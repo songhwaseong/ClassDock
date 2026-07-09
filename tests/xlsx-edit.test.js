@@ -17,7 +17,7 @@ const {
   spreadsheetCellValueSnapshot,
   spreadsheetVirtualWindow,
   writeStructuredSpreadsheetModel
-} = require("../src/js/office-viewers.js");
+} = require("../src/js/spreadsheet-viewer.js");
 
 test("XLSX 셀 값 스냅샷은 수식·날짜·리치텍스트를 독립 복제한다", () => {
   const source = {
