@@ -5,7 +5,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const source = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+// documents.js 분할본을 이어붙여 검사 — 패턴이 어느 조각에 있든 동일하게 매칭된다.
+const source = ["documents.js", "workspace-store.js", "file-loaders.js", "pdf-render.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 
 test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", () => {
   assert.match(source, /buildWorkspacePayload\(rows, folderPaths\)/);

@@ -5,7 +5,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const source = fs.readFileSync(path.join(__dirname, "../src/js/python-viewer.js"), "utf8");
+// python-viewer.js 분할본을 이어붙여 검사 — 패턴이 어느 조각에 있든 동일하게 매칭된다.
+const source = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 
 test("파이썬 편집기에서 실행 기준 폴더를 선택하는 경로 도우미를 노출한다", () => {
   assert.match(source, /pathHelpBtn\.textContent = "경로 도우미"/);

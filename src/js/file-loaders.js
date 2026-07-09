@@ -1,0 +1,932 @@
+"use strict";
+
+/* ===== 파일 로딩 ===== */
+async function handleFiles(files, options={}){
+  const arr = [...files];
+  const bulk = options.bulk || arr.length > 1;        // 여러 개·압축 내부 → 첫 항목만 자동 표시(나머지는 클릭 시 렌더)
+  let firstDoc = null;                                 // 호출부가 연 문서를 바로 쓸 수 있게(정의 이동 등) 반환
+  for (const file of arr){
+    throwIfUiCancelled();
+    const ext = fileExtOf(file.name);
+    const opts = { ...options, bulk, size: file.size || 0, fsHandle: options.fsHandle || file.__fsHandle || null,
+      workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
+    opts.textEncoding = await inspectTextFileEncoding(file, ext);
+    opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
+    if (opts.fsHandle && opts.workspacePath && typeof saveFsHandle === "function") saveFsHandle(opts.workspacePath, opts.fsHandle);
+    const duplicate = docs.find(d => d.sourceKey && d.sourceKey === opts.sourceKey);
+    if (duplicate){
+      if (!uiBatchDepth) setActiveDoc(duplicate.id);
+      else if (!uiBatchActiveCandidate) uiBatchActiveCandidate = duplicate.id;
+      toast(`이미 열린 파일입니다: ${file.name}`, 1800);
+      if (!firstDoc) firstDoc = duplicate;
+      continue;
+    }
+    if (opts.archiveCtx && !opts.relPath) opts.relPath = file.name;   // 여러 파일 동시 업로드(평면)의 옆파일 경로
+    try {
+      let made = null;
+      if (ext === "pdf") await loadPdf(await file.arrayBuffer(), file.name, opts);
+      else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);
+      else if (ext === "zip") await loadZip(file, opts);
+      else if (ext === "tar") await loadTar(file, opts);
+      else if (ext === "gz" || ext === "tgz") await loadGz(file, opts);   // .gz / .tgz / .tar.gz
+      else if (ext === "pptx"){
+        const pptxBytes = await readPptxBytes(file);
+        const pdfBuf = await tryConvertPptxToPdf(pptxBytes);  // 설치된 PowerPoint 로 정확 변환 시도(exe 백엔드)
+        if (pdfBuf) await loadPdf(pdfBuf, file.name.replace(/\.pptx$/i, ".pdf"), opts);
+        else made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxConvertError: _lastPptxConvertError || "알 수 없는 변환 실패" }); // 백엔드 없음/변환 실패 → pptxjs 미리보기로 폴백
+      }
+      else if (SQLITE_EXTS.includes(ext)) made = await loadSqlite(file, opts);
+      else if (ext === "ipynb"){
+        if (typeof notebookModeEnabled === "function" && notebookModeEnabled()){
+          // [실험·Phase1] 셀 노트북 뷰(읽기전용 미리보기). 콘솔에서 mnNotebookMode(false) 로 끄면 기존 변환(.py) 뷰.
+          try {
+            const __nbModel = ipynbToModel(await file.text());
+            made = makeDoc("office", file.name, opts);
+            made.notebook = true; made.notebookModel = __nbModel;
+            made.render = async () => { made.el.innerHTML = ""; made.el.scrollTop = 0; renderNotebookView(__nbModel, made.el, made); };
+            refreshChrome();
+            activateIfIdle(made, opts);
+          } catch(e){ toast((e && e.message) || "노트북을 열지 못했어요.", 4000); made = await loadText(file, opts); }
+        } else {
+        // 주피터 노트북 → 파이썬 소스로 변환한 뒤 Python 실습 뷰어로 연다
+        let pySrc = null;
+        try { pySrc = ipynbToPython(await file.text(), file.name); }
+        catch(e){ toast((e && e.message) || "노트북을 변환하지 못했어요.", 4000); made = await loadText(file, opts); }
+        if (pySrc != null){
+          const pyName = file.name.replace(/\.ipynb$/i, "") + ".py";
+          const pyFile = new File([pySrc], pyName, { type: "text/plain" });
+          // 변환된 노트북은 .py 로 다룬다 — 경로 표시·저장 대상도 .py 로 맞춘다.
+          // (폴더 새로고침의 탭 복원도 같은 ipynb 분기를 거치므로 .py 경로끼리 일관되게 매칭된다)
+          const pyOpts = { ...opts, textEncoding: null };
+          if (pyOpts.workspacePath) pyOpts.workspacePath = pyOpts.workspacePath.replace(/\.ipynb$/i, ".py");
+          if (pyOpts.relPath) pyOpts.relPath = pyOpts.relPath.replace(/\.ipynb$/i, ".py");
+          // 원본 .ipynb 파일 핸들은 물려받지 않는다(저장 때 노트북을 파이썬으로 덮어쓰지 않도록).
+          // 대신 같은 폴더 핸들을 들고 있다가, 저장할 때 그 폴더에 X.py 를 새로 만든다(원본 .ipynb 는 그대로 보존).
+          pyOpts.fsHandle = null;
+          pyOpts.fsDirHandle = file.__fsDirHandle || null;
+          made = await loadOffice(pyFile, "py", pyOpts);
+          if (made) made.notebook = true;   // 셀 단위 실행(에러가 나도 다음 셀 계속)을 위해 표시
+        }
+        }
+      }
+      else if (["docx","xlsx","xls","csv","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml"].includes(ext) || (ext in CODE_EXTS)) made = await loadOffice(file, ext, opts);
+      else if (IMG_EXTS.includes(ext)) made = await loadImage(file, opts);
+      else if (VIDEO_EXTS.includes(ext) || AUDIO_EXTS.includes(ext)) made = await loadVideo(file, opts);
+      // 자막은 텍스트 뷰로 명시 배정 — UTF-16 저장 SMI가 loadText 바이너리 판별에 오판되지 않게
+      else if (SUBTITLE_EXTS.includes(ext)) made = await loadOffice(file, "txt", opts);
+      else made = await loadText(file, opts);          // 알 수 없는 확장자 → 텍스트면 열고 아니면 안내
+      if (made && !firstDoc) firstDoc = made;
+      // 닫은 탭 복원용: 최상위 실제 파일로 연 문서엔 원본 File과 열기 옵션을 보관해 둔다(아카이브 내부·임시 문서 제외).
+      if (!opts.parentId && !opts.archiveCtx && !options.transient && file instanceof File){
+        const opened = docs.find(d => d.sourceKey && d.sourceKey === opts.sourceKey);
+        if (opened) opened.__reopen = { file, name: opened.name,
+          options: { workspacePath: opts.workspacePath, fsHandle: opts.fsHandle, textEncoding: opts.textEncoding,
+            originalSaveMode: opts.originalSaveMode } };
+      }
+    } catch (e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
+  }
+  return firstDoc;
+}
+
+// 닫은 탭 복원 스택(최근 닫은 파일 12개). 일괄/내부 닫기는 제외하고 사용자가 직접 닫은 파일만 쌓인다.
+let closedDocStack = [];
+async function reopenClosedDoc(){
+  const entry = closedDocStack.pop();
+  if (!entry || !entry.file){ toast("다시 열 닫은 파일이 없어요.", 1800); return; }
+  try { await handleFiles([entry.file], entry.options || {}); }
+  catch(e){ if (!(e && e.message === "operation-cancelled")) toast("파일을 다시 열지 못했어요.", 3000); }
+}
+
+/* ===== PPTX → PDF 변환 (exe 백엔드 + 설치된 PowerPoint) =====
+   pptxjs 는 도형/그룹 좌표를 못 맞춰 원본과 크게 달라진다. exe 로 실행 중이면 launcher 의
+   /convert-pptx 엔드포인트(PowerPoint COM)로 정확히 PDF 변환해 PDF 뷰어로 띄운다(서명도 가능).
+   - file:// (브라우저 단독 offline HTML)이거나 PowerPoint 미설치면 null → 기존 pptxjs 폴백. */
+let _pptxBackend = null;   // null=미확인, true/false=캐시
+let _lastPptxConvertError = "";
+async function readPptxBytes(file){
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!looksEncryptedOffice(bytes)) return bytes;
+  const dec = await promptAndDecrypt(bytes, "pptx");
+  if (!dec) throw new Error("cancelled");
+  return dec;
+}
+async function pptxBackendAvailable(){
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;   // file:// → 백엔드 없음
+  if (_pptxBackend !== null) return _pptxBackend;
+  try {
+    const res = await fetch("/can-convert", { method: "GET" });
+    _pptxBackend = res.ok && (await res.text()).trim() === "yes";
+  } catch(e){ _pptxBackend = false; }
+  return _pptxBackend;
+}
+async function tryConvertPptxToPdf(pptxBytes){
+  _lastPptxConvertError = "";
+  if (!(await pptxBackendAvailable())) {
+    const msg = (location.protocol === "http:" || location.protocol === "https:")
+      ? "PowerPoint 변환 백엔드를 사용할 수 없어 간이 미리보기로 열어요."
+      : "PPTX 도형을 정확히 보려면 manneung-classroom.exe로 열어주세요.";
+    _lastPptxConvertError = msg;
+    toast(msg, 4000);
+    return null;
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 180000);   // 최대 3분
+  try {
+    showLoading("PowerPoint으로 변환 중… (대형 파일은 잠시 걸려요)");
+    const buf = normalizeArrayBuffer(pptxBytes);
+    const res = await fetch("/convert-pptx", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: buf, signal: ctrl.signal });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      console.warn("pptx pdf conversion failed:", res.status, msg);
+      _lastPptxConvertError = msg || ("HTTP " + res.status);
+      toast("PowerPoint 변환에 실패해 간이 미리보기로 열어요.", 3500);
+      return null;                                         // 501(PowerPoint 없음)/500 등 → 폴백
+    }
+    if (((res.headers.get("Content-Type") || "").toLowerCase()).indexOf("application/pdf") < 0) {
+      _lastPptxConvertError = "PowerPoint 변환 결과가 PDF가 아님";
+      toast("PowerPoint 변환 결과가 올바르지 않아 간이 미리보기로 열어요.", 3500);
+      return null;
+    }
+    const pdf = await res.arrayBuffer();
+    if (pdf && pdf.byteLength > 100) {
+      toast("PowerPoint 정확 변환(PDF)으로 열었어요.", 2500);
+      return pdf;
+    }
+    _lastPptxConvertError = "빈 PDF 결과";
+    return null;
+  } catch(e){
+    console.warn("pptx pdf conversion skipped:", e);
+    _lastPptxConvertError = e && e.message ? e.message : String(e || "unknown");
+    toast("PowerPoint 변환을 사용할 수 없어 간이 미리보기로 열어요.", 3500);
+    return null;
+  }
+  finally { clearTimeout(timer); hideLoading(); }
+}
+
+/* ===== 압축(zip) 풀어서 내부 파일을 각각 열기 (zip.js — 무암호 + AES 암호 지원) ===== */
+async function loadZip(file, options={}){
+  if (typeof zip === "undefined"){ toast("압축 라이브러리를 불러오지 못했습니다."); return; }
+  zip.configure({ useWebWorkers: false });                 // file:// 에서도 동작하도록 워커 미사용
+  showLoading("압축 여는 중…");
+
+  // 1) 엔트리 훑어서 — 열 수 있는 게 있는지 + 암호가 걸렸는지 파악
+  let openable = 0, unsupported = 0, encrypted = false;
+  const archivePaths = [];
+  try {
+    const r = new zip.ZipReader(new zip.BlobReader(file));
+    for (const e of await r.getEntries()){
+      if (e.directory) continue;
+      const path = safeArchivePath(e.filename);
+      if (!path) continue;
+      if (path.indexOf("__MACOSX/") === 0) continue;        // 맥 메타데이터
+      const base = path.split("/").pop();                   // 경로 제거 → 파일명만
+      if (base && base !== ".DS_Store") archivePaths.push(path);
+      if (!base || (base.charAt(0) === "." && !isEnvFile(base))) continue;   // 숨김(.DS_Store 등) — .env 계열은 예외
+      const ext = fileExtOf(base);
+      if (!ZIP_OPENABLE.includes(ext)){ unsupported++; continue; }
+      openable++;
+      if (e.encrypted) encrypted = true;
+    }
+    await r.close();
+  } catch(e){
+    console.error(e); hideLoading();
+    toast("압축을 열지 못했습니다. 올바른 zip 파일인지 확인해 주세요.", 3500);
+    return;
+  }
+  if (!openable){
+    hideLoading();
+    toast(unsupported ? "압축 안에 열 수 있는 형식이 없어요. · " + unsupported + "개 형식 미지원" : "압축이 비어 있어요.", 3500);
+    return;
+  }
+
+  // 2) 암호가 걸렸으면 암호 확정 (오피스 암호와 동일하게 최대 5회 재시도)
+  let password = null;
+  if (encrypted){
+    hideLoading();
+    for (let attempt = 0; ; attempt++){
+      const pw = await askPassword(attempt === 0
+        ? "암호로 보호된 압축입니다. 암호를 입력하세요."
+        : "암호가 올바르지 않습니다. 다시 입력해 주세요.");
+      if (pw === null) return;                              // 취소
+      showLoading("암호 확인 중…");
+      const ok = await zipPasswordOk(file, pw);
+      hideLoading();
+      if (ok){ password = pw; break; }
+      if (attempt >= 4){ toast("암호를 확인하지 못했어요.", 3000); return; }
+    }
+  }
+
+  const zipGroup = makeGroup("zip", file.name, options.parentId || null);
+  zipGroup.zipLimits = true;
+  zipGroup.workspacePaths = [options.workspacePath || file.name];
+  // 같은 압축에서 나온 .py 실행 시 옆 파일(import·데이터)을 함께 쓰도록, 실행할 때 이 압축을 통째로 다시 푼다.
+  const archiveCtx = {
+    name: file.name,
+    paths: archivePaths,
+    extract: (keep) => extractZipAll(file, password, keep)
+  };
+  const zipFolders = new Map();
+  function zipParentFor(path){
+    const parts = String(path || "").split("/").filter(Boolean);
+    parts.pop();
+    let parentId = zipGroup.nodeId, key = "";
+    for (const part of parts){
+      key = key ? key + "/" + part : part;
+      if (!zipFolders.has(key)){
+        zipFolders.set(key, makeGroup("folder", part, parentId).nodeId);
+      }
+      parentId = zipFolders.get(key);
+    }
+    return parentId;
+  }
+
+  // 3) 실제 추출 → 하나씩 열어 메모리 피크를 낮춤
+  showLoading("압축 푸는 중…");
+  let opened = 0, failed = 0, oversized = 0, r = null, extractedBytes = 0;
+  try {
+    r = new zip.ZipReader(new zip.BlobReader(file), password ? { password } : undefined);
+    const entries = await r.getEntries();
+    for (const e of entries){
+      if (e.directory) continue;
+      const path = e.filename || "";
+      if (path.indexOf("__MACOSX/") === 0) continue;
+      const base = path.split("/").pop();
+      if (!base || (base.charAt(0) === "." && !isEnvFile(base))) continue;
+      const ext = fileExtOf(base);
+      if (!ZIP_OPENABLE.includes(ext)) continue;
+      const entrySize = Number(e.uncompressedSize) || 0;
+      if (entrySize > ZIP_ENTRY_CAP || extractedBytes + entrySize > ZIP_EXTRACT_CAP){ oversized++; continue; }
+      try {
+        updateLoading(`압축 푸는 중… (${opened + failed + 1}/${openable})`);
+        const m = ZIP_MIME[ext];
+        const innerFile = new File([await e.getData(new zip.BlobWriter())], base, m ? { type: m } : undefined);
+        extractedBytes += innerFile.size || entrySize;
+        const parentId = zipParentFor(path);
+        hideLoading();
+        await handleFiles([innerFile], { parentId, bulk: true, relPath: path, archiveCtx });
+        opened++;
+        await yieldToBrowser();
+        showLoading(`압축 푸는 중… (${opened}/${openable})`);
+      } catch(err){
+        console.error(err);
+        failed++;
+      }                               // 개별 추출 실패
+    }
+  } catch(e){ console.error(e); }
+  finally {
+    try { if (r) await r.close(); } catch(e){ console.warn(e); }
+  }
+  hideLoading();
+
+  if (!opened){ closeGroup(zipGroup.nodeId); toast("압축을 풀지 못했어요.", 3000); return; }
+  const summary = formatZipOpenSummary({ opened, unsupported, oversized, failed });
+  toast(summary + " · ZIP은 읽기 중심이며 원본 새로고침·덮어쓰기는 지원하지 않아요. (ⓘ)", 6000);
+}
+
+/* ===== tar / gzip (.tar / .gz / .tar.gz / .tgz) ===== */
+// gzip 해제: 브라우저 내장 DecompressionStream 사용(외부 라이브러리·네트워크 불필요).
+async function gunzipBytes(bytes){
+  if (typeof DecompressionStream === "undefined")
+    throw new Error("이 브라우저는 gzip 해제를 지원하지 않습니다.");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// tar 파서: 512바이트 헤더+데이터 블록을 훑어 일반 파일만 추출({name, data}[]).
+function parseTar(buf){
+  const td = new TextDecoder();
+  const str = (s, len) => td.decode(buf.subarray(s, s + len)).replace(/\0[\s\S]*$/, "").trim();
+  const octal = (s, len) => parseInt((td.decode(buf.subarray(s, s + len)).replace(/[\0 ]+$/, "").trim() || "0"), 8) || 0;
+  const files = []; let off = 0, longName = null;
+  while (off + 512 <= buf.length){
+    let empty = true;
+    for (let i = 0; i < 512; i++){ if (buf[off + i] !== 0){ empty = false; break; } }
+    if (empty) break;                                   // 끝(빈 블록)
+    let name = str(off, 100);
+    const size = octal(off + 124, 12);
+    const type = String.fromCharCode(buf[off + 156] || 0);
+    const prefix = str(off + 345, 155);                 // ustar 긴 경로
+    if (prefix) name = prefix + "/" + name;
+    off += 512;
+    const data = buf.subarray(off, off + size);
+    off += Math.ceil(size / 512) * 512;
+    if (type === "L"){ longName = td.decode(data).replace(/\0[\s\S]*$/, ""); continue; }  // GNU 긴 이름
+    if (longName){ name = longName; longName = null; }
+    if (type === "0" || type === "\0" || type === "" || type === "7") files.push({ name, data });
+    // 디렉토리(5)·심볼릭(1,2)·메타(x,g)는 건너뜀
+  }
+  return files;
+}
+
+// tar 바이트를 그룹으로 펼쳐 내부 파일을 각각 연다(zip 과 동일한 폴더 트리 구성).
+async function extractTar(tarBytes, name, options = {}){
+  const entries = parseTar(tarBytes).filter(en => {
+    const base = (en.name.split("/").pop() || "");
+    if (!base || (base.charAt(0) === "." && !isEnvFile(base)) || en.name.indexOf("PaxHeader") >= 0) return false;
+    return ZIP_OPENABLE.includes(fileExtOf(base));
+  });
+  if (!entries.length){ toast("압축 안에 열 수 있는 형식이 없어요.", 3000); return; }
+  const group = makeGroup("zip", name, options.parentId || null);
+  group.workspacePaths = [options.workspacePath || name];
+  // 같은 tar 에서 나온 .py 실행 시 옆 파일을 함께 쓰도록, 실행할 때 tar 를 통째로 다시 푼다.
+  const archiveCtx = { name, extract: () => tarTreeAll(tarBytes) };
+  const folders = new Map();
+  const parentFor = (path) => {
+    const parts = String(path || "").split("/").filter(Boolean); parts.pop();
+    let parentId = group.nodeId, key = "";
+    for (const part of parts){
+      key = key ? key + "/" + part : part;
+      if (!folders.has(key)) folders.set(key, makeGroup("folder", part, parentId).nodeId);
+      parentId = folders.get(key);
+    }
+    return parentId;
+  };
+  let opened = 0;
+  for (const en of entries){
+    const base = en.name.split("/").pop();
+    const m = ZIP_MIME[(base.split(".").pop() || "").toLowerCase()];
+    const innerFile = new File([en.data], base, m ? { type: m } : undefined);
+    await handleFiles([innerFile], { parentId: parentFor(en.name), bulk: true, relPath: en.name, archiveCtx });
+    opened++;
+    await yieldToBrowser();
+  }
+  if (!opened){ closeGroup(group.nodeId); toast("압축을 풀지 못했어요.", 3000); }
+  else toast(opened + "개 열기", 3000);
+}
+
+async function loadTar(file, options = {}){
+  showLoading("압축 푸는 중…");
+  try {
+    await extractTar(new Uint8Array(await file.arrayBuffer()), file.name, options);
+  } catch(e){ console.error(e); toast("tar 파일을 열지 못했습니다.", 3500); }
+  finally { hideLoading(); }
+}
+
+async function loadGz(file, options = {}){
+  showLoading("압축 푸는 중…");
+  try {
+    const out = await gunzipBytes(new Uint8Array(await file.arrayBuffer()));
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".tgz") || lower.endsWith(".tar.gz")){
+      await extractTar(out, file.name.replace(/\.(tgz|tar\.gz)$/i, ".tar"), options);
+    } else {
+      // 단일 파일 gzip → 확장자(.gz)만 떼고 그대로 처리
+      const innerName = file.name.replace(/\.gz$/i, "") || "decompressed";
+      hideLoading();
+      await handleFiles([new File([out], innerName)], options);
+    }
+  } catch(e){ console.error(e); toast("gzip 압축을 풀지 못했습니다. (지원: gzip · tar.gz)", 3500); }
+  finally { hideLoading(); }
+}
+
+/* 암호 검증: 첫 암호화 엔트리를 주어진 암호로 풀어본다(성공=true) */
+async function zipPasswordOk(file, pw){
+  try {
+    const r = new zip.ZipReader(new zip.BlobReader(file), { password: pw });
+    const te = (await r.getEntries()).find(e => e.encrypted && !e.directory);
+    if (te) await te.getData(new zip.BlobWriter());         // 암호가 틀리면 여기서 throw
+    await r.close();
+    return true;
+  } catch(e){ return false; }
+}
+
+async function openFilesWithHandles(options={}){
+  if (typeof window === "undefined" || typeof window.showOpenFilePicker !== "function") return false;
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({ multiple: true });
+  } catch(e){
+    if (e && e.name !== "AbortError") console.warn(e);
+    return !!(e && e.name === "AbortError");
+  }
+  const files = [];
+  for (const handle of handles || []){
+    try { files.push(withFileHandle(await handle.getFile(), handle)); }
+    catch(e){ console.warn(e); }
+  }
+  if (files.length) queueFiles(files, options);
+  return true;
+}
+function pickFilesOrInput(input, options={}){
+  openFilesWithHandles(options).then(handled => {
+    if (!handled && input) input.click();
+  });
+}
+
+function queueFiles(files, options={}){
+  const batch = [...files];
+  if (!batch.length) return fileQueue;
+  let opts = options;
+  // 여러 파일을 한 번에 올리면 그 묶음을 같은 작업폴더의 옆 파일로 묶는다(.py 실행 시 import/파일읽기 지원).
+  if (!options.archiveCtx){
+    const loose = batch.filter(f => !["zip","tar","gz","tgz"].includes((f.name.split(".").pop() || "").toLowerCase()));
+    if (loose.length > 1){
+      const ctx = makeFileSiblingCtx(loose.map(f => ({ file: f, relPath: f.name })), "여러 파일");
+      opts = { ...options, archiveCtx: ctx };
+    }
+  }
+  fileQueue = fileQueue
+    .then(() => runUiBatch(async () => { await rememberWorkspace(batch, docs.length === 0); await handleFiles(batch, opts); }))
+    .catch((e) => { if (e && e.message === "operation-cancelled") toast("파일 열기를 취소했어요."); else console.error(e); });
+  return fileQueue;
+}
+
+/* 폴더 열기(webkitdirectory / File System Access API)
+   - 지원 브라우저는 디렉터리 핸들을 보관해 이후 폴더 새로고침을 한 번에 처리한다.
+   - 미지원 환경은 기존 folder input으로 폴더를 다시 선택하는 방식으로 폴백한다. */
+let pendingFolderRefreshId = null;
+
+function setFileRelativePath(file, path){
+  try { Object.defineProperty(file, "webkitRelativePath", { value: path, configurable: true }); } catch(e){}
+  return file;
+}
+async function collectDirectoryHandleFiles(handle){
+  if (!handle || handle.kind !== "directory") return { files: [], folderPaths: [] };
+  const rootName = handle.name || "폴더";
+  const files = [];
+  const folderPaths = [rootName];
+  const walk = async (dir, parts) => {
+    for await (const entry of dir.values()){
+      throwIfUiCancelled();
+      if (!entry || !entry.name) continue;
+      if (entry.kind === "directory"){
+        if (entry.name.charAt(0) === ".") continue;
+        const nextParts = parts.concat(entry.name);
+        folderPaths.push([rootName].concat(nextParts).join("/"));
+        await walk(entry, nextParts);
+      } else if (entry.kind === "file"){
+        const file = withDirHandle(withFileHandle(await entry.getFile(), entry), dir);
+        setFileRelativePath(file, [rootName].concat(parts, entry.name).join("/"));
+        files.push(file);
+      }
+    }
+  };
+  await walk(handle, []);
+  return { files, folderPaths };
+}
+async function collectFolderEntryPaths(entries, fileList){
+  const paths = new Set();
+  const firstFilePath = String((fileList && fileList[0] && (fileList[0].webkitRelativePath || fileList[0].name)) || "");
+  const rootName = normalizedRunPath(firstFilePath).split("/")[0] || "";
+  const addParents = (value, includeSelf=false) => {
+    const parts = normalizedRunPath(value).split("/").filter(Boolean);
+    const end = includeSelf ? parts.length : Math.max(0, parts.length - 1);
+    for (let i = 1; i <= end; i++) paths.add(parts.slice(0, i).join("/"));
+  };
+  [...(fileList || [])].forEach(file => addParents(file.webkitRelativePath || file.name));
+  const visit = async (entry) => {
+    if (!entry) return;
+    let path = normalizedRunPath(entry.fullPath || entry.name);
+    if (rootName && path && path.split("/")[0] !== rootName) path = rootName + "/" + path;
+    if (entry.isDirectory){
+      if ((entry.name || "").charAt(0) === ".") return;
+      addParents(path, true);
+      let children = [];
+      try { children = await readAllDirectoryEntries(entry); } catch(e){ console.warn(e); }
+      for (const child of children) await visit(child);
+    } else if (entry.isFile) {
+      addParents(path);
+    }
+  };
+  for (const entry of entries || []) await visit(entry);
+  return [...paths].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+}
+async function chooseFolderHandle(startIn=null){
+  if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") return null;
+  const options = { mode: "read" };
+  if (startIn && startIn.kind === "directory") options.startIn = startIn;
+  try { return await window.showDirectoryPicker(options); }
+  catch(e){
+    if (options.startIn && !(e && e.name === "AbortError")){
+      try { return await window.showDirectoryPicker({ mode: "read" }); }
+      catch(f){
+        if (!(f && f.name === "AbortError")) console.warn("directory picker failed:", f);
+        return null;
+      }
+    }
+    if (!(e && e.name === "AbortError")) console.warn("directory picker failed:", e);
+    return null;
+  }
+}
+async function askOriginalFolderSave(handle){
+  if (!handle || handle.kind !== "directory" || typeof handle.requestPermission !== "function") return false;
+  const useOriginal = await confirmDialog(
+    "이 폴더의 코드·텍스트 파일에서 저장을 누르면 원본 파일을 바로 덮어쓸까요? 실행 결과와 새 파일은 기존 자동 저장 폴더에 보관됩니다.",
+    "원본에 저장",
+    "사본으로 저장"
+  );
+  if (!useOriginal) return false;
+  try {
+    let permission = typeof handle.queryPermission === "function"
+      ? await handle.queryPermission({ mode:"readwrite" })
+      : "prompt";
+    if (permission !== "granted") permission = await handle.requestPermission({ mode:"readwrite" });
+    if (permission === "granted"){
+      toast("원본 저장 모드를 켰어요. 저장할 때 원본 파일이 변경됩니다.", 3600);
+      return true;
+    }
+  } catch(e){ console.warn("folder write permission denied:", e); }
+  toast("폴더 쓰기 권한이 없어 기존 자동 저장 폴더를 사용합니다.", 3400);
+  return false;
+}
+async function pickFolderOrInput(input){
+  pendingFolderRefreshId = null;
+  const supportsPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+  if (!supportsPicker){
+    if (input) input.click();
+    return;
+  }
+  const handle = await chooseFolderHandle();
+  if (!handle) return;
+  const originalSaveMode = await askOriginalFolderSave(handle);
+  showLoading("폴더 파일 확인 중…");
+  try {
+    const snapshot = await collectDirectoryHandleFiles(handle);
+    queueFolder(snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths, originalSaveMode });
+  } catch(e){
+    if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요.");
+    else { console.error(e); toast("폴더를 읽지 못했어요.", 3000); }
+  } finally {
+    hideLoading();
+  }
+}
+function handleFolderInputSelection(fileList, options={}){
+  const refreshId = pendingFolderRefreshId;
+  pendingFolderRefreshId = null;
+  if (refreshId) return queueFolderRefresh(refreshId, fileList, options);
+  return queueFolder(fileList, options);
+}
+function clearPendingFolderRefresh(){ pendingFolderRefreshId = null; }
+function queueFolder(fileList, options={}){
+  const files = [...fileList];
+  if (!files.length && !(options.folderPaths && options.folderPaths.length)) return fileQueue;
+  fileQueue = fileQueue.then(() => runUiBatch(async () => {
+    if (files.length || (options.folderPaths && options.folderPaths.length))
+      await rememberWorkspace(files, navNodes.length === 0, { folderPaths:options.folderPaths || [] });
+    await openFolderFiles(files, options);
+  })).catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
+  return fileQueue;
+}
+
+function folderOpenableFiles(fileList){
+  // 열 수 있는 형식 + 숨김파일 제외(.env 계열은 예외)
+  return [...fileList].filter(f => {
+    const base = f.name || "";
+    if (!base || isHiddenFolderEntry(f.webkitRelativePath || base)) return false;
+    return ZIP_OPENABLE.includes(fileExtOf(base));
+  });
+}
+async function openFolderFiles(fileList, options={}){
+  const openable = folderOpenableFiles(fileList);
+  const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))]
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  if (!openable.length && !folderPaths.length){ toast("폴더 안에 열 수 있는 파일이나 폴더가 없어요.", 3000); return; }
+
+  const rootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
+  const rootGroup = makeGroup("folder", rootName, null);
+  rootGroup.folderRefreshRootId = rootGroup.nodeId;
+  rootGroup.folderHandle = options.folderHandle || null;
+  rootGroup.originalSaveMode = !!options.originalSaveMode;
+  rootGroup.folderPaths = folderPaths.length ? folderPaths : [rootName];
+  rootGroup.workspacePaths = [
+    ...[...fileList].map(f => f.webkitRelativePath || (rootName + "/" + f.name)),
+    ...rootGroup.folderPaths.map(workspaceFolderMarkerPath)
+  ];
+  const workspacePathsByFolder = indexWorkspacePathsByFolder(rootGroup.workspacePaths);
+  // 폴더 전체(데이터 파일 포함, 숨김 경로 제외)를 옆 파일로 묶는다 — .py 실행 시 import/파일읽기 지원
+  const folderCtx = makeFileSiblingCtx(
+    [...fileList]
+      .filter(f => !isHiddenFolderEntry(f.webkitRelativePath || f.name || ""))
+      .map(f => ({ file: f, relPath: f.webkitRelativePath || (rootName + "/" + f.name) })),
+    rootName,
+    folderPaths
+  );
+  rootGroup.newPythonContext = {
+    parentId: rootGroup.nodeId, dir: rootName, archiveCtx: folderCtx, label: rootName
+  };
+  const folders = new Map();                 // 상대경로 key → 그룹 nodeId
+  const parentFor = (relPath) => {
+    const parts = String(relPath || "").split("/").filter(Boolean);
+    parts.pop();                             // 파일명 제거
+    if (parts.length) parts.shift();         // 루트 폴더명 제거(rootGroup 이 담당)
+    let parentId = rootGroup.nodeId, key = rootName;
+    for (const part of parts){
+      key += "/" + part;
+      if (!folders.has(key)){
+        const subgroup = makeGroup("folder", part, parentId);
+        subgroup.workspacePaths = workspacePathsByFolder.get(key) || [];
+        subgroup.newPythonContext = {
+          parentId: subgroup.nodeId, dir: key, archiveCtx: folderCtx, label: part
+        };
+        subgroup.folderRefreshRootId = rootGroup.nodeId;
+        folders.set(key, subgroup.nodeId);
+      }
+      parentId = folders.get(key);
+    }
+    return parentId;
+  };
+  // FileList에는 빈 디렉터리가 들어오지 않지만, Chrome/Edge의 디렉터리 핸들에서는
+  // 폴더 경로를 별도로 수집할 수 있다. 파일을 열기 전에 그 경로로 빈 그룹까지 만든다.
+  folderPaths.forEach(path => parentFor(path + "/.__empty_folder__"));
+
+  showLoading("폴더 여는 중…");
+  let opened = 0;
+  for (const f of openable){
+    try {
+      updateLoading(`폴더 여는 중… (${opened + 1}/${openable.length})`);
+      const rel = f.webkitRelativePath || (rootName + "/" + f.name);
+      const parentId = parentFor(rel);
+      hideLoading();
+      await handleFiles([f], { parentId, bulk: true, relPath: rel, archiveCtx: folderCtx,
+        originalSaveMode: rootGroup.originalSaveMode });   // 첫 개만 즉시 렌더, 나머지 지연
+      opened++;
+      await yieldToBrowser();
+      showLoading(`폴더 여는 중… (${opened}/${openable.length})`);
+    } catch(e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
+  }
+  hideLoading();
+  if (!opened && !folderPaths.length){ closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
+  if (!options.silent){
+    const subfolderCount = Math.max(0, folders.size);
+    const summary = opened ? opened + "개 파일" : "빈 폴더";
+    toast(summary + (subfolderCount ? " · 폴더 " + subfolderCount + "개" : "") + " 열기", 2800);
+  }
+  return rootGroup;
+}
+
+function navBranchIds(rootId){
+  const ids = new Set([rootId]);
+  let changed = true;
+  while (changed){
+    changed = false;
+    navNodes.forEach(node => {
+      if (!ids.has(node.nodeId) && ids.has(node.parentId)){
+        ids.add(node.nodeId);
+        changed = true;
+      }
+    });
+  }
+  return ids;
+}
+function groupStablePath(node){
+  if (!node) return "";
+  if (node.newPythonContext && node.newPythonContext.dir) return normalizedRunPath(node.newPythonContext.dir);
+  const parts = [node.name || ""];
+  let parentId = node.parentId;
+  while (parentId){
+    const parent = navNodes.find(item => item.nodeId === parentId && item.type === "group");
+    if (!parent) break;
+    parts.unshift(parent.name || "");
+    parentId = parent.parentId;
+  }
+  return parts.filter(Boolean).join("/");
+}
+async function requestFolderRefresh(rootId){
+  const root = navNodes.find(node => node.nodeId === rootId && node.type === "group" && node.folderRefreshRootId === node.nodeId);
+  if (!root) return;
+  let handle = root.folderHandle || null;
+  if (handle && handle.kind === "directory" && await ensureReadPermission(handle)){
+    showLoading("폴더 변경 내용 확인 중…");
+    try {
+      const snapshot = await collectDirectoryHandleFiles(handle);
+      root.folderHandle = handle;
+      queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths });
+    } catch(e){
+      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
+      else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
+
+  const supportsPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+  if (supportsPicker){
+    const picked = await chooseFolderHandle(root.folderHandle || null);
+    if (!picked) return;
+    showLoading("폴더 변경 내용 확인 중…");
+    try {
+      const snapshot = await collectDirectoryHandleFiles(picked);
+      queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths });
+    } catch(e){
+      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
+      else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
+
+  const input = byId("folderInput");
+  if (!input) return;
+  pendingFolderRefreshId = rootId;
+  toast("'" + root.name + "' 폴더를 다시 선택해 주세요.", 3200);
+  input.click();
+}
+function queueFolderRefresh(rootId, fileList, options={}){
+  const files = [...fileList];
+  if (!files.length && !(options.folderPaths && options.folderPaths.length)) return fileQueue;
+  fileQueue = fileQueue
+    .then(() => runUiBatch(() => refreshFolderGroup(rootId, files, options)))
+    .catch((e) => {
+      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
+      else { console.error(e); toast("폴더 새로고침 중 오류가 났어요.", 3200); }
+    });
+  return fileQueue;
+}
+async function refreshFolderGroup(rootId, fileList, options={}){
+  const root = navNodes.find(node => node.nodeId === rootId && node.type === "group");
+  if (!root) return false;
+  const files = [...fileList];
+  const openable = folderOpenableFiles(files);
+  const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))];
+  if (!openable.length && !folderPaths.length){ toast("새로고침할 수 있는 파일이나 폴더가 없어요.", 3200); return false; }
+  const selectedRootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
+  if (selectedRootName !== root.name){
+    toast("'" + root.name + "' 폴더를 선택해야 새로고침할 수 있어요.", 3600);
+    return false;
+  }
+
+  const branchIds = navBranchIds(rootId);
+  const childDocs = docs.filter(doc => branchIds.has(doc.nodeId));
+  const childDocIds = new Set(childDocs.map(doc => doc.id));
+  const hasUnsaved = childDocs.some(doc => doc.hasUnsavedEdits || (doc.isScratch && !doc._named));
+  const editedPdfs = childDocs.filter(doc => doc.kind === "pdf" && doc.elements && doc.elements.length);
+  if (hasUnsaved || editedPdfs.length){
+    const detail = hasUnsaved && editedPdfs.length ? "저장하지 않은 코드와 PDF 편집" : (hasUnsaved ? "저장하지 않은 코드" : "PDF 편집");
+    const ok = await confirmDialog(detail + "이 있습니다. 폴더를 새로고침하면 해당 내용이 사라질 수 있어요.", "새로고침", "취소");
+    if (!ok) return false;
+  }
+
+  const refForId = (id) => {
+    const doc = docs.find(item => item.id === id);
+    if (!doc) return null;
+    if (!childDocIds.has(id)) return { id };
+    return { path: normalizedRunPath(doc.workspacePath || doc.relPath || doc.name) };
+  };
+  const tabRefs = tabOrder.map(refForId).filter(Boolean);
+  const activeRef = refForId(activeId);
+  const studyRef = refForId(studyPdfId);
+  const mruRefs = activeMru.map(refForId).filter(Boolean);
+  const expanded = new Map();
+  navNodes.filter(node => branchIds.has(node.nodeId) && node.type === "group")
+    .forEach(node => expanded.set(groupStablePath(node), node.expanded !== false));
+  const oldRootIndex = navNodes.findIndex(node => node.nodeId === rootId);
+  const oldPaths = [...(root.workspacePaths || [])].map(normalizedRunPath);
+
+  for (const doc of editedPdfs){
+    if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);
+    doc.recoveryDirty = false;
+  }
+  childDocs.forEach(doc => closeDoc(doc.id, { skipConfirm: true, skipPrune: true, skipUi: true }));
+  for (let i = navNodes.length - 1; i >= 0; i--){
+    if (branchIds.has(navNodes[i].nodeId)) navNodes.splice(i, 1);
+  }
+  bumpNavTree();
+
+  const nextRoot = await openFolderFiles(files, { ...options, silent: true, originalSaveMode: !!root.originalSaveMode });
+  if (!nextRoot) return false;
+  const nextBranchIds = navBranchIds(nextRoot.nodeId);
+  const nextNodes = navNodes.filter(node => nextBranchIds.has(node.nodeId));
+  for (let i = navNodes.length - 1; i >= 0; i--){
+    if (nextBranchIds.has(navNodes[i].nodeId)) navNodes.splice(i, 1);
+  }
+  navNodes.splice(Math.max(0, Math.min(oldRootIndex, navNodes.length)), 0, ...nextNodes);
+  bumpNavTree();
+  nextNodes.filter(node => node.type === "group").forEach(node => {
+    const saved = expanded.get(groupStablePath(node));
+    if (saved !== undefined) node.expanded = saved;
+  });
+
+  const nextDocs = docs.filter(doc => nextBranchIds.has(doc.nodeId));
+  const resolveRef = (ref) => {
+    if (!ref) return null;
+    if (ref.id != null) return docs.some(doc => doc.id === ref.id) ? ref.id : null;
+    const match = nextDocs.find(doc => normalizedRunPath(doc.workspacePath || doc.relPath || doc.name) === ref.path);
+    return match ? match.id : null;
+  };
+  const restoredTabs = [], seenTabs = new Set();
+  tabRefs.forEach(ref => {
+    const id = resolveRef(ref);
+    if (id != null && !seenTabs.has(id)){ seenTabs.add(id); restoredTabs.push(id); }
+  });
+  tabOrder = restoredTabs;
+  activeMru = mruRefs.map(resolveRef).filter((id, index, rows) => id != null && rows.indexOf(id) === index);
+  const nextStudyId = resolveRef(studyRef);
+  studyPdfId = nextStudyId != null && docs.some(doc => doc.id === nextStudyId && doc.kind === "pdf") ? nextStudyId : null;
+  const wantedActive = resolveRef(activeRef);
+  const fallbackActive = wantedActive || restoredTabs[0] || (nextDocs[0] && nextDocs[0].id) || (docs[0] && docs[0].id) || 0;
+  sidebarCursorKey = nextRoot.nodeId;
+  if (fallbackActive){
+    setActiveDoc(fallbackActive);
+    uiBatchActiveCandidate = fallbackActive;
+  }
+  else {
+    activeId = 0; state = null; viewer = null;
+    refreshChrome(); applyStudyLayout(); renderSidebar();
+  }
+
+  if (files.length || folderPaths.length)
+    await rememberWorkspace(files, false, { silent: true, folderPaths });
+  const nextPathSet = new Set(files.map(file => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name))));
+  folderPaths.forEach(path => nextPathSet.add(workspaceFolderMarkerPath(path)));
+  const deleted = oldPaths.filter(path => path && !nextPathSet.has(path));
+  if (deleted.length) forgetWorkspacePaths(deleted);
+  toast("폴더를 새로고침했어요. " + nextDocs.length + "개 파일을 반영했습니다.", 3000);
+  return true;
+}
+
+function readEntryFile(entry){
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+function readDirectoryEntries(reader){
+  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+
+async function readAllDirectoryEntries(entry){
+  const reader = entry.createReader();
+  const all = [];
+  for (;;){
+    const batch = await readDirectoryEntries(reader);
+    if (!batch.length) break;
+    all.push(...batch);
+  }
+  return all;
+}
+
+async function handleEntry(entry, parentId=null){
+  if (!entry) return;
+  if (entry.isDirectory){
+    const group = makeGroup("folder", entry.name, parentId);
+    const entries = await readAllDirectoryEntries(entry);
+    entries.sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
+    for (const child of entries) await handleEntry(child, group.nodeId);
+    if (!navNodes.some(n => n.parentId === group.nodeId)) closeGroup(group.nodeId);
+    return;
+  }
+  if (entry.isFile){
+    let file;
+    try { file = await readEntryFile(entry); }
+    catch (e){ console.warn("파일 엔트리를 읽지 못해 건너뜀:", entry.name, e); return; }
+    await handleFiles([file], { parentId, bulk: true });   // 폴더=묶음 열기: 첫 개만 즉시 렌더, 나머지는 지연(빈 화면·렌더 폭주 방지)
+  }
+}
+
+async function handleDroppedItems(entries){
+  let used = false;
+  for (const entry of entries){
+    if (!entry) continue;
+    used = true;
+    await handleEntry(entry, null);
+  }
+  return used;
+}
+
+// 폴더 드롭도 폴더 선택과 같은 File[] 형태로 모아 저장·옆파일 실행·자동복원을 모두 지원한다.
+async function collectDroppedFiles(entry, prefix, out, folderPaths){
+  if (!entry) return;
+  const rel = prefix ? prefix + "/" + entry.name : entry.name;
+  if (entry.isDirectory){
+    if ((entry.name || "").charAt(0) === ".") return;
+    if (folderPaths) folderPaths.push(rel);
+    const children = await readAllDirectoryEntries(entry);
+    for (const child of children) await collectDroppedFiles(child, rel, out, folderPaths);
+  } else if (entry.isFile){
+    try {
+      const file = await readEntryFile(entry);
+      Object.defineProperty(file, "webkitRelativePath", { value: rel });
+      out.push(file);
+    } catch(e){ console.warn("파일 엔트리를 읽지 못해 건너뜀:", entry.name, e); }
+  }
+}
+
+function queueDroppedItems(dataTransfer){
+  const items = dataTransfer && dataTransfer.items;
+  const files = dataTransfer && dataTransfer.files ? [...dataTransfer.files] : [];
+  if (!items || !items.length) return queueFiles(files);
+  // 엔트리는 드롭 이벤트가 끝나기 전에 동기적으로 확보해야 한다(이후 item 무효화).
+  const entries = [];
+  for (const item of [...items]){
+    if (item.kind !== "file") continue;
+    const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+    if (entry) entries.push(entry);
+  }
+  // 폴더 드롭이 아니면 신뢰할 수 있는 dataTransfer.files 를 그대로 쓴다.
+  // file:// 로 열면 FileSystemFileEntry.file() 이 EncodingError 로 깨지는 Chrome 버그가 있어,
+  // 일반 파일은 엔트리 API 를 거치지 않는다(폴더 구조 파악이 필요할 때만 엔트리 순회).
+  const hasDir = entries.some(en => en.isDirectory);
+  if (!hasDir) return queueFiles(files);
+  fileQueue = fileQueue
+    .then(() => runUiBatch(async () => {
+      const collected = [];
+      const folderPaths = [];
+      for (const entry of entries) await collectDroppedFiles(entry, "", collected, folderPaths);
+      if (collected.length || folderPaths.length)
+        await rememberWorkspace(collected, navNodes.length === 0, { folderPaths });
+      await openFolderFiles(collected, { folderPaths });
+    }))
+    .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
+  return fileQueue;
+}
+

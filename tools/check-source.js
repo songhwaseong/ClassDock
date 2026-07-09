@@ -36,7 +36,8 @@ for (const name of ["normalizePythonDiagnostics", "normalizePythonTraceReport"])
   }
 }
 
-const pythonViewer = fs.readFileSync(path.join(root, "src/js/python-viewer.js"), "utf8");
+// python-viewer.js 분할본 — 같은 컨텍스트에 순서대로 로드하면 번들과 동일한 전역 환경이 된다.
+const pythonViewerFiles = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"];
 const workerContext = vm.createContext({
   console,
   window:{},
@@ -46,7 +47,10 @@ const workerContext = vm.createContext({
   btoa:(value) => Buffer.from(value, "binary").toString("base64"),
   atob:(value) => Buffer.from(value, "base64").toString("binary")
 });
-new vm.Script(pythonViewer, { filename: "python-viewer.js" }).runInContext(workerContext);
+for (const file of pythonViewerFiles) {
+  const code = fs.readFileSync(path.join(root, "src/js", file), "utf8");
+  new vm.Script(code, { filename: file }).runInContext(workerContext);
+}
 const outputLimitCheck = new vm.Script(`(() => {
   const normal = createPythonOutputCollector(8, 64);
   normal.append("12345678"); normal.append("ABCDEFGHIJ");

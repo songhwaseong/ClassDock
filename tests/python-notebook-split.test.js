@@ -6,7 +6,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "../src/js/python-viewer.js"), "utf8");
+// python-viewer.js 분할본을 이어붙여 실행 — 번들과 동일한 전역 환경이 된다.
+const source = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 const context = vm.createContext({
   console,
   window:{},
