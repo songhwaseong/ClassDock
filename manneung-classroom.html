@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>만능파일교실</title>
+<script src="src/js/state-sync.js"></script>
+<script src="src/js/theme.js"></script>
+<link rel="stylesheet" href="src/styles.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/css/pptxjs.css">
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+  <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="왼쪽 사이드 메뉴 숨기기" title="왼쪽 사이드 메뉴 숨기기">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg>
+  </button>
+  <div class="brand">만능파일교실</div>
+  <span class="workspace-activity" id="workspaceActivity" hidden><span class="workspace-activity-dot"></span><span id="workspaceActivityText"></span></span>
+  <span class="server-status" id="serverStatus" hidden><span class="server-status-dot"></span><span class="server-status-text" id="serverStatusText"></span></span>
+  <span class="py-ready" id="pyReadyStatus" title="브라우저 파이썬(Pyodide) 준비 상태" hidden><span class="py-ready-ico" aria-hidden="true"></span><span class="py-ready-text" id="pyReadyText"></span></span>
+  </div>
+  <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="originalSaveBadge" class="original-save-badge" hidden>원본 저장</span><span id="activeDocEncoding" class="doc-encoding" hidden></span><span id="activeDocStatus" class="doc-status" hidden></span></div>
+  <div class="header-actions">
+  <div class="tools" id="tools" hidden>
+    <details class="tool-menu"><summary>편집</summary><div class="tool-menu-pop">
+      <button id="btnSign">서명</button><button id="btnText">텍스트</button><button id="btnDate">날짜</button><button id="btnCheck">✓ 체크</button><button id="btnPen" type="button" title="PDF 위에 펜·형광펜으로 필기">✏️ 필기</button><button id="btnCodeLink" type="button" title="현재 Python 줄을 PDF에 연결">코드 연결</button>
+    </div></details>
+    <details class="tool-menu"><summary>페이지</summary><div class="tool-menu-pop">
+      <button id="btnPages" type="button" title="페이지 썸네일·추출·정리">썸네일·정리</button>
+      <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
+    </div></details>
+    <input type="file" id="mergePdfInput" accept=".pdf,application/pdf" multiple hidden>
+    <button id="btnPdfFind" type="button" data-shortcut-action="findInDocument" data-shortcut-title="PDF에서 찾기" data-shortcut-aria="true">찾기</button>
+    <span class="spacer"></span>
+    <span class="zoom-ctl">
+      <button id="zoomOut" type="button" title="축소 (Ctrl+-)">－</button>
+      <button id="zoomLabel" type="button" title="원래대로(맞춤)">100%</button>
+      <button id="zoomIn" type="button" title="확대 (Ctrl++)">＋</button>
+    </span>
+    <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
+    </button>
+    <button id="btnFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
+    <button id="btnDownload" class="primary" data-shortcut-action="saveCurrent" data-shortcut-title="PDF 다운로드">다운로드</button>
+  </div>
+  <div class="tools" id="officeTools" hidden>
+    <span class="spacer"></span>
+    <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
+    </button>
+    <button id="btnOfficeFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
+    <button id="btnPrint">인쇄 / PDF로 저장</button>
+  </div>
+  <button id="studyToggle" type="button" hidden title="PDF와 Python 코드를 나란히 보기">학습 화면</button>
+  <button id="saveFolderOpen" class="save-folder-open" type="button" hidden title="직전에 저장한 파일이 있는 폴더 열기" aria-label="직전에 저장한 파일이 있는 폴더 열기">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M9 14h6M12 11v6"/></svg><span>저장 폴더</span>
+  </button>
+  <button id="imageMemoOpen" class="image-memo-open" type="button" title="이미지 메모 열기" aria-label="이미지 메모 열기" aria-controls="imageMemo" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5"/></svg><span>이미지 메모</span>
+  </button>
+  <button id="settingsOpen" type="button" title="설정" aria-label="설정">⚙</button>
+  <button id="helpOpen" type="button" title="도움말·단축키" aria-label="도움말">?</button>
+  <button id="themeToggle" class="theme-toggle" type="button" title="다크 모드로 전환" aria-label="테마 전환"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+  </div>
+</header>
+
+<div id="tabBar" hidden></div>
+
+<main>
+  <div id="sidebar" hidden>
+    <div class="sb-title">
+      <span class="file-stats-wrap" id="fileStatsWrap">
+        <button id="fileStats" class="file-stats" type="button" title="열린 파일이 없습니다" aria-haspopup="menu" aria-expanded="false" aria-controls="fileStatsPop" disabled><span id="fileStatsSummary">파일 0개 · 0 B</span></button>
+        <div id="fileStatsPop" class="file-stats-pop" role="menu" hidden></div>
+      </span>
+      <span class="mem-stat" id="memStat" hidden></span>
+    </div>
+    <label class="sb-search" for="sbSearch">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+      <input id="sbSearch" type="search" placeholder="파일명·내용 검색" autocomplete="off" spellcheck="false" data-shortcut-action="focusSearch" data-shortcut-title="파일명·내용 검색">
+      <kbd data-shortcut-action="focusSearch">Ctrl+F</kbd>
+    </label>
+    <div class="sb-list" id="sbList"></div>
+    <div class="sb-actions" aria-label="파일 및 도구">
+      <div class="sb-more-wrap sb-open-wrap">
+        <button class="sb-action" id="sbOpen" type="button" title="파일 또는 폴더 열기" aria-label="파일 또는 폴더 열기" aria-haspopup="menu" aria-expanded="false" aria-controls="sbOpenMenu">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h7l2 2h9v11H3z"/><path d="M12 11v6M9 14h6"/></svg>
+        </button>
+        <div class="sb-more-menu" id="sbOpenMenu" role="menu" hidden>
+          <button class="sb-menu-item" id="sbOpenFiles" type="button" role="menuitem" data-shortcut-action="openFiles" data-shortcut-title="파일 추가">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M12 11v6M9 14h6"/></svg>
+            <span>파일 추가</span>
+          </button>
+          <button class="sb-menu-item" id="sbOpenFolder" type="button" role="menuitem" data-shortcut-action="openFolder" data-shortcut-title="폴더 열기">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M12 11v6M9 14h6"/></svg>
+            <span>폴더 열기</span>
+          </button>
+        </div>
+      </div>
+      <div class="sb-more-wrap">
+        <button class="sb-action" id="sbNew" type="button" title="새로 만들기 (Alt+N)" aria-label="새로 만들기" aria-haspopup="menu" aria-expanded="false" aria-controls="sbNewMenu">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <div class="sb-more-menu" id="sbNewMenu" role="menu" hidden>
+          <button class="sb-menu-item" id="sbNewPy" type="button" role="menuitem" data-shortcut-action="newPython" data-shortcut-title="새 파이썬 코드" data-shortcut-aria="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3c-4 0-4 2-4 4v3h8a3 3 0 0 1 3 3v4c0 2-2 4-4 4h-3v-3"/><path d="M12 21c4 0 4-2 4-4v-3H8a3 3 0 0 1-3-3V7c0-2 2-4 4-4h3v3"/><path d="M10 6h.01M14 18h.01"/></svg>
+            <span>새 파이썬 코드</span>
+          </button>
+          <button class="sb-menu-item" id="sbNewNotebook" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 3v18"/><path d="M11 8h6M11 12h6M11 16h4"/></svg>
+            <span>새 노트북(.ipynb)</span>
+          </button>
+          <button class="sb-menu-item" id="sbNewSheet" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14h18M9 4v16M15 4v16"/></svg>
+            <span>새 빈 표(엑셀)</span>
+          </button>
+          <button class="sb-menu-item" id="sbNewBoard" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/><path d="M7 9l3 3 5-5"/></svg>
+            <span>새 화이트보드</span>
+          </button>
+          <button class="sb-menu-item" id="sbNewText" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4M9 13h6M9 17h6M9 9h2"/></svg>
+            <span>새 텍스트 파일</span>
+          </button>
+          <button class="sb-menu-item" id="sbOpenLesson" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/><path d="M10.5 8.5v4l3.5-2z"/></svg>
+            <span>리플레이 열기(.lesson)</span>
+          </button>
+        </div>
+      </div>
+      <button class="sb-action" id="sbExamples" type="button" title="파이썬 예제 갤러리" aria-label="파이썬 예제 갤러리">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l2.2 4.8L19 9l-3.6 3.4L16.3 18 12 15.4 7.7 18l.9-5.6L5 9l4.8-1.2z"/></svg>
+      </button>
+      <div class="sb-more-wrap">
+        <button class="sb-action" id="sbMore" type="button" title="더보기" aria-label="더보기" aria-haspopup="menu" aria-expanded="false" aria-controls="sbMoreMenu">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+        </button>
+        <div class="sb-more-menu" id="sbMoreMenu" role="menu" hidden>
+          <button class="sb-menu-item" id="sbRefreshActive" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12a9 9 0 0 1 15.5-6.2"/><path d="M18 3v5h-5M6 21v-5h5"/></svg>
+            <span>현재 파일 새로고침</span>
+          </button>
+          <button class="sb-menu-item danger" id="sbClearWorkspace" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+            <span>최근 작업공간 지우기</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="sbResizer" hidden title="드래그: 너비 조절 · 더블클릭: 파일명에 자동 맞춤"></div>
+  <div id="content">
+    <div id="fsControls" class="fs-controls hide">
+      <span id="fsZoomGroup" class="fs-zoom-group">
+        <button id="fsZoomOut" type="button" title="축소">－</button>
+        <button id="fsZoomLabel" type="button" title="맞춤">100%</button>
+        <button id="fsZoomIn" type="button" title="확대">＋</button>
+      </span>
+      <span class="page-ctl fs-page-ctl" id="fsPageCtl" title="페이지 번호 입력 후 Enter로 이동">
+        <input id="fsPageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
+        <span class="page-sep" id="fsPageTotal">/ 1</span>
+      </span>
+      <button id="fsExit" type="button">전체화면 종료</button>
+    </div>
+    <div class="study-page-ctl" id="studyPageCtl" title="페이지 번호 입력 후 Enter로 이동">
+      <input id="studyPageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
+      <span class="page-sep" id="studyPageTotal">/ 1</span>
+      <button id="btnStudyFind" type="button" class="study-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="참조 PDF에서 찾기" data-shortcut-aria="true" aria-label="참조 PDF에서 찾기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
+      </button>
+      <button id="btnStudyPen" type="button" class="study-pen-btn" title="PDF에 필기 (펜·형광펜·지우개)" aria-label="PDF 필기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
+      </button>
+    </div>
+    <span class="page-ctl view-page-ctl" id="pageCtl" title="페이지 번호 입력 후 Enter로 이동">
+      <input id="pageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
+      <span class="page-sep" id="pageTotal">/ 1</span>
+    </span>
+    <div class="dropzone" id="dropzone">
+      <div class="dz-inner" id="dzInner">
+        <div class="dz-icon"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></div>
+        <h2>파일을 여기로 끌어다 놓으세요</h2>
+        <p>PDF · Word · Excel · PowerPoint · 이미지 · 폴더 · ZIP &nbsp;|&nbsp; 또는 클릭해서 선택</p>
+        <p class="dz-feature">✦ Python 실행·자동채점 · Jupyter 노트북 · 화이트보드 · PDF 서명·필기 &mdash; 모두 이 안에서</p>
+        <button type="button" id="dzFolderBtn" class="dz-folder">폴더 열기</button>
+        <span class="dz-new-wrap">
+          <button type="button" id="dzNew" class="dz-folder" aria-haspopup="menu" aria-expanded="false" aria-controls="dzNewMenu">＋ 새로 만들기 ▾</button>
+          <span class="dz-new-menu" id="dzNewMenu" role="menu" hidden>
+            <button type="button" id="dzNewPy" role="menuitem" data-shortcut-action="newPython" data-shortcut-title="새 파이썬 코드">새 파이썬 코드</button>
+            <button type="button" id="dzNewNotebook" role="menuitem">새 노트북(.ipynb)</button>
+            <button type="button" id="dzNewSheet" role="menuitem">새 빈 표(엑셀)</button>
+            <button type="button" id="dzNewBoard" role="menuitem">새 화이트보드</button>
+            <button type="button" id="dzNewText" role="menuitem">새 텍스트 파일</button>
+            <button type="button" id="dzOpenLesson" role="menuitem">리플레이 열기(.lesson)</button>
+          </span>
+        </span>
+        <button type="button" id="dzExamples" class="dz-folder">✨ 파이썬 예제 갤러리</button>
+        <div class="dz-note">모든 처리는 이 브라우저 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.<br>
+          서명·편집은 PDF에서, 나머지는 미리보기로 · <b>여러 개를 한꺼번에 열 수 있어요</b></div>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
+        <input type="file" id="folderInput" webkitdirectory multiple hidden>
+      </div>
+    </div>
+  </div>
+  <aside class="scratchpad" id="scratchpad" role="dialog" aria-modal="false" aria-labelledby="scratchpadTitle" hidden>
+    <div class="scratchpad-head">
+      <div><h2 id="scratchpadTitle">임시 메모</h2><span id="scratchpadStatus" aria-live="polite">자동 저장</span></div>
+      <button id="scratchpadClose" type="button" title="메모 닫기" aria-label="메모 닫기">×</button>
+    </div>
+    <div class="scratchpad-tabbar">
+      <div class="scratchpad-tabs" id="scratchpadTabs" role="tablist" aria-label="메모 탭"></div>
+      <button class="scratchpad-new" id="scratchpadNew" type="button">+ 새 메모</button>
+    </div>
+    <div class="scratchpad-insertbar">
+      <button id="scratchpadAddText" type="button">+ 글 블록</button>
+      <button id="scratchpadAddImage" type="button">+ 이미지</button>
+      <span>이미지 붙여넣기·파일/웹 이미지 드롭 가능</span>
+      <div class="scratchpad-colors" id="scratchpadColors" role="group" aria-label="현재 메모 색상">
+        <button class="scratchpad-color" type="button" data-note-color="yellow" title="노랑" aria-label="노랑 메모"></button>
+        <button class="scratchpad-color" type="button" data-note-color="sage" title="세이지 그린" aria-label="세이지 그린 메모"></button>
+        <button class="scratchpad-color" type="button" data-note-color="lavender" title="라벤더" aria-label="라벤더 메모"></button>
+        <button class="scratchpad-color" type="button" data-note-color="rose" title="소프트 로즈" aria-label="소프트 로즈 메모"></button>
+        <button class="scratchpad-color" type="button" data-note-color="ivory" title="웜 아이보리" aria-label="웜 아이보리 메모"></button>
+      </div>
+    </div>
+    <input id="scratchpadImageFile" type="file" accept="image/*" multiple hidden>
+    <div class="scratchpad-editor" id="scratchpadEditor" role="tabpanel" tabindex="0" aria-label="임시 메모 내용"></div>
+    <div class="scratchpad-foot">
+      <span id="scratchpadCount">0자</span>
+      <button id="scratchpadRename" type="button">이름 변경</button>
+      <button id="scratchpadCopy" type="button">텍스트 복사</button>
+      <button id="scratchpadClear" class="danger" type="button">지우기</button>
+    </div>
+  </aside>
+  <aside class="image-memo" id="imageMemo" role="dialog" aria-modal="false" aria-labelledby="imageMemoTitle" hidden>
+    <div class="image-memo-head">
+      <div><h2 id="imageMemoTitle">이미지 메모</h2><span id="imageMemoStatus" aria-live="polite">캡처 후 Ctrl+V로 붙여넣으세요.</span></div>
+      <button id="imageMemoClose" type="button" title="이미지 메모 닫기" aria-label="이미지 메모 닫기">×</button>
+    </div>
+    <button class="image-memo-drop" id="imageMemoDrop" type="button">
+      <strong>Ctrl+V로 캡처 이미지 붙여넣기</strong>
+      <span>클릭해서 이미지 선택 · 파일/웹 이미지 드래그 가능</span>
+    </button>
+    <input type="file" id="imageMemoFile" accept="image/*" multiple hidden>
+    <div class="image-memo-list" id="imageMemoList" aria-live="polite">
+      <div class="image-memo-empty" id="imageMemoEmpty">붙여넣은 이미지가 여기에 쌓입니다.</div>
+    </div>
+    <div class="image-memo-foot">
+      <label class="image-memo-auto"><input id="imageMemoAutoSave" type="checkbox" checked> 자동 저장</label>
+      <span id="imageMemoCount">0개</span>
+      <button id="imageMemoSave" class="primary" type="button" disabled hidden>파일로 다운로드</button>
+    </div>
+  </aside>
+  <div class="image-memo-preview" id="imageMemoPreview" role="dialog" aria-modal="true" aria-labelledby="imageMemoPreviewTitle" hidden>
+    <div class="image-memo-preview-box">
+      <div class="image-memo-preview-head">
+        <strong id="imageMemoPreviewTitle">이미지 미리보기</strong>
+        <button id="imageMemoPreviewClose" type="button" title="미리보기 닫기" aria-label="미리보기 닫기">×</button>
+      </div>
+      <div class="image-memo-preview-stage" id="imageMemoPreviewStage" tabindex="0" aria-label="확대 이미지. 마우스 휠로 확대하고 드래그해서 이동할 수 있습니다.">
+        <img id="imageMemoPreviewImage" alt="" draggable="false">
+      </div>
+      <div class="image-memo-preview-tools">
+        <button id="imageMemoZoomOut" type="button" title="축소">−</button>
+        <span id="imageMemoZoomLabel">100%</span>
+        <button id="imageMemoZoomIn" type="button" title="확대">＋</button>
+        <button id="imageMemoZoomFit" type="button">화면 맞춤</button>
+        <button id="imageMemoZoomOriginal" type="button">100%</button>
+        <small>휠 확대·축소 · 드래그 이동 · 모서리로 창 크기 조절</small>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- 창 전체 드롭 안내 오버레이 -->
+<div class="drop-overlay" id="dropOverlay"><div class="doi">여기에 놓으면 새 탭으로 열려요</div></div>
+
+<!-- 서명 모달 -->
+<div class="modal" id="sigModal" hidden>
+  <div class="modal-card">
+    <h3>서명 추가</h3>
+    <div class="sub">아래에 직접 그리거나, 서명 이미지를 업로드하세요.</div>
+    <div class="lastsig" id="lastSigRow" hidden>
+      <span>최근 서명</span>
+      <img id="lastSigThumb" alt="최근 서명">
+      <button class="btn" id="sigReuse">다시 사용</button>
+    </div>
+    <div class="sig-library-wrap">
+      <div class="sig-library-head"><span>서명 보관함</span><small>최근 8개 자동 저장</small></div>
+      <div class="sig-library" id="sigLibrary"><span class="sig-library-empty">저장된 서명이 없습니다.</span></div>
+    </div>
+    <div class="pad-wrap">
+      <canvas id="sigPad"></canvas>
+      <div class="pad-base"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="sigClear">지우기</button>
+      <button class="btn" id="sigUpload">이미지 업로드</button>
+      <input type="file" id="sigFile" accept="image/*" hidden>
+      <label class="sig-target-label">적용
+        <select id="sigTarget" class="sig-target">
+          <option value="current">현재 페이지</option>
+          <option value="selected">썸네일에서 선택한 페이지</option>
+          <option value="all">모든 페이지</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <button class="btn" id="sigCancel">취소</button>
+      <button class="btn primary" id="sigInsert">삽입</button>
+    </div>
+  </div>
+</div>
+
+<!-- 암호 입력 모달 -->
+<div class="modal" id="pwModal" hidden>
+  <div class="modal-card" style="width:min(420px,96%)">
+    <h3>암호 입력</h3>
+    <div class="sub" id="pwSub">암호로 보호된 파일입니다. 암호를 입력하세요.</div>
+    <input type="password" id="pwInput" class="pw-input" placeholder="암호" autocomplete="off">
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" id="pwCancel">취소</button>
+      <button class="btn primary" id="pwOk">확인</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="textModal" hidden>
+  <div class="modal-card" style="width:min(420px,96%)">
+    <h3 id="textTitle">이름 입력</h3>
+    <div class="sub" id="textSub"></div>
+    <input type="text" id="textInput" class="pw-input" autocomplete="off">
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" id="textCancel">취소</button>
+      <button class="btn primary" id="textOk">확인</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="confirmModal" hidden>
+  <div class="modal-card" style="width:min(420px,96%)">
+    <h3>잠깐!</h3>
+    <div class="sub" id="confirmSub">계속하시겠어요?</div>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button class="btn" id="confirmCancel">취소</button>
+      <button class="btn primary" id="confirmOk">계속</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card settings-card">
+    <h3>설정</h3><div class="sub">변경 사항은 이 브라우저에 저장됩니다.</div>
+    <label class="settings-row"><span>화면 글자 크기</span><select id="settingUiScale" class="pw-input"><option value="1">보통 (100%)</option><option value="1.12">크게 (112%)</option><option value="1.25">아주 크게 (125%)</option></select></label>
+    <label class="settings-row"><span>PDF 기본 배율</span><select id="settingPdfZoom" class="pw-input"><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></label>
+    <label class="settings-row"><span>렌더링 성능</span><select id="settingPerformance" class="pw-input"><option value="memory">메모리 절약</option><option value="quality">최고 화질</option></select></label>
+    <label class="settings-check"><input type="checkbox" id="settingAutoRestore"><span>시작할 때 최근 작업공간 자동 복원</span></label>
+    <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>PDF 편집 내용 자동 저장·복원</span></label>
+    <label class="settings-check"><input type="checkbox" id="settingScreensaver"><span>대기 화면(화면보호기) — 일정 시간 입력이 없으면 전체 화면 표시</span></label>
+    <div class="settings-row"><span>표시까지 대기 시간</span><select id="settingScreensaverIdle" class="pw-input"><option value="1">1분</option><option value="3">3분</option><option value="5">5분</option><option value="10">10분</option><option value="20">20분</option></select></div>
+    <label class="settings-check"><input type="checkbox" id="settingScreensaverSound"><span>▶ 지금 시작으로 켤 때 영상 소리 재생 — 자동(유휴) 대기 화면은 항상 무음</span></label>
+    <div class="settings-save-folder">
+      <div class="settings-save-folder-copy"><strong>대기 화면 내용</strong><small id="settingScreensaverName">기본 애니메이션(시계)</small><span>영상을 고르면 재생하고(<strong>여러 개 선택 시 차례대로 반복</strong>), 없으면 시계 애니메이션을 보여줍니다. <strong>MP4(H.264)·WebM 권장</strong> — 재생이 안 되는 파일은 저장 전에 걸러 드립니다. 영상은 이 브라우저에만 저장되어 프로그램(exe·HTML) 용량과 무관합니다.</span></div>
+      <div class="settings-save-folder-actions"><button class="btn" id="settingScreensaverVideo" type="button" title="여러 개를 선택하면 차례대로 반복 재생 · MP4·WebM 권장">영상 선택</button><button class="btn" id="settingScreensaverClear" type="button">영상 지우기</button><button class="btn primary" id="settingScreensaverStart" type="button" title="모니터 전체 화면으로 지금 바로 대기 화면을 켭니다 (아무 키·클릭으로 해제)">▶ 지금 시작</button></div>
+    </div>
+    <input type="file" id="screensaverVideoInput" accept="video/mp4,video/webm,video/*" multiple hidden>
+    <div class="settings-save-folder" id="settingSaveFolderWrap" hidden>
+      <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath"></small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
+      <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>
+    </div>
+    <div class="shortcut-settings">
+      <div class="shortcut-settings-head"><div><strong>단축키</strong><small>항목을 누른 뒤 새 조합을 입력하세요.</small></div><button class="btn" id="settingsResetShortcuts" type="button">기본값 복원</button></div>
+      <div id="shortcutSettingsList" class="shortcut-settings-list"></div>
+      <div id="shortcutSettingsError" class="shortcut-settings-error" role="alert" aria-live="polite"></div>
+    </div>
+    <div class="modal-actions"><span class="spacer"></span><button class="btn" id="settingsCancel">취소</button><button class="btn primary" id="settingsSave">저장</button></div>
+  </div>
+</div>
+<div class="modal" id="welcomeModal" hidden>
+  <div class="modal-card welcome-card">
+    <h3>만능파일교실에 오신 걸 환영해요 👋</h3>
+    <p class="welcome-lead">설치 없이 PDF·엑셀·이미지·파이썬을 한 창에서 열고 다뤄요. 아래 3가지만 알면 바로 시작할 수 있어요.</p>
+    <ol class="welcome-steps">
+      <li><span class="welcome-step-ico">📂</span><div><b>1. 파일 열기</b><small>화면에 파일을 끌어다 놓거나 왼쪽 아래 <b>열기</b> 버튼을 눌러요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
+      <li><span class="welcome-step-ico">🐍</span><div><b>2. 파이썬 실행</b><small>코드를 쓰고 <b>▶ 실행</b>(또는 <kbd>Ctrl+Enter</kbd>)을 누르면 바로 결과가 나와요. 파이썬을 설치하지 않아도 돼요.</small></div></li>
+      <li><span class="welcome-step-ico">💾</span><div><b>3. 저장</b><small>편집한 PDF·코드는 <b>다운로드</b>하거나 저장 폴더에 저장돼요. 원본은 그대로 남아요.</small></div></li>
+    </ol>
+    <p class="welcome-safe">🔒 파일은 외부로 전송되지 않고, 이 컴퓨터 안에서만 처리돼요.</p>
+    <div class="modal-actions">
+      <button class="btn" id="welcomeExamples" type="button">✨ 파이썬 예제로 시작</button>
+      <span class="spacer"></span>
+      <button class="btn primary" id="welcomeClose" type="button">시작하기</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card help-card"><h3>도움말</h3>
+  <div class="help-section-title">기능 둘러보기</div>
+  <ul class="help-features">
+    <li><b>파일 열기</b> — 끌어다 놓거나 폴더째로. PDF·Word·Excel·PowerPoint·한글·이미지·코드·ZIP을 한꺼번에 열 수 있어요.</li>
+    <li><b>PDF</b> — 서명·텍스트·날짜·체크·펜 필기, 페이지 썸네일·추출·합치기, 인쇄 / PDF로 저장.</li>
+    <li><b>Python 실행</b> — ▶로 바로 실행, 자동완성·정의 이동, <b>단계 실행</b>으로 변수 추적, <b>진단</b>과 <b>자동 채점</b>, 라이브러리 설치까지.</li>
+    <li><b>Jupyter 노트북(.ipynb)</b> — 셀 하나씩 실행(Shift+Enter)하면 변수가 다음 셀로 이어지는 커널 모드.</li>
+    <li><b>화이트보드</b> — 자유 필기·도형·이미지로 판서. 새로 만들기에서 추가.</li>
+    <li><b>학습 화면</b> — PDF와 Python 코드를 나란히 보고, 코드 줄을 PDF에 핀으로 연결.</li>
+    <li><b>임시 메모</b>(Ctrl+M)·<b>이미지 메모</b>(캡처 여러 장 붙여넣기·일괄 저장)·<b>다크 모드</b>·작업공간 자동 복원. 모든 처리는 이 컴퓨터 안에서만 이뤄지고 파일은 외부로 전송되지 않아요.</li>
+  </ul>
+  <div class="help-section-title">단축키</div>
+  <div class="shortcut-grid">
+    <kbd data-shortcut-action="openFiles">Ctrl+O</kbd><span>파일 열기</span><kbd data-shortcut-action="openFolder">Ctrl+Shift+O</kbd><span>폴더 열기</span>
+    <kbd data-shortcut-action="saveCurrent">Ctrl+S</kbd><span>현재 PDF/Python 저장</span><kbd data-shortcut-action="closeCurrent">Ctrl+W</kbd><span>현재 파일 닫기</span>
+    <kbd data-shortcut-action="reopenClosed">Ctrl+Shift+T</kbd><span>닫은 파일 다시 열기</span>
+    <kbd data-shortcut-action="focusSearch">Ctrl+F</kbd><span>열린 파일 검색</span><kbd>Ctrl+Z</kbd><span>PDF 편집·페이지 작업 되돌리기</span>
+    <kbd>Ctrl+Y</kbd><span>다시 실행</span><kbd><span data-shortcut-action="previousFile" data-shortcut-display="true">Ctrl+←</span> / <span data-shortcut-action="nextFile" data-shortcut-display="true">Ctrl+→</span></kbd><span>이전 / 다음 수업 파일</span>
+    <kbd data-shortcut-action="scratchpad">Ctrl+M</kbd><span>임시 메모 열기·닫기</span><kbd>Ctrl 두 번</kbd><span>Python 편집기로 포커스</span>
+    <kbd data-shortcut-action="screensaverStart">Ctrl+F12</kbd><span>대기 화면 지금 시작 (모니터 전체)</span>
+    <kbd>Alt+← / →</kbd><span>왼쪽 사이드바 숨기기 / 보이기</span><kbd data-shortcut-action="newPython">Alt+N</kbd><span>새 파이썬 코드 만들기</span>
+    <kbd data-shortcut-action="findInDocument">Ctrl+H</kbd><span>PDF에서 찾기 (PDF 보기 중)</span>
+    <strong class="shortcut-section">Python 편집</strong>
+    <kbd data-shortcut-action="runCode">Ctrl+Enter</kbd><span>코드 실행 (노트북: 이 셀만)</span><kbd>Shift+Enter</kbd><span>노트북: 이 셀 실행 후 다음 셀</span>
+    <kbd>Ctrl+D</kbd><span>선택한 줄 삭제</span>
+    <kbd>Alt+↑</kbd><span>선택한 줄 위로 이동</span><kbd>Alt+↓</kbd><span>선택한 줄 아래로 이동</span>
+    <kbd>Ctrl+Alt+↓</kbd><span>선택한 줄 아래로 복제</span><kbd>Ctrl+/</kbd><span>선택한 줄 주석 토글</span>
+    <kbd>Tab</kbd><span>선택한 줄 들여쓰기</span><kbd>Shift+Tab</kbd><span>선택한 줄 내어쓰기</span>
+    <kbd>문자 입력</kbd><span>Python 자동완성 열기</span><kbd>↑ / ↓</kbd><span>자동완성 항목 선택</span>
+    <kbd>Enter / Tab</kbd><span>자동완성 적용</span><kbd>Esc</kbd><span>자동완성 닫기</span>
+    <kbd>더블클릭</kbd><span>같은 식별자 동시수정</span><kbd>Ctrl+클릭</kbd><span>함수 정의 열기</span>
+    <kbd>Ctrl+H</kbd><span>노트북 전체 셀 찾기·바꾸기</span><kbd>Ctrl+Shift+H</kbd><span>현재 셀에서 찾기·바꾸기</span><kbd>Esc</kbd><span>열린 검색창 모두 닫기</span>
+  </div><div class="modal-actions"><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
+</div>
+
+<div class="toast" id="toast" aria-live="polite"></div>
+<div class="loading" id="loading" hidden><div class="spinner"></div><p id="loadingMsg">처리 중…</p><button class="btn" id="loadingCancel" hidden>작업 취소</button></div>
+<div class="hint" id="hint" hidden>요소를 끌어 위치 이동 · 더블클릭으로 텍스트 수정 · 모서리로 크기 조절 · Delete 키로 삭제</div>
+
+<!-- 오피스 미리보기 라이브러리 (순서 중요) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<!-- docx-preview 는 JSZip 3.x(loadAsync) 필요 → 먼저 v3 을 띄우고 docx-preview 가 이를 캡처하게 한다 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/docx-preview@0.3.5/dist/docx-preview.min.js"></script>
+<!-- 이후 전역 JSZip 을 2.6.1 로 되돌린다 (PPTXjs/앱 repair 가 동기 new JSZip API 사용) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js"></script>
+<script>
+window.FileReaderJS = window.FileReaderJS || {
+  setSync: function(){},
+  setupBlob: function(blob, options){
+    const reader = new FileReader();
+    const on = options && options.on || {};
+    reader.onload = function(event){ if (on.load) on.load(event, blob); };
+    reader.onerror = function(event){ if (on.error) on.error(event, blob); };
+    const mode = options && options.readAsDefault || "ArrayBuffer";
+    if (mode === "DataURL") reader.readAsDataURL(blob);
+    else if (mode === "Text") reader.readAsText(blob);
+    else reader.readAsArrayBuffer(blob);
+  },
+  setupDrop: function(){},
+  setupInput: function(){}
+};
+</script>
+<script src="https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/divs2slides.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/pptxjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- 스프레드시트 편집·저장 시 셀 서식(번호서식·색·글꼴·병합) 보존 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<!-- 오피스 열기암호 복호화 (Agile) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script src="vendor/office-decrypt.js"></script>
+<!-- 한글(HWP 바이너리) 뷰어: hwp.js v0.0.3 (ESM→전역 변환본) -->
+<script src="vendor/hwp.global.js"></script>
+<!-- PDF 서명/편집 라이브러리 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<!-- DOM → 이미지 캡처(노트북 전체를 PDF로 저장) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="vendor/html-to-image.js"></script>
+<!-- 압축(zip) 풀기 + 암호 ZIP(AES) 지원 -->
+<script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip-full.min.js"></script>
+<script src="src/js/core.js"></script>
+<script src="src/js/state.js"></script>
+<script src="src/js/pdf-recovery.js"></script>
+<script src="src/js/video-viewer.js"></script>
+<script src="src/js/documents.js"></script>
+<script src="src/js/pdf-editor.js"></script>
+<script src="src/js/pdf-pages.js"></script>
+<script src="src/js/viewer-base.js"></script>
+<script src="src/js/korean-font.js"></script>
+<script src="src/js/python-viewer.js"></script>
+<script src="src/js/notebook-viewer.js"></script>
+<script src="src/js/office-viewers.js"></script>
+<script src="src/js/image-viewer.js"></script>
+<script src="src/js/board-render.js"></script>
+<script src="src/js/whiteboard.js"></script>
+<script src="src/js/lesson-replay.js"></script>
+<script src="src/js/screensaver.js"></script>
+<script src="src/js/scratchpad.js"></script>
+<script src="src/js/image-memo.js"></script>
+<script src="src/js/app.js"></script>
+
+</body>
+</html>

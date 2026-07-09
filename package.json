@@ -1,0 +1,10 @@
+{
+  "name": "pdf-signer-local",
+  "private": true,
+  "scripts": {
+    "build": "node build-offline.js",
+    "check": "node tools/check-source.js",
+    "test": "node --test tests/*.test.js",
+    "verify": "npm run check && npm test && npm run build"
+  }
+}

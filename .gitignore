@@ -1,0 +1,7 @@
+.claude/settings.local.json
+ffmpeg.exe
+
+# 빌드 산출물 (커밋된 소스로부터 재생성됨 — node build-offline.js + desktop/build.bat)
+manneung-classroom-offline.html
+manneung-classroom.exe
+desktop/app.html

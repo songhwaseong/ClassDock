@@ -1,0 +1,104 @@
+{
+  "styles": {
+    "local": "src/styles.css",
+    "pptx": {
+      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/css/pptxjs.css",
+      "file": "pptxjs.css"
+    }
+  },
+  "localScripts": [
+    "state-sync.js",
+    "theme.js",
+    "core.js",
+    "state.js",
+    "pdf-recovery.js",
+    "video-viewer.js",
+    "documents.js",
+    "pdf-editor.js",
+    "pdf-pages.js",
+    "viewer-base.js",
+    "korean-font.js",
+    "python-viewer.js",
+    "notebook-viewer.js",
+    "office-viewers.js",
+    "image-viewer.js",
+    "board-render.js",
+    "whiteboard.js",
+    "lesson-replay.js",
+    "screensaver.js",
+    "scratchpad.js",
+    "image-memo.js",
+    "app.js"
+  ],
+  "vendorScripts": [
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js",
+      "file": "jquery.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+      "file": "jszip3.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js",
+      "file": "jszip.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js",
+      "file": "jszip-utils.min.js"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/divs2slides.min.js",
+      "file": "divs2slides.min.js"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/pptxjs.min.js",
+      "file": "pptxjs.min.js"
+    },
+    {
+      "src": "https://unpkg.com/docx-preview@0.3.5/dist/docx-preview.min.js",
+      "file": "docx-preview.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
+      "file": "xlsx.full.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js",
+      "file": "exceljs.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js",
+      "file": "crypto-js.min.js"
+    },
+    {
+      "src": "vendor/office-decrypt.js",
+      "file": "office-decrypt.js"
+    },
+    {
+      "src": "vendor/hwp.global.js",
+      "file": "hwp.global.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+      "file": "pdf.min.js",
+      "worker": "pdf.worker.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js",
+      "file": "pdf-lib.min.js"
+    },
+    {
+      "src": "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js",
+      "file": "html2canvas.min.js"
+    },
+    {
+      "src": "vendor/html-to-image.js",
+      "file": "html-to-image.js"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip-full.min.js",
+      "file": "zip-full.min.js"
+    }
+  ]
+}

@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>만능파일교실 사용법</title>
+<style>
+  :root{
+    --ink:#1e293b; --muted:#64748b; --border:#e2e8f0; --panel:#f8fafc;
+    --accent:#2563eb; --accent-soft:#dbeafe; --code-bg:#f1f5f9; --bg:#ffffff;
+    --warn:#b45309; --warn-bg:#fef3c7;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,-apple-system,sans-serif;
+    line-height:1.7;font-size:15.5px;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:32px 24px 80px}
+  h1{font-size:28px;margin:0 0 8px;letter-spacing:-.02em}
+  h2{font-size:22px;margin:48px 0 16px;padding:8px 0 6px;border-bottom:2px solid var(--accent-soft);scroll-margin-top:20px}
+  h2 .back{font-size:13px;font-weight:400;color:var(--muted);text-decoration:none;float:right;margin-top:6px}
+  h2 .back:hover{color:var(--accent)}
+  h3{font-size:17px;margin:28px 0 10px;color:var(--ink)}
+  h4{font-size:15.5px;margin:18px 0 6px}
+  p{margin:10px 0}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  ul,ol{padding-left:24px;margin:10px 0}
+  li{margin:4px 0}
+  blockquote{border-left:3px solid var(--accent-soft);background:#f8fafc;
+    margin:14px 0;padding:10px 16px;color:var(--ink);border-radius:0 6px 6px 0}
+  blockquote p{margin:4px 0}
+  code{background:var(--code-bg);padding:2px 6px;border-radius:4px;
+    font-family:Consolas,"Courier New",monospace;font-size:.92em;color:#0f172a}
+  pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;
+    overflow-x:auto;border:1px solid var(--border)}
+  pre code{background:none;padding:0;font-size:13.5px}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+  th,td{border:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:600}
+  hr{border:none;border-top:1px solid var(--border);margin:32px 0}
+  .lead{color:var(--muted);font-size:15px;margin:6px 0 20px}
+  .updated{display:inline-block;font-size:13px;color:var(--accent);background:var(--accent-soft);
+    padding:4px 12px;border-radius:999px;margin:6px 0 12px}
+  /* TOC */
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:18px 22px;margin:24px 0 32px}
+  .toc h2{font-size:17px;border:none;margin:0 0 10px;padding:0}
+  .toc ol{margin:0;padding-left:24px}
+  .toc li{margin:6px 0}
+  .toc a{color:var(--ink);font-weight:500}
+  .toc a:hover{color:var(--accent)}
+  /* 박스 */
+  .box{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin:14px 0}
+  .warn{background:var(--warn-bg);border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;color:#78350f;margin:12px 0}
+  .warn strong{color:#78350f}
+  /* 키캡 스타일 */
+  kbd{display:inline-block;padding:2px 7px;font-family:Consolas,monospace;font-size:12.5px;
+    background:#fff;border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;color:#334155}
+  /* 화면구성 ASCII 박스 */
+  .ascii{font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:1.4;
+    background:#0f172a;color:#e2e8f0;padding:14px 18px;border-radius:8px;overflow-x:auto;white-space:pre}
+  /* 작은 화면 */
+  @media (max-width:640px){
+    .wrap{padding:20px 14px 60px}
+    h1{font-size:24px}
+    h2{font-size:19px;margin-top:36px}
+    table{font-size:13.5px}
+  }
+  /* 다크 모드 */
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ink:#e2e8f0;--muted:#94a3b8;--border:#334155;--panel:#1e293b;
+      --accent:#60a5fa;--accent-soft:#1e3a8a;--code-bg:#0f172a;--bg:#0b1220;
+      --warn:#fbbf24;--warn-bg:#422006;
+    }
+    blockquote{background:#0f172a}
+    pre code,code{color:#e2e8f0}
+    th{background:#0f172a}
+    .warn{color:#fcd34d}
+    .warn strong{color:#fcd34d}
+    kbd{background:#1e293b;color:#cbd5e1;border-color:#475569}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>만능파일교실 사용법 — 처음부터 끝까지</h1>
+<p class="updated"><strong>최종 업데이트: 2026년 7월 4일</strong></p>
+<p class="lead">처음 쓰는 분도 따라할 수 있게 클론부터 실제 사용까지 단계별로 정리했어요. 자세한 기능 설명·릴리스 노트는 <a href="README.md">README.md</a>를 참고하세요.</p>
+
+<nav class="toc" id="toc">
+<h2>목차</h2>
+<ol>
+  <li><a href="#sec1">이 프로그램이 뭐예요?</a></li>
+  <li><a href="#sec2">내 PC에 받기 — 두 가지 방법</a></li>
+  <li><a href="#sec3">실행하기 — 세 가지 방법 중 고르기</a></li>
+  <li><a href="#sec4">첫 사용 — 파일 열어 보기</a></li>
+  <li><a href="#sec5">파일 종류별 사용법</a></li>
+  <li><a href="#sec6">상황별 가이드</a></li>
+  <li><a href="#sec7">자주 쓰는 단축키</a></li>
+  <li><a href="#sec8">개발자용 — 소스 수정 후 다시 빌드</a></li>
+  <li><a href="#sec9">제한사항 한눈에 보기</a></li>
+  <li><a href="#sec10">문제 해결 FAQ</a></li>
+</ol>
+</nav>
+
+<hr>
+
+<h2 id="sec1">1. 이 프로그램이 뭐예요? <a class="back" href="#toc">↑ 목차</a></h2>
+<p>여러 형식의 파일(PDF·Word·Excel·PowerPoint·이미지·Python 등)을 <strong>하나의 창에서</strong> 보고 편집하는 오프라인 도구입니다.</p>
+<ul>
+  <li><strong>PDF</strong>에 서명·텍스트·필기를 올려 다른 PDF로 저장</li>
+  <li><strong>Excel/CSV</strong> 표 보기·편집·통계</li>
+  <li><strong>Python</strong> 코드 작성·실행·자동채점 (브라우저 안에서도 동작)</li>
+  <li><strong>PDF 교재 + Python 코드를 나란히</strong> 펴 놓고 공부 (학습 화면)</li>
+  <li><strong>화이트보드(설명용 칠판)</strong>와 <strong>PDF·코드 위 필기</strong></li>
+  <li><strong>수업 리플레이</strong> — 화이트보드 판서 과정을 녹화해 <strong>되감아 재생</strong>(<code>.lesson</code>)</li>
+</ul>
+<p>파일은 외부 서버로 올라가지 않습니다. 내 PC 안에서만 처리합니다.</p>
+
+<h2 id="sec2">2. 내 PC에 받기 — 두 가지 방법 <a class="back" href="#toc">↑ 목차</a></h2>
+
+<h3>방법 A. Git으로 클론 (개발자·소스 수정할 사람)</h3>
+<ol>
+  <li><strong>Git이 설치돼 있는지 확인</strong> — 명령 프롬프트(<code>cmd</code>)나 PowerShell에서 <code>git --version</code> 입력. 없으면 <a href="https://git-scm.com" target="_blank" rel="noopener">git-scm.com</a>에서 설치.</li>
+  <li>원하는 폴더에서 클론:
+<pre><code>git clone https://github.com/songhwaseong/myOffice.git
+cd myOffice</code></pre>
+  </li>
+</ol>
+
+<h3>방법 B. ZIP으로 다운로드 (그냥 쓰고만 싶은 사람)</h3>
+<ol>
+  <li>GitHub 저장소(<code>https://github.com/songhwaseong/myOffice</code>) 접속</li>
+  <li>초록색 <strong>Code</strong> 버튼 → <strong>Download ZIP</strong></li>
+  <li>받은 ZIP을 원하는 폴더에 압축 해제</li>
+</ol>
+<blockquote><p><strong>이 단계만 끝나면 사용은 가능합니다.</strong> 다음 섹션에서 실행 방법을 고르세요.</p></blockquote>
+
+<h2 id="sec3">3. 실행하기 — 세 가지 방법 중 고르기 <a class="back" href="#toc">↑ 목차</a></h2>
+<p>받은 폴더 안에 세 가지 실행 방법이 들어 있습니다. <strong>상황에 맞게 하나만 고르면 됩니다.</strong></p>
+
+<table>
+<thead><tr><th>방법</th><th>누가 쓰면 좋아요?</th><th>더블클릭할 파일</th></tr></thead>
+<tbody>
+<tr><td><strong>① EXE</strong></td><td>가장 추천. 자동 복원·로컬 Python·정확한 PPT 변환 등 모든 기능 사용</td><td><code>manneung-classroom.exe</code></td></tr>
+<tr><td><strong>② 오프라인 HTML</strong></td><td>USB로 들고 다니거나 다른 PC에 파일 하나만 주고 싶을 때</td><td><code>manneung-classroom-offline.html</code></td></tr>
+<tr><td><strong>③ 온라인 HTML</strong></td><td>개발자가 소스 수정하며 바로 확인할 때</td><td><code>manneung-classroom.html</code></td></tr>
+</tbody>
+</table>
+
+<h3>① EXE 실행 (가장 추천)</h3>
+<ol>
+  <li><code>manneung-classroom.exe</code> 더블클릭</li>
+  <li><strong>처음 실행 시 Windows SmartScreen 경고</strong>가 뜰 수 있어요 (서명되지 않은 빌드라서):
+    <ul><li>"Windows의 PC 보호" 창에서 <strong>추가 정보</strong> → <strong>실행</strong> 클릭</li></ul>
+  </li>
+  <li>콘솔창 없이 로컬 서버가 뜨고 기본 브라우저가 자동으로 열립니다.</li>
+  <li>끝낼 때는 브라우저 탭만 닫지 말고 <strong>트레이/작업관리자에서 <code>manneung-classroom.exe</code>도 종료</strong>하세요. 또는 <code>desktop/stop-server.cmd</code> 실행.</li>
+</ol>
+<blockquote><p>EXE를 매번 누르기 귀찮으면 <a href="#sec6-shortcut">§6 매번 EXE 누르기 귀찮을 때</a> 참고.</p></blockquote>
+
+<h3>② 오프라인 HTML 실행</h3>
+<ol>
+  <li><code>manneung-classroom-offline.html</code> 더블클릭 → 기본 브라우저에서 바로 열림</li>
+  <li>인터넷이 없어도 PDF·문서 보기·편집은 그대로 동작</li>
+  <li>단, <strong>Python을 처음 실행할 때</strong>는 인터넷이 필요합니다 (Pyodide 런타임 다운로드)</li>
+</ol>
+
+<h3>③ 온라인 HTML 실행</h3>
+<ol>
+  <li>인터넷 연결 상태에서 <code>manneung-classroom.html</code> 더블클릭</li>
+  <li>라이브러리를 CDN에서 받아오므로 <strong>첫 실행은 반드시 인터넷 필요</strong></li>
+</ol>
+
+<h2 id="sec4">4. 첫 사용 — 파일 열어 보기 <a class="back" href="#toc">↑ 목차</a></h2>
+
+<blockquote><p><strong>처음 열면</strong> 파일 열기 → 파이썬 실행 → 저장 3단계를 알려 주는 <strong>환영 창</strong>이 한 번 뜹니다. <strong>✨ 파이썬 예제로 시작</strong>을 누르면 곧장 예제 갤러리가 열려요. 나중에 다시 보려면 헤더 <code>?</code> → <strong>처음 사용 안내 보기</strong>.</p></blockquote>
+
+<h3>파일 열기 (3가지 방법)</h3>
+<ol>
+  <li><strong>드래그 앤 드롭</strong> — 탐색기에서 파일을 화면으로 끌어다 놓기 (가장 빠름)</li>
+  <li><strong>사이드바 하단 [열기] 버튼</strong> → <strong>파일 추가</strong> 또는 <strong>폴더 열기</strong></li>
+  <li><kbd>Ctrl</kbd>+<kbd>O</kbd> (파일 열기) / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> (폴더 열기)</li>
+</ol>
+
+<h3>여러 파일을 한 번에</h3>
+<ul>
+  <li>폴더째 드래그하거나 ZIP을 열면 안의 파일들이 사이드바에 정리됨</li>
+  <li>사이드바에서 파일 클릭으로 전환</li>
+</ul>
+
+<h3>화면 구성</h3>
+<div class="ascii">┌─────────────────────────────────────────────┐
+│ 헤더 (파일명·확장자 통계·메모·설정)         │
+├──────────┬──────────────────────────────────┤
+│          │ 탭 (열린 파일들)                 │
+│ 사이드바 ├──────────────────────────────────┤
+│          │                                  │
+│  파일    │      현재 파일 내용              │
+│  목록    │                                  │
+│          │                                  │
+└──────────┴──────────────────────────────────┘</div>
+
+<h2 id="sec5">5. 파일 종류별 사용법 <a class="back" href="#toc">↑ 목차</a></h2>
+
+<h3>📄 PDF — 편집·서명·필기</h3>
+<h4>기본 기능</h4>
+<ul>
+  <li>상단 메뉴 <strong>편집</strong> → <strong>서명 / 텍스트 / 날짜 / ✓ 체크</strong>로 PDF 위에 요소 추가</li>
+  <li>요소를 <strong>드래그</strong>해서 이동, <strong>더블클릭</strong>해서 텍스트 수정, <strong>모서리</strong>로 크기 조절, <kbd>Delete</kbd>로 삭제</li>
+  <li><strong>다운로드</strong> 버튼 → <code>원본이름_signed.pdf</code>로 저장 (원본은 그대로)</li>
+</ul>
+<h4>페이지 정리</h4>
+<ul>
+  <li>상단 <strong>페이지</strong> → 썸네일 보기, 페이지 추출·삭제·순서 변경·90도 회전</li>
+  <li><strong>PDF 합치기</strong> — 현재 PDF 뒤에 다른 PDF 이어붙이기</li>
+</ul>
+<h4>필기 모드 (✏️ 필기)</h4>
+<ul>
+  <li>펜·형광펜·지우개로 PDF 위에 직접 판서</li>
+  <li>필기바의 <strong>● 녹화</strong>로 필기 과정을 <strong>수업 리플레이</strong>로 저장 → 교재 위에서 판서가 되살아남(아래 🎬 참고)</li>
+  <li>필기바 왼쪽 끝 <strong>⋮⋮ 핸들</strong>을 끌어 위치 자유 배치, 좌/우 끝으로 가면 자동 세로 모드</li>
+  <li><strong>🖱 선택</strong> 도구를 누르면 그리기 일시 정지 (페이지 클릭/이동 평소처럼)</li>
+  <li>필기는 자동 저장돼 같은 PDF를 다시 열면 복원, 다운로드한 PDF에 그대로 구워짐</li>
+</ul>
+
+<h3>📊 Excel / CSV</h3>
+<ul>
+  <li>셀·행·열·드래그 범위 선택 후 <strong>합계·평균·최소·최대·개수</strong> 자동 표시</li>
+  <li><kbd>Ctrl</kbd>+<kbd>C</kbd>로 TSV 복사 → 다른 표에 붙여넣기</li>
+  <li><strong>표 위 검색창</strong>에서 셀 찾기</li>
+  <li><code>.xlsx</code>는 셀 편집·필터·정렬·행/열 추가/삭제·서식 보존 저장</li>
+  <li><code>.csv</code>는 큰 파일도 페이지로 나눠 보기, XLSX로 변환 가능</li>
+</ul>
+
+<h3>🐍 Python (.py)</h3>
+<h4>기본 흐름</h4>
+<ol>
+  <li><code>.py</code> 파일을 열거나 사이드바 <strong>새로 만들기 → 새 파이썬 코드</strong></li>
+  <li>코드 입력 후 <strong>▶</strong> 버튼 또는 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행</li>
+  <li>결과가 옆/아래 패널에 표시 (Side/Below 버튼으로 위치 토글)</li>
+</ol>
+<div class="box"><strong>예제 갤러리</strong> — 빈 편집기에는 117개 예제 갤러리가 뜹니다. <strong>난이도 필터 칩(⭐ 입문 / ⭐⭐ 기본 / ⭐⭐⭐ 심화 / ⭐⭐⭐⭐ 응용 / ⭐⭐⭐⭐⭐ 도전)</strong>으로 단계별로 추리고, 검색창에서 제목·설명·개념·파일명으로 찾을 수 있습니다. 응용·도전 단계에는 다익스트라·배낭 DP·N-퀸·만델브로·A* 길찾기 같은 심화 예제가 있어요. 예제를 클릭하면 새 코드로 열려 바로 실행됩니다.</div>
+<h4>도구바 버튼들</h4>
+<ul>
+  <li><strong>▶ 실행</strong> — 코드 실행. 실행 중에는 빨간 <strong>■</strong> 버튼으로 바뀌어 무한 반복이나 오래 걸리는 코드를 바로 멈출 수 있음</li>
+  <li><strong>단계 실행</strong> — 줄별 변수 변화를 최대 300단계까지 기록 (디버깅용)</li>
+  <li><strong>진단</strong> — 실행 없이 문법·자주 하는 실수 검사</li>
+  <li><strong>채점</strong> — 여러 테스트의 입력/기대 출력으로 자동 채점</li>
+  <li><strong>.py 저장</strong> — 코드 저장</li>
+  <li><strong>↩ 원본</strong> — 편집 전 원본으로 되돌리기</li>
+  <li><strong>PDF에 핀</strong> — 현재 코드 줄을 PDF 위치에 연결</li>
+  <li><strong>✏️ 필기</strong> — 편집 잠그고 코드·실행결과 위에 필기 (세션 한정, 문서 닫으면 사라짐)</li>
+  <li><strong>라이브러리</strong> — 데이터분석·크롤링·DB 세트 원클릭 설치 (EXE+로컬 Python)</li>
+  <li><strong>노트북으로 ▾</strong> — 본문을 누르면 현재 코드를 바로 노트북으로 변환. ▾에서 <strong>셀 나누기</strong>(줄번호 클릭으로 <code># %%</code> 경계 조정) 또는 <strong>자동분할</strong> 선택</li>
+  <li><strong>A− / A+</strong> — 코드와 실행 결과의 문자 크기를 함께 조절. 표준 출력·오류·표·변수·진단 글자에 적용되고 그래프·이미지 크기는 유지</li>
+</ul>
+<h4>노트북 변환</h4>
+<ol>
+  <li><strong>노트북으로</strong> 본문을 누르면 현재 <code># %%</code> 경계를 기준으로 즉시 새 노트북 탭이 열립니다.</li>
+  <li>경계를 직접 정하려면 <strong>▾ → 셀 나누기</strong>를 누르고 편집기 왼쪽 줄번호를 클릭해 경계를 넣거나 뺍니다.</li>
+  <li>상단 <strong>분할 완료</strong>를 누르면 변환합니다. 취소하려면 <kbd>Esc</kbd> 또는 <strong>▾ → × 셀 나누기 취소</strong>를 누르면 진입 전 코드로 복원됩니다.</li>
+  <li><strong>▾ → 자동분할</strong>은 빈 줄 뒤의 최상위 문장을 기준으로 <code># %%</code>을 자동 추가하며, 이후 셀 나누기로 세부 조정할 수 있습니다.</li>
+</ol>
+<h4>입력값(<code>input()</code>) 처리</h4>
+<ul>
+  <li><strong>EXE + 로컬 Python</strong>: 결과 창에 입력 커서가 떠서 대화형으로 입력</li>
+  <li><strong>브라우저(Pyodide)</strong>: <code>input("이름: ")</code>처럼 순서가 고정된 입력은 <strong>프롬프트 문구를 라벨로 단 개별 입력칸</strong>이 떠서 채우면 됩니다. 칸에서 Enter로 다음 칸, 마지막 칸에서 Enter면 바로 실행돼요. 반복문·조건문 안처럼 값 개수가 달라질 수 있으면 <strong>한 줄에 하나씩 적는 자유 입력칸</strong>으로 자동 전환됩니다.</li>
+</ul>
+<blockquote><p><strong>파이썬 준비 배지</strong> — 브라우저 실행에서는 파이썬 파일·노트북을 여는 순간 런타임을 미리 준비합니다. 헤더에 <strong>파이썬 준비 중… → 준비 완료 ✓</strong> 배지가 떠서 첫 실행 대기가 짧아집니다(로컬 파이썬이 있으면 표시되지 않고 바로 대화형 실행).</p></blockquote>
+
+<h3>📓 Jupyter 노트북 (.ipynb)</h3>
+<ul>
+  <li>코드 셀에서 문자를 입력하면 자동완성 후보가 셀 밖에 잘리지 않고 표시됨</li>
+  <li>기본 후보는 입력 직후 빠르게 표시되고, EXE+로컬 Python/Jedi의 정밀 후보가 준비되면 같은 목록이 자동 갱신됨</li>
+  <li>EXE에서 <strong>전체 실행 옆 ▾ → 로컬 Python 셀 커널 사용</strong>을 선택하면 변수와 Selenium 브라우저 상태를 유지한 채 셀별로 로컬 Python을 실행할 수 있음</li>
+  <li><code>requests</code>·BeautifulSoup·Selenium 크롤링과 <code>%pip</code>, <code>%matplotlib</code>, <code>!명령</code>을 지원하며, 중지 또는 커널 재시작 시 Selenium 자식 프로세스도 함께 종료</li>
+  <li>로컬 Python이 없으면 실행 메뉴에 <strong>로컬 Python 설치 필요</strong>가 표시되고, Selenium 셀 실행 시 PATH 옵션을 포함한 설치·재시작 안내를 보여 줌</li>
+  <li>앞쪽 코드 셀에서 만든 변수·함수와 <code>import</code>도 다음 셀의 자동완성 문맥에 포함</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Space</kbd>로 후보를 직접 열고 ↑/↓, Enter/Tab, Esc로 조작</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Enter</kbd>는 현재 셀 실행, <kbd>Shift</kbd>+<kbd>Enter</kbd>는 실행 후 다음 셀로 이동, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>는 모든 코드 셀을 위에서부터 전체 실행. 실행 중에는 상단 <strong>전체 실행</strong>이 빨간 <strong>■</strong> 버튼으로 바뀌며 현재 셀과 남은 전체 실행을 함께 중단</li>
+  <li><code>input("이름: ")</code>, <code>input("나이: ")</code>처럼 순서가 고정된 셀은 문구를 차례로 보여 주고 Enter로 값을 하나씩 입력받아 마지막 값에서 자동 실행. 반복문·조건문 안의 <code>input()</code>은 값을 필요한 만큼 추가한 뒤 <strong>입력 완료 후 실행</strong>. 입력값은 노트북 파일에는 저장하지 않음</li>
+  <li>명령 모드에서 셀을 클릭해 하나를 선택하고, <kbd>Ctrl</kbd>+클릭으로 떨어진 셀을 추가 선택하거나 <kbd>Shift</kbd>+클릭으로 연속 범위를 선택</li>
+  <li>선택한 셀은 <kbd>Ctrl</kbd>+<kbd>C</kbd>로 복사, <kbd>Ctrl</kbd>+<kbd>X</kbd>로 잘라내기, <kbd>Ctrl</kbd>+<kbd>V</kbd>로 마지막 선택 셀 아래에 붙여넣기. 셀 순서와 마크다운 첨부 이미지는 유지하고 실행 결과·실행 번호·필기는 제외함. 셀 편집 중에는 기존처럼 글자 복사·붙여넣기로 동작</li>
+  <li>셀 도구의 <strong>메모 아이콘</strong>을 누르면 선택한 셀을 임시 메모에 전용 셀 카드로 보관. 여러 셀은 순서를 유지하며 실행 결과·실행 번호·필기는 제외함</li>
+  <li>셀의 <code>⋮⋮</code> 손잡이를 끌기 시작하면 임시 메모가 자동으로 열림. 메모장에 놓으면 셀 카드로 저장되고, 셀 카드를 노트북 셀 사이로 다시 끌거나 카드의 <strong>노트북에 붙여넣기</strong>를 누르면 해당 위치에 새 셀로 삽입</li>
+  <li>저장하지 않은 편집은 자동복구본으로 보관되며 다음에 같은 노트북을 열 때 복원 여부를 확인. 명령 모드 <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Y</kbd> 또는 상단 ↶/↷로 셀 추가·삭제·이동·형식 변경·잘라내기·붙여넣기를 되돌리기/다시 실행</li>
+  <li>셀 오른쪽 위의 <code>⋮⋮</code> 손잡이를 끌어 원하는 셀의 위·아래로 순서를 변경. 기존 위/아래 이동 버튼과 키보드 조작도 그대로 사용 가능</li>
+  <li>상단 <strong>목차</strong>는 마크다운의 <code># 제목</code>을 자동 수집해 해당 셀로 이동. 셀 도구의 ▾와 실행 결과의 <strong>출력 접기</strong>로 긴 노트북을 정리</li>
+  <li>툴바 <strong>전체 찾기</strong> 또는 <kbd>Ctrl</kbd>+<kbd>H</kbd>로 코드·마크다운·raw 셀 전체를 검색하고 한 개/전체 치환. 대소문자·단어 단위·정규식 지원 (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>는 현재 코드 셀만). <kbd>Enter</kbd>로 마지막 결과를 지나면 첫 결과로, <kbd>Shift</kbd>+<kbd>Enter</kbd>로 첫 결과를 지나면 마지막 결과로 순환. 문자열을 선택한 뒤 누르면 검색란에 자동으로 채워지고, <kbd>Esc</kbd>는 열려 있는 검색창을 모두 닫음</li>
+  <li>마크다운 셀은 <code>&lt;h1&gt;</code>, <code>&lt;font color="blue"&gt;</code> 같은 <strong>HTML 태그도 렌더</strong>함(Jupyter와 동일). <code>&lt;script&gt;</code>·이벤트 핸들러·<code>javascript:</code> 링크 등 위험한 부분은 자동으로 제거(살균)</li>
+  <li>코드 셀에서 <code>display(...)</code>는 주피터처럼 동작(브라우저 커널에 자동 주입)</li>
+  <li>텍스트·HTML·PNG/JPEG·SVG·JSON·LaTeX뿐 아니라 <strong>Plotly·Bokeh·Vega/Vega-Lite 인터랙티브 차트, Folium 지도, 오디오(mp3·wav·ogg 등)·비디오(mp4·webm 등)</strong> 실행 결과도 표시(차트·지도는 격리된 iframe으로 렌더, 런타임은 인터넷 연결 시 CDN에서 로드). 오류 결과의 <strong>오류 줄 N로 이동</strong>을 누르면 해당 코드 셀 줄로 이동</li>
+  <li>셀 실행 뒤 <strong>변수 N개</strong>를 펼치면 학생 코드가 만든 변수의 이름·자료형·현재 값을 확인</li>
+  <li>폴더로 함께 연 노트북은 같은 프로젝트의 파일을 커널 작업폴더에 연결하고, 노트북보다 상위에 있는 <code>dataIn/result01.csv</code>도 자동으로 실행 기준을 맞춰 그대로 읽고 저장할 수 있음. 셀이 참조한 파일은 실행 직전에 사이드바 작업공간과 다시 동기화</li>
+  <li>셀에서 새로 만들거나 변경한 파일은 셀 출력 아래에 표시되고 최근 작업공간·자동 저장 폴더에 반영</li>
+  <li>노트북을 저장하면 기존 실행 출력·실행 번호·마크다운 첨부 이미지와 새 실행 결과를 함께 보존. <strong>출력 지우기</strong>를 누른 경우에만 저장 데이터에서도 제거</li>
+  <li>상단 <strong>A− / A+</strong> 또는 <kbd>Ctrl</kbd> <kbd>+</kbd>/<kbd>−</kbd>로 코드 셀과 실행 결과 문자의 크기를 함께 조절. 이미지·그래프·영상 크기는 유지되고 선택값은 다음 실행에도 유지</li>
+  <li>Matplotlib이 내용 없는 figure만 만든 경우 빈 흰색 이미지는 자동으로 제외. 기존 파일에 이미 저장된 빈 출력은 <strong>출력 지우기</strong> 후 다시 실행</li>
+  <li>셀의 <code>import</code>를 감지해 Pyodide 공식 패키지를 자동으로 준비하고, 그 밖의 순수 Python 패키지는 PyPI 자동 설치를 시도</li>
+  <li><strong>Faker는 EXE에 내장되어 오프라인에서도 사용 가능</strong>. 바이너리 확장이 필요한 미지원 패키지는 일반 <code>.py</code>의 로컬 Python으로 실행</li>
+</ul>
+
+<h3>🎨 화이트보드 (설명용 칠판)</h3>
+<ul>
+  <li>사이드바 <strong>새로 만들기 → 새 화이트보드</strong>로 빈 칠판 열기</li>
+  <li>펜·형광펜·지우개·직선·화살표·사각형·원·텍스트·이미지 삽입</li>
+  <li>도구막대 왼쪽 끝 <strong>⋮⋮ 핸들</strong>을 끌면 상/우/하/좌 4면 중 가장 가까운 변으로 자동 도킹</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> 되돌리기/다시 실행</li>
+  <li><strong>PNG/PDF 내보내기</strong> 지원</li>
+</ul>
+
+<h3>🎬 수업 리플레이 (판서 되감아 보기)</h3>
+<p>화이트보드에 쓴 판서를 <strong>시간 순서대로 녹화</strong>해 나중에 되감아 볼 수 있습니다. 영상이 아니라 벡터(선·도형) 기록이라 파일이 작고 인터넷 없이 동작합니다. <strong>화이트보드</strong>와 <strong>PDF 위 필기</strong> 두 가지를 녹화할 수 있습니다.</p>
+<ol>
+  <li>화이트보드 도구막대 오른쪽 끝 <strong>● 녹화</strong>를 누르고 판서 시작 (버튼이 <strong>■ 정지</strong>로 바뀌며 깜빡임)</li>
+  <li>다 쓰면 <strong>■ 정지</strong> → 자동으로 <strong>리플레이 화면</strong>이 열림</li>
+  <li>재생 바에서 <strong>▶/⏸ 재생·정지</strong>(<kbd>Space</kbd>), <strong>탐색 슬라이더</strong>로 원하는 순간 이동, <strong>0.5~4× 속도</strong>, <strong>⟲ 처음부터</strong> — 재생 중 마지막 획은 실제로 <strong>그려지는 것처럼</strong> 나타남</li>
+  <li><strong>💾 저장</strong>으로 <code>.lesson</code> 파일 저장 → 결석한 학생에게 전달하거나 다음 수업에서 다시 재생</li>
+  <li>저장한 <code>.lesson</code>은 <strong>더블클릭·드래그</strong>하거나 사이드바 <strong>새로 만들기 → 리플레이 열기(.lesson)</strong>로 다시 엽니다</li>
+</ol>
+<blockquote>펜·형광펜·지우개·도형·텍스트·이미지 삽입·되돌리기까지 모두 기록됩니다. 판서를 안 하고 설명만 하는 시간은 용량을 늘리지 않아 <strong>녹화 시간 자체에는 제한이 없습니다</strong>(용량은 판서량에 비례).</blockquote>
+<p><strong>PDF 교재 위 필기 녹화</strong>도 같은 방식입니다.</p>
+<ol>
+  <li>PDF를 열고 <strong>✏️ 필기</strong>로 필기바를 켠 뒤, 필기바 오른쪽 <strong>● 녹화</strong>를 누릅니다</li>
+  <li>교재에 펜·형광펜으로 설명하며 판서 (페이지를 넘겨 가며 여러 쪽도 가능)</li>
+  <li><strong>■ 정지</strong>를 누르면 <strong>교재 페이지 위에서 필기가 되살아나는</strong> 리플레이가 열립니다 — 페이지 전환·지우기까지 순서대로 재생</li>
+  <li>화이트보드 리플레이와 똑같이 <strong>💾 저장</strong>으로 <code>.lesson</code>을 남깁니다</li>
+</ol>
+<blockquote>PDF 필기 리플레이는 판서한 <strong>페이지의 배경 이미지</strong>를 함께 담으므로 화이트보드 리플레이보다 파일이 큽니다(페이지 수·해상도에 비례).</blockquote>
+
+<h3>🖥 대기 화면 (화면보호기)</h3>
+<p>일정 시간 아무 입력이 없을 때 전체 화면으로 <strong>내 영상</strong>이나 <strong>시계 애니메이션</strong>을 띄우는 기능입니다. <strong>기본은 꺼져 있고, 설정에서 켤 때만</strong> 동작합니다.</p>
+<ol>
+  <li>헤더의 <strong>설정</strong>을 열고 <strong>대기 화면(화면보호기)</strong>을 체크</li>
+  <li><strong>표시까지 대기 시간</strong>(1·3·5·10·20분) 선택</li>
+  <li>원하는 영상이 있으면 <strong>영상 선택</strong>으로 지정(없으면 시계 애니메이션). <strong>영상 지우기</strong>로 되돌림</li>
+  <li><strong>저장</strong>을 누르면 적용 — 그 시간만큼 입력이 없으면 대기 화면이 뜨고, <strong>아무 키·클릭·마우스 이동</strong>에 즉시 사라집니다</li>
+</ol>
+<blockquote><strong>권장 형식은 MP4(H.264)·WebM</strong>입니다. MOV·MKV·AVI·WMV 등은 브라우저에서 재생이 안 될 수 있어, 고르면 경고가 뜨고 그래도 쓰면 재생 실패 시 시계 애니메이션으로 대체됩니다.<br>
+<strong>영상은 이 브라우저(앱)에만 저장</strong>되어 프로그램(exe·HTML) 용량은 늘지 않습니다. 영상이 없거나 못 읽으면 자동으로 시계 애니메이션을 씁니다.<br>
+<strong>작업 중에는 뜨지 않습니다</strong>: 파이썬·노트북 실행 중, 동영상·오디오 재생 중, 파일 처리 중, 설정 등 대화상자·미리보기(iframe) 사용 중이면 대기 화면을 미룹니다.</blockquote>
+
+<h3>📝 텍스트·이미지·노트북 셀 메모</h3>
+<ol>
+  <li>상단 <strong>메모</strong> 또는 <kbd>Ctrl</kbd>+<kbd>M</kbd>으로 메모장 열기</li>
+  <li><strong>+ 글 블록</strong>으로 글 영역을 추가하고 <strong>+ 이미지</strong>로 이미지 파일 삽입</li>
+  <li>글 영역에 이미지를 <kbd>Ctrl</kbd>+<kbd>V</kbd>로 붙여넣거나 로컬 파일·웹 이미지를 메모장에 드롭</li>
+  <li>이미지 블록의 <strong>↑ ← → ↓</strong> 버튼으로 설명 글의 위·왼쪽·오른쪽·아래에 즉시 배치</li>
+  <li><strong>작게/중간/크게/가득</strong>으로 표시 크기를 바꾸고 <strong>블록 ↑/↓</strong> 또는 <strong>⋮⋮</strong> 드래그로 문서 순서 변경</li>
+  <li>이미지 옆 입력란에 설명 작성. 글·이미지·배치 정보는 이 컴퓨터에 자동 저장</li>
+  <li>기존 텍스트 메모는 새 형식으로 자동 이전되며, <strong>텍스트 복사</strong>는 이미지 이름을 포함한 읽기 쉬운 텍스트로 복사</li>
+  <li>블록 도구막대의 <strong>자물쇠 아이콘</strong>을 누르면 읽기 전용으로 바뀌어 내용·배치·이동·삭제를 막음. 잠긴 자물쇠 아이콘을 다시 누르면 편집 가능</li>
+  <li>이미지 블록의 <strong>📋 복사</strong>(클립보드 → 다른 프로그램에 붙여넣기), <strong>💾 파일로</strong>(EXE는 저장 폴더, 브라우저는 다운로드), <strong>✏️ 편집기로</strong>(이미지 편집 탭으로 열어 자르기·표시 후 ‘📷 메모로’로 다시 넣기)로 메모 속 이미지를 재사용. 잠긴 블록에서도 사용 가능</li>
+  <li>노트북에서 선택한 셀의 메모 아이콘을 누르거나 <code>⋮⋮</code> 손잡이를 메모장에 드롭하면 <strong>코드/마크다운/Raw 셀 카드</strong>로 별도 저장</li>
+  <li>셀 카드의 <strong>노트북에 붙여넣기</strong>를 누르면 현재 노트북의 선택 셀 아래에 삽입. 카드 손잡이를 노트북 셀 사이에 직접 드롭하면 정확한 위치에 삽입</li>
+  <li>셀 카드는 최대 200개까지 보관하며 코드·마크다운 첨부·일반 메타데이터를 유지하고 실행 결과·실행 번호·필기는 저장하지 않음</li>
+</ol>
+<blockquote><p>잠긴 블록이 하나라도 있으면 해당 메모 탭 삭제와 <strong>모두 지우기</strong>도 차단됩니다. 먼저 각 블록의 잠금을 해제하세요.</p></blockquote>
+<blockquote><p>웹 이미지가 사이트 보안 정책(CORS·로그인·<code>blob:</code> 주소) 때문에 드롭되지 않으면 웹에서 <strong>이미지 복사</strong> 후 메모장에서 <kbd>Ctrl</kbd>+<kbd>V</kbd>를 사용하세요.</p></blockquote>
+
+<h3>📸 이미지 메모</h3>
+<ol>
+  <li>상단 <strong>이미지 메모</strong>를 눌러 창 열기</li>
+  <li>화면을 캡처한 뒤 <kbd>Ctrl</kbd>+<kbd>V</kbd>로 붙여넣기 — 같은 창에 여러 장을 계속 추가할 수 있음</li>
+  <li>이미지 메모 창 어디에나 이미지 파일이나 웹 이미지를 드롭 가능. 필요 없는 이미지는 카드 오른쪽 위 <strong>×</strong>로 삭제</li>
+  <li>기본으로 켜진 <strong>자동 저장</strong>이 붙여넣기·드롭 후 1.4초 뒤 동작
+    <ul>
+      <li>EXE: 자동 저장 폴더 아래 <code>이미지메모/날짜_시간/</code>에 개별 이미지로 실제 저장</li>
+      <li>일반 브라우저: IndexedDB에 임시복구본을 저장하고 다음 실행 때 복원</li>
+      <li>실패한 이미지는 미저장 상태로 남겨 자동 재시도</li>
+    </ul>
+  </li>
+  <li>EXE에서는 자동저장 실패 또는 자동저장을 끈 경우에만 <strong>다시 시도/지금 저장</strong> 버튼 표시. 일반 브라우저의 <strong>파일로 다운로드</strong>는 한 장은 이미지, 여러 장은 ZIP으로 저장</li>
+  <li>EXE를 다시 실행하면 현재 자동 저장 폴더의 최근 이미지 메모를 자동으로 불러옴
+    <ul>
+      <li>저장된 카드의 <strong>×</strong>는 저장된 이미지 파일도 함께 삭제</li>
+    </ul>
+  </li>
+  <li>이미지 카드를 클릭하면 큰 미리보기로 확인
+    <ul>
+      <li>마우스 휠 또는 <strong>−</strong>/<strong>+</strong>로 확대·축소</li>
+      <li>확대된 이미지를 드래그해 이동</li>
+      <li><strong>화면 맞춤</strong>, <strong>100%</strong>, 더블클릭 전환과 <kbd>Esc</kbd> 닫기 지원</li>
+    </ul>
+  </li>
+  <li>카드의 <strong>현재 메모로 보내기</strong>를 누르면 일반 메모의 현재 탭에 같은 이미지를 넣고 설명·배치를 추가할 수 있음</li>
+</ol>
+
+<h3>📚 PDF 교재 + Python 같이 보기 (학습 화면)</h3>
+<ol>
+  <li>PDF 교재 열기 → 상단 <strong>학습 화면</strong> 클릭</li>
+  <li>사이드바에서 <code>.py</code> 파일 선택 → PDF와 코드 편집기가 나란히 표시</li>
+  <li>분할바를 드래그해 좌/우 비율 조정</li>
+  <li>코드의 <strong>PDF에 핀</strong> / PDF의 <strong>코드 연결</strong>로 양방향 점프</li>
+</ol>
+
+<h3>🖼 이미지</h3>
+<ul>
+  <li>회전·좌우/상하 뒤집기·자르기·PNG/JPG/PDF 저장</li>
+  <li>되돌리기/다시 실행 지원</li>
+</ul>
+
+<h3>📎 ZIP·압축 묶음</h3>
+<ul>
+  <li>드래그 앤 드롭 또는 파일 열기로 ZIP 선택</li>
+  <li>내부 파일이 폴더처럼 사이드바에 펼쳐짐</li>
+  <li>암호 걸린 ZIP은 암호 입력 가능</li>
+  <li>단 <strong>읽기 전용</strong> — 원본 ZIP을 다시 압축해 저장하지는 못함 (편집물은 별도 저장)</li>
+</ul>
+
+<h2 id="sec6">6. 상황별 가이드 <a class="back" href="#toc">↑ 목차</a></h2>
+
+<h3>🌐 인터넷이 안 되는 환경에서 쓰고 싶어요</h3>
+<ul>
+  <li><strong>EXE 사용 가능</strong> — 문서 보기·편집은 완전 오프라인</li>
+  <li><strong>오프라인 HTML 사용 가능</strong> — 같은 이유</li>
+  <li><strong>단, Python을 브라우저(Pyodide)로 실행할 때</strong>는 첫 실행에 인터넷 필요 (런타임 다운로드)</li>
+  <li><strong>완전 오프라인 Python을 원하면</strong>: EXE + 로컬에 Python 설치 → 로컬 Python으로 실행되므로 인터넷 불필요</li>
+  <li><strong>오프라인에서도 Pyodide를 쓰려면</strong>: EXE 옆 <code>vendor/pyodide/</code> 폴더에 코어 파일이 미리 있어야 함</li>
+</ul>
+
+<h3>🐍 파이썬은 설치하지 않고도 코드를 실행하고 싶어요</h3>
+<ul>
+  <li>브라우저 Pyodide가 자동으로 동작합니다 — <strong>별도 파이썬 설치 불필요</strong></li>
+  <li><code>numpy</code>·<code>pandas</code>·<code>matplotlib</code> 같은 공식 패키지와 PyPI의 순수 Python 패키지는 첫 실행 시 자동으로 받아옴</li>
+  <li><code>Faker</code>는 EXE에 내장되어 인터넷 없이도 사용 가능</li>
+  <li>첫 실행만 인터넷 필요, 이후 캐시</li>
+  <li><strong>제한</strong>: <code>selenium</code>·<code>konlpy</code> 등 Pyodide 미지원 패키지, OS 명령(<code>subprocess</code>)은 사용 불가</li>
+</ul>
+
+<h3>💻 학생들에게 배포하려면?</h3>
+<ul>
+  <li><strong>단일 파일 배포 = <code>manneung-classroom-offline.html</code> 한 파일만</strong> USB·메신저로 주면 끝</li>
+  <li>학생이 더블클릭하면 바로 브라우저에서 열림, 파이썬·라이브러리 설치 불필요</li>
+  <li>더 강력한 기능(로컬 Python 실행·자동 복원·PPT 변환)이 필요하면 <code>manneung-classroom.exe</code> 배포</li>
+</ul>
+
+<h3>📁 <code>input()</code>이 있는 코드를 가르치고 싶어요</h3>
+<ul>
+  <li><strong>자연스러운 대화형 입력</strong>이 필요하면 <strong>EXE + 로컬 Python</strong>이 답</li>
+  <li>브라우저(Pyodide)에서는 코드 실행 전에 입력값들을 미리 한 줄씩 적어두는 방식</li>
+</ul>
+
+<h3 id="sec6-shortcut">🔄 매번 EXE 누르기 귀찮을 때</h3>
+<p>EXE를 한 번 띄워두고 <strong>브라우저 즐겨찾기로 바로 접속</strong>할 수 있어요.</p>
+<ol>
+  <li><code>desktop/start-server-hidden.vbs</code> 실행 — 콘솔창 없이 서버만 뜸 (브라우저는 자동으로 열리지 않음)</li>
+  <li>브라우저에서 <code>http://127.0.0.1:17645/</code> 접속 후 <strong>즐겨찾기</strong>(<kbd>Ctrl</kbd>+<kbd>D</kbd>)</li>
+  <li>그 <code>.vbs</code>를 <strong>시작프로그램 폴더</strong>(<kbd>Win</kbd>+<kbd>R</kbd> → <code>shell:startup</code> → 거기에 복사)에 넣어두면 PC 켤 때 자동으로 서버가 뜨고, 즐겨찾기만 누르면 바로 사용 가능</li>
+  <li>끄려면 <code>desktop/stop-server.cmd</code> 실행</li>
+</ol>
+<div class="warn"><strong>⚠️</strong> 백그라운드 서버가 뜬 상태에서는 EXE를 직접 더블클릭하지 마세요 (중복 인스턴스가 됨).</div>
+
+<h3>📌 작업 표시줄에 고정하고 싶어요</h3>
+<ol>
+  <li>파일 탐색기에서 <code>manneung-classroom.exe</code> 위치를 엽니다</li>
+  <li>EXE를 <strong>마우스 오른쪽 클릭</strong></li>
+  <li>Windows 11: <strong>더 많은 옵션 표시</strong> → <strong>작업 표시줄에 고정</strong></li>
+  <li>Windows 10: 바로 <strong>작업 표시줄에 고정</strong></li>
+</ol>
+<div class="warn"><strong>⚠️</strong> EXE 파일을 다른 위치로 옮기거나 삭제하면 고정된 아이콘이 작동하지 않습니다.<br><strong>⚠️</strong> 위의 "즐겨찾기로 항상 켜두기"를 함께 쓰는 중이라면, 작업 표시줄의 EXE를 누르지 말고 브라우저 즐겨찾기를 쓰세요.</div>
+
+<h3>🔒 PDF 파일에 암호가 걸려 있어요</h3>
+<ul>
+  <li><strong>Word·Excel·PowerPoint(.docx/.xlsx/.pptx)</strong>의 Agile 방식 암호는 지원 (열 때 입력창이 뜸)</li>
+  <li><strong>PDF 자체 암호</strong>는 아직 미지원 — 다른 도구로 암호를 제거 후 열어야 합니다</li>
+  <li><strong>HWPX(신형 한글)</strong>도 미지원 — 한글에서 <code>.hwp</code> 또는 PDF로 다시 저장 후 열기</li>
+</ul>
+
+<h3>💾 작업 자동 복원 (EXE 전용)</h3>
+<ul>
+  <li>EXE에서 마지막으로 열어둔 파일·ZIP·폴더·탭 순서까지 다음 실행 때 자동 복원</li>
+  <li>사이드바 <strong>더보기 → 최근 작업공간 지우기</strong>로 삭제 가능</li>
+  <li>합계 256MB·최대 10,000개 항목까지 저장. 더 큰 묶음은 현재 세션은 열리지만 자동 복원은 생략</li>
+</ul>
+
+<h2 id="sec7">7. 자주 쓰는 단축키 <a class="back" href="#toc">↑ 목차</a></h2>
+<blockquote><p>⚙ 표시는 <strong>설정 → 단축키</strong>에서 바꿀 수 있는 항목입니다(총 13개). 나머지는 편집기·표·노트북 내부 고정 단축키입니다. 전체 목록은 헤더의 <code>?</code> 버튼(노트북은 자체 치트시트)에서도 볼 수 있습니다.</p></blockquote>
+
+<h3>전역 (어디서나)</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>파일 열기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>폴더 열기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>현재 파일 저장 (PDF 내보내기 / Python·노트북 저장)</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>현재 탭 닫기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>닫은 파일 다시 열기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>사이드바 검색 (파일명·내용 통합)</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>임시 메모 열기/닫기</td><td>⚙</td></tr>
+<tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>새 파이썬 코드</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>Ctrl</kbd>+<kbd>→</kbd></td><td>같은 묶음의 이전/다음 파일로 이동</td><td>⚙</td></tr>
+<tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd></td><td>왼쪽 사이드바 숨기기/보이기</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd> 두 번 빠르게</td><td>Python 편집기로 포커스 복귀</td><td></td></tr>
+<tr><td><kbd>Esc</kbd></td><td>열린 모달·메뉴·필기 모드 닫기</td><td></td></tr>
+</tbody>
+</table>
+<blockquote><p>사이드바 목록에 포커스가 있을 땐 <kbd>↑</kbd>/<kbd>↓</kbd>로 파일 이동, <kbd>Enter</kbd>/<kbd>Space</kbd>로 열기.</p></blockquote>
+
+<h3>PDF 편집·보기</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>PDF 안에서 찾기 (형광 표시)</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>편집·페이지 작업 되돌리기 (최대 50단계)</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>다시 실행</td><td></td></tr>
+<tr><td><kbd>Delete</kbd></td><td>선택한 요소(서명·텍스트 등) 삭제</td><td></td></tr>
+<tr><td>페이지 번호 입력 후 <kbd>Enter</kbd></td><td>해당 페이지로 이동</td><td></td></tr>
+</tbody>
+</table>
+
+<h3>Python 코드 편집기</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>코드 실행</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>찾기·바꾸기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>선택한 줄 삭제</td><td></td></tr>
+<tr><td><kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd></td><td>선택한 줄 위/아래로 이동</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>↓</kbd></td><td>선택한 줄 아래로 복제</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>선택한 줄 주석 토글</td><td></td></tr>
+<tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>들여쓰기 / 내어쓰기</td><td></td></tr>
+<tr><td><kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd></td><td>같은 단어 다음/이전 위치</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>자동완성 열기 (<kbd>↑</kbd>/<kbd>↓</kbd> 선택 · <kbd>Enter</kbd>/<kbd>Tab</kbd> 적용 · <kbd>Esc</kbd> 닫기)</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+클릭</td><td>함수 정의로 이동</td><td></td></tr>
+<tr><td>더블클릭 후 입력</td><td>같은 식별자 동시수정</td><td></td></tr>
+<tr><td><kbd>Alt</kbd>+세로 드래그</td><td>열(블록) 동시 편집</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>(<kbd>Ctrl</kbd>+<kbd>Y</kbd>)</td><td>되돌리기 / 다시 실행 (최대 300단계)</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>Ctrl</kbd> <kbd>-</kbd></td><td>코드와 실행 결과 문자 크게 / 작게</td><td></td></tr>
+</tbody>
+</table>
+
+<h3>Jupyter 노트북</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>현재 셀 실행</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>모든 코드 셀 전체 실행</td><td>⚙</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>실행하고 다음 셀로</td><td></td></tr>
+<tr><td><kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>셀 편집 시작 / 명령 모드로</td><td></td></tr>
+<tr><td><kbd>A</kbd> / <kbd>B</kbd></td><td>위 / 아래에 코드 셀 추가</td><td></td></tr>
+<tr><td><kbd>M</kbd> / <kbd>Y</kbd></td><td>마크다운 / 코드 셀로 변환</td><td></td></tr>
+<tr><td><kbd>D</kbd>, <kbd>D</kbd></td><td>셀 삭제 (D 연속 두 번)</td><td></td></tr>
+<tr><td><kbd>↑</kbd>/<kbd>↓</kbd> 또는 <kbd>K</kbd>/<kbd>J</kbd></td><td>셀 선택 이동</td><td></td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>Shift</kbd>+<kbd>↓</kbd></td><td>여러 셀 선택</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd></td><td>셀 복사 / 잘라내기 / 붙여넣기</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>셀 작업 되돌리기 / 다시 실행</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd></td><td>위/아래 셀 편집으로 이동</td><td></td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd> · <kbd>Alt</kbd>+클릭</td><td>함수 도움말(설명) 보기</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>노트북 전체 / 현재 셀 찾기·바꾸기</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>Ctrl</kbd> <kbd>-</kbd></td><td>코드 셀과 실행 결과 문자 크게 / 작게</td><td></td></tr>
+</tbody>
+</table>
+
+<h3>Excel · CSV 표</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>선택 영역 TSV 복사</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>전체 선택</td></tr>
+<tr><td><kbd>↑</kbd>/<kbd>↓</kbd>/<kbd>←</kbd>/<kbd>→</kbd></td><td>셀 이동 (<kbd>Ctrl</kbd>+화살표: 맨 끝으로)</td></tr>
+<tr><td><kbd>Home</kbd> / <kbd>End</kbd> / <kbd>Ctrl</kbd>+<kbd>Home</kbd> / <kbd>Ctrl</kbd>+<kbd>End</kbd></td><td>행 끝 / 시트 끝</td></tr>
+<tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>한 화면 위/아래</td></tr>
+<tr><td><kbd>Shift</kbd>+클릭·화살표</td><td>범위 선택</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>(<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>)</td><td>편집 모드 되돌리기 / 다시 실행</td></tr>
+</tbody>
+</table>
+
+<h3>화이트보드</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>(<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>)</td><td>되돌리기 / 다시 실행</td></tr>
+<tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>선택한 이미지·도형 삭제</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>선택 해제</td></tr>
+<tr><td>텍스트 입력 중 <kbd>Ctrl</kbd>+<kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>입력 확정 / 취소</td></tr>
+<tr><td>리플레이 재생 화면에서 <kbd>Space</kbd></td><td>재생 / 일시정지</td></tr>
+</tbody>
+</table>
+
+<h3>메모 · 이미지 메모</h3>
+<table>
+<thead><tr><th>단축키</th><th>동작</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>클립보드 이미지 붙여넣기 (일반 메모·이미지 메모)</td></tr>
+<tr><td>이미지 확대 중 <kbd>+</kbd>/<kbd>=</kbd> · <kbd>-</kbd> · 휠</td><td>확대 / 축소 (<kbd>Esc</kbd> 닫기, 더블클릭 화면맞춤↔100%)</td></tr>
+</tbody>
+</table>
+
+<h2 id="sec8">8. 개발자용 — 소스 수정 후 다시 빌드 <a class="back" href="#toc">↑ 목차</a></h2>
+<p>이 프로젝트의 EXE 빌드는 다음 두 단계로 진행됩니다.</p>
+<ol>
+  <li><code>manneung-classroom.html</code>, <code>src/</code>, <code>vendor/</code>를 합쳐 <code>manneung-classroom-offline.html</code> 생성</li>
+  <li>오프라인 HTML을 C# 런처에 내장해 <code>manneung-classroom.exe</code> 생성</li>
+</ol>
+
+<h3>준비물</h3>
+<ul>
+  <li><strong>Node.js</strong> — <code>node --version</code>으로 확인. 없으면 <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a>에서 설치</li>
+  <li><strong>.NET Framework C# 컴파일러</strong> — 일반적인 Windows 환경에서는 아래 위치 중 하나에 있습니다
+    <ul>
+      <li><code>C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe</code></li>
+      <li><code>C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe</code></li>
+    </ul>
+  </li>
+  <li><code>package.json</code>에 외부 npm 의존성이 없으므로 현재는 <code>npm install</code>이 필요하지 않습니다.</li>
+</ul>
+
+<h3>권장 빌드 절차</h3>
+<p>프로젝트 루트에서 PowerShell을 열고 다음 명령을 순서대로 실행합니다.</p>
+<pre><code>cd D:\my\myOffice
+
+# 실행 중인 기존 EXE가 있다면 종료
+Get-Process manneung-classroom -ErrorAction SilentlyContinue |
+    Stop-Process -Force
+
+# 구문 검사 + 자동 테스트 + 오프라인 HTML 생성
+npm.cmd run verify
+
+# 오프라인 HTML을 내장한 EXE 생성
+cmd /c desktop\build.bat</code></pre>
+<blockquote><p>PowerShell에서는 실행 정책에 따라 <code>npm</code>이 <code>npm.ps1</code> 오류로 막힐 수 있습니다. 이때 실행 정책을 바꾸지 말고 위 예시처럼 <code>npm.cmd</code>를 사용하면 됩니다.</p></blockquote>
+
+<h3>테스트를 생략하고 빠르게 빌드</h3>
+<p>코드 검증이 이미 끝난 상태에서 산출물만 다시 만들려면:</p>
+<pre><code>cd D:\my\myOffice
+node build-offline.js
+cmd /c desktop\build.bat</code></pre>
+<p>개별 검증 명령은 다음과 같습니다.</p>
+<pre><code>npm.cmd run check    # 구문 검사만
+npm.cmd test         # 자동 테스트만
+npm.cmd run build    # 오프라인 HTML만 생성</code></pre>
+
+<h3>생성되는 파일</h3>
+<table>
+<thead><tr><th>파일</th><th>설명</th></tr></thead>
+<tbody>
+<tr><td><code>manneung-classroom-offline.html</code></td><td>CSS·JavaScript·문서 라이브러리를 합친 단일 오프라인 HTML</td></tr>
+<tr><td><code>desktop/app.html</code></td><td>EXE에 내장하기 위해 복사된 오프라인 HTML</td></tr>
+<tr><td><code>manneung-classroom.exe</code></td><td>최종 Windows 실행 파일</td></tr>
+</tbody>
+</table>
+<p>결과 파일의 크기와 수정 시각은 다음 명령으로 확인할 수 있습니다.</p>
+<pre><code>Get-Item .\manneung-classroom.exe |
+    Select-Object FullName, Length, LastWriteTime</code></pre>
+
+<h3>자주 발생하는 빌드 오류</h3>
+<ul>
+  <li><strong><code>npm.ps1</code>을 로드할 수 없음</strong>: <code>npm</code> 대신 <code>npm.cmd</code> 사용</li>
+  <li><strong><code>manneung-classroom.exe</code> 액세스 거부</strong>: 실행 중인 EXE를 위의 <code>Stop-Process</code> 명령으로 종료한 뒤 재시도</li>
+  <li><strong><code>manneung-classroom-offline.html</code>이 없음</strong>: <code>node build-offline.js</code> 또는 <code>npm.cmd run build</code>를 먼저 실행</li>
+  <li><strong>C# compiler not found</strong>: .NET Framework 개발 구성 요소를 설치하거나 Go 1.21 이상을 설치</li>
+</ul>
+<p><code>desktop/build.bat</code>은 C# 컴파일러가 있으면 <code>desktop/launcher.cs</code>를 사용합니다. 컴파일러가 없으면 Go 빌드를 시도하지만, Go 폴백 버전은 PowerPoint 변환 등 일부 로컬 연동 기능이 제한되므로 <strong>C# 빌드를 권장</strong>합니다.</p>
+
+<h3>배포할 때</h3>
+<ul>
+  <li>기본 앱 기능은 <code>manneung-classroom.exe</code> 하나로 실행할 수 있습니다.</li>
+  <li>인터넷 없이 브라우저 Python(Pyodide)까지 사용하려면 EXE와 함께 <code>vendor/pyodide/</code> 폴더를 같은 상대 위치로 배포합니다.</li>
+  <li>로컬 Python의 번들 패키지 설치까지 오프라인으로 지원하려면 <code>vendor/wheels/</code>도 함께 배포합니다.</li>
+  <li>자체 코드 서명을 하지 않은 EXE에는 Windows SmartScreen 경고가 표시될 수 있습니다.</li>
+</ul>
+
+<h3>즐겨찾기 상시구동 중이라면</h3>
+<ul>
+  <li>재빌드 후 <code>desktop/stop-server.cmd</code> → <code>desktop/start-server-hidden.vbs</code>로 서버 재시작 필요</li>
+</ul>
+
+<h2 id="sec9">9. 제한사항 한눈에 보기 <a class="back" href="#toc">↑ 목차</a></h2>
+<table>
+<thead><tr><th>영역</th><th>제한</th></tr></thead>
+<tbody>
+<tr><td><strong>Word·PowerPoint·HWP</strong></td><td>보기 전용 (편집 불가)</td></tr>
+<tr><td><strong>PDF 암호</strong></td><td>열 수 없음</td></tr>
+<tr><td><strong>HWPX(신형 한글)</strong></td><td>지원 안 함</td></tr>
+<tr><td><strong>ZIP</strong></td><td>읽기 전용. 항목당 64MB, 해제 합계 256MB 제한</td></tr>
+<tr><td><strong>Python 옆 파일 함께 실행</strong></td><td>합계 50MB 초과 시 단독 실행으로 폴백</td></tr>
+<tr><td><strong>Python 실행 시간</strong></td><td>로컬 30분, Pyodide(브라우저) 5분 자동 중지</td></tr>
+<tr><td><strong>Python 출력</strong></td><td>표준출력·오류 각각 1MB까지 보관</td></tr>
+<tr><td><strong>자동 복원</strong></td><td>합계 256MB, 최대 10,000 항목</td></tr>
+<tr><td><strong>PDF 텍스트 요소</strong></td><td>저장 시 이미지로 들어가 선택·검색 불가 (서명·기입용)</td></tr>
+<tr><td><strong>Pyodide 패키지</strong></td><td><code>selenium</code>·<code>konlpy</code>·<code>subprocess</code> 등 일부 불가</td></tr>
+<tr><td><strong>PPTX 정확 변환</strong></td><td>EXE + 설치된 PowerPoint 필요 (없으면 근사 미리보기)</td></tr>
+<tr><td><strong>수업 리플레이</strong></td><td>시간 제한 없음(용량은 판서량에 비례). <strong>화이트보드·PDF 필기</strong> 녹화 지원(Python 실행 녹화는 추후). PDF 필기는 페이지 배경 이미지를 담아 파일이 더 큼</td></tr>
+<tr><td><strong>대기 화면(화면보호기)</strong></td><td>기본 꺼짐(설정에서 켤 때만). 영상은 브라우저 저장소에 보관(용량 큰 영상은 저장 실패할 수 있음 → 짧은 영상 권장). 진짜 OS 전체화면이 아닌 앱 내 전체 오버레이</td></tr>
+<tr><td><strong>메모의 노트북 셀</strong></td><td>최대 200개. 실행 결과·실행 번호·세션 필기는 제외하고 코드·마크다운 첨부·일반 메타데이터만 보관</td></tr>
+</tbody>
+</table>
+
+<h2 id="sec10">10. 문제 해결 FAQ <a class="back" href="#toc">↑ 목차</a></h2>
+
+<h3>Q1. EXE를 더블클릭했는데 SmartScreen 경고가 떠요</h3>
+<p>서명되지 않은 빌드라 정상입니다.</p>
+<p>→ "Windows의 PC 보호" 창에서 <strong>추가 정보</strong> → <strong>실행</strong> 클릭</p>
+
+<h3>Q2. 브라우저가 자동으로 안 열려요</h3>
+<p>EXE가 실행됐는데 브라우저가 안 뜨면:</p>
+<ol>
+  <li>작업관리자에서 <code>manneung-classroom.exe</code> 프로세스가 살아 있는지 확인</li>
+  <li>살아 있으면 브라우저에서 <code>http://127.0.0.1:17645/</code> 직접 접속</li>
+  <li>17645가 다른 프로그램에 점유돼 있으면 <strong>다음 고정 후보 포트(18645 · 19645 · 27645 · 37645 · 47645)</strong> 중 하나로 떠 있을 수 있음 → 그 주소로 접속하거나, 콘솔창이 안 보이므로 종료 후 재실행. 한 번 뜬 포트는 기억되어 다음 실행 때 재사용됩니다</li>
+</ol>
+
+<h3>Q3. 즐겨찾기로 접속이 안 돼요</h3>
+<ul>
+  <li><code>start-server-hidden.vbs</code>가 실행 중인지 작업관리자에서 확인</li>
+  <li>안 떠 있으면 다시 실행</li>
+  <li>EXE를 따로 더블클릭한 적이 있으면 중복 인스턴스가 떠서 포트가 어긋날 수 있음 → 모두 종료 후 <code>.vbs</code>만 다시 실행</li>
+</ul>
+
+<h3>Q4. Python 실행이 안 돼요 / 너무 느려요</h3>
+<ul>
+  <li><strong>브라우저 첫 실행은 Pyodide 다운로드 때문에 30초~1분</strong> 정도 걸립니다. 이후 캐시되어 빨라짐</li>
+  <li>인터넷이 없으면 첫 실행이 실패할 수 있음 → EXE + 로컬 Python 설치 권장</li>
+  <li>로컬 Python을 인식하지 못하면 편집기 도구바의 <strong>Py Env</strong> 클릭해 진단 확인</li>
+</ul>
+
+<h3>Q5. PowerPoint 파일이 깨져 보여요</h3>
+<ul>
+  <li>EXE + 설치된 Microsoft PowerPoint가 있어야 정확 변환</li>
+  <li>HTML 버전이나 PowerPoint 미설치 시 PPTXjs 근사 미리보기로 폴백 (애니메이션·복잡한 도형이 어긋날 수 있음)</li>
+</ul>
+
+<h3>Q6. 저장한 파일이 안 보여요</h3>
+<ul>
+  <li>EXE에서 Python·Excel 저장 위치: <strong><code>내 문서\만능교실 저장\</code></strong> 폴더</li>
+  <li>PDF·이미지 내보내기는 브라우저 기본 다운로드 폴더로 떨어짐</li>
+  <li>편집기 상단에 마지막 저장 경로가 표시됨</li>
+</ul>
+
+<h3>Q7. 작업 표시줄의 EXE 아이콘이 동작 안 해요</h3>
+<ul>
+  <li>EXE 파일을 다른 위치로 옮기거나 삭제했는지 확인</li>
+  <li>옮겼다면 작업 표시줄 아이콘을 우클릭 → <strong>작업 표시줄에서 제거</strong> 후 새 위치에서 다시 고정</li>
+</ul>
+
+<h3>Q8. PDF 위에 한 필기가 사라졌어요</h3>
+<ul>
+  <li>PDF 필기는 자동 저장되지만, <strong>다른 작업공간으로 옮기거나 EXE 자동 복원 데이터를 지우면</strong> 함께 사라질 수 있음</li>
+  <li>다운로드한 PDF에는 필기가 그대로 구워지므로, 영구 보존하려면 <strong>다운로드</strong> 버튼으로 저장</li>
+</ul>
+
+<h3>Q9. Python 편집기에서 필기를 켰는데 다시 끄고 싶어요</h3>
+<ul>
+  <li>도구바의 <strong>✏️ 필기</strong> 버튼을 한 번 더 누르면 편집 잠금 해제 + 캔버스 OFF</li>
+  <li>필기는 세션 한정이라 문서를 닫으면 자동으로 사라집니다 (저장되지 않음)</li>
+</ul>
+
+<hr>
+
+<h2 id="more">더 알아보기 <a class="back" href="#toc">↑ 목차</a></h2>
+<ul>
+  <li>전체 기능 목록·릴리스 노트: <a href="README.md">README.md</a></li>
+  <li>단축키 전체: 앱 상단 <code>?</code> 버튼</li>
+  <li>문제 보고·제안: GitHub Issues</li>
+</ul>
+
+</div>
+</body>
+</html>

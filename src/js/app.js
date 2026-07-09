@@ -1,0 +1,990 @@
+"use strict";
+
+/* ===== 이벤트 연결 ===== */
+function wire(){
+  setupSingleTab();          // 같은 앱이 여러 탭/창으로 동시에 떠 자동저장이 충돌하지 않게 — 한 번에 한 창만 활성
+  wireScratchpad();
+  wireImageMemo();
+  // 일반 EXE 실행에서는 마지막 브라우저 탭이 닫히면 로컬 서버도 자동 종료한다.
+  // 시작프로그램용 상시 서버(PDFSIGNER_NO_BROWSER=1)는 백엔드가 heartbeat 종료를 사용하지 않는다.
+  (() => {
+    if (location.protocol !== "http:" || !/^(127\.0\.0\.1|localhost)$/i.test(location.hostname)) return;
+    const clientId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2));
+    let closed = false;
+    // 서버 생존 표시: 하트비트 응답이 오면 초록(연결됨), 실패하면 빨강(끊김). 서버 모드에서만 보인다.
+    const setServerStatus = (ok) => {
+      const wrap = byId("serverStatus"), text = byId("serverStatusText");
+      if (!wrap || !text || closed) return;
+      wrap.hidden = false;
+      wrap.classList.toggle("ok", ok);
+      wrap.classList.toggle("down", !ok);
+      text.textContent = ok ? "서버 연결됨" : "서버 끊김";
+      wrap.setAttribute("aria-label", text.textContent);
+      wrap.title = ok ? "로컬 서버와 연결되어 있습니다." : "로컬 서버가 종료되었습니다. manneung-classroom.exe 를 다시 실행하세요.";
+    };
+    const beat = () => {
+      if (closed) return;
+      fetch("/heartbeat?id=" + encodeURIComponent(clientId), {
+        method: "POST", headers: { "X-PdfSigner-Heartbeat": "1" }, cache: "no-store", keepalive: true
+      }).then(r => setServerStatus(!!r && r.ok)).catch(() => setServerStatus(false));
+    };
+    beat();
+    const timer = setInterval(beat, 5000);
+    window.addEventListener("focus", beat);
+    window.addEventListener("pagehide", () => {
+      closed = true; clearInterval(timer);
+      try { navigator.sendBeacon("/heartbeat-close?id=" + encodeURIComponent(clientId), ""); } catch(e){}
+    }, { once: true });
+  })();
+
+  // 내부 드래그(이미지 등 페이지 요소를 끄는 동작)를 외부 파일 드롭과 구분 — 자기 창에 떨궈도 새 파일로 추가하지 않도록
+  let internalDrag = false;
+  byId("loadingCancel").onclick = cancelUiBatch;
+  window.addEventListener("dragstart", () => { internalDrag = true; }, true);
+  window.addEventListener("dragend",   () => { internalDrag = false; }, true);
+
+  // 드롭존
+  const fileInput = byId("fileInput");
+  byId("dzInner").addEventListener("click", (e) => {
+    // 숨겨진 file/folder input의 프로그래밍 클릭도 부모로 버블링한다.
+    // 버튼·input에서 시작한 이벤트를 다시 처리하면 선택창이 연달아 두 번 열린다.
+    if (e.target.closest("button,input")) return;
+    pickFilesOrInput(fileInput);
+  });
+  fileInput.addEventListener("change", (e) => { const fs = e.target.files; if (fs.length){ queueFiles(fs); e.target.value = ""; } });
+  // 폴더 열기(webkitdirectory) — 드래그가 막히는 file:// 에서도 폴더를 통째로 연다
+  const folderInput = byId("folderInput");
+  folderInput.addEventListener("change", async (e) => {
+    const fs = [...e.target.files];
+    const entries = [...(e.target.webkitEntries || [])];
+    if (fs.length || entries.length){
+      const folderPaths = await collectFolderEntryPaths(entries, fs);
+      handleFolderInputSelection(fs, { folderPaths });
+    }
+    e.target.value = "";
+  });
+  folderInput.addEventListener("cancel", clearPendingFolderRefresh);
+  byId("dzFolderBtn").addEventListener("click", (e) => { e.stopPropagation(); pickFolderOrInput(folderInput); });
+  byId("dzNewPy").addEventListener("click", (e) => { e.stopPropagation(); newPythonScratch(); });
+  if (byId("dzNewNotebook")) byId("dzNewNotebook").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newNotebookScratch === "function") newNotebookScratch(); });
+  byId("dzNewSheet").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newSpreadsheetScratch === "function") newSpreadsheetScratch(); });
+  byId("dzNewBoard").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newWhiteboard === "function") newWhiteboard(); });
+  byId("dzNewText").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTextScratch === "function") newTextScratch(); });
+  if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
+  byId("dzExamples").addEventListener("click", (e) => { e.stopPropagation(); openSnippetGallery(); });
+  (() => {                                   // 드롭존 '＋ 새로 만들기' 드롭다운(파이썬·노트북·표·화이트보드·텍스트)
+    const btn = byId("dzNew"), menu = byId("dzNewMenu");
+    if (!btn || !menu) return;
+    const items = [byId("dzNewPy"), byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson")].filter(Boolean);
+    const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+    btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    items.forEach(it => it.addEventListener("click", () => setOpen(false)));
+    document.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
+  })();
+  ["dragenter","dragover"].forEach(ev => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); dropzone.classList.add("drag");
+  }));
+  ["dragleave","drop"].forEach(ev => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("drag");
+    if (ev === "drop" && !internalDrag && e.dataTransfer.files.length) queueDroppedItems(e.dataTransfer);
+  }));
+
+  // 창 전체로 파일이 떨어져 브라우저가 이동하는 것 방지 + 파일 처리는 여기 한 곳에서만
+  const dropOverlay = byId("dropOverlay");
+  let dragDepth = 0;
+  let dropOverlayTimer = 0;
+  const hideOverlay = () => { dragDepth = 0; clearTimeout(dropOverlayTimer); dropOverlayTimer = 0; dropOverlay.classList.remove("show"); };
+  const armOverlayTimer = () => { clearTimeout(dropOverlayTimer); dropOverlayTimer = setTimeout(hideOverlay, 10000); };
+  const draggingFiles = (e) => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+  const memoOwnsFileDrop = () => {
+    const imageMemo = byId("imageMemo");
+    const scratchpad = byId("scratchpad");
+    return !!((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden));
+  };
+  window.addEventListener("dragenter", (e) => {
+    if (internalDrag || !draggingFiles(e)) return;
+    // 메모 창이 열렸으면 전역 오버레이가 창 위를 덮지 않게 한다.
+    // 각 메모의 drop 핸들러가 이미지를 받고 stopPropagation 하므로 본문의 새 탭 열기와 중복되지 않는다.
+    if (memoOwnsFileDrop()){ hideOverlay(); return; }
+    dragDepth++; dropOverlay.classList.add("show"); armOverlayTimer(); // 오버레이가 떠서 iframe 위까지 덮음 → 어디든 드롭 가능
+  });
+  window.addEventListener("dragleave", () => {
+    if (internalDrag) return;
+    if (--dragDepth <= 0) hideOverlay();                   // 창 밖으로 완전히 나가면 숨김
+  });
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    hideOverlay();
+    if (internalDrag) return;                                            // 페이지 안에서 시작된 드래그(이미지 등)는 무시
+    if (e.dataTransfer.files.length) queueDroppedItems(e.dataTransfer);   // 어디에 떨궈도 새 탭으로 추가
+  });
+  window.addEventListener("dragend", hideOverlay, true);
+  window.addEventListener("blur", hideOverlay);
+
+  // PDF와 작업공간은 자동 복구되므로, 저장하지 않은 Python 편집본이 있을 때만 경고한다.
+  let suppressUnloadWarn = false;
+  const hasUnsavedCode = () => docs.some(d => d.hasUnsavedEdits);
+  window.addEventListener("keydown", (e) => {
+    const isReload = e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
+    if (!isReload) return;
+    if (!hasUnsavedCode()) return;
+    if (!byId("confirmModal").hidden) return;       // 확인창이 이미 떠 있으면 무시
+    e.preventDefault();
+    confirmDialog("저장하지 않은 Python 코드 수정이 있습니다. 새로고침할까요?", "새로고침", "취소").then(ok => {
+      if (ok){ suppressUnloadWarn = true; location.reload(); }
+    });
+  });
+
+  // Ctrl 키만 빠르게 두 번 누르면 현재 Python 편집기로 포커스를 되돌린다.
+  // Ctrl+클릭·Ctrl+단축키를 잘못 인식하지 않도록, 다른 키/포인터와 함께 쓰인 Ctrl은 제외한다.
+  (() => {
+    let controlDown = false, solo = false, lastTap = 0;
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Control"){
+        if (!e.repeat){ controlDown = true; solo = !e.altKey && !e.shiftKey && !e.metaKey; }
+      } else if (controlDown) solo = false;
+    }, true);
+    window.addEventListener("pointerdown", () => { if (controlDown) solo = false; }, true);
+    window.addEventListener("keyup", (e) => {
+      if (e.key !== "Control") return;
+      const wasSolo = controlDown && solo;
+      controlDown = false; solo = false;
+      if (!wasSolo){ lastTap = 0; return; }
+      const now = Date.now();
+      if (now - lastTap > 360){ lastTap = now; return; }
+      lastTap = 0;
+      const modalOpen = !!document.querySelector(".modal:not([hidden])");
+      const scratchpad = byId("scratchpad");
+      if (modalOpen || (scratchpad && !scratchpad.hidden)) return;
+      const ta = state && state.codeEditor && state.codeEditor.ta;
+      if (!ta || !ta.isConnected) return;
+      try { ta.focus({ preventScroll: true }); } catch(_) { ta.focus(); }
+    }, true);
+    window.addEventListener("blur", () => { controlDown = false; solo = false; lastTap = 0; });
+  })();
+  // 탭 닫기처럼 가로챌 수 없는 경우엔 브라우저 기본 확인창으로 폴백.
+  window.addEventListener("beforeunload", (e) => {
+    if (suppressUnloadWarn) return;
+    if (hasUnsavedCode()){ e.preventDefault(); e.returnValue = ""; }
+  });
+
+  // 인쇄/PDF 저장 시 잘림 방지: PPTX 슬라이드를 인쇄 페이지 폭에 맞춰 "똑바로" 축소한다.
+  // (페이지 방향은 강제하지 않는다 — landscape 를 강제하면 일부 브라우저가 내용을 90° 회전시켜 저장하는 버그가 있어서.)
+  const PRINT_FIT_W = 700;                        // 세로 A4 인쇄 가능 폭(px) 근사
+  const PRINT_FIT_H = 940;                        // 세로 A4 인쇄 가능 높이(px) 근사 — 높이로도 맞춰 1슬라이드=1페이지 보장
+  window.addEventListener("beforeprint", () => {
+    const host = state && state.el ? state.el.querySelector(".pptx-host") : null;
+    if (!host) return;
+    const slide = host.querySelector(".slide");
+    const natW = slide ? (parseFloat(slide.style.width)  || slide.getBoundingClientRect().width  || 960) : 960;
+    const natH = slide ? (parseFloat(slide.style.height) || slide.getBoundingClientRect().height || 540) : 540;
+    host.style.setProperty("--pptx-print-zoom", Math.min(1, PRINT_FIT_W / natW, PRINT_FIT_H / natH));
+    host.querySelectorAll(".slide").forEach(s => {           // 각 슬라이드를 컨테이너로 감싸 한 페이지에 하나씩 + 아래로 내림
+      if (!s.parentElement || !s.parentElement.classList.contains("pptx-print-page")){
+        const w = document.createElement("div"); w.className = "pptx-print-page";
+        s.parentNode.insertBefore(w, s); w.appendChild(s);
+      }
+    });
+  });
+  window.addEventListener("afterprint", () => {
+    const host = state && state.el ? state.el.querySelector(".pptx-host") : null;
+    if (host) host.style.removeProperty("--pptx-print-zoom");
+  });
+
+  // 툴바
+  byId("btnSign").onclick = openSig;
+  byId("btnText").onclick = () => addTextElement("text", { fontSize: 18 });
+  byId("btnDate").onclick = () => {
+    const d = new Date();
+    const s = d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    addTextElement("date", { fontSize: 18, text: s });
+  };
+  byId("btnCheck").onclick = () => addTextElement("check", { fontSize: 30, color: "#16a34a", bold: true, text: "✓" });
+  byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
+  byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
+  byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
+  byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
+  byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
+  byId("btnPages").onclick = () => togglePdfPagePanel();
+  byId("btnMergePdf").onclick = () => byId("mergePdfInput").click();
+  byId("mergePdfInput").addEventListener("change", (e) => {
+    const files = [...e.target.files]; e.target.value = "";
+    if (files.length && state && state.kind === "pdf") mergePdfFiles(state, files);
+  });
+  byId("btnDownload").onclick = exportPdf;
+  byId("btnPrint").onclick = () => window.print();
+  byId("btnFullscreen").onclick = toggleViewerFullscreen;
+  byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
+  byId("studyToggle").onclick = toggleStudyMode;
+  byId("fsExit").onclick = exitViewerFullscreen;
+  byId("fsZoomIn").onclick  = () => { const d = fullscreenPdfTarget(); if (d) setPdfZoom((d.zoom || 1) * 1.25, d); showFullscreenControls(); };
+  byId("fsZoomOut").onclick = () => { const d = fullscreenPdfTarget(); if (d) setPdfZoom((d.zoom || 1) / 1.25, d); showFullscreenControls(); };
+  byId("fsZoomLabel").onclick = () => { const d = fullscreenPdfTarget(); if (d) setPdfZoom(1, d); showFullscreenControls(); };
+  byId("fsControls").addEventListener("mousemove", armFullscreenControlsTimer);
+  ["mousemove","mousedown","touchstart","keydown"].forEach(ev => {
+    window.addEventListener(ev, () => {
+      if (isViewerFullscreen()) showFullscreenControls();
+    }, { passive: true });
+  });
+  document.addEventListener("fullscreenchange", () => {
+    syncFullscreenButtons();
+    scheduleViewerLayoutRefresh();
+    if (isViewerFullscreen()) showFullscreenControls();
+    else hideFullscreenControlsNow();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.body.classList.contains("viewer-fullscreen")) {
+      e.preventDefault();
+      exitViewerFullscreen();
+    }
+  });
+  // 화면 확대/축소 (PDF)
+  byId("zoomIn").onclick  = () => setPdfZoom(((state && state.zoom) || 1) * 1.25);
+  byId("zoomOut").onclick = () => setPdfZoom(((state && state.zoom) || 1) / 1.25);
+  byId("zoomLabel").onclick = () => setPdfZoom(1);
+  // 페이지 입력: 숫자 입력 후 Enter → 해당 페이지로 이동(헤더·전체화면 공용)
+  const wirePageInput = (numId, targetDoc, refresh) => {
+    const input = byId(numId); if (!input) return;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter"){ e.preventDefault(); const doc = targetDoc(); if (doc) goToPdfPage(doc, input.value); input.blur(); }
+      else if (e.key === "Escape"){ e.preventDefault(); refresh(); input.blur(); }
+    });
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("blur", refresh);
+  };
+  wirePageInput("pageNum", () => state && state.kind === "pdf" ? state : null, () => updatePdfPageIndicator(state));
+  wirePageInput("fsPageNum", fullscreenPdfTarget, updateFullscreenPageIndicator);
+  // 학습 화면 PDF 페이지 입력(고정된 PDF 기준 — 활성 문서는 코드라 별도 처리)
+  (() => {
+    const input = byId("studyPageNum"); if (!input) return;
+    const ref = () => docs.find(d => d.id === studyPdfId && d.kind === "pdf");
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter"){ e.preventDefault(); const r = ref(); if (r) goToPdfPage(r, input.value); updateStudyPageIndicator(); input.blur(); }
+      else if (e.key === "Escape"){ e.preventDefault(); updateStudyPageIndicator(); input.blur(); }
+    });
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("blur", () => updateStudyPageIndicator());
+  })();
+  window.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (!state || state.kind !== "pdf") return;
+    if (e.key === "=" || e.key === "+"){ e.preventDefault(); setPdfZoom(((state.zoom) || 1) * 1.25); }
+    else if (e.key === "-"){ e.preventDefault(); setPdfZoom(((state.zoom) || 1) / 1.25); }
+    else if (e.key === "0"){ e.preventDefault(); setPdfZoom(1); }
+  });
+  byId("sbNewPy").onclick = () => newPythonScratch();
+  if (byId("sbNewNotebook")) byId("sbNewNotebook").onclick = () => { if (typeof newNotebookScratch === "function") newNotebookScratch(); };
+  byId("sbNewSheet").onclick = () => { if (typeof newSpreadsheetScratch === "function") newSpreadsheetScratch(); };
+  byId("sbNewBoard").onclick = () => { if (typeof newWhiteboard === "function") newWhiteboard(); };
+  byId("sbNewText").onclick = () => { if (typeof newTextScratch === "function") newTextScratch(); };
+  if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
+  byId("sbExamples").onclick = () => openSnippetGallery();
+  byId("sbList").addEventListener("keydown", onSidebarKey);   // 사이드바 ↑/↓ 파일 선택 이동, Enter/Space 로 열기
+  const sidebarSearch = byId("sbSearch");
+  sidebarSearch.addEventListener("input", onSidebarSearchInput);
+  sidebarSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Escape"){
+      sidebarSearch.value = "";
+      sidebarExtFilter = "";
+      contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = ""; clearTimeout(contentSearchTimer); setContentStatus("");
+      renderSidebar();
+      sidebarSearch.blur();
+    }
+  });
+  // 파일과 폴더는 브라우저에서 선택 방식이 달라, 하나의 열기 버튼 아래 메뉴로 묶는다.
+  (() => {
+    const open = byId("sbOpen"), menu = byId("sbOpenMenu"), files = byId("sbOpenFiles"), folder = byId("sbOpenFolder");
+    const setOpen = (visible) => {
+      menu.hidden = !visible;
+      open.setAttribute("aria-expanded", String(visible));
+      if (visible) files.focus();
+    };
+    open.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    files.addEventListener("click", () => { setOpen(false); pickFilesOrInput(byId("fileInput")); });
+    folder.addEventListener("click", () => { setOpen(false); pickFolderOrInput(byId("folderInput")); });
+    document.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !menu.hidden){ setOpen(false); open.focus(); }
+    });
+  })();
+  // 자주 쓰지 않는 작업은 더보기 메뉴에 두어 파일 목록의 세로 공간을 확보한다.
+  (() => {
+    const more = byId("sbMore"), menu = byId("sbMoreMenu"), refresh = byId("sbRefreshActive"), clear = byId("sbClearWorkspace");
+    const setOpen = (open) => {
+      menu.hidden = !open;
+      more.setAttribute("aria-expanded", String(open));
+      if (open) (refresh || clear).focus();
+    };
+    more.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(menu.hidden);
+    });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !menu.hidden){ setOpen(false); more.focus(); }
+    });
+    if (refresh) refresh.addEventListener("click", () => {
+      setOpen(false);
+      if (!activeId){ toast("새로고침할 파일을 먼저 선택해 주세요.", 2200); return; }
+      refreshDocFromSource(activeId);
+    });
+    clear.addEventListener("click", () => { setOpen(false); clearRememberedWorkspace(); });
+  })();
+  (() => {                                   // 사이드바 '새로 만들기'(+) 드롭다운: 새 파이썬·새 빈 표
+    const btn = byId("sbNew"), menu = byId("sbNewMenu");
+    if (!btn || !menu) return;
+    const home = menu.parentNode;
+    const items = [byId("sbNewPy"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbOpenLesson")].filter(Boolean);
+    const placeMenu = () => {
+      const rect = btn.getBoundingClientRect();
+      document.body.appendChild(menu);               // 좁은 사이드바의 overflow:hidden에 잘리지 않게 화면 레이어로 이동
+      menu.classList.add("sb-menu-viewport");
+      menu.hidden = false;
+      const pad = 8, gap = 7;
+      const width = menu.offsetWidth, height = menu.offsetHeight;
+      const left = Math.max(pad, Math.min(rect.left, window.innerWidth - width - pad));
+      let top = rect.top - height - gap;
+      if (top < pad) top = Math.min(window.innerHeight - height - pad, rect.bottom + gap);
+      menu.style.left = left + "px";
+      menu.style.top = Math.max(pad, top) + "px";
+      menu.style.right = "auto";
+      menu.style.bottom = "auto";
+    };
+    const setOpen = (open) => {
+      btn.setAttribute("aria-expanded", String(open));
+      if (open){
+        placeMenu();
+        if (items[0]) items[0].focus();
+      } else {
+        menu.hidden = true;
+        menu.classList.remove("sb-menu-viewport");
+        menu.removeAttribute("style");
+        home.appendChild(menu);
+      }
+    };
+    btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    items.forEach(it => it.addEventListener("click", () => setOpen(false)));
+    document.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
+    window.addEventListener("resize", () => { if (!menu.hidden) placeMenu(); });
+  })();
+  let shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
+  let shortcutCaptureAction = "";
+  const shortcutError = byId("shortcutSettingsError");
+  const setShortcutError = (message="") => { shortcutError.textContent = message; };
+  const renderShortcutSettings = () => {
+    const list = byId("shortcutSettingsList");
+    list.textContent = "";
+    SHORTCUT_DEFINITIONS.forEach((item) => {
+      const row = document.createElement("div"); row.className = "shortcut-setting-row";
+      const copy = document.createElement("div"); copy.className = "shortcut-setting-copy";
+      const label = document.createElement("strong"); label.textContent = item.label;
+      const description = document.createElement("small"); description.textContent = item.description;
+      copy.append(label, description);
+      const button = document.createElement("button"); button.type = "button"; button.className = "shortcut-capture";
+      button.dataset.action = item.id;
+      const recording = shortcutCaptureAction === item.id;
+      button.classList.toggle("recording", recording);
+      button.textContent = recording ? "새 키를 누르세요…" : shortcutDisplay(shortcutDraft[item.id]);
+      button.setAttribute("aria-label", item.label + " 단축키 " + (recording ? "입력 중" : shortcutDisplay(shortcutDraft[item.id])));
+      button.addEventListener("click", () => {
+        shortcutCaptureAction = item.id;
+        setShortcutError("새 단축키를 누르세요. Esc를 누르면 취소됩니다.");
+        renderShortcutSettings();
+        const next = list.querySelector('[data-action="' + item.id + '"]');
+        if (next) next.focus();
+      });
+      row.append(copy, button); list.appendChild(row);
+    });
+  };
+  window.addEventListener("keydown", (e) => {
+    if (!shortcutCaptureAction || byId("settingsModal").hidden) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.key === "Escape"){
+      shortcutCaptureAction = "";
+      setShortcutError("");
+      renderShortcutSettings();
+      return;
+    }
+    const value = shortcutFromEventLike(e);
+    if (!value) return;
+    const invalid = validateShortcutChoice(value);
+    if (invalid){ setShortcutError(invalid); return; }
+    const duplicate = SHORTCUT_DEFINITIONS.find((item) =>
+      item.id !== shortcutCaptureAction && normalizeShortcut(shortcutDraft[item.id]) === value);
+    if (duplicate){
+      setShortcutError("'" + duplicate.label + "'에서 이미 사용하는 단축키예요.");
+      return;
+    }
+    shortcutDraft[shortcutCaptureAction] = value;
+    shortcutCaptureAction = "";
+    setShortcutError("");
+    renderShortcutSettings();
+  }, true);
+  byId("settingsResetShortcuts").onclick = () => {
+    shortcutCaptureAction = "";
+    shortcutDraft = normalizeShortcutMap(DEFAULT_SHORTCUTS);
+    setShortcutError("기본 단축키로 되돌렸습니다. 저장을 눌러 적용하세요.");
+    renderShortcutSettings();
+  };
+  const saveFolderOpen = byId("saveFolderOpen");
+  const settingSaveFolderWrap = byId("settingSaveFolderWrap");
+  const settingSaveFolderPath = byId("settingSaveFolderPath");
+  const settingSaveFolderOpen = byId("settingSaveFolderOpen");
+  const settingSaveFolderChange = byId("settingSaveFolderChange");
+  let currentSaveFolderPath = "";
+  const setSaveFolderPath = (path) => {
+    currentSaveFolderPath = String(path || "").trim();
+    const available = !!currentSaveFolderPath;
+    saveFolderOpen.hidden = !available;
+    settingSaveFolderWrap.hidden = !available;
+    settingSaveFolderPath.textContent = currentSaveFolderPath;
+    settingSaveFolderPath.title = currentSaveFolderPath;
+    saveFolderOpen.title = "직전에 저장한 파일이 있는 폴더 열기" + (available ? " · 저장 루트: " + currentSaveFolderPath : "");
+  };
+  const saveFolderRequest = async (path, method="GET") => {
+    const response = await fetch(path, {
+      method,
+      headers: { "X-PdfSigner-Action":"1" },
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    return (await response.text()).trim();
+  };
+  const refreshSaveFolder = async () => {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+    try {
+      const path = await saveFolderRequest("/save-root");
+      setSaveFolderPath(path);
+      return !!path;
+    } catch(_){
+      setSaveFolderPath("");
+      return false;
+    }
+  };
+  const openSaveFolder = async () => {
+    try {
+      const path = await saveFolderRequest("/open-save-folder", "POST");
+      if (path) setSaveFolderPath(path);
+    } catch(e){ toast("저장 폴더를 열지 못했어요.", 2200); }
+  };
+  const chooseSaveFolder = async () => {
+    const originalLabel = settingSaveFolderChange.textContent;
+    settingSaveFolderChange.disabled = true;
+    settingSaveFolderChange.textContent = "선택창 확인…";
+    toast("Windows 폴더 선택창을 열고 있어요.", 1800);
+    try {
+      await saveFolderRequest("/choose-save-folder", "POST");
+      let result = null;
+      for (let attempt = 0; attempt < 1200; attempt++){
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const response = await fetch("/choose-save-folder-status", {
+          method:"GET",
+          headers:{ "X-PdfSigner-Action":"1" },
+          cache:"no-store"
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const status = await response.json();
+        if (status && status.state !== "opening"){
+          result = status;
+          break;
+        }
+      }
+      if (!result) throw new Error("folder-picker-timeout");
+      if (result.state === "cancelled") return;
+      if (result.state === "error") throw new Error(result.result || "folder-picker-error");
+      if (result.state !== "saved" || !result.result) return;
+      setSaveFolderPath(result.result);
+      toast("자동 저장 위치를 변경했어요. 기존 파일은 이전 폴더에 그대로 있습니다.", 3400);
+    } catch(e){ toast("저장 폴더를 변경하지 못했어요.", 2400); }
+    finally {
+      settingSaveFolderChange.disabled = false;
+      settingSaveFolderChange.textContent = originalLabel;
+    }
+  };
+  // 헤더 '저장 폴더' = 직전에 저장한 파일이 있는 폴더를 연다(아직 저장 전이면 저장 루트로 폴백).
+  // 설정 '현재 폴더 보기' = 예전처럼 설정된 저장 루트를 연다.
+  const openLastSavedFileFolder = async () => {
+    const rel = (typeof window !== "undefined" && window.__mnLastSaveRel) ? String(window.__mnLastSaveRel) : "";
+    if (!rel){ openSaveFolder(); return; }
+    try {
+      const res = await fetch("/open-file-folder", {
+        method: "POST",
+        headers: { "X-PdfSigner-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
+        cache: "no-store"
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch(e){ toast("저장한 파일 폴더를 열지 못했어요.", 2200); }
+  };
+  saveFolderOpen.onclick = openLastSavedFileFolder;
+  // 저장 완료 토스트의 '폴더 열기' 버튼이 같은 동작을 쓸 수 있게 노출(EXE 로컬 서버에서만 목록에 뜸)
+  try { window.__mnOpenLastSavedFolder = openLastSavedFileFolder; } catch(_){}
+  settingSaveFolderOpen.onclick = openSaveFolder;
+  settingSaveFolderChange.onclick = chooseSaveFolder;
+  refreshSaveFolder();
+  byId("settingsOpen").onclick = () => {
+    byId("settingUiScale").value = String(currentUiScale());
+    byId("settingPdfZoom").value = String(defaultPdfZoom());
+    byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
+    byId("settingAutoRestore").checked = !!appSettings.autoRestore;
+    byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
+    const ss = appSettings.screensaver || { enabled:false, idleMin:5 };
+    byId("settingScreensaver").checked = !!ss.enabled;
+    byId("settingScreensaverIdle").value = String(ss.idleMin || 5);
+    byId("settingScreensaverSound").checked = !!ss.sound;
+    refreshScreensaverName();
+    shortcutCaptureAction = "";
+    shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
+    setShortcutError("");
+    renderShortcutSettings();
+    refreshSaveFolder();
+    byId("settingsModal").hidden = false;
+  };
+  byId("settingsCancel").onclick = () => {
+    shortcutCaptureAction = "";
+    byId("settingsModal").hidden = true;
+  };
+  byId("settingsSave").onclick = () => {
+    const conflict = shortcutConflict(shortcutDraft);
+    if (conflict){
+      const first = SHORTCUT_DEFINITIONS.find((item) => item.id === conflict.first);
+      const second = SHORTCUT_DEFINITIONS.find((item) => item.id === conflict.second);
+      setShortcutError("'" + first.label + "'과 '" + second.label + "'의 단축키가 같습니다.");
+      return;
+    }
+    const previousPerformance = appSettings.performance;
+    saveAppSettings({
+      uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
+      performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
+      pdfRecovery: byId("settingPdfRecovery").checked,
+      screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
+        sound: byId("settingScreensaverSound").checked },
+      shortcuts:shortcutDraft
+    });
+    if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
+    applyUiScale();
+    syncShortcutHints();
+    if (state && state.kind === "pdf" && !appSettings.pdfRecovery) state.recoveryDirty = false;
+    byId("settingsModal").hidden = true;
+    updateDocumentStatus(state);
+    if (previousPerformance !== appSettings.performance){
+      docs.filter(d => d.kind === "pdf" && d.pages).forEach(d => {
+        d.pages.forEach(releasePageCanvas);
+        startLazyRender(d);
+        if (d.id === activeId) refreshVisibleQuality(d);
+      });
+    }
+    scheduleViewerLayoutRefresh();
+    toast("설정을 저장했어요. 화면 크기와 단축키는 바로 적용됩니다.", 2800);
+  };
+  // 대기 화면(화면보호기) 영상 선택/지우기 — 파일 작업이라 즉시 반영(켜짐·시간은 저장 버튼을 따름).
+  function refreshScreensaverName(){
+    const el = byId("settingScreensaverName"); if (!el) return;
+    const names = (typeof screensaverVideoNames === "function") ? screensaverVideoNames() : [];
+    el.textContent = names.length > 1 ? ("영상 " + names.length + "개: " + names[0] + " 외 " + (names.length - 1) + "개 (차례대로 반복)")
+      : names.length === 1 ? ("영상: " + names[0]) : "기본 애니메이션(시계)";
+  }
+  const ssVideoInput = byId("screensaverVideoInput");
+  if (byId("settingScreensaverVideo") && ssVideoInput){
+    byId("settingScreensaverVideo").onclick = () => ssVideoInput.click();
+    ssVideoInput.addEventListener("change", async () => {
+      const files = ssVideoInput.files ? [...ssVideoInput.files] : [];
+      if (files.length && typeof setScreensaverVideos === "function") await setScreensaverVideos(files);
+      ssVideoInput.value = ""; refreshScreensaverName();
+    });
+  }
+  if (byId("settingScreensaverClear")){
+    byId("settingScreensaverClear").onclick = async () => { if (typeof clearScreensaverVideo === "function") await clearScreensaverVideo(); refreshScreensaverName(); };
+  }
+  if (byId("settingScreensaverStart")){
+    // 클릭 제스처가 있는 이 순간에만 전체화면이 허용된다(유휴 자동 표시는 창 안 오버레이).
+    byId("settingScreensaverStart").onclick = () => { if (typeof startScreensaverNow === "function") startScreensaverNow(); };
+  }
+  if (typeof initScreensaver === "function") initScreensaver();
+  document.querySelectorAll(".tool-menu").forEach(menu => menu.querySelectorAll("button").forEach(button => button.addEventListener("click", () => { menu.open = false; })));
+  document.addEventListener("click", (e) => document.querySelectorAll(".tool-menu[open]").forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }));
+  byId("helpOpen").onclick = () => { byId("helpModal").hidden = false; };
+  byId("helpClose").onclick = () => { byId("helpModal").hidden = true; };
+
+  // 처음 사용 안내(온보딩): 최초 1회 자동으로 열고, 도움말의 '처음 사용 안내 보기'로 다시 볼 수 있다.
+  const ONBOARDED_KEY = "mn_onboarded_v1";
+  const openWelcome = () => { const m = byId("welcomeModal"); if (m) m.hidden = false; };
+  const closeWelcome = () => { const m = byId("welcomeModal"); if (m) m.hidden = true; try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch(_){} };
+  const welcomeCloseBtn = byId("welcomeClose"); if (welcomeCloseBtn) welcomeCloseBtn.onclick = closeWelcome;
+  const welcomeExamplesBtn = byId("welcomeExamples");
+  if (welcomeExamplesBtn) welcomeExamplesBtn.onclick = () => { closeWelcome(); if (typeof openSnippetGallery === "function") openSnippetGallery(); };
+  const welcomeReopenBtn = byId("welcomeReopen");
+  if (welcomeReopenBtn) welcomeReopenBtn.onclick = () => { byId("helpModal").hidden = true; openWelcome(); };
+  try { if (!localStorage.getItem(ONBOARDED_KEY)) setTimeout(openWelcome, 700); } catch(_){}
+
+  // 정적 모달 공통 ESC 닫기. 단순히 hidden 만 바꾸지 않고 기존 취소 버튼을 눌러
+  // 암호·텍스트·확인 Promise 와 설정 임시 상태가 정상적으로 정리되게 한다.
+  const modalCancelButtons = {
+    sigModal: "sigCancel",
+    pwModal: "pwCancel",
+    textModal: "textCancel",
+    confirmModal: "confirmCancel",
+    settingsModal: "settingsCancel",
+    helpModal: "helpClose",
+    welcomeModal: "welcomeClose"
+  };
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.isComposing || e.keyCode === 229 || shortcutCaptureAction) return;
+    const visible = [...document.querySelectorAll(".modal:not([hidden])")]
+      .filter(modal => modal.id && modalCancelButtons[modal.id]);
+    if (!visible.length) return;                           // 동적 모달은 각자의 ESC 정리 함수를 사용
+    const focused = document.activeElement && document.activeElement.closest
+      ? document.activeElement.closest(".modal:not([hidden])") : null;
+    const modal = focused && modalCancelButtons[focused.id] ? focused : visible[visible.length - 1];
+    const cancel = byId(modalCancelButtons[modal.id]);
+    if (!cancel) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    cancel.click();
+  }, true);
+
+  // 사이드바 파일 통계: 클릭으로 열기/닫기, 바깥 클릭 시 닫기
+  (() => {
+    const wrap = byId("fileStatsWrap"), pop = byId("fileStatsPop"), chip = byId("fileStats");
+    if (!wrap) return;
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = pop.hidden;
+      pop.hidden = !open;
+      wrap.dataset.pin = open ? "1" : "0";
+      chip.setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", (e) => {
+      if (!wrap.contains(e.target)){
+        pop.hidden = true;
+        wrap.dataset.pin = "0";
+        chip.setAttribute("aria-expanded", "false");
+      }
+    });
+  })();
+  byId("sidebarToggle").onclick = () => {
+    sidebarCollapsed = !sidebarCollapsed;
+    try { localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed)); } catch(e){}
+    refreshChrome();
+    scheduleViewerLayoutRefresh();
+  };
+
+  // 자주 쓰는 파일 작업 단축키. 편집기 안에서도 Ctrl+S는 현재 문서를 저장한다.
+  window.addEventListener("keydown", (e) => {
+    if (document.querySelector(".modal:not([hidden])")) return;
+    // Alt+← / → : 왼쪽 사이드바 숨기기 / 보이기 (브라우저 뒤로·앞으로가기는 막는다)
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.isComposing
+        && (e.key === "ArrowLeft" || e.key === "ArrowRight")){
+      e.preventDefault();
+      const wantCollapsed = (e.key === "ArrowLeft");      // ← 숨기기, → 보이기
+      if (sidebarCollapsed !== wantCollapsed){
+        sidebarCollapsed = wantCollapsed;
+        try { localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed)); } catch(_){}
+        refreshChrome();
+        scheduleViewerLayoutRefresh();
+      }
+      return;
+    }
+    if (shortcutMatches(e, "newPython")){
+      e.preventDefault();
+      if (typeof newPythonScratch === "function") newPythonScratch();
+      return;
+    }
+    if (shortcutMatches(e, "screensaverStart")){
+      // 키 입력도 사용자 제스처라 전체화면이 허용된다(설정을 열지 않고 바로 시작).
+      e.preventDefault();
+      if (typeof startScreensaverNow === "function") startScreensaverNow();
+      return;
+    }
+    const key = String(e.key || "").toLowerCase();
+    const previous = shortcutMatches(e, "previousFile"), next = shortcutMatches(e, "nextFile");
+    if (previous || next){
+      const target = e.target;
+      const editing = !!(target && target.closest && target.closest("input,textarea,[contenteditable='true']"));
+      const codeEditor = !!(target && target.closest && target.closest(".code-input"));
+      // 코드 편집기에선 Ctrl+←/→ 에 걸린 편집 기능이 없어 탭 전환에 쓴다.
+      // 그 외 입력란(검색·파일명 등)에선 단어 단위 커서 이동 등 기본 동작을 보존한다.
+      if (editing && !codeEditor) return;
+      if (tabOrder.length < 2) return;                  // 열린 탭이 2개 이상일 때만 전환
+      e.preventDefault();
+      navigateTab(previous ? -1 : 1);                  // 열린 탭 좌/우 순환
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "z" && state && state.kind === "pdf"){
+      e.preventDefault();
+      if (e.shiftKey) redoPdfEdit(state);
+      else undoPdfEdit(state);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && key === "y" && state && state.kind === "pdf"){
+      e.preventDefault(); redoPdfEdit(state); return;
+    }
+    if (shortcutMatches(e, "openFolder")){
+      e.preventDefault();
+      pickFolderOrInput(folderInput);
+      return;
+    }
+    if (shortcutMatches(e, "openFiles")){
+      e.preventDefault(); pickFilesOrInput(fileInput); return;
+    }
+    if (shortcutMatches(e, "saveCurrent")){
+      if (state && state.notebookModel && typeof saveNotebook === "function"){
+        e.preventDefault();
+        saveNotebook(state);
+        return;
+      }
+      if (state && state.kind === "pdf") { e.preventDefault(); exportPdf(); return; }
+      const save = state && state.el && state.el.querySelector(".run-save");
+      if (save) {
+        e.preventDefault();
+        if (save.disabled) return;
+        // Python에서 저장 단축키를 사용한 경우에만 저장 성공 후 실행 전 진단을 이어서 실행한다.
+        // 툴바의 '.py 저장' 버튼을 직접 누르면 기존처럼 저장만 한다.
+        if (state && state.codeEditor && /\.pyw?$/i.test(state.codeEditorFileBase || state.name || "")) {
+          save.dataset.diagnoseAfterSave = "1";
+        }
+        save.click();
+      }
+      return;
+    }
+    if (shortcutMatches(e, "closeCurrent") && state){
+      e.preventDefault();
+      closeDoc(state.id, { forgetWorkspace: true });
+      return;
+    }
+    if (shortcutMatches(e, "reopenClosed")){
+      e.preventDefault();
+      reopenClosedDoc();
+      return;
+    }
+    if (shortcutMatches(e, "findInDocument")){
+      const target = typeof pdfFindTarget === "function"
+        ? pdfFindTarget()
+        : (state && state.kind === "pdf" ? state : null);
+      if (target){
+        e.preventDefault();
+        if (typeof openPdfFind === "function") openPdfFind(target);
+        return;
+      }
+      if (state && typeof state.openDocFind === "function"){   // 텍스트·코드·HTML 소스 읽기 전용 보기에서 찾기
+        e.preventDefault();
+        state.openDocFind();
+        return;
+      }
+    }
+    if (shortcutMatches(e, "focusSearch") && docs.length){
+      e.preventDefault();
+      if (sidebarCollapsed){ sidebarCollapsed = false; refreshChrome(); }
+      sidebarSearch.focus(); sidebarSearch.select();
+    }
+  });
+  syncShortcutHints();
+  if (typeof startMemStat === "function") startMemStat();   // 메모리 사용량 칩 폴링 시작
+
+  // 사이드바 너비 드래그 조절
+  (function(){
+    const resizer = byId("sbResizer"), sidebar = byId("sidebar");
+    try { const saved = localStorage.getItem("sbWidth"); if (saved) sidebar.style.flexBasis = saved; } catch(e){}
+    const saveWidth = () => { try { localStorage.setItem("sbWidth", sidebar.style.flexBasis); } catch(e){} };
+    const fitToLongestName = () => {
+      if (!navNodes.length) return;
+      const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+      const sample = sidebar.querySelector(".sb-name");
+      const font = sample ? getComputedStyle(sample) : getComputedStyle(sidebar);
+      ctx.font = `${font.fontWeight || "400"} ${font.fontSize || "13px"} ${font.fontFamily || "sans-serif"}`;
+      const depthOf = (node) => {
+        let depth = 0, current = node;
+        while (current && current.parentId != null){ depth++; current = navNodes.find(n => n.nodeId === current.parentId); }
+        return depth;
+      };
+      let needed = 150;
+      for (const node of navNodes){
+        const doc = node.type === "doc" ? docs.find(d => d.id === node.docId) : null;
+        const name = node.type === "group" ? node.name : (doc && doc.name);
+        if (!name) continue;
+        // 좌우 패딩 + 트위스트 + 배지 + 닫기 + gap + 스크롤바 여유 + 폴더 깊이 들여쓰기.
+        needed = Math.max(needed, Math.ceil(ctx.measureText(name).width + 112 + depthOf(node) * 16));
+      }
+      sidebar.style.flexBasis = Math.max(150, Math.min(needed, 600)) + "px";
+      saveWidth();
+      scheduleViewerLayoutRefresh();
+      toast(needed > 600 ? "가장 긴 파일명에 맞췄어요. 최대 너비는 600px입니다." : "파일명 길이에 맞춰 사이드바를 조절했어요.", 1800);
+    };
+    resizer.addEventListener("dblclick", (e) => { e.preventDefault(); fitToLongestName(); });
+    resizer.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      resizer.setPointerCapture(e.pointerId);
+      resizer.classList.add("dragging");
+      const startX = e.clientX, startW = sidebar.getBoundingClientRect().width;
+      const move = (ev) => {
+        let w = startW + (ev.clientX - startX);
+        w = Math.max(150, Math.min(w, 600));         // 최소 150 ~ 최대 600px
+        sidebar.style.flexBasis = w + "px";
+      };
+      const up = () => {
+        resizer.classList.remove("dragging");
+        resizer.removeEventListener("pointermove", move);
+        resizer.removeEventListener("pointerup", up);
+        saveWidth();
+      };
+      resizer.addEventListener("pointermove", move);
+      resizer.addEventListener("pointerup", up);
+    });
+  })();
+
+  // 테마(다크모드) 토글
+  (function(){
+    const btn = byId("themeToggle");
+    const root = document.documentElement;
+    const MOON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+    const SUN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+    const sync = () => {
+      const dark = root.getAttribute("data-theme") === "dark";
+      btn.innerHTML = dark ? SUN : MOON;
+      btn.title = dark ? "라이트 모드로 전환" : "다크 모드로 전환";
+    };
+    btn.onclick = () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("theme", next); } catch(e){}
+      sync();
+    };
+    sync();
+  })();
+
+  // 서명 모달
+  byId("sigClear").onclick = clearPad;
+  byId("sigCancel").onclick = closeSig;
+  byId("sigInsert").onclick = insertSig;
+  byId("sigReuse").onclick = () => { if (lastSig) placeSignature(lastSig.dataUrl, lastSig.aspect); };
+  byId("sigUpload").onclick = () => byId("sigFile").click();
+  byId("sigFile").addEventListener("change", (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const res = imageToSignature(img);
+      if (!res){ toast("이미지에서 서명을 찾지 못했어요."); return; }
+      placeSignature(res.dataUrl, res.aspect);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); toast("이미지를 불러오지 못했습니다."); };
+    img.src = url;
+  });
+  initPad();
+
+  // Delete 키로 선택 요소 삭제 (편집 중이 아닐 때만)
+  window.addEventListener("keydown", (e) => {
+    if ((e.key === "Delete" || e.key === "Backspace") && state && state.kind === "pdf" && state.selected){
+      const ae = document.activeElement;
+      if (ae && ae.isContentEditable) return;
+      e.preventDefault(); removeEl(state.selected);
+    }
+  });
+
+  if (typeof pdfjsLib === "undefined" || typeof PDFLib === "undefined"){
+    toast("라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.", 5000);
+  }
+
+  setupMovableModals();
+}
+
+/* ===== 모달 이동·크기 조절 =====
+   모든 .modal-card 를 헤더(빈 영역) 드래그로 이동, 우하단 모서리로 크기 조절 가능하게 한다.
+   - 버튼·입력·텍스트(선택용 dd 등)에서 시작한 드래그는 무시 → 본문 클릭/선택은 그대로
+   - 정적 모달(HTML)·동적 모달(런타임 생성) 모두 커버(MutationObserver) */
+function makeCardMovable(card){
+  if (!card || card.__movable) return;
+  card.__movable = true;
+  card.classList.add("modal-movable");
+  // 드래그 시작을 무시할 대상: 상호작용·텍스트 선택 영역
+  const IGNORE = "button,input,textarea,select,a,canvas,label,dd,[contenteditable],.modal-actions";
+  card.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(IGNORE)) return;
+    const rect = card.getBoundingClientRect();
+    // 우하단 모서리(크기조절 그립, ~18px)에서 시작하면 브라우저 resize 에 양보
+    if (e.clientX > rect.right - 18 && e.clientY > rect.bottom - 18) return;
+    card.style.position = "fixed";
+    card.style.margin = "0";
+    card.style.left = rect.left + "px";
+    card.style.top = rect.top + "px";
+    card.style.width = rect.width + "px";
+    const offX = e.clientX - rect.left, offY = e.clientY - rect.top;
+    e.preventDefault();
+    const onMove = (ev) => {
+      let x = ev.clientX - offX, y = ev.clientY - offY;
+      x = Math.max(40 - rect.width, Math.min(x, window.innerWidth - 40));
+      y = Math.max(0, Math.min(y, window.innerHeight - 36));
+      card.style.left = x + "px"; card.style.top = y + "px";
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove, true);
+      document.removeEventListener("mouseup", onUp, true);
+    };
+    document.addEventListener("mousemove", onMove, true);
+    document.addEventListener("mouseup", onUp, true);
+  });
+}
+function setupMovableModals(){
+  document.querySelectorAll(".modal-card").forEach(makeCardMovable);
+  if (typeof MutationObserver === "undefined") return;
+  const mo = new MutationObserver((muts) => {
+    muts.forEach(m => m.addedNodes && m.addedNodes.forEach(n => {
+      if (n.nodeType !== 1) return;
+      if (n.classList && n.classList.contains("modal-card")) makeCardMovable(n);
+      if (n.querySelectorAll) n.querySelectorAll(".modal-card").forEach(makeCardMovable);
+    }));
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+}
+
+/* ===== 단일 탭 가드 =====
+   같은 origin(고정 포트)으로 여러 탭/창이 동시에 뜨면 자동저장(작업공간·탭 순서)이 서로 덮어쓰는 충돌이 난다.
+   localStorage 하트비트로 '한 번에 한 창만 활성'을 보장한다. 새로 연 창이 활성권을 가져가고(takeover),
+   기존 창은 안내 오버레이로 잠시 멈춘다. 활성 창이 닫히면 남은 창이 자동으로 이어받는다. */
+function setupSingleTab(){
+  const KEY = "manneung-classroom:active-tab";
+  const myId = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  let amActive = false, overlay = null;
+  const readActive = () => { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch(_){ return null; } };
+  const ensureOverlay = () => {
+    if (overlay) return overlay;
+    overlay = document.createElement("div"); overlay.className = "single-tab-overlay"; overlay.hidden = true;
+    const box = document.createElement("div"); box.className = "single-tab-box";
+    const h = document.createElement("h2"); h.textContent = "다른 창에서 사용 중이에요";
+    const p = document.createElement("p"); p.innerHTML = "같은 앱이 다른 탭·창에서 열려 있어, 이 창은 잠시 멈췄어요.<br>저장 충돌을 막기 위해 한 번에 한 창만 활성화됩니다.";
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "single-tab-take"; btn.textContent = "이 창에서 계속하기";
+    btn.addEventListener("click", claim);
+    box.append(h, p, btn); overlay.appendChild(box); document.body.appendChild(overlay);
+    return overlay;
+  };
+  const setActive = (active) => {
+    amActive = active; window.__tabActive = active;
+    ensureOverlay().hidden = active;
+    document.body.classList.toggle("tab-passive", !active);
+  };
+  const beat = () => { if (amActive){ try { localStorage.setItem(KEY, JSON.stringify({ id: myId, ts: Date.now() })); } catch(_){} } };
+  function claim(){ setActive(true); beat(); }      // 활성권 잡기(다른 탭은 storage 이벤트로 passive 전환)
+  window.addEventListener("storage", (e) => {
+    if (e.key !== KEY || !amActive) return;
+    const v = readActive();
+    if (v && v.id && v.id !== myId) setActive(false);   // 다른 탭이 새로 잡음 → 나는 멈춤
+  });
+  setInterval(() => {
+    if (amActive){ beat(); return; }
+    const v = readActive();
+    if (!v || (Date.now() - (v.ts || 0)) > 6000) claim();   // 활성 창이 사라짐(하트비트 끊김) → 자동 이어받기
+  }, 2500);
+  window.addEventListener("beforeunload", () => { const v = readActive(); if (amActive && v && v.id === myId){ try { localStorage.removeItem(KEY); } catch(_){} } });
+  claim();                                          // 로드 시 takeover
+}
+wire();
+restoreLastWorkspace();

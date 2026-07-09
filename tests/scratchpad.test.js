@@ -1,0 +1,144 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {
+  normalizeScratchpadData,
+  scratchpadNextTitle,
+  scratchpadRemoveBlock,
+  scratchpadNormalizeBlock,
+  scratchpadNormalizeNotebookCell,
+  scratchpadPlainText,
+  scratchpadHasLockedBlocks
+} = require("../src/js/scratchpad.js");
+
+test("기존 단일 메모는 내용 손실 없이 첫 탭으로 이전한다", () => {
+  const data = normalizeScratchpadData(null, "기존 메모 내용");
+  assert.equal(data.version, 5);
+  assert.equal(data.notes.length, 1);
+  assert.equal(data.notes[0].title, "기존 메모");
+  assert.equal(data.notes[0].blocks.length, 1);
+  assert.equal(data.notes[0].blocks[0].type, "text");
+  assert.equal(data.notes[0].blocks[0].text, "기존 메모 내용");
+  assert.equal(data.notes[0].color, "yellow");
+  assert.equal(data.activeId, data.notes[0].id);
+});
+
+test("메모 색상은 허용된 프리셋만 복원한다", () => {
+  const data = normalizeScratchpadData({
+    version:4,
+    notes:[
+      { id:"sage", title:"세이지", color:"sage", text:"초록" },
+      { id:"invalid", title:"잘못된 색", color:"neon", text:"기본색" }
+    ]
+  });
+  assert.equal(data.notes[0].color, "sage");
+  assert.equal(data.notes[1].color, "yellow");
+});
+
+test("v2 텍스트 메모 탭과 활성 탭을 최신 블록 형식으로 복원한다", () => {
+  const saved = {
+    version:2,
+    activeId:"two",
+    notes:[
+      { id:"one", title:"첫 메모", text:"하나" },
+      { id:"two", title:"둘째 메모", text:"둘" }
+    ]
+  };
+  const data = normalizeScratchpadData(saved);
+  assert.deepEqual(data.notes.map(note => [note.id, note.title, note.blocks[0].text]), [
+    ["one", "첫 메모", "하나"],
+    ["two", "둘째 메모", "둘"]
+  ]);
+  assert.equal(data.activeId, "two");
+});
+
+test("텍스트와 이미지 블록의 배치 정보를 정규화한다", () => {
+  const data = normalizeScratchpadData({
+    version:3,
+    notes:[{
+      id:"mixed",
+      title:"혼합 메모",
+      blocks:[
+        { id:"text-1", type:"text", text:"이미지 위 글" },
+        { id:"image-1", type:"image", assetId:"asset-1", text:"이미지 옆 설명", position:"right", width:"large", name:"예제.png", size:123, locked:true }
+      ]
+    }]
+  });
+  assert.equal(data.notes[0].blocks[1].position, "right");
+  assert.equal(data.notes[0].blocks[1].width, "large");
+  assert.equal(data.notes[0].blocks[1].assetId, "asset-1");
+  assert.equal(data.notes[0].blocks[0].locked, false);
+  assert.equal(data.notes[0].blocks[1].locked, true);
+  assert.equal(scratchpadHasLockedBlocks(data.notes[0]), true);
+  assert.equal(scratchpadPlainText(data.notes[0]), "이미지 위 글\n\n[이미지: 예제.png]\n이미지 옆 설명");
+});
+
+test("잘못된 이미지 배치값은 안전한 기본값으로 바꾼다", () => {
+  const block = scratchpadNormalizeBlock({
+    type:"image",
+    assetId:"asset-2",
+    position:"floating",
+    width:"huge"
+  });
+  assert.equal(block.position, "left");
+  assert.equal(block.width, "medium");
+  assert.equal(block.locked, false);
+  assert.equal(scratchpadNormalizeBlock({ type:"image" }), null);
+});
+
+test("노트북 셀 블록은 코드·마크다운 내용을 보존하고 실행 메타데이터를 제거한다", () => {
+  const block = scratchpadNormalizeBlock({
+    id:"cell-1",
+    type:"notebook-cell",
+    cell:{
+      type:"markdown",
+      source:"## 메모 셀",
+      attachments:{ "figure.png":{ "image/png":"AAAA" } },
+      metadata:{ keep:true, manneung_execution:{ hash:"old" }, manneung_ink:[1, 2] }
+    }
+  });
+  assert.equal(block.type, "notebook-cell");
+  assert.equal(block.cell.type, "markdown");
+  assert.equal(block.cell.source, "## 메모 셀");
+  assert.deepEqual(block.cell.attachments, { "figure.png":{ "image/png":"AAAA" } });
+  assert.deepEqual(block.cell.metadata, { keep:true });
+  assert.match(scratchpadPlainText({ blocks:[block] }), /노트북 마크다운 셀/);
+  assert.equal(scratchpadNormalizeNotebookCell(null), null);
+});
+
+test("잠긴 블록이 없는 메모는 전체 삭제를 막지 않는다", () => {
+  assert.equal(scratchpadHasLockedBlocks({
+    blocks:[
+      { type:"text", text:"수정 가능", locked:false },
+      { type:"image", assetId:"asset", locked:false }
+    ]
+  }), false);
+});
+
+test("새 메모 이름은 이미 사용 중인 번호를 건너뛴다", () => {
+  assert.equal(scratchpadNextTitle([{ title:"새 메모 1" }, { title:"새 메모 3" }]), "새 메모 2");
+});
+
+test("마지막 노트북 셀 블록을 삭제하면 빈 글 블록으로 돌아간다", () => {
+  const cell = {
+    id:"cell-only",
+    type:"notebook-cell",
+    cell:{ type:"code", source:"print('hello')" },
+    locked:false
+  };
+  const result = scratchpadRemoveBlock([cell], cell.id);
+  assert.equal(result.removed, cell);
+  assert.equal(result.blocks.length, 1);
+  assert.equal(result.blocks[0].type, "text");
+  assert.equal(result.blocks[0].text, "");
+  assert.equal(result.activeId, result.blocks[0].id);
+});
+
+test("마지막 이미지 블록도 삭제하고 빈 글 블록으로 돌아간다", () => {
+  const image = { id:"image-only", type:"image", assetId:"asset-only", locked:false };
+  const result = scratchpadRemoveBlock([image], image.id);
+  assert.equal(result.removed, image);
+  assert.equal(result.blocks.length, 1);
+  assert.equal(result.blocks[0].type, "text");
+});
