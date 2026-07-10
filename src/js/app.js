@@ -543,6 +543,8 @@ function wire(){
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
+    byId("settingPet").checked = !!appSettings.petEnabled;
+    byId("settingPetCount").value = String(appSettings.petCount || 1);
     const ss = appSettings.screensaver || { enabled:false, idleMin:5 };
     byId("settingScreensaver").checked = !!ss.enabled;
     byId("settingScreensaverIdle").value = String(ss.idleMin || 5);
@@ -572,11 +574,13 @@ function wire(){
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
+      petEnabled: byId("settingPet").checked, petCount: Number(byId("settingPetCount").value) || 1,
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
         sound: byId("settingScreensaverSound").checked },
       shortcuts:shortcutDraft
     });
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
+    if (typeof applyPetSettings === "function") applyPetSettings();
     applyUiScale();
     syncShortcutHints();
     if (state && state.kind === "pdf" && !appSettings.pdfRecovery) state.recoveryDirty = false;
@@ -616,6 +620,7 @@ function wire(){
     byId("settingScreensaverStart").onclick = () => { if (typeof startScreensaverNow === "function") startScreensaverNow(); };
   }
   if (typeof initScreensaver === "function") initScreensaver();
+  if (typeof initPet === "function") initPet();
   document.querySelectorAll(".tool-menu").forEach(menu => menu.querySelectorAll("button").forEach(button => button.addEventListener("click", () => { menu.open = false; })));
   document.addEventListener("click", (e) => document.querySelectorAll(".tool-menu[open]").forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }));
   byId("helpOpen").onclick = () => { byId("helpModal").hidden = false; };

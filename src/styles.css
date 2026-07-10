@@ -1085,6 +1085,23 @@
   .ss-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   .ss-hint{position:absolute;left:0;right:0;bottom:26px;text-align:center;color:rgba(226,232,240,.5);
     font-size:13px;letter-spacing:.02em;pointer-events:none;z-index:1}
+  /* ===== 픽셀 펫(돌아다니는 게) — 모달 위로도 다니지만 화면보호기(100000)에는 가려진다 ===== */
+  .pixel-pet{position:fixed;left:0;top:0;width:45px;height:33px;z-index:90000;cursor:grab;
+    user-select:none;-webkit-user-select:none;touch-action:none;will-change:transform}
+  .pixel-pet canvas{display:block;width:100%;height:100%;image-rendering:pixelated;pointer-events:none}
+  .pixel-pet-bubble{position:absolute;left:50%;bottom:calc(100% + 7px);transform:translateX(-50%) scale(.8);
+    padding:4px 9px;border-radius:9px;background:var(--panel);border:1px solid var(--border);color:var(--ink);
+    font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s ease,transform .15s ease;
+    box-shadow:0 4px 14px rgba(0,0,0,.22)}
+  .pixel-pet-bubble.show{opacity:1;transform:translateX(-50%) scale(1)}
+  /* 연필 펫이 착지한 자리에 잠깐 남는 낙서 흔적 */
+  .pixel-pet-trace{position:fixed;width:10px;height:4px;border-radius:2px;background:#9aa4b2;
+    z-index:89999;pointer-events:none;animation:pet-trace-fade 1.4s ease-out forwards}
+  @keyframes pet-trace-fade{from{opacity:.65}to{opacity:0}}
+  /* UFO 납치 광선(스프라이트 아래로 뻗는 사다리꼴) */
+  .pixel-pet-beam{position:absolute;left:50%;top:24px;transform:translateX(-50%);width:36px;height:0;
+    background:linear-gradient(180deg,rgba(253,224,71,.5),rgba(253,224,71,.04));
+    clip-path:polygon(30% 0,70% 0,100% 100%,0 100%);pointer-events:none;display:none}
   .docx-host{margin:0 auto}
   .hwp-host{margin:0 auto}
   .pptx-host{margin:0 auto}

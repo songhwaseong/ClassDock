@@ -73,6 +73,7 @@ const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.
 const DEFAULT_APP_SETTINGS = {
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
+  petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   shortcuts: DEFAULT_SHORTCUTS
 };
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.

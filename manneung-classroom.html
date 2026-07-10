@@ -380,6 +380,8 @@
     <label class="settings-row"><span>렌더링 성능</span><select id="settingPerformance" class="pw-input"><option value="memory">메모리 절약</option><option value="quality">최고 화질</option></select></label>
     <label class="settings-check"><input type="checkbox" id="settingAutoRestore"><span>시작할 때 최근 작업공간 자동 복원</span></label>
     <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>PDF 편집 내용 자동 저장·복원</span></label>
+    <label class="settings-check"><input type="checkbox" id="settingPet"><span>픽셀 펫 — 작은 캐릭터들이 화면·창 위를 돌아다닙니다 (붙잡아 던지기 가능)</span></label>
+    <div class="settings-row"><span>픽셀 펫 마릿수</span><select id="settingPetCount" class="pw-input"><option value="1">1마리</option><option value="2">2마리</option><option value="3">3마리</option><option value="4">4마리</option><option value="6">6마리</option></select></div>
     <label class="settings-check"><input type="checkbox" id="settingScreensaver"><span>대기 화면(화면보호기) — 일정 시간 입력이 없으면 전체 화면 표시</span></label>
     <div class="settings-row"><span>표시까지 대기 시간</span><select id="settingScreensaverIdle" class="pw-input"><option value="1">1분</option><option value="3">3분</option><option value="5">5분</option><option value="10">10분</option><option value="20">20분</option></select></div>
     <label class="settings-check"><input type="checkbox" id="settingScreensaverSound"><span>▶ 지금 시작으로 켤 때 영상 소리 재생 — 자동(유휴) 대기 화면은 항상 무음</span></label>
@@ -531,6 +533,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/whiteboard.js"></script>
 <script src="src/js/lesson-replay.js"></script>
 <script src="src/js/screensaver.js"></script>
+<script src="src/js/pet.js"></script>
 <script src="src/js/scratchpad.js"></script>
 <script src="src/js/image-memo.js"></script>
 <script src="src/js/app.js"></script>
