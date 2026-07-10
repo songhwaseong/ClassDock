@@ -8,7 +8,9 @@ const path = require("node:path");
 // python-viewer.js 분할본을 이어붙여 검사 — 패턴이 어느 조각에 있든 동일하게 매칭된다.
 const pythonSource = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
   .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
-const notebookSource = fs.readFileSync(path.join(__dirname, "../src/js/notebook-viewer.js"), "utf8");
+// notebook-viewer.js 분할본을 이어붙여 검사 — 패턴이 어느 조각에 있든 동일하게 매칭된다.
+const notebookSource = ["notebook-model.js", "notebook-tools.js", "notebook-run.js", "notebook-pdf-export.js", "notebook-cells.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 
 test("브라우저 노트북 커널은 실행 폴더가 아닌 프로젝트 루트 전체에서 출력 파일을 찾는다", () => {
   assert.match(pythonSource, /outputRoot = workspace\.root/);

@@ -1,5 +1,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+// notebook-viewer.js 분할본을 이어붙여 CommonJS 식 래퍼로 실행 — 번들과 동일한 순서/스코프이고,
+// 마지막 조각(notebook-cells.js) 끝의 module.exports 가 스텁 module 에 채워진다.
+// (vm 별도 컨텍스트를 쓰면 다른 realm 의 Array/Object 가 되어 deepEqual 이 실패하므로 같은 realm 에서 실행)
+const nbModule = { exports: {} };
+const nbSource = ["notebook-model.js", "notebook-tools.js", "notebook-run.js", "notebook-pdf-export.js", "notebook-cells.js"]
+  .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
+new Function("module", "window", "localStorage", nbSource)(
+  nbModule, {}, { getItem: () => null, setItem: () => {} });
 const {
   ipynbToModel,
   modelToIpynb,
@@ -40,7 +51,7 @@ const {
   notebookInteractiveMimeFrameSpec,
   notebookPdfSegments,
   notebookPdfBatches
-} = require("../src/js/notebook-viewer.js");
+} = nbModule.exports;
 
 test("노트북 PDF 페이지는 가능한 셀 경계에서 나뉘고 큰 셀만 A4 높이로 자른다", () => {
   assert.deepEqual(
