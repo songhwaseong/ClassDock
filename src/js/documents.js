@@ -1180,7 +1180,12 @@ function untabDoc(id){
   if (i < 0) return;
   if (id === studyPdfId) toggleStudyMode();
   tabOrder.splice(i, 1);
-  if (id === activeId && tabOrder.length) setActiveDoc(tabOrder[Math.min(i, tabOrder.length - 1)]);
+  if (id === activeId && tabOrder.length){
+    // 직전에 보던 문서로 돌아간다(closeDoc 과 같은 VSCode 패턴). Ctrl+클릭 정의 이동으로 연 탭을
+    // 닫으면 원래 편집하던 화면으로 복귀. 이력에 탭으로 살아있는 게 없으면 옆 탭으로 폴백.
+    const prevId = activeMru.find(x => x !== id && tabOrder.includes(x));
+    setActiveDoc(prevId != null ? prevId : tabOrder[Math.min(i, tabOrder.length - 1)]);
+  }
   else renderTabs();
 }
 
