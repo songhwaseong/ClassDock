@@ -45,6 +45,7 @@ let state = null;        // 활성 문서
 let viewer = null;       // 활성 문서 컨테이너(pdf 렌더/측정용)
 let studyPdfId = null;   // 분할 작업의 참고 문서 ID (기존 변수명 호환 유지)
 let studyReferenceLocked = false; // 필요할 때만 참고 문서를 잠근다. 기본값은 기존 학습 화면처럼 편집 가능.
+let studyTargetPane = "work"; // 분할 화면에서 마지막에 클릭한 칸("work"|"reference") — 사이드바 파일 클릭이 이 칸의 문서를 바꾼다.
 let lastSig = null;      // 최근 서명(문서 공통, 재사용)
 
 let fileQueue = Promise.resolve();

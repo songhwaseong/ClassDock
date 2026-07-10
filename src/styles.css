@@ -165,6 +165,7 @@
   .tab:hover{background:rgba(255,255,255,.06)}
   .tab[draggable="true"]{cursor:grab}
   .tab.dragging{opacity:.45;cursor:grabbing}
+  .tab.study-ref{box-shadow:inset 0 0 0 1.5px var(--accent);background:color-mix(in srgb,var(--accent) 15%,transparent)}   /* 분할 화면 참고 칸에 떠 있는 문서의 탭 */
   .tab.drop-before{box-shadow:inset 3px 0 var(--accent)}
   .tab.drop-after{box-shadow:inset -3px 0 var(--accent)}
   .tab.active{background:rgba(255,255,255,.10);border-bottom-color:var(--muted)}
@@ -565,6 +566,8 @@
   #content.study-mode .study-divider{display:block}
   #content.study-mode .study-reference{display:block!important;right:calc(100% - var(--study-split,50%));border-right:3px solid var(--border)}
   #content.study-mode .study-work{left:var(--study-split,50%);display:block!important}
+  /* 마지막에 클릭한 칸(사이드바 파일 클릭이 이 칸에 열림) — 옅은 안쪽 테두리로 표시 */
+  #content.study-mode .study-pane-target{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}
   /* 더블클릭으로 좌우 바꾼 상태: PDF(reference)를 오른쪽, 코드(work)를 왼쪽으로 */
   #content.study-mode.study-swapped .study-reference{left:var(--study-split,50%);right:0;border-right:0;border-left:3px solid var(--border)}
   #content.study-mode.study-swapped .study-work{left:0;right:calc(100% - var(--study-split,50%))}

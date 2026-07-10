@@ -400,6 +400,48 @@ function setStudyReferenceLocked(locked){
   toast(studyReferenceLocked ? "참고 문서를 잠갔습니다. 보기·스크롤·복사만 가능합니다." : "참고 문서 잠금을 풀었습니다. 기존 학습 화면처럼 편집할 수 있습니다.", 3200);
 }
 
+// 분할 화면에서 마지막에 클릭한 칸을 기억한다 — 사이드바 파일 클릭이 이 칸의 문서를 바꾼다.
+function setStudyTargetPane(pane){
+  if (pane !== "reference" && pane !== "work") return;
+  if (studyTargetPane === pane) return;
+  studyTargetPane = pane;
+  updateStudyTargetHighlight();
+}
+// 타깃 칸에만 표시 클래스를 붙인다(참고/작업 두 문서만 만지면 되므로 가볍다).
+function updateStudyTargetHighlight(){
+  const split = byId("content").classList.contains("study-mode");
+  const targetId = studyTargetPane === "reference" ? studyPdfId : activeId;
+  docs.forEach(d => d.el.classList.toggle("study-pane-target", split && d.id === targetId));
+}
+// 칸 안 아무 곳이나 누르면 그 칸이 타깃이 된다. 내부 위젯이 이벤트 전파를 막아도 잡히게 캡처 단계 사용.
+function setupStudyPaneTracker(){
+  const content = byId("content");
+  if (content._studyPaneTracker) return;
+  content._studyPaneTracker = true;
+  content.addEventListener("pointerdown", (e) => {
+    if (!content.classList.contains("study-mode")) return;
+    const pane = e.target.closest && e.target.closest(".study-reference, .study-work");
+    if (!pane) return;
+    setStudyTargetPane(pane.classList.contains("study-reference") ? "reference" : "work");
+  }, true);
+}
+
+// 사이드바·상단 탭에서 파일 클릭 시 공용 진입점: 분할 화면이면 마지막 클릭 칸 기준으로 연다.
+// - 타깃 칸에 이미 떠 있는 문서 → 그대로 유지
+// - 반대 칸에 떠 있는 문서 → 좌우 역할 교대(스왑)
+// - 그 외 문서 → 타깃 칸의 문서만 교체(반대 칸은 유지)
+function openDocInTargetPane(id){
+  const split = byId("content").classList.contains("study-mode") && studyPdfId !== null;
+  if (!split){ setActiveDoc(id); return; }
+  if (id === studyPdfId || id === activeId){
+    const targetId = studyTargetPane === "reference" ? studyPdfId : activeId;
+    if (id !== targetId) setStudyReference(activeId);   // 반대 칸 문서 클릭 → setStudyReference 의 역할 교대 로직으로 스왑
+    return;
+  }
+  if (studyTargetPane === "reference") setStudyReference(id);
+  else setActiveDoc(id);
+}
+
 // 학습 화면 좌(PDF)·우(코드) 비율 조절 분할바 — #content 에 한 번만 만들고 드래그로 --study-split 갱신(저장)
 function setupStudyDivider(){
   const content = byId("content");
@@ -454,7 +496,7 @@ function fitStudyPdf(doc){
 
 function applyStudyLayout(){
   const content = byId("content");
-  docs.forEach(d => d.el.classList.remove("study-reference", "study-work", "study-readonly"));
+  docs.forEach(d => d.el.classList.remove("study-reference", "study-work", "study-readonly", "study-pane-target"));
   const ref = docs.find(d => d.id === studyPdfId);
   const work = docs.find(d => d.id === activeId);
   const split = !!(ref && work && ref.id !== work.id);
@@ -464,6 +506,7 @@ function applyStudyLayout(){
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
     setupStudyDivider();                       // 분할바 준비(저장된 비율 적용)
+    setupStudyPaneTracker();                   // 칸 클릭 → 타깃 칸 추적(한 번만 설치)
     ref.el.hidden = false;
     ref.el.classList.add("study-reference");
     ref.el.classList.toggle("study-readonly", studyReferenceLocked);
@@ -504,6 +547,7 @@ function applyStudyLayout(){
     lockBtn.title = studyReferenceLocked ? "참고 문서 잠금을 풀고 편집 가능하게 하기" : "참고 문서를 읽기 전용으로 잠그기";
     lockBtn.setAttribute("aria-pressed", String(studyReferenceLocked));
   }
+  updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
   updateModeBadges();
 }
@@ -513,9 +557,11 @@ function toggleStudyMode(){
     const prev = docs.find(d => d.id === studyPdfId);
     studyPdfId = null;
     studyReferenceLocked = false;
+    studyTargetPane = "work";
     if (typeof syncPdfFindToActive === "function") syncPdfFindToActive(activeId);
     docs.forEach(d => d.el.hidden = d.id !== activeId);
     applyStudyLayout();
+    renderTabs();                                          // 참고 문서 탭 표시 제거
     if (prev && prev.kind === "pdf" && prev._preStudyZoom != null){ setPdfZoom(prev._preStudyZoom, prev); prev._preStudyZoom = null; }   // 진입 전 줌 복원
     return;
   }
@@ -535,9 +581,11 @@ function startStudyModeWithDoc(doc, options={}){
     return true;
   }
   studyReferenceLocked = false;
+  studyTargetPane = "work";                                                            // 분할 진입 시 기본 타깃은 작업 칸
   studyPdfId = doc.id;
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
+  renderTabs();                                                                        // 참고 문서 탭 표시 갱신
   if (!options.silent) toast("문서를 참고 화면에 고정했어요. 기존 학습 화면처럼 양쪽 모두 편집할 수 있으며, 필요하면 ‘참고 잠금’을 누르세요.", 4600);
   return true;
 }
@@ -555,6 +603,7 @@ function setStudyReference(id){
   }
   studyPdfId = id;
   if (typeof syncPdfFindToActive === "function") syncPdfFindToActive(activeId);
+  if (!tabOrder.includes(id)) tabOrder.push(id);                          // 참고 칸으로 열어도 탭에 추가(아래 renderTabs 또는 setActiveDoc 이 그린다)
   if (next.kind === "pdf") next._preStudyZoom = next.zoom;                // 종료 시 되돌릴 줌 기억
   // 현재 작업 문서를 참고로 바꿀 때는 기존 참고 문서를 작업 칸으로 넘겨 역할을 교대한다.
   const workDoc = previousWork && previousWork.id !== next.id ? previousWork : prevRef;
@@ -562,6 +611,7 @@ function setStudyReference(id){
   if (activeId !== workDoc.id){ setActiveDoc(workDoc.id); return; }
   next.el.hidden = false;
   applyStudyLayout();                                                      // 좌우 배치 즉시 적용(참조=새 PDF, 작업=기존)
+  renderTabs();                                                            // 새 참고 탭 추가·참고 표시 갱신
   ensureRendered(next).then(() => { if (next.id === studyPdfId && next.kind === "pdf"){ startLazyRender(next); requestAnimationFrame(() => fitStudyPdf(next)); } });
   updateSidebarActive(); focusSidebarDoc(id);
 }
@@ -1036,13 +1086,13 @@ function renderTabs(){
     const d = docs.find(x => x.id === id);
     if (!d) return;
     const tab = document.createElement("div");
-    tab.className = "tab" + (id === activeId ? " active" : "");
+    tab.className = "tab" + (id === activeId ? " active" : "") + (studyPdfId !== null && id === studyPdfId && id !== activeId ? " study-ref" : "");   // 분할 참고 문서 표시
     tab.draggable = true;
     const cat = extCategory(d.kind, d.name);
     if (cat) tab.dataset.cat = cat;
     tab.title = d.name + (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
       " · 드래그: 위치 변경 · 우클릭: 탭 정리";
-    tab.onclick = () => setActiveDoc(d.id);
+    tab.onclick = () => openDocInTargetPane(d.id);   // 분할 화면이면 마지막 클릭 칸에 열기
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(id, e.clientX, e.clientY); });
     tab.addEventListener("dragstart", (e) => {
       draggedTabId = id;
@@ -1096,7 +1146,7 @@ function renderTabs(){
         const item = document.createElement("button"); item.type = "button"; item.className = "tab-overflow-item";
         const badge = document.createElement("span"); badge.className = "tab-ic"; badge.textContent = iconFor(doc.kind, doc.name);
         const name = document.createElement("span"); name.textContent = doc.name;
-        item.append(badge, name); item.onclick = () => setActiveDoc(id); list.appendChild(item); count++;
+        item.append(badge, name); item.onclick = () => openDocInTargetPane(id); list.appendChild(item); count++;
       });
       if (!count){ const empty = document.createElement("div"); empty.className = "tab-overflow-empty"; empty.textContent = "일치하는 탭이 없습니다."; list.appendChild(empty); }
     };
@@ -1628,7 +1678,7 @@ function renderSidebar(){
         const canFocusRenderedContent = !!(hit && ["md", "markdown", "mdx", "csv"].includes(ext));
         // 코드·텍스트는 렌더 전에도 줄 이동을 예약한다. 이미 렌더된 문서는 아래에서 즉시 이동한다.
         if (canFocusContentLine) doc.pendingFocusLine = hit.line;
-        setActiveDoc(doc.id);
+        openDocInTargetPane(doc.id);           // 분할 화면이면 마지막 클릭 칸에 열기(아니면 setActiveDoc 와 동일)
         if (doc.kind === "pdf" && hit){   // PDF 내용 검색 결과 → 일치 페이지로 이동
           if (hit && hit.unit === "페이지" && hit.line) scrollPdfToPage(doc, hit.line);
         } else if (canFocusContentLine){
