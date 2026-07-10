@@ -1410,13 +1410,6 @@ function buildCodeEditor(text, prof, options={}){
     if (findOpen && e.key === "Escape" && complete.hidden){   // 본문에 포커스가 있어도 Esc 로 찾기 닫기
       e.preventDefault(); closeFind(); return;
     }
-    // 자동완성 목록이 떠 있어도, 자동 닫힘 문자 바로 앞의 Tab은 항목 수락보다 "문자 밖으로 이동"을 우선한다.
-    if (e.key === "Tab" && !e.shiftKey && ta.selectionStart === ta.selectionEnd &&
-        ['"', "'", ")", "]", "}"].includes(ta.value[ta.selectionStart])){
-      e.preventDefault(); hideCompletion();
-      ta.selectionStart = ta.selectionEnd = ta.selectionStart + 1;
-      sync(); return;
-    }
     if (!complete.hidden){
       if (e.key === "ArrowDown" || e.key === "ArrowUp"){
         e.preventDefault();
