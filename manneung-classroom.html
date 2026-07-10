@@ -53,7 +53,9 @@
     <button id="btnOfficeFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
     <button id="btnPrint">인쇄 / PDF로 저장</button>
   </div>
-  <button id="studyToggle" type="button" hidden title="PDF와 Python 코드를 나란히 보기">학습 화면</button>
+  <button id="studyToggle" type="button" hidden title="참고 문서와 작업 문서를 나란히 보기">분할 작업</button>
+  <button id="studySetReference" type="button" hidden title="현재 작업 문서를 참고 화면으로 바꾸기">참고로</button>
+  <button id="studyReferenceLock" type="button" hidden title="참고 문서를 읽기 전용으로 잠그기" aria-pressed="false">참고 잠금</button>
   <button id="saveFolderOpen" class="save-folder-open" type="button" hidden title="직전에 저장한 파일이 있는 폴더 열기" aria-label="직전에 저장한 파일이 있는 폴더 열기">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M9 14h6M12 11v6"/></svg><span>저장 폴더</span>
   </button>
@@ -170,6 +172,8 @@
       <button id="btnStudyFind" type="button" class="study-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="참조 PDF에서 찾기" data-shortcut-aria="true" aria-label="참조 PDF에서 찾기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
       </button>
+      <span class="study-readonly-badge" aria-label="참고 문서 읽기 전용">읽기 전용</span>
+      <button id="btnStudySwap" type="button" class="study-swap-btn" title="참고 화면과 작업 화면의 좌우 위치 바꾸기" aria-label="참고 화면과 작업 화면의 좌우 위치 바꾸기">↔</button>
       <button id="btnStudyPen" type="button" class="study-pen-btn" title="PDF에 필기 (펜·형광펜·지우개)" aria-label="PDF 필기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
       </button>
@@ -406,7 +410,7 @@
     <li><b>Python 실행</b> — ▶로 바로 실행, 자동완성·정의 이동, <b>단계 실행</b>으로 변수 추적, <b>진단</b>과 <b>자동 채점</b>, 라이브러리 설치까지.</li>
     <li><b>Jupyter 노트북(.ipynb)</b> — 셀 하나씩 실행(Shift+Enter)하면 변수가 다음 셀로 이어지는 커널 모드.</li>
     <li><b>화이트보드</b> — 자유 필기·도형·이미지로 판서. 새로 만들기에서 추가.</li>
-    <li><b>학습 화면</b> — PDF와 Python 코드를 나란히 보고, 코드 줄을 PDF에 핀으로 연결.</li>
+    <li><b>분할 작업</b> — 어떤 문서든 참고 화면과 나란히 보고, 필요할 때만 참고 문서를 잠가 분할 비율·좌우 위치를 조절.</li>
     <li><b>임시 메모</b>(Ctrl+M)·<b>이미지 메모</b>(캡처 여러 장 붙여넣기·일괄 저장)·<b>다크 모드</b>·작업공간 자동 복원. 모든 처리는 이 컴퓨터 안에서만 이뤄지고 파일은 외부로 전송되지 않아요.</li>
   </ul>
   <div class="help-section-title">단축키</div>

@@ -813,7 +813,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   tabOrder = restoredTabs;
   activeMru = mruRefs.map(resolveRef).filter((id, index, rows) => id != null && rows.indexOf(id) === index);
   const nextStudyId = resolveRef(studyRef);
-  studyPdfId = nextStudyId != null && docs.some(doc => doc.id === nextStudyId && doc.kind === "pdf") ? nextStudyId : null;
+  studyPdfId = nextStudyId != null && docs.some(doc => doc.id === nextStudyId) ? nextStudyId : null;
   const wantedActive = resolveRef(activeRef);
   const fallbackActive = wantedActive || restoredTabs[0] || (nextDocs[0] && nextDocs[0].id) || (docs[0] && docs[0].id) || 0;
   sidebarCursorKey = nextRoot.nodeId;

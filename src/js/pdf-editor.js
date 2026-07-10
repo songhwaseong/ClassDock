@@ -151,6 +151,7 @@ document.addEventListener("pointerdown", (e) => {
 function removeEl(el){
   const doc = (el && el.__doc) || state;
   if (!doc || doc.kind !== "pdf") return;
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return; }
   doc.elements = doc.elements.filter(x => x.el !== el);
   if (doc.selected === el) doc.selected = null;
   el.remove();
@@ -204,7 +205,10 @@ function placeBase(pageIndex, kind, doc=state){
   return el;
 }
 function btn(label){ const b = document.createElement("button"); b.textContent = label; return b; }
+function isPdfReferenceLocked(doc){ return typeof isStudyReferenceReadonly === "function" && isStudyReferenceReadonly(doc); }
+function explainPdfReferenceLocked(){ toast("분할 작업의 참고 PDF는 읽기 전용이에요.", 2200); }
 function changeFont(el, d){
+  if (isPdfReferenceLocked((el && el.__doc) || state)){ explainPdfReferenceLocked(); return; }
   const t = el.querySelector(".text-edit"); if (!t) return;
   const cur = parseFloat(getComputedStyle(t).fontSize) || 18;
   t.style.fontSize = Math.max(8, Math.min(96, cur + d)) + "px";
@@ -214,6 +218,7 @@ function changeFont(el, d){
 /* ===== 이미지(서명) 요소 ===== */
 function addImageElement(dataUrl, aspect, pageIndex, options={}){
   const doc = options.doc || state;
+  if (!options.restoring && isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return null; }
   const el = placeBase(pageIndex, "signature", doc);
   if (!el) return null;
   const w = 200, h = w / aspect;
@@ -233,6 +238,7 @@ function addImageElement(dataUrl, aspect, pageIndex, options={}){
 /* ===== 텍스트류 요소 ===== */
 function addTextElement(kind, opts={}){
   const doc = opts.doc || state;
+  if (!opts.restoring && isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return null; }
   const pageIndex = Number.isInteger(opts.pageIndex) ? opts.pageIndex : currentPageIndex(doc);
   const el = placeBase(pageIndex, kind, doc);
   if (!el) return null;
@@ -424,6 +430,7 @@ function targetPdfForCodeLink(){
 function createCodeLinkFromCodeDoc(codeDoc){
   const pdfDoc = targetPdfForCodeLink();
   if (!pdfDoc){ toast("Open a PDF first, then pin a code line.", 2600); return; }
+  if (isPdfReferenceLocked(pdfDoc)){ explainPdfReferenceLocked(); return; }
   codeDoc = codeDoc || activeCodeLinkDoc();
   const target = codeLinkTargetFromDoc(codeDoc);
   if (!target){ toast("Open a Python file and place the cursor on a line first.", 3000); return; }
@@ -457,7 +464,7 @@ async function openCodeLink(el){
     doc.codeEditor.focusLine(targetLine);
   }
   toast(enteredStudy
-    ? doc.name + ":" + targetLine + " 줄을 학습 화면에서 열었어요."
+    ? doc.name + ":" + targetLine + " 줄을 분할 작업 화면에서 열었어요."
     : "Moved to " + doc.name + ":" + targetLine, enteredStudy ? 2200 : 1600);
 }
 
@@ -1097,6 +1104,7 @@ function inkElForPage(doc, pageIndex){
   return found ? found.el : buildInkElement(doc, pageIndex, []);
 }
 function clearInkOnPage(doc, pageIndex){
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return; }
   const entry = doc.elements.find(x => x.kind === "ink" && x.pageIndex === pageIndex);
   if (!entry || !entry.el.__strokes.length){ toast("이 페이지에 지울 필기가 없어요.", 1600); return; }
   entry.el.__strokes = []; renderInkEl(entry.el); recordPdfEdit(doc);
@@ -1106,11 +1114,12 @@ function clearInkOnPage(doc, pageIndex){
 
 // ----- 펜 모드 토글 + 도구막대 -----
 function penTargetDoc(){
-  if (state && state.kind === "pdf") return state;
-  const ref = docs.find(d => d.id === studyPdfId && d.kind === "pdf");
-  return ref || docs.find(d => d.kind === "pdf") || null;
+  if (state && state.kind === "pdf" && !isPdfReferenceLocked(state)) return state;
+  if (studyPdfId !== null) return null;               // 분할 작업에서는 읽기 전용 참고 PDF로 폴백하지 않는다.
+  return docs.find(d => d.kind === "pdf") || null;
 }
 function setPenMode(on){
+  if (on && !penTargetDoc()){ explainPdfReferenceLocked(); on = false; }
   penMode = !!on;
   byId("content").classList.toggle("pdf-pen-mode", penMode);
   const bar = ensurePenBar(); bar.hidden = !penMode;
@@ -1258,7 +1267,7 @@ function penPointerDown(e){
   const pageEl = e.target && e.target.closest ? e.target.closest(".page") : null;
   if (!pageEl) return;
   const doc = docs.find(d => d.kind === "pdf" && d.pages && d.pages.some(p => p.pageEl === pageEl));
-  if (!doc) return;
+  if (!doc || isPdfReferenceLocked(doc)) return;
   const pageIndex = doc.pages.findIndex(p => p.pageEl === pageEl);
   const p = doc.pages[pageIndex]; if (!p) return;
   e.preventDefault(); e.stopPropagation();

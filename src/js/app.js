@@ -205,6 +205,9 @@ function wire(){
   byId("btnCheck").onclick = () => addTextElement("check", { fontSize: 30, color: "#16a34a", bold: true, text: "✓" });
   byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
+  if (byId("btnStudySwap")) byId("btnStudySwap").onclick = () => {
+    if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
+  };
   byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
@@ -219,6 +222,12 @@ function wire(){
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
+  if (byId("studySetReference")) byId("studySetReference").onclick = () => {
+    if (state && typeof setStudyReference === "function") setStudyReference(state.id);
+  };
+  if (byId("studyReferenceLock")) byId("studyReferenceLock").onclick = () => {
+    if (typeof setStudyReferenceLocked === "function") setStudyReferenceLocked(!studyReferenceLocked);
+  };
   byId("fsExit").onclick = exitViewerFullscreen;
   byId("fsZoomIn").onclick  = () => { const d = fullscreenPdfTarget(); if (d) setPdfZoom((d.zoom || 1) * 1.25, d); showFullscreenControls(); };
   byId("fsZoomOut").onclick = () => { const d = fullscreenPdfTarget(); if (d) setPdfZoom((d.zoom || 1) / 1.25, d); showFullscreenControls(); };

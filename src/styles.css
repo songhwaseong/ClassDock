@@ -650,12 +650,17 @@
     border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);border-radius:6px;padding:4px 3px;outline:none}
   .study-page-ctl input:focus{border-color:var(--accent);background:rgba(255,255,255,.18)}
   .study-page-ctl .page-sep{color:rgba(255,255,255,.85)}
-  .study-find-btn,.study-pen-btn{font:inherit;font-size:13px;line-height:1;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);
+  .study-find-btn,.study-pen-btn,.study-swap-btn{font:inherit;font-size:13px;line-height:1;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);
     color:#fff;border-radius:6px;padding:4px 7px;margin-left:3px;cursor:pointer}
   .study-find-btn svg,.study-pen-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;
     stroke-linecap:round;stroke-linejoin:round}
-  .study-find-btn:hover,.study-pen-btn:hover{background:rgba(255,255,255,.2)}
+  .study-find-btn:hover,.study-pen-btn:hover,.study-swap-btn:hover{background:rgba(255,255,255,.2)}
   .study-pen-btn.active{background:var(--accent);border-color:var(--accent)}
+  .study-readonly-badge{display:none;align-items:center;padding:4px 7px;margin-left:3px;border:1px solid rgba(255,255,255,.22);
+    border-radius:6px;background:rgba(15,23,42,.48);color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap}
+  #content.study-mode.study-reference-locked .study-readonly-badge{display:inline-flex}
+  #content.study-mode.study-reference-locked .study-pen-btn{display:none}
+  .study-page-ctl.non-pdf-ref #studyPageNum,.study-page-ctl.non-pdf-ref #studyPageTotal,.study-page-ctl.non-pdf-ref #btnStudyFind{display:none}
   #content.study-mode .study-page-ctl{display:inline-flex;right:calc(100% - var(--study-split,50%) + 10px)}
   #content.study-mode.study-swapped .study-page-ctl{right:10px}
   #content:fullscreen .study-page-ctl,body.viewer-fullscreen #content .study-page-ctl{display:none!important}
@@ -668,6 +673,9 @@
 
   /* ---- 배치된 요소 ---- */
   .placed{position:absolute;cursor:move;touch-action:none;user-select:none;z-index:8}   /* 텍스트/링크 레이어(6·7)보다 위에 둬 글자 위에 놓인 서명·상자도 잡히게 */
+  /* 분할 작업의 참고 PDF는 스크롤·텍스트 선택·검색과 기존 코드 핀 이동만 허용한다. */
+  .study-reference.study-readonly .placed:not(.code-link){pointer-events:none}
+  .study-reference.study-readonly .code-link .code-link-del{display:none!important}
   .placed.selected{outline:2px solid var(--accent);outline-offset:2px}
   .placed img{display:block;width:100%;height:100%;pointer-events:none}
   .text-edit{display:inline-block;min-width:14px;line-height:1.3;white-space:pre;
