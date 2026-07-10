@@ -1483,6 +1483,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   };
   editor.ta.addEventListener("input", refreshEditState);
   editor.ta.addEventListener("focus", () => { if (ownerDoc) window.__lastCodeLinkDocId = ownerDoc.id; });
+  if (ownerDoc){                                   // 저장하지 않고 닫은 스크래치 초안은 고유 키라 다시 안 쓰이니 정리(localStorage 찌꺼기 방지)
+    if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
+    ownerDoc.cleanupFns.push(() => { if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey); });
+  }
   pythonBackendAvailable().then(refreshEditState);
   prewarmBrowserPython();                        // 실행 전에 브라우저 파이썬 런타임을 미리 데운다(로컬 파이썬이면 자동 skip)
   revertBtn.addEventListener("click", async () => {
@@ -1547,6 +1551,15 @@ async function renderCode(file, host, ext, profile, runCtx){
 const PY_DRAFT_PREFIX = "pdf-signer-python-draft:";
 const PY_DRAFT_MAX = 768 * 1024;
 function pythonDraftKey(file, ownerDoc, runCtx){
+  // 새로 만든(아직 이름을 정해 저장하지 않은) 스크래치는 기본 이름("새 코드.py")과 스타터 내용이
+  // 늘 똑같아서, 경로 기준 초안 키가 서로 겹치고 sourceFingerprint 무효화도 걸리지 않는다.
+  // → 이전 스크래치의 초안이 새 스크래치로 되살아나므로, 문서마다 1회성 고유 토큰으로 키를 만든다.
+  //   (doc id 는 새로고침하면 0부터 다시 매겨져 세션 간 충돌하므로, 시각+난수로 세션 간에도 유일하게 한다.)
+  if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
+    if (!ownerDoc.__scratchDraftId) ownerDoc.__scratchDraftId = "scratch:" + Date.now().toString(36) + ":" + Math.random().toString(36).slice(2, 8);
+    const uid = ownerDoc.__scratchDraftId;
+    return PY_DRAFT_PREFIX + fingerprintBytes(uid, new TextEncoder().encode(uid));
+  }
   const identity = String(
     (ownerDoc && ownerDoc.workspacePath) ||
     (runCtx && runCtx.archiveCtx && (runCtx.archiveCtx.name + "/" + (runCtx.relPath || ""))) ||
