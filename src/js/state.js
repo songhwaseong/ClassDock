@@ -74,6 +74,7 @@ const DEFAULT_APP_SETTINGS = {
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
+  petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   shortcuts: DEFAULT_SHORTCUTS
 };
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.
@@ -81,6 +82,16 @@ function normalizeScreensaver(value){
   const s = value && typeof value === "object" ? value : {};
   const idle = Number(s.idleMin);
   return { enabled: !!s.enabled, idleMin: [1, 3, 5, 10, 20].includes(idle) ? idle : 5, sound: !!s.sound };
+}
+function normalizePetFocus(value){
+  const s = value && typeof value === "object" ? value : {};
+  const focusMin = Number(s.focusMin), breakMin = Number(s.breakMin);
+  return {
+    enabled: s.enabled !== false,
+    focusMin: [15, 25, 40, 50].includes(focusMin) ? focusMin : 25,
+    breakMin: [3, 5, 10].includes(breakMin) ? breakMin : 5,
+    quietTyping: s.quietTyping !== false
+  };
 }
 function normalizeShortcutMap(value){
   const source = value && typeof value === "object" ? value : {};
@@ -91,13 +102,13 @@ function normalizeShortcutMap(value){
 let appSettings = (() => {
   try {
     const saved = JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}");
-    return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), shortcuts:normalizeShortcutMap(saved.shortcuts) };
   }
-  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), shortcuts:normalizeShortcutMap() }; }
+  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), shortcuts:normalizeShortcutMap() }; }
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("pdfSignerSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }

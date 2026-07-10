@@ -212,6 +212,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         throwIfCancelled();
         setStatus((r.code === 0 ? "완료" : "종료 코드 " + r.code) + " · 로컬 파이썬" + withFolder);
         applyErr(r.code, r.stderr);                  // 에러 줄 강조
+        if (typeof petReact === "function") petReact(r.code === 0 ? "success" : "error");   // 펫들이 결과에 반응
         const remembered = await rememberRunOutputs(runCtx, bundle, r.outputs, r.sessionId);
         if (remembered.count){
           updateRunProjectPanel(ui, bundle, runCtx);
@@ -293,6 +294,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
       }
       setStatus((r.code === 0 ? "완료" : "오류 종료") + " · 브라우저(Pyodide)" + withFolder);
       applyErr(r.code, r.stderr);                    // 에러 줄 강조
+      if (typeof petReact === "function") petReact(r.code === 0 ? "success" : "error");     // 펫들이 결과에 반응
     }
   } catch(e){
     const cancelled = cancelRequested || (e && (e.code === "worker-cancel" || e.code === "run-cancel"));

@@ -41,7 +41,9 @@
     "lesson-replay.js",
     "screensaver.js",
     "pet-data.js",
+    "pet-events.js",
     "pet.js",
+    "pet-focus.js",
     "scratchpad.js",
     "image-memo.js",
     "app.js"

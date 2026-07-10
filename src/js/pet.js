@@ -118,8 +118,8 @@ function petDraw(p){
       ctx.fillRect(c * PET_SCALE + dx, r * PET_SCALE, PET_SCALE, PET_SCALE);
     }
   }
-  // 별·축구공은 가끔 반짝이 픽셀이 튄다
-  if (p.kind === "roller" && Math.random() < 0.1){
+  // 별·축구공, 그리고 황금 펫은 가끔 반짝이 픽셀이 튄다
+  if ((p.kind === "roller" || p.gold) && Math.random() < 0.1){
     ctx.fillStyle = "#ffffff";
     for (let i = 0; i < 2; i++)
       ctx.fillRect((3 + Math.floor(Math.random() * 9)) * PET_SCALE, (3 + Math.floor(Math.random() * 6)) * PET_SCALE, PET_SCALE, PET_SCALE);
@@ -176,7 +176,7 @@ function petPickAction(p, w){
   }
   else if (p.kind === "dog"){      // 강아지: 고양이가 보이면 쫓아가고, 없으면 가끔 신나서 질주한다
     const cat = w.pets.find(o => o !== p && o.kind === "cat" && PET_GROUND_STATES.includes(o.state));
-    if (cat && roll < 0.3){ p.state = "chase"; p.victim = cat; p.timer = 420; }
+    if (cat && roll < 0.3){ p.state = "chase"; p.victim = cat; p.timer = 420; petEventRecord("dog_cat_chase"); }
     else if (roll < 0.5){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 140; }
     else if (roll < 0.72){ p.state = "idle"; p.timer = 50 + Math.random() * 110; }
     else if (roll < 0.86){ p.state = "jump"; p.vy = -(5 + Math.random() * 3); p.vx = p.face * (1 + Math.random()); }
@@ -262,6 +262,316 @@ function petSay(p, text){
   p.bubbleTimer = setTimeout(() => p.bubble.classList.remove("show"), 1600);
 }
 
+// ----- 수업 이벤트 반응: 파이썬 실행이 끝나면 성공/오류에 맞춰 펫들이 한마디씩 한다 -----
+const PET_CHEER = ["성공! 🎉", "와~ 됐다!", "코드 천재!", "완벽해요!", "만세!", "박수 짝짝!"];
+const PET_OOPS = ["어이쿠!", "으악, 빨간 글씨!", "괜찮아요, 다시!", "삐끗...", "오류는 스승님", "힘내요!"];
+let petReactAt = 0;
+function petReact(type){
+  const w = petWorld;
+  if (!w || (type !== "success" && type !== "error")) return;
+  const now = Date.now();
+  if (now - petReactAt < 4000) return;                        // 연속 실행 도배 방지
+  petReactAt = now;
+  const lines = type === "success" ? PET_CHEER : PET_OOPS;
+  let delay = 0;
+  for (const p of w.pets){
+    delay += 100 + Math.random() * 250;                       // 한 마리씩 시차를 두고 반응
+    setTimeout(() => {
+      if (petWorld !== w || p.state === "drag") return;       // 꺼졌거나 붙잡힌 중이면 그대로
+      petSay(p, lines[Math.floor(Math.random() * lines.length)]);
+      if (p.grav && PET_GROUND_STATES.includes(p.state)){
+        if (type === "success"){                              // 서 있던 애들은 기뻐서 점프
+          p.state = "jump"; p.vy = -(5 + Math.random() * 3); p.vx = 0; p.rot = 0; p.t = 0;
+        } else {                                              // 오류엔 깜짝 놀라 찌부
+          p.squash = 1; p.state = "idle"; p.timer = 60 + Math.random() * 60;
+        }
+      } else p.pop = 12;                                      // 떠 있는 애들은 뽀잉
+    }, delay);
+  }
+}
+
+// ----- 행동 도감·숨겨진 조합 이벤트 -----
+const PET_EVENT_DEX_KEY = "mn.petEventDex";
+function petEventDexLoad(){
+  try {
+    const value = JSON.parse(localStorage.getItem(PET_EVENT_DEX_KEY));
+    return value && typeof value === "object" ? value : {};
+  } catch(_){ return {}; }
+}
+function petEventDef(id){
+  return typeof PET_EVENT_DEFS === "object" ? PET_EVENT_DEFS.find(e => e.id === id) : null;
+}
+function petEventRecord(id){
+  const def = petEventDef(id);
+  if (!def) return;
+  const dex = petEventDexLoad();
+  const first = !dex[id];
+  const now = Date.now();
+  const entry = dex[id] || (dex[id] = { n:0, first:now });
+  entry.n = (Number(entry.n) || 0) + 1;
+  entry.last = now;
+  try { localStorage.setItem(PET_EVENT_DEX_KEY, JSON.stringify(dex)); } catch(_){}
+  if (first && typeof toast === "function"){
+    toast("새로운 행동 발견! 「" + def.title + "」", 5200, {
+      type:"success",
+      action:{ label:"행동 도감", onClick:() => openPetDex("events") }
+    });
+  }
+  const modal = document.getElementById("petDexModal");
+  if (modal && !modal.hidden && typeof renderPetEventDex === "function") renderPetEventDex();
+}
+function petSpeciesById(id){
+  for (const sp of PET_SPECIES) if (petSpeciesId(sp) === id) return sp;
+  return null;
+}
+function petEventMoveToward(p, tx, ty, rate){
+  const dx = tx - p.x, dy = ty - p.y;
+  p.x += dx * rate; p.y += dy * rate;
+  if (Math.abs(dx) > 2) p.face = dx < 0 ? -1 : 1;
+}
+function petEventPair(w, def){
+  const free = p => !p.petEvent && p.state !== "drag" && p.state !== "abduct" && p.state !== "vanish";
+  const a = w.pets.find(p => p.speciesId === def.pets[0] && free(p));
+  const b = w.pets.find(p => p !== a && p.speciesId === def.pets[1] && free(p));
+  return a && b ? [a, b] : null;
+}
+function petEventStart(w, def, pair){
+  if (!def || !def.scene || !pair || w.event) return false;
+  const evt = { world:w, def, a:pair[0], b:pair[1], t:0 };
+  w.event = evt;
+  for (const p of pair){
+    p.petEvent = evt; p.state = "pet-event"; p.victim = null; p.gTarget = null;
+    p.vx = 0; p.vy = 0; p.rot = 0; p.squash = 0; p.off = false;
+    p.el.style.opacity = "";
+    if (p.beam){ p.beam.style.display = "none"; p.beam.style.height = "0px"; }
+    if (p.bolt) p.bolt.style.display = "none";
+    if (p.thread) p.thread.style.display = "none";
+    if (p.chute) p.chute.style.display = "none";
+  }
+  return true;
+}
+function petEventReleasePet(p){
+  p.petEvent = null; p.victim = null; p.gTarget = null;
+  p.vx = 0; p.vy = 0; p.rot = 0; p.squash = 0; p.off = false; p.pop = 6;
+  p.el.style.opacity = "";
+  if (p.beam){ p.beam.style.display = "none"; p.beam.style.height = "0px"; }
+  if (p.bolt) p.bolt.style.display = "none";
+  if (p.thread) p.thread.style.display = "none";
+  if (p.chute) p.chute.style.display = "none";
+  if (p.grav){
+    p.y = Math.min(p.y, Math.max(0, window.innerHeight - PET_H - 1));
+    p.state = "fall"; p.t = 0;
+  } else petAirRelease(p);
+}
+function petEventEnd(evt, completed){
+  if (!evt) return;
+  const w = evt.world;
+  if (w.event === evt) w.event = null;
+  for (const p of [evt.a, evt.b]) if (p && p.petEvent === evt) petEventReleasePet(p);
+  if (w.playedEvents) w.playedEvents.add(evt.def.id);
+  w.eventTimer = 900 + Math.floor(Math.random() * 600);
+  if (completed){
+    petEventRecord(evt.def.id);
+    const lines = evt.def.finish || [];
+    if (lines[0]) petSay(evt.a, lines[0]);
+    if (lines[1]) setTimeout(() => { if (petWorld === w && evt.b.el.isConnected) petSay(evt.b, lines[1]); }, 180);
+  }
+}
+function petEventSceneStep(evt){
+  const t = ++evt.t, a = evt.a, b = evt.b, scene = evt.def.scene;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const floorY = Math.max(42, vh - PET_H - 4);
+  const left = Math.max(8, Math.min(vw - 230, vw * 0.18));
+  const span = Math.max(80, Math.min(230, vw - left - 55));
+
+  if (scene === "cleanup"){
+    if (t < 70){
+      petEventMoveToward(a, left, floorY, 0.09);
+      petEventMoveToward(b, Math.max(4, left - 48), floorY, 0.09);
+    } else if (t < 180){
+      const u = (t - 70) / 110;
+      a.x = left + span * u; a.y = floorY - Math.abs(Math.sin(t * 0.22)) * 18; a.face = 1;
+      b.x += (left - 34 - b.x) * 0.08; b.y += (floorY - b.y) * 0.1;
+      if (t === 72) petSay(a, "여기에도 그려야지!");
+      if (t % 11 === 0) petTrace(a.x + PET_W / 2 - 5, floorY + PET_H - 4, "", 4200);
+    } else {
+      const u = Math.min(1, (t - 180) / 105);
+      a.x = left + span; a.y += (floorY - a.y) * 0.1;
+      b.x = Math.max(0, left - 34) + (span + 34) * u; b.y = floorY; b.face = 1;
+      if (t === 182) petSay(b, "쓱싹쓱싹!");
+      if (t % 9 === 0) petTrace(b.x + PET_W / 2 - 5, floorY + PET_H - 4, "dust", 900);
+    }
+  }
+  else if (scene === "magnet"){
+    const center = Math.max(60, Math.min(vw - 60, vw * 0.5));
+    if (t < 70){
+      petEventMoveToward(a, center - 70, floorY, 0.09);
+      petEventMoveToward(b, center + 80, floorY, 0.09);
+    } else {
+      a.x = center - 55 + Math.sin(t * 0.18) * 5; a.y = floorY; a.rot = Math.sin(t * 0.8) * 8; a.face = 1;
+      b.x += (center - 15 - b.x) * 0.025; b.y = floorY; b.face = -1;
+      b.rot += 13; b.off = t > 170 && t < 215;
+      if (t === 72) petSay(a, "철컥! 끌어당긴다!");
+      if (t === 174) petSay(b, "과부하... 재부팅...");
+    }
+  }
+  else if (scene === "home"){
+    const center = Math.max(45, Math.min(vw - 45, vw * 0.5));
+    if (t < 70){
+      petEventMoveToward(a, center - 22, Math.max(12, floorY - 135), 0.08);
+      petEventMoveToward(b, center - 18, floorY, 0.09);
+    } else if (t < 180){
+      const u = (t - 70) / 110;
+      a.x = center - 22; a.y = Math.max(10, floorY - 135 - u * 35) + Math.sin(t * 0.1) * 3;
+      b.x = center - 18; b.y = floorY + (a.y + PET_H - floorY) * u;
+      a.beam.style.display = "block";
+      a.beam.style.height = Math.max(18, b.y - (a.y + PET_H) + 10) + "px";
+      b.rot = Math.sin(t * 0.45) * 18;
+      if (t === 74) petSay(b, "어? 내 우주선!");
+    } else if (t < 215){
+      a.beam.style.display = "none";
+      a.y -= 6; b.y -= 6;
+      if (t > 198){ a.el.style.opacity = "0"; b.el.style.opacity = "0"; }
+    } else {
+      if (t === 215){
+        const nx = center < vw / 2 ? vw - 70 : 25;
+        a.x = Math.max(0, nx); b.x = Math.max(0, nx + 4); a.y = -30; b.y = 4;
+        petSmoke(a.x, 18); a.el.style.opacity = ""; b.el.style.opacity = "";
+      }
+      a.y += (Math.max(12, floorY - 120) - a.y) * 0.05;
+      b.y += (floorY - b.y) * 0.05; b.rot *= 0.86;
+    }
+  }
+  else if (scene === "rain"){
+    const center = Math.max(45, Math.min(vw - 45, vw * 0.5));
+    if (t < 65){
+      petEventMoveToward(a, center - 22, Math.max(12, floorY - 135), 0.08);
+      petEventMoveToward(b, center - 18, floorY, 0.09);
+    } else {
+      a.x = center - 22 + Math.sin(t * 0.04) * 18; a.y = Math.max(10, floorY - 135) + Math.sin(t * 0.08) * 3;
+      b.x = center - 18 + Math.sin(t * 0.09) * 16;
+      b.y = floorY - Math.abs(Math.sin((t - 65) * 0.105)) * 75; b.squash = b.y > floorY - 5 ? 0.4 : 0;
+      if (t === 68) petSay(a, "후두둑~ 소나기!");
+      if (t === 94) petSay(b, "개굴개굴!");
+      if (t % 4 === 0) petTrace(a.x + 5 + Math.random() * 55, a.y + PET_H + 12 + Math.random() * 45, "rain", 520);
+    }
+  }
+  else if (scene === "apple"){
+    if (t < 55){
+      petEventMoveToward(a, left + 45, floorY, 0.09);
+      petEventMoveToward(b, left, floorY, 0.09);
+    } else {
+      const u = Math.min(1, (t - 55) / 205);
+      a.x = left + 45 + span * u; a.y = floorY - Math.abs(Math.sin(t * 0.18)) * 16;
+      a.face = 1; a.rot = u * 850;
+      b.x = Math.max(left, a.x - 58 - Math.sin(t * 0.08) * 12);
+      b.y = floorY - Math.abs(Math.sin(t * 0.22)) * 28; b.face = 1;
+      if (t === 58) petSay(b, "사과다! 기다려!");
+      if (t === 175) petSay(a, "데굴데굴~");
+    }
+  }
+  else if (scene === "slowrace"){
+    const start = Math.max(8, Math.min(vw - 180, vw * 0.16));
+    const raceSpan = Math.max(70, Math.min(250, vw - start - 55));
+    if (t < 65){
+      petEventMoveToward(a, start, floorY - 3, 0.08);
+      petEventMoveToward(b, start + 4, floorY, 0.08);
+    } else {
+      const u = Math.min(1, (t - 65) / 285);
+      a.x = start + raceSpan * Math.min(1, u * 0.91 + Math.sin(t * 0.04) * 0.008); a.y = floorY - 3; a.face = 1;
+      b.x = start + raceSpan * Math.min(1, u * 0.94 + Math.sin(t * 0.035 + 1) * 0.008); b.y = floorY; b.face = 1;
+      if (t === 68){ petSay(a, "준비... 출발..."); setTimeout(() => { if (b.petEvent === evt) petSay(b, "천천히 가자!"); }, 260); }
+      if (t === 300) petSay(a.x > b.x ? a : b, "거의 다 왔다!");
+    }
+  }
+
+  for (const p of [a, b]){
+    p.x = Math.max(0, Math.min(vw - PET_W, p.x));
+    p.y = Math.max(-PET_H * 2, Math.min(vh - PET_H, p.y));
+  }
+  if (t >= evt.def.duration) petEventEnd(evt, true);
+}
+function petEventTick(w){
+  if (w.event){ petEventSceneStep(w.event); return; }
+  if (--w.eventTimer > 0) return;
+  const dex = petEventDexLoad();
+  let choices = PET_EVENT_DEFS.filter(def => def.scene && !w.playedEvents.has(def.id))
+    .map(def => ({ def, pair:petEventPair(w, def) })).filter(x => x.pair);
+  const unseen = choices.filter(x => !dex[x.def.id]);
+  if (unseen.length) choices = unseen;
+  if (choices.length){
+    const choice = choices[Math.floor(Math.random() * choices.length)];
+    petEventStart(w, choice.def, choice.pair);
+  } else w.eventTimer = 300;
+}
+
+// ----- 집중 모드·타이핑 생활 리듬 -----
+function petWorldIsQuiet(w){
+  return !!w && (w.rhythm === "focus" || Date.now() < (w.typingQuietUntil || 0));
+}
+function petWakeFromQuiet(p){
+  if (!p.quiet) return;
+  p.quiet = false; p.off = false; p.squash = 0; p.rot = 0;
+  p.el.classList.remove("pet-quiet");
+  if (p.state === "drag") return;
+  if (p.grav){ p.state = "fall"; p.vx = 0; p.vy = 0; p.t = 0; }
+  else petAirRelease(p);
+}
+function petQuietUpdate(p, w){
+  if (!p.quiet){
+    p.quiet = true; p.victim = null; p.gTarget = null; p.vx = 0; p.vy = 0;
+    p.el.classList.add("pet-quiet");
+    if (p.kind === "ufo") petUfoAbort(p);
+    if (p.beam){ p.beam.style.display = "none"; p.beam.style.height = "0px"; }
+    if (p.bolt) p.bolt.style.display = "none";
+    if (p.thread) p.thread.style.display = "none";
+    if (p.chute) p.chute.style.display = "none";
+  }
+  const index = Math.max(0, w.pets.indexOf(p));
+  const side = index % 2, slot = Math.floor(index / 2);
+  const gap = PET_W + 7, margin = 8;
+  const tx = side === 0 ? margin + slot * gap : window.innerWidth - PET_W - margin - slot * gap;
+  const ty = Math.max(0, window.innerHeight - PET_H - 6);
+  p.x += (tx - p.x) * 0.065;
+  p.y += (ty - p.y) * 0.065;
+  p.face = side === 0 ? 1 : -1;
+  p.rot = Math.sin(p.t * 0.035) * 2;
+  p.squash = 0.08 + (Math.sin(p.t * 0.07) + 1) * 0.025;
+  p.off = true;
+}
+function petSetRhythm(mode){
+  const w = petWorld;
+  if (!w) return;
+  mode = mode === "focus" ? "focus" : mode === "break" ? "break" : "normal";
+  if (w.rhythm === mode && mode !== "break") return;
+  w.rhythm = mode;
+  if (mode === "focus"){
+    if (w.event) petEventEnd(w.event, false);
+    w.typingQuietUntil = 0;
+    const first = w.pets.find(p => p.state !== "drag");
+    if (first) petSay(first, "집중 시간! 조용히 쉴게요");
+    return;
+  }
+  for (const p of w.pets) petWakeFromQuiet(p);
+  if (mode === "break"){
+    w.eventTimer = Math.min(w.eventTimer || 300, 240);
+    w.pets.forEach((p, index) => {
+      if (p.state === "drag") return;
+      setTimeout(() => {
+        if (petWorld !== w || w.rhythm !== "break" || p.state === "drag") return;
+        if (p.grav){ p.state = "jump"; p.vy = -(4.5 + Math.random() * 2); p.vx = 0; p.t = 0; p.off = false; }
+        else { p.pop = 12; p.off = false; }
+        if (index === 0) petSay(p, "휴식 시간! 쭉쭉~");
+      }, index * 120);
+    });
+  }
+}
+function petTypingPulse(){
+  const w = petWorld;
+  if (!w || w.rhythm === "focus") return;
+  w.typingQuietUntil = Date.now() + 3800;
+}
+
 // ----- 유령: 중력을 무시하고 목표 지점을 향해 스르륵 떠다닌다. 가끔 반투명해진다 -----
 function petGhostUpdate(p){
   const vw = window.innerWidth, vh = window.innerHeight;
@@ -313,6 +623,7 @@ function petUfoUpdate(p, pets){
         p.state = "beam"; p.timer = 110;
         p.beam.style.display = "block";
         v.state = "abduct"; v.vy = 0; v.rot = 0; v.t = 0;
+        if (v.speciesId === "rabbit") petEventRecord("ufo_rabbit_abduction");
       }
     }
   }
@@ -554,7 +865,10 @@ function petUpdate(p, w){
   if (p.squash > 0) p.squash = Math.max(0, p.squash - 0.06);
   if (p.pop > 0) p.pop--;
   if (p.cool > 0) p.cool--;                                    // 고양이 사냥 쿨타임
+  if (p.petEvent) return;                                      // 숨겨진 조합 연출은 이벤트 감독이 좌표를 움직인다
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
+  if (petWorldIsQuiet(w)){ petQuietUpdate(p, w); return; }
+  if (p.quiet) petWakeFromQuiet(p);
   if (p.kind === "ghost") return petGhostUpdate(p);
   if (p.kind === "ufo") return petUfoUpdate(p, w.pets);
   if (p.kind === "spider") return petSpiderUpdate(p);
@@ -582,7 +896,10 @@ function petUpdate(p, w){
   if (p.kind === "mouse" && (p.state === "walk" || p.state === "idle") && p.cool <= 0){
     const cat = w.pets.find(o => o.kind === "cat" && o.state !== "drag" &&
       Math.abs(o.x - p.x) < 170 && Math.abs(o.y - p.y) < 60);
-    if (cat){ p.state = "flee"; p.timer = 90; p.face = (p.x < cat.x) ? -1 : 1; p.cool = 400; petSay(p, "찍찍!"); }
+    if (cat){
+      p.state = "flee"; p.timer = 90; p.face = (p.x < cat.x) ? -1 : 1; p.cool = 400; petSay(p, "찍찍!");
+      petEventRecord("cat_mouse_escape");
+    }
   }
   // 카멜레온: 가까운 펫의 색을 슬쩍 복사하고, 멀어지면 원래 색으로 돌아온다
   if (p.kind === "chameleon" && p.t % 30 === 0){
@@ -596,6 +913,7 @@ function petUpdate(p, w){
       p.mimicOf = near;
       p.palette = near ? { C: near.blinkCol, D: near.palette.D || near.blinkCol } : p.basePal;
       if (near && Math.random() < 0.4) petSay(p, "슥- 변신!");
+      if (near && near.speciesId === "cat") petEventRecord("chameleon_copycat");
     }
   }
 
@@ -860,6 +1178,7 @@ function petUpdate(p, w){
 // ----- 공용 루프: 몇 마리든 rAF 하나로 돌린다 -----
 function petWorldStep(w){
   if (--w.refresh <= 0){ w.platforms = petCollectPlatforms(); w.refresh = 30; }   // 발판은 0.5초마다 갱신
+  if (!petWorldIsQuiet(w) || w.event) petEventTick(w);
   for (const p of w.pets){ petUpdate(p, w); petDraw(p); }
   w.raf = requestAnimationFrame(() => petWorldStep(w));
 }
@@ -879,8 +1198,31 @@ function petAirRelease(p){
 // ----- 붙잡기·던지기·짧은 클릭 -----
 function petBindPointer(p){
   let dragging = false, moved = 0, last = null;
+  const finishDrag = (cancelled) => {
+    if (!dragging) return;
+    dragging = false;
+    p.el.style.cursor = "grab";
+    if (cancelled){
+      p.vx = 0; p.vy = 0; p.rot = 0;
+      if (p.grav){ p.state = "fall"; p.t = 0; }
+      else petAirRelease(p);
+      return;
+    }
+    if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
+      petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)]);
+      if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
+      else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
+    } else {              // 던지기: 마지막 이동 속도로 날아간다(중력 없는 애들은 관성 미끄러짐)
+      p.vx = Math.max(-7, Math.min(7, p.vx));
+      p.vy = Math.max(-9, Math.min(6, p.vy));
+      if (p.grav){ p.state = "fall"; p.t = 0; }
+      else petAirRelease(p);
+    }
+  };
   p.el.addEventListener("pointerdown", (e) => {
     e.preventDefault();
+    if (p.petEvent) petEventEnd(p.petEvent, false);             // 연출 중 붙잡으면 발견 처리 없이 자연스럽게 취소
+    if (p.quiet) petWakeFromQuiet(p);                           // 집중 중에도 직접 붙잡는 조작은 즉시 허용
     dragging = true; moved = 0; last = { x:e.clientX, y:e.clientY };
     if (p.kind === "ufo") petUfoAbort(p);                      // 납치 중이었으면 광선을 끄고 피해자를 놓아준다
     p.state = "drag"; p.rot = 0; p.vx = 0; p.vy = 0; p.blink = 0; p.off = false;
@@ -900,21 +1242,9 @@ function petBindPointer(p){
     p.rot = Math.max(-25, Math.min(25, dx * 2));
     last = { x:e.clientX, y:e.clientY };
   });
-  p.el.addEventListener("pointerup", () => {
-    if (!dragging) return;
-    dragging = false;
-    p.el.style.cursor = "grab";
-    if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
-      petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)]);
-      if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
-      else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
-    } else {              // 던지기: 마지막 이동 속도로 날아간다(중력 없는 애들은 관성 미끄러짐)
-      p.vx = Math.max(-7, Math.min(7, p.vx));
-      p.vy = Math.max(-9, Math.min(6, p.vy));
-      if (p.grav){ p.state = "fall"; p.t = 0; }
-      else petAirRelease(p);
-    }
-  });
+  p.el.addEventListener("pointerup", () => finishDrag(false));
+  p.el.addEventListener("pointercancel", () => finishDrag(true));
+  p.el.addEventListener("lostpointercapture", () => finishDrag(true));
 }
 
 // 눈꺼풀 색: 스프라이트에서 눈흰자(W) 바로 옆 픽셀의 색 = 그 자리 몸통 색
@@ -927,10 +1257,48 @@ function petEyelidColor(art, palette){
   return first || "#999999";
 }
 
+// ----- 황금 펫(희귀)·도감 — 만난 종족을 localStorage 에 기록해 도감에서 보여준다 -----
+const PET_GOLD_CHANCE = 0.02;         // 등장할 때마다 2% 확률로 금빛 개체
+const PET_DEX_KEY = "mn.petDex";
+function petSpeciesId(sp){            // 종족 id = PET_ART 에서 그 스프라이트의 키
+  if (!sp._id){
+    for (const k in PET_ART){ if (PET_ART[k] === sp.art){ sp._id = k; break; } }
+  }
+  return sp._id || "unknown";
+}
+function petDexLoad(){
+  try { return JSON.parse(localStorage.getItem(PET_DEX_KEY)) || {}; } catch(_){ return {}; }
+}
+function petDexRecord(id, gold){
+  const dex = petDexLoad();
+  const e = dex[id] || (dex[id] = { n: 0 });
+  e.n++;
+  if (gold) e.g = true;
+  try { localStorage.setItem(PET_DEX_KEY, JSON.stringify(dex)); } catch(_){}
+}
+// 원래 색의 밝기만 남기고 금빛 램프에 얹는다 — 어두운 부분은 진한 금갈색, 밝은 부분은 연한 금색
+function petGoldColor(hex){
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return hex;
+  const v = parseInt(m[1], 16);
+  const t = 0.25 + 0.75 * ((0.299 * (v >> 16 & 255) + 0.587 * (v >> 8 & 255) + 0.114 * (v & 255)) / 255);
+  const r = Math.round(120 + 135 * t), g = Math.round(80 + 130 * t), b = Math.round(20 + 60 * t);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+function petGoldPalette(pal){
+  const out = {};
+  for (const k in pal) out[k] = petGoldColor(pal[k]);
+  return out;
+}
+
 // ----- 펫 한 마리 만들기(켤 때마다 종족 가방에서 겹치지 않게 뽑는다 — 오늘은 누가 나올까) -----
 function petSpawn(i, total, bag){
   const species = bag[i % bag.length];
-  const palette = species.palettes[Math.floor(Math.random() * species.palettes.length)];
+  const speciesId = petSpeciesId(species);
+  const gold = Math.random() < PET_GOLD_CHANCE;
+  let palette = species.palettes[Math.floor(Math.random() * species.palettes.length)];
+  if (gold) palette = petGoldPalette(palette);
+  petDexRecord(speciesId, gold);
   const el = document.createElement("div");
   el.className = "pixel-pet";
   el.title = "붙잡아 던질 수 있어요";
@@ -978,7 +1346,7 @@ function petSpawn(i, total, bag){
   else { y0 = -PET_H - i * 90; state0 = "fall"; }
   const p = {
     el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
-    kind: species.kind, art: species.art, palette, sayings: species.sayings,
+    kind: species.kind, speciesId, art: species.art, palette, sayings: species.sayings, gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),
     speed: 0.85 + Math.random() * 0.4, grav,
@@ -991,18 +1359,42 @@ function petSpawn(i, total, bag){
     support: null, gTarget: null, victim: null, bubbleTimer: 0
   };
   petBindPointer(p);
+  if (gold) setTimeout(() => { if (p.el.isConnected) petSay(p, "✨ 반짝반짝!"); }, 900 + Math.random() * 600);
   return p;
+}
+
+// 2마리 이상이면 아직 발견하지 못한 조합이 가끔 함께 나오게 해 수집이 순수 운에만 좌우되지 않게 한다.
+function petEventBiasBag(bag, count){
+  if (count < 2 || typeof PET_EVENT_DEFS !== "object" || Math.random() > 0.78) return bag;
+  const dex = petEventDexLoad();
+  const unseen = PET_EVENT_DEFS.filter(def => !dex[def.id] && def.pets.every(id => !!petSpeciesById(id)));
+  if (!unseen.length) return bag;
+  const directed = unseen.filter(def => def.scene);
+  const choices = directed.length ? directed : unseen;
+  const def = choices[Math.floor(Math.random() * choices.length)];
+  const first = bag.find(sp => petSpeciesId(sp) === def.pets[0]);
+  const second = bag.find(sp => petSpeciesId(sp) === def.pets[1]);
+  if (!first || !second) return bag;
+  return [first, second, ...bag.filter(sp => sp !== first && sp !== second)];
 }
 
 // ----- 켜기/끄기 -----
 function petStart(count){
   if (petWorld) return;
   const n = Math.max(1, Math.min(PET_MAX, count || 1));
-  // 종족 가방: 전체를 무작위로 섞어 겹치지 않게 하나씩 나눠 준다
-  const bag = PET_SPECIES.slice().sort(() => Math.random() - 0.5);
+  // 종족 가방: 전체를 무작위로 섞어(피셔-예이츠) 겹치지 않게 하나씩 나눠 준다
+  // sort(() => Math.random()-0.5) 는 원래 순서 근처에 머무는 편향이 있어 같은 펫만 계속 나온다
+  const bag = PET_SPECIES.slice();
+  for (let i = bag.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = bag[i]; bag[i] = bag[j]; bag[j] = t;
+  }
+  const arrangedBag = petEventBiasBag(bag, n);
   const w = petWorld = { pets: [], platforms: petCollectPlatforms(), refresh: 30, raf: 0,
-    mouse: { x:-9999, y:-9999, ts: 0 } };
-  for (let i = 0; i < n; i++) w.pets.push(petSpawn(i, n, bag));
+    mouse: { x:-9999, y:-9999, ts: 0 }, event:null,
+    eventTimer:240 + Math.floor(Math.random() * 180), playedEvents:new Set(),
+    rhythm:"normal", typingQuietUntil:0 };
+  for (let i = 0; i < n; i++) w.pets.push(petSpawn(i, n, arrangedBag));
   w.onResize = () => {
     w.platforms = petCollectPlatforms();
     for (const p of w.pets) p.x = Math.min(p.x, Math.max(0, window.innerWidth - PET_W));
@@ -1022,6 +1414,7 @@ function petStart(count){
 function petStop(){
   const w = petWorld;
   if (!w) return;
+  if (w.event) petEventEnd(w.event, false);
   cancelAnimationFrame(w.raf);
   window.removeEventListener("resize", w.onResize);
   window.removeEventListener("mousemove", w.onMouse);
@@ -1040,3 +1433,124 @@ function applyPetSettings(){
   petStart(count);
 }
 function initPet(){ applyPetSettings(); }
+
+// ----- 펫 도감: 친구와 숨겨진 행동을 두 탭으로 보여준다 -----
+function petDexDrawMini(cv, art, palette, silhouette, scale){
+  const s = scale || PET_SCALE;
+  cv.width = PET_GW * s; cv.height = PET_GH * s;
+  const ctx = cv.getContext("2d");
+  for (let r = 0; r < art.length; r++){
+    const row = art[r];
+    for (let c = 0; c < row.length; c++){
+      const ch = row[c];
+      if (ch === ".") continue;
+      const col = silhouette ? "#3a4150"
+        : ch === "W" ? "#ffffff" : ch === "K" ? "#161616" : palette[ch];
+      if (!col) continue;
+      ctx.fillStyle = col;
+      ctx.fillRect(c * s, r * s, s, s);
+    }
+  }
+}
+function renderPetFriendDex(){
+  const grid = document.getElementById("petDexGrid");
+  if (!grid) return;
+  const dex = petDexLoad();
+  grid.textContent = "";
+  let met = 0, golds = 0;
+  for (const sp of PET_SPECIES){
+    const id = petSpeciesId(sp);
+    const e = dex[id];
+    if (e){ met++; if (e.g) golds++; }
+    const name = (typeof PET_NAMES === "object" && PET_NAMES[id]) || id;
+    const cell = document.createElement("div");
+    cell.className = "pet-dex-cell" + (e ? "" : " unmet") + (e && e.g ? " gold" : "");
+    const cv = document.createElement("canvas");
+    petDexDrawMini(cv, sp.art, sp.palettes[0], !e);
+    const nm = document.createElement("span");
+    nm.textContent = e ? name : "???";
+    cell.appendChild(cv); cell.appendChild(nm);
+    if (e){
+      cell.title = name + " · " + e.n + "번 만남" + (e.g ? " · 황금 펫도 만났어요!" : "");
+      if (e.g){ const b = document.createElement("b"); b.className = "pet-dex-star"; b.textContent = "★"; cell.appendChild(b); }
+    } else cell.title = "아직 만나지 못했어요 — 펫을 켤 때마다 무작위로 등장해요";
+    grid.appendChild(cell);
+  }
+  const count = document.getElementById("petDexCount");
+  if (count) count.dataset.friends = "만난 친구 " + met + " / " + PET_SPECIES.length
+    + (golds ? " · 황금 펫 ★ " + golds + "종" : "") + " — 숨겨진 행동은 펫이 2마리 이상일 때 만날 수 있어요";
+}
+function renderPetEventDex(){
+  const grid = document.getElementById("petEventDexGrid");
+  if (!grid || typeof PET_EVENT_DEFS !== "object") return;
+  const dex = petEventDexLoad();
+  grid.textContent = "";
+  let met = 0;
+  for (const def of PET_EVENT_DEFS){
+    const entry = dex[def.id];
+    if (entry) met++;
+    const cell = document.createElement("div");
+    cell.className = "pet-event-cell " + (entry ? "discovered" : "unmet");
+    cell.title = entry ? def.description : def.hint;
+
+    const pair = document.createElement("div");
+    pair.className = "pet-event-pair";
+    def.pets.forEach((id, index) => {
+      if (index){
+        const plus = document.createElement("span"); plus.className = "pet-event-plus"; plus.textContent = "+"; pair.appendChild(plus);
+      }
+      const sp = petSpeciesById(id);
+      const cv = document.createElement("canvas");
+      if (sp) petDexDrawMini(cv, sp.art, sp.palettes[0], !entry, 2);
+      cv.setAttribute("aria-label", entry ? ((PET_NAMES && PET_NAMES[id]) || id) : "숨겨진 펫");
+      pair.appendChild(cv);
+    });
+
+    const copy = document.createElement("div"); copy.className = "pet-event-copy";
+    const title = document.createElement("strong"); title.className = "pet-event-title"; title.textContent = entry ? def.title : "???";
+    const detail = document.createElement("span"); detail.className = entry ? "pet-event-desc" : "pet-event-hint";
+    detail.textContent = entry ? def.description : def.hint;
+    copy.appendChild(title); copy.appendChild(detail);
+    cell.appendChild(pair); cell.appendChild(copy);
+    if (entry && entry.n > 1){
+      const n = document.createElement("span"); n.className = "pet-event-count"; n.textContent = entry.n + "회"; cell.appendChild(n);
+    }
+    grid.appendChild(cell);
+  }
+  const count = document.getElementById("petDexCount");
+  if (count){
+    count.dataset.events = "발견한 행동 " + met + " / " + PET_EVENT_DEFS.length
+      + " — 조합이 함께 있으면 아직 못 본 행동이 조금 먼저 일어나요";
+    const modal = document.getElementById("petDexModal");
+    if (modal && modal.dataset.tab === "events") count.textContent = count.dataset.events;
+  }
+}
+function petDexSetTab(tab){
+  tab = tab === "events" ? "events" : "friends";
+  const modal = document.getElementById("petDexModal");
+  const friendsTab = document.getElementById("petDexFriendsTab");
+  const eventsTab = document.getElementById("petDexEventsTab");
+  const friends = document.getElementById("petDexGrid");
+  const events = document.getElementById("petEventDexGrid");
+  const count = document.getElementById("petDexCount");
+  if (modal) modal.dataset.tab = tab;
+  if (friendsTab){ friendsTab.classList.toggle("active", tab === "friends"); friendsTab.setAttribute("aria-selected", String(tab === "friends")); }
+  if (eventsTab){ eventsTab.classList.toggle("active", tab === "events"); eventsTab.setAttribute("aria-selected", String(tab === "events")); }
+  if (friends) friends.hidden = tab !== "friends";
+  if (events) events.hidden = tab !== "events";
+  if (count) count.textContent = tab === "events" ? (count.dataset.events || "") : (count.dataset.friends || "");
+}
+function openPetDex(tab){
+  const modal = document.getElementById("petDexModal");
+  if (!modal) return;
+  renderPetFriendDex();
+  renderPetEventDex();
+  const friendsTab = document.getElementById("petDexFriendsTab");
+  const eventsTab = document.getElementById("petDexEventsTab");
+  if (friendsTab) friendsTab.onclick = () => petDexSetTab("friends");
+  if (eventsTab) eventsTab.onclick = () => petDexSetTab("events");
+  petDexSetTab(tab || "friends");
+  modal.hidden = false;
+  const close = document.getElementById("petDexClose");
+  if (close) close.focus();                                   // ESC 가 뒤의 설정 창 대신 도감을 닫게
+}

@@ -537,6 +537,13 @@ function wire(){
   settingSaveFolderOpen.onclick = openSaveFolder;
   settingSaveFolderChange.onclick = chooseSaveFolder;
   refreshSaveFolder();
+  const syncPetFocusSettingFields = () => {
+    const enabled = !!byId("settingPetFocus").checked;
+    byId("settingPetFocusMin").disabled = !enabled;
+    byId("settingPetBreakMin").disabled = !enabled;
+    byId("settingPetQuietTyping").disabled = !enabled;
+  };
+  byId("settingPetFocus").addEventListener("change", syncPetFocusSettingFields);
   byId("settingsOpen").onclick = () => {
     byId("settingUiScale").value = String(currentUiScale());
     byId("settingPdfZoom").value = String(defaultPdfZoom());
@@ -545,6 +552,12 @@ function wire(){
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
+    const petFocus = typeof normalizePetFocus === "function" ? normalizePetFocus(appSettings.petFocus) : { enabled:true, focusMin:25, breakMin:5, quietTyping:true };
+    byId("settingPetFocus").checked = !!petFocus.enabled;
+    byId("settingPetFocusMin").value = String(petFocus.focusMin);
+    byId("settingPetBreakMin").value = String(petFocus.breakMin);
+    byId("settingPetQuietTyping").checked = !!petFocus.quietTyping;
+    syncPetFocusSettingFields();
     const ss = appSettings.screensaver || { enabled:false, idleMin:5 };
     byId("settingScreensaver").checked = !!ss.enabled;
     byId("settingScreensaverIdle").value = String(ss.idleMin || 5);
@@ -575,12 +588,15 @@ function wire(){
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
       petEnabled: byId("settingPet").checked, petCount: Number(byId("settingPetCount").value) || 1,
+      petFocus: { enabled: byId("settingPetFocus").checked, focusMin: Number(byId("settingPetFocusMin").value) || 25,
+        breakMin: Number(byId("settingPetBreakMin").value) || 5, quietTyping: byId("settingPetQuietTyping").checked },
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
         sound: byId("settingScreensaverSound").checked },
       shortcuts:shortcutDraft
     });
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
     if (typeof applyPetSettings === "function") applyPetSettings();
+    if (typeof applyPetFocusSettings === "function") applyPetFocusSettings();
     applyUiScale();
     syncShortcutHints();
     if (state && state.kind === "pdf" && !appSettings.pdfRecovery) state.recoveryDirty = false;
@@ -621,6 +637,9 @@ function wire(){
   }
   if (typeof initScreensaver === "function") initScreensaver();
   if (typeof initPet === "function") initPet();
+  if (typeof initPetFocus === "function") initPetFocus();
+  if (byId("btnPetDex")) byId("btnPetDex").onclick = () => { if (typeof openPetDex === "function") openPetDex(); };
+  if (byId("petDexClose")) byId("petDexClose").onclick = () => { byId("petDexModal").hidden = true; };
   document.querySelectorAll(".tool-menu").forEach(menu => menu.querySelectorAll("button").forEach(button => button.addEventListener("click", () => { menu.open = false; })));
   document.addEventListener("click", (e) => document.querySelectorAll(".tool-menu[open]").forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }));
   byId("helpOpen").onclick = () => { byId("helpModal").hidden = false; };
@@ -646,7 +665,8 @@ function wire(){
     confirmModal: "confirmCancel",
     settingsModal: "settingsCancel",
     helpModal: "helpClose",
-    welcomeModal: "welcomeClose"
+    welcomeModal: "welcomeClose",
+    petDexModal: "petDexClose"
   };
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || e.isComposing || e.keyCode === 229 || shortcutCaptureAction) return;

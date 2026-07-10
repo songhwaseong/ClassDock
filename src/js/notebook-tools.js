@@ -338,6 +338,7 @@ async function nbRunNotebookLocalPythonOnce(ownerDoc){
   try {
     const result = await runPythonInteractive(script, bundle, ui, hooks);
     nbSetStatus(ownerDoc, (result && result.code) ? "로컬 실행이 오류로 끝났어요 (아래 결과 확인)." : "로컬 파이썬 실행 완료 ✓");
+    if (typeof petReact === "function") petReact((result && result.code) ? "error" : "success");   // 펫들이 결과에 반응
   } catch(error){
     nbSetStatus(ownerDoc, "로컬 실행 실패: " + ((error && error.message) || error));
   } finally {

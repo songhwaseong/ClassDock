@@ -881,3 +881,17 @@ const PET_SPECIES = [
     ],
     sayings: ["메에에~", "폭신폭신", "털 깎을 때 됐나?", "양 한 마리, 양 두 마리...", "구름 아니에요", "포근하죠?"] }
 ];
+
+// 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
+const PET_NAMES = {
+  crab:"게", chick:"병아리", robot:"로봇", ghost:"유령", slime:"슬라임",
+  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", dog:"강아지",
+  spider:"거미", mole:"두더지", frog:"개구리", penguin:"펭귄", balloon:"풍선",
+  snail:"달팽이", ninja:"닌자", bird:"새", rabbit:"토끼", soccer:"축구공",
+  chameleon:"카멜레온", wizard:"마법사", magnet:"자석", cloud:"번개구름", rocket:"로켓",
+  butterfly:"나비", fish:"물고기", snake:"뱀", mouse:"생쥐", turtle:"거북이",
+  octopus:"문어", bat:"박쥐", owl:"부엉이", duck:"오리", squirrel:"다람쥐",
+  hedgehog:"고슴도치", hamster:"햄스터", bee:"꿀벌", ladybug:"무당벌레", dice:"주사위",
+  apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
+  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양"
+};

@@ -116,6 +116,28 @@
   .tool-menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:80;display:grid;gap:5px;min-width:150px;padding:7px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.28)}
   .tool-menu-pop button{color:var(--ink);background:var(--field);border-color:var(--border);text-align:left}.tool-menu-pop button:hover{background:var(--panel-2)}
   .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+  .pet-focus-wrap{position:relative;flex:0 0 auto}
+  .pet-focus-wrap[hidden]{display:none}
+  .pet-focus-open{display:inline-flex;align-items:center;gap:5px}
+  .pet-focus-open.active{border-color:rgba(129,140,248,.75);background:rgba(79,70,229,.36);color:#e0e7ff}
+  .pet-focus-open.break{border-color:rgba(52,211,153,.65);background:rgba(5,150,105,.28);color:#a7f3d0}
+  .pet-focus-open.paused{border-color:rgba(251,191,36,.65);background:rgba(180,83,9,.25);color:#fde68a}
+  .pet-focus-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:95;width:min(310px,calc(100vw - 16px));padding:15px;
+    border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--ink);box-shadow:0 14px 38px rgba(0,0,0,.3)}
+  .pet-focus-panel[hidden]{display:none}
+  .pet-focus-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .pet-focus-head strong{font-size:14px}
+  header .pet-focus-head button{width:28px;height:28px;padding:0;border-color:var(--border);background:var(--panel-2);color:var(--muted);font-size:18px}
+  .pet-focus-time{margin:10px 0 8px;font:700 34px/1.1 Consolas,"Courier New",monospace;letter-spacing:.02em;text-align:center;color:var(--accent)}
+  .pet-focus-progress{height:7px;overflow:hidden;border-radius:999px;background:var(--panel-2)}
+  .pet-focus-progress span{display:block;width:0;height:100%;border-radius:inherit;background:var(--accent);transition:width .35s linear}
+  .pet-focus-panel.break .pet-focus-time{color:#059669}
+  .pet-focus-panel.break .pet-focus-progress span{background:#10b981}
+  .pet-focus-message{min-height:34px;margin:10px 0 9px;color:var(--muted);font-size:11.5px;line-height:1.45;text-align:center}
+  .pet-focus-controls{display:flex;justify-content:center;gap:7px}
+  header .pet-focus-controls .btn{padding:7px 11px;border:1px solid var(--border);background:var(--panel-2);color:var(--ink);font-size:12px}
+  header .pet-focus-controls .btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}
+  .pet-focus-stats{display:block;margin-top:9px;color:var(--muted);font-size:10.5px;text-align:center}
   header .scratchpad-open{display:inline-flex;align-items:center;gap:6px}
   header .scratchpad-open svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   header .image-memo-open{display:inline-flex;align-items:center;gap:6px}
@@ -920,6 +942,9 @@
   .loading #loadingCancel{margin-top:4px}
   .settings-card{width:min(640px,96%);max-height:88vh;overflow:auto}.settings-row,.settings-check{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
   .settings-row .pw-input{width:140px;margin:0}.settings-check{justify-content:flex-start}.settings-check input{width:17px;height:17px;accent-color:var(--accent)}
+  .pet-focus-setting-selects{display:flex;gap:6px}
+  .settings-row .pet-focus-setting-selects .pw-input{width:112px}
+  @media (max-width:480px){.pet-focus-setting-row{align-items:stretch;flex-direction:column}.pet-focus-setting-selects .pw-input{flex:1}}
   .settings-save-folder{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
   .settings-save-folder[hidden]{display:none}
   .settings-save-folder-copy{display:flex;flex-direction:column;min-width:0;gap:3px}
@@ -1088,6 +1113,9 @@
   /* ===== 픽셀 펫(돌아다니는 게) — 모달 위로도 다니지만 화면보호기(100000)에는 가려진다 ===== */
   .pixel-pet{position:fixed;left:0;top:0;width:45px;height:33px;z-index:90000;cursor:grab;
     user-select:none;-webkit-user-select:none;touch-action:none;will-change:transform}
+  .pixel-pet.pet-quiet::after{content:"z";position:absolute;left:76%;top:-8px;color:#7c8ba1;font:700 11px/1 monospace;
+    pointer-events:none;text-shadow:0 1px 0 var(--panel);animation:pet-sleep-z 1.8s ease-in-out infinite}
+  @keyframes pet-sleep-z{0%,100%{opacity:.2;transform:translate(0,3px) scale(.8)}50%{opacity:.9;transform:translate(5px,-4px) scale(1.1)}}
   .pixel-pet canvas{display:block;width:100%;height:100%;image-rendering:pixelated;pointer-events:none}
   .pixel-pet-bubble{position:absolute;left:50%;bottom:calc(100% + 7px);transform:translateX(-50%) scale(.8);
     padding:4px 9px;border-radius:9px;background:var(--panel);border:1px solid var(--border);color:var(--ink);
@@ -1102,6 +1130,7 @@
   .pixel-pet-trace.dirt{background:#8a6a4f;width:6px;height:6px;border-radius:50%}
   .pixel-pet-trace.dust{background:#e8dce5;width:9px;height:3px}
   .pixel-pet-trace.puff{background:#c9ccd4;width:8px;height:8px;border-radius:50%}
+  .pixel-pet-trace.rain{width:2px;height:10px;border-radius:2px;background:#65a9e8;transform:rotate(12deg)}
   @keyframes pet-trace-fade{from{opacity:.65}to{opacity:0}}
   /* 물고기의 비눗방울(스프라이트를 감싸는 반투명 원) */
   .pixel-pet-orb{position:absolute;inset:-7px;border-radius:50%;pointer-events:none;
@@ -1125,6 +1154,44 @@
   .pixel-pet-beam{position:absolute;left:50%;top:24px;transform:translateX(-50%);width:36px;height:0;
     background:linear-gradient(180deg,rgba(253,224,71,.5),rgba(253,224,71,.04));
     clip-path:polygon(30% 0,70% 0,100% 100%,0 100%);pointer-events:none;display:none}
+  /* 펫 도감: 친구 도감 + 둘이 만나 완성하는 숨겨진 행동 도감 */
+  .pet-dex-card{width:min(720px,96%);max-height:88vh;overflow:auto}
+  .pet-dex-tabs{display:flex;gap:6px;margin:12px 0 8px;padding:4px;border-radius:11px;background:var(--panel-2)}
+  .pet-dex-tab{flex:1;border:1px solid transparent;border-radius:8px;padding:7px 12px;background:transparent;
+    color:var(--muted);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  .pet-dex-tab:hover{color:var(--ink)}
+  .pet-dex-tab.active{background:var(--panel);border-color:var(--border);color:var(--accent);box-shadow:0 2px 7px rgba(0,0,0,.08)}
+  .pet-dex-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;margin-top:12px}
+  .pet-dex-cell{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;
+    padding:12px 4px 8px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);font-size:12px}
+  .pet-dex-cell canvas{image-rendering:pixelated}
+  .pet-dex-cell.unmet{opacity:.55}
+  .pet-dex-cell.unmet span{color:var(--muted);letter-spacing:2px}
+  .pet-dex-cell.gold{border-color:#d6a531;box-shadow:inset 0 0 0 1px rgba(214,165,49,.4)}
+  .pet-dex-star{position:absolute;top:3px;right:7px;color:#e8b93c;font-style:normal;font-weight:400}
+  .pet-event-dex-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:10px;margin-top:12px}
+  .pet-event-dex-grid[hidden]{display:none}
+  .pet-event-cell{position:relative;display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:10px;
+    min-height:92px;padding:11px;border:1px solid var(--border);border-radius:12px;background:var(--panel-2)}
+  .pet-event-cell.discovered{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));
+    box-shadow:inset 3px 0 0 color-mix(in srgb,var(--accent) 70%,transparent)}
+  .pet-event-cell.unmet{opacity:.72}
+  .pet-event-pair{display:flex;align-items:center;justify-content:center;gap:0;min-width:72px}
+  .pet-event-pair canvas{width:33px;height:25px;object-fit:contain;image-rendering:pixelated}
+  .pet-event-plus{width:10px;margin:0 -1px;color:var(--muted);font-size:12px;text-align:center;z-index:1}
+  .pet-event-copy{min-width:0}
+  .pet-event-title{display:block;margin-bottom:4px;color:var(--ink);font-size:12.5px;line-height:1.25}
+  .pet-event-cell.unmet .pet-event-title{color:var(--muted);letter-spacing:2px}
+  .pet-event-hint,.pet-event-desc{display:block;color:var(--muted);font-size:11px;line-height:1.38}
+  .pet-event-desc{color:var(--ink)}
+  .pet-event-count{position:absolute;right:8px;top:6px;color:var(--muted);font-size:10px}
+  @media (max-width:520px){
+    .pet-event-dex-grid{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .pixel-pet.pet-quiet::after{animation:none}
+    .pet-focus-progress span{transition:none}
+  }
   .docx-host{margin:0 auto}
   .hwp-host{margin:0 auto}
   .pptx-host{margin:0 auto}
