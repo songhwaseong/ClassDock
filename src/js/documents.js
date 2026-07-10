@@ -262,14 +262,21 @@ function makeGroup(kind, name, parentId=null){
 
 function attachStudyReferenceGuard(doc){
   const locked = () => isStudyReferenceLocked(doc);
-  const isInteractive = (target) => {
-    if (!target || !target.closest) return false;
-    return !!target.closest("button,input,select,textarea,[contenteditable='true'],.placed,.wb-canvas,.wb-tools,.code-edit,.selectable-sheet,.xlsx-sheet,.xlsx-editbar,.img-editor,.img-view,.scratchpad");
+  const pointerSurface = (target) => {
+    if (!target || !target.closest) return "content";
+    if (target.closest(".code-link")) return "code-link";
+    const textControl = target.closest("textarea,[contenteditable='true'],input");
+    if (textControl){
+      const type = String(textControl.type || "text").toLowerCase();
+      if (textControl.tagName !== "INPUT" || ["text","search","url","email","tel","password","number"].includes(type)) return "text-selection";
+    }
+    if (target.closest(".selectable-sheet,.xlsx-sheet")) return "sheet-selection";
+    if (target.closest("button,input,select,.placed,.wb-canvas,.wb-tools,.code-edit,.xlsx-editbar,.img-editor,.img-view,.scratchpad")) return "mutation-control";
+    return "content";
   };
   const blockPointer = (event) => {
     if (!locked()) return;
-    if (event.target && event.target.closest && event.target.closest(".code-link")) return; // 기존 핀 이동은 읽기 동작으로 허용
-    if (!isInteractive(event.target)) return; // PDF 텍스트 선택·컨테이너 스크롤은 유지
+    if (studyReadonlyPointerAllowed(pointerSurface(event.target), event.type)) return;
     event.preventDefault(); event.stopImmediatePropagation();
   };
   ["pointerdown", "click", "dblclick", "contextmenu"].forEach(type => doc.el.addEventListener(type, blockPointer, true));
@@ -279,8 +286,13 @@ function attachStudyReferenceGuard(doc){
   }, true));
   doc.el.addEventListener("keydown", (event) => {
     if (!locked()) return;
-    const key = String(event.key || "").toLowerCase();
-    if ((event.ctrlKey || event.metaKey) && (key === "c" || key === "a")) return; // 읽기·복사 허용
+    const target = event.target;
+    const closest = target && target.closest ? target.closest.bind(target) : () => null;
+    if (studyReadonlyKeyAllowed({
+      key:event.key, ctrlKey:event.ctrlKey, metaKey:event.metaKey,
+      textEntry:!!closest("input,textarea,[contenteditable='true']"),
+      activationControl:!!closest("button,select")
+    })) return;
     event.preventDefault(); event.stopImmediatePropagation();
   }, true);
 }
@@ -421,8 +433,9 @@ function setupStudyPaneTracker(){
   content.addEventListener("pointerdown", (e) => {
     if (!content.classList.contains("study-mode")) return;
     const pane = e.target.closest && e.target.closest(".study-reference, .study-work");
-    if (!pane) return;
-    setStudyTargetPane(pane.classList.contains("study-reference") ? "reference" : "work");
+    const chip = e.target.closest && e.target.closest(".study-chip-ref, .study-chip-work");
+    if (!pane && !chip) return;
+    setStudyTargetPane((pane && pane.classList.contains("study-reference")) || (chip && chip.classList.contains("study-chip-ref")) ? "reference" : "work");
   }, true);
 }
 
@@ -431,15 +444,11 @@ function setupStudyPaneTracker(){
 // - 반대 칸에 떠 있는 문서 → 좌우 역할 교대(스왑)
 // - 그 외 문서 → 타깃 칸의 문서만 교체(반대 칸은 유지)
 function openDocInTargetPane(id){
-  const split = byId("content").classList.contains("study-mode") && studyPdfId !== null;
-  if (!split){ setActiveDoc(id); return; }
-  if (id === studyPdfId || id === activeId){
-    const targetId = studyTargetPane === "reference" ? studyPdfId : activeId;
-    if (id !== targetId) setStudyReference(activeId);   // 반대 칸 문서 클릭 → setStudyReference 의 역할 교대 로직으로 스왑
-    return;
-  }
-  if (studyTargetPane === "reference") setStudyReference(id);
-  else setActiveDoc(id);
+  const action = studyPaneSelectionAction(studyPdfId, activeId, studyTargetPane, id);
+  if (action === "keep") return;
+  if (action === "swap"){ setStudyReference(activeId); return; }
+  if (action === "replace-reference"){ setStudyReference(id); return; }
+  setActiveDoc(id);   // 일반 화면 또는 작업 칸 교체
 }
 
 // 학습 화면 좌(PDF)·우(코드) 비율 조절 분할바 — #content 에 한 번만 만들고 드래그로 --study-split 갱신(저장)
@@ -538,14 +547,18 @@ function applyStudyLayout(){
   btn.hidden = docs.length === 0;
   btn.textContent = ref ? "분할 작업 종료" : "분할 작업";
   btn.title = ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기";
-  const setRefBtn = byId("studySetReference");
-  if (setRefBtn) setRefBtn.hidden = !split;
-  const lockBtn = byId("studyReferenceLock");
-  if (lockBtn){
-    lockBtn.hidden = !split;
-    lockBtn.textContent = studyReferenceLocked ? "잠금 해제" : "참고 잠금";
-    lockBtn.title = studyReferenceLocked ? "참고 문서 잠금을 풀고 편집 가능하게 하기" : "참고 문서를 읽기 전용으로 잠그기";
-    lockBtn.setAttribute("aria-pressed", String(studyReferenceLocked));
+  // 칸 위 역할 칩: 파일명·잠금 상태 갱신(표시 여부는 CSS 의 .study-mode 클래스가 결정)
+  if (split){
+    const refName = byId("studyChipRefName"), workName = byId("studyChipWorkName");
+    if (refName) refName.textContent = ref.name;
+    if (workName) workName.textContent = work.name;
+  }
+  const chipLock = byId("studyChipLock");
+  if (chipLock){
+    chipLock.title = studyReferenceLocked ? "참고 문서 잠금을 풀고 편집 가능하게 하기" : "참고 문서를 읽기 전용으로 잠그기";
+    chipLock.setAttribute("aria-pressed", String(studyReferenceLocked));
+    const label = byId("studyChipLockLabel");
+    if (label) label.textContent = studyReferenceLocked ? "잠금 해제" : "잠금";
   }
   updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
@@ -586,7 +599,7 @@ function startStudyModeWithDoc(doc, options={}){
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
   renderTabs();                                                                        // 참고 문서 탭 표시 갱신
-  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 기존 학습 화면처럼 양쪽 모두 편집할 수 있으며, 필요하면 ‘참고 잠금’을 누르세요.", 4600);
+  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 기존 학습 화면처럼 양쪽 모두 편집할 수 있으며, 필요하면 참고 칸 왼쪽 위 ‘잠금’을 누르세요.", 4600);
   return true;
 }
 function startStudyModeWithPdf(pdfDoc, options={}){ return pdfDoc && pdfDoc.kind === "pdf" ? startStudyModeWithDoc(pdfDoc, options) : false; }

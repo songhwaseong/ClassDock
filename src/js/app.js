@@ -222,10 +222,10 @@ function wire(){
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
-  if (byId("studySetReference")) byId("studySetReference").onclick = () => {
+  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 참고·작업 역할 교대
     if (state && typeof setStudyReference === "function") setStudyReference(state.id);
   };
-  if (byId("studyReferenceLock")) byId("studyReferenceLock").onclick = () => {
+  if (byId("studyChipLock")) byId("studyChipLock").onclick = () => {         // 참고 칩의 잠금 토글
     if (typeof setStudyReferenceLocked === "function") setStudyReferenceLocked(!studyReferenceLocked);
   };
   byId("fsExit").onclick = exitViewerFullscreen;

@@ -1950,6 +1950,34 @@
     }
   }
 
+  // 분할 작업에서 문서를 골랐을 때 수행할 상태 전이를 DOM과 분리해 결정한다.
+  // reference/work 역할과 실제 좌우(또는 상하) 배치는 별개이므로 역할 ID만 사용한다.
+  function studyPaneSelectionAction(referenceId, workId, targetPane, selectedId) {
+    const split = referenceId != null && workId != null && referenceId !== workId;
+    if (!split) return "activate";
+    const pane = targetPane === "reference" ? "reference" : "work";
+    const targetId = pane === "reference" ? referenceId : workId;
+    if (selectedId === referenceId || selectedId === workId)
+      return selectedId === targetId ? "keep" : "swap";
+    return pane === "reference" ? "replace-reference" : "replace-work";
+  }
+
+  // 참고 잠금 중 포인터 입력은 읽기·선택 표면만 통과시킨다.
+  // 표는 한 번 클릭 선택까지만 허용하고, 편집 진입인 더블클릭·메뉴는 차단한다.
+  function studyReadonlyPointerAllowed(surface, eventType) {
+    if (surface === "content" || surface === "text-selection" || surface === "code-link") return true;
+    if (surface === "sheet-selection") return eventType === "pointerdown" || eventType === "click";
+    return false;
+  }
+
+  // 참고 잠금 중 텍스트 선택·복사와 문서 탐색에 필요한 키만 허용한다.
+  function studyReadonlyKeyAllowed(eventLike={}) {
+    const key = String(eventLike.key || "").toLowerCase();
+    if ((eventLike.ctrlKey || eventLike.metaKey) && ["a", "c", "f", "g"].includes(key)) return true;
+    if (["arrowleft", "arrowright", "arrowup", "arrowdown", "pageup", "pagedown", "home", "end", "escape", "tab", "f3"].includes(key)) return true;
+    return key === " " && !eventLike.textEntry && !eventLike.activationControl;
+  }
+
   return {
     decodeWorkspace, encodeWorkspace, escapeAttr, escapeHtml, inlineMarkdown, indexWorkspacePathsByFolder,
     detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
@@ -1961,6 +1989,7 @@
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput,
-    normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections
+    normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
+    studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
   };
 });

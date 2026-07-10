@@ -667,6 +667,37 @@
   #content.study-mode .study-page-ctl{display:inline-flex;right:calc(100% - var(--study-split,50%) + 10px)}
   #content.study-mode.study-swapped .study-page-ctl{right:10px}
   #content:fullscreen .study-page-ctl,body.viewer-fullscreen #content .study-page-ctl{display:none!important}
+  /* 학습 화면: 칸마다 왼쪽 위에 떠 있는 역할 칩(참고·작업 + 파일명). 평소 반투명, 올리면 선명 */
+  .study-chip{position:absolute;top:10px;z-index:14;display:none;align-items:center;gap:6px;max-width:min(38%,300px);
+    padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:12px;
+    box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.62;transition:opacity .15s ease}
+  .study-chip:hover,.study-chip:focus-within{opacity:1}
+  .study-chip>svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .study-chip-role{font-weight:700;flex:0 0 auto}
+  .study-chip-name{color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .study-chip button{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:12px;line-height:1;color:#fff;
+    border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);border-radius:999px;padding:3px 8px;margin-left:2px;cursor:pointer;flex:0 0 auto}
+  .study-chip button:hover{background:rgba(255,255,255,.2)}
+  .study-chip button svg{display:block;width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .study-chip-ref .ic-closed{display:none}
+  #content.study-mode.study-reference-locked .study-chip-ref .ic-closed{display:block}
+  #content.study-mode.study-reference-locked .study-chip-ref .ic-open{display:none}
+  #content.study-mode.study-reference-locked .study-chip-ref{opacity:.92}
+  #content.study-mode.study-reference-locked #studyChipLock{background:var(--accent);border-color:var(--accent)}
+  #content.study-mode .study-chip{display:inline-flex}
+  #content.study-mode .study-chip-ref{left:10px}
+  #content.study-mode .study-chip-work{left:calc(var(--study-split,50%) + 14px)}
+  #content.study-mode.study-swapped .study-chip-ref{left:calc(var(--study-split,50%) + 14px)}
+  #content.study-mode.study-swapped .study-chip-work{left:10px}
+  #content:fullscreen .study-chip,body.viewer-fullscreen #content .study-chip{display:none!important}
+  /* 두 칸 사이 가운데: 참고 ⇄ 작업 역할 교체 버튼(분할바 더블클릭=위치 바꾸기와 별개) */
+  .study-role-swap{position:absolute;display:none;left:var(--study-split,50%);top:50%;transform:translate(-50%,-50%);z-index:14;
+    width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(15,23,42,.82);color:#fff;
+    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.62;transition:opacity .15s ease;padding:0}
+  .study-role-swap:hover,.study-role-swap:focus-visible{opacity:1;background:rgba(15,23,42,.95)}
+  .study-role-swap svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  #content.study-mode .study-role-swap{display:flex}
+  #content:fullscreen .study-role-swap,body.viewer-fullscreen #content .study-role-swap{display:none!important}
   /* 일반 화면: PDF 보기일 때 화면 오른쪽 위에 떠 있는 페이지 컨트롤(학습 화면과 같은 모양) */
   .view-page-ctl{position:absolute;top:10px;right:16px;z-index:14;display:none;
     padding:5px 8px;border-radius:8px;background:rgba(15,23,42,.82);box-shadow:0 4px 14px rgba(0,0,0,.3)}
@@ -2279,10 +2310,18 @@
     .mode-badge{display:none}.study-pair-badge{max-width:42vw}
     .py-env-grid{grid-template-columns:1fr}
     .py-grade-fields,.py-grade-result-body{grid-template-columns:1fr}
-    #content.study-mode .study-reference{right:0;bottom:50%;border-right:0;border-bottom:3px solid var(--border)}
-    #content.study-mode .study-work{left:0;top:50%}
+    #content.study-mode .study-reference{left:0;right:0;top:0;bottom:50%;border:0;border-bottom:3px solid var(--border)}
+    #content.study-mode .study-work{left:0;right:0;top:50%;bottom:0}
+    #content.study-mode.study-swapped .study-reference{left:0;right:0;top:50%;bottom:0;border:0;border-top:3px solid var(--border)}
+    #content.study-mode.study-swapped .study-work{left:0;right:0;top:0;bottom:50%}
     #content.study-mode .study-divider{display:none}
-    #content.study-mode .study-page-ctl,#content.study-mode.study-swapped .study-page-ctl{right:10px}
+    #content.study-mode .study-page-ctl{right:10px;top:10px}
+    #content.study-mode.study-swapped .study-page-ctl{right:10px;top:calc(50% + 10px)}
+    #content.study-mode .study-chip-ref{left:10px;top:10px}
+    #content.study-mode .study-chip-work{left:10px;top:calc(50% + 10px)}
+    #content.study-mode.study-swapped .study-chip-ref{left:10px;top:calc(50% + 10px)}
+    #content.study-mode.study-swapped .study-chip-work{left:10px;top:10px}
+    .study-role-swap{left:auto;right:14px;top:50%;transform:translateY(-50%)}
   }
   .md-host{max-width:920px;margin:0 auto;background:#fff;border-radius:8px;padding:34px 42px;
     box-shadow:0 4px 18px rgba(15,23,42,.12);line-height:1.7;color:#1e293b;user-select:text;-webkit-user-select:text;cursor:text}

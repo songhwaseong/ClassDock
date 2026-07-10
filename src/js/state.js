@@ -10,7 +10,8 @@ const {
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonTraceReport,
-  prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker
+  prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker,
+  studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
 } = PdfSignerCore;
 
 /* ===== 다중 문서 상태 =====
