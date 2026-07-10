@@ -13,6 +13,88 @@
    확장 여지: PDF 잉크·파이썬 실행을 keyframe kind(track)로 추가하면 같은 타임라인에 얹을 수 있다. */
 
 const LESSON_FORMAT = "manneung-lesson";
+const LESSON_VERSION = 1;
+// 외부 .lesson 은 JSON 파싱 전에 파일 크기를 제한하고, 파싱 뒤에는 배열/문자열의
+// 상한을 확인한다. 영상이 아니라 이벤트 데이터이므로 이 정도면 충분히 넉넉하면서도
+// 실수로 매우 큰 파일을 열어 브라우저가 멈추는 상황을 막을 수 있다.
+const LESSON_MAX_FILE_BYTES = 128 * 1024 * 1024;
+const LESSON_MAX_KEYFRAMES = 100000;
+const LESSON_MAX_ITEMS_PER_SNAPSHOT = 50000;
+const LESSON_MAX_STROKE_POINTS = 100000;
+const LESSON_MAX_PAGES = 10000;
+const LESSON_MAX_PY_EVENTS = 100000;
+const LESSON_MAX_TEXT_CHARS = 8 * 1024 * 1024;
+
+function lessonValidationError(message){ return { ok:false, message }; }
+function lessonFinite(value){ return typeof value === "number" && Number.isFinite(value); }
+function lessonShortText(value, limit=LESSON_MAX_TEXT_CHARS){ return typeof value === "string" && value.length <= limit; }
+function lessonValidPoint(point){ return !!point && lessonFinite(point.x) && lessonFinite(point.y); }
+function lessonValidStroke(stroke){
+  if (!stroke || typeof stroke !== "object" || !Array.isArray(stroke.points) ||
+      !stroke.points.length || stroke.points.length > LESSON_MAX_STROKE_POINTS) return false;
+  return stroke.points.every(lessonValidPoint);
+}
+function lessonValidItem(item){
+  if (!item || typeof item !== "object" || typeof item.type !== "string") return false;
+  if (["pen", "highlighter", "eraser"].includes(item.type)) return lessonValidStroke(item);
+  if (item.type === "text") return lessonShortText(String(item.text || ""));
+  if (item.type === "image") return !item.src || lessonShortText(item.src);
+  return ["line", "arrow", "rect", "ellipse"].includes(item.type);
+}
+function lessonValidKeyframeTime(frame, previous){
+  return !!frame && typeof frame === "object" && lessonFinite(frame.t) && frame.t >= previous;
+}
+
+// 재생 화면에서 사용하는 최소 스키마를 검증한다. 화면 출력은 textContent/canvas로만
+// 처리되지만, 잘못된 배열·좌표가 렌더링 루프를 망가뜨리지 않도록 불러오기 경계에서 막는다.
+function validateLessonPayload(lesson){
+  if (!lesson || typeof lesson !== "object" || Array.isArray(lesson)) return lessonValidationError("리플레이 내용이 올바른 JSON 객체가 아니에요.");
+  if (lesson.format !== LESSON_FORMAT || lesson.version !== LESSON_VERSION) return lessonValidationError("지원하지 않는 리플레이 형식 또는 버전이에요.");
+  if (!["board", "pdf-ink", "python"].includes(lesson.kind)) return lessonValidationError("알 수 없는 리플레이 종류예요.");
+  if (!lessonFinite(lesson.duration) || lesson.duration < 0) return lessonValidationError("재생 시간이 올바르지 않아요.");
+  if (!Array.isArray(lesson.keyframes) || lesson.keyframes.length > LESSON_MAX_KEYFRAMES) return lessonValidationError("리플레이 장면 수가 올바르지 않아요.");
+
+  let lastTime = 0;
+  for (const frame of lesson.keyframes){
+    if (!lessonValidKeyframeTime(frame, lastTime) || frame.t > lesson.duration) return lessonValidationError("리플레이 시간 정보가 올바르지 않아요.");
+    lastTime = frame.t;
+    if (lesson.kind === "board"){
+      if (Array.isArray(frame.s)){
+        if (frame.s.length > LESSON_MAX_ITEMS_PER_SNAPSHOT || !frame.s.every(lessonValidItem)) return lessonValidationError("화이트보드 장면 데이터가 올바르지 않아요.");
+      } else if (!lessonValidItem(frame.a)) return lessonValidationError("화이트보드 장면 데이터가 올바르지 않아요.");
+    } else if (lesson.kind === "pdf-ink"){
+      if (!Number.isInteger(frame.p) || frame.p < 0 || frame.p >= LESSON_MAX_PAGES || (!frame.c && !lessonValidStroke(frame.a)))
+        return lessonValidationError("PDF 필기 장면 데이터가 올바르지 않아요.");
+    }
+  }
+
+  if (lesson.kind === "board"){
+    if (!lessonFinite(lesson.W) || !lessonFinite(lesson.H) || lesson.W <= 0 || lesson.H <= 0 || lesson.W > 100000 || lesson.H > 100000)
+      return lessonValidationError("화이트보드 크기가 올바르지 않아요.");
+  }
+  if (lesson.kind === "pdf-ink"){
+    if (!lesson.pages || typeof lesson.pages !== "object" || Array.isArray(lesson.pages) || Object.keys(lesson.pages).length > LESSON_MAX_PAGES)
+      return lessonValidationError("PDF 페이지 정보가 올바르지 않아요.");
+  }
+  if (lesson.python != null){
+    if (!Array.isArray(lesson.python) || lesson.python.length > LESSON_MAX_PY_EVENTS) return lessonValidationError("파이썬 리플레이 장면 수가 올바르지 않아요.");
+    let pyLastTime = 0;
+    for (const event of lesson.python){
+      if (!lessonValidKeyframeTime(event, pyLastTime) || event.t > lesson.duration) return lessonValidationError("파이썬 리플레이 시간 정보가 올바르지 않아요.");
+      pyLastTime = event.t;
+      if (event.code != null && !lessonShortText(event.code)) return lessonValidationError("파이썬 코드가 너무 길거나 올바르지 않아요.");
+      if (event.f != null && !lessonShortText(event.f, 4096)) return lessonValidationError("파이썬 파일 이름이 올바르지 않아요.");
+      if (event.out != null){
+        const out = event.out;
+        if (!out || typeof out !== "object" || !lessonShortText(String(out.o || "")) || !lessonShortText(String(out.e || "")) || !lessonShortText(String(out.x || "")))
+          return lessonValidationError("파이썬 실행 결과가 올바르지 않아요.");
+        if (out.img != null && (!Array.isArray(out.img) || out.img.length > 8 || !out.img.every(src => lessonShortText(src))))
+          return lessonValidationError("파이썬 실행 이미지가 올바르지 않아요.");
+      }
+    }
+  }
+  return { ok:true, lesson };
+}
 
 // 이미지 항목을 저장 가능한 dataURL 로 직렬화(원본 Image → 오프스크린 캔버스). 한 번 계산하면 캐시.
 function lessonSerializeItems(items){
@@ -69,7 +151,7 @@ function LessonRecorder(items, bg, dim){
       if (this.active) this.capture(its, b, d);
       this.active = false;
       return {
-        format: LESSON_FORMAT, version: 1, kind: "board",
+        format: LESSON_FORMAT, version: LESSON_VERSION, kind: "board",
         createdAt: new Date().toISOString(),
         bg: bg || "#ffffff",
         W: maxW || 1280, H: maxH || 720,
@@ -148,6 +230,7 @@ function openLessonReplay(lesson, name){
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
     if (lesson.kind === "pdf-ink") renderPdfInkReplay(doc, host, lesson);
+    else if (lesson.kind === "python") renderPythonReplay(doc, host, lesson);
     else renderReplay(doc, host, lesson);
   };
   if (typeof refreshChrome === "function") refreshChrome();
@@ -155,11 +238,15 @@ function openLessonReplay(lesson, name){
   return doc;
 }
 
-// ----- PDF 위 필기 녹화 (전역 훅; pdf-editor.js 가 호출, 녹화 중이 아니면 무동작) -----
+// ----- PDF 위 필기 + 파이썬 녹화 (전역 훅; pdf-editor.js·python-runtime.js 가 호출, 녹화 중이 아니면 무동작) -----
 let _lessonPdfRec = null;
 function lessonPdfRecording(){ return !!(_lessonPdfRec && _lessonPdfRec.active); }
 function lessonPdfOnStroke(pdfDoc, pageIndex, stroke){ if (lessonPdfRecording()) _lessonPdfRec.onStroke(pdfDoc, pageIndex, stroke); }
 function lessonPdfOnClear(pdfDoc, pageIndex){ if (lessonPdfRecording()) _lessonPdfRec.onClear(pdfDoc, pageIndex); }
+// 파이썬 트랙 훅 — 실행 시작(코드 확정), 대화형 스트림 출력, 최종 결과
+function lessonPyOnRun(code, file){ if (lessonPdfRecording()) _lessonPdfRec.onPyRun(code, file); }
+function lessonPyOnLiveOutput(stdout, stderr){ if (lessonPdfRecording()) _lessonPdfRec.onPyLive(stdout, stderr); }
+function lessonPyOnResult(res){ if (lessonPdfRecording()) _lessonPdfRec.onPyResult(res); }
 function lessonPdfCloneStroke(s){ return { tool: s.tool, color: s.color, width: s.width, points: (s.points || []).map((p) => ({ x: p.x, y: p.y })) }; }
 function lessonPdfCaptureBackdrop(pdfDoc, pageIndex){
   const p = pdfDoc && pdfDoc.pages && pdfDoc.pages[pageIndex]; if (!p) return null;
@@ -169,7 +256,25 @@ function lessonPdfCaptureBackdrop(pdfDoc, pageIndex){
 function LessonPdfInkRecorder(){
   const t0 = performance.now();
   const keyframes = []; const pages = {};
+  const py = [];                                  // 파이썬 트랙: {t,f,code} 코드 스냅샷 | {t,run:1} 실행 시작 | {t,out:{o,e,x,img}} 출력
+  let lastCode = null, lastLiveAt = -1;
   const now = () => Math.round(performance.now() - t0);
+  // 1초마다 활성 파이썬 편집기의 코드를 샘플링(바뀐 때만 기록) — 타자 과정이 타임라인에 남는다.
+  const sampleCode = () => {
+    try {
+      if (typeof docs === "undefined" || typeof activeId === "undefined") return;
+      const d = docs.find((x) => x && x.id === activeId);
+      if (!d || !d.codeEditor || typeof d.codeEditor.getValue !== "function") return;
+      const name = String(d.name || "");
+      if (!/\.py$/i.test(name)) return;
+      const code = d.codeEditor.getValue();
+      if (code === lastCode) return;
+      lastCode = code;
+      py.push({ t: now(), f: name, code });
+    } catch(_){}
+  };
+  const timer = setInterval(sampleCode, 1000);
+  sampleCode();                                   // 시작 시점 코드(초기 상태)
   return {
     active: true,
     onStroke(pdfDoc, pageIndex, stroke){
@@ -178,28 +283,75 @@ function LessonPdfInkRecorder(){
       keyframes.push({ t: now(), p: pageIndex, a: lessonPdfCloneStroke(stroke) });
     },
     onClear(pdfDoc, pageIndex){ if (this.active) keyframes.push({ t: now(), p: pageIndex, c: 1 }); },
+    onPyRun(code, file){
+      if (!this.active) return;
+      const src = String(code == null ? "" : code);
+      if (src !== lastCode){ lastCode = src; py.push({ t: now(), f: String(file || ""), code: src }); }   // 실행 시점 코드 확정
+      py.push({ t: now(), run: 1 });
+    },
+    onPyLive(stdout, stderr){
+      if (!this.active) return;
+      const t = now();
+      if (t - lastLiveAt < 700) return;           // 폴링 스트림은 0.7초 간격으로만 기록(파일 크기 보호)
+      lastLiveAt = t;
+      py.push({ t, out: { o: String(stdout || ""), e: String(stderr || "") } });
+    },
+    onPyResult(res){
+      if (!this.active || !res) return;
+      const out = { o: String(res.stdout || ""), e: String(res.stderr || "") };
+      if (res.fatal) out.x = String(res.fatal);
+      if (Array.isArray(res.images) && res.images.length) out.img = res.images.slice(0, 8);
+      py.push({ t: now(), out });
+    },
     stop(){
       this.active = false;
-      return { format: LESSON_FORMAT, version: 1, kind: "pdf-ink", createdAt: new Date().toISOString(),
-        duration: keyframes.length ? keyframes[keyframes.length - 1].t : 0, pages, keyframes };
+      clearInterval(timer);
+      sampleCode();                               // 마지막 편집분 반영
+      const hasInk = keyframes.length && Object.keys(pages).length;
+      const lastT = (arr) => arr.length ? (arr[arr.length - 1].t || 0) : 0;
+      const lesson = {
+        format: LESSON_FORMAT, version: LESSON_VERSION, kind: hasInk ? "pdf-ink" : "python",
+        createdAt: new Date().toISOString(),
+        duration: Math.max(lastT(keyframes), lastT(py)),
+        pages, keyframes
+      };
+      if (py.length) lesson.python = py;
+      return lesson;
     }
   };
 }
-// PDF 필기바의 ● 녹화 버튼이 호출. 시작이면 true, 정지면 false 를 돌려준다.
+// 파이썬 트랙에 "내용"이 있는지 — 실행/출력이 있거나 코드가 초기 스냅샷 이후 바뀐 적이 있으면 참.
+function lessonPyHasContent(py){
+  if (!Array.isArray(py) || !py.length) return false;
+  return py.some((ev, i) => ev.run || ev.out || (i > 0 && ev.code != null));
+}
+// PDF 필기바·파이썬 실행바의 ● 녹화 버튼이 호출. 시작이면 true, 정지면 false 를 돌려준다.
+// 어느 쪽 버튼으로 시작/정지하든 상태가 맞도록 document 에 "lesson-rec-changed" 이벤트를 쏜다.
+function lessonRecNotify(on){
+  try { document.dispatchEvent(new CustomEvent("lesson-rec-changed", { detail: { on: !!on } })); } catch(_){}
+}
 function lessonPdfToggleRecord(){
   if (lessonPdfRecording()){
     const lesson = _lessonPdfRec.stop(); _lessonPdfRec = null;
-    if (lesson.keyframes.length && Object.keys(lesson.pages).length && typeof finishLessonRecording === "function") finishLessonRecording(lesson, "PDF 필기");
-    else if (typeof toast === "function") toast("녹화된 필기가 없어요.", 2000);
+    const hasInk = lesson.keyframes.length && Object.keys(lesson.pages).length;
+    const hasPy = lessonPyHasContent(lesson.python);
+    if (!hasPy) delete lesson.python;
+    if ((hasInk || hasPy) && typeof finishLessonRecording === "function"){
+      finishLessonRecording(lesson, hasInk && hasPy ? "수업" : hasInk ? "PDF 필기" : "파이썬");
+    }
+    else if (typeof toast === "function") toast("녹화된 내용이 없어요.", 2000);
+    lessonRecNotify(false);
     return false;
   }
   _lessonPdfRec = LessonPdfInkRecorder();
-  if (typeof toast === "function") toast("PDF 필기 녹화를 시작했어요. 필기한 뒤 ■ 정지를 누르세요.", 3200);
+  if (typeof toast === "function") toast("수업 녹화를 시작했어요. PDF 필기와 파이썬 코드·실행이 기록됩니다. ■ 정지로 끝내세요.", 3400);
+  lessonRecNotify(true);
   return true;
 }
 
-// 재생기 공용 타임라인/컨트롤(보드·PDF잉크가 공유). opts.draw(ctx,CW,CH,dpr,playT) 가 한 프레임을 그린다.
-// 반환 { redraw } 로 이미지 로드 완료 등에서 다시 그릴 수 있다.
+// 재생기 공용 타임라인/컨트롤(보드·PDF잉크·파이썬이 공유). opts.draw(ctx,CW,CH,dpr,playT) 가 한 프레임을 그린다.
+// opts.side = 캔버스 옆에 붙일 DOM 패널(파이썬 트랙), opts.hideStage = 캔버스 없이 패널만(파이썬 전용 리플레이),
+// opts.onTime(playT) = 프레임마다 DOM 패널을 갱신할 콜백. 반환 { redraw } 로 이미지 로드 완료 등에서 다시 그릴 수 있다.
 function mountReplayPlayer(doc, host, opts){
   host.classList.add("lr-doc");
   const duration = opts.duration || 0;
@@ -209,7 +361,15 @@ function mountReplayPlayer(doc, host, opts){
   const canvas = document.createElement("canvas"); canvas.className = "lr-canvas";
   stage.appendChild(canvas);
   const bar = document.createElement("div"); bar.className = "lr-bar";
-  wrap.append(stage, bar); host.appendChild(wrap);
+  if (opts.side){
+    const main = document.createElement("div"); main.className = "lr-main";
+    if (opts.hideStage) stage.classList.add("lr-stage-hidden");
+    main.append(stage, opts.side);
+    wrap.append(main, bar);
+  } else {
+    wrap.append(stage, bar);
+  }
+  host.appendChild(wrap);
 
   const ctx = canvas.getContext("2d");
   let dpr = 1, CW = 0, CH = 0;
@@ -227,7 +387,11 @@ function mountReplayPlayer(doc, host, opts){
   const saveBtn = mk("💾 저장", ".lesson 파일로 저장", "lr-btn lr-save");
   bar.append(playBtn, restartBtn, seek, timeLabel, speedSel, saveBtn);
 
-  const draw = () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, CW, CH); opts.draw(ctx, CW, CH, dpr, playT); };
+  const draw = () => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, CW, CH);
+    opts.draw(ctx, CW, CH, dpr, playT);
+    if (typeof opts.onTime === "function") opts.onTime(playT);
+  };
   const resize = () => {
     const r = stage.getBoundingClientRect();
     CW = Math.max(1, Math.round(r.width)); CH = Math.max(1, Math.round(r.height));
@@ -347,6 +511,98 @@ function pdfInkStateAt(kfs, times, t, firstPage){
   return { page, strokes, grow, growLimit };
 }
 
+// ----- 파이썬 트랙 재생 -----
+// t 시점의 파이썬 상태: 마지막 코드 스냅샷 + (실행 중이면 running, 결과가 나왔으면 out).
+// 이벤트 수가 작아(수백~수천) idx 가 바뀔 때만 앞에서부터 다시 쌓는다.
+function lessonPyStateAt(py, times, t, cache){
+  const idx = lessonIndexAt(times, t) - (times.length && times[0] > t ? 1 : 0);   // 첫 이벤트 전이면 -1
+  if (cache && cache.idx === idx) return cache.state;
+  let code = null, file = "", out = null, running = false;
+  for (let i = 0; i <= idx; i++){
+    const ev = py[i];
+    if (ev.code != null){ code = ev.code; if (ev.f) file = ev.f; }
+    if (ev.run){ running = true; out = null; }           // 실행 시작 → 이전 결과를 지우고 '실행 중…' 표시
+    if (ev.out){ out = ev.out; running = false; }
+  }
+  const state = { code, file, out, running };
+  if (cache){ cache.idx = idx; cache.state = state; }
+  return state;
+}
+
+// 파이썬 트랙 사이드 패널(코드 + 실행 결과). update(state) 는 내용이 바뀐 때만 DOM 을 갱신한다.
+function buildLessonPyPanel(){
+  const side = document.createElement("div"); side.className = "lr-side";
+  const head = document.createElement("div"); head.className = "lr-side-head";
+  const fileEl = document.createElement("span"); fileEl.className = "lr-side-file"; fileEl.textContent = "파이썬";
+  const stateEl = document.createElement("span"); stateEl.className = "lr-side-state";
+  head.append(fileEl, stateEl);
+  const codePre = document.createElement("pre"); codePre.className = "lr-py-code"; codePre.textContent = "";
+  const outWrap = document.createElement("div"); outWrap.className = "lr-py-out"; outWrap.hidden = true;
+  const outHead = document.createElement("div"); outHead.className = "lr-py-outhead"; outHead.textContent = "실행 결과";
+  const outPre = document.createElement("pre"); outPre.className = "lr-py-outpre";
+  const outStdout = document.createElement("span");
+  const outStderr = document.createElement("span"); outStderr.className = "lr-py-err";
+  outPre.append(outStdout, outStderr);
+  const outImgs = document.createElement("div"); outImgs.className = "lr-py-imgs";
+  outWrap.append(outHead, outPre, outImgs);
+  side.append(head, codePre, outWrap);
+
+  let lastCode = null, lastOut = null, lastRunning = null, lastFile = null;
+  const update = (state) => {
+    if (state.file !== lastFile){ lastFile = state.file; fileEl.textContent = state.file || "파이썬"; }
+    if (state.code !== lastCode){
+      lastCode = state.code;
+      codePre.textContent = state.code == null ? "(아직 코드가 없어요)" : state.code;
+      codePre.classList.toggle("lr-py-empty", state.code == null);
+    }
+    if (state.running !== lastRunning){
+      lastRunning = state.running;
+      stateEl.textContent = state.running ? "▶ 실행 중…" : "";
+      stateEl.classList.toggle("running", !!state.running);
+    }
+    if (state.out !== lastOut){
+      lastOut = state.out;
+      const out = state.out;
+      outWrap.hidden = !out;
+      if (out){
+        outStdout.textContent = out.o || "";
+        outStderr.textContent = (out.e ? ((out.o ? "\n" : "") + out.e) : "") + (out.x ? (((out.o || out.e) ? "\n" : "") + "⚠ " + out.x) : "");
+        outPre.classList.toggle("lr-py-muted", !out.o && !out.e && !out.x);
+        if (!out.o && !out.e && !out.x) outStdout.textContent = "(출력 없음)";
+        outImgs.innerHTML = "";
+        if (Array.isArray(out.img)) for (const src of out.img){ const im = document.createElement("img"); im.src = src; im.alt = "그래프"; outImgs.appendChild(im); }
+        outWrap.scrollTop = 0;
+      }
+    }
+  };
+  return { side, update };
+}
+
+// 파이썬 트랙이 있는 lesson 에 사이드 패널을 만들어 { side, onTime } 을 돌려준다(없으면 null).
+function lessonPySideFor(lesson){
+  const py = Array.isArray(lesson.python) ? lesson.python : null;
+  if (!py || !py.length) return null;
+  const panel = buildLessonPyPanel();
+  const times = py.map((ev) => ev.t || 0);
+  const cache = { idx: null, state: null };
+  return { side: panel.side, onTime: (t) => panel.update(lessonPyStateAt(py, times, t, cache)) };
+}
+
+// 파이썬 전용 리플레이(kind:"python") — 캔버스 없이 코드·실행 결과 패널만 재생.
+function renderPythonReplay(doc, host, lesson){
+  const pySide = lessonPySideFor(lesson);
+  const py = Array.isArray(lesson.python) ? lesson.python : [];
+  const duration = lesson.duration || (py.length ? (py[py.length - 1].t || 0) : 0);
+  mountReplayPlayer(doc, host, {
+    duration,
+    draw: () => {},
+    side: pySide ? pySide.side : null,
+    hideStage: true,
+    onTime: pySide ? pySide.onTime : undefined,
+    onSave: () => saveLessonFile(lesson, doc.name)
+  });
+}
+
 function renderPdfInkReplay(doc, host, lesson){
   const kfs = lesson.keyframes || [];
   const times = kfs.map((k) => k.t || 0);
@@ -385,7 +641,13 @@ function renderPdfInkReplay(doc, host, lesson){
     ctx.restore();
   };
 
-  const player = mountReplayPlayer(doc, host, { duration, draw, onSave: () => saveLessonFile(lesson, doc.name) });
+  const pySide = lessonPySideFor(lesson);            // 파이썬 트랙이 함께 녹화됐으면 오른쪽 패널로 재생
+  const player = mountReplayPlayer(doc, host, {
+    duration, draw,
+    side: pySide ? pySide.side : null,
+    onTime: pySide ? pySide.onTime : undefined,
+    onSave: () => saveLessonFile(lesson, doc.name)
+  });
   for (const k in pages){ if (pages[k] && pages[k].src){ const im = new Image(); im.onload = () => player.redraw(); im.src = pages[k].src; imgs[k] = im; } }
 }
 
@@ -409,8 +671,13 @@ function finishLessonRecording(lesson, name){
 // .lesson 파일 열기(파일 오픈 파이프라인 + 메뉴 공용).
 async function loadLesson(file, opts){
   let lesson = null;
+  if (!file || (Number(file.size) > LESSON_MAX_FILE_BYTES)){
+    if (typeof toast === "function") toast("리플레이 파일은 128MB 이하만 열 수 있어요.", 3000);
+    return null;
+  }
   try { lesson = JSON.parse(await file.text()); } catch(_){}
-  if (!lesson || lesson.format !== LESSON_FORMAT){ if (typeof toast === "function") toast("리플레이(.lesson) 파일을 읽지 못했어요.", 3000); return null; }
+  const checked = validateLessonPayload(lesson);
+  if (!checked.ok){ if (typeof toast === "function") toast("리플레이(.lesson) 파일을 읽지 못했어요: " + checked.message, 3600); return null; }
   return openLessonReplay(lesson, (file.name || "수업 리플레이").replace(/\.lesson$/i, ""));
 }
 

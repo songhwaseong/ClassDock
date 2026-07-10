@@ -17,6 +17,7 @@
     "workspace-store.js",
     "file-loaders.js",
     "pdf-render.js",
+    "pdf-ocr.js",
     "pdf-editor.js",
     "pdf-pages.js",
     "viewer-base.js",

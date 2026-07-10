@@ -1324,6 +1324,11 @@ async function getDocText(doc){                          // 한 번 읽어 소�
   try {
     if (doc.kind === "pdf"){
       text = await extractPdfText(doc);
+      // 스캔본(글자 없음)이라도 글자 인식(OCR)을 해 둔 PDF 면 그 텍스트로 검색한다(줄 번호 = 페이지 번호 규약 동일).
+      if (text === false && typeof pdfOcrCachedText === "function"){
+        const ocr = await pdfOcrCachedText(doc);
+        if (typeof ocr === "string" && ocr.trim()) text = ocr;
+      }
     } else {
       const bytes = await readDocSourceBytes(doc);
       let binary = false, lim = Math.min(bytes.length, 8192);

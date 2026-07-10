@@ -1,6 +1,8 @@
 "use strict";
 
-/* ===== EXE 최근 작업공간 저장/복원 ===== */
+/* ===== 최근 작업공간 저장/복원 =====
+   EXE(C# 로컬 서버)가 있으면 서버에 저장하고, 없으면(오프라인/온라인 HTML·file:// 포함)
+   같은 바이너리 포맷을 이 브라우저의 IndexedDB에 저장한다. 복원·정리 동선은 두 경로가 동일하다. */
 let workspaceMutationQueue = Promise.resolve();
 const pendingWorkspaceRemovals = new Set();
 let workspaceRemoveTimer = 0;
@@ -24,6 +26,117 @@ async function workspaceFetch(url, options={}){
   const timer = setTimeout(() => ctrl.abort(), 120000);
   try { return await fetch(url, { ...options, signal: ctrl.signal }); }
   finally { clearTimeout(timer); }
+}
+
+// ----- 저장 백엔드 선택: EXE 로컬 서버 vs 브라우저 IndexedDB -----
+// /can-save-file 은 C# 런처에서만 "yes" 를 돌려준다(한 번만 확인 후 캐시, saveFileBackendAvailable 과 동일 패턴).
+let _wsBackendProbe = null;
+function workspaceBackendAvailable(){
+  if (location.protocol !== "http:" && location.protocol !== "https:") return Promise.resolve(false);
+  if (_wsBackendProbe === null){
+    _wsBackendProbe = (async () => {
+      try {
+        const res = await fetch("/can-save-file", { cache: "no-store" });
+        return res.ok && (await res.text()).trim().toLowerCase() === "yes";
+      } catch(e){ return false; }
+    })();
+  }
+  return _wsBackendProbe;
+}
+
+// ----- 브라우저(IndexedDB) 작업공간 저장소 -----
+const WS_IDB_NAME = "manneung-workspace", WS_IDB_STORE = "workspace", WS_IDB_KEY = "payload";
+function wsIdbSupported(){ try { return typeof indexedDB !== "undefined" && !!indexedDB; } catch(e){ return false; } }
+function wsIdbOpen(){
+  return new Promise((resolve, reject) => {
+    let req;
+    try { req = indexedDB.open(WS_IDB_NAME, 1); } catch(e){ reject(e); return; }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(WS_IDB_STORE)) db.createObjectStore(WS_IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("idb-open"));
+  });
+}
+function wsIdbRequest(mode, run){
+  return wsIdbOpen().then(db => new Promise((resolve, reject) => {
+    let request = null;
+    try {
+      const tx = db.transaction(WS_IDB_STORE, mode);
+      request = run(tx.objectStore(WS_IDB_STORE));
+      tx.oncomplete = () => { db.close(); resolve(request ? request.result : undefined); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error("idb-tx")); };
+      tx.onabort = () => { db.close(); reject(tx.error || new Error("idb-abort")); };
+    } catch(e){ db.close(); reject(e); }
+  }));
+}
+// 페이로드는 Blob 으로 저장 — 큰 묶음도 브라우저가 파일로 내려 메모리를 아낀다.
+async function wsIdbGetPayload(){
+  const record = await wsIdbRequest("readonly", store => store.get(WS_IDB_KEY));
+  if (!record || !record.blob) return null;
+  const bytes = new Uint8Array(await record.blob.arrayBuffer());
+  return bytes.length ? bytes : null;
+}
+function wsIdbSetPayload(bytes){
+  return wsIdbRequest("readwrite", store => store.put({ blob: new Blob([bytes]), savedAt: Date.now() }, WS_IDB_KEY));
+}
+function wsIdbClearPayload(){
+  return wsIdbRequest("readwrite", store => store.delete(WS_IDB_KEY));
+}
+
+// {path, bytes} 행 목록을 작업공간 바이너리 포맷으로 직렬화(decodeWorkspace 의 역방향).
+function encodeWorkspaceRows(rows){
+  const enc = new TextEncoder();
+  const items = rows.map(r => ({ pathBytes: enc.encode(r.path), bytes: r.bytes || new Uint8Array(0) }));
+  if (items.length > 10000) throw new Error("workspace-too-many");
+  let total = 4;
+  for (const it of items){
+    total += 8 + it.pathBytes.length + it.bytes.length;
+    if (total > WORKSPACE_CAP) throw new Error("workspace-too-large");
+  }
+  const out = new Uint8Array(total), view = new DataView(out.buffer);
+  let pos = 0; view.setUint32(pos, items.length, true); pos += 4;
+  for (const it of items){
+    view.setUint32(pos, it.pathBytes.length, true); pos += 4;
+    out.set(it.pathBytes, pos); pos += it.pathBytes.length;
+    view.setUint32(pos, it.bytes.length, true); pos += 4;
+    out.set(it.bytes, pos); pos += it.bytes.length;
+  }
+  return out;
+}
+
+// IndexedDB/서버 공용 규칙을 작고 순수한 함수로 둔다. 같은 경로는 새 파일 내용이 우선이고,
+// 제거 대상이 없으면 기존 바이트를 그대로 쓴다.
+function mergeWorkspacePayloads(previous, incoming){
+  if (!previous || !previous.length) return incoming;
+  const map = new Map();
+  for (const row of decodeWorkspace(previous)) map.set(row.path, row.bytes);
+  for (const row of decodeWorkspace(incoming)) map.set(row.path, row.bytes);
+  return encodeWorkspaceRows([...map.entries()].map(([path, bytes]) => ({ path, bytes })));
+}
+function removeWorkspacePayloadPaths(previous, paths){
+  if (!previous || !previous.length) return null;
+  const drop = new Set(paths || []);
+  const rows = decodeWorkspace(previous).filter(row => !drop.has(row.path));
+  return rows.length ? encodeWorkspaceRows(rows) : null;
+}
+
+// 브라우저 저장: replace=0 이면 서버와 같은 병합 규칙(같은 경로는 새 내용 우선)을 적용한다.
+async function browserWorkspaceSave(body, replace){
+  if (!replace){
+    const prev = await wsIdbGetPayload().catch(() => null);
+    if (prev && prev.length) body = mergeWorkspacePayloads(prev, body);
+  }
+  await wsIdbSetPayload(body);
+}
+async function browserWorkspaceRemove(paths, clearAll){
+  if (clearAll){ await wsIdbClearPayload(); return; }
+  const prev = await wsIdbGetPayload().catch(() => null);
+  if (!prev || !prev.length) return;
+  const next = removeWorkspacePayloadPaths(prev, paths);
+  if (!next){ await wsIdbClearPayload(); return; }
+  await wsIdbSetPayload(next);
 }
 
 function encodeWorkspacePathList(rows){
@@ -59,7 +172,9 @@ async function flushWorkspaceRemovals(){
   workspaceCleanupActive = true;
   setWorkspaceActivity("작업공간 정리 중…");
   try {
+    const useServer = await workspaceBackendAvailable();
     return await queueWorkspaceMutation(async () => {
+      if (!useServer){ await browserWorkspaceRemove(rows, clearAll); return true; }
       const res = await workspaceFetch(clearAll ? "/workspace-clear" : "/workspace-remove", {
         method: "POST", headers: { "X-PdfSigner-Workspace": "1" },
         ...(clearAll ? {} : { body: encodeWorkspacePathList(rows) })
@@ -121,7 +236,8 @@ async function buildWorkspacePayload(files, folderPaths=[]){
 }
 
 async function rememberWorkspace(files, replace, options={}){
-  if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+  const useServer = await workspaceBackendAvailable();
+  if (!useServer && !wsIdbSupported()) return false;   // 서버도 IndexedDB 도 없으면 자동 복원 저장 불가
   if (window.__tabActive === false) return false;     // 비활성 탭은 작업공간 자동저장 생략(충돌 방지)
   // 영상·오디오 원본은 자동 복원 묶음에서 제외 — 수백 MB 파일 하나가 전체 저장(256MB 제한)을 막지 않게.
   // 다음 실행에 자동 복원되지 않을 뿐, 폴더 열기나 드래그로 다시 열면 된다.
@@ -145,15 +261,21 @@ async function rememberWorkspace(files, replace, options={}){
     if (silent) setWorkspaceActivity("작업공간 저장 중…");
     else updateLoading("다음 실행을 위해 작업공간 기억하는 중…");
     const body = await buildWorkspacePayload(rows, folderPaths);
-    const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-save?replace=" + (replace ? "1" : "0"), {
-      method: "POST", headers: { "Content-Type": "application/octet-stream", "X-PdfSigner-Workspace": "1" }, body
-    }));
-    if (!res.ok) throw new Error(await res.text());
+    if (useServer){
+      const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-save?replace=" + (replace ? "1" : "0"), {
+        method: "POST", headers: { "Content-Type": "application/octet-stream", "X-PdfSigner-Workspace": "1" }, body
+      }));
+      if (!res.ok) throw new Error(await res.text());
+    } else {
+      await queueWorkspaceMutation(() => browserWorkspaceSave(body, replace));
+    }
     return true;
   } catch(e){
     const msg = String(e && e.message || e);
     console.warn("workspace save skipped:", e);
-    toast(msg.indexOf("too-large") >= 0 ? `파일 묶음이 ${Math.round(WORKSPACE_CAP / (1024 * 1024))}MB를 넘어 자동 복원 저장은 생략했어요.` : "최근 작업공간을 저장하지 못했어요.", 4000);
+    toast(msg.indexOf("too-large") >= 0 ? `파일 묶음이 ${Math.round(WORKSPACE_CAP / (1024 * 1024))}MB를 넘어 자동 복원 저장은 생략했어요.`
+      : (e && e.name === "QuotaExceededError") ? "브라우저 저장 공간이 부족해 자동 복원 저장은 생략했어요."
+      : "최근 작업공간을 저장하지 못했어요.", 4000);
     return false;
   } finally {
     if (silent) setWorkspaceActivity(pendingWorkspaceRemovals.size || workspaceClearPending ? "닫은 파일 정리 대기 중…" : "");
@@ -162,7 +284,7 @@ async function rememberWorkspace(files, replace, options={}){
 }
 
 async function readRestoredLocalFile(path){
-  if (location.protocol !== "http:" && location.protocol !== "https:") return null;
+  if (!(await workspaceBackendAvailable())) return null;   // 저장 폴더 최신본 확인은 EXE 로컬 서버에서만
   if (!/\.(py|pyw|txt|db|sqlite|sqlite3)$/i.test(String(path || ""))) return null;
   try {
     const res = await fetch("/local-file?path=" + encodeURIComponent(path), { cache: "no-store" });
@@ -194,21 +316,34 @@ async function parseWorkspacePayload(buffer){
 }
 
 async function restoreLastWorkspace(){
-  if (location.protocol !== "http:" && location.protocol !== "https:") return;
   if (!appSettings.autoRestore) return;
+  const useServer = await workspaceBackendAvailable();
+  if (!useServer && !wsIdbSupported()) return;
   const savedTabs = loadSavedTabState();    // 파일을 열기 전에 저장된 탭 구성을 먼저 읽어둔다
   tabRestoreInProgress = true;
   showLoading("최근 작업공간 확인 중…");
   try {
-    const res = await fetch("/workspace-load", { cache: "no-store" });
-    if (!res.ok) return;
-    const savedSize = Number(res.headers.get("Content-Length")) || 0;
-    if (savedSize > WORKSPACE_CAP){
-      await workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }).catch(() => {});
-      toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
-      return;
+    let payload = null;
+    if (useServer){
+      const res = await fetch("/workspace-load", { cache: "no-store" });
+      if (!res.ok) return;
+      const savedSize = Number(res.headers.get("Content-Length")) || 0;
+      if (savedSize > WORKSPACE_CAP){
+        await workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }).catch(() => {});
+        toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
+        return;
+      }
+      payload = await res.arrayBuffer();
+    } else {
+      payload = await wsIdbGetPayload().catch(() => null);
+      if (!payload) return;
+      if (payload.length > WORKSPACE_CAP){
+        await wsIdbClearPayload().catch(() => {});
+        toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
+        return;
+      }
     }
-    const restored = await parseWorkspacePayload(await res.arrayBuffer());
+    const restored = await parseWorkspacePayload(payload);
     const rows = restored.rows;
     const restoredFolderPaths = restored.folderPaths;
     if (!rows.length && !restoredFolderPaths.length) return;
@@ -250,21 +385,27 @@ async function restoreLastWorkspace(){
 }
 
 async function clearRememberedWorkspace(){
-  if (location.protocol !== "http:" && location.protocol !== "https:"){
-    toast("최근 작업공간 저장은 EXE 실행에서만 사용해요.", 2800); return;
+  const useServer = await workspaceBackendAvailable();
+  if (!useServer && !wsIdbSupported()){
+    toast("이 브라우저에서는 최근 작업공간 저장을 지원하지 않아요.", 2800); return;
   }
   const ok = await confirmDialog("다음 실행 때 자동 복원할 작업공간을 지울까요? 현재 열린 파일은 유지됩니다.", "지우기", "취소");
   if (!ok) return;
   try {
     await flushWorkspaceRemovals();
-    const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }));
-    if (!res.ok) throw new Error(await res.text());
+    if (useServer){
+      const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }));
+      if (!res.ok) throw new Error(await res.text());
+    } else {
+      await queueWorkspaceMutation(() => wsIdbClearPayload());
+    }
     toast("최근 작업공간을 지웠어요.", 2500);
   } catch(e){ toast("최근 작업공간을 지우지 못했어요.", 3000); }
 }
 
 function forgetWorkspacePaths(paths, clearAll=false){
-  if ((location.protocol !== "http:" && location.protocol !== "https:") || !paths || !paths.length) return;
+  if (!paths || !paths.length) return;
+  if ((location.protocol !== "http:" && location.protocol !== "https:") && !wsIdbSupported()) return;
   if (clearAll){
     workspaceClearPending = true;
     pendingWorkspaceRemovals.clear();

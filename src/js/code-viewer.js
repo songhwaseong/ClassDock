@@ -911,6 +911,23 @@ async function renderCode(file, host, ext, profile, runCtx){
   linkBtn.title = "현재 코드 줄을 PDF에 핀으로 연결";
   // 필기 버튼 — 누르면 편집 잠금 + 캔버스 오버레이가 한 번에 켜짐. 다시 누르면 둘 다 해제.
   const inkBtn = document.createElement("button"); inkBtn.className = "run-ink"; inkBtn.type = "button"; inkBtn.textContent = "✏️ 필기"; inkBtn.title = "코드 위에 필기 — 켜는 동안 편집 잠금";
+  // 수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록.
+  // PDF 필기바의 ● 녹화와 같은 녹화기를 공유하므로 어느 쪽에서 시작/정지해도 상태가 맞는다.
+  const recBtn = document.createElement("button"); recBtn.className = "run-rec"; recBtn.type = "button";
+  const syncRecBtn = (on) => {
+    recBtn.classList.toggle("recording", on);
+    recBtn.textContent = on ? "■ 정지" : "● 녹화";
+    recBtn.title = on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기"
+      : "수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록";
+  };
+  syncRecBtn(typeof lessonPdfRecording === "function" && lessonPdfRecording());
+  recBtn.addEventListener("click", () => {
+    if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
+    syncRecBtn(lessonPdfToggleRecord());
+  });
+  const onRecChanged = (e) => syncRecBtn(!!(e.detail && e.detail.on));
+  document.addEventListener("lesson-rec-changed", onRecChanged);
+  if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(() => document.removeEventListener("lesson-rec-changed", onRecChanged)); }
   const status = document.createElement("span"); status.className = "run-status";
   const fontGroup = document.createElement("span"); fontGroup.className = "run-font-group";
   const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button"; fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
@@ -935,7 +952,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   newPyBtn.addEventListener("click", () => { if (typeof newPythonScratch === "function") newPythonScratch(); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(clearBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(clearBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
   syncShortcutHints(bar);
 
   // 편집기 바로 위: 마지막으로 저장한 파일의 절대경로 표시. 저장 전엔 회색 안내문.

@@ -491,6 +491,7 @@ function ensurePdfFindBar(){
       '<button type="button" class="pdf-find-opt" data-opt="word" title="단어 단위">\\b</button>' +
       '<button type="button" class="pdf-find-opt" data-opt="regex" title="정규식">.*</button>' +
       '<button type="button" class="regex-suggest-toggle" title="예시에서 정규식 추천" aria-expanded="false">패턴</button>' +
+      '<button type="button" class="pdf-find-ocr" title="스캔(이미지) PDF 의 글자를 인식해 찾기·검색이 되게 하기" hidden>🔍 글자 인식</button>' +
       '<button type="button" class="pdf-find-btn" data-nav="prev" title="이전 (Shift+Enter)">↑</button>' +
       '<button type="button" class="pdf-find-btn" data-nav="next" title="다음 (Enter)">↓</button>' +
       '<button type="button" class="pdf-find-btn" data-close title="닫기 (Esc)">✕</button>' +
@@ -499,7 +500,19 @@ function ensurePdfFindBar(){
   byId("content").appendChild(bar);
   _pdfFind = { bar, input: bar.querySelector(".pdf-find-input"), count: bar.querySelector(".pdf-find-count"),
     suggestPanel: bar.querySelector(".regex-suggest"), patternButton: bar.querySelector(".regex-suggest-toggle"),
+    ocrBtn: bar.querySelector(".pdf-find-ocr"),
     doc: null, optCase: false, optWord: false, optRegex: false, suggestOpen: false, suggestToken: 0 };
+  // 스캔 PDF 글자 인식 — 완료되면 현재 검색을 다시 계산해 하이라이트가 바로 뜬다.
+  _pdfFind.ocrBtn.addEventListener("click", () => {
+    const doc = _pdfFind.doc;
+    if (!doc || typeof pdfOcrToggle !== "function") return;
+    pdfOcrToggle(doc, _pdfFind.ocrBtn, () => {
+      if (_pdfFind && _pdfFind.doc === doc){
+        if (_pdfFind.input.value.trim()) computePdfMatches(doc);
+        else updatePdfFindCount(doc);
+      }
+    });
+  });
   _pdfFind.input.addEventListener("input", () => {
     clearTimeout(_pdfFindTimer);
     if (_pdfFind.suggestOpen) renderPdfRegexSuggestions();
@@ -572,14 +585,23 @@ async function openPdfFind(targetDoc){
   f.bar.classList.toggle("study-target", !!(content && content.classList.contains("study-mode") && target.id === studyPdfId));
   f.bar.hidden = false;
   f.input.focus(); f.input.select();
+  if (f.ocrBtn && !target._ocrRunning) f.ocrBtn.hidden = true;   // 문서가 바뀌었을 수 있으니 일단 감춤(아래 판정 후 표시)
   if (typeof ensureRendered === "function") await ensureRendered(target);   // placeholder(페이지·오버레이) 보장
   if (f.input.value.trim()) computePdfMatches(target);
   else updatePdfFindCount(target);
+  // 스캔본(추출·OCR 텍스트 모두 없음) 판정은 비동기로 — 끝나면 글자 인식 버튼을 보여준다.
+  (async () => {
+    try {
+      const text = await getDocText(target);
+      if (_pdfFind && _pdfFind.doc === target && _pdfFind.ocrBtn && text === false) _pdfFind.ocrBtn.hidden = false;
+    } catch(e){}
+  })();
 }
 function closePdfFind(){
   if (!_pdfFind) return;
   if (_pdfFind.doc) clearPdfFindHighlights(_pdfFind.doc);
   setPdfRegexSuggestionOpen(false);
+  if (_pdfFind.ocrBtn && !(_pdfFind.doc && _pdfFind.doc._ocrRunning)) _pdfFind.ocrBtn.hidden = true;
   _pdfFind.bar.hidden = true;
   _pdfFind.bar.classList.remove("study-target");
   _pdfFind.doc = null;
@@ -668,6 +690,10 @@ async function computePdfMatches(doc){
     const p = doc.pages[pn - 1] || doc.pages.find(pp => pp.pageNum === pn);
     if (!p) continue;
     let data; try { data = await pdfPageFindData(doc, p); } catch(e){ continue; }
+    // 글자 정보가 없는 스캔 페이지는 글자 인식(OCR) 결과(단어 좌표)로 대신 찾는다.
+    if (!data.str.trim() && typeof pdfOcrFindData === "function"){
+      try { const od = await pdfOcrFindData(doc, p); if (od) data = od; } catch(e){}
+    }
     if (token !== doc._pdfFind.token || _pdfFind.doc !== doc) return;   // 더 새 검색·문서 전환 → 중단
     if (data.str.trim()) hasText = true;
     re.lastIndex = 0;
@@ -737,7 +763,11 @@ function updatePdfFindCount(doc){
   if (!_pdfFind) return;
   const M = doc && doc._pdfFind && doc._pdfFind.matches;
   if (!_pdfFind.input.value){ _pdfFind.count.textContent = ""; return; }
-  if (doc && doc._pdfFind && doc._pdfFind.hasText === false){ _pdfFind.count.textContent = "텍스트 없음"; return; }
+  if (doc && doc._pdfFind && doc._pdfFind.hasText === false){
+    _pdfFind.count.textContent = "텍스트 없음(스캔본)";
+    if (_pdfFind.ocrBtn) _pdfFind.ocrBtn.hidden = false;    // 글자 인식으로 찾을 수 있게 안내
+    return;
+  }
   _pdfFind.count.textContent = (M && M.length) ? ((doc._pdfFind.active + 1) + "/" + M.length) : "0/0";
 }
 
@@ -1131,14 +1161,18 @@ function ensurePenBar(){
   bar.appendChild(mk("초기화", "현재 페이지의 필기 전체 지우기", "pen-act", () => { const doc = penTargetDoc(); if (doc) clearInkOnPage(doc, currentPageIndex(doc)); }));
   bar.appendChild(mk("✕", "필기 모드 끄기", "pen-act", () => setPenMode(false)));
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
-  // 수업 리플레이 녹화 — PDF 위 필기 과정을 시간순으로 기록해 되감아 볼 수 있다.
-  const recBtn = mk("● 녹화", "수업 리플레이 녹화 — 필기 과정을 시간순으로 기록해 되감아 볼 수 있어요", "pen-act pen-rec", () => {
-    if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
-    const on = lessonPdfToggleRecord();
+  // 수업 리플레이 녹화 — PDF 위 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있다.
+  // 파이썬 실행바의 ● 녹화와 같은 녹화기를 공유 — lesson-rec-changed 로 양쪽 버튼 상태를 맞춘다.
+  const syncPenRecBtn = (on) => {
     recBtn.classList.toggle("recording", on);
     recBtn.textContent = on ? "■ 정지" : "● 녹화";
-    recBtn.title = on ? "녹화 정지 — 지금까지 필기를 리플레이로 만들기" : "수업 리플레이 녹화 — 필기 과정을 시간순으로 기록해 되감아 볼 수 있어요";
+    recBtn.title = on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기" : "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요";
+  };
+  const recBtn = mk("● 녹화", "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요", "pen-act pen-rec", () => {
+    if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
+    syncPenRecBtn(lessonPdfToggleRecord());
   });
+  document.addEventListener("lesson-rec-changed", (e) => syncPenRecBtn(!!(e.detail && e.detail.on)));   // 펜바는 싱글턴이라 해제 불필요
   bar.appendChild(recBtn);
   setTool("pen"); setColor("#e11d48"); setWidth(3);
   byId("content").appendChild(bar);

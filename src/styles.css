@@ -1007,6 +1007,34 @@
   .lr-time{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:96px;text-align:center}
   .lr-speed{font:inherit;font-size:12.5px;height:32px;border:1px solid var(--border);border-radius:7px;
     background:var(--field);color:var(--ink);cursor:pointer;padding:0 6px}
+  /* 리플레이 파이썬 트랙 — 캔버스 옆(또는 단독) 코드·실행 결과 패널 */
+  .lr-main{display:flex;flex:1 1 auto;min-height:0}
+  .lr-main .lr-stage{flex:1 1 58%}
+  .lr-stage-hidden{display:none}
+  .lr-side{flex:1 1 42%;min-width:0;display:flex;flex-direction:column;overflow:auto;
+    background:var(--viewer);border-left:1px solid var(--border)}
+  .lr-stage-hidden+.lr-side{border-left:none}
+  .lr-side-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:8px 12px;
+    background:var(--panel);border-bottom:1px solid var(--border)}
+  .lr-side-file{font-size:12.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lr-side-state{font-size:12px;color:var(--muted);white-space:nowrap}
+  .lr-side-state.running{color:var(--danger);font-weight:600;animation:lr-recpulse 1.3s ease-in-out infinite}
+  .lr-py-code{flex:0 1 auto;margin:0;padding:12px 14px;font:12.5px/1.55 var(--code-font,Consolas,monospace);
+    color:var(--ink);white-space:pre-wrap;word-break:break-word;overflow:auto;min-height:80px}
+  .lr-py-code.lr-py-empty{color:var(--muted)}
+  .lr-py-out{flex:0 1 auto;border-top:1px solid var(--border);overflow:auto}
+  .lr-py-outhead{padding:6px 14px;font-size:11.5px;font-weight:600;color:var(--muted);
+    background:var(--panel);border-bottom:1px solid var(--border)}
+  .lr-py-outpre{margin:0;padding:10px 14px;font:12.5px/1.55 var(--code-font,Consolas,monospace);
+    color:var(--ink);white-space:pre-wrap;word-break:break-word}
+  .lr-py-outpre.lr-py-muted{color:var(--muted)}
+  .lr-py-err{color:var(--danger)}
+  .lr-py-imgs{padding:0 14px 12px;display:flex;flex-direction:column;gap:8px}
+  .lr-py-imgs img{max-width:100%;border:1px solid var(--border);border-radius:6px;background:#fff}
+  @media (max-width:900px){ .lr-main{flex-direction:column} .lr-side{border-left:none;border-top:1px solid var(--border)} }
+  /* 파이썬 실행바 녹화 버튼 — 평소에는 실행바 보조 버튼과 같은 톤, 녹화 중에만 강조 */
+  .run-rec{white-space:nowrap}
+  .run-rec.recording{background:var(--danger);color:#fff;border-color:var(--danger);animation:lr-recpulse 1.3s ease-in-out infinite}
   /* ===== 화면보호기(대기 화면) ===== */
   .screensaver{position:fixed;inset:0;z-index:100000;background:#000;display:flex;align-items:center;justify-content:center;
     opacity:0;transition:opacity .25s ease;cursor:none;overflow:hidden}
@@ -1363,9 +1391,9 @@
   [data-theme="dark"] .run-trace{background:rgba(37,99,235,.12);border-color:#60a5fa;color:#bfdbfe}
   [data-theme="dark"] .run-analyze{background:rgba(124,58,237,.12);border-color:#a78bfa;color:#ddd6fe}
   /* 보조 버튼(저장·라이브러리·지우기·되돌리기·글자크기)은 한 가지 톤으로 — ▶ 실행만 도드라지게 */
-  .run-clear,.run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag{font:inherit;font-size:12.5px;border:1px solid var(--border);
+  .run-clear,.run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec{font:inherit;font-size:12.5px;border:1px solid var(--border);
     background:var(--field);color:var(--muted);border-radius:8px;padding:6px 11px;cursor:pointer}
-  .run-clear:hover,.run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-clear:hover,.run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover{background:var(--panel-hover);color:var(--ink)}
   /* PDF에 핀: PDF·코드를 나란히 보는 학습 화면일 때만 쓸모가 있어 그때만 노출 */
   .run-link{display:none}
   #content.study-mode .run-link{display:inline-block}
@@ -2219,6 +2247,10 @@
   .pdf-find-opt{font:600 12px Consolas,"Courier New",monospace;border:1px solid var(--border);border-radius:5px;
     background:var(--field);color:var(--muted);padding:3px 6px;cursor:pointer;min-width:28px}
   .pdf-find-opt.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .pdf-find-ocr{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:5px;height:26px;padding:0 8px;
+    background:var(--field);color:var(--ink);cursor:pointer;white-space:nowrap}
+  .pdf-find-ocr:hover{background:var(--panel-hover)}
+  .pdf-find-ocr.running{background:var(--accent);color:#fff;border-color:var(--accent)}
   .pdf-find-btn{font:600 12.5px system-ui,sans-serif;border:1px solid var(--border);border-radius:5px;
     background:var(--field);color:var(--muted);padding:4px 9px;cursor:pointer}
   .pdf-find-opt:hover,.pdf-find-btn:hover{background:var(--panel-hover);color:var(--ink)}

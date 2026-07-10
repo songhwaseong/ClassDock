@@ -22,6 +22,8 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
   const stdin = (grading || diagnosing) ? "" : (ui.stdin ? ui.stdin.value : "");
   if (ui.running) return;
   ui.running = true;
+  // 수업 리플레이 녹화 중이면 실행 시작(확정 코드)을 파이썬 트랙에 기록(일반 실행만).
+  if (!grading && !diagnosing && !tracing && typeof lessonPyOnRun === "function") lessonPyOnRun(studentSource, ui.fileBase);
   let cancelRequested = false;
   let cancelCurrent = null;
   const idleButtonTitle = btn.title;
@@ -451,6 +453,7 @@ async function runPythonInteractive(src, bundle, ui, hooks){
           if (nextErr !== shownErr){ shownErr = nextErr; stderrEl.textContent = nextErr; }
           applyPythonStderrClass(stderrEl, fullErr, data.complete ? data.code : undefined);
           outPanel.scrollTop = outPanel.scrollHeight;
+          if (typeof lessonPyOnLiveOutput === "function") lessonPyOnLiveOutput(fullOut, fullErr);   // 수업 리플레이(녹화 중일 때만)
         }
         if (data.complete){
           result = {
@@ -472,6 +475,7 @@ async function runPythonInteractive(src, bundle, ui, hooks){
   appendVariableInspector(outPanel, result.variables);
   appendPlotGallery(outPanel, result.images);
   appendOutputFiles(outPanel, result.outputs, sessionId);
+  if (typeof lessonPyOnResult === "function") lessonPyOnResult({ stdout: result.stdout, stderr: result.stderr, images: result.images });   // 수업 리플레이(녹화 중일 때만)
   result.sessionId = sessionId;
   return result;
 }
@@ -2289,6 +2293,7 @@ function renderPyResult(panel, stdout, stderr, fatal, images, variables, code){
   panel.appendChild(head); panel.appendChild(pre);
   appendVariableInspector(panel, variables);
   appendPlotGallery(panel, images);
+  if (typeof lessonPyOnResult === "function") lessonPyOnResult({ stdout, stderr, fatal, images });   // 수업 리플레이(녹화 중일 때만)
 }
 
 function appendPythonErrorHelp(panel, stderr, location, ui){
