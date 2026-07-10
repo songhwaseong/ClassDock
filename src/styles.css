@@ -303,6 +303,11 @@
   .sb-menu-item:hover{background:var(--panel-2)}
   .sb-menu-item.danger{color:var(--danger)}
   .sb-menu-item svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .sb-menu-item[hidden]{display:none}
+  .header-more-wrap{position:relative;display:inline-flex}
+  .header-more-btn{display:inline-flex;align-items:center;justify-content:center}
+  .header-more-btn svg{width:18px;height:18px;fill:currentColor;stroke:none}
+  .header-more-menu{top:calc(100% + 7px);bottom:auto;right:0;min-width:184px}
   .dz-folder{margin-top:12px;padding:9px 16px;border:1px solid var(--accent);background:transparent;
     color:var(--accent);border-radius:8px;font:inherit;font-size:14px;cursor:pointer}
   .dz-folder:hover{background:var(--accent);color:#fff}
@@ -942,6 +947,14 @@
   .loading #loadingCancel{margin-top:4px}
   .settings-card{width:min(640px,96%);max-height:88vh;overflow:auto}.settings-row,.settings-check{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
   .settings-row .pw-input{width:140px;margin:0}.settings-check{justify-content:flex-start}.settings-check input{width:17px;height:17px;accent-color:var(--accent)}
+  .settings-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 10px;padding:4px;border-radius:11px;background:var(--panel-2)}
+  .settings-tab{flex:1 1 auto;min-width:64px;border:1px solid transparent;border-radius:8px;padding:7px 10px;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+  .settings-tab:hover{color:var(--ink)}
+  .settings-tab.active{background:var(--panel);border-color:var(--border);color:var(--accent);box-shadow:0 2px 7px rgba(0,0,0,.08)}
+  .settings-section[hidden]{display:none}
+  .settings-section{min-height:132px}
+  .settings-section > .settings-row:last-child,.settings-section > .settings-check:last-child,.settings-section > .settings-save-folder:last-child{border-bottom:none}
+  .settings-section .shortcut-settings{margin-top:0;padding-top:0;border-top:none}
   .pet-focus-setting-selects{display:flex;gap:6px}
   .settings-row .pet-focus-setting-selects .pw-input{width:112px}
   @media (max-width:480px){.pet-focus-setting-row{align-items:stretch;flex-direction:column}.pet-focus-setting-selects .pw-input{flex:1}}

@@ -544,7 +544,31 @@ function wire(){
     byId("settingPetQuietTyping").disabled = !enabled;
   };
   byId("settingPetFocus").addEventListener("change", syncPetFocusSettingFields);
+  const setSettingsTab = (name) => {
+    document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
+      const on = tab.dataset.settingsTab === name;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll("#settingsModal .settings-section").forEach((sec) => {
+      sec.hidden = sec.dataset.settingsPanel !== name;
+    });
+  };
+  document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
+    tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
+  });
+  (() => {                                   // 헤더 '더보기' 드롭다운(저장 폴더·이미지 메모)
+    const btn = byId("headerMore"), menu = byId("headerMoreMenu");
+    if (!btn || !menu) return;
+    const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+    btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
+    menu.addEventListener("click", (e) => e.stopPropagation());
+    [byId("saveFolderOpen"), byId("imageMemoOpen")].forEach(it => it && it.addEventListener("click", () => setOpen(false)));
+    document.addEventListener("click", () => setOpen(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
+  })();
   byId("settingsOpen").onclick = () => {
+    setSettingsTab("general");
     byId("settingUiScale").value = String(currentUiScale());
     byId("settingPdfZoom").value = String(defaultPdfZoom());
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";

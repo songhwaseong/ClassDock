@@ -29,6 +29,7 @@
 const PET_SCALE = 3, PET_GW = 15, PET_GH = 11;
 const PET_W = PET_GW * PET_SCALE, PET_H = PET_GH * PET_SCALE;   // 45×33
 const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 12;
+const PET_FPS_MIN = 42, PET_FPS_FLOOR = 3, PET_FPS_TRIGGER_MS = 2500;   // 저사양 자동 하향: FPS가 이 아래로 약 2.5초 지속되면 마릿수를 절반으로
 // 발판 위에 "서 있는" 상태들 — 발판 추적 대상이자 UFO 의 납치 후보가 된다
 const PET_GROUND_STATES = ["walk", "idle", "seekwall", "reboot", "hopwait",
   "stalk", "chase", "zoomies", "slide", "charge", "tongue", "hide", "dash",
@@ -1177,10 +1178,41 @@ function petUpdate(p, w){
 
 // ----- 공용 루프: 몇 마리든 rAF 하나로 돌린다 -----
 function petWorldStep(w){
+  const now = performance.now();
+  const dt = w.fpsLast ? now - w.fpsLast : 0;
+  w.fpsLast = now;
+  if (dt > 0 && dt < 1000){                                     // 탭 복귀 등 비정상 간격(>1s)은 무시
+    const fps = 1000 / dt;
+    w.fpsEma = w.fpsEma ? w.fpsEma * 0.9 + fps * 0.1 : fps;
+    if (!w.autoTrimmed && w.pets.length > PET_FPS_FLOOR && now - w.startTs > 3000){
+      w.slowMs = w.fpsEma < PET_FPS_MIN ? w.slowMs + dt : 0;    // 워밍업 3초 후, 저FPS 지속 시간 누적
+      if (w.slowMs >= PET_FPS_TRIGGER_MS) petAutoThrottle(w);
+    }
+  }
   if (--w.refresh <= 0){ w.platforms = petCollectPlatforms(); w.refresh = 30; }   // 발판은 0.5초마다 갱신
   if (!petWorldIsQuiet(w) || w.event) petEventTick(w);
   for (const p of w.pets){ petUpdate(p, w); petDraw(p); }
   w.raf = requestAnimationFrame(() => petWorldStep(w));
+}
+
+// 저사양 PC에서 프레임이 계속 떨어지면 마릿수를 절반(최소 PET_FPS_FLOOR)으로 줄여 부드럽게 유지한다.
+// 세션당 한 번만 동작하며 저장된 설정(petCount)은 건드리지 않는다 — 다음 실행 때 다시 전체 마릿수로 시도.
+function petAutoThrottle(w){
+  w.autoTrimmed = true;
+  const target = Math.max(PET_FPS_FLOOR, Math.floor(w.pets.length / 2));
+  if (target >= w.pets.length) return;
+  if (w.event){ petEventEnd(w.event, false); w.event = null; }   // 진행 중 이벤트의 펫 참조가 끊기지 않게 먼저 정리
+  petTrimTo(w, target);
+  w.slowMs = 0; w.fpsEma = 0;
+  if (typeof toast === "function") toast(`화면이 버거워 펫을 ${target}마리로 줄였어요. 설정에서 다시 조절할 수 있어요.`);
+}
+function petTrimTo(w, target){
+  while (w.pets.length > target){
+    const p = w.pets.pop();
+    if (!p) break;
+    clearTimeout(p.bubbleTimer);
+    if (p.el) p.el.remove();
+  }
 }
 
 // 붙잡았다 놓았을 때 중력 없는 종족이 돌아가는 상태(물고기는 방울이 터져 파닥거린다)
@@ -1393,7 +1425,8 @@ function petStart(count){
   const w = petWorld = { pets: [], platforms: petCollectPlatforms(), refresh: 30, raf: 0,
     mouse: { x:-9999, y:-9999, ts: 0 }, event:null,
     eventTimer:240 + Math.floor(Math.random() * 180), playedEvents:new Set(),
-    rhythm:"normal", typingQuietUntil:0 };
+    rhythm:"normal", typingQuietUntil:0,
+    startTs:performance.now(), fpsLast:0, fpsEma:0, slowMs:0, autoTrimmed:false };
   for (let i = 0; i < n; i++) w.pets.push(petSpawn(i, n, arrangedBag));
   w.onResize = () => {
     w.platforms = petCollectPlatforms();
