@@ -589,6 +589,22 @@ test("Python 다중 변수 경로 대입도 뒤 문자열 결합까지 추적한
   }]);
 });
 
+test("Python 함수 인수 안의 경로 변수 결합도 필요한 파일을 찾는다", () => {
+  const target = "m_project/k.national/toji-word2vec.py";
+  const source = [
+    "dataIn, dataOut = '../dataIn/', '../dataOut/'",
+    "fp = codecs.open(filename=dataIn + 'BEXX0003.txt', mode='r', encoding='utf-8')"
+  ].join("\n");
+  const context = inferPythonProjectRunContext(target, source, [
+    target,
+    "m_project/dataIn/BEXX0003.txt"
+  ]);
+  assert.deepEqual(context.references, [{
+    ref:"../dataIn/BEXX0003.txt",
+    path:"m_project/dataIn/BEXX0003.txt"
+  }]);
+});
+
 test("같은 식별자들을 한 번의 편집으로 함께 바꾼다", () => {
   const source = "score = 1\nprint(score)\nscore2 = score\n# score\nlabel = 'score'";
   const selected = identifierOccurrences(source, 0, 5);

@@ -149,21 +149,32 @@
     const variables = new Map(), values = [];
     for (const line of String(source || "").split(/\r?\n/)) {
       const match = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*=\s*(.+)$/.exec(line);
-      if (!match) continue;
-      const names = match[1].split(",").map(name => name.trim());
-      const expressions = names.length > 1 ? splitPythonAssignmentValues(match[2]) : [match[2]];
-      if (expressions.length !== names.length) {
-        names.forEach(name => variables.delete(name));
-        continue;
-      }
-      names.forEach((name, index) => {
-        const value = evaluatePythonStringConcat(expressions[index], variables);
-        if (value === null) variables.delete(name);
-        else {
-          variables.set(name, value);
-          values.push(value);
+      if (match) {
+        const names = match[1].split(",").map(name => name.trim());
+        const expressions = names.length > 1 ? splitPythonAssignmentValues(match[2]) : [match[2]];
+        if (expressions.length !== names.length) {
+          names.forEach(name => variables.delete(name));
+        } else {
+          names.forEach((name, index) => {
+            const value = evaluatePythonStringConcat(expressions[index], variables);
+            if (value === null) variables.delete(name);
+            else {
+              variables.set(name, value);
+              values.push(value);
+            }
+          });
         }
-      });
+      }
+      // open(filename=dataIn + "sample.txt")처럼 대입문 밖의 함수 인수에
+      // 직접 쓴 상수 경로 결합도 실행 묶음에 포함한다. 실제 Python 실행은
+      // 하지 않고, 앞에서 확인한 문자열 변수와 바로 뒤의 문자열만 추적한다.
+      const concat = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\+\s*([rRuUbB]{0,2})(["'])([^"'\r\n]*)\3/g;
+      let concatMatch;
+      while ((concatMatch = concat.exec(line))) {
+        const base = variables.get(concatMatch[1]);
+        if (base === undefined || /f/i.test(concatMatch[2])) continue;
+        values.push(base + concatMatch[4]);
+      }
     }
     return values;
   }
