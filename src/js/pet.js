@@ -28,7 +28,7 @@
 
 const PET_SCALE = 3, PET_GW = 15, PET_GH = 11;
 const PET_W = PET_GW * PET_SCALE, PET_H = PET_GH * PET_SCALE;   // 45×33
-const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 6;
+const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 12;
 // 발판 위에 "서 있는" 상태들 — 발판 추적 대상이자 UFO 의 납치 후보가 된다
 const PET_GROUND_STATES = ["walk", "idle", "seekwall", "reboot", "hopwait",
   "stalk", "chase", "zoomies", "slide", "charge", "tongue", "hide", "dash",
