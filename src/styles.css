@@ -1390,6 +1390,8 @@
   .code-host-readonly.code-chunked.is-wrapped .code-pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
   .readonly-jump-line{position:absolute;left:0;right:0;z-index:2;pointer-events:none;
     background:rgba(250,204,21,.20);border-left:3px solid #facc15;box-shadow:inset 0 0 0 1px rgba(250,204,21,.14)}
+  .readonly-jump-word{position:absolute;z-index:3;pointer-events:none;border-radius:2px;
+    background:rgba(250,204,21,.38);box-shadow:inset 0 -2px 0 #facc15,0 0 0 1px rgba(250,204,21,.32)}
   .code-host .tk-c,.nbv-static .tk-c{color:var(--code-muted);font-style:italic}
   .code-host .tk-s,.nbv-static .tk-s{color:var(--code-string)}
   .code-host .tk-n,.nbv-static .tk-n{color:var(--code-number)}

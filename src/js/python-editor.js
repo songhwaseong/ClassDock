@@ -892,12 +892,19 @@ function buildCodeEditor(text, prof, options={}){
     const base = normPath.split("/").pop() || (def.name || "definition") + ".py";
     const sourceKey = "definition:" + normPath;        // 경로 정규화 → 재클릭 시 중복 탭 방지
     const targetLine = def.line || 1;
+    const targetFocus = {
+      column:Math.max(0, Number(def.column) || 0),
+      length:Math.max(1, String(def.name || wordInfo.word || "").length)
+    };
     // 소스키로 되찾지 않고, 연(또는 이미 열린) 문서를 직접 받아 그 줄로 이동.
     const target = await handleFiles([new File([buf], base, { type: "text/x-python" })], { sourceKey, workspacePath: def.path });
     if (target){
       const navigator = target.codeEditor || target.codeViewer;
-      if (navigator && navigator.focusLine) navigator.focusLine(targetLine);
-      else target.pendingFocusLine = targetLine;       // 아직 렌더 전 → editor 부착 시 renderCode 가 소비
+      if (navigator && navigator.focusLine) navigator.focusLine(targetLine, targetFocus);
+      else {
+        target.pendingFocusLine = targetLine;           // 아직 렌더 전 → editor 부착 시 renderCode 가 소비
+        target.pendingFocusOptions = targetFocus;
+      }
     }
     toast("정의 파일을 열었습니다.", 1400);
   };

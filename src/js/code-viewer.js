@@ -588,14 +588,20 @@ async function renderCode(file, host, ext, profile, runCtx){
         host.appendChild(treeEl);
         if (ownerDoc){
           // 트리에는 줄 개념이 없으므로, 줄 이동 요청이 오면 코드 보기로 전환한 뒤 넘긴다.
-          ownerDoc.codeViewer = { focusLine: (line) => { treeMode = false; showView();
-            if (ownerDoc.codeViewer && ownerDoc.codeViewer.focusLine) ownerDoc.codeViewer.focusLine(line); } };
+          ownerDoc.codeViewer = { focusLine: (line, opts) => { treeMode = false; showView();
+            if (ownerDoc.codeViewer && ownerDoc.codeViewer.focusLine) ownerDoc.codeViewer.focusLine(line, opts); } };
         }
         return;
       }
       const viewText = prettyText != null ? prettyText : currentText;
       const allLines = viewText.split("\n");
       const lineN = allLines.length;
+      const lineOffsets = [];
+      let sourceOffset = 0;
+      for (let i = 0; i < allLines.length; i++){
+        lineOffsets.push(sourceOffset);
+        sourceOffset += allLines[i].length + 1;
+      }
       const longLine = /[^\n]{2000}/.test(viewText);            // 초장문 단일 라인 → 줄바꿈으로 가로 레이아웃 폭발 회피
       const big = heavy || lineN > 6000;                       // 줄이 아주 많으면 청크 가상 렌더(보이는 부분만 레이아웃)
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
@@ -629,7 +635,8 @@ async function renderCode(file, host, ext, profile, runCtx){
         wrap.append(gutter, pre);
       }
       const jump = document.createElement("div"); jump.className = "readonly-jump-line"; jump.hidden = true; jump.setAttribute("aria-hidden", "true");
-      wrap.appendChild(jump);
+      const jumpWord = document.createElement("div"); jumpWord.className = "readonly-jump-word"; jumpWord.hidden = true; jumpWord.setAttribute("aria-hidden", "true");
+      wrap.append(jump, jumpWord);
       host.appendChild(wrap);
       // 청크(가상 렌더) 모드에서 대상 줄의 실제 top 을 실측한다. 추정 줄높이(LINE_H)와 청크별 pre 패딩 때문에
       // 줄이 내려갈수록 누적 오차가 생겨 노란 바가 실제 줄과 어긋나던 문제를 없앤다. 비청크 모드는 null 반환(아래 추정식이 이미 정확).
@@ -648,6 +655,53 @@ async function renderCode(file, host, ext, profile, runCtx){
         const wr = wrap.getBoundingClientRect(), cr = chunkEl.getBoundingClientRect();
         return { top: (cr.top - wr.top + wrap.scrollTop) + padTop + li * lh, lh };   // 청크 top(실측) + 청크 안 상대 위치
       };
+      const textRangeAt = (root, start, end) => {
+        if (!root || start < 0 || end <= start) return null;
+        let offset = 0, startNode = null, endNode = null, startAt = 0, endAt = 0;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())){
+          const next = offset + (node.nodeValue || "").length;
+          if (!startNode && start >= offset && start <= next){ startNode = node; startAt = start - offset; }
+          if (!endNode && end >= offset && end <= next){ endNode = node; endAt = end - offset; }
+          if (startNode && endNode) break;
+          offset = next;
+        }
+        if (!startNode || !endNode) return null;
+        const range = document.createRange();
+        try { range.setStart(startNode, startAt); range.setEnd(endNode, endAt); return range; }
+        catch(_){ return null; }
+      };
+      const codeRangeForLine = (line, column, length) => {
+        const text = allLines[line - 1] || "";
+        if (column < 0 || !length || column >= text.length) return null;
+        let code = preRef && preRef.querySelector("code"), start = lineOffsets[line - 1] + column;
+        if (!code && chunkStarts.length){
+          const ci = Math.floor((line - 1) / CHUNK);
+          const chunk = wrap.querySelectorAll(".code-chunk")[ci];
+          if (chunk) code = chunk.querySelector("code");
+          start -= chunkStarts[ci] || 0;
+        }
+        return textRangeAt(code, start, Math.min(start + length, start + text.length - column));
+      };
+      const measureRenderedLine = (line) => {
+        const text = allLines[line - 1] || "";
+        const range = codeRangeForLine(line, 0, Math.max(1, text.length));
+        if (!range) return null;
+        const rect = range.getClientRects()[0] || range.getBoundingClientRect(), hostRect = wrap.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        return { top:rect.top - hostRect.top + wrap.scrollTop, lh:rect.height };
+      };
+      const measureJumpWord = (line, opts) => {
+        const column = Math.max(0, Math.floor(Number(opts && opts.column) || 0));
+        const length = Math.max(0, Math.floor(Number(opts && opts.length) || 0));
+        const range = codeRangeForLine(line, column, length);
+        if (!range) return null;
+        const rect = range.getBoundingClientRect(), hostRect = wrap.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        return { left:rect.left - hostRect.left + wrap.scrollLeft, top:rect.top - hostRect.top + wrap.scrollTop,
+          width:rect.width, height:rect.height };
+      };
       const focusLine = (line, opts) => {
         line = Math.max(1, Math.min(lineN, parseInt(line, 10) || 1));
         let lineHeight = LINE_H, paddingTop = 16;
@@ -658,26 +712,36 @@ async function renderCode(file, host, ext, profile, runCtx){
         // 찾기(noBar)는 placeRoHit 이 실제 단어에 상자를 씌워 정밀 배치하므로, 여기선 기존 추정 스크롤만 하고 줄 전체 노란 바는 생략.
         if (opts && opts.noBar){
           wrap.scrollTop = Math.max(0, estTop - wrap.clientHeight * 0.35);
-          jump.style.top = estTop + "px"; jump.style.height = lineHeight + "px"; jump.hidden = true;
+          jump.style.top = estTop + "px"; jump.style.height = lineHeight + "px"; jump.hidden = true; jumpWord.hidden = true;
           return;
         }
         // 내용검색 클릭 등 일반 점프: 청크 모드는 실측 위치로 정확히 배치. 스크롤 후 이웃 청크 재렌더로 밀리면 다음 프레임에 보정.
         const place = () => {
-          const m = measureLineTop(line);
+          const fallback = measureLineTop(line);
+          const m = measureRenderedLine(line) || fallback;
           const top = m ? m.top : estTop, lh = m ? m.lh : lineHeight;
           wrap.scrollTop = Math.max(0, top - wrap.clientHeight * 0.35);
           jump.style.top = top + "px"; jump.style.height = lh + "px";
         };
+        const placeWord = () => {
+          const word = measureJumpWord(line, opts);
+          if (!word){ jumpWord.hidden = true; return; }
+          jumpWord.style.left = word.left + "px"; jumpWord.style.top = word.top + "px";
+          jumpWord.style.width = word.width + "px"; jumpWord.style.height = word.height + "px";
+          jumpWord.hidden = false;
+        };
         place();
-        if (chunkStarts.length) requestAnimationFrame(place);
-        jump.hidden = false; clearTimeout(viewJumpTimer); viewJumpTimer = setTimeout(() => { jump.hidden = true; }, 2400);
+        placeWord();
+        if (chunkStarts.length) requestAnimationFrame(() => { place(); placeWord(); });
+        jump.hidden = false; clearTimeout(viewJumpTimer); viewJumpTimer = setTimeout(() => { jump.hidden = true; jumpWord.hidden = true; }, 2400);
       };
       const flashJumpBar = () => { jump.hidden = false; clearTimeout(viewJumpTimer); viewJumpTimer = setTimeout(() => { jump.hidden = true; }, 2400); };
       if (ownerDoc){
         ownerDoc.codeViewer = { focusLine };
         if (ownerDoc.pendingFocusLine){
-          const line = ownerDoc.pendingFocusLine; ownerDoc.pendingFocusLine = 0;
-          requestAnimationFrame(() => { if (ownerDoc.codeViewer) ownerDoc.codeViewer.focusLine(line); });
+          const line = ownerDoc.pendingFocusLine, opts = ownerDoc.pendingFocusOptions;
+          ownerDoc.pendingFocusLine = 0; ownerDoc.pendingFocusOptions = null;
+          requestAnimationFrame(() => { if (ownerDoc.codeViewer) ownerDoc.codeViewer.focusLine(line, opts); });
         }
       }
       // 편집 잠금(대용량) 파일용 읽기 전용 찾기 바 — 문자열에서 찾아 해당 줄로 점프·강조(Ctrl+H 로 연다).
@@ -1455,8 +1519,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (editor.setPinProvider) editor.setPinProvider(() => (typeof codeLinksTargetingDoc === "function" ? codeLinksTargetingDoc(ownerDoc) : []));
     window.__lastCodeLinkDocId = ownerDoc.id;
     if (ownerDoc.pendingFocusLine){                    // 정의 이동·코드 링크가 렌더 전에 예약해 둔 줄로 이동
-      const ln = ownerDoc.pendingFocusLine; ownerDoc.pendingFocusLine = 0;
-      requestAnimationFrame(() => { if (ownerDoc.codeEditor === editor && editor.focusLine) editor.focusLine(ln); });
+      const ln = ownerDoc.pendingFocusLine, opts = ownerDoc.pendingFocusOptions;
+      ownerDoc.pendingFocusLine = 0; ownerDoc.pendingFocusOptions = null;
+      requestAnimationFrame(() => { if (ownerDoc.codeEditor === editor && editor.focusLine) editor.focusLine(ln, opts); });
     }
     if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = [];
     ownerDoc.cleanupFns.push(() => {
