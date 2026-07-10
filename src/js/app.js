@@ -33,7 +33,7 @@ function wire(){
     window.addEventListener("focus", beat);
     window.addEventListener("pagehide", () => {
       closed = true; clearInterval(timer);
-      try { navigator.sendBeacon("/heartbeat-close?id=" + encodeURIComponent(clientId), ""); } catch(e){}
+      try { fetch("/heartbeat-close?id=" + encodeURIComponent(clientId), { method:"POST", headers:{ "X-PdfSigner-Heartbeat":"1" }, keepalive:true }); } catch(e){}
     }, { once: true });
   })();
 

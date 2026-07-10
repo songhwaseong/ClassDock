@@ -203,10 +203,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
           const localIncluded = bundleHasLocalModule(bundle, missing);
           if (localIncluded){
             toast("'" + missing + "' 파일은 작업폴더에 있지만 import 경로가 맞지 않아요. 작업폴더 목록과 패키지 구조를 확인하세요.", 4200);
-          } else if (await confirmDialog(
-            "'" + missing + "' 모듈을 찾지 못했어요.\n\n직접 만든 모듈이라면 같은 작업폴더에 " + missing + ".py 또는 " +
-            missing + "/__init__.py가 있어야 합니다.\n외부 라이브러리가 맞다면 '" + pip + "'을(를) pip로 설치할 수 있습니다.",
-            "pip 설치 후 실행", "취소")){
+          } else {
             const ok = await runPipInstall([pip], ui);
             throwIfCancelled();
             if (ok) continue;   // 설치 성공 → 자동 재실행
@@ -589,6 +586,14 @@ async function runPipInstall(pkgs, ui){
     toast("브라우저 실행에서는 패키지가 자동으로 받아져요 — 따로 설치할 필요 없습니다.", 4000);
     return false;
   }
+  const approved = typeof confirmDialog === "function" && await confirmDialog(
+    "다음 패키지를 이 컴퓨터의 Python 환경에 설치합니다.\n\n" + pkgs.join(", ") +
+    "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
+    "설치", "취소");
+  if (!approved){
+    if (status) status.textContent = "설치 취소";
+    return false;
+  }
   split.classList.add("show-out");
   if (ui.clearBtn) ui.clearBtn.hidden = false;
   if (ui.layoutBtn) ui.layoutBtn.hidden = false;
@@ -599,7 +604,7 @@ async function runPipInstall(pkgs, ui){
   outPanel.append(head, pre);
   if (status) status.textContent = "설치 중… " + pkgs.join(" ");
   try {
-    const res = await fetch("/pip-install", { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: pkgs.join(" ") });
+    const res = await fetch("/pip-install", { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8", "X-Manneung-Pip-Confirm":"1" }, body: pkgs.join(" ") });
     const txt = await res.text();
     let j; try { j = JSON.parse(txt); } catch(_){ j = { ok: res.ok, code: -1, output: txt }; }
     pre.classList.remove("out-muted");

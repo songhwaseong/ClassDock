@@ -655,6 +655,21 @@ function notebookInteractiveHtmlFrameSpec(html){
   };
 }
 
+// 알려진 차트가 아닌 HTML은 기본적으로 정적으로만 보여 준다. 스크립트·iframe 등
+// 실행 가능한 요소가 있을 때만, 문서 단위 신뢰 승인을 받은 뒤 별도 sandbox에서 실행한다.
+function notebookUntrustedHtmlFrameSpec(html){
+  const input = String(html == null ? "" : html);
+  if (!input || input.length > NOTEBOOK_RICH_FRAME_MAX_HTML) return null;
+  if (!/<(?:script|iframe|object|embed)\b|\son[a-z]+\s*=/i.test(input)) return null;
+  return {
+    srcdoc:notebookFrameDocument(input),
+    paddingBottom:"62%",
+    title:"신뢰된 인터랙티브 HTML 출력",
+    allowScripts:true,
+    requiresTrust:true
+  };
+}
+
 function notebookJsonForScript(value){
   let json;
   try { json = JSON.stringify(value); }

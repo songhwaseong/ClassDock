@@ -67,6 +67,10 @@ class PdfSignerLauncher
         "PdfSigner", "app-state.json");
     static readonly object AppStateLock = new object();
     const int AppStateMaxBytes = 8 * 1024 * 1024;
+    const int MaxHttpHeaderBytes = 64 * 1024;
+    const int MaxHttpRequestBodyBytes = 510 * 1024 * 1024;
+    // 일반적인 수업용 데이터 분석은 허용하면서, 실수로 큰 배열을 반복 생성해 PC 전체가 멈추는 일을 줄인다.
+    const long PythonProcessMemoryLimitBytes = 1536L * 1024 * 1024;
     // 직전 인스턴스가 실제로 바인딩한 포트. 다음 실행이 후보 포트 전체를 HTTP 로 뒤지지 않고 이 한 곳만 확인해
     // 단일 인스턴스 여부를 빠르게 판단하도록 기록한다(기동 지연 방지).
     static readonly string InstancePortPath = Path.Combine(
@@ -474,11 +478,33 @@ class PdfSignerLauncher
         return diff == 0;
     }
 
-    static bool HasLocalAuthToken(Dictionary<string, string> headers, string path)
+    static bool HasLocalAuthToken(Dictionary<string, string> headers)
     {
         string value;
         if (headers != null && headers.TryGetValue("X-Manneung-Token", out value) && TokenEquals(value)) return true;
-        return TokenEquals(QueryValue(path, "mn_token"));
+        return false;
+    }
+
+    // loopback에만 바인딩하더라도 DNS rebinding 등으로 다른 Host가 들어오는 요청은 받지 않는다.
+    // 이 서버는 IPv4 loopback 전용이므로 Host도 localhost 또는 127.0.0.1만 허용한다.
+    static bool HasAllowedLocalHost(Dictionary<string, string> headers)
+    {
+        string value;
+        if (headers == null || !headers.TryGetValue("Host", out value) || string.IsNullOrWhiteSpace(value)) return false;
+        string host = value.Trim().ToLowerInvariant();
+        int colon = host.LastIndexOf(':');
+        if (colon > 0) host = host.Substring(0, colon);
+        return host == "127.0.0.1" || host == "localhost";
+    }
+
+    // 브라우저가 Origin을 보냈다면 현재 loopback origin과 일치해야 한다.
+    // 일부 로컬 도구는 Origin을 생략하므로, 그 경우에는 실행별 토큰 검증을 계속 경계로 삼는다.
+    static bool HasAllowedLocalOrigin(Dictionary<string, string> headers)
+    {
+        string origin, host;
+        if (headers == null || !headers.TryGetValue("Origin", out origin) || string.IsNullOrWhiteSpace(origin)) return true;
+        if (!headers.TryGetValue("Host", out host) || string.IsNullOrWhiteSpace(host)) return false;
+        return string.Equals(origin.Trim(), "http://" + host.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     static bool RequiresLocalAuthToken(string method, string path)
@@ -493,6 +519,7 @@ class PdfSignerLauncher
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
             if (path == "/image-memo-delete") return true;
             if (path == "/complete" || path == "/definition" || path == "/pip-install") return true;
+            if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
@@ -539,9 +566,8 @@ class PdfSignerLauncher
         {
             string root = Path.GetFullPath(CurrentSaveRoot());
             string memoRoot = Path.GetFullPath(Path.Combine(root, "이미지메모"));
-            string candidate = Path.GetFullPath(Path.Combine(root, safe));
-            string prefix = memoRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+            string candidate;
+            if (!TryResolveSaveRootPath(safe, out candidate) || !IsPathInsideRoot(memoRoot, candidate, false)) return false;
             fullPath = candidate;
             return true;
         }
@@ -752,15 +778,31 @@ class PdfSignerLauncher
             using (client)
             using (NetworkStream stream = client.GetStream())
             {
+                client.ReceiveTimeout = 15000;
+                client.SendTimeout = 15000;
                 // ---- 요청 헤더를 \r\n\r\n 까지 바이트 단위로 읽는다(바디는 바이너리라 StreamReader 금지) ----
                 List<byte> head = new List<byte>(1024);
+                bool headerComplete = false;
                 int b;
                 while ((b = stream.ReadByte()) != -1)
                 {
                     head.Add((byte)b);
                     int n = head.Count;
-                    if (n >= 4 && head[n - 4] == 13 && head[n - 3] == 10 && head[n - 2] == 13 && head[n - 1] == 10) break;
-                    if (n > 65536) break;   // 헤더 과대 방지
+                    if (n >= 4 && head[n - 4] == 13 && head[n - 3] == 10 && head[n - 2] == 13 && head[n - 1] == 10)
+                    {
+                        headerComplete = true;
+                        break;
+                    }
+                    if (n > MaxHttpHeaderBytes)
+                    {
+                        WriteResponse(stream, "431 Request Header Fields Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("request-header-too-large"));
+                        return;
+                    }
+                }
+                if (!headerComplete)
+                {
+                    WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("incomplete-request-header"));
+                    return;
                 }
                 string headerText = Encoding.ASCII.GetString(head.ToArray());
                 string[] lines = headerText.Split(new string[] { "\r\n" }, StringSplitOptions.None);
@@ -778,12 +820,47 @@ class PdfSignerLauncher
                     string val = lines[i].Substring(c + 1).Trim();
                     headers[key] = val;
                     if (key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
-                        int.TryParse(val, out contentLength);
+                    {
+                        if (!int.TryParse(val, out contentLength) || contentLength < 0)
+                        {
+                            WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-content-length"));
+                            return;
+                        }
+                    }
+                }
+
+                if (rp.Length < 3 || !rp[2].StartsWith("HTTP/", StringComparison.Ordinal) || !path.StartsWith("/", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-request-line"));
+                    return;
+                }
+                if (!HasAllowedLocalHost(headers))
+                {
+                    WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-local-host"));
+                    return;
+                }
+                // 지도 스냅샷의 sandbox iframe은 Origin: null로 /tile-proxy만 호출한다.
+                // 해당 프록시는 별도 목적지 allowlist로 보호하므로 이 경로만 예외로 둔다.
+                if (!HasAllowedLocalOrigin(headers) && !path.StartsWith("/tile-proxy", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-local-origin"));
+                    return;
+                }
+                if (contentLength > MaxHttpRequestBodyBytes)
+                {
+                    WriteResponse(stream, "413 Payload Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("request-body-too-large"));
+                    return;
+                }
+                // 인증 실패 요청은 본문을 읽지 않는다. 큰 무단 요청으로 메모리·I/O를 점유하는 것을 막는다.
+                if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers))
+                {
+                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("local-token-required"));
+                    return;
                 }
 
                 // ---- 바디(있으면) 읽기 ----
                 byte[] body = new byte[0];
-                if (contentLength > 0 && contentLength <= 510 * 1024 * 1024)
+                if (contentLength > 0)
                 {
                     body = new byte[contentLength];
                     int read = 0;
@@ -794,12 +871,6 @@ class PdfSignerLauncher
                         read += got;
                     }
                     if (read != contentLength) body = new byte[0];
-                }
-
-                if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers, path))
-                {
-                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("local-token-required"));
-                    return;
                 }
 
                 // ---- 라우팅 ----
@@ -925,6 +996,11 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path.StartsWith("/heartbeat-close?", StringComparison.Ordinal))
                 {
+                    if (!headers.ContainsKey("X-PdfSigner-Heartbeat"))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("heartbeat-header-required"));
+                        return;
+                    }
                     CloseHeartbeatClient(QueryValue(path, "id"));
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
@@ -1153,7 +1229,12 @@ class PdfSignerLauncher
                         string rel = headers.ContainsKey("X-Save-Path") ? Uri.UnescapeDataString(headers["X-Save-Path"]) : "";
                         string safe = SafeRelPath(rel);
                         if (safe == null) safe = "practice.py";
-                        string full = Path.Combine(CurrentSaveRoot(), safe);
+                        string full;
+                        if (!TryResolveSaveRootPath(safe, out full))
+                        {
+                            WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-save-path"));
+                            return;
+                        }
                         string dir = Path.GetDirectoryName(full);
                         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                         File.WriteAllBytes(full, body);
@@ -1240,6 +1321,12 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path == "/pip-install")
                 {
+                    string pipConfirmed;
+                    if (!headers.TryGetValue("x-manneung-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-confirmation-required"));
+                        return;
+                    }
                     // 설치된 파이썬에 패키지 설치(pip). 본문 = 공백/줄바꿈으로 구분한 패키지 이름들.
                     try
                     {
@@ -1534,6 +1621,8 @@ class PdfSignerLauncher
             "Content-Type: " + contentType + "\r\n" +
             "Content-Length: " + body.Length + "\r\n" +
             "Cache-Control: no-store\r\n" +
+            "X-Content-Type-Options: nosniff\r\n" +
+            "Referrer-Policy: no-referrer\r\n" +
             "X-App: manneung-classroom\r\n" +      // 우리 서버 식별용(중복 실행 시 단일 인스턴스 판별)
             "Connection: close\r\n" +
             "\r\n";
@@ -1551,6 +1640,8 @@ class PdfSignerLauncher
             "Content-Length: " + body.Length + "\r\n" +
             "Access-Control-Allow-Origin: *\r\n" +
             "Cache-Control: max-age=600\r\n" +
+            "X-Content-Type-Options: nosniff\r\n" +
+            "Referrer-Policy: no-referrer\r\n" +
             "X-App: manneung-classroom\r\n" +
             "Connection: close\r\n" +
             "\r\n";
@@ -1903,6 +1994,54 @@ class PdfSignerLauncher
         return "";
     }
 
+    static bool IsPathInsideRoot(string root, string candidate, bool allowRoot=true)
+    {
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(candidate)) return false;
+        string normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalizedCandidate = Path.GetFullPath(candidate);
+        if (allowRoot && string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase)) return true;
+        string prefix = normalizedRoot + Path.DirectorySeparatorChar;
+        return normalizedCandidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // 저장 루트 아래에서 이미 존재하는 재분석 지점(심볼릭 링크·junction)을 거치지 않게 한다.
+    // 상대경로 검증만으로는 저장 루트 안의 링크가 외부 파일을 가리키는 경우를 막을 수 없기 때문이다.
+    static bool HasReparsePointBelowRoot(string root, string full)
+    {
+        try
+        {
+            string normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedFull = Path.GetFullPath(full);
+            if (!IsPathInsideRoot(normalizedRoot, normalizedFull, true)) return true;
+            string relative = normalizedFull.Substring(normalizedRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string current = normalizedRoot;
+            foreach (string part in relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, part);
+                if (!File.Exists(current) && !Directory.Exists(current)) continue;
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
+            }
+            return false;
+        }
+        catch { return true; }
+    }
+
+    static bool TryResolveSaveRootPath(string relativePath, out string full)
+    {
+        full = "";
+        string safe = SafeRelPath(relativePath);
+        if (safe == null) return false;
+        try
+        {
+            string root = Path.GetFullPath(CurrentSaveRoot());
+            string candidate = Path.GetFullPath(Path.Combine(root, safe));
+            if (!IsPathInsideRoot(root, candidate, false) || HasReparsePointBelowRoot(root, candidate)) return false;
+            full = candidate;
+            return true;
+        }
+        catch { return false; }
+    }
+
     static bool TryReadLocalFile(string path, out byte[] data, out string fileName)
     {
         data = null;
@@ -1917,11 +2056,7 @@ class PdfSignerLauncher
             }
             else
             {
-                string root = Path.GetFullPath(CurrentSaveRoot());
-                full = Path.GetFullPath(Path.Combine(root, path));
-                string rootWithSep = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                if (!full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase) && !string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
-                    return false;
+                if (!TryResolveSaveRootPath(path, out full)) return false;
             }
         }
         catch { return false; }
@@ -2144,6 +2279,41 @@ class PdfSignerLauncher
         try { if (!process.HasExited) process.Kill(); } catch { }
     }
 
+    static long ProcessTreeWorkingSetBytes(int rootPid)
+    {
+        var parent = new Dictionary<int, int>();
+        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == IntPtr.Zero || snap.ToInt64() == -1) return 0;
+        try
+        {
+            PROCESSENTRY32 pe = new PROCESSENTRY32();
+            pe.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+            if (Process32First(snap, ref pe))
+            {
+                do { parent[(int)pe.th32ProcessID] = (int)pe.th32ParentProcessID; }
+                while (Process32Next(snap, ref pe));
+            }
+        }
+        finally { CloseHandle(snap); }
+
+        var tree = new HashSet<int>();
+        tree.Add(rootPid);
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var pair in parent)
+                if (tree.Contains(pair.Value) && tree.Add(pair.Key)) changed = true;
+        }
+        long total = 0;
+        foreach (int pid in tree)
+        {
+            try { using (Process child = Process.GetProcessById(pid)) total += child.WorkingSet64; }
+            catch { }
+        }
+        return total;
+    }
+
     static string StartPythonSession(byte[] body, bool bundle)
     {
         string interp = FindPython();
@@ -2322,10 +2492,22 @@ class PdfSignerLauncher
         Thread watcher = new Thread(delegate()
         {
             bool exited = false;
-            try { exited = session.Process.WaitForExit(30 * 60 * 1000); } catch { }
+            bool memoryLimit = false;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (!exited && watch.ElapsedMilliseconds < 30 * 60 * 1000)
+            {
+                try { exited = session.Process.WaitForExit(500); } catch { break; }
+                if (!exited && ProcessTreeWorkingSetBytes(session.Process.Id) > PythonProcessMemoryLimitBytes)
+                {
+                    memoryLimit = true;
+                    break;
+                }
+            }
             if (!exited)
             {
-                session.Stderr.AppendLine("\n[시간 초과: 대화형 실행을 30분 후 종료했습니다.]");
+                session.Stderr.AppendLine(memoryLimit
+                    ? "\n[메모리 제한: 대화형 실행이 1.5GB를 넘어 종료했습니다.]"
+                    : "\n[시간 초과: 대화형 실행을 30분 후 종료했습니다.]");
                 KillProcessTree(session.Process);
                 try { session.Process.WaitForExit(2000); } catch { }
             }
@@ -3378,11 +3560,21 @@ class PdfSignerLauncher
             }
             catch { }
 
-            if (!proc.WaitForExit(60000))                    // 최대 60초
+            bool timedOut = false;
+            bool memoryLimit = false;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (!proc.WaitForExit(250))
             {
-                try { proc.Kill(); } catch { }
+                if (watch.ElapsedMilliseconds >= 60000) { timedOut = true; break; }
+                if (ProcessTreeWorkingSetBytes(proc.Id) > PythonProcessMemoryLimitBytes) { memoryLimit = true; break; }
+            }
+            if (timedOut || memoryLimit)
+            {
+                KillProcessTree(proc);
                 try { proc.WaitForExit(2000); } catch { }
-                errSb.AppendLine("[시간 초과: 60초를 넘겨 실행을 중단했습니다.]");
+                errSb.AppendLine(memoryLimit
+                    ? "[메모리 제한: 실행이 1.5GB를 넘어 중단했습니다.]"
+                    : "[시간 초과: 60초를 넘겨 실행을 중단했습니다.]");
                 exitCode = -1;
             }
             else

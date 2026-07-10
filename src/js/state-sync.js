@@ -21,13 +21,6 @@
       return new URL(raw, location.href).origin === location.origin;
     } catch (_) { return false; }
   }
-  function tokenUrl(url) {
-    if (!localToken || !isSameOriginRequest(url)) return url;
-    var raw = String(url || "");
-    if (/[?&]mn_token=/.test(raw)) return raw;
-    return raw + (raw.indexOf("?") >= 0 ? "&" : "?") + "mn_token=" + encodeURIComponent(localToken);
-  }
-
   if (localToken && window.fetch) {
     try {
       var rawFetch = window.fetch.bind(window);
@@ -59,15 +52,6 @@
           try { this.setRequestHeader("X-Manneung-Token", localToken); } catch (_) {}
         }
         return rawSend.apply(this, arguments);
-      };
-    } catch (_) {}
-  }
-
-  if (localToken && navigator.sendBeacon) {
-    try {
-      var rawBeacon = navigator.sendBeacon.bind(navigator);
-      navigator.sendBeacon = function (url, data) {
-        return rawBeacon(tokenUrl(url), data);
       };
     } catch (_) {}
   }
@@ -130,14 +114,17 @@
     localStorage.clear = function () { rawClear(); schedule(); };
   } catch (_) {}
 
-  // 페이지를 떠나기 전 마지막 변경을 확실히 반영(디바운스 대기분 포함). sendBeacon 은 종료 중에도 전송된다.
+  // 페이지를 떠나기 전 마지막 변경을 확실히 반영한다. URL 토큰 노출을 막기 위해
+  // sendBeacon 대신 헤더를 붙일 수 있는 keepalive fetch를 우선 사용한다.
   window.addEventListener("pagehide", function () {
     if (!timer) return;
     clearTimeout(timer); timer = null;
     try {
       var body = JSON.stringify(snapshot());
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("/app-state", new Blob([body], { type: "application/json" }));
+      if (window.fetch) {
+        window.fetch("/app-state", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true
+        });
       } else {
         var x = new XMLHttpRequest();
         x.open("POST", "/app-state", false);   // 종료 직전 동기 전송(폴백)

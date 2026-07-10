@@ -1228,6 +1228,37 @@ function renderNotebookRichFrame(host, spec){
   return true;
 }
 
+function renderNotebookTrustCard(host, html, ctrl){
+  const spec = notebookUntrustedHtmlFrameSpec(html);
+  if (!spec) return false;
+  const card = document.createElement("div");
+  card.className = "nbv-out-interactive-trust";
+  const title = document.createElement("strong");
+  title.textContent = "인터랙티브 HTML 결과";
+  const detail = document.createElement("p");
+  detail.textContent = "스크립트 또는 외부 콘텐츠가 포함되어 있어 기본적으로 실행하지 않았습니다. 실행해도 앱과 분리된 iframe에서만 동작합니다.";
+  const run = document.createElement("button");
+  run.type = "button";
+  run.className = "nbv-out-interactive-trust-run";
+  run.textContent = "이 노트북에서 실행";
+  run.addEventListener("click", async () => {
+    const ownerDoc = ctrl && ctrl.ownerDoc;
+    if (!ownerDoc) return;
+    if (!ownerDoc._nbInteractiveHtmlTrusted){
+      const ok = typeof confirmDialog === "function" && await confirmDialog(
+        "이 노트북의 임의 HTML·스크립트 결과를 이번에 연 노트북 동안 실행합니다. 외부 네트워크 요청이 발생할 수 있으므로 신뢰하는 노트북에서만 계속하세요.",
+        "이 노트북 신뢰", "취소");
+      if (!ok) return;
+      ownerDoc._nbInteractiveHtmlTrusted = true;
+    }
+    card.remove();
+    renderNotebookRichFrame(host, spec);
+  });
+  card.append(title, detail, run);
+  host.appendChild(card);
+  return true;
+}
+
 function renderCellOutputs(outputs, host, ctrl){
   for (const o of outputs){
     if (o.kind === "image"){
@@ -1254,7 +1285,13 @@ function renderCellOutputs(outputs, host, ctrl){
       }
     } else if (o.kind === "html"){
       const frameSpec = notebookInteractiveHtmlFrameSpec(o.html);
-      if (!renderNotebookRichFrame(host, frameSpec)){
+      const untrustedSpec = !frameSpec && notebookUntrustedHtmlFrameSpec(o.html);
+      if (frameSpec) renderNotebookRichFrame(host, frameSpec);
+      else if (untrustedSpec && ctrl && ctrl.ownerDoc && ctrl.ownerDoc._nbInteractiveHtmlTrusted){
+        renderNotebookRichFrame(host, untrustedSpec);
+      } else if (untrustedSpec){
+        renderNotebookTrustCard(host, o.html, ctrl);
+      } else {
         const rich = document.createElement("div");
         rich.className = "nbv-out-html";
         const sanitizer = typeof PdfSignerCore !== "undefined" &&
@@ -1359,6 +1396,7 @@ if (typeof module === "object" && module.exports){
     notebookSetOutputsCollapsed,
     notebookFoliumFrameSpec,
     notebookInteractiveHtmlFrameSpec,
+    notebookUntrustedHtmlFrameSpec,
     notebookInteractiveMimeFrameSpec,
     notebookPdfSegments,
     notebookPdfBatches

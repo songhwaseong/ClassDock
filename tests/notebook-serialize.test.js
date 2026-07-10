@@ -48,6 +48,7 @@ const {
   notebookSetOutputsCollapsed,
   notebookFoliumFrameSpec,
   notebookInteractiveHtmlFrameSpec,
+  notebookUntrustedHtmlFrameSpec,
   notebookInteractiveMimeFrameSpec,
   notebookPdfSegments,
   notebookPdfBatches
@@ -118,6 +119,15 @@ test("known interactive chart HTML is isolated while ordinary scripts stay block
   assert.equal(plotly.allowScripts, true);
   assert.match(plotly.srcdoc, /cdn\.plot\.ly/);
   assert.equal(notebookInteractiveHtmlFrameSpec("<script>alert(1)</script>"), null);
+});
+
+test("arbitrary interactive HTML requires explicit notebook trust", () => {
+  const spec = notebookUntrustedHtmlFrameSpec('<div id="demo"></div><script>document.querySelector("#demo").textContent = "ok"</script>');
+  assert.ok(spec);
+  assert.equal(spec.allowScripts, true);
+  assert.equal(spec.requiresTrust, true);
+  assert.match(spec.srcdoc, /textContent = "ok"/);
+  assert.equal(notebookUntrustedHtmlFrameSpec("<table><tr><td>safe</td></tr></table>"), null);
 });
 
 test("Plotly and Vega MIME bundles produce sandbox frame documents", () => {
