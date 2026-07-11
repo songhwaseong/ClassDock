@@ -683,6 +683,11 @@ function wire(){
   if (typeof initPetFocus === "function") initPetFocus();
   if (byId("btnPetDex")) byId("btnPetDex").onclick = () => { if (typeof openPetDex === "function") openPetDex(); };
   if (byId("petDexClose")) byId("petDexClose").onclick = () => { byId("petDexModal").hidden = true; };
+  if (typeof initPetCustom === "function") initPetCustom();
+  if (byId("btnPetSay")) byId("btnPetSay").onclick = () => { if (typeof openPetSayings === "function") openPetSayings(); };
+  if (byId("petSayClose")) byId("petSayClose").onclick = () => { byId("petSayModal").hidden = true; };
+  if (byId("btnPetBuilder")) byId("btnPetBuilder").onclick = () => { if (typeof openPetBuilder === "function") openPetBuilder(); };
+  if (byId("petBuilderClose")) byId("petBuilderClose").onclick = () => { byId("petBuilderModal").hidden = true; };
   document.querySelectorAll(".tool-menu").forEach(menu => menu.querySelectorAll("button").forEach(button => button.addEventListener("click", () => { menu.open = false; })));
   document.addEventListener("click", (e) => document.querySelectorAll(".tool-menu[open]").forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }));
   byId("helpOpen").onclick = () => { byId("helpModal").hidden = false; };
@@ -709,7 +714,9 @@ function wire(){
     settingsModal: "settingsCancel",
     helpModal: "helpClose",
     welcomeModal: "welcomeClose",
-    petDexModal: "petDexClose"
+    petDexModal: "petDexClose",
+    petSayModal: "petSayClose",
+    petBuilderModal: "petBuilderClose"
   };
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || e.isComposing || e.keyCode === 229 || shortcutCaptureAction) return;

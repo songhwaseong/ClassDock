@@ -1295,6 +1295,55 @@
   @media (max-width:520px){
     .pet-event-dex-grid{grid-template-columns:1fr}
   }
+  /* 펫 대사 편집 + 나만의 펫 만들기 */
+  .pet-say-card{width:min(560px,96%);max-height:88vh;overflow:auto}
+  .pet-say-section{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+  .pet-say-section h4{margin:0 0 8px;font-size:13px;color:var(--ink)}
+  .pet-say-list{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .pet-say-item{display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px;
+    border:1px solid var(--border);border-radius:999px;background:var(--panel-2);font-size:12.5px;max-width:100%}
+  .pet-say-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pet-say-del{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:12px;
+    line-height:1;padding:2px 3px;border-radius:50%}
+  .pet-say-del:hover{background:var(--danger,#e04b4b);color:#fff}
+  .pet-say-empty{margin:6px 0;color:var(--muted);font-size:12px}
+  .pet-say-add{display:flex;gap:6px;margin-top:6px}
+  .pet-say-add input{flex:1;min-width:0}
+  /* 친구 고르기: 이름 대신 캐릭터 그림 그리드에서 선택 */
+  .pet-say-pick-label{font-size:12.5px;color:var(--muted);margin:2px 0}
+  .pet-say-pick-label b{color:var(--ink)}
+  .pet-say-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:6px;
+    max-height:216px;overflow:auto;margin:8px 0;padding:5px;border:1px solid var(--border);
+    border-radius:10px;background:var(--panel-2)}
+  .pet-say-pick{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;
+    padding:6px 3px 5px;border:2px solid transparent;border-radius:9px;background:var(--panel);
+    cursor:pointer;font:inherit;font-size:11px;color:var(--ink)}
+  .pet-say-pick canvas{image-rendering:pixelated}
+  .pet-say-pick span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pet-say-pick:hover{border-color:var(--border)}
+  .pet-say-pick.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .pet-say-pick-dot{position:absolute;top:2px;right:4px;color:var(--accent);font-size:8px;line-height:1}
+  .pet-builder-card{width:min(760px,96%);max-height:90vh;overflow:auto}
+  .pet-builder-body{display:flex;gap:16px;margin-top:12px;flex-wrap:wrap}
+  .pet-builder-preview{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none}
+  .pet-builder-preview canvas{image-rendering:pixelated;border:1px solid var(--border);
+    border-radius:12px;background:var(--panel-2);padding:8px}
+  .pet-builder-form{flex:1;min-width:240px;display:flex;flex-direction:column;gap:8px}
+  .pet-builder-field-label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
+  .pet-builder-art-picker{max-height:158px}
+  .pet-builder-palettes{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+  .pet-swatch{padding:3px;border:2px solid var(--border);border-radius:8px;background:var(--panel-2);cursor:pointer;line-height:0}
+  .pet-swatch canvas{image-rendering:pixelated}
+  .pet-swatch.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+  .pet-builder-saved{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
+  .pet-builder-saved h4{margin:0 0 4px;font-size:13px;color:var(--ink)}
+  .pet-dex-cell .pet-dex-del{position:absolute;top:3px;right:5px;border:none;background:transparent;
+    color:var(--muted);cursor:pointer;font-size:12px;line-height:1;padding:2px 4px;border-radius:50%}
+  .pet-dex-cell .pet-dex-del:hover{background:var(--danger,#e04b4b);color:#fff}
+  @media (max-width:520px){
+    .pet-builder-body{flex-direction:column}
+    .pet-builder-palettes{justify-content:flex-start}
+  }
   @media (prefers-reduced-motion:reduce){
     .pixel-pet.pet-quiet::after{animation:none}
     .pet-focus-progress span{transition:none}

@@ -322,7 +322,7 @@ function petEventRecord(id){
   if (modal && !modal.hidden && typeof renderPetEventDex === "function") renderPetEventDex();
 }
 function petSpeciesById(id){
-  for (const sp of PET_SPECIES) if (petSpeciesId(sp) === id) return sp;
+  for (const sp of petAllSpecies()) if (petSpeciesId(sp) === id) return sp;
   return null;
 }
 function petEventMoveToward(p, tx, ty, rate){
@@ -1292,11 +1292,17 @@ function petEyelidColor(art, palette){
 // ----- 황금 펫(희귀)·도감 — 만난 종족을 localStorage 에 기록해 도감에서 보여준다 -----
 const PET_GOLD_CHANCE = 0.02;         // 등장할 때마다 2% 확률로 금빛 개체
 const PET_DEX_KEY = "mn.petDex";
-function petSpeciesId(sp){            // 종족 id = PET_ART 에서 그 스프라이트의 키
+function petSpeciesId(sp){            // 종족 id = PET_ART 에서 그 스프라이트의 키(나만의 펫은 자기 id 를 갖는다)
+  if (sp.id) return sp.id;
   if (!sp._id){
     for (const k in PET_ART){ if (PET_ART[k] === sp.art){ sp._id = k; break; } }
   }
   return sp._id || "unknown";
+}
+// 기본 종족 + 사용자가 만든 나만의 펫(pet-custom.js). 스폰 가방·도감 검색이 함께 쓴다.
+function petAllSpecies(){
+  const custom = typeof petCustomSpecies === "function" ? petCustomSpecies() : [];
+  return custom.length ? PET_SPECIES.concat(custom) : PET_SPECIES;
 }
 function petDexLoad(){
   try { return JSON.parse(localStorage.getItem(PET_DEX_KEY)) || {}; } catch(_){ return {}; }
@@ -1330,7 +1336,7 @@ function petSpawn(i, total, bag){
   const gold = Math.random() < PET_GOLD_CHANCE;
   let palette = species.palettes[Math.floor(Math.random() * species.palettes.length)];
   if (gold) palette = petGoldPalette(palette);
-  petDexRecord(speciesId, gold);
+  if (!species.custom) petDexRecord(speciesId, gold);   // 나만의 펫은 도감(만난 친구) 집계에서 제외
   const el = document.createElement("div");
   el.className = "pixel-pet";
   el.title = "붙잡아 던질 수 있어요";
@@ -1378,7 +1384,8 @@ function petSpawn(i, total, bag){
   else { y0 = -PET_H - i * 90; state0 = "fall"; }
   const p = {
     el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
-    kind: species.kind, speciesId, art: species.art, palette, sayings: species.sayings, gold,
+    kind: species.kind, speciesId, art: species.art, palette,
+    sayings: (typeof petSayingsFor === "function" ? petSayingsFor(speciesId, species.sayings) : species.sayings), gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),
     speed: 0.85 + Math.random() * 0.4, grav,
@@ -1416,7 +1423,7 @@ function petStart(count){
   const n = Math.max(1, Math.min(PET_MAX, count || 1));
   // 종족 가방: 전체를 무작위로 섞어(피셔-예이츠) 겹치지 않게 하나씩 나눠 준다
   // sort(() => Math.random()-0.5) 는 원래 순서 근처에 머무는 편향이 있어 같은 펫만 계속 나온다
-  const bag = PET_SPECIES.slice();
+  const bag = petAllSpecies().slice();
   for (let i = bag.length - 1; i > 0; i--){
     const j = Math.floor(Math.random() * (i + 1));
     const t = bag[i]; bag[i] = bag[j]; bag[j] = t;
@@ -1466,6 +1473,14 @@ function applyPetSettings(){
   petStart(count);
 }
 function initPet(){ applyPetSettings(); }
+
+// 대사·나만의 펫이 바뀌면 호출 — 돌아다니는 중이면 같은 마릿수로 다시 켜 즉시 반영한다(꺼져 있으면 무시).
+function petRefreshAll(){
+  if (!petWorld) return;
+  const n = petWorld.pets.length;
+  petStop();
+  petStart(n);
+}
 
 // ----- 펫 도감: 친구와 숨겨진 행동을 두 탭으로 보여준다 -----
 function petDexDrawMini(cv, art, palette, silhouette, scale){

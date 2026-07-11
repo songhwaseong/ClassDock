@@ -437,6 +437,8 @@
       <div class="settings-row pet-focus-setting-row"><span>집중·휴식 시간</span><span class="pet-focus-setting-selects"><select id="settingPetFocusMin" class="pw-input" aria-label="집중 시간"><option value="15">15분 집중</option><option value="25">25분 집중</option><option value="40">40분 집중</option><option value="50">50분 집중</option></select><select id="settingPetBreakMin" class="pw-input" aria-label="휴식 시간"><option value="3">3분 휴식</option><option value="5">5분 휴식</option><option value="10">10분 휴식</option></select></span></div>
       <label class="settings-check"><input type="checkbox" id="settingPetQuietTyping"><span>타이핑하는 동안 펫이 화면 가장자리에서 조용히 기다리기</span></label>
       <div class="settings-row"><span>펫 도감 — 지금까지 만난 친구들</span><button class="btn" id="btnPetDex" type="button">열어 보기</button></div>
+      <div class="settings-row"><span>펫 대사 — 클릭하면 말하는 말풍선 직접 쓰기</span><button class="btn" id="btnPetSay" type="button">편집</button></div>
+      <div class="settings-row"><span>나만의 펫 — 그림·움직임·색·대사 조합</span><button class="btn" id="btnPetBuilder" type="button">만들기</button></div>
     </div>
 
     <div class="settings-section" data-settings-panel="screensaver" role="tabpanel" hidden>
@@ -472,6 +474,62 @@
     <div class="pet-dex-grid" id="petDexGrid" role="tabpanel" aria-labelledby="petDexFriendsTab"></div>
     <div class="pet-event-dex-grid" id="petEventDexGrid" role="tabpanel" aria-labelledby="petDexEventsTab" hidden></div>
     <div class="modal-actions"><span class="spacer"></span><button class="btn primary" id="petDexClose">닫기</button></div>
+  </div>
+</div>
+<div class="modal" id="petSayModal" hidden>
+  <div class="modal-card pet-say-card">
+    <h3>펫 대사 편집</h3>
+    <p class="sub">펫을 짧게 클릭하면 대사 중 하나를 말풍선으로 말해요. 아래에 직접 추가·삭제할 수 있어요.</p>
+    <div class="pet-say-section">
+      <h4>모든 펫 공통 대사</h4>
+      <div class="pet-say-list" id="petSayGlobalList"></div>
+      <form class="pet-say-add" id="petSayGlobalForm">
+        <input type="text" id="petSayGlobalInput" class="pw-input" maxlength="40" placeholder="예: 오늘도 화이팅!" autocomplete="off">
+        <button class="btn primary" type="submit">추가</button>
+      </form>
+    </div>
+    <div class="pet-say-section">
+      <h4>특정 친구에게만</h4>
+      <div class="pet-say-pick-label">친구 고르기 — <b id="petSayPickName"></b></div>
+      <div class="pet-say-picker" id="petSaySpecies" role="listbox" aria-label="친구 고르기"></div>
+      <div class="pet-say-list" id="petSaySpeciesList"></div>
+      <form class="pet-say-add" id="petSaySpeciesForm">
+        <input type="text" id="petSaySpeciesInput" class="pw-input" maxlength="40" placeholder="이 친구만의 대사" autocomplete="off">
+        <button class="btn primary" type="submit">추가</button>
+      </form>
+      <p class="sub" id="petSaySpeciesBase"></p>
+    </div>
+    <div class="modal-actions"><span class="spacer"></span><button class="btn primary" id="petSayClose">닫기</button></div>
+  </div>
+</div>
+<div class="modal" id="petBuilderModal" hidden>
+  <div class="modal-card pet-builder-card">
+    <h3>나만의 펫 만들기</h3>
+    <p class="sub">그림·움직임·색·대사를 골라 나만의 친구를 만들어요. 펫을 켜면 다른 친구들과 함께 무작위로 등장해요.</p>
+    <div class="pet-builder-body">
+      <div class="pet-builder-preview">
+        <canvas id="petBuilderPreview"></canvas>
+        <button class="btn" id="petBuilderShuffle" type="button">색 랜덤</button>
+      </div>
+      <div class="pet-builder-form">
+        <label class="settings-row"><span>이름</span><input id="petBuilderName" class="pw-input" maxlength="12" placeholder="예: 별이" autocomplete="off"></label>
+        <div class="pet-builder-field"><span class="pet-builder-field-label">그림</span>
+          <div class="pet-say-picker pet-builder-art-picker" id="petBuilderArt" role="listbox" aria-label="그림 고르기"></div>
+        </div>
+        <label class="settings-row"><span>움직임</span><select id="petBuilderKind" class="pw-input"></select></label>
+        <div class="settings-row"><span>색</span><div class="pet-builder-palettes" id="petBuilderPalettes"></div></div>
+        <div class="pet-say-list" id="petBuilderSayList"></div>
+        <form class="pet-say-add" id="petBuilderSayForm">
+          <input id="petBuilderSayInput" class="pw-input" maxlength="40" placeholder="대사 추가 (예: 반가워!)" autocomplete="off">
+          <button class="btn" type="submit">대사 추가</button>
+        </form>
+      </div>
+    </div>
+    <div class="pet-builder-saved">
+      <h4>내가 만든 펫</h4>
+      <div class="pet-dex-grid pet-builder-list" id="petBuilderList"></div>
+    </div>
+    <div class="modal-actions"><button class="btn" id="petBuilderReset" type="button">새로 만들기</button><span class="spacer"></span><button class="btn" id="petBuilderClose">닫기</button><button class="btn primary" id="petBuilderSave">이 펫 저장</button></div>
   </div>
 </div>
 <div class="modal" id="welcomeModal" hidden>
@@ -608,6 +666,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/lesson-replay.js"></script>
 <script src="src/js/screensaver.js"></script>
 <script src="src/js/pet-data.js"></script>
+<script src="src/js/pet-custom.js"></script>
 <script src="src/js/pet-events.js"></script>
 <script src="src/js/pet.js"></script>
 <script src="src/js/pet-focus.js"></script>
