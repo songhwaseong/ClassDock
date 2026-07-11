@@ -53,5 +53,7 @@ test("study session state is persisted and restored with tabs", () => {
   assert.match(docs, /work: docStableKey\(work\)/);
   assert.match(docs, /locked: !!studyReferenceLocked/);
   assert.match(docs, /function restoreStudyState\(saved\)/);
+  assert.match(docs, /ensureRendered\(reference\)\.then\(\(\) => \{/);
+  assert.match(docs, /reference\.id === studyPdfId && reference\.kind === "pdf"/);
   assert.match(store, /restoreStudyState\(savedTabs\)/);
 });

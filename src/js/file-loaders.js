@@ -591,8 +591,16 @@ function queueFolder(fileList, options={}){
     // 자동 복원 저장은 폴더를 먼저 연 뒤에 한다 — 수백 MB 복사를 기다리지 않고 바로 화면에 뜨게.
     const replaceWorkspace = navNodes.length === 0;
     await openFolderFiles(files, options);
-    if (files.length || (options.folderPaths && options.folderPaths.length))
-      await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths:options.folderPaths || [] });
+    // webkitdirectory 폴백은 빈 폴더 경로를 주지 않는다. 그래도 상대경로의 루트는 남겨야
+    // 대량 이미지가 자동 복원에서 생략됐다는 표식을 다음 실행에도 복원할 수 있다.
+    const folderPaths = options.folderPaths && options.folderPaths.length
+      ? options.folderPaths
+      : [...new Set(files
+          .map(file => normalizedRunPath(file && file.webkitRelativePath || ""))
+          .filter(path => path.includes("/"))
+          .map(path => path.split("/")[0]))];
+    if (files.length || folderPaths.length)
+      await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths });
   })).catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }
@@ -609,6 +617,7 @@ async function openFolderFiles(fileList, options={}){
   const openable = folderOpenableFiles(fileList);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))]
     .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  const pendingImageFolderPaths = [...new Set((options.pendingImageFolderPaths || []).map(normalizedRunPath).filter(Boolean))];
   if (!openable.length && !folderPaths.length){ toast("폴더 안에 열 수 있는 파일이나 폴더가 없어요.", 3000); return; }
 
   const rootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
@@ -616,8 +625,9 @@ async function openFolderFiles(fileList, options={}){
   rootGroup.folderRefreshRootId = rootGroup.nodeId;
   rootGroup.folderHandle = options.folderHandle || null;
   rememberFolderHandle(rootGroup, rootName);   // 핸들 IDB 보관/복구 — 재실행 뒤에도 '폴더 새로고침'이 권한 1클릭으로 동작
-  // 대량 사진은 자동 복원 바이트에서 빠질 수 있다. 복원된 빈 폴더는 클릭 시 실제 폴더를 다시 읽는다.
-  rootGroup.restorePendingImages = !!options.restoreFromWorkspace && openable.length === 0;
+  // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
+  rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
+  rootGroup.imageSkipWorkspacePath = workspaceImageSkipMarkerPath(rootName);
   rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderPaths = folderPaths.length ? folderPaths : [rootName];
   rootGroup.workspacePaths = [
@@ -944,6 +954,17 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   else {
     activeId = 0; state = null; viewer = null;
     refreshChrome(); applyStudyLayout(); renderSidebar();
+  }
+  // 폴더 새로고침으로 참고 문서가 새 인스턴스로 교체되면 활성 문서가 아니어서 지연 렌더가 생략된다.
+  // 분할 화면에 보일 문서는 형식과 무관하게 렌더하고, PDF에만 추가 페이지 렌더·폭 맞춤을 적용한다.
+  const refreshedStudyReference = docs.find(doc => doc.id === studyPdfId);
+  if (refreshedStudyReference && refreshedStudyReference.id !== activeId){
+    ensureRendered(refreshedStudyReference).then(() => {
+      if (refreshedStudyReference.id === studyPdfId && refreshedStudyReference.kind === "pdf"){
+        startLazyRender(refreshedStudyReference);
+        requestAnimationFrame(() => fitStudyPdf(refreshedStudyReference));
+      }
+    });
   }
 
   if (files.length || folderPaths.length)

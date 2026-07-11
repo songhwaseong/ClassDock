@@ -1453,11 +1453,12 @@ function restoreStudyState(saved){
   if (reference.kind === "pdf" && reference._preStudyZoom == null) reference._preStudyZoom = reference.zoom;
   applyStudyLayout();
   renderTabs();
-  if (reference.kind === "pdf"){
-    ensureRendered(reference).then(() => {
-      if (reference.id === studyPdfId){ startLazyRender(reference); requestAnimationFrame(() => fitStudyPdf(reference)); }
-    });
-  }
+  // 복원 직후 참고 문서는 활성 문서가 아니므로, PDF뿐 아니라 모든 형식을 명시적으로 첫 렌더한다.
+  ensureRendered(reference).then(() => {
+    if (reference.id === studyPdfId && reference.kind === "pdf"){
+      startLazyRender(reference); requestAnimationFrame(() => fitStudyPdf(reference));
+    }
+  });
   return true;
 }
 
@@ -1800,13 +1801,15 @@ function renderSidebar(){
     item.onclick = (e) => {
       sidebarCursorKey = node.nodeId;                       // 클릭한 줄을 키보드 커서로 동기화
       if (node.type === "group"){
-        // 자동 복원에서는 대량 사진의 바이트를 보관하지 않는다. 그 결과 빈 상태로 복원된
-        // 루트 폴더를 처음 클릭하면, 펼치기만 하지 말고 저장된 폴더 핸들로 실제 파일을 다시 읽는다.
-        if (node.restorePendingImages && node.folderRefreshRootId === node.nodeId && !node.folderReloading){
-          node.folderReloading = true;
-          Promise.resolve(requestFolderRefresh(node.nodeId))
+        // 자동 복원에서 대량 사진이 생략된 폴더는 루트·하위 폴더 어디를 눌러도 한 번만 실제 파일을 다시 읽는다.
+        const pendingImageRoot = navNodes.find(item =>
+          item.nodeId === node.folderRefreshRootId && item.type === "group" && item.folderRefreshRootId === item.nodeId
+        );
+        if (pendingImageRoot && pendingImageRoot.restorePendingImages && !pendingImageRoot.folderReloading){
+          pendingImageRoot.folderReloading = true;
+          Promise.resolve(requestFolderRefresh(pendingImageRoot.nodeId))
             .catch(() => {})
-            .finally(() => { node.folderReloading = false; });
+            .finally(() => { pendingImageRoot.folderReloading = false; });
           return;
         }
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
@@ -2093,8 +2096,11 @@ function closeGroup(nodeId, options={}){
   refreshChrome();
   applyStudyLayout();
   renderSidebar();
-  if (options.forgetWorkspace && group.workspacePaths && group.workspacePaths.length)
-    forgetWorkspacePaths(group.workspacePaths, navNodes.length === 0);
+  const forgottenPaths = [...(group.workspacePaths || [])];
+  if (group.folderRefreshRootId === group.nodeId && group.imageSkipWorkspacePath)
+    forgottenPaths.push(group.imageSkipWorkspacePath);
+  if (options.forgetWorkspace && forgottenPaths.length)
+    forgetWorkspacePaths(forgottenPaths, navNodes.length === 0);
 }
 
 function refreshChrome(){
