@@ -14,6 +14,143 @@ async function loadImage(file, options={}){
 }
 
 // 범용 백업: 알 수 없는 확장자라도 내용이 텍스트면 코드뷰(줄번호)로 열고, 바이너리면 미지원 안내.
+/* ===== Folder image gallery ===== */
+function galleryFolderContainsDoc(folderNode, doc, includeChildren){
+  if (!folderNode || !doc || doc.kind !== "image") return false;
+  if (!includeChildren) return doc.parentId === folderNode.nodeId;
+  let parentId = doc.parentId;
+  while (parentId){
+    if (parentId === folderNode.nodeId) return true;
+    const parent = navNodes.find(node => node.nodeId === parentId);
+    if (!parent || parent.parentId === parentId) break;
+    parentId = parent.parentId;
+  }
+  return false;
+}
+
+function folderGalleryImageDocs(folderNode, includeChildren){
+  return docs
+    .filter(doc => doc.sourceFile && galleryFolderContainsDoc(folderNode, doc, includeChildren))
+    .sort((a, b) => String(a.relPath || a.name).localeCompare(String(b.relPath || b.name), "ko", { numeric:true, sensitivity:"base" }));
+}
+
+function imageGalleryFolderImageCount(folderNode, includeChildren){
+  return folderGalleryImageDocs(folderNode, includeChildren).length;
+}
+
+function openFolderImageGallery(folderNode, includeChildren){
+  const imageDocs = folderGalleryImageDocs(folderNode, includeChildren);
+  if (!imageDocs.length){
+    toast(includeChildren ? "이 폴더와 하위 폴더에 표시할 이미지가 없어요." : "이 폴더에 바로 들어 있는 이미지가 없어요.", 2600);
+    return null;
+  }
+  const galleryKey = folderNode.nodeId + ":" + (includeChildren ? "all" : "direct");
+  const existing = docs.find(doc => doc.kind === "image-gallery" && doc.galleryKey === galleryKey);
+  if (existing){ setActiveDoc(existing.id); return existing; }
+
+  const folderPath = (folderNode.newPythonContext && folderNode.newPythonContext.dir) || "";
+  const prefix = folderPath ? folderPath.replace(/\\/g, "/").replace(/\/+$/, "") + "/" : "";
+  const items = imageDocs.map(source => {
+    const fullPath = String(source.relPath || source.name || "").replace(/\\/g, "/");
+    return {
+      docId: source.id,
+      file: source.sourceFile,
+      name: source.name,
+      relPath: fullPath,
+      labelPath: prefix && fullPath.indexOf(prefix) === 0 ? fullPath.slice(prefix.length) : fullPath
+    };
+  });
+  const suffix = includeChildren ? "이미지 전체" : "이미지";
+  const doc = makeDoc("image-gallery", folderNode.name + " · " + suffix, { parentId:folderNode.nodeId });
+  doc.galleryKey = galleryKey;
+  doc.galleryItems = items;
+  doc.galleryState = { mode:"grid", index:0 };
+  doc.render = async () => {
+    const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
+    renderFolderImageGallery(doc, host);
+  };
+  refreshChrome();
+  activateIfIdle(doc, {});
+  return doc;
+}
+
+function gallerySetImageSource(img, file){
+  const url = URL.createObjectURL(file);
+  const release = () => URL.revokeObjectURL(url);
+  img.addEventListener("load", release, { once:true });
+  img.addEventListener("error", release, { once:true });
+  img.src = url;
+}
+
+function renderFolderImageGallery(doc, host){
+  const items = doc.galleryItems || [];
+  const state = doc.galleryState || (doc.galleryState = { mode:"grid", index:0 });
+  state.index = Math.max(0, Math.min(items.length - 1, Number(state.index) || 0));
+  const shell = document.createElement("section"); shell.className = "image-gallery"; shell.tabIndex = 0;
+  const bar = document.createElement("div"); bar.className = "image-gallery-bar";
+  const gridButton = document.createElement("button"); gridButton.type = "button"; gridButton.textContent = "▦ 여러 장 보기";
+  gridButton.classList.toggle("active", state.mode === "grid");
+  gridButton.title = "썸네일을 격자로 봅니다";
+  gridButton.addEventListener("click", () => { state.mode = "grid"; paint(); });
+  const count = document.createElement("span"); count.className = "image-gallery-count";
+  const prev = document.createElement("button"); prev.type = "button"; prev.textContent = "‹ 이전"; prev.title = "이전 이미지";
+  const next = document.createElement("button"); next.type = "button"; next.textContent = "다음 ›"; next.title = "다음 이미지";
+  prev.addEventListener("click", () => { if (state.index > 0){ state.index--; state.mode = "single"; paint(); } });
+  next.addEventListener("click", () => { if (state.index < items.length - 1){ state.index++; state.mode = "single"; paint(); } });
+  const edit = document.createElement("button"); edit.type = "button"; edit.textContent = "편집기로 열기"; edit.title = "현재 이미지를 기존 이미지 편집기로 엽니다";
+  edit.addEventListener("click", () => {
+    const item = items[state.index]; if (!item) return;
+    const source = docs.find(candidate => candidate.id === item.docId);
+    if (source) setActiveDoc(source.id);
+    else loadImage(item.file, { parentId:doc.parentId, relPath:item.relPath });
+  });
+  bar.append(gridButton, prev, count, next, edit);
+  const body = document.createElement("div"); body.className = "image-gallery-body";
+  shell.append(bar, body); host.appendChild(shell);
+
+  const paint = () => {
+    body.innerHTML = "";
+    const single = state.mode === "single";
+    gridButton.classList.toggle("active", !single);
+    prev.hidden = next.hidden = edit.hidden = !single;
+    count.textContent = single ? (state.index + 1) + " / " + items.length : items.length + "장";
+    prev.disabled = !single || state.index === 0;
+    next.disabled = !single || state.index >= items.length - 1;
+    if (!single){
+      const grid = document.createElement("div"); grid.className = "image-gallery-grid";
+      items.forEach((item, index) => {
+        const card = document.createElement("button"); card.type = "button"; card.className = "image-gallery-card";
+        card.title = item.labelPath || item.name; card.setAttribute("aria-label", item.name + " 한 장 보기");
+        const frame = document.createElement("span"); frame.className = "image-gallery-thumb";
+        const image = document.createElement("img"); image.loading = "lazy"; image.alt = "";
+        gallerySetImageSource(image, item.file);
+        frame.appendChild(image);
+        const name = document.createElement("strong"); name.textContent = item.name;
+        const path = document.createElement("small"); path.textContent = item.labelPath || item.name;
+        card.append(frame, name, path);
+        card.addEventListener("click", () => { state.index = index; state.mode = "single"; paint(); shell.focus(); });
+        grid.appendChild(card);
+      });
+      body.appendChild(grid);
+      return;
+    }
+    const item = items[state.index];
+    const singleView = document.createElement("div"); singleView.className = "image-gallery-single";
+    const image = document.createElement("img"); image.alt = item.name; image.draggable = false;
+    gallerySetImageSource(image, item.file);
+    const caption = document.createElement("div"); caption.className = "image-gallery-caption";
+    const name = document.createElement("strong"); name.textContent = item.name;
+    const path = document.createElement("span"); path.textContent = item.labelPath || item.name;
+    caption.append(name, path); singleView.append(image, caption); body.appendChild(singleView);
+  };
+  shell.addEventListener("keydown", (event) => {
+    if (state.mode !== "single" || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === "ArrowLeft" && state.index > 0){ event.preventDefault(); prev.click(); }
+    if (event.key === "ArrowRight" && state.index < items.length - 1){ event.preventDefault(); next.click(); }
+  });
+  paint();
+}
+
 async function loadText(file, options={}){
   let binary = false;
   try {
