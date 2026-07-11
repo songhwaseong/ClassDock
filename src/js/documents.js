@@ -429,6 +429,7 @@ function setStudySwapped(v){
   studySwapped = !!v;
   try { localStorage.setItem("studySwapped", studySwapped ? "1" : "0"); } catch(e){}
   byId("content").classList.toggle("study-swapped", studySwapped);
+  if (typeof showStudyControls === "function") showStudyControls();                    // 스왑 결과가 보이도록 바를 다시 표시(유휴 숨김 해제)
   const ref = docs.find(d => d.id === studyPdfId);
   if (ref && ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));        // 칸 너비가 바뀌었으니 PDF 다시 맞춤
 }
@@ -505,13 +506,25 @@ function setupStudyDivider(){
   apply(ratio);
   divider.addEventListener("pointerdown", (e) => {
     if (matchMedia("(max-width: 900px)").matches) return;          // 모바일은 세로 고정 분할
-    e.preventDefault(); divider.setPointerCapture(e.pointerId); divider.classList.add("dragging");
     const rect = content.getBoundingClientRect();
-    const move = (ev) => apply(((ev.clientX - rect.left) / rect.width) * 100);
+    const startX = e.clientX;
+    let dragging = false;
+    // 움직임이 4px 을 넘을 때만 드래그로 전환한다. 순수 클릭·더블클릭은 포인터 캡처를
+    // 걸지 않아 dblclick(좌우 바꾸기)이 캡처에 가로채이지 않는다.
+    const move = (ev) => {
+      if (!dragging){
+        if (Math.abs(ev.clientX - startX) < 4) return;
+        dragging = true;
+        try { divider.setPointerCapture(e.pointerId); } catch(_){}
+        divider.classList.add("dragging");
+      }
+      ev.preventDefault();
+      apply(((ev.clientX - rect.left) / rect.width) * 100);
+    };
     const up = () => {
-      divider.classList.remove("dragging");
+      if (dragging){ divider.classList.remove("dragging"); save(); }
       divider.removeEventListener("pointermove", move); divider.removeEventListener("pointerup", up);
-      divider.removeEventListener("pointercancel", up); save();
+      divider.removeEventListener("pointercancel", up);
     };
     divider.addEventListener("pointermove", move); divider.addEventListener("pointerup", up); divider.addEventListener("pointercancel", up);
   });
@@ -546,6 +559,7 @@ function applyStudyLayout(){
   content.classList.toggle("study-mode", split);
   content.classList.toggle("study-reference-locked", split && studyReferenceLocked);
   content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 좌우 배치 적용
+  content.classList.toggle("study-ref-nonpdf", !!(split && ref && ref.kind !== "pdf"));  // 참고가 PDF가 아니면 PDF 전용 컨트롤(필기·페이지) 숨김
   if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){

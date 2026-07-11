@@ -220,8 +220,8 @@ function wire(){
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
-  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 참고·작업 역할 교대
-    if (state && typeof setStudyReference === "function") setStudyReference(state.id);
+  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우 위치 바꾸기(참고=PDF 유지 → 필기·페이지 컨트롤이 PDF를 따라 이동)
+    if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
   };
   if (byId("studyChipLock")) byId("studyChipLock").onclick = () => {         // 참고 칩의 잠금 토글
     if (typeof setStudyReferenceLocked === "function") setStudyReferenceLocked(!studyReferenceLocked);
