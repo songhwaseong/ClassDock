@@ -1249,11 +1249,23 @@ function ensurePenBar(){
 
 // ----- 그리기(문서 캡처, 펜 모드일 때만) -----
 let _inkDraw = null;
-function inkPos(e, p, doc){
-  const rect = p.overlay.getBoundingClientRect();
+// 화면(client) 좌표 → 페이지의 '회전 전' 로컬 좌표(잉크·강조가 저장되는 좌표계).
+// pageEl 은 transform-origin:top-left 로 scale(z)+회전이 걸리고 frame 이 그 배치 박스(padding·border 0)라,
+// frame 좌상단을 기준점으로 zoom·exportRotation 을 역으로 풀면 어느 회전에서도 정확히 맞는다.
+function pageLocalFromClient(p, doc, clientX, clientY){
+  const fr = p.frame.getBoundingClientRect();
   const z = (doc && doc.zoom) || 1;
-  let x = (e.clientX - rect.left) / z, y = (e.clientY - rect.top) / z;
+  const sx = (clientX - fr.left) / z, sy = (clientY - fr.top) / z;
+  const r = ((p.exportRotation || 0) % 360 + 360) % 360;
+  let x, y;
+  if (r === 90){ x = sy; y = p.cssH - sx; }
+  else if (r === 180){ x = p.cssW - sx; y = p.cssH - sy; }
+  else if (r === 270){ x = p.cssW - sy; y = sx; }
+  else { x = sx; y = sy; }
   return { x: Math.max(0, Math.min(p.cssW, x)), y: Math.max(0, Math.min(p.cssH, y)) };
+}
+function inkPos(e, p, doc){
+  return pageLocalFromClient(p, doc, e.clientX, e.clientY);
 }
 function drawInkSeg(ctx, st, a, b){
   ctx.save(); applyInkStyle(ctx, st);
@@ -1326,7 +1338,6 @@ function applyTextHighlight(color){
   if (!info) return false;
   const { sel, doc } = info;
   if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return false; }
-  const z = doc.zoom || 1;
   const byPage = new Map();
   for (let i = 0; i < sel.rangeCount; i++){
     for (const r of sel.getRangeAt(i).getClientRects()){
@@ -1343,11 +1354,13 @@ function applyTextHighlight(color){
   let made = 0;
   for (const [pageIndex, prects] of byPage){
     const p = doc.pages[pageIndex]; if (!p || !p.overlay) continue;
-    const orect = p.overlay.getBoundingClientRect();
     const lines = [];
     for (const r of prects){
-      const left = (r.left - orect.left) / z, right = (r.right - orect.left) / z;
-      const top = (r.top - orect.top) / z, bottom = (r.bottom - orect.top) / z;
+      // 화면 사각형의 대각 두 꼭짓점을 회전 전 페이지 좌표로 변환(회전 시 축이 바뀌므로 min/max 로 정규화).
+      const a = pageLocalFromClient(p, doc, r.left, r.top);
+      const b = pageLocalFromClient(p, doc, r.right, r.bottom);
+      const left = Math.min(a.x, b.x), right = Math.max(a.x, b.x);
+      const top = Math.min(a.y, b.y), bottom = Math.max(a.y, b.y);
       let g = null;
       for (const c of lines){
         const ov = Math.min(bottom, c.bottom) - Math.max(top, c.top);
