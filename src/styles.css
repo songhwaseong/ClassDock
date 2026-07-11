@@ -1395,7 +1395,7 @@
   .xlsx-editbar{display:flex;flex-direction:column;gap:6px;max-width:1080px;margin:0 auto 10px;padding:8px;
     border:1px solid var(--border);border-radius:11px;background:var(--panel);box-shadow:0 3px 12px rgba(15,23,42,.07);
     font-size:12.5px;color:var(--muted)}
-  .xlsx-editbar-row{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;width:100%;min-width:0;overflow:visible}
+  .xlsx-editbar-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;min-width:0;overflow:visible}
   .xlsx-editgroup{display:inline-flex;align-items:center;gap:5px;flex:none;min-height:34px;padding:2px 4px;
     border:1px solid var(--border);border-radius:9px;background:var(--field);white-space:nowrap}
   .xlsx-editgroup-label{padding:0 3px;color:var(--muted);font-size:10.5px;font-weight:700}
@@ -1463,6 +1463,51 @@
   .xlsx-chart-canvas{flex:1;min-height:0;background:#fff;margin:8px;border-radius:8px;overflow:hidden;display:flex;cursor:grab}
   .xlsx-chart-canvas:active{cursor:grabbing}
   .xlsx-chart-canvas svg{width:100%;height:100%;display:block;pointer-events:none}
+  /* 미니 피벗 설정·미리보기 모달 */
+  .xlsx-pivot-modal{position:fixed;left:50%;top:10vh;transform:translateX(-50%);z-index:1300;
+    width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.34)}
+  .xlsx-pivot-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .xlsx-pivot-head strong{font-size:15px;color:var(--ink)}
+  .xlsx-pivot-head button{margin-left:auto;font:inherit;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:4px 10px;cursor:pointer}
+  .xlsx-pivot-controls{display:flex;flex-wrap:wrap;gap:10px 16px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .xlsx-pivot-controls label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink)}
+  .xlsx-pivot-controls select{font:inherit;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);max-width:170px}
+  .xlsx-pivot-preview{overflow:auto;padding:6px 14px;flex:1;min-height:80px}
+  .xlsx-pivot-preview table{border-collapse:collapse;width:100%;font-size:13px}
+  .xlsx-pivot-preview th,.xlsx-pivot-preview td{border:1px solid var(--border);padding:4px 8px;text-align:left}
+  .xlsx-pivot-preview th{background:var(--panel-hover);position:sticky;top:0}
+  .xlsx-pivot-preview td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .xlsx-pivot-actions{display:flex;justify-content:flex-end;gap:8px;padding:11px 14px;border-top:1px solid var(--border)}
+  .xlsx-pivot-actions button{font:inherit;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:6px 14px;cursor:pointer}
+  .xlsx-pivot-actions button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  /* 데이터 유효성(목록) 셀 표시 ▼ + 편집 시 드롭다운 팝업 */
+  .xlsx-sheet td.xlsx-has-dv{position:relative}
+  .xlsx-sheet td.xlsx-has-dv::after{content:"▾";position:absolute;right:2px;top:50%;transform:translateY(-50%);
+    font-size:10px;line-height:1;color:var(--muted,#94a3b8);pointer-events:none}
+  .xlsx-cell-dropdown{position:fixed;z-index:1950;display:flex;flex-direction:column;max-height:240px;overflow:auto;
+    padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.28)}
+  .xlsx-cell-dropdown button{display:block;width:100%;text-align:left;border:0;border-radius:6px;padding:6px 12px;
+    background:transparent;color:var(--ink);font:inherit;cursor:pointer;white-space:nowrap}
+  .xlsx-cell-dropdown button:hover,.xlsx-cell-dropdown button.focus{background:var(--panel-hover);color:var(--accent)}
+  .xlsx-cell-dropdown button.active{font-weight:700}
+  /* 조건부 서식 규칙 관리 모달 */
+  .xlsx-cond-modal{position:fixed;left:50%;top:12vh;transform:translateX(-50%);z-index:1300;
+    width:min(500px,94vw);max-height:76vh;display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.34)}
+  .xlsx-cond-head{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .xlsx-cond-head strong{font-size:15px;color:var(--ink)}
+  .xlsx-cond-head button{margin-left:auto;font:inherit;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:4px 10px;cursor:pointer}
+  .xlsx-cond-list{overflow:auto;padding:6px 10px;flex:1;min-height:60px}
+  .xlsx-cond-item{display:flex;align-items:center;gap:10px;padding:6px 6px;border-bottom:1px solid var(--border);font-size:13px;color:var(--ink)}
+  .xlsx-cond-item .sw{width:16px;height:16px;border-radius:4px;border:1px solid var(--border);flex:none}
+  .xlsx-cond-item .rg{font-variant-numeric:tabular-nums;color:var(--muted,#94a3b8);min-width:74px}
+  .xlsx-cond-item .de{flex:1}
+  .xlsx-cond-item button{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);padding:3px 9px;cursor:pointer}
+  .xlsx-cond-item button:hover{background:var(--panel-hover);color:var(--accent)}
+  .xlsx-cond-empty{padding:18px;text-align:center;color:var(--muted,#94a3b8)}
+  .xlsx-cond-foot{display:flex;justify-content:space-between;gap:8px;padding:11px 14px;border-top:1px solid var(--border)}
+  .xlsx-cond-foot button{font:inherit;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:6px 14px;cursor:pointer}
   .xlsx-frozen{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
   .xlsx-fmt-color{width:28px;height:22px;padding:0;border:1px solid var(--border);border-radius:5px;background:none;cursor:pointer;vertical-align:middle}
   /* 글꼴·정렬 서식 버튼(B/I/U·정렬 아이콘): 정사각 컴팩트 */
