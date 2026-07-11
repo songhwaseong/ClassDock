@@ -624,6 +624,11 @@
     transform:translateX(-4px);background:var(--border);z-index:9;cursor:col-resize;touch-action:none}
   .study-divider::before{content:"";position:absolute;top:0;bottom:0;left:3px;width:2px;background:rgba(255,255,255,.12)}
   .study-divider:hover::before,.study-divider.dragging::before{background:var(--accent);width:3px;left:2.5px}
+  /* 가운데 손잡이(그립) — 드래그로 비율 조절·더블클릭으로 좌우 바꾸기 가능함을 알림 */
+  .study-divider::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:6px;height:34px;border-radius:999px;background:rgba(148,163,184,.55);
+    box-shadow:0 0 0 3px rgba(15,23,42,.35);transition:background .12s}
+  .study-divider:hover::after,.study-divider.dragging::after{background:var(--accent)}
   #content.study-mode .study-divider{display:block}
   #content.study-mode .study-reference{display:block!important;right:calc(100% - var(--study-split,50%));border-right:3px solid var(--border)}
   #content.study-mode .study-work{left:var(--study-split,50%);display:block!important}
@@ -730,11 +735,25 @@
   .study-readonly-badge{display:none;align-items:center;padding:4px 7px;margin-left:3px;border:1px solid rgba(255,255,255,.22);
     border-radius:6px;background:rgba(15,23,42,.48);color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap}
   #content.study-mode.study-reference-locked .study-readonly-badge{display:inline-flex}
-  #content.study-mode.study-reference-locked .study-pen-btn{display:none}
   .study-page-ctl.non-pdf-ref #studyPageNum,.study-page-ctl.non-pdf-ref #studyPageTotal,.study-page-ctl.non-pdf-ref #btnStudyFind{display:none}
-  #content.study-mode .study-page-ctl{display:inline-flex;right:calc(100% - var(--study-split,50%) + 10px)}
-  #content.study-mode.study-swapped .study-page-ctl{right:10px}
+  /* 페이지·찾기 바: PDF 칸 우상단 코너의 필기 버튼(폭 고정) 왼쪽에 붙도록 52px 안쪽으로 */
+  #content.study-mode .study-page-ctl{display:inline-flex;right:calc(100% - var(--study-split,50%) + 52px)}
+  #content.study-mode.study-swapped .study-page-ctl{right:52px}
   #content:fullscreen .study-page-ctl,body.viewer-fullscreen #content .study-page-ctl{display:none!important}
+  /* PDF 필기 버튼: 페이지 바에서 분리해 참고(PDF) 칸의 오른쪽 위 코너에 단독 배치 */
+  .study-pen-solo{position:absolute;top:10px;z-index:14;display:none;align-items:center;justify-content:center;
+    padding:6px 8px;border-radius:8px;background:rgba(15,23,42,.82);color:#fff;cursor:pointer;
+    box-shadow:0 4px 14px rgba(0,0,0,.3);transition:opacity .18s ease}
+  .study-pen-solo svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .study-pen-solo:hover{background:rgba(15,23,42,.95)}
+  .study-pen-solo.active{background:var(--accent)}
+  #content.study-mode .study-pen-solo{display:inline-flex;right:calc(100% - var(--study-split,50%) + 10px)}
+  #content.study-mode.study-swapped .study-pen-solo{right:10px}
+  #content.study-mode.study-reference-locked .study-pen-solo{display:none}
+  /* 잠금 시 필기 버튼이 사라지므로 페이지 바를 코너로 되돌림 */
+  #content.study-mode.study-reference-locked .study-page-ctl{right:calc(100% - var(--study-split,50%) + 10px)}
+  #content.study-mode.study-reference-locked.study-swapped .study-page-ctl{right:10px}
+  #content:fullscreen .study-pen-solo,body.viewer-fullscreen #content .study-pen-solo{display:none!important}
   /* 학습 화면: 칸마다 왼쪽 위에 떠 있는 역할 칩(참고·작업 + 파일명). 평소 반투명, 올리면 선명 */
   .study-chip{position:absolute;top:10px;z-index:14;display:none;align-items:center;gap:6px;max-width:min(38%,300px);
     padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:12px;
@@ -769,6 +788,7 @@
   /* 분할화면 바 자동 숨김: 입력이 없으면 흐려졌다가 마우스·키 입력에 다시 나타남(전체화면 fs-controls 와 같은 방식) */
   .study-page-ctl{transition:opacity .18s ease}
   #content.study-mode.study-idle .study-page-ctl,
+  #content.study-mode.study-idle .study-pen-solo,
   #content.study-mode.study-idle .study-chip,
   #content.study-mode.study-idle .study-role-swap{opacity:0;pointer-events:none}
   @media (prefers-reduced-motion:reduce){

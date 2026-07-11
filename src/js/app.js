@@ -205,9 +205,7 @@ function wire(){
   byId("btnCheck").onclick = () => addTextElement("check", { fontSize: 30, color: "#16a34a", bold: true, text: "✓" });
   byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
-  if (byId("btnStudySwap")) byId("btnStudySwap").onclick = () => {
-    if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
-  };
+  // 좌우 위치 바꾸기는 분할바 더블클릭으로 통합(중복 버튼 제거) — setupStudyDivider 참고
   byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
