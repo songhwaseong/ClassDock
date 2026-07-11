@@ -242,6 +242,41 @@ function hideFullscreenControlsNow(){
   const controls = byId("fsControls");
   if (controls) controls.classList.add("hide");
 }
+// ── 분할화면(study) 바 자동 숨김 — 전체화면 컨트롤과 같은 유휴 숨김 방식 ──
+let studyControlsTimer = null;
+const STUDY_IDLE_MS = 3500;
+function studyControlsActive(){
+  const c = byId("content");
+  return !!(c && c.classList.contains("study-mode") && !isViewerFullscreen());
+}
+// 페이지 번호 입력 중·펜 필기 중·찾기창 열림 중에는 숨기지 않는다
+function studyInteractionBusy(){
+  const ae = document.activeElement;
+  const ctl = byId("studyPageCtl");
+  if (ctl && ae && ctl.contains(ae)) return true;
+  const pen = byId("btnStudyPen");
+  if (pen && pen.classList.contains("active")) return true;
+  if (document.querySelector(".pdf-find:not([hidden])")) return true;
+  return false;
+}
+function armStudyControlsTimer(){
+  clearTimeout(studyControlsTimer);
+  if (!studyControlsActive()) return;
+  studyControlsTimer = setTimeout(() => {
+    if (!studyControlsActive()) return;
+    if (studyInteractionBusy()){ armStudyControlsTimer(); return; }   // 상호작용 중이면 다시 대기
+    const c = byId("content"); if (c) c.classList.add("study-idle");
+  }, STUDY_IDLE_MS);
+}
+function showStudyControls(){
+  if (!studyControlsActive()) return;
+  const c = byId("content"); if (c) c.classList.remove("study-idle");
+  armStudyControlsTimer();
+}
+function stopStudyControlsAutoHide(){
+  clearTimeout(studyControlsTimer);
+  const c = byId("content"); if (c) c.classList.remove("study-idle");
+}
 function scheduleViewerLayoutRefresh(){
   setTimeout(() => {
     const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
@@ -511,6 +546,7 @@ function applyStudyLayout(){
   content.classList.toggle("study-mode", split);
   content.classList.toggle("study-reference-locked", split && studyReferenceLocked);
   content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 좌우 배치 적용
+  if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
     setupStudyDivider();                       // 분할바 준비(저장된 비율 적용)
