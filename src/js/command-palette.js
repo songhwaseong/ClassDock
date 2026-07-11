@@ -13,8 +13,10 @@
   // ── 실행 대상 판별(문맥) ─────────────────────────────
   const isPdf   = () => { const s = curState(); return !!(s && s.kind === "pdf"); };
   const hasDoc  = () => !!curState();
+  const hasMultipleDocs = () => { try { return docs.length > 1; } catch(_){ return false; } };
   const canRun  = () => { const s = curState(); return !!(s && s.el && s.el.querySelector(".run-go")); };
   const canPrint= () => { const t = $("officeTools"); return !!(t && !t.hidden); };
+  const canStudy = () => { const b = $("studyToggle"); return !!(b && !b.hidden); };
   const clickId = (id) => { const el = $(id); if (el) el.click(); };
   const callFn  = (name, ...args) => { if (typeof window[name] === "function") window[name](...args); };
 
@@ -40,6 +42,11 @@
     C("settings","⚙️","설정 열기", () => clickId("settingsOpen"), { kw:"settings 설정 환경 옵션 preferences" }),
     C("help","❓","도움말 · 단축키", () => clickId("helpOpen"), { kw:"help 도움말 단축키 shortcut 가이드" }),
     // 문서(PDF) 전용
+    C("closeCurrent","×","현재 파일 닫기", () => { const s = curState(); if (s) callFn("closeDoc", s.id, { forgetWorkspace:true }); }, { when:hasDoc, sc:"closeCurrent", kw:"close 닫기 탭 파일" }),
+    C("reopenClosed","↶","닫은 파일 다시 열기", () => callFn("reopenClosedDoc"), { sc:"reopenClosed", kw:"reopen restore 닫은 파일 탭 복원" }),
+    C("previousFile","◀","이전 열린 파일", () => callFn("navigateTab", -1), { when:hasMultipleDocs, sc:"previousFile", kw:"previous 이전 파일 탭 이동" }),
+    C("nextFile","▶","다음 열린 파일", () => callFn("navigateTab", 1), { when:hasMultipleDocs, sc:"nextFile", kw:"next 다음 파일 탭 이동" }),
+    C("studyToggle","⇄","분할 작업 켜기 / 끄기", () => clickId("studyToggle"), { when:canStudy, kw:"study split 분할 작업 참고 나란히" }),
     C("pdfSign","✍️","PDF 서명 추가", () => clickId("btnSign"), { when:isPdf, kw:"sign signature 서명 도장" }),
     C("pdfText","🔤","PDF 텍스트 넣기", () => clickId("btnText"), { when:isPdf, kw:"text 텍스트 글자" }),
     C("pdfDate","📅","PDF 날짜 넣기", () => clickId("btnDate"), { when:isPdf, kw:"date 날짜" }),
@@ -49,6 +56,8 @@
     C("pdfPages","🗂️","페이지 썸네일 · 정리", () => clickId("btnPages"), { when:isPdf, kw:"pages 페이지 썸네일 추출 정리 삭제 회전" }),
     C("pdfMerge","➕","PDF 합치기", () => clickId("btnMergePdf"), { when:isPdf, kw:"merge 합치기 병합 이어붙이기" }),
     C("pdfDownload","💾","PDF 다운로드 / 저장", () => clickId("btnDownload"), { when:isPdf, sc:"saveCurrent", kw:"download save 다운로드 저장 내보내기" }),
+    C("pdfUndo","↶","PDF 편집 실행 취소", () => callFn("undoPdfEdit"), { when:isPdf, kw:"undo 실행 취소 되돌리기" }),
+    C("pdfRedo","↷","PDF 편집 다시 실행", () => callFn("redoPdfEdit"), { when:isPdf, kw:"redo 다시 실행 복구" }),
     // 코드 실행 / 인쇄 / 전체화면 (문맥)
     C("runCode","▶️","현재 코드 실행", () => { const s = curState(); const b = s && s.el && s.el.querySelector(".run-go"); if (b) b.click(); }, { when:canRun, sc:"runCode", kw:"run execute 실행 돌리기" }),
     C("print","🖨️","인쇄 / PDF로 저장", () => clickId("btnPrint"), { when:canPrint, kw:"print 인쇄 출력 pdf" }),
@@ -69,7 +78,17 @@
   }
 
   // ── UI ─────────────────────────────
-  let overlay = null, input = null, listEl = null, emptyEl = null, items = [], activeIndex = 0;
+  let overlay = null, input = null, listEl = null, emptyEl = null, items = [], activeIndex = 0, previousFocus = null;
+  const focusableInPalette = () => overlay ? [...overlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.hidden && !el.disabled) : [];
+  function trapFocus(e){
+    if (e.key !== "Tab") return;
+    const nodes = focusableInPalette();
+    if (!nodes.length){ e.preventDefault(); return; }
+    const first = nodes[0], last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  }
   function build(){
     overlay = document.createElement("div");
     overlay.className = "cmdk-overlay"; overlay.hidden = true;
@@ -77,7 +96,7 @@
       '<div class="cmdk" role="dialog" aria-modal="true" aria-label="명령 팔레트">' +
         '<div class="cmdk-inputwrap">' +
           '<svg class="cmdk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>' +
-          '<input class="cmdk-input" type="text" placeholder="기능 검색…  (예: 서명, 화이트보드, 어둡게)" autocomplete="off" spellcheck="false" aria-label="명령 검색" aria-controls="cmdkList">' +
+          '<input class="cmdk-input" type="text" role="combobox" placeholder="기능 검색…  (예: 서명, 화이트보드, 어둡게)" autocomplete="off" spellcheck="false" aria-label="명령 검색" aria-controls="cmdkList" aria-expanded="true">' +
           '<kbd class="cmdk-esc">Esc</kbd>' +
         '</div>' +
         '<div class="cmdk-list" id="cmdkList" role="listbox"></div>' +
@@ -89,6 +108,7 @@
     emptyEl = overlay.querySelector(".cmdk-empty");
     input.addEventListener("input", () => render(input.value));
     input.addEventListener("keydown", onInputKey);
+    overlay.addEventListener("keydown", trapFocus);
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
   }
   function render(query){
@@ -104,6 +124,7 @@
     list.forEach((c, idx) => {
       const row = document.createElement("div");
       row.className = "cmdk-item" + (idx === 0 ? " active" : "");
+      row.id = "cmdkOption" + idx;
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", idx === 0 ? "true" : "false");
       const ico = document.createElement("span"); ico.className = "cmdk-item-ico"; ico.textContent = c.icon || "•";
@@ -116,6 +137,7 @@
       frag.appendChild(row);
     });
     listEl.appendChild(frag);
+    input.setAttribute("aria-activedescendant", items.length ? "cmdkOption0" : "");
   }
   function setActive(idx){
     if (idx < 0 || idx >= items.length) return;
@@ -125,6 +147,7 @@
       el.classList.toggle("active", on);
       el.setAttribute("aria-selected", on ? "true" : "false");
     });
+    input.setAttribute("aria-activedescendant", "cmdkOption" + idx);
     const el = listEl.children[idx]; if (el) el.scrollIntoView({ block: "nearest" });
   }
   function move(delta){ if (items.length) setActive((activeIndex + delta + items.length) % items.length); }
@@ -136,7 +159,7 @@
   }
   function run(idx){
     const c = items[idx]; if (!c) return;
-    close();
+    close(false);
     // 파일 선택창·모달을 여는 동작은 팔레트가 닫힌 뒤 실행해야 포커스·중첩 문제가 없다.
     setTimeout(() => {
       try { c.run(); }
@@ -147,12 +170,18 @@
     if (!overlay) build();
     if (!overlay.hidden) return;
     if (document.querySelector(".modal:not([hidden])")) return;   // 다른 대화상자 위에 겹쳐 열지 않음
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.hidden = false;
     input.value = "";
     render("");
     requestAnimationFrame(() => { try { input.focus(); input.select(); } catch(_){} });
   }
-  function close(){ if (overlay && !overlay.hidden) overlay.hidden = true; }
+  function close(restoreFocus=true){
+    if (!overlay || overlay.hidden) return;
+    overlay.hidden = true;
+    const restore = previousFocus; previousFocus = null;
+    if (restoreFocus && restore && restore.isConnected) requestAnimationFrame(() => { try { restore.focus(); } catch(_){} });
+  }
   window.openCommandPalette = open;
 
   // ── 열기 단축키(기본 Ctrl+K, 설정 → 단축키에서 변경 가능) ──

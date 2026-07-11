@@ -36,16 +36,21 @@ for (const relative of scripts) {
 // 최상위(들여쓰기 없는 열 0) function/class/var/let/const 선언만 본다 — 이 코드베이스의 스타일상
 // 중첩 선언은 항상 들여쓰기돼 있어 열 0 기준이면 실제 전역만 정확히 걸러진다.
 const topDeclRe = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|^class\s+([A-Za-z_$][\w$]*)|^(?:var|let|const)\s+([A-Za-z_$][\w$]*)/;
+const topWindowAssignRe = /^(?:window|globalThis)\.([A-Za-z_$][\w$]*)\s*=/;
 const globalDecls = new Map();   // 이름 -> 선언한 파일 목록
+function recordGlobal(name, relative){
+  if (!name) return;
+  if (!globalDecls.has(name)) globalDecls.set(name, []);
+  globalDecls.get(name).push(relative);
+}
 for (const relative of scripts) {
   const lines = fs.readFileSync(path.join(root, relative), "utf8").split("\n");
   for (const line of lines) {
     const match = topDeclRe.exec(line);
-    if (!match) continue;
-    const name = match[1] || match[2] || match[3];
-    if (!name) continue;
-    if (!globalDecls.has(name)) globalDecls.set(name, []);
-    globalDecls.get(name).push(relative);
+    if (match) recordGlobal(match[1] || match[2] || match[3], relative);
+    // 함수 선언뿐 아니라 직접 window/globalThis 에 붙이는 공개 API도 같은 전역 이름이므로 충돌을 막는다.
+    const windowMatch = topWindowAssignRe.exec(line);
+    if (windowMatch) recordGlobal(windowMatch[1], relative);
   }
 }
 const globalCollisions = [...globalDecls.entries()].filter(([, files]) => files.length > 1);

@@ -1,6 +1,6 @@
 *{box-sizing:border-box;margin:0;padding:0}
   :root{
-    --bg:#eef2f7;--panel:#fff;--ink:#000;--muted:#64748b;
+    --bg:#eef2f7;--workspace-bg:var(--bg);--panel:#fff;--ink:#000;--muted:#64748b;
     --accent:#4f46e5;--accent-d:#4338ca;--border:#e2e8f0;--danger:#ef4444;
     --header:#1e293b;--sidebar:#0f172a;--viewer:#fff;
     --panel-2:#f1f5f9;--panel-hover:#f5f6ff;--field:#fff;
@@ -29,6 +29,19 @@
     --memo-paper:var(--field);--memo-paper-border:var(--border);
     --scratchpad-locked-border:#4f7fcb;--scratchpad-locked-bg:#182536;--scratchpad-locked-field:#1e3047;
   }
+  /* 라이트 배경 프리셋 — Python 편집 화면까지 바꾸되 PDF·일반 문서·메모지·다크 모드는 유지한다. */
+  html[data-theme="light"][data-light-background="warm"]{--bg:#f6f1e8;--workspace-bg:#f6f1e8}
+  html[data-theme="light"][data-light-background="mint"]{--bg:#edf7f2;--workspace-bg:#edf7f2}
+  html[data-theme="light"][data-light-background="lavender"]{--bg:#f4f1fa;--workspace-bg:#f4f1fa}
+  html[data-theme="light"][data-light-background="sky"]{--bg:#edf6fb;--workspace-bg:#edf6fb}
+  html[data-theme="light"][data-light-background="warm"] .office.python-editor-doc{background:#f6f1e8;--code-bg:#fffcf5;--code-gutter:#eee5d5;--code-panel:#fffcf5;--code-panel-head:#eee5d5;--code-border:#ded2bd;--code-hover:#f8f0e4}
+  html[data-theme="light"][data-light-background="mint"] .office.python-editor-doc{background:#edf7f2;--code-bg:#f9fdfb;--code-gutter:#e2f0e8;--code-panel:#f9fdfb;--code-panel-head:#e2f0e8;--code-border:#cde0d4;--code-hover:#edf7f2}
+  html[data-theme="light"][data-light-background="lavender"] .office.python-editor-doc{background:#f4f1fa;--code-bg:#fbfaff;--code-gutter:#ebe6f4;--code-panel:#fbfaff;--code-panel-head:#ebe6f4;--code-border:#d9d0e9;--code-hover:#f2eef9}
+  html[data-theme="light"][data-light-background="sky"] .office.python-editor-doc{background:#edf6fb;--code-bg:#f9fcff;--code-gutter:#e2eef6;--code-panel:#f9fcff;--code-panel-head:#e2eef6;--code-border:#cbdde8;--code-hover:#edf6fb}
+  /* 문서 원본의 종이색·이미지·슬라이드는 보존하고, 그 바깥 작업 공간만 프리셋 색으로 통일한다. */
+  html[data-theme="light"][data-light-background]:not([data-light-background="cool"]) .viewer,
+  html[data-theme="light"][data-light-background]:not([data-light-background="cool"]) .office{background:var(--workspace-bg)}
+  html[data-theme="light"][data-light-background]:not([data-light-background="cool"]) .office.wb-doc .wb-wrap{background:var(--workspace-bg)}
   html{color-scheme:light}
   html[data-theme="dark"]{color-scheme:dark}
   html,body{height:100%}
@@ -153,6 +166,17 @@
   .sidebar-toggle{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;padding:0;border-radius:8px}
   .sidebar-toggle svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .theme-toggle{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:6px 9px}
+  .light-background-setting{align-items:center}
+  .light-background-options{display:inline-flex;align-items:center;gap:7px}
+  .light-background-choice{width:24px;height:24px;padding:0;border:1px solid var(--border);border-radius:50%;cursor:pointer;transition:transform .1s,box-shadow .1s}
+  .light-background-choice:hover{transform:translateY(-1px)}
+  .light-background-choice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .light-background-choice[data-light-background="cool"]{background:#eef2f7}
+  .light-background-choice[data-light-background="warm"]{background:#f6f1e8}
+  .light-background-choice[data-light-background="mint"]{background:#edf7f2}
+  .light-background-choice[data-light-background="lavender"]{background:#f4f1fa}
+  .light-background-choice[data-light-background="sky"]{background:#edf6fb}
+  .light-background-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
   /* 상시 유틸리티(분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
   .header-util{display:inline-flex;align-items:center;gap:6px}
   .save-folder-open{display:inline-flex;align-items:center;gap:6px}

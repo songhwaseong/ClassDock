@@ -554,6 +554,23 @@ function wire(){
       sec.hidden = sec.dataset.settingsPanel !== name;
     });
   };
+  const LIGHT_BACKGROUND_VALUES = new Set(["cool", "warm", "mint", "lavender", "sky"]);
+  let lightBackgroundDraft = "cool";
+  const normalizeLightBackground = (value) => LIGHT_BACKGROUND_VALUES.has(value) ? value : "cool";
+  const currentLightBackground = () => normalizeLightBackground(document.documentElement.getAttribute("data-light-background"));
+  const lightBackgroundButtons = [...document.querySelectorAll(".light-background-choice[data-light-background]")];
+  const syncLightBackgroundButtons = () => lightBackgroundButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.lightBackground === lightBackgroundDraft));
+  });
+  const applyLightBackground = (value) => {
+    const next = normalizeLightBackground(value);
+    document.documentElement.setAttribute("data-light-background", next);
+    try { localStorage.setItem("lightBackground", next); } catch(_){}
+  };
+  lightBackgroundButtons.forEach((button) => button.addEventListener("click", () => {
+    lightBackgroundDraft = normalizeLightBackground(button.dataset.lightBackground);
+    syncLightBackgroundButtons();
+  }));
   document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
     tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
   });
@@ -569,6 +586,8 @@ function wire(){
   })();
   byId("settingsOpen").onclick = () => {
     setSettingsTab("general");
+    lightBackgroundDraft = currentLightBackground();
+    syncLightBackgroundButtons();
     byId("settingUiScale").value = String(currentUiScale());
     byId("settingPdfZoom").value = String(defaultPdfZoom());
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
@@ -607,6 +626,7 @@ function wire(){
       return;
     }
     const previousPerformance = appSettings.performance;
+    applyLightBackground(lightBackgroundDraft);
     saveAppSettings({
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,

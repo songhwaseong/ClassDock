@@ -1410,7 +1410,7 @@ function ensureTextHiBar(){
   _textHiBar = bar; return bar;
 }
 function hideTextHiBar(){ if (_textHiBar) _textHiBar.hidden = true; }
-function positionTextHiBar(){
+function positionTextHiBar(focusColor=false){
   const info = pdfTextSelectionInfo();
   if (!info || isPdfReferenceLocked(info.doc)){ hideTextHiBar(); return; }
   const rects = info.sel.getRangeAt(info.sel.rangeCount - 1).getClientRects();
@@ -1424,11 +1424,21 @@ function positionTextHiBar(){
   let top = r.top - bh - 8;                              // 선택 위쪽에, 공간 없으면 아래로
   if (top < 8) top = Math.min(window.innerHeight - bh - 8, r.bottom + 8);
   bar.style.left = left + "px"; bar.style.top = top + "px";
+  if (focusColor){
+    const firstColor = bar.querySelector(".pdf-hi-color");
+    if (firstColor) firstColor.focus();
+  }
 }
 // 드래그 중엔 깜빡이지 않도록 손을 뗐을 때(pointerup) 위치를 잡고, 선택이 풀리면 숨긴다.
 document.addEventListener("pointerup", (e) => {
   if (e.target && e.target.closest && e.target.closest(".pdf-hi-bar")) return;
   setTimeout(positionTextHiBar, 0);
+});
+document.addEventListener("keyup", (e) => {
+  if (!e.shiftKey || !["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End","PageUp","PageDown"].includes(e.key)) return;
+  const target = e.target;
+  if (!target || !target.closest || !target.closest(".pdf-text-layer")) return;
+  setTimeout(() => positionTextHiBar(true), 0);
 });
 document.addEventListener("selectionchange", () => {
   const sel = window.getSelection && window.getSelection();

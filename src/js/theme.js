@@ -4,6 +4,9 @@
       var t = localStorage.getItem("theme");
       if (t !== "light" && t !== "dark")
         t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      var lightBackground = localStorage.getItem("lightBackground");
+      if (["cool", "warm", "mint", "lavender", "sky"].indexOf(lightBackground) < 0) lightBackground = "cool";
       document.documentElement.setAttribute("data-theme", t);
+      document.documentElement.setAttribute("data-light-background", lightBackground);
     }catch(e){}
   })();

@@ -477,6 +477,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   const lineCount = text.split("\n").length;
   const runnable = RUN_EXTS.has(ext);
   const ownerDoc = docs.find(d => d.el === host) || null;
+  // 라이트 모드 배경 프리셋은 Python 실행·편집 화면에만 별도 적용한다.
+  if (runnable) host.classList.add("python-editor-doc");
   const effectiveRunCtx = {
     ...(ownerDoc && ownerDoc.archiveCtx ? { archiveCtx: ownerDoc.archiveCtx } : {}),
     ...(ownerDoc && ownerDoc.relPath ? { relPath: ownerDoc.relPath } : {}),

@@ -412,6 +412,13 @@
 
     <div class="settings-section" data-settings-panel="general" role="tabpanel">
       <label class="settings-row"><span>화면 글자 크기</span><select id="settingUiScale" class="pw-input"><option value="1">보통 (100%)</option><option value="1.12">크게 (112%)</option><option value="1.25">아주 크게 (125%)</option></select></label>
+      <div class="settings-row light-background-setting"><span>라이트 모드 배경</span><div id="settingLightBackground" class="light-background-options" role="group" aria-label="라이트 모드 본 화면 배경">
+        <button type="button" class="light-background-choice" data-light-background="cool" title="기본 쿨 그레이" aria-label="기본 쿨 그레이"></button>
+        <button type="button" class="light-background-choice" data-light-background="warm" title="웜 크림" aria-label="웜 크림"></button>
+        <button type="button" class="light-background-choice" data-light-background="mint" title="민트" aria-label="민트"></button>
+        <button type="button" class="light-background-choice" data-light-background="lavender" title="라벤더" aria-label="라벤더"></button>
+        <button type="button" class="light-background-choice" data-light-background="sky" title="스카이" aria-label="스카이"></button>
+      </div></div>
       <label class="settings-check"><input type="checkbox" id="settingAutoRestore"><span>시작할 때 최근 작업공간 자동 복원</span></label>
       <div class="settings-save-folder" id="settingSaveFolderWrap" hidden>
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath"></small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
