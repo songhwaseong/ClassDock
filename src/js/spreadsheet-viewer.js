@@ -1337,6 +1337,71 @@ function evaluateAst(ast, resolver){
       case "PROPER": { const s = formulaToString(scal(A()[0])); return isFormulaError(s) ? s : s.replace(/\b\w/g, ch => ch.toUpperCase()).replace(/\B\w/g, ch => ch.toLowerCase()); }
       case "EXACT": { const a = A(); return formulaToString(scal(a[0])) === formulaToString(scal(a[1])); }
       case "TEXTJOIN": { const a = A(); const delim = formulaToString(scal(a[0])); const ignoreEmpty = a[1] !== undefined ? formulaToBool(scal(a[1])) : true; const parts = []; for (const v of flat(a.slice(2))){ if (isFormulaError(v)) return v; const sv = formulaToString(v); if (ignoreEmpty && sv === "") continue; parts.push(sv); } return parts.join(delim); }
+      // ----- 통계 -----
+      case "MEDIAN": { const { ns, err } = collectNumbers(A()); if (err) return err; if (!ns.length) return FORMULA_ERR("#NUM!"); const s = ns.slice().sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+      case "STDEV": case "STDEV.S": { const { ns, err } = collectNumbers(A()); if (err) return err; if (ns.length < 2) return FORMULA_ERR("#DIV/0!"); const mean = ns.reduce((s, n) => s + n, 0) / ns.length; return Math.sqrt(ns.reduce((s, n) => s + (n - mean) * (n - mean), 0) / (ns.length - 1)); }
+      case "STDEVP": case "STDEV.P": { const { ns, err } = collectNumbers(A()); if (err) return err; if (!ns.length) return FORMULA_ERR("#DIV/0!"); const mean = ns.reduce((s, n) => s + n, 0) / ns.length; return Math.sqrt(ns.reduce((s, n) => s + (n - mean) * (n - mean), 0) / ns.length); }
+      case "LARGE": case "SMALL": { const a = node.args; if (a.length < 2) return FORMULA_ERR("#VALUE!"); const { ns, err } = collectNumbers([ev(a[0])]); if (err) return err; const k = formulaToNumber(scal(ev(a[1]))); if (isFormulaError(k)) return k; const ki = Math.floor(k); if (ki < 1 || ki > ns.length) return FORMULA_ERR("#NUM!"); const sorted = ns.slice().sort((x, y) => node.name === "LARGE" ? y - x : x - y); return sorted[ki - 1]; }
+      case "RANK": case "RANK.EQ": {   // order 생략/0=내림차순(1등이 최댓값) — 석차 계산용
+        const a = node.args; if (a.length < 2) return FORMULA_ERR("#VALUE!");
+        const x = formulaToNumber(scal(ev(a[0]))); if (isFormulaError(x)) return x;
+        const { ns, err } = collectNumbers([ev(a[1])]); if (err) return err;
+        const asc = a[2] !== undefined ? formulaToBool(scal(ev(a[2]))) : false;
+        if (!ns.some(v => v === x)) return FORMULA_ERR("#N/A");
+        let n = 0; ns.forEach(v => { if (asc ? v < x : v > x) n++; });
+        return n + 1;
+      }
+      // ----- 다중 조건 집계 -----
+      case "COUNTIFS": {
+        const a = node.args; if (a.length < 2 || a.length % 2) return FORMULA_ERR("#VALUE!");
+        const pairs = []; let len = -1;
+        for (let k = 0; k < a.length; k += 2){
+          const rng = flat([ev(a[k])]); const crit = makeCriteria(scal(ev(a[k + 1])));
+          if (len < 0) len = rng.length; else if (rng.length !== len) return FORMULA_ERR("#VALUE!");
+          pairs.push({ rng, crit });
+        }
+        let n = 0;
+        for (let i = 0; i < len; i++){ if (pairs.every(p => !isFormulaError(p.rng[i]) && p.crit(p.rng[i]))) n++; }
+        return n;
+      }
+      case "SUMIFS": case "AVERAGEIFS": {
+        const a = node.args; if (a.length < 3 || a.length % 2 === 0) return FORMULA_ERR("#VALUE!");
+        const vr = flat([ev(a[0])]);
+        const pairs = [];
+        for (let k = 1; k < a.length; k += 2){
+          const rng = flat([ev(a[k])]); const crit = makeCriteria(scal(ev(a[k + 1])));
+          if (rng.length !== vr.length) return FORMULA_ERR("#VALUE!");
+          pairs.push({ rng, crit });
+        }
+        let s = 0, cnt = 0;
+        for (let i = 0; i < vr.length; i++){
+          if (!pairs.every(p => !isFormulaError(p.rng[i]) && p.crit(p.rng[i]))) continue;
+          if (typeof vr[i] === "number"){ s += vr[i]; cnt++; }
+        }
+        return node.name === "SUMIFS" ? s : (cnt ? s / cnt : FORMULA_ERR("#DIV/0!"));
+      }
+      // ----- 논리·조회 -----
+      case "IFS": {
+        const a = node.args; if (a.length < 2 || a.length % 2) return FORMULA_ERR("#VALUE!");
+        for (let k = 0; k < a.length; k += 2){
+          const c = formulaToBool(scal(ev(a[k]))); if (isFormulaError(c)) return c;
+          if (c) return scal(ev(a[k + 1]));
+        }
+        return FORMULA_ERR("#N/A");
+      }
+      case "CHOOSE": { const a = node.args; if (a.length < 2) return FORMULA_ERR("#VALUE!"); const i = formulaToNumber(scal(ev(a[0]))); if (isFormulaError(i)) return i; const k = Math.floor(i); if (k < 1 || k >= a.length) return FORMULA_ERR("#VALUE!"); return scal(ev(a[k])); }
+      case "XLOOKUP": {
+        const a = node.args; if (a.length < 3) return FORMULA_ERR("#VALUE!");
+        const key = scal(ev(a[0])); if (isFormulaError(key)) return key;
+        const la = flat([ev(a[1])]), ra = flat([ev(a[2])]);
+        if (!la.length || ra.length !== la.length) return FORMULA_ERR("#VALUE!");
+        for (let i = 0; i < la.length; i++){ if (!isFormulaError(la[i]) && lookupEqual(la[i], key)) return ra[i]; }
+        return a[3] !== undefined ? scal(ev(a[3])) : FORMULA_ERR("#N/A");
+      }
+      case "ISBLANK": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return !isFormulaError(v) && (v === "" || v == null); }
+      case "ISNUMBER": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return typeof v === "number"; }
+      case "ISTEXT": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return typeof v === "string" && v !== ""; }
+      case "ISERROR": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); return isFormulaError(ev(node.args[0])); }
       default: return FORMULA_ERR("#NAME?");
     }
   };
@@ -1375,6 +1440,81 @@ function remapFormulaRefs(formula, transform){
     prev = tk.text;
   }
   return out;
+}
+
+// 시트 이름이 바뀔 때 수식 속 시트 참조(Sheet2!A1, '내 시트'!A1)를 새 이름으로 재작성.
+function remapFormulaSheetName(formula, oldName, newName){
+  let toks;
+  try { toks = tokenizeFormula(formula); } catch(_){ return formula; }
+  const target = String(oldName).toLowerCase();
+  const needQuote = /[^A-Za-z0-9_ㄱ-ㆎ가-힣]/.test(newName) || /^\d/.test(newName);
+  const replacement = needQuote ? "'" + String(newName).replace(/'/g, "''") + "'" : newName;
+  let out = "";
+  for (let i = 0; i < toks.length; i++){
+    const tk = toks[i], nx = toks[i + 1];
+    if (nx && nx.text === "!" && (tk.type === "name" || tk.type === "sheetq")){
+      const nm = tk.type === "sheetq" ? tk.text.slice(1, -1).replace(/''/g, "'") : tk.text;
+      if (nm.toLowerCase() === target){ out += replacement; continue; }
+    }
+    out += tk.text;
+  }
+  return out;
+}
+
+// 자동 채우기 텍스트 패턴: 요일·월·계절 순환 + "1반"/"학생1" 같은 접두어·숫자·접미어 증가.
+// 패턴이 아니면 null (호출부가 원본 순환 복사로 처리).
+const SPREADSHEET_FILL_CYCLES = [
+  ["월", "화", "수", "목", "금", "토", "일"],
+  ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"],
+  ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"],
+  ["봄", "여름", "가을", "겨울"],
+  ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+];
+function spreadsheetTextSeries(vals){
+  const strs = vals.map(v => String(v == null ? "" : v).trim());
+  if (!strs.length || strs.some(s => s === "")) return null;
+  // 1) 순환 목록: 모든 값이 같은 목록 항목이고 간격이 일정하면 이어서 순환(거꾸로 드래그도 음수 간격으로 계속)
+  for (const cycle of SPREADSHEET_FILL_CYCLES){
+    const idxs = strs.map(s => cycle.indexOf(s));
+    if (idxs.some(i => i < 0)) continue;
+    const L = cycle.length;
+    let step = 1;
+    if (idxs.length >= 2){
+      step = idxs[1] - idxs[0];
+      const norm = ((step % L) + L) % L;
+      if (norm === 0) return null;                        // 같은 값 반복 → 순환 복사에 맡김
+      for (let k = 1; k < idxs.length; k++){
+        if ((((idxs[k] - idxs[k - 1]) % L) + L) % L !== norm) return null;
+      }
+    }
+    const last = idxs[idxs.length - 1];
+    return (i) => cycle[(((last + step * (i + 1)) % L) + L) % L];
+  }
+  // 2) 접두어+숫자+접미어: "1반"→"2반", "학생1"→"학생2" ("01" 처럼 0채움도 유지)
+  const parts = strs.map(s => /^(\D*?)(\d+)(\D*)$/.exec(s));
+  if (parts.every(Boolean)){
+    const pre = parts[0][1], suf = parts[0][3];
+    if (!parts.every(p => p[1] === pre && p[3] === suf)) return null;
+    const nums = parts.map(p => Number(p[2]));
+    let step = 1;
+    if (nums.length >= 2){
+      step = nums[nums.length - 1] - nums[nums.length - 2];
+      for (let k = 1; k < nums.length; k++){ if (nums[k] - nums[k - 1] !== step) return null; }
+      if (step === 0) return null;
+    }
+    const lastDigits = parts[parts.length - 1][2];
+    const padWidth = (lastDigits.length > 1 && lastDigits[0] === "0") ? lastDigits.length : 0;
+    const base = nums[nums.length - 1];
+    return (i) => {
+      const n = base + step * (i + 1);
+      if (n < 0) return pre + n + suf;
+      let t = String(n);
+      while (t.length < padWidth) t = "0" + t;
+      return pre + t + suf;
+    };
+  }
+  return null;
 }
 
 // 선택 데이터로 간단 차트(막대·선·원)를 SVG 문자열로 생성. 오프라인·무의존.
@@ -1560,7 +1700,8 @@ async function renderXlsx(file, host, doc){
   });
   // 내보내기 버튼은 별도 래퍼로 묶어, 편집 모드에서만 이 래퍼를 숨긴다(모드 토글은 항상 보이게).
   const expBtns = document.createElement("div"); expBtns.className = "xlsx-export-btns";
-  expBtns.append(expLabel, csvBtn, sheetXlsxBtn);
+  const printBtn = mkExp("인쇄·PDF", "현재 시트를 프린터로 인쇄하거나 PDF로 저장", () => printCurrentSheet());
+  expBtns.append(expLabel, csvBtn, sheetXlsxBtn, printBtn);
   if (wb.SheetNames.length > 1){
     expBtns.append(mkExp("전체 XLSX", "모든 시트를 한 XLSX 파일로 저장", () => {
       let out;
@@ -1722,7 +1863,8 @@ async function renderXlsx(file, host, doc){
     }
     const w = await ensureExWb();
     if (!w) return null;
-    const ws = w.getWorksheet(name) || w.worksheets[0];
+    // 이름이 바뀐 시트는 원본 파일 속 이름으로 찾는다(모델을 만들기 전에 이름만 바꾼 경우)
+    const ws = w.getWorksheet(sheetOrigNames.get(name) || name) || w.getWorksheet(name) || w.worksheets[0];
     exMerges[name] = (ws && ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges.slice() : [];
     editedCells[name] = new Map();
     styledCells[name] = new Map();
@@ -2482,11 +2624,43 @@ async function renderXlsx(file, host, doc){
     return true;
   };
 
-  // Ctrl+Z / Ctrl+Y(또는 Ctrl+Shift+Z), Del/Backspace: 편집 모드에서 시트에 포커스가 있을 때
+  // 선택 영역을 탭 구분 텍스트로(잘라내기용). 선택이 없으면 null.
+  const selectionTsv = () => {
+    const marked = [...sheet.querySelectorAll('td.sheet-selected[data-mrow]')];
+    if (!marked.length) return null;
+    const byRow = new Map();
+    let c1 = Infinity, c2 = -Infinity;
+    marked.forEach(td => {
+      const r = Number(td.dataset.mrow), c = Number(td.dataset.mcol);
+      if (!byRow.has(r)) byRow.set(r, new Map());
+      byRow.get(r).set(c, td.textContent || "");
+      if (c < c1) c1 = c; if (c > c2) c2 = c;
+    });
+    return [...byRow.keys()].sort((a, b) => a - b).map(r => {
+      const m = byRow.get(r), line = [];
+      for (let c = c1; c <= c2; c++) line.push(m.has(c) ? m.get(c) : "");
+      return line.join("\t");
+    }).join("\n");
+  };
+  // Ctrl+X: 선택 영역을 클립보드로 복사한 뒤 내용 삭제(서식 유지 — 엑셀 잘라내기와 동일한 체감)
+  const cutSelection = async () => {
+    const text = selectionTsv();
+    if (text == null){ toast("잘라낼 셀을 먼저 선택하세요.", 1600); return; }
+    await copySpreadsheetText(text);
+    clearSelectionContents();
+    toast("선택 영역을 잘라냈어요. 붙여넣기(Ctrl+V)로 옮기세요.", 1800);
+  };
+
+  // Enter/F2 편집 시작 · Del 내용 삭제 · Ctrl+Z/Y 실행취소 · Ctrl+X 잘라내기 · Ctrl+S 저장
   sheet.addEventListener("keydown", (e) => {
     if (!editMode) return;
     const t = e.target;
     if (t && t.closest && t.closest('[contenteditable="true"]')) return;   // 셀 편집 중엔 네이티브 동작
+    if ((e.key === "Enter" || e.key === "F2") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){
+      const td = sheet.querySelector('td.sheet-anchor[data-mrow]') || sheet.querySelector('td.sheet-selected[data-mrow]');
+      if (td){ e.preventDefault(); e.stopPropagation(); startCellEdit(td, currentSheet); }
+      return;
+    }
     if ((e.key === "Delete" || e.key === "Backspace") && !e.ctrlKey && !e.metaKey && !e.altKey){
       if (sheet.querySelector('td.sheet-selected[data-mrow]')){   // 선택이 있으면 브라우저 뒤로가기 등 기본동작 차단
         e.preventDefault(); e.stopPropagation();
@@ -2498,6 +2672,8 @@ async function renderXlsx(file, host, doc){
     const k = String(e.key).toLowerCase();
     if (k === "z" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); doUndo(); }
     else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
+    else if (k === "x" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); cutSelection(); }
+    else if (k === "s" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); quickSave(); }
   });
 
   let editState = { filter: "", headerFrozen: true, sortCol: -1, sortDir: 1 };
@@ -2703,11 +2879,18 @@ async function renderXlsx(file, host, doc){
       for (let c = src.c1; c <= src.c2; c++){
         const srcCells = []; for (let r = src.r1; r <= src.r2; r++) srcCells.push(model[r][c]);
         const H = srcCells.length;
+        const textGen = srcCells.every(s => !s.f && typeof s.v === "string")
+          ? spreadsheetTextSeries(down ? srcCells.map(s => s.v) : srcCells.map(s => s.v).slice().reverse())
+          : null;
         if (srcCells.every(s => !s.f && typeof s.v === "number")){         // 순수 숫자 → 등차 연장
           const gen = fillSeries(down ? srcCells.map(s => s.v) : srcCells.map(s => s.v).slice().reverse());
           let i = 0;
           if (down) for (let r = src.r2 + 1; r <= t.r2; r++) setCell(r, c, gen(i++), null);
           else for (let r = src.r1 - 1; r >= t.r1; r--) setCell(r, c, gen(i++), null);
+        } else if (textGen){                                                // 요일·월·"1반" 등 텍스트 패턴 연장
+          let i = 0;
+          if (down) for (let r = src.r2 + 1; r <= t.r2; r++) setCell(r, c, textGen(i++), null);
+          else for (let r = src.r1 - 1; r >= t.r1; r--) setCell(r, c, textGen(i++), null);
         } else {                                                            // 그 외 → 패턴 순환(수식은 참조 조정)
           let i = 0;
           const put = (r) => {
@@ -2726,11 +2909,18 @@ async function renderXlsx(file, host, doc){
       for (let r = src.r1; r <= src.r2; r++){
         const srcCells = []; for (let c = src.c1; c <= src.c2; c++) srcCells.push(model[r][c]);
         const W = srcCells.length;
+        const textGen = srcCells.every(s => !s.f && typeof s.v === "string")
+          ? spreadsheetTextSeries(right ? srcCells.map(s => s.v) : srcCells.map(s => s.v).slice().reverse())
+          : null;
         if (srcCells.every(s => !s.f && typeof s.v === "number")){
           const gen = fillSeries(right ? srcCells.map(s => s.v) : srcCells.map(s => s.v).slice().reverse());
           let i = 0;
           if (right) for (let c = src.c2 + 1; c <= t.c2; c++) setCell(r, c, gen(i++), null);
           else for (let c = src.c1 - 1; c >= t.c1; c--) setCell(r, c, gen(i++), null);
+        } else if (textGen){
+          let i = 0;
+          if (right) for (let c = src.c2 + 1; c <= t.c2; c++) setCell(r, c, textGen(i++), null);
+          else for (let c = src.c1 - 1; c >= t.c1; c--) setCell(r, c, textGen(i++), null);
         } else {
           let i = 0;
           const put = (c) => {
@@ -2847,6 +3037,24 @@ async function renderXlsx(file, host, doc){
     return true;
   };
 
+  // 편집 확정 후 화면(표시) 순서 기준으로 이웃 셀로 선택 이동 — 엑셀의 Enter(아래)/Tab(오른쪽) 흐름.
+  // 필터·정렬로 모델 행 순서와 다를 수 있어 DOM 이웃을 따라간다. 가장자리는 제자리 유지.
+  const moveEditSelection = (fromTd, dr, dc) => {
+    if (!fromTd || !fromTd.isConnected) return;
+    let target = null;
+    if (dr){
+      let tr = dr > 0 ? fromTd.parentElement.nextElementSibling : fromTd.parentElement.previousElementSibling;
+      while (tr && tr.classList.contains("xlsx-virtual-spacer")) tr = dr > 0 ? tr.nextElementSibling : tr.previousElementSibling;
+      if (tr && tr.cells) target = tr.cells[fromTd.cellIndex];
+    } else if (dc){
+      target = dc > 0 ? fromTd.nextElementSibling : fromTd.previousElementSibling;
+    }
+    if (!target || !target.hasAttribute || !target.hasAttribute("data-mrow")) target = fromTd;
+    try { sheet.focus({ preventScroll: true }); } catch(_){ sheet.focus(); }
+    if (typeof sheet._selectSpreadsheetElement === "function") sheet._selectSpreadsheetElement(target);
+    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+
   const startCellEdit = (td, name) => {
     const model = exModels[name]; if (!model) return;
     const r = Number(td.dataset.mrow), c = Number(td.dataset.mcol);
@@ -2867,7 +3075,8 @@ async function renderXlsx(file, host, doc){
     };
     const onBlur = () => finish(true);
     const onKey = (e) => {
-      if (e.key === "Enter"){ e.preventDefault(); td.blur(); }
+      if (e.key === "Enter" && !e.altKey){ e.preventDefault(); finish(true); moveEditSelection(td, e.shiftKey ? -1 : 1, 0); }
+      else if (e.key === "Tab"){ e.preventDefault(); finish(true); moveEditSelection(td, 0, e.shiftKey ? -1 : 1); }
       else if (e.key === "Escape"){ e.preventDefault(); finish(false); }
       e.stopPropagation();
     };
@@ -2999,7 +3208,8 @@ async function renderXlsx(file, host, doc){
     };
     const w = new ExcelJS.Workbook();
     if (csvFastAoa){
-      for (const name of Object.keys(exModels)){
+      for (const name of wb.SheetNames){                 // 탭 순서(드래그로 바꾼 순서)대로 기록
+        if (!exModels[name]) continue;
         const ws = w.addWorksheet(name);
         writeStructuredSpreadsheetModel(ws, exModels[name], exMerges[name] || []);
         applyViewSizes(ws, name);
@@ -3007,8 +3217,26 @@ async function renderXlsx(file, host, doc){
       return await w.xlsx.writeBuffer();
     }
     await w.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    // 시트 구조 변경 반영: 삭제 → 이름 변경(임시 이름 2단계로 맞바꿈 충돌 방지) → 새 시트는 아래 루프에서 추가
+    removedOrigSheets.forEach(orig => {
+      const ws = w.getWorksheet(orig);
+      if (ws){ try { w.removeWorksheet(ws.id); } catch(e){ console.warn("시트 삭제 실패:", orig, e); } }
+    });
+    const renamePending = [];
+    sheetOrigNames.forEach((orig, current) => {
+      const ws = w.getWorksheet(orig);
+      if (ws && ws.name !== current){
+        renamePending.push([ws, current]);
+        try { ws.name = "__mn_rename_" + renamePending.length; } catch(_){}
+      }
+    });
+    renamePending.forEach(([ws, current]) => { try { ws.name = current; } catch(_){} });
     for (const name of Object.keys(exModels)){
-      const ws = w.getWorksheet(name); if (!ws) continue;
+      let ws = w.getWorksheet(name);
+      if (!ws){
+        if (!addedSheets.has(name)) continue;
+        ws = w.addWorksheet(name);                      // 새로 만든 시트는 원본에 없음 → 추가 후 전체 기록
+      }
       const model = exModels[name];
       applyViewSizes(ws, name);
       if (structChanged.has(name)){
@@ -3032,7 +3260,84 @@ async function renderXlsx(file, host, doc){
         }
       }
     }
+    // 탭에서 드래그로 바꾼 시트 순서를 파일에 반영(ExcelJS 는 orderNo 오름차순으로 기록)
+    wb.SheetNames.forEach((name, i) => {
+      const ws = w.getWorksheet(name);
+      if (ws) ws.orderNo = i + 1;
+    });
     return await w.xlsx.writeBuffer();
+  };
+
+  // 원본 경로에 덮어쓰기(exe 로컬 서버가 있을 때). 성공 시 저장된 경로, 실패·미지원이면 null.
+  const saveBytesInPlace = async (out) => {
+    try {
+      if (typeof saveFileBackendAvailable !== "function" || !(await saveFileBackendAvailable())) return null;
+      const rel = String((doc && (doc.relPath || doc.workspacePath || doc.name)) || file.name)
+        .replace(/\\/g, "/").replace(/^\/+/, "");
+      const res = await fetch("/save-file", {
+        method: "POST",
+        headers: { "X-Save-Path": encodeURIComponent(rel) },
+        body: new Blob([out], { type: "application/octet-stream" })
+      });
+      if (!res.ok) return null;
+      const savedPath = (await res.text()).trim() || rel;
+      try { window.__mnLastSaveRel = rel; } catch(_){}   // 헤더 '저장 폴더'가 직전 저장 파일 폴더를 열 수 있게 기록
+      return savedPath;
+    } catch(e){ console.error(e); return null; }
+  };
+  // Ctrl+S 빠른 저장: 제자리 저장이 되면 원본에 덮어쓰고, 아니면 서식 유지 XLSX 다운로드.
+  let quickSaving = false;
+  const quickSave = async () => {
+    if (quickSaving) return;
+    quickSaving = true;
+    try {
+      const out = await exportExBytes();
+      if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
+      const savedPath = await saveBytesInPlace(out);
+      if (savedPath){ toast("저장했어요: " + savedPath, 2400, { type: "success" }); return; }
+      downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
+    } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
+    finally { quickSaving = false; }
+  };
+
+  // ----- 현재 시트 인쇄 / PDF 저장: 숨은 iframe에 표만 담아 인쇄(앱 UI 제외, 셀 서식 유지) -----
+  const printCurrentSheet = () => {
+    let tableEl = null;
+    if (exModels[currentSheet]){
+      maybeRecalc(currentSheet);
+      tableEl = tableFromModel(exModels[currentSheet], false);   // 병합·인라인 서식 포함 읽기 전용 표
+    } else if (wb.Sheets[currentSheet]){
+      const tmp = document.createElement("div");
+      tmp.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[currentSheet], { editable: false });
+      tableEl = tmp.querySelector("table");
+    }
+    if (!tableEl){ toast("인쇄할 내용이 없어요.", 1800); return; }
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(iframe);
+    const esc = (s) => String(s).replace(/[<>&]/g, ch => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;" }[ch]));
+    const idoc = iframe.contentDocument;
+    idoc.open();
+    idoc.write("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + esc(base + " - " + currentSheet) + "</title><style>"
+      + "body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;color:#111;margin:0}"
+      + "h1{font-size:13pt;margin:0 0 5mm}"
+      + "table{border-collapse:collapse;font-size:10pt}"
+      + "td,th{border:1px solid #999;padding:3px 6px;vertical-align:middle;word-break:break-word}"
+      + "@page{margin:12mm}"
+      + "</style></head><body></body></html>");
+    idoc.close();
+    const h = idoc.createElement("h1");
+    h.textContent = base + " · " + currentSheet;
+    idoc.body.appendChild(h);
+    idoc.body.appendChild(idoc.importNode(tableEl, true));
+    const cleanup = () => setTimeout(() => { if (iframe.isConnected) iframe.remove(); }, 400);
+    try { iframe.contentWindow.addEventListener("afterprint", cleanup); } catch(_){}
+    setTimeout(() => {
+      try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+      catch(e){ console.error(e); toast("인쇄 창을 열지 못했어요.", 2200); iframe.remove(); }
+    }, 50);
+    setTimeout(() => { if (iframe.isConnected) iframe.remove(); }, 120000);   // 인쇄 다이얼로그가 오래 열려도 결국 정리
   };
 
   let editToolMenus = [];
@@ -3067,12 +3372,12 @@ async function renderXlsx(file, host, doc){
     if (editContextOutside){ document.removeEventListener("pointerdown", editContextOutside, true); editContextOutside = null; }
     if (editContextKeydown){ document.removeEventListener("keydown", editContextKeydown, true); editContextKeydown = null; }
   };
-  const openEditContextMenu = (x, y) => {
+  const openEditContextMenu = (x, y, actions = editContextActions) => {
     closeEditContextMenu();
     const menu = document.createElement("div");
     menu.className = "xlsx-context-menu";
     menu.setAttribute("role", "menu");
-    editContextActions.forEach(item => {
+    actions.forEach(item => {
       if (item.separator){
         const sep = document.createElement("div"); sep.className = "xlsx-context-sep"; menu.appendChild(sep); return;
       }
@@ -3117,6 +3422,23 @@ async function renderXlsx(file, host, doc){
   sheet.addEventListener("pointerdown", () => {
     closeEditToolMenus();
     closeEditContextMenu();
+  });
+  // 시트 탭 우클릭 → 시트 관리 메뉴(편집 모드). 읽기 전용에서는 안내만.
+  tabs.addEventListener("contextmenu", (event) => {
+    const tab = event.target && event.target.closest ? event.target.closest(".xlsx-tab") : null;
+    if (!tab || tab.classList.contains("xlsx-tab-add")) return;
+    event.preventDefault();
+    if (!editMode){ toast("시트 추가·삭제는 '표 편집·정렬' 모드에서 할 수 있어요.", 2200); return; }
+    const name = tab.textContent;
+    closeEditToolMenus();
+    if (name !== currentSheet){ currentSheet = name; rerender(); }   // 우클릭한 시트를 먼저 선택(엑셀과 동일)
+    openEditContextMenu(event.clientX, event.clientY, [
+      { label: "＋ 새 시트", action: () => addNewSheet() },
+      { label: "⧉ 시트 복제", action: () => addNewSheet(name) },
+      { label: "이름 바꾸기", action: () => renameSheetPrompt(name) },
+      { separator: true },
+      { label: "시트 삭제", action: () => deleteCurrentSheet(), disabled: () => wb.SheetNames.length <= 1 }
+    ]);
   });
 
   // ===== 편집 도구막대: 자주 쓰는 기능은 2줄에 유지하고, 세부 기능은 드롭다운·우클릭으로 제공 =====
@@ -3377,7 +3699,15 @@ async function renderXlsx(file, host, doc){
     };
     const historyGroup = makeGroup("", "xlsx-editgroup-history", undoBtn, redoBtn);
     const dataGroup = makeGroup("", "xlsx-editgroup-data", filterInput, sortSel, ascBtn, descBtn);
-    const structureMenu = makeMenu("행·열", "xlsx-tool-menu-structure", addRowBtn, addColBtn, delRowBtn, delColBtn, mergeBtn, unmergeBtn);
+    const addSheetBtn = document.createElement("button"); addSheetBtn.type = "button"; addSheetBtn.textContent = "＋ 새 시트"; addSheetBtn.title = "빈 시트를 새로 추가";
+    addSheetBtn.onclick = () => addNewSheet();
+    const dupSheetBtn = document.createElement("button"); dupSheetBtn.type = "button"; dupSheetBtn.textContent = "⧉ 시트 복제"; dupSheetBtn.title = "현재 시트를 값·서식·병합까지 복제";
+    dupSheetBtn.onclick = () => addNewSheet(currentSheet);
+    const renSheetBtn = document.createElement("button"); renSheetBtn.type = "button"; renSheetBtn.textContent = "시트 이름 바꾸기"; renSheetBtn.title = "현재 시트 이름 바꾸기(시트 탭 더블클릭도 가능)";
+    renSheetBtn.onclick = () => renameSheetPrompt(currentSheet);
+    const delSheetBtn = document.createElement("button"); delSheetBtn.type = "button"; delSheetBtn.textContent = "시트 삭제"; delSheetBtn.title = "현재 시트를 삭제(되돌리기 불가)";
+    delSheetBtn.onclick = () => deleteCurrentSheet();
+    const structureMenu = makeMenu("행·열·시트", "xlsx-tool-menu-structure", addRowBtn, addColBtn, delRowBtn, delColBtn, mergeBtn, unmergeBtn, addSheetBtn, dupSheetBtn, renSheetBtn, delSheetBtn);
     const fontGroup = makeGroup("", "xlsx-editgroup-font", fontSel, sizeSel, boldBtn, italicBtn, underlineBtn, fontColorWrap);
     const alignGroup = makeGroup("", "xlsx-editgroup-align", alignLeftBtn, alignCenterBtn, alignRightBtn, vAlignSel, wrapBtn, numSel);
     const formatMenu = makeMenu("채우기·테두리", "xlsx-tool-menu-format", fillWrap, fillBtn, borderWrap, borderStyleSel, borderWhereSel, borderBtn, clearFmtBtn, copyFmtBtn, pasteFmtBtn);
@@ -3388,10 +3718,12 @@ async function renderXlsx(file, host, doc){
     const selImgBtn = document.createElement("button"); selImgBtn.type = "button"; selImgBtn.textContent = "📷 선택→메모"; selImgBtn.title = "선택한 셀 범위를 이미지로 만들어 메모에 저장";
     selImgBtn.onclick = () => saveSelectionToMemo();
     const formulaHint = document.createElement("span"); formulaHint.className = "xlsx-formula-hint";
-    formulaHint.textContent = "🧮 =SUM(A1:A3), =Sheet2!A1 · 위 입력줄에서도 편집 · 핸들 드래그로 수식 채우기";
-    formulaHint.title = "함수: SUM·AVERAGE·IF·COUNTIF·SUMIF·VLOOKUP·HLOOKUP·INDEX·MATCH·DATE·YEAR·TEXT·SUBSTITUTE 등 · 시트 간 참조·자동 재계산·참조 자동 조정 · 선택 후 '차트'로 시각화";
+    formulaHint.textContent = "🧮 =SUM(A1:A3), =RANK(B2,B2:B31), =Sheet2!A1 · Enter=편집·아래 이동, Tab=오른쪽, Ctrl+S=저장";
+    formulaHint.title = "함수: SUM·AVERAGE·IF·IFS·COUNTIF(S)·SUMIF(S)·AVERAGEIF(S)·RANK·MEDIAN·STDEV·LARGE·SMALL·VLOOKUP·XLOOKUP·INDEX·MATCH·CHOOSE·DATE·TEXT 등 · 시트 간 참조·자동 재계산·참조 자동 조정 · 채우기 핸들은 숫자·요일·월·'1반' 패턴 연장";
     const moreMenu = makeMenu("더보기", "xlsx-tool-menu-more", chartBtn, selImgBtn, formulaHint);
-    const saveMenu = makeMenu("저장", "xlsx-tool-menu-save xlsx-editgroup-save", xlsxBtn, csvBtn2);
+    const printBtn2 = document.createElement("button"); printBtn2.type = "button"; printBtn2.textContent = "인쇄·PDF"; printBtn2.title = "현재 시트를 프린터로 인쇄하거나 PDF로 저장";
+    printBtn2.onclick = () => printCurrentSheet();
+    const saveMenu = makeMenu("저장", "xlsx-tool-menu-save xlsx-editgroup-save", xlsxBtn, csvBtn2, printBtn2);
     const mainRow = document.createElement("div"); mainRow.className = "xlsx-editbar-row xlsx-editbar-main";
     mainRow.append(historyGroup, dataGroup, structureMenu.details, frozen, findMenu.details, moreMenu.details, saveMenu.details);
     const fmtRow = document.createElement("div"); fmtRow.className = "xlsx-editbar-row xlsx-editbar-fmt";
@@ -3423,21 +3755,13 @@ async function renderXlsx(file, host, doc){
     saveFileBackendAvailable().then((ok) => {
       if (!ok || !editMode || editBar.querySelector(".xlsx-save-inplace")) return;
       const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "xlsx-save-inplace"; saveBtn.textContent = "제자리 저장";
-      saveBtn.title = "편집 내용을 원본 파일에 저장(서식 유지)";
+      saveBtn.title = "편집 내용을 원본 파일에 저장(서식 유지 · Ctrl+S)";
       saveBtn.onclick = async () => {
         saveBtn.disabled = true;
         try {
           const out = await exportExBytes();
           if (!out){ toast("저장 준비 실패(다운로드를 이용하세요).", 2600); return; }
-          const rel = String((doc && (doc.relPath || doc.workspacePath || doc.name)) || file.name)
-            .replace(/\\/g, "/").replace(/^\/+/, "");
-          const res = await fetch("/save-file", {
-            method: "POST",
-            headers: { "X-Save-Path": encodeURIComponent(rel) },
-            body: new Blob([out], { type: "application/octet-stream" })
-          });
-          const savedPath = res.ok ? ((await res.text()).trim() || rel) : null;
-          if (savedPath){ try { window.__mnLastSaveRel = rel; } catch(_){} }   // 헤더 '저장 폴더'가 직전 저장 파일 폴더를 열 수 있게 기록
+          const savedPath = await saveBytesInPlace(out);
           toast(savedPath ? ("저장했어요: " + savedPath) : "제자리 저장 실패(다운로드를 이용하세요).", savedPath ? 2600 : 2800);
         } catch(e){ console.error(e); toast("저장하지 못했어요(다운로드를 이용하세요).", 2600); }
         finally { saveBtn.disabled = false; }
@@ -3446,7 +3770,181 @@ async function renderXlsx(file, host, doc){
     });
   };
 
+  // ===== 시트 관리(편집 모드): 추가·복제·이름 바꾸기·삭제 =====
+  const addedSheets = new Set();          // 원본 파일에 없는 새 시트(저장 시 addWorksheet)
+  const removedOrigSheets = new Set();    // 삭제된 원본 시트의 '원본 이름'
+  const sheetOrigNames = new Map();       // 이름 바뀐 원본 시트: 현재 이름 -> 원본 이름
+  const validSheetName = (name) => {
+    const t = String(name || "").trim();
+    return (t && t.length <= 31 && !/[\\\/\?\*\[\]:]/.test(t)) ? t : null;
+  };
+  const uniqueSheetName = (base) => {
+    const names = new Set(wb.SheetNames.map(n => String(n).toLowerCase()));
+    let t = String(base).slice(0, 28) || "Sheet", i = 2;
+    while (names.has(t.toLowerCase())) t = String(base).slice(0, 28) + i++;
+    return t.slice(0, 31);
+  };
+  // 시트 편집 모델·병합·변경추적을 새 이름으로 옮기는 공용 도우미
+  const renameSheetState = (oldName, name) => {
+    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, sheet.__sheetSizes || {}].forEach(obj => {
+      if (obj && obj[oldName] !== undefined){ obj[name] = obj[oldName]; delete obj[oldName]; }
+    });
+    if (structChanged.delete(oldName)) structChanged.add(name);
+    if (sheetsWithFormula.delete(oldName)) sheetsWithFormula.add(name);
+  };
+  const addNewSheet = async (copyFrom = null) => {
+    if (copyFrom){
+      await exModelFor(copyFrom);
+      if (!exModels[copyFrom]){ toast("시트를 복제할 수 없어요.", 2200); return; }
+    }
+    const name = uniqueSheetName(copyFrom ? (copyFrom + " 사본") : ("Sheet" + (wb.SheetNames.length + 1)));
+    exModels[name] = copyFrom
+      ? exModels[copyFrom].map(row => row.map(s => cloneSpreadsheetValue(s)))
+      : Array.from({ length: 20 }, () => Array.from({ length: 8 }, blankCell));
+    exMerges[name] = copyFrom ? (exMerges[copyFrom] || []).slice() : [];
+    editedCells[name] = new Map(); styledCells[name] = new Map();
+    structChanged.add(name); addedSheets.add(name);
+    if (copyFrom && sheetsWithFormula.has(copyFrom)) sheetsWithFormula.add(name);
+    wb.SheetNames.push(name);
+    wb.Sheets[name] = { "!ref": "A1" };            // 보기 전용 폴백 스텁(실데이터는 exModels)
+    anyDirty = true;
+    currentSheet = name;
+    rerender();
+    toast(copyFrom ? ("시트를 복제했어요: " + name) : ("새 시트를 추가했어요: " + name), 1800);
+  };
+  const renameSheetPrompt = (oldName) => {
+    const input = prompt("시트 이름 바꾸기", oldName);
+    if (input == null) return;
+    const name = validSheetName(input);
+    if (!name){ toast("시트 이름은 1~31자, \\ / ? * [ ] : 문자는 쓸 수 없어요.", 2600); return; }
+    if (name === oldName) return;
+    if (wb.SheetNames.some(n => n !== oldName && String(n).toLowerCase() === name.toLowerCase())){
+      toast("같은 이름의 시트가 이미 있어요.", 2200); return;
+    }
+    wb.SheetNames[wb.SheetNames.indexOf(oldName)] = name;
+    if (wb.Sheets[oldName] !== undefined){ wb.Sheets[name] = wb.Sheets[oldName]; delete wb.Sheets[oldName]; }
+    renameSheetState(oldName, name);
+    if (addedSheets.delete(oldName)) addedSheets.add(name);
+    else {
+      const orig = sheetOrigNames.get(oldName) || oldName;
+      sheetOrigNames.delete(oldName);
+      sheetOrigNames.set(name, orig);
+    }
+    // 다른 시트 수식의 'OldName!A1' 참조를 새 이름으로 따라가게 재작성
+    Object.keys(exModels).forEach(nm => {
+      const model = exModels[nm];
+      const copiedRows = new Set();
+      for (let r = 0; r < model.length; r++){
+        if (!model[r]) continue;
+        for (let c = 0; c < model[r].length; c++){
+          const s = model[r][c];
+          if (!s || !s.f) continue;
+          const nf = remapFormulaSheetName(s.f, oldName, name);
+          if (nf === s.f) continue;
+          if (csvFastAoa){
+            if (!copiedRows.has(r)){ model[r] = model[r].slice(); copiedRows.add(r); }
+            model[r][c] = { ...model[r][c], f: nf };
+          } else {
+            s.f = nf;
+          }
+          structChanged.add(nm);
+        }
+      }
+    });
+    if (currentSheet === oldName) currentSheet = name;
+    anyDirty = true;
+    rerender();
+    toast("시트 이름을 바꿨어요: " + name, 1600);
+  };
+  const deleteCurrentSheet = () => {
+    const name = currentSheet;
+    if (wb.SheetNames.length <= 1){ toast("마지막 시트는 삭제할 수 없어요.", 2200); return; }
+    if (!confirm("'" + name + "' 시트를 삭제할까요? 시트 삭제는 되돌리기(Ctrl+Z)가 되지 않아요.")) return;
+    wb.SheetNames.splice(wb.SheetNames.indexOf(name), 1);
+    delete wb.Sheets[name];
+    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks].forEach(obj => { delete obj[name]; });
+    structChanged.delete(name); sheetsWithFormula.delete(name);
+    if (!addedSheets.delete(name)) removedOrigSheets.add(sheetOrigNames.get(name) || name);
+    sheetOrigNames.delete(name);
+    anyDirty = true;
+    currentSheet = wb.SheetNames[0];
+    recalcAndRefresh();                              // 삭제한 시트를 참조하던 수식 → #REF!
+    rerender();
+    toast("시트를 삭제했어요.", 1600);
+  };
+  // 편집 모드: 탭을 좌우로 끌어 시트 순서 바꾸기(엑셀과 동일). 6px 이상 움직여야 드래그로 인식해
+  // 클릭(시트 전환)·더블클릭(이름 바꾸기)과 충돌하지 않는다. 저장 시 파일에도 순서가 반영된다.
+  const wireTabDrag = (b, name) => {
+    b.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.isPrimary === false) return;
+      const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
+      let dragging = false;
+      const onMove = (ev) => {
+        if (ev.pointerId !== pid) return;
+        if (!dragging){
+          if (Math.abs(ev.clientX - startX) < 6 && Math.abs(ev.clientY - startY) < 14) return;
+          dragging = true;
+          b.classList.add("xlsx-tab-dragging");
+          try { b.setPointerCapture(pid); } catch(_){}
+        }
+        // 다른 탭들의 가운데를 기준으로 현재 위치를 정하고, 맨 뒤는 ＋ 탭 앞까지만
+        const siblings = [...tabs.querySelectorAll(".xlsx-tab:not(.xlsx-tab-add)")].filter(el => el !== b);
+        let before = null;
+        for (const el of siblings){
+          const r = el.getBoundingClientRect();
+          if (ev.clientX < r.left + r.width / 2){ before = el; break; }
+        }
+        tabs.insertBefore(b, before || tabs.querySelector(".xlsx-tab-add"));
+      };
+      const onUp = (ev) => {
+        if (ev.pointerId !== pid) return;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (!dragging) return;
+        b.classList.remove("xlsx-tab-dragging");
+        try { b.releasePointerCapture(pid); } catch(_){}
+        const order = [...tabs.querySelectorAll(".xlsx-tab:not(.xlsx-tab-add)")].map(el => el.textContent);
+        const changed = order.join(" ") !== wb.SheetNames.join(" ");
+        if (changed){
+          wb.SheetNames.length = 0;
+          wb.SheetNames.push(...order);
+          anyDirty = true;
+        }
+        currentSheet = name;              // 엑셀처럼 끌던 시트를 선택 상태로
+        rerender();
+        if (changed) toast("시트 순서를 바꿨어요. 저장하면 파일에도 반영돼요.", 1800);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+  };
+  const rebuildTabs = () => {
+    tabs.replaceChildren();
+    wb.SheetNames.forEach(name => {
+      const b = document.createElement("button");
+      b.className = "xlsx-tab"; b.textContent = name;
+      b.title = editMode ? (name + " (더블클릭: 이름 바꾸기 · 우클릭: 시트 메뉴 · 드래그: 순서 바꾸기)") : name;
+      if (name === currentSheet) b.classList.add("active");
+      b.onclick = () => { if (name !== currentSheet){ currentSheet = name; rerender(); } };
+      if (editMode){
+        b.ondblclick = () => renameSheetPrompt(name);
+        wireTabDrag(b, name);
+      }
+      tabs.appendChild(b);
+    });
+    if (editMode){
+      const add = document.createElement("button");
+      add.className = "xlsx-tab xlsx-tab-add"; add.textContent = "＋"; add.title = "새 시트 추가";
+      add.onclick = () => addNewSheet();
+      tabs.appendChild(add);
+    }
+    tabs.style.display = (wb.SheetNames.length === 1 && !editMode) ? "none" : "";
+  };
+
   const rerender = async () => {
+    rebuildTabs();
     expBtns.hidden = editMode;   // 읽기 전용에서는 항상 표시 — 편집분·CSV 변환본은 exportSheetOf 가 모델 값으로 내보냄
     editBar.hidden = !editMode;
     if (editMode){
@@ -3467,20 +3965,7 @@ async function renderXlsx(file, host, doc){
     }
   };
 
-  const show = (name, btn) => {
-    currentSheet = name;
-    [...tabs.children].forEach(c => c.classList.remove("active"));
-    btn.classList.add("active");
-    rerender();
-  };
-  wb.SheetNames.forEach((name, i) => {
-    const b = document.createElement("button");
-    b.className = "xlsx-tab"; b.textContent = name;
-    b.onclick = () => show(name, b);
-    tabs.appendChild(b);
-    if (i === 0) show(name, b);
-  });
-  if (wb.SheetNames.length === 1) tabs.style.display = "none";
+  rerender();
 }
 
 if (typeof module === "object" && module.exports){
@@ -3497,6 +3982,8 @@ if (typeof module === "object" && module.exports){
     evaluateFormula,
     isFormulaError,
     remapFormulaRefs,
+    remapFormulaSheetName,
+    spreadsheetTextSeries,
     buildSpreadsheetChartSvg,
     cloneSpreadsheetValue,
     spreadsheetVirtualWindow,
