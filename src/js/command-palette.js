@@ -184,6 +184,20 @@
   }
   window.openCommandPalette = open;
 
+  // ── 상시 진입점(헤더 버튼·빈 화면 힌트) 연결 ──
+  // 팔레트는 이미 완성돼 있으나 진입점이 도움말 안 단축키뿐이라 발견성이 낮았다.
+  // 파일 타입과 무관한 헤더 버튼과 드롭존 힌트를 클릭 진입점으로 연결한다.
+  ["commandPaletteOpen", "dzCommandPalette"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("click", (e) => { e.preventDefault(); open(); });
+  });
+  // 헤더 버튼의 kbd 라벨을 실제(커스텀 가능) 단축키와 맞춘다.
+  (function syncKbd(){
+    const kb = $("commandPaletteKbd");
+    if (!kb || typeof window.shortcutValue !== "function" || typeof window.shortcutDisplay !== "function") return;
+    try { const k = window.shortcutDisplay(window.shortcutValue("commandPalette")); if (k) kb.textContent = k; } catch(_){}
+  })();
+
   // ── 열기 단축키(기본 Ctrl+K, 설정 → 단축키에서 변경 가능) ──
   window.addEventListener("keydown", (e) => {
     const matched = typeof window.shortcutMatches === "function"

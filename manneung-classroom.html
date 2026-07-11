@@ -47,6 +47,11 @@
     <button id="btnPrint">인쇄 / PDF로 저장</button>
   </div>
   <div class="header-util">
+  <button id="commandPaletteOpen" class="cmdk-trigger" type="button" data-shortcut-action="commandPalette" data-shortcut-title="기능 검색·실행" data-shortcut-aria="true" title="기능 검색·실행 (Ctrl+K)" aria-label="명령 팔레트 — 기능 검색·실행" aria-haspopup="dialog">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
+    <span>기능 검색</span>
+    <kbd id="commandPaletteKbd">Ctrl K</kbd>
+  </button>
   <button id="studyToggle" type="button" hidden title="참고 문서와 작업 문서를 나란히 보기">분할 작업</button>
   <div class="header-more-wrap" id="headerMoreWrap">
     <button class="header-more-btn" id="headerMore" type="button" title="더보기 — 저장 폴더·이미지 메모" aria-label="더보기" aria-haspopup="menu" aria-expanded="false" aria-controls="headerMoreMenu">
@@ -190,27 +195,16 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
       </button>
       <span class="study-readonly-badge" aria-label="참고 문서 읽기 전용">읽기 전용</span>
-      <button id="btnStudySwap" type="button" class="study-swap-btn" title="참고 화면과 작업 화면의 좌우 위치 바꾸기" aria-label="참고 화면과 작업 화면의 좌우 위치 바꾸기">↔</button>
+      <span class="study-ctl-divider" aria-hidden="true"></span>
       <button id="btnStudyPen" type="button" class="study-pen-btn" title="PDF에 필기 (펜·형광펜·지우개)" aria-label="PDF 필기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
       </button>
     </div>
-    <div class="study-chip study-chip-ref" id="studyChipRef">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V6a2.5 2.5 0 0 1 2.5-2.5H20V17H6.5A2.5 2.5 0 0 0 4 19.5Zm0 0A2.5 2.5 0 0 0 6.5 22H20"></path></svg>
-      <span class="study-chip-role">참고</span>
-      <span class="study-chip-name" id="studyChipRefName"></span>
-      <button id="studyChipLock" type="button" aria-pressed="false" title="참고 문서를 읽기 전용으로 잠그기">
-        <svg class="ic-open" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.6-1.7"></path></svg>
-        <svg class="ic-closed" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
-        <span id="studyChipLockLabel">잠금</span>
-      </button>
-    </div>
-    <div class="study-chip study-chip-work" id="studyChipWork">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
-      <span class="study-chip-role">작업</span>
-      <span class="study-chip-name" id="studyChipWorkName"></span>
-    </div>
-    <button class="study-role-swap" id="studyRoleSwap" type="button" title="참고 문서 ⇄ 작업 문서 역할 바꾸기" aria-label="참고와 작업 역할 바꾸기">
+    <button class="study-ref-lock" id="studyChipLock" type="button" aria-pressed="false" title="참고 문서를 읽기 전용으로 잠그기" aria-label="참고 문서 읽기 전용 잠금">
+      <svg class="ic-open" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.6-1.7"></path></svg>
+      <svg class="ic-closed" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+    </button>
+    <button class="study-role-swap" id="studyRoleSwap" type="button" title="참고·작업 화면 좌우 위치 바꾸기 (분할바 더블클릭과 동일)" aria-label="참고와 작업 화면 좌우 위치 바꾸기">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13m0 0-3-3m3 3-3 3"></path><path d="M20 16H7m0 0 3-3m-3 3 3 3"></path></svg>
     </button>
     <span class="page-ctl view-page-ctl" id="pageCtl" title="페이지 번호 입력 후 Enter로 이동">
@@ -244,6 +238,10 @@
           </span>
         </span>
         <button type="button" id="dzExamples" class="dz-folder">✨ 파이썬 예제 갤러리</button>
+        <button type="button" id="dzCommandPalette" class="dz-cmdk-hint" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
+          <span>뭐든 <kbd>Ctrl</kbd><kbd>K</kbd>로 검색해 실행 — 서명·필기·화이트보드·예제까지</span>
+        </button>
         <div class="dz-note">모든 처리는 이 브라우저 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.<br>
           서명·편집은 PDF에서, 나머지는 미리보기로 · <b>여러 개를 한꺼번에 열 수 있어요</b></div>
         <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>

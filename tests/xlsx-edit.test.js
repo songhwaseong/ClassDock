@@ -324,3 +324,157 @@ test("구조 변경 저장은 현재 병합 범위를 다시 적용한다", asyn
   assert.equal(result.getCell("B1").master.address, "A1");
   assert.equal(result.getCell("A1").value, "제목");
 });
+
+test("수식 엔진: 통계·다중조건·논리 확장 함수(RANK·SUMIFS·IFS·MEDIAN 등)", () => {
+  // A열=반(1,1,2,2), B열=점수(90,70,80,60)
+  const grid = [[1, 90], [1, 70], [2, 80], [2, 60]];
+  const resolver = (c, r) => (grid[r] && grid[r][c] !== undefined ? grid[r][c] : "");
+  const f = (s) => evaluateFormula(s, resolver);
+
+  // 통계
+  assert.equal(f("=MEDIAN(B1:B4)"), 75);                       // (70+80)/2
+  assert.equal(f("=MEDIAN(B1:B3)"), 80);                       // 홀수 개
+  assert.equal(f("=LARGE(B1:B4,2)"), 80);
+  assert.equal(f("=SMALL(B1:B4,1)"), 60);
+  assert.equal(f("=LARGE(B1:B4,9)"), "#NUM!");
+  assert.equal(f("=ROUND(STDEV(B1:B4),4)"), 12.9099);          // 표본표준편차 √(500/3)
+  assert.equal(f("=ROUND(STDEVP(B1:B4),4)"), 11.1803);         // 모표준편차 √125
+  // 석차: 90점은 1등, 60점은 4등, 오름차순이면 60점이 1등
+  assert.equal(f("=RANK(B1,B1:B4)"), 1);
+  assert.equal(f("=RANK(B4,B1:B4)"), 4);
+  assert.equal(f("=RANK(B4,B1:B4,1)"), 1);
+  assert.equal(f("=RANK(999,B1:B4)"), "#N/A");
+  // 다중 조건 집계
+  assert.equal(f("=COUNTIFS(A1:A4,1,B1:B4,\">=70\")"), 2);     // 1반 & 70점 이상
+  assert.equal(f("=SUMIFS(B1:B4,A1:A4,2)"), 140);              // 2반 점수 합
+  assert.equal(f("=SUMIFS(B1:B4,A1:A4,1,B1:B4,\">80\")"), 90); // 1반 & 80점 초과
+  assert.equal(f("=AVERAGEIFS(B1:B4,A1:A4,2)"), 70);
+  assert.equal(f("=AVERAGEIFS(B1:B4,A1:A4,9)"), "#DIV/0!");    // 조건에 맞는 값 없음
+  // 논리·조회
+  assert.equal(f("=IFS(B1<80,\"보통\",B1>=80,\"우수\")"), "우수");
+  assert.equal(f("=IFS(B4>=90,\"A\",B4>=70,\"B\")"), "#N/A");  // 아무 조건도 안 맞음
+  assert.equal(f("=CHOOSE(2,\"가\",\"나\",\"다\")"), "나");
+  assert.equal(f("=CHOOSE(9,\"가\",\"나\")"), "#VALUE!");
+  assert.equal(f("=XLOOKUP(2,A1:A4,B1:B4)"), 80);              // 첫 일치(3행)
+  assert.equal(f("=XLOOKUP(9,A1:A4,B1:B4,\"없음\")"), "없음");
+  assert.equal(f("=XLOOKUP(9,A1:A4,B1:B4)"), "#N/A");
+  // 정보 함수(빈칸·숫자·텍스트·오류)
+  assert.equal(f("=ISBLANK(C1)"), "TRUE");
+  assert.equal(f("=ISNUMBER(B1)"), "TRUE");
+  assert.equal(f("=ISNUMBER(\"x\")"), "FALSE");
+  assert.equal(f("=ISTEXT(\"x\")"), "TRUE");
+  assert.equal(f("=ISERROR(1/0)"), "TRUE");
+  assert.equal(f("=IF(ISERROR(1/0),\"오류\",\"정상\")"), "오류");
+});
+
+test("자동 채우기 텍스트 패턴: 요일·월 순환과 '1반' 증가, 역방향·비패턴 구분", () => {
+  const { spreadsheetTextSeries } = require("../src/js/spreadsheet-viewer.js");
+  // 요일 순환(주말 지나 되돌아옴)
+  const day = spreadsheetTextSeries(["금"]);
+  assert.deepEqual([day(0), day(1), day(2)], ["토", "일", "월"]);
+  // 두 값으로 간격 파악(격일)
+  const skip = spreadsheetTextSeries(["월", "수"]);
+  assert.deepEqual([skip(0), skip(1)], ["금", "일"]);
+  // 역방향(위로 드래그): 호출부가 뒤집어 넘기는 형태 그대로
+  const rev = spreadsheetTextSeries(["수", "화"]);
+  assert.deepEqual([rev(0), rev(1)], ["월", "일"]);
+  // 월 순환: 12월 다음은 1월
+  const month = spreadsheetTextSeries(["11월", "12월"]);
+  assert.deepEqual([month(0), month(1)], ["1월", "2월"]);
+  // 접두어+숫자: 1반→2반, 0채움 유지
+  const ban = spreadsheetTextSeries(["1반"]);
+  assert.deepEqual([ban(0), ban(1)], ["2반", "3반"]);
+  const pad = spreadsheetTextSeries(["학생01", "학생02"]);
+  assert.equal(pad(0), "학생03");
+  // 간격 있는 숫자 패턴
+  const step = spreadsheetTextSeries(["5번", "10번"]);
+  assert.equal(step(0), "15번");
+  // 패턴이 아니면 null(호출부가 순환 복사)
+  assert.equal(spreadsheetTextSeries(["사과", "바나나"]), null);
+  assert.equal(spreadsheetTextSeries(["월", "월"]), null);        // 동일 반복은 복사에 맡김
+  assert.equal(spreadsheetTextSeries(["1반", "3반", "4반"]), null); // 간격 불일치
+  assert.equal(spreadsheetTextSeries(["", "1반"]), null);           // 빈 값 포함
+});
+
+test("시트 이름 변경 시 수식 속 시트 참조를 재작성한다", () => {
+  const { remapFormulaSheetName } = require("../src/js/spreadsheet-viewer.js");
+  assert.equal(remapFormulaSheetName("Sheet2!A1+1", "Sheet2", "성적표"), "성적표!A1+1");
+  assert.equal(remapFormulaSheetName("SUM(Sheet2!A1:B2)", "Sheet2", "성적표"), "SUM(성적표!A1:B2)");
+  // 따옴표 시트 이름 · 공백 있는 새 이름은 따옴표로 감싼다
+  assert.equal(remapFormulaSheetName("'내 시트'!A1", "내 시트", "새시트"), "새시트!A1");
+  assert.equal(remapFormulaSheetName("Sheet2!A1", "Sheet2", "1학기 성적"), "'1학기 성적'!A1");
+  // 다른 시트 참조·함수 이름은 건드리지 않는다
+  assert.equal(remapFormulaSheetName("Sheet3!A1+SUM(A1)", "Sheet2", "성적표"), "Sheet3!A1+SUM(A1)");
+});
+
+test("ExcelJS orderNo 로 시트 순서를 바꿔 저장하면 재로드 순서도 바뀐다(탭 드래그 저장 경로)", async () => {
+  const w = new ExcelJS.Workbook();
+  w.addWorksheet("A"); w.addWorksheet("B"); w.addWorksheet("C");
+  w.getWorksheet("A").getCell("A1").value = "a";
+  // 탭 드래그 결과 [B, C, A] 순서 → orderNo 1,2,3
+  w.getWorksheet("B").orderNo = 1;
+  w.getWorksheet("C").orderNo = 2;
+  w.getWorksheet("A").orderNo = 3;
+  const bytes = await w.xlsx.writeBuffer();
+  const reopened = new ExcelJS.Workbook();
+  await reopened.xlsx.load(bytes);
+  assert.deepEqual(reopened.worksheets.map(ws => ws.name), ["B", "C", "A"]);
+  assert.equal(reopened.getWorksheet("A").getCell("A1").value, "a");   // 데이터 유지
+});
+
+test("수식 자동완성 컨텍스트: 함수 이름 입력·괄호 안 인자·비수식 구분", () => {
+  const { formulaTypingContext } = require("../src/js/spreadsheet-viewer.js");
+  // '=' 뒤 함수 이름 입력 중
+  assert.deepEqual(formulaTypingContext("=SU", 3), { type:"name", partial:"SU", start:1 });
+  assert.deepEqual(formulaTypingContext("=A1+CO", 6), { type:"name", partial:"CO", start:4 });
+  assert.deepEqual(formulaTypingContext("=SUM(A1)+AV", 11), { type:"name", partial:"AV", start:9 });
+  // 괄호 안 → 인자 힌트(가장 안쪽 함수)
+  assert.deepEqual(formulaTypingContext("=SUM(A1", 7), { type:"args", name:"SUM" });
+  assert.deepEqual(formulaTypingContext("=SUM(IF(A1>1,", 13), { type:"args", name:"IF" });
+  // 닫힌 괄호 뒤·수식 아님·완성할 것 없음 → null
+  assert.equal(formulaTypingContext("=SUM(A1)", 8), null);
+  assert.equal(formulaTypingContext("hello", 5), null);
+  assert.equal(formulaTypingContext("=A1+", 4), null);
+  // 셀 참조(SUM 안의 A1)는 함수 이름 후보로 취급하지 않도록 캐럿이 참조 뒤일 때 args 유지
+  assert.deepEqual(formulaTypingContext("=RANK(B2,", 9), { type:"args", name:"RANK" });
+});
+
+test("자동합계(Σ): 선택 모양에 따라 아래·오른쪽·제자리에 수식을 만든다", () => {
+  const { spreadsheetAutoFormulaJobs } = require("../src/js/spreadsheet-viewer.js");
+  const n = (v) => ({ v, f: null });
+  const t = (v) => ({ v, f: null });
+  // A열 숫자 3행 + B열 텍스트
+  const model = [
+    [n(10), t("가")],
+    [n(20), t("나")],
+    [n(30), t("다")]
+  ];
+  // 여러 행 선택 → 숫자 있는 열만 아래 칸에 열 합계
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(model, { s:{ r:0, c:0 }, e:{ r:2, c:1 } }, "SUM"),
+    [{ r:3, c:0, f:"SUM(A1:A3)" }]
+  );
+  // 한 행 여러 열 → 오른쪽 칸에 행 합계
+  const rowModel = [[n(1), n(2), n(3)]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(rowModel, { s:{ r:0, c:0 }, e:{ r:0, c:2 } }, "AVERAGE"),
+    [{ r:0, c:3, f:"AVERAGE(A1:C1)" }]
+  );
+  // 단일 셀 → 위로 이어진 숫자 범위를 그 셀에
+  const below = [[n(1)], [n(2)], [n(3)], [t("")]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(below, { s:{ r:3, c:0 }, e:{ r:3, c:0 } }, "SUM"),
+    [{ r:3, c:0, f:"SUM(A1:A3)" }]
+  );
+  // 단일 셀 · 위에 숫자 없으면 왼쪽으로
+  const leftward = [[n(5), n(6), t("")]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(leftward, { s:{ r:0, c:2 }, e:{ r:0, c:2 } }, "SUM"),
+    [{ r:0, c:2, f:"SUM(A1:B1)" }]
+  );
+  // 숫자가 전혀 없으면 빈 배열
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs([[t("가"), t("나")]], { s:{ r:0, c:0 }, e:{ r:0, c:1 } }, "SUM"),
+    []
+  );
+});

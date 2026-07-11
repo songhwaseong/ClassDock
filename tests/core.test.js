@@ -12,7 +12,7 @@ const {
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput,
   normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
-  orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker
+  orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath
 } = require("../src/js/core.js");
 
 test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", () => {
@@ -77,6 +77,12 @@ test("작업공간 바이너리를 손실 없이 왕복한다", () => {
   assert.deepEqual(decoded.map((row) => row.path), input.map((row) => row.path));
   assert.deepEqual([...decoded[0].bytes], [1, 2, 3]);
   assert.equal(new TextDecoder().decode(decoded[1].bytes), "안녕");
+});
+
+test("대량 이미지 생략 표식은 폴더 경로와 안전하게 왕복한다", () => {
+  const marker = workspaceImageSkipMarkerPath("사진/2026/");
+  assert.equal(workspaceImageSkipFolderPath(marker), "사진/2026");
+  assert.equal(workspaceImageSkipFolderPath("사진/2026/a.jpg"), "");
 });
 
 test("빈 폴더 표시는 작업공간의 숨김 마커로 손실 없이 왕복한다", () => {

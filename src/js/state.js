@@ -10,7 +10,7 @@ const {
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonTraceReport,
-  prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker,
+  prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
 } = PdfSignerCore;
 
@@ -20,6 +20,9 @@ const {
  *   pdf 추가: { pdfBytes, fileName, pages[], elements[], selected, addCount }
  * state = 활성 문서(아래 PDF 함수들이 그대로 활성 문서에 동작), viewer = 활성 문서 컨테이너 */
 const docs = [];
+// sourceKey → doc 인덱스: "이미 열린 파일" 중복 검사를 파일 수천 개 폴더에서도 O(1)로.
+// makeDoc 에서 등록하고 closeDoc 에서 해제한다.
+const docsBySourceKey = new Map();
 const navNodes = [];
 // navNodes 빠른 조회 인덱스(nodeId→node) + 레슨 루트 캐시.
 // 트리(추가/삭제)가 바뀔 때 bumpNavTree() 로 버전을 올리면, 다음 조회 때만 다시 만든다.
@@ -45,7 +48,7 @@ let activeId = 0, docSeq = 0, navSeq = 0;
 let state = null;        // 활성 문서
 let viewer = null;       // 활성 문서 컨테이너(pdf 렌더/측정용)
 let studyPdfId = null;   // 분할 작업의 참고 문서 ID (기존 변수명 호환 유지)
-let studyReferenceLocked = false; // 필요할 때만 참고 문서를 잠근다. 기본값은 기존 학습 화면처럼 편집 가능.
+let studyReferenceLocked = false; // 분할 진입 시 참고 문서를 기본 잠금(읽기 전용)으로 켠다. 열쇠로 풀 수 있음.
 let studyTargetPane = "work"; // 분할 화면에서 마지막에 클릭한 칸("work"|"reference") — 사이드바 파일 클릭이 이 칸의 문서를 바꾼다.
 let lastSig = null;      // 최근 서명(문서 공통, 재사용)
 
@@ -288,7 +291,27 @@ function hideLoading(){
   byId("loading").hidden = true;
 }
 function updateLoading(msg){ if (msg) byId("loadingMsg").textContent = msg; }
-function yieldToBrowser(){ return new Promise(resolve => setTimeout(resolve, 0)); }
+// 브라우저에 제어권을 잠깐 돌려준다(진행 표시·입력 처리). setTimeout(0)은 타이머가 연쇄되면
+// 최소 4ms로 묶여 수천 파일 루프에서 수십 초를 잃는다 → scheduler.yield/MessageChannel로 클램프 없이 양보.
+const _yieldResolvers = [];
+let _yieldChannel = null;
+function yieldToBrowser(){
+  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") return scheduler.yield();
+  if (typeof MessageChannel === "undefined") return new Promise(resolve => setTimeout(resolve, 0));
+  if (!_yieldChannel){
+    _yieldChannel = new MessageChannel();
+    _yieldChannel.port1.onmessage = () => { const resolve = _yieldResolvers.shift(); if (resolve) resolve(); };
+  }
+  return new Promise(resolve => { _yieldResolvers.push(resolve); _yieldChannel.port2.postMessage(0); });
+}
+// 마지막 양보 후 일정 시간이 지났을 때만 실제로 양보 — 파일 수천 개 루프에서 항목당 고정 비용을 없앤다.
+let _lastYieldAt = 0;
+async function yieldToBrowserThrottled(minGapMs = 12){
+  const now = performance.now();
+  if (now - _lastYieldAt < minGapMs) return;
+  await yieldToBrowser();
+  _lastYieldAt = performance.now();
+}
 // PDF 렌더 해상도: 화면에 "보이는 배율(줌)"에 맞춰 캔버스 픽셀을 잡아 크롬처럼 어느 배율이든 또렷하게 한다.
 // 최소 RENDER_SCALE 배 슈퍼샘플(작게 봐도 선명) + 줌이 커지면 그 배율로 재렌더(targetRenderDpr 참고).
 // RENDER_MAX_SIDE 로 캔버스 한 변(px)을 제한해 고배율 메모리를 보호한다(단 z=1 품질은 보존).

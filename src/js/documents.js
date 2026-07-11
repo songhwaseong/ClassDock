@@ -242,6 +242,41 @@ function hideFullscreenControlsNow(){
   const controls = byId("fsControls");
   if (controls) controls.classList.add("hide");
 }
+// ── 분할화면(study) 바 자동 숨김 — 전체화면 컨트롤과 같은 유휴 숨김 방식 ──
+let studyControlsTimer = null;
+const STUDY_IDLE_MS = 3500;
+function studyControlsActive(){
+  const c = byId("content");
+  return !!(c && c.classList.contains("study-mode") && !isViewerFullscreen());
+}
+// 페이지 번호 입력 중·펜 필기 중·찾기창 열림 중에는 숨기지 않는다
+function studyInteractionBusy(){
+  const ae = document.activeElement;
+  const ctl = byId("studyPageCtl");
+  if (ctl && ae && ctl.contains(ae)) return true;
+  const pen = byId("btnStudyPen");
+  if (pen && pen.classList.contains("active")) return true;
+  if (document.querySelector(".pdf-find:not([hidden])")) return true;
+  return false;
+}
+function armStudyControlsTimer(){
+  clearTimeout(studyControlsTimer);
+  if (!studyControlsActive()) return;
+  studyControlsTimer = setTimeout(() => {
+    if (!studyControlsActive()) return;
+    if (studyInteractionBusy()){ armStudyControlsTimer(); return; }   // 상호작용 중이면 다시 대기
+    const c = byId("content"); if (c) c.classList.add("study-idle");
+  }, STUDY_IDLE_MS);
+}
+function showStudyControls(){
+  if (!studyControlsActive()) return;
+  const c = byId("content"); if (c) c.classList.remove("study-idle");
+  armStudyControlsTimer();
+}
+function stopStudyControlsAutoHide(){
+  clearTimeout(studyControlsTimer);
+  const c = byId("content"); if (c) c.classList.remove("study-idle");
+}
 function scheduleViewerLayoutRefresh(){
   setTimeout(() => {
     const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
@@ -302,7 +337,6 @@ function makeDoc(kind, name, options={}){
   el.className = (kind === "pdf") ? "viewer" : "office";
   el.hidden = true;
   byId("content").appendChild(el);
-  attachPanBehavior(el);                 // 손바닥 도구: 내용이 화면보다 크면 드래그로 이동
   const d = { id, nodeId: "doc:" + id, parentId: options.parentId || null, name, kind, el,
     workspacePath: options.workspacePath || null, size: options.size || 0, sourceKey: options.sourceKey || null,
     isScratch: !!options.isScratch, textEncoding: options.textEncoding || null,
@@ -311,13 +345,14 @@ function makeDoc(kind, name, options={}){
   d.archiveCtx = options.archiveCtx || null;
   d.fsHandle = options.fsHandle || null;
   d.fsDirHandle = options.fsDirHandle || null;   // 같은 폴더에 새 파일을 만들 때 쓰는 폴더 핸들(변환 노트북 저장 등)
-  attachStudyReferenceGuard(d);
-  el.addEventListener("pointerdown", () => focusSidebarDoc(id));
+  // 손바닥 도구·읽기전용 가드·사이드바 포커스 리스너는 첫 활성화(ensureDocInteractive)로 미룬다.
+  // 이미지 수천 장 폴더에서 문서마다 관찰자 2개 + 리스너 십수 개를 만들던 고정 비용 제거.
   if (kind === "pdf"){
     d.pdfBytes=null; d.fileName=name; d.pages=[]; d.allPages=[]; d.elements=[]; d.selected=null; d.addCount=0; d.zoom=defaultPdfZoom();
     d.selectedPageIds = new Set(); d.pagePanelOpen = false;
   }
   docs.push(d);
+  if (d.sourceKey && !docsBySourceKey.has(d.sourceKey)) docsBySourceKey.set(d.sourceKey, d);
   navNodes.push({ nodeId: d.nodeId, type: "doc", docId: id, parentId: d.parentId });
   bumpNavTree();
   renderSidebar();                       // 새 항목을 한 번만 그려둔다(이후 전환은 활성표시만 갱신)
@@ -394,6 +429,7 @@ function setStudySwapped(v){
   studySwapped = !!v;
   try { localStorage.setItem("studySwapped", studySwapped ? "1" : "0"); } catch(e){}
   byId("content").classList.toggle("study-swapped", studySwapped);
+  if (typeof showStudyControls === "function") showStudyControls();                    // 스왑 결과가 보이도록 바를 다시 표시(유휴 숨김 해제)
   const ref = docs.find(d => d.id === studyPdfId);
   if (ref && ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));        // 칸 너비가 바뀌었으니 PDF 다시 맞춤
 }
@@ -408,6 +444,7 @@ function isStudyReferenceReadonly(doc){ return isStudyReferenceLocked(doc); }
 function setStudyReferenceLocked(locked){
   studyReferenceLocked = !!locked;
   applyStudyLayout();
+  persistTabState();
   toast(studyReferenceLocked ? "참고 문서를 잠갔습니다. 보기·스크롤·복사만 가능합니다." : "참고 문서 잠금을 풀었습니다. 기존 학습 화면처럼 편집할 수 있습니다.", 3200);
 }
 
@@ -417,6 +454,7 @@ function setStudyTargetPane(pane){
   if (studyTargetPane === pane) return;
   studyTargetPane = pane;
   updateStudyTargetHighlight();
+  persistTabState();
 }
 // 타깃 칸에만 표시 클래스를 붙인다(참고/작업 두 문서만 만지면 되므로 가볍다).
 function updateStudyTargetHighlight(){
@@ -432,10 +470,19 @@ function setupStudyPaneTracker(){
   content.addEventListener("pointerdown", (e) => {
     if (!content.classList.contains("study-mode")) return;
     const pane = e.target.closest && e.target.closest(".study-reference, .study-work");
-    const chip = e.target.closest && e.target.closest(".study-chip-ref, .study-chip-work");
-    if (!pane && !chip) return;
-    setStudyTargetPane((pane && pane.classList.contains("study-reference")) || (chip && chip.classList.contains("study-chip-ref")) ? "reference" : "work");
+    if (!pane) return;
+    setStudyTargetPane(pane.classList.contains("study-reference") ? "reference" : "work");
   }, true);
+  // 참고 칸 왼쪽 위 모서리에 마우스가 오면 잠금 열쇠를 잠깐 노출(잠금 상태면 CSS 가 늘 보여주므로 무시)
+  content.addEventListener("pointermove", (e) => {
+    if (!content.classList.contains("study-mode") || studyReferenceLocked){ content.classList.remove("study-ref-lock-show"); return; }
+    const ref = docs.find(d => d.id === studyPdfId);
+    if (!ref || !ref.el){ content.classList.remove("study-ref-lock-show"); return; }
+    const r = ref.el.getBoundingClientRect();
+    const near = e.clientX >= r.left && e.clientX <= r.left + 150 && e.clientY >= r.top && e.clientY <= r.top + 64;
+    content.classList.toggle("study-ref-lock-show", near);
+  }, { passive: true });
+  content.addEventListener("pointerleave", () => content.classList.remove("study-ref-lock-show"));
 }
 
 // 사이드바·상단 탭에서 파일 클릭 시 공용 진입점: 분할 화면이면 마지막 클릭 칸 기준으로 연다.
@@ -470,13 +517,25 @@ function setupStudyDivider(){
   apply(ratio);
   divider.addEventListener("pointerdown", (e) => {
     if (matchMedia("(max-width: 900px)").matches) return;          // 모바일은 세로 고정 분할
-    e.preventDefault(); divider.setPointerCapture(e.pointerId); divider.classList.add("dragging");
     const rect = content.getBoundingClientRect();
-    const move = (ev) => apply(((ev.clientX - rect.left) / rect.width) * 100);
+    const startX = e.clientX;
+    let dragging = false;
+    // 움직임이 4px 을 넘을 때만 드래그로 전환한다. 순수 클릭·더블클릭은 포인터 캡처를
+    // 걸지 않아 dblclick(좌우 바꾸기)이 캡처에 가로채이지 않는다.
+    const move = (ev) => {
+      if (!dragging){
+        if (Math.abs(ev.clientX - startX) < 4) return;
+        dragging = true;
+        try { divider.setPointerCapture(e.pointerId); } catch(_){}
+        divider.classList.add("dragging");
+      }
+      ev.preventDefault();
+      apply(((ev.clientX - rect.left) / rect.width) * 100);
+    };
     const up = () => {
-      divider.classList.remove("dragging");
+      if (dragging){ divider.classList.remove("dragging"); save(); }
       divider.removeEventListener("pointermove", move); divider.removeEventListener("pointerup", up);
-      divider.removeEventListener("pointercancel", up); save();
+      divider.removeEventListener("pointercancel", up);
     };
     divider.addEventListener("pointermove", move); divider.addEventListener("pointerup", up); divider.addEventListener("pointercancel", up);
   });
@@ -511,6 +570,8 @@ function applyStudyLayout(){
   content.classList.toggle("study-mode", split);
   content.classList.toggle("study-reference-locked", split && studyReferenceLocked);
   content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 좌우 배치 적용
+  content.classList.toggle("study-ref-nonpdf", !!(split && ref && ref.kind !== "pdf"));  // 참고가 PDF가 아니면 PDF 전용 컨트롤(필기·페이지) 숨김
+  if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
     setupStudyDivider();                       // 분할바 준비(저장된 비율 적용)
@@ -546,18 +607,11 @@ function applyStudyLayout(){
   btn.hidden = docs.length === 0;
   btn.textContent = ref ? "분할 작업 종료" : "분할 작업";
   btn.title = ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기";
-  // 칸 위 역할 칩: 파일명·잠금 상태 갱신(표시 여부는 CSS 의 .study-mode 클래스가 결정)
-  if (split){
-    const refName = byId("studyChipRefName"), workName = byId("studyChipWorkName");
-    if (refName) refName.textContent = ref.name;
-    if (workName) workName.textContent = work.name;
-  }
+  // 참고 칸 왼쪽 위 잠금 열쇠: 상태(잠김/열림)만 갱신(표시 여부는 CSS + 모서리 호버가 결정)
   const chipLock = byId("studyChipLock");
   if (chipLock){
     chipLock.title = studyReferenceLocked ? "참고 문서 잠금을 풀고 편집 가능하게 하기" : "참고 문서를 읽기 전용으로 잠그기";
     chipLock.setAttribute("aria-pressed", String(studyReferenceLocked));
-    const label = byId("studyChipLockLabel");
-    if (label) label.textContent = studyReferenceLocked ? "잠금 해제" : "잠금";
   }
   updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
@@ -592,13 +646,13 @@ function startStudyModeWithDoc(doc, options={}){
     setStudyReference(doc.id);
     return true;
   }
-  studyReferenceLocked = false;
+  studyReferenceLocked = true;                                                         // 참고 문서는 기본 읽기 전용(잠금) — 실수로 고치는 걸 막음
   studyTargetPane = "work";                                                            // 분할 진입 시 기본 타깃은 작업 칸
   studyPdfId = doc.id;
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
   renderTabs();                                                                        // 참고 문서 탭 표시 갱신
-  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 기존 학습 화면처럼 양쪽 모두 편집할 수 있으며, 필요하면 참고 칸 왼쪽 위 ‘잠금’을 누르세요.", 4600);
+  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 참고 문서는 읽기 전용으로 잠겨 있어요. 편집하려면 참고 칸 왼쪽 위 열쇠를 눌러 잠금을 푸세요.", 4600);
   return true;
 }
 function startStudyModeWithPdf(pdfDoc, options={}){ return pdfDoc && pdfDoc.kind === "pdf" ? startStudyModeWithDoc(pdfDoc, options) : false; }
@@ -662,10 +716,22 @@ function focusSidebarDoc(id){
 }
 function focusSidebarActive(){ focusSidebarDoc(activeId); }
 
+// 문서당 상호작용 부착(지연): 손바닥 도구 관찰자 + 분할화면 읽기전용 가드 + 사이드바 포커스.
+// makeDoc 시점이 아니라 처음 화면에 쓰일 때 한 번만 붙여, 대량 폴더 열기의 문서당 고정 비용을 없앤다.
+function ensureDocInteractive(d){
+  if (!d || d.__interactive || !d.el) return;
+  d.__interactive = true;
+  attachPanBehavior(d.el);                 // 손바닥 도구: 내용이 화면보다 크면 드래그로 이동
+  attachStudyReferenceGuard(d);
+  d.el.addEventListener("pointerdown", () => focusSidebarDoc(d.id));
+}
+
 // 지연 렌더: 문서를 처음 활성화할 때 doc.render() 를 한 번만 실행한다.
 // (압축 안에 파일이 많아도 열기/전환이 빨라지고, 클릭한 문서만 그린다.)
 function ensureRendered(d){
-  if (!d || d.closed || d.rendered || typeof d.render !== "function") return Promise.resolve();
+  if (!d || d.closed) return Promise.resolve();
+  ensureDocInteractive(d);                 // 활성화 경로 공통 지점 — 여기서 처음 한 번 부착
+  if (d.rendered || typeof d.render !== "function") return Promise.resolve();
   if (d._renderPromise) return d._renderPromise;          // 진행 중인 첫 렌더가 끝날 때까지 후속 이동도 함께 대기
   d._rendering = true;
   const promise = Promise.resolve().then(async () => {
@@ -769,6 +835,7 @@ function modeBadgeText(doc){
   if (doc.kind === "pdf") return "PDF 편집";
   if (doc.kind === "board") return "화이트보드";
   if (doc.kind === "replay") return "수업 리플레이";
+  if (doc.kind === "image-gallery") return "이미지 모아보기";
   if (ext === ".py" || ext === ".pyw") return "Python 실습";
   if (doc.kind === "image") return "이미지 보기";
   if (doc.kind === "video") return doc.media === "audio" ? "오디오 재생" : "영상 재생";
@@ -826,6 +893,7 @@ function closeDoc(id, options={}){
     closedDocStack.push(d.__reopen);
     if (closedDocStack.length > 12) closedDocStack.shift();
   }
+  if (d.sourceKey && docsBySourceKey.get(d.sourceKey) === d) docsBySourceKey.delete(d.sourceKey);
   contentTextCache.delete(id);                 // 내용 검색 캐시 정리
   contentLowerCache.delete(id);
   contentMatchSnippets.delete(id);
@@ -1263,9 +1331,9 @@ function openSidebarGroupMenu(node, x, y){
   if (!node || node.type !== "group" || !node.newPythonContext) return;
   const menu = document.createElement("div");
   menu.className = "tab-ctx-menu"; menu.setAttribute("role", "menu");
-  const add = (label, run) => {
+  const add = (label, run, disabled=false) => {
     const button = document.createElement("button"); button.type = "button"; button.setAttribute("role", "menuitem");
-    const text = document.createElement("span"); text.textContent = label; button.appendChild(text);
+    const text = document.createElement("span"); text.textContent = label; button.appendChild(text); button.disabled = !!disabled;
     button.addEventListener("click", () => { closeSidebarGroupMenu(); run(); });
     menu.appendChild(button);
   };
@@ -1275,6 +1343,12 @@ function openSidebarGroupMenu(node, x, y){
   add("+Nb  새 노트북", () => {
     if (typeof newNotebookScratchInFolder === "function") newNotebookScratchInFolder(node.newPythonContext);
   });
+  if (node.folderRefreshRootId && typeof imageGalleryFolderImageCount === "function" && typeof openFolderImageGallery === "function"){
+    const directCount = imageGalleryFolderImageCount(node, false);
+    const nestedCount = imageGalleryFolderImageCount(node, true);
+    add("▦ 이미지 모아보기 — 이 폴더만 (" + directCount + "개)", () => openFolderImageGallery(node, false), directCount === 0);
+    add("▦ 이미지 모아보기 — 하위 폴더 포함 (" + nestedCount + "개)", () => openFolderImageGallery(node, true), nestedCount === 0);
+  }
   if (node.folderRefreshRootId){
     add("↻  폴더 새로고침", () => requestFolderRefresh(node.folderRefreshRootId));
     // 브라우저 재생이 막히는 형식(MKV 등)이 있으면 한꺼번에 MP4로 변환(ffmpeg — 자세한 안내는 영상 탭)
@@ -1321,7 +1395,18 @@ function persistTabState(){       // 탭 순서·활성 탭을 디바운스 저�
     try {
       const tabs = tabOrder.map(id => docStableKey(docs.find(d => d.id === id))).filter(Boolean);
       const active = docStableKey(docs.find(d => d.id === activeId));
-      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, savedAt: Date.now() }));
+      const reference = docs.find(d => d.id === studyPdfId);
+      const work = docs.find(d => d.id === activeId);
+      // ID is recreated at each launch, so persist stable document paths instead.
+      const study = reference && work && reference.id !== work.id
+        ? {
+            reference: docStableKey(reference),
+            work: docStableKey(work),
+            locked: !!studyReferenceLocked,
+            targetPane: studyTargetPane === "reference" ? "reference" : "work"
+          }
+        : null;
+      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, savedAt: Date.now() }));
     } catch(e){}
   }, 400);
 }
@@ -1343,11 +1428,46 @@ function applyTabState(saved){
   setActiveDoc(seen.has(wantActive) ? wantActive : restored[0]);
 }
 
+// Reconnect the split pair after all workspace files have been restored.
+// Older saved states have no study field and continue to restore as a normal view.
+function restoreStudyState(saved){
+  const study = saved && saved.study;
+  if (!study || typeof study !== "object") return false;
+  const referenceKey = String(study.reference || "");
+  const workKey = String(study.work || "");
+  if (!referenceKey || !workKey || referenceKey === workKey) return false;
+  const keyToDoc = new Map();
+  docs.forEach(d => {
+    const key = docStableKey(d);
+    if (key && !keyToDoc.has(key)) keyToDoc.set(key, d);
+  });
+  const reference = keyToDoc.get(referenceKey);
+  const work = keyToDoc.get(workKey);
+  if (!reference || !work || reference.id === work.id) return false;
+
+  // The active document is always the work pane. tabRestoreInProgress prevents a resave here.
+  if (activeId !== work.id) setActiveDoc(work.id);
+  studyPdfId = reference.id;
+  studyReferenceLocked = !!study.locked;
+  studyTargetPane = study.targetPane === "reference" ? "reference" : "work";
+  if (reference.kind === "pdf" && reference._preStudyZoom == null) reference._preStudyZoom = reference.zoom;
+  applyStudyLayout();
+  renderTabs();
+  // 복원 직후 참고 문서는 활성 문서가 아니므로, PDF뿐 아니라 모든 형식을 명시적으로 첫 렌더한다.
+  ensureRendered(reference).then(() => {
+    if (reference.id === studyPdfId && reference.kind === "pdf"){
+      startLazyRender(reference); requestAnimationFrame(() => fitStudyPdf(reference));
+    }
+  });
+  return true;
+}
+
 function iconFor(kind, name){
   if (kind === "folder") return "DIR";
   if (kind === "zip") return "ZIP";
   if (kind === "pdf") return "PDF";
   if (kind === "image") return "IMG";
+  if (kind === "image-gallery") return "▦";
   if (kind === "video") return AUDIO_EXTS.includes(fileExtOf(name)) ? "AUD" : "VID";
   if (kind === "board") return "칠판";
   if (kind === "replay") return "▶";
@@ -1365,6 +1485,7 @@ function extCategory(kind, name){
   if (kind === "zip")    return "zip";
   if (kind === "pdf")    return "pdf";
   if (kind === "image")  return "img";
+  if (kind === "image-gallery") return "img";
   if (kind === "video")  return "media";
   const ext = fileExtOf(name);
   if (ext === "docx") return "word";
@@ -1680,6 +1801,17 @@ function renderSidebar(){
     item.onclick = (e) => {
       sidebarCursorKey = node.nodeId;                       // 클릭한 줄을 키보드 커서로 동기화
       if (node.type === "group"){
+        // 자동 복원에서 대량 사진이 생략된 폴더는 루트·하위 폴더 어디를 눌러도 한 번만 실제 파일을 다시 읽는다.
+        const pendingImageRoot = navNodes.find(item =>
+          item.nodeId === node.folderRefreshRootId && item.type === "group" && item.folderRefreshRootId === item.nodeId
+        );
+        if (pendingImageRoot && pendingImageRoot.restorePendingImages && !pendingImageRoot.folderReloading){
+          pendingImageRoot.folderReloading = true;
+          Promise.resolve(requestFolderRefresh(pendingImageRoot.nodeId))
+            .catch(() => {})
+            .finally(() => { pendingImageRoot.folderReloading = false; });
+          return;
+        }
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
         // Alt+클릭: 형제를 유지한 채 자기만 펴기/접기(여러 폴더 동시에 펼쳐두고 싶을 때).
         node.expanded = !node.expanded;
@@ -1964,8 +2096,11 @@ function closeGroup(nodeId, options={}){
   refreshChrome();
   applyStudyLayout();
   renderSidebar();
-  if (options.forgetWorkspace && group.workspacePaths && group.workspacePaths.length)
-    forgetWorkspacePaths(group.workspacePaths, navNodes.length === 0);
+  const forgottenPaths = [...(group.workspacePaths || [])];
+  if (group.folderRefreshRootId === group.nodeId && group.imageSkipWorkspacePath)
+    forgottenPaths.push(group.imageSkipWorkspacePath);
+  if (options.forgetWorkspace && forgottenPaths.length)
+    forgetWorkspacePaths(forgottenPaths, navNodes.length === 0);
 }
 
 function refreshChrome(){

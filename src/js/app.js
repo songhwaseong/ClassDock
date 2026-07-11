@@ -205,9 +205,7 @@ function wire(){
   byId("btnCheck").onclick = () => addTextElement("check", { fontSize: 30, color: "#16a34a", bold: true, text: "✓" });
   byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
-  if (byId("btnStudySwap")) byId("btnStudySwap").onclick = () => {
-    if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
-  };
+  // 좌우 위치 바꾸기는 분할바 더블클릭으로 통합(중복 버튼 제거) — setupStudyDivider 참고
   byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
@@ -222,8 +220,8 @@ function wire(){
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
-  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 참고·작업 역할 교대
-    if (state && typeof setStudyReference === "function") setStudyReference(state.id);
+  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우 위치 바꾸기(참고=PDF 유지 → 필기·페이지 컨트롤이 PDF를 따라 이동)
+    if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
   };
   if (byId("studyChipLock")) byId("studyChipLock").onclick = () => {         // 참고 칩의 잠금 토글
     if (typeof setStudyReferenceLocked === "function") setStudyReferenceLocked(!studyReferenceLocked);
@@ -236,6 +234,7 @@ function wire(){
   ["mousemove","mousedown","touchstart","keydown"].forEach(ev => {
     window.addEventListener(ev, () => {
       if (isViewerFullscreen()) showFullscreenControls();
+      else if (typeof showStudyControls === "function") showStudyControls();   // 분할화면 바 재노출
     }, { passive: true });
   });
   document.addEventListener("fullscreenchange", () => {

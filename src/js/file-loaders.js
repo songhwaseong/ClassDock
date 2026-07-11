@@ -13,7 +13,7 @@ async function handleFiles(files, options={}){
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
     if (opts.fsHandle && opts.workspacePath && typeof saveFsHandle === "function") saveFsHandle(opts.workspacePath, opts.fsHandle);
-    const duplicate = docs.find(d => d.sourceKey && d.sourceKey === opts.sourceKey);
+    const duplicate = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
     if (duplicate){
       if (!uiBatchDepth) setActiveDoc(duplicate.id);
       else if (!uiBatchActiveCandidate) uiBatchActiveCandidate = duplicate.id;
@@ -76,12 +76,16 @@ async function handleFiles(files, options={}){
       else if (SUBTITLE_EXTS.includes(ext)) made = await loadOffice(file, "txt", opts);
       else made = await loadText(file, opts);          // 알 수 없는 확장자 → 텍스트면 열고 아니면 안내
       if (made && !firstDoc) firstDoc = made;
-      // 닫은 탭 복원용: 최상위 실제 파일로 연 문서엔 원본 File과 열기 옵션을 보관해 둔다(아카이브 내부·임시 문서 제외).
-      if (!opts.parentId && !opts.archiveCtx && !options.transient && file instanceof File){
-        const opened = docs.find(d => d.sourceKey && d.sourceKey === opts.sourceKey);
-        if (opened) opened.__reopen = { file, name: opened.name,
-          options: { workspacePath: opts.workspacePath, fsHandle: opts.fsHandle, textEncoding: opts.textEncoding,
-            originalSaveMode: opts.originalSaveMode } };
+      const opened = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
+      if (opened){
+        // 폴더 새로고침의 변경 판별(경로+크기+수정시각)용 — 원본 파일 수정시각을 문서에 새겨 둔다.
+        opened.__srcMtime = file.lastModified || 0;
+        // 닫은 탭 복원용: 최상위 실제 파일로 연 문서엔 원본 File과 열기 옵션을 보관해 둔다(아카이브 내부·임시 문서 제외).
+        if (!opts.parentId && !opts.archiveCtx && !options.transient && file instanceof File){
+          opened.__reopen = { file, name: opened.name,
+            options: { workspacePath: opts.workspacePath, fsHandle: opts.fsHandle, textEncoding: opts.textEncoding,
+              originalSaveMode: opts.originalSaveMode } };
+        }
       }
     } catch (e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
   }
@@ -426,7 +430,12 @@ function queueFiles(files, options={}){
     }
   }
   fileQueue = fileQueue
-    .then(() => runUiBatch(async () => { await rememberWorkspace(batch, docs.length === 0); await handleFiles(batch, opts); }))
+    .then(() => runUiBatch(async () => {
+      // 자동 복원 저장은 파일을 먼저 연 뒤에 한다 — 저장 준비(파일 복사) 시간을 기다리지 않고 바로 화면에 뜨게.
+      const replaceWorkspace = docs.length === 0;
+      await handleFiles(batch, opts);
+      await rememberWorkspace(batch, replaceWorkspace, { silent: true });
+    }))
     .catch((e) => { if (e && e.message === "operation-cancelled") toast("파일 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }
@@ -440,10 +449,23 @@ function setFileRelativePath(file, path){
   try { Object.defineProperty(file, "webkitRelativePath", { value: path, configurable: true }); } catch(e){}
   return file;
 }
+// 폴더 핸들을 IndexedDB 에 보관(구조화 복제 가능) → 자동 복원으로 되살아난 폴더도 '새로고침' 버튼이
+// 권한 확인 1클릭만으로 디스크에서 다시 읽는다. (이미지 대량 폴더의 자동 복원 제외와 짝을 이룸)
+const FOLDER_HANDLE_KEY_PREFIX = "__folder-handle__/";
+function rememberFolderHandle(rootGroup, rootName){
+  if (typeof saveFsHandle !== "function" || typeof loadFsHandle !== "function") return;
+  if (rootGroup.folderHandle){
+    saveFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName, rootGroup.folderHandle);
+    return;
+  }
+  loadFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName).then(handle => {
+    if (handle && handle.kind === "directory" && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
+  }).catch(() => {});
+}
 async function collectDirectoryHandleFiles(handle){
   if (!handle || handle.kind !== "directory") return { files: [], folderPaths: [] };
   const rootName = handle.name || "폴더";
-  const files = [];
+  const found = [];                          // { entry, dir, parts } — 경로 순회로 먼저 모은다
   const folderPaths = [rootName];
   const walk = async (dir, parts) => {
     for await (const entry of dir.values()){
@@ -455,13 +477,18 @@ async function collectDirectoryHandleFiles(handle){
         folderPaths.push([rootName].concat(nextParts).join("/"));
         await walk(entry, nextParts);
       } else if (entry.kind === "file"){
-        const file = withDirHandle(withFileHandle(await entry.getFile(), entry), dir);
-        setFileRelativePath(file, [rootName].concat(parts, entry.name).join("/"));
-        files.push(file);
+        found.push({ entry, dir, parts });
       }
     }
   };
   await walk(handle, []);
+  // getFile() 은 항목마다 브라우저 왕복이 있어 수천 개 폴더에서 순차 실행이 느리다 → 순서 보존 제한 병렬.
+  const files = await mapWithConcurrency(found, 8, async (item) => {
+    throwIfUiCancelled();
+    const file = withDirHandle(withFileHandle(await item.entry.getFile(), item.entry), item.dir);
+    setFileRelativePath(file, [rootName].concat(item.parts, item.entry.name).join("/"));
+    return file;
+  });
   return { files, folderPaths };
 }
 async function collectFolderEntryPaths(entries, fileList){
@@ -561,9 +588,19 @@ function queueFolder(fileList, options={}){
   const files = [...fileList];
   if (!files.length && !(options.folderPaths && options.folderPaths.length)) return fileQueue;
   fileQueue = fileQueue.then(() => runUiBatch(async () => {
-    if (files.length || (options.folderPaths && options.folderPaths.length))
-      await rememberWorkspace(files, navNodes.length === 0, { folderPaths:options.folderPaths || [] });
+    // 자동 복원 저장은 폴더를 먼저 연 뒤에 한다 — 수백 MB 복사를 기다리지 않고 바로 화면에 뜨게.
+    const replaceWorkspace = navNodes.length === 0;
     await openFolderFiles(files, options);
+    // webkitdirectory 폴백은 빈 폴더 경로를 주지 않는다. 그래도 상대경로의 루트는 남겨야
+    // 대량 이미지가 자동 복원에서 생략됐다는 표식을 다음 실행에도 복원할 수 있다.
+    const folderPaths = options.folderPaths && options.folderPaths.length
+      ? options.folderPaths
+      : [...new Set(files
+          .map(file => normalizedRunPath(file && file.webkitRelativePath || ""))
+          .filter(path => path.includes("/"))
+          .map(path => path.split("/")[0]))];
+    if (files.length || folderPaths.length)
+      await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths });
   })).catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }
@@ -580,12 +617,17 @@ async function openFolderFiles(fileList, options={}){
   const openable = folderOpenableFiles(fileList);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))]
     .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
+  const pendingImageFolderPaths = [...new Set((options.pendingImageFolderPaths || []).map(normalizedRunPath).filter(Boolean))];
   if (!openable.length && !folderPaths.length){ toast("폴더 안에 열 수 있는 파일이나 폴더가 없어요.", 3000); return; }
 
   const rootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
   const rootGroup = makeGroup("folder", rootName, null);
   rootGroup.folderRefreshRootId = rootGroup.nodeId;
   rootGroup.folderHandle = options.folderHandle || null;
+  rememberFolderHandle(rootGroup, rootName);   // 핸들 IDB 보관/복구 — 재실행 뒤에도 '폴더 새로고침'이 권한 1클릭으로 동작
+  // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
+  rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
+  rootGroup.imageSkipWorkspacePath = workspaceImageSkipMarkerPath(rootName);
   rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderPaths = folderPaths.length ? folderPaths : [rootName];
   rootGroup.workspacePaths = [
@@ -633,15 +675,14 @@ async function openFolderFiles(fileList, options={}){
   let opened = 0;
   for (const f of openable){
     try {
-      updateLoading(`폴더 여는 중… (${opened + 1}/${openable.length})`);
       const rel = f.webkitRelativePath || (rootName + "/" + f.name);
       const parentId = parentFor(rel);
-      hideLoading();
       await handleFiles([f], { parentId, bulk: true, relPath: rel, archiveCtx: folderCtx,
         originalSaveMode: rootGroup.originalSaveMode });   // 첫 개만 즉시 렌더, 나머지 지연
       opened++;
-      await yieldToBrowser();
-      showLoading(`폴더 여는 중… (${opened}/${openable.length})`);
+      // 진행 표시·양보는 묶어서 — 파일마다 하면 수천 개 폴더에서 그 비용만 수십 초가 된다.
+      if (opened % 20 === 0 || opened === openable.length) updateLoading(`폴더 여는 중… (${opened}/${openable.length})`);
+      await yieldToBrowserThrottled();
     } catch(e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
   }
   hideLoading();
@@ -690,7 +731,7 @@ async function requestFolderRefresh(rootId){
     try {
       const snapshot = await collectDirectoryHandleFiles(handle);
       root.folderHandle = handle;
-      queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths });
+      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
@@ -707,7 +748,7 @@ async function requestFolderRefresh(rootId){
     showLoading("폴더 변경 내용 확인 중…");
     try {
       const snapshot = await collectDirectoryHandleFiles(picked);
-      queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths });
+      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
@@ -747,62 +788,150 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     return false;
   }
 
+  // ===== 변경분만 반영(diff) =====
+  // 예전에는 하위 문서를 전부 닫고 전부 다시 열었다 — 이미지 4천 장 폴더에선 새로고침 한 번이 첫 열기만큼 걸렸다.
+  // 이제 경로+크기+수정시각이 같은 문서는 그대로 두고, 추가/변경/삭제된 파일만 처리한다.
   const branchIds = navBranchIds(rootId);
   const childDocs = docs.filter(doc => branchIds.has(doc.nodeId));
-  const childDocIds = new Set(childDocs.map(doc => doc.id));
-  const hasUnsaved = childDocs.some(doc => doc.hasUnsavedEdits || (doc.isScratch && !doc._named));
-  const editedPdfs = childDocs.filter(doc => doc.kind === "pdf" && doc.elements && doc.elements.length);
+  // 이미지 갤러리는 실제 파일이 아닌 파생 탭이다. 변경 없는 새로고침에서 파일 삭제로
+  // 오인해 닫지 않으며, 실제 파일 목록이 달라질 때만 함께 닫아 다음에 최신 목록으로 연다.
+  const galleryDocs = childDocs.filter(doc => doc.kind === "image-gallery");
+  const sourceDocs = childDocs.filter(doc => doc.kind !== "image-gallery");
+  const docKeyOf = (doc) => normalizedRunPath(doc.workspacePath || doc.relPath || doc.name);
+  const fileKeyOf = (file) => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name));
+  const nextByKey = new Map(openable.map(file => [fileKeyOf(file), file]));
+  const keptDocs = [], dropDocs = [];
+  let changedCount = 0, removedCount = 0;
+  for (const doc of sourceDocs){
+    const key = docKeyOf(doc);
+    const file = nextByKey.get(key);
+    const unchanged = !!file && doc.__srcMtime != null &&
+      (Number(doc.size) || 0) === (Number(file.size) || 0) && doc.__srcMtime === (file.lastModified || 0);
+    if (unchanged){ keptDocs.push(doc); nextByKey.delete(key); }
+    else { dropDocs.push(doc); if (file) changedCount++; else removedCount++; }
+  }
+  const addFiles = openable.filter(file => nextByKey.has(fileKeyOf(file)));
+  const shouldCloseGalleries = dropDocs.length > 0 || addFiles.length > 0;
+  const docsToClose = shouldCloseGalleries ? dropDocs.concat(galleryDocs) : dropDocs;
+
+  // 편집 내용 확인은 실제로 닫힐(변경·삭제) 문서만 대상으로 — 그대로 유지되는 문서의 편집은 살아남는다.
+  const hasUnsaved = dropDocs.some(doc => doc.hasUnsavedEdits || (doc.isScratch && !doc._named));
+  const editedPdfs = dropDocs.filter(doc => doc.kind === "pdf" && doc.elements && doc.elements.length);
   if (hasUnsaved || editedPdfs.length){
     const detail = hasUnsaved && editedPdfs.length ? "저장하지 않은 코드와 PDF 편집" : (hasUnsaved ? "저장하지 않은 코드" : "PDF 편집");
     const ok = await confirmDialog(detail + "이 있습니다. 폴더를 새로고침하면 해당 내용이 사라질 수 있어요.", "새로고침", "취소");
     if (!ok) return false;
   }
 
+  // 닫히는 문서의 탭·활성·분할 참조는 경로로 기억해 두었다가, 같은 경로로 다시 열리면 이어준다.
+  const droppedIds = new Set(docsToClose.map(doc => doc.id));
+  const droppedPathOf = new Map(dropDocs.map(doc => [doc.id, docKeyOf(doc)]));
   const refForId = (id) => {
-    const doc = docs.find(item => item.id === id);
-    if (!doc) return null;
-    if (!childDocIds.has(id)) return { id };
-    return { path: normalizedRunPath(doc.workspacePath || doc.relPath || doc.name) };
+    if (id == null || !docs.some(doc => doc.id === id)) return null;
+    if (!droppedIds.has(id)) return { id };
+    const path = droppedPathOf.get(id);
+    return path ? { path } : null;  // 파생 탭(갤러리)은 실제 파일로 복원하지 않는다.
   };
   const tabRefs = tabOrder.map(refForId).filter(Boolean);
   const activeRef = refForId(activeId);
   const studyRef = refForId(studyPdfId);
   const mruRefs = activeMru.map(refForId).filter(Boolean);
-  const expanded = new Map();
-  navNodes.filter(node => branchIds.has(node.nodeId) && node.type === "group")
-    .forEach(node => expanded.set(groupStablePath(node), node.expanded !== false));
-  const oldRootIndex = navNodes.findIndex(node => node.nodeId === rootId);
   const oldPaths = [...(root.workspacePaths || [])].map(normalizedRunPath);
 
   for (const doc of editedPdfs){
     if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);
     doc.recoveryDirty = false;
   }
-  childDocs.forEach(doc => closeDoc(doc.id, { skipConfirm: true, skipPrune: true, skipUi: true }));
-  for (let i = navNodes.length - 1; i >= 0; i--){
-    if (branchIds.has(navNodes[i].nodeId)) navNodes.splice(i, 1);
+  docsToClose.forEach(doc => closeDoc(doc.id, { skipConfirm: true, skipPrune: true, skipUi: true }));
+
+  // 새 옆파일 컨텍스트(파일 스냅샷이 바뀌므로 폴더 전체 기준으로 새로 만든다)
+  const folderCtx = makeFileSiblingCtx(
+    files
+      .filter(f => !isHiddenFolderEntry(f.webkitRelativePath || f.name || ""))
+      .map(f => ({ file: f, relPath: f.webkitRelativePath || (selectedRootName + "/" + f.name) })),
+    selectedRootName,
+    folderPaths
+  );
+
+  // 기존 그룹 재사용 + 없는 폴더만 생성
+  const groupByPath = new Map();
+  navNodes.filter(node => branchIds.has(node.nodeId) && node.type === "group" && node.nodeId !== rootId)
+    .forEach(node => groupByPath.set(groupStablePath(node), node));
+  const parentFor = (relPath) => {
+    const parts = String(relPath || "").split("/").filter(Boolean);
+    parts.pop();
+    if (parts.length) parts.shift();
+    let parentId = root.nodeId, key = selectedRootName;
+    for (const part of parts){
+      key += "/" + part;
+      let group = groupByPath.get(key);
+      if (!group){
+        group = makeGroup("folder", part, parentId);
+        group.folderRefreshRootId = root.nodeId;
+        group.newPythonContext = { parentId: group.nodeId, dir: key, archiveCtx: folderCtx, label: part };
+        groupByPath.set(key, group);
+      }
+      parentId = group.nodeId;
+    }
+    return parentId;
+  };
+  folderPaths.forEach(path => parentFor(path + "/.__empty_folder__"));
+
+  showLoading("폴더 새로고침 중…");
+  let opened = 0;
+  for (const f of addFiles){
+    try {
+      const rel = f.webkitRelativePath || (selectedRootName + "/" + f.name);
+      await handleFiles([f], { parentId: parentFor(rel), bulk: true, relPath: rel, archiveCtx: folderCtx,
+        originalSaveMode: !!root.originalSaveMode });
+      opened++;
+      if (opened % 20 === 0 || opened === addFiles.length) updateLoading(`폴더 새로고침 중… (${opened}/${addFiles.length})`);
+      await yieldToBrowserThrottled();
+    } catch(e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
+  }
+  hideLoading();
+
+  // 사라진 폴더의 빈 그룹 제거(하위가 모두 비었을 때만, 안쪽부터)
+  const validFolderSet = new Set([selectedRootName, ...folderPaths]);
+  let prunedGroups = true;
+  while (prunedGroups){
+    prunedGroups = false;
+    for (const [path, node] of [...groupByPath]){
+      if (validFolderSet.has(path)) continue;
+      if (navNodes.some(n => n.parentId === node.nodeId)) continue;
+      const idx = navNodes.findIndex(n => n.nodeId === node.nodeId);
+      if (idx >= 0) navNodes.splice(idx, 1);
+      groupByPath.delete(path);
+      prunedGroups = true;
+    }
   }
   bumpNavTree();
 
-  const nextRoot = await openFolderFiles(files, { ...options, silent: true, originalSaveMode: !!root.originalSaveMode });
-  if (!nextRoot) return false;
-  const nextBranchIds = navBranchIds(nextRoot.nodeId);
-  const nextNodes = navNodes.filter(node => nextBranchIds.has(node.nodeId));
-  for (let i = navNodes.length - 1; i >= 0; i--){
-    if (nextBranchIds.has(navNodes[i].nodeId)) navNodes.splice(i, 1);
-  }
-  navNodes.splice(Math.max(0, Math.min(oldRootIndex, navNodes.length)), 0, ...nextNodes);
-  bumpNavTree();
-  nextNodes.filter(node => node.type === "group").forEach(node => {
-    const saved = expanded.get(groupStablePath(node));
-    if (saved !== undefined) node.expanded = saved;
+  // 루트·하위 그룹 메타데이터를 새 스냅샷 기준으로 갱신
+  root.folderHandle = options.folderHandle || root.folderHandle || null;
+  rememberFolderHandle(root, selectedRootName);
+  root.restorePendingImages = false;
+  root.folderPaths = folderPaths.length ? folderPaths : [selectedRootName];
+  root.workspacePaths = [
+    ...files.map(f => f.webkitRelativePath || (selectedRootName + "/" + f.name)),
+    ...root.folderPaths.map(workspaceFolderMarkerPath)
+  ];
+  const workspacePathsByFolder = indexWorkspacePathsByFolder(root.workspacePaths);
+  root.newPythonContext = { parentId: root.nodeId, dir: selectedRootName, archiveCtx: folderCtx, label: selectedRootName };
+  groupByPath.forEach((node, path) => {
+    node.workspacePaths = workspacePathsByFolder.get(path) || [];
+    if (node.newPythonContext) node.newPythonContext.archiveCtx = folderCtx;
+    else node.newPythonContext = { parentId: node.nodeId, dir: path, archiveCtx: folderCtx, label: node.name };
   });
+  keptDocs.forEach(doc => { if (doc.archiveCtx && doc.archiveCtx.isFolderContext) doc.archiveCtx = folderCtx; });
 
-  const nextDocs = docs.filter(doc => nextBranchIds.has(doc.nodeId));
+  // 탭·활성·분할 참조 복원(유지된 문서는 id 그대로, 다시 열린 문서는 경로로 연결)
+  const nextBranchIds = navBranchIds(rootId);
   const resolveRef = (ref) => {
     if (!ref) return null;
     if (ref.id != null) return docs.some(doc => doc.id === ref.id) ? ref.id : null;
-    const match = nextDocs.find(doc => normalizedRunPath(doc.workspacePath || doc.relPath || doc.name) === ref.path);
+    if (!ref.path) return null;
+    const match = docs.find(doc => nextBranchIds.has(doc.nodeId) && docKeyOf(doc) === ref.path);
     return match ? match.id : null;
   };
   const restoredTabs = [], seenTabs = new Set();
@@ -814,9 +943,10 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   activeMru = mruRefs.map(resolveRef).filter((id, index, rows) => id != null && rows.indexOf(id) === index);
   const nextStudyId = resolveRef(studyRef);
   studyPdfId = nextStudyId != null && docs.some(doc => doc.id === nextStudyId) ? nextStudyId : null;
+  const nextDocs = docs.filter(doc => nextBranchIds.has(doc.nodeId));
   const wantedActive = resolveRef(activeRef);
   const fallbackActive = wantedActive || restoredTabs[0] || (nextDocs[0] && nextDocs[0].id) || (docs[0] && docs[0].id) || 0;
-  sidebarCursorKey = nextRoot.nodeId;
+  sidebarCursorKey = root.nodeId;
   if (fallbackActive){
     setActiveDoc(fallbackActive);
     uiBatchActiveCandidate = fallbackActive;
@@ -825,6 +955,17 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     activeId = 0; state = null; viewer = null;
     refreshChrome(); applyStudyLayout(); renderSidebar();
   }
+  // 폴더 새로고침으로 참고 문서가 새 인스턴스로 교체되면 활성 문서가 아니어서 지연 렌더가 생략된다.
+  // 분할 화면에 보일 문서는 형식과 무관하게 렌더하고, PDF에만 추가 페이지 렌더·폭 맞춤을 적용한다.
+  const refreshedStudyReference = docs.find(doc => doc.id === studyPdfId);
+  if (refreshedStudyReference && refreshedStudyReference.id !== activeId){
+    ensureRendered(refreshedStudyReference).then(() => {
+      if (refreshedStudyReference.id === studyPdfId && refreshedStudyReference.kind === "pdf"){
+        startLazyRender(refreshedStudyReference);
+        requestAnimationFrame(() => fitStudyPdf(refreshedStudyReference));
+      }
+    });
+  }
 
   if (files.length || folderPaths.length)
     await rememberWorkspace(files, false, { silent: true, folderPaths });
@@ -832,7 +973,11 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   folderPaths.forEach(path => nextPathSet.add(workspaceFolderMarkerPath(path)));
   const deleted = oldPaths.filter(path => path && !nextPathSet.has(path));
   if (deleted.length) forgetWorkspacePaths(deleted);
-  toast("폴더를 새로고침했어요. " + nextDocs.length + "개 파일을 반영했습니다.", 3000);
+  const changeSummary = [];
+  if (addFiles.length - changedCount > 0) changeSummary.push("추가 " + (addFiles.length - changedCount) + "개");
+  if (changedCount) changeSummary.push("변경 " + changedCount + "개");
+  if (removedCount) changeSummary.push("제거 " + removedCount + "개");
+  toast("폴더를 새로고침했어요. " + (changeSummary.length ? changeSummary.join(" · ") : "변경된 파일 없음") + " (전체 " + nextDocs.length + "개)", 3000);
   return true;
 }
 
@@ -891,7 +1036,19 @@ async function collectDroppedFiles(entry, prefix, out, folderPaths){
     if ((entry.name || "").charAt(0) === ".") return;
     if (folderPaths) folderPaths.push(rel);
     const children = await readAllDirectoryEntries(entry);
-    for (const child of children) await collectDroppedFiles(child, rel, out, folderPaths);
+    // 파일 엔트리는 항목당 왕복이 있어 폴더 단위로 제한 병렬 읽기(순서 보존), 하위 폴더는 순차 순회.
+    const fileChildren = children.filter(child => child && child.isFile);
+    const read = await mapWithConcurrency(fileChildren, 8, async (child) => {
+      try {
+        const file = await readEntryFile(child);
+        Object.defineProperty(file, "webkitRelativePath", { value: rel + "/" + child.name });
+        return file;
+      } catch(e){ console.warn("파일 엔트리를 읽지 못해 건너뜀:", child.name, e); return null; }
+    });
+    read.forEach(file => { if (file) out.push(file); });
+    for (const child of children){
+      if (child && child.isDirectory) await collectDroppedFiles(child, rel, out, folderPaths);
+    }
   } else if (entry.isFile){
     try {
       const file = await readEntryFile(entry);
