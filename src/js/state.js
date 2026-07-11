@@ -54,6 +54,7 @@ let fileQueue = Promise.resolve();
 // 원본 파일을 여는 크기에는 영향을 주지 않는다.
 const WORKSPACE_CAP = 256 * 1024 * 1024;
 const SHORTCUT_DEFINITIONS = Object.freeze([
+  { id:"commandPalette", label:"명령 팔레트", description:"기능을 검색해 바로 실행하는 창 열기", defaultValue:"Ctrl+K" },
   { id:"openFiles", label:"파일 열기", description:"파일 선택 창 열기", defaultValue:"Ctrl+O" },
   { id:"openFolder", label:"폴더 열기", description:"폴더 전체 열기", defaultValue:"Ctrl+Shift+O" },
   { id:"saveCurrent", label:"현재 파일 저장", description:"PDF 내보내기 또는 Python 저장", defaultValue:"Ctrl+S" },

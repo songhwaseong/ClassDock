@@ -47,7 +47,8 @@
     "pet-focus.js",
     "scratchpad.js",
     "image-memo.js",
-    "app.js"
+    "app.js",
+    "command-palette.js"
   ],
   "vendorScripts": [
     {
