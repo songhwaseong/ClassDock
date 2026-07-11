@@ -468,10 +468,19 @@ function setupStudyPaneTracker(){
   content.addEventListener("pointerdown", (e) => {
     if (!content.classList.contains("study-mode")) return;
     const pane = e.target.closest && e.target.closest(".study-reference, .study-work");
-    const chip = e.target.closest && e.target.closest(".study-chip-ref, .study-chip-work");
-    if (!pane && !chip) return;
-    setStudyTargetPane((pane && pane.classList.contains("study-reference")) || (chip && chip.classList.contains("study-chip-ref")) ? "reference" : "work");
+    if (!pane) return;
+    setStudyTargetPane(pane.classList.contains("study-reference") ? "reference" : "work");
   }, true);
+  // 참고 칸 왼쪽 위 모서리에 마우스가 오면 잠금 열쇠를 잠깐 노출(잠금 상태면 CSS 가 늘 보여주므로 무시)
+  content.addEventListener("pointermove", (e) => {
+    if (!content.classList.contains("study-mode") || studyReferenceLocked){ content.classList.remove("study-ref-lock-show"); return; }
+    const ref = docs.find(d => d.id === studyPdfId);
+    if (!ref || !ref.el){ content.classList.remove("study-ref-lock-show"); return; }
+    const r = ref.el.getBoundingClientRect();
+    const near = e.clientX >= r.left && e.clientX <= r.left + 150 && e.clientY >= r.top && e.clientY <= r.top + 64;
+    content.classList.toggle("study-ref-lock-show", near);
+  }, { passive: true });
+  content.addEventListener("pointerleave", () => content.classList.remove("study-ref-lock-show"));
 }
 
 // 사이드바·상단 탭에서 파일 클릭 시 공용 진입점: 분할 화면이면 마지막 클릭 칸 기준으로 연다.
@@ -596,18 +605,11 @@ function applyStudyLayout(){
   btn.hidden = docs.length === 0;
   btn.textContent = ref ? "분할 작업 종료" : "분할 작업";
   btn.title = ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기";
-  // 칸 위 역할 칩: 파일명·잠금 상태 갱신(표시 여부는 CSS 의 .study-mode 클래스가 결정)
-  if (split){
-    const refName = byId("studyChipRefName"), workName = byId("studyChipWorkName");
-    if (refName) refName.textContent = ref.name;
-    if (workName) workName.textContent = work.name;
-  }
+  // 참고 칸 왼쪽 위 잠금 열쇠: 상태(잠김/열림)만 갱신(표시 여부는 CSS + 모서리 호버가 결정)
   const chipLock = byId("studyChipLock");
   if (chipLock){
     chipLock.title = studyReferenceLocked ? "참고 문서 잠금을 풀고 편집 가능하게 하기" : "참고 문서를 읽기 전용으로 잠그기";
     chipLock.setAttribute("aria-pressed", String(studyReferenceLocked));
-    const label = byId("studyChipLockLabel");
-    if (label) label.textContent = studyReferenceLocked ? "잠금 해제" : "잠금";
   }
   updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
@@ -642,13 +644,13 @@ function startStudyModeWithDoc(doc, options={}){
     setStudyReference(doc.id);
     return true;
   }
-  studyReferenceLocked = false;
+  studyReferenceLocked = true;                                                         // 참고 문서는 기본 읽기 전용(잠금) — 실수로 고치는 걸 막음
   studyTargetPane = "work";                                                            // 분할 진입 시 기본 타깃은 작업 칸
   studyPdfId = doc.id;
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
   renderTabs();                                                                        // 참고 문서 탭 표시 갱신
-  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 기존 학습 화면처럼 양쪽 모두 편집할 수 있으며, 필요하면 참고 칸 왼쪽 위 ‘잠금’을 누르세요.", 4600);
+  if (!options.silent) toast("문서를 참고 화면에 고정했어요. 참고 문서는 읽기 전용으로 잠겨 있어요. 편집하려면 참고 칸 왼쪽 위 열쇠를 눌러 잠금을 푸세요.", 4600);
   return true;
 }
 function startStudyModeWithPdf(pdfDoc, options={}){ return pdfDoc && pdfDoc.kind === "pdf" ? startStudyModeWithDoc(pdfDoc, options) : false; }

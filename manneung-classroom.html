@@ -200,21 +200,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
       </button>
     </div>
-    <div class="study-chip study-chip-ref" id="studyChipRef">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V6a2.5 2.5 0 0 1 2.5-2.5H20V17H6.5A2.5 2.5 0 0 0 4 19.5Zm0 0A2.5 2.5 0 0 0 6.5 22H20"></path></svg>
-      <span class="study-chip-role">참고</span>
-      <span class="study-chip-name" id="studyChipRefName"></span>
-      <button id="studyChipLock" type="button" aria-pressed="false" title="참고 문서를 읽기 전용으로 잠그기">
-        <svg class="ic-open" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.6-1.7"></path></svg>
-        <svg class="ic-closed" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
-        <span id="studyChipLockLabel">잠금</span>
-      </button>
-    </div>
-    <div class="study-chip study-chip-work" id="studyChipWork">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.4-10.4a2.1 2.1 0 0 0-3-3L5.2 16Z"></path><path d="m14.5 6.7 2.8 2.8"></path></svg>
-      <span class="study-chip-role">작업</span>
-      <span class="study-chip-name" id="studyChipWorkName"></span>
-    </div>
+    <button class="study-ref-lock" id="studyChipLock" type="button" aria-pressed="false" title="참고 문서를 읽기 전용으로 잠그기" aria-label="참고 문서 읽기 전용 잠금">
+      <svg class="ic-open" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 7.6-1.7"></path></svg>
+      <svg class="ic-closed" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+    </button>
     <button class="study-role-swap" id="studyRoleSwap" type="button" title="참고·작업 화면 좌우 위치 바꾸기 (분할바 더블클릭과 동일)" aria-label="참고와 작업 화면 좌우 위치 바꾸기">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13m0 0-3-3m3 3-3 3"></path><path d="M20 16H7m0 0 3-3m-3 3 3 3"></path></svg>
     </button>

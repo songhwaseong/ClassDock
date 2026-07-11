@@ -746,29 +746,24 @@
   #content.study-mode.study-reference-locked .study-ctl-divider{display:none}
   /* 참고가 PDF가 아니면 PDF 전용 컨트롤(페이지·찾기·필기 알약)을 숨김 */
   #content.study-mode.study-ref-nonpdf .study-page-ctl{display:none!important}
-  /* 학습 화면: 칸마다 왼쪽 위에 떠 있는 역할 칩(참고·작업 + 파일명). 평소 반투명, 올리면 선명 */
-  .study-chip{position:absolute;top:10px;z-index:14;display:none;align-items:center;gap:6px;max-width:min(38%,300px);
-    padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:12px;
-    box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.62;transition:opacity .15s ease}
-  .study-chip:hover,.study-chip:focus-within{opacity:1}
-  .study-chip>svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-  .study-chip-role{font-weight:700;flex:0 0 auto}
-  .study-chip-name{color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .study-chip button{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:12px;line-height:1;color:#fff;
-    border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);border-radius:999px;padding:3px 8px;margin-left:2px;cursor:pointer;flex:0 0 auto}
-  .study-chip button:hover{background:rgba(255,255,255,.2)}
-  .study-chip button svg{display:block;width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-  .study-chip-ref .ic-closed{display:none}
-  #content.study-mode.study-reference-locked .study-chip-ref .ic-closed{display:block}
-  #content.study-mode.study-reference-locked .study-chip-ref .ic-open{display:none}
-  #content.study-mode.study-reference-locked .study-chip-ref{opacity:.92}
-  #content.study-mode.study-reference-locked #studyChipLock{background:var(--accent);border-color:var(--accent)}
-  #content.study-mode .study-chip{display:inline-flex}
-  #content.study-mode .study-chip-ref{left:10px}
-  #content.study-mode .study-chip-work{left:calc(var(--study-split,50%) + 14px)}
-  #content.study-mode.study-swapped .study-chip-ref{left:calc(var(--study-split,50%) + 14px)}
-  #content.study-mode.study-swapped .study-chip-work{left:10px}
-  #content:fullscreen .study-chip,body.viewer-fullscreen #content .study-chip{display:none!important}
+  /* 학습 화면: 참고 칸 왼쪽 위 잠금 열쇠 하나만. 평소 숨김 → 그 모서리에 마우스를 올리면 나타남. 잠겨 있으면 계속 보임 */
+  /* 바탕은 투명, 자물쇠 선만 연한 빨강. 어디서든 보이게 선에 옅은 그림자만 얹는다 */
+  .study-ref-lock{position:absolute;top:12px;z-index:15;display:none;align-items:center;justify-content:center;
+    width:34px;height:34px;padding:0;border:0;background:transparent;color:#f87171;cursor:pointer;
+    opacity:0;pointer-events:none;transition:opacity .16s ease,color .16s ease,transform .16s ease}
+  .study-ref-lock svg{display:block;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
+    filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.35))}
+  .study-ref-lock .ic-closed{display:none}
+  .study-ref-lock:hover{color:#ef4444;transform:scale(1.08)}
+  #content.study-mode .study-ref-lock{display:inline-flex;left:12px}
+  #content.study-mode.study-swapped .study-ref-lock{left:calc(var(--study-split,50%) + 14px)}
+  /* 모서리 호버(JS가 붙이는 study-ref-lock-show)·키보드 포커스·잠금 상태일 때만 노출 */
+  #content.study-mode.study-ref-lock-show .study-ref-lock,
+  #content.study-mode.study-reference-locked .study-ref-lock,
+  #content.study-mode .study-ref-lock:focus-visible{opacity:1;pointer-events:auto}
+  #content.study-mode.study-reference-locked .study-ref-lock .ic-open{display:none}
+  #content.study-mode.study-reference-locked .study-ref-lock .ic-closed{display:block}
+  #content:fullscreen .study-ref-lock,body.viewer-fullscreen #content .study-ref-lock{display:none!important}
   /* 두 칸 사이 가운데: 참고 ⇄ 작업 역할 교체 버튼(분할바 더블클릭=위치 바꾸기와 별개) */
   .study-role-swap{position:absolute;display:none;left:var(--study-split,50%);top:50%;transform:translate(-50%,-50%);z-index:14;
     width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(15,23,42,.82);color:#fff;
@@ -780,10 +775,9 @@
   /* 분할화면 바 자동 숨김: 입력이 없으면 흐려졌다가 마우스·키 입력에 다시 나타남(전체화면 fs-controls 와 같은 방식) */
   .study-page-ctl{transition:opacity .18s ease}
   #content.study-mode.study-idle .study-page-ctl,
-  #content.study-mode.study-idle .study-chip,
   #content.study-mode.study-idle .study-role-swap{opacity:0;pointer-events:none}
   @media (prefers-reduced-motion:reduce){
-    .study-page-ctl,#content.study-mode .study-chip,#content.study-mode .study-role-swap{transition:none}
+    .study-page-ctl,#content.study-mode .study-ref-lock,#content.study-mode .study-role-swap{transition:none}
   }
   /* 일반 화면: PDF 보기일 때 화면 오른쪽 위에 떠 있는 페이지 컨트롤(학습 화면과 같은 모양) */
   .view-page-ctl{position:absolute;top:10px;right:16px;z-index:14;display:none;
@@ -2543,10 +2537,8 @@
     #content.study-mode .study-divider{display:none}
     #content.study-mode .study-page-ctl{right:10px;top:10px}
     #content.study-mode.study-swapped .study-page-ctl{right:10px;top:calc(50% + 10px)}
-    #content.study-mode .study-chip-ref{left:10px;top:10px}
-    #content.study-mode .study-chip-work{left:10px;top:calc(50% + 10px)}
-    #content.study-mode.study-swapped .study-chip-ref{left:10px;top:calc(50% + 10px)}
-    #content.study-mode.study-swapped .study-chip-work{left:10px;top:10px}
+    #content.study-mode .study-ref-lock{left:12px;top:10px}
+    #content.study-mode.study-swapped .study-ref-lock{left:12px;top:calc(50% + 10px)}
     .study-role-swap{left:auto;right:14px;top:50%;transform:translateY(-50%)}
   }
   .md-host{max-width:920px;margin:0 auto;background:#fff;border-radius:8px;padding:34px 42px;
