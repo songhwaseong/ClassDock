@@ -2660,7 +2660,8 @@
   .image-gallery-count{min-width:64px;text-align:center;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
   .image-gallery-body{width:min(1320px,100%);margin:0 auto}
   .image-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-  .image-gallery-card{min-width:0;display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);text-align:left;cursor:pointer;overflow:hidden}
+  /* content-visibility: 화면 밖 카드의 레이아웃·페인트를 건너뛴다 — 수천 장 격자에서 스크롤·초기 표시가 가벼워짐 */
+  .image-gallery-card{min-width:0;display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);text-align:left;cursor:pointer;overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 190px}
   .image-gallery-card:hover,.image-gallery-card:focus-visible{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent);outline:none}
   .image-gallery-thumb{display:grid;place-items:center;height:125px;overflow:hidden;border-radius:6px;background:linear-gradient(45deg,color-mix(in srgb,var(--panel-2) 76%,#fff) 25%,transparent 25%),linear-gradient(-45deg,color-mix(in srgb,var(--panel-2) 76%,#fff) 25%,transparent 25%),var(--panel-2);background-size:16px 16px}
   .image-gallery-thumb img{width:100%;height:100%;object-fit:cover}

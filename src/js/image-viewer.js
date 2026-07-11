@@ -108,7 +108,9 @@ function renderFolderImageGallery(doc, host){
   const body = document.createElement("div"); body.className = "image-gallery-body";
   shell.append(bar, body); host.appendChild(shell);
 
+  let gridIo = null;   // 격자 썸네일 지연 로더 — 다시 그릴 때 이전 관찰자를 정리한다
   const paint = () => {
+    if (gridIo){ gridIo.disconnect(); gridIo = null; }
     body.innerHTML = "";
     const single = state.mode === "single";
     gridButton.classList.toggle("active", !single);
@@ -118,12 +120,25 @@ function renderFolderImageGallery(doc, host){
     next.disabled = !single || state.index >= items.length - 1;
     if (!single){
       const grid = document.createElement("div"); grid.className = "image-gallery-grid";
+      // 수천 장 폴더: 화면 근처 카드만 이미지 URL 을 만들어 디코딩한다(전체 즉시 로드 방지)
+      gridIo = (typeof IntersectionObserver !== "undefined")
+        ? new IntersectionObserver((entries) => {
+            for (const ent of entries){
+              if (!ent.isIntersecting) continue;
+              const img = ent.target;
+              gridIo.unobserve(img);
+              const file = img.__galleryFile;
+              if (file){ img.__galleryFile = null; gallerySetImageSource(img, file); }
+            }
+          }, { rootMargin: "900px 0px" })
+        : null;
       items.forEach((item, index) => {
         const card = document.createElement("button"); card.type = "button"; card.className = "image-gallery-card";
         card.title = item.labelPath || item.name; card.setAttribute("aria-label", item.name + " 한 장 보기");
         const frame = document.createElement("span"); frame.className = "image-gallery-thumb";
         const image = document.createElement("img"); image.loading = "lazy"; image.alt = "";
-        gallerySetImageSource(image, item.file);
+        if (gridIo){ image.__galleryFile = item.file; gridIo.observe(image); }
+        else gallerySetImageSource(image, item.file);
         frame.appendChild(image);
         const name = document.createElement("strong"); name.textContent = item.name;
         const path = document.createElement("small"); path.textContent = item.labelPath || item.name;

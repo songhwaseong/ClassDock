@@ -337,7 +337,6 @@ function makeDoc(kind, name, options={}){
   el.className = (kind === "pdf") ? "viewer" : "office";
   el.hidden = true;
   byId("content").appendChild(el);
-  attachPanBehavior(el);                 // 손바닥 도구: 내용이 화면보다 크면 드래그로 이동
   const d = { id, nodeId: "doc:" + id, parentId: options.parentId || null, name, kind, el,
     workspacePath: options.workspacePath || null, size: options.size || 0, sourceKey: options.sourceKey || null,
     isScratch: !!options.isScratch, textEncoding: options.textEncoding || null,
@@ -346,13 +345,14 @@ function makeDoc(kind, name, options={}){
   d.archiveCtx = options.archiveCtx || null;
   d.fsHandle = options.fsHandle || null;
   d.fsDirHandle = options.fsDirHandle || null;   // 같은 폴더에 새 파일을 만들 때 쓰는 폴더 핸들(변환 노트북 저장 등)
-  attachStudyReferenceGuard(d);
-  el.addEventListener("pointerdown", () => focusSidebarDoc(id));
+  // 손바닥 도구·읽기전용 가드·사이드바 포커스 리스너는 첫 활성화(ensureDocInteractive)로 미룬다.
+  // 이미지 수천 장 폴더에서 문서마다 관찰자 2개 + 리스너 십수 개를 만들던 고정 비용 제거.
   if (kind === "pdf"){
     d.pdfBytes=null; d.fileName=name; d.pages=[]; d.allPages=[]; d.elements=[]; d.selected=null; d.addCount=0; d.zoom=defaultPdfZoom();
     d.selectedPageIds = new Set(); d.pagePanelOpen = false;
   }
   docs.push(d);
+  if (d.sourceKey && !docsBySourceKey.has(d.sourceKey)) docsBySourceKey.set(d.sourceKey, d);
   navNodes.push({ nodeId: d.nodeId, type: "doc", docId: id, parentId: d.parentId });
   bumpNavTree();
   renderSidebar();                       // 새 항목을 한 번만 그려둔다(이후 전환은 활성표시만 갱신)
@@ -714,10 +714,22 @@ function focusSidebarDoc(id){
 }
 function focusSidebarActive(){ focusSidebarDoc(activeId); }
 
+// 문서당 상호작용 부착(지연): 손바닥 도구 관찰자 + 분할화면 읽기전용 가드 + 사이드바 포커스.
+// makeDoc 시점이 아니라 처음 화면에 쓰일 때 한 번만 붙여, 대량 폴더 열기의 문서당 고정 비용을 없앤다.
+function ensureDocInteractive(d){
+  if (!d || d.__interactive || !d.el) return;
+  d.__interactive = true;
+  attachPanBehavior(d.el);                 // 손바닥 도구: 내용이 화면보다 크면 드래그로 이동
+  attachStudyReferenceGuard(d);
+  d.el.addEventListener("pointerdown", () => focusSidebarDoc(d.id));
+}
+
 // 지연 렌더: 문서를 처음 활성화할 때 doc.render() 를 한 번만 실행한다.
 // (압축 안에 파일이 많아도 열기/전환이 빨라지고, 클릭한 문서만 그린다.)
 function ensureRendered(d){
-  if (!d || d.closed || d.rendered || typeof d.render !== "function") return Promise.resolve();
+  if (!d || d.closed) return Promise.resolve();
+  ensureDocInteractive(d);                 // 활성화 경로 공통 지점 — 여기서 처음 한 번 부착
+  if (d.rendered || typeof d.render !== "function") return Promise.resolve();
   if (d._renderPromise) return d._renderPromise;          // 진행 중인 첫 렌더가 끝날 때까지 후속 이동도 함께 대기
   d._rendering = true;
   const promise = Promise.resolve().then(async () => {
@@ -879,6 +891,7 @@ function closeDoc(id, options={}){
     closedDocStack.push(d.__reopen);
     if (closedDocStack.length > 12) closedDocStack.shift();
   }
+  if (d.sourceKey && docsBySourceKey.get(d.sourceKey) === d) docsBySourceKey.delete(d.sourceKey);
   contentTextCache.delete(id);                 // 내용 검색 캐시 정리
   contentLowerCache.delete(id);
   contentMatchSnippets.delete(id);
@@ -1741,6 +1754,15 @@ function renderSidebar(){
     item.onclick = (e) => {
       sidebarCursorKey = node.nodeId;                       // 클릭한 줄을 키보드 커서로 동기화
       if (node.type === "group"){
+        // 자동 복원에서는 대량 사진의 바이트를 보관하지 않는다. 그 결과 빈 상태로 복원된
+        // 루트 폴더를 처음 클릭하면, 펼치기만 하지 말고 저장된 폴더 핸들로 실제 파일을 다시 읽는다.
+        if (node.restorePendingImages && node.folderRefreshRootId === node.nodeId && !node.folderReloading){
+          node.folderReloading = true;
+          Promise.resolve(requestFolderRefresh(node.nodeId))
+            .catch(() => {})
+            .finally(() => { node.folderReloading = false; });
+          return;
+        }
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
         // Alt+클릭: 형제를 유지한 채 자기만 펴기/접기(여러 폴더 동시에 펼쳐두고 싶을 때).
         node.expanded = !node.expanded;

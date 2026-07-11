@@ -13,7 +13,8 @@ test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", ()
   assert.match(source, /buildWorkspacePayload\(rows, folderPaths\)/);
   assert.match(source, /workspaceFolderMarkerPath\(folder\)/);
   assert.match(source, /workspaceFolderPathFromMarker\(row\.path\)/);
-  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths \}\)/);
+  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, restoreFromWorkspace:true \}\)/);
+  assert.match(source, /restorePendingImages = !!options\.restoreFromWorkspace && openable\.length === 0/);
 });
 
 test("folder refresh picker starts from the previous root folder handle when possible", () => {
