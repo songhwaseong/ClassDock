@@ -153,6 +153,8 @@
   .sidebar-toggle{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;padding:0;border-radius:8px}
   .sidebar-toggle svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .theme-toggle{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:6px 9px}
+  /* 상시 유틸리티(분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
+  .header-util{display:inline-flex;align-items:center;gap:6px}
   .save-folder-open{display:inline-flex;align-items:center;gap:6px}
   .save-folder-open[hidden]{display:none}
   .save-folder-open svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -680,11 +682,11 @@
     border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);border-radius:6px;padding:4px 3px;outline:none}
   .study-page-ctl input:focus{border-color:var(--accent);background:rgba(255,255,255,.18)}
   .study-page-ctl .page-sep{color:rgba(255,255,255,.85)}
-  .study-find-btn,.study-pen-btn,.study-swap-btn{font:inherit;font-size:13px;line-height:1;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);
+  .study-find-btn,.study-pen-btn,.study-swap-btn,.page-find-btn{font:inherit;font-size:13px;line-height:1;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);
     color:#fff;border-radius:6px;padding:4px 7px;margin-left:3px;cursor:pointer}
-  .study-find-btn svg,.study-pen-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;
+  .study-find-btn svg,.study-pen-btn svg,.page-find-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;
     stroke-linecap:round;stroke-linejoin:round}
-  .study-find-btn:hover,.study-pen-btn:hover,.study-swap-btn:hover{background:rgba(255,255,255,.2)}
+  .study-find-btn:hover,.study-pen-btn:hover,.study-swap-btn:hover,.page-find-btn:hover{background:rgba(255,255,255,.2)}
   .study-pen-btn.active{background:var(--accent);border-color:var(--accent)}
   .study-readonly-badge{display:none;align-items:center;padding:4px 7px;margin-left:3px;border:1px solid rgba(255,255,255,.22);
     border-radius:6px;background:rgba(15,23,42,.48);color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap}
@@ -731,6 +733,16 @@
   #content.pdf-active .view-page-ctl{display:inline-flex}
   #content.study-mode .view-page-ctl{display:none}                      /* 학습 화면은 전용 컨트롤 사용 */
   body.viewer-fullscreen #content.pdf-active .view-page-ctl{display:none}  /* 전체화면은 fs 컨트롤 사용 */
+  /* 뷰어 컨트롤 클러스터: 줌·전체화면을 페이지 표시줄(pill) 안으로 모음 — 문서에 작용하는 기능을 문서 위에 배치 */
+  .view-page-ctl .zoom-ctl{display:inline-flex;align-items:center;gap:2px}
+  .view-page-ctl .zoom-ctl button,.view-page-ctl .page-fs-btn{font:inherit;font-size:12.5px;line-height:1;
+    border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#fff;border-radius:6px;padding:4px 7px;cursor:pointer}
+  .view-page-ctl .zoom-ctl button:hover,.view-page-ctl .page-fs-btn:hover{background:rgba(255,255,255,.2)}
+  .view-page-ctl #zoomLabel{min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
+  .view-page-ctl .page-fs-btn{display:inline-flex;align-items:center;justify-content:center}
+  .view-page-ctl .page-fs-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .view-page-ctl .page-fs-btn.active{background:var(--accent);border-color:var(--accent)}
+  .view-page-ctl .pv-divider{width:1px;align-self:stretch;background:rgba(255,255,255,.2);margin:1px 2px}
 
   /* ---- 배치된 요소 ---- */
   .placed{position:absolute;cursor:move;touch-action:none;user-select:none;z-index:8}   /* 텍스트/링크 레이어(6·7)보다 위에 둬 글자 위에 놓인 서명·상자도 잡히게 */

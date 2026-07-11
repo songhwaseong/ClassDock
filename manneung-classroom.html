@@ -32,17 +32,10 @@
       <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
     </div></details>
     <input type="file" id="mergePdfInput" accept=".pdf,application/pdf" multiple hidden>
-    <button id="btnPdfFind" type="button" data-shortcut-action="findInDocument" data-shortcut-title="PDF에서 찾기" data-shortcut-aria="true">찾기</button>
     <span class="spacer"></span>
-    <span class="zoom-ctl">
-      <button id="zoomOut" type="button" title="축소 (Ctrl+-)">－</button>
-      <button id="zoomLabel" type="button" title="원래대로(맞춤)">100%</button>
-      <button id="zoomIn" type="button" title="확대 (Ctrl++)">＋</button>
-    </span>
     <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
     </button>
-    <button id="btnFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
     <button id="btnDownload" class="primary" data-shortcut-action="saveCurrent" data-shortcut-title="PDF 다운로드">다운로드</button>
   </div>
   <div class="tools" id="officeTools" hidden>
@@ -53,6 +46,7 @@
     <button id="btnOfficeFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
     <button id="btnPrint">인쇄 / PDF로 저장</button>
   </div>
+  <div class="header-util">
   <button id="studyToggle" type="button" hidden title="참고 문서와 작업 문서를 나란히 보기">분할 작업</button>
   <div class="header-more-wrap" id="headerMoreWrap">
     <button class="header-more-btn" id="headerMore" type="button" title="더보기 — 저장 폴더·이미지 메모" aria-label="더보기" aria-haspopup="menu" aria-expanded="false" aria-controls="headerMoreMenu">
@@ -87,6 +81,7 @@
   <button id="settingsOpen" type="button" title="설정" aria-label="설정">⚙</button>
   <button id="helpOpen" type="button" title="도움말·단축키" aria-label="도움말">?</button>
   <button id="themeToggle" class="theme-toggle" type="button" title="다크 모드로 전환" aria-label="테마 전환"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+  </div>
   </div>
 </header>
 
@@ -219,8 +214,16 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13m0 0-3-3m3 3-3 3"></path><path d="M20 16H7m0 0 3-3m-3 3 3 3"></path></svg>
     </button>
     <span class="page-ctl view-page-ctl" id="pageCtl" title="페이지 번호 입력 후 Enter로 이동">
+      <span class="zoom-ctl">
+        <button id="zoomOut" type="button" title="축소 (Ctrl+-)">－</button>
+        <button id="zoomLabel" type="button" title="원래대로(맞춤)">100%</button>
+        <button id="zoomIn" type="button" title="확대 (Ctrl++)">＋</button>
+      </span>
+      <span class="pv-divider" aria-hidden="true"></span>
       <input id="pageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
       <span class="page-sep" id="pageTotal">/ 1</span>
+      <button id="btnPdfFind" type="button" class="page-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="PDF에서 찾기" data-shortcut-aria="true" aria-label="PDF에서 찾기"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg></button>
+      <button id="btnFullscreen" type="button" class="page-fs-btn" title="문서 영역 전체화면" aria-label="문서 영역 전체화면"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
     </span>
     <div class="dropzone" id="dropzone">
       <div class="dz-inner" id="dzInner">

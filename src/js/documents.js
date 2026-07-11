@@ -208,14 +208,13 @@ function toggleViewerFullscreen(){
 }
 function syncFullscreenButtons(){
   const on = isViewerFullscreen();
-  const label = on ? "⛶ 나가기" : "⛶ 전체화면";
   const title = on ? "전체화면 종료" : "문서 영역 전체화면";
-  ["btnFullscreen","btnOfficeFullscreen"].forEach(id => {
-    const btn = byId(id);
-    if (!btn) return;
-    btn.textContent = label;
-    btn.title = title;
-  });
+  // PDF 전체화면은 페이지 표시줄(pill) 안의 아이콘 버튼 — 라벨을 덮어쓰지 않고 툴팁·상태만 갱신
+  const pdfFs = byId("btnFullscreen");
+  if (pdfFs){ pdfFs.title = title; pdfFs.setAttribute("aria-label", title); pdfFs.classList.toggle("active", on); }
+  // 오피스 전체화면은 헤더의 텍스트 버튼
+  const offFs = byId("btnOfficeFullscreen");
+  if (offFs){ offFs.textContent = on ? "⛶ 나가기" : "⛶ 전체화면"; offFs.title = title; }
   const group = byId("fsZoomGroup");
   const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
   if (group) group.hidden = !pdf;
