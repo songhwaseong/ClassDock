@@ -785,6 +785,15 @@
   /* 병합 선택 하이라이트: 뷰어(스크롤 컨테이너) 안에 절대배치 → 내용과 함께 스크롤된다 */
   .pdf-sel-hilite{position:absolute;left:0;top:0;pointer-events:none;z-index:9}
   .pdf-sel-box{position:absolute;background:rgba(37,99,235,.28);border-radius:1.5px}
+  /* 글자 선택 시 뜨는 강조(형광펜) 색상 막대 */
+  .pdf-hi-bar{position:fixed;z-index:210;display:inline-flex;align-items:center;gap:7px;
+    background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:5px 10px;
+    box-shadow:0 8px 24px rgba(0,0,0,.26)}
+  .pdf-hi-bar[hidden]{display:none}
+  .pdf-hi-cap{font-size:14px;line-height:1;user-select:none}
+  .pdf-hi-color{width:20px;height:20px;border-radius:50%;border:2px solid rgba(0,0,0,.12);
+    padding:0;cursor:pointer;transition:transform .08s}
+  .pdf-hi-color:hover{transform:scale(1.15);border-color:var(--ink)}
   .pdf-annot-layer{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none;z-index:7}
   .pdf-annot-layer a{position:absolute;display:block;pointer-events:auto;cursor:pointer;border-radius:2px;
     transition:background .1s,box-shadow .1s}

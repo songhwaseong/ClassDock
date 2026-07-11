@@ -1302,3 +1302,127 @@ function penPointerUp(){
 }
 document.addEventListener("pointerdown", penPointerDown, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && penMode){ setPenMode(false); } });
+
+/* ===== PDF 텍스트 선택 → 형광펜 강조(마크업) =====
+   펜 모드 없이 크롬 PDF처럼 글자를 드래그로 선택하면 색상 막대가 떠서 바로 강조한다.
+   선택 범위를 줄 단위 사각형으로 병합해 형광펜 '잉크 스트로크'로 변환 → 기존 잉크
+   파이프라인(렌더·직렬화 PNG·자동복원 벡터·되돌리기·PDF 굽기·리플레이)에 그대로 합류한다. */
+const TEXT_HI_COLORS = [["#ffd43b","노랑"],["#69db7c","연두"],["#ff8fab","분홍"],["#74c0fc","하늘"],["#ffa94d","주황"]];
+let _textHiColor = "#ffd43b";
+
+// 현재 선택이 편집 가능한 PDF 글자 위인지 확인하고 { sel, doc } 반환(아니면 null).
+function pdfTextSelectionInfo(){
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const anchor = sel.anchorNode;
+  const anchorEl = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+  if (!anchorEl || !anchorEl.closest || !anchorEl.closest(".pdf-text-layer")) return null;
+  const doc = docs.find(d => d.kind === "pdf" && d.el && d.el.contains(anchor));
+  return doc ? { sel, doc } : null;
+}
+// 선택 범위의 화면 사각형들을 페이지별로 모아 줄 단위로 병합하고 형광펜 스트로크를 얹는다.
+function applyTextHighlight(color){
+  const info = pdfTextSelectionInfo();
+  if (!info) return false;
+  const { sel, doc } = info;
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return false; }
+  const z = doc.zoom || 1;
+  const byPage = new Map();
+  for (let i = 0; i < sel.rangeCount; i++){
+    for (const r of sel.getRangeAt(i).getClientRects()){
+      if (r.width <= 0.5 || r.height <= 0.5) continue;
+      const probe = document.elementFromPoint(Math.min(window.innerWidth - 1, Math.max(0, r.left + Math.min(4, r.width / 2))), r.top + r.height / 2);
+      const pageEl = probe && probe.closest ? probe.closest(".page") : null;
+      if (!pageEl) continue;
+      const pageIndex = doc.pages.findIndex(p => p.pageEl === pageEl);
+      if (pageIndex < 0) continue;
+      if (!byPage.has(pageIndex)) byPage.set(pageIndex, []);
+      byPage.get(pageIndex).push(r);
+    }
+  }
+  let made = 0;
+  for (const [pageIndex, prects] of byPage){
+    const p = doc.pages[pageIndex]; if (!p || !p.overlay) continue;
+    const orect = p.overlay.getBoundingClientRect();
+    const lines = [];
+    for (const r of prects){
+      const left = (r.left - orect.left) / z, right = (r.right - orect.left) / z;
+      const top = (r.top - orect.top) / z, bottom = (r.bottom - orect.top) / z;
+      let g = null;
+      for (const c of lines){
+        const ov = Math.min(bottom, c.bottom) - Math.max(top, c.top);
+        if (ov > 0.4 * Math.min(bottom - top, c.bottom - c.top)){ g = c; break; }
+      }
+      if (g){ g.left = Math.min(g.left, left); g.right = Math.max(g.right, right); g.top = Math.min(g.top, top); g.bottom = Math.max(g.bottom, bottom); }
+      else lines.push({ left, right, top, bottom });
+    }
+    const el = inkElForPage(doc, pageIndex);
+    for (const g of lines){
+      const h = g.bottom - g.top, w = g.right - g.left;
+      if (h < 2 || w < 1) continue;
+      const cy = (g.top + g.bottom) / 2, inset = Math.min(h / 2, w / 2);
+      const stroke = { tool: "highlighter", color, width: h, points: [{ x: g.left + inset, y: cy }, { x: g.right - inset, y: cy }] };
+      el.__strokes.push(stroke);
+      if (typeof lessonPdfOnStroke === "function") lessonPdfOnStroke(doc, pageIndex, stroke);
+      made++;
+    }
+    if (made) renderInkEl(el);
+  }
+  if (made){
+    recordPdfEdit(doc);
+    try { sel.removeAllRanges(); } catch(_){}
+    if (typeof refreshPdfSelHighlight === "function") refreshPdfSelHighlight();
+    hideTextHiBar();
+  }
+  return made > 0;
+}
+
+// ----- 선택 위에 뜨는 강조 색상 막대 -----
+let _textHiBar = null;
+function ensureTextHiBar(){
+  if (_textHiBar) return _textHiBar;
+  const bar = document.createElement("div");
+  bar.className = "pdf-hi-bar"; bar.hidden = true;
+  bar.setAttribute("role", "toolbar"); bar.setAttribute("aria-label", "선택한 글자 강조");
+  const cap = document.createElement("span"); cap.className = "pdf-hi-cap"; cap.textContent = "🖍️"; bar.appendChild(cap);
+  for (const [c, name] of TEXT_HI_COLORS){
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "pdf-hi-color"; b.style.background = c;
+    b.title = name + "으로 강조"; b.setAttribute("aria-label", name + "으로 강조");
+    // mousedown 에서 preventDefault 로 선택을 유지한 채 바로 적용(클릭이면 선택이 풀림).
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); e.stopPropagation(); _textHiColor = c; applyTextHighlight(c); });
+    bar.appendChild(b);
+  }
+  document.body.appendChild(bar);
+  _textHiBar = bar; return bar;
+}
+function hideTextHiBar(){ if (_textHiBar) _textHiBar.hidden = true; }
+function positionTextHiBar(){
+  const info = pdfTextSelectionInfo();
+  if (!info || isPdfReferenceLocked(info.doc)){ hideTextHiBar(); return; }
+  const rects = info.sel.getRangeAt(info.sel.rangeCount - 1).getClientRects();
+  const r = rects && rects.length ? rects[rects.length - 1] : info.sel.getRangeAt(0).getBoundingClientRect();
+  if (!r || (!r.width && !r.height)){ hideTextHiBar(); return; }
+  const bar = ensureTextHiBar();
+  bar.hidden = false;
+  const bw = bar.offsetWidth || 180, bh = bar.offsetHeight || 34;
+  let left = r.left + r.width / 2 - bw / 2;
+  left = Math.max(8, Math.min(window.innerWidth - bw - 8, left));
+  let top = r.top - bh - 8;                              // 선택 위쪽에, 공간 없으면 아래로
+  if (top < 8) top = Math.min(window.innerHeight - bh - 8, r.bottom + 8);
+  bar.style.left = left + "px"; bar.style.top = top + "px";
+}
+// 드래그 중엔 깜빡이지 않도록 손을 뗐을 때(pointerup) 위치를 잡고, 선택이 풀리면 숨긴다.
+document.addEventListener("pointerup", (e) => {
+  if (e.target && e.target.closest && e.target.closest(".pdf-hi-bar")) return;
+  setTimeout(positionTextHiBar, 0);
+});
+document.addEventListener("selectionchange", () => {
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.isCollapsed || !pdfTextSelectionInfo()) hideTextHiBar();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && _textHiBar && !_textHiBar.hidden){ hideTextHiBar(); }
+}, true);
+window.addEventListener("resize", hideTextHiBar);
+document.addEventListener("scroll", hideTextHiBar, true);   // PDF 스크롤 시 위치가 어긋나므로 숨김
