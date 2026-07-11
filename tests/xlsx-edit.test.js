@@ -421,3 +421,60 @@ test("ExcelJS orderNo 로 시트 순서를 바꿔 저장하면 재로드 순서�
   assert.deepEqual(reopened.worksheets.map(ws => ws.name), ["B", "C", "A"]);
   assert.equal(reopened.getWorksheet("A").getCell("A1").value, "a");   // 데이터 유지
 });
+
+test("수식 자동완성 컨텍스트: 함수 이름 입력·괄호 안 인자·비수식 구분", () => {
+  const { formulaTypingContext } = require("../src/js/spreadsheet-viewer.js");
+  // '=' 뒤 함수 이름 입력 중
+  assert.deepEqual(formulaTypingContext("=SU", 3), { type:"name", partial:"SU", start:1 });
+  assert.deepEqual(formulaTypingContext("=A1+CO", 6), { type:"name", partial:"CO", start:4 });
+  assert.deepEqual(formulaTypingContext("=SUM(A1)+AV", 11), { type:"name", partial:"AV", start:9 });
+  // 괄호 안 → 인자 힌트(가장 안쪽 함수)
+  assert.deepEqual(formulaTypingContext("=SUM(A1", 7), { type:"args", name:"SUM" });
+  assert.deepEqual(formulaTypingContext("=SUM(IF(A1>1,", 13), { type:"args", name:"IF" });
+  // 닫힌 괄호 뒤·수식 아님·완성할 것 없음 → null
+  assert.equal(formulaTypingContext("=SUM(A1)", 8), null);
+  assert.equal(formulaTypingContext("hello", 5), null);
+  assert.equal(formulaTypingContext("=A1+", 4), null);
+  // 셀 참조(SUM 안의 A1)는 함수 이름 후보로 취급하지 않도록 캐럿이 참조 뒤일 때 args 유지
+  assert.deepEqual(formulaTypingContext("=RANK(B2,", 9), { type:"args", name:"RANK" });
+});
+
+test("자동합계(Σ): 선택 모양에 따라 아래·오른쪽·제자리에 수식을 만든다", () => {
+  const { spreadsheetAutoFormulaJobs } = require("../src/js/spreadsheet-viewer.js");
+  const n = (v) => ({ v, f: null });
+  const t = (v) => ({ v, f: null });
+  // A열 숫자 3행 + B열 텍스트
+  const model = [
+    [n(10), t("가")],
+    [n(20), t("나")],
+    [n(30), t("다")]
+  ];
+  // 여러 행 선택 → 숫자 있는 열만 아래 칸에 열 합계
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(model, { s:{ r:0, c:0 }, e:{ r:2, c:1 } }, "SUM"),
+    [{ r:3, c:0, f:"SUM(A1:A3)" }]
+  );
+  // 한 행 여러 열 → 오른쪽 칸에 행 합계
+  const rowModel = [[n(1), n(2), n(3)]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(rowModel, { s:{ r:0, c:0 }, e:{ r:0, c:2 } }, "AVERAGE"),
+    [{ r:0, c:3, f:"AVERAGE(A1:C1)" }]
+  );
+  // 단일 셀 → 위로 이어진 숫자 범위를 그 셀에
+  const below = [[n(1)], [n(2)], [n(3)], [t("")]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(below, { s:{ r:3, c:0 }, e:{ r:3, c:0 } }, "SUM"),
+    [{ r:3, c:0, f:"SUM(A1:A3)" }]
+  );
+  // 단일 셀 · 위에 숫자 없으면 왼쪽으로
+  const leftward = [[n(5), n(6), t("")]];
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs(leftward, { s:{ r:0, c:2 }, e:{ r:0, c:2 } }, "SUM"),
+    [{ r:0, c:2, f:"SUM(A1:B1)" }]
+  );
+  // 숫자가 전혀 없으면 빈 배열
+  assert.deepEqual(
+    spreadsheetAutoFormulaJobs([[t("가"), t("나")]], { s:{ r:0, c:0 }, e:{ r:0, c:1 } }, "SUM"),
+    []
+  );
+});

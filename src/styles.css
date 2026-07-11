@@ -1314,6 +1314,40 @@
   .xlsx-tab-add:hover{background:var(--accent);color:#fff;border-style:solid}
   /* 탭 드래그(순서 바꾸기) 중 — 들어 올린 느낌 + 잡는 커서 */
   .xlsx-tab-dragging{opacity:.6;cursor:grabbing;box-shadow:0 4px 10px rgba(15,23,42,.25);position:relative;z-index:3}
+  /* 수식 자동완성 드롭다운(=SU → 함수 후보 · SUM( → 인자 힌트) */
+  .xlsx-fx-menu{position:fixed;z-index:60;min-width:240px;max-width:330px;background:#fff;border:1px solid var(--border);
+    border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:4px;font-size:12.5px}
+  .xlsx-fx-item{display:flex;align-items:baseline;gap:5px;padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden}
+  .xlsx-fx-item b{color:var(--accent);flex:none}
+  .xlsx-fx-sig{color:var(--muted);flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+  .xlsx-fx-desc{color:var(--muted);margin-left:auto;padding-left:8px;overflow:hidden;text-overflow:ellipsis}
+  .xlsx-fx-item.sel,.xlsx-fx-item:hover{background:var(--accent);color:#fff}
+  .xlsx-fx-item.sel b,.xlsx-fx-item.sel .xlsx-fx-sig,.xlsx-fx-item.sel .xlsx-fx-desc,
+  .xlsx-fx-item:hover b,.xlsx-fx-item:hover .xlsx-fx-sig,.xlsx-fx-item:hover .xlsx-fx-desc{color:#fff}
+  .xlsx-fx-hint{padding:5px 8px;color:var(--muted)}
+  .xlsx-fx-hint b{color:var(--accent)}
+  /* 열별 자동필터: 열 머리글 ▼ 버튼(리사이저 손잡이 왼쪽에 배치) + 값 체크박스 패널 */
+  .sheet-colfilter-btn{position:absolute;top:50%;right:9px;transform:translateY(-50%);border:0;background:transparent;
+    font-size:9px;line-height:1;padding:3px 4px;border-radius:4px;color:#94a3b8;cursor:pointer}
+  .sheet-colfilter-btn:hover{background:rgba(37,99,235,.15);color:var(--accent)}
+  .sheet-colfilter-btn.active{color:#fff;background:var(--accent)}
+  .selectable-sheet .sheet-col-head{padding-right:24px}   /* ▼ 버튼 자리 확보(편집 모드에서만 버튼이 붙지만 여백은 무해) */
+  .sheet-colfilter-menu{position:fixed;z-index:70;width:230px;background:#fff;border:1px solid var(--border);
+    border-radius:10px;box-shadow:0 10px 28px rgba(15,23,42,.22);padding:8px;font-size:13px;display:flex;flex-direction:column;gap:6px}
+  .sheet-colfilter-title{font-weight:700;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sheet-colfilter-search{font:inherit;padding:4px 8px;border:1px solid var(--border);border-radius:6px;width:100%;box-sizing:border-box}
+  .sheet-colfilter-selrow{display:flex;gap:6px}
+  .sheet-colfilter-selrow button,.sheet-colfilter-footer button{font:inherit;font-size:12.5px;padding:4px 8px;
+    border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer}
+  .sheet-colfilter-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px;border:1px solid var(--border);border-radius:6px;padding:6px}
+  .sheet-colfilter-list label{display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sheet-colfilter-note{color:var(--muted);font-size:12px}
+  .sheet-colfilter-footer{display:flex;gap:6px;justify-content:flex-end}
+  .sheet-colfilter-apply{background:var(--accent)!important;color:#fff;border-color:var(--accent)!important}
+  [data-theme="dark"] .sheet-colfilter-menu,[data-theme="dark"] .xlsx-fx-menu{background:#1e293b;border-color:#475569}
+  [data-theme="dark"] .sheet-colfilter-title{color:#e2e8f0}
+  [data-theme="dark"] .sheet-colfilter-selrow button,[data-theme="dark"] .sheet-colfilter-footer button,
+  [data-theme="dark"] .sheet-colfilter-search{background:#0f172a;color:#e2e8f0;border-color:#475569}
   /* CSV 페이지 네비 — 선택 바 안에 합쳐져 같은 줄에 표시(구분선으로 선택 컨트롤과 분리) */
   .csv-pagenav{display:inline-flex;align-items:center;gap:8px;padding-right:10px;margin-right:2px;border-right:1px solid var(--border)}
   .csv-pagestatus{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}

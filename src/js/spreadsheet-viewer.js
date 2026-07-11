@@ -1517,6 +1517,145 @@ function spreadsheetTextSeries(vals){
   return null;
 }
 
+// 수식 자동완성용 함수 목록: [이름, 시그니처, 설명] — 수식 엔진(evCall)이 지원하는 함수만.
+const SPREADSHEET_FN_HELP = [
+  ["SUM", "SUM(범위)", "합계"],
+  ["AVERAGE", "AVERAGE(범위)", "평균"],
+  ["COUNT", "COUNT(범위)", "숫자 개수"],
+  ["COUNTA", "COUNTA(범위)", "빈칸 아닌 개수"],
+  ["COUNTBLANK", "COUNTBLANK(범위)", "빈칸 개수"],
+  ["MIN", "MIN(범위)", "최솟값"],
+  ["MAX", "MAX(범위)", "최댓값"],
+  ["MEDIAN", "MEDIAN(범위)", "중앙값"],
+  ["STDEV", "STDEV(범위)", "표본 표준편차"],
+  ["STDEVP", "STDEVP(범위)", "모 표준편차"],
+  ["LARGE", "LARGE(범위, k)", "k번째 큰 값"],
+  ["SMALL", "SMALL(범위, k)", "k번째 작은 값"],
+  ["RANK", "RANK(값, 범위, [오름차순])", "석차(기본 내림차순)"],
+  ["PRODUCT", "PRODUCT(범위)", "곱"],
+  ["IF", "IF(조건, 참일때, [거짓일때])", "조건 분기"],
+  ["IFS", "IFS(조건1, 값1, 조건2, 값2, …)", "여러 조건 중 첫 참"],
+  ["IFERROR", "IFERROR(값, 오류일때)", "오류면 대체값"],
+  ["AND", "AND(조건1, 조건2, …)", "모두 참인지"],
+  ["OR", "OR(조건1, 조건2, …)", "하나라도 참인지"],
+  ["NOT", "NOT(조건)", "참거짓 반전"],
+  ["COUNTIF", "COUNTIF(범위, 조건)", "조건에 맞는 개수"],
+  ["SUMIF", "SUMIF(범위, 조건, [합계범위])", "조건에 맞는 합계"],
+  ["AVERAGEIF", "AVERAGEIF(범위, 조건, [평균범위])", "조건에 맞는 평균"],
+  ["COUNTIFS", "COUNTIFS(범위1, 조건1, 범위2, 조건2, …)", "여러 조건 개수"],
+  ["SUMIFS", "SUMIFS(합계범위, 범위1, 조건1, …)", "여러 조건 합계"],
+  ["AVERAGEIFS", "AVERAGEIFS(평균범위, 범위1, 조건1, …)", "여러 조건 평균"],
+  ["VLOOKUP", "VLOOKUP(찾을값, 표범위, 열번호, [유사일치])", "세로 방향 찾기"],
+  ["HLOOKUP", "HLOOKUP(찾을값, 표범위, 행번호, [유사일치])", "가로 방향 찾기"],
+  ["XLOOKUP", "XLOOKUP(찾을값, 찾을범위, 반환범위, [없을때])", "찾아서 짝 반환"],
+  ["INDEX", "INDEX(범위, 행, [열])", "위치의 값"],
+  ["MATCH", "MATCH(찾을값, 범위, [0=정확])", "위치 번호"],
+  ["CHOOSE", "CHOOSE(번호, 값1, 값2, …)", "번호에 해당하는 값"],
+  ["ROUND", "ROUND(수, 자릿수)", "반올림"],
+  ["ROUNDUP", "ROUNDUP(수, 자릿수)", "올림"],
+  ["ROUNDDOWN", "ROUNDDOWN(수, 자릿수)", "내림"],
+  ["ABS", "ABS(수)", "절댓값"],
+  ["INT", "INT(수)", "정수 내림"],
+  ["SQRT", "SQRT(수)", "제곱근"],
+  ["MOD", "MOD(수, 나눌수)", "나머지"],
+  ["POWER", "POWER(밑, 지수)", "거듭제곱"],
+  ["TODAY", "TODAY()", "오늘 날짜"],
+  ["NOW", "NOW()", "지금 날짜·시각"],
+  ["DATE", "DATE(년, 월, 일)", "날짜 만들기"],
+  ["YEAR", "YEAR(날짜)", "연도"],
+  ["MONTH", "MONTH(날짜)", "월"],
+  ["DAY", "DAY(날짜)", "일"],
+  ["HOUR", "HOUR(시각)", "시"],
+  ["MINUTE", "MINUTE(시각)", "분"],
+  ["SECOND", "SECOND(시각)", "초"],
+  ["WEEKDAY", "WEEKDAY(날짜, [방식])", "요일 번호"],
+  ["EDATE", "EDATE(날짜, 개월수)", "개월 더한 날짜"],
+  ["DATEDIF", "DATEDIF(시작, 끝, \"D|M|Y\")", "기간 차이"],
+  ["TEXT", "TEXT(값, \"서식\")", "서식 문자열로"],
+  ["VALUE", "VALUE(문자)", "숫자로 변환"],
+  ["LEN", "LEN(문자)", "글자 수"],
+  ["LEFT", "LEFT(문자, [개수])", "왼쪽에서 자르기"],
+  ["RIGHT", "RIGHT(문자, [개수])", "오른쪽에서 자르기"],
+  ["MID", "MID(문자, 시작, 개수)", "가운데 자르기"],
+  ["TRIM", "TRIM(문자)", "공백 정리"],
+  ["UPPER", "UPPER(문자)", "대문자로"],
+  ["LOWER", "LOWER(문자)", "소문자로"],
+  ["PROPER", "PROPER(문자)", "단어 첫 글자 대문자"],
+  ["CONCAT", "CONCAT(값1, 값2, …)", "이어 붙이기"],
+  ["TEXTJOIN", "TEXTJOIN(구분자, 빈칸무시, 값들…)", "구분자로 이어 붙이기"],
+  ["SUBSTITUTE", "SUBSTITUTE(문자, 찾을것, 바꿀것, [번째])", "바꾸기"],
+  ["REPLACE", "REPLACE(문자, 시작, 개수, 새문자)", "위치로 바꾸기"],
+  ["FIND", "FIND(찾을것, 문자, [시작])", "위치 찾기(대소문자 구분)"],
+  ["SEARCH", "SEARCH(찾을것, 문자, [시작])", "위치 찾기"],
+  ["REPT", "REPT(문자, 횟수)", "반복"],
+  ["EXACT", "EXACT(문자1, 문자2)", "완전히 같은지"],
+  ["ISBLANK", "ISBLANK(셀)", "빈칸인지"],
+  ["ISNUMBER", "ISNUMBER(값)", "숫자인지"],
+  ["ISTEXT", "ISTEXT(값)", "문자인지"],
+  ["ISERROR", "ISERROR(값)", "오류인지"]
+];
+
+// 수식 입력 중 캐럿 앞 상태 분석 → 자동완성 컨텍스트.
+//  · { type:"name", partial, start } : 함수 이름을 치는 중(start = 토큰 시작 위치)
+//  · { type:"args", name }           : 함수 괄호 안(인자 힌트 표시용, 가장 안쪽 함수)
+//  · null                            : 수식이 아니거나 완성할 것이 없음
+function formulaTypingContext(text, caret){
+  const s = String(text == null ? "" : text);
+  if (s[0] !== "=") return null;
+  const upto = s.slice(0, Math.max(0, Math.min(caret, s.length)));
+  const m = /[A-Za-z][A-Za-z.]*$/.exec(upto);
+  if (m && m.index > 0){
+    const before = upto[m.index - 1];
+    if ("=+-*/^&<>,(%".includes(before)) return { type: "name", partial: m[0], start: m.index };
+  }
+  // 괄호 짝을 세며 뒤에서 앞으로 — 닫히지 않은 '(' 바로 앞의 단어가 현재 함수
+  let depth = 0;
+  for (let i = upto.length - 1; i > 0; i--){
+    const ch = upto[i];
+    if (ch === ")") depth++;
+    else if (ch === "("){
+      if (depth > 0){ depth--; continue; }
+      const head = /[A-Za-z][A-Za-z.]*$/.exec(upto.slice(0, i));
+      if (head) return { type: "args", name: head[0].toUpperCase() };
+      return null;
+    }
+  }
+  return null;
+}
+
+// 자동합계(Σ): 선택 범위를 보고 수식을 넣을 자리와 수식을 정한다. 반환 [{ r, c, f }]
+//  · 여러 행 선택 → 각 열의 아래 칸에 열 합계(숫자 있는 열만)
+//  · 한 행 여러 열 → 오른쪽 칸에 행 합계
+//  · 단일 셀 → 위로 이어진 숫자 범위(없으면 왼쪽)를 그 셀에 합계
+function spreadsheetAutoFormulaJobs(model, b, fnName){
+  const isNum = (r, c) => !!(model[r] && model[r][c] && !model[r][c].f && typeof model[r][c].v === "number");
+  const ref = (r, c) => spreadsheetColumnName(c) + (r + 1);
+  const jobs = [];
+  if (b.s.r === b.e.r && b.s.c === b.e.c){
+    const { r, c } = b.s;
+    let r1 = r;
+    while (r1 - 1 >= 0 && isNum(r1 - 1, c)) r1--;
+    if (r1 < r){ jobs.push({ r, c, f: fnName + "(" + ref(r1, c) + ":" + ref(r - 1, c) + ")" }); return jobs; }
+    let c1 = c;
+    while (c1 - 1 >= 0 && isNum(r, c1 - 1)) c1--;
+    if (c1 < c) jobs.push({ r, c, f: fnName + "(" + ref(r, c1) + ":" + ref(r, c - 1) + ")" });
+    return jobs;
+  }
+  if (b.s.r === b.e.r){
+    const r = b.s.r;
+    let any = false;
+    for (let c = b.s.c; c <= b.e.c; c++) if (isNum(r, c)) any = true;
+    if (any) jobs.push({ r, c: b.e.c + 1, f: fnName + "(" + ref(r, b.s.c) + ":" + ref(r, b.e.c) + ")" });
+    return jobs;
+  }
+  for (let c = b.s.c; c <= b.e.c; c++){
+    let any = false;
+    for (let r = b.s.r; r <= b.e.r; r++) if (isNum(r, c)) any = true;
+    if (any) jobs.push({ r: b.e.r + 1, c, f: fnName + "(" + ref(b.s.r, c) + ":" + ref(b.e.r, c) + ")" });
+  }
+  return jobs;
+}
+
 // 선택 데이터로 간단 차트(막대·선·원)를 SVG 문자열로 생성. 오프라인·무의존.
 const SPREADSHEET_CHART_COLORS = ["#4f46e5","#10b981","#f59e0b","#ef4444","#0ea5e9","#8b5cf6","#ec4899","#14b8a6","#f97316","#64748b"];
 function escapeChartText(s){ return String(s == null ? "" : s).replace(/[<>&]/g, ch => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;" }[ch])); }
@@ -2677,18 +2816,142 @@ async function renderXlsx(file, host, doc){
   });
 
   let editState = { filter: "", headerFrozen: true, sortCol: -1, sortDir: 1 };
+  const colFiltersBySheet = {};   // 시트이름 -> { 열index: Set(표시값) } — 열별 자동필터(보기 전용, 파일엔 저장 안 함)
   const virtualCsvEditor = !!csvFastAoa && csvFastAoa.length *
     Math.max(1, csvFastAoa.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)) > 12000;
 
   const matchingModelRows = (model, editable) => {
     const head = editState.headerFrozen ? 1 : 0;
     const term = editable ? editState.filter.trim().toLowerCase() : "";
+    const colFilters = editable ? colFiltersBySheet[currentSheet] : null;
+    const filterCols = colFilters ? Object.keys(colFilters) : [];
     const result = [];
     for (let r = 0; r < model.length; r++){
-      if (editable && term && r >= head && !model[r].some(s => dispCell(s).toLowerCase().includes(term))) continue;
+      if (editable && r >= head){
+        if (term && !model[r].some(s => dispCell(s).toLowerCase().includes(term))) continue;
+        let pass = true;
+        for (const ck of filterCols){
+          const s = model[r][Number(ck)];
+          if (!colFilters[ck].has(s ? dispCell(s) : "")){ pass = false; break; }
+        }
+        if (!pass) continue;
+      }
       result.push(r);
     }
     return result;
+  };
+
+  // ----- 열별 자동필터(편집 모드): 열 머리글 ▼ → 값 체크박스로 행 걸러내기 -----
+  let colFilterMenu = null, colFilterOutside = null, colFilterKeydown = null;
+  const closeColFilterMenu = () => {
+    if (colFilterMenu){ colFilterMenu.remove(); colFilterMenu = null; }
+    if (colFilterOutside){ document.removeEventListener("pointerdown", colFilterOutside, true); colFilterOutside = null; }
+    if (colFilterKeydown){ document.removeEventListener("keydown", colFilterKeydown, true); colFilterKeydown = null; }
+  };
+  const applyColFilter = (c, set) => {
+    const filters = colFiltersBySheet[currentSheet] || (colFiltersBySheet[currentSheet] = {});
+    if (set) filters[c] = set; else delete filters[c];
+    if (!Object.keys(filters).length) delete colFiltersBySheet[currentSheet];
+    renderEditable(currentSheet);
+  };
+  const openColFilterMenu = (btn, c) => {
+    closeColFilterMenu();
+    const model = exModels[currentSheet]; if (!model) return;
+    const head = editState.headerFrozen ? 1 : 0;
+    // 고유값 수집(표시 텍스트 기준, 500개 상한) — 첫 행 머리글은 값 목록에서 제외
+    const counts = new Map();
+    let truncated = false;
+    for (let r = head; r < model.length; r++){
+      const s = model[r] && model[r][c];
+      const key = s ? dispCell(s) : "";
+      if (!counts.has(key) && counts.size >= 500){ truncated = true; continue; }
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const values = [...counts.keys()].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    const current = (colFiltersBySheet[currentSheet] || {})[c] || null;
+    const state = new Map();
+    values.forEach(v => state.set(v, current ? current.has(v) : true));
+
+    const menu = document.createElement("div");
+    menu.className = "sheet-colfilter-menu";
+    const title = document.createElement("div"); title.className = "sheet-colfilter-title";
+    const headCell = head && model[0] && model[0][c] ? dispCell(model[0][c]) : "";
+    title.textContent = (headCell ? headCell + " · " : "") + spreadsheetColumnName(c) + "열 필터";
+    const search = document.createElement("input");
+    search.type = "search"; search.placeholder = "값 검색"; search.className = "sheet-colfilter-search";
+    search.addEventListener("keydown", (e) => e.stopPropagation());
+    const listEl = document.createElement("div"); listEl.className = "sheet-colfilter-list";
+    const renderList = () => {
+      const q = search.value.trim().toLowerCase();
+      listEl.replaceChildren();
+      values.forEach(v => {
+        if (q && !String(v).toLowerCase().includes(q)) return;
+        const lab = document.createElement("label");
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!state.get(v);
+        cb.addEventListener("change", () => state.set(v, cb.checked));
+        lab.append(cb, document.createTextNode(" " + (v === "" ? "(빈칸)" : v) + " · " + counts.get(v)));
+        listEl.appendChild(lab);
+      });
+    };
+    renderList();
+    search.addEventListener("input", renderList);
+    const mkBtn = (text, onClick, cls) => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = text;
+      if (cls) b.className = cls;
+      b.addEventListener("click", onClick); return b;
+    };
+    const selRow = document.createElement("div"); selRow.className = "sheet-colfilter-selrow";
+    selRow.append(
+      mkBtn("모두 선택", () => { values.forEach(v => state.set(v, true)); renderList(); }),
+      mkBtn("모두 해제", () => { values.forEach(v => state.set(v, false)); renderList(); })
+    );
+    const footer = document.createElement("div"); footer.className = "sheet-colfilter-footer";
+    footer.append(
+      mkBtn("적용", () => {
+        const selected = values.filter(v => state.get(v));
+        if (!selected.length){ toast("최소 한 값은 선택해야 해요.", 1800); return; }
+        closeColFilterMenu();
+        applyColFilter(c, selected.length === values.length ? null : new Set(selected));
+      }, "sheet-colfilter-apply"),
+      mkBtn("필터 지우기", () => { closeColFilterMenu(); applyColFilter(c, null); })
+    );
+    menu.append(title, search, selRow, listEl);
+    if (truncated){
+      const note = document.createElement("div"); note.className = "sheet-colfilter-note";
+      note.textContent = "값이 많아 500개까지만 표시해요.";
+      menu.appendChild(note);
+    }
+    menu.appendChild(footer);
+    document.body.appendChild(menu);
+    const br = btn.getBoundingClientRect(), mr = menu.getBoundingClientRect();
+    menu.style.left = Math.max(6, Math.min(window.innerWidth - mr.width - 6, br.left)) + "px";
+    menu.style.top = Math.max(6, Math.min(window.innerHeight - mr.height - 6, br.bottom + 4)) + "px";
+    colFilterMenu = menu;
+    colFilterOutside = (event) => { if (!menu.contains(event.target)) closeColFilterMenu(); };
+    colFilterKeydown = (event) => { if (event.key === "Escape") closeColFilterMenu(); };
+    setTimeout(() => {
+      if (!colFilterMenu) return;
+      document.addEventListener("pointerdown", colFilterOutside, true);
+      document.addEventListener("keydown", colFilterKeydown, true);
+    }, 0);
+    search.focus();
+  };
+  const decorateFilterHeads = () => {
+    const filters = colFiltersBySheet[currentSheet] || {};
+    sheet.querySelectorAll(".sheet-col-head").forEach(th => {
+      if (th.querySelector(".sheet-colfilter-btn")) return;
+      const c = Number(th.dataset.col);
+      if (!Number.isInteger(c)) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const active = !!filters[c];
+      btn.className = "sheet-colfilter-btn" + (active ? " active" : "");
+      btn.textContent = "▼";
+      btn.title = active ? "열 필터 적용 중 — 눌러서 수정" : "열 필터(값 선택)";
+      btn.addEventListener("pointerdown", (e) => e.stopPropagation());   // 열 선택 드래그와 충돌 방지
+      btn.addEventListener("click", (e) => { e.stopPropagation(); openColFilterMenu(btn, c); });
+      th.appendChild(btn);
+    });
   };
   // 병합 정보 → 좌상단 span 맵 + 가려지는 셀 집합. 편집 모드는 격자를 평평하게 유지(선택·편집 정확도)하되
   // 병합 위치를 점선 힌트로 표시하고, 읽기 전용 모드에서는 실제 colspan/rowspan 으로 합쳐 그린다.
@@ -2775,7 +3038,7 @@ async function renderXlsx(file, host, doc){
       });
       sheet.replaceChildren(table);
       enhanceSpreadsheetSelection(sheet, name, { editable, rowLabels:visible, onSelectionChange: editable ? onCellSelect : undefined });
-      if (editable) bindEditableTable(table, name);
+      if (editable){ bindEditableTable(table, name); decorateFilterHeads(); }
       sheet.scrollTop = topBefore; sheet.scrollLeft = leftBefore;
     };
     const onScroll = () => {
@@ -2825,7 +3088,15 @@ async function renderXlsx(file, host, doc){
     const s = model && model[r] && model[r][c];
     if (document.activeElement !== fbInput) fbInput.value = s ? ((s.f != null && s.f !== "") ? ("=" + s.f) : rawText(s)) : "";
   };
+  const fbFxTarget = {
+    get: () => ({ text: fbInput.value, caret: fbInput.selectionStart == null ? fbInput.value.length : fbInput.selectionStart }),
+    set: (text, caret) => { fbInput.value = text; try { fbInput.setSelectionRange(caret, caret); } catch(_){} fbInput.focus(); },
+    rect: () => fbInput.getBoundingClientRect()
+  };
+  fbInput.addEventListener("input", () => updateFxMenu(fbFxTarget));
+  fbInput.addEventListener("blur", () => hideFxMenu());
   fbInput.addEventListener("keydown", (e) => {
+    if (fxHandleKey(e)) return;                       // 자동완성 목록이 떠 있으면 ↑↓·Tab·Enter 는 완성에 사용
     if (e.key === "Enter"){
       e.preventDefault();
       if (fbCell) applyCellInput(currentSheet, fbCell.r, fbCell.c, fbInput.value);
@@ -3008,6 +3279,7 @@ async function renderXlsx(file, host, doc){
     sheet.replaceChildren(table); sheet.scrollTop = 0;
     enhanceSpreadsheetSelection(sheet, name, { editable: true, onSelectionChange: onCellSelect });
     bindEditableTable(table, name);
+    decorateFilterHeads();
     updateFormulaBar();
   };
 
@@ -3037,6 +3309,105 @@ async function renderXlsx(file, host, doc){
     return true;
   };
 
+  // ===== 수식 자동완성: '=SU' → 함수 후보 목록, 'SUM(' 안에서는 인자 힌트 =====
+  const fxMenu = document.createElement("div"); fxMenu.className = "xlsx-fx-menu"; fxMenu.hidden = true;
+  host.appendChild(fxMenu);
+  let fxItems = [], fxIndex = -1, fxCtx = null, fxTarget = null;
+  const hideFxMenu = () => { fxMenu.hidden = true; fxMenu.replaceChildren(); fxItems = []; fxIndex = -1; fxCtx = null; fxTarget = null; };
+  const renderFxMenu = () => {
+    fxMenu.replaceChildren();
+    if (fxCtx && fxCtx.type === "args"){
+      const fn = SPREADSHEET_FN_HELP.find(f => f[0] === fxCtx.name);
+      if (!fn){ hideFxMenu(); return; }
+      const hint = document.createElement("div"); hint.className = "xlsx-fx-hint";
+      const sig = document.createElement("b"); sig.textContent = fn[1];
+      hint.append(sig, document.createTextNode(" — " + fn[2]));
+      fxMenu.appendChild(hint);
+    } else {
+      fxItems.forEach((fn, i) => {
+        const row = document.createElement("div");
+        row.className = "xlsx-fx-item" + (i === fxIndex ? " sel" : "");
+        const nm = document.createElement("b"); nm.textContent = fn[0];
+        const sig = document.createElement("span"); sig.className = "xlsx-fx-sig"; sig.textContent = fn[1].slice(fn[0].length);
+        const de = document.createElement("span"); de.className = "xlsx-fx-desc"; de.textContent = fn[2];
+        row.append(nm, sig, de);
+        // pointerdown + preventDefault: 편집 중인 셀의 blur(=확정)를 막고 완성만 넣는다
+        row.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); fxIndex = i; fxAccept(); });
+        fxMenu.appendChild(row);
+      });
+    }
+    fxMenu.hidden = false;
+    if (fxTarget){
+      const r = fxTarget.rect();
+      fxMenu.style.left = Math.max(6, Math.min(window.innerWidth - 330, r.left)) + "px";
+      fxMenu.style.top = Math.min(window.innerHeight - 48, r.bottom + 2) + "px";
+    }
+  };
+  const updateFxMenu = (target) => {
+    if (!editMode){ hideFxMenu(); return; }
+    const st = target.get();
+    const ctx = formulaTypingContext(st.text, st.caret);
+    if (!ctx){ hideFxMenu(); return; }
+    fxTarget = target; fxCtx = ctx;
+    if (ctx.type === "name"){
+      const q = ctx.partial.toUpperCase();
+      fxItems = SPREADSHEET_FN_HELP.filter(f => f[0].startsWith(q)).slice(0, 9);
+      if (!fxItems.length){ hideFxMenu(); return; }
+      fxIndex = 0;
+    } else {
+      fxItems = []; fxIndex = -1;
+    }
+    renderFxMenu();
+  };
+  const fxAccept = () => {
+    if (!fxTarget || !fxCtx || fxCtx.type !== "name" || fxIndex < 0 || !fxItems[fxIndex]) return false;
+    const name = fxItems[fxIndex][0];
+    const st = fxTarget.get();
+    const target = fxTarget;
+    target.set(st.text.slice(0, fxCtx.start) + name + "(" + st.text.slice(st.caret), fxCtx.start + name.length + 1);
+    updateFxMenu(target);                     // 삽입 직후 인자 힌트로 전환
+    return true;
+  };
+  // 자동완성이 떠 있을 때의 키 처리(↑↓ 이동 · Tab/Enter 완성 · Esc 닫기). 소비했으면 true.
+  const fxHandleKey = (e) => {
+    if (fxMenu.hidden) return false;
+    if (fxCtx && fxCtx.type === "name" && fxItems.length){
+      if (e.key === "ArrowDown" || e.key === "ArrowUp"){
+        e.preventDefault(); e.stopPropagation();
+        fxIndex = (fxIndex + (e.key === "ArrowDown" ? 1 : -1) + fxItems.length) % fxItems.length;
+        renderFxMenu();
+        return true;
+      }
+      if (e.key === "Tab" || e.key === "Enter"){
+        e.preventDefault(); e.stopPropagation();
+        fxAccept();
+        return true;
+      }
+    }
+    if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); hideFxMenu(); return true; }
+    return false;
+  };
+  const tdFxTarget = (td) => ({
+    get: () => {
+      const text = td.textContent || "";
+      let caret = text.length;
+      const sel = window.getSelection();
+      if (sel && sel.anchorNode && td.contains(sel.anchorNode) && sel.anchorNode.nodeType === 3) caret = sel.anchorOffset;
+      return { text, caret };
+    },
+    set: (text, caret) => {
+      td.textContent = text;
+      const node = td.firstChild;
+      if (node){
+        const range = document.createRange();
+        range.setStart(node, Math.min(caret, node.textContent.length));
+        range.collapse(true);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      }
+    },
+    rect: () => td.getBoundingClientRect()
+  });
+
   // 편집 확정 후 화면(표시) 순서 기준으로 이웃 셀로 선택 이동 — 엑셀의 Enter(아래)/Tab(오른쪽) 흐름.
   // 필터·정렬로 모델 행 순서와 다를 수 있어 DOM 이웃을 따라간다. 가장자리는 제자리 유지.
   const moveEditSelection = (fromTd, dr, dc) => {
@@ -3064,8 +3435,12 @@ async function renderXlsx(file, host, doc){
     td.focus();
     const range = document.createRange(); range.selectNodeContents(td);
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    const fxT = tdFxTarget(td);
+    const onInput = () => updateFxMenu(fxT);
     const finish = (commit) => {
       td.removeEventListener("blur", onBlur); td.removeEventListener("keydown", onKey);
+      td.removeEventListener("input", onInput);
+      hideFxMenu();
       td.contentEditable = "false"; td.classList.remove("editing");
       if (commit) applyCellInput(name, r, c, td.textContent);
       s = model[r][c];
@@ -3075,6 +3450,7 @@ async function renderXlsx(file, host, doc){
     };
     const onBlur = () => finish(true);
     const onKey = (e) => {
+      if (fxHandleKey(e)) return;                     // 자동완성 목록이 떠 있으면 ↑↓·Tab·Enter 는 완성에 사용
       if (e.key === "Enter" && !e.altKey){ e.preventDefault(); finish(true); moveEditSelection(td, e.shiftKey ? -1 : 1, 0); }
       else if (e.key === "Tab"){ e.preventDefault(); finish(true); moveEditSelection(td, 0, e.shiftKey ? -1 : 1); }
       else if (e.key === "Escape"){ e.preventDefault(); finish(false); }
@@ -3082,6 +3458,7 @@ async function renderXlsx(file, host, doc){
     };
     td.addEventListener("blur", onBlur);
     td.addEventListener("keydown", onKey);
+    td.addEventListener("input", onInput);
   };
 
   // ----- 선택 범위의 좌상단(붙여넣기·병합 기준점) -----
@@ -3162,6 +3539,36 @@ async function renderXlsx(file, host, doc){
     structChanged.add(currentSheet); anyDirty = true;
     buildEditBar(); renderEditable(currentSheet);
     toast("병합을 해제했어요.", 1400);
+  };
+
+  // ----- Σ 자동계산: 선택 범위 바로 아래(또는 오른쪽)에 SUM·AVERAGE 등 수식 자동 삽입 -----
+  const insertAutoFormula = (fnName) => {
+    const model = exModels[currentSheet]; if (!model) return;
+    const b = selectionBounds();
+    if (!b){ toast("계산할 범위를 먼저 선택하세요.", 2000); return; }
+    const jobs = spreadsheetAutoFormulaJobs(model, b, fnName);
+    if (!jobs.length){ toast("선택 범위(단일 셀이면 위·왼쪽)에 숫자가 있어야 해요.", 2400); return; }
+    pushUndo(currentSheet);
+    // 수식이 들어갈 자리가 격자 밖이면 행/열을 늘린다
+    const curCols = model[0] ? model[0].length : 0;
+    const needRows = Math.max(...jobs.map(j => j.r)) + 1;
+    const needCols = Math.max(...jobs.map(j => j.c)) + 1;
+    while (model.length < needRows) model.push(Array.from({ length: Math.max(curCols, needCols) }, blankCell));
+    if (needCols > curCols) model.forEach(row => { while (row.length < needCols) row.push(blankCell()); });
+    const copiedRows = new Set();
+    jobs.forEach(({ r, c, f }) => {
+      if (csvFastAoa){
+        if (!copiedRows.has(r)){ model[r] = model[r].slice(); copiedRows.add(r); }
+        model[r][c] = { ...model[r][c], f, style: cloneSpreadsheetValue(model[r][c].style || {}) };
+      } else {
+        model[r][c].f = f;
+      }
+    });
+    sheetsWithFormula.add(currentSheet);
+    structChanged.add(currentSheet);
+    anyDirty = true;
+    buildEditBar(); renderEditable(currentSheet);   // renderEditable 이 재계산까지 수행
+    toast(jobs.length + "개 셀에 " + fnName + " 수식을 넣었어요.", 1800);
   };
 
   // 편집 모드에서 시트에 포커스가 있을 때 클립보드 붙여넣기(셀 편집 중이면 네이티브 붙여넣기)
@@ -3422,6 +3829,7 @@ async function renderXlsx(file, host, doc){
   sheet.addEventListener("pointerdown", () => {
     closeEditToolMenus();
     closeEditContextMenu();
+    closeColFilterMenu();
   });
   // 시트 탭 우클릭 → 시트 관리 메뉴(편집 모드). 읽기 전용에서는 안내만.
   tabs.addEventListener("contextmenu", (event) => {
@@ -3508,6 +3916,7 @@ async function renderXlsx(file, host, doc){
       model.forEach((row, index) => { model[index] = [...row.slice(0, at), blankCell(), ...row.slice(at)]; });
       exMerges[currentSheet] = adjustSpreadsheetMergesAfterColumnInsert(exMerges[currentSheet], at);
       remapModelFormulas(currentSheet, (c, r) => ({ c: c >= at ? c + 1 : c, r }));   // 삽입 지점 이후 열참조 +1
+      delete colFiltersBySheet[currentSheet];   // 열 인덱스가 밀려 필터가 어긋나므로 초기화
       structChanged.add(currentSheet); anyDirty = true;
       buildEditBar(); renderEditable(currentSheet);
       toast(selectedCols.length ? "선택 열 왼쪽에 빈 열을 추가했어요." : "맨 오른쪽에 빈 열을 추가했어요.", 1600);
@@ -3538,6 +3947,7 @@ async function renderXlsx(file, host, doc){
       remapModelFormulas(currentSheet, (c, r) => delColSet.has(c) ? null : { c: c - colsSel.filter(d => d < c).length, r });
       model.forEach(row => colsSel.forEach(c => row.splice(c, 1)));   // 내림차순 → 큰 인덱스부터 안전 삭제
       if (model[0] && !model[0].length) model.forEach(row => row.push(blankCell()));
+      delete colFiltersBySheet[currentSheet];   // 열 인덱스가 밀려 필터가 어긋나므로 초기화
       structChanged.add(currentSheet); anyDirty = true;
       buildEditBar(); renderEditable(currentSheet);
       toast(colsSel.length + "개 열을 삭제했어요.", 1600);
@@ -3724,8 +4134,18 @@ async function renderXlsx(file, host, doc){
     const printBtn2 = document.createElement("button"); printBtn2.type = "button"; printBtn2.textContent = "인쇄·PDF"; printBtn2.title = "현재 시트를 프린터로 인쇄하거나 PDF로 저장";
     printBtn2.onclick = () => printCurrentSheet();
     const saveMenu = makeMenu("저장", "xlsx-tool-menu-save xlsx-editgroup-save", xlsxBtn, csvBtn2, printBtn2);
+    const mkAutoBtn = (label, fn, title) => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = title;
+      b.onclick = () => insertAutoFormula(fn); return b;
+    };
+    const autoMenu = makeMenu("Σ 자동계산", "xlsx-tool-menu-autosum",
+      mkAutoBtn("Σ 합계", "SUM", "선택 범위 아래(한 행이면 오른쪽)에 합계 수식 삽입"),
+      mkAutoBtn("평균", "AVERAGE", "선택 범위의 평균 수식 삽입"),
+      mkAutoBtn("개수", "COUNT", "선택 범위의 숫자 개수 수식 삽입"),
+      mkAutoBtn("최대", "MAX", "선택 범위의 최댓값 수식 삽입"),
+      mkAutoBtn("최소", "MIN", "선택 범위의 최솟값 수식 삽입"));
     const mainRow = document.createElement("div"); mainRow.className = "xlsx-editbar-row xlsx-editbar-main";
-    mainRow.append(historyGroup, dataGroup, structureMenu.details, frozen, findMenu.details, moreMenu.details, saveMenu.details);
+    mainRow.append(historyGroup, dataGroup, structureMenu.details, autoMenu.details, frozen, findMenu.details, moreMenu.details, saveMenu.details);
     const fmtRow = document.createElement("div"); fmtRow.className = "xlsx-editbar-row xlsx-editbar-fmt";
     fmtRow.append(fontGroup, alignGroup, formatMenu.details, condMenu.details);
     editBar.append(mainRow, fmtRow);
@@ -3746,6 +4166,7 @@ async function renderXlsx(file, host, doc){
       { label:"서식 붙이기", action:() => pasteCellFormat() },
       { label:"서식 지우기", action:() => clearSelectionFormat() },
       { separator:true },
+      { label:"Σ 선택 범위 합계", action:() => insertAutoFormula("SUM") },
       { label:"선택 범위로 차트 만들기", action:() => insertChart() },
       { label:"선택 범위를 이미지 메모로 저장", action:() => saveSelectionToMemo() }
     ];
@@ -3786,7 +4207,7 @@ async function renderXlsx(file, host, doc){
   };
   // 시트 편집 모델·병합·변경추적을 새 이름으로 옮기는 공용 도우미
   const renameSheetState = (oldName, name) => {
-    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, sheet.__sheetSizes || {}].forEach(obj => {
+    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, colFiltersBySheet, sheet.__sheetSizes || {}].forEach(obj => {
       if (obj && obj[oldName] !== undefined){ obj[name] = obj[oldName]; delete obj[oldName]; }
     });
     if (structChanged.delete(oldName)) structChanged.add(name);
@@ -3862,7 +4283,7 @@ async function renderXlsx(file, host, doc){
     if (!confirm("'" + name + "' 시트를 삭제할까요? 시트 삭제는 되돌리기(Ctrl+Z)가 되지 않아요.")) return;
     wb.SheetNames.splice(wb.SheetNames.indexOf(name), 1);
     delete wb.Sheets[name];
-    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks].forEach(obj => { delete obj[name]; });
+    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, colFiltersBySheet].forEach(obj => { delete obj[name]; });
     structChanged.delete(name); sheetsWithFormula.delete(name);
     if (!addedSheets.delete(name)) removedOrigSheets.add(sheetOrigNames.get(name) || name);
     sheetOrigNames.delete(name);
@@ -3984,6 +4405,8 @@ if (typeof module === "object" && module.exports){
     remapFormulaRefs,
     remapFormulaSheetName,
     spreadsheetTextSeries,
+    formulaTypingContext,
+    spreadsheetAutoFormulaJobs,
     buildSpreadsheetChartSvg,
     cloneSpreadsheetValue,
     spreadsheetVirtualWindow,
