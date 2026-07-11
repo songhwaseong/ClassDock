@@ -444,6 +444,7 @@ function isStudyReferenceReadonly(doc){ return isStudyReferenceLocked(doc); }
 function setStudyReferenceLocked(locked){
   studyReferenceLocked = !!locked;
   applyStudyLayout();
+  persistTabState();
   toast(studyReferenceLocked ? "참고 문서를 잠갔습니다. 보기·스크롤·복사만 가능합니다." : "참고 문서 잠금을 풀었습니다. 기존 학습 화면처럼 편집할 수 있습니다.", 3200);
 }
 
@@ -453,6 +454,7 @@ function setStudyTargetPane(pane){
   if (studyTargetPane === pane) return;
   studyTargetPane = pane;
   updateStudyTargetHighlight();
+  persistTabState();
 }
 // 타깃 칸에만 표시 클래스를 붙인다(참고/작업 두 문서만 만지면 되므로 가볍다).
 function updateStudyTargetHighlight(){
@@ -1393,7 +1395,18 @@ function persistTabState(){       // 탭 순서·활성 탭을 디바운스 저�
     try {
       const tabs = tabOrder.map(id => docStableKey(docs.find(d => d.id === id))).filter(Boolean);
       const active = docStableKey(docs.find(d => d.id === activeId));
-      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, savedAt: Date.now() }));
+      const reference = docs.find(d => d.id === studyPdfId);
+      const work = docs.find(d => d.id === activeId);
+      // ID is recreated at each launch, so persist stable document paths instead.
+      const study = reference && work && reference.id !== work.id
+        ? {
+            reference: docStableKey(reference),
+            work: docStableKey(work),
+            locked: !!studyReferenceLocked,
+            targetPane: studyTargetPane === "reference" ? "reference" : "work"
+          }
+        : null;
+      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, savedAt: Date.now() }));
     } catch(e){}
   }, 400);
 }
@@ -1413,6 +1426,39 @@ function applyTabState(saved){
   tabOrder = restored;
   const wantActive = keyToId.get(saved.active);
   setActiveDoc(seen.has(wantActive) ? wantActive : restored[0]);
+}
+
+// Reconnect the split pair after all workspace files have been restored.
+// Older saved states have no study field and continue to restore as a normal view.
+function restoreStudyState(saved){
+  const study = saved && saved.study;
+  if (!study || typeof study !== "object") return false;
+  const referenceKey = String(study.reference || "");
+  const workKey = String(study.work || "");
+  if (!referenceKey || !workKey || referenceKey === workKey) return false;
+  const keyToDoc = new Map();
+  docs.forEach(d => {
+    const key = docStableKey(d);
+    if (key && !keyToDoc.has(key)) keyToDoc.set(key, d);
+  });
+  const reference = keyToDoc.get(referenceKey);
+  const work = keyToDoc.get(workKey);
+  if (!reference || !work || reference.id === work.id) return false;
+
+  // The active document is always the work pane. tabRestoreInProgress prevents a resave here.
+  if (activeId !== work.id) setActiveDoc(work.id);
+  studyPdfId = reference.id;
+  studyReferenceLocked = !!study.locked;
+  studyTargetPane = study.targetPane === "reference" ? "reference" : "work";
+  if (reference.kind === "pdf" && reference._preStudyZoom == null) reference._preStudyZoom = reference.zoom;
+  applyStudyLayout();
+  renderTabs();
+  if (reference.kind === "pdf"){
+    ensureRendered(reference).then(() => {
+      if (reference.id === studyPdfId){ startLazyRender(reference); requestAnimationFrame(() => fitStudyPdf(reference)); }
+    });
+  }
+  return true;
 }
 
 function iconFor(kind, name){

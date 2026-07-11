@@ -44,3 +44,14 @@ test("모바일 교체 배치는 참고와 작업의 위아래 영역을 완전�
   assert.match(css, /#content\.study-mode\.study-swapped \.study-work\{left:0;right:0;top:0;bottom:50%\}/);
   assert.match(css, /#content\.study-mode\.study-swapped \.study-ref-lock\{left:12px;top:calc\(50% \+ 10px\)\}/);
 });
+
+test("study session state is persisted and restored with tabs", () => {
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const store = fs.readFileSync(path.join(__dirname, "../src/js/workspace-store.js"), "utf8");
+  assert.match(docs, /study = reference && work && reference\.id !== work\.id/);
+  assert.match(docs, /reference: docStableKey\(reference\)/);
+  assert.match(docs, /work: docStableKey\(work\)/);
+  assert.match(docs, /locked: !!studyReferenceLocked/);
+  assert.match(docs, /function restoreStudyState\(saved\)/);
+  assert.match(store, /restoreStudyState\(savedTabs\)/);
+});

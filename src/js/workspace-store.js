@@ -419,6 +419,7 @@ async function restoreLastWorkspace(){
     hideLoading();
     endUiBatch();
     applyTabState(savedTabs);   // 파일이 모두 열린 뒤 탭 순서·활성 탭 복원
+    restoreStudyState(savedTabs); // 참고·작업 문서 짝도 마지막에 다시 구성
     tabRestoreInProgress = false;
   }
 }
