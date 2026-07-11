@@ -29,6 +29,31 @@ for (const relative of scripts) {
   }
 }
 
+// 전역 네임스페이스 충돌 가드
+// 모듈 번들러 없이 40여 개 스크립트가 하나의 전역을 공유하는 구조라, 두 파일(또는 한 파일에서
+// 두 번)이 같은 최상위 이름을 선언하면 나중 것이 앞의 것을 '조용히' 덮어써 버그가 된다.
+// 빌드 시점에 잡아 실패시켜, 전역 네임스페이스 통합 없이도 실수로 인한 덮어쓰기를 막는다.
+// 최상위(들여쓰기 없는 열 0) function/class/var/let/const 선언만 본다 — 이 코드베이스의 스타일상
+// 중첩 선언은 항상 들여쓰기돼 있어 열 0 기준이면 실제 전역만 정확히 걸러진다.
+const topDeclRe = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|^class\s+([A-Za-z_$][\w$]*)|^(?:var|let|const)\s+([A-Za-z_$][\w$]*)/;
+const globalDecls = new Map();   // 이름 -> 선언한 파일 목록
+for (const relative of scripts) {
+  const lines = fs.readFileSync(path.join(root, relative), "utf8").split("\n");
+  for (const line of lines) {
+    const match = topDeclRe.exec(line);
+    if (!match) continue;
+    const name = match[1] || match[2] || match[3];
+    if (!name) continue;
+    if (!globalDecls.has(name)) globalDecls.set(name, []);
+    globalDecls.get(name).push(relative);
+  }
+}
+const globalCollisions = [...globalDecls.entries()].filter(([, files]) => files.length > 1);
+if (globalCollisions.length) {
+  const detail = globalCollisions.map(([name, files]) => `  ${name}  ←  ${files.join(", ")}`).join("\n");
+  throw new Error("전역 이름 충돌(같은 최상위 이름을 두 곳 이상에서 선언 — 뒤 정의가 앞을 덮어씀):\n" + detail);
+}
+
 const stateSource = fs.readFileSync(path.join(root, "src/js/state.js"), "utf8");
 for (const name of ["normalizePythonDiagnostics", "normalizePythonTraceReport"]) {
   if (!new RegExp("\\b" + name + "\\b").test(stateSource)) {
@@ -97,4 +122,4 @@ const styleMatch = html.match(/<link\s+rel="stylesheet"\s+href="(src\/[^"]+)"/);
 if (!styleMatch || !fs.existsSync(path.join(root, styleMatch[1]))) throw new Error("Application stylesheet was not found.");
 if (styleMatch[1] !== manifest.styles.local) throw new Error("HTML local stylesheet does not match scripts.manifest.json");
 if (!html.includes(`<link rel="stylesheet" href="${manifest.styles.pptx.src}">`)) throw new Error("PPTX stylesheet tag missing from HTML");
-console.log(`소스 검사 완료: JavaScript ${scripts.length}개, Pyodide Worker 1개, CSS 1개${pythonHarnessChecked ? ", Python harness 2개" : ""}`);
+console.log(`소스 검사 완료: JavaScript ${scripts.length}개, Pyodide Worker 1개, CSS 1개${pythonHarnessChecked ? ", Python harness 2개" : ""}, 전역 선언 ${globalDecls.size}개(충돌 0)`);
