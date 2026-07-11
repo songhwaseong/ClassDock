@@ -16,8 +16,39 @@ const {
   cloneSpreadsheetValue,
   spreadsheetCellValueSnapshot,
   spreadsheetVirtualWindow,
+  spreadsheetGuessHeader,
   writeStructuredSpreadsheetModel
 } = require("../src/js/spreadsheet-viewer.js");
+
+test("CSV 첫 줄 머리글 추정: 컬럼명/데이터/애매를 구분한다", () => {
+  // 숫자 열인데 첫 줄만 텍스트 → 머리글
+  assert.equal(spreadsheetGuessHeader([
+    ["이름", "점수", "나이"],
+    ["가", "90", "12"],
+    ["나", "85", "13"],
+    ["다", "77", "12"]
+  ]), true);
+  // 첫 줄도 아래와 같은 숫자 형태 → 데이터(머리글 아님)
+  assert.equal(spreadsheetGuessHeader([
+    ["1", "90", "12"],
+    ["2", "85", "13"],
+    ["3", "77", "12"]
+  ]), false);
+  // 전부 텍스트 + 첫 줄 값이 고유 → 머리글로 추정
+  assert.equal(spreadsheetGuessHeader([
+    ["도시", "지역", "구분"],
+    ["서울", "수도권", "특별시"],
+    ["부산", "영남", "광역시"]
+  ]), true);
+  // 첫 줄에 빈 칸이 섞이면 머리글로 보기 어렵다 → 데이터
+  assert.equal(spreadsheetGuessHeader([
+    ["", "10", "20"],
+    ["x", "11", "21"],
+    ["y", "12", "22"]
+  ]), false);
+  // 데이터가 거의 없으면 기존 동작대로 머리글
+  assert.equal(spreadsheetGuessHeader([["a", "b"]]), true);
+});
 
 test("XLSX 셀 값 스냅샷은 수식·날짜·리치텍스트를 독립 복제한다", () => {
   const source = {

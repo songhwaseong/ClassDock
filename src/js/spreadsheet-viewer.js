@@ -731,16 +731,82 @@ function setupSheetResize(sheet, table, colRow, rows, label){
 function pxToExcelColWidth(px){ return Math.max(1, Math.round(((Number(px) || 0) - 5) / 7 * 100) / 100); }
 function pxToExcelRowHeight(px){ return Math.max(6, Math.round((Number(px) || 0) * 0.75 * 100) / 100); }
 
+// CSV 첫 줄이 머리글(컬럼명)인지 실제 데이터인지 추정한다.
+// 숫자 위주 열인데 첫 줄만 텍스트면 머리글, 첫 줄도 숫자면 데이터. 애매하면 기존 동작대로 머리글로 본다.
+function spreadsheetGuessHeader(rows){
+  if (!Array.isArray(rows) || rows.length < 2) return true;
+  const head = rows[0] || [];
+  const cols = head.length;
+  if (!cols) return true;
+  const sampleN = Math.min(rows.length, 50);
+  const isBlank = (v) => String(v == null ? "" : v).trim() === "";
+  const isNum = (v) => { const s = String(v == null ? "" : v).trim().replace(/,/g, ""); return s !== "" && isFinite(Number(s)); };
+  let voteHeader = 0, voteData = 0, blanksInHead = 0;
+  for (let c = 0; c < cols; c++){
+    if (isBlank(head[c])) blanksInHead++;
+    let num = 0, nonBlank = 0;
+    for (let r = 1; r < sampleN; r++){ const v = rows[r] && rows[r][c]; if (isBlank(v)) continue; nonBlank++; if (isNum(v)) num++; }
+    if (!nonBlank) continue;
+    if (num / nonBlank >= 0.8){                        // 숫자 위주 열
+      if (isNum(head[c])) voteData += 1;               // 첫 줄도 숫자 → 데이터
+      else voteHeader += 1;                            // 첫 줄만 텍스트 → 전형적 머리글
+    } else if (!isBlank(head[c]) && !isNum(head[c])){  // 텍스트 열 + 첫 줄도 텍스트
+      voteHeader += 0.3;                               // 약한 머리글 신호
+    }
+  }
+  const vals = head.map(v => String(v == null ? "" : v).trim());
+  if (blanksInHead === 0 && new Set(vals).size === vals.length) voteHeader += 0.5;   // 머리글은 보통 값이 고유
+  if (blanksInHead > 0) voteData += 1;                 // 첫 줄에 빈 칸이 있으면 머리글로 보기 어렵다
+  return voteHeader >= voteData;                       // 동점이면 머리글(기존 기본과 일치)
+}
+
+// CSV→XLSX 변환 직전 '첫 줄을 머리글로 쓸까요?'를 한 번 묻는다. 추정 결과를 기본(추천)으로 표시.
+// 반환: true(머리글) / false(데이터) / null(취소)
+function promptCsvHeaderChoice(firstRow, guessHasHeader){
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "csv-header-ask";
+    const sample = (firstRow || []).slice(0, 8).map(v => String(v == null ? "" : v)).join("  ·  ") || "(빈 줄)";
+    overlay.innerHTML =
+      '<div class="csv-header-card" role="dialog" aria-modal="true">' +
+      '<strong>첫 줄을 머리글로 쓸까요?</strong>' +
+      '<div class="csv-header-sample">첫 줄: ' + escapeChartText(sample) + '</div>' +
+      '<div class="csv-header-hint">' + (guessHasHeader ? "컬럼명처럼 보여요." : "실제 데이터처럼 보여요.") + ' 원하는 쪽을 고르세요.</div>' +
+      '<div class="csv-header-actions">' +
+        '<button data-h="1" class="' + (guessHasHeader ? "primary" : "") + '">머리글로 사용' + (guessHasHeader ? " (추천)" : "") + '</button>' +
+        '<button data-h="0" class="' + (guessHasHeader ? "" : "primary") + '">데이터로 사용' + (guessHasHeader ? "" : " (추천)") + '</button>' +
+      '</div></div>';
+    document.body.appendChild(overlay);
+    const done = (val) => { overlay.remove(); document.removeEventListener("keydown", onKey, true); resolve(val); };
+    const onKey = (e) => {
+      if (e.key === "Escape"){ e.preventDefault(); done(null); }
+      else if (e.key === "Enter"){ e.preventDefault(); done(guessHasHeader); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) done(null); });
+    overlay.querySelector('[data-h="1"]').onclick = () => done(true);
+    overlay.querySelector('[data-h="0"]').onclick = () => done(false);
+    const rec = overlay.querySelector(".csv-header-actions .primary") || overlay.querySelector(".csv-header-actions button");
+    if (rec) rec.focus();
+  });
+}
+
 function renderCsvPreview(text, host, filename, ownerDoc){
   if (ownerDoc) ownerDoc.contentSearchFocus = null;
   const rowStarts = indexCsvRows(text);
   if (!rowStarts.length){ host.textContent = "CSV 파일이 비어 있습니다."; return; }
   const recordAt = (index) => text.slice(rowStarts[index], index + 1 < rowStarts.length ? rowStarts[index + 1] : text.length);
   const delimiter = detectCsvDelimiter(recordAt(0));
-  const header = parseCsvRecord(recordAt(0), delimiter);
+  const firstRow = parseCsvRecord(recordAt(0), delimiter);
+  // 첫 줄이 머리글(컬럼명)인지 실제 데이터인지 추정 → 미리보기와 XLSX 변환이 같은 판정을 쓴다.
+  const sampleRows = [];
+  for (let i = 0; i < Math.min(rowStarts.length, 50); i++) sampleRows.push(i === 0 ? firstRow : parseCsvRecord(recordAt(i), delimiter));
+  const hasHeader = spreadsheetGuessHeader(sampleRows);
+  const headerOffset = hasHeader ? 1 : 0;
+  const header = hasHeader ? firstRow : null;             // 열 머리글 텍스트(머리글일 때만; 아니면 A/B/C)
   // 한 페이지 셀 수를 ~8000으로 묶는다. 컬럼이 아주 많은 표(수천 열)에서 50행 강제로 수십만 셀을 만들어 멈추던 문제 방지.
-  const pageSize = Math.max(2, Math.min(500, Math.floor(8000 / Math.max(1, header.length))));
-  const dataRows = Math.max(0, rowStarts.length - 1);
+  const pageSize = Math.max(2, Math.min(500, Math.floor(8000 / Math.max(1, firstRow.length))));
+  const dataRows = Math.max(0, rowStarts.length - headerOffset);
   const pages = Math.max(1, Math.ceil(dataRows / pageSize));
   let page = 0;
 
@@ -760,14 +826,17 @@ function renderCsvPreview(text, host, filename, ownerDoc){
       try {
         const aoa = [];
         for (let i = 0; i < rowStarts.length; i++) aoa.push(parseCsvRecord(recordAt(i), delimiter));
+        // 변환 직전 '첫 줄을 머리글로?'를 한 번 확인(추정 결과를 추천으로). 취소면 변환 중단.
+        const useHeader = await promptCsvHeaderChoice(aoa[0], hasHeader);
+        if (useHeader == null) return;
         const nb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(nb, XLSX.utils.aoa_to_sheet(aoa), "Sheet1");
         const out = XLSX.write(nb, { type: "array", bookType: "xlsx" });
         const name = sheetBaseName(filename) + ".xlsx";
         const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         if (typeof handleFiles === "function"){
-          await handleFiles([new File([out], name, { type:mime })], { isScratch:true, spreadsheetAoa:aoa });
-          toast("XLSX로 변환해 편집 탭을 열었어요.", 2200);
+          await handleFiles([new File([out], name, { type:mime })], { isScratch:true, spreadsheetAoa:aoa, spreadsheetHasHeader:useHeader });
+          toast(useHeader ? "XLSX로 변환해 편집 탭을 열었어요(첫 줄=머리글)." : "XLSX로 변환해 편집 탭을 열었어요(첫 줄=데이터).", 2400);
         } else {
           downloadSpreadsheetFile(out, name, mime);
           toast("XLSX로 변환해 저장했어요.", 1800, { type: "success" });
@@ -789,16 +858,16 @@ function renderCsvPreview(text, host, filename, ownerDoc){
   const showPage = (nextPage) => {
     page = Math.max(0, Math.min(pages - 1, nextPage));
     const table = document.createElement("table"), body = document.createElement("tbody");
-    const start = 1 + page * pageSize;                      // CSV 첫 줄(0)은 컬럼명 헤더 → 데이터는 1행부터
+    const start = headerOffset + page * pageSize;          // 머리글이 있으면 데이터는 1행부터, 없으면 0행부터
     const end = Math.min(rowStarts.length, start + pageSize);
     for (let i = start; i < end; i++) appendRow(body, parseCsvRecord(recordAt(i), delimiter));
     table.appendChild(body); sheet.replaceChildren(table); sheet.scrollTop = 0; sheet.scrollLeft = 0;
-    // 첫 줄을 열 머리글로, 왼쪽 행 번호는 페이지에 맞춰 이어지게(rowStart).
+    // 머리글이면 첫 줄을 열 머리글로(colLabels), 아니면 A/B/C. 왼쪽 행 번호는 페이지에 맞춰 이어지게(rowStart).
     enhanceSpreadsheetSelection(sheet, "CSV", { extra: pagenav, colLabels: header, rowStart: page * pageSize });
     const firstNo = page * pageSize + 1, lastNo = page * pageSize + (end - start);
     status.textContent = dataRows
       ? `${firstNo.toLocaleString()}-${lastNo.toLocaleString()} / 총 ${dataRows.toLocaleString()}행`
-      : "데이터 없음(머리글만)";
+      : (hasHeader ? "데이터 없음(머리글만)" : "데이터 없음");
     prev.disabled = page === 0; next.disabled = page >= pages - 1;
   };
   if (ownerDoc){
@@ -816,8 +885,9 @@ function renderCsvPreview(text, host, filename, ownerDoc){
         }
       }
       if (!found) return false;
-      const targetPage = found.row === 0 ? 0 : Math.floor((found.row - 1) / pageSize);
-      const visibleRow = found.row === 0 ? -1 : ((found.row - 1) % pageSize);   // 0=헤더 → 컬럼 머리글(-1)
+      const dataIndex = found.row - headerOffset;              // 머리글이 있으면 0행은 머리글(-1), 없으면 0행도 데이터
+      const targetPage = dataIndex < 0 ? 0 : Math.floor(dataIndex / pageSize);
+      const visibleRow = dataIndex < 0 ? -1 : (dataIndex % pageSize);
       showPage(targetPage);
       requestAnimationFrame(() => {
         if (typeof sheet._focusContentCell === "function") sheet._focusContentCell(visibleRow, found.col);
@@ -3221,7 +3291,9 @@ async function renderXlsx(file, host, doc){
     else if (k === "s" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); quickSave(); }
   });
 
-  let editState = { filter: "", headerFrozen: true, sortCol: -1, sortDir: 1 };
+  // CSV→XLSX 변환 시 사용자가 고른 '첫 줄 머리글' 여부를 기본값으로. (없으면 기존처럼 머리글 고정)
+  const initHeaderFrozen = (doc && typeof doc.spreadsheetHasHeader === "boolean") ? doc.spreadsheetHasHeader : true;
+  let editState = { filter: "", headerFrozen: initHeaderFrozen, sortCol: -1, sortDir: 1 };
   const colFiltersBySheet = {};   // 시트이름 -> { 열index: Set(표시값) } — 열별 자동필터(보기 전용, 파일엔 저장 안 함)
   const virtualCsvEditor = !!csvFastAoa && csvFastAoa.length *
     Math.max(1, csvFastAoa.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)) > 12000;
@@ -4974,6 +5046,7 @@ if (typeof module === "object" && module.exports){
     cloneSpreadsheetValue,
     spreadsheetVirtualWindow,
     spreadsheetCellValueSnapshot,
+    spreadsheetGuessHeader,
     writeStructuredSpreadsheetModel
   };
 }
