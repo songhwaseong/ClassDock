@@ -771,7 +771,8 @@
     padding:5px 8px;border-radius:8px;background:rgba(15,23,42,.82);box-shadow:0 4px 14px rgba(0,0,0,.3)}
   #content.pdf-active .view-page-ctl{display:inline-flex}
   #content.study-mode .view-page-ctl{display:none}                      /* 학습 화면은 전용 컨트롤 사용 */
-  body.viewer-fullscreen #content.pdf-active .view-page-ctl{display:none}  /* 전체화면은 fs 컨트롤 사용 */
+  #content:fullscreen.pdf-active .view-page-ctl,
+  body.viewer-fullscreen #content.pdf-active .view-page-ctl{display:none}  /* 전체화면은 fs 컨트롤 사용(네이티브·폴백 모두) */
   /* 뷰어 컨트롤 클러스터: 줌·전체화면을 페이지 표시줄(pill) 안으로 모음 — 문서에 작용하는 기능을 문서 위에 배치 */
   .view-page-ctl .zoom-ctl{display:inline-flex;align-items:center;gap:2px}
   .view-page-ctl .zoom-ctl button,.view-page-ctl .page-fs-btn{font:inherit;font-size:12.5px;line-height:1;
