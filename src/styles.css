@@ -177,8 +177,16 @@
   .light-background-choice[data-light-background="lavender"]{background:#f4f1fa}
   .light-background-choice[data-light-background="sky"]{background:#edf6fb}
   .light-background-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
-  /* 상시 유틸리티(분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
-  .header-util{display:inline-flex;align-items:center;gap:6px}
+  /* 상시 유틸리티(검색·분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
+  .header-util{display:inline-flex;align-items:center;gap:6px;padding-left:10px;margin-left:2px;
+    border-left:1px solid rgba(255,255,255,.14)}
+  @media (max-width:720px){.header-util{padding-left:0;margin-left:0;border-left:0}}
+  /* 명령 팔레트 상시 진입점 — 검색창처럼 보이는 버튼으로 발견성을 높인다 */
+  header .cmdk-trigger{display:inline-flex;align-items:center;gap:7px;padding-right:8px}
+  header .cmdk-trigger svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+  header .cmdk-trigger kbd{font:11px Consolas,"Courier New",monospace;padding:2px 6px;border-radius:5px;
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.16);color:#e5e7eb;white-space:nowrap}
+  @media (max-width:1080px){header .cmdk-trigger span,header .cmdk-trigger kbd{display:none}header .cmdk-trigger{padding:7px 9px}}
   .save-folder-open{display:inline-flex;align-items:center;gap:6px}
   .save-folder-open[hidden]{display:none}
   .save-folder-open svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -649,6 +657,13 @@
   .dz-inner h2{font-size:20px;margin-bottom:8px}
   .dz-inner p{color:var(--muted);font-size:14px}
   .dz-feature{margin-top:9px;font-size:12.5px;color:var(--accent);font-weight:600}
+  .dz-cmdk-hint{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:8px 14px;
+    border:1px solid var(--border);border-radius:999px;background:var(--panel-2);color:var(--muted);
+    font:inherit;font-size:12.5px;cursor:pointer;transition:.12s}
+  .dz-cmdk-hint:hover{border-color:var(--accent);color:var(--ink)}
+  .dz-cmdk-hint svg{width:15px;height:15px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .dz-cmdk-hint kbd{font:11px Consolas,"Courier New",monospace;padding:2px 6px;margin:0 1px;border:1px solid var(--border);
+    border-bottom-width:2px;border-radius:5px;background:var(--field);color:var(--ink)}
   .dz-note{margin-top:18px;font-size:12px;color:var(--muted)}
   /* 창 전체 드롭 오버레이 — 파일을 끌고 들어오면 화면 전체를 덮어 어디에 떨궈도(미리보기·iframe 위까지) 받는다 */
   .drop-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
