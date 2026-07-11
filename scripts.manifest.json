@@ -2,7 +2,7 @@
   "styles": {
     "local": "src/styles.css",
     "pptx": {
-      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/css/pptxjs.css",
+      "src": "vendor/pptxjs.css",
       "file": "pptxjs.css"
     }
   },
@@ -34,6 +34,7 @@
     "notebook-cells.js",
     "office-doc-viewers.js",
     "spreadsheet-viewer.js",
+    "spreadsheet-chart.js",
     "pptx-viewer.js",
     "image-viewer.js",
     "board-render.js",
@@ -66,11 +67,11 @@
       "file": "jszip-utils.min.js"
     },
     {
-      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/divs2slides.min.js",
+      "src": "vendor/divs2slides.min.js",
       "file": "divs2slides.min.js"
     },
     {
-      "src": "https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/pptxjs.min.js",
+      "src": "vendor/pptxjs.min.js",
       "file": "pptxjs.min.js"
     },
     {

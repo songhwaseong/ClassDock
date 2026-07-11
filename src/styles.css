@@ -2626,3 +2626,22 @@
     .pptx-print-page{display:flex!important;justify-content:center;align-items:flex-start;padding-top:90mm;break-inside:avoid;page-break-inside:avoid;break-after:page;page-break-after:always}
     .pptx-print-page:last-child{break-after:auto;page-break-after:auto}
   }
+
+  /* ===== 스프레드시트 차트 모달 ===== */
+  .chart-card{width:min(860px,96%);display:flex;flex-direction:column;gap:12px}
+  .chart-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .chart-head h3{margin:0;flex:0 0 auto}
+  .chart-type-tabs{display:inline-flex;gap:6px;flex:1 1 auto;flex-wrap:wrap}
+  .chart-type-tab{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:999px;
+    background:var(--field);color:var(--muted);padding:5px 14px;cursor:pointer}
+  .chart-type-tab:hover:not(:disabled){background:var(--panel-hover);color:var(--ink)}
+  .chart-type-tab.active{background:var(--accent,#3b6fe0);border-color:var(--accent,#3b6fe0);color:#fff;font-weight:600}
+  .chart-type-tab:disabled{opacity:.4;cursor:default}
+  .chart-x{flex:0 0 auto;border:none;background:transparent;color:var(--muted);font-size:22px;
+    line-height:1;cursor:pointer;padding:0 4px}
+  .chart-x:hover{color:var(--ink)}
+  .chart-stage{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px;
+    display:flex;justify-content:center;align-items:center;overflow:auto}
+  .chart-svg{width:100%;height:auto;max-width:780px}
+  .chart-note{color:var(--muted);font-size:12.5px;min-height:16px;text-align:center}
+  .chart-actions{display:flex;gap:8px;align-items:center;margin:0}

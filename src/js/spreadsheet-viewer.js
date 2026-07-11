@@ -183,13 +183,14 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
   const findNext = document.createElement("button"); findNext.type = "button"; findNext.textContent = "다음"; findNext.disabled = true;
   const findStatus = document.createElement("span"); findStatus.className = "sheet-find-status"; findStatus.textContent = "";
   const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "복사"; copy.disabled = true;
+  const chart = document.createElement("button"); chart.type = "button"; chart.textContent = "📊 차트"; chart.disabled = true; chart.title = "선택한 범위로 차트 만들기 (막대·꺾은선·원·산점도)";
   const clear = document.createElement("button"); clear.type = "button"; clear.textContent = "선택 해제"; clear.disabled = true;
   const stat = document.createElement("span"); stat.className = "sheet-stat"; stat.textContent = "";   // 선택 영역 합계·평균·개수
   // 찾기·복사/해제를 그룹으로 묶어, 폭이 넘쳐 줄바꿈될 때 버튼 하나만 떨어지지 않고 그룹째 깔끔히 내려가게 한다.
   const findGroup = document.createElement("span"); findGroup.className = "sheet-bar-group";
   findGroup.append(search, findPrev, findNext, findStatus);
   const actGroup = document.createElement("span"); actGroup.className = "sheet-bar-group";
-  actGroup.append(copy, clear);
+  actGroup.append(copy, chart, clear);
   bar.append(info, findGroup, actGroup, stat);
   if (opts.extra) bar.prepend(opts.extra);   // CSV 페이지 네비 등 외부 컨트롤을 같은 바 앞쪽에 합친다(바 재생성 시 매번 다시 끼움)
 
@@ -338,7 +339,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     if (!selection){
       clearMarks();
       info.textContent = (label || "표") + " · 셀·행·열 선택";
-      copy.disabled = true; clear.disabled = true;
+      copy.disabled = true; clear.disabled = true; chart.disabled = true;
       if (options.deferStat) selectionStatPending = true; else flushSelectionStat();
       if (typeof opts.onSelectionChange === "function") opts.onSelectionChange(null);
       return;
@@ -382,7 +383,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     markedAnchor = nextAnchor && nextAnchor.classList.contains("sheet-selected") ? nextAnchor : null;
     if (markedAnchor) markedAnchor.classList.add("sheet-anchor");
     info.textContent = rangeLabel(selection);
-    copy.disabled = false; clear.disabled = false;
+    copy.disabled = false; clear.disabled = false; chart.disabled = false;
     if (options.deferStat) selectionStatPending = true; else flushSelectionStat();
     if (typeof opts.onSelectionChange === "function") opts.onSelectionChange(selection);
   };
@@ -524,6 +525,25 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     if (!text) return;
     const ok = await copySpreadsheetText(text);
     toast(ok ? "선택한 표 내용을 복사했어요." : "복사하지 못했어요.", 1800);
+  });
+  chart.addEventListener("click", () => {
+    if (!selection){ return; }
+    if (typeof window.openSpreadsheetChart !== "function"){ toast("차트 기능을 불러오지 못했어요.", 2200, { type: "error" }); return; }
+    const matrix = [];
+    for (let r = selection.row1; r <= selection.row2; r++){
+      const line = [];
+      for (let c = selection.col1; c <= selection.col2; c++) line.push(textAt(r, c));
+      matrix.push(line);
+    }
+    // CSV처럼 열 이름(헤더)이 표 밖에 따로 있으면 계열 이름으로 쓰도록 맨 앞에 붙인다.
+    if (colLabels){
+      const header = [];
+      for (let c = selection.col1; c <= selection.col2; c++){
+        header.push(colLabels[c] != null && String(colLabels[c]).trim() !== "" ? String(colLabels[c]) : "");
+      }
+      if (header.some(h => h !== "")) matrix.unshift(header);
+    }
+    window.openSpreadsheetChart({ matrix, label: (label || "표") });
   });
   clear.addEventListener("click", () => { anchor = null; applySelection(null); });
   search.addEventListener("input", () => { findIndex = -1; runFind(1, true); });
