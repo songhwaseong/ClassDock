@@ -142,8 +142,12 @@ function renderFolderImageGallery(doc, host){
         else gallerySetImageSource(image, item.file);
         frame.appendChild(image);
         const name = document.createElement("strong"); name.textContent = item.name;
-        const path = document.createElement("small"); path.textContent = item.labelPath || item.name;
-        card.append(frame, name, path);
+        const pathLabel = item.labelPath && item.labelPath !== item.name ? item.labelPath : "";
+        card.append(frame, name);
+        if (pathLabel){
+          const path = document.createElement("small"); path.textContent = pathLabel;
+          card.appendChild(path);
+        }
         card.addEventListener("click", () => { state.index = index; state.mode = "single"; paint(); shell.focus(); });
         grid.appendChild(card);
       });
@@ -156,8 +160,13 @@ function renderFolderImageGallery(doc, host){
     gallerySetImageSource(image, item.file);
     const caption = document.createElement("div"); caption.className = "image-gallery-caption";
     const name = document.createElement("strong"); name.textContent = item.name;
-    const path = document.createElement("span"); path.textContent = item.labelPath || item.name;
-    caption.append(name, path); singleView.append(image, caption); body.appendChild(singleView);
+    const pathLabel = item.labelPath && item.labelPath !== item.name ? item.labelPath : "";
+    caption.appendChild(name);
+    if (pathLabel){
+      const path = document.createElement("span"); path.textContent = pathLabel;
+      caption.appendChild(path);
+    }
+    singleView.append(image, caption); body.appendChild(singleView);
   };
   shell.addEventListener("keydown", (event) => {
     if (state.mode !== "single" || event.altKey || event.ctrlKey || event.metaKey) return;
