@@ -1994,13 +1994,27 @@ class PdfSignerLauncher
         return "";
     }
 
+    // 드라이브 루트(예: D:\)를 루트로 써도 검증이 깨지지 않게 정규화.
+    // "D:\" 를 TrimEnd 하면 "D:" 가 되는데, Path.GetFullPath("D:") 는 그 드라이브의
+    // '현재 폴더'(예: D:\my)로 풀리므로 이후 재검증이 전부 실패한다 → 드라이브 루트는 구분자를 유지.
+    static string NormalizeRootForCheck(string root)
+    {
+        string normalized = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (normalized.Length == 2 && normalized[1] == ':') normalized += Path.DirectorySeparatorChar;
+        return normalized;
+    }
+
     static bool IsPathInsideRoot(string root, string candidate, bool allowRoot=true)
     {
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(candidate)) return false;
-        string normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string normalizedRoot = NormalizeRootForCheck(root);
         string normalizedCandidate = Path.GetFullPath(candidate);
-        if (allowRoot && string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase)) return true;
-        string prefix = normalizedRoot + Path.DirectorySeparatorChar;
+        if (allowRoot && string.Equals(
+            normalizedCandidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            normalizedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase)) return true;
+        string prefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            ? normalizedRoot : normalizedRoot + Path.DirectorySeparatorChar;
         return normalizedCandidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -2010,7 +2024,7 @@ class PdfSignerLauncher
     {
         try
         {
-            string normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedRoot = NormalizeRootForCheck(root);
             string normalizedFull = Path.GetFullPath(full);
             if (!IsPathInsideRoot(normalizedRoot, normalizedFull, true)) return true;
             string relative = normalizedFull.Substring(normalizedRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

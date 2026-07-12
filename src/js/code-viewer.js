@@ -1681,7 +1681,9 @@ function downloadTextFile(text, name){
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// 텍스트/코드 파일 저장(.py 외): EXE면 서버에 원래 확장자로 저장, 아니면 다운로드. 스크래치 첫 저장은 이름을 받는다.
+// 텍스트/코드 파일 저장(.py 외 — 노트북 .ipynb 포함): EXE면 서버에 원래 확장자로 저장,
+// 아니면 .py 저장과 동일하게 위치를 한 번 고르고 핸들을 보관해 같은 파일에 덮어쓰기, 마지막 폴백이 다운로드.
+// 스크래치 첫 저장은 이름을 받는다.
 async function saveTextDoc(value, ownerDoc, name){
   try {
     if (ownerDoc && ownerDoc.originalSaveMode){
@@ -1727,7 +1729,51 @@ async function saveTextDoc(value, ownerDoc, name){
         return true;
       }
     }
-    const blob = new Blob([value], { type: "text/plain;charset=utf-8" });   // 브라우저/file:// → 다운로드(확장자 유지)
+    // A) 서버가 없으면(.py 저장과 동일) 첫 저장에 위치를 한 번 고르고 핸들을 보관 → 이후엔 대화상자 없이
+    //    같은 파일에 조용히 덮어쓰기. 노트북 Ctrl+S 가 매번 다운로드 폴더로 떨어지지 않게 한다.
+    //    변환된 노트북처럼 폴더 핸들(fsDirHandle)만 있으면 그 폴더 안에 새 파일로 만들어진다.
+    if (ownerDoc && !ownerDoc.fsHandle && ownerDoc.workspacePath && typeof loadFsHandle === "function"){
+      try { const restored = await loadFsHandle(ownerDoc.workspacePath); if (restored) ownerDoc.fsHandle = restored; } catch(_){}
+    }
+    const hadHandle = !!(ownerDoc && (ownerDoc.fsHandle || ownerDoc.fsDirHandle));
+    const extMatch = String(name).match(/\.[A-Za-z0-9]+$/);
+    const ext = extMatch ? extMatch[0].toLowerCase() : "";
+    const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
+    const wrote = await saveViaFileHandle(value, name, ownerDoc, {
+      mime: mime + ";charset=utf-8",
+      pickerTypes: ext ? [{ description: ext === ".ipynb" ? "Jupyter Notebook" : ext.slice(1).toUpperCase() + " 파일",
+        accept: { [mime]: [ext] } }] : null
+    });
+    if (wrote === "cancelled") return false;                 // 사용자가 위치 선택을 닫음 → 저장 안 함(다운로드도 없음)
+    if (wrote === "saved"){
+      if (ownerDoc){
+        const oldPath = String(ownerDoc.workspacePath || ownerDoc.name || name).replace(/\\/g, "/").replace(/^\/+/, "");
+        // 파일 선택 창에서 다른 이름을 골랐으면 탭·사이드바·헤더 이름을 새 이름으로 맞춘다(.py 저장과 동일)
+        if (ownerDoc.fsHandle && ownerDoc.fsHandle.name && ownerDoc.fsHandle.name !== ownerDoc.name){
+          ownerDoc.name = ownerDoc.fsHandle.name;
+          if (typeof state !== "undefined" && state === ownerDoc){
+            const hdr = byId("activeFileName"); if (hdr) hdr.textContent = ownerDoc.name;
+          }
+          if (typeof renderTabs === "function") renderTabs();
+        }
+        const slash = oldPath.lastIndexOf("/");
+        const path = slash >= 0 ? oldPath.slice(0, slash + 1) + (ownerDoc.name || name) : (ownerDoc.name || oldPath);
+        ownerDoc.workspacePath = path;
+        if (ownerDoc.isScratch) ownerDoc._named = true;      // 자동 저장이 같은 핸들로 이어지도록
+        ownerDoc.size = new Blob([value]).size;
+        ownerDoc.savedText = value;
+        markDocumentSavedAsUtf8(ownerDoc);
+        if (ownerDoc.fsHandle){                              // 저장 위치를 경로 키로 보관 → 다음 실행에도 재선택 불필요
+          saveFsHandle(path, ownerDoc.fsHandle);
+          if (oldPath && oldPath !== path) forgetFsHandle(oldPath);
+        }
+        if (typeof renderSidebar === "function") renderSidebar();
+      }
+      toast(hadHandle ? "저장한 위치의 파일에 바로 저장했어요."
+        : "선택한 위치에 저장했어요. 다음부터는 묻지 않고 같은 파일에 저장돼요.", 2600, { type: "success" });
+      return true;
+    }
+    const blob = new Blob([value], { type: "text/plain;charset=utf-8" });   // 미지원 브라우저/file:// → 다운로드(확장자 유지)
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -1810,8 +1856,8 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
       if (options.existingOnly) return "denied";
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";
       handle = await window.showSaveFilePicker({
-        suggestedName: /\.py$/i.test(name) ? name : name + ".py",
-        types: [{ description: "Python", accept: { "text/x-python": [".py", ".pyw"] } }]
+        suggestedName: /\.[A-Za-z0-9]+$/.test(name) ? name : name + ".py",
+        types: options.pickerTypes || [{ description: "Python", accept: { "text/x-python": [".py", ".pyw"] } }]
       });
       if (ownerDoc) ownerDoc.fsHandle = handle;
     }

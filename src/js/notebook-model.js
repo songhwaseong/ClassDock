@@ -97,7 +97,9 @@ function notebookAutosaveTarget(ownerDoc, serverAvailable){
   if (ownerDoc.originalSaveMode){
     return ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function" ? "file-handle" : "";
   }
-  return serverAvailable && (ownerDoc.workspacePath || ownerDoc.name) ? "server" : "";
+  if (serverAvailable && (ownerDoc.workspacePath || ownerDoc.name)) return "server";
+  // 서버 없는 브라우저: 수동 저장(Ctrl+S)에서 위치를 한 번 고른 뒤에는 그 파일로 조용히 자동 저장
+  return ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function" ? "file-handle" : "";
 }
 
 function notebookSetAutosaveState(ownerDoc, state){
