@@ -275,8 +275,8 @@ function addCodeLinkElement(target, opts={}){
   const line = Math.max(1, parseInt(target && target.line, 10) || 1);
   const label = String(opts.label || (target && target.label) || ("L" + line)).slice(0, 32);
   el.__codeTarget = { ...(target || {}), line, label };
-  el.style.width = (opts.widthPx || 92) + "px";
-  el.style.height = (opts.heightPx || 34) + "px";
+  el.style.width = (opts.widthPx || 54) + "px";
+  el.style.height = (opts.heightPx || 24) + "px";
   const pin = document.createElement("button");
   pin.type = "button";
   pin.className = "code-link-pin";
@@ -422,14 +422,14 @@ async function revealCodeLinkPin(pdfDoc, pinEl){
 
 function targetPdfForCodeLink(){
   const study = docs.find(d => d.id === studyPdfId && d.kind === "pdf");
-  if (study) return study;
-  if (state && state.kind === "pdf") return state;
-  return docs.find(d => d.kind === "pdf") || null;
+  if (study) return study;                          // 분할 참고 칸의 PDF(화면에 보이는 대상)
+  if (state && state.kind === "pdf") return state;  // (드묾) 활성 문서 자체가 PDF
+  return null;                                      // 화면에 안 보이는 배경 PDF로는 전환하지 않음 — 편집 칸이 엉뚱한 PDF로 바뀌는 것 방지
 }
 
 function createCodeLinkFromCodeDoc(codeDoc){
   const pdfDoc = targetPdfForCodeLink();
-  if (!pdfDoc){ toast("Open a PDF first, then pin a code line.", 2600); return; }
+  if (!pdfDoc){ toast("옆 화면에 PDF를 두고 잠금을 푼 뒤 핀을 꽂아 주세요.", 3200); return; }
   if (isPdfReferenceLocked(pdfDoc)){ explainPdfReferenceLocked(); return; }
   codeDoc = codeDoc || activeCodeLinkDoc();
   const target = codeLinkTargetFromDoc(codeDoc);

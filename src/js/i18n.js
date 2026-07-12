@@ -784,6 +784,7 @@
     "PDF를 먼저 열어 주세요.": "Open a PDF first.",
     "보관함에서 삭제": "Remove from library",
     "분할 작업의 참고 PDF는 읽기 전용이에요.": "The reference PDF in split view is read-only.",
+    "옆 화면에 PDF를 두고 잠금을 푼 뒤 핀을 꽂아 주세요.": "Put a PDF in the side pane and unlock it, then pin.",
     "서명을 넣었어요.": "Added the signature.",
     "서명이 비어 있어요.": "The signature is empty.",
     "선택한 글자 강조": "Highlight the selected text",

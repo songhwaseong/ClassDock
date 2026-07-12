@@ -821,7 +821,7 @@
     border:2px solid #fff;border-radius:50%;cursor:nwse-resize;display:none}
   .placed.selected .grip{display:block}
   .code-link-pin{display:flex;align-items:center;justify-content:center;width:100%;height:100%;border:1px solid rgba(202,160,25,.55);
-    border-radius:999px;background:#fef3c7;color:#78350f;font:700 12px/1.1 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;
+    border-radius:999px;background:#fef3c7;color:#78350f;font:700 11px/1.1 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;
     cursor:pointer;box-shadow:0 2px 8px rgba(120,53,15,.18);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .code-link-pin:hover{background:#fde68a;border-color:#ca8a04}
   /* ===== PDF 위 필기(잉크) ===== */
