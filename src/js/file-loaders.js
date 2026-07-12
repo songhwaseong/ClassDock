@@ -793,10 +793,10 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   // 이제 경로+크기+수정시각이 같은 문서는 그대로 두고, 추가/변경/삭제된 파일만 처리한다.
   const branchIds = navBranchIds(rootId);
   const childDocs = docs.filter(doc => branchIds.has(doc.nodeId));
-  // 이미지 갤러리는 실제 파일이 아닌 파생 탭이다. 변경 없는 새로고침에서 파일 삭제로
+  // 이미지/PDF 갤러리는 실제 파일이 아닌 파생 탭이다. 변경 없는 새로고침에서 파일 삭제로
   // 오인해 닫지 않으며, 실제 파일 목록이 달라질 때만 함께 닫아 다음에 최신 목록으로 연다.
-  const galleryDocs = childDocs.filter(doc => doc.kind === "image-gallery");
-  const sourceDocs = childDocs.filter(doc => doc.kind !== "image-gallery");
+  const galleryDocs = childDocs.filter(doc => doc.kind === "image-gallery" || doc.kind === "pdf-gallery");
+  const sourceDocs = childDocs.filter(doc => doc.kind !== "image-gallery" && doc.kind !== "pdf-gallery");
   const docKeyOf = (doc) => normalizedRunPath(doc.workspacePath || doc.relPath || doc.name);
   const fileKeyOf = (file) => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name));
   const nextByKey = new Map(openable.map(file => [fileKeyOf(file), file]));

@@ -16,7 +16,7 @@ async function loadImage(file, options={}){
 // 범용 백업: 알 수 없는 확장자라도 내용이 텍스트면 코드뷰(줄번호)로 열고, 바이너리면 미지원 안내.
 /* ===== Folder image gallery ===== */
 function galleryFolderContainsDoc(folderNode, doc, includeChildren){
-  if (!folderNode || !doc || doc.kind !== "image") return false;
+  if (!folderNode || !doc) return false;
   if (!includeChildren) return doc.parentId === folderNode.nodeId;
   let parentId = doc.parentId;
   while (parentId){
@@ -36,6 +36,16 @@ function folderGalleryImageDocs(folderNode, includeChildren){
 
 function imageGalleryFolderImageCount(folderNode, includeChildren){
   return folderGalleryImageDocs(folderNode, includeChildren).length;
+}
+
+function folderGalleryPdfDocs(folderNode, includeChildren){
+  return docs
+    .filter(doc => doc.kind === "pdf" && galleryFolderContainsDoc(folderNode, doc, includeChildren))
+    .sort((a, b) => String(a.relPath || a.name).localeCompare(String(b.relPath || b.name), "ko", { numeric:true, sensitivity:"base" }));
+}
+
+function pdfGalleryFolderPdfCount(folderNode, includeChildren){
+  return folderGalleryPdfDocs(folderNode, includeChildren).length;
 }
 
 function openFolderImageGallery(folderNode, includeChildren){
@@ -68,6 +78,40 @@ function openFolderImageGallery(folderNode, includeChildren){
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
     renderFolderImageGallery(doc, host);
+  };
+  refreshChrome();
+  activateIfIdle(doc, {});
+  return doc;
+}
+
+function openFolderPdfGallery(folderNode, includeChildren){
+  const pdfDocs = folderGalleryPdfDocs(folderNode, includeChildren);
+  if (!pdfDocs.length){
+    toast(includeChildren ? "이 폴더와 하위 폴더에 표시할 PDF가 없어요." : "이 폴더에 바로 들어 있는 PDF가 없어요.", 2600);
+    return null;
+  }
+  const galleryKey = folderNode.nodeId + ":pdf:" + (includeChildren ? "all" : "direct");
+  const existing = docs.find(doc => doc.kind === "pdf-gallery" && doc.galleryKey === galleryKey);
+  if (existing){ setActiveDoc(existing.id); return existing; }
+
+  const folderPath = (folderNode.newPythonContext && folderNode.newPythonContext.dir) || "";
+  const prefix = folderPath ? folderPath.replace(/\\/g, "/").replace(/\/+$/, "") + "/" : "";
+  const items = pdfDocs.map(source => {
+    const fullPath = String(source.relPath || source.name || "").replace(/\\/g, "/");
+    return {
+      docId: source.id,
+      name: source.name,
+      relPath: fullPath,
+      labelPath: prefix && fullPath.indexOf(prefix) === 0 ? fullPath.slice(prefix.length) : fullPath
+    };
+  });
+  const suffix = includeChildren ? "PDF 전체" : "PDF";
+  const doc = makeDoc("pdf-gallery", folderNode.name + " · " + suffix, { parentId:folderNode.nodeId });
+  doc.galleryKey = galleryKey;
+  doc.galleryItems = items;
+  doc.render = async () => {
+    const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
+    renderFolderPdfGallery(doc, host);
   };
   refreshChrome();
   activateIfIdle(doc, {});
@@ -174,6 +218,120 @@ function renderFolderImageGallery(doc, host){
     if (event.key === "ArrowRight" && state.index < items.length - 1){ event.preventDefault(); next.click(); }
   });
   paint();
+}
+
+/* ===== Folder PDF gallery ===== */
+function renderFolderPdfGallery(doc, host){
+  const items = doc.galleryItems || [];
+  const shell = document.createElement("section"); shell.className = "image-gallery pdf-gallery"; shell.tabIndex = 0;
+  const bar = document.createElement("div"); bar.className = "image-gallery-bar";
+  const label = document.createElement("strong"); label.textContent = "▦ PDF 모아보기"; label.title = "PDF 첫 페이지를 격자로 봅니다";
+  const count = document.createElement("span"); count.className = "image-gallery-count"; count.textContent = items.length + "개";
+  bar.append(label, count);
+  const body = document.createElement("div"); body.className = "image-gallery-body";
+  const grid = document.createElement("div"); grid.className = "image-gallery-grid";
+  body.appendChild(grid); shell.append(bar, body); host.appendChild(shell);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
+
+  let disposed = false;
+  let observer = null;
+  let rendering = 0;
+  const pending = [];
+  const loadingTasks = new Set();
+  const maxConcurrent = 2;
+  const alive = () => !disposed && !doc.closed && shell.isConnected;
+  const cleanup = () => {
+    disposed = true;
+    pending.length = 0;
+    if (observer) observer.disconnect();
+    loadingTasks.forEach(task => { try { task.destroy(); } catch(e){} });
+    loadingTasks.clear();
+  };
+  doc.cleanupFns = doc.cleanupFns || [];
+  doc.cleanupFns.push(cleanup);
+
+  const renderThumbnail = async job => {
+    const source = docs.find(candidate => candidate.id === job.item.docId);
+    let loadingTask = null, pdf = null, page = null;
+    try {
+      if (!alive() || !job.frame.isConnected) return;
+      if (!source || source.closed || !source.pdfBytes) throw new Error("PDF source unavailable");
+      if (typeof pdfjsLib === "undefined") throw new Error("PDF renderer unavailable");
+      if (typeof ensureWorker === "function") await ensureWorker();
+      if (!alive() || !job.frame.isConnected) return;
+      loadingTask = pdfjsLib.getDocument({ data:new Uint8Array(source.pdfBytes.slice(0)), disableFontFace:true, useSystemFonts:false });
+      loadingTasks.add(loadingTask);
+      pdf = await loadingTask.promise;
+      if (!alive() || !job.frame.isConnected) return;
+      page = await pdf.getPage(1);
+      const base = page.getViewport({ scale:1 });
+      const cssScale = Math.min(220 / Math.max(1, base.width), 150 / Math.max(1, base.height), 0.32);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const viewport = page.getViewport({ scale:cssScale * dpr });
+      const canvas = job.canvas;
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      canvas.style.width = Math.max(1, Math.round(viewport.width / dpr)) + "px";
+      canvas.style.height = Math.max(1, Math.round(viewport.height / dpr)) + "px";
+      await page.render({ canvasContext:canvas.getContext("2d"), viewport }).promise;
+      if (!alive() || !job.frame.isConnected) return;
+      job.placeholder.hidden = true;
+      canvas.hidden = false;
+      const pathLabel = job.item.labelPath && job.item.labelPath !== job.item.name ? job.item.labelPath : "";
+      job.detail.textContent = (pathLabel ? pathLabel + " · " : "") + pdf.numPages + "쪽";
+      job.card.title = (job.item.labelPath || job.item.name) + " · " + pdf.numPages + "쪽";
+      job.card.removeAttribute("aria-busy");
+    } catch(e){
+      if (alive() && job.frame.isConnected){
+        job.placeholder.textContent = "PDF";
+        job.detail.textContent = "미리보기를 만들지 못했어요.";
+        job.card.removeAttribute("aria-busy");
+      }
+    } finally {
+      if (page && typeof page.cleanup === "function"){ try { page.cleanup(); } catch(e){} }
+      if (loadingTask) loadingTasks.delete(loadingTask);
+      if (pdf && typeof pdf.destroy === "function"){ try { await pdf.destroy(); } catch(e){} }
+      else if (loadingTask && typeof loadingTask.destroy === "function"){ try { await loadingTask.destroy(); } catch(e){} }
+    }
+  };
+  const pump = () => {
+    while (alive() && rendering < maxConcurrent && pending.length){
+      const job = pending.shift();
+      if (!job.frame.isConnected) continue;
+      rendering++;
+      renderThumbnail(job).finally(() => { rendering--; pump(); });
+    }
+  };
+  const queue = job => { if (alive()){ pending.push(job); pump(); } };
+  observer = typeof IntersectionObserver !== "undefined"
+    ? new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          observer.unobserve(entry.target);
+          queue(entry.target.__pdfGalleryJob);
+        });
+      }, { rootMargin:"420px 0px" })
+    : null;
+
+  items.forEach(item => {
+    const card = document.createElement("button"); card.type = "button"; card.className = "image-gallery-card pdf-gallery-card";
+    card.title = item.labelPath || item.name; card.setAttribute("aria-label", item.name + " PDF 열기"); card.setAttribute("aria-busy", "true");
+    const frame = document.createElement("span"); frame.className = "image-gallery-thumb pdf-gallery-thumb";
+    const placeholder = document.createElement("span"); placeholder.className = "pdf-gallery-placeholder"; placeholder.textContent = "PDF";
+    const canvas = document.createElement("canvas"); canvas.hidden = true; canvas.setAttribute("aria-hidden", "true");
+    frame.append(placeholder, canvas);
+    const name = document.createElement("strong"); name.textContent = item.name;
+    const detail = document.createElement("small"); detail.textContent = "첫 페이지 미리보기 준비 중…";
+    const job = { item, card, frame, canvas, placeholder, detail };
+    frame.__pdfGalleryJob = job;
+    card.append(frame, name, detail);
+    card.addEventListener("click", () => {
+      const source = docs.find(candidate => candidate.id === item.docId);
+      if (source) setActiveDoc(source.id);
+    });
+    grid.appendChild(card);
+    if (observer) observer.observe(frame); else queue(job);
+  });
 }
 
 async function loadText(file, options={}){

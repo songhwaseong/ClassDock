@@ -488,6 +488,10 @@
     // ── 2단계(잔여): 이미지 편집기 ──
     "▦ 여러 장 보기": "▦ Grid view",
     "썸네일을 격자로 봅니다": "View thumbnails as a grid",
+    "▦ PDF 모아보기": "▦ PDF gallery",
+    "PDF 첫 페이지를 격자로 봅니다": "View PDF first pages as a grid",
+    "▦ PDF 모아보기 — 이 폴더만 ({n}개)": "▦ PDF gallery — this folder ({n})",
+    "▦ PDF 모아보기 — 하위 폴더 포함 ({n}개)": "▦ PDF gallery — include subfolders ({n})",
     "‹ 이전": "‹ Prev",
     "다음 ›": "Next ›",
     "이전 이미지": "Previous image",
@@ -653,6 +657,7 @@
     "화이트보드": "Whiteboard",
     "수업 리플레이": "Lesson replay",
     "이미지 모아보기": "Image gallery",
+    "PDF 모아보기": "PDF gallery",
     "Python 실습": "Python practice",
     "이미지 보기": "Image view",
     "오디오 재생": "Audio playback",

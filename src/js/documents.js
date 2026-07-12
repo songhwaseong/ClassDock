@@ -838,6 +838,7 @@ function modeBadgeText(doc){
   if (doc.kind === "board") return "화이트보드";
   if (doc.kind === "replay") return "수업 리플레이";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
+  if (doc.kind === "pdf-gallery") return "PDF 모아보기";
   if (ext === ".py" || ext === ".pyw") return "Python 실습";
   if (doc.kind === "image") return "이미지 보기";
   if (doc.kind === "video") return doc.media === "audio" ? "오디오 재생" : "영상 재생";
@@ -1352,6 +1353,12 @@ function openSidebarGroupMenu(node, x, y){
     add("▦ 이미지 모아보기 — 이 폴더만 (" + directCount + "개)", () => openFolderImageGallery(node, false), directCount === 0);
     add("▦ 이미지 모아보기 — 하위 폴더 포함 (" + nestedCount + "개)", () => openFolderImageGallery(node, true), nestedCount === 0);
   }
+  if (node.folderRefreshRootId && typeof pdfGalleryFolderPdfCount === "function" && typeof openFolderPdfGallery === "function"){
+    const directCount = pdfGalleryFolderPdfCount(node, false);
+    const nestedCount = pdfGalleryFolderPdfCount(node, true);
+    add("▦ PDF 모아보기 — 이 폴더만 (" + directCount + "개)", () => openFolderPdfGallery(node, false), directCount === 0);
+    add("▦ PDF 모아보기 — 하위 폴더 포함 (" + nestedCount + "개)", () => openFolderPdfGallery(node, true), nestedCount === 0);
+  }
   if (node.folderRefreshRootId){
     add("↻  폴더 새로고침", () => requestFolderRefresh(node.folderRefreshRootId));
     // 브라우저 재생이 막히는 형식(MKV 등)이 있으면 한꺼번에 MP4로 변환(ffmpeg — 자세한 안내는 영상 탭)
@@ -1471,6 +1478,7 @@ function iconFor(kind, name){
   if (kind === "pdf") return "PDF";
   if (kind === "image") return "IMG";
   if (kind === "image-gallery") return "▦";
+  if (kind === "pdf-gallery") return "▦";
   if (kind === "video") return AUDIO_EXTS.includes(fileExtOf(name)) ? "AUD" : "VID";
   if (kind === "board") return "칠판";
   if (kind === "replay") return "▶";
@@ -1489,6 +1497,7 @@ function extCategory(kind, name){
   if (kind === "pdf")    return "pdf";
   if (kind === "image")  return "img";
   if (kind === "image-gallery") return "img";
+  if (kind === "pdf-gallery") return "pdf";
   if (kind === "video")  return "media";
   const ext = fileExtOf(name);
   if (ext === "docx") return "word";
