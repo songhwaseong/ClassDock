@@ -352,17 +352,27 @@ function collapseRunButtons(bar, buttons, storageKey){
   if (storageKey){ try { open = localStorage.getItem(storageKey) === "1"; } catch(_){} }
   const wrap = document.createElement("span"); wrap.className = "run-more-wrap"; wrap.hidden = !open;
   const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "run-more" + (open ? " open" : "");
-  moreBtn.textContent = open ? "⋯ 접기" : "⋯ 더보기"; moreBtn.title = "단계 실행·진단·채점·PDF 핀·Py Env 등 추가 도구";
+  const tr = (text) => (typeof window.t === "function" ? window.t(text) : text);
+  const syncMoreButton = (show) => {
+    moreBtn.classList.toggle("open", show);
+    moreBtn.textContent = tr(show ? "⋯ 접기" : "⋯ 더보기");
+    moreBtn.title = tr("단계 실행·진단·채점·PDF 핀·Py Env 등 추가 도구");
+  };
+  syncMoreButton(open);
   bar.insertBefore(moreBtn, buttons[0]);
   bar.insertBefore(wrap, buttons[0]);
   for (const b of buttons) wrap.appendChild(b);
   moreBtn.addEventListener("click", () => {
     const show = wrap.hidden;
     wrap.hidden = !show;
-    moreBtn.classList.toggle("open", show);
-    moreBtn.textContent = show ? "⋯ 접기" : "⋯ 더보기";
+    syncMoreButton(show);
     if (storageKey){ try { localStorage.setItem(storageKey, show ? "1" : "0"); } catch(_){} }
   });
+  const onLanguageChange = () => {
+    if (!moreBtn.isConnected){ window.removeEventListener("mni18nchange", onLanguageChange); return; }
+    syncMoreButton(!wrap.hidden);
+  };
+  window.addEventListener("mni18nchange", onLanguageChange);
 }
 
 /* ===== JSON 트리 보기 (표시 전용) =====
@@ -982,6 +992,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   // PDF 필기바의 ● 녹화와 같은 녹화기를 공유하므로 어느 쪽에서 시작/정지해도 상태가 맞는다.
   const recBtn = document.createElement("button"); recBtn.className = "run-rec"; recBtn.type = "button";
   const _T = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const _TF = (tmpl, vars) => (typeof window.tf === "function" ? window.tf(tmpl, vars) : String(tmpl).replace(/\{(\w+)\}/g, (_, key) => vars && vars[key] != null ? String(vars[key]) : _));
   const syncRecBtn = (on) => {
     recBtn.classList.toggle("recording", on);
     recBtn.textContent = _T(on ? "■ 정지" : "● 녹화");
@@ -1164,8 +1175,21 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.fileBase = String((effectiveRunCtx && effectiveRunCtx.relPath) || (file && file.name) || (ownerDoc && ownerDoc.name) || "").replace(/\\/g, "/").split("/").pop();
   const fromArchive = !!(effectiveRunCtx && effectiveRunCtx.archiveCtx && effectiveRunCtx.relPath);
   const runShortcutLabel = shortcutDisplay(shortcutValue("runCode"));
-  const idleMsg = fromArchive ? "편집 후 " + runShortcutLabel + " 실행 · 옆 파일 포함" : "편집 후 " + runShortcutLabel + " 로 실행";
+  const makeIdleMessage = () => fromArchive
+    ? _TF("편집 후 {shortcut} 실행 · 옆 파일 포함", { shortcut:runShortcutLabel })
+    : _TF("편집 후 {shortcut} 로 실행", { shortcut:runShortcutLabel });
+  let idleMsg = makeIdleMessage();
   status.textContent = restoredDraft === null ? idleMsg : "자동 복구된 편집본 · 저장하거나 원본으로 되돌리세요";
+  const onStatusLanguageChange = () => {
+    if (status.textContent !== idleMsg) return;
+    idleMsg = makeIdleMessage();
+    status.textContent = idleMsg;
+  };
+  window.addEventListener("mni18nchange", onStatusLanguageChange);
+  if (ownerDoc){
+    if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = [];
+    ownerDoc.cleanupFns.push(() => window.removeEventListener("mni18nchange", onStatusLanguageChange));
+  }
   // 실행 결과를 편집기 옆(가로) ↔ 아래(세로)로 토글. 선택은 저장되어 다음에 열 때도 유지.
   ui.layoutBtn = layoutBtn;
   let outputStacked = false;
@@ -1910,7 +1934,12 @@ function activeFolderContextForNewFile(){
   return { parentId: cur.parentId, dir, archiveCtx: cur.archiveCtx };
 }
 function pythonScratchStarter(){
-  return "# 여기에 파이썬 코드를 작성하고 ▶ 실행 (" + shortcutDisplay(shortcutValue("runCode")) + ")\nprint(\"Hello, Python!\")\n";
+  const prompt = typeof t === "function" ? t("여기에 파이썬 코드를 작성하고 ▶ 실행") : "여기에 파이썬 코드를 작성하고 ▶ 실행";
+  return "# " + prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")\nprint(\"Hello, Python!\")\n";
+}
+function pythonScratchFileName(number=1){
+  const base = typeof window.t === "function" ? window.t("새 코드") : "새 코드";
+  return base + (number > 1 ? " " + number : "") + ".py";
 }
 function createPythonScratchInFolder(folder){
   if (!folder || !folder.parentId || !folder.archiveCtx || !folder.dir) return false;
@@ -1919,8 +1948,8 @@ function createPythonScratchInFolder(folder){
   if (!dir) return false;
   // 같은 폴더 안에서 이름이 겹치지 않게 정한다.
   const taken = new Set(docs.map(d => normalizedRunPath(d.workspacePath || d.relPath || "")));
-  let name = "새 코드.py";
-  for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = "새 코드 " + n + ".py";
+  let name = pythonScratchFileName();
+  for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = pythonScratchFileName(n);
   const relPath = dir + "/" + name;
   handleFiles([new File([starter], name, { type: "text/x-python" })],
     { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath });
@@ -1936,7 +1965,7 @@ function newPythonScratch(){
   const starter = pythonScratchStarter();
   const folder = activeFolderContextForNewFile();
   if (folder && createPythonScratchInFolder(folder)) return;
-  const name = _scratchCount > 1 ? ("새 코드 " + _scratchCount + ".py") : "새 코드.py";
+  const name = pythonScratchFileName(_scratchCount);
   handleFiles([new File([starter], name, { type: "text/x-python" })], { isScratch: true });
 }
 

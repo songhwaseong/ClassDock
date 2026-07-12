@@ -325,6 +325,15 @@ function renderNotebookView(model, host, ownerDoc){
     ownerDoc._nbInkButton = inkBtn;
     ownerDoc._nbInkToolbar = inkToolbar;
     nbRefreshKernelModeUi(ownerDoc);
+    const onNotebookLanguageChange = () => {
+      nbRefreshKernelModeUi(ownerDoc);
+      nbRefreshExecutionStates(ownerDoc);
+      for (const ctrl of ownerDoc._nbCtrls || []){
+        if (ctrl && typeof ctrl.syncOutputCollapsed === "function") ctrl.syncOutputCollapsed();
+      }
+    };
+    window.addEventListener("mni18nchange", onNotebookLanguageChange);
+    ownerDoc.cleanupFns.push(() => window.removeEventListener("mni18nchange", onNotebookLanguageChange));
   }
 
   // ── 셀 목록 ──
@@ -359,6 +368,32 @@ function renderNotebookView(model, host, ownerDoc){
     ownerDoc._nbSelected = -1;
     ownerDoc._nbCellSelection = new Set();
     ownerDoc._nbSelectionAnchor = null;
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function" && typeof MutationObserver === "function"){
+      const pending = new Set();
+      let scheduled = false;
+      const flush = () => {
+        scheduled = false;
+        for (const node of pending){
+          if (node && node.isConnected) window.MNI18N.translateTree(node);
+        }
+        pending.clear();
+      };
+      const observer = new MutationObserver(records => {
+        for (const record of records){
+          for (const node of record.addedNodes){
+            const target = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+            if (target && target.nodeType === Node.ELEMENT_NODE) pending.add(target);
+          }
+        }
+        if (!scheduled && pending.size){
+          scheduled = true;
+          Promise.resolve().then(flush);
+        }
+      });
+      observer.observe(root, { childList:true, subtree:true });
+      if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
+      ownerDoc.cleanupFns.push(() => observer.disconnect());
+    }
   }
 
   // 닫을 때 모든 셀 에디터 정리(메모리 회수) + 커널 네임스페이스 비우기
@@ -390,7 +425,7 @@ function renderNotebookView(model, host, ownerDoc){
 function nbKernelId(ownerDoc){ return "nbv:" + (ownerDoc && ownerDoc.id != null ? ownerDoc.id : "default"); }
 
 function nbSetStatus(ownerDoc, msg){
-  if (ownerDoc && ownerDoc._nbStatusEl) ownerDoc._nbStatusEl.textContent = msg || "";
+  if (ownerDoc && ownerDoc._nbStatusEl) ownerDoc._nbStatusEl.textContent = nbT(msg || "");
 }
 
 function notebookExecutionControlState(running, cancelRequested){
@@ -412,8 +447,8 @@ function nbSetRunningUi(ownerDoc, running){
   const btn = ownerDoc._nbRunAllBtn;
   if (btn){
     const state = notebookExecutionControlState(running, ownerDoc._nbCancelRequested);
-    btn.textContent = state.label;
-    btn.title = state.title;
+    btn.textContent = nbT(state.label);
+    btn.title = nbT(state.title);
     btn.disabled = state.disabled;
     btn.setAttribute("aria-label", btn.title);
   }
@@ -460,7 +495,7 @@ function nbUpdateOutputFreshness(ctrl, state){
   }
   const note = old || document.createElement("div");
   note.className = "nbv-out-freshness";
-  note.textContent = "⚠ 수정 전 상태의 실행 결과입니다. " + state.reason;
+  note.textContent = nbT("⚠ 수정 전 상태의 실행 결과입니다. ") + nbT(state.reason || "");
   if (!old) ctrl.outWrap.insertBefore(note, ctrl.outWrap.firstChild);
 }
 
@@ -470,11 +505,12 @@ function nbApplyExecutionState(ctrl, state){
   if (ctrl.runBtn && ctrl.runBtn.classList.contains("is-running")) return;   // 실행 중엔 정지(■) 표시를 유지
   ctrl.cellEl.dataset.execState = state.status;
   if (ctrl.stateLabel){
-    ctrl.stateLabel.textContent = NB_EXEC_STATE_LABELS[state.status] || "";
-    ctrl.stateLabel.title = state.reason || "";
+    const label = NB_EXEC_STATE_LABELS[state.status] || "";
+    ctrl.stateLabel.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
+    ctrl.stateLabel.title = nbT(state.reason || "");
   }
   if (ctrl.runBtn){
-    ctrl.runBtn.title = state.reason + "\n이 셀 실행 (Ctrl+Enter · Shift+Enter=실행 후 다음)";
+    ctrl.runBtn.title = nbT(state.reason || "") + "\n" + nbT("이 셀 실행 (Ctrl+Enter · Shift+Enter=실행 후 다음)");
   }
   nbUpdateOutputFreshness(ctrl, state);
 }
@@ -493,10 +529,13 @@ function nbRefreshExecutionStates(ownerDoc){
   const btn = ownerDoc._nbFreshRunBtn;
   if (btn){
     btn.classList.toggle("has-stale", staleCount > 0);
-    btn.textContent = staleCount > 0 ? "최신 상태로 실행 (" + staleCount + ")" : "재시작 후 실행";
-    btn.title = staleCount > 0
+    btn.textContent = staleCount > 0
+      ? (typeof window !== "undefined" && typeof window.tf === "function"
+        ? window.tf("최신 상태로 실행 ({n})", { n:staleCount }) : "최신 상태로 실행 (" + staleCount + ")")
+      : (typeof window !== "undefined" && window.t ? window.t("재시작 후 실행") : "재시작 후 실행");
+    btn.title = nbT(staleCount > 0
       ? "커널을 비우고 모든 셀을 위에서부터 실행해 오래된 결과를 최신 상태로 맞춥니다."
-      : "커널을 재시작한 뒤 모든 셀을 처음부터 실행";
+      : "커널을 재시작한 뒤 모든 셀을 처음부터 실행");
   }
   // ▾ 메뉴는 접혀 있어도 stale 알림이 보이도록 더보기 버튼에 뱃지를 켠다.
   if (ownerDoc._nbRunMoreBtn) ownerDoc._nbRunMoreBtn.classList.toggle("has-stale", staleCount > 0);
@@ -524,12 +563,12 @@ function setRunState(ctrl, state){
   if (ctrl.runCount) ctrl.runCount.textContent = count;
   else ctrl.runBtn.textContent = count;
   ctrl.runBtn.classList.toggle("is-running", running);
-  ctrl.runBtn.title = running
+  ctrl.runBtn.title = nbT(running
     ? "실행 중지 (클릭)"
-    : "이 셀 실행 (Ctrl+Enter · Shift+Enter=실행 후 다음)";
-  ctrl.runBtn.setAttribute("aria-label", running ? "실행 중지" : "이 셀 실행");
+    : "이 셀 실행 (Ctrl+Enter · Shift+Enter=실행 후 다음)");
+  ctrl.runBtn.setAttribute("aria-label", nbT(running ? "실행 중지" : "이 셀 실행"));
   if (running && ctrl.stateLabel){
-    ctrl.stateLabel.textContent = "중지";
+    ctrl.stateLabel.textContent = nbT("중지");
     ctrl.cellEl.dataset.execState = "running";
   }
 }
@@ -604,7 +643,7 @@ function nbBuildVarRow(item, sanitizer, lookupVariable){
     loaded = true;
     renderValue(item);
   } else {
-    body.textContent = "펼치면 현재 커널 값을 불러옵니다.";
+    body.textContent = nbT("펼치면 현재 커널 값을 불러옵니다.");
     box.addEventListener("toggle", async () => {
       if (!box.open){
         loaded = false;
@@ -612,16 +651,16 @@ function nbBuildVarRow(item, sanitizer, lookupVariable){
       }
       if (loaded || loading) return;
       loading = true;
-      body.textContent = "현재 커널 값 불러오는 중…";
+      body.textContent = nbT("현재 커널 값 불러오는 중…");
       try {
         const value = await lookupVariable(item.name);
-        if (!value) body.textContent = "현재 커널에 이 변수가 없습니다.";
+        if (!value) body.textContent = nbT("현재 커널에 이 변수가 없습니다.");
         else {
           renderValue(value);
           loaded = true;
         }
       } catch(e){
-        body.textContent = "값을 불러오지 못했습니다: " + ((e && e.message) ? e.message : e);
+        body.textContent = nbTf("값을 불러오지 못했습니다: {message}", { message:(e && e.message) ? e.message : e });
       } finally {
         loading = false;
       }
@@ -639,12 +678,12 @@ function renderNotebookVariables(host, variables, ownerDoc){
   const details = document.createElement("details");
   details.className = "nbv-vars";
   const summary = document.createElement("summary");
-  summary.textContent = "변수 " + rows.length + "개 (현재 셀까지 · 펼치면 현재 값)";
+  summary.textContent = nbTf("변수 {n}개 (현재 셀까지 · 펼치면 현재 값)", { n:rows.length });
   const search = document.createElement("input");
   search.type = "search";
   search.className = "nbv-vars-search";
-  search.placeholder = "변수 이름·자료형 검색";
-  search.setAttribute("aria-label", "변수 검색");
+  search.placeholder = nbT("변수 이름·자료형 검색");
+  search.setAttribute("aria-label", nbT("변수 검색"));
   const table = document.createElement("div");
   table.className = "nbv-vars-table";
   const rendered = [];
@@ -671,11 +710,11 @@ function renderNotebookVariables(host, variables, ownerDoc){
 function notebookElapsedText(ms){
   const value = Number(ms);
   if (!Number.isFinite(value) || value < 0) return "";
-  if (value < 1000) return "실행 " + Math.round(value) + "밀리초";
-  if (value < 60000) return "실행 " + (value / 1000).toFixed(value < 10000 ? 1 : 0) + "초";
+  if (value < 1000) return nbTf("실행 {n}밀리초", { n:Math.round(value) });
+  if (value < 60000) return nbTf("실행 {seconds}초", { seconds:(value / 1000).toFixed(value < 10000 ? 1 : 0) });
   const minutes = Math.floor(value / 60000);
   const seconds = Math.round((value % 60000) / 1000);
-  return "실행 " + minutes + "분 " + seconds + "초";
+  return nbTf("실행 {minutes}분 {seconds}초", { minutes, seconds });
 }
 
 // 커널 결과(stdout/stderr/images)를 셀 바로 아래 인라인으로 그린다(빈 출력이면 표시 안 함, 재실행 시 교체).
@@ -696,7 +735,7 @@ function renderRunResult(ctrl, result){
   for (const src of images){ const im = document.createElement("img"); im.className = "nbv-out-img"; im.src = src; wrap.appendChild(im); }
   if (outputs.length){
     const files = document.createElement("div"); files.className = "nbv-out-files";
-    const title = document.createElement("strong"); title.textContent = "생성·변경 파일 " + outputs.length + "개";
+    const title = document.createElement("strong"); title.textContent = nbTf("생성·변경 파일 {n}개", { n:outputs.length });
     files.appendChild(title);
     for (const output of outputs.slice(0, 20)){
       const row = document.createElement("div"); row.className = "nbv-out-file";
@@ -763,13 +802,13 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
       }
       if (workspaceBundle) nbSetStatus(ownerDoc, "노트북 작업폴더 준비 중…");
     } catch(e){
-      nbSetStatus(ownerDoc, "작업폴더 준비 오류: " + ((e && e.message) ? e.message : e));
+      nbSetStatus(ownerDoc, nbTf("작업폴더 준비 오류: {message}", { message:(e && e.message) ? e.message : e }));
       throw e;
     }
     const workspaceCwd = notebookCellWorkspaceCwd(ownerDoc, cell, workspaceBundle);
     let task;
     if (localKernel){
-      nbSetStatus(ownerDoc, "셀 실행 중… · 로컬 Python · 기준 " + (workspaceCwd || "."));
+      nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel} · 기준 {cwd}", { kernel:nbT("로컬 Python"), cwd:workspaceCwd || "." }));
       task = startLocalNotebookKernelRun(
         ownerDoc,
         cell.source,
@@ -793,7 +832,7 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
       }
       await ensurePyodideWorker(onMsg);
       nbThrowIfCancelled(ownerDoc);
-      nbSetStatus(ownerDoc, "셀 실행 중… · 브라우저 · 기준 " + (workspaceCwd || "."));
+      nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel} · 기준 {cwd}", { kernel:nbT("브라우저"), cwd:workspaceCwd || "." }));
       task = startPyodideKernelRun({
         kernelId:nbKernelId(ownerDoc),
         source:cell.source,
@@ -842,20 +881,23 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     markNbDirty(ownerDoc);
     nbRefreshExecutionStates(ownerDoc);
     const elapsedText = notebookElapsedText(result.elapsedMs);
-    const kernelName = localKernel ? "로컬 Python" : "브라우저";
+    const kernelName = nbT(localKernel ? "로컬 Python" : "브라우저");
     nbSetStatus(ownerDoc, result.ok === false
-      ? "오류 · " + kernelName + " · 기준 " + (workspaceCwd || ".") + " · 커널 유지" + (elapsedText ? " · " + elapsedText : "")
-      : ("완료" + (result.stderr ? "(경고 있음)" : "") + " · " + kernelName + " · 기준 " + (workspaceCwd || ".") +
-        (remembered.count ? " · 파일 " + remembered.count + "개 저장" : "") + (elapsedText ? " · " + elapsedText : "")));
+      ? nbTf("오류 · {kernel} · 기준 {cwd} · 커널 유지{elapsed}", { kernel:kernelName, cwd:workspaceCwd || ".", elapsed:elapsedText ? " · " + elapsedText : "" })
+      : nbTf("완료{warning} · {kernel} · 기준 {cwd}{files}{elapsed}", {
+        warning:result.stderr ? nbT("(경고 있음)") : "", kernel:kernelName, cwd:workspaceCwd || ".",
+        files:remembered.count ? " · " + nbTf("파일 {n}개 저장", { n:remembered.count }) : "",
+        elapsed:elapsedText ? " · " + elapsedText : ""
+      }));
   } catch(e){
     const message = (e && e.message) ? e.message : String(e);
     const cancelled = !!ownerDoc._nbCancelRequested || (e && e.code === "worker-cancel");
     result = { ok:false, cancelled, code:cancelled ? -1 : 1, error:message, stdout:"", stderr:cancelled ? "" : message, images:[], outputs:[] };
     if (cancelled){
       ownerDoc._nbWorkspacePromise = null;
-      nbSetStatus(ownerDoc, "중지됨 · " + (ownerDoc._nbKernelMode === "local" ? "로컬 Python" : "브라우저") + " 커널 초기화됨");
+      nbSetStatus(ownerDoc, nbTf("중지됨 · {kernel} 커널 초기화됨", { kernel:nbT(ownerDoc._nbKernelMode === "local" ? "로컬 Python" : "브라우저") }));
     } else {
-      nbSetStatus(ownerDoc, "실행 오류: " + message);
+      nbSetStatus(ownerDoc, nbTf("실행 오류: {message}", { message }));
     }
     setRunState(ctrl, "idle");
     nbRefreshExecutionStates(ownerDoc);   // 정지/오류 후 버튼·상태 라벨을 실제 실행 상태로 되돌린다
@@ -924,7 +966,7 @@ async function nbRestartKernel(ownerDoc){
     if (ownerDoc._nbKernelMode === "local") await nbStopLocalNotebookKernel(ownerDoc);
     else await startPyodideKernelRun({ kernelId: nbKernelId(ownerDoc), reset: true }).promise;
   } catch(e){
-    nbSetStatus(ownerDoc, "커널 재시작 실패: " + ((e && e.message) ? e.message : e));
+    nbSetStatus(ownerDoc, nbTf("커널 재시작 실패: {message}", { message:(e && e.message) ? e.message : e }));
     ownerDoc._nbBusy = false;
     return false;
   }
@@ -945,7 +987,7 @@ async function nbRestartKernel(ownerDoc){
   }
   if (changed) markNbDirty(ownerDoc);
   nbRefreshExecutionStates(ownerDoc);
-  nbSetStatus(ownerDoc, (ownerDoc._nbKernelMode === "local" ? "로컬 Python" : "브라우저") + " 커널 재시작됨 · 상태 초기화");
+  nbSetStatus(ownerDoc, nbTf("{kernel} 커널 재시작됨 · 상태 초기화", { kernel:nbT(ownerDoc._nbKernelMode === "local" ? "로컬 Python" : "브라우저") }));
   return true;
 }
 
@@ -997,10 +1039,10 @@ function nbExportPy(ownerDoc){
   if (!model) return;
   let pySrc;
   try { pySrc = (typeof ipynbToPython === "function") ? ipynbToPython(modelToIpynb(model), ownerDoc.name || "notebook.ipynb") : null; }
-  catch(e){ nbSetStatus(ownerDoc, "내보내기 실패: " + ((e && e.message) || e)); return; }
+  catch(e){ nbSetStatus(ownerDoc, nbTf("내보내기 실패: {message}", { message:(e && e.message) || e })); return; }
   if (pySrc == null){ nbSetStatus(ownerDoc, "내보내기를 지원하지 않는 환경이에요."); return; }
   const pyName = String(ownerDoc.name || "notebook").replace(/\.ipynb$/i, "") + ".py";
   if (typeof handleFiles === "function") handleFiles([new File([pySrc], pyName, { type: "text/x-python" })], { isScratch: true });
-  nbSetStatus(ownerDoc, pyName + " 로 내보냈어요.");
+  nbSetStatus(ownerDoc, nbTf("{name} 로 내보냈어요.", { name:pyName }));
 }
 

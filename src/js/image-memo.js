@@ -818,7 +818,7 @@ function wireImageMemo(){
       entries = unique.concat(entries);
       setStatus(unique.length
         ? `저장된 이미지 메모 ${unique.length}개를 불러왔어요.`
-        : "저장된 이미지 메모가 없습니다.");
+        : t("저장된 이미지 메모가 없습니다."));
     } catch(e){
       console.warn("image memo restore failed:", e);
       setStatus("저장된 이미지 메모를 불러오지 못했어요.");

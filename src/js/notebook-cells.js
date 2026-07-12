@@ -400,7 +400,7 @@ function nbBuildCell(ownerDoc, cell){
       pre.className = "nbv-static";
       pre.innerHTML = cell.source
         ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "hash") : escapeForPre(cell.source))
-        : '<span class="nbv-md-empty">빈 코드 셀 — 클릭해 편집</span>';
+        : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       pre.addEventListener("mousedown", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -469,7 +469,7 @@ function nbBuildCell(ownerDoc, cell){
       else if (ctrl.staticEl) {
         ctrl.staticEl.innerHTML = cell.source
           ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "hash") : escapeForPre(cell.source))
-          : '<span class="nbv-md-empty">빈 코드 셀 — 클릭해 편집</span>';
+          : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       }
       refreshStdin();
     };
@@ -1034,12 +1034,14 @@ function updateNbSaveButton(ownerDoc, btn){
   if (!btn) return;
   const dirty = !!(ownerDoc && ownerDoc.hasUnsavedEdits);
   const autosaveState = ownerDoc && ownerDoc._nbAutosaveState;
-  btn.textContent = autosaveState === "saving" ? "저장 중…"
+  const label = autosaveState === "saving" ? "저장 중…"
     : autosaveState === "failed" ? "저장 실패"
     : dirty ? "저장 *" : "저장";
-  btn.title = autosaveState === "saving" ? "노트북을 자동 저장하는 중입니다."
+  const title = autosaveState === "saving" ? "노트북을 자동 저장하는 중입니다."
     : autosaveState === "failed" ? "자동 저장에 실패했습니다. 복구본은 유지되며 저장 버튼으로 다시 시도할 수 있습니다."
     : dirty ? "저장되지 않은 변경 내용이 있습니다." : "노트북 저장";
+  btn.textContent = nbT(label);
+  btn.title = nbT(title);
   btn.classList.toggle("is-dirty", dirty);
 }
 
@@ -1177,10 +1179,15 @@ function renderNotebookError(host, value, ctrl){
   if (help){
     const card = document.createElement("section");
     card.className = "py-error-help nbv-error-help";
-    const title = document.createElement("strong"); title.textContent = help.title;
+    const title = document.createElement("strong");
+    title.textContent = (typeof window !== "undefined" && window.MNI18N && window.MNI18N.lang === "en")
+      ? help.type + " in your code" : help.title;
     const type = document.createElement("code"); type.textContent = help.type;
     const head = document.createElement("div"); head.className = "py-error-help-head"; head.append(title, type);
-    const tip = document.createElement("p"); tip.textContent = help.tip;
+    const tip = document.createElement("p");
+    tip.textContent = (typeof window !== "undefined" && window.MNI18N && window.MNI18N.lang === "en")
+      ? "Read the Python error below, then check the code at the reported line."
+      : help.tip;
     card.append(head, tip);
     box.appendChild(card);
   }
@@ -1192,7 +1199,7 @@ function renderNotebookError(host, value, ctrl){
     const jump = document.createElement("button");
     jump.type = "button";
     jump.className = "nbv-error-jump";
-    jump.textContent = "오류 줄 " + line + "로 이동";
+    jump.textContent = nbTf("오류 줄 {line}로 이동", { line });
     jump.addEventListener("click", () => nbFocusCellLine(ctrl, line));
     box.append(jump);
   }

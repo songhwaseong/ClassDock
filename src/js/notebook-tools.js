@@ -70,7 +70,8 @@ function notebookWorkspaceImports(bundle){
 }
 
 function notebookKernelModeLabel(mode){
-  return mode === "local" ? "노트북 · 로컬 Python" : "노트북 · 브라우저";
+  const label = mode === "local" ? "노트북 · 로컬 Python" : "노트북 · 브라우저";
+  return typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
 }
 
 function notebookRequiresLocalPython(source){
@@ -94,19 +95,22 @@ function nbRefreshKernelModeUi(ownerDoc){
     ownerDoc._nbKernelTag.classList.toggle("is-local", local);
   }
   if (ownerDoc._nbLocalKernelBtn){
-    ownerDoc._nbLocalKernelBtn.textContent = local
+    const label = local
       ? "✓ 로컬 Python 셀 커널 사용 중"
       : (missing ? "로컬 Python 설치 필요" : "로컬 Python 셀 커널 사용");
-    ownerDoc._nbLocalKernelBtn.title = missing
+    const title = missing
       ? "Selenium 크롤링을 사용하려면 PC에 Python을 설치하고 앱을 다시 실행해야 합니다."
       : local
       ? "현재 셀 실행은 PC의 로컬 Python을 사용합니다. 누르면 브라우저 커널로 돌아갑니다."
       : "셀마다 PC의 로컬 Python으로 실행하고 변수·Selenium 브라우저 상태를 다음 셀까지 유지합니다.";
+    ownerDoc._nbLocalKernelBtn.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
+    ownerDoc._nbLocalKernelBtn.title = typeof window !== "undefined" && typeof window.t === "function" ? window.t(title) : title;
     ownerDoc._nbLocalKernelBtn.classList.toggle("is-active", local);
     ownerDoc._nbLocalKernelBtn.classList.toggle("is-missing", missing);
   }
   if (ownerDoc._nbLocalRunBtn){
-    ownerDoc._nbLocalRunBtn.textContent = missing ? "로컬 Python 전체 실행 · 설치 필요" : "로컬 Python 전체 1회 실행";
+    const label = missing ? "로컬 Python 전체 실행 · 설치 필요" : "로컬 Python 전체 1회 실행";
+    ownerDoc._nbLocalRunBtn.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
     ownerDoc._nbLocalRunBtn.classList.toggle("is-missing", missing);
   }
 }
@@ -340,7 +344,7 @@ async function nbRunNotebookLocalPythonOnce(ownerDoc){
     nbSetStatus(ownerDoc, (result && result.code) ? "로컬 실행이 오류로 끝났어요 (아래 결과 확인)." : "로컬 파이썬 실행 완료 ✓");
     if (typeof petReact === "function") petReact((result && result.code) ? "error" : "success");   // 펫들이 결과에 반응
   } catch(error){
-    nbSetStatus(ownerDoc, "로컬 실행 실패: " + ((error && error.message) || error));
+    nbSetStatus(ownerDoc, nbTf("로컬 실행 실패: {message}", { message:(error && error.message) || error }));
   } finally {
     ui.running = false;
     ownerDoc._nbLocalCancel = null;

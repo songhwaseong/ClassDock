@@ -1,5 +1,14 @@
 "use strict";
 
+function nbT(text){
+  return typeof window !== "undefined" && typeof window.t === "function" ? window.t(text) : text;
+}
+
+function nbTf(template, values){
+  if (typeof window !== "undefined" && typeof window.tf === "function") return window.tf(template, values);
+  return String(template).replace(/\{(\w+)\}/g, (_, key) => values && values[key] != null ? String(values[key]) : _);
+}
+
 /* ============================================================================
  * 주피터식 셀 노트북 에디터 — Phase 1: 모델 + .ipynb 직렬화 + 읽기전용 렌더
  *  · 저장 포맷은 .ipynb(nbformat 4) 직접. 기존 출력·첨부와 새 실행 결과를 함께 보존한다.
@@ -290,7 +299,8 @@ function nbRefreshToc(ownerDoc){
     }
   }
   if (ownerDoc._nbTocButton){
-    ownerDoc._nbTocButton.textContent = "목차" + (headings.length ? " " + headings.length : "");
+    const label = typeof window !== "undefined" && typeof window.t === "function" ? window.t("목차") : "목차";
+    ownerDoc._nbTocButton.textContent = label + (headings.length ? " " + headings.length : "");
   }
 }
 
@@ -312,7 +322,8 @@ function nbAttachOutputToggle(ownerDoc, ctrl, wrap){
   const sync = () => {
     const on = !!key && collapsed.has(key);
     wrap.classList.toggle("nbv-out-collapsed", on);
-    button.textContent = on ? "▸ 출력 펼치기" : "▾ 출력 접기";
+    const label = on ? "▸ 출력 펼치기" : "▾ 출력 접기";
+    button.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
     button.setAttribute("aria-expanded", String(!on));
   };
   button.addEventListener("click", () => {

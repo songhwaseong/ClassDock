@@ -26,8 +26,40 @@ function scratchpadBlockId(prefix="block"){
 function scratchpadNextTitle(notes){
   const names = new Set((notes || []).map(note => String(note && note.title || "").trim()));
   let number = 1;
-  while (names.has("새 메모 " + number)) number++;
-  return "새 메모 " + number;
+  while (names.has(scratchpadDefaultTitle(number))) number++;
+  return scratchpadDefaultTitle(number);
+}
+
+function scratchpadDefaultTitle(number){
+  const base = typeof t === "function" ? t("새 메모") : "새 메모";
+  return base + " " + number;
+}
+
+function scratchpadDefaultTitleNumber(title){
+  const match = /^(?:새 메모|New note) (\d+)$/.exec(String(title || "").trim());
+  return match ? Number(match[1]) : null;
+}
+
+function localizeScratchpadDefaultTitles(notes){
+  const list = Array.isArray(notes) ? notes : [];
+  const used = new Set(list
+    .filter(note => !scratchpadDefaultTitleNumber(note && note.title))
+    .map(note => String(note && note.title || "").trim()));
+  let changed = false;
+  for (const note of list){
+    const originalNumber = scratchpadDefaultTitleNumber(note && note.title);
+    if (!originalNumber) continue;
+    let number = originalNumber;
+    while (used.has(scratchpadDefaultTitle(number))) number++;
+    const title = scratchpadDefaultTitle(number);
+    if (note.title !== title){
+      note.title = title;
+      note.updatedAt = Date.now();
+      changed = true;
+    }
+    used.add(title);
+  }
+  return changed;
 }
 
 function scratchpadTextBlock(text=""){
@@ -135,7 +167,7 @@ function normalizeScratchpadData(value, legacyText=""){
     const text = String(legacyText || "");
     notes.push({
       id:scratchpadNoteId(),
-      title:text ? "기존 메모" : "새 메모 1",
+      title:text ? "기존 메모" : scratchpadNextTitle(notes),
       color:"yellow",
       blocks:[scratchpadTextBlock(text)],
       createdAt:Date.now(),
@@ -1046,7 +1078,7 @@ function wireScratchpad(){
     if (!data.notes.length){
       data.notes.push({
         id:scratchpadNoteId(),
-        title:"새 메모 1",
+        title:scratchpadNextTitle(data.notes),
         color:"yellow",
         blocks:[scratchpadTextBlock("")],
         createdAt:Date.now(),
@@ -1133,10 +1165,17 @@ function wireScratchpad(){
     setOpen(false);
   };
 
+  const localizedDefaultTitles = localizeScratchpadDefaultTitles(data.notes);
   activeBlockId = activeNote().blocks[0].id;
   renderEditor();
   renderTabs();
-  persist(false);
+  persist(localizedDefaultTitles);
+  window.addEventListener("mni18nchange", () => {
+    if (!localizeScratchpadDefaultTitles(data.notes)) return;
+    renderEditor();
+    renderTabs();
+    persist(false);
+  });
   let restoreOpen = false;
   try { restoreOpen = localStorage.getItem(SCRATCHPAD_OPEN_KEY) === "1"; } catch(_){}
   setOpen(restoreOpen, false);
