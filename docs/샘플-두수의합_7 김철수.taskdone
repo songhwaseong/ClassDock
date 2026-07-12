@@ -1,0 +1,36 @@
+{
+ "format": "manneung-task-result",
+ "version": 1,
+ "taskId": "sample-task-0001",
+ "taskTitle": "두 수의 합",
+ "taskHash": "5576ecfe748a2c307b9f0e62dfeaa082f4032f9b1e422acd36638c9eff4418f9",
+ "student": "7 김철수",
+ "code": "a = int(input())\nb = int(input())\nprint(a - b)\n",
+ "grade": {
+  "passed": 0,
+  "total": 3,
+  "results": [
+   {
+    "name": "기본",
+    "passed": false,
+    "actual": "-1",
+    "error": ""
+   },
+   {
+    "name": "음수 포함",
+    "passed": false,
+    "actual": "-14",
+    "error": ""
+   },
+   {
+    "name": "큰 수(숨김)",
+    "passed": false,
+    "actual": "-530865",
+    "error": ""
+   }
+  ]
+ },
+ "gradedWith": "pyodide",
+ "submittedAt": "2026-07-12T13:19:48.502Z",
+ "seal": "8899355976ee27211ad366eece2a31c9ae0a3fa1b658d8a0687861b62ea7d2f0"
+}

@@ -1231,8 +1231,17 @@ async function renderCode(file, host, ext, profile, runCtx){
   analyzeBtn.addEventListener("click", () => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { diagnoseMode:true }));
   gradeBtn.addEventListener("click", () => openAssignmentGradingModal({
     storageKey: "pdf-signer-python-grade:" + draftKey.slice(PY_DRAFT_PREFIX.length),
-    onRun: (tests) => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { gradeTests:tests })
+    onRun: (tests) => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { gradeTests:tests }),
+    // 과제 패키지(.task) 내보내기 — 현재 코드를 시작 코드로 넘긴다
+    taskExport: {
+      getSource: () => editor.getValue(),
+      suggestedTitle: String((ownerDoc && ownerDoc.name) || "과제").replace(/\.(py|pyw|ipynb)$/i, "")
+    }
   }));
+  // 과제 패키지(.task)로 연 문서면 편집기 위에 과제 바(제목·점수·채점·제출)를 붙인다.
+  if (ownerDoc && ownerDoc.taskCtx && typeof mountTaskBanner === "function"){
+    mountTaskBanner(ownerDoc, ui, runCtxWithDoc, { bar, getCode: () => editor.getValue() });
+  }
   linkBtn.addEventListener("click", () => {
     if (typeof createCodeLinkFromCodeDoc === "function") createCodeLinkFromCodeDoc(ownerDoc);
   });

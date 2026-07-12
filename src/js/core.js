@@ -486,10 +486,13 @@
     const unsupported = Math.max(0, Number(row.unsupported) || 0);
     const oversized = Math.max(0, Number(row.oversized) || 0);
     const failed = Math.max(0, Number(row.failed) || 0);
-    if (unsupported) extra.push(window.tf("{n}개 형식 미지원", { n: unsupported }));
-    if (oversized) extra.push(window.tf("{n}개 용량 제한 제외", { n: oversized }));
-    if (failed) extra.push(window.tf("{n}개 열기 실패", { n: failed }));
-    return window.tf("{n}개 열기", { n: opened }) + (extra.length ? " · " + extra.join(" · ") : "");
+    const tf = typeof window !== "undefined" && typeof window.tf === "function"
+      ? window.tf
+      : (template, vars) => String(template).replace(/\{(\w+)\}/g, (_, key) => vars && vars[key] != null ? String(vars[key]) : _);
+    if (unsupported) extra.push(tf("{n}개 형식 미지원", { n: unsupported }));
+    if (oversized) extra.push(tf("{n}개 용량 제한 제외", { n: oversized }));
+    if (failed) extra.push(tf("{n}개 열기 실패", { n: failed }));
+    return tf("{n}개 열기", { n: opened }) + (extra.length ? " · " + extra.join(" · ") : "");
   }
 
   function isExternalRef(ref) {
@@ -1865,7 +1868,9 @@
       const name = String(item.name == null ? "" : item.name).trim().slice(0, 120) || ("테스트 " + (result.length + 1));
       const input = String(item.input == null ? "" : item.input).slice(0, maxTextLength).replace(/\r\n?/g, "\n");
       const expected = String(item.expected == null ? "" : item.expected).slice(0, maxTextLength).replace(/\r\n?/g, "\n");
-      result.push({ name, input, expected });
+      const row = { name, input, expected };
+      if (item.hidden === true) row.hidden = true;   // 과제 패키지(.task)의 숨김 테스트 — 학생에겐 통과/실패만 표시
+      result.push(row);
     }
     return result;
   }
@@ -1875,6 +1880,15 @@
     while (lines.length && !lines[0].trim()) lines.shift();
     while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     return lines.map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+  }
+
+  // 숨김 테스트의 traceback·예외 메시지는 학생 화면의 공통 오류 안내에도 노출하지 않는다.
+  function assignmentGradingErrorText(report, gradeTests, fallback="") {
+    if (!report || !Array.isArray(report.results)) return String(fallback || "");
+    return report.results
+      .map((row, index) => (gradeTests && gradeTests[index] && gradeTests[index].hidden) ? "" : String((row && row.error) || ""))
+      .filter(Boolean)
+      .join("\n");
   }
 
   function normalizePythonDiagnostics(items, maxItems=100) {
@@ -2009,7 +2023,7 @@
     diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
-    normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput,
+    normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
   };

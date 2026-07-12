@@ -119,6 +119,7 @@
   <li><strong>PDF 교재 + Python 코드를 나란히</strong> 펴 놓고 공부 (학습 화면)</li>
   <li><strong>화이트보드(설명용 칠판)</strong>와 <strong>PDF·코드 위 필기</strong></li>
   <li><strong>수업 리플레이</strong> — 화이트보드 판서 과정을 녹화해 <strong>되감아 재생</strong>(<code>.lesson</code>)</li>
+  <li><strong>과제 패키지</strong> — 문제·시작 코드·자동채점을 한 파일(<code>.task</code>)로 배포하고 제출본(<code>.taskdone</code>)을 걷어 <strong>재채점·성적 CSV</strong></li>
 </ul>
 <p>파일은 외부 서버로 올라가지 않습니다. 내 PC 안에서만 처리합니다.</p>
 
@@ -334,6 +335,38 @@ cd myOffice</code></pre>
 </ol>
 <blockquote>PDF 필기 리플레이는 판서한 <strong>페이지의 배경 이미지</strong>를 함께 담으므로 화이트보드 리플레이보다 파일이 큽니다(페이지 수·해상도에 비례).</blockquote>
 
+<h3 id="task-package">📦 과제 패키지 (.task) — 만들고 · 풀고 · 검수하기</h3>
+<p><strong>문제 설명 + 시작 코드 + 자동채점 테스트</strong>를 <code>.task</code> <strong>한 파일</strong>로 묶어 배포하는 기능입니다. 서버·인터넷 없이 USB나 메신저로 파일만 전달하면, 학생은 더블클릭으로 풀고 선생님은 제출본을 다시 채점해 확인합니다.</p>
+
+<p><strong>선생님 — 과제 만들기</strong></p>
+<ol>
+  <li>파이썬(<code>.py</code>) 파일을 열고 코드를 작성한 뒤, 실행 바 <strong>⋯ 더보기 → 채점</strong>에서 테스트(입력값·기대 출력)를 만듭니다</li>
+  <li>채점 창의 <strong>[📦 과제로 내보내기]</strong>를 누르면 <strong>과제 빌더</strong>가 열립니다</li>
+  <li><strong>과제 제목 · 출제자 · 문제 설명</strong>(마크다운 지원, <strong>미리보기</strong> 버튼으로 확인)을 적고, <strong>시작 코드</strong>(학생에게 처음 보여줄 코드)를 다듬습니다</li>
+  <li>테스트마다 <strong>숨김</strong> 체크 가능 — 숨김 테스트는 학생에게 <strong>통과/실패만</strong> 보이고 입력·기대 출력은 가려집니다</li>
+  <li>학생 코드가 읽을 <strong>데이터 파일</strong>(csv·txt 등, 합계 8MB)도 첨부할 수 있습니다 — 시작 코드와 같은 폴더에 있는 것처럼 <code>open('data.csv')</code>로 읽힙니다</li>
+  <li><strong>[👀 학생 화면 미리보기]</strong>로 학생이 여는 그대로 확인(알림의 <strong>[이어서 만들기]</strong>로 빌더 복귀) → <strong>[📦 .task 내보내기]</strong></li>
+  <li>명령 팔레트(<kbd>Ctrl</kbd>+<kbd>K</kbd>)의 <strong>"과제 파일 만들기 (.task)"</strong>로도 이 흐름에 바로 들어갈 수 있습니다</li>
+</ol>
+
+<p><strong>학생 — 과제 풀기</strong></p>
+<ol>
+  <li>받은 <code>.task</code> 파일을 <strong>더블클릭·드래그</strong>로 엽니다 → <strong>문제 설명은 왼쪽 참고 화면에 고정</strong>, <strong>시작 코드는 편집기</strong>로 열립니다</li>
+  <li>편집기 위 <strong>과제 바</strong>(📦 제목 · 통과 n/m)에서 진행 상태를 보며 코드를 완성합니다. <strong>[문제 보기]</strong>로 닫았던 문제를 다시 띄울 수 있습니다</li>
+  <li><strong>[✓ 채점]</strong> — 과제에 담긴 테스트로 자동 채점되어 테스트별 통과/실패와 출력 비교가 표시됩니다(몇 번이든 다시 채점 가능)</li>
+  <li>다 풀면 <strong>[📤 제출본 내보내기]</strong> → 이름 입력 → <code>과제제목_이름.taskdone</code> 파일이 만들어집니다(EXE는 저장 폴더에 기록 + [폴더 열기], 브라우저는 다운로드). 채점을 안 했거나 채점 후 코드를 고쳤으면 <strong>현재 코드로 자동 재채점 후</strong> 내보냅니다</li>
+  <li>만들어진 <code>.taskdone</code> 파일을 선생님께 제출(USB·메신저·학급 게시판 등)</li>
+</ol>
+
+<p><strong>선생님 — 제출본 검수</strong></p>
+<ul>
+  <li><strong>한 명씩</strong>: 학생의 <code>.taskdone</code>을 더블클릭하면 <strong>검수 화면</strong>이 열립니다 — 학생·제출 시각·<strong>제출본이 신고한 점수</strong>·채점 환경·<strong>파일 검사</strong>(수정·손상 감지)와 제출 코드를 한눈에. 같은 과제의 원본 <code>.task</code>가 열려 있으면 <strong>[🔁 재채점]</strong>이 활성화되어 제출 코드를 <strong>선생님 파일의 테스트로 다시 채점</strong>하고 신고 점수와의 <strong>✓ 일치 / ⚠ 불일치</strong>를 알려줍니다. <strong>[새 탭에서 편집기로 열기]</strong>로 학생 코드를 직접 실행·단계 실행해 볼 수도 있습니다</li>
+  <li><strong>반 전체 한 번에</strong>: <strong>새로 만들기 → 제출본 일괄 검수(.taskdone)</strong> (명령 팔레트에서도 가능) → <strong>[+ 제출본 추가]</strong>로 여러 <code>.taskdone</code>을 한 번에 선택 → 원본 <code>.task</code>를 연 상태에서 <strong>[▶ 전체 재채점]</strong> → 표에 학생별 재채점 점수와 일치/불일치가 채워집니다 → <strong>[⬇ 성적 CSV]</strong>로 엑셀에서 바로 열리는 성적표 내보내기. 각 행의 <strong>[자세히]</strong>로 단독 검수 화면을 엽니다</li>
+</ul>
+<blockquote><strong>제출본에 적힌 점수는 참고용입니다.</strong> 파일 검사(봉인)는 단순 수정·손상만 감지할 수 있어, 확실한 확인은 <strong>선생님 컴퓨터에서의 재채점</strong>으로 하세요 — 점수를 고친 제출본도 재채점에서 불일치로 드러납니다. 과제 파일을 배포 후 수정했다면 "과제 버전이 다름" 경고가 함께 표시됩니다.<br>
+<strong>숨김 테스트의 한계</strong>: <code>.task</code>는 텍스트(JSON) 파일이라 마음먹은 학생은 내용을 열어볼 수 있습니다. 변별이 중요한 평가라면 숨김 테스트에만 의존하지 마세요.<br>
+체험용 샘플이 <code>docs/</code> 폴더에 있습니다 — <code>샘플-두수의합.task</code> + 제출본 3종(정답/오답/점수 조작). 과제와 제출본들을 함께 열고 일괄 검수를 눌러 보세요.</blockquote>
+
 <h3>🖥 대기 화면 (화면보호기)</h3>
 <p>일정 시간 아무 입력이 없을 때 전체 화면으로 <strong>내 영상</strong>이나 <strong>시계 애니메이션</strong>을 띄우는 기능입니다. <strong>기본은 꺼져 있고, 설정에서 켤 때만</strong> 동작합니다.</p>
 <ol>
@@ -442,6 +475,7 @@ cd myOffice</code></pre>
   <li><strong>단일 파일 배포 = <code>manneung-classroom-offline.html</code> 한 파일만</strong> USB·메신저로 주면 끝</li>
   <li>학생이 더블클릭하면 바로 브라우저에서 열림, 파이썬·라이브러리 설치 불필요</li>
   <li>더 강력한 기능(로컬 Python 실행·자동 복원·PPT 변환)이 필요하면 <code>manneung-classroom.exe</code> 배포</li>
+  <li><strong>숙제·수행평가는 <a href="#task-package">과제 패키지(.task)</a></strong>로 — 문제·시작 코드·자동채점을 한 파일로 배포하고 제출본(<code>.taskdone</code>)을 걷어 일괄 재채점·성적 CSV까지</li>
 </ul>
 
 <h3>📁 <code>input()</code>이 있는 코드를 가르치고 싶어요</h3>
@@ -693,6 +727,7 @@ npm.cmd run build    # 오프라인 HTML만 생성</code></pre>
 <tr><td><strong>수업 리플레이</strong></td><td>시간 제한 없음(용량은 판서량에 비례). <strong>화이트보드·PDF 필기</strong> 녹화 지원(Python 실행 녹화는 추후). PDF 필기는 페이지 배경 이미지를 담아 파일이 더 큼</td></tr>
 <tr><td><strong>대기 화면(화면보호기)</strong></td><td>기본 꺼짐(설정에서 켤 때만). 영상은 브라우저 저장소에 보관(용량 큰 영상은 저장 실패할 수 있음 → 짧은 영상 권장). 진짜 OS 전체화면이 아닌 앱 내 전체 오버레이</td></tr>
 <tr><td><strong>메모의 노트북 셀</strong></td><td>최대 200개. 실행 결과·실행 번호·세션 필기는 제외하고 코드·마크다운 첨부·일반 메타데이터만 보관</td></tr>
+<tr><td><strong>과제 패키지(.task)</strong></td><td>파이썬 단일 파일 과제만(노트북 과제는 추후). 테스트 최대 20개·첨부 합계 8MB. <code>.task</code>는 텍스트(JSON)라 <strong>숨김 테스트·봉인은 완전한 보안이 아님</strong> — 확실한 확인은 선생님 재채점으로</td></tr>
 </tbody>
 </table>
 

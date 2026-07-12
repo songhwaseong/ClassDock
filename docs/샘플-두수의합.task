@@ -1,0 +1,37 @@
+{
+ "format": "manneung-task",
+ "version": 1,
+ "id": "sample-task-0001",
+ "meta": {
+  "title": "두 수의 합",
+  "author": "만능파일교실",
+  "createdAt": "2026-07-12T12:58:35.629Z"
+ },
+ "problem": {
+  "md": "## 문제: 두 수의 합\n\n두 정수를 한 줄에 하나씩 입력받아 **합**을 출력하세요.\n\n### 입력 예\n- 첫 줄: 정수 a\n- 둘째 줄: 정수 b\n\n### 출력 예\n```\n5\n```\n\n> 힌트: input() 으로 받은 값은 문자열이라 int() 로 바꿔야 해요."
+ },
+ "starter": {
+  "name": "main.py",
+  "code": "a = int(input())\nb = int(input())\n# 여기에 합을 출력하는 코드를 쓰세요\n"
+ },
+ "files": [],
+ "tests": [
+  {
+   "name": "기본",
+   "input": "2\n3",
+   "expected": "5"
+  },
+  {
+   "name": "음수 포함",
+   "input": "-4\n10",
+   "expected": "6"
+  },
+  {
+   "name": "큰 수(숨김)",
+   "input": "123456\n654321",
+   "expected": "777777",
+   "hidden": true
+  }
+ ],
+ "options": {}
+}

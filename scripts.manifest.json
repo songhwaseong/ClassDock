@@ -41,6 +41,7 @@
     "board-render.js",
     "whiteboard.js",
     "lesson-replay.js",
+    "task-package.js",
     "screensaver.js",
     "pet-data.js",
     "pet-custom.js",

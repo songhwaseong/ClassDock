@@ -10,7 +10,7 @@ const {
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
-  normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput,
+  normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
   normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath
 } = require("../src/js/core.js");
@@ -703,6 +703,17 @@ test("과제 자동채점 테스트를 정리하고 출력의 의미 없는 공�
   ]);
   assert.equal(normalizeGradingOutput("\r\n  결과  \r\n\r\n"), "  결과");
   assert.equal(normalizeGradingOutput("a  \n b\t"), "a\n b");
+});
+
+test("숨김 테스트의 실행 오류는 학생용 공통 오류 안내에서 제외한다", () => {
+  const report = { results: [
+    { error: "공개 테스트 오류" },
+    { error: "숨김 입력 12345 노출" },
+    { error: "" }
+  ] };
+  const tests = [{}, { hidden: true }, {}];
+  assert.equal(assignmentGradingErrorText(report, tests, "fallback"), "공개 테스트 오류");
+  assert.equal(assignmentGradingErrorText(null, tests, "채점기 오류"), "채점기 오류");
 });
 
 test("Python 실행 전 진단 결과를 위치와 심각도 순으로 정리한다", () => {

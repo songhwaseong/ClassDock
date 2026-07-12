@@ -32,6 +32,8 @@
     C("newBoard","🖊️","새 화이트보드", () => callFn("newWhiteboard"), { kw:"whiteboard 화이트보드 칠판 판서 필기" }),
     C("newText","📝","새 텍스트 파일", () => callFn("newTextScratch"), { kw:"text txt 텍스트 메모장 새" }),
     C("openLesson","⏯️","수업 리플레이 열기 (.lesson)", () => callFn("openLessonFilePicker"), { kw:"lesson replay 리플레이 되감기 수업 녹화" }),
+    C("newTask","📦","과제 파일 만들기 (.task)", () => callFn("openTaskBuilderFromActive"), { kw:"task assignment 과제 만들기 배포 자동채점 숙제" }),
+    C("taskBatch","🗂️","제출본 일괄 검수 (.taskdone)", () => callFn("openTaskBatchReview"), { kw:"taskdone submission 제출 검수 재채점 성적 채점 일괄 csv" }),
     C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery"), { kw:"example gallery 예제 갤러리 샘플 연습" }),
     // 도구 · 보기
     C("scratchpad","🗒️","임시 메모 열기", () => callFn("openScratchpadForNotebookDrop"), { sc:"scratchpad", kw:"memo note 메모 임시 스크래치 노트" }),

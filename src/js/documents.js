@@ -344,6 +344,7 @@ function makeDoc(kind, name, options={}){
     originalSaveMode: !!options.originalSaveMode };   // 새로 만든 빈 코드 → 첫 저장 때 이름 받기
   d.relPath = options.relPath || null;
   d.archiveCtx = options.archiveCtx || null;
+  if (options.taskCtx) d.taskCtx = options.taskCtx;   // 과제 패키지(.task) 문서 — 렌더 시 과제 바를 붙일 근거
   d.fsHandle = options.fsHandle || null;
   d.fsDirHandle = options.fsDirHandle || null;   // 같은 폴더에 새 파일을 만들 때 쓰는 폴더 핸들(변환 노트북 저장 등)
   // 손바닥 도구·읽기전용 가드·사이드바 포커스 리스너는 첫 활성화(ensureDocInteractive)로 미룬다.

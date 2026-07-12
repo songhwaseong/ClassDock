@@ -71,11 +71,12 @@ function wire(){
   byId("dzNewBoard").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newWhiteboard === "function") newWhiteboard(); });
   byId("dzNewText").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTextScratch === "function") newTextScratch(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
+  if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
   byId("dzExamples").addEventListener("click", (e) => { e.stopPropagation(); openSnippetGallery(); });
   (() => {                                   // 드롭존 '＋ 새로 만들기' 드롭다운(파이썬·노트북·표·화이트보드·텍스트)
     const btn = byId("dzNew"), menu = byId("dzNewMenu");
     if (!btn || !menu) return;
-    const items = [byId("dzNewPy"), byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson")].filter(Boolean);
+    const items = [byId("dzNewPy"), byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson"), byId("dzTaskBatch")].filter(Boolean);
     const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
     btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
     menu.addEventListener("click", (e) => e.stopPropagation());
@@ -289,6 +290,7 @@ function wire(){
   byId("sbNewBoard").onclick = () => { if (typeof newWhiteboard === "function") newWhiteboard(); };
   byId("sbNewText").onclick = () => { if (typeof newTextScratch === "function") newTextScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
+  if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   byId("sbExamples").onclick = () => openSnippetGallery();
   byId("sbList").addEventListener("keydown", onSidebarKey);   // 사이드바 ↑/↓ 파일 선택 이동, Enter/Space 로 열기
   const sidebarSearch = byId("sbSearch");
@@ -347,7 +349,7 @@ function wire(){
     const btn = byId("sbNew"), menu = byId("sbNewMenu");
     if (!btn || !menu) return;
     const home = menu.parentNode;
-    const items = [byId("sbNewPy"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbOpenLesson")].filter(Boolean);
+    const items = [byId("sbNewPy"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
     const placeMenu = () => {
       const rect = btn.getBoundingClientRect();
       document.body.appendChild(menu);               // 좁은 사이드바의 overflow:hidden에 잘리지 않게 화면 레이어로 이동

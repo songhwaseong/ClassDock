@@ -865,6 +865,19 @@ function openAssignmentGradingModal(options){
   const actions = document.createElement("div"); actions.className = "modal-actions";
   const add = document.createElement("button"); add.className = "btn"; add.type = "button"; add.textContent = "+ 테스트 추가";
   add.addEventListener("click", () => addRow({ name:"테스트 " + (list.children.length + 1), input:"", expected:"" }));
+  // 과제 패키지(.task) 내보내기 — 편집기에서 열었을 때만(taskExport 제공 시) 노출
+  let exportTaskBtn = null;
+  if (options.taskExport && typeof openTaskBuilderModal === "function"){
+    exportTaskBtn = document.createElement("button"); exportTaskBtn.className = "btn"; exportTaskBtn.type = "button";
+    exportTaskBtn.textContent = "📦 과제로 내보내기";
+    exportTaskBtn.title = "현재 코드와 이 테스트로 배포용 과제 파일(.task) 만들기";
+    exportTaskBtn.addEventListener("click", () => {
+      const tests = saveAssignmentTests(options.storageKey, collect());
+      if (!tests.length){ toast("테스트를 1개 이상 채워 주세요.", 2600); return; }
+      close(false);
+      openTaskBuilderModal({ ...options.taskExport, tests });
+    });
+  }
   const spacer = document.createElement("div"); spacer.className = "spacer";
   const cancel = document.createElement("button"); cancel.className = "btn"; cancel.type = "button"; cancel.textContent = "닫기";
   const run = document.createElement("button"); run.className = "btn primary"; run.type = "button"; run.textContent = "저장하고 채점";
@@ -886,7 +899,8 @@ function openAssignmentGradingModal(options){
     close(false);
     if (typeof options.onRun === "function") options.onRun(tests);
   });
-  actions.append(add, spacer, cancel, run);
+  if (exportTaskBtn) actions.append(add, exportTaskBtn, spacer, cancel, run);
+  else actions.append(add, spacer, cancel, run);
   card.append(title, sub, list, actions); modal.appendChild(card);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(true); });
   document.body.appendChild(modal);
@@ -977,7 +991,9 @@ function parsePythonGradingReport(stdout){
   } catch(_){ return null; }
 }
 
-function renderAssignmentGradingResult(panel, report, stderr){
+function renderAssignmentGradingResult(panel, report, stderr, gradeTests){
+  // gradeTests[i].hidden(과제 패키지의 숨김 테스트)이면 입력·기대·실제 출력을 가리고 통과/실패만 보여준다.
+  const hiddenAt = (index) => !!(Array.isArray(gradeTests) && gradeTests[index] && gradeTests[index].hidden);
   panel.innerHTML = "";
   const results = report && Array.isArray(report.results) ? report.results : [];
   const passed = results.filter(row => row.passed).length;
@@ -1000,7 +1016,7 @@ function renderAssignmentGradingResult(panel, report, stderr){
     if (!row.passed) item.open = true;
     const title = document.createElement("summary");
     const mark = document.createElement("span"); mark.className = "py-grade-result-mark"; mark.textContent = row.passed ? "통과" : "실패";
-    const name = document.createElement("span"); name.textContent = row.name || ("테스트 " + (index + 1));
+    const name = document.createElement("span"); name.textContent = (row.name || ("테스트 " + (index + 1))) + (hiddenAt(index) ? " 🔒" : "");
     title.append(mark, name); item.appendChild(title);
     const body = document.createElement("div"); body.className = "py-grade-result-body";
     const addValue = (caption, value, cls) => {
@@ -1009,10 +1025,16 @@ function renderAssignmentGradingResult(panel, report, stderr){
       const pre = document.createElement("pre"); pre.textContent = value === "" ? "(없음)" : value;
       block.append(labelEl, pre); body.appendChild(block);
     };
-    if (row.input) addValue("입력", row.input);
-    addValue("기대 출력", row.expected);
-    addValue("실제 출력", row.actual);
-    if (row.error) addValue("실행 오류", row.error, "is-error");
+    if (hiddenAt(index)){
+      const note = document.createElement("p"); note.className = "py-grade-hidden-note";
+      note.textContent = "숨김 테스트 — 입력·기대 출력·실제 출력은 표시되지 않아요.";
+      body.appendChild(note);
+    } else {
+      if (row.input) addValue("입력", row.input);
+      addValue("기대 출력", row.expected);
+      addValue("실제 출력", row.actual);
+      if (row.error) addValue("실행 오류", row.error, "is-error");
+    }
     item.appendChild(body); list.appendChild(item);
   });
   panel.appendChild(list);

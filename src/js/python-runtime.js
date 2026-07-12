@@ -190,10 +190,13 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         }
         if (grading){
           const report = parsePythonGradingReport(r.stdout);
-          const score = renderAssignmentGradingResult(outPanel, report, r.stderr);
-          const gradingErrors = report ? report.results.map(row => row.error).filter(Boolean).join("\n") : r.stderr;
+          const score = renderAssignmentGradingResult(outPanel, report, r.stderr, gradeTests);
+          const gradingErrors = assignmentGradingErrorText(report, gradeTests, r.stderr);
           if (gradingErrors) applyErr(1, gradingErrors);
           setStatus(score.total ? ("채점 완료 · " + score.passed + "/" + score.total + " 통과 · 로컬 파이썬" + withFolder) : "채점 오류 · 로컬 파이썬");
+          if (typeof options.onGradeResult === "function"){   // 과제 패키지(.task) 과제 바가 점수를 기록
+            try { options.onGradeResult({ report, passed: score.passed, total: score.total, backend: "local-python" }); } catch(_){}
+          }
           break;
         }
         const missing = (r.code !== 0) ? detectMissingModule(r.stderr) : null;
@@ -277,10 +280,13 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
       }
       if (grading){
         const report = parsePythonGradingReport(r.stdout);
-        const score = renderAssignmentGradingResult(outPanel, report, r.stderr);
-        const gradingErrors = report ? report.results.map(row => row.error).filter(Boolean).join("\n") : r.stderr;
+        const score = renderAssignmentGradingResult(outPanel, report, r.stderr, gradeTests);
+        const gradingErrors = assignmentGradingErrorText(report, gradeTests, r.stderr);
         if (gradingErrors) applyErr(1, gradingErrors);
         setStatus(score.total ? ("채점 완료 · " + score.passed + "/" + score.total + " 통과 · 브라우저(Pyodide)" + withFolder) : "채점 오류 · 브라우저(Pyodide)");
+        if (typeof options.onGradeResult === "function"){   // 과제 패키지(.task) 과제 바가 점수를 기록
+          try { options.onGradeResult({ report, passed: score.passed, total: score.total, backend: "pyodide" }); } catch(_){}
+        }
         return;
       }
       renderPyResult(outPanel, r.stdout, r.stderr, null, r.images, r.variables, r.code);

@@ -26,6 +26,8 @@ async function handleFiles(files, options={}){
       let made = null;
       if (ext === "pdf") await loadPdf(await file.arrayBuffer(), file.name, opts);
       else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);
+      else if (ext === "task" && typeof loadTask === "function") made = await loadTask(file, opts);
+      else if (ext === "taskdone" && typeof loadTaskSubmission === "function") made = await loadTaskSubmission(file, opts);
       else if (ext === "zip") await loadZip(file, opts);
       else if (ext === "tar") await loadTar(file, opts);
       else if (ext === "gz" || ext === "tgz") await loadGz(file, opts);   // .gz / .tgz / .tar.gz
