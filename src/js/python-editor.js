@@ -1250,7 +1250,7 @@ function buildCodeEditor(text, prof, options={}){
     findApplying = true; emitInput(); findApplying = false;
     commitNow();
     recomputeFind(false);
-    toast(count + "개를 바꿨어요.", 1800);
+    toast(window.tf("{n}개를 바꿨어요.", { n: count }), 1800);
   };
   const openFind = (seedText) => {
     findOpen = true; findBar.hidden = false;

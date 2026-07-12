@@ -172,6 +172,7 @@ function setupNotebookKernelBar(ownerDoc, editor, ui, outer, split){
   const kstatus = document.createElement("span"); kstatus.className = "nb-kernel-status"; kstatus.textContent = "셀에 커서를 두고 [이 셀] 실행";
   bar.append(tag, runCellBtn, nextBtn, restartBtn, nbViewBtn, kstatus);
   outer.insertBefore(bar, split);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   let busy = false, lastRunIndex = 0, activeTask = null, cancelRequested = false;
   const setBusy = (b) => {
@@ -980,11 +981,12 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록.
   // PDF 필기바의 ● 녹화와 같은 녹화기를 공유하므로 어느 쪽에서 시작/정지해도 상태가 맞는다.
   const recBtn = document.createElement("button"); recBtn.className = "run-rec"; recBtn.type = "button";
+  const _T = (s) => (typeof window.t === "function" ? window.t(s) : s);
   const syncRecBtn = (on) => {
     recBtn.classList.toggle("recording", on);
-    recBtn.textContent = on ? "■ 정지" : "● 녹화";
-    recBtn.title = on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기"
-      : "수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록";
+    recBtn.textContent = _T(on ? "■ 정지" : "● 녹화");
+    recBtn.title = _T(on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기"
+      : "수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록");
   };
   syncRecBtn(typeof lessonPdfRecording === "function" && lessonPdfRecording());
   recBtn.addEventListener("click", () => {
@@ -1123,6 +1125,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
   outer.appendChild(bar); outer.appendChild(pkgWrap); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(pathHelpPanel); outer.appendChild(split);
+  // 동적 툴바(실행 바·라이브러리·경로 안내)를 현재 UI 언어로 번역 — 코드 편집기 본문(split)은 제외.
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") {
+    [bar, pkgWrap, inputWrap, pathBar, projectRow].forEach((el) => window.MNI18N.translateTree(el));
+  }
   host.appendChild(outer);
 
   const ui = { btn: runBtn, traceBtn, analyzeBtn, gradeBtn, status, outPanel, split, stdin, inputWrap, editorTa: editor.ta,

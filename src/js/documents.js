@@ -208,13 +208,14 @@ function toggleViewerFullscreen(){
 }
 function syncFullscreenButtons(){
   const on = isViewerFullscreen();
-  const title = on ? "전체화면 종료" : "문서 영역 전체화면";
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const title = _t(on ? "전체화면 종료" : "문서 영역 전체화면");
   // PDF 전체화면은 페이지 표시줄(pill) 안의 아이콘 버튼 — 라벨을 덮어쓰지 않고 툴팁·상태만 갱신
   const pdfFs = byId("btnFullscreen");
   if (pdfFs){ pdfFs.title = title; pdfFs.setAttribute("aria-label", title); pdfFs.classList.toggle("active", on); }
   // 오피스 전체화면은 헤더의 텍스트 버튼
   const offFs = byId("btnOfficeFullscreen");
-  if (offFs){ offFs.textContent = on ? "⛶ 나가기" : "⛶ 전체화면"; offFs.title = title; }
+  if (offFs){ offFs.textContent = _t(on ? "⛶ 나가기" : "⛶ 전체화면"); offFs.title = title; }
   const group = byId("fsZoomGroup");
   const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
   if (group) group.hidden = !pdf;
@@ -605,8 +606,9 @@ function applyStudyLayout(){
   }
   const btn = byId("studyToggle");
   btn.hidden = docs.length === 0;
-  btn.textContent = ref ? "분할 작업 종료" : "분할 작업";
-  btn.title = ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기";
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  btn.textContent = _t(ref ? "분할 작업 종료" : "분할 작업");
+  btn.title = _t(ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기");
   // 참고 칸 왼쪽 위 잠금 열쇠: 상태(잠김/열림)만 갱신(표시 여부는 CSS + 모서리 호버가 결정)
   const chipLock = byId("studyChipLock");
   if (chipLock){
@@ -772,7 +774,7 @@ function updateDocumentStatus(doc){
   else if (doc.kind === "pdf" && appSettings.pdfRecovery && doc.recoveryDirty){ text = "자동 저장 중"; cls = "dirty"; }
   else if (doc.kind === "pdf" && appSettings.pdfRecovery){ text = "자동 저장됨"; cls = "saved"; }
   if (!text){ badge.hidden = true; return; }
-  badge.textContent = text; badge.className = "doc-status " + cls; badge.hidden = false;
+  badge.textContent = (typeof window.t === "function") ? window.t(text) : text; badge.className = "doc-status " + cls; badge.hidden = false;
 }
 
 function updateDocumentEncoding(doc){
@@ -857,13 +859,14 @@ function updateModeBadges(){
     mode.hidden = true; pair.hidden = true; return;
   }
   const text = modeBadgeText(doc);
-  mode.textContent = text;
-  mode.title = "현재 화면: " + text;
+  const shown = (typeof window.t === "function") ? window.t(text) : text;
+  mode.textContent = shown;
+  mode.title = window.tf("현재 화면: {mode}", { mode: shown });
   mode.hidden = !text;
   const ref = docs.find(d => d.id === studyPdfId);
   const work = docs.find(d => d.id === activeId && (!ref || d.id !== ref.id));
   if (ref && work){
-    const label = "참조: " + ref.name + " · 작업: " + work.name;
+    const label = window.tf("참조: {ref} · 작업: {work}", { ref: ref.name, work: work.name });
     pair.textContent = label;
     pair.title = label;
     pair.hidden = false;
@@ -1689,7 +1692,7 @@ function onContentSearchWorkerMessage(ev){
     if (d.hit){ contentMatchIds.add(d.docId); contentMatchSnippets.set(d.docId, d.hit); scheduleContentSearchRender(); }
   } else if (d.type === "done"){
     if (d.token !== contentSearchToken) return;
-    setContentStatus(contentMatchIds.size ? (contentMatchIds.size + "개 일치") : "내용 일치 없음");
+    setContentStatus(contentMatchIds.size ? window.tf("{n}개 일치", { n: contentMatchIds.size }) : (window.t ? window.t("내용 일치 없음") : "내용 일치 없음"));
     renderSidebar();
   }
 }
@@ -1724,7 +1727,7 @@ async function runContentSearch(query){
       files: large.map(d => ({ docId: d.id, blob: d.sourceFile })) });
   } else {
     // 워커 불가(구형 환경) 또는 대형 파일 없음 → 지금 결과가 최종
-    setContentStatus(result.size ? (result.size + "개 일치") : "내용 일치 없음");
+    setContentStatus(result.size ? window.tf("{n}개 일치", { n: result.size }) : (window.t ? window.t("내용 일치 없음") : "내용 일치 없음"));
   }
 }
 function onSidebarSearchInput(){                          // 입력 즉시 이름 필터 + 내용 검색은 디바운스
@@ -1893,8 +1896,9 @@ function renderSidebar(){
     }
     const saved = document.createElement("span");
     saved.className = "sb-saved";
-    if (doc && doc.hasUnsavedEdits){ saved.textContent = "●"; saved.title = "저장 후 수정됨"; }
-    else if (doc && doc.savedInWorkspace){ saved.textContent = "✓"; saved.title = "앱 작업공간에 저장됨"; }
+    const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+    if (doc && doc.hasUnsavedEdits){ saved.textContent = "●"; saved.title = _t("저장 후 수정됨"); }
+    else if (doc && doc.savedInWorkspace){ saved.textContent = "✓"; saved.title = _t("앱 작업공간에 저장됨"); }
     else saved.hidden = true;
     const encoding = document.createElement("span");
     encoding.className = "sb-encoding";
@@ -1998,13 +2002,13 @@ async function updateMemStat(){
   try { const m = performance && performance.memory; if (m && m.usedJSHeapSize) jsMB = Math.round(m.usedJSHeapSize / 1048576); } catch(_){}
   if (backendMB == null && jsMB == null){ el.hidden = true; return; }
   const parts = [];
-  if (backendMB != null) parts.push("메모리 " + backendMB + "MB");
+  if (backendMB != null) parts.push(window.tf("메모리 {mb}MB", { mb: backendMB }));
   if (jsMB != null) parts.push("JS " + jsMB + "MB");
   el.textContent = parts.join(" · ");
   el.hidden = false;
   const tip = [];
   for (const p of procs.slice(0, 8)) tip.push(p.name + " " + p.mb + "MB");
-  if (jsMB != null) tip.push("페이지 JS 힙 " + jsMB + "MB");
+  if (jsMB != null) tip.push(window.tf("페이지 JS 힙 {mb}MB", { mb: jsMB }));
   el.title = tip.join("\n");
 }
 function startMemStat(){
@@ -2021,12 +2025,12 @@ function updateFileStats(){
   wrap.hidden = false;
   if (!open.length){
     sidebarExtFilter = "";
-    chip.textContent = "파일 0개 · 0 B";
+    chip.textContent = (typeof window.t === "function") ? window.t("파일 0개 · 0 B") : "파일 0개 · 0 B";
     pop.hidden = true;
     wrap.dataset.pin = "0";
     if (button){
       button.disabled = true;
-      button.title = "열린 파일이 없습니다";
+      button.title = (typeof window.t === "function") ? window.t("열린 파일이 없습니다") : "열린 파일이 없습니다";
       button.setAttribute("aria-expanded", "false");
     }
     return;
@@ -2038,34 +2042,41 @@ function updateFileStats(){
     const key = documentExtension(d);
     byExt.set(key, (byExt.get(key) || 0) + 1);
   }
-  chip.textContent = "파일 " + open.length + "개 · " + humanSize(totalSize) + (sidebarExtFilter ? " · " + sidebarExtFilter : "");
-  if (button) button.title = sidebarExtFilter ? "현재 " + sidebarExtFilter + " · 확장자 필터 변경" : "열린 파일 — 확장자별 보기";
+  chip.textContent = window.tf("파일 {n}개 · {size}", { n: open.length, size: humanSize(totalSize) }) + (sidebarExtFilter ? " · " + sidebarExtFilter : "");
+  if (button) button.title = sidebarExtFilter ? window.tf("현재 {ext} · 확장자 필터 변경", { ext: sidebarExtFilter }) : (window.t ? window.t("열린 파일 — 확장자별 보기") : "열린 파일 — 확장자별 보기");
   const rows = [...byExt.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   pop.innerHTML = "";
   const head = document.createElement("div"); head.className = "fsp-head";
-  head.textContent = "파일 " + open.length + "개 · " + humanSize(totalSize);
+  head.textContent = window.tf("파일 {n}개 · {size}", { n: open.length, size: humanSize(totalSize) });
   pop.appendChild(head);
   const all = document.createElement("div"); all.className = "fsp-row fsp-all-row";
   all.classList.toggle("active", !sidebarExtFilter);
   all.setAttribute("role", "menuitemradio"); all.setAttribute("aria-checked", String(!sidebarExtFilter)); all.tabIndex = 0;
-  all.title = "전체 파일 보기";
+  all.title = (window.t ? window.t("전체 파일 보기") : "전체 파일 보기");
   all.onclick = (e) => { e.stopPropagation(); setSidebarExtensionFilter(""); };
   all.onkeydown = (e) => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); setSidebarExtensionFilter(""); } };
-  const allLabel = document.createElement("span"); allLabel.textContent = "전체";
-  const allCount = document.createElement("span"); allCount.className = "fsp-cnt"; allCount.textContent = open.length + "개";
+  const allLabel = document.createElement("span"); allLabel.textContent = (window.t ? window.t("전체") : "전체");
+  const allCount = document.createElement("span"); allCount.className = "fsp-cnt"; allCount.textContent = window.tf("{n}개", { n: open.length });
   all.append(allLabel, allCount); pop.appendChild(all);
   for (const [ext, n] of rows){
     const row = document.createElement("div"); row.className = "fsp-row";
     row.classList.toggle("active", sidebarExtFilter === ext);
     row.setAttribute("role", "menuitemradio"); row.setAttribute("aria-checked", String(sidebarExtFilter === ext)); row.tabIndex = 0;
-    row.title = ext + " 파일만 보기";
+    row.title = window.tf("{ext} 파일만 보기", { ext });
     row.onclick = (e) => { e.stopPropagation(); setSidebarExtensionFilter(ext); };
     row.onkeydown = (e) => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); setSidebarExtensionFilter(ext); } };
     const ex = document.createElement("span"); ex.className = "fsp-ext"; ex.textContent = ext;
-    const ct = document.createElement("span"); ct.className = "fsp-cnt"; ct.textContent = n + "개";
+    const ct = document.createElement("span"); ct.className = "fsp-cnt"; ct.textContent = window.tf("{n}개", { n });
     row.append(ex, ct); pop.appendChild(row);
   }
 }
+
+// i18n 바인딩 대상이 아닌 동적 문서 상태·사이드바도 언어 전환 직후 다시 계산한다.
+window.addEventListener("mni18nchange", () => {
+  docs.forEach(updateDocumentStatus);
+  updateModeBadges();
+  renderSidebar();
+});
 
 function closeGroup(nodeId, options={}){
   const group = navNodes.find(n => n.nodeId === nodeId && n.type === "group");

@@ -93,6 +93,7 @@ function createPdfPagePanel(doc){
   const list = document.createElement("div"); list.className = "pdf-thumb-list";
   panel.append(head, actions, list);
   doc.el.insertBefore(panel, doc.el.firstChild);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
   doc.pagePanel = panel; doc.pageThumbList = list; doc.pageCountLabel = count;
   updatePdfPagePanel(doc);
 }
@@ -151,7 +152,7 @@ async function extractPdfPages(doc){
     const ids = new Set(pages.map(p => p.originalIndex));
     const bytes = await buildPdfBytes(doc, ids);
     downloadPdfBytes(bytes, doc.fileName.replace(/\.pdf$/i, "") + "_pages.pdf");
-    toast(pages.length + "개 페이지를 저장했어요.");
+    toast(window.tf("{n}개 페이지를 저장했어요.", { n: pages.length }));
   } catch(e){ console.error(e); toast("페이지 추출에 실패했습니다.", 3000); }
   finally { hideLoading(); }
 }

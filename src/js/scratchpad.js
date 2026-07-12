@@ -437,15 +437,15 @@ function wireScratchpad(){
   const showStatus = (message, reset=true) => {
     clearTimeout(statusTimer);
     status.textContent = message;
-    if (reset) statusTimer = setTimeout(() => { status.textContent = "자동 저장"; }, 2200);
+    if (reset) statusTimer = setTimeout(() => { status.textContent = (window.t ? window.t("자동 저장") : "자동 저장"); }, 2200);
   };
   const updateCount = () => {
     const note = activeNote();
     const textLength = note.blocks.reduce((sum, block) => sum + String(block.text || "").length, 0);
     const images = note.blocks.filter(block => block.type === "image").length;
     const cells = note.blocks.filter(block => block.type === "notebook-cell").length;
-    count.textContent = textLength.toLocaleString() + "자" +
-      (images ? " · 이미지 " + images + "개" : "") + (cells ? " · 셀 " + cells + "개" : "");
+    count.textContent = window.tf("{n}자", { n: textLength.toLocaleString() }) +
+      (images ? " · " + window.tf("이미지 {n}개", { n: images }) : "") + (cells ? " · " + window.tf("셀 {n}개", { n: cells }) : "");
   };
   const persist = (announce=true) => {
     clearTimeout(saveTimer);

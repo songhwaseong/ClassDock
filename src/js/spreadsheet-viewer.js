@@ -193,6 +193,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
   actGroup.append(copy, chart, clear);
   bar.append(info, findGroup, actGroup, stat);
   if (opts.extra) bar.prepend(opts.extra);   // CSV 페이지 네비 등 외부 컨트롤을 같은 바 앞쪽에 합친다(바 재생성 시 매번 다시 끼움)
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   const rowCount = rows.length;
   let selection = null;
@@ -846,6 +847,7 @@ function renderCsvPreview(text, host, filename, ownerDoc){
     });
     pagenav.append(toXlsx);
   }
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(pagenav);
   if (pages <= 1){ prev.hidden = true; next.hidden = true; }   // 한 페이지면 이동 버튼 숨김(상태·저장은 유지)
   const sheet = document.createElement("div"); sheet.className = "xlsx-sheet csv-sheet";
   host.append(sheet);                                          // 선택 바는 enhance 가 sheet 앞에 만들어 끼운다

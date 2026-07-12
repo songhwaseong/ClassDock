@@ -9,6 +9,7 @@
   "localScripts": [
     "state-sync.js",
     "theme.js",
+    "i18n.js",
     "core.js",
     "state.js",
     "pdf-recovery.js",

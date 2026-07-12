@@ -154,7 +154,7 @@ async function pdfOcrToggle(doc, btn, onDone){
   if (!doc || doc.kind !== "pdf" || !doc.pdfBytes){ toast("인식할 PDF 를 찾지 못했어요.", 2400); return; }
   if (doc._ocrRunning){ doc._ocrCancel = true; if (btn) btn.textContent = "중지 중…"; return; }
 
-  const idle = () => { if (btn){ btn.textContent = "🔍 글자 인식"; btn.classList.remove("running"); } };
+  const idle = () => { if (btn){ btn.textContent = (typeof window.t === "function" ? window.t("🔍 글자 인식") : "🔍 글자 인식"); btn.classList.remove("running"); } };
   if (!(await pdfOcrEnsureTesseract())){ idle(); return; }
 
   doc._ocrRunning = true; doc._ocrCancel = false;

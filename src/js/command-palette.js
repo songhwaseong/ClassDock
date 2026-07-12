@@ -66,8 +66,10 @@
 
   // ── 검색 ─────────────────────────────
   const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+  const localizedLabel = (cmd) => (typeof window.t === "function" ? window.t(cmd.label) : cmd.label);
   function score(cmd, q){
-    const hay = norm(cmd.label + " " + (cmd.kw || ""));
+    // 화면에는 영어 레이블을 보여 주므로, 검색도 원문·번역문 양쪽을 대상으로 한다.
+    const hay = norm(cmd.label + " " + localizedLabel(cmd) + " " + (cmd.kw || ""));
     const i = hay.indexOf(norm(q));
     return i < 0 ? -1 : (1000 - i);                 // 앞쪽에서 일치할수록 상위
   }
@@ -103,6 +105,7 @@
         '<div class="cmdk-empty" hidden>일치하는 기능이 없어요</div>' +
       '</div>';
     document.body.appendChild(overlay);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(overlay);
     input = overlay.querySelector(".cmdk-input");
     listEl = overlay.querySelector(".cmdk-list");
     emptyEl = overlay.querySelector(".cmdk-empty");
@@ -128,7 +131,7 @@
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", idx === 0 ? "true" : "false");
       const ico = document.createElement("span"); ico.className = "cmdk-item-ico"; ico.textContent = c.icon || "•";
-      const lab = document.createElement("span"); lab.className = "cmdk-item-label"; lab.textContent = c.label;
+      const lab = document.createElement("span"); lab.className = "cmdk-item-label"; lab.textContent = localizedLabel(c);
       row.appendChild(ico); row.appendChild(lab);
       const key = shortcutKey(c);
       if (key){ const kb = document.createElement("kbd"); kb.className = "cmdk-item-key"; kb.textContent = key; row.appendChild(kb); }
@@ -183,6 +186,11 @@
     if (restoreFocus && restore && restore.isConnected) requestAnimationFrame(() => { try { restore.focus(); } catch(_){} });
   }
   window.openCommandPalette = open;
+
+  // 열린 팔레트는 언어 전환 뒤에도 결과 목록·검색 순위를 즉시 새 언어 기준으로 맞춘다.
+  window.addEventListener("mni18nchange", () => {
+    if (overlay && !overlay.hidden) render(input ? input.value : "");
+  });
 
   // ── 상시 진입점(헤더 버튼·빈 화면 힌트) 연결 ──
   // 팔레트는 이미 완성돼 있으나 진입점이 도움말 안 단축키뿐이라 발견성이 낮았다.

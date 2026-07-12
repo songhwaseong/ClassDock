@@ -107,6 +107,7 @@ function renderFolderImageGallery(doc, host){
   bar.append(gridButton, prev, count, next, edit);
   const body = document.createElement("div"); body.className = "image-gallery-body";
   shell.append(bar, body); host.appendChild(shell);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   let gridIo = null;   // 격자 썸네일 지연 로더 — 다시 그릴 때 이전 관찰자를 정리한다
   const paint = () => {
@@ -555,6 +556,8 @@ function setupImageEditor(file, host, img){
   bar.append(annToggle, adjustToggle);
   wrap.insertBefore(adjustPanel, stage);
   wrap.insertBefore(annPanel, stage);
+  // 편집기 툴바·보정/표시 패널을 현재 UI 언어로 번역(이미지 본문 stage 는 텍스트가 없어 무해).
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") { window.MNI18N.translateTree(bar); window.MNI18N.translateTree(adjustPanel); window.MNI18N.translateTree(annPanel); }
 
   const canvasPoint = (ev) => {
     const r = canvas.getBoundingClientRect();

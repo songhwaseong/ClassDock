@@ -486,10 +486,10 @@
     const unsupported = Math.max(0, Number(row.unsupported) || 0);
     const oversized = Math.max(0, Number(row.oversized) || 0);
     const failed = Math.max(0, Number(row.failed) || 0);
-    if (unsupported) extra.push(unsupported + "개 형식 미지원");
-    if (oversized) extra.push(oversized + "개 용량 제한 제외");
-    if (failed) extra.push(failed + "개 열기 실패");
-    return opened + "개 열기" + (extra.length ? " · " + extra.join(" · ") : "");
+    if (unsupported) extra.push(window.tf("{n}개 형식 미지원", { n: unsupported }));
+    if (oversized) extra.push(window.tf("{n}개 용량 제한 제외", { n: oversized }));
+    if (failed) extra.push(window.tf("{n}개 열기 실패", { n: failed }));
+    return window.tf("{n}개 열기", { n: opened }) + (extra.length ? " · " + extra.join(" · ") : "");
   }
 
   function isExternalRef(ref) {

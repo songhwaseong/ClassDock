@@ -110,6 +110,7 @@ async function renderSqlite(file, host){
   });
   toolbar.append(identity, refresh);
   shell.appendChild(toolbar);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(toolbar);
 
   if (!tables.length){
     sqliteMessage(shell, "비어 있는 데이터베이스입니다", "사용자 테이블이나 뷰가 아직 없습니다.");

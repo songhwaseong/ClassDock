@@ -130,12 +130,12 @@ function renderNotebookView(model, host, ownerDoc){
   collapseOutputsBtn.addEventListener("click", () => {
     closeOutputMenu();
     const count = notebookSetOutputsCollapsed(ownerDoc, true);
-    nbSetStatus(ownerDoc, count ? "출력 " + count + "개 접음" : "접을 출력이 없어요.");
+    nbSetStatus(ownerDoc, count ? window.tf("출력 {n}개 접음", { n: count }) : (window.t ? window.t("접을 출력이 없어요.") : "접을 출력이 없어요."));
   });
   expandOutputsBtn.addEventListener("click", () => {
     closeOutputMenu();
     const count = notebookSetOutputsCollapsed(ownerDoc, false);
-    nbSetStatus(ownerDoc, count ? "출력 " + count + "개 펼침" : "펼칠 출력이 없어요.");
+    nbSetStatus(ownerDoc, count ? window.tf("출력 {n}개 펼침", { n: count }) : (window.t ? window.t("펼칠 출력이 없어요.") : "펼칠 출력이 없어요."));
   });
   const onDocClickOutputMenu = event => {
     if (!outputGroup.contains(event.target)) closeOutputMenu();
@@ -240,6 +240,7 @@ function renderNotebookView(model, host, ownerDoc){
   const exportGroup = buildToolMenuGroup(exportBtn, "변환(.py) 뷰", [toPyBtn], "nbv-export-group");
   bar.append(tag, saveGroup, undoBtn, redoBtn, runGroup, outputGroup, inkBtn, tocBtn, findBtn, fontGroup, exportGroup, helpBtn, status);
   root.appendChild(bar);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   const tocPanel = document.createElement("div");
   tocPanel.className = "nbv-toc";
   tocPanel.hidden = true;
@@ -347,6 +348,7 @@ function renderNotebookView(model, host, ownerDoc){
   };
   footer.append(addBtn("＋ 코드 셀", "code"), addBtn("＋ 마크다운", "markdown"));
   root.appendChild(footer);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") { window.MNI18N.translateTree(tocPanel); window.MNI18N.translateTree(footer); }
 
   // 키보드: 명령/편집 모드 (저장·실행·셀 조작) — 캡처 단계에서 에디터보다 먼저 처리
   root.addEventListener("keydown", (e) => nbOnKeydown(ownerDoc, e), true);

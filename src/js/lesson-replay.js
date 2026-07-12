@@ -386,6 +386,7 @@ function mountReplayPlayer(doc, host, opts){
   [["0.5", "0.5×"], ["1", "1×"], ["1.5", "1.5×"], ["2", "2×"], ["4", "4×"]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === "1") o.selected = true; speedSel.appendChild(o); });
   const saveBtn = mk("💾 저장", ".lesson 파일로 저장", "lr-btn lr-save");
   bar.append(playBtn, restartBtn, seek, timeLabel, speedSel, saveBtn);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   const draw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, CW, CH);

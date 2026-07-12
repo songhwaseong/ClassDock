@@ -157,7 +157,8 @@ function syncShortcutHints(root=document){
   root.querySelectorAll("[data-shortcut-action]").forEach((el) => {
     const action = el.dataset.shortcutAction, display = shortcutDisplay(shortcutValue(action));
     if (el.tagName === "KBD" || el.dataset.shortcutDisplay === "true") el.textContent = display;
-    const title = el.dataset.shortcutTitle;
+    const rawTitle = el.dataset.shortcutTitle;
+    const title = rawTitle && (typeof window.t === "function") ? window.t(rawTitle) : rawTitle;
     if (title) {
       el.title = title + " (" + display + ")";
       if (el.dataset.shortcutAria === "true") el.setAttribute("aria-label", el.title);
@@ -208,7 +209,7 @@ function renderRegexSuggestionPanel(panel, example, countText, onApply) {
     top.append(label, code);
     if (typeof countText === "string") {
       const count = document.createElement("span"); count.className = "regex-suggest-count";
-      count.textContent = countRegexMatches(countText, item.pattern).toLocaleString() + "개 일치";
+      count.textContent = window.tf("{n}개 일치", { n: countRegexMatches(countText, item.pattern).toLocaleString() });
       top.appendChild(count);
     } else if (countText === undefined) {
       const count = document.createElement("span"); count.className = "regex-suggest-count";
@@ -256,7 +257,7 @@ function ensureWorker(){
    opts.action: { label, onClick } — 토스트 안 행동 버튼(예: 저장 후 '폴더 열기') */
 function toast(msg, ms=2200, opts={}){
   const area = byId("toast"); if (!area) return null;
-  msg = String(msg);
+  msg = (typeof window.t === "function") ? window.t(String(msg)) : String(msg);
   // 같은 문구가 이미 떠 있으면 갈아 끼워 중복으로 쌓이지 않게 한다(저장 연타 등).
   for (const old of [...area.children]) if (old.dataset.msg === msg) old.remove();
   while (area.children.length >= 3) area.firstChild.remove();
@@ -284,13 +285,13 @@ function toast(msg, ms=2200, opts={}){
   timer = setTimeout(dismiss, ms);
   return item;
 }
-function showLoading(msg){ byId("loadingMsg").textContent = msg||"처리 중…"; byId("loading").hidden = false; }
+function showLoading(msg){ const _t = (typeof window.t === "function") ? window.t : (x)=>x; byId("loadingMsg").textContent = _t(msg||"처리 중…"); byId("loading").hidden = false; }
 function hideLoading(){
   // 작업공간 배치 복원 중 내부 로더가 완료돼도 전체 복원이 끝날 때까지 화면을 유지한다.
   if (typeof uiBatchDepth !== "undefined" && uiBatchDepth > 0) return;
   byId("loading").hidden = true;
 }
-function updateLoading(msg){ if (msg) byId("loadingMsg").textContent = msg; }
+function updateLoading(msg){ if (msg) byId("loadingMsg").textContent = (typeof window.t === "function") ? window.t(msg) : msg; }
 // 브라우저에 제어권을 잠깐 돌려준다(진행 표시·입력 처리). setTimeout(0)은 타이머가 연쇄되면
 // 최소 4ms로 묶여 수천 파일 루프에서 수십 초를 잃는다 → scheduler.yield/MessageChannel로 클램프 없이 양보.
 const _yieldResolvers = [];

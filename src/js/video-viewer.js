@@ -585,6 +585,7 @@ function renderVideoPlayer(file, doc){
 
     bar.append(btnOpen, btnToggle, btnSize, status, picker);
     wrap.appendChild(bar);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   }
 
   wrap.appendChild(stage);

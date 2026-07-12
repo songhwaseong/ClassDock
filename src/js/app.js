@@ -931,7 +931,8 @@ function wire(){
     const sync = () => {
       const dark = root.getAttribute("data-theme") === "dark";
       btn.innerHTML = dark ? SUN : MOON;
-      btn.title = dark ? "라이트 모드로 전환" : "다크 모드로 전환";
+      const _tt = dark ? "라이트 모드로 전환" : "다크 모드로 전환";
+      btn.title = (typeof window.t === "function") ? window.t(_tt) : _tt;
     };
     btn.onclick = () => {
       const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";

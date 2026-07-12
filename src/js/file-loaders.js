@@ -199,7 +199,7 @@ async function loadZip(file, options={}){
   }
   if (!openable){
     hideLoading();
-    toast(unsupported ? "압축 안에 열 수 있는 형식이 없어요. · " + unsupported + "개 형식 미지원" : "압축이 비어 있어요.", 3500);
+    toast(unsupported ? window.tf("압축 안에 열 수 있는 형식이 없어요. · {n}개 형식 미지원", { n: unsupported }) : "압축이 비어 있어요.", 3500);
     return;
   }
 
@@ -355,7 +355,7 @@ async function extractTar(tarBytes, name, options = {}){
     await yieldToBrowser();
   }
   if (!opened){ closeGroup(group.nodeId); toast("압축을 풀지 못했어요.", 3000); }
-  else toast(opened + "개 열기", 3000);
+  else toast(window.tf("{n}개 열기", { n: opened }), 3000);
 }
 
 async function loadTar(file, options = {}){

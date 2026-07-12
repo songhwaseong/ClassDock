@@ -599,6 +599,7 @@ function nbBuildInkToolbar(ownerDoc){
   setColor(state.color);
   setWidth(state.width);
   syncTools();
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   // 자유 배치 드래그 — position:fixed 라 좌표는 뷰포트 기준. 화면 밖으로 못 나가게 여백 8px 로 가둔다.
   // 좌/우 끝(가장자리 근처)으로 끌면 세로 막대로 자동 전환한다(PDF 펜 바와 동일).
@@ -1047,7 +1048,7 @@ function nbReplaceNotebookAll(ownerDoc){
   for (const ctrl of (ownerDoc._nbCtrls || [])) ctrl.setSource(ctrl.cell.source);
   markNbDirty(ownerDoc);
   nbRefreshNotebookFind(ownerDoc, 0);
-  toast("노트북 전체에서 " + count + "개를 바꿨어요.", 2200);
+  toast(window.tf("노트북 전체에서 {n}개를 바꿨어요.", { n: count }), 2200);
 }
 
 function nbBuildFindPanel(ownerDoc){

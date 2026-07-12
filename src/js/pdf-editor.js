@@ -1173,9 +1173,10 @@ function ensurePenBar(){
   // 수업 리플레이 녹화 — PDF 위 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있다.
   // 파이썬 실행바의 ● 녹화와 같은 녹화기를 공유 — lesson-rec-changed 로 양쪽 버튼 상태를 맞춘다.
   const syncPenRecBtn = (on) => {
+    const _T = (s) => (typeof window.t === "function" ? window.t(s) : s);
     recBtn.classList.toggle("recording", on);
-    recBtn.textContent = on ? "■ 정지" : "● 녹화";
-    recBtn.title = on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기" : "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요";
+    recBtn.textContent = _T(on ? "■ 정지" : "● 녹화");
+    recBtn.title = _T(on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기" : "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요");
   };
   const recBtn = mk("● 녹화", "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요", "pen-act pen-rec", () => {
     if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
@@ -1185,6 +1186,7 @@ function ensurePenBar(){
   bar.appendChild(recBtn);
   setTool("pen"); setColor("#e11d48"); setWidth(3);
   byId("content").appendChild(bar);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   // ----- 드래그로 자유 배치(픽셀 좌표) + 좌/우 끝 자동 세로 전환 -----
   // 옛 4방향 토글 값("top"/"left"/...)이 남아 있으면 무시하고 기본 위치(아래 가운데) 유지.
@@ -1407,6 +1409,7 @@ function ensureTextHiBar(){
     bar.appendChild(b);
   }
   document.body.appendChild(bar);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   _textHiBar = bar; return bar;
 }
 function hideTextHiBar(){ if (_textHiBar) _textHiBar.hidden = true; }

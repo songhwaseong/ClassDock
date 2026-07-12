@@ -376,6 +376,7 @@ function renderWhiteboard(doc, host){
   applyPos(curPos);
 
   tools.append(posGroup, toolGroup, colorGroup, widthGroup, imgGroup, actGroup, exportGroup, recGroup);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(tools);
   setTool("select"); setColor("#111111"); setWidth(4); updateUndoButtons();   // 열면 선택·이동 도구가 기본 활성
 
   // ----- 키보드(이 보드가 활성일 때만): Ctrl+Z / Ctrl+Y -----
