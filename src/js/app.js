@@ -388,12 +388,13 @@ function wire(){
   const setShortcutError = (message="") => { shortcutError.textContent = message; };
   const renderShortcutSettings = () => {
     const list = byId("shortcutSettingsList");
+    const tr = (value) => typeof window.t === "function" ? window.t(value) : value;
     list.textContent = "";
     SHORTCUT_DEFINITIONS.forEach((item) => {
       const row = document.createElement("div"); row.className = "shortcut-setting-row";
       const copy = document.createElement("div"); copy.className = "shortcut-setting-copy";
-      const label = document.createElement("strong"); label.textContent = item.label;
-      const description = document.createElement("small"); description.textContent = item.description;
+      const label = document.createElement("strong"); label.textContent = tr(item.label);
+      const description = document.createElement("small"); description.textContent = tr(item.description);
       copy.append(label, description);
       const button = document.createElement("button"); button.type = "button"; button.className = "shortcut-capture";
       button.dataset.action = item.id;
@@ -401,6 +402,8 @@ function wire(){
       button.classList.toggle("recording", recording);
       button.textContent = recording ? "새 키를 누르세요…" : shortcutDisplay(shortcutDraft[item.id]);
       button.setAttribute("aria-label", item.label + " 단축키 " + (recording ? "입력 중" : shortcutDisplay(shortcutDraft[item.id])));
+      button.textContent = recording ? tr("다른 단축키를 누르세요") : shortcutDisplay(shortcutDraft[item.id]);
+      button.setAttribute("aria-label", tr(item.label) + " " + tr("단축키") + " " + (recording ? tr("입력 중") : shortcutDisplay(shortcutDraft[item.id])));
       button.addEventListener("click", () => {
         shortcutCaptureAction = item.id;
         setShortcutError("새 단축키를 누르세요. Esc를 누르면 취소됩니다.");
@@ -411,6 +414,9 @@ function wire(){
       row.append(copy, button); list.appendChild(row);
     });
   };
+  window.addEventListener("mni18nchange", () => {
+    if (!byId("settingsModal").hidden) renderShortcutSettings();
+  });
   window.addEventListener("keydown", (e) => {
     if (!shortcutCaptureAction || byId("settingsModal").hidden) return;
     e.preventDefault(); e.stopImmediatePropagation();

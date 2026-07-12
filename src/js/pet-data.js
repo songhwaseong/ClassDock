@@ -895,3 +895,56 @@ const PET_NAMES = {
   apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
   alien:"외계인", ant:"개미", pig:"돼지", sheep:"양"
 };
+
+const PET_NAMES_EN = {
+  crab:"Crab", chick:"Chick", robot:"Robot", ghost:"Ghost", slime:"Slime",
+  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", dog:"Dog",
+  spider:"Spider", mole:"Mole", frog:"Frog", penguin:"Penguin", balloon:"Balloon",
+  snail:"Snail", ninja:"Ninja", bird:"Bird", rabbit:"Rabbit", soccer:"Soccer ball",
+  chameleon:"Chameleon", wizard:"Wizard", magnet:"Magnet", cloud:"Thundercloud", rocket:"Rocket",
+  butterfly:"Butterfly", fish:"Fish", snake:"Snake", mouse:"Mouse", turtle:"Turtle",
+  octopus:"Octopus", bat:"Bat", owl:"Owl", duck:"Duck", squirrel:"Squirrel",
+  hedgehog:"Hedgehog", hamster:"Hamster", bee:"Bee", ladybug:"Ladybug", dice:"Die",
+  apple:"Apple", eraser:"Eraser", mushroom:"Mushroom", carrot:"Carrot", dino:"Dinosaur", snowman:"Snowman",
+  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep"
+};
+
+const PET_KIND_SAYINGS_EN = {
+  climber:["Up we go!", "Hello!", "Keep climbing!"], walker:["On the move!", "Hello!", "Step by step!"],
+  hopper:["Boing!", "Let's hop!", "Here I go!"], bouncer:["Boing!", "So bouncy!", "Hello!"],
+  roller:["Rolling along!", "Here I go!", "Wheee!"], ghost:["Boo!", "Did I surprise you?", "Hello!"],
+  ufo:["Beep beep!", "Greetings, Earthling!", "Scanning..."], cat:["Meow!", "Time for a nap.", "Purr..."],
+  dog:["Woof!", "Let's go!", "Sniff sniff!"], spider:["Look at my web!", "Hello!", "No biting!"],
+  mole:["Pop!", "Underground is cozy.", "Hello!"], frog:["Ribbit!", "Ready to jump!", "Hop!"],
+  penguin:["Waddle waddle!", "Sliding is the best!", "Quack!"], balloon:["Floating along!", "Don't let go!", "Up we go!"],
+  snail:["Slow is okay.", "Keep going!", "Easy does it."], ninja:["...!", "Too quiet...", "Whoosh!"],
+  bird:["Chirp chirp!", "Flying high!", "Hello!"], chameleon:["What color today?", "Color shift!", "Can you find me?"],
+  wizard:["Abracadabra!", "Ta-da!", "Magic time!"], magnet:["Click!", "Drawn together!", "So magnetic!"],
+  cloud:["Rumble...", "Stormy skies!", "Flash!"], rocket:["3, 2, 1...", "Ready for launch!", "To space!"],
+  flutter:["Flutter flutter!", "Hello!", "Such a nice breeze!"], fish:["Blub blub!", "Swimming along!", "Bubble safe!"],
+  snake:["Sss...", "Slithering along!", "Hello!"], mouse:["Squeak!", "Where's the cheese?", "So fast!"],
+  default:["Hello!", "Let's do our best!", "Nice to see you!"]
+};
+
+const PET_BUBBLE_EN = {
+  "성공! 🎉":"Success! 🎉", "와~ 됐다!":"It worked!", "코드 천재!":"Code genius!", "완벽해요!":"Perfect!", "만세!":"Hooray!", "박수 짝짝!":"Clap clap!",
+  "어이쿠!":"Oops!", "으악, 빨간 글씨!":"Oh no, red text!", "괜찮아요, 다시!":"It's okay, try again!", "삐끗...":"Whoops...", "오류는 스승님":"Errors teach us!", "힘내요!":"You can do it!",
+  "슈웅~":"Whoosh!", "쑤욱~":"Digging down!", "슉!":"Whoosh!", "수리수리 마수리~":"Abracadabra!", "철컥!":"Click!", "3, 2, 1...":"3, 2, 1...",
+  "여기에도 그려야지!":"I'll draw here too!", "쓱싹쓱싹!":"Scrub scrub!", "철컥! 끌어당긴다!":"Click! Pulling in!", "과부하... 재부팅...":"Overload... rebooting...",
+  "어? 내 우주선!":"Hey, my spaceship!", "후두둑~ 소나기!":"Pitter-patter rain!", "개굴개굴!":"Ribbit ribbit!", "사과다! 기다려!":"An apple! Wait up!", "데굴데굴~":"Rolling along!",
+  "준비... 출발...":"Ready... go...", "천천히 가자!":"Let's take it slow!", "거의 다 왔다!":"Almost there!", "집중 시간! 조용히 쉴게요":"Focus time! I'll rest quietly.", "휴식 시간! 쭉쭉~":"Break time! Stretch!",
+  "납치 실패...":"Abduction failed...", "다시 둥실~":"Floating again!", "푸슈슈슉~":"Pfffft!", "콰르릉!":"Kaboom!", "우르릉...":"Rumble...", "후우- 새 방울!":"Phew—new bubble!",
+  "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
+  "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!",
+  "다 지웠다!":"All clean!", "또 그려도 돼?":"Can I draw again?", "자력 정상!":"Magnet power normal!", "재부팅 완료!":"Reboot complete!",
+  "별 구경 완료!":"Star-gazing complete!", "지구가 제일 재밌어!":"Earth is the most fun!", "개굴! 최고야!":"Ribbit! Amazing!", "촉촉하게 완료!":"Nice and damp!",
+  "거의 잡았는데!":"I almost caught it!", "아삭은 다음 기회에!":"Crunchy next time!", "내가 이겼나?":"Did I win?", "천천히 가도 도착!":"Slow still gets there!"
+};
+
+function petUsesEnglish(){ return typeof window !== "undefined" && !!(window.MNI18N && window.MNI18N.lang === "en"); }
+function petText(korean, english){ return petUsesEnglish() ? (english || PET_BUBBLE_EN[korean] || korean) : korean; }
+function petSpeciesLabel(id){ return (petUsesEnglish() ? PET_NAMES_EN[id] : PET_NAMES[id]) || id; }
+function petDefaultSayings(speciesId, species){
+  if (!petUsesEnglish()) return (species && species.sayings) || [];
+  return (PET_KIND_SAYINGS_EN[(species && species.kind) || "default"] || PET_KIND_SAYINGS_EN.default).slice();
+}

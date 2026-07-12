@@ -256,8 +256,8 @@ function petPickAction(p, w){
   }
 }
 
-function petSay(p, text){
-  p.bubble.textContent = text;
+function petSay(p, text, translate=true){
+  p.bubble.textContent = translate && typeof petText === "function" ? petText(text) : text;
   p.bubble.classList.add("show");
   clearTimeout(p.bubbleTimer);
   p.bubbleTimer = setTimeout(() => p.bubble.classList.remove("show"), 1600);
@@ -373,7 +373,7 @@ function petEventEnd(evt, completed){
   w.eventTimer = 900 + Math.floor(Math.random() * 600);
   if (completed){
     petEventRecord(evt.def.id);
-    const lines = evt.def.finish || [];
+    const lines = (typeof petEventText === "function" ? petEventText(evt.def, "finish") : evt.def.finish) || [];
     if (lines[0]) petSay(evt.a, lines[0]);
     if (lines[1]) setTimeout(() => { if (petWorld === w && evt.b.el.isConnected) petSay(evt.b, lines[1]); }, 180);
   }
@@ -1241,7 +1241,7 @@ function petBindPointer(p){
       return;
     }
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
-      petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)]);
+      petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)], false);
       if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
       else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
     } else {              // 던지기: 마지막 이동 속도로 날아간다(중력 없는 애들은 관성 미끄러짐)
@@ -1385,7 +1385,7 @@ function petSpawn(i, total, bag){
   const p = {
     el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
     kind: species.kind, speciesId, art: species.art, palette,
-    sayings: (typeof petSayingsFor === "function" ? petSayingsFor(speciesId, species.sayings) : species.sayings), gold,
+    sayings: (typeof petSayingsFor === "function" ? petSayingsFor(speciesId, petDefaultSayings(speciesId, species)) : petDefaultSayings(speciesId, species)), gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),
     speed: 0.85 + Math.random() * 0.4, grav,
@@ -1464,6 +1464,19 @@ function petStop(){
 }
 
 // 설정 저장/시작 시 호출 — appSettings.petEnabled·petCount 를 따라 켜고 끈다.
+window.addEventListener("mni18nchange", () => {
+  if (petWorld){
+    for (const p of petWorld.pets){
+      const species = typeof petSpeciesById === "function" ? petSpeciesById(p.speciesId) : null;
+      if (species) p.sayings = typeof petSayingsFor === "function"
+        ? petSayingsFor(p.speciesId, petDefaultSayings(p.speciesId, species))
+        : petDefaultSayings(p.speciesId, species);
+    }
+  }
+  const dex = document.getElementById("petDexModal");
+  if (dex && !dex.hidden){ renderPetFriendDex(); renderPetEventDex(); petDexSetTab(dex.dataset.tab); }
+});
+
 function applyPetSettings(){
   const on = typeof appSettings === "object" && !!appSettings.petEnabled;
   const count = Math.max(1, Math.min(PET_MAX, Number(appSettings && appSettings.petCount) || 1));
@@ -1510,7 +1523,7 @@ function renderPetFriendDex(){
     const id = petSpeciesId(sp);
     const e = dex[id];
     if (e){ met++; if (e.g) golds++; }
-    const name = (typeof PET_NAMES === "object" && PET_NAMES[id]) || id;
+      const name = typeof petSpeciesLabel === "function" ? petSpeciesLabel(id) : ((typeof PET_NAMES === "object" && PET_NAMES[id]) || id);
     const cell = document.createElement("div");
     cell.className = "pet-dex-cell" + (e ? "" : " unmet") + (e && e.g ? " gold" : "");
     const cv = document.createElement("canvas");
@@ -1527,6 +1540,10 @@ function renderPetFriendDex(){
   const count = document.getElementById("petDexCount");
   if (count) count.dataset.friends = "만난 친구 " + met + " / " + PET_SPECIES.length
     + (golds ? " · 황금 펫 ★ " + golds + "종" : "") + " — 숨겨진 행동은 펫이 2마리 이상일 때 만날 수 있어요";
+  if (count && typeof petUsesEnglish === "function" && petUsesEnglish()){
+    count.dataset.friends = "Friends met: " + met + " / " + PET_SPECIES.length
+      + (golds ? " · Golden pets: " + golds : "") + " — hidden behaviors can appear with two or more pets.";
+  }
 }
 function renderPetEventDex(){
   const grid = document.getElementById("petEventDexGrid");
@@ -1539,7 +1556,7 @@ function renderPetEventDex(){
     if (entry) met++;
     const cell = document.createElement("div");
     cell.className = "pet-event-cell " + (entry ? "discovered" : "unmet");
-    cell.title = entry ? def.description : def.hint;
+    cell.title = entry ? petEventText(def, "description") : petEventText(def, "hint");
 
     const pair = document.createElement("div");
     pair.className = "pet-event-pair";
@@ -1550,14 +1567,14 @@ function renderPetEventDex(){
       const sp = petSpeciesById(id);
       const cv = document.createElement("canvas");
       if (sp) petDexDrawMini(cv, sp.art, sp.palettes[0], !entry, 2);
-      cv.setAttribute("aria-label", entry ? ((PET_NAMES && PET_NAMES[id]) || id) : "숨겨진 펫");
+      cv.setAttribute("aria-label", entry ? (typeof petSpeciesLabel === "function" ? petSpeciesLabel(id) : ((PET_NAMES && PET_NAMES[id]) || id)) : petText("숨겨진 펫", "Hidden pet"));
       pair.appendChild(cv);
     });
 
     const copy = document.createElement("div"); copy.className = "pet-event-copy";
-    const title = document.createElement("strong"); title.className = "pet-event-title"; title.textContent = entry ? def.title : "???";
+    const title = document.createElement("strong"); title.className = "pet-event-title"; title.textContent = entry ? petEventText(def, "title") : "???";
     const detail = document.createElement("span"); detail.className = entry ? "pet-event-desc" : "pet-event-hint";
-    detail.textContent = entry ? def.description : def.hint;
+    detail.textContent = entry ? petEventText(def, "description") : petEventText(def, "hint");
     copy.appendChild(title); copy.appendChild(detail);
     cell.appendChild(pair); cell.appendChild(copy);
     if (entry && entry.n > 1){
@@ -1569,6 +1586,12 @@ function renderPetEventDex(){
   if (count){
     count.dataset.events = "발견한 행동 " + met + " / " + PET_EVENT_DEFS.length
       + " — 조합이 함께 있으면 아직 못 본 행동이 조금 먼저 일어나요";
+    const modal = document.getElementById("petDexModal");
+    if (modal && modal.dataset.tab === "events") count.textContent = count.dataset.events;
+  }
+  if (count && typeof petUsesEnglish === "function" && petUsesEnglish()){
+    count.dataset.events = "Behaviors discovered: " + met + " / " + PET_EVENT_DEFS.length
+      + " — unobserved behaviors are a little more likely when the right pair appears together.";
     const modal = document.getElementById("petDexModal");
     if (modal && modal.dataset.tab === "events") count.textContent = count.dataset.events;
   }

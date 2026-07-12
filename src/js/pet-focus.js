@@ -74,6 +74,33 @@ function petFocusRestoreElapsed(){
     } else petFocusSetIdle();
   } else petFocusSetIdle();
 }
+function petFocusRenderEnglish(settings, phase, progress, time, open, openText, phaseEl, timeEl, message, bar, progressEl, start, pause, stop){
+  const running = !!petFocusState.running;
+  openText.textContent = phase === "focus" ? (running ? "Focus " + time : "Focus paused")
+    : phase === "break" ? (running ? "Break " + time : "Break paused") : "Focus";
+  open.setAttribute("aria-label", phase === "idle" ? "Open pixel pet focus mode" : openText.textContent);
+  phaseEl.textContent = phase === "focus" ? (running ? "Focusing" : "Focus paused")
+    : phase === "break" ? (running ? "On break" : "Break paused") : "Ready to focus";
+  timeEl.textContent = time;
+  bar.style.width = progress + "%";
+  progressEl.setAttribute("aria-valuenow", String(Math.round(progress)));
+  progressEl.setAttribute("aria-label", phase === "break" ? "Break progress" : "Focus progress");
+  message.textContent = phase === "focus" ? (running
+    ? "Your pets are resting quietly at the edge while you focus."
+    : "The timer and pets are paused. Continue when you're ready.")
+    : phase === "break" ? (running
+      ? "Stand up and gently stretch your shoulders and wrists."
+      : "Your break is paused for a moment.")
+      : "Focus for " + settings.focusMin + " min, then take a " + settings.breakMin + " min break.";
+  start.hidden = running;
+  start.textContent = phase === "idle" ? "Start focus" : "Resume";
+  pause.hidden = !running;
+  stop.hidden = phase === "idle";
+  stop.textContent = phase === "break" ? "End break" : "Stop";
+  const stats = petFocusStatsLoad();
+  petFocusEl("petFocusStats").textContent = "Focus cycles today: " + stats.cycles;
+}
+
 function petFocusUpdateUi(){
   const settings = petFocusSettings(), phase = petFocusState.phase;
   const remaining = petFocusRemaining();
@@ -90,6 +117,10 @@ function petFocusUpdateUi(){
   open.classList.toggle("break", phase === "break" && petFocusState.running);
   open.classList.toggle("paused", phase !== "idle" && !petFocusState.running);
   panel.classList.toggle("break", phase === "break");
+  if (typeof petUsesEnglish === "function" && petUsesEnglish()){
+    petFocusRenderEnglish(settings, phase, progress, time, open, openText, phaseEl, timeEl, message, bar, progressEl, start, pause, stop);
+    return;
+  }
   openText.textContent = phase === "focus" ? (petFocusState.running ? "집중 " + time : "집중 일시정지")
     : phase === "break" ? (petFocusState.running ? "휴식 " + time : "휴식 일시정지") : "집중";
   open.setAttribute("aria-label", phase === "idle" ? "픽셀 펫 집중 모드 열기" : openText.textContent);
@@ -138,6 +169,7 @@ function petFocusPause(){
 function petFocusStop(showMessage){
   const wasActive = petFocusState.phase !== "idle";
   petFocusSetIdle(); petFocusUpdateUi();
+  if (showMessage !== false && wasActive && typeof petUsesEnglish === "function" && petUsesEnglish() && typeof toast === "function"){ toast("Ended focus mode.", 1800); return; }
   if (showMessage !== false && wasActive && typeof toast === "function") toast("집중 모드를 종료했어요.", 1800);
 }
 function petFocusFinishFocus(){
@@ -146,10 +178,12 @@ function petFocusFinishFocus(){
   petFocusState = { phase:"break", running:true, endAt:Date.now() + total, remainingMs:total, totalMs:total };
   petFocusSave();
   if (typeof petSetRhythm === "function") petSetRhythm("break");
+  if (typeof petUsesEnglish === "function" && petUsesEnglish() && typeof toast === "function"){ toast("Focus complete! Take a " + settings.breakMin + " min break and stretch.", 5200, { type:"success" }); return; }
   if (typeof toast === "function") toast("집중 완료! 이제 " + settings.breakMin + "분 동안 몸을 풀어 보세요.", 5200, { type:"success" });
 }
 function petFocusFinishBreak(){
   petFocusSetIdle();
+  if (typeof petUsesEnglish === "function" && petUsesEnglish() && typeof toast === "function"){ toast("Break's over. Start your next focus when ready.", 4800); return; }
   if (typeof toast === "function") toast("휴식이 끝났어요. 준비되면 다음 집중을 시작하세요.", 4800);
 }
 function petFocusTick(){
@@ -194,6 +228,7 @@ function applyPetFocusSettings(){
 function initPetFocus(){
   if (petFocusWired) return;
   petFocusWired = true;
+  window.addEventListener("mni18nchange", () => petFocusUpdateUi());
   petFocusLoad(); petFocusRestoreElapsed();
   const open = petFocusEl("petFocusOpen"), panel = petFocusEl("petFocusPanel");
   if (!open || !panel) return;

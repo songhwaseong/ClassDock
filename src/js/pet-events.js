@@ -62,3 +62,21 @@ const PET_EVENT_DEFS = [
     description:"UFO가 토끼를 데려가려 했지만 이번에도 아슬아슬하게 실패했어요."
   }
 ];
+
+const PET_EVENT_EN = {
+  pencil_eraser_cleanup:{ title:"Scribble cleanup", hint:"What happens when the pencil meets the eraser?", description:"The eraser hurried after the pencil's doodles and cleaned them away.", finish:["All clean!", "Can I draw again?"] },
+  magnet_robot_reboot:{ title:"Magnetic overload", hint:"What happens when a metal friend stands by a strong magnet?", description:"The robot spun around the magnet, then paused for a quick reboot.", finish:["Magnet power normal!", "Reboot complete!"] },
+  ufo_alien_home:{ title:"The way home?", hint:"What happens when two friends from space meet?", description:"The UFO took the alien for a quick lap around the space beyond the screen.", finish:["Star-gazing complete!", "Earth is the most fun!"] },
+  cloud_frog_rain:{ title:"Ribbit rain shower", hint:"What happens when a cloud visits a rain-loving friend?", description:"A tiny shower from the thundercloud sent the frog happily hopping.", finish:["Ribbit! Amazing!", "Nice and damp!"] },
+  apple_rabbit_chase:{ title:"Catch that apple!", hint:"What happens when the rabbit spots a crisp red friend?", description:"The rabbit chased the rolling apple all the way to the edge of the screen.", finish:["I almost caught it!", "Crunchy next time!"] },
+  snail_turtle_race:{ title:"The world's slowest race", hint:"What happens when two leisurely friends reach the starting line?", description:"The snail and turtle raced very slowly, but made it to the end.", finish:["Did I win?", "Slow still gets there!"] },
+  cat_mouse_escape:{ title:"Squeak! Run!", hint:"What happens when a cat meets a very small friend?", description:"The mouse spotted the cat, panicked, and dashed the other way." },
+  dog_cat_chase:{ title:"Woof! Meow!?", hint:"What happens when a dog spots a cat?", description:"The excited dog chased the cat over to say hello." },
+  chameleon_copycat:{ title:"Cat-colored makeover", hint:"What happens when a color-changing friend gets near a cat?", description:"The chameleon borrowed the color of the nearby cat." },
+  ufo_rabbit_abduction:{ title:"Rabbit abduction attempt", hint:"What happens when a strange light shines on a rabbit?", description:"The UFO tried to take the rabbit, but narrowly failed again." }
+};
+
+function petEventText(def, key){
+  const english = PET_EVENT_EN[def && def.id];
+  return petUsesEnglish() && english && english[key] != null ? english[key] : def[key];
+}

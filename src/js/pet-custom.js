@@ -30,6 +30,14 @@ const PET_KIND_LABELS = {
 };
 
 // ----- 저장소 도우미 -----
+const PET_KIND_LABELS_EN = {
+  climber:"Wall climber", walker:"Walker", hopper:"Hopper", bouncer:"Bouncer", roller:"Roller", ghost:"Floating ghost",
+  ufo:"Flying UFO", cat:"Cursor hunter", dog:"Happy runner", spider:"Web climber", mole:"Burrower", frog:"Big jumper",
+  penguin:"Waddle and slide", balloon:"Balloon floater", snail:"Slow crawler", ninja:"Teleport dash", bird:"Flying bird",
+  chameleon:"Color changer", wizard:"Magic teleport", magnet:"Magnetic pull", cloud:"Thundercloud", rocket:"Launch and parachute",
+  flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape"
+};
+
 function petJSONLoad(key, fallback){
   try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; }
   catch(_){ return fallback; }
@@ -107,7 +115,7 @@ function petSpeciesName(sp){
   if (!sp) return "";
   if (sp.custom) return sp.name || "내 펫";
   const id = typeof petSpeciesId === "function" ? petSpeciesId(sp) : sp._id;
-  return (typeof PET_NAMES === "object" && PET_NAMES[id]) || id;
+  return typeof petSpeciesLabel === "function" ? petSpeciesLabel(id) : ((typeof PET_NAMES === "object" && PET_NAMES[id]) || id);
 }
 
 /* ==================== 대사 편집 UI ==================== */
@@ -244,7 +252,7 @@ function petBuilderFillSelects(){
     kindSel.textContent = "";
     for (const k in PET_KIND_LABELS){
       const opt = document.createElement("option");
-      opt.value = k; opt.textContent = PET_KIND_LABELS[k];
+      opt.value = k; opt.textContent = typeof petUsesEnglish === "function" && petUsesEnglish() ? (PET_KIND_LABELS_EN[k] || k) : PET_KIND_LABELS[k];
       kindSel.appendChild(opt);
     }
   }
@@ -413,4 +421,12 @@ function initPetBuilderModal(){
 // 대사·펫이 바뀌면, 이미 돌아다니는 펫들에게 즉시 반영되도록 다시 켠다(꺼져 있으면 아무 일 없음).
 function petLiveRefresh(){ if (typeof petRefreshAll === "function") petRefreshAll(); }
 
-function initPetCustom(){ initPetSayModal(); initPetBuilderModal(); }
+function initPetCustom(){
+  initPetSayModal(); initPetBuilderModal();
+  window.addEventListener("mni18nchange", () => {
+    const sayings = document.getElementById("petSayModal");
+    if (sayings && !sayings.hidden) openPetSayings();
+    const builder = document.getElementById("petBuilderModal");
+    if (builder && !builder.hidden){ petBuilderFillSelects(); petBuilderSyncForm(); petBuilderRenderSaved(); }
+  });
+}
