@@ -7,7 +7,7 @@ const {
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   transformEditorLines, pythonCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
-  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr,
+  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
@@ -384,6 +384,18 @@ test("Ctrl+클릭 정의 이동은 현재 파일의 Python 함수와 클래스�
     line: 4, kind: "def", offset: 25
   });
   assert.equal(findPythonLocalDefinition(source, "Missing", source.length), null);
+});
+
+test("Ctrl+클릭 정의 이동은 작업공간의 from import 로컬 모듈을 찾는다", () => {
+  const source = "from Utility.keras_graph_util import model_information\nmodel_information(model)";
+  const paths = ["수업자료/main.py", "수업자료/Utility/keras_graph_util.py", "다른반/Utility/keras_graph_util.py"];
+  assert.deepEqual(resolvePythonImportedDefinition(source, "model_information", "수업자료/main.py", paths), {
+    path:"수업자료/Utility/keras_graph_util.py", importedName:"model_information"
+  });
+  assert.deepEqual(resolvePythonImportedDefinition("from .Utility.keras_graph_util import model_information as info", "info", "수업자료/main.py", paths), {
+    path:"수업자료/Utility/keras_graph_util.py", importedName:"model_information"
+  });
+  assert.equal(resolvePythonImportedDefinition(source, "missing", "수업자료/main.py", paths), null);
 });
 
 test("자동완성 수락은 현재 입력 중인 접두어를 덮어쓴다", () => {

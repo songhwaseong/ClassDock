@@ -785,6 +785,55 @@
     return best || matches[0];
   }
 
+  // from package.module import name 형태에서, 현재 작업공간에 함께 열린 로컬 모듈 파일을 찾는다.
+  // 브라우저 파일 API는 실제 절대경로를 주지 않으므로, 작업공간 상대경로의 끝부분을 기준으로 매칭한다.
+  function resolvePythonImportedDefinition(source, name, currentPath, availablePaths) {
+    const word = String(name || "");
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(word)) return null;
+    const normalize = (value) => normalizeWorkspacePath(value).replace(/\/+$/, "");
+    const dirname = (value) => { const i = value.lastIndexOf("/"); return i >= 0 ? value.slice(0, i) : ""; };
+    const paths = [...new Set((availablePaths || []).map(normalize).filter(path => /\.(?:py|pyw|pyi)$/i.test(path)))];
+    const current = normalize(currentPath);
+    const commonPrefix = (a, b) => {
+      const aa = String(a || "").split("/").filter(Boolean), bb = String(b || "").split("/").filter(Boolean);
+      let n = 0; while (n < aa.length && n < bb.length && aa[n] === bb[n]) n++;
+      return n;
+    };
+    const findModule = (rawModule) => {
+      const dots = /^(\.+)(.*)$/.exec(rawModule);
+      const moduleName = String(dots ? dots[2] : rawModule).replace(/^\.+|\.+$/g, "");
+      if (!moduleName) return null;
+      const rel = moduleName.replace(/\./g, "/");
+      const wants = [rel + ".py", rel + "/__init__.py"];
+      if (dots){
+        const base = dirname(current).split("/").filter(Boolean);
+        const ascend = Math.max(0, dots[1].length - 1);
+        base.splice(Math.max(0, base.length - ascend));
+        const prefix = base.join("/");
+        for (const want of wants){
+          const exact = normalize(prefix ? prefix + "/" + want : want);
+          const hit = paths.find(path => path === exact);
+          if (hit) return hit;
+        }
+      }
+      const candidates = paths.filter(path => wants.some(want => path === want || path.endsWith("/" + want)));
+      if (!candidates.length) return null;
+      candidates.sort((a, b) => commonPrefix(dirname(b), dirname(current)) - commonPrefix(dirname(a), dirname(current)) || a.localeCompare(b));
+      return candidates[0];
+    };
+    const re = /^\s*from\s+([.A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\s+([^\n#]+)/gm;
+    let match;
+    while ((match = re.exec(String(source || "")))) {
+      const modulePath = findModule(match[1]);
+      if (!modulePath) continue;
+      for (const part of match[2].replace(/[()]/g, "").split(",")) {
+        const item = /^\s*([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/.exec(part);
+        if (item && (item[2] || item[1]) === word) return { path:modulePath, importedName:item[1] };
+      }
+    }
+    return null;
+  }
+
   function transformEditorLines(value, selectionStart, selectionEnd, action) {
     const text = String(value || "");
     const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
@@ -2021,7 +2070,7 @@
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     transformEditorLines, pythonCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
-    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
+    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,

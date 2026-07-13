@@ -6,7 +6,7 @@ const {
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
   pythonCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
-  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, parsePythonTracebackLocation, classifyPythonStderr,
+  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonTraceReport,

@@ -5,6 +5,29 @@ const CODE_KW = "abstract|and|arguments|as|assert|async|await|base|bool|boolean|
 const SQL_KW = "select|from|where|insert|into|update|delete|create|alter|drop|table|view|index|join|inner|left|right|outer|full|cross|on|group|order|by|asc|desc|having|union|all|values|set|primary|key|foreign|references|not|null|default|distinct|as|and|or|like|between|in|exists|case|when|then|else|count|sum|avg|min|max|limit|offset|begin|commit|rollback";
 window.__lastCodeLinkDocId = window.__lastCodeLinkDocId || null;
 
+// Ctrl+클릭에서 현재 작업공간의 from ... import ... 를 먼저 해석한다.
+// Jedi에는 브라우저가 가진 폴더 상대경로를 넘길 수 없어, 함께 열린 문서 경로로 직접 연결해야 한다.
+async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
+  if (!ownerDoc || !wordInfo || !wordInfo.word || typeof resolvePythonImportedDefinition !== "function") return false;
+  const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  const hit = resolvePythonImportedDefinition(source, wordInfo.word, docPath(ownerDoc), docs.map(docPath));
+  if (!hit) return false;
+  const target = docs.find(doc => docPath(doc) === hit.path);
+  if (!target) return false;
+  let targetSource = "";
+  try { targetSource = await openDocRunText(target); } catch(_){}
+  const definition = findPythonLocalDefinition(targetSource, hit.importedName, 0);
+  const targetLine = definition ? definition.line : 1;
+  const targetFocus = { column:0, length:Math.max(1, hit.importedName.length) };
+  target.pendingFocusLine = targetLine;
+  target.pendingFocusOptions = targetFocus;
+  setActiveDoc(target.id);
+  const navigator = target.codeEditor || target.codeViewer;
+  if (navigator && navigator.focusLine) navigator.focusLine(targetLine, targetFocus);
+  toast(definition ? "작업공간의 함수 정의로 이동했습니다." : "작업공간의 모듈 파일을 열었습니다.", 1600);
+  return true;
+}
+
 function highlightCode(src, profile){
   if (profile === "text") return escapeHtml(src);   // 강조 없이 텍스트만(rst/adoc/org/tex 등 경량 마크업)
   let com;
@@ -947,7 +970,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const draftKey = pythonDraftKey(file, ownerDoc, effectiveRunCtx);
   const sourceFingerprint = fingerprintBytes((file && file.name) || "code.py", sourceBytes);
   const restoredDraft = loadPythonDraft(draftKey, sourceFingerprint);
-  const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof);
+  const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
+    resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo)
+  });
   let savedValue = text;
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;
 

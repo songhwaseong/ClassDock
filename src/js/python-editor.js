@@ -867,6 +867,11 @@ function buildCodeEditor(text, prof, options={}){
       toast("현재 파일의 " + (localDef.kind === "class" ? "클래스" : "함수") + " 정의로 이동했습니다.", 1400);
       return;
     }
+    if (typeof options.resolveWorkspaceDefinition === "function"){
+      try {
+        if (await options.resolveWorkspaceDefinition({ source:ta.value, wordInfo })) return;
+      } catch(e){ console.warn("작업공간 정의 이동 실패:", e); }
+    }
     if (!jediReady()){
       toast("정의 이동은 exe + 로컬 Python/Jedi에서 사용할 수 있어요.", 2800);
       return;

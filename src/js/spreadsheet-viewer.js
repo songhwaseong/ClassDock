@@ -4575,8 +4575,10 @@ async function renderXlsx(file, host, doc){
     const underlineBtn = mkFmtBtn("U", "밑줄 (선택 셀)", () => toggleFontProp("underline", "밑줄"), "xlsx-fmt-btn xlsx-fmt-underline");
     const fontColorWrap = document.createElement("label"); fontColorWrap.className = "xlsx-frozen"; fontColorWrap.title = "선택 셀 글자 색";
     const fontColor = document.createElement("input"); fontColor.type = "color"; fontColor.className = "xlsx-fmt-color"; fontColor.value = "#1f2937";
-    fontColor.addEventListener("change", () => setFontColor(fontColor.value));
     fontColorWrap.append(document.createTextNode("글자색 "), fontColor);
+    const fontColorApplyBtn = document.createElement("button"); fontColorApplyBtn.type = "button"; fontColorApplyBtn.textContent = "적용";
+    fontColorApplyBtn.title = "고른 글자색을 선택 셀에 적용";
+    fontColorApplyBtn.onclick = () => setFontColor(fontColor.value);
     const sizeSel = document.createElement("select"); sizeSel.className = "xlsx-sortcol"; sizeSel.title = "글자 크기";
     [["", "크기"], ...[8,9,10,11,12,14,16,18,20,24,28,36].map(v => [String(v), String(v)])]
       .forEach(([val, label]) => { const o = document.createElement("option"); o.value = val; o.textContent = label; sizeSel.appendChild(o); });
@@ -4782,7 +4784,7 @@ async function renderXlsx(file, host, doc){
     const delSheetBtn = document.createElement("button"); delSheetBtn.type = "button"; delSheetBtn.textContent = "시트 삭제"; delSheetBtn.title = "현재 시트를 삭제(되돌리기 불가)";
     delSheetBtn.onclick = () => deleteCurrentSheet();
     const structureMenu = makeMenu("행·열·시트", "xlsx-tool-menu-structure", addRowBtn, addColBtn, delRowBtn, delColBtn, mergeBtn, unmergeBtn, addSheetBtn, dupSheetBtn, renSheetBtn, delSheetBtn);
-    const fontGroup = makeGroup("", "xlsx-editgroup-font", fontSel, sizeSel, boldBtn, italicBtn, underlineBtn, fontColorWrap);
+    const fontGroup = makeGroup("", "xlsx-editgroup-font", fontSel, sizeSel, boldBtn, italicBtn, underlineBtn, fontColorWrap, fontColorApplyBtn);
     const alignGroup = makeGroup("", "xlsx-editgroup-align", alignLeftBtn, alignCenterBtn, alignRightBtn, vAlignSel, wrapBtn, numSel);
     const formatMenu = makeMenu("채우기·테두리", "xlsx-tool-menu-format", fillWrap, fillBtn, borderWrap, borderStyleSel, borderWhereSel, borderBtn, clearFmtBtn, copyFmtBtn, pasteFmtBtn);
     const findMenu = makeMenu("찾기·바꿈", "xlsx-tool-menu-find", findInput, replInput, replaceBtn);
