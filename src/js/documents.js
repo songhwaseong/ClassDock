@@ -1860,9 +1860,16 @@ function renderSidebar(){
           return;
         }
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
-        // Alt+클릭: 형제를 유지한 채 자기만 펴기/접기(여러 폴더 동시에 펼쳐두고 싶을 때).
-        node.expanded = !node.expanded;
-        if (!e.altKey && node.expanded) collapseSiblingGroups(node);
+        // 이미 펼쳐진 폴더라도 형제 중 열린 폴더가 있으면 접지 않고 형제만 접는다(첫 클릭부터 "이 폴더만 남기기").
+        // 자기 혼자 열려 있을 때 클릭하면 그때 접힌다. Alt+클릭: 형제를 유지한 채 자기만 펴기/접기.
+        const hasOpenSiblings = navNodes.some(n =>
+          n !== node && n.type === "group" && n.parentId === node.parentId && n.expanded);
+        if (!e.altKey && node.expanded && hasOpenSiblings){
+          collapseSiblingGroups(node);
+        } else {
+          node.expanded = !node.expanded;
+          if (!e.altKey && node.expanded) collapseSiblingGroups(node);
+        }
         renderSidebar();
       }
       else {
@@ -1902,7 +1909,7 @@ function renderSidebar(){
     const twist = document.createElement("span");
     twist.className = "sb-twist";
     twist.textContent = node.type === "group" ? (node.expanded ? "▾" : "▸") : "";
-    if (node.type === "group") twist.title = "클릭: 펼치기(같은 레벨 폴더는 자동 접힘) · Alt+클릭: 형제 유지한 채 자기만 토글";
+    if (node.type === "group") twist.title = "클릭: 이 폴더만 남기고 같은 레벨 폴더 접기 · Alt+클릭: 형제 유지한 채 자기만 토글";
     const ic = document.createElement("span");
     ic.className = "sb-ic";
     ic.textContent = node.type === "group" ? iconFor(node.kind, node.name) : iconFor(doc.kind, doc.name);
