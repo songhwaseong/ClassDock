@@ -997,9 +997,50 @@ function makeCardMovable(card){
   if (!card || card.__movable) return;
   card.__movable = true;
   card.classList.add("modal-movable");
+  const MIN_VISIBLE = 40;
+  const EDGE_MARGIN = 6;
+  const compactLayout = () => {
+    try { return window.matchMedia("(max-width:640px)").matches; }
+    catch(_){ return window.innerWidth <= 640; }
+  };
+  const modalIsVisible = () => {
+    const modal = card.closest(".modal");
+    return !!card.isConnected && !card.hidden && (!modal || !modal.hidden);
+  };
+  const clampCard = (forceFullyInside=false) => {
+    if (!modalIsVisible() || compactLayout()) return;
+    let rect = card.getBoundingClientRect();
+    const maxWidth = Math.max(280, window.innerWidth - EDGE_MARGIN * 2);
+    const maxHeight = Math.max(140, window.innerHeight - EDGE_MARGIN * 2);
+    const nextWidth = Math.min(rect.width, maxWidth);
+    const nextHeight = Math.min(rect.height, maxHeight);
+    if (Math.abs(nextWidth - rect.width) > 0.5) card.style.width = nextWidth + "px";
+    if (Math.abs(nextHeight - rect.height) > 0.5) card.style.height = nextHeight + "px";
+    rect = card.getBoundingClientRect();
+    const minLeft = forceFullyInside ? EDGE_MARGIN : Math.min(EDGE_MARGIN, window.innerWidth - MIN_VISIBLE - rect.width);
+    const maxLeft = forceFullyInside ? window.innerWidth - rect.width - EDGE_MARGIN : window.innerWidth - MIN_VISIBLE;
+    const minTop = forceFullyInside ? EDGE_MARGIN : Math.min(EDGE_MARGIN, window.innerHeight - MIN_VISIBLE - rect.height);
+    const maxTop = forceFullyInside ? window.innerHeight - rect.height - EDGE_MARGIN : window.innerHeight - MIN_VISIBLE;
+    const left = Math.max(minLeft, Math.min(rect.left, maxLeft));
+    const top = Math.max(minTop, Math.min(rect.top, maxTop));
+    if (Math.abs(left - rect.left) > 0.5 || Math.abs(top - rect.top) > 0.5){
+      card.style.position = "fixed";
+      card.style.margin = "0";
+      card.style.transform = "none";
+      card.style.left = left + "px";
+      card.style.top = top + "px";
+    }
+  };
+  card.__clampMovableModal = clampCard;
+  window.addEventListener("resize", () => requestAnimationFrame(() => clampCard(true)));
+  if (typeof ResizeObserver !== "undefined"){
+    const ro = new ResizeObserver(() => clampCard(false));
+    ro.observe(card);
+  }
   // 드래그 시작을 무시할 대상: 상호작용·텍스트 선택 영역
   const IGNORE = "button,input,textarea,select,a,canvas,label,dd,[contenteditable],.modal-actions";
   card.addEventListener("mousedown", (e) => {
+    if (compactLayout()) return;
     if (e.button !== 0) return;
     if (e.target.closest(IGNORE)) return;
     const rect = card.getBoundingClientRect();
@@ -1013,14 +1054,16 @@ function makeCardMovable(card){
     const offX = e.clientX - rect.left, offY = e.clientY - rect.top;
     e.preventDefault();
     const onMove = (ev) => {
+      const liveRect = card.getBoundingClientRect();
       let x = ev.clientX - offX, y = ev.clientY - offY;
-      x = Math.max(40 - rect.width, Math.min(x, window.innerWidth - 40));
-      y = Math.max(0, Math.min(y, window.innerHeight - 36));
+      x = Math.max(MIN_VISIBLE - liveRect.width, Math.min(x, window.innerWidth - MIN_VISIBLE));
+      y = Math.max(MIN_VISIBLE - liveRect.height, Math.min(y, window.innerHeight - MIN_VISIBLE));
       card.style.left = x + "px"; card.style.top = y + "px";
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("mouseup", onUp, true);
+      clampCard(true);
     };
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("mouseup", onUp, true);
@@ -1035,8 +1078,16 @@ function setupMovableModals(){
       if (n.classList && n.classList.contains("modal-card")) makeCardMovable(n);
       if (n.querySelectorAll) n.querySelectorAll(".modal-card").forEach(makeCardMovable);
     }));
+    muts.forEach(m => {
+      if (m.type !== "attributes" || m.attributeName !== "hidden") return;
+      const modal = m.target && m.target.classList && m.target.classList.contains("modal") ? m.target : null;
+      if (!modal || modal.hidden) return;
+      requestAnimationFrame(() => modal.querySelectorAll(".modal-card").forEach(card => {
+        if (typeof card.__clampMovableModal === "function") card.__clampMovableModal(true);
+      }));
+    });
   });
-  mo.observe(document.body, { childList: true, subtree: true });
+  mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
 }
 
 /* ===== 단일 탭 가드 =====

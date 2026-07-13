@@ -92,20 +92,25 @@ function petSayingsFor(speciesId, baseSayings){
 // ----- 나만의 펫 -----
 function petCustomLoad(){
   const list = petJSONLoad(PET_CUSTOM_KEY, []);
-  return Array.isArray(list) ? list.slice(0, PET_CUSTOM_MAX_N) : [];
+  return Array.isArray(list)
+    ? list.slice(0, PET_CUSTOM_MAX_N)
+      .filter(item => item && typeof item === "object")
+      .map(item => ({ ...item, priority:item.priority === true }))
+    : [];
 }
 function petCustomSave(list){ petJSONSave(PET_CUSTOM_KEY, (list || []).slice(0, PET_CUSTOM_MAX_N)); }
 
 // 저장된 나만의 펫 → pet.js 가 이해하는 종족 형식으로 변환(그림·움직임은 기존 자산을 재사용).
 function petCustomSpecies(){
   if (typeof PET_ART !== "object") return [];
-  return petCustomLoad().map(c => {
+  return petCustomLoad().map((c, index) => {
     const art = PET_ART[c.art];
     if (!art || !PET_KIND_LABELS[c.kind] || !c.palette) return null;
     return {
       id: c.id, name: c.name || "내 펫", custom: true,
       kind: c.kind, art: art, palettes: [c.palette],
-      sayings: petCleanSayings(c.sayings), trail: c.trail || null
+      sayings: petCleanSayings(c.sayings), trail: c.trail || null,
+      priority: c.priority === true, priorityIndex: index
     };
   }).filter(Boolean);
 }
@@ -335,7 +340,7 @@ function petBuilderRenderSaved(){
   }
   list.forEach((c, i) => {
     const cell = document.createElement("div");
-    cell.className = "pet-dex-cell";
+    cell.className = "pet-dex-cell" + (c.priority ? " priority" : "");
     if (typeof petDexDrawMini === "function" && PET_ART[c.art]){
       const cv = document.createElement("canvas");
       petDexDrawMini(cv, PET_ART[c.art], c.palette, false, PET_SCALE);
@@ -345,6 +350,25 @@ function petBuilderRenderSaved(){
     nm.textContent = c.name || "내 펫";
     cell.appendChild(nm);
     cell.title = (PET_KIND_LABELS[c.kind] || c.kind) + (c.sayings && c.sayings.length ? " · 대사 " + c.sayings.length + "개" : "");
+    const priority = document.createElement("label");
+    priority.className = "pet-builder-priority-toggle";
+    priority.title = "체크하면 펫을 켤 때 먼저 등장합니다";
+    const priorityInput = document.createElement("input");
+    priorityInput.type = "checkbox";
+    priorityInput.checked = c.priority === true;
+    priorityInput.setAttribute("aria-label", (c.name || "custom pet") + " 우선 등장");
+    priorityInput.onchange = () => {
+      const all = petCustomLoad();
+      if (!all[i]) return;
+      all[i].priority = priorityInput.checked;
+      petCustomSave(all);
+      petBuilderRenderSaved();
+      petLiveRefresh();
+    };
+    const priorityText = document.createElement("span");
+    priorityText.textContent = "우선";
+    priority.append(priorityInput, priorityText);
+    cell.appendChild(priority);
     const del = document.createElement("button");
     del.type = "button"; del.className = "pet-dex-del"; del.textContent = "✕";
     del.title = "이 펫 지우기"; del.setAttribute("aria-label", (c.name || "내 펫") + " 지우기");
@@ -363,6 +387,8 @@ function openPetBuilder(){
   if (!petBuilderDraft) petBuilderDraft = petBuilderNewDraft();
   const nameEl = document.getElementById("petBuilderName");
   if (nameEl) nameEl.value = "";
+  const priorityEl = document.getElementById("petBuilderPriority");
+  if (priorityEl) priorityEl.checked = false;
   petBuilderSyncForm();
   petBuilderRenderSaved();
   modal.hidden = false;
@@ -389,11 +415,13 @@ function initPetBuilderModal(){
   if (reset) reset.onclick = () => {
     petBuilderDraft = petBuilderNewDraft();
     const nameEl = document.getElementById("petBuilderName"); if (nameEl) nameEl.value = "";
+    const priorityEl = document.getElementById("petBuilderPriority"); if (priorityEl) priorityEl.checked = false;
     petBuilderSyncForm();
   };
   const save = document.getElementById("petBuilderSave");
   if (save) save.onclick = () => {
     const nameEl = document.getElementById("petBuilderName");
+    const priorityEl = document.getElementById("petBuilderPriority");
     const name = ((nameEl && nameEl.value) || "").trim().slice(0, PET_NAME_MAX_LEN) || "내 펫";
     const pals = petPalettesForArt(petBuilderDraft.art);
     const palette = pals[Math.min(petBuilderDraft.paletteIndex, pals.length - 1)] || pals[0];
@@ -405,7 +433,8 @@ function initPetBuilderModal(){
     all.push({
       id: "custom:" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name: name, art: petBuilderDraft.art, kind: petBuilderDraft.kind,
-      palette: palette, sayings: petCleanSayings(petBuilderDraft.sayings)
+      palette: palette, sayings: petCleanSayings(petBuilderDraft.sayings),
+      priority: !!(priorityEl && priorityEl.checked)
     });
     petCustomSave(all);
     petBuilderRenderSaved();
@@ -413,6 +442,7 @@ function initPetBuilderModal(){
     if (typeof toast === "function") toast("「" + name + "」 저장! 펫을 켜면 함께 돌아다녀요.", 3200);
     // 다음 펫을 바로 만들 수 있게 이름만 비운다(그림·색 설정은 유지).
     if (nameEl){ nameEl.value = ""; nameEl.focus(); }
+    if (priorityEl) priorityEl.checked = false;
     petBuilderDraft.sayings = [];
     petBuilderRenderSayings();
   };

@@ -1304,6 +1304,12 @@ function petAllSpecies(){
   const custom = typeof petCustomSpecies === "function" ? petCustomSpecies() : [];
   return custom.length ? PET_SPECIES.concat(custom) : PET_SPECIES;
 }
+function petPriorityBag(bag){
+  const priority = bag
+    .filter(sp => sp && sp.custom && sp.priority === true)
+    .sort((a, b) => (Number(a.priorityIndex) || 0) - (Number(b.priorityIndex) || 0));
+  return priority.length ? priority.concat(bag.filter(sp => !(sp && sp.custom && sp.priority === true))) : bag;
+}
 function petDexLoad(){
   try { return JSON.parse(localStorage.getItem(PET_DEX_KEY)) || {}; } catch(_){ return {}; }
 }
@@ -1428,7 +1434,7 @@ function petStart(count){
     const j = Math.floor(Math.random() * (i + 1));
     const t = bag[i]; bag[i] = bag[j]; bag[j] = t;
   }
-  const arrangedBag = petEventBiasBag(bag, n);
+  const arrangedBag = petPriorityBag(petEventBiasBag(bag, n));
   const w = petWorld = { pets: [], platforms: petCollectPlatforms(), refresh: 30, raf: 0,
     mouse: { x:-9999, y:-9999, ts: 0 }, event:null,
     eventTimer:240 + Math.floor(Math.random() * 180), playedEvents:new Set(),
