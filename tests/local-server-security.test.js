@@ -53,8 +53,8 @@ test("패키지 설치는 사용자 확인과 확인 헤더가 있어야 진행�
 
 test("로컬 Python 실행은 출력·시간·메모리 상한을 적용한다", () => {
   assert.match(launcher, /class LimitedTextBuffer/);
-  assert.match(launcher, /const long PythonProcessMemoryLimitBytes = 1536L/);
+  assert.match(launcher, /const long PythonProcessMemoryLimitBytes = 4096L/);
   assert.match(launcher, /static long ProcessTreeWorkingSetBytes/);
-  assert.match(launcher, /메모리 제한: 실행이 1\.5GB를 넘어 중단했습니다/);
-  assert.match(launcher, /메모리 제한: 대화형 실행이 1\.5GB를 넘어 종료했습니다/);
+  assert.match(launcher, /메모리 제한: 실행이 4GB를 넘어 중단했습니다/);
+  assert.match(launcher, /메모리 제한: 대화형 실행이 4GB를 넘어 종료했습니다/);
 });

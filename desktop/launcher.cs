@@ -70,7 +70,7 @@ class PdfSignerLauncher
     const int MaxHttpHeaderBytes = 64 * 1024;
     const int MaxHttpRequestBodyBytes = 510 * 1024 * 1024;
     // 일반적인 수업용 데이터 분석은 허용하면서, 실수로 큰 배열을 반복 생성해 PC 전체가 멈추는 일을 줄인다.
-    const long PythonProcessMemoryLimitBytes = 1536L * 1024 * 1024;
+    const long PythonProcessMemoryLimitBytes = 4096L * 1024 * 1024;
     // 직전 인스턴스가 실제로 바인딩한 포트. 다음 실행이 후보 포트 전체를 HTTP 로 뒤지지 않고 이 한 곳만 확인해
     // 단일 인스턴스 여부를 빠르게 판단하도록 기록한다(기동 지연 방지).
     static readonly string InstancePortPath = Path.Combine(
@@ -2520,7 +2520,7 @@ class PdfSignerLauncher
             if (!exited)
             {
                 session.Stderr.AppendLine(memoryLimit
-                    ? "\n[메모리 제한: 대화형 실행이 1.5GB를 넘어 종료했습니다.]"
+                    ? "\n[메모리 제한: 대화형 실행이 4GB를 넘어 종료했습니다.]"
                     : "\n[시간 초과: 대화형 실행을 30분 후 종료했습니다.]");
                 KillProcessTree(session.Process);
                 try { session.Process.WaitForExit(2000); } catch { }
@@ -3587,7 +3587,7 @@ class PdfSignerLauncher
                 KillProcessTree(proc);
                 try { proc.WaitForExit(2000); } catch { }
                 errSb.AppendLine(memoryLimit
-                    ? "[메모리 제한: 실행이 1.5GB를 넘어 중단했습니다.]"
+                    ? "[메모리 제한: 실행이 4GB를 넘어 중단했습니다.]"
                     : "[시간 초과: 60초를 넘겨 실행을 중단했습니다.]");
                 exitCode = -1;
             }
