@@ -584,6 +584,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key;
     if (mod && !e.altKey && String(key).toLowerCase() === "c"){   // 선택 영역 복사
+      if (opts.editable) return;   // 편집 모드는 전용 핸들러가 서식 포함 복사를 수행 — 이중 클립보드 쓰기(경합) 방지
       if (!selection) return;
       e.preventDefault();
       await copySpreadsheetText(selectionText());
@@ -613,17 +614,24 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     }
   };
   sheet.addEventListener("keydown", handleSheetKeydown);
-  const doubleClickHandlers = [];
-  if (!opts.editable){                                   // 편집 모드에선 더블클릭이 '셀 편집'이라 복사 동작을 달지 않는다
-    dataCells().forEach(cell => {
-      const handleDoubleClick = async () => {
-        await copySpreadsheetText(cell.textContent || "");
-        toast("셀 값을 복사했어요.", 1200);
-      };
-      cell.addEventListener("dblclick", handleDoubleClick);
-      doubleClickHandlers.push([cell, handleDoubleClick]);
-    });
-  }
+  // 더블클릭(보기 모드): 셀 값 복사. 드래그 선택이 sheet.setPointerCapture 를 걸면 브라우저가
+  // click/dblclick 을 캡처 대상(sheet)으로 재타깃해 셀 리스너에는 이벤트가 안 닿는다.
+  // 그래서 sheet 에 달고, 재타깃된 경우엔 좌표(elementFromPoint)로 실제 셀을 찾는다.
+  const cellFromDblClick = (e) => {
+    let cell = e.target && e.target.closest ? e.target.closest("[data-row][data-col]") : null;
+    if (!cell){
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      cell = el && el.closest ? el.closest("[data-row][data-col]") : null;
+    }
+    return cell && sheet.contains(cell) ? cell : null;
+  };
+  const handleCopyDblClick = async (e) => {
+    const cell = cellFromDblClick(e);
+    if (!cell) return;
+    await copySpreadsheetText(cell.textContent || "");
+    toast("셀 값을 복사했어요.", 1200);
+  };
+  if (!opts.editable) sheet.addEventListener("dblclick", handleCopyDblClick);   // 편집 모드에선 더블클릭이 '셀 편집'
   setupSheetResize(sheet, table, colRow, rows, label);
   // 첫 행(머리글) 고정을 위해 열 머리글 줄 높이를 CSS 변수로 노출 → .xlsx-edit-header 를 그 아래에 sticky 로 붙인다.
   try { const hh = Math.round(colRow.getBoundingClientRect().height) || 30; sheet.style.setProperty("--sheet-head-h", hh + "px"); } catch(_){}
@@ -635,7 +643,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     sheet.removeEventListener("keydown", handleSheetKeydown);
     if (dragFrame) cancelAnimationFrame(dragFrame);
     clearTimeout(contentFlashTimer);
-    doubleClickHandlers.forEach(([cell, handler]) => cell.removeEventListener("dblclick", handler));
+    sheet.removeEventListener("dblclick", handleCopyDblClick);
     delete sheet._focusContentCell;
     delete sheet._selectSpreadsheetElement;
     delete sheet._spreadsheetCleanup;
@@ -2428,19 +2436,35 @@ async function renderXlsx(file, host, doc){
     if (n) toast(n + "개 셀 표시형식 적용", 1300);
   };
 
-  // ----- 서식 복사 붓(선택 셀 서식 복제 → 다른 선택에 붙이기) -----
-  let copiedFormat = null;
+  // ----- 서식 복사 붓(선택 범위 서식을 셀별로 복제 → 다른 선택에 상대 위치대로 타일링 붙이기) -----
+  let copiedFormat = null;   // { rows, cols, grid: style[][] } — 바깥쪽 테두리처럼 셀마다 다른 서식도 그대로 옮긴다
   const copyCellFormat = () => {
-    const st = firstSelectedStyle();
-    if (st == null){ toast("서식을 복사할 셀을 먼저 선택하세요.", 1900); return; }
-    copiedFormat = cloneSpreadsheetValue(st || {});
-    toast("서식을 복사했어요. 대상 선택 후 '서식 붙이기'.", 2400);
+    const model = exModels[currentSheet];
+    const marked = [...sheet.querySelectorAll('td.sheet-selected[data-mrow]')];
+    if (!model || !marked.length){ toast("서식을 복사할 셀을 먼저 선택하세요.", 1900); return; }
+    let r1 = Infinity, r2 = -Infinity, c1 = Infinity, c2 = -Infinity;
+    marked.forEach(td => {
+      const r = Number(td.dataset.mrow), c = Number(td.dataset.mcol);
+      if (r < r1) r1 = r; if (r > r2) r2 = r; if (c < c1) c1 = c; if (c > c2) c2 = c;
+    });
+    const grid = [];
+    for (let r = r1; r <= r2; r++){
+      const row = [];
+      for (let c = c1; c <= c2; c++){
+        const s = model[r] && model[r][c];
+        row.push(cloneSpreadsheetValue((s && s.style) || {}));
+      }
+      grid.push(row);
+    }
+    copiedFormat = { rows: r2 - r1 + 1, cols: c2 - c1 + 1, grid };
+    toast(copiedFormat.rows + "×" + copiedFormat.cols + " 서식을 복사했어요. 대상 선택 후 '서식 붙이기'.", 2400);
   };
   const pasteCellFormat = () => {
     if (!copiedFormat){ toast("먼저 '서식 복사'를 누르세요.", 1900); return; }
-    const n = applyFormatToSelection(s => {
-      s.style = cloneSpreadsheetValue(copiedFormat);
-      s.nf = copiedFormat.numFmt || null;
+    const n = applyFormatToSelection((s, ctx) => {
+      const src = copiedFormat.grid[(ctx.r - ctx.r1) % copiedFormat.rows][(ctx.c - ctx.c1) % copiedFormat.cols];
+      s.style = cloneSpreadsheetValue(src);
+      s.nf = src.numFmt || null;
     });
     if (n) toast(n + "개 셀에 서식을 붙였어요.", 1500);
   };
@@ -3495,10 +3519,22 @@ async function renderXlsx(file, host, doc){
     if (typeof sheet._xlsxVirtualCleanup === "function") sheet._xlsxVirtualCleanup();
     sheet.classList.remove("xlsx-virtualized");
   };
-  const bindEditableTable = (table, name) => {
-    table.addEventListener("dblclick", (e) => {
-      const td = e.target.closest('td[data-mcol]');
-      if (td) startCellEdit(td, name);
+  // 더블클릭 → 셀 편집. 선택 드래그의 sheet.setPointerCapture 가 click/dblclick 을 sheet 로
+  // 재타깃해 table/td 리스너에는 이벤트가 안 닿으므로, sheet 에 한 번만 달고
+  // 재타깃된 경우엔 좌표(elementFromPoint)로 실제 셀을 찾는다.
+  let editDblClickBound = false;
+  const bindEditableTable = () => {
+    if (editDblClickBound) return;
+    editDblClickBound = true;
+    sheet.addEventListener("dblclick", (e) => {
+      if (!editMode) return;
+      if (e.target && e.target.closest && e.target.closest('[contenteditable="true"]')) return;   // 이미 편집 중인 셀
+      let td = e.target && e.target.closest ? e.target.closest("td[data-mcol]") : null;
+      if (!td){
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        td = el && el.closest ? el.closest("td[data-mcol]") : null;
+      }
+      if (td && sheet.contains(td)) startCellEdit(td, currentSheet);
     });
   };
   const renderVirtualModel = (name, editable) => {
@@ -4128,7 +4164,9 @@ async function renderXlsx(file, host, doc){
     if (t && t.closest && t.closest('[contenteditable="true"]')) return;
     const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
     // 내부에서 복사(Ctrl+C)한 직후 클립보드가 그대로면 서식·번호서식까지 복원한다.
-    if (richClip && text === richClip.tsv){
+    // 윈도우 클립보드는 \n 을 \r\n 으로 되돌려주므로 줄바꿈을 통일해 비교한다.
+    const normNl = (x) => String(x).replace(/\r\n?/g, "\n");
+    if (richClip && normNl(text) === normNl(richClip.tsv)){
       e.preventDefault();
       pasteRichIntoSelection(richClip);
       return;
