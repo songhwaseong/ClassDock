@@ -96,7 +96,7 @@ function nbRefreshKernelModeUi(ownerDoc){
   }
   if (ownerDoc._nbLocalKernelBtn){
     const label = local
-      ? "✓ 로컬 Python 셀 커널 사용 중"
+      ? "브라우저 Python(Pyodide)으로 돌아가기"
       : (missing ? "로컬 Python 설치 필요" : "로컬 Python 셀 커널 사용");
     const title = missing
       ? "Selenium 크롤링을 사용하려면 PC에 Python을 설치하고 앱을 다시 실행해야 합니다."
