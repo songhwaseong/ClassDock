@@ -33,10 +33,10 @@ async function loadPdf(arrayBuffer, name, options={}){
       }
       if (doc.closed) return;
       startLazyRender(doc);          // 보이는 페이지부터 렌더, 멀어지면 캔버스 해제
+      createPdfPagePanel(doc);
+      await initPdfOutline(doc);     // 원본 책갈피를 편집 모델로 바꾼 뒤 복구본·히스토리와 합친다
       await restorePdfRecovery(doc);
       initPdfHistory(doc);
-      createPdfPagePanel(doc);
-      initPdfOutline(doc);           // 책갈피(outline)가 있으면 목차 버튼 활성화
 
       byId("hint").hidden = false;
       setTimeout(()=>{ byId("hint").hidden = true; }, 6000);
@@ -67,10 +67,28 @@ function togglePdfNightMode(){
   toast(pdfNightMode ? "야간 보기 켬 — PDF 페이지 색을 반전해 눈부심을 줄여요. (화면 표시만, 저장 결과는 그대로)" : "야간 보기를 껐어요.", 2600);
 }
 
+// 복원 과정에서는 활성 문서가 아닌 PDF도 먼저 렌더될 수 있다. hidden 문서의 clientWidth는 0이므로
+// 그대로 배율을 계산하면 모든 페이지가 최소 배율(0.3)로 고정된다. 문서 자체 폭을 우선 사용하되,
+// 아직 배치되지 않은 경우에는 실제 문서 영역/창 폭으로 계산한다.
+function pdfViewerLayoutWidth(doc){
+  const ownWidth = Number(doc && doc.el && doc.el.clientWidth) || 0;
+  if (ownWidth > 80) return ownWidth;
+  const content = typeof byId === "function" ? byId("content") : null;
+  const contentWidth = Number(content && content.clientWidth) || 0;
+  if (contentWidth > 80) return contentWidth;
+  const viewportWidth = typeof window !== "undefined" ? (Number(window.innerWidth) || 0) : 0;
+  if (viewportWidth > 80) return viewportWidth;
+  return FIT_MAX_W;
+}
+
+function pdfPlaceholderAvailableWidth(doc){
+  return Math.max(1, Math.min(FIT_MAX_W, pdfViewerLayoutWidth(doc) - 40));
+}
+
 // 페이지 placeholder 생성: 크기·오버레이·프레임만 만들고 캔버스는 지연 렌더로 미룬다.
 function createPagePlaceholder(page, doc, pageNum){
   const base = page.getViewport({ scale: 1 });
-  const avail = Math.min(FIT_MAX_W, doc.el.clientWidth - 40);
+  const avail = pdfPlaceholderAvailableWidth(doc);
   let scale = (avail / base.width) * FIT_SCALE;
   scale = Math.max(0.3, Math.min(scale, 2.2));
   const vp = page.getViewport({ scale });

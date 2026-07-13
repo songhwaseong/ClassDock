@@ -899,7 +899,8 @@ function textToDataUrl(el){
 let pdfExportActive = false;
 async function exportPdf(){
   if (!state || state.kind !== "pdf" || pdfExportActive) return;
-  if (!state.elements.length){ toast("추가한 항목이 없어요. 그래도 다운로드합니다.", 1800); }
+  const outlineCount = typeof countPdfOutlineItems === "function" ? countPdfOutlineItems(state.pdfOutline) : 0;
+  if (!state.elements.length && !outlineCount){ toast("추가한 항목이 없어요. 그래도 다운로드합니다.", 1800); }
   pdfExportActive = true;
   const downloadButton = byId("btnDownload");
   if (downloadButton){ downloadButton.disabled = true; downloadButton.setAttribute("aria-busy", "true"); }

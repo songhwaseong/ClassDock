@@ -1918,23 +1918,25 @@ class PdfSignerLauncher
 
     static byte[] RunPowerPointExport(string inPath, string outPath)
     {
-        Exception windowedError = null;
+        Exception hiddenError = null;
         try
         {
-            return RunPowerPointExportAttempt(inPath, outPath, true);
-        }
-        catch (Exception ex)
-        {
-            windowedError = ex;
-        }
-
-        try
-        {
+            // 먼저 창을 만들지 않고 변환해 PowerPoint가 화면이나 작업 표시줄에 나타나는 일을 줄인다.
             return RunPowerPointExportAttempt(inPath, outPath, false);
         }
         catch (Exception ex)
         {
-            throw new Exception("windowed-open failed: " + FlattenMessage(windowedError) + "; hidden-open failed: " + FlattenMessage(ex), ex);
+            hiddenError = ex;
+        }
+
+        try
+        {
+            // 숨김 Open이 불안정한 일부 Office 빌드에서만 최소화된 창으로 다시 시도한다.
+            return RunPowerPointExportAttempt(inPath, outPath, true);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception("hidden-open failed: " + FlattenMessage(hiddenError) + "; windowed-open failed: " + FlattenMessage(ex), ex);
         }
     }
 

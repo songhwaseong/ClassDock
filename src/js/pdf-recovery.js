@@ -72,11 +72,13 @@ async function savePdfRecovery(doc){
   if (!appSettings.pdfRecovery) return;
   if (!doc || doc.closed || !doc.recoveryKey || !doc.pages.length) return;
   const elements = serializePdfElements(doc);
+  const outline = typeof serializePdfOutline === "function" ? serializePdfOutline(doc.pdfOutline) : [];
   try {
     await pdfRecoveryRequest("readwrite", (store) => store.put({
       key: doc.recoveryKey, name: doc.fileName, version: PDF_RECOVERY_VERSION,
       updatedAt: Date.now(), elements,
-      pages: doc.pages.map(p => ({ originalIndex: p.originalIndex, exportRotation: p.exportRotation || 0 }))
+      pages: doc.pages.map(p => ({ originalIndex: p.originalIndex, exportRotation: p.exportRotation || 0 })),
+      outline
     }));
     doc.recoveryDirty = false;
     updateDocumentStatus(doc);
@@ -102,7 +104,8 @@ function initPdfHistory(doc){
 function snapshotPdfState(doc){
   return {
     elements: serializePdfElements(doc),
-    pages: doc.pages.map(p => ({ originalIndex: p.originalIndex, exportRotation: p.exportRotation || 0 }))
+    pages: doc.pages.map(p => ({ originalIndex: p.originalIndex, exportRotation: p.exportRotation || 0 })),
+    outline: typeof serializePdfOutline === "function" ? serializePdfOutline(doc.pdfOutline) : []
   };
 }
 
@@ -138,6 +141,7 @@ function applyPdfHistory(doc, entry){
     for (const item of doc.elements || []) item.el.remove();
     doc.elements = [];
     restorePdfPageState(doc, entry.snapshot.pages);
+    if (Array.isArray(entry.snapshot.outline) && typeof restorePdfOutlineState === "function") restorePdfOutlineState(doc, entry.snapshot.outline);
     hydratePdfElements(doc, entry.snapshot.elements);
   } finally { doc._applyingHistory = false; }
   schedulePdfRecovery(doc);
@@ -178,15 +182,16 @@ async function restorePdfRecovery(doc){
   if (!saved || saved.version !== PDF_RECOVERY_VERSION) return;
   const elementCount = Array.isArray(saved.elements) ? saved.elements.length : 0;
   const pageChanged = Array.isArray(saved.pages) && (saved.pages.length !== doc.pages.length || saved.pages.some((p, i) => !doc.pages[i] || p.originalIndex !== doc.pages[i].originalIndex || p.exportRotation));
-  if (!elementCount && !pageChanged) return;
-  hideLoading();
-  const ok = await confirmDialog(`'${doc.fileName}'의 이전 PDF 편집 내용을 복원할까요?`, "복원", "버리기");
-  if (!ok) { await deletePdfRecovery(doc.recoveryKey); return; }
+  const outlineChanged = Array.isArray(saved.outline) && typeof serializePdfOutline === "function"
+    && JSON.stringify(saved.outline) !== JSON.stringify(serializePdfOutline(doc.pdfOutline));
+  if (!elementCount && !pageChanged && !outlineChanged) return;
   doc._restoringRecovery = true;
   try {
     if (saved.pages) restorePdfPageState(doc, saved.pages);
+    if (Array.isArray(saved.outline) && typeof restorePdfOutlineState === "function") restorePdfOutlineState(doc, saved.outline);
     hydratePdfElements(doc, saved.elements || []);
-    toast("이전 PDF 편집 내용을 복원했어요.", 3000);
+    doc.recoveryDirty = false;
+    updateDocumentStatus(doc);
   } finally { doc._restoringRecovery = false; }
 }
 

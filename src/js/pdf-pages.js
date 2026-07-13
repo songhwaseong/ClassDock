@@ -8,6 +8,118 @@ function downloadPdfBytes(bytes, name){
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
+// 편집 중인 책갈피 트리를 저장 가능한 최소 데이터로 복사한다.
+// PDF.js 의 dest/ref 같은 런타임 객체와 UI 선택 상태는 복구본·히스토리에 넣지 않는다.
+function serializePdfOutline(items){
+  return (Array.isArray(items) ? items : []).map(item => ({
+    title: String(item.title || "").replace(/\s+/g, " ").trim() || "(제목 없음)",
+    originalIndex: Number.isInteger(item.originalIndex) ? item.originalIndex : null,
+    url: /^(https?:|mailto:)/i.test(String(item.url || "")) ? String(item.url) : "",
+    bold: !!item.bold,
+    italic: !!item.italic,
+    items: serializePdfOutline(item.items)
+  }));
+}
+
+let pdfOutlineIdSeed = 0;
+function restorePdfOutlineItems(items){
+  return (Array.isArray(items) ? items : []).map(item => ({
+    id: "pdf-outline-" + Date.now().toString(36) + "-" + (++pdfOutlineIdSeed).toString(36),
+    title: String(item && item.title || "").replace(/\s+/g, " ").trim() || "(제목 없음)",
+    originalIndex: Number.isInteger(item && item.originalIndex) ? item.originalIndex : null,
+    url: /^(https?:|mailto:)/i.test(String(item && item.url || "")) ? String(item.url) : "",
+    bold: !!(item && item.bold),
+    italic: !!(item && item.italic),
+    items: restorePdfOutlineItems(item && item.items)
+  }));
+}
+
+function restorePdfOutlineState(doc, items){
+  if (!doc || !Array.isArray(items)) return;
+  doc.pdfOutline = restorePdfOutlineItems(items);
+  doc.selectedOutlineId = null;
+  updatePdfOutlinePanel(doc);
+  updatePdfOutlineButton(doc);
+}
+
+// 선택 페이지 추출에서도 포함된 페이지의 책갈피만 남긴다. 목적지가 빠진 상위 항목은
+// 포함된 하위 항목의 그룹 제목으로 유지할 수 있다.
+function pdfOutlineForPages(items, allowedOriginalIds){
+  const allowed = allowedOriginalIds instanceof Set ? allowedOriginalIds : new Set(allowedOriginalIds || []);
+  const visit = (list) => {
+    const out = [];
+    for (const item of Array.isArray(list) ? list : []){
+      const children = visit(item.items);
+      const hasPage = Number.isInteger(item.originalIndex) && allowed.has(item.originalIndex);
+      const hasUrl = /^(https?:|mailto:)/i.test(String(item.url || ""));
+      if (!hasPage && !hasUrl && !children.length) continue;
+      out.push({ ...item, originalIndex: hasPage ? item.originalIndex : null, items: children });
+    }
+    return out;
+  };
+  return visit(items);
+}
+
+// pdf-lib 저수준 객체로 ISO PDF Outline 트리를 작성한다. pdf-lib에는 책갈피용 고수준 API가
+// 없어서 Catalog/Outlines/연결 리스트를 직접 구성한다.
+function writePdfOutline(pdfDoc, items, chosenPages){
+  if (!pdfDoc || !PDFLib) return 0;
+  const chosen = Array.isArray(chosenPages) ? chosenPages : [];
+  const allowed = new Set(chosen.map(page => page.originalIndex));
+  const outline = pdfOutlineForPages(items, allowed);
+  if (!outline.length) return 0;
+
+  const { PDFName, PDFHexString, PDFNumber } = PDFLib;
+  const context = pdfDoc.context;
+  const pageRefByOriginal = new Map();
+  chosen.forEach((page, index) => {
+    const outputPage = pdfDoc.getPage(index);
+    if (outputPage) pageRefByOriginal.set(page.originalIndex, outputPage.ref);
+  });
+
+  const root = context.obj({ Type: PDFName.of("Outlines") });
+  const rootRef = context.register(root);
+  const buildLevel = (levelItems, parentRef) => {
+    const nodes = levelItems.map(item => {
+      const dict = context.obj({});
+      const ref = context.register(dict);
+      dict.set(PDFName.of("Title"), PDFHexString.fromText(String(item.title || "(제목 없음)")));
+      dict.set(PDFName.of("Parent"), parentRef);
+      const pageRef = pageRefByOriginal.get(item.originalIndex);
+      if (pageRef) dict.set(PDFName.of("Dest"), context.obj([pageRef, PDFName.of("Fit")]));
+      else if (/^(https?:|mailto:)/i.test(String(item.url || ""))){
+        const action = context.obj({ S: PDFName.of("URI"), URI: PDFHexString.fromText(String(item.url)) });
+        dict.set(PDFName.of("A"), context.register(action));
+      }
+      const flags = (item.italic ? 1 : 0) | (item.bold ? 2 : 0);
+      if (flags) dict.set(PDFName.of("F"), PDFNumber.of(flags));
+      return { item, dict, ref };
+    });
+
+    let count = nodes.length;
+    nodes.forEach((node, index) => {
+      if (index > 0) node.dict.set(PDFName.of("Prev"), nodes[index - 1].ref);
+      if (index + 1 < nodes.length) node.dict.set(PDFName.of("Next"), nodes[index + 1].ref);
+      const child = buildLevel(Array.isArray(node.item.items) ? node.item.items : [], node.ref);
+      if (child.count){
+        node.dict.set(PDFName.of("First"), child.first);
+        node.dict.set(PDFName.of("Last"), child.last);
+        node.dict.set(PDFName.of("Count"), PDFNumber.of(child.count));
+        count += child.count;
+      }
+    });
+    return { first: nodes.length ? nodes[0].ref : null, last: nodes.length ? nodes[nodes.length - 1].ref : null, count };
+  };
+
+  const tree = buildLevel(outline, rootRef);
+  root.set(PDFName.of("First"), tree.first);
+  root.set(PDFName.of("Last"), tree.last);
+  root.set(PDFName.of("Count"), PDFNumber.of(tree.count));
+  pdfDoc.catalog.set(PDFName.of("Outlines"), rootRef);
+  pdfDoc.catalog.set(PDFName.of("PageMode"), PDFName.of("UseOutlines"));
+  return tree.count;
+}
+
 async function buildPdfBytes(doc, onlyOriginalIds=null){
   const { PDFDocument, degrees } = PDFLib;
   const source = await PDFDocument.load(doc.pdfBytes, { ignoreEncryption: true });
@@ -41,6 +153,7 @@ async function buildPdfBytes(doc, onlyOriginalIds=null){
     });
   }
   output.setTitle(doc.fileName || "PDF");
+  writePdfOutline(output, doc.pdfOutline, chosen);
   return output.save();
 }
 
@@ -148,39 +261,71 @@ async function renderPdfThumbnails(doc){
 /* ===== PDF 목차(책갈피) 패널 =====
  * PDF 에 저장된 책갈피(outline)를 트리로 보여주고 클릭하면 해당 페이지로 이동한다.
  * 페이지 정리(삭제·이동) 뒤에도 원본 페이지 번호(pageNum)로 찾아가므로 안전하다. */
-function initPdfOutline(doc){
-  doc.pdfOutline = null;                       // null=아직 확인 중, []=없음, [...]=있음
+async function initPdfOutline(doc){
+  doc.pdfOutline = null;                       // null=확인 중, []=없음, [...]=편집 모델
   doc.outlinePanelOpen = false;
+  doc.selectedOutlineId = null;
   updatePdfOutlineButton(doc);
-  if (!doc.pdfjsDoc || typeof doc.pdfjsDoc.getOutline !== "function"){ doc.pdfOutline = []; updatePdfOutlineButton(doc); return; }
-  doc.pdfjsDoc.getOutline()
-    .then(items => { if (doc.closed) return; doc.pdfOutline = Array.isArray(items) ? items : []; updatePdfOutlineButton(doc); })
-    .catch(() => { if (doc.closed) return; doc.pdfOutline = []; updatePdfOutlineButton(doc); });
+  if (!doc.pdfjsDoc || typeof doc.pdfjsDoc.getOutline !== "function"){
+    doc.pdfOutline = [];
+    updatePdfOutlineButton(doc);
+    return;
+  }
+  try {
+    const raw = await doc.pdfjsDoc.getOutline();
+    if (doc.closed) return;
+    doc.pdfOutline = await normalizePdfOutlineItems(doc, Array.isArray(raw) ? raw : []);
+  } catch(_){
+    if (!doc.closed) doc.pdfOutline = [];
+  }
+  updatePdfOutlinePanel(doc);
+  updatePdfOutlineButton(doc);
+}
+
+async function normalizePdfOutlineItems(doc, items){
+  const out = [];
+  for (const raw of Array.isArray(items) ? items : []){
+    const pageNum = await resolvePdfOutlinePage(doc, raw);
+    const page = pageNum ? doc.pages.find(p => p.pageNum === pageNum) : null;
+    out.push({
+      id: "pdf-outline-" + Date.now().toString(36) + "-" + (++pdfOutlineIdSeed).toString(36),
+      title: String(raw.title || "").replace(/\s+/g, " ").trim() || "(제목 없음)",
+      originalIndex: page ? page.originalIndex : null,
+      url: /^(https?:|mailto:)/i.test(String(raw.url || "")) ? String(raw.url) : "",
+      bold: !!raw.bold,
+      italic: !!raw.italic,
+      items: await normalizePdfOutlineItems(doc, raw.items)
+    });
+  }
+  return out;
 }
 
 function updatePdfOutlineButton(doc){
   const button = byId("btnOutline"); if (!button) return;
   if (!doc || doc.id !== activeId || doc.kind !== "pdf") return;   // PDF 가 아니면 tools 바 자체가 숨겨진다
   const tr = window.t || ((s) => s);
-  const has = !!(doc.pdfOutline && doc.pdfOutline.length);
-  button.disabled = !has;
-  button.classList.toggle("primary", has && !!doc.outlinePanelOpen);
-  button.title = has ? tr("문서 목차(책갈피)로 이동")
-    : doc.pdfOutline == null ? tr("목차 확인 중…") : tr("이 PDF에는 목차(책갈피)가 없어요");
+  const ready = Array.isArray(doc.pdfOutline);
+  const has = ready && doc.pdfOutline.length > 0;
+  button.disabled = !ready;
+  button.classList.toggle("primary", ready && !!doc.outlinePanelOpen);
+  button.title = !ready ? tr("목차 확인 중…")
+    : has ? tr("문서 목차로 이동하거나 책갈피 편집") : tr("현재 페이지에 책갈피 추가");
 }
 
 function setPdfOutlinePanelOpen(doc, open){
-  if (!doc || doc.kind !== "pdf") return;
+  if (!doc || doc.kind !== "pdf" || !Array.isArray(doc.pdfOutline)) return;
   if (open && !doc.outlinePanel) createPdfOutlinePanel(doc);
   if (!doc.outlinePanel) return;
   doc.outlinePanelOpen = !!open;
   doc.outlinePanel.hidden = !doc.outlinePanelOpen;
-  if (doc.outlinePanelOpen && doc.pagePanelOpen) setPdfPagePanelOpen(doc, false);   // 썸네일 패널과 자리 공유
+  if (doc.outlinePanelOpen){
+    if (doc.pagePanelOpen) setPdfPagePanelOpen(doc, false);   // 썸네일 패널과 자리 공유
+    updatePdfOutlinePanel(doc);
+  }
   updatePdfOutlineButton(doc);
 }
 function togglePdfOutlinePanel(doc=state){
-  if (!doc || doc.kind !== "pdf") return;
-  if (!doc.pdfOutline || !doc.pdfOutline.length){ toast("이 PDF에는 목차(책갈피)가 없어요.", 2400); return; }
+  if (!doc || doc.kind !== "pdf" || !Array.isArray(doc.pdfOutline)) return;
   setPdfOutlinePanelOpen(doc, !doc.outlinePanelOpen);
 }
 
@@ -199,40 +344,199 @@ function createPdfOutlinePanel(doc){
     if (doc.id === activeId) byId("btnOutline").focus();
   });
   head.append(heading, close);
-  const list = document.createElement("div"); list.className = "pdf-outline-list";
-  panel.append(head, list);
-  doc.el.insertBefore(panel, doc.el.firstChild);
-  doc.outlinePanel = panel;
 
-  const pending = [];                          // 페이지 번호 라벨은 뒤에서 차례로 해석해 채운다
+  const actions = document.createElement("div"); actions.className = "pdf-outline-actions";
+  const action = (label, titleText, fn, cls="") => {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+    button.title = titleText; button.className = cls; button.addEventListener("click", fn); actions.appendChild(button); return button;
+  };
+  const buttons = {
+    add: action("＋ 현재 페이지", "현재 보고 있는 페이지에 책갈피 추가", () => addPdfOutlineItem(doc), "pdf-outline-add"),
+    rename: action("이름", "선택한 책갈피 이름 바꾸기", () => renamePdfOutlineItem(doc)),
+    remove: action("삭제", "선택한 책갈피와 하위 항목 삭제", () => deletePdfOutlineItem(doc)),
+    up: action("↑", "같은 단계에서 위로 이동", () => movePdfOutlineItem(doc, -1)),
+    down: action("↓", "같은 단계에서 아래로 이동", () => movePdfOutlineItem(doc, 1)),
+    outdent: action("←", "상위 단계로 내어쓰기", () => outdentPdfOutlineItem(doc)),
+    indent: action("→", "바로 위 항목의 하위 목차로 들여쓰기", () => indentPdfOutlineItem(doc))
+  };
+  const list = document.createElement("div"); list.className = "pdf-outline-list";
+  panel.append(head, actions, list);
+  doc.el.insertBefore(panel, doc.el.firstChild);
+  doc.outlinePanel = panel; doc.outlineList = list; doc.outlineCountLabel = count; doc.outlineButtons = buttons;
+  updatePdfOutlinePanel(doc);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
+}
+
+function pdfOutlineLocation(items, id, parent=null, parentList=null){
+  const list = Array.isArray(items) ? items : [];
+  for (let index = 0; index < list.length; index++){
+    const item = list[index];
+    if (item.id === id) return { item, list, index, parent, parentList };
+    const found = pdfOutlineLocation(item.items, id, item, list);
+    if (found) return found;
+  }
+  return null;
+}
+
+function countPdfOutlineItems(items){
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + 1 + countPdfOutlineItems(item.items), 0);
+}
+
+function updatePdfOutlinePanel(doc){
+  if (!doc || !doc.outlineList) return;
+  const list = doc.outlineList;
+  list.replaceChildren();
+  const selected = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId);
+  if (!selected) doc.selectedOutlineId = null;
   const addItems = (items, depth) => {
     for (const item of items){
       const row = document.createElement("button");
       row.type = "button"; row.className = "pdf-outline-item";
-      row.style.setProperty("--depth", depth);
+      row.style.setProperty("--depth", Math.min(depth, 12));
+      row.classList.toggle("selected", item.id === doc.selectedOutlineId);
       const name = document.createElement("span"); name.className = "pdf-outline-name";
-      name.textContent = String(item.title || "").replace(/\s+/g, " ").trim() || "(제목 없음)";
+      name.textContent = item.title || "(제목 없음)";
       if (item.bold) name.style.fontWeight = "700";
       if (item.italic) name.style.fontStyle = "italic";
-      row.title = name.textContent;
       const pageLabel = document.createElement("span"); pageLabel.className = "pdf-outline-page";
+      const page = Number.isInteger(item.originalIndex) ? doc.pages.find(p => p.originalIndex === item.originalIndex) : null;
+      pageLabel.textContent = page ? String(doc.pages.indexOf(page) + 1) : (item.url ? "↗" : "—");
+      row.title = name.textContent + (page ? " · " + pageLabel.textContent + "페이지" : "");
       row.append(name, pageLabel);
-      row.addEventListener("click", () => gotoPdfOutlineItem(doc, item));
+      row.addEventListener("click", () => {
+        doc.selectedOutlineId = item.id;
+        updatePdfOutlinePanel(doc);
+        gotoPdfOutlineItem(doc, item);
+      });
+      row.addEventListener("dblclick", (event) => { event.preventDefault(); renamePdfOutlineItem(doc, item.id); });
       list.appendChild(row);
-      pending.push({ item, pageLabel });
-      if (Array.isArray(item.items) && item.items.length && depth < 7) addItems(item.items, depth + 1);
+      if (Array.isArray(item.items) && item.items.length) addItems(item.items, depth + 1);
     }
   };
   addItems(doc.pdfOutline || [], 0);
-  count.textContent = pending.length + "개";
-  (async () => {                               // 항목이 많아도 패널은 먼저 뜨고 번호가 순서대로 채워진다
-    for (const { item, pageLabel } of pending){
-      if (doc.closed || !panel.isConnected) return;
-      const n = await resolvePdfOutlinePage(doc, item);
-      if (n) pageLabel.textContent = String(n);
+  if (!list.childElementCount){
+    const empty = document.createElement("div"); empty.className = "pdf-outline-empty";
+    empty.textContent = "책갈피가 없습니다. ‘＋ 현재 페이지’를 눌러 추가하세요.";
+    list.appendChild(empty);
+  }
+  if (doc.outlineCountLabel) doc.outlineCountLabel.textContent = countPdfOutlineItems(doc.pdfOutline) + "개";
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId);
+  const locked = typeof isPdfReferenceLocked === "function" && isPdfReferenceLocked(doc);
+  const b = doc.outlineButtons || {};
+  if (b.add) b.add.disabled = locked;
+  for (const key of ["rename", "remove", "up", "down", "outdent", "indent"]) if (b[key]) b[key].disabled = locked || !loc;
+  if (loc){
+    if (b.up) b.up.disabled = locked || loc.index <= 0;
+    if (b.down) b.down.disabled = locked || loc.index >= loc.list.length - 1;
+    if (b.indent) b.indent.disabled = locked || loc.index <= 0;
+    if (b.outdent) b.outdent.disabled = locked || !loc.parent;
+  }
+}
+
+function canEditPdfOutline(doc){
+  if (!doc || doc.kind !== "pdf") return false;
+  if (typeof isPdfReferenceLocked === "function" && isPdfReferenceLocked(doc)){
+    if (typeof explainPdfReferenceLocked === "function") explainPdfReferenceLocked();
+    return false;
+  }
+  return true;
+}
+
+function commitPdfOutlineEdit(doc, message){
+  updatePdfOutlinePanel(doc);
+  updatePdfOutlineButton(doc);
+  recordPdfEdit(doc);
+  if (message) toast(message, 1800, { type: "success" });
+}
+
+async function addPdfOutlineItem(doc){
+  if (!canEditPdfOutline(doc)) return;
+  const page = doc.pages[currentPageIndex(doc)];
+  if (!page){ toast("책갈피를 추가할 페이지를 찾지 못했어요.", 2200); return; }
+  const displayPage = doc.pages.indexOf(page) + 1;
+  const entered = await askText({ title: "책갈피 추가", message: displayPage + "페이지의 목차 이름을 입력하세요.",
+    value: "페이지 " + displayPage, placeholder: "예: 1장 시작", okText: "추가" });
+  if (entered == null) return;
+  const title = String(entered).replace(/\s+/g, " ").trim();
+  if (!title){ toast("책갈피 이름을 입력하세요.", 1800); return; }
+  const item = restorePdfOutlineItems([{ title, originalIndex: page.originalIndex, items: [] }])[0];
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId);
+  if (loc) loc.list.splice(loc.index + 1, 0, item); else doc.pdfOutline.push(item);
+  doc.selectedOutlineId = item.id;
+  commitPdfOutlineEdit(doc, "현재 페이지에 책갈피를 추가했어요.");
+}
+
+async function renamePdfOutlineItem(doc, id=doc && doc.selectedOutlineId){
+  if (!canEditPdfOutline(doc)) return;
+  const loc = pdfOutlineLocation(doc.pdfOutline, id); if (!loc) return;
+  const entered = await askText({ title: "책갈피 이름 바꾸기", message: "목차에 표시할 이름을 입력하세요.",
+    value: loc.item.title, okText: "변경" });
+  if (entered == null) return;
+  const title = String(entered).replace(/\s+/g, " ").trim();
+  if (!title){ toast("책갈피 이름을 입력하세요.", 1800); return; }
+  loc.item.title = title;
+  doc.selectedOutlineId = loc.item.id;
+  commitPdfOutlineEdit(doc, "책갈피 이름을 바꿨어요.");
+}
+
+async function deletePdfOutlineItem(doc){
+  if (!canEditPdfOutline(doc)) return;
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId); if (!loc) return;
+  const descendants = countPdfOutlineItems(loc.item.items);
+  const detail = descendants ? "와 하위 항목 " + descendants + "개를" : "을";
+  if (!(await confirmDialog("‘" + loc.item.title + "’" + detail + " 삭제할까요?", "삭제", "취소"))) return;
+  loc.list.splice(loc.index, 1);
+  doc.selectedOutlineId = null;
+  commitPdfOutlineEdit(doc, "책갈피를 삭제했어요.");
+}
+
+function movePdfOutlineItem(doc, direction){
+  if (!canEditPdfOutline(doc)) return false;
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId); if (!loc) return false;
+  const target = loc.index + direction;
+  if (target < 0 || target >= loc.list.length) return false;
+  loc.list.splice(loc.index, 1); loc.list.splice(target, 0, loc.item);
+  commitPdfOutlineEdit(doc);
+  return true;
+}
+
+function indentPdfOutlineItem(doc){
+  if (!canEditPdfOutline(doc)) return false;
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId); if (!loc || loc.index <= 0) return false;
+  const parent = loc.list[loc.index - 1];
+  loc.list.splice(loc.index, 1);
+  if (!Array.isArray(parent.items)) parent.items = [];
+  parent.items.push(loc.item);
+  commitPdfOutlineEdit(doc);
+  return true;
+}
+
+function outdentPdfOutlineItem(doc){
+  if (!canEditPdfOutline(doc)) return false;
+  const loc = pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId); if (!loc || !loc.parent) return false;
+  const parentLoc = pdfOutlineLocation(doc.pdfOutline, loc.parent.id); if (!parentLoc) return false;
+  loc.list.splice(loc.index, 1);
+  parentLoc.list.splice(parentLoc.index + 1, 0, loc.item);
+  commitPdfOutlineEdit(doc);
+  return true;
+}
+
+function removePdfOutlinePages(doc, removedOriginalIds){
+  if (!doc || !Array.isArray(doc.pdfOutline)) return;
+  const removed = removedOriginalIds instanceof Set ? removedOriginalIds : new Set(removedOriginalIds || []);
+  const visit = (items) => {
+    const out = [];
+    for (const item of items){
+      item.items = visit(Array.isArray(item.items) ? item.items : []);
+      if (Number.isInteger(item.originalIndex) && removed.has(item.originalIndex)) out.push(...item.items);
+      else out.push(item);
     }
-  })();
-  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
+    return out;
+  };
+  doc.pdfOutline = visit(doc.pdfOutline);
+  if (!pdfOutlineLocation(doc.pdfOutline, doc.selectedOutlineId)) doc.selectedOutlineId = null;
+  updatePdfOutlinePanel(doc);
+  updatePdfOutlineButton(doc);
 }
 
 // 책갈피 목적지(dest) → 원본 페이지 번호(1-기준). 결과는 항목에 캐시한다.
@@ -250,16 +554,14 @@ async function resolvePdfOutlinePage(doc, item){
   return n;
 }
 
-async function gotoPdfOutlineItem(doc, item){
-  if (!item.dest && item.url){                 // 외부 링크형 책갈피
+function gotoPdfOutlineItem(doc, item){
+  if (item.url && !Number.isInteger(item.originalIndex)){                 // 외부 링크형 책갈피
     if (/^(https?:|mailto:)/i.test(item.url)) window.open(item.url, "_blank", "noopener");
     return;
   }
-  const n = await resolvePdfOutlinePage(doc, item);
-  if (!n){ toast("이 목차 항목의 위치를 찾지 못했어요.", 2200); return; }
-  const p = doc.pages.find(x => x.pageNum === n);
-  if (!p){ toast("이 목차 항목의 페이지가 삭제됐어요.", 2200); return; }
-  p.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+  const page = Number.isInteger(item.originalIndex) ? doc.pages.find(p => p.originalIndex === item.originalIndex) : null;
+  if (!page){ toast("이 목차 항목의 위치를 찾지 못했어요.", 2200); return; }
+  page.frame.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function extractPdfPages(doc){
@@ -292,6 +594,7 @@ async function deletePdfPages(doc){
   pages.forEach(p => { releasePageCanvas(p); p.frame.remove(); });
   doc.pages = doc.pages.filter(p => !removing.has(p));
   for (const item of doc.elements.slice()) if (removing.has(old[item.pageIndex])) item.el.remove();
+  removePdfOutlinePages(doc, new Set(pages.map(p => p.originalIndex)));
   reindexPdfElements(doc, old); doc.selectedPageIds.clear();
   startLazyRender(doc); updatePdfPagePanel(doc); recordPdfEdit(doc); schedulePdfRecovery(doc);
 }
@@ -347,6 +650,7 @@ async function mergePdfFiles(doc, files){
       const copied = await merged.copyPages(source, source.getPageIndices());
       copied.forEach(page => merged.addPage(page));
     }
+    writePdfOutline(merged, doc.pdfOutline, doc.pages);   // 현재 문서의 책갈피는 합친 PDF의 앞부분에도 유지
     downloadPdfBytes(await merged.save(), doc.fileName.replace(/\.pdf$/i, "") + "_merged.pdf");
     toast(`${files.length + 1}개 PDF를 합쳤어요.`);
   } catch(e){ console.error(e); toast("PDF 합치기에 실패했습니다. 암호 파일인지 확인하세요.", 3500); }
