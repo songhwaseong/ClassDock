@@ -454,10 +454,12 @@ async function runPythonInteractive(src, bundle, ui, hooks){
         const nextOut = toShow(fullOut);
         const nextErr = fullErr ? ((fullOut ? "\n" : "") + toShow(fullErr)) : "";
         if (nextOut !== shownOut || nextErr !== shownErr){
+          // 사용자가 위로 스크롤해 둔 동안에는 자동 스크롤을 멈추고, 바닥 근처일 때만 따라 내려간다
+          const nearBottom = outPanel.scrollHeight - outPanel.scrollTop - outPanel.clientHeight < 40;
           if (nextOut !== shownOut){ shownOut = nextOut; stdoutEl.textContent = nextOut; }
           if (nextErr !== shownErr){ shownErr = nextErr; stderrEl.textContent = nextErr; }
           applyPythonStderrClass(stderrEl, fullErr, data.complete ? data.code : undefined);
-          outPanel.scrollTop = outPanel.scrollHeight;
+          if (nearBottom) outPanel.scrollTop = outPanel.scrollHeight;
           if (typeof lessonPyOnLiveOutput === "function") lessonPyOnLiveOutput(fullOut, fullErr);   // 수업 리플레이(녹화 중일 때만)
         }
         if (data.complete){
