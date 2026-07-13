@@ -506,8 +506,21 @@ function appendOutputFiles(panel, outputs, sessionId){
       dl.href = URL.createObjectURL(new Blob([f.bytes]));
       open.addEventListener("click", () => handleFiles([new File([f.bytes], base)]));
     } else {                                        // 로컬 세션: 서버에서 받기
-      dl.href = "/python-session-file?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(f.name);
-      open.addEventListener("click", () => openSessionFile(sessionId, f.name));
+      // <a href> 직접 다운로드는 X-Manneung-Token 헤더를 못 붙여 서버가 403으로 거절한다
+      // → fetch(래퍼가 토큰 자동 첨부)로 받아 Blob 으로 저장
+      const url = "/python-session-file?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(f.name);
+      dl.href = "#";
+      dl.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) throw new Error(res.status === 404 ? "실행 결과가 만료되었어요 — 다시 실행해 주세요." : ("HTTP " + res.status));
+          const blobUrl = URL.createObjectURL(await res.blob());
+          const a = document.createElement("a"); a.href = blobUrl; a.download = base;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+        } catch(err){ toast("파일을 저장하지 못했어요: " + ((err && err.message) || err), 3000); }
+      });
     }
     row.append(name, size, dl, open);
     wrap.appendChild(row);
