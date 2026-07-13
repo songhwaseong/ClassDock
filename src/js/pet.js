@@ -23,6 +23,7 @@
      rocket(로켓)=카운트다운→발사→낙하산 귀환 / flutter(나비·꿀벌)=팔랑팔랑 날다 다른 펫 머리에 앉아 쉼
      fish(물고기)=비눗방울 안에서 부유, 방울이 터지면(클릭·던지기) 바닥에서 파닥거리다 새 방울을 붐
      snake(뱀)=꿈틀꿈틀 기어다니고 똬리 틀기 / mouse(생쥐)=고양이가 다가오면 "찍찍!" 하고 도망
+     human(커피 아저씨)=걷고 점프하고 벽도 타되 천장은 안 걷고 꼭대기에서 뛰어내림, 클릭하면 두 팔 번쩍 만세
    몇 마리든 rAF 루프는 하나만 돌고 발판 스캔도 공유하므로 성능 부담이 거의 없다.
    그리기는 마리당 45×33px 작은 캔버스 하나뿐이고, 몸통에만 포인터가 잡혀 UI 클릭을 막지 않는다. */
 
@@ -33,7 +34,7 @@ const PET_FPS_MIN = 42, PET_FPS_FLOOR = 3, PET_FPS_TRIGGER_MS = 2500;   // 저�
 // 발판 위에 "서 있는" 상태들 — 발판 추적 대상이자 UFO 의 납치 후보가 된다
 const PET_GROUND_STATES = ["walk", "idle", "seekwall", "reboot", "hopwait",
   "stalk", "chase", "zoomies", "slide", "charge", "tongue", "hide", "dash",
-  "stun", "pull", "cast", "flee", "coil", "countdown"];
+  "stun", "pull", "cast", "flee", "coil", "countdown", "cheer"];
 
 // 펫이 올라설 수 있는 UI 요소(윗변이 발판이 된다). 보이는 것만 골라 쓴다.
 const PET_PLATFORM_SELECTORS = [
@@ -159,6 +160,16 @@ function petPickAction(p, w){
       else { p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 80; }
     }
   }
+  else if (p.kind === "human"){    // 커피 아저씨: 걷고 점프하고 벽도 타고, 기분 좋으면 혼자 만세
+    if (roll < 0.4){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
+    else if (roll < 0.62){ p.state = "idle"; p.timer = 50 + Math.random() * 110; }
+    else if (roll < 0.78){ p.state = "jump"; p.vy = -(6 + Math.random() * 4); p.vx = p.face * (1.2 + Math.random() * 1.8); }
+    else if (roll < 0.84){ petCheer(p, Math.random() < 0.5); }
+    else { // 가까운 쪽 벽으로 걸어가 수직으로 타고 오르기(바닥에서만)
+      if (p.support && p.support.floor){ p.state = "seekwall"; p.side = (p.x < window.innerWidth / 2) ? -1 : 1; p.face = p.side; }
+      else { p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 80; }
+    }
+  }
   else if (p.kind === "walker"){   // 로봇: 벽은 못 타고, 가끔 방전돼 멈췄다 재부팅한다
     if (roll < 0.46){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
     else if (roll < 0.76){ p.state = "idle"; p.timer = 50 + Math.random() * 110; }
@@ -254,6 +265,14 @@ function petPickAction(p, w){
     p.state = "hopwait"; p.timer = 8 + Math.random() * 40;
     if (Math.random() < 0.3) p.face *= -1;
   }
+}
+
+// 커피 아저씨: 두 팔 번쩍 만세(전용 프레임 misterCheer 로 잠깐 바꿔 그린다)
+function petCheer(p, say){
+  p.state = "cheer"; p.timer = 60; p.t = 0;
+  p.vx = 0; p.vy = 0; p.rot = 0; p.pop = 12;
+  if (p.cheerArt) p.art = p.cheerArt;
+  if (say) petSay(p, "만세!");
 }
 
 function petSay(p, text, translate=true){
@@ -866,6 +885,7 @@ function petUpdate(p, w){
   if (p.squash > 0) p.squash = Math.max(0, p.squash - 0.06);
   if (p.pop > 0) p.pop--;
   if (p.cool > 0) p.cool--;                                    // 고양이 사냥 쿨타임
+  if (p.cheerArt && p.state !== "cheer" && p.art !== p.baseArt) p.art = p.baseArt;   // 만세가 끊기면(붙잡힘 등) 원래 그림으로
   if (p.petEvent) return;                                      // 숨겨진 조합 연출은 이벤트 감독이 좌표를 움직인다
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
   if (petWorldIsQuiet(w)){ petQuietUpdate(p, w); return; }
@@ -1008,6 +1028,10 @@ function petUpdate(p, w){
   else if (p.state === "tongue"){                              // 개구리: 혀 낼름(그리기는 petDraw 가)
     if (--p.timer <= 0) petPickAction(p, w);
   }
+  else if (p.state === "cheer"){                               // 커피 아저씨: 두 팔 들고 만세!
+    p.rot = Math.sin(p.t * 0.5) * 4;
+    if (--p.timer <= 0){ p.rot = 0; petPickAction(p, w); }
+  }
   else if (p.state === "slide"){                               // 펭귄: 배를 깔고 주욱 미끄러진다
     p.x += p.vx * p.speed;
     p.vx *= 0.975;
@@ -1130,7 +1154,14 @@ function petUpdate(p, w){
   else if (p.state === "climb"){
     p.y -= climb;
     p.x = p.side < 0 ? 0 : vw - PET_W;
-    if (p.y <= 0){ p.y = 0; p.state = "ceiling"; p.face = -p.side; p.timer = 80 + Math.random() * 140; }
+    if (p.y <= 0){
+      p.y = 0;
+      if (p.kind === "human"){   // 아저씨는 천장을 걷는 대신 꼭대기에서 힘차게 뛰어내린다
+        p.state = "fall"; p.vy = 0; p.vx = -p.side * 2.4; p.face = -p.side; p.t = 0;
+        if (Math.random() < 0.5) petSay(p, "야호~");
+      }
+      else { p.state = "ceiling"; p.face = -p.side; p.timer = 80 + Math.random() * 140; }
+    }
     else if (p.t > 40 && Math.random() < 0.004){ p.state = "fall"; p.vy = 0; p.vx = -p.side * 1.5; }   // 가끔 손을 놓친다
   }
   else if (p.state === "ceiling"){
@@ -1241,9 +1272,12 @@ function petBindPointer(p){
       return;
     }
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
-      petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)], false);
-      if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
-      else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
+      if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
+      else {
+        petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)], false);
+        if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
+        else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
+      }
     } else {              // 던지기: 마지막 이동 속도로 날아간다(중력 없는 애들은 관성 미끄러짐)
       p.vx = Math.max(-7, Math.min(7, p.vx));
       p.vy = Math.max(-9, Math.min(6, p.vy));
@@ -1391,6 +1425,7 @@ function petSpawn(i, total, bag){
   const p = {
     el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
     kind: species.kind, speciesId, art: species.art, palette,
+    baseArt: species.art, cheerArt: species.cheerArt || null,
     sayings: (typeof petSayingsFor === "function" ? petSayingsFor(speciesId, petDefaultSayings(speciesId, species)) : petDefaultSayings(speciesId, species)), gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),

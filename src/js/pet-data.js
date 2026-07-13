@@ -656,6 +656,32 @@ const PET_ART = {
     "...AAAAAAAA....",
     "...FF....FF....",
     "...FF....FF...."
+  ],
+  mister: [
+    "....HHHHHHH....",
+    "...HHHHHHHHH...",
+    "...HSSSSSSSH...",
+    "..GGWKGGGWKGG..",
+    "....SSMMMSS....",
+    ".....SSSSS.....",
+    "..BBBBBBBBBBB..",
+    ".SBBBBBBBBBBCC.",
+    "..BBBBBBBBBBB..",
+    "....PP...PP....",
+    "....PP...PP...."
+  ],
+  misterCheer: [   // 만세 포즈(클릭하면 이 프레임으로 잠깐 바뀐다) — 두 팔을 번쩍
+    ".S..HHHHHHH..S.",
+    ".B.HHHHHHHHH.B.",
+    ".B.HSSSSSSSH.B.",
+    ".BGGWKGGGWKGGB.",
+    "..B.SSMMMSS.B..",
+    "..BB.SSSSS.BB..",
+    "..BBBBBBBBBBB..",
+    "..BBBBBBBBBBB..",
+    "..BBBBBBBBBBB..",
+    "....PP...PP....",
+    "....PP...PP...."
   ]
 };
 
@@ -879,7 +905,12 @@ const PET_SPECIES = [
   { kind:"bouncer", art:PET_ART.sheep, palettes: [
       { A:"#f2f0ea", F:"#4a4540" }                               // 양(폭신폭신 통통)
     ],
-    sayings: ["메에에~", "폭신폭신", "털 깎을 때 됐나?", "양 한 마리, 양 두 마리...", "구름 아니에요", "포근하죠?"] }
+    sayings: ["메에에~", "폭신폭신", "털 깎을 때 됐나?", "양 한 마리, 양 두 마리...", "구름 아니에요", "포근하죠?"] },
+  { kind:"human", art:PET_ART.mister, cheerArt:PET_ART.misterCheer, palettes: [
+      { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#5f5340", P:"#4a4550", C:"#f2f0ea" },   // 갈색 셔츠(원조)
+      { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#3f5a7a", P:"#333848", C:"#f2f0ea" }    // 남색 셔츠
+    ],
+    sayings: ["만세!", "허허허", "커피 한잔 어때요?", "오늘도 화이팅!", "열심히 하시네요", "잠깐 쉬었다 가요", "안녕하세요!"] }
 ];
 
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
@@ -893,7 +924,7 @@ const PET_NAMES = {
   octopus:"문어", bat:"박쥐", owl:"부엉이", duck:"오리", squirrel:"다람쥐",
   hedgehog:"고슴도치", hamster:"햄스터", bee:"꿀벌", ladybug:"무당벌레", dice:"주사위",
   apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
-  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양"
+  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨"
 };
 
 const PET_NAMES_EN = {
@@ -906,7 +937,7 @@ const PET_NAMES_EN = {
   octopus:"Octopus", bat:"Bat", owl:"Owl", duck:"Duck", squirrel:"Squirrel",
   hedgehog:"Hedgehog", hamster:"Hamster", bee:"Bee", ladybug:"Ladybug", dice:"Die",
   apple:"Apple", eraser:"Eraser", mushroom:"Mushroom", carrot:"Carrot", dino:"Dinosaur", snowman:"Snowman",
-  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep"
+  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy"
 };
 
 const PET_KIND_SAYINGS_EN = {
@@ -923,6 +954,7 @@ const PET_KIND_SAYINGS_EN = {
   cloud:["Rumble...", "Stormy skies!", "Flash!"], rocket:["3, 2, 1...", "Ready for launch!", "To space!"],
   flutter:["Flutter flutter!", "Hello!", "Such a nice breeze!"], fish:["Blub blub!", "Swimming along!", "Bubble safe!"],
   snake:["Sss...", "Slithering along!", "Hello!"], mouse:["Squeak!", "Where's the cheese?", "So fast!"],
+  human:["Hooray!", "How about a coffee?", "Keep up the good work!"],
   default:["Hello!", "Let's do our best!", "Nice to see you!"]
 };
 
@@ -935,7 +967,7 @@ const PET_BUBBLE_EN = {
   "준비... 출발...":"Ready... go...", "천천히 가자!":"Let's take it slow!", "거의 다 왔다!":"Almost there!", "집중 시간! 조용히 쉴게요":"Focus time! I'll rest quietly.", "휴식 시간! 쭉쭉~":"Break time! Stretch!",
   "납치 실패...":"Abduction failed...", "다시 둥실~":"Floating again!", "푸슈슈슉~":"Pfffft!", "콰르릉!":"Kaboom!", "우르릉...":"Rumble...", "후우- 새 방울!":"Phew—new bubble!",
   "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
-  "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!",
+  "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!", "야호~":"Yahoo!",
   "다 지웠다!":"All clean!", "또 그려도 돼?":"Can I draw again?", "자력 정상!":"Magnet power normal!", "재부팅 완료!":"Reboot complete!",
   "별 구경 완료!":"Star-gazing complete!", "지구가 제일 재밌어!":"Earth is the most fun!", "개굴! 최고야!":"Ribbit! Amazing!", "촉촉하게 완료!":"Nice and damp!",
   "거의 잡았는데!":"I almost caught it!", "아삭은 다음 기회에!":"Crunchy next time!", "내가 이겼나?":"Did I win?", "천천히 가도 도착!":"Slow still gets there!"

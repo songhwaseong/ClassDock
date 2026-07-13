@@ -26,7 +26,7 @@ const PET_KIND_LABELS = {
   ninja:"순간이동 대시 (닌자)", bird:"훨훨 날기 (새)", chameleon:"색 바꾸기 (카멜레온)",
   wizard:"마법 순간이동 (마법사)", magnet:"자석으로 끌기", cloud:"번개 구름",
   rocket:"발사·낙하산 (로켓)", flutter:"팔랑팔랑 날기 (나비)", fish:"비눗방울 타기 (물고기)",
-  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)"
+  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 벽 타고 만세 (아저씨)"
 };
 
 // ----- 저장소 도우미 -----
@@ -35,7 +35,7 @@ const PET_KIND_LABELS_EN = {
   ufo:"Flying UFO", cat:"Cursor hunter", dog:"Happy runner", spider:"Web climber", mole:"Burrower", frog:"Big jumper",
   penguin:"Waddle and slide", balloon:"Balloon floater", snail:"Slow crawler", ninja:"Teleport dash", bird:"Flying bird",
   chameleon:"Color changer", wizard:"Magic teleport", magnet:"Magnetic pull", cloud:"Thundercloud", rocket:"Launch and parachute",
-  flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape"
+  flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape", human:"Walk, climb, cheer"
 };
 
 function petJSONLoad(key, fallback){
@@ -106,9 +106,10 @@ function petCustomSpecies(){
   return petCustomLoad().map((c, index) => {
     const art = PET_ART[c.art];
     if (!art || !PET_KIND_LABELS[c.kind] || !c.palette) return null;
+    const base = typeof PET_SPECIES === "object" ? PET_SPECIES.find(s => s.art === art) : null;
     return {
       id: c.id, name: c.name || "내 펫", custom: true,
-      kind: c.kind, art: art, palettes: [c.palette],
+      kind: c.kind, art: art, cheerArt: (base && base.cheerArt) || null, palettes: [c.palette],
       sayings: petCleanSayings(c.sayings), trail: c.trail || null,
       priority: c.priority === true, priorityIndex: index
     };
