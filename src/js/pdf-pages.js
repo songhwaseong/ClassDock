@@ -55,6 +55,7 @@ function setPdfPagePanelOpen(doc, open){
   doc.pagePanelOpen = !!open;
   doc.pagePanel.hidden = !doc.pagePanelOpen;
   byId("btnPages").classList.toggle("primary", doc.pagePanelOpen);
+  if (doc.pagePanelOpen && doc.outlinePanelOpen) setPdfOutlinePanelOpen(doc, false);   // 왼쪽 자리 공유 — 한 번에 하나만
   if (doc.pagePanelOpen) renderPdfThumbnails(doc);
 }
 function togglePdfPagePanel(doc=state){
@@ -142,6 +143,123 @@ async function renderPdfThumbnails(doc){
     }
   } catch(e){ console.warn("페이지 썸네일 생성 실패:", e); }
   finally { doc._thumbsRendering = false; }
+}
+
+/* ===== PDF 목차(책갈피) 패널 =====
+ * PDF 에 저장된 책갈피(outline)를 트리로 보여주고 클릭하면 해당 페이지로 이동한다.
+ * 페이지 정리(삭제·이동) 뒤에도 원본 페이지 번호(pageNum)로 찾아가므로 안전하다. */
+function initPdfOutline(doc){
+  doc.pdfOutline = null;                       // null=아직 확인 중, []=없음, [...]=있음
+  doc.outlinePanelOpen = false;
+  updatePdfOutlineButton(doc);
+  if (!doc.pdfjsDoc || typeof doc.pdfjsDoc.getOutline !== "function"){ doc.pdfOutline = []; updatePdfOutlineButton(doc); return; }
+  doc.pdfjsDoc.getOutline()
+    .then(items => { if (doc.closed) return; doc.pdfOutline = Array.isArray(items) ? items : []; updatePdfOutlineButton(doc); })
+    .catch(() => { if (doc.closed) return; doc.pdfOutline = []; updatePdfOutlineButton(doc); });
+}
+
+function updatePdfOutlineButton(doc){
+  const button = byId("btnOutline"); if (!button) return;
+  if (!doc || doc.id !== activeId || doc.kind !== "pdf") return;   // PDF 가 아니면 tools 바 자체가 숨겨진다
+  const tr = window.t || ((s) => s);
+  const has = !!(doc.pdfOutline && doc.pdfOutline.length);
+  button.disabled = !has;
+  button.classList.toggle("primary", has && !!doc.outlinePanelOpen);
+  button.title = has ? tr("문서 목차(책갈피)로 이동")
+    : doc.pdfOutline == null ? tr("목차 확인 중…") : tr("이 PDF에는 목차(책갈피)가 없어요");
+}
+
+function setPdfOutlinePanelOpen(doc, open){
+  if (!doc || doc.kind !== "pdf") return;
+  if (open && !doc.outlinePanel) createPdfOutlinePanel(doc);
+  if (!doc.outlinePanel) return;
+  doc.outlinePanelOpen = !!open;
+  doc.outlinePanel.hidden = !doc.outlinePanelOpen;
+  if (doc.outlinePanelOpen && doc.pagePanelOpen) setPdfPagePanelOpen(doc, false);   // 썸네일 패널과 자리 공유
+  updatePdfOutlineButton(doc);
+}
+function togglePdfOutlinePanel(doc=state){
+  if (!doc || doc.kind !== "pdf") return;
+  if (!doc.pdfOutline || !doc.pdfOutline.length){ toast("이 PDF에는 목차(책갈피)가 없어요.", 2400); return; }
+  setPdfOutlinePanelOpen(doc, !doc.outlinePanelOpen);
+}
+
+function createPdfOutlinePanel(doc){
+  const panel = document.createElement("aside");
+  panel.className = "pdf-outline-panel"; panel.hidden = true;
+  const head = document.createElement("div"); head.className = "pdf-pages-head";
+  const heading = document.createElement("div"); heading.className = "pdf-pages-title";
+  const title = document.createElement("span"); title.textContent = "목차";
+  const count = document.createElement("span"); count.className = "pdf-page-count";
+  heading.append(title, count);
+  const close = document.createElement("button"); close.type = "button"; close.className = "pdf-pages-close";
+  close.textContent = "✕"; close.title = "목차 닫기"; close.setAttribute("aria-label", close.title);
+  close.addEventListener("click", () => {
+    setPdfOutlinePanelOpen(doc, false);
+    if (doc.id === activeId) byId("btnOutline").focus();
+  });
+  head.append(heading, close);
+  const list = document.createElement("div"); list.className = "pdf-outline-list";
+  panel.append(head, list);
+  doc.el.insertBefore(panel, doc.el.firstChild);
+  doc.outlinePanel = panel;
+
+  const pending = [];                          // 페이지 번호 라벨은 뒤에서 차례로 해석해 채운다
+  const addItems = (items, depth) => {
+    for (const item of items){
+      const row = document.createElement("button");
+      row.type = "button"; row.className = "pdf-outline-item";
+      row.style.setProperty("--depth", depth);
+      const name = document.createElement("span"); name.className = "pdf-outline-name";
+      name.textContent = String(item.title || "").replace(/\s+/g, " ").trim() || "(제목 없음)";
+      if (item.bold) name.style.fontWeight = "700";
+      if (item.italic) name.style.fontStyle = "italic";
+      row.title = name.textContent;
+      const pageLabel = document.createElement("span"); pageLabel.className = "pdf-outline-page";
+      row.append(name, pageLabel);
+      row.addEventListener("click", () => gotoPdfOutlineItem(doc, item));
+      list.appendChild(row);
+      pending.push({ item, pageLabel });
+      if (Array.isArray(item.items) && item.items.length && depth < 7) addItems(item.items, depth + 1);
+    }
+  };
+  addItems(doc.pdfOutline || [], 0);
+  count.textContent = pending.length + "개";
+  (async () => {                               // 항목이 많아도 패널은 먼저 뜨고 번호가 순서대로 채워진다
+    for (const { item, pageLabel } of pending){
+      if (doc.closed || !panel.isConnected) return;
+      const n = await resolvePdfOutlinePage(doc, item);
+      if (n) pageLabel.textContent = String(n);
+    }
+  })();
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
+}
+
+// 책갈피 목적지(dest) → 원본 페이지 번호(1-기준). 결과는 항목에 캐시한다.
+async function resolvePdfOutlinePage(doc, item){
+  if (item.__pageNum !== undefined) return item.__pageNum;
+  let n = null;
+  try {
+    let dest = item.dest;
+    if (typeof dest === "string") dest = await doc.pdfjsDoc.getDestination(dest);
+    const ref = Array.isArray(dest) ? dest[0] : null;
+    if (typeof ref === "number") n = ref + 1;                                  // 일부 PDF 는 페이지 인덱스를 직접 담는다
+    else if (ref) n = (await doc.pdfjsDoc.getPageIndex(ref)) + 1;
+  } catch(_){ n = null; }
+  item.__pageNum = n;
+  return n;
+}
+
+async function gotoPdfOutlineItem(doc, item){
+  if (!item.dest && item.url){                 // 외부 링크형 책갈피
+    if (/^(https?:|mailto:)/i.test(item.url)) window.open(item.url, "_blank", "noopener");
+    return;
+  }
+  const n = await resolvePdfOutlinePage(doc, item);
+  if (!n){ toast("이 목차 항목의 위치를 찾지 못했어요.", 2200); return; }
+  const p = doc.pages.find(x => x.pageNum === n);
+  if (!p){ toast("이 목차 항목의 페이지가 삭제됐어요.", 2200); return; }
+  p.frame.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function extractPdfPages(doc){

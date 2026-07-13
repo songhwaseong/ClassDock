@@ -537,6 +537,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     const saveName = (ownerDoc && ownerDoc.name) || (file && file.name) || ("문서." + (ext || "txt"));
     const jsonPretty = ext === "json";           // jsonc/json5 는 주석 때문에 JSON.parse 가 실패하므로 제외
     const isHtml = ext === "html" || ext === "htm" || ext === "xhtml";   // 소스 보기 ↔ 미리보기(렌더) 토글 대상
+    const isMd = ext === "md" || ext === "markdown" || ext === "mdx";    // 마크다운: 미리보기 우선 + 편집·저장 지원
     let currentText = text;
     let prettyText = null;                        // null=원본 표시, 문자열=정렬본 표시(화면 전용 — 편집·저장은 항상 원본)
     let treeMode = false;                         // JSON 트리 보기(화면 전용). 편집·저장은 항상 원본 텍스트 기준
@@ -559,13 +560,14 @@ async function renderCode(file, host, ext, profile, runCtx){
       viewMode = "view"; openReadonlyFind = null;
       // 내용 검색 등에서 줄 이동이 예약돼 있으면 줄번호가 있는 코드 보기로 받는다.
       if (treeMode && ownerDoc && ownerDoc.pendingFocusLine) treeMode = false;
-      if (canEdit || jsonPretty || isHtml){
+      if (canEdit || jsonPretty || isHtml || isMd){
         const bar = document.createElement("div"); bar.className = "text-view-bar";
-        const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = saveName;
+        const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
         bar.appendChild(name);
-        if (isHtml){
+        if (isHtml || isMd){
           const previewBtn = document.createElement("button"); previewBtn.type = "button"; previewBtn.className = "text-edit-btn";
-          previewBtn.textContent = "미리보기"; previewBtn.title = "HTML을 실제 페이지로 렌더링해 보기";
+          previewBtn.textContent = "미리보기";
+          previewBtn.title = isMd ? "마크다운을 문서 모양으로 렌더링해 보기" : "HTML을 실제 페이지로 렌더링해 보기";
           previewBtn.addEventListener("click", () => showPreview());
           bar.appendChild(previewBtn);
         }
@@ -915,23 +917,43 @@ async function renderCode(file, host, ext, profile, runCtx){
         try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; if (ownerDoc){ ownerDoc.hasUnsavedEdits = false; updateDocumentStatus(ownerDoc); } } }
         finally { saveBtn.disabled = false; }
       });
-      viewBtn.addEventListener("click", () => { currentText = editor.getValue(); showView(); });
+      viewBtn.addEventListener("click", () => { currentText = editor.getValue(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
       requestAnimationFrame(() => editor.ta.focus());
     };
 
-    // HTML 미리보기: 소스 대신 기존 렌더러(샌드박스 iframe + 옆 리소스 인라인 + 링크 이동)로 실제 페이지를 보여준다.
+    // HTML/마크다운 미리보기: 소스 대신 렌더된 화면을 보여준다.
+    //  - HTML: 기존 렌더러(샌드박스 iframe + 옆 리소스 인라인 + 링크 이동)
+    //  - 마크다운: markdownToHtml 로 문서 모양 렌더(저장 전 편집 내용도 반영)
     const showPreview = () => {
       teardownActive(); host.innerHTML = "";
       viewMode = "preview"; openReadonlyFind = null;
       if (ownerDoc){ ownerDoc.codeViewer = null; ownerDoc.codeEditor = null; }
       const bar = document.createElement("div"); bar.className = "text-view-bar";
-      const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = saveName;
+      const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
       const srcBtn = document.createElement("button"); srcBtn.type = "button"; srcBtn.className = "text-edit-btn";
-      srcBtn.textContent = "소스코드"; srcBtn.title = "HTML 원문(소스) 보기";
+      srcBtn.textContent = "소스코드"; srcBtn.title = isMd ? "마크다운 원문(소스) 보기" : "HTML 원문(소스) 보기";
       srcBtn.addEventListener("click", () => showView());
       bar.append(name, srcBtn);
+      if (isMd && canEdit){
+        const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
+        editBtn.title = "이 파일을 편집하고 저장";
+        editBtn.addEventListener("click", showEdit);
+        bar.appendChild(editBtn);
+      }
       host.appendChild(bar);
-      renderHtmlFile(file, host, effectiveRunCtx);
+      if (isMd){
+        const wrap = document.createElement("article");
+        wrap.className = "md-host";
+        wrap.innerHTML = markdownToHtml(currentText, { allowHtml: true });
+        host.appendChild(wrap);
+      } else {
+        renderHtmlFile(file, host, effectiveRunCtx);
+      }
+    };
+    // 사이드바 본문 검색 결과 클릭 → 미리보기 화면에서 일치 글자로 스크롤+하이라이트
+    if (isMd && ownerDoc) ownerDoc.contentSearchFocus = (query) => {
+      if (viewMode !== "preview") showPreview();
+      return focusRenderedTextMatch(host, query);
     };
 
     // 보기에서 마우스로 선택한 텍스트를 검색어 시드로 가져온다(이 문서 안의 선택일 때만, 한 줄·200자 이내).
@@ -962,7 +984,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (ownerDoc) ownerDoc.openDocFind = openDocFind;
 
     if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(teardownActive); }
-    (canEdit && ownerDoc && ownerDoc.isScratch ? showEdit : showView)();
+    if (canEdit && ownerDoc && ownerDoc.isScratch) showEdit();
+    else if (isMd) showPreview();                 // 마크다운은 문서 모양(미리보기)이 기본
+    else showView();
     return;
   }
 

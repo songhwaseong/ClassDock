@@ -211,6 +211,9 @@ function wire(){
   byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
   byId("btnPages").onclick = () => togglePdfPagePanel();
+  byId("btnOutline").onclick = () => togglePdfOutlinePanel();
+  byId("btnPdfNight").onclick = () => togglePdfNightMode();
+  applyPdfNightMode();                        // 저장된 야간 보기 상태 복원
   byId("btnMergePdf").onclick = () => byId("mergePdfInput").click();
   byId("mergePdfInput").addEventListener("change", (e) => {
     const files = [...e.target.files]; e.target.value = "";

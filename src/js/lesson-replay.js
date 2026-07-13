@@ -480,6 +480,10 @@ function renderReplay(doc, host, lesson){
 // 부분 스트로크 그리기(성장 애니메이션). 기존 잉크 렌더러(applyInkStyle)를 재사용해 지우개(destination-out)도 재현.
 function lessonDrawInk(ctx, st, limit){
   const p = st.points; if (!p || !p.length) return;
+  // 도형(화살표·사각형·모자이크)은 성장 애니메이션 없이 한 번에(PDF 편집 화면과 같은 렌더러로) 그린다.
+  if (typeof INK_SHAPE_TOOLS !== "undefined" && INK_SHAPE_TOOLS.has(st.tool) && typeof drawInkShape === "function"){
+    drawInkShape(ctx, st); return;
+  }
   const n = (limit == null) ? p.length : Math.max(1, Math.min(p.length, limit));
   ctx.save();
   if (typeof applyInkStyle === "function") applyInkStyle(ctx, st);

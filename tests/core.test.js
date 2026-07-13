@@ -12,7 +12,8 @@ const {
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
   normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
-  orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath
+  orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
+  workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath
 } = require("../src/js/core.js");
 
 test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", () => {
@@ -42,6 +43,30 @@ test("HWPX 본문 섹션은 숫자 순서로 고르고 다른 압축 항목은 �
   ]), ["Contents/section0.xml", "Contents/section2.xml", "Contents/section10.xml"]);
   assert.deepEqual(orderHwpxSections([]), []);
   assert.deepEqual(orderHwpxSections(null), []);
+});
+
+test("Office XML 본문은 접두사와 서식 실행이 달라도 문단 단위로 합친다", () => {
+  const xml = [
+    '<x:p xmlns:x="urn:test"><x:t>중요</x:t><x:t>문장 &amp; 표</x:t></x:p>',
+    '<p><t>둘째</t><t> 문단</t></p>'
+  ].join("");
+  assert.deepEqual(officeXmlParagraphLines(xml, 100).lines, ["중요문장 & 표", "둘째 문단"]);
+  assert.equal(officeXmlTextRuns('<a:t>첫째</a:t><z:t>둘째</z:t>', " ", 100).text, "첫째 둘째");
+  const limited = officeXmlParagraphLines('<w:p><w:t>' + "가".repeat(30) + '</w:t></w:p>', 10);
+  assert.equal(limited.chars, 10);
+  assert.equal(limited.truncated, true);
+});
+
+test("렌더된 본문 검색은 여러 텍스트 노드에 걸친 일치 구간을 계산한다", () => {
+  assert.deepEqual(renderedTextMatchSegments(["앞 ", "중요", "문장", " 뒤"], "중요문장"), [
+    { index:1, start:0, end:2 },
+    { index:2, start:0, end:2 }
+  ]);
+  assert.deepEqual(renderedTextMatchSegments(["Alpha", "Beta"], "hab"), [
+    { index:0, start:3, end:5 },
+    { index:1, start:0, end:1 }
+  ]);
+  assert.deepEqual(renderedTextMatchSegments(["없음"], "검색"), []);
 });
 
 test("JSON 트리 노드 정보는 타입·자식 수·잘린 문자열을 구분한다", () => {

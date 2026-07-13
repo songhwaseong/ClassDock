@@ -2195,17 +2195,21 @@ async function renderXlsx(file, host, doc){
       }
     }
   };
-  const recalcAndRefresh = () => {
-    if (!sheetsWithFormula.size) return;
+  const recalcAndRefresh = (options={}) => {
+    if (!sheetsWithFormula.size) return false;
+    const refreshDom = !(options && options.refreshDom === false);
     sheetsWithFormula.forEach(nm => { if (exModels[nm]) structChanged.add(nm); });   // 결과가 바뀔 수 있어 전체 재작성
     anyDirty = true;
     const updated = recalcAll();
-    const model = exModels[currentSheet];
-    (updated[currentSheet] || []).forEach(({ r, c }) => {
-      const td = modelCellTd(r, c);
-      if (td && model && model[r] && model[r][c]){ const s = model[r][c]; td.textContent = dispCell(s); td.classList.toggle("num", typeof s.v === "number"); }
-    });
-    refreshCondFormat();
+    if (refreshDom){
+      const model = exModels[currentSheet];
+      (updated[currentSheet] || []).forEach(({ r, c }) => {
+        const td = modelCellTd(r, c);
+        if (td && model && model[r] && model[r][c]){ const s = model[r][c]; td.textContent = dispCell(s); td.classList.toggle("num", typeof s.v === "number"); }
+      });
+      refreshCondFormat();
+    }
+    return true;
   };
 
   // ----- 셀 서식(채우기·테두리) 편집 헬퍼 -----
@@ -2502,7 +2506,8 @@ async function renderXlsx(file, host, doc){
       }
     });
     anyDirty = true;
-    renderEditable(currentSheet);
+    const recalculated = recalcAndRefresh({ refreshDom:false });   // 새 표를 그리기 전에 한 번만 재계산
+    renderEditable(currentSheet, { skipRecalc:recalculated });
     toast(changes.length + "곳을 바꿨어요" + (scope ? "(선택 범위)" : "") + ".", 1900);
   };
 
@@ -3783,10 +3788,10 @@ async function renderXlsx(file, host, doc){
     enhanceSpreadsheetSelection(sheet, name);
   };
 
-  const renderEditable = (name) => {
+  const renderEditable = (name, options={}) => {
     const model = exModels[name];
     if (!model){ sheet.textContent = "편집 데이터를 불러오는 중…"; return; }
-    maybeRecalc(name);
+    if (!options.skipRecalc) maybeRecalc(name);
     clearVirtualEditor();
     if (virtualCsvEditor){
       sheet.scrollTop = 0;
@@ -4572,11 +4577,20 @@ async function renderXlsx(file, host, doc){
     };
     const boldBtn = mkFmtBtn("B", "굵게 (선택 셀)", () => toggleFontProp("bold", "굵게"), "xlsx-fmt-btn xlsx-fmt-bold");
     const italicBtn = mkFmtBtn("I", "기울임 (선택 셀)", () => toggleFontProp("italic", "기울임"), "xlsx-fmt-btn xlsx-fmt-italic");
-    const underlineBtn = mkFmtBtn("U", "밑줄 (선택 셀)", () => toggleFontProp("underline", "밑줄"), "xlsx-fmt-btn xlsx-fmt-underline");
-    const fontColorWrap = document.createElement("label"); fontColorWrap.className = "xlsx-frozen"; fontColorWrap.title = "선택 셀 글자 색";
-    const fontColor = document.createElement("input"); fontColor.type = "color"; fontColor.className = "xlsx-fmt-color"; fontColor.value = "#1f2937";
+    const underlineBtn = mkFmtBtn(
+      "U", "밑줄 (선택 셀)", () => toggleFontProp("underline", "밑줄"), "xlsx-fmt-btn xlsx-fmt-underline"
+    );
+    const fontColorWrap = document.createElement("label");
+    fontColorWrap.className = "xlsx-frozen";
+    fontColorWrap.title = "선택 셀 글자 색";
+    const fontColor = document.createElement("input");
+    fontColor.type = "color";
+    fontColor.className = "xlsx-fmt-color";
+    fontColor.value = "#1f2937";
     fontColorWrap.append(document.createTextNode("글자색 "), fontColor);
-    const fontColorApplyBtn = document.createElement("button"); fontColorApplyBtn.type = "button"; fontColorApplyBtn.textContent = "적용";
+    const fontColorApplyBtn = document.createElement("button");
+    fontColorApplyBtn.type = "button";
+    fontColorApplyBtn.textContent = "적용";
     fontColorApplyBtn.title = "고른 글자색을 선택 셀에 적용";
     fontColorApplyBtn.onclick = () => setFontColor(fontColor.value);
     const sizeSel = document.createElement("select"); sizeSel.className = "xlsx-sortcol"; sizeSel.title = "글자 크기";
@@ -4784,7 +4798,9 @@ async function renderXlsx(file, host, doc){
     const delSheetBtn = document.createElement("button"); delSheetBtn.type = "button"; delSheetBtn.textContent = "시트 삭제"; delSheetBtn.title = "현재 시트를 삭제(되돌리기 불가)";
     delSheetBtn.onclick = () => deleteCurrentSheet();
     const structureMenu = makeMenu("행·열·시트", "xlsx-tool-menu-structure", addRowBtn, addColBtn, delRowBtn, delColBtn, mergeBtn, unmergeBtn, addSheetBtn, dupSheetBtn, renSheetBtn, delSheetBtn);
-    const fontGroup = makeGroup("", "xlsx-editgroup-font", fontSel, sizeSel, boldBtn, italicBtn, underlineBtn, fontColorWrap, fontColorApplyBtn);
+    const fontGroup = makeGroup(
+      "", "xlsx-editgroup-font", fontSel, sizeSel, boldBtn, italicBtn, underlineBtn, fontColorWrap, fontColorApplyBtn
+    );
     const alignGroup = makeGroup("", "xlsx-editgroup-align", alignLeftBtn, alignCenterBtn, alignRightBtn, vAlignSel, wrapBtn, numSel);
     const formatMenu = makeMenu("채우기·테두리", "xlsx-tool-menu-format", fillWrap, fillBtn, borderWrap, borderStyleSel, borderWhereSel, borderBtn, clearFmtBtn, copyFmtBtn, pasteFmtBtn);
     const findMenu = makeMenu("찾기·바꿈", "xlsx-tool-menu-find", findInput, replInput, replaceBtn);

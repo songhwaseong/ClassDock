@@ -424,6 +424,7 @@ function setActiveDoc(id){
   byId("tools").hidden = (d.kind !== "pdf");
   byId("officeTools").hidden = (d.kind === "pdf");
   byId("btnPages").classList.toggle("primary", !!(d.kind === "pdf" && d.pagePanelOpen));
+  if (typeof updatePdfOutlineButton === "function") updatePdfOutlineButton(d);   // 목차 버튼 상태를 활성 PDF 기준으로
   updateDocumentEncoding(d);
   updateDocumentStatus(d);
   updateOriginalSaveBadge(d);
@@ -1307,6 +1308,41 @@ function untabMany(removeIds, anchorId){
   else renderTabs();
 }
 
+/* ===== 파일 표시 이름 바꾸기(앱 내) =====
+ * 탭·사이드바·헤더에 보이는 이름만 바꾼다. 원본 파일과 저장/내보내기 파일 이름은 바꾸지 않는다.
+ * 확장자는 뷰어 종류·검색 대상을 결정하므로 원래 확장자를 유지한다. */
+async function renameDoc(id){
+  const doc = docs.find(d => d.id === id);
+  if (!doc || typeof askText !== "function") return;
+  const input = await askText({
+    title: "이름 바꾸기",
+    message: "앱의 탭·사이드바에 표시되는 이름만 바뀌어요. 원본 파일과 저장/내보내기 파일 이름은 그대로예요.",
+    value: doc.name, okText: "바꾸기"
+  });
+  if (input === null) return;
+  let name = String(input).replace(/[\\/:*?"<>|]/g, "").trim();
+  if (!name || name === doc.name) return;
+  const oldName = String(doc.name);
+  const oldExt = fileExtOf(oldName.toLowerCase());
+  const hasOldExt = oldExt && oldExt !== oldName.toLowerCase();
+  if (hasOldExt && !name.toLowerCase().endsWith("." + oldExt)){
+    name = name.replace(/\.+$/, "") + "." + oldExt;        // 확장자 유지(빼거나 바꿔 적어도 원래 확장자로)
+  }
+  // 탭 복원 키는 실제 파일 정체성을 가리켜야 한다. 표시 이름을 바꾸기 전에 한 번만 고정해
+  // 다음 실행에서 원래 디스크 이름으로 다시 열린 문서와 계속 매칭되게 한다.
+  if (!doc.stableRestoreKey) doc.stableRestoreKey = docStableKey(doc);
+  doc.name = name;
+  renderSidebar();
+  renderTabs();
+  if (doc.el) doc.el.querySelectorAll(".text-view-name").forEach(el => { el.textContent = name; });
+  if (doc.id === activeId){
+    const hdr = byId("activeFileName");
+    if (hdr) hdr.textContent = name;
+  }
+  if (typeof persistTabState === "function") persistTabState();
+  toast("표시 이름을 '" + name + "'(으)로 바꿨어요. 원본 파일 이름은 그대로예요.", 3200, { type: "success" });
+}
+
 // 탭 우클릭 메뉴: IDE 처럼 오른쪽/왼쪽/다른 탭을 한 번에 정리(모두 "탭만 닫기" — 파일은 사이드바에 유지)
 let tabMenuEl = null;
 function closeTabMenu(){
@@ -1337,6 +1373,7 @@ function openTabMenu(anchorId, x, y){
     menu.appendChild(b);
   };
   add("이 탭 닫기", null, () => untabDoc(anchorId));
+  add("이름 바꾸기", null, () => renameDoc(anchorId));
   const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
   add("오른쪽 탭 닫기", right.length, () => untabMany(right, anchorId));
   add("왼쪽 탭 닫기", left.length, () => untabMany(left, anchorId));
@@ -1348,6 +1385,30 @@ function openTabMenu(anchorId, x, y){
   tabMenuEl = menu;
   setTimeout(() => document.addEventListener("click", onTabMenuDocClick, true), 0);   // 바깥 클릭 시 닫기(여는 클릭은 제외)
   document.addEventListener("keydown", onTabMenuKey, true);
+}
+
+// 사이드바 파일 우클릭 메뉴(탭 메뉴와 같은 스타일) — 탭에 없는 파일도 이름을 바꿀 수 있게 한다.
+function openSidebarDocMenu(doc, x, y){
+  closeTabMenu();
+  closeSidebarGroupMenu();
+  const menu = document.createElement("div");
+  menu.className = "tab-ctx-menu"; menu.setAttribute("role", "menu");
+  const add = (label, run) => {
+    const button = document.createElement("button"); button.type = "button"; button.setAttribute("role", "menuitem");
+    const text = document.createElement("span"); text.textContent = label; button.appendChild(text);
+    button.addEventListener("click", () => { closeSidebarGroupMenu(); run(); });
+    menu.appendChild(button);
+  };
+  add("이름 바꾸기", () => renameDoc(doc.id));
+  document.body.appendChild(menu);
+  const pad = 8, mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.max(pad, Math.min(x, window.innerWidth - mw - pad)) + "px";
+  menu.style.top = Math.max(pad, Math.min(y, window.innerHeight - mh - pad)) + "px";
+  sidebarGroupMenuEl = menu;                                   // 닫기 동선(바깥 클릭·Esc)은 그룹 메뉴와 공유
+  setTimeout(() => document.addEventListener("click", onSidebarGroupMenuDocClick, true), 0);
+  document.addEventListener("keydown", onSidebarGroupMenuKey, true);
+  const first = menu.querySelector("button");
+  if (first) first.focus();
 }
 
 // 업로드한 일반 폴더 우클릭 메뉴. ZIP/TAR 그룹에는 newPythonContext 를 넣지 않아 표시되지 않는다.
@@ -1419,6 +1480,7 @@ function openSidebarGroupMenu(node, x, y){
 // 세션이 바뀌어도 같은 파일을 가리키는 안정 키: 루트 그룹→…→파일명 경로(생성 ID가 아닌 이름 기반)
 function docStableKey(doc){
   if (!doc) return "";
+  if (doc.stableRestoreKey) return doc.stableRestoreKey;
   const parts = [doc.name];
   let pid = doc.parentId;
   while (pid != null){
@@ -1565,6 +1627,11 @@ const PDF_SEARCH_MAX_PAGES = 500;                   // 텍스트 추출 페이�
 const PDF_SEARCH_MAX_CHARS = 1500000;               // 추출 누적 글자 상한
 const TEXT_SEARCH_EXTS = new Set(["txt","text","log","md","markdown","mdx","csv","tsv","json","xml",
   "yaml","yml","html","htm","xhtml","ini","cfg","conf","env","sql","srt","vtt","smi"]);
+const OFFICE_SEARCH_EXTS = new Set(["docx","pptx","hwpx"]);   // zip 안 XML 에서 본문을 직접 추출해 검색
+const OFFICE_SEARCH_MAX_BYTES = 64 * 1024 * 1024;             // 원본 zip 크기 상한(이미지가 커도 XML 은 작다)
+const OFFICE_TEXT_MAX_CHARS = 1500000;                        // 추출 누적 글자 상한(PDF 와 동일한 보호선)
+const OFFICE_XML_ENTRY_MAX_BYTES = 32 * 1024 * 1024;          // 단일 XML 압축 해제 상한(zip bomb·손상 파일 방어)
+const OFFICE_XML_TOTAL_MAX_BYTES = 64 * 1024 * 1024;          // 한 문서에서 읽는 XML 전체 압축 해제 상한
 // 확장자·종류상 텍스트로 검색할 만한 파일인가(크기는 따지지 않음).
 function isTextExtSearchable(doc){
   if (!doc || doc.kind === "pdf" || !doc.sourceFile) return false;
@@ -1573,10 +1640,27 @@ function isTextExtSearchable(doc){
   if (ext === lower) return true;                       // 확장자 없는 파일도 텍스트일 수 있음
   return (typeof CODE_EXTS !== "undefined" && ext in CODE_EXTS) || TEXT_SEARCH_EXTS.has(ext);
 }
-// 메인 스레드 즉시 검색 대상: 소형 텍스트 + (텍스트 기반) PDF.
+// Office 문서(docx·pptx·hwpx·hwp) 본문 검색 대상 여부.
+//  - docx/pptx/hwpx: zip 안 XML 을 직접 파싱하므로 아직 안 연 문서도 검색된다.
+//  - hwp(구형 바이너리): 직접 파싱이 어려워, 이미 렌더된 화면의 글자로 검색한다(안 연 문서는 제외).
+function isOfficeSearchable(doc){
+  if (!doc || doc.kind !== "office" || !doc.sourceFile) return false;
+  const ext = fileExtOf(String(doc.name || "").toLowerCase());
+  if (ext === "hwp") return true;
+  return OFFICE_SEARCH_EXTS.has(ext) && (doc.size || 0) <= OFFICE_SEARCH_MAX_BYTES;
+}
+// 사이드바 스니펫의 단위 라벨(기본 "줄"): 검색 결과 텍스트의 줄 번호가 무엇을 뜻하는지 알려준다.
+function officeSnippetUnit(doc){
+  const ext = fileExtOf(String(doc.name || "").toLowerCase());
+  if (ext === "pptx") return "슬라이드";
+  if (ext === "docx" || ext === "hwpx") return "문단";
+  return "";
+}
+// 메인 스레드 즉시 검색 대상: 소형 텍스트 + (텍스트 기반) PDF + Office 문서.
 function isTextSearchable(doc){
   if (!doc) return false;
   if (doc.kind === "pdf") return !!doc.pdfBytes;       // 텍스트 PDF 검색(스캔본은 추출 결과가 비어 자동 제외)
+  if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp
   if ((doc.size || 0) > CONTENT_SEARCH_MAX_BYTES) return false;
   return isTextExtSearchable(doc);
 }
@@ -1612,6 +1696,74 @@ async function extractPdfText(doc){
   } catch(e){ return false; }
   finally { if (temp && temp.destroy){ try { temp.destroy(); } catch(e){} } }
 }
+// Office 문서 본문 추출. 반환: string(성공) | false(추출 불가 → 캐시) | undefined(아직 불확정 → 캐시 금지).
+async function extractOfficeText(doc){
+  const ext = fileExtOf(String(doc.name || "").toLowerCase());
+  if (ext === "hwp"){                                     // 구형 바이너리 — 렌더된 화면의 글자로 검색
+    if (!doc.rendered || !doc.el) return undefined;       // 아직 안 열었으면 다음 검색에서 다시 시도
+    const t = String(doc.el.innerText || "").replace(/\u0000/g, "").trim();
+    return t || false;
+  }
+  if (typeof zip === "undefined") return false;
+  let reader = null;
+  try {
+    zip.configure({ useWebWorkers: false });
+    reader = new zip.ZipReader(new zip.BlobReader(doc.sourceFile));
+    const entries = await reader.getEntries();
+    const byPath = new Map();
+    for (const e of entries){ if (!e.directory) byPath.set(e.filename.replace(/\\/g, "/"), e); }
+    let xmlBytesRead = 0;
+    const readText = async (p) => {
+      const e = byPath.get(p); if (!e) return null;
+      const declared = Number(e.uncompressedSize);
+      if (Number.isFinite(declared) && (declared > OFFICE_XML_ENTRY_MAX_BYTES || xmlBytesRead + declared > OFFICE_XML_TOTAL_MAX_BYTES))
+        throw new Error("office-xml-too-large");
+      const text = await e.getData(new zip.TextWriter());
+      const actual = String(text || "").length;
+      if (actual > OFFICE_XML_ENTRY_MAX_BYTES) throw new Error("office-xml-too-large");
+      xmlBytesRead += Number.isFinite(declared) ? declared : actual;
+      if (xmlBytesRead > OFFICE_XML_TOTAL_MAX_BYTES) throw new Error("office-xml-too-large");
+      return text;
+    };
+    const numOf = (p) => { const m = p.match(/(\d+)\.xml$/); return m ? +m[1] : 0; };
+    let lines = [];
+    if (ext === "docx"){
+      const xml = await readText("word/document.xml");
+      if (!xml) return false;                             // 암호 문서·비표준 구조 → 검색 제외
+      lines = officeXmlParagraphLines(xml, OFFICE_TEXT_MAX_CHARS).lines;
+    } else if (ext === "pptx"){
+      const slides = [...byPath.keys()].filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p)).sort((a, b) => numOf(a) - numOf(b));
+      if (!slides.length) return false;
+      let total = 0;
+      for (let i = 0; i < slides.length; i++){            // 슬라이드당 한 줄(슬라이드 안 문단은 공백으로 잇는다)
+        const p = slides[i];
+        const xml = await readText(p);
+        const run = xml ? officeXmlTextRuns(xml, " ", Math.max(0, OFFICE_TEXT_MAX_CHARS - total)) : { text:"", truncated:false };
+        const line = run.text.replace(/\s+/g, " ").trim();
+        lines.push(line); total += line.length;
+        if (run.truncated || total >= OFFICE_TEXT_MAX_CHARS) break;
+        if (i % 8 === 7 && typeof yieldToBrowser === "function") await yieldToBrowser();
+      }
+    } else if (ext === "hwpx"){
+      const sections = [...byPath.keys()].filter(p => /^Contents\/section\d+\.xml$/i.test(p)).sort((a, b) => numOf(a) - numOf(b));
+      if (!sections.length) return false;
+      let total = 0;
+      for (let i = 0; i < sections.length; i++){
+        const p = sections[i];
+        const xml = await readText(p);
+        if (xml){
+          const part = officeXmlParagraphLines(xml, Math.max(0, OFFICE_TEXT_MAX_CHARS - total));
+          lines.push(...part.lines); total += part.chars;
+          if (part.truncated || total >= OFFICE_TEXT_MAX_CHARS) break;
+        }
+        if (i % 4 === 3 && typeof yieldToBrowser === "function") await yieldToBrowser();
+      }
+    } else return false;
+    const joined = lines.join("\n").replace(/\u0000/g, "");
+    return joined.replace(/\n/g, "").trim() ? joined : false;
+  } catch(_){ return false; }
+  finally { if (reader){ try { await reader.close(); } catch(_){} } }
+}
 // 검색 결과에서 PDF 의 특정 페이지로 스크롤(지연 렌더라 먼저 렌더 보장 후 프레임으로 이동).
 async function scrollPdfToPage(doc, pageNum){
   try { if (typeof ensureRendered === "function") await ensureRendered(doc); } catch(e){}
@@ -1629,6 +1781,10 @@ async function getDocText(doc){                          // 한 번 읽어 소�
         const ocr = await pdfOcrCachedText(doc);
         if (typeof ocr === "string" && ocr.trim()) text = ocr;
       }
+    } else if (isOfficeSearchable(doc)){
+      const extracted = await extractOfficeText(doc);
+      if (extracted === undefined) return false;         // 아직 불확정(안 연 hwp) → 캐시하지 않고 다음 검색에서 재시도
+      text = extracted;
     } else {
       const bytes = await readDocSourceBytes(doc);
       let binary = false, lim = Math.min(bytes.length, 8192);
@@ -1757,7 +1913,11 @@ async function runContentSearch(query){
     let lower = contentLowerCache.get(doc.id);
     if (text && typeof lower !== "string"){ lower = text.toLocaleLowerCase(); contentLowerCache.set(doc.id, lower); }
     const snippet = text && contentMatchSnippet(text, query, 120, lower);
-    if (snippet){ if (doc.kind === "pdf") snippet.unit = "페이지"; result.add(doc.id); snippets.set(doc.id, snippet); }
+    if (snippet){
+      if (doc.kind === "pdf") snippet.unit = "페이지";
+      else { const unit = officeSnippetUnit(doc); if (unit) snippet.unit = unit; }
+      result.add(doc.id); snippets.set(doc.id, snippet);
+    }
   }
   if (token !== contentSearchToken) return;
   contentMatchIds = result; contentMatchSnippets = snippets; contentMatchQuery = query;
@@ -1878,7 +2038,7 @@ function renderSidebar(){
         const canFocusContentLine = !!(hit && hit.line && hit.unit !== "페이지" &&
           (ext === "txt" || ext === "html" || ext === "htm" || ext === "xhtml" ||
            (typeof CODE_EXTS !== "undefined" && ext in CODE_EXTS)));
-        const canFocusRenderedContent = !!(hit && ["md", "markdown", "mdx", "csv"].includes(ext));
+        const canFocusRenderedContent = !!(hit && ["md", "markdown", "mdx", "csv", "docx", "pptx", "hwp", "hwpx"].includes(ext));
         // 코드·텍스트는 렌더 전에도 줄 이동을 예약한다. 이미 렌더된 문서는 아래에서 즉시 이동한다.
         if (canFocusContentLine) doc.pendingFocusLine = hit.line;
         openDocInTargetPane(doc.id);           // 분할 화면이면 마지막 클릭 칸에 열기(아니면 setActiveDoc 와 동일)
@@ -1904,6 +2064,12 @@ function renderSidebar(){
         e.preventDefault(); e.stopPropagation();
         sidebarCursorKey = node.nodeId;
         openSidebarGroupMenu(node, e.clientX, e.clientY);
+      });
+    } else if (node.type === "doc" && doc){
+      item.addEventListener("contextmenu", (e) => {           // 파일 우클릭: 이름 바꾸기
+        e.preventDefault(); e.stopPropagation();
+        sidebarCursorKey = node.nodeId;
+        openSidebarDocMenu(doc, e.clientX, e.clientY);
       });
     }
     const twist = document.createElement("span");
@@ -2179,4 +2345,3 @@ function refreshChrome(){
   sidebarToggle.setAttribute("aria-expanded", String(!sidebarCollapsed));
   byId("studyToggle").hidden = !has;
 }
-

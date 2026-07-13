@@ -36,6 +36,7 @@ async function loadPdf(arrayBuffer, name, options={}){
       await restorePdfRecovery(doc);
       initPdfHistory(doc);
       createPdfPagePanel(doc);
+      initPdfOutline(doc);           // 책갈피(outline)가 있으면 목차 버튼 활성화
 
       byId("hint").hidden = false;
       setTimeout(()=>{ byId("hint").hidden = true; }, 6000);
@@ -48,6 +49,22 @@ async function loadPdf(arrayBuffer, name, options={}){
   };
   refreshChrome();
   activateIfIdle(doc, options);          // 단일 열기면 즉시 렌더, 묶음이면 첫 개만
+}
+
+/* ===== PDF 야간 보기(색 반전) =====
+   페이지 캔버스에만 CSS 반전 필터를 걸어 눈부심을 줄인다(화면 표시 전용).
+   필기·서명·강조는 별도 레이어라 원색을 유지하고, 저장·인쇄 결과에는 영향이 없다. */
+let pdfNightMode = (() => { try { return localStorage.getItem("pdfNightMode") === "1"; } catch(e){ return false; } })();
+function applyPdfNightMode(){
+  byId("content").classList.toggle("pdf-night", pdfNightMode);
+  const button = byId("btnPdfNight");
+  if (button) button.classList.toggle("primary", pdfNightMode);
+}
+function togglePdfNightMode(){
+  pdfNightMode = !pdfNightMode;
+  try { localStorage.setItem("pdfNightMode", pdfNightMode ? "1" : "0"); } catch(e){}
+  applyPdfNightMode();
+  toast(pdfNightMode ? "야간 보기 켬 — PDF 페이지 색을 반전해 눈부심을 줄여요. (화면 표시만, 저장 결과는 그대로)" : "야간 보기를 껐어요.", 2600);
 }
 
 // 페이지 placeholder 생성: 크기·오버레이·프레임만 만들고 캔버스는 지연 렌더로 미룬다.

@@ -27,6 +27,13 @@ test(".lesson 입력은 정상 리플레이만 받아들이고 손상된 장면�
   assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:10, s:[] }, { t:5, a:pen() }] }).ok, false);
   assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:0, s:[pen([{ x:1, y:"bad" }])] }] }).ok, false);
   assert.equal(validateLessonPayload({ ...valid, keyframes:new Array(100001).fill({ t:0, s:[] }) }).ok, false);
+
+  const shapeReplay = {
+    format:"manneung-lesson", version:1, kind:"pdf-ink", duration:50,
+    pages:{ 0:{ w:800, h:1200 } },
+    keyframes:[{ t:50, p:0, a:{ tool:"mosaic", color:"#999", width:3, points:[{ x:10, y:20 }, { x:80, y:60 }] } }]
+  };
+  assert.equal(validateLessonPayload(shapeReplay).ok, true);
 });
 
 test("브라우저 작업공간은 새 경로를 병합하고 닫은 경로만 제거한다", () => {

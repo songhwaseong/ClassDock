@@ -8,6 +8,7 @@ const {
   diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
+  officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,

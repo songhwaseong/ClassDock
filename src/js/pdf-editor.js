@@ -1055,6 +1055,7 @@ let penMode = false;
 let penState = { tool: "pen", color: "#e11d48", width: 3 };
 const INK_SUPER = 2;                                  // 잉크 캔버스 내부 해상도 배수(선명도)
 
+const INK_SHAPE_TOOLS = new Set(["arrow", "rect", "mosaic"]);   // 드래그 시작→끝 두 점으로 그리는 도구
 function inkStrokeWidth(tool, w){
   if (tool === "eraser") return Math.max(14, w * 6);
   if (tool === "highlighter") return Math.max(10, w * 5);
@@ -1067,11 +1068,50 @@ function applyInkStyle(ctx, st){
 }
 function drawInkStroke(ctx, st){
   const p = st.points; if (!p || !p.length) return;
+  if (INK_SHAPE_TOOLS.has(st.tool)){ drawInkShape(ctx, st); return; }
   ctx.save(); applyInkStyle(ctx, st);
   ctx.beginPath(); ctx.moveTo(p[0].x, p[0].y);
   for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
   if (p.length === 1) ctx.lineTo(p[0].x + 0.01, p[0].y + 0.01);
   ctx.stroke(); ctx.restore();
+}
+// 도형 스트로크(화살표·사각형·모자이크): points 의 첫 점=시작, 마지막 점=끝 두 점만 사용한다.
+// 잉크 스트로크와 같은 {tool,color,width,points} 모델이라 직렬화·복구·되돌리기·PDF 굽기·리플레이에 그대로 합류.
+function drawInkShape(ctx, st){
+  const p = st.points; if (!p || p.length < 1) return;
+  const a = p[0], b = p[p.length - 1];
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  if (st.tool === "mosaic"){
+    // 개인정보 가리기용 불투명 모자이크 무늬 — 셀 밝기는 좌표 기반 결정적 값(다시 그려도 동일).
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+    const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+    if (w >= 2 && h >= 2){
+      const cell = 8;
+      for (let cy = 0; cy < h; cy += cell){
+        for (let cx = 0; cx < w; cx += cell){
+          const i = (((cx / cell) | 0) * 31 + ((cy / cell) | 0) * 17) % 4;
+          const g = 168 + i * 13;
+          ctx.fillStyle = "rgb(" + g + "," + (g + 2) + "," + (g + 6) + ")";
+          ctx.fillRect(x + cx, y + cy, Math.min(cell, w - cx), Math.min(cell, h - cy));
+        }
+      }
+    }
+  } else {
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = st.width; ctx.strokeStyle = st.color;
+    if (st.tool === "rect"){
+      ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+    } else {   // arrow
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const ang = Math.atan2(b.y - a.y, b.x - a.x), len = 9 + st.width * 2.2;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - len * Math.cos(ang - Math.PI / 7), b.y - len * Math.sin(ang - Math.PI / 7));
+      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - len * Math.cos(ang + Math.PI / 7), b.y - len * Math.sin(ang + Math.PI / 7));
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 function renderInkEl(el){
   const cv = el.__canvas, s = el.__super || INK_SUPER, ctx = cv.getContext("2d");
@@ -1151,9 +1191,10 @@ function ensurePenBar(){
     for (const k in tools) tools[k].classList.toggle("active", k === t);
     const content = byId("content");
     content.classList.toggle("pen-select", t === "select");
-    ["select", "pen", "highlighter", "eraser"].forEach(tool => content.classList.toggle("pen-tool-" + tool, tool === t));
+    ["select", "pen", "highlighter", "eraser", "arrow", "rect", "mosaic"].forEach(tool => content.classList.toggle("pen-tool-" + tool, tool === t));
   };
-  [["select","🖱","선택"],["pen","✏️","펜"],["highlighter","🖍️","형광펜"],["eraser","🧽","지우개"]].forEach(([t,icon,title]) => { const b = mk(icon, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
+  [["select","🖱","선택"],["pen","✏️","펜"],["highlighter","🖍️","형광펜"],["eraser","🧽","지우개"],
+   ["arrow","↗","화살표 (드래그)"],["rect","▭","사각형 (드래그)"],["mosaic","▦","모자이크 — 개인정보 가리기 (드래그)"]].forEach(([t,icon,title]) => { const b = mk(icon, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   const swatches = {};
   const custom = document.createElement("input");
@@ -1288,10 +1329,13 @@ function penPointerDown(e){
   const el = inkElForPage(doc, pageIndex);
   const ctx = el.__canvas.getContext("2d"); ctx.setTransform(el.__super, 0, 0, el.__super, 0, 0);
   const pos = inkPos(e, p, doc);
-  const stroke = { tool: penState.tool, color: penState.color, width: inkStrokeWidth(penState.tool, penState.width), points: [pos] };
+  const shape = INK_SHAPE_TOOLS.has(penState.tool);
+  const stroke = shape
+    ? { tool: penState.tool, color: penState.color, width: penState.width, points: [pos, { x: pos.x, y: pos.y }] }
+    : { tool: penState.tool, color: penState.color, width: inkStrokeWidth(penState.tool, penState.width), points: [pos] };
   el.__strokes.push(stroke);
-  _inkDraw = { doc, el, ctx, p, pageIndex, stroke, last: pos };
-  drawInkSeg(ctx, stroke, pos, pos);
+  _inkDraw = { doc, el, ctx, p, pageIndex, stroke, last: pos, shape };
+  if (shape) renderInkEl(el); else drawInkSeg(ctx, stroke, pos, pos);
   window.addEventListener("pointermove", penPointerMove, true);
   window.addEventListener("pointerup", penPointerUp, true);
   window.addEventListener("pointercancel", penPointerUp, true);
@@ -1300,6 +1344,11 @@ function penPointerMove(e){
   if (!_inkDraw) return;
   e.preventDefault();
   const pos = inkPos(e, _inkDraw.p, _inkDraw.doc);
+  if (_inkDraw.shape){                                // 도형: 끝점만 갱신하고 전체 다시 그려 미리보기
+    _inkDraw.stroke.points[1] = pos;
+    renderInkEl(_inkDraw.el);
+    return;
+  }
   _inkDraw.stroke.points.push(pos);
   drawInkSeg(_inkDraw.ctx, _inkDraw.stroke, _inkDraw.last, pos);
   _inkDraw.last = pos;
@@ -1309,7 +1358,17 @@ function penPointerUp(){
   window.removeEventListener("pointerup", penPointerUp, true);
   window.removeEventListener("pointercancel", penPointerUp, true);
   if (!_inkDraw) return;
-  const { doc, el, pageIndex, stroke } = _inkDraw; _inkDraw = null;
+  const { doc, el, pageIndex, stroke, shape } = _inkDraw; _inkDraw = null;
+  // 클릭만 하고 끌지 않은 도형(2px 미만)은 실수로 보고 버린다.
+  if (shape){
+    const a = stroke.points[0], b = stroke.points[1];
+    if (Math.abs(b.x - a.x) < 2 && Math.abs(b.y - a.y) < 2){
+      const i = el.__strokes.indexOf(stroke);
+      if (i >= 0) el.__strokes.splice(i, 1);
+      renderInkEl(el);
+      return;
+    }
+  }
   renderInkEl(el);                                    // 한 번에 다시 그려 형광펜 알파·지우개 겹침 정리
   recordPdfEdit(doc);                                 // 스트로크 1개 = 되돌리기 1단계
   if (typeof lessonPdfOnStroke === "function") lessonPdfOnStroke(doc, pageIndex, stroke);   // 수업 리플레이 녹화(중일 때만)

@@ -2002,6 +2002,75 @@
       .map((x) => x.path);
   }
 
+  // Office Open XML/HWPX 본문의 XML 엔티티를 텍스트로 되돌린다.
+  function officeXmlDecodeText(value) {
+    return String(value || "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+        try { return String.fromCodePoint(parseInt(hex, 16)); } catch (_) { return ""; }
+      })
+      .replace(/&#(\d+);/g, (_, digits) => {
+        try { return String.fromCodePoint(parseInt(digits, 10)); } catch (_) { return ""; }
+      })
+      .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  }
+
+  // 접두사가 w:/a:/hp:가 아니어도 유효한 Office XML의 <*:t> 실행 텍스트를 읽는다.
+  function officeXmlTextRuns(xml, separator="", maxChars=1500000) {
+    const parts = [];
+    let chars = 0, truncated = false;
+    const runRe = /<(?:[A-Za-z_][\w.-]*:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?t\s*>/gi;
+    let match;
+    while ((match = runRe.exec(String(xml || "")))) {
+      let text = officeXmlDecodeText(match[1]);
+      const separatorCost = parts.length ? separator.length : 0;
+      const remaining = Math.max(0, maxChars - chars - separatorCost);
+      if (text.length > remaining){ text = text.slice(0, remaining); truncated = true; }
+      if (parts.length && separator){ parts.push(separator); chars += separator.length; }
+      parts.push(text); chars += text.length;
+      if (chars >= maxChars){ truncated = true; break; }
+    }
+    return { text:parts.join(""), chars, truncated };
+  }
+
+  // DOCX/HWPX 문단을 한 줄씩 추출한다. split 대신 순차 정규식으로 읽어 큰 XML의 복제 배열을 만들지 않는다.
+  function officeXmlParagraphLines(xml, maxChars=1500000) {
+    const lines = [];
+    let chars = 0, truncated = false;
+    const paraRe = /<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?p\s*>/gi;
+    let match;
+    const source = String(xml || "");
+    while ((match = paraRe.exec(source))) {
+      const remaining = Math.max(0, maxChars - chars);
+      const run = officeXmlTextRuns(match[1], "", remaining);
+      const line = run.text.replace(/\s+/g, " ").trim();
+      lines.push(line); chars += line.length;
+      if (run.truncated || chars >= maxChars){ truncated = true; break; }
+    }
+    return { lines, chars, truncated };
+  }
+
+  // 여러 DOM 텍스트 노드에 걸친 검색어가 어느 노드의 어느 구간과 겹치는지 계산한다.
+  function renderedTextMatchSegments(chunks, query) {
+    const values = (Array.isArray(chunks) ? chunks : []).map(value => String(value || ""));
+    const needle = String(query || "");
+    if (!needle) return [];
+    const at = values.join("").toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+    if (at < 0) return [];
+    const end = at + needle.length;
+    const result = [];
+    let offset = 0;
+    values.forEach((value, index) => {
+      const next = offset + value.length;
+      const startInNode = Math.max(0, at - offset);
+      const endInNode = Math.min(value.length, end - offset);
+      if (startInNode < endInNode) result.push({ index, start:startInNode, end:endInNode });
+      offset = next;
+    });
+    return result;
+  }
+
   // JSON 트리 보기의 한 노드 표시 정보(표시 전용 · DOM과 분리해 단위 테스트 가능).
   // 객체·배열은 자식 수 요약을, 원시값은 코드처럼 보이는 문자열을 돌려준다(긴 문자열은 잘라서 길이 표시).
   function jsonTreeNodeInfo(value, maxString = 200) {
@@ -2074,6 +2143,7 @@
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
+    officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
     studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
   };
 });

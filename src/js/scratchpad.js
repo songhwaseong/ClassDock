@@ -1352,6 +1352,11 @@ function wireScratchpad(){
     setOpen(true, false);
     return addImageBlobs(blobs, options);
   };
+  // 텍스트를 글 블록으로 추가(이미지 OCR 결과 등 외부 모듈용) — 메모장을 열고 새 블록에 넣는다.
+  window.appendTextToScratchpad = (text) => {
+    setOpen(true, false);
+    return insertTextBlock(String(text || ""), false);
+  };
   window.addNotebookCellsToScratchpad = (snapshots, options={}) => {
     setOpen(true, false);
     return addNotebookCells(snapshots, options);

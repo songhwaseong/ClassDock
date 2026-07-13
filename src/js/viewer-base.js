@@ -12,12 +12,14 @@ async function loadOffice(file, ext, options={}){
     if (ext === "docx")      await renderDocx(file, host);
     else if (ext === "pptx") await renderPptx(file, host, options);
     else if (ext === "hwp" || ext === "hwpx") await renderHwp(file, ext, host);
-    else if (ext === "md" || ext === "markdown" || ext === "mdx") await renderMarkdown(file, host, doc);
+    else if (ext === "md" || ext === "markdown" || ext === "mdx") await renderCode(file, host, ext, "text", siblingCtx);   // 미리보기 우선 + [✎ 편집]·저장 (code-viewer 의 isMd 경로)
     else if (ext === "txt")  await renderCode(file, host, "txt", "text");   // 텍스트도 코드뷰로 → 편집 토글·저장 지원
     else if (ext === "html" || ext === "htm" || ext === "xhtml") await renderCode(file, host, ext, "xml", siblingCtx);   // 소스 우선 + [미리보기] 토글로 렌더
 
     else if (CODE_EXTS[ext]) await renderCode(file, host, ext, null, siblingCtx);   // js/py/json/css/sql/xml 등
     else                     await renderXlsx(file, host, doc);   // xlsx / xls / csv (위 else 가 모두 받음 — 중복 호출 제거)
+    // 본문 검색 결과 클릭 → 렌더된 화면에서 일치 글자로 스크롤+하이라이트 (마크다운·CSV 와 같은 통로)
+    if (["docx", "pptx", "hwp", "hwpx"].includes(ext)) doc.contentSearchFocus = (query) => focusRenderedTextMatch(host, query);
   };
   refreshChrome();
   activateIfIdle(doc, options);              // 단일 열기면 즉시 렌더, 묶음이면 첫 개만
@@ -210,26 +212,42 @@ function focusRenderedTextMatch(root, query){
   clearTimeout(root._contentSearchFlashTimer);
   root.querySelectorAll("mark.content-search-flash").forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent || "")));
   root.normalize();
-  const needle = String(query).toLocaleLowerCase();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = null, at = -1;
+  const nodes = [];
+  let node;
   while ((node = walker.nextNode())){
-    at = String(node.nodeValue || "").toLocaleLowerCase().indexOf(needle);
-    if (at >= 0) break;
+    const parent = node.parentElement;
+    if (parent && parent.closest("script,style,noscript")) continue;
+    nodes.push(node);
   }
-  if (!node || at < 0) return false;
-  const mark = document.createElement("mark");
-  mark.className = "content-search-flash";
-  mark.tabIndex = -1;
-  mark.textContent = node.nodeValue.slice(at, at + String(query).length);
-  const before = document.createTextNode(node.nodeValue.slice(0, at));
-  const after = document.createTextNode(node.nodeValue.slice(at + String(query).length));
-  node.replaceWith(before, mark, after);
-  try { mark.focus({ preventScroll:true }); } catch(_) { mark.focus(); }
-  mark.scrollIntoView({ block:"center", inline:"nearest", behavior:"smooth" });
+  const segments = renderedTextMatchSegments(nodes.map(item => item.nodeValue || ""), query);
+  if (!segments.length) return false;
+  const marks = [];
+  // 뒤쪽 노드부터 감싸면 앞 노드의 참조와 인덱스가 바뀌지 않는다. 한 검색어가 여러 서식 span에
+  // 걸쳐 있어도 각 조각을 따로 mark로 감싸 원래 DOM 서식을 보존한다.
+  for (let i = segments.length - 1; i >= 0; i--){
+    const segment = segments[i], textNode = nodes[segment.index];
+    if (!textNode || !textNode.parentNode) continue;
+    const value = textNode.nodeValue || "";
+    const mark = document.createElement("mark");
+    mark.className = "content-search-flash";
+    mark.textContent = value.slice(segment.start, segment.end);
+    const parts = [];
+    if (segment.start > 0) parts.push(document.createTextNode(value.slice(0, segment.start)));
+    parts.push(mark);
+    if (segment.end < value.length) parts.push(document.createTextNode(value.slice(segment.end)));
+    textNode.replaceWith(...parts);
+    marks.unshift(mark);
+  }
+  const first = marks[0];
+  if (!first) return false;
+  first.tabIndex = -1;
+  try { first.focus({ preventScroll:true }); } catch(_) { first.focus(); }
+  first.scrollIntoView({ block:"center", inline:"nearest", behavior:"smooth" });
   root._contentSearchFlashTimer = setTimeout(() => {
-    if (!mark.isConnected) return;
-    mark.replaceWith(document.createTextNode(mark.textContent || ""));
+    marks.forEach(mark => {
+      if (mark.isConnected) mark.replaceWith(document.createTextNode(mark.textContent || ""));
+    });
     root.normalize();
   }, 2400);
   return true;

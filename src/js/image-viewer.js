@@ -534,6 +534,7 @@ function setupImageEditor(file, host, img){
     mkBtn("JPG", "현재 이미지를 JPG로 저장", () => downloadEditedImage(state, file, "jpeg")),
     mkBtn("PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file)),
     mkBtn("📷 메모로", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만", () => sendImageToMemo(state, file)),
+    mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state, file)),
     mkBtn("-", "축소", () => { state.zoom = Math.max(0.1, (state.zoom === null ? 1 : state.zoom) - 0.25); redraw(); }, "img-tool-compact"),
     zoomLabel,
     mkBtn("+", "확대", () => { state.zoom = Math.min(8, (state.zoom === null ? 1 : state.zoom) + 0.25); redraw(); }, "img-tool-compact"),
@@ -1259,6 +1260,82 @@ function sendImageToMemo(state, file){
       saveImageBlobUnified(blob, file, name);
     }
   }, "image/png");
+}
+
+/* ===== 이미지 글자 추출(OCR) =====
+ * 스캔 PDF OCR(pdf-ocr.js)의 도구 로더(동의 + CDN, 한국어+영어)를 그대로 재사용해
+ * 현재 화면의 이미지(자르기 영역이 있으면 그 부분만)에서 글자를 읽어 복사·메모로 보낸다.
+ * 인식은 이 컴퓨터 안에서만 처리되고 이미지가 외부로 전송되지 않는 점도 동일하다. */
+let _imgOcrRunning = false;
+async function extractImageText(state, file){
+  if (_imgOcrRunning){ toast("이미 글자를 인식하는 중이에요.", 2000); return; }
+  if (typeof pdfOcrEnsureTesseract !== "function" || !(await pdfOcrEnsureTesseract())) return;
+  const full = renderForDisplay(state);
+  let cv = full;
+  const crop = state.cropRect;
+  if (crop && crop.w >= 4 && crop.h >= 4){                 // 자르기 영역이 있으면 그 부분만 인식
+    const x = Math.max(0, Math.floor(crop.x)), y = Math.max(0, Math.floor(crop.y));
+    const w = Math.max(1, Math.min(full.width - x, Math.round(crop.w)));
+    const h = Math.max(1, Math.min(full.height - y, Math.round(crop.h)));
+    cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(full, x, y, w, h, 0, 0, w, h);
+  }
+  _imgOcrRunning = true;
+  showLoading("글자 인식 중… (이 컴퓨터 안에서만 처리돼요)");
+  let worker = null, text = "", ok = false;
+  try {
+    worker = await Tesseract.createWorker("kor+eng", 1);
+    const { data } = await worker.recognize(cv);
+    text = String((data && data.text) || "").replace(/[ \t]+\n/g, "\n").trim();
+    ok = true;
+  } catch(e){
+    console.warn("image ocr failed:", e);
+    toast("글자 인식 중 문제가 생겼어요: " + ((e && e.message) || e), 3600, { type: "error" });
+  } finally {
+    if (worker){ try { worker.terminate(); } catch(_){} }
+    hideLoading();
+    _imgOcrRunning = false;
+  }
+  if (!ok) return;
+  if (!text){ toast("읽을 수 있는 글자를 찾지 못했어요. 글자가 크고 선명할수록 잘 인식돼요.", 3600); return; }
+  showImageOcrResult(text);
+}
+
+// 인식 결과 창: 텍스트를 고쳐 쓸 수 있는 칸 + 복사·메모로 보내기.
+function showImageOcrResult(text){
+  const overlay = document.createElement("div"); overlay.className = "modal";
+  const card = document.createElement("div"); card.className = "modal-card"; card.style.width = "min(580px,96%)";
+  const heading = document.createElement("h3"); heading.textContent = "글자 추출 결과";
+  const sub = document.createElement("div"); sub.className = "sub";
+  sub.textContent = "인식이 완벽하지 않을 수 있어요 — 필요한 부분을 고쳐서 복사하세요.";
+  const ta = document.createElement("textarea");
+  ta.className = "img-ocr-text"; ta.value = text; ta.rows = 12;
+  ta.setAttribute("aria-label", "인식된 글자");
+  const actions = document.createElement("div"); actions.className = "modal-actions";
+  const spacer = document.createElement("span"); spacer.className = "spacer";
+  const mkAct = (label, cls) => { const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; return b; };
+  const memoBtn = mkAct("메모에 넣기", "btn");
+  const copyBtn = mkAct("📋 복사", "btn primary");
+  const closeBtn = mkAct("닫기", "btn");
+  const close = () => { overlay.remove(); window.removeEventListener("keydown", onKey, true); };
+  const onKey = (e) => { if (e.key === "Escape"){ e.preventDefault(); close(); } };
+  window.addEventListener("keydown", onKey, true);
+  closeBtn.addEventListener("click", close);
+  copyBtn.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(ta.value); toast("인식한 글자를 복사했어요.", 1800, { type: "success" }); }
+    catch(_){ ta.select(); document.execCommand && document.execCommand("copy"); toast("인식한 글자를 복사했어요.", 1800, { type: "success" }); }
+  });
+  memoBtn.addEventListener("click", () => {
+    if (typeof window.appendTextToScratchpad !== "function"){ toast("메모 기능을 찾지 못했어요 — 복사를 사용해 주세요.", 2600); return; }
+    window.appendTextToScratchpad(ta.value);
+    toast("인식한 글자를 메모에 넣었어요.", 1900, { type: "success" });
+  });
+  actions.append(spacer, memoBtn, copyBtn, closeBtn);
+  card.append(heading, sub, ta, actions);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(card);
+  ta.focus();
 }
 
 function downloadEditedImage(state, file, format){

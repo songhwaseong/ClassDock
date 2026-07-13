@@ -489,6 +489,37 @@ function renderVideoPlayer(file, doc){
   // ---- 자막 도구(영상만 — 오디오는 자막 표시 영역이 없다) ----
   if (doc.media !== "audio"){
     const bar = document.createElement("div"); bar.className = "vv-bar";
+
+    // 프레임 캡처: 현재 장면을 이미지로 떠서 일반 메모에 넣는다(체육 자세·실험 장면 기록용).
+    // 메모를 못 쓰는 환경이면 PNG 다운로드로 폴백.
+    const btnCapture = document.createElement("button");
+    btnCapture.type = "button"; btnCapture.textContent = "📷 장면 캡처";
+    btnCapture.title = "현재 화면(프레임)을 이미지로 캡처해 메모에 넣어요";
+    btnCapture.addEventListener("click", () => {
+      if (!media.videoWidth || !media.videoHeight){
+        if (typeof toast === "function") toast("영상을 먼저 재생하거나 원하는 장면으로 이동해 주세요.", 2600);
+        return;
+      }
+      const cv = document.createElement("canvas");
+      cv.width = media.videoWidth; cv.height = media.videoHeight;
+      try { cv.getContext("2d").drawImage(media, 0, 0); }
+      catch(e){ if (typeof toast === "function") toast("이 영상에서는 화면을 캡처할 수 없어요.", 2600, { type: "error" }); return; }
+      const t = Math.max(0, Math.floor(media.currentTime || 0));
+      const stamp = (t >= 3600 ? Math.floor(t / 3600) + "h" : "")
+        + String(Math.floor(t / 60) % 60).padStart(2, "0") + "m" + String(t % 60).padStart(2, "0") + "s";
+      const base = String(file.name || "video").replace(/\.[^.]+$/, "");
+      const name = base + "_" + stamp + ".png";
+      cv.toBlob((blob) => {
+        if (!blob){ if (typeof toast === "function") toast("캡처 이미지를 만들지 못했어요.", 2400, { type: "error" }); return; }
+        const png = new File([blob], name, { type: "image/png" });
+        if (typeof window.addImagesToScratchpad === "function"){
+          Promise.resolve(window.addImagesToScratchpad([png], { name: base + " " + stamp + " 장면" }))
+            .then(() => { if (typeof toast === "function") toast("현재 장면을 메모에 넣었어요. (" + name + ")", 2200, { type: "success" }); })
+            .catch(() => vvDownloadFile(png));                     // 메모 실패 → 파일 다운로드 폴백
+        } else vvDownloadFile(png);
+      }, "image/png");
+    });
+
     const btnOpen = document.createElement("button");
     btnOpen.type = "button"; btnOpen.textContent = "자막 열기";
     btnOpen.title = "SRT · VTT · SMI 자막 파일을 이 영상에 연결 (한글 인코딩 자동 인식)";
@@ -583,7 +614,7 @@ function renderVideoPlayer(file, doc){
       applyCueSize();
     });
 
-    bar.append(btnOpen, btnToggle, btnSize, status, picker);
+    bar.append(btnCapture, btnOpen, btnToggle, btnSize, status, picker);
     wrap.appendChild(bar);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   }
