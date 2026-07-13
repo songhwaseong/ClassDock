@@ -87,6 +87,10 @@
   .welcome-steps li{display:flex;gap:12px;align-items:flex-start}
   .welcome-step-ico{flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;font-size:19px;
     background:var(--panel);border:1px solid var(--border);border-radius:9px}
+  .ui-icon{width:1em;height:1em;display:inline-block;vertical-align:-.13em;flex:0 0 auto}
+  .ui-symbol{display:inline-flex;align-items:center;justify-content:center;width:1em;height:1em;vertical-align:-.13em}
+  .ui-symbol .ui-icon{width:1em;height:1em;vertical-align:0}
+  .welcome-step-ico .ui-icon{width:19px;height:19px}
   .welcome-steps b{display:block;font-size:14px;margin-bottom:2px;color:var(--ink)}
   .welcome-steps small{color:var(--muted);font-size:12.5px;line-height:1.5}
   .welcome-safe{margin:16px 0 0;padding:9px 12px;background:var(--panel);border:1px solid var(--border);
@@ -1014,7 +1018,9 @@
     cursor:pointer;font:inherit;transition:border-color .12s,transform .12s}
   .snippet-card:hover{border-color:var(--accent);transform:translateY(-2px)}
   .snippet-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
-  .snippet-emoji{font-size:22px;line-height:1}
+  .snippet-emoji{font-size:22px;line-height:1;color:var(--accent)}
+  .snippet-emoji .ui-icon{width:22px;height:22px;vertical-align:0}
+  .cmdk-item-ico{display:none}
   .snippet-level{font-size:10px;line-height:1;letter-spacing:-1px;flex:none;opacity:.9}
   .snippet-title{font-size:13px;font-weight:700;text-align:left;line-height:1.25}
   .snippet-desc{font-size:11.5px;color:var(--muted);line-height:1.35;

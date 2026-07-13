@@ -11,6 +11,7 @@
     "theme.js",
     "i18n.js",
     "core.js",
+    "icons.js",
     "state.js",
     "pdf-recovery.js",
     "video-viewer.js",

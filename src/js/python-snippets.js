@@ -8,7 +8,7 @@ const PY_SNIPPETS = [
   { cat:"기초·출력", title:"Hello, Python", emoji:"👋", name:"hello.py", code:
 `name = "파이썬"
 print("Hello,", name)
-print("환영합니다! 🐍")
+print("환영합니다!")
 ` },
   { cat:"기초·출력", title:"이름 인사 (입력)", emoji:"🙋", name:"인사.py", code:
 `name = input("이름이 뭐예요? ")
@@ -189,7 +189,7 @@ print("이번 주 행운의 번호:", nums)
   { cat:"random·게임", title:"주사위 굴리기", emoji:"🎲", name:"주사위.py", code:
 `import random
 for _ in range(5):
-    print("🎲", random.randint(1, 6))
+    print(random.randint(1, 6))
 ` },
   { cat:"random·게임", title:"가위바위보", emoji:"✊", name:"가위바위보.py", code:
 `import random
@@ -208,7 +208,7 @@ while True:
     elif guess > answer:
         print("DOWN ↓")
     else:
-        print("정답! 🎉")
+        print("정답!")
         break
 ` },
   { cat:"random·게임", title:"동전 던지기 통계", emoji:"🪙", name:"동전.py", code:
@@ -1200,6 +1200,20 @@ print(" ".join(sentence))
 ` },
 ];
 
+function snippetIcon(snippet) {
+  const category = String(snippet.cat || "");
+  if (category.includes("그래프")) return "graph";
+  if (category.includes("random") || category.includes("시뮬레이션")) return "dice";
+  if (category.includes("수학") || category.includes("알고리즘") || category.includes("정렬")) return "math";
+  if (category.includes("문자열")) return "text";
+  if (category.includes("리스트") || category.includes("딕셔너리")) return "list";
+  if (category.includes("날짜")) return "clock";
+  if (category.includes("함수") || category.includes("클래스")) return "function";
+  if (category.includes("예외")) return "warning";
+  if (category.includes("응용")) return "puzzle";
+  return "code";
+}
+
 // ===== 예제 학습 메타데이터 =====
 // 각 예제에 난이도(level 1~5)·한 줄 설명(desc)·배우는 개념(learn)을 더한다.
 // 코드 블록을 건드리지 않도록 PY_SNIPPETS 와 "같은 순서"의 병렬 배열로 두고 아래에서 병합한다.
@@ -1388,7 +1402,7 @@ function openSnippetGallery(){
       const b = document.createElement("button"); b.type = "button"; b.className = "snippet-card"; b.title = s.name;
       if (lvInfo){ b.classList.add("lv" + s.level); b.setAttribute("aria-label", s.title + " · " + lvInfo.label + " · " + (s.desc || "")); }
       const top = document.createElement("span"); top.className = "snippet-top";
-      const em = document.createElement("span"); em.className = "snippet-emoji"; em.textContent = s.emoji;
+      const em = document.createElement("span"); em.className = "snippet-emoji"; em.innerHTML = uiIcon(snippetIcon(s));
       top.appendChild(em);
       if (lvInfo){ const lv = document.createElement("span"); lv.className = "snippet-level"; lv.textContent = lvInfo.star; lv.title = lvInfo.label; top.appendChild(lv); }
       const t = document.createElement("span"); t.className = "snippet-title"; t.textContent = s.title;

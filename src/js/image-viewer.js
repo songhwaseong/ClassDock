@@ -30,7 +30,7 @@ function galleryFolderContainsDoc(folderNode, doc, includeChildren){
 
 function folderGalleryImageDocs(folderNode, includeChildren){
   return docs
-    .filter(doc => doc.sourceFile && galleryFolderContainsDoc(folderNode, doc, includeChildren))
+    .filter(doc => doc.kind === "image" && doc.sourceFile && galleryFolderContainsDoc(folderNode, doc, includeChildren))
     .sort((a, b) => String(a.relPath || a.name).localeCompare(String(b.relPath || b.name), "ko", { numeric:true, sensitivity:"base" }));
 }
 

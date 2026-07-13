@@ -32,7 +32,7 @@
       <button id="btnOutline" type="button" title="문서 목차(책갈피)로 이동" disabled>목차</button>
       <button id="btnPages" type="button" title="페이지 썸네일·추출·정리">썸네일·정리</button>
       <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
-      <button id="btnPdfNight" type="button" title="PDF 페이지 색을 반전해 눈부심 줄이기 (화면 표시만 바뀌고 저장에는 영향 없음)">🌙 야간 보기</button>
+      <button id="btnPdfNight" type="button" title="PDF 페이지 색을 반전해 눈부심 줄이기 (화면 표시만 바뀌고 저장에는 영향 없음)">야간 보기</button>
     </div></details>
     <input type="file" id="mergePdfInput" accept=".pdf,application/pdf" multiple hidden>
     <span class="spacer"></span>
@@ -547,14 +547,14 @@
 </div>
 <div class="modal" id="welcomeModal" hidden>
   <div class="modal-card welcome-card">
-    <h3>만능파일교실에 오신 걸 환영해요 👋</h3>
+    <h3>만능파일교실에 오신 걸 환영해요</h3>
     <p class="welcome-lead" data-i18n="welcome.lead">설치 없이 PDF·엑셀·이미지·파이썬을 한 창에서 열고 다뤄요. 아래 3가지만 알면 바로 시작할 수 있어요.</p>
     <ol class="welcome-steps">
-      <li data-i18n="welcome.step1"><span class="welcome-step-ico">📂</span><div><b>1. 파일 열기</b><small>화면에 파일을 끌어다 놓거나 왼쪽 아래 <b>열기</b> 버튼을 눌러요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
-      <li data-i18n="welcome.step2"><span class="welcome-step-ico">🐍</span><div><b>2. 파이썬 실행</b><small>코드를 쓰고 <b>▶ 실행</b>(또는 <kbd>Ctrl+Enter</kbd>)을 누르면 바로 결과가 나와요. 파이썬을 설치하지 않아도 돼요.</small></div></li>
-      <li data-i18n="welcome.step3"><span class="welcome-step-ico">💾</span><div><b>3. 저장</b><small>편집한 PDF·코드는 <b>다운로드</b>하거나 저장 폴더에 저장돼요. 원본은 그대로 남아요.</small></div></li>
+      <li data-i18n="welcome.step1"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3z"/></svg></span><div><b>1. 파일 열기</b><small>화면에 파일을 끌어다 놓거나 왼쪽 아래 <b>열기</b> 버튼을 눌러요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
+      <li data-i18n="welcome.step2"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M15 5l5 5-5 5M13 3l-2 14"/></svg></span><div><b>2. 파이썬 실행</b><small>코드를 쓰고 <b>▶ 실행</b>(또는 <kbd>Ctrl+Enter</kbd>)을 누르면 바로 결과가 나와요. 파이썬을 설치하지 않아도 돼요.</small></div></li>
+      <li data-i18n="welcome.step3"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg></span><div><b>3. 저장</b><small>편집한 PDF·코드는 <b>다운로드</b>하거나 저장 폴더에 저장돼요. 원본은 그대로 남아요.</small></div></li>
     </ol>
-    <p class="welcome-safe" data-i18n="welcome.safe">🔒 파일은 외부로 전송되지 않고, 이 컴퓨터 안에서만 처리돼요.</p>
+    <p class="welcome-safe" data-i18n="welcome.safe">파일은 외부로 전송되지 않고, 이 컴퓨터 안에서만 처리돼요.</p>
     <div class="modal-actions">
       <button class="btn" id="welcomeExamples" type="button">✨ 파이썬 예제로 시작</button>
       <span class="spacer"></span>
@@ -647,6 +647,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <!-- 압축(zip) 풀기 + 암호 ZIP(AES) 지원 -->
 <script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip-full.min.js"></script>
 <script src="src/js/core.js"></script>
+<script src="src/js/icons.js"></script>
 <script src="src/js/state.js"></script>
 <script src="src/js/pdf-recovery.js"></script>
 <script src="src/js/video-viewer.js"></script>
