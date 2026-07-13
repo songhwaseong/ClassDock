@@ -219,8 +219,23 @@ function wireImageMemo(){
     previewY = 0;
     applyPreviewTransform();
   };
+  let previewIdleTimer = null;
+  const armPreviewIdle = () => {
+    clearTimeout(previewIdleTimer);
+    if (!preview || preview.hidden) return;
+    previewIdleTimer = setTimeout(() => {
+      if (preview && !preview.hidden && !previewStage.classList.contains("dragging")) preview.classList.add("tools-idle");
+    }, 2500);
+  };
+  const showPreviewTools = () => {
+    if (!preview || preview.hidden) return;
+    preview.classList.remove("tools-idle");
+    armPreviewIdle();
+  };
   const closePreview = (restoreFocus=true) => {
     if (!preview || preview.hidden) return;
+    clearTimeout(previewIdleTimer);
+    preview.classList.remove("tools-idle");
     preview.hidden = true;
     previewEntry = null;
     previewImage.removeAttribute("src");
@@ -236,6 +251,7 @@ function wireImageMemo(){
     previewImage.onload = fitPreview;
     previewImage.src = entry.url;
     preview.hidden = false;
+    showPreviewTools();
     requestAnimationFrame(() => {
       if (previewImage.complete) fitPreview();
       previewStage.focus();
@@ -623,6 +639,7 @@ function wireImageMemo(){
   saveButton.addEventListener("click", saveAll);
 
   if (preview){
+    preview.addEventListener("mousemove", showPreviewTools, { passive:true });
     previewClose.addEventListener("click", () => closePreview());
     preview.addEventListener("click", (event) => { if (event.target === preview) closePreview(); });
     zoomOutButton.addEventListener("click", () => setPreviewZoom(previewZoom / 1.2));
@@ -632,6 +649,7 @@ function wireImageMemo(){
     previewStage.addEventListener("wheel", (event) => {
       event.preventDefault();
       setPreviewZoom(previewZoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12), event.clientX, event.clientY);
+      showPreviewTools();
     }, { passive:false });
     previewStage.addEventListener("dblclick", () => {
       if (Math.abs(previewZoom - 1) < 0.02) fitPreview();

@@ -611,6 +611,10 @@
   .image-memo-preview-tools button:hover{background:rgba(255,255,255,.16)}
   .image-memo-preview-tools span{min-width:52px;text-align:center;font:12px Consolas,"Courier New",monospace}
   .image-memo-preview-tools small{margin-left:8px;color:#94a3b8;font-size:10.5px}
+  /* 확대 미리보기 유휴 자동 숨김: 마우스가 멈추면 상단·하단 바가 흐려졌다가 움직이면 다시 나타남 */
+  .image-memo-preview-head,.image-memo-preview-tools{transition:opacity .2s ease}
+  .image-memo-preview.tools-idle .image-memo-preview-head,
+  .image-memo-preview.tools-idle .image-memo-preview-tools{opacity:0;pointer-events:none}
   @media(max-width:640px){
     .image-memo{border-radius:10px}
     .image-memo-head{border-radius:10px 10px 0 0;cursor:default}
@@ -785,8 +789,10 @@
   }
   /* 일반 화면: PDF 보기일 때 화면 오른쪽 위에 떠 있는 페이지 컨트롤(학습 화면과 같은 모양) */
   .view-page-ctl{position:absolute;top:10px;right:16px;z-index:14;display:none;
-    padding:5px 8px;border-radius:8px;background:rgba(15,23,42,.82);box-shadow:0 4px 14px rgba(0,0,0,.3)}
+    padding:5px 8px;border-radius:8px;background:rgba(15,23,42,.82);box-shadow:0 4px 14px rgba(0,0,0,.3);
+    transition:opacity .25s ease, transform .25s ease}
   #content.pdf-active .view-page-ctl{display:inline-flex}
+  #content.pdf-active.pdf-ctl-idle .view-page-ctl{opacity:0;transform:translateY(-8px);pointer-events:none}  /* 유휴 시 숨김(마우스 움직이면 재노출) */
   #content.study-mode .view-page-ctl{display:none}                      /* 학습 화면은 전용 컨트롤 사용 */
   #content:fullscreen.pdf-active .view-page-ctl,
   body.viewer-fullscreen #content.pdf-active .view-page-ctl{display:none}  /* 전체화면은 fs 컨트롤 사용(네이티브·폴백 모두) */

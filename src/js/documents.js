@@ -278,6 +278,39 @@ function stopStudyControlsAutoHide(){
   clearTimeout(studyControlsTimer);
   const c = byId("content"); if (c) c.classList.remove("study-idle");
 }
+// ── 일반 PDF 단독 뷰의 우측 상단 바(줌·페이지) 자동 숨김 — study 바와 같은 유휴 방식 ──
+let pdfControlsTimer = null;
+const PDF_CTL_IDLE_MS = 3000;
+function pdfControlsActive(){
+  const c = byId("content");
+  return !!(c && c.classList.contains("pdf-active") && !c.classList.contains("study-mode") && !isViewerFullscreen());
+}
+// 페이지 번호 입력 중·찾기창 열림 중에는 숨기지 않는다
+function pdfControlsBusy(){
+  const ae = document.activeElement;
+  const ctl = byId("pageCtl");
+  if (ctl && ae && ctl.contains(ae)) return true;
+  if (document.querySelector(".pdf-find:not([hidden])")) return true;
+  return false;
+}
+function armPdfControlsTimer(){
+  clearTimeout(pdfControlsTimer);
+  if (!pdfControlsActive()) return;
+  pdfControlsTimer = setTimeout(() => {
+    if (!pdfControlsActive()) return;
+    if (pdfControlsBusy()){ armPdfControlsTimer(); return; }   // 상호작용 중이면 다시 대기
+    const c = byId("content"); if (c) c.classList.add("pdf-ctl-idle");
+  }, PDF_CTL_IDLE_MS);
+}
+function showPdfControls(){
+  if (!pdfControlsActive()) return;
+  const c = byId("content"); if (c) c.classList.remove("pdf-ctl-idle");
+  armPdfControlsTimer();
+}
+function stopPdfControlsAutoHide(){
+  clearTimeout(pdfControlsTimer);
+  const c = byId("content"); if (c) c.classList.remove("pdf-ctl-idle");
+}
 function scheduleViewerLayoutRefresh(){
   setTimeout(() => {
     const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
@@ -379,6 +412,7 @@ function setActiveDoc(id){
   }
   const d = docs.find(x => x.id === id);
   byId("content").classList.toggle("pdf-active", !!d && d.kind === "pdf");   // 일반 화면 플로팅 페이지 컨트롤 표시 조건
+  if (d && d.kind === "pdf") showPdfControls(); else stopPdfControlsAutoHide();   // PDF 단독 뷰일 때만 바 유휴 자동 숨김 시작
 
   // 전환은 직전·현재 두 문서만 토글한다(모든 문서를 매번 훑지 않아 파일 많은 묶음에서 클릭이 빨라짐).
   // 학습 화면의 고정 PDF는 이 함수 끝의 applyStudyLayout 이 다시 표시한다.

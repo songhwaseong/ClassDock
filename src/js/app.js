@@ -235,7 +235,10 @@ function wire(){
   ["mousemove","mousedown","touchstart","keydown"].forEach(ev => {
     window.addEventListener(ev, () => {
       if (isViewerFullscreen()) showFullscreenControls();
-      else if (typeof showStudyControls === "function") showStudyControls();   // 분할화면 바 재노출
+      else {
+        if (typeof showStudyControls === "function") showStudyControls();   // 분할화면 바 재노출
+        if (typeof showPdfControls === "function") showPdfControls();       // PDF 단독 뷰 우측 상단 바 재노출
+      }
     }, { passive: true });
   });
   document.addEventListener("fullscreenchange", () => {
