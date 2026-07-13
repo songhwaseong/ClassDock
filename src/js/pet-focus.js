@@ -117,6 +117,7 @@ function petFocusUpdateUi(){
   open.classList.toggle("break", phase === "break" && petFocusState.running);
   open.classList.toggle("paused", phase !== "idle" && !petFocusState.running);
   panel.classList.toggle("break", phase === "break");
+  petFocusSyncSetup(phase);
   if (typeof petUsesEnglish === "function" && petUsesEnglish()){
     petFocusRenderEnglish(settings, phase, progress, time, open, openText, phaseEl, timeEl, message, bar, progressEl, start, pause, stop);
     return;
@@ -144,6 +145,38 @@ function petFocusUpdateUi(){
   stop.textContent = phase === "break" ? "휴식 끝내기" : "종료";
   const stats = petFocusStatsLoad();
   petFocusEl("petFocusStats").textContent = "오늘 집중 완료 " + stats.cycles + "회";
+}
+// 대기 상태에서만 집중·휴식 시간을 직접 입력받는다(진행 중에는 숨겨 잠금).
+function petFocusSyncSetup(phase){
+  const setup = petFocusEl("petFocusSetup");
+  if (!setup) return;
+  const idle = phase === "idle";
+  setup.hidden = !idle;
+  if (!idle) return;
+  const english = typeof petUsesEnglish === "function" && petUsesEnglish();
+  const settings = petFocusSettings();
+  const focusInput = petFocusEl("petFocusSetFocus"), breakInput = petFocusEl("petFocusSetBreak");
+  const focusLabel = petFocusEl("petFocusSetFocusLabel"), breakLabel = petFocusEl("petFocusSetBreakLabel");
+  if (focusLabel) focusLabel.textContent = english ? "Focus" : "집중";
+  if (breakLabel) breakLabel.textContent = english ? "Break" : "휴식";
+  setup.querySelectorAll(".pet-focus-setup-unit").forEach((el) => { el.textContent = english ? "min" : "분"; });
+  // 입력 중인 칸은 건드리지 않아 타이핑을 방해하지 않는다.
+  if (focusInput && document.activeElement !== focusInput) focusInput.value = String(settings.focusMin);
+  if (breakInput && document.activeElement !== breakInput) breakInput.value = String(settings.breakMin);
+}
+function petFocusApplySetup(){
+  if (petFocusState.phase !== "idle") return;
+  const focusInput = petFocusEl("petFocusSetFocus"), breakInput = petFocusEl("petFocusSetBreak");
+  if (!focusInput || !breakInput) return;
+  const cur = petFocusSettings();
+  const focusRaw = Math.round(Number(focusInput.value)), breakRaw = Math.round(Number(breakInput.value));
+  const focusMin = Number.isFinite(focusRaw) ? Math.min(180, Math.max(1, focusRaw)) : cur.focusMin;
+  const breakMin = Number.isFinite(breakRaw) ? Math.min(60, Math.max(1, breakRaw)) : cur.breakMin;
+  const next = { ...cur, focusMin, breakMin };
+  if (typeof saveAppSettings === "function") saveAppSettings({ petFocus:next });
+  else if (typeof appSettings === "object" && appSettings) appSettings.petFocus = next;
+  focusInput.value = String(focusMin); breakInput.value = String(breakMin);
+  petFocusUpdateUi();
 }
 function petFocusStartOrResume(){
   const settings = petFocusSettings();
@@ -238,6 +271,9 @@ function initPetFocus(){
   petFocusEl("petFocusStart").addEventListener("click", petFocusStartOrResume);
   petFocusEl("petFocusPause").addEventListener("click", petFocusPause);
   petFocusEl("petFocusStop").addEventListener("click", () => petFocusStop(true));
+  const setFocus = petFocusEl("petFocusSetFocus"), setBreak = petFocusEl("petFocusSetBreak");
+  if (setFocus) setFocus.addEventListener("change", petFocusApplySetup);
+  if (setBreak) setBreak.addEventListener("change", petFocusApplySetup);
   document.addEventListener("click", () => petFocusSetPanel(false));
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) petFocusSetPanel(false); });
   document.addEventListener("beforeinput", petFocusTypingInput, true);

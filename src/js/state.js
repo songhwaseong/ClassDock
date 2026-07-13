@@ -89,11 +89,11 @@ function normalizeScreensaver(value){
 }
 function normalizePetFocus(value){
   const s = value && typeof value === "object" ? value : {};
-  const focusMin = Number(s.focusMin), breakMin = Number(s.breakMin);
+  const focusMin = Math.round(Number(s.focusMin)), breakMin = Math.round(Number(s.breakMin));
   return {
     enabled: s.enabled !== false,
-    focusMin: [15, 25, 40, 50].includes(focusMin) ? focusMin : 25,
-    breakMin: [3, 5, 10].includes(breakMin) ? breakMin : 5,
+    focusMin: Number.isFinite(focusMin) ? Math.min(180, Math.max(1, focusMin)) : 25,
+    breakMin: Number.isFinite(breakMin) ? Math.min(60, Math.max(1, breakMin)) : 5,
     quietTyping: s.quietTyping !== false
   };
 }

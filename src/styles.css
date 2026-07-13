@@ -147,6 +147,10 @@
   .pet-focus-panel.break .pet-focus-time{color:#059669}
   .pet-focus-panel.break .pet-focus-progress span{background:#10b981}
   .pet-focus-message{min-height:34px;margin:10px 0 9px;color:var(--muted);font-size:11.5px;line-height:1.45;text-align:center}
+  .pet-focus-setup{display:flex;justify-content:center;gap:12px;margin:0 0 11px}
+  .pet-focus-setup[hidden]{display:none}
+  .pet-focus-setup-field{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
+  header .pet-focus-setup-field input{width:54px;padding:5px 6px;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--ink);font-size:13px;text-align:center}
   .pet-focus-controls{display:flex;justify-content:center;gap:7px}
   header .pet-focus-controls .btn{padding:7px 11px;border:1px solid var(--border);background:var(--panel-2);color:var(--ink);font-size:12px}
   header .pet-focus-controls .btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}

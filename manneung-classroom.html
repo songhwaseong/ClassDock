@@ -75,6 +75,10 @@
       <div class="pet-focus-time" id="petFocusTime">25:00</div>
       <div class="pet-focus-progress" id="petFocusProgress" role="progressbar" aria-label="집중 시간 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="petFocusProgressBar"></span></div>
       <p class="pet-focus-message" id="petFocusMessage">펫들과 함께 집중할 준비를 해보세요.</p>
+      <div class="pet-focus-setup" id="petFocusSetup">
+        <label class="pet-focus-setup-field"><span id="petFocusSetFocusLabel">집중</span><input type="number" id="petFocusSetFocus" min="1" max="180" step="1" inputmode="numeric" aria-label="집중 시간(분)"><span class="pet-focus-setup-unit">분</span></label>
+        <label class="pet-focus-setup-field"><span id="petFocusSetBreakLabel">휴식</span><input type="number" id="petFocusSetBreak" min="1" max="60" step="1" inputmode="numeric" aria-label="휴식 시간(분)"><span class="pet-focus-setup-unit">분</span></label>
+      </div>
       <div class="pet-focus-controls">
         <button class="btn primary" id="petFocusStart" type="button">집중 시작</button>
         <button class="btn" id="petFocusPause" type="button" hidden>일시정지</button>
@@ -440,7 +444,7 @@
       <label class="settings-check"><input type="checkbox" id="settingPet"><span>픽셀 펫 — 작은 캐릭터들이 화면·창 위를 돌아다닙니다 (붙잡아 던지기 가능)</span></label>
       <div class="settings-row"><span>픽셀 펫 마릿수</span><select id="settingPetCount" class="pw-input"><option value="1">1마리</option><option value="2">2마리</option><option value="3">3마리</option><option value="4">4마리</option><option value="6">6마리</option><option value="8">8마리</option><option value="10">10마리</option><option value="12">12마리</option></select></div>
       <label class="settings-check"><input type="checkbox" id="settingPetFocus"><span>펫 집중 모드 — 집중 중에는 조용히 쉬고, 휴식 때 함께 스트레칭</span></label>
-      <div class="settings-row pet-focus-setting-row"><span>집중·휴식 시간</span><span class="pet-focus-setting-selects"><select id="settingPetFocusMin" class="pw-input" aria-label="집중 시간"><option value="15">15분 집중</option><option value="25">25분 집중</option><option value="40">40분 집중</option><option value="50">50분 집중</option></select><select id="settingPetBreakMin" class="pw-input" aria-label="휴식 시간"><option value="3">3분 휴식</option><option value="5">5분 휴식</option><option value="10">10분 휴식</option></select></span></div>
+      <div class="settings-row pet-focus-setting-row"><span>집중·휴식 시간(분)</span><span class="pet-focus-setting-selects"><input type="number" id="settingPetFocusMin" class="pw-input" min="1" max="180" step="1" inputmode="numeric" aria-label="집중 시간(분)"><input type="number" id="settingPetBreakMin" class="pw-input" min="1" max="60" step="1" inputmode="numeric" aria-label="휴식 시간(분)"></span></div>
       <label class="settings-check"><input type="checkbox" id="settingPetQuietTyping"><span>타이핑하는 동안 펫이 화면 가장자리에서 조용히 기다리기</span></label>
       <div class="settings-row"><span>펫 도감 — 지금까지 만난 친구들</span><button class="btn" id="btnPetDex" type="button">열어 보기</button></div>
       <div class="settings-row"><span>펫 대사 — 클릭하면 말하는 말풍선 직접 쓰기</span><button class="btn" id="btnPetSay" type="button">편집</button></div>
