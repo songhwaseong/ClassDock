@@ -320,7 +320,9 @@ function scheduleViewerLayoutRefresh(){
 }
 
 function makeGroup(kind, name, parentId=null){
-  const node = { nodeId: "group:" + (++navSeq), type: "group", kind, name, parentId, expanded: true };
+  // 새 폴더/압축 그룹은 접힌 채로 시작한다. 폴더를 열면 배치 종료 후 첫 문서가 활성화되고,
+  // focusSidebarDoc 가 그 문서의 상위 폴더 체인(루트 포함)만 펼친다 → "열린 탭의 폴더만 펼침".
+  const node = { nodeId: "group:" + (++navSeq), type: "group", kind, name, parentId, expanded: false };
   navNodes.push(node);
   bumpNavTree();
   renderSidebar();
@@ -753,6 +755,30 @@ function focusSidebarDoc(id){
   }
 }
 function focusSidebarActive(){ focusSidebarDoc(activeId); }
+
+// 활성 문서의 상위 폴더 체인만 펼치고 나머지 그룹은 모두 접는다 → "정확히 활성 탭 하나만 펼침".
+// 폴더 열기·드롭·자동복원이 끝나는 순간에만 호출한다(탭 전환·수동 펼침은 건드리지 않는다).
+function collapseToActiveBranch(){
+  if (sidebarCollapsed) return;
+  const d = docs.find(x => x.id === activeId);
+  if (!d) return;
+  const keep = new Set();                          // 활성 문서의 상위 그룹(루트 포함)만 펼쳐 둔다
+  let node = navNodeById(d.nodeId);
+  while (node && node.parentId != null){
+    const parent = navNodeById(node.parentId);
+    if (!parent) break;
+    if (parent.type === "group") keep.add(parent.nodeId);
+    node = parent;
+  }
+  let changed = false;
+  for (const n of navNodes){
+    if (n.type !== "group") continue;
+    const want = keep.has(n.nodeId);
+    if (n.expanded !== want){ n.expanded = want; changed = true; }
+  }
+  if (changed) renderSidebar();
+  focusSidebarActive();                            // 정리 후 활성 항목이 보이도록 스크롤
+}
 
 // 문서당 상호작용 부착(지연): 손바닥 도구 관찰자 + 분할화면 읽기전용 가드 + 사이드바 포커스.
 // makeDoc 시점이 아니라 처음 화면에 쓰일 때 한 번만 붙여, 대량 폴더 열기의 문서당 고정 비용을 없앤다.

@@ -597,7 +597,9 @@ function queueFolder(fileList, options={}){
           .map(path => path.split("/")[0]))];
     if (files.length || folderPaths.length)
       await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths });
-  })).catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
+  }))
+    .then(() => collapseToActiveBranch())   // 폴더를 연 순간엔 활성 파일의 폴더 체인만 펼쳐 둔다
+    .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }
 
@@ -1079,6 +1081,7 @@ function queueDroppedItems(dataTransfer){
         await rememberWorkspace(collected, navNodes.length === 0, { folderPaths });
       await openFolderFiles(collected, { folderPaths });
     }))
+    .then(() => collapseToActiveBranch())   // 폴더 드롭도 활성 파일의 폴더 체인만 펼쳐 둔다
     .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }

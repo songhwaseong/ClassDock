@@ -449,6 +449,7 @@ async function restoreLastWorkspace(){
     endUiBatch();
     applyTabState(savedTabs);   // 파일이 모두 열린 뒤 탭 순서·활성 탭 복원
     restoreStudyState(savedTabs); // 참고·작업 문서 짝도 마지막에 다시 구성
+    collapseToActiveBranch();   // 복원 완료 후 활성 탭의 폴더 체인만 남기고 나머지는 접는다(배치 대표·활성 탭 이중 펼침 정리)
     tabRestoreInProgress = false;
   }
 }
