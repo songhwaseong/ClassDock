@@ -1270,7 +1270,6 @@ function finishPythonDiagnostics(rawReport, ui){
   }
   if (!diagnostics.length){
     if (ui && ui.clearError) ui.clearError();
-    toast("발견된 문제가 없습니다.", 2600, { type:"success" });
     return { errors, warnings, total:0, failed:false };
   }
 
