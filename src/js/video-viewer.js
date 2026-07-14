@@ -122,7 +122,8 @@ function vvDownloadFile(file){
  * — 한 번 돌려두면 그다음부터는 mp4 를 바로 열면 된다. */
 
 // 일괄 변환 대상: 브라우저 재생이 자주 막히는 컨테이너만(잘 재생되는 mp4·webm 등은 제외)
-const VV_BATCH_EXTS = ["mkv","avi","wmv","flv"];
+// MOV는 크롬·엣지에서는 대개 재생되지만 Firefox가 컨테이너 자체를 못 읽어 포함
+const VV_BATCH_EXTS = ["mkv","avi","wmv","flv","mov"];
 
 // 문서가 속한 최상위 폴더 그룹(폴더 새로고침 루트) — 일괄 변환의 기준 폴더
 function vvDocFolderRoot(doc){
@@ -210,7 +211,7 @@ async function vvBatchConvertFolder(rootId){
   const root = (typeof navNodes !== "undefined") ? navNodes.find(n => n.nodeId === rootId) : null;
   const targets = vvFolderVideoTargets(rootId);
   if (!targets.length){
-    if (typeof toast === "function") toast("이 폴더에 일괄 변환할 영상(MKV·AVI·WMV·FLV)이 없어요.", 3200);
+    if (typeof toast === "function") toast("이 폴더에 일괄 변환할 영상(MKV·AVI·WMV·FLV·MOV)이 없어요.", 3200);
     return;
   }
   if (!(await vvMediaBackendAvailable())){
@@ -355,7 +356,7 @@ function renderVideoPlayer(file, doc){
       if (rootNode && vvFolderVideoTargets(rootNode.nodeId).length > 1){
         const batchBtn = document.createElement("button");
         batchBtn.type = "button"; batchBtn.textContent = "폴더 전체 변환";
-        batchBtn.title = "이 폴더의 MKV·AVI·WMV·FLV 영상을 한꺼번에 MP4로 변환해 폴더에 저장해요 (한 번만 하면 됨)";
+        batchBtn.title = "이 폴더의 MKV·AVI·WMV·FLV·MOV 영상을 한꺼번에 MP4로 변환해 폴더에 저장해요 (한 번만 하면 됨)";
         batchBtn.addEventListener("click", () => vvBatchConvertFolder(rootNode.nodeId));
         noticeEl.appendChild(batchBtn);
       }

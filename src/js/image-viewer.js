@@ -364,7 +364,7 @@ function renderImage(file, host){
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      setupImageEditor(file, host, img);
+      setupImageEditor(file, host, img, docs.find(doc => doc.el === host) || null);
       resolve();
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("이미지 로드 실패")); };
@@ -372,7 +372,7 @@ function renderImage(file, host){
   });
 }
 
-function setupImageEditor(file, host, img){
+function setupImageEditor(file, host, img, ownerDoc=null){
   const state = {
     img, rotation: 0, flipX: false, flipY: false, zoom: null,
     cropMode: false, cropRect: null, cropRatio: null, dragStart: null, output: null,
@@ -530,8 +530,8 @@ function setupImageEditor(file, host, img){
     cropBtn,
     applyCropBtn,
     cropRatioWrap,
-    mkBtn("PNG", "현재 이미지를 PNG로 저장", () => downloadEditedImage(state, file, "png")),
-    mkBtn("JPG", "현재 이미지를 JPG로 저장", () => downloadEditedImage(state, file, "jpeg")),
+    mkBtn("PNG", "현재 이미지를 PNG로 저장", () => downloadEditedImage(state, file, "png", ownerDoc)),
+    mkBtn("JPG", "현재 이미지를 JPG로 저장", () => downloadEditedImage(state, file, "jpeg", ownerDoc)),
     mkBtn("PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file)),
     mkBtn("📷 메모로", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만", () => sendImageToMemo(state, file)),
     mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state, file)),
@@ -1207,7 +1207,28 @@ function imageBaseName(file){
 
 // 저장 동선 통일: EXE 로컬 서버가 있으면 권한 팝업 없이 저장 폴더(내 문서\만능교실 저장)에 쓰고
 // 저장 완료 토스트에 절대경로·[폴더 열기]를 띄운다. 없으면 기존 다운로드로 폴백(.py 저장과 같은 흐름).
-async function saveImageBlobUnified(blob, file, outName){
+async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options={}){
+  if (options.overwriteOriginal && ownerDoc && ownerDoc.originalSaveMode){
+    const wrote = (typeof saveViaFileHandle === "function")
+      ? await saveViaFileHandle(blob, ownerDoc.name || file.name, ownerDoc, { existingOnly:true, mime:blob.type || "application/octet-stream" })
+      : "unsupported";
+    if (wrote !== "saved"){
+      toast("원본 이미지 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type:"error" });
+      return false;
+    }
+    const savedName = ownerDoc.name || file.name || outName;
+    const path = String(ownerDoc.workspacePath || ownerDoc.relPath || savedName).replace(/\\/g, "/").replace(/^\/+/, "");
+    let updated = new File([blob], savedName, { type:blob.type || "application/octet-stream" });
+    if (path.indexOf("/") >= 0) Object.defineProperty(updated, "webkitRelativePath", { value:path });
+    if (typeof withFileHandle === "function") updated = withFileHandle(updated, ownerDoc.fsHandle);
+    if (typeof withDirHandle === "function") updated = withDirHandle(updated, ownerDoc.fsDirHandle);
+    ownerDoc.sourceFile = updated;
+    ownerDoc.size = updated.size;
+    if (typeof rememberWorkspace === "function") ownerDoc.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true });
+    if (typeof renderSidebar === "function") renderSidebar();
+    toast("원본 이미지에 저장했어요.", 2200, { type:"success" });
+    return true;
+  }
   const relDir = (() => {
     const p = String((file && file.webkitRelativePath) || "").replace(/\\/g, "/");
     const i = p.lastIndexOf("/");
@@ -1222,7 +1243,7 @@ async function saveImageBlobUnified(blob, file, outName){
           action: (typeof window !== "undefined" && typeof window.__mnOpenLastSavedFolder === "function")
             ? { label: "폴더 열기", onClick: () => window.__mnOpenLastSavedFolder() } : null
         });
-        return;
+        return true;
       }
     }
   } catch(_){ /* 서버 저장 실패 → 다운로드 폴백 */ }
@@ -1232,6 +1253,7 @@ async function saveImageBlobUnified(blob, file, outName){
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast("파일을 내려받았어요.", 1800, { type: "success" });
+  return true;
 }
 
 // 편집본을 일반 메모에 이미지 블록으로 넣는다(엑셀 '선택→메모'와 같은 통로).
@@ -1338,14 +1360,21 @@ function showImageOcrResult(text){
   ta.focus();
 }
 
-function downloadEditedImage(state, file, format){
+function imageOutputMatchesOriginal(file, format){
+  const ext = String(file && file.name || "").split(".").pop().toLowerCase();
+  return (format === "png" && ext === "png") ||
+    (format === "jpeg" && (ext === "jpg" || ext === "jpeg"));
+}
+
+function downloadEditedImage(state, file, format, ownerDoc=null){
   const canvas = renderForDisplay(state);
   const jpeg = format === "jpeg";
-  const name = imageBaseName(file) + "_edited." + (jpeg ? "jpg" : "png");
+  const overwriteOriginal = !!(ownerDoc && ownerDoc.originalSaveMode && imageOutputMatchesOriginal(file, format));
+  const name = overwriteOriginal ? (ownerDoc.name || file.name) : imageBaseName(file) + "_edited." + (jpeg ? "jpg" : "png");
   const quality = jpeg ? Math.max(0.5, Math.min(1, (state.jpgQuality || 90) / 100)) : undefined;
   canvas.toBlob(blob => {
     if (!blob){ toast("이미지를 저장하지 못했어요.", 2200, { type: "error" }); return; }
-    saveImageBlobUnified(blob, file, name);
+    saveImageBlobUnified(blob, file, name, ownerDoc, { overwriteOriginal });
   }, jpeg ? "image/jpeg" : "image/png", quality);
 }
 

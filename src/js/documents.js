@@ -1072,7 +1072,7 @@ async function pickRefreshReplacement(doc){
     return null;
   }
 }
-async function refreshDocFromSource(id){
+async function refreshDocFromSource(id, options={}){
   const doc = docs.find(d => d.id === id);
   if (!doc) return;
   let picked = null;
@@ -1093,11 +1093,11 @@ async function refreshDocFromSource(id){
     }
     handle = picked.handle;
   }
-  if (doc.hasUnsavedEdits){
+  if (!options.skipConfirm && doc.hasUnsavedEdits){
     const ok = await confirmDialog("저장하지 않은 코드 수정이 있습니다. 원본으로 새로고침하면 현재 편집 내용이 사라질 수 있어요.", "새로고침", "취소");
     if (!ok) return;
   }
-  if (doc.kind === "pdf" && doc.elements && doc.elements.length){
+  if (!options.skipConfirm && doc.kind === "pdf" && doc.elements && doc.elements.length){
     const ok = await confirmDialog("PDF에 추가한 편집/핀을 버리고 원본 파일을 다시 읽을까요?", "새로고침", "취소");
     if (!ok) return;
     if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);

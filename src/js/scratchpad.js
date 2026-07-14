@@ -867,15 +867,30 @@ function wireScratchpad(){
       img.src = url;
     });
     const copyBtn = makeButton("📋 복사", "이미지를 클립보드로 복사 — 한글·워드 등 다른 프로그램에 붙여넣기", async () => {
-      const blob = await blockBlob(); if (!blob) return;
+      if (!navigator.clipboard || typeof ClipboardItem === "undefined"){
+        showStatus("이 브라우저에서는 복사가 안 됩니다. 이미지 우클릭 → 이미지 복사를 사용하세요.", false);
+        return;
+      }
+      // 클립보드는 PNG가 가장 안정적. 저장소 읽기 실패는 blockBlob이 자체 안내를 띄우므로 여기선 조용히 끝낸다.
+      let assetMissing = false;
+      const pngPromise = () => blockBlob().then(blob => {
+        if (!blob){ assetMissing = true; throw new Error("asset-missing"); }
+        return /^image\/png$/i.test(blob.type) ? blob : toPngBlob(blob);
+      });
       try {
-        if (!navigator.clipboard || typeof ClipboardItem === "undefined") throw new Error("clipboard-unsupported");
-        const png = /^image\/png$/i.test(blob.type) ? blob : await toPngBlob(blob);   // 클립보드는 PNG가 가장 안정적
-        await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+        try {
+          // Safari는 클릭 직후(사용자 제스처가 살아있을 때) write를 시작해야 하므로 PNG 준비를 Promise 그대로 넘긴다
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": pngPromise() })]);
+        } catch(error){
+          if (assetMissing) throw error;
+          // ClipboardItem에 Promise 값을 못 넣는 브라우저 — Blob을 만든 뒤 다시 시도
+          const png = await pngPromise();
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+        }
         showStatus("이미지를 복사했습니다");
       } catch(error){
         console.warn(error);
-        showStatus("이 브라우저에서는 복사가 안 됩니다. 이미지 우클릭 → 이미지 복사를 사용하세요.", false);
+        if (!assetMissing) showStatus("이 브라우저에서는 복사가 안 됩니다. 이미지 우클릭 → 이미지 복사를 사용하세요.", false);
       }
     }, "scratchpad-reuse");
     const fileBtn = makeButton("💾 파일로", "이미지를 파일로 저장 (EXE는 저장 폴더, 브라우저는 다운로드)", async () => {

@@ -1222,7 +1222,12 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.clearError = () => editor.clearError();
   // 에러 줄 매칭에 쓸 파일명(로컬 단일 실행은 script.py, 번들은 대상 파일 basename)
   ui.fileBase = String((effectiveRunCtx && effectiveRunCtx.relPath) || (file && file.name) || (ownerDoc && ownerDoc.name) || "").replace(/\\/g, "/").split("/").pop();
-  const fromArchive = !!(effectiveRunCtx && effectiveRunCtx.archiveCtx && effectiveRunCtx.relPath);
+  // archiveCtx 는 '진짜 압축(zip/tar)'과 '폴더로 연 파일'이 모두 갖는다. 폴더 컨텍스트는 isFolderContext 로 구분된다.
+  // 저장 대상·안내 문구가 다르므로(zip 은 원본을 못 쓰고 별도 파일, 폴더는 원본 파일에 되쓰기) 여기서 나눠 둔다.
+  const runArchiveCtx = effectiveRunCtx && effectiveRunCtx.archiveCtx;
+  const fromArchive = !!(runArchiveCtx && effectiveRunCtx.relPath);
+  const fromZip = fromArchive && !runArchiveCtx.isFolderContext;   // 원본 압축을 다시 못 쓰는 진짜 zip/tar
+  const fromFolder = fromArchive && !fromZip;                       // 원본 파일에 되쓸 수 있는 폴더 열기
   const runShortcutLabel = shortcutDisplay(shortcutValue("runCode"));
   const makeIdleMessage = () => fromArchive
     ? _TF("편집 후 {shortcut} 실행 · 옆 파일 포함", { shortcut:runShortcutLabel })
@@ -1388,7 +1393,11 @@ async function renderCode(file, host, ext, profile, runCtx){
     };
     saveBtn.disabled = true;
     let persisted = false;
-    const saveToOriginal = !!(ownerDoc && ownerDoc.originalSaveMode);
+    // 폴더로 연 파일이 원본 파일 핸들(File System Access)을 들고 있으면, 서버 사본(SaveRoot) 대신
+    // 그 핸들로 원본 파일에 바로 되쓴다 → 폴더에서 연 파일은 '원본 자리'에 저장된다.
+    const hasFolderOriginalHandle = !!(fromFolder && ownerDoc && ownerDoc.fsHandle
+      && typeof ownerDoc.fsHandle.createWritable === "function");
+    const saveToOriginal = !!(ownerDoc && ownerDoc.originalSaveMode) || hasFolderOriginalHandle;
     try {
       // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\만능교실 저장).
       if (!saveToOriginal && await saveFileBackendAvailable()){
@@ -1489,11 +1498,14 @@ async function renderCode(file, host, ext, profile, runCtx){
       // 폴백 환경(브라우저)은 보안상 절대경로를 알 수 없어 파일명만 표시
       setSavedPath(wrote === "saved" && ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.name
         ? ownerDoc.fsHandle.name : ((ownerDoc && ownerDoc.name) || name));
-      if (fromArchive){
-        // 압축(zip/tar) 안의 파일은 원본 압축을 다시 쓰지 않고 별도 파일로만 저장된다 — 혼동 없게 안내.
+      if (fromZip){
+        // 진짜 압축(zip/tar) 안의 파일은 원본 압축을 다시 쓰지 않고 별도 파일로만 저장된다 — 혼동 없게 안내.
         toast(wrote === "saved"
           ? "압축 안의 파일이라 원본 zip이 아닌 별도 파일로 저장했어요."
           : "압축 안의 파일이라 원본 zip이 아닌 별도 .py로 저장했어요.", 3400, { type: "success" });
+      } else if (saveToOriginal){
+        // 폴더로 연 파일 → 원본 파일에 되썼다(여기 도달하면 wrote === "saved").
+        toast(persisted ? "원본 파일에 저장하고 작업공간도 갱신했어요." : "원본 파일에 저장했어요.", 2600, { type: "success" });
       } else {
         toast((wrote === "saved")
           ? (persisted ? "원본 파일에 저장하고 작업공간도 갱신했어요." : "원본 파일에 바로 저장했어요.")
@@ -1744,7 +1756,11 @@ function downloadTextFile(text, name){
 // 스크래치 첫 저장은 이름을 받는다.
 async function saveTextDoc(value, ownerDoc, name){
   try {
-    if (ownerDoc && ownerDoc.originalSaveMode){
+    // 폴더로 연 파일이 원본 파일 핸들을 들고 있으면 서버 사본이 아닌 원본 파일에 되쓴다(.py 저장과 동일 원칙).
+    const wantOriginal = !!(ownerDoc && ownerDoc.originalSaveMode);
+    const fromFolderOriginal = !!(ownerDoc && ownerDoc.archiveCtx && ownerDoc.archiveCtx.isFolderContext
+      && ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function");
+    if (wantOriginal || fromFolderOriginal){
       const wrote = await saveViaFileHandle(value, name, ownerDoc, {
         existingOnly: true,
         mime: "text/plain;charset=utf-8"
@@ -1756,8 +1772,9 @@ async function saveTextDoc(value, ownerDoc, name){
         toast("원본 파일에 바로 저장했어요.", 2200, { type: "success" });
         return true;
       }
-      if (wrote !== "cancelled") toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" });
-      return false;
+      if (wrote === "cancelled") return false;
+      // 명시적 원본 모드는 실패를 알리고 끝내지만, 폴더 핸들만으로 시도한 경우엔 아래 일반 저장 경로로 폴백한다.
+      if (wantOriginal){ toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" }); return false; }
     }
     if (await saveFileBackendAvailable()){
       if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named){

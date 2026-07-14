@@ -9,6 +9,7 @@ async function handleFiles(files, options={}){
     throwIfUiCancelled();
     const ext = fileExtOf(file.name);
     const opts = { ...options, bulk, size: file.size || 0, fsHandle: options.fsHandle || file.__fsHandle || null,
+      fsDirHandle: options.fsDirHandle || file.__fsDirHandle || null,
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
@@ -34,7 +35,9 @@ async function handleFiles(files, options={}){
       else if (ext === "pptx"){
         const pptxBytes = await readPptxBytes(file);
         const pdfBuf = await tryConvertPptxToPdf(pptxBytes);  // 설치된 PowerPoint 로 정확 변환 시도(exe 백엔드)
-        if (pdfBuf) await loadPdf(pdfBuf, file.name.replace(/\.pptx$/i, ".pdf"), opts);
+        // PPTX를 PDF로 변환해 보여 주는 경우에는 PDF 저장이 원본 PPTX를 덮어쓰면 안 된다.
+        // 따라서 변환 미리보기에는 파일 핸들과 원본 저장 모드를 넘기지 않는다.
+        if (pdfBuf) await loadPdf(pdfBuf, file.name.replace(/\.pptx$/i, ".pdf"), { ...opts, fsHandle:null, fsDirHandle:null, originalSaveMode:false });
         else made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxConvertError: _lastPptxConvertError || "알 수 없는 변환 실패" }); // 백엔드 없음/변환 실패 → pptxjs 미리보기로 폴백
       }
       else if (SQLITE_EXTS.includes(ext)) made = await loadSqlite(file, opts);
@@ -537,26 +540,17 @@ async function chooseFolderHandle(startIn=null){
     return null;
   }
 }
-async function askOriginalFolderSave(handle){
-  if (!handle || handle.kind !== "directory" || typeof handle.requestPermission !== "function") return false;
-  const useOriginal = await confirmDialog(
-    "이 폴더의 코드·텍스트 파일에서 저장을 누르면 원본 파일을 바로 덮어쓸까요? 실행 결과와 새 파일은 기존 자동 저장 폴더에 보관됩니다.",
-    "원본에 저장",
-    "사본으로 저장"
-  );
-  if (!useOriginal) return false;
+// 폴더로 연 파일은 항상 원본 파일에 바로 저장한다(별도 컨펌 없이). 폴더 핸들에 쓰기 권한을 한 번 받아
+// 두면 하위 파일 저장이 매번 권한 팝업 없이 조용히 진행된다(권한은 하위로 상속). 권한을 못 받아도
+// 원본 저장 모드는 켠 채 두어, 첫 저장 때 파일 단위로 다시 권한을 요청하게 한다.
+async function ensureFolderWriteAccess(handle){
+  if (!handle || handle.kind !== "directory" || typeof handle.requestPermission !== "function") return;
   try {
     let permission = typeof handle.queryPermission === "function"
       ? await handle.queryPermission({ mode:"readwrite" })
       : "prompt";
     if (permission !== "granted") permission = await handle.requestPermission({ mode:"readwrite" });
-    if (permission === "granted"){
-      toast("원본 저장 모드를 켰어요. 저장할 때 원본 파일이 변경됩니다.", 3600);
-      return true;
-    }
-  } catch(e){ console.warn("folder write permission denied:", e); }
-  toast("폴더 쓰기 권한이 없어 기존 자동 저장 폴더를 사용합니다.", 3400);
-  return false;
+  } catch(e){ console.warn("folder write permission request failed:", e); }
 }
 async function pickFolderOrInput(input){
   pendingFolderRefreshId = null;
@@ -567,11 +561,11 @@ async function pickFolderOrInput(input){
   }
   const handle = await chooseFolderHandle();
   if (!handle) return;
-  const originalSaveMode = await askOriginalFolderSave(handle);
+  await ensureFolderWriteAccess(handle);   // 원본 저장용 쓰기 권한 1회 확보(컨펌 창 없이)
   showLoading("폴더 파일 확인 중…");
   try {
     const snapshot = await collectDirectoryHandleFiles(handle);
-    queueFolder(snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths, originalSaveMode });
+    queueFolder(snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths, originalSaveMode: true });
   } catch(e){
     if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요.");
     else { console.error(e); toast("폴더를 읽지 못했어요.", 3000); }
