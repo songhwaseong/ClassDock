@@ -111,17 +111,17 @@
     {
       "src": "vendor/jquery.min.js",
       "file": "jquery.min.js",
-      "sha384": "sha384-apfJm2DWye6itJXDari7QfgbBXzkNeRsr1xgTfEH0SCvYV+NlzqP+MkX/LHMZIPI"
+      "sha384": "sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
     },
     {
       "src": "vendor/jszip3.min.js",
       "file": "jszip3.min.js",
-      "sha384": "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+      "sha384": "sha384-AlTJ+VCagfX4FDFi+LRUl2RTzMl/0vpKDphc3QY6FIT8stPVGR6RqD5LHirPt5KM"
     },
     {
       "src": "vendor/jszip.min.js",
       "file": "jszip.min.js",
-      "sha384": "sha384-D2t1uL2FYMG4JZs9SG3zZ3QsDxdAkDC4O3QKphAu52ZkQG1R1lScoy55CpmzyXp/"
+      "sha384": "sha384-/uIBVG1oH4Tb9OcLLxfroAlKUcnoOIEjpv8jPC8YM4QzWRTuc9/VSQdrs+iFkWN1"
     },
     {
       "src": "vendor/jszip-utils.min.js",
@@ -141,17 +141,17 @@
     {
       "src": "vendor/docx-preview.min.js",
       "file": "docx-preview.min.js",
-      "sha384": "sha384-2FWzwQuvuR3N7wbc5ymKuHlwyoxFXg7035r6QiAHYL6XcTiLr6iAkUS5WksY/ZxU"
+      "sha384": "sha384-XETEC39BEI+1nILZ5N2gFQcu6ii4k3avoqyi4YwQMbs29xkt01EKMqd9rFvic0Wu"
     },
     {
       "src": "vendor/xlsx.full.min.js",
       "file": "xlsx.full.min.js",
-      "sha384": "sha384-ZmG1VCoRXjPXl6lsGHPQCuHnIGCdPOwZ6+9RFJUeLELENdn8kgBpTZ6VOS12HG5l"
+      "sha384": "sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
     },
     {
       "src": "vendor/exceljs.min.js",
       "file": "exceljs.min.js",
-      "sha384": "sha384-A2IjsQtTx3fHPC7iFRcdseRpDyzRrVOXPIY6ptEHNblPE0vmAA0IqySAOgt+EfGx"
+      "sha384": "sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz"
     },
     {
       "src": "vendor/crypto-js.min.js",
@@ -161,38 +161,38 @@
     {
       "src": "vendor/office-decrypt.js",
       "file": "office-decrypt.js",
-      "sha384": "sha384-Wg+/2pmL1N/r6M+c63/mZwxq4xRfm9zb0vokMxMwOwUrblXhnSJciP3KJIO8cK2F"
+      "sha384": "sha384-CqC7oKNgJ8rypkYGPyOUdZfXA+8NzuqWur3DaYi0w44Je2A8w1itcYxXm2G9irH6"
     },
     {
       "src": "vendor/hwp.global.js",
       "file": "hwp.global.js",
-      "sha384": "sha384-Aeim5qNqkBWyhTliynTbE06e4P1vdsz2lM6BDZCcYmLsgapOaLHSY3uQ+JAGXutQ"
+      "sha384": "sha384-MQnvsTyMfoP4jg0s8W6Cdh6D/jO11/GaEP9WwCqorrCGO7DGwH38O4qwWfZNt9oD"
     },
     {
       "src": "vendor/pdf.min.js",
       "file": "pdf.min.js",
       "worker": "pdf.worker.min.js",
-      "sha384": "sha384-dvUYiqYx/K4rVqYb58FNo3LVW+Dd+zT7BXt3v0SZWT//NnAiU9Fv0oAhGUX8xQmX"
+      "sha384": "sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e"
     },
     {
       "src": "vendor/pdf-lib.min.js",
       "file": "pdf-lib.min.js",
-      "sha384": "sha384-luX2alSlbWbGNY3EgPfNGqgEE8Bo0vmx4RBJHMB5rkhZ+9ponJhpUQ0AOhbzlHM/"
+      "sha384": "sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI"
     },
     {
       "src": "vendor/html2canvas.min.js",
       "file": "html2canvas.min.js",
-      "sha384": "sha384-sZp/6Wp3cNqnQ/OhlQzRA6nDX9l+dJc7g5DHWOJgGA1K29MxqXkH/tWuUZ+abtU4"
+      "sha384": "sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H"
     },
     {
       "src": "vendor/html-to-image.js",
       "file": "html-to-image.js",
-      "sha384": "sha384-xLgzHdt2mattQ+ahbon5GzS7s37ucfD7HaPIlBVG9JYfSqIv90k4zj+w9rnnZbEK"
+      "sha384": "sha384-ypwawCzIKTXFz66bA+5EXBfGOa/AbLT1ATOCeOAnt6YlUL8HkbttN4cOOWWpQfa+"
     },
     {
       "src": "vendor/zip-full.min.js",
       "file": "zip-full.min.js",
-      "sha384": "sha384-uGcdo8u2ahL2UYcUdfaMDNH/aQOwbQsbiqfITFyBjahQ7MQhn95oS6xYe8cci+lk"
+      "sha384": "sha384-I/HWtwluKZIVzQnugyNZWTtzOTrBIK7nsdVnB1a+tLSTplwghWXI0AFsDxmFlXvW"
     }
   ]
 }

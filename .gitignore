@@ -5,3 +5,6 @@ ffmpeg.exe
 manneung-classroom-offline.html
 manneung-classroom.exe
 desktop/app.html
+
+# 배포용 테스트 패키지 (pack.bat 로 재생성)
+dist/
