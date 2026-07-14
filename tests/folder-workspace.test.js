@@ -22,12 +22,15 @@ test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", ()
   assert.match(source, /restorePendingImages = !!options\.restoreFromWorkspace && pendingImageFolderPaths\.some\(path => path === rootName\)/);
 });
 
-test("대량 이미지 생략 표식은 복원 뒤 하위 폴더 클릭에서도 실제 폴더 읽기를 시작한다", () => {
+test("대량 이미지 생략 표식은 명시적 '사진 불러오기' 버튼으로만 실제 폴더 읽기를 시작한다", () => {
   assert.match(source, /workspaceImageSkipMarkerPath\(folder\)/);
   assert.match(source, /workspaceImageSkipFolderPath\(row\.path\)/);
   assert.match(source, /pendingImageFolderPaths:group\.pendingImageFolderPaths/);
-  assert.match(source, /pendingImageRoot\.restorePendingImages/);
-  assert.match(source, /requestFolderRefresh\(pendingImageRoot\.nodeId\)/);
+  // 자동 복원에서 빠진 루트 폴더에만 눈에 보이는 복원 버튼을 달고(다른 폴더를 클릭해도 새로고침하지 않음),
+  // 그 버튼을 눌러야만 requestFolderRefresh 로 디스크에서 사진을 다시 읽는다.
+  assert.match(source, /node\.restorePendingImages && node\.folderRefreshRootId === node\.nodeId/);
+  assert.match(source, /📷 사진 불러오기/);
+  assert.match(source, /requestFolderRefresh\(node\.nodeId\)/);
 });
 
 test("폴더 새로고침으로 교체된 참고 문서는 분할 화면에서 다시 렌더한다", () => {
