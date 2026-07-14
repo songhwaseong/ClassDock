@@ -8,6 +8,11 @@ const path = require("node:path");
 // documents.js 분할본을 이어붙여 검사 — 패턴이 어느 조각에 있든 동일하게 매칭된다.
 const source = ["documents.js", "workspace-store.js", "file-loaders.js", "pdf-render.js"]
   .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
+const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+const codeSource = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
+const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+const guideMarkdown = fs.readFileSync(path.join(__dirname, "../사용법.md"), "utf8");
+const guideHtml = fs.readFileSync(path.join(__dirname, "../사용법.html"), "utf8");
 
 test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", () => {
   assert.match(source, /buildWorkspacePayload\(rows, folderPaths, pendingImageFolderPaths\)/);
@@ -46,4 +51,26 @@ test("folder refresh picker starts from the previous root folder handle when pos
 test("실제 폴더 그룹은 마지막 파일을 닫아도 자동 정리하지 않는다", () => {
   assert.match(source, /const physicalFolder = refreshRoot/);
   assert.match(source, /if \(physicalFolder\) break;/);
+});
+
+test("설정의 자동 저장 폴더 항목은 경로 조회 전이나 일반 HTML에서도 숨기지 않는다", () => {
+  assert.match(htmlSource, /id="settingSaveFolderWrap">/);
+  assert.doesNotMatch(htmlSource, /id="settingSaveFolderWrap" hidden/);
+  assert.match(appSource, /settingSaveFolderWrap\.hidden = false/);
+  assert.match(appSource, /EXE에서만 설정할 수 있습니다\./);
+});
+
+test("원본 쓰기 권한 없이 연 폴더의 Python 저장은 별도 저장 위치를 명확히 알린다", () => {
+  assert.match(codeSource, /fromFolder && !saveToOriginal/);
+  assert.match(codeSource, /원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요/);
+  assert.match(codeSource, /원본에 저장하려면 '폴더 열기'로 다시 여세요/);
+});
+
+test("사용 설명서는 폴더 드래그와 폴더 열기의 Python 저장 차이를 필수 주의사항으로 안내한다", () => {
+  for (const guide of [guideMarkdown, guideHtml]){
+    assert.match(guide, /꼭 알아두세요/);
+    assert.match(guide, /폴더를 화면으로 드래그/);
+    assert.match(guide, /드래그한 원본 파일은 변경되지 않습니다/);
+    assert.match(guide, /자동 저장 폴더/);
+  }
 });

@@ -462,13 +462,21 @@ function wire(){
   const settingSaveFolderOpen = byId("settingSaveFolderOpen");
   const settingSaveFolderChange = byId("settingSaveFolderChange");
   let currentSaveFolderPath = "";
-  const setSaveFolderPath = (path) => {
+  const setSaveFolderPath = (path, status="ready") => {
     currentSaveFolderPath = String(path || "").trim();
     const available = !!currentSaveFolderPath;
     saveFolderOpen.hidden = !available;
-    settingSaveFolderWrap.hidden = !available;
-    settingSaveFolderPath.textContent = currentSaveFolderPath;
-    settingSaveFolderPath.title = currentSaveFolderPath;
+    // 설정 항목 자체는 항상 표시한다. 경로 API를 쓸 수 없는 일반 HTML에서도 항목이
+    // 사라진 것처럼 보이지 않게 하고, EXE에서만 변경할 수 있음을 명확히 안내한다.
+    settingSaveFolderWrap.hidden = false;
+    settingSaveFolderPath.textContent = available
+      ? currentSaveFolderPath
+      : (status === "loading"
+          ? (typeof window.t === "function" ? window.t("저장 위치 확인 중…") : "저장 위치 확인 중…")
+          : (typeof window.t === "function" ? window.t("EXE에서만 설정할 수 있습니다.") : "EXE에서만 설정할 수 있습니다."));
+    settingSaveFolderPath.title = available ? currentSaveFolderPath : settingSaveFolderPath.textContent;
+    settingSaveFolderOpen.disabled = !available;
+    settingSaveFolderChange.disabled = !available;
     saveFolderOpen.title = "직전에 저장한 파일이 있는 폴더 열기" + (available ? " · 저장 루트: " + currentSaveFolderPath : "");
   };
   const saveFolderRequest = async (path, method="GET") => {
@@ -481,13 +489,17 @@ function wire(){
     return (await response.text()).trim();
   };
   const refreshSaveFolder = async () => {
-    if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+    setSaveFolderPath("", "loading");
+    if (location.protocol !== "http:" && location.protocol !== "https:"){
+      setSaveFolderPath("", "unavailable");
+      return false;
+    }
     try {
       const path = await saveFolderRequest("/save-root");
       setSaveFolderPath(path);
       return !!path;
     } catch(_){
-      setSaveFolderPath("");
+      setSaveFolderPath("", "unavailable");
       return false;
     }
   };

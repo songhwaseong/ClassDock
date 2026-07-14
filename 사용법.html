@@ -89,7 +89,7 @@
 <div class="wrap">
 
 <h1>만능파일교실 사용법 — 처음부터 끝까지</h1>
-<p class="updated"><strong>최종 업데이트: 2026년 7월 4일</strong></p>
+<p class="updated"><strong>최종 업데이트: 2026년 7월 14일</strong></p>
 <p class="lead">처음 쓰는 분도 따라할 수 있게 클론부터 실제 사용까지 단계별로 정리했어요. 자세한 기능 설명·릴리스 노트는 <a href="README.md">README.md</a>를 참고하세요.</p>
 
 <nav class="toc" id="toc">
@@ -189,6 +189,15 @@ cd myOffice</code></pre>
   <li><kbd>Ctrl</kbd>+<kbd>O</kbd> (파일 열기) / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> (폴더 열기)</li>
 </ol>
 
+<div class="warn">
+  <p><strong>⚠ 꼭 알아두세요 — 폴더를 여는 방식에 따라 <code>.py</code> 저장 위치가 달라집니다.</strong></p>
+  <ul>
+    <li><strong>원본 <code>.py</code> 파일에 바로 저장하려면</strong> 사이드바의 <strong>열기 → 폴더 열기</strong> 또는 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>로 폴더를 여세요. 처음에 폴더 쓰기 권한을 허용하면 <strong>.py 저장</strong>이 선택한 폴더의 원본 파일에 반영됩니다.</li>
+    <li>탐색기에서 <strong>폴더를 화면으로 드래그</strong>하면 브라우저 보안상 원본 쓰기 권한을 받을 수 없습니다. 이때 EXE는 편집본을 <strong>설정 → 일반 → 자동 저장 폴더</strong>에 저장하고, 일반 HTML은 별도 파일 또는 다운로드 사본으로 저장합니다. <strong>드래그한 원본 파일은 변경되지 않습니다.</strong></li>
+    <li>원본에 저장되지 않은 경우 앱이 실제 저장 위치와 함께 안내합니다. 원본 저장이 필요하면 해당 폴더를 <strong>폴더 열기</strong>로 다시 여세요.</li>
+  </ul>
+</div>
+
 <h3>여러 파일을 한 번에</h3>
 <ul>
   <li>폴더째 드래그하거나 ZIP을 열면 안의 파일들이 사이드바에 정리됨</li>
@@ -253,7 +262,7 @@ cd myOffice</code></pre>
   <li><strong>단계 실행</strong> — 줄별 변수 변화를 최대 300단계까지 기록 (디버깅용)</li>
   <li><strong>진단</strong> — 실행 없이 문법·자주 하는 실수 검사</li>
   <li><strong>채점</strong> — 여러 테스트의 입력/기대 출력으로 자동 채점</li>
-  <li><strong>.py 저장</strong> — 코드 저장</li>
+  <li><strong>.py 저장</strong> — 코드 저장. <strong>폴더 열기</strong>로 연 파일은 원본에 반영하고, 드래그로 연 폴더는 원본이 아닌 자동 저장 폴더/별도 사본에 저장하면서 안내 표시</li>
   <li><strong>↩ 원본</strong> — 편집 전 원본으로 되돌리기</li>
   <li><strong>PDF에 핀</strong> — 현재 코드 줄을 PDF 위치에 연결</li>
   <li><strong>✏️ 필기</strong> — 편집 잠그고 코드·실행결과 위에 필기 (세션 한정, 문서 닫으면 사라짐)</li>
