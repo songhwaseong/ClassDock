@@ -59,17 +59,20 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
   if (ui.traceBtn) ui.traceBtn.disabled = true;
   if (ui.analyzeBtn) ui.analyzeBtn.disabled = true;
   if (ui.gradeBtn) ui.gradeBtn.disabled = true;
-  split.classList.add("show-out");
-  if (ui.clearBtn){ ui.clearBtn.hidden = false; ui.clearBtn.disabled = true; }
-  if (ui.layoutBtn) ui.layoutBtn.hidden = false;
+  if (!diagnosing){
+    split.classList.add("show-out");
+    if (ui.clearBtn){ ui.clearBtn.hidden = false; ui.clearBtn.disabled = true; }
+    if (ui.layoutBtn) ui.layoutBtn.hidden = false;
+  }
   const modeTitle = diagnosing ? "실행 전 코드 진단" : tracing ? "단계 실행" : grading ? "과제 자동채점" : "실행 결과";
   const modeProgress = diagnosing ? "코드를 실행하지 않고 분석 중…" : tracing ? "실행 흐름 기록 중…" : grading ? "테스트 실행 중…" : "실행 중…";
-  outPanel.innerHTML = '<div class="out-head">' + modeTitle + '</div><pre class="out-pre out-muted">' + modeProgress + '</pre>';
+  if (!diagnosing) outPanel.innerHTML = '<div class="out-head">' + modeTitle + '</div><pre class="out-pre out-muted">' + modeProgress + '</pre>';
   const setStatus = (m) => { status.textContent = m; };
   if (ui.clearError) ui.clearError();                                   // 이전 실행의 에러 줄 표시 해제
   if (ui.clearTraceLine) ui.clearTraceLine();
   const applyErr = (code, stderr) => {
     if (!code) return;
+    if (diagnosing) return;
     const knownFiles = docs.map((doc) => String(doc.workspacePath || doc.relPath || doc.name || "").replace(/\\/g, "/").split("/").pop()).filter(Boolean);
     const location = parsePythonTracebackLocation(stderr, ui.fileBase, knownFiles);
     const line = location && location.current ? location.line : 0;
@@ -165,11 +168,13 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
       for (;;){
         throwIfCancelled();
         setStatus((diagnosing ? "진단 중…" : tracing ? "단계 기록 중…" : grading ? "채점 중…" : "실행 중…") + " (로컬 파이썬" + withFolder + ")");
-        const r = await runPythonInteractive(executionSource, bundle, ui, { bindCancel });
+        const r = diagnosing
+          ? await runPythonViaBackend(executionSource, "")
+          : await runPythonInteractive(executionSource, bundle, ui, { bindCancel });
         throwIfCancelled();
         if (diagnosing){
           const parsed = parsePythonMarkedReport(r.stdout, PY_DIAG_MARKER);
-          const summary = renderPythonDiagnostics(outPanel, parsed && parsed.report, ui);
+          const summary = finishPythonDiagnostics(parsed && parsed.report, ui);
           if (!parsed) applyErr(1, r.stderr || "진단 결과를 읽지 못했습니다.");
           setStatus(parsed
             ? ("진단 완료 · 오류 " + summary.errors + " · 경고 " + summary.warnings + " · 로컬 파이썬")
@@ -238,7 +243,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         throwIfCancelled();
         workerTask = startPyodideWorkerRun(executionSource, bundle, stdin, packages, setStatus);
         bindCancel(() => workerTask && workerTask.cancel());
-        const head = outPanel.querySelector(".out-head");
+        const head = diagnosing ? null : outPanel.querySelector(".out-head");
         const stopWorker = document.createElement("button");
         stopWorker.type = "button"; stopWorker.className = "terminal-stop"; stopWorker.textContent = "중지";
         stopWorker.title = "브라우저 Python Worker 실행 중지";
@@ -259,7 +264,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
       }
       if (diagnosing){
         const parsed = parsePythonMarkedReport(r.stdout, PY_DIAG_MARKER);
-        const summary = renderPythonDiagnostics(outPanel, parsed && parsed.report, ui);
+        const summary = finishPythonDiagnostics(parsed && parsed.report, ui);
         if (!parsed) applyErr(1, r.stderr || "진단 결과를 읽지 못했습니다.");
         setStatus(parsed
           ? ("진단 완료 · 오류 " + summary.errors + " · 경고 " + summary.warnings + " · 브라우저(Pyodide)")

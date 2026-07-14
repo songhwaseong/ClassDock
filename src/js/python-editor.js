@@ -10,7 +10,7 @@ function buildCodeEditor(text, prof, options={}){
   ta.value = text; ta.spellcheck = false; ta.wrap = "off";
   ta.setAttribute("autocomplete", "off"); ta.setAttribute("autocapitalize", "off"); ta.setAttribute("autocorrect", "off");
   const overlay = document.createElement("div"); overlay.className = "col-overlay"; overlay.setAttribute("aria-hidden", "true");
-  const errBand = document.createElement("div"); errBand.className = "err-line"; errBand.hidden = true; errBand.setAttribute("aria-hidden", "true");
+  const errBands = document.createElement("div"); errBands.className = "err-lines"; errBands.setAttribute("aria-hidden", "true");
   const traceBand = document.createElement("div"); traceBand.className = "trace-line"; traceBand.hidden = true; traceBand.setAttribute("aria-hidden", "true");
   const jumpBand = document.createElement("div"); jumpBand.className = "jump-line"; jumpBand.hidden = true; jumpBand.setAttribute("aria-hidden", "true");
   const cellBand = document.createElement("div"); cellBand.className = "cell-band"; cellBand.hidden = true; cellBand.setAttribute("aria-hidden", "true");
@@ -52,7 +52,7 @@ function buildCodeEditor(text, prof, options={}){
   };
   pre.appendChild(code);
   // caretLine 은 맨 앞에 둬서 강조 pre·textarea 보다 뒤(아래)에 깔린다 — 글자 위에 색이 덧칠되지 않게.
-  edit.appendChild(cellBand); edit.appendChild(caretLine); edit.appendChild(indentLayer); edit.appendChild(wordHi); edit.appendChild(findHi); edit.appendChild(spotlightHi); edit.appendChild(defHover); edit.appendChild(pre); edit.appendChild(ta); edit.appendChild(cellDivLayer); edit.appendChild(errBand); edit.appendChild(traceBand); edit.appendChild(jumpBand); edit.appendChild(overlay);
+  edit.appendChild(cellBand); edit.appendChild(caretLine); edit.appendChild(indentLayer); edit.appendChild(wordHi); edit.appendChild(findHi); edit.appendChild(spotlightHi); edit.appendChild(defHover); edit.appendChild(pre); edit.appendChild(ta); edit.appendChild(cellDivLayer); edit.appendChild(errBands); edit.appendChild(traceBand); edit.appendChild(jumpBand); edit.appendChild(overlay);
   if (completionPortal){
     complete.classList.add("code-complete-portal");
     document.body.appendChild(complete);
@@ -66,16 +66,22 @@ function buildCodeEditor(text, prof, options={}){
   if (typeof ensurePythonImportIndex === "function") ensurePythonImportIndex();
 
   // ===== 실행 에러 줄 표시: 에러 난 줄에 빨간 띠. 스크롤 따라 움직이고, 코드 수정 시 사라진다 =====
-  let errLine = 0;
+  let errLines = [];
   const positionErr = () => {
-    if (!errLine){ errBand.hidden = true; return; }
+    errBands.replaceChildren();
+    if (!errLines.length) return;
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
-    errBand.style.top = (pt + (errLine - 1) * lh - ta.scrollTop) + "px";
-    errBand.style.height = lh + "px";
-    errBand.hidden = false;
+    const fragment = document.createDocumentFragment();
+    errLines.forEach((line) => {
+      const band = document.createElement("div"); band.className = "err-line";
+      band.style.top = (pt + (line - 1) * lh - ta.scrollTop) + "px";
+      band.style.height = lh + "px";
+      fragment.appendChild(band);
+    });
+    errBands.appendChild(fragment);
   };
-  const clearError = () => { if (!errLine) return; errLine = 0; errBand.hidden = true; };
+  const clearError = () => { errLines = []; errBands.replaceChildren(); };
   let traceLine = 0;
   const positionTrace = () => {
     if (!traceLine){ traceBand.hidden = true; return; }
@@ -142,15 +148,17 @@ function buildCodeEditor(text, prof, options={}){
     e = Math.max(s, Math.min(total, parseInt(e, 10) || s));
     cellStart = s; cellEnd = e; positionCellBand();
   };
-  const markError = (n) => {
-    n = parseInt(n, 10);
+  const markErrorLines = (lines) => {
     const total = ta.value.split("\n").length;
-    if (!n || n < 1 || n > total){ clearError(); return; }
-    errLine = n; positionErr();
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, y = (errLine - 1) * lh;
+    errLines = [...new Set((Array.isArray(lines) ? lines : [lines]).map(n => parseInt(n, 10)).filter(n => n >= 1 && n <= total))];
+    if (!errLines.length){ clearError(); return; }
+    positionErr();
+    const firstLine = errLines[0];
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, y = (firstLine - 1) * lh;
     if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - lh){ ta.scrollTop = Math.max(0, y - ta.clientHeight / 2); }  // 보이게 스크롤
     positionErr();
   };
+  const markError = (n) => markErrorLines([n]);
 
   const focusLine = (n) => {
     const total = ta.value.split("\n").length;
@@ -1574,7 +1582,7 @@ function buildCodeEditor(text, prof, options={}){
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },
     openFind, closeFind, isFindOpen: () => findOpen, isCompletionOpen: () => !complete.hidden,
-    markError, clearError, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
+    markError, markErrorLines, clearError, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
     setCellSplitMode, toggleCellBoundaryAtLine, isCellSplitMode: () => cellSplitMode, autoSplitCells,
     spotlightRange, clearSpotlight };
 }

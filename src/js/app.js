@@ -843,8 +843,6 @@ function wire(){
       if (save) {
         e.preventDefault();
         if (save.disabled) return;
-        // Python에서 저장 단축키를 사용한 경우에만 저장 성공 후 실행 전 진단을 이어서 실행한다.
-        // 툴바의 '.py 저장' 버튼을 직접 누르면 기존처럼 저장만 한다.
         if (state && state.codeEditor && /\.pyw?$/i.test(state.codeEditorFileBase || state.name || "")) {
           save.dataset.diagnoseAfterSave = "1";
         }

@@ -1259,6 +1259,27 @@ function parsePythonMarkedReport(stdout, marker){
   } catch(_){ return null; }
 }
 
+function finishPythonDiagnostics(rawReport, ui){
+  const diagnostics = rawReport ? normalizePythonDiagnostics(rawReport.diagnostics) : [];
+  const errors = diagnostics.filter(item => item.severity === "error").length;
+  const warnings = diagnostics.filter(item => item.severity === "warning").length;
+  if (!rawReport){
+    if (ui && ui.clearError) ui.clearError();
+    toast("진단 결과를 읽지 못했습니다. 다시 시도해 주세요.", 3500, { type:"error" });
+    return { errors:1, warnings:0, total:0, failed:true };
+  }
+  if (!diagnostics.length){
+    if (ui && ui.clearError) ui.clearError();
+    toast("발견된 문제가 없습니다.", 2600, { type:"success" });
+    return { errors, warnings, total:0, failed:false };
+  }
+
+  const lines = diagnostics.map(item => item.line);
+  if (ui && ui.markErrorLines) ui.markErrorLines(lines);
+  else if (ui && ui.markError) ui.markError(lines[0]);
+  return { errors, warnings, total:diagnostics.length, failed:false };
+}
+
 function renderPythonDiagnostics(panel, rawReport, ui){
   panel.innerHTML = "";
   const head = document.createElement("div"); head.className = "out-head"; head.textContent = "실행 전 코드 진단";
