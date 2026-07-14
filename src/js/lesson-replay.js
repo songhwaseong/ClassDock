@@ -468,8 +468,8 @@ function renderReplay(doc, host, lesson){
     ctx.translate(ox, oy); ctx.scale(scale, scale);
     ctx.beginPath(); ctx.rect(0, 0, lesson.W, lesson.H); ctx.clip();
     ctx.fillStyle = boardBg; ctx.fillRect(0, 0, lesson.W, lesson.H);
-    boardDrawItems(ctx, baseItems, { bg: boardBg });
-    if (grow) boardDrawItem(ctx, grow, boardBg, growLimit);
+    MNBoardRenderer.drawItems(ctx, baseItems, { bg: boardBg });
+    if (grow) MNBoardRenderer.drawItem(ctx, grow, boardBg, growLimit);
     ctx.restore();
   };
   const player = mountReplayPlayer(doc, host, { duration, draw, onSave: () => saveLessonFile(lesson, doc.name) });

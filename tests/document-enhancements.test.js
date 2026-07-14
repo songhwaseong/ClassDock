@@ -34,3 +34,25 @@ test("스프레드시트 전체 바꾸기는 재계산과 다시 그리기를 �
   assert.match(source, /recalcAndRefresh\(\{ refreshDom:false \}\)/);
   assert.match(source, /renderEditable\(currentSheet, \{ skipRecalc:recalculated \}\)/);
 });
+
+test("스프레드시트 편집은 공통 미저장 상태와 작업공간 복구 스냅샷을 갱신한다", () => {
+  const sheet = read("spreadsheet-viewer.js");
+  const docs = read("documents.js");
+  assert.match(sheet, /syncSpreadsheetDirtyState/);
+  assert.match(sheet, /markDocumentDirty\(doc\)/);
+  assert.match(sheet, /saveDocumentRecoverySnapshot\(doc, bytes/);
+  assert.match(sheet, /markSpreadsheetSaved/);
+  assert.match(docs, /function markDocumentDirty\(/);
+  assert.match(docs, /function markDocumentSavedSnapshot\(/);
+});
+
+test("이미지와 화이트보드 편집도 공통 미저장 상태를 사용한다", () => {
+  const image = read("image-viewer.js");
+  const board = read("whiteboard.js");
+  assert.match(image, /const markImageDirty/);
+  assert.match(image, /saveDocumentRecoverySnapshot\(ownerDoc, blob/);
+  assert.match(board, /markDocumentDirty\(doc\)/);
+  assert.match(board, /doc\.boardState/);
+  assert.match(board, /BOARD_RECOVERY_PREFIX/);
+  assert.match(board, /restoreBoardImages/);
+});

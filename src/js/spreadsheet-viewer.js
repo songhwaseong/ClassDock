@@ -2026,6 +2026,37 @@ async function renderXlsx(file, host, doc){
   const sheetsWithFormula = new Set();  // 수식이 하나라도 있는 시트 → 편집 시 재계산 대상
   let csvFastModelPromise = null;
   let anyDirty = false;
+  let spreadsheetRecoveryTimer = 0;
+  let spreadsheetDirtyKnown = false;
+  const syncSpreadsheetDirtyState = (reschedule=false) => {
+    if (!anyDirty) return;
+    if (!spreadsheetDirtyKnown){
+      spreadsheetDirtyKnown = true;
+      if (doc && typeof markDocumentDirty === "function") markDocumentDirty(doc);
+    } else if (!reschedule) return;
+    clearTimeout(spreadsheetRecoveryTimer);
+    // 셀을 연속 입력할 때마다 XLSX 전체를 만들지 않도록 짧게 모아 작업공간에 저장한다.
+    spreadsheetRecoveryTimer = setTimeout(async () => {
+      if (!anyDirty || !doc || !doc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return;
+      try {
+        const bytes = await exportExBytes();
+        if (bytes) await saveDocumentRecoverySnapshot(doc, bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      } catch(error){ console.warn("spreadsheet recovery snapshot skipped:", error); }
+    }, 1400);
+  };
+  const spreadsheetDirtyWatch = setInterval(syncSpreadsheetDirtyState, 250);
+  const markSpreadsheetSaved = async (bytes) => {
+    anyDirty = false;
+    spreadsheetDirtyKnown = false;
+    clearTimeout(spreadsheetRecoveryTimer);
+    if (doc && typeof markDocumentSavedSnapshot === "function"){
+      await markDocumentSavedSnapshot(doc, bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+  };
+  if (doc){
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => { clearTimeout(spreadsheetRecoveryTimer); clearInterval(spreadsheetDirtyWatch); });
+  }
   const blankCell = () => ({ v: "", xv: null, nf: null, style: {}, f: null });
   const cellFormula = (cell) => {                        // 수식 셀이면 '=' 없는 수식 문자열, 아니면 null
     const val = cell && cell.value;
@@ -3789,6 +3820,7 @@ async function renderXlsx(file, host, doc){
   };
 
   const renderEditable = (name, options={}) => {
+    syncSpreadsheetDirtyState(true);
     const model = exModels[name];
     if (!model){ sheet.textContent = "편집 데이터를 불러오는 중…"; return; }
     if (!options.skipRecalc) maybeRecalc(name);
@@ -4302,8 +4334,9 @@ async function renderXlsx(file, host, doc){
       const out = await exportExBytes();
       if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
       const savedPath = await saveBytesInPlace(out);
-      if (savedPath){ toast("저장했어요: " + savedPath, 2400, { type: "success" }); return; }
+      if (savedPath){ await markSpreadsheetSaved(out); toast("저장했어요: " + savedPath, 2400, { type: "success" }); return; }
       downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      await markSpreadsheetSaved(out);
       toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
     } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
     finally { quickSaving = false; }
@@ -4723,6 +4756,7 @@ async function renderXlsx(file, host, doc){
         const out = await exportExBytes();
         if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
         downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        await markSpreadsheetSaved(out);
         toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
       } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
       finally { xlsxBtn.disabled = false; }
@@ -4876,6 +4910,7 @@ async function renderXlsx(file, host, doc){
           const out = await exportExBytes();
           if (!out){ toast("저장 준비 실패(다운로드를 이용하세요).", 2600); return; }
           const savedPath = await saveBytesInPlace(out);
+          if (savedPath) await markSpreadsheetSaved(out);
           toast(savedPath ? ("저장했어요: " + savedPath) : "제자리 저장 실패(다운로드를 이용하세요).", savedPath ? 2600 : 2800);
         } catch(e){ console.error(e); toast("저장하지 못했어요(다운로드를 이용하세요).", 2600); }
         finally { saveBtn.disabled = false; }

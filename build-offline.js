@@ -20,6 +20,17 @@ function requireTag(source, tag, label) {
   }
 }
 
+function verifyVendorIntegrity(item) {
+  if (!item.sha384 || !/^sha384-[A-Za-z0-9+/]+={0,2}$/.test(item.sha384)) {
+    throw new Error(`Vendor SHA-384 is missing or invalid: ${item.file}`);
+  }
+  const bytes = fs.readFileSync(path.join(root, "vendor", item.file));
+  const actual = "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+  if (actual !== item.sha384) {
+    throw new Error(`Vendor SHA-384 mismatch: ${item.file}`);
+  }
+}
+
 let html = read("manneung-classroom.html");
 
 const localStyleTag = `<link rel="stylesheet" href="${manifest.styles.local}">`;
@@ -69,6 +80,7 @@ for (const file of manifest.localScripts) {
 }
 
 for (const item of manifest.vendorScripts) {
+  verifyVendorIntegrity(item);
   const tag = `<script src="${item.src}"></script>`;
   requireTag(html, tag, "Vendor script");
   let inline = `<script>\n${esc(read("vendor/" + item.file))}\n</script>`;

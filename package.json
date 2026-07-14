@@ -5,6 +5,11 @@
     "build": "node build-offline.js",
     "check": "node tools/check-source.js",
     "test": "node --test tests/*.test.js",
-    "verify": "npm run check && npm test && npm run build"
+    "test:e2e": "playwright test",
+    "release-check": "node tools/check-release.js",
+    "verify": "npm run check && npm test && npm run build && npm run release-check"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
   }
 }

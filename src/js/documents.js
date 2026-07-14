@@ -813,6 +813,67 @@ function updateDocumentStatus(doc){
   badge.textContent = (typeof window.t === "function") ? window.t(text) : text; badge.className = "doc-status " + cls; badge.hidden = false;
 }
 
+// 편집기 종류와 관계없이 같은 "저장 안 됨" 상태를 사용한다. 개별 뷰어가
+// 직접 hasUnsavedEdits 를 만지면 상태 배지·사이드바가 늦게 갱신되기 쉬워서,
+// 새 편집 기능은 이 함수를 통해 변경 사실을 알린다.
+function markDocumentDirty(doc, dirty=true){
+  if (!doc) return;
+  doc.hasUnsavedEdits = !!dirty;
+  if (doc.id === activeId) updateDocumentStatus(doc);
+  if (typeof renderSidebar === "function") renderSidebar();
+}
+
+function unsavedDocumentLabel(doc){
+  if (!doc) return "문서";
+  if (doc.kind === "image") return "이미지 편집";
+  if (doc.kind === "board") return "화이트보드";
+  if (doc.notebook) return "노트북";
+  if (doc.kind === "office" && /\.(xlsx|xls|csv)$/i.test(doc.name || "")) return "스프레드시트";
+  if (doc.kind === "office") return "문서";
+  return "코드";
+}
+
+function recoverySnapshotFile(doc, bytes, type){
+  if (!doc || !bytes || typeof File === "undefined") return null;
+  const name = doc.name || "recovery.bin";
+  const file = new File([bytes], name, { type:type || "application/octet-stream" });
+  const path = String(doc.workspacePath || doc.relPath || name).replace(/\\/g, "/").replace(/^\/+/, "");
+  if (path && path !== name){
+    try { Object.defineProperty(file, "webkitRelativePath", { value:path, configurable:true }); } catch(_){}
+  }
+  if (doc.fsHandle && typeof withFileHandle === "function") return withFileHandle(file, doc.fsHandle);
+  return file;
+}
+
+// 작업공간 자동 복원은 File 바이트를 기준으로 동작한다. 표·이미지처럼 자체
+// 편집 모델을 가진 뷰어도 최신 스냅샷을 같은 경로로 넣어 다음 실행에 복구한다.
+async function saveDocumentRecoverySnapshot(doc, bytes, type){
+  if (!doc || !doc.hasUnsavedEdits || !doc.workspacePath || typeof rememberWorkspace !== "function") return false;
+  const file = recoverySnapshotFile(doc, bytes, type);
+  if (!file) return false;
+  try {
+    doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true });
+    return !!doc.savedInWorkspace;
+  } catch(error){
+    console.warn("document recovery snapshot skipped:", error);
+    return false;
+  }
+}
+
+async function markDocumentSavedSnapshot(doc, bytes, type){
+  if (!doc) return false;
+  const file = recoverySnapshotFile(doc, bytes, type);
+  if (file){
+    doc.sourceFile = file;
+    doc.size = file.size;
+    if (typeof rememberWorkspace === "function"){
+      try { doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true }); } catch(error){ console.warn("saved document workspace refresh skipped:", error); }
+    }
+  }
+  markDocumentDirty(doc, false);
+  return !!file;
+}
+
 function updateDocumentEncoding(doc){
   const badge = byId("activeDocEncoding");
   if (!badge || !doc || doc.id !== activeId || !doc.textEncoding){
@@ -917,7 +978,7 @@ function closeDoc(id, options={}){
   if (i < 0) return;
   const d = docs[i];
   if (!options.skipConfirm && d.hasUnsavedEdits){
-    if (!confirm(`'${d.name}'의 저장하지 않은 코드 수정이 있습니다. 닫을까요?`)) return;
+    if (!confirm(`'${d.name}'의 저장하지 않은 ${unsavedDocumentLabel(d)} 수정이 있습니다. 닫을까요?`)) return;
   }
   if (!options.skipConfirm && d.kind === "pdf" && d.elements && d.elements.length){
     if (!confirm(`'${d.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`)) return;
@@ -1094,7 +1155,7 @@ async function refreshDocFromSource(id, options={}){
     handle = picked.handle;
   }
   if (!options.skipConfirm && doc.hasUnsavedEdits){
-    const ok = await confirmDialog("저장하지 않은 코드 수정이 있습니다. 원본으로 새로고침하면 현재 편집 내용이 사라질 수 있어요.", "새로고침", "취소");
+    const ok = await confirmDialog(`저장하지 않은 ${unsavedDocumentLabel(doc)} 수정이 있습니다. 원본으로 새로고침하면 현재 편집 내용이 사라질 수 있어요.`, "새로고침", "취소");
     if (!ok) return;
   }
   if (!options.skipConfirm && doc.kind === "pdf" && doc.elements && doc.elements.length){

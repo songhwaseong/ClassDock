@@ -6,7 +6,7 @@ async function loadImage(file, options={}){
   doc.sourceFile = file;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
-    await renderImage(file, host);
+    await renderImage(doc.sourceFile || file, host);
   };
   refreshChrome();
   activateIfIdle(doc, options);
@@ -392,6 +392,25 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   wrap.append(bar, stage);
   host.appendChild(wrap);
 
+  let imageRecoveryTimer = 0;
+  const markImageDirty = () => {
+    if (!ownerDoc || typeof markDocumentDirty !== "function") return;
+    markDocumentDirty(ownerDoc);
+    clearTimeout(imageRecoveryTimer);
+    imageRecoveryTimer = setTimeout(async () => {
+      if (!ownerDoc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return;
+      try {
+        const flattened = renderForDisplay(state);
+        const blob = await new Promise(resolve => flattened.toBlob(resolve, "image/png"));
+        if (blob) await saveDocumentRecoverySnapshot(ownerDoc, blob, "image/png");
+      } catch(error){ console.warn("image recovery snapshot skipped:", error); }
+    }, 1200);
+  };
+  if (ownerDoc){
+    if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
+    ownerDoc.cleanupFns.push(() => clearTimeout(imageRecoveryTimer));
+  }
+
   const zoomLabel = document.createElement("span"); zoomLabel.className = "img-zoom-label";
   const mkBtn = (text, title, fn, cls) => {
     const b = document.createElement("button");
@@ -442,6 +461,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   };
   const shiftShapes = (dx, dy) => { mapShapePoints(p => ({ x: p.x + dx, y: p.y + dy })); };
   const pushHistory = () => {
+    markImageDirty();
     state.history.push(snapshot());
     if (state.history.length > 50) state.history.shift();
     state.future = [];
@@ -449,11 +469,13 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   };
   const undoBtn = mkBtn("되돌리기", "이미지 편집 되돌리기", () => {
     if (!state.history.length) return;
+    markImageDirty();
     state.future.push(snapshot());
     restoreSnapshot(state.history.pop());
   });
   const redoBtn = mkBtn("다시", "이미지 편집 다시 실행", () => {
     if (!state.future.length) return;
+    markImageDirty();
     state.history.push(snapshot());
     restoreSnapshot(state.future.pop());
   });
@@ -566,6 +588,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   const beginAdjust = () => { if (!adjustPre) adjustPre = snapshot(); };
   const commitAdjust = () => {
     if (!adjustPre) return;
+    markImageDirty();
     state.history.push(adjustPre);
     if (state.history.length > 50) state.history.shift();
     state.future = []; updateHistoryButtons(); adjustPre = null;
@@ -1225,7 +1248,7 @@ async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options=
     ownerDoc.sourceFile = updated;
     ownerDoc.size = updated.size;
     if (typeof rememberWorkspace === "function") ownerDoc.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true });
-    if (typeof renderSidebar === "function") renderSidebar();
+    if (typeof markDocumentDirty === "function") markDocumentDirty(ownerDoc, false);
     toast("원본 이미지에 저장했어요.", 2200, { type:"success" });
     return true;
   }
@@ -1238,6 +1261,7 @@ async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options=
     if (typeof saveFileBackendAvailable === "function" && await saveFileBackendAvailable()){
       const path = await saveViaServer(blob, { workspacePath: relDir + outName }, outName);
       if (path){
+        if (ownerDoc && typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(ownerDoc, blob, blob.type || "image/png");
         toast("저장 완료 · " + path, 3400, {
           type: "success",
           action: (typeof window !== "undefined" && typeof window.__mnOpenLastSavedFolder === "function")
@@ -1252,6 +1276,7 @@ async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options=
   a.href = url; a.download = outName;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  if (ownerDoc && typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(ownerDoc, blob, blob.type || "image/png");
   toast("파일을 내려받았어요.", 1800, { type: "success" });
   return true;
 }

@@ -5,10 +5,25 @@
    PNG/PDF 로 내보낸다. 새 라이브러리 없이 캔버스만 사용. */
 
 let _boardCount = 0;
+const BOARD_RECOVERY_PREFIX = "manneung-board-recovery:";
+function boardRecoveryKey(name){ return BOARD_RECOVERY_PREFIX + String(name || "화이트보드"); }
+function readBoardRecovery(name){
+  try {
+    const saved = JSON.parse(localStorage.getItem(boardRecoveryKey(name)) || "null");
+    if (!saved || saved.version !== 1 || !Array.isArray(saved.items)) return null;
+    return { tool:"pen", color:"#111111", width:4, bg:saved.bg || "#ffffff", items:saved.items, undo:[], redo:[], selected:null };
+  } catch(_){ return null; }
+}
 function newWhiteboard(){
   _boardCount++;
   const name = _boardCount > 1 ? ("화이트보드 " + _boardCount) : "화이트보드";
   const doc = makeDoc("board", name, {});
+  const recovered = readBoardRecovery(name);
+  if (recovered && recovered.items.length){
+    doc.boardState = recovered;
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
+    else doc.hasUnsavedEdits = true;
+  }
   doc.render = async () => { const host = doc.el; host.innerHTML = ""; host.scrollTop = 0; renderWhiteboard(doc, host); };
   if (typeof refreshChrome === "function") refreshChrome();
   activateIfIdle(doc, {});
@@ -27,13 +42,34 @@ function renderWhiteboard(doc, host){
   const ctx = canvas.getContext("2d");
   let dpr = 1, W = 0, H = 0;
   // wb: 보드 상태(전역 active 문서 변수 state 와 헷갈리지 않게 이름 분리)
-  const wb = { tool: "pen", color: "#111111", width: 4, items: [], undo: [], redo: [], bg: "#ffffff", selected: null };
+  // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
+  // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
+  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], undo: [], redo: [], bg: "#ffffff", selected: null });
+  let boardRecoveryTimer = 0;
+  const scheduleBoardRecovery = () => {
+    clearTimeout(boardRecoveryTimer);
+    boardRecoveryTimer = setTimeout(() => {
+      try {
+        const items = wb.items.map(item => {
+          const copy = { ...item };
+          if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
+          return copy;
+        });
+        localStorage.setItem(boardRecoveryKey(doc.name), JSON.stringify({ version:1, bg:wb.bg, items }));
+      } catch(error){ console.warn("whiteboard recovery snapshot skipped:", error); }
+    }, 500);
+  };
 
   // ----- 모델 → 캔버스 (그리기는 board-render.js 공용 함수 사용 → 리플레이 재생과 화면이 일치) -----
-  const applyStroke = (it) => boardApplyStroke(ctx, it, wb.bg);
-  const drawItem = (it) => boardDrawItem(ctx, it, wb.bg);
+  const { applyStroke: applyBoardStroke, drawItem: drawBoardItem } = MNBoardRenderer;
+  const applyStroke = (it) => applyBoardStroke(ctx, it, wb.bg);
+  const drawItem = (it) => drawBoardItem(ctx, it, wb.bg);
   // 수업 리플레이: 녹화 중이면 커밋(획/도형/텍스트/이미지/지우기/되돌리기)마다 스냅샷을 남긴다.
-  const recordCommit = () => { if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }); } catch(_){} } };
+  const recordCommit = () => {
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
+    scheduleBoardRecovery();
+    if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }); } catch(_){} }
+  };
   const HANDLE = 12;                                  // 크기조절 핸들 한 변 크기(클릭 판정에도 사용)
   // 8방향 핸들: hx/hy ∈ {0=왼/위, 0.5=가운데, 1=오른/아래}. 가운데(0.5,0.5) 제외.
   const HANDLES = [
@@ -58,6 +94,15 @@ function renderWhiteboard(doc, host){
       ctx.fillStyle = "#fff";
       for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); ctx.strokeRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); }
       ctx.restore();
+    }
+  };
+  const restoreBoardImages = () => {
+    for (const item of wb.items){
+      if (!item || item.type !== "image" || item.img || !item.src) continue;
+      const img = new Image();
+      img.onload = () => { item.img = img; img.__boardSrc = item.src; redraw(); };
+      img.onerror = () => { console.warn("whiteboard recovery image skipped"); };
+      img.src = item.src;
     }
   };
   const pushUndo = () => { wb.undo.push(wb.items.slice()); if (wb.undo.length > 140) wb.undo.shift(); wb.redo.length = 0; };
@@ -178,13 +223,22 @@ function renderWhiteboard(doc, host){
   }
 
   // ----- 이미지 넣기(캡처 붙여넣기·드래그드롭·파일선택) -----
-  const imageUrls = [];                              // 보드 닫을 때 일괄 해제(생존 동안은 유지 — 저장/내보내기에 필요)
-  const loadImageBlob = (blob) => new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob); imageUrls.push(url); const img = new Image();
-    img.onload = () => { resolve(img); };
-    img.onerror = () => { reject(new Error("image-load-failed")); };
-    img.src = url;
+  const imageUrls = [];                              // 이전 버전 object URL 정리 호환용(새 삽입은 복구 가능한 data URL 사용)
+  const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("image-read-failed"));
+    reader.readAsDataURL(blob);
   });
+  const loadImageBlob = async (blob) => {
+    const src = await blobToDataUrl(blob);
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { img.__boardSrc = src; resolve(img); };
+      img.onerror = () => reject(new Error("image-load-failed"));
+      img.src = src;
+    });
+  };
   // (cx,cy) 중심으로 스테이지에 맞춰 축소 배치. cx/cy 없으면 화면 중앙.
   const placeImage = (img, cx, cy) => {
     const maxW = W * 0.85, maxH = H * 0.85;
@@ -193,7 +247,7 @@ function renderWhiteboard(doc, host){
     const ccx = (cx == null) ? W / 2 : cx, ccy = (cy == null) ? H / 2 : cy;
     let x = Math.round(ccx - w / 2), y = Math.round(ccy - h / 2);
     x = Math.max(0, Math.min(x, Math.max(0, W - w))); y = Math.max(0, Math.min(y, Math.max(0, H - h)));
-    const it = { type: "image", img, x, y, w, h };
+    const it = { type: "image", img, src:img.__boardSrc || img.src || "", x, y, w, h };
     pushUndo(); wb.items.push(it);
     wb.selected = it; setTool("select");              // 넣자마자 선택 상태 + 선택 도구 → 바로 드래그로 위치·크기 조절
     redraw(); updateUndoButtons(); recordCommit();
@@ -398,8 +452,9 @@ function renderWhiteboard(doc, host){
   // ----- 사이즈 추적 + 정리 -----
   let ro = null;
   if (typeof ResizeObserver !== "undefined"){ ro = new ResizeObserver(() => resize()); ro.observe(stage); }
+  restoreBoardImages();
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }

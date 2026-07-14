@@ -604,13 +604,13 @@
 <div class="hint" id="hint" hidden>요소를 끌어 위치 이동 · 더블클릭으로 텍스트 수정 · 모서리로 크기 조절 · Delete 키로 삭제</div>
 
 <!-- 오피스 미리보기 라이브러리 (순서 중요) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="vendor/jquery.min.js"></script>
 <!-- docx-preview 는 JSZip 3.x(loadAsync) 필요 → 먼저 v3 을 띄우고 docx-preview 가 이를 캡처하게 한다 -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://unpkg.com/docx-preview@0.3.5/dist/docx-preview.min.js"></script>
+<script src="vendor/jszip3.min.js"></script>
+<script src="vendor/docx-preview.min.js"></script>
 <!-- 이후 전역 JSZip 을 2.6.1 로 되돌린다 (PPTXjs/앱 repair 가 동기 new JSZip API 사용) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/2.6.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/jszip-utils.min.js"></script>
 <script>
 window.FileReaderJS = window.FileReaderJS || {
   setSync: function(){},
@@ -630,22 +630,22 @@ window.FileReaderJS = window.FileReaderJS || {
 </script>
 <script src="vendor/divs2slides.min.js"></script>
 <script src="vendor/pptxjs.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <!-- 스프레드시트 편집·저장 시 셀 서식(번호서식·색·글꼴·병합) 보존 -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="vendor/exceljs.min.js"></script>
 <!-- 오피스 열기암호 복호화 (Agile) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+<script src="vendor/crypto-js.min.js"></script>
 <script src="vendor/office-decrypt.js"></script>
 <!-- 한글(HWP 바이너리) 뷰어: hwp.js v0.0.3 (ESM→전역 변환본) -->
 <script src="vendor/hwp.global.js"></script>
 <!-- PDF 서명/편집 라이브러리 -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
 <!-- DOM → 이미지 캡처(노트북 전체를 PDF로 저장) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="vendor/html2canvas.min.js"></script>
 <script src="vendor/html-to-image.js"></script>
 <!-- 압축(zip) 풀기 + 암호 ZIP(AES) 지원 -->
-<script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js/dist/zip-full.min.js"></script>
+<script src="vendor/zip-full.min.js"></script>
 <script src="src/js/core.js"></script>
 <script src="src/js/icons.js"></script>
 <script src="src/js/state.js"></script>

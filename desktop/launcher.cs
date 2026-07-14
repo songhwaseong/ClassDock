@@ -71,6 +71,9 @@ class PdfSignerLauncher
     const int MaxHttpRequestBodyBytes = 510 * 1024 * 1024;
     // 일반적인 수업용 데이터 분석은 허용하면서, 실수로 큰 배열을 반복 생성해 PC 전체가 멈추는 일을 줄인다.
     const long PythonProcessMemoryLimitBytes = 4096L * 1024 * 1024;
+    // 지속형 노트북 커널은 프로세스가 살아 있어 일반 실행의 WaitForExit 제한을 타지 않는다.
+    // 셀 하나가 무한 실행되는 상황을 막되, 데이터 분석 셀은 일반 스크립트보다 길 수 있어 10분을 허용한다.
+    const int PythonKernelExecutionTimeoutMs = 10 * 60 * 1000;
     // 직전 인스턴스가 실제로 바인딩한 포트. 다음 실행이 후보 포트 전체를 HTTP 로 뒤지지 않고 이 한 곳만 확인해
     // 단일 인스턴스 여부를 빠르게 판단하도록 기록한다(기동 지연 방지).
     static readonly string InstancePortPath = Path.Combine(
@@ -2218,10 +2221,22 @@ class PdfSignerLauncher
             });
             reader.IsBackground = true;
             reader.Start();
-            if (!reader.Join(30 * 60 * 1000))
+            bool timedOut = false;
+            bool memoryLimit = false;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (!reader.Join(250))
+            {
+                if (watch.ElapsedMilliseconds >= PythonKernelExecutionTimeoutMs) { timedOut = true; break; }
+                if (ProcessTreeWorkingSetBytes(kernel.Process.Id) > PythonProcessMemoryLimitBytes) { memoryLimit = true; break; }
+            }
+            if (timedOut || memoryLimit)
             {
                 KillProcessTree(kernel.Process);
-                throw new Exception("kernel-timeout");
+                try { reader.Join(2000); } catch { }
+                kernel.Stderr.AppendLine(memoryLimit
+                    ? "[메모리 제한: 노트북 커널 실행이 4GB를 넘어 종료했습니다.]"
+                    : "[시간 초과: 노트북 셀 실행이 10분을 넘어 종료했습니다.]");
+                throw new Exception(memoryLimit ? "kernel-memory-limit" : "kernel-timeout");
             }
             if (readError != null) throw readError;
             if (string.IsNullOrEmpty(responseLine))

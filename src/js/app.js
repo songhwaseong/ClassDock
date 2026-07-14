@@ -125,16 +125,17 @@ function wire(){
   window.addEventListener("dragend", hideOverlay, true);
   window.addEventListener("blur", hideOverlay);
 
-  // PDF와 작업공간은 자동 복구되므로, 저장하지 않은 Python 편집본이 있을 때만 경고한다.
+  // 모든 편집 문서는 hasUnsavedEdits 를 공통으로 사용한다. PDF는 자체 복구본을
+  // 저장하므로 이 플래그를 쓰지 않고, 표·이미지·화이트보드도 여기서 경고한다.
   let suppressUnloadWarn = false;
-  const hasUnsavedCode = () => docs.some(d => d.hasUnsavedEdits);
+  const hasUnsavedEdits = () => docs.some(d => d.hasUnsavedEdits);
   window.addEventListener("keydown", (e) => {
     const isReload = e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
     if (!isReload) return;
-    if (!hasUnsavedCode()) return;
+    if (!hasUnsavedEdits()) return;
     if (!byId("confirmModal").hidden) return;       // 확인창이 이미 떠 있으면 무시
     e.preventDefault();
-    confirmDialog("저장하지 않은 Python 코드 수정이 있습니다. 새로고침할까요?", "새로고침", "취소").then(ok => {
+    confirmDialog("저장하지 않은 편집 내용이 있습니다. 새로고침할까요?", "새로고침", "취소").then(ok => {
       if (ok){ suppressUnloadWarn = true; location.reload(); }
     });
   });
@@ -169,7 +170,7 @@ function wire(){
   // 탭 닫기처럼 가로챌 수 없는 경우엔 브라우저 기본 확인창으로 폴백.
   window.addEventListener("beforeunload", (e) => {
     if (suppressUnloadWarn) return;
-    if (hasUnsavedCode()){ e.preventDefault(); e.returnValue = ""; }
+    if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
   });
 
   // 인쇄/PDF 저장 시 잘림 방지: PPTX 슬라이드를 인쇄 페이지 폭에 맞춰 "똑바로" 축소한다.

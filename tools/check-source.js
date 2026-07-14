@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const vm = require("vm");
+const crypto = require("crypto");
 
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
@@ -13,10 +14,45 @@ if (!scripts.length) throw new Error("Application script tags were not found.");
 if (scripts.join("\n") !== manifestScripts.join("\n")) {
   throw new Error("manneung-classroom.html script order does not match scripts.manifest.json");
 }
+const layerScripts = (manifest.applicationLayers || []).flatMap((layer) => layer.scripts || []);
+if (layerScripts.join("\n") !== manifest.localScripts.join("\n")) {
+  throw new Error("applicationLayers must contain every local script exactly once and in load order.");
+}
+const scriptIndex = new Map(manifest.localScripts.map((file, index) => [file, index]));
+for (const [script, dependencies] of Object.entries(manifest.scriptDependencies || {})) {
+  if (!scriptIndex.has(script)) throw new Error(`Dependency target is not a local script: ${script}`);
+  for (const dependency of dependencies) {
+    if (!scriptIndex.has(dependency)) throw new Error(`Dependency source is not a local script: ${dependency}`);
+    if (scriptIndex.get(dependency) >= scriptIndex.get(script)) {
+      throw new Error(`Script dependency order is invalid: ${script} must load after ${dependency}`);
+    }
+  }
+}
+for (const boundary of manifest.moduleBoundaries || []) {
+  if (!scriptIndex.has(boundary.file)) throw new Error(`Module boundary is not a local script: ${boundary.file}`);
+  const moduleSource = fs.readFileSync(path.join(root, "src/js", boundary.file), "utf8");
+  if (!new RegExp(`\\b(?:const|let|var)\\s+${boundary.publicApi}\\b`).test(moduleSource)) {
+    throw new Error(`Module public API is missing: ${boundary.publicApi}`);
+  }
+  for (const consumer of boundary.consumers || []) {
+    if (!scriptIndex.has(consumer)) throw new Error(`Module consumer is not a local script: ${consumer}`);
+    if (scriptIndex.get(consumer) <= scriptIndex.get(boundary.file)) {
+      throw new Error(`Module consumer must load after its boundary: ${consumer}`);
+    }
+    const consumerSource = fs.readFileSync(path.join(root, "src/js", consumer), "utf8");
+    if (!new RegExp(`\\b${boundary.publicApi}\\b`).test(consumerSource)) {
+      throw new Error(`Module consumer does not use the public API: ${consumer}`);
+    }
+  }
+}
 for (const item of manifest.vendorScripts) {
   const tag = `<script src="${item.src}"></script>`;
   if (!html.includes(tag)) throw new Error(`Vendor script tag missing from HTML: ${item.src}`);
-  if (!fs.existsSync(path.join(root, "vendor", item.file))) throw new Error(`Vendor file missing: ${item.file}`);
+  const vendorPath = path.join(root, "vendor", item.file);
+  if (!fs.existsSync(vendorPath)) throw new Error(`Vendor file missing: ${item.file}`);
+  if (!item.sha384 || !/^sha384-[A-Za-z0-9+/]+={0,2}$/.test(item.sha384)) throw new Error(`Vendor SHA-384 is missing or invalid: ${item.file}`);
+  const actualHash = "sha384-" + crypto.createHash("sha384").update(fs.readFileSync(vendorPath)).digest("base64");
+  if (actualHash !== item.sha384) throw new Error(`Vendor SHA-384 mismatch: ${item.file}`);
   if (item.worker && !fs.existsSync(path.join(root, "vendor", item.worker))) throw new Error(`Vendor worker missing: ${item.worker}`);
 }
 for (const relative of scripts) {

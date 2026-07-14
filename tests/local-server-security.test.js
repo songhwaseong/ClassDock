@@ -60,3 +60,14 @@ test("로컬 Python 실행은 출력·시간·메모리 상한을 적용한다",
   assert.match(launcher, /메모리 제한: 실행이 4GB를 넘어 중단했습니다/);
   assert.match(launcher, /메모리 제한: 대화형 실행이 4GB를 넘어 종료했습니다/);
 });
+
+test("지속형 노트북 커널도 셀 실행 시간과 프로세스 트리 메모리를 제한한다", () => {
+  const start = launcher.indexOf("static string ExecutePythonKernel");
+  const end = launcher.indexOf("static void StopPythonKernel", start);
+  const kernel = launcher.slice(start, end);
+  assert.match(launcher, /const int PythonKernelExecutionTimeoutMs = 10 \* 60 \* 1000/);
+  assert.match(kernel, /ProcessTreeWorkingSetBytes\(kernel\.Process\.Id\)/);
+  assert.match(kernel, /PythonKernelExecutionTimeoutMs/);
+  assert.match(kernel, /노트북 커널 실행이 4GB를 넘어 종료했습니다/);
+  assert.match(kernel, /노트북 셀 실행이 10분을 넘어 종료했습니다/);
+});
