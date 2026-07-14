@@ -739,7 +739,21 @@ function renderRunResult(ctrl, result){
     files.appendChild(title);
     for (const output of outputs.slice(0, 20)){
       const row = document.createElement("div"); row.className = "nbv-out-file";
-      row.textContent = String(output.name || "output.dat") + " · " + humanSize(Number(output.size) || 0);
+      const full = String(output.name || "output.dat");
+      const base = full.split("/").pop() || "file";
+      const name = document.createElement("span"); name.className = "of-name"; name.textContent = full;
+      const size = document.createElement("span"); size.className = "of-size"; size.textContent = humanSize(Number(output.size) || 0);
+      row.append(name, size);
+      if (output.bytes){                                 // 실행 시점에 채워진 파일 바이트(브라우저·로컬 커널 공통)
+        const dl = document.createElement("a"); dl.className = "of-btn"; dl.textContent = "⬇ 저장";
+        dl.setAttribute("download", base); dl.href = URL.createObjectURL(new Blob([output.bytes]));
+        const open = document.createElement("button"); open.type = "button"; open.className = "of-btn"; open.textContent = "열기";
+        open.addEventListener("click", () => handleFiles([new File([output.bytes], base)]));   // 앱 뷰어로 열기
+        row.append(dl, open);
+      } else {                                           // 20MB 초과 등으로 바이트 미수집
+        const note = document.createElement("span"); note.className = "of-size"; note.textContent = nbTf("(너무 커서 미리 못 받음)");
+        row.append(note);
+      }
       files.appendChild(row);
     }
     wrap.appendChild(files);
@@ -851,6 +865,29 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     result = await task.promise;
     if (result && typeof result === "object") result.elapsedMs = runClock.now() - runStartedAt;
     nbThrowIfCancelled(ownerDoc);
+    // 로컬 커널: 누락 모듈(ModuleNotFoundError)이면 pip 로 설치한 뒤 자동 재실행한다
+    // (단일 .py 파일 실행과 동일한 편의 — 브라우저 커널은 preparePyodideWorkerPackages 가 미리 챙김).
+    if (localKernel){
+      const tried = new Set();
+      while (result && result.ok === false){
+        const missing = detectMissingModule(result.stderr);
+        if (!missing || tried.has(missing) || tried.size >= 6 || bundleHasLocalModule(workspaceBundle, missing)) break;
+        tried.add(missing);
+        const installed = await nbInstallMissingModule(ownerDoc, importToPip(missing));
+        nbThrowIfCancelled(ownerDoc);
+        if (!installed) break;
+        nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel} · 기준 {cwd}", { kernel:nbT("로컬 Python"), cwd:workspaceCwd || "." }));
+        const retryTask = startLocalNotebookKernelRun(
+          ownerDoc, cell.source, ctrl.stdinText ? ctrl.stdinText() : "", workspaceBundle
+        );
+        ownerDoc._nbActiveTask = retryTask;
+        if (ownerDoc._nbCancelRequested) retryTask.cancel();
+        const retryStartedAt = runClock.now();
+        result = await retryTask.promise;
+        if (result && typeof result === "object") result.elapsedMs = runClock.now() - retryStartedAt;
+        nbThrowIfCancelled(ownerDoc);
+      }
+    }
     const outputBundle = workspaceBundle
       ? { ...workspaceBundle, cwd:workspaceCwd,
           logicalRoot:workspaceBundle.logicalRoot || "" }
@@ -896,6 +933,11 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     if (cancelled){
       ownerDoc._nbWorkspacePromise = null;
       nbSetStatus(ownerDoc, nbTf("중지됨 · {kernel} 커널 초기화됨", { kernel:nbT(ownerDoc._nbKernelMode === "local" ? "로컬 Python" : "브라우저") }));
+    } else if (/could not be read|NotReadableError|permission problems that have occurred/i.test(message)){
+      // 폴더에서 온 File 스냅샷이 만료됨(파일이 디스크에서 바뀌었거나 권한 만료) — 캐시를 비워 다음 실행에서 다시 읽게 하고,
+      // 재획득이 불가능한 경우(핸들 없는 드래그드롭 등)를 대비해 폴더를 다시 열라고 안내한다.
+      ownerDoc._nbWorkspacePromise = null;
+      nbSetStatus(ownerDoc, "작업폴더 파일을 다시 읽지 못했어요(파일이 바뀌었거나 권한이 만료됨). 폴더를 다시 열고 실행해 주세요.");
     } else {
       nbSetStatus(ownerDoc, nbTf("실행 오류: {message}", { message }));
     }

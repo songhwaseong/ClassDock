@@ -251,6 +251,35 @@ function startLocalNotebookKernelRun(ownerDoc, source, stdin, workspaceBundle){
   };
 }
 
+// 로컬 커널 셀에서 누락 모듈을 만났을 때 이 PC 의 Python 에 pip 로 설치한다(동의 후).
+// 진행/결과는 노트북 상태줄·토스트로 알린다(.py 뷰어의 runPipInstall 은 별도 출력 패널을 요구해 재사용 대신 별도 구현).
+// 설치가 끝나면 같은 커널 프로세스에서 다시 import 하면 site-packages 에서 새로 잡힌다. 성공 여부 반환.
+async function nbInstallMissingModule(ownerDoc, pkg){
+  if (!pkg) return false;
+  if (!(await pythonBackendAvailable())) return false;   // 브라우저 커널이면 자동 설치 대상 아님
+  const approved = typeof confirmDialog === "function" && await confirmDialog(
+    "이 노트북이 쓰는 로컬 Python 환경에 다음 패키지를 설치합니다.\n\n" + pkg +
+    "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
+    "설치", "취소");
+  if (!approved){ nbSetStatus(ownerDoc, "패키지 설치를 취소했어요."); return false; }
+  nbSetStatus(ownerDoc, "패키지 설치 중… " + pkg + " (수십 초~몇 분 · 인터넷 필요)");
+  try {
+    const res = await fetch("/pip-install", {
+      method:"POST",
+      headers:{ "Content-Type":"text/plain; charset=utf-8", "X-Manneung-Pip-Confirm":"1" },
+      body:pkg
+    });
+    const txt = await res.text();
+    let j; try { j = JSON.parse(txt); } catch(_){ j = { ok:res.ok, code:-1, output:txt }; }
+    if (typeof toast === "function") toast(j.ok ? ("설치 완료: " + pkg + " · 다시 실행합니다") : "설치 실패 — 아래 상태줄/로그를 확인하세요", 3200);
+    nbSetStatus(ownerDoc, j.ok ? ("설치 완료 ✓ · " + pkg) : ("설치 실패 (코드 " + j.code + ") · " + pkg));
+    return !!j.ok;
+  } catch(e){
+    nbSetStatus(ownerDoc, "설치 요청 실패: " + ((e && e.message) || e));
+    return false;
+  }
+}
+
 // ── 로컬 파이썬 전체 실행(옵션 B) ─────────────────────────────────────────────
 // 노트북 전체 코드를 이 PC에 설치된 '진짜' 파이썬으로 한 번에 실행한다. 브라우저 커널(Pyodide)에서
 // 안 되는 코드(selenium 크롤링 등)를 위한 별도 경로로, 기존 셀별 실행은 전혀 건드리지 않는다.

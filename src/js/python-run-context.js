@@ -69,10 +69,30 @@ function makeFileSiblingCtx(pairs, name, directories=[]){
       for (const p of sel) total += (p.file.size || 0);
       if (total > RUN_BUNDLE_CAP) throw new Error("sibling-set-too-large");
       const out = [];
-      for (const p of sel) out.push({ path: p.relPath, bytes: new Uint8Array(await p.file.arrayBuffer()) });
+      for (const p of sel) out.push({ path: p.relPath, bytes: await readRunSiblingBytes(p) });
       return out;
     }
   };
+}
+// 폴더에서 온 File 은 File System Access 스냅샷이라, 폴더 안 파일이 디스크에서 바뀌면(노트북 자동 저장 등)
+// 다시 읽을 때 NotReadableError 로 실패한다. 보관해둔 원본 핸들(__fsHandle)로 File 을 다시 떠서 재시도하고,
+// 성공한 새 스냅샷을 pair 에 반영해 이후 읽기도 어긋나지 않게 한다(documents.js 의 readDocSourceBytes 와 같은 방식).
+async function readRunSiblingBytes(pair){
+  const file = pair && pair.file;
+  if (!file || typeof file.arrayBuffer !== "function") throw new Error("no-sibling-file");
+  try {
+    return new Uint8Array(await file.arrayBuffer());
+  } catch(e){
+    const handle = file.__fsHandle;
+    if (handle && typeof handle.getFile === "function"){
+      let fresh = await handle.getFile();
+      if (typeof withFileHandle === "function") fresh = withFileHandle(fresh, handle);
+      if (typeof withDirHandle === "function" && file.__fsDirHandle) fresh = withDirHandle(fresh, file.__fsDirHandle);
+      pair.file = fresh;
+      return new Uint8Array(await fresh.arrayBuffer());
+    }
+    throw e;
+  }
 }
 // 폴더/압축 묶음을 실행 대상과 관련된 범위로 좁힌다.
 // 자동 실행 기준은 실제 .py 파일 폴더이며, 상위·형제 파일은 ../dataIn/shopList.xml처럼 명시한 경로로 찾는다.
