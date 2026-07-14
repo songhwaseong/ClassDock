@@ -2069,17 +2069,6 @@ function renderSidebar(){
     item.onclick = (e) => {
       sidebarCursorKey = node.nodeId;                       // 클릭한 줄을 키보드 커서로 동기화
       if (node.type === "group"){
-        // 자동 복원에서 대량 사진이 생략된 폴더는 루트·하위 폴더 어디를 눌러도 한 번만 실제 파일을 다시 읽는다.
-        const pendingImageRoot = navNodes.find(item =>
-          item.nodeId === node.folderRefreshRootId && item.type === "group" && item.folderRefreshRootId === item.nodeId
-        );
-        if (pendingImageRoot && pendingImageRoot.restorePendingImages && !pendingImageRoot.folderReloading){
-          pendingImageRoot.folderReloading = true;
-          Promise.resolve(requestFolderRefresh(pendingImageRoot.nodeId))
-            .catch(() => {})
-            .finally(() => { pendingImageRoot.folderReloading = false; });
-          return;
-        }
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
         // 이미 펼쳐진 폴더라도 형제 중 열린 폴더가 있으면 접지 않고 형제만 접는다(첫 클릭부터 "이 폴더만 남기기").
         // 자기 혼자 열려 있을 때 클릭하면 그때 접힌다. Alt+클릭: 형제를 유지한 채 자기만 펴기/접기.
@@ -2159,6 +2148,24 @@ function renderSidebar(){
       info.title = ZIP_MODE_NOTICE; info.setAttribute("aria-label", "ZIP 제한사항 보기");
       info.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toast(ZIP_MODE_NOTICE, 6500); });
       label.appendChild(info);
+    }
+    // 대량 사진이 자동 복원에서 빠진 폴더(루트)에는 눈에 보이는 복원 버튼을 단다 — 이 버튼을 눌러야만
+    // 디스크에서 사진을 다시 읽는다. 다른 폴더를 클릭해도 새로고침되지 않는다.
+    if (node.type === "group" && node.restorePendingImages && node.folderRefreshRootId === node.nodeId){
+      label.classList.add("has-image-restore");
+      const restore = document.createElement("button");
+      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = "📷 사진 불러오기";
+      restore.title = "용량이 커서 자동 복원에서 빠진 사진을 디스크에서 다시 불러옵니다.";
+      restore.setAttribute("aria-label", "빠진 사진 다시 불러오기");
+      restore.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (node.folderReloading) return;
+        node.folderReloading = true; restore.disabled = true;
+        Promise.resolve(requestFolderRefresh(node.nodeId))
+          .catch(() => {})
+          .finally(() => { node.folderReloading = false; });
+      });
+      label.appendChild(restore);
     }
     if (doc && query && contentMatchQuery === query && contentMatchSnippets.has(doc.id)){
       const hit = contentMatchSnippets.get(doc.id);

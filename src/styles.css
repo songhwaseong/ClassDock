@@ -312,8 +312,12 @@
   [data-cat="code"]{--ic:#6b8aa3}
   [data-cat="media"]{--ic:#6366f1}
   .sb-label{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden}
-  .sb-label.has-zip-info{flex-direction:row;align-items:center;gap:5px}
-  .sb-label.has-zip-info .sb-name{flex:1}
+  .sb-label.has-zip-info,.sb-label.has-image-restore{flex-direction:row;align-items:center;gap:5px}
+  .sb-label.has-zip-info .sb-name,.sb-label.has-image-restore .sb-name{flex:1}
+  .sb-image-restore{flex:0 0 auto;padding:1px 8px;border:1px solid rgba(96,165,250,.5);border-radius:999px;
+    background:rgba(96,165,250,.16);color:#bfdbfe;font:600 10px/1.6 "Segoe UI","Malgun Gothic",sans-serif;cursor:pointer;white-space:nowrap}
+  .sb-image-restore:hover,.sb-image-restore:focus-visible{background:rgba(96,165,250,.32);color:#fff;outline:1px solid rgba(96,165,250,.7)}
+  .sb-image-restore:disabled{opacity:.5;cursor:default}
   .sb-name{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sb-zip-info{flex:0 0 auto;width:19px;height:19px;padding:0;border:0;border-radius:50%;background:transparent;
     color:#f5c06a;font:700 14px/19px "Segoe UI Symbol","Malgun Gothic",sans-serif;cursor:help;opacity:.82}
