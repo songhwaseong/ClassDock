@@ -515,6 +515,7 @@ function appendOutputFiles(panel, outputs, sessionId){
       // → fetch(래퍼가 토큰 자동 첨부)로 받아 Blob 으로 저장
       const url = "/python-session-file?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(f.name);
       dl.href = "#";
+      open.addEventListener("click", () => openSessionFile(sessionId, f.name));   // 서버에서 받아 앱 뷰어로 열기
       dl.addEventListener("click", async (e) => {
         e.preventDefault();
         try {
