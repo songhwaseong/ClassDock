@@ -502,15 +502,83 @@ function buildJsonTreeView(rootValue){
   return wrap;
 }
 
+// 원본 텍스트의 주된 개행 문자를 판별한다(CRLF/CR/LF). 저장 시 이 개행으로 되돌린다.
+function detectDominantEol(raw){
+  const s = String(raw || "");
+  const crlf = (s.match(/\r\n/g) || []).length;
+  const totalLf = (s.match(/\n/g) || []).length;
+  const totalCr = (s.match(/\r/g) || []).length;
+  const lfOnly = totalLf - crlf;              // \r 없이 홀로 있는 \n
+  const crOnly = totalCr - crlf;              // \n 없이 홀로 있는 \r (구형 Mac)
+  if (crlf > 0 && crlf >= lfOnly && crlf >= crOnly) return "crlf";
+  if (crOnly > 0 && crOnly > lfOnly) return "cr";
+  return "lf";
+}
+
+// 저장 직전, 편집기의 LF 텍스트를 원본 개행·BOM 으로 되돌린다(문자 인코딩은 UTF-8 로 고정).
+function applyDocEncodingOnSave(value, ownerDoc){
+  let out = String(value == null ? "" : value);
+  const eol = ownerDoc && ownerDoc.textEol;
+  if (eol === "crlf") out = out.replace(/\n/g, "\r\n");
+  else if (eol === "cr") out = out.replace(/\n/g, "\r");
+  if (ownerDoc && ownerDoc.textBom && out.charCodeAt(0) !== 0xFEFF) out = String.fromCharCode(0xFEFF) + out;
+  return out;
+}
+
+// 구조화 파일(JSON·XML·YAML) 편집 중 유효성 진단. 편집기 상단에 "✓ 유효" 또는 오류 위치를 보여준다.
+// 반환: { level:"ok"|"warn"|"error", text } 또는 null(진단 대상 아님).
+function structuredEditDiagnostic(ext, prof, text){
+  const src = String(text == null ? "" : text);
+  const lineAt = (pos) => { const p = Math.max(0, Math.min(pos, src.length)); return (src.slice(0, p).match(/\n/g) || []).length + 1; };
+  if (ext === "json"){
+    if (!src.trim()) return { level:"warn", text:"빈 파일" };
+    try { JSON.parse(src); return { level:"ok", text:"✓ 유효한 JSON" }; }
+    catch(e){
+      const msg = String((e && e.message) || e);
+      const m = msg.match(/position (\d+)/i);
+      const lm = msg.match(/line (\d+)/i);
+      const where = lm ? ("" + lm[1] + "번째 줄") : (m ? (lineAt(+m[1]) + "번째 줄") : "");
+      return { level:"error", text:"⚠ JSON 오류" + (where ? " · " + where : "") + " · " + msg.replace(/^JSON\.parse:\s*/i, "").replace(/ in JSON at position \d+/i, "") };
+    }
+  }
+  if (prof === "xml"){
+    if (!src.trim()) return { level:"warn", text:"빈 파일" };
+    try {
+      const doc = new DOMParser().parseFromString(src, "application/xml");
+      const err = doc.querySelector("parsererror");
+      if (!err) return { level:"ok", text:"✓ 잘 짜인 XML" };
+      const detail = (err.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      return { level:"error", text:"⚠ XML 오류 · " + detail };
+    } catch(e){ return { level:"error", text:"⚠ XML 오류 · " + String((e && e.message) || e) }; }
+  }
+  if (ext === "yaml" || ext === "yml"){
+    // YAML 정식 파서는 번들하지 않았다. 확실히 판단할 수 있는 들여쓰기 탭만 오류로 표시하고,
+    // 나머지는 성공(초록색)으로 오인되지 않도록 간이 검사 경고로 분리한다.
+    const lines = src.split("\n");
+    for (let i = 0; i < lines.length; i++){
+      if (/^ *\t/.test(lines[i])) return { level:"error", text:"⚠ YAML: " + (i + 1) + "번째 줄 들여쓰기에 탭 문자 — 공백으로 바꾸세요" };
+    }
+    return { level:"warn", text:"YAML 간이 검사 · 탭 들여쓰기 없음(전체 문법 검증 아님)" };
+  }
+  return null;
+}
+
 async function renderCode(file, host, ext, profile, runCtx){
   const sourceBytes = new Uint8Array(await file.arrayBuffer());
-  const text = smartDecodeText(sourceBytes).replace(/\r\n?/g, "\n");
+  const rawText = smartDecodeText(sourceBytes);
+  const text = rawText.replace(/\r\n?/g, "\n");
   // 대용량/초장문 파일은 구문 강조(수십만 span 생성)를 생략하고 일반 텍스트로 → 렌더·전환 부담 감소
   const heavy = text.length > 300000 || /[^\n]{20000}/.test(text);
   const prof = heavy ? "text" : (profile || CODE_EXTS[ext] || "c");
   const lineCount = text.split("\n").length;
   const runnable = RUN_EXTS.has(ext);
   const ownerDoc = docs.find(d => d.el === host) || null;
+  // 저장 시 원본 개행(CRLF/CR)·BOM 을 보존하기 위해 로드 시 1회 감지해 문서에 기억한다.
+  // (화면·편집은 항상 LF 로 정규화하고, 저장할 때만 되돌린다 → Windows .bat/.ps1 등의 개행이 바뀌지 않음.)
+  if (ownerDoc && ownerDoc.textEol == null){
+    ownerDoc.textEol = detectDominantEol(rawText);
+    ownerDoc.textBom = !!(ownerDoc.textEncoding && ownerDoc.textEncoding.bom);
+  }
   // 라이트 모드 배경 프리셋은 Python 실행·편집 화면에만 별도 적용한다.
   if (runnable) host.classList.add("python-editor-doc");
   const effectiveRunCtx = {
@@ -539,6 +607,24 @@ async function renderCode(file, host, ext, profile, runCtx){
     const isHtml = ext === "html" || ext === "htm" || ext === "xhtml";   // 소스 보기 ↔ 미리보기(렌더) 토글 대상
     const isMd = ext === "md" || ext === "markdown" || ext === "mdx";    // 마크다운: 미리보기 우선 + 편집·저장 지원
     let currentText = text;
+    // 저장하지 않은 편집 초안 자동복구 — 파이썬·PDF처럼 비파이썬 텍스트/코드도 복구한다.
+    // 키는 파일 경로, 유효성은 원본 바이트 지문으로 확인(파일이 바뀌면 초안 폐기).
+    const textDraftKey = canEdit ? pythonDraftKey(file, ownerDoc, effectiveRunCtx) : null;
+    const textDraftFingerprint = fingerprintBytes((file && file.name) || saveName, sourceBytes);
+    let restoredTextDraft = null;
+    if (textDraftKey){
+      const saved = loadPythonDraft(textDraftKey, textDraftFingerprint);
+      if (saved !== null && saved !== text){ restoredTextDraft = saved; currentText = saved; }
+    }
+    let textDraftTimer = 0;
+    const persistTextDraft = () => {
+      clearTimeout(textDraftTimer); textDraftTimer = 0;
+      if (!textDraftKey) return;
+      const savedRef = (ownerDoc && typeof ownerDoc.savedText === "string") ? ownerDoc.savedText : text;
+      if (currentText === savedRef) clearPythonDraft(textDraftKey);
+      else savePythonDraft(textDraftKey, textDraftFingerprint, currentText);
+    };
+    const scheduleTextDraft = () => { clearTimeout(textDraftTimer); textDraftTimer = setTimeout(persistTextDraft, 500); };
     let prettyText = null;                        // null=원본 표시, 문자열=정렬본 표시(화면 전용 — 편집·저장은 항상 원본)
     let treeMode = false;                         // JSON 트리 보기(화면 전용). 편집·저장은 항상 원본 텍스트 기준
     let treeData = null, treeDataFor = null;      // JSON.parse 결과 캐시(같은 원문이면 재파싱 생략)
@@ -887,10 +973,11 @@ async function renderCode(file, host, ext, profile, runCtx){
       prettyText = null; treeMode = false;   // 편집·저장은 항상 원본 텍스트 기준 — 표시 전용 정렬·트리 상태는 해제
       const startedForFind = findOnlyEdit; findOnlyEdit = false;
       // 찾기(Ctrl+H)만 하러 들어온 편집 모드면, 찾기를 닫을 때 아직 수정 전이면 보기로 되돌린다.
-      const editorOpts = startedForFind ? { onFindClose: () => {
+      const editorOpts = { plain: true, fileExt: ext };      // 일반 텍스트/코드: 파이썬 전용 지능 없이 확장자별 버퍼 단어 완성만
+      if (startedForFind) editorOpts.onFindClose = () => {
         if (ownerDoc && ownerDoc.hasUnsavedEdits) return;   // 편집을 시작했으면 그대로 편집 유지
         currentText = editor.getValue(); showView();
-      } } : {};
+      };
       const editor = buildCodeEditor(currentText, prof, editorOpts); activeEditor = editor;
       if (ownerDoc) ownerDoc.codeEditor = editor;
       const bar = document.createElement("div"); bar.className = "run-bar text-edit-bar";
@@ -901,12 +988,30 @@ async function renderCode(file, host, ext, profile, runCtx){
       const fontUp = document.createElement("button"); fontUp.type = "button"; fontUp.className = "run-font"; fontUp.textContent = "A+"; fontUp.title = "글자 크게 (Ctrl++)";
       fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
       const status = document.createElement("span"); status.className = "run-status";
-      bar.append(saveBtn, viewBtn, fontDown, fontUp, status);
+      const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
+      bar.append(saveBtn, viewBtn, fontDown, fontUp, status, diag);
+      // 원본이 UTF-8 이 아니면 저장 시 UTF-8 로 바뀜을 알린다(개행·BOM 은 원본 유지).
+      const enc0 = ownerDoc && ownerDoc.textEncoding;
+      if (enc0 && enc0.encoding && enc0.encoding !== "utf-8" && !enc0.empty){
+        const encNote = document.createElement("span"); encNote.className = "text-edit-encnote";
+        encNote.textContent = "원본 " + (enc0.shortLabel || enc0.label) + " → 저장 시 UTF-8";
+        encNote.title = "이 파일은 " + enc0.label + " 인코딩이에요. 저장하면 UTF-8 로 바뀝니다(개행 문자는 원본 유지).";
+        bar.appendChild(encNote);
+      }
       host.appendChild(bar); host.appendChild(editor.host);
       if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
       registerEditorFont(editor.host);
-      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; if (ownerDoc){ ownerDoc.hasUnsavedEdits = dirty; updateDocumentStatus(ownerDoc); } };
+      let diagTimer = 0;
+      const runDiagnostic = () => {
+        const d = structuredEditDiagnostic(ext, prof, editor.getValue());
+        if (!d){ diag.hidden = true; return; }
+        diag.hidden = false; diag.textContent = d.text; diag.dataset.level = d.level;
+        diag.title = d.level === "ok" ? "구조 검사를 통과했어요." : d.text;
+      };
+      const scheduleDiagnostic = () => { clearTimeout(diagTimer); diagTimer = setTimeout(runDiagnostic, 300); };
+      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; if (ownerDoc){ ownerDoc.hasUnsavedEdits = dirty; updateDocumentStatus(ownerDoc); } scheduleTextDraft(); scheduleDiagnostic(); };
       editor.ta.addEventListener("input", markDirty);
+      runDiagnostic();                                        // 편집 진입 시 1회 즉시 진단
       editor.ta.addEventListener("keydown", (e) => {
         if (shortcutMatches(e, "saveCurrent")){ e.preventDefault(); saveBtn.click(); }
         else if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); }
@@ -914,7 +1019,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       });
       saveBtn.addEventListener("click", async () => {
         saveBtn.disabled = true;
-        try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; if (ownerDoc){ ownerDoc.hasUnsavedEdits = false; updateDocumentStatus(ownerDoc); } } }
+        try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; if (ownerDoc){ ownerDoc.hasUnsavedEdits = false; updateDocumentStatus(ownerDoc); } persistTextDraft(); } }
         finally { saveBtn.disabled = false; }
       });
       viewBtn.addEventListener("click", () => { currentText = editor.getValue(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
@@ -984,7 +1089,12 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (ownerDoc) ownerDoc.openDocFind = openDocFind;
 
     if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(teardownActive); }
-    if (canEdit && ownerDoc && ownerDoc.isScratch) showEdit();
+    if (restoredTextDraft !== null){              // 저장하지 않은 편집 초안 복구 → 편집 화면으로 열어 바로 보이게
+      if (ownerDoc){ ownerDoc.hasUnsavedEdits = true; updateDocumentStatus(ownerDoc); }
+      showEdit();
+      toast("저장하지 않은 편집 내용을 복구했어요.", 2600);
+    }
+    else if (canEdit && ownerDoc && ownerDoc.isScratch) showEdit();
     else if (isMd) showPreview();                 // 마크다운은 문서 모양(미리보기)이 기본
     else showView();
     return;
@@ -1756,13 +1866,16 @@ function downloadTextFile(text, name){
 // 아니면 .py 저장과 동일하게 위치를 한 번 고르고 핸들을 보관해 같은 파일에 덮어쓰기, 마지막 폴백이 다운로드.
 // 스크래치 첫 저장은 이름을 받는다.
 async function saveTextDoc(value, ownerDoc, name){
+  // 화면·편집은 LF·UTF-8 로 다루지만, 디스크에는 원본 개행·BOM 을 되살려 쓴다(문자 인코딩은 UTF-8).
+  // savedText·dirty 비교는 편집기와 같은 LF 값(value)을 그대로 쓴다.
+  const outValue = applyDocEncodingOnSave(value, ownerDoc);
   try {
     // 폴더로 연 파일이 원본 파일 핸들을 들고 있으면 서버 사본이 아닌 원본 파일에 되쓴다(.py 저장과 동일 원칙).
     const wantOriginal = !!(ownerDoc && ownerDoc.originalSaveMode);
     const fromFolderOriginal = !!(ownerDoc && ownerDoc.archiveCtx && ownerDoc.archiveCtx.isFolderContext
       && ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function");
     if (wantOriginal || fromFolderOriginal){
-      const wrote = await saveViaFileHandle(value, name, ownerDoc, {
+      const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
         mime: "text/plain;charset=utf-8"
       });
@@ -1794,7 +1907,7 @@ async function saveTextDoc(value, ownerDoc, name){
         if (typeof renderSidebar === "function") renderSidebar();
         const hdr = byId("activeFileName"); if (hdr && typeof state !== "undefined" && state === ownerDoc) hdr.textContent = fname;
       }
-      const path = await saveViaServer(value, ownerDoc, name);
+      const path = await saveViaServer(outValue, ownerDoc, name);
       if (path){
         if (ownerDoc){ ownerDoc.size = new Blob([value]).size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
         toast("저장 완료 · " + path, 3400, {
@@ -1815,7 +1928,7 @@ async function saveTextDoc(value, ownerDoc, name){
     const extMatch = String(name).match(/\.[A-Za-z0-9]+$/);
     const ext = extMatch ? extMatch[0].toLowerCase() : "";
     const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
-    const wrote = await saveViaFileHandle(value, name, ownerDoc, {
+    const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
       mime: mime + ";charset=utf-8",
       pickerTypes: ext ? [{ description: ext === ".ipynb" ? "Jupyter Notebook" : ext.slice(1).toUpperCase() + " 파일",
         accept: { [mime]: [ext] } }] : null
@@ -1849,7 +1962,7 @@ async function saveTextDoc(value, ownerDoc, name){
         : "선택한 위치에 저장했어요. 다음부터는 묻지 않고 같은 파일에 저장돼요.", 2600, { type: "success" });
       return true;
     }
-    const blob = new Blob([value], { type: "text/plain;charset=utf-8" });   // 미지원 브라우저/file:// → 다운로드(확장자 유지)
+    const blob = new Blob([outValue], { type: "text/plain;charset=utf-8" });   // 미지원 브라우저/file:// → 다운로드(확장자 유지)
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);

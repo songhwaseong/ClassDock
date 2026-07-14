@@ -5,7 +5,7 @@ const {
   htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle,
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
-  transformEditorLines, pythonCompletionCandidates, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -369,6 +369,25 @@ test("Python 자동완성은 현재 코드 식별자와 기본 단어를 접두�
   assert.deepEqual(suggestions.slice(0, 3), ["process_data", "project_name", "property"]);
   assert.ok(pythonCompletionCandidates("", "pri").includes("print"));
   assert.doesNotMatch(pythonCompletionCandidates("print", "print").join(" "), /\bprint\b/);
+});
+
+test("언어별 자동완성: 프로파일 키워드로 바꾸면 파이썬 키워드가 섞이지 않는다", () => {
+  // 기본(키워드 미지정)은 파이썬 키워드 유지 — 기존 동작 보존
+  assert.ok(pythonCompletionCandidates("", "de").includes("def"));
+  // JS(C계열) 키워드를 넘기면 파이썬 전용 키워드는 빠지고 JS 키워드가 나온다
+  const js = pythonCompletionCandidates("const myVar = 1", "fun", completionWordsForProfile("c", "js"));
+  assert.ok(js.includes("function"));
+  assert.ok(!pythonCompletionCandidates("", "el", completionWordsForProfile("c", "js")).includes("elif"));
+  // 버퍼 식별자는 언제나 키워드보다 먼저 제안된다
+  const ranked = pythonCompletionCandidates("myFunction other", "my", completionWordsForProfile("c", "js"));
+  assert.equal(ranked[0], "myFunction");
+  // 순수 텍스트/알 수 없는 형식은 키워드 없이 버퍼 단어만
+  assert.deepEqual(completionWordsForProfile("text"), []);
+  assert.deepEqual(pythonCompletionCandidates("alpha beta", "al", []), ["alpha"]);
+  // 같은 구문강조 프로파일을 공유해도 확장자 기준으로 다른 언어 키워드만 제안한다.
+  assert.ok(!completionWordsForProfile("hash", "yaml").includes("def"));
+  assert.ok(!completionWordsForProfile("c", "json").includes("function"));
+  assert.ok(completionWordsForProfile("hash", "ps1").includes("foreach"));
 });
 
 test("import completion suggestions carry their import statement", () => {

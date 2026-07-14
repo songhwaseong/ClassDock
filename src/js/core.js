@@ -527,6 +527,58 @@
     "abs all any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex delattr dict dir divmod enumerate eval exec filter float format frozenset getattr globals hasattr hash help hex id input int isinstance issubclass iter len list locals map max memoryview min next object oct open ord pow print property range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip __import__"
   ).split(/\s+/);
 
+  // 비(非)파이썬 파일도 편집기에서 버퍼 단어 자동완성을 쓴다. 언어별 키워드를 함께 제안해
+  // 파이썬 키워드가 JS·SQL 등에 섞여 드는 문제를 없앤다. 구문강조 프로파일(CODE_EXTS)을 그대로 쓴다.
+  const JS_COMPLETION_WORDS = (
+    "as async await break case catch class const continue debugger default delete do else export extends false finally for from function get if import in instanceof let new null of return set static super switch this throw true try typeof var void while with yield " +
+    "console document window Array Object String Number Boolean Math JSON Promise require module exports"
+  ).split(/\s+/);
+  const TS_COMPLETION_WORDS = JS_COMPLETION_WORDS.concat("abstract any as assert asserts bigint declare enum implements infer interface is keyof namespace never private protected public readonly satisfies type undefined unknown".split(/\s+/));
+  const C_COMPLETION_WORDS = "auto break case char const continue default do double else enum extern float for goto if inline int long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary _Noreturn _Static_assert _Thread_local".split(/\s+/);
+  const CPP_COMPLETION_WORDS = C_COMPLETION_WORDS.concat("alignas alignof and and_eq asm bitand bitor bool catch class compl concept constexpr const_cast continue co_await co_return co_yield decltype delete dynamic_cast explicit export false friend mutable namespace new noexcept not not_eq nullptr operator or or_eq private protected public reflexpr reinterpret_cast requires static_assert static_cast template this thread_local throw true try typeid typename using virtual wchar_t xor xor_eq".split(/\s+/));
+  const JAVA_COMPLETION_WORDS = "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public record return short static strictfp super switch synchronized this throw throws transient try void volatile while true false null".split(/\s+/);
+  const CSHARP_COMPLETION_WORDS = "abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while async await dynamic get set value var yield".split(/\s+/);
+  const GO_COMPLETION_WORDS = "break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var true false iota nil".split(/\s+/);
+  const RUST_COMPLETION_WORDS = "as async await break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while abstract become box do final macro override priv typeof unsized virtual yield".split(/\s+/);
+  const SHELL_COMPLETION_WORDS = "case do done elif else esac fi for function if in select then time until while coproc break continue return export readonly local declare typeset unset shift source alias unalias true false test".split(/\s+/);
+  const POWERSHELL_COMPLETION_WORDS = "begin break catch class continue data define do dynamicparam else elseif end enum exit filter finally for foreach from function hidden if in param process return switch throw trap try until using var while workflow and as band bnot bor bxor case contains ccontains ceq cge cgt cle clike clt cmatch cne cnotcontains cnotlike cnotmatch cor creplace csharp csplit eq ge gt ilike imatch in is isnot le like lt match not notcontains notin notlike notmatch or replace shl shr split".split(/\s+/);
+  const RUBY_COMPLETION_WORDS = "BEGIN END alias and begin break case class def defined do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield".split(/\s+/);
+  const SQL_COMPLETION_WORDS = (
+    "SELECT FROM WHERE INSERT INTO UPDATE DELETE CREATE ALTER DROP TABLE VIEW INDEX JOIN INNER LEFT RIGHT OUTER FULL ON GROUP ORDER BY ASC DESC HAVING UNION ALL VALUES SET PRIMARY KEY FOREIGN REFERENCES NOT NULL DEFAULT DISTINCT AS AND OR LIKE BETWEEN IN EXISTS CASE WHEN THEN ELSE END COUNT SUM AVG MIN MAX LIMIT OFFSET BEGIN COMMIT ROLLBACK"
+  ).split(/\s+/);
+  const CSS_COMPLETION_WORDS = (
+    "color background background-color border margin padding width height display position top left right bottom flex grid gap font font-size font-weight line-height text-align justify-content align-items float overflow opacity transform transition animation z-index box-shadow border-radius cursor content visibility inherit initial none auto absolute relative fixed sticky block inline flex grid"
+  ).split(/\s+/);
+  // 확장자별 완성 키워드. 구문강조 프로파일은 여러 언어를 함께 쓰므로, 편집기에서는 확장자를
+  // 우선해 JS 키워드가 JSON에, Python 키워드가 YAML·PowerShell에 섞이지 않게 한다.
+  // ext를 생략한 기존 호출은 프로파일 기본값을 유지한다.
+  function completionWordsForProfile(profile, ext="") {
+    const extension = String(ext || "").toLowerCase().replace(/^\./, "");
+    if (extension){
+      if (["js", "mjs", "cjs", "jsx", "vue", "svelte"].includes(extension)) return JS_COMPLETION_WORDS;
+      if (["ts", "tsx"].includes(extension)) return TS_COMPLETION_WORDS;
+      if (["c", "h"].includes(extension)) return C_COMPLETION_WORDS;
+      if (["cpp", "cc", "hpp", "cxx"].includes(extension)) return CPP_COMPLETION_WORDS;
+      if (extension === "java") return JAVA_COMPLETION_WORDS;
+      if (extension === "cs") return CSHARP_COMPLETION_WORDS;
+      if (extension === "go") return GO_COMPLETION_WORDS;
+      if (extension === "rs") return RUST_COMPLETION_WORDS;
+      if (["py", "pyi"].includes(extension)) return PYTHON_COMPLETION_WORDS;
+      if (["sh", "bash", "zsh"].includes(extension)) return SHELL_COMPLETION_WORDS;
+      if (extension === "ps1") return POWERSHELL_COMPLETION_WORDS;
+      if (extension === "rb") return RUBY_COMPLETION_WORDS;
+      // JSON/YAML/XML·설정 파일은 언어 키워드 대신 현재 버퍼의 단어만 제안한다.
+      if (["json", "json5", "jsonc", "yaml", "yml", "xml", "xsl", "xslt", "xsd", "rss", "atom", "plist", "wsdl", "dbk", "docbook", "toml", "ini", "env", "properties", "conf"].includes(extension)) return [];
+    }
+    switch (String(profile || "")) {
+      case "c": return JS_COMPLETION_WORDS;
+      case "sql": return SQL_COMPLETION_WORDS;
+      case "css": return CSS_COMPLETION_WORDS;
+      case "hash": return PYTHON_COMPLETION_WORDS;
+      default: return [];                             // xml/text 등: 버퍼 단어만
+    }
+  }
+
   // 아직 코드에 import하지 않은 이름도 초보자가 바로 쓸 수 있게, 자주 쓰는
   // 표준/수업 라이브러리의 import 경로를 함께 제안한다. 외부 라이브러리는
   // 실행 시 기존 설치 안내가 그대로 동작한다.
@@ -726,7 +778,7 @@
     , ["pygame", "module", "import pygame"]
   ].map(([name, type, importText]) => ({ name, type, importText }));
 
-  function pythonCompletionCandidates(source, prefix) {
+  function pythonCompletionCandidates(source, prefix, keywords) {
     const query = String(prefix || "");
     const ranked = new Map();
     const identifier = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
@@ -735,7 +787,9 @@
       const word = match[0];
       if (!ranked.has(word)) ranked.set(word, 0);
     }
-    for (const word of PYTHON_COMPLETION_WORDS) if (!ranked.has(word)) ranked.set(word, 1);
+    // keywords 를 넘기지 않으면 파이썬 편집기 기본 동작(파이썬 키워드)을 유지한다.
+    const kw = keywords === undefined ? PYTHON_COMPLETION_WORDS : (keywords || []);
+    for (const word of kw) if (!ranked.has(word)) ranked.set(word, 1);
     return [...ranked]
       .filter(([word]) => word !== query && (!query || word.startsWith(query)))
       .sort((a, b) => a[1] - b[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))
@@ -2418,7 +2472,7 @@
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-    transformEditorLines, pythonCompletionCandidates, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,

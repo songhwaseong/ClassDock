@@ -62,8 +62,16 @@ function buildCodeEditor(text, prof, options={}){
   help.setAttribute("role", "tooltip");
   document.body.appendChild(help);
   host.appendChild(gutter); host.appendChild(edit);
-  ensureJediProbe();                                       // 로컬 파이썬이면 Jedi 완성 준비(백그라운드, UI 비차단)
-  if (typeof ensurePythonImportIndex === "function") ensurePythonImportIndex();
+  // plain=일반 텍스트/코드 편집(.py 실행 화면이 아님). 이때는 파이썬 전용 지능(Jedi 완성·정의 이동·함수 도움말·
+  // 파이썬 import 제안)을 끄고, 프로파일에 맞는 버퍼 단어 완성만 쓴다. 로컬 파이썬이 떠 있어도(jediReady=true)
+  // JS·JSON 소스를 파이썬으로 보내지 않도록 이 플래그로 함께 막는다.
+  const plainMode = !!options.plain;
+  const completionWords = plainMode ? completionWordsForProfile(prof, options.fileExt) : undefined;
+  const jediUsable = () => !plainMode && typeof jediReady === "function" && jediReady();
+  if (!plainMode){
+    ensureJediProbe();                                     // 로컬 파이썬이면 Jedi 완성 준비(백그라운드, UI 비차단)
+    if (typeof ensurePythonImportIndex === "function") ensurePythonImportIndex();
+  }
 
   // ===== 실행 에러 줄 표시: 에러 난 줄에 빨간 띠. 스크롤 따라 움직이고, 코드 수정 시 사라진다 =====
   let errLines = [];
@@ -410,7 +418,7 @@ function buildCodeEditor(text, prof, options={}){
     help.hidden = false; positionHelp();
   };
   const showFunctionHelp = async () => {
-    if (!jediReady()) return;
+    if (!jediUsable()) return;
     const caret = ta.selectionStart;
     const context = completionContextFor();
     const before = ta.value.slice(0, caret);
@@ -506,9 +514,10 @@ function buildCodeEditor(text, prof, options={}){
   let completionSeq = 0;                                   // 비동기 Jedi 응답 경합 방지(최신 요청만 반영)
   const showLocalCompletion = (word, contextSource=null, includeImports=false) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
-    const local = pythonCompletionCandidates(source, word.prefix);
-    const indexed = includeImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
-    const imports = includeImports && typeof pythonImportCompletionCandidates === "function"
+    const local = pythonCompletionCandidates(source, word.prefix, completionWords);
+    const wantImports = includeImports && !plainMode;      // 파이썬 import 제안은 파이썬 편집기에서만
+    const indexed = wantImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+    const imports = wantImports && typeof pythonImportCompletionCandidates === "function"
       ? pythonImportCompletionCandidates(source, word.prefix, indexed) : indexed;
     const names = new Set(local);
     const items = [...local, ...imports.filter(item => !names.has(item.name))].slice(0, 12);
@@ -538,7 +547,7 @@ function buildCodeEditor(text, prof, options={}){
     completion.manual = manual;
     // 로컬 후보는 즉시 보여 주고, 더 정확한 Jedi 결과가 오면 같은 팝업을 비동기로 보강한다.
     // 네트워크 왕복과 서버의 Python 프로세스 시작을 기다리는 동안 팝업이 비어 있지 않아 체감 지연이 줄어든다.
-    if (jediReady()){
+    if (jediUsable()){
       const seq = completionSeq, caret = ta.selectionStart, currentSource = ta.value;
       const context = completionContextFor(), source = context.source;
       const localShown = showLocalCompletion(word, source, manual);
@@ -896,7 +905,7 @@ function buildCodeEditor(text, prof, options={}){
         if (await options.resolveWorkspaceDefinition({ source:ta.value, wordInfo })) return;
       } catch(e){ console.warn("작업공간 정의 이동 실패:", e); }
     }
-    if (!jediReady()){
+    if (!jediUsable()){
       toast("정의 이동은 exe + 로컬 Python/Jedi에서 사용할 수 있어요.", 2800);
       return;
     }
@@ -1003,7 +1012,7 @@ function buildCodeEditor(text, prof, options={}){
   };
   // Ctrl 호버 = 정의 이동 준비, Alt 호버 = 함수 도움말 준비 — 둘 다 같은 밑줄로 "누를 수 있음"을 표시.
   const hoverLinkModifier = (e) => (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey)
-    || (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && jediReady());
+    || (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && jediUsable());
   ta.addEventListener("mousemove", (e) => {
     defHoverPointer = { x: e.clientX, y: e.clientY };
     if (hoverLinkModifier(e)) scheduleDefinitionHoverAt(e.clientX, e.clientY);
@@ -1030,7 +1039,7 @@ function buildCodeEditor(text, prof, options={}){
       return;
     }
     // Alt+클릭: 클릭한 함수의 도움말 팝업(Shift+Tab 과 동일). Ctrl+클릭은 정의 이동이라 Alt 로 분리.
-    if (e.button === 0 && e.altKey && !e.ctrlKey && !e.metaKey && jediReady()){
+    if (e.button === 0 && e.altKey && !e.ctrlKey && !e.metaKey && jediUsable()){
       const info = wordAtOffset(offsetFromMeasuredPoint(e.clientX, e.clientY));
       if (info){
         e.preventDefault();
@@ -1532,7 +1541,7 @@ function buildCodeEditor(text, prof, options={}){
       }
     }
     // Shift+Tab: 커서 바로 앞이 식별자/호출이면 함수 도움말(주피터식), 들여쓰기 위치면 아래 내어쓰기로 넘어감.
-    if (e.key === "Tab" && e.shiftKey && ta.selectionStart === ta.selectionEnd && jediReady() &&
+    if (e.key === "Tab" && e.shiftKey && ta.selectionStart === ta.selectionEnd && jediUsable() &&
         /[A-Za-z0-9_)\]]$/.test(ta.value.slice(0, ta.selectionStart))){
       e.preventDefault(); hideCompletion(); showFunctionHelp(); return;
     }
@@ -1548,16 +1557,31 @@ function buildCodeEditor(text, prof, options={}){
       scrollCaretIntoView();
     } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && e.keyCode !== 229){   // 자동 들여쓰기
       const s = ta.selectionStart, en = ta.selectionEnd, val = ta.value;
-      const openPlan = pythonOpenClosePlan(val, s, en);
-      if (openPlan){
-        e.preventDefault();
-        ta.value = val.slice(0, s) + openPlan.inserted + val.slice(en);
-        ta.selectionStart = ta.selectionEnd = openPlan.caret;
-        hideCompletion(); emitInput(); scrollCaretIntoView(); return;
+      if (!plainMode){                                                      // 파이썬 전용: x=open(...) → x.close() 자동 채움
+        const openPlan = pythonOpenClosePlan(val, s, en);
+        if (openPlan){
+          e.preventDefault();
+          ta.value = val.slice(0, s) + openPlan.inserted + val.slice(en);
+          ta.selectionStart = ta.selectionEnd = openPlan.caret;
+          hideCompletion(); emitInput(); scrollCaretIntoView(); return;
+        }
       }
       const head = val.slice(val.lastIndexOf("\n", s - 1) + 1, s);          // 현재 줄(커서 앞)
       let indent = (head.match(/^[ \t]*/) || [""])[0];                      // 윗줄 들여쓰기 유지
-      if (/:\s*$/.test(head)) indent += "    ";                             // 블록 시작(:)이면 한 단계 더
+      // 커서가 여는 괄호와 짝 닫는 괄호 사이면 블록으로 펼친다: {\n    |\n} (모든 언어 공통)
+      const openPair = { "(": ")", "[": "]", "{": "}" };
+      if (s === en && openPair[val[s - 1]] && val[en] === openPair[val[s - 1]]){
+        e.preventDefault();
+        const body = "\n" + indent + "    ", tail = "\n" + indent;
+        ta.value = val.slice(0, s) + body + tail + val.slice(en);
+        ta.selectionStart = ta.selectionEnd = s + body.length;
+        hideCompletion(); emitInput(); scrollCaretIntoView(); return;
+      }
+      if (prof === "hash"){
+        if (/:\s*$/.test(head)) indent += "    ";                           // 파이썬 등 블록 시작(:)이면 한 단계 더
+      } else if (prof === "c"){
+        if (/[{([]\s*$/.test(head)) indent += "    ";                       // C계열: { ( [ 로 끝나면 한 단계 더
+      }
       e.preventDefault();
       const ins = "\n" + indent;
       ta.value = val.slice(0, s) + ins + val.slice(en);

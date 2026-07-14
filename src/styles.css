@@ -1163,7 +1163,16 @@
   .ro-find-hit{position:absolute;z-index:3;pointer-events:none;background:rgba(250,204,21,.42);
     border-radius:2px;box-shadow:0 0 0 1px rgba(202,138,4,.7);mix-blend-mode:normal}
   /* 보기 모드 바와 같은 배치: 왼쪽엔 상태 문구, 버튼들은 오른쪽에 나란히 */
-  .text-edit-bar .run-status{order:-1;margin-right:auto}
+  .text-edit-bar .run-status{order:-1;margin-right:8px}
+  /* JSON·XML·YAML 편집 중 유효성 배지: 상태 문구 옆에 두고 남은 공간을 채워 버튼을 오른쪽으로 민다 */
+  .text-edit-diag{order:-1;margin-right:auto;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:60ch}
+  .text-edit-diag[data-level="ok"]{color:#16a34a}
+  .text-edit-diag[data-level="warn"]{color:#ca8a04}
+  .text-edit-diag[data-level="error"]{color:#dc2626}
+  /* 비 UTF-8 원본 저장 안내: 오른쪽 버튼들 뒤에 은은하게 */
+  .text-edit-encnote{font-size:12px;color:var(--muted);white-space:nowrap;padding-left:6px;
+    border-left:1px solid var(--border, #e2e8f0)}
   .wb-wrap{display:flex;flex-direction:column;height:100%;background:var(--viewer)}
   .wb-wrap.tb-pos-bottom{flex-direction:column-reverse}
   .wb-wrap.tb-pos-left{flex-direction:row}
