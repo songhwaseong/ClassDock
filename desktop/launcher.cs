@@ -530,6 +530,7 @@ class PdfSignerLauncher
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
             if (path == "/image-memo-list" || path.StartsWith("/image-memo-file?", StringComparison.Ordinal)) return true;
             if (path == "/can-complete") return true;
+            if (path == "/python-import-index") return true;
             if (path.StartsWith("/local-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
@@ -1251,6 +1252,12 @@ class PdfSignerLauncher
                     bool ok = false;
                     try { ok = EnsureJedi(); } catch { ok = false; }
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(ok ? "yes" : "no"));
+                }
+                else if (method == "GET" && path == "/python-import-index")
+                {
+                    // 설치된 패키지의 메타데이터와 Python 소스만 읽어 만든 자동 import 색인.
+                    // 실제 패키지 import/실행은 하지 않으며, 생성 작업은 백그라운드에서 한 번만 한다.
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PythonImportIndexJson()));
                 }
                 else if (method == "POST" && path == "/complete")
                 {
@@ -3202,6 +3209,173 @@ class PdfSignerLauncher
         return "{\"ok\":" + (exitCode == 0 ? "true" : "false")
              + ",\"code\":" + exitCode
              + ",\"output\":" + JsonString(tail) + "}";
+    }
+
+    // ===== Jedi 기반 문맥 자동완성 =====
+    // ===== 설치된 로컬 Python 패키지의 안전한 import 색인 =====
+    static readonly object PythonImportIndexLock = new object();
+    static string _pythonImportIndexState = "idle"; // idle | building | ready | error
+    static string _pythonImportIndexJson = "";
+    static string _pythonImportIndexRunnerPath = null;
+
+    static string PythonImportIndexRunner()
+    {
+        lock (PythonImportIndexLock)
+        {
+            if (_pythonImportIndexRunnerPath != null && File.Exists(_pythonImportIndexRunnerPath)) return _pythonImportIndexRunnerPath;
+            string path = Path.Combine(Path.GetTempPath(), "moida_python_import_index.py");
+            File.WriteAllText(path, @"import ast
+import json
+import os
+import site
+import sysconfig
+import tokenize
+
+MAX_FILES = 20000
+MAX_ITEMS = 20000
+MAX_FILE_BYTES = 1024 * 1024
+skip_dirs = set(['__pycache__', 'tests', 'test', 'docs', 'doc', 'examples', 'example', 'data', 'dist-info', 'egg-info'])
+bases = []
+for value in list(getattr(site, 'getsitepackages', lambda: [])()) + [getattr(site, 'getusersitepackages', lambda: '')(), sysconfig.get_paths().get('purelib', ''), sysconfig.get_paths().get('platlib', '')]:
+    if value and os.path.isdir(value) and value not in bases:
+        bases.append(value)
+
+items = {}
+def add(name, kind, import_text):
+    if len(items) >= MAX_ITEMS or not name or name.startswith('_') or not name.isidentifier():
+        return
+    key = (name, import_text)
+    if key not in items:
+        items[key] = {'name': name, 'type': kind, 'importText': import_text}
+
+def module_for(base, full):
+    rel = os.path.relpath(full, base)
+    parts = rel.split(os.sep)
+    leaf = parts.pop()
+    stem = os.path.splitext(leaf)[0]
+    if stem != '__init__':
+        parts.append(stem)
+    if not parts or any((not p.isidentifier()) for p in parts):
+        return ''
+    return '.'.join(parts)
+
+try:
+    from importlib import metadata
+    for dist in metadata.distributions():
+        top_level = dist.read_text('top_level.txt') or ''
+        for top in top_level.splitlines():
+            top = top.strip()
+            if top.isidentifier():
+                add(top, 'module', 'import ' + top)
+except Exception:
+    pass
+
+seen_files = 0
+for base in bases:
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and not d.endswith(('.dist-info', '.egg-info')) and d not in skip_dirs]
+        for file_name in files:
+            if seen_files >= MAX_FILES or len(items) >= MAX_ITEMS:
+                break
+            if not file_name.endswith(('.py', '.pyi')) or file_name.startswith('.'):
+                continue
+            full = os.path.join(root, file_name)
+            try:
+                if os.path.getsize(full) > MAX_FILE_BYTES:
+                    continue
+                module = module_for(base, full)
+                if not module:
+                    continue
+                seen_files += 1
+                top = module.split('.')[0]
+                add(top, 'module', 'import ' + top)
+                with tokenize.open(full) as handle:
+                    tree = ast.parse(handle.read(), filename=full)
+            except Exception:
+                continue
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef):
+                    add(node.name, 'class', 'from ' + module + ' import ' + node.name)
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    add(node.name, 'function', 'from ' + module + ' import ' + node.name)
+                elif isinstance(node, ast.ImportFrom) and node.level:
+                    for alias in node.names:
+                        if alias.name != '*':
+                            public_name = alias.asname or alias.name
+                            add(public_name, 'class', 'from ' + module + ' import ' + public_name)
+        if seen_files >= MAX_FILES or len(items) >= MAX_ITEMS:
+            break
+
+rows = sorted(items.values(), key=lambda item: (item['name'].lower(), item['name'], item['importText'].count('.'), item['importText']))
+print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen_files >= MAX_FILES or len(items) >= MAX_ITEMS}, ensure_ascii=False, separators=(',', ':')))
+", new UTF8Encoding(false));
+            _pythonImportIndexRunnerPath = path;
+            return path;
+        }
+    }
+
+    static void BuildPythonImportIndex()
+    {
+        string result = "";
+        string error = "";
+        try
+        {
+            string interp = FindPython();
+            if (interp == null) throw new PythonMissingException();
+            string args = (interp == "py" ? "-3 " : "") + "\"" + PythonImportIndexRunner() + "\"";
+            ProcessStartInfo psi = new ProcessStartInfo(interp, args);
+            psi.UseShellExecute = false; psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+            psi.StandardOutputEncoding = new UTF8Encoding(false);
+            psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            Process proc = Process.Start(psi);
+            if (proc == null) throw new InvalidOperationException("index-spawn-failed");
+            result = proc.StandardOutput.ReadToEnd();
+            error = proc.StandardError.ReadToEnd();
+            if (!proc.WaitForExit(60000))
+            {
+                try { proc.Kill(); } catch { }
+                throw new TimeoutException("index-timeout");
+            }
+            if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(result)) throw new InvalidOperationException("index-failed: " + error);
+            if (result.Length > 8 * 1024 * 1024) throw new InvalidOperationException("index-too-large");
+            result = result.Trim();
+            if (!result.StartsWith("{", StringComparison.Ordinal)) throw new InvalidOperationException("index-invalid-response");
+        }
+        catch (Exception ex)
+        {
+            error = FlattenMessage(ex);
+            result = "";
+        }
+        lock (PythonImportIndexLock)
+        {
+            if (!string.IsNullOrEmpty(result))
+            {
+                _pythonImportIndexJson = result;
+                _pythonImportIndexState = "ready";
+            }
+            else
+            {
+                _pythonImportIndexJson = "{\"ok\":false,\"state\":\"error\",\"reason\":" + JsonString(string.IsNullOrEmpty(error) ? "index-failed" : error) + ",\"items\":[]}";
+                _pythonImportIndexState = "error";
+            }
+        }
+    }
+
+    static string PythonImportIndexJson()
+    {
+        lock (PythonImportIndexLock)
+        {
+            if (_pythonImportIndexState == "ready" || _pythonImportIndexState == "error") return _pythonImportIndexJson;
+            if (_pythonImportIndexState == "idle")
+            {
+                _pythonImportIndexState = "building";
+                Thread worker = new Thread(BuildPythonImportIndex);
+                worker.IsBackground = true;
+                worker.Start();
+            }
+            return "{\"ok\":true,\"state\":\"building\",\"items\":[]}";
+        }
     }
 
     // ===== Jedi 기반 문맥 자동완성 =====

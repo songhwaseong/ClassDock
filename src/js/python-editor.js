@@ -63,6 +63,7 @@ function buildCodeEditor(text, prof, options={}){
   document.body.appendChild(help);
   host.appendChild(gutter); host.appendChild(edit);
   ensureJediProbe();                                       // 로컬 파이썬이면 Jedi 완성 준비(백그라운드, UI 비차단)
+  if (typeof ensurePythonImportIndex === "function") ensurePythonImportIndex();
 
   // ===== 실행 에러 줄 표시: 에러 난 줄에 빨간 띠. 스크롤 따라 움직이고, 코드 수정 시 사라진다 =====
   let errLine = 0;
@@ -479,12 +480,13 @@ function buildCodeEditor(text, prof, options={}){
       item.setAttribute("role", "option"); item.setAttribute("aria-selected", String(index === completion.index));
       const name = document.createElement("span"); name.className = "code-complete-name"; name.textContent = info.name;
       item.appendChild(name);
-      if (info.signature){
+      const detail = info.signature || info.importText;
+      if (detail){
         const signature = document.createElement("span");
         signature.className = "code-complete-signature";
-        signature.textContent = info.signature;
+        signature.textContent = detail;
         item.appendChild(signature);
-        item.title = info.signature;
+        item.title = detail;
       }
       item.addEventListener("mousedown", (e) => { e.preventDefault(); completion.index = index; acceptCompletion(); });
       complete.appendChild(item);
@@ -494,9 +496,14 @@ function buildCodeEditor(text, prof, options={}){
     const active = complete.children[completion.index]; if (active) active.scrollIntoView({ block: "nearest" });
   };
   let completionSeq = 0;                                   // 비동기 Jedi 응답 경합 방지(최신 요청만 반영)
-  const showLocalCompletion = (word, contextSource=null) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
+  const showLocalCompletion = (word, contextSource=null, includeImports=false) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
-    const items = pythonCompletionCandidates(source, word.prefix).slice(0, 10);
+    const local = pythonCompletionCandidates(source, word.prefix);
+    const indexed = includeImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+    const imports = includeImports && typeof pythonImportCompletionCandidates === "function"
+      ? pythonImportCompletionCandidates(source, word.prefix, indexed) : indexed;
+    const names = new Set(local);
+    const items = [...local, ...imports.filter(item => !names.has(item.name))].slice(0, 12);
     if (!items.length){ hideCompletion(); return false; }
     completion.items = items; completion.index = 0; completion.start = word.start; completion.end = word.end;
     renderCompletion();
@@ -526,22 +533,26 @@ function buildCodeEditor(text, prof, options={}){
     if (jediReady()){
       const seq = completionSeq, caret = ta.selectionStart, currentSource = ta.value;
       const context = completionContextFor(), source = context.source;
-      const localShown = showLocalCompletion(word, source);
+      const localShown = showLocalCompletion(word, source, manual);
       const before = currentSource.slice(0, caret);
       const line = context.lineOffset + (before.match(/\n/g) || []).length + 1; // Jedi: 줄 1-based
       const column = caret - (before.lastIndexOf("\n") + 1);          // Jedi: 칸 0-based
       requestJediCompletions(source, line, column).then(items => {
         if (seq !== completionSeq || ta.selectionStart !== caret) return;   // 더 최신 요청·커서 이동 → 폐기
         const pruned = manual ? (items || []) : pruneFullyTyped(items, word.prefix);   // 수동(Ctrl+Space)은 그대로
-        if (pruned.length){
-          completion.items = pruned.slice(0, 12); completion.index = 0;
+        const indexed = manual && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+        const imports = manual && typeof pythonImportCompletionCandidates === "function"
+          ? pythonImportCompletionCandidates(source, word.prefix, indexed) : indexed;
+        const combined = [...pruned, ...imports.filter(item => !pruned.some(candidate => String(candidate && candidate.name || candidate) === item.name))];
+        if (combined.length){
+          completion.items = combined.slice(0, 12); completion.index = 0;
           completion.start = word.start; completion.end = word.end;
           renderCompletion();
         } else if (!localShown) hideCompletion();     // Jedi·로컬 후보가 모두 없을 때만 닫힘(로컬 버퍼 후보가 떠 있으면 유지)
       });
       return;
     }
-    showLocalCompletion(word);
+    showLocalCompletion(word, null, manual);
   };
   const scheduleCompletion = () => {
     clearTimeout(completionTimer);
@@ -553,9 +564,14 @@ function buildCodeEditor(text, prof, options={}){
       ? selected
       : { name: String(selected || ""), type: "", signature: "" };
     const range = completionReplacementRange(ta.value, ta.selectionStart, ta.selectionEnd, completion.start, completion.end, info.name);
-    const insertion = completionInsertionPlan(ta.value, range, info);
-    ta.value = ta.value.slice(0, range.start) + insertion.text + ta.value.slice(range.end);
-    ta.selectionStart = ta.selectionEnd = insertion.caret;
+    const application = (typeof completionApplicationPlan === "function")
+      ? completionApplicationPlan(ta.value, range, info)
+      : (() => {
+          const insertion = completionInsertionPlan(ta.value, range, info);
+          return { value:ta.value.slice(0, range.start) + insertion.text + ta.value.slice(range.end), caret:insertion.caret };
+        })();
+    ta.value = application.value;
+    ta.selectionStart = ta.selectionEnd = application.caret;
     hideCompletion(); emitInput(); scrollCaretIntoView();
   }
   const insertPair = (open, close) => {

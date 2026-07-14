@@ -20,6 +20,8 @@ test("로컬 서버는 Host와 인증을 본문 수신 전에 검증한다", () 
   assert.match(launcher, /static bool HasAllowedLocalHost/);
   assert.match(launcher, /host == "127\.0\.0\.1" \|\| host == "localhost"/);
   assert.match(launcher, /static bool HasAllowedLocalOrigin/);
+  assert.match(launcher, /path == "\/python-import-index"/);
+  assert.match(launcher, /static string PythonImportIndexJson\(\)/);
   assert.match(launcher, /!HasAllowedLocalOrigin\(headers\) && !path\.StartsWith\("\/tile-proxy"/);
   const auth = launcher.indexOf("if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers))");
   const body = launcher.indexOf("// ---- 바디(있으면) 읽기 ----");

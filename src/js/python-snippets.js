@@ -1455,6 +1455,43 @@ function openSnippetGallery(){
 // 줄번호·스크롤 동기화, Tab=공백 4칸. getValue()로 현재 내용을 읽는다(저장 기능은 없음 — 실시간 편집+실행).
 // ===== Jedi(로컬 파이썬) 문맥 자동완성 — 가능할 때만, 안 되면 로컬 완성으로 폴백 =====
 let _jediBackend = null;   // null=미확인 | "pending" | true | false
+let _pythonImportIndex = [];
+let _pythonImportIndexState = "idle"; // idle | loading | building | ready | unavailable
+let _pythonImportIndexRetry = 0;
+
+// EXE의 로컬 Python에 실제 설치된 패키지만, 코드 실행 없이 서버가 색인해 준다.
+// 브라우저/오프라인 HTML에서는 요청이 실패해도 기존 내장 후보만 사용한다.
+function ensurePythonImportIndex(){
+  if (_pythonImportIndexState === "ready" || _pythonImportIndexState === "loading" || _pythonImportIndexState === "unavailable") return;
+  if (location.protocol !== "http:" && location.protocol !== "https:"){ _pythonImportIndexState = "unavailable"; return; }
+  _pythonImportIndexState = "loading";
+  fetch("/python-import-index", { method:"GET", cache:"no-store" })
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (data && data.state === "building"){
+        _pythonImportIndexState = "building";
+        clearTimeout(_pythonImportIndexRetry);
+        _pythonImportIndexRetry = setTimeout(() => { _pythonImportIndexState = "idle"; ensurePythonImportIndex(); }, 1200);
+        return;
+      }
+      if (!data || data.ok === false || !Array.isArray(data.items)){ _pythonImportIndexState = "unavailable"; return; }
+      _pythonImportIndex = data.items.map(item => {
+        const name = String(item && item.name || "");
+        const importText = String(item && item.importText || "");
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !/^(?:from\s+[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s+import\s+[A-Za-z_]\w*|import\s+[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\s+as\s+[A-Za-z_]\w*)?$/.test(importText)) return null;
+        return { name, type:String(item.type || "class"), importText };
+      }).filter(Boolean);
+      _pythonImportIndexState = "ready";
+    })
+    .catch(() => { _pythonImportIndexState = "unavailable"; });
+}
+
+function pythonIndexedImportCandidates(prefix){
+  const query = String(prefix || "");
+  if (_pythonImportIndexState !== "ready") return [];
+  return _pythonImportIndex.filter(item => !query || item.name.startsWith(query));
+}
+
 function ensureJediProbe(){
   if (_jediBackend !== null) return;                       // 한 번만 확인(결과 캐시)
   if (location.protocol !== "http:" && location.protocol !== "https:"){ _jediBackend = false; return; }

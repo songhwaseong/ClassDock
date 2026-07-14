@@ -5,8 +5,8 @@ const {
   htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle,
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
-  transformEditorLines, pythonCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-  diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
+  transformEditorLines, pythonCompletionCandidates, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
@@ -371,6 +371,22 @@ test("Python 자동완성은 현재 코드 식별자와 기본 단어를 접두�
   assert.doesNotMatch(pythonCompletionCandidates("print", "print").join(" "), /\bprint\b/);
 });
 
+test("import completion suggestions carry their import statement", () => {
+  assert.deepEqual(pythonImportCompletionCandidates("Pa", "Pa"), [{
+    name:"Path", type:"class", importText:"from pathlib import Path"
+  }]);
+  assert.ok(pythonImportCompletionCandidates("", "p").some(item => item.importText === "import pandas as pd"));
+  assert.ok(pythonImportCompletionCandidates("MLP", "MLP").some(item => item.importText === "from sklearn.neural_network import MLPClassifier"));
+  assert.ok(pythonImportCompletionCandidates("Count", "Count").some(item => item.importText === "from sklearn.feature_extraction.text import CountVectorizer"));
+  assert.ok(pythonImportCompletionCandidates("Sequential", "Sequential").some(item => item.importText === "from tensorflow.keras.models import Sequential"));
+  assert.ok(pythonImportCompletionCandidates("word_", "word_").some(item => item.importText === "from nltk.tokenize import word_tokenize"));
+  assert.deepEqual(pythonImportCompletionCandidates("External", "External", [{ name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool" }]), [{
+    name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool"
+  }]);
+  assert.equal(pythonImportCompletionCandidates("from pathlib import Path\nPa", "Pa").length, 0);
+  assert.equal(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa").length, 0);
+});
+
 test("더블클릭 변수 선택은 옆 공백을 제외하고 식별자 전체로 보정한다", () => {
   assert.deepEqual(normalizeIdentifierSelection("total_count = 3", 0, 12), {
     selectionStart: 0, selectionEnd: 11
@@ -451,6 +467,20 @@ test("변수 자동완성은 이름만 삽입한다", () => {
   const range = completionReplacementRange(source, source.length, source.length, 0, source.length, "student_name");
   const insertion = completionInsertionPlan(source, range, { name: "student_name", type: "statement" });
   assert.deepEqual(insertion, { text: "student_name", caret: 12 });
+});
+
+test("import completion adds one top-level import and keeps the caret at the completed name", () => {
+  const source = "#!/usr/bin/env python\n\"\"\"example\"\"\"\nfrom __future__ import annotations\n\nbase = Pa";
+  const plan = completionApplicationPlan(source, { start:source.length - 2, end:source.length }, {
+    name:"Path", type:"class", importText:"from pathlib import Path"
+  });
+  assert.equal(plan.value, "#!/usr/bin/env python\n\"\"\"example\"\"\"\nfrom __future__ import annotations\nfrom pathlib import Path\n\nbase = Path");
+  assert.equal(plan.caret, plan.value.length);
+  const existingSource = "from pathlib import Path\nbase = Pa";
+  const existing = completionApplicationPlan(existingSource, { start:existingSource.length - 2, end:existingSource.length }, {
+    name:"Path", type:"class", importText:"from pathlib import Path"
+  });
+  assert.equal(existing.value, "from pathlib import Path\nbase = Path");
 });
 
 test("실행 결과 파일을 논리 프로젝트 경로에 이어 붙인다", () => {

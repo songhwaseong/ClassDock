@@ -527,6 +527,205 @@
     "abs all any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex delattr dict dir divmod enumerate eval exec filter float format frozenset getattr globals hasattr hash help hex id input int isinstance issubclass iter len list locals map max memoryview min next object oct open ord pow print property range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip __import__"
   ).split(/\s+/);
 
+  // 아직 코드에 import하지 않은 이름도 초보자가 바로 쓸 수 있게, 자주 쓰는
+  // 표준/수업 라이브러리의 import 경로를 함께 제안한다. 외부 라이브러리는
+  // 실행 시 기존 설치 안내가 그대로 동작한다.
+  const PYTHON_IMPORT_COMPLETIONS = [
+    ["Path", "class", "from pathlib import Path"],
+    ["PurePath", "class", "from pathlib import PurePath"],
+    ["datetime", "class", "from datetime import datetime"],
+    ["date", "class", "from datetime import date"],
+    ["time", "class", "from datetime import time"],
+    ["timedelta", "class", "from datetime import timedelta"],
+    ["timezone", "class", "from datetime import timezone"],
+    ["Counter", "class", "from collections import Counter"],
+    ["defaultdict", "class", "from collections import defaultdict"],
+    ["deque", "class", "from collections import deque"],
+    ["namedtuple", "function", "from collections import namedtuple"],
+    ["itertools", "module", "import itertools"],
+    ["functools", "module", "import functools"],
+    ["Any", "class", "from typing import Any"],
+    ["Optional", "class", "from typing import Optional"],
+    ["List", "class", "from typing import List"],
+    ["Dict", "class", "from typing import Dict"],
+    ["Tuple", "class", "from typing import Tuple"],
+    ["Set", "class", "from typing import Set"],
+    ["Iterable", "class", "from typing import Iterable"],
+    ["Iterator", "class", "from typing import Iterator"],
+    ["Callable", "class", "from typing import Callable"],
+    ["Literal", "class", "from typing import Literal"],
+    ["json", "module", "import json"],
+    ["csv", "module", "import csv"],
+    ["re", "module", "import re"],
+    ["os", "module", "import os"],
+    ["sys", "module", "import sys"],
+    ["math", "module", "import math"],
+    ["random", "module", "import random"],
+    ["statistics", "module", "import statistics"],
+    ["sqlite3", "module", "import sqlite3"],
+    ["requests", "module", "import requests"],
+    ["pd", "module", "import pandas as pd"],
+    ["np", "module", "import numpy as np"],
+    ["plt", "module", "import matplotlib.pyplot as plt"],
+    ["DataFrame", "class", "from pandas import DataFrame"],
+    ["Series", "class", "from pandas import Series"],
+    ["sns", "module", "import seaborn as sns"],
+    ["Image", "class", "from PIL import Image"],
+    ["cv2", "module", "import cv2"],
+    ["BeautifulSoup", "class", "from bs4 import BeautifulSoup"]
+    , ["scipy", "module", "import scipy"]
+    , ["stats", "module", "from scipy import stats"]
+    , ["train_test_split", "function", "from sklearn.model_selection import train_test_split"]
+    , ["KFold", "class", "from sklearn.model_selection import KFold"]
+    , ["StratifiedKFold", "class", "from sklearn.model_selection import StratifiedKFold"]
+    , ["cross_val_score", "function", "from sklearn.model_selection import cross_val_score"]
+    , ["GridSearchCV", "class", "from sklearn.model_selection import GridSearchCV"]
+    , ["RandomizedSearchCV", "class", "from sklearn.model_selection import RandomizedSearchCV"]
+    , ["StandardScaler", "class", "from sklearn.preprocessing import StandardScaler"]
+    , ["MinMaxScaler", "class", "from sklearn.preprocessing import MinMaxScaler"]
+    , ["RobustScaler", "class", "from sklearn.preprocessing import RobustScaler"]
+    , ["LabelEncoder", "class", "from sklearn.preprocessing import LabelEncoder"]
+    , ["OneHotEncoder", "class", "from sklearn.preprocessing import OneHotEncoder"]
+    , ["PolynomialFeatures", "class", "from sklearn.preprocessing import PolynomialFeatures"]
+    , ["SimpleImputer", "class", "from sklearn.impute import SimpleImputer"]
+    , ["Pipeline", "class", "from sklearn.pipeline import Pipeline"]
+    , ["ColumnTransformer", "class", "from sklearn.compose import ColumnTransformer"]
+    , ["LinearRegression", "class", "from sklearn.linear_model import LinearRegression"]
+    , ["LogisticRegression", "class", "from sklearn.linear_model import LogisticRegression"]
+    , ["Ridge", "class", "from sklearn.linear_model import Ridge"]
+    , ["Lasso", "class", "from sklearn.linear_model import Lasso"]
+    , ["KNeighborsClassifier", "class", "from sklearn.neighbors import KNeighborsClassifier"]
+    , ["KNeighborsRegressor", "class", "from sklearn.neighbors import KNeighborsRegressor"]
+    , ["SVC", "class", "from sklearn.svm import SVC"]
+    , ["SVR", "class", "from sklearn.svm import SVR"]
+    , ["DecisionTreeClassifier", "class", "from sklearn.tree import DecisionTreeClassifier"]
+    , ["DecisionTreeRegressor", "class", "from sklearn.tree import DecisionTreeRegressor"]
+    , ["RandomForestClassifier", "class", "from sklearn.ensemble import RandomForestClassifier"]
+    , ["RandomForestRegressor", "class", "from sklearn.ensemble import RandomForestRegressor"]
+    , ["ExtraTreesClassifier", "class", "from sklearn.ensemble import ExtraTreesClassifier"]
+    , ["GradientBoostingClassifier", "class", "from sklearn.ensemble import GradientBoostingClassifier"]
+    , ["GradientBoostingRegressor", "class", "from sklearn.ensemble import GradientBoostingRegressor"]
+    , ["AdaBoostClassifier", "class", "from sklearn.ensemble import AdaBoostClassifier"]
+    , ["MLPClassifier", "class", "from sklearn.neural_network import MLPClassifier"]
+    , ["MLPRegressor", "class", "from sklearn.neural_network import MLPRegressor"]
+    , ["CountVectorizer", "class", "from sklearn.feature_extraction.text import CountVectorizer"]
+    , ["TfidfVectorizer", "class", "from sklearn.feature_extraction.text import TfidfVectorizer"]
+    , ["HashingVectorizer", "class", "from sklearn.feature_extraction.text import HashingVectorizer"]
+    , ["KMeans", "class", "from sklearn.cluster import KMeans"]
+    , ["DBSCAN", "class", "from sklearn.cluster import DBSCAN"]
+    , ["PCA", "class", "from sklearn.decomposition import PCA"]
+    , ["accuracy_score", "function", "from sklearn.metrics import accuracy_score"]
+    , ["precision_score", "function", "from sklearn.metrics import precision_score"]
+    , ["recall_score", "function", "from sklearn.metrics import recall_score"]
+    , ["f1_score", "function", "from sklearn.metrics import f1_score"]
+    , ["confusion_matrix", "function", "from sklearn.metrics import confusion_matrix"]
+    , ["classification_report", "function", "from sklearn.metrics import classification_report"]
+    , ["mean_squared_error", "function", "from sklearn.metrics import mean_squared_error"]
+    , ["r2_score", "function", "from sklearn.metrics import r2_score"]
+    , ["load_iris", "function", "from sklearn.datasets import load_iris"]
+    , ["load_wine", "function", "from sklearn.datasets import load_wine"]
+    , ["make_classification", "function", "from sklearn.datasets import make_classification"]
+    , ["webdriver", "module", "from selenium import webdriver"]
+    , ["By", "class", "from selenium.webdriver.common.by import By"]
+    , ["WebDriverWait", "class", "from selenium.webdriver.support.ui import WebDriverWait"]
+    , ["EC", "module", "from selenium.webdriver.support import expected_conditions as EC"]
+    , ["Workbook", "class", "from openpyxl import Workbook"]
+    , ["load_workbook", "function", "from openpyxl import load_workbook"]
+    , ["Document", "class", "from docx import Document"]
+    , ["torch", "module", "import torch"]
+    , ["nn", "module", "import torch.nn as nn"]
+    , ["F", "module", "import torch.nn.functional as F"]
+    , ["pipeline", "function", "from transformers import pipeline"]
+    , ["glob", "module", "import glob"]
+    , ["shutil", "module", "import shutil"]
+    , ["subprocess", "module", "import subprocess"]
+    , ["logging", "module", "import logging"]
+    , ["argparse", "module", "import argparse"]
+    , ["pickle", "module", "import pickle"]
+    , ["zipfile", "module", "import zipfile"]
+    , ["tempfile", "module", "import tempfile"]
+    , ["threading", "module", "import threading"]
+    , ["multiprocessing", "module", "import multiprocessing"]
+    , ["Decimal", "class", "from decimal import Decimal"]
+    , ["Fraction", "class", "from fractions import Fraction"]
+    , ["dataclass", "function", "from dataclasses import dataclass"]
+    , ["field", "function", "from dataclasses import field"]
+    , ["Enum", "class", "from enum import Enum"]
+    , ["OrderedDict", "class", "from collections import OrderedDict"]
+    , ["lru_cache", "function", "from functools import lru_cache"]
+    , ["partial", "function", "from functools import partial"]
+    , ["product", "function", "from itertools import product"]
+    , ["combinations", "function", "from itertools import combinations"]
+    , ["permutations", "function", "from itertools import permutations"]
+    , ["chain", "function", "from itertools import chain"]
+    , ["array", "function", "from numpy import array"]
+    , ["arange", "function", "from numpy import arange"]
+    , ["linspace", "function", "from numpy import linspace"]
+    , ["zeros", "function", "from numpy import zeros"]
+    , ["ones", "function", "from numpy import ones"]
+    , ["read_csv", "function", "from pandas import read_csv"]
+    , ["read_excel", "function", "from pandas import read_excel"]
+    , ["concat", "function", "from pandas import concat"]
+    , ["merge", "function", "from pandas import merge"]
+    , ["to_datetime", "function", "from pandas import to_datetime"]
+    , ["Figure", "class", "from matplotlib.figure import Figure"]
+    , ["ElasticNet", "class", "from sklearn.linear_model import ElasticNet"]
+    , ["SGDClassifier", "class", "from sklearn.linear_model import SGDClassifier"]
+    , ["SGDRegressor", "class", "from sklearn.linear_model import SGDRegressor"]
+    , ["Perceptron", "class", "from sklearn.linear_model import Perceptron"]
+    , ["GaussianNB", "class", "from sklearn.naive_bayes import GaussianNB"]
+    , ["MultinomialNB", "class", "from sklearn.naive_bayes import MultinomialNB"]
+    , ["BernoulliNB", "class", "from sklearn.naive_bayes import BernoulliNB"]
+    , ["VotingClassifier", "class", "from sklearn.ensemble import VotingClassifier"]
+    , ["VotingRegressor", "class", "from sklearn.ensemble import VotingRegressor"]
+    , ["StackingClassifier", "class", "from sklearn.ensemble import StackingClassifier"]
+    , ["StackingRegressor", "class", "from sklearn.ensemble import StackingRegressor"]
+    , ["HistGradientBoostingClassifier", "class", "from sklearn.ensemble import HistGradientBoostingClassifier"]
+    , ["BaggingClassifier", "class", "from sklearn.ensemble import BaggingClassifier"]
+    , ["IsolationForest", "class", "from sklearn.ensemble import IsolationForest"]
+    , ["AgglomerativeClustering", "class", "from sklearn.cluster import AgglomerativeClustering"]
+    , ["SpectralClustering", "class", "from sklearn.cluster import SpectralClustering"]
+    , ["MiniBatchKMeans", "class", "from sklearn.cluster import MiniBatchKMeans"]
+    , ["TruncatedSVD", "class", "from sklearn.decomposition import TruncatedSVD"]
+    , ["NMF", "class", "from sklearn.decomposition import NMF"]
+    , ["LatentDirichletAllocation", "class", "from sklearn.decomposition import LatentDirichletAllocation"]
+    , ["TSNE", "class", "from sklearn.manifold import TSNE"]
+    , ["SelectKBest", "class", "from sklearn.feature_selection import SelectKBest"]
+    , ["RFE", "class", "from sklearn.feature_selection import RFE"]
+    , ["chi2", "function", "from sklearn.feature_selection import chi2"]
+    , ["cosine_similarity", "function", "from sklearn.metrics.pairwise import cosine_similarity"]
+    , ["roc_auc_score", "function", "from sklearn.metrics import roc_auc_score"]
+    , ["roc_curve", "function", "from sklearn.metrics import roc_curve"]
+    , ["mean_absolute_error", "function", "from sklearn.metrics import mean_absolute_error"]
+    , ["mean_absolute_percentage_error", "function", "from sklearn.metrics import mean_absolute_percentage_error"]
+    , ["silhouette_score", "function", "from sklearn.metrics import silhouette_score"]
+    , ["make_regression", "function", "from sklearn.datasets import make_regression"]
+    , ["fetch_20newsgroups", "function", "from sklearn.datasets import fetch_20newsgroups"]
+    , ["word_tokenize", "function", "from nltk.tokenize import word_tokenize"]
+    , ["sent_tokenize", "function", "from nltk.tokenize import sent_tokenize"]
+    , ["stopwords", "module", "from nltk.corpus import stopwords"]
+    , ["WordCloud", "class", "from wordcloud import WordCloud"]
+    , ["Okt", "class", "from konlpy.tag import Okt"]
+    , ["tf", "module", "import tensorflow as tf"]
+    , ["Sequential", "class", "from tensorflow.keras.models import Sequential"]
+    , ["Dense", "class", "from tensorflow.keras.layers import Dense"]
+    , ["Dropout", "class", "from tensorflow.keras.layers import Dropout"]
+    , ["Conv2D", "class", "from tensorflow.keras.layers import Conv2D"]
+    , ["LSTM", "class", "from tensorflow.keras.layers import LSTM"]
+    , ["Adam", "class", "from tensorflow.keras.optimizers import Adam"]
+    , ["px", "module", "import plotly.express as px"]
+    , ["go", "module", "import plotly.graph_objects as go"]
+    , ["st", "module", "import streamlit as st"]
+    , ["Flask", "class", "from flask import Flask"]
+    , ["render_template", "function", "from flask import render_template"]
+    , ["FastAPI", "class", "from fastapi import FastAPI"]
+    , ["BaseModel", "class", "from pydantic import BaseModel"]
+    , ["create_engine", "function", "from sqlalchemy import create_engine"]
+    , ["QtWidgets", "module", "from PyQt5 import QtWidgets"]
+    , ["tk", "module", "import tkinter as tk"]
+    , ["pygame", "module", "import pygame"]
+  ].map(([name, type, importText]) => ({ name, type, importText }));
+
   function pythonCompletionCandidates(source, prefix) {
     const query = String(prefix || "");
     const ranked = new Map();
@@ -541,6 +740,88 @@
       .filter(([word]) => word !== query && (!query || word.startsWith(query)))
       .sort((a, b) => a[1] - b[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))
       .map(([word]) => word);
+  }
+
+  function pythonImportCompletionCandidates(source, prefix, extraCandidates=[]) {
+    const text = String(source || ""), query = String(prefix || "");
+    const declared = new Set();
+    const seen = new Set();
+    const declaration = /(?:^|\n)\s*(?:async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b|(?:^|\n)\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/g;
+    let match;
+    while ((match = declaration.exec(text))) declared.add(match[1] || match[2]);
+    const extra = Array.isArray(extraCandidates) ? extraCandidates.filter((item) => item && typeof item === "object") : [];
+    return [...PYTHON_IMPORT_COMPLETIONS, ...extra]
+      .filter((item) => !query || item.name.startsWith(query))
+      .filter((item) => {
+        if (seen.has(item.name)) return false;
+        seen.add(item.name); return true;
+      })
+      .filter((item) => !declared.has(item.name))
+      .filter((item) => !hasPythonImport(text, item.importText))
+      .map((item) => ({ ...item }));
+  }
+
+  function normalizePythonImport(importText) {
+    return String(importText || "").trim().replace(/\s+/g, " ");
+  }
+
+  function hasPythonImport(source, importText) {
+    const target = normalizePythonImport(importText);
+    if (!target) return true;
+    return String(source || "").split("\n").some((line) => normalizePythonImport(line.replace(/\s*#.*$/, "")) === target);
+  }
+
+  function pythonImportInsertOffset(source) {
+    const text = String(source || "");
+    const lines = text.split("\n");
+    let index = 0;
+    if (lines[0] && /^#!.*python/i.test(lines[0])) index = 1;
+    if (index < 2 && /^#.*coding[:=]/i.test(lines[index] || "")) index++;
+    // 간단한 모듈 docstring을 건너뛴다. __future__ import는 반드시 그 뒤에 와야 한다.
+    const doc = (lines[index] || "").match(/^\s*([\"']{3})/);
+    if (doc) {
+      const quote = doc[1];
+      if ((lines[index].match(new RegExp(quote.replace(/([\\"'])/g, "\\$1"), "g")) || []).length >= 2) index++;
+      else {
+        index++;
+        while (index < lines.length && !lines[index].includes(quote)) index++;
+        if (index < lines.length) index++;
+      }
+    }
+    while (index < lines.length && /^\s*from\s+__future__\s+import\b/.test(lines[index])) index++;
+    // 기존 최상단 import 묶음 안에서는 마지막 import 다음에 둔다. 빈 줄과 주석은 묶음에 포함한다.
+    let lastImport = -1, scan = index;
+    while (scan < lines.length) {
+      const line = lines[scan];
+      if (/^\s*(?:import\s+|from\s+[A-Za-z_][\w.]*\s+import\s+)/.test(line)) { lastImport = scan; scan++; continue; }
+      if (/^\s*(?:#.*)?$/.test(line)) { scan++; continue; }
+      break;
+    }
+    const insertLine = lastImport >= 0 ? lastImport + 1 : index;
+    let offset = 0;
+    for (let i = 0; i < insertLine; i++) offset += lines[i].length + 1;
+    return offset;
+  }
+
+  function completionApplicationPlan(value, range, item) {
+    const text = String(value || "");
+    const insertion = completionInsertionPlan(text, range, item);
+    const start = Math.max(0, Math.min(Number(range && range.start) || 0, text.length));
+    const end = Math.max(start, Math.min(Number(range && range.end) || start, text.length));
+    let next = text.slice(0, start) + insertion.text + text.slice(end);
+    let caret = insertion.caret;
+    const importText = item && typeof item === "object" ? normalizePythonImport(item.importText) : "";
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const linePrefix = text.slice(lineStart, start);
+    // import 문을 작성하는 도중이거나 이미 import된 경우에는 본문만 완성한다.
+    if (!importText || /^\s*(?:from|import)\b/.test(linePrefix) || hasPythonImport(next, importText)) return { value:next, caret };
+    const offset = pythonImportInsertOffset(next);
+    const prefix = offset > 0 && next.charAt(offset - 1) !== "\n" ? "\n" : "";
+    const suffix = offset < next.length ? "\n" : "";
+    const added = prefix + importText + suffix;
+    next = next.slice(0, offset) + added + next.slice(offset);
+    if (offset <= caret) caret += added.length;
+    return { value:next, caret };
   }
 
   function normalizeIdentifierSelection(value, selectionStart, selectionEnd) {
@@ -2137,8 +2418,8 @@
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-    transformEditorLines, pythonCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-    diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan,
+    transformEditorLines, pythonCompletionCandidates, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
