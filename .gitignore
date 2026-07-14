@@ -8,3 +8,9 @@ desktop/app.html
 
 # 배포용 테스트 패키지 (pack.bat 로 재생성)
 dist/
+
+# 개발/테스트 의존성·산출물 (npm install · playwright)
+node_modules/
+package-lock.json
+test-results/
+playwright-report/

@@ -2671,6 +2671,19 @@
   .code-input{position:absolute;inset:0;margin:0;border:0;outline:none;resize:none;box-sizing:border-box;
     padding:16px 18px;white-space:pre;overflow:auto;background:transparent;color:transparent;caret-color:var(--code-caret)}
   .code-input::selection{background:var(--code-select)}
+  /* 대용량 전용 가벼운 편집기: 강조 오버레이(pre)가 없으므로 textarea 글자를 직접 보여준다(일반 편집기는 투명 textarea+pre). */
+  .code-host-light .code-input{color:var(--code-text)}
+  /* 가벼운 편집기의 찾기 바 — 편집 영역 위에 떠 있는 작은 오버레이(읽기전용 .ro-find 재사용) */
+  .code-edit .lite-find{position:absolute;top:8px;right:16px;left:auto;z-index:6;margin:0;
+    width:min(360px,calc(100% - 32px));padding:6px 8px;box-sizing:border-box;background:var(--panel);
+    border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18)}
+  .code-edit .lite-find[hidden]{display:none}
+  /* 가벼운 편집기 찾기 일치 강조 — 투명 textarea 뒤에 깔려 글자에 노란 박스가 비쳐 보인다(읽기전용 .ro-find-hit 와 같은 톤) */
+  .code-edit .lite-hit-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .lite-hit{position:absolute;background:rgba(250,204,21,.42);border-radius:2px;box-shadow:0 0 0 1px rgba(202,138,4,.5)}
+  [data-theme="dark"] .lite-hit{background:rgba(250,204,21,.30);box-shadow:0 0 0 1px rgba(250,204,21,.5)}
+  /* 강조 박스 위치를 실측하는 숨은 미러(textarea 와 같은 글꼴·탭으로 한 줄을 레이아웃해 일치 span 의 위치·폭을 읽음) */
+  .code-edit .lite-measure{position:absolute;left:-99999px;top:0;margin:0;padding:0;border:0;white-space:pre;visibility:hidden;pointer-events:none}
   /* 편집기는 투명 textarea(캐럿·폭 기준)가 일반체라, 강조 pre 의 주석 italic 이 폭을 어긋나게 해 캐럿이 글자와 겹친다 → 편집기에서만 해제 */
   .code-host-edit .tk-c{font-style:normal}
   /* 들여쓰기 가이드: 들여쓴 줄의 들여쓰기 한 단계(4칸)마다 가는 세로 점선 — 학생이 들여쓰기를 "구조선"으로 인식하게 해 백스페이스로 깨뜨리는 실수를 줄인다(VSCode 패턴). */

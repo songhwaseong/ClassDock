@@ -1611,3 +1611,175 @@ function buildCodeEditor(text, prof, options={}){
     spotlightRange, clearSpotlight };
 }
 
+// 대용량(1MB+·초장문) 텍스트/코드 전용 '가벼운 편집기'. 구문 강조 오버레이·단어 강조·자동완성·핀 등
+// 무거운 레이어를 전부 빼고 '보이는 textarea + 줄번호'만 둔다. 일반 편집기(buildCodeEditor)는 글자 하나
+// 칠 때마다 highlightCode 로 문서 전체를 다시 그려(innerHTML) 큰 파일에서 프리징하는데, 여기선 그 비용이
+// 없어 수 MB 파일도 매끄럽게 편집된다. 대신 강조·완성 같은 편의 기능은 제공하지 않는다.
+// showEdit 이 기대하는 인터페이스(host·ta·getValue·destroy·focusLine·openFind)만 최소로 맞춘다.
+function buildLightTextEditor(text, options={}){
+  const host = document.createElement("div"); host.className = "code-host code-host-edit code-host-light";
+  const gutter = document.createElement("div"); gutter.className = "code-gutter"; gutter.setAttribute("aria-hidden", "true");
+  const edit = document.createElement("div"); edit.className = "code-edit";
+  const hitLayer = document.createElement("div"); hitLayer.className = "lite-hit-layer"; hitLayer.setAttribute("aria-hidden", "true");   // 찾기 일치 강조 박스(투명 textarea 뒤에 깔림)
+  const ta = document.createElement("textarea"); ta.className = "code-input";
+  ta.value = text; ta.spellcheck = false; ta.wrap = "off";
+  ta.setAttribute("autocomplete", "off"); ta.setAttribute("autocapitalize", "off"); ta.setAttribute("autocorrect", "off");
+  edit.appendChild(hitLayer); edit.appendChild(ta);   // hitLayer 를 먼저 → textarea(투명 배경) 아래에 강조가 비쳐 보인다
+  host.appendChild(gutter); host.appendChild(edit);
+
+  const countLines = (v) => { let c = 1; for (let i = 0; i < v.length; i++) if (v.charCodeAt(i) === 10) c++; return c; };
+  const offsetOfLine = (v, line) => {                 // 1-based 줄의 시작 글자 위치
+    if (line <= 1) return 0;
+    let seen = 0; for (let i = 0; i < v.length; i++){ if (v.charCodeAt(i) === 10 && ++seen === line - 1) return i + 1; }
+    return v.length;
+  };
+  const lineAtOffset = (v, off) => { let n = 1; const end = Math.min(off, v.length); for (let i = 0; i < end; i++) if (v.charCodeAt(i) === 10) n++; return n; };
+
+  // 줄번호는 줄 '개수'가 바뀔 때만 다시 만든다 — 같은 줄 안에서 타이핑하면 그대로 둔다(초대형 파일도 가벼움).
+  let lastLineCount = -1;
+  const renderGutter = () => {
+    const n = countLines(ta.value);
+    if (n === lastLineCount) return;
+    lastLineCount = n;
+    let nums = ""; for (let i = 1; i <= n; i++) nums += i + "\n";
+    gutter.textContent = nums;
+  };
+  // ===== 찾기 일치 강조 박스 =====
+  let curHit = null;                                   // curHit={s,len} 현재 강조 위치
+  // 위치 계산은 '컬럼×글자폭'이 아니라 실제 렌더링을 그대로 재는 방식 — 한글(전각)·탭·혼합 폭까지 정확.
+  // 화면 밖에 둔 미러 <pre>(textarea 와 같은 글꼴·탭)에서 '앞부분+<span>일치</span>'를 레이아웃해 span 의 위치·폭을 읽는다.
+  let measurePre = null;
+  const styleMeasure = () => {
+    const cs = getComputedStyle(ta);
+    measurePre.style.fontFamily = cs.fontFamily; measurePre.style.fontSize = cs.fontSize;
+    measurePre.style.fontWeight = cs.fontWeight; measurePre.style.letterSpacing = cs.letterSpacing;
+    measurePre.style.fontVariantLigatures = cs.fontVariantLigatures; measurePre.style.fontFeatureSettings = cs.fontFeatureSettings;
+    measurePre.style.fontKerning = cs.fontKerning;
+    measurePre.style.tabSize = cs.tabSize; measurePre.style.MozTabSize = cs.tabSize;
+  };
+  const positionHit = () => {
+    let box = hitLayer.firstChild;
+    if (!curHit){ if (box) hitLayer.textContent = ""; return; }
+    const v = ta.value;
+    if (curHit.s > v.length) { clearHit(); return; }
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || 20, padTop = parseFloat(cs.paddingTop) || 16, padLeft = parseFloat(cs.paddingLeft) || 18;
+    const line = lineAtOffset(v, curHit.s), lineStart = offsetOfLine(v, line);
+    const nl = v.indexOf("\n", curHit.s); const lineEnd = nl === -1 ? v.length : nl;   // 강조는 한 줄 안에서만
+    if (!measurePre){ measurePre = document.createElement("pre"); measurePre.className = "lite-measure"; measurePre.setAttribute("aria-hidden", "true"); edit.appendChild(measurePre); }
+    styleMeasure();
+    measurePre.textContent = "";
+    measurePre.appendChild(document.createTextNode(v.slice(lineStart, curHit.s)));
+    const span = document.createElement("span"); span.textContent = v.slice(curHit.s, Math.min(curHit.s + curHit.len, lineEnd));
+    measurePre.appendChild(span);
+    const left = span.offsetLeft, width = span.offsetWidth;
+    if (!box){ box = document.createElement("div"); box.className = "lite-hit"; hitLayer.appendChild(box); }
+    box.style.top = (padTop + (line - 1) * lh - ta.scrollTop) + "px";
+    box.style.height = lh + "px";
+    box.style.left = (padLeft + left - ta.scrollLeft) + "px";
+    box.style.width = Math.max(2, width) + "px";
+  };
+  const showHit = (s, len) => { curHit = { s, len }; positionHit(); };
+  const clearHit = () => { curHit = null; hitLayer.textContent = ""; };
+  host.__refreshFontMetrics = () => { positionHit(); };   // 글자 크기 변경(A±) 시 강조 박스도 다시 맞춘다
+
+  const syncScroll = () => { gutter.scrollTop = ta.scrollTop; positionHit(); };
+  ta.addEventListener("scroll", syncScroll, { passive: true });
+  ta.addEventListener("input", renderGutter);
+
+  // Tab = 4칸 들여쓰기 / Shift+Tab = 내어쓰기(간단). 그 외 키는 textarea 네이티브 동작을 그대로 둔다.
+  ta.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    const s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;
+    if (e.shiftKey){
+      const ls = v.lastIndexOf("\n", s - 1) + 1;
+      let rm = 0; while (rm < 4 && v.charCodeAt(ls + rm) === 32) rm++;
+      if (rm){ ta.value = v.slice(0, ls) + v.slice(ls + rm); ta.selectionStart = ta.selectionEnd = Math.max(ls, s - rm); ta.dispatchEvent(new Event("input", { bubbles: true })); }
+    } else {
+      ta.value = v.slice(0, s) + "    " + v.slice(en);
+      ta.selectionStart = ta.selectionEnd = s + 4;
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+
+  const focusLine = (line) => {
+    const v = ta.value, total = countLines(v);
+    line = Math.max(1, Math.min(total, parseInt(line, 10) || 1));
+    const start = offsetOfLine(v, line);
+    ta.focus(); ta.setSelectionRange(start, start);
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
+    syncScroll();
+  };
+
+  // ===== 가벼운 찾기(Ctrl+H): 문자열을 찾아 textarea 안에서 선택·스크롤(강조 오버레이 없이 네이티브 선택만) =====
+  let findBar = null, findInput = null, findCount = null, findOpen = false;
+  let matches = [], matchIdx = -1;
+  const computeMatches = () => {
+    matches = []; matchIdx = -1;
+    const q = findInput.value; if (!q){ findCount.textContent = ""; clearHit(); return; }
+    const hay = ta.value.toLowerCase(), needle = q.toLowerCase();
+    let from = 0, idx;
+    while ((idx = hay.indexOf(needle, from)) !== -1){ matches.push(idx); from = idx + Math.max(1, needle.length); if (matches.length >= 5000) break; }
+    findCount.textContent = matches.length ? (matches.length + "개") : "없음";
+  };
+  const goMatch = (delta) => {
+    if (!matches.length) return;
+    matchIdx = (matchIdx + delta + matches.length) % matches.length;
+    findCount.textContent = (matchIdx + 1) + "/" + matches.length;
+    const s = matches[matchIdx], len = findInput.value.length;
+    // 포커스는 찾기 입력창에 그대로 둔다 — textarea 로 포커스를 옮기면 한글 IME 조합이 끊긴다(ㅆ+ㅡ 안 붙음).
+    // 선택 위치만 표시(포커스 이동 없음)하고, 강조는 자체 노란 박스로 그린다.
+    try { ta.setSelectionRange(s, s + len); } catch(_){}
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, line = lineAtOffset(ta.value, s);
+    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
+    showHit(s, len);              // 일치 부분에 또렷한 강조 박스
+    syncScroll();
+  };
+  const closeFind = () => {
+    if (findBar) findBar.hidden = true;
+    findOpen = false; clearHit();
+    if (typeof options.onFindClose === "function"){ try { options.onFindClose(); } catch(_){} }
+    ta.focus();
+  };
+  const buildFindBar = () => {
+    findBar = document.createElement("div"); findBar.className = "ro-find lite-find";
+    findInput = document.createElement("input"); findInput.type = "text"; findInput.className = "ro-find-input"; findInput.placeholder = "찾기"; findInput.setAttribute("aria-label", "문서에서 찾기");
+    findCount = document.createElement("span"); findCount.className = "ro-find-count";
+    const prev = document.createElement("button"); prev.type = "button"; prev.className = "text-edit-btn"; prev.textContent = "↑"; prev.title = "이전 (Shift+Enter)";
+    const next = document.createElement("button"); next.type = "button"; next.className = "text-edit-btn"; next.textContent = "↓"; next.title = "다음 (Enter)";
+    const close = document.createElement("button"); close.type = "button"; close.className = "text-edit-btn"; close.textContent = "✕"; close.title = "닫기 (Esc)";
+    findBar.append(findInput, findCount, prev, next, close);
+    const runSearch = () => { computeMatches(); if (matches.length){ matchIdx = -1; goMatch(1); } };
+    // 한글 IME 조합 중(isComposing)에는 검색하지 않는다 — 조합 도중 재검색이 조합을 방해하지 않게, 조합 확정 후에만.
+    findInput.addEventListener("input", (e) => { if (e.isComposing) return; runSearch(); });
+    findInput.addEventListener("compositionend", runSearch);
+    findInput.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;                          // 조합 확정용 Enter 는 검색 이동으로 가로채지 않는다
+      if (e.key === "Enter"){ e.preventDefault(); goMatch(e.shiftKey ? -1 : 1); }
+      else if (e.key === "Escape"){ e.preventDefault(); closeFind(); }
+    });
+    prev.addEventListener("click", () => { goMatch(-1); findInput.focus(); });
+    next.addEventListener("click", () => { goMatch(1); findInput.focus(); });
+    close.addEventListener("click", closeFind);
+    edit.appendChild(findBar);
+  };
+  const openFind = (seed) => {
+    if (!findBar) buildFindBar();
+    findBar.hidden = false; findOpen = true;
+    if (seed && seed !== findInput.value){ findInput.value = seed; computeMatches(); if (matches.length){ matchIdx = -1; goMatch(1); } }
+    findInput.focus(); findInput.select();
+  };
+
+  renderGutter();
+  return {
+    host, ta,
+    getValue: () => ta.value,
+    setValue: (v) => { ta.value = v; renderGutter(); ta.dispatchEvent(new Event("input", { bubbles: true })); },
+    getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
+    focusLine, openFind, closeFind, isFindOpen: () => findOpen,
+    destroy: () => { ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove(); }
+  };
+}
+

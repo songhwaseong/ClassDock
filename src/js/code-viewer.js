@@ -568,7 +568,13 @@ async function renderCode(file, host, ext, profile, runCtx){
   const rawText = smartDecodeText(sourceBytes);
   const text = rawText.replace(/\r\n?/g, "\n");
   // 대용량/초장문 파일은 구문 강조(수십만 span 생성)를 생략하고 일반 텍스트로 → 렌더·전환 부담 감소
-  const heavy = text.length > 300000 || /[^\n]{20000}/.test(text);
+  const longSingleLine = /[^\n]{20000}/.test(text);
+  const heavy = text.length > 300000 || longSingleLine;          // 이 이상: 구문 강조 생략
+  // 1MB 초과(또는 초장문 단일 라인)는 편집을 '가벼운 편집기'로 연다 — 강조 오버레이를 통째로 빼서,
+  // 글자 하나 칠 때마다 문서 전체를 다시 그리던(highlightCode→innerHTML) 프리징을 없앤다(B안).
+  // 20MB 초과는 투명 오버레이 편집기(또는 textarea) 자체가 버거우므로 편집을 잠그고 읽기 전용으로 남긴다.
+  const lightEdit = text.length > 1048576 || longSingleLine;
+  const tooBigToEdit = text.length > 20 * 1048576;
   const prof = heavy ? "text" : (profile || CODE_EXTS[ext] || "c");
   const lineCount = text.split("\n").length;
   const runnable = RUN_EXTS.has(ext);
@@ -600,8 +606,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   }
 
   if (!runnable){
-    // 텍스트/코드: 기본은 읽기 전용, [✎ 편집] 토글로 편집기 전환 후 저장(원래 확장자 유지). 큰 파일은 읽기 전용 고정.
-    const canEdit = !heavy;
+    // 텍스트/코드: 기본은 읽기 전용, [✎ 편집] 토글로 편집기 전환 후 저장(원래 확장자 유지).
+    // ~1MB는 일반 편집기, 1~20MB는 가벼운 편집기(lightEdit), 20MB 초과만 읽기 전용 고정.
+    const canEdit = !tooBigToEdit;
     const saveName = (ownerDoc && ownerDoc.name) || (file && file.name) || ("문서." + (ext || "txt"));
     const jsonPretty = ext === "json";           // jsonc/json5 는 주석 때문에 JSON.parse 가 실패하므로 제외
     const isHtml = ext === "html" || ext === "htm" || ext === "xhtml";   // 소스 보기 ↔ 미리보기(렌더) 토글 대상
@@ -978,7 +985,10 @@ async function renderCode(file, host, ext, profile, runCtx){
         if (ownerDoc && ownerDoc.hasUnsavedEdits) return;   // 편집을 시작했으면 그대로 편집 유지
         currentText = editor.getValue(); showView();
       };
-      const editor = buildCodeEditor(currentText, prof, editorOpts); activeEditor = editor;
+      // 대용량(1MB+·초장문)은 강조 오버레이가 없는 가벼운 편집기로 — 프리징 방지(B안).
+      const editor = lightEdit ? buildLightTextEditor(currentText, editorOpts)
+                               : buildCodeEditor(currentText, prof, editorOpts);
+      activeEditor = editor;
       if (ownerDoc) ownerDoc.codeEditor = editor;
       const bar = document.createElement("div"); bar.className = "run-bar text-edit-bar";
       const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "run-save"; saveBtn.textContent = "저장";
@@ -990,6 +1000,13 @@ async function renderCode(file, host, ext, profile, runCtx){
       const status = document.createElement("span"); status.className = "run-status";
       const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
       bar.append(saveBtn, viewBtn, fontDown, fontUp, status, diag);
+      // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
+      if (lightEdit){
+        const liteNote = document.createElement("span"); liteNote.className = "text-edit-encnote";
+        liteNote.textContent = "가벼운 편집 (대용량 · 강조·자동완성 없음)";
+        liteNote.title = "1MB가 넘거나 아주 긴 줄이 있는 파일이라, 편집이 멈추지 않도록 구문 강조와 코드 지능을 끈 채로 열었어요. 저장은 그대로 됩니다.";
+        bar.appendChild(liteNote);
+      }
       // 원본이 UTF-8 이 아니면 저장 시 UTF-8 로 바뀜을 알린다(개행·BOM 은 원본 유지).
       const enc0 = ownerDoc && ownerDoc.textEncoding;
       if (enc0 && enc0.encoding && enc0.encoding !== "utf-8" && !enc0.empty){
