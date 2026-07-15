@@ -266,7 +266,6 @@ function setupNotebookKernelBar(ownerDoc, editor, ui, outer, split){
     setBusy(true);
     if (editor.highlightCellRange) editor.highlightCellRange(cell.startLine + 1, cell.endLine + 1);
     split.classList.add("show-out");
-    if (ui.clearBtn){ ui.clearBtn.hidden = false; ui.clearBtn.disabled = false; }
     if (ui.layoutBtn) ui.layoutBtn.hidden = false;
     setStatus("셀 " + cell.label + " 실행 준비…");
     try {
@@ -1159,7 +1158,6 @@ async function renderCode(file, host, ext, profile, runCtx){
   const nbConvertGroup = document.createElement("span");
   nbConvertGroup.className = "run-nbconvert-group";
   nbConvertGroup.append(nbConvertBtn, nbConvertMore, nbConvertMenu);
-  const clearBtn = document.createElement("button"); clearBtn.className = "run-clear"; clearBtn.type = "button"; clearBtn.textContent = "지우기"; clearBtn.hidden = true;
   const linkBtn = document.createElement("button"); linkBtn.className = "run-link"; linkBtn.type = "button"; linkBtn.textContent = "PDF에 핀";
   linkBtn.title = "현재 코드 줄을 PDF에 핀으로 연결";
   // 필기 버튼 — 누르면 편집 잠금 + 캔버스 오버레이가 한 번에 켜짐. 다시 누르면 둘 다 해제.
@@ -1207,7 +1205,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   newPyBtn.addEventListener("click", () => { if (typeof newPythonScratch === "function") newPythonScratch(); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(clearBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
   syncShortcutHints(bar);
 
   // 편집기 바로 위: 마지막으로 저장한 파일의 절대경로 표시. 저장 전엔 회색 안내문.
@@ -1309,6 +1307,33 @@ async function renderCode(file, host, ext, profile, runCtx){
   const divider = document.createElement("div"); divider.className = "run-divider";
   divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
   const outPanel = document.createElement("div"); outPanel.className = "code-output";
+  const outHideBtn = document.createElement("button"); outHideBtn.className = "out-hide"; outHideBtn.type = "button";
+  const syncOutputHideLabel = () => {
+    const label = _T("실행 결과 숨기기");
+    outHideBtn.title = label; outHideBtn.setAttribute("aria-label", label);
+  };
+  const syncOutputHideIcon = (stacked) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", stacked ? "M7 9l5 5 5-5" : "M9 7l5 5-5 5");
+    svg.appendChild(path); outHideBtn.replaceChildren(svg);
+  };
+  syncOutputHideLabel();
+  // 실행 결과 렌더러들이 panel.innerHTML 을 교체해도 숨기기 버튼은 현재 헤더에 다시 붙인다.
+  const attachOutputHideButton = () => {
+    const head = outPanel.querySelector(".out-head");
+    if (head){ if (outHideBtn.parentNode !== head) head.appendChild(outHideBtn); }
+    else if (outHideBtn.parentNode !== outPanel) outPanel.insertBefore(outHideBtn, outPanel.firstChild);
+  };
+  outPanel.appendChild(outHideBtn);
+  const outputChromeObserver = new MutationObserver(attachOutputHideButton);
+  outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
+  outHideBtn.addEventListener("click", () => {
+    split.classList.remove("show-out");
+    layoutBtn.hidden = false;
+    editor.ta.focus({ preventScroll:true });
+  });
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
   outer.appendChild(bar); outer.appendChild(pkgWrap); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(pathHelpPanel); outer.appendChild(split);
@@ -1363,6 +1388,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   let idleMsg = makeIdleMessage();
   status.textContent = restoredDraft === null ? idleMsg : "자동 복구된 편집본 · 저장하거나 원본으로 되돌리세요";
   const onStatusLanguageChange = () => {
+    syncOutputHideLabel();
     if (status.textContent !== idleMsg) return;
     idleMsg = makeIdleMessage();
     status.textContent = idleMsg;
@@ -1370,7 +1396,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   window.addEventListener("mni18nchange", onStatusLanguageChange);
   if (ownerDoc){
     if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = [];
-    ownerDoc.cleanupFns.push(() => window.removeEventListener("mni18nchange", onStatusLanguageChange));
+    ownerDoc.cleanupFns.push(() => {
+      window.removeEventListener("mni18nchange", onStatusLanguageChange);
+      outputChromeObserver.disconnect();
+    });
   }
   // 실행 결과를 편집기 옆(가로) ↔ 아래(세로)로 토글. 선택은 저장되어 다음에 열 때도 유지.
   ui.layoutBtn = layoutBtn;
@@ -1382,11 +1411,13 @@ async function renderCode(file, host, ext, profile, runCtx){
     layoutBtn.textContent = outputStacked ? "Side" : "Below";
     layoutBtn.title = outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로";
     layoutBtn.setAttribute("aria-label", layoutBtn.title);
+    syncOutputHideIcon(outputStacked);
   };
   layoutBtn.addEventListener("click", () => {
     outputStacked = !outputStacked;
     try { localStorage.setItem("pythonSplitDir", outputStacked ? "col" : "row"); } catch(e){}
     applyOutputLayout();
+    split.classList.add("show-out");
   });
   applyOutputLayout();
   // keepEditorFocus: Ctrl+Enter 로 실행하면 편집을 이어가도록 에디터에 커서를 유지(▶ 버튼 클릭은 평소대로 터미널로 포커스)
@@ -1651,8 +1682,6 @@ async function renderCode(file, host, ext, profile, runCtx){
       startDiagnosis();
     } finally { saveBtn.disabled = false; }
   });
-  clearBtn.addEventListener("click", () => { split.classList.remove("show-out"); outPanel.innerHTML = ""; clearBtn.hidden = true; layoutBtn.hidden = true; status.textContent = idleMsg; });
-  ui.clearBtn = clearBtn;
   // input() 프롬프트를 순서대로 읽어 라벨 붙은 입력칸을 만든다(브라우저 실행 전용, 초급자용).
   // 순서가 고정된 호출이면 프롬프트 문구를 라벨로 단 개별 칸을 보여 주고, 반복문·조건문 안처럼
   // 호출 횟수가 달라질 수 있으면 기존 자유 입력 textarea 로 폴백한다. stdin(textarea)은 값 저장소를

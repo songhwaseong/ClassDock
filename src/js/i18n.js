@@ -634,6 +634,7 @@
     "현재 셀 안에서 찾기·바꾸기": "Find/replace within the current cell",
     "키보드 단축키": "Keyboard shortcuts",
     "결과 패널 닫기": "Close the result panel",
+    "실행 결과 숨기기": "Hide run output",
     "펜": "Pen",
     "형광펜": "Highlighter",
     "지우개": "Eraser",

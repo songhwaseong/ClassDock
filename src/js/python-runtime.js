@@ -62,7 +62,6 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
   if (ui.gradeBtn) ui.gradeBtn.disabled = true;
   if (!diagnosing){
     split.classList.add("show-out");
-    if (ui.clearBtn){ ui.clearBtn.hidden = false; ui.clearBtn.disabled = true; }
     if (ui.layoutBtn) ui.layoutBtn.hidden = false;
   }
   const modeTitle = diagnosing ? "실행 전 코드 진단" : tracing ? "단계 실행" : grading ? "과제 자동채점" : "실행 결과";
@@ -329,7 +328,6 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
     if (ui.traceBtn) ui.traceBtn.disabled = false;
     if (ui.analyzeBtn) ui.analyzeBtn.disabled = false;
     if (ui.gradeBtn) ui.gradeBtn.disabled = false;
-    if (ui.clearBtn) ui.clearBtn.disabled = false;
     if (typeof ui.resumeLiveDiagnostics === "function") ui.resumeLiveDiagnostics();
   }
 }
@@ -641,7 +639,6 @@ async function runPipInstall(pkgs, ui){
     return false;
   }
   split.classList.add("show-out");
-  if (ui.clearBtn) ui.clearBtn.hidden = false;
   if (ui.layoutBtn) ui.layoutBtn.hidden = false;
   outPanel.innerHTML = "";
   const head = document.createElement("div"); head.className = "out-head"; head.textContent = "패키지 설치";
@@ -675,7 +672,6 @@ async function runPipList(ui){
     return;
   }
   split.classList.add("show-out");
-  if (ui.clearBtn) ui.clearBtn.hidden = false;
   if (ui.layoutBtn) ui.layoutBtn.hidden = false;
   outPanel.innerHTML = "";
   const head = document.createElement("div"); head.className = "out-head"; head.textContent = "설치된 라이브러리";

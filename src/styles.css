@@ -1861,10 +1861,10 @@
   .run-trace:disabled,.run-analyze:disabled{opacity:.5;cursor:default}
   [data-theme="dark"] .run-trace{background:rgba(37,99,235,.12);border-color:#60a5fa;color:#bfdbfe}
   [data-theme="dark"] .run-analyze{background:rgba(124,58,237,.12);border-color:#a78bfa;color:#ddd6fe}
-  /* 보조 버튼(저장·라이브러리·지우기·되돌리기·글자크기)은 한 가지 톤으로 — ▶ 실행만 도드라지게 */
-  .run-clear,.run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec{font:inherit;font-size:12.5px;border:1px solid var(--border);
+  /* 보조 버튼(저장·라이브러리·되돌리기·글자크기)은 한 가지 톤으로 — ▶ 실행만 도드라지게 */
+  .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec{font:inherit;font-size:12.5px;border:1px solid var(--border);
     background:var(--field);color:var(--muted);border-radius:8px;padding:6px 11px;cursor:pointer}
-  .run-clear:hover,.run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover{background:var(--panel-hover);color:var(--ink)}
   /* PDF에 핀: PDF·코드를 나란히 보는 학습 화면일 때만 쓸모가 있어 그때만 노출 */
   .run-link{display:none}
   #content.study-mode .run-link{display:inline-block}
@@ -2423,7 +2423,14 @@
     .run-split.stack-v .run-divider:focus-visible::before{top:4px;height:4px;left:0;right:0;width:auto}
   }
   .out-head{position:sticky;top:0;background:var(--code-panel-head);color:var(--code-muted);font-size:11.5px;letter-spacing:.04em;
-    padding:8px 14px;border-bottom:1px solid var(--code-border);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+    padding:8px 48px 8px 14px;border-bottom:1px solid var(--code-border);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .out-hide{width:27px;height:27px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--code-muted);
+    display:inline-grid;place-items:center;cursor:pointer;z-index:12}
+  .out-hide:hover,.out-hide:focus-visible{background:var(--panel-hover);color:var(--code-text);border-color:var(--code-border)}
+  .out-hide:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .out-hide svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .out-head>.out-hide{position:absolute;right:8px;top:4px}
+  .code-output>.out-hide{position:sticky;top:6px;align-self:flex-end;flex:0 0 27px;margin:6px 7px -33px 0}
   .py-grade-summary{display:flex;align-items:center;gap:10px;margin:12px 14px 6px;padding:11px 12px;border:1px solid var(--code-border);
     border-radius:9px;font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
   .py-grade-summary strong{font-size:20px}.py-grade-summary span{font-size:12.5px}
@@ -2854,7 +2861,7 @@
   .code-input::-webkit-scrollbar-thumb{background:var(--code-border);border-radius:8px;border:3px solid var(--code-bg);cursor:default}
   @media (max-width:900px){
     .run-split{flex-direction:column}.run-divider{display:none}.run-split.show-out .code-host,.run-split.show-out .code-output{flex:1 1 auto}
-    .code-output{max-height:50vh}.code-host-edit{height:50vh}.run-layout{display:none}
+    .code-output{max-height:50vh}.code-host-edit{height:50vh}.run-layout,.out-hide{display:none}
     .py-path-examples{grid-template-columns:1fr}.py-path-cwd{grid-template-columns:1fr}.run-project-row{align-items:stretch}
     .mode-badge{display:none}.study-pair-badge{max-width:42vw}
     .py-env-grid{grid-template-columns:1fr}
