@@ -11,6 +11,7 @@
 
   const WORKSPACE_FOLDER_MARKER = ".manneung-folder-keep-9f4d2a7b";
   const WORKSPACE_IMAGE_SKIP_MARKER = ".manneung-images-skipped-4e72c1b9";
+  const WORKSPACE_ORIGINAL_SAVE_MARKER = ".manneung-original-save-6c87f41e";
   function workspaceFolderMarkerPath(value) {
     const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
     return path ? path + "/" + WORKSPACE_FOLDER_MARKER : "";
@@ -27,6 +28,15 @@
   function workspaceImageSkipFolderPath(value) {
     const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
     const suffix = "/" + WORKSPACE_IMAGE_SKIP_MARKER;
+    return path.endsWith(suffix) ? path.slice(0, -suffix.length) : "";
+  }
+  function workspaceOriginalSaveMarkerPath(value) {
+    const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
+    return path ? path + "/" + WORKSPACE_ORIGINAL_SAVE_MARKER : "";
+  }
+  function workspaceOriginalSaveFolderPath(value) {
+    const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
+    const suffix = "/" + WORKSPACE_ORIGINAL_SAVE_MARKER;
     return path.endsWith(suffix) ? path.slice(0, -suffix.length) : "";
   }
 
@@ -2510,6 +2520,7 @@
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
+    workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,

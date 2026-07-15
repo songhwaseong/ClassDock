@@ -2124,6 +2124,49 @@ async function forgetFsHandle(path){
 //   - 첫 저장: showSaveFilePicker 로 위치를 한 번 고르고(suggestedName=원본 이름), 핸들을 문서(ownerDoc.fsHandle)에 보관
 //   - 이후 저장: 보관한 핸들로 대화상자 없이 조용히 덮어쓰기
 //   - 미지원(구형 브라우저·file://)·권한 거부 → "unsupported"(호출부에서 다운로드로 폴백)
+function originalSaveRootForDoc(ownerDoc){
+  let parentId = ownerDoc && ownerDoc.parentId;
+  while (parentId){
+    const group = navNodes.find(node => node.nodeId === parentId && node.type === "group");
+    if (!group) return null;
+    if (group.folderRefreshRootId === group.nodeId) return group;
+    parentId = group.parentId;
+  }
+  return null;
+}
+
+async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly){
+  if (!ownerDoc || !ownerDoc.originalSaveMode) return null;
+  const root = originalSaveRootForDoc(ownerDoc);
+  if (!root) return null;
+  let rootHandle = root.folderHandle || null;
+  if (!rootHandle && typeof loadRememberedFolderHandle === "function"){
+    rootHandle = await loadRememberedFolderHandle(root.name);
+    if (rootHandle) root.folderHandle = rootHandle;
+  }
+  if (!rootHandle || typeof rootHandle.getDirectoryHandle !== "function") return null;
+  let permission = typeof rootHandle.queryPermission === "function"
+    ? await rootHandle.queryPermission({ mode:"readwrite" })
+    : "granted";
+  if (permission !== "granted" && typeof rootHandle.requestPermission === "function")
+    permission = await rootHandle.requestPermission({ mode:"readwrite" });
+  if (permission !== "granted") return null;
+
+  const path = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || ownerDoc.name || name);
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length > 1 && parts[0] !== root.name) return null;
+  if (parts[0] === root.name) parts.shift();
+  if (parts.some(part => part === "." || part === "..")) return null;
+  const fileName = parts.pop() || ownerDoc.name || name;
+  let dirHandle = rootHandle;
+  for (const part of parts) dirHandle = await dirHandle.getDirectoryHandle(part);
+  const handle = await dirHandle.getFileHandle(fileName, { create:!existingOnly });
+  ownerDoc.fsDirHandle = dirHandle;
+  ownerDoc.fsHandle = handle;
+  if (ownerDoc.workspacePath && typeof saveFsHandle === "function") saveFsHandle(ownerDoc.workspacePath, handle);
+  return handle;
+}
+
 async function saveViaFileHandle(text, name, ownerDoc, options={}){
   try {
     let handle = ownerDoc && ownerDoc.fsHandle;
@@ -2147,6 +2190,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
         return "denied";
       }
     }
+    if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name, !!options.existingOnly);
     if (!handle){
       if (options.existingOnly) return "denied";
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";

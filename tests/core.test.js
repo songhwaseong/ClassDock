@@ -13,7 +13,8 @@ const {
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
   normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
-  workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath
+  workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
+  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath
 } = require("../src/js/core.js");
 
 test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", () => {
@@ -861,6 +862,12 @@ test("Python block indentation recognizes a colon before an inline comment", () 
   assert.equal(pythonLineOpensBlock("    if label == '#':  # 해시 문자열"), true);
   assert.equal(pythonLineOpensBlock("value = '# not a comment'"), false);
   assert.equal(pythonLineOpensBlock("value = 1  # 설명:"), false);
+});
+
+test("원본 저장 폴더 표식은 작업공간 경로와 안전하게 왕복한다", () => {
+  const marker = workspaceOriginalSaveMarkerPath("수업/파이썬/");
+  assert.equal(workspaceOriginalSaveFolderPath(marker), "수업/파이썬");
+  assert.equal(workspaceOriginalSaveFolderPath("수업/파이썬/main.py"), "");
 });
 
 test("editor undo history remembers the caret immediately before an edit", () => {

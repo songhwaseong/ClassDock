@@ -484,14 +484,22 @@ function setFileRelativePath(file, path){
 // 폴더 핸들을 IndexedDB 에 보관(구조화 복제 가능) → 자동 복원으로 되살아난 폴더도 '새로고침' 버튼이
 // 권한 확인 1클릭만으로 디스크에서 다시 읽는다. (이미지 대량 폴더의 자동 복원 제외와 짝을 이룸)
 const FOLDER_HANDLE_KEY_PREFIX = "__folder-handle__/";
+async function loadRememberedFolderHandle(rootName){
+  if (typeof loadFsHandle !== "function") return null;
+  try {
+    const handle = await loadFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName);
+    return handle && handle.kind === "directory" ? handle : null;
+  } catch(_){ return null; }
+}
 function rememberFolderHandle(rootGroup, rootName){
   if (typeof saveFsHandle !== "function" || typeof loadFsHandle !== "function") return;
   if (rootGroup.folderHandle){
     saveFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName, rootGroup.folderHandle);
     return;
   }
-  loadFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName).then(handle => {
-    if (handle && handle.kind === "directory" && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
+  if (!rootGroup.originalSaveMode) return;
+  loadRememberedFolderHandle(rootName).then(handle => {
+    if (handle && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
   }).catch(() => {});
 }
 async function collectDirectoryHandleFiles(handle){
@@ -613,7 +621,7 @@ function queueFolder(fileList, options={}){
   fileQueue = fileQueue.then(() => runUiBatch(async () => {
     // 자동 복원 저장은 폴더를 먼저 연 뒤에 한다 — 수백 MB 복사를 기다리지 않고 바로 화면에 뜨게.
     const replaceWorkspace = navNodes.length === 0;
-    await openFolderFiles(files, options);
+    const rootGroup = await openFolderFiles(files, options);
     // webkitdirectory 폴백은 빈 폴더 경로를 주지 않는다. 그래도 상대경로의 루트는 남겨야
     // 대량 이미지가 자동 복원에서 생략됐다는 표식을 다음 실행에도 복원할 수 있다.
     const folderPaths = options.folderPaths && options.folderPaths.length
@@ -622,8 +630,12 @@ function queueFolder(fileList, options={}){
           .map(file => normalizedRunPath(file && file.webkitRelativePath || ""))
           .filter(path => path.includes("/"))
           .map(path => path.split("/")[0]))];
-    if (files.length || folderPaths.length)
-      await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths });
+    if (files.length || folderPaths.length){
+      const originalSaveFolderPaths = rootGroup && rootGroup.originalSaveMode
+        ? [rootGroup.name]
+        : [];
+      await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths, originalSaveFolderPaths });
+    }
   }))
     .then(() => collapseToActiveBranch())   // 폴더를 연 순간엔 활성 파일의 폴더 체인만 펼쳐 둔다
     .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
@@ -650,16 +662,17 @@ async function openFolderFiles(fileList, options={}){
   const rootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
   const rootGroup = makeGroup("folder", rootName, null);
   rootGroup.folderRefreshRootId = rootGroup.nodeId;
+  rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderHandle = options.folderHandle || null;
   rememberFolderHandle(rootGroup, rootName);   // 핸들 IDB 보관/복구 — 재실행 뒤에도 '폴더 새로고침'이 권한 1클릭으로 동작
   // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
   rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
   rootGroup.imageSkipWorkspacePath = workspaceImageSkipMarkerPath(rootName);
-  rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderPaths = folderPaths.length ? folderPaths : [rootName];
   rootGroup.workspacePaths = [
     ...[...fileList].map(f => f.webkitRelativePath || (rootName + "/" + f.name)),
-    ...rootGroup.folderPaths.map(workspaceFolderMarkerPath)
+    ...rootGroup.folderPaths.map(workspaceFolderMarkerPath),
+    ...(rootGroup.originalSaveMode ? [workspaceOriginalSaveMarkerPath(rootName)] : [])
   ];
   const workspacePathsByFolder = indexWorkspacePathsByFolder(rootGroup.workspacePaths);
   // 폴더 전체(데이터 파일 포함, 숨김 경로 제외)를 옆 파일로 묶는다 — .py 실행 시 import/파일읽기 지원
@@ -758,7 +771,8 @@ async function requestFolderRefresh(rootId){
     try {
       const snapshot = await collectDirectoryHandleFiles(handle);
       root.folderHandle = handle;
-      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths });
+      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths,
+        originalSaveMode:!!root.originalSaveMode });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
@@ -772,10 +786,12 @@ async function requestFolderRefresh(rootId){
   if (supportsPicker){
     const picked = await chooseFolderHandle(root.folderHandle || null);
     if (!picked) return;
+    await ensureFolderWriteAccess(picked);
     showLoading("폴더 변경 내용 확인 중…");
     try {
       const snapshot = await collectDirectoryHandleFiles(picked);
-      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths });
+      return queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths,
+        originalSaveMode:true });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
@@ -805,6 +821,7 @@ function queueFolderRefresh(rootId, fileList, options={}){
 async function refreshFolderGroup(rootId, fileList, options={}){
   const root = navNodes.find(node => node.nodeId === rootId && node.type === "group");
   if (!root) return false;
+  if (options.originalSaveMode) root.originalSaveMode = true;
   const files = [...fileList];
   const openable = await folderOpenableFiles(files);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))];
@@ -834,7 +851,12 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     const file = nextByKey.get(key);
     const unchanged = !!file && doc.__srcMtime != null &&
       (Number(doc.size) || 0) === (Number(file.size) || 0) && doc.__srcMtime === (file.lastModified || 0);
-    if (unchanged){ keptDocs.push(doc); nextByKey.delete(key); }
+    if (unchanged){
+      doc.fsHandle = file.__fsHandle || doc.fsHandle || null;
+      doc.fsDirHandle = file.__fsDirHandle || doc.fsDirHandle || null;
+      doc.originalSaveMode = !!root.originalSaveMode;
+      keptDocs.push(doc); nextByKey.delete(key);
+    }
     else { dropDocs.push(doc); if (file) changedCount++; else removedCount++; }
   }
   const addFiles = openable.filter(file => nextByKey.has(fileKeyOf(file)));
@@ -941,7 +963,8 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   root.folderPaths = folderPaths.length ? folderPaths : [selectedRootName];
   root.workspacePaths = [
     ...files.map(f => f.webkitRelativePath || (selectedRootName + "/" + f.name)),
-    ...root.folderPaths.map(workspaceFolderMarkerPath)
+    ...root.folderPaths.map(workspaceFolderMarkerPath),
+    ...(root.originalSaveMode ? [workspaceOriginalSaveMarkerPath(selectedRootName)] : [])
   ];
   const workspacePathsByFolder = indexWorkspacePathsByFolder(root.workspacePaths);
   root.newPythonContext = { parentId: root.nodeId, dir: selectedRootName, archiveCtx: folderCtx, label: selectedRootName };
@@ -995,9 +1018,11 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   }
 
   if (files.length || folderPaths.length)
-    await rememberWorkspace(files, false, { silent: true, folderPaths });
+    await rememberWorkspace(files, false, { silent: true, folderPaths,
+      originalSaveFolderPaths:root.originalSaveMode ? [selectedRootName] : [] });
   const nextPathSet = new Set(files.map(file => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name))));
   folderPaths.forEach(path => nextPathSet.add(workspaceFolderMarkerPath(path)));
+  if (root.originalSaveMode) nextPathSet.add(workspaceOriginalSaveMarkerPath(selectedRootName));
   const deleted = oldPaths.filter(path => path && !nextPathSet.has(path));
   if (deleted.length) forgetWorkspacePaths(deleted);
   const changeSummary = [];

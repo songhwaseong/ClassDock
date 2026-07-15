@@ -192,7 +192,7 @@ async function flushWorkspaceRemovals(){
   }
 }
 
-async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPaths=[]){
+async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPaths=[], originalSaveFolderPaths=[]){
   const enc = new TextEncoder(), rows = [];
   let total = 4;
   for (const file of [...files]){
@@ -220,6 +220,17 @@ async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPa
     if (!folder || seenPendingImageFolders.has(folder)) continue;
     seenPendingImageFolders.add(folder);
     const marker = workspaceImageSkipMarkerPath(folder);
+    const pathBytes = enc.encode(marker);
+    total += 8 + pathBytes.length;
+    if (total > WORKSPACE_CAP) throw new Error("workspace-too-large");
+    rows.push({ file:null, pathBytes, size:0 });
+  }
+  const seenOriginalSaveFolders = new Set();
+  for (const value of originalSaveFolderPaths || []){
+    const folder = normalizedRunPath(value).replace(/\/+$/, "");
+    if (!folder || seenOriginalSaveFolders.has(folder)) continue;
+    seenOriginalSaveFolders.add(folder);
+    const marker = workspaceOriginalSaveMarkerPath(folder);
     const pathBytes = enc.encode(marker);
     total += 8 + pathBytes.length;
     if (total > WORKSPACE_CAP) throw new Error("workspace-too-large");
@@ -278,12 +289,20 @@ async function rememberWorkspace(files, replace, options={}){
   }
   const folderPaths = options.folderPaths || [];
   const folderRoots = new Set(folderPaths.map(path => normalizedRunPath(path).split("/")[0]).filter(Boolean));
+  const originalSaveFolderPaths = [...new Set((options.originalSaveFolderPaths || [])
+    .map(path => normalizedRunPath(path).replace(/\/+$/, ""))
+    .filter(path => path && folderRoots.has(path.split("/")[0])))];
   const pendingImageFolderPaths = [...new Set(skippedImagePaths
     .map(path => normalizedRunPath(path).split("/")[0])
     .filter(path => path && folderRoots.has(path)))];
   const staleImageMarkerPaths = [...folderRoots]
     .filter(path => !pendingImageFolderPaths.includes(path))
     .map(workspaceImageSkipMarkerPath)
+    .filter(Boolean);
+  const originalSaveRoots = new Set(originalSaveFolderPaths.map(path => path.split("/")[0]));
+  const staleOriginalSaveMarkerPaths = [...folderRoots]
+    .filter(path => !originalSaveRoots.has(path))
+    .map(workspaceOriginalSaveMarkerPath)
     .filter(Boolean);
   const notifySkippedImages = () => {
     if (!skippedImages) return;
@@ -312,7 +331,7 @@ async function rememberWorkspace(files, replace, options={}){
     await flushWorkspaceRemovals();
     if (silent) setWorkspaceActivity("작업공간 저장 중…");
     else updateLoading("다음 실행을 위해 작업공간 기억하는 중…");
-    const body = await buildWorkspacePayload(rows, folderPaths, pendingImageFolderPaths);
+    const body = await buildWorkspacePayload(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths);
     if (useServer){
       const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-save?replace=" + (replace ? "1" : "0"), {
         method: "POST", headers: { "Content-Type": "application/octet-stream", "X-PdfSigner-Workspace": "1" }, body
@@ -325,6 +344,7 @@ async function rememberWorkspace(files, replace, options={}){
     // merge 저장만으로 사라지지 않는다. 성공적으로 폴더 표식을 저장한 뒤 경로별로 정리한다.
     if (skippedImagePaths.length) forgetWorkspacePaths(skippedImagePaths);
     if (staleImageMarkerPaths.length) forgetWorkspacePaths(staleImageMarkerPaths);
+    if (staleOriginalSaveMarkerPaths.length) forgetWorkspacePaths(staleOriginalSaveMarkerPaths);
     notifySkippedImages();
     return true;
   } catch(e){
@@ -361,8 +381,13 @@ async function parseWorkspacePayload(buffer){
   const pendingImageFolderPaths = [...new Set(decoded
     .map(row => workspaceImageSkipFolderPath(row.path))
     .filter(Boolean))];
+  const originalSaveFolderPaths = [...new Set(decoded
+    .map(row => workspaceOriginalSaveFolderPath(row.path))
+    .filter(Boolean))];
   pendingImageFolderPaths.forEach(path => { if (!folderPaths.includes(path)) folderPaths.push(path); });
-  const fileRows = decoded.filter(row => !workspaceFolderPathFromMarker(row.path) && !workspaceImageSkipFolderPath(row.path));
+  originalSaveFolderPaths.forEach(path => { if (!folderPaths.includes(path)) folderPaths.push(path); });
+  const fileRows = decoded.filter(row => !workspaceFolderPathFromMarker(row.path) &&
+    !workspaceImageSkipFolderPath(row.path) && !workspaceOriginalSaveFolderPath(row.path));
   // 저장 폴더의 최신 파일 확인은 결과 순서를 유지한 채 제한적으로 병렬화한다.
   const rows = await mapWithConcurrency(fileRows, 6, async (row) => {
     const diskBytes = await readRestoredLocalFile(row.path);
@@ -373,7 +398,7 @@ async function parseWorkspacePayload(buffer){
     if (path.indexOf("/") >= 0) Object.defineProperty(file, "webkitRelativePath", { value: path });
     return { path, file, syncedFromDisk: !!diskBytes };
   });
-  return { rows, folderPaths, pendingImageFolderPaths };
+  return { rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths };
 }
 
 async function restoreLastWorkspace(){
@@ -408,12 +433,13 @@ async function restoreLastWorkspace(){
     const rows = restored.rows;
     const restoredFolderPaths = restored.folderPaths;
     const restoredPendingImageFolderPaths = restored.pendingImageFolderPaths;
+    const restoredOriginalSaveFolderPaths = restored.originalSaveFolderPaths;
     if (!rows.length && !restoredFolderPaths.length) return;
     updateLoading("최근 작업공간 복원 중…");
     beginUiBatch();
     const folderGroups = new Map(), loose = [];
     const ensureFolderGroup = (root) => {
-      if (!folderGroups.has(root)) folderGroups.set(root, { files:[], folderPaths:[], pendingImageFolderPaths:[] });
+      if (!folderGroups.has(root)) folderGroups.set(root, { files:[], folderPaths:[], pendingImageFolderPaths:[], originalSaveMode:false });
       return folderGroups.get(root);
     };
     rows.forEach(row => {
@@ -431,10 +457,15 @@ async function restoreLastWorkspace(){
       const root = path.split("/")[0];
       if (root) ensureFolderGroup(root).pendingImageFolderPaths.push(path);
     });
+    restoredOriginalSaveFolderPaths.forEach(path => {
+      const root = path.split("/")[0];
+      if (root) ensureFolderGroup(root).originalSaveMode = true;
+    });
     for (const group of folderGroups.values())
       // 대량 이미지가 자동 복원 저장에서 제외된 폴더는 빈 트리만 먼저 복원한다.
       // 사용자가 그 루트 폴더를 클릭하면 저장해 둔 폴더 핸들로 실제 파일을 다시 읽는다.
-      await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths, restoreFromWorkspace:true });
+      await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+        originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true });
     if (loose.length){
       let opts = { bulk: loose.length > 1 };
       const siblings = loose.filter(f => !["zip","tar","gz","tgz"].includes((f.name.split(".").pop() || "").toLowerCase()));

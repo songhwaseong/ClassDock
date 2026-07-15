@@ -14,11 +14,24 @@ const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.h
 const guideMarkdown = fs.readFileSync(path.join(__dirname, "../사용법.md"), "utf8");
 const guideHtml = fs.readFileSync(path.join(__dirname, "../사용법.html"), "utf8");
 
+test("original-save folders keep their mode and file handles across restore and refresh", () => {
+  assert.match(source, /workspaceOriginalSaveMarkerPath\(folder\)/);
+  assert.match(source, /workspaceOriginalSaveFolderPath\(row\.path\)/);
+  assert.match(source, /originalSaveMode:group\.originalSaveMode/);
+  assert.match(source, /originalSaveFolderPaths:root\.originalSaveMode \? \[selectedRootName\] : \[\]/);
+  assert.match(source, /root\.originalSaveMode \? \[workspaceOriginalSaveMarkerPath\(selectedRootName\)\] : \[\]/);
+  assert.match(source, /if \(root\.originalSaveMode\) nextPathSet\.add\(workspaceOriginalSaveMarkerPath\(selectedRootName\)\)/);
+  assert.match(source, /doc\.fsHandle = file\.__fsHandle \|\| doc\.fsHandle \|\| null/);
+  assert.match(source, /doc\.originalSaveMode = !!root\.originalSaveMode/);
+  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name, !!options\.existingOnly\)/);
+  assert.match(codeSource, /loadRememberedFolderHandle\(root\.name\)/);
+});
+
 test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", () => {
-  assert.match(source, /buildWorkspacePayload\(rows, folderPaths, pendingImageFolderPaths\)/);
+  assert.match(source, /buildWorkspacePayload\(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths\)/);
   assert.match(source, /workspaceFolderMarkerPath\(folder\)/);
   assert.match(source, /workspaceFolderPathFromMarker\(row\.path\)/);
-  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, pendingImageFolderPaths:group\.pendingImageFolderPaths, restoreFromWorkspace:true \}\)/);
+  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, pendingImageFolderPaths:group\.pendingImageFolderPaths,[\s\S]*originalSaveMode:group\.originalSaveMode, restoreFromWorkspace:true \}\)/);
   assert.match(source, /restorePendingImages = !!options\.restoreFromWorkspace && pendingImageFolderPaths\.some\(path => path === rootName\)/);
 });
 
@@ -42,7 +55,7 @@ test("폴더 새로고침으로 교체된 참고 문서는 분할 화면에서 �
 test("폴더 선택 폴백도 상대경로의 루트를 대량 이미지 복원 표식에 남긴다", () => {
   assert.match(source, /filter\(path => path\.includes\("\/"\)\)/);
   assert.match(source, /map\(path => path\.split\("\/"\)\[0\]\)/);
-  assert.match(source, /rememberWorkspace\(files, replaceWorkspace, \{ silent: true, folderPaths \}\)/);
+  assert.match(source, /rememberWorkspace\(files, replaceWorkspace, \{ silent: true, folderPaths, originalSaveFolderPaths \}\)/);
 });
 
 test("folder refresh picker starts from the previous root folder handle when possible", () => {
