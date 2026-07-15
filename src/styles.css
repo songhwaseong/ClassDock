@@ -328,7 +328,7 @@
     color:#94a3b8;background:rgba(15,23,42,.28);font:500 8.5px/1.35 Consolas,"Courier New",monospace}
   .sb-item.active .sb-encoding{color:#e0e7ff;border-color:rgba(224,231,255,.45);background:rgba(255,255,255,.1)}
   .sb-saved{flex:0 0 auto;font-size:11px;color:#2dd4bf;line-height:1}
-  .sb-saved[title="저장 후 수정됨"]{color:#fbbf24;font-size:8px}
+  .sb-saved.dirty{color:#fbbf24;font-size:8px}
   .sb-close{flex:0 0 auto;border:0;background:transparent;color:inherit;cursor:pointer;opacity:.55;
     font-size:13px;width:20px;height:20px;border-radius:5px}
   .sb-close:hover{opacity:1;background:rgba(255,255,255,.22)}

@@ -2166,7 +2166,7 @@ async function renderXlsx(file, host, doc){
       const model = exModels[nm];
       if (!model) return (wb.SheetNames || []).some(s => s.toLowerCase() === String(nm).toLowerCase()) ? "" : FORMULA_ERR("#REF!");
       if (r < 0 || c < 0 || r >= model.length || !model[r] || c >= model[r].length) return "";
-      const key = nm + " " + r + "," + c;
+      const key = nm + "\u0001" + r + "," + c;
       if (cache.has(key)) return cache.get(key);
       const s = model[r][c];
       if (!s.f){ let v = s.v; if (v instanceof Date) v = spreadsheetDateSerial(v); else if (v == null) v = ""; cache.set(key, v); return v; }
@@ -3193,10 +3193,15 @@ async function renderXlsx(file, host, doc){
     };
   };
 
-  // ----- 되돌리기 / 다시실행 (시트별 스냅샷 스택) -----
-  const undoStacks = {};          // name -> [snapshot]
-  const redoStacks = {};          // name -> [snapshot]
-  const MAX_UNDO = 40;
+  // ----- 되돌리기 / 다시실행 (시트별, 공용 history.js) -----
+  // 다른 편집기와 달리 여기는 편집 "직전"에 기록한다(pushUndo 18곳). 그 자리를 그대로 두려고
+  // 두 가지를 쓴다.
+  //  - 리비전 번호: 스냅샷 같음 판정을 O(1) 로. 시트 전체를 비교하면 큰 표에서 느리다.
+  //  - dropRedo(): 새 편집이 시작된 순간 앞쪽(redo) 갈래를 무효화. 이걸 빼면 되돌린 뒤
+  //    새로 편집해도 '다시실행'이 살아 있어, 누르면 방금 한 편집을 조용히 버린다.
+  // 아직 기록되지 않은 마지막 편집은 undo() 가 되돌리기 직전에 확정한다.
+  const histories = new Map();    // name -> { h, ref }
+  const sheetRevs = {};           // name -> 편집 리비전
   let undoBtn = null, redoBtn = null;
   const cloneModel = (model) => {
     if (typeof structuredClone === "function"){ try { return structuredClone(model); } catch(_){} }
@@ -3213,6 +3218,7 @@ async function renderXlsx(file, host, doc){
     }));
   };
   const snapshot = (name) => ({
+    rev: sheetRevs[name] || 0,
     // CSV 변환본은 수정할 행만 복사하는 copy-on-write 모델이라 최상위 행 배열만 보관해도 안전하다.
     model: csvFastAoa ? (exModels[name] || []).slice() : cloneModel(exModels[name] || []),
     edited: new Map(editedCells[name] || []),
@@ -3221,6 +3227,7 @@ async function renderXlsx(file, host, doc){
     struct: structChanged.has(name)
   });
   const restoreSnapshot = (name, snap) => {
+    sheetRevs[name] = snap.rev || 0;          // 리비전도 함께 되돌려야 "미기록 변경 있음"을 오판하지 않는다
     exModels[name] = csvFastAoa ? (snap.model || []).slice() : cloneModel(snap.model);
     editedCells[name] = new Map(snap.edited);
     styledCells[name] = new Map(snap.styled);
@@ -3232,36 +3239,57 @@ async function renderXlsx(file, host, doc){
       || Object.values(editedCells).some(m => m && m.size)
       || Object.values(styledCells).some(m => m && m.size);
   };
-  const updateUndoButtons = () => {
-    if (undoBtn) undoBtn.disabled = !((undoStacks[currentSheet] || []).length);
-    if (redoBtn) redoBtn.disabled = !((redoStacks[currentSheet] || []).length);
-  };
-  // 각 편집 직전 호출: 현재 상태를 undo 스택에 저장하고 redo 무효화
-  const pushUndo = (name) => {
-    const st = undoStacks[name] || (undoStacks[name] = []);
-    st.push(snapshot(name));
-    if (st.length > MAX_UNDO) st.shift();
-    redoStacks[name] = [];
-    updateUndoButtons();
-  };
-  const applyRestore = (name, targetStack, otherStack) => {
-    (otherStack[name] || (otherStack[name] = [])).push(snapshot(name));
-    restoreSnapshot(name, targetStack[name].pop());
+  const applyRestore = (name, snap) => {
+    restoreSnapshot(name, snap);
     recomputeDirty();
     buildEditBar();                 // 편집 버튼 클로저가 새 model 참조를 캡처하도록 툴바 재생성
     renderEditable(name);
-    updateUndoButtons();
     try { sheet.focus({ preventScroll: true }); } catch(_){}
+  };
+  // 시트별 히스토리. ref.name 을 거치는 이유는 시트 이름이 바뀌어도 같은 기록을 이어 쓰기 위함.
+  const historyFor = (name) => {
+    let entry = histories.get(name);
+    if (!entry){
+      const ref = { name };
+      const h = MNEditHistory.create({
+        limit: MNEditHistory.LIMITS.sheet,
+        capture: () => snapshot(ref.name),
+        apply: (snap) => applyRestore(ref.name, snap),
+        isEqual: (a, b) => a.rev === b.rev,
+        onChange: () => updateUndoButtons(),
+      });
+      h.reset();
+      entry = { h, ref };
+      histories.set(name, entry);
+    }
+    return entry.h;
+  };
+  // 버튼 상태 확인용 — 아직 편집한 적 없는 시트에 히스토리(=스냅샷 복제)를 만들지 않는다.
+  const historyIfAny = (name) => { const e = histories.get(name); return e ? e.h : null; };
+  const hasPendingEdit = (name, h) => { const cur = h.current(); return !!cur && cur.rev !== (sheetRevs[name] || 0); };
+  const canUndoSheet = (name) => { const h = historyIfAny(name); return !!h && (h.canUndo() || hasPendingEdit(name, h)); };
+  const canRedoSheet = (name) => { const h = historyIfAny(name); return !!h && h.canRedo(); };
+  const updateUndoButtons = () => {
+    if (undoBtn) undoBtn.disabled = !canUndoSheet(currentSheet);
+    if (redoBtn) redoBtn.disabled = !canRedoSheet(currentSheet);
+  };
+  // 각 편집 직전 호출: 직전 상태를 확정하고, 앞쪽(redo) 갈래를 버리고, 이제부터의 변경을 '미기록'으로 표시
+  const pushUndo = (name) => {
+    const h = historyFor(name);
+    h.commit();
+    h.dropRedo();
+    sheetRevs[name] = (sheetRevs[name] || 0) + 1;
+    updateUndoButtons();
   };
   const doUndo = () => {
     const name = currentSheet;
-    if (!(undoStacks[name] || []).length){ toast("되돌릴 작업이 없어요.", 1400); return; }
-    applyRestore(name, undoStacks, redoStacks);
+    if (!canUndoSheet(name)){ toast("되돌릴 작업이 없어요.", 1400); return; }
+    historyFor(name).undo();        // 미기록 편집은 undo 안에서 한 단계로 확정된다
   };
   const doRedo = () => {
     const name = currentSheet;
-    if (!(redoStacks[name] || []).length){ toast("다시 실행할 작업이 없어요.", 1400); return; }
-    applyRestore(name, redoStacks, undoStacks);
+    if (!canRedoSheet(name)){ toast("다시 실행할 작업이 없어요.", 1400); return; }
+    historyFor(name).redo();
   };
   // 도구모음 버튼을 누르면 포커스가 표 밖으로 이동하므로, XLSX 탭 전체에서 히스토리 단축키를 받는다.
   // 단, 셀·검색창 등 텍스트 입력 중에는 브라우저 기본 undo/redo를 그대로 유지한다.
@@ -4954,9 +4982,12 @@ async function renderXlsx(file, host, doc){
   };
   // 시트 편집 모델·병합·변경추적을 새 이름으로 옮기는 공용 도우미
   const renameSheetState = (oldName, name) => {
-    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, colFiltersBySheet, condRulesBySheet, sheet.__sheetSizes || {}].forEach(obj => {
+    [exModels, exMerges, editedCells, styledCells, sheetRevs, colFiltersBySheet, condRulesBySheet, sheet.__sheetSizes || {}].forEach(obj => {
       if (obj && obj[oldName] !== undefined){ obj[name] = obj[oldName]; delete obj[oldName]; }
     });
+    // 히스토리는 Map 이라 따로 옮긴다. ref.name 도 같이 바꿔야 capture/apply 가 새 이름을 본다.
+    const entry = histories.get(oldName);
+    if (entry){ entry.ref.name = name; histories.delete(oldName); histories.set(name, entry); }
     if (structChanged.delete(oldName)) structChanged.add(name);
     if (sheetsWithFormula.delete(oldName)) sheetsWithFormula.add(name);
   };
@@ -5030,7 +5061,9 @@ async function renderXlsx(file, host, doc){
     if (!confirm("'" + name + "' 시트를 삭제할까요? 시트 삭제는 되돌리기(Ctrl+Z)가 되지 않아요.")) return;
     wb.SheetNames.splice(wb.SheetNames.indexOf(name), 1);
     delete wb.Sheets[name];
-    [exModels, exMerges, editedCells, styledCells, undoStacks, redoStacks, colFiltersBySheet].forEach(obj => { delete obj[name]; });
+    [exModels, exMerges, editedCells, styledCells, sheetRevs, colFiltersBySheet].forEach(obj => { delete obj[name]; });
+    const gone = histories.get(name);
+    if (gone){ gone.h.cancel(); histories.delete(name); }
     structChanged.delete(name); sheetsWithFormula.delete(name);
     if (!addedSheets.delete(name)) removedOrigSheets.add(sheetOrigNames.get(name) || name);
     sheetOrigNames.delete(name);
@@ -5073,7 +5106,7 @@ async function renderXlsx(file, host, doc){
         b.classList.remove("xlsx-tab-dragging");
         try { b.releasePointerCapture(pid); } catch(_){}
         const order = [...tabs.querySelectorAll(".xlsx-tab:not(.xlsx-tab-add)")].map(el => el.textContent);
-        const changed = order.join(" ") !== wb.SheetNames.join(" ");
+        const changed = order.join("\u0001") !== wb.SheetNames.join("\u0001");
         if (changed){
           wb.SheetNames.length = 0;
           wb.SheetNames.push(...order);

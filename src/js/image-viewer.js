@@ -415,8 +415,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     // 표시(주석): 출력 캔버스 픽셀 좌표로 저장 — 저장 시 renderForDisplay 가 함께 굽는다.
     shapes: [], annTool: null, annColor: "#ef4444", annWidth: 4, annDraft: null,
     annSelected: null, annMove: null,                       // 선택 도구: 선택된 표시와 이동 드래그 상태
-    jpgQuality: 90,
-    history: [], future: []
+    jpgQuality: 90
   };
   const wrap = document.createElement("div"); wrap.className = "img-editor";
   const bar = document.createElement("div"); bar.className = "img-tools";
@@ -495,28 +494,23 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     }
   };
   const shiftShapes = (dx, dy) => { mapShapePoints(p => ({ x: p.x + dx, y: p.y + dy })); };
-  const pushHistory = () => {
-    markImageDirty();
-    state.history.push(snapshot());
-    if (state.history.length > 50) state.history.shift();
-    state.future = [];
-    updateHistoryButtons();
-  };
-  const undoBtn = mkBtn("되돌리기", "이미지 편집 되돌리기", () => {
-    if (!state.history.length) return;
-    markImageDirty();
-    state.future.push(snapshot());
-    restoreSnapshot(state.history.pop());
+  const history = MNEditHistory.create({
+    limit: MNEditHistory.LIMITS.image,
+    capture: snapshot,
+    apply: restoreSnapshot,
+    // img 는 같은 이미지 객체면 같은 것으로 본다(자르기·확대는 새 이미지를 만든다). 나머지는 값 비교.
+    isEqual: (a, b) => a.img === b.img && a.rotation === b.rotation && a.flipX === b.flipX && a.flipY === b.flipY
+      && JSON.stringify(a.adjust) === JSON.stringify(b.adjust)
+      && JSON.stringify(a.shapes) === JSON.stringify(b.shapes),
+    onChange: () => updateHistoryButtons(),
   });
-  const redoBtn = mkBtn("다시", "이미지 편집 다시 실행", () => {
-    if (!state.future.length) return;
-    markImageDirty();
-    state.history.push(snapshot());
-    restoreSnapshot(state.future.pop());
-  });
+  // 편집을 마친 뒤 호출한다. 실제로 달라졌을 때만 한 단계로 기록된다.
+  const recordEdit = () => { if (history.commit()) markImageDirty(); };
+  const undoBtn = mkBtn("되돌리기", "이미지 편집 되돌리기", () => { if (history.undo()) markImageDirty(); });
+  const redoBtn = mkBtn("다시", "이미지 편집 다시 실행", () => { if (history.redo()) markImageDirty(); });
   const updateHistoryButtons = () => {
-    undoBtn.disabled = state.history.length === 0;
-    redoBtn.disabled = state.future.length === 0;
+    undoBtn.disabled = !history.canUndo();
+    redoBtn.disabled = !history.canRedo();
   };
   const syncCropUi = () => {
     cropRatioWrap.hidden = !state.cropMode;
@@ -544,12 +538,11 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     const crop = state.cropRect;
     const c = renderEditedImage(state, crop);
     const next = await imageFromDataUrl(c.toDataURL("image/png"));
-    pushHistory();
     shiftShapes(-Math.max(0, Math.floor(crop.x)), -Math.max(0, Math.floor(crop.y)));   // 표시 좌표를 잘린 기준으로 이동
     state.img = next; state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null; state.cropMode = false;
     cropBtn.classList.remove("active"); stage.classList.remove("crop-mode");
     syncCropUi();
-    redraw();
+    redraw(); recordEdit();
   });
   // 자르기 비율 프리셋 — 자르기 모드일 때만 표시
   const cropRatioWrap = document.createElement("span"); cropRatioWrap.className = "img-crop-ratios"; cropRatioWrap.hidden = true;
@@ -580,10 +573,10 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   bar.append(
     undoBtn,
     redoBtn,
-    mkBtn("↶", "왼쪽으로 90도 회전", () => { pushHistory(); transformShapesGeo("ccw"); state.rotation = (state.rotation + 270) % 360; state.cropRect = null; redraw(); }),
-    mkBtn("↷", "오른쪽으로 90도 회전", () => { pushHistory(); transformShapesGeo("cw"); state.rotation = (state.rotation + 90) % 360; state.cropRect = null; redraw(); }),
-    mkBtn("좌우", "좌우 뒤집기", () => { pushHistory(); transformShapesGeo("fx"); state.flipX = !state.flipX; state.cropRect = null; redraw(); }),
-    mkBtn("상하", "상하 뒤집기", () => { pushHistory(); transformShapesGeo("fy"); state.flipY = !state.flipY; state.cropRect = null; redraw(); }),
+    mkBtn("↶", "왼쪽으로 90도 회전", () => { transformShapesGeo("ccw"); state.rotation = (state.rotation + 270) % 360; state.cropRect = null; redraw(); recordEdit(); }),
+    mkBtn("↷", "오른쪽으로 90도 회전", () => { transformShapesGeo("cw"); state.rotation = (state.rotation + 90) % 360; state.cropRect = null; redraw(); recordEdit(); }),
+    mkBtn("좌우", "좌우 뒤집기", () => { transformShapesGeo("fx"); state.flipX = !state.flipX; state.cropRect = null; redraw(); recordEdit(); }),
+    mkBtn("상하", "상하 뒤집기", () => { transformShapesGeo("fy"); state.flipY = !state.flipY; state.cropRect = null; redraw(); recordEdit(); }),
     cropBtn,
     applyCropBtn,
     cropRatioWrap,
@@ -598,13 +591,11 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     mkBtn("맞춤", "화면에 맞추기", () => { state.zoom = null; redraw(); }),
     dimsLabel,
     mkBtn("초기화", "회전·뒤집기·자르기·표시·보정 모두 초기화", () => {
-      const a = state.adjust, adjusted = a.brightness !== 100 || a.contrast !== 100 || a.saturate !== 100 || a.sharpen || a.denoise;
-      if (state.rotation || state.flipX || state.flipY || state.cropRect || state.img !== img || adjusted || state.shapes.length) pushHistory();
       state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null; state.cropMode = false; state.zoom = null;
       state.adjust = { brightness:100, contrast:100, saturate:100, sharpen:0, denoise:0 };
       state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null;
       state.img = img;
-      cropBtn.classList.remove("active"); stage.classList.remove("crop-mode"); syncCropUi(); syncAdjustUI(); redraw();
+      cropBtn.classList.remove("active"); stage.classList.remove("crop-mode"); syncCropUi(); syncAdjustUI(); redraw(); recordEdit();
     })
   );
 
@@ -619,23 +610,15 @@ function setupImageEditor(file, host, img, ownerDoc=null){
       r.input.value = v; r.val.textContent = r.pct ? v + "%" : String(v);
     }
   };
-  let adjustPre = null;                                   // 슬라이더 드래그 시작 직전 스냅샷(드래그 1회 = 되돌리기 1단계)
-  const beginAdjust = () => { if (!adjustPre) adjustPre = snapshot(); };
-  const commitAdjust = () => {
-    if (!adjustPre) return;
-    markImageDirty();
-    state.history.push(adjustPre);
-    if (state.history.length > 50) state.history.shift();
-    state.future = []; updateHistoryButtons(); adjustPre = null;
-  };
+  // 슬라이더는 드래그 중 값을 실시간으로 바꾸고 끝(change)에서 한 단계로 기록한다.
+  // 직전 상태는 이미 히스토리의 현재 단계라, 따로 미리 떠 둘 필요가 없다.
+  const commitAdjust = () => recordEdit();
   const mkSlider = (label, key, min, max, pct) => {
     const row = document.createElement("label"); row.className = "img-adj-row";
     const name = document.createElement("span"); name.className = "img-adj-name"; name.textContent = label;
     const input = document.createElement("input"); input.type = "range"; input.min = min; input.max = max; input.step = 1; input.value = state.adjust[key];
     const val = document.createElement("span"); val.className = "img-adj-val"; val.textContent = pct ? state.adjust[key] + "%" : String(state.adjust[key]);
     sliderRefs[key] = { input, val, pct };
-    input.addEventListener("pointerdown", beginAdjust);
-    input.addEventListener("keydown", beginAdjust);
     input.addEventListener("input", () => { state.adjust[key] = Number(input.value); val.textContent = pct ? input.value + "%" : input.value; scheduleRedraw(); });
     input.addEventListener("change", commitAdjust);
     row.append(name, input, val);
@@ -646,19 +629,17 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     const base = renderEditedImage(state);                // 기하변형만 적용된 베이스(보정은 라이브 유지)
     const nw = Math.round(base.width * factor), nh = Math.round(base.height * factor);
     if (Math.max(nw, nh) > 6000 || nw * nh > 24e6){ toast("너무 커집니다(최대 6000px). 더 작은 배율을 쓰세요.", 3000); return; }
-    pushHistory();
     const c = (factor >= 4) ? drawScaled(drawScaled(base, base.width * 2, base.height * 2), nw, nh) : drawScaled(base, nw, nh);   // 4x는 2단계로(품질↑)
     imageFromDataUrl(c.toDataURL("image/png")).then(im => {
       scaleShapes(nw / base.width);
       state.img = im; state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null;
-      redraw(); toast(factor + "x 확대 완료 (" + nw + "×" + nh + ")", 2200);
+      redraw(); recordEdit(); toast(factor + "x 확대 완료 (" + nw + "×" + nh + ")", 2200);
     });
   }
   function downscaleCurrent(factor){
     const base = renderEditedImage(state);
     const nw = Math.round(base.width * factor), nh = Math.round(base.height * factor);
     if (Math.min(nw, nh) < 16){ toast("너무 작아집니다(최소 16px). 더 큰 배율을 쓰세요.", 2400); return; }
-    pushHistory();
     let cur = base;                                       // 큰 폭 축소는 절반씩 줄여 품질을 지킨다
     while (cur.width / nw >= 2 && cur.height / nh >= 2)
       cur = drawScaled(cur, Math.max(nw, Math.round(cur.width / 2)), Math.max(nh, Math.round(cur.height / 2)));
@@ -666,21 +647,19 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     imageFromDataUrl(c.toDataURL("image/png")).then(im => {
       scaleShapes(nw / base.width);
       state.img = im; state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null;
-      redraw(); toast("크기 조절 완료 (" + nw + "×" + nh + ")", 2200, { type: "success" });
+      redraw(); recordEdit(); toast("크기 조절 완료 (" + nw + "×" + nh + ")", 2200, { type: "success" });
     });
   }
   const autoBtn = mkBtn("✨ 자동보정", "밝기·대비를 자동으로 맞추고 약하게 선명화", () => {
     const lv = computeAutoLevels(renderEditedImage(state));
-    pushHistory();
     state.adjust.brightness = lv.brightness; state.adjust.contrast = lv.contrast;
     state.adjust.sharpen = Math.max(state.adjust.sharpen, 25);
-    syncAdjustUI(); redraw();
+    syncAdjustUI(); redraw(); recordEdit();
     toast("자동 보정 적용 — 슬라이더로 미세조정할 수 있어요", 2400);
   }, "img-adj-auto");
   const resetAdjBtn = mkBtn("보정 초기화", "밝기·대비·채도·선명도·노이즈를 기본값으로", () => {
-    pushHistory();
     state.adjust = { brightness:100, contrast:100, saturate:100, sharpen:0, denoise:0 };
-    syncAdjustUI(); redraw();
+    syncAdjustUI(); redraw(); recordEdit();
   });
   const upWrap = document.createElement("span"); upWrap.className = "img-adj-row";
   const upLabel = document.createElement("span"); upLabel.className = "img-adj-name"; upLabel.textContent = "고화질 확대";
@@ -755,7 +734,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   annWidthRow.append(annWidthName, annWidthInput, annWidthVal);
   const annClearBtn = mkBtn("모두 지우기", "모든 표시를 지우기 (되돌리기 버튼으로 복구 가능)", () => {
     if (!state.shapes.length) return;
-    pushHistory(); state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null; redraw();
+    state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null; redraw(); recordEdit();
   });
   const annHint = document.createElement("span"); annHint.className = "img-ann-hint";
   annHint.textContent = "드래그해 표시 · 텍스트는 클릭해 입력(넣은 뒤 바로 드래그로 이동) · 🖱 선택: 클릭해 잡고 드래그로 이동, Delete 삭제, 텍스트 더블클릭 수정";
@@ -845,12 +824,11 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   const addTextAt = async (p) => {
     const typed = await askText({ title: "텍스트 넣기", message: "이미지에 넣을 글자를 입력하세요.", placeholder: "예: 여기 확인!", okText: "넣기" });
     if (typed === null || !String(typed).trim()) return;
-    pushHistory();
     const shape = { kind: "text", color: state.annColor, size: Math.round(14 + state.annWidth * 5), x: p.x, y: p.y, text: String(typed).trim() };
     state.shapes.push(shape);
     if (state.annTool !== "select") setAnnTool("select");  // 넣자마자 선택 도구로 전환 → 바로 드래그로 위치 조정
     state.annSelected = shape;
-    redraw();
+    redraw(); recordEdit();
     toast("텍스트를 넣었어요. 드래그로 위치를 옮길 수 있어요.", 2000);
   };
   const finishAnnDraft = () => {
@@ -861,8 +839,8 @@ function setupImageEditor(file, host, img, ownerDoc=null){
         ? Math.hypot(d.points[1].x - d.points[0].x, d.points[1].y - d.points[0].y) >= 6
         : d.points.length >= 2)
       : (d.w >= 4 && d.h >= 4);
-    if (ok){ delete d._ax; delete d._ay; pushHistory(); state.shapes.push(d); }
-    redraw();
+    if (ok){ delete d._ax; delete d._ay; state.shapes.push(d); }
+    redraw(); if (ok) recordEdit();
   };
   canvas.addEventListener("pointerdown", (e) => {
     if (!state.output) return;
@@ -907,7 +885,6 @@ function setupImageEditor(file, host, img, ownerDoc=null){
       const dx = p.x - state.annMove.start.x, dy = p.y - state.annMove.start.y;
       if (!state.annMove.moved){
         if (Math.abs(dx) + Math.abs(dy) < 2) return;       // 짧은 클릭은 이동으로 치지 않음
-        pushHistory();                                     // 이동 1회 = 되돌리기 1단계(원본 좌표 기준)
         state.annMove.moved = true;
       }
       const s = state.annSelected, o = state.annMove.orig;
@@ -930,7 +907,13 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     }
     scheduleRedraw();
   });
-  canvas.addEventListener("pointerup", () => { state.dragStart = null; state.annMove = null; finishAnnDraft(); });
+  canvas.addEventListener("pointerup", () => {
+    state.dragStart = null;
+    const moved = !!(state.annMove && state.annMove.moved);
+    state.annMove = null;
+    finishAnnDraft();
+    if (moved) recordEdit();                               // 드래그 이동 1회 = 되돌리기 1단계
+  });
   canvas.addEventListener("pointercancel", () => { state.dragStart = null; state.annDraft = null; state.annMove = null; redraw(); });
   canvas.addEventListener("click", () => {
     if (state.cropMode || state.annTool) return;
@@ -944,10 +927,9 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     const typed = await askText({ title: "텍스트 수정", message: "내용을 고쳐 쓰세요. 비우고 확인하면 삭제됩니다.", value: s.text, okText: "수정" });
     if (typed === null) return;
     const next = String(typed).trim();
-    pushHistory();
     if (next){ s.text = next; state.annSelected = s; }
     else { state.shapes = state.shapes.filter(x => x !== s); state.annSelected = null; }
-    redraw();
+    redraw(); recordEdit();
   });
 
   // ===== 자르기 상자 이동·모서리 핸들 리사이즈 =====
@@ -1057,10 +1039,9 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     }
     if ((e.key === "Delete" || e.key === "Backspace") && state.annSelected){
       e.preventDefault(); e.stopPropagation();
-      pushHistory();
       state.shapes = state.shapes.filter(s => s !== state.annSelected);
       state.annSelected = null; state.annMove = null;
-      redraw();
+      redraw(); recordEdit();
     } else if (e.key === "Escape" && state.annSelected){   // 선택만 해제(전역 Esc 동작은 그대로 진행)
       state.annSelected = null; state.annMove = null;
       redraw();
@@ -1070,6 +1051,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
 
   if (typeof ResizeObserver !== "undefined") new ResizeObserver(updateCropBox).observe(canvas);
   redraw();
+  history.reset();                                         // 연 직후 상태를 되돌리기 기준점으로
 }
 
 // 점 p 와 선분 a–b 사이 거리(펜·화살표 히트테스트용)

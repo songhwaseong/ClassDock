@@ -24,8 +24,7 @@ function notebookModeEnabled(){
 const NOTEBOOK_RECOVERY_DB = "manneung-notebook-recovery";
 const NOTEBOOK_RECOVERY_STORE = "drafts";
 const NOTEBOOK_RECOVERY_MAX_TEXT = 20 * 1024 * 1024;
-const NOTEBOOK_HISTORY_MAX_ENTRIES = 24;
-const NOTEBOOK_HISTORY_MAX_TEXT = 12 * 1024 * 1024;
+const NOTEBOOK_HISTORY_MAX_TEXT = 12 * 1024 * 1024;   // 단계 수 상한은 MNEditHistory.LIMITS.notebook
 const NOTEBOOK_AUTOSAVE_DELAY = 3000;
 
 function notebookRecoveryKey(ownerDoc){
@@ -186,8 +185,7 @@ async function notebookRunAutosave(ownerDoc){
         console.warn("notebook autosave workspace refresh skipped:", error);
       }
     }
-    ownerDoc.hasUnsavedEdits = modelToIpynb(ownerDoc.notebookModel) !== text;
-    if (typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
+    markDocumentDirty(ownerDoc, modelToIpynb(ownerDoc.notebookModel) !== text);
     notebookSetAutosaveState(ownerDoc, ownerDoc.hasUnsavedEdits ? "" : "saved");
     nbSetStatus(ownerDoc, ownerDoc.hasUnsavedEdits ? "편집 내용 자동 저장 대기 중…" : "자동 저장됨");
     if (!ownerDoc.hasUnsavedEdits) await notebookDeleteRecovery(ownerDoc);
@@ -220,31 +218,68 @@ function notebookHistorySnapshot(ownerDoc){
   return modelToIpynb(ownerDoc.notebookModel);
 }
 
-function notebookTrimHistory(stack){
-  while (stack.length > NOTEBOOK_HISTORY_MAX_ENTRIES) stack.shift();
-  let total = stack.reduce((sum, entry) => sum + entry.text.length, 0);
-  while (stack.length > 1 && total > NOTEBOOK_HISTORY_MAX_TEXT){
-    total -= stack[0].text.length;
-    stack.shift();
+// 셀 작업 되돌리기(공용 history.js). 표와 마찬가지로 편집 "직전"에 기록하므로
+// 리비전 번호로 같음을 판정하고(스냅샷이 ipynb 전체라 문자열 비교도 비싸다),
+// dropRedo() 로 새 작업이 시작된 순간 앞쪽 갈래를 버린다.
+// 단계 하나에 실행 결과·이미지까지 들어가 크기가 들쭉날쭉하므로 총량 상한도 함께 건다.
+function nbHistoryFor(ownerDoc){
+  if (!ownerDoc._nbHistory){
+    ownerDoc._nbHistory = MNEditHistory.create({
+      limit: MNEditHistory.LIMITS.notebook,
+      maxBytes: NOTEBOOK_HISTORY_MAX_TEXT,
+      sizeOf: (entry) => entry.text.length,
+      capture: () => ({
+        text: notebookHistorySnapshot(ownerDoc),
+        rev: ownerDoc._nbRev || 0,
+        label: ownerDoc._nbPendingLabel || "셀 작업"
+      }),
+      apply: (entry) => {
+        let model;
+        try { model = ipynbToModel(entry.text); }
+        catch(error){ console.error(error); return; }
+        ownerDoc._nbRev = entry.rev || 0;             // 리비전도 되돌려야 '미기록 작업 있음'을 오판하지 않는다
+        ownerDoc._nbHistoryRestoring = true;          // 되돌리는 중 자동저장·재기록이 끼어들지 않게
+        try { nbReplaceNotebookModel(ownerDoc, model, { dirty:true }); }
+        finally { ownerDoc._nbHistoryRestoring = false; }
+      },
+      isEqual: (a, b) => a.rev === b.rev,
+      onChange: () => nbUpdateHistoryButtons(ownerDoc),
+    });
+    ownerDoc._nbHistory.reset();
   }
+  return ownerDoc._nbHistory;
+}
+
+// 아직 기록되지 않은 마지막 작업이 있는지 — 되돌리기 버튼 상태용(스냅샷을 뜨지 않는다).
+function nbHasPendingEdit(ownerDoc){
+  const h = ownerDoc && ownerDoc._nbHistory;
+  const cur = h && h.current();
+  return !!cur && cur.rev !== (ownerDoc._nbRev || 0);
+}
+function nbCanUndo(ownerDoc){
+  const h = ownerDoc && ownerDoc._nbHistory;
+  return !!h && (h.canUndo() || nbHasPendingEdit(ownerDoc));
+}
+function nbCanRedo(ownerDoc){
+  const h = ownerDoc && ownerDoc._nbHistory;
+  return !!h && h.canRedo();
 }
 
 function nbUpdateHistoryButtons(ownerDoc){
   if (!ownerDoc) return;
-  if (ownerDoc._nbUndoBtn) ownerDoc._nbUndoBtn.disabled = !(ownerDoc._nbUndoStack && ownerDoc._nbUndoStack.length);
-  if (ownerDoc._nbRedoBtn) ownerDoc._nbRedoBtn.disabled = !(ownerDoc._nbRedoStack && ownerDoc._nbRedoStack.length);
+  if (ownerDoc._nbUndoBtn) ownerDoc._nbUndoBtn.disabled = !nbCanUndo(ownerDoc);
+  if (ownerDoc._nbRedoBtn) ownerDoc._nbRedoBtn.disabled = !nbCanRedo(ownerDoc);
 }
 
+// 각 셀 작업 직전 호출: 직전 상태를 확정하고, 앞쪽 갈래를 버리고, 이번 작업 이름을 기억한다.
 function nbPushHistory(ownerDoc, label){
   if (!ownerDoc || ownerDoc._nbHistoryRestoring) return;
-  const text = notebookHistorySnapshot(ownerDoc);
-  if (!text) return;
-  if (!Array.isArray(ownerDoc._nbUndoStack)) ownerDoc._nbUndoStack = [];
-  if (!Array.isArray(ownerDoc._nbRedoStack)) ownerDoc._nbRedoStack = [];
-  const last = ownerDoc._nbUndoStack[ownerDoc._nbUndoStack.length - 1];
-  if (!last || last.text !== text) ownerDoc._nbUndoStack.push({ text, label:String(label || "셀 작업") });
-  ownerDoc._nbRedoStack.length = 0;
-  notebookTrimHistory(ownerDoc._nbUndoStack);
+  if (!ownerDoc.notebookModel) return;
+  const h = nbHistoryFor(ownerDoc);
+  h.commit();
+  h.dropRedo();
+  ownerDoc._nbRev = (ownerDoc._nbRev || 0) + 1;
+  ownerDoc._nbPendingLabel = String(label || "셀 작업");
   nbUpdateHistoryButtons(ownerDoc);
 }
 

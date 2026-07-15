@@ -1025,7 +1025,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         diag.title = d.level === "ok" ? "구조 검사를 통과했어요." : d.text;
       };
       const scheduleDiagnostic = () => { clearTimeout(diagTimer); diagTimer = setTimeout(runDiagnostic, 300); };
-      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; if (ownerDoc){ ownerDoc.hasUnsavedEdits = dirty; updateDocumentStatus(ownerDoc); } scheduleTextDraft(); scheduleDiagnostic(); };
+      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; markDocumentDirty(ownerDoc, dirty); scheduleTextDraft(); scheduleDiagnostic(); };
       editor.ta.addEventListener("input", markDirty);
       runDiagnostic();                                        // 편집 진입 시 1회 즉시 진단
       editor.ta.addEventListener("keydown", (e) => {
@@ -1035,7 +1035,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       });
       saveBtn.addEventListener("click", async () => {
         saveBtn.disabled = true;
-        try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; if (ownerDoc){ ownerDoc.hasUnsavedEdits = false; updateDocumentStatus(ownerDoc); } persistTextDraft(); } }
+        try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; markDocumentDirty(ownerDoc, false); persistTextDraft(); } }
         finally { saveBtn.disabled = false; }
       });
       viewBtn.addEventListener("click", () => { currentText = editor.getValue(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
@@ -1106,7 +1106,7 @@ async function renderCode(file, host, ext, profile, runCtx){
 
     if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(teardownActive); }
     if (restoredTextDraft !== null){              // 저장하지 않은 편집 초안 복구 → 편집 화면으로 열어 바로 보이게
-      if (ownerDoc){ ownerDoc.hasUnsavedEdits = true; updateDocumentStatus(ownerDoc); }
+      markDocumentDirty(ownerDoc);
       showEdit();
       toast("저장하지 않은 편집 내용을 복구했어요.", 2600);
     }
@@ -1599,9 +1599,8 @@ async function renderCode(file, host, ext, profile, runCtx){
           }
           savedValue = value;
           clearPythonDraft(draftKey);
-          if (ownerDoc) ownerDoc.hasUnsavedEdits = (editor.getValue() !== savedValue);
-          if (ownerDoc) updateDocumentStatus(ownerDoc);
-          renderSidebar();
+          markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
+          renderSidebar();                         // 저장으로 ✓ 표시·이름도 바뀌므로 dirty 변화와 무관하게 갱신
           setSavedPath(savedPath);                 // 편집기 위 경로 줄에 절대경로 고정 표시
           const originalUnavailableNotice = "이 폴더는 원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요. 원본에 저장하려면 '폴더 열기'로 다시 여세요.";
           const savedNotice = fromFolder && !saveToOriginal
@@ -1655,9 +1654,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       }
       savedValue = value;
       clearPythonDraft(draftKey);
-      if (ownerDoc) ownerDoc.hasUnsavedEdits = (editor.getValue() !== savedValue);
-      if (ownerDoc) updateDocumentStatus(ownerDoc);
-      renderSidebar();
+      markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
+      renderSidebar();                         // 저장으로 ✓ 표시·이름도 바뀌므로 dirty 변화와 무관하게 갱신
       // 폴백 환경(브라우저)은 보안상 절대경로를 알 수 없어 파일명만 표시
       setSavedPath(wrote === "saved" && ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.name
         ? ownerDoc.fsHandle.name : ((ownerDoc && ownerDoc.name) || name));
@@ -1790,10 +1788,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   };
   const refreshEditState = () => {
     revertBtn.disabled = (editor.getValue() === text);
-    const wasDirty = !!(ownerDoc && ownerDoc.hasUnsavedEdits);
-    if (ownerDoc) ownerDoc.hasUnsavedEdits = (editor.getValue() !== savedValue);
-    if (ownerDoc) updateDocumentStatus(ownerDoc);
-    if (ownerDoc && wasDirty !== ownerDoc.hasUnsavedEdits) renderSidebar();
+    markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
     inputWrap.hidden = (_pyBackend === true) ? true : !usesInput(editor.getValue());
     if (!inputWrap.hidden) renderInputFields();
     clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 500);

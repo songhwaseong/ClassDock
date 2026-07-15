@@ -127,8 +127,11 @@ function wire(){
 
   // 모든 편집 문서는 hasUnsavedEdits 를 공통으로 사용한다. PDF는 자체 복구본을
   // 저장하므로 이 플래그를 쓰지 않고, 표·이미지·화이트보드도 여기서 경고한다.
+  // 단, 자동 저장·복원이 꺼져 있으면 PDF 편집을 되살릴 수단이 없으므로 함께 경고한다.
   let suppressUnloadWarn = false;
-  const hasUnsavedEdits = () => docs.some(d => d.hasUnsavedEdits);
+  const pdfEditsAtRisk = (d) => d.kind === "pdf" && !appSettings.pdfRecovery
+    && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d);
+  const hasUnsavedEdits = () => docs.some(d => d.hasUnsavedEdits || pdfEditsAtRisk(d));
   window.addEventListener("keydown", (e) => {
     const isReload = e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
     if (!isReload) return;

@@ -1197,8 +1197,7 @@ function nbReplaceNotebookModel(ownerDoc, model, options={}){
   host.innerHTML = "";
   ownerDoc.notebookModel = model;
   renderNotebookView(model, host, ownerDoc);
-  ownerDoc.hasUnsavedEdits = options.dirty !== false;
-  if (typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
+  markDocumentDirty(ownerDoc, options.dirty !== false);
   updateNbSaveButton(ownerDoc, ownerDoc._nbSaveBtn);
   if (options.status) nbSetStatus(ownerDoc, options.status);
   return true;
@@ -1206,25 +1205,15 @@ function nbReplaceNotebookModel(ownerDoc, model, options={}){
 
 function nbRestoreHistory(ownerDoc, direction){
   if (!ownerDoc || ownerDoc._nbHistoryRestoring) return false;
-  const undo = ownerDoc._nbUndoStack || (ownerDoc._nbUndoStack = []);
-  const redo = ownerDoc._nbRedoStack || (ownerDoc._nbRedoStack = []);
-  const source = direction === "redo" ? redo : undo;
-  const targetStack = direction === "redo" ? undo : redo;
-  if (!source.length) return false;
-  const current = notebookHistorySnapshot(ownerDoc);
-  const entry = source.pop();
-  let model;
-  try { model = ipynbToModel(entry.text); }
-  catch(error){ console.error(error); return false; }
-  if (current) targetStack.push({ text:current, label:entry.label });
-  notebookTrimHistory(targetStack);
-  ownerDoc._nbHistoryRestoring = true;
-  nbReplaceNotebookModel(ownerDoc, model, {
-    dirty:true,
-    status:(direction === "redo" ? "다시 실행: " : "되돌림: ") + entry.label
-  });
-  ownerDoc._nbHistoryRestoring = false;
-  nbUpdateHistoryButtons(ownerDoc);
+  const redoing = direction === "redo";
+  if (redoing ? !nbCanRedo(ownerDoc) : !nbCanUndo(ownerDoc)) return false;
+  const h = nbHistoryFor(ownerDoc);
+  if (!(redoing ? h.redo() : h.undo())) return false;   // 미기록 작업은 undo 안에서 한 단계로 확정된다
+  // 작업 이름은 항상 "위쪽" 단계에 붙어 있다. 되돌리면 방금 떠난 단계(peekRedo),
+  // 다시 실행하면 방금 들어간 단계(current).
+  const entry = redoing ? h.current() : h.peekRedo();
+  const label = (entry && entry.label) || "셀 작업";
+  nbSetStatus(ownerDoc, (redoing ? "다시 실행: " : "되돌림: ") + label);
   notebookScheduleRecovery(ownerDoc);
   return true;
 }

@@ -412,41 +412,36 @@ function buildCodeEditor(text, prof, options={}){
   /* ===== Undo/Redo 히스토리 =====
      열 편집·Tab·Enter 자동들여쓰기는 ta.value 를 직접 바꿔 textarea 네이티브 undo 를 깨뜨린다.
      그래서 에디터 전체를 자체 스냅샷 스택으로 되돌린다(연속 입력은 350ms 로 한 단계로 묶음). */
-  let history = [{ value: ta.value, s: 0, e: 0 }];
-  let hindex = 0, applyingHistory = false, coalesceTimer = 0;
-  const HISTORY_MAX = 300;
   const snapshot = () => ({ value: ta.value, s: ta.selectionStart, e: ta.selectionEnd });
+  const history = MNEditHistory.create({
+    limit: MNEditHistory.LIMITS.text,
+    capture: snapshot,
+    apply: (st) => {
+      ta.value = st.value;
+      ta.selectionStart = st.s; ta.selectionEnd = st.e;
+      emitInput();                     // 하이라이트·스크롤·외부 편집상태 갱신(되돌리는 중이라 재기록은 안 된다)
+    },
+    isEqual: (a, b) => a.value === b.value,   // 커서만 다른 건 새 단계가 아니다
+  });
+  history.reset();
+  let coalesceTimer = 0;
   const rememberHistoryCaret = () => {
-    if (applyingHistory || !history[hindex]) return;
-    history[hindex] = editorHistoryCaretState(history[hindex], ta.value, ta.selectionStart, ta.selectionEnd);
+    const cur = history.isApplying() ? null : history.current();
+    if (cur) history.replaceCurrent(editorHistoryCaretState(cur, ta.value, ta.selectionStart, ta.selectionEnd));
   };
   const commitNow = () => {
-    if (applyingHistory) return;
-    const st = snapshot();
-    if (history[hindex] && history[hindex].value === st.value){ history[hindex] = st; return; }  // 값 동일 → 커서만 갱신
-    history = history.slice(0, hindex + 1);
-    history.push(st);
-    if (history.length > HISTORY_MAX) history.shift();
-    hindex = history.length - 1;
+    if (history.isApplying()) return;
+    if (!history.commit()) history.replaceCurrent(snapshot());   // 값 동일 → 커서만 갱신
   };
-  const commitSoon = () => { if (applyingHistory) return; clearTimeout(coalesceTimer); coalesceTimer = setTimeout(commitNow, 350); };
-  const applyState = (st) => {
-    applyingHistory = true;
-    ta.value = st.value;
-    ta.selectionStart = st.s; ta.selectionEnd = st.e;
-    emitInput();                       // 하이라이트·스크롤·외부 편집상태 갱신(applyingHistory 라 재기록은 안 함)
-    applyingHistory = false;
-  };
+  // 연속 입력 묶기는 여기서 직접 한다 — 묶임이 풀릴 때 커서만 갱신하는 위 동작이 필요해서.
+  const commitSoon = () => { if (history.isApplying()) return; clearTimeout(coalesceTimer); coalesceTimer = setTimeout(commitNow, 350); };
   const undo = () => {
     clearTimeout(coalesceTimer);
-    if (history[hindex].value !== ta.value) commitNow();   // 대기 중 입력을 먼저 한 단계로 확정(되돌린 뒤 redo 가능)
-    if (hindex <= 0) return;
-    hindex--; applyState(history[hindex]);
+    history.undo();                    // 대기 중 입력은 undo 안에서 한 단계로 확정된다
   };
   const redo = () => {
     clearTimeout(coalesceTimer);
-    if (hindex >= history.length - 1) return;
-    hindex++; applyState(history[hindex]);
+    history.redo();
   };
   const completion = { items: [], index: 0, start: 0, end: 0, manual: false };
   let completionTimer = 0;
@@ -1232,7 +1227,7 @@ function buildCodeEditor(text, prof, options={}){
     refresh(); sync(); clearError(); clearTraceLine();
     schedulePinRender();                                // 줄이 추가/삭제되면 핀 마커 줄 위치 재확정(앵커 기반)
     if (linkedEdit.active) renderLinkedEditRanges(); else clearWordHi();
-    clearDefinitionHover(); if (!applyingHistory) commitSoon();
+    clearDefinitionHover(); if (!history.isApplying()) commitSoon();
     if (findOpen && !findApplying) recomputeFind(false);   // 본문이 바뀌면 매치·개수 갱신(커서는 유지)
     // 입력·삭제·붙여넣기 때 자동완성 갱신. 프로그램이 발생시킨 input은 제외한다.
     if (!linkedEdit.active && typeof InputEvent !== "undefined" && e instanceof InputEvent && e.isTrusted &&

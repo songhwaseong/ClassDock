@@ -1020,9 +1020,8 @@ function fitEditorHeight(ed){
 
 function markNbDirty(ownerDoc){
   if (!ownerDoc) return;
-  ownerDoc.hasUnsavedEdits = true;
   notebookSetAutosaveState(ownerDoc, "");
-  if (typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
+  markDocumentDirty(ownerDoc);
   updateNbSaveButton(ownerDoc, ownerDoc._nbSaveBtn);
   nbScheduleExecutionStateRefresh(ownerDoc);
   notebookScheduleRecovery(ownerDoc);
@@ -1075,9 +1074,9 @@ async function saveNotebook(ownerDoc){
         ownerDoc.savedInWorkspace = false;
       }
     }
-    ownerDoc.hasUnsavedEdits = modelToIpynb(ownerDoc.notebookModel) !== text;
-    if (typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
+    markDocumentDirty(ownerDoc, modelToIpynb(ownerDoc.notebookModel) !== text);
     updateNbSaveButton(ownerDoc, ownerDoc._nbSaveBtn);
+    // 저장 위치가 새로 작업공간에 반영되면 dirty 상태가 그대로여도 ✓ 표시를 갱신해야 한다.
     if (typeof renderSidebar === "function") renderSidebar();
     await notebookDeleteRecovery(ownerDoc);
   }

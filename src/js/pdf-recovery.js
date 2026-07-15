@@ -96,9 +96,28 @@ function schedulePdfRecovery(doc=state){
 
 function initPdfHistory(doc){
   if (!doc || doc.kind !== "pdf") return;
-  const snapshot = snapshotPdfState(doc);
-  doc.pdfHistory = [{ snapshot, json: JSON.stringify(snapshot) }];
-  doc.pdfHistoryIndex = 0;
+  // 스냅샷은 JSON 문자열로만 들고 있는다. 객체와 문자열을 함께 보관하던 옛 방식은
+  // 서명 이미지(base64)를 단계마다 두 벌씩 쥐고 있어 메모리를 두 배로 썼다.
+  doc.pdfHistory = MNEditHistory.create({
+    limit: MNEditHistory.LIMITS.pdf,
+    capture: () => JSON.stringify(snapshotPdfState(doc)),
+    apply: (json) => applyPdfHistory(doc, JSON.parse(json)),
+    isEqual: (a, b) => a === b,                 // 스냅샷이 문자열이라 그대로 비교
+  });
+  doc.pdfHistory.reset();
+  // 히스토리는 상한을 넘으면 앞에서부터 버리므로 기준점은 따로 들고 있는다.
+  doc.pdfBaselineJson = doc.pdfHistory.current();
+}
+
+// PDF는 hasUnsavedEdits 대신 이 함수로 "잃으면 안 되는 편집"을 판단한다.
+// 주석·서명(elements)뿐 아니라 페이지 재정렬·회전·삭제와 목차 편집까지 포함하려고
+// 복구본이 추적하는 것과 같은 스냅샷을 문서를 연 직후 상태와 비교한다.
+function pdfHasPendingEdits(doc){
+  if (!doc || doc.kind !== "pdf") return false;
+  if (doc.elements && doc.elements.length) return true;
+  if (!doc.pdfBaselineJson) return false;
+  try { return JSON.stringify(snapshotPdfState(doc)) !== doc.pdfBaselineJson; }
+  catch(e){ console.warn("PDF 편집 여부 확인 실패:", e); return false; }
 }
 
 function snapshotPdfState(doc){
@@ -111,58 +130,43 @@ function snapshotPdfState(doc){
 
 function commitPdfHistory(doc){
   if (!doc || doc.kind !== "pdf" || doc._restoringRecovery || doc._applyingHistory) return;
-  clearTimeout(doc.pdfHistoryTimer);
-  doc.pdfHistoryTimer = null;
   if (!doc.pdfHistory) initPdfHistory(doc);
-  const snapshot = snapshotPdfState(doc);
-  const json = JSON.stringify(snapshot);
-  const current = doc.pdfHistory[doc.pdfHistoryIndex];
-  if (current && current.json === json) return;
-  doc.pdfHistory.splice(doc.pdfHistoryIndex + 1);
-  doc.pdfHistory.push({ snapshot, json });
-  if (doc.pdfHistory.length > 50) doc.pdfHistory.shift();
-  doc.pdfHistoryIndex = doc.pdfHistory.length - 1;
+  doc.pdfHistory.commit();
 }
 
 function recordPdfEdit(doc=state, delay=0){
   if (!doc || doc.kind !== "pdf" || doc._restoringRecovery || doc._applyingHistory) return;
   schedulePdfRecovery(doc);
-  clearTimeout(doc.pdfHistoryTimer);
-  if (delay > 0) doc.pdfHistoryTimer = setTimeout(() => commitPdfHistory(doc), delay);
-  else commitPdfHistory(doc);
+  if (!doc.pdfHistory) initPdfHistory(doc);
+  if (delay > 0) doc.pdfHistory.commitSoon(delay);
+  else doc.pdfHistory.commit();
   if (typeof refreshCodePinMarkers === "function") refreshCodePinMarkers();   // 핀 추가·이동·삭제 → 코드 거터 마커 갱신
 }
 
-function applyPdfHistory(doc, entry){
-  if (!doc || !entry) return;
-  doc._applyingHistory = true;
+function applyPdfHistory(doc, snapshot){
+  if (!doc || !snapshot) return;
+  doc._applyingHistory = true;             // 복구 저장·재기록이 이 복원을 새 편집으로 오해하지 않게
   try {
     selectEl(null);
     for (const item of doc.elements || []) item.el.remove();
     doc.elements = [];
-    restorePdfPageState(doc, entry.snapshot.pages);
-    if (Array.isArray(entry.snapshot.outline) && typeof restorePdfOutlineState === "function") restorePdfOutlineState(doc, entry.snapshot.outline);
-    hydratePdfElements(doc, entry.snapshot.elements);
+    restorePdfPageState(doc, snapshot.pages);
+    if (Array.isArray(snapshot.outline) && typeof restorePdfOutlineState === "function") restorePdfOutlineState(doc, snapshot.outline);
+    hydratePdfElements(doc, snapshot.elements);
   } finally { doc._applyingHistory = false; }
   schedulePdfRecovery(doc);
 }
 
 function undoPdfEdit(doc=state){
-  if (!doc || doc.kind !== "pdf") return false;
-  if (doc.pdfHistoryTimer) commitPdfHistory(doc);
-  if (!doc.pdfHistory || doc.pdfHistoryIndex <= 0){ toast("되돌릴 작업이 없어요.", 1500); return false; }
-  doc.pdfHistoryIndex--;
-  applyPdfHistory(doc, doc.pdfHistory[doc.pdfHistoryIndex]);
+  if (!doc || doc.kind !== "pdf" || !doc.pdfHistory) return false;
+  if (!doc.pdfHistory.undo()){ toast("되돌릴 작업이 없어요.", 1500); return false; }
   toast("편집 작업을 되돌렸어요.", 1200);
   return true;
 }
 
 function redoPdfEdit(doc=state){
-  if (!doc || doc.kind !== "pdf") return false;
-  if (doc.pdfHistoryTimer) commitPdfHistory(doc);
-  if (!doc.pdfHistory || doc.pdfHistoryIndex >= doc.pdfHistory.length - 1){ toast("다시 실행할 작업이 없어요.", 1500); return false; }
-  doc.pdfHistoryIndex++;
-  applyPdfHistory(doc, doc.pdfHistory[doc.pdfHistoryIndex]);
+  if (!doc || doc.kind !== "pdf" || !doc.pdfHistory) return false;
+  if (!doc.pdfHistory.redo()){ toast("다시 실행할 작업이 없어요.", 1500); return false; }
   toast("편집 작업을 다시 실행했어요.", 1200);
   return true;
 }

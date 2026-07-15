@@ -13,6 +13,7 @@
     "core.js",
     "icons.js",
     "state.js",
+    "history.js",
     "pdf-recovery.js",
     "video-viewer.js",
     "documents.js",
@@ -57,7 +58,7 @@
   "applicationLayers": [
     {
       "name": "bootstrap",
-      "scripts": ["state-sync.js", "theme.js", "i18n.js", "core.js", "icons.js", "state.js"]
+      "scripts": ["state-sync.js", "theme.js", "i18n.js", "core.js", "icons.js", "state.js", "history.js"]
     },
     {
       "name": "documents",
@@ -105,6 +106,12 @@
       "file": "board-render.js",
       "publicApi": "MNBoardRenderer",
       "consumers": ["lesson-replay.js", "whiteboard.js"]
+    },
+    {
+      "name": "edit-history",
+      "file": "history.js",
+      "publicApi": "MNEditHistory",
+      "consumers": ["pdf-recovery.js", "python-editor.js", "notebook-model.js", "spreadsheet-viewer.js", "image-viewer.js", "whiteboard.js"]
     }
   ],
   "vendorScripts": [

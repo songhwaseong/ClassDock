@@ -848,9 +848,12 @@ function updateDocumentStatus(doc){
 // 편집기 종류와 관계없이 같은 "저장 안 됨" 상태를 사용한다. 개별 뷰어가
 // 직접 hasUnsavedEdits 를 만지면 상태 배지·사이드바가 늦게 갱신되기 쉬워서,
 // 새 편집 기능은 이 함수를 통해 변경 사실을 알린다.
+// 값이 그대로면 아무것도 다시 그리지 않으므로 타자마다 불러도 된다.
 function markDocumentDirty(doc, dirty=true){
   if (!doc) return;
-  doc.hasUnsavedEdits = !!dirty;
+  const next = !!dirty;
+  if (doc.hasUnsavedEdits === next) return;
+  doc.hasUnsavedEdits = next;
   if (doc.id === activeId) updateDocumentStatus(doc);
   if (typeof renderSidebar === "function") renderSidebar();
 }
@@ -1013,12 +1016,15 @@ function closeDoc(id, options={}){
   if (!options.skipConfirm && d.hasUnsavedEdits){
     if (!confirm(`'${d.name}'의 저장하지 않은 ${unsavedDocumentLabel(d)} 수정이 있습니다. 닫을까요?`)) return;
   }
-  if (!options.skipConfirm && d.kind === "pdf" && d.elements && d.elements.length){
-    if (!confirm(`'${d.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`)) return;
+  if (!options.skipConfirm && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d)){
+    const msg = appSettings.pdfRecovery
+      ? `'${d.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`
+      : `'${d.name}'의 편집 내용이 사라집니다. 자동 저장·복원이 꺼져 있어 다시 열어도 복원할 수 없어요. 닫을까요?`;
+    if (!confirm(msg)) return;
   }
   if (d.kind === "pdf"){
     clearTimeout(d.recoveryTimer);
-    clearTimeout(d.pdfHistoryTimer);
+    if (d.pdfHistory) d.pdfHistory.cancel();
     if (d.recoveryDirty) savePdfRecovery(d);
   }
   d.closed = true;
@@ -1191,7 +1197,7 @@ async function refreshDocFromSource(id, options={}){
     const ok = await confirmDialog(`저장하지 않은 ${unsavedDocumentLabel(doc)} 수정이 있습니다. 원본으로 새로고침하면 현재 편집 내용이 사라질 수 있어요.`, "새로고침", "취소");
     if (!ok) return;
   }
-  if (!options.skipConfirm && doc.kind === "pdf" && doc.elements && doc.elements.length){
+  if (!options.skipConfirm && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(doc)){
     const ok = await confirmDialog("PDF에 추가한 편집/핀을 버리고 원본 파일을 다시 읽을까요?", "새로고침", "취소");
     if (!ok) return;
     if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);
@@ -2217,7 +2223,7 @@ function renderSidebar(){
     const saved = document.createElement("span");
     saved.className = "sb-saved";
     const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
-    if (doc && doc.hasUnsavedEdits){ saved.textContent = "●"; saved.title = _t("저장 후 수정됨"); }
+    if (doc && doc.hasUnsavedEdits){ saved.classList.add("dirty"); saved.textContent = "●"; saved.title = _t("저장 후 수정됨"); }
     else if (doc && doc.savedInWorkspace){ saved.textContent = "✓"; saved.title = _t("앱 작업공간에 저장됨"); }
     else saved.hidden = true;
     const encoding = document.createElement("span");

@@ -11,7 +11,7 @@ function readBoardRecovery(name){
   try {
     const saved = JSON.parse(localStorage.getItem(boardRecoveryKey(name)) || "null");
     if (!saved || saved.version !== 1 || !Array.isArray(saved.items)) return null;
-    return { tool:"pen", color:"#111111", width:4, bg:saved.bg || "#ffffff", items:saved.items, undo:[], redo:[], selected:null };
+    return { tool:"pen", color:"#111111", width:4, bg:saved.bg || "#ffffff", items:saved.items, selected:null };
   } catch(_){ return null; }
 }
 function newWhiteboard(){
@@ -44,7 +44,7 @@ function renderWhiteboard(doc, host){
   // wb: 보드 상태(전역 active 문서 변수 state 와 헷갈리지 않게 이름 분리)
   // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
-  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], undo: [], redo: [], bg: "#ffffff", selected: null });
+  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: "#ffffff", selected: null });
   let boardRecoveryTimer = 0;
   const scheduleBoardRecovery = () => {
     clearTimeout(boardRecoveryTimer);
@@ -105,10 +105,19 @@ function renderWhiteboard(doc, host){
       img.src = item.src;
     }
   };
-  const pushUndo = () => { wb.undo.push(wb.items.slice()); if (wb.undo.length > 140) wb.undo.shift(); wb.redo.length = 0; };
-  const doUndo = () => { if (!wb.undo.length) return; wb.redo.push(wb.items.slice()); wb.items = wb.undo.pop(); wb.selected = null; redraw(); updateUndoButtons(); recordCommit(); };
-  const doRedo = () => { if (!wb.redo.length) return; wb.undo.push(wb.items.slice()); wb.items = wb.redo.pop(); wb.selected = null; redraw(); updateUndoButtons(); recordCommit(); };
-  const clearAll = () => { if (!wb.items.length) return; pushUndo(); wb.items = []; wb.selected = null; redraw(); updateUndoButtons(); recordCommit(); };
+  // 스냅샷은 항목 배열의 얕은 복사 — 항목 객체 자체를 제자리에서 고치면 이전 단계가 망가지므로
+  // 기존 항목을 바꿀 때는 사본으로 교체한다(beginSelDrag 참고).
+  const history = MNEditHistory.create({
+    limit: MNEditHistory.LIMITS.board,
+    capture: () => wb.items.slice(),
+    apply: (items) => { wb.items = items.slice(); wb.selected = null; redraw(); },
+    // 항목은 통째로 교체만 하고 제자리에서 고치지 않으므로 참조 비교로 충분하다.
+    isEqual: (a, b) => a.length === b.length && a.every((it, i) => it === b[i]),
+    onChange: () => updateUndoButtons(),
+  });
+  const doUndo = () => { if (history.undo()) recordCommit(); };
+  const doRedo = () => { if (history.redo()) recordCommit(); };
+  const clearAll = () => { if (!wb.items.length) return; wb.items = []; wb.selected = null; redraw(); history.commit(); recordCommit(); };
 
   // ----- 사이즈/DPR (리사이즈해도 좌표는 CSS px 그대로라 그림 위치 유지) -----
   const resize = () => {
@@ -131,10 +140,11 @@ function renderWhiteboard(doc, host){
     canvas.setPointerCapture(e.pointerId);
     const it = wb.selected; const start = pt(e);
     const o = { left: it.x, top: it.y, right: it.x + it.w, bottom: it.y + it.h };
-    let live = it, undoPushed = false;
+    let live = it, cloned = false;
     const move = (ev) => {
       const q = pt(ev);
-      if (!undoPushed){ pushUndo(); const idx = wb.items.indexOf(it); live = Object.assign({}, it); wb.items[idx] = live; wb.selected = live; undoPushed = true; }
+      // 이전 단계 스냅샷이 이 항목 객체를 함께 가리키므로, 제자리에서 고치지 않고 사본으로 바꿔 끼운다.
+      if (!cloned){ const idx = wb.items.indexOf(it); live = Object.assign({}, it); wb.items[idx] = live; wb.selected = live; cloned = true; }
       if (mode === "move"){
         live.x = o.left + (q.x - start.x); live.y = o.top + (q.y - start.y);
       } else {                                          // 핸들이 잡은 변/모서리만 이동(반대편 고정), 가로·세로 독립
@@ -147,7 +157,7 @@ function renderWhiteboard(doc, host){
     };
     const up = () => {
       canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
-      updateUndoButtons(); redraw(); if (undoPushed) recordCommit();
+      redraw(); if (cloned){ history.commit(); recordCommit(); }   // 드래그 한 번을 한 단계로
     };
     canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
   };
@@ -190,7 +200,7 @@ function renderWhiteboard(doc, host){
     drawing = false;
     if (!cur){ return; }
     if (!cur.points && Math.abs(cur.x2 - cur.x1) < 2 && Math.abs(cur.y2 - cur.y1) < 2){ cur = null; redraw(); return; }  // 점 찍힌 도형 무시
-    pushUndo(); wb.items.push(cur); cur = null; redraw(); updateUndoButtons(); recordCommit();
+    wb.items.push(cur); cur = null; redraw(); history.commit(); recordCommit();
   };
   canvas.addEventListener("pointerup", finishStroke);
   canvas.addEventListener("pointercancel", finishStroke);
@@ -212,7 +222,7 @@ function renderWhiteboard(doc, host){
     const commit = () => {
       if (done) return; done = true;
       const txt = ta.value; ta.remove();
-      if (txt.trim()){ pushUndo(); wb.items.push({ type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs }); redraw(); updateUndoButtons(); recordCommit(); }
+      if (txt.trim()){ wb.items.push({ type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs }); redraw(); history.commit(); recordCommit(); }
     };
     ta.addEventListener("blur", commit);
     ta.addEventListener("keydown", (e) => {
@@ -248,9 +258,9 @@ function renderWhiteboard(doc, host){
     let x = Math.round(ccx - w / 2), y = Math.round(ccy - h / 2);
     x = Math.max(0, Math.min(x, Math.max(0, W - w))); y = Math.max(0, Math.min(y, Math.max(0, H - h)));
     const it = { type: "image", img, src:img.__boardSrc || img.src || "", x, y, w, h };
-    pushUndo(); wb.items.push(it);
+    wb.items.push(it);
     wb.selected = it; setTool("select");              // 넣자마자 선택 상태 + 선택 도구 → 바로 드래그로 위치·크기 조절
-    redraw(); updateUndoButtons(); recordCommit();
+    redraw(); history.commit(); recordCommit();
   };
   const insertImageBlob = (blob, cx, cy) => {
     if (!blob || !/^image\//.test(blob.type)){ return false; }
@@ -327,7 +337,7 @@ function renderWhiteboard(doc, host){
   };
   const setColor = (c) => { wb.color = c; for (const k in swatchEls) swatchEls[k].classList.toggle("active", k === c); customColor.value = c; };
   const setWidth = (w) => { wb.width = w; for (const k in widthBtns) widthBtns[k].classList.toggle("active", Number(k) === w); };
-  const updateUndoButtons = () => { if (undoBtn) undoBtn.disabled = !wb.undo.length; if (redoBtn) redoBtn.disabled = !wb.redo.length; };
+  const updateUndoButtons = () => { if (undoBtn) undoBtn.disabled = !history.canUndo(); if (redoBtn) redoBtn.disabled = !history.canRedo(); };
 
   const mkBtn = (label, title, cls, fn) => {
     const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; b.title = title; b.setAttribute("aria-label", title);
@@ -431,7 +441,7 @@ function renderWhiteboard(doc, host){
 
   tools.append(posGroup, toolGroup, colorGroup, widthGroup, imgGroup, actGroup, exportGroup, recGroup);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(tools);
-  setTool("select"); setColor("#111111"); setWidth(4); updateUndoButtons();   // 열면 선택·이동 도구가 기본 활성
+  setTool("select"); setColor("#111111"); setWidth(4); history.reset();   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로
 
   // ----- 키보드(이 보드가 활성일 때만): Ctrl+Z / Ctrl+Y -----
   const onKey = (e) => {
@@ -444,7 +454,7 @@ function renderWhiteboard(doc, host){
       else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
     } else if ((e.key === "Delete" || e.key === "Backspace") && wb.selected){      // 선택한 이미지 삭제
       e.preventDefault(); e.stopPropagation();
-      pushUndo(); wb.items = wb.items.filter(it => it !== wb.selected); wb.selected = null; redraw(); updateUndoButtons(); recordCommit();
+      wb.items = wb.items.filter(it => it !== wb.selected); wb.selected = null; redraw(); history.commit(); recordCommit();
     } else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
   };
   document.addEventListener("keydown", onKey, true);
