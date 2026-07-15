@@ -416,6 +416,10 @@ function buildCodeEditor(text, prof, options={}){
   let hindex = 0, applyingHistory = false, coalesceTimer = 0;
   const HISTORY_MAX = 300;
   const snapshot = () => ({ value: ta.value, s: ta.selectionStart, e: ta.selectionEnd });
+  const rememberHistoryCaret = () => {
+    if (applyingHistory || !history[hindex]) return;
+    history[hindex] = editorHistoryCaretState(history[hindex], ta.value, ta.selectionStart, ta.selectionEnd);
+  };
   const commitNow = () => {
     if (applyingHistory) return;
     const st = snapshot();
@@ -1178,6 +1182,7 @@ function buildCodeEditor(text, prof, options={}){
   });
 
   ta.addEventListener("beforeinput", (e) => {
+    rememberHistoryCaret();
     if (!linkedEdit.active || !e.isTrusted) return;
     linkedBeforeInput = {
       value: ta.value,
@@ -1531,6 +1536,7 @@ function buildCodeEditor(text, prof, options={}){
   findBar.querySelector(".code-find-close").addEventListener("click", closeFind);
 
   ta.addEventListener("keydown", (e) => {
+    rememberHistoryCaret();
     if (!help.hidden && e.key === "Escape"){ e.preventDefault(); hideHelp(); return; }   // 도움말 열려 있으면 Esc 로 먼저 닫기
     if (linkedEdit.active){
       if (e.key === "Escape"){
@@ -1684,7 +1690,7 @@ function buildCodeEditor(text, prof, options={}){
         hideCompletion(); emitInput(); scrollCaretIntoView(); return;
       }
       if (prof === "hash"){
-        if (/:\s*$/.test(head)) indent += "    ";                           // 파이썬 등 블록 시작(:)이면 한 단계 더
+        if (pythonLineOpensBlock(head)) indent += "    ";                    // Python 블록 시작(:) 뒤에 주석이 있어도 한 단계 더
       } else if (prof === "c"){
         if (/[{([]\s*$/.test(head)) indent += "    ";                       // C계열: { ( [ 로 끝나면 한 단계 더
       }

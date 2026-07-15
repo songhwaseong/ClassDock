@@ -991,6 +991,14 @@
     return { start, end: oldEnd, inserted: newText.slice(start, newEnd) };
   }
 
+  function editorHistoryCaretState(state, value, selectionStart, selectionEnd) {
+    if (!state || state.value !== String(value || "")) return state;
+    const length = state.value.length;
+    const start = Math.max(0, Math.min(Number(selectionStart) || 0, length));
+    const end = Math.max(start, Math.min(Number(selectionEnd) || start, length));
+    return { ...state, s:start, e:end };
+  }
+
   function applyLinkedIdentifierEdit(value, ranges, primaryIndex, editStart, editEnd, inserted) {
     const text = String(value || ""), rows = Array.isArray(ranges) ? ranges : [];
     const primary = rows[primaryIndex];
@@ -1009,6 +1017,23 @@
       end: row.end + (index + 1) * delta
     }));
     return { value: next, ranges: nextRanges, primaryIndex, relStart, relEnd, inserted: replacement };
+  }
+
+  function pythonLineOpensBlock(value) {
+    const line = String(value || "");
+    let quote = "", escaped = false, codeEnd = line.length;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (escaped) { escaped = false; continue; }
+      if (quote) {
+        if (char === "\\") escaped = true;
+        else if (char === quote) quote = "";
+        continue;
+      }
+      if (char === "\"" || char === "'") quote = char;
+      else if (char === "#") { codeEnd = i; break; }
+    }
+    return /:\s*$/.test(line.slice(0, codeEnd));
   }
 
   function pythonOpenClosePlan(value, selectionStart, selectionEnd) {
@@ -2486,7 +2511,7 @@
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-    diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
+    diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,

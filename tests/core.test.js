@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-  diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
+  diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
@@ -854,4 +854,19 @@ test("Python 단계 실행 보고서의 변수와 변경 내역을 안전하게 
   assert.deepEqual(report.steps[0].changes[0], { name:"total", before:"3", after:"7", type:"int", kind:"changed" });
   assert.equal(report.steps[1].phase, "return");
   assert.equal(report.error, "");
+});
+
+test("Python block indentation recognizes a colon before an inline comment", () => {
+  assert.equal(pythonLineOpensBlock("class BayesianFilter: # 베이지안 필터"), true);
+  assert.equal(pythonLineOpensBlock("    if label == '#':  # 해시 문자열"), true);
+  assert.equal(pythonLineOpensBlock("value = '# not a comment'"), false);
+  assert.equal(pythonLineOpensBlock("value = 1  # 설명:"), false);
+});
+
+test("editor undo history remembers the caret immediately before an edit", () => {
+  const initial = { value:"first\nsecond", s:0, e:0 };
+  assert.deepEqual(editorHistoryCaretState(initial, initial.value, 8, 8), {
+    value:"first\nsecond", s:8, e:8
+  });
+  assert.equal(editorHistoryCaretState(initial, "changed", 4, 4), initial);
 });
