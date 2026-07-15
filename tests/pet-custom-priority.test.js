@@ -8,8 +8,13 @@ const root = path.join(__dirname, "..");
 
 function loadPetCustomHarness(initialStorage){
   const values = new Map(Object.entries(initialStorage || {}));
+  const petArt = { crab:["A"], robot:["B"] };
   const context = {
-    PET_ART: { crab:["A"], robot:["B"] },
+    PET_ART: petArt,
+    PET_SPECIES: [
+      { kind:"walker", art:petArt.crab, palettes:[{ A:"#111111" }] },
+      { kind:"walker", art:petArt.robot, palettes:[{ A:"#222222" }] }
+    ],
     localStorage: {
       getItem:(key) => values.has(key) ? values.get(key) : null,
       setItem:(key, value) => values.set(key, String(value))
@@ -38,4 +43,6 @@ test("custom pet priority is normalized and exposed to the pet engine", () => {
     ["custom:a", true, 0],
     ["custom:b", false, 1]
   ]);
+  assert.equal(species[0].baseSpeciesId, "crab");
+  assert.equal(species[1].baseSpeciesId, "robot");
 });

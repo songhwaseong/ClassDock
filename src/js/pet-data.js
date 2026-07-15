@@ -682,8 +682,80 @@ const PET_ART = {
     "..BBBBBBBBBBB..",
     "....PP...PP....",
     "....PP...PP...."
+  ],
+  glassesMan: [
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "...HHHHHHHHHH...",
+    "...HHSSSSSSHH...",
+    "...SGWKGGWKSS...",
+    "....SSMMMMSS....",
+    ".....SSSSSS.....",
+    "....BBBBBBBB....",
+    "...SBBBBBBBBS...",
+    "...SBBBBBBBBS...",
+    "....BBBBBBBB....",
+    "....BBBBBBBB....",
+    "....BBBBBBBB....",
+    ".....PPPPPP.....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "...FFF....FFF...",
+    "...FFF....FFF..."
   ]
 };
+
+// 사진 기반 사람 펫은 기존 15×11 펫과 분리해 16×20 전용 프레임으로 움직인다.
+function petMotionFrame(base, changes){
+  const frame = base.slice();
+  for (const row in changes) frame[Number(row)] = changes[row];
+  return frame;
+}
+const PET_GLASSES_MAN_MOTION = {
+  walk: [
+    petMotionFrame(PET_ART.glassesMan, {
+      8:"..SSBBBBBBBB....", 9:"....BBBBBBBBSS..",
+      14:".....PPP..PPP...", 15:".....PPP.PPP....", 16:"....PPP..PPP....",
+      17:"...PPP....PPP...", 18:"..FFF......FFF..", 19:"..FFF......FFF.."
+    }),
+    petMotionFrame(PET_ART.glassesMan, {
+      8:"....BBBBBBBBSS..", 9:"..SSBBBBBBBB....",
+      14:"...PPP..PPP.....", 15:"....PPP.PPP.....", 16:"....PPP..PPP....",
+      17:"...PPP....PPP...", 18:"..FFF......FFF..", 19:"..FFF......FFF.."
+    })
+  ],
+  jump: [petMotionFrame(PET_ART.glassesMan, {
+    8:"..SSBBBBBBBBSS..", 9:"...BBBBBBBBBB...",
+    14:".....PPPPPP.....", 15:"....PPP..PPP....", 16:"...PPP....PPP...",
+    17:"...PPP....PPP...", 18:"....FFF..FFF....", 19:"................"
+  })],
+  fall: null,
+  climb: [
+    petMotionFrame(PET_ART.glassesMan, {
+      0:"..SS.HHHHHH.....", 1:"..BBHHHHHHHH....", 2:"..BBHHHHHHHHHH..",
+      8:"..BBSSBBBBBBBS..", 14:".....PPP.PPP....", 17:"...PPP....PPP..."
+    }),
+    petMotionFrame(PET_ART.glassesMan, {
+      0:".....HHHHHH.SS..", 1:"....HHHHHHHHBB..", 2:"..HHHHHHHHHHBB..",
+      8:"..SBBBBBBBSSBB..", 14:"....PPP.PPP.....", 17:"...PPP....PPP..."
+    })
+  ],
+  cheer: [
+    petMotionFrame(PET_ART.glassesMan, {
+      0:"SS...HHHHHH...SS", 1:"BB..HHHHHHHH..BB", 2:".B.HHHHHHHHHH.B.",
+      3:".B.HHSSSSSSHH.B.", 4:".B.SGWKGGWKSS.B.", 5:".B..SSMMMMSS..B.",
+      6:".B...SSSSSS...B."
+    }),
+    petMotionFrame(PET_ART.glassesMan, {
+      0:".SS..HHHHHH..SS.", 1:".BB.HHHHHHHH.BB.", 2:"..BHHHHHHHHHHB..",
+      3:"..BHHSSSSSSHHB..", 4:"..BSGWKGGWKSSB..", 5:"..B.SSMMMMSS.B..",
+      6:"..B..SSSSSS..B.."
+    })
+  ]
+};
+PET_GLASSES_MAN_MOTION.fall = PET_GLASSES_MAN_MOTION.jump;
 
 // 종족 목록: kind 가 이동 방식을 정한다. 같은 그림이라도 팔레트가 달라 저마다 다른 아이로 보인다.
 const PET_SPECIES = [
@@ -910,7 +982,18 @@ const PET_SPECIES = [
       { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#5f5340", P:"#4a4550", C:"#f2f0ea" },   // 갈색 셔츠(원조)
       { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#3f5a7a", P:"#333848", C:"#f2f0ea" }    // 남색 셔츠
     ],
-    sayings: ["만세!", "허허허", "커피 한잔 어때요?", "오늘도 화이팅!", "열심히 하시네요", "잠깐 쉬었다 가요", "안녕하세요!"] }
+    sayings: ["만세!", "허허허", "커피 한잔 어때요?", "오늘도 화이팅!", "열심히 하시네요", "잠깐 쉬었다 가요", "안녕하세요!"] },
+  { kind:"human", art:PET_ART.glassesMan, cheerArt:PET_GLASSES_MAN_MOTION.cheer[0],
+    motionArt:PET_GLASSES_MAN_MOTION, gridW:16, gridH:20, pixelScale:3, width:64, height:80,
+    spriteSheet:{
+      src:"src/assets/pixel-teacher.png", cellW:96, cellH:120,
+      frames:{ idle:[0], walk:[0,1,2,3,4,5], seekwall:[0,1,2,3,4,5],
+        jump:[6,7,8,9], fall:[8,9], climb:[10,11,12,13], cheer:[14,15,16,17] }
+    }, palettes: [
+      { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#6a5238", P:"#3e424a", F:"#25272b" },
+      { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#775b3c", P:"#313844", F:"#20242a" }
+    ],
+    sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"] }
 ];
 
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
@@ -924,7 +1007,7 @@ const PET_NAMES = {
   octopus:"문어", bat:"박쥐", owl:"부엉이", duck:"오리", squirrel:"다람쥐",
   hedgehog:"고슴도치", hamster:"햄스터", bee:"꿀벌", ladybug:"무당벌레", dice:"주사위",
   apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
-  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨"
+  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨", glassesMan:"픽셀 선생님"
 };
 
 const PET_NAMES_EN = {
@@ -937,7 +1020,7 @@ const PET_NAMES_EN = {
   octopus:"Octopus", bat:"Bat", owl:"Owl", duck:"Duck", squirrel:"Squirrel",
   hedgehog:"Hedgehog", hamster:"Hamster", bee:"Bee", ladybug:"Ladybug", dice:"Die",
   apple:"Apple", eraser:"Eraser", mushroom:"Mushroom", carrot:"Carrot", dino:"Dinosaur", snowman:"Snowman",
-  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy"
+  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy", glassesMan:"Pixel teacher"
 };
 
 const PET_KIND_SAYINGS_EN = {

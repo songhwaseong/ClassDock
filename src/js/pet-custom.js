@@ -26,7 +26,7 @@ const PET_KIND_LABELS = {
   ninja:"순간이동 대시 (닌자)", bird:"훨훨 날기 (새)", chameleon:"색 바꾸기 (카멜레온)",
   wizard:"마법 순간이동 (마법사)", magnet:"자석으로 끌기", cloud:"번개 구름",
   rocket:"발사·낙하산 (로켓)", flutter:"팔랑팔랑 날기 (나비)", fish:"비눗방울 타기 (물고기)",
-  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 벽 타고 만세 (아저씨)"
+  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 점프하고 벽 타고 만세 (사람)"
 };
 
 // ----- 저장소 도우미 -----
@@ -107,9 +107,18 @@ function petCustomSpecies(){
     const art = PET_ART[c.art];
     if (!art || !PET_KIND_LABELS[c.kind] || !c.palette) return null;
     const base = typeof PET_SPECIES === "object" ? PET_SPECIES.find(s => s.art === art) : null;
+    const baseSpeciesId = base ? Object.keys(PET_ART).find(id => PET_ART[id] === base.art) || null : null;
     return {
       id: c.id, name: c.name || "내 펫", custom: true,
-      kind: c.kind, art: art, cheerArt: (base && base.cheerArt) || null, palettes: [c.palette],
+      baseSpeciesId,
+      kind: c.kind, art: art, cheerArt: (base && base.cheerArt) || null,
+      motionArt: (base && c.kind === base.kind && base.motionArt) || null,
+      spriteSheet: (base && c.kind === base.kind && base.spriteSheet) || null,
+      width: (base && c.kind === base.kind && base.width) || null,
+      height: (base && c.kind === base.kind && base.height) || null,
+      gridW: (base && c.kind === base.kind && base.gridW) || null,
+      gridH: (base && c.kind === base.kind && base.gridH) || null,
+      pixelScale: (base && c.kind === base.kind && base.pixelScale) || null, palettes: [c.palette],
       sayings: petCleanSayings(c.sayings), trail: c.trail || null,
       priority: c.priority === true, priorityIndex: index
     };

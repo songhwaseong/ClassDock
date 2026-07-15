@@ -63,7 +63,8 @@ function petCollectPlatforms(){
 
 // 현재 발밑을 받치는 발판 찾기(발 y와 발판 윗변이 6px 이내·가로 중심이 범위 안)
 function petFindSupport(p, platforms){
-  const cx = p.x + PET_W / 2, feet = p.y + PET_H;
+  const pw = p.w || PET_W, ph = p.h || PET_H;
+  const cx = p.x + pw / 2, feet = p.y + ph;
   let best = null;
   for (const pl of platforms){
     if (cx < pl.x - 2 || cx > pl.x + pl.w + 2) continue;
@@ -102,41 +103,58 @@ const PET_MOVING_STATES = ["walk", "seekwall", "climb", "ceiling", "float",
   "flee", "chute"];
 function petDraw(p){
   const ctx = p.ctx;
-  ctx.clearRect(0, 0, PET_W, PET_H);
+  const pw = p.w || PET_W, ph = p.h || PET_H, ps = p.pixelScale || PET_SCALE;
+  ctx.clearRect(0, 0, pw, ph);
   const moving = PET_MOVING_STATES.includes(p.state);
-  const wob = moving ? Math.round(Math.sin(p.t * 0.5) * 1.5) : 0;
+  const wob = moving && !p.motionArt ? Math.round(Math.sin(p.t * 0.5) * 1.5) : 0;
+  const motionState = p.state === "seekwall" ? "walk" : p.state;
+  const frames = p.motionArt && p.motionArt[motionState];
+  const drawArt = frames && frames.length ? frames[Math.floor(p.t / 7) % frames.length] : p.art;
   const eyesOff = p.blink > 0 || p.off;
-  for (let r = 0; r < p.art.length; r++){
-    const row = p.art[r];
-    for (let c = 0; c < row.length; c++){
-      const ch = row[c];
-      if (ch === ".") continue;
-      let col = ch === "W" ? "#ffffff" : ch === "K" ? "#161616" : p.palette[ch];
-      if (!col) continue;
-      if (ch === "W" && eyesOff) col = p.off ? (p.palette.D || p.blinkCol) : p.blinkCol;   // 깜빡임·방전
-      if (ch === "K" && eyesOff) continue;
-      const dx = (r >= 9) ? wob * ((c % 2) ? 1 : -1) : 0;     // 다리·자락만 꼼지락
-      ctx.fillStyle = col;
-      ctx.fillRect(c * PET_SCALE + dx, r * PET_SCALE, PET_SCALE, PET_SCALE);
+  let spriteDrawn = false;
+  if (p.spriteSheet && p.spriteImage && p.spriteImage.complete && p.spriteImage.naturalWidth > 0){
+    const sf = p.spriteSheet.frames[motionState] || p.spriteSheet.frames.idle;
+    if (sf && sf.length){
+      const frameIndex = sf[Math.floor(p.t / 7) % sf.length];
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(p.spriteImage, frameIndex * p.spriteSheet.cellW, 0,
+        p.spriteSheet.cellW, p.spriteSheet.cellH, 0, 0, pw, ph);
+      spriteDrawn = true;
     }
   }
-  // 별·축구공, 그리고 황금 펫은 가끔 반짝이 픽셀이 튄다
-  if ((p.kind === "roller" || p.gold) && Math.random() < 0.1){
-    ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 2; i++)
-      ctx.fillRect((3 + Math.floor(Math.random() * 9)) * PET_SCALE, (3 + Math.floor(Math.random() * 6)) * PET_SCALE, PET_SCALE, PET_SCALE);
-  }
-  // 개구리·카멜레온 혀 낼름(입가에서 앞으로 늘었다 줄어든다 — 좌우 반전은 transform 이 처리)
-  if (p.state === "tongue" && (p.kind === "frog" || p.kind === "chameleon")){
-    const ty = p.kind === "frog" ? 6 : 4, tx = p.kind === "frog" ? 11 : 12;
-    const len = 1 + Math.round(Math.sin((1 - p.timer / 16) * Math.PI) * 4);
-    ctx.fillStyle = "#e86a7a";
-    for (let i = 0; i < len; i++)
-      ctx.fillRect(Math.min(14, tx + i) * PET_SCALE, ty * PET_SCALE, PET_SCALE, PET_SCALE);
+  if (!spriteDrawn){
+    for (let r = 0; r < drawArt.length; r++){
+      const row = drawArt[r];
+      for (let c = 0; c < row.length; c++){
+        const ch = row[c];
+        if (ch === ".") continue;
+        let col = ch === "W" ? "#ffffff" : ch === "K" ? "#161616" : p.palette[ch];
+        if (!col) continue;
+        if (ch === "W" && eyesOff) col = p.off ? (p.palette.D || p.blinkCol) : p.blinkCol;   // 깜빡임·방전
+        if (ch === "K" && eyesOff) continue;
+        const dx = (r >= 9) ? wob * ((c % 2) ? 1 : -1) : 0;     // 다리·자락만 꼼지락
+        ctx.fillStyle = col;
+        ctx.fillRect(c * ps + dx, r * ps, ps, ps);
+      }
+    }
+    // 별·축구공, 그리고 황금 펫은 가끔 반짝이 픽셀이 튄다
+    if ((p.kind === "roller" || p.gold) && Math.random() < 0.1){
+      ctx.fillStyle = "#ffffff";
+      for (let i = 0; i < 2; i++)
+        ctx.fillRect((3 + Math.floor(Math.random() * 9)) * ps, (3 + Math.floor(Math.random() * 6)) * ps, ps, ps);
+    }
+    // 개구리·카멜레온 혀 낼름(입가에서 앞으로 늘었다 줄어든다 — 좌우 반전은 transform 이 처리)
+    if (p.state === "tongue" && (p.kind === "frog" || p.kind === "chameleon")){
+      const ty = p.kind === "frog" ? 6 : 4, tx = p.kind === "frog" ? 11 : 12;
+      const len = 1 + Math.round(Math.sin((1 - p.timer / 16) * Math.PI) * 4);
+      ctx.fillStyle = "#e86a7a";
+      for (let i = 0; i < len; i++)
+        ctx.fillRect(Math.min(14, tx + i) * ps, ty * ps, ps, ps);
+    }
   }
   // 위치·방향은 CSS transform 으로(리플로 없이 GPU 합성만 일어난다)
   const rot = p.kind === "roller" ? p.roll
-    : p.state === "climb" ? (p.side < 0 ? -90 : 90) : (p.rot || 0);
+    : p.state === "climb" && p.kind !== "human" ? (p.side < 0 ? -90 : 90) : (p.rot || 0);
   const flipY = (p.state === "ceiling" || p.state === "ceilwalk") ? -1 : 1;   // 천장에선 뒤집힌다
   const sq = p.squash > 0 ? p.squash : 0;                     // 찌부(슬라임 착지·개구리 웅크림 등)
   const pop = p.pop > 0 ? p.pop / 12 : 0;                     // 클릭했을 때 뽀잉
@@ -268,11 +286,16 @@ function petPickAction(p, w){
 }
 
 // 커피 아저씨: 두 팔 번쩍 만세(전용 프레임 misterCheer 로 잠깐 바꿔 그린다)
+function petRandomSaying(p, fallback){
+  const list = p && Array.isArray(p.sayings) ? p.sayings.filter(s => typeof s === "string" && s.trim()) : [];
+  return list.length ? list[Math.floor(Math.random() * list.length)] : (fallback || "안녕하세요!");
+}
+
 function petCheer(p, say){
   p.state = "cheer"; p.timer = 60; p.t = 0;
   p.vx = 0; p.vy = 0; p.rot = 0; p.pop = 12;
   if (p.cheerArt) p.art = p.cheerArt;
-  if (say) petSay(p, "만세!");
+  if (say) petSay(p, petRandomSaying(p, "만세!"), false);
 }
 
 function petSay(p, text, translate=true){
@@ -900,17 +923,18 @@ function petUpdate(p, w){
   if (p.state === "fly") return petBirdFly(p, w);
 
   const vw = window.innerWidth, vh = window.innerHeight;
+  const pw = p.w || PET_W, ph = p.h || PET_H;
   const walk = PET_WALK * p.speed, climb = PET_CLIMB * p.speed;
   if (PET_GROUND_STATES.includes(p.state)){
     // 서 있던 발판이 사라지면(모달 닫힘 등) 떨어진다. 살짝 움직였으면 발 위치를 따라간다.
     const s = petFindSupport(p, w.platforms);
     if (!s){ p.state = "fall"; p.vy = 0; p.vx = 0; }
-    else { p.support = s; p.y = s.y - PET_H; }
+    else { p.support = s; p.y = s.y - ph; }
   }
 
   // 고양이: 근처에서 마우스가 움직이면 하던 일을 멈추고 살금살금 다가간다
   if (p.kind === "cat" && (p.state === "walk" || p.state === "idle") && p.cool <= 0 && Date.now() - w.mouse.ts < 3000){
-    const mdx = w.mouse.x - (p.x + PET_W / 2), mdy = w.mouse.y - (p.y + PET_H / 2);
+    const mdx = w.mouse.x - (p.x + pw / 2), mdy = w.mouse.y - (p.y + ph / 2);
     if (Math.abs(mdx) > 40 && Math.abs(mdx) < 300 && mdy > -220 && mdy < 80){ p.state = "stalk"; p.t = 0; }
   }
   // 생쥐: 고양이가 가까이 오면 "찍찍!" 하고 반대쪽으로 도망친다
@@ -946,21 +970,21 @@ function petUpdate(p, w){
     if (p.kind === "roller") p.roll += p.face * 4 * p.speed;   // 별·축구공·주사위는 걸을수록 구른다
     if (p.kind === "penguin") p.rot = Math.sin(p.t * 0.35) * 8;                    // 뒤뚱뒤뚱
     if (p.kind === "snake") p.rot = Math.sin(p.t * 0.3) * 3;                       // 스르륵 몸짓
-    if (p.trail === "slime" && p.t % 26 === 0) petTrace(p.x + PET_W / 2 - 6, p.y + PET_H - 4, "slime", 3800);
+    if (p.trail === "slime" && p.t % 26 === 0) petTrace(p.x + pw / 2 - 6, p.y + ph - 4, "slime", 3800);
     if (p.state === "seekwall"){
-      if ((p.side < 0 && p.x <= 0) || (p.side > 0 && p.x >= vw - PET_W)){
-        p.x = p.side < 0 ? 0 : vw - PET_W;
+      if ((p.side < 0 && p.x <= 0) || (p.side > 0 && p.x >= vw - pw)){
+        p.x = p.side < 0 ? 0 : vw - pw;
         p.state = "climb"; p.t = 0;
       }
     } else {
       // 발판 가장자리: 바닥이면 되돌아오고, UI 발판이면 절반 확률로 뛰어내린다
       const s = p.support;
-      if (s && (p.x + PET_W / 2 < s.x + 4 || p.x + PET_W / 2 > s.x + s.w - 4)){
+      if (s && (p.x + pw / 2 < s.x + 4 || p.x + pw / 2 > s.x + s.w - 4)){
         if (!s.floor && Math.random() < 0.5){ p.state = "fall"; p.vy = 0; p.vx = p.face * 1.2; }
         else p.face *= -1;
       }
       if (p.x <= 0){ p.x = 0; p.face = 1; }
-      if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.face = -1; }
+      if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
       if (--p.timer <= 0) petPickAction(p, w);
     }
   }
@@ -981,7 +1005,7 @@ function petUpdate(p, w){
     }
   }
   else if (p.state === "stalk"){                               // 고양이: 몸을 낮추고 커서를 향해 살금살금
-    const mdx = w.mouse.x - (p.x + PET_W / 2), mdy = w.mouse.y - (p.y + PET_H / 2);
+    const mdx = w.mouse.x - (p.x + pw / 2), mdy = w.mouse.y - (p.y + ph / 2);
     p.squash = 0.18;
     if (Math.abs(mdx) > 6){ p.face = mdx < 0 ? -1 : 1; p.x += p.face * 0.55 * p.speed; }
     if (Date.now() - w.mouse.ts > 3500 || Math.abs(mdx) > 420 || mdy > 120){       // 커서가 멎었거나 멀어짐: 시치미
@@ -1011,9 +1035,9 @@ function petUpdate(p, w){
     p.x += p.face * 3.1 * p.speed;
     p.rot = p.face * 8;
     const s = p.support;
-    if (s && (p.x + PET_W / 2 < s.x + 4 || p.x + PET_W / 2 > s.x + s.w - 4)) p.face *= -1;
+    if (s && (p.x + pw / 2 < s.x + 4 || p.x + pw / 2 > s.x + s.w - 4)) p.face *= -1;
     if (p.x <= 0){ p.x = 0; p.face = 1; }
-    if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.face = -1; }
+    if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
     if (Math.random() < 0.02) p.face *= -1;
     if (--p.timer <= 0){ p.rot = 0; petPickAction(p, w); }
   }
@@ -1037,7 +1061,7 @@ function petUpdate(p, w){
     p.vx *= 0.975;
     p.rot = p.face * 82;
     if (p.x <= 0){ p.x = 0; p.vx = Math.abs(p.vx); p.face = 1; }
-    if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.vx = -Math.abs(p.vx); p.face = -1; }
+    if (p.x >= vw - pw){ p.x = vw - pw; p.vx = -Math.abs(p.vx); p.face = -1; }
     if (Math.abs(p.vx) < 0.4){ p.rot = 0; p.state = "idle"; p.timer = 40 + Math.random() * 80; }
   }
   else if (p.state === "hide"){                                // 달팽이·거북이: 껍질 속으로 쏙(눈도 감는다)
@@ -1052,7 +1076,7 @@ function petUpdate(p, w){
     p.x += p.face * 2.8 * p.speed;
     p.rot = p.face * 6;
     if (p.x <= 0){ p.x = 0; p.face = 1; }
-    if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.face = -1; }
+    if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
     if (--p.timer <= 0){ p.rot = 0; p.cool = 300; petPickAction(p, w); }
   }
   else if (p.state === "cast"){                                // 마법사: 주문 영창 → 다른 펫을 뿅 하고 순간이동
@@ -1097,16 +1121,16 @@ function petUpdate(p, w){
   else if (p.state === "launch"){                              // 로켓: 연기를 뿜으며 가속 상승
     p.vy = Math.max(-9, p.vy - 0.25);
     p.y += p.vy;
-    if (p.t % 3 === 0) petTrace(p.x + PET_W / 2 - 9 + Math.random() * 10, p.y + PET_H, "puff", 500);
+    if (p.t % 3 === 0) petTrace(p.x + pw / 2 - 9 + Math.random() * 10, p.y + ph, "puff", 500);
     if (p.y <= 20){ p.state = "chute"; p.vy = 0; p.t = 0; p.chute.style.display = "block"; petSay(p, "낙하산!"); }
   }
   else if (p.state === "chute"){                               // 로켓: 낙하산 펴고 흔들흔들 귀환
     p.y += 0.9;
     p.x += Math.sin(p.t * 0.05) * 1.2;
     p.rot = Math.sin(p.t * 0.05) * 12;
-    p.x = Math.max(0, Math.min(vw - PET_W, p.x));
-    if (p.y + PET_H >= vh){
-      p.y = vh - PET_H; p.rot = 0; p.squash = 0.3;
+    p.x = Math.max(0, Math.min(vw - pw, p.x));
+    if (p.y + ph >= vh){
+      p.y = vh - ph; p.rot = 0; p.squash = 0.3;
       p.chute.style.display = "none";
       p.state = "idle"; p.timer = 80 + Math.random() * 80;
     }
@@ -1115,7 +1139,7 @@ function petUpdate(p, w){
     p.x += p.face * 5 * p.speed;
     p.rot = p.face * 10;
     if (p.x <= 0){ p.x = 0; p.face = 1; }
-    if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.face = -1; }
+    if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
     if (--p.timer <= 0){ p.rot = 0; petPickAction(p, w); }
   }
   else if (p.state === "vanish"){                              // 닌자: 연막 속에 숨었다가 다른 발판에서 등장
@@ -1132,17 +1156,17 @@ function petUpdate(p, w){
   }
   else if (p.state === "digdown"){                             // 두더지: 흙을 튀기며 바닥 밑으로
     p.y += 1.2;
-    if (p.t % 5 === 0) petTrace(p.x + PET_W / 2 - 8 + Math.random() * 12, vh - 6, "dirt", 900);
+    if (p.t % 5 === 0) petTrace(p.x + pw / 2 - 8 + Math.random() * 12, vh - 6, "dirt", 900);
     if (p.y >= vh){ p.state = "burrow"; p.timer = 80 + Math.random() * 140; }
   }
   else if (p.state === "burrow"){                              // 땅속 이동(화면 밖) 후 다른 곳에서 등장
-    if (--p.timer <= 0){ p.x = Math.random() * Math.max(1, vw - PET_W); p.state = "digup"; p.t = 0; }
+    if (--p.timer <= 0){ p.x = Math.random() * Math.max(1, vw - pw); p.state = "digup"; p.t = 0; }
   }
   else if (p.state === "digup"){
     p.y -= 1.4;
-    if (p.t % 5 === 0) petTrace(p.x + PET_W / 2 - 8 + Math.random() * 12, vh - 6, "dirt", 900);
-    if (p.y <= vh - PET_H){
-      p.y = vh - PET_H; p.state = "jump"; p.t = 0; p.vy = -4.5; p.vx = 0;
+    if (p.t % 5 === 0) petTrace(p.x + pw / 2 - 8 + Math.random() * 12, vh - 6, "dirt", 900);
+    if (p.y <= vh - ph){
+      p.y = vh - ph; p.state = "jump"; p.t = 0; p.vy = -4.5; p.vx = 0;
       if (Math.random() < 0.4) petSay(p, "뿅!");
     }
   }
@@ -1153,7 +1177,7 @@ function petUpdate(p, w){
   }
   else if (p.state === "climb"){
     p.y -= climb;
-    p.x = p.side < 0 ? 0 : vw - PET_W;
+    p.x = p.side < 0 ? 0 : vw - pw;
     if (p.y <= 0){
       p.y = 0;
       if (p.kind === "human"){   // 아저씨는 천장을 걷는 대신 꼭대기에서 힘차게 뛰어내린다
@@ -1162,12 +1186,14 @@ function petUpdate(p, w){
       }
       else { p.state = "ceiling"; p.face = -p.side; p.timer = 80 + Math.random() * 140; }
     }
-    else if (p.t > 40 && Math.random() < 0.004){ p.state = "fall"; p.vy = 0; p.vx = -p.side * 1.5; }   // 가끔 손을 놓친다
+    else if (p.kind !== "human" && p.t > 40 && Math.random() < 0.004){
+      p.state = "fall"; p.vy = 0; p.vx = -p.side * 1.5;          // 동물형 벽타기 펫만 가끔 손을 놓친다
+    }
   }
   else if (p.state === "ceiling"){
     p.x += p.face * 0.9 * p.speed;
     if (p.x <= 0){ p.x = 0; p.face = 1; }
-    if (p.x >= vw - PET_W){ p.x = vw - PET_W; p.face = -1; }
+    if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
     if (--p.timer <= 0){ p.state = "fall"; p.vy = 0; p.vx = 0; p.t = 0; }
   }
   else if (p.state === "jump" || p.state === "fall"){
@@ -1175,24 +1201,24 @@ function petUpdate(p, w){
       p.state = "fly"; p.gTarget = null; p.landT = null; p.rot = 0; p.vx *= 0.5; p.vy = 0;
       return;
     }
-    const prevFeet = p.y + PET_H;
+    const prevFeet = p.y + ph;
     p.vy += PET_GRAV; p.x += p.vx; p.y += p.vy;
     if (p.x < 0){ p.x = 0; p.vx *= -0.6; p.face = 1; }
-    if (p.x > vw - PET_W){ p.x = vw - PET_W; p.vx *= -0.6; p.face = -1; }
+    if (p.x > vw - pw){ p.x = vw - pw; p.vx *= -0.6; p.face = -1; }
     if (p.kind === "roller") p.roll += p.vx * 3;
     else p.rot = p.state === "fall" ? Math.sin(p.t * 0.35) * 14 : 0;
     if (p.vy > 0){
-      const cx = p.x + PET_W / 2, feet = p.y + PET_H;
+      const cx = p.x + pw / 2, feet = p.y + ph;
       for (const pl of w.platforms){
         if (cx < pl.x || cx > pl.x + pl.w) continue;
         if (prevFeet <= pl.y + 1 && feet >= pl.y){             // 이번 프레임에 윗변을 통과 → 착지
-          p.y = pl.y - PET_H; p.vy = 0; p.vx = 0; p.rot = 0;
+          p.y = pl.y - ph; p.vy = 0; p.vx = 0; p.rot = 0;
           p.support = pl;
           if (p.kind === "hopper" || p.kind === "bouncer"){    // 콩콩이들은 바로 다음 점프를 준비
             p.state = "hopwait"; p.timer = 6 + Math.random() * 36;
             if (p.kind === "bouncer") p.squash = 1;            // 슬라임·문어·양은 찌부
-            if (p.trail === "scribble") petTrace(p.x + PET_W / 2 - 5, pl.y - 4);                  // 연필 낙서
-            else if (p.trail === "dust") petTrace(p.x + PET_W / 2 - 5, pl.y - 4, "dust", 1100);   // 지우개 가루
+            if (p.trail === "scribble") petTrace(p.x + pw / 2 - 5, pl.y - 4);                  // 연필 낙서
+            else if (p.trail === "dust") petTrace(p.x + pw / 2 - 5, pl.y - 4, "dust", 1100);   // 지우개 가루
           } else if (p.kind === "frog"){                       // 개구리는 착지 찌부 후 잠깐 앉는다
             p.state = "idle"; p.timer = 30 + Math.random() * 70; p.squash = 0.5;
           } else {
@@ -1203,7 +1229,7 @@ function petUpdate(p, w){
         }
       }
     }
-    if (p.y > vh + 60){ p.y = -PET_H; p.vy = 0; }              // 안전망: 뚫고 떨어지면 위에서 재등장
+    if (p.y > vh + 60){ p.y = -ph; p.vy = 0; }              // 안전망: 뚫고 떨어지면 위에서 재등장
   }
 }
 
@@ -1274,7 +1300,7 @@ function petBindPointer(p){
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
       if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
       else {
-        petSay(p, p.sayings[Math.floor(Math.random() * p.sayings.length)], false);
+        petSay(p, petRandomSaying(p), false);
         if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
         else { petAirRelease(p); p.pop = 12; p.vx = 0; p.vy = 0; }
       }
@@ -1303,8 +1329,8 @@ function petBindPointer(p){
     const dx = e.clientX - last.x, dy = e.clientY - last.y;
     moved += Math.abs(dx) + Math.abs(dy);
     p.vx = dx; p.vy = dy;
-    p.x = Math.max(0, Math.min(window.innerWidth - PET_W, p.x + dx));
-    p.y = Math.max(0, Math.min(window.innerHeight - PET_H, p.y + dy));
+    p.x = Math.max(0, Math.min(window.innerWidth - (p.w || PET_W), p.x + dx));
+    p.y = Math.max(0, Math.min(window.innerHeight - (p.h || PET_H), p.y + dy));
     p.rot = Math.max(-25, Math.min(25, dx * 2));
     last = { x:e.clientX, y:e.clientY };
   });
@@ -1373,6 +1399,9 @@ function petGoldPalette(pal){
 function petSpawn(i, total, bag){
   const species = bag[i % bag.length];
   const speciesId = petSpeciesId(species);
+  const gridW = species.gridW || PET_GW, gridH = species.gridH || PET_GH;
+  const pixelScale = species.pixelScale || PET_SCALE;
+  const petW = species.width || gridW * pixelScale, petH = species.height || gridH * pixelScale;
   const gold = Math.random() < PET_GOLD_CHANCE;
   let palette = species.palettes[Math.floor(Math.random() * species.palettes.length)];
   if (gold) palette = petGoldPalette(palette);
@@ -1380,8 +1409,14 @@ function petSpawn(i, total, bag){
   const el = document.createElement("div");
   el.className = "pixel-pet";
   el.title = "붙잡아 던질 수 있어요";
+  el.style.width = petW + "px"; el.style.height = petH + "px";
   const cv = document.createElement("canvas");
-  cv.width = PET_W; cv.height = PET_H;
+  cv.width = petW; cv.height = petH;
+  let spriteImage = null;
+  if (species.spriteSheet && species.spriteSheet.src){
+    spriteImage = new Image();
+    spriteImage.src = species.spriteSheet.src;
+  }
   const bubble = document.createElement("div");
   bubble.className = "pixel-pet-bubble";
   el.appendChild(cv); el.appendChild(bubble);
@@ -1421,17 +1456,23 @@ function petSpawn(i, total, bag){
   else if (species.kind === "flutter"){ y0 = 60 + Math.random() * Math.max(40, window.innerHeight * 0.4); state0 = "flit"; }
   else if (species.kind === "fish"){ y0 = 80 + Math.random() * Math.max(40, window.innerHeight * 0.4); state0 = "bubble"; }
   else if (!grav){ y0 = 60 + Math.random() * Math.max(40, window.innerHeight * 0.3); state0 = species.kind === "ghost" ? "float" : "cruise"; }
-  else { y0 = -PET_H - i * 90; state0 = "fall"; }
+  else { y0 = -petH - i * 90; state0 = "fall"; }
+  const sayingsSpeciesId = species.baseSpeciesId || speciesId;
+  const defaultSayings = petDefaultSayings(speciesId, species);
+  const sayings = typeof petSayingsFor === "function"
+    ? petSayingsFor(sayingsSpeciesId, defaultSayings) : defaultSayings;
   const p = {
     el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
-    kind: species.kind, speciesId, art: species.art, palette,
-    baseArt: species.art, cheerArt: species.cheerArt || null,
-    sayings: (typeof petSayingsFor === "function" ? petSayingsFor(speciesId, petDefaultSayings(speciesId, species)) : petDefaultSayings(speciesId, species)), gold,
+    kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette,
+    baseArt: species.art, cheerArt: species.cheerArt || null, motionArt: species.motionArt || null,
+    spriteSheet:species.spriteSheet || null, spriteImage,
+    sayings, gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),
     speed: 0.85 + Math.random() * 0.4, grav,
-    x: Math.max(0, Math.min(window.innerWidth - PET_W, window.innerWidth * (0.2 + 0.6 * ((i + 1) / (total + 1))))),
+    x: Math.max(0, Math.min(window.innerWidth - petW, window.innerWidth * (0.2 + 0.6 * ((i + 1) / (total + 1))))),
     y: y0,
+    w:petW, h:petH, gridW, gridH, pixelScale,
     vx: 0, vy: 0, face: 1, side: -1, rot: 0, roll: 0, squash: 0, pop: 0,
     state: state0,
     t: Math.floor(Math.random() * 100), timer: 60, blink: 0, off: false, fadeT: 0,
@@ -1478,7 +1519,7 @@ function petStart(count){
   for (let i = 0; i < n; i++) w.pets.push(petSpawn(i, n, arrangedBag));
   w.onResize = () => {
     w.platforms = petCollectPlatforms();
-    for (const p of w.pets) p.x = Math.min(p.x, Math.max(0, window.innerWidth - PET_W));
+    for (const p of w.pets) p.x = Math.min(p.x, Math.max(0, window.innerWidth - (p.w || PET_W)));
   };
   window.addEventListener("resize", w.onResize);
   // 고양이가 커서를 사냥할 수 있게 마우스 위치를 기억해 둔다
@@ -1509,9 +1550,12 @@ window.addEventListener("mni18nchange", () => {
   if (petWorld){
     for (const p of petWorld.pets){
       const species = typeof petSpeciesById === "function" ? petSpeciesById(p.speciesId) : null;
-      if (species) p.sayings = typeof petSayingsFor === "function"
-        ? petSayingsFor(p.speciesId, petDefaultSayings(p.speciesId, species))
-        : petDefaultSayings(p.speciesId, species);
+      if (species){
+        const defaultSayings = petDefaultSayings(p.speciesId, species);
+        p.sayings = typeof petSayingsFor === "function"
+          ? petSayingsFor(p.sayingsSpeciesId || species.baseSpeciesId || p.speciesId, defaultSayings)
+          : defaultSayings;
+      }
     }
   }
   const dex = document.getElementById("petDexModal");
@@ -1539,7 +1583,8 @@ function petRefreshAll(){
 // ----- 펫 도감: 친구와 숨겨진 행동을 두 탭으로 보여준다 -----
 function petDexDrawMini(cv, art, palette, silhouette, scale){
   const s = scale || PET_SCALE;
-  cv.width = PET_GW * s; cv.height = PET_GH * s;
+  const gw = art.reduce((max, row) => Math.max(max, row.length), 0) || PET_GW;
+  cv.width = gw * s; cv.height = art.length * s;
   const ctx = cv.getContext("2d");
   for (let r = 0; r < art.length; r++){
     const row = art[r];
