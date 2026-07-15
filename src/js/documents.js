@@ -14,7 +14,7 @@ const CODE_EXTS = {
   xml:"xml", xsl:"xml", xslt:"xml", xsd:"xml", rss:"xml", atom:"xml", plist:"xml", wsdl:"xml", dbk:"xml", docbook:"xml",
   rst:"text", adoc:"text", asciidoc:"text", asc:"text", org:"text", textile:"text", tex:"text", latex:"text", sty:"text", cls:"text", wiki:"text", mediawiki:"text",
   r:"hash", lua:"c", pl:"hash", pm:"hash", tcl:"hash", awk:"hash", groovy:"c", gradle:"c", proto:"c", coffee:"hash", cmake:"hash", dockerfile:"hash", makefile:"hash", mk:"hash",
-  tsv:"text", log:"text", diff:"text", patch:"text"
+  tsv:"text", log:"text", diff:"text", patch:"text", tokens:"text"
 };
 const TEXT_ENCODING_EXTS = new Set(["csv","md","markdown","mdx","txt","html","htm","xhtml", ...Object.keys(CODE_EXTS), ...SUBTITLE_EXTS]);
 // ZIP 안에서 자동으로 열어줄 확장자(중첩 zip 포함)

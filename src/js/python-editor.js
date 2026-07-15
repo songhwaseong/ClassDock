@@ -81,8 +81,11 @@ function buildCodeEditor(text, prof, options={}){
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
     const fragment = document.createDocumentFragment();
-    errLines.forEach((line) => {
-      const band = document.createElement("div"); band.className = "err-line";
+    errLines.forEach((entry) => {
+      const item = (entry && typeof entry === "object") ? entry : { line:entry, severity:"error" };
+      const line = item.line;
+      const band = document.createElement("div");
+      band.className = "err-line" + (item.severity === "warning" ? " err-line-warning" : item.severity === "info" ? " err-line-info" : "");
       band.style.top = (pt + (line - 1) * lh - ta.scrollTop) + "px";
       band.style.height = lh + "px";
       fragment.appendChild(band);
@@ -167,6 +170,23 @@ function buildCodeEditor(text, prof, options={}){
     positionErr();
   };
   const markError = (n) => markErrorLines([n]);
+  // 실시간 진단은 타이핑 위치를 방해하지 않도록 자동 스크롤 없이 줄 표시만 갱신한다.
+  const setDiagnosticItems = (items) => {
+    const total = ta.value.split("\n").length;
+    const severityRank = { error:0, warning:1, info:2 };
+    const byLine = new Map();
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      item = item || {};
+      const line = parseInt(item.line, 10);
+      if (!(line >= 1 && line <= total)) return;
+      const severity = ["error", "warning", "info"].includes(item.severity) ? item.severity : "warning";
+      const current = byLine.get(line);
+      if (!current || severityRank[severity] < severityRank[current.severity]) byLine.set(line, { line, severity });
+    });
+    errLines = [...byLine.values()].sort((a, b) => a.line - b.line);
+    if (!errLines.length){ clearError(); return; }
+    positionErr();
+  };
 
   const focusLine = (n) => {
     const total = ta.value.split("\n").length;
@@ -1606,7 +1626,7 @@ function buildCodeEditor(text, prof, options={}){
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },
     openFind, closeFind, isFindOpen: () => findOpen, isCompletionOpen: () => !complete.hidden,
-    markError, markErrorLines, clearError, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
+    markError, markErrorLines, setDiagnosticItems, clearError, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
     setCellSplitMode, toggleCellBoundaryAtLine, isCellSplitMode: () => cellSplitMode, autoSplitCells,
     spotlightRange, clearSpotlight };
 }

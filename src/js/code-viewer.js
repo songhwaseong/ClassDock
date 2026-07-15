@@ -1704,6 +1704,55 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.renderInputFields = renderInputFields;
   // 편집 상태 반영: 되돌리기 활성화 + input() 미리입력 칸(로컬 파이썬이면 대화형이라 숨김)
   let draftTimer = 0;
+  const liveDiagnosticsEnabled = !isNotebook && typeof runPythonLiveDiagnostics === "function";
+  let liveDiagTimer = 0, liveDiagVersion = 0, liveDiagRunning = false;
+  let liveDiagPending = false, liveDiagPaused = false, liveDiagDestroyed = false;
+  const runLiveDiagnostics = async (version, source) => {
+    if (!liveDiagnosticsEnabled || liveDiagDestroyed || liveDiagPaused || ui.running) { liveDiagPending = true; return; }
+    if (liveDiagRunning){ liveDiagPending = true; return; }
+    liveDiagRunning = true;
+    try {
+      const items = await runPythonLiveDiagnostics(source, ui.fileBase);
+      if (!liveDiagDestroyed && !liveDiagPaused && !ui.running && version === liveDiagVersion && source === editor.getValue()){
+        editor.setDiagnosticItems(items);
+      }
+    } catch(_){
+      // 자동 진단 실패는 편집을 방해하거나 상태 메시지를 띄우지 않는다.
+      if (!liveDiagDestroyed && !liveDiagPaused && version === liveDiagVersion && source === editor.getValue()) editor.clearError();
+    } finally {
+      liveDiagRunning = false;
+      if (liveDiagPending && !liveDiagPaused && !liveDiagDestroyed){
+        liveDiagPending = false;
+        scheduleLiveDiagnostics(120);
+      }
+    }
+  };
+  const scheduleLiveDiagnostics = (delay=700) => {
+    liveDiagVersion++;
+    clearTimeout(liveDiagTimer);
+    if (!liveDiagnosticsEnabled || liveDiagDestroyed) return;
+    const source = editor.getValue();
+    if (!source.trim()){ liveDiagPending = false; editor.clearError(); return; }
+    if (liveDiagPaused || ui.running){ liveDiagPending = true; return; }
+    const version = liveDiagVersion;
+    liveDiagTimer = setTimeout(() => runLiveDiagnostics(version, source), delay);
+  };
+  ui.pauseLiveDiagnostics = () => {
+    liveDiagPaused = true;
+    liveDiagVersion++;
+    liveDiagPending = false;
+    clearTimeout(liveDiagTimer);
+  };
+  ui.resumeLiveDiagnostics = () => {
+    liveDiagPaused = false;
+    if (liveDiagPending){ liveDiagPending = false; scheduleLiveDiagnostics(); }
+  };
+  ui.destroyLiveDiagnostics = () => {
+    liveDiagDestroyed = true;
+    liveDiagVersion++;
+    liveDiagPending = false;
+    clearTimeout(liveDiagTimer);
+  };
   const persistDraft = () => {
     clearTimeout(draftTimer); draftTimer = 0;
     const value = editor.getValue();
@@ -1719,6 +1768,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     inputWrap.hidden = (_pyBackend === true) ? true : !usesInput(editor.getValue());
     if (!inputWrap.hidden) renderInputFields();
     clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 500);
+    scheduleLiveDiagnostics();
   };
   editor.ta.addEventListener("input", refreshEditState);
   editor.ta.addEventListener("focus", () => { if (ownerDoc) window.__lastCodeLinkDocId = ownerDoc.id; });
@@ -1756,6 +1806,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     ownerDoc.codeEditorFileBase = ui.fileBase;
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
     ownerDoc.cleanupFns.push(() => {
+      if (typeof ui.destroyLiveDiagnostics === "function") ui.destroyLiveDiagnostics();
       if (typeof ui.cancelRun === "function") ui.cancelRun();
     });
     // 이 코드 문서를 가리키는 PDF 핀들을 거터 마커로 표시(코드→PDF 역방향 이동).

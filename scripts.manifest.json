@@ -116,7 +116,7 @@
     {
       "src": "vendor/jszip3.min.js",
       "file": "jszip3.min.js",
-      "sha384": "sha384-AlTJ+VCagfX4FDFi+LRUl2RTzMl/0vpKDphc3QY6FIT8stPVGR6RqD5LHirPt5KM"
+      "sha384": "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
     },
     {
       "src": "vendor/jszip.min.js",
@@ -166,7 +166,7 @@
     {
       "src": "vendor/hwp.global.js",
       "file": "hwp.global.js",
-      "sha384": "sha384-MQnvsTyMfoP4jg0s8W6Cdh6D/jO11/GaEP9WwCqorrCGO7DGwH38O4qwWfZNt9oD"
+      "sha384": "sha384-Aeim5qNqkBWyhTliynTbE06e4P1vdsz2lM6BDZCcYmLsgapOaLHSY3uQ+JAGXutQ"
     },
     {
       "src": "vendor/pdf.min.js",
@@ -187,7 +187,7 @@
     {
       "src": "vendor/html-to-image.js",
       "file": "html-to-image.js",
-      "sha384": "sha384-ypwawCzIKTXFz66bA+5EXBfGOa/AbLT1ATOCeOAnt6YlUL8HkbttN4cOOWWpQfa+"
+      "sha384": "sha384-xLgzHdt2mattQ+ahbon5GzS7s37ucfD7HaPIlBVG9JYfSqIv90k4zj+w9rnnZbEK"
     },
     {
       "src": "vendor/zip-full.min.js",

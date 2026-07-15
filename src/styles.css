@@ -2694,6 +2694,8 @@
   /* 실행 에러 줄 표시(반투명 빨간 띠 + 왼쪽 빨간 바). 코드 수정 시 JS가 숨긴다 */
   .err-line{position:absolute;left:0;right:0;pointer-events:none;z-index:2;
     background:rgba(239,68,68,.16);border-left:3px solid #ef4444;box-shadow:inset 0 0 0 1px rgba(239,68,68,.22)}
+  .err-line.err-line-warning{background:rgba(245,158,11,.14);border-left-color:#f59e0b;box-shadow:inset 0 0 0 1px rgba(245,158,11,.20)}
+  .err-line.err-line-info{background:rgba(59,130,246,.12);border-left-color:#3b82f6;box-shadow:inset 0 0 0 1px rgba(59,130,246,.18)}
   .trace-line{position:absolute;left:0;right:0;pointer-events:none;z-index:2;
     background:rgba(59,130,246,.16);border-left:3px solid #3b82f6;box-shadow:inset 0 0 0 1px rgba(59,130,246,.20)}
   /* 현재(커서) 줄 강조: 글자 뒤에 깔리는 은은한 띠(맨 뒤 레이어이므로 z-index 불필요) */

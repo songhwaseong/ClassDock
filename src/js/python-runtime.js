@@ -21,6 +21,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
   const { btn, status, outPanel, split } = ui;
   const stdin = (grading || diagnosing) ? "" : (ui.stdin ? ui.stdin.value : "");
   if (ui.running) return;
+  if (typeof ui.pauseLiveDiagnostics === "function") ui.pauseLiveDiagnostics();
   ui.running = true;
   // 수업 리플레이 녹화 중이면 실행 시작(확정 코드)을 파이썬 트랙에 기록(일반 실행만).
   if (!grading && !diagnosing && !tracing && typeof lessonPyOnRun === "function") lessonPyOnRun(studentSource, ui.fileBase);
@@ -329,7 +330,23 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
     if (ui.analyzeBtn) ui.analyzeBtn.disabled = false;
     if (ui.gradeBtn) ui.gradeBtn.disabled = false;
     if (ui.clearBtn) ui.clearBtn.disabled = false;
+    if (typeof ui.resumeLiveDiagnostics === "function") ui.resumeLiveDiagnostics();
   }
+}
+
+// 편집 중 사용하는 무소음 진단 경로. 학생 코드는 실행하지 않고 기존 compile/AST 하니스만 돌린다.
+// 수동 진단과 달리 출력 패널·상태·버튼을 바꾸지 않으며 호출자가 최신 결과 여부를 판정한다.
+async function runPythonLiveDiagnostics(src, fileName){
+  const executionSource = buildPythonDiagnosticHarness(String(src == null ? "" : src), fileName || "practice.py");
+  let result;
+  if (await pythonBackendAvailable()) result = await runPythonViaBackend(executionSource, "");
+  else {
+    const task = startPyodideWorkerRun(executionSource, null, "", null, null);
+    result = await task.promise;
+  }
+  const parsed = parsePythonMarkedReport(result && result.stdout, PY_DIAG_MARKER);
+  if (!parsed || !parsed.report) throw new Error("live-diagnostic-report-missing");
+  return normalizePythonDiagnostics(parsed.report.diagnostics).filter(item => item.severity !== "info");
 }
 
 // 로컬 백엔드(exe 런처)로 실행: 소스를 보내고 {stdout, stderr, code} 회수

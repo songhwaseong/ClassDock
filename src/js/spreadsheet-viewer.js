@@ -3263,6 +3263,27 @@ async function renderXlsx(file, host, doc){
     if (!(redoStacks[name] || []).length){ toast("다시 실행할 작업이 없어요.", 1400); return; }
     applyRestore(name, redoStacks, undoStacks);
   };
+  // 도구모음 버튼을 누르면 포커스가 표 밖으로 이동하므로, XLSX 탭 전체에서 히스토리 단축키를 받는다.
+  // 단, 셀·검색창 등 텍스트 입력 중에는 브라우저 기본 undo/redo를 그대로 유지한다.
+  const handleSpreadsheetHistoryKeydown = (e) => {
+    if (!editMode || !doc || state !== doc || e.defaultPrevented || e.isComposing) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const key = String(e.key || "").toLowerCase();
+    const undo = key === "z" && !e.shiftKey;
+    const redo = key === "y" || (key === "z" && e.shiftKey);
+    if (!undo && !redo) return;
+    const target = e.target;
+    if (target && target.closest && target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    if (document.querySelector(".modal:not([hidden])")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (redo) doRedo(); else doUndo();
+  };
+  document.addEventListener("keydown", handleSpreadsheetHistoryKeydown, true);
+  if (doc){
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => document.removeEventListener("keydown", handleSpreadsheetHistoryKeydown, true));
+  }
   // Del/Backspace: 선택 셀의 내용 삭제(서식은 유지 — 엑셀과 동일)
   // 서식·수식까지 함께 옮기는 내부 클립보드. 시스템 클립보드에는 표시용 TSV 를 쓰고,
   // 붙여넣을 때 클립보드 텍스트가 우리가 쓴 TSV 그대로면(=중간에 외부 복사 없음) 서식까지 복원한다.
@@ -3327,7 +3348,7 @@ async function renderXlsx(file, host, doc){
     toast("선택 영역을 잘라냈어요(서식 포함). 붙여넣기(Ctrl+V)로 옮기세요.", 1800);
   };
 
-  // Enter/F2 편집 시작 · Del 내용 삭제 · Ctrl+Z/Y 실행취소 · Ctrl+X 잘라내기 · Ctrl+S 저장
+  // Enter/F2 편집 시작 · Del 내용 삭제 · Ctrl+X 잘라내기 · Ctrl+S 저장
   sheet.addEventListener("keydown", (e) => {
     if (!editMode) return;
     const t = e.target;
@@ -3346,9 +3367,7 @@ async function renderXlsx(file, host, doc){
     }
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const k = String(e.key).toLowerCase();
-    if (k === "z" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); doUndo(); }
-    else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
-    else if (k === "c" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); copyRichSelection(); }
+    if (k === "c" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); copyRichSelection(); }
     else if (k === "x" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); cutSelection(); }
     else if (k === "s" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); quickSave(); }
   });
