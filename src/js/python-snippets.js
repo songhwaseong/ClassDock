@@ -1504,8 +1504,9 @@ function ensureJediProbe(){
 const jediReady = () => _jediBackend === true;
 async function requestJediCompletions(source, line, column){
   try {
+    const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/complete", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, line, column }) });
+      body: JSON.stringify({ source:analysisSource, line, column }) });
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || data.ok === false || !Array.isArray(data.items)) return null;
@@ -1524,8 +1525,9 @@ async function requestJediHelp(source, line, column){
   const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), 8000) : 0;   // 응답이 없으면 8초 후 포기(로딩 무한대기 방지)
   try {
+    const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/complete", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, line, column, mode: "help" }), signal: controller ? controller.signal : undefined });
+      body: JSON.stringify({ source:analysisSource, line, column, mode: "help" }), signal: controller ? controller.signal : undefined });
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || data.ok === false) return null;
@@ -1541,8 +1543,9 @@ async function requestJediHelp(source, line, column){
 }
 async function requestJediDefinition(source, line, column){
   try {
+    const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/definition", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, line, column, mode: "definition" }) });
+      body: JSON.stringify({ source:analysisSource, line, column, mode: "definition" }) });
     if (!res.ok) return null;
     const data = await res.json();
     return data && data.ok ? data : data || null;

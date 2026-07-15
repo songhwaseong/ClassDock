@@ -607,6 +607,15 @@ function buildCodeEditor(text, prof, options={}){
     const active = complete.children[completion.index]; if (active) active.scrollIntoView({ block: "nearest" });
   };
   let completionSeq = 0;                                   // 비동기 Jedi 응답 경합 방지(최신 요청만 반영)
+  const dismissCompletion = () => {
+    completionSeq++;
+    hideCompletion();
+  };
+  const closeCompletionOnOutsidePointer = (event) => {
+    if (complete.hidden || complete.contains(event.target)) return;
+    dismissCompletion();
+  };
+  document.addEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
   const showLocalCompletion = (word, contextSource=null, includeImports=false) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
     const local = pythonCompletionCandidates(source, word.prefix, completionWords);
@@ -973,7 +982,7 @@ function buildCodeEditor(text, prof, options={}){
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
     move(e);
   });
-  ta.addEventListener("blur", () => { exitCol(); exitLinkedEdit(); hideCompletion(); clearDefinitionHover(); });
+  ta.addEventListener("blur", () => { exitCol(); exitLinkedEdit(); dismissCompletion(); clearDefinitionHover(); });
   // 더블클릭 단어 선택: 기본 선택의 공백 깜빡임을 막되, 한글처럼 폭이 넓은 문자가 앞에 있어도 밀리지 않게
   // 클릭한 줄의 실제 렌더링 폭을 측정해서 문자 위치를 찾는다.
   const isWordChar = (ch) => !!ch && (/[A-Za-z0-9_]/.test(ch) || (ch.charCodeAt(0) > 127 && !/\s/.test(ch)));
@@ -1696,6 +1705,7 @@ function buildCodeEditor(text, prof, options={}){
     destroy: () => {
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);
       document.removeEventListener("selectionchange", syncSelection);
+      document.removeEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
       window.removeEventListener("scroll", hidePortalOnScroll, true);
       window.removeEventListener("resize", hidePortalOnScroll);
       help.remove();

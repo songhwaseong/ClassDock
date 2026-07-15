@@ -579,6 +579,19 @@
     }
   }
 
+  // Jedi cannot always infer the concrete type returned by inherited class loaders
+  // such as Word2Vec.load(). Add an analysis-only annotation to earlier assignment
+  // lines while keeping the user's source and the active cursor line unchanged.
+  function pythonCompletionInferenceSource(source, cursorLine=1) {
+    const lines = String(source == null ? "" : source).split("\n");
+    const stop = Math.max(0, Math.min(lines.length, (parseInt(cursorLine, 10) || 1) - 1));
+    const classLoadAssignment = /^(\s*)([A-Za-z_]\w*)(\s*)=(\s*)((?:[A-Za-z_]\w*\.)*[A-Z][A-Za-z0-9_]*)(\.load\s*\()/;
+    for (let i = 0; i < stop; i++) {
+      lines[i] = lines[i].replace(classLoadAssignment, "$1$2: $5$3=$4$5$6");
+    }
+    return lines.join("\n");
+  }
+
   // 아직 코드에 import하지 않은 이름도 초보자가 바로 쓸 수 있게, 자주 쓰는
   // 표준/수업 라이브러리의 import 경로를 함께 제안한다. 외부 라이브러리는
   // 실행 시 기존 설치 안내가 그대로 동작한다.
@@ -2472,7 +2485,7 @@
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,

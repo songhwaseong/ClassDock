@@ -5,7 +5,7 @@ const {
   htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle,
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
-  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, applyLinkedIdentifierEdit, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -404,6 +404,24 @@ test("import completion suggestions carry their import statement", () => {
   }]);
   assert.equal(pythonImportCompletionCandidates("from pathlib import Path\nPa", "Pa").length, 0);
   assert.equal(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa").length, 0);
+});
+
+test("Class.load 대입은 Jedi 분석용 반환 타입을 보강하되 실제 입력 줄은 바꾸지 않는다", () => {
+  const source = [
+    "from gensim.models import word2vec",
+    "model = word2vec.Word2Vec.load(filename)",
+    "model.wv.get_"
+  ].join("\n");
+  assert.equal(pythonCompletionInferenceSource(source, 3), [
+    "from gensim.models import word2vec",
+    "model: word2vec.Word2Vec = word2vec.Word2Vec.load(filename)",
+    "model.wv.get_"
+  ].join("\n"));
+  assert.equal(pythonCompletionInferenceSource(source, 2), source);
+  assert.equal(
+    pythonCompletionInferenceSource("value = loader.load(path)\nvalue.", 2),
+    "value = loader.load(path)\nvalue."
+  );
 });
 
 test("더블클릭 변수 선택은 옆 공백을 제외하고 식별자 전체로 보정한다", () => {
