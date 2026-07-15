@@ -12,6 +12,8 @@ const root = __dirname;
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 const manifest = JSON.parse(read("scripts.manifest.json"));
 const esc = (code) => code.replace(/<\/script/gi, "<\\/script");
+const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+const normalizedTextBytes = (bytes) => Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
 
 function requireTag(source, tag, label) {
   if (!source.includes(tag)) {
@@ -25,7 +27,8 @@ function verifyVendorIntegrity(item) {
     throw new Error(`Vendor SHA-384 is missing or invalid: ${item.file}`);
   }
   const bytes = fs.readFileSync(path.join(root, "vendor", item.file));
-  const actual = "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+  const raw = sha384(bytes);
+  const actual = raw === item.sha384 ? raw : sha384(normalizedTextBytes(bytes));
   if (actual !== item.sha384) {
     throw new Error(`Vendor SHA-384 mismatch: ${item.file}`);
   }

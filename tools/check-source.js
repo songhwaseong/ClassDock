@@ -7,6 +7,8 @@ const crypto = require("crypto");
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
+const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+const normalizedTextBytes = (bytes) => Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
 const scripts = [...html.matchAll(/<script\s+src="(src\/js\/[^"]+)"\s*><\/script>/g)].map((match) => match[1]);
 const manifestScripts = manifest.localScripts.map((file) => "src/js/" + file);
 
@@ -51,7 +53,12 @@ for (const item of manifest.vendorScripts) {
   const vendorPath = path.join(root, "vendor", item.file);
   if (!fs.existsSync(vendorPath)) throw new Error(`Vendor file missing: ${item.file}`);
   if (!item.sha384 || !/^sha384-[A-Za-z0-9+/]+={0,2}$/.test(item.sha384)) throw new Error(`Vendor SHA-384 is missing or invalid: ${item.file}`);
-  const actualHash = "sha384-" + crypto.createHash("sha384").update(fs.readFileSync(vendorPath)).digest("base64");
+  const vendorBytes = fs.readFileSync(vendorPath);
+  // Preserve the original byte-level check. If it differs, also accept the
+  // canonical LF form because Git may convert checked-out JavaScript to CRLF
+  // on Windows.
+  const rawHash = sha384(vendorBytes);
+  const actualHash = rawHash === item.sha384 ? rawHash : sha384(normalizedTextBytes(vendorBytes));
   if (actualHash !== item.sha384) throw new Error(`Vendor SHA-384 mismatch: ${item.file}`);
   if (item.worker && !fs.existsSync(path.join(root, "vendor", item.worker))) throw new Error(`Vendor worker missing: ${item.worker}`);
 }

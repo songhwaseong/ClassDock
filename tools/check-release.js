@@ -12,6 +12,8 @@ const source = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8
 const offlinePath = path.join(root, "manneung-classroom-offline.html");
 const offline = fs.readFileSync(offlinePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
+const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+const normalizedTextBytes = (bytes) => Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
 
 function fail(message) {
   throw new Error(`Release artifact check failed: ${message}`);
@@ -36,7 +38,8 @@ function executableScriptSources(markup) {
 for (const item of manifest.vendorScripts) {
   if (!item.src.startsWith("vendor/")) fail(`vendor URL must stay local: ${item.src}`);
   const bytes = fs.readFileSync(path.join(root, "vendor", item.file));
-  const actual = "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
+  const raw = sha384(bytes);
+  const actual = raw === item.sha384 ? raw : sha384(normalizedTextBytes(bytes));
   if (actual !== item.sha384) fail(`vendor hash mismatch: ${item.file}`);
   if (!source.includes(`<script src="${item.src}"></script>`)) fail(`source vendor tag missing: ${item.src}`);
 }
