@@ -2701,6 +2701,22 @@
     background:rgba(239,68,68,.16);border-left:3px solid #ef4444;box-shadow:inset 0 0 0 1px rgba(239,68,68,.22)}
   .err-line.err-line-warning{background:rgba(245,158,11,.14);border-left-color:#f59e0b;box-shadow:inset 0 0 0 1px rgba(245,158,11,.20)}
   .err-line.err-line-info{background:rgba(59,130,246,.12);border-left-color:#3b82f6;box-shadow:inset 0 0 0 1px rgba(59,130,246,.18)}
+  .code-diagnostic-tooltip{position:fixed;z-index:172;width:max-content;max-width:min(460px,calc(100vw - 20px));
+    overflow:hidden;pointer-events:none;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);
+    box-shadow:0 14px 36px rgba(15,23,42,.24),0 0 0 1px rgba(148,163,184,.08);
+    font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
+  .code-diagnostic-tooltip-item{padding:9px 11px;border-left:3px solid #f59e0b}
+  .code-diagnostic-tooltip-item+.code-diagnostic-tooltip-item{border-top:1px solid var(--border)}
+  .code-diagnostic-tooltip-item.is-error{border-left-color:#ef4444}.code-diagnostic-tooltip-item.is-info{border-left-color:#3b82f6}
+  .code-diagnostic-tooltip-head{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;color:var(--muted)}
+  .code-diagnostic-tooltip-head strong{color:#d97706;font-size:11.5px}.code-diagnostic-tooltip-item.is-error .code-diagnostic-tooltip-head strong{color:#dc2626}
+  .code-diagnostic-tooltip-item.is-info .code-diagnostic-tooltip-head strong{color:#2563eb}
+  .code-diagnostic-tooltip-message{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12.5px;line-height:1.5}
+  .code-diagnostic-tooltip-hint{margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:11.5px;line-height:1.45}
+  [data-theme="dark"] .code-diagnostic-tooltip{border-color:#334155;background:linear-gradient(180deg,#172033,#111827);box-shadow:0 14px 36px rgba(2,6,23,.52)}
+  [data-theme="dark"] .code-diagnostic-tooltip-head strong{color:#fbbf24}
+  [data-theme="dark"] .code-diagnostic-tooltip-item.is-error .code-diagnostic-tooltip-head strong{color:#fca5a5}
+  [data-theme="dark"] .code-diagnostic-tooltip-item.is-info .code-diagnostic-tooltip-head strong{color:#93c5fd}
   .trace-line{position:absolute;left:0;right:0;pointer-events:none;z-index:2;
     background:rgba(59,130,246,.16);border-left:3px solid #3b82f6;box-shadow:inset 0 0 0 1px rgba(59,130,246,.20)}
   /* 현재(커서) 줄 강조: 글자 뒤에 깔리는 은은한 띠(맨 뒤 레이어이므로 z-index 불필요) */

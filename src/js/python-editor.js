@@ -61,6 +61,11 @@ function buildCodeEditor(text, prof, options={}){
   const help = document.createElement("div"); help.className = "code-help code-help-portal"; help.hidden = true;
   help.setAttribute("role", "tooltip");
   document.body.appendChild(help);
+  const diagnosticTip = document.createElement("div");
+  diagnosticTip.className = "code-diagnostic-tooltip";
+  diagnosticTip.hidden = true;
+  diagnosticTip.setAttribute("role", "tooltip");
+  document.body.appendChild(diagnosticTip);
   host.appendChild(gutter); host.appendChild(edit);
   // plain=일반 텍스트/코드 편집(.py 실행 화면이 아님). 이때는 파이썬 전용 지능(Jedi 완성·정의 이동·함수 도움말·
   // 파이썬 import 제안)을 끄고, 프로파일에 맞는 버퍼 단어 완성만 쓴다. 로컬 파이썬이 떠 있어도(jediReady=true)
@@ -75,6 +80,64 @@ function buildCodeEditor(text, prof, options={}){
 
   // ===== 실행 에러 줄 표시: 에러 난 줄에 빨간 띠. 스크롤 따라 움직이고, 코드 수정 시 사라진다 =====
   let errLines = [];
+  let diagnosticTipLine = 0;
+  const hideDiagnosticTooltip = () => {
+    diagnosticTipLine = 0;
+    diagnosticTip.hidden = true;
+    diagnosticTip.replaceChildren();
+  };
+  const positionDiagnosticTooltip = (clientX, clientY) => {
+    const gap = 14, margin = 10;
+    let left = clientX + gap, top = clientY + gap;
+    diagnosticTip.style.left = left + "px";
+    diagnosticTip.style.top = top + "px";
+    const rect = diagnosticTip.getBoundingClientRect();
+    if (left + rect.width > window.innerWidth - margin) left = Math.max(margin, clientX - rect.width - gap);
+    if (top + rect.height > window.innerHeight - margin) top = Math.max(margin, clientY - rect.height - gap);
+    diagnosticTip.style.left = left + "px";
+    diagnosticTip.style.top = top + "px";
+  };
+  const showDiagnosticTooltip = (entry, clientX, clientY) => {
+    const diagnostics = entry && Array.isArray(entry.diagnostics) ? entry.diagnostics : [];
+    if (!diagnostics.length){ hideDiagnosticTooltip(); return; }
+    if (diagnosticTipLine !== entry.line){
+      diagnosticTip.replaceChildren();
+      diagnostics.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "code-diagnostic-tooltip-item is-" + item.severity;
+        const head = document.createElement("div"); head.className = "code-diagnostic-tooltip-head";
+        const severity = document.createElement("strong");
+        severity.textContent = item.severity === "error" ? "오류" : item.severity === "info" ? "참고" : "경고";
+        const where = document.createElement("span");
+        where.textContent = item.line + "줄 " + (item.column + 1) + "칸" + (item.code ? " · " + item.code : "");
+        head.append(severity, where);
+        const message = document.createElement("div"); message.className = "code-diagnostic-tooltip-message"; message.textContent = item.message;
+        row.append(head, message);
+        if (item.hint){
+          const hint = document.createElement("div"); hint.className = "code-diagnostic-tooltip-hint"; hint.textContent = "힌트: " + item.hint;
+          row.appendChild(hint);
+        }
+        diagnosticTip.appendChild(row);
+      });
+      diagnosticTipLine = entry.line;
+    }
+    diagnosticTip.hidden = false;
+    positionDiagnosticTooltip(clientX, clientY);
+  };
+  const diagnosticEntryAtPointer = (event) => {
+    const rect = ta.getBoundingClientRect();
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
+    const contentY = event.clientY - rect.top + ta.scrollTop - pt;
+    if (contentY < 0) return null;
+    const line = Math.floor(contentY / lh) + 1;
+    return errLines.find((entry) => entry && typeof entry === "object" && entry.line === line && Array.isArray(entry.diagnostics)) || null;
+  };
+  const handleDiagnosticPointerMove = (event) => {
+    const entry = diagnosticEntryAtPointer(event);
+    if (!entry){ hideDiagnosticTooltip(); return; }
+    showDiagnosticTooltip(entry, event.clientX, event.clientY);
+  };
   const positionErr = () => {
     errBands.replaceChildren();
     if (!errLines.length) return;
@@ -92,7 +155,7 @@ function buildCodeEditor(text, prof, options={}){
     });
     errBands.appendChild(fragment);
   };
-  const clearError = () => { errLines = []; errBands.replaceChildren(); };
+  const clearError = () => { errLines = []; errBands.replaceChildren(); hideDiagnosticTooltip(); };
   let traceLine = 0;
   const positionTrace = () => {
     if (!traceLine){ traceBand.hidden = true; return; }
@@ -172,6 +235,7 @@ function buildCodeEditor(text, prof, options={}){
   const markError = (n) => markErrorLines([n]);
   // 실시간 진단은 타이핑 위치를 방해하지 않도록 자동 스크롤 없이 줄 표시만 갱신한다.
   const setDiagnosticItems = (items) => {
+    hideDiagnosticTooltip();
     const total = ta.value.split("\n").length;
     const severityRank = { error:0, warning:1, info:2 };
     const byLine = new Map();
@@ -180,8 +244,19 @@ function buildCodeEditor(text, prof, options={}){
       const line = parseInt(item.line, 10);
       if (!(line >= 1 && line <= total)) return;
       const severity = ["error", "warning", "info"].includes(item.severity) ? item.severity : "warning";
-      const current = byLine.get(line);
-      if (!current || severityRank[severity] < severityRank[current.severity]) byLine.set(line, { line, severity });
+      const diagnostic = {
+        line,
+        column:Math.max(0, parseInt(item.column, 10) || 0),
+        severity,
+        code:String(item.code == null ? "" : item.code),
+        message:String(item.message == null ? "" : item.message),
+        hint:String(item.hint == null ? "" : item.hint)
+      };
+      if (!diagnostic.message) return;
+      const current = byLine.get(line) || { line, severity, diagnostics:[] };
+      current.diagnostics.push(diagnostic);
+      if (severityRank[severity] < severityRank[current.severity]) current.severity = severity;
+      byLine.set(line, current);
     });
     errLines = [...byLine.values()].sort((a, b) => a.line - b.line);
     if (!errLines.length){ clearError(); return; }
@@ -1154,7 +1229,9 @@ function buildCodeEditor(text, prof, options={}){
       else hideCompletion();
     } else if (!linkedEdit.active && !complete.hidden) hideCompletion();
   });
-  ta.addEventListener("scroll", () => { sync(); hideCompletion(); if (col.active) col.render(); });
+  ta.addEventListener("mousemove", handleDiagnosticPointerMove);
+  ta.addEventListener("mouseleave", hideDiagnosticTooltip);
+  ta.addEventListener("scroll", () => { sync(); hideCompletion(); hideDiagnosticTooltip(); if (col.active) col.render(); });
   ta.addEventListener("select", sync);
 
   /* ===== 편집기 내 찾기/바꾸기(Ctrl+H) =====
@@ -1622,6 +1699,7 @@ function buildCodeEditor(text, prof, options={}){
       window.removeEventListener("scroll", hidePortalOnScroll, true);
       window.removeEventListener("resize", hidePortalOnScroll);
       help.remove();
+      diagnosticTip.remove();
       if (completionPortal) complete.remove();
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },

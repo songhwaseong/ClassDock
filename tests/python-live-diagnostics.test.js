@@ -16,6 +16,9 @@ test("Python 실시간 진단은 입력을 모아 최신 코드 결과만 줄 �
   assert.match(viewer, /editor\.setDiagnosticItems\(items\)/);
   assert.match(editor, /const setDiagnosticItems = \(items\) =>/);
   assert.match(editor, /err-line-warning/);
+  assert.match(editor, /current\.diagnostics\.push\(diagnostic\)/);
+  assert.match(editor, /ta\.addEventListener\("mousemove", handleDiagnosticPointerMove\)/);
+  assert.match(editor, /code-diagnostic-tooltip-hint/);
 });
 
 test("Python 실시간 진단은 코드를 실행하지 않고 수동 실행 중에는 일시정지한다", () => {
