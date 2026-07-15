@@ -335,23 +335,58 @@ function renderFolderPdfGallery(doc, host){
 }
 
 async function loadText(file, options={}){
-  let binary = false;
-  try {
-    const head = new Uint8Array(await file.slice(0, 8192).arrayBuffer());
-    let ctrl = 0;
-    for (let i = 0; i < head.length; i++){
-      const b = head[i];
-      if (b === 0){ binary = true; break; }
-      if (b < 9 || (b > 13 && b < 32)) ctrl++;
-    }
-    if (!binary && head.length && ctrl / head.length > 0.1) binary = true;
-  } catch(e){}
-  if (binary){ toast("지원하지 않는 형식: " + file.name, 2500); return; }
+  const textLike = typeof isLikelyTextFile === "function" ? await isLikelyTextFile(file) : true;
+  if (!textLike){ if (!options.bulk) toast("지원하지 않는 형식: " + file.name, 2500); return; }
   const doc = makeDoc("office", file.name, options);
   doc.sourceFile = file;
+  doc.isTextFile = true;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
     await renderCode(file, host, "", "text");
+  };
+  refreshChrome();
+  activateIfIdle(doc, options);
+  return doc;
+}
+
+// .model/.npy 학습 산출물은 텍스트로 해석하지 않는다. 원본 File을 유지해 작업공간과
+// 다운로드에서 동일한 바이트를 보존한다.
+async function loadBinaryAsset(file, options={}){
+  const doc = makeDoc("binary", file.name, options);
+  doc.sourceFile = file;
+  doc.binaryAsset = true;
+  doc.render = async () => {
+    const host = doc.el;
+    host.innerHTML = "";
+    host.scrollTop = 0;
+    const panel = document.createElement("section");
+    panel.className = "binary-asset-card";
+    const icon = document.createElement("div");
+    icon.className = "binary-asset-icon";
+    icon.textContent = fileExtOf(file.name).toUpperCase() || "BIN";
+    const title = document.createElement("h2");
+    title.textContent = file.name;
+    const detail = document.createElement("p");
+    detail.textContent = `${humanSize(file.size || 0)} · 이진 파일 · 텍스트 편집은 제공하지 않습니다.`;
+    const help = document.createElement("p");
+    help.className = "binary-asset-help";
+    help.textContent = fileExtOf(file.name).toLowerCase() === "model"
+      ? "Gensim 등에서 저장한 모델 원본을 손상 없이 보관합니다. 같이 생성된 .npy 보조 파일도 함께 유지하세요."
+      : "NumPy 배열 원본을 손상 없이 보관합니다.";
+    const download = document.createElement("button");
+    download.type = "button";
+    download.className = "btn primary";
+    download.textContent = "원본 다운로드";
+    download.addEventListener("click", () => {
+      const source = doc.sourceFile || file;
+      const url = URL.createObjectURL(source);
+      const link = document.createElement("a");
+      link.href = url; link.download = doc.name || file.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    panel.append(icon, title, detail, help, download);
+    host.appendChild(panel);
   };
   refreshChrome();
   activateIfIdle(doc, options);

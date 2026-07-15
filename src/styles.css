@@ -1135,6 +1135,11 @@
     padding:8px 12px;border-radius:8px;opacity:.85;z-index:15;max-width:280px;line-height:1.5}
   /* ===== 오피스 뷰어 ===== */
   .office{position:absolute;inset:0;overflow:auto;background:var(--viewer);padding:24px 12px 60px;isolation:isolate}
+  .binary-asset-card{max-width:560px;margin:48px auto;padding:32px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 12px 36px #00000012;text-align:center}
+  .binary-asset-icon{display:grid;place-items:center;width:72px;height:72px;margin:0 auto 18px;border-radius:16px;background:#7c3aed1c;color:#7c3aed;font-weight:800;font-size:15px;letter-spacing:.04em}
+  .binary-asset-card h2{margin:0 0 10px;overflow-wrap:anywhere}
+  .binary-asset-card p{margin:8px 0;color:var(--muted);line-height:1.65}
+  .binary-asset-card .binary-asset-help{margin:18px 0 22px;font-size:13px}
   /* ===== 화이트보드(독립 칠판) ===== */
   .office.wb-doc{padding:0;overflow:hidden}
   /* 단일 탭 가드: 비활성 창을 덮는 안내 오버레이 */

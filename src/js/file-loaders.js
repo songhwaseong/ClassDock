@@ -1,5 +1,29 @@
 "use strict";
 
+const UNKNOWN_TEXT_SAMPLE_BYTES = 8192;
+const UNKNOWN_TEXT_ARCHIVE_PROBE_CAP = 32 * 1024 * 1024;
+
+// 등록되지 않은 확장자라도 실제 내용이 텍스트라면 안전하게 연다. NUL/제어문자가 많은
+// 파일은 이진으로 보고 건너뛰므로 임의의 바이너리를 텍스트로 손상시키지 않는다.
+function isLikelyTextBytes(bytes){
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  if (view.length >= 2 && ((view[0] === 0xFF && view[1] === 0xFE) || (view[0] === 0xFE && view[1] === 0xFF))) return true;
+  let ctrl = 0;
+  for (let i = 0; i < view.length; i++){
+    const b = view[i];
+    if (b === 0) return false;
+    if (b < 9 || (b > 13 && b < 32)) ctrl++;
+  }
+  return !view.length || ctrl / view.length <= 0.1;
+}
+async function isLikelyTextFile(file){
+  try { return isLikelyTextBytes(new Uint8Array(await file.slice(0, UNKNOWN_TEXT_SAMPLE_BYTES).arrayBuffer())); }
+  catch(_){ return false; }
+}
+function isUnknownTextArchiveCandidate(ext, size){
+  return !ZIP_OPENABLE.includes(ext) && (Number(size) || 0) <= UNKNOWN_TEXT_ARCHIVE_PROBE_CAP;
+}
+
 /* ===== 파일 로딩 ===== */
 async function handleFiles(files, options={}){
   const arr = [...files];
@@ -41,6 +65,7 @@ async function handleFiles(files, options={}){
         else made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxConvertError: _lastPptxConvertError || "알 수 없는 변환 실패" }); // 백엔드 없음/변환 실패 → pptxjs 미리보기로 폴백
       }
       else if (SQLITE_EXTS.includes(ext)) made = await loadSqlite(file, opts);
+      else if (BINARY_ASSET_EXTS.has(ext)) made = await loadBinaryAsset(file, opts);
       else if (ext === "ipynb"){
         if (typeof notebookModeEnabled === "function" && notebookModeEnabled()){
           // [실험·Phase1] 셀 노트북 뷰(읽기전용 미리보기). 콘솔에서 mnNotebookMode(false) 로 끄면 기존 변환(.py) 뷰.
@@ -192,7 +217,7 @@ async function loadZip(file, options={}){
       if (base && base !== ".DS_Store") archivePaths.push(path);
       if (!base || (base.charAt(0) === "." && !isEnvFile(base))) continue;   // 숨김(.DS_Store 등) — .env 계열은 예외
       const ext = fileExtOf(base);
-      if (!ZIP_OPENABLE.includes(ext)){ unsupported++; continue; }
+      if (!ZIP_OPENABLE.includes(ext) && !isUnknownTextArchiveCandidate(ext, e.uncompressedSize)){ unsupported++; continue; }
       openable++;
       if (e.encrypted) encrypted = true;
     }
@@ -262,14 +287,16 @@ async function loadZip(file, options={}){
       const base = path.split("/").pop();
       if (!base || (base.charAt(0) === "." && !isEnvFile(base))) continue;
       const ext = fileExtOf(base);
-      if (!ZIP_OPENABLE.includes(ext)) continue;
       const entrySize = Number(e.uncompressedSize) || 0;
+      const knownOpenable = ZIP_OPENABLE.includes(ext);
+      if (!knownOpenable && !isUnknownTextArchiveCandidate(ext, entrySize)) continue;
       if (entrySize > ZIP_ENTRY_CAP || extractedBytes + entrySize > ZIP_EXTRACT_CAP){ oversized++; continue; }
       try {
         updateLoading(`압축 푸는 중… (${opened + failed + 1}/${openable})`);
         const m = ZIP_MIME[ext];
         const innerFile = new File([await e.getData(new zip.BlobWriter())], base, m ? { type: m } : undefined);
         extractedBytes += innerFile.size || entrySize;
+        if (!knownOpenable && !(await isLikelyTextFile(innerFile))){ unsupported++; continue; }
         const parentId = zipParentFor(path);
         hideLoading();
         await handleFiles([innerFile], { parentId, bulk: true, relPath: path, archiveCtx });
@@ -332,7 +359,7 @@ async function extractTar(tarBytes, name, options = {}){
   const entries = parseTar(tarBytes).filter(en => {
     const base = (en.name.split("/").pop() || "");
     if (!base || (base.charAt(0) === "." && !isEnvFile(base)) || en.name.indexOf("PaxHeader") >= 0) return false;
-    return ZIP_OPENABLE.includes(fileExtOf(base));
+    return ZIP_OPENABLE.includes(fileExtOf(base)) || isLikelyTextBytes(en.data);
   });
   if (!entries.length){ toast("압축 안에 열 수 있는 형식이 없어요.", 3000); return; }
   const group = makeGroup("zip", name, options.parentId || null);
@@ -603,16 +630,18 @@ function queueFolder(fileList, options={}){
   return fileQueue;
 }
 
-function folderOpenableFiles(fileList){
+async function folderOpenableFiles(fileList){
   // 열 수 있는 형식 + 숨김파일 제외(.env 계열은 예외)
-  return [...fileList].filter(f => {
+  const openable = [];
+  for (const f of [...fileList]){
     const base = f.name || "";
-    if (!base || isHiddenFolderEntry(f.webkitRelativePath || base)) return false;
-    return ZIP_OPENABLE.includes(fileExtOf(base));
-  });
+    if (!base || isHiddenFolderEntry(f.webkitRelativePath || base)) continue;
+    if (ZIP_OPENABLE.includes(fileExtOf(base)) || await isLikelyTextFile(f)) openable.push(f);
+  }
+  return openable;
 }
 async function openFolderFiles(fileList, options={}){
-  const openable = folderOpenableFiles(fileList);
+  const openable = await folderOpenableFiles(fileList);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))]
     .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
   const pendingImageFolderPaths = [...new Set((options.pendingImageFolderPaths || []).map(normalizedRunPath).filter(Boolean))];
@@ -777,7 +806,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const root = navNodes.find(node => node.nodeId === rootId && node.type === "group");
   if (!root) return false;
   const files = [...fileList];
-  const openable = folderOpenableFiles(files);
+  const openable = await folderOpenableFiles(files);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))];
   if (!openable.length && !folderPaths.length){ toast("새로고침할 수 있는 파일이나 폴더가 없어요.", 3200); return false; }
   const selectedRootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";

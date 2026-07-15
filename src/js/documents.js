@@ -3,6 +3,12 @@
 /* ===== 문서 관리(사이드바/탭) ===== */
 const IMG_EXTS = ["png","jpg","jpeg","gif","webp","bmp","svg","avif","ico"];
 const SQLITE_EXTS = ["db","sqlite","sqlite3"];
+// 학습 모델과 NumPy 배열은 이진 파일이므로 텍스트 편집기로 열지 않고 원본 바이트를 보존한다.
+const BINARY_ASSET_EXTS = new Set([
+  "model", "npy", "npz", "kv",
+  "onnx", "tflite", "safetensors", "pt", "pth", "ckpt",
+  "joblib", "pkl", "pickle", "keras", "h5", "hdf5"
+]);
 // 코드/설정 파일: 확장자 → 구문강조 프로파일(c=C계열, hash=#주석, css/sql/xml=전용)
 const CODE_EXTS = {
   js:"c", mjs:"c", cjs:"c", ts:"c", jsx:"c", tsx:"c", java:"c", c:"c", h:"c", cpp:"c", cc:"c", hpp:"c", cxx:"c",
@@ -14,13 +20,13 @@ const CODE_EXTS = {
   xml:"xml", xsl:"xml", xslt:"xml", xsd:"xml", rss:"xml", atom:"xml", plist:"xml", wsdl:"xml", dbk:"xml", docbook:"xml",
   rst:"text", adoc:"text", asciidoc:"text", asc:"text", org:"text", textile:"text", tex:"text", latex:"text", sty:"text", cls:"text", wiki:"text", mediawiki:"text",
   r:"hash", lua:"c", pl:"hash", pm:"hash", tcl:"hash", awk:"hash", groovy:"c", gradle:"c", proto:"c", coffee:"hash", cmake:"hash", dockerfile:"hash", makefile:"hash", mk:"hash",
-  tsv:"text", log:"text", diff:"text", patch:"text", tokens:"text"
+  tsv:"text", log:"text", diff:"text", patch:"text", tokens:"text", vec:"text", vocab:"text"
 };
 const TEXT_ENCODING_EXTS = new Set(["csv","md","markdown","mdx","txt","html","htm","xhtml", ...Object.keys(CODE_EXTS), ...SUBTITLE_EXTS]);
 // ZIP 안에서 자동으로 열어줄 확장자(중첩 zip 포함)
 // VIDEO_EXTS·AUDIO_EXTS·SUBTITLE_EXTS 는 video-viewer.js 가 이 파일보다 먼저 로드되어 제공한다(스크립트 순서 주의).
 const ZIP_OPENABLE = ["pdf","docx","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb",
-  ...SQLITE_EXTS, ...Object.keys(CODE_EXTS), "zip", "tar", "gz", "tgz", ...IMG_EXTS,
+  ...SQLITE_EXTS, ...Object.keys(CODE_EXTS), ...BINARY_ASSET_EXTS, "zip", "tar", "gz", "tgz", ...IMG_EXTS,
   ...VIDEO_EXTS, ...AUDIO_EXTS, ...SUBTITLE_EXTS];
 // .env 계열(.env, .env.local 등)은 점으로 시작하지만 숨김 파일이 아니라 설정 파일 → 폴더/압축에서도 연다
 function isEnvFile(name){ return /^\.env(\.[^\\/]+)?$/i.test(String(name || "")); }
@@ -964,6 +970,7 @@ function modeBadgeText(doc){
   if (doc.kind === "pdf-gallery") return "PDF 모아보기";
   if (ext === ".py" || ext === ".pyw") return "Python 실습";
   if (doc.kind === "image") return "이미지 보기";
+  if (doc.kind === "binary") return "이진 파일 보관";
   if (doc.kind === "video") return doc.media === "audio" ? "오디오 재생" : "영상 재생";
   if (ext === ".docx") return "Word 보기";
   if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") return "표 보기";
@@ -1683,6 +1690,7 @@ function extCategory(kind, name){
   if (kind === "image-gallery") return "img";
   if (kind === "pdf-gallery") return "pdf";
   if (kind === "video")  return "media";
+  if (kind === "binary") return "binary";
   const ext = fileExtOf(name);
   if (ext === "docx") return "word";
   if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";
@@ -1722,6 +1730,7 @@ const OFFICE_XML_TOTAL_MAX_BYTES = 64 * 1024 * 1024;          // 한 문서에�
 // 확장자·종류상 텍스트로 검색할 만한 파일인가(크기는 따지지 않음).
 function isTextExtSearchable(doc){
   if (!doc || doc.kind === "pdf" || !doc.sourceFile) return false;
+  if (doc.isTextFile) return true;
   const lower = String(doc.name || "").toLowerCase();
   const ext = fileExtOf(lower);
   if (ext === lower) return true;                       // 확장자 없는 파일도 텍스트일 수 있음
