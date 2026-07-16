@@ -756,6 +756,9 @@ const PET_GLASSES_MAN_MOTION = {
   ]
 };
 PET_GLASSES_MAN_MOTION.fall = PET_GLASSES_MAN_MOTION.jump;
+// 떠오르고 활강하는 동안에도 두 팔을 내리지 않는다 — 만세 프레임을 그대로 쓴다
+PET_GLASSES_MAN_MOTION.soar = PET_GLASSES_MAN_MOTION.cheer;
+PET_GLASSES_MAN_MOTION.glide = PET_GLASSES_MAN_MOTION.cheer;
 
 // 종족 목록: kind 가 이동 방식을 정한다. 같은 그림이라도 팔레트가 달라 저마다 다른 아이로 보인다.
 const PET_SPECIES = [
@@ -988,7 +991,8 @@ const PET_SPECIES = [
     spriteSheet:{
       src:"src/assets/pixel-teacher.png", cellW:96, cellH:120,
       frames:{ idle:[0], walk:[0,1,2,3,4,5], seekwall:[0,1,2,3,4,5],
-        jump:[6,7,8,9], fall:[8,9], climb:[10,11,12,13], cheer:[14,15,16,17] }
+        jump:[6,7,8,9], fall:[8,9], climb:[10,11,12,13], cheer:[14,15,16,17],
+        soar:[14,15,16,17], glide:[14,15,16,17] }
     }, palettes: [
       { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#6a5238", P:"#3e424a", F:"#25272b" },
       { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#775b3c", P:"#313844", F:"#20242a" }
@@ -1051,6 +1055,7 @@ const PET_BUBBLE_EN = {
   "납치 실패...":"Abduction failed...", "다시 둥실~":"Floating again!", "푸슈슈슉~":"Pfffft!", "콰르릉!":"Kaboom!", "우르릉...":"Rumble...", "후우- 새 방울!":"Phew—new bubble!",
   "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
   "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!", "야호~":"Yahoo!",
+  "두둥실~":"Floating up!", "저기로!":"Over there!",
   "다 지웠다!":"All clean!", "또 그려도 돼?":"Can I draw again?", "자력 정상!":"Magnet power normal!", "재부팅 완료!":"Reboot complete!",
   "별 구경 완료!":"Star-gazing complete!", "지구가 제일 재밌어!":"Earth is the most fun!", "개굴! 최고야!":"Ribbit! Amazing!", "촉촉하게 완료!":"Nice and damp!",
   "거의 잡았는데!":"I almost caught it!", "아삭은 다음 기회에!":"Crunchy next time!", "내가 이겼나?":"Did I win?", "천천히 가도 도착!":"Slow still gets there!"

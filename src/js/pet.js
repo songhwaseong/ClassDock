@@ -23,18 +23,24 @@
      rocket(로켓)=카운트다운→발사→낙하산 귀환 / flutter(나비·꿀벌)=팔랑팔랑 날다 다른 펫 머리에 앉아 쉼
      fish(물고기)=비눗방울 안에서 부유, 방울이 터지면(클릭·던지기) 바닥에서 파닥거리다 새 방울을 붐
      snake(뱀)=꿈틀꿈틀 기어다니고 똬리 틀기 / mouse(생쥐)=고양이가 다가오면 "찍찍!" 하고 도망
-     human(커피 아저씨)=걷고 점프하고 벽도 타되 천장은 안 걷고 꼭대기에서 뛰어내림, 클릭하면 두 팔 번쩍 만세
+     human(커피 아저씨·픽셀 선생님)=걷고 점프하고 벽도 타되 천장은 안 걷고, 꼭대기에선 절반 확률로 선반에 건너뛰거나
+       그냥 뛰어내림. 스스로 한 만세는 절반 확률로 만세 자세 그대로 떠올라 선반에 내려앉는다(클릭 만세는 제자리)
    몇 마리든 rAF 루프는 하나만 돌고 발판 스캔도 공유하므로 성능 부담이 거의 없다.
    그리기는 마리당 45×33px 작은 캔버스 하나뿐이고, 몸통에만 포인터가 잡혀 UI 클릭을 막지 않는다. */
 
 const PET_SCALE = 3, PET_GW = 15, PET_GH = 11;
 const PET_W = PET_GW * PET_SCALE, PET_H = PET_GH * PET_SCALE;   // 45×33
 const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 12;
+// 아저씨가 벽 꼭대기에서 선반으로 건너뛸 때: 살짝 솟구쳤다 떨어지고, 가로 속도는 이 상한을 넘지 않는다
+const PET_HOP_VX = 5.2, PET_HOP_VY = -3.6;
 const PET_FPS_MIN = 42, PET_FPS_FLOOR = 3, PET_FPS_TRIGGER_MS = 2500;   // 저사양 자동 하향: FPS가 이 아래로 약 2.5초 지속되면 마릿수를 절반으로
 // 발판 위에 "서 있는" 상태들 — 발판 추적 대상이자 UFO 의 납치 후보가 된다
 const PET_GROUND_STATES = ["walk", "idle", "seekwall", "reboot", "hopwait",
   "stalk", "chase", "zoomies", "slide", "charge", "tongue", "hide", "dash",
   "stun", "pull", "cast", "flee", "coil", "countdown", "cheer"];
+
+// 만세 자세를 유지하는 상태들 — 떠오르고 활강하는 내내 두 팔을 내리지 않는다
+const PET_CHEER_POSE_STATES = ["cheer", "soar", "glide"];
 
 // 펫이 올라설 수 있는 UI 요소(윗변이 발판이 된다). 보이는 것만 골라 쓴다.
 const PET_PLATFORM_SELECTORS = [
@@ -182,7 +188,7 @@ function petPickAction(p, w){
     if (roll < 0.4){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
     else if (roll < 0.62){ p.state = "idle"; p.timer = 50 + Math.random() * 110; }
     else if (roll < 0.78){ p.state = "jump"; p.vy = -(6 + Math.random() * 4); p.vx = p.face * (1.2 + Math.random() * 1.8); }
-    else if (roll < 0.84){ petCheer(p, Math.random() < 0.5); }
+    else if (roll < 0.84){ petCheer(p, Math.random() < 0.5, true); }   // 만세 뒤 절반은 그대로 두둥실 떠올라 선반으로
     else { // 가까운 쪽 벽으로 걸어가 수직으로 타고 오르기(바닥에서만)
       if (p.support && p.support.floor){ p.state = "seekwall"; p.side = (p.x < window.innerWidth / 2) ? -1 : 1; p.face = p.side; }
       else { p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 80; }
@@ -291,11 +297,49 @@ function petRandomSaying(p, fallback){
   return list.length ? list[Math.floor(Math.random() * list.length)] : (fallback || "안녕하세요!");
 }
 
-function petCheer(p, say){
+function petCheer(p, say, mayFloat){
   p.state = "cheer"; p.timer = 60; p.t = 0;
   p.vx = 0; p.vy = 0; p.rot = 0; p.pop = 12;
+  p.soarAfter = !!mayFloat;                                  // 스스로 한 만세만 두둥실로 이어진다(클릭 만세는 제자리)
   if (p.cheerArt) p.art = p.cheerArt;
   if (say) petSay(p, petRandomSaying(p, "만세!"), false);
+}
+
+// 벽 꼭대기에서 건너뛸 선반 고르기.
+// 낙하 적분이 vy += g 뒤 y += vy 라 n 프레임 뒤 낙하거리는 n*vy0 + g*n*(n+1)/2 다.
+// 이를 h 로 놓고 푼 n(= 발이 윗변에 닿는 프레임)으로, 선반 위에 온전히 올라서는
+// 착지 범위를 그대로 가로 속도 구간으로 바꾼다. 구간이 비면 그 선반은 못 닿는 것.
+function petPlanWallHop(p, w){
+  const pw = p.w || PET_W, ph = p.h || PET_H;
+  const cx = p.x + pw / 2, feet = p.y + ph;
+  const g = PET_GRAV, vy0 = PET_HOP_VY, b = vy0 + g / 2;
+  const hops = [];
+  for (const pl of w.platforms){
+    if (pl.floor || pl.w < pw + 12 || pl.y - ph < 0) continue;    // 바닥·좁은 선반·서면 화면 위로 넘치는 선반은 뺀다
+    const h = pl.y - feet;
+    if (h < 30) continue;                                          // 발밑에 한참 있어야 뛸 맛이 난다
+    const n = (Math.sqrt(b * b + 2 * g * h) - b) / g;
+    let lo = (pl.x + pw / 2 + 4 - cx) / n, hi = (pl.x + pl.w - pw / 2 - 4 - cx) / n;
+    lo = Math.max(lo, p.side < 0 ? 0.3 : -PET_HOP_VX);             // 붙어 있던 벽 반대쪽으로만 뛴다
+    hi = Math.min(hi, p.side < 0 ? PET_HOP_VX : -0.3);
+    if (lo > hi) continue;
+    hops.push(lo + Math.random() * (hi - lo));
+  }
+  return hops.length ? hops[Math.floor(Math.random() * hops.length)] : null;
+}
+
+// 아저씨: 만세한 채 두둥실 떠올라 선반 위 상공까지 간다(내려앉기는 glide → fall 이 맡는다)
+function petSoarStart(p, w){
+  const pw = p.w || PET_W, ph = p.h || PET_H;
+  const spots = w.platforms.filter(pl => !pl.floor && pl.w >= pw + 12 && pl.y - ph > 24);
+  if (!spots.length) return false;                                 // 올라설 선반이 없으면 하던 대로 둔다
+  const pl = spots[Math.floor(Math.random() * spots.length)];
+  p.landT = { x: pl.x + 6 + Math.random() * Math.max(1, pl.w - pw - 12), y: pl.y - ph };
+  p.state = "soar"; p.t = 0; p.timer = 0;
+  p.vx = 0; p.vy = 0; p.rot = 0; p.support = null;
+  if (p.cheerArt) p.art = p.cheerArt;
+  if (Math.random() < 0.5) petSay(p, "두둥실~");
+  return true;
 }
 
 function petSay(p, text, translate=true){
@@ -908,7 +952,7 @@ function petUpdate(p, w){
   if (p.squash > 0) p.squash = Math.max(0, p.squash - 0.06);
   if (p.pop > 0) p.pop--;
   if (p.cool > 0) p.cool--;                                    // 고양이 사냥 쿨타임
-  if (p.cheerArt && p.state !== "cheer" && p.art !== p.baseArt) p.art = p.baseArt;   // 만세가 끊기면(붙잡힘 등) 원래 그림으로
+  if (p.cheerArt && !PET_CHEER_POSE_STATES.includes(p.state) && p.art !== p.baseArt) p.art = p.baseArt;   // 만세가 끊기면(붙잡힘 등) 원래 그림으로
   if (p.petEvent) return;                                      // 숨겨진 조합 연출은 이벤트 감독이 좌표를 움직인다
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
   if (petWorldIsQuiet(w)){ petQuietUpdate(p, w); return; }
@@ -1054,7 +1098,33 @@ function petUpdate(p, w){
   }
   else if (p.state === "cheer"){                               // 커피 아저씨: 두 팔 들고 만세!
     p.rot = Math.sin(p.t * 0.5) * 4;
-    if (--p.timer <= 0){ p.rot = 0; petPickAction(p, w); }
+    if (--p.timer <= 0){
+      p.rot = 0;
+      const soared = p.soarAfter && Math.random() < 0.5 && petSoarStart(p, w);
+      p.soarAfter = false;
+      if (!soared) petPickAction(p, w);
+    }
+  }
+  else if (p.state === "soar"){                                // 만세 자세 그대로 두둥실 상승
+    const hoverY = Math.max(8, (p.landT ? p.landT.y : 0) - 70);
+    p.y -= 1.5 * p.speed;
+    p.x = Math.max(0, Math.min(vw - pw, p.x + Math.sin(p.t * 0.07) * 0.5));
+    p.rot = Math.sin(p.t * 0.11) * 5;
+    if (p.y <= hoverY){ p.state = "glide"; p.t = 0; }
+  }
+  else if (p.state === "glide"){                               // 점찍어 둔 선반 위 상공으로 건너간다
+    if (!p.landT){ p.state = "fall"; p.vy = 0; p.vx = 0; p.rot = 0; p.t = 0; }
+    else {
+      const dx = p.landT.x - p.x, sp = 1.4 * p.speed;
+      p.x += Math.abs(dx) < sp ? dx : (dx < 0 ? -sp : sp);
+      p.y += Math.sin(p.t * 0.09) * 0.3;
+      p.rot = Math.sin(p.t * 0.11) * 5;
+      if (Math.abs(dx) > 3) p.face = dx < 0 ? -1 : 1;
+      if (Math.abs(dx) < 1.5){                                 // 도착 → 착지는 낙하 판정에 맡긴다
+        p.rot = 0; p.landT = null;
+        p.state = "fall"; p.vy = 0; p.vx = 0; p.t = 0;
+      }
+    }
   }
   else if (p.state === "slide"){                               // 펭귄: 배를 깔고 주욱 미끄러진다
     p.x += p.vx * p.speed;
@@ -1180,9 +1250,16 @@ function petUpdate(p, w){
     p.x = p.side < 0 ? 0 : vw - pw;
     if (p.y <= 0){
       p.y = 0;
-      if (p.kind === "human"){   // 아저씨는 천장을 걷는 대신 꼭대기에서 힘차게 뛰어내린다
-        p.state = "fall"; p.vy = 0; p.vx = -p.side * 2.4; p.face = -p.side; p.t = 0;
-        if (Math.random() < 0.5) petSay(p, "야호~");
+      if (p.kind === "human"){   // 아저씨는 천장을 걷지 않는다: 절반은 선반으로 건너뛰고, 아니면 그냥 뛰어내린다
+        const hop = Math.random() < 0.5 ? petPlanWallHop(p, w) : null;
+        p.t = 0;
+        if (hop !== null){        // 살짝 솟구쳐 선반으로 건너뛴다
+          p.state = "jump"; p.vy = PET_HOP_VY; p.vx = hop; p.face = hop < 0 ? -1 : 1;
+          if (Math.random() < 0.5) petSay(p, "저기로!");
+        } else {                  // 닿을 선반이 없거나 안 뛰기로 했으면 그냥 뛰어내린다
+          p.state = "fall"; p.vy = 0; p.vx = -p.side * 2.4; p.face = -p.side;
+          if (Math.random() < 0.5) petSay(p, "야호~");
+        }
       }
       else { p.state = "ceiling"; p.face = -p.side; p.timer = 80 + Math.random() * 140; }
     }
@@ -1476,7 +1553,7 @@ function petSpawn(i, total, bag){
     vx: 0, vy: 0, face: 1, side: -1, rot: 0, roll: 0, squash: 0, pop: 0,
     state: state0,
     t: Math.floor(Math.random() * 100), timer: 60, blink: 0, off: false, fadeT: 0,
-    cool: 0, dropLen: 0, hangY: 0, landT: null,
+    cool: 0, dropLen: 0, hangY: 0, landT: null, soarAfter: false,
     support: null, gTarget: null, victim: null, bubbleTimer: 0
   };
   petBindPointer(p);
