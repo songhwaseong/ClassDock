@@ -64,5 +64,61 @@ function drawItems(ctx, items, opts){
   }
 }
 
-return Object.freeze({ applyStroke, drawItem, drawItems });
+const SELECTABLE_TYPES = new Set(["image", "line", "arrow", "rect", "ellipse", "text"]);
+
+function isSelectable(it){
+  return !!(it && SELECTABLE_TYPES.has(it.type));
+}
+
+// 선택 표시와 히트테스트에 쓰는 항목 경계. 텍스트 폭은 화면과 같은 캔버스 글꼴로 외부에서 측정한다.
+function itemBounds(it, measureText){
+  if (!isSelectable(it)) return null;
+  if (it.type === "image") return { x:it.x, y:it.y, w:it.w, h:it.h };
+  if (it.type === "text"){
+    const fs = Math.max(1, Number(it.fontSize) || 16);
+    const lines = String(it.text || "").split("\n");
+    const widthOf = (typeof measureText === "function") ? measureText : (line) => String(line).length * fs * 0.6;
+    let w = 1;
+    for (const line of lines) w = Math.max(w, Number(widthOf(line, fs)) || 0);
+    return { x:it.x, y:it.y, w, h:Math.max(fs, lines.length * fs * 1.25) };
+  }
+  const x = Math.min(it.x1, it.x2), y = Math.min(it.y1, it.y2);
+  return { x, y, w:Math.abs(it.x2 - it.x1), h:Math.abs(it.y2 - it.y1) };
+}
+
+function pointSegmentDistance(p, a, b){
+  const dx = b.x - a.x, dy = b.y - a.y;
+  if (!dx && !dy) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function hitTestItem(it, p, measureText, tolerance){
+  if (!isSelectable(it) || !p) return false;
+  const tol = Math.max(4, Number(tolerance) || 0, (Number(it.width) || 0) / 2 + 3);
+  if (it.type === "line" || it.type === "arrow"){
+    return pointSegmentDistance(p, { x:it.x1, y:it.y1 }, { x:it.x2, y:it.y2 }) <= tol;
+  }
+  const b = itemBounds(it, measureText); if (!b) return false;
+  if (it.type === "ellipse"){
+    const rx = Math.max(b.w / 2, tol), ry = Math.max(b.h / 2, tol);
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    return ((p.x - cx) * (p.x - cx)) / (rx * rx) + ((p.y - cy) * (p.y - cy)) / (ry * ry) <= 1;
+  }
+  return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
+}
+
+function translateItem(it, dx, dy){
+  if (!isSelectable(it)) return it;
+  const moved = Object.assign({}, it);
+  if (it.type === "image" || it.type === "text"){
+    moved.x = it.x + dx; moved.y = it.y + dy;
+  } else {
+    moved.x1 = it.x1 + dx; moved.y1 = it.y1 + dy;
+    moved.x2 = it.x2 + dx; moved.y2 = it.y2 + dy;
+  }
+  return moved;
+}
+
+return Object.freeze({ applyStroke, drawItem, drawItems, isSelectable, itemBounds, hitTestItem, translateItem });
 })();

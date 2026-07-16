@@ -61,9 +61,20 @@ function renderWhiteboard(doc, host){
   };
 
   // ----- 모델 → 캔버스 (그리기는 board-render.js 공용 함수 사용 → 리플레이 재생과 화면이 일치) -----
-  const { applyStroke: applyBoardStroke, drawItem: drawBoardItem } = MNBoardRenderer;
+  const {
+    applyStroke: applyBoardStroke,
+    drawItem: drawBoardItem,
+    itemBounds: boardItemBounds,
+    hitTestItem: hitTestBoardItem,
+    translateItem: translateBoardItem
+  } = MNBoardRenderer;
   const applyStroke = (it) => applyBoardStroke(ctx, it, wb.bg);
   const drawItem = (it) => drawBoardItem(ctx, it, wb.bg);
+  const measureBoardText = (line, fontSize) => {
+    ctx.save(); ctx.font = fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
+    const width = ctx.measureText(String(line || "")).width; ctx.restore(); return width;
+  };
+  const boundsOf = (it) => boardItemBounds(it, measureBoardText);
   // 수업 리플레이: 녹화 중이면 커밋(획/도형/텍스트/이미지/지우기/되돌리기)마다 스냅샷을 남긴다.
   const recordCommit = () => {
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
@@ -83,16 +94,21 @@ function renderWhiteboard(doc, host){
     for (const h of HANDLES){ const hp = handlePos(it, h); if (Math.abs(p.x - hp.x) <= HANDLE && Math.abs(p.y - hp.y) <= HANDLE) return h; }
     return null;
   };
+  let editingTextItem = null;
   const redraw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.fillStyle = wb.bg; ctx.fillRect(0, 0, W, H);
-    for (const it of wb.items) drawItem(it);
-    const s = wb.selected;                            // 선택 표시(점선 테두리 + 8핸들). 내보낼 땐 잠시 해제하므로 안 박힘.
-    if (s && s.type === "image"){
+    for (const it of wb.items) if (it !== editingTextItem) drawItem(it);
+    const s = wb.selected;                            // 선택 표시(점선 테두리, 이미지는 8핸들). 내보낼 땐 잠시 해제하므로 안 박힘.
+    const sb = s && boundsOf(s);
+    if (s && sb){
       ctx.save(); ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = "#2563eb";
-      ctx.setLineDash([6, 4]); ctx.strokeRect(s.x, s.y, s.w, s.h); ctx.setLineDash([]);
-      ctx.fillStyle = "#fff";
-      for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); ctx.strokeRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); }
+      const pad = s.type === "image" ? 0 : 4;
+      ctx.setLineDash([6, 4]); ctx.strokeRect(sb.x - pad, sb.y - pad, Math.max(1, sb.w) + pad * 2, Math.max(1, sb.h) + pad * 2); ctx.setLineDash([]);
+      if (s.type === "image"){
+        ctx.fillStyle = "#fff";
+        for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); ctx.strokeRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); }
+      }
       ctx.restore();
     }
   };
@@ -131,23 +147,25 @@ function renderWhiteboard(doc, host){
 
   // ----- 포인터 그리기 -----
   const pt = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  // 선택 도구: 이미지 히트테스트
-  const imageAt = (p) => {
-    for (let i = wb.items.length - 1; i >= 0; i--){ const it = wb.items[i]; if (it.type === "image" && p.x >= it.x && p.x <= it.x + it.w && p.y >= it.y && p.y <= it.y + it.h) return it; }
+  // 선택 도구: 이미지·도형·텍스트 중 위에 그려진 항목부터 히트테스트
+  const itemAt = (p) => {
+    for (let i = wb.items.length - 1; i >= 0; i--){ const it = wb.items[i]; if (hitTestBoardItem(it, p, measureBoardText, 7)) return it; }
     return null;
   };
   const beginSelDrag = (e, mode, handle) => {
     canvas.setPointerCapture(e.pointerId);
     const it = wb.selected; const start = pt(e);
-    const o = { left: it.x, top: it.y, right: it.x + it.w, bottom: it.y + it.h };
+    const o = it.type === "image" ? { left: it.x, top: it.y, right: it.x + it.w, bottom: it.y + it.h } : null;
+    const idx = wb.items.indexOf(it);
     let live = it, cloned = false;
     const move = (ev) => {
       const q = pt(ev);
-      // 이전 단계 스냅샷이 이 항목 객체를 함께 가리키므로, 제자리에서 고치지 않고 사본으로 바꿔 끼운다.
-      if (!cloned){ const idx = wb.items.indexOf(it); live = Object.assign({}, it); wb.items[idx] = live; wb.selected = live; cloned = true; }
       if (mode === "move"){
-        live.x = o.left + (q.x - start.x); live.y = o.top + (q.y - start.y);
+        live = translateBoardItem(it, q.x - start.x, q.y - start.y);
+        wb.items[idx] = live; wb.selected = live; cloned = true;
       } else {                                          // 핸들이 잡은 변/모서리만 이동(반대편 고정), 가로·세로 독립
+        // 이전 단계 스냅샷이 이 항목 객체를 함께 가리키므로, 제자리에서 고치지 않고 사본으로 바꿔 끼운다.
+        if (!cloned){ live = Object.assign({}, it); wb.items[idx] = live; wb.selected = live; cloned = true; }
         if (handle.hx === 0){ const nx = Math.min(q.x, o.right - 24); live.x = nx; live.w = o.right - nx; }
         else if (handle.hx === 1){ live.x = o.left; live.w = Math.max(24, q.x - o.left); }
         if (handle.hy === 0){ const ny = Math.min(q.y, o.bottom - 16); live.y = ny; live.h = o.bottom - ny; }
@@ -165,15 +183,15 @@ function renderWhiteboard(doc, host){
     const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
     if (h){ beginSelDrag(e, "resize", h); return; }                                       // 핸들 → 그 방향으로 크기조절
-    const img = imageAt(p);
-    wb.selected = img || null; redraw();
-    if (img) beginSelDrag(e, "move");                                                     // 이미지 본체 → 이동
+    const item = itemAt(p);
+    wb.selected = item || null; redraw();
+    if (item) beginSelDrag(e, "move");                                                    // 항목 본체 → 이동
   };
   let cur = null, drawing = false, lastPt = null;
   canvas.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     if (wb.tool === "select"){ startSelect(e); return; }
-    if (wb.tool === "text"){ startText(pt(e)); return; }
+    if (wb.tool === "text"){ e.preventDefault(); startText(pt(e)); return; }
     canvas.setPointerCapture(e.pointerId); drawing = true;
     const p = pt(e);
     if (wb.tool === "pen" || wb.tool === "highlighter" || wb.tool === "eraser"){
@@ -204,30 +222,68 @@ function renderWhiteboard(doc, host){
   };
   canvas.addEventListener("pointerup", finishStroke);
   canvas.addEventListener("pointercancel", finishStroke);
-  // 선택 도구 호버 커서: 이미지 위=이동, 우하단 핸들=크기조절
+  // 선택 도구 호버 커서: 선택 가능한 항목 위=이동, 이미지 핸들=크기조절
   canvas.addEventListener("pointermove", (e) => {
     if (wb.tool !== "select" || drawing) return;
     const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
-    canvas.style.cursor = h ? h.cur : (imageAt(p) ? "move" : "default");
+    canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "default");
+  });
+  canvas.addEventListener("dblclick", (e) => {
+    if (wb.tool !== "select") return;
+    const item = itemAt(pt(e));
+    if (!item || item.type !== "text") return;
+    e.preventDefault(); e.stopPropagation(); startText({ x:item.x, y:item.y }, item);
   });
 
   // ----- 텍스트 도구: 클릭 위치에 인라인 입력 -----
-  function startText(p){
+  function startText(p, existing){
     const ta = document.createElement("textarea"); ta.className = "wb-textinput"; ta.rows = 1;
-    const fs = Math.max(14, wb.width * 4);
-    ta.style.left = p.x + "px"; ta.style.top = p.y + "px"; ta.style.color = wb.color; ta.style.fontSize = fs + "px";
-    stage.appendChild(ta); ta.focus();
+    const fs = existing ? Math.max(14, Number(existing.fontSize) || 16) : Math.max(14, wb.width * 4);
+    const color = existing ? existing.color : wb.color;
+    ta.style.left = p.x + "px"; ta.style.top = p.y + "px"; ta.style.color = color; ta.style.fontSize = fs + "px";
+    ta.placeholder = "텍스트 입력";
+    if (existing){
+      ta.value = String(existing.text || "");
+      const b = boundsOf(existing);
+      if (b){ ta.style.width = Math.max(120, b.w + 16) + "px"; ta.style.height = Math.max(fs * 1.5, b.h + 8) + "px"; }
+      editingTextItem = existing; wb.selected = null; redraw();
+    }
+    stage.appendChild(ta);
+    // pointerdown 중 만든 입력창은 같은 클릭의 기본 포커스 처리로 즉시 blur 될 수 있어 다음 프레임에 포커스한다.
+    requestAnimationFrame(() => {
+      if (!ta.isConnected) return;
+      ta.focus({ preventScroll:true });
+      if (existing) ta.select();
+    });
     let done = false;
     const commit = () => {
       if (done) return; done = true;
       const txt = ta.value; ta.remove();
-      if (txt.trim()){ wb.items.push({ type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs }); redraw(); history.commit(); recordCommit(); }
+      editingTextItem = null;
+      if (existing){
+        const idx = wb.items.indexOf(existing);
+        if (idx < 0){ redraw(); return; }
+        if (txt.trim()){
+          const item = Object.assign({}, existing, { text:txt });
+          wb.items[idx] = item; wb.selected = item;
+        } else {
+          wb.items.splice(idx, 1); wb.selected = null;
+        }
+        redraw(); history.commit(); recordCommit(); return;
+      }
+      if (txt.trim()){
+        const item = { type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs };
+        wb.items.push(item); wb.selected = item; setTool("select"); redraw(); history.commit(); recordCommit();
+      }
     };
     ta.addEventListener("blur", commit);
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Escape"){ e.preventDefault(); done = true; ta.remove(); }
-      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); ta.blur(); }
+      if (e.key === "Escape"){
+        e.preventDefault(); done = true; ta.remove(); editingTextItem = null;
+        if (existing) wb.selected = existing; redraw();
+      }
+      else if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ta.blur(); }
       e.stopPropagation();
     });
   }
@@ -319,11 +375,29 @@ function renderWhiteboard(doc, host){
   };
 
   // ----- 도구막대 -----
-  const COLORS = ["#111111", "#e11d48", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed", "#ffffff"];
+  const COLORS = [
+    ["#111111", "검정"], ["#e11d48", "빨강"], ["#2563eb", "파랑"], ["#16a34a", "초록"],
+    ["#f59e0b", "주황"], ["#7c3aed", "보라"], ["#ffffff", "흰색"]
+  ];
+  const WB_ICONS = {
+    select: '<path d="M5 3l12 9-6.2 1.2L8 19.5z"/><path d="m11 13 4.5 6.5"/>',
+    pen: '<path d="m4 20 4.4-1 10.8-10.8a2.1 2.1 0 0 0-3-3L5.4 16z"/><path d="m14.7 6.7 3 3M5.4 16l3 3"/>',
+    highlighter: '<path d="m7 14 7.8-7.8 3 3L10 17z"/><path d="m13.3 7.7 3 3M7 14l3 3M4 20h12"/>',
+    eraser: '<path d="m4.7 14.3 8.6-8.6a2.4 2.4 0 0 1 3.4 0l1.6 1.6a2.4 2.4 0 0 1 0 3.4L9 20H6.4l-3.1-3.1a1.8 1.8 0 0 1 0-2.6z"/><path d="m10.5 8.5 5 5M9 20h11"/>',
+    line: '<path d="M5 19 19 5"/>',
+    arrow: '<path d="M5 19 19 5M11 5h8v8"/>',
+    rect: '<rect x="4" y="6" width="16" height="12" rx="1"/>',
+    ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
+    text: '<path d="M5 5h14M12 5v14M8 19h8"/>',
+    image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m5.5 17 4.5-4 3 2.5 2.5-2 3 3.5"/>',
+    undo: '<path d="M9 7 5 11l4 4"/><path d="M5 11h8a6 6 0 0 1 6 6"/>',
+    redo: '<path d="m15 7 4 4-4 4"/><path d="M19 11h-8a6 6 0 0 0-6 6"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>'
+  };
   const TOOLS = [
-    ["select", "🖱", "선택·이동 (이미지 옮기기·크기조절)"],
-    ["pen", "✏️", "펜"], ["highlighter", "🖍️", "형광펜"], ["eraser", "🧽", "지우개"],
-    ["line", "／", "직선"], ["arrow", "↗", "화살표"], ["rect", "▭", "사각형"], ["ellipse", "◯", "원"], ["text", "T", "텍스트"]
+    ["select", "select", "선택·이동 (이미지 옮기기·크기조절)"],
+    ["pen", "pen", "펜"], ["highlighter", "highlighter", "형광펜"], ["eraser", "eraser", "지우개"],
+    ["line", "line", "직선"], ["arrow", "arrow", "화살표"], ["rect", "rect", "사각형"], ["ellipse", "ellipse", "원"], ["text", "text", "텍스트"]
   ];
   const toolBtns = {};
   const swatchEls = {};
@@ -343,14 +417,26 @@ function renderWhiteboard(doc, host){
     const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; b.title = title; b.setAttribute("aria-label", title);
     b.addEventListener("click", fn); return b;
   };
+  const mkIcon = (name) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "wb-icon"); svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+    svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor"); svg.setAttribute("stroke-width", "1.8"); svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
+    svg.innerHTML = WB_ICONS[name] || "";
+    return svg;
+  };
+  const mkIconBtn = (icon, title, cls, fn) => {
+    const b = mkBtn("", title, cls, fn);
+    b.appendChild(mkIcon(icon));
+    return b;
+  };
   const grp = () => { const g = document.createElement("span"); g.className = "wb-group"; return g; };
 
   const toolGroup = grp();
-  TOOLS.forEach(([t, icon, title]) => { const b = mkBtn(icon, title, "wb-tool", () => setTool(t)); toolBtns[t] = b; toolGroup.appendChild(b); });
+  TOOLS.forEach(([t, icon, title]) => { const b = mkIconBtn(icon, title, "wb-tool", () => setTool(t)); toolBtns[t] = b; toolGroup.appendChild(b); });
 
   const colorGroup = grp();
-  COLORS.forEach((c) => {
-    const s = document.createElement("button"); s.type = "button"; s.className = "wb-swatch"; s.title = c; s.style.background = c;
+  COLORS.forEach(([c, name]) => {
+    const s = document.createElement("button"); s.type = "button"; s.className = "wb-swatch"; s.title = name; s.setAttribute("aria-label", name); s.style.background = c;
     if (c === "#ffffff") s.style.border = "1px solid #cbd5e1";
     s.addEventListener("click", () => setColor(c)); swatchEls[c] = s; colorGroup.appendChild(s);
   });
@@ -364,12 +450,12 @@ function renderWhiteboard(doc, host){
   const imgGroup = grp();
   const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.hidden = true;
   fileInput.addEventListener("change", () => { const f = fileInput.files && fileInput.files[0]; if (f) insertImageBlob(f); fileInput.value = ""; });
-  imgGroup.append(mkBtn("🖼", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", () => fileInput.click()), fileInput);
+  imgGroup.append(mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", () => fileInput.click()), fileInput);
 
   const actGroup = grp();
-  undoBtn = mkBtn("↶", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
-  redoBtn = mkBtn("↷", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
-  const clearBtn = mkBtn("🗑", "보드 전체 지우기", "wb-act wb-clear", () => {
+  undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
+  redoBtn = mkIconBtn("redo", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
+  const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", () => {
     if (!wb.items.length) return;
     if (typeof confirmDialog === "function"){ confirmDialog("보드 내용을 모두 지울까요?", "지우기", "취소").then(ok => { if (ok) clearAll(); }); }
     else clearAll();
@@ -452,7 +538,7 @@ function renderWhiteboard(doc, host){
       const k = String(e.key).toLowerCase();
       if (k === "z" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); doUndo(); }
       else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
-    } else if ((e.key === "Delete" || e.key === "Backspace") && wb.selected){      // 선택한 이미지 삭제
+    } else if ((e.key === "Delete" || e.key === "Backspace") && wb.selected){      // 선택한 이미지·도형·텍스트 삭제
       e.preventDefault(); e.stopPropagation();
       wb.items = wb.items.filter(it => it !== wb.selected); wb.selected = null; redraw(); history.commit(); recordCommit();
     } else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
