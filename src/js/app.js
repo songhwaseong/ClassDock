@@ -126,12 +126,15 @@ function wire(){
   window.addEventListener("blur", hideOverlay);
 
   // 모든 편집 문서는 hasUnsavedEdits 를 공통으로 사용한다. PDF는 자체 복구본을
-  // 저장하므로 이 플래그를 쓰지 않고, 표·이미지·화이트보드도 여기서 경고한다.
+  // 저장하므로 이 플래그를 쓰지 않고, 표·이미지도 여기서 경고한다.
   // 단, 자동 저장·복원이 꺼져 있으면 PDF 편집을 되살릴 수단이 없으므로 함께 경고한다.
+  // 화이트보드는 편집 즉시 localStorage 에 자동 저장·복원되므로(PDF 복구본과 같은 안전망)
+  // 닫기·새로고침 경고에서 제외한다. 사이드바 ● 배지로는 여전히 "저장 안 됨"을 알린다.
   let suppressUnloadWarn = false;
   const pdfEditsAtRisk = (d) => d.kind === "pdf" && !appSettings.pdfRecovery
     && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d);
-  const hasUnsavedEdits = () => docs.some(d => d.hasUnsavedEdits || pdfEditsAtRisk(d));
+  const boardEditsRecovered = (d) => d.kind === "board";
+  const hasUnsavedEdits = () => docs.some(d => (d.hasUnsavedEdits && !boardEditsRecovered(d)) || pdfEditsAtRisk(d));
   window.addEventListener("keydown", (e) => {
     const isReload = e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
     if (!isReload) return;
@@ -172,6 +175,8 @@ function wire(){
   })();
   // 탭 닫기처럼 가로챌 수 없는 경우엔 브라우저 기본 확인창으로 폴백.
   window.addEventListener("beforeunload", (e) => {
+    // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
+    docs.forEach(d => { if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery(); });
     if (suppressUnloadWarn) return;
     if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
   });

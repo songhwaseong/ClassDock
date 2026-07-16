@@ -46,18 +46,22 @@ function renderWhiteboard(doc, host){
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
   const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: "#ffffff", selected: null });
   let boardRecoveryTimer = 0;
+  const saveBoardRecoveryNow = () => {
+    clearTimeout(boardRecoveryTimer); boardRecoveryTimer = 0;
+    try {
+      const items = wb.items.map(item => {
+        const copy = { ...item };
+        if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
+        return copy;
+      });
+      localStorage.setItem(boardRecoveryKey(doc.name), JSON.stringify({ version:1, bg:wb.bg, items }));
+    } catch(error){ console.warn("whiteboard recovery snapshot skipped:", error); }
+  };
+  // 탭 닫기·브라우저 종료 직전엔 0.5초 디바운스를 건너뛰고 마지막 획까지 즉시 저장한다.
+  doc.flushBoardRecovery = saveBoardRecoveryNow;
   const scheduleBoardRecovery = () => {
     clearTimeout(boardRecoveryTimer);
-    boardRecoveryTimer = setTimeout(() => {
-      try {
-        const items = wb.items.map(item => {
-          const copy = { ...item };
-          if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
-          return copy;
-        });
-        localStorage.setItem(boardRecoveryKey(doc.name), JSON.stringify({ version:1, bg:wb.bg, items }));
-      } catch(error){ console.warn("whiteboard recovery snapshot skipped:", error); }
-    }, 500);
+    boardRecoveryTimer = setTimeout(saveBoardRecoveryNow, 500);
   };
 
   // ----- 모델 → 캔버스 (그리기는 board-render.js 공용 함수 사용 → 리플레이 재생과 화면이 일치) -----
