@@ -37,11 +37,33 @@ async function dragTabTo(page, tabName, fraction) {
   }, { tabName, fraction });
 }
 
+// 사이드바 파일도 같은 드롭존 파이프라인을 탄다. 탭과 마찬가지로 실제 리스너를 태운다.
+async function dragSidebarItemTo(page, fileName, fraction) {
+  return page.evaluate(({ fileName, fraction }) => {
+    const item = [...document.querySelectorAll("#sbList .sb-item")]
+      .find(el => { const n = el.querySelector(".sb-name"); return n && n.textContent === fileName; });
+    if (!item) throw new Error("사이드바 항목을 찾지 못함: " + fileName);
+    if (!item.draggable) throw new Error("사이드바 항목이 draggable 이 아님: " + fileName);
+    const dt = new DataTransfer();
+    item.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+    const zone = document.querySelector(".split-drop");
+    if (!zone || zone.hidden) throw new Error("드롭 안내가 뜨지 않음");
+    const rect = zone.getBoundingClientRect();
+    const opts = { bubbles: true, dataTransfer: dt,
+      clientX: rect.left + rect.width * fraction, clientY: rect.top + rect.height / 2 };
+    zone.dispatchEvent(new DragEvent("dragover", opts));
+    zone.dispatchEvent(new DragEvent("drop", opts));
+    item.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
+  }, { fileName, fraction });
+}
+
 // 참고/작업 칸에 실제로 들어간 문서 이름 — 역할 상태(studyPdfId·activeId)를 그대로 읽는다.
 const paneNames = (page) => page.evaluate(() => ({
   refName: (docs.find(d => d.id === studyPdfId) || {}).name || null,
   workName: (docs.find(d => d.id === activeId) || {}).name || null
 }));
+
+const tabNames = (page) => page.locator("#tabBar .tab .tab-name").allTextContents();
 
 test("탭을 본문 왼쪽으로 끌면 그 문서가 참고 칸에 고정되고 분할로 들어간다", async ({ page }) => {
   const errors = [];
@@ -108,4 +130,46 @@ test("드롭 안내는 탭 드래그 중에만 뜨고 끝나면 사라진다", a
   await expect(page.locator(".split-drop")).toBeHidden();
   await dragTabTo(page, "ref-note.txt", 0.25);
   await expect(page.locator(".split-drop")).toBeHidden();   // dragend 후 정리
+});
+
+test("사이드바 파일을 본문 왼쪽으로 끌면 참고 칸에 고정되고 분할로 들어간다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openTwoDocs(page);
+  await dragSidebarItemTo(page, "ref-note.txt", 0.25);
+
+  await expect(page.locator("#content")).toHaveClass(/study-mode/);
+  const panes = await paneNames(page);
+  expect(panes.refName).toBe("ref-note.txt");     // 끌어온 파일이 참고 칸
+  expect(panes.workName).toBe("work-note.txt");   // 보던 문서가 작업 칸
+  expect(errors).toEqual([]);
+});
+
+test("탭에 없던 사이드바 파일을 참고 칸으로 끌어도 탭이 생긴다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openTwoDocs(page);
+  // ref-note.txt 를 탭바에서만 제거한다(파일은 사이드바에 남는다) → tabOrder 에서 빠진 상태
+  await page.evaluate(() => untabDoc(docs.find(d => d.name === "ref-note.txt").id));
+  expect(await tabNames(page)).not.toContain("ref-note.txt");
+
+  await dragSidebarItemTo(page, "ref-note.txt", 0.25);   // 참고 칸(왼쪽)으로
+
+  await expect(page.locator("#content")).toHaveClass(/study-mode/);
+  expect((await paneNames(page)).refName).toBe("ref-note.txt");
+  expect(await tabNames(page)).toContain("ref-note.txt");   // 참고 칸 경로에서도 탭 복구
+  expect(errors).toEqual([]);
+});
+
+test("사이드바 파일을 본문 오른쪽으로 끌면 작업 칸에 열리고 보던 문서가 참고가 된다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openTwoDocs(page);   // 보던 문서 = work-note.txt
+  await dragSidebarItemTo(page, "ref-note.txt", 0.75);
+
+  await expect(page.locator("#content")).toHaveClass(/study-mode/);
+  const panes = await paneNames(page);
+  expect(panes.refName).toBe("work-note.txt");
+  expect(panes.workName).toBe("ref-note.txt");
+  expect(errors).toEqual([]);
 });

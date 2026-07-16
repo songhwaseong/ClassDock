@@ -800,6 +800,7 @@ function startStudyModeWithDoc(doc, options={}){
   studyReferenceLocked = true;                                                         // 참고 문서는 기본 읽기 전용(잠금) — 실수로 고치는 걸 막음
   studyTargetPane = "work";                                                            // 분할 진입 시 기본 타깃은 작업 칸
   studyPdfId = doc.id;
+  if (!tabOrder.includes(doc.id)) tabOrder.push(doc.id);                               // 사이드바에서 바로 고정해도 탭이 생기게(setStudyReference 와 동일 처리)
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
   renderTabs();                                                                        // 참고 문서 탭 표시 갱신
@@ -2270,6 +2271,15 @@ function renderSidebar(){
         sidebarCursorKey = node.nodeId;
         openSidebarDocMenu(doc, e.clientX, e.clientY);
       });
+      // 파일을 본문 좌우로 끌면 탭과 똑같이 분할한다(폴더/그룹은 접기·펼치기 클릭이라 제외).
+      item.draggable = true;
+      item.addEventListener("dragstart", (e) => {
+        draggedTabId = doc.id;                                // 탭 드롭존과 같은 파이프라인 재사용
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", doc.name);       // 바깥 앱으로 끌었을 때만 쓰인다
+        showSplitDropZone();                                  // 본문 좌우 드롭 안내(iframe 뷰어 위까지 덮음)
+      });
+      item.addEventListener("dragend", () => { draggedTabId = null; hideSplitDropZone(); });
     }
     const twist = document.createElement("span");
     twist.className = "sb-twist";
