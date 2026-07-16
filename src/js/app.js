@@ -310,6 +310,7 @@ function wire(){
       sidebarSearch.value = "";
       sidebarExtFilter = "";
       contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = ""; clearTimeout(contentSearchTimer); setContentStatus("");
+      contentSearchBusyQuery = "";                       // 예약된 검색을 취소했으니 "검색 중…"도 걷는다
       renderSidebar();
       sidebarSearch.blur();
     }

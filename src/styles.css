@@ -276,6 +276,10 @@
   .sb-search input::placeholder{color:#64748b}
   .sb-search kbd{font:10px Consolas,"Courier New",monospace;color:#64748b;white-space:nowrap}
   .sb-empty{padding:18px 10px;text-align:center;color:#64748b;font-size:12px}
+  /* 내용 검색이 도는 동안 — "없음"과 눈에 띄게 구분해 결과를 기다리는 중임을 알린다 */
+  .sb-empty.searching{animation:sb-empty-pulse 1.1s ease-in-out infinite}
+  @keyframes sb-empty-pulse{50%{opacity:.45}}
+  @media (prefers-reduced-motion:reduce){ .sb-empty.searching{animation:none} }
   .sb-list{flex:1;overflow:auto;padding:2px 8px}
   .sb-item{display:flex;align-items:center;gap:7px;padding:9px 10px 9px calc(10px + var(--depth, 0) * 16px);border-radius:8px;cursor:pointer;
     font-size:13px;color:#e2e8f0;margin-bottom:2px}

@@ -1719,9 +1719,13 @@ let contentMatchIds = new Set();             // 현재 질의에 내용이 일�
 let contentMatchSnippets = new Map();         // docId -> { line, text } 첫 일치 미리보기
 let contentMatchQuery = "";                  // contentMatchIds 가 대응하는 질의(불일치하면 무시 → 오래된 결과 방지)
 const contentTextCache = new Map();          // docId -> 원본 텍스트(또는 false=스킵)
-const contentLowerCache = new Map();         // docId -> 소문자 텍스트(검색 반복 시 통째 소문자 변환 비용 제거)
+const contentLowerCache = new Map();         // docId -> { text, lower } 소문자본과 그 출처 본문(검색 반복 시 통째 소문자 변환 비용 제거)
 let contentSearchToken = 0;                  // 진행 중 검색 취소용
 let contentSearchTimer = 0;
+// 내용 검색이 예약·진행 중인 질의. 이름 필터가 0개일 때 사이드바가 "없음"이라고 단언하지 않고
+// "검색 중…"을 띄우게 하는 근거 — 결과는 곧 도착하는데 없다고 말하면 검색이 고장 난 것처럼 보인다.
+let contentSearchBusyQuery = "";
+const CONTENT_SEARCH_DEBOUNCE_MS = 80;       // 캐시가 더워지면 검색 자체는 ~10ms대 — 대기가 체감 지연의 대부분이었다
 const CONTENT_SEARCH_MAX_BYTES = 4 * 1024 * 1024;          // 이하: 메인 스레드에서 즉시 검색
 const CONTENT_SEARCH_WORKER_MAX_BYTES = 128 * 1024 * 1024; // 여기까지: 대형 텍스트는 워커에서 검색
 const PDF_SEARCH_MAX_PAGES = 500;                   // 텍스트 추출 페이지 상한(초대용량 보호)
@@ -1733,6 +1737,22 @@ const OFFICE_SEARCH_MAX_BYTES = 64 * 1024 * 1024;             // 원본 zip 크�
 const OFFICE_TEXT_MAX_CHARS = 1500000;                        // 추출 누적 글자 상한(PDF 와 동일한 보호선)
 const OFFICE_XML_ENTRY_MAX_BYTES = 32 * 1024 * 1024;          // 단일 XML 압축 해제 상한(zip bomb·손상 파일 방어)
 const OFFICE_XML_TOTAL_MAX_BYTES = 64 * 1024 * 1024;          // 한 문서에서 읽는 XML 전체 압축 해제 상한
+// 내용 검색이 볼 본문 — 살아있는 편집기 > 저장된 텍스트 > 디스크 스냅샷 순(실행 경로 openDocRunText 와 같은 사다리).
+// 앞의 두 칸은 이미 메모리에 있는 문자열이라 읽기 비용이 없고, 편집·저장마다 바뀌므로 캐시에 넣지 않는다
+// (contentTextCache 는 파일을 닫을 때만 비워져서, 캐시하면 저장 후에도 옛 내용이 검색된다).
+// 편집기는 dirty 일 때만 읽는다 — 깨끗한 문서는 savedText 와 같은 내용이라 문자열 복사를 아낀다.
+function hasLiveDocText(doc){
+  if (!doc) return false;
+  if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function") return true;
+  return typeof doc.savedText === "string";
+}
+function liveDocText(doc){
+  if (!doc) return null;
+  if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
+    try { return String(doc.codeEditor.getValue()); } catch(e){}
+  }
+  return typeof doc.savedText === "string" ? doc.savedText : null;
+}
 // 확장자·종류상 텍스트로 검색할 만한 파일인가(크기는 따지지 않음).
 function isTextExtSearchable(doc){
   if (!doc || doc.kind === "pdf" || !doc.sourceFile) return false;
@@ -1763,12 +1783,15 @@ function isTextSearchable(doc){
   if (!doc) return false;
   if (doc.kind === "pdf") return !!doc.pdfBytes;       // 텍스트 PDF 검색(스캔본은 추출 결과가 비어 자동 제외)
   if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp
+  // 본문이 이미 메모리에 있으면 파일을 읽지 않으므로 크기 상한과 무관하게 여기서 바로 검색한다.
+  if (hasLiveDocText(doc)) return isTextExtSearchable(doc);
   if ((doc.size || 0) > CONTENT_SEARCH_MAX_BYTES) return false;
   return isTextExtSearchable(doc);
 }
 // 워커 검색 대상: 메인 스레드 상한을 넘는 대형 텍스트(워커 상한 이하).
 function isLargeTextSearchable(doc){
   const size = doc && (doc.size || 0);
+  if (hasLiveDocText(doc)) return false;               // 위에서 최신 텍스트로 이미 검색됨(워커엔 옛 스냅샷뿐)
   return isTextExtSearchable(doc) && size > CONTENT_SEARCH_MAX_BYTES && size <= CONTENT_SEARCH_WORKER_MAX_BYTES;
 }
 // 텍스트 기반 PDF의 글자를 페이지 단위로 추출(페이지당 한 줄 → 스니펫 line 번호 = 페이지 번호).
@@ -1873,6 +1896,8 @@ async function scrollPdfToPage(doc, pageNum){
   if (p && p.frame && p.frame.scrollIntoView) p.frame.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 async function getDocText(doc){                          // 한 번 읽어 소문자로 캐시(바이너리/실패는 false)
+  const live = liveDocText(doc);                         // 편집기·저장 텍스트는 캐시를 타지 않고 늘 최신을 쓴다
+  if (live !== null) return live;
   if (contentTextCache.has(doc.id)) return contentTextCache.get(doc.id);
   let text = false;
   try {
@@ -1978,7 +2003,14 @@ function ensureContentSearchWorker(){
     const url = URL.createObjectURL(new Blob(["(" + contentSearchWorkerMain.toString() + ")();"], { type:"text/javascript" }));
     const w = new Worker(url); URL.revokeObjectURL(url);
     w.onmessage = onContentSearchWorkerMessage;
-    w.onerror = () => { _contentSearchWorkerBroken = true; };
+    // 워커가 죽으면 done 이 영영 오지 않는다 → 진행 표시를 걷어 "검색 중…"에 갇히지 않게 한다
+    // (메인 스레드가 이미 찾아둔 결과는 그대로 남는다).
+    w.onerror = () => {
+      _contentSearchWorkerBroken = true; _contentSearchWorker = null;
+      contentSearchBusyQuery = "";
+      setContentStatus(contentMatchIds.size ? window.tf("{n}개 일치", { n: contentMatchIds.size }) : (window.t ? window.t("내용 일치 없음") : "내용 일치 없음"));
+      renderSidebar();
+    };
     _contentSearchWorker = w;
   } catch(_){ _contentSearchWorkerBroken = true; }
   return _contentSearchWorker;
@@ -1994,6 +2026,7 @@ function onContentSearchWorkerMessage(ev){
     if (d.hit){ contentMatchIds.add(d.docId); contentMatchSnippets.set(d.docId, d.hit); scheduleContentSearchRender(); }
   } else if (d.type === "done"){
     if (d.token !== contentSearchToken) return;
+    contentSearchBusyQuery = "";                          // 워커까지 끝 → 이제 "없음"이라고 말해도 된다
     setContentStatus(contentMatchIds.size ? window.tf("{n}개 일치", { n: contentMatchIds.size }) : (window.t ? window.t("내용 일치 없음") : "내용 일치 없음"));
     renderSidebar();
   }
@@ -2005,15 +2038,27 @@ function evictContentSearchDoc(id){
 
 async function runContentSearch(query){
   const token = ++contentSearchToken;
-  if (!query){ contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = ""; setContentStatus(""); renderSidebar(); return; }
+  if (!query){
+    contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = "";
+    contentSearchBusyQuery = ""; setContentStatus(""); renderSidebar(); return;
+  }
+  contentSearchBusyQuery = query;
   setContentStatus("검색 중…");
   const result = new Set();
   const snippets = new Map();
   for (const doc of docs.filter(isTextSearchable)){
     if (token !== contentSearchToken) return;            // 더 새 검색이 시작됨 → 중단
+    // 첫 검색은 파일을 통째로 읽고 디코드·소문자 변환한다(수십~수백 ms). 중간중간 양보해 화면이 얼지 않게 한다.
+    if (typeof yieldToBrowserThrottled === "function") await yieldToBrowserThrottled(12);
+    if (token !== contentSearchToken) return;            // 양보 사이에 새 검색이 들어올 수 있다
     const text = await getDocText(doc);
-    let lower = contentLowerCache.get(doc.id);
-    if (text && typeof lower !== "string"){ lower = text.toLocaleLowerCase(); contentLowerCache.set(doc.id, lower); }
+    // 소문자본은 그 본문에서 나온 것일 때만 재쓴다 — 편집 중인 문서는 매번 새 문자열이라 자연히 다시 만들어진다.
+    let lower;
+    if (text){
+      const cached = contentLowerCache.get(doc.id);
+      if (cached && cached.text === text) lower = cached.lower;
+      else { lower = text.toLocaleLowerCase(); contentLowerCache.set(doc.id, { text, lower }); }
+    }
     const snippet = text && contentMatchSnippet(text, query, 120, lower);
     if (snippet){
       if (doc.kind === "pdf") snippet.unit = "페이지";
@@ -2026,6 +2071,7 @@ async function runContentSearch(query){
   // 대형 텍스트는 워커로 넘겨 백그라운드에서 검색(메인 스레드 안 멈춤). 결과는 도착하는 대로 사이드바에 반영된다.
   const large = docs.filter(isLargeTextSearchable);
   const worker = large.length ? ensureContentSearchWorker() : null;
+  if (!worker) contentSearchBusyQuery = "";              // 워커가 뒤이어 돌지 않으면 지금 결과가 최종
   renderSidebar();
   if (worker){
     setContentStatus("검색 중…");                          // done 메시지에서 최종 개수·렌더 마무리
@@ -2037,12 +2083,16 @@ async function runContentSearch(query){
   }
 }
 function onSidebarSearchInput(){                          // 입력 즉시 이름 필터 + 내용 검색은 디바운스
-  renderSidebar();
   clearTimeout(contentSearchTimer);
   const q = String((byId("sbSearch") || {}).value || "").trim().toLocaleLowerCase();
-  if (!q){ contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = ""; setContentStatus(""); return; }
+  if (!q){
+    contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = "";
+    contentSearchBusyQuery = ""; setContentStatus(""); renderSidebar(); return;
+  }
+  contentSearchBusyQuery = q;                            // 그린 뒤에 세우면 "없음"이 한 프레임 스쳐 지나간다 → 먼저 세운다
   setContentStatus("…");
-  contentSearchTimer = setTimeout(() => runContentSearch(q), 250);
+  renderSidebar();
+  contentSearchTimer = setTimeout(() => runContentSearch(q), CONTENT_SEARCH_DEBOUNCE_MS);
 }
 function documentExtension(doc){
   const name = String(doc && doc.name || "");
@@ -2250,7 +2300,12 @@ function renderSidebar(){
   });
   draw(null);
   if (!visibleCount && (query || sidebarExtFilter)){
-    const empty = document.createElement("div"); empty.className = "sb-empty"; empty.textContent = "필터에 일치하는 파일이 없습니다.";
+    // 내용 검색이 아직 돌고 있으면 "없음"이라고 단언하지 않는다 — 결과가 곧 도착한다.
+    const searching = !!query && contentSearchBusyQuery === query;
+    const label = searching ? "검색 중…" : "필터에 일치하는 파일이 없습니다.";
+    const empty = document.createElement("div");
+    empty.className = "sb-empty" + (searching ? " searching" : "");
+    empty.textContent = (typeof window.t === "function" ? window.t(label) : label);
     list.appendChild(empty);
   }
   restoreSidebarCursor();                // 다시 그린 뒤 키보드 커서(roving tabindex/포커스) 복원
