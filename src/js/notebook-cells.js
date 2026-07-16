@@ -811,6 +811,18 @@ function nbSelectCell(ownerDoc, idx, scrollBlock){
   idx = Math.max(0, Math.min(ctrls.length - 1, idx));
   nbSetSelected(ownerDoc, idx, { focusCell: true, scroll: true, scrollBlock });
 }
+// 사이드바 내용 검색 결과를 눌렀을 때 — 검색어가 든 첫 셀로 이동한다.
+// 스니펫의 셀 번호를 넘겨받지 않고 여기서 다시 찾는다: 결과가 뜬 뒤 셀을 고쳤어도 지금 화면 기준으로 맞는 셀을 잡는다.
+function nbFocusSearchMatch(ownerDoc, query){
+  const q = String(query || "").toLocaleLowerCase();
+  const cells = ownerDoc && ownerDoc.notebookModel && ownerDoc.notebookModel.cells;
+  if (!q || !Array.isArray(cells)) return false;
+  for (let i = 0; i < cells.length; i++){
+    const source = String((cells[i] && cells[i].source) || "");
+    if (source.toLocaleLowerCase().indexOf(q) >= 0){ nbSelectCell(ownerDoc, i, "center"); return true; }
+  }
+  return false;
+}
 function nbEnterEdit(ownerDoc, idx, scrollBlock){
   const ctrl = (ownerDoc._nbCtrls || [])[idx];
   if (!ctrl) return;

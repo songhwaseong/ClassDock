@@ -193,7 +193,7 @@ async function pdfOcrToggle(doc, btn, onDone){
     if (key) await pdfOcrIdbRequest("readwrite", store => store.put(record, key));
     doc._ocrData = record;
     // 사이드바 본문 검색 캐시 무효화 — 다음 검색부터 OCR 텍스트가 잡힌다.
-    try { contentTextCache.delete(doc.id); contentLowerCache.delete(doc.id); } catch(e){}
+    try { contentCacheDrop(doc.id); } catch(e){}
     const found = pages.filter(pg => pg.text.trim()).length;
     toast(found
       ? "글자 인식 완료 — " + pages.length + "쪽 중 " + found + "쪽에서 글자를 찾았어요. 이제 이 PDF 도 검색됩니다."
