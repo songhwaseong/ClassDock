@@ -720,7 +720,16 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     applyCursor();
     if (hadSelection) redraw();                            // 도구를 바꾸면 선택 점선 제거
   };
-  const mkTool = (key, text, title) => { const b = mkBtn(text, title, () => setAnnTool(key)); annToolBtns[key] = b; return b; };
+  const setLabeledIcon = (button, icon, label) => {
+    if (typeof window.setUiIconLabel === "function") window.setUiIconLabel(button, icon, label);
+    else button.textContent = label;
+    return button;
+  };
+  const mkTool = (key, icon, label, title) => {
+    const b = setLabeledIcon(mkBtn("", title, () => setAnnTool(key)), icon, label);
+    annToolBtns[key] = b;
+    return b;
+  };
   const annColorRow = document.createElement("span"); annColorRow.className = "img-adj-row";
   const annColorName = document.createElement("span"); annColorName.className = "img-adj-name"; annColorName.textContent = "색";
   const annColorInput = document.createElement("input"); annColorInput.type = "color"; annColorInput.value = state.annColor; annColorInput.title = "표시 색상"; annColorInput.className = "img-ann-color";
@@ -737,27 +746,27 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null; redraw(); recordEdit();
   });
   const annHint = document.createElement("span"); annHint.className = "img-ann-hint";
-  annHint.textContent = "드래그해 표시 · 텍스트는 클릭해 입력(넣은 뒤 바로 드래그로 이동) · 🖱 선택: 클릭해 잡고 드래그로 이동, Delete 삭제, 텍스트 더블클릭 수정";
+  annHint.textContent = "드래그해 표시 · 텍스트는 클릭해 입력(넣은 뒤 바로 드래그로 이동) · 선택 도구: 클릭해 잡고 드래그로 이동, Delete 삭제, 텍스트 더블클릭 수정";
   annPanel.append(
-    mkTool("select", "🖱 선택", "표시를 클릭해 선택 → 드래그로 이동 · Delete 삭제 · 텍스트 더블클릭으로 수정"),
-    mkTool("pen", "✏️ 펜", "펜으로 자유롭게 그리기"),
-    mkTool("hl", "🖍️ 형광펜", "반투명 형광펜으로 강조"),
-    mkTool("arrow", "→ 화살표", "드래그한 방향으로 화살표 그리기"),
-    mkTool("rect", "▭ 사각형", "드래그한 영역에 테두리 사각형"),
-    mkTool("text", "T 텍스트", "클릭한 위치에 글자 넣기"),
-    mkTool("mosaic", "▦ 모자이크", "드래그한 영역을 모자이크로 가리기(이름·얼굴 등)"),
+    mkTool("select", "select", "선택", "표시를 클릭해 선택 → 드래그로 이동 · Delete 삭제 · 텍스트 더블클릭으로 수정"),
+    mkTool("pen", "pen", "펜", "펜으로 자유롭게 그리기"),
+    mkTool("hl", "highlighter", "형광펜", "반투명 형광펜으로 강조"),
+    mkTool("arrow", "arrow", "화살표", "드래그한 방향으로 화살표 그리기"),
+    mkTool("rect", "rect", "사각형", "드래그한 영역에 테두리 사각형"),
+    mkTool("text", "text", "텍스트", "클릭한 위치에 글자 넣기"),
+    mkTool("mosaic", "mosaic", "모자이크", "드래그한 영역을 모자이크로 가리기(이름·얼굴 등)"),
     annColorRow,
     annWidthRow,
     annClearBtn,
     annHint
   );
-  const annToggle = mkBtn("✏️ 표시", "펜·화살표·텍스트·모자이크 표시 패널 열기/닫기", () => {
+  const annToggle = setLabeledIcon(mkBtn("", "펜·화살표·텍스트·모자이크 표시 패널 열기/닫기", () => {
     annPanel.hidden = !annPanel.hidden;
     annToggle.classList.toggle("active", !annPanel.hidden);
     if (annPanel.hidden) setAnnToolOff();
     else if (!state.annTool) setAnnTool("pen");            // 패널을 열면 펜부터 바로 사용
     applyCursor();
-  });
+  }), "pen", "표시");
   bar.append(annToggle, adjustToggle);
   wrap.insertBefore(adjustPanel, stage);
   wrap.insertBefore(annPanel, stage);

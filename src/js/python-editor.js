@@ -1652,6 +1652,15 @@ function buildCodeEditor(text, prof, options={}){
         /[A-Za-z0-9_)\]]$/.test(ta.value.slice(0, ta.selectionStart))){
       e.preventDefault(); hideCompletion(); showFunctionHelp(); return;
     }
+    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+      const bracketPlan = closingBracketTabPlan(ta.value, ta.selectionStart, ta.selectionEnd);
+      if (bracketPlan){
+        e.preventDefault();
+        ta.selectionStart = ta.selectionEnd = bracketPlan.caret;
+        sync();
+        return;
+      }
+    }
     if (e.key === "Tab"){                                  // 선택 줄 들여쓰기, 커서만 있으면 공백 4칸
       e.preventDefault();
       if (e.shiftKey || ta.selectionStart !== ta.selectionEnd){

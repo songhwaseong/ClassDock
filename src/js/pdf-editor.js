@@ -1202,6 +1202,12 @@ function ensurePenBar(){
   if (_penBar) return _penBar;
   const bar = document.createElement("div"); bar.className = "pen-bar"; bar.hidden = true;
   const mk = (label, title, cls, fn) => { const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; b.title = title; b.addEventListener("click", fn); return b; };
+  const mkIcon = (name, fallback, title, cls, fn) => {
+    const b = mk("", title, cls, fn);
+    if (typeof window.setUiIcon === "function") window.setUiIcon(b, name, title);
+    else b.textContent = fallback;
+    return b;
+  };
 
   // 드래그 핸들(⋮⋮) — 바를 마우스로 끌어 자유 배치. 픽셀 좌표는 localStorage 에 저장.
   const drag = document.createElement("span"); drag.className = "pen-drag"; drag.title = "끌어서 위치 옮기기"; drag.textContent = "⋮⋮";
@@ -1217,8 +1223,8 @@ function ensurePenBar(){
     content.classList.toggle("pen-select", t === "select");
     ["select", "pen", "highlighter", "eraser", "arrow", "rect", "mosaic"].forEach(tool => content.classList.toggle("pen-tool-" + tool, tool === t));
   };
-  [["select","🖱","선택"],["pen","✏️","펜"],["highlighter","🖍️","형광펜"],["eraser","🧽","지우개"],
-   ["arrow","↗","화살표 (드래그)"],["rect","▭","사각형 (드래그)"],["mosaic","▦","모자이크 — 개인정보 가리기 (드래그)"]].forEach(([t,icon,title]) => { const b = mk(icon, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
+  [["select","select","선택","선택"],["pen","pen","펜","펜"],["highlighter","highlighter","형광펜","형광펜"],["eraser","eraser","지우개","지우개"],
+   ["arrow","arrow","화살표","화살표 (드래그)"],["rect","rect","사각형","사각형 (드래그)"],["mosaic","mosaic","모자이크","모자이크 — 개인정보 가리기 (드래그)"]].forEach(([t,name,fallback,title]) => { const b = mkIcon(name, fallback, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   const swatches = {};
   const custom = document.createElement("input");
@@ -1230,10 +1236,10 @@ function ensurePenBar(){
   const setWidth = (w) => { penState.width = w; for (const k in widths) widths[k].classList.toggle("active", Number(k) === w); };
   [["2","S",2],["3","M",3],["6","L",6]].forEach(([k,label,w]) => { const b = mk(label, "굵기 " + label, "pen-width", () => setWidth(w)); widths[k] = b; bar.appendChild(b); });
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
-  bar.appendChild(mk("↶", "되돌리기 (Ctrl+Z)", "pen-act", () => { const doc = penTargetDoc(); if (doc) undoPdfEdit(doc); }));
-  bar.appendChild(mk("↷", "다시 실행 (Ctrl+Y)", "pen-act", () => { const doc = penTargetDoc(); if (doc) redoPdfEdit(doc); }));
+  bar.appendChild(mkIcon("undo", "되돌리기", "되돌리기 (Ctrl+Z)", "pen-act", () => { const doc = penTargetDoc(); if (doc) undoPdfEdit(doc); }));
+  bar.appendChild(mkIcon("redo", "다시 실행", "다시 실행 (Ctrl+Y)", "pen-act", () => { const doc = penTargetDoc(); if (doc) redoPdfEdit(doc); }));
   bar.appendChild(mk("초기화", "현재 페이지의 필기 전체 지우기", "pen-act", () => { const doc = penTargetDoc(); if (doc) clearInkOnPage(doc, currentPageIndex(doc)); }));
-  bar.appendChild(mk("✕", "필기 모드 끄기", "pen-act", () => setPenMode(false)));
+  bar.appendChild(mkIcon("close", "닫기", "필기 모드 끄기", "pen-act", () => setPenMode(false)));
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   // 수업 리플레이 녹화 — PDF 위 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있다.
   // 파이썬 실행바의 ● 녹화와 같은 녹화기를 공유 — lesson-rec-changed 로 양쪽 버튼 상태를 맞춘다.
@@ -1482,7 +1488,10 @@ function ensureTextHiBar(){
   const bar = document.createElement("div");
   bar.className = "pdf-hi-bar"; bar.hidden = true;
   bar.setAttribute("role", "toolbar"); bar.setAttribute("aria-label", "선택한 글자 강조");
-  const cap = document.createElement("span"); cap.className = "pdf-hi-cap"; cap.textContent = "🖍️"; bar.appendChild(cap);
+  const cap = document.createElement("span"); cap.className = "pdf-hi-cap";
+  if (typeof window.setUiIcon === "function") window.setUiIcon(cap, "highlighter", "글자 강조");
+  else cap.textContent = "강조";
+  bar.appendChild(cap);
   for (const [c, name] of TEXT_HI_COLORS){
     const b = document.createElement("button");
     b.type = "button"; b.className = "pdf-hi-color"; b.style.background = c;

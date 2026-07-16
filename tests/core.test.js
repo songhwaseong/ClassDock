@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-  diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
+  diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
@@ -855,6 +855,14 @@ test("Python 단계 실행 보고서의 변수와 변경 내역을 안전하게 
   assert.deepEqual(report.steps[0].changes[0], { name:"total", before:"3", after:"7", type:"int", kind:"changed" });
   assert.equal(report.steps[1].phase, "return");
   assert.equal(report.error, "");
+});
+
+test("Tab은 커서 바로 뒤의 닫는 괄호만 통과한다", () => {
+  assert.deepEqual(closingBracketTabPlan("func()", 5, 5), { caret:6 });
+  assert.deepEqual(closingBracketTabPlan("data[0]", 6, 6), { caret:7 });
+  assert.deepEqual(closingBracketTabPlan("{x}", 2, 2), { caret:3 });
+  assert.equal(closingBracketTabPlan("func()", 4, 4), null);
+  assert.equal(closingBracketTabPlan("func()", 5, 6), null);
 });
 
 test("Python block indentation recognizes a colon before an inline comment", () => {

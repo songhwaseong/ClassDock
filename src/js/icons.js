@@ -9,7 +9,9 @@
     save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
+    select: '<path d="m5 3 12 9-6 1.5L8 20z"/><path d="m12 14 4 6"/>',
     pen: '<path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/>',
+    highlighter: '<path d="m5 15 8-8 4 4-8 8H5zM12 8l4 4M4 21h16"/>',
     eraser: '<path d="m7 18-3-3a2 2 0 0 1 0-3l6-6a2 2 0 0 1 3 0l7 7a2 2 0 0 1 0 3l-2 2H7zM7 18h13"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
     chart: '<path d="M4 20V5M4 20h17M8 16v-4M13 16V8M18 16v-7"/>',
@@ -18,7 +20,12 @@
     play: '<path d="m8 5 11 7-11 7z"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    undo: '<path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6"/>',
+    redo: '<path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    move: '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
+    rect: '<rect x="4" y="5" width="16" height="14" rx="1"/>',
+    mosaic: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
     warning: '<path d="m12 3 9 17H3zM12 9v4M12 17h.01"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.3 2.3-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.2h-3v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-2.3-2.3.1-.1A1.7 1.7 0 0 0 6.6 15a1.7 1.7 0 0 0-1.5-1H5v-3h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.3-2.3.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V4h3v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.2v3h-.2a1.7 1.7 0 0 0-1.5 1z"/>',
     board: '<rect x="4" y="4" width="16" height="13" rx="1"/><path d="M8 21h8M12 17v4M7 9h10M7 13h6"/>',
@@ -43,6 +50,12 @@
     if (label) element.setAttribute("aria-label", label);
     return element;
   };
+  window.setUiIconLabel = function(element, name, label){
+    element.innerHTML = window.uiIcon(name, label);
+    if (label) element.append(document.createTextNode(" " + label));
+    if (label) element.setAttribute("aria-label", label);
+    return element;
+  };
 
   // 버튼·안내 문구에 남아 있는 단색 기호는 같은 SVG 체계로 바꾸고, 색상 이모지는
   // 사용자 문서/코드 영역을 제외한 앱 UI에서 제거한다. 동적으로 추가되는 UI도 처리한다.
@@ -53,6 +66,9 @@
     ["⚠", "warning"], ["⚙", "settings"], ["⛶", "arrow"], ["▭", "board"], ["▦", "board"],
     ["●", "record"], ["■", "stop"]
   ]);
+  symbolIcons.set("\u{1F5B1}", "select");
+  symbolIcons.set("\u{1F58D}", "highlighter");
+  symbolIcons.set("\u{1F9FD}", "eraser");
   const iconMatch = /[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu;
   const skipUiCleanup = (node) => {
     const el = node.parentElement;

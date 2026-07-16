@@ -1121,6 +1121,14 @@
     };
   }
 
+  function closingBracketTabPlan(value, selectionStart, selectionEnd) {
+    const text = String(value || "");
+    const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
+    const end = Math.max(start, Math.min(Number(selectionEnd) || 0, text.length));
+    if (start !== end || ![")", "]", "}"].includes(text.charAt(start))) return null;
+    return { caret:start + 1 };
+  }
+
   function lineNumberAtOffset(value, offset) {
     const text = String(value || "");
     const end = Math.max(0, Math.min(Number(offset) || 0, text.length));
@@ -2522,7 +2530,7 @@
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-    diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan,
+    diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,

@@ -575,18 +575,24 @@ function nbBuildInkToolbar(ownerDoc){
     button.addEventListener("click", fn);
     return button;
   };
+  const mkIcon = (name, fallback, title, cls, fn) => {
+    const button = mk("", title, cls, fn);
+    if (typeof window.setUiIcon === "function") window.setUiIcon(button, name, title);
+    else button.textContent = fallback;
+    return button;
+  };
   const tools = {};
   const syncTools = () => {
     for (const key in tools) tools[key].classList.toggle("active", key === state.tool);
     nbSyncInkSurfaces(ownerDoc);
   };
   [
-    ["move","↕","이동·셀 선택"],
-    ["pen","✏️","펜"],
-    ["highlighter","🖍️","형광펜"],
-    ["eraser","🧽","지우개"]
-  ].forEach(([key, label, title]) => {
-    tools[key] = mk(label, title, "nbv-ink-tool", () => { state.tool = key; syncTools(); });
+    ["move","move","이동","이동·셀 선택"],
+    ["pen","pen","펜","펜"],
+    ["highlighter","highlighter","형광펜","형광펜"],
+    ["eraser","eraser","지우개","지우개"]
+  ].forEach(([key, name, fallback, title]) => {
+    tools[key] = mkIcon(name, fallback, title, "nbv-ink-tool", () => { state.tool = key; syncTools(); });
     bar.appendChild(tools[key]);
   });
   const sep = () => Object.assign(document.createElement("span"), { className:"nbv-ink-sep" });
@@ -624,10 +630,10 @@ function nbBuildInkToolbar(ownerDoc){
   });
   bar.append(
     sep(),
-    mk("↶", "선택한 셀의 마지막 필기 되돌리기", "nbv-ink-action", () => nbUndoInk(ownerDoc)),
+    mkIcon("undo", "되돌리기", "선택한 셀의 마지막 필기 되돌리기", "nbv-ink-action", () => nbUndoInk(ownerDoc)),
     mk("셀 지우기", "선택한 셀의 필기 전체 지우기", "nbv-ink-action", () => nbClearInk(ownerDoc)),
     mk("전체 지우기", "모든 셀의 필기 지우기", "nbv-ink-action", () => nbClearAllInk(ownerDoc)),
-    mk("✕", "필기 전체 지우고 끄기", "nbv-ink-action", () => { nbClearAllInk(ownerDoc, { silent:true }); nbSetInkMode(ownerDoc, false); })
+    mkIcon("close", "닫기", "필기 전체 지우고 끄기", "nbv-ink-action", () => { nbClearAllInk(ownerDoc, { silent:true }); nbSetInkMode(ownerDoc, false); })
   );
   setColor(state.color);
   setWidth(state.width);

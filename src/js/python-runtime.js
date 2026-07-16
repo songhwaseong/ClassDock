@@ -2526,6 +2526,12 @@ function ensureCodePenBar(){
   if (_codePenBar) return _codePenBar;
   const bar = document.createElement("div"); bar.className = "pen-bar code-pen-bar"; bar.hidden = true;
   const mk = (label, title, cls, fn) => { const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; b.title = title; b.addEventListener("click", fn); return b; };
+  const mkIcon = (name, fallback, title, cls, fn) => {
+    const b = mk("", title, cls, fn);
+    if (typeof window.setUiIcon === "function") window.setUiIcon(b, name, title);
+    else b.textContent = fallback;
+    return b;
+  };
   // 드래그 핸들
   const drag = document.createElement("span"); drag.className = "pen-drag"; drag.title = "끌어서 위치 옮기기"; drag.textContent = "⋮⋮";
   bar.appendChild(drag); bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
@@ -2536,7 +2542,7 @@ function ensureCodePenBar(){
     for (const k in tools) tools[k].classList.toggle("active", k === t);
     if (_codePenActive && _codePenActive.setTool) _codePenActive.setTool(t);
   };
-  [["pen","✏️","펜"],["highlighter","🖍️","형광펜"],["eraser","🧽","지우개"]].forEach(([t, icon, title]) => { const b = mk(icon, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
+  [["pen","pen","펜","펜"],["highlighter","highlighter","형광펜","형광펜"],["eraser","eraser","지우개","지우개"]].forEach(([t, name, fallback, title]) => { const b = mkIcon(name, fallback, title, "pen-tool", () => setTool(t)); tools[t] = b; bar.appendChild(b); });
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   // 색
   const swatches = {};
@@ -2551,7 +2557,7 @@ function ensureCodePenBar(){
   [["2","S",2],["3","M",3],["6","L",6]].forEach(([k, label, w]) => { const b = mk(label, "굵기 " + label, "pen-width", () => setWidth(w)); widths[k] = b; bar.appendChild(b); });
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   bar.appendChild(mk("초기화", "필기 전체 지우기", "pen-act", () => { if (_codePenActive && _codePenActive.clear) _codePenActive.clear(); }));
-  bar.appendChild(mk("✕", "필기 모드 끄기", "pen-act", () => { if (_codePenActive && _codePenActive.doc) setCodePenMode(_codePenActive.doc, false); }));
+  bar.appendChild(mkIcon("close", "닫기", "필기 모드 끄기", "pen-act", () => { if (_codePenActive && _codePenActive.doc) setCodePenMode(_codePenActive.doc, false); }));
   setTool("pen"); setColor("#e11d48"); setWidth(3);
   byId("content").appendChild(bar);
 

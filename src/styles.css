@@ -935,7 +935,7 @@
   .pen-bar.vertical .pen-sep{width:100%;height:1px;margin:2px 0}
   .pen-bar.vertical .pen-drag{justify-content:center;padding:4px 0;writing-mode:vertical-rl;text-orientation:upright;letter-spacing:0}
   .pen-bar.vertical .pen-swatch,.pen-bar.vertical .pen-color-input{align-self:center}
-  .pen-bar button{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 9px;cursor:pointer}
+  .pen-bar button{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px}
   .pen-bar button:hover{background:var(--panel-hover)}
   .pen-tool.active,.pen-width.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   .pen-rec{color:var(--danger);font-weight:600;white-space:nowrap}
@@ -2157,7 +2157,7 @@
   .nbv-ink-toolbar.vertical .nbv-ink-drag{justify-content:center;padding:4px 0;writing-mode:vertical-rl;text-orientation:upright;letter-spacing:0}
   .nbv-ink-toolbar.vertical .nbv-ink-swatch,.nbv-ink-toolbar.vertical .nbv-ink-color{align-self:center}
   .nbv-ink-toolbar button{font:inherit;font-size:12px;line-height:1;border:1px solid var(--border);border-radius:7px;
-    background:var(--field);color:var(--ink);padding:6px 8px;cursor:pointer}
+    background:var(--field);color:var(--ink);padding:6px 8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px}
   .nbv-ink-toolbar button:hover{background:var(--panel-hover)}
   .nbv-ink-tool.active,.nbv-ink-width.active{background:var(--accent);border-color:var(--accent);color:#fff}
   .nbv-ink-swatch{width:23px;height:23px;padding:0!important;border:2px solid transparent!important;border-radius:50%!important}
@@ -2930,7 +2930,7 @@
   .img-adj-row input[type=range]{width:118px;accent-color:var(--accent)}
   .img-adj-val{min-width:42px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
   .img-adjust button{font:inherit;font-size:12.5px;border:1px solid var(--border);background:var(--field);
-    color:var(--muted);border-radius:7px;padding:6px 10px;cursor:pointer}
+    color:var(--muted);border-radius:7px;padding:6px 10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px}
   .img-adjust button:hover{background:var(--panel-hover);color:var(--ink);border-color:var(--accent)}
   /* 선택된 도구·모드는 hover 와 확실히 구분되게 강조색으로 채움(펜·형광펜 등 현재 도구 표시) */
   .img-tools button.active,.img-adjust button.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}

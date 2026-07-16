@@ -1161,7 +1161,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const linkBtn = document.createElement("button"); linkBtn.className = "run-link"; linkBtn.type = "button"; linkBtn.textContent = "PDF에 핀";
   linkBtn.title = "현재 코드 줄을 PDF에 핀으로 연결";
   // 필기 버튼 — 누르면 편집 잠금 + 캔버스 오버레이가 한 번에 켜짐. 다시 누르면 둘 다 해제.
-  const inkBtn = document.createElement("button"); inkBtn.className = "run-ink"; inkBtn.type = "button"; inkBtn.textContent = "✏️ 필기"; inkBtn.title = "코드 위에 필기 — 켜는 동안 편집 잠금";
+  const inkBtn = document.createElement("button"); inkBtn.className = "run-ink"; inkBtn.type = "button"; inkBtn.title = "코드 위에 필기 — 켜는 동안 편집 잠금";
+  if (typeof window.setUiIconLabel === "function") window.setUiIconLabel(inkBtn, "pen", "필기");
+  else inkBtn.textContent = "필기";
   // 수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록.
   // PDF 필기바의 ● 녹화와 같은 녹화기를 공유하므로 어느 쪽에서 시작/정지해도 상태가 맞는다.
   const recBtn = document.createElement("button"); recBtn.className = "run-rec"; recBtn.type = "button";
