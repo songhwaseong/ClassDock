@@ -5,7 +5,9 @@ const path = require("node:path");
 const {
   studyPaneSelectionAction,
   studyReadonlyPointerAllowed,
-  studyReadonlyKeyAllowed
+  studyReadonlyKeyAllowed,
+  splitDropRoleForSide,
+  tabDropSplitAction
 } = require("../src/js/core.js");
 
 test("분할 문서 선택은 타깃 칸 유지·역할 교체·한쪽 교체를 구분한다", () => {
@@ -16,6 +18,45 @@ test("분할 문서 선택은 타깃 칸 유지·역할 교체·한쪽 교체를
   assert.equal(studyPaneSelectionAction(1, 2, "work", 1), "swap");
   assert.equal(studyPaneSelectionAction(1, 2, "reference", 3), "replace-reference");
   assert.equal(studyPaneSelectionAction(1, 2, "work", 3), "replace-work");
+});
+
+test("드롭한 칸의 역할은 좌우 바꾸기 상태를 따라간다", () => {
+  assert.equal(splitDropRoleForSide("left", false), "reference");
+  assert.equal(splitDropRoleForSide("right", false), "work");
+  assert.equal(splitDropRoleForSide("left", true), "work");
+  assert.equal(splitDropRoleForSide("right", true), "reference");
+});
+
+test("분할 중 탭 드롭은 유지·역할 교대·한쪽 교체를 구분한다", () => {
+  // 참고=1, 작업=2
+  assert.equal(tabDropSplitAction(1, 2, "reference", 1, 3), "keep");
+  assert.equal(tabDropSplitAction(1, 2, "work", 2, 3), "keep");
+  assert.equal(tabDropSplitAction(1, 2, "reference", 2, 3), "swap");
+  assert.equal(tabDropSplitAction(1, 2, "work", 1, 3), "swap");
+  assert.equal(tabDropSplitAction(1, 2, "reference", 3, 4), "replace-reference");
+  assert.equal(tabDropSplitAction(1, 2, "work", 3, 4), "replace-work");
+});
+
+test("분할 전 탭 드롭은 보던 문서를 상대편 칸에 세워 분할로 들어간다", () => {
+  // 보던 문서=2, 다른 탭 3을 끌어옴
+  assert.equal(tabDropSplitAction(null, 2, "reference", 3, 2), "replace-reference");
+  assert.equal(tabDropSplitAction(null, 2, "work", 3, 2), "pin-current");
+});
+
+test("보던 문서의 탭을 끌면 직전에 보던 문서가 짝이 된다", () => {
+  assert.equal(tabDropSplitAction(null, 2, "reference", 2, 5), "pin-with-mate");
+  assert.equal(tabDropSplitAction(null, 2, "work", 2, 5), "mate-as-reference");
+});
+
+test("짝이 없으면 참고로 고정만 하고 기다린다(버튼과 같은 동작)", () => {
+  assert.equal(tabDropSplitAction(null, 2, "reference", 2, null), "pin-only");
+  assert.equal(tabDropSplitAction(null, 2, "work", 2, null), "keep");
+});
+
+test("고정만 해둔 상태(참고=작업)에서 탭을 끌면 분할이 완성된다", () => {
+  // 버튼으로 2를 고정만 해둔 상태 — 아직 분할 아님
+  assert.equal(tabDropSplitAction(2, 2, "work", 3, null), "pin-current");
+  assert.equal(tabDropSplitAction(2, 2, "reference", 3, null), "replace-reference");
 });
 
 test("참고 잠금은 텍스트·표 선택을 허용하고 편집 진입은 막는다", () => {

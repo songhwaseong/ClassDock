@@ -2509,6 +2509,30 @@
     return pane === "reference" ? "replace-reference" : "replace-work";
   }
 
+  // 화면에서 본 좌/우 중 어느 쪽이 어느 역할의 칸인지. 좌우 바꾸기(swapped)면 자리가 뒤집힌다.
+  function splitDropRoleForSide(side, swapped) {
+    return (side === "left") !== !!swapped ? "reference" : "work";
+  }
+
+  // 상단 탭을 본문 칸에 끌어다 놓았을 때 수행할 상태 전이를 DOM과 분리해 결정한다.
+  // mateId 는 분할 진입 시 반대편에 세울 짝(직전에 보던 문서)이며, 없으면 null.
+  function tabDropSplitAction(referenceId, workId, role, draggedId, mateId) {
+    const split = referenceId != null && workId != null && referenceId !== workId;
+    if (role === "reference") {
+      if (draggedId === referenceId) return "keep";
+      if (split) return draggedId === workId ? "swap" : "replace-reference";
+      if (draggedId === workId) return mateId != null ? "pin-with-mate" : "pin-only";
+      return "replace-reference";
+    }
+    if (split) {
+      if (draggedId === workId) return "keep";
+      if (draggedId === referenceId) return "swap";
+      return "replace-work";
+    }
+    if (draggedId === workId) return mateId != null ? "mate-as-reference" : "keep";
+    return "pin-current";
+  }
+
   // 참고 잠금 중 포인터 입력은 읽기·선택 표면만 통과시킨다.
   // 표는 한 번 클릭 선택까지만 허용하고, 편집 진입인 더블클릭·메뉴는 차단한다.
   function studyReadonlyPointerAllowed(surface, eventType) {
@@ -2539,6 +2563,7 @@
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
-    studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
+    studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
+    splitDropRoleForSide, tabDropSplitAction
   };
 });

@@ -542,6 +542,111 @@ function openDocInTargetPane(id){
   setActiveDoc(id);   // 일반 화면 또는 작업 칸 교체
 }
 
+// ===== 상단 탭을 본문으로 끌어다 분할하기 =====
+// 버튼(studyToggle)과 같은 일을 하는 추가 경로다. 터치는 HTML5 드래그가 없고 키보드·명령 팔레트도
+// 버튼을 쓰므로 버튼은 그대로 둔다.
+
+// 끌어온 문서를 상대편 칸에 세울 짝 — 직전에 보던 문서(activeMru)를 우선한다.
+function splitDropMate(excludeId){
+  const alive = (x) => x != null && x !== excludeId && docs.some(d => d.id === x);
+  const recent = activeMru.find(x => alive(x) && tabOrder.includes(x));
+  if (recent != null) return recent;
+  const tabbed = tabOrder.find(alive);
+  if (tabbed != null) return tabbed;
+  const other = docs.find(d => d.id !== excludeId);
+  return other ? other.id : null;
+}
+
+// 탭을 떨군 칸에 맞춰 역할을 정한다. 분할 진입·참고 교체·역할 교대는 기존 함수가 그대로 처리한다.
+function dropTabIntoPane(id, role){
+  const doc = docs.find(d => d.id === id);
+  if (!doc) return;
+  const mate = splitDropMate(id);
+  const action = tabDropSplitAction(studyPdfId, activeId, role, id, mate);
+  if (action === "keep") return;
+  if (action === "swap" && role === "work"){ setStudyReference(activeId); return; }   // 참고 문서를 작업 칸으로 → 역할 교대
+  // 아래 세 갈래는 모두 "끌어온 문서를 참고 칸으로" — startStudyModeWithDoc 가 분할 진입·참고 교체·교대를 가른다.
+  if (action === "swap" || action === "replace-reference" || action === "pin-only"){ startStudyModeWithDoc(doc); return; }
+  if (action === "pin-with-mate"){ startStudyModeWithDoc(doc); setActiveDoc(mate); return; }
+  if (action === "mate-as-reference"){                              // 보던 문서는 작업 칸에 두고 짝을 참고로 세운다
+    const mateDoc = docs.find(d => d.id === mate);
+    if (mateDoc) startStudyModeWithDoc(mateDoc);
+    return;
+  }
+  if (action === "replace-work"){ setActiveDoc(id); return; }       // 작업 칸 문서만 교체(참고 칸 유지)
+  if (action === "pin-current"){                                    // 보던 문서를 참고로 고정하고 끌어온 문서를 작업 칸에
+    const current = docs.find(d => d.id === activeId);
+    if (current) startStudyModeWithDoc(current);
+    setActiveDoc(id);
+  }
+}
+
+// 탭 드래그 중에만 #content 를 덮는 투명 판. 오피스·스프레드시트 뷰어는 iframe 이라 덮개가 없으면
+// 그 위에서 dragover 가 부모 문서로 오지 않는다(파일 드롭 오버레이가 화면 전체를 덮는 것과 같은 이유).
+function setupSplitDropZone(){
+  const content = byId("content");
+  if (content._splitDrop) return content._splitDrop;
+  const zone = document.createElement("div");
+  zone.className = "split-drop";
+  zone.hidden = true;
+  ["left", "right"].forEach(side => {
+    const half = document.createElement("div");
+    half.className = "split-drop-half";
+    half.dataset.side = side;
+    half.appendChild(document.createElement("span"));
+    zone.appendChild(half);
+  });
+  const sideAt = (clientX) => {
+    const rect = zone.getBoundingClientRect();
+    return clientX < rect.left + rect.width / 2 ? "left" : "right";
+  };
+  zone.addEventListener("dragover", (e) => {
+    if (draggedTabId === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const side = sideAt(e.clientX);
+    zone.classList.toggle("on-left", side === "left");
+    zone.classList.toggle("on-right", side === "right");
+  });
+  zone.addEventListener("dragleave", (e) => {
+    if (e.target !== zone) return;
+    zone.classList.remove("on-left", "on-right");
+  });
+  zone.addEventListener("drop", (e) => {
+    if (draggedTabId === null) return;
+    e.preventDefault(); e.stopPropagation();
+    const id = draggedTabId;
+    const side = sideAt(e.clientX);
+    draggedTabId = null;
+    clearTabDropMarkers();
+    hideSplitDropZone();
+    dropTabIntoPane(id, splitDropRoleForSide(side, studySwapped));
+  });
+  content.appendChild(zone);
+  content._splitDrop = zone;
+  return zone;
+}
+
+// 각 반쪽에 그 칸의 이름을 띄운다 — 좌우 바꾸기 상태에 따라 참고/작업 위치가 달라지므로 매번 갱신.
+function showSplitDropZone(){
+  if (matchMedia("(max-width: 900px)").matches) return;   // 좁은 화면은 위아래 분할 — 좌우 안내가 맞지 않는다
+  if (!docs.length) return;
+  const zone = setupSplitDropZone();
+  zone.querySelectorAll(".split-drop-half").forEach(half => {
+    const role = splitDropRoleForSide(half.dataset.side, studySwapped);
+    half.querySelector("span").textContent = role === "reference" ? "참고 칸에 고정" : "작업 칸에서 열기";
+  });
+  zone.classList.remove("on-left", "on-right");
+  zone.hidden = false;
+}
+function hideSplitDropZone(){
+  const content = byId("content");
+  const zone = content && content._splitDrop;
+  if (!zone) return;
+  zone.hidden = true;
+  zone.classList.remove("on-left", "on-right");
+}
+
 // 학습 화면 좌(PDF)·우(코드) 비율 조절 분할바 — #content 에 한 번만 만들고 드래그로 --study-split 갱신(저장)
 function setupStudyDivider(){
   const content = byId("content");
@@ -1311,14 +1416,17 @@ function renderTabs(){
     const cat = extCategory(d.kind, d.name);
     if (cat) tab.dataset.cat = cat;
     tab.title = d.name + (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
-      " · 드래그: 위치 변경 · 우클릭: 탭 정리";
+      " · 드래그: 탭바에서 위치 변경 · 본문 좌우로 끌면 분할 · 우클릭: 탭 정리";
     tab.onclick = () => openDocInTargetPane(d.id);   // 분할 화면이면 마지막 클릭 칸에 열기
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(id, e.clientX, e.clientY); });
     tab.addEventListener("dragstart", (e) => {
       draggedTabId = id;
       tab.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", String(id));
+      // 드래그 대상은 draggedTabId 로 가린다. 여기 text/plain 은 바깥 앱으로 끌었을 때만 쓰이므로
+      // 뜻 없는 문서 번호 대신 파일명을 넣는다.
+      e.dataTransfer.setData("text/plain", d.name);
+      showSplitDropZone();                      // 본문 좌우 드롭 안내 표시(iframe 뷰어 위까지 덮는다)
     });
     tab.addEventListener("dragover", (e) => {
       if (draggedTabId === null || draggedTabId === id) return;
@@ -1340,7 +1448,7 @@ function renderTabs(){
       clearTabDropMarkers();
       moveTab(movedId, id, after);
     });
-    tab.addEventListener("dragend", () => { draggedTabId = null; clearTabDropMarkers(); });
+    tab.addEventListener("dragend", () => { draggedTabId = null; clearTabDropMarkers(); hideSplitDropZone(); });
     const ic = document.createElement("span"); ic.className = "tab-ic"; ic.textContent = iconFor(d.kind, d.name);
     const nm = document.createElement("span"); nm.className = "tab-name"; nm.textContent = d.name;
     const x = document.createElement("button"); x.className = "tab-x"; x.textContent = "✕";

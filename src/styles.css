@@ -654,6 +654,21 @@
   /* 더블클릭으로 좌우 바꾼 상태: PDF(reference)를 오른쪽, 코드(work)를 왼쪽으로 */
   #content.study-mode.study-swapped .study-reference{left:var(--study-split,50%);right:0;border-right:0;border-left:3px solid var(--border)}
   #content.study-mode.study-swapped .study-work{left:0;right:calc(100% - var(--study-split,50%))}
+  /* 상단 탭을 본문으로 끌면 뜨는 좌우 드롭 안내 — 탭 드래그 중에만 보이고, iframe 뷰어 위까지 덮어 dragover 를 받는다 */
+  .split-drop{position:absolute;inset:0;z-index:40;display:flex}
+  .split-drop[hidden]{display:none}
+  .split-drop-half{flex:1;display:flex;align-items:center;justify-content:center;pointer-events:none;
+    border:3px dashed transparent;transition:background .12s,border-color .12s}
+  .split-drop-half span{padding:10px 16px;border-radius:10px;font-size:14px;font-weight:700;color:#fff;
+    background:rgba(15,23,42,.78);box-shadow:0 6px 20px rgba(0,0,0,.3);opacity:0;transition:opacity .12s}
+  .split-drop.on-left .split-drop-half[data-side="left"],
+  .split-drop.on-right .split-drop-half[data-side="right"]{
+    background:color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent)}
+  .split-drop.on-left .split-drop-half[data-side="left"] span,
+  .split-drop.on-right .split-drop-half[data-side="right"] span{opacity:1}
+  @media (prefers-reduced-motion: reduce){
+    .split-drop-half,.split-drop-half span{transition:none}
+  }
   #content:fullscreen{background:var(--viewer)}
   body.viewer-fullscreen header,body.viewer-fullscreen #tabBar,body.viewer-fullscreen #sidebar,body.viewer-fullscreen #sbResizer,body.viewer-fullscreen #scratchpad,body.viewer-fullscreen #imageMemo{display:none!important}
   body.viewer-fullscreen main{position:fixed;inset:0;z-index:100;background:var(--viewer)}

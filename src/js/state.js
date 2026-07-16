@@ -13,7 +13,8 @@ const {
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-  studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed
+  studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
+  splitDropRoleForSide, tabDropSplitAction
 } = PdfSignerCore;
 
 /* ===== 다중 문서 상태 =====
