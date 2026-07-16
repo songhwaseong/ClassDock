@@ -1117,6 +1117,7 @@
     "취소 요청됨": "Cancellation requested",
     "페이지를 계산하고 있어요…": "Calculating pages…",
     "내용 일치 없음": "No content matches",
+    "검색 중…": "Searching…",
     "접을 출력이 없어요.": "No outputs to collapse.",
     "펼칠 출력이 없어요.": "No outputs to expand."
   };

@@ -310,6 +310,8 @@ function wire(){
       sidebarSearch.value = "";
       sidebarExtFilter = "";
       contentMatchIds = new Set(); contentMatchSnippets = new Map(); contentMatchQuery = ""; clearTimeout(contentSearchTimer); setContentStatus("");
+      contentSearchBusyQuery = "";                       // 예약된 검색을 취소했으니 "검색 중…"도 걷는다
+      contentCacheClear();                               // 검색을 닫았다 → 본문·소문자본 사본을 놓아준다
       renderSidebar();
       sidebarSearch.blur();
     }

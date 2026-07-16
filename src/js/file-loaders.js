@@ -74,6 +74,8 @@ async function handleFiles(files, options={}){
             made = makeDoc("office", file.name, opts);
             made.notebook = true; made.notebookModel = __nbModel;
             made.render = async () => { made.el.innerHTML = ""; made.el.scrollTop = 0; renderNotebookView(__nbModel, made.el, made); };
+            // 사이드바 내용 검색 결과 클릭 → 일치한 셀로 이동(렌더 뒤에 불린다)
+            made.contentSearchFocus = (query) => nbFocusSearchMatch(made, query);
             refreshChrome();
             activateIfIdle(made, opts);
           } catch(e){ toast((e && e.message) || "노트북을 열지 못했어요.", 4000); made = await loadText(file, opts); }
