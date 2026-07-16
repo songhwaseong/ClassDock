@@ -799,11 +799,11 @@ function wire(){
   // 자주 쓰는 파일 작업 단축키. 편집기 안에서도 Ctrl+S는 현재 문서를 저장한다.
   window.addEventListener("keydown", (e) => {
     if (document.querySelector(".modal:not([hidden])")) return;
-    // Alt+← / → : 왼쪽 사이드바 숨기기 / 보이기 (브라우저 뒤로·앞으로가기는 막는다)
-    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.isComposing
-        && (e.key === "ArrowLeft" || e.key === "ArrowRight")){
+    // 왼쪽 사이드바 숨기기 / 보이기 (기본 Alt+←/→ — 브라우저 뒤로·앞으로가기는 막는다)
+    const sbHide = shortcutMatches(e, "sidebarHide"), sbShow = shortcutMatches(e, "sidebarShow");
+    if (sbHide || sbShow){
       e.preventDefault();
-      const wantCollapsed = (e.key === "ArrowLeft");      // ← 숨기기, → 보이기
+      const wantCollapsed = sbHide;
       if (sidebarCollapsed !== wantCollapsed){
         sidebarCollapsed = wantCollapsed;
         try { localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed)); } catch(_){}

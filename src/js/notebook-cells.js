@@ -836,13 +836,15 @@ function nbOnKeydown(ownerDoc, e){
   if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && nbAnyFindOpen(ownerDoc)){
     e.preventDefault(); e.stopPropagation(); nbCloseAllFinds(ownerDoc); return;
   }
-  // Ctrl+H = 노트북 전체 찾기·바꾸기, Ctrl+Shift+H = 현재 셀 안에서 찾기·바꾸기 (capture 단계라 셀 편집기보다 먼저 가로챔)
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "h" || e.key === "H")){
-    e.preventDefault(); e.stopPropagation();
-    if (e.shiftKey) nbOpenCellFind(ownerDoc); else nbOpenNotebookFind(ownerDoc);
-    return;
+  // 노트북 전체 찾기·바꾸기(기본 Ctrl+H)·현재 셀 찾기(기본 Ctrl+Shift+H)·저장(기본 Ctrl+S)은
+  // 설정의 단축키 재지정을 따른다. (capture 단계라 셀 편집기보다 먼저 가로챔)
+  if (typeof shortcutMatches === "function" && shortcutMatches(e, "findInCell")){
+    e.preventDefault(); e.stopPropagation(); nbOpenCellFind(ownerDoc); return;
   }
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "s" || e.key === "S")){
+  if (typeof shortcutMatches === "function" && shortcutMatches(e, "findInDocument")){
+    e.preventDefault(); e.stopPropagation(); nbOpenNotebookFind(ownerDoc); return;
+  }
+  if (typeof shortcutMatches === "function" && shortcutMatches(e, "saveCurrent")){
     e.preventDefault(); e.stopPropagation(); saveNotebook(ownerDoc); return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "=" || e.key === "+")){
@@ -881,11 +883,11 @@ function nbOnKeydown(ownerDoc, e){
     }
   }
 
-  // 실행(편집·명령 공통)
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey){
+  // 실행(편집·명령 공통) — 설정의 'Python 코드 실행'(기본 Ctrl+Enter)·'셀 실행 후 다음 셀'(기본 Shift+Enter)을 따른다.
+  if (typeof shortcutMatches === "function" && shortcutMatches(e, "runCode")){
     if (idx >= 0){ e.preventDefault(); e.stopPropagation(); nbRunByIndex(ownerDoc, idx, false); } return;
   }
-  if (e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+  if (typeof shortcutMatches === "function" && shortcutMatches(e, "runCellAdvance")){
     if (idx >= 0){ e.preventDefault(); e.stopPropagation(); nbRunByIndex(ownerDoc, idx, true); } return;
   }
 

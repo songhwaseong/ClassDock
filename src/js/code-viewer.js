@@ -1809,8 +1809,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (await confirmDialog("편집한 내용을 버리고 원본 코드로 되돌릴까요?", "되돌리기", "취소")){ editor.setValue(text); clearPythonDraft(draftKey); refreshEditState(); }
   });
   editor.ta.addEventListener("keydown", (e) => {
-    // 노트북: Shift+Enter = 이 셀 실행 후 다음 셀로, Ctrl/⌘+Enter = 이 셀만(상태 유지). 일반 코드는 기존대로 전체 실행.
-    if (ui.runCurrentCell && e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+    // 노트북: Shift+Enter(설정 재지정 가능) = 이 셀 실행 후 다음 셀로, Ctrl/⌘+Enter = 이 셀만(상태 유지). 일반 코드는 기존대로 전체 실행.
+    if (ui.runCurrentCell && shortcutMatches(e, "runCellAdvance")){
       e.preventDefault(); ui.runCurrentCell(true); return;
     }
     // 노트북: Ctrl/⌘+↑·↓ = 실행 없이 이전/다음 셀로 커서 이동

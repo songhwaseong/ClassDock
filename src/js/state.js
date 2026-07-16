@@ -63,16 +63,20 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"commandPalette", label:"명령 팔레트", description:"기능을 검색해 바로 실행하는 창 열기", defaultValue:"Ctrl+K" },
   { id:"openFiles", label:"파일 열기", description:"파일 선택 창 열기", defaultValue:"Ctrl+O" },
   { id:"openFolder", label:"폴더 열기", description:"폴더 전체 열기", defaultValue:"Ctrl+Shift+O" },
-  { id:"saveCurrent", label:"현재 파일 저장", description:"PDF 내보내기 또는 Python 저장", defaultValue:"Ctrl+S" },
+  { id:"saveCurrent", label:"현재 파일 저장", description:"PDF·Python·노트북·엑셀 편집 저장", defaultValue:"Ctrl+S" },
   { id:"closeCurrent", label:"현재 파일 닫기", description:"활성 탭 닫기", defaultValue:"Ctrl+W" },
   { id:"reopenClosed", label:"닫은 파일 다시 열기", description:"방금 닫은 탭 복원", defaultValue:"Ctrl+Shift+T" },
   { id:"focusSearch", label:"열린 파일 검색", description:"사이드바 검색창으로 이동", defaultValue:"Ctrl+F" },
+  { id:"sidebarHide", label:"사이드바 숨기기", description:"왼쪽 파일 목록 접기", defaultValue:"Alt+ArrowLeft" },
+  { id:"sidebarShow", label:"사이드바 보이기", description:"왼쪽 파일 목록 펼치기", defaultValue:"Alt+ArrowRight" },
   { id:"scratchpad", label:"임시 메모", description:"메모 열기·닫기", defaultValue:"Ctrl+M" },
   { id:"newPython", label:"새 Python 코드", description:"빈 Python 편집기 만들기", defaultValue:"Alt+N" },
   { id:"previousFile", label:"이전 수업 파일", description:"이전 열린 탭으로 이동", defaultValue:"Ctrl+ArrowLeft" },
   { id:"nextFile", label:"다음 수업 파일", description:"다음 열린 탭으로 이동", defaultValue:"Ctrl+ArrowRight" },
-  { id:"findInDocument", label:"문서 안에서 찾기", description:"PDF 찾기 또는 편집기 찾기·바꾸기", defaultValue:"Ctrl+H" },
-  { id:"runCode", label:"Python 코드 실행", description:"현재 Python 코드 실행", defaultValue:"Ctrl+Enter" },
+  { id:"findInDocument", label:"문서 안에서 찾기", description:"PDF·노트북·편집기 찾기·바꾸기", defaultValue:"Ctrl+H" },
+  { id:"findInCell", label:"현재 셀에서 찾기", description:"노트북 현재 셀 안에서 찾기·바꾸기", defaultValue:"Ctrl+Shift+H" },
+  { id:"runCode", label:"Python 코드 실행", description:"현재 Python 코드 실행 (노트북: 이 셀만)", defaultValue:"Ctrl+Enter" },
+  { id:"runCellAdvance", label:"셀 실행 후 다음 셀", description:"노트북·셀 코드에서 실행 후 다음 셀로", defaultValue:"Shift+Enter" },
   { id:"runNotebook", label:"노트북 전체 실행", description:"현재 노트북의 모든 코드 셀 실행", defaultValue:"Ctrl+Shift+Enter" },
   { id:"screensaverStart", label:"대기 화면 지금 시작", description:"모니터 전체 화면으로 대기 화면 켜기", defaultValue:"Ctrl+F12" }
 ]);
@@ -133,6 +137,8 @@ function shortcutDisplay(value){
 function validateShortcutChoice(value){
   const normalized = normalizeShortcut(value);
   if (!normalized) return "단축키를 인식하지 못했어요.";
+  // 기본값으로 쓰는 조합(Ctrl+Shift+T·Shift+Enter·Alt+←/→ 등)은 앱이 이미 처리하므로 언제든 다시 선택할 수 있다.
+  if (Object.values(DEFAULT_SHORTCUTS).some((v) => normalizeShortcut(v) === normalized)) return "";
   const hasMainModifier = /^(?:Ctrl|Meta|Alt)\+/.test(normalized);
   if (!hasMainModifier) return "Ctrl, Alt 또는 Win 키를 함께 눌러 주세요.";
   const unavailable = new Set([

@@ -3393,11 +3393,14 @@ async function renderXlsx(file, host, doc){
       }
       return;
     }
+    // 저장은 설정의 '현재 파일 저장'(기본 Ctrl+S) 재지정을 따른다.
+    if (typeof shortcutMatches === "function" && shortcutMatches(e, "saveCurrent")){
+      e.preventDefault(); e.stopPropagation(); quickSave(); return;
+    }
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     const k = String(e.key).toLowerCase();
     if (k === "c" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); copyRichSelection(); }
     else if (k === "x" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); cutSelection(); }
-    else if (k === "s" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); quickSave(); }
   });
 
   // CSV→XLSX 변환 시 사용자가 고른 '첫 줄 머리글' 여부를 기본값으로. (없으면 기존처럼 머리글 고정)
