@@ -1113,7 +1113,10 @@
       ? item
       : { name: String(item || ""), type: "" };
     const name = String(info.name || "");
-    const callable = String(info.type || "").toLowerCase() === "function";
+    // import 줄에서는 함수형 후보라도 이름만 넣는다 — from math import sqrt() 는 문법 오류다.
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const importLine = /^\s*(?:from|import)\b/.test(text.slice(lineStart, start));
+    const callable = String(info.type || "").toLowerCase() === "function" && !importLine;
     const hasOpenParenthesis = callable && text.charAt(end) === "(";
     return {
       text: name + (callable && !hasOpenParenthesis ? "()" : ""),

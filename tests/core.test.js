@@ -500,6 +500,24 @@ test("함수 자동완성은 기존 여는 괄호를 중복 삽입하지 않는�
   assert.equal(source.slice(0, range.start) + insertion.text + source.slice(range.end), "json.loads()");
 });
 
+test("import 줄에서는 함수 자동완성도 괄호를 붙이지 않는다", () => {
+  const source = "from math import sqr";
+  const range = completionReplacementRange(source, source.length, source.length, 17, source.length, "sqrt");
+  const insertion = completionInsertionPlan(source, range, { name: "sqrt", type: "function" });
+  assert.deepEqual(insertion, { text: "sqrt", caret: 21 });
+  assert.equal(source.slice(0, range.start) + insertion.text + source.slice(range.end), "from math import sqrt");
+  // 들여쓴 import(함수 안 지역 import)도 같게 다룬다.
+  const indented = "def load():\n    from json import loa";
+  const indentedRange = completionReplacementRange(indented, indented.length, indented.length, 32, indented.length, "loads");
+  const indentedInsertion = completionInsertionPlan(indented, indentedRange, { name: "loads", type: "function" });
+  assert.equal(indentedInsertion.text, "loads");
+  // 같은 후보라도 본문에서는 괄호와 인수 위치 커서를 유지한다.
+  const body = "value = sqr";
+  const bodyRange = completionReplacementRange(body, body.length, body.length, 8, body.length, "sqrt");
+  const bodyInsertion = completionInsertionPlan(body, bodyRange, { name: "sqrt", type: "function" });
+  assert.deepEqual(bodyInsertion, { text: "sqrt()", caret: 13 });
+});
+
 test("변수 자동완성은 이름만 삽입한다", () => {
   const source = "student_na";
   const range = completionReplacementRange(source, source.length, source.length, 0, source.length, "student_name");
