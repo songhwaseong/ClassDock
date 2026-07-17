@@ -64,6 +64,21 @@ test("folder refresh picker starts from the previous root folder handle when pos
   assert.match(source, /chooseFolderHandle\(root\.folderHandle \|\| null\)/);
 });
 
+test("folder drops traverse modern File System Access directory handles", () => {
+  assert.match(source, /captureDroppedFileItems\(dataTransfer\)/);
+  assert.match(source, /await Promise\.all\(handlePromises\)/);
+  assert.match(source, /handle\.kind === "directory"/);
+  assert.match(source, /collectDirectoryHandleFiles\(handle\)/);
+  assert.match(source, /const modernHasDir = handles\.some/);
+  assert.match(source, /if \(!modernHasDir && hasLegacyDir\)/);
+  assert.match(source, /droppedTransferNeedsFolderPicker\(dataTransfer, files\)/);
+  assert.match(source, /pickFolderOrInput\(folderInput\)/);
+  assert.match(source, /folderHandle:directoryHandles\.length === 1 \? directoryHandles\[0\] : null/);
+  assert.match(appSource, /const wasInternal = isInternalDragTransfer\(e\.dataTransfer, internalDrag\)/);
+  assert.match(appSource, /if \(!wasInternal\) queueDroppedItems\(e\.dataTransfer\)/);
+  assert.match(appSource, /dropOverlay\.addEventListener\("drop"/);
+});
+
 test("실제 폴더 그룹은 마지막 파일을 닫아도 자동 정리하지 않는다", () => {
   assert.match(source, /const physicalFolder = refreshRoot/);
   assert.match(source, /if \(physicalFolder\) break;/);

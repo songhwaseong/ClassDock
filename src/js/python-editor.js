@@ -1713,6 +1713,7 @@ function buildCodeEditor(text, prof, options={}){
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,
     destroy: () => {
+      if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);
       document.removeEventListener("selectionchange", syncSelection);
       document.removeEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
@@ -1897,7 +1898,10 @@ function buildLightTextEditor(text, options={}){
     setValue: (v) => { ta.value = v; renderGutter(); ta.dispatchEvent(new Event("input", { bubbles: true })); },
     getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
     focusLine, openFind, closeFind, isFindOpen: () => findOpen,
-    destroy: () => { ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove(); }
+    destroy: () => {
+      if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
+      ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove();
+    }
   };
 }
 

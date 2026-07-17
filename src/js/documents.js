@@ -601,7 +601,7 @@ function setupSplitDropZone(){
     return clientX < rect.left + rect.width / 2 ? "left" : "right";
   };
   zone.addEventListener("dragover", (e) => {
-    if (draggedTabId === null) return;
+    if (draggedTabId === null || !isInternalDragTransfer(e.dataTransfer, true)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     const side = sideAt(e.clientX);
@@ -613,13 +613,11 @@ function setupSplitDropZone(){
     zone.classList.remove("on-left", "on-right");
   });
   zone.addEventListener("drop", (e) => {
-    if (draggedTabId === null) return;
+    if (draggedTabId === null || !isInternalDragTransfer(e.dataTransfer, true)) return;
     e.preventDefault(); e.stopPropagation();
     const id = draggedTabId;
     const side = sideAt(e.clientX);
-    draggedTabId = null;
-    clearTabDropMarkers();
-    hideSplitDropZone();
+    resetDocumentDragState();
     dropTabIntoPane(id, splitDropRoleForSide(side, studySwapped));
   });
   content.appendChild(zone);
@@ -1365,6 +1363,11 @@ function clearTabDropMarkers(){
   const bar = byId("tabBar");
   if (bar) bar.querySelectorAll(".tab").forEach(tab => tab.classList.remove("dragging", "drop-before", "drop-after"));
 }
+function resetDocumentDragState(){
+  draggedTabId = null;
+  clearTabDropMarkers();
+  hideSplitDropZone();
+}
 function moveTab(draggedId, targetId, after){
   if (draggedId === targetId) return;
   const from = tabOrder.indexOf(draggedId);
@@ -1424,13 +1427,14 @@ function renderTabs(){
       draggedTabId = id;
       tab.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(INTERNAL_DRAG_MIME, "document");
       // 드래그 대상은 draggedTabId 로 가린다. 여기 text/plain 은 바깥 앱으로 끌었을 때만 쓰이므로
       // 뜻 없는 문서 번호 대신 파일명을 넣는다.
       e.dataTransfer.setData("text/plain", d.name);
       showSplitDropZone();                      // 본문 좌우 드롭 안내 표시(iframe 뷰어 위까지 덮는다)
     });
     tab.addEventListener("dragover", (e) => {
-      if (draggedTabId === null || draggedTabId === id) return;
+      if (draggedTabId === null || draggedTabId === id || !isInternalDragTransfer(e.dataTransfer, true)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       const rect = tab.getBoundingClientRect();
@@ -1440,16 +1444,15 @@ function renderTabs(){
     });
     tab.addEventListener("dragleave", () => tab.classList.remove("drop-before", "drop-after"));
     tab.addEventListener("drop", (e) => {
-      if (draggedTabId === null || draggedTabId === id) return;
+      if (draggedTabId === null || draggedTabId === id || !isInternalDragTransfer(e.dataTransfer, true)) return;
       e.preventDefault(); e.stopPropagation();
       const rect = tab.getBoundingClientRect();
       const after = e.clientX > rect.left + rect.width / 2;
       const movedId = draggedTabId;
-      draggedTabId = null;
-      clearTabDropMarkers();
+      resetDocumentDragState();
       moveTab(movedId, id, after);
     });
-    tab.addEventListener("dragend", () => { draggedTabId = null; clearTabDropMarkers(); hideSplitDropZone(); });
+    tab.addEventListener("dragend", resetDocumentDragState);
     const ic = document.createElement("span"); ic.className = "tab-ic"; ic.textContent = iconFor(d.kind, d.name);
     const nm = document.createElement("span"); nm.className = "tab-name"; nm.textContent = d.name;
     const x = document.createElement("button"); x.className = "tab-x"; x.textContent = "✕";
@@ -2396,10 +2399,11 @@ function renderSidebar(){
       item.addEventListener("dragstart", (e) => {
         draggedTabId = doc.id;                                // 탭 드롭존과 같은 파이프라인 재사용
         e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData(INTERNAL_DRAG_MIME, "document");
         e.dataTransfer.setData("text/plain", doc.name);       // 바깥 앱으로 끌었을 때만 쓰인다
         showSplitDropZone();                                  // 본문 좌우 드롭 안내(iframe 뷰어 위까지 덮음)
       });
-      item.addEventListener("dragend", () => { draggedTabId = null; hideSplitDropZone(); });
+      item.addEventListener("dragend", resetDocumentDragState);
     }
     const twist = document.createElement("span");
     twist.className = "sb-twist";

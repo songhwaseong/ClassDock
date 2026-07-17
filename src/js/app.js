@@ -39,9 +39,15 @@ function wire(){
 
   // 내부 드래그(이미지 등 페이지 요소를 끄는 동작)를 외부 파일 드롭과 구분 — 자기 창에 떨궈도 새 파일로 추가하지 않도록
   let internalDrag = false;
+  const resetInternalDragState = () => {
+    internalDrag = false;
+    if (typeof resetDocumentDragState === "function") resetDocumentDragState();
+  };
   byId("loadingCancel").onclick = cancelUiBatch;
-  window.addEventListener("dragstart", () => { internalDrag = true; }, true);
-  window.addEventListener("dragend",   () => { internalDrag = false; }, true);
+  window.addEventListener("dragstart", (e) => {
+    internalDrag = true;
+    try { if (e.dataTransfer) e.dataTransfer.setData(INTERNAL_DRAG_MIME, "1"); } catch (_) {}
+  }, true);
 
   // 드롭존
   const fileInput = byId("fileInput");
@@ -89,7 +95,11 @@ function wire(){
   }));
   ["dragleave","drop"].forEach(ev => dropzone.addEventListener(ev, (e) => {
     e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("drag");
-    if (ev === "drop" && !internalDrag && e.dataTransfer.files.length) queueDroppedItems(e.dataTransfer);
+    if (ev === "drop"){
+      const wasInternal = isInternalDragTransfer(e.dataTransfer, internalDrag);
+      resetInternalDragState();
+      if (!wasInternal) queueDroppedItems(e.dataTransfer);
+    }
   }));
 
   // 창 전체로 파일이 떨어져 브라우저가 이동하는 것 방지 + 파일 처리는 여기 한 곳에서만
@@ -98,6 +108,18 @@ function wire(){
   let dropOverlayTimer = 0;
   const hideOverlay = () => { dragDepth = 0; clearTimeout(dropOverlayTimer); dropOverlayTimer = 0; dropOverlay.classList.remove("show"); };
   const armOverlayTimer = () => { clearTimeout(dropOverlayTimer); dropOverlayTimer = setTimeout(hideOverlay, 10000); };
+  // 화면 전체 오버레이가 실제 드롭 대상이므로 창 버블링에만 기대지 않고 여기서 직접 받는다.
+  dropOverlay.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  });
+  dropOverlay.addEventListener("drop", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    hideOverlay();
+    const wasInternal = isInternalDragTransfer(e.dataTransfer, internalDrag);
+    resetInternalDragState();
+    if (!wasInternal) queueDroppedItems(e.dataTransfer);
+  });
   const draggingFiles = (e) => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
   const memoOwnsFileDrop = () => {
     const imageMemo = byId("imageMemo");
@@ -105,25 +127,32 @@ function wire(){
     return !!((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden));
   };
   window.addEventListener("dragenter", (e) => {
-    if (internalDrag || !draggingFiles(e)) return;
+    if (!draggingFiles(e) || isInternalDragTransfer(e.dataTransfer, false)) return;
+    // 외부 Files 드롭은 이전 내부 드래그 플래그가 남아 있어도 업로드가 우선한다.
+    if (internalDrag) resetInternalDragState();
     // 메모 창이 열렸으면 전역 오버레이가 창 위를 덮지 않게 한다.
     // 각 메모의 drop 핸들러가 이미지를 받고 stopPropagation 하므로 본문의 새 탭 열기와 중복되지 않는다.
     if (memoOwnsFileDrop()){ hideOverlay(); return; }
     dragDepth++; dropOverlay.classList.add("show"); armOverlayTimer(); // 오버레이가 떠서 iframe 위까지 덮음 → 어디든 드롭 가능
   });
-  window.addEventListener("dragleave", () => {
-    if (internalDrag) return;
+  window.addEventListener("dragleave", (e) => {
+    if (isInternalDragTransfer(e.dataTransfer, internalDrag)) return;
     if (--dragDepth <= 0) hideOverlay();                   // 창 밖으로 완전히 나가면 숨김
   });
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => {
     e.preventDefault();
     hideOverlay();
-    if (internalDrag) return;                                            // 페이지 안에서 시작된 드래그(이미지 등)는 무시
-    if (e.dataTransfer.files.length) queueDroppedItems(e.dataTransfer);   // 어디에 떨궈도 새 탭으로 추가
+    const wasInternal = isInternalDragTransfer(e.dataTransfer, internalDrag);
+    resetInternalDragState();
+    if (wasInternal) return;                                             // 페이지 안에서 시작된 드래그(이미지 등)는 무시
+    queueDroppedItems(e.dataTransfer);                                  // 어디에 떨궈도 새 탭으로 추가
   });
-  window.addEventListener("dragend", hideOverlay, true);
-  window.addEventListener("blur", hideOverlay);
+  window.addEventListener("dragend", () => { resetInternalDragState(); hideOverlay(); }, true);
+  window.addEventListener("blur", () => { resetInternalDragState(); hideOverlay(); });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && internalDrag){ resetInternalDragState(); hideOverlay(); }
+  }, true);
 
   // 모든 편집 문서는 hasUnsavedEdits 를 공통으로 사용한다. PDF는 자체 복구본을
   // 저장하므로 이 플래그를 쓰지 않고, 표·이미지도 여기서 경고한다.

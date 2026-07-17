@@ -14,7 +14,8 @@ const {
   normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
   workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath
+  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, dataTransferHasFileItems, captureDroppedFileItems,
+  droppedTransferNeedsFolderPicker
 } = require("../src/js/core.js");
 
 test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", () => {
@@ -902,4 +903,74 @@ test("editor undo history remembers the caret immediately before an edit", () =>
     value:"first\nsecond", s:8, e:8
   });
   assert.equal(editorHistoryCaretState(initial, "changed", 4, 4), initial);
+});
+
+test("folder drops are recognized even when DataTransfer.files is empty", () => {
+  assert.equal(dataTransferHasFileItems({
+    files: [],
+    items: [{ kind:"file", webkitGetAsEntry(){ return { isDirectory:true }; } }]
+  }), true);
+  assert.equal(dataTransferHasFileItems({ files:[{ name:"note.txt" }], items:[] }), true);
+  assert.equal(dataTransferHasFileItems({ files:[], items:[{ kind:"string" }] }), false);
+  assert.equal(dataTransferHasFileItems({ files:[], items:[] }), false);
+  assert.equal(dataTransferHasFileItems(null), false);
+});
+
+test("folder drop sources capture both legacy entries and modern handles during the event", async () => {
+  const legacyDirectory = { name:"legacy", isDirectory:true };
+  const modernDirectory = { name:"modern", kind:"directory" };
+  let modernCalled = 0;
+  const captured = captureDroppedFileItems({
+    files: [],
+    items: [
+      { kind:"file", webkitGetAsEntry(){ return legacyDirectory; } },
+      {
+        kind:"file",
+        webkitGetAsEntry(){ return null; },
+        getAsFileSystemHandle(){
+          modernCalled += 1;
+          return Promise.resolve(modernDirectory);
+        }
+      },
+      { kind:"string", getAsFileSystemHandle(){ throw new Error("must not be called"); } }
+    ]
+  });
+  assert.equal(modernCalled, 1);
+  assert.deepEqual(captured.entries, [legacyDirectory]);
+  assert.deepEqual(await Promise.all(captured.handlePromises), [modernDirectory]);
+});
+
+test("modern folder handles are captured even when a legacy entry is also available", async () => {
+  const legacyDirectory = { name:"same", isDirectory:true };
+  const modernDirectory = { name:"same", kind:"directory" };
+  let handleCalls = 0;
+  const captured = captureDroppedFileItems({
+    files: [],
+    items: [{
+      kind:"file",
+      webkitGetAsEntry(){ return legacyDirectory; },
+      getAsFileSystemHandle(){
+        handleCalls += 1;
+        return Promise.resolve(modernDirectory);
+      }
+    }]
+  });
+  assert.equal(handleCalls, 1);
+  assert.deepEqual(captured.entries, [legacyDirectory]);
+  assert.deepEqual(await Promise.all(captured.handlePromises), [modernDirectory]);
+});
+
+test("directory placeholders are not opened as zero-byte untitled files", () => {
+  const oneFileItem = { items:[{ kind:"file" }] };
+  assert.equal(droppedTransferNeedsFolderPicker(oneFileItem, [
+    { name:"수업자료", size:0, type:"" }
+  ]), true);
+  assert.equal(droppedTransferNeedsFolderPicker(oneFileItem, []), true);
+  assert.equal(droppedTransferNeedsFolderPicker(oneFileItem, [
+    { name:"empty.txt", size:0, type:"text/plain" }
+  ]), false);
+  assert.equal(droppedTransferNeedsFolderPicker(oneFileItem, [
+    { name:"data", size:12, type:"" }
+  ]), false);
+  assert.equal(droppedTransferNeedsFolderPicker({ items:[] }, []), false);
 });

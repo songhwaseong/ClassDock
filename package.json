@@ -2,7 +2,8 @@
   "name": "pdf-signer-local",
   "private": true,
   "scripts": {
-    "build": "node build-offline.js",
+    "build:spellcheck-worker": "node tools/build-korean-spell-worker.mjs",
+    "build": "npm run build:spellcheck-worker && node build-offline.js",
     "check": "node tools/check-source.js",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
@@ -10,6 +11,11 @@
     "verify": "npm run check && npm test && npm run build && npm run release-check"
   },
   "devDependencies": {
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "esbuild": "0.25.8"
+  },
+  "dependencies": {
+    "hunspell-dict-ko": "0.1.0",
+    "hunspell-wasm": "0.3.0"
   }
 }

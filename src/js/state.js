@@ -14,7 +14,8 @@ const {
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
-  splitDropRoleForSide, tabDropSplitAction
+  splitDropRoleForSide, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
+  INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
 } = PdfSignerCore;
 
 /* ===== 다중 문서 상태 =====

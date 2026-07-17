@@ -521,7 +521,16 @@ function nbMountMarkdown(ctrl, ownerDoc){
     if (ctrl.cellEl.querySelector(".nbv-md-edit")) return;
     const wrap = document.createElement("div"); wrap.className = "nbv-md-editwrap"; wrap.style.position = "relative";
     const ta = document.createElement("textarea");
-    ta.className = "nbv-md-edit"; ta.value = cell.source; ta.spellcheck = false;
+    ta.className = "nbv-md-edit"; ta.value = cell.source; ta.spellcheck = true;
+    const editPane = document.createElement("div"); editPane.className = "nbv-md-editpane";
+    editPane.appendChild(ta);
+    const spellcheck = MNKoreanSpellcheck.attach({
+      textarea:ta,
+      buttonHost:editPane,
+      mode:"markdown",
+      fileExt:"md",
+      label:"노트북 마크다운 맞춤법 검사"
+    });
     const preview = document.createElement("div"); preview.className = "md-host nbv-md-preview";
     // 노트북 전체 찾기 강조(주황 박스)를 얹는 오버레이 — textarea 위에 겹치고 입력은 통과시킨다.
     const layer = document.createElement("div"); layer.className = "nbv-md-spotlayer"; layer.setAttribute("aria-hidden", "true");
@@ -564,14 +573,18 @@ function nbMountMarkdown(ctrl, ownerDoc){
       }
       mirror.remove();
     };
-    const commit = () => { editCtx = null; sync(); renderView(); wrap.replaceWith(view); };
+    const commit = () => {
+      editCtx = null; sync(); renderView();
+      if (spellcheck) spellcheck.destroy();
+      wrap.replaceWith(view);
+    };
     ta.addEventListener("input", () => { clearSpot(); sync(); grow(); updatePreview(); });
     ta.addEventListener("blur", (e) => {
       const to = e.relatedTarget;
-      if (to && to.closest && to.closest(".nbv-find")) return;   // 노트북 찾기창으로 포커스가 간 경우엔 편집·강조를 유지
+      if (to && to.closest && to.closest(".nbv-find,.spellcheck-trigger,.spellcheck-panel")) return;   // 찾기·맞춤법 패널로 포커스가 간 경우엔 편집을 유지
       commit();
     });
-    wrap.append(ta, preview, layer);
+    wrap.append(editPane, preview, layer);
     view.replaceWith(wrap); ta.focus(); grow(); updatePreview();
     editCtx = { ta, draw: drawSpot, clear: clearSpot, commit, spotOwned: false };
   };

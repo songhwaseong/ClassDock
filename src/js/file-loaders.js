@@ -1113,32 +1113,94 @@ async function collectDroppedFiles(entry, prefix, out, folderPaths){
 }
 
 function queueDroppedItems(dataTransfer){
-  const items = dataTransfer && dataTransfer.items;
-  const files = dataTransfer && dataTransfer.files ? [...dataTransfer.files] : [];
-  if (!items || !items.length) return queueFiles(files);
+  const captured = captureDroppedFileItems(dataTransfer);
+  const files = captured.files;
+  const entries = captured.entries;
+  const handlePromises = captured.handlePromises;
   // 엔트리는 드롭 이벤트가 끝나기 전에 동기적으로 확보해야 한다(이후 item 무효화).
-  const entries = [];
-  for (const item of [...items]){
-    if (item.kind !== "file") continue;
-    const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
-    if (entry) entries.push(entry);
-  }
   // 폴더 드롭이 아니면 신뢰할 수 있는 dataTransfer.files 를 그대로 쓴다.
   // file:// 로 열면 FileSystemFileEntry.file() 이 EncodingError 로 깨지는 Chrome 버그가 있어,
   // 일반 파일은 엔트리 API 를 거치지 않는다(폴더 구조 파악이 필요할 때만 엔트리 순회).
-  const hasDir = entries.some(en => en.isDirectory);
-  if (!hasDir) return queueFiles(files);
+  const hasLegacyDir = entries.some(entry => entry.isDirectory);
+  if (!hasLegacyDir && !handlePromises.length){
+    if (droppedTransferNeedsFolderPicker(dataTransfer, files)){
+      toast("이 브라우저는 드롭한 폴더 내용을 직접 주지 않아요. 같은 폴더를 선택해 주세요.", 4500);
+      const folderInput = byId("folderInput");
+      if (folderInput) pickFolderOrInput(folderInput);
+      return fileQueue;
+    }
+    if (!files.length){
+      toast("브라우저가 드롭한 폴더 정보를 전달하지 않았어요. '폴더 열기' 버튼을 사용해 주세요.", 4500);
+      return fileQueue;
+    }
+    return queueFiles(files);
+  }
   fileQueue = fileQueue
     .then(() => runUiBatch(async () => {
       const collected = [];
       const folderPaths = [];
-      for (const entry of entries) await collectDroppedFiles(entry, "", collected, folderPaths);
-      if (collected.length || folderPaths.length)
-        await rememberWorkspace(collected, navNodes.length === 0, { folderPaths });
-      await openFolderFiles(collected, { folderPaths });
+      const directoryHandles = [];
+
+      // 최신 Chromium은 기존 엔트리 대신 File System Access 핸들만 줄 수 있다.
+      // 핸들 함수는 드롭 이벤트 안에서 이미 호출했으며 여기서는 결과만 기다린다.
+      const handles = handlePromises.length ? await Promise.all(handlePromises) : [];
+      const modernHasDir = handles.some(handle => handle && handle.kind === "directory");
+      let hasDir = modernHasDir || hasLegacyDir;
+      if (!modernHasDir && hasLegacyDir){
+        for (const entry of entries) await collectDroppedFiles(entry, "", collected, folderPaths);
+      }
+      for (const handle of handles){
+        if (!handle) continue;
+        if (handle.kind === "directory"){
+          directoryHandles.push(handle);
+          const snapshot = await collectDirectoryHandleFiles(handle);
+          collected.push(...snapshot.files);
+          folderPaths.push(...snapshot.folderPaths);
+        } else if ((modernHasDir || !files.length) && handle.kind === "file" && typeof handle.getFile === "function"){
+          try {
+            const file = withFileHandle(await handle.getFile(), handle);
+            setFileRelativePath(file, file.name);
+            collected.push(file);
+          } catch(e){ console.warn("드롭한 파일 핸들을 읽지 못했어요:", e); }
+        }
+      }
+
+      if (!hasDir){
+        const regularFiles = files.length ? files : collected;
+        if (!regularFiles.length){
+          toast("드롭한 폴더 정보를 읽지 못했어요. '폴더 열기' 버튼을 사용해 주세요.", 4000);
+          return;
+        }
+        let options = {};
+        const loose = regularFiles.filter(file =>
+          !["zip","tar","gz","tgz"].includes((file.name.split(".").pop() || "").toLowerCase()));
+        if (loose.length > 1){
+          options.archiveCtx = makeFileSiblingCtx(
+            loose.map(file => ({ file, relPath:file.name })), "여러 파일");
+        }
+        const replaceWorkspace = docs.length === 0;
+        await handleFiles(regularFiles, options);
+        await rememberWorkspace(regularFiles, replaceWorkspace, { silent:true });
+        return;
+      }
+
+      const uniqueFolderPaths = [...new Set(folderPaths)];
+      if (collected.length || uniqueFolderPaths.length)
+        await rememberWorkspace(collected, navNodes.length === 0, { folderPaths:uniqueFolderPaths });
+      await openFolderFiles(collected, {
+        folderPaths:uniqueFolderPaths,
+        folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null
+      });
     }))
     .then(() => collapseToActiveBranch())   // 폴더 드롭도 활성 파일의 폴더 체인만 펼쳐 둔다
-    .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
+    .catch((e) => {
+      if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요.");
+      else {
+        console.error(e);
+        const reason = e && (e.name || e.message) ? " (" + (e.name || e.message) + ")" : "";
+        toast("드롭한 폴더를 읽지 못했어요" + reason, 5000);
+      }
+    });
   return fileQueue;
 }
 

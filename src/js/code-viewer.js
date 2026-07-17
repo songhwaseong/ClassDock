@@ -578,6 +578,21 @@ async function renderCode(file, host, ext, profile, runCtx){
   const lineCount = text.split("\n").length;
   const runnable = RUN_EXTS.has(ext);
   const ownerDoc = docs.find(d => d.el === host) || null;
+  const spellModeForExt = () => {
+    if (ext === "md" || ext === "markdown" || ext === "mdx") return "markdown";
+    if (!ext || ["txt","text","log","srt","vtt","smi","rst","adoc","asciidoc","org","textile","wiki","mediawiki"].includes(ext)) return "plain";
+    return "code";
+  };
+  const attachSpellcheck = (editor, buttonHost, label) => {
+    if (!editor || !editor.ta || typeof MNKoreanSpellcheck === "undefined") return null;
+    return MNKoreanSpellcheck.attach({
+      textarea:editor.ta,
+      buttonHost,
+      mode:spellModeForExt(),
+      fileExt:ext,
+      label:label || ((ownerDoc && ownerDoc.name) || file.name || "맞춤법 검사")
+    });
+  };
   // 저장 시 원본 개행(CRLF/CR)·BOM 을 보존하기 위해 로드 시 1회 감지해 문서에 기억한다.
   // (화면·편집은 항상 LF 로 정규화하고, 저장할 때만 되돌린다 → Windows .bat/.ps1 등의 개행이 바뀌지 않음.)
   if (ownerDoc && ownerDoc.textEol == null){
@@ -999,6 +1014,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       const status = document.createElement("span"); status.className = "run-status";
       const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
       bar.append(saveBtn, viewBtn, fontDown, fontUp, status, diag);
+      attachSpellcheck(editor, bar, saveName);
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
       if (lightEdit){
         const liteNote = document.createElement("span"); liteNote.className = "text-edit-encnote";
@@ -1208,6 +1224,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
+  attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
   syncShortcutHints(bar);
 
   // 편집기 바로 위: 마지막으로 저장한 파일의 절대경로 표시. 저장 전엔 회색 안내문.

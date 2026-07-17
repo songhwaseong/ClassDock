@@ -14,6 +14,7 @@
     "icons.js",
     "state.js",
     "history.js",
+    "spellcheck.js",
     "pdf-recovery.js",
     "video-viewer.js",
     "documents.js",
@@ -59,64 +60,201 @@
   "applicationLayers": [
     {
       "name": "bootstrap",
-      "scripts": ["state-sync.js", "theme.js", "i18n.js", "core.js", "icons.js", "state.js", "history.js"]
+      "scripts": [
+        "state-sync.js",
+        "theme.js",
+        "i18n.js",
+        "core.js",
+        "icons.js",
+        "state.js",
+        "history.js",
+        "spellcheck.js"
+      ]
     },
     {
       "name": "documents",
-      "scripts": ["pdf-recovery.js", "video-viewer.js", "documents.js", "workspace-store.js", "file-loaders.js", "pdf-render.js", "pdf-ocr.js", "pdf-editor.js", "pdf-pages.js", "viewer-base.js", "korean-font.js", "code-viewer.js"]
+      "scripts": [
+        "pdf-recovery.js",
+        "video-viewer.js",
+        "documents.js",
+        "workspace-store.js",
+        "file-loaders.js",
+        "pdf-render.js",
+        "pdf-ocr.js",
+        "pdf-editor.js",
+        "pdf-pages.js",
+        "viewer-base.js",
+        "korean-font.js",
+        "code-viewer.js"
+      ]
     },
     {
       "name": "python-and-notebooks",
-      "scripts": ["python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js", "notebook-model.js", "notebook-tools.js", "notebook-run.js", "notebook-pdf-export.js", "notebook-cells.js"]
+      "scripts": [
+        "python-snippets.js",
+        "python-editor.js",
+        "python-run-context.js",
+        "python-runtime.js",
+        "notebook-model.js",
+        "notebook-tools.js",
+        "notebook-run.js",
+        "notebook-pdf-export.js",
+        "notebook-cells.js"
+      ]
     },
     {
       "name": "document-editors",
-      "scripts": ["office-doc-viewers.js", "spreadsheet-viewer.js", "spreadsheet-chart.js", "pptx-viewer.js", "image-viewer.js", "board-render.js", "whiteboard.js"]
+      "scripts": [
+        "office-doc-viewers.js",
+        "spreadsheet-viewer.js",
+        "spreadsheet-chart.js",
+        "pptx-viewer.js",
+        "image-viewer.js",
+        "board-render.js",
+        "whiteboard.js"
+      ]
     },
     {
       "name": "learning-tools",
-      "scripts": ["lesson-replay.js", "diff-viewer.js", "task-package.js", "screensaver.js", "pet-data.js", "pet-custom.js", "pet-events.js", "pet.js", "pet-focus.js", "scratchpad.js", "image-memo.js", "app.js", "command-palette.js"]
+      "scripts": [
+        "lesson-replay.js",
+        "diff-viewer.js",
+        "task-package.js",
+        "screensaver.js",
+        "pet-data.js",
+        "pet-custom.js",
+        "pet-events.js",
+        "pet.js",
+        "pet-focus.js",
+        "scratchpad.js",
+        "image-memo.js",
+        "app.js",
+        "command-palette.js"
+      ]
     }
   ],
   "scriptDependencies": {
-    "state.js": ["core.js", "theme.js"],
-    "documents.js": ["state.js"],
-    "workspace-store.js": ["documents.js"],
-    "file-loaders.js": ["workspace-store.js"],
-    "pdf-render.js": ["file-loaders.js"],
-    "pdf-editor.js": ["pdf-render.js", "pdf-recovery.js"],
-    "pdf-pages.js": ["pdf-editor.js"],
-    "code-viewer.js": ["documents.js"],
-    "python-editor.js": ["code-viewer.js", "python-snippets.js"],
-    "python-run-context.js": ["python-editor.js"],
-    "python-runtime.js": ["python-run-context.js"],
-    "notebook-model.js": ["documents.js"],
-    "notebook-tools.js": ["notebook-model.js"],
-    "notebook-run.js": ["notebook-tools.js", "python-runtime.js"],
-    "notebook-cells.js": ["notebook-run.js"],
-    "spreadsheet-viewer.js": ["office-doc-viewers.js", "documents.js"],
-    "spreadsheet-chart.js": ["spreadsheet-viewer.js"],
-    "image-viewer.js": ["documents.js"],
-    "whiteboard.js": ["board-render.js", "documents.js"],
-    "diff-viewer.js": ["documents.js", "code-viewer.js"],
-    "app.js": ["file-loaders.js", "notebook-cells.js", "whiteboard.js"],
-    "command-palette.js": ["app.js"]
+    "state.js": [
+      "core.js",
+      "theme.js"
+    ],
+    "documents.js": [
+      "state.js"
+    ],
+    "workspace-store.js": [
+      "documents.js"
+    ],
+    "file-loaders.js": [
+      "workspace-store.js"
+    ],
+    "pdf-render.js": [
+      "file-loaders.js"
+    ],
+    "pdf-editor.js": [
+      "pdf-render.js",
+      "pdf-recovery.js"
+    ],
+    "pdf-pages.js": [
+      "pdf-editor.js"
+    ],
+    "code-viewer.js": [
+      "documents.js",
+      "spellcheck.js"
+    ],
+    "python-editor.js": [
+      "code-viewer.js",
+      "python-snippets.js"
+    ],
+    "python-run-context.js": [
+      "python-editor.js"
+    ],
+    "python-runtime.js": [
+      "python-run-context.js"
+    ],
+    "notebook-model.js": [
+      "documents.js"
+    ],
+    "notebook-tools.js": [
+      "notebook-model.js"
+    ],
+    "notebook-run.js": [
+      "notebook-tools.js",
+      "python-runtime.js"
+    ],
+    "notebook-cells.js": [
+      "notebook-run.js",
+      "spellcheck.js"
+    ],
+    "spreadsheet-viewer.js": [
+      "office-doc-viewers.js",
+      "documents.js"
+    ],
+    "spreadsheet-chart.js": [
+      "spreadsheet-viewer.js"
+    ],
+    "image-viewer.js": [
+      "documents.js"
+    ],
+    "whiteboard.js": [
+      "board-render.js",
+      "documents.js"
+    ],
+    "diff-viewer.js": [
+      "documents.js",
+      "code-viewer.js"
+    ],
+    "scratchpad.js": [
+      "spellcheck.js"
+    ],
+    "app.js": [
+      "file-loaders.js",
+      "notebook-cells.js",
+      "whiteboard.js"
+    ],
+    "command-palette.js": [
+      "app.js"
+    ]
   },
   "moduleBoundaries": [
     {
       "name": "board-renderer",
       "file": "board-render.js",
       "publicApi": "MNBoardRenderer",
-      "consumers": ["lesson-replay.js", "whiteboard.js"]
+      "consumers": [
+        "lesson-replay.js",
+        "whiteboard.js"
+      ]
     },
     {
       "name": "edit-history",
       "file": "history.js",
       "publicApi": "MNEditHistory",
-      "consumers": ["pdf-recovery.js", "python-editor.js", "notebook-model.js", "spreadsheet-viewer.js", "image-viewer.js", "whiteboard.js"]
+      "consumers": [
+        "pdf-recovery.js",
+        "python-editor.js",
+        "notebook-model.js",
+        "spreadsheet-viewer.js",
+        "image-viewer.js",
+        "whiteboard.js"
+      ]
+    },
+    {
+      "name": "korean-spellcheck",
+      "file": "spellcheck.js",
+      "publicApi": "MNKoreanSpellcheck",
+      "consumers": [
+        "code-viewer.js",
+        "notebook-cells.js",
+        "scratchpad.js"
+      ]
     }
   ],
   "vendorScripts": [
+    {
+      "src": "vendor/korean-hunspell-worker.js",
+      "file": "korean-hunspell-worker.js",
+      "sha384": "sha384-OADNRCF5ayD/u9Ihsx+2KpmHNJp7KKKwlOOjQcgMXJeAYqDwecy5SYh2/xa9RIEE"
+    },
     {
       "src": "vendor/jquery.min.js",
       "file": "jquery.min.js",

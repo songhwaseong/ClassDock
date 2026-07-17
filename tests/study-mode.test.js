@@ -7,7 +7,9 @@ const {
   studyReadonlyPointerAllowed,
   studyReadonlyKeyAllowed,
   splitDropRoleForSide,
-  tabDropSplitAction
+  tabDropSplitAction,
+  INTERNAL_DRAG_MIME,
+  isInternalDragTransfer
 } = require("../src/js/core.js");
 
 test("분할 문서 선택은 타깃 칸 유지·역할 교체·한쪽 교체를 구분한다", () => {
@@ -97,4 +99,24 @@ test("study session state is persisted and restored with tabs", () => {
   assert.match(docs, /ensureRendered\(reference\)\.then\(\(\) => \{/);
   assert.match(docs, /reference\.id === studyPdfId && reference\.kind === "pdf"/);
   assert.match(store, /restoreStudyState\(savedTabs\)/);
+});
+
+test("internal document drags are separated from external file uploads by MIME type", () => {
+  assert.equal(isInternalDragTransfer({ types:[INTERNAL_DRAG_MIME, "text/plain"] }, false), true);
+  assert.equal(isInternalDragTransfer({ types:["Files"] }, false), false);
+  assert.equal(isInternalDragTransfer({ types:["Files"] }, true), false);
+  assert.equal(isInternalDragTransfer({ types:["text/plain"] }, true), true);
+  assert.equal(isInternalDragTransfer({ types:[] }, false), false);
+});
+
+test("document drag state is marked and reset on every termination path", () => {
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  assert.match(docs, /setData\(INTERNAL_DRAG_MIME, "document"\)/);
+  assert.match(docs, /function resetDocumentDragState\(\)/);
+  assert.match(docs, /!isInternalDragTransfer\(e\.dataTransfer, true\)/);
+  assert.match(app, /setData\(INTERNAL_DRAG_MIME, "1"\)/);
+  assert.match(app, /const wasInternal = isInternalDragTransfer\(e\.dataTransfer, internalDrag\)/);
+  assert.match(app, /window\.addEventListener\("blur", \(\) => \{ resetInternalDragState\(\); hideOverlay\(\); \}\)/);
+  assert.match(app, /e\.key === "Escape" && internalDrag/);
 });

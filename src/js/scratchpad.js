@@ -764,6 +764,13 @@ function wireScratchpad(){
     textarea.value = block.text;
     textarea.readOnly = !!block.locked;
     textarea.setAttribute("aria-readonly", String(!!block.locked));
+    const textSpellcheck = MNKoreanSpellcheck.attach({
+      textarea,
+      buttonHost:tools,
+      mode:"plain",
+      label:((activeNote() || {}).title || "메모") + " 맞춤법 검사"
+    });
+    if (textSpellcheck) textSpellcheck.button.disabled = !!block.locked;
     textarea.addEventListener("focus", () => { activeBlockId = block.id; });
     textarea.addEventListener("input", () => {
       if (block.locked) return;
@@ -969,6 +976,13 @@ function wireScratchpad(){
     text.value = block.text;
     text.readOnly = !!block.locked;
     text.setAttribute("aria-readonly", String(!!block.locked));
+    const imageTextSpellcheck = MNKoreanSpellcheck.attach({
+      textarea:text,
+      buttonHost:tools,
+      mode:"plain",
+      label:((activeNote() || {}).title || "메모") + " 이미지 설명 맞춤법 검사"
+    });
+    if (imageTextSpellcheck) imageTextSpellcheck.button.disabled = !!block.locked;
     text.addEventListener("focus", () => { activeBlockId = block.id; });
     text.addEventListener("input", () => {
       if (block.locked) return;
