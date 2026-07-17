@@ -43,6 +43,7 @@
     "board-render.js",
     "whiteboard.js",
     "lesson-replay.js",
+    "diff-viewer.js",
     "task-package.js",
     "screensaver.js",
     "pet-data.js",
@@ -74,7 +75,7 @@
     },
     {
       "name": "learning-tools",
-      "scripts": ["lesson-replay.js", "task-package.js", "screensaver.js", "pet-data.js", "pet-custom.js", "pet-events.js", "pet.js", "pet-focus.js", "scratchpad.js", "image-memo.js", "app.js", "command-palette.js"]
+      "scripts": ["lesson-replay.js", "diff-viewer.js", "task-package.js", "screensaver.js", "pet-data.js", "pet-custom.js", "pet-events.js", "pet.js", "pet-focus.js", "scratchpad.js", "image-memo.js", "app.js", "command-palette.js"]
     }
   ],
   "scriptDependencies": {
@@ -97,6 +98,7 @@
     "spreadsheet-chart.js": ["spreadsheet-viewer.js"],
     "image-viewer.js": ["documents.js"],
     "whiteboard.js": ["board-render.js", "documents.js"],
+    "diff-viewer.js": ["documents.js", "code-viewer.js"],
     "app.js": ["file-loaders.js", "notebook-cells.js", "whiteboard.js"],
     "command-palette.js": ["app.js"]
   },

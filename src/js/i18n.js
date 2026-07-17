@@ -1134,7 +1134,44 @@
     "내용 일치 없음": "No content matches",
     "검색 중…": "Searching…",
     "접을 출력이 없어요.": "No outputs to collapse.",
-    "펼칠 출력이 없어요.": "No outputs to expand."
+    "펼칠 출력이 없어요.": "No outputs to expand.",
+
+    // 파일 비교(diff)
+    "두 파일 비교 (diff)": "Compare two files (diff)",
+    "저장본과 비교 (현재 문서)": "Compare with saved copy (current file)",
+    "파일 비교": "File compare",
+    "두 파일 비교": "Compare two files",
+    "열린 문서 중 두 개를 골라 차이를 확인해요. 편집 중인 내용은 지금 상태 그대로 비교돼요.": "Pick two open documents to see their differences. Unsaved edits are compared as they are now.",
+    "기준 (왼쪽)": "Base (left)",
+    "비교 (오른쪽)": "Compare (right)",
+    "비교": "Compare",
+    "나란히 보기": "Side by side",
+    "한 줄로 보기": "Unified view",
+    "왼쪽·오른쪽 두 칸으로 나란히 비교하기": "Compare in two columns, side by side",
+    "삭제·추가를 위아래로 이어 한 줄 흐름으로 보기": "Show removals and additions in one flowing column",
+    "공백 무시": "Ignore whitespace",
+    "들여쓰기·공백만 다른 줄을 같은 줄로 취급해요": "Treat lines that differ only in whitespace as equal",
+    "⇄ 순서 바꾸기": "⇄ Swap sides",
+    "왼쪽(기준)과 오른쪽(비교)을 서로 바꿔요": "Swap the base and compare sides",
+    "↻ 다시 비교": "↻ Re-compare",
+    "문서의 지금 내용(편집 중 포함)으로 다시 비교해요": "Compare again with the documents' current contents (including unsaved edits)",
+    "차이 없음": "No differences",
+    "두 파일의 내용이 같아요": "The two files are identical",
+    "공백·들여쓰기 차이만 있어요": "Only whitespace/indentation differs",
+    "비교할 텍스트·코드 문서가 2개 이상 열려 있어야 해요.": "Open at least two text/code documents to compare.",
+    "서로 다른 두 문서를 골라 주세요.": "Please pick two different documents.",
+    "문서를 찾지 못했어요. 다시 열어 주세요.": "Couldn't find the document. Please reopen it.",
+    "문서 내용을 읽지 못했어요.": "Couldn't read the document contents.",
+    "비교하던 문서가 이미 닫혀 다시 읽지 못했어요.": "Couldn't re-read — the compared document is already closed.",
+    "지금 내용으로 다시 비교했어요.": "Re-compared with the current contents.",
+    "편집 중인 텍스트·코드 문서에서만 사용할 수 있어요.": "Available only for a text/code document being edited.",
+    "아직 저장된 적이 없는 새 문서라 비교할 저장본이 없어요.": "This new document has never been saved, so there is no saved copy to compare.",
+    "파일이 너무 커서 비교할 수 없어요 (5MB 초과).": "The file is too large to compare (over 5MB).",
+    "줄이 너무 많아 비교할 수 없어요 (파일당 50,000줄 초과).": "The file has too many lines to compare (over 50,000 lines per file).",
+    "파일 끝 개행 있음": "Final newline present",
+    "파일 끝 개행 없음": "No final newline",
+    "🔀 시작 코드와 비교": "🔀 Compare with starter code",
+    "학생이 과제 시작 코드에서 무엇을 바꿨는지 나란히 비교해 보기": "See side by side what the student changed from the starter code"
   };
 
   /* ── 리치 블록 사전(data-i18n="key" → English HTML). 한국어 원문은 스캔 때 기억. ── */
@@ -1221,7 +1258,10 @@
     "편집 후 {shortcut} 실행 · 옆 파일 포함": "Edit, then run with {shortcut} · includes adjacent files",
     "편집 후 {shortcut} 로 실행": "Edit, then run with {shortcut}",
     "{ext} 파일만 보기": "Show only {ext} files",
-    "압축 안에 열 수 있는 형식이 없어요. · {n}개 형식 미지원": "No openable formats inside the archive. · {n} unsupported {n|format|formats}"
+    "압축 안에 열 수 있는 형식이 없어요. · {n}개 형식 미지원": "No openable formats inside the archive. · {n} unsupported {n|format|formats}",
+    "같은 {n}줄 펼치기": "Expand {n} identical {n|line|lines}",
+    "성능 보호를 위해 가운데 {n}개 행을 생략했어요": "Skipped {n} middle {n|row|rows} to protect performance",
+    "추가·수정 {a}줄 · 삭제·수정 {d}줄": "{a} added/changed · {d} removed/changed {d|line|lines}"
   };
 
   function tf(tmpl, vars) {

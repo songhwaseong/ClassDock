@@ -3117,3 +3117,49 @@
   .chart-svg{width:100%;height:auto;max-width:780px}
   .chart-note{color:var(--muted);font-size:12.5px;min-height:16px;text-align:center}
   .chart-actions{display:flex;gap:8px;align-items:center;margin:0}
+
+  /* ===== 파일 비교(diff) ===== */
+  .diff-wrap{max-width:1500px;margin:0 auto;padding:14px 16px 24px}
+  .diff-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .diff-bar .spacer{flex:1}
+  .diff-bar .btn{padding:6px 11px;font-size:12.5px}
+  .diff-bar .btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);font-weight:700}
+  .diff-name{font-weight:700;font-size:13px;padding:3px 10px;border-radius:999px;max-width:34ch;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .diff-name.is-a{background:color-mix(in srgb,#ef4444 14%,var(--panel));color:color-mix(in srgb,#ef4444 70%,var(--ink))}
+  .diff-name.is-b{background:color-mix(in srgb,#16a34a 16%,var(--panel));color:color-mix(in srgb,#16a34a 70%,var(--ink))}
+  .diff-arrow{color:var(--muted)}
+  .diff-stats{font-size:13px;color:var(--muted)}
+  .diff-stats .diff-plus{color:#16a34a;margin-right:4px}
+  .diff-stats .diff-minus{color:var(--danger)}
+  .diff-body{display:grid;border:1px solid var(--border);border-radius:12px;overflow:hidden;
+    background:var(--panel);font:12.5px/1.55 Consolas,"Courier New",monospace}
+  .diff-view-split{grid-template-columns:max-content minmax(0,1fr) max-content minmax(0,1fr)}
+  .diff-view-unified{grid-template-columns:max-content max-content minmax(0,1fr)}
+  .diff-ln{padding:0 9px;text-align:right;color:var(--muted);user-select:none;min-width:34px;
+    background:color-mix(in srgb,var(--border) 26%,var(--panel));border-right:1px solid var(--border)}
+  .diff-cell{padding:0 10px;white-space:pre-wrap;word-break:break-all;min-width:0}
+  .diff-view-split .diff-cell.is-left{border-right:1px solid var(--border)}
+  .diff-cell:empty::before{content:"\200B"}
+  .diff-cell.is-del{background:color-mix(in srgb,#ef4444 12%,var(--panel))}
+  .diff-cell.is-ins{background:color-mix(in srgb,#16a34a 13%,var(--panel))}
+  .diff-cell.is-none{background:color-mix(in srgb,var(--border) 38%,var(--panel))}
+  .diff-mark{border-radius:3px}
+  .diff-cell.is-del .diff-mark{background:color-mix(in srgb,#ef4444 34%,var(--panel))}
+  .diff-cell.is-ins .diff-mark{background:color-mix(in srgb,#16a34a 36%,var(--panel))}
+  .diff-fold{grid-column:1/-1;font:inherit;font-size:12px;border:none;cursor:pointer;padding:5px 12px;
+    text-align:center;color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--panel));
+    border-top:1px dashed var(--border);border-bottom:1px dashed var(--border)}
+  .diff-fold:hover{background:color-mix(in srgb,var(--accent) 14%,var(--panel))}
+  .diff-limit{grid-column:1/-1;padding:7px 12px;text-align:center;color:var(--muted);
+    background:color-mix(in srgb,var(--danger) 6%,var(--panel));border-top:1px dashed var(--border);
+    border-bottom:1px dashed var(--border)}
+  .diff-eof{font-style:italic;color:var(--muted)}
+  .diff-same{grid-column:1/-1;padding:44px 20px;text-align:center;color:var(--muted);
+    font:15px/1.6 system-ui,"Malgun Gothic",sans-serif}
+  .diff-pick-sub{color:var(--muted);font-size:13px;margin:6px 0 14px}
+  .diff-pick-body{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+  .diff-pick-row{display:flex;align-items:center;gap:10px}
+  .diff-pick-row b{flex:0 0 96px;font-size:13px}
+  .diff-pick-row select{flex:1;min-width:0;font:inherit;font-size:13px;padding:8px 10px;
+    border:1px solid var(--border);border-radius:9px;background:var(--field,var(--panel));color:var(--ink)}

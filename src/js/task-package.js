@@ -659,14 +659,17 @@ function renderTaskSubmissionView(doc, host, sub, sealState){
   refreshBtn.textContent = "↻"; refreshBtn.title = "열린 과제 다시 확인";
   const regradeBtn = document.createElement("button"); regradeBtn.type = "button"; regradeBtn.className = "btn primary";
   regradeBtn.textContent = "🔁 재채점"; regradeBtn.title = "제출 코드를 원본 과제의 테스트로 이 컴퓨터에서 다시 채점";
+  const diffBtn = document.createElement("button"); diffBtn.type = "button"; diffBtn.className = "btn";
+  diffBtn.textContent = "🔀 시작 코드와 비교"; diffBtn.title = "학생이 과제 시작 코드에서 무엇을 바꿨는지 나란히 비교해 보기";
   const compareEl = document.createElement("div"); compareEl.className = "task-review-compare"; compareEl.hidden = true;
-  matchBox.append(matchMsg, openTaskBtn, refreshBtn, regradeBtn);
+  matchBox.append(matchMsg, openTaskBtn, refreshBtn, diffBtn, regradeBtn);
   wrap.appendChild(matchBox);
   wrap.appendChild(compareEl);
 
   const refreshMatch = () => {
     const ctx = findOpenTaskCtx(sub.taskId, sub.taskHash);
     regradeBtn.disabled = !ctx;
+    diffBtn.disabled = !ctx || typeof openCompareResult !== "function";
     openTaskBtn.hidden = !!ctx;
     if (!ctx){
       const ambiguous = countOpenTaskVersions(sub.taskId) > 1;
@@ -699,6 +702,15 @@ function renderTaskSubmissionView(doc, host, sub, sealState){
     document.body.appendChild(inp); inp.click();
   });
   refreshBtn.addEventListener("click", refreshMatch);
+  // 시작 코드 ↔ 제출 코드 비교 — 학생이 무엇을 고쳤는지 채점 전에 한눈에 본다.
+  diffBtn.addEventListener("click", () => {
+    const ctx = refreshMatch();
+    if (!ctx || typeof openCompareResult !== "function") return;
+    openCompareResult(
+      { name: (ctx.task.starter.name || "main.py") + " (시작 코드)", text: String(ctx.task.starter.code || "") },
+      { name: (sub.student || "학생") + " 제출 코드", text: String(sub.code || "") }
+    );
+  });
 
   // 재채점 실행/결과 패널 — 파이썬 실행기(runPythonSource)가 요구하는 최소 ui 객체를 만든다.
   const regradeSection = document.createElement("div"); regradeSection.className = "task-review-out";

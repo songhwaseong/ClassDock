@@ -37,6 +37,12 @@
     C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery"), { kw:"example gallery 예제 갤러리 샘플 연습" }),
     // 도구 · 보기
     C("scratchpad","🗒️","임시 메모 열기", () => callFn("openScratchpadForNotebookDrop"), { sc:"scratchpad", kw:"memo note 메모 임시 스크래치 노트" }),
+    C("compareFiles","🔀","두 파일 비교 (diff)", () => callFn("openFileComparePicker"),
+      { when:() => { try { return typeof diffComparableDocs === "function" && diffComparableDocs().length >= 2; } catch(_){ return false; } },
+        kw:"diff compare 비교 차이 다른 점 변경 대조" }),
+    C("compareSaved","🔀","저장본과 비교 (현재 문서)", () => callFn("compareActiveDocWithSaved"),
+      { when:() => { const s = curState(); return !!(s && s.codeEditor); },
+        kw:"diff compare 저장본 원본 비교 변경 사항 바뀐" }),
     C("imageMemo","🖼️","이미지 메모", () => clickId("imageMemoOpen"), { kw:"image 이미지 캡처 스크린샷 메모" }),
     C("theme","🌓","밝게 / 어둡게 전환 (테마)", () => clickId("themeToggle"), { kw:"theme dark light 다크 라이트 테마 어둡게 밝게 야간" }),
     C("sidebar","↔️","사이드바 접기 / 펼치기", () => clickId("sidebarToggle"), { kw:"sidebar 사이드바 목록 파일 접기 펼치기" }),

@@ -1075,6 +1075,7 @@ function modeBadgeText(doc){
   if (doc.kind === "pdf") return "PDF 편집";
   if (doc.kind === "board") return "화이트보드";
   if (doc.kind === "replay") return "수업 리플레이";
+  if (doc.kind === "diff") return "파일 비교";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
   if (doc.kind === "pdf-gallery") return "PDF 모아보기";
   if (ext === ".py" || ext === ".pyw") return "Python 실습";
@@ -1787,6 +1788,7 @@ function iconFor(kind, name){
   if (kind === "video") return AUDIO_EXTS.includes(fileExtOf(name)) ? "AUD" : "VID";
   if (kind === "board") return "칠판";
   if (kind === "replay") return "▶";
+  if (kind === "diff") return "비교";
   const ext = fileExtOf(name);
   if (ext === "md" || ext === "markdown" || ext === "mdx") return "MD";
   if (ext === "docx") return "DOC";
@@ -1805,6 +1807,7 @@ function extCategory(kind, name){
   if (kind === "pdf-gallery") return "pdf";
   if (kind === "video")  return "media";
   if (kind === "binary") return "binary";
+  if (kind === "diff")   return "code";
   const ext = fileExtOf(name);
   if (ext === "docx") return "word";
   if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";

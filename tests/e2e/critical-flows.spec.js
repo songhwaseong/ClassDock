@@ -122,3 +122,35 @@ test("a new whiteboard initializes its canvas through the module boundary", asyn
   await expect(page.locator("#activeFileName")).not.toHaveText("");
   await expect.poll(() => page.evaluate(() => typeof MNBoardRenderer)).toBe("object");
 });
+
+test("two text files can be compared in the diff viewer", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await page.goto("/");
+  await page.locator("#fileInput").setInputFiles([
+    { name: "diff-a.txt", mimeType: "text/plain", buffer: Buffer.from("line one\nsame line\nlast\n", "utf8") },
+    { name: "diff-b.txt", mimeType: "text/plain", buffer: Buffer.from("line two\nsame line\nlast\nappended\n", "utf8") }
+  ]);
+  await expect(page.locator("#activeFileName")).not.toHaveText("");
+  // 명령 팔레트 대신 전역 진입점을 직접 호출해 선택 모달을 연다(팔레트 흐름은 별도 테스트가 있음)
+  await page.evaluate(() => window.openFileComparePicker());
+  const modal = page.locator(".diff-pick-modal");
+  await expect(modal).toBeVisible();
+  await modal.locator("select").nth(0).selectOption({ label: "diff-a.txt" });
+  await modal.locator("select").nth(1).selectOption({ label: "diff-b.txt" });
+  await modal.locator("button.primary").click();
+  // 비교 문서: 바뀐 줄은 좌우로 강조되고, 추가 줄은 오른쪽에만 나타난다
+  await expect(page.locator("#activeFileName")).toHaveText("비교: diff-a.txt ⇄ diff-b.txt");
+  const body = page.locator(".diff-body");
+  await expect(body).toBeVisible();
+  await expect(body.locator(".diff-cell.is-del")).toContainText("line one");
+  await expect(body.locator(".diff-cell.is-ins .diff-mark").first()).toHaveText("two");
+  await expect(body.locator(".diff-cell.is-ins").nth(1)).toHaveText("appended");
+  await expect(page.locator(".diff-stats .diff-plus")).toHaveText("+2");
+  await expect(page.locator(".diff-stats .diff-minus")).toHaveText("−1");
+  // 한 줄(unified) 보기 전환도 동작해야 한다 (버튼 문구는 언어 설정에 따라 번역되므로 클래스로 찾는다)
+  await page.locator(".diff-view-toggle").click();
+  await expect(page.locator(".diff-body.diff-view-unified")).toBeVisible();
+  expect(errors).toEqual([]);
+});
