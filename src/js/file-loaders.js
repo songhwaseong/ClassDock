@@ -589,6 +589,41 @@ async function ensureFolderWriteAccess(handle){
     if (permission !== "granted") permission = await handle.requestPermission({ mode:"readwrite" });
   } catch(e){ console.warn("folder write permission request failed:", e); }
 }
+// 이미 열린 폴더 트리와 새로 여는 폴더의 관계를 핸들로 판별한다. 하위 폴더는 루트가 달라
+// 경로 문자열로는 같은 파일임을 알 수 없으므로 isSameEntry/resolve 만이 유일한 비교 수단이다.
+// same=같은 폴더, child=새 폴더가 기존 트리 안, parents=기존 트리(들)가 새 폴더 안.
+async function classifyRelatedFolderRoots(handle){
+  const result = { same:null, child:null, parents:[] };
+  if (!handle || handle.kind !== "directory" || typeof handle.isSameEntry !== "function") return result;
+  const roots = navNodes.filter(n => n.type === "group" && n.folderRefreshRootId === n.nodeId
+    && n.folderHandle && n.folderHandle.kind === "directory");
+  for (const root of roots){
+    try {
+      if (await root.folderHandle.isSameEntry(handle)){ if (!result.same) result.same = root; continue; }
+      if (typeof root.folderHandle.resolve !== "function") continue;
+      if (await root.folderHandle.resolve(handle)){ if (!result.child) result.child = root; continue; }
+      if (await handle.resolve(root.folderHandle)) result.parents.push(root);
+    } catch(e){ console.warn("폴더 포함 관계 확인 실패:", e); }   // 비교 실패 시 기존처럼 새 트리로 연다
+  }
+  return result;
+}
+// 새로 여는 폴더가 이미 열린 트리를 포함하면(부모 폴더를 다시 연 경우) 작은 트리를 닫아 하나로 합친다.
+// 같은 디스크 파일이 문서 두 벌로 열려 서로의 저장을 덮어쓰는 것을 막기 위해서다.
+// 저장하지 않은 편집이 있는 트리는 닫지 않고 경고만 한다 — 중복보다 편집 유실이 더 나쁘다.
+function absorbContainedFolderRoots(parents){
+  const keptNames = [];
+  for (const root of parents){
+    const branchIds = navBranchIds(root.nodeId);
+    const hasUnsaved = docs.some(doc => branchIds.has(doc.nodeId) &&
+      (doc.hasUnsavedEdits || (doc.isScratch && !doc._named) ||
+       (doc.kind === "pdf" && doc.elements && doc.elements.length)));
+    if (hasUnsaved){ keptNames.push(root.name); continue; }
+    closeGroup(root.nodeId, { forgetWorkspace:true });
+    toast("이미 열려 있던 '" + root.name + "' 폴더를 새로 연 폴더 안으로 합쳤어요.", 3200);
+  }
+  if (keptNames.length)
+    toast("'" + keptNames.join("', '") + "'에 저장하지 않은 편집이 있어 그대로 두었어요. 같은 파일이 두 곳에 열려 있으니 저장에 주의하세요.", 5600);
+}
 async function pickFolderOrInput(input){
   pendingFolderRefreshId = null;
   const supportsPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
@@ -598,7 +633,24 @@ async function pickFolderOrInput(input){
   }
   const handle = await chooseFolderHandle();
   if (!handle) return;
+  // 같은 폴더/하위 폴더를 다시 열면 새 트리(중복 문서·저장 충돌)를 만들지 않고 기존 트리를 새로고침한다.
+  const related = await classifyRelatedFolderRoots(handle);
+  if (related.same || related.child){
+    const root = related.same || related.child;
+    if (related.same){
+      root.folderHandle = handle;          // 방금 고른 핸들이 권한이 확실하다 — 교체
+      await ensureFolderWriteAccess(handle);
+      root.originalSaveMode = true;        // '폴더 열기'로 다시 열었으니 원본 저장 모드로 승격
+      rememberFolderHandle(root, root.name);
+    }
+    toast(related.same
+      ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 새로고침합니다."
+      : "선택한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 새로고침합니다.", 3400);
+    await requestFolderRefresh(root.nodeId);
+    return;
+  }
   await ensureFolderWriteAccess(handle);   // 원본 저장용 쓰기 권한 1회 확보(컨펌 창 없이)
+  if (related.parents.length) absorbContainedFolderRoots(related.parents);
   showLoading("폴더 파일 확인 중…");
   try {
     const snapshot = await collectDirectoryHandleFiles(handle);
@@ -1152,6 +1204,27 @@ function queueDroppedItems(dataTransfer){
       for (const handle of handles){
         if (!handle) continue;
         if (handle.kind === "directory"){
+          // 같은 폴더/하위 폴더를 다시 드롭하면 새 트리(중복 문서·저장 충돌) 대신 기존 트리를 새로고침한다.
+          // 여기는 이미 fileQueue 배치 안이므로 queueFolderRefresh(큐 재진입=교착)가 아니라 직접 실행한다.
+          const related = await classifyRelatedFolderRoots(handle);
+          if (related.same || related.child){
+            const root = related.same || related.child;
+            if (related.same) root.folderHandle = handle;   // 드롭 핸들이 최신 권한을 갖는다
+            let allowed = false;
+            try { allowed = await ensureReadPermission(root.folderHandle); } catch(_){}
+            if (!allowed){
+              toast("'" + root.name + "' 폴더가 이미 열려 있는데 다시 읽을 권한이 없어요. 사이드바의 '폴더 새로고침'을 사용해 주세요.", 4600);
+              continue;
+            }
+            toast(related.same
+              ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 새로고침합니다."
+              : "드롭한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 새로고침합니다.", 3400);
+            const snapshot = await collectDirectoryHandleFiles(root.folderHandle);
+            await refreshFolderGroup(root.nodeId, snapshot.files, { folderHandle: root.folderHandle,
+              folderPaths: snapshot.folderPaths, originalSaveMode: !!root.originalSaveMode });
+            continue;
+          }
+          if (related.parents.length) absorbContainedFolderRoots(related.parents);
           directoryHandles.push(handle);
           const snapshot = await collectDirectoryHandleFiles(handle);
           collected.push(...snapshot.files);
@@ -1185,11 +1258,29 @@ function queueDroppedItems(dataTransfer){
       }
 
       const uniqueFolderPaths = [...new Set(folderPaths)];
-      if (collected.length || uniqueFolderPaths.length)
-        await rememberWorkspace(collected, navNodes.length === 0, { folderPaths:uniqueFolderPaths });
+      if (!uniqueFolderPaths.length){
+        // 드롭한 폴더 전부가 기존 트리 새로고침으로 처리됨 — 남은 건 함께 드롭한 낱개 파일뿐이라 일반 파일로 연다.
+        if (!collected.length) return;
+        const loose = collected.filter(file =>
+          !["zip","tar","gz","tgz"].includes((file.name.split(".").pop() || "").toLowerCase()));
+        const looseOptions = loose.length > 1
+          ? { archiveCtx: makeFileSiblingCtx(loose.map(file => ({ file, relPath:file.name })), "여러 파일") }
+          : {};
+        const replaceWorkspace = docs.length === 0;
+        await handleFiles(collected, looseOptions);
+        await rememberWorkspace(collected, replaceWorkspace, { silent:true });
+        return;
+      }
+      // 핸들로 드롭한 폴더는 파일 핸들 덕에 실제로 원본에 저장되므로 원본 저장 마커도 함께 기록한다.
+      // 마커 없이 저장하면 '폴더 열기'가 남긴 마커가 stale 정리에 지워져, 재시작 후 원본 저장이 조용히 풀렸다.
+      const originalSaveFolderPaths = modernHasDir
+        ? [...new Set(uniqueFolderPaths.map(path => normalizedRunPath(path).split("/")[0]).filter(Boolean))]
+        : [];
+      await rememberWorkspace(collected, navNodes.length === 0, { folderPaths:uniqueFolderPaths, originalSaveFolderPaths });
       await openFolderFiles(collected, {
         folderPaths:uniqueFolderPaths,
-        folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null
+        folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null,
+        originalSaveMode: modernHasDir
       });
     }))
     .then(() => collapseToActiveBranch())   // 폴더 드롭도 활성 파일의 폴더 체인만 펼쳐 둔다
