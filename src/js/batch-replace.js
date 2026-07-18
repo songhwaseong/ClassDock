@@ -326,6 +326,14 @@ if (typeof window !== "undefined" && window.document) {
     const findInput = mkField("찾을 말", "예: 2025");
     const replaceInput = mkField("바꿀 말", "예: 2026");
 
+    // 사이드바 검색창(#sbSearch, "파일명·내용 검색")에 입력해 둔 말이 있으면 "찾을 말"에 미리 채워,
+    // 검색하던 낱말을 그대로 이어서 바꿀 수 있게 한다(프로그램 입력이라 input 이벤트는 안 튐 → 미리보기는 사용자가 실행).
+    try {
+      const sbSearch = document.getElementById("sbSearch");
+      const seed = sbSearch && String(sbSearch.value || "").trim();
+      if (seed) findInput.value = seed;
+    } catch(_){}
+
     const opts = document.createElement("div"); opts.className = "batch-replace-opts";
     const mkCheck = (labelText, titleText) => {
       const l = document.createElement("label"); l.className = "batch-replace-check"; if (titleText) l.title = titleText;
@@ -348,7 +356,8 @@ if (typeof window !== "undefined" && window.document) {
     card.append(title, sub, form, opts, status, results, actions);
     modal.appendChild(card);
 
-    let lastPreview = null;   // { matcher, files:[{doc,out,count,changes,text,checked}] }
+    let lastPreview = null;   // { matcher, sig, files:[{doc,out,count,changes,text,checked}] }
+    let previewTimer = 0;     // "찾을 말"·옵션 입력을 몰아 처리하는 디바운스 타이머
 
     const setApplyLabel = () => {
       const model = batchApplyButtonModel(lastPreview);
@@ -358,6 +367,7 @@ if (typeof window !== "undefined" && window.document) {
     setApplyLabel();
 
     function renderResults(){
+      const prevScroll = results.scrollTop;   // 실시간 갱신 때 목록 스크롤이 튀지 않게 유지
       results.innerHTML = "";
       if (!lastPreview) return;
       const files = lastPreview.files;
@@ -391,12 +401,28 @@ if (typeof window !== "undefined" && window.document) {
         box.appendChild(lines);
         results.appendChild(box);
       });
+      results.scrollTop = prevScroll;
       setApplyLabel();
     }
 
-    async function runPreview(){
+    // 모달이 떠 있는 동안 문서 본문은 바뀌지 않으므로(오버레이가 막음) 한 번 읽어 캐시한다.
+    // 이래야 "바꿀 말"을 칠 때마다 디스크·편집기를 다시 읽지 않고 즉시 목록을 다시 계산할 수 있다.
+    const textCache = new Map();
+    async function readDocCached(doc){
+      if (textCache.has(doc.id)) return textCache.get(doc.id);
+      const t = await batchReplaceReadText(doc);
+      textCache.set(doc.id, t);
+      return t;
+    }
+    // "찾기" 조건의 지문. 이게 그대로면 걸리는 파일·줄은 안 바뀌고 "바꿀 말"만 다시 계산하면 된다.
+    const findSig = () => JSON.stringify([findInput.value, caseChk.checked, regexChk.checked]);
+
+    // 전체 재훑기: 파일을 (캐시 경유) 읽어 걸리는 곳을 새로 찾는다. "찾을 말"·옵션이 바뀔 때만 쓴다.
+    async function runFullPreview(){
       const matcher = batchBuildMatcher(findInput.value, { caseSensitive: caseChk.checked, regex: regexChk.checked });
       if (matcher.error){ lastPreview = null; results.innerHTML = ""; status.textContent = matcher.error; setApplyLabel(); return; }
+      const sig = findSig();
+      const prevChecked = new Map((lastPreview ? lastPreview.files : []).map(f => [f.doc.id, f.checked]));
       lastPreview = null;
       apply.disabled = true; apply.textContent = "미리보기 만드는 중…";
       status.textContent = "훑는 중…"; results.innerHTML = "";
@@ -404,34 +430,58 @@ if (typeof window !== "undefined" && window.document) {
         const targets = batchReplaceTargetDocs();
         const files = [];
         for (const doc of targets){
-          const text = await batchReplaceReadText(doc);
+          const text = await readDocCached(doc);
           if (text == null) continue;
           const r = batchComputeReplacement(text, matcher, replaceInput.value);
-          if (r.count > 0) files.push({ doc, out: r.out, count: r.count, changes: r.changes, text, checked: true });
+          const checked = prevChecked.has(doc.id) ? prevChecked.get(doc.id) : true;
+          if (r.count > 0) files.push({ doc, out: r.out, count: r.count, changes: r.changes, text, checked });
         }
-        lastPreview = { matcher, files };
+        lastPreview = { matcher, sig, files };
         renderResults();
       } finally { setApplyLabel(); }
     }
 
+    // "찾을 말"은 그대로고 "바꿀 말"만 바뀐 경우: 파일을 다시 읽지 않고 결과 문자열만 다시 계산한다(즉시).
+    function recomputeReplacement(){
+      if (!lastPreview) return;
+      lastPreview.files = lastPreview.files.map(f => {
+        const r = batchComputeReplacement(f.text, lastPreview.matcher, replaceInput.value);
+        return { doc: f.doc, out: r.out, count: r.count, changes: r.changes, text: f.text, checked: f.checked };
+      });
+      renderResults();
+    }
+
+    function scheduleFullPreview(delay){
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(runFullPreview, delay);
+    }
+
     const close = () => {
+      clearTimeout(previewTimer);
       window.removeEventListener("keydown", onKey, true);
       modal.remove(); batchReplaceOpen = false;
     };
     const onKey = (e) => {
       if (e.key === "Escape"){ e.stopPropagation(); close(); }
-      else if (e.key === "Enter" && (e.target === findInput || e.target === replaceInput)){ e.preventDefault(); runPreview(); }
+      else if (e.key === "Enter" && (e.target === findInput || e.target === replaceInput)){ e.preventDefault(); clearTimeout(previewTimer); runFullPreview(); }
     };
     window.addEventListener("keydown", onKey, true);
     modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
     cancel.addEventListener("click", close);
-    // 조건을 바꾸면 이전 미리보기는 더 이상 유효하지 않다 → 버튼을 미리보기 단계로 되돌린다.
-    [findInput, replaceInput].forEach(el => el.addEventListener("input", () => { lastPreview = null; setApplyLabel(); }));
-    [caseChk, regexChk].forEach(el => el.addEventListener("change", () => { lastPreview = null; setApplyLabel(); }));
+    // 입력할 때마다 아래 목록을 살아 있게 갱신한다.
+    //  - "바꿀 말"만 바뀌었으면(찾기 지문 동일) 파일을 다시 읽지 않고 즉시 재계산한다.
+    //  - "찾을 말"·옵션이 바뀌었으면 잠깐 뒤(디바운스) 전체를 다시 훑는다.
+    findInput.addEventListener("input", () => scheduleFullPreview(250));
+    replaceInput.addEventListener("input", () => {
+      if (lastPreview && lastPreview.sig === findSig()) recomputeReplacement();
+      else scheduleFullPreview(250);
+    });
+    [caseChk, regexChk].forEach(el => el.addEventListener("change", () => scheduleFullPreview(0)));
 
     apply.addEventListener("click", async () => {
       if (!lastPreview){
-        await runPreview();
+        clearTimeout(previewTimer);
+        await runFullPreview();
         if (lastPreview && lastPreview.files.length)
           status.textContent += " 결과를 확인한 뒤 아래 버튼을 다시 누르면 저장돼요.";
         return;
@@ -457,7 +507,9 @@ if (typeof window !== "undefined" && window.document) {
 
     document.body.appendChild(modal);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(modal);
-    requestAnimationFrame(() => { try { findInput.focus(); } catch(_){} });
+    // 검색어를 미리 채운 채로 열렸으면, 미리보기를 누른 것처럼 아래 목록을 바로 보여준다.
+    if (findInput.value) runFullPreview();
+    requestAnimationFrame(() => { try { findInput.focus(); if (findInput.value) findInput.select(); } catch(_){} });
   }
 
   // 사이드바 버튼 연결(있으면). 이 스크립트는 <body> 끝에서 실행되므로 DOMContentLoaded 가
