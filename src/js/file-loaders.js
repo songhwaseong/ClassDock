@@ -504,11 +504,34 @@ function rememberFolderHandle(rootGroup, rootName){
     if (handle && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
   }).catch(() => {});
 }
-async function collectDirectoryHandleFiles(handle){
+function folderScanLoadingText(progress){
+  const row = progress || {};
+  const files = Math.max(0, Number(row.files) || 0).toLocaleString();
+  const folders = Math.max(0, Number(row.folders) || 0).toLocaleString();
+  if (row.phase === "reading"){
+    const processed = Math.max(0, Number(row.processed) || 0).toLocaleString();
+    const total = Math.max(0, Number(row.total) || 0).toLocaleString();
+    return `폴더 파일 불러오는 중… (${processed}/${total})`;
+  }
+  return `폴더 파일 확인 중… (파일 ${files}개 · 폴더 ${folders}개)`;
+}
+async function collectDirectoryHandleFiles(handle, options={}){
   if (!handle || handle.kind !== "directory") return { files: [], folderPaths: [] };
   const rootName = handle.name || "폴더";
   const found = [];                          // { entry, dir, parts } — 경로 순회로 먼저 모은다
   const folderPaths = [rootName];
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  let lastProgressAt = 0, lastProgressCount = -1;
+  const report = (phase, processed=0, total=0, force=false) => {
+    if (!onProgress) return;
+    const count = phase === "reading" ? processed : found.length + folderPaths.length;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (!force && count - lastProgressCount < 25 && now - lastProgressAt < 120) return;
+    lastProgressCount = count;
+    lastProgressAt = now;
+    onProgress({ phase, files:found.length, folders:folderPaths.length, processed, total });
+  };
+  report("scanning", 0, 0, true);
   const walk = async (dir, parts) => {
     for await (const entry of dir.values()){
       throwIfUiCancelled();
@@ -517,18 +540,25 @@ async function collectDirectoryHandleFiles(handle){
         if (entry.name.charAt(0) === ".") continue;
         const nextParts = parts.concat(entry.name);
         folderPaths.push([rootName].concat(nextParts).join("/"));
+        report("scanning");
         await walk(entry, nextParts);
       } else if (entry.kind === "file"){
         found.push({ entry, dir, parts });
+        report("scanning");
       }
     }
   };
   await walk(handle, []);
+  report("scanning", 0, 0, true);
   // getFile() 은 항목마다 브라우저 왕복이 있어 수천 개 폴더에서 순차 실행이 느리다 → 순서 보존 제한 병렬.
+  let loaded = 0;
+  report("reading", loaded, found.length, true);
   const files = await mapWithConcurrency(found, 8, async (item) => {
     throwIfUiCancelled();
     const file = withDirHandle(withFileHandle(await item.entry.getFile(), item.entry), item.dir);
     setFileRelativePath(file, [rootName].concat(item.parts, item.entry.name).join("/"));
+    loaded++;
+    report("reading", loaded, found.length, loaded === found.length);
     return file;
   });
   return { files, folderPaths };
@@ -1135,12 +1165,13 @@ async function handleDroppedItems(entries){
 }
 
 // 폴더 드롭도 폴더 선택과 같은 File[] 형태로 모아 저장·옆파일 실행·자동복원을 모두 지원한다.
-async function collectDroppedFiles(entry, prefix, out, folderPaths){
+async function collectDroppedFiles(entry, prefix, out, folderPaths, onProgress=null){
   if (!entry) return;
   const rel = prefix ? prefix + "/" + entry.name : entry.name;
   if (entry.isDirectory){
     if ((entry.name || "").charAt(0) === ".") return;
     if (folderPaths) folderPaths.push(rel);
+    if (onProgress) onProgress({ phase:"scanning", files:out.length, folders:folderPaths.length });
     const children = await readAllDirectoryEntries(entry);
     // 파일 엔트리는 항목당 왕복이 있어 폴더 단위로 제한 병렬 읽기(순서 보존), 하위 폴더는 순차 순회.
     const fileChildren = children.filter(child => child && child.isFile);
@@ -1152,14 +1183,16 @@ async function collectDroppedFiles(entry, prefix, out, folderPaths){
       } catch(e){ console.warn("파일 엔트리를 읽지 못해 건너뜀:", child.name, e); return null; }
     });
     read.forEach(file => { if (file) out.push(file); });
+    if (onProgress) onProgress({ phase:"scanning", files:out.length, folders:folderPaths.length });
     for (const child of children){
-      if (child && child.isDirectory) await collectDroppedFiles(child, rel, out, folderPaths);
+      if (child && child.isDirectory) await collectDroppedFiles(child, rel, out, folderPaths, onProgress);
     }
   } else if (entry.isFile){
     try {
       const file = await readEntryFile(entry);
       Object.defineProperty(file, "webkitRelativePath", { value: rel });
       out.push(file);
+      if (onProgress) onProgress({ phase:"scanning", files:out.length, folders:folderPaths.length });
     } catch(e){ console.warn("파일 엔트리를 읽지 못해 건너뜀:", entry.name, e); }
   }
 }
@@ -1187,11 +1220,15 @@ function queueDroppedItems(dataTransfer){
     }
     return queueFiles(files);
   }
+  let deferredWorkspaceSave = null;
   fileQueue = fileQueue
     .then(() => runUiBatch(async () => {
+      showLoading("폴더 파일 확인 중…");
+      await yieldToBrowser();
       const collected = [];
       const folderPaths = [];
       const directoryHandles = [];
+      const showScanProgress = progress => updateLoading(folderScanLoadingText(progress));
 
       // 최신 Chromium은 기존 엔트리 대신 File System Access 핸들만 줄 수 있다.
       // 핸들 함수는 드롭 이벤트 안에서 이미 호출했으며 여기서는 결과만 기다린다.
@@ -1199,7 +1236,7 @@ function queueDroppedItems(dataTransfer){
       const modernHasDir = handles.some(handle => handle && handle.kind === "directory");
       let hasDir = modernHasDir || hasLegacyDir;
       if (!modernHasDir && hasLegacyDir){
-        for (const entry of entries) await collectDroppedFiles(entry, "", collected, folderPaths);
+        for (const entry of entries) await collectDroppedFiles(entry, "", collected, folderPaths, showScanProgress);
       }
       for (const handle of handles){
         if (!handle) continue;
@@ -1219,14 +1256,14 @@ function queueDroppedItems(dataTransfer){
             toast(related.same
               ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 새로고침합니다."
               : "드롭한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 새로고침합니다.", 3400);
-            const snapshot = await collectDirectoryHandleFiles(root.folderHandle);
+            const snapshot = await collectDirectoryHandleFiles(root.folderHandle, { onProgress:showScanProgress });
             await refreshFolderGroup(root.nodeId, snapshot.files, { folderHandle: root.folderHandle,
               folderPaths: snapshot.folderPaths, originalSaveMode: !!root.originalSaveMode });
             continue;
           }
           if (related.parents.length) absorbContainedFolderRoots(related.parents);
           directoryHandles.push(handle);
-          const snapshot = await collectDirectoryHandleFiles(handle);
+          const snapshot = await collectDirectoryHandleFiles(handle, { onProgress:showScanProgress });
           collected.push(...snapshot.files);
           folderPaths.push(...snapshot.folderPaths);
         } else if ((modernHasDir || !files.length) && handle.kind === "file" && typeof handle.getFile === "function"){
@@ -1276,14 +1313,28 @@ function queueDroppedItems(dataTransfer){
       const originalSaveFolderPaths = modernHasDir
         ? [...new Set(uniqueFolderPaths.map(path => normalizedRunPath(path).split("/")[0]).filter(Boolean))]
         : [];
-      await rememberWorkspace(collected, navNodes.length === 0, { folderPaths:uniqueFolderPaths, originalSaveFolderPaths });
-      await openFolderFiles(collected, {
+      const replaceWorkspace = navNodes.length === 0;
+      const rootGroup = await openFolderFiles(collected, {
         folderPaths:uniqueFolderPaths,
         folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null,
         originalSaveMode: modernHasDir
       });
+      // 화면과 사이드바를 먼저 표시한 뒤 자동 복원용 바이트 복사를 수행한다.
+      // 이 저장은 아래 후속 then 에서 UI 배치를 끝낸 다음 헤더 상태로 조용히 진행한다.
+      if (rootGroup) deferredWorkspaceSave = {
+        files:collected, replaceWorkspace, folderPaths:uniqueFolderPaths, originalSaveFolderPaths
+      };
     }))
-    .then(() => collapseToActiveBranch())   // 폴더 드롭도 활성 파일의 폴더 체인만 펼쳐 둔다
+    .then(async () => {
+      collapseToActiveBranch();             // UI 배치가 끝나 활성 파일과 사이드바가 먼저 보인다
+      if (!deferredWorkspaceSave) return;
+      await yieldToBrowser();               // 활성 문서가 실제로 한 프레임 그려진 뒤 저장 복사를 시작한다
+      const pending = deferredWorkspaceSave;
+      deferredWorkspaceSave = null;
+      await rememberWorkspace(pending.files, pending.replaceWorkspace, {
+        silent:true, folderPaths:pending.folderPaths, originalSaveFolderPaths:pending.originalSaveFolderPaths
+      });
+    })
     .catch((e) => {
       if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요.");
       else {

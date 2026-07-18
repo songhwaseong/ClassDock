@@ -79,6 +79,21 @@ test("folder drops traverse modern File System Access directory handles", () => 
   assert.match(appSource, /dropOverlay\.addEventListener\("drop"/);
 });
 
+test("폴더 드롭은 탐색 진행을 즉시 표시하고 화면을 연 뒤 작업공간을 저장한다", () => {
+  assert.match(source, /showLoading\("폴더 파일 확인 중…"\);\s*await yieldToBrowser\(\)/);
+  assert.match(source, /폴더 파일 확인 중… \(파일 \$\{files\}개 · 폴더 \$\{folders\}개\)/);
+  assert.match(source, /collectDirectoryHandleFiles\(handle, \{ onProgress:showScanProgress \}\)/);
+  const dropStart = source.indexOf("function queueDroppedItems(dataTransfer)");
+  const dropEnd = source.indexOf("\n}", dropStart) + 2;
+  const dropBlock = source.slice(dropStart, dropEnd);
+  const openAt = dropBlock.indexOf("const rootGroup = await openFolderFiles(collected");
+  const deferAt = dropBlock.indexOf("deferredWorkspaceSave = {");
+  const saveAt = dropBlock.indexOf("await rememberWorkspace(pending.files");
+  assert.ok(openAt >= 0 && deferAt > openAt && saveAt > deferAt);
+  assert.match(dropBlock, /collapseToActiveBranch\(\);[\s\S]*await yieldToBrowser\(\);[\s\S]*await rememberWorkspace\(pending\.files/);
+  assert.match(dropBlock, /silent:true, folderPaths:pending\.folderPaths/);
+});
+
 test("실제 폴더 그룹은 마지막 파일을 닫아도 자동 정리하지 않는다", () => {
   assert.match(source, /const physicalFolder = refreshRoot/);
   assert.match(source, /if \(physicalFolder\) break;/);
