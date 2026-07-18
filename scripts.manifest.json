@@ -45,6 +45,7 @@
     "whiteboard.js",
     "lesson-replay.js",
     "diff-viewer.js",
+    "batch-replace.js",
     "task-package.js",
     "screensaver.js",
     "pet-data.js",
@@ -119,6 +120,7 @@
       "scripts": [
         "lesson-replay.js",
         "diff-viewer.js",
+        "batch-replace.js",
         "task-package.js",
         "screensaver.js",
         "pet-data.js",
@@ -200,6 +202,10 @@
       "documents.js"
     ],
     "diff-viewer.js": [
+      "documents.js",
+      "code-viewer.js"
+    ],
+    "batch-replace.js": [
       "documents.js",
       "code-viewer.js"
     ],

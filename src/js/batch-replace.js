@@ -1,0 +1,474 @@
+"use strict";
+
+/* ===== 여러 파일 찾아 바꾸기 (batch replace) =====
+   열린 텍스트·코드 문서들에서 한 낱말/패턴을 한꺼번에 찾아 바꾼다.
+   편집기는 활성 문서에만 붙어 있으므로, 닫혀 있는 파일까지 바꾸려면
+   "미리보기 → 확인 → 적용+저장" 방식이 이 구조에서 유일하게 안전하다.
+   저장은 이미 검증된 saveTextDoc({silent,existingOnly}) 경로를 그대로 재사용한다
+   (exe 런처에선 서버 저장이라 대화상자 없이 조용히 저장된다).
+
+   PDF·오피스(본문 읽기전용)·노트북(셀 모델은 별도 저장 경로)은 v1에서 제외한다.
+   정규식의 . 은 줄바꿈을 넘지 않으며, 개수·미리보기·결과는 줄 단위로 계산해 항상 일치한다. */
+
+const BATCH_REPLACE_PREVIEW_LINES = 8;      // 파일당 미리보기로 보여줄 바뀌는 줄 최대 개수
+const BATCH_REPLACE_SNIPPET_MAX = 160;      // 미리보기 한 줄 최대 글자(넘으면 … 로 줄임)
+
+/* ---------- 순수 코어(테스트 대상) ---------- */
+
+// 정규식 특수문자를 문자 그대로 다루도록 이스케이프(일반 찾기 모드).
+function batchEscapeRegExp(value){
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// 찾기 조건 → 재사용 가능한 정규식 정보. 오류·위험 패턴은 { error } 로 돌려준다.
+function batchBuildMatcher(query, opts){
+  opts = opts || {};
+  if (!query) return { error: "찾을 말을 입력하세요." };
+  const flags = "g" + (opts.caseSensitive ? "" : "i");
+  const pattern = opts.regex ? String(query) : batchEscapeRegExp(query);
+  let probe;
+  try { probe = new RegExp(pattern, flags); }
+  catch(e){ return { error: "정규식이 올바르지 않아요: " + (e && e.message || e) }; }
+  // 빈 문자열에도 일치하는 패턴(예: a*, 빈 정규식)은 모든 자리에 끼어들어 위험 → 막는다.
+  if (probe.test("")) return { error: "빈 문자열에도 일치하는 패턴은 쓸 수 없어요." };
+  return { pattern, flags, regex: !!opts.regex };
+}
+
+// 바꿀 문자열: 일반 모드에선 $ 를 문자 그대로($$ 로 이스케이프), 정규식 모드에선 $1·$& 등 그대로 둔다.
+function batchReplacementString(replacement, regex){
+  return regex ? String(replacement) : String(replacement).replace(/\$/g, "$$$$");
+}
+
+// 한 문서 본문에 치환을 적용. 줄 단위 처리라 개수·미리보기·결과가 서로 어긋나지 않는다.
+// 반환: { out(바뀐 전체 본문), count(바뀐 곳 수), changes([{line, before, after, count}]) }
+function batchComputeReplacement(text, matcher, replacement){
+  const repl = batchReplacementString(replacement, matcher.regex);
+  const lines = String(text).split("\n");
+  let count = 0;
+  const changes = [];
+  const out = lines.map((line, i) => {
+    const found = line.match(new RegExp(matcher.pattern, matcher.flags));   // 전역 → 겹치지 않는 일치 배열
+    const n = found ? found.length : 0;
+    if (!n) return line;
+    count += n;
+    const after = line.replace(new RegExp(matcher.pattern, matcher.flags), repl);
+    changes.push({ line: i + 1, before: line, after, count: n });
+    return after;
+  });
+  return { out: out.join("\n"), count, changes };
+}
+
+// 아직 렌더하지 않은 파일도 일괄 치환 대상이므로, 디스크 원문을 LF 로 바꾸기 전에
+// 저장 시 되살릴 개행과 BOM 정보를 문서에 기록한다(renderCode 의 초기 감지와 같은 규약).
+function batchDetectDominantEol(raw){
+  const s = String(raw || "");
+  const crlf = (s.match(/\r\n/g) || []).length;
+  const totalLf = (s.match(/\n/g) || []).length;
+  const totalCr = (s.match(/\r/g) || []).length;
+  const lfOnly = totalLf - crlf;
+  const crOnly = totalCr - crlf;
+  if (crlf > 0 && crlf >= lfOnly && crlf >= crOnly) return "crlf";
+  if (crOnly > 0 && crOnly > lfOnly) return "cr";
+  return "lf";
+}
+
+function batchRememberDocTextFormat(doc, raw){
+  if (!doc) return;
+  if (doc.textEol == null) doc.textEol = batchDetectDominantEol(raw);
+  if (doc.textBom == null){
+    const fromEncoding = !!(doc.textEncoding && doc.textEncoding.bom);
+    doc.textBom = fromEncoding || String(raw || "").charCodeAt(0) === 0xFEFF;
+  }
+}
+
+function batchIsTargetDoc(doc, isTextSearchable, isLocked){
+  if (!doc || doc.notebookModel || doc.kind === "pdf") return false;
+  if (typeof isLocked === "function" && isLocked(doc)) return false;
+  if (typeof isTextSearchable === "function") return isTextSearchable(doc) || !!doc.codeEditor;
+  return typeof doc.savedText === "string" || !!doc.codeEditor;
+}
+
+function batchIsVisibleDoc(doc, currentActiveId, currentStudyId){
+  return !!(doc && (doc.id === currentActiveId || doc.id === currentStudyId));
+}
+
+// 되돌리기에서 디스크 재저장이 실패해도 화면의 내용은 이전 값으로 복원하되,
+// clean 으로 거짓 표시하지 않는다. actions 를 주입해 상태 전이를 단위 테스트할 수 있게 한다.
+async function batchRestoreUndoEntry(entry, actions){
+  let persisted = false;
+  let saveFailed = false;
+  if (entry.resave){
+    try { persisted = (await actions.save(entry)) === true; }
+    catch(_){ persisted = false; }
+    saveFailed = !persisted;
+  }
+  actions.reflect(entry.doc, entry.prev);
+  if (typeof actions.markDirty === "function") actions.markDirty(entry.doc, !persisted);
+  return { persisted, needsSave: !persisted, saveFailed };
+}
+
+// 실제 파일 저장과 별개로 앱 재시작 복원 묶음도 최신 바이트로 교체한다.
+// 여러 파일을 하나씩 rememberWorkspace 하면 매번 전체 묶음을 병합하므로, 성공한 파일을 모아 한 번만 저장한다.
+async function batchRememberSavedEntries(entries, actions){
+  if (!Array.isArray(entries) || !entries.length || !actions ||
+      typeof actions.makeFile !== "function" || typeof actions.remember !== "function")
+    return { attempted: false, saved: false };
+  const files = entries.map(entry => actions.makeFile(entry)).filter(Boolean);
+  if (!files.length) return { attempted: false, saved: false };
+  let saved = false;
+  try { saved = (await actions.remember(files)) === true; } catch(_){ saved = false; }
+  entries.forEach(entry => { if (entry.doc) entry.doc.savedInWorkspace = saved; });
+  return { attempted: true, saved };
+}
+
+function batchApplyButtonModel(preview){
+  if (!preview) return { disabled: false, requiresPreview: true, label: "미리보기" };
+  const chosen = Array.isArray(preview.files) ? preview.files.filter(file => file.checked) : [];
+  if (!chosen.length) return { disabled: true, requiresPreview: false, label: "바꾸고 저장" };
+  const total = chosen.reduce((sum, file) => sum + (Number(file.count) || 0), 0);
+  return {
+    disabled: false,
+    requiresPreview: false,
+    label: "바꾸고 저장 (" + chosen.length + "개 파일 · " + total + "곳)"
+  };
+}
+
+/* ---------- 브라우저 전용: 대상 문서·본문 확보 ---------- */
+
+if (typeof window !== "undefined" && window.document) {
+
+  // 바꿀 수 있는(=편집 가능한 텍스트·코드) 열린 문서. PDF·노트북·바이너리 오피스는 제외.
+  // 주의: 이 앱은 .txt·.md·.py 등도 kind==="office" 로 로드한다(viewer-base 의 loadOffice).
+  // 그래서 kind 로 거르면 안 되고, 텍스트 여부는 isTextExtSearchable 로 판정한다
+  // (이 함수는 pdf 를 빼고, .docx 같은 바이너리 오피스는 확장자로 자연히 false 가 된다).
+  function batchReplaceTargetDocs(){
+    if (typeof docs === "undefined") return [];
+    const textCheck = typeof isTextExtSearchable === "function" ? isTextExtSearchable : null;
+    const lockCheck = typeof isStudyReferenceLocked === "function" ? isStudyReferenceLocked : null;
+    return docs.filter(d => batchIsTargetDoc(d, textCheck, lockCheck));
+  }
+
+  // 문서의 현재 본문을 LF 로 정규화해 돌려준다(편집 중 > 저장본 > 디스크 순).
+  async function batchReplaceReadText(doc){
+    const norm = (s) => String(s).replace(/\r\n?/g, "\n");
+    if (doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
+      try { return norm(doc.codeEditor.getValue()); } catch(_){}
+    }
+    if (typeof liveDocText === "function"){
+      try { const live = liveDocText(doc); if (live != null) return norm(live); } catch(_){}
+    }
+    if (typeof doc.savedText === "string") return norm(doc.savedText);
+    if (doc.sourceFile && typeof readDocSourceBytes === "function" && typeof smartDecodeText === "function"){
+      try {
+        const raw = smartDecodeText(await readDocSourceBytes(doc));
+        batchRememberDocTextFormat(doc, raw);
+        return norm(raw);
+      } catch(_){}
+    }
+    return null;
+  }
+
+  const brEsc = (s) => (typeof escapeHtml === "function" ? escapeHtml(s)
+    : String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])));
+  const brClip = (s) => { s = String(s); return s.length > BATCH_REPLACE_SNIPPET_MAX ? s.slice(0, BATCH_REPLACE_SNIPPET_MAX) + "…" : s; };
+  const brToast = (msg, ms, opts) => { if (typeof toast === "function") toast(msg, ms, opts); };
+
+  /* ---------- 적용 · 되돌리기 ---------- */
+
+  function batchWorkspaceSnapshotFile(entry){
+    if (!entry || !entry.doc || typeof recoverySnapshotFile !== "function") return null;
+    const out = typeof applyDocEncodingOnSave === "function"
+      ? applyDocEncodingOnSave(entry.text, entry.doc)
+      : String(entry.text == null ? "" : entry.text);
+    return recoverySnapshotFile(entry.doc, new Blob([out], { type:"text/plain;charset=utf-8" }), "text/plain;charset=utf-8");
+  }
+
+  function batchRememberWorkspaceEntries(entries){
+    return batchRememberSavedEntries(entries, {
+      makeFile: batchWorkspaceSnapshotFile,
+      remember: (files) => typeof rememberWorkspace === "function"
+        ? rememberWorkspace(files, false, { silent:true })
+        : false
+    });
+  }
+
+  // 확장자 → renderCode 프로파일(viewer-base 의 텍스트 경로와 같은 매핑).
+  const BATCH_PLAIN_EXTS = new Set(["md","markdown","mdx","txt","text","log","srt","vtt","smi","rst","adoc","asciidoc","org","textile","wiki","mediawiki"]);
+  function batchTextProfile(ext){
+    if (!ext || BATCH_PLAIN_EXTS.has(ext)) return "text";
+    if (ext === "html" || ext === "htm" || ext === "xhtml") return "xml";
+    if (typeof CODE_EXTS !== "undefined" && ext in CODE_EXTS) return null;   // renderCode 가 CODE_EXTS 로 결정
+    return "text";
+  }
+
+  // 바뀐 내용을 앱이 실제로 읽는 곳에 반영한다. 핵심: doc.render 의 클로저는 처음 연 File 을
+  // 붙들고 있어(viewer-base) sourceFile 만 바꿔선 재렌더가 옛 내용을 읽는다 → 새 File 로 render 를 다시 만든다.
+  //  - 편집기가 떠 있으면(활성/편집 중): setValue 로 화면 반영, render 는 건드리지 않는다.
+  //  - 그 밖(읽기전용 보기·아직 안 연 탭): 새 File 로 sourceFile·render 를 교체하고 다음에 열 때 새로 그리게 한다.
+  function batchReflectInDoc(doc, newText){
+    let fresh = null;
+    try {
+      const bytes = new TextEncoder().encode(newText);
+      fresh = new File([bytes], doc.name || "text.txt", { type: "text/plain" });
+      const old = doc.sourceFile;
+      if (old){
+        if (old.__fsHandle && typeof withFileHandle === "function") withFileHandle(fresh, old.__fsHandle);
+        if (old.__fsDirHandle && typeof withDirHandle === "function") withDirHandle(fresh, old.__fsDirHandle);
+      }
+      doc.sourceFile = fresh;                 // 내용검색·비교·실행이 새 내용을 읽도록(readDocSourceBytes)
+      if (typeof contentCacheDrop === "function") contentCacheDrop(doc.id);
+    } catch(_){}
+    if (doc.codeEditor && typeof doc.codeEditor.setValue === "function"){
+      try { doc.codeEditor.setValue(newText); } catch(_){}
+      return;                                 // 편집기가 곧 최신 화면 — render 재구성 불필요
+    }
+    if (!fresh) return;
+    const ext = typeof fileExtOf === "function" ? fileExtOf(String(doc.name || "").toLowerCase()) : "";
+    const prof = batchTextProfile(ext);
+    const ctx = { relPath: doc.relPath, archiveCtx: doc.archiveCtx };
+    doc.render = async () => {
+      const host = doc.el; if (!host) return;
+      host.innerHTML = ""; host.scrollTop = 0;
+      await renderCode(fresh, host, ext, prof, ctx);
+    };
+    doc.rendered = false;                      // 다음 활성화 때 새로 그린다(지연 렌더)
+    const currentStudyId = typeof studyPdfId !== "undefined" ? studyPdfId : null;
+    if (batchIsVisibleDoc(doc, activeId, currentStudyId) && typeof ensureRendered === "function")
+      ensureRendered(doc);                     // 작업 탭 또는 분할 참고 칸에 지금 보이는 문서는 즉시 갱신
+  }
+
+  // 선택한 파일들에 치환을 적용하고 저장한다. 반환: 되돌리기용 스냅샷 배열.
+  async function batchReplaceApply(chosen){
+    const undo = [];
+    const workspaceEntries = [];
+    let saved = 0, editedOnly = 0, skipped = 0, replaced = 0;
+    for (const f of chosen){
+      const doc = f.doc;
+      const hadEditor = doc.codeEditor && typeof doc.codeEditor.setValue === "function";
+      let res = "skipped";
+      if (typeof saveTextDoc === "function"){
+        try { res = await saveTextDoc(f.out, doc, doc.name, { silent: true, existingOnly: true }); }
+        catch(_){ res = false; }
+      }
+      if (res === true){
+        batchReflectInDoc(doc, f.out);         // 디스크 저장됨 → 화면·재렌더도 새 내용으로
+        undo.push({ doc, prev: f.text, resave: true });
+        workspaceEntries.push({ doc, text: f.out });
+        saved++; replaced += f.count;
+        if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+      } else if (hadEditor){
+        // 저장 위치는 없지만 편집기엔 반영 → 미저장으로 두어 사용자가 직접 저장(Ctrl+Z 로도 되돌릴 수 있다).
+        batchReflectInDoc(doc, f.out);
+        undo.push({ doc, prev: f.text, resave: false });
+        editedOnly++; replaced += f.count;
+        if (typeof markDocumentDirty === "function") markDocumentDirty(doc, true);
+      } else {
+        skipped++;   // 디스크 저장 불가 + 편집기 없음 → 아무것도 바꾸지 않는다(화면·디스크 어긋남 방지)
+      }
+    }
+    const workspace = await batchRememberWorkspaceEntries(workspaceEntries);
+    return { undo, saved, editedOnly, skipped, replaced,
+      workspaceAttempted: workspace.attempted, workspaceSaved: workspace.saved };
+  }
+
+  async function batchReplaceUndo(undo){
+    let done = 0, needsSave = 0, saveFailed = 0;
+    const workspaceEntries = [];
+    for (const u of undo){
+      const result = await batchRestoreUndoEntry(u, {
+        save: (entry) => typeof saveTextDoc === "function"
+          ? saveTextDoc(entry.prev, entry.doc, entry.doc.name, { silent: true, existingOnly: true })
+          : false,
+        reflect: batchReflectInDoc,
+        markDirty: typeof markDocumentDirty === "function" ? markDocumentDirty : null
+      });
+      done++;
+      if (result.needsSave) needsSave++;
+      if (result.saveFailed) saveFailed++;
+      if (result.persisted) workspaceEntries.push({ doc: u.doc, text: u.prev });
+    }
+    const workspace = await batchRememberWorkspaceEntries(workspaceEntries);
+    let msg = done + "개 파일 내용을 되돌렸어요.";
+    if (needsSave) msg += " · " + needsSave + "개는 저장 안 됨";
+    if (saveFailed) msg += " (" + saveFailed + "개 재저장 실패)";
+    if (workspace.attempted && !workspace.saved) msg += " · 자동 복원 갱신 실패";
+    const failed = saveFailed || (workspace.attempted && !workspace.saved);
+    brToast(msg, failed ? 6000 : 3200, { type: failed ? "error" : "success" });
+  }
+
+  /* ---------- 패널(모달) ---------- */
+
+  let batchReplaceOpen = false;
+
+  function openBatchReplace(){
+    if (batchReplaceOpen) return;
+    if (!batchReplaceTargetDocs().length){
+      brToast("바꿀 텍스트·코드 파일이 열려 있지 않아요.", 2800);
+      return;
+    }
+    batchReplaceOpen = true;
+
+    const modal = document.createElement("div"); modal.className = "modal batch-replace-modal";
+    const card = document.createElement("div"); card.className = "modal-card batch-replace-card";
+    const title = document.createElement("h3"); title.textContent = "여러 파일 찾아 바꾸기";
+    const sub = document.createElement("p"); sub.className = "batch-replace-sub";
+    sub.textContent = "열린 텍스트·코드 파일에서 한꺼번에 바꿔요. 미리보기로 확인한 뒤 적용하며, 적용 후에도 되돌릴 수 있어요. (PDF·오피스·노트북 제외)";
+
+    // 입력줄
+    const form = document.createElement("div"); form.className = "batch-replace-form";
+    const mkField = (labelText, placeholder) => {
+      const wrap = document.createElement("label"); wrap.className = "batch-replace-field";
+      const cap = document.createElement("span"); cap.textContent = labelText;
+      const input = document.createElement("input"); input.type = "text"; input.placeholder = placeholder; input.autocomplete = "off"; input.spellcheck = false;
+      wrap.append(cap, input); form.appendChild(wrap);
+      return input;
+    };
+    const findInput = mkField("찾을 말", "예: 2025");
+    const replaceInput = mkField("바꿀 말", "예: 2026");
+
+    const opts = document.createElement("div"); opts.className = "batch-replace-opts";
+    const mkCheck = (labelText, titleText) => {
+      const l = document.createElement("label"); l.className = "batch-replace-check"; if (titleText) l.title = titleText;
+      const c = document.createElement("input"); c.type = "checkbox";
+      const s = document.createElement("span"); s.textContent = labelText;
+      l.append(c, s); opts.appendChild(l);
+      return c;
+    };
+    const caseChk = mkCheck("대소문자 구분", "체크하면 A 와 a 를 다르게 봐요.");
+    const regexChk = mkCheck("정규식", "정규식(예: \\d+, 그룹 $1)으로 찾고 바꿔요.");
+
+    const status = document.createElement("div"); status.className = "batch-replace-status"; status.setAttribute("aria-live", "polite");
+    const results = document.createElement("div"); results.className = "batch-replace-results";
+
+    const actions = document.createElement("div"); actions.className = "modal-actions";
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "btn"; cancel.textContent = "닫기";
+    const apply = document.createElement("button"); apply.type = "button"; apply.className = "btn primary";
+    actions.append(cancel, apply);
+
+    card.append(title, sub, form, opts, status, results, actions);
+    modal.appendChild(card);
+
+    let lastPreview = null;   // { matcher, files:[{doc,out,count,changes,text,checked}] }
+
+    const setApplyLabel = () => {
+      const model = batchApplyButtonModel(lastPreview);
+      apply.disabled = model.disabled;
+      apply.textContent = model.label;
+    };
+    setApplyLabel();
+
+    function renderResults(){
+      results.innerHTML = "";
+      if (!lastPreview) return;
+      const files = lastPreview.files;
+      if (!files.length){ status.textContent = "바뀔 내용이 없어요."; setApplyLabel(); return; }
+      const totalMatches = files.reduce((n, f) => n + f.count, 0);
+      status.textContent = files.length + "개 파일 · " + totalMatches + "곳에서 바뀔 수 있어요.";
+      files.forEach((f, idx) => {
+        const box = document.createElement("div"); box.className = "batch-replace-file";
+        const head = document.createElement("label"); head.className = "batch-replace-file-head";
+        const chk = document.createElement("input"); chk.type = "checkbox"; chk.checked = f.checked;
+        chk.addEventListener("change", () => { f.checked = chk.checked; box.classList.toggle("off", !chk.checked); setApplyLabel(); });
+        const nm = document.createElement("b"); nm.className = "batch-replace-file-name";
+        nm.textContent = f.doc.workspacePath || f.doc.relPath || f.doc.name;
+        const cnt = document.createElement("span"); cnt.className = "batch-replace-file-count"; cnt.textContent = f.count + "곳";
+        head.append(chk, nm, cnt);
+        box.appendChild(head);
+        const lines = document.createElement("div"); lines.className = "batch-replace-lines";
+        f.changes.slice(0, BATCH_REPLACE_PREVIEW_LINES).forEach(ch => {
+          const row = document.createElement("div"); row.className = "batch-replace-line";
+          row.innerHTML =
+            '<span class="brl-no">' + ch.line + '</span>' +
+            '<span class="brl-before">' + brEsc(brClip(ch.before)) + '</span>' +
+            '<span class="brl-after">' + brEsc(brClip(ch.after)) + '</span>';
+          lines.appendChild(row);
+        });
+        if (f.changes.length > BATCH_REPLACE_PREVIEW_LINES){
+          const more = document.createElement("div"); more.className = "batch-replace-more";
+          more.textContent = "…그리고 " + (f.changes.length - BATCH_REPLACE_PREVIEW_LINES) + "줄 더";
+          lines.appendChild(more);
+        }
+        box.appendChild(lines);
+        results.appendChild(box);
+      });
+      setApplyLabel();
+    }
+
+    async function runPreview(){
+      const matcher = batchBuildMatcher(findInput.value, { caseSensitive: caseChk.checked, regex: regexChk.checked });
+      if (matcher.error){ lastPreview = null; results.innerHTML = ""; status.textContent = matcher.error; setApplyLabel(); return; }
+      lastPreview = null;
+      apply.disabled = true; apply.textContent = "미리보기 만드는 중…";
+      status.textContent = "훑는 중…"; results.innerHTML = "";
+      try {
+        const targets = batchReplaceTargetDocs();
+        const files = [];
+        for (const doc of targets){
+          const text = await batchReplaceReadText(doc);
+          if (text == null) continue;
+          const r = batchComputeReplacement(text, matcher, replaceInput.value);
+          if (r.count > 0) files.push({ doc, out: r.out, count: r.count, changes: r.changes, text, checked: true });
+        }
+        lastPreview = { matcher, files };
+        renderResults();
+      } finally { setApplyLabel(); }
+    }
+
+    const close = () => {
+      window.removeEventListener("keydown", onKey, true);
+      modal.remove(); batchReplaceOpen = false;
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape"){ e.stopPropagation(); close(); }
+      else if (e.key === "Enter" && (e.target === findInput || e.target === replaceInput)){ e.preventDefault(); runPreview(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+    cancel.addEventListener("click", close);
+    // 조건을 바꾸면 이전 미리보기는 더 이상 유효하지 않다 → 버튼을 미리보기 단계로 되돌린다.
+    [findInput, replaceInput].forEach(el => el.addEventListener("input", () => { lastPreview = null; setApplyLabel(); }));
+    [caseChk, regexChk].forEach(el => el.addEventListener("change", () => { lastPreview = null; setApplyLabel(); }));
+
+    apply.addEventListener("click", async () => {
+      if (!lastPreview){
+        await runPreview();
+        if (lastPreview && lastPreview.files.length)
+          status.textContent += " 결과를 확인한 뒤 아래 버튼을 다시 누르면 저장돼요.";
+        return;
+      }
+      const chosen = lastPreview.files.filter(f => f.checked);
+      if (!chosen.length) return;
+      apply.disabled = true; apply.textContent = "바꾸는 중…";
+      const r = await batchReplaceApply(chosen);
+      close();
+      const parts = [];
+      if (r.saved) parts.push(r.saved + "개 파일 저장");
+      if (r.editedOnly) parts.push(r.editedOnly + "개 편집기만 반영");
+      let msg = r.replaced + "곳 바꿈";
+      if (parts.length) msg += " · " + parts.join(" · ");
+      if (r.skipped) msg += " · " + r.skipped + "개 건너뜀(저장 위치 없음)";
+      if (r.workspaceAttempted && !r.workspaceSaved) msg += " · 자동 복원 갱신 실패";
+      const failed = r.workspaceAttempted && !r.workspaceSaved;
+      brToast(msg, 6000, {
+        type: failed ? "error" : (r.replaced ? "success" : undefined),
+        action: r.undo.length ? { label: "되돌리기", onClick: () => batchReplaceUndo(r.undo) } : null
+      });
+    });
+
+    document.body.appendChild(modal);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(modal);
+    requestAnimationFrame(() => { try { findInput.focus(); } catch(_){} });
+  }
+
+  // 사이드바 버튼 연결(있으면). 이 스크립트는 <body> 끝에서 실행되므로 DOMContentLoaded 가
+  // 이미 지났을 수 있다 → readyState 를 보고 즉시/지연 중 맞는 쪽으로 건다.
+  const wireBatchReplaceButton = () => {
+    const btn = document.getElementById("sbReplaceAll");
+    if (btn && !btn._brWired){ btn._brWired = true; btn.addEventListener("click", openBatchReplace); }
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireBatchReplaceButton);
+  else wireBatchReplaceButton();
+
+  window.openBatchReplace = openBatchReplace;
+  window.batchReplaceTargetDocs = batchReplaceTargetDocs;
+}

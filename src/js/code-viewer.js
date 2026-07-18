@@ -1982,7 +1982,11 @@ function downloadTextFile(text, name){
 // 텍스트/코드 파일 저장(.py 외 — 노트북 .ipynb 포함): EXE면 서버에 원래 확장자로 저장,
 // 아니면 .py 저장과 동일하게 위치를 한 번 고르고 핸들을 보관해 같은 파일에 덮어쓰기, 마지막 폴백이 다운로드.
 // 스크래치 첫 저장은 이름을 받는다.
-async function saveTextDoc(value, ownerDoc, name){
+// options.silent: 성공·실패 토스트를 띄우지 않는다(여러 파일 일괄 바꾸기가 자체 요약을 보여줌).
+// options.existingOnly: 이미 저장 위치가 있는 파일만 조용히 덮어쓰고, 위치를 물어야 하면 "skipped" 를 돌려준다
+//   (일괄 저장이 파일마다 저장 대화상자·다운로드를 띄우지 않게 한다).
+async function saveTextDoc(value, ownerDoc, name, options={}){
+  const silent = !!options.silent, existingOnly = !!options.existingOnly;
   // 화면·편집은 LF·UTF-8 로 다루지만, 디스크에는 원본 개행·BOM 을 되살려 쓴다(문자 인코딩은 UTF-8).
   // savedText·dirty 비교는 편집기와 같은 LF 값(value)을 그대로 쓴다.
   const outValue = applyDocEncodingOnSave(value, ownerDoc);
@@ -2000,14 +2004,16 @@ async function saveTextDoc(value, ownerDoc, name){
         ownerDoc.size = new Blob([value]).size;
         ownerDoc.savedText = value;
         markDocumentSavedAsUtf8(ownerDoc);
-        toast("원본 파일에 바로 저장했어요.", 2200, { type: "success" });
+        if (!silent) toast("원본 파일에 바로 저장했어요.", 2200, { type: "success" });
         return true;
       }
       if (wrote === "cancelled") return false;
       // 명시적 원본 모드는 실패를 알리고 끝내지만, 폴더 핸들만으로 시도한 경우엔 아래 일반 저장 경로로 폴백한다.
-      if (wantOriginal){ toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" }); return false; }
+      if (wantOriginal){ if (!silent) toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" }); return false; }
     }
     if (await saveFileBackendAvailable()){
+      // 조용한 일괄 저장: 아직 이름 없는 새 문서는 이름을 물어야 하므로 건너뛴다.
+      if (existingOnly && ownerDoc && ownerDoc.isScratch && !ownerDoc._named) return "skipped";
       if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
         const m = String(name).match(/\.[^.\\/]+$/); const ext0 = m ? m[0] : ".txt";
         const base = String(ownerDoc.name || name).replace(/\.[^.\\/]+$/, "");
@@ -2027,6 +2033,7 @@ async function saveTextDoc(value, ownerDoc, name){
       const path = await saveViaServer(outValue, ownerDoc, name);
       if (path){
         if (ownerDoc){ ownerDoc.size = new Blob([value]).size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
+        if (silent) return true;
         toast("저장 완료 · " + path, 3400, {
           type: "success",
           action: (typeof window !== "undefined" && typeof window.__mnOpenLastSavedFolder === "function")
@@ -2046,11 +2053,13 @@ async function saveTextDoc(value, ownerDoc, name){
     const ext = extMatch ? extMatch[0].toLowerCase() : "";
     const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
     const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
+      existingOnly,
       mime: mime + ";charset=utf-8",
       pickerTypes: ext ? [{ description: ext === ".ipynb" ? "Jupyter Notebook" : ext.slice(1).toUpperCase() + " 파일",
         accept: { [mime]: [ext] } }] : null
     });
     if (wrote === "cancelled") return false;                 // 사용자가 위치 선택을 닫음 → 저장 안 함(다운로드도 없음)
+    if (existingOnly && wrote !== "saved") return "skipped";  // 조용한 일괄 저장: 위치를 물어야 하는 파일은 건너뜀
     if (wrote === "saved"){
       if (ownerDoc){
         const oldPath = String(ownerDoc.workspacePath || ownerDoc.name || name).replace(/\\/g, "/").replace(/^\/+/, "");
@@ -2075,7 +2084,7 @@ async function saveTextDoc(value, ownerDoc, name){
         }
         if (typeof renderSidebar === "function") renderSidebar();
       }
-      toast(hadHandle ? "저장한 위치의 파일에 바로 저장했어요."
+      if (!silent) toast(hadHandle ? "저장한 위치의 파일에 바로 저장했어요."
         : "선택한 위치에 저장했어요. 다음부터는 묻지 않고 같은 파일에 저장돼요.", 2600, { type: "success" });
       return true;
     }
@@ -2084,9 +2093,9 @@ async function saveTextDoc(value, ownerDoc, name){
     const a = document.createElement("a"); a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     if (ownerDoc){ ownerDoc.size = blob.size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
-    toast("파일을 내려받았어요.", 1800, { type: "success" });
+    if (!silent) toast("파일을 내려받았어요.", 1800, { type: "success" });
     return true;
-  } catch(e){ console.error(e); toast("저장하지 못했어요.", 2200, { type: "error" }); return false; }
+  } catch(e){ console.error(e); if (!silent) toast("저장하지 못했어요.", 2200, { type: "error" }); return false; }
 }
 
 // 새 빈 텍스트 파일(.txt) — renderCode 의 편집 토글로 열려 바로 편집·저장.

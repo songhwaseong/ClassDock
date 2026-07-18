@@ -3213,3 +3213,38 @@
   .diff-pick-row b{flex:0 0 96px;font-size:13px}
   .diff-pick-row select{flex:1;min-width:0;font:inherit;font-size:13px;padding:8px 10px;
     border:1px solid var(--border);border-radius:9px;background:var(--field,var(--panel));color:var(--ink)}
+
+  /* 사이드바 진입 버튼 */
+  .sb-replace-all{flex:0 0 auto;display:flex;align-items:center;gap:7px;margin:0 8px 8px;padding:0 9px;height:30px;
+    border:1px solid var(--border);border-radius:8px;background:transparent;color:#94a3b8;font:inherit;font-size:12px;
+    cursor:pointer;text-align:left}
+  .sb-replace-all:hover{border-color:var(--accent);color:#cbd5e1;background:rgba(255,255,255,.05)}
+  .sb-replace-all svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .sb-replace-all span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* 여러 파일 찾아 바꾸기 패널 */
+  .batch-replace-card{width:min(720px,96%);max-height:92vh;display:flex;flex-direction:column}
+  .batch-replace-sub{color:var(--muted);font-size:13px;margin:6px 0 14px}
+  .batch-replace-form{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+  .batch-replace-field{display:flex;align-items:center;gap:10px}
+  .batch-replace-field span{flex:0 0 68px;font-size:13px;color:var(--muted)}
+  .batch-replace-field input{flex:1;min-width:0;font:inherit;font-size:13px;padding:8px 10px;
+    border:1px solid var(--border);border-radius:9px;background:var(--field,var(--panel));color:var(--ink)}
+  .batch-replace-opts{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+  .batch-replace-check{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer}
+  .batch-replace-status{font-size:12.5px;color:var(--muted);min-height:18px;margin-bottom:8px}
+  .batch-replace-results{flex:1 1 auto;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+  .batch-replace-file{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .batch-replace-file.off{opacity:.5}
+  .batch-replace-file-head{display:flex;align-items:center;gap:9px;padding:8px 11px;cursor:pointer;
+    background:var(--field,rgba(255,255,255,.03))}
+  .batch-replace-file-name{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .batch-replace-file-count{flex:0 0 auto;font-size:12px;color:var(--muted)}
+  .batch-replace-lines{display:flex;flex-direction:column;font:12px/1.55 Consolas,"Courier New",monospace}
+  .batch-replace-line{display:grid;grid-template-columns:44px 1fr;gap:2px 8px;padding:3px 11px}
+  .batch-replace-line:nth-child(even){background:rgba(127,127,127,.05)}
+  .brl-no{grid-row:1/3;color:var(--muted);text-align:right;user-select:none}
+  .brl-before{color:var(--danger,#e06c75);text-decoration:line-through;opacity:.75;
+    overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
+  .brl-after{color:var(--ok,#98c379);overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
+  .batch-replace-more{padding:3px 11px;color:var(--muted);font-style:italic}

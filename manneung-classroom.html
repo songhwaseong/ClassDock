@@ -113,6 +113,10 @@
       <input id="sbSearch" type="search" placeholder="파일명·내용 검색" autocomplete="off" spellcheck="false" data-shortcut-action="focusSearch" data-shortcut-title="파일명·내용 검색">
       <kbd data-shortcut-action="focusSearch">Ctrl+F</kbd>
     </label>
+    <button id="sbReplaceAll" class="sb-replace-all" type="button" title="열린 텍스트·코드 파일에서 한꺼번에 찾아 바꿔요" data-shortcut-action="replaceAcrossFiles">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h9M4 7l3-3M4 7l3 3"/><path d="M20 17h-9M20 17l-3-3M20 17l-3 3"/></svg>
+      <span>여러 파일 찾아 바꾸기</span>
+    </button>
     <div class="sb-list" id="sbList"></div>
     <div class="sb-actions" aria-label="파일 및 도구">
       <div class="sb-more-wrap sb-open-wrap">
@@ -683,6 +687,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/whiteboard.js"></script>
 <script src="src/js/lesson-replay.js"></script>
 <script src="src/js/diff-viewer.js"></script>
+<script src="src/js/batch-replace.js"></script>
 <script src="src/js/task-package.js"></script>
 <script src="src/js/screensaver.js"></script>
 <script src="src/js/pet-data.js"></script>
