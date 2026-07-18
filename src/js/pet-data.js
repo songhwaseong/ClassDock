@@ -137,6 +137,19 @@ const PET_ART = {
     "...CC....CC....",
     "...CC....CC...."
   ],
+  calicoCat: [
+    "..D.........O..",
+    "..DD.......OO..",
+    "..DDCCCCCCOOC..",
+    "..CWKCCCCCWKC..",
+    "..CCCCCNCCCCC..",
+    "..CCDDDCCOOCC..",
+    "...CDDDCCOOC.O.",
+    "...CCCCCCCCCOO.",
+    "...CCCCCCCCCO..",
+    "...CC....CC....",
+    "...CC....CC...."
+  ],
   dog: [
     ".EE.........EE.",
     ".EEB.......BEE.",
@@ -833,6 +846,19 @@ const PET_SPECIES = [
       { C:"#f5ede2", D:"#a98b7d", N:"#e99aaa" }
     ],
     sayings: ["배고프다냐옹"] },
+  { kind:"calicoCat", art:PET_ART.calicoCat, gridW:32, gridH:32, pixelScale:3, width:96, height:96,
+    spriteSheet:{
+      src:"src/assets/calico-cat-sprites.png", cellW:96, cellH:96, cols:6,
+      frames:{
+        idle:[5], walk:[0,1,2,3,4,5],
+        diagonalFly:[6,7,8,9,10,11], wallBounce:[12,13,14,15], land:[16,17],
+        groom:[18,19,20,21,22,23], jump:[6,7,8,9,10,11], fall:[6,7,8,9,10,11]
+      }
+    },
+    palettes: [
+      { C:"#f6f3ec", D:"#3a3438", O:"#cb7e48", N:"#e28c98" }
+    ],
+    sayings: ["...뭘 봐냥", "보초 서는 중이다냥", "간식 어디 있냥", "삼색이는 행운의 상징이다냥", "슈웅- 반사!"] },
   { kind:"dog", art:PET_ART.dog, palettes: [
       { B:"#c78d55", E:"#8a5a30", N:"#4a3220", T:"#8a5a30" },    // 갈색 강아지
       { B:"#f0ede5", E:"#c9b89a", N:"#4a3220", T:"#c9b89a" }     // 하양 강아지
@@ -1029,7 +1055,7 @@ const PET_SPECIES = [
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
 const PET_NAMES = {
   crab:"게", chick:"병아리", robot:"로봇", ghost:"유령", slime:"슬라임",
-  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", fluffyCat:"복실고양이", dog:"강아지",
+  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", fluffyCat:"복실고양이", calicoCat:"삼색고양이", dog:"강아지",
   spider:"거미", mole:"두더지", frog:"개구리", penguin:"펭귄", balloon:"풍선",
   snail:"달팽이", ninja:"닌자", bird:"새", rabbit:"토끼", soccer:"축구공",
   chameleon:"카멜레온", wizard:"마법사", magnet:"자석", cloud:"번개구름", rocket:"로켓",
@@ -1042,7 +1068,7 @@ const PET_NAMES = {
 
 const PET_NAMES_EN = {
   crab:"Crab", chick:"Chick", robot:"Robot", ghost:"Ghost", slime:"Slime",
-  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", fluffyCat:"Fluffy cat", dog:"Dog",
+  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", fluffyCat:"Fluffy cat", calicoCat:"Calico cat", dog:"Dog",
   spider:"Spider", mole:"Mole", frog:"Frog", penguin:"Penguin", balloon:"Balloon",
   snail:"Snail", ninja:"Ninja", bird:"Bird", rabbit:"Rabbit", soccer:"Soccer ball",
   chameleon:"Chameleon", wizard:"Wizard", magnet:"Magnet", cloud:"Thundercloud", rocket:"Rocket",
@@ -1059,6 +1085,7 @@ const PET_KIND_SAYINGS_EN = {
   roller:["Rolling along!", "Here I go!", "Wheee!"], ghost:["Boo!", "Did I surprise you?", "Hello!"],
   ufo:["Beep beep!", "Greetings, Earthling!", "Scanning..."], cat:["Meow!", "Time for a nap.", "Purr..."],
   fluffyCat:["I'm hungry, meow!"],
+  calicoCat:["What are you looking at, meow?", "On patrol, meow!", "Where are the snacks?", "Calicos bring good luck!", "Whoosh, bounce!"],
   dog:["Woof!", "Let's go!", "Sniff sniff!"], spider:["Look at my web!", "Hello!", "No biting!"],
   mole:["Pop!", "Underground is cozy.", "Hello!"], frog:["Ribbit!", "Ready to jump!", "Hop!"],
   penguin:["Waddle waddle!", "Sliding is the best!", "Quack!"], balloon:["Floating along!", "Don't let go!", "Up we go!"],

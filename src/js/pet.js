@@ -13,6 +13,7 @@
      ufo(UFO)=날아다니다 다른 펫을 광선으로 납치 시도(시늉만 하고 실패한다)
      cat(고양이)=마우스 커서를 발견하면 살금살금 다가가 덮침
      fluffyCat(복실고양이)=부드럽게 걷다 대각선 비행, 벽에 닿으면 반대 위쪽 대각선으로 반사, 클릭하면 앞발 그루밍
+     calicoCat(삼색고양이)=복실이와 같은 동작이지만 더 활발 — 자주·빠르게 날고 오래 벽을 튕긴다
      dog(강아지)=고양이를 발견하면 쫓아가 왕왕(고양이는 화들짝), 없으면 신나서 질주
      spider(거미)=천장에 살며 거미줄을 타고 내려왔다 올라감(던지면 실을 쏘아 복귀)
      mole(두더지)=바닥을 파고 들어가 다른 곳에서 뿅 / frog(개구리)=웅크려 모은 힘으로 대점프+혀 낼름
@@ -209,6 +210,11 @@ function petPickAction(p, w){
     else if (roll < 0.78){ p.state = "idle"; p.timer = 55 + Math.random() * 105; }
     else petStartFluffyFlight(p);
   }
+  else if (p.kind === "calicoCat"){ // 삼색고양이: 덜 쉬고 더 자주, 더 빠르게 날아올라 벽을 오래 튕긴다
+    if (roll < 0.46){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 140; }
+    else if (roll < 0.64){ p.state = "idle"; p.timer = 40 + Math.random() * 80; }
+    else petStartFluffyFlight(p, 1.25);
+  }
   else if (p.kind === "roller"){   // 별·축구공: 걷기가 곧 구르기
     if (roll < 0.5){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
     else if (roll < 0.75){ p.state = "idle"; p.timer = 40 + Math.random() * 90; }
@@ -220,7 +226,7 @@ function petPickAction(p, w){
     else { p.state = "jump"; p.vy = -(5 + Math.random() * 3); p.vx = p.face * (1 + Math.random() * 1.5); }
   }
   else if (p.kind === "dog"){      // 강아지: 고양이가 보이면 쫓아가고, 없으면 가끔 신나서 질주한다
-    const cat = w.pets.find(o => o !== p && (o.kind === "cat" || o.kind === "fluffyCat") && PET_GROUND_STATES.includes(o.state));
+    const cat = w.pets.find(o => o !== p && (o.kind === "cat" || o.kind === "fluffyCat" || o.kind === "calicoCat") && PET_GROUND_STATES.includes(o.state));
     if (cat && roll < 0.3){ p.state = "chase"; p.victim = cat; p.timer = 420; petEventRecord("dog_cat_chase"); }
     else if (roll < 0.5){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 140; }
     else if (roll < 0.72){ p.state = "idle"; p.timer = 50 + Math.random() * 110; }
@@ -314,13 +320,14 @@ function petCheer(p, say, mayFloat){
   if (say) petSay(p, petRandomSaying(p, "만세!"), false);
 }
 
-// 복실고양이 전용 행동: 걷다가 대각선으로 이륙하고, 클릭하면 앞발로 얼굴을 닦는다.
-function petStartFluffyFlight(p){
+// 복실·삼색고양이 공용 행동: 걷다가 대각선으로 이륙하고, 클릭하면 앞발로 얼굴을 닦는다.
+// boost>1 이면 더 빠르고 오래 난다(삼색고양이).
+function petStartFluffyFlight(p, boost = 1){
   p.face = p.face < 0 ? -1 : 1;
   p.state = "diagonalFly"; p.t = 0;
-  p.airTimer = 180 + Math.random() * 100;
-  p.vx = p.face * (2.05 + Math.random() * 0.5);
-  p.vy = -(1.3 + Math.random() * 0.4);
+  p.airTimer = (180 + Math.random() * 100) * boost;
+  p.vx = p.face * (2.05 + Math.random() * 0.5) * boost;
+  p.vy = -(1.3 + Math.random() * 0.4) * boost;
   p.support = null; p.rot = 0; p.squash = 0;
 }
 
@@ -335,8 +342,12 @@ function petFluffyWallBounce(p, side){
 function petStartFluffyGroom(p){
   p.state = "groom"; p.timer = 126; p.t = 0;
   p.vx = 0; p.vy = 0; p.rot = 0; p.squash = 0;
-  petRememberFluffyCatSeen();
-  petSay(p, "배고프다냐옹");
+  if (p.kind === "fluffyCat"){
+    petRememberFluffyCatSeen();
+    petSay(p, "배고프다냐옹");
+  } else {
+    petSay(p, petRandomSaying(p), false);
+  }
 }
 
 // 벽 꼭대기에서 건너뛸 선반 고르기.
@@ -1017,7 +1028,7 @@ function petUpdate(p, w){
   }
   // 생쥐: 고양이가 가까이 오면 "찍찍!" 하고 반대쪽으로 도망친다
   if (p.kind === "mouse" && (p.state === "walk" || p.state === "idle") && p.cool <= 0){
-    const cat = w.pets.find(o => (o.kind === "cat" || o.kind === "fluffyCat") && o.state !== "drag" &&
+    const cat = w.pets.find(o => (o.kind === "cat" || o.kind === "fluffyCat" || o.kind === "calicoCat") && o.state !== "drag" &&
       Math.abs(o.x - p.x) < 170 && Math.abs(o.y - p.y) < 60);
     if (cat){
       p.state = "flee"; p.timer = 90; p.face = (p.x < cat.x) ? -1 : 1; p.cool = 400; petSay(p, "찍찍!");
@@ -1369,7 +1380,7 @@ function petUpdate(p, w){
         if (prevFeet <= pl.y + 1 && feet >= pl.y){             // 이번 프레임에 윗변을 통과 → 착지
           p.y = pl.y - ph; p.vy = 0; p.vx = 0; p.rot = 0;
           p.support = pl;
-          if (p.kind === "fluffyCat"){
+          if (p.kind === "fluffyCat" || p.kind === "calicoCat"){
             p.state = "land"; p.timer = 14; p.squash = 0.12; p.t = 0;
           } else if (p.kind === "hopper" || p.kind === "bouncer"){    // 콩콩이들은 바로 다음 점프를 준비
             p.state = "hopwait"; p.timer = 6 + Math.random() * 36;
@@ -1455,7 +1466,7 @@ function petBindPointer(p){
       return;
     }
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
-      if (p.kind === "fluffyCat"){ petStartFluffyGroom(p); }    // 복실고양이는 앞발로 얼굴을 닦는다
+      if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
       else if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
       else {
         petSay(p, petRandomSaying(p), false);

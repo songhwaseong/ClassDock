@@ -20,7 +20,7 @@ const PET_CUSTOM_MAX_N = 24;     // 만들 수 있는 나만의 펫 개수 상�
 const PET_KIND_LABELS = {
   climber:"벽 타기 (게·개미)", walker:"뚜벅뚜벅 걷기 (로봇)", hopper:"콩콩 뛰기 (토끼)",
   bouncer:"통통 튀기 (슬라임)", roller:"데굴데굴 구르기 (별)", ghost:"둥실 떠다니기 (유령)",
-  ufo:"날며 광선 쏘기 (UFO)", cat:"커서 사냥 (고양이)", fluffyCat:"대각선 비행+그루밍 (복실고양이)", dog:"신나게 질주 (강아지)",
+  ufo:"날며 광선 쏘기 (UFO)", cat:"커서 사냥 (고양이)", fluffyCat:"대각선 비행+그루밍 (복실고양이)", calicoCat:"쌩쌩 대각선 비행 (삼색고양이)", dog:"신나게 질주 (강아지)",
   spider:"거미줄 타기 (거미)", mole:"땅 파고 뿅 (두더지)", frog:"폴짝 대점프 (개구리)",
   penguin:"뒤뚱+배 미끄럼 (펭귄)", balloon:"풍선처럼 두둥실", snail:"느릿느릿 기기 (달팽이)",
   ninja:"순간이동 대시 (닌자)", bird:"훨훨 날기 (새)", chameleon:"색 바꾸기 (카멜레온)",
@@ -32,7 +32,7 @@ const PET_KIND_LABELS = {
 // ----- 저장소 도우미 -----
 const PET_KIND_LABELS_EN = {
   climber:"Wall climber", walker:"Walker", hopper:"Hopper", bouncer:"Bouncer", roller:"Roller", ghost:"Floating ghost",
-  ufo:"Flying UFO", cat:"Cursor hunter", fluffyCat:"Diagonal flight and grooming", dog:"Happy runner", spider:"Web climber", mole:"Burrower", frog:"Big jumper",
+  ufo:"Flying UFO", cat:"Cursor hunter", fluffyCat:"Diagonal flight and grooming", calicoCat:"Speedy diagonal flight", dog:"Happy runner", spider:"Web climber", mole:"Burrower", frog:"Big jumper",
   penguin:"Waddle and slide", balloon:"Balloon floater", snail:"Slow crawler", ninja:"Teleport dash", bird:"Flying bird",
   chameleon:"Color changer", wizard:"Magic teleport", magnet:"Magnetic pull", cloud:"Thundercloud", rocket:"Launch and parachute",
   flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape", human:"Walk, climb, cheer"

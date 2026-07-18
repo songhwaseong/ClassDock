@@ -85,7 +85,8 @@ for (const file of manifest.localScripts) {
 // 이미지 기반 픽셀펫 스프라이트도 단일 HTML 안에 포함해 EXE에서 외부 파일 없이 보이게 한다.
 const petSpriteRelatives = [
   "src/assets/pixel-teacher.png",
-  "src/assets/fluffy-cat-sprites-v2.png"
+  "src/assets/fluffy-cat-sprites-v2.png",
+  "src/assets/calico-cat-sprites.png"
 ];
 for (const petSpriteRelative of petSpriteRelatives) {
   const petSpritePath = path.join(root, petSpriteRelative);
