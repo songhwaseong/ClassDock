@@ -1273,8 +1273,6 @@
     "내보내기 실패: {message}": "Export failed: {message}",
     "{name} 로 내보냈어요.": "Exported as {name}.",
     "로컬 실행 실패: {message}": "Local run failed: {message}",
-    "편집 후 {shortcut} 실행 · 옆 파일 포함": "Edit, then run with {shortcut} · includes adjacent files",
-    "편집 후 {shortcut} 로 실행": "Edit, then run with {shortcut}",
     "{ext} 파일만 보기": "Show only {ext} files",
     "압축 안에 열 수 있는 형식이 없어요. · {n}개 형식 미지원": "No openable formats inside the archive. · {n} unsupported {n|format|formats}",
     "같은 {n}줄 펼치기": "Expand {n} identical {n|line|lines}",

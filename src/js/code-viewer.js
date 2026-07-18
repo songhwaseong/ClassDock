@@ -1223,7 +1223,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   newPyBtn.addEventListener("click", () => { if (typeof newPythonScratch === "function") newPythonScratch(); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn); bar.appendChild(status);
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
   attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
   syncShortcutHints(bar);
 
@@ -1400,10 +1400,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const fromArchive = !!(runArchiveCtx && effectiveRunCtx.relPath);
   const fromZip = fromArchive && !runArchiveCtx.isFolderContext;   // 원본 압축을 다시 못 쓰는 진짜 zip/tar
   const fromFolder = fromArchive && !fromZip;                       // 원본 파일에 되쓸 수 있는 폴더 열기
-  const runShortcutLabel = shortcutDisplay(shortcutValue("runCode"));
-  const makeIdleMessage = () => fromArchive
-    ? _TF("편집 후 {shortcut} 실행 · 옆 파일 포함", { shortcut:runShortcutLabel })
-    : _TF("편집 후 {shortcut} 로 실행", { shortcut:runShortcutLabel });
+  const makeIdleMessage = () => "";
   let idleMsg = makeIdleMessage();
   status.textContent = restoredDraft === null ? idleMsg : "자동 복구된 편집본 · 저장하거나 원본으로 되돌리세요";
   const onStatusLanguageChange = () => {
