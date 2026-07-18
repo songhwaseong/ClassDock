@@ -82,15 +82,20 @@ for (const file of manifest.localScripts) {
   html = html.replace(tag, () => `<script>\n${esc(read("src/js/" + file))}\n</script>`);
 }
 
-// 사진 기반 픽셀펫 스프라이트도 단일 HTML 안에 포함해 EXE에서 외부 파일 없이 보이게 한다.
-const petSpriteRelative = "src/assets/pixel-teacher.png";
-const petSpritePath = path.join(root, petSpriteRelative);
-if (!fs.existsSync(petSpritePath)) {
-  console.error("Pixel pet sprite not found:", petSpriteRelative);
-  process.exit(1);
+// 이미지 기반 픽셀펫 스프라이트도 단일 HTML 안에 포함해 EXE에서 외부 파일 없이 보이게 한다.
+const petSpriteRelatives = [
+  "src/assets/pixel-teacher.png",
+  "src/assets/fluffy-cat-sprites-v2.png"
+];
+for (const petSpriteRelative of petSpriteRelatives) {
+  const petSpritePath = path.join(root, petSpriteRelative);
+  if (!fs.existsSync(petSpritePath)) {
+    console.error("Pixel pet sprite not found:", petSpriteRelative);
+    process.exit(1);
+  }
+  const petSpriteDataUrl = "data:image/png;base64," + fs.readFileSync(petSpritePath).toString("base64");
+  html = html.split(petSpriteRelative).join(petSpriteDataUrl);
 }
-const petSpriteDataUrl = "data:image/png;base64," + fs.readFileSync(petSpritePath).toString("base64");
-html = html.split(petSpriteRelative).join(petSpriteDataUrl);
 
 for (const item of manifest.vendorScripts) {
   verifyVendorIntegrity(item);

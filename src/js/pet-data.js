@@ -124,6 +124,19 @@ const PET_ART = {
     "...CC....CC....",
     "...CC....CC...."
   ],
+  fluffyCat: [
+    "..C.........C..",
+    "..CC.......CC..",
+    "..CCCCCCCCCCC..",
+    "..CWKCCCCCWKC..",
+    "..CCCCCNCCCCC..",
+    "..CCCCCCCCCCC..",
+    "...CCCCCCCCC.D.",
+    "...CCCCCCCCCDD.",
+    "...CCCCCCCCCD..",
+    "...CC....CC....",
+    "...CC....CC...."
+  ],
   dog: [
     ".EE.........EE.",
     ".EEB.......BEE.",
@@ -807,6 +820,19 @@ const PET_SPECIES = [
       { C:"#4a4f5a", D:"#32363f", N:"#e89aa8" }                  // 검은 고양이
     ],
     sayings: ["야옹~", "...귀찮다냥", "츄르 있어요?", "골골골", "커서 어딨지?", "냐하!", "낮잠 시간이다냥"] },
+  { kind:"fluffyCat", art:PET_ART.fluffyCat, gridW:32, gridH:32, pixelScale:3, width:96, height:96,
+    spriteSheet:{
+      src:"src/assets/fluffy-cat-sprites-v2.png", cellW:96, cellH:96, cols:6,
+      frames:{
+        idle:[5], walk:[0,1,2,3,4,5],
+        diagonalFly:[6,7,8,9,10,11], wallBounce:[12,13,14,15], land:[16,17],
+        groom:[18,19,20,21,22,23], jump:[6,7,8,9,10,11], fall:[6,7,8,9,10,11]
+      }
+    },
+    palettes: [
+      { C:"#f5ede2", D:"#a98b7d", N:"#e99aaa" }
+    ],
+    sayings: ["배고프다냐옹"] },
   { kind:"dog", art:PET_ART.dog, palettes: [
       { B:"#c78d55", E:"#8a5a30", N:"#4a3220", T:"#8a5a30" },    // 갈색 강아지
       { B:"#f0ede5", E:"#c9b89a", N:"#4a3220", T:"#c9b89a" }     // 하양 강아지
@@ -1003,7 +1029,7 @@ const PET_SPECIES = [
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
 const PET_NAMES = {
   crab:"게", chick:"병아리", robot:"로봇", ghost:"유령", slime:"슬라임",
-  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", dog:"강아지",
+  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", fluffyCat:"복실고양이", dog:"강아지",
   spider:"거미", mole:"두더지", frog:"개구리", penguin:"펭귄", balloon:"풍선",
   snail:"달팽이", ninja:"닌자", bird:"새", rabbit:"토끼", soccer:"축구공",
   chameleon:"카멜레온", wizard:"마법사", magnet:"자석", cloud:"번개구름", rocket:"로켓",
@@ -1016,7 +1042,7 @@ const PET_NAMES = {
 
 const PET_NAMES_EN = {
   crab:"Crab", chick:"Chick", robot:"Robot", ghost:"Ghost", slime:"Slime",
-  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", dog:"Dog",
+  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", fluffyCat:"Fluffy cat", dog:"Dog",
   spider:"Spider", mole:"Mole", frog:"Frog", penguin:"Penguin", balloon:"Balloon",
   snail:"Snail", ninja:"Ninja", bird:"Bird", rabbit:"Rabbit", soccer:"Soccer ball",
   chameleon:"Chameleon", wizard:"Wizard", magnet:"Magnet", cloud:"Thundercloud", rocket:"Rocket",
@@ -1032,6 +1058,7 @@ const PET_KIND_SAYINGS_EN = {
   hopper:["Boing!", "Let's hop!", "Here I go!"], bouncer:["Boing!", "So bouncy!", "Hello!"],
   roller:["Rolling along!", "Here I go!", "Wheee!"], ghost:["Boo!", "Did I surprise you?", "Hello!"],
   ufo:["Beep beep!", "Greetings, Earthling!", "Scanning..."], cat:["Meow!", "Time for a nap.", "Purr..."],
+  fluffyCat:["I'm hungry, meow!"],
   dog:["Woof!", "Let's go!", "Sniff sniff!"], spider:["Look at my web!", "Hello!", "No biting!"],
   mole:["Pop!", "Underground is cozy.", "Hello!"], frog:["Ribbit!", "Ready to jump!", "Hop!"],
   penguin:["Waddle waddle!", "Sliding is the best!", "Quack!"], balloon:["Floating along!", "Don't let go!", "Up we go!"],
@@ -1053,7 +1080,7 @@ const PET_BUBBLE_EN = {
   "어? 내 우주선!":"Hey, my spaceship!", "후두둑~ 소나기!":"Pitter-patter rain!", "개굴개굴!":"Ribbit ribbit!", "사과다! 기다려!":"An apple! Wait up!", "데굴데굴~":"Rolling along!",
   "준비... 출발...":"Ready... go...", "천천히 가자!":"Let's take it slow!", "거의 다 왔다!":"Almost there!", "집중 시간! 조용히 쉴게요":"Focus time! I'll rest quietly.", "휴식 시간! 쭉쭉~":"Break time! Stretch!",
   "납치 실패...":"Abduction failed...", "다시 둥실~":"Floating again!", "푸슈슈슉~":"Pfffft!", "콰르릉!":"Kaboom!", "우르릉...":"Rumble...", "후우- 새 방울!":"Phew—new bubble!",
-  "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
+  "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "배고프다냐옹":"I'm hungry, meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
   "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!", "야호~":"Yahoo!",
   "두둥실~":"Floating up!", "저기로!":"Over there!",
   "다 지웠다!":"All clean!", "또 그려도 돼?":"Can I draw again?", "자력 정상!":"Magnet power normal!", "재부팅 완료!":"Reboot complete!",
