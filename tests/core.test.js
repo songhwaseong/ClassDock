@@ -23,6 +23,14 @@ test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", (
   assert.equal(detectTextEncoding(new Uint8Array([0xEF, 0xBB, 0xBF, 0x61])).label, "UTF-8 (BOM 있음)");
   assert.equal(detectTextEncoding(new TextEncoder().encode("한글 UTF-8")).label, "UTF-8");
   assert.equal(detectTextEncoding(new Uint8Array([0xB0, 0xA1])).label, "CP949 / EUC-KR");
+  const damagedCp949 = detectTextEncoding(new Uint8Array([0xB0, 0xA1, 0xFF]));
+  assert.equal(damagedCp949.encoding, "euc-kr");
+  assert.equal(damagedCp949.lossy, true);
+  const utf8Korean = new TextEncoder().encode("한글");
+  const damagedUtf8 = new Uint8Array(utf8Korean.length + 1);
+  damagedUtf8.set(utf8Korean);
+  damagedUtf8[damagedUtf8.length - 1] = 0xFF;
+  assert.equal(detectTextEncoding(damagedUtf8).encoding, "utf-8");
   assert.equal(detectTextEncoding(new TextEncoder().encode("plain ascii")).shortLabel, "ASCII");
   assert.equal(detectTextEncoding(new Uint8Array([0xFF, 0xFE, 0x61, 0x00])).shortLabel, "UTF-16 LE");
   assert.equal(detectTextEncoding(new Uint8Array()).shortLabel, "빈 파일");

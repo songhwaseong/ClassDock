@@ -48,7 +48,7 @@
     const bytes = value instanceof Uint8Array ? value : new Uint8Array(value || 0);
     const result = (encoding, label, shortLabel, extra={}) => ({
       encoding, label, shortLabel: shortLabel || label, bom: !!extra.bom,
-      empty: !!extra.empty, uncertain: !!extra.uncertain
+      empty: !!extra.empty, uncertain: !!extra.uncertain, lossy: !!extra.lossy
     });
     if (!bytes.length) return result("utf-8", "빈 파일 (저장 시 UTF-8)", "빈 파일", { empty:true, uncertain:true });
     if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
@@ -85,6 +85,30 @@
     try {
       new TextDecoder("euc-kr", { fatal:true }).decode(bytes);
       return result("euc-kr", "CP949 / EUC-KR", "CP949");
+    } catch(_){}
+
+    // 오래된 ANSI 텍스트에는 파일 일부에만 잘못된 바이트가 섞인 경우가 있다.
+    // strict 디코딩 하나만 실패해도 UTF-8로 되돌리면 정상 CP949 한글까지 전부 깨지므로,
+    // 앞·중간·끝 표본을 관대한 모드로 디코딩해 대체 문자(�)가 적은 쪽을 고른다.
+    const chunkSize = 64 * 1024;
+    const starts = bytes.length <= chunkSize
+      ? [0]
+      : [0, Math.max(0, Math.floor((bytes.length - chunkSize) / 2)), Math.max(0, bytes.length - chunkSize)];
+    const replacementScore = (encoding) => {
+      let score = 0;
+      const decoder = new TextDecoder(encoding);
+      for (const start of [...new Set(starts)]) {
+        const text = decoder.decode(bytes.subarray(start, Math.min(bytes.length, start + chunkSize)));
+        for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 0xFFFD) score++;
+      }
+      return score;
+    };
+    try {
+      const utf8Score = replacementScore("utf-8");
+      const cp949Score = replacementScore("euc-kr");
+      if (utf8Score < cp949Score)
+        return result("utf-8", "UTF-8 (일부 오류 바이트 허용)", "UTF-8", { uncertain:true, lossy:true });
+      return result("euc-kr", "CP949 / EUC-KR (일부 오류 바이트 허용)", "CP949", { uncertain:true, lossy:true });
     } catch(_){}
     return result(null, "알 수 없는 인코딩", "알 수 없음", { uncertain:true });
   }

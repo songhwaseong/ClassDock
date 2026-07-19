@@ -2123,7 +2123,22 @@ function contentSearchWorkerMain(){
     if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return "utf-8";
     try { new TextDecoder("utf-8", { fatal:true }).decode(bytes); return "utf-8"; } catch(_){}
     try { new TextDecoder("euc-kr", { fatal:true }).decode(bytes); return "euc-kr"; } catch(_){}
-    return "utf-8";
+    // 일부 오류 바이트가 섞인 오래된 ANSI 파일도 본문과 같은 기준으로 복구한다.
+    const chunkSize = 64 * 1024;
+    const starts = bytes.length <= chunkSize
+      ? [0]
+      : [0, Math.max(0, Math.floor((bytes.length - chunkSize) / 2)), Math.max(0, bytes.length - chunkSize)];
+    const replacementScore = (encoding) => {
+      let score = 0;
+      const decoder = new TextDecoder(encoding);
+      for (const start of [...new Set(starts)]){
+        const text = decoder.decode(bytes.subarray(start, Math.min(bytes.length, start + chunkSize)));
+        for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 0xFFFD) score++;
+      }
+      return score;
+    };
+    try { return replacementScore("utf-8") < replacementScore("euc-kr") ? "utf-8" : "euc-kr"; }
+    catch(_){ return "utf-8"; }
   }
   function decode(bytes){
     const lim = Math.min(bytes.length, 8192);              // 앞부분에 NUL 이 있으면 바이너리로 보고 스킵(메인 경로와 동일)
