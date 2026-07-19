@@ -928,7 +928,13 @@ function wire(){
     }
     if (shortcutMatches(e, "focusSearch") && docs.length){
       e.preventDefault();
+      const seed = document.activeElement === sidebarSearch
+        ? "" : currentSelectionSeed();                   // focus()·select() 가 선택을 지우기 전에 붙잡는다(검색창 자신은 제외)
       if (sidebarCollapsed){ sidebarCollapsed = false; refreshChrome(); }
+      if (seed && seed !== sidebarSearch.value){         // 문서에서 선택해 둔 글자가 있으면 검색어로 딸려간다
+        sidebarSearch.value = seed;
+        sidebarSearch.dispatchEvent(new Event("input", { bubbles: true }));   // 이름·본문 검색 즉시 실행
+      }
       sidebarSearch.focus(); sidebarSearch.select();
     }
   });

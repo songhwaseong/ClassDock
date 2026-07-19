@@ -591,6 +591,9 @@ async function openPdfFind(targetDoc){
   const content = byId("content");
   f.bar.classList.toggle("study-target", !!(content && content.classList.contains("study-mode") && target.id === studyPdfId));
   f.bar.hidden = false;
+  // PDF 본문에서 드래그해 둔 글자가 있으면 검색어로 딸려간다(이 PDF 안의 선택만, 한 줄·200자 이내).
+  const seed = typeof currentSelectionSeed === "function" ? currentSelectionSeed(target.el) : "";
+  if (seed && seed !== f.input.value.trim()) f.input.value = seed;
   f.input.focus(); f.input.select();
   if (f.ocrBtn && !target._ocrRunning) f.ocrBtn.hidden = true;   // 문서가 바뀌었을 수 있으니 일단 감춤(아래 판정 후 표시)
   if (typeof ensureRendered === "function") await ensureRendered(target);   // placeholder(페이지·오버레이) 보장

@@ -295,6 +295,26 @@ function toast(msg, ms=2200, opts={}){
   timer = setTimeout(dismiss, ms);
   return item;
 }
+/* 화면에서 지금 선택돼 있는 글자를 검색어 시드로 돌려준다(한 줄·200자 이내, 없으면 "").
+   편집기(textarea·글자 입력란) 안의 선택이 우선이고, 다음이 문서 본문의 마우스 선택.
+   container 를 주면 그 요소 안에서 이뤄진 선택만 인정한다(예: 특정 PDF 화면). */
+function currentSelectionSeed(container){
+  try {
+    const el = document.activeElement;
+    if (el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && /^(text|search)$/.test(el.type))) &&
+        typeof el.selectionStart === "number" && (!container || container.contains(el))){
+      const sel = String(el.value || "").slice(el.selectionStart, el.selectionEnd).trim();
+      if (sel && !sel.includes("\n") && sel.length <= 200) return sel;
+    }
+    const s = window.getSelection && window.getSelection();
+    if (s && !s.isCollapsed && s.rangeCount &&
+        (!container || (container.contains(s.anchorNode) && container.contains(s.focusNode)))){
+      const t = String(s).replace(/\s+/g, " ").trim();
+      if (t && t.length <= 200) return t;
+    }
+  } catch(_){}
+  return "";
+}
 function showLoading(msg){ const _t = (typeof window.t === "function") ? window.t : (x)=>x; byId("loadingMsg").textContent = _t(msg||"처리 중…"); byId("loading").hidden = false; }
 function hideLoading(){
   // 작업공간 배치 복원 중 내부 로더가 완료돼도 전체 복원이 끝날 때까지 화면을 유지한다.
