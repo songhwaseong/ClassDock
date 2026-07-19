@@ -205,15 +205,17 @@ function petPickAction(p, w){
     else if (roll < 0.9){ p.state = "jump"; p.vy = -(4 + Math.random() * 3); p.vx = p.face * (1 + Math.random()); }
     else { p.state = "reboot"; p.timer = 110 + Math.random() * 70; p.off = true; }
   }
-  else if (p.kind === "fluffyCat"){ // 복실고양이: 충분히 걷고 쉬다가 가끔 대각선으로 날아오른다
-    if (roll < 0.58){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 110 + Math.random() * 170; }
-    else if (roll < 0.78){ p.state = "idle"; p.timer = 55 + Math.random() * 105; }
-    else petStartFluffyFlight(p);
+  else if (p.kind === "fluffyCat"){ // 복실고양이: 충분히 걷고 쉬다가 가끔 대각선으로 날아오른다 (비행 확률은 매번 8~36%로 출렁인다)
+    const fly = 0.08 + Math.random() * 0.28;
+    if (roll < fly) petStartFluffyFlight(p);
+    else if (roll < fly + (1 - fly) * 0.74){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 110 + Math.random() * 170; }
+    else { p.state = "idle"; p.timer = 55 + Math.random() * 105; }
   }
-  else if (p.kind === "calicoCat"){ // 삼색고양이: 덜 쉬고 더 자주, 더 빠르게 날아올라 벽을 오래 튕긴다
-    if (roll < 0.46){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 140; }
-    else if (roll < 0.64){ p.state = "idle"; p.timer = 40 + Math.random() * 80; }
-    else petStartFluffyFlight(p, 1.25);
+  else if (p.kind === "calicoCat"){ // 삼색고양이: 덜 쉬고 더 자주, 더 빠르게 날아올라 벽을 오래 튕긴다 (비행 확률은 매번 20~52%)
+    const fly = 0.2 + Math.random() * 0.32;
+    if (roll < fly) petStartFluffyFlight(p, 1.25);
+    else if (roll < fly + (1 - fly) * 0.72){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 140; }
+    else { p.state = "idle"; p.timer = 40 + Math.random() * 80; }
   }
   else if (p.kind === "roller"){   // 별·축구공: 걷기가 곧 구르기
     if (roll < 0.5){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
@@ -325,7 +327,7 @@ function petCheer(p, say, mayFloat){
 function petStartFluffyFlight(p, boost = 1){
   p.face = p.face < 0 ? -1 : 1;
   p.state = "diagonalFly"; p.t = 0;
-  p.airTimer = (180 + Math.random() * 100) * boost;
+  p.airTimer = (420 + Math.random() * 240) * boost;
   p.vx = p.face * (2.05 + Math.random() * 0.5) * boost;
   p.vy = -(1.3 + Math.random() * 0.4) * boost;
   p.support = null; p.rot = 0; p.squash = 0;
@@ -1093,19 +1095,19 @@ function petUpdate(p, w){
       petFluffyWallBounce(p, 1);
     }
 
-    // 천장에서는 아래로 방향을 바꾸고, 다음 세로 벽 충돌 때 다시 위쪽 대각선으로 튄다.
+    // 천장·바닥 모두 반사한다 — 비행은 오직 airTimer 가 다 됐을 때만 끝난다.
     if (p.y <= 6 && p.vy < 0){
       p.y = 6;
       p.vy = Math.max(1.05, Math.abs(p.vy) * 0.88);
     }
     if (p.y >= vh - ph - 4 && p.vy > 0){
       p.y = vh - ph - 4;
-      p.state = "fall"; p.vy = 0; p.vx *= 0.35; p.rot = 0; p.t = 0;
-    } else {
-      if (p.state === "wallBounce" && --p.timer <= 0){ p.state = "diagonalFly"; p.t = 0; }
-      if (--p.airTimer <= 0){
-        p.state = "fall"; p.vy = Math.max(0, p.vy); p.vx *= 0.35; p.rot = 0; p.t = 0;
-      }
+      p.vy = -Math.max(1.05, Math.abs(p.vy) * 0.88);
+      p.pop = 4;
+    }
+    if (p.state === "wallBounce" && --p.timer <= 0){ p.state = "diagonalFly"; p.t = 0; }
+    if (--p.airTimer <= 0){
+      p.state = "fall"; p.vy = Math.max(0, p.vy); p.vx *= 0.35; p.rot = 0; p.t = 0;
     }
   }
   else if (p.state === "groom"){                               // 클릭 반응: 앞발을 핥고 얼굴을 닦는 동작을 세 번 반복
