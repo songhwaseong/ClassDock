@@ -599,27 +599,22 @@ async function rememberRunOutputs(runCtx, bundle, outputs, sessionId){
   return { count:remembered, persisted };
 }
 // 스크립트가 절대 경로(예: r'D:\running\...')로 직접 쓰는 파일은 임시 작업폴더 밖이라 산출물 스캔에
-// 안 잡힌다. 대신 소스의 절대 경로 리터럴이 열린 폴더 루트의 실제 위치(저장 루트 + 루트 이름)를
-// 가리키면 결과가 이미 디스크에 있을 수 있으므로, 파일 쓰기 없이 '↻ 동기화' 표식만 남긴다.
+// 안 잡힌다. 디렉터리 핸들은 실제 절대경로를 노출하지 않으므로, 소스의 절대경로 리터럴 안에 열린
+// 루트 폴더명이 경로 세그먼트로 있으면 결과가 디스크에 있을 수 있다고 보고 '↻ 동기화' 표식을 남긴다.
 // 읽기만 하는 스크립트도 표식이 뜰 수 있지만(과탐), 동기화가 변경 없음으로 끝날 뿐 잃는 게 없다.
 async function markRunTouchedFolderRoots(runCtx){
-  if (typeof navNodes === "undefined" || typeof displayPathForWorkspace !== "function") return;
+  if (typeof navNodes === "undefined") return;
   const roots = navNodes.filter(node => node.type === "group" && node.folderRefreshRootId === node.nodeId
     && node.originalSaveMode && node.folderHandle && !node.runOutputsPending);
   if (!roots.length) return;
   if (!(await saveFileBackendAvailable())) return;   // 로컬 파이썬이 없으면 절대 경로 쓰기도 일어나지 않는다
   const source = await openDocRunText(runCtx && runCtx.ownerDoc);
   if (!source) return;
-  const literals = source.match(/[A-Za-z]:[\\/][^'"\r\n]*/g);
-  if (!literals) return;
-  const normalized = literals.map(value => value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase());
+  const paths = windowsAbsolutePathLiterals(source);
+  if (!paths.length) return;
   let marked = false;
   for (const root of roots){
-    let rootAbs = "";
-    try { rootAbs = String(await displayPathForWorkspace(root.name) || ""); } catch(_){}
-    if (!rootAbs || !isLocalAbsolutePath(rootAbs)) continue;
-    const prefix = rootAbs.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() + "/";
-    if (!normalized.some(path => path.startsWith(prefix))) continue;
+    if (!paths.some(path => windowsAbsolutePathTouchesFolder(path, root.name))) continue;
     root.runOutputsPending = true;
     marked = true;
   }

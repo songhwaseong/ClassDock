@@ -1645,7 +1645,9 @@ function openSidebarGroupMenu(node, x, y){
   menu.className = "tab-ctx-menu"; menu.setAttribute("role", "menu");
   const add = (label, run, disabled=false) => {
     const button = document.createElement("button"); button.type = "button"; button.setAttribute("role", "menuitem");
-    const text = document.createElement("span"); text.textContent = label; button.appendChild(text); button.disabled = !!disabled;
+    const text = document.createElement("span");
+    text.textContent = (typeof window.t === "function") ? window.t(label) : label;
+    button.appendChild(text); button.disabled = !!disabled;
     button.addEventListener("click", () => { closeSidebarGroupMenu(); run(); });
     menu.appendChild(button);
   };
@@ -2438,12 +2440,13 @@ function renderSidebar(){
         (node.restorePendingImages || node.runOutputsPending)){
       label.classList.add("has-image-restore");
       const restore = document.createElement("button");
-      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = "↻ 동기화";
+      const translate = (text) => (typeof window.t === "function" ? window.t(text) : text);
+      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = translate("↻ 동기화");
       const reasons = [];
       if (node.restorePendingImages) reasons.push("용량이 커서 자동 복원에서 빠진 사진");
       if (node.runOutputsPending) reasons.push("코드 실행이 만든 파일");
-      restore.title = reasons.join("과 ") + "을 디스크에서 다시 불러옵니다.";
-      restore.setAttribute("aria-label", "폴더 동기화");
+      restore.title = translate(reasons.join("과 ") + "을 디스크에서 다시 불러옵니다.");
+      restore.setAttribute("aria-label", translate("폴더 동기화"));
       restore.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
         if (node.folderReloading) return;

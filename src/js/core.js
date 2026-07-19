@@ -100,6 +100,30 @@
     return path;
   }
 
+  // Python 소스에 적힌 Windows 절대경로 리터럴을 비교 가능한 형태로 추린다.
+  // 일반 문자열의 이스케이프 백슬래시("D:\\folder")와 raw 문자열(r"D:\folder"),
+  // UNC 경로를 모두 같은 슬래시 형태로 정규화한다.
+  function windowsAbsolutePathLiterals(source) {
+    const matches = String(source || "").match(/(?:[A-Za-z]:[\\/]+|\\{2,})[^'"\r\n]*/g) || [];
+    const seen = new Set(), paths = [];
+    for (const value of matches) {
+      const path = value.replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      paths.push(path);
+    }
+    return paths;
+  }
+
+  // File System Access 디렉터리 핸들은 실제 절대경로를 노출하지 않는다. 따라서 소스 경로에
+  // 열린 루트 폴더명이 독립된 경로 세그먼트로 있으면 그 루트를 건드린 것으로 보수적으로 본다.
+  function windowsAbsolutePathTouchesFolder(path, folderName) {
+    const wanted = String(folderName || "").replace(/[\\/]+/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+    if (!wanted || wanted.includes("/")) return false;
+    const parts = String(path || "").replace(/[\\/]+/g, "/").split("/").filter(Boolean);
+    return parts.some((part) => part.toLowerCase() === wanted);
+  }
+
   function evaluatePythonStringConcat(expression, variables) {
     const text = String(expression || "");
     let pos = 0, value = "", terms = 0;
@@ -2615,6 +2639,7 @@
     detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
+    windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,

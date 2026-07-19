@@ -674,8 +674,8 @@ async function pickFolderOrInput(input){
       rememberFolderHandle(root, root.name);
     }
     toast(related.same
-      ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 새로고침합니다."
-      : "선택한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 새로고침합니다.", 3400);
+      ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 동기화합니다."
+      : "선택한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 동기화합니다.", 3400);
     await requestFolderRefresh(root.nodeId);
     return;
   }
@@ -1114,7 +1114,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   if (addFiles.length - changedCount > 0) changeSummary.push("추가 " + (addFiles.length - changedCount) + "개");
   if (changedCount) changeSummary.push("변경 " + changedCount + "개");
   if (removedCount) changeSummary.push("제거 " + removedCount + "개");
-  toast("폴더를 새로고침했어요. " + (changeSummary.length ? changeSummary.join(" · ") : "변경된 파일 없음") + " (전체 " + nextDocs.length + "개)", 3000);
+  toast("폴더를 동기화했어요. " + (changeSummary.length ? changeSummary.join(" · ") : "변경된 파일 없음") + " (전체 " + nextDocs.length + "개)", 3000);
   return true;
 }
 
@@ -1255,8 +1255,8 @@ function queueDroppedItems(dataTransfer){
               continue;
             }
             toast(related.same
-              ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 새로고침합니다."
-              : "드롭한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 새로고침합니다.", 3400);
+              ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 동기화합니다."
+              : "드롭한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 동기화합니다.", 3400);
             const snapshot = await collectDirectoryHandleFiles(root.folderHandle, { onProgress:showScanProgress });
             await refreshFolderGroup(root.nodeId, snapshot.files, { folderHandle: root.folderHandle,
               folderPaths: snapshot.folderPaths, originalSaveMode: !!root.originalSaveMode });

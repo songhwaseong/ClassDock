@@ -5,6 +5,7 @@ const {
   htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle,
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
+  windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
   transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
@@ -903,6 +904,22 @@ test("editor undo history remembers the caret immediately before an edit", () =>
     value:"first\nsecond", s:8, e:8
   });
   assert.equal(editorHistoryCaretState(initial, "changed", 4, 4), initial);
+});
+
+test("Windows 절대경로 리터럴은 raw·이스케이프·UNC 표기를 같은 폴더 기준으로 감지한다", () => {
+  const paths = windowsAbsolutePathLiterals([
+    String.raw`open(r"D:\수업자료\project\raw.csv", "w")`,
+    String.raw`open("D:\\수업자료\\project\\escaped.csv", "w")`,
+    String.raw`open(r"\\server\share\project\unc.csv", "w")`
+  ].join("\n"));
+  assert.deepEqual(paths, [
+    "D:/수업자료/project/raw.csv",
+    "D:/수업자료/project/escaped.csv",
+    "/server/share/project/unc.csv"
+  ]);
+  assert.equal(paths.every(path => windowsAbsolutePathTouchesFolder(path, "project")), true);
+  assert.equal(windowsAbsolutePathTouchesFolder(paths[0], "수업"), false);
+  assert.equal(windowsAbsolutePathTouchesFolder(paths[0], "다른폴더"), false);
 });
 
 test("folder drops are recognized even when DataTransfer.files is empty", () => {

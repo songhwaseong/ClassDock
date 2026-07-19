@@ -3,6 +3,7 @@
 const {
   decodeWorkspace, encodeWorkspace, escapeAttr, escapeHtml, fingerprintBytes, inlineMarkdown, indexWorkspacePathsByFolder,
   formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink, transformEditorLines,
+  windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
   pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
