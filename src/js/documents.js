@@ -1668,7 +1668,7 @@ function openSidebarGroupMenu(node, x, y){
     add("▦ PDF 모아보기 — 하위 폴더 포함 (" + nestedCount + "개)", () => openFolderPdfGallery(node, true), nestedCount === 0);
   }
   if (node.folderRefreshRootId){
-    add("↻  폴더 새로고침", () => requestFolderRefresh(node.folderRefreshRootId));
+    add("↻  동기화", () => requestFolderRefresh(node.folderRefreshRootId));
     // 브라우저 재생이 막히는 형식(MKV 등)이 있으면 한꺼번에 MP4로 변환(ffmpeg — 자세한 안내는 영상 탭)
     const videoTargets = (typeof vvFolderVideoTargets === "function") ? vvFolderVideoTargets(node.folderRefreshRootId) : [];
     if (videoTargets.length){
@@ -2421,7 +2421,7 @@ function renderSidebar(){
     if (doc) nm.title += " · " + humanSize(doc.size || 0);
     if (doc && doc.textEncoding) nm.title += " · 인코딩: " + doc.textEncoding.label +
       (doc.textEncoding.sampled ? " (앞부분 검사)" : "");
-    if (node.type === "group" && node.newPythonContext) nm.title += " · 우클릭: 새 Python 코드·노트북" + (node.folderRefreshRootId ? " · 폴더 새로고침" : "");
+    if (node.type === "group" && node.newPythonContext) nm.title += " · 우클릭: 새 Python 코드·노트북" + (node.folderRefreshRootId ? " · 동기화" : "");
     const label = document.createElement("span"); label.className = "sb-label"; label.appendChild(nm);
     if (node.type === "group" && node.zipLimits === true){
       label.classList.add("has-zip-info");
@@ -2432,14 +2432,18 @@ function renderSidebar(){
       info.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toast(ZIP_MODE_NOTICE, 6500); });
       label.appendChild(info);
     }
-    // 대량 사진이 자동 복원에서 빠진 폴더(루트)에는 눈에 보이는 복원 버튼을 단다 — 이 버튼을 눌러야만
-    // 디스크에서 사진을 다시 읽는다. 다른 폴더를 클릭해도 새로고침되지 않는다.
-    if (node.type === "group" && node.restorePendingImages && node.folderRefreshRootId === node.nodeId){
+    // 디스크와 트리가 어긋난 게 확실한 루트에만 동기화 버튼을 단다 — 대량 사진이 자동 복원에서
+    // 빠졌거나, 코드 실행이 이 폴더 안에 파일을 만들었을 때. 버튼을 눌러야만 디스크를 다시 읽는다.
+    if (node.type === "group" && node.folderRefreshRootId === node.nodeId &&
+        (node.restorePendingImages || node.runOutputsPending)){
       label.classList.add("has-image-restore");
       const restore = document.createElement("button");
-      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = "📷 사진 불러오기";
-      restore.title = "용량이 커서 자동 복원에서 빠진 사진을 디스크에서 다시 불러옵니다.";
-      restore.setAttribute("aria-label", "빠진 사진 다시 불러오기");
+      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = "↻ 동기화";
+      const reasons = [];
+      if (node.restorePendingImages) reasons.push("용량이 커서 자동 복원에서 빠진 사진");
+      if (node.runOutputsPending) reasons.push("코드 실행이 만든 파일");
+      restore.title = reasons.join("과 ") + "을 디스크에서 다시 불러옵니다.";
+      restore.setAttribute("aria-label", "폴더 동기화");
       restore.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
         if (node.folderReloading) return;

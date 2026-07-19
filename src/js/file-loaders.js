@@ -858,7 +858,7 @@ async function requestFolderRefresh(rootId){
       return queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths,
         originalSaveMode:!!root.originalSaveMode });
     } catch(e){
-      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
+      if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
     } finally {
       hideLoading();
@@ -877,7 +877,7 @@ async function requestFolderRefresh(rootId){
       return queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths,
         originalSaveMode:true });
     } catch(e){
-      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
+      if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
       else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
     } finally {
       hideLoading();
@@ -897,8 +897,8 @@ function queueFolderRefresh(rootId, fileList, options={}){
   fileQueue = fileQueue
     .then(() => runUiBatch(() => refreshFolderGroup(rootId, files, options)))
     .catch((e) => {
-      if (e && e.message === "operation-cancelled") toast("폴더 새로고침을 취소했어요.");
-      else { console.error(e); toast("폴더 새로고침 중 오류가 났어요.", 3200); }
+      if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
+      else { console.error(e); toast("폴더 동기화 중 오류가 났어요.", 3200); }
     });
   return fileQueue;
 }
@@ -909,10 +909,10 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const files = [...fileList];
   const openable = await folderOpenableFiles(files);
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))];
-  if (!openable.length && !folderPaths.length){ toast("새로고침할 수 있는 파일이나 폴더가 없어요.", 3200); return false; }
+  if (!openable.length && !folderPaths.length){ toast("동기화할 수 있는 파일이나 폴더가 없어요.", 3200); return false; }
   const selectedRootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
   if (selectedRootName !== root.name){
-    toast("'" + root.name + "' 폴더를 선택해야 새로고침할 수 있어요.", 3600);
+    toast("'" + root.name + "' 폴더를 선택해야 동기화할 수 있어요.", 3600);
     return false;
   }
 
@@ -952,7 +952,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const editedPdfs = dropDocs.filter(doc => doc.kind === "pdf" && doc.elements && doc.elements.length);
   if (hasUnsaved || editedPdfs.length){
     const detail = hasUnsaved && editedPdfs.length ? "저장하지 않은 코드와 PDF 편집" : (hasUnsaved ? "저장하지 않은 코드" : "PDF 편집");
-    const ok = await confirmDialog(detail + "이 있습니다. 폴더를 새로고침하면 해당 내용이 사라질 수 있어요.", "새로고침", "취소");
+    const ok = await confirmDialog(detail + "이 있습니다. 폴더를 동기화하면 해당 내용이 사라질 수 있어요.", "동기화", "취소");
     if (!ok) return false;
   }
 
@@ -1010,7 +1010,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   };
   folderPaths.forEach(path => parentFor(path + "/.__empty_folder__"));
 
-  showLoading("폴더 새로고침 중…");
+  showLoading("폴더 동기화 중…");
   let opened = 0;
   for (const f of addFiles){
     try {
@@ -1018,7 +1018,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
       await handleFiles([f], { parentId: parentFor(rel), bulk: true, relPath: rel, archiveCtx: folderCtx,
         originalSaveMode: !!root.originalSaveMode });
       opened++;
-      if (opened % 20 === 0 || opened === addFiles.length) updateLoading(`폴더 새로고침 중… (${opened}/${addFiles.length})`);
+      if (opened % 20 === 0 || opened === addFiles.length) updateLoading(`폴더 동기화 중… (${opened}/${addFiles.length})`);
       await yieldToBrowserThrottled();
     } catch(e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
   }
@@ -1044,6 +1044,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   root.folderHandle = options.folderHandle || root.folderHandle || null;
   rememberFolderHandle(root, selectedRootName);
   root.restorePendingImages = false;
+  root.runOutputsPending = false;
   root.folderPaths = folderPaths.length ? folderPaths : [selectedRootName];
   root.workspacePaths = [
     ...files.map(f => f.webkitRelativePath || (selectedRootName + "/" + f.name)),
@@ -1250,7 +1251,7 @@ function queueDroppedItems(dataTransfer){
             let allowed = false;
             try { allowed = await ensureReadPermission(root.folderHandle); } catch(_){}
             if (!allowed){
-              toast("'" + root.name + "' 폴더가 이미 열려 있는데 다시 읽을 권한이 없어요. 사이드바의 '폴더 새로고침'을 사용해 주세요.", 4600);
+              toast("'" + root.name + "' 폴더가 이미 열려 있는데 다시 읽을 권한이 없어요. 사이드바의 '동기화'를 사용해 주세요.", 4600);
               continue;
             }
             toast(related.same

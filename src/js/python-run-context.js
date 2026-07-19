@@ -564,6 +564,7 @@ function mergeRuntimeFiles(runCtx, files, keep){
   return [...byPath.values()];
 }
 async function rememberRunOutputs(runCtx, bundle, outputs, sessionId){
+  try { await markRunTouchedFolderRoots(runCtx); } catch(e){ console.warn("절대 경로 동기화 표식 실패:", e); }
   if (!outputs || !outputs.length) return { count:0, persisted:false };
   const store = runRuntimeFileStore(runCtx, true);
   if (!store) return { count:0, persisted:false };
@@ -593,8 +594,74 @@ async function rememberRunOutputs(runCtx, bundle, outputs, sessionId){
     persisted = await persistRunOutputFiles(savedRows);
     const holder = runRuntimeFileHolder(runCtx);
     if (holder && persisted) holder.runtimeFilesPersisted = true;
+    await writeRunOutputsToFolderRoots(savedRows);
   }
   return { count:remembered, persisted };
+}
+// 스크립트가 절대 경로(예: r'D:\running\...')로 직접 쓰는 파일은 임시 작업폴더 밖이라 산출물 스캔에
+// 안 잡힌다. 대신 소스의 절대 경로 리터럴이 열린 폴더 루트의 실제 위치(저장 루트 + 루트 이름)를
+// 가리키면 결과가 이미 디스크에 있을 수 있으므로, 파일 쓰기 없이 '↻ 동기화' 표식만 남긴다.
+// 읽기만 하는 스크립트도 표식이 뜰 수 있지만(과탐), 동기화가 변경 없음으로 끝날 뿐 잃는 게 없다.
+async function markRunTouchedFolderRoots(runCtx){
+  if (typeof navNodes === "undefined" || typeof displayPathForWorkspace !== "function") return;
+  const roots = navNodes.filter(node => node.type === "group" && node.folderRefreshRootId === node.nodeId
+    && node.originalSaveMode && node.folderHandle && !node.runOutputsPending);
+  if (!roots.length) return;
+  if (!(await saveFileBackendAvailable())) return;   // 로컬 파이썬이 없으면 절대 경로 쓰기도 일어나지 않는다
+  const source = await openDocRunText(runCtx && runCtx.ownerDoc);
+  if (!source) return;
+  const literals = source.match(/[A-Za-z]:[\\/][^'"\r\n]*/g);
+  if (!literals) return;
+  const normalized = literals.map(value => value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase());
+  let marked = false;
+  for (const root of roots){
+    let rootAbs = "";
+    try { rootAbs = String(await displayPathForWorkspace(root.name) || ""); } catch(_){}
+    if (!rootAbs || !isLocalAbsolutePath(rootAbs)) continue;
+    const prefix = rootAbs.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() + "/";
+    if (!normalized.some(path => path.startsWith(prefix))) continue;
+    root.runOutputsPending = true;
+    marked = true;
+  }
+  if (marked && typeof renderSidebar === "function") renderSidebar();
+}
+// 실행 산출물이 열려 있는 폴더 트리 안 경로면 그 폴더의 디렉터리 핸들로 원본 위치에 직접 쓴다.
+// (/save-file 은 '만능교실 저장' 폴더에만 쓰므로, 원본 폴더를 다시 읽는 동기화가 새 파일을 보려면
+// 여기서 실제 폴더에 써 두어야 한다.) 하나라도 써지면 루트에 표식을 남겨 '↻ 동기화' 버튼을 띄운다.
+async function writeRunOutputsToFolderRoots(rows){
+  if (typeof navNodes === "undefined") return;
+  const byRoot = new Map();
+  for (const row of rows){
+    const path = normalizedRunPath(row.path);
+    const rootName = path.split("/")[0];
+    if (!rootName || !path.includes("/")) continue;   // 루트 세그먼트가 없으면 붙일 폴더도 없다
+    if (!byRoot.has(rootName)) byRoot.set(rootName, []);
+    byRoot.get(rootName).push({ path, bytes: row.bytes });
+  }
+  if (!byRoot.size) return;
+  let marked = false;
+  for (const node of navNodes){
+    if (node.type !== "group" || node.folderRefreshRootId !== node.nodeId) continue;
+    if (!node.originalSaveMode || !node.folderHandle || node.folderHandle.kind !== "directory") continue;
+    const targets = byRoot.get(node.name);
+    if (!targets) continue;
+    let wrote = 0;
+    for (const target of targets){
+      try {
+        const segments = target.path.split("/").slice(1);
+        const fileName = segments.pop();
+        let dir = node.folderHandle;
+        for (const segment of segments) dir = await dir.getDirectoryHandle(segment, { create:true });
+        const fileHandle = await dir.getFileHandle(fileName, { create:true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(target.bytes);
+        await writable.close();
+        wrote++;
+      } catch(e){ console.warn("실행 산출물 원본 폴더 저장 실패:", target.path, e); }
+    }
+    if (wrote && !node.runOutputsPending){ node.runOutputsPending = true; marked = true; }
+  }
+  if (marked && typeof renderSidebar === "function") renderSidebar();
 }
 async function persistRunOutputFiles(rows){
   if (!rows || !rows.length || (location.protocol !== "http:" && location.protocol !== "https:")) return false;

@@ -306,7 +306,7 @@ async function rememberWorkspace(files, replace, options={}){
     .filter(Boolean);
   const notifySkippedImages = () => {
     if (!skippedImages) return;
-    toast("사진 " + skippedImages.toLocaleString() + "장은 용량이 커서 자동 복원 저장에서 제외했어요. 다음 실행 때는 '폴더 새로고침'으로 다시 불러올 수 있어요.", 4200);
+    toast("사진 " + skippedImages.toLocaleString() + "장은 용량이 커서 자동 복원 저장에서 제외했어요. 다음 실행 때는 '동기화'로 다시 불러올 수 있어요.", 4200);
   };
   if (!rows.length && !folderPaths.length){
     // 파일 선택으로 연 사진만 있는 경우에는 새 작업공간 본문을 만들지 않는다.
