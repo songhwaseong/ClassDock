@@ -48,7 +48,7 @@ const ZIP_MIME = { svg:"image/svg+xml", png:"image/png", jpg:"image/jpeg", jpeg:
   gif:"image/gif", webp:"image/webp", bmp:"image/bmp", avif:"image/avif", ico:"image/x-icon", pdf:"application/pdf",
   html:"text/html", htm:"text/html" };
 const ZIP_EXTRACT_CAP = 256 * 1024 * 1024;
-const ZIP_ENTRY_CAP = 64 * 1024 * 1024;
+const ZIP_ENTRY_CAP = 128 * 1024 * 1024;
 const ZIP_MODE_NOTICE = "ZIP 모드: 원본 압축의 새로고침·덮어쓰기는 지원하지 않으며, 편집한 파일은 별도로 저장됩니다. Python 옆 파일 실행은 합계 50MB까지 지원합니다.";
 
 // 여러 파일을 복원할 때 각 항목마다 사이드바·탭을 다시 그리지 않고 마지막에 한 번만 반영한다.

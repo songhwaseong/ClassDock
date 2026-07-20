@@ -241,7 +241,7 @@ async function vvBatchConvertFolder(rootId){
         let already = false;
         try { await outDir.getFileHandle(outName); already = true; } catch(_){}
         if (already){ existed++; continue; }                     // 이전에 변환해 둔 것 — 재변환 안 함
-        if (!target.sourceFile || target.sourceFile.size > 500 * 1024 * 1024){ oversized++; continue; }
+        if (!target.sourceFile || target.sourceFile.size > 1024 * 1024 * 1024){ oversized++; continue; }
         const res = await fetch("/convert-media", {
           method: "POST", headers: { "Content-Type": "application/octet-stream" },
           body: target.sourceFile, signal: progress.signal()
@@ -265,7 +265,7 @@ async function vvBatchConvertFolder(rootId){
   const parts = [];
   if (converted) parts.push("변환 " + converted + "개");
   if (existed) parts.push("이미 있어 건너뜀 " + existed + "개");
-  if (oversized) parts.push("500MB 초과 제외 " + oversized + "개");
+  if (oversized) parts.push("1GB 초과 제외 " + oversized + "개");
   if (failed) parts.push("실패 " + failed + "개");
   if (typeof toast === "function"){
     toast((progress.isCancelled() ? "일괄 변환 중지 — " : "일괄 변환 완료 — ") + (parts.join(" · ") || "대상 없음"), 6000);
@@ -399,8 +399,8 @@ function renderVideoPlayer(file, doc){
   }
 
   async function startConvert(){
-    if (file.size > 500 * 1024 * 1024){
-      setNotice("이 파일은 500MB가 넘어 앱 안에서는 변환할 수 없어요. 샤나인코더·팟인코더 등으로 MP4(H.264+AAC) 변환 후 열어주세요.");
+    if (file.size > 1024 * 1024 * 1024){
+      setNotice("이 파일은 1GB가 넘어 앱 안에서는 변환할 수 없어요. 샤나인코더·팟인코더 등으로 MP4(H.264+AAC) 변환 후 열어주세요.");
       return;
     }
     if (location.protocol !== "http:" && location.protocol !== "https:"){

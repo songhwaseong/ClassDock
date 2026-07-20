@@ -845,12 +845,12 @@ function pyFsSnapshot(py, base){
   for (const f of pyFsWalk(py, base)) m.set(f.path, f.size + ":" + f.mtime);
   return m;
 }
-// 실행 후 새로 생기거나 크기가 바뀐 파일을 {name, size, bytes}[] 로 수집(파일 20MB·합계 50MB 상한)
+// 실행 후 새로 생기거나 크기가 바뀐 파일을 {name, size, bytes}[] 로 수집(파일 40MB·합계 50MB 상한)
 function pyFsCollectOutputs(py, base, snap){
   const out = []; let total = 0;
   for (const f of pyFsWalk(py, base)){
     if (snap.has(f.path) && snap.get(f.path) === f.size + ":" + f.mtime) continue;
-    if (f.size > 20 * 1024 * 1024) continue;
+    if (f.size > 40 * 1024 * 1024) continue;
     if (total + f.size > 50 * 1024 * 1024) break;
     let bytes; try { bytes = py.FS.readFile(f.path, { encoding: "binary" }); } catch(_){ continue; }
     total += bytes.length;
@@ -1149,7 +1149,7 @@ function pyodideWorkerMain(){
     const out = []; let total = 0;
     for (const file of walkFs(base)){
       if (snapshot.has(file.path) && snapshot.get(file.path) === file.size + ":" + file.mtime) continue;
-      if (file.size > 20 * 1024 * 1024) continue;
+      if (file.size > 40 * 1024 * 1024) continue;
       if (total + file.size > 50 * 1024 * 1024) break;
       let bytes; try { bytes = py.FS.readFile(file.path, { encoding:"binary" }); } catch(_){ continue; }
       total += bytes.length;

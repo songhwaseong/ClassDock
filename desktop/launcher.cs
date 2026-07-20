@@ -68,7 +68,7 @@ class PdfSignerLauncher
     static readonly object AppStateLock = new object();
     const int AppStateMaxBytes = 8 * 1024 * 1024;
     const int MaxHttpHeaderBytes = 64 * 1024;
-    const int MaxHttpRequestBodyBytes = 510 * 1024 * 1024;
+    const int MaxHttpRequestBodyBytes = 1034 * 1024 * 1024;
     // 일반적인 수업용 데이터 분석은 허용하면서, 실수로 큰 배열을 반복 생성해 PC 전체가 멈추는 일을 줄인다.
     const long PythonProcessMemoryLimitBytes = 4096L * 1024 * 1024;
     // 지속형 노트북 커널은 프로세스가 살아 있어 일반 실행의 WaitForExit 제한을 타지 않는다.
@@ -2277,7 +2277,7 @@ class PdfSignerLauncher
         try
         {
             FileInfo info = new FileInfo(full);
-            if (info.Length > 20 * 1024 * 1024) return false;
+            if (info.Length > 40 * 1024 * 1024) return false;
             data = File.ReadAllBytes(full);
         }
         catch { return false; }

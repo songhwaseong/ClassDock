@@ -574,7 +574,7 @@ async function rememberRunOutputs(runCtx, bundle, outputs, sessionId){
   const savedRows = [];
   for (const output of outputs){
     const size = Number(output.size) || (output.bytes && output.bytes.length) || 0;
-    if (size > 20 * 1024 * 1024 || total + size > RUN_BUNDLE_CAP) continue;
+    if (size > 40 * 1024 * 1024 || total + size > RUN_BUNDLE_CAP) continue;
     let bytes = output.bytes ? new Uint8Array(output.bytes) : null;
     if (!bytes && sessionId){
       try {
@@ -783,7 +783,7 @@ async function buildOpenPythonSiblingBundle(src, runCtx, scopeSource){
   put(target, src, 1000);
   // 참조된 데이터 파일도 실제 프로젝트 상대 위치에 둔다. cwd와 파일 트리를 함께 보존하므로
   // dataIn/x.csv와 ../dataIn/x.csv가 일반 Python의 상대경로 규칙 그대로 구분된다.
-  const DATA_PER_FILE_CAP = 20 * 1024 * 1024;
+  const DATA_PER_FILE_CAP = 40 * 1024 * 1024;
   for (const m of dataMatches){
     for (const item of m.items){
       if (!item.doc || !item.doc.sourceFile) continue;

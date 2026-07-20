@@ -229,7 +229,7 @@ function startLocalNotebookKernelRun(ownerDoc, source, stdin, workspaceBundle){
     if (!response.ok) throw new Error(await response.text() || ("HTTP " + response.status));
     const result = await response.json();
     for (const output of (result.outputs || [])){
-      if (!output || !output.name || Number(output.size) > 20 * 1024 * 1024) continue;
+      if (!output || !output.name || Number(output.size) > 40 * 1024 * 1024) continue;
       try {
         const file = await fetch("/python-kernel-file?id=" + encodeURIComponent(id) + "&name=" + encodeURIComponent(output.name));
         if (file.ok) output.bytes = new Uint8Array(await file.arrayBuffer());
