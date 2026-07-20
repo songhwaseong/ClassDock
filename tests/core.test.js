@@ -549,6 +549,53 @@ test("import completion adds one top-level import and keeps the caret at the com
   assert.equal(existing.value, "from pathlib import Path\nbase = Path");
 });
 
+test("같은 모듈의 import 자동완성은 기존 from 문에 쉼표로 합친다", () => {
+  const source = "from sklearn.metrics import accuracy_score\nmatrix = confusion_mat";
+  const plan = completionApplicationPlan(source, { start:source.length - "confusion_mat".length, end:source.length }, {
+    name:"confusion_matrix", type:"function", importText:"from sklearn.metrics import confusion_matrix"
+  });
+  assert.equal(
+    plan.value,
+    "from sklearn.metrics import accuracy_score, confusion_matrix\nmatrix = confusion_matrix()"
+  );
+  assert.equal(plan.caret, plan.value.length - 1);
+});
+
+test("같은 모듈 import 병합은 주석과 별칭을 보존한다", () => {
+  const source = "from selenium.webdriver.support.ui import WebDriverWait  # 대기 도구\ncondition = E";
+  const plan = completionApplicationPlan(source, { start:source.length - 1, end:source.length }, {
+    name:"EC", type:"module", importText:"from selenium.webdriver.support.ui import expected_conditions as EC"
+  });
+  assert.equal(
+    plan.value,
+    "from selenium.webdriver.support.ui import WebDriverWait, expected_conditions as EC  # 대기 도구\ncondition = EC"
+  );
+});
+
+test("괄호형 여러 줄 import 자동완성은 기존 형식 안에 항목을 추가한다", () => {
+  const source = "from sklearn.metrics import (\n    accuracy_score,\n)\nmatrix = confusion_mat";
+  const plan = completionApplicationPlan(source, { start:source.length - "confusion_mat".length, end:source.length }, {
+    name:"confusion_matrix", type:"function", importText:"from sklearn.metrics import confusion_matrix"
+  });
+  assert.equal(
+    plan.value,
+    "from sklearn.metrics import (\n    accuracy_score,\n    confusion_matrix,\n)\nmatrix = confusion_matrix()"
+  );
+});
+
+test("쉼표 목록과 import star는 같은 자동 import 후보를 중복 제안하지 않는다", () => {
+  assert.equal(
+    pythonImportCompletionCandidates("from sklearn.metrics import accuracy_score, confusion_matrix\nconf", "conf")
+      .some((item) => item.name === "confusion_matrix"),
+    false
+  );
+  assert.equal(
+    pythonImportCompletionCandidates("from sklearn.metrics import *\nconf", "conf")
+      .some((item) => item.name === "confusion_matrix"),
+    false
+  );
+});
+
 test("실행 결과 파일을 논리 프로젝트 경로에 이어 붙인다", () => {
   assert.equal(resolveRuntimeOutputPath("lesson/main.py", "result.txt", "", false), "lesson/result.txt");
   assert.equal(resolveRuntimeOutputPath("course/pkg/main.py", "pkg/result.txt", "course", true), "course/pkg/result.txt");

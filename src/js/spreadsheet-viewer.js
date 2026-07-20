@@ -2049,6 +2049,7 @@ async function renderXlsx(file, host, doc){
   // 보기 모드는 SheetJS(sheet_to_html) 유지. 편집은 원본 바이트를 ExcelJS 로 읽어 '편집한 셀만' 되돌려 써서
   // 손대지 않은 셀의 서식·수식·병합을 그대로 보존한다. 정렬/행·열 구조 변경이 일어난 시트만 전체 재작성.
   let editMode = !!(doc && doc.isScratch);
+  let viewOptions = null;
   const editTitle = document.createElement("strong"); editTitle.className = "xlsx-edit-title"; editTitle.textContent = "편집 도구";
   const editToggle = document.createElement("button"); editToggle.type = "button"; editToggle.className = "xlsx-editmode-btn";
   editToggle.title = "셀 편집·정렬·필터 모드 (저장 시 서식 보존)";
@@ -2057,6 +2058,7 @@ async function renderXlsx(file, host, doc){
     editToggle.title = editMode ? "편집을 마치고 읽기 전용으로 전환" : "셀 편집·정렬·필터 모드로 전환";
     editToggle.classList.toggle("active", editMode);
     editTitle.hidden = !editMode;
+    if (viewOptions) viewOptions.hidden = !editMode;
     exp.classList.toggle("editing", editMode);
   };
   syncEditToggle();
@@ -3530,6 +3532,22 @@ async function renderXlsx(file, host, doc){
   // CSV→XLSX 변환 시 사용자가 고른 '첫 줄 머리글' 여부를 기본값으로. (없으면 기존처럼 머리글 고정)
   const initHeaderFrozen = (doc && typeof doc.spreadsheetHasHeader === "boolean") ? doc.spreadsheetHasHeader : true;
   let editState = { filter: "", headerFrozen: initHeaderFrozen, sortCol: -1, sortDir: 1 };
+  viewOptions = document.createElement("label");
+  viewOptions.className = "xlsx-view-options";
+  viewOptions.title = "현재 시트의 보기 설정";
+  const viewOptionsLabel = document.createElement("span");
+  viewOptionsLabel.className = "xlsx-view-options-label";
+  viewOptionsLabel.textContent = "보기 설정";
+  const headerFrozenChk = document.createElement("input");
+  headerFrozenChk.type = "checkbox";
+  headerFrozenChk.checked = editState.headerFrozen;
+  headerFrozenChk.addEventListener("change", () => {
+    editState.headerFrozen = headerFrozenChk.checked;
+    renderEditable(currentSheet);
+  });
+  viewOptions.append(viewOptionsLabel, headerFrozenChk, document.createTextNode("첫 행 머리글 고정"));
+  viewOptions.hidden = !editMode;
+  exp.insertBefore(viewOptions, editToggle);
   const colFiltersBySheet = {};   // 시트이름 -> { 열index: Set(표시값) } — 열별 자동필터(보기 전용, 파일엔 저장 안 함)
   const virtualCsvEditor = !!csvFastAoa && csvFastAoa.length *
     Math.max(1, csvFastAoa.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)) > 12000;
@@ -4883,11 +4901,6 @@ async function renderXlsx(file, host, doc){
     const unmergeBtn = document.createElement("button"); unmergeBtn.type = "button"; unmergeBtn.textContent = "⊟ 병합해제"; unmergeBtn.title = "선택 범위의 병합을 해제";
     unmergeBtn.onclick = () => unmergeSelection();
 
-    const frozen = document.createElement("label"); frozen.className = "xlsx-frozen";
-    const fchk = document.createElement("input"); fchk.type = "checkbox"; fchk.checked = editState.headerFrozen;
-    fchk.addEventListener("change", () => { editState.headerFrozen = fchk.checked; renderEditable(currentSheet); });
-    frozen.append(fchk, document.createTextNode(" 첫 행 머리글 고정"));
-
     // 되돌리기 / 다시실행
     undoBtn = document.createElement("button"); undoBtn.type = "button"; undoBtn.textContent = "↶"; undoBtn.title = "되돌리기 (Ctrl+Z)";
     undoBtn.onclick = () => doUndo();
@@ -5164,7 +5177,7 @@ async function renderXlsx(file, host, doc){
       mkAutoBtn("최대", "MAX", "선택 범위의 최댓값 수식 삽입"),
       mkAutoBtn("최소", "MIN", "선택 범위의 최솟값 수식 삽입"));
     const mainRow = document.createElement("div"); mainRow.className = "xlsx-editbar-row xlsx-editbar-main";
-    mainRow.append(historyGroup, dataGroup, structureMenu.details, autoMenu.details, frozen, findMenu.details, moreMenu.details, saveMenu.details);
+    mainRow.append(historyGroup, dataGroup, structureMenu.details, autoMenu.details, findMenu.details, moreMenu.details, saveMenu.details);
     const fmtRow = document.createElement("div"); fmtRow.className = "xlsx-editbar-row xlsx-editbar-fmt";
     fmtRow.append(fontGroup, alignGroup, formatMenu.details, condMenu.details, cfMenu.details, dvMenu.details);
     editBar.append(mainRow, fmtRow);

@@ -892,10 +892,133 @@
     return String(importText || "").trim().replace(/\s+/g, " ");
   }
 
+  function normalizePythonImportSpec(spec) {
+    return String(spec || "").trim().replace(/\s+/g, " ");
+  }
+
+  function parsePythonFromImport(importText) {
+    const match = normalizePythonImport(importText).match(/^from\s+([.A-Za-z_][.\w]*)\s+import\s+(.+)$/);
+    if (!match) return null;
+    let body = match[2].trim();
+    if (body.startsWith("(") && body.endsWith(")")) body = body.slice(1, -1);
+    const specs = body.replace(/\\\s*/g, " ").split(",").map(normalizePythonImportSpec).filter(Boolean);
+    return specs.length ? { module:match[1], specs } : null;
+  }
+
+  function pythonTopLevelFromImports(source) {
+    const text = String(source || "");
+    const rows = [];
+    const re = /^from[ \t]+([.A-Za-z_][.\w]*)[ \t]+import[ \t]+([^\r\n]*)/gm;
+    let match;
+    while ((match = re.exec(text))) {
+      const start = match.index;
+      const firstRest = match[2].replace(/\s*#.*$/, "");
+      const parenthesized = /^\s*\(/.test(firstRest);
+      const continuation = /\\\s*$/.test(firstRest);
+      let end = start + match[0].length;
+      if (parenthesized) {
+        let cursor = start, depth = 0, sawOpen = false;
+        while (cursor < text.length) {
+          const newlineAt = text.indexOf("\n", cursor);
+          const rawEnd = newlineAt < 0 ? text.length : newlineAt;
+          const contentEnd = rawEnd > cursor && text.charAt(rawEnd - 1) === "\r" ? rawEnd - 1 : rawEnd;
+          const code = text.slice(cursor, contentEnd).replace(/\s*#.*$/, "");
+          for (const ch of code) {
+            if (ch === "(") { depth++; sawOpen = true; }
+            else if (ch === ")") depth--;
+          }
+          end = contentEnd;
+          if (sawOpen && depth <= 0) break;
+          if (newlineAt < 0) break;
+          cursor = newlineAt + 1;
+        }
+      }
+      const statement = text.slice(start, end);
+      const code = statement.split(/\r?\n/).map((line) => line.replace(/\s*#.*$/, "")).join(" ");
+      const header = code.match(/^from\s+([.A-Za-z_][.\w]*)\s+import\s+([\s\S]+)$/);
+      if (header) {
+        let body = header[2].trim();
+        if (body.startsWith("(") && body.endsWith(")")) body = body.slice(1, -1);
+        const specs = body.replace(/\\\s*/g, " ").split(",").map(normalizePythonImportSpec).filter(Boolean);
+        rows.push({
+          start, end, statement, module:header[1], specs,
+          parenthesized, continuation, hasStar:specs.includes("*")
+        });
+      }
+      re.lastIndex = Math.max(re.lastIndex, end);
+    }
+    return rows;
+  }
+
   function hasPythonImport(source, importText) {
     const target = normalizePythonImport(importText);
     if (!target) return true;
-    return String(source || "").split("\n").some((line) => normalizePythonImport(line.replace(/\s*#.*$/, "")) === target);
+    if (String(source || "").split("\n").some((line) => normalizePythonImport(line.replace(/\s*#.*$/, "")) === target)) return true;
+    const wanted = parsePythonFromImport(target);
+    if (!wanted) return false;
+    return pythonTopLevelFromImports(source).some((row) =>
+      row.module === wanted.module
+      && (row.hasStar || wanted.specs.every((spec) => row.specs.includes(spec)))
+    );
+  }
+
+  function mergePythonFromImport(source, importText) {
+    const text = String(source || "");
+    const wanted = parsePythonFromImport(importText);
+    if (!wanted || wanted.specs.length !== 1 || wanted.specs[0] === "*") return { value:text, merged:false };
+    const spec = wanted.specs[0];
+    for (const row of pythonTopLevelFromImports(text)) {
+      if (row.module !== wanted.module) continue;
+      if (row.hasStar || row.specs.includes(spec)) return { value:text, merged:true, start:row.start, oldLength:row.end - row.start, newLength:row.end - row.start };
+      if (row.continuation) continue;
+      let replacement = row.statement;
+      if (!row.parenthesized) {
+        const hashAt = replacement.indexOf("#");
+        const codeEnd = hashAt >= 0 ? hashAt : replacement.length;
+        const beforeComment = replacement.slice(0, codeEnd).replace(/\s+$/, "");
+        const suffix = replacement.slice(beforeComment.length);
+        replacement = beforeComment + ", " + spec + suffix;
+      } else if (!replacement.includes("\n")) {
+        const closeAt = replacement.lastIndexOf(")");
+        if (closeAt < 0) continue;
+        const beforeClose = replacement.slice(0, closeAt);
+        const trimmed = beforeClose.replace(/\s+$/, "");
+        const suffix = beforeClose.slice(trimmed.length);
+        const addition = trimmed.endsWith("(")
+          ? spec
+          : (trimmed.endsWith(",") ? " " + spec + "," : ", " + spec);
+        replacement = trimmed + addition + suffix + replacement.slice(closeAt);
+      } else {
+        const newline = replacement.includes("\r\n") ? "\r\n" : "\n";
+        const closeAt = replacement.lastIndexOf(")");
+        const closeLineStart = replacement.lastIndexOf("\n", closeAt - 1) + 1;
+        if (closeAt < 0 || closeLineStart <= 0) continue;
+        let prefix = replacement.slice(0, closeLineStart);
+        const closing = replacement.slice(closeLineStart);
+        let prefixBody = prefix.slice(0, -newline.length);
+        const previousLineStart = prefixBody.lastIndexOf("\n") + 1;
+        let previousLine = prefixBody.slice(previousLineStart);
+        const previousCode = previousLine.replace(/\s*#.*$/, "").replace(/\s+$/, "");
+        const closingIndent = (closing.match(/^([ \t]*)/) || ["", ""])[1];
+        let itemIndent = (previousLine.match(/^([ \t]*)/) || ["", ""])[1];
+        if (previousCode.endsWith("(")) itemIndent = closingIndent + "    ";
+        else if (!previousCode.endsWith(",")) {
+          const hashAt = previousLine.indexOf("#");
+          const codeEnd = hashAt >= 0 ? hashAt : previousLine.length;
+          const beforeComment = previousLine.slice(0, codeEnd).replace(/\s+$/, "");
+          previousLine = beforeComment + "," + previousLine.slice(beforeComment.length);
+          prefixBody = prefixBody.slice(0, previousLineStart) + previousLine;
+        }
+        prefix = prefixBody + newline + itemIndent + spec + "," + newline;
+        replacement = prefix + closing;
+      }
+      const next = text.slice(0, row.start) + replacement + text.slice(row.end);
+      return {
+        value:next, merged:true, start:row.start,
+        oldLength:row.end - row.start, newLength:replacement.length
+      };
+    }
+    return { value:text, merged:false };
   }
 
   function pythonImportInsertOffset(source) {
@@ -942,6 +1065,13 @@
     const linePrefix = text.slice(lineStart, start);
     // import 문을 작성하는 도중이거나 이미 import된 경우에는 본문만 완성한다.
     if (!importText || /^\s*(?:from|import)\b/.test(linePrefix) || hasPythonImport(next, importText)) return { value:next, caret };
+    const mergedImport = mergePythonFromImport(next, importText);
+    if (mergedImport.merged) {
+      if (mergedImport.start + mergedImport.oldLength <= caret) {
+        caret += mergedImport.newLength - mergedImport.oldLength;
+      }
+      return { value:mergedImport.value, caret };
+    }
     const offset = pythonImportInsertOffset(next);
     const prefix = offset > 0 && next.charAt(offset - 1) !== "\n" ? "\n" : "";
     const suffix = offset < next.length ? "\n" : "";
