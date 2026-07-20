@@ -109,7 +109,7 @@ test("설정의 자동 저장 폴더 항목은 경로 조회 전이나 일반 HT
 test("원본 쓰기 권한 없이 연 폴더의 Python 저장은 별도 저장 위치를 명확히 알린다", () => {
   assert.match(codeSource, /fromFolder && !saveToOriginal/);
   assert.match(codeSource, /원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요/);
-  assert.match(codeSource, /원본에 저장하려면 '폴더 열기'로 다시 여세요/);
+  assert.match(codeSource, /원본에 저장하려면 사이드바 \[열기 → 폴더 열기\]로 다시 여세요/);
 });
 
 test("사용 설명서는 폴더 드래그와 폴더 열기의 Python 저장 차이를 필수 주의사항으로 안내한다", () => {

@@ -2488,8 +2488,7 @@ function renderSidebar(){
     saved.className = "sb-saved";
     const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
     if (doc && doc.hasUnsavedEdits){ saved.classList.add("dirty"); saved.textContent = "●"; saved.title = _t("저장 후 수정됨"); }
-    else if (doc && doc.savedInWorkspace){ saved.textContent = "✓"; saved.title = _t("앱 작업공간에 저장됨"); }
-    else saved.hidden = true;
+    else saved.hidden = true;   // 저장되면 표시 없음(✓ 체크 제거) — dirty 점만 상태를 알린다
     const encoding = document.createElement("span");
     encoding.className = "sb-encoding";
     if (doc && doc.textEncoding){

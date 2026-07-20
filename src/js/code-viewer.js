@@ -1672,14 +1672,16 @@ async function renderCode(file, host, ext, profile, runCtx){
           markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
           renderSidebar();                         // 저장으로 ✓ 표시·이름도 바뀌므로 dirty 변화와 무관하게 갱신
           setSavedPath(savedPath);                 // 편집기 위 경로 줄에 절대경로 고정 표시
-          const originalUnavailableNotice = "이 폴더는 원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요. 원본에 저장하려면 '폴더 열기'로 다시 여세요.";
+          const originalUnavailableNotice = "이 폴더는 원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요. 원본에 저장하려면 사이드바 [열기 → 폴더 열기]로 다시 여세요.";
           const savedNotice = fromFolder && !saveToOriginal
             ? ((typeof window.t === "function" ? window.t(originalUnavailableNotice) : originalUnavailableNotice) + " · " + savedPath)
             : "저장 완료 · " + savedPath;
           toast(savedNotice, fromFolder && !saveToOriginal ? 5600 : 3400, {
             type: "success",
+            // 문구가 '사이드바 폴더 열기'(원본 권한 재획득)를 가리키므로, 자동 저장 폴더만 여는 이 버튼은
+            // 라벨을 '저장 폴더 열기'로 구분해 사용자가 두 동작을 혼동하지 않게 한다.
             action: (typeof window !== "undefined" && typeof window.__mnOpenLastSavedFolder === "function")
-              ? { label: "폴더 열기", onClick: () => window.__mnOpenLastSavedFolder() } : null
+              ? { label: fromFolder && !saveToOriginal ? "저장 폴더 열기" : "폴더 열기", onClick: () => window.__mnOpenLastSavedFolder() } : null
           });
           startDiagnosis();
           return;
@@ -1736,8 +1738,8 @@ async function renderCode(file, host, ext, profile, runCtx){
           : "압축 안의 파일이라 원본 zip이 아닌 별도 .py로 저장했어요.", 3400, { type: "success" });
       } else if (fromFolder && !saveToOriginal){
         toast(wrote === "saved"
-          ? "이 폴더는 원본 쓰기 권한 없이 열려 선택한 위치에 별도 파일로 저장했어요. 원본에 저장하려면 '폴더 열기'로 다시 여세요."
-          : "이 폴더는 원본 쓰기 권한 없이 열려 다운로드 사본으로 저장했어요. 원본에 저장하려면 '폴더 열기'로 다시 여세요.",
+          ? "이 폴더는 원본 쓰기 권한 없이 열려 선택한 위치에 별도 파일로 저장했어요. 원본에 저장하려면 사이드바 [열기 → 폴더 열기]로 다시 여세요."
+          : "이 폴더는 원본 쓰기 권한 없이 열려 다운로드 사본으로 저장했어요. 원본에 저장하려면 사이드바 [열기 → 폴더 열기]로 다시 여세요.",
           5200, { type: "success" });
       } else if (saveToOriginal){
         // 폴더로 연 파일 → 원본 파일에 되썼다(여기 도달하면 wrote === "saved").

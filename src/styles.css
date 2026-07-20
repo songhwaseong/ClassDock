@@ -331,7 +331,7 @@
   .sb-encoding{flex:0 0 auto;padding:1px 4px;border:1px solid rgba(148,163,184,.28);border-radius:4px;
     color:#94a3b8;background:rgba(15,23,42,.28);font:500 8.5px/1.35 Consolas,"Courier New",monospace}
   .sb-item.active .sb-encoding{color:#e0e7ff;border-color:rgba(224,231,255,.45);background:rgba(255,255,255,.1)}
-  .sb-saved{flex:0 0 auto;font-size:11px;color:#2dd4bf;line-height:1}
+  .sb-saved{flex:0 0 auto;line-height:1}
   .sb-saved.dirty{color:#fbbf24;font-size:8px}
   .sb-close{flex:0 0 auto;border:0;background:transparent;color:inherit;cursor:pointer;opacity:.55;
     font-size:13px;width:20px;height:20px;border-radius:5px}
