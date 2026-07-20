@@ -88,6 +88,22 @@ test("모바일 교체 배치는 참고와 작업의 위아래 영역을 완전�
   assert.match(css, /#content\.study-mode\.study-swapped \.study-ref-lock\{left:12px;top:calc\(50% \+ 10px\)\}/);
 });
 
+test("분할바는 누르는 즉시 포인터를 캡처해 빠른 좌우 드래그도 놓치지 않는다", () => {
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const down = docs.slice(
+    docs.indexOf('divider.addEventListener("pointerdown"'),
+    docs.indexOf('divider.addEventListener("dblclick"')
+  );
+  assert.match(down, /const pointerId = e\.pointerId;/);
+  assert.match(down, /divider\.setPointerCapture\(pointerId\)/);
+  assert.ok(
+    down.indexOf("divider.setPointerCapture(pointerId)") < down.indexOf('const move = (ev) =>'),
+    "pointer capture must happen before waiting for the first pointermove"
+  );
+  assert.match(down, /ev\.pointerId !== pointerId/);
+  assert.match(down, /divider\.releasePointerCapture\(pointerId\)/);
+});
+
 test("study session state is persisted and restored with tabs", () => {
   const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
   const store = fs.readFileSync(path.join(__dirname, "../src/js/workspace-store.js"), "utf8");

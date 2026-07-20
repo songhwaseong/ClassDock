@@ -665,25 +665,33 @@ function setupStudyDivider(){
   apply(ratio);
   divider.addEventListener("pointerdown", (e) => {
     if (matchMedia("(max-width: 900px)").matches) return;          // 모바일은 세로 고정 분할
+    if (!e.isPrimary || e.button !== 0) return;
+    e.preventDefault();
     const rect = content.getBoundingClientRect();
     const startX = e.clientX;
+    const pointerId = e.pointerId;
     let dragging = false;
-    // 움직임이 4px 을 넘을 때만 드래그로 전환한다. 순수 클릭·더블클릭은 포인터 캡처를
-    // 걸지 않아 dblclick(좌우 바꾸기)이 캡처에 가로채이지 않는다.
+    // 분할바가 8px로 좁으므로 누르는 즉시 캡처해야 첫 move 전에 바깥으로 빠져도
+    // 드래그를 놓치지 않는다. 실제 비율 변경은 4px 이후라 더블클릭과도 구분된다.
+    try { divider.setPointerCapture(pointerId); } catch(_){}
     const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       if (!dragging){
         if (Math.abs(ev.clientX - startX) < 4) return;
         dragging = true;
-        try { divider.setPointerCapture(e.pointerId); } catch(_){}
         divider.classList.add("dragging");
       }
       ev.preventDefault();
       apply(((ev.clientX - rect.left) / rect.width) * 100);
     };
-    const up = () => {
+    const up = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       if (dragging){ divider.classList.remove("dragging"); save(); }
       divider.removeEventListener("pointermove", move); divider.removeEventListener("pointerup", up);
       divider.removeEventListener("pointercancel", up);
+      try {
+        if (divider.hasPointerCapture(pointerId)) divider.releasePointerCapture(pointerId);
+      } catch(_){}
     };
     divider.addEventListener("pointermove", move); divider.addEventListener("pointerup", up); divider.addEventListener("pointercancel", up);
   });
