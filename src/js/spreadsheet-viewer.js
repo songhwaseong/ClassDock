@@ -99,6 +99,65 @@ function spreadsheetColumnName(index){
   return s;
 }
 
+// 행·열 헤더에서 시작한 선택은 포인터가 좁은 헤더 띠를 벗어나도 시작 축을 유지한다.
+// elementFromPoint 에 넘길 좌표를 해당 헤더 축으로 투영해 행 선택은 Y, 열 선택은 X만 따라가게 한다.
+function spreadsheetSelectionDragHitPoint(kind, point, sheetRect, cornerRect, colRect){
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  let x = clamp(point.x, sheetRect.left + 2, sheetRect.right - 2);
+  let y = clamp(point.y, sheetRect.top + 2, sheetRect.bottom - 2);
+  if (kind === "row"){
+    x = clamp(cornerRect.left + 2, sheetRect.left + 2, sheetRect.right - 2);
+    y = Math.max(y, Math.min(sheetRect.bottom - 2, colRect.bottom + 2));
+  } else if (kind === "col"){
+    x = Math.max(x, Math.min(sheetRect.right - 2, cornerRect.right + 2));
+    y = clamp(colRect.top + 2, sheetRect.top + 2, sheetRect.bottom - 2);
+  } else if (kind === "cell"){
+    x = Math.max(x, Math.min(sheetRect.right - 2, cornerRect.right + 2));
+    y = Math.max(y, Math.min(sheetRect.bottom - 2, colRect.bottom + 2));
+  }
+  return { x, y };
+}
+
+function spreadsheetSelectionRangeKeys(range, maxCols){
+  const keys = new Set();
+  if (!range || !(maxCols > 0)) return keys;
+  for (let r = range.row1; r <= range.row2; r++)
+    for (let c = range.col1; c <= range.col2; c++) keys.add(r * maxCols + c);
+  return keys;
+}
+
+function spreadsheetSelectionRangeCovered(keys, range, maxCols){
+  if (!keys || !range) return false;
+  for (let r = range.row1; r <= range.row2; r++)
+    for (let c = range.col1; c <= range.col2; c++)
+      if (!keys.has(r * maxCols + c)) return false;
+  return true;
+}
+
+function spreadsheetSelectionCombineKeys(baseKeys, range, mode, maxCols){
+  const result = new Set(mode === "replace" ? [] : (baseKeys || []));
+  const rangeKeys = spreadsheetSelectionRangeKeys(range, maxCols);
+  rangeKeys.forEach(key => {
+    if (mode === "subtract") result.delete(key);
+    else result.add(key);
+  });
+  return result;
+}
+
+function spreadsheetSelectionBoundsFromKeys(keys, maxCols){
+  if (!keys || !keys.size || !(maxCols > 0)) return null;
+  let row1 = Infinity, row2 = -Infinity, col1 = Infinity, col2 = -Infinity;
+  keys.forEach(key => {
+    const row = Math.floor(key / maxCols), col = key % maxCols;
+    if (row < row1) row1 = row;
+    if (row > row2) row2 = row;
+    if (col < col1) col1 = col;
+    if (col > col2) col2 = col;
+  });
+  const area = (row2 - row1 + 1) * (col2 - col1 + 1);
+  return { row1, row2, col1, col2, contiguous:keys.size === area, count:keys.size };
+}
+
 async function copySpreadsheetText(text){
   try { await navigator.clipboard.writeText(text); return true; }
   catch(e){
@@ -246,6 +305,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
 
   const rowCount = rows.length;
   let selection = null;
+  let selectedKeys = new Set();
   let anchor = null;
   let dragTarget = null;
   let isDragging = false;
@@ -310,11 +370,13 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     return first + ":" + last + " 범위 선택";
   };
   const selectionText = () => {
-    if (!selection) return "";
+    const bounds = spreadsheetSelectionBoundsFromKeys(selectedKeys, maxCols);
+    if (!bounds) return "";
+    if (!bounds.contiguous) return null;
     const lines = [];
-    for (let r = selection.row1; r <= selection.row2; r++){
+    for (let r = bounds.row1; r <= bounds.row2; r++){
       const cells = [];
-      for (let c = selection.col1; c <= selection.col2; c++) cells.push(textAt(r, c));
+      for (let c = bounds.col1; c <= bounds.col2; c++) cells.push(textAt(r, c));
       lines.push(cells.join("\t"));
     }
     return lines.join("\n");
@@ -337,16 +399,15 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
   };
   // 엑셀 하단처럼 선택 영역의 합계·평균·최소·최대·숫자개수·선택칸수를 셀렉트바에 표시.
   const updateStat = () => {
-    if (!selection){ stat.textContent = ""; return; }
+    if (!selectedKeys.size){ stat.textContent = ""; return; }
     let count = 0, nums = 0, sum = 0, min = Infinity, max = -Infinity;
-    for (let r = selection.row1; r <= selection.row2; r++){
-      for (let c = selection.col1; c <= selection.col2; c++){
-        const raw = textAt(r, c);
-        if (String(raw == null ? "" : raw).trim() !== "") count++;
-        const n = parseCellNumber(raw);
-        if (n != null){ nums++; sum += n; if (n < min) min = n; if (n > max) max = n; }
-      }
-    }
+    selectedKeys.forEach(key => {
+      const r = Math.floor(key / maxCols), c = key % maxCols;
+      const raw = textAt(r, c);
+      if (String(raw == null ? "" : raw).trim() !== "") count++;
+      const n = parseCellNumber(raw);
+      if (n != null){ nums++; sum += n; if (n < min) min = n; if (n > max) max = n; }
+    });
     if (count < 2){ stat.textContent = ""; return; }           // 단일 셀은 값이 보이므로 생략
     const parts = [];
     if (nums >= 1){
@@ -385,28 +446,41 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     updateStat();
   };
   const applySelection = (next, options={}) => {
-    selection = next;
-    if (!selection){
+    if (!next){
+      selection = null;
+      selectedKeys = new Set();
       clearMarks();
+      sheet.dataset.selectionContiguous = "0";
+      sheet.dataset.selectionCount = "0";
       info.textContent = (label || "표") + " · 셀·행·열 선택";
       copy.disabled = true; clear.disabled = true; chart.disabled = true;
       if (options.deferStat) selectionStatPending = true; else flushSelectionStat();
       if (typeof opts.onSelectionChange === "function") opts.onSelectionChange(null);
       return;
     }
-    const nextCells = new Map();
-    for (let r = selection.row1; r <= selection.row2; r++){
-      for (let c = selection.col1; c <= selection.col2; c++){
-        const cell = cellAt(r, c);
-        if (!cell) continue;
-        let mask = 0;
-        if (r === selection.row1) mask |= MASK_TOP;
-        if (r === selection.row2) mask |= MASK_BOTTOM;
-        if (c === selection.col1) mask |= MASK_LEFT;
-        if (c === selection.col2) mask |= MASK_RIGHT;
-        nextCells.set(cell, mask);
-      }
+    const mode = options.mode || "replace";
+    const baseKeys = options.baseKeys || selectedKeys;
+    selectedKeys = spreadsheetSelectionCombineKeys(baseKeys, next, mode, maxCols);
+    selection = selectedKeys.size ? next : null;
+    if (!selectedKeys.size){
+      applySelection(null, options);
+      return;
     }
+    const bounds = spreadsheetSelectionBoundsFromKeys(selectedKeys, maxCols);
+    const nextCells = new Map();
+    const selectedRows = new Set(), selectedCols = new Set();
+    selectedKeys.forEach(key => {
+      const r = Math.floor(key / maxCols), c = key % maxCols;
+      const cell = cellAt(r, c);
+      if (!cell) return;
+      let mask = 0;
+      if (r === 0 || !selectedKeys.has((r - 1) * maxCols + c)) mask |= MASK_TOP;
+      if (c === maxCols - 1 || !selectedKeys.has(r * maxCols + c + 1)) mask |= MASK_RIGHT;
+      if (r === rowCount - 1 || !selectedKeys.has((r + 1) * maxCols + c)) mask |= MASK_BOTTOM;
+      if (c === 0 || !selectedKeys.has(r * maxCols + c - 1)) mask |= MASK_LEFT;
+      nextCells.set(cell, mask);
+      selectedRows.add(r); selectedCols.add(c);
+    });
     markedCells.forEach((mask, cell) => {
       const nextMask = nextCells.get(cell);
       if (nextMask === undefined) setCellMark(cell, null);
@@ -419,11 +493,11 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     const nextRows = new Set(), nextCols = new Set();
     rowHeads.forEach(head => {
       const r = Number(head.dataset.row);
-      if (r >= selection.row1 && r <= selection.row2) nextRows.add(head);
+      if (selectedRows.has(r)) nextRows.add(head);
     });
     colHeads.forEach(head => {
       const c = Number(head.dataset.col);
-      if (c >= selection.col1 && c <= selection.col2) nextCols.add(head);
+      if (selectedCols.has(c)) nextCols.add(head);
     });
     markedRowHeads = syncHeadMarks(markedRowHeads, nextRows);
     markedColHeads = syncHeadMarks(markedColHeads, nextCols);
@@ -432,10 +506,23 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     if (markedAnchor && markedAnchor !== nextAnchor) markedAnchor.classList.remove("sheet-anchor");
     markedAnchor = nextAnchor && nextAnchor.classList.contains("sheet-selected") ? nextAnchor : null;
     if (markedAnchor) markedAnchor.classList.add("sheet-anchor");
-    info.textContent = rangeLabel(selection);
-    copy.disabled = false; clear.disabled = false; chart.disabled = false;
+    sheet.dataset.selectionContiguous = bounds.contiguous ? "1" : "0";
+    sheet.dataset.selectionCount = String(bounds.count);
+    if (bounds.contiguous){
+      const kind = bounds.col1 === 0 && bounds.col2 === maxCols - 1
+        ? "row"
+        : (bounds.row1 === 0 && bounds.row2 === rowCount - 1 ? "col" : "cell");
+      info.textContent = rangeLabel({ kind, ...bounds });
+    } else {
+      info.textContent = "비연속 선택 · " + bounds.count + "칸";
+    }
+    copy.disabled = !bounds.contiguous;
+    clear.disabled = false;
+    chart.disabled = !bounds.contiguous;
     if (options.deferStat) selectionStatPending = true; else flushSelectionStat();
-    if (typeof opts.onSelectionChange === "function") opts.onSelectionChange(selection);
+    if (typeof opts.onSelectionChange === "function"){
+      opts.onSelectionChange({ kind:bounds.contiguous ? "range" : "multi", ...bounds });
+    }
   };
   // 편집기 우클릭 메뉴가 클릭한 셀·행·열을 현재 선택으로 맞출 수 있게 최소 API만 노출한다.
   sheet._selectSpreadsheetElement = (element) => {
@@ -492,6 +579,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
   };
 
   let dragPointerId = null, dragFrame = 0, dragPoint = null, lastDragKey = "";
+  let dragBaseKeys = null, dragSelectionMode = "replace";
   const dragKey = (target) => target ? [target.kind, target.row, target.col].join(":") : "";
   const runDragFrame = (allowRepeat=true) => {
     dragFrame = 0;
@@ -503,29 +591,29 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
       if (position > end - edge) return Math.min(24, Math.max(3, Math.ceil((position - (end - edge)) / 3)));
       return 0;
     };
-    const dx = axisSpeed(dragPoint.x, rect.left, rect.right);
-    const dy = axisSpeed(dragPoint.y, rect.top, rect.bottom);
+    // 행 선택은 세로, 열 선택은 가로만 자동 스크롤한다. sticky 헤더에서 반대 축까지
+    // 스크롤되면 포인터 아래 행·열이 불필요하게 흔들린다.
+    const dx = dragTarget.kind === "row" ? 0 : axisSpeed(dragPoint.x, rect.left, rect.right);
+    const dy = dragTarget.kind === "col" ? 0 : axisSpeed(dragPoint.y, rect.top, rect.bottom);
     const beforeLeft = sheet.scrollLeft, beforeTop = sheet.scrollTop;
     if (dx) sheet.scrollLeft += dx;
     if (dy) sheet.scrollTop += dy;
     const scrolled = beforeLeft !== sheet.scrollLeft || beforeTop !== sheet.scrollTop;
 
-    let hitX = Math.max(rect.left + 2, Math.min(rect.right - 2, dragPoint.x));
-    let hitY = Math.max(rect.top + 2, Math.min(rect.bottom - 2, dragPoint.y));
-    // 셀 범위 드래그가 고정 행/열 머리글 위에 닿아도 마지막 보이는 데이터 셀까지 계속 확장한다.
-    if (dragTarget.kind === "cell"){
-      const cornerRect = corner.getBoundingClientRect();
-      const colRect = colRow.getBoundingClientRect();
-      hitX = Math.max(hitX, cornerRect.right + 2);
-      hitY = Math.max(hitY, colRect.bottom + 2);
-    }
-    const target = targetFromElement(document.elementFromPoint(hitX, hitY));
+    const cornerRect = corner.getBoundingClientRect();
+    const colRect = colRow.getBoundingClientRect();
+    const hit = spreadsheetSelectionDragHitPoint(dragTarget.kind, dragPoint, rect, cornerRect, colRect);
+    const target = targetFromElement(document.elementFromPoint(hit.x, hit.y));
     if (target && target.kind === dragTarget.kind){
       const key = dragKey(target);
       if (key !== lastDragKey){
         lastDragKey = key;
         focusCell = target;
-        applySelection(selectionFromTargets(dragTarget, target), { deferStat:true });
+        applySelection(selectionFromTargets(dragTarget, target), {
+          deferStat:true,
+          baseKeys:dragBaseKeys,
+          mode:dragSelectionMode
+        });
       }
     }
     if (allowRepeat && scrolled && isDragging) dragFrame = requestAnimationFrame(() => runDragFrame(true));
@@ -543,6 +631,12 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     if (e.pointerType === "touch") e.preventDefault();
     sheet.focus({ preventScroll: true });
     const start = e.shiftKey && anchor && anchor.kind === target.kind ? anchor : target;
+    const next = selectionFromTargets(start, target);
+    const additive = e.ctrlKey || e.metaKey;
+    dragBaseKeys = additive ? new Set(selectedKeys) : new Set();
+    dragSelectionMode = additive && spreadsheetSelectionRangeCovered(dragBaseKeys, next, maxCols)
+      ? "subtract"
+      : (additive ? "add" : "replace");
     dragTarget = start;
     anchor = start;
     focusCell = target;
@@ -551,7 +645,11 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     dragPoint = { x:e.clientX, y:e.clientY };
     lastDragKey = dragKey(target);
     try { sheet.setPointerCapture(e.pointerId); } catch(_){}
-    applySelection(selectionFromTargets(start, target), { deferStat:true });
+    applySelection(next, {
+      deferStat:true,
+      baseKeys:dragBaseKeys,
+      mode:dragSelectionMode
+    });
   };
   const stopDragging = (e) => {
     if (!isDragging || (e && dragPointerId !== null && e.pointerId !== dragPointerId)) return;
@@ -564,6 +662,7 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
       if (dragPointerId !== null && sheet.hasPointerCapture(dragPointerId)) sheet.releasePointerCapture(dragPointerId);
     } catch(_){}
     isDragging = false; dragTarget = null; dragPointerId = null; dragPoint = null; lastDragKey = "";
+    dragBaseKeys = null; dragSelectionMode = "replace";
     if (selectionStatPending) flushSelectionStat();
   };
   sheet.addEventListener("pointerdown", handlePointerDown);
@@ -572,23 +671,25 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
   window.addEventListener("pointercancel", stopDragging);
   copy.addEventListener("click", async () => {
     const text = selectionText();
+    if (text == null){ toast("복사하려면 하나의 연속 범위만 선택하세요.", 2000); return; }
     if (!text) return;
     const ok = await copySpreadsheetText(text);
     toast(ok ? "선택한 표 내용을 복사했어요." : "복사하지 못했어요.", 1800);
   });
   chart.addEventListener("click", () => {
-    if (!selection){ return; }
+    const bounds = spreadsheetSelectionBoundsFromKeys(selectedKeys, maxCols);
+    if (!bounds || !bounds.contiguous){ return; }
     if (typeof window.openSpreadsheetChart !== "function"){ toast("차트 기능을 불러오지 못했어요.", 2200, { type: "error" }); return; }
     const matrix = [];
-    for (let r = selection.row1; r <= selection.row2; r++){
+    for (let r = bounds.row1; r <= bounds.row2; r++){
       const line = [];
-      for (let c = selection.col1; c <= selection.col2; c++) line.push(textAt(r, c));
+      for (let c = bounds.col1; c <= bounds.col2; c++) line.push(textAt(r, c));
       matrix.push(line);
     }
     // CSV처럼 열 이름(헤더)이 표 밖에 따로 있으면 계열 이름으로 쓰도록 맨 앞에 붙인다.
     if (colLabels){
       const header = [];
-      for (let c = selection.col1; c <= selection.col2; c++){
+      for (let c = bounds.col1; c <= bounds.col2; c++){
         header.push(colLabels[c] != null && String(colLabels[c]).trim() !== "" ? String(colLabels[c]) : "");
       }
       if (header.some(h => h !== "")) matrix.unshift(header);
@@ -642,7 +743,9 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
       if (opts.editable) return;   // 편집 모드는 전용 핸들러가 서식 포함 복사를 수행 — 이중 클립보드 쓰기(경합) 방지
       if (!selection) return;
       e.preventDefault();
-      await copySpreadsheetText(selectionText());
+      const text = selectionText();
+      if (text == null){ toast("복사하려면 하나의 연속 범위만 선택하세요.", 2000); return; }
+      await copySpreadsheetText(text);
       return;
     }
     if (mod && !e.altKey && String(key).toLowerCase() === "a"){   // 전체 선택
@@ -702,6 +805,8 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     sheet.removeEventListener("dblclick", handleCopyDblClick);
     delete sheet._focusContentCell;
     delete sheet._selectSpreadsheetElement;
+    delete sheet.dataset.selectionContiguous;
+    delete sheet.dataset.selectionCount;
     delete sheet._spreadsheetCleanup;
   };
   applySelection(null);
@@ -3423,6 +3528,13 @@ async function renderXlsx(file, host, doc){
   // 서식·수식까지 함께 옮기는 내부 클립보드. 시스템 클립보드에는 표시용 TSV 를 쓰고,
   // 붙여넣을 때 클립보드 텍스트가 우리가 쓴 TSV 그대로면(=중간에 외부 복사 없음) 서식까지 복원한다.
   let richClip = null;
+  const hasNonContiguousSelection = () =>
+    sheet.dataset.selectionContiguous === "0" && Number(sheet.dataset.selectionCount || 0) > 0;
+  const warnContiguousSelection = (action) => {
+    if (!hasNonContiguousSelection()) return false;
+    toast((action || "이 작업을 하려면") + " 하나의 연속 범위만 선택하세요.", 2200);
+    return true;
+  };
 
   const clearSelectionContents = () => {
     const model = exModels[currentSheet]; if (!model) return false;
@@ -3457,6 +3569,7 @@ async function renderXlsx(file, host, doc){
 
   // 선택 영역을 탭 구분 텍스트로(잘라내기용). 선택이 없으면 null.
   const selectionTsv = () => {
+    if (hasNonContiguousSelection()) return null;
     const marked = [...sheet.querySelectorAll('td.sheet-selected[data-mrow]')];
     if (!marked.length) return null;
     const byRow = new Map();
@@ -3475,6 +3588,7 @@ async function renderXlsx(file, host, doc){
   };
   // Ctrl+X: 선택 영역을 클립보드로 복사한 뒤 내용 삭제(서식 유지 — 엑셀 잘라내기와 동일한 체감)
   const cutSelection = async () => {
+    if (warnContiguousSelection("잘라내려면")) return;
     const clip = captureRichSelection();
     if (!clip){ toast("잘라낼 셀을 먼저 선택하세요.", 1600); return; }
     clip.cut = true;                       // 잘라내기 → 붙일 때 수식 참조를 조정하지 않고 그대로 옮김(엑셀 동작)
@@ -3820,6 +3934,7 @@ async function renderXlsx(file, host, doc){
   fillHandle.title = "끌어서 자동 채우기";
   let fillState = null;
   const fillSelBounds = () => {
+    if (hasNonContiguousSelection()) return null;
     const marked = [...sheet.querySelectorAll('td.sheet-selected[data-mrow]')];
     if (!marked.length) return null;
     const rs = marked.map(td => Number(td.dataset.mrow)), cs = marked.map(td => Number(td.dataset.mcol));
@@ -4248,6 +4363,7 @@ async function renderXlsx(file, host, doc){
     };
   };
   const selectionBounds = () => {
+    if (hasNonContiguousSelection()) return null;
     const marked = [...sheet.querySelectorAll('td.sheet-selected[data-mrow]')];
     if (!marked.length) return null;
     const rows = marked.map(td => Number(td.dataset.mrow)), cols = marked.map(td => Number(td.dataset.mcol));
@@ -4256,6 +4372,7 @@ async function renderXlsx(file, host, doc){
 
   // ----- 클립보드 표 붙여넣기(선택 좌상단부터 채우고, 부족하면 행·열 확장) -----
   const pasteGridIntoSelection = (grid) => {
+    if (warnContiguousSelection("붙여넣으려면")) return;
     const model = exModels[currentSheet];
     if (!model || !grid.length) return;
     const { r:r0, c:c0 } = selectionTopLeft();
@@ -4290,6 +4407,7 @@ async function renderXlsx(file, host, doc){
   // ----- 서식 포함 복사/붙여넣기: 선택 사각형의 값·수식·번호서식·스타일을 통째로 담았다가 복원 -----
   // 수식은 엑셀처럼 복사 위치만큼 상대참조를 옮겨 붙인다($ 절대참조는 고정). 잘라내기는 참조를 그대로 유지.
   const captureRichSelection = () => {
+    if (hasNonContiguousSelection()) return null;
     const model = exModels[currentSheet];
     const b = selectionBounds();
     if (!model || !b) return null;
@@ -4313,6 +4431,7 @@ async function renderXlsx(file, host, doc){
     return { cells, tsv: lines.join("\n"), origin: { sheet:currentSheet, r:b.s.r, c:b.s.c } };
   };
   const copyRichSelection = async () => {
+    if (warnContiguousSelection("복사하려면")) return;
     const clip = captureRichSelection();
     if (!clip){ toast("복사할 셀을 먼저 선택하세요.", 1600); return; }
     richClip = clip;
@@ -4321,6 +4440,7 @@ async function renderXlsx(file, host, doc){
     toast(rows + "×" + cols + " 복사했어요(서식 포함, Ctrl+V).", 1500);
   };
   const pasteRichIntoSelection = (clip) => {
+    if (warnContiguousSelection("붙여넣으려면")) return;
     const model = exModels[currentSheet];
     if (!model || !clip || !clip.cells.length) return;
     const grid = clip.cells;
@@ -4405,6 +4525,7 @@ async function renderXlsx(file, host, doc){
 
   // ----- 셀 병합 / 병합 해제 -----
   const mergeSelection = () => {
+    if (warnContiguousSelection("병합하려면")) return;
     const b = selectionBounds();
     if (!b || (b.s.r === b.e.r && b.s.c === b.e.c)){ toast("두 칸 이상 선택해 병합하세요.", 2000); return; }
     pushUndo(currentSheet);
@@ -4422,6 +4543,7 @@ async function renderXlsx(file, host, doc){
     toast("선택 범위를 병합했어요.", 1500);
   };
   const unmergeSelection = () => {
+    if (warnContiguousSelection("병합을 해제하려면")) return;
     const b = selectionBounds();
     if (!b){ toast("병합 해제할 셀을 선택하세요.", 1800); return; }
     const before = (exMerges[currentSheet] || []).length;
@@ -4436,6 +4558,7 @@ async function renderXlsx(file, host, doc){
 
   // ----- Σ 자동계산: 선택 범위 바로 아래(또는 오른쪽)에 SUM·AVERAGE 등 수식 자동 삽입 -----
   const insertAutoFormula = (fnName) => {
+    if (warnContiguousSelection("자동계산하려면")) return;
     const model = exModels[currentSheet]; if (!model) return;
     const b = selectionBounds();
     if (!b){ toast("계산할 범위를 먼저 선택하세요.", 2000); return; }
@@ -5466,6 +5589,11 @@ if (typeof module === "object" && module.exports){
     spreadsheetDirectSaveKind,
     spreadsheetJumpToDataEdge,
     spreadsheetModelCellEmpty,
+    spreadsheetSelectionBoundsFromKeys,
+    spreadsheetSelectionCombineKeys,
+    spreadsheetSelectionDragHitPoint,
+    spreadsheetSelectionRangeCovered,
+    spreadsheetSelectionRangeKeys,
     writeStructuredSpreadsheetModel
   };
 }

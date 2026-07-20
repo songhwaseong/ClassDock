@@ -21,8 +21,67 @@ const {
   spreadsheetGuessHeader,
   spreadsheetConvertedDocOptions,
   spreadsheetDirectSaveKind,
+  spreadsheetSelectionBoundsFromKeys,
+  spreadsheetSelectionCombineKeys,
+  spreadsheetSelectionDragHitPoint,
+  spreadsheetSelectionRangeCovered,
+  spreadsheetSelectionRangeKeys,
   writeStructuredSpreadsheetModel
 } = require("../src/js/spreadsheet-viewer.js");
+
+test("Ctrl 선택은 떨어진 범위를 추가하고 선택된 범위를 다시 누르면 해제한다", () => {
+  const maxCols = 5;
+  const first = { row1:0, row2:1, col1:0, col2:1 };
+  const extra = { row1:0, row2:0, col1:3, col2:3 };
+  let keys = spreadsheetSelectionCombineKeys(new Set(), first, "replace", maxCols);
+
+  assert.deepEqual([...spreadsheetSelectionRangeKeys(first, maxCols)], [0, 1, 5, 6]);
+  assert.equal(spreadsheetSelectionRangeCovered(keys, first, maxCols), true);
+  assert.deepEqual(
+    spreadsheetSelectionBoundsFromKeys(keys, maxCols),
+    { row1:0, row2:1, col1:0, col2:1, contiguous:true, count:4 }
+  );
+
+  keys = spreadsheetSelectionCombineKeys(keys, extra, "add", maxCols);
+  assert.equal(spreadsheetSelectionRangeCovered(keys, extra, maxCols), true);
+  assert.deepEqual(
+    spreadsheetSelectionBoundsFromKeys(keys, maxCols),
+    { row1:0, row2:1, col1:0, col2:3, contiguous:false, count:5 }
+  );
+
+  keys = spreadsheetSelectionCombineKeys(keys, extra, "subtract", maxCols);
+  assert.deepEqual(
+    spreadsheetSelectionBoundsFromKeys(keys, maxCols),
+    { row1:0, row2:1, col1:0, col2:1, contiguous:true, count:4 }
+  );
+});
+
+test("행·열 헤더 선택 드래그는 포인터가 헤더 띠를 벗어나도 시작 축을 유지한다", () => {
+  const sheet = { left:100, right:900, top:50, bottom:650 };
+  const corner = { left:100, right:146, top:50, bottom:82 };
+  const colRow = { left:100, right:900, top:50, bottom:82 };
+
+  assert.deepEqual(
+    spreadsheetSelectionDragHitPoint("row", { x:700, y:360 }, sheet, corner, colRow),
+    { x:102, y:360 }
+  );
+  assert.deepEqual(
+    spreadsheetSelectionDragHitPoint("row", { x:700, y:20 }, sheet, corner, colRow),
+    { x:102, y:84 }
+  );
+  assert.deepEqual(
+    spreadsheetSelectionDragHitPoint("col", { x:620, y:500 }, sheet, corner, colRow),
+    { x:620, y:52 }
+  );
+  assert.deepEqual(
+    spreadsheetSelectionDragHitPoint("col", { x:40, y:500 }, sheet, corner, colRow),
+    { x:148, y:52 }
+  );
+  assert.deepEqual(
+    spreadsheetSelectionDragHitPoint("cell", { x:20, y:10 }, sheet, corner, colRow),
+    { x:148, y:84 }
+  );
+});
 
 test("열 필터 값 목록은 항목이 많아도 행을 축소하지 않고 긴 값만 말줄임한다", () => {
   const root = path.join(__dirname, "..");
