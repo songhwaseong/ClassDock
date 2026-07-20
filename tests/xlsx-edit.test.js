@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const ExcelJS = require("../vendor/exceljs.min.js");
 const {
   adjustSpreadsheetMergesAfterColumnInsert,
@@ -21,6 +23,15 @@ const {
   spreadsheetDirectSaveKind,
   writeStructuredSpreadsheetModel
 } = require("../src/js/spreadsheet-viewer.js");
+
+test("열 필터 값 목록은 항목이 많아도 행을 축소하지 않고 긴 값만 말줄임한다", () => {
+  const root = path.join(__dirname, "..");
+  const viewer = fs.readFileSync(path.join(root, "src/js/spreadsheet-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  assert.match(viewer, /valueText\.className\s*=\s*"sheet-colfilter-value"/);
+  assert.match(styles, /\.sheet-colfilter-list label\{[^}]*flex:0 0 auto;[^}]*min-height:20px/);
+  assert.match(styles, /\.sheet-colfilter-value\{[^}]*text-overflow:ellipsis;[^}]*white-space:nowrap/);
+});
 
 test("CSV 변환 문서는 원본 CSV 대신 같은 폴더의 XLSX를 저장 대상으로 삼는다", () => {
   const csvHandle = { kind:"file", name:"성적.csv" };

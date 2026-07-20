@@ -3621,7 +3621,11 @@ async function renderXlsx(file, host, doc){
         const lab = document.createElement("label");
         const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!state.get(v);
         cb.addEventListener("change", () => state.set(v, cb.checked));
-        lab.append(cb, document.createTextNode(" " + (v === "" ? "(빈칸)" : v) + " · " + counts.get(v)));
+        const valueText = document.createElement("span");
+        valueText.className = "sheet-colfilter-value";
+        valueText.textContent = (v === "" ? "(빈칸)" : v) + " · " + counts.get(v);
+        valueText.title = valueText.textContent;
+        lab.append(cb, valueText);
         listEl.appendChild(lab);
       });
     };
