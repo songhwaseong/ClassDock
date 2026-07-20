@@ -88,7 +88,7 @@ test("짧은 클릭은 점프 대신 그루밍과 '배고프다냐옹' 말풍선
   };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end) + ";globalThis.groom=petStartFluffyGroom;", context);
-  const pet = { state:"walk", timer:0, t:20, vx:2, vy:1, rot:3, squash:0.2 };
+  const pet = { kind:"fluffyCat", state:"walk", timer:0, t:20, vx:2, vy:1, rot:3, squash:0.2 };
   context.groom(pet);
   assert.equal(pet.state, "groom");
   assert.equal(pet.timer, 126);
@@ -96,7 +96,7 @@ test("짧은 클릭은 점프 대신 그루밍과 '배고프다냐옹' 말풍선
   assert.equal(pet.vy, 0);
   assert.equal(remembered, true);
   assert.equal(said, "배고프다냐옹");
-  assert.match(source, /p\.kind === "fluffyCat"\)\{ petStartFluffyGroom\(p\); \}/);
+  assert.match(source, /p\.kind === "fluffyCat" \|\| p\.kind === "calicoCat"\)\{ petStartFluffyGroom\(p\); \}/);
 });
 
 test("다중 행 스프라이트 렌더링과 비행·착지 상태가 엔진에 연결된다", () => {
@@ -110,7 +110,8 @@ test("다중 행 스프라이트 렌더링과 비행·착지 상태가 엔진에
 });
 
 test("복실고양이는 직접 클릭하기 전까지 우선 등장하고 이후에는 무작위 순서를 유지한다", () => {
-  const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8");
+  // Windows 체크아웃(CRLF)에서도 "\n\n" 경계 탐색이 어긋나지 않게 정규화한다
+  const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("function petNewFluffyCatBiasBag");
   const end = source.indexOf("\n\n// ----- 켜기/끄기", start);
   assert.ok(start >= 0 && end > start);
