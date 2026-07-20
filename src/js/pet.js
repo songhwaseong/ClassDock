@@ -173,6 +173,17 @@ function petDraw(p){
   const sy = flipY * (1 - 0.35 * sq + 0.12 * pop);
   p.el.style.transform = "translate(" + Math.round(p.x) + "px," + Math.round(p.y) + "px)";
   p.cv.style.transform = "rotate(" + rot + "deg) scale(" + sx + "," + sy + ")";
+  if (p.bubbleVisible && p.noticeBubbleWidth){
+    const baseLeft = p.x + pw / 2 - p.noticeBubbleWidth / 2;
+    const minShift = 14 - baseLeft;
+    const maxShift = window.innerWidth - 14 - p.noticeBubbleWidth - baseLeft;
+    const shift = Math.max(minShift, Math.min(maxShift, 0));
+    p.bubble.style.setProperty("--pet-bubble-shift", Math.round(shift) + "px");
+    p.bubble.classList.toggle("below", p.y < (p.noticeBubbleHeight || 0) + 20);
+  } else {
+    p.bubble.style.removeProperty("--pet-bubble-shift");
+    p.bubble.classList.remove("below");
+  }
 }
 
 // ----- 다음 행동 고르기(바닥·발판 위에서, 종족별로 레퍼토리가 다르다) -----
@@ -389,11 +400,75 @@ function petSoarStart(p, w){
   return true;
 }
 
-function petSay(p, text, translate=true){
-  p.bubble.textContent = translate && typeof petText === "function" ? petText(text) : text;
+function petSay(p, text, translate=true, options={}){
+  const notice = !!options.notice;
+  if (!notice && p.noticeActive) return false;                  // 알림을 읽는 동안 일반 대사가 덮어쓰지 않게 한다
+  const shown = translate && typeof petText === "function" ? petText(text) : text;
+  (p.bubbleText || p.bubble).textContent = shown;
+  p.bubble.classList.toggle("pet-notice", notice);
+  p.bubble.classList.toggle("success", notice && options.type === "success");
+  p.bubble.classList.toggle("error", notice && options.type === "error");
+  p.bubbleVisible = true;
+  p.noticeBubbleWidth = p.bubble.offsetWidth;
+  p.noticeBubbleHeight = p.bubble.offsetHeight;
   p.bubble.classList.add("show");
   clearTimeout(p.bubbleTimer);
-  p.bubbleTimer = setTimeout(() => p.bubble.classList.remove("show"), 1600);
+  p.bubbleTimer = setTimeout(() => {
+    p.bubble.classList.remove("show");
+    p.bubbleVisible = false;
+    if (typeof options.onDone === "function") options.onDone();
+  }, Math.max(400, Number(options.duration) || 1600));
+  return true;
+}
+
+function petNoticeDuration(text, ms){
+  const requested = Number(ms) || 2200;
+  const reading = 1400 + String(text || "").length * 42;
+  return Math.max(1800, Math.min(6000, Math.max(requested, reading)));
+}
+
+function petPlayNextNotice(p, w){
+  if (petWorld !== w || !p.el.isConnected){
+    p.noticeActive = false; p.noticeText = ""; p.noticeQueue.length = 0;
+    return;
+  }
+  const next = p.noticeQueue.shift();
+  if (!next){
+    p.noticeActive = false; p.noticeText = ""; p.noticeBubbleWidth = 0; p.noticeBubbleHeight = 0;
+    return;
+  }
+  p.noticeActive = true;
+  p.noticeText = next.text;
+  petSay(p, next.text, false, {
+    notice:true,
+    type:next.type,
+    duration:petNoticeDuration(next.text, next.ms),
+    onDone:() => {
+      if (petWorld !== w) return;
+      p.noticeText = "";
+      setTimeout(() => petPlayNextNotice(p, w), 120);
+    }
+  });
+}
+
+// 공용 toast()가 호출하는 연결점. 정확히 한 마리만 켜져 있고 화면에 보일 때 알림을 맡는다.
+// 반환값이 true면 일반 화면 토스트는 생략하고, 행동 버튼이 있는 토스트만 병행 표시한다.
+function petNotify(message, ms=2200, opts={}){
+  const w = petWorld;
+  if (!w || w.pets.length !== 1 || document.hidden) return false;
+  const p = w.pets[0];
+  if (!p || !p.el || !p.el.isConnected || p.state === "drag") return false;
+  const text = String(message || "").trim();
+  if (!text) return false;
+  if (p.noticeText === text || p.noticeQueue.some(item => item.text === text)) return true;
+  if (p.noticeQueue.length >= 2) p.noticeQueue.shift();          // 현재 알림 포함 최근 3개까지만 유지
+  p.noticeQueue.push({
+    text,
+    ms:Number(ms) || 2200,
+    type:opts.type === "success" || opts.type === "error" ? opts.type : ""
+  });
+  if (!p.noticeActive) petPlayNextNotice(p, w);
+  return true;
 }
 
 // ----- 수업 이벤트 반응: 파이썬 실행이 끝나면 성공/오류에 맞춰 펫들이 한마디씩 한다 -----
@@ -1601,6 +1676,10 @@ function petSpawn(i, total, bag){
   }
   const bubble = document.createElement("div");
   bubble.className = "pixel-pet-bubble";
+  bubble.setAttribute("aria-hidden", "true");                    // 알림은 기존 #toast aria-live 영역이 별도로 읽는다
+  const bubbleText = document.createElement("span");
+  bubbleText.className = "pixel-pet-bubble-text";
+  bubble.appendChild(bubbleText);
   el.appendChild(cv); el.appendChild(bubble);
   let beam = null, thread = null, bolt = null, orb = null, chute = null;
   if (species.kind === "ufo"){                                 // 납치 광선(평소엔 숨김)
@@ -1644,7 +1723,7 @@ function petSpawn(i, total, bag){
   const sayings = typeof petSayingsFor === "function"
     ? petSayingsFor(sayingsSpeciesId, defaultSayings) : defaultSayings;
   const p = {
-    el, cv, bubble, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
+    el, cv, bubble, bubbleText, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
     kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette,
     baseArt: species.art, cheerArt: species.cheerArt || null, motionArt: species.motionArt || null,
     spriteSheet:species.spriteSheet || null, spriteImage,
@@ -1659,7 +1738,9 @@ function petSpawn(i, total, bag){
     state: state0,
     t: Math.floor(Math.random() * 100), timer: 60, blink: 0, off: false, fadeT: 0,
     cool: 0, dropLen: 0, hangY: 0, landT: null, soarAfter: false, airTimer: 0,
-    support: null, gTarget: null, victim: null, bubbleTimer: 0
+    support: null, gTarget: null, victim: null, bubbleTimer: 0,
+    noticeActive:false, noticeText:"", noticeQueue:[], noticeBubbleWidth:0, noticeBubbleHeight:0,
+    bubbleVisible:false
   };
   petBindPointer(p);
   if (gold) setTimeout(() => { if (p.el.isConnected) petSay(p, "✨ 반짝반짝!"); }, 900 + Math.random() * 600);

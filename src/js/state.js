@@ -269,6 +269,21 @@ function ensureWorker(){
 function toast(msg, ms=2200, opts={}){
   const area = byId("toast"); if (!area) return null;
   msg = (typeof window.t === "function") ? window.t(String(msg)) : String(msg);
+  const hasAction = !!(opts.action && opts.action.label);
+  const petHandled = typeof petNotify === "function" && petNotify(msg, ms, opts);
+  // 펫이 한 마리라 일반 알림을 대신 말한 경우, 화면 토스트는 숨기되 aria-live 안내는 유지한다.
+  // 행동 버튼이 있는 알림은 펫도 말하고 실제 버튼이 든 토스트도 그대로 보여 준다.
+  if (petHandled && !hasAction){
+    for (const old of [...area.children]) if (old.dataset.msg === msg) old.remove();
+    while (area.children.length >= 3) area.firstChild.remove();
+    const live = document.createElement("span");
+    live.className = "toast-announcement";
+    live.dataset.msg = msg;
+    live.textContent = msg;
+    area.appendChild(live);
+    setTimeout(() => live.remove(), Math.max(1000, ms));
+    return live;
+  }
   // 같은 문구가 이미 떠 있으면 갈아 끼워 중복으로 쌓이지 않게 한다(저장 연타 등).
   for (const old of [...area.children]) if (old.dataset.msg === msg) old.remove();
   while (area.children.length >= 3) area.firstChild.remove();
@@ -280,7 +295,7 @@ function toast(msg, ms=2200, opts={}){
   item.appendChild(text);
   let timer;
   const dismiss = () => { clearTimeout(timer); item.classList.remove("show"); setTimeout(() => item.remove(), 200); };
-  if (opts.action && opts.action.label){
+  if (hasAction){
     const btn = document.createElement("button");
     btn.type = "button"; btn.className = "toast-action"; btn.textContent = opts.action.label;
     btn.addEventListener("click", (e) => {
