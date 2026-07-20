@@ -28,6 +28,53 @@ async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
   return true;
 }
 
+// 문자열 토큰이 f-string 인가? (접두사에 f/F 포함) — 바깥 정규식이 이미 잘라낸 토큰만 검사.
+function isFStringToken(token){
+  const q = token.search(/["'`]/);
+  return q > 0 && /[fF]/.test(token.slice(0, q));
+}
+// f-string 한 토큰(m[0])만 받아 HTML 을 돌려주는 격리 함수 — 바깥 경계는 이미 확정돼 있어
+// 문서의 다른 부분에 영향을 줄 수 없고, 모든 원본 글자를 escapeHtml 로 한 번씩만 방출해
+// 편집 오버레이의 글자 정렬도 깨지지 않는다. { … } 안(보간식)은 기본 글자색(tk-fi), 나머지
+// 리터럴은 문자열색(tk-s). {{·}} 는 리터럴 중괄호라 문자열색을 유지한다.
+function highlightFString(token){
+  const open = token.match(/^[A-Za-z]*(?:'''|"""|'|"|`)/);
+  if (!open) return '<span class="tk-s">' + escapeHtml(token) + '</span>';
+  const opener = open[0];
+  const quote = opener.match(/(?:'''|"""|'|"|`)$/)[0];
+  const bodyEnd = token.length - quote.length;
+  // 닫는 따옴표가 온전할 때만 분리한다(미완성 문자열은 통째로 문자열색으로 안전 폴백).
+  if (bodyEnd < opener.length || token.slice(bodyEnd) !== quote){
+    return '<span class="tk-s">' + escapeHtml(token) + '</span>';
+  }
+  const body = token.slice(opener.length, bodyEnd);
+  let html = '<span class="tk-s">' + escapeHtml(opener) + '</span>';
+  let buf = "";
+  const flush = () => { if (buf){ html += '<span class="tk-s">' + escapeHtml(buf) + '</span>'; buf = ""; } };
+  for (let i = 0; i < body.length; ){
+    const c = body[i];
+    if (c === '{' && body[i+1] === '{'){ buf += '{{'; i += 2; continue; }   // 리터럴 {
+    if (c === '}' && body[i+1] === '}'){ buf += '}}'; i += 2; continue; }   // 리터럴 }
+    if (c === '{'){
+      flush();
+      let depth = 1, j = i + 1;
+      while (j < body.length && depth > 0){
+        const cj = body[j];
+        if (cj === '{') depth++;
+        else if (cj === '}'){ depth--; if (depth === 0) break; }
+        j++;
+      }
+      const end = (j < body.length && depth === 0) ? j : body.length - 1;   // 짝 없는 { 는 남은 전부를 보간식으로
+      html += '<span class="tk-fi">' + escapeHtml(body.slice(i, end + 1)) + '</span>';
+      i = end + 1;
+      continue;
+    }
+    buf += c; i++;
+  }
+  flush();
+  html += '<span class="tk-s">' + escapeHtml(quote) + '</span>';
+  return html;
+}
 function highlightCode(src, profile){
   if (profile === "text") return escapeHtml(src);   // 강조 없이 텍스트만(rst/adoc/org/tex 등 경량 마크업)
   let com;
@@ -36,7 +83,10 @@ function highlightCode(src, profile){
   else if (profile==="xml") com="<!--[\\s\\S]*?-->";
   else if (profile==="css") com="/\\*[\\s\\S]*?\\*/";
   else com="//[^\\n]*|/\\*[\\s\\S]*?\\*/";
-  const str = '"""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'' + (profile==="c" ? '|`(?:\\\\.|[^`\\\\])*`' : "");
+  // 문자열 접두사(f·r·b·u 및 조합)를 따옴표 바로 앞에서만 함께 잡는다. 접두사가 있을 때만 \b 로
+  // 식별자 꼬리를 배제하고, 없을 때는 일반 문자열이 그대로 매칭되도록 그룹 전체를 선택적으로 둔다.
+  const strPre = '(?:\\b(?:[rR][bBfF]|[bBfF][rR]|[rRbBuUfF]))?';
+  const str = strPre + '(?:"""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\')' + (profile==="c" ? '|`(?:\\\\.|[^`\\\\])*`' : "");
   const num = "\\b0[xX][0-9a-fA-F]+\\b|\\b\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b";
   const kwList = profile==="sql" ? SQL_KW : CODE_KW;
   let alts;
@@ -49,8 +99,12 @@ function highlightCode(src, profile){
   while ((m = re.exec(src))){
     if (m[0] === ""){ re.lastIndex++; continue; }
     out += escapeHtml(src.slice(last, m.index));
-    const g = m.groups, cls = g.com?"c":g.s?"s":g.n?"n":g.k?"k":g.t?"t":"";
-    out += '<span class="tk-'+cls+'">' + escapeHtml(m[0]) + '</span>';
+    const g = m.groups;
+    if (g.s && isFStringToken(m[0])) out += highlightFString(m[0]);
+    else {
+      const cls = g.com?"c":g.s?"s":g.n?"n":g.k?"k":g.t?"t":"";
+      out += '<span class="tk-'+cls+'">' + escapeHtml(m[0]) + '</span>';
+    }
     last = m.index + m[0].length;
   }
   out += escapeHtml(src.slice(last));
