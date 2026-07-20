@@ -17,8 +17,38 @@ const {
   spreadsheetCellValueSnapshot,
   spreadsheetVirtualWindow,
   spreadsheetGuessHeader,
+  spreadsheetConvertedDocOptions,
+  spreadsheetDirectSaveKind,
   writeStructuredSpreadsheetModel
 } = require("../src/js/spreadsheet-viewer.js");
+
+test("CSV 변환 문서는 원본 CSV 대신 같은 폴더의 XLSX를 저장 대상으로 삼는다", () => {
+  const csvHandle = { kind:"file", name:"성적.csv" };
+  const parentDirHandle = { kind:"directory", name:"자료" };
+  const aoa = [["이름", "점수"], ["가", "90"]];
+  const options = spreadsheetConvertedDocOptions({
+    parentId:"folder-1",
+    workspacePath:"자료/성적.csv",
+    relPath:"자료/성적.csv",
+    fsHandle:csvHandle,
+    fsDirHandle:parentDirHandle
+  }, "성적.xlsx", aoa, true);
+
+  assert.equal(options.convertedFromCsv, true);
+  assert.equal(options.fsHandle, null);
+  assert.equal(options.fsDirHandle, parentDirHandle);
+  assert.equal(options.workspacePath, "자료/성적.xlsx");
+  assert.equal(options.relPath, "자료/성적.xlsx");
+  assert.equal(options.parentId, "folder-1");
+  assert.equal(options.originalSaveMode, false);
+  assert.equal(options.spreadsheetAoa, aoa);
+  assert.equal(options.spreadsheetHasHeader, true);
+
+  assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true }), "create");
+  assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true, fsHandle:{} }), "existing");
+  assert.equal(spreadsheetDirectSaveKind({ fsHandle:{} }), "existing");
+  assert.equal(spreadsheetDirectSaveKind({}), "");
+});
 
 test("CSV 첫 줄 머리글 추정: 컬럼명/데이터/애매를 구분한다", () => {
   // 숫자 열인데 첫 줄만 텍스트 → 머리글
@@ -507,5 +537,68 @@ test("자동합계(Σ): 선택 모양에 따라 아래·오른쪽·제자리에 
   assert.deepEqual(
     spreadsheetAutoFormulaJobs([[t("가"), t("나")]], { s:{ r:0, c:0 }, e:{ r:0, c:1 } }, "SUM"),
     []
+  );
+});
+
+test("Ctrl+방향키 데이터 경계 점프: 블록 끝·다음 데이터·시트 끝을 엑셀처럼 찾는다", () => {
+  const { spreadsheetJumpToDataEdge, spreadsheetModelCellEmpty } = require("../src/js/spreadsheet-viewer.js");
+  // 6행×1열: 데이터 A1:A3, A5 (A4·A6 빈 칸)
+  const col = ["v", "v", "v", "", "v", ""];
+  const empty = (r, c) => col[r] === "";
+  const jump = (row, dr) => spreadsheetJumpToDataEdge(empty, col.length, 1, row, 0, dr, 0).row;
+  assert.equal(jump(0, 1), 2);   // 블록 안 → 블록 끝
+  assert.equal(jump(2, 1), 4);   // 블록 끝 → 다음 데이터 셀
+  assert.equal(jump(4, 1), 5);   // 마지막 데이터 → 더 없으면 시트 끝
+  assert.equal(jump(3, 1), 4);   // 빈 셀 → 다음 데이터 셀
+  assert.equal(jump(4, -1), 2);  // 위로: 빈 칸 건너 이전 블록 끝
+  assert.equal(jump(2, -1), 0);  // 블록 안 위로 → 블록 시작
+  assert.equal(jump(0, -1), 0);  // 경계 밖 이동은 제자리
+  // 가로 방향도 동일 로직(2열 격자에서 오른쪽 점프)
+  const grid = [["v", "", "v"]];
+  const emptyG = (r, c) => grid[r][c] === "";
+  assert.deepEqual(
+    spreadsheetJumpToDataEdge(emptyG, 1, 3, 0, 0, 0, 1),
+    { row: 0, col: 2 }
+  );
+  assert.equal(spreadsheetModelCellEmpty({ v:"", f:"A1" }), false);  // 표시 결과가 비어도 수식 셀은 데이터
+  assert.equal(spreadsheetModelCellEmpty({ v:"   ", f:null }), false); // 공백 문자열도 입력된 값
+  assert.equal(spreadsheetModelCellEmpty({ v:"", f:null }), true);
+});
+
+test("복사 붙여넣기 수식 이동: 상대참조는 델타만큼, $절대참조는 고정된다", () => {
+  // 붙여넣기 코드와 동일한 변환: 복사 원점→붙일 위치 이동량(dr, dc)만큼 상대참조를 옮긴다
+  const shift = (f, dr, dc) => remapFormulaRefs(
+    f,
+    (cc, rr, abs) => ({
+      c:abs.colAbs ? cc : cc + dc,
+      r:abs.rowAbs ? rr : rr + dr
+    }),
+    { includeSheetRefs:true }
+  );
+  assert.equal(shift("SUM(A1:A3)", 2, 1), "SUM(B3:B5)");
+  assert.equal(shift("$A$1+B2", 3, 3), "$A$1+E5");          // 절대참조 고정
+  assert.equal(shift("$A1+A$1", 1, 1), "$A2+B$1");          // 혼합참조는 고정된 축만 유지
+  assert.equal(shift("Sheet2!A1+A1", 1, 0), "Sheet2!A2+A2"); // 시트 지정 상대참조도 이동
+  assert.equal(shift("A1", -1, 0), "#REF!");                 // 격자 밖으로 나가면 #REF!
+});
+
+test("잘라낸 범위를 옮기면 같은 시트와 다른 시트의 참조가 새 위치를 따라간다", () => {
+  const { remapMovedFormulaRefs } = require("../src/js/spreadsheet-viewer.js");
+  const bounds = { s:{ r:0, c:0 }, e:{ r:1, c:1 } }; // Sheet1!A1:B2
+  assert.equal(
+    remapMovedFormulaRefs("A1+$B$2+C3", "Sheet1", "Sheet1", "Sheet1", bounds, 2, 1),
+    "B3+$C$4+C3"
+  );
+  assert.equal(
+    remapMovedFormulaRefs("A1+C3", "Sheet1", "Sheet1", "Sheet 2", bounds, 0, 2),
+    "'Sheet 2'!C1+C3"
+  );
+  assert.equal(
+    remapMovedFormulaRefs("Sheet1!A1+A1", "Summary", "Sheet1", "Sheet 2", bounds, 1, 0),
+    "'Sheet 2'!A2+A1"
+  );
+  assert.equal(
+    remapMovedFormulaRefs("'Sheet 1'!$B2", "Summary", "Sheet 1", "Sheet2", bounds, 1, 1),
+    "Sheet2!$C3"
   );
 });

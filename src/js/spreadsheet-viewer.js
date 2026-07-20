@@ -62,6 +62,33 @@ function smartDecodeText(bytes){
   return new TextDecoder("utf-8").decode(bytes);
 }
 
+// Ctrl+방향키 데이터 경계 점프(엑셀 동작). empty(r,c) 접근자와 격자 크기를 받아 목적지 좌표를 돌려준다.
+//  · 현재·다음 셀 모두 값이 있으면 → 이어진 데이터 블록의 끝까지
+//  · 다음 셀이 비었으면(또는 현재가 빈 셀) → 그 방향의 다음 데이터 셀까지(없으면 시트 끝)
+function spreadsheetJumpToDataEdge(empty, rowCount, maxCols, row, col, dr, dc){
+  const inB = (r, c) => r >= 0 && r < rowCount && c >= 0 && c < maxCols;
+  let r = row, c = col;
+  const nr = r + dr, nc = c + dc;
+  if (!inB(nr, nc)) return { row: r, col: c };
+  if (!empty(r, c) && !empty(nr, nc)){
+    while (inB(r + dr, c + dc) && !empty(r + dr, c + dc)){ r += dr; c += dc; }
+  } else {
+    r = nr; c = nc;
+    while (inB(r, c) && empty(r, c)){ r += dr; c += dc; }
+    if (!inB(r, c)){
+      r = Math.max(0, Math.min(rowCount - 1, r));
+      c = Math.max(0, Math.min(maxCols - 1, c));
+    }
+  }
+  return { row: r, col: c };
+}
+
+function spreadsheetModelCellEmpty(cell){
+  if (!cell) return true;
+  if (cell.f != null && cell.f !== "") return false;
+  return cell.v === "" || cell.v === null || cell.v === undefined;
+}
+
 function spreadsheetColumnName(index){
   let n = index + 1, s = "";
   while (n > 0){
@@ -94,6 +121,28 @@ function downloadSpreadsheetFile(data, name, mime){
 }
 function sheetBaseName(name){ return String(name || "sheet").replace(/\.[^.]+$/, "") || "sheet"; }
 function sanitizeFilePart(s){ return String(s || "").replace(/[\\/:*?"<>|]/g, "").trim() || "sheet"; }
+function spreadsheetConvertedDocOptions(ownerDoc, name, aoa, hasHeader){
+  const toXlsxPath = (value) => value ? String(value).replace(/\.csv$/i, ".xlsx") : null;
+  return {
+    isScratch:true,
+    convertedFromCsv:true,
+    spreadsheetAoa:aoa,
+    spreadsheetHasHeader:hasHeader,
+    parentId:ownerDoc && ownerDoc.parentId || null,
+    workspacePath:toXlsxPath(ownerDoc && ownerDoc.workspacePath) || name,
+    relPath:toXlsxPath(ownerDoc && ownerDoc.relPath),
+    // CSV 파일 핸들은 절대 넘기지 않는다. 부모 폴더 핸들만 전달해 같은 폴더에 새 XLSX를 만든다.
+    fsHandle:null,
+    fsDirHandle:ownerDoc && ownerDoc.fsDirHandle || null,
+    originalSaveMode:false
+  };
+}
+function spreadsheetDirectSaveKind(doc){
+  if (!doc) return "";
+  if (doc.fsHandle) return "existing";
+  if (doc.convertedFromCsv) return "create";
+  return "";
+}
 
 // 새 빈 표(스프레드시트) 만들기 — 유효한 빈 XLSX(12행×6열)를 생성해 열고, 바로 편집 모드로 진입(isScratch).
 let _sheetScratchCount = 0;
@@ -568,6 +617,12 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     const rh = (sample && sample.offsetHeight) || 24;
     return Math.max(1, Math.floor((sheet.clientHeight || 400) / rh) - 1);
   };
+  const jumpToDataEdge = (row, col, dr, dc) =>
+    spreadsheetJumpToDataEdge((r, c) => {
+      const cell = cellAt(r, c);
+      if (typeof opts.isCellEmpty === "function") return !!opts.isCellEmpty(cell, r, c);
+      return String(textAt(r, c) || "") === "";
+    }, rowCount, maxCols, row, col, dr, dc);
   // extend=false 면 단일 셀 선택(anchor 재설정), true(Shift) 면 anchor 고정 후 범위 확장.
   const moveActive = (row, col, extend) => {
     const r = clampRow(row), c = clampCol(col);
@@ -602,11 +657,12 @@ function enhanceSpreadsheetSelection(sheet, label, opts={}){
     if (!selection){ moveActive(0, 0, false); return; }   // 선택이 없으면 첫 입력은 A1 로 진입
     const cur = activeCell();
     const ext = e.shiftKey;
+    const jump = (dr, dc) => { const p = jumpToDataEdge(cur.row, cur.col, dr, dc); moveActive(p.row, p.col, ext); };
     switch (key){
-      case "ArrowUp":    moveActive(mod ? 0 : cur.row - 1, cur.col, ext); break;                 // Ctrl: 맨 위로
-      case "ArrowDown":  moveActive(mod ? rowCount - 1 : cur.row + 1, cur.col, ext); break;       // Ctrl: 맨 아래로
-      case "ArrowLeft":  moveActive(cur.row, mod ? 0 : cur.col - 1, ext); break;                 // Ctrl: 맨 왼쪽으로
-      case "ArrowRight": moveActive(cur.row, mod ? maxCols - 1 : cur.col + 1, ext); break;        // Ctrl: 맨 오른쪽으로
+      case "ArrowUp":    if (mod) jump(-1, 0); else moveActive(cur.row - 1, cur.col, ext); break;   // Ctrl: 데이터 경계로
+      case "ArrowDown":  if (mod) jump(1, 0); else moveActive(cur.row + 1, cur.col, ext); break;
+      case "ArrowLeft":  if (mod) jump(0, -1); else moveActive(cur.row, cur.col - 1, ext); break;
+      case "ArrowRight": if (mod) jump(0, 1); else moveActive(cur.row, cur.col + 1, ext); break;
       case "Home":       moveActive(mod ? 0 : cur.row, 0, ext); break;                            // Ctrl+Home: A1
       case "End":        moveActive(mod ? rowCount - 1 : cur.row, maxCols - 1, ext); break;       // Ctrl+End: 마지막 셀
       case "PageUp":     moveActive(cur.row - pageRows(), cur.col, ext); break;
@@ -844,7 +900,8 @@ function renderCsvPreview(text, host, filename, ownerDoc){
         const name = sheetBaseName(filename) + ".xlsx";
         const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         if (typeof handleFiles === "function"){
-          await handleFiles([new File([out], name, { type:mime })], { isScratch:true, spreadsheetAoa:aoa, spreadsheetHasHeader:useHeader });
+          const openOptions = spreadsheetConvertedDocOptions(ownerDoc, name, aoa, useHeader);
+          await handleFiles([new File([out], name, { type:mime })], openOptions);
           toast(useHeader ? "XLSX로 변환해 편집 탭을 열었어요(첫 줄=머리글)." : "XLSX로 변환해 편집 탭을 열었어요(첫 줄=데이터).", 2400);
         } else {
           downloadSpreadsheetFile(out, name, mime);
@@ -1499,12 +1556,12 @@ function evaluateFormula(formula, resolver){
 }
 // 수식 문자열의 셀 참조를 transform(col, row, {colAbs,rowAbs}) → {c,r}|null 로 재작성.
 // 행/열 삽입·삭제·정렬로 셀이 이동할 때 참조를 따라가게 한다($ 절대표기는 그대로 보존, null 이면 #REF!).
-function remapFormulaRefs(formula, transform){
+function remapFormulaRefs(formula, transform, options={}){
   let toks;
   try { toks = tokenizeFormula(formula); } catch(_){ return formula; }
   let out = "", prev = "";
   for (const tk of toks){
-    if (tk.type === "ref" && prev !== "!"){          // prev "!" 이면 시트 간 참조(Sheet2!A1) → 건드리지 않음
+    if (tk.type === "ref" && (prev !== "!" || options.includeSheetRefs)){
       const m = /^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/.exec(tk.text);
       if (m){
         const colAbs = m[1] === "$", rowAbs = m[3] === "$";
@@ -1518,6 +1575,54 @@ function remapFormulaRefs(formula, transform){
     }
     out += tk.text;
     prev = tk.text;
+  }
+  return out;
+}
+
+function spreadsheetFormulaSheetName(token){
+  if (!token) return "";
+  if (token.type === "sheetq") return token.text.slice(1, -1).replace(/''/g, "'");
+  return token.type === "name" ? token.text : "";
+}
+
+function spreadsheetFormulaSheetToken(name){
+  const text = String(name || "");
+  return /[^A-Za-z0-9_ㄱ-ㆎ가-힣]/.test(text) || /^\d/.test(text)
+    ? "'" + text.replace(/'/g, "''") + "'"
+    : text;
+}
+
+function remapMovedFormulaRefs(formula, homeSheet, sourceSheet, destinationSheet, bounds, dr, dc){
+  if (!bounds || !bounds.s || !bounds.e) return formula;
+  let toks;
+  try { toks = tokenizeFormula(formula); } catch(_){ return formula; }
+  const sameSheet = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+  const movedRef = (token) => {
+    const m = /^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/.exec(token && token.text || "");
+    if (!m) return null;
+    const c = formulaColumnIndex(m[2]), r = Number(m[4]) - 1;
+    if (r < bounds.s.r || r > bounds.e.r || c < bounds.s.c || c > bounds.e.c) return null;
+    return (m[1] || "") + spreadsheetColumnName(c + dc) + (m[3] || "") + (r + dr + 1);
+  };
+  let out = "";
+  for (let i = 0; i < toks.length; i++){
+    const tk = toks[i], bang = toks[i + 1], ref = toks[i + 2];
+    if ((tk.type === "name" || tk.type === "sheetq") && bang && bang.text === "!" && ref && ref.type === "ref"){
+      const shifted = sameSheet(spreadsheetFormulaSheetName(tk), sourceSheet) ? movedRef(ref) : null;
+      if (shifted){
+        out += spreadsheetFormulaSheetToken(destinationSheet) + "!" + shifted;
+        i += 2;
+        continue;
+      }
+    }
+    if (tk.type === "ref" && sameSheet(homeSheet, sourceSheet)){
+      const shifted = movedRef(tk);
+      if (shifted){
+        out += (sameSheet(homeSheet, destinationSheet) ? "" : spreadsheetFormulaSheetToken(destinationSheet) + "!") + shifted;
+        continue;
+      }
+    }
+    out += tk.text;
   }
   return out;
 }
@@ -3370,6 +3475,7 @@ async function renderXlsx(file, host, doc){
   const cutSelection = async () => {
     const clip = captureRichSelection();
     if (!clip){ toast("잘라낼 셀을 먼저 선택하세요.", 1600); return; }
+    clip.cut = true;                       // 잘라내기 → 붙일 때 수식 참조를 조정하지 않고 그대로 옮김(엑셀 동작)
     richClip = clip;
     await copySpreadsheetText(clip.tsv);
     clearSelectionContents();
@@ -3392,6 +3498,24 @@ async function renderXlsx(file, host, doc){
         clearSelectionContents();
       }
       return;
+    }
+    // 글자·숫자·기호 키 → 엑셀처럼 기존 값을 대체하며 즉시 입력 시작.
+    // 한글 IME 는 keydown 이 Process(229) 로 오므로 preventDefault 없이 셀만 편집 가능으로 바꿔
+    // 조합이 그 셀에서 시작되게 한다(막으면 첫 글자 조합이 끊긴다).
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing){
+      if (!(t && t.closest && t.closest("input,textarea,select"))){   // 필터·검색 입력창은 제외
+        const ime = e.key === "Process" || e.keyCode === 229;
+        const printable = typeof e.key === "string" && e.key.length === 1;
+        if (ime || printable){
+          const td = sheet.querySelector('td.sheet-anchor[data-mrow]') || sheet.querySelector('td.sheet-selected[data-mrow]');
+          if (td){
+            if (!ime) e.preventDefault();
+            e.stopPropagation();
+            startCellEdit(td, currentSheet, { replaceWith: ime ? "" : e.key });
+            return;
+          }
+        }
+      }
     }
     // 저장은 설정의 '현재 파일 저장'(기본 Ctrl+S) 재지정을 따른다.
     if (typeof shortcutMatches === "function" && shortcutMatches(e, "saveCurrent")){
@@ -3579,13 +3703,13 @@ async function renderXlsx(file, host, doc){
         if (!editable && covered.has(key)) continue;       // 읽기 전용: 가려지는 셀은 생략(좌상단이 span)
         const s = model[r][c];
         const td = document.createElement("td");
+        td.dataset.mrow = String(r); td.dataset.mcol = String(c);
         td.textContent = dispCell(s);
         if (typeof s.v === "number") td.classList.add("num");
         applyCellStyleToTd(td, s);                       // 채우기·테두리 서식 반영
         if (condPrepared.length) applyCondOverlayToTd(td, r, c, s, condPrepared);   // 조건부 서식 오버레이
         const sp = spanAt.get(key);
         if (editable){
-          td.dataset.mrow = String(r); td.dataset.mcol = String(c);
           if (sp) td.classList.add("xlsx-merged-anchor");
           else if (covered.has(key)) td.classList.add("xlsx-merged-cover");
         } else if (sp){
@@ -3599,6 +3723,11 @@ async function renderXlsx(file, host, doc){
     spacer(options.bottomHeight, "bottom");
     table.appendChild(body);
     return table;
+  };
+  const modelNavigationCellEmpty = (model) => (cell) => {
+    if (!cell) return true;
+    const r = Number(cell.dataset.mrow), c = Number(cell.dataset.mcol);
+    return spreadsheetModelCellEmpty(model && model[r] && model[r][c]);
   };
 
   const clearVirtualEditor = () => {
@@ -3641,7 +3770,12 @@ async function renderXlsx(file, host, doc){
         rowIndexes:visible, topHeight:windowState.topHeight, bottomHeight:windowState.bottomHeight
       });
       sheet.replaceChildren(table);
-      enhanceSpreadsheetSelection(sheet, name, { editable, rowLabels:visible, onSelectionChange: editable ? onCellSelect : undefined });
+      enhanceSpreadsheetSelection(sheet, name, {
+        editable,
+        rowLabels:visible,
+        onSelectionChange:editable ? onCellSelect : undefined,
+        isCellEmpty:modelNavigationCellEmpty(model)
+      });
       if (editable){ bindEditableTable(table, name); decorateFilterHeads(); }
       sheet.scrollTop = topBefore; sheet.scrollLeft = leftBefore;
     };
@@ -3866,7 +4000,9 @@ async function renderXlsx(file, host, doc){
       sheet.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[name], { editable: false });
     }
     sheet.scrollTop = 0;
-    enhanceSpreadsheetSelection(sheet, name);
+    enhanceSpreadsheetSelection(sheet, name, {
+      isCellEmpty:exModels[name] ? modelNavigationCellEmpty(exModels[name]) : undefined
+    });
   };
 
   const renderEditable = (name, options={}) => {
@@ -3882,7 +4018,11 @@ async function renderXlsx(file, host, doc){
     }
     const table = tableFromModel(model, true);
     sheet.replaceChildren(table); sheet.scrollTop = 0;
-    enhanceSpreadsheetSelection(sheet, name, { editable: true, onSelectionChange: onCellSelect });
+    enhanceSpreadsheetSelection(sheet, name, {
+      editable:true,
+      onSelectionChange:onCellSelect,
+      isCellEmpty:modelNavigationCellEmpty(model)
+    });
     bindEditableTable(table, name);
     decorateFilterHeads();
     updateFormulaBar();
@@ -4032,7 +4172,7 @@ async function renderXlsx(file, host, doc){
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
-  const startCellEdit = (td, name) => {
+  const startCellEdit = (td, name, editOpts={}) => {
     const model = exModels[name]; if (!model) return;
     const r = Number(td.dataset.mrow), c = Number(td.dataset.mcol);
     let s = model[r][c];
@@ -4040,10 +4180,14 @@ async function renderXlsx(file, host, doc){
       openCellDropdown(td, name, r, c, s.dv.values);   // 목록 유효성 셀은 자유 입력 대신 드롭다운
       return;
     }
+    // replaceWith: 타이핑 즉시 입력(기존 값 대체). 캐럿은 끝에 두어 이어서 입력되게 한다.
+    const replace = editOpts.replaceWith != null;
     td.contentEditable = "true"; td.classList.add("editing");
-    td.textContent = (s.f != null && s.f !== "") ? ("=" + s.f) : rawText(s);   // 수식 셀은 '=수식'을 보여줌
+    td.textContent = replace ? String(editOpts.replaceWith)
+      : (s.f != null && s.f !== "") ? ("=" + s.f) : rawText(s);   // 수식 셀은 '=수식'을 보여줌
     td.focus();
     const range = document.createRange(); range.selectNodeContents(td);
+    if (replace) range.collapse(false);
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
     const fxT = tdFxTarget(td);
     const onInput = () => updateFxMenu(fxT);
@@ -4069,6 +4213,7 @@ async function renderXlsx(file, host, doc){
     td.addEventListener("blur", onBlur);
     td.addEventListener("keydown", onKey);
     td.addEventListener("input", onInput);
+    if (replace) onInput();                             // '=' 로 시작하면 바로 함수 자동완성 표시
   };
 
   // ----- 선택 범위의 좌상단(붙여넣기·병합 기준점) -----
@@ -4120,8 +4265,8 @@ async function renderXlsx(file, host, doc){
     toast(grid.length + "×" + gridCols + " 붙여넣었어요.", 1800);
   };
 
-  // ----- 서식 포함 복사/붙여넣기: 선택 사각형의 값·번호서식·스타일을 통째로 담았다가 복원 -----
-  // 수식은 상대참조 재조정이 필요해, 이동해 붙일 때 결과가 어긋나지 않도록 계산된 값으로 굳혀서 옮긴다.
+  // ----- 서식 포함 복사/붙여넣기: 선택 사각형의 값·수식·번호서식·스타일을 통째로 담았다가 복원 -----
+  // 수식은 엑셀처럼 복사 위치만큼 상대참조를 옮겨 붙인다($ 절대참조는 고정). 잘라내기는 참조를 그대로 유지.
   const captureRichSelection = () => {
     const model = exModels[currentSheet];
     const b = selectionBounds();
@@ -4133,6 +4278,7 @@ async function renderXlsx(file, host, doc){
         const s = (model[r] && model[r][c]) || blankCell();
         rowCells.push({
           v: cloneSpreadsheetValue(s.v),
+          f: s.f || null,
           nf: s.nf || null,
           style: cloneSpreadsheetValue(s.style || {}),
           dv: s.dv ? cloneSpreadsheetValue(s.dv) : null
@@ -4142,7 +4288,7 @@ async function renderXlsx(file, host, doc){
       cells.push(rowCells);
       lines.push(line.join("\t"));
     }
-    return { cells, tsv: lines.join("\n") };
+    return { cells, tsv: lines.join("\n"), origin: { sheet:currentSheet, r:b.s.r, c:b.s.c } };
   };
   const copyRichSelection = async () => {
     const clip = captureRichSelection();
@@ -4163,24 +4309,76 @@ async function renderXlsx(file, host, doc){
     const curCols = model[0] ? model[0].length : 0;
     while (model.length < needRows) model.push(Array.from({ length: Math.max(curCols, needCols) }, blankCell));
     if (needCols > curCols) model.forEach(row => { while (row.length < needCols) row.push(blankCell()); });
+    // 복사 원점 → 붙여넣기 위치의 이동량. 복사한 수식은 이만큼 상대참조를 옮긴다(잘라내기는 그대로).
+    const dr = clip.origin ? r0 - clip.origin.r : 0;
+    const dc = clip.origin ? c0 - clip.origin.c : 0;
+    const sourceSheet = clip.origin && clip.origin.sheet ? clip.origin.sheet : currentSheet;
+    const sourceBounds = {
+      s:{ r:clip.origin ? clip.origin.r : r0, c:clip.origin ? clip.origin.c : c0 },
+      e:{
+        r:(clip.origin ? clip.origin.r : r0) + grid.length - 1,
+        c:(clip.origin ? clip.origin.c : c0) + gridCols - 1
+      }
+    };
+    let pastedFormula = false;
     for (let i = 0; i < grid.length; i++){
       for (let j = 0; j < grid[i].length; j++){
         const r = r0 + i, c = c0 + j;
         const src = grid[i][j];
         const v = cloneSpreadsheetValue(src.v);
+        let f = src.f || null;
+        if (f && !clip.cut && (dr || dc)){
+          f = remapFormulaRefs(
+            f,
+            (cc, rr, abs) => ({ c:abs.colAbs ? cc : cc + dc, r:abs.rowAbs ? rr : rr + dr }),
+            { includeSheetRefs:true }
+          );
+        } else if (f && clip.cut && sourceSheet !== currentSheet){
+          // 다른 시트로 범위를 옮길 때, 옮긴 수식 안의 로컬 참조는 원래 시트를 기준으로 목적지에 다시 연결한다.
+          f = remapMovedFormulaRefs(f, sourceSheet, sourceSheet, currentSheet, sourceBounds, dr, dc);
+        }
         const cell = {
-          v, xv: (v === "" || v == null) ? null : cloneSpreadsheetValue(v),
-          f: null, nf: src.nf || null,
+          v, xv: f ? null : ((v === "" || v == null) ? null : cloneSpreadsheetValue(v)),
+          f, nf: src.nf || null,
           style: cloneSpreadsheetValue(src.style || {})
         };
         if (src.dv) cell.dv = cloneSpreadsheetValue(src.dv);
         model[r][c] = cell;
+        if (f) pastedFormula = true;
       }
     }
+    if (clip.cut && clip.origin){
+      // 잘라낸 범위를 참조하던 워크북의 다른 수식도 새 위치를 따라가게 한다.
+      Object.keys(exModels).forEach(name => {
+        const targetModel = exModels[name];
+        if (!targetModel) return;
+        const copiedRows = new Set();
+        let changed = false;
+        for (let r = 0; r < targetModel.length; r++){
+          if (!targetModel[r]) continue;
+          for (let c = 0; c < targetModel[r].length; c++){
+            const cell = targetModel[r][c];
+            if (!cell || !cell.f) continue;
+            const next = remapMovedFormulaRefs(cell.f, name, sourceSheet, currentSheet, sourceBounds, dr, dc);
+            if (next === cell.f) continue;
+            if (csvFastAoa){
+              if (!copiedRows.has(r)){ targetModel[r] = targetModel[r].slice(); copiedRows.add(r); }
+              targetModel[r][c] = { ...targetModel[r][c], f:next };
+            } else {
+              cell.f = next;
+            }
+            changed = true;
+          }
+        }
+        if (changed){ sheetsWithFormula.add(name); structChanged.add(name); }
+      });
+    }
+    if (pastedFormula) sheetsWithFormula.add(currentSheet);   // 재계산 대상으로 등록(결과는 renderEditable 이 채움)
     structChanged.add(currentSheet);   // 값+서식을 함께 되쓰므로 전체 재작성 경로로 저장
     anyDirty = true;
     buildEditBar(); renderEditable(currentSheet);
-    toast(grid.length + "×" + gridCols + " 붙여넣었어요(서식 포함).", 1800);
+    if (clip.cut) richClip = null;                           // 잘라내기는 첫 성공적인 붙여넣기에서 소비
+    toast(grid.length + "×" + gridCols + " 붙여넣었어요(서식·수식 포함).", 1800);
   };
 
   // ----- 셀 병합 / 병합 해제 -----
@@ -4375,6 +4573,48 @@ async function renderXlsx(file, host, doc){
       return savedPath;
     } catch(e){ console.error(e); return null; }
   };
+  const saveBytesToDocumentHandle = async (out) => {
+    const kind = spreadsheetDirectSaveKind(doc);
+    if (!kind || typeof saveViaFileHandle !== "function") return { handled:false };
+    const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const result = await saveViaFileHandle(out, (doc && doc.name) || (base + ".xlsx"), doc, {
+      existingOnly:kind === "existing",
+      mime,
+      pickerTypes:[{
+        description:"Excel 통합 문서",
+        accept:{ [mime]:[".xlsx"] }
+      }]
+    });
+    if (result === "cancelled") return { handled:true, cancelled:true };
+    if (result !== "saved"){
+      // 이미 연결된 파일의 쓰기 실패는 다른 위치에 조용히 저장하지 않는다.
+      if (kind === "existing") return { handled:true, error:true };
+      return { handled:false };
+    }
+    const actualName = doc && doc.fsHandle && doc.fsHandle.name;
+    if (actualName && doc.name !== actualName){
+      doc.name = actualName;
+      if (typeof refreshWorkspacePath === "function"){
+        doc.workspacePath = refreshWorkspacePath(doc.workspacePath, actualName);
+        if (doc.relPath) doc.relPath = refreshWorkspacePath(doc.relPath, actualName);
+      }
+      if (typeof refreshChrome === "function") refreshChrome();
+    }
+    if (doc && doc.fsHandle && doc.workspacePath && typeof saveFsHandle === "function")
+      saveFsHandle(doc.workspacePath, doc.fsHandle);
+    if (doc) doc._named = true;
+    return { handled:true, saved:true, path:(doc && (doc.workspacePath || doc.name)) || (base + ".xlsx") };
+  };
+  const finishDirectSpreadsheetSave = async (out, direct) => {
+    if (!direct || !direct.handled) return false;
+    if (direct.saved){
+      await markSpreadsheetSaved(out);
+      toast("XLSX로 저장했어요: " + direct.path, 2400, { type:"success" });
+    } else if (direct.error){
+      toast("연결된 XLSX 파일에 쓸 권한이 없어 저장하지 못했어요.", 2800, { type:"error" });
+    }
+    return true;
+  };
   // Ctrl+S 빠른 저장: 제자리 저장이 되면 원본에 덮어쓰고, 아니면 서식 유지 XLSX 다운로드.
   let quickSaving = false;
   const quickSave = async () => {
@@ -4383,6 +4623,8 @@ async function renderXlsx(file, host, doc){
     try {
       const out = await exportExBytes();
       if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
+      const direct = await saveBytesToDocumentHandle(out);
+      if (await finishDirectSpreadsheetSave(out, direct)) return;
       const savedPath = await saveBytesInPlace(out);
       if (savedPath){ await markSpreadsheetSaved(out); toast("저장했어요: " + savedPath, 2400, { type: "success" }); return; }
       downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -4799,12 +5041,19 @@ async function renderXlsx(file, host, doc){
     cfVal.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitCondRule(); } e.stopPropagation(); });
     cfVal2.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitCondRule(); } e.stopPropagation(); });
 
-    const xlsxBtn = document.createElement("button"); xlsxBtn.type = "button"; xlsxBtn.textContent = "XLSX 저장"; xlsxBtn.title = "서식(번호서식·색·글꼴·병합)을 유지해 XLSX 다운로드";
+    const xlsxBtn = document.createElement("button"); xlsxBtn.type = "button"; xlsxBtn.textContent = "XLSX 저장";
+    xlsxBtn.title = doc && doc.convertedFromCsv
+      ? "원본 CSV 폴더에 XLSX로 저장(폴더 정보가 없으면 저장 위치 선택)"
+      : "서식(번호서식·색·글꼴·병합)을 유지해 XLSX 다운로드";
     xlsxBtn.onclick = async () => {
       xlsxBtn.disabled = true;
       try {
         const out = await exportExBytes();
         if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
+        if (doc && doc.convertedFromCsv){
+          const direct = await saveBytesToDocumentHandle(out);
+          if (await finishDirectSpreadsheetSave(out, direct)) return;
+        }
         downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         await markSpreadsheetSaved(out);
         toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
@@ -5186,6 +5435,7 @@ if (typeof module === "object" && module.exports){
     evaluateFormula,
     isFormulaError,
     remapFormulaRefs,
+    remapMovedFormulaRefs,
     remapFormulaSheetName,
     spreadsheetTextSeries,
     formulaTypingContext,
@@ -5195,6 +5445,10 @@ if (typeof module === "object" && module.exports){
     spreadsheetVirtualWindow,
     spreadsheetCellValueSnapshot,
     spreadsheetGuessHeader,
+    spreadsheetConvertedDocOptions,
+    spreadsheetDirectSaveKind,
+    spreadsheetJumpToDataEdge,
+    spreadsheetModelCellEmpty,
     writeStructuredSpreadsheetModel
   };
 }

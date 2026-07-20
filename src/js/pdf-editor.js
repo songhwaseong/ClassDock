@@ -901,39 +901,40 @@ function textToDataUrl(el){
 /* ===== 저장(폴더로 연 PDF는 원본 덮어쓰기, 그 외 다운로드) ===== */
 let pdfExportActive = false;
 async function exportPdf(){
-  if (!state || state.kind !== "pdf" || pdfExportActive) return;
-  const outlineCount = typeof countPdfOutlineItems === "function" ? countPdfOutlineItems(state.pdfOutline) : 0;
-  if (!state.elements.length && !outlineCount){ toast("추가한 항목이 없어요. 그래도 다운로드합니다.", 1800); }
+  const doc = state;
+  if (!doc || doc.kind !== "pdf" || pdfExportActive) return;
+  const outlineCount = typeof countPdfOutlineItems === "function" ? countPdfOutlineItems(doc.pdfOutline) : 0;
+  if (!doc.elements.length && !outlineCount){ toast("추가한 항목이 없어요. 그래도 다운로드합니다.", 1800); }
   pdfExportActive = true;
   const downloadButton = byId("btnDownload");
   if (downloadButton){ downloadButton.disabled = true; downloadButton.setAttribute("aria-busy", "true"); }
   try {
-    const bytes = await buildPdfBytes(state);
-    if (state.originalSaveMode){
+    const bytes = await buildPdfBytes(doc);
+    if (doc.originalSaveMode){
       // 폴더로 연 PDF는 코드·텍스트와 마찬가지로 원본 파일 핸들에 바로 쓴다.
       // 저장 뒤 새 바이트를 기준으로 문서를 다시 열어, 다음 저장에서 기존 편집이 중복 적용되지 않게 한다.
       const wrote = (typeof saveViaFileHandle === "function")
-        ? await saveViaFileHandle(bytes, state.fileName, state, { existingOnly:true, mime:"application/pdf" })
+        ? await saveViaFileHandle(bytes, doc.fileName, doc, { existingOnly:true, mime:"application/pdf" })
         : "unsupported";
       if (wrote !== "saved"){
         toast("원본 PDF 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type:"error" });
         return;
       }
-      const path = String(state.workspacePath || state.fileName || "document.pdf").replace(/\\/g, "/").replace(/^\/+/, "");
-      const updated = new File([bytes], state.fileName || "document.pdf", { type:"application/pdf" });
+      const path = String(doc.workspacePath || doc.fileName || "document.pdf").replace(/\\/g, "/").replace(/^\/+/, "");
+      const updated = new File([bytes], doc.fileName || "document.pdf", { type:"application/pdf" });
       if (path.indexOf("/") >= 0) Object.defineProperty(updated, "webkitRelativePath", { value:path });
-      state.size = updated.size;
-      if (typeof rememberWorkspace === "function") state.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true });
-      if (state.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(state.recoveryKey);
-      state.recoveryDirty = false;
-      if (typeof updateDocumentStatus === "function") updateDocumentStatus(state);
-      const savedId = state.id;
+      doc.size = updated.size;
+      if (typeof rememberWorkspace === "function") doc.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true });
+      if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);
+      doc.recoveryDirty = false;
+      if (typeof updateDocumentStatus === "function") updateDocumentStatus(doc);
+      const savedId = doc.id;
       toast("원본 PDF에 저장했어요. 최신 파일로 다시 여는 중이에요.", 2200, { type:"success" });
       if (typeof refreshDocFromSource === "function") await refreshDocFromSource(savedId, { skipConfirm:true });
       return;
     }
-    downloadPdfBytes(bytes, state.fileName.replace(/\.pdf$/i, "") + "_signed.pdf");
-    toast("다운로드 완료 · " + state.fileName.replace(/\.pdf$/i, "") + "_signed.pdf", 2600, { type: "success" });
+    downloadPdfBytes(bytes, doc.fileName.replace(/\.pdf$/i, "") + "_signed.pdf");
+    toast("다운로드 완료 · " + doc.fileName.replace(/\.pdf$/i, "") + "_signed.pdf", 2600, { type: "success" });
   } catch (e){
     console.error(e);
     toast("저장 중 오류가 발생했습니다.", 3000, { type: "error" });
