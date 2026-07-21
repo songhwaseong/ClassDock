@@ -2534,6 +2534,27 @@
       (severityRank[b.severity] == null ? 9 : severityRank[b.severity]));
   }
 
+  function normalizePythonUnusedRanges(items, maxItems=500) {
+    if (!Array.isArray(items)) return [];
+    const kinds = new Set(["variable", "parameter", "import", "function", "class", "exception", "pattern"]);
+    const seen = new Set(), out = [];
+    for (const raw of items.slice(0, maxItems)){
+      const item = raw || {};
+      const line = Math.max(1, parseInt(item.line, 10) || 1);
+      const column = Math.max(0, parseInt(item.column, 10) || 0);
+      const rawLength = parseInt(item.length, 10) || 0;
+      if (rawLength < 1 || rawLength > 200) continue;
+      const length = rawLength;
+      const name = String(item.name == null ? "" : item.name).slice(0, 200);
+      const kind = kinds.has(item.kind) ? item.kind : "variable";
+      if (!name || length !== name.length) continue;
+      const key = line + ":" + column + ":" + length;
+      if (seen.has(key)) continue;
+      seen.add(key); out.push({ line, column, length, name, kind });
+    }
+    return out.sort((a, b) => a.line - b.line || a.column - b.column || a.length - b.length);
+  }
+
   function normalizePythonTraceReport(report, maxSteps=300) {
     report = report && typeof report === "object" ? report : {};
     const steps = Array.isArray(report.steps) ? report.steps.slice(0, maxSteps).map((step, index) => {
@@ -2801,7 +2822,7 @@
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
-    normalizePythonDiagnostics, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
+    normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
     studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
     splitDropRoleForSide, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,

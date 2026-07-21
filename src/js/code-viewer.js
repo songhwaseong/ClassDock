@@ -75,7 +75,7 @@ function highlightFString(token){
   html += '<span class="tk-s">' + escapeHtml(quote) + '</span>';
   return html;
 }
-function highlightCode(src, profile){
+function highlightCodeBase(src, profile){
   if (profile === "text") return escapeHtml(src);   // 강조 없이 텍스트만(rst/adoc/org/tex 등 경량 마크업)
   let com;
   if (profile==="hash") com="#[^\\n]*";
@@ -109,6 +109,36 @@ function highlightCode(src, profile){
   }
   out += escapeHtml(src.slice(last));
   return out;
+}
+
+// 구문 강조 결과의 문자 배치를 바꾸지 않으면서 의미 분석 범위만 흐리게 표시한다.
+// 먼저 원문에 사용자가 입력할 가능성이 매우 낮은 PUA 표식을 끼운 뒤 기존 렉서를 통과시키면,
+// 문자열·주석 같은 여러 줄 토큰의 상태를 깨뜨리지 않고 정확한 식별자 위치에 span을 넣을 수 있다.
+function highlightCode(src, profile, semanticRanges=[]){
+  const text = String(src == null ? "" : src);
+  const candidates = (Array.isArray(semanticRanges) ? semanticRanges : [])
+    .map((item) => ({
+      start:Math.max(0, Math.min(text.length, parseInt(item && item.start, 10) || 0)),
+      end:Math.max(0, Math.min(text.length, parseInt(item && item.end, 10) || 0))
+    }))
+    .filter((item) => item.end > item.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const ranges = [];
+  for (const item of candidates) if (!ranges.length || item.start >= ranges[ranges.length - 1].end) ranges.push(item);
+  if (!ranges.length) return highlightCodeBase(text, profile);
+
+  let markerCode = 0xE000;
+  while (markerCode < 0xF8FC && (text.includes(String.fromCharCode(markerCode)) || text.includes(String.fromCharCode(markerCode + 1)))) markerCode += 2;
+  if (markerCode >= 0xF8FC) return highlightCodeBase(text, profile);
+  const open = String.fromCharCode(markerCode), close = String.fromCharCode(markerCode + 1);
+  let marked = text;
+  for (let i = ranges.length - 1; i >= 0; i--){
+    const range = ranges[i];
+    marked = marked.slice(0, range.start) + open + marked.slice(range.start, range.end) + close + marked.slice(range.end);
+  }
+  return highlightCodeBase(marked, profile)
+    .split(open).join('<span class="tk-unused">')
+    .split(close).join('</span>');
 }
 
 // 주피터 노트북(.ipynb) JSON → 실행 가능한 파이썬 소스로 변환
@@ -1811,13 +1841,16 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (liveDiagRunning){ liveDiagPending = true; return; }
     liveDiagRunning = true;
     try {
-      const items = await runPythonLiveDiagnostics(source, ui.fileBase);
+      const analysis = await runPythonLiveDiagnostics(source, ui.fileBase);
       if (!liveDiagDestroyed && !liveDiagPaused && !ui.running && version === liveDiagVersion && source === editor.getValue()){
-        editor.setDiagnosticItems(items);
+        editor.setDiagnosticItems(analysis.diagnostics);
+        editor.setUnusedRanges(analysis.unused);
       }
     } catch(_){
       // 자동 진단 실패는 편집을 방해하거나 상태 메시지를 띄우지 않는다.
-      if (!liveDiagDestroyed && !liveDiagPaused && version === liveDiagVersion && source === editor.getValue()) editor.clearError();
+      if (!liveDiagDestroyed && !liveDiagPaused && version === liveDiagVersion && source === editor.getValue()){
+        editor.clearError(); editor.clearUnusedRanges();
+      }
     } finally {
       liveDiagRunning = false;
       if (liveDiagPending && !liveDiagPaused && !liveDiagDestroyed){
@@ -1831,7 +1864,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     clearTimeout(liveDiagTimer);
     if (!liveDiagnosticsEnabled || liveDiagDestroyed) return;
     const source = editor.getValue();
-    if (!source.trim()){ liveDiagPending = false; editor.clearError(); return; }
+    if (!source.trim()){ liveDiagPending = false; editor.clearError(); editor.clearUnusedRanges(); return; }
     if (liveDiagPaused || ui.running){ liveDiagPending = true; return; }
     const version = liveDiagVersion;
     liveDiagTimer = setTimeout(() => runLiveDiagnostics(version, source), delay);

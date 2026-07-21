@@ -12,7 +12,7 @@ const {
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
-  normalizePythonDiagnostics, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
+  normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
   workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, dataTransferHasFileItems, captureDroppedFileItems,
@@ -909,6 +909,21 @@ test("Python 실행 전 진단 결과를 위치와 심각도 순으로 정리한
     ["error", 2, 0, "SyntaxError"],
     ["warning", 2, 0, "X"],
     ["warning", 4, 2, "PY-NAME"]
+  ]);
+});
+
+test("Python 미사용 심볼 범위는 중복과 잘못된 길이를 제거해 위치순으로 정리한다", () => {
+  const rows = normalizePythonUnusedRanges([
+    { line:3, column:8, length:4, name:"idle", kind:"function" },
+    { line:1, column:7, length:2, name:"os", kind:"import" },
+    { line:1, column:7, length:2, name:"os", kind:"import" },
+    { line:2, column:0, length:2, name:"value", kind:"variable" },
+    { line:4, column:0, length:1, name:"x", kind:"unknown" }
+  ]);
+  assert.deepEqual(rows, [
+    { line:1, column:7, length:2, name:"os", kind:"import" },
+    { line:3, column:8, length:4, name:"idle", kind:"function" },
+    { line:4, column:0, length:1, name:"x", kind:"variable" }
   ]);
 });
 

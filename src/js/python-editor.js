@@ -34,6 +34,7 @@ function buildCodeEditor(text, prof, options={}){
   let renderFindHi = () => {};
   let renderSpotlight = () => {};
   let renderCellDividers = () => {};   // 실제 구현은 아래(편집 헬퍼 정의 후) 할당 — syncNow 가 먼저 참조하므로 예약 선언
+  let unusedSemanticRanges = [];       // Python AST 분석이 돌려준 미사용 선언의 절대 문자 범위
   // ===== 편집기 내 찾기/바꾸기(Ctrl+H) 상태 — 실제 구현은 아래 colMetrics 정의 후 할당 =====
   let findOpen = false, findMatches = [], findIndex = -1, findApplying = false;
   let computeWordHi = () => {};
@@ -282,7 +283,7 @@ function buildCodeEditor(text, prof, options={}){
     const val = ta.value;
     // Keep the final empty line measurable so the highlight layer and textarea
     // have the same maximum scroll position when the source ends with a newline.
-    code.innerHTML = highlightCode(val, prof) + "&#8203;";
+    code.innerHTML = highlightCode(val, prof, unusedSemanticRanges) + "&#8203;";
     const lines = val.split("\n").length;
     let nums = ""; for (let i = 1; i <= lines; i++) nums += i + "\n";
     gutter.textContent = nums;
@@ -1189,6 +1190,8 @@ function buildCodeEditor(text, prof, options={}){
   });
   ta.addEventListener("input", (e) => {
     if (!help.hidden) hideHelp();   // 타이핑하면 함수 도움말은 닫는다
+    // 분석 결과가 오기 전까지 이전 코드의 위치를 재사용하면 엉뚱한 글자가 흐려지므로 즉시 비운다.
+    unusedSemanticRanges = [];
     if (linkedEdit.active && linkedBeforeInput && e.isTrusted){
       const before = linkedBeforeInput, partial = ta.value;
       const partialSelectionStart = ta.selectionStart, partialSelectionEnd = ta.selectionEnd;
@@ -1706,6 +1709,29 @@ function buildCodeEditor(text, prof, options={}){
       scrollCaretIntoView();                     // 맨 아래 엔터 시 커서 따라 화면 내려가게
     }
   });
+  const setUnusedRanges = (items) => {
+    const value = ta.value, starts = [0];
+    for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) === 10) starts.push(i + 1);
+    const next = [];
+    for (const item of Array.isArray(items) ? items : []){
+      const line = Math.max(1, parseInt(item && item.line, 10) || 1);
+      const column = Math.max(0, parseInt(item && item.column, 10) || 0);
+      const length = Math.max(0, parseInt(item && item.length, 10) || 0);
+      if (!length || line > starts.length) continue;
+      const start = starts[line - 1] + column, end = start + length;
+      if (start < starts[line - 1] || end > value.length || value.slice(start, end).indexOf("\n") >= 0) continue;
+      const expected = String((item && item.name) || "");
+      if (expected && value.slice(start, end) !== expected) continue;
+      next.push({ start, end });
+    }
+    unusedSemanticRanges = next.sort((a, b) => a.start - b.start || a.end - b.end);
+    refresh(); sync();
+  };
+  const clearUnusedRanges = () => {
+    if (!unusedSemanticRanges.length) return;
+    unusedSemanticRanges = [];
+    refresh(); sync();
+  };
   refresh();
   return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
@@ -1725,7 +1751,7 @@ function buildCodeEditor(text, prof, options={}){
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },
     openFind, closeFind, isFindOpen: () => findOpen, isCompletionOpen: () => !complete.hidden,
-    markError, markErrorLines, setDiagnosticItems, clearError, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
+    markError, markErrorLines, setDiagnosticItems, clearError, setUnusedRanges, clearUnusedRanges, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
     setCellSplitMode, toggleCellBoundaryAtLine, isCellSplitMode: () => cellSplitMode, autoSplitCells,
     spotlightRange, clearSpotlight };
 }

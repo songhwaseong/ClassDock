@@ -344,7 +344,10 @@ async function runPythonLiveDiagnostics(src, fileName){
   }
   const parsed = parsePythonMarkedReport(result && result.stdout, PY_DIAG_MARKER);
   if (!parsed || !parsed.report) throw new Error("live-diagnostic-report-missing");
-  return normalizePythonDiagnostics(parsed.report.diagnostics).filter(item => item.severity !== "info");
+  return {
+    diagnostics:normalizePythonDiagnostics(parsed.report.diagnostics).filter(item => item.severity !== "info"),
+    unused:normalizePythonUnusedRanges(parsed.report.unused)
+  };
 }
 
 // 로컬 백엔드(exe 런처)로 실행: 소스를 보내고 {stdout, stderr, code} 회수
