@@ -23,7 +23,7 @@ test("original-save folders keep their mode and file handles across restore and 
   assert.match(source, /if \(root\.originalSaveMode\) nextPathSet\.add\(workspaceOriginalSaveMarkerPath\(selectedRootName\)\)/);
   assert.match(source, /doc\.fsHandle = file\.__fsHandle \|\| doc\.fsHandle \|\| null/);
   assert.match(source, /doc\.originalSaveMode = !!root\.originalSaveMode/);
-  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name, !!options\.existingOnly\)/);
+  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name,[\s\S]*!!options\.existingOnly && !createInOriginalFolder\)/);
   assert.match(codeSource, /loadRememberedFolderHandle\(root\.name\)/);
 });
 
@@ -110,6 +110,15 @@ test("원본 쓰기 권한 없이 연 폴더의 Python 저장은 별도 저장 �
   assert.match(codeSource, /fromFolder && !saveToOriginal/);
   assert.match(codeSource, /원본 쓰기 권한 없이 열려 자동 저장 폴더에 저장했어요/);
   assert.match(codeSource, /원본에 저장하려면 사이드바 \[열기 → 폴더 열기\]로 다시 여세요/);
+});
+
+test("원본 폴더에서 만든 새 Python 파일은 원본 저장 모드와 폴더 상대경로를 이어받는다", () => {
+  assert.match(codeSource, /originalSaveRootForDoc\(\{ parentId:folder\.parentId \}\)/);
+  assert.match(codeSource, /originalSaveMode:!!\(originalRoot && originalRoot\.originalSaveMode\)/);
+  assert.match(codeSource, /const initialDocPath = ownerDoc && \(ownerDoc\.workspacePath \|\| ownerDoc\.relPath\)/);
+  assert.match(codeSource, /setSavedPath\(initialDocPath, \{ original:true, pending:!!\(ownerDoc\.isScratch && !ownerDoc\._named\) \}\)/);
+  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.isScratch && ownerDoc\.originalSaveMode\)/);
+  assert.match(codeSource, /!!options\.existingOnly && !createInOriginalFolder/);
 });
 
 test("사용 설명서는 폴더 드래그와 폴더 열기의 Python 저장 차이를 필수 주의사항으로 안내한다", () => {

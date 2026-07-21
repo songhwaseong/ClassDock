@@ -1360,20 +1360,28 @@ async function renderCode(file, host, ext, profile, runCtx){
       document.removeEventListener("pointerdown", projectOutsideClose, true); projectOutsideClose = null;
     }
   });
-  const setSavedPath = (p) => {
+  const setSavedPath = (p, options={}) => {
     const savedAbsPath = p || "";
     if (savedAbsPath){
-      pathText.textContent = savedAbsPath; pathText.title = "드래그해서 복사할 수 있습니다";
+      pathText.textContent = options.pending ? ("저장 예정 · " + savedAbsPath) : savedAbsPath;
+      pathText.title = options.original
+        ? "선택한 원본 폴더 기준 경로입니다. 브라우저 보안상 드라이브를 포함한 절대경로는 표시되지 않을 수 있습니다."
+        : "드래그해서 복사할 수 있습니다";
       pathText.classList.remove("is-empty");
     } else {
       pathText.textContent = "저장하면 경로가 여기 표시됩니다"; pathText.removeAttribute("title");
       pathText.classList.add("is-empty");
     }
   };
-  if (ownerDoc && ownerDoc.workspacePath){
-    setSavedPath(ownerDoc.workspacePath);
-    displayPathForWorkspace(ownerDoc.workspacePath).then(p => {
-      if (p && ownerDoc && ownerDoc.workspacePath) setSavedPath(p);
+  const initialDocPath = ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath);
+  if (initialDocPath && ownerDoc.originalSaveMode){
+    // 폴더 열기로 받은 File System Access 핸들은 브라우저 보안상 절대경로를 공개하지 않는다.
+    // 대신 실제 원본 폴더 안에서 사용할 상대경로를 표시해 파일명만 경로처럼 보이는 혼란을 막는다.
+    setSavedPath(initialDocPath, { original:true, pending:!!(ownerDoc.isScratch && !ownerDoc._named) });
+  } else if (initialDocPath && !(ownerDoc && ownerDoc.isScratch && !ownerDoc._named)){
+    setSavedPath(initialDocPath);
+    displayPathForWorkspace(initialDocPath).then(p => {
+      if (p && ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath)) setSavedPath(p);
     });
   }
   // 라이브러리 설치 패널(설치된 로컬 파이썬에서만 노출) — 세트 설치 + 직접 입력
@@ -1713,31 +1721,33 @@ async function renderCode(file, host, ext, profile, runCtx){
       && typeof ownerDoc.fsHandle.createWritable === "function");
     const saveToOriginal = !!(ownerDoc && ownerDoc.originalSaveMode) || hasFolderOriginalHandle;
     try {
-      // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\만능교실 저장).
-      if (!saveToOriginal && await saveFileBackendAvailable()){
-        // 새로 만든(스크래치) 파일의 첫 저장은 이름을 받는다(서버 저장은 위치 선택 창이 없으므로).
-        if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
-          const base = String(ownerDoc.name || name).replace(/\.py$/i, "");
-          const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
-            placeholder: "예: 연습", value: base, okText: "저장" });
-          if (typed === null) return;                            // 취소 → 저장 안 함
-          let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim();   // 파일명 금지문자 제거
-          if (!fname) fname = base || "새 코드";
-          if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ".py";    // 확장자가 없으면 .py 붙임
-          const currentPath = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || "");
-          const currentDir = runPathDir(currentPath);
-          const nextPath = currentDir ? currentDir + "/" + fname : fname;
-          ownerDoc.name = fname; ownerDoc.workspacePath = nextPath;
-          if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
-          ownerDoc._named = true;
-          name = fname;
-          if (typeof state !== "undefined" && state === ownerDoc){
-            const hdr = byId("activeFileName");
-            if (hdr){ hdr.textContent = fname; const c = extCategory(ownerDoc.kind, fname); if (c) hdr.dataset.cat = c; }
-          }
-          if (typeof renderTabs === "function") renderTabs();
-          renderSidebar();
+      const canSaveViaServer = !saveToOriginal && await saveFileBackendAvailable();
+      // EXE 자동 저장과 원본 폴더의 새 파일 생성은 별도 파일 선택 창이 없으므로 첫 저장 전에 이름을 정한다.
+      if ((saveToOriginal || canSaveViaServer) && ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
+        const base = String(ownerDoc.name || name).replace(/\.py$/i, "");
+        const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
+          placeholder: "예: 연습", value: base, okText: "저장" });
+        if (typed === null) return;                            // 취소 → 저장 안 함
+        let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim();
+        if (!fname) fname = base || "새 코드";
+        if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ".py";
+        const currentPath = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || "");
+        const currentDir = runPathDir(currentPath);
+        const nextPath = currentDir ? currentDir + "/" + fname : fname;
+        ownerDoc.name = fname; ownerDoc.workspacePath = nextPath;
+        if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
+        ownerDoc._named = true;
+        name = fname;
+        if (typeof state !== "undefined" && state === ownerDoc){
+          const hdr = byId("activeFileName");
+          if (hdr){ hdr.textContent = fname; const c = extCategory(ownerDoc.kind, fname); if (c) hdr.dataset.cat = c; }
         }
+        if (typeof renderTabs === "function") renderTabs();
+        renderSidebar();
+        if (saveToOriginal) setSavedPath(nextPath, { original:true, pending:true });
+      }
+      // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\만능교실 저장).
+      if (canSaveViaServer){
         const savedPath = await saveViaServer(value, ownerDoc, name);
         if (savedPath){
           if (ownerDoc){
@@ -1799,6 +1809,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         if (path.indexOf("/") >= 0) Object.defineProperty(updated, "webkitRelativePath", { value: path });
         const oldPath = ownerDoc.workspacePath;
         ownerDoc.workspacePath = path;
+        if (wrote === "saved" && ownerDoc.isScratch) ownerDoc._named = true;
         ownerDoc.size = updated.size;
         ownerDoc.savedText = value;
         markDocumentSavedAsUtf8(ownerDoc, false);
@@ -1814,8 +1825,12 @@ async function renderCode(file, host, ext, profile, runCtx){
       markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
       renderSidebar();                         // 저장으로 ✓ 표시·이름도 바뀌므로 dirty 변화와 무관하게 갱신
       // 폴백 환경(브라우저)은 보안상 절대경로를 알 수 없어 파일명만 표시
-      setSavedPath(wrote === "saved" && ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.name
-        ? ownerDoc.fsHandle.name : ((ownerDoc && ownerDoc.name) || name));
+      if (wrote === "saved" && saveToOriginal && ownerDoc){
+        setSavedPath(ownerDoc.workspacePath || ownerDoc.relPath || ownerDoc.name || name, { original:true });
+      } else {
+        setSavedPath(wrote === "saved" && ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.name
+          ? ownerDoc.fsHandle.name : ((ownerDoc && ownerDoc.name) || name));
+      }
       if (fromZip){
         // 진짜 압축(zip/tar) 안의 파일은 원본 압축을 다시 쓰지 않고 별도 파일로만 저장된다 — 혼동 없게 안내.
         toast(wrote === "saved"
@@ -2356,7 +2371,11 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
         return "denied";
       }
     }
-    if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name, !!options.existingOnly);
+    // 원본 저장 폴더에서 만든 새 문서는 아직 파일이 없으므로 create:true 로 연다.
+    // 기존 원본 파일은 기존대로 create:false 를 유지해 잘못된 위치에 새 파일이 생기지 않게 한다.
+    const createInOriginalFolder = !!(ownerDoc && ownerDoc.isScratch && ownerDoc.originalSaveMode);
+    if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name,
+      !!options.existingOnly && !createInOriginalFolder);
     if (!handle){
       if (options.existingOnly) return "denied";
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";
@@ -2502,8 +2521,11 @@ function createPythonScratchInFolder(folder){
   let name = pythonScratchFileName();
   for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = pythonScratchFileName(n);
   const relPath = dir + "/" + name;
+  const originalRoot = typeof originalSaveRootForDoc === "function"
+    ? originalSaveRootForDoc({ parentId:folder.parentId }) : null;
   handleFiles([new File([starter], name, { type: "text/x-python" })],
-    { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath });
+    { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath,
+      originalSaveMode:!!(originalRoot && originalRoot.originalSaveMode) });
   if (typeof toast === "function") toast("'" + (folder.label || dir.split("/").pop() || dir) + "' 폴더 안에 새 Python 파일을 만들었어요.", 3000);
   return true;
 }
