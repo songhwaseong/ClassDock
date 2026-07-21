@@ -130,3 +130,25 @@ test("복실고양이는 직접 클릭하기 전까지 우선 등장하고 이�
   seen = true;
   assert.deepEqual(Array.from(context.bias(bag), item => item.id), ["dog", "fluffyCat", "robot"]);
 });
+
+test("코딩 중 휴식할 때 복실고양이의 전체 크기가 화면 안에 남는다", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("function petQuietUpdate");
+  const end = source.indexOf("\nfunction petSetRhythm", start);
+  assert.ok(start >= 0 && end > start);
+
+  const context = { PET_W:45, PET_H:33, window:{ innerWidth:1264, innerHeight:910 }, Math };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end) + ";globalThis.quietUpdate=petQuietUpdate;", context);
+
+  const pet = {
+    quiet:true, w:96, h:96, x:8, y:808, face:1, rot:0, squash:0, off:false, t:0,
+    el:{ classList:{ add(){} } }
+  };
+  const world = { pets:[pet] };
+  context.quietUpdate(pet, world);
+
+  assert.equal(pet.x, 8);
+  assert.equal(pet.y, 808);
+  assert.equal(pet.y + pet.h, context.window.innerHeight - 6);
+});

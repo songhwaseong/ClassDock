@@ -738,9 +738,10 @@ function petQuietUpdate(p, w){
   }
   const index = Math.max(0, w.pets.indexOf(p));
   const side = index % 2, slot = Math.floor(index / 2);
+  const pw = p.w || PET_W, ph = p.h || PET_H;
   const gap = PET_W + 7, margin = 8;
-  const tx = side === 0 ? margin + slot * gap : window.innerWidth - PET_W - margin - slot * gap;
-  const ty = Math.max(0, window.innerHeight - PET_H - 6);
+  const tx = side === 0 ? margin + slot * gap : window.innerWidth - pw - margin - slot * gap;
+  const ty = Math.max(0, window.innerHeight - ph - 6);
   p.x += (tx - p.x) * 0.065;
   p.y += (ty - p.y) * 0.065;
   p.face = side === 0 ? 1 : -1;
