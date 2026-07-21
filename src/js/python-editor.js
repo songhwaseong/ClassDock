@@ -35,6 +35,7 @@ function buildCodeEditor(text, prof, options={}){
   let renderSpotlight = () => {};
   let renderCellDividers = () => {};   // 실제 구현은 아래(편집 헬퍼 정의 후) 할당 — syncNow 가 먼저 참조하므로 예약 선언
   let unusedSemanticRanges = [];       // Python AST 분석이 돌려준 미사용 선언의 절대 문자 범위
+  let semanticRangeText = ta.value;    // 다음 입력에서 기존 범위를 안전하게 이동시키기 위한 직전 본문
   // ===== 편집기 내 찾기/바꾸기(Ctrl+H) 상태 — 실제 구현은 아래 colMetrics 정의 후 할당 =====
   let findOpen = false, findMatches = [], findIndex = -1, findApplying = false;
   let computeWordHi = () => {};
@@ -1190,8 +1191,6 @@ function buildCodeEditor(text, prof, options={}){
   });
   ta.addEventListener("input", (e) => {
     if (!help.hidden) hideHelp();   // 타이핑하면 함수 도움말은 닫는다
-    // 분석 결과가 오기 전까지 이전 코드의 위치를 재사용하면 엉뚱한 글자가 흐려지므로 즉시 비운다.
-    unusedSemanticRanges = [];
     if (linkedEdit.active && linkedBeforeInput && e.isTrusted){
       const before = linkedBeforeInput, partial = ta.value;
       const partialSelectionStart = ta.selectionStart, partialSelectionEnd = ta.selectionEnd;
@@ -1227,6 +1226,10 @@ function buildCodeEditor(text, prof, options={}){
         } else exitLinkedEdit();
       } else exitLinkedEdit();
     }
+    // 새 AST 분석을 기다리는 동안에도 직접 건드리지 않은 미사용 표시는 유지한다.
+    // 편집 뒤쪽 범위는 글자 수만큼 이동하고, 편집과 겹친 범위만 즉시 버려 엉뚱한 글자를 흐리지 않는다.
+    unusedSemanticRanges = remapTextRangesAfterEdit(unusedSemanticRanges, semanticRangeText, ta.value);
+    semanticRangeText = ta.value;
     refresh(); sync(); clearError(); clearTraceLine();
     schedulePinRender();                                // 줄이 추가/삭제되면 핀 마커 줄 위치 재확정(앵커 기반)
     if (linkedEdit.active) renderLinkedEditRanges(); else clearWordHi();
@@ -1722,9 +1725,10 @@ function buildCodeEditor(text, prof, options={}){
       if (start < starts[line - 1] || end > value.length || value.slice(start, end).indexOf("\n") >= 0) continue;
       const expected = String((item && item.name) || "");
       if (expected && value.slice(start, end) !== expected) continue;
-      next.push({ start, end });
+      next.push({ start, end, name:expected || value.slice(start, end) });
     }
     unusedSemanticRanges = next.sort((a, b) => a.start - b.start || a.end - b.end);
+    semanticRangeText = value;
     refresh(); sync();
   };
   const clearUnusedRanges = () => {

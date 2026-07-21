@@ -31,13 +31,23 @@ test("Python 실시간 진단은 코드를 실행하지 않고 수동 실행 중
   assert.match(viewer, /ui\.destroyLiveDiagnostics/);
 });
 
-test("Python 미사용 선언은 범위 분석 결과로 흐려지고 입력 즉시 오래된 범위를 버린다", () => {
+test("불완전한 Python 문법에서는 기존 미사용 표시를 빈 결과로 덮어쓰지 않는다", () => {
+  const liveStart = viewer.indexOf("const runLiveDiagnostics");
+  const liveEnd = viewer.indexOf("const scheduleLiveDiagnostics", liveStart);
+  const liveRunner = viewer.slice(liveStart, liveEnd);
+  assert.match(runContext, /'unusedReady': __md_tree is not None/);
+  assert.match(runtime, /unusedReady:parsed\.report\.unusedReady === true/);
+  assert.match(liveRunner, /if \(analysis\.unusedReady\) editor\.setUnusedRanges\(analysis\.unused\)/);
+  assert.doesNotMatch(liveRunner, /editor\.clearError\(\); editor\.clearUnusedRanges\(\)/);
+});
+
+test("Python 미사용 선언은 범위 분석 결과로 흐려지고 입력 중 안전한 범위를 유지한다", () => {
   assert.match(runContext, /class _md_Unused/);
   assert.match(runContext, /def _md_resolve\(scope, name\)/);
   assert.match(runContext, /'unused': \(__md_unused\[:500\]/);
   assert.match(runtime, /unused:normalizePythonUnusedRanges\(parsed\.report\.unused\)/);
   assert.match(viewer, /editor\.setUnusedRanges\(analysis\.unused\)/);
-  assert.match(editor, /unusedSemanticRanges = \[\]/);
+  assert.match(editor, /remapTextRangesAfterEdit\(unusedSemanticRanges, semanticRangeText, ta\.value\)/);
   assert.match(editor, /highlightCode\(val, prof, unusedSemanticRanges\)/);
   assert.match(styles, /\.code-host \.tk-unused/);
 });

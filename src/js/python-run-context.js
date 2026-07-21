@@ -1346,7 +1346,7 @@ function buildPythonDiagnosticHarness(source, fileName){
     "        if isinstance(__md_node, __md_ast.While) and isinstance(__md_node.test, __md_ast.Constant) and __md_node.test.value is True:",
     "            __md_add('info', __md_line, __md_col, 'PY-LOOP', '조건이 항상 참인 반복문입니다.', '반복문 안에 도달 가능한 break 또는 종료 조건이 있는지 확인하세요.')",
     "__md_items.sort(key=lambda item: (item['line'], item['column'], {'error': 0, 'warning': 1, 'info': 2}.get(item['severity'], 9)))",
-    "__md_payload = __md_json.dumps({'diagnostics': __md_items[:100], 'unused': (__md_unused[:500] if __md_tree is not None else [])}, ensure_ascii=False).encode('utf-8')",
+    "__md_payload = __md_json.dumps({'diagnostics': __md_items[:100], 'unusedReady': __md_tree is not None, 'unused': (__md_unused[:500] if __md_tree is not None else [])}, ensure_ascii=False).encode('utf-8')",
     "print('" + PY_DIAG_MARKER + "' + __md_b64.b64encode(__md_payload).decode('ascii'))"
   ].join("\n");
 }

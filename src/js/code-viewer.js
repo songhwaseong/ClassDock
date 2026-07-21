@@ -1877,12 +1877,14 @@ async function renderCode(file, host, ext, profile, runCtx){
       const analysis = await runPythonLiveDiagnostics(source, ui.fileBase);
       if (!liveDiagDestroyed && !liveDiagPaused && !ui.running && version === liveDiagVersion && source === editor.getValue()){
         editor.setDiagnosticItems(analysis.diagnostics);
-        editor.setUnusedRanges(analysis.unused);
+        // 문법이 완성돼 AST가 만들어졌을 때만 미사용 판정을 교체한다.
+        // `a.`처럼 입력 중인 SyntaxError에서는 위치 보정한 이전 표시를 유지해 흰색으로 깜빡이지 않게 한다.
+        if (analysis.unusedReady) editor.setUnusedRanges(analysis.unused);
       }
     } catch(_){
       // 자동 진단 실패는 편집을 방해하거나 상태 메시지를 띄우지 않는다.
       if (!liveDiagDestroyed && !liveDiagPaused && version === liveDiagVersion && source === editor.getValue()){
-        editor.clearError(); editor.clearUnusedRanges();
+        editor.clearError();
       }
     } finally {
       liveDiagRunning = false;

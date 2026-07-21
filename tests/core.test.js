@@ -7,7 +7,7 @@ const {
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
   transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-  diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
+  diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
@@ -814,6 +814,29 @@ test("같은 식별자들을 한 번의 편집으로 함께 바꾼다", () => {
   assert.equal(retyped.value, "total = 1\nprint(total)\nscore2 = total\n# score\nlabel = 'score'");
   assert.deepEqual(diffTextEdit(source, source.replace("score", "total")), { start: 0, end: 5, inserted: "total" });
   assert.equal(identifierOccurrences(source, source.indexOf("score2"), source.indexOf("score2") + 6), null);
+});
+
+test("텍스트 편집 뒤 미사용 의미 범위는 안전한 위치만 유지하고 이동한다", () => {
+  const before = "unused = 1\nsecond = 2\nprint('ok')";
+  const ranges = [
+    { start:0, end:6, name:"unused" },
+    { start:11, end:17, name:"second" }
+  ];
+  const prefixed = "# memo\n" + before;
+  assert.deepEqual(remapTextRangesAfterEdit(ranges, before, prefixed), [
+    { start:7, end:13, name:"unused" },
+    { start:18, end:24, name:"second" }
+  ]);
+
+  const touched = before.slice(0, 3) + "X" + before.slice(4);
+  assert.deepEqual(remapTextRangesAfterEdit(ranges, before, touched), [
+    { start:11, end:17, name:"second" }
+  ]);
+
+  const joined = "x" + before;
+  assert.deepEqual(remapTextRangesAfterEdit(ranges, before, joined), [
+    { start:12, end:18, name:"second" }
+  ]);
 });
 
 test("open 대입문 다음에는 작업 줄과 close 호출 계획을 만든다", () => {

@@ -241,11 +241,26 @@
     border-color:color-mix(in srgb,var(--ic) 38%,var(--border))}
   .tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:500;color:#cbd5e1}
   .tab[data-cat] .tab-name{color:color-mix(in srgb,var(--ic) var(--name-tint),#e2e8f0)}
+  .tab-tail{position:relative;flex:0 0 18px;width:18px;height:18px}
   .tab-x{flex:0 0 auto;display:grid;place-items:center;width:18px;height:18px;border:0;background:transparent;
     color:#94a3b8;cursor:pointer;border-radius:4px;font-size:12px;line-height:1}
   .tab-x:hover{background:rgba(255,255,255,.22);color:#fff}
+  /* 저장 안 된 탭 표시: 평소엔 점(●), 마우스 올리면 같은 자리에 닫기(✕)가 나온다. 폭을 ✕와 맞춰 전환 시 흔들림이 없다. */
+  .tab-tail .tab-dot,.tab-tail .tab-x{position:absolute;inset:0}
+  .tab-dot{display:none;place-items:center;color:#fbbf24;font-size:8px;line-height:1;pointer-events:none}
+  .tab.dirty .tab-dot{display:grid}
+  .tab.dirty .tab-x{opacity:0;pointer-events:none}
+  .tab.dirty:hover .tab-dot,.tab.dirty:focus-within .tab-dot{opacity:0}
+  .tab.dirty:hover .tab-x,.tab.dirty:focus-within .tab-x{opacity:1;pointer-events:auto}
+  /* hover가 없는 터치 환경에서는 수정 점과 닫기 버튼을 모두 보여 한 번의 터치로 닫을 수 있게 한다. */
+  @media (hover:none){
+    .tab.dirty .tab-tail{flex-basis:40px;width:40px}
+    .tab.dirty .tab-dot,.tab.dirty:hover .tab-dot,.tab.dirty:focus-within .tab-dot{inset:0 auto 0 0;width:18px;opacity:1}
+    .tab.dirty .tab-x{inset:0 0 0 auto;width:18px;opacity:1;pointer-events:auto}
+  }
   .tab-overflow{position:relative;flex:0 0 auto;margin-left:auto}
-  .tab-more{height:28px;min-width:48px;padding:0 10px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#cbd5e1;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .tab-more{height:28px;min-width:48px;padding:0 10px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#cbd5e1;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .tab-more-dirty,.tab-overflow-dirty{flex:0 0 auto;color:#fbbf24;font-size:9px}
   .tab-more:hover{background:rgba(255,255,255,.14);color:#fff}
   .tab-overflow-menu{position:absolute;right:0;top:calc(100% + 7px);width:min(320px,calc(100vw - 20px));padding:7px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.32)}
   .tab-overflow-menu input{width:100%;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12.5px;outline:none}
@@ -253,7 +268,7 @@
   .tab-overflow-list{max-height:310px;overflow:auto;margin-top:6px}
   .tab-overflow-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
   .tab-overflow-item:hover{background:var(--panel-hover)}
-  .tab-overflow-item>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab-overflow-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tab-overflow-empty{padding:16px 8px;text-align:center;color:var(--muted);font-size:12px}
   /* 탭 우클릭 정리 메뉴 */
   .tab-ctx-menu{position:fixed;z-index:120;min-width:206px;padding:6px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.32)}

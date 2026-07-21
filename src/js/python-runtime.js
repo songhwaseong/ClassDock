@@ -346,6 +346,7 @@ async function runPythonLiveDiagnostics(src, fileName){
   if (!parsed || !parsed.report) throw new Error("live-diagnostic-report-missing");
   return {
     diagnostics:normalizePythonDiagnostics(parsed.report.diagnostics).filter(item => item.severity !== "info"),
+    unusedReady:parsed.report.unusedReady === true,
     unused:normalizePythonUnusedRanges(parsed.report.unused)
   };
 }

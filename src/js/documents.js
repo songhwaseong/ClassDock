@@ -968,6 +968,7 @@ function markDocumentDirty(doc, dirty=true){
   doc.hasUnsavedEdits = next;
   if (doc.id === activeId) updateDocumentStatus(doc);
   if (typeof renderSidebar === "function") renderSidebar();
+  if (typeof renderTabs === "function") renderTabs();   // 탭의 점(●) 표시도 함께 켜고 끈다
 }
 
 function unsavedDocumentLabel(doc){
@@ -1427,7 +1428,8 @@ function renderTabs(){
     tab.draggable = true;
     const cat = extCategory(d.kind, d.name);
     if (cat) tab.dataset.cat = cat;
-    tab.title = d.name + (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
+    tab.title = d.name + (d.hasUnsavedEdits ? " · 저장 후 수정됨" : "") +
+      (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
       " · 드래그: 탭바에서 위치 변경 · 본문 좌우로 끌면 분할 · 우클릭: 탭 정리";
     tab.onclick = () => openDocInTargetPane(d.id);   // 분할 화면이면 마지막 클릭 칸에 열기
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(id, e.clientX, e.clientY); });
@@ -1463,16 +1465,34 @@ function renderTabs(){
     tab.addEventListener("dragend", resetDocumentDragState);
     const ic = document.createElement("span"); ic.className = "tab-ic"; ic.textContent = iconFor(d.kind, d.name);
     const nm = document.createElement("span"); nm.className = "tab-name"; nm.textContent = d.name;
+    // 수정된 탭은 오른쪽 끝에 점(●)을 보이고, 마우스를 올리면 그 자리에 닫기(✕)가 나온다(사이드바 표시와 톤 통일).
+    const dot = document.createElement("span"); dot.className = "tab-dot"; dot.textContent = "●";
+    dot.setAttribute("aria-hidden", "true");
+    if (d.hasUnsavedEdits) tab.classList.add("dirty");
     const x = document.createElement("button"); x.className = "tab-x"; x.textContent = "✕";
     x.title = id === studyPdfId ? "탭 닫기 및 분할 작업 종료(파일은 사이드바에 유지)" : "탭만 닫기(파일은 사이드바에 유지)";
     x.onclick = (e) => { e.stopPropagation(); untabDoc(d.id); };
-    tab.append(ic, nm, x);
+    const tail = document.createElement("span"); tail.className = "tab-tail"; tail.append(dot, x);
+    tab.append(ic, nm, tail);
     bar.appendChild(tab);
   });
   if (hiddenIds.length){
     const wrap = document.createElement("div"); wrap.className = "tab-overflow";
     const more = document.createElement("button"); more.type = "button"; more.className = "tab-more";
-    more.textContent = "+" + hiddenIds.length; more.title = "숨겨진 탭 " + hiddenIds.length + "개";
+    const hiddenDirtyCount = hiddenIds.reduce((count, id) => {
+      const doc = docs.find(d => d.id === id);
+      return count + (doc && doc.hasUnsavedEdits ? 1 : 0);
+    }, 0);
+    const moreCount = document.createElement("span"); moreCount.textContent = "+" + hiddenIds.length;
+    more.appendChild(moreCount);
+    more.title = "숨겨진 탭 " + hiddenIds.length + "개";
+    if (hiddenDirtyCount){
+      const moreDirty = document.createElement("span"); moreDirty.className = "tab-more-dirty";
+      moreDirty.textContent = "●" + hiddenDirtyCount; moreDirty.setAttribute("aria-hidden", "true");
+      more.appendChild(moreDirty);
+      more.title += " · 저장 후 수정됨 " + hiddenDirtyCount + "개";
+      more.setAttribute("aria-label", more.title);
+    }
     const menu = document.createElement("div"); menu.className = "tab-overflow-menu"; menu.hidden = true;
     const search = document.createElement("input"); search.type = "search"; search.placeholder = "숨겨진 탭 검색";
     search.setAttribute("aria-label", "숨겨진 탭 검색");
@@ -1485,8 +1505,14 @@ function renderTabs(){
         if (!doc || (query && !doc.name.toLocaleLowerCase().includes(query))) return;
         const item = document.createElement("button"); item.type = "button"; item.className = "tab-overflow-item";
         const badge = document.createElement("span"); badge.className = "tab-ic"; badge.textContent = iconFor(doc.kind, doc.name);
-        const name = document.createElement("span"); name.textContent = doc.name;
-        item.append(badge, name); item.onclick = () => openDocInTargetPane(id); list.appendChild(item); count++;
+        const name = document.createElement("span"); name.className = "tab-overflow-name"; name.textContent = doc.name;
+        item.append(badge, name);
+        if (doc.hasUnsavedEdits){
+          const dirty = document.createElement("span"); dirty.className = "tab-overflow-dirty"; dirty.textContent = "●";
+          dirty.setAttribute("aria-hidden", "true"); item.appendChild(dirty);
+          item.title = doc.name + " · 저장 후 수정됨"; item.setAttribute("aria-label", item.title);
+        }
+        item.onclick = () => openDocInTargetPane(id); list.appendChild(item); count++;
       });
       if (!count){ const empty = document.createElement("div"); empty.className = "tab-overflow-empty"; empty.textContent = "일치하는 탭이 없습니다."; list.appendChild(empty); }
     };

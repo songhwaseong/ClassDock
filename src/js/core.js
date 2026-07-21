@@ -1181,6 +1181,34 @@
     return { start, end: oldEnd, inserted: newText.slice(start, newEnd) };
   }
 
+  // 비동기 의미 분석 결과의 문자 범위를 한 번의 텍스트 편집 뒤 새 위치로 옮긴다.
+  // 직접 건드린 범위는 오래된 판정을 표시하지 않도록 버리고, 앞/뒤의 안전한 범위만 유지한다.
+  function remapTextRangesAfterEdit(ranges, before, after) {
+    const oldText = String(before || ""), newText = String(after || "");
+    const edit = diffTextEdit(oldText, newText);
+    if (edit.start === edit.end && !edit.inserted) return Array.isArray(ranges) ? ranges.slice() : [];
+    const delta = edit.inserted.length - (edit.end - edit.start);
+    const isIdentifierChar = (ch) => !!ch && /[A-Za-z0-9_\u0080-\uFFFF]/.test(ch);
+    const next = [];
+    for (const raw of Array.isArray(ranges) ? ranges : []) {
+      const start = Math.max(0, parseInt(raw && raw.start, 10) || 0);
+      const end = Math.max(start, parseInt(raw && raw.end, 10) || 0);
+      if (end <= start || end > oldText.length) continue;
+      let mappedStart;
+      if (end <= edit.start) mappedStart = start;
+      else if (start >= edit.end) mappedStart = start + delta;
+      else continue;
+      const mappedEnd = mappedStart + (end - start);
+      if (mappedStart < 0 || mappedEnd > newText.length) continue;
+      const name = String((raw && raw.name) || oldText.slice(start, end));
+      if (name && newText.slice(mappedStart, mappedEnd) !== name) continue;
+      // 식별자 바로 옆에 식별자 문자가 붙으면 이전 이름의 일부만 흐려지는 오표시가 되므로 버린다.
+      if (name && (isIdentifierChar(newText[mappedStart - 1]) || isIdentifierChar(newText[mappedEnd]))) continue;
+      next.push({ ...raw, start:mappedStart, end:mappedEnd, name });
+    }
+    return next;
+  }
+
   function editorHistoryCaretState(state, value, selectionStart, selectionEnd) {
     if (!state || state.value !== String(value || "")) return state;
     const length = state.value.length;
@@ -2830,7 +2858,7 @@
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
-    diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
+    diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
