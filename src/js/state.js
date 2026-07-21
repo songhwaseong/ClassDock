@@ -10,7 +10,7 @@ const {
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
-  normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, normalizePythonVariables,
+  normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,

@@ -2461,6 +2461,18 @@
     return !!actual && actual === normalizeShortcut(shortcut);
   }
 
+  // Python 편집기 실행 결과 패널의 방향 단축키를 DOM과 분리해 판별한다.
+  // Alt+Shift만 정확히 누른 경우에만 처리해 Ctrl/Win 조합과 편집기 기본 선택을 보존한다.
+  function pythonOutputShortcutCommand(event) {
+    if (!event || event.isComposing || !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return "";
+    return ({
+      ArrowLeft: "show-right",
+      ArrowUp: "show-below",
+      ArrowRight: "hide-right",
+      ArrowDown: "hide-below"
+    })[String(event.key || "")] || "";
+  }
+
   function normalizePythonVariables(items, maxItems=80, maxValueLength=600) {
     if (!Array.isArray(items)) return [];
     const result = [], seen = new Set();
@@ -2820,7 +2832,7 @@
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
-    suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
+    suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,

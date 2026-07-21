@@ -1513,9 +1513,42 @@ async function renderCode(file, host, ext, profile, runCtx){
     layoutBtn.setAttribute("aria-label", layoutBtn.title);
     syncOutputHideIcon(outputStacked);
   };
+  const saveOutputLayout = () => {
+    try { localStorage.setItem("pythonSplitDir", outputStacked ? "col" : "row"); } catch(e){}
+  };
+  const hasOutputContent = () => Array.from(outPanel.children).some((child) =>
+    child !== outHideBtn && !(child.classList && child.classList.contains("code-pen-overlay"))
+  );
+  const handleOutputDirectionShortcut = (e) => {
+    const command = typeof pythonOutputShortcutCommand === "function" ? pythonOutputShortcutCommand(e) : "";
+    if (!command) return false;
+    e.preventDefault(); e.stopPropagation();
+    if (e.repeat) return true;
+    if (command === "show-right" || command === "show-below") {
+      outputStacked = command === "show-below";
+      saveOutputLayout();
+      applyOutputLayout();
+      if (hasOutputContent()) {
+        split.classList.add("show-out");
+        layoutBtn.hidden = false;
+      } else {
+        split.classList.remove("show-out");
+        toast(_T(outputStacked
+          ? "실행하면 결과를 아래에 표시합니다."
+          : "실행하면 결과를 오른쪽에 표시합니다."), 2600);
+      }
+      return true;
+    }
+    const hidingMatchingLayout = split.classList.contains("show-out") &&
+      ((command === "hide-right" && !outputStacked) || (command === "hide-below" && outputStacked));
+    if (hidingMatchingLayout) split.classList.remove("show-out");
+    return true;
+  };
+  // 코드 입력뿐 아니라 실행 버튼·대화형 결과에 포커스가 있어도 같은 패널 안에서는 동작한다.
+  outer.addEventListener("keydown", (e) => { handleOutputDirectionShortcut(e); });
   layoutBtn.addEventListener("click", () => {
     outputStacked = !outputStacked;
-    try { localStorage.setItem("pythonSplitDir", outputStacked ? "col" : "row"); } catch(e){}
+    saveOutputLayout();
     applyOutputLayout();
     split.classList.add("show-out");
   });

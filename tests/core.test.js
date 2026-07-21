@@ -10,7 +10,7 @@ const {
   diffTextEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
-  suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent,
+  suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
   normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
@@ -250,6 +250,16 @@ test("사용자 단축키를 일관된 형식으로 정규화하고 키 이벤�
   assert.equal(shortcutMatchesEvent({ key:"Enter", ctrlKey:true }, "Ctrl+Enter"), true);
   assert.equal(shortcutMatchesEvent({ key:"Enter", altKey:true }, "Ctrl+Enter"), false);
   assert.equal(shortcutMatchesEvent({ key:"Enter", ctrlKey:true, shiftKey:true }, "Ctrl+Shift+Enter"), true);
+});
+
+test("Python 결과 패널 방향 단축키는 Alt+Shift+방향키만 허용한다", () => {
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowLeft", altKey:true, shiftKey:true }), "show-right");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowUp", altKey:true, shiftKey:true }), "show-below");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowRight", altKey:true, shiftKey:true }), "hide-right");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowDown", altKey:true, shiftKey:true }), "hide-below");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowRight", altKey:true }), "");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowRight", altKey:true, shiftKey:true, ctrlKey:true }), "");
+  assert.equal(pythonOutputShortcutCommand({ key:"ArrowRight", altKey:true, shiftKey:true, isComposing:true }), "");
 });
 
 test("아카이브 안의 상대 경로를 문서 기준으로 계산한다", () => {
