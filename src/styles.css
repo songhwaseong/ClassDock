@@ -1996,6 +1996,10 @@
   .run-fontpick{min-width:0;width:auto;max-width:160px;padding:6px 8px;font-weight:500;cursor:pointer;
     appearance:auto;-webkit-appearance:auto}
   .run-newpy{padding:6px 9px;min-width:42px;font-weight:700;text-align:center}
+  .run-warning-toggle{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:0 8px;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);color:var(--muted);font-size:12px;white-space:nowrap;cursor:pointer;user-select:none}
+  .run-warning-toggle:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-warning-toggle input{margin:0;accent-color:#f59e0b;cursor:pointer}
   .run-layout{padding:6px 9px;min-width:54px;line-height:1.2;text-align:center}
   .run-diag{padding:6px 9px;min-width:58px;font-weight:650;text-align:center}
   .run-diag.is-ok{border-color:rgba(22,163,74,.35);color:#15803d;background:rgba(22,163,74,.08)}
@@ -2520,6 +2524,7 @@
   .run-split .code-host{margin:0;max-width:none;flex:0 1 var(--run-editor-width);min-width:0}
   .run-split:not(.show-out) .code-host{flex:1 1 100%}
   .run-split:not(.show-out) .code-output,.run-split:not(.show-out) .run-divider{display:none}
+  .run-split.hide-python-warnings .out-warn{display:none}
   .run-divider{flex:0 0 12px;position:relative;cursor:col-resize;touch-action:none;outline:0}
   .run-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:2px;border-radius:2px;background:var(--border)}
   .run-divider:hover::before,.run-divider.dragging::before,.run-divider:focus-visible::before{left:4px;width:4px;background:var(--accent)}

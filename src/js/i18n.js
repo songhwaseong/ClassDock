@@ -668,6 +668,8 @@
     "키보드 단축키": "Keyboard shortcuts",
     "결과 패널 닫기": "Close the result panel",
     "실행 결과 숨기기": "Hide run output",
+    "경고 표시": "Show warnings",
+    "정상 실행 뒤 발생한 Python 경고를 실행 결과에 표시": "Show Python warnings from successful runs in the run output",
     "실행하면 결과를 오른쪽에 표시합니다.": "Run the code to show its output on the right.",
     "실행하면 결과를 아래에 표시합니다.": "Run the code to show its output below.",
     "실행 결과 오른쪽 표시 / 숨기기": "Show / hide run output on the right",

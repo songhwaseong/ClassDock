@@ -361,9 +361,11 @@ function buildRunPayload(src, stdin){
 }
 
 function pythonStderrClassName(stderr, status){
-  const kind = (typeof classifyPythonStderr === "function")
-    ? classifyPythonStderr(stderr, status)
-    : (stderr ? "error" : "none");
+  const kind = (typeof pythonStderrDisplayKind === "function")
+    ? pythonStderrDisplayKind(stderr, status)
+    : (status == null && String(stderr || "").trim()
+      ? "pending"
+      : (typeof classifyPythonStderr === "function" ? classifyPythonStderr(stderr, status) : (stderr ? "error" : "none")));
   return kind === "warning" ? "out-warn" : kind === "error" ? "out-err" : "";
 }
 
@@ -386,7 +388,7 @@ async function runPythonInteractive(src, bundle, ui, hooks){
   const headLabel = document.createElement("span"); headLabel.textContent = "실행 결과 · 대화형 터미널"; head.appendChild(headLabel);
   const pre = document.createElement("pre"); pre.className = "out-pre";
   const stdoutEl = document.createElement("span");
-  const stderrEl = document.createElement("span"); stderrEl.className = "out-warn";
+  const stderrEl = document.createElement("span");
   pre.append(stdoutEl, stderrEl);
   const row = document.createElement("div"); row.className = "terminal-input-row";
   const mark = document.createElement("span"); mark.className = "terminal-mark"; mark.textContent = "›";
@@ -476,7 +478,13 @@ async function runPythonInteractive(src, bundle, ui, hooks){
         knownErrLen = fullErr.length;
         const toShow = data.complete ? displayText : liveText;
         const nextOut = toShow(fullOut);
-        const nextErr = fullErr ? ((fullOut ? "\n" : "") + toShow(fullErr)) : "";
+        const showWarnings = !ui.split.classList.contains("hide-python-warnings");
+        const pendingStderrHidden = (typeof pythonStderrShouldBuffer === "function")
+          ? pythonStderrShouldBuffer(data.complete, showWarnings)
+          : (!data.complete && !showWarnings);
+        // 경고 표시를 껐을 때는 종료 전 stderr를 화면에 쓰지 않는다. 완료 후에는 내용을 DOM에
+        // 보존하고 out-warn 클래스만 숨겨, 체크를 다시 켜면 재실행 없이 경고를 볼 수 있게 한다.
+        const nextErr = (!pendingStderrHidden && fullErr) ? ((fullOut ? "\n" : "") + toShow(fullErr)) : "";
         if (nextOut !== shownOut || nextErr !== shownErr){
           // 사용자가 위로 스크롤해 둔 동안에는 자동 스크롤을 멈추고, 바닥 근처일 때만 따라 내려간다
           const nearBottom = outPanel.scrollHeight - outPanel.scrollTop - outPanel.clientHeight < 40;

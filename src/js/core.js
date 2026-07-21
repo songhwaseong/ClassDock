@@ -2021,6 +2021,19 @@
     return "warning";
   }
 
+  // 대화형 실행 중에는 아직 종료 코드를 모르므로 stderr를 경고나 오류로 단정하지 않는다.
+  // 표시 여부는 실행 화면에서 결정하고, 종료 코드가 나온 뒤 최종 색상과 숨김 여부를 확정한다.
+  function pythonStderrDisplayKind(stderr, status) {
+    const text = String(stderr || "");
+    if (!text.trim()) return "none";
+    if (status == null) return "pending";
+    return classifyPythonStderr(text, status);
+  }
+
+  function pythonStderrShouldBuffer(complete, showWarnings) {
+    return complete !== true && showWarnings === false;
+  }
+
   function explainPythonError(stderr) {
     const lines = String(stderr || "").trim().split(/\r?\n/).filter(Boolean);
     let type = "", message = "";
@@ -2859,7 +2872,7 @@
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
-    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, explainPythonError, contentMatchSnippet,
+    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,

@@ -1305,9 +1305,18 @@ async function renderCode(file, host, ext, profile, runCtx){
   const newPyBtn = document.createElement("button"); newPyBtn.className = "run-newpy"; newPyBtn.type = "button"; newPyBtn.textContent = "+Py";
   newPyBtn.dataset.shortcutAction = "newPython"; newPyBtn.dataset.shortcutTitle = newPyTitle; newPyBtn.dataset.shortcutAria = "true";
   newPyBtn.addEventListener("click", () => { if (typeof newPythonScratch === "function") newPythonScratch(); });
+  // 정상 종료된 stderr 경고만 결과에서 숨기는 표시 설정. 실행 중 stderr는 보류하고 실제 오류는 완료 뒤 표시한다.
+  const warningToggle = document.createElement("label"); warningToggle.className = "run-warning-toggle";
+  const warningCheckbox = document.createElement("input"); warningCheckbox.type = "checkbox";
+  const warningText = document.createElement("span"); warningText.textContent = "경고 표시";
+  let showPythonWarnings = true;
+  try { showPythonWarnings = localStorage.getItem("pythonShowWarnings") !== "0"; } catch(_){}
+  warningCheckbox.checked = showPythonWarnings;
+  warningToggle.title = "정상 실행 뒤 발생한 Python 경고를 실행 결과에 표시";
+  warningToggle.append(warningCheckbox, warningText);
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
   attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
   syncShortcutHints(bar);
 
@@ -1407,6 +1416,19 @@ async function renderCode(file, host, ext, profile, runCtx){
   inputWrap.append(inputLabel, inputFields, inputHint, stdin);
 
   const split = document.createElement("div"); split.className = "run-split";
+  const applyWarningVisibility = (syncOpenEditors) => {
+    showPythonWarnings = warningCheckbox.checked;
+    split.classList.toggle("hide-python-warnings", !showPythonWarnings);
+    if (syncOpenEditors){
+      document.querySelectorAll(".run-warning-toggle input[type=checkbox]").forEach((input) => { input.checked = showPythonWarnings; });
+      document.querySelectorAll(".run-split").forEach((runSplit) => runSplit.classList.toggle("hide-python-warnings", !showPythonWarnings));
+    }
+  };
+  applyWarningVisibility();
+  warningCheckbox.addEventListener("change", () => {
+    applyWarningVisibility(true);
+    try { localStorage.setItem("pythonShowWarnings", showPythonWarnings ? "1" : "0"); } catch(_){}
+  });
   const divider = document.createElement("div"); divider.className = "run-divider";
   divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
   const outPanel = document.createElement("div"); outPanel.className = "code-output";
