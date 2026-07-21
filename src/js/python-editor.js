@@ -447,6 +447,7 @@ function buildCodeEditor(text, prof, options={}){
   };
   const completion = { items: [], index: 0, start: 0, end: 0, manual: false };
   let completionTimer = 0;
+  let pendingAutoParen = -1;   // 자동완성으로 방금 () 가 삽입된 커서 위치(그 직후 ( 중복입력 방지용). 다른 편집·이동 시 -1 로 무효화.
   const hideCompletion = () => {
     clearTimeout(completionTimer); completionTimer = 0;
     complete.hidden = true; complete.textContent = ""; completion.items = []; completion.manual = false;
@@ -551,6 +552,21 @@ function buildCodeEditor(text, prof, options={}){
     const match = ta.value.slice(0, end).match(/[A-Za-z_][A-Za-z0-9_]*$/);
     return { prefix: match ? match[0] : "", start: end - (match ? match[0].length : 0), end };
   };
+  // 커서가 파이썬 주석(#) 안에 있으면 자동완성을 띄우지 않는다. 현재 줄만 훑되
+  // 따옴표 안의 #(문자열 리터럴)은 주석으로 보지 않는다.
+  const caretInComment = (caret) => {
+    if (prof !== "hash") return false;                    // # 주석을 쓰는 프로필(파이썬)만 대상
+    const before = ta.value.slice(0, caret);
+    const line = before.slice(before.lastIndexOf("\n") + 1);
+    let quote = "";
+    for (let i = 0; i < line.length; i++){
+      const ch = line[i];
+      if (quote){ if (ch === quote) quote = ""; continue; }
+      if (ch === "'" || ch === '"'){ quote = ch; continue; }
+      if (ch === "#") return true;
+    }
+    return false;
+  };
   const positionCompletion = () => {
     const before = ta.value.slice(0, completion.end);
     const line = before.slice(before.lastIndexOf("\n") + 1);
@@ -647,6 +663,7 @@ function buildCodeEditor(text, prof, options={}){
     completionSeq++;                                       // 진행 중이던 Jedi 응답 무효화
     const word = completionWord();
     if (!word){ hideCompletion(); return; }
+    if (caretInComment(word.end)){ hideCompletion(); return; }   // 주석 안에서는 자동완성하지 않음
     const dotContext = word.start > 0 && ta.value[word.start - 1] === ".";   // obj. 처럼 멤버 접근 문맥
     if (!manual && !dotContext && word.prefix.length < 1){ hideCompletion(); return; }
     completion.manual = manual;
@@ -694,6 +711,9 @@ function buildCodeEditor(text, prof, options={}){
         })();
     ta.value = application.value;
     ta.selectionStart = ta.selectionEnd = application.caret;
+    // 함수 수락으로 빈 () 가 자동 삽입되어 커서가 그 안에 놓였으면, 바로 뒤 ( 중복입력을 막을 위치로 기록.
+    const caret = application.caret;
+    pendingAutoParen = (ta.value[caret - 1] === "(" && ta.value[caret] === ")") ? caret : -1;
     hideCompletion(); emitInput(); scrollCaretIntoView();
   }
   const insertPair = (open, close) => {
@@ -1538,6 +1558,7 @@ function buildCodeEditor(text, prof, options={}){
 
   ta.addEventListener("keydown", (e) => {
     rememberHistoryCaret();
+    const autoParenSpot = pendingAutoParen; pendingAutoParen = -1;   // 자동 () 중복방지 표식은 다음 키 입력 한 번만 유효(one-shot)
     if (!help.hidden && e.key === "Escape"){ e.preventDefault(); hideHelp(); return; }   // 도움말 열려 있으면 Esc 로 먼저 닫기
     if (linkedEdit.active){
       if (e.key === "Escape"){
@@ -1640,6 +1661,12 @@ function buildCodeEditor(text, prof, options={}){
       }
       if ((e.key === '"' || e.key === "'") && start === end && ta.value[start] === e.key){
         e.preventDefault(); ta.selectionStart = ta.selectionEnd = start + 1; return;
+      }
+      // 함수 자동완성이 방금 넣어 준 빈 () 안에서 곧바로 ( 를 누르면 print(()) 처럼 중복되므로,
+      // 그 한 번만 무시한다(같은 위치·직후에만 성립 → 튜플 인자 print((1,2)) 등 일반 중첩은 그대로 동작).
+      if (e.key === "(" && start === end && start === autoParenSpot
+          && ta.value[start - 1] === "(" && ta.value[start] === ")"){
+        e.preventDefault(); return;
       }
       if (pairs[e.key]){
         // 자동 닫기 짝 붙이기 — 단, 선택 없이 커서 바로 뒤가 '단어 문자'면 여는 문자만 넣는다
