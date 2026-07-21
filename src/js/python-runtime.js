@@ -97,10 +97,26 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         const targetRel = String(runCtx.relPath).replace(/\\/g, "/").replace(/^\/+/, "");
         // 폴더 묶음(makeFileSiblingCtx)이면 실행 대상과 관련된 하위 트리로 좁혀서 읽는다(무관한 폴더·대용량 데이터 제외).
         const preferredCwd = pythonPreferredRunCwd(runCtx);
-        const scopeFilter = runCtx.archiveCtx.paths
+        let scopeFilter = runCtx.archiveCtx.paths
           ? buildArchiveScopeFilter(targetRel, studentSource, runCtx.archiveCtx.paths, runCtx.archiveCtx.directories || [], preferredCwd)
           : null;
         let files = await runCtx.archiveCtx.extract(scopeFilter || undefined);
+        if (scopeFilter){
+          const expandedFilter = expandArchiveScopeFilterFromPythonFiles(
+            targetRel,
+            studentSource,
+            runCtx.archiveCtx.paths,
+            runCtx.archiveCtx.directories || [],
+            preferredCwd,
+            files,
+            scopeFilter
+          );
+          if (expandedFilter !== scopeFilter){
+            scopeFilter = expandedFilter;
+            try { files = await runCtx.archiveCtx.extract(scopeFilter); }
+            catch(e){ console.warn("indirect python path expansion skipped:", e); }
+          }
+        }
         throwIfCancelled();
         files = mergeRuntimeFiles(runCtx, files, scopeFilter || undefined);
         // 같은 묶음의 옆 파일을 앱에서 열어 편집했으면, 업로드/압축 당시 내용 대신 '현재 편집기 내용'으로 덮어쓴다

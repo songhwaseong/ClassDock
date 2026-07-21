@@ -131,7 +131,37 @@ function buildArchiveScopeFilter(targetRel, src, availablePaths, availableDirs=[
   keep.cwd = project.cwd || targetDir;
   keep.references = project.references;
   keep.directories = [...referencedDirs];
+  // The first pass only knows the entry script. Keep the local import roots so
+  // a second pass can inspect those modules for their own relative paths.
+  keep.pythonDependencyRoots = [...pkgDirs];
   return keep;
+}
+
+// Imported helpers can read or write relative paths that never appear in the
+// entry script (for example Utility/keras_graph_util.py -> ../dataOut/). After
+// the first scoped extraction, inspect only the imported local module roots and
+// rebuild the scope with their source included. This preserves the small bundle
+// while ensuring referenced directories/files are restored in the temp project.
+function expandArchiveScopeFilterFromPythonFiles(targetRel, src, availablePaths, availableDirs, preferredCwd, files, initialFilter){
+  const roots = initialFilter && Array.isArray(initialFilter.pythonDependencyRoots)
+    ? initialFilter.pythonDependencyRoots.map(normalizedRunPath).filter(Boolean)
+    : [];
+  if (!roots.length || !Array.isArray(files) || !files.length) return initialFilter;
+  const decoder = new TextDecoder("utf-8");
+  const dependencySources = [];
+  for (const file of files){
+    const path = normalizedRunPath(file && file.path);
+    if (!/\.py$/i.test(path) || !roots.some(root => path === root || runPathStartsWith(path, root))) continue;
+    try { dependencySources.push(decoder.decode(file.bytes)); } catch(_){}
+  }
+  if (!dependencySources.length) return initialFilter;
+  return buildArchiveScopeFilter(
+    targetRel,
+    String(src || "") + "\n" + dependencySources.join("\n"),
+    availablePaths,
+    availableDirs,
+    preferredCwd
+  );
 }
 
 function normalizedRunPath(path){
