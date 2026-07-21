@@ -75,27 +75,30 @@ test("복실고양이 벽 충돌은 좌우를 뒤집고 반드시 위쪽 대각�
   assert.ok(leftWall.vy < 0);
 });
 
-test("짧은 클릭은 점프 대신 그루밍과 '배고프다냐옹' 말풍선을 시작한다", () => {
+test("짧은 클릭은 점프 대신 그루밍과 저장된 복실고양이 대사를 시작한다", () => {
   const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8");
   const start = source.indexOf("function petStartFluffyGroom");
   const end = source.indexOf("\n// 벽 꼭대기", start);
   assert.ok(start >= 0 && end > start);
   let said = null;
+  let translated = null;
   let remembered = false;
   const context = {
     petRememberFluffyCatSeen:() => { remembered = true; },
-    petSay:(_pet, text) => { said = text; }
+    petRandomSaying:(pet, fallback) => pet.sayings && pet.sayings[1] || fallback,
+    petSay:(_pet, text, translate) => { said = text; translated = translate; }
   };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end) + ";globalThis.groom=petStartFluffyGroom;", context);
-  const pet = { kind:"fluffyCat", state:"walk", timer:0, t:20, vx:2, vy:1, rot:3, squash:0.2 };
+  const pet = { kind:"fluffyCat", sayings:["배고프다냐옹", "추르달라냥"], state:"walk", timer:0, t:20, vx:2, vy:1, rot:3, squash:0.2 };
   context.groom(pet);
   assert.equal(pet.state, "groom");
   assert.equal(pet.timer, 126);
   assert.equal(pet.vx, 0);
   assert.equal(pet.vy, 0);
   assert.equal(remembered, true);
-  assert.equal(said, "배고프다냐옹");
+  assert.equal(said, "추르달라냥");
+  assert.equal(translated, false);
   assert.match(source, /p\.kind === "fluffyCat" \|\| p\.kind === "calicoCat"\)\{ petStartFluffyGroom\(p\); \}/);
 });
 

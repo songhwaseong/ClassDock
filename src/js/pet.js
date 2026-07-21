@@ -357,7 +357,7 @@ function petStartFluffyGroom(p){
   p.vx = 0; p.vy = 0; p.rot = 0; p.squash = 0;
   if (p.kind === "fluffyCat"){
     petRememberFluffyCatSeen();
-    petSay(p, "배고프다냐옹");
+    petSay(p, petRandomSaying(p, "배고프다냐옹"), false);
   } else {
     petSay(p, petRandomSaying(p), false);
   }
