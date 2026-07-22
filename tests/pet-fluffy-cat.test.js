@@ -35,7 +35,47 @@ test("복실고양이는 24프레임 전용 시트와 정확한 대사를 제공
   assert.deepEqual(Array.from(fluffy.spriteSheet.frames.wallBounce), [12, 13, 14, 15]);
   assert.deepEqual(Array.from(fluffy.spriteSheet.frames.land), [16, 17]);
   assert.deepEqual(Array.from(fluffy.spriteSheet.frames.groom), [18, 19, 20, 21, 22, 23]);
+  assert.equal(fluffy.spriteSheet.frameMs.walk, 90);
+  assert.equal(fluffy.spriteSheet.frameMs.diagonalFly, 116.67);
+  assert.deepEqual(Array.from(fluffy.spriteSheet.frameOffsets[6]), [2, 18]);
+  assert.deepEqual(Array.from(fluffy.spriteSheet.frameOffsets[11]), [2, 18]);
   assert.deepEqual(Array.from(fluffy.sayings), ["배고프다냐옹"]);
+});
+
+test("복실고양이 시간 배율은 화면 주사율과 무관하게 60Hz 물리 시간으로 환산한다", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("function petFrameScale");
+  const end = source.indexOf("\n\n// ----- 발판 수집", start);
+  assert.ok(start >= 0 && end > start);
+  const context = { PET_BASE_FRAME_MS:1000 / 60 };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end) + ";globalThis.frameScale=petFrameScale;", context);
+
+  assert.ok(Math.abs(context.frameScale(1000 / 60) - 1) < 1e-9);
+  assert.ok(Math.abs(context.frameScale(1000 / 120) - 0.5) < 1e-9);
+  assert.equal(context.frameScale(1000 / 20), 2, "긴 프레임은 두 틱까지만 따라잡는다");
+  assert.equal(context.frameScale(500), 1, "탭 복귀 간격은 한 틱으로 안전하게 처리한다");
+});
+
+test("복실고양이는 걷기 속도에서 비행 목표 속도로 완만하게 이륙한다", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("function petStartFluffyFlight");
+  const end = source.indexOf("\nfunction petFluffyWallBounce", start);
+  assert.ok(start >= 0 && end > start);
+  const context = { PET_WALK:1.05, Math };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end) + ";globalThis.startFlight=petStartFluffyFlight;", context);
+
+  const pet = { state:"walk", face:1, t:12, vx:0, vy:0, support:{}, rot:2, squash:0.2 };
+  context.startFlight(pet);
+  assert.equal(pet.state, "diagonalFly");
+  assert.equal(pet.flightStartVx, 1.05);
+  assert.equal(pet.flightStartVy, 0);
+  assert.ok(pet.flightTargetVx > pet.flightStartVx);
+  assert.ok(pet.flightTargetVy < 0);
+  assert.equal(pet.flightEase, 0);
+  assert.equal(pet.vx, pet.flightStartVx);
+  assert.equal(pet.vy, 0);
 });
 
 test("복실고양이 PNG는 6×4 RGBA 셀 시트이며 오프라인 빌드 대상이다", () => {
@@ -110,6 +150,8 @@ test("다중 행 스프라이트 렌더링과 비행·착지 상태가 엔진에
   assert.match(source, /petFluffyWallBounce\(p, -1\)/);
   assert.match(source, /petFluffyWallBounce\(p, 1\)/);
   assert.match(source, /p\.state = "land"; p\.timer = 14/);
+  assert.match(source, /p\.spriteDrawFrame !== frameIndex/);
+  assert.match(source, /petDraw\(p, w\.frameDeltaMs\)/);
 });
 
 test("복실고양이는 직접 클릭하기 전까지 우선 등장하고 이후에는 무작위 순서를 유지한다", () => {

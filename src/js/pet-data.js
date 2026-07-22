@@ -836,6 +836,12 @@ const PET_SPECIES = [
   { kind:"fluffyCat", art:PET_ART.fluffyCat, gridW:32, gridH:32, pixelScale:3, width:96, height:96,
     spriteSheet:{
       src:"src/assets/fluffy-cat-sprites-v2.png", cellW:96, cellH:96, cols:6,
+      frameMs:{ idle:120, walk:90, diagonalFly:116.67, wallBounce:116.67, land:90, groom:100, jump:116.67, fall:116.67 },
+      // 비행 그림은 셀 안에서 걷기 그림보다 약 18px 위에 있다.
+      // 모든 비행 프레임을 똑같이 내리면 원래의 작은 몸짓은 보존하면서 이륙·착지 순간이동만 줄어든다.
+      frameOffsets:{
+        6:[2,18], 7:[2,18], 8:[2,18], 9:[2,18], 10:[2,18], 11:[2,18]
+      },
       frames:{
         idle:[5], walk:[0,1,2,3,4,5],
         diagonalFly:[6,7,8,9,10,11], wallBounce:[12,13,14,15], land:[16,17],

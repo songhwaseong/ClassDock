@@ -33,6 +33,7 @@
 const PET_SCALE = 3, PET_GW = 15, PET_GH = 11;
 const PET_W = PET_GW * PET_SCALE, PET_H = PET_GH * PET_SCALE;   // 45×33
 const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 12;
+const PET_BASE_FRAME_MS = 1000 / 60;
 // 아저씨가 벽 꼭대기에서 선반으로 건너뛸 때: 살짝 솟구쳤다 떨어지고, 가로 속도는 이 상한을 넘지 않는다
 const PET_HOP_VX = 5.2, PET_HOP_VY = -3.6;
 const PET_FPS_MIN = 42, PET_FPS_FLOOR = 3, PET_FPS_TRIGGER_MS = 2500;   // 저사양 자동 하향: FPS가 이 아래로 약 2.5초 지속되면 마릿수를 절반으로
@@ -52,6 +53,13 @@ const PET_PLATFORM_SELECTORS = [
 
 let petWorld = null;      // 켜져 있을 때만 { pets:[…], platforms, mouse, raf, … } 가 존재한다
 let petTraceCount = 0;    // 낙서·점액·흙 흔적 개수 상한용
+
+// 복실·삼색고양이 전용 시간 배율. 60Hz를 1로 두고 긴 프레임은 두 틱까지만 따라잡아
+// 순간적인 탭 복귀나 멈춤 뒤에 화면을 가로질러 튀는 것을 막는다.
+function petFrameScale(dt){
+  if (!(dt > 0) || dt >= 250) return 1;
+  return Math.min(2, dt / PET_BASE_FRAME_MS);
+}
 
 // ----- 발판 수집: 화면 바닥 + 보이는 UI 요소들의 윗변(모든 펫이 공유) -----
 function petCollectPlatforms(){
@@ -109,10 +117,9 @@ function petSmoke(x, y){
 const PET_MOVING_STATES = ["walk", "seekwall", "climb", "ceiling", "float",
   "stalk", "chase", "zoomies", "dash", "fly", "ceilwalk", "descend", "ascend", "reel",
   "flee", "chute", "diagonalFly", "wallBounce", "land", "groom"];
-function petDraw(p){
+function petDraw(p, frameDeltaMs = PET_BASE_FRAME_MS){
   const ctx = p.ctx;
   const pw = p.w || PET_W, ph = p.h || PET_H, ps = p.pixelScale || PET_SCALE;
-  ctx.clearRect(0, 0, pw, ph);
   const moving = PET_MOVING_STATES.includes(p.state);
   const wob = moving && !p.motionArt ? Math.round(Math.sin(p.t * 0.5) * 1.5) : 0;
   const motionState = p.state === "seekwall" ? "walk" : p.state;
@@ -123,17 +130,33 @@ function petDraw(p){
   if (p.spriteSheet && p.spriteImage && p.spriteImage.complete && p.spriteImage.naturalWidth > 0){
     const sf = p.spriteSheet.frames[motionState] || p.spriteSheet.frames.idle;
     if (sf && sf.length){
-      const frameIndex = sf[Math.floor(p.t / 7) % sf.length];
+      if (p.spriteAnimState !== motionState){
+        p.spriteAnimState = motionState;
+        p.spriteAnimMs = 0;
+      } else {
+        p.spriteAnimMs = (p.spriteAnimMs || 0) + Math.min(50, Math.max(0, frameDeltaMs));
+      }
+      const stateFrameMs = p.spriteSheet.frameMs && p.spriteSheet.frameMs[motionState] || 100;
+      const frameIndex = sf[Math.floor((p.spriteAnimMs || 0) / stateFrameMs) % sf.length];
       const cols = p.spriteSheet.cols || Math.max(1, Math.floor(p.spriteImage.naturalWidth / p.spriteSheet.cellW));
-      const sourceX = (frameIndex % cols) * p.spriteSheet.cellW;
-      const sourceY = Math.floor(frameIndex / cols) * p.spriteSheet.cellH;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(p.spriteImage, sourceX, sourceY,
-        p.spriteSheet.cellW, p.spriteSheet.cellH, 0, 0, pw, ph);
+      if (p.spriteDrawFrame !== frameIndex){
+        const sourceX = (frameIndex % cols) * p.spriteSheet.cellW;
+        const sourceY = Math.floor(frameIndex / cols) * p.spriteSheet.cellH;
+        const offset = p.spriteSheet.frameOffsets && p.spriteSheet.frameOffsets[frameIndex] || [0, 0];
+        const offsetX = offset[0] * pw / p.spriteSheet.cellW;
+        const offsetY = offset[1] * ph / p.spriteSheet.cellH;
+        ctx.clearRect(0, 0, pw, ph);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(p.spriteImage, sourceX, sourceY,
+          p.spriteSheet.cellW, p.spriteSheet.cellH, offsetX, offsetY, pw, ph);
+        p.spriteDrawFrame = frameIndex;
+      }
       spriteDrawn = true;
     }
   }
   if (!spriteDrawn){
+    p.spriteDrawFrame = null;
+    ctx.clearRect(0, 0, pw, ph);
     for (let r = 0; r < drawArt.length; r++){
       const row = drawArt[r];
       for (let c = 0; c < row.length; c++){
@@ -336,11 +359,16 @@ function petCheer(p, say, mayFloat){
 // 복실·삼색고양이 공용 행동: 걷다가 대각선으로 이륙하고, 클릭하면 앞발로 얼굴을 닦는다.
 // boost>1 이면 더 빠르고 오래 난다(삼색고양이).
 function petStartFluffyFlight(p, boost = 1){
+  const launchFromWalk = p.state === "walk";
   p.face = p.face < 0 ? -1 : 1;
   p.state = "diagonalFly"; p.t = 0;
   p.airTimer = (420 + Math.random() * 240) * boost;
-  p.vx = p.face * (2.05 + Math.random() * 0.5) * boost;
-  p.vy = -(1.3 + Math.random() * 0.4) * boost;
+  p.flightStartVx = launchFromWalk ? p.face * PET_WALK : 0;
+  p.flightStartVy = 0;
+  p.flightTargetVx = p.face * (2.05 + Math.random() * 0.5) * boost;
+  p.flightTargetVy = -(1.3 + Math.random() * 0.4) * boost;
+  p.flightEase = 0;
+  p.vx = p.flightStartVx; p.vy = p.flightStartVy;
   p.support = null; p.rot = 0; p.squash = 0;
 }
 
@@ -349,6 +377,7 @@ function petFluffyWallBounce(p, side){
   p.face = side < 0 ? 1 : -1;
   p.vx = p.face * speed;
   p.vy = -Math.max(1.25, Math.abs(p.vy) || 1.4);
+  p.flightEase = 1;
   p.state = "wallBounce"; p.timer = 24; p.t = 0; p.pop = 5;
 }
 
@@ -1069,12 +1098,14 @@ function petBirdFly(p, w){
 
 // ----- 물리·상태 기계: 펫 한 마리의 한 프레임 -----
 function petUpdate(p, w){
-  p.t++;
-  if (p.blink > 0) p.blink--;
-  else if (!p.off && Math.random() < 0.008) p.blink = 8;
-  if (p.squash > 0) p.squash = Math.max(0, p.squash - 0.06);
-  if (p.pop > 0) p.pop--;
-  if (p.cool > 0) p.cool--;                                    // 고양이 사냥 쿨타임
+  const smoothCat = p.kind === "fluffyCat" || p.kind === "calicoCat";
+  const step = smoothCat ? (w.frameScale || 1) : 1;
+  p.t += step;
+  if (p.blink > 0) p.blink = Math.max(0, p.blink - step);
+  else if (!p.off && Math.random() < 0.008 * step) p.blink = 8;
+  if (p.squash > 0) p.squash = Math.max(0, p.squash - 0.06 * step);
+  if (p.pop > 0) p.pop = Math.max(0, p.pop - step);
+  if (p.cool > 0) p.cool = Math.max(0, p.cool - step);          // 고양이 사냥 쿨타임
   if (p.cheerArt && !PET_CHEER_POSE_STATES.includes(p.state) && p.art !== p.baseArt) p.art = p.baseArt;   // 만세가 끊기면(붙잡힘 등) 원래 그림으로
   if (p.petEvent) return;                                      // 숨겨진 조합 연출은 이벤트 감독이 좌표를 움직인다
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
@@ -1133,7 +1164,7 @@ function petUpdate(p, w){
     // 종족별 걸음 맵시: 달팽이·거북이=엉금엉금, 카멜레온=느긋, 뱀=꿈틀꿈틀 맥동
     const wf = p.kind === "snail" ? 0.25 : p.kind === "chameleon" ? 0.5
       : p.kind === "snake" ? (0.7 + Math.sin(p.t * 0.15) * 0.5) : 1;
-    p.x += p.face * walk * wf;
+    p.x += p.face * walk * wf * step;
     if (p.kind === "roller") p.roll += p.face * 4 * p.speed;   // 별·축구공·주사위는 걸을수록 구른다
     if (p.kind === "penguin") p.rot = Math.sin(p.t * 0.35) * 8;                    // 뒤뚱뒤뚱
     if (p.kind === "snake") p.rot = Math.sin(p.t * 0.3) * 3;                       // 스르륵 몸짓
@@ -1152,16 +1183,25 @@ function petUpdate(p, w){
       }
       if (p.x <= 0){ p.x = 0; p.face = 1; }
       if (p.x >= vw - pw){ p.x = vw - pw; p.face = -1; }
-      if (--p.timer <= 0) petPickAction(p, w);
+      p.timer -= step;
+      if (p.timer <= 0) petPickAction(p, w);
     }
   }
   else if (p.state === "idle"){
-    if (--p.timer <= 0) petPickAction(p, w);
+    p.timer -= step;
+    if (p.timer <= 0) petPickAction(p, w);
   }
   else if (p.state === "diagonalFly" || p.state === "wallBounce"){
-    p.x += p.vx * p.speed;
-    p.y += p.vy * p.speed;
-    p.rot = -p.face * 7 + Math.sin(p.t * 0.18) * 2;
+    let launchMix = 1;
+    if (p.state === "diagonalFly" && p.flightEase < 1){
+      p.flightEase = Math.min(1, (p.flightEase || 0) + step / 9);
+      launchMix = 1 - Math.pow(1 - p.flightEase, 3);
+      p.vx = p.flightStartVx + (p.flightTargetVx - p.flightStartVx) * launchMix;
+      p.vy = p.flightStartVy + (p.flightTargetVy - p.flightStartVy) * launchMix;
+    }
+    p.x += p.vx * p.speed * step;
+    p.y += p.vy * p.speed * step;
+    p.rot = (-p.face * 7 + Math.sin(p.t * 0.18) * 2) * launchMix;
 
     if (p.x <= 0 && p.vx < 0){
       p.x = 0;
@@ -1181,14 +1221,17 @@ function petUpdate(p, w){
       p.vy = -Math.max(1.05, Math.abs(p.vy) * 0.88);
       p.pop = 4;
     }
-    if (p.state === "wallBounce" && --p.timer <= 0){ p.state = "diagonalFly"; p.t = 0; }
-    if (--p.airTimer <= 0){
+    if (p.state === "wallBounce") p.timer -= step;
+    if (p.state === "wallBounce" && p.timer <= 0){ p.state = "diagonalFly"; p.t = 0; }
+    p.airTimer -= step;
+    if (p.airTimer <= 0){
       p.state = "fall"; p.vy = Math.max(0, p.vy); p.vx *= 0.35; p.rot = 0; p.t = 0;
     }
   }
   else if (p.state === "groom"){                               // 클릭 반응: 앞발을 핥고 얼굴을 닦는 동작을 세 번 반복
     p.rot = Math.sin(p.t * 0.12) * 1.5;
-    if (--p.timer <= 0){
+    p.timer -= step;
+    if (p.timer <= 0){
       p.rot = 0;
       const support = petFindSupport(p, w.platforms);
       if (support){
@@ -1200,7 +1243,8 @@ function petUpdate(p, w){
     }
   }
   else if (p.state === "land"){                                // 비행·낙하 뒤 두 프레임으로 가볍게 자세를 가다듬는다
-    if (--p.timer <= 0) petPickAction(p, w);
+    p.timer -= step;
+    if (p.timer <= 0) petPickAction(p, w);
   }
   else if (p.state === "reboot"){                              // 로봇 방전: 눈이 꺼진 채 멈췄다가 다시 켜진다
     if (p.timer === 20){ p.off = false; p.blink = 0; }
@@ -1446,7 +1490,7 @@ function petUpdate(p, w){
       return;
     }
     const prevFeet = p.y + ph;
-    p.vy += PET_GRAV; p.x += p.vx; p.y += p.vy;
+    p.vy += PET_GRAV * step; p.x += p.vx * step; p.y += p.vy * step;
     if (p.x < 0){ p.x = 0; p.vx *= -0.6; p.face = 1; }
     if (p.x > vw - pw){ p.x = vw - pw; p.vx *= -0.6; p.face = -1; }
     if (p.kind === "roller") p.roll += p.vx * 3;
@@ -1484,6 +1528,8 @@ function petWorldStep(w){
   const now = performance.now();
   const dt = w.fpsLast ? now - w.fpsLast : 0;
   w.fpsLast = now;
+  w.frameDeltaMs = dt > 0 && dt < 250 ? dt : PET_BASE_FRAME_MS;
+  w.frameScale = petFrameScale(dt);
   if (dt > 0 && dt < 1000){                                     // 탭 복귀 등 비정상 간격(>1s)은 무시
     const fps = 1000 / dt;
     w.fpsEma = w.fpsEma ? w.fpsEma * 0.9 + fps * 0.1 : fps;
@@ -1494,7 +1540,7 @@ function petWorldStep(w){
   }
   if (--w.refresh <= 0){ w.platforms = petCollectPlatforms(); w.refresh = 30; }   // 발판은 0.5초마다 갱신
   if (!petWorldIsQuiet(w) || w.event) petEventTick(w);
-  for (const p of w.pets){ petUpdate(p, w); petDraw(p); }
+  for (const p of w.pets){ petUpdate(p, w); petDraw(p, w.frameDeltaMs); }
   w.raf = requestAnimationFrame(() => petWorldStep(w));
 }
 
