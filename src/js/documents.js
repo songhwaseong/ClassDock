@@ -468,8 +468,50 @@ function navigateTab(delta){
   if (next != null && next !== activeId) setActiveDoc(next);
 }
 
-// 학습 화면에서 PDF·코드의 좌우 위치를 바꾼 상태(저장)
+// 학습 화면의 배치 방향과 두 칸의 위치를 바꾼 상태(저장)
+let studyStacked = (() => { try { return localStorage.getItem("studySplitDirection") === "stack"; } catch(e){ return false; } })();
 let studySwapped = (() => { try { return localStorage.getItem("studySwapped") === "1"; } catch(e){ return false; } })();
+function studyUsesStackedLayout(){
+  return studyStacked || (typeof matchMedia === "function" && matchMedia("(max-width: 900px)").matches);
+}
+function updateStudyDirectionControls(){
+  const stacked = studyUsesStackedLayout();
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const direction = byId("studyDirectionToggle");
+  if (direction){
+    const label = _t(studyStacked ? "좌우 분할로 전환" : "상하 분할로 전환");
+    direction.title = label;
+    direction.setAttribute("aria-label", label);
+    direction.setAttribute("aria-pressed", String(studyStacked));
+  }
+  const swap = byId("studyRoleSwap");
+  if (swap){
+    const label = _t(stacked ? "참고와 작업 화면 위아래 위치 바꾸기" : "참고와 작업 화면 좌우 위치 바꾸기");
+    swap.title = label + _t(" (분할바 더블클릭과 동일)");
+    swap.setAttribute("aria-label", label);
+  }
+}
+function setStudyStacked(v){
+  studyStacked = !!v;
+  try { localStorage.setItem("studySplitDirection", studyStacked ? "stack" : "side"); } catch(e){}
+  const content = byId("content");
+  content.classList.toggle("study-stacked", content.classList.contains("study-mode") && studyStacked);
+  if (content._studyDivider && typeof content._studyDivider._setStudyDirection === "function")
+    content._studyDivider._setStudyDirection(studyStacked);
+  updateStudyDirectionControls();
+  const zone = content._splitDrop;
+  if (zone && !zone.hidden) showSplitDropZone();
+  if (typeof showStudyControls === "function") showStudyControls();
+  const ref = docs.find(d => d.id === studyPdfId);
+  if (ref && ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));
+}
+if (typeof window !== "undefined") window.addEventListener("mni18nchange", () => {
+  updateStudyDirectionControls();
+  const content = byId("content");
+  if (content && content._studyDivider && typeof content._studyDivider._setStudyDirection === "function")
+    content._studyDivider._setStudyDirection(content.classList.contains("study-stacked"));
+  if (content && content._splitDrop && !content._splitDrop.hidden) showSplitDropZone();
+});
 function setStudySwapped(v){
   studySwapped = !!v;
   try { localStorage.setItem("studySwapped", studySwapped ? "1" : "0"); } catch(e){}
@@ -532,7 +574,7 @@ function setupStudyPaneTracker(){
 
 // 사이드바·상단 탭에서 파일 클릭 시 공용 진입점: 분할 화면이면 마지막 클릭 칸 기준으로 연다.
 // - 타깃 칸에 이미 떠 있는 문서 → 그대로 유지
-// - 반대 칸에 떠 있는 문서 → 좌우 역할 교대(스왑)
+// - 반대 칸에 떠 있는 문서 → 두 칸의 역할 교대(스왑)
 // - 그 외 문서 → 타깃 칸의 문서만 교체(반대 칸은 유지)
 function openDocInTargetPane(id){
   const action = studyPaneSelectionAction(studyPdfId, activeId, studyTargetPane, id);
@@ -581,6 +623,16 @@ function dropTabIntoPane(id, role){
   }
 }
 
+function configureSplitDropZone(zone, stacked){
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  zone.classList.toggle("stack", stacked);
+  zone.querySelectorAll(".split-drop-half").forEach((half, index) => {
+    half.dataset.side = stacked ? (index === 0 ? "top" : "bottom") : (index === 0 ? "left" : "right");
+    const role = splitDropRoleForSide(half.dataset.side, studySwapped);
+    half.querySelector("span").textContent = _t(role === "reference" ? "참고 칸에 고정" : "작업 칸에서 열기");
+  });
+}
+
 // 탭 드래그 중에만 #content 를 덮는 투명 판. 오피스·스프레드시트 뷰어는 iframe 이라 덮개가 없으면
 // 그 위에서 dragover 가 부모 문서로 오지 않는다(파일 드롭 오버레이가 화면 전체를 덮는 것과 같은 이유).
 function setupSplitDropZone(){
@@ -596,27 +648,40 @@ function setupSplitDropZone(){
     half.appendChild(document.createElement("span"));
     zone.appendChild(half);
   });
-  const sideAt = (clientX) => {
+  const sideAt = (clientX, clientY) => {
     const rect = zone.getBoundingClientRect();
+    let stacked = studyUsesStackedLayout();
+    if (!content.classList.contains("study-mode")){
+      const dx = Math.abs((clientX - (rect.left + rect.width / 2)) / Math.max(1, rect.width));
+      const dy = Math.abs((clientY - (rect.top + rect.height / 2)) / Math.max(1, rect.height));
+      stacked = dy > dx;  // 첫 분할은 포인터가 더 가까운 화면 가장자리 방향을 사용한다.
+    }
+    if (stacked) return clientY < rect.top + rect.height / 2 ? "top" : "bottom";
     return clientX < rect.left + rect.width / 2 ? "left" : "right";
   };
+  const clearSide = () => zone.classList.remove("on-left", "on-right", "on-top", "on-bottom");
   zone.addEventListener("dragover", (e) => {
     if (draggedTabId === null || !isInternalDragTransfer(e.dataTransfer, true)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    const side = sideAt(e.clientX);
+    const side = sideAt(e.clientX, e.clientY);
+    if (!content.classList.contains("study-mode")) configureSplitDropZone(zone, side === "top" || side === "bottom");
+    clearSide();
     zone.classList.toggle("on-left", side === "left");
     zone.classList.toggle("on-right", side === "right");
+    zone.classList.toggle("on-top", side === "top");
+    zone.classList.toggle("on-bottom", side === "bottom");
   });
   zone.addEventListener("dragleave", (e) => {
     if (e.target !== zone) return;
-    zone.classList.remove("on-left", "on-right");
+    clearSide();
   });
   zone.addEventListener("drop", (e) => {
     if (draggedTabId === null || !isInternalDragTransfer(e.dataTransfer, true)) return;
     e.preventDefault(); e.stopPropagation();
     const id = draggedTabId;
-    const side = sideAt(e.clientX);
+    const side = sideAt(e.clientX, e.clientY);
+    if (!content.classList.contains("study-mode")) setStudyStacked(side === "top" || side === "bottom");
     resetDocumentDragState();
     dropTabIntoPane(id, splitDropRoleForSide(side, studySwapped));
   });
@@ -625,16 +690,13 @@ function setupSplitDropZone(){
   return zone;
 }
 
-// 각 반쪽에 그 칸의 이름을 띄운다 — 좌우 바꾸기 상태에 따라 참고/작업 위치가 달라지므로 매번 갱신.
+// 각 반쪽에 그 칸의 이름을 띄운다 — 분할 방향과 위치 바꾸기 상태에 따라 매번 갱신.
 function showSplitDropZone(){
-  if (matchMedia("(max-width: 900px)").matches) return;   // 좁은 화면은 위아래 분할 — 좌우 안내가 맞지 않는다
   if (!docs.length) return;
   const zone = setupSplitDropZone();
-  zone.querySelectorAll(".split-drop-half").forEach(half => {
-    const role = splitDropRoleForSide(half.dataset.side, studySwapped);
-    half.querySelector("span").textContent = role === "reference" ? "참고 칸에 고정" : "작업 칸에서 열기";
-  });
-  zone.classList.remove("on-left", "on-right");
+  const stacked = studyUsesStackedLayout();
+  configureSplitDropZone(zone, stacked);
+  zone.classList.remove("on-left", "on-right", "on-top", "on-bottom");
   zone.hidden = false;
 }
 function hideSplitDropZone(){
@@ -642,33 +704,52 @@ function hideSplitDropZone(){
   const zone = content && content._splitDrop;
   if (!zone) return;
   zone.hidden = true;
-  zone.classList.remove("on-left", "on-right");
+  zone.classList.remove("on-left", "on-right", "on-top", "on-bottom");
 }
 
-// 학습 화면 좌(PDF)·우(코드) 비율 조절 분할바 — #content 에 한 번만 만들고 드래그로 --study-split 갱신(저장)
+// 학습 화면 비율 조절 분할바 — 좌우/상하 방향별 비율을 기억하고 포인터 축을 바꿔 사용한다.
 function setupStudyDivider(){
   const content = byId("content");
   if (content._studyDivider) return content._studyDivider;
   const divider = document.createElement("div");
   divider.className = "study-divider";
-  divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
+  divider.setAttribute("role", "separator"); divider.tabIndex = 0;
   divider.setAttribute("aria-valuemin", "20"); divider.setAttribute("aria-valuemax", "80");
-  divider.title = "드래그: 좌우 비율 조절 · 더블클릭: 좌우 바꾸기";
-  let ratio = 50;
-  try { const s = Number(localStorage.getItem("studySplitRatio")); if (s >= 20 && s <= 80) ratio = s; } catch(e){}
+  let sideRatio = 50, stackRatio = 50;
+  try {
+    const side = Number(localStorage.getItem("studySplitRatio"));
+    const stack = Number(localStorage.getItem("studyStackSplitRatio"));
+    if (side >= 20 && side <= 80) sideRatio = side;
+    if (stack >= 20 && stack <= 80) stackRatio = stack;
+  } catch(e){}
+  const isStacked = () => content.classList.contains("study-stacked");
   const apply = (next) => {
-    ratio = Math.max(20, Math.min(80, next));
+    const ratio = Math.max(20, Math.min(80, next));
+    if (isStacked()) stackRatio = ratio; else sideRatio = ratio;
     content.style.setProperty("--study-split", ratio + "%");
     divider.setAttribute("aria-valuenow", String(Math.round(ratio)));
   };
-  const save = () => { try { localStorage.setItem("studySplitRatio", String(ratio)); } catch(e){} };
-  apply(ratio);
+  const save = () => {
+    try {
+      localStorage.setItem(isStacked() ? "studyStackSplitRatio" : "studySplitRatio", String(isStacked() ? stackRatio : sideRatio));
+    } catch(e){}
+  };
+  divider._setStudyDirection = (stacked) => {
+    const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+    divider.setAttribute("aria-orientation", stacked ? "horizontal" : "vertical");
+    divider.title = _t(stacked
+      ? "드래그: 위아래 비율 조절 · 더블클릭: 위아래 바꾸기"
+      : "드래그: 좌우 비율 조절 · 더블클릭: 좌우 바꾸기");
+    apply(stacked ? stackRatio : sideRatio);
+  };
+  divider._setStudyDirection(isStacked());
   divider.addEventListener("pointerdown", (e) => {
     if (matchMedia("(max-width: 900px)").matches) return;          // 모바일은 세로 고정 분할
     if (!e.isPrimary || e.button !== 0) return;
     e.preventDefault();
     const rect = content.getBoundingClientRect();
-    const startX = e.clientX;
+    const stacked = isStacked();
+    const startPoint = stacked ? e.clientY : e.clientX;
     const pointerId = e.pointerId;
     let dragging = false;
     // 분할바가 8px로 좁으므로 누르는 즉시 캡처해야 첫 move 전에 바깥으로 빠져도
@@ -677,12 +758,14 @@ function setupStudyDivider(){
     const move = (ev) => {
       if (ev.pointerId !== pointerId) return;
       if (!dragging){
-        if (Math.abs(ev.clientX - startX) < 4) return;
+        if (Math.abs((stacked ? ev.clientY : ev.clientX) - startPoint) < 4) return;
         dragging = true;
         divider.classList.add("dragging");
       }
       ev.preventDefault();
-      apply(((ev.clientX - rect.left) / rect.width) * 100);
+      apply(stacked
+        ? ((ev.clientY - rect.top) / rect.height) * 100
+        : ((ev.clientX - rect.left) / rect.width) * 100);
     };
     const up = (ev) => {
       if (ev.pointerId !== pointerId) return;
@@ -695,10 +778,15 @@ function setupStudyDivider(){
     };
     divider.addEventListener("pointermove", move); divider.addEventListener("pointerup", up); divider.addEventListener("pointercancel", up);
   });
-  divider.addEventListener("dblclick", () => setStudySwapped(!studySwapped));   // 더블클릭: PDF·코드 좌우 바꾸기
+  divider.addEventListener("dblclick", () => setStudySwapped(!studySwapped));
   divider.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault(); apply(ratio + (e.key === "ArrowLeft" ? -2 : 2)); save();
+    const stacked = isStacked();
+    const decrease = stacked ? e.key === "ArrowUp" : e.key === "ArrowLeft";
+    const increase = stacked ? e.key === "ArrowDown" : e.key === "ArrowRight";
+    if (!decrease && !increase) return;
+    e.preventDefault();
+    apply((stacked ? stackRatio : sideRatio) + (decrease ? -2 : 2));
+    save();
   });
   content.appendChild(divider);
   content._studyDivider = divider;
@@ -725,12 +813,15 @@ function applyStudyLayout(){
   const split = !!(ref && work && ref.id !== work.id);
   content.classList.toggle("study-mode", split);
   content.classList.toggle("study-reference-locked", split && studyReferenceLocked);
-  content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 좌우 배치 적용
+  content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 위치 교체 적용
+  content.classList.toggle("study-stacked", split && studyStacked);   // 저장된 좌우/상하 방향 적용
   content.classList.toggle("study-ref-nonpdf", !!(split && ref && ref.kind !== "pdf"));  // 참고가 PDF가 아니면 PDF 전용 컨트롤(필기·페이지) 숨김
   if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
     setupStudyDivider();                       // 분할바 준비(저장된 비율 적용)
+    if (content._studyDivider && typeof content._studyDivider._setStudyDirection === "function")
+      content._studyDivider._setStudyDirection(studyStacked);
     setupStudyPaneTracker();                   // 칸 클릭 → 타깃 칸 추적(한 번만 설치)
     ref.el.hidden = false;
     ref.el.classList.add("study-reference");
@@ -764,6 +855,7 @@ function applyStudyLayout(){
   const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
   btn.textContent = _t(ref ? "분할 작업 종료" : "분할 작업");
   btn.title = _t(ref ? "참고 문서 고정을 해제하고 일반 화면으로 돌아가기" : "현재 문서를 참고 화면에 고정하고 작업 문서와 나란히 보기");
+  updateStudyDirectionControls();
   // 참고 칸 왼쪽 위 잠금 열쇠: 상태(잠김/열림)만 갱신(표시 여부는 CSS + 모서리 호버가 결정)
   const chipLock = byId("studyChipLock");
   if (chipLock){

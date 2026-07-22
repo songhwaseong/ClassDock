@@ -22,11 +22,15 @@ test("분할 문서 선택은 타깃 칸 유지·역할 교체·한쪽 교체를
   assert.equal(studyPaneSelectionAction(1, 2, "work", 3), "replace-work");
 });
 
-test("드롭한 칸의 역할은 좌우 바꾸기 상태를 따라간다", () => {
+test("드롭한 칸의 역할은 방향과 위치 바꾸기 상태를 따라간다", () => {
   assert.equal(splitDropRoleForSide("left", false), "reference");
   assert.equal(splitDropRoleForSide("right", false), "work");
+  assert.equal(splitDropRoleForSide("top", false), "reference");
+  assert.equal(splitDropRoleForSide("bottom", false), "work");
   assert.equal(splitDropRoleForSide("left", true), "work");
   assert.equal(splitDropRoleForSide("right", true), "reference");
+  assert.equal(splitDropRoleForSide("top", true), "work");
+  assert.equal(splitDropRoleForSide("bottom", true), "reference");
 });
 
 test("분할 중 탭 드롭은 유지·역할 교대·한쪽 교체를 구분한다", () => {
@@ -83,18 +87,35 @@ test("참고 잠금은 복사·선택·키보드 탐색만 통과시킨다", () 
 
 test("모바일 교체 배치는 참고와 작업의 위아래 영역을 완전히 지정한다", () => {
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
-  assert.match(css, /#content\.study-mode\.study-swapped \.study-reference\{left:0;right:0;top:50%;bottom:0;/);
-  assert.match(css, /#content\.study-mode\.study-swapped \.study-work\{left:0;right:0;top:0;bottom:50%\}/);
-  assert.match(css, /#content\.study-mode\.study-swapped \.study-ref-lock\{left:12px;top:calc\(50% \+ 10px\)\}/);
+  assert.match(css, /#content\.study-mode\.study-swapped \.study-reference\{left:0!important;right:0!important;top:50%!important;bottom:0!important;/);
+  assert.match(css, /#content\.study-mode\.study-swapped \.study-work\{left:0!important;right:0!important;top:0!important;bottom:50%!important\}/);
+  assert.match(css, /#content\.study-mode\.study-swapped \.study-ref-lock\{left:12px!important;top:calc\(50% \+ 10px\)!important\}/);
 });
 
-test("분할바는 누르는 즉시 포인터를 캡처해 빠른 좌우 드래그도 놓치지 않는다", () => {
+test("상하 분할은 높이 비율·가로 분할바·위아래 드롭 판정을 사용한다", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+  assert.match(css, /#content\.study-mode\.study-stacked \.study-reference\{left:0;right:0;top:0;bottom:calc\(100% - var\(--study-split,50%\)\)/);
+  assert.match(css, /#content\.study-mode\.study-stacked \.study-divider\{left:0;right:0;top:var\(--study-split,50%\);bottom:auto;width:auto;height:8px/);
+  assert.match(docs, /stacked = dy > dx/);
+  assert.match(docs, /setStudyStacked\(side === "top" \|\| side === "bottom"\)/);
+  assert.match(docs, /if \(stacked\) return clientY < rect\.top \+ rect\.height \/ 2 \? "top" : "bottom"/);
+  assert.match(docs, /studyStackSplitRatio/);
+  assert.match(docs, /aria-orientation", stacked \? "horizontal" : "vertical"/);
+  assert.match(html, /id="studyDirectionToggle"/);
+});
+
+test("분할바는 누르는 즉시 포인터를 캡처해 빠른 방향별 드래그도 놓치지 않는다", () => {
   const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
   const down = docs.slice(
     docs.indexOf('divider.addEventListener("pointerdown"'),
     docs.indexOf('divider.addEventListener("dblclick"')
   );
   assert.match(down, /const pointerId = e\.pointerId;/);
+  assert.match(down, /const startPoint = stacked \? e\.clientY : e\.clientX;/);
+  assert.match(down, /ev\.clientY - rect\.top/);
+  assert.match(down, /ev\.clientX - rect\.left/);
   assert.match(down, /divider\.setPointerCapture\(pointerId\)/);
   assert.ok(
     down.indexOf("divider.setPointerCapture(pointerId)") < down.indexOf('const move = (ev) =>'),

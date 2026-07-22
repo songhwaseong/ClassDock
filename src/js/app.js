@@ -244,7 +244,7 @@ function wire(){
   byId("btnCheck").onclick = () => addTextElement("check", { fontSize: 30, color: "#16a34a", bold: true, text: "✓" });
   byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
-  // 좌우 위치 바꾸기는 분할바 더블클릭으로 통합(중복 버튼 제거) — setupStudyDivider 참고
+  // 분할 방향과 위치 교체는 분할 경계의 버튼 및 분할바에서 제어한다.
   byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
@@ -262,8 +262,11 @@ function wire(){
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
-  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우 위치 바꾸기(참고=PDF 유지 → 필기·페이지 컨트롤이 PDF를 따라 이동)
+  if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우/위아래 위치 바꾸기
     if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
+  };
+  if (byId("studyDirectionToggle")) byId("studyDirectionToggle").onclick = () => {
+    if (typeof setStudyStacked === "function") setStudyStacked(!studyStacked);
   };
   if (byId("studyChipLock")) byId("studyChipLock").onclick = () => {         // 참고 칩의 잠금 토글
     if (typeof setStudyReferenceLocked === "function") setStudyReferenceLocked(!studyReferenceLocked);

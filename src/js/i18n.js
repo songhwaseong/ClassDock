@@ -135,6 +135,10 @@
     "참고 문서 읽기 전용 잠금": "Lock reference read-only",
     "참고·작업 화면 좌우 위치 바꾸기 (분할바 더블클릭과 동일)": "Swap reference/working sides (same as double-clicking the divider)",
     "참고와 작업 화면 좌우 위치 바꾸기": "Swap reference and working sides",
+    "참고와 작업 화면 위아래 위치 바꾸기": "Swap reference and working top/bottom positions",
+    " (분할바 더블클릭과 동일)": " (same as double-clicking the divider)",
+    "상하 분할로 전환": "Switch to top/bottom split",
+    "좌우 분할로 전환": "Switch to side-by-side split",
     "PDF에서 찾기": "Find in PDF",
 
     // 시작 화면(드롭존)
@@ -841,7 +845,10 @@
 
     // ── 긴 꼬리: 문서·탭·분할(documents.js) ──
     "⛶ 나가기": "⛶ Exit",
-    "드래그: 좌우 비율 조절 · 더블클릭: 좌우 바꾸기": "Drag: adjust ratio · double-click: swap sides",
+    "드래그: 좌우 비율 조절 · 더블클릭: 좌우 바꾸기": "Drag: adjust side ratio · double-click: swap sides",
+    "드래그: 위아래 비율 조절 · 더블클릭: 위아래 바꾸기": "Drag: adjust top/bottom ratio · double-click: swap positions",
+    "참고 칸에 고정": "Pin in reference pane",
+    "작업 칸에서 열기": "Open in working pane",
     "먼저 참고할 문서를 연 뒤 분할 작업을 눌러주세요.": "Open a document to reference first, then click Split view.",
     "묶음 전체 닫기": "Close the whole bundle",
     "문서를 참고 화면에 고정했어요. 참고 문서는 읽기 전용으로 잠겨 있어요. 편집하려면 참고 칸 왼쪽 위 열쇠를 눌러 잠금을 푸세요.": "Pinned the document as a reference. The reference is locked read-only. To edit it, click the key at the top-left of the reference pane to unlock.",
@@ -1219,7 +1226,7 @@
     "help.f3": "<b>Run Python</b> — run instantly with ▶, autocomplete & go-to-definition, <b>step run</b> to trace variables, <b>diagnose</b> and <b>auto-grade</b>, even install libraries.",
     "help.f4": "<b>Jupyter notebook (.ipynb)</b> — run cells one by one (Shift+Enter) in kernel mode, carrying variables to the next cell.",
     "help.f5": "<b>Whiteboard</b> — free ink, shapes, and images. Add it from New.",
-    "help.f6": "<b>Split view</b> — put any document side by side with a reference, and lock the reference when needed to adjust the split ratio and sides.",
+    "help.f6": "<b>Split view</b> — view any document with a reference side by side or top and bottom, then lock the reference and adjust the split ratio or positions.",
     "help.f7": "<b>Scratchpad</b> (Ctrl+M) · <b>image notes</b> (paste many captures, save in bulk) · <b>dark mode</b> · auto-restore workspace. Everything is processed on this computer only and files are never sent anywhere.",
     "ss.desc": "Choose a video to play (<strong>multiple loop in order</strong>), or show a clock animation if none. <strong>MP4 (H.264) / WebM recommended</strong> — unplayable files are filtered before saving. Videos are stored in this browser only, independent of the app (exe/HTML) size."
   };

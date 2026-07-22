@@ -2829,9 +2829,10 @@
     return pane === "reference" ? "replace-reference" : "replace-work";
   }
 
-  // 화면에서 본 좌/우 중 어느 쪽이 어느 역할의 칸인지. 좌우 바꾸기(swapped)면 자리가 뒤집힌다.
+  // 화면에서 본 첫 칸(왼쪽/위쪽)이 어느 역할인지. 위치 바꾸기(swapped)면 자리가 뒤집힌다.
   function splitDropRoleForSide(side, swapped) {
-    return (side === "left") !== !!swapped ? "reference" : "work";
+    const first = side === "left" || side === "top";
+    return first !== !!swapped ? "reference" : "work";
   }
 
   // 상단 탭을 본문 칸에 끌어다 놓았을 때 수행할 상태 전이를 DOM과 분리해 결정한다.

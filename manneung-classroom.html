@@ -222,6 +222,10 @@
     <button class="study-role-swap" id="studyRoleSwap" type="button" title="참고·작업 화면 좌우 위치 바꾸기 (분할바 더블클릭과 동일)" aria-label="참고와 작업 화면 좌우 위치 바꾸기">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13m0 0-3-3m3 3-3 3"></path><path d="M20 16H7m0 0 3-3m-3 3 3 3"></path></svg>
     </button>
+    <button class="study-direction-toggle" id="studyDirectionToggle" type="button" title="상하 분할로 전환" aria-label="상하 분할로 전환" aria-pressed="false">
+      <span class="study-direction-stack" aria-hidden="true">↕</span>
+      <span class="study-direction-side" aria-hidden="true">↔</span>
+    </button>
     <span class="page-ctl view-page-ctl" id="pageCtl" title="페이지 번호 입력 후 Enter로 이동">
       <span class="zoom-ctl">
         <button id="zoomOut" type="button" title="축소 (Ctrl+-)">－</button>
@@ -575,7 +579,7 @@
     <li data-i18n="help.f3"><b>Python 실행</b> — ▶로 바로 실행, 자동완성·정의 이동, <b>단계 실행</b>으로 변수 추적, <b>진단</b>과 <b>자동 채점</b>, 라이브러리 설치까지.</li>
     <li data-i18n="help.f4"><b>Jupyter 노트북(.ipynb)</b> — 셀 하나씩 실행(Shift+Enter)하면 변수가 다음 셀로 이어지는 커널 모드.</li>
     <li data-i18n="help.f5"><b>화이트보드</b> — 자유 필기·도형·이미지로 판서. 새로 만들기에서 추가.</li>
-    <li data-i18n="help.f6"><b>분할 작업</b> — 어떤 문서든 참고 화면과 나란히 보고, 필요할 때만 참고 문서를 잠가 분할 비율·좌우 위치를 조절.</li>
+    <li data-i18n="help.f6"><b>분할 작업</b> — 어떤 문서든 참고 화면과 함께 좌우·상하로 보고, 필요할 때 참고 문서를 잠가 분할 비율과 위치를 조절.</li>
     <li data-i18n="help.f7"><b>임시 메모</b>(Ctrl+M)·<b>이미지 메모</b>(캡처 여러 장 붙여넣기·일괄 저장)·<b>다크 모드</b>·작업공간 자동 복원. 모든 처리는 이 컴퓨터 안에서만 이뤄지고 파일은 외부로 전송되지 않아요.</li>
   </ul>
   <div class="help-section-title">단축키</div>
