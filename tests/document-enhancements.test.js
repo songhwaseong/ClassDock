@@ -15,11 +15,29 @@ test("이름 변경은 원본 폴더 권한이 있는 문서에만 노출하고 
   assert.match(source, /doc\.originalSaveMode/);
   assert.match(source, /typeof directDir\.removeEntry === "function"/);
   assert.match(source, /if \(canRenameOriginalDoc\(anchorDoc\)\) add\("이름 바꾸기"/);
-  assert.match(source, /if \(!canRenameOriginalDoc\(doc\)\) return;/);
+  const sidebarMenu = source.slice(source.indexOf("function openSidebarDocMenu"), source.indexOf("// 업로드한 일반 폴더 우클릭 메뉴"));
+  assert.match(sidebarMenu, /if \(canRenameOriginalDoc\(doc\)\) add\("이름 바꾸기"/);
+  assert.doesNotMatch(sidebarMenu, /if \(!canRenameOriginalDoc\(doc\)\) return;/);
   assert.match(rename, /moveOriginalFile\(ctx, name\)/);
   assert.match(source, /await ctx\.dirHandle\.removeEntry\(ctx\.oldName\)/);
   assert.match(source, /doc\.workspacePath = doc\.workspacePath \? refreshWorkspacePath/);
   assert.match(source, /doc\.stableRestoreKey = docStableKey\(doc\)/);
+});
+
+test("탭과 사이드바 파일 메뉴는 이름과 상대 경로를 복사한다", () => {
+  const source = read("documents.js");
+  assert.match(source, /add\("이름 복사", null, \(\) => copyDocumentName\(anchorDoc\)\)/);
+  assert.match(source, /add\("상대 경로 복사", null, \(\) => copyDocumentRelativePath\(anchorDoc\)\)/);
+  assert.match(source, /add\("이름 복사", \(\) => copyDocumentName\(doc\)\)/);
+  assert.match(source, /add\("상대 경로 복사", \(\) => copyDocumentRelativePath\(doc\)\)/);
+
+  const start = source.indexOf("function documentRelativePathForCopy");
+  const end = source.indexOf("async function copyDocumentMenuText", start);
+  const sandbox = {};
+  vm.runInNewContext(source.slice(start, end) + "; this.documentRelativePathForCopy = documentRelativePathForCopy;", sandbox);
+  assert.equal(sandbox.documentRelativePathForCopy({ name:"문서.pdf", workspacePath:"수업\\1주차\\문서.pdf" }), "수업/1주차/문서.pdf");
+  assert.equal(sandbox.documentRelativePathForCopy({ name:"압축문서.txt", relPath:"자료/압축문서.txt" }), "자료/압축문서.txt");
+  assert.equal(sandbox.documentRelativePathForCopy({ name:"낱개.txt" }), "낱개.txt");
 });
 
 test("원본 이름 변경 폴백은 복사를 마친 뒤에만 이전 파일을 제거한다", async () => {

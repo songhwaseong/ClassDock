@@ -1883,6 +1883,46 @@ async function renameDoc(id){
   toast("원본 파일 이름을 '" + name + "'(으)로 바꿨어요.", 3200, { type: "success" });
 }
 
+function documentRelativePathForCopy(doc){
+  return String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
+    .replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+async function copyDocumentMenuText(text, successMessage){
+  const value = String(text || "");
+  let copied = false;
+  if (value){
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function"){
+        await navigator.clipboard.writeText(value);
+        copied = true;
+      }
+    } catch(_){ }
+    if (!copied){
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try { copied = !!document.execCommand("copy"); } catch(_){ }
+      textarea.remove();
+    }
+  }
+  const message = copied ? successMessage : "복사하지 못했어요.";
+  toast(typeof window.t === "function" ? window.t(message) : message, 1800,
+    copied ? { type:"success" } : undefined);
+  return copied;
+}
+
+function copyDocumentName(doc){
+  return copyDocumentMenuText(doc && doc.name, "파일 이름을 복사했어요.");
+}
+
+function copyDocumentRelativePath(doc){
+  return copyDocumentMenuText(documentRelativePathForCopy(doc), "상대 경로를 복사했어요.");
+}
+
 // 탭 우클릭 메뉴: IDE 처럼 오른쪽/왼쪽/다른 탭을 한 번에 정리(모두 "탭만 닫기" — 파일은 사이드바에 유지)
 let tabMenuEl = null;
 function closeTabMenu(){
@@ -1914,6 +1954,8 @@ function openTabMenu(anchorId, x, y){
   };
   add("이 탭 닫기", null, () => untabDoc(anchorId));
   const anchorDoc = docs.find(doc => doc.id === anchorId);
+  add("이름 복사", null, () => copyDocumentName(anchorDoc));
+  add("상대 경로 복사", null, () => copyDocumentRelativePath(anchorDoc));
   if (canRenameOriginalDoc(anchorDoc)) add("이름 바꾸기", null, () => renameDoc(anchorId));
   const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
   add("오른쪽 탭 닫기", right.length, () => untabMany(right, anchorId));
@@ -1932,7 +1974,6 @@ function openTabMenu(anchorId, x, y){
 function openSidebarDocMenu(doc, x, y){
   closeTabMenu();
   closeSidebarGroupMenu();
-  if (!canRenameOriginalDoc(doc)) return;
   const menu = document.createElement("div");
   menu.className = "tab-ctx-menu"; menu.setAttribute("role", "menu");
   const add = (label, run) => {
@@ -1941,7 +1982,9 @@ function openSidebarDocMenu(doc, x, y){
     button.addEventListener("click", () => { closeSidebarGroupMenu(); run(); });
     menu.appendChild(button);
   };
-  add("이름 바꾸기", () => renameDoc(doc.id));
+  add("이름 복사", () => copyDocumentName(doc));
+  add("상대 경로 복사", () => copyDocumentRelativePath(doc));
+  if (canRenameOriginalDoc(doc)) add("이름 바꾸기", () => renameDoc(doc.id));
   document.body.appendChild(menu);
   const pad = 8, mw = menu.offsetWidth, mh = menu.offsetHeight;
   menu.style.left = Math.max(pad, Math.min(x, window.innerWidth - mw - pad)) + "px";
@@ -2736,7 +2779,7 @@ function renderSidebar(){
         openSidebarGroupMenu(node, e.clientX, e.clientY);
       });
     } else if (node.type === "doc" && doc){
-      item.addEventListener("contextmenu", (e) => {           // 파일 우클릭: 이름 바꾸기
+      item.addEventListener("contextmenu", (e) => {           // 파일 우클릭: 이름·상대 경로 복사, 원본 이름 바꾸기
         e.preventDefault(); e.stopPropagation();
         sidebarCursorKey = node.nodeId;
         openSidebarDocMenu(doc, e.clientX, e.clientY);
