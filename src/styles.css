@@ -2005,7 +2005,6 @@
     .office.python-editor-doc .run-split .code-host-edit{height:auto;min-height:0;max-height:none}
     .office.python-editor-doc .code-output{min-height:0;max-height:none}
     .office.python-editor-doc .run-split.stack-v{height:auto}
-    .office.python-editor-doc .py-path-help{max-height:min(50vh,420px);overflow:auto}
   }
   .run-bar{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
   .run-go{font:inherit;font-weight:600;font-size:15px;line-height:1;border:1.5px solid #16a34a;border-radius:8px;height:30px;padding:0 13px;cursor:pointer;
@@ -2497,14 +2496,18 @@
   .run-path-text{flex:1;min-width:0;white-space:normal;word-break:break-all;
     color:var(--ink);font-family:Consolas,"Courier New",monospace;cursor:text;user-select:text;-webkit-user-select:text}
   .run-path-text.is-empty{color:var(--muted);font-family:inherit;font-style:italic;cursor:default;user-select:none}
-  .run-project-row{display:flex;align-items:flex-start;gap:8px;margin:-2px 0 10px}
-  .run-project-info{flex:1;min-width:0;margin:0;border:1px solid var(--code-border);border-radius:8px;background:var(--code-panel);color:var(--code-text)}
+  .run-project-row{position:relative;display:flex;align-items:flex-start;gap:8px;margin:-2px 0 10px}
+  .run-project-info{position:relative;flex:1;min-width:0;margin:0;border:1px solid var(--code-border);border-radius:8px;background:var(--code-panel);color:var(--code-text)}
+  .run-project-info[open]{border-radius:8px 8px 0 0}
   .run-path-help{flex:none;border:1px solid var(--code-border);border-radius:8px;background:var(--field);color:var(--muted);
     padding:7px 10px;font:650 12px/1.35 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;cursor:pointer}
   .run-path-help:hover{border-color:var(--accent);color:var(--accent);background:var(--panel-hover)}
   .run-project-info summary{padding:7px 10px;color:var(--code-muted);font-size:12px;font-weight:650;cursor:pointer;user-select:none}
   .run-project-info[open] summary{border-bottom:1px solid var(--code-border)}
-  .run-project-body{padding:9px 11px;font-size:11.5px;line-height:1.5}
+  /* 편집기를 밀지 않도록 드롭다운을 오버레이로 띄운다(바깥 클릭·Esc 닫기는 JS에 이미 있음). */
+  .run-project-body{position:absolute;top:100%;left:-1px;right:-1px;z-index:30;max-height:min(50vh,340px);overflow:auto;
+    padding:9px 11px;border:1px solid var(--code-border);border-top:0;border-radius:0 0 8px 8px;
+    background:var(--code-panel);box-shadow:0 14px 30px rgba(0,0,0,.25);font-size:11.5px;line-height:1.5}
   .run-project-body p{margin:0 0 6px;color:var(--code-muted)}
   .run-project-files{max-height:180px;overflow:auto;margin:0;padding:5px;border-radius:6px;background:var(--code-bg)}
   .run-project-file{display:flex;align-items:center;width:100%;min-height:27px;gap:8px;margin:0;padding:4px 6px;border:0;
@@ -2518,8 +2521,11 @@
   .run-project-file-size{flex:none;color:var(--code-muted);font-size:10.5px}
   .run-project-more{padding:5px 6px;color:var(--code-muted);font:11px/1.4 Consolas,"Courier New",monospace}
   .run-project-body .run-project-note{margin:7px 0 0;color:var(--code-string)}
-  .py-path-help{margin:0 0 10px;padding:12px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--code-border));
-    border-radius:10px;background:var(--code-panel);color:var(--code-text);font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
+  /* 경로 도우미도 오버레이: projectRow 를 앵커로 편집기 위에 겹쳐 펼친다. */
+  .py-path-help{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:31;max-height:min(60vh,460px);overflow:auto;
+    margin:0;padding:12px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--code-border));
+    border-radius:10px;background:var(--code-panel);color:var(--code-text);box-shadow:0 14px 30px rgba(0,0,0,.25);
+    font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
   .py-path-help-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
   .py-path-help-head>div{display:flex;flex-direction:column;gap:2px}.py-path-help-head strong{font-size:15px}.py-path-help-head span{color:var(--code-muted);font-size:11.5px}
   .py-path-help button{border:1px solid var(--code-border);border-radius:7px;background:var(--field);color:var(--muted);padding:5px 8px;font:inherit;font-size:11.5px;cursor:pointer}

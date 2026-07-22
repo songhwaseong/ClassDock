@@ -1358,7 +1358,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const pathHelpBtn = document.createElement("button"); pathHelpBtn.type = "button"; pathHelpBtn.className = "run-path-help";
   pathHelpBtn.textContent = "경로 도우미"; pathHelpBtn.title = "파일 읽기·저장·import 경로를 현재 작업폴더 기준으로 확인";
   projectRow.append(projectInfo, pathHelpBtn);
+  // 경로 도우미·작업폴더 패널은 편집기를 밀지 않고 그 위로 겹쳐 펼쳐진다(CSS 오버레이). 앵커는 projectRow.
   const pathHelpPanel = document.createElement("section"); pathHelpPanel.className = "py-path-help"; pathHelpPanel.hidden = true;
+  projectRow.appendChild(pathHelpPanel);
   // 경로 도우미도 작업폴더 패널처럼 팝오버식으로: 바깥 클릭·Esc 로 닫는다. 리스너는 열릴 때만 단다.
   let pathHelpOutsideClose = null;
   const detachPathHelpOutside = () => {
@@ -1514,7 +1516,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   });
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
-  outer.appendChild(bar); outer.appendChild(pkgWrap); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(pathHelpPanel); outer.appendChild(split);
+  outer.appendChild(bar); outer.appendChild(pkgWrap); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(split);
   // 동적 툴바(실행 바·라이브러리·경로 안내)를 현재 UI 언어로 번역 — 코드 편집기 본문(split)은 제외.
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") {
     [bar, pkgWrap, inputWrap, pathBar, projectRow].forEach((el) => window.MNI18N.translateTree(el));
@@ -1526,8 +1528,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.closePathHelp = closePathHelp;
   ui.openPathHelp = () => {
     pathHelpPanel.hidden = false;
-    renderPythonPathHelper(pathHelpPanel, editor.getValue(), runCtxWithDoc, ui);
-    pathHelpPanel.scrollIntoView({ block:"nearest", behavior:"smooth" });
+    renderPythonPathHelper(pathHelpPanel, editor.getValue(), runCtxWithDoc, ui);   // 오버레이라 스크롤 보정 불필요
     if (pathHelpOutsideClose) return;
     pathHelpOutsideClose = (e) => {
       if (!document.contains(pathHelpPanel) || pathHelpPanel.hidden){ detachPathHelpOutside(); return; }  // 뷰어 교체·다른 경로로 닫힘 → 리스너 정리(누수 방지)
