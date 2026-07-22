@@ -760,7 +760,7 @@ function wireScratchpad(){
     textarea.className = "scratchpad-text-block";
     textarea.maxLength = 200000;
     textarea.placeholder = "내용을 입력하세요. 이미지는 붙여넣거나 이곳에 드래그할 수 있습니다.";
-    textarea.spellcheck = true;
+    textarea.spellcheck = false;
     textarea.value = block.text;
     textarea.readOnly = !!block.locked;
     textarea.setAttribute("aria-readonly", String(!!block.locked));
@@ -972,7 +972,7 @@ function wireScratchpad(){
     text.className = "scratchpad-image-text";
     text.maxLength = 200000;
     text.placeholder = "이미지와 함께 표시할 글을 입력하세요.";
-    text.spellcheck = true;
+    text.spellcheck = false;
     text.value = block.text;
     text.readOnly = !!block.locked;
     text.setAttribute("aria-readonly", String(!!block.locked));

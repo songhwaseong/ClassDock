@@ -394,6 +394,7 @@
     width:min(840px,calc(100vw - 32px));height:min(72vh,680px);
     min-width:min(280px,calc(100vw - 12px));min-height:min(200px,calc(100vh - 12px));
     max-width:calc(100vw - 12px);max-height:calc(100vh - 12px);container: scratchpad / inline-size;
+    --memo-block-border:color-mix(in srgb,var(--memo-paper-border) 65%,var(--ink));
     border-radius:14px;overflow:hidden;background:var(--panel);color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.42)}
   .scratchpad[hidden]{display:none}
   .scratchpad[data-note-color="yellow"],.scratchpad-tab[data-note-color="yellow"],.scratchpad-color[data-note-color="yellow"]{
@@ -458,10 +459,10 @@
     display:grid;place-items:center;border:3px dashed var(--accent);border-radius:10px;background:color-mix(in srgb,var(--memo-paper) 90%,transparent);
     color:var(--accent);font-size:15px;font-weight:750;pointer-events:none}
   .scratchpad-editor.external-cell-drag::after{content:"여기에 놓으면 노트북 셀로 보관됩니다"}
-  .scratchpad-block{position:relative;margin:0 0 10px;border:1px solid transparent;border-radius:9px;background:color-mix(in srgb,var(--memo-paper) 94%,var(--panel));
-    transition:border-color .12s,box-shadow .12s}
+  .scratchpad-block{position:relative;margin:0 0 10px;border:2px solid var(--memo-block-border);border-radius:9px;background:color-mix(in srgb,var(--memo-paper) 90%,var(--panel));
+    box-shadow:0 4px 12px rgba(0,0,0,.36);transition:border-color .12s,box-shadow .12s}
   .scratchpad-block:last-child{margin-bottom:0}
-  .scratchpad-block:hover,.scratchpad-block:focus-within{border-color:var(--border);box-shadow:0 2px 10px rgba(15,23,42,.06)}
+  .scratchpad-block:hover,.scratchpad-block:focus-within{border-color:color-mix(in srgb,var(--memo-block-border) 65%,var(--accent));box-shadow:0 5px 16px rgba(0,0,0,.46)}
   .scratchpad-block.locked{border-color:var(--scratchpad-locked-border);background:var(--scratchpad-locked-bg)}
   .scratchpad-block.locked:hover,.scratchpad-block.locked:focus-within{border-color:var(--scratchpad-locked-border);box-shadow:0 2px 12px rgba(79,127,203,.14)}
   .scratchpad-block.dragging{opacity:.45}
