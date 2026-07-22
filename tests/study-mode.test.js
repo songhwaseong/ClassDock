@@ -149,6 +149,15 @@ test("study session state is persisted and restored with tabs", () => {
   assert.match(store, /restoreStudyState\(savedTabs\)/);
 });
 
+test("분할 화면의 참고 또는 작업 탭을 닫으면 분할 작업을 종료한다", () => {
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const single = docs.slice(docs.indexOf("function untabDoc(id)"), docs.indexOf("function untabMany"));
+  const many = docs.slice(docs.indexOf("function untabMany"), docs.indexOf("/* ===== 파일 표시 이름 바꾸기"));
+  assert.match(docs, /const closesStudyPane = studyPdfId !== null && \(id === studyPdfId \|\| id === activeId\)/);
+  assert.match(single, /studyPdfId !== null && \(id === studyPdfId \|\| id === activeId\)\) toggleStudyMode\(\)/);
+  assert.match(many, /removeSet\.has\(studyPdfId\) \|\| removeSet\.has\(activeId\)/);
+});
+
 test("internal document drags are separated from external file uploads by MIME type", () => {
   assert.equal(isInternalDragTransfer({ types:[INTERNAL_DRAG_MIME, "text/plain"] }, false), true);
   assert.equal(isInternalDragTransfer({ types:["Files"] }, false), false);

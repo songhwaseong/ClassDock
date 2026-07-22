@@ -1585,7 +1585,8 @@ function renderTabs(){
     dot.setAttribute("aria-hidden", "true");
     if (d.hasUnsavedEdits) tab.classList.add("dirty");
     const x = document.createElement("button"); x.className = "tab-x"; x.textContent = "✕";
-    x.title = id === studyPdfId ? "탭 닫기 및 분할 작업 종료(파일은 사이드바에 유지)" : "탭만 닫기(파일은 사이드바에 유지)";
+    const closesStudyPane = studyPdfId !== null && (id === studyPdfId || id === activeId);
+    x.title = closesStudyPane ? "탭 닫기 및 분할 작업 종료(파일은 사이드바에 유지)" : "탭만 닫기(파일은 사이드바에 유지)";
     x.onclick = (e) => { e.stopPropagation(); untabDoc(d.id); };
     const tail = document.createElement("span"); tail.className = "tab-tail"; tail.append(dot, x);
     tab.append(ic, nm, tail);
@@ -1646,7 +1647,7 @@ function renderTabs(){
 function untabDoc(id){
   const i = tabOrder.indexOf(id);
   if (i < 0) return;
-  if (id === studyPdfId) toggleStudyMode();
+  if (studyPdfId !== null && (id === studyPdfId || id === activeId)) toggleStudyMode();
   tabOrder.splice(i, 1);
   if (id === activeId && tabOrder.length){
     // 직전에 보던 문서로 돌아간다(closeDoc 과 같은 VSCode 패턴). Ctrl+클릭 정의 이동으로 연 탭을
@@ -1662,7 +1663,7 @@ function untabMany(removeIds, anchorId){
   const removeSet = new Set(removeIds);
   removeSet.delete(anchorId);                                  // 기준(우클릭한) 탭은 보존
   if (!tabOrder.some(id => removeSet.has(id))) return;
-  if (studyPdfId !== null && removeSet.has(studyPdfId)) toggleStudyMode();   // 고정 PDF가 닫히면 학습 화면 먼저 종료
+  if (studyPdfId !== null && (removeSet.has(studyPdfId) || removeSet.has(activeId))) toggleStudyMode();   // 표시 중인 참고·작업 탭이 닫히면 분할 작업 먼저 종료
   const activeRemoved = removeSet.has(activeId);
   tabOrder = tabOrder.filter(id => !removeSet.has(id));
   if (activeRemoved) setActiveDoc(anchorId);                  // 닫힌 탭이 활성이었으면 기준 탭으로 이동(내부에서 renderTabs)
