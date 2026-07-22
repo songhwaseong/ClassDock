@@ -15,7 +15,7 @@ const {
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
-  splitDropRoleForSide, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
+  splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
   INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
 } = PdfSignerCore;
 

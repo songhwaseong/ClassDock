@@ -2835,6 +2835,15 @@
     return first !== !!swapped ? "reference" : "work";
   }
 
+  // 드롭 안내의 시각적 경계와 실제 판정이 같은 분할 비율을 사용하도록 순수 계산으로 분리한다.
+  function splitDropSideAtPoint(clientX, clientY, rect, stacked, splitRatio=0.5) {
+    const ratio = Number.isFinite(Number(splitRatio))
+      ? Math.max(0, Math.min(1, Number(splitRatio)))
+      : 0.5;
+    if (stacked) return clientY < rect.top + rect.height * ratio ? "top" : "bottom";
+    return clientX < rect.left + rect.width * ratio ? "left" : "right";
+  }
+
   // 상단 탭을 본문 칸에 끌어다 놓았을 때 수행할 상태 전이를 DOM과 분리해 결정한다.
   // mateId 는 분할 진입 시 반대편에 세울 짝(직전에 보던 문서)이며, 없으면 null.
   function tabDropSplitAction(referenceId, workId, role, draggedId, mateId) {
@@ -2945,7 +2954,7 @@
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
     studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
-    splitDropRoleForSide, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
+    splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
     INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
   };
 });

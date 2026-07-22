@@ -692,6 +692,7 @@
   .split-drop[hidden]{display:none}
   .split-drop-half{flex:1;display:flex;align-items:center;justify-content:center;pointer-events:none;
     border:3px dashed transparent;transition:background .12s,border-color .12s}
+  .split-drop-half:first-child{flex:0 0 var(--split-drop-cut,50%)}
   .split-drop-half span{padding:10px 16px;border-radius:10px;font-size:14px;font-weight:700;color:#fff;
     background:rgba(15,23,42,.78);box-shadow:0 6px 20px rgba(0,0,0,.3);opacity:0;transition:opacity .12s}
   .split-drop.on-left .split-drop-half[data-side="left"],

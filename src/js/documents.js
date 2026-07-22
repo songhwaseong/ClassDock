@@ -633,6 +633,29 @@ function configureSplitDropZone(zone, stacked){
   });
 }
 
+// 이미 분할된 화면에서는 실제로 렌더링된 두 칸의 경계를 사용한다.
+// CSS 변수만 읽지 않아 모바일의 강제 50:50 배치와 위치 교체 상태도 화면 그대로 따라간다.
+function syncSplitDropBoundary(zone, stacked){
+  const content = byId("content");
+  const rect = zone.getBoundingClientRect();
+  let ratio = 0.5;
+  if (content.classList.contains("study-mode")){
+    const panes = [...content.children]
+      .filter(el => !el.hidden && (el.classList.contains("study-reference") || el.classList.contains("study-work")))
+      .map(el => el.getBoundingClientRect())
+      .sort((a, b) => stacked ? a.top - b.top : a.left - b.left);
+    const size = stacked ? rect.height : rect.width;
+    if (panes.length >= 2 && size > 0){
+      const firstEnd = stacked ? panes[0].bottom : panes[0].right;
+      const secondStart = stacked ? panes[1].top : panes[1].left;
+      const zoneStart = stacked ? rect.top : rect.left;
+      ratio = Math.max(0, Math.min(1, ((firstEnd + secondStart) / 2 - zoneStart) / size));
+    }
+  }
+  zone.style.setProperty("--split-drop-cut", (ratio * 100) + "%");
+  return ratio;
+}
+
 // 탭 드래그 중에만 #content 를 덮는 투명 판. 오피스·스프레드시트 뷰어는 iframe 이라 덮개가 없으면
 // 그 위에서 dragover 가 부모 문서로 오지 않는다(파일 드롭 오버레이가 화면 전체를 덮는 것과 같은 이유).
 function setupSplitDropZone(){
@@ -656,8 +679,7 @@ function setupSplitDropZone(){
       const dy = Math.abs((clientY - (rect.top + rect.height / 2)) / Math.max(1, rect.height));
       stacked = dy > dx;  // 첫 분할은 포인터가 더 가까운 화면 가장자리 방향을 사용한다.
     }
-    if (stacked) return clientY < rect.top + rect.height / 2 ? "top" : "bottom";
-    return clientX < rect.left + rect.width / 2 ? "left" : "right";
+    return splitDropSideAtPoint(clientX, clientY, rect, stacked, syncSplitDropBoundary(zone, stacked));
   };
   const clearSide = () => zone.classList.remove("on-left", "on-right", "on-top", "on-bottom");
   zone.addEventListener("dragover", (e) => {
@@ -698,6 +720,7 @@ function showSplitDropZone(){
   configureSplitDropZone(zone, stacked);
   zone.classList.remove("on-left", "on-right", "on-top", "on-bottom");
   zone.hidden = false;
+  syncSplitDropBoundary(zone, stacked);
 }
 function hideSplitDropZone(){
   const content = byId("content");

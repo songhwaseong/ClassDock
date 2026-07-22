@@ -7,6 +7,7 @@ const {
   studyReadonlyPointerAllowed,
   studyReadonlyKeyAllowed,
   splitDropRoleForSide,
+  splitDropSideAtPoint,
   tabDropSplitAction,
   INTERNAL_DRAG_MIME,
   isInternalDragTransfer
@@ -31,6 +32,14 @@ test("드롭한 칸의 역할은 방향과 위치 바꾸기 상태를 따라간�
   assert.equal(splitDropRoleForSide("right", true), "reference");
   assert.equal(splitDropRoleForSide("top", true), "work");
   assert.equal(splitDropRoleForSide("bottom", true), "reference");
+});
+
+test("이미 분할된 화면의 드롭 판정은 50%가 아니라 split bar 비율을 따른다", () => {
+  const rect = { left: 100, top: 50, width: 1000, height: 600 };
+  assert.equal(splitDropSideAtPoint(449, 300, rect, false, 0.35), "left");
+  assert.equal(splitDropSideAtPoint(450, 300, rect, false, 0.35), "right");
+  assert.equal(splitDropSideAtPoint(500, 229, rect, true, 0.3), "top");
+  assert.equal(splitDropSideAtPoint(500, 230, rect, true, 0.3), "bottom");
 });
 
 test("분할 중 탭 드롭은 유지·역할 교대·한쪽 교체를 구분한다", () => {
@@ -100,7 +109,9 @@ test("상하 분할은 높이 비율·가로 분할바·위아래 드롭 판정�
   assert.match(css, /#content\.study-mode\.study-stacked \.study-divider\{left:0;right:0;top:var\(--study-split,50%\);bottom:auto;width:auto;height:8px/);
   assert.match(docs, /stacked = dy > dx/);
   assert.match(docs, /setStudyStacked\(side === "top" \|\| side === "bottom"\)/);
-  assert.match(docs, /if \(stacked\) return clientY < rect\.top \+ rect\.height \/ 2 \? "top" : "bottom"/);
+  assert.match(docs, /splitDropSideAtPoint\(clientX, clientY, rect, stacked, syncSplitDropBoundary\(zone, stacked\)\)/);
+  assert.match(docs, /\(firstEnd \+ secondStart\) \/ 2 - zoneStart/);
+  assert.match(css, /\.split-drop-half:first-child\{flex:0 0 var\(--split-drop-cut,50%\)\}/);
   assert.match(docs, /studyStackSplitRatio/);
   assert.match(docs, /aria-orientation", stacked \? "horizontal" : "vertical"/);
   assert.match(html, /id="studyDirectionToggle"/);
