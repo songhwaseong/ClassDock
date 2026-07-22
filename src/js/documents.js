@@ -2837,7 +2837,7 @@ function renderSidebar(){
       label.classList.add("has-image-restore");
       const restore = document.createElement("button");
       const translate = (text) => (typeof window.t === "function" ? window.t(text) : text);
-      restore.className = "sb-image-restore"; restore.type = "button"; restore.textContent = translate("↻ 동기화");
+      restore.className = "sb-image-restore"; restore.type = "button"; restore.innerHTML = window.uiIcon("refresh");
       const reasons = [];
       if (node.restorePendingImages) reasons.push("용량이 커서 자동 복원에서 빠진 사진");
       if (node.runOutputsPending) reasons.push("코드 실행이 만든 파일");

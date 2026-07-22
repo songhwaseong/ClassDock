@@ -40,6 +40,7 @@
     graph: '<path d="M4 20V5M4 20h17M7 16l4-5 3 3 5-7"/><circle cx="7" cy="16" r="1" fill="currentColor"/><circle cx="11" cy="11" r="1" fill="currentColor"/><circle cx="14" cy="14" r="1" fill="currentColor"/><circle cx="19" cy="7" r="1" fill="currentColor"/>'
     ,record: '<circle cx="12" cy="12" r="7" fill="currentColor" stroke="none"/>'
     ,stop: '<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>'
+    ,refresh: '<path d="M21.5 4.5v5.2h-5.2"/><path d="M19.6 14.5a8 8 0 1 1-1.9-8.3l3.8 3.5"/>'
   };
   window.uiIcon = function(name, label){
     const content = paths[name] || paths.code;
@@ -62,14 +63,14 @@
   const symbolIcons = new Map([
     ["✓", "check"], ["✔", "check"], ["✕", "close"], ["✖", "close"],
     ["✏", "pen"], ["✎", "pen"], ["✂", "code"], ["▶", "play"],
-    ["→", "arrow"], ["←", "arrow"], ["↔", "arrow"], ["↗", "arrow"], ["↩", "arrow"], ["⟲", "arrow"],
+    ["→", "arrow"], ["←", "arrow"], ["↔", "arrow"], ["↗", "arrow"], ["↩", "arrow"], ["⟲", "arrow"], ["↻", "refresh"],
     ["⚠", "warning"], ["⚙", "settings"], ["⛶", "arrow"], ["▭", "board"], ["▦", "board"],
     ["●", "record"], ["■", "stop"]
   ]);
   symbolIcons.set("\u{1F5B1}", "select");
   symbolIcons.set("\u{1F58D}", "highlighter");
   symbolIcons.set("\u{1F9FD}", "eraser");
-  const iconMatch = /[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu;
+  const iconMatch = /[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲↻⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu;
   const skipUiCleanup = (node) => {
     const el = node.parentElement;
     return !el || !!el.closest("svg,script,style,pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view");
@@ -101,7 +102,7 @@
     if (!element || !element.getAttribute || element.closest("pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view")) return;
     const value = element.getAttribute(name);
     if (!value) return;
-    const cleaned = value.replace(/[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu, "").replace(/\s{2,}/g, " ").trim();
+    const cleaned = value.replace(/[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲↻⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu, "").replace(/\s{2,}/g, " ").trim();
     if (cleaned !== value) element.setAttribute(name, cleaned);
   };
   const cleanUiTree = (root) => {
