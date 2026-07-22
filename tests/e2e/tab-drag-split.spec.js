@@ -81,6 +81,28 @@ test("탭을 본문 왼쪽으로 끌면 그 문서가 참고 칸에 고정되고
   expect(errors).toEqual([]);
 });
 
+test("아직 렌더하지 않은 탭을 참고 칸에 놓아도 내용이 즉시 열린다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openTwoDocs(page);
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.name === "ref-note.txt");
+    doc.rendered = false;
+    doc.el.replaceChildren();
+    doc.render = async () => {
+      const marker = document.createElement("div");
+      marker.dataset.deferredRender = "done";
+      marker.textContent = "지연 렌더 참고 문서";
+      doc.el.appendChild(marker);
+    };
+  });
+
+  await dragTabTo(page, "ref-note.txt", 0.25);
+
+  await expect(page.locator(".study-reference [data-deferred-render='done']")).toHaveText("지연 렌더 참고 문서");
+  expect(errors).toEqual([]);
+});
+
 test("탭을 본문 오른쪽으로 끌면 보던 문서가 참고로 고정되고 끌어온 문서가 작업 칸에 열린다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));

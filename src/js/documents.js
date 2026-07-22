@@ -925,6 +925,14 @@ function startStudyModeWithDoc(doc, options={}){
   if (doc.kind === "pdf" && doc._preStudyZoom == null) doc._preStudyZoom = doc.zoom;   // 종료 시 되돌릴 원래 줌 기억
   applyStudyLayout();
   renderTabs();                                                                        // 참고 문서 탭 표시 갱신
+  // 복원된 탭이나 사이드바 항목은 아직 한 번도 활성화되지 않아 지연 렌더 상태일 수 있다.
+  // 이런 문서를 바로 참고 칸에 드롭하면 컨테이너만 표시되고 내용은 비어 보이므로,
+  // 참고 칸으로 진입하는 경로에서도 첫 렌더를 명시적으로 시작한다.
+  ensureRendered(doc).then(() => {
+    if (doc.id === studyPdfId && doc.kind === "pdf"){
+      startLazyRender(doc); requestAnimationFrame(() => fitStudyPdf(doc));
+    }
+  });
   if (!options.silent) toast("문서를 참고 화면에 고정했어요. 참고 문서는 읽기 전용으로 잠겨 있어요. 편집하려면 참고 칸 왼쪽 위 열쇠를 눌러 잠금을 푸세요.", 4600);
   return true;
 }
