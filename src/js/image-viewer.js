@@ -342,7 +342,7 @@ async function loadText(file, options={}){
   doc.isTextFile = true;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
-    await renderCode(file, host, "", "text");
+    await renderCode(doc.sourceFile || file, host, "", "text");
   };
   refreshChrome();
   activateIfIdle(doc, options);
@@ -356,6 +356,7 @@ async function loadBinaryAsset(file, options={}){
   doc.sourceFile = file;
   doc.binaryAsset = true;
   doc.render = async () => {
+    const source = doc.sourceFile || file;
     const host = doc.el;
     host.innerHTML = "";
     host.scrollTop = 0;
@@ -363,14 +364,14 @@ async function loadBinaryAsset(file, options={}){
     panel.className = "binary-asset-card";
     const icon = document.createElement("div");
     icon.className = "binary-asset-icon";
-    icon.textContent = fileExtOf(file.name).toUpperCase() || "BIN";
+    icon.textContent = fileExtOf(source.name).toUpperCase() || "BIN";
     const title = document.createElement("h2");
-    title.textContent = file.name;
+    title.textContent = source.name;
     const detail = document.createElement("p");
-    detail.textContent = `${humanSize(file.size || 0)} · 이진 파일 · 텍스트 편집은 제공하지 않습니다.`;
+    detail.textContent = `${humanSize(source.size || 0)} · 이진 파일 · 텍스트 편집은 제공하지 않습니다.`;
     const help = document.createElement("p");
     help.className = "binary-asset-help";
-    help.textContent = fileExtOf(file.name).toLowerCase() === "model"
+    help.textContent = fileExtOf(source.name).toLowerCase() === "model"
       ? "Gensim 등에서 저장한 모델 원본을 손상 없이 보관합니다. 같이 생성된 .npy 보조 파일도 함께 유지하세요."
       : "NumPy 배열 원본을 손상 없이 보관합니다.";
     const download = document.createElement("button");

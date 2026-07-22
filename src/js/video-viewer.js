@@ -283,7 +283,7 @@ async function loadVideo(file, options={}){
   doc.media = AUDIO_EXTS.includes(mediaExtOf(file.name)) ? "audio" : "video";
   doc.render = async () => {
     doc.el.innerHTML = ""; doc.el.scrollTop = 0;
-    renderVideoPlayer(file, doc);
+    renderVideoPlayer(doc.sourceFile || file, doc);
   };
   refreshChrome();
   activateIfIdle(doc, options);

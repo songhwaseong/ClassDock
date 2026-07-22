@@ -1670,30 +1670,208 @@ function untabMany(removeIds, anchorId){
   else renderTabs();
 }
 
-/* ===== 파일 표시 이름 바꾸기(앱 내) =====
- * 탭·사이드바·헤더에 보이는 이름만 바꾼다. 원본 파일과 저장/내보내기 파일 이름은 바꾸지 않는다.
- * 확장자는 뷰어 종류·검색 대상을 결정하므로 원래 확장자를 유지한다. */
+/* ===== 원본 파일 이름 바꾸기 =====
+ * '폴더 열기'로 쓰기 권한을 받은 실제 파일만 이름을 바꿀 수 있다.
+ * 개별 파일·압축 내부·자동 복원 사본처럼 부모 폴더를 확실히 알 수 없는 문서에는 메뉴 자체를 노출하지 않는다. */
+function originalRenameRootForDoc(doc){
+  let parentId = doc && doc.parentId;
+  while (parentId){
+    const group = navNodes.find(node => node.nodeId === parentId && node.type === "group");
+    if (!group) return null;
+    if (group.folderRefreshRootId === group.nodeId) return group;
+    parentId = group.parentId;
+  }
+  return null;
+}
+
+function originalRenamePath(doc){
+  return String((doc && (doc.workspacePath || doc.relPath)) || "")
+    .replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function canRenameOriginalDoc(doc){
+  if (!doc || !doc.originalSaveMode || (doc.isScratch && !doc.fsHandle)) return false;
+  // 복구 데이터의 경로를 안전하게 옮길 수 있도록, 저장되지 않은 편집이 있으면 먼저 저장하게 한다.
+  if (doc.hasUnsavedEdits) return false;
+  if (typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(doc)) return false;
+  // .ipynb 를 메모리에서 .py 로 변환한 문서는 실제 .py 원본이 생기기 전까지 제외한다.
+  if (doc.notebook && /\.py$/i.test(doc.name || "") && !doc.fsHandle) return false;
+  const root = originalRenameRootForDoc(doc);
+  if (!root || !originalRenamePath(doc)) return false;
+  const directDir = doc.fsDirHandle;
+  if (directDir && typeof directDir.getFileHandle === "function" && typeof directDir.removeEntry === "function") return true;
+  const rootHandle = root.folderHandle;
+  return !!(rootHandle && typeof rootHandle.getDirectoryHandle === "function");
+}
+
+async function originalRenameContext(doc){
+  if (!canRenameOriginalDoc(doc)) return null;
+  const root = originalRenameRootForDoc(doc);
+  const path = originalRenamePath(doc);
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length > 1 && parts[0] !== root.name) return null;
+  if (parts[0] === root.name) parts.shift();
+  if (!parts.length || parts.some(part => part === "." || part === "..")) return null;
+  const oldName = parts.pop();
+
+  let dirHandle = doc.fsDirHandle || null;
+  if (!dirHandle){
+    let rootHandle = root.folderHandle || null;
+    if (!rootHandle && typeof loadRememberedFolderHandle === "function"){
+      rootHandle = await loadRememberedFolderHandle(root.name);
+      if (rootHandle) root.folderHandle = rootHandle;
+    }
+    if (!rootHandle || typeof rootHandle.getDirectoryHandle !== "function") return null;
+    dirHandle = rootHandle;
+    for (const part of parts) dirHandle = await dirHandle.getDirectoryHandle(part);
+  }
+  if (!dirHandle || typeof dirHandle.getFileHandle !== "function" || typeof dirHandle.removeEntry !== "function") return null;
+
+  let permission = typeof dirHandle.queryPermission === "function"
+    ? await dirHandle.queryPermission({ mode:"readwrite" }) : "granted";
+  if (permission !== "granted" && typeof dirHandle.requestPermission === "function")
+    permission = await dirHandle.requestPermission({ mode:"readwrite" });
+  if (permission !== "granted") return null;
+
+  let fileHandle = doc.fsHandle;
+  if (!fileHandle || typeof fileHandle.getFile !== "function") fileHandle = await dirHandle.getFileHandle(oldName);
+  return { root, path, oldName, dirHandle, fileHandle };
+}
+
+async function originalRenameTargetExists(ctx, newName){
+  try {
+    const existing = await ctx.dirHandle.getFileHandle(newName);
+    if (ctx.fileHandle && typeof ctx.fileHandle.isSameEntry === "function"){
+      try { if (await ctx.fileHandle.isSameEntry(existing)) return "same"; } catch(_){ }
+    }
+    return "other";
+  } catch(error){
+    if (error && error.name === "NotFoundError") return "none";
+    throw error;
+  }
+}
+
+async function moveOriginalFile(ctx, newName){
+  const targetState = await originalRenameTargetExists(ctx, newName);
+  if (targetState === "other") throw new Error("rename-target-exists");
+
+  // Chromium이 실제 파일 시스템 move를 제공하면 원자적인 이름 변경을 우선한다.
+  if (typeof ctx.fileHandle.move === "function"){
+    let moved = false;
+    try {
+      await ctx.fileHandle.move(newName);
+      moved = true;
+    } catch(error){
+      // 대소문자만 다른 이름은 복사 폴백으로 안전하게 처리할 수 없다.
+      if (targetState === "same") throw error;
+    }
+    if (moved){
+      try { return await ctx.dirHandle.getFileHandle(newName); }
+      catch(_){ return ctx.fileHandle; }   // move가 끝난 뒤 재조회만 실패했으면 복사 폴백으로 되돌아가지 않는다.
+    }
+  } else if (targetState === "same"){
+    throw new Error("rename-case-only-unsupported");
+  }
+
+  // move 미지원 환경: 새 파일을 완전히 쓴 것을 확인한 뒤에만 옛 항목을 지운다.
+  const source = await ctx.fileHandle.getFile();
+  let targetHandle = null;
+  let created = false;
+  try {
+    targetHandle = await ctx.dirHandle.getFileHandle(newName, { create:true });
+    created = true;
+    const writable = await targetHandle.createWritable();
+    try { await writable.write(source); await writable.close(); }
+    catch(error){ try { await writable.abort(); } catch(_){ } throw error; }
+    const copied = await targetHandle.getFile();
+    if (copied.size !== source.size) throw new Error("rename-copy-incomplete");
+    await ctx.dirHandle.removeEntry(ctx.oldName);
+    return targetHandle;
+  } catch(error){
+    if (created){ try { await ctx.dirHandle.removeEntry(newName); } catch(_){ } }
+    throw error;
+  }
+}
+
+function replaceWorkspacePathInGroups(oldPath, newPath){
+  for (const node of navNodes){
+    if (!node || !Array.isArray(node.workspacePaths)) continue;
+    node.workspacePaths = node.workspacePaths.map(path =>
+      String(path || "").replace(/\\/g, "/") === oldPath ? newPath : path);
+  }
+}
+
+async function applyOriginalRename(doc, ctx, newName, newHandle){
+  const oldPath = ctx.path;
+  const newPath = refreshWorkspacePath(oldPath, newName);
+  let fresh = await newHandle.getFile();
+  fresh = withDirHandle(withFileHandle(fresh, newHandle), ctx.dirHandle);
+  if (typeof setFileRelativePath === "function") setFileRelativePath(fresh, newPath);
+
+  if (doc.sourceKey && docsBySourceKey.get(doc.sourceKey) === doc) docsBySourceKey.delete(doc.sourceKey);
+  doc.name = newName;
+  if (Object.prototype.hasOwnProperty.call(doc, "fileName")) doc.fileName = newName;
+  doc.workspacePath = doc.workspacePath ? refreshWorkspacePath(doc.workspacePath, newName) : newPath;
+  if (doc.relPath) doc.relPath = refreshWorkspacePath(doc.relPath, newName);
+  doc.fsHandle = newHandle;
+  doc.fsDirHandle = ctx.dirHandle;
+  doc.sourceFile = fresh;
+  doc.size = fresh.size || 0;
+  doc.__srcMtime = fresh.lastModified || 0;
+  doc.sourceKey = [doc.parentId || "root", doc.workspacePath || doc.relPath || newName, doc.size, doc.__srcMtime].join("|");
+  docsBySourceKey.set(doc.sourceKey, doc);
+  doc.stableRestoreKey = "";
+  doc.stableRestoreKey = docStableKey(doc);
+  if (typeof contentCacheDrop === "function") contentCacheDrop(doc.id);
+  if (doc.archiveCtx && typeof doc.archiveCtx.rename === "function") doc.archiveCtx.rename(oldPath, newPath, fresh);
+  replaceWorkspacePathInGroups(oldPath, newPath);
+
+  if (typeof saveFsHandle === "function") await saveFsHandle(newPath, newHandle);
+  if (typeof forgetFsHandle === "function" && oldPath !== newPath) await forgetFsHandle(oldPath);
+  if (typeof forgetWorkspacePaths === "function" && oldPath !== newPath) forgetWorkspacePaths([oldPath]);
+  if (typeof rememberWorkspace === "function"){
+    try {
+      await rememberWorkspace([fresh], false, { silent:true,
+        folderPaths:ctx.root.folderPaths || [],
+        originalSaveFolderPaths:ctx.root.originalSaveMode ? [ctx.root.name] : [] });
+    } catch(error){ console.warn("renamed file workspace refresh skipped:", error); }
+  }
+}
+
 async function renameDoc(id){
   const doc = docs.find(d => d.id === id);
-  if (!doc || typeof askText !== "function") return;
+  if (!doc || !canRenameOriginalDoc(doc) || typeof askText !== "function") return;
+  let ctx;
+  try { ctx = await originalRenameContext(doc); }
+  catch(error){ console.warn(error); toast("원본 폴더에 접근하지 못했어요.", 3000); return; }
+  if (!ctx){ toast("원본 파일 이름을 바꿀 권한이 없어요.", 3000); return; }
   const input = await askText({
     title: "이름 바꾸기",
-    message: "앱의 탭·사이드바에 표시되는 이름만 바뀌어요. 원본 파일과 저장/내보내기 파일 이름은 그대로예요.",
-    value: doc.name, okText: "바꾸기"
+    message: "디스크에 있는 원본 파일 이름이 실제로 바뀝니다.",
+    value: ctx.oldName, okText: "바꾸기"
   });
   if (input === null) return;
-  let name = String(input).replace(/[\\/:*?"<>|]/g, "").trim();
-  if (!name || name === doc.name) return;
-  const oldName = String(doc.name);
+  let name = String(input).replace(/[\\/:*?"<>|]/g, "").trim().replace(/[. ]+$/, "");
+  if (!name || name === "." || name === ".." || name === ctx.oldName) return;
+  const oldName = String(ctx.oldName);
   const oldExt = fileExtOf(oldName.toLowerCase());
   const hasOldExt = oldExt && oldExt !== oldName.toLowerCase();
   if (hasOldExt && !name.toLowerCase().endsWith("." + oldExt)){
     name = name.replace(/\.+$/, "") + "." + oldExt;        // 확장자 유지(빼거나 바꿔 적어도 원래 확장자로)
   }
-  // 탭 복원 키는 실제 파일 정체성을 가리켜야 한다. 표시 이름을 바꾸기 전에 한 번만 고정해
-  // 다음 실행에서 원래 디스크 이름으로 다시 열린 문서와 계속 매칭되게 한다.
-  if (!doc.stableRestoreKey) doc.stableRestoreKey = docStableKey(doc);
-  doc.name = name;
+  if (!name || name === oldName) return;
+  try {
+    const newHandle = await moveOriginalFile(ctx, name);
+    await applyOriginalRename(doc, ctx, name, newHandle);
+  } catch(error){
+    console.warn("original file rename failed:", error);
+    const code = String(error && error.message || "");
+    if (code === "rename-target-exists") toast("같은 폴더에 동일한 이름의 파일이 이미 있어요.", 3400);
+    else if (code === "rename-case-only-unsupported") toast("이 환경에서는 대소문자만 바꾸는 이름 변경을 지원하지 않아요.", 3600);
+    else if (error && error.name === "NotAllowedError") toast("원본 파일 이름을 바꿀 권한이 없어요.", 3200);
+    else toast("원본 파일 이름을 바꾸지 못했어요. 기존 파일은 유지됩니다.", 3600);
+    return;
+  }
   renderSidebar();
   renderTabs();
   if (doc.el) doc.el.querySelectorAll(".text-view-name").forEach(el => { el.textContent = name; });
@@ -1702,7 +1880,7 @@ async function renameDoc(id){
     if (hdr) hdr.textContent = name;
   }
   if (typeof persistTabState === "function") persistTabState();
-  toast("표시 이름을 '" + name + "'(으)로 바꿨어요. 원본 파일 이름은 그대로예요.", 3200, { type: "success" });
+  toast("원본 파일 이름을 '" + name + "'(으)로 바꿨어요.", 3200, { type: "success" });
 }
 
 // 탭 우클릭 메뉴: IDE 처럼 오른쪽/왼쪽/다른 탭을 한 번에 정리(모두 "탭만 닫기" — 파일은 사이드바에 유지)
@@ -1735,7 +1913,8 @@ function openTabMenu(anchorId, x, y){
     menu.appendChild(b);
   };
   add("이 탭 닫기", null, () => untabDoc(anchorId));
-  add("이름 바꾸기", null, () => renameDoc(anchorId));
+  const anchorDoc = docs.find(doc => doc.id === anchorId);
+  if (canRenameOriginalDoc(anchorDoc)) add("이름 바꾸기", null, () => renameDoc(anchorId));
   const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
   add("오른쪽 탭 닫기", right.length, () => untabMany(right, anchorId));
   add("왼쪽 탭 닫기", left.length, () => untabMany(left, anchorId));
@@ -1753,6 +1932,7 @@ function openTabMenu(anchorId, x, y){
 function openSidebarDocMenu(doc, x, y){
   closeTabMenu();
   closeSidebarGroupMenu();
+  if (!canRenameOriginalDoc(doc)) return;
   const menu = document.createElement("div");
   menu.className = "tab-ctx-menu"; menu.setAttribute("role", "menu");
   const add = (label, run) => {

@@ -9,16 +9,17 @@ async function loadOffice(file, ext, options={}){
   if (typeof options.spreadsheetHasHeader === "boolean") doc.spreadsheetHasHeader = options.spreadsheetHasHeader;   // CSV→XLSX 변환 시 '첫 줄 머리글' 선택 전달
   doc.render = async () => {                 // 처음 활성화될 때 실제 렌더(지연 렌더)
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
+    const source = doc.sourceFile || file;
     const siblingCtx = { relPath: doc.relPath || options.relPath, archiveCtx: doc.archiveCtx || options.archiveCtx };
-    if (ext === "docx")      await renderDocx(file, host);
-    else if (ext === "pptx") await renderPptx(file, host, options);
-    else if (ext === "hwp" || ext === "hwpx") await renderHwp(file, ext, host);
-    else if (ext === "md" || ext === "markdown" || ext === "mdx") await renderCode(file, host, ext, "text", siblingCtx);   // 미리보기 우선 + [✎ 편집]·저장 (code-viewer 의 isMd 경로)
-    else if (ext === "txt")  await renderCode(file, host, "txt", "text");   // 텍스트도 코드뷰로 → 편집 토글·저장 지원
-    else if (ext === "html" || ext === "htm" || ext === "xhtml") await renderCode(file, host, ext, "xml", siblingCtx);   // 소스 우선 + [미리보기] 토글로 렌더
+    if (ext === "docx")      await renderDocx(source, host);
+    else if (ext === "pptx") await renderPptx(source, host, options);
+    else if (ext === "hwp" || ext === "hwpx") await renderHwp(source, ext, host);
+    else if (ext === "md" || ext === "markdown" || ext === "mdx") await renderCode(source, host, ext, "text", siblingCtx);   // 미리보기 우선 + [✎ 편집]·저장 (code-viewer 의 isMd 경로)
+    else if (ext === "txt")  await renderCode(source, host, "txt", "text");   // 텍스트도 코드뷰로 → 편집 토글·저장 지원
+    else if (ext === "html" || ext === "htm" || ext === "xhtml") await renderCode(source, host, ext, "xml", siblingCtx);   // 소스 우선 + [미리보기] 토글로 렌더
 
-    else if (CODE_EXTS[ext]) await renderCode(file, host, ext, null, siblingCtx);   // js/py/json/css/sql/xml 등
-    else                     await renderXlsx(file, host, doc);   // xlsx / xls / csv (위 else 가 모두 받음 — 중복 호출 제거)
+    else if (CODE_EXTS[ext]) await renderCode(source, host, ext, null, siblingCtx);   // js/py/json/css/sql/xml 등
+    else                     await renderXlsx(source, host, doc);   // xlsx / xls / csv (위 else 가 모두 받음 — 중복 호출 제거)
     // 본문 검색 결과 클릭 → 렌더된 화면에서 일치 글자로 스크롤+하이라이트 (마크다운·CSV 와 같은 통로)
     if (["docx", "pptx", "hwp", "hwpx"].includes(ext)) doc.contentSearchFocus = (query) => focusRenderedTextMatch(host, query);
   };
@@ -32,7 +33,7 @@ async function loadSqlite(file, options={}){
   doc.sourceFile = file;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
-    await renderSqlite(file, host);
+    await renderSqlite(doc.sourceFile || file, host);
   };
   refreshChrome();
   activateIfIdle(doc, options);

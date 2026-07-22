@@ -2,18 +2,62 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const read = (name) => fs.readFileSync(path.join(__dirname, "../src/js", name), "utf8");
 
-test("표시 이름 변경은 실제 저장 이름과 분리하고 원래 복원 키를 유지한다", () => {
+test("이름 변경은 원본 폴더 권한이 있는 문서에만 노출하고 실제 파일과 경로를 갱신한다", () => {
   const source = read("documents.js");
   const start = source.indexOf("async function renameDoc");
   const end = source.indexOf("// 탭 우클릭 메뉴", start);
   const rename = source.slice(start, end);
-  assert.match(rename, /doc\.stableRestoreKey\s*=\s*docStableKey\(doc\)/);
-  assert.match(rename, /원본 파일과 저장\/내보내기 파일 이름은 그대로/);
-  assert.doesNotMatch(rename, /doc\.fileName\s*=\s*name/);
-  assert.match(source, /if \(doc\.stableRestoreKey\) return doc\.stableRestoreKey/);
+  assert.match(source, /function canRenameOriginalDoc\(doc\)/);
+  assert.match(source, /doc\.originalSaveMode/);
+  assert.match(source, /typeof directDir\.removeEntry === "function"/);
+  assert.match(source, /if \(canRenameOriginalDoc\(anchorDoc\)\) add\("이름 바꾸기"/);
+  assert.match(source, /if \(!canRenameOriginalDoc\(doc\)\) return;/);
+  assert.match(rename, /moveOriginalFile\(ctx, name\)/);
+  assert.match(source, /await ctx\.dirHandle\.removeEntry\(ctx\.oldName\)/);
+  assert.match(source, /doc\.workspacePath = doc\.workspacePath \? refreshWorkspacePath/);
+  assert.match(source, /doc\.stableRestoreKey = docStableKey\(doc\)/);
+});
+
+test("원본 이름 변경 폴백은 복사를 마친 뒤에만 이전 파일을 제거한다", async () => {
+  const source = read("documents.js");
+  const start = source.indexOf("async function originalRenameTargetExists");
+  const end = source.indexOf("function replaceWorkspacePathInGroups", start);
+  const sandbox = {};
+  vm.runInNewContext(source.slice(start, end) + "; this.moveOriginalFile = moveOriginalFile;", sandbox);
+
+  const events = [];
+  const originalFile = { size:4 };
+  const oldHandle = {
+    getFile: async () => originalFile,
+    isSameEntry: async other => other === oldHandle
+  };
+  const entries = new Map([["old.txt", oldHandle]]);
+  const dirHandle = {
+    getFileHandle: async (name, options={}) => {
+      if (entries.has(name)) return entries.get(name);
+      if (!options.create){ const error = new Error("missing"); error.name = "NotFoundError"; throw error; }
+      let size = 0;
+      const target = {
+        createWritable: async () => ({
+          write: async file => { events.push("write"); size = file.size; },
+          close: async () => { events.push("close"); },
+          abort: async () => {}
+        }),
+        getFile: async () => ({ size })
+      };
+      entries.set(name, target);
+      return target;
+    },
+    removeEntry: async name => { events.push("remove:" + name); entries.delete(name); }
+  };
+  const result = await sandbox.moveOriginalFile({ oldName:"old.txt", fileHandle:oldHandle, dirHandle }, "new.txt");
+  assert.equal(result, entries.get("new.txt"));
+  assert.equal(entries.has("old.txt"), false);
+  assert.deepEqual(events, ["write", "close", "remove:old.txt"]);
 });
 
 test("Office 검색은 압축 해제 크기를 제한하고 대용량 XML split을 사용하지 않는다", () => {

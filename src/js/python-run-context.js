@@ -62,6 +62,15 @@ function makeFileSiblingCtx(pairs, name, directories=[]){
     isFolderContext: true,
     paths,                                                  // 바이트를 읽기 전 경로만 노출(실행 대상 기준 범위 좁히기용)
     directories: runDirectoryPaths(paths, directories),
+    rename: (oldPath, newPath, file) => {
+      const oldKey = normalizedRunPath(oldPath), newKey = normalizedRunPath(newPath);
+      const index = paths.indexOf(oldKey);
+      if (index < 0) return false;
+      paths[index] = newKey;
+      pairs[index].relPath = newKey;
+      if (file) pairs[index].file = file;
+      return true;
+    },
     extract: async (keep) => {
       // keep(path) 가 주어지면 해당 파일만 읽는다 → 무관한 폴더·대용량 데이터 제외(50MB 상한 회피).
       const sel = (typeof keep === "function") ? pairs.filter(p => keep(p.relPath)) : pairs;
