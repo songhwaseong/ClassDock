@@ -44,3 +44,12 @@ test("라이트 모드 배경 설정은 메모 색과 분리된 본 화면 전�
   const codeViewer = fs.readFileSync(path.join(root, "src/js/code-viewer.js"), "utf8");
   assert.match(codeViewer, /if \(runnable\) host\.classList\.add\("python-editor-doc"\)/);
 });
+
+test("Python editor keeps outer tools visible and scrolls inside its panes", () => {
+  const css = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  assert.match(css, /\.office\.python-editor-doc\{overflow:hidden\}/);
+  assert.match(css, /\.office\.python-editor-doc \.run-wrap\{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden\}/);
+  assert.match(css, /\.office\.python-editor-doc \.run-split\{flex:1 1 auto;min-height:0;overflow:hidden\}/);
+  assert.match(css, /\.office\.python-editor-doc \.run-split \.code-host-edit\{height:auto;min-height:0;max-height:none\}/);
+  assert.match(css, /\.office\.python-editor-doc \.code-output\{min-height:0;max-height:none\}/);
+});

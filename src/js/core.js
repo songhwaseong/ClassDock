@@ -869,6 +869,68 @@
       .map(([word]) => word);
   }
 
+  // Public DataFrame API catalog for the bundled pandas 2.2.3 runtime. Keep
+  // attributes non-callable so accepting them does not append parentheses.
+  const PYTHON_DATAFRAME_ATTRIBUTES = (
+    "T at attrs axes columns dtypes empty flags iat iloc index loc ndim shape size sparse style values"
+  ).split(/\s+/);
+  const PYTHON_DATAFRAME_METHODS = (
+    "abs add add_prefix add_suffix agg aggregate align all any apply applymap asfreq asof assign astype at_time " +
+    "backfill between_time bfill bool boxplot clip combine combine_first compare convert_dtypes copy corr corrwith " +
+    "count cov cummax cummin cumprod cumsum describe diff div dot drop drop_duplicates droplevel dropna duplicated " +
+    "eq eval ewm expanding explode ffill fillna filter first first_valid_index floordiv from_dict from_records ge get " +
+    "groupby gt head hist idxmax idxmin infer_objects info insert interpolate isin isna isnull items iterrows " +
+    "itertuples join keys kurt kurtosis last last_valid_index le lt map mask max mean median melt memory_usage merge " +
+    "min mod mode mul ne nlargest notna notnull nsmallest nunique pad pct_change pipe pivot pivot_table plot pop pow " +
+    "prod product quantile query radd rank rdiv reindex reindex_like rename rename_axis reorder_levels replace " +
+    "resample reset_index rfloordiv rmod rmul rolling round rpow rsub rtruediv sample select_dtypes sem set_axis " +
+    "set_flags set_index shift skew sort_index sort_values squeeze stack std sub sum swapaxes swaplevel tail take " +
+    "to_clipboard to_csv to_dict to_excel to_feather to_gbq to_hdf to_html to_json to_latex to_markdown to_numpy " +
+    "to_orc to_parquet to_period to_pickle to_records to_sql to_stata to_string to_timestamp to_xarray to_xml " +
+    "transform transpose truediv truncate tz_convert tz_localize unstack update value_counts var where xs"
+  ).split(/\s+/);
+  const PYTHON_DATAFRAME_SIGNATURES = {
+    sort_values:"sort_values(by, ascending=True, inplace=False, na_position='last', ignore_index=False)",
+    groupby:"groupby(by=None, ...)",
+    dropna:"dropna(axis=0, how='any', ...)",
+    reset_index:"reset_index(level=None, drop=False, ...)",
+    merge:"merge(right, how='inner', ...)",
+    to_csv:"to_csv(path_or_buf=None, ...)"
+  };
+  const PYTHON_DATAFRAME_MEMBER_COMPLETIONS = [
+    ...PYTHON_DATAFRAME_ATTRIBUTES.map(name => ({ name, type:"property", signature:"" })),
+    ...PYTHON_DATAFRAME_METHODS.map(name => ({
+      name,
+      type:"function",
+      signature:PYTHON_DATAFRAME_SIGNATURES[name] || (name + "(...)")
+    }))
+  ].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Provide semantic fallback when Jedi is unavailable. This keeps DataFrame
+  // members discoverable without adding pandas-only names to every object.
+  function pythonMemberCompletionCandidates(source, receiver, prefix) {
+    const name = String(receiver || "");
+    const query = String(prefix || "");
+    if (!/^[A-Za-z_]\w*$/.test(name)) return [];
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const dataframeAssignment = new RegExp(
+      "(?:^|\\n)\\s*" + escaped
+      + "(?:\\s*:\\s*[^=\\n]+)?\\s*=\\s*(?:(?:pd|pandas)\\s*\\.\\s*)?DataFrame\\s*\\(",
+      "m"
+    );
+    const dataframeReaderAssignment = new RegExp(
+      "(?:^|\\n)\\s*" + escaped
+      + "(?:\\s*:\\s*[^=\\n]+)?\\s*=\\s*(?:pd|pandas)\\s*\\.\\s*"
+      + "(?:read_csv|read_excel|read_json|read_html|read_parquet|read_feather|read_pickle|read_sql(?:_query|_table)?)\\s*\\(",
+      "m"
+    );
+    const text = String(source || "");
+    if (!dataframeAssignment.test(text) && !dataframeReaderAssignment.test(text)) return [];
+    return PYTHON_DATAFRAME_MEMBER_COMPLETIONS
+      .filter(item => item.name !== query && (!query || item.name.startsWith(query)))
+      .map(item => ({ ...item }));
+  }
+
   function pythonImportCompletionCandidates(source, prefix, extraCandidates=[]) {
     const text = String(source || ""), query = String(prefix || "");
     const declared = new Set();
@@ -2946,7 +3008,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,

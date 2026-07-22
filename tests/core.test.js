@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -409,6 +409,26 @@ test("언어별 자동완성: 프로파일 키워드로 바꾸면 파이썬 키�
   assert.ok(!completionWordsForProfile("hash", "yaml").includes("def"));
   assert.ok(!completionWordsForProfile("c", "json").includes("function"));
   assert.ok(completionWordsForProfile("hash", "ps1").includes("foreach"));
+});
+
+test("DataFrame fallback completion exposes the pandas member catalog without Jedi", () => {
+  const source = [
+    "import pandas as pd",
+    "ft_frame = pd.DataFrame(most_importances, index=train_features, columns=['Importance'])",
+    "ft_frame.sort_"
+  ].join("\n");
+  assert.deepEqual(pythonMemberCompletionCandidates(source, "ft_frame", "sort_v"), [{
+    name:"sort_values",
+    type:"function",
+    signature:"sort_values(by, ascending=True, inplace=False, na_position='last', ignore_index=False)"
+  }]);
+  const allMembers = pythonMemberCompletionCandidates(source, "ft_frame", "");
+  assert.ok(allMembers.length > 150);
+  for (const name of ["groupby", "dropna", "reset_index", "merge", "to_csv", "value_counts"]) {
+    assert.ok(allMembers.some(item => item.name === name && item.type === "function"), name);
+  }
+  assert.ok(allMembers.some(item => item.name === "shape" && item.type === "property"));
+  assert.deepEqual(pythonMemberCompletionCandidates("items = []\nitems.sort_", "items", "sort_"), []);
 });
 
 test("import completion suggestions carry their import statement", () => {

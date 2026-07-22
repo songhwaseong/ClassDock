@@ -1996,6 +1996,17 @@
   /* 코드 실행(.py): 실행 바 + 좌(코드)·우(출력) 분할 */
   .run-wrap{max-width:1180px;margin:0 auto}
   .run-wrap .code-note{max-width:none;margin:0 0 8px}
+  /* Keep Python tools visible; the editor/output panes handle scrolling. */
+  @media (min-width:901px){
+    .office.python-editor-doc{overflow:hidden}
+    .office.python-editor-doc .run-wrap{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+    .office.python-editor-doc .run-wrap > :not(.run-split){flex:0 0 auto}
+    .office.python-editor-doc .run-split{flex:1 1 auto;min-height:0;overflow:hidden}
+    .office.python-editor-doc .run-split .code-host-edit{height:auto;min-height:0;max-height:none}
+    .office.python-editor-doc .code-output{min-height:0;max-height:none}
+    .office.python-editor-doc .run-split.stack-v{height:auto}
+    .office.python-editor-doc .py-path-help{max-height:min(50vh,420px);overflow:auto}
+  }
   .run-bar{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
   .run-go{font:inherit;font-weight:600;font-size:15px;line-height:1;border:1.5px solid #16a34a;border-radius:8px;height:30px;padding:0 13px;cursor:pointer;
     background:transparent;color:#16a34a;display:inline-flex;align-items:center;justify-content:center;min-width:40px}

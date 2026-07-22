@@ -633,9 +633,11 @@ function buildCodeEditor(text, prof, options={}){
     dismissCompletion();
   };
   document.addEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
-  const showLocalCompletion = (word, contextSource=null, includeImports=false) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
+  const showLocalCompletion = (word, contextSource=null, includeImports=false, memberReceiver="") => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
     const local = pythonCompletionCandidates(source, word.prefix, completionWords);
+    const members = memberReceiver && !plainMode && typeof pythonMemberCompletionCandidates === "function"
+      ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
     const wantImports = includeImports && !plainMode;      // 파이썬 import 제안은 파이썬 편집기에서만
     const indexed = wantImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
     let workspace = [];
@@ -644,8 +646,15 @@ function buildCodeEditor(text, prof, options={}){
     }
     const imports = wantImports && typeof pythonImportCompletionCandidates === "function"
       ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
-    const names = new Set(local);
-    const items = [...local, ...imports.filter(item => !names.has(item.name))].slice(0, 12);
+    const names = new Set();
+    const items = [];
+    const completionLimit = memberReceiver ? 240 : 12;
+    for (const item of [...members, ...local, ...imports]) {
+      const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
+      if (!name || names.has(name)) continue;
+      names.add(name); items.push(item);
+      if (items.length >= completionLimit) break;
+    }
     if (!items.length){ hideCompletion(); return false; }
     completion.items = items; completion.index = 0; completion.start = word.start; completion.end = word.end;
     renderCompletion();
@@ -669,6 +678,8 @@ function buildCodeEditor(text, prof, options={}){
     if (!word){ hideCompletion(); return; }
     if (caretInComment(word.end)){ hideCompletion(); return; }   // 주석 안에서는 자동완성하지 않음
     const dotContext = word.start > 0 && ta.value[word.start - 1] === ".";   // obj. 처럼 멤버 접근 문맥
+    const receiverMatch = dotContext ? ta.value.slice(0, word.start - 1).match(/([A-Za-z_]\w*)$/) : null;
+    const memberReceiver = receiverMatch ? receiverMatch[1] : "";
     if (!manual && !dotContext && word.prefix.length < 1){ hideCompletion(); return; }
     completion.manual = manual;
     // 로컬 후보는 즉시 보여 주고, 더 정확한 Jedi 결과가 오면 같은 팝업을 비동기로 보강한다.
@@ -676,7 +687,7 @@ function buildCodeEditor(text, prof, options={}){
     if (jediUsable()){
       const seq = completionSeq, caret = ta.selectionStart, currentSource = ta.value;
       const context = completionContextFor(), source = context.source;
-      const localShown = showLocalCompletion(word, source, manual);
+      const localShown = showLocalCompletion(word, source, manual, memberReceiver);
       const before = currentSource.slice(0, caret);
       const line = context.lineOffset + (before.match(/\n/g) || []).length + 1; // Jedi: 줄 1-based
       const column = caret - (before.lastIndexOf("\n") + 1);          // Jedi: 칸 0-based
@@ -690,16 +701,24 @@ function buildCodeEditor(text, prof, options={}){
         }
         const imports = manual && typeof pythonImportCompletionCandidates === "function"
           ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
-        const combined = [...pruned, ...imports.filter(item => !pruned.some(candidate => String(candidate && candidate.name || candidate) === item.name))];
+        const fallbackMembers = memberReceiver && typeof pythonMemberCompletionCandidates === "function"
+          ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
+        const combined = [];
+        const combinedNames = new Set();
+        for (const item of [...fallbackMembers, ...pruned, ...imports]) {
+          const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
+          if (!name || combinedNames.has(name)) continue;
+          combinedNames.add(name); combined.push(item);
+        }
         if (combined.length){
-          completion.items = combined.slice(0, 12); completion.index = 0;
+          completion.items = combined.slice(0, memberReceiver ? 240 : 12); completion.index = 0;
           completion.start = word.start; completion.end = word.end;
           renderCompletion();
         } else if (!localShown) hideCompletion();     // Jedi·로컬 후보가 모두 없을 때만 닫힘(로컬 버퍼 후보가 떠 있으면 유지)
       });
       return;
     }
-    showLocalCompletion(word, null, manual);
+    showLocalCompletion(word, null, manual, memberReceiver);
   };
   const scheduleCompletion = () => {
     clearTimeout(completionTimer);
