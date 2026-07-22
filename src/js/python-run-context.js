@@ -437,7 +437,10 @@ function renderPythonPathHelper(panel, src, runCtx, ui){
   const sub = document.createElement("span"); sub.textContent = "현재 코드와 열린 폴더를 기준으로 계산합니다.";
   heading.append(title, sub);
   const close = document.createElement("button"); close.type = "button"; close.textContent = "닫기";
-  close.addEventListener("click", () => { panel.hidden = true; });
+  close.addEventListener("click", () => {
+    if (ui && typeof ui.closePathHelp === "function") ui.closePathHelp();
+    else panel.hidden = true;
+  });
   head.append(heading, close);
 
   const summary = document.createElement("dl"); summary.className = "py-path-summary";

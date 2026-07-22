@@ -1359,8 +1359,27 @@ async function renderCode(file, host, ext, profile, runCtx){
   pathHelpBtn.textContent = "경로 도우미"; pathHelpBtn.title = "파일 읽기·저장·import 경로를 현재 작업폴더 기준으로 확인";
   projectRow.append(projectInfo, pathHelpBtn);
   const pathHelpPanel = document.createElement("section"); pathHelpPanel.className = "py-path-help"; pathHelpPanel.hidden = true;
+  // 경로 도우미도 작업폴더 패널처럼 팝오버식으로: 바깥 클릭·Esc 로 닫는다. 리스너는 열릴 때만 단다.
+  let pathHelpOutsideClose = null;
+  const detachPathHelpOutside = () => {
+    if (!pathHelpOutsideClose) return;
+    document.removeEventListener("pointerdown", pathHelpOutsideClose, true);
+    pathHelpOutsideClose = null;
+  };
+  const closePathHelp = () => { pathHelpPanel.hidden = true; detachPathHelpOutside(); };
   outer.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || !projectInfo.open) return;
+    if (e.key !== "Escape") return;
+    if (!pathHelpPanel.hidden){
+      const focusWasInPanel = pathHelpPanel.contains(document.activeElement);
+      e.preventDefault();
+      e.stopPropagation();
+      closePathHelp();
+      if (focusWasInPanel){
+        try { pathHelpBtn.focus({ preventScroll:true }); } catch(_) { pathHelpBtn.focus(); }
+      }
+      return;
+    }
+    if (!projectInfo.open) return;
     const focusWasInList = projectBody.contains(document.activeElement);
     e.preventDefault();
     e.stopPropagation();
@@ -1504,14 +1523,23 @@ async function renderCode(file, host, ext, profile, runCtx){
 
   const ui = { btn: runBtn, traceBtn, analyzeBtn, gradeBtn, status, outPanel, split, stdin, inputWrap, editorTa: editor.ta,
     projectInfo, projectSummary, projectBody, pathHelpBtn, pathHelpPanel };
+  ui.closePathHelp = closePathHelp;
   ui.openPathHelp = () => {
     pathHelpPanel.hidden = false;
     renderPythonPathHelper(pathHelpPanel, editor.getValue(), runCtxWithDoc, ui);
     pathHelpPanel.scrollIntoView({ block:"nearest", behavior:"smooth" });
+    if (pathHelpOutsideClose) return;
+    pathHelpOutsideClose = (e) => {
+      if (!document.contains(pathHelpPanel) || pathHelpPanel.hidden){ detachPathHelpOutside(); return; }  // 뷰어 교체·다른 경로로 닫힘 → 리스너 정리(누수 방지)
+      if (pathHelpPanel.contains(e.target)) return;
+      if (pathHelpBtn.contains(e.target)) return;   // 토글 버튼 클릭은 click 핸들러가 처리(여기서 닫으면 다시 열려버림)
+      closePathHelp();
+    };
+    document.addEventListener("pointerdown", pathHelpOutsideClose, true);
   };
   pathHelpBtn.addEventListener("click", () => {
     if (pathHelpPanel.hidden) ui.openPathHelp();
-    else pathHelpPanel.hidden = true;
+    else closePathHelp();
   });
   ui.markError = (n) => editor.markError(n);                    // 실행 에러 줄 강조 / 해제(수정 시 자동 해제)
   ui.markErrorLines = (lines) => editor.markErrorLines(lines);
