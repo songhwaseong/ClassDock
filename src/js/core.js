@@ -877,7 +877,9 @@
     let match;
     while ((match = declaration.exec(text))) declared.add(match[1] || match[2]);
     const extra = Array.isArray(extraCandidates) ? extraCandidates.filter((item) => item && typeof item === "object") : [];
-    return [...PYTHON_IMPORT_COMPLETIONS, ...extra]
+    const preferredExtra = extra.filter((item) => Number(item.priority) < 0);
+    const regularExtra = extra.filter((item) => !(Number(item.priority) < 0));
+    return [...preferredExtra, ...PYTHON_IMPORT_COMPLETIONS, ...regularExtra]
       .filter((item) => !query || item.name.startsWith(query))
       .filter((item) => {
         if (seen.has(item.name)) return false;
@@ -886,6 +888,70 @@
       .filter((item) => !declared.has(item.name))
       .filter((item) => !hasPythonImport(text, item.importText))
       .map((item) => ({ ...item }));
+  }
+
+  // Build auto-import candidates from Python files already opened in the same
+  // workspace. The shortest module path reachable from the current script's
+  // directory (or one of its parents) mirrors the project runner's sys.path.
+  function pythonWorkspaceImportCompletionCandidates(currentPath, entries) {
+    const normalize = (value) => normalizeWorkspacePath(value).replace(/\/+$/, "");
+    const dirname = (value) => {
+      const path = normalize(value), index = path.lastIndexOf("/");
+      return index >= 0 ? path.slice(0, index) : "";
+    };
+    const isIdentifier = (value) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || ""));
+    const current = normalize(currentPath);
+    const bases = [];
+    for (let base = dirname(current); ; base = dirname(base)) {
+      if (!bases.includes(base)) bases.push(base);
+      if (!base) break;
+    }
+    const modulePartsFor = (value) => {
+      const path = normalize(value);
+      if (!/\.(?:py|pyw|pyi)$/i.test(path)) return null;
+      for (const base of bases) {
+        if (base && path !== base && !path.startsWith(base + "/")) continue;
+        let relative = base ? path.slice(base.length).replace(/^\/+/, "") : path;
+        relative = relative.replace(/\.(?:py|pyw|pyi)$/i, "");
+        let parts = relative.split("/").filter(Boolean);
+        if (parts[parts.length - 1] === "__init__") parts = parts.slice(0, -1);
+        if (parts.length && parts.every(isIdentifier)) return parts;
+      }
+      return null;
+    };
+    const rows = [];
+    const seen = new Set();
+    const add = (name, type, importText) => {
+      if (!isIdentifier(name) || name.startsWith("_") || !importText) return;
+      const key = name + "\n" + importText;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ name, type, importText, priority:-1, workspace:true });
+    };
+    const files = (Array.isArray(entries) ? entries : [])
+      .map((entry) => ({
+        path:normalize(entry && entry.path),
+        source:String((entry && entry.source) == null ? "" : entry.source)
+      }))
+      .filter((entry) => entry.path && entry.path !== current && /\.(?:py|pyw|pyi)$/i.test(entry.path))
+      .map((entry) => ({ ...entry, moduleParts:modulePartsFor(entry.path) }))
+      .filter((entry) => entry.moduleParts && entry.moduleParts.length)
+      .sort((a, b) => a.moduleParts.length - b.moduleParts.length || a.path.localeCompare(b.path));
+    for (const file of files) {
+      const parts = file.moduleParts;
+      for (let index = 0; index < parts.length; index++) {
+        const name = parts[index];
+        const parent = parts.slice(0, index).join(".");
+        add(name, "module", parent ? ("from " + parent + " import " + name) : ("import " + name));
+      }
+      const moduleName = parts.join(".");
+      const definition = /^(async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+      let match;
+      while ((match = definition.exec(file.source))) {
+        add(match[2], match[1] === "class" ? "class" : "function", "from " + moduleName + " import " + match[2]);
+      }
+    }
+    return rows;
   }
 
   function normalizePythonImport(importText) {
@@ -2870,7 +2936,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,

@@ -638,8 +638,12 @@ function buildCodeEditor(text, prof, options={}){
     const local = pythonCompletionCandidates(source, word.prefix, completionWords);
     const wantImports = includeImports && !plainMode;      // 파이썬 import 제안은 파이썬 편집기에서만
     const indexed = wantImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+    let workspace = [];
+    if (wantImports && typeof options.workspaceImportCandidates === "function") {
+      try { workspace = options.workspaceImportCandidates() || []; } catch(e) { workspace = []; }
+    }
     const imports = wantImports && typeof pythonImportCompletionCandidates === "function"
-      ? pythonImportCompletionCandidates(source, word.prefix, indexed) : indexed;
+      ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
     const names = new Set(local);
     const items = [...local, ...imports.filter(item => !names.has(item.name))].slice(0, 12);
     if (!items.length){ hideCompletion(); return false; }
@@ -680,8 +684,12 @@ function buildCodeEditor(text, prof, options={}){
         if (seq !== completionSeq || ta.selectionStart !== caret) return;   // 더 최신 요청·커서 이동 → 폐기
         const pruned = manual ? (items || []) : pruneFullyTyped(items, word.prefix);   // 수동(Ctrl+Space)은 그대로
         const indexed = manual && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+        let workspace = [];
+        if (manual && typeof options.workspaceImportCandidates === "function") {
+          try { workspace = options.workspaceImportCandidates() || []; } catch(e) { workspace = []; }
+        }
         const imports = manual && typeof pythonImportCompletionCandidates === "function"
-          ? pythonImportCompletionCandidates(source, word.prefix, indexed) : indexed;
+          ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
         const combined = [...pruned, ...imports.filter(item => !pruned.some(candidate => String(candidate && candidate.name || candidate) === item.name))];
         if (combined.length){
           completion.items = combined.slice(0, 12); completion.index = 0;

@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, pythonCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -425,6 +425,54 @@ test("import completion suggestions carry their import statement", () => {
   }]);
   assert.equal(pythonImportCompletionCandidates("from pathlib import Path\nPa", "Pa").length, 0);
   assert.equal(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa").length, 0);
+});
+
+test("workspace import completion indexes Python modules and top-level symbols in other folders", () => {
+  const candidates = pythonWorkspaceImportCompletionCandidates(
+    "m_project/h.softmax/main.py",
+    [{
+      path:"m_project/Utility/keras_graph_util.py",
+      source:[
+        "def model_information(model):",
+        "    pass",
+        "",
+        "class GraphBuilder:",
+        "    def render(self):",
+        "        pass",
+        "",
+        "def _private_helper():",
+        "    pass"
+      ].join("\n")
+    }]
+  );
+  assert.ok(candidates.some(item => item.name === "Utility" && item.importText === "import Utility"));
+  assert.ok(candidates.some(item => item.name === "keras_graph_util" && item.importText === "from Utility import keras_graph_util"));
+  assert.ok(candidates.some(item => item.name === "model_information" && item.type === "function"
+    && item.importText === "from Utility.keras_graph_util import model_information"));
+  assert.ok(candidates.some(item => item.name === "GraphBuilder" && item.type === "class"
+    && item.importText === "from Utility.keras_graph_util import GraphBuilder"));
+  assert.ok(!candidates.some(item => item.name === "render" || item.name === "_private_helper"));
+});
+
+test("workspace import completion prefers the nearest valid module path and skips the current file", () => {
+  const candidates = pythonWorkspaceImportCompletionCandidates("project/app/main.py", [
+    { path:"project/app/main.py", source:"def current_only():\n    pass" },
+    { path:"project/app/helper.py", source:"async def load_data():\n    pass" },
+    { path:"project/shared/__init__.py", source:"class SharedValue:\n    pass" }
+  ]);
+  assert.ok(candidates.some(item => item.name === "helper" && item.importText === "import helper"));
+  assert.ok(candidates.some(item => item.name === "load_data" && item.importText === "from helper import load_data"));
+  assert.ok(candidates.some(item => item.name === "SharedValue" && item.importText === "from shared import SharedValue"));
+  assert.ok(!candidates.some(item => item.name === "current_only"));
+});
+
+test("workspace auto-import candidates take precedence over the installed-package catalog", () => {
+  const result = pythonImportCompletionCandidates("Pa", "Pa", [{
+    name:"Path", type:"class", importText:"from local_paths import Path", priority:-1
+  }]);
+  assert.deepEqual(result, [{
+    name:"Path", type:"class", importText:"from local_paths import Path", priority:-1
+  }]);
 });
 
 test("Class.load 대입은 Jedi 분석용 반환 타입을 보강하되 실제 입력 줄은 바꾸지 않는다", () => {

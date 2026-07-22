@@ -28,6 +28,31 @@ async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
   return true;
 }
 
+// 열린 작업공간의 최신 Python 문서만 읽어 로컬 자동 import 후보를 만든다.
+// 서로 다른 폴더/압축 묶음은 import 루트가 모호해지므로 같은 archiveCtx만 포함한다.
+function workspacePythonImportCandidates(ownerDoc){
+  if (!ownerDoc || typeof pythonWorkspaceImportCompletionCandidates !== "function") return [];
+  const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
+    .replace(/\\/g, "/").replace(/^\/+/, "");
+  const currentPath = docPath(ownerDoc);
+  const context = ownerDoc.archiveCtx || null;
+  const entries = [];
+  for (const doc of docs){
+    if (!doc || doc === ownerDoc || doc.kind === "pdf") continue;
+    if (doc.sourceKey && String(doc.sourceKey).startsWith("definition:")) continue;
+    if ((doc.archiveCtx || null) !== context) continue;
+    const path = docPath(doc);
+    if (!/\.(?:py|pyw|pyi)$/i.test(path)) continue;
+    let source = null;
+    if (doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
+      try { source = doc.codeEditor.getValue(); } catch(_){}
+    }
+    if (source == null && typeof doc.savedText === "string") source = doc.savedText;
+    if (source != null) entries.push({ path, source });
+  }
+  return pythonWorkspaceImportCompletionCandidates(currentPath, entries);
+}
+
 // 문자열 토큰이 f-string 인가? (접두사에 f/F 포함) — 바깥 정규식이 이미 잘라낸 토큰만 검사.
 function isFStringToken(token){
   const q = token.search(/["'`]/);
@@ -1221,7 +1246,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   const sourceFingerprint = fingerprintBytes((file && file.name) || "code.py", sourceBytes);
   const restoredDraft = loadPythonDraft(draftKey, sourceFingerprint);
   const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
-    resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo)
+    resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo),
+    workspaceImportCandidates: () => workspacePythonImportCandidates(ownerDoc)
   });
   let savedValue = text;
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;

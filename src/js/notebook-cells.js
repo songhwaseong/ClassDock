@@ -426,6 +426,7 @@ function nbBuildCell(ownerDoc, cell){
       if (ctrl.active) return;
       const ed = buildCodeEditor(cell.source, "hash", {
         completionPortal:true,
+        workspaceImportCandidates:() => (typeof workspacePythonImportCandidates === "function" ? workspacePythonImportCandidates(ownerDoc) : []),
         completionContext:(currentSource) => notebookCompletionContext(
           ownerDoc && ownerDoc.notebookModel,
           cell,
