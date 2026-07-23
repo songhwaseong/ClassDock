@@ -1223,6 +1223,72 @@
     return { selectionStart: start, selectionEnd: end };
   }
 
+  function pythonBracketContentSelection(value, caretOffset) {
+    const text = String(value || "");
+    const caret = Math.max(0, Math.min(Number(caretOffset) || 0, text.length));
+    const openIndex = caret - 1;
+    const pairs = { "(":")", "[":"]", "{":"}" };
+    const open = text[openIndex];
+    if (!pairs[open]) return null;
+
+    let state = "code", quote = "", triple = false, escaped = false;
+    const stack = [];
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (state === "comment") {
+        if (ch === "\n") state = "code";
+        continue;
+      }
+      if (state === "string") {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === "\\") {
+          escaped = true;
+        } else if (triple) {
+          if (ch === quote && text[i + 1] === quote && text[i + 2] === quote) {
+            i += 2;
+            state = "code";
+            quote = "";
+            triple = false;
+          }
+        } else if (ch === quote) {
+          state = "code";
+          quote = "";
+        }
+        continue;
+      }
+      if (ch === "#") {
+        state = "comment";
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        quote = ch;
+        triple = text[i + 1] === ch && text[i + 2] === ch;
+        if (triple) i += 2;
+        state = "string";
+        continue;
+      }
+      if (i < openIndex) continue;
+      if (i === openIndex) {
+        stack.push(open);
+        continue;
+      }
+      if (pairs[ch]) {
+        stack.push(ch);
+        continue;
+      }
+      if (ch === ")" || ch === "]" || ch === "}") {
+        if (!stack.length || pairs[stack[stack.length - 1]] !== ch) return null;
+        stack.pop();
+        if (!stack.length) {
+          if (i === caret) return null;
+          return { selectionStart:caret, selectionEnd:i };
+        }
+      }
+    }
+    return null;
+  }
+
   function findNextIdentifierOccurrence(value, selectionStart, selectionEnd, reverse=false) {
     const text = String(value || "");
     let start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
@@ -3008,7 +3074,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,

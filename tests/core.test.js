@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -523,6 +523,40 @@ test("더블클릭 변수 선택은 옆 공백을 제외하고 식별자 전체�
   assert.deepEqual(normalizeIdentifierSelection("print(total_count)", 8, 10), {
     selectionStart: 6, selectionEnd: 17
   });
+});
+
+test("bracket content selection covers parentheses, square brackets, and braces", () => {
+  assert.deepEqual(pythonBracketContentSelection("print(name, age)", 6), {
+    selectionStart:6, selectionEnd:15
+  });
+  assert.deepEqual(pythonBracketContentSelection("items[index + 1]", 6), {
+    selectionStart:6, selectionEnd:15
+  });
+  assert.deepEqual(pythonBracketContentSelection('{"name": user}', 1), {
+    selectionStart:1, selectionEnd:13
+  });
+});
+
+test("bracket content selection handles nesting, strings, comments, and multiple lines", () => {
+  const nested = "func(a, other(b, [c, d]), {'x': e})";
+  assert.deepEqual(pythonBracketContentSelection(nested, 5), {
+    selectionStart:5, selectionEnd:nested.length - 1
+  });
+  const quoted = 'func(")", value) # ] }';
+  assert.deepEqual(pythonBracketContentSelection(quoted, 5), {
+    selectionStart:5, selectionEnd:15
+  });
+  const multiline = "func(\n  value,  # ) ignored\n  other\n)";
+  assert.deepEqual(pythonBracketContentSelection(multiline, 5), {
+    selectionStart:5, selectionEnd:multiline.length - 1
+  });
+});
+
+test("bracket content selection keeps the normal double-click path for unsupported positions", () => {
+  assert.equal(pythonBracketContentSelection("func()", 5), null);
+  assert.equal(pythonBracketContentSelection("func(value", 5), null);
+  assert.equal(pythonBracketContentSelection('text = "(value)"', 9), null);
+  assert.equal(pythonBracketContentSelection("func(value)", 6), null);
 });
 
 test("F3 단어 이동은 같은 식별자를 순환하며 부분 단어는 건너뛴다", () => {

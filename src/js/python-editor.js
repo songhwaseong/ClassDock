@@ -1176,7 +1176,9 @@ function buildCodeEditor(text, prof, options={}){
   });
   window.addEventListener("keyup", (e) => { if (e.key === "Control" || e.key === "Alt") clearDefinitionHover(); });
   window.addEventListener("blur", clearDefinitionHover);
+  let pendingBracketSelection = null;
   ta.addEventListener("mousedown", (e) => {
+    if (e.button === 0 && e.detail === 1) pendingBracketSelection = null;
     if (linkedEdit.active && e.button === 0 && e.detail === 1) exitLinkedEdit();
     if (e.button === 0 && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey){
       const info = wordAtOffset(offsetFromMeasuredPoint(e.clientX, e.clientY));
@@ -1205,6 +1207,18 @@ function buildCodeEditor(text, prof, options={}){
     }
     if (e.button !== 0 || e.altKey || e.detail !== 2) return;
     const pos = offsetFromMeasuredPoint(e.clientX, e.clientY);
+    const bracketSelection = pythonBracketContentSelection(ta.value, pos);
+    if (bracketSelection){
+      e.preventDefault();
+      pendingBracketSelection = bracketSelection;
+      exitLinkedEdit();
+      ta.focus();
+      ta.setSelectionRange(bracketSelection.selectionStart, bracketSelection.selectionEnd);
+      hideCompletion();
+      computeWordHi();
+      sync();
+      return;
+    }
     const info = wordAtOffset(pos);
     if (info){
       e.preventDefault();
@@ -1217,8 +1231,16 @@ function buildCodeEditor(text, prof, options={}){
   });
   ta.addEventListener("dblclick", () => {
     hideCompletion();
+    const bracketSelection = pendingBracketSelection;
+    pendingBracketSelection = null;
     requestAnimationFrame(() => {
       if (!ta.isConnected) return;
+      if (bracketSelection){
+        ta.setSelectionRange(bracketSelection.selectionStart, bracketSelection.selectionEnd);
+        computeWordHi();
+        sync();
+        return;
+      }
       const next = normalizeIdentifierSelection(ta.value, ta.selectionStart, ta.selectionEnd);
       ta.setSelectionRange(next.selectionStart, next.selectionEnd);
       startLinkedEdit();
