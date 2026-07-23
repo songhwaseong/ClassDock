@@ -2601,10 +2601,12 @@
   .run-divider{flex:0 0 12px;position:relative;cursor:col-resize;touch-action:none;outline:0}
   .run-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:2px;border-radius:2px;background:var(--border)}
   .run-divider:hover::before,.run-divider.dragging::before,.run-divider:focus-visible::before{left:4px;width:4px;background:var(--accent)}
-  .code-output{flex:1 1 0;min-width:0;display:flex;flex-direction:column;background:var(--code-panel);
+  .code-output{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column;background:var(--code-panel);
     border-radius:8px;box-shadow:0 4px 18px rgba(15,23,42,.12);max-height:calc(100vh - 240px);   /* 편집기(.code-host-edit)와 같은 기준 — 바닥 정렬 */
     overflow:auto;font-family:var(--code-ff,Consolas,"Courier New",monospace);
     font-size:var(--code-fs,13px);line-height:var(--code-lh,21px)}
+  .code-output:focus{outline:none}
+  .code-output:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   /* 노트북 '로컬 파이썬으로 실행'(옵션 B) 결과 패널 — 노트북 하단에 붙는 독립 영역 */
   .nbv-local-out-wrap{margin:14px 8px 8px;border:1px solid rgba(148,163,184,.35);border-radius:10px;overflow:hidden;background:var(--code-panel)}
   .nbv-local-out-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:rgba(148,163,184,.14);font-size:13px;font-weight:600}
@@ -2623,15 +2625,31 @@
     .run-split.stack-v .run-divider.dragging::before,
     .run-split.stack-v .run-divider:focus-visible::before{top:4px;height:4px;left:0;right:0;width:auto}
   }
-  .out-head{position:sticky;top:0;background:var(--code-panel-head);color:var(--code-muted);font-size:11.5px;letter-spacing:.04em;
-    padding:8px 48px 8px 14px;border-bottom:1px solid var(--code-border);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .out-head{position:sticky;top:0;z-index:12;background:var(--code-panel-head);color:var(--code-muted);font-size:11.5px;letter-spacing:.04em;
+    min-height:34px;box-sizing:border-box;padding:8px 78px 8px 14px;border-bottom:1px solid var(--code-border);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .out-head-actions{position:absolute;right:7px;top:3px;display:flex;align-items:center;gap:2px;z-index:13}
   .out-hide{width:27px;height:27px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--code-muted);
     display:inline-grid;place-items:center;cursor:pointer;z-index:12}
-  .out-hide:hover,.out-hide:focus-visible{background:var(--panel-hover);color:var(--code-text);border-color:var(--code-border)}
-  .out-hide:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  .out-hide svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-  .out-head>.out-hide{position:absolute;right:8px;top:4px}
-  .code-output>.out-hide{position:sticky;top:6px;align-self:flex-end;flex:0 0 27px;margin:6px 7px -33px 0}
+  .out-find-open{width:27px;height:27px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--code-muted);
+    display:inline-grid;place-items:center;cursor:pointer}
+  .out-hide:hover,.out-hide:focus-visible,.out-find-open:hover,.out-find-open:focus-visible{background:var(--panel-hover);color:var(--code-text);border-color:var(--code-border)}
+  .out-hide:focus-visible,.out-find-open:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .out-hide svg,.out-find-open svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .code-output>.out-head-actions{position:sticky;top:5px;align-self:flex-end;flex:0 0 27px;margin:0 7px -27px 0}
+  .out-find-bar{position:sticky;top:34px;z-index:11;display:flex;align-items:center;gap:5px;padding:7px 8px;
+    background:var(--code-panel-head);border-bottom:1px solid var(--code-border);flex:0 0 auto}
+  .out-find-bar[hidden]{display:none}
+  .out-find-input{flex:1 1 150px;min-width:70px;height:29px;box-sizing:border-box;border:1px solid var(--code-border);
+    border-radius:6px;padding:4px 8px;background:var(--code-bg);color:var(--code-text);
+    font:var(--code-fs,13px)/1.35 var(--code-ff,Consolas,"Courier New",monospace)}
+  .out-find-input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+  .out-find-count{min-width:46px;text-align:center;color:var(--code-muted);font-size:11px;white-space:nowrap}
+  .out-find-nav,.out-find-close{width:28px;height:28px;padding:0;border:1px solid var(--code-border);border-radius:6px;
+    background:var(--field);color:var(--code-muted);font:600 13px/1 system-ui,sans-serif;cursor:pointer}
+  .out-find-nav:hover,.out-find-close:hover{background:var(--panel-hover);color:var(--code-text)}
+  .out-find-layer{position:absolute;left:0;top:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}
+  .out-find-hit{position:absolute;box-sizing:border-box;background:rgba(250,204,21,.38);border-radius:2px}
+  .out-find-hit.active{background:rgba(249,115,22,.48);outline:1px solid #f97316}
   .py-grade-summary{display:flex;align-items:center;gap:10px;margin:12px 14px 6px;padding:11px 12px;border:1px solid var(--code-border);
     border-radius:9px;font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
   .py-grade-summary strong{font-size:20px}.py-grade-summary span{font-size:12.5px}

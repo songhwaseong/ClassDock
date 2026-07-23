@@ -1552,7 +1552,43 @@ async function renderCode(file, host, ext, profile, runCtx){
   const divider = document.createElement("div"); divider.className = "run-divider";
   divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
   const outPanel = document.createElement("div"); outPanel.className = "code-output";
+  outPanel.tabIndex = 0;
+  outPanel.setAttribute("aria-label", _T("실행 결과"));
   const outHideBtn = document.createElement("button"); outHideBtn.className = "out-hide"; outHideBtn.type = "button";
+  const outFindBtn = document.createElement("button"); outFindBtn.className = "out-find-open"; outFindBtn.type = "button";
+  outFindBtn.setAttribute("aria-haspopup", "true"); outFindBtn.setAttribute("aria-expanded", "false");
+  const outFindIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  outFindIcon.setAttribute("viewBox", "0 0 24 24"); outFindIcon.setAttribute("aria-hidden", "true");
+  const outFindCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  outFindCircle.setAttribute("cx", "10.5"); outFindCircle.setAttribute("cy", "10.5"); outFindCircle.setAttribute("r", "6");
+  const outFindPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  outFindPath.setAttribute("d", "m15 15 5 5");
+  outFindIcon.append(outFindCircle, outFindPath); outFindBtn.appendChild(outFindIcon);
+  const outHeadActions = document.createElement("span"); outHeadActions.className = "out-head-actions out-chrome";
+  outHeadActions.append(outFindBtn, outHideBtn);
+
+  const outFindBar = document.createElement("div"); outFindBar.className = "out-find-bar out-chrome"; outFindBar.hidden = true;
+  const outFindInput = document.createElement("input"); outFindInput.className = "out-find-input"; outFindInput.type = "search";
+  outFindInput.autocomplete = "off"; outFindInput.spellcheck = false;
+  const outFindCount = document.createElement("span"); outFindCount.className = "out-find-count";
+  const outFindPrev = document.createElement("button"); outFindPrev.className = "out-find-nav"; outFindPrev.type = "button"; outFindPrev.textContent = "↑";
+  const outFindNext = document.createElement("button"); outFindNext.className = "out-find-nav"; outFindNext.type = "button"; outFindNext.textContent = "↓";
+  const outFindClose = document.createElement("button"); outFindClose.className = "out-find-close"; outFindClose.type = "button"; outFindClose.textContent = "✕";
+  outFindBar.append(outFindInput, outFindCount, outFindPrev, outFindNext, outFindClose);
+  const outFindLayer = document.createElement("div"); outFindLayer.className = "out-find-layer out-chrome";
+  outFindLayer.setAttribute("aria-hidden", "true");
+
+  let outputFindOpen = false, outputFindMatches = [], outputFindIndex = -1, outputFindTruncated = false;
+  let outputFindTimer = 0, outputFindRaf = 0;
+  const OUTPUT_FIND_LIMIT = 2000;
+  const syncOutputFindLabels = () => {
+    const label = _T("실행 결과에서 찾기");
+    outFindBtn.title = label + " (Ctrl+H)"; outFindBtn.setAttribute("aria-label", outFindBtn.title);
+    outFindInput.placeholder = label; outFindInput.setAttribute("aria-label", label);
+    outFindPrev.title = _T("이전 결과") + " (Shift+Enter)"; outFindPrev.setAttribute("aria-label", outFindPrev.title);
+    outFindNext.title = _T("다음 결과") + " (Enter)"; outFindNext.setAttribute("aria-label", outFindNext.title);
+    outFindClose.title = _T("닫기 (Esc)"); outFindClose.setAttribute("aria-label", outFindClose.title);
+  };
   const syncOutputHideLabel = () => {
     const label = _T("실행 결과 숨기기");
     outHideBtn.title = label; outHideBtn.setAttribute("aria-label", label);
@@ -1564,17 +1600,178 @@ async function renderCode(file, host, ext, profile, runCtx){
     path.setAttribute("d", stacked ? "M7 9l5 5 5-5" : "M9 7l5 5-5 5");
     svg.appendChild(path); outHideBtn.replaceChildren(svg);
   };
-  syncOutputHideLabel();
-  // 실행 결과 렌더러들이 panel.innerHTML 을 교체해도 숨기기 버튼은 현재 헤더에 다시 붙인다.
-  const attachOutputHideButton = () => {
-    const head = outPanel.querySelector(".out-head");
-    if (head){ if (outHideBtn.parentNode !== head) head.appendChild(outHideBtn); }
-    else if (outHideBtn.parentNode !== outPanel) outPanel.insertBefore(outHideBtn, outPanel.firstChild);
+  syncOutputHideLabel(); syncOutputFindLabels();
+  const isOutputChromeNode = (node) => {
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return !!(el && (el.classList.contains("out-chrome") || el.closest(".out-chrome")));
   };
-  outPanel.appendChild(outHideBtn);
-  const outputChromeObserver = new MutationObserver(attachOutputHideButton);
+  // 실행 결과 렌더러들이 panel.innerHTML 을 교체해도 검색·숨기기 도구는 현재 헤더에 다시 붙인다.
+  const attachOutputChrome = () => {
+    const head = outPanel.querySelector(".out-head");
+    if (head){
+      if (outHeadActions.parentNode !== head) head.appendChild(outHeadActions);
+      if (outFindBar.parentNode !== outPanel || outFindBar.previousElementSibling !== head) head.insertAdjacentElement("afterend", outFindBar);
+    } else {
+      if (outHeadActions.parentNode !== outPanel) outPanel.insertBefore(outHeadActions, outPanel.firstChild);
+      if (outFindBar.parentNode !== outPanel) outPanel.insertBefore(outFindBar, outHeadActions.nextSibling);
+    }
+    if (outFindLayer.parentNode !== outPanel) outPanel.appendChild(outFindLayer);
+  };
+  const clearOutputFindHighlights = () => {
+    outFindLayer.replaceChildren();
+  };
+  const renderOutputFindHighlights = () => {
+    cancelAnimationFrame(outputFindRaf);
+    outputFindRaf = requestAnimationFrame(() => {
+      outputFindRaf = 0; clearOutputFindHighlights();
+      if (!outputFindOpen || !outputFindMatches.length) return;
+      const panelRect = outPanel.getBoundingClientRect();
+      const head = outPanel.querySelector(".out-head");
+      const visibleTop = Math.max(panelRect.top, !outFindBar.hidden
+        ? outFindBar.getBoundingClientRect().bottom
+        : (head ? head.getBoundingClientRect().bottom : panelRect.top));
+      const visibleBottom = panelRect.bottom;
+      const frag = document.createDocumentFragment();
+      outputFindMatches.forEach((match, matchIndex) => {
+        Array.from(match.range.getClientRects()).forEach((rect) => {
+          // 스크롤 영역 밖의 Range rect를 절대 좌표로 그리면 일부 브라우저에서 패널 안쪽에
+          // 빈 강조 박스처럼 나타난다. 현재 실제로 보이는 글자 조각만 그리고 스크롤 때 다시 계산한다.
+          if (!rect.width || !rect.height || rect.bottom <= visibleTop || rect.top >= visibleBottom ||
+              rect.right <= panelRect.left || rect.left >= panelRect.right) return;
+          const clippedLeft = Math.max(rect.left, panelRect.left);
+          const clippedRight = Math.min(rect.right, panelRect.right);
+          const clippedTop = Math.max(rect.top, visibleTop);
+          const clippedBottom = Math.min(rect.bottom, visibleBottom);
+          const box = document.createElement("span");
+          box.className = "out-find-hit" + (matchIndex === outputFindIndex ? " active" : "");
+          box.style.left = (clippedLeft - panelRect.left + outPanel.scrollLeft) + "px";
+          box.style.top = (clippedTop - panelRect.top + outPanel.scrollTop) + "px";
+          box.style.width = (clippedRight - clippedLeft) + "px";
+          box.style.height = (clippedBottom - clippedTop) + "px";
+          frag.appendChild(box);
+        });
+      });
+      outFindLayer.appendChild(frag);
+    });
+  };
+  const updateOutputFindCount = () => {
+    if (!outFindInput.value){ outFindCount.textContent = ""; return; }
+    if (!outputFindMatches.length){ outFindCount.textContent = "0/0"; return; }
+    outFindCount.textContent = (outputFindIndex + 1) + "/" + outputFindMatches.length + (outputFindTruncated ? "+" : "");
+  };
+  const outputFindTextNodeAllowed = (node) => {
+    const el = node && node.parentElement;
+    if (!el || isOutputChromeNode(el)) return false;
+    if (el.closest(".out-head,.out-vars,.code-pen-overlay,button,input,textarea,select,script,style,svg,[hidden]")) return false;
+    // 접힌 변수·채점·진단 details 내부는 화면에 보이지 않으므로 검색 개수와 이동 대상에서 제외한다.
+    // summary 자체는 접힌 상태에서도 보이므로 계속 검색할 수 있다.
+    const closedDetails = el.closest("details:not([open])");
+    if (closedDetails && !el.closest("summary")) return false;
+    if (!el.getClientRects().length) return false;
+    if (split.classList.contains("hide-python-warnings") && el.closest(".out-warn")) return false;
+    return true;
+  };
+  const recomputeOutputFind = (resetIndex) => {
+    clearTimeout(outputFindTimer); outputFindTimer = 0;
+    outputFindMatches = []; outputFindTruncated = false;
+    const query = outFindInput.value;
+    if (outputFindOpen && query){
+      const needle = query.toLocaleLowerCase();
+      const walker = document.createTreeWalker(outPanel, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => outputFindTextNodeAllowed(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      });
+      let node;
+      outer: while ((node = walker.nextNode())){
+        const hay = String(node.nodeValue || "").toLocaleLowerCase();
+        let from = 0, at;
+        while ((at = hay.indexOf(needle, from)) !== -1){
+          const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + query.length);
+          outputFindMatches.push({ range });
+          if (outputFindMatches.length >= OUTPUT_FIND_LIMIT){ outputFindTruncated = true; break outer; }
+          from = at + Math.max(1, query.length);
+        }
+      }
+    }
+    if (resetIndex) outputFindIndex = outputFindMatches.length ? 0 : -1;
+    else outputFindIndex = outputFindMatches.length ? Math.max(0, Math.min(outputFindIndex, outputFindMatches.length - 1)) : -1;
+    updateOutputFindCount(); renderOutputFindHighlights();
+  };
+  const scheduleOutputFind = (resetIndex, delay=90) => {
+    clearTimeout(outputFindTimer);
+    outputFindTimer = setTimeout(() => recomputeOutputFind(resetIndex), delay);
+  };
+  const scrollToOutputFindMatch = () => {
+    const match = outputFindMatches[outputFindIndex]; if (!match) return;
+    const rect = match.range.getBoundingClientRect(), panelRect = outPanel.getBoundingClientRect();
+    const head = outPanel.querySelector(".out-head");
+    const chromeBottom = !outFindBar.hidden ? outFindBar.getBoundingClientRect().bottom
+      : (head ? head.getBoundingClientRect().bottom : panelRect.top);
+    if (rect.top < chromeBottom + 6) outPanel.scrollTop += rect.top - chromeBottom - 8;
+    else if (rect.bottom > panelRect.bottom - 8) outPanel.scrollTop += rect.bottom - panelRect.bottom + 8;
+  };
+  const goOutputFindMatch = (delta) => {
+    if (!outputFindMatches.length){ updateOutputFindCount(); return; }
+    outputFindIndex = (outputFindIndex + delta + outputFindMatches.length) % outputFindMatches.length;
+    updateOutputFindCount(); renderOutputFindHighlights();
+    requestAnimationFrame(scrollToOutputFindMatch);
+  };
+  const outputFindSelectionSeed = () => {
+    try {
+      const selection = window.getSelection && window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount ||
+          !outPanel.contains(selection.anchorNode) || !outPanel.contains(selection.focusNode)) return "";
+      const value = String(selection).trim();
+      return value && !value.includes("\n") && value.length <= 200 ? value : "";
+    } catch(_){ return ""; }
+  };
+  const openOutputFind = (seed) => {
+    attachOutputChrome(); outputFindOpen = true; outFindBar.hidden = false; outFindBtn.setAttribute("aria-expanded", "true");
+    const selected = typeof seed === "string" ? seed : outputFindSelectionSeed();
+    if (selected && selected !== outFindInput.value) outFindInput.value = selected;
+    recomputeOutputFind(true);
+    outFindInput.focus(); outFindInput.select();
+  };
+  const closeOutputFind = (restoreFocus=true) => {
+    outputFindOpen = false; outFindBar.hidden = true; outFindBtn.setAttribute("aria-expanded", "false");
+    outputFindMatches = []; outputFindIndex = -1; outputFindTruncated = false;
+    clearOutputFindHighlights(); updateOutputFindCount();
+    if (restoreFocus) outFindBtn.focus({ preventScroll:true });
+  };
+  const outputChromeObserver = new MutationObserver((records) => {
+    attachOutputChrome();
+    if (!outputFindOpen) return;
+    const contentChanged = records.some((record) => {
+      if (isOutputChromeNode(record.target)) return false;
+      const changed = Array.from(record.addedNodes).concat(Array.from(record.removedNodes));
+      return !changed.length || !changed.every(isOutputChromeNode);
+    });
+    if (contentChanged) scheduleOutputFind(false, 120);
+  });
+  const outputFindResizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => { if (outputFindOpen) renderOutputFindHighlights(); })
+    : null;
+  if (outputFindResizeObserver) outputFindResizeObserver.observe(outPanel);
+  const onOutputFindScroll = () => { if (outputFindOpen) renderOutputFindHighlights(); };
+  const onOutputDetailsToggle = (e) => {
+    if (outputFindOpen && e.target && e.target.matches && e.target.matches("details")) scheduleOutputFind(false, 0);
+  };
+  outPanel.addEventListener("scroll", onOutputFindScroll, { passive:true });
+  outPanel.addEventListener("toggle", onOutputDetailsToggle, true);
+  outPanel.append(outHeadActions, outFindBar, outFindLayer);
   outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
+  outFindBtn.addEventListener("click", () => outputFindOpen ? closeOutputFind(false) : openOutputFind());
+  outFindInput.addEventListener("input", (e) => { if (!e.isComposing) scheduleOutputFind(true); });
+  outFindInput.addEventListener("compositionend", () => scheduleOutputFind(true, 0));
+  outFindInput.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (e.key === "Enter"){ e.preventDefault(); goOutputFindMatch(e.shiftKey ? -1 : 1); }
+    else if (e.key === "Escape"){ e.preventDefault(); closeOutputFind(); }
+  });
+  outFindPrev.addEventListener("click", () => { goOutputFindMatch(-1); outFindInput.focus(); });
+  outFindNext.addEventListener("click", () => { goOutputFindMatch(1); outFindInput.focus(); });
+  outFindClose.addEventListener("click", () => closeOutputFind());
   outHideBtn.addEventListener("click", () => {
+    if (outputFindOpen) closeOutputFind(false);
     split.classList.remove("show-out");
     layoutBtn.hidden = false;
     editor.ta.focus({ preventScroll:true });
@@ -1590,6 +1787,8 @@ async function renderCode(file, host, ext, profile, runCtx){
 
   const ui = { btn: runBtn, traceBtn, analyzeBtn, gradeBtn, status, outPanel, split, stdin, inputWrap, editorTa: editor.ta,
     projectInfo, projectSummary, projectBody, pathHelpBtn, pathHelpPanel };
+  ui.openOutputFind = openOutputFind;
+  ui.closeOutputFind = closeOutputFind;
   ui.closePathHelp = closePathHelp;
   ui.openPathHelp = () => {
     pathHelpPanel.hidden = false;
@@ -1638,7 +1837,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   let idleMsg = makeIdleMessage();
   status.textContent = restoredDraft === null ? idleMsg : "자동 복구된 편집본 · 저장하거나 원본으로 되돌리세요";
   const onStatusLanguageChange = () => {
-    syncOutputHideLabel();
+    syncOutputHideLabel(); syncOutputFindLabels();
+    outPanel.setAttribute("aria-label", _T("실행 결과"));
     if (status.textContent !== idleMsg) return;
     idleMsg = makeIdleMessage();
     status.textContent = idleMsg;
@@ -1649,6 +1849,10 @@ async function renderCode(file, host, ext, profile, runCtx){
     ownerDoc.cleanupFns.push(() => {
       window.removeEventListener("mni18nchange", onStatusLanguageChange);
       outputChromeObserver.disconnect();
+      if (outputFindResizeObserver) outputFindResizeObserver.disconnect();
+      outPanel.removeEventListener("scroll", onOutputFindScroll);
+      outPanel.removeEventListener("toggle", onOutputDetailsToggle, true);
+      clearTimeout(outputFindTimer); cancelAnimationFrame(outputFindRaf);
     });
   }
   // 실행 결과를 편집기 옆(가로) ↔ 아래(세로)로 토글. 선택은 저장되어 다음에 열 때도 유지.
@@ -1667,7 +1871,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     try { localStorage.setItem("pythonSplitDir", outputStacked ? "col" : "row"); } catch(e){}
   };
   const hasOutputContent = () => Array.from(outPanel.children).some((child) =>
-    child !== outHideBtn && !(child.classList && child.classList.contains("code-pen-overlay"))
+    !(child.classList && (child.classList.contains("out-chrome") || child.classList.contains("code-pen-overlay")))
   );
   const handleOutputDirectionShortcut = (e) => {
     const command = typeof pythonOutputShortcutCommand === "function" ? pythonOutputShortcutCommand(e) : "";
@@ -1694,8 +1898,20 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (hidingMatchingLayout) split.classList.remove("show-out");
     return true;
   };
+  const outputOwnsFindShortcut = (e) => outPanel.contains(e.target) || !!outputFindSelectionSeed();
   // 코드 입력뿐 아니라 실행 버튼·대화형 결과에 포커스가 있어도 같은 패널 안에서는 동작한다.
-  outer.addEventListener("keydown", (e) => { handleOutputDirectionShortcut(e); });
+  outer.addEventListener("keydown", (e) => {
+    if (typeof shortcutMatches === "function" && shortcutMatches(e, "findInDocument") && outputOwnsFindShortcut(e)){
+      e.preventDefault(); e.stopPropagation(); openOutputFind(); return;
+    }
+    if (outputFindOpen && e.key === "F3"){
+      e.preventDefault(); e.stopPropagation(); goOutputFindMatch(e.shiftKey ? -1 : 1); return;
+    }
+    if (outputFindOpen && e.key === "Escape" && outPanel.contains(e.target)){
+      e.preventDefault(); e.stopPropagation(); closeOutputFind(); return;
+    }
+    handleOutputDirectionShortcut(e);
+  });
   layoutBtn.addEventListener("click", () => {
     outputStacked = !outputStacked;
     saveOutputLayout();
@@ -2209,8 +2425,14 @@ async function renderCode(file, host, ext, profile, runCtx){
     else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); }
   });
   registerEditorFont(editor.host);                                                    // 저장된 글자 크기 적용
+  outPanel.__refreshFontMetrics = () => { if (outputFindOpen) renderOutputFindHighlights(); };
   registerEditorFont(outPanel);                                                       // 실행 결과 문자에도 같은 크기 적용
   if (ownerDoc){
+    const openPythonDocFind = () => {
+      if (outPanel.contains(document.activeElement) || outputFindSelectionSeed()) openOutputFind();
+      else editor.openFind();
+    };
+    ownerDoc.openDocFind = openPythonDocFind;
     ownerDoc.codeEditor = editor;
     ownerDoc.codeEditorFileBase = ui.fileBase;
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
@@ -2230,9 +2452,11 @@ async function renderCode(file, host, ext, profile, runCtx){
     ownerDoc.cleanupFns.push(() => {
       persistDraft();
       if (ownerDoc.codeEditor === editor) ownerDoc.codeEditor = null;
+      if (ownerDoc.openDocFind === openPythonDocFind) delete ownerDoc.openDocFind;
       editor.destroy();
       unregisterEditorFont(editor.host);
       unregisterEditorFont(outPanel);
+      delete outPanel.__refreshFontMetrics;
     });
     // 필기 모드 — 켜면 편집이 자동 잠금되고 캔버스 오버레이가 뜸. 다시 누르면 둘 다 해제.
     // 보드(문서) 닫을 때 자동 정리 → 필기는 세션 한정.
