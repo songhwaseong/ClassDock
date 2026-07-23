@@ -1074,7 +1074,9 @@ function updateDocumentStatus(doc){
   const badge = byId("activeDocStatus");
   if (!badge || !doc || doc.id !== activeId){ if (badge) badge.hidden = true; return; }
   let text = "", cls = "";
-  if (doc.hasUnsavedEdits){ text = "저장 안 됨"; cls = "dirty"; }
+  if (doc._pyAutosaveState === "saving"){ text = "자동 저장 중"; cls = "dirty"; }
+  else if (doc._pyAutosaveState === "failed"){ text = "자동 저장 실패"; cls = "dirty"; }
+  else if (doc.hasUnsavedEdits){ text = "저장 안 됨"; cls = "dirty"; }
   else if (doc.kind === "pdf" && appSettings.pdfRecovery && doc.recoveryDirty){ text = "자동 저장 중"; cls = "dirty"; }
   else if (doc.kind === "pdf" && appSettings.pdfRecovery){ text = "자동 저장됨"; cls = "saved"; }
   if (!text){ badge.hidden = true; return; }

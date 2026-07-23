@@ -661,6 +661,7 @@ function wire(){
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
+    byId("settingPythonAutosave").checked = !!appSettings.pythonAutosave;
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
     const petFocus = typeof normalizePetFocus === "function" ? normalizePetFocus(appSettings.petFocus) : { enabled:true, focusMin:25, breakMin:5, quietTyping:true };
@@ -699,6 +700,7 @@ function wire(){
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
+      pythonAutosave: byId("settingPythonAutosave").checked,
       petEnabled: byId("settingPet").checked, petCount: Number(byId("settingPetCount").value) || 1,
       petFocus: { enabled: byId("settingPetFocus").checked, focusMin: Number(byId("settingPetFocusMin").value) || 25,
         breakMin: Number(byId("settingPetBreakMin").value) || 5, quietTyping: byId("settingPetQuietTyping").checked },
@@ -709,6 +711,7 @@ function wire(){
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
     if (typeof applyPetSettings === "function") applyPetSettings();
     if (typeof applyPetFocusSettings === "function") applyPetFocusSettings();
+    docs.forEach(doc => { if (typeof doc.schedulePythonAutosave === "function") doc.schedulePythonAutosave(); });
     applyUiScale();
     syncShortcutHints();
     if (state && state.kind === "pdf" && !appSettings.pdfRecovery) state.recoveryDirty = false;

@@ -84,7 +84,7 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
 ]);
 const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.map((item) => [item.id, item.defaultValue])));
 const DEFAULT_APP_SETTINGS = {
-  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true,
+  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, pythonAutosave: false,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },

@@ -1758,7 +1758,17 @@ async function renderCode(file, host, ext, profile, runCtx){
       ? "빈 줄 기준으로 셀 경계(# %%)를 넣었어요. 필요하면 거터 클릭으로 조정하세요."
       : "추가할 경계가 없어요(이미 나뉘었거나 빈 줄 구분이 없음).", 3600);
   });
+  let pyAutosaveTimer = 0;
+  let pyAutosaveSaving = null;
+  let pyAutosaveAgain = false;
+  let pyAutosaveDisposed = false;
+  let pyManualSaveActive = false;
   saveBtn.addEventListener("click", async () => {
+    pyManualSaveActive = true;
+    clearTimeout(pyAutosaveTimer); pyAutosaveTimer = 0;
+    saveBtn.disabled = true;
+    if (ownerDoc){ ownerDoc._pyAutosaveState = ""; updateDocumentStatus(ownerDoc); }
+    if (pyAutosaveSaving) await pyAutosaveSaving;
     const value = editor.getValue();
     let name = (ownerDoc && ownerDoc.name) || (file && file.name) || "practice.py";
     const diagnoseAfterSave = saveBtn.dataset.diagnoseAfterSave === "1";
@@ -1768,7 +1778,6 @@ async function renderCode(file, host, ext, profile, runCtx){
       // 저장 이벤트를 먼저 끝내 버튼 상태와 저장 경로 UI를 정리한 뒤, 방금 저장한 코드로 진단한다.
       setTimeout(() => runPythonSource(value, ui, runCtxWithDoc, false, { diagnoseMode:true }), 0);
     };
-    saveBtn.disabled = true;
     let persisted = false;
     // 폴더로 연 파일이 원본 파일 핸들(File System Access)을 들고 있으면, 서버 사본(SaveRoot) 대신
     // 그 핸들로 원본 파일에 바로 되쓴다 → 폴더에서 연 파일은 '원본 자리'에 저장된다.
@@ -1905,7 +1914,12 @@ async function renderCode(file, host, ext, profile, runCtx){
           : (persisted ? "다운로드하고 왼쪽 작업공간에도 저장했어요." : "다운로드 사본을 저장했어요."), 2600, { type: "success" });
       }
       startDiagnosis();
-    } finally { saveBtn.disabled = false; }
+    } finally {
+      pyManualSaveActive = false;
+      saveBtn.disabled = false;
+      if (ownerDoc && !ownerDoc.hasUnsavedEdits) ownerDoc._pyAutosaveFailureNotified = false;
+      if (ownerDoc && ownerDoc.hasUnsavedEdits) schedulePythonAutosave();
+    }
   });
   // input() 프롬프트를 순서대로 읽어 라벨 붙은 입력칸을 만든다(브라우저 실행 전용, 초급자용).
   // 순서가 고정된 호출이면 프롬프트 문구를 라벨로 단 개별 칸을 보여 주고, 반복문·조건문 안처럼
@@ -2018,19 +2032,93 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (value === savedValue) clearPythonDraft(draftKey);
     else savePythonDraft(draftKey, sourceFingerprint, value);
   };
+  const setPythonAutosaveState = (next) => {
+    if (!ownerDoc) return;
+    ownerDoc._pyAutosaveState = next || "";
+    updateDocumentStatus(ownerDoc);
+  };
+  function schedulePythonAutosave(){
+    clearTimeout(pyAutosaveTimer); pyAutosaveTimer = 0;
+    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.pythonAutosave){
+      if (!appSettings.pythonAutosave) setPythonAutosaveState("");
+      return;
+    }
+    setPythonAutosaveState("");
+    if (pyAutosaveSaving || pyManualSaveActive){ pyAutosaveAgain = true; return; }
+    pyAutosaveTimer = setTimeout(() => {
+      pyAutosaveTimer = 0;
+      runPythonAutosave();
+    }, PYTHON_AUTOSAVE_DELAY);
+  }
+  async function runPythonAutosave(){
+    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.pythonAutosave) return false;
+    if (pyAutosaveSaving){ pyAutosaveAgain = true; return pyAutosaveSaving; }
+    if (pyManualSaveActive){ pyAutosaveAgain = true; return false; }
+    pyAutosaveAgain = false;
+    const saving = (async () => {
+      const serverAvailable = !ownerDoc.originalSaveMode && await saveFileBackendAvailable();
+      const target = pythonAutosaveTarget(ownerDoc, serverAvailable, fromZip);
+      if (!target) return false;
+      const value = editor.getValue();
+      const name = ownerDoc.name || (file && file.name) || "practice.py";
+      setPythonAutosaveState("saving");
+      const result = await writePythonAutosave(value, ownerDoc, name, target);
+      if (!result.ok) throw new Error("python-autosave-write-failed");
+
+      const effectiveName = ownerDoc.name || name;
+      const path = String(ownerDoc.workspacePath || effectiveName).replace(/\\/g, "/").replace(/^\/+/, "");
+      const updated = new File([value], effectiveName, { type:"text/x-python;charset=utf-8" });
+      if (path.indexOf("/") >= 0) Object.defineProperty(updated, "webkitRelativePath", { value:path });
+      ownerDoc.workspacePath = path;
+      ownerDoc.size = updated.size;
+      ownerDoc.savedText = value;
+      markDocumentSavedAsUtf8(ownerDoc, false);
+      try { ownerDoc.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true }); }
+      catch(error){ console.warn("python autosave workspace refresh skipped:", error); }
+      savedValue = value;
+      clearPythonDraft(draftKey);
+      markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
+      renderSidebar();
+      setSavedPath(target === "server" ? result.path : (ownerDoc.workspacePath || ownerDoc.name || name),
+        { original:target === "file-handle" && (ownerDoc.originalSaveMode || fromFolder) });
+      setPythonAutosaveState("");
+      return true;
+    })().catch(error => {
+      console.warn("python autosave skipped:", error);
+      setPythonAutosaveState("failed");
+      if (!ownerDoc._pyAutosaveFailureNotified){
+        ownerDoc._pyAutosaveFailureNotified = true;
+        toast("Python 자동 저장에 실패했어요. 로컬 초안은 유지됩니다.", 3200, { type:"error" });
+      }
+      return false;
+    }).finally(() => {
+      pyAutosaveSaving = null;
+      if (ownerDoc && !ownerDoc.hasUnsavedEdits) ownerDoc._pyAutosaveFailureNotified = false;
+      if (pyAutosaveAgain) schedulePythonAutosave();
+    });
+    pyAutosaveSaving = saving;
+    return saving;
+  }
   const refreshEditState = () => {
     revertBtn.disabled = (editor.getValue() === text);
     markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
     inputWrap.hidden = (_pyBackend === true) ? true : !usesInput(editor.getValue());
     if (!inputWrap.hidden) renderInputFields();
     clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 500);
+    schedulePythonAutosave();
     scheduleLiveDiagnostics();
   };
   editor.ta.addEventListener("input", refreshEditState);
   editor.ta.addEventListener("focus", () => { if (ownerDoc) window.__lastCodeLinkDocId = ownerDoc.id; });
   if (ownerDoc){                                   // 저장하지 않고 닫은 스크래치 초안은 고유 키라 다시 안 쓰이니 정리(localStorage 찌꺼기 방지)
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
-    ownerDoc.cleanupFns.push(() => { if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey); });
+    ownerDoc.schedulePythonAutosave = schedulePythonAutosave;
+    ownerDoc.cleanupFns.push(() => {
+      pyAutosaveDisposed = true;
+      clearTimeout(pyAutosaveTimer); pyAutosaveTimer = 0;
+      if (ownerDoc.schedulePythonAutosave === schedulePythonAutosave) delete ownerDoc.schedulePythonAutosave;
+      if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey);
+    });
   }
   pythonBackendAvailable().then(refreshEditState);
   prewarmBrowserPython();                        // 실행 전에 브라우저 파이썬 런타임을 미리 데운다(로컬 파이썬이면 자동 skip)
@@ -2096,6 +2184,38 @@ async function renderCode(file, host, ext, profile, runCtx){
 
 const PY_DRAFT_PREFIX = "pdf-signer-python-draft:";
 const PY_DRAFT_MAX = 768 * 1024;
+const PYTHON_AUTOSAVE_DELAY = 3000;
+function pythonAutosaveTarget(ownerDoc, serverAvailable, fromZip=false){
+  if (!ownerDoc || !ownerDoc.hasUnsavedEdits || fromZip) return "";
+  if (ownerDoc.isScratch && !ownerDoc._named) return "";
+  const handle = ownerDoc.fsHandle;
+  const canWriteHandle = !!(handle && typeof handle.createWritable === "function");
+  if (ownerDoc.originalSaveMode) return canWriteHandle ? "file-handle" : "";
+  if (canWriteHandle) return "file-handle";
+  return serverAvailable && (ownerDoc.workspacePath || ownerDoc.name) ? "server" : "";
+}
+async function writePythonAutosave(value, ownerDoc, name, target){
+  if (target === "server"){
+    const path = await saveViaServer(value, ownerDoc, name);
+    return { ok:!!path, path:path || "" };
+  }
+  if (target !== "file-handle") return { ok:false, path:"" };
+  const handle = ownerDoc && ownerDoc.fsHandle;
+  if (!handle || typeof handle.createWritable !== "function") return { ok:false, path:"" };
+  const permission = typeof handle.queryPermission === "function"
+    ? await handle.queryPermission({ mode:"readwrite" }) : "granted";
+  // 자동저장 중에는 브라우저 권한창을 띄우지 않는다. Ctrl+S로 권한을 다시 받은 뒤 다음 편집부터 재시도한다.
+  if (permission !== "granted") return { ok:false, path:"" };
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(new Blob([value], { type:"text/x-python;charset=utf-8" }));
+    await writable.close();
+  } catch(error){
+    try { if (typeof writable.abort === "function") await writable.abort(); } catch(_){}
+    throw error;
+  }
+  return { ok:true, path:ownerDoc.workspacePath || ownerDoc.name || name || "" };
+}
 function pythonDraftKey(file, ownerDoc, runCtx){
   // 새로 만든(아직 이름을 정해 저장하지 않은) 스크래치는 기본 이름("새 코드.py")과 스타터 내용이
   // 늘 똑같아서, 경로 기준 초안 키가 서로 겹치고 sourceFingerprint 무효화도 걸리지 않는다.
