@@ -418,6 +418,14 @@
     --memo-paper:#2a1a20;--memo-paper-border:#62404a}
   [data-theme="dark"] .scratchpad[data-note-color="ivory"],[data-theme="dark"] .scratchpad-tab[data-note-color="ivory"],[data-theme="dark"] .scratchpad-color[data-note-color="ivory"]{
     --memo-paper:#24211d;--memo-paper-border:#4e463b}
+  /* 직접 고른 색: --memo-paper·--memo-ink 는 JS 가 인라인으로 지정. 어두운 종이에서도 글이 읽히게 글자색을 따라간다. */
+  .scratchpad[data-note-color="custom"] .scratchpad-editor,
+  .scratchpad[data-note-color="custom"] .scratchpad-text-block,
+  .scratchpad[data-note-color="custom"] .scratchpad-image-text,
+  .scratchpad-tab[data-note-color="custom"].active{color:var(--memo-ink,var(--ink))}
+  .scratchpad[data-note-color="custom"] .scratchpad-text-block::placeholder,
+  .scratchpad[data-note-color="custom"] .scratchpad-image-text::placeholder{
+    color:color-mix(in srgb,var(--memo-ink,var(--ink)) 55%,transparent)}
   .scratchpad-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 14px 12px;background:var(--panel);
     border:1px solid var(--border);border-bottom:0;border-radius:14px 14px 0 0;cursor:move;user-select:none;touch-action:none}
   .scratchpad-head h2{font-size:15px;line-height:1.3}.scratchpad-head span{display:block;margin-top:2px;color:var(--muted);font-size:10.5px}
@@ -452,6 +460,14 @@
   .scratchpad-insertbar .scratchpad-color:hover{border-color:var(--accent);background:var(--memo-paper);transform:translateY(-1px)}
   .scratchpad-insertbar .scratchpad-color:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .scratchpad-insertbar .scratchpad-color[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .scratchpad-insertbar .scratchpad-color-custom{width:21px;height:21px;padding:0;border:1px solid var(--border);
+    border-radius:50%;background:none;cursor:pointer;transition:transform .1s}
+  .scratchpad-insertbar .scratchpad-color-custom::-webkit-color-swatch-wrapper{padding:0}
+  .scratchpad-insertbar .scratchpad-color-custom::-webkit-color-swatch{border:0;border-radius:50%}
+  .scratchpad-insertbar .scratchpad-color-custom:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .scratchpad-insertbar .scratchpad-color-custom:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .scratchpad-insertbar .scratchpad-color-custom.active{border-color:var(--accent);
+    box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
   .scratchpad-insertbar .scratchpad-color[aria-pressed="true"]::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;
     color:var(--ink);font:700 11px/1 system-ui,sans-serif}
   .scratchpad-editor{position:relative;min-height:0;overflow:auto;padding:12px;background:var(--memo-paper);

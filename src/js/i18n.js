@@ -246,6 +246,7 @@
     "+ 이미지": "+ Image",
     "이미지 붙여넣기·파일/웹 이미지 드롭 가능": "Paste images · drop file/web images",
     "현재 메모 색상": "Current note color",
+    "메모 색 직접 고르기": "Pick a custom note color",
     "노랑": "Yellow", "노랑 메모": "Yellow note",
     "세이지 그린": "Sage green", "세이지 그린 메모": "Sage green note",
     "라벤더 메모": "Lavender note",

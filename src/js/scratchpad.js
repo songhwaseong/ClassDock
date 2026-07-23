@@ -14,6 +14,36 @@ const SCRATCHPAD_MAX_TOTAL_IMAGE_BYTES = 200 * 1024 * 1024;
 const SCRATCHPAD_LAYOUTS = new Set(["top", "left", "right", "bottom"]);
 const SCRATCHPAD_IMAGE_SIZES = new Set(["small", "medium", "large", "full"]);
 const SCRATCHPAD_COLORS = new Set(["yellow", "sage", "lavender", "rose", "ivory"]);
+const SCRATCHPAD_CUSTOM_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+// 프리셋 이름 또는 직접 고른 hex(#rrggbb)만 허용하고, 그 외에는 기본색으로 되돌린다.
+function scratchpadNormalizeColor(value){
+  if (SCRATCHPAD_COLORS.has(value)) return value;
+  if (typeof value === "string" && SCRATCHPAD_CUSTOM_COLOR_RE.test(value.trim())) return value.trim().toLowerCase();
+  return "yellow";
+}
+
+// 직접 고른 색은 CSS 프리셋 대신 인라인 변수로 종이·테두리·글자색을 입힌다.
+function scratchpadApplyNoteColor(el, color){
+  if (!el) return;
+  const custom = !SCRATCHPAD_COLORS.has(color);
+  el.dataset.noteColor = custom ? "custom" : color;
+  if (custom){
+    el.style.setProperty("--memo-paper", color);
+    el.style.setProperty("--memo-paper-border", "color-mix(in srgb," + color + " 70%,var(--ink))");
+    el.style.setProperty("--memo-ink", scratchpadInkForPaper(color));
+  } else {
+    el.style.removeProperty("--memo-paper");
+    el.style.removeProperty("--memo-paper-border");
+    el.style.removeProperty("--memo-ink");
+  }
+}
+
+// 종이색 밝기에 따라 읽히는 글자색을 고른다(어두운 종이 → 밝은 글자).
+function scratchpadInkForPaper(hex){
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? "#1f2937" : "#f8fafc";
+}
 
 function scratchpadNoteId(){
   return "memo-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
@@ -157,7 +187,7 @@ function normalizeScratchpadData(value, legacyText=""){
     notes.push({
       id,
       title,
-      color:SCRATCHPAD_COLORS.has(raw.color) ? raw.color : "yellow",
+      color:scratchpadNormalizeColor(raw.color),
       blocks,
       createdAt:Number(raw.createdAt) || Date.now(),
       updatedAt:Number(raw.updatedAt) || Date.now()
@@ -424,6 +454,7 @@ function wireScratchpad(){
   const addTextButton = byId("scratchpadAddText");
   const addImageButton = byId("scratchpadAddImage");
   const colorButtons = [...panel.querySelectorAll(".scratchpad-color[data-note-color]")];
+  const customColorInput = byId("scratchpadColorCustom");
   const imageInput = byId("scratchpadImageFile");
   const renameButton = byId("scratchpadRename");
   const status = byId("scratchpadStatus");
@@ -1051,10 +1082,15 @@ function wireScratchpad(){
   function renderEditor(){
     renderToken++;
     const note = activeNote();
-    panel.dataset.noteColor = note.color;
+    scratchpadApplyNoteColor(panel, note.color);
+    const isCustomColor = !SCRATCHPAD_COLORS.has(note.color);
     colorButtons.forEach(button =>
-      button.setAttribute("aria-pressed", String(button.dataset.noteColor === note.color))
+      button.setAttribute("aria-pressed", String(!isCustomColor && button.dataset.noteColor === note.color))
     );
+    if (customColorInput){
+      customColorInput.classList.toggle("active", isCustomColor);
+      if (isCustomColor) customColorInput.value = note.color;
+    }
     editor.setAttribute("aria-label", note.title + " 내용");
     editor.setAttribute("aria-labelledby", "scratchpad-tab-" + note.id);
     editor.replaceChildren(...note.blocks.map(block =>
@@ -1127,7 +1163,7 @@ function wireScratchpad(){
     for (const note of data.notes){
       const item = document.createElement("div");
       item.className = "scratchpad-tab" + (note.id === data.activeId ? " active" : "");
-      item.dataset.noteColor = note.color;
+      scratchpadApplyNoteColor(item, note.color);
       const tab = document.createElement("button");
       tab.type = "button";
       tab.className = "scratchpad-tab-main";
@@ -1246,6 +1282,26 @@ function wireScratchpad(){
     renderTabs();
     persist();
   }));
+  if (customColorInput){
+    customColorInput.addEventListener("input", () => {
+      // 드래그 중에는 화면만 미리 반영하고, 확정(change)에서 저장한다.
+      scratchpadApplyNoteColor(panel, customColorInput.value);
+      const activeTab = tabs.querySelector(".scratchpad-tab.active");
+      if (activeTab) scratchpadApplyNoteColor(activeTab, customColorInput.value);
+    });
+    customColorInput.addEventListener("change", () => {
+      const note = activeNote();
+      if (!note) return;
+      const color = scratchpadNormalizeColor(customColorInput.value);
+      if (note.color !== color){
+        note.color = color;
+        note.updatedAt = Date.now();
+        persist();
+      }
+      renderEditor();
+      renderTabs();
+    });
+  }
   if (addImageButton && imageInput){
     addImageButton.addEventListener("click", () => imageInput.click());
     imageInput.addEventListener("change", async () => {
@@ -1413,6 +1469,7 @@ function wireScratchpad(){
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     normalizeScratchpadData,
+    scratchpadNormalizeColor,
     scratchpadNextTitle,
     scratchpadRemoveBlock,
     scratchpadNormalizeBlock,

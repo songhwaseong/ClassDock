@@ -36,6 +36,20 @@ test("메모 색상은 허용된 프리셋만 복원한다", () => {
   assert.equal(data.notes[1].color, "yellow");
 });
 
+test("직접 고른 hex 메모 색은 유지하고 형식이 틀리면 기본색으로 되돌린다", () => {
+  const data = normalizeScratchpadData({
+    version:5,
+    notes:[
+      { id:"custom", title:"커스텀", color:"#A1B2C3", text:"hex 색" },
+      { id:"short", title:"짧은 hex", color:"#123", text:"불량" },
+      { id:"noHash", title:"샵 없음", color:"a1b2c3", text:"불량" }
+    ]
+  });
+  assert.equal(data.notes[0].color, "#a1b2c3");
+  assert.equal(data.notes[1].color, "yellow");
+  assert.equal(data.notes[2].color, "yellow");
+});
+
 test("v2 텍스트 메모 탭과 활성 탭을 최신 블록 형식으로 복원한다", () => {
   const saved = {
     version:2,
