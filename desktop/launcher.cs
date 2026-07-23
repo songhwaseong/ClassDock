@@ -225,6 +225,7 @@ class PdfSignerLauncher
         public Dictionary<string, long> InitMtime = new Dictionary<string, long>();  // 실행 전 입력 파일 수정시각(Ticks)
         public string OutputsJson = "[]";                                            // 실행이 만든/바꾼 파일 목록
         public DateTime DoneAt = DateTime.MaxValue;                                   // 완료 시각(보존 정리용)
+        public readonly List<int[]> Echoes = new List<int[]>();                       // stdout 속 입력 에코 구간 [시작,길이] — 프런트가 입력값만 다른 색으로 표시
     }
 
     static readonly object PySessionsLock = new object();
@@ -2604,6 +2605,7 @@ class PdfSignerLauncher
                      + ",\"code\":" + session.ExitCode
                      + ",\"stdoutDelta\":" + JsonString(session.Stdout.GetTextFrom(so))
                      + ",\"stderrDelta\":" + JsonString(session.Stderr.GetTextFrom(se))
+                     + ",\"echoes\":" + BuildEchoesJson(session.Echoes)
                      + ",\"images\":" + session.ImagesJson
                      + ",\"variables\":" + session.VariablesJson
                      + ",\"outputs\":" + session.OutputsJson + "}";
@@ -2611,10 +2613,23 @@ class PdfSignerLauncher
                  + ",\"code\":" + session.ExitCode
                  + ",\"stdout\":" + JsonString(session.Stdout.GetText())
                  + ",\"stderr\":" + JsonString(session.Stderr.GetText())
+                 + ",\"echoes\":" + BuildEchoesJson(session.Echoes)
                  + ",\"images\":" + session.ImagesJson
                  + ",\"variables\":" + session.VariablesJson
                  + ",\"outputs\":" + session.OutputsJson + "}";
         }
+    }
+
+    // 입력 에코 구간 목록 → JSON [[시작,길이],...] (세션 Sync 잠금 안에서 호출)
+    static string BuildEchoesJson(List<int[]> echoes)
+    {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < echoes.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append('[').Append(echoes[i][0]).Append(',').Append(echoes[i][1]).Append(']');
+        }
+        return sb.Append(']').ToString();
     }
 
     static void SendPythonSessionInput(string id, string input)
@@ -2628,7 +2643,13 @@ class PdfSignerLauncher
             // 파이프 stdin은 에코되지 않으므로 터미널처럼 표시한다. 반드시 stdin 에 쓰기 "전에" 에코를 버퍼에 넣는다.
             // 먼저 쓰면(flush) 파이썬이 즉시 다음 input() 프롬프트를 출력해, 리더 스레드가 그 프롬프트를
             // 에코보다 먼저 버퍼에 담아 "이름 입력 : 나이 입력 : 송화성"처럼 순서가 뒤섞인다.
+            int echoStart = session.Stdout.TextLength;
             session.Stdout.AppendLine(input ?? "");
+            int echoLen = (input ?? "").Length;
+            // 에코가 기대 위치에 정확히 들어갔을 때만 구간을 기록한다. 4MB 상한 절단이나 리더 스레드의
+            // 동시 append 로 오프셋이 어긋난 경우엔 기록을 생략 — 그 입력만 색 없이 표시될 뿐 안전하다.
+            if (echoLen > 0 && session.Stdout.TextLength == echoStart + echoLen + Environment.NewLine.Length)
+                session.Echoes.Add(new int[] { echoStart, echoLen });
             session.Process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length);
             session.Process.StandardInput.BaseStream.Flush();
         }

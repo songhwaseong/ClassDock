@@ -2822,6 +2822,9 @@
   .out-err{color:var(--danger)}
   .out-warn{color:#d97706}
   [data-theme="dark"] .out-warn{color:#fbbf24}
+  /* 대화형 터미널에서 사용자가 입력한 값(에코) — 터미널 입력줄의 초록(#4ade80)과 같은 계열로 구분 */
+  .out-echo{color:#15803d;font-weight:600}
+  [data-theme="dark"] .out-echo{color:#4ade80}
   .out-muted{color:var(--code-muted)}
   .out-files{margin:12px 14px 6px;border-top:1px solid var(--code-border);padding-top:10px}
   .out-files-head{color:var(--code-muted);font-size:11.5px;letter-spacing:.04em;margin-bottom:6px}

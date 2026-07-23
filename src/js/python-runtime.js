@@ -468,17 +468,23 @@ async function runPythonInteractive(src, bundle, ui, hooks){
                                                   // 배치로도 수 초가 걸려 "정지됨" 표시가 그만큼 늦어진다
   const LIVE_TAIL = 16000;                  // 실행 중에는 마지막 부분만 표시 — 거대한 <pre> 재배치가 매 폴마다
                                             // 반복되면 메인 스레드가 막혀 정지 클릭이 늦게 처리된다
-  const displayText = (text) => text.length > FINAL_HEAD + FINAL_TAIL + 200
-    ? text.slice(0, FINAL_HEAD)
-      + "\n\n…(출력이 " + text.length.toLocaleString() + "자로 길어 중간을 생략했어요)…\n\n"
-      + text.slice(-FINAL_TAIL)
-    : text;
-  const liveText = (text) => text.length > LIVE_TAIL
-    ? "…(출력이 길어 마지막 부분만 표시 중 — 전체는 실행이 끝나면 표시)\n" + text.slice(-LIVE_TAIL)
-    : text;
+  // 표시 텍스트를 원본(fullOut) 오프셋을 아는 조각 목록으로 만든다 — 입력 에코 구간만 다른 색으로
+  // 칠하려면 잘린 화면 텍스트의 각 조각이 원본 어디에서 왔는지 알아야 한다. src<0 은 생략 안내 문구.
+  const displaySegs = (text) => text.length > FINAL_HEAD + FINAL_TAIL + 200
+    ? [{ text: text.slice(0, FINAL_HEAD), src: 0 },
+       { text: "\n\n…(출력이 " + text.length.toLocaleString() + "자로 길어 중간을 생략했어요)…\n\n", src: -1 },
+       { text: text.slice(-FINAL_TAIL), src: text.length - FINAL_TAIL }]
+    : [{ text, src: 0 }];
+  const liveSegs = (text) => text.length > LIVE_TAIL
+    ? [{ text: "…(출력이 길어 마지막 부분만 표시 중 — 전체는 실행이 끝나면 표시)\n", src: -1 },
+       { text: text.slice(-LIVE_TAIL), src: text.length - LIVE_TAIL }]
+    : [{ text, src: 0 }];
+  const displayText = (text) => displaySegs(text).map(s => s.text).join("");
+  const liveText = (text) => liveSegs(text).map(s => s.text).join("");
   let shownOut = null, shownErr = null;
   let fullOut = "", fullErr = "";           // 증분(delta) 응답을 이어붙인 누적 출력
   let knownOutLen = -1, knownErrLen = -1;   // 이미 받은 출력 길이 — 서버가 같으면 "unchanged", 자랐으면 새 내용만 응답
+  let echoRanges = [];                      // stdout 속 입력 에코 구간 [시작,길이] — 서버가 폴 응답에 실어줌
   try {
     for (;;){
       const res = await fetch("/python-session-poll?id=" + encodeURIComponent(sessionId)
@@ -495,8 +501,10 @@ async function runPythonInteractive(src, bundle, ui, hooks){
         }
         knownOutLen = fullOut.length;
         knownErrLen = fullErr.length;
+        if (Array.isArray(data.echoes)) echoRanges = data.echoes;
         const toShow = data.complete ? displayText : liveText;
-        const nextOut = toShow(fullOut);
+        const outSegs = (data.complete ? displaySegs : liveSegs)(fullOut);
+        const nextOut = outSegs.map(s => s.text).join("");
         const showWarnings = !ui.split.classList.contains("hide-python-warnings");
         const pendingStderrHidden = (typeof pythonStderrShouldBuffer === "function")
           ? pythonStderrShouldBuffer(data.complete, showWarnings)
@@ -507,7 +515,7 @@ async function runPythonInteractive(src, bundle, ui, hooks){
         if (nextOut !== shownOut || nextErr !== shownErr){
           // 사용자가 위로 스크롤해 둔 동안에는 자동 스크롤을 멈추고, 바닥 근처일 때만 따라 내려간다
           const nearBottom = outPanel.scrollHeight - outPanel.scrollTop - outPanel.clientHeight < 40;
-          if (nextOut !== shownOut){ shownOut = nextOut; stdoutEl.textContent = nextOut; }
+          if (nextOut !== shownOut){ shownOut = nextOut; renderPythonStdoutSegs(stdoutEl, outSegs, echoRanges); }
           if (nextErr !== shownErr){ shownErr = nextErr; stderrEl.textContent = nextErr; }
           applyPythonStderrClass(stderrEl, fullErr, data.complete ? data.code : undefined);
           if (nearBottom) outPanel.scrollTop = outPanel.scrollHeight;
@@ -536,6 +544,30 @@ async function runPythonInteractive(src, bundle, ui, hooks){
   if (typeof lessonPyOnResult === "function") lessonPyOnResult({ stdout: result.stdout, stderr: result.stderr, images: result.images });   // 수업 리플레이(녹화 중일 때만)
   result.sessionId = sessionId;
   return result;
+}
+
+// 대화형 터미널 stdout 을 다시 그린다. 입력 에코 구간(echoes: fullOut 기준 [시작,길이], 오름차순·비중첩)만
+// span.out-echo 로 감싸 일반 출력과 색을 구분한다. seg.src 는 조각이 원본 어디서 왔는지(음수면 생략 안내 문구).
+function renderPythonStdoutSegs(el, segs, echoes){
+  el.textContent = "";
+  const frag = document.createDocumentFragment();
+  for (const seg of segs){
+    if (seg.src < 0 || !echoes.length){ frag.appendChild(document.createTextNode(seg.text)); continue; }
+    const segStart = seg.src, segEnd = seg.src + seg.text.length;
+    let pos = segStart;
+    for (const range of echoes){
+      const start = Math.max(segStart, range[0]), end = Math.min(segEnd, range[0] + range[1]);
+      if (end <= pos) continue;               // 이 조각보다 앞의 에코
+      if (start >= segEnd) break;             // 이후 에코는 모두 이 조각 뒤
+      if (start > pos) frag.appendChild(document.createTextNode(seg.text.slice(pos - segStart, start - segStart)));
+      const span = document.createElement("span"); span.className = "out-echo";
+      span.textContent = seg.text.slice(start - segStart, end - segStart);
+      frag.appendChild(span);
+      pos = end;
+    }
+    if (pos < segEnd) frag.appendChild(document.createTextNode(seg.text.slice(pos - segStart)));
+  }
+  el.appendChild(frag);
 }
 
 // 실행이 만든/바꾼 파일을 결과 패널에 [저장]·[열기] 와 함께 나열(로컬 세션 전용)
