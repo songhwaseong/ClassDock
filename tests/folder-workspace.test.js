@@ -42,7 +42,8 @@ test("대량 이미지·실행 산출물 표식은 명시적 '동기화' 버튼�
   // 자동 복원에서 빠진 사진이나 실행 산출물이 있는 루트에만 동기화 버튼을 달고,
   // 그 버튼을 눌러야만 requestFolderRefresh 로 디스크를 다시 읽는다.
   assert.match(source, /node\.folderRefreshRootId === node\.nodeId &&[\s\S]*node\.restorePendingImages \|\| node\.runOutputsPending/);
-  assert.match(source, /translate\("↻ 동기화"\)/);
+  assert.match(source, /restore\.innerHTML = window\.uiIcon\("refresh"\)/);
+  assert.match(source, /translate\("폴더 동기화"\)/);
   assert.match(source, /requestFolderRefresh\(node\.nodeId\)/);
 });
 
