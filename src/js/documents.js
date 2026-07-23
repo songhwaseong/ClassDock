@@ -4,10 +4,11 @@
 const IMG_EXTS = ["png","jpg","jpeg","gif","webp","bmp","svg","avif","ico"];
 const SQLITE_EXTS = ["db","sqlite","sqlite3"];
 // 학습 모델과 NumPy 배열은 이진 파일이므로 텍스트 편집기로 열지 않고 원본 바이트를 보존한다.
+// .pyc(컴파일된 Python 바이트코드)도 소스가 없는 이진 파일이라 같은 경로로 다룬다.
 const BINARY_ASSET_EXTS = new Set([
   "model", "npy", "npz", "kv",
   "onnx", "tflite", "safetensors", "pt", "pth", "ckpt",
-  "joblib", "pkl", "pickle", "keras", "h5", "hdf5"
+  "joblib", "pkl", "pickle", "keras", "h5", "hdf5", "pyc"
 ]);
 // 코드/설정 파일: 확장자 → 구문강조 프로파일(c=C계열, hash=#주석, css/sql/xml=전용)
 const CODE_EXTS = {

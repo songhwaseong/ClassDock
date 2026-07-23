@@ -13,7 +13,7 @@ const viewer = read("src", "js", "image-viewer.js");
 test("ML model binaries and NumPy sidecar files use the safe binary-asset path", () => {
   for (const ext of [
     "model", "npy", "npz", "kv", "onnx", "tflite", "safetensors", "pt", "pth", "ckpt",
-    "joblib", "pkl", "pickle", "keras", "h5", "hdf5"
+    "joblib", "pkl", "pickle", "keras", "h5", "hdf5", "pyc"
   ]) assert.match(documents, new RegExp(`"${ext}"`));
   assert.match(documents, /\.\.\.BINARY_ASSET_EXTS/);
   assert.match(loaders, /BINARY_ASSET_EXTS\.has\(ext\)\) made = await loadBinaryAsset\(file, opts\)/);
