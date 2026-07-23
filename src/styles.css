@@ -2568,15 +2568,18 @@
   .py-path-example-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--code-border);font-size:11.5px}
   .py-path-example-head button{padding:3px 6px;font-size:10.5px}.py-path-example pre{margin:0;padding:8px;overflow:auto;color:var(--code-text);font:10.5px/1.45 Consolas,"Courier New",monospace;white-space:pre}
   .run-pkg-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}
-  .pkg-set{font:inherit;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:8px;padding:7px 12px;cursor:pointer}
-  .pkg-set:hover{background:#eef2f7;border-color:#94a3b8}
-  .pkg-custom{font:inherit;flex:1;min-width:160px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 10px}
-  .pkg-go{font:inherit;border:0;border-radius:8px;padding:7px 14px;cursor:pointer;background:#0ea5e9;color:#fff}
-  .pkg-go:hover{background:#0284c7}
-  .pkg-list{background:#eef2ff;border-color:#c7d2fe;color:#4338ca}
-  .pkg-list:hover{background:#e0e7ff;border-color:#a5b4fc}
-  .pkg-file{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
-  .pkg-file:hover{background:#d1fae5;border-color:#6ee7b7}
+  .pkg-set,.pkg-go{height:30px;display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:12.5px;
+    border:1px solid var(--border);border-radius:8px;padding:0 11px;cursor:pointer}
+  .pkg-set{background:var(--field);color:var(--muted)}
+  .pkg-set:hover{background:var(--panel-hover);color:var(--ink)}
+  .pkg-custom{height:30px;font:inherit;font-size:12.5px;flex:1;min-width:160px;border:1px solid var(--border);
+    border-radius:8px;padding:0 10px;background:var(--field);color:var(--ink);outline:none}
+  .pkg-custom::placeholder{color:var(--muted)}
+  .pkg-custom:hover{border-color:var(--muted)}
+  .pkg-custom:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(99,102,241,.18)}
+  .pkg-go{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:600}
+  .pkg-go:hover{border-color:var(--accent-d);background:var(--accent-d)}
+  .pkg-set:focus-visible,.pkg-go:focus-visible{outline:2px solid rgba(99,102,241,.35);outline-offset:2px}
   .run-input-wrap{margin:0 0 10px;padding:9px 11px;background:var(--panel);border:1px solid var(--border);
     border-radius:8px;display:flex;flex-direction:column;gap:7px}
   .run-input-label{font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap}
