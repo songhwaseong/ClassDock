@@ -675,6 +675,10 @@
     .image-memo-preview-tools{flex-wrap:wrap}
     .image-memo-preview-tools small{width:100%;margin:0;text-align:center}
   }
+  /* 헤더 '분할 작업' 버튼 숨김(삭제 아님) — 분할바 가운데 버튼(종료)·탭 드래그(진입)로 대체됨.
+     나중에 다시 쓸 수 있어 이 한 줄만 지우면 원래대로 돌아온다. JS 의 hidden 토글보다 우선하도록 !important.
+     display:none 이어도 명령 팔레트의 click() 은 동작하므로 팔레트 '분할 작업 켜기/끄기'는 그대로 쓸 수 있다. */
+  #studyToggle{display:none!important}
   .study-divider{display:none;position:absolute;top:0;bottom:0;left:var(--study-split,50%);width:8px;
     transform:translateX(-4px);background:var(--border);z-index:9;cursor:col-resize;touch-action:none}
   .study-divider::before{content:"";position:absolute;top:0;bottom:0;left:3px;width:2px;background:rgba(255,255,255,.12)}

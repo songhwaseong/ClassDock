@@ -899,6 +899,8 @@ function applyStudyLayout(){
     pageCtl.hidden = !split;
     pageCtl.classList.toggle("non-pdf-ref", !!(split && ref && ref.kind !== "pdf"));
   }
+  // 헤더 '분할 작업' 버튼은 CSS(#studyToggle{display:none})로 숨겨둔 상태(삭제 아님 — 나중에 되살릴 수 있음).
+  // 명령 팔레트가 이 버튼의 hidden 여부·click() 을 계속 쓰므로 아래 상태 갱신 로직은 그대로 유지한다.
   const btn = byId("studyToggle");
   btn.hidden = docs.length === 0;
   const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
