@@ -684,6 +684,15 @@
     width:6px;height:34px;border-radius:999px;background:rgba(148,163,184,.55);
     box-shadow:0 0 0 3px rgba(15,23,42,.35);transition:background .12s}
   .study-divider:hover::after,.study-divider.dragging::after{background:var(--accent)}
+  /* 분할바 종료 버튼 — 마지막에 클릭한(테두리 표시) 칸만 남기고 분할 종료.
+     가운데 ⇄(역할 교체)·↕(방향 전환)와 같은 모양으로 ⇄ 위쪽(-42px)에 배치한다. */
+  .study-divider-close{position:absolute;top:calc(50% - 42px);left:50%;transform:translate(-50%,-50%);
+    width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(15,23,42,.82);color:#fff;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);
+    opacity:0;pointer-events:none;transition:opacity .15s ease;padding:0}
+  .study-divider-close:hover,.study-divider-close:focus-visible{opacity:1;background:rgba(15,23,42,.95)}
+  .study-divider-close svg{width:18px;height:18px;pointer-events:none}
+  .study-divider.dragging .study-divider-close{visibility:hidden}
   #content.study-mode .study-divider{display:block}
   #content.study-mode .study-reference{display:block!important;right:calc(100% - var(--study-split,50%));border-right:3px solid var(--border)}
   #content.study-mode .study-work{left:var(--study-split,50%);display:block!important}
@@ -703,6 +712,8 @@
   #content.study-mode.study-stacked .study-divider:hover::before,
   #content.study-mode.study-stacked .study-divider.dragging::before{left:0;top:2.5px;width:auto;height:3px}
   #content.study-mode.study-stacked .study-divider::after{width:34px;height:6px}
+  #content.study-mode.study-stacked .study-divider-close{top:50%;left:calc(50% - 42px)}
+  #content.study-mode.study-stacked .study-divider-close svg{transform:rotate(90deg)}
   /* 상단 탭을 본문으로 끌면 뜨는 좌우 드롭 안내 — 탭 드래그 중에만 보이고, iframe 뷰어 위까지 덮어 dragover 를 받는다 */
   .split-drop{position:absolute;inset:0;z-index:40;display:flex}
   .split-drop.stack{flex-direction:column}
@@ -884,7 +895,7 @@
   /* 두 칸 사이 가운데: 참고 ⇄ 작업 역할 교체 버튼(분할바 더블클릭=위치 바꾸기와 별개) */
   .study-role-swap{position:absolute;display:none;left:var(--study-split,50%);top:50%;transform:translate(-50%,-50%);z-index:14;
     width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(15,23,42,.82);color:#fff;
-    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.62;transition:opacity .15s ease;padding:0}
+    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:0;pointer-events:none;transition:opacity .15s ease;padding:0}
   .study-role-swap:hover,.study-role-swap:focus-visible{opacity:1;background:rgba(15,23,42,.95)}
   .study-role-swap svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
   #content.study-mode .study-role-swap{display:flex}
@@ -892,7 +903,7 @@
   #content.study-mode.study-stacked .study-role-swap svg{transform:rotate(90deg)}
   .study-direction-toggle{position:absolute;display:none;left:var(--study-split,50%);top:calc(50% + 42px);transform:translate(-50%,-50%);z-index:14;
     width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(15,23,42,.82);color:#fff;
-    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.62;transition:opacity .15s ease;padding:0;
+    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:0;pointer-events:none;transition:opacity .15s ease;padding:0;
     font:700 19px/1 system-ui,sans-serif}
   .study-direction-toggle:hover,.study-direction-toggle:focus-visible{opacity:1;background:rgba(15,23,42,.95)}
   .study-direction-side{display:none}
@@ -900,13 +911,20 @@
   #content.study-mode.study-stacked .study-direction-toggle{left:calc(50% + 42px);top:var(--study-split,50%);transform:translate(-50%,-50%)}
   #content.study-mode.study-stacked .study-direction-stack{display:none}
   #content.study-mode.study-stacked .study-direction-side{display:inline}
+  /* 분할바 가운데 버튼 3종(종료·역할 교체·방향 전환)은 평소 숨겨두고, 마우스가 분할바 근처(±60px)에
+     오면 나타난다(study-divider-near 는 JS 접근 감지). 키보드 포커스 시에도 보인다. */
+  #content.study-mode.study-divider-near .study-role-swap,
+  #content.study-mode.study-divider-near .study-direction-toggle,
+  #content.study-mode.study-divider-near .study-divider-close{opacity:.62;pointer-events:auto}
+  #content.study-mode.study-divider-near .study-role-swap:hover,#content.study-mode .study-role-swap:focus-visible,
+  #content.study-mode.study-divider-near .study-direction-toggle:hover,#content.study-mode .study-direction-toggle:focus-visible,
+  #content.study-mode.study-divider-near .study-divider-close:hover,#content.study-mode .study-divider-close:focus-visible{opacity:1}
   #content:fullscreen .study-role-swap,body.viewer-fullscreen #content .study-role-swap{display:none!important}
   #content:fullscreen .study-direction-toggle,body.viewer-fullscreen #content .study-direction-toggle{display:none!important}
+  #content:fullscreen .study-divider-close,body.viewer-fullscreen #content .study-divider-close{display:none!important}
   /* 분할화면 바 자동 숨김: 입력이 없으면 흐려졌다가 마우스·키 입력에 다시 나타남(전체화면 fs-controls 와 같은 방식) */
   .study-page-ctl{transition:opacity .18s ease}
-  #content.study-mode.study-idle .study-page-ctl,
-  #content.study-mode.study-idle .study-role-swap,
-  #content.study-mode.study-idle .study-direction-toggle{opacity:0;pointer-events:none}
+  #content.study-mode.study-idle .study-page-ctl{opacity:0;pointer-events:none}
   @media (prefers-reduced-motion:reduce){
     .study-page-ctl,#content.study-mode .study-ref-lock,#content.study-mode .study-role-swap,#content.study-mode .study-direction-toggle{transition:none}
   }
@@ -3099,7 +3117,8 @@
     #content.study-mode.study-swapped .study-page-ctl{right:10px!important;top:calc(50% + 10px)!important}
     #content.study-mode .study-ref-lock{left:12px!important;top:10px!important}
     #content.study-mode.study-swapped .study-ref-lock{left:12px!important;top:calc(50% + 10px)!important}
-    #content.study-mode .study-role-swap{left:auto!important;right:14px!important;top:50%!important;transform:translateY(-50%)!important}
+    #content.study-mode .study-role-swap{left:auto!important;right:14px!important;top:50%!important;transform:translateY(-50%)!important;
+      opacity:.62!important;pointer-events:auto!important}   /* 모바일은 분할바가 없어 접근 감지 불가 → 항상 표시 */
     #content.study-mode .study-role-swap svg{transform:rotate(90deg)}
     #content.study-mode .study-direction-toggle{display:none!important}
     #content.study-mode .pdf-find.study-target{right:10px!important;top:52px!important}

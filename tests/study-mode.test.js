@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   studyPaneSelectionAction,
+  studySplitEndKeepId,
   studyReadonlyPointerAllowed,
   studyReadonlyKeyAllowed,
   splitDropRoleForSide,
@@ -21,6 +22,13 @@ test("분할 문서 선택은 타깃 칸 유지·역할 교체·한쪽 교체를
   assert.equal(studyPaneSelectionAction(1, 2, "work", 1), "swap");
   assert.equal(studyPaneSelectionAction(1, 2, "reference", 3), "replace-reference");
   assert.equal(studyPaneSelectionAction(1, 2, "work", 3), "replace-work");
+});
+
+test("분할바 종료 버튼은 마지막에 클릭한 칸의 문서를 남긴다", () => {
+  assert.equal(studySplitEndKeepId(1, 2, "reference"), 1);   // 참고 칸 포커스 → 참고 문서 유지
+  assert.equal(studySplitEndKeepId(1, 2, "work"), 2);        // 작업 칸 포커스 → 작업 문서 유지
+  assert.equal(studySplitEndKeepId(null, 2, "work"), null);  // 분할 아님
+  assert.equal(studySplitEndKeepId(2, 2, "work"), null);     // 고정만 해둔 상태(참고=작업)도 분할 아님
 });
 
 test("드롭한 칸의 역할은 방향과 위치 바꾸기 상태를 따라간다", () => {

@@ -2957,6 +2957,13 @@
     return pane === "reference" ? "replace-reference" : "replace-work";
   }
 
+  // 분할바 가운데 종료 버튼 — 남길(마지막에 클릭한 타깃) 칸의 문서 id 를 돌려준다. 분할이 아니면 null.
+  function studySplitEndKeepId(referenceId, workId, targetPane) {
+    const split = referenceId != null && workId != null && referenceId !== workId;
+    if (!split) return null;
+    return targetPane === "reference" ? referenceId : workId;
+  }
+
   // 화면에서 본 첫 칸(왼쪽/위쪽)이 어느 역할인지. 위치 바꾸기(swapped)면 자리가 뒤집힌다.
   function splitDropRoleForSide(side, swapped) {
     const first = side === "left" || side === "top";
@@ -3081,7 +3088,7 @@
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
-    studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed,
+    studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,
     splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
     INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
   };

@@ -571,6 +571,18 @@ function setupStudyPaneTracker(){
     content.classList.toggle("study-ref-lock-show", near);
   }, { passive: true });
   content.addEventListener("pointerleave", () => content.classList.remove("study-ref-lock-show"));
+  // 분할바 주변(±60px)에 마우스가 오면 가운데 버튼(종료·역할 교체·방향 전환)을 보여준다.
+  // 유휴 시간 기반이 아니라 접근 기반이라 화면을 가리지 않고, 필요할 때 분할바로 가면 바로 나온다.
+  content.addEventListener("pointermove", (e) => {
+    if (!content.classList.contains("study-mode")){ content.classList.remove("study-divider-near"); return; }
+    const r = content.getBoundingClientRect();
+    const ratio = parseFloat(content.style.getPropertyValue("--study-split")) || 50;
+    const stacked = content.classList.contains("study-stacked");
+    const line = stacked ? r.top + r.height * ratio / 100 : r.left + r.width * ratio / 100;
+    const near = Math.abs((stacked ? e.clientY : e.clientX) - line) <= 60;
+    content.classList.toggle("study-divider-near", near);
+  }, { passive: true });
+  content.addEventListener("pointerleave", () => content.classList.remove("study-divider-near"));
 }
 
 // 사이드바·상단 탭에서 파일 클릭 시 공용 진입점: 분할 화면이면 마지막 클릭 칸 기준으로 연다.
@@ -758,12 +770,24 @@ function setupStudyDivider(){
       localStorage.setItem(isStacked() ? "studyStackSplitRatio" : "studySplitRatio", String(isStacked() ? stackRatio : sideRatio));
     } catch(e){}
   };
+  // 가운데 종료 버튼 — 마지막에 클릭한(테두리 표시) 칸만 남기고 분할을 끝낸다.
+  // 헤더의 '분할 작업 종료'까지 마우스를 옮기지 않아도 분할바에서 바로 복귀할 수 있다.
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "study-divider-close";
+  closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 8 9 12 5 16"/><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 8 15 12 19 16"/></svg>';
+  closeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());   // 분할바 드래그 시작 방지
+  closeBtn.addEventListener("dblclick", (e) => e.stopPropagation());      // 더블클릭 위치 바꾸기 방지
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); endStudySplitKeepFocused(); });
+  divider.appendChild(closeBtn);
   divider._setStudyDirection = (stacked) => {
     const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
     divider.setAttribute("aria-orientation", stacked ? "horizontal" : "vertical");
     divider.title = _t(stacked
       ? "드래그: 위아래 비율 조절 · 더블클릭: 위아래 바꾸기"
       : "드래그: 좌우 비율 조절 · 더블클릭: 좌우 바꾸기");
+    closeBtn.title = _t("마지막에 클릭한 칸(테두리 표시)만 남기고 분할 종료");
+    closeBtn.setAttribute("aria-label", closeBtn.title);
     apply(stacked ? stackRatio : sideRatio);
   };
   divider._setStudyDirection(isStacked());
@@ -840,6 +864,7 @@ function applyStudyLayout(){
   content.classList.toggle("study-swapped", split && studySwapped);   // 저장된 위치 교체 적용
   content.classList.toggle("study-stacked", split && studyStacked);   // 저장된 좌우/상하 방향 적용
   content.classList.toggle("study-ref-nonpdf", !!(split && ref && ref.kind !== "pdf"));  // 참고가 PDF가 아니면 PDF 전용 컨트롤(필기·페이지) 숨김
+  if (!split) content.classList.remove("study-divider-near");                            // 분할 종료 시 분할바 버튼 표시 상태 정리
   if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
@@ -889,6 +914,15 @@ function applyStudyLayout(){
   updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
   updateModeBadges();
+}
+
+// 분할바 가운데 종료 버튼 — 마지막에 클릭한(테두리 표시) 칸의 문서만 남기고 분할을 끝낸다.
+// 참고 칸을 남길 땐 참고 문서를 먼저 활성으로 올린 뒤 종료해 그 문서가 화면에 남는다.
+function endStudySplitKeepFocused(){
+  const keepId = studySplitEndKeepId(studyPdfId, activeId, studyTargetPane);
+  if (keepId === null) return;
+  if (keepId !== activeId) setActiveDoc(keepId);
+  toggleStudyMode();
 }
 
 function toggleStudyMode(){

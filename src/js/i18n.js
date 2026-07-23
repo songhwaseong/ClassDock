@@ -862,6 +862,7 @@
     "참고 칸에 고정": "Pin in reference pane",
     "작업 칸에서 열기": "Open in working pane",
     "먼저 참고할 문서를 연 뒤 분할 작업을 눌러주세요.": "Open a document to reference first, then click Split view.",
+    "마지막에 클릭한 칸(테두리 표시)만 남기고 분할 종료": "End split view — keep the last-clicked (outlined) pane",
     "묶음 전체 닫기": "Close the whole bundle",
     "문서를 참고 화면에 고정했어요. 참고 문서는 읽기 전용으로 잠겨 있어요. 편집하려면 참고 칸 왼쪽 위 열쇠를 눌러 잠금을 푸세요.": "Pinned the document as a reference. The reference is locked read-only. To edit it, click the key at the top-left of the reference pane to unlock.",
     "분할 작업 종료": "End split view",
