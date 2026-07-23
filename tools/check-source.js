@@ -147,13 +147,32 @@ new vm.Script(workerSource, { filename: "pyodide-worker.generated.js" });
 let pythonHarnessChecked = false;
 const pythonProbe = spawnSync("python", ["--version"], { encoding:"utf8" });
 if (pythonProbe.status === 0) {
-  const diagnosticHarness = new vm.Script(
-    "buildPythonDiagnosticHarness(\"total = missing + 1\", \"check.py\")"
-  ).runInContext(workerContext);
-  const diagnosticRun = spawnSync("python", ["-"], { input:diagnosticHarness, encoding:"utf8" });
-  if (diagnosticRun.status !== 0 || !String(diagnosticRun.stdout).includes("__MANNEUNG_DIAG__")) {
-    process.stderr.write(diagnosticRun.stderr || "Python diagnostic harness check failed\n");
-    process.exit(diagnosticRun.status || 1);
+  const runDiagnosticProbe = (source) => {
+    const diagnosticHarness = new vm.Script(
+      `buildPythonDiagnosticHarness(${JSON.stringify(source)}, "check.py")`
+    ).runInContext(workerContext);
+    const diagnosticRun = spawnSync("python", ["-"], { input:diagnosticHarness, encoding:"utf8" });
+    const marker = String(diagnosticRun.stdout).match(/__MANNEUNG_DIAG__([A-Za-z0-9+/=]+)/);
+    if (diagnosticRun.status !== 0 || !marker) {
+      process.stderr.write(diagnosticRun.stderr || "Python diagnostic harness check failed\n");
+      process.exit(diagnosticRun.status || 1);
+    }
+    return JSON.parse(Buffer.from(marker[1], "base64").toString("utf8"));
+  };
+  runDiagnosticProbe("total = missing + 1");
+  const directBreakReport = runDiagnosticProbe("while True:\n    if ready:\n        break");
+  if (directBreakReport.diagnostics.some((item) => item.code === "PY-LOOP")) {
+    throw new Error("Python diagnostic direct-break loop check failed");
+  }
+  const nestedBreakReport = runDiagnosticProbe("while True:\n    while pending:\n        break");
+  const nestedLoopItems = nestedBreakReport.diagnostics.filter((item) => item.code === "PY-LOOP");
+  if (nestedLoopItems.length !== 1 || nestedLoopItems[0].line !== 1) {
+    throw new Error("Python diagnostic nested-loop break check failed");
+  }
+  const noBreakReport = runDiagnosticProbe("while True:\n    while True:\n        pass");
+  const noBreakLoopItems = noBreakReport.diagnostics.filter((item) => item.code === "PY-LOOP");
+  if (noBreakLoopItems.length !== 2 || noBreakLoopItems[0].line !== 1 || noBreakLoopItems[1].line !== 2) {
+    throw new Error("Python diagnostic nested no-break loop check failed");
   }
   const traceHarness = new vm.Script(
     "buildPythonTraceHarness(\"value = 1\\nvalue += 2\\nprint(value)\", \"check.py\", 30)"

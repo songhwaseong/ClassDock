@@ -361,7 +361,10 @@ async function runPythonLiveDiagnostics(src, fileName){
   const parsed = parsePythonMarkedReport(result && result.stdout, PY_DIAG_MARKER);
   if (!parsed || !parsed.report) throw new Error("live-diagnostic-report-missing");
   return {
-    diagnostics:normalizePythonDiagnostics(parsed.report.diagnostics).filter(item => item.severity !== "info"),
+    // 자동 편집 중에는 참고 진단을 대부분 숨기되, 종료 조건 없는 while True는
+    // 즉시 알아볼 수 있도록 PY-LOOP만 파란 줄 표시로 유지한다.
+    diagnostics:normalizePythonDiagnostics(parsed.report.diagnostics)
+      .filter(item => item.severity !== "info" || item.code === "PY-LOOP"),
     unusedReady:parsed.report.unusedReady === true,
     unused:normalizePythonUnusedRanges(parsed.report.unused)
   };

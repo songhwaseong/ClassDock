@@ -1808,6 +1808,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   });
   ui.markError = (n) => editor.markError(n);                    // 실행 에러 줄 강조 / 해제(수정 시 자동 해제)
   ui.markErrorLines = (lines) => editor.markErrorLines(lines);
+  ui.setDiagnosticItems = (items) => editor.setDiagnosticItems(items); // 진단 심각도·설명까지 보존해 줄 색상과 호버에 반영
   ui.focusError = (n) => { editor.markError(n); editor.ta.focus(); };
   ui.focusLine = (n) => editor.focusLine(n);
   ui.showTraceLine = (n) => editor.showTraceLine(n);

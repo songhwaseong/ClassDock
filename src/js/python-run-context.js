@@ -1193,6 +1193,22 @@ function buildPythonDiagnosticHarness(source, fileName){
     "except (SyntaxError, IndentationError, TabError) as __md_error:",
     "    __md_add('error', getattr(__md_error, 'lineno', 1), max(0, (getattr(__md_error, 'offset', 1) or 1) - 1), type(__md_error).__name__, getattr(__md_error, 'msg', str(__md_error)), '표시된 줄과 바로 위 줄의 괄호·콜론·따옴표·들여쓰기를 확인해 보세요.')",
     "if __md_tree is not None:",
+    "    class __md_LoopBreak(__md_ast.NodeVisitor):",
+    "        def __init__(self): self.found = False",
+    "        def visit_Break(self, node): self.found = True",
+    "        def visit_For(self, node): pass",
+    "        def visit_AsyncFor(self, node): pass",
+    "        def visit_While(self, node): pass",
+    "        def visit_FunctionDef(self, node): pass",
+    "        def visit_AsyncFunctionDef(self, node): pass",
+    "        def visit_ClassDef(self, node): pass",
+    "        def visit_Lambda(self, node): pass",
+    "    def __md_has_loop_break(loop):",
+    "        visitor = __md_LoopBreak()",
+    "        for statement in loop.body:",
+    "            visitor.visit(statement)",
+    "            if visitor.found: return True",
+    "        return False",
     "    _md_defined = {'__name__': 1, '__file__': 1}",
     "    _md_loaded = {}",
     "    _md_wildcard = False",
@@ -1385,7 +1401,7 @@ function buildPythonDiagnosticHarness(source, fileName){
     "                __md_add('info', __md_line, __md_col, 'PY-NONE', 'None 비교에는 is 또는 is not이 더 분명해요.', 'value is None 또는 value is not None 형태를 권장합니다.')",
     "        if isinstance(__md_node, __md_ast.Call) and isinstance(__md_node.func, __md_ast.Name) and __md_node.func.id in ('eval', 'exec'):",
     "            __md_add('warning', __md_line, __md_col, 'PY-DYNAMIC', __md_node.func.id + '()는 문자열을 코드로 실행해 예상하지 못한 동작을 만들 수 있어요.', '학습 목적이 아니라면 일반 조건문·함수 호출로 바꿀 수 있는지 확인하세요.')",
-    "        if isinstance(__md_node, __md_ast.While) and isinstance(__md_node.test, __md_ast.Constant) and __md_node.test.value is True:",
+    "        if isinstance(__md_node, __md_ast.While) and isinstance(__md_node.test, __md_ast.Constant) and __md_node.test.value is True and not __md_has_loop_break(__md_node):",
     "            __md_add('info', __md_line, __md_col, 'PY-LOOP', '조건이 항상 참인 반복문입니다.', '반복문 안에 도달 가능한 break 또는 종료 조건이 있는지 확인하세요.')",
     "__md_items.sort(key=lambda item: (item['line'], item['column'], {'error': 0, 'warning': 1, 'info': 2}.get(item['severity'], 9)))",
     "__md_payload = __md_json.dumps({'diagnostics': __md_items[:100], 'unusedReady': __md_tree is not None, 'unused': (__md_unused[:500] if __md_tree is not None else [])}, ensure_ascii=False).encode('utf-8')",
@@ -1545,9 +1561,14 @@ function finishPythonDiagnostics(rawReport, ui){
     return { errors, warnings, total:0, failed:false };
   }
 
-  const lines = diagnostics.map(item => item.line);
-  if (ui && ui.markErrorLines) ui.markErrorLines(lines);
-  else if (ui && ui.markError) ui.markError(lines[0]);
+  // 줄 번호만 넘기면 모든 항목이 빨간 실행 오류로 보이고 호버 설명도 사라진다.
+  // 편집기가 지원하면 정규화된 진단 전체를 전달해 심각도·메시지·힌트를 보존한다.
+  if (ui && ui.setDiagnosticItems) ui.setDiagnosticItems(diagnostics);
+  else {
+    const lines = diagnostics.map(item => item.line);
+    if (ui && ui.markErrorLines) ui.markErrorLines(lines);
+    else if (ui && ui.markError) ui.markError(lines[0]);
+  }
   return { errors, warnings, total:diagnostics.length, failed:false };
 }
 
@@ -1590,9 +1611,12 @@ function renderPythonDiagnostics(panel, rawReport, ui){
     list.appendChild(row);
   });
   panel.appendChild(list);
-  const firstError = diagnostics.find(item => item.severity === "error");
-  if (firstError && ui && ui.markError) ui.markError(firstError.line);
-  else if (ui && ui.clearError) ui.clearError();
+  if (ui && ui.setDiagnosticItems) ui.setDiagnosticItems(diagnostics);
+  else {
+    const firstError = diagnostics.find(item => item.severity === "error");
+    if (firstError && ui && ui.markError) ui.markError(firstError.line);
+    else if (ui && ui.clearError) ui.clearError();
+  }
   return { errors, warnings, total:diagnostics.length };
 }
 

@@ -23,9 +23,29 @@ test("Python 실시간 진단은 입력을 모아 최신 코드 결과만 줄 �
   assert.match(editor, /code-diagnostic-tooltip-hint/);
 });
 
+test("Python 수동 진단도 심각도와 설명을 보존해 줄 색상과 호버에 반영한다", () => {
+  assert.match(viewer, /ui\.setDiagnosticItems = \(items\) => editor\.setDiagnosticItems\(items\)/);
+  const finishStart = runContext.indexOf("function finishPythonDiagnostics");
+  const finishEnd = runContext.indexOf("function renderPythonDiagnostics", finishStart);
+  const finish = runContext.slice(finishStart, finishEnd);
+  assert.match(finish, /if \(ui && ui\.setDiagnosticItems\) ui\.setDiagnosticItems\(diagnostics\)/);
+  assert.match(finish, /else \{[\s\S]*ui\.markErrorLines\(lines\)/);
+});
+
+test("while True 진단은 현재 반복문을 빠져나가는 break가 있을 때 생략한다", () => {
+  assert.match(runContext, /class __md_LoopBreak\(__md_ast\.NodeVisitor\)/);
+  assert.match(runContext, /def visit_Break\(self, node\): self\.found = True/);
+  assert.match(runContext, /def visit_While\(self, node\): pass/);
+  assert.match(runContext, /not __md_has_loop_break\(__md_node\)/);
+});
+
+test("자동 진단은 PY-LOOP 참고만 파란 줄 표시로 유지한다", () => {
+  assert.match(runtime, /item\.severity !== "info" \|\| item\.code === "PY-LOOP"/);
+});
+
 test("Python 실시간 진단은 코드를 실행하지 않고 수동 실행 중에는 일시정지한다", () => {
   assert.match(runtime, /buildPythonDiagnosticHarness\(String\(src == null \? "" : src\)/);
-  assert.match(runtime, /filter\(item => item\.severity !== "info"\)/);
+  assert.match(runtime, /filter\(item => item\.severity !== "info" \|\| item\.code === "PY-LOOP"\)/);
   assert.match(runtime, /ui\.pauseLiveDiagnostics\(\)/);
   assert.match(runtime, /ui\.resumeLiveDiagnostics\(\)/);
   assert.match(viewer, /ui\.destroyLiveDiagnostics/);
