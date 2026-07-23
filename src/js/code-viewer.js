@@ -831,7 +831,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         }
         if (canEdit){
           const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
-          editBtn.title = "이 파일을 편집하고 저장";
+          editBtn.title = "이 파일을 편집하고 저장 — 본문을 더블클릭하거나 클릭 후 바로 입력해도 켜져요";
           editBtn.addEventListener("click", showEdit);
           bar.appendChild(editBtn);
         }
@@ -997,6 +997,71 @@ async function renderCode(file, host, ext, profile, runCtx){
           ownerDoc.pendingFocusLine = 0; ownerDoc.pendingFocusOptions = null;
           requestAnimationFrame(() => { if (ownerDoc.codeViewer) ownerDoc.codeViewer.focusLine(line, opts); });
         }
+      }
+      // ── 보기에서 바로 편집 진입 — 본문을 더블클릭하거나 클릭해 두고 글자를 입력하면
+      // ✎ 편집 버튼 없이 그 자리로 편집 모드가 켜진다. pretty(정렬본)는 원본과 글자 위치가
+      // 어긋나므로 제외(트리 보기는 위에서 이미 early return). keydown 에서 preventDefault 없이
+      // 포커스만 편집기 textarea 로 옮기면, 지금 누른 키(한글 IME 조합 포함)가 그대로 입력된다.
+      if (canEdit && prettyText == null){
+        // 보기 DOM(강조 span·청크 분할)의 텍스트 노드 위치 → currentText 안의 글자 offset
+        const viewOffsetAt = (node, nodeOffset) => {
+          if (!node) return null;
+          const el = node.nodeType === 1 ? node : node.parentElement;
+          const codeEl = el && el.closest ? el.closest(".code-pre code") : null;
+          if (!codeEl || !wrap.contains(codeEl)) return null;
+          let base = 0;
+          if (chunkStarts.length){
+            const chunkEl = codeEl.closest(".code-chunk");
+            const ci = Array.prototype.indexOf.call(wrap.querySelectorAll(".code-chunk"), chunkEl);
+            if (ci < 0) return null;
+            base = chunkStarts[ci] || 0;
+          }
+          if (node === codeEl) return base;            // 앵커가 code 요소 자체면 그 블록 시작으로
+          let off = 0;
+          const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = walker.nextNode())){
+            if (n === node) return base + off + Math.min(nodeOffset, (n.nodeValue || "").length);
+            off += (n.nodeValue || "").length;
+          }
+          return null;
+        };
+        // 현재 선택(클릭 캐럿·더블클릭 단어)을 편집기 selection 범위로 변환. 실패 시 화면 첫 줄 근처로.
+        const selectionRangeForEdit = () => {
+          try {
+            const s = window.getSelection();
+            if (s && s.rangeCount && wrap.contains(s.anchorNode)){
+              const a = viewOffsetAt(s.anchorNode, s.anchorOffset);
+              const f = s.isCollapsed ? a : viewOffsetAt(s.focusNode, s.focusOffset);
+              if (a != null && f != null) return { start: Math.min(a, f), end: Math.max(a, f) };
+            }
+          } catch(_){}
+          const line = Math.max(1, Math.min(lineN, Math.round(wrap.scrollTop / LINE_H) + 1));
+          const off = lineOffsets[line - 1] || 0;
+          return { start: off, end: off };
+        };
+        const enterEditHere = () => {
+          const range = selectionRangeForEdit();
+          const scrollTop = wrap.scrollTop, scrollLeft = wrap.scrollLeft;   // showEdit 이 wrap 을 없애기 전에 붙잡는다
+          showEdit();
+          const ed = activeEditor;
+          if (!ed || !ed.ta) return;
+          try { ed.ta.focus(); } catch(_){}                                 // 동기 포커스 → 이번 키 입력이 편집기로 들어감
+          const len = ed.ta.value.length;
+          try { ed.ta.setSelectionRange(Math.min(range.start, len), Math.min(range.end, len)); } catch(_){}
+          ed.ta.scrollTop = scrollTop; ed.ta.scrollLeft = scrollLeft;       // 보던 위치 그대로 이어서 편집
+        };
+        wrap.addEventListener("dblclick", (e) => {
+          if (e.target && e.target.closest && e.target.closest(".code-gutter")) return;   // 줄번호는 제외
+          enterEditHere();
+        });
+        wrap.addEventListener("keydown", (e) => {
+          if (e.ctrlKey || e.metaKey || e.altKey) return;                   // 단축키(복사·찾기 등)는 그대로
+          const printable = e.key && e.key.length === 1 && e.key !== " ";   // 스페이스는 스크롤 용도로 남긴다
+          const ime = e.key === "Process" || e.keyCode === 229;             // 한글 등 IME 첫 키
+          if (!printable && !ime && e.key !== "Enter") return;
+          enterEditHere();   // preventDefault 하지 않음 → 이 키 입력이 편집기 textarea 에 그대로 들어간다
+        });
       }
       // 편집 잠금(대용량) 파일용 읽기 전용 찾기 바 — 문자열에서 찾아 해당 줄로 점프·강조(Ctrl+H 로 연다).
       if (!canEdit){

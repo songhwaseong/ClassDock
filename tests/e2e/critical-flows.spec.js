@@ -113,6 +113,54 @@ test("in-editor find highlights Korean (full-width) matches at the correct posit
   expect(errors).toEqual([]);
 });
 
+test("typing in the read-only text view switches straight into the editor", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await page.goto("/");
+  await page.locator("#fileInput").setInputFiles({
+    name: "e2e-direct-edit.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("hello\nworld\n", "utf8")
+  });
+  await expect(page.locator("#activeFileName")).toHaveText("e2e-direct-edit.txt");
+  const pre = page.locator(".code-host-readonly .code-pre");
+  await expect(pre).toBeVisible();
+  // 본문 첫 줄을 클릭해 캐럿을 두고 바로 타이핑 → [✎ 편집] 없이 편집 모드로 전환 + 그 글자가 입력된다
+  await pre.click({ position: { x: 30, y: 24 } });
+  await page.keyboard.press("Z");
+  const ta = page.locator(".code-host-edit .code-input");
+  await expect(ta).toBeVisible();
+  // 클릭한 위치(첫 줄 "hello" 안쪽)에 Z 가 들어갔는지 — 정확한 캐럿 컬럼은 렌더 폭에 따라 다르므로 앞 6자 안이면 통과
+  await expect.poll(() => page.evaluate(() => document.querySelector(".code-host-edit .code-input").value.slice(0, 6))).toContain("Z");
+  expect(errors).toEqual([]);
+});
+
+test("double-clicking a word in the read-only view enters edit with the word selected", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await page.goto("/");
+  await page.locator("#fileInput").setInputFiles({
+    name: "e2e-dblclick-edit.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("hello\nworld\n", "utf8")
+  });
+  await expect(page.locator("#activeFileName")).toHaveText("e2e-dblclick-edit.txt");
+  const pre = page.locator(".code-host-readonly .code-pre");
+  await expect(pre).toBeVisible();
+  await pre.dblclick({ position: { x: 30, y: 24 } });   // 첫 줄 "hello" 위 더블클릭
+  const ta = page.locator(".code-host-edit .code-input");
+  await expect(ta).toBeVisible();
+  // 더블클릭으로 잡힌 단어("hello")가 편집기에서도 그대로 선택돼 있어야 한다
+  const sel = await page.evaluate(() => {
+    const el = document.querySelector(".code-host-edit .code-input");
+    return el.value.slice(el.selectionStart, el.selectionEnd);
+  });
+  expect(sel).toBe("hello");
+  expect(errors).toEqual([]);
+});
+
 test("a new whiteboard initializes its canvas through the module boundary", async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });   // 환영 모달이 클릭을 가로막지 않게 미리 끈다
   await page.goto("/");
