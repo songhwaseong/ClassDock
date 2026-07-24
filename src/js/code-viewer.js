@@ -2081,13 +2081,6 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (pyAutosaveSaving) await pyAutosaveSaving;
     const value = editor.getValue();
     let name = (ownerDoc && ownerDoc.name) || (file && file.name) || "practice.py";
-    const diagnoseAfterSave = saveBtn.dataset.diagnoseAfterSave === "1";
-    delete saveBtn.dataset.diagnoseAfterSave;
-    const startDiagnosis = () => {
-      if (!diagnoseAfterSave) return;
-      // 저장 이벤트를 먼저 끝내 버튼 상태와 저장 경로 UI를 정리한 뒤, 방금 저장한 코드로 진단한다.
-      setTimeout(() => runPythonSource(value, ui, runCtxWithDoc, false, { diagnoseMode:true }), 0);
-    };
     let persisted = false;
     // 폴더로 연 파일이 원본 파일 핸들(File System Access)을 들고 있으면, 서버 사본(SaveRoot) 대신
     // 그 핸들로 원본 파일에 바로 되쓴다 → 폴더에서 연 파일은 '원본 자리'에 저장된다.
@@ -2152,7 +2145,6 @@ async function renderCode(file, host, ext, profile, runCtx){
             action: (typeof window !== "undefined" && typeof window.__mnOpenLastSavedFolder === "function")
               ? { label: fromFolder && !saveToOriginal ? "저장 폴더 열기" : "폴더 열기", onClick: () => window.__mnOpenLastSavedFolder() } : null
           });
-          startDiagnosis();
           return;
         }
         // 서버 저장 실패 → 아래 기존 방식으로 폴백
@@ -2223,7 +2215,6 @@ async function renderCode(file, host, ext, profile, runCtx){
           ? (persisted ? "원본 파일에 저장하고 작업공간도 갱신했어요." : "원본 파일에 바로 저장했어요.")
           : (persisted ? "다운로드하고 왼쪽 작업공간에도 저장했어요." : "다운로드 사본을 저장했어요."), 2600, { type: "success" });
       }
-      startDiagnosis();
     } finally {
       pyManualSaveActive = false;
       saveBtn.disabled = false;

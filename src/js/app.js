@@ -900,9 +900,6 @@ function wire(){
       if (save) {
         e.preventDefault();
         if (save.disabled) return;
-        if (state && state.codeEditor && /\.pyw?$/i.test(state.codeEditorFileBase || state.name || "")) {
-          save.dataset.diagnoseAfterSave = "1";
-        }
         save.click();
       }
       return;
