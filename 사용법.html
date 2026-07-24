@@ -271,6 +271,7 @@ cd myOffice</code></pre>
   <li><strong>PDF에 핀</strong> — 현재 코드 줄을 PDF 위치에 연결</li>
   <li><strong>✏️ 필기</strong> — 편집 잠그고 코드·실행결과 위에 필기 (세션 한정, 문서 닫으면 사라짐)</li>
   <li><strong>라이브러리</strong> — 데이터분석·크롤링·DB 세트 원클릭 설치 (EXE+로컬 Python)</li>
+  <li><strong>결과 / 터미널</strong> — 실행 결과와 명령창을 전환. EXE에서는 현재 작업폴더를 유지하는 로컬 PowerShell, 일반 브라우저에서는 변수가 유지되는 Pyodide Python 콘솔로 동작</li>
   <li><strong>노트북으로 ▾</strong> — 본문을 누르면 현재 코드를 바로 노트북으로 변환. ▾에서 <strong>셀 나누기</strong>(줄번호 클릭으로 <code># %%</code> 경계 조정) 또는 <strong>자동분할</strong> 선택</li>
   <li><strong>A− / A+</strong> — 코드와 실행 결과의 문자 크기를 함께 조절. 표준 출력·오류·표·변수·진단 글자에 적용되고 그래프·이미지 크기는 유지</li>
 </ul>
@@ -285,6 +286,14 @@ cd myOffice</code></pre>
 <ul>
   <li><strong>EXE + 로컬 Python</strong>: 결과 창에 입력 커서가 떠서 대화형으로 입력</li>
   <li><strong>브라우저(Pyodide)</strong>: <code>input("이름: ")</code>처럼 순서가 고정된 입력은 <strong>프롬프트 문구를 라벨로 단 개별 입력칸</strong>이 떠서 채우면 됩니다. 칸에서 Enter로 다음 칸, 마지막 칸에서 Enter면 바로 실행돼요. 반복문·조건문 안처럼 값 개수가 달라질 수 있으면 <strong>한 줄에 하나씩 적는 자유 입력칸</strong>으로 자동 전환됩니다.</li>
+</ul>
+<h4>터미널</h4>
+<ul>
+  <li><strong>EXE</strong>: <code>.py</code> 파일의 작업폴더에서 PowerShell 명령 실행. <code>cd</code>, <code>python</code>, <code>pip</code>, 파일 명령 등을 사용할 수 있고 <strong>중지</strong> 또는 <kbd>Ctrl</kbd>+<kbd>C</kbd>로 실행 중인 명령과 자식 프로세스를 함께 종료</li>
+  <li><strong>브라우저</strong>: 운영체제 명령 대신 Python 문장·식을 실행. 변수와 import 상태는 이어지며 <strong>초기화</strong>로 모두 지울 수 있음</li>
+  <li><kbd>Enter</kbd>는 실행, <kbd>Shift</kbd>+<kbd>Enter</kbd>는 여러 줄 입력, <kbd>↑</kbd>/<kbd>↓</kbd>는 명령 기록 이동</li>
+  <li><strong>EXE 경로 자동완성</strong>: 경로 일부를 입력하고 <kbd>Tab</kbd>을 누르면 다음 후보, <kbd>Shift</kbd>+<kbd>Tab</kbd>을 누르면 이전 후보로 이동. <code>cd</code>·<code>Set-Location</code>에서는 폴더만 찾고 공백이 있는 경로는 자동으로 따옴표 처리</li>
+  <li>로컬 명령은 PC에서 직접 실행되므로 신뢰할 수 있는 명령만 사용</li>
 </ul>
 <blockquote><p><strong>파이썬 준비 배지</strong> — 브라우저 실행에서는 파이썬 파일·노트북을 여는 순간 런타임을 미리 준비합니다. 헤더에 <strong>파이썬 준비 중… → 준비 완료 ✓</strong> 배지가 떠서 첫 실행 대기가 짧아집니다(로컬 파이썬이 있으면 표시되지 않고 바로 대화형 실행).</p></blockquote>
 

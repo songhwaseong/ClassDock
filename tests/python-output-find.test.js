@@ -10,6 +10,7 @@ const codeSource = fs.readFileSync(path.join(root, "src/js/code-viewer.js"), "ut
 const cssSource = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
 const htmlSource = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
 const i18nSource = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
+const terminalSource = fs.readFileSync(path.join(root, "src/js/python-terminal.js"), "utf8");
 
 test("Python 실행 결과 헤더는 재렌더 뒤에도 검색 도구를 다시 붙인다", () => {
   assert.match(codeSource, /outFindBtn\.className = "out-find-open"/);
@@ -17,6 +18,13 @@ test("Python 실행 결과 헤더는 재렌더 뒤에도 검색 도구를 다시
   assert.match(codeSource, /const attachOutputChrome = \(\) =>/);
   assert.match(codeSource, /new MutationObserver\(\(records\) => \{[\s\S]*attachOutputChrome\(\)/);
   assert.match(codeSource, /outHeadActions\.append\(outFindBtn, outHideBtn\)/);
+});
+
+test("터미널의 중첩 헤더는 검색 바를 같은 부모에 한 번만 붙인다", () => {
+  assert.match(terminalSource, /head\.className = "out-head py-terminal-head"/);
+  assert.match(codeSource, /const headParent = head\.parentNode \|\| outPanel/);
+  assert.match(codeSource, /outFindBar\.parentNode !== headParent/);
+  assert.doesNotMatch(codeSource, /outFindBar\.parentNode !== outPanel \|\| outFindBar\.previousElementSibling !== head/);
 });
 
 test("실행 결과 검색은 본문만 찾아 오버레이로 강조하고 큰 출력의 결과 수를 제한한다", () => {

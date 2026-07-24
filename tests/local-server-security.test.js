@@ -7,6 +7,7 @@ const launcher = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"),
 const stateSync = fs.readFileSync(path.join(__dirname, "../src/js/state-sync.js"), "utf8");
 const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const pythonRuntime = fs.readFileSync(path.join(__dirname, "../src/js/python-runtime.js"), "utf8");
+const pythonTerminal = fs.readFileSync(path.join(__dirname, "../src/js/python-terminal.js"), "utf8");
 
 test("로컬 API는 헤더 토큰만 인정하고 URL 토큰을 사용하지 않는다", () => {
   assert.match(launcher, /static bool HasLocalAuthToken\(Dictionary<string, string> headers\)/);
@@ -70,4 +71,55 @@ test("지속형 노트북 커널도 셀 실행 시간과 프로세스 트리 메
   assert.match(kernel, /PythonKernelExecutionTimeoutMs/);
   assert.match(kernel, /노트북 커널 실행이 4GB를 넘어 종료했습니다/);
   assert.match(kernel, /노트북 셀 실행이 10분을 넘어 종료했습니다/);
+});
+
+test("Python 편집기 터미널은 인증·사용자 확인·프로세스 제한을 거친다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/terminal-session-", StringComparison\.Ordinal\)\) return true/);
+  assert.match(launcher, /static string StartTerminalSession\(byte\[\] body\)/);
+  assert.match(launcher, /ProcessTreeWorkingSetBytes\(session\.Process\.Id\)/);
+  assert.match(launcher, /메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다/);
+  assert.match(launcher, /시간 초과: 터미널 명령을 30분 후 종료했습니다/);
+  assert.match(launcher, /KillProcessTree\(session\.Process\)/);
+  assert.match(pythonTerminal, /터미널 명령은 내 컴퓨터에서 직접 실행됩니다/);
+  assert.match(pythonTerminal, /startPyodideKernelRun/);
+});
+
+test("터미널의 논리 작업 폴더가 없으면 실제 상위 폴더로 안전하게 대체한다", () => {
+  assert.match(launcher, /ResolveTerminalWorkingDirectory\(string requested, out bool fallbackUsed\)/);
+  assert.match(launcher, /Path\.GetDirectoryName\(parent\.TrimEnd/);
+  assert.match(launcher, /session\.CwdFallback = cwdFallback/);
+  assert.match(launcher, /cwdFallback/);
+  assert.match(pythonTerminal, /표시된 작업 폴더가 PC에 없어 가장 가까운 실제 폴더/);
+});
+
+test("로컬 PowerShell 터미널은 Tab으로 경로를 자동 완성한다", () => {
+  assert.match(launcher, /path == "\/terminal-complete"/);
+  assert.match(launcher, /static string TerminalCompletionJson\(byte\[\] body\)/);
+  assert.match(launcher, /directoryFlag == "1"/);
+  assert.match(launcher, /StartsWith\(leaf, StringComparison\.OrdinalIgnoreCase\)/);
+  assert.match(pythonTerminal, /fetch\("\/terminal-complete"/);
+  assert.match(pythonTerminal, /event\.key === "Tab"/);
+  assert.match(pythonTerminal, /event\.shiftKey/);
+  assert.match(pythonTerminal, /quoteCompletion/);
+});
+
+test("실행 중인 터미널은 포커스를 방해하지 않고 Ctrl+C로 중지한다", () => {
+  assert.match(pythonTerminal, /const interruptWithKeyboard = \(event\) =>/);
+  assert.match(pythonTerminal, /!busy \|\| activeView !== "terminal"/);
+  assert.match(pythonTerminal, /focused !== document\.body && !root\.contains\(focused\)/);
+  assert.match(pythonTerminal, /String\(event\.key\)\.toLowerCase\(\) !== "c"/);
+  assert.match(pythonTerminal, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+stop\(\);/);
+  assert.match(pythonTerminal, /document\.removeEventListener\("keydown", interruptWithKeyboard, true\)/);
+});
+
+test("터미널 중지는 Windows Job과 후손 PID 재검사로 서버 프로세스를 끝낸다", () => {
+  assert.match(launcher, /CreateJobObject\(IntPtr lpJobAttributes, string lpName\)/);
+  assert.match(launcher, /AssignProcessToJobObject\(IntPtr hJob, IntPtr hProcess\)/);
+  assert.match(launcher, /TerminateJobObject\(IntPtr hJob, uint uExitCode\)/);
+  assert.match(launcher, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
+  assert.match(launcher, /EnableJobKillOnClose\(session\.JobHandle\)/);
+  assert.match(launcher, /session\.JobHandle = CreateJobObject\(IntPtr\.Zero, null\)/);
+  assert.match(launcher, /TerminateJobObject\(job, 130\)/);
+  assert.match(launcher, /static List<int> ProcessTreeIds\(int rootPid\)/);
+  assert.match(launcher, /for \(int attempt = 0; attempt < 3; attempt\+\+\)/);
 });

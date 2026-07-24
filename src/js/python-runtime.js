@@ -2,6 +2,7 @@
 
 async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
   options = options || {};
+  if (ui && typeof ui.showResultTab === "function") ui.showResultTab();
   const gradeTests = normalizeAssignmentTests(options.gradeTests);
   const grading = gradeTests.length > 0;
   const diagnosing = options.diagnoseMode === true;

@@ -43,6 +43,52 @@ class PdfSignerLauncher
     static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool TerminateJobObject(IntPtr hJob, uint uExitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetInformationJobObject(IntPtr hJob, int infoType, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+    const int JobObjectExtendedLimitInformation = 9;
+    const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
 
     static readonly string LocalAuthToken = CreateLocalAuthToken();
     static readonly byte[] Page = InjectLocalAuthToken(ReadResource("app.html"));
@@ -230,6 +276,27 @@ class PdfSignerLauncher
 
     static readonly object PySessionsLock = new object();
     static readonly Dictionary<string, PythonSession> PySessions = new Dictionary<string, PythonSession>();
+
+    class TerminalSession
+    {
+        public string Id;
+        public Process Process;
+        public readonly object Sync = new object();
+        public readonly LimitedTextBuffer Stdout = new LimitedTextBuffer();
+        public readonly LimitedTextBuffer Stderr = new LimitedTextBuffer();
+        public bool Complete;
+        public int ExitCode = -1;
+        public string Cwd = "";
+        public string Marker = "";
+        public string ScriptPath = "";
+        public bool CwdFallback;
+        public IntPtr JobHandle = IntPtr.Zero;
+        public bool StopRequested;
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
+    static readonly object TerminalSessionsLock = new object();
+    static readonly Dictionary<string, TerminalSession> TerminalSessions = new Dictionary<string, TerminalSession>();
 
     // 노트북 셀을 같은 전역 변수 공간에서 차례로 실행하는 지속형 로컬 Python 커널.
     // Selenium driver 같은 객체도 다음 셀까지 살아 있어 Jupyter와 같은 흐름으로 사용할 수 있다.
@@ -526,6 +593,8 @@ class PdfSignerLauncher
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/terminal-session-", StringComparison.Ordinal)) return true;
+            if (path == "/terminal-complete") return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
         }
         if (method == "GET")
@@ -539,6 +608,7 @@ class PdfSignerLauncher
             if (path.StartsWith("/python-kernel-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
         }
         return false;
     }
@@ -1440,6 +1510,38 @@ class PdfSignerLauncher
                     StopPythonSession(QueryValue(path, "id"));
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
+                else if (method == "POST" && path == "/terminal-session-start")
+                {
+                    try
+                    {
+                        string id = StartTerminalSession(body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"id\":" + JsonString(id) + "}"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("terminal-start-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/terminal-session-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollTerminalSession(QueryValue(path, "id"))));
+                }
+                else if (method == "POST" && path.StartsWith("/terminal-session-stop", StringComparison.Ordinal))
+                {
+                    StopTerminalSession(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path == "/terminal-complete")
+                {
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(TerminalCompletionJson(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("terminal-complete-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "GET" && path.StartsWith("/tile-proxy?", StringComparison.Ordinal))
                 {
                     // 노트북 PDF 지도 스냅샷용 — sandbox iframe 의 fetch 가 차단되는 타일을 서버가 대신 받아온다
@@ -2302,20 +2404,79 @@ class PdfSignerLauncher
         foreach (PythonKernel kernel in stale) StopPythonKernel(kernel.Id);
     }
 
+    static List<int> ProcessTreeIds(int rootPid)
+    {
+        var parent = new Dictionary<int, int>();
+        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != IntPtr.Zero && snap.ToInt64() != -1)
+        {
+            try
+            {
+                PROCESSENTRY32 pe = new PROCESSENTRY32();
+                pe.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+                if (Process32First(snap, ref pe))
+                {
+                    do { parent[(int)pe.th32ProcessID] = (int)pe.th32ParentProcessID; }
+                    while (Process32Next(snap, ref pe));
+                }
+            }
+            finally { CloseHandle(snap); }
+        }
+        var tree = new HashSet<int>();
+        tree.Add(rootPid);
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var pair in parent)
+                if (tree.Contains(pair.Value) && tree.Add(pair.Key)) changed = true;
+        }
+        return new List<int>(tree);
+    }
+
     static void KillProcessTree(Process process)
     {
         if (process == null) return;
-        try { if (process.HasExited) return; } catch { return; }
+        int rootPid;
+        try { rootPid = process.Id; } catch { return; }
+        // taskkill 결과만 믿지 않는다. 부모가 먼저 끝났거나 새 자식이 생긴 경우에도
+        // 스냅샷에서 찾은 후손 PID를 직접 종료하고 짧게 재확인한다.
+        List<int> initialTree = ProcessTreeIds(rootPid);
         try
         {
-            ProcessStartInfo psi = new ProcessStartInfo("taskkill", "/PID " + process.Id + " /T /F");
+            ProcessStartInfo psi = new ProcessStartInfo("taskkill", "/PID " + rootPid + " /T /F");
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             Process killer = Process.Start(psi);
             if (killer != null) killer.WaitForExit(5000);
         }
         catch { }
-        try { if (!process.HasExited) process.Kill(); } catch { }
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            List<int> tree = attempt == 0 ? initialTree : ProcessTreeIds(rootPid);
+            foreach (int pid in tree)
+            {
+                if (pid == rootPid) continue;
+                try { using (Process child = Process.GetProcessById(pid)) child.Kill(); } catch { }
+            }
+            try { using (Process root = Process.GetProcessById(rootPid)) root.Kill(); } catch { }
+            if (attempt < 2) Thread.Sleep(100);
+        }
+    }
+
+    static void EnableJobKillOnClose(IntPtr job)
+    {
+        if (job == IntPtr.Zero) return;
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(info, buffer, false);
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, buffer, (uint)size);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     static long ProcessTreeWorkingSetBytes(int rootPid)
@@ -2351,6 +2512,303 @@ class PdfSignerLauncher
             catch { }
         }
         return total;
+    }
+
+    static string ResolveTerminalWorkingDirectory(string requested, out bool fallbackUsed)
+    {
+        fallbackUsed = false;
+        string fallback = CurrentSaveRoot();
+        if (string.IsNullOrWhiteSpace(fallback) || !Directory.Exists(fallback))
+            fallback = AppDomain.CurrentDomain.BaseDirectory;
+        if (string.IsNullOrWhiteSpace(requested)) return Path.GetFullPath(fallback);
+
+        string candidate = requested.Trim();
+        if (!Path.IsPathRooted(candidate)) candidate = Path.Combine(fallback, candidate);
+        candidate = Path.GetFullPath(candidate);
+        if (File.Exists(candidate)) candidate = Path.GetDirectoryName(candidate);
+        if (!string.IsNullOrWhiteSpace(candidate) && Directory.Exists(candidate)) return candidate;
+
+        // 브라우저 폴더 드래그·복원 문서는 논리 경로만 알고 원본 절대경로에 접근하지 못할 수 있다.
+        // 그 경로가 디스크에 없다고 명령 자체를 막지 말고, 가장 가까운 실제 상위 폴더에서 시작한다.
+        fallbackUsed = true;
+        string parent = candidate;
+        while (!string.IsNullOrWhiteSpace(parent))
+        {
+            try
+            {
+                parent = Path.GetDirectoryName(parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent)) return parent;
+            }
+            catch { break; }
+        }
+        return Path.GetFullPath(fallback);
+    }
+
+    static string PowerShellLiteral(string value)
+    {
+        return "'" + (value ?? "").Replace("'", "''") + "'";
+    }
+
+    static string TerminalCompletionJson(byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > 64 * 1024)
+            throw new Exception("bad-terminal-completion");
+        int pos = 0;
+        string requestedCwd = ReadBundleString(body, ref pos);
+        string fragment = ReadBundleString(body, ref pos);
+        string directoryFlag = ReadBundleString(body, ref pos);
+        if (pos != body.Length || fragment.IndexOf('\0') >= 0)
+            throw new Exception("bad-terminal-completion");
+
+        bool ignoredFallback;
+        string cwd = ResolveTerminalWorkingDirectory(requestedCwd, out ignoredFallback);
+        string typed = fragment ?? "";
+        int separatorAt = Math.Max(typed.LastIndexOf('\\'), typed.LastIndexOf('/'));
+        string typedDir = separatorAt >= 0 ? typed.Substring(0, separatorAt + 1) : "";
+        string leaf = separatorAt >= 0 ? typed.Substring(separatorAt + 1) : typed;
+        string lookupDir;
+        if (typedDir.StartsWith("~\\", StringComparison.Ordinal) || typedDir.StartsWith("~/", StringComparison.Ordinal))
+        {
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            lookupDir = Path.Combine(profile, typedDir.Substring(2).Replace('/', Path.DirectorySeparatorChar));
+        }
+        else if (Path.IsPathRooted(typedDir))
+        {
+            lookupDir = Path.GetFullPath(typedDir);
+        }
+        else
+        {
+            lookupDir = Path.GetFullPath(Path.Combine(cwd, typedDir.Replace('/', Path.DirectorySeparatorChar)));
+        }
+        if (!Directory.Exists(lookupDir)) return "{\"items\":[]}";
+
+        bool directoriesOnly = directoryFlag == "1";
+        List<FileSystemInfo> matches = new List<FileSystemInfo>();
+        try
+        {
+            DirectoryInfo directory = new DirectoryInfo(lookupDir);
+            foreach (DirectoryInfo item in directory.GetDirectories())
+                if (item.Name.StartsWith(leaf, StringComparison.OrdinalIgnoreCase)) matches.Add(item);
+            if (!directoriesOnly)
+                foreach (FileInfo item in directory.GetFiles())
+                    if (item.Name.StartsWith(leaf, StringComparison.OrdinalIgnoreCase)) matches.Add(item);
+        }
+        catch { return "{\"items\":[]}"; }
+        matches.Sort(delegate(FileSystemInfo a, FileSystemInfo b)
+        {
+            bool ad = a is DirectoryInfo;
+            bool bd = b is DirectoryInfo;
+            if (ad != bd) return ad ? -1 : 1;
+            return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        });
+
+        char separator = typedDir.IndexOf('/') >= 0 && typedDir.IndexOf('\\') < 0 ? '/' : '\\';
+        StringBuilder json = new StringBuilder("{\"items\":[");
+        int limit = Math.Min(matches.Count, 120);
+        for (int i = 0; i < limit; i++)
+        {
+            if (i > 0) json.Append(',');
+            FileSystemInfo item = matches[i];
+            bool isDirectory = item is DirectoryInfo;
+            string value = typedDir + item.Name + (isDirectory ? separator.ToString() : "");
+            json.Append("{\"value\":").Append(JsonString(value))
+                .Append(",\"directory\":").Append(isDirectory ? "true" : "false").Append('}');
+        }
+        return json.Append("]}").ToString();
+    }
+
+    static string StartTerminalSession(byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > 1024 * 1024)
+            throw new Exception("bad-terminal-request");
+        int pos = 0;
+        string command = ReadBundleString(body, ref pos);
+        string requestedCwd = ReadBundleString(body, ref pos);
+        if (pos != body.Length || string.IsNullOrWhiteSpace(command) || command.IndexOf('\0') >= 0)
+            throw new Exception("bad-terminal-command");
+
+        SweepTerminalSessions();
+        TerminalSession session = new TerminalSession();
+        session.Id = Guid.NewGuid().ToString("N");
+        bool cwdFallback;
+        session.Cwd = ResolveTerminalWorkingDirectory(requestedCwd, out cwdFallback);
+        session.CwdFallback = cwdFallback;
+        session.Marker = "__MANNEUNG_TERMINAL_CWD_" + session.Id + "__";
+        session.ScriptPath = Path.Combine(Path.GetTempPath(), "manneung_terminal_" + session.Id + ".ps1");
+
+        string script =
+            "$ErrorActionPreference = 'Continue'\r\n" +
+            "$mnUtf8 = New-Object System.Text.UTF8Encoding $false\r\n" +
+            "[Console]::InputEncoding = $mnUtf8\r\n" +
+            "[Console]::OutputEncoding = $mnUtf8\r\n" +
+            "$OutputEncoding = $mnUtf8\r\n" +
+            "Set-Location -LiteralPath " + PowerShellLiteral(session.Cwd) + "\r\n" +
+            "$mnExitCode = 0\r\n" +
+            "try {\r\n" +
+            "  & {\r\n" + command + "\r\n  }\r\n" +
+            "  if ($null -ne $LASTEXITCODE) { $mnExitCode = [int]$LASTEXITCODE }\r\n" +
+            "  elseif (-not $?) { $mnExitCode = 1 }\r\n" +
+            "} catch {\r\n" +
+            "  [Console]::Error.WriteLine($_.Exception.Message)\r\n" +
+            "  $mnExitCode = 1\r\n" +
+            "} finally {\r\n" +
+            "  [Console]::Out.WriteLine(" + PowerShellLiteral(session.Marker) + " + (Get-Location).Path)\r\n" +
+            "}\r\n" +
+            "exit $mnExitCode\r\n";
+        File.WriteAllText(session.ScriptPath, script, new UTF8Encoding(true));
+
+        string systemDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string powershell = Path.Combine(systemDir, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershell)) powershell = "powershell.exe";
+        ProcessStartInfo psi = new ProcessStartInfo(
+            powershell,
+            "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + session.ScriptPath + "\"");
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = new UTF8Encoding(false);
+        psi.StandardErrorEncoding = new UTF8Encoding(false);
+        psi.WorkingDirectory = session.Cwd;
+
+        session.Process = new Process();
+        session.Process.StartInfo = psi;
+        try
+        {
+            session.Process.Start();
+            session.JobHandle = CreateJobObject(IntPtr.Zero, null);
+            if (session.JobHandle != IntPtr.Zero)
+            {
+                EnableJobKillOnClose(session.JobHandle);
+                if (!AssignProcessToJobObject(session.JobHandle, session.Process.Handle))
+                {
+                    CloseHandle(session.JobHandle);
+                    session.JobHandle = IntPtr.Zero;
+                }
+            }
+            lock (TerminalSessionsLock) TerminalSessions[session.Id] = session;
+        }
+        catch
+        {
+            if (session.JobHandle != IntPtr.Zero)
+            {
+                try { CloseHandle(session.JobHandle); } catch { }
+                session.JobHandle = IntPtr.Zero;
+            }
+            try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
+            throw;
+        }
+
+        Thread outReader = StartLimitedReader(session.Process.StandardOutput, session.Stdout);
+        Thread errReader = StartLimitedReader(session.Process.StandardError, session.Stderr);
+        Thread watcher = new Thread(delegate()
+        {
+            bool exited = false;
+            bool memoryLimit = false;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (!exited && watch.ElapsedMilliseconds < 30 * 60 * 1000)
+            {
+                try { exited = session.Process.WaitForExit(500); } catch { break; }
+                if (!exited && ProcessTreeWorkingSetBytes(session.Process.Id) > PythonProcessMemoryLimitBytes)
+                {
+                    memoryLimit = true;
+                    break;
+                }
+            }
+            if (!exited)
+            {
+                session.Stderr.AppendLine(memoryLimit
+                    ? "\n[메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다.]"
+                    : "\n[시간 초과: 터미널 명령을 30분 후 종료했습니다.]");
+                KillProcessTree(session.Process);
+                try { session.Process.WaitForExit(2000); } catch { }
+            }
+            try { outReader.Join(2000); errReader.Join(2000); } catch { }
+            try { session.ExitCode = session.Process.ExitCode; } catch { session.ExitCode = -1; }
+            UpdateTerminalCwdAndOutput(session);
+            lock (session.Sync) { session.DoneAt = DateTime.UtcNow; session.Complete = true; }
+            IntPtr completedJob = IntPtr.Zero;
+            lock (session.Sync) { completedJob = session.JobHandle; session.JobHandle = IntPtr.Zero; }
+            if (completedJob != IntPtr.Zero) try { CloseHandle(completedJob); } catch { }
+            try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
+            SweepTerminalSessions();
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+        return session.Id;
+    }
+
+    static string CleanTerminalOutput(TerminalSession session, string text)
+    {
+        text = text ?? "";
+        int markerAt = text.LastIndexOf(session.Marker, StringComparison.Ordinal);
+        if (markerAt < 0) return text;
+        int valueStart = markerAt + session.Marker.Length;
+        int valueEnd = text.IndexOfAny(new char[] { '\r', '\n' }, valueStart);
+        if (valueEnd < 0) valueEnd = text.Length;
+        string nextCwd = text.Substring(valueStart, valueEnd - valueStart).Trim();
+        if (!string.IsNullOrWhiteSpace(nextCwd) && Directory.Exists(nextCwd)) session.Cwd = nextCwd;
+        int removeEnd = valueEnd;
+        if (removeEnd < text.Length && text[removeEnd] == '\r') removeEnd++;
+        if (removeEnd < text.Length && text[removeEnd] == '\n') removeEnd++;
+        return text.Remove(markerAt, removeEnd - markerAt);
+    }
+
+    static void UpdateTerminalCwdAndOutput(TerminalSession session)
+    {
+        if (session == null) return;
+        lock (session.Sync)
+        {
+            CleanTerminalOutput(session, session.Stdout.GetText());
+        }
+    }
+
+    static string PollTerminalSession(string id)
+    {
+        TerminalSession session;
+        lock (TerminalSessionsLock) if (!TerminalSessions.TryGetValue(id ?? "", out session))
+            return "{\"complete\":true,\"code\":-1,\"stdout\":\"\",\"stderr\":\"터미널 세션을 찾지 못했습니다.\",\"cwd\":\"\"}";
+        lock (session.Sync)
+        {
+            string stdout = CleanTerminalOutput(session, session.Stdout.GetText());
+            return "{\"complete\":" + (session.Complete ? "true" : "false")
+                + ",\"code\":" + session.ExitCode
+                + ",\"stdout\":" + JsonString(stdout)
+                + ",\"stderr\":" + JsonString(session.Stderr.GetText())
+                + ",\"cwd\":" + JsonString(session.Cwd)
+                + ",\"cwdFallback\":" + (session.CwdFallback ? "true" : "false") + "}";
+        }
+    }
+
+    static void StopTerminalSession(string id)
+    {
+        TerminalSession session = null;
+        lock (TerminalSessionsLock) TerminalSessions.TryGetValue(id ?? "", out session);
+        if (session == null) return;
+        IntPtr job;
+        lock (session.Sync) { session.StopRequested = true; job = session.JobHandle; }
+        if (job != IntPtr.Zero) try { TerminateJobObject(job, 130); } catch { }
+        KillProcessTree(session.Process);
+    }
+
+    static void SweepTerminalSessions()
+    {
+        List<TerminalSession> remove = new List<TerminalSession>();
+        lock (TerminalSessionsLock)
+        {
+            List<TerminalSession> done = new List<TerminalSession>();
+            foreach (TerminalSession session in TerminalSessions.Values)
+                if (session.Complete) done.Add(session);
+            done.Sort(delegate(TerminalSession a, TerminalSession b) { return a.DoneAt.CompareTo(b.DoneAt); });
+            DateTime now = DateTime.UtcNow;
+            foreach (TerminalSession session in done)
+                if ((now - session.DoneAt).TotalMinutes > 15) remove.Add(session);
+            for (int i = 0; i < done.Count - 24; i++)
+                if (!remove.Contains(done[i])) remove.Add(done[i]);
+            foreach (TerminalSession session in remove) TerminalSessions.Remove(session.Id);
+        }
+        foreach (TerminalSession session in remove)
+            try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
     }
 
     static string StartPythonSession(byte[] body, bool bundle)

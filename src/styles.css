@@ -2090,6 +2090,14 @@
   .run-diag{padding:6px 9px;min-width:58px;font-weight:650;text-align:center}
   .run-diag.is-ok{border-color:rgba(22,163,74,.35);color:#15803d;background:rgba(22,163,74,.08)}
   .run-diag.is-warn{border-color:rgba(245,158,11,.45);color:#b45309;background:rgba(245,158,11,.10)}
+  .run-output-tabs{display:inline-flex;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--field)}
+  .run-output-tab{height:29px;padding:0 10px;border:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);
+    font:650 12px/1 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;cursor:pointer}
+  .run-output-tab:last-child{border-right:0}
+  .run-output-tab:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-output-tab.active{background:color-mix(in srgb,var(--accent) 14%,var(--field));color:var(--accent)}
+  .run-output-tab:focus-visible{position:relative;z-index:1;outline:2px solid var(--accent);outline-offset:-2px}
+  .run-output-tab:disabled{opacity:.5;cursor:default}
   .run-font-group{display:inline-flex;gap:4px}
   .run-nbconvert-group{position:relative;display:inline-flex;align-items:stretch}
   .run-nbconvert-group>.run-nbconvert,.run-nbconvert-more{height:32px;box-sizing:border-box;
@@ -2897,8 +2905,34 @@
   .code-output .py-error-detail{font-size:var(--code-fs,13px)}
   .terminal-input:disabled{color:var(--code-muted)}
   .terminal-stop{border:1px solid #7f1d1d;background:#450a0a;color:#fecaca;border-radius:6px;padding:4px 9px;cursor:pointer}
+  .terminal-stop:disabled{opacity:.45;cursor:default}
   .terminal-rerun{border:1px solid #166534;background:#052e16;color:#bbf7d0;border-radius:6px;padding:4px 9px;cursor:pointer}
   .terminal-rerun:disabled{opacity:.5;cursor:default}
+  .py-terminal{display:flex;flex:1 0 min-content;min-height:100%;flex-direction:column;background:var(--code-panel);color:var(--code-text)}
+  .py-terminal-head{padding-right:78px}
+  .py-terminal-title{font-weight:750;color:var(--code-text)}
+  .py-terminal-mode{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0;color:var(--code-muted)}
+  .py-terminal-head-buttons{display:inline-flex;align-items:center;gap:5px;margin-right:2px}
+  .py-terminal-tool,.py-terminal-run{border:1px solid var(--code-border);border-radius:6px;background:var(--field);color:var(--code-muted);
+    padding:4px 8px;font:650 11px/1.25 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;cursor:pointer}
+  .py-terminal-tool:hover,.py-terminal-run:hover{border-color:var(--accent);color:var(--accent);background:var(--panel-hover)}
+  .py-terminal-tool:disabled,.py-terminal-run:disabled{opacity:.45;cursor:default}
+  .py-terminal-log{flex:1 0 auto;min-height:130px;padding:11px 13px;white-space:pre-wrap;overflow-wrap:anywhere;
+    font:var(--code-fs,13px)/var(--code-lh,21px) var(--code-ff,Consolas,"Courier New",monospace)}
+  .py-terminal-intro{margin-bottom:8px;color:var(--code-muted);font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;font-size:12px}
+  .py-terminal-command-line{margin-top:8px;color:#60a5fa;font-weight:650}
+  .py-terminal-output{color:var(--code-text)}
+  .py-terminal-error{color:#f87171}
+  .py-terminal-status{margin:3px 0;color:var(--code-muted);font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;font-size:11.5px}
+  .py-terminal-status.error{color:#f87171}
+  .py-terminal-input-row{position:sticky;bottom:0;display:flex;align-items:flex-end;gap:8px;padding:9px 11px;
+    border-top:1px solid var(--code-border);background:var(--code-panel-head);z-index:3}
+  .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4ade80;font-weight:700;user-select:none}
+  .py-terminal-command{flex:1;min-width:0;min-height:24px;max-height:110px;resize:vertical;padding:2px 0;border:0;outline:0;
+    background:transparent;color:var(--code-text);caret-color:#4ade80;
+    font:var(--code-fs,13px)/var(--code-lh,21px) var(--code-ff,Consolas,"Courier New",monospace)}
+  .py-terminal-command:disabled{color:var(--code-muted)}
+  .py-terminal-run{flex:none;margin-bottom:1px}
   /* 편집 가능한 .py 에디터: 투명 textarea(입력) 위에, 그 아래 구문강조 pre(표시)를 정확히 겹친다 */
   .code-host-edit{position:relative;height:calc(100vh - 240px);min-height:220px;overflow:hidden;
     --code-sbw:12px;--code-sbh:12px;font-size:var(--code-fs,13px);line-height:var(--code-lh,21px)}

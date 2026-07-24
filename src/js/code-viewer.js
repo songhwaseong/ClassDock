@@ -1331,6 +1331,12 @@ async function renderCode(file, host, ext, profile, runCtx){
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button"; revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
   const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
+  const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
+  const resultTabBtn = document.createElement("button"); resultTabBtn.className = "run-output-tab active"; resultTabBtn.type = "button"; resultTabBtn.textContent = "결과";
+  resultTabBtn.title = "Python 실행 결과 보기"; resultTabBtn.setAttribute("aria-pressed", "true");
+  const terminalTabBtn = document.createElement("button"); terminalTabBtn.className = "run-output-tab"; terminalTabBtn.type = "button"; terminalTabBtn.textContent = "터미널";
+  terminalTabBtn.title = "명령 터미널 열기"; terminalTabBtn.setAttribute("aria-pressed", "false");
+  outputTabs.append(resultTabBtn, terminalTabBtn);
   const nbConvertBtn = document.createElement("button"); nbConvertBtn.className = "run-nbconvert"; nbConvertBtn.type = "button"; nbConvertBtn.textContent = "노트북으로";
   nbConvertBtn.title = "현재 코드를 주피터 노트북(.ipynb)으로 변환해 새 탭으로 열기 (# %% 를 셀 경계로)";
   // 줄번호(거터)를 클릭해 셀 경계(# %%)를 넣고, 다시 눌러 노트북으로 변환하는 모드 토글
@@ -1407,7 +1413,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   warningToggle.append(warningCheckbox, warningText);
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(outputTabs); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
   attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
   syncShortcutHints(bar);
 
@@ -1610,7 +1616,11 @@ async function renderCode(file, host, ext, profile, runCtx){
     const head = outPanel.querySelector(".out-head");
     if (head){
       if (outHeadActions.parentNode !== head) head.appendChild(outHeadActions);
-      if (outFindBar.parentNode !== outPanel || outFindBar.previousElementSibling !== head) head.insertAdjacentElement("afterend", outFindBar);
+      // 일반 실행 결과의 헤더는 outPanel 직계 자식이지만 터미널 헤더는 .py-terminal 안에 있다.
+      // 부모를 무조건 outPanel 로 검사하면 MutationObserver가 같은 검색 바를 안팎으로 계속 옮겨
+      // 메인 스레드가 멈춘다. 실제 헤더 부모를 기준으로 한 번만 붙인다.
+      const headParent = head.parentNode || outPanel;
+      if (outFindBar.parentNode !== headParent || outFindBar.previousElementSibling !== head) head.insertAdjacentElement("afterend", outFindBar);
     } else {
       if (outHeadActions.parentNode !== outPanel) outPanel.insertBefore(outHeadActions, outPanel.firstChild);
       if (outFindBar.parentNode !== outPanel) outPanel.insertBefore(outFindBar, outHeadActions.nextSibling);
@@ -1924,7 +1934,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const runCtxWithDoc = { ...(effectiveRunCtx || {}), ownerDoc };
   updateRunProjectPanel(ui, null, runCtxWithDoc);
   const isNotebook = !!(ownerDoc && ownerDoc.notebook);   // .ipynb 변환 문서는 셀 단위로 실행
+  let pythonTerminal = null;
   if (isNotebook){
+    outputTabs.hidden = true;
     setupNotebookKernelBar(ownerDoc, editor, ui, outer, split);   // 셀 하나씩 실행하는 브라우저 커널 툴바
     // 이미 노트북 문서면 셀 나누기·자동분할은 의미 없으므로 감춘다(커널 바에서 셀을 직접 다룸).
     cellSplitBtn.hidden = true; autoSplitBtn.hidden = true; nbConvertMore.hidden = true;
@@ -1933,6 +1945,24 @@ async function renderCode(file, host, ext, profile, runCtx){
   } else {
     // 일반 Python: 노트북 변환 계열은 한 드롭다운으로 묶고, 다른 보조 도구와 함께 '⋯ 더보기'로 접는다.
     collapseRunButtons(bar, [traceBtn, analyzeBtn, gradeBtn, linkBtn, nbConvertGroup, diagBtn], "pyRunMore");
+    if (typeof createPythonTerminal === "function"){
+      pythonTerminal = createPythonTerminal({
+        ui,
+        runCtx:runCtxWithDoc,
+        ownerDoc,
+        resultButton:resultTabBtn,
+        terminalButton:terminalTabBtn,
+        onShowOutput:() => {
+          split.classList.add("show-out");
+          layoutBtn.hidden = false;
+        },
+        attachOutputChrome
+      });
+      ui.showResultTab = () => pythonTerminal.showResults();
+    } else {
+      terminalTabBtn.disabled = true;
+      terminalTabBtn.title = "터미널 기능을 불러오지 못했습니다";
+    }
   }
   const run = (keepEditorFocus) => runPythonSource(editor.getValue(), ui, runCtxWithDoc, keepEditorFocus === true, isNotebook ? { notebookCells: true } : undefined);
   ui.rerun = () => run(false);                 // 대화형 터미널의 ↻ 재실행 버튼이 호출(▶ 버튼과 동일)
@@ -2440,6 +2470,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     ownerDoc.cleanupFns.push(() => {
       if (typeof ui.destroyLiveDiagnostics === "function") ui.destroyLiveDiagnostics();
       if (typeof ui.cancelRun === "function") ui.cancelRun();
+      if (pythonTerminal) pythonTerminal.destroy();
     });
     // 이 코드 문서를 가리키는 PDF 핀들을 거터 마커로 표시(코드→PDF 역방향 이동).
     if (editor.setPinProvider) editor.setPinProvider(() => (typeof codeLinksTargetingDoc === "function" ? codeLinksTargetingDoc(ownerDoc) : []));
