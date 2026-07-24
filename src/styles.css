@@ -1963,6 +1963,26 @@
   .sqlite-message strong{display:block;margin-bottom:4px;color:var(--ink)}
   .sqlite-message p{margin:0}
   .sqlite-message.error{border-color:color-mix(in srgb,var(--danger) 48%,var(--border));background:color-mix(in srgb,var(--danger) 6%,var(--panel))}
+  .sqlite-editor{margin-bottom:12px;padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2)}
+  .sqlite-editor-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .sqlite-editor-head strong{font-size:13px;color:var(--ink)}
+  .sqlite-editor-hint{color:var(--muted);font-size:11px}
+  .sqlite-sql-input{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;padding:9px 10px;border:1px solid var(--border);
+    border-radius:7px;background:var(--field);color:var(--ink);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+  .sqlite-sql-input:focus{outline:none;border-color:var(--accent)}
+  .sqlite-editor-actions{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .sqlite-run{flex:none;border:1px solid var(--accent);border-radius:7px;background:var(--accent);color:#fff;
+    padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer}
+  .sqlite-run:hover{filter:brightness(1.05)}
+  .sqlite-run:disabled{opacity:.55;cursor:wait}
+  .sqlite-exec-status{color:var(--muted);font-size:11.5px}
+  .sqlite-exec-result{margin-top:10px;padding:9px 11px;border:1px solid var(--border);border-radius:7px;background:var(--field)}
+  .sqlite-exec-result.error{border-color:color-mix(in srgb,var(--danger) 48%,var(--border));background:color-mix(in srgb,var(--danger) 7%,var(--field));color:var(--danger)}
+  .sqlite-exec-summary{margin:0 0 6px;font-size:12px;font-weight:700;color:var(--ink)}
+  .sqlite-exec-note{margin:6px 0 0;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+  .sqlite-exec-note.warning{color:var(--danger)}
+  .sqlite-exec-result.error .sqlite-exec-summary,.sqlite-exec-result.error p{color:var(--danger)}
+  .sqlite-exec-result .sqlite-grid-wrap{max-height:40vh;margin:0}
   @media(max-width:720px){
     .sqlite-layout{grid-template-columns:1fr}
     .sqlite-table-list{flex-direction:row;border-right:0;border-bottom:1px solid var(--border);max-height:none;overflow:auto}

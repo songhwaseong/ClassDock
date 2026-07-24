@@ -396,6 +396,8 @@ async function parseWorkspacePayload(buffer){
     const name = path.split("/").pop() || "file";
     const file = new File([bytes], name);
     if (path.indexOf("/") >= 0) Object.defineProperty(file, "webkitRelativePath", { value: path });
+    if (diskBytes && /\.(db|sqlite|sqlite3)$/i.test(path))
+      Object.defineProperty(file, "__sqliteDiskPath", { value:path });
     return { path, file, syncedFromDisk: !!diskBytes };
   });
   return { rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths };

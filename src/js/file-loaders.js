@@ -34,6 +34,7 @@ async function handleFiles(files, options={}){
     const ext = fileExtOf(file.name);
     const opts = { ...options, bulk, size: file.size || 0, fsHandle: options.fsHandle || file.__fsHandle || null,
       fsDirHandle: options.fsDirHandle || file.__fsDirHandle || null,
+      sqliteDiskPath: options.sqliteDiskPath || file.__sqliteDiskPath || null,
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
@@ -116,7 +117,7 @@ async function handleFiles(files, options={}){
         if (!opts.parentId && !opts.archiveCtx && !options.transient && file instanceof File){
           opened.__reopen = { file, name: opened.name,
             options: { workspacePath: opts.workspacePath, fsHandle: opts.fsHandle, textEncoding: opts.textEncoding,
-              originalSaveMode: opts.originalSaveMode } };
+              sqliteDiskPath: opts.sqliteDiskPath, originalSaveMode: opts.originalSaveMode } };
         }
       }
     } catch (e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }

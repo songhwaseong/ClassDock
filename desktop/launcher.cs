@@ -592,7 +592,7 @@ class PdfSignerLauncher
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
             if (path.StartsWith("/app-state", StringComparison.Ordinal)) return true;
-            if (path == "/sqlite-preview" || path == "/save-file") return true;
+            if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec" || path == "/save-file") return true;
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
             if (path == "/image-memo-delete") return true;
             if (path == "/complete" || path == "/definition" || path == "/pip-install") return true;
@@ -1186,6 +1186,72 @@ class PdfSignerLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("sqlite-preview-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/sqlite-disk-preview")
+                {
+                    // 저장 루트의 실제 DB를 읽는다. 최초 편집 활성화 때는 브라우저가 연 파일의 SHA-256과
+                    // 디스크 파일이 일치해야 하며, 이후 새로고침은 이미 확인된 같은 상대경로를 다시 읽는다.
+                    try
+                    {
+                        string json = SqliteDiskPreview(headers);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-not-found"));
+                    }
+                    catch (DbMismatchException)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-changed"));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        WriteResponse(stream, "415 Unsupported Media Type", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("not-sqlite3"));
+                    }
+                    catch (PythonMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-python"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("sqlite-disk-preview-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/sqlite-exec")
+                {
+                    // 워크스페이스에 저장된 .db 원본에 임의 SQL(SELECT/DDL/DML)을 실행한다.
+                    // 경로는 X-Db-Path(퍼센트 인코딩, 저장 루트 기준 상대경로), SQL 은 본문 텍스트.
+                    // 실행은 단일 트랜잭션으로 처리하고 수정 계열이면 같은 폴더에 일관된 .bak 백업을 남긴다.
+                    try
+                    {
+                        if (body.Length > 2 * 1024 * 1024)
+                        {
+                            WriteResponse(stream, "413 Payload Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("sql-too-large"));
+                            return;
+                        }
+                        string json = SqliteExec(headers, body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-not-found"));
+                    }
+                    catch (DbMismatchException)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-changed"));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        WriteResponse(stream, "415 Unsupported Media Type", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("not-sqlite3"));
+                    }
+                    catch (PythonMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-python"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("sqlite-exec-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (path == "/can-save-file")
@@ -3699,15 +3765,19 @@ class PdfSignerLauncher
                 "    con.execute('PRAGMA query_only=ON')\n" +
                 "    masters = con.execute(\"SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name\").fetchall()\n" +
                 "    result['totalTables'] = len(masters)\n" +
+                "    remaining_cells = 12000\n" +
                 "    for name, kind, sql in masters[:60]:\n" +
                 "        item = {'name': name, 'type': kind, 'sql': (sql or '')[:4000], 'columns': [], 'rows': [], 'rowCount': None}\n" +
                 "        try:\n" +
                 "            info = con.execute('PRAGMA table_info(' + qid(name) + ')').fetchall()\n" +
                 "            item['columns'] = [{'name': r[1], 'type': r[2] or '', 'notnull': bool(r[3]), 'default': r[4], 'pk': int(r[5] or 0)} for r in info[:80]]\n" +
                 "            item['rowCount'] = int(con.execute('SELECT COUNT(*) FROM ' + qid(name)).fetchone()[0])\n" +
-                "            cur = con.execute('SELECT * FROM ' + qid(name) + ' LIMIT 200')\n" +
+                "            width = max(1, min(len(info), 80))\n" +
+                "            row_limit = min(200, remaining_cells // width)\n" +
+                "            cur = con.execute('SELECT * FROM ' + qid(name) + ' LIMIT ' + str(row_limit))\n" +
                 "            item['displayColumns'] = [d[0] for d in (cur.description or [])[:80]]\n" +
                 "            item['rows'] = [[cell(v) for v in row[:80]] for row in cur.fetchall()]\n" +
+                "            remaining_cells = max(0, remaining_cells - len(item['rows']) * max(1, len(item['displayColumns'])))\n" +
                 "        except Exception as exc:\n" +
                 "            item['error'] = str(exc)\n" +
                 "        result['tables'].append(item)\n" +
@@ -3737,30 +3807,337 @@ class PdfSignerLauncher
         {
             string runner = SqlitePreviewRunner();
             string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + dbPath + "\"";
-            ProcessStartInfo psi = new ProcessStartInfo(interp, args);
-            psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
-            psi.StandardOutputEncoding = new UTF8Encoding(false);
-            psi.StandardErrorEncoding = new UTF8Encoding(false);
-            psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
-            Process proc = Process.Start(psi);
-            if (proc == null) throw new Exception("sqlite-preview-spawn-failed");
-            string stdout = proc.StandardOutput.ReadToEnd();
-            string stderr = proc.StandardError.ReadToEnd();
-            if (!proc.WaitForExit(30000))
-            {
-                try { proc.Kill(); } catch { }
-                throw new Exception("sqlite-preview-timeout");
-            }
-            if (proc.ExitCode != 0) throw new Exception(string.IsNullOrWhiteSpace(stderr) ? "sqlite-preview-failed" : stderr.Trim());
-            if (stdout.Length > 12 * 1024 * 1024) throw new Exception("sqlite-preview-result-too-large");
-            return stdout.Trim();
+            return RunSqliteRunner(interp, args, null);
         }
         finally
         {
             try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    static string _sqliteExecRunnerPath = null;
+    static readonly object SqliteExecLock = new object();
+
+    class SqliteProcessCapture
+    {
+        public readonly StringBuilder Text = new StringBuilder();
+        public bool TooLarge;
+        public Exception Error;
+    }
+
+    static string SqliteExecRunner()
+    {
+        lock (SqlitePreviewLock)
+        {
+            if (_sqliteExecRunnerPath != null && File.Exists(_sqliteExecRunnerPath)) return _sqliteExecRunnerPath;
+            string path = Path.Combine(Path.GetTempPath(), "moida_sqlite_exec.py");
+            File.WriteAllText(path,
+                "import sys, json, sqlite3, hashlib, os\n" +
+                "db = sys.argv[1]\n" +
+                "mode = sys.argv[2] if len(sys.argv) > 2 else 'exec'\n" +
+                "backup = sys.argv[3] if len(sys.argv) > 3 else ''\n" +
+                "sql = sys.stdin.read() if mode == 'exec' else ''\n" +
+                "def qid(value): return '\"' + str(value).replace('\"', '\"\"') + '\"'\n" +
+                "def fingerprint(path, include_wal=True):\n" +
+                "    digest = hashlib.sha256()\n" +
+                "    paths = [(path, b'')]\n" +
+                "    if include_wal and os.path.exists(path + '-wal'): paths.append((path + '-wal', b'\\0wal\\0'))\n" +
+                "    for current, marker in paths:\n" +
+                "        if marker: digest.update(marker)\n" +
+                "        with open(current, 'rb') as source:\n" +
+                "            while True:\n" +
+                "                chunk = source.read(1024 * 1024)\n" +
+                "                if not chunk: break\n" +
+                "                digest.update(chunk)\n" +
+                "    return digest.hexdigest()\n" +
+                "def cell(value):\n" +
+                "    if value is None: return None\n" +
+                "    if isinstance(value, (bytes, bytearray, memoryview)): return '<BLOB %d bytes>' % len(value)\n" +
+                "    text = str(value)\n" +
+                "    return text if len(text) <= 500 else text[:500] + '…'\n" +
+                "def snapshot(con):\n" +
+                "    masters = con.execute(\"SELECT name, type, sql FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name\").fetchall()\n" +
+                "    tables, remaining_cells = [], 12000\n" +
+                "    for name, kind, tsql in masters[:60]:\n" +
+                "        item = {'name': name, 'type': kind, 'sql': (tsql or '')[:4000], 'columns': [], 'rows': [], 'rowCount': None}\n" +
+                "        try:\n" +
+                "            info = con.execute('PRAGMA table_info(' + qid(name) + ')').fetchall()\n" +
+                "            item['columns'] = [{'name': r[1], 'type': r[2] or '', 'notnull': bool(r[3]), 'default': r[4], 'pk': int(r[5] or 0)} for r in info[:80]]\n" +
+                "            item['rowCount'] = int(con.execute('SELECT COUNT(*) FROM ' + qid(name)).fetchone()[0])\n" +
+                "            width = max(1, min(len(info), 80))\n" +
+                "            row_limit = min(200, remaining_cells // width)\n" +
+                "            cur = con.execute('SELECT * FROM ' + qid(name) + ' LIMIT ' + str(row_limit))\n" +
+                "            item['displayColumns'] = [d[0] for d in (cur.description or [])[:80]]\n" +
+                "            item['rows'] = [[cell(v) for v in row[:80]] for row in cur.fetchall()]\n" +
+                "            remaining_cells = max(0, remaining_cells - len(item['rows']) * max(1, len(item['displayColumns'])))\n" +
+                "        except Exception as exc:\n" +
+                "            item['error'] = str(exc)\n" +
+                "        tables.append(item)\n" +
+                "    return tables, len(masters)\n" +
+                "def statements(script):\n" +
+                "    parts, buf = [], ''\n" +
+                "    for ch in script:\n" +
+                "        buf += ch\n" +
+                "        if ch == ';' and sqlite3.complete_statement(buf):\n" +
+                "            if buf.strip(): parts.append(buf)\n" +
+                "            buf = ''\n" +
+                "    if buf.strip(): parts.append(buf)\n" +
+                "    return parts\n" +
+                "def first_keyword(statement):\n" +
+                "    text = statement.lstrip()\n" +
+                "    while True:\n" +
+                "        if text.startswith('--'):\n" +
+                "            pos = text.find('\\n')\n" +
+                "            text = '' if pos < 0 else text[pos + 1:].lstrip()\n" +
+                "            continue\n" +
+                "        if text.startswith('/*'):\n" +
+                "            pos = text.find('*/', 2)\n" +
+                "            text = '' if pos < 0 else text[pos + 2:].lstrip()\n" +
+                "            continue\n" +
+                "        break\n" +
+                "    return ''.join(ch for ch in text.split(None, 1)[0] if ch.isalpha()).upper() if text else ''\n" +
+                "result, con, committed = {'ok': True}, None, False\n" +
+                "try:\n" +
+                "    con = sqlite3.connect(db)\n" +
+                "    con.execute('PRAGMA busy_timeout=4000')\n" +
+                "    if mode == 'preview':\n" +
+                "        con.execute('PRAGMA query_only=ON')\n" +
+                "        result = {'ok': True, 'limit': 200, 'tables': []}\n" +
+                "        result['tables'], result['totalTables'] = snapshot(con)\n" +
+                "    else:\n" +
+                "        parts = statements(sql)\n" +
+                "        if not parts: raise ValueError('empty-sql')\n" +
+                "        if not backup: raise ValueError('missing-backup-path')\n" +
+                "        backup_con = sqlite3.connect(backup)\n" +
+                "        try: con.backup(backup_con)\n" +
+                "        finally: backup_con.close()\n" +
+                "        changes_before = con.total_changes\n" +
+                "        con.execute('BEGIN IMMEDIATE')\n" +
+                "        denied = (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_TRANSACTION)\n" +
+                "        con.set_authorizer(lambda action, p1, p2, dbname, source: sqlite3.SQLITE_DENY if action in denied else sqlite3.SQLITE_OK)\n" +
+                "        cur = con.cursor()\n" +
+                "        try:\n" +
+                "            for statement in parts: cur.execute(statement)\n" +
+                "            if len(parts) == 1 and cur.description:\n" +
+                "                cols = [d[0] for d in cur.description[:40]]\n" +
+                "                data = cur.fetchmany(501)\n" +
+                "                exec_info = {'kind': 'select', 'columns': cols, 'rows': [[cell(v) for v in row[:40]] for row in data[:500]], 'truncated': len(data) > 500, 'rowCount': min(len(data), 500)}\n" +
+                "            elif len(parts) == 1:\n" +
+                "                exec_info = {'kind': 'write', 'rowcount': cur.rowcount, 'lastrowid': cur.lastrowid}\n" +
+                "            else:\n" +
+                "                exec_info = {'kind': 'script', 'changes': con.total_changes - changes_before}\n" +
+                "            con.set_authorizer(lambda action, p1, p2, dbname, source: sqlite3.SQLITE_OK)\n" +
+                "            con.commit()\n" +
+                "            committed = True\n" +
+                "        except Exception:\n" +
+                "            con.set_authorizer(lambda action, p1, p2, dbname, source: sqlite3.SQLITE_OK)\n" +
+                "            con.rollback()\n" +
+                "            try: os.remove(backup)\n" +
+                "            except OSError: pass\n" +
+                "            raise\n" +
+                "        read_only = len(parts) == 1 and first_keyword(parts[0]) in ('SELECT', 'EXPLAIN', 'VALUES')\n" +
+                "        if read_only:\n" +
+                "            try: os.remove(backup)\n" +
+                "            except OSError: pass\n" +
+                "        else:\n" +
+                "            exec_info['backup'] = os.path.basename(backup)\n" +
+                "        result = {'ok': True, 'exec': exec_info}\n" +
+                "except Exception as exc:\n" +
+                "    if mode == 'exec' and backup and not committed:\n" +
+                "        try:\n" +
+                "            if con is not None and con.in_transaction: con.rollback()\n" +
+                "        except Exception: pass\n" +
+                "        try: os.remove(backup)\n" +
+                "        except OSError: pass\n" +
+                "    result = {'ok': False, 'error': str(exc)}\n" +
+                "finally:\n" +
+                "    if con is not None:\n" +
+                "        try: con.close()\n" +
+                "        except Exception: pass\n" +
+                "if result.get('ok'):\n" +
+                "    try: result['fingerprint'] = fingerprint(db)\n" +
+                "    except Exception: result['fingerprint'] = ''\n" +
+                "print(json.dumps(result, ensure_ascii=False))\n",
+                new UTF8Encoding(false));
+            _sqliteExecRunnerPath = path;
+            return path;
+        }
+    }
+
+    // SQL 쓰기는 저장 루트 아래의 명시적 상대경로만 허용한다. 절대경로는 로컬 PC의 임의 DB를
+    // 수정할 수 있으므로 읽기용 TryReadLocalFile 과 달리 허용하지 않는다.
+    static bool TryResolveDbPath(string path, out string full)
+    {
+        full = "";
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)) return false;
+        try
+        {
+            if (!TryResolveSaveRootPath(path, out full)) return false;
+        }
+        catch { return false; }
+        if (!File.Exists(full)) return false;
+        string ext = Path.GetExtension(full).ToLowerInvariant();
+        return ext == ".db" || ext == ".sqlite" || ext == ".sqlite3";
+    }
+
+    static void ValidateSqliteHeader(string full)
+    {
+        byte[] signature = Encoding.ASCII.GetBytes("SQLite format 3\0");
+        using (FileStream fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            byte[] headBytes = new byte[signature.Length];
+            int read = fs.Read(headBytes, 0, headBytes.Length);
+            if (read < signature.Length) throw new InvalidDataException("not-sqlite3");
+            for (int i = 0; i < signature.Length; i++)
+                if (headBytes[i] != signature[i]) throw new InvalidDataException("not-sqlite3");
+        }
+    }
+
+    static void AppendHashFile(HashAlgorithm hash, string path)
+    {
+        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            byte[] buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+                hash.TransformBlock(buffer, 0, read, buffer, 0);
+        }
+    }
+
+    static string DbFingerprint(string full, bool includeWal)
+    {
+        using (SHA256 sha = SHA256.Create())
+        {
+            AppendHashFile(sha, full);
+            string wal = full + "-wal";
+            if (includeWal && File.Exists(wal))
+            {
+                byte[] marker = Encoding.ASCII.GetBytes("\0wal\0");
+                sha.TransformBlock(marker, 0, marker.Length, marker, 0);
+                AppendHashFile(sha, wal);
+            }
+            sha.TransformFinalBlock(new byte[0], 0, 0);
+            StringBuilder text = new StringBuilder(sha.Hash.Length * 2);
+            foreach (byte value in sha.Hash) text.Append(value.ToString("x2"));
+            return text.ToString();
+        }
+    }
+
+    static void ValidateDbFingerprint(Dictionary<string, string> headers, string full, bool required, bool includeWal)
+    {
+        string expected = headers != null && headers.ContainsKey("X-Db-Fingerprint")
+            ? headers["X-Db-Fingerprint"].Trim().ToLowerInvariant() : "";
+        if (required && expected.Length != 64) throw new DbMismatchException();
+        if (expected.Length > 0 && !string.Equals(expected, DbFingerprint(full, includeWal), StringComparison.Ordinal))
+            throw new DbMismatchException();
+    }
+
+    static string NextDbBackupPath(string full)
+    {
+        string prefix = full + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string candidate = prefix;
+        int suffix = 1;
+        while (File.Exists(candidate)) candidate = prefix + "-" + (suffix++);
+        return candidate;
+    }
+
+    static void CaptureProcessText(StreamReader reader, int limit, SqliteProcessCapture capture)
+    {
+        try
+        {
+            char[] buffer = new char[4096];
+            int read;
+            while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                int remaining = limit - capture.Text.Length;
+                if (remaining > 0) capture.Text.Append(buffer, 0, Math.Min(read, remaining));
+                if (read > remaining) capture.TooLarge = true;
+            }
+        }
+        catch (Exception ex) { capture.Error = ex; }
+    }
+
+    static string RunSqliteRunner(string interp, string args, string stdin)
+    {
+        ProcessStartInfo psi = new ProcessStartInfo(interp, args);
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = new UTF8Encoding(false);
+        psi.StandardErrorEncoding = new UTF8Encoding(false);
+        psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+        using (Process proc = Process.Start(psi))
+        {
+            if (proc == null) throw new Exception("sqlite-process-spawn-failed");
+            SqliteProcessCapture stdout = new SqliteProcessCapture();
+            SqliteProcessCapture stderr = new SqliteProcessCapture();
+            Thread stdoutThread = new Thread(delegate() { CaptureProcessText(proc.StandardOutput, 12 * 1024 * 1024, stdout); });
+            Thread stderrThread = new Thread(delegate() { CaptureProcessText(proc.StandardError, 1024 * 1024, stderr); });
+            stdoutThread.IsBackground = true;
+            stderrThread.IsBackground = true;
+            stdoutThread.Start();
+            stderrThread.Start();
+            try
+            {
+                using (StreamWriter input = new StreamWriter(proc.StandardInput.BaseStream, new UTF8Encoding(false)))
+                {
+                    if (!string.IsNullOrEmpty(stdin)) input.Write(stdin);
+                }
+                if (!proc.WaitForExit(30000))
+                {
+                    try { proc.Kill(); } catch { }
+                    try { proc.WaitForExit(5000); } catch { }
+                    throw new Exception("sqlite-process-timeout");
+                }
+            }
+            finally
+            {
+                stdoutThread.Join(5000);
+                stderrThread.Join(5000);
+            }
+            if (stdout.Error != null) throw stdout.Error;
+            if (stderr.Error != null) throw stderr.Error;
+            if (stdout.TooLarge) throw new Exception("sqlite-result-too-large");
+            if (proc.ExitCode != 0)
+                throw new Exception(string.IsNullOrWhiteSpace(stderr.Text.ToString()) ? "sqlite-process-failed" : stderr.Text.ToString().Trim());
+            return stdout.Text.ToString().Trim();
+        }
+    }
+
+    static string SqliteDiskPreview(Dictionary<string, string> headers)
+    {
+        string rawPath = headers != null && headers.ContainsKey("X-Db-Path") ? Uri.UnescapeDataString(headers["X-Db-Path"]) : "";
+        string full;
+        if (!TryResolveDbPath(rawPath, out full)) throw new FileNotFoundException("db-not-found");
+        ValidateSqliteHeader(full);
+        ValidateDbFingerprint(headers, full, false, false);
+        string interp = FindPython();
+        if (interp == null) throw new PythonMissingException();
+        string runner = SqliteExecRunner();
+        string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + full + "\" preview";
+        return RunSqliteRunner(interp, args, null);
+    }
+
+    static string SqliteExec(Dictionary<string, string> headers, byte[] body)
+    {
+        string rawPath = headers != null && headers.ContainsKey("X-Db-Path") ? Uri.UnescapeDataString(headers["X-Db-Path"]) : "";
+        string full;
+        if (!TryResolveDbPath(rawPath, out full)) throw new FileNotFoundException("db-not-found");
+        ValidateSqliteHeader(full);
+        string sql = Encoding.UTF8.GetString(body ?? new byte[0]);
+        if (string.IsNullOrWhiteSpace(sql)) throw new Exception("empty-sql");
+        string interp = FindPython();
+        if (interp == null) throw new PythonMissingException();
+        lock (SqliteExecLock)
+        {
+            // 화면을 연 뒤 같은 경로가 다른 파일로 교체됐으면 실행하지 않는다.
+            ValidateDbFingerprint(headers, full, true, true);
+            string backup = NextDbBackupPath(full);
+            string runner = SqliteExecRunner();
+            string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + full + "\" exec \"" + backup + "\"";
+            return RunSqliteRunner(interp, args, sql);
         }
     }
 
@@ -4508,3 +4885,4 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
 class PowerPointMissingException : Exception { }
 class PythonMissingException : Exception { }
 class FfmpegMissingException : Exception { }
+class DbMismatchException : Exception { }

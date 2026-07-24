@@ -31,9 +31,11 @@ async function loadOffice(file, ext, options={}){
 async function loadSqlite(file, options={}){
   const doc = makeDoc("office", file.name, options);
   doc.sourceFile = file;
+  // 서버가 실제 저장 폴더 파일로 확인한 .db 만 편집한다. 일반 드래그/압축 내부 파일의 논리 경로는 쓰지 않는다.
+  doc.dbPath = options.sqliteDiskPath || null;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
-    await renderSqlite(doc.sourceFile || file, host);
+    await renderSqlite(doc.sourceFile || file, host, doc.dbPath);
   };
   refreshChrome();
   activateIfIdle(doc, options);
@@ -47,6 +49,26 @@ function sqliteHeaderValid(bytes){
   return true;
 }
 
+async function sqliteSha256(bytes){
+  if (!bytes || typeof crypto === "undefined" || !crypto.subtle || typeof crypto.subtle.digest !== "function") return "";
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function sqliteDiskSnapshot(dbPath, expectedFingerprint=""){
+  const headers = { "X-Db-Path": encodeURIComponent(dbPath) };
+  if (expectedFingerprint) headers["X-Db-Fingerprint"] = expectedFingerprint;
+  const response = await fetch("/sqlite-disk-preview", { method:"POST", headers, cache:"no-store" });
+  if (!response.ok){
+    const error = new Error((await response.text()) || ("HTTP " + response.status));
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  if (!data || data.ok === false) throw new Error((data && data.error) || "SQLite 내용을 읽지 못했습니다.");
+  return data;
+}
+
 function sqliteMessage(host, title, detail, kind=""){
   const wrap = document.createElement("div"); wrap.className = "sqlite-message" + (kind ? " " + kind : "");
   const heading = document.createElement("strong"); heading.textContent = title;
@@ -54,7 +76,7 @@ function sqliteMessage(host, title, detail, kind=""){
   wrap.append(heading, text); host.appendChild(wrap);
 }
 
-async function renderSqlite(file, host){
+async function renderSqlite(file, host, dbPath){
   const shell = document.createElement("section"); shell.className = "sqlite-host";
   host.appendChild(shell);
   const loading = document.createElement("div"); loading.className = "sqlite-message";
@@ -75,57 +97,233 @@ async function renderSqlite(file, host){
     return;
   }
 
-  let data;
-  try {
-    const response = await fetch("/sqlite-preview", {
-      method: "POST",
-      headers: { "Content-Type":"application/octet-stream" },
-      body: bytes
-    });
-    if (!response.ok){
-      const reason = await response.text();
-      if (response.status === 501) throw new Error("이 컴퓨터에서 Python을 찾지 못해 SQLite를 열 수 없습니다.");
-      if (response.status === 413) throw new Error("100MB를 넘는 SQLite 파일은 미리보기를 지원하지 않습니다.");
-      if (response.status === 415) throw new Error("SQLite 3 형식이 아닌 데이터베이스입니다.");
-      throw new Error(reason || ("HTTP " + response.status));
+  let data, editable = false, dbFingerprint = "";
+  if (dbPath){
+    try {
+      const expectedFingerprint = await sqliteSha256(bytes);
+      if (expectedFingerprint){
+        data = await sqliteDiskSnapshot(dbPath, expectedFingerprint);
+        dbFingerprint = data.fingerprint || expectedFingerprint;
+        editable = true;
+      }
+    } catch(e){
+      // 저장 폴더에 동명 파일이 있더라도 현재 화면의 파일과 다르면 절대 편집 대상으로 삼지 않는다.
+      if (!e || (e.status !== 404 && e.status !== 409)) console.warn("SQLite 디스크 원본 확인 실패:", e);
     }
-    data = await response.json();
-    if (!data || data.ok === false) throw new Error((data && data.error) || "SQLite 내용을 읽지 못했습니다.");
-  } catch(e){
+  }
+  if (!data){
+    try {
+      const response = await fetch("/sqlite-preview", {
+        method: "POST",
+        headers: { "Content-Type":"application/octet-stream" },
+        body: bytes
+      });
+      if (!response.ok){
+        const reason = await response.text();
+        if (response.status === 501) throw new Error("이 컴퓨터에서 Python을 찾지 못해 SQLite를 열 수 없습니다.");
+        if (response.status === 413) throw new Error("100MB를 넘는 SQLite 파일은 미리보기를 지원하지 않습니다.");
+        if (response.status === 415) throw new Error("SQLite 3 형식이 아닌 데이터베이스입니다.");
+        throw new Error(reason || ("HTTP " + response.status));
+      }
+      data = await response.json();
+      if (!data || data.ok === false) throw new Error((data && data.error) || "SQLite 내용을 읽지 못했습니다.");
+    } catch(e){
+      shell.textContent = "";
+      sqliteMessage(shell, "데이터베이스를 열지 못했어요", (e && e.message) || String(e), "error");
+      return;
+    }
+  }
+
+  let sqlText = "";   // 편집기 내용 — 다시 그릴 때 보존
+
+  paintSqlite(data);
+
+  function paintSqlite(data, execResult){
     shell.textContent = "";
-    sqliteMessage(shell, "데이터베이스를 열지 못했어요", (e && e.message) || String(e), "error");
-    return;
+    const toolbar = document.createElement("div"); toolbar.className = "sqlite-toolbar";
+    const identity = document.createElement("div"); identity.className = "sqlite-identity";
+    const title = document.createElement("strong"); title.textContent = file.name;
+    const summary = document.createElement("span");
+    const tables = Array.isArray(data.tables) ? data.tables : [];
+    summary.textContent = "SQLite 3 · " + tables.length + "개 테이블/뷰 · " + (editable ? "편집 가능" : "읽기 전용")
+      + " · 행 미리보기 최대 " + (data.limit || 200) + "개";
+    identity.append(title, summary);
+    const refresh = document.createElement("button"); refresh.type = "button"; refresh.textContent = "↻ 새로고침";
+    refresh.title = "현재 파일을 다시 읽습니다";
+    refresh.addEventListener("click", async () => {
+      if (refresh.disabled) return;
+      refresh.disabled = true;
+      try {
+        if (!editable){ host.innerHTML = ""; await renderSqlite(file, host, null); return; }
+        const latest = await sqliteDiskSnapshot(dbPath);
+        dbFingerprint = latest.fingerprint || dbFingerprint;
+        data = latest;
+        paintSqlite(data);
+      } catch(e){
+        paintSqlite(data, { error:"새로고침 실패: " + ((e && e.message) || String(e)) });
+      } finally { refresh.disabled = false; }
+    });
+    toolbar.append(identity, refresh);
+    shell.appendChild(toolbar);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(toolbar);
+
+    if (editable) shell.appendChild(buildSqlEditor(execResult));
+
+    if (!tables.length){
+      sqliteMessage(shell, "비어 있는 데이터베이스입니다", "사용자 테이블이나 뷰가 아직 없습니다.");
+      return;
+    }
+
+    const layout = document.createElement("div"); layout.className = "sqlite-layout";
+    const nav = document.createElement("nav"); nav.className = "sqlite-table-list"; nav.setAttribute("aria-label", "SQLite 테이블");
+    const content = document.createElement("div"); content.className = "sqlite-content";
+    layout.append(nav, content); shell.appendChild(layout);
+    paintTableList(tables, nav, content);
   }
 
-  shell.textContent = "";
-  const toolbar = document.createElement("div"); toolbar.className = "sqlite-toolbar";
-  const identity = document.createElement("div"); identity.className = "sqlite-identity";
-  const title = document.createElement("strong"); title.textContent = file.name;
-  const summary = document.createElement("span");
-  const tables = Array.isArray(data.tables) ? data.tables : [];
-  summary.textContent = "SQLite 3 · " + tables.length + "개 테이블/뷰 · 읽기 전용 · 행 미리보기 최대 " + (data.limit || 200) + "개";
-  identity.append(title, summary);
-  const refresh = document.createElement("button"); refresh.type = "button"; refresh.textContent = "↻ 새로고침";
-  refresh.title = "현재 파일을 다시 읽습니다";
-  refresh.addEventListener("click", async () => {
-    if (refresh.disabled) return;
-    refresh.disabled = true;
-    try { host.innerHTML = ""; await renderSqlite(file, host); } finally { refresh.disabled = false; }
-  });
-  toolbar.append(identity, refresh);
-  shell.appendChild(toolbar);
-  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(toolbar);
+  function buildSqlEditor(execResult){
+    const panel = document.createElement("section"); panel.className = "sqlite-editor";
+    const head = document.createElement("div"); head.className = "sqlite-editor-head";
+    const label = document.createElement("strong"); label.textContent = "SQL 실행";
+    const hint = document.createElement("span"); hint.className = "sqlite-editor-hint";
+    hint.textContent = "임의 SQL(SELECT·INSERT·UPDATE·DELETE·DDL) · 수정 시 자동 .bak 백업";
+    head.append(label, hint);
+    const input = document.createElement("textarea"); input.className = "sqlite-sql-input";
+    input.spellcheck = false; input.rows = 3;
+    input.placeholder = "예) INSERT INTO 학생(이름, 점수) VALUES ('홍길동', 90);";
+    input.value = sqlText;
+    input.addEventListener("input", () => { sqlText = input.value; });
+    const actions = document.createElement("div"); actions.className = "sqlite-editor-actions";
+    const run = document.createElement("button"); run.type = "button"; run.className = "sqlite-run";
+    run.textContent = "▶ 실행 (Ctrl+Enter)";
+    const status = document.createElement("span"); status.className = "sqlite-exec-status";
+    actions.append(run, status);
+    panel.append(head, input, actions);
 
-  if (!tables.length){
-    sqliteMessage(shell, "비어 있는 데이터베이스입니다", "사용자 테이블이나 뷰가 아직 없습니다.");
-    return;
+    const result = document.createElement("div"); result.className = "sqlite-exec-result";
+    if (execResult) fillExecResult(result, execResult); else result.hidden = true;
+    panel.appendChild(result);
+
+    const submit = () => runSql(input.value, run, status);
+    run.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); submit(); }
+    });
+    return panel;
   }
 
-  const layout = document.createElement("div"); layout.className = "sqlite-layout";
-  const nav = document.createElement("nav"); nav.className = "sqlite-table-list"; nav.setAttribute("aria-label", "SQLite 테이블");
-  const content = document.createElement("div"); content.className = "sqlite-content";
-  layout.append(nav, content); shell.appendChild(layout);
+  function fillExecResult(box, exec){
+    box.hidden = false; box.textContent = "";
+    if (exec.error){
+      box.className = "sqlite-exec-result error";
+      const p = document.createElement("p"); p.textContent = "오류: " + exec.error; box.appendChild(p);
+      return;
+    }
+    box.className = "sqlite-exec-result ok";
+    const head = document.createElement("p"); head.className = "sqlite-exec-summary";
+    if (exec.kind === "select"){
+      head.textContent = "SELECT · " + Number(exec.rowCount || 0).toLocaleString() + "행" + (exec.truncated ? " (처음 500행만 표시)" : "");
+      box.appendChild(head);
+      const cols = Array.isArray(exec.columns) ? exec.columns : [];
+      const rows = Array.isArray(exec.rows) ? exec.rows : [];
+      if (cols.length){
+        const scroller = document.createElement("div"); scroller.className = "sqlite-grid-wrap";
+        const grid = document.createElement("table"); grid.className = "sqlite-grid";
+        const thead = document.createElement("thead"), hr = document.createElement("tr");
+        const no = document.createElement("th"); no.textContent = "#"; hr.appendChild(no);
+        cols.forEach(c => { const th = document.createElement("th"); th.textContent = c; hr.appendChild(th); });
+        thead.appendChild(hr); grid.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        rows.forEach((row, index) => {
+          const tr = document.createElement("tr");
+          const rn = document.createElement("th"); rn.scope = "row"; rn.textContent = String(index + 1); tr.appendChild(rn);
+          cols.forEach((_, ci) => {
+            const td = document.createElement("td"), v = row && row[ci];
+            if (v === null || v === undefined){ td.textContent = "NULL"; td.className = "sqlite-null"; }
+            else td.textContent = String(v);
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        grid.appendChild(tbody); scroller.appendChild(grid); box.appendChild(scroller);
+      }
+    } else if (exec.kind === "write"){
+      const affected = (exec.rowcount === null || exec.rowcount === undefined || exec.rowcount < 0) ? 0 : exec.rowcount;
+      head.textContent = "완료 · " + Number(affected).toLocaleString() + "행 변경"
+        + (exec.lastrowid ? " · 마지막 rowid " + exec.lastrowid : "");
+      box.appendChild(head);
+    } else {
+      head.textContent = "완료 · 여러 문장 실행됨 (총 " + Number(exec.changes || 0).toLocaleString() + "행 변경)";
+      box.appendChild(head);
+    }
+    if (exec.backup){
+      const backup = document.createElement("p"); backup.className = "sqlite-exec-note";
+      backup.textContent = "백업: " + exec.backup;
+      box.appendChild(backup);
+    }
+    if (exec.previewError){
+      const warning = document.createElement("p"); warning.className = "sqlite-exec-note warning";
+      warning.textContent = "SQL은 완료됐지만 화면 새로고침에 실패했습니다: " + exec.previewError;
+      box.appendChild(warning);
+    }
+  }
 
+  async function runSql(text, runButton, status){
+    const sql = String(text || "").trim();
+    if (!sql){ status.textContent = "실행할 SQL을 입력하세요"; return; }
+    if (looksDestructive(sql) && !confirm("되돌릴 수 없는 변경일 수 있습니다.\n실행 전 .bak 백업이 만들어집니다. 계속할까요?\n\n" + sql.slice(0, 300))) return;
+    sqlText = sql;
+    runButton.disabled = true; status.textContent = "실행 중…";
+    try {
+      const headers = { "Content-Type":"text/plain; charset=utf-8", "X-Db-Path": encodeURIComponent(dbPath) };
+      if (dbFingerprint) headers["X-Db-Fingerprint"] = dbFingerprint;
+      const response = await fetch("/sqlite-exec", {
+        method: "POST",
+        headers,
+        body: sql
+      });
+      if (!response.ok){
+        const reason = await response.text();
+        if (response.status === 404) throw new Error("원본 파일을 찾을 수 없어 편집할 수 없습니다. (저장 폴더 안의 파일만 편집됩니다)");
+        if (response.status === 409) throw new Error("파일이 화면을 연 뒤 외부에서 변경되었습니다. 새로고침한 뒤 다시 실행하세요.");
+        if (response.status === 501) throw new Error("이 컴퓨터에서 Python을 찾지 못해 SQL을 실행할 수 없습니다.");
+        if (response.status === 415) throw new Error("SQLite 3 형식이 아닌 파일입니다.");
+        if (response.status === 413) throw new Error("SQL이 너무 깁니다. 2MB 이하로 나누어 실행하세요.");
+        throw new Error(reason || ("HTTP " + response.status));
+      }
+      const out = await response.json();
+      if (!out || out.ok === false){
+        status.textContent = "";
+        paintSqlite(data, { error: (out && out.error) || "SQL 실행에 실패했습니다." });
+        return;
+      }
+      dbFingerprint = out.fingerprint || dbFingerprint;
+      const exec = out.exec || { kind:"write", rowcount:0 };
+      try {
+        data = await sqliteDiskSnapshot(dbPath);
+        dbFingerprint = data.fingerprint || dbFingerprint;
+      } catch(previewError){
+        exec.previewError = (previewError && previewError.message) || String(previewError);
+      }
+      status.textContent = "";
+      paintSqlite(data, exec);
+    } catch(e){
+      status.textContent = "";
+      paintSqlite(data, { error: (e && e.message) || String(e) });
+    } finally {
+      runButton.disabled = false;
+    }
+  }
+
+  function looksDestructive(sql){
+    const kw = (sql.match(/^\s*([a-z]+)/i) || [,""])[1].toUpperCase();
+    if (kw === "DROP" || kw === "TRUNCATE") return true;
+    if (kw === "DELETE" && !/\bwhere\b/i.test(sql)) return true;   // WHERE 없는 전체 삭제
+    if (kw === "UPDATE" && !/\bwhere\b/i.test(sql)) return true;   // WHERE 없는 전체 갱신
+    return false;
+  }
+
+  function paintTableList(tables, nav, content){
   const renderTable = (table, activeButton) => {
     nav.querySelectorAll("button").forEach(button => button.classList.toggle("active", button === activeButton));
     content.textContent = "";
@@ -207,6 +405,7 @@ async function renderSqlite(file, host){
     nav.appendChild(button);
     if (index === 0) renderTable(table, button);
   });
+  }
 }
 
 function focusRenderedTextMatch(root, query){

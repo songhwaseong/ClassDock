@@ -362,6 +362,7 @@ async function openRunProjectFile(path, bundle, runCtx){
     relPath: wanted,
     archiveCtx: runCtx && runCtx.archiveCtx ? runCtx.archiveCtx : null,
     sourceKey: previewKey,
+    sqliteDiskPath: runtimeBytes ? wanted : null,
     transient: true
   });
   if (preview){
