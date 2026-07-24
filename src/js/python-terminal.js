@@ -50,6 +50,7 @@ function createPythonTerminal(options){
   let destroyed = false;
   let activeTask = null;
   let localSessionId = "";
+  let localShellOpening = null;
   let browserKernelStarted = false;
   let commandHistory = [];
   let historyIndex = 0;
@@ -96,7 +97,8 @@ function createPythonTerminal(options){
       activeView = "terminal"; setTabState("terminal"); refreshOutputChrome();
     }
     if (typeof options.onShowOutput === "function") options.onShowOutput();
-    ensureBackend().then(() => {
+    ensureBackend().then((isLocal) => {
+      if (isLocal) ensureLocalShell().catch(() => {});
       if (!destroyed && activeView === "terminal") setTimeout(() => input.focus(), 0);
     }).catch(() => {});
   };
@@ -143,9 +145,9 @@ function createPythonTerminal(options){
       }
       mode.textContent = localBackend ? "로컬 PowerShell" : "브라우저 Python · Pyodide";
       intro.textContent = localBackend
-        ? "이 PC에서 PowerShell 명령을 실행합니다. 현재 폴더는 명령이 끝난 뒤에도 유지됩니다."
+        ? "이 PC의 지속형 PowerShell에서 명령을 실행합니다. 현재 폴더와 변수는 다음 명령에도 유지됩니다."
         : "브라우저 안에서 Python을 실행합니다. 운영체제 명령과 subprocess는 사용할 수 없습니다.";
-      resetButton.title = localBackend ? "작업 폴더를 처음 위치로 되돌리기" : "브라우저 Python 변수와 상태 초기화";
+      resetButton.title = localBackend ? "PowerShell 변수와 작업 폴더 초기화" : "브라우저 Python 변수와 상태 초기화";
       setPrompt();
       return localBackend;
     }).catch(() => {
@@ -172,6 +174,46 @@ function createPythonTerminal(options){
     let offset = 0;
     chunks.forEach((chunk) => { body.set(chunk, offset); offset += chunk.length; });
     return body;
+  };
+
+  const ensureLocalShell = async () => {
+    if (localSessionId) return localSessionId;
+    if (localShellOpening) return localShellOpening;
+    localShellOpening = fetch("/terminal-session-open", {
+      method:"POST",
+      headers:{ "Content-Type":"application/octet-stream" },
+      body:encodeStrings([currentCwd])
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(await response.text() || ("HTTP " + response.status));
+      const data = await response.json();
+      const id = String(data.id || "");
+      if (!id) throw new Error("PowerShell 세션을 시작하지 못했습니다.");
+      if (destroyed){
+        fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
+        throw new Error("터미널이 닫혔습니다.");
+      }
+      localSessionId = id;
+      if (data.cwd) currentCwd = String(data.cwd);
+      if (data.cwdFallback){
+        appendLog(
+          "표시된 작업 폴더가 PC에 없어 가장 가까운 실제 폴더 " + (data.cwd || "") + "에서 시작했습니다.",
+          "py-terminal-status"
+        );
+      }
+      mode.textContent = "로컬 PowerShell · 준비됨";
+      setPrompt();
+      return id;
+    }).finally(() => { localShellOpening = null; });
+    return localShellOpening;
+  };
+
+  const closeLocalShell = async () => {
+    const id = localSessionId;
+    localSessionId = "";
+    if (!id) return;
+    try {
+      await fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST" });
+    } catch(_){}
   };
 
   const completionContext = () => {
@@ -286,16 +328,15 @@ function createPythonTerminal(options){
       if (!confirmed) throw new Error("터미널 실행을 취소했습니다.");
       createPythonTerminal.localConfirmed = true;
     }
-    const response = await fetch("/terminal-session-start", {
+    const sessionId = await ensureLocalShell();
+    const response = await fetch("/terminal-session-run?id=" + encodeURIComponent(sessionId), {
       method:"POST",
       headers:{ "Content-Type":"application/octet-stream" },
-      body:encodeStrings([command, currentCwd])
+      body:encodeStrings([command])
     });
     if (!response.ok) throw new Error(await response.text() || ("HTTP " + response.status));
-    localSessionId = String((await response.json()).id || "");
-    if (!localSessionId) throw new Error("터미널 세션을 시작하지 못했습니다.");
     for (;;){
-      const poll = await fetch("/terminal-session-poll?id=" + encodeURIComponent(localSessionId), { cache:"no-store" });
+      const poll = await fetch("/terminal-session-poll?id=" + encodeURIComponent(sessionId), { cache:"no-store" });
       if (!poll.ok) throw new Error(await poll.text() || ("HTTP " + poll.status));
       const data = await poll.json();
       stdoutEl.textContent = data.stdout || "";
@@ -303,20 +344,15 @@ function createPythonTerminal(options){
       stderrEl.hidden = !stderrEl.textContent;
       scrollLog();
       if (data.complete){
-        if (data.cwdFallback){
-          appendLog(
-            "표시된 작업 폴더가 PC에 없어 가장 가까운 실제 폴더 " + (data.cwd || "") + "에서 실행했습니다.",
-            "py-terminal-status"
-          );
-        }
         if (data.cwd) currentCwd = String(data.cwd);
+        if (data.alive === false && localSessionId === sessionId) localSessionId = "";
         setPrompt();
-        if (Number(data.code) !== 0) appendLog("종료 코드 " + data.code, "py-terminal-status error");
+        mode.textContent = data.alive === false ? "로컬 PowerShell · 다시 시작 대기" : "로컬 PowerShell · 준비됨";
+        if (Number(data.code) !== 0 && !data.stopped) appendLog("종료 코드 " + data.code, "py-terminal-status error");
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await new Promise((resolve) => setTimeout(resolve, 35));
     }
-    localSessionId = "";
   };
 
   const browserConsoleSource = (command) =>
@@ -380,7 +416,7 @@ function createPythonTerminal(options){
       stderrEl.hidden = false;
       stderrEl.textContent = cancelled ? "명령 실행을 중지했습니다." : ((error && error.message) ? error.message : String(error));
     } finally {
-      activeTask = null; localSessionId = ""; setBusy(false); scrollLog();
+      activeTask = null; setBusy(false); scrollLog();
     }
   };
 
@@ -388,7 +424,7 @@ function createPythonTerminal(options){
     if (!busy) return;
     stopButton.disabled = true;
     if (localSessionId){
-      try { await fetch("/terminal-session-stop?id=" + encodeURIComponent(localSessionId), { method:"POST" }); } catch(_){}
+      await closeLocalShell();
     } else if (activeTask && typeof activeTask.cancel === "function"){
       activeTask.cancel();
     }
@@ -397,9 +433,15 @@ function createPythonTerminal(options){
     if (busy) return;
     await ensureBackend();
     if (localBackend){
-      currentCwd = initialCwd;
-      setPrompt();
-      appendLog("작업 폴더를 처음 위치로 되돌렸습니다.", "py-terminal-status");
+      setBusy(true);
+      try {
+        await closeLocalShell();
+        currentCwd = initialCwd;
+        await ensureLocalShell();
+        appendLog("PowerShell 변수와 작업 폴더를 초기화했습니다.", "py-terminal-status");
+      } catch(error){
+        appendLog((error && error.message) ? error.message : String(error), "py-terminal-error");
+      } finally { setBusy(false); }
       return;
     }
     setBusy(true);
@@ -450,7 +492,7 @@ function createPythonTerminal(options){
   });
   input.addEventListener("input", () => {
     completionState = null;
-    if (localBackend) mode.textContent = "로컬 PowerShell";
+    if (localBackend) mode.textContent = localSessionId ? "로컬 PowerShell · 준비됨" : "로컬 PowerShell";
   });
   document.addEventListener("keydown", interruptWithKeyboard, true);
 
@@ -460,7 +502,11 @@ function createPythonTerminal(options){
     destroy:() => {
       destroyed = true;
       document.removeEventListener("keydown", interruptWithKeyboard, true);
-      if (localSessionId) fetch("/terminal-session-stop?id=" + encodeURIComponent(localSessionId), { method:"POST", keepalive:true }).catch(() => {});
+      if (localSessionId){
+        const id = localSessionId;
+        localSessionId = "";
+        fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
+      }
       if (activeTask && typeof activeTask.cancel === "function") activeTask.cancel();
       if (!localBackend && browserKernelStarted && typeof startPyodideKernelRun === "function"){
         startPyodideKernelRun({ kernelId:browserKernelId, reset:true }).promise.catch(() => {});

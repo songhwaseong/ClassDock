@@ -282,16 +282,22 @@ class PdfSignerLauncher
         public string Id;
         public Process Process;
         public readonly object Sync = new object();
-        public readonly LimitedTextBuffer Stdout = new LimitedTextBuffer();
-        public readonly LimitedTextBuffer Stderr = new LimitedTextBuffer();
-        public bool Complete;
+        public LimitedTextBuffer Stdout = new LimitedTextBuffer();
+        public LimitedTextBuffer Stderr = new LimitedTextBuffer();
+        public StreamWriter Input;
+        public bool CommandRunning;
+        public bool CommandComplete = true;
+        public bool ShellExited;
         public int ExitCode = -1;
+        public int Sequence;
         public string Cwd = "";
         public string Marker = "";
         public string ScriptPath = "";
         public bool CwdFallback;
         public IntPtr JobHandle = IntPtr.Zero;
         public bool StopRequested;
+        public DateTime CommandStartedAt = DateTime.MaxValue;
+        public DateTime LastUsed = DateTime.UtcNow;
         public DateTime DoneAt = DateTime.MaxValue;
     }
 
@@ -1510,16 +1516,28 @@ class PdfSignerLauncher
                     StopPythonSession(QueryValue(path, "id"));
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
-                else if (method == "POST" && path == "/terminal-session-start")
+                else if (method == "POST" && path == "/terminal-session-open")
                 {
                     try
                     {
-                        string id = StartTerminalSession(body);
-                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"id\":" + JsonString(id) + "}"));
+                        string json = OpenTerminalSession(body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
                     }
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("terminal-start-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/terminal-session-run", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        RunTerminalCommand(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("terminal-run-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (method == "GET" && path.StartsWith("/terminal-session-poll", StringComparison.Ordinal))
@@ -2617,15 +2635,14 @@ class PdfSignerLauncher
         return json.Append("]}").ToString();
     }
 
-    static string StartTerminalSession(byte[] body)
+    static string OpenTerminalSession(byte[] body)
     {
-        if (body == null || body.Length == 0 || body.Length > 1024 * 1024)
+        if (body == null || body.Length == 0 || body.Length > 64 * 1024)
             throw new Exception("bad-terminal-request");
         int pos = 0;
-        string command = ReadBundleString(body, ref pos);
         string requestedCwd = ReadBundleString(body, ref pos);
-        if (pos != body.Length || string.IsNullOrWhiteSpace(command) || command.IndexOf('\0') >= 0)
-            throw new Exception("bad-terminal-command");
+        if (pos != body.Length || requestedCwd.IndexOf('\0') >= 0)
+            throw new Exception("bad-terminal-request");
 
         SweepTerminalSessions();
         TerminalSession session = new TerminalSession();
@@ -2633,9 +2650,11 @@ class PdfSignerLauncher
         bool cwdFallback;
         session.Cwd = ResolveTerminalWorkingDirectory(requestedCwd, out cwdFallback);
         session.CwdFallback = cwdFallback;
-        session.Marker = "__MANNEUNG_TERMINAL_CWD_" + session.Id + "__";
+        session.Marker = "__MANNEUNG_TERMINAL_DONE_" + session.Id + "__";
         session.ScriptPath = Path.Combine(Path.GetTempPath(), "manneung_terminal_" + session.Id + ".ps1");
 
+        // 명령은 UTF-8 Base64 한 줄로 전달한다. 스크립트블록을 현재 범위에 dot-source하여
+        // cd, 환경변수와 PowerShell 변수가 다음 명령에도 그대로 유지되게 한다.
         string script =
             "$ErrorActionPreference = 'Continue'\r\n" +
             "$mnUtf8 = New-Object System.Text.UTF8Encoding $false\r\n" +
@@ -2643,18 +2662,27 @@ class PdfSignerLauncher
             "[Console]::OutputEncoding = $mnUtf8\r\n" +
             "$OutputEncoding = $mnUtf8\r\n" +
             "Set-Location -LiteralPath " + PowerShellLiteral(session.Cwd) + "\r\n" +
-            "$mnExitCode = 0\r\n" +
-            "try {\r\n" +
-            "  & {\r\n" + command + "\r\n  }\r\n" +
-            "  if ($null -ne $LASTEXITCODE) { $mnExitCode = [int]$LASTEXITCODE }\r\n" +
-            "  elseif (-not $?) { $mnExitCode = 1 }\r\n" +
-            "} catch {\r\n" +
-            "  [Console]::Error.WriteLine($_.Exception.Message)\r\n" +
-            "  $mnExitCode = 1\r\n" +
-            "} finally {\r\n" +
-            "  [Console]::Out.WriteLine(" + PowerShellLiteral(session.Marker) + " + (Get-Location).Path)\r\n" +
-            "}\r\n" +
-            "exit $mnExitCode\r\n";
+            "$mnMarker = " + PowerShellLiteral(session.Marker) + "\r\n" +
+            "while (($mnLine = [Console]::In.ReadLine()) -ne $null) {\r\n" +
+            "  $mnSep = $mnLine.IndexOf('|')\r\n" +
+            "  if ($mnSep -lt 1) { continue }\r\n" +
+            "  $mnSeq = $mnLine.Substring(0, $mnSep)\r\n" +
+            "  $mnExitCode = 0\r\n" +
+            "  try {\r\n" +
+            "    $mnCommand = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($mnLine.Substring($mnSep + 1)))\r\n" +
+            "    $global:LASTEXITCODE = $null\r\n" +
+            "    . ([ScriptBlock]::Create($mnCommand))\r\n" +
+            "    $mnSucceeded = $?\r\n" +
+            "    if ($null -ne $LASTEXITCODE) { $mnExitCode = [int]$LASTEXITCODE }\r\n" +
+            "    elseif (-not $mnSucceeded) { $mnExitCode = 1 }\r\n" +
+            "  } catch {\r\n" +
+            "    [Console]::Error.WriteLine($_.Exception.Message)\r\n" +
+            "    $mnExitCode = 1\r\n" +
+            "  } finally {\r\n" +
+            "    $mnCwd = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Location).Path))\r\n" +
+            "    [Console]::Out.WriteLine($mnMarker + '|' + $mnSeq + '|' + $mnExitCode + '|' + $mnCwd)\r\n" +
+            "  }\r\n" +
+            "}\r\n";
         File.WriteAllText(session.ScriptPath, script, new UTF8Encoding(true));
 
         string systemDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
@@ -2665,6 +2693,7 @@ class PdfSignerLauncher
             "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + session.ScriptPath + "\"");
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
+        psi.RedirectStandardInput = true;
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = new UTF8Encoding(false);
@@ -2676,6 +2705,8 @@ class PdfSignerLauncher
         try
         {
             session.Process.Start();
+            session.Input = new StreamWriter(session.Process.StandardInput.BaseStream, new UTF8Encoding(false));
+            session.Input.AutoFlush = true;
             session.JobHandle = CreateJobObject(IntPtr.Zero, null);
             if (session.JobHandle != IntPtr.Zero)
             {
@@ -2695,71 +2726,163 @@ class PdfSignerLauncher
                 try { CloseHandle(session.JobHandle); } catch { }
                 session.JobHandle = IntPtr.Zero;
             }
+            try { if (session.Process != null) KillProcessTree(session.Process); } catch { }
             try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
             throw;
         }
 
-        Thread outReader = StartLimitedReader(session.Process.StandardOutput, session.Stdout);
-        Thread errReader = StartLimitedReader(session.Process.StandardError, session.Stderr);
+        Thread outReader = StartTerminalOutputReader(session);
+        Thread errReader = StartTerminalErrorReader(session);
         Thread watcher = new Thread(delegate()
         {
             bool exited = false;
-            bool memoryLimit = false;
-            Stopwatch watch = Stopwatch.StartNew();
-            while (!exited && watch.ElapsedMilliseconds < 30 * 60 * 1000)
+            while (!exited)
             {
-                try { exited = session.Process.WaitForExit(500); } catch { break; }
-                if (!exited && ProcessTreeWorkingSetBytes(session.Process.Id) > PythonProcessMemoryLimitBytes)
+                try { exited = session.Process.WaitForExit(250); } catch { break; }
+                if (exited) break;
+                bool running;
+                DateTime startedAt;
+                lock (session.Sync) { running = session.CommandRunning; startedAt = session.CommandStartedAt; }
+                if (!running) continue;
+                bool timedOut = (DateTime.UtcNow - startedAt).TotalMinutes >= 30;
+                bool memoryLimit = ProcessTreeWorkingSetBytes(session.Process.Id) > PythonProcessMemoryLimitBytes;
+                if (timedOut || memoryLimit)
                 {
-                    memoryLimit = true;
+                    lock (session.Sync)
+                    {
+                        session.Stderr.AppendLine(memoryLimit
+                            ? "\n[메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다.]"
+                            : "\n[시간 초과: 터미널 명령을 30분 후 종료했습니다.]");
+                    }
+                    StopTerminalSession(session.Id);
                     break;
                 }
             }
-            if (!exited)
-            {
-                session.Stderr.AppendLine(memoryLimit
-                    ? "\n[메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다.]"
-                    : "\n[시간 초과: 터미널 명령을 30분 후 종료했습니다.]");
-                KillProcessTree(session.Process);
-                try { session.Process.WaitForExit(2000); } catch { }
-            }
+            try { session.Process.WaitForExit(2000); } catch { }
             try { outReader.Join(2000); errReader.Join(2000); } catch { }
-            try { session.ExitCode = session.Process.ExitCode; } catch { session.ExitCode = -1; }
-            UpdateTerminalCwdAndOutput(session);
-            lock (session.Sync) { session.DoneAt = DateTime.UtcNow; session.Complete = true; }
+            int processCode;
+            try { processCode = session.Process.ExitCode; } catch { processCode = -1; }
             IntPtr completedJob = IntPtr.Zero;
-            lock (session.Sync) { completedJob = session.JobHandle; session.JobHandle = IntPtr.Zero; }
+            lock (session.Sync)
+            {
+                session.ShellExited = true;
+                if (session.CommandRunning)
+                {
+                    session.CommandRunning = false;
+                    session.CommandComplete = true;
+                    session.ExitCode = session.StopRequested ? 130 : processCode;
+                }
+                session.DoneAt = DateTime.UtcNow;
+                completedJob = session.JobHandle;
+                session.JobHandle = IntPtr.Zero;
+            }
             if (completedJob != IntPtr.Zero) try { CloseHandle(completedJob); } catch { }
             try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
             SweepTerminalSessions();
         });
         watcher.IsBackground = true;
         watcher.Start();
-        return session.Id;
+        bool reportFallback = session.CwdFallback;
+        session.CwdFallback = false;
+        return "{\"id\":" + JsonString(session.Id)
+            + ",\"cwd\":" + JsonString(session.Cwd)
+            + ",\"cwdFallback\":" + (reportFallback ? "true" : "false") + "}";
     }
 
-    static string CleanTerminalOutput(TerminalSession session, string text)
+    static Thread StartTerminalOutputReader(TerminalSession session)
     {
-        text = text ?? "";
-        int markerAt = text.LastIndexOf(session.Marker, StringComparison.Ordinal);
-        if (markerAt < 0) return text;
-        int valueStart = markerAt + session.Marker.Length;
-        int valueEnd = text.IndexOfAny(new char[] { '\r', '\n' }, valueStart);
-        if (valueEnd < 0) valueEnd = text.Length;
-        string nextCwd = text.Substring(valueStart, valueEnd - valueStart).Trim();
-        if (!string.IsNullOrWhiteSpace(nextCwd) && Directory.Exists(nextCwd)) session.Cwd = nextCwd;
-        int removeEnd = valueEnd;
-        if (removeEnd < text.Length && text[removeEnd] == '\r') removeEnd++;
-        if (removeEnd < text.Length && text[removeEnd] == '\n') removeEnd++;
-        return text.Remove(markerAt, removeEnd - markerAt);
+        Thread thread = new Thread(delegate()
+        {
+            try
+            {
+                string line;
+                string prefix = session.Marker + "|";
+                while ((line = session.Process.StandardOutput.ReadLine()) != null)
+                {
+                    if (line.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        string[] parts = line.Split(new char[] { '|' }, 4);
+                        int sequence;
+                        int code;
+                        if (parts.Length == 4 && int.TryParse(parts[1], out sequence) && int.TryParse(parts[2], out code))
+                        {
+                            string nextCwd = "";
+                            try { nextCwd = Encoding.UTF8.GetString(Convert.FromBase64String(parts[3])); } catch { }
+                            lock (session.Sync)
+                            {
+                                if (sequence == session.Sequence)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(nextCwd) && Directory.Exists(nextCwd)) session.Cwd = nextCwd;
+                                    session.ExitCode = code;
+                                    session.CommandRunning = false;
+                                    session.CommandComplete = true;
+                                    session.LastUsed = DateTime.UtcNow;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    lock (session.Sync) session.Stdout.AppendLine(line);
+                }
+            }
+            catch { }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
     }
 
-    static void UpdateTerminalCwdAndOutput(TerminalSession session)
+    static Thread StartTerminalErrorReader(TerminalSession session)
     {
-        if (session == null) return;
+        Thread thread = new Thread(delegate()
+        {
+            try
+            {
+                string line;
+                while ((line = session.Process.StandardError.ReadLine()) != null)
+                    lock (session.Sync) session.Stderr.AppendLine(line);
+            }
+            catch { }
+        });
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
+    }
+
+    static void RunTerminalCommand(string id, byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > 1024 * 1024)
+            throw new Exception("bad-terminal-command");
+        int pos = 0;
+        string command = ReadBundleString(body, ref pos);
+        if (pos != body.Length || string.IsNullOrWhiteSpace(command) || command.IndexOf('\0') >= 0)
+            throw new Exception("bad-terminal-command");
+        TerminalSession session;
+        lock (TerminalSessionsLock) if (!TerminalSessions.TryGetValue(id ?? "", out session))
+            throw new Exception("terminal-session-not-found");
         lock (session.Sync)
         {
-            CleanTerminalOutput(session, session.Stdout.GetText());
+            if (session.ShellExited) throw new Exception("terminal-session-stopped");
+            if (session.CommandRunning) throw new Exception("terminal-command-busy");
+            try { if (session.Process.HasExited) throw new Exception("terminal-session-stopped"); }
+            catch (InvalidOperationException) { throw new Exception("terminal-session-stopped"); }
+            session.Stdout = new LimitedTextBuffer();
+            session.Stderr = new LimitedTextBuffer();
+            session.ExitCode = -1;
+            session.StopRequested = false;
+            session.CommandComplete = false;
+            session.CommandRunning = true;
+            session.CommandStartedAt = DateTime.UtcNow;
+            session.LastUsed = DateTime.UtcNow;
+            session.Sequence++;
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(command));
+            try { session.Input.WriteLine(session.Sequence.ToString() + "|" + encoded); }
+            catch
+            {
+                session.CommandRunning = false;
+                session.CommandComplete = true;
+                throw new Exception("terminal-session-stopped");
+            }
         }
     }
 
@@ -2767,13 +2890,14 @@ class PdfSignerLauncher
     {
         TerminalSession session;
         lock (TerminalSessionsLock) if (!TerminalSessions.TryGetValue(id ?? "", out session))
-            return "{\"complete\":true,\"code\":-1,\"stdout\":\"\",\"stderr\":\"터미널 세션을 찾지 못했습니다.\",\"cwd\":\"\"}";
+            return "{\"complete\":true,\"alive\":false,\"code\":-1,\"stdout\":\"\",\"stderr\":\"터미널 세션을 찾지 못했습니다.\",\"cwd\":\"\"}";
         lock (session.Sync)
         {
-            string stdout = CleanTerminalOutput(session, session.Stdout.GetText());
-            return "{\"complete\":" + (session.Complete ? "true" : "false")
+            return "{\"complete\":" + (session.CommandComplete ? "true" : "false")
+                + ",\"alive\":" + (session.ShellExited ? "false" : "true")
+                + ",\"stopped\":" + (session.StopRequested ? "true" : "false")
                 + ",\"code\":" + session.ExitCode
-                + ",\"stdout\":" + JsonString(stdout)
+                + ",\"stdout\":" + JsonString(session.Stdout.GetText())
                 + ",\"stderr\":" + JsonString(session.Stderr.GetText())
                 + ",\"cwd\":" + JsonString(session.Cwd)
                 + ",\"cwdFallback\":" + (session.CwdFallback ? "true" : "false") + "}";
@@ -2786,7 +2910,12 @@ class PdfSignerLauncher
         lock (TerminalSessionsLock) TerminalSessions.TryGetValue(id ?? "", out session);
         if (session == null) return;
         IntPtr job;
-        lock (session.Sync) { session.StopRequested = true; job = session.JobHandle; }
+        lock (session.Sync)
+        {
+            session.StopRequested = true;
+            if (session.CommandRunning) session.Stderr.AppendLine("[명령 실행을 중지했습니다.]");
+            job = session.JobHandle;
+        }
         if (job != IntPtr.Zero) try { TerminateJobObject(job, 130); } catch { }
         KillProcessTree(session.Process);
     }
@@ -2798,7 +2927,7 @@ class PdfSignerLauncher
         {
             List<TerminalSession> done = new List<TerminalSession>();
             foreach (TerminalSession session in TerminalSessions.Values)
-                if (session.Complete) done.Add(session);
+                if (session.ShellExited) done.Add(session);
             done.Sort(delegate(TerminalSession a, TerminalSession b) { return a.DoneAt.CompareTo(b.DoneAt); });
             DateTime now = DateTime.UtcNow;
             foreach (TerminalSession session in done)

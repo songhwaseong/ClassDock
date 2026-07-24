@@ -75,13 +75,24 @@ test("지속형 노트북 커널도 셀 실행 시간과 프로세스 트리 메
 
 test("Python 편집기 터미널은 인증·사용자 확인·프로세스 제한을 거친다", () => {
   assert.match(launcher, /path\.StartsWith\("\/terminal-session-", StringComparison\.Ordinal\)\) return true/);
-  assert.match(launcher, /static string StartTerminalSession\(byte\[\] body\)/);
+  assert.match(launcher, /static string OpenTerminalSession\(byte\[\] body\)/);
+  assert.match(launcher, /static void RunTerminalCommand\(string id, byte\[\] body\)/);
   assert.match(launcher, /ProcessTreeWorkingSetBytes\(session\.Process\.Id\)/);
   assert.match(launcher, /메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다/);
   assert.match(launcher, /시간 초과: 터미널 명령을 30분 후 종료했습니다/);
   assert.match(launcher, /KillProcessTree\(session\.Process\)/);
   assert.match(pythonTerminal, /터미널 명령은 내 컴퓨터에서 직접 실행됩니다/);
   assert.match(pythonTerminal, /startPyodideKernelRun/);
+});
+
+test("로컬 터미널은 PowerShell 프로세스를 재사용해 짧은 명령과 cd를 빠르게 처리한다", () => {
+  assert.match(launcher, /while \(\(\$mnLine = \[Console\]::In\.ReadLine\(\)\) -ne \$null\)/);
+  assert.match(launcher, /\. \(\[ScriptBlock\]::Create\(\$mnCommand\)\)/);
+  assert.match(launcher, /session\.Input\.WriteLine\(session\.Sequence\.ToString\(\) \+ "\|"/);
+  assert.match(pythonTerminal, /fetch\("\/terminal-session-open"/);
+  assert.match(pythonTerminal, /fetch\("\/terminal-session-run\?id="/);
+  assert.match(pythonTerminal, /setTimeout\(resolve, 35\)/);
+  assert.match(pythonTerminal, /현재 폴더와 변수는 다음 명령에도 유지됩니다/);
 });
 
 test("터미널의 논리 작업 폴더가 없으면 실제 상위 폴더로 안전하게 대체한다", () => {
