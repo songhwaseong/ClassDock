@@ -449,7 +449,8 @@ function nbBuildCell(ownerDoc, cell){
       ed.ta.addEventListener("focus", () => nbSetSelected(ownerDoc, nbCtrlIndex(ownerDoc, ctrl), {}));
       requestAnimationFrame(() => fitEditorHeight(ed));
       ctrl.editor = ed; ctrl.active = true;
-      ed.ta.readOnly = !!ownerDoc._nbInkMode;
+      ed.ta.readOnly = !!ownerDoc._nbInkMode || !!ownerDoc._studyReadonly;
+      ed.ta.setAttribute("aria-readonly", String(ed.ta.readOnly));
     };
     ctrl.demount = () => {
       if (!ctrl.active || !ctrl.editor) return;

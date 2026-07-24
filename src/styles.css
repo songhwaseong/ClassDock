@@ -893,6 +893,16 @@
   #content.study-mode.study-ref-lock-show .study-ref-lock,
   #content.study-mode.study-reference-locked .study-ref-lock,
   #content.study-mode .study-ref-lock:focus-visible{opacity:1;pointer-events:auto}
+  #content.study-mode .study-ref-lock.study-ref-lock-flash{animation:study-ref-lock-flash .52s ease-out}
+  @keyframes study-ref-lock-flash{
+    0%,100%{opacity:1;transform:scale(1);color:#f87171}
+    25%,75%{opacity:.18;transform:scale(.86)}
+    50%{opacity:1;transform:scale(1.18);color:#ef4444}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #content.study-mode .study-ref-lock.study-ref-lock-flash{
+      animation:none;background:rgba(239,68,68,.18);border-radius:8px;box-shadow:0 0 0 3px rgba(239,68,68,.22)}
+  }
   #content.study-mode.study-reference-locked .study-ref-lock .ic-open{display:none}
   #content.study-mode.study-reference-locked .study-ref-lock .ic-closed{display:block}
   #content:fullscreen .study-ref-lock,body.viewer-fullscreen #content .study-ref-lock{display:none!important}

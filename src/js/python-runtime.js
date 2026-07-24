@@ -2659,7 +2659,8 @@ function setCodePenMode(doc, on){
     if (doc.__inkBtn) doc.__inkBtn.classList.add("primary");
   } else {
     if (doc.codePenOverlay){ doc.codePenOverlay.hide(); }
-    editor.ta.readOnly = false;
+    editor.ta.readOnly = !!doc._studyReadonly;
+    editor.ta.setAttribute("aria-readonly", String(!!doc._studyReadonly));
     editor.host.classList.remove("code-host-viewmode");
     if (_codePenActive && _codePenActive.doc === doc) _codePenActive = null;
     if (_codePenBar && !_codePenActive) _codePenBar.hidden = true;

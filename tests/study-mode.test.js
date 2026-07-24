@@ -102,6 +102,14 @@ test("참고 잠금은 복사·선택·키보드 탐색만 통과시킨다", () 
   assert.equal(studyReadonlyKeyAllowed({ key:"Delete" }), false);
 });
 
+test("지연 렌더가 끝난 뒤 Python·노트북 편집기에 참고 잠금을 다시 적용한다", () => {
+  const documents = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const notebookCells = fs.readFileSync(path.join(__dirname, "../src/js/notebook-cells.js"), "utf8");
+  assert.match(documents, /await d\.render\(\);\s*d\.rendered = true;\s*[\s\S]*?syncStudyReadonlyForDoc\(d\);/);
+  assert.match(documents, /\(doc\._nbCtrls \|\| \[\]\)\.forEach\(ctrl => syncEditor\(ctrl && ctrl\.editor\)\)/);
+  assert.match(notebookCells, /ed\.ta\.readOnly = !!ownerDoc\._nbInkMode \|\| !!ownerDoc\._studyReadonly/);
+});
+
 test("모바일 교체 배치는 참고와 작업의 위아래 영역을 완전히 지정한다", () => {
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(css, /#content\.study-mode\.study-swapped \.study-reference\{left:0!important;right:0!important;top:50%!important;bottom:0!important;/);

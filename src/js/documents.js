@@ -337,6 +337,22 @@ function makeGroup(kind, name, parentId=null){
   return node;
 }
 
+let studyReferenceLockFlashTimer = 0;
+let studyReferenceLockFlashAt = 0;
+function flashStudyReferenceLock(){
+  const content = byId("content");
+  const lock = byId("studyChipLock");
+  if (!content || !lock || !studyReferenceLocked || !content.classList.contains("study-mode")) return;
+  const now = Date.now();
+  if (now - studyReferenceLockFlashAt < 280) return;
+  studyReferenceLockFlashAt = now;
+  clearTimeout(studyReferenceLockFlashTimer);
+  lock.classList.remove("study-ref-lock-flash");
+  void lock.offsetWidth;
+  lock.classList.add("study-ref-lock-flash");
+  studyReferenceLockFlashTimer = setTimeout(() => lock.classList.remove("study-ref-lock-flash"), 650);
+}
+
 function attachStudyReferenceGuard(doc){
   const locked = () => isStudyReferenceLocked(doc);
   const pointerSurface = (target) => {
@@ -354,12 +370,15 @@ function attachStudyReferenceGuard(doc){
   const blockPointer = (event) => {
     if (!locked()) return;
     if (studyReadonlyPointerAllowed(pointerSurface(event.target), event.type)) return;
+    flashStudyReferenceLock();
     event.preventDefault(); event.stopImmediatePropagation();
   };
   ["pointerdown", "click", "dblclick", "contextmenu"].forEach(type => doc.el.addEventListener(type, blockPointer, true));
-  doc.el.addEventListener("beforeinput", (event) => { if (locked()){ event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  doc.el.addEventListener("beforeinput", (event) => {
+    if (locked()){ flashStudyReferenceLock(); event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
   ["paste", "cut", "drop"].forEach(type => doc.el.addEventListener(type, (event) => {
-    if (locked()){ event.preventDefault(); event.stopImmediatePropagation(); }
+    if (locked()){ flashStudyReferenceLock(); event.preventDefault(); event.stopImmediatePropagation(); }
   }, true));
   doc.el.addEventListener("keydown", (event) => {
     if (!locked()) return;
@@ -370,6 +389,7 @@ function attachStudyReferenceGuard(doc){
       textEntry:!!closest("input,textarea,[contenteditable='true']"),
       activationControl:!!closest("button,select")
     })) return;
+    flashStudyReferenceLock();
     event.preventDefault(); event.stopImmediatePropagation();
   }, true);
 }
@@ -530,6 +550,19 @@ function isStudyReferenceLocked(doc){
   return !!(studyReferenceLocked && doc && doc.id === studyPdfId && content && content.classList.contains("study-mode"));
 }
 function isStudyReferenceReadonly(doc){ return isStudyReferenceLocked(doc); }
+function syncStudyReadonlyForDoc(doc){
+  if (!doc) return;
+  const readonly = isStudyReferenceLocked(doc);
+  doc._studyReadonly = readonly;
+  const editorReadonly = readonly || !!doc._nbInkMode || !!(doc.codePenOverlay && doc.codePenOverlay.active);
+  const syncEditor = (editor) => {
+    if (!editor || !editor.ta) return;
+    editor.ta.readOnly = editorReadonly;
+    editor.ta.setAttribute("aria-readonly", String(editorReadonly));
+  };
+  syncEditor(doc.codeEditor);
+  (doc._nbCtrls || []).forEach(ctrl => syncEditor(ctrl && ctrl.editor));
+}
 function setStudyReferenceLocked(locked){
   studyReferenceLocked = !!locked;
   applyStudyLayout();
@@ -887,14 +920,7 @@ function applyStudyLayout(){
     }
     if (ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));    // 진입 시 1회 맞춤
   }
-  docs.forEach(d => {
-    const readonly = !!(split && studyReferenceLocked && ref && d.id === ref.id);
-    d._studyReadonly = readonly;
-    if (d.codeEditor && d.codeEditor.ta){
-      d.codeEditor.ta.readOnly = readonly || !!d._nbInkMode;
-      d.codeEditor.ta.setAttribute("aria-readonly", String(readonly || !!d._nbInkMode));
-    }
-  });
+  docs.forEach(syncStudyReadonlyForDoc);
   const pageCtl = byId("studyPageCtl");
   if (pageCtl){
     pageCtl.hidden = !split;
@@ -1074,7 +1100,10 @@ function ensureDocInteractive(d){
 function ensureRendered(d){
   if (!d || d.closed) return Promise.resolve();
   ensureDocInteractive(d);                 // 활성화 경로 공통 지점 — 여기서 처음 한 번 부착
-  if (d.rendered || typeof d.render !== "function") return Promise.resolve();
+  if (d.rendered || typeof d.render !== "function"){
+    syncStudyReadonlyForDoc(d);
+    return Promise.resolve();
+  }
   if (d._renderPromise) return d._renderPromise;          // 진행 중인 첫 렌더가 끝날 때까지 후속 이동도 함께 대기
   d._rendering = true;
   const promise = Promise.resolve().then(async () => {
@@ -1082,6 +1111,9 @@ function ensureRendered(d){
     try {
       await d.render();
       d.rendered = true;
+      // 복원·사이드바 고정처럼 참고 잠금이 편집기 생성보다 먼저 적용된 경우를 포함해
+      // 렌더가 만든 모든 코드 입력창에 현재 잠금 상태를 다시 반영한다.
+      syncStudyReadonlyForDoc(d);
     } catch (e){
       if (!(e && (e.message === "cancelled" || e.message === "hwpx-unsupported" || e.message === "handled"))){
         console.error(e); toast("파일을 여는 중 오류가 발생했습니다.", 3000);

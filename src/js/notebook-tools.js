@@ -404,7 +404,11 @@ function nbSyncInkSurfaces(ownerDoc){
   }
   for (const ctrl of (ownerDoc._nbCtrls || [])){
     if (ctrl.inkSurface) ctrl.inkSurface.setDrawing(drawing);
-    if (ctrl.editor && ctrl.editor.ta) ctrl.editor.ta.readOnly = !!ownerDoc._nbInkMode;
+    if (ctrl.editor && ctrl.editor.ta){
+      const readonly = !!ownerDoc._nbInkMode || !!ownerDoc._studyReadonly;
+      ctrl.editor.ta.readOnly = readonly;
+      ctrl.editor.ta.setAttribute("aria-readonly", String(readonly));
+    }
   }
 }
 
