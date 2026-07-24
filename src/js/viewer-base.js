@@ -31,6 +31,7 @@ async function loadOffice(file, ext, options={}){
 async function loadSqlite(file, options={}){
   const doc = makeDoc("office", file.name, options);
   doc.sourceFile = file;
+  doc.sqliteDocument = true;
   // 서버가 실제 저장 폴더 파일로 확인한 .db 만 편집한다. 일반 드래그/압축 내부 파일의 논리 경로는 쓰지 않는다.
   doc.dbPath = options.sqliteDiskPath || null;
   doc.render = async () => {
@@ -40,6 +41,42 @@ async function loadSqlite(file, options={}){
   refreshChrome();
   activateIfIdle(doc, options);
   return doc;
+}
+
+// 파일/폴더를 처음 열 때는 화면 렌더가 작업공간 복사보다 먼저 끝난다.
+// 복사가 끝난 직후 저장 루트의 동일 바이트 DB임을 서버로 재확인하고, 열린 읽기 전용 탭을 실행 가능 상태로 바꾼다.
+async function promoteSavedSqliteDocuments(files){
+  if (location.protocol !== "http:" && location.protocol !== "https:") return 0;
+  const candidates = [...(files || [])]
+    .map(file => ({
+      file,
+      path: String(file && (file.webkitRelativePath || file.name) || "")
+        .replace(/\\/g, "/").replace(/^\/+/, "")
+    }))
+    .filter(item => item.file && /\.(db|sqlite|sqlite3)$/i.test(item.path));
+  if (!candidates.length) return 0;
+
+  let promoted = 0;
+  for (const item of candidates){
+    const path = item.path;
+    const doc = docs.find(candidate => candidate && candidate.sqliteDocument && !candidate.dbPath
+      && (candidate.sourceFile === item.file || normalizedRunPath(candidate.workspacePath) === normalizedRunPath(path)));
+    if (!doc) continue;
+    try {
+      const bytes = new Uint8Array(await (doc.sourceFile || item.file).arrayBuffer());
+      if (!sqliteHeaderValid(bytes)) continue;
+      const expectedFingerprint = await sqliteSha256(bytes);
+      if (!expectedFingerprint) continue;
+      await sqliteDiskSnapshot(path, expectedFingerprint);
+      doc.dbPath = path;
+      promoted++;
+      if (doc.el && !doc.el.hidden && typeof doc.render === "function") await doc.render();
+    } catch(e){
+      if (!e || (e.status !== 404 && e.status !== 409))
+        console.warn("SQLite 실행 화면 활성화 실패:", e);
+    }
+  }
+  return promoted;
 }
 
 function sqliteHeaderValid(bytes){

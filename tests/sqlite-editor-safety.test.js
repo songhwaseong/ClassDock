@@ -18,6 +18,16 @@ test("SQLite 편집은 서버가 확인한 디스크 경로에서만 활성화�
   assert.match(viewer, /e\.status !== 404 && e\.status !== 409/);
 });
 
+test("처음 연 SQLite는 작업공간 저장 직후 실행 화면으로 승격된다", () => {
+  assert.match(viewer, /async function promoteSavedSqliteDocuments\(files\)/);
+  assert.match(viewer, /candidate\.sqliteDocument && !candidate\.dbPath/);
+  assert.match(viewer, /await sqliteDiskSnapshot\(path, expectedFingerprint\)/);
+  assert.match(viewer, /doc\.dbPath = path/);
+  assert.match(viewer, /!doc\.el\.hidden && typeof doc\.render === "function"/);
+  assert.match(workspace, /if \(useServer && typeof promoteSavedSqliteDocuments === "function"\)/);
+  assert.match(workspace, /await promoteSavedSqliteDocuments\(rows\)/);
+});
+
 test("SQLite 쓰기 경로는 저장 루트 상대경로와 파일 지문으로 제한된다", () => {
   const start = launcher.indexOf("static bool TryResolveDbPath");
   const end = launcher.indexOf("static readonly System.Text.RegularExpressions.Regex PkgNameRe", start);

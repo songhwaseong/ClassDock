@@ -340,6 +340,12 @@ async function rememberWorkspace(files, replace, options={}){
     } else {
       await queueWorkspaceMutation(() => browserWorkspaceSave(body, replace));
     }
+    // 첫 열기 화면은 작업공간 저장보다 먼저 그려진다. 서버 저장이 끝난 지금 동일 파일임을 확인해
+    // SQLite 읽기 전용 탭을 실행 가능 상태로 즉시 갱신한다(브라우저 IndexedDB 모드에서는 실행하지 않음).
+    if (useServer && typeof promoteSavedSqliteDocuments === "function"){
+      try { await promoteSavedSqliteDocuments(rows); }
+      catch(e){ console.warn("SQLite 실행 화면 갱신 실패:", e); }
+    }
     // 이전 버전에서 자동 복원 묶음에 들어간 사진은 이번 저장에서 빠졌다고 해서
     // merge 저장만으로 사라지지 않는다. 성공적으로 폴더 표식을 저장한 뒤 경로별로 정리한다.
     if (skippedImagePaths.length) forgetWorkspacePaths(skippedImagePaths);
