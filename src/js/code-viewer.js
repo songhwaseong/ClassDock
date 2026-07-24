@@ -1332,11 +1332,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
-  const resultTabBtn = document.createElement("button"); resultTabBtn.className = "run-output-tab active"; resultTabBtn.type = "button"; resultTabBtn.textContent = "결과";
-  resultTabBtn.title = "Python 실행 결과 보기"; resultTabBtn.setAttribute("aria-pressed", "true");
+  // 결과/터미널을 버튼 하나로 토글한다. 기본은 결과 화면이고, 누르면 터미널로 전환·다시 누르면 결과로 복귀.
   const terminalTabBtn = document.createElement("button"); terminalTabBtn.className = "run-output-tab"; terminalTabBtn.type = "button"; terminalTabBtn.textContent = "터미널";
   terminalTabBtn.title = "명령 터미널 열기"; terminalTabBtn.setAttribute("aria-pressed", "false");
-  outputTabs.append(resultTabBtn, terminalTabBtn);
+  outputTabs.append(terminalTabBtn);
   const nbConvertBtn = document.createElement("button"); nbConvertBtn.className = "run-nbconvert"; nbConvertBtn.type = "button"; nbConvertBtn.textContent = "노트북으로";
   nbConvertBtn.title = "현재 코드를 주피터 노트북(.ipynb)으로 변환해 새 탭으로 열기 (# %% 를 셀 경계로)";
   // 줄번호(거터)를 클릭해 셀 경계(# %%)를 넣고, 다시 눌러 노트북으로 변환하는 모드 토글
@@ -1950,8 +1949,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         ui,
         runCtx:runCtxWithDoc,
         ownerDoc,
-        resultButton:resultTabBtn,
-        terminalButton:terminalTabBtn,
+        toggleButton:terminalTabBtn,
         onShowOutput:() => {
           split.classList.add("show-out");
           layoutBtn.hidden = false;

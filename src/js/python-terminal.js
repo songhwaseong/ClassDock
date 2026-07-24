@@ -7,9 +7,9 @@ function createPythonTerminal(options){
   options = options || {};
   const ui = options.ui || {};
   const outPanel = ui.outPanel;
-  const resultButton = options.resultButton;
-  const terminalButton = options.terminalButton;
-  if (!outPanel || !resultButton || !terminalButton) return {
+  // 결과/터미널을 오가는 토글 버튼 하나로 동작한다. (예전 두 버튼 방식과의 호환도 유지)
+  const toggleButton = options.toggleButton || options.terminalButton;
+  if (!outPanel || !toggleButton) return {
     showResults:() => {},
     showTerminal:() => {},
     destroy:() => {}
@@ -73,10 +73,10 @@ function createPythonTerminal(options){
   let currentCwd = initialCwd;
 
   const setTabState = (view) => {
-    resultButton.classList.toggle("active", view === "result");
-    terminalButton.classList.toggle("active", view === "terminal");
-    resultButton.setAttribute("aria-pressed", view === "result" ? "true" : "false");
-    terminalButton.setAttribute("aria-pressed", view === "terminal" ? "true" : "false");
+    const isTerminal = view === "terminal";
+    toggleButton.classList.toggle("active", isTerminal);
+    toggleButton.setAttribute("aria-pressed", isTerminal ? "true" : "false");
+    toggleButton.title = isTerminal ? "결과 화면으로 돌아가기" : "명령 터미널 열기";
   };
   const movePanelChildren = (target) => {
     while (outPanel.firstChild) target.appendChild(outPanel.firstChild);
@@ -465,8 +465,10 @@ function createPythonTerminal(options){
     stop();
   };
 
-  resultButton.addEventListener("click", showResults);
-  terminalButton.addEventListener("click", showTerminal);
+  toggleButton.addEventListener("click", () => {
+    if (activeView === "terminal") showResults();
+    else showTerminal();
+  });
   runButton.addEventListener("click", execute);
   clearButton.addEventListener("click", () => log.replaceChildren());
   resetButton.addEventListener("click", reset);
