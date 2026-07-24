@@ -28,6 +28,18 @@ test("처음 연 SQLite는 작업공간 저장 직후 실행 화면으로 승격
   assert.match(workspace, /await promoteSavedSqliteDocuments\(rows\)/);
 });
 
+test("읽기 전용 SQLite는 안내와 안전한 저장 폴더 사본 전환을 제공한다", () => {
+  assert.match(viewer, /editable \? buildSqlEditor\(execResult\) : buildSqliteReadOnlyNotice\(\)/);
+  assert.match(viewer, /저장 폴더에 사본 만들기/);
+  assert.match(viewer, /"X-Save-Path": encodeURIComponent\(copyPath\)/);
+  assert.match(viewer, /sqliteDiskSnapshot\(copyPath, expectedFingerprint\)/);
+  assert.match(viewer, /if \(typeof onDiskPathChange === "function"\) onDiskPathChange\(copyPath, copiedDbFullPath\)/);
+  assert.match(viewer, /doc\.dbPath = path/);
+  assert.match(viewer, /사본 절대경로/);
+  assert.match(viewer, /locationPath\.textContent = copiedDbFullPath/);
+  assert.match(viewer, /if \(fullPath\) doc\.dbFullPath = fullPath/);
+});
+
 test("SQLite 쓰기 경로는 저장 루트 상대경로와 파일 지문으로 제한된다", () => {
   const start = launcher.indexOf("static bool TryResolveDbPath");
   const end = launcher.indexOf("static readonly System.Text.RegularExpressions.Regex PkgNameRe", start);

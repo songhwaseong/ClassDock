@@ -1975,6 +1975,18 @@
     padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer}
   .sqlite-run:hover{filter:brightness(1.05)}
   .sqlite-run:disabled{opacity:.55;cursor:wait}
+  .sqlite-secondary{flex:none;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+  .sqlite-secondary:hover{border-color:var(--accent);background:var(--panel-hover)}
+  .sqlite-secondary:disabled{opacity:.55;cursor:wait}
+  .sqlite-readonly-notice{border-style:dashed}
+  .sqlite-readonly-badge{padding:2px 7px;border:1px solid var(--border);border-radius:999px;background:var(--field)}
+  .sqlite-readonly-copy{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+  .sqlite-copy-location{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px;margin-top:10px;padding:8px 10px;
+    border:1px solid var(--border);border-radius:7px;background:var(--field);font-size:11.5px}
+  .sqlite-copy-location strong{color:var(--ink);white-space:nowrap}
+  .sqlite-copy-location code{min-width:0;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overflow-wrap:anywhere;user-select:text}
   .sqlite-exec-status{color:var(--muted);font-size:11.5px}
   .sqlite-exec-result{margin-top:10px;padding:9px 11px;border:1px solid var(--border);border-radius:7px;background:var(--field)}
   .sqlite-exec-result.error{border-color:color-mix(in srgb,var(--danger) 48%,var(--border));background:color-mix(in srgb,var(--danger) 7%,var(--field));color:var(--danger)}

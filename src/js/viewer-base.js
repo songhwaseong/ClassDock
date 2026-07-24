@@ -34,9 +34,13 @@ async function loadSqlite(file, options={}){
   doc.sqliteDocument = true;
   // 서버가 실제 저장 폴더 파일로 확인한 .db 만 편집한다. 일반 드래그/압축 내부 파일의 논리 경로는 쓰지 않는다.
   doc.dbPath = options.sqliteDiskPath || null;
+  doc.dbFullPath = "";
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
-    await renderSqlite(doc.sourceFile || file, host, doc.dbPath);
+    await renderSqlite(doc.sourceFile || file, host, doc.dbPath, (path, fullPath) => {
+      doc.dbPath = path;
+      if (fullPath) doc.dbFullPath = fullPath;
+    }, doc.dbFullPath);
   };
   refreshChrome();
   activateIfIdle(doc, options);
@@ -113,7 +117,7 @@ function sqliteMessage(host, title, detail, kind=""){
   wrap.append(heading, text); host.appendChild(wrap);
 }
 
-async function renderSqlite(file, host, dbPath){
+async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullPath=""){
   const shell = document.createElement("section"); shell.className = "sqlite-host";
   host.appendChild(shell);
   const loading = document.createElement("div"); loading.className = "sqlite-message";
@@ -172,6 +176,7 @@ async function renderSqlite(file, host, dbPath){
   }
 
   let sqlText = "";   // 편집기 내용 — 다시 그릴 때 보존
+  let copiedDbFullPath = String(initialDbFullPath || "");
 
   paintSqlite(data);
 
@@ -204,7 +209,7 @@ async function renderSqlite(file, host, dbPath){
     shell.appendChild(toolbar);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(toolbar);
 
-    if (editable) shell.appendChild(buildSqlEditor(execResult));
+    shell.appendChild(editable ? buildSqlEditor(execResult) : buildSqliteReadOnlyNotice());
 
     if (!tables.length){
       sqliteMessage(shell, "비어 있는 데이터베이스입니다", "사용자 테이블이나 뷰가 아직 없습니다.");
@@ -216,6 +221,89 @@ async function renderSqlite(file, host, dbPath){
     const content = document.createElement("div"); content.className = "sqlite-content";
     layout.append(nav, content); shell.appendChild(layout);
     paintTableList(tables, nav, content);
+  }
+
+  function sqliteCopyPath(){
+    const original = String(file && file.name || "database.db");
+    const clean = original.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim() || "database.db";
+    const dot = clean.lastIndexOf(".");
+    const ext = dot > 0 && /\.(db|sqlite|sqlite3)$/i.test(clean.slice(dot)) ? clean.slice(dot) : ".db";
+    const stem = (dot > 0 ? clean.slice(0, dot) : clean).replace(/[. ]+$/g, "") || "database";
+    const now = new Date();
+    const pad = (value, size=2) => String(value).padStart(size, "0");
+    const stamp = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + "-"
+      + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + "-" + pad(now.getMilliseconds(), 3);
+    return "SQLite 사본/" + stem + "-실행용-" + stamp + ext;
+  }
+
+  function buildSqliteReadOnlyNotice(){
+    const panel = document.createElement("section"); panel.className = "sqlite-editor sqlite-readonly-notice";
+    const head = document.createElement("div"); head.className = "sqlite-editor-head";
+    const label = document.createElement("strong"); label.textContent = "SQL 실행";
+    const hint = document.createElement("span"); hint.className = "sqlite-editor-hint sqlite-readonly-badge";
+    hint.textContent = "읽기 전용";
+    head.append(label, hint);
+
+    const message = document.createElement("p"); message.className = "sqlite-readonly-copy";
+    message.textContent = "이 데이터베이스는 읽기 전용으로 열렸습니다. SQL 실행과 데이터 변경은 안전을 위해 만능교실 저장 폴더에 있는 DB 파일에서만 사용할 수 있습니다.";
+
+    const actions = document.createElement("div"); actions.className = "sqlite-editor-actions";
+    const copy = document.createElement("button"); copy.type = "button"; copy.className = "sqlite-run";
+    copy.textContent = "저장 폴더에 사본 만들기";
+    const open = document.createElement("button"); open.type = "button"; open.className = "sqlite-secondary";
+    open.textContent = "저장 폴더 열기";
+    const status = document.createElement("span"); status.className = "sqlite-exec-status";
+    actions.append(copy, open, status);
+    panel.append(head, message, actions);
+
+    copy.addEventListener("click", async () => {
+      if (copy.disabled) return;
+      copy.disabled = true; open.disabled = true; status.textContent = "사본 저장 중…";
+      try {
+        const copyPath = sqliteCopyPath();
+        const response = await fetch("/save-file", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-Save-Path": encodeURIComponent(copyPath)
+          },
+          body: bytes
+        });
+        const savedFullPath = (await response.text()).trim();
+        if (!response.ok) throw new Error(savedFullPath || ("HTTP " + response.status));
+        const expectedFingerprint = await sqliteSha256(bytes);
+        if (!expectedFingerprint) throw new Error("저장한 사본을 안전하게 확인하지 못했습니다.");
+        const latest = await sqliteDiskSnapshot(copyPath, expectedFingerprint);
+        dbPath = copyPath;
+        copiedDbFullPath = savedFullPath || copyPath;
+        dbFingerprint = latest.fingerprint || expectedFingerprint;
+        editable = true;
+        data = latest;
+        if (typeof onDiskPathChange === "function") onDiskPathChange(copyPath, copiedDbFullPath);
+        try { window.__mnLastSaveRel = copyPath; } catch(_){}
+        if (typeof toast === "function") toast("저장 폴더에 실행 가능한 DB 사본을 만들었습니다.", 3000);
+        paintSqlite(data);
+      } catch(e){
+        status.textContent = "사본을 만들지 못했습니다: " + ((e && e.message) || String(e));
+        copy.disabled = false; open.disabled = false;
+      }
+    });
+
+    open.addEventListener("click", async () => {
+      if (open.disabled) return;
+      open.disabled = true; status.textContent = "";
+      try {
+        const response = await fetch("/open-save-folder", {
+          method: "POST",
+          headers: { "X-PdfSigner-Action":"1" },
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+      } catch(e){
+        status.textContent = "저장 폴더를 열지 못했습니다.";
+      } finally { open.disabled = false; }
+    });
+    return panel;
   }
 
   function buildSqlEditor(execResult){
@@ -236,6 +324,15 @@ async function renderSqlite(file, host, dbPath){
     const status = document.createElement("span"); status.className = "sqlite-exec-status";
     actions.append(run, status);
     panel.append(head, input, actions);
+
+    if (copiedDbFullPath){
+      const location = document.createElement("div"); location.className = "sqlite-copy-location";
+      const locationLabel = document.createElement("strong"); locationLabel.textContent = "사본 절대경로";
+      const locationPath = document.createElement("code"); locationPath.textContent = copiedDbFullPath;
+      locationPath.title = copiedDbFullPath;
+      location.append(locationLabel, locationPath);
+      panel.appendChild(location);
+    }
 
     const result = document.createElement("div"); result.className = "sqlite-exec-result";
     if (execResult) fillExecResult(result, execResult); else result.hidden = true;
