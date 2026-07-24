@@ -88,6 +88,8 @@ test("Python 편집기 터미널은 인증·사용자 확인·프로세스 제�
 test("로컬 터미널은 PowerShell 프로세스를 재사용해 짧은 명령과 cd를 빠르게 처리한다", () => {
   assert.match(launcher, /while \(\(\$mnLine = \[Console\]::In\.ReadLine\(\)\) -ne \$null\)/);
   assert.match(launcher, /\. \(\[ScriptBlock\]::Create\(\$mnCommand\)\)/);
+  assert.match(launcher, /\. \(\[ScriptBlock\]::Create\(\$mnCommand\)\) \| Out-Default/);
+  assert.match(launcher, /\$mnSucceeded = \$mnPipelineSucceeded -and \(\$Error\.Count -eq \$mnErrorCount\)/);
   assert.match(launcher, /session\.Input\.WriteLine\(session\.Sequence\.ToString\(\) \+ "\|"/);
   assert.match(pythonTerminal, /fetch\("\/terminal-session-open"/);
   assert.match(pythonTerminal, /fetch\("\/terminal-session-run\?id="/);

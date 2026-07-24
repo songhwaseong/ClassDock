@@ -441,7 +441,9 @@ async function restoreLastWorkspace(){
     beginUiBatch();
     const folderGroups = new Map(), loose = [];
     const ensureFolderGroup = (root) => {
-      if (!folderGroups.has(root)) folderGroups.set(root, { files:[], folderPaths:[], pendingImageFolderPaths:[], originalSaveMode:false });
+      if (!folderGroups.has(root)) folderGroups.set(root, {
+        rootName:root, files:[], folderPaths:[], pendingImageFolderPaths:[], originalSaveMode:false
+      });
       return folderGroups.get(root);
     };
     rows.forEach(row => {
@@ -463,11 +465,21 @@ async function restoreLastWorkspace(){
       const root = path.split("/")[0];
       if (root) ensureFolderGroup(root).originalSaveMode = true;
     });
-    for (const group of folderGroups.values())
+    for (const group of folderGroups.values()){
+      const nativeHandle = group.originalSaveMode && typeof restoreNativeSourceFolder === "function"
+        ? await restoreNativeSourceFolder(group.rootName)
+        : null;
       // 대량 이미지가 자동 복원 저장에서 제외된 폴더는 빈 트리만 먼저 복원한다.
       // 사용자가 그 루트 폴더를 클릭하면 저장해 둔 폴더 핸들로 실제 파일을 다시 읽는다.
-      await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
-        originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true });
+      if (nativeHandle){
+        await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+          originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true,
+          folderHandle:nativeHandle, nativeRootPath:nativeHandle.nativePath });
+      } else {
+        await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+          originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true });
+      }
+    }
     if (loose.length){
       let opts = { bulk: loose.length > 1 };
       const siblings = loose.filter(f => !["zip","tar","gz","tgz"].includes((f.name.split(".").pop() || "").toLowerCase()));

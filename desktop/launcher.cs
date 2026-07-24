@@ -17,6 +17,28 @@ class PdfSignerLauncher
     static extern bool AllowSetForegroundWindow(int dwProcessId);
     [DllImport("user32.dll")]
     static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct BROWSEINFO
+    {
+        public IntPtr hwndOwner;
+        public IntPtr pidlRoot;
+        public IntPtr pszDisplayName;
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string lpszTitle;
+        public uint ulFlags;
+        public IntPtr lpfn;
+        public IntPtr lParam;
+        public int iImage;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHBrowseForFolderW")]
+    static extern IntPtr SHBrowseForFolder(ref BROWSEINFO info);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHGetPathFromIDListW")]
+    static extern bool SHGetPathFromIDList(IntPtr pidl, StringBuilder path);
+    [DllImport("ole32.dll")]
+    static extern void CoTaskMemFree(IntPtr ptr);
 
     // ── 프로세스 트리(자기 자신 + 파이썬 커널·드라이버 등 자식) 메모리 측정용 ──
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
@@ -138,6 +160,18 @@ class PdfSignerLauncher
     static readonly object SaveRootPickerLock = new object();
     static string SaveRootPickerState = "idle";
     static string SaveRootPickerResult = "";
+    // EXE의 '폴더 열기'는 브라우저 File System Access API 대신 Windows 폴더 선택창을 사용한다.
+    // 브라우저 API가 숨기는 드라이브 포함 절대경로를 터미널 작업폴더로 전달하면서도,
+    // 선택한 루트 밖의 파일에는 접근할 수 없도록 실행 중 발급한 ID로만 후속 요청을 받는다.
+    static readonly object SourceFolderLock = new object();
+    static readonly Dictionary<string, string> SourceFolders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    static readonly string SourceFolderConfigPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PdfSigner", "source-folders.txt");
+    static readonly object SourceFolderPickerLock = new object();
+    static string SourceFolderPickerState = "idle";
+    static string SourceFolderPickerResult = "";
+    static string SourceFolderPickerId = "";
     // 오프라인 실행용으로 번들된 Pyodide 코어 폴더(exe 옆 vendor/pyodide/). tools/download-pyodide.js 로 채운다.
     static readonly string PyodideDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vendor", "pyodide");
     const int WorkspaceMaxBytes = 500 * 1024 * 1024;
@@ -531,6 +565,157 @@ class PdfSignerLauncher
         }
     }
 
+    static string RunSourceFolderPickerDialog()
+    {
+        IntPtr displayName = Marshal.AllocHGlobal(520);
+        IntPtr pidl = IntPtr.Zero;
+        try
+        {
+            BROWSEINFO info = new BROWSEINFO();
+            // 사용자가 버튼을 누른 브라우저 창을 소유자로 지정해 선택창이 뒤에 숨지 않게 한다.
+            info.hwndOwner = GetForegroundWindow();
+            info.pszDisplayName = displayName;
+            info.lpszTitle = "만능파일교실에서 열 폴더를 선택하세요.";
+            // BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX | BIF_NONEWFOLDERBUTTON
+            info.ulFlags = 1 | 64 | 16 | 512;
+            pidl = SHBrowseForFolder(ref info);
+            if (pidl == IntPtr.Zero) return "";
+            StringBuilder selected = new StringBuilder(32768);
+            if (!SHGetPathFromIDList(pidl, selected)) throw new InvalidOperationException("folder-path-unavailable");
+            return selected.ToString().Trim();
+        }
+        finally
+        {
+            if (pidl != IntPtr.Zero) CoTaskMemFree(pidl);
+            Marshal.FreeHGlobal(displayName);
+        }
+    }
+
+    static void RememberSourceFolder(string path)
+    {
+        try
+        {
+            string normalized = Path.GetFullPath(path);
+            string dir = Path.GetDirectoryName(SourceFolderConfigPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            List<string> rows = new List<string>();
+            if (File.Exists(SourceFolderConfigPath))
+                foreach (string row in File.ReadAllLines(SourceFolderConfigPath, Encoding.UTF8))
+                    try
+                    {
+                        string value = Path.GetFullPath(row.Trim());
+                        if (Directory.Exists(value) && !rows.Exists(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+                            rows.Add(value);
+                    }
+                    catch { }
+            rows.RemoveAll(x => string.Equals(x, normalized, StringComparison.OrdinalIgnoreCase));
+            rows.Insert(0, normalized);
+            if (rows.Count > 64) rows.RemoveRange(64, rows.Count - 64);
+            File.WriteAllLines(SourceFolderConfigPath, rows.ToArray(), new UTF8Encoding(false));
+        }
+        catch { }
+    }
+
+    static bool IsRememberedSourceFolder(string path)
+    {
+        try
+        {
+            string normalized = Path.GetFullPath(path);
+            if (!File.Exists(SourceFolderConfigPath)) return false;
+            foreach (string row in File.ReadAllLines(SourceFolderConfigPath, Encoding.UTF8))
+                try
+                {
+                    if (string.Equals(Path.GetFullPath(row.Trim()), normalized, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                catch { }
+        }
+        catch { }
+        return false;
+    }
+
+    static string RegisterSourceFolder(string path, bool remember)
+    {
+        string normalized = NormalizeSaveRoot(path);
+        if (string.IsNullOrEmpty(normalized) || !Directory.Exists(normalized))
+            throw new DirectoryNotFoundException("source-folder-not-found");
+        lock (SourceFolderLock)
+        {
+            foreach (KeyValuePair<string, string> item in SourceFolders)
+                if (string.Equals(item.Value, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (remember) RememberSourceFolder(normalized);
+                    return item.Key;
+                }
+            string id = Guid.NewGuid().ToString("N");
+            SourceFolders[id] = normalized;
+            if (remember) RememberSourceFolder(normalized);
+            return id;
+        }
+    }
+
+    static bool StartSourceFolderPicker()
+    {
+        lock (SourceFolderPickerLock)
+        {
+            if (SourceFolderPickerState == "opening") return false;
+            SourceFolderPickerState = "opening";
+            SourceFolderPickerResult = "";
+            SourceFolderPickerId = "";
+        }
+        Thread dialogThread = new Thread(delegate()
+        {
+            try
+            {
+                string selected = RunSourceFolderPickerDialog();
+                lock (SourceFolderPickerLock)
+                {
+                    if (string.IsNullOrEmpty(selected))
+                    {
+                        SourceFolderPickerState = "cancelled";
+                    }
+                    else
+                    {
+                        SourceFolderPickerResult = Path.GetFullPath(selected);
+                        SourceFolderPickerId = RegisterSourceFolder(SourceFolderPickerResult, true);
+                        SourceFolderPickerState = "saved";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (SourceFolderPickerLock)
+                {
+                    SourceFolderPickerState = "error";
+                    SourceFolderPickerResult = FlattenMessage(ex);
+                    SourceFolderPickerId = "";
+                }
+            }
+        });
+        dialogThread.SetApartmentState(ApartmentState.STA);
+        dialogThread.IsBackground = true;
+        dialogThread.Start();
+        return true;
+    }
+
+    static string SourceFolderPickerStatusJson()
+    {
+        lock (SourceFolderPickerLock)
+        {
+            return "{\"state\":" + JsonString(SourceFolderPickerState)
+                + ",\"result\":" + JsonString(SourceFolderPickerResult)
+                + ",\"id\":" + JsonString(SourceFolderPickerId) + "}";
+        }
+    }
+
+    static string RestoreSourceFolderJson(byte[] body)
+    {
+        string path = Encoding.UTF8.GetString(body ?? new byte[0]).Trim();
+        if (!IsRememberedSourceFolder(path)) throw new UnauthorizedAccessException("source-folder-not-remembered");
+        string id = RegisterSourceFolder(path, false);
+        return "{\"id\":" + JsonString(id) + ",\"path\":" + JsonString(Path.GetFullPath(path)) + "}";
+    }
+
     static bool HasLocalActionHeader(Dictionary<string, string> headers)
     {
         string value;
@@ -594,6 +779,10 @@ class PdfSignerLauncher
             if (path.StartsWith("/app-state", StringComparison.Ordinal)) return true;
             if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec" || path == "/save-file") return true;
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
+            if (path == "/choose-source-folder" || path == "/source-folder-restore") return true;
+            if (path.StartsWith("/source-folder-file", StringComparison.Ordinal)
+                || path.StartsWith("/source-folder-directory", StringComparison.Ordinal)
+                || path.StartsWith("/source-folder-remove", StringComparison.Ordinal)) return true;
             if (path == "/image-memo-delete") return true;
             if (path == "/complete" || path == "/definition" || path == "/pip-install") return true;
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
@@ -607,6 +796,10 @@ class PdfSignerLauncher
         {
             if (path == "/workspace-load") return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
+            if (path == "/source-folder-capability" || path == "/choose-source-folder-status") return true;
+            if (path.StartsWith("/source-folder-entry", StringComparison.Ordinal)
+                || path.StartsWith("/source-folder-list", StringComparison.Ordinal)
+                || path.StartsWith("/source-folder-file", StringComparison.Ordinal)) return true;
             if (path == "/image-memo-list" || path.StartsWith("/image-memo-file?", StringComparison.Ordinal)) return true;
             if (path == "/can-complete") return true;
             if (path == "/python-import-index") return true;
@@ -1322,6 +1515,155 @@ class PdfSignerLauncher
                         return;
                     }
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(SaveRootPickerStatusJson()));
+                }
+                else if (method == "GET" && path == "/source-folder-capability")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "POST" && path == "/choose-source-folder")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool started = StartSourceFolderPicker();
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(started ? "opened" : "opening"));
+                }
+                else if (method == "GET" && path == "/choose-source-folder-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(SourceFolderPickerStatusJson()));
+                }
+                else if (method == "POST" && path == "/source-folder-restore")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(RestoreSourceFolderJson(body)));
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("source-folder-restore-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/source-folder-entry?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = SourceFolderEntryJson(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/source-folder-list?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = SourceFolderListJson(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (DirectoryNotFoundException ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/source-folder-file?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        byte[] bytes = ReadSourceFolderFile(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteResponse(stream, "200 OK", "application/octet-stream", bytes);
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/source-folder-file?", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        WriteSourceFolderFile(QueryValue(path, "id"), QueryValue(path, "path"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("source-file-write-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/source-folder-directory?", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        CreateSourceFolderDirectory(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("source-directory-create-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/source-folder-remove?", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        RemoveSourceFolderEntry(
+                            QueryValue(path, "id"),
+                            QueryValue(path, "path"),
+                            QueryValue(path, "recursive") == "1");
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("source-entry-remove-failed: " + FlattenMessage(ex)));
+                    }
                 }
                 else if (method == "GET" && path == "/image-memo-list")
                 {
@@ -2255,6 +2597,137 @@ class PdfSignerLauncher
         catch { return false; }
     }
 
+    static bool TryResolveSourceFolderPath(string id, string relativePath, bool allowRoot, out string root, out string full)
+    {
+        root = "";
+        full = "";
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        lock (SourceFolderLock)
+        {
+            if (!SourceFolders.TryGetValue(id, out root)) return false;
+        }
+        try
+        {
+            root = Path.GetFullPath(root);
+            string rel = (relativePath ?? "").Trim();
+            if (rel.Length == 0)
+            {
+                if (!allowRoot) return false;
+                full = root;
+                return Directory.Exists(full);
+            }
+            string safe = SafeRelPath(rel);
+            if (safe == null) return false;
+            string candidate = Path.GetFullPath(Path.Combine(root, safe));
+            if (!IsPathInsideRoot(root, candidate, false) || HasReparsePointBelowRoot(root, candidate)) return false;
+            full = candidate;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    static long UnixMilliseconds(DateTime value)
+    {
+        DateTime utc = value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+        return (long)(utc - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+    }
+
+    static string SourceFolderEntryJson(string id, string relativePath)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, true, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        if (Directory.Exists(full))
+        {
+            DirectoryInfo info = new DirectoryInfo(full);
+            return "{\"kind\":\"directory\",\"name\":" + JsonString(info.Name)
+                + ",\"size\":0,\"lastModified\":" + UnixMilliseconds(info.LastWriteTimeUtc) + "}";
+        }
+        if (File.Exists(full))
+        {
+            FileInfo info = new FileInfo(full);
+            return "{\"kind\":\"file\",\"name\":" + JsonString(info.Name)
+                + ",\"size\":" + info.Length
+                + ",\"lastModified\":" + UnixMilliseconds(info.LastWriteTimeUtc) + "}";
+        }
+        throw new FileNotFoundException("source-entry-not-found");
+    }
+
+    static string SourceFolderListJson(string id, string relativePath)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, true, out root, out full) || !Directory.Exists(full))
+            throw new DirectoryNotFoundException("source-directory-not-found");
+        List<FileSystemInfo> entries = new List<FileSystemInfo>();
+        foreach (FileSystemInfo entry in new DirectoryInfo(full).GetFileSystemInfos())
+        {
+            // 숨김 폴더(.git 등)는 순회하지 않되 .env 같은 점 파일은 기존 폴더 열기와 동일하게 전달한다.
+            if (entry is DirectoryInfo && entry.Name.StartsWith(".", StringComparison.Ordinal)) continue;
+            try { if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue; }
+            catch { continue; }
+            entries.Add(entry);
+        }
+        entries.Sort(delegate(FileSystemInfo a, FileSystemInfo b)
+        {
+            bool ad = a is DirectoryInfo, bd = b is DirectoryInfo;
+            if (ad != bd) return ad ? -1 : 1;
+            return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        });
+        StringBuilder json = new StringBuilder("{\"items\":[");
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (i > 0) json.Append(',');
+            FileSystemInfo entry = entries[i];
+            FileInfo file = entry as FileInfo;
+            json.Append("{\"kind\":").Append(JsonString(file == null ? "directory" : "file"))
+                .Append(",\"name\":").Append(JsonString(entry.Name))
+                .Append(",\"size\":").Append(file == null ? 0 : file.Length)
+                .Append(",\"lastModified\":").Append(UnixMilliseconds(entry.LastWriteTimeUtc))
+                .Append('}');
+        }
+        return json.Append("]}").ToString();
+    }
+
+    static byte[] ReadSourceFolderFile(string id, string relativePath)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        if (!File.Exists(full)) throw new FileNotFoundException("source-file-not-found");
+        return File.ReadAllBytes(full);
+    }
+
+    static void WriteSourceFolderFile(string id, string relativePath, byte[] body)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        string parent = Path.GetDirectoryName(full);
+        if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
+            throw new DirectoryNotFoundException("source-parent-not-found");
+        if (Directory.Exists(full)) throw new IOException("source-entry-is-directory");
+        File.WriteAllBytes(full, body ?? new byte[0]);
+    }
+
+    static void CreateSourceFolderDirectory(string id, string relativePath)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        if (File.Exists(full)) throw new IOException("source-entry-is-file");
+        Directory.CreateDirectory(full);
+    }
+
+    static void RemoveSourceFolderEntry(string id, string relativePath, bool recursive)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        if (File.Exists(full)) { File.Delete(full); return; }
+        if (Directory.Exists(full)) { Directory.Delete(full, recursive); return; }
+        throw new FileNotFoundException("source-entry-not-found");
+    }
+
     static bool TryReadLocalFile(string path, out byte[] data, out string fileName)
     {
         data = null;
@@ -2737,8 +3210,12 @@ class PdfSignerLauncher
             "  try {\r\n" +
             "    $mnCommand = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($mnLine.Substring($mnSep + 1)))\r\n" +
             "    $global:LASTEXITCODE = $null\r\n" +
-            "    . ([ScriptBlock]::Create($mnCommand))\r\n" +
-            "    $mnSucceeded = $?\r\n" +
+            "    $mnErrorCount = $Error.Count\r\n" +
+            // 지속형 while 안에서 객체를 그대로 내보내면 Get-ChildItem(ls)도 속성 목록으로 풀린다.
+            // 실제 콘솔 호스트처럼 Out-Default를 거치게 해 기본 Table/List 뷰와 열 정렬을 적용한다.
+            "    . ([ScriptBlock]::Create($mnCommand)) | Out-Default\r\n" +
+            "    $mnPipelineSucceeded = $?\r\n" +
+            "    $mnSucceeded = $mnPipelineSucceeded -and ($Error.Count -eq $mnErrorCount)\r\n" +
             "    if ($null -ne $LASTEXITCODE) { $mnExitCode = [int]$LASTEXITCODE }\r\n" +
             "    elseif (-not $mnSucceeded) { $mnExitCode = 1 }\r\n" +
             "  } catch {\r\n" +

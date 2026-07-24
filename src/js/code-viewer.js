@@ -1491,7 +1491,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     }
   };
   const initialDocPath = ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath);
-  if (initialDocPath && ownerDoc.originalSaveMode){
+  if (ownerDoc && ownerDoc.nativeAbsolutePath){
+    setSavedPath(ownerDoc.nativeAbsolutePath);
+  } else if (initialDocPath && ownerDoc.originalSaveMode){
     // 폴더 열기로 받은 File System Access 핸들은 브라우저 보안상 절대경로를 공개하지 않는다.
     // 대신 실제 원본 폴더 안에서 사용할 상대경로를 표시해 파일명만 경로처럼 보이는 혼란을 막는다.
     setSavedPath(initialDocPath, { original:true, pending:!!(ownerDoc.isScratch && !ownerDoc._named) });
@@ -2771,7 +2773,7 @@ function openFsHandleDb(){
 }
 function fsHandleKey(path){ return String(path || "").replace(/\\/g, "/").replace(/^\/+/, ""); }
 async function saveFsHandle(path, handle){
-  const key = fsHandleKey(path); if (!key || !handle) return;
+  const key = fsHandleKey(path); if (!key || !handle || handle.__manneungNativeHandle) return;
   try { const db = await openFsHandleDb(); await new Promise((res, rej) => { const tx = db.transaction(FS_HANDLE_STORE, "readwrite"); tx.objectStore(FS_HANDLE_STORE).put(handle, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
   catch(e){ console.warn("fs handle save skipped:", e); }
 }

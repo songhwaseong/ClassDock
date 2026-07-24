@@ -35,10 +35,12 @@ async function handleFiles(files, options={}){
     const opts = { ...options, bulk, size: file.size || 0, fsHandle: options.fsHandle || file.__fsHandle || null,
       fsDirHandle: options.fsDirHandle || file.__fsDirHandle || null,
       sqliteDiskPath: options.sqliteDiskPath || file.__sqliteDiskPath || null,
+      nativeAbsolutePath: options.nativeAbsolutePath || file.__nativeAbsolutePath || null,
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
-    if (opts.fsHandle && opts.workspacePath && typeof saveFsHandle === "function") saveFsHandle(opts.workspacePath, opts.fsHandle);
+    if (opts.fsHandle && !opts.fsHandle.__manneungNativeHandle && opts.workspacePath && typeof saveFsHandle === "function")
+      saveFsHandle(opts.workspacePath, opts.fsHandle);
     const duplicate = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
     if (duplicate){
       if (!uiBatchDepth) setActiveDoc(duplicate.id);
@@ -497,10 +499,19 @@ async function loadRememberedFolderHandle(rootName){
 function rememberFolderHandle(rootGroup, rootName){
   if (typeof saveFsHandle !== "function" || typeof loadFsHandle !== "function") return;
   if (rootGroup.folderHandle){
-    saveFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName, rootGroup.folderHandle);
+    if (!rootGroup.folderHandle.__manneungNativeHandle)
+      saveFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName, rootGroup.folderHandle);
     return;
   }
   if (!rootGroup.originalSaveMode) return;
+  if (typeof restoreNativeSourceFolder === "function"){
+    restoreNativeSourceFolder(rootName).then(handle => {
+      if (handle && !rootGroup.folderHandle){
+        rootGroup.folderHandle = handle;
+        rootGroup.nativeRootPath = handle.nativePath || "";
+      }
+    }).catch(() => {});
+  }
   loadRememberedFolderHandle(rootName).then(handle => {
     if (handle && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
   }).catch(() => {});
@@ -591,7 +602,237 @@ async function collectFolderEntryPaths(entries, fileList){
   for (const entry of entries || []) await visit(entry);
   return [...paths].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
 }
+
+// EXE에서는 Windows 폴더 선택창이 고른 실제 절대경로를 로컬 서버가 보관하고,
+// 아래 핸들이 File System Access API와 같은 최소 인터페이스를 제공한다.
+// 일반 브라우저에는 이 엔드포인트가 없으므로 기존 showDirectoryPicker를 그대로 사용한다.
+const NATIVE_SOURCE_ROOTS_KEY = "manneung-native-source-roots:v1";
+let nativeSourceFolderCapability = null;
+function nativeSourceUrl(path, id, rel, extra=""){
+  return path + "?id=" + encodeURIComponent(id || "") + "&path=" + encodeURIComponent(rel || "") + extra;
+}
+function nativeJoinRel(parent, name){
+  const left = String(parent || "").replace(/\/+$/, "");
+  const right = String(name || "").replace(/^\/+/, "");
+  return left ? left + "/" + right : right;
+}
+function nativeJoinAbsolute(parent, name){
+  return String(parent || "").replace(/[\\/]+$/, "") + "\\" + String(name || "").replace(/^[\\/]+/, "");
+}
+function nativeHandleError(response, text){
+  const name = response && response.status === 404 ? "NotFoundError"
+    : response && response.status === 403 ? "NotAllowedError"
+    : "InvalidStateError";
+  try { return new DOMException(text || name, name); }
+  catch(_){ const error = new Error(text || name); error.name = name; return error; }
+}
+async function nativeSourceFetch(url, options={}){
+  const response = await fetch(url, { cache:"no-store", ...options });
+  if (!response.ok) throw nativeHandleError(response, await response.text());
+  return response;
+}
+function rememberNativeSourceRoot(name, path){
+  if (!name || !path) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(NATIVE_SOURCE_ROOTS_KEY) || "{}");
+    saved[String(name)] = String(path);
+    localStorage.setItem(NATIVE_SOURCE_ROOTS_KEY, JSON.stringify(saved));
+  } catch(_){}
+}
+function rememberedNativeSourceRoot(name){
+  try {
+    const saved = JSON.parse(localStorage.getItem(NATIVE_SOURCE_ROOTS_KEY) || "{}");
+    return String(saved && saved[String(name)] || "");
+  } catch(_){ return ""; }
+}
+async function nativeSourceSupported(){
+  if (nativeSourceFolderCapability != null) return nativeSourceFolderCapability;
+  if (location.protocol !== "http:" && location.protocol !== "https:") return (nativeSourceFolderCapability = false);
+  try {
+    const response = await fetch("/source-folder-capability", { cache:"no-store" });
+    nativeSourceFolderCapability = response.ok && (await response.text()).trim() === "yes";
+  } catch(_){ nativeSourceFolderCapability = false; }
+  return nativeSourceFolderCapability;
+}
+async function nativeSourceEntry(id, rel){
+  const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-entry", id, rel));
+  return response.json();
+}
+async function nativeWritableBytes(value){
+  if (value instanceof Blob) return new Uint8Array(await value.arrayBuffer());
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (value && typeof value === "object" && value.type === "write") return nativeWritableBytes(value.data);
+  return new TextEncoder().encode(String(value == null ? "" : value));
+}
+class NativeSourceFileHandle {
+  constructor(rootId, rootPath, relPath, meta=null){
+    this.kind = "file";
+    this.__manneungNativeHandle = true;
+    this.rootId = rootId;
+    this.rootPath = rootPath;
+    this.relPath = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    this.name = this.relPath.split("/").pop() || "file";
+    this.nativePath = nativeJoinAbsolute(rootPath, this.relPath.replace(/\//g, "\\"));
+    this.meta = meta || null;
+  }
+  async queryPermission(){ return "granted"; }
+  async requestPermission(){ return "granted"; }
+  async isSameEntry(other){
+    return !!(other && other.kind === "file" && String(other.nativePath || "").toLowerCase() === this.nativePath.toLowerCase());
+  }
+  async getFile(){
+    let meta = this.meta;
+    if (!meta) meta = await nativeSourceEntry(this.rootId, this.relPath);
+    const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, this.relPath));
+    const blob = await response.blob();
+    let file = new File([blob], this.name, {
+      type:blob.type || "application/octet-stream",
+      lastModified:Number(meta && meta.lastModified) || Date.now()
+    });
+    try { Object.defineProperty(file, "__nativeAbsolutePath", { value:this.nativePath, configurable:true }); } catch(_){}
+    if (typeof withFileHandle === "function") file = withFileHandle(file, this);
+    return file;
+  }
+  async createWritable(){
+    const handle = this;
+    let bytes = new Uint8Array(0), closed = false;
+    return {
+      async write(value){
+        if (closed) throw new Error("writable-closed");
+        bytes = await nativeWritableBytes(value);
+      },
+      async close(){
+        if (closed) return;
+        closed = true;
+        await nativeSourceFetch(nativeSourceUrl("/source-folder-file", handle.rootId, handle.relPath), {
+          method:"POST",
+          headers:{ "Content-Type":"application/octet-stream", "X-PdfSigner-Action":"1" },
+          body:bytes
+        });
+        handle.meta = { kind:"file", name:handle.name, size:bytes.byteLength, lastModified:Date.now() };
+      },
+      async abort(){ closed = true; }
+    };
+  }
+}
+class NativeSourceDirectoryHandle {
+  constructor(rootId, rootPath, relPath=""){
+    this.kind = "directory";
+    this.__manneungNativeHandle = true;
+    this.rootId = rootId;
+    this.rootPath = String(rootPath || "").replace(/[\\/]+$/, "");
+    this.relPath = String(relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    this.name = this.relPath ? this.relPath.split("/").pop() : (this.rootPath.split(/[\\/]/).pop() || this.rootPath);
+    this.nativePath = this.relPath ? nativeJoinAbsolute(this.rootPath, this.relPath.replace(/\//g, "\\")) : this.rootPath;
+  }
+  async queryPermission(){ return "granted"; }
+  async requestPermission(){ return "granted"; }
+  async isSameEntry(other){
+    return !!(other && other.kind === "directory" && String(other.nativePath || "").toLowerCase() === this.nativePath.toLowerCase());
+  }
+  async resolve(other){
+    if (!other || !other.nativePath) return null;
+    const base = this.nativePath.replace(/[\\/]+$/, "");
+    const target = String(other.nativePath).replace(/[\\/]+$/, "");
+    if (target.toLowerCase() === base.toLowerCase()) return [];
+    const prefix = base + "\\";
+    if (!target.toLowerCase().startsWith(prefix.toLowerCase())) return null;
+    return target.slice(prefix.length).split(/[\\/]/).filter(Boolean);
+  }
+  async *values(){
+    const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-list", this.rootId, this.relPath));
+    const data = await response.json();
+    for (const item of (data.items || [])){
+      const rel = nativeJoinRel(this.relPath, item.name);
+      yield item.kind === "directory"
+        ? new NativeSourceDirectoryHandle(this.rootId, this.rootPath, rel)
+        : new NativeSourceFileHandle(this.rootId, this.rootPath, rel, item);
+    }
+  }
+  async getDirectoryHandle(name, options={}){
+    const rel = nativeJoinRel(this.relPath, name);
+    try {
+      const item = await nativeSourceEntry(this.rootId, rel);
+      if (item.kind !== "directory") throw nativeHandleError(null, "source-entry-is-file");
+    } catch(error){
+      if (!options.create || error.name !== "NotFoundError") throw error;
+      await nativeSourceFetch(nativeSourceUrl("/source-folder-directory", this.rootId, rel), {
+        method:"POST", headers:{ "X-PdfSigner-Action":"1" }
+      });
+    }
+    return new NativeSourceDirectoryHandle(this.rootId, this.rootPath, rel);
+  }
+  async getFileHandle(name, options={}){
+    const rel = nativeJoinRel(this.relPath, name);
+    let meta = null;
+    try {
+      meta = await nativeSourceEntry(this.rootId, rel);
+      if (meta.kind !== "file") throw nativeHandleError(null, "source-entry-is-directory");
+    } catch(error){
+      if (!options.create || error.name !== "NotFoundError") throw error;
+      await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, rel), {
+        method:"POST",
+        headers:{ "Content-Type":"application/octet-stream", "X-PdfSigner-Action":"1" },
+        body:new Uint8Array(0)
+      });
+      meta = { kind:"file", name:String(name), size:0, lastModified:Date.now() };
+    }
+    return new NativeSourceFileHandle(this.rootId, this.rootPath, rel, meta);
+  }
+  async removeEntry(name, options={}){
+    const rel = nativeJoinRel(this.relPath, name);
+    await nativeSourceFetch(nativeSourceUrl("/source-folder-remove", this.rootId, rel,
+      "&recursive=" + (options.recursive ? "1" : "0")), {
+      method:"POST", headers:{ "X-PdfSigner-Action":"1" }
+    });
+  }
+}
+async function chooseNativeSourceFolder(){
+  if (!(await nativeSourceSupported())) return { supported:false, handle:null };
+  const headers = { "X-PdfSigner-Action":"1" };
+  await nativeSourceFetch("/choose-source-folder", { method:"POST", headers });
+  for (let attempt = 0; attempt < 1200; attempt++){
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const response = await nativeSourceFetch("/choose-source-folder-status", { headers });
+    const status = await response.json();
+    if (status.state === "opening") continue;
+    if (status.state === "cancelled") return { supported:true, handle:null };
+    if (status.state === "saved" && status.id && status.result){
+      const handle = new NativeSourceDirectoryHandle(status.id, status.result);
+      rememberNativeSourceRoot(handle.name, status.result);
+      return { supported:true, handle };
+    }
+    throw new Error(status.result || "folder-picker-failed");
+  }
+  throw new Error("folder-picker-timeout");
+}
+async function restoreNativeSourceFolder(rootName){
+  if (!(await nativeSourceSupported())) return null;
+  const path = rememberedNativeSourceRoot(rootName);
+  if (!path) return null;
+  try {
+    const response = await nativeSourceFetch("/source-folder-restore", {
+      method:"POST",
+      headers:{ "Content-Type":"text/plain;charset=utf-8", "X-PdfSigner-Action":"1" },
+      body:path
+    });
+    const data = await response.json();
+    return data.id && data.path ? new NativeSourceDirectoryHandle(data.id, data.path) : null;
+  } catch(_){ return null; }
+}
 async function chooseFolderHandle(startIn=null){
+  try {
+    const native = await chooseNativeSourceFolder();
+    if (native.supported) return native.handle;
+  } catch(error){
+    // 로컬 선택창이 특정 Windows 환경에서 실패해도 버튼 자체가 무반응처럼 끝나지 않게,
+    // 이번 실행에서는 기존 브라우저 폴더 선택창으로 즉시 폴백한다.
+    console.warn("native source folder picker failed:", error);
+    nativeSourceFolderCapability = false;
+    if (typeof toast === "function")
+      toast("Windows 폴더 선택창을 열지 못해 기본 폴더 선택창으로 전환합니다.", 3600);
+  }
   if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") return null;
   const options = { mode: "read" };
   if (startIn && startIn.kind === "directory") options.startIn = startIn;
@@ -749,6 +990,8 @@ async function openFolderFiles(fileList, options={}){
   rootGroup.folderRefreshRootId = rootGroup.nodeId;
   rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderHandle = options.folderHandle || null;
+  rootGroup.nativeRootPath = String(options.nativeRootPath ||
+    (rootGroup.folderHandle && rootGroup.folderHandle.__manneungNativeHandle && rootGroup.folderHandle.nativePath) || "");
   rememberFolderHandle(rootGroup, rootName);   // 핸들 IDB 보관/복구 — 재실행 뒤에도 '폴더 새로고침'이 권한 1클릭으로 동작
   // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
   rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
@@ -803,6 +1046,9 @@ async function openFolderFiles(fileList, options={}){
       const rel = f.webkitRelativePath || (rootName + "/" + f.name);
       const parentId = parentFor(rel);
       await handleFiles([f], { parentId, bulk: true, relPath: rel, archiveCtx: folderCtx,
+        nativeAbsolutePath:f.__nativeAbsolutePath || (rootGroup.nativeRootPath
+          ? nativeJoinAbsolute(rootGroup.nativeRootPath, rel.split("/").slice(1).join("\\"))
+          : null),
         originalSaveMode: rootGroup.originalSaveMode });   // 첫 개만 즉시 렌더, 나머지 지연
       opened++;
       // 진행 표시·양보는 묶어서 — 파일마다 하면 수천 개 폴더에서 그 비용만 수십 초가 된다.
@@ -939,6 +1185,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     if (unchanged){
       doc.fsHandle = file.__fsHandle || doc.fsHandle || null;
       doc.fsDirHandle = file.__fsDirHandle || doc.fsDirHandle || null;
+      doc.nativeAbsolutePath = file.__nativeAbsolutePath || doc.nativeAbsolutePath || null;
       doc.originalSaveMode = !!root.originalSaveMode;
       keptDocs.push(doc); nextByKey.delete(key);
     }
@@ -1017,6 +1264,9 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     try {
       const rel = f.webkitRelativePath || (selectedRootName + "/" + f.name);
       await handleFiles([f], { parentId: parentFor(rel), bulk: true, relPath: rel, archiveCtx: folderCtx,
+        nativeAbsolutePath:f.__nativeAbsolutePath || (root.nativeRootPath
+          ? nativeJoinAbsolute(root.nativeRootPath, rel.split("/").slice(1).join("\\"))
+          : null),
         originalSaveMode: !!root.originalSaveMode });
       opened++;
       if (opened % 20 === 0 || opened === addFiles.length) updateLoading(`폴더 동기화 중… (${opened}/${addFiles.length})`);
@@ -1043,6 +1293,8 @@ async function refreshFolderGroup(rootId, fileList, options={}){
 
   // 루트·하위 그룹 메타데이터를 새 스냅샷 기준으로 갱신
   root.folderHandle = options.folderHandle || root.folderHandle || null;
+  root.nativeRootPath = String(options.nativeRootPath || root.nativeRootPath ||
+    (root.folderHandle && root.folderHandle.__manneungNativeHandle && root.folderHandle.nativePath) || "");
   rememberFolderHandle(root, selectedRootName);
   root.restorePendingImages = false;
   root.runOutputsPending = false;

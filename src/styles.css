@@ -2947,7 +2947,7 @@
   .py-terminal-status.error{color:#f87171}
   .py-terminal-input-row{position:sticky;bottom:0;display:flex;align-items:flex-end;gap:8px;padding:9px 11px;
     border-top:1px solid var(--code-border);background:var(--code-panel-head);z-index:3}
-  .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4ade80;font-weight:700;user-select:none}
+  .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--code-text);font-weight:700;user-select:none}
   .py-terminal-command{flex:1;min-width:0;min-height:24px;max-height:110px;resize:vertical;padding:2px 0;border:0;outline:0;
     background:transparent;color:var(--code-text);caret-color:#4ade80;
     font:var(--code-fs,13px)/var(--code-lh,21px) var(--code-ff,Consolas,"Courier New",monospace)}
@@ -3038,6 +3038,12 @@
   .code-pin-mark:hover{opacity:1;transform:scale(1.18)}
   .code-pin-badge{position:absolute;right:-3px;top:-3px;min-width:13px;height:13px;padding:0 2px;box-sizing:border-box;
     border-radius:7px;background:var(--accent,#2563eb);color:#fff;font:700 8px/13px system-ui,sans-serif;text-align:center}
+  /* 거터 맨 아래 '↓' 버튼: 마지막 줄번호 왼쪽(핀 레인)에서 누르면 문서 끝에 빈 줄 10개 추가(엔터 10번 효과) */
+  .code-jump-down{position:absolute;left:1px;z-index:5;display:flex;align-items:center;justify-content:center;
+    width:18px;padding:0;margin:0;border:0;background:transparent;cursor:pointer;
+    color:var(--code-muted,#94a3b8);font-size:13px;line-height:1;pointer-events:auto;opacity:.55;
+    transition:transform .08s ease,opacity .08s ease,color .08s ease}
+  .code-jump-down:hover{opacity:1;color:var(--accent,#2563eb);transform:translateY(1px)}
   /* 더블클릭한 단어와 같은 단어들: 글자 뒤에 깔리는 은은한 음영(맨 뒤 레이어 — z-index 불필요) */
   .word-hi-layer,.code-def-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none}
   .word-hi{position:absolute;background:rgba(234,179,8,.20);border-radius:2px;box-shadow:inset 0 0 0 1px rgba(202,138,4,.30)}

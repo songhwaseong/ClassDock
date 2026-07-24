@@ -387,8 +387,35 @@ function buildCodeEditor(text, prof, options={}){
   const schedulePinRender = () => { clearTimeout(pinRenderTimer); pinRenderTimer = setTimeout(buildPinMarks, 220); };
   host.__refreshPins = buildPinMarks;                 // 폰트 변경(applyEditorFontMetrics)에서 재배치
 
+  // ===== 거터 맨 아래 '↓' 버튼: 누르면 문서 끝에 빈 줄 10개를 추가(엔터 10번 효과) =====
+  const JUMP_DOWN_LINES = 10;
+  const jumpDownBtn = document.createElement("button");
+  jumpDownBtn.type = "button"; jumpDownBtn.className = "code-jump-down"; jumpDownBtn.textContent = "↓";
+  jumpDownBtn.title = "문서 끝에 빈 줄 " + JUMP_DOWN_LINES + "개 추가";
+  jumpDownBtn.setAttribute("aria-label", jumpDownBtn.title);
+  host.appendChild(jumpDownBtn);
+  const positionJumpDown = () => {                    // 마지막 줄번호 옆에 붙어 스크롤을 따라 이동
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
+    const lastLine = ta.value.split("\n").length;     // 1-based 마지막 줄
+    jumpDownBtn.style.top = (pt + (lastLine - 1) * lh - ta.scrollTop) + "px";
+    jumpDownBtn.style.height = lh + "px";
+  };
+  jumpDownBtn.addEventListener("mousedown", (e) => { e.preventDefault(); });   // 거터 클릭이 포커스·선택을 흔들지 않게
+  jumpDownBtn.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    hideCompletion(); exitCol();
+    clearTimeout(coalesceTimer); commitNow();
+    ta.value = ta.value + "\n".repeat(JUMP_DOWN_LINES);
+    ta.selectionStart = ta.selectionEnd = ta.value.length;   // 커서를 새로 만든 마지막 빈 줄로
+    ta.focus();
+    emitInput();                                             // 하이라이트·줄번호·히스토리(undo) 한 번에 반영
+    clearTimeout(coalesceTimer); commitNow();
+    scrollCaretIntoView();
+  });
+
   let syncRaf = 0;
-  const syncNow = () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; gutter.scrollTop = ta.scrollTop; positionErr(); positionTrace(); positionJump(); positionCellBand(); positionCaretLine(); positionPins(); renderWordHi(); renderDefinitionHover(); renderFindHi(); renderSpotlight(); renderIndentGuides(); renderCellDividers(); };
+  const syncNow = () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; gutter.scrollTop = ta.scrollTop; positionErr(); positionTrace(); positionJump(); positionCellBand(); positionCaretLine(); positionPins(); positionJumpDown(); renderWordHi(); renderDefinitionHover(); renderFindHi(); renderSpotlight(); renderIndentGuides(); renderCellDividers(); };
   const sync = () => {
     syncNow();
     cancelAnimationFrame(syncRaf);

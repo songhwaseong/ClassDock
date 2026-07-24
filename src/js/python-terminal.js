@@ -59,7 +59,7 @@ function createPythonTerminal(options){
   const browserKernelId = "py-terminal-" + Math.random().toString(36).slice(2);
 
   const rawDocPath = String(
-    (options.ownerDoc && (options.ownerDoc.workspacePath || options.ownerDoc.relPath)) ||
+    (options.ownerDoc && (options.ownerDoc.nativeAbsolutePath || options.ownerDoc.workspacePath || options.ownerDoc.relPath)) ||
     (options.runCtx && (options.runCtx.workspacePath || options.runCtx.relPath)) || ""
   );
   const configuredCwd = String((options.runCtx && options.runCtx.cwd) || "");

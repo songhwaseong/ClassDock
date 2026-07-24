@@ -27,6 +27,11 @@ test("터미널의 중첩 헤더는 검색 바를 같은 부모에 한 번만 �
   assert.doesNotMatch(codeSource, /outFindBar\.parentNode !== outPanel \|\| outFindBar\.previousElementSibling !== head/);
 });
 
+test("터미널 입력 경로는 출력 본문과 같은 기본 글자색을 사용한다", () => {
+  assert.match(cssSource, /\.py-terminal-prompt\{[^}]*color:var\(--code-text\)/);
+  assert.match(cssSource, /\.py-terminal-output\{color:var\(--code-text\)\}/);
+});
+
 test("실행 결과 검색은 본문만 찾아 오버레이로 강조하고 큰 출력의 결과 수를 제한한다", () => {
   assert.match(codeSource, /const OUTPUT_FIND_LIMIT = 2000/);
   assert.match(codeSource, /document\.createTreeWalker\(outPanel, NodeFilter\.SHOW_TEXT/);

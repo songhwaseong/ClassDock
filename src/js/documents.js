@@ -383,6 +383,7 @@ function makeDoc(kind, name, options={}){
   const d = { id, nodeId: "doc:" + id, parentId: options.parentId || null, name, kind, el,
     workspacePath: options.workspacePath || null, size: options.size || 0, sourceKey: options.sourceKey || null,
     isScratch: !!options.isScratch, textEncoding: options.textEncoding || null,
+    nativeAbsolutePath: options.nativeAbsolutePath || null,
     originalSaveMode: !!options.originalSaveMode };   // 새로 만든 빈 코드 → 첫 저장 때 이름 받기
   d.relPath = options.relPath || null;
   d.archiveCtx = options.archiveCtx || null;
@@ -1862,6 +1863,7 @@ async function applyOriginalRename(doc, ctx, newName, newHandle){
   if (doc.relPath) doc.relPath = refreshWorkspacePath(doc.relPath, newName);
   doc.fsHandle = newHandle;
   doc.fsDirHandle = ctx.dirHandle;
+  if (newHandle && newHandle.nativePath) doc.nativeAbsolutePath = newHandle.nativePath;
   doc.sourceFile = fresh;
   doc.size = fresh.size || 0;
   doc.__srcMtime = fresh.lastModified || 0;
