@@ -5,6 +5,10 @@ const CODE_KW = "abstract|and|arguments|as|assert|async|await|base|bool|boolean|
 const SQL_KW = "select|from|where|insert|into|update|delete|create|alter|drop|table|view|index|join|inner|left|right|outer|full|cross|on|group|order|by|asc|desc|having|union|all|values|set|primary|key|foreign|references|not|null|default|distinct|as|and|or|like|between|in|exists|case|when|then|else|count|sum|avg|min|max|limit|offset|begin|commit|rollback";
 window.__lastCodeLinkDocId = window.__lastCodeLinkDocId || null;
 
+function isDefinitionSourceDoc(doc){
+  return !!(doc && String(doc.sourceKey || "").startsWith("definition:"));
+}
+
 // Ctrl+클릭에서 현재 작업공간의 from ... import ... 를 먼저 해석한다.
 // Jedi에는 브라우저가 가진 폴더 상대경로를 넘길 수 없어, 함께 열린 문서 경로로 직접 연결해야 한다.
 async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
@@ -685,8 +689,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const tooBigToEdit = text.length > 20 * 1048576;
   const prof = heavy ? "text" : (profile || CODE_EXTS[ext] || "c");
   const lineCount = text.split("\n").length;
-  const runnable = RUN_EXTS.has(ext);
   const ownerDoc = docs.find(d => d.el === host) || null;
+  const definitionSource = isDefinitionSourceDoc(ownerDoc);
+  const runnable = RUN_EXTS.has(ext) && !definitionSource;
   const spellModeForExt = () => {
     if (ext === "md" || ext === "markdown" || ext === "mdx") return "markdown";
     if (!ext || ["txt","text","log","srt","vtt","smi","rst","adoc","asciidoc","org","textile","wiki","mediawiki"].includes(ext)) return "plain";
@@ -710,6 +715,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   }
   // 라이트 모드 배경 프리셋은 Python 실행·편집 화면에만 별도 적용한다.
   if (runnable) host.classList.add("python-editor-doc");
+  else host.classList.remove("python-editor-doc");
   const effectiveRunCtx = {
     ...(ownerDoc && ownerDoc.archiveCtx ? { archiveCtx: ownerDoc.archiveCtx } : {}),
     ...(ownerDoc && ownerDoc.relPath ? { relPath: ownerDoc.relPath } : {}),
@@ -731,7 +737,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   if (!runnable){
     // 텍스트/코드: 기본은 읽기 전용, [✎ 편집] 토글로 편집기 전환 후 저장(원래 확장자 유지).
     // ~1MB는 일반 편집기, 1~20MB는 가벼운 편집기(lightEdit), 20MB 초과만 읽기 전용 고정.
-    const canEdit = !tooBigToEdit;
+    const canEdit = !definitionSource && !tooBigToEdit;
     const saveName = (ownerDoc && ownerDoc.name) || (file && file.name) || ("문서." + (ext || "txt"));
     const jsonPretty = ext === "json";           // jsonc/json5 는 주석 때문에 JSON.parse 가 실패하므로 제외
     const isHtml = ext === "html" || ext === "htm" || ext === "xhtml";   // 소스 보기 ↔ 미리보기(렌더) 토글 대상
@@ -857,7 +863,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         sourceOffset += allLines[i].length + 1;
       }
       const longLine = /[^\n]{2000}/.test(viewText);            // 초장문 단일 라인 → 줄바꿈으로 가로 레이아웃 폭발 회피
-      const big = heavy || lineN > 6000;                       // 줄이 아주 많으면 청크 가상 렌더(보이는 부분만 레이아웃)
+      const big = definitionSource || heavy || lineN > 6000;   // 외부 정의/다줄 파일은 청크 가상 렌더(보이는 부분만 레이아웃)
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
       const wrap = document.createElement("div");
       wrap.className = "code-host code-host-readonly" + (longLine ? " is-wrapped" : "") + (big ? " code-chunked" : "");
