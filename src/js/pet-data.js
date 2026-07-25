@@ -46,6 +46,19 @@ const PET_ART = {
     "....GG...GG....",
     "...GGG...GGG..."
   ],
+  mossGolem: [
+    "......D........",
+    ".....DDD.......",
+    "....DWWD.......",
+    "...DDDDDD......",
+    "..DGGGGGGD.....",
+    ".DDGGGGGGDD....",
+    ".DGGGGGGGGD....",
+    ".DGGDDDDGGD....",
+    "..DD.DD.DD.....",
+    "...D.DD.D......",
+    "...D....D......"
+  ],
   ghost: [
     ".....PPPPP.....",
     "....PPPPPPP....",
@@ -1055,7 +1068,16 @@ const PET_SPECIES = [
       { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#6a5238", P:"#3e424a", F:"#25272b" },
       { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#775b3c", P:"#313844", F:"#20242a" }
     ],
-    sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"] }
+    sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"] },
+  { kind:"mossGolem", art:PET_ART.mossGolem, gridW:32, gridH:40, pixelScale:4, width:128, height:160, speed:0.21,
+    spriteSheet:{
+      src:"src/assets/moss-golem-sprites.png", cellW:256, cellH:512, cols:6,
+      frameMs:{ idle:180, walk:180, look:180, laser:120 },
+      frames:{ idle:[6], walk:[0,1,2,3,4,5], look:[7], laser:[9,10] }
+    }, palettes: [
+      { D:"#514d3d", G:"#705f48", W:"#f2d466" }
+    ],
+    sayings: ["쿵...", "천천히 가자", "이끼가 자랐네", "눈빛 조심!", "삐빅..."] }
 ];
 
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
@@ -1069,7 +1091,7 @@ const PET_NAMES = {
   octopus:"문어", bat:"박쥐", owl:"부엉이", duck:"오리", squirrel:"다람쥐",
   hedgehog:"고슴도치", hamster:"햄스터", bee:"꿀벌", ladybug:"무당벌레", dice:"주사위",
   apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
-  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨", glassesMan:"픽셀 선생님"
+  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨", glassesMan:"픽셀 선생님", mossGolem:"이끼 골렘"
 };
 
 const PET_NAMES_EN = {
@@ -1082,7 +1104,7 @@ const PET_NAMES_EN = {
   octopus:"Octopus", bat:"Bat", owl:"Owl", duck:"Duck", squirrel:"Squirrel",
   hedgehog:"Hedgehog", hamster:"Hamster", bee:"Bee", ladybug:"Ladybug", dice:"Die",
   apple:"Apple", eraser:"Eraser", mushroom:"Mushroom", carrot:"Carrot", dino:"Dinosaur", snowman:"Snowman",
-  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy", glassesMan:"Pixel teacher"
+  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy", glassesMan:"Pixel teacher", mossGolem:"Moss golem"
 };
 
 const PET_KIND_SAYINGS_EN = {

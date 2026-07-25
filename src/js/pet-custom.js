@@ -26,7 +26,8 @@ const PET_KIND_LABELS = {
   ninja:"순간이동 대시 (닌자)", bird:"훨훨 날기 (새)", chameleon:"색 바꾸기 (카멜레온)",
   wizard:"마법 순간이동 (마법사)", magnet:"자석으로 끌기", cloud:"번개 구름",
   rocket:"발사·낙하산 (로켓)", flutter:"팔랑팔랑 날기 (나비)", fish:"비눗방울 타기 (물고기)",
-  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 점프하고 벽 타고 만세 (사람)"
+  snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 점프하고 벽 타고 만세 (사람)",
+  mossGolem:"느린 걸음+눈 레이저 (이끼 골렘)"
 };
 
 // ----- 저장소 도우미 -----
@@ -35,7 +36,8 @@ const PET_KIND_LABELS_EN = {
   ufo:"Flying UFO", cat:"Cursor hunter", fluffyCat:"Diagonal flight and grooming", calicoCat:"Speedy diagonal flight", dog:"Happy runner", spider:"Web climber", mole:"Burrower", frog:"Big jumper",
   penguin:"Waddle and slide", balloon:"Balloon floater", snail:"Slow crawler", ninja:"Teleport dash", bird:"Flying bird",
   chameleon:"Color changer", wizard:"Magic teleport", magnet:"Magnetic pull", cloud:"Thundercloud", rocket:"Launch and parachute",
-  flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape", human:"Walk, climb, cheer"
+  flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape", human:"Walk, climb, cheer",
+  mossGolem:"Slow steps and eye laser"
 };
 
 function petJSONLoad(key, fallback){

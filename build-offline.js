@@ -86,7 +86,8 @@ for (const file of manifest.localScripts) {
 const petSpriteRelatives = [
   "src/assets/pixel-teacher.png",
   "src/assets/fluffy-cat-sprites-v2.png",
-  "src/assets/calico-cat-sprites.png"
+  "src/assets/calico-cat-sprites.png",
+  "src/assets/moss-golem-sprites.png"
 ];
 for (const petSpriteRelative of petSpriteRelatives) {
   const petSpritePath = path.join(root, petSpriteRelative);

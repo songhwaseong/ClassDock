@@ -38,7 +38,7 @@ const PET_BASE_FRAME_MS = 1000 / 60;
 const PET_HOP_VX = 5.2, PET_HOP_VY = -3.6;
 const PET_FPS_MIN = 42, PET_FPS_FLOOR = 3, PET_FPS_TRIGGER_MS = 2500;   // 저사양 자동 하향: FPS가 이 아래로 약 2.5초 지속되면 마릿수를 절반으로
 // 발판 위에 "서 있는" 상태들 — 발판 추적 대상이자 UFO 의 납치 후보가 된다
-const PET_GROUND_STATES = ["walk", "idle", "seekwall", "reboot", "hopwait",
+const PET_GROUND_STATES = ["walk", "idle", "look", "laser", "seekwall", "reboot", "hopwait",
   "stalk", "chase", "zoomies", "slide", "charge", "tongue", "hide", "dash",
   "stun", "pull", "cast", "flee", "coil", "countdown", "cheer", "land"];
 
@@ -232,6 +232,11 @@ function petPickAction(p, w){
       if (p.support && p.support.floor){ p.state = "seekwall"; p.side = (p.x < window.innerWidth / 2) ? -1 : 1; p.face = p.side; }
       else { p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 80; }
     }
+  }
+  else if (p.kind === "mossGolem"){ // 이끼 골렘: 비행하거나 점프하지 않고, 아주 느린 한 걸음과 눈 레이저만 쓴다.
+    if (roll < 0.68){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 180 + Math.random() * 140; }
+    else if (roll < 0.91){ p.state = "idle"; p.timer = 75 + Math.random() * 115; }
+    else { p.state = "laser"; p.face = 1; p.timer = 22 + Math.random() * 16; }
   }
   else if (p.kind === "walker"){   // 로봇: 벽은 못 타고, 가끔 방전돼 멈췄다 재부팅한다
     if (roll < 0.46){ p.state = "walk"; p.face = Math.random() < 0.5 ? -1 : 1; p.timer = 90 + Math.random() * 150; }
@@ -1191,6 +1196,10 @@ function petUpdate(p, w){
     p.timer -= step;
     if (p.timer <= 0) petPickAction(p, w);
   }
+  else if (p.state === "look" || p.state === "laser"){
+    p.timer -= step;
+    if (p.timer <= 0) petPickAction(p, w);
+  }
   else if (p.state === "diagonalFly" || p.state === "wallBounce"){
     let launchMix = 1;
     if (p.state === "diagonalFly" && p.flightEase < 1){
@@ -1592,6 +1601,9 @@ function petBindPointer(p){
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
       if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
       else if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
+      else if (p.kind === "mossGolem" && p.grav){
+        p.state = "look"; p.face = 1; p.timer = 70; p.vx = 0; p.vy = 0; p.rot = 0; p.t = 0;
+      }
       else {
         petSay(p, petRandomSaying(p), false);
         if (p.grav){ p.state = "jump"; p.vy = -7; p.vx = 0; p.rot = 0; p.t = 0; }
@@ -1777,7 +1789,7 @@ function petSpawn(i, total, bag){
     sayings, gold,
     basePal: palette, mimicOf: null, trail: species.trail || null,
     blinkCol: petEyelidColor(species.art, palette),
-    speed: 0.85 + Math.random() * 0.4, grav,
+    speed: species.speed || (0.85 + Math.random() * 0.4), grav,
     x: Math.max(0, Math.min(window.innerWidth - petW, window.innerWidth * (0.2 + 0.6 * ((i + 1) / (total + 1))))),
     y: y0,
     w:petW, h:petH, gridW, gridH, pixelScale,
