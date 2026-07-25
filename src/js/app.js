@@ -652,6 +652,40 @@ function wire(){
     document.addEventListener("click", () => setOpen(false));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
   })();
+  // '도구' 탭 체크박스를 레지스트리(TOGGLEABLE_TOOLS)에서 1회 생성한다. id: settingTool-<도구id>.
+  const toolCheckId = (id) => "settingTool-" + id;
+  let toolChecksBuilt = false;
+  const buildToolVisibilityChecks = () => {
+    if (toolChecksBuilt) return;
+    const hosts = { py: byId("settingToolsPy"), notebook: byId("settingToolsNb") };
+    if (!hosts.py || !hosts.notebook || typeof TOGGLEABLE_TOOLS === "undefined") return;
+    for (const tool of TOGGLEABLE_TOOLS){
+      const host = hosts[tool.target]; if (!host) continue;
+      const label = document.createElement("label"); label.className = "settings-check";
+      const input = document.createElement("input"); input.type = "checkbox"; input.id = toolCheckId(tool.id);
+      const span = document.createElement("span"); span.textContent = tool.label;
+      label.append(input, span); host.appendChild(label);
+    }
+    toolChecksBuilt = true;
+  };
+  const syncToolVisibilityChecks = () => {
+    buildToolVisibilityChecks();
+    if (typeof TOGGLEABLE_TOOLS === "undefined") return;
+    const vis = appSettings.toolVisibility || {};
+    for (const tool of TOGGLEABLE_TOOLS){
+      const input = byId(toolCheckId(tool.id));
+      if (input) input.checked = vis[tool.id] !== false;
+    }
+  };
+  const collectToolVisibility = () => {
+    const out = {};
+    if (typeof TOGGLEABLE_TOOLS === "undefined") return out;
+    for (const tool of TOGGLEABLE_TOOLS){
+      const input = byId(toolCheckId(tool.id));
+      out[tool.id] = input ? !!input.checked : true;
+    }
+    return out;
+  };
   byId("settingsOpen").onclick = () => {
     setSettingsTab("general");
     lightBackgroundDraft = currentLightBackground();
@@ -663,6 +697,7 @@ function wire(){
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingPythonAutosave").checked = !!appSettings.pythonAutosave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
+    syncToolVisibilityChecks();
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
     const petFocus = typeof normalizePetFocus === "function" ? normalizePetFocus(appSettings.petFocus) : { enabled:true, focusMin:25, breakMin:5, quietTyping:true };
@@ -708,8 +743,10 @@ function wire(){
         breakMin: Number(byId("settingPetBreakMin").value) || 5, quietTyping: byId("settingPetQuietTyping").checked },
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
         sound: byId("settingScreensaverSound").checked },
+      toolVisibility: collectToolVisibility(),
       shortcuts:shortcutDraft
     });
+    if (typeof applyToolVisibility === "function") applyToolVisibility();
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
     if (typeof applyPetSettings === "function") applyPetSettings();
     if (typeof applyPetFocusSettings === "function") applyPetFocusSettings();

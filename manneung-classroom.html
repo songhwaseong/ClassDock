@@ -427,6 +427,7 @@
     <div class="settings-tabs" id="settingsTabs" role="tablist" aria-label="설정 분류">
       <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="general">일반</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="document">문서</button>
+      <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="tools">도구</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="pet">펫</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="screensaver">대기 화면</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="shortcut">단축키</button>
@@ -454,6 +455,12 @@
       <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>PDF 편집 내용 자동 저장·복원</span></label>
       <label class="settings-check"><input type="checkbox" id="settingPythonAutosave"><span>Python 편집 파일 자동 저장 — 입력을 멈춘 뒤 3초 후</span></label>
       <label class="settings-check"><input type="checkbox" id="settingPyFormatOnSave"><span>Python 저장 시 코드 자동 정렬 — 들여쓰기·공백 정리(로컬 파이썬이면 black)</span></label>
+    </div>
+
+    <div class="settings-section" data-settings-panel="tools" role="tabpanel" hidden>
+      <p class="settings-hint">체크한 도구만 도구막대에 보입니다. ▶ 실행·저장 등 꼭 필요한 버튼은 항상 표시됩니다. (변경은 저장 즉시 적용)</p>
+      <div class="settings-tools-group"><strong>Python 편집기 도구</strong><div id="settingToolsPy" class="settings-tools-list"></div></div>
+      <div class="settings-tools-group"><strong>노트북 도구</strong><div id="settingToolsNb" class="settings-tools-list"></div></div>
     </div>
 
     <div class="settings-section" data-settings-panel="pet" role="tabpanel" hidden>

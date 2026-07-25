@@ -488,38 +488,6 @@ function setupNotebookKernelBar(ownerDoc, editor, ui, outer, split){
   }
 }
 
-// 실행 바의 보조 버튼들을 '⋯ 더보기' 토글 뒤로 접는다. 버튼 DOM을 그대로 옮기므로 동작·핸들러는 유지된다.
-// storageKey 를 주면 펼침/접힘 상태를 기억한다(한 번 펼치면 다음에도 펼친 채로 — 자주 쓰는 사용자 배려).
-function collapseRunButtons(bar, buttons, storageKey){
-  buttons = (buttons || []).filter(Boolean);
-  if (!bar || !buttons.length) return;
-  let open = false;
-  if (storageKey){ try { open = localStorage.getItem(storageKey) === "1"; } catch(_){} }
-  const wrap = document.createElement("span"); wrap.className = "run-more-wrap"; wrap.hidden = !open;
-  const moreBtn = document.createElement("button"); moreBtn.type = "button"; moreBtn.className = "run-more" + (open ? " open" : "");
-  const tr = (text) => (typeof window.t === "function" ? window.t(text) : text);
-  const syncMoreButton = (show) => {
-    moreBtn.classList.toggle("open", show);
-    moreBtn.textContent = tr(show ? "⋯ 접기" : "⋯ 더보기");
-    moreBtn.title = tr("단계 실행·진단·채점·PDF 핀·Py Env 등 추가 도구");
-  };
-  syncMoreButton(open);
-  bar.insertBefore(moreBtn, buttons[0]);
-  bar.insertBefore(wrap, buttons[0]);
-  for (const b of buttons) wrap.appendChild(b);
-  moreBtn.addEventListener("click", () => {
-    const show = wrap.hidden;
-    wrap.hidden = !show;
-    syncMoreButton(show);
-    if (storageKey){ try { localStorage.setItem(storageKey, show ? "1" : "0"); } catch(_){} }
-  });
-  const onLanguageChange = () => {
-    if (!moreBtn.isConnected){ window.removeEventListener("mni18nchange", onLanguageChange); return; }
-    syncMoreButton(!wrap.hidden);
-  };
-  window.addEventListener("mni18nchange", onLanguageChange);
-}
-
 /* ===== JSON 트리 보기 (표시 전용) =====
  * 파싱된 JSON 값을 접고 펼치는 트리 DOM으로 만든다. 큰 파일에서도 멈추지 않도록
  *  · 자식 DOM은 처음 펼칠 때 만들고(지연 생성),
@@ -1344,7 +1312,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button"; saveBtn.textContent = ".py 저장";
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "Python 파일 저장";
-  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button"; revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  // 일반 텍스트 편집기의 '보기로'도 run-revert 스타일을 공유하므로, 설정에서 숨길 Python 전용 표식은 따로 둔다.
+  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
   const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
@@ -1990,11 +1959,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     setupNotebookKernelBar(ownerDoc, editor, ui, outer, split);   // 셀 하나씩 실행하는 브라우저 커널 툴바
     // 이미 노트북 문서면 셀 나누기·자동분할은 의미 없으므로 감춘다(커널 바에서 셀을 직접 다룸).
     cellSplitBtn.hidden = true; autoSplitBtn.hidden = true; nbConvertMore.hidden = true;
-    // 노트북에선 커널 바가 주 동작이므로, 전체 실행용 보조 버튼을 폭넓게 접는다(기본 접힘).
-    collapseRunButtons(bar, [traceBtn, analyzeBtn, gradeBtn, linkBtn, nbConvertGroup, diagBtn], "nbRunMore");
+    // 보조 버튼은 접지 않고 그대로 노출한다. 노출/숨김은 설정 '도구' 탭에서 사용자가 직접 고른다.
   } else {
-    // 일반 Python: 노트북 변환 계열은 한 드롭다운으로 묶고, 다른 보조 도구와 함께 '⋯ 더보기'로 접는다.
-    collapseRunButtons(bar, [traceBtn, analyzeBtn, gradeBtn, linkBtn, nbConvertGroup, diagBtn], "pyRunMore");
     if (typeof createPythonTerminal === "function"){
       pythonTerminal = createPythonTerminal({
         ui,

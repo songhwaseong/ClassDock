@@ -1220,6 +1220,13 @@
   .settings-section{min-height:132px}
   .settings-section > .settings-row:last-child,.settings-section > .settings-check:last-child,.settings-section > .settings-save-folder:last-child{border-bottom:none}
   .settings-section .shortcut-settings{margin-top:0;padding-top:0;border-top:none}
+  .settings-hint{margin:0 0 4px;padding:10px 0 0;font-size:12.5px;color:var(--muted)}
+  .settings-tools-group{padding:10px 0;border-bottom:1px solid var(--border)}
+  .settings-tools-group:last-child{border-bottom:none}
+  .settings-tools-group > strong{display:block;font-size:12.5px;margin:0 0 8px}
+  .settings-tools-list{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+  .settings-tools-list .settings-check{border-bottom:none;padding:4px 0}
+  @media (max-width:480px){.settings-tools-list{grid-template-columns:1fr}}
   .pet-focus-setting-selects{display:flex;gap:6px}
   .settings-row .pet-focus-setting-selects .pw-input{width:112px}
   @media (max-width:480px){.pet-focus-setting-row{align-items:stretch;flex-direction:column}.pet-focus-setting-selects .pw-input{flex:1}}
@@ -2091,6 +2098,29 @@
     .office.python-editor-doc .run-split.stack-v{height:auto}
   }
   .run-bar{position:relative;z-index:32;display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+  /* 도구 노출 설정(state.js TOGGLEABLE_TOOLS) — 숨김으로 고른 버튼만 <html>.hide-tool-<id> 로 감춘다.
+     클래스만 토글하므로 이미 열려 있는 편집기·노트북 툴바에도 즉시 반영된다. */
+  html.hide-tool-pyTrace .run-trace,
+  html.hide-tool-pyAnalyze .run-analyze,
+  html.hide-tool-pyGrade .run-grade,
+  html.hide-tool-pyLink .run-link,
+  html.hide-tool-pyNbConvert .run-nbconvert-group,
+  html.hide-tool-pyInk .run-ink,
+  html.hide-tool-pyRec .run-rec,
+  html.hide-tool-pyPkg .run-pkg,
+  html.hide-tool-pyEnv .run-diag,
+  html.hide-tool-pyNewPy .run-newpy,
+  html.hide-tool-pyRevert .run-py-revert,
+  html.hide-tool-pyFont .run-font-group,
+  html.hide-tool-nbInk .nbv-ink-toggle,
+  html.hide-tool-nbToc .nbv-toc-open,
+  html.hide-tool-nbFind .nbv-find-open,
+  html.hide-tool-nbFont .nbv-font-group,
+  /* .py 변환 그룹과 PDF 저장 메뉴만 숨긴다. 저장 버튼 자체는 항상 남긴다. */
+  html.hide-tool-nbExport .nbv-export-group,
+  html.hide-tool-nbExport .nbv-save-group > .nbv-run-more,
+  html.hide-tool-nbExport .nbv-save-group > .nbv-run-menu,
+  html.hide-tool-nbHelp .nbv-help-open{display:none!important}
   .run-go{font:inherit;font-weight:600;font-size:15px;line-height:1;border:1.5px solid #16a34a;border-radius:8px;height:30px;padding:0 13px;cursor:pointer;
     background:transparent;color:#16a34a;display:inline-flex;align-items:center;justify-content:center;min-width:40px}
   .run-go:hover{background:rgba(22,163,74,.09);border-color:#15803d;color:#15803d}
@@ -2161,12 +2191,6 @@
   .run-nbconvert.is-active{border-color:#7c3aed;color:#7c3aed;background:rgba(124,58,237,.08)}
   .run-status{font-size:12.5px;color:#64748b}
   /* 실행 바 '⋯ 더보기' — 노트북에서 보조 버튼을 접는 토글 */
-  .run-more{font:inherit;font-size:12.5px;border:1px dashed var(--border);background:transparent;color:#64748b;
-    border-radius:7px;padding:6px 11px;cursor:pointer}
-  .run-more:hover{color:var(--ink);border-color:#94a3b8}
-  .run-more.open{border-style:solid}
-  .run-more-wrap{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .run-more-wrap[hidden]{display:none}
   /* 노트북 커널 툴바(.ipynb 셀 단위 실행) */
   .nb-kernel-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:7px 10px;
     border:1px solid var(--border);border-left:3px solid #7c3aed;border-radius:8px;background:var(--panel)}

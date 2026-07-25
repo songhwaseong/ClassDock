@@ -84,11 +84,52 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"screensaverStart", label:"대기 화면 지금 시작", description:"모니터 전체 화면으로 대기 화면 켜기", defaultValue:"Ctrl+F12" }
 ]);
 const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.map((item) => [item.id, item.defaultValue])));
+// 설정에서 노출/숨김을 고를 수 있는 도구막대 버튼들. 이 배열 하나가 설정 체크박스 목록과
+// CSS 숨김 클래스를 모두 구동한다(라벨·목록 이중 관리 방지). cls 는 각 버튼의 고유 클래스명.
+// ▶ 실행·저장처럼 없으면 안 되는 버튼은 일부러 뺐다. 기본값은 전부 노출(defaultVisible).
+const TOGGLEABLE_TOOLS = Object.freeze([
+  // Python 실행 바 (code-viewer.js)
+  { id:"pyTrace",     label:"단계 실행",       cls:"run-trace",           target:"py" },
+  { id:"pyAnalyze",   label:"진단",            cls:"run-analyze",         target:"py" },
+  { id:"pyGrade",     label:"채점",            cls:"run-grade",           target:"py" },
+  { id:"pyLink",      label:"PDF에 핀",        cls:"run-link",            target:"py" },
+  { id:"pyNbConvert", label:"노트북으로 변환", cls:"run-nbconvert-group", target:"py" },
+  { id:"pyInk",       label:"필기",            cls:"run-ink",             target:"py" },
+  { id:"pyRec",       label:"녹화",            cls:"run-rec",             target:"py" },
+  { id:"pyPkg",       label:"라이브러리",      cls:"run-pkg",             target:"py" },
+  { id:"pyEnv",       label:"Py Env(실행 환경)",cls:"run-diag",           target:"py" },
+  { id:"pyNewPy",     label:"+Py(새 파이썬)",  cls:"run-newpy",           target:"py" },
+  { id:"pyRevert",    label:"원본 되돌리기",   cls:"run-py-revert",       target:"py" },
+  { id:"pyFont",      label:"글자 크기(A− A+)",cls:"run-font-group",      target:"py" },
+  // 노트북 도구막대 (notebook-run.js)
+  { id:"nbInk",       label:"필기",            cls:"nbv-ink-toggle",      target:"notebook" },
+  { id:"nbToc",       label:"목차",            cls:"nbv-toc-open",        target:"notebook" },
+  { id:"nbFind",      label:"전체 찾기",       cls:"nbv-find-open",       target:"notebook" },
+  { id:"nbFont",      label:"글자 크기(A− A+)",cls:"nbv-font-group",      target:"notebook" },
+  { id:"nbExport",    label:"내보내기(.py/PDF)",cls:"nbv-export-group",   target:"notebook" },
+  { id:"nbHelp",      label:"단축키",          cls:"nbv-help-open",       target:"notebook" }
+]);
+// { id: boolean } 로 정규화. 레지스트리에 있는 id만 남기고, 지정 안 된 것·잘못된 값은 노출(true).
+function normalizeToolVisibility(value){
+  const s = value && typeof value === "object" ? value : {};
+  const out = {};
+  for (const tool of TOGGLEABLE_TOOLS) out[tool.id] = s[tool.id] !== false;
+  return out;
+}
+// 숨김으로 설정된 도구만 <html>.hide-tool-<id> 클래스를 붙인다(CSS 가 display:none 처리).
+// 클래스만 토글하므로 이미 열려 있는 문서·툴바에도 재렌더 없이 즉시 반영된다.
+function applyToolVisibility(){
+  if (typeof document === "undefined") return;
+  const vis = normalizeToolVisibility(appSettings && appSettings.toolVisibility);
+  const root = document.documentElement;
+  for (const tool of TOGGLEABLE_TOOLS) root.classList.toggle("hide-tool-" + tool.id, vis[tool.id] === false);
+}
 const DEFAULT_APP_SETTINGS = {
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, pythonAutosave: false, pyFormatOnSave: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
+  toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
   shortcuts: DEFAULT_SHORTCUTS
 };
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.
@@ -116,13 +157,13 @@ function normalizeShortcutMap(value){
 let appSettings = (() => {
   try {
     const saved = JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}");
-    return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), shortcuts:normalizeShortcutMap(saved.shortcuts) };
   }
-  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), shortcuts:normalizeShortcutMap() }; }
+  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() }; }
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("pdfSignerSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }
@@ -186,6 +227,7 @@ function applyUiScale(){
   document.body.style.height = (100 / scale) + "vh";
 }
 applyUiScale();
+applyToolVisibility();
 function defaultPdfZoom(){ const z = Number(appSettings.pdfZoom); return [1,1.25,1.5].includes(z) ? z : 1.25; }
 function pdfRenderProfile(){
   return appSettings.performance === "quality"
