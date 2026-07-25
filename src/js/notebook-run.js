@@ -865,7 +865,7 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     result = await task.promise;
     if (result && typeof result === "object") result.elapsedMs = runClock.now() - runStartedAt;
     nbThrowIfCancelled(ownerDoc);
-    // 로컬 커널: 누락 모듈(ModuleNotFoundError)이면 pip 로 설치한 뒤 자동 재실행한다
+    // 로컬 커널: 누락 모듈(ModuleNotFoundError)이면 pip 로 설치하고 새 커널을 만든 뒤 자동 재실행한다
     // (단일 .py 파일 실행과 동일한 편의 — 브라우저 커널은 preparePyodideWorkerPackages 가 미리 챙김).
     if (localKernel){
       const tried = new Set();

@@ -129,6 +129,17 @@ async function nbStopLocalNotebookKernel(ownerDoc, options={}){
   } catch(_){}
 }
 
+// pip 설치로 이미 import 된 라이브러리의 코드가 바뀔 수 있으므로, 로컬 커널은 다음 셀 실행 전에 새로 만든다.
+// 출력은 학습 기록으로 남기되 변수·Selenium 등 커널 안의 상태는 초기화된다.
+async function nbRestartLocalKernelAfterPackageInstall(ownerDoc){
+  if (!ownerDoc) return false;
+  const hadKernel = !!(ownerDoc._nbLocalKernelId || ownerDoc._nbLocalKernelStart);
+  await nbStopLocalNotebookKernel(ownerDoc);
+  ownerDoc._nbExec = 0;
+  ownerDoc._nbWorkspacePromise = null;
+  return hadKernel;
+}
+
 async function nbToggleLocalKernelMode(ownerDoc){
   if (!ownerDoc || ownerDoc._nbBusy || ownerDoc._nbRunAllActive || ownerDoc._nbLocalRunActive) return;
   if (ownerDoc._nbKernelMode === "local"){
@@ -253,7 +264,7 @@ function startLocalNotebookKernelRun(ownerDoc, source, stdin, workspaceBundle){
 
 // 로컬 커널 셀에서 누락 모듈을 만났을 때 이 PC 의 Python 에 pip 로 설치한다(동의 후).
 // 진행/결과는 노트북 상태줄·토스트로 알린다(.py 뷰어의 runPipInstall 은 별도 출력 패널을 요구해 재사용 대신 별도 구현).
-// 설치가 끝나면 같은 커널 프로세스에서 다시 import 하면 site-packages 에서 새로 잡힌다. 성공 여부 반환.
+// 설치가 끝나면 로컬 커널을 재시작해, 이미 import 된 이전 버전이 남지 않도록 한다. 성공 여부 반환.
 async function nbInstallMissingModule(ownerDoc, pkg){
   if (!pkg) return false;
   if (!(await pythonBackendAvailable())) return false;   // 브라우저 커널이면 자동 설치 대상 아님
@@ -271,8 +282,15 @@ async function nbInstallMissingModule(ownerDoc, pkg){
     });
     const txt = await res.text();
     let j; try { j = JSON.parse(txt); } catch(_){ j = { ok:res.ok, code:-1, output:txt }; }
-    if (typeof toast === "function") toast(j.ok ? ("설치 완료: " + pkg + " · 다시 실행합니다") : "설치 실패 — 아래 상태줄/로그를 확인하세요", 3200);
-    nbSetStatus(ownerDoc, j.ok ? ("설치 완료 ✓ · " + pkg) : ("설치 실패 (코드 " + j.code + ") · " + pkg));
+    if (j.ok){
+      const restarted = await nbRestartLocalKernelAfterPackageInstall(ownerDoc);
+      const suffix = restarted ? " · 커널 재시작됨" : "";
+      if (typeof toast === "function") toast("설치 완료: " + pkg + suffix + " · 셀을 다시 실행합니다", 3600);
+      nbSetStatus(ownerDoc, "설치 완료 ✓ · " + pkg + suffix);
+    } else {
+      if (typeof toast === "function") toast("설치 실패 — 아래 상태줄/로그를 확인하세요", 3200);
+      nbSetStatus(ownerDoc, "설치 실패 (코드 " + j.code + ") · " + pkg);
+    }
     return !!j.ok;
   } catch(e){
     nbSetStatus(ownerDoc, "설치 요청 실패: " + ((e && e.message) || e));

@@ -1512,7 +1512,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 라이브러리 설치 패널(설치된 로컬 파이썬에서만 노출) — 세트 설치 + 직접 입력
   const pkgWrap = document.createElement("div"); pkgWrap.className = "run-pkg-wrap"; pkgWrap.hidden = true;
   const mkSet = (label, pkgs) => { const b = document.createElement("button"); b.type = "button"; b.className = "pkg-set"; b.textContent = label; b.addEventListener("click", () => runPipInstall(pkgs, ui)); return b; };
-  const pkgCustom = document.createElement("input"); pkgCustom.className = "pkg-custom"; pkgCustom.type = "text"; pkgCustom.placeholder = "직접 입력: requests pandas …";
+  const pkgCustom = document.createElement("input"); pkgCustom.className = "pkg-custom"; pkgCustom.type = "text"; pkgCustom.placeholder = "직접 입력: requests, pandas==2.2.2"; pkgCustom.title = "버전 지정 예: requests==2.31.0, pandas>=2.0\n버전은 패키지명 뒤에 붙여 입력하세요. (requests 2.31.0은 지원하지 않음)";
+  const pkgVersionHint = document.createElement("span"); pkgVersionHint.className = "pkg-version-hint"; pkgVersionHint.textContent = "버전 지정: 패키지명==버전 (예: requests==2.31.0) · 여러 개는 공백 또는 쉼표로 구분";
   const pkgGo = document.createElement("button"); pkgGo.type = "button"; pkgGo.className = "pkg-go"; pkgGo.textContent = "설치";
   const doCustom = () => { const v = pkgCustom.value.trim(); if (v) runPipInstall(v.split(/[\s,]+/).filter(Boolean), ui); };
   pkgGo.addEventListener("click", doCustom);
@@ -1532,7 +1533,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (pkgs.length > 40) toast("라이브러리가 " + pkgs.length + "개라 한 번에 40개까지만 설치돼요. 나머지는 파일을 나눠 설치해 주세요.", 6000);
     runPipInstall(pkgs.slice(0, 40), ui);
   });
-  pkgWrap.append(mkSet("데이터 분석", ["matplotlib","openpyxl","seaborn","scipy"]), mkSet("크롤링", ["requests","beautifulsoup4","lxml"]), mkSet("DB(MySQL)", ["pymysql"]), pkgCustom, pkgGo, pkgFileBtn, pkgFile, pkgList);
+  pkgWrap.append(mkSet("데이터 분석", ["matplotlib","openpyxl","seaborn","scipy"]), mkSet("크롤링", ["requests","beautifulsoup4","lxml"]), mkSet("DB(MySQL)", ["pymysql"]), pkgCustom, pkgGo, pkgVersionHint, pkgFileBtn, pkgFile, pkgList);
   pkgBtn.addEventListener("click", () => { pkgWrap.hidden = !pkgWrap.hidden; });
   pythonBackendAvailable().then(ok => { if (ok) pkgBtn.hidden = false; });   // 로컬 파이썬일 때만
 
