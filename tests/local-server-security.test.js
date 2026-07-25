@@ -8,6 +8,7 @@ const stateSync = fs.readFileSync(path.join(__dirname, "../src/js/state-sync.js"
 const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const pythonRuntime = fs.readFileSync(path.join(__dirname, "../src/js/python-runtime.js"), "utf8");
 const pythonTerminal = fs.readFileSync(path.join(__dirname, "../src/js/python-terminal.js"), "utf8");
+const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 
 test("로컬 API는 헤더 토큰만 인정하고 URL 토큰을 사용하지 않는다", () => {
   assert.match(launcher, /static bool HasLocalAuthToken\(Dictionary<string, string> headers\)/);
@@ -116,13 +117,27 @@ test("로컬 PowerShell 터미널은 Tab으로 경로를 자동 완성한다", (
   assert.match(pythonTerminal, /quoteCompletion/);
 });
 
-test("실행 중인 터미널은 포커스를 방해하지 않고 Ctrl+C로 중지한다", () => {
+test("열린 터미널 모달은 포커스를 방해하지 않고 Ctrl+C로 중지한다", () => {
   assert.match(pythonTerminal, /const interruptWithKeyboard = \(event\) =>/);
-  assert.match(pythonTerminal, /!busy \|\| activeView !== "terminal"/);
+  assert.match(pythonTerminal, /!busy \|\| !isOpen/);
   assert.match(pythonTerminal, /focused !== document\.body && !root\.contains\(focused\)/);
   assert.match(pythonTerminal, /String\(event\.key\)\.toLowerCase\(\) !== "c"/);
   assert.match(pythonTerminal, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+stop\(\);/);
   assert.match(pythonTerminal, /document\.removeEventListener\("keydown", interruptWithKeyboard, true\)/);
+});
+
+test("Python 편집기 터미널은 실행 결과와 분리된 모달로 열고 Esc로 닫는다", () => {
+  assert.match(pythonTerminal, /modal\.className = "modal py-terminal-modal"/);
+  assert.match(pythonTerminal, /modal\.setAttribute\("aria-modal", "true"\)/);
+  assert.match(pythonTerminal, /const closeTerminal = \(restoreFocus=true\) =>/);
+  assert.match(pythonTerminal, /if \(!isOpen \|\| event\.key !== "Escape"\) return/);
+  assert.match(pythonTerminal, /modal\.addEventListener\("mousedown", \(event\) => \{ if \(event\.target === modal\) closeTerminal\(\); \}\)/);
+  assert.doesNotMatch(pythonTerminal, /const resultStore = document\.createDocumentFragment\(\)/);
+});
+
+test("터미널 사용 확인 창은 터미널 모달보다 앞에 표시된다", () => {
+  assert.match(styles, /\.modal\{[^}]*z-index:200/);
+  assert.match(styles, /\.py-terminal-modal\{z-index:190\}/);
 });
 
 test("터미널 중지는 Windows Job과 후손 PID 재검사로 서버 프로세스를 끝낸다", () => {

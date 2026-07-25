@@ -2954,8 +2954,12 @@
   .terminal-stop:disabled{opacity:.45;cursor:default}
   .terminal-rerun{border:1px solid #166534;background:#052e16;color:#bbf7d0;border-radius:6px;padding:4px 9px;cursor:pointer}
   .terminal-rerun:disabled{opacity:.5;cursor:default}
+  /* 확인·입력 같은 일반 모달(z-index:200)은 터미널 위에서 반드시 조작할 수 있어야 한다. */
+  .py-terminal-modal{z-index:190}
+  .py-terminal-modal .py-terminal-card{width:min(900px,96vw);height:min(680px,calc(100vh - 24px));max-height:calc(100vh - 12px);padding:0;overflow:hidden;display:flex;flex-direction:column}
+  .py-terminal-modal .py-terminal{height:100%;min-height:0;flex:1 1 auto}
   .py-terminal{display:flex;flex:1 0 min-content;min-height:100%;flex-direction:column;background:var(--code-panel);color:var(--code-text)}
-  .py-terminal-head{padding-right:78px}
+  .py-terminal-head{padding-right:12px}
   .py-terminal-title{font-weight:750;color:var(--code-text)}
   .py-terminal-mode{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0;color:var(--code-muted)}
   .py-terminal-head-buttons{display:inline-flex;align-items:center;gap:5px;margin-right:2px}
@@ -2963,8 +2967,8 @@
     padding:4px 8px;font:650 11px/1.25 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;cursor:pointer}
   .py-terminal-tool:hover,.py-terminal-run:hover{border-color:var(--accent);color:var(--accent);background:var(--panel-hover)}
   .py-terminal-tool:disabled,.py-terminal-run:disabled{opacity:.45;cursor:default}
-  .py-terminal-log{flex:1 0 auto;min-height:130px;padding:11px 13px;white-space:pre-wrap;overflow-wrap:anywhere;
-    font:var(--code-fs,13px)/var(--code-lh,21px) var(--code-ff,Consolas,"Courier New",monospace)}
+  .py-terminal-log{flex:1 1 auto;min-height:0;padding:11px 13px;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;
+    font:var(--terminal-fs,var(--code-fs,13px))/var(--terminal-lh,var(--code-lh,21px)) var(--code-ff,Consolas,"Courier New",monospace)}
   .py-terminal-intro{margin-bottom:8px;color:var(--code-muted);font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;font-size:12px}
   .py-terminal-command-line{margin-top:8px;color:#60a5fa;font-weight:650}
   .py-terminal-output{color:var(--code-text)}
@@ -2973,10 +2977,10 @@
   .py-terminal-status.error{color:#f87171}
   .py-terminal-input-row{position:sticky;bottom:0;display:flex;align-items:flex-end;gap:8px;padding:9px 11px;
     border-top:1px solid var(--code-border);background:var(--code-panel-head);z-index:3}
-  .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--code-text);font-weight:700;user-select:none}
+  .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--code-text);font:700 var(--terminal-fs,var(--code-fs,13px))/var(--terminal-lh,var(--code-lh,21px)) var(--code-ff,Consolas,"Courier New",monospace);user-select:none}
   .py-terminal-command{flex:1;min-width:0;min-height:24px;max-height:110px;resize:vertical;padding:2px 0;border:0;outline:0;
     background:transparent;color:var(--code-text);caret-color:#4ade80;
-    font:var(--code-fs,13px)/var(--code-lh,21px) var(--code-ff,Consolas,"Courier New",monospace)}
+    font:var(--terminal-fs,var(--code-fs,13px))/var(--terminal-lh,var(--code-lh,21px)) var(--code-ff,Consolas,"Courier New",monospace)}
   .py-terminal-command:disabled{color:var(--code-muted)}
   .py-terminal-run{flex:none;margin-bottom:1px}
   /* 편집 가능한 .py 에디터: 투명 textarea(입력) 위에, 그 아래 구문강조 pre(표시)를 정확히 겹친다 */

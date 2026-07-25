@@ -11,6 +11,7 @@ const cssSource = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
 const htmlSource = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
 const i18nSource = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
 const terminalSource = fs.readFileSync(path.join(root, "src/js/python-terminal.js"), "utf8");
+const appSource = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
 
 test("Python 실행 결과 헤더는 재렌더 뒤에도 검색 도구를 다시 붙인다", () => {
   assert.match(codeSource, /outFindBtn\.className = "out-find-open"/);
@@ -30,6 +31,20 @@ test("터미널의 중첩 헤더는 검색 바를 같은 부모에 한 번만 �
 test("터미널 입력 경로는 출력 본문과 같은 기본 글자색을 사용한다", () => {
   assert.match(cssSource, /\.py-terminal-prompt\{[^}]*color:var\(--code-text\)/);
   assert.match(cssSource, /\.py-terminal-output\{color:var\(--code-text\)\}/);
+});
+
+test("터미널은 경로·입력·출력에 같은 조절 가능한 코드 글꼴 크기를 사용한다", () => {
+  assert.match(terminalSource, /const terminalFontStorageKey = "pyTerminalFontSize"/);
+  assert.match(terminalSource, /fontDownButton\.addEventListener\("click", \(\) => bumpTerminalFont\(-1\)\)/);
+  assert.match(terminalSource, /fontUpButton\.addEventListener\("click", \(\) => bumpTerminalFont\(1\)\)/);
+  assert.match(cssSource, /\.py-terminal-log\{[^}]*--terminal-fs/);
+  assert.match(cssSource, /\.py-terminal-prompt\{[^}]*--terminal-fs/);
+  assert.match(cssSource, /\.py-terminal-command\{[^}]*--terminal-fs/);
+});
+
+test("터미널 로그는 모달 이동 대상에서 제외해 텍스트를 드래그해 복사할 수 있다", () => {
+  assert.match(appSource, /const IGNORE = "[^"]*\.py-terminal-log/);
+  assert.match(cssSource, /\.py-terminal-log\{[^}]*overflow:auto/);
 });
 
 test("실행 결과 검색은 본문만 찾아 오버레이로 강조하고 큰 출력의 결과 수를 제한한다", () => {

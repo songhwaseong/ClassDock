@@ -1338,7 +1338,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
-  // 결과/터미널을 버튼 하나로 토글한다. 기본은 결과 화면이고, 누르면 터미널로 전환·다시 누르면 결과로 복귀.
+  // 터미널은 실행 결과와 분리된 모달 창으로 연다.
   const terminalTabBtn = document.createElement("button"); terminalTabBtn.className = "run-output-tab"; terminalTabBtn.type = "button"; terminalTabBtn.textContent = "터미널";
   terminalTabBtn.title = "명령 터미널 열기"; terminalTabBtn.setAttribute("aria-pressed", "false");
   outputTabs.append(terminalTabBtn);
@@ -1990,12 +1990,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         ui,
         runCtx:runCtxWithDoc,
         ownerDoc,
-        toggleButton:terminalTabBtn,
-        onShowOutput:() => {
-          split.classList.add("show-out");
-          layoutBtn.hidden = false;
-        },
-        attachOutputChrome
+        toggleButton:terminalTabBtn
       });
       ui.showResultTab = () => pythonTerminal.showResults();
     } else {

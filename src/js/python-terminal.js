@@ -1,32 +1,34 @@
 "use strict";
 
-// Python 편집기의 결과 패널을 보존한 채 터미널 화면과 전환한다.
+// Python 편집기의 실행 결과와 분리된 모달 터미널을 제공한다.
 // EXE에서는 PowerShell 명령을 로컬 런처가 실행하고, 일반 브라우저에서는
 // 같은 UI를 상태가 유지되는 Pyodide Python 콘솔로 사용한다.
 function createPythonTerminal(options){
   options = options || {};
-  const ui = options.ui || {};
-  const outPanel = ui.outPanel;
-  // 결과/터미널을 오가는 토글 버튼 하나로 동작한다. (예전 두 버튼 방식과의 호환도 유지)
+  // 예전 terminalButton 옵션과의 호환을 유지한다.
   const toggleButton = options.toggleButton || options.terminalButton;
-  if (!outPanel || !toggleButton) return {
+  if (!toggleButton) return {
     showResults:() => {},
     showTerminal:() => {},
     destroy:() => {}
   };
 
-  const resultStore = document.createDocumentFragment();
-  const terminalStore = document.createDocumentFragment();
   const root = document.createElement("section"); root.className = "py-terminal";
   const head = document.createElement("div"); head.className = "out-head py-terminal-head";
-  const title = document.createElement("span"); title.className = "py-terminal-title"; title.textContent = "터미널";
+  const title = document.createElement("span"); title.className = "py-terminal-title"; title.id = "py-terminal-title-" + Math.random().toString(36).slice(2); title.textContent = "터미널";
   const mode = document.createElement("span"); mode.className = "py-terminal-mode"; mode.textContent = "환경 확인 중…";
   const headButtons = document.createElement("span"); headButtons.className = "py-terminal-head-buttons";
+  const fontDownButton = document.createElement("button"); fontDownButton.type = "button"; fontDownButton.className = "py-terminal-tool py-terminal-font"; fontDownButton.textContent = "A−";
+  fontDownButton.title = "터미널 글자 작게"; fontDownButton.setAttribute("aria-label", fontDownButton.title);
+  const fontUpButton = document.createElement("button"); fontUpButton.type = "button"; fontUpButton.className = "py-terminal-tool py-terminal-font"; fontUpButton.textContent = "A+";
+  fontUpButton.title = "터미널 글자 크게"; fontUpButton.setAttribute("aria-label", fontUpButton.title);
   const clearButton = document.createElement("button"); clearButton.type = "button"; clearButton.className = "py-terminal-tool"; clearButton.textContent = "지우기";
   const resetButton = document.createElement("button"); resetButton.type = "button"; resetButton.className = "py-terminal-tool"; resetButton.textContent = "초기화";
   const stopButton = document.createElement("button"); stopButton.type = "button"; stopButton.className = "terminal-stop"; stopButton.textContent = "중지"; stopButton.disabled = true;
   stopButton.title = "실행 중인 명령 종료 (Ctrl+C)";
-  headButtons.append(clearButton, resetButton, stopButton);
+  const closeButton = document.createElement("button"); closeButton.type = "button"; closeButton.className = "py-terminal-tool py-terminal-close"; closeButton.textContent = "닫기";
+  closeButton.title = "터미널 닫기 (Esc)";
+  headButtons.append(fontDownButton, fontUpButton, clearButton, resetButton, stopButton, closeButton);
   head.append(title, mode, headButtons);
 
   const log = document.createElement("div"); log.className = "py-terminal-log"; log.setAttribute("role", "log"); log.setAttribute("aria-live", "polite");
@@ -43,7 +45,29 @@ function createPythonTerminal(options){
   inputRow.append(prompt, input, runButton);
   root.append(head, log, inputRow);
 
-  let activeView = "result";
+  const modal = document.createElement("div"); modal.className = "modal py-terminal-modal"; modal.hidden = true;
+  modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); modal.setAttribute("aria-labelledby", title.id);
+  const card = document.createElement("div"); card.className = "modal-card py-terminal-card"; card.tabIndex = -1;
+  card.appendChild(root); modal.appendChild(card); document.body.appendChild(modal);
+
+  let isOpen = false;
+  let opener = null;
+  const terminalFontStorageKey = "pyTerminalFontSize";
+  let terminalFontSize = 13;
+  try {
+    const savedFontSize = Number(localStorage.getItem(terminalFontStorageKey));
+    if (Number.isFinite(savedFontSize)) terminalFontSize = Math.max(11, Math.min(30, Math.round(savedFontSize)));
+  } catch(_){}
+  const applyTerminalFont = () => {
+    root.style.setProperty("--terminal-fs", terminalFontSize + "px");
+    root.style.setProperty("--terminal-lh", Math.round(terminalFontSize * 1.6) + "px");
+  };
+  const bumpTerminalFont = (delta) => {
+    terminalFontSize = Math.max(11, Math.min(30, terminalFontSize + delta));
+    applyTerminalFont();
+    try { localStorage.setItem(terminalFontStorageKey, String(terminalFontSize)); } catch(_){}
+  };
+  applyTerminalFont();
   let backendReady = null;
   let localBackend = false;
   let busy = false;
@@ -72,39 +96,37 @@ function createPythonTerminal(options){
   let initialCwd = absoluteDocPath ? pathDir(rawDocPath) : (configuredCwd || pathDir(rawDocPath));
   let currentCwd = initialCwd;
 
-  const setTabState = (view) => {
-    const isTerminal = view === "terminal";
-    toggleButton.classList.toggle("active", isTerminal);
-    toggleButton.setAttribute("aria-pressed", isTerminal ? "true" : "false");
-    toggleButton.title = isTerminal ? "결과 화면으로 돌아가기" : "명령 터미널 열기";
+  toggleButton.setAttribute("aria-haspopup", "dialog");
+  const setOpenState = (open) => {
+    toggleButton.classList.toggle("active", open);
+    toggleButton.setAttribute("aria-pressed", open ? "true" : "false");
+    toggleButton.setAttribute("aria-expanded", open ? "true" : "false");
+    toggleButton.title = open ? "터미널이 열려 있습니다" : "명령 터미널 열기";
   };
-  const movePanelChildren = (target) => {
-    while (outPanel.firstChild) target.appendChild(outPanel.firstChild);
-  };
-  const refreshOutputChrome = () => {
-    if (typeof options.attachOutputChrome === "function") options.attachOutputChrome();
+  const closeTerminal = (restoreFocus=true) => {
+    if (!isOpen) return;
+    isOpen = false; modal.hidden = true; setOpenState(false);
+    const focusTarget = opener; opener = null;
+    if (restoreFocus && focusTarget && focusTarget.isConnected) setTimeout(() => focusTarget.focus(), 0);
   };
   const showResults = () => {
-    if (activeView === "result") return;
-    movePanelChildren(terminalStore);
-    outPanel.appendChild(resultStore);
-    activeView = "result"; setTabState("result"); refreshOutputChrome();
+    // 편집기 실행 결과는 뒤의 원래 결과 패널에 표시한다.
+    closeTerminal(false);
   };
   const showTerminal = () => {
-    if (activeView !== "terminal"){
-      movePanelChildren(resultStore);
-      outPanel.appendChild(terminalStore.firstChild || root);
-      activeView = "terminal"; setTabState("terminal"); refreshOutputChrome();
+    if (destroyed) return;
+    if (!isOpen){
+      opener = document.activeElement;
+      isOpen = true; modal.hidden = false; setOpenState(true);
     }
-    if (typeof options.onShowOutput === "function") options.onShowOutput();
     ensureBackend().then((isLocal) => {
       if (isLocal) ensureLocalShell().catch(() => {});
-      if (!destroyed && activeView === "terminal") setTimeout(() => input.focus(), 0);
+      if (!destroyed && isOpen) setTimeout(() => input.focus(), 0);
     }).catch(() => {});
   };
 
   const scrollLog = () => {
-    if (activeView === "terminal") outPanel.scrollTop = outPanel.scrollHeight;
+    if (isOpen) log.scrollTop = log.scrollHeight;
   };
   const trimLog = () => {
     while (log.childNodes.length > 400) log.removeChild(log.firstChild);
@@ -120,7 +142,7 @@ function createPythonTerminal(options){
     busy = !!value;
     input.disabled = busy; runButton.disabled = busy; resetButton.disabled = busy;
     stopButton.disabled = !busy;
-    if (!busy && activeView === "terminal") setTimeout(() => input.focus(), 0);
+    if (!busy && isOpen) setTimeout(() => input.focus(), 0);
   };
   const setPrompt = () => {
     if (localBackend){
@@ -456,7 +478,7 @@ function createPythonTerminal(options){
   };
 
   const interruptWithKeyboard = (event) => {
-    if (!busy || activeView !== "terminal" || event.isComposing || event.repeat) return;
+    if (!busy || !isOpen || event.isComposing || event.repeat) return;
     if (!event.ctrlKey || event.altKey || event.metaKey || String(event.key).toLowerCase() !== "c") return;
     const focused = document.activeElement;
     if (focused && focused !== document.body && !root.contains(focused)) return;
@@ -466,13 +488,21 @@ function createPythonTerminal(options){
   };
 
   toggleButton.addEventListener("click", () => {
-    if (activeView === "terminal") showResults();
+    if (isOpen) closeTerminal();
     else showTerminal();
   });
   runButton.addEventListener("click", execute);
+  fontDownButton.addEventListener("click", () => bumpTerminalFont(-1));
+  fontUpButton.addEventListener("click", () => bumpTerminalFont(1));
   clearButton.addEventListener("click", () => log.replaceChildren());
   resetButton.addEventListener("click", reset);
   stopButton.addEventListener("click", stop);
+  closeButton.addEventListener("click", () => closeTerminal());
+  modal.addEventListener("mousedown", (event) => { if (event.target === modal) closeTerminal(); });
+  const closeWithEscape = (event) => {
+    if (!isOpen || event.key !== "Escape") return;
+    event.preventDefault(); event.stopImmediatePropagation(); closeTerminal();
+  };
   input.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
     if (event.key === "Tab"){
@@ -497,13 +527,17 @@ function createPythonTerminal(options){
     if (localBackend) mode.textContent = localSessionId ? "로컬 PowerShell · 준비됨" : "로컬 PowerShell";
   });
   document.addEventListener("keydown", interruptWithKeyboard, true);
+  document.addEventListener("keydown", closeWithEscape, true);
 
   return {
     showResults,
     showTerminal,
+    close:closeTerminal,
     destroy:() => {
       destroyed = true;
       document.removeEventListener("keydown", interruptWithKeyboard, true);
+      document.removeEventListener("keydown", closeWithEscape, true);
+      modal.remove();
       if (localSessionId){
         const id = localSessionId;
         localSessionId = "";
