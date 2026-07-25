@@ -2081,6 +2081,11 @@ async function renderCode(file, host, ext, profile, runCtx){
     saveBtn.disabled = true;
     if (ownerDoc){ ownerDoc._pyAutosaveState = ""; updateDocumentStatus(ownerDoc); }
     if (pyAutosaveSaving) await pyAutosaveSaving;
+    // 저장 시 자동 정렬 — 명시적 저장(Ctrl+S·.py 저장)에서만. 백그라운드 자동 저장에는 적용하지 않아
+    // 타이핑 도중 커서가 튀지 않게 한다. 로컬 파이썬이면 black, 아니면 경량 재들여쓰기로 정리 후 저장.
+    if (appSettings.pyFormatOnSave && typeof editor.formatDocument === "function"){
+      try { await editor.formatDocument({ backend: true, silent: true }); } catch(_){}
+    }
     const value = editor.getValue();
     let name = (ownerDoc && ownerDoc.name) || (file && file.name) || "practice.py";
     let persisted = false;

@@ -794,6 +794,41 @@ function buildCodeEditor(text, prof, options={}){
     scrollCaretIntoView();                       // 줄 이동·복제로 커서가 화면 밖으로 나가면 따라가게
   };
 
+  // ===== 코드 자동 정렬 =====
+  // 경량 재들여쓰기(오프라인·항상 가능) + 로컬 파이썬이면 black/autopep8 전체 재포맷. 파이썬 편집기(prof "hash",
+  // plain 아님)에서만 동작한다. black 은 비동기라 도중에 사용자가 편집하면 그 결과를 버려 편집을 덮어쓰지 않는다.
+  // undo 는 정렬 전/후를 한 단계로 묶고, 커서는 같은 줄·같은 칸(가능한 범위)으로 되돌린다.
+  const formatDocumentNow = async (opts) => {
+    opts = opts || {};
+    if (plainMode || prof !== "hash") return { changed: false };
+    const before = ta.value;
+    if (!before.trim()) return { changed: false };
+    hideCompletion(); exitCol();
+    const caret = ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd;
+    let line = 0, col = 0;
+    for (let i = 0; i < caret && i < before.length; i++){ if (before.charCodeAt(i) === 10){ line++; col = 0; } else col++; }
+    let result;
+    try {
+      result = (typeof mnFormatPythonSource === "function")
+        ? await mnFormatPythonSource(before, { backend: opts.backend !== false })
+        : { text: (typeof lightReindentPython === "function" ? lightReindentPython(before) : before), engine: "light" };
+    } catch(_){ result = { text: before, engine: "light" }; }
+    const after = (result && typeof result.text === "string") ? result.text : before;
+    if (ta.value !== before) return { changed: false, stale: true };   // 비동기 도중 사용자가 편집 → 폐기
+    if (after === before) return { changed: false, engine: result && result.engine, reason: result && result.reason };
+    clearTimeout(coalesceTimer); commitNow();                          // 정렬 직전 상태를 undo 한 단계로
+    ta.value = after;
+    const nlines = after.split("\n");
+    const tgtLine = Math.max(0, Math.min(line, nlines.length - 1));
+    let off = 0; for (let i = 0; i < tgtLine; i++) off += nlines[i].length + 1;
+    off += Math.min(col, nlines[tgtLine].length);
+    ta.selectionStart = ta.selectionEnd = Math.min(off, after.length);
+    emitInput();
+    clearTimeout(coalesceTimer); commitNow();
+    scrollCaretIntoView();
+    return { changed: true, engine: result && result.engine, reason: result && result.reason };
+  };
+
   /* ===== 셀 나누기: 거터(줄번호)를 클릭하면 그 줄에 # %% 경계를 넣거나 뺀다 =====
      경계는 텍스트 안의 # %% 로 남으므로, 완료 후 변환(splitNotebookCells)은 그대로 재사용된다. */
   const CELL_MARKER_RE = /^\s*#+\s*%%/;
@@ -1652,6 +1687,24 @@ function buildCodeEditor(text, prof, options={}){
     if (shortcutMatches(e, "findInDocument")){
       e.preventDefault(); e.stopPropagation(); exitCol(); hideCompletion(); openFind(); return;
     }
+    if (shortcutMatches(e, "formatDocument")){
+      e.preventDefault(); e.stopPropagation();
+      formatDocumentNow({ backend: true }).then((r) => {
+        if (!r || typeof toast !== "function") return;
+        if (r.reason === "syntax") toast("구문 오류가 있어 완전 정렬은 못 하고 공백만 정리했어요.", 2800);
+        else if (r.changed) {
+          const engine = r.engine === "light"
+            ? (typeof window.t === "function" ? window.t("경량 정렬") : "경량 정렬")
+            : (r.engine || "formatter");
+          const message = typeof window.tf === "function"
+            ? window.tf("코드를 정렬했어요 ({engine}).", { engine })
+            : "코드를 정렬했어요 (" + engine + ").";
+          toast(message, 1600);
+        }
+        else if (!r.changed && !r.stale) toast("이미 정렬돼 있어요.", 1400);
+      }).catch(() => {});
+      return;
+    }
     if (findOpen && e.key === "F3"){   // F3/Shift+F3: 찾기 패널이 열려 있으면 매치 순환
       e.preventDefault(); selectMatch(findIndex + (e.shiftKey ? -1 : 1)); return;
     }
@@ -1845,6 +1898,8 @@ function buildCodeEditor(text, prof, options={}){
     focusLine,
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,
+    formatDocument: formatDocumentNow,
+    canFormat: () => !plainMode && prof === "hash",
     destroy: () => {
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);

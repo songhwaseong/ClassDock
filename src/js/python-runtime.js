@@ -719,6 +719,7 @@ async function runPipInstall(pkgs, ui){
     if (!j.ok){ const e = document.createElement("span"); e.className = "out-err"; e.textContent = "\n\n✖ 설치 실패 (코드 " + j.code + ") — 위 로그를 확인하세요."; pre.appendChild(e); }
     outPanel.scrollTop = outPanel.scrollHeight;
     if (status) status.textContent = j.ok ? "설치 완료 ✓" : "설치 실패";
+    if (j.ok) resetBackendFormatterProbe();        // black/autopep8 를 방금 설치했을 수 있으니 다음 정렬 때 다시 확인
     toast(j.ok ? ("설치 완료: " + pkgs.join(" ")) : "설치 실패 — 로그를 확인하세요", 3000);
     return !!j.ok;
   } catch(e){
@@ -766,6 +767,69 @@ async function runPipList(ui){
     pre.textContent = "목록 조회 실패: " + ((e && e.message) || e);
     if (status) status.textContent = "목록 조회 실패";
   }
+}
+
+// ===== 코드 자동 정렬 =====
+// 로컬 파이썬 백엔드가 있으면 black(없으면 autopep8)으로 전체 재포맷하고, 아니면(또는 실패 시)
+// 순수 JS 경량 재들여쓰기(lightReindentPython)로 폴백한다. 브라우저(pyodide) 실행은 오프라인
+// 번들에 포매터 휠이 없으므로 항상 경량 정렬만 쓴다.
+let _pyBackendFormatter = null;   // null=미확인, false=포매터 없음(세션 내 재시도 안 함), "black"|"autopep8"=사용 가능
+function resetBackendFormatterProbe(){ _pyBackendFormatter = null; }   // pip 설치 후 재확인용
+function _utf8ToBase64(str){
+  const bytes = new TextEncoder().encode(String(str == null ? "" : str));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function _pyFormatDriver(b64){
+  // stdout 앞에 import 경고 등이 섞여도 안전하게 파싱하도록 결과를 <<<MNFMT>>> 뒤 JSON 한 줄로 낸다.
+  return [
+    "import sys, json, base64",
+    "src = base64.b64decode('" + b64 + "').decode('utf-8')",
+    "res = {'ok': False, 'reason': 'no-formatter'}",
+    "try:",
+    "    import black",
+    "    try:",
+    "        res = {'ok': True, 'engine': 'black', 'formatted': black.format_str(src, mode=black.Mode())}",
+    "    except Exception as e:",
+    "        res = {'ok': False, 'reason': 'syntax', 'engine': 'black', 'detail': str(e)[:400]}",
+    "except Exception:",
+    "    try:",
+    "        import autopep8",
+    "        res = {'ok': True, 'engine': 'autopep8', 'formatted': autopep8.fix_code(src)}",
+    "    except ImportError:",
+    "        res = {'ok': False, 'reason': 'no-formatter'}",
+    "    except Exception as e:",
+    "        res = {'ok': False, 'reason': 'syntax', 'engine': 'autopep8', 'detail': str(e)[:400]}",
+    "sys.stdout.write('\\n<<<MNFMT>>>' + json.dumps(res))",
+  ].join("\n");
+}
+// source → { text, engine:'black'|'autopep8'|'light', changed, reason? }
+async function mnFormatPythonSource(source, opts){
+  opts = opts || {};
+  const src = String(source == null ? "" : source);
+  let light = src;
+  try { if (typeof lightReindentPython === "function") light = lightReindentPython(src); } catch(_){ light = src; }
+  const lightResult = () => ({ text: light, engine: "light", changed: light !== src });
+  if (opts.backend === false || _pyBackendFormatter === false) return lightResult();
+  let backendUp = false;
+  try { backendUp = await pythonBackendAvailable(); } catch(_){ backendUp = false; }
+  if (!backendUp) return lightResult();
+  try {
+    const r = await runPythonViaBackend(_pyFormatDriver(_utf8ToBase64(src)), "");
+    const out = String((r && r.stdout) || "");
+    const marker = out.lastIndexOf("<<<MNFMT>>>");
+    if (marker >= 0){
+      const j = JSON.parse(out.slice(marker + "<<<MNFMT>>>".length));
+      if (j && j.ok && typeof j.formatted === "string"){
+        _pyBackendFormatter = j.engine || "black";
+        return { text: j.formatted, engine: j.engine || "black", changed: j.formatted !== src };
+      }
+      if (j && j.reason === "no-formatter"){ _pyBackendFormatter = false; return { ...lightResult(), reason: "no-formatter" }; }
+      if (j && j.reason === "syntax"){ return { ...lightResult(), reason: "syntax", detail: j.detail || "", engineTried: j.engine }; }
+    }
+  } catch(_){}
+  return lightResult();
 }
 
 async function runPythonViaBackend(src, stdin){

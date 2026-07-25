@@ -1448,6 +1448,148 @@
     return /:\s*$/.test(line.slice(0, codeEnd));
   }
 
+  // 경량 재들여쓰기(오프라인·구문 파서 없이 보수적으로 동작).
+  //  1) 줄 앞 탭 → Python 해석과 같은 8칸 탭 스톱 기준 스페이스
+  //  2) 블록·괄호·역슬래시 연속이 아닌데 갑자기 깊어진 명백한 unexpected indent만 현재 블록 깊이로 복원
+  //  3) 줄 끝 공백 제거
+  //  4) 빈 줄 3개 이상 → 2개로, 파일 끝 빈 줄 정리(마지막 개행 1개 보장)
+  // 삼중따옴표 문자열 안(내용)은 절대 건드리지 않도록 문자열/주석 상태를 문자 단위로 추적한다.
+  // 정상 블록의 들여쓰기 폭을 통일하거나 애매한 잘못된 dedent를 추측하지는 않는다.
+  function lightReindentPython(source) {
+    const text = String(source == null ? "" : source);
+    if (!text.trim()) return "";
+    const lines = text.split("\n");
+    const startInTriple = new Array(lines.length);   // 각 줄 시작이 삼중따옴표 문자열 안인가
+    const endInTriple = new Array(lines.length);      // 각 줄 끝(개행 직전)이 삼중따옴표 문자열 안인가
+    let inTriple = false, tripleQuote = "";
+    for (let li = 0; li < lines.length; li++) {
+      startInTriple[li] = inTriple;
+      const line = lines[li];
+      let quote = "", escaped = false;                // 한 줄짜리 문자열은 물리 줄을 넘지 않는다(보수적)
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inTriple) {
+          if (ch === "\\") { i++; continue; }          // 이스케이프: 다음 문자 무시(닫는 따옴표 오판 방지)
+          if (ch === tripleQuote && line[i + 1] === tripleQuote && line[i + 2] === tripleQuote) {
+            inTriple = false; tripleQuote = ""; i += 2;
+          }
+          continue;
+        }
+        if (quote) {
+          if (escaped) { escaped = false; continue; }
+          if (ch === "\\") { escaped = true; continue; }
+          if (ch === quote) quote = "";
+          continue;
+        }
+        if (ch === "#") break;                          // 나머지는 주석
+        if (ch === "'" || ch === '"') {
+          if (line[i + 1] === ch && line[i + 2] === ch) { inTriple = true; tripleQuote = ch; i += 2; }
+          else quote = ch;
+        }
+      }
+      endInTriple[li] = inTriple;
+    }
+    const blankCode = new Array(lines.length);
+    const cleaned = lines.map((line, li) => {
+      if (!startInTriple[li]) {                         // 줄 앞이 코드일 때만 Python 탭 스톱대로 확장
+        const lead = (line.match(/^[ \t]*/) || [""])[0];
+        if (lead.indexOf("\t") >= 0) {
+          let expanded = "";
+          for (const c of lead) {
+            if (c === "\t") expanded += " ".repeat(8 - (expanded.length % 8));
+            else expanded += " ";
+          }
+          line = expanded + line.slice(lead.length);
+        }
+      }
+      if (!endInTriple[li]) line = line.replace(/[ \t]+$/, "");   // 줄 끝이 코드일 때만 후행 공백 제거
+      const terminalSentinel = li === lines.length - 1 && line === "" && text.endsWith("\n");
+      blankCode[li] = terminalSentinel || (line.trim() === "" && !startInTriple[li]);
+      // split("\n")이 만든 마지막 빈 항목은 실제 문자열 내용이 아니다. 그 외 삼중문자열 안 빈 줄은 보존한다.
+      return line;
+    });
+
+    // 문자열·주석을 제외한 괄호 깊이와 물리 줄 끝의 명시적 연속(\)만 추적한다.
+    // 삼중문자열을 여는 줄은 그 지점부터 보수적으로 스캔을 멈추며, 문자열 내부 줄은 호출하지 않는다.
+    const scanStructure = (line, initialDepth) => {
+      let quote = "", escaped = false, depth = initialDepth, hasCode = false, lastCode = "", unbalanced = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (quote) {
+          if (escaped) { escaped = false; continue; }
+          if (ch === "\\") { escaped = true; continue; }
+          if (ch === quote) quote = "";
+          continue;
+        }
+        if (ch === "#") break;
+        if (ch === "'" || ch === '"') {
+          hasCode = true; lastCode = "string";
+          if (line[i + 1] === ch && line[i + 2] === ch) break;
+          quote = ch; continue;
+        }
+        if (/\s/.test(ch)) continue;
+        hasCode = true; lastCode = ch;
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") {
+          if (depth > 0) depth--;
+          else unbalanced = true;
+        }
+      }
+      return { depth, hasCode, lastCode, explicitContinuation:lastCode === "\\", unbalanced };
+    };
+
+    // Python은 블록을 연 논리 줄 다음에서만 새 들여쓰기 깊이를 허용한다. 현재 블록보다 깊지만
+    // 앞 논리 줄이 ':'로 끝나지 않은 경우만 되돌리므로, 화면 예시의 최상위 오들여쓰기는 고치되
+    // 함수 인수·자료구조·역슬래시 연속 줄은 그대로 둔다.
+    const indentStack = [0];
+    let pendingBlock = false, bracketDepth = 0, explicitContinuation = false, repairSafe = true;
+    for (let li = 0; li < cleaned.length; li++) {
+      if (startInTriple[li]) { explicitContinuation = false; continue; }
+      let line = cleaned[li];
+      const continuationAtStart = bracketDepth > 0 || explicitContinuation;
+      const scan = scanStructure(line, bracketDepth);
+      const logicalContinues = scan.depth > 0 || scan.explicitContinuation;
+
+      if (!continuationAtStart && scan.hasCode) {
+        const lead = (line.match(/^ */) || [""])[0].length;   // 탭은 위에서 이미 Python 열 기준으로 확장됨
+        let poppedIndent = false;
+        while (indentStack.length > 1 && lead < indentStack[indentStack.length - 1]) {
+          indentStack.pop(); poppedIndent = true;
+        }
+        const currentIndent = indentStack[indentStack.length - 1];
+        if (lead < currentIndent || (poppedIndent && lead !== currentIndent)) {
+          repairSafe = false;                                // 일치하지 않는 dedent는 의미를 추측하지 않는다
+        } else if (pendingBlock) {
+          if (lead > currentIndent) indentStack.push(lead);
+          else repairSafe = false;                           // 블록 본문이 빠진 별도 문법 오류
+          pendingBlock = false;
+        } else if (repairSafe && lead > currentIndent) {
+          line = " ".repeat(currentIndent) + line.slice(lead);
+          cleaned[li] = line;
+        }
+      }
+
+      if (scan.unbalanced) repairSafe = false;
+      bracketDepth = scan.depth;
+      explicitContinuation = scan.explicitContinuation;
+      if (scan.hasCode && !logicalContinues) pendingBlock = scan.lastCode === ":";
+    }
+
+    const out = [], outBlankCode = [];
+    let run = 0;                                        // 연속 빈(코드) 줄 수
+    for (let li = 0; li < cleaned.length; li++) {
+      if (blankCode[li]) {
+        run++;
+        if (run <= 2) { out.push(cleaned[li]); outBlankCode.push(true); }
+      } else {
+        run = 0; out.push(cleaned[li]); outBlankCode.push(false);
+      }
+    }
+    // 파일 끝의 코드 빈 줄만 제거한다. 닫히지 않은 삼중문자열 안 공백 줄은 편집 중인 실제 내용이다.
+    while (out.length && outBlankCode[outBlankCode.length - 1]) { out.pop(); outBlankCode.pop(); }
+    return out.length ? out.join("\n") + "\n" : "";
+  }
+
   function pythonOpenClosePlan(value, selectionStart, selectionEnd) {
     const text = String(value || "");
     const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
@@ -3082,7 +3224,7 @@
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
-    diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
+    diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,

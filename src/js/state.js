@@ -6,7 +6,7 @@ const {
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
   pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
-  diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
+  diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer,
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
@@ -80,11 +80,12 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"runCode", label:"Python 코드 실행", description:"현재 Python 코드 실행 (노트북: 이 셀만)", defaultValue:"Ctrl+Enter" },
   { id:"runCellAdvance", label:"셀 실행 후 다음 셀", description:"노트북·셀 코드에서 실행 후 다음 셀로", defaultValue:"Shift+Enter" },
   { id:"runNotebook", label:"노트북 전체 실행", description:"현재 노트북의 모든 코드 셀 실행", defaultValue:"Ctrl+Shift+Enter" },
+  { id:"formatDocument", label:"코드 자동 정렬", description:"Python 코드 들여쓰기·공백 정렬(로컬 파이썬이면 black)", defaultValue:"Shift+Alt+F" },
   { id:"screensaverStart", label:"대기 화면 지금 시작", description:"모니터 전체 화면으로 대기 화면 켜기", defaultValue:"Ctrl+F12" }
 ]);
 const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.map((item) => [item.id, item.defaultValue])));
 const DEFAULT_APP_SETTINGS = {
-  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, pythonAutosave: false,
+  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, pythonAutosave: false, pyFormatOnSave: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
