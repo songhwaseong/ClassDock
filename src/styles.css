@@ -2088,7 +2088,7 @@
     .office.python-editor-doc .code-output{min-height:0;max-height:none}
     .office.python-editor-doc .run-split.stack-v{height:auto}
   }
-  .run-bar{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+  .run-bar{position:relative;z-index:32;display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
   .run-go{font:inherit;font-weight:600;font-size:15px;line-height:1;border:1.5px solid #16a34a;border-radius:8px;height:30px;padding:0 13px;cursor:pointer;
     background:transparent;color:#16a34a;display:inline-flex;align-items:center;justify-content:center;min-width:40px}
   .run-go:hover{background:rgba(22,163,74,.09);border-color:#15803d;color:#15803d}
@@ -2640,7 +2640,10 @@
   .py-path-example{min-width:0;border:1px solid var(--code-border);border-radius:8px;background:var(--code-bg);overflow:hidden}
   .py-path-example-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--code-border);font-size:11.5px}
   .py-path-example-head button{padding:3px 6px;font-size:10.5px}.py-path-example pre{margin:0;padding:8px;overflow:auto;color:var(--code-text);font:10.5px/1.45 Consolas,"Courier New",monospace;white-space:pre}
-  .run-pkg-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}
+  /* 라이브러리 패널은 실행 바 아래에 겹쳐 열어 편집기 영역을 밀지 않는다. */
+  .run-pkg-wrap{position:absolute;top:calc(100% + 6px);left:0;z-index:1;width:min(760px,100%);max-height:min(60vh,280px);overflow:auto;
+    box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:11px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--border));
+    border-radius:10px;background:var(--panel);box-shadow:0 14px 30px rgba(0,0,0,.25)}
   .pkg-set,.pkg-go{height:30px;display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:12.5px;
     border:1px solid var(--border);border-radius:8px;padding:0 11px;cursor:pointer}
   .pkg-set{background:var(--field);color:var(--muted)}

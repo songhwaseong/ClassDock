@@ -1445,6 +1445,14 @@ async function renderCode(file, host, ext, profile, runCtx){
     pathHelpOutsideClose = null;
   };
   const closePathHelp = () => { pathHelpPanel.hidden = true; detachPathHelpOutside(); };
+  // 라이브러리 패널도 실행 바를 밀지 않는 팝오버로 연다. 닫힐 때 전역 리스너도 함께 정리한다.
+  let pkgOutsideClose = null;
+  const detachPkgOutside = () => {
+    if (!pkgOutsideClose) return;
+    document.removeEventListener("pointerdown", pkgOutsideClose, true);
+    pkgOutsideClose = null;
+  };
+  const closePkg = () => { pkgWrap.hidden = true; detachPkgOutside(); };
   outer.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (!pathHelpPanel.hidden){
@@ -1454,6 +1462,16 @@ async function renderCode(file, host, ext, profile, runCtx){
       closePathHelp();
       if (focusWasInPanel){
         try { pathHelpBtn.focus({ preventScroll:true }); } catch(_) { pathHelpBtn.focus(); }
+      }
+      return;
+    }
+    if (!pkgWrap.hidden){
+      const focusWasInPanel = pkgWrap.contains(document.activeElement);
+      e.preventDefault();
+      e.stopPropagation();
+      closePkg();
+      if (focusWasInPanel){
+        try { pkgBtn.focus({ preventScroll:true }); } catch(_) { pkgBtn.focus(); }
       }
       return;
     }
@@ -1534,7 +1552,20 @@ async function renderCode(file, host, ext, profile, runCtx){
     runPipInstall(pkgs.slice(0, 40), ui);
   });
   pkgWrap.append(mkSet("데이터 분석", ["matplotlib","openpyxl","seaborn","scipy"]), mkSet("크롤링", ["requests","beautifulsoup4","lxml"]), mkSet("DB(MySQL)", ["pymysql"]), pkgCustom, pkgGo, pkgVersionHint, pkgFileBtn, pkgFile, pkgList);
-  pkgBtn.addEventListener("click", () => { pkgWrap.hidden = !pkgWrap.hidden; });
+  // 패널은 실행 바의 자식으로 두고 절대 위치로 띄운다. 그래서 열어도 편집기 높이가 줄지 않는다.
+  bar.appendChild(pkgWrap);
+  pkgBtn.addEventListener("click", () => {
+    if (!pkgWrap.hidden){ closePkg(); return; }
+    closePathHelp();
+    pkgWrap.hidden = false;
+    if (pkgOutsideClose) return;
+    pkgOutsideClose = (e) => {
+      if (!document.contains(pkgWrap) || pkgWrap.hidden){ detachPkgOutside(); return; }
+      if (pkgWrap.contains(e.target) || pkgBtn.contains(e.target)) return;
+      closePkg();
+    };
+    document.addEventListener("pointerdown", pkgOutsideClose, true);
+  });
   pythonBackendAvailable().then(ok => { if (ok) pkgBtn.hidden = false; });   // 로컬 파이썬일 때만
 
   diagBtn.addEventListener("click", () => openPythonEnvModal(diagBtn));
@@ -1796,10 +1827,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   });
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
-  outer.appendChild(bar); outer.appendChild(pkgWrap); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(split);
+  outer.appendChild(bar); outer.appendChild(inputWrap); outer.appendChild(pathBar); outer.appendChild(projectRow); outer.appendChild(split);
   // 동적 툴바(실행 바·라이브러리·경로 안내)를 현재 UI 언어로 번역 — 코드 편집기 본문(split)은 제외.
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") {
-    [bar, pkgWrap, inputWrap, pathBar, projectRow].forEach((el) => window.MNI18N.translateTree(el));
+    [bar, inputWrap, pathBar, projectRow].forEach((el) => window.MNI18N.translateTree(el));
   }
   host.appendChild(outer);
 
@@ -1809,6 +1840,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.closeOutputFind = closeOutputFind;
   ui.closePathHelp = closePathHelp;
   ui.openPathHelp = () => {
+    closePkg();
     pathHelpPanel.hidden = false;
     renderPythonPathHelper(pathHelpPanel, editor.getValue(), runCtxWithDoc, ui);   // 오버레이라 스크롤 보정 불필요
     if (pathHelpOutsideClose) return;
