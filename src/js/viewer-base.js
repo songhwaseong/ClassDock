@@ -405,6 +405,11 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
   async function runSql(text, runButton, status){
     const sql = String(text || "").trim();
     if (!sql){ status.textContent = "실행할 SQL을 입력하세요"; return; }
+    if (blockedTxKeyword(sql)){
+      status.textContent = "";
+      paintSqlite(data, { error: SQLITE_TX_HINT });
+      return;
+    }
     if (looksDestructive(sql) && !confirm("되돌릴 수 없는 변경일 수 있습니다.\n실행 전 .bak 백업이 만들어집니다. 계속할까요?\n\n" + sql.slice(0, 300))) return;
     sqlText = sql;
     runButton.disabled = true; status.textContent = "실행 중…";
@@ -428,7 +433,9 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
       const out = await response.json();
       if (!out || out.ok === false){
         status.textContent = "";
-        paintSqlite(data, { error: (out && out.error) || "SQL 실행에 실패했습니다." });
+        let error = (out && out.error) || "SQL 실행에 실패했습니다.";
+        if (/not authorized/i.test(error)) error = SQLITE_TX_HINT;
+        paintSqlite(data, { error });
         return;
       }
       dbFingerprint = out.fingerprint || dbFingerprint;
@@ -447,6 +454,18 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
     } finally {
       runButton.disabled = false;
     }
+  }
+
+  // 이 도구는 변경을 자체 트랜잭션(+.bak 백업)으로 감싸 실행하므로, 수동 트랜잭션 제어와
+  // 다른 DB 연결(ATTACH/DETACH)은 SQLite authorizer가 막아 "not authorized"를 던진다.
+  const SQLITE_TX_HINT = "이 도구는 변경을 실행할 때마다 자동으로 커밋하고 .bak 백업을 만듭니다. "
+    + "COMMIT·BEGIN·ROLLBACK 같은 트랜잭션 명령이나 ATTACH·DETACH는 직접 쓸 수 없습니다. "
+    + "INSERT·UPDATE·DELETE·DDL만 그대로 실행하면 됩니다.";
+
+  function blockedTxKeyword(sql){
+    const kw = (sql.match(/^\s*([a-z]+)/i) || [,""])[1].toUpperCase();
+    return kw === "BEGIN" || kw === "COMMIT" || kw === "END" || kw === "ROLLBACK"
+      || kw === "SAVEPOINT" || kw === "RELEASE" || kw === "ATTACH" || kw === "DETACH";
   }
 
   function looksDestructive(sql){
