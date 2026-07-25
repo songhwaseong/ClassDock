@@ -143,12 +143,17 @@ function highlightCodeBase(src, profile){
 // 구문 강조 결과의 문자 배치를 바꾸지 않으면서 의미 분석 범위만 흐리게 표시한다.
 // 먼저 원문에 사용자가 입력할 가능성이 매우 낮은 PUA 표식을 끼운 뒤 기존 렉서를 통과시키면,
 // 문자열·주석 같은 여러 줄 토큰의 상태를 깨뜨리지 않고 정확한 식별자 위치에 span을 넣을 수 있다.
+// semanticRanges: [{start, end, cls}] — cls는 "tk-unused"(기본, 미사용 흐림) 또는 "tk-param"(함수 매개변수·
+// 키워드 인자 이름). 서로 다른 부류가 같은 글자를 겹쳐 칠하지 않도록 정렬 후 겹치는 범위는 앞선 것만 남긴다
+// (미사용 흐림을 먼저 넣으면 흐림이 매개변수색을 이긴다). 각 부류는 전용 PUA 마커 쌍으로 감싼 뒤 span 으로 치환.
+const SEMANTIC_HL_CLASSES = ["tk-unused", "tk-param"];
 function highlightCode(src, profile, semanticRanges=[]){
   const text = String(src == null ? "" : src);
   const candidates = (Array.isArray(semanticRanges) ? semanticRanges : [])
     .map((item) => ({
       start:Math.max(0, Math.min(text.length, parseInt(item && item.start, 10) || 0)),
-      end:Math.max(0, Math.min(text.length, parseInt(item && item.end, 10) || 0))
+      end:Math.max(0, Math.min(text.length, parseInt(item && item.end, 10) || 0)),
+      cls:(item && item.cls === "tk-param") ? "tk-param" : "tk-unused"
     }))
     .filter((item) => item.end > item.start)
     .sort((a, b) => a.start - b.start || a.end - b.end);
@@ -156,18 +161,23 @@ function highlightCode(src, profile, semanticRanges=[]){
   for (const item of candidates) if (!ranges.length || item.start >= ranges[ranges.length - 1].end) ranges.push(item);
   if (!ranges.length) return highlightCodeBase(text, profile);
 
+  // 부류마다 별도의 open/close 문자가 필요하므로(2쌍=4글자) 본문에 없는 연속 PUA 블록을 찾는다.
+  const free = (code) => !text.includes(String.fromCharCode(code));
   let markerCode = 0xE000;
-  while (markerCode < 0xF8FC && (text.includes(String.fromCharCode(markerCode)) || text.includes(String.fromCharCode(markerCode + 1)))) markerCode += 2;
-  if (markerCode >= 0xF8FC) return highlightCodeBase(text, profile);
-  const open = String.fromCharCode(markerCode), close = String.fromCharCode(markerCode + 1);
+  while (markerCode < 0xF8FA && !(free(markerCode) && free(markerCode + 1) && free(markerCode + 2) && free(markerCode + 3))) markerCode += 4;
+  if (markerCode >= 0xF8FA) return highlightCodeBase(text, profile);
+  const marks = {};
+  SEMANTIC_HL_CLASSES.forEach((cls, i) => { marks[cls] = { open:String.fromCharCode(markerCode + i * 2), close:String.fromCharCode(markerCode + i * 2 + 1) }; });
   let marked = text;
   for (let i = ranges.length - 1; i >= 0; i--){
-    const range = ranges[i];
-    marked = marked.slice(0, range.start) + open + marked.slice(range.start, range.end) + close + marked.slice(range.end);
+    const range = ranges[i], mk = marks[range.cls];
+    marked = marked.slice(0, range.start) + mk.open + marked.slice(range.start, range.end) + mk.close + marked.slice(range.end);
   }
-  return highlightCodeBase(marked, profile)
-    .split(open).join('<span class="tk-unused">')
-    .split(close).join('</span>');
+  let html = highlightCodeBase(marked, profile);
+  for (const cls of SEMANTIC_HL_CLASSES){
+    html = html.split(marks[cls].open).join('<span class="' + cls + '">').split(marks[cls].close).join('</span>');
+  }
+  return html;
 }
 
 // 주피터 노트북(.ipynb) JSON → 실행 가능한 파이썬 소스로 변환
@@ -2327,7 +2337,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         editor.setDiagnosticItems(analysis.diagnostics);
         // 문법이 완성돼 AST가 만들어졌을 때만 미사용 판정을 교체한다.
         // `a.`처럼 입력 중인 SyntaxError에서는 위치 보정한 이전 표시를 유지해 흰색으로 깜빡이지 않게 한다.
-        if (analysis.unusedReady) editor.setUnusedRanges(analysis.unused);
+        if (analysis.unusedReady){ editor.setUnusedRanges(analysis.unused); editor.setParamRanges(analysis.params); }
       }
     } catch(_){
       // 자동 진단 실패는 편집을 방해하거나 상태 메시지를 띄우지 않는다.

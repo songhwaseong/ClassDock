@@ -35,6 +35,7 @@ function buildCodeEditor(text, prof, options={}){
   let renderSpotlight = () => {};
   let renderCellDividers = () => {};   // 실제 구현은 아래(편집 헬퍼 정의 후) 할당 — syncNow 가 먼저 참조하므로 예약 선언
   let unusedSemanticRanges = [];       // Python AST 분석이 돌려준 미사용 선언의 절대 문자 범위
+  let paramSemanticRanges = [];        // 함수 매개변수·키워드 인자 이름의 절대 문자 범위(cls:"tk-param")
   let semanticRangeText = ta.value;    // 다음 입력에서 기존 범위를 안전하게 이동시키기 위한 직전 본문
   // ===== 편집기 내 찾기/바꾸기(Ctrl+H) 상태 — 실제 구현은 아래 colMetrics 정의 후 할당 =====
   let findOpen = false, findMatches = [], findIndex = -1, findApplying = false;
@@ -284,7 +285,9 @@ function buildCodeEditor(text, prof, options={}){
     const val = ta.value;
     // Keep the final empty line measurable so the highlight layer and textarea
     // have the same maximum scroll position when the source ends with a newline.
-    code.innerHTML = highlightCode(val, prof, unusedSemanticRanges) + "&#8203;";
+    // 미사용 흐림(tk-unused)을 먼저 넘겨 매개변수색(tk-param)과 겹칠 때 흐림이 이기게 한다.
+    const semanticRanges = paramSemanticRanges.length ? unusedSemanticRanges.concat(paramSemanticRanges) : unusedSemanticRanges;
+    code.innerHTML = highlightCode(val, prof, semanticRanges) + "&#8203;";
     const lines = val.split("\n").length;
     let nums = ""; for (let i = 1; i <= lines; i++) nums += i + "\n";
     gutter.textContent = nums;
@@ -1360,6 +1363,7 @@ function buildCodeEditor(text, prof, options={}){
     // 새 AST 분석을 기다리는 동안에도 직접 건드리지 않은 미사용 표시는 유지한다.
     // 편집 뒤쪽 범위는 글자 수만큼 이동하고, 편집과 겹친 범위만 즉시 버려 엉뚱한 글자를 흐리지 않는다.
     unusedSemanticRanges = remapTextRangesAfterEdit(unusedSemanticRanges, semanticRangeText, ta.value);
+    paramSemanticRanges = remapTextRangesAfterEdit(paramSemanticRanges, semanticRangeText, ta.value);
     semanticRangeText = ta.value;
     refresh(); sync(); clearError(); clearTraceLine();
     schedulePinRender();                                // 줄이 추가/삭제되면 핀 마커 줄 위치 재확정(앵커 기반)
@@ -1892,6 +1896,32 @@ function buildCodeEditor(text, prof, options={}){
     unusedSemanticRanges = [];
     refresh(); sync();
   };
+  // 함수 매개변수·키워드 인자 이름 강조. 미사용 표시와 같은 방식(줄/열/길이 → 절대 범위 + 이름 검증)이되
+  // cls 를 tk-param 으로 달아 refresh 가 highlightCode 로 넘길 때 매개변수색으로 칠하게 한다.
+  const setParamRanges = (items) => {
+    const value = ta.value, starts = [0];
+    for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) === 10) starts.push(i + 1);
+    const next = [];
+    for (const item of Array.isArray(items) ? items : []){
+      const line = Math.max(1, parseInt(item && item.line, 10) || 1);
+      const column = Math.max(0, parseInt(item && item.column, 10) || 0);
+      const length = Math.max(0, parseInt(item && item.length, 10) || 0);
+      if (!length || line > starts.length) continue;
+      const start = starts[line - 1] + column, end = start + length;
+      if (start < starts[line - 1] || end > value.length || value.slice(start, end).indexOf("\n") >= 0) continue;
+      const expected = String((item && item.name) || "");
+      if (expected && value.slice(start, end) !== expected) continue;
+      next.push({ start, end, name:expected || value.slice(start, end), cls:"tk-param" });
+    }
+    paramSemanticRanges = next.sort((a, b) => a.start - b.start || a.end - b.end);
+    semanticRangeText = value;
+    refresh(); sync();
+  };
+  const clearParamRanges = () => {
+    if (!paramSemanticRanges.length) return;
+    paramSemanticRanges = [];
+    refresh(); sync();
+  };
   refresh();
   return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
@@ -1913,7 +1943,7 @@ function buildCodeEditor(text, prof, options={}){
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },
     openFind, closeFind, isFindOpen: () => findOpen, isCompletionOpen: () => !complete.hidden,
-    markError, markErrorLines, setDiagnosticItems, clearError, setUnusedRanges, clearUnusedRanges, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
+    markError, markErrorLines, setDiagnosticItems, clearError, setUnusedRanges, clearUnusedRanges, setParamRanges, clearParamRanges, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
     setCellSplitMode, toggleCellBoundaryAtLine, isCellSplitMode: () => cellSplitMode, autoSplitCells,
     spotlightRange, clearSpotlight };
 }

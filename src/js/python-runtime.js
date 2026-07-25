@@ -367,7 +367,10 @@ async function runPythonLiveDiagnostics(src, fileName){
     diagnostics:normalizePythonDiagnostics(parsed.report.diagnostics)
       .filter(item => item.severity !== "info" || item.code === "PY-LOOP"),
     unusedReady:parsed.report.unusedReady === true,
-    unused:normalizePythonUnusedRanges(parsed.report.unused)
+    unused:normalizePythonUnusedRanges(parsed.report.unused),
+    // 진단 하니스가 params를 최대 600개까지 내보내므로, 기본 500개 정규화 상한으로
+    // 뒤쪽 매개변수·키워드 인자 색상이 누락되지 않게 같은 한도를 사용한다.
+    params:normalizePythonUnusedRanges(parsed.report.params, 600)
   };
 }
 

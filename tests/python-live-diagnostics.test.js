@@ -57,7 +57,7 @@ test("불완전한 Python 문법에서는 기존 미사용 표시를 빈 결과�
   const liveRunner = viewer.slice(liveStart, liveEnd);
   assert.match(runContext, /'unusedReady': __md_tree is not None/);
   assert.match(runtime, /unusedReady:parsed\.report\.unusedReady === true/);
-  assert.match(liveRunner, /if \(analysis\.unusedReady\) editor\.setUnusedRanges\(analysis\.unused\)/);
+  assert.match(liveRunner, /if \(analysis\.unusedReady\)\{ editor\.setUnusedRanges\(analysis\.unused\); editor\.setParamRanges\(analysis\.params\); \}/);
   assert.doesNotMatch(liveRunner, /editor\.clearError\(\); editor\.clearUnusedRanges\(\)/);
 });
 
@@ -68,6 +68,19 @@ test("Python 미사용 선언은 범위 분석 결과로 흐려지고 입력 중
   assert.match(runtime, /unused:normalizePythonUnusedRanges\(parsed\.report\.unused\)/);
   assert.match(viewer, /editor\.setUnusedRanges\(analysis\.unused\)/);
   assert.match(editor, /remapTextRangesAfterEdit\(unusedSemanticRanges, semanticRangeText, ta\.value\)/);
-  assert.match(editor, /highlightCode\(val, prof, unusedSemanticRanges\)/);
+  assert.match(editor, /highlightCode\(val, prof, semanticRanges\)/);
   assert.match(styles, /\.code-host \.tk-unused/);
+});
+
+test("Python 함수 매개변수·키워드 인자 이름은 AST 범위로 tk-param 색을 입는다", () => {
+  assert.match(runContext, /isinstance\(__md_node, __md_ast\.keyword\) and __md_node\.arg is not None/);
+  assert.match(runContext, /isinstance\(__md_node, __md_ast\.arg\)/);
+  assert.match(runContext, /'params': \(__md_params\[:600\]/);
+  assert.match(runtime, /params:normalizePythonUnusedRanges\(parsed\.report\.params, 600\)/);
+  assert.match(viewer, /editor\.setParamRanges\(analysis\.params\)/);
+  assert.match(editor, /const setParamRanges = \(items\) =>/);
+  assert.match(editor, /cls:"tk-param"/);
+  assert.match(editor, /remapTextRangesAfterEdit\(paramSemanticRanges, semanticRangeText, ta\.value\)/);
+  assert.match(styles, /\.code-host \.tk-param,\.nbv-static \.tk-param\{color:var\(--code-param\)\}/);
+  assert.match(styles, /--code-param:/);
 });

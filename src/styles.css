@@ -7,7 +7,7 @@
     --toast:#1e293b;--overlay:rgba(255,255,255,.7);--spin-track:#d8def0;--dz-border:#b9c4d4;
     --code-bg:#f8fafc;--code-gutter:#eef2f7;--code-text:#0f172a;--code-muted:#64748b;
     --code-border:#d7dee8;--code-hover:#eaf0f7;--code-string:#047857;--code-number:#b91c1c;
-    --code-keyword:#1d4ed8;--code-type:#a21caf;--code-select:rgba(37,99,235,.18);
+    --code-keyword:#1d4ed8;--code-type:#a21caf;--code-param:#0e7490;--code-select:rgba(37,99,235,.18);
     --code-caret:#111827;--code-panel:#f8fafc;--code-panel-head:#eef2f7;
     --memo-paper:#fff9e6;--memo-paper-border:#ead8a0;
     --scratchpad-locked-border:#4f7fcb;--scratchpad-locked-bg:#edf4ff;--scratchpad-locked-field:#f4f8ff;
@@ -24,7 +24,7 @@
     --toast:#334155;--overlay:rgba(2,6,23,.66);--spin-track:#334155;--dz-border:#3b4a63;
     --code-bg:#0f172a;--code-gutter:#16213a;--code-text:#e2e8f0;--code-muted:#64748b;
     --code-border:#1e293b;--code-hover:#334155;--code-string:#86efac;--code-number:#fca5a5;
-    --code-keyword:#93c5fd;--code-type:#f0abfc;--code-select:rgba(148,163,184,.35);
+    --code-keyword:#93c5fd;--code-type:#f0abfc;--code-param:#67e8f9;--code-select:rgba(148,163,184,.35);
     --code-caret:#e2e8f0;--code-panel:#0f172a;--code-panel-head:#0b1120;
     --memo-paper:var(--field);--memo-paper-border:var(--border);
     --scratchpad-locked-border:#4f7fcb;--scratchpad-locked-bg:#182536;--scratchpad-locked-field:#1e3047;
@@ -545,6 +545,7 @@
   .scratchpad-notebook-source .tk-n{color:var(--code-number)}
   .scratchpad-notebook-source .tk-k{color:var(--code-keyword)}
   .scratchpad-notebook-source .tk-t{color:var(--code-type)}
+  .scratchpad-notebook-source .tk-param{color:var(--code-param)}
   .scratchpad-foot{display:flex;align-items:center;gap:7px;padding:10px 24px 10px 12px;background:var(--panel);border:1px solid var(--border);
     border-top-color:var(--border);border-radius:0 0 14px 14px}
   .scratchpad-foot span{margin-right:auto;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
@@ -2046,6 +2047,7 @@
   .code-host .tk-n,.nbv-static .tk-n{color:var(--code-number)}
   .code-host .tk-k,.nbv-static .tk-k{color:var(--code-keyword)}
   .code-host .tk-t,.nbv-static .tk-t{color:var(--code-type)}
+  .code-host .tk-param,.nbv-static .tk-param{color:var(--code-param)}
   /* Python 의미 분석에서 참조되지 않은 선언. 참조가 생기면 다음 분석 때 span 자체가 제거된다. */
   .code-host .tk-unused{color:var(--code-muted)!important;opacity:.62}
   /* JSON 트리 보기(표시 전용): 코드 뷰와 같은 팔레트, 접고 펼치는 구조 탐색용 */
@@ -3410,6 +3412,7 @@
     .code-host .tk-n{color:#b91c1c!important}
     .code-host .tk-k{color:#1d4ed8!important}
     .code-host .tk-t{color:#a21caf!important}
+    .code-host .tk-param{color:#0e7490!important}
     .run-bar,.run-path,.run-project-row,.py-path-help,.code-output,.run-divider{display:none!important}
     .run-split{display:block!important}
     .code-host-edit{height:auto!important;overflow:visible!important}
