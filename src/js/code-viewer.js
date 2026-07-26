@@ -1371,11 +1371,25 @@ async function renderCode(file, host, ext, profile, runCtx){
   fontDown.addEventListener("click", () => bumpCodeFont(-1));
   fontUp.addEventListener("click", () => bumpCodeFont(1));
   const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
-  fontPick.title = "코드 글꼴 (시스템에 설치된 monospace 폰트만 표시)"; fontPick.setAttribute("aria-label", fontPick.title);
-  const installed = availableCodeFontChoices();
+  fontPick.title = "코드 글꼴 (시스템에 설치된 글꼴만 · 고정폭/가변폭으로 나눠 표시)";
+  fontPick.setAttribute("aria-label", fontPick.title);
+  const fontGroups = groupedCodeFontChoices();
+  const installed = [...fontGroups.mono, ...fontGroups.prop];
   // 저장된 폰트가 시스템에서 빠졌으면 기본으로 자동 폴백(드롭다운에 안 나타나는 옵션이 선택돼 보이는 혼란 방지).
   if (_codeFontFamily && !installed.some(c => c.value === _codeFontFamily)) setCodeFontFamily("");
-  for (const c of installed){ const o = document.createElement("option"); o.value = c.value; o.textContent = c.label; if (c.value === _codeFontFamily) o.selected = true; fontPick.appendChild(o); }
+  // 고정폭/가변폭을 묶어서 보여준다 — 코드 정렬이 맞는 글꼴을 한눈에 고를 수 있게.
+  const addFontGroup = (label, list) => {
+    if (!list.length) return;
+    const g = document.createElement("optgroup"); g.label = label;
+    for (const c of list){
+      const o = document.createElement("option"); o.value = c.value; o.textContent = c.label;
+      if (c.value === _codeFontFamily) o.selected = true;
+      g.appendChild(o);
+    }
+    fontPick.appendChild(g);
+  };
+  addFontGroup("고정폭 (코딩용)", fontGroups.mono);
+  addFontGroup("가변폭 (읽기용)", fontGroups.prop);
   fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
   // 후보가 기본 하나뿐이면(설치된 게 없으면) 드롭다운 자체를 숨겨 자리만 차지하지 않게 한다.
   if (installed.length <= 1) fontPick.hidden = true;
@@ -2927,36 +2941,71 @@ async function saveViaServer(text, ownerDoc, name){
 
 // ===== 에디터 편의: 코드 글자 크기·폰트(모든 에디터 공유·저장) =====
 let _codeFontSize = (() => { const v = Number(localStorage.getItem("pyCodeFontSize")); return (v >= 11 && v <= 30) ? v : 13; })();
-// 안전한 monospace 시스템 폰트만 후보로 둔다(웹폰트 비동기 로드/가변폭 폰트로 인한 캐럿 어긋남 방지).
-// value 가 ""이면 기본(Consolas) 사용. 각 stack 끝에 monospace 폴백을 두어 미설치 폰트도 안전하게 다음 후보로 넘어간다.
+// 시스템에 설치된 폰트만 후보로 둔다(웹폰트는 비동기 로드라 첫 렌더에서 겹침이 어긋날 수 있음).
+// value 가 ""이면 기본(Consolas) 사용. 각 stack 끝에 폴백을 두어 미설치 폰트도 안전하게 다음 후보로 넘어간다.
+// 고정폭/가변폭은 실제 설치된 글꼴을 측정해 자동으로 나눈다(isMonospaceFont) → 후보를 추가할 때 따로 표시할 필요 없음.
 const CODE_FONT_CHOICES = [
   { value: "", label: "기본 (Consolas)", stack: "" },
   { value: "Cascadia Mono", label: "Cascadia Mono", stack: '"Cascadia Mono","Cascadia Code",Consolas,monospace' },
   { value: "Cascadia Code", label: "Cascadia Code", stack: '"Cascadia Code","Cascadia Mono",Consolas,monospace' },
   { value: "D2Coding", label: "D2Coding", stack: '"D2Coding","나눔고딕코딩","NanumGothicCoding",Consolas,monospace' },
   { value: "NanumGothicCoding", label: "나눔고딕코딩", stack: '"나눔고딕코딩","NanumGothicCoding","D2Coding",Consolas,monospace' },
-  { value: "Courier New", label: "Courier New", stack: '"Courier New",Consolas,monospace' }
+  { value: "Courier New", label: "Courier New", stack: '"Courier New",Consolas,monospace' },
+  // 아래는 가변폭(자동 분류돼 '가변폭' 묶음에 들어간다). 코드 정렬보다 읽기 편한 글꼴을 원하는 경우용.
+  { value: "Malgun Gothic", label: "맑은 고딕", stack: '"Malgun Gothic","맑은 고딕",sans-serif' },
+  { value: "NanumGothic", label: "나눔고딕", stack: '"NanumGothic","나눔고딕",sans-serif' },
+  { value: "Gulim", label: "굴림", stack: '"Gulim","굴림",sans-serif' },
+  { value: "Batang", label: "바탕", stack: '"Batang","바탕",serif' },
+  { value: "Segoe UI", label: "Segoe UI", stack: '"Segoe UI",sans-serif' }
 ];
-// 시스템에 폰트가 실제로 설치돼 있는지 — fallback(serif)과 텍스트 너비를 비교(canvas).
-// 설치돼 있으면 측정값이 달라지고, 없으면 serif 와 똑같이 떨어진다(브라우저가 그대로 fallback).
+// 시스템에 폰트가 실제로 설치돼 있는지 — 폴백 글꼴과 텍스트 너비를 비교(canvas).
+// 미설치면 브라우저가 폴백을 그대로 쓰므로 폭이 같게 떨어진다.
+// serif 하나만 비교하면 '바탕'처럼 한글 serif 폴백과 같은 글꼴이 미설치로 오판되므로,
+// serif·sans-serif 두 기준과 비교해 하나라도 다르면 설치된 것으로 본다.
 const _fontAvailCache = new Map();
 function isCodeFontInstalled(family){
   if (!family) return true;
   if (_fontAvailCache.has(family)) return _fontAvailCache.get(family);
+  let ok = true;                                     // 측정 실패하면 일단 보이게(안전한 폴백)
   try {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
+    const ctx = document.createElement("canvas").getContext("2d");
     const text = "mmmmmmmmlliiwwwwwwwww가나다라0123456789";
-    ctx.font = "72px serif";
-    const base = ctx.measureText(text).width;
-    ctx.font = '72px "' + family + '", serif';
-    const ok = Math.abs(ctx.measureText(text).width - base) > 0.5;
+    const differsFrom = (generic) => {
+      ctx.font = "72px " + generic;
+      const base = ctx.measureText(text).width;
+      ctx.font = '72px "' + family + '", ' + generic;
+      return Math.abs(ctx.measureText(text).width - base) > 0.5;
+    };
+    ok = differsFrom("serif") || differsFrom("sans-serif");
     _fontAvailCache.set(family, ok);
-    return ok;
-  } catch(_){ return true; }   // 측정 실패하면 일단 보이게(안전한 폴백)
+  } catch(_){}
+  return ok;
 }
 function availableCodeFontChoices(){
   return CODE_FONT_CHOICES.filter(c => isCodeFontInstalled(c.value));
+}
+// 고정폭(monospace)인지 — 좁은 글자(i)와 넓은 글자(M)를 같은 개수만큼 재서 폭이 같으면 고정폭.
+// stack 전체로 재기 때문에 폰트가 없어 폴백된 경우에도 '실제로 그려지는 글꼴' 기준으로 판정된다.
+const _fontMonoCache = new Map();
+function isMonospaceFont(stack){
+  const ff = stack || 'Consolas,monospace';
+  if (_fontMonoCache.has(ff)) return _fontMonoCache.get(ff);
+  let mono = true;                                   // 측정 실패 시엔 고정폭으로 간주(기존 동작 유지)
+  try {
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = "72px " + ff;
+    const narrow = ctx.measureText("iiiiiiiiii").width;
+    const wide = ctx.measureText("MMMMMMMMMM").width;
+    mono = Math.abs(narrow - wide) < 1;
+  } catch(_){}
+  _fontMonoCache.set(ff, mono);
+  return mono;
+}
+// 드롭다운용 — 설치된 후보를 고정폭/가변폭으로 나눠 돌려준다.
+function groupedCodeFontChoices(){
+  const mono = [], prop = [];
+  for (const c of availableCodeFontChoices()) (isMonospaceFont(c.stack) ? mono : prop).push(c);
+  return { mono, prop };
 }
 let _codeFontFamily = (() => {
   const v = String(localStorage.getItem("pyCodeFontFamily") || "");

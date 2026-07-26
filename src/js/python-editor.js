@@ -921,15 +921,40 @@ function buildCodeEditor(text, prof, options={}){
   /* ===== Alt+세로 드래그 열(블록) 편집 — 여러 줄의 같은 열을 동시에 삽입/교체 =====
      textarea 가 텍스트 원본을 그대로 보관하고, 그 위 overlay 에 가짜 선택 박스·커서를 그린다.
      활성 중에는 textarea 의 네이티브 커서를 감추고(키 입력을 가로채) 각 줄에 같은 편집을 적용한다.
-     열 좌표는 문자 인덱스 기준(고정폭 폰트). 들여쓰기는 공백 4칸이라 정렬이 맞는다. */
+     열 좌표는 문자 인덱스 기준이고, 가로 위치(px)는 줄 앞부분을 실제로 측정해서 잡는다
+     → 가변폭 글꼴·한글(전각)·탭이 섞여도 선택 박스와 커서가 글자와 어긋나지 않는다. */
   const col = { active: false };
   const colMetrics = () => {
     const cs = getComputedStyle(ta);
-    const span = document.createElement("span");
-    span.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-family:" + cs.fontFamily + ";font-size:" + cs.fontSize;
-    span.textContent = "0000000000"; edit.appendChild(span);
-    const cw = span.getBoundingClientRect().width / 10; span.remove();
-    return { cw, lh: parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.6), pl: parseFloat(cs.paddingLeft) || 0, pt: parseFloat(cs.paddingTop) || 0 };
+    return { lh: parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.6), pl: parseFloat(cs.paddingLeft) || 0, pt: parseFloat(cs.paddingTop) || 0 };
+  };
+  // 열↔px 변환. 측정은 measureCodeText(미러 span) 로 하고, 한 번의 드래그·렌더 동안만 캐시한다
+  // (같은 줄의 같은 열을 선택 박스·커서가 반복해서 물어보므로 측정 횟수가 줄어든다).
+  let colWCache = new Map();                          // "줄번호\t글자수" → px
+  const colWReset = () => { colWCache.clear(); };
+  const colPrefixW = (line, text, n) => {
+    if (n <= 0) return 0;
+    const key = line + "\t" + n;
+    let w = colWCache.get(key);
+    if (w === undefined){ w = measureCodeText(text.slice(0, n)); colWCache.set(key, w); }
+    return w;
+  };
+  // 줄 끝을 넘어간 구간용 기준 글자폭 — 짧은 줄 뒤쪽으로 드래그해도 사각 선택이 이어지게 한다.
+  let colRefCw = 0;
+  const colRefWidth = () => (colRefCw || (colRefCw = measureCodeText("0000000000") / 10) || 8);
+  // px → 가장 가까운 문자 경계(열). 앞부분 폭은 글자수에 대해 단조 증가하므로 이분 탐색.
+  const colAtX = (line, text, x) => {
+    const len = text.length;
+    if (x <= 0) return 0;
+    const full = colPrefixW(line, text, len);
+    if (x >= full) return len + Math.round((x - full) / colRefWidth());   // 줄 끝 뒤 = 가상 열
+    let lo = 0, hi = len;
+    while (hi - lo > 1){
+      const mid = (lo + hi) >> 1;
+      if (colPrefixW(line, text, mid) <= x) lo = mid; else hi = mid;
+    }
+    const wLo = colPrefixW(line, text, lo), wHi = colPrefixW(line, text, hi);
+    return (x - wLo) <= (wHi - x) ? lo : hi;           // 고정폭에서의 Math.round 와 같은 감각으로 스냅
   };
   // ===== 같은 단어 음영(렌더는 보이는 화면 범위만, 스캔은 선택이 바뀔 때만) =====
   // 한글 등 전각 문자는 글자폭이 영문 1ch 와 달라, 가로 위치/너비는 산술이 아니라 줄 앞부분을 실제 측정해서 잡는다.
@@ -1019,7 +1044,8 @@ function buildCodeEditor(text, prof, options={}){
     const lines = ta.value.split("\n");
     let line = Math.floor((clientY - r.top - m.pt + ta.scrollTop) / m.lh);
     line = Math.max(0, Math.min(line, lines.length - 1));
-    let colv = Math.round((clientX - r.left - m.pl + ta.scrollLeft) / m.cw);
+    colWReset();
+    const colv = colAtX(line, lines[line] || "", clientX - r.left - m.pl + ta.scrollLeft);
     return { line, colv: Math.max(0, colv), lines };
   };
   const lineColToOffset = (line, colv) => {
@@ -1031,21 +1057,30 @@ function buildCodeEditor(text, prof, options={}){
     overlay.textContent = "";
     if (!col.active) return;
     const m = col.m, lines = ta.value.split("\n");
+    colWReset();
     for (let i = col.lineStart; i <= col.lineEnd && i < lines.length; i++){
-      const len = lines[i].length;
+      const s = lines[i], len = s.length;
       const sa = Math.min(col.leftCol, len), sb = Math.min(col.rightCol, len);
+      const xa = colPrefixW(i, s, sa), xb = colPrefixW(i, s, sb);
       const top = m.pt + i * m.lh - ta.scrollTop;
       if (sb > sa){
         const box = document.createElement("div"); box.className = "col-sel";
-        box.style.cssText = "left:" + (m.pl + sa * m.cw - ta.scrollLeft) + "px;top:" + top + "px;width:" + ((sb - sa) * m.cw) + "px;height:" + m.lh + "px";
+        box.style.cssText = "left:" + (m.pl + xa - ta.scrollLeft) + "px;top:" + top + "px;width:" + (xb - xa) + "px;height:" + m.lh + "px";
         overlay.appendChild(box);
       }
       const caretColV = col.caretSide === "left" ? col.leftCol : col.rightCol;
       const cc = Math.min(caretColV, len);
+      const xc = cc === sa ? xa : (cc === sb ? xb : colPrefixW(i, s, cc));
       const car = document.createElement("div"); car.className = "col-caret";
-      car.style.cssText = "left:" + (m.pl + cc * m.cw - ta.scrollLeft) + "px;top:" + top + "px;height:" + m.lh + "px";
+      car.style.cssText = "left:" + (m.pl + xc - ta.scrollLeft) + "px;top:" + top + "px;height:" + m.lh + "px";
       overlay.appendChild(car);
     }
+  };
+  // 글꼴·글자 크기가 바뀌면(A± / 글꼴 드롭다운) 측정 캐시를 버리고 열 편집 오버레이를 다시 그린다.
+  // applyEditorFontMetrics 가 이 훅을 호출한다.
+  host.__refreshFontMetrics = () => {
+    colRefCw = 0; colWReset();
+    if (col.active){ col.m = colMetrics(); col.render(); }
   };
   const colEachLine = (mutate) => {        // lineStart..lineEnd 각 줄을 mutate(text, a, b) 로 바꾼다(a,b=그 줄의 선택 시작/끝)
     const lines = ta.value.split("\n"), L = col.leftCol, R = col.rightCol;
@@ -1174,6 +1209,9 @@ function buildCodeEditor(text, prof, options={}){
     const cs = getComputedStyle(ta);
     clickMeasureSpan.style.fontFamily = cs.fontFamily; clickMeasureSpan.style.fontSize = cs.fontSize;
     clickMeasureSpan.style.fontWeight = cs.fontWeight; clickMeasureSpan.style.fontStyle = cs.fontStyle; clickMeasureSpan.style.letterSpacing = cs.letterSpacing;
+    clickMeasureSpan.style.fontVariantLigatures = cs.fontVariantLigatures;
+    clickMeasureSpan.style.fontFeatureSettings = cs.fontFeatureSettings;
+    clickMeasureSpan.style.fontKerning = cs.fontKerning;
     clickMeasureSpan.textContent = text;
     return clickMeasureSpan.getBoundingClientRect().width;
   };

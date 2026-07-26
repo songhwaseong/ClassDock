@@ -3,7 +3,7 @@
  * - window.t(ko): JS 문자열 번역기. 사전에 없으면 원문(한국어)을 그대로 돌려준다.
  * - 정적 셸(헤더·메뉴·사이드바·설정·대화상자 등)을 로드 시 자동 번역한다.
  *     · 텍스트 노드: 앞뒤 공백을 보존하며 사전 일치 시 치환
- *     · 속성: title/aria-label/placeholder/alt (단축키가 관리하는 title/aria는 제외)
+ *     · 속성: title/aria-label/placeholder/alt/label (단축키가 관리하는 title/aria는 제외)
  *     · data-i18n="key" 를 붙인 리치 블록: HTML 통째 교체(HTML_DICT[key])
  *   모든 치환은 원문을 기억해 두어 한국어로 되돌릴 수 있다(파괴적이지 않음).
  * - 헤더 언어 토글(한/EN). 선택은 localStorage "uiLang" 에 저장되어 재실행에도 유지.
@@ -522,7 +522,10 @@
     "수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록": "Record a lesson replay — code edits and run output (plus PDF ink in study view) over time",
     "코드·결과 글자 작게 (Ctrl+−)": "Smaller code/result text (Ctrl+−)",
     "코드·결과 글자 크게 (Ctrl++)": "Larger code/result text (Ctrl++)",
-    "코드 글꼴 (시스템에 설치된 monospace 폰트만 표시)": "Code font (only installed monospace fonts shown)",
+    "코드 글꼴 (시스템에 설치된 글꼴만 · 고정폭/가변폭으로 나눠 표시)":
+      "Code font (installed fonts only · grouped by monospace / proportional)",
+    "고정폭 (코딩용)": "Monospace (for coding)",
+    "가변폭 (읽기용)": "Proportional (for reading)",
     "저장하면 경로가 여기 표시됩니다": "The path appears here after you save",
     "드래그해서 복사할 수 있습니다": "Drag to copy",
     "실행 작업폴더 · 실행 전": "Run working folder · before run",
@@ -1330,7 +1333,7 @@
   /* ── 정적 셸 + 동적 서브트리 스캔: 번역 대상 바인딩을 수집한다. ── */
   var bindings = [];
   var scanned = false;
-  var ATTRS = ["title", "aria-label", "placeholder", "alt"];
+  var ATTRS = ["title", "aria-label", "placeholder", "alt", "label"];   // label = optgroup 묶음 이름
   // 같은 노드/속성을 중복 바인딩하지 않도록 추적(동적 서브트리를 여러 번 넘겨도 안전).
   var seenText = new WeakSet();
   var seenHtml = new WeakSet();
