@@ -53,6 +53,7 @@ async function handleFiles(files, options={}){
     try {
       let made = null;
       if (ext === "pdf") await loadPdf(await file.arrayBuffer(), file.name, opts);
+      else if (ext === "mnote" && typeof loadMnote === "function") made = await loadMnote(file, opts);
       else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);
       else if (ext === "task" && typeof loadTask === "function") made = await loadTask(file, opts);
       else if (ext === "taskdone" && typeof loadTaskSubmission === "function") made = await loadTaskSubmission(file, opts);

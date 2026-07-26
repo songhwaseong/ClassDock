@@ -162,6 +162,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4M9 13h6M9 17h6M9 9h2"/></svg>
             <span>새 텍스트 파일</span>
           </button>
+          <button class="sb-menu-item" id="sbNewMnote" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/></svg>
+            <span>새 블록 문서(.mnote)</span>
+          </button>
           <button class="sb-menu-item" id="sbOpenLesson" type="button" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/><path d="M10.5 8.5v4l3.5-2z"/></svg>
             <span>리플레이 열기(.lesson)</span>
@@ -283,6 +287,7 @@
     </div>
     <div class="scratchpad-insertbar">
       <button id="scratchpadAddText" type="button">+ 글 블록</button>
+      <button id="scratchpadAddTable" type="button">+ 표</button>
       <button id="scratchpadAddImage" type="button">+ 이미지</button>
       <span>이미지 붙여넣기·파일/웹 이미지 드롭 가능</span>
       <div class="scratchpad-colors" id="scratchpadColors" role="group" aria-label="현재 메모 색상">
@@ -716,6 +721,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/pet.js"></script>
 <script src="src/js/pet-focus.js"></script>
 <script src="src/js/scratchpad.js"></script>
+<script src="src/js/mnote.js"></script>
 <script src="src/js/image-memo.js"></script>
 <script src="src/js/app.js"></script>
 <script src="src/js/command-palette.js"></script>

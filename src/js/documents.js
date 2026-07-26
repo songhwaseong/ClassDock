@@ -2349,6 +2349,15 @@ const OFFICE_XML_TOTAL_MAX_BYTES = 64 * 1024 * 1024;          // 한 문서에�
 function isNotebookSearchable(doc){
   return !!(doc && doc.notebookModel && Array.isArray(doc.notebookModel.cells));
 }
+// .mnote 블록 문서 — 본문이 파일(JSON)이 아니라 모델(mnote.blocks)에 있다.
+// sourceFile(JSON)을 검색하면 키·base64가 잡히므로, 노트북처럼 모델의 블록 본문만 검색한다.
+function isMnoteSearchable(doc){
+  return !!(doc && doc.mnote && Array.isArray(doc.mnote.blocks));
+}
+function mnoteSearchText(doc){
+  if (!isMnoteSearchable(doc)) return null;
+  return (typeof mnotePlainText === "function") ? mnotePlainText(doc.mnote) : null;
+}
 // 검색 본문: 셀 본문을 줄 그대로 이어붙인다(코드·마크다운·raw 모두). 셀 사이엔 개행 하나.
 // savedText 는 ipynb JSON 이라 검색에 쓰면 안 된다(따옴표·\n 이스케이프가 섞인 직렬화본).
 // ※ 아래 notebookCellAtLine 의 줄 셈과 규약이 한 쌍이다 — 한쪽만 바꾸면 셀 번호가 어긋난다.
@@ -2375,12 +2384,14 @@ function notebookCellAtLine(doc, line){
 function hasLiveDocText(doc){
   if (!doc) return false;
   if (isNotebookSearchable(doc)) return true;            // 셀 모델이 곧 최신 본문
+  if (isMnoteSearchable(doc)) return true;               // 블록 모델이 곧 최신 본문
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function") return true;
   return typeof doc.savedText === "string";
 }
 function liveDocText(doc){
   if (!doc) return null;
   if (isNotebookSearchable(doc)) return notebookSearchText(doc);   // savedText(=ipynb JSON) 보다 먼저 — 직렬화본을 검색하면 안 된다
+  if (isMnoteSearchable(doc)) return mnoteSearchText(doc);         // savedText(=mnote JSON) 대신 블록 본문
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
     try { return String(doc.codeEditor.getValue()); } catch(e){}
   }
@@ -2416,6 +2427,7 @@ function isTextSearchable(doc){
   if (!doc) return false;
   if (doc.kind === "pdf") return !!doc.pdfBytes;       // 텍스트 PDF 검색(스캔본은 추출 결과가 비어 자동 제외)
   if (isNotebookSearchable(doc)) return true;          // 셀 노트북 — sourceFile 이 없어 아래 확장자 판정을 못 탄다
+  if (isMnoteSearchable(doc)) return true;             // .mnote — 블록 본문(모델)로 검색, 확장자 판정 우회
   if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp
   // 본문이 이미 메모리에 있으면 파일을 읽지 않으므로 크기 상한과 무관하게 여기서 바로 검색한다.
   if (hasLiveDocText(doc)) return isTextExtSearchable(doc);

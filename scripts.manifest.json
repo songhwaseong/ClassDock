@@ -55,6 +55,7 @@
     "pet.js",
     "pet-focus.js",
     "scratchpad.js",
+    "mnote.js",
     "image-memo.js",
     "app.js",
     "command-palette.js"
@@ -131,6 +132,7 @@
         "pet.js",
         "pet-focus.js",
         "scratchpad.js",
+        "mnote.js",
         "image-memo.js",
         "app.js",
         "command-palette.js"
@@ -217,6 +219,13 @@
     "scratchpad.js": [
       "spellcheck.js"
     ],
+    "mnote.js": [
+      "documents.js",
+      "file-loaders.js",
+      "code-viewer.js",
+      "history.js",
+      "spellcheck.js"
+    ],
     "app.js": [
       "file-loaders.js",
       "notebook-cells.js",
@@ -246,7 +255,8 @@
         "notebook-model.js",
         "spreadsheet-viewer.js",
         "image-viewer.js",
-        "whiteboard.js"
+        "whiteboard.js",
+        "mnote.js"
       ]
     },
     {
@@ -256,7 +266,8 @@
       "consumers": [
         "code-viewer.js",
         "notebook-cells.js",
-        "scratchpad.js"
+        "scratchpad.js",
+        "mnote.js"
       ]
     }
   ],

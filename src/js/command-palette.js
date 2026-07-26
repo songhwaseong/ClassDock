@@ -31,6 +31,7 @@
     C("newSheet","📊","새 빈 표 (엑셀)", () => callFn("newSpreadsheetScratch"), { kw:"excel sheet 엑셀 표 스프레드시트 xlsx" }),
     C("newBoard","🖊️","새 화이트보드", () => callFn("newWhiteboard"), { kw:"whiteboard 화이트보드 칠판 판서 필기" }),
     C("newText","📝","새 텍스트 파일", () => callFn("newTextScratch"), { kw:"text txt 텍스트 메모장 새" }),
+    C("newMnote","🧩","새 블록 문서 (.mnote)", () => callFn("newMnoteScratch"), { kw:"block document 블록 문서 표 이미지 글 혼합 mnote 노션" }),
     C("openLesson","⏯️","수업 리플레이 열기 (.lesson)", () => callFn("openLessonFilePicker"), { kw:"lesson replay 리플레이 되감기 수업 녹화" }),
     C("newTask","📦","과제 파일 만들기 (.task)", () => callFn("openTaskBuilderFromActive"), { kw:"task assignment 과제 만들기 배포 자동채점 숙제" }),
     C("taskBatch","🗂️","제출본 일괄 검수 (.taskdone)", () => callFn("openTaskBatchReview"), { kw:"taskdone submission 제출 검수 재채점 성적 채점 일괄 csv" }),

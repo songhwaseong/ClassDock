@@ -504,6 +504,22 @@
     padding:12px 14px;background:transparent;color:var(--ink);font:14px/1.7 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;tab-size:4}
   .scratchpad-text-block::placeholder,.scratchpad-image-text::placeholder{color:var(--muted)}
   .scratchpad-text-block[readonly],.scratchpad-image-text[readonly]{cursor:default;color:var(--ink);background:var(--scratchpad-locked-field)}
+  .scratchpad-table-tools{display:flex;align-items:center;gap:4px;padding:4px 6px;flex-wrap:wrap;
+    border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);background:color-mix(in srgb,var(--panel) 55%,transparent)}
+  .scratchpad-table-tools button{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--muted);
+    padding:3px 8px;font:inherit;font-size:10.5px;line-height:1.15;cursor:pointer}
+  .scratchpad-table-tools button:hover{background:var(--panel-hover);color:var(--ink)}
+  .scratchpad-table-tools button:disabled{opacity:.42;cursor:not-allowed}
+  .scratchpad-table-tools .scratchpad-table-toggle.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .scratchpad-table-scroll{overflow-x:auto;padding:10px 12px 12px}
+  table.scratchpad-table{border-collapse:collapse;width:100%;table-layout:fixed}
+  table.scratchpad-table th,table.scratchpad-table td{border:1px solid var(--border);padding:0;vertical-align:top;min-width:64px}
+  table.scratchpad-table th{background:color-mix(in srgb,var(--accent) 12%,var(--field))}
+  .scratchpad-table-cell{min-height:1.6em;padding:6px 8px;outline:0;
+    font:14px/1.6 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;word-break:break-word;white-space:pre-wrap}
+  table.scratchpad-table th .scratchpad-table-cell{font-weight:700}
+  .scratchpad-table-cell:focus{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 0 0 0 2px var(--accent)}
+  .scratchpad-table-cell[contenteditable="false"]{cursor:default;color:var(--ink)}
   .scratchpad-layout-group{display:inline-flex;align-items:center;gap:2px}
   .scratchpad-block-tools .scratchpad-layout{min-width:25px;padding-left:5px;padding-right:5px}
   .scratchpad-block-tools .scratchpad-layout.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -566,6 +582,61 @@
     .scratchpad-foot{flex-wrap:wrap;padding:8px 18px 8px 9px}
     .scratchpad-foot span{width:100%;margin-right:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   }
+  /* ===== .mnote 블록 문서 편집기 ===== */
+  .mnote-doc{display:flex;flex-direction:column;height:100%;min-height:0}
+  .mnote-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel)}
+  .mnote-title{flex:1 1 200px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:600 15px/1.3 inherit}
+  .mnote-insert{display:flex;gap:6px;flex-wrap:wrap}
+  .mnote-insert button,.mnote-save{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .mnote-insert button:hover,.mnote-save:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .mnote-save{font-weight:600}
+  .mnote-history{display:flex;gap:2px}
+  .mnote-history button{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    width:30px;padding:6px 0;font:inherit;font-size:14px;cursor:pointer}
+  .mnote-history button:hover:not(:disabled){background:var(--panel-hover);border-color:var(--accent)}
+  .mnote-history button:disabled{opacity:.4;cursor:not-allowed}
+  .mnote-export{display:flex;gap:4px}
+  .mnote-export button{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--muted);
+    padding:6px 9px;font:inherit;font-size:11.5px;cursor:pointer}
+  .mnote-export button:hover{background:var(--panel-hover);color:var(--ink);border-color:var(--accent)}
+  .mnote-status{color:var(--muted);font-size:11px;min-width:56px}
+  .mnote-blocks{flex:1 1 auto;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;
+    width:100%;max-width:920px;margin:0 auto;box-sizing:border-box}
+  .mnote-block{border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
+  .mnote-block-tools{display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 6px;
+    border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--panel) 70%,transparent)}
+  .mnote-block-tools button,.mnote-block-tools select{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--muted);
+    padding:4px 7px;font:inherit;font-size:10.5px;cursor:pointer}
+  .mnote-block-tools button:hover,.mnote-block-tools select:hover{background:var(--panel-hover);color:var(--ink)}
+  .mnote-block-tools button.danger{color:var(--danger)}
+  .mnote-text{display:block;width:100%;min-height:44px;resize:none;border:0;outline:0;padding:10px 12px;background:transparent;color:var(--ink);
+    font:14px/1.7 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
+  .mnote-text::placeholder{color:var(--muted)}
+  .mnote-image-picture{display:grid;place-items:center;padding:10px;background:repeating-conic-gradient(#e2e8f0 0 25%,#f8fafc 0 50%) 50%/16px 16px}
+  [data-theme="dark"] .mnote-image-picture{background:repeating-conic-gradient(#1e293b 0 25%,#334155 0 50%) 50%/16px 16px}
+  .mnote-image-picture img{display:block;max-width:100%;object-fit:contain}
+  .mnote-image.size-small .mnote-image-picture img{max-height:140px}
+  .mnote-image.size-medium .mnote-image-picture img{max-height:280px}
+  .mnote-image.size-large .mnote-image-picture img{max-height:440px}
+  .mnote-image.size-full .mnote-image-picture img{width:100%;max-height:640px}
+  .mnote-caption{display:block;width:100%;border:0;border-top:1px solid var(--border);outline:0;padding:7px 12px;background:transparent;
+    color:var(--muted);font:13px/1.5 inherit;text-align:center}
+  .mnote-table-tools{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:4px 6px;
+    border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);background:color-mix(in srgb,var(--panel) 55%,transparent)}
+  .mnote-table-tools button{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--muted);
+    padding:3px 8px;font:inherit;font-size:10.5px;cursor:pointer}
+  .mnote-table-tools button:hover{background:var(--panel-hover);color:var(--ink)}
+  .mnote-table-tools .mnote-table-toggle.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .mnote-table-scroll{overflow-x:auto;padding:10px 12px}
+  table.mnote-table{border-collapse:collapse;width:100%;table-layout:fixed}
+  table.mnote-table th,table.mnote-table td{border:1px solid var(--border);padding:0;vertical-align:top;min-width:64px}
+  table.mnote-table th{background:color-mix(in srgb,var(--accent) 12%,var(--field))}
+  .mnote-table-cell{min-height:1.6em;padding:6px 8px;outline:0;word-break:break-word;white-space:pre-wrap;
+    font:14px/1.6 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
+  table.mnote-table th .mnote-table-cell{font-weight:700}
+  .mnote-table-cell:focus{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 0 0 0 2px var(--accent)}
   @media(max-width:600px),(max-height:520px){
     .scratchpad,.image-memo{left:6px!important;top:6px!important;transform:none!important;
       width:calc(100vw - 12px)!important;height:calc(100vh - 12px)!important;

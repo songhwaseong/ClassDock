@@ -156,3 +156,32 @@ test("마지막 이미지 블록도 삭제하고 빈 글 블록으로 돌아간�
   assert.equal(result.blocks.length, 1);
   assert.equal(result.blocks[0].type, "text");
 });
+
+test("표 블록은 직사각형으로 정규화되고 복사 본문에 포함된다", () => {
+  const table = scratchpadNormalizeBlock({
+    id:"table-1",
+    type:"table",
+    rows:[["이름", "점수"], ["민수"]],
+    header:true,
+    locked:true
+  });
+  assert.equal(table.type, "table");
+  assert.deepEqual(table.rows, [["이름", "점수"], ["민수", ""]]);
+  assert.equal(table.header, true);
+  assert.equal(table.locked, true);
+  assert.equal(scratchpadPlainText({ blocks:[table] }), "이름\t점수\n민수\t");
+});
+
+test("마지막 표 블록도 삭제하면 빈 글 블록으로 돌아간다", () => {
+  const table = {
+    id:"table-only",
+    type:"table",
+    rows:[[""]],
+    header:false,
+    locked:false
+  };
+  const result = scratchpadRemoveBlock([table], table.id);
+  assert.equal(result.removed, table);
+  assert.equal(result.blocks.length, 1);
+  assert.equal(result.blocks[0].type, "text");
+});

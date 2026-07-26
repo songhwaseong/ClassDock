@@ -9,6 +9,8 @@ const SCRATCHPAD_ASSET_STORE = "assets";
 const SCRATCHPAD_MAX_NOTES = 30;
 const SCRATCHPAD_MAX_IMAGES = 50;
 const SCRATCHPAD_MAX_NOTEBOOK_CELLS = 200;
+const SCRATCHPAD_MAX_TABLE_ROWS = 50;
+const SCRATCHPAD_MAX_TABLE_COLS = 20;
 const SCRATCHPAD_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const SCRATCHPAD_MAX_TOTAL_IMAGE_BYTES = 200 * 1024 * 1024;
 const SCRATCHPAD_LAYOUTS = new Set(["top", "left", "right", "bottom"]);
@@ -96,6 +98,14 @@ function scratchpadTextBlock(text=""){
   return { id:scratchpadBlockId("text"), type:"text", text:String(text || ""), locked:false };
 }
 
+// 표 블록: rows = 문자열 셀의 2차원 배열(직사각형), header=첫 행을 머리글로.
+function scratchpadTableBlock(rows=2, cols=2){
+  const r = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_ROWS, rows | 0));
+  const c = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_COLS, cols | 0));
+  const grid = Array.from({ length:r }, () => Array.from({ length:c }, () => ""));
+  return { id:scratchpadBlockId("table"), type:"table", rows:grid, header:true, locked:false };
+}
+
 function scratchpadRemoveBlock(blocks, blockId){
   const list = Array.isArray(blocks) ? blocks : [];
   const index = list.findIndex(block => block && block.id === blockId);
@@ -135,8 +145,21 @@ function scratchpadNormalizeNotebookCell(raw){
 
 function scratchpadNormalizeBlock(raw){
   if (!raw || typeof raw !== "object") return null;
-  const prefix = raw.type === "image" ? "image" : raw.type === "notebook-cell" ? "cell" : "text";
+  const prefix = raw.type === "image" ? "image" : raw.type === "notebook-cell" ? "cell" : raw.type === "table" ? "table" : "text";
   const id = String(raw.id || "").trim() || scratchpadBlockId(prefix);
+  if (raw.type === "table"){
+    const rawRows = Array.isArray(raw.rows) ? raw.rows : [];
+    let cols = 0;
+    for (const row of rawRows) if (Array.isArray(row)) cols = Math.max(cols, row.length);
+    cols = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_COLS, cols || 1));
+    let rows = rawRows.filter(Array.isArray).slice(0, SCRATCHPAD_MAX_TABLE_ROWS).map(row => {
+      const cells = row.slice(0, cols).map(cell => String(cell == null ? "" : cell).slice(0, 5000));
+      while (cells.length < cols) cells.push("");
+      return cells;
+    });
+    if (!rows.length) rows = [Array.from({ length:cols }, () => "")];
+    return { id, type:"table", rows, header:raw.header !== false, locked:raw.locked === true };
+  }
   if (raw.type === "notebook-cell"){
     const cell = scratchpadNormalizeNotebookCell(raw.cell);
     if (!cell) return null;
@@ -218,6 +241,10 @@ function scratchpadPlainText(note){
     if (block.type === "image"){
       const label = "[이미지: " + (block.name || "메모 이미지") + "]";
       return block.text ? label + "\n" + block.text : label;
+    }
+    if (block.type === "table"){
+      return (Array.isArray(block.rows) ? block.rows : [])
+        .map(row => (Array.isArray(row) ? row : []).join("\t")).join("\n");
     }
     return String(block.text || "");
   }).join("\n\n");
@@ -452,6 +479,7 @@ function wireScratchpad(){
   const tabs = byId("scratchpadTabs");
   const newButton = byId("scratchpadNew");
   const addTextButton = byId("scratchpadAddText");
+  const addTableButton = byId("scratchpadAddTable");
   const addImageButton = byId("scratchpadAddImage");
   const colorButtons = [...panel.querySelectorAll(".scratchpad-color[data-note-color]")];
   const customColorInput = byId("scratchpadColorCustom");
@@ -495,7 +523,7 @@ function wireScratchpad(){
   const allImageBlocks = () => data.notes.flatMap(note => note.blocks.filter(block => block.type === "image"));
   const allNotebookCellBlocks = () => data.notes.flatMap(note => note.blocks.filter(block => block.type === "notebook-cell"));
   const noteHasContent = note => note && note.blocks.some(block =>
-    block.type === "image" || block.type === "notebook-cell" || String(block.text || "").trim()
+    block.type === "image" || block.type === "notebook-cell" || block.type === "table" || String(block.text || "").trim()
   );
   const showStatus = (message, reset=true) => {
     clearTimeout(statusTimer);
@@ -507,8 +535,10 @@ function wireScratchpad(){
     const textLength = note.blocks.reduce((sum, block) => sum + String(block.text || "").length, 0);
     const images = note.blocks.filter(block => block.type === "image").length;
     const cells = note.blocks.filter(block => block.type === "notebook-cell").length;
+    const tables = note.blocks.filter(block => block.type === "table").length;
     count.textContent = window.tf("{n}자", { n: textLength.toLocaleString() }) +
-      (images ? " · " + window.tf("이미지 {n}개", { n: images }) : "") + (cells ? " · " + window.tf("셀 {n}개", { n: cells }) : "");
+      (images ? " · " + window.tf("이미지 {n}개", { n: images }) : "") + (cells ? " · " + window.tf("셀 {n}개", { n: cells }) : "") +
+      (tables ? " · " + window.tf("표 {n}개", { n: tables }) : "");
   };
   const persist = (announce=true) => {
     clearTimeout(saveTimer);
@@ -570,6 +600,20 @@ function wireScratchpad(){
     persist();
     if (focus){
       const target = editor.querySelector(`[data-block-id="${block.id}"] textarea`);
+      if (target) target.focus();
+    }
+    return block;
+  };
+  const insertTableBlock = (focus=true) => {
+    const note = activeNote();
+    const block = scratchpadTableBlock(2, 2);
+    note.blocks.splice(insertionIndex(note), 0, block);
+    activeBlockId = block.id;
+    note.updatedAt = Date.now();
+    renderEditor();
+    persist();
+    if (focus){
+      const target = editor.querySelector(`[data-block-id="${block.id}"] .scratchpad-table-cell`);
       if (target) target.focus();
     }
     return block;
@@ -839,6 +883,148 @@ function wireScratchpad(){
     shell.append(tools, textarea);
     return shell;
   };
+  const makeTableBlock = block => {
+    const shell = makeBlockShell(block);
+    let focusR = 0, focusC = 0;
+    const cols = () => (block.rows[0] ? block.rows[0].length : 0);
+    const lockedMsg = () => showStatus("잠긴 블록은 편집할 수 없습니다. 먼저 잠금을 해제하세요.", false);
+    const host = () => editor.querySelector(`[data-block-id="${block.id}"]`);
+    const focusCell = (r, c) => {
+      const node = host();
+      if (!node) return;
+      const cell = node.querySelector(`.scratchpad-table-cell[data-r="${r}"][data-c="${c}"]`);
+      if (!cell) return;
+      cell.focus();
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    // 구조 변경(행·열 추가/삭제·머리글)은 모델을 바꾼 뒤 전체 렌더 후 셀로 다시 포커스한다.
+    const commit = () => {
+      const note = activeNote();
+      if (note) note.updatedAt = Date.now();
+      renderEditor();
+      persist();
+    };
+    const addRow = at => {
+      if (block.locked) return lockedMsg();
+      if (block.rows.length >= SCRATCHPAD_MAX_TABLE_ROWS){ showStatus("표는 최대 " + SCRATCHPAD_MAX_TABLE_ROWS + "행까지 넣을 수 있습니다.", false); return; }
+      const idx = Math.max(0, Math.min(block.rows.length, at == null ? block.rows.length : at));
+      block.rows.splice(idx, 0, Array.from({ length:cols() }, () => ""));
+      commit();
+    };
+    const addCol = at => {
+      if (block.locked) return lockedMsg();
+      if (cols() >= SCRATCHPAD_MAX_TABLE_COLS){ showStatus("표는 최대 " + SCRATCHPAD_MAX_TABLE_COLS + "열까지 넣을 수 있습니다.", false); return; }
+      const idx = Math.max(0, Math.min(cols(), at == null ? cols() : at));
+      block.rows.forEach(row => row.splice(idx, 0, ""));
+      commit();
+    };
+    const delRow = at => {
+      if (block.locked) return lockedMsg();
+      if (block.rows.length <= 1){ showStatus("행이 하나뿐이라 삭제할 수 없습니다.", false); return; }
+      block.rows.splice(Math.max(0, Math.min(block.rows.length - 1, at)), 1);
+      commit();
+    };
+    const delCol = at => {
+      if (block.locked) return lockedMsg();
+      if (cols() <= 1){ showStatus("열이 하나뿐이라 삭제할 수 없습니다.", false); return; }
+      block.rows.forEach(row => row.splice(Math.max(0, Math.min(cols() - 1, at)), 1));
+      commit();
+    };
+    const toggleHeader = () => {
+      if (block.locked) return lockedMsg();
+      block.header = !block.header;
+      commit();
+    };
+    // 블록 공통 도구(핸들·잠금·이동·삭제) — 글 블록과 동일
+    const tools = document.createElement("div");
+    tools.className = "scratchpad-block-tools";
+    tools.append(
+      makeBlockHandle(block),
+      makeLockButton(block),
+      makeButton("↑", "이 블록을 위로", () => moveBlock(block, -1)),
+      makeButton("↓", "이 블록을 아래로", () => moveBlock(block, 1)),
+      makeButton("×", "이 표 블록 삭제", () => removeBlock(block), "danger")
+    );
+    // 표 전용 도구 — 현재 포커스된 셀 기준으로 행·열을 다룬다
+    const tableTools = document.createElement("div");
+    tableTools.className = "scratchpad-table-tools";
+    const headerBtn = makeButton("머리글", "첫 행을 머리글로 표시", () => toggleHeader(),
+      "scratchpad-table-toggle" + (block.header ? " active" : ""));
+    headerBtn.setAttribute("aria-pressed", String(block.header));
+    tableTools.append(
+      headerBtn,
+      makeButton("＋행", "현재 행 아래에 행 추가", () => { const r = focusR; addRow(r + 1); focusCell(Math.min(block.rows.length - 1, r + 1), focusC); }),
+      makeButton("－행", "현재 행 삭제", () => { const r = focusR; delRow(r); focusCell(Math.min(block.rows.length - 1, r), Math.min(cols() - 1, focusC)); }),
+      makeButton("＋열", "현재 열 오른쪽에 열 추가", () => { const c = focusC; addCol(c + 1); focusCell(focusR, Math.min(cols() - 1, c + 1)); }),
+      makeButton("－열", "현재 열 삭제", () => { const c = focusC; delCol(c); focusCell(Math.min(block.rows.length - 1, focusR), Math.min(cols() - 1, c)); })
+    );
+    if (block.locked){
+      [...tools.querySelectorAll("button"), ...tableTools.querySelectorAll("button")].forEach(button => {
+        if (!button.classList.contains("scratchpad-lock")) button.disabled = true;
+      });
+    }
+    // 셀 입력 중 방향 이동. 구조가 바뀌는 Enter/Tab만 여기서 가로챈다.
+    const handleKey = (event, r, c) => {
+      if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); closeByEscape(); return; }
+      const nCols = cols(), nRows = block.rows.length;
+      if (event.key === "Tab"){
+        event.preventDefault();
+        let idx = r * nCols + c + (event.shiftKey ? -1 : 1);
+        if (idx < 0) idx = 0;
+        if (idx > nRows * nCols - 1){ addRow(nRows); focusCell(nRows, 0); return; }
+        focusCell(Math.floor(idx / nCols), idx % nCols);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey){
+        event.preventDefault();
+        if (r === nRows - 1){ addRow(nRows); focusCell(nRows, c); }
+        else focusCell(r + 1, c);
+        return;
+      }
+      if (shortcutActionForEvent(event) === "saveCurrent"){ event.preventDefault(); event.stopPropagation(); persist(); }
+    };
+    const makeCell = (r, c) => {
+      const isHeader = block.header && r === 0;
+      const cell = document.createElement(isHeader ? "th" : "td");
+      const box = document.createElement("div");
+      box.className = "scratchpad-table-cell";
+      box.contentEditable = block.locked ? "false" : "true";
+      box.textContent = block.rows[r][c] || "";
+      box.dataset.r = String(r);
+      box.dataset.c = String(c);
+      box.setAttribute("role", "textbox");
+      box.setAttribute("aria-label", (r + 1) + "행 " + (c + 1) + "열");
+      if (!block.locked){
+        box.addEventListener("focus", () => { focusR = r; focusC = c; activeBlockId = block.id; });
+        box.addEventListener("input", () => { block.rows[r][c] = box.textContent; touchNote(); });
+        box.addEventListener("paste", event => {
+          event.preventDefault();
+          const text = ((event.clipboardData || window.clipboardData) || { getData:() => "" }).getData("text/plain");
+          document.execCommand("insertText", false, String(text || "").replace(/[\t\r\n]+/g, " "));
+        });
+        box.addEventListener("keydown", event => handleKey(event, r, c));
+      }
+      cell.appendChild(box);
+      return cell;
+    };
+    const table = document.createElement("table");
+    table.className = "scratchpad-table";
+    for (let r = 0; r < block.rows.length; r++){
+      const tr = document.createElement("tr");
+      for (let c = 0; c < block.rows[r].length; c++) tr.appendChild(makeCell(r, c));
+      table.appendChild(tr);
+    }
+    const scroller = document.createElement("div");
+    scroller.className = "scratchpad-table-scroll";
+    scroller.appendChild(table);
+    shell.append(tools, tableTools, scroller);
+    return shell;
+  };
   const makeImageBlock = block => {
     const shell = makeBlockShell(block);
     shell.classList.add("layout-" + block.position, "size-" + block.width);
@@ -1096,6 +1282,7 @@ function wireScratchpad(){
     editor.replaceChildren(...note.blocks.map(block =>
       block.type === "image" ? makeImageBlock(block)
         : block.type === "notebook-cell" ? makeNotebookCellBlock(block)
+        : block.type === "table" ? makeTableBlock(block)
         : makeTextBlock(block)
     ));
     updateCount();
@@ -1272,6 +1459,7 @@ function wireScratchpad(){
     focusFirstEditor();
   });
   if (addTextButton) addTextButton.addEventListener("click", () => insertTextBlock());
+  if (addTableButton) addTableButton.addEventListener("click", () => insertTableBlock());
   colorButtons.forEach(button => button.addEventListener("click", () => {
     const note = activeNote();
     const color = button.dataset.noteColor;
