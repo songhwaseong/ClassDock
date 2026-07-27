@@ -87,9 +87,16 @@ test("복실고양이 PNG는 6×4 RGBA 셀 시트이며 오프라인 빌드 대�
   assert.equal(bytes[25], 6, "PNG color type must be RGBA");
   assert.ok(bytes.length > 10000, "sprite sheet is unexpectedly empty");
 
+  // 단일 파일 빌드에는 이 그림이 반드시 들어가야 한다. 다만 예전처럼 JavaScript 문자열에
+  // 직접 박아 넣지 않고, 실행되지 않는 JSON 표(#mnPetSprites)에 경로→데이터URL 로 넣는다.
+  // 펫은 기본 꺼짐이라, 켜지 않은 사용자가 약 1.6MB 를 함께 파싱하지 않게 하기 위함이다.
   const buildSource = fs.readFileSync(path.join(root, "build-offline.js"), "utf8");
   assert.match(buildSource, /src\/assets\/fluffy-cat-sprites-v2\.png/);
-  assert.match(buildSource, /html\.split\(petSpriteRelative\)\.join\(petSpriteDataUrl\)/);
+  assert.match(buildSource, /petSpriteMap\[petSpriteRelative\]\s*=\s*"data:image\/png;base64,"/);
+  assert.match(buildSource, /id="mnPetSprites"/);
+  // 그리는 쪽은 그 표를 거쳐 실제 URL 을 얻어야 한다(안 그러면 EXE 에서 그림이 안 뜬다).
+  const petSource = fs.readFileSync(path.join(root, "src/js/pet.js"), "utf8");
+  assert.match(petSource, /spriteImage\.src\s*=\s*petSpriteUrl\(species\.spriteSheet\.src\)/);
 });
 
 test("복실고양이 벽 충돌은 좌우를 뒤집고 반드시 위쪽 대각선으로 반사한다", () => {

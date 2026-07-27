@@ -47,9 +47,35 @@ for (const boundary of manifest.moduleBoundaries || []) {
     }
   }
 }
+// 지연 로드 대상은 MNLazy 묶음 정의와 manifest 가 항상 같은 목록을 가리켜야 한다.
+// (한쪽만 고치면 "시작할 때도 안 싣고 필요할 때도 안 싣는" 조용한 누락이 된다.)
+const lazyBundles = require("../src/js/lazy.js").BUNDLES;
+const bundledFiles = new Set(Object.values(lazyBundles).flatMap((bundle) => bundle.files));
+const manifestLazyFiles = new Set(manifest.vendorScripts.filter((item) => item.lazy).map((item) => item.file));
+for (const file of bundledFiles) {
+  if (!manifestLazyFiles.has(file)) throw new Error(`MNLazy bundle file is not a lazy vendor script: ${file}`);
+}
+for (const file of manifestLazyFiles) {
+  if (!bundledFiles.has(file)) throw new Error(`Lazy vendor script belongs to no MNLazy bundle: ${file}`);
+}
+for (const [name, bundle] of Object.entries(lazyBundles)) {
+  if (!Array.isArray(bundle.files) || !bundle.files.length) throw new Error(`MNLazy bundle is empty: ${name}`);
+  if (!bundle.label) throw new Error(`MNLazy bundle has no label: ${name}`);
+}
+if (!html.includes("<!--MN_LAZY_VENDOR-->")) throw new Error("Lazy vendor placeholder is missing from HTML.");
+
 for (const item of manifest.vendorScripts) {
   const tag = `<script src="${item.src}"></script>`;
-  if (!html.includes(tag)) throw new Error(`Vendor script tag missing from HTML: ${item.src}`);
+  if (item.lazy) {
+    // 지연 로드 라이브러리는 시작 비용을 만들지 않아야 하므로 태그가 남아 있으면 실패시킨다.
+    if (html.includes(tag)) throw new Error(`Lazy vendor must not be loaded at startup: ${item.src}`);
+    if (!lazyBundles[item.lazy]) throw new Error(`Unknown MNLazy bundle for vendor: ${item.file} → ${item.lazy}`);
+    if (!lazyBundles[item.lazy].files.includes(item.file)) {
+      throw new Error(`Vendor is not part of the bundle it declares: ${item.file} → ${item.lazy}`);
+    }
+  } else if (!html.includes(tag)) {
+    throw new Error(`Vendor script tag missing from HTML: ${item.src}`);
+  }
   const vendorPath = path.join(root, "vendor", item.file);
   if (!fs.existsSync(vendorPath)) throw new Error(`Vendor file missing: ${item.file}`);
   if (!item.sha384 || !/^sha384-[A-Za-z0-9+/]+={0,2}$/.test(item.sha384)) throw new Error(`Vendor SHA-384 is missing or invalid: ${item.file}`);

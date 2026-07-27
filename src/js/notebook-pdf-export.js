@@ -83,6 +83,8 @@ let _nbCaptureLibPromise = null;
 function nbMapCaptureLibSource(){
   if (_nbCaptureLibPromise) return _nbCaptureLibPromise;
   _nbCaptureLibPromise = (async () => {
+    // 지연 로드본이라 아직 심기 전일 수 있다 — 먼저 실제 로드를 보장한 뒤 소스를 찾는다.
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("capture");
     for (const s of Array.from(document.scripts)){
       const text = s.src ? "" : (s.textContent || "");
       if (text.length > 5000 && text.slice(0, 300).indexOf("html-to-image") >= 0) return text;
@@ -91,6 +93,11 @@ function nbMapCaptureLibSource(){
     if (src){ try { const r = await fetch(src); if (r.ok) return await r.text(); } catch(_){} }
     return "";
   })();
+  // 빈 결과는 기억하지 않는다 — 로드 실패였다면 다음 내보내기에서 다시 찾아본다.
+  _nbCaptureLibPromise = _nbCaptureLibPromise.then((text) => {
+    if (!text) _nbCaptureLibPromise = null;
+    return text;
+  });
   return _nbCaptureLibPromise;
 }
 
@@ -317,6 +324,11 @@ async function nbExportImagePdf(ownerDoc){
   if (!ownerDoc) return;
   const cells = ownerDoc._nbCellsWrap;
   if (!cells || !cells.childElementCount){ nbSetStatus(ownerDoc, "내보낼 셀이 없어요."); return; }
+  // 캡처 라이브러리(html2canvas·html-to-image)는 PDF 내보내기를 누를 때 처음 로드한다.
+  if (typeof MNLazy !== "undefined"){
+    nbSetStatus(ownerDoc, "이미지 라이브러리 준비 중…");
+    await MNLazy.tryNeed("capture");
+  }
   if (typeof html2canvas === "undefined"){ nbSetStatus(ownerDoc, "이미지 라이브러리를 불러오지 못했어요."); return; }
   if (typeof PDFLib === "undefined"){ nbSetStatus(ownerDoc, "PDF 라이브러리를 불러오지 못했어요."); return; }
   if (ownerDoc._nbPdfBusy) return;

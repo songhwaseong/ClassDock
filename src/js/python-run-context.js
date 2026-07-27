@@ -12,6 +12,8 @@ const RUN_BUNDLE_CAP = 50 * 1024 * 1024;   // 옆 파일 포함 실행 시 합�
 // 압축 안의 모든 파일을 {path, bytes}[] 로 다시 추출(실행 작업폴더 복원용). 디렉터리·맥 메타는 제외.
 async function extractZipAll(file, password, keep){
   const out = [];
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("zip");   // 압축 라이브러리는 첫 사용 때 로드
+  if (typeof zip === "undefined") throw new Error("압축 라이브러리를 불러오지 못했습니다.");
   const r = new zip.ZipReader(new zip.BlobReader(file), password ? { password } : undefined);
   try {
     const selected = [];

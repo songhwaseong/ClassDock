@@ -21,11 +21,64 @@ const makeWritePythonAutosave = (saveViaServer) => new Function(
   "saveViaServer", "Blob", codeSource.slice(writeStart, writeEnd) + "\nreturn writePythonAutosave;"
 )(saveViaServer, Blob);
 
-test("Python 자동저장 설정은 기본적으로 꺼져 있고 설정 창에서 저장된다", () => {
-  assert.match(stateSource, /pythonAutosave:\s*false/);
-  assert.match(htmlSource, /id="settingPythonAutosave"/);
-  assert.match(appSource, /settingPythonAutosave"\)\.checked = !!appSettings\.pythonAutosave/);
-  assert.match(appSource, /pythonAutosave: byId\("settingPythonAutosave"\)\.checked/);
+test("자동 저장 설정은 기본적으로 꺼져 있고 설정 창에서 저장된다", () => {
+  // 예전 이름(pythonAutosave)은 Python 전용이었다. 지금은 텍스트·마크다운도 같은 설정을 쓴다.
+  assert.match(stateSource, /autoSave:\s*false/);
+  assert.match(htmlSource, /id="settingAutoSave"/);
+  assert.match(appSource, /settingAutoSave"\)\.checked = !!appSettings\.autoSave/);
+  assert.match(appSource, /autoSave: byId\("settingAutoSave"\)\.checked/);
+});
+
+test("예전 설정(pythonAutosave)을 켜 둔 사용자는 새 이름으로 그대로 이어진다", () => {
+  const start = stateSource.indexOf("function migrateAppSettings");
+  const end = stateSource.indexOf("let appSettings", start);
+  assert.ok(start >= 0 && end > start);
+  const migrate = new Function(stateSource.slice(start, end) + "\nreturn migrateAppSettings;")();
+  assert.equal(migrate({ pythonAutosave: true }).autoSave, true);
+  assert.equal(migrate({ pythonAutosave: false }).autoSave, false);
+  assert.equal(migrate({}).autoSave, undefined);                       // 저장한 적 없으면 기본값을 쓴다
+  assert.equal(migrate({ autoSave: false, pythonAutosave: true }).autoSave, false);   // 새 값이 우선
+  assert.ok(!("pythonAutosave" in migrate({ pythonAutosave: true })));
+});
+
+test("텍스트·마크다운 편집기도 같은 자동 저장 설정을 쓰고 대화상자를 띄우지 않는다", () => {
+  assert.match(codeSource, /appSettings\.autoSave/);
+  // existingOnly: 이미 있는 파일에만 조용히 되쓴다 — 타이핑 중 저장 위치 묻는 창이 뜨면 안 된다.
+  assert.match(codeSource, /saveTextDoc\([^)]*\{ silent:true, existingOnly:true \}\)/);
+  assert.doesNotMatch(codeSource, /appSettings\.pythonAutosave/);
+});
+
+test("텍스트 자동저장은 건너뜀을 성공으로 오인하지 않고 저장 중 새 입력을 더럽힘 상태로 유지한다", () => {
+  const start = codeSource.indexOf("const runTextAutosave");
+  const end = codeSource.indexOf("const scheduleTextAutosave", start);
+  const block = codeSource.slice(start, end);
+  assert.match(block, /if \(ok === true\)/);
+  assert.match(block, /else if \(ok === "skipped"\)/);
+  assert.match(block, /const latest = editor\.getValue\(\)/);
+  assert.match(block, /const dirty = latest !== value/);
+  assert.match(block, /markDocumentDirty\(ownerDoc, dirty\)/);
+  assert.match(block, /retryChangedValue = dirty/);
+  assert.match(codeSource, /if \(existingOnly\) return false;\s*\/\/ 저장 대상은 확정됐지만 EXE 쓰기가 실패함/);
+  assert.match(codeSource, /return hadHandle \? false : "skipped"/);
+});
+
+test("텍스트 자동저장 실패는 편집 내용을 유지하고 한 번만 수동 재시도를 안내한다", () => {
+  const start = codeSource.indexOf("const runTextAutosave");
+  const end = codeSource.indexOf("const scheduleTextAutosave", start);
+  const block = codeSource.slice(start, end);
+  assert.match(block, /setTextAutosaveState\("failed"\)/);
+  assert.match(block, /_textAutosaveFailureNotified/);
+  assert.match(block, /자동 저장에 실패했어요\. 편집 내용은 남아 있어요\./);
+  assert.match(block, /label:"지금 저장"/);
+});
+
+test("조용한 텍스트 자동저장은 파일·폴더 쓰기 권한 요청창을 띄우지 않는다", () => {
+  assert.match(codeSource, /noPermissionPrompt: silent && existingOnly/);
+  const start = codeSource.indexOf("async function saveViaFileHandle");
+  const end = codeSource.indexOf("// exe 런처", start);
+  const block = codeSource.slice(start, end);
+  assert.match(block, /options\.noPermissionPrompt\) return "denied"/);
+  assert.match(block, /restoreFolderOriginalFileHandle\([\s\S]*!!options\.noPermissionPrompt/);
 });
 
 test("Python 자동저장은 이름과 조용히 쓸 수 있는 저장 대상이 확정된 파일만 사용한다", () => {
@@ -53,7 +106,9 @@ test("파일 핸들 자동저장은 권한 요청창을 띄우지 않고 로컬 
   const writeBlock = codeSource.slice(writeStart, writeEnd);
   assert.match(writeBlock, /queryPermission/);
   assert.doesNotMatch(writeBlock, /requestPermission/);
-  assert.match(codeSource, /Python 자동 저장에 실패했어요\. 로컬 초안은 유지됩니다\./);
+  // 실패 알림은 "무슨 일이 있었는지"에 더해 "다음에 뭘 할 수 있는지"까지 준다.
+  assert.match(codeSource, /자동 저장에 실패했어요\. 편집 내용은 남아 있어요\./);
+  assert.match(codeSource, /label:"지금 저장"/);
   const runBlock = codeSource.slice(codeSource.indexOf("async function runPythonAutosave"), codeSource.indexOf("const refreshEditState"));
   const failureBlock = runBlock.slice(runBlock.indexOf("})().catch"));
   assert.match(runBlock, /if \(!result\.ok\) throw[\s\S]*clearPythonDraft\(draftKey\)/);

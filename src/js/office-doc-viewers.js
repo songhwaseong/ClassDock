@@ -2,6 +2,7 @@
 
 async function renderHwp(file, ext, host){
   if (ext === "hwpx"){ await renderHwpx(file, host); return; }   // 신형 HWPX 는 zip/XML 직접 파싱(간이 미리보기)
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("hwp");   // 한글 뷰어는 .hwp 를 열 때 처음 로드
   if (!window.hwpjs || !window.hwpjs.Viewer){ toast("한글(HWP) 뷰어 로드 실패"); return; }
   // hwp.js 는 기본 type:'binary' = 바이너리 "문자열" 을 기대한다(Uint8Array 를 그대로 넘기면 s2a 에서 깨짐).
   // 그래서 바이트를 latin1 바이너리 문자열로 변환해 넘긴다.
@@ -23,6 +24,7 @@ async function renderHwp(file, ext, host){
  * 원본과 배치가 다를 수 있음을 상단 배너로 안내한다. 파싱이 전부 실패하면 텍스트 미리보기
  * (Preview/PrvText.txt)로, 그것도 없으면 기존 안내(변환 후 열기)로 폴백한다. */
 async function renderHwpx(file, host){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("zip");   // 압축 라이브러리는 첫 사용 때 로드
   if (typeof zip === "undefined"){ toast("압축 라이브러리를 불러오지 못했어요."); throw new Error("handled"); }
   zip.configure({ useWebWorkers: false });
   const reader = new zip.ZipReader(new zip.BlobReader(file));
@@ -200,6 +202,7 @@ async function renderHwpx(file, host){
 }
 
 async function renderDocx(file, host){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("docx");   // Word 뷰어는 .docx 를 열 때 처음 로드
   if (typeof docx === "undefined"){ toast("Word 뷰어 로드 실패"); return; }
   let data = file;
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -346,6 +349,7 @@ async function promptAndDecrypt(bytes, kind){
 
 /* 범용 복호화: office-decrypt.js(crypto-js 기반, Agile) — xlsx/docx/pptx 공통 */
 async function decryptOffice(bytes, password /*, kind */){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("officeCrypt");   // 암호 문서를 만났을 때만 로드
   if (typeof OfficeDecrypt === "undefined" || !OfficeDecrypt.decrypt) throw new Error("복호화 모듈 없음");
   return OfficeDecrypt.decrypt(bytes, password);   // Uint8Array 반환(동기)
 }

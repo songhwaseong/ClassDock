@@ -10,6 +10,7 @@
     "state-sync.js",
     "theme.js",
     "i18n.js",
+    "lazy.js",
     "core.js",
     "icons.js",
     "state.js",
@@ -19,6 +20,7 @@
     "video-viewer.js",
     "documents.js",
     "workspace-store.js",
+    "recent-files.js",
     "file-loaders.js",
     "pdf-render.js",
     "pdf-ocr.js",
@@ -67,6 +69,7 @@
         "state-sync.js",
         "theme.js",
         "i18n.js",
+        "lazy.js",
         "core.js",
         "icons.js",
         "state.js",
@@ -81,6 +84,7 @@
         "video-viewer.js",
         "documents.js",
         "workspace-store.js",
+        "recent-files.js",
         "file-loaders.js",
         "pdf-render.js",
         "pdf-ocr.js",
@@ -151,7 +155,8 @@
       "documents.js"
     ],
     "file-loaders.js": [
-      "workspace-store.js"
+      "workspace-store.js",
+      "recent-files.js"
     ],
     "pdf-render.js": [
       "file-loaders.js"
@@ -233,9 +238,37 @@
     ],
     "command-palette.js": [
       "app.js"
+    ],
+    "recent-files.js": [
+      "documents.js"
     ]
   },
   "moduleBoundaries": [
+    {
+      "name": "lazy-vendor",
+      "file": "lazy.js",
+      "publicApi": "MNLazy",
+      "consumers": [
+        "spellcheck.js",
+        "documents.js",
+        "file-loaders.js",
+        "office-doc-viewers.js",
+        "spreadsheet-viewer.js",
+        "pptx-viewer.js",
+        "notebook-pdf-export.js",
+        "image-memo.js",
+        "python-run-context.js"
+      ]
+    },
+    {
+      "name": "recent-items",
+      "file": "recent-files.js",
+      "publicApi": "MNRecent",
+      "consumers": [
+        "file-loaders.js",
+        "app.js"
+      ]
+    },
     {
       "name": "board-renderer",
       "file": "board-render.js",
@@ -275,66 +308,79 @@
     {
       "src": "vendor/korean-hunspell-worker.js",
       "file": "korean-hunspell-worker.js",
+      "lazy": "spellcheck",
       "sha384": "sha384-OADNRCF5ayD/u9Ihsx+2KpmHNJp7KKKwlOOjQcgMXJeAYqDwecy5SYh2/xa9RIEE"
     },
     {
       "src": "vendor/jquery.min.js",
       "file": "jquery.min.js",
+      "lazy": "pptx",
       "sha384": "sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
     },
     {
       "src": "vendor/jszip3.min.js",
       "file": "jszip3.min.js",
+      "lazy": "docx",
       "sha384": "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
     },
     {
       "src": "vendor/jszip.min.js",
       "file": "jszip.min.js",
+      "lazy": "jszip",
       "sha384": "sha384-/uIBVG1oH4Tb9OcLLxfroAlKUcnoOIEjpv8jPC8YM4QzWRTuc9/VSQdrs+iFkWN1"
     },
     {
       "src": "vendor/jszip-utils.min.js",
       "file": "jszip-utils.min.js",
+      "lazy": "jszip",
       "sha384": "sha384-sLhugvyb7QXT38D573of73nmwbSPlCWTaRKJfuBgGCyoWijHVim5MtXquZN4VU0+"
     },
     {
       "src": "vendor/divs2slides.min.js",
       "file": "divs2slides.min.js",
+      "lazy": "pptx",
       "sha384": "sha384-jlQueChw9ZQP+k4P9xVK0QtBb+yILYmVhXC7dVhAiMlvF2HcB4NY4uvETT8yY6RL"
     },
     {
       "src": "vendor/pptxjs.min.js",
       "file": "pptxjs.min.js",
+      "lazy": "pptx",
       "sha384": "sha384-m5yyO2mX0PtFwZpBw6YBXITQ9XCR2X6ZNlucLJ+hmJu2/znygM2PbMukiDUsI0Ai"
     },
     {
       "src": "vendor/docx-preview.min.js",
       "file": "docx-preview.min.js",
+      "lazy": "docx",
       "sha384": "sha384-XETEC39BEI+1nILZ5N2gFQcu6ii4k3avoqyi4YwQMbs29xkt01EKMqd9rFvic0Wu"
     },
     {
       "src": "vendor/xlsx.full.min.js",
       "file": "xlsx.full.min.js",
+      "lazy": "xlsx",
       "sha384": "sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
     },
     {
       "src": "vendor/exceljs.min.js",
       "file": "exceljs.min.js",
+      "lazy": "exceljs",
       "sha384": "sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz"
     },
     {
       "src": "vendor/crypto-js.min.js",
       "file": "crypto-js.min.js",
+      "lazy": "officeCrypt",
       "sha384": "sha384-mgWScxWVKP8F7PBbpNp7i/aSb17kN0LcifBpahAplF3Mn0GR4/u1oMpWIm2rD8yY"
     },
     {
       "src": "vendor/office-decrypt.js",
       "file": "office-decrypt.js",
+      "lazy": "officeCrypt",
       "sha384": "sha384-CqC7oKNgJ8rypkYGPyOUdZfXA+8NzuqWur3DaYi0w44Je2A8w1itcYxXm2G9irH6"
     },
     {
       "src": "vendor/hwp.global.js",
       "file": "hwp.global.js",
+      "lazy": "hwp",
       "sha384": "sha384-Aeim5qNqkBWyhTliynTbE06e4P1vdsz2lM6BDZCcYmLsgapOaLHSY3uQ+JAGXutQ"
     },
     {
@@ -351,16 +397,19 @@
     {
       "src": "vendor/html2canvas.min.js",
       "file": "html2canvas.min.js",
+      "lazy": "capture",
       "sha384": "sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H"
     },
     {
       "src": "vendor/html-to-image.js",
       "file": "html-to-image.js",
+      "lazy": "capture",
       "sha384": "sha384-xLgzHdt2mattQ+ahbon5GzS7s37ucfD7HaPIlBVG9JYfSqIv90k4zj+w9rnnZbEK"
     },
     {
       "src": "vendor/zip-full.min.js",
       "file": "zip-full.min.js",
+      "lazy": "zip",
       "sha384": "sha384-I/HWtwluKZIVzQnugyNZWTtzOTrBIK7nsdVnB1a+tLSTplwghWXI0AFsDxmFlXvW"
     }
   ]

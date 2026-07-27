@@ -205,7 +205,8 @@ function spreadsheetDirectSaveKind(doc){
 
 // 새 빈 표(스프레드시트) 만들기 — 유효한 빈 XLSX(12행×6열)를 생성해 열고, 바로 편집 모드로 진입(isScratch).
 let _sheetScratchCount = 0;
-function newSpreadsheetScratch(){
+async function newSpreadsheetScratch(){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("xlsx");   // 표를 만들 때 처음 로드
   if (typeof XLSX === "undefined"){ toast("Excel 라이브러리를 불러오지 못했어요.", 2400); return; }
   _sheetScratchCount++;
   const rows = 12, cols = 6;
@@ -2062,6 +2063,7 @@ function writeStructuredSpreadsheetModel(ws, model, merges){
 }
 
 async function renderXlsx(file, host, doc){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("xlsx");   // 엑셀 뷰어는 표를 열 때 처음 로드
   if (typeof XLSX === "undefined"){ toast("Excel 뷰어 로드 실패"); return; }
   const csvFastAoa = doc && Array.isArray(doc.spreadsheetAoa) ? doc.spreadsheetAoa : null;
   let bytes = new Uint8Array(await file.arrayBuffer());
@@ -2085,6 +2087,8 @@ async function renderXlsx(file, host, doc){
   }
   // 한컴 한셀 등에서 일부 시트가 비어버리거나(또는 파싱 실패) 하면 정화 후 재시도
   if (!csvFastAoa && (!wb || wb.SheetNames.some(n => !wb.Sheets[n]))){
+    // 한컴 파일을 만난 이 경로에서만 JSZip 이 필요하다(보통 표는 여기까지 오지 않는다).
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("jszip");
     const fixed = sanitizeHancomSpreadsheet(bytes);
     if (fixed !== bytes){
       try { wb = XLSX.read(fixed, { type: "array" }); } catch(e){ /* 원본 결과 유지 */ }
@@ -2184,6 +2188,7 @@ async function renderXlsx(file, host, doc){
   let exWb = null, exLoadPromise = null;
   const ensureExWb = async () => {
     if (exWb) return exWb;
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("exceljs");   // 편집 모드에 들어갈 때 처음 로드
     if (typeof ExcelJS === "undefined") return null;
     if (!exLoadPromise){
       exLoadPromise = (async () => {
@@ -4621,6 +4626,7 @@ async function renderXlsx(file, host, doc){
   const exportExBytes = async () => {
     // 캐시된 편집 기준 워크북을 직접 바꾸면 "저장 → 되돌리기 → 다시 저장"에서 이전 변경이 남는다.
     // 매 저장마다 원본 바이트를 새 워크북에 로드한 뒤 현재 모델만 반영한다.
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("exceljs");   // 저장 시점에도 준비 보장
     if (typeof ExcelJS === "undefined") return null;
     // 화면에서 조절한 열 폭·행 높이(모델 인덱스 기준)와 머리글 고정을 워크시트에 반영한다.
     const applyViewSizes = (ws, name) => {

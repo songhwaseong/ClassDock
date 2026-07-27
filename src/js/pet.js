@@ -30,6 +30,24 @@
    몇 마리든 rAF 루프는 하나만 돌고 발판 스캔도 공유하므로 성능 부담이 거의 없다.
    그리기는 마리당 45×33px 작은 캔버스 하나뿐이고, 몸통에만 포인터가 잡혀 UI 클릭을 막지 않는다. */
 
+/* 스프라이트 시트 경로 → 실제 URL.
+   서버·파일로 서빙될 때는 pet-data.js 의 상대 경로를 그대로 쓰고, 단일 파일 빌드에서는
+   빌드가 심어 둔 JSON 표(#mnPetSprites)의 데이터 URL 로 바꿔 준다. 그 표는 JavaScript 로
+   파싱되지 않는 블록이라, 펫을 켜지 않은 사용자는 약 1.7MB 를 읽지 않는다. */
+let _petSpriteMap = null;
+function petSpriteUrl(relativePath){
+  const key = String(relativePath || "");
+  if (!key) return key;
+  if (_petSpriteMap === null){
+    _petSpriteMap = {};
+    try {
+      const holder = document.getElementById("mnPetSprites");
+      if (holder) _petSpriteMap = JSON.parse(holder.textContent || "{}") || {};
+    } catch(e){ console.warn("펫 스프라이트 표를 읽지 못했어요:", e); }
+  }
+  return _petSpriteMap[key] || key;
+}
+
 const PET_SCALE = 3, PET_GW = 15, PET_GH = 11;
 const PET_W = PET_GW * PET_SCALE, PET_H = PET_GH * PET_SCALE;   // 45×33
 const PET_GRAV = 0.5, PET_WALK = 1.05, PET_CLIMB = 1.0, PET_MAX = 12;
@@ -1732,7 +1750,7 @@ function petSpawn(i, total, bag){
     el.style.visibility = "hidden";
     spriteImage.onload = () => { if (el.isConnected) el.style.visibility = ""; };
     spriteImage.onerror = () => { if (el.isConnected) el.style.visibility = ""; };
-    spriteImage.src = species.spriteSheet.src;
+    spriteImage.src = petSpriteUrl(species.spriteSheet.src);
   }
   const bubble = document.createElement("div");
   bubble.className = "pixel-pet-bubble";

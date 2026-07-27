@@ -48,6 +48,10 @@ let tabOrder = [];        // 선택(활성화)한 문서 id 순서 — 헤더 �
 let activeMru = [];
 let sidebarCollapsed = false;
 let sidebarCursorKey = null;   // 사이드바 키보드 커서(현재 강조된 줄의 nodeId)
+// 사이드바 다중 선택(Ctrl/Shift 클릭) — 여러 파일을 한 번에 닫거나 지울 때 쓴다.
+// 문서 줄만 담고(폴더 제외), 담긴 값은 nodeId. 선택 중에는 일반 클릭이 선택을 해제한다.
+let sidebarSelection = new Set();
+let sidebarSelectionAnchor = null;   // Shift 범위 선택의 기준 줄
 let lastFocusedDocId = null;   // 마지막으로 들여다본 문서 id — 사이드바를 다시 열 때 그 파일명으로 커서를 옮긴다
 try { sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true"; } catch(e){}
 let activeId = 0, docSeq = 0, navSeq = 0;
@@ -126,7 +130,10 @@ function applyToolVisibility(){
   for (const tool of TOGGLEABLE_TOOLS) root.classList.toggle("hide-tool-" + tool.id, vis[tool.id] === false);
 }
 const DEFAULT_APP_SETTINGS = {
-  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, pythonAutosave: false, pyFormatOnSave: true,
+  // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).
+  //   예전 이름은 pythonAutosave 였고 Python 에만 적용됐다 — 아래 migrateAppSettings 가 값을 옮긴다.
+  // pdfRecovery: 파일에 쓰지 않고 브라우저 안에 복구본만 남긴다(꺼짐 대비 안전망) — 성격이 달라 따로 둔다.
+  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
@@ -156,9 +163,16 @@ function normalizeShortcutMap(value){
     item.id, normalizeShortcut(source[item.id]) || item.defaultValue
   ]));
 }
+// 예전 설정 이름을 새 이름으로 옮긴다. 이미 켜 두었던 사용자의 선택이 조용히 꺼지지 않게 한다.
+function migrateAppSettings(saved){
+  const next = { ...(saved || {}) };
+  if (next.autoSave === undefined && next.pythonAutosave !== undefined) next.autoSave = !!next.pythonAutosave;
+  delete next.pythonAutosave;
+  return next;
+}
 let appSettings = (() => {
   try {
-    const saved = JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}");
+    const saved = migrateAppSettings(JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}"));
     return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), shortcuts:normalizeShortcutMap(saved.shortcuts) };
   }
   catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() }; }

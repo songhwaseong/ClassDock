@@ -1215,7 +1215,71 @@ async function renderCode(file, host, ext, profile, runCtx){
         diag.title = d.level === "ok" ? "구조 검사를 통과했어요." : d.text;
       };
       const scheduleDiagnostic = () => { clearTimeout(diagTimer); diagTimer = setTimeout(runDiagnostic, 300); };
-      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; markDocumentDirty(ownerDoc, dirty); scheduleTextDraft(); scheduleDiagnostic(); };
+
+      /* 자동 저장 — 예전에는 Python 편집기에만 있어서, 같은 편집기를 쓰는 .txt·.md 는
+         "알아서 저장되는 파일"과 "안 되는 파일"이 뒤섞여 예측이 안 됐다. 같은 설정으로 묶는다.
+         이미 디스크에 있는 파일에만 조용히 되쓰고(existingOnly), 새 파일 저장 위치를 묻는
+         대화상자는 절대 띄우지 않는다 — 타이핑 도중 창이 뜨면 안 되기 때문. */
+      let textAutosaveTimer = 0, textAutosaveBusy = false, textAutosaveAgain = false;
+      const setTextAutosaveState = (next) => {
+        if (!ownerDoc) return;
+        ownerDoc._pyAutosaveState = next || "";
+        updateDocumentStatus(ownerDoc);
+      };
+      const runTextAutosave = async () => {
+        if (!ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.autoSave) return;
+        if (textAutosaveBusy){ textAutosaveAgain = true; return; }
+        textAutosaveBusy = true;
+        const value = editor.getValue();
+        let retryChangedValue = false;
+        setTextAutosaveState("saving");
+        try {
+          const ok = await saveTextDoc(value, ownerDoc, saveName, { silent:true, existingOnly:true });
+          if (ok === true){
+            const latest = editor.getValue();
+            const dirty = latest !== value;
+            currentText = latest;
+            status.textContent = dirty ? "저장 안 됨" : "저장됨";
+            markDocumentDirty(ownerDoc, dirty);
+            persistTextDraft();
+            setTextAutosaveState("");
+            ownerDoc._textAutosaveFailureNotified = false;
+            retryChangedValue = dirty;
+          } else if (ok === "skipped"){
+            setTextAutosaveState("");     // 저장할 위치가 아직 없는 문서 — 조용히 넘어가고 수동 저장을 기다린다
+          } else {
+            setTextAutosaveState("failed");
+            if (!ownerDoc._textAutosaveFailureNotified){
+              ownerDoc._textAutosaveFailureNotified = true;
+              toast("자동 저장에 실패했어요. 편집 내용은 남아 있어요.", 6000, { type:"error",
+                action:{ label:"지금 저장", onClick:() => saveBtn.click() } });
+            }
+          }
+        } catch(error){
+          console.warn("text autosave failed:", error);
+          setTextAutosaveState("failed");
+          if (!ownerDoc._textAutosaveFailureNotified){
+            ownerDoc._textAutosaveFailureNotified = true;
+            toast("자동 저장에 실패했어요. 편집 내용은 남아 있어요.", 6000, { type:"error",
+              action:{ label:"지금 저장", onClick:() => saveBtn.click() } });
+          }
+        } finally {
+          textAutosaveBusy = false;
+          if (textAutosaveAgain || retryChangedValue){ textAutosaveAgain = false; scheduleTextAutosave(); }
+        }
+      };
+      const scheduleTextAutosave = () => {
+        clearTimeout(textAutosaveTimer); textAutosaveTimer = 0;
+        if (!ownerDoc || !appSettings.autoSave){ setTextAutosaveState(""); return; }
+        if (!ownerDoc.hasUnsavedEdits) return;
+        textAutosaveTimer = setTimeout(runTextAutosave, TEXT_AUTOSAVE_DELAY);
+      };
+      if (ownerDoc){
+        if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
+        ownerDoc.cleanupFns.push(() => { clearTimeout(textAutosaveTimer); textAutosaveTimer = 0; });
+      }
+
+      const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; markDocumentDirty(ownerDoc, dirty); if (textAutosaveBusy) textAutosaveAgain = true; scheduleTextDraft(); scheduleDiagnostic(); scheduleTextAutosave(); };
       editor.ta.addEventListener("input", markDirty);
       runDiagnostic();                                        // 편집 진입 시 1회 즉시 진단
       editor.ta.addEventListener("keydown", (e) => {
@@ -1225,7 +1289,20 @@ async function renderCode(file, host, ext, profile, runCtx){
       });
       saveBtn.addEventListener("click", async () => {
         saveBtn.disabled = true;
-        try { const ok = await saveTextDoc(editor.getValue(), ownerDoc, saveName); if (ok){ currentText = editor.getValue(); status.textContent = "저장됨"; markDocumentDirty(ownerDoc, false); persistTextDraft(); } }
+        try {
+          const value = editor.getValue();
+          const ok = await saveTextDoc(value, ownerDoc, saveName);
+          if (ok === true){
+            const latest = editor.getValue();
+            const dirty = latest !== value;
+            currentText = latest;
+            status.textContent = dirty ? "저장 안 됨" : "저장됨";
+            markDocumentDirty(ownerDoc, dirty);
+            ownerDoc._textAutosaveFailureNotified = false;
+            persistTextDraft();
+            if (dirty) scheduleTextAutosave();
+          }
+        }
         finally { saveBtn.disabled = false; }
       });
       viewBtn.addEventListener("click", () => { currentText = editor.getValue(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
@@ -2210,7 +2287,9 @@ async function renderCode(file, host, ext, profile, runCtx){
       const wrote = await saveViaFileHandle(value, name, ownerDoc, { existingOnly: saveToOriginal });
       if (wrote === "cancelled") return;                  // 사용자가 위치 선택을 취소 → 아무 것도 안 함
       if (saveToOriginal && wrote !== "saved"){
-        toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" });
+        // 여기서 끝내면 편집 내용이 갈 곳이 없다 — 사본으로 내려받는 길을 바로 준다.
+        toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 6000, { type: "error",
+          action:{ label:"사본으로 내려받기", onClick:() => downloadTextFile(value, name) } });
         return;
       }
       if (wrote === "unsupported") downloadTextFile(value, name);   // 미지원 브라우저/file:// → 기존 다운로드 폴백
@@ -2397,8 +2476,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   };
   function schedulePythonAutosave(){
     clearTimeout(pyAutosaveTimer); pyAutosaveTimer = 0;
-    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.pythonAutosave){
-      if (!appSettings.pythonAutosave) setPythonAutosaveState("");
+    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.autoSave){
+      if (!appSettings.autoSave) setPythonAutosaveState("");
       return;
     }
     setPythonAutosaveState("");
@@ -2409,7 +2488,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     }, PYTHON_AUTOSAVE_DELAY);
   }
   async function runPythonAutosave(){
-    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.pythonAutosave) return false;
+    if (pyAutosaveDisposed || !ownerDoc || !ownerDoc.hasUnsavedEdits || !appSettings.autoSave) return false;
     if (pyAutosaveSaving){ pyAutosaveAgain = true; return pyAutosaveSaving; }
     if (pyManualSaveActive){ pyAutosaveAgain = true; return false; }
     pyAutosaveAgain = false;
@@ -2446,7 +2525,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       setPythonAutosaveState("failed");
       if (!ownerDoc._pyAutosaveFailureNotified){
         ownerDoc._pyAutosaveFailureNotified = true;
-        toast("Python 자동 저장에 실패했어요. 로컬 초안은 유지됩니다.", 3200, { type:"error" });
+        toast("자동 저장에 실패했어요. 편집 내용은 남아 있어요.", 6000, { type:"error",
+          action:{ label:"지금 저장", onClick:() => saveBtn.click() } });
       }
       return false;
     }).finally(() => {
@@ -2552,6 +2632,7 @@ async function renderCode(file, host, ext, profile, runCtx){
 const PY_DRAFT_PREFIX = "pdf-signer-python-draft:";
 const PY_DRAFT_MAX = 768 * 1024;
 const PYTHON_AUTOSAVE_DELAY = 3000;
+const TEXT_AUTOSAVE_DELAY = 3000;   // 텍스트·마크다운 편집기도 같은 간격으로 자동 저장(입력이 멈춘 뒤)
 function pythonAutosaveTarget(ownerDoc, serverAvailable, fromZip=false){
   if (!ownerDoc || !ownerDoc.hasUnsavedEdits || fromZip) return "";
   if (ownerDoc.isScratch && !ownerDoc._named) return "";
@@ -2701,6 +2782,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     if (wantOriginal || fromFolderOriginal){
       const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
+        noPermissionPrompt: silent && existingOnly,
         mime: "text/plain;charset=utf-8"
       });
       if (wrote === "saved"){
@@ -2712,7 +2794,12 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       }
       if (wrote === "cancelled") return false;
       // 명시적 원본 모드는 실패를 알리고 끝내지만, 폴더 핸들만으로 시도한 경우엔 아래 일반 저장 경로로 폴백한다.
-      if (wantOriginal){ if (!silent) toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 3000, { type: "error" }); return false; }
+      // 원본에 못 쓰면 편집 내용이 갈 곳이 없다 — 사본으로 내려받는 길을 함께 준다.
+      if (wantOriginal){
+        if (!silent) toast("원본 파일 쓰기 권한이 없어 저장하지 못했어요.", 6000, { type: "error",
+          action:{ label:"사본으로 내려받기", onClick:() => downloadTextFile(value, name) } });
+        return false;
+      }
     }
     if (await saveFileBackendAvailable()){
       // 조용한 일괄 저장: 아직 이름 없는 새 문서는 이름을 물어야 하므로 건너뛴다.
@@ -2744,6 +2831,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
         });
         return true;
       }
+      if (existingOnly) return false;       // 저장 대상은 확정됐지만 EXE 쓰기가 실패함 — 건너뜀과 구분
     }
     // A) 서버가 없으면(.py 저장과 동일) 첫 저장에 위치를 한 번 고르고 핸들을 보관 → 이후엔 대화상자 없이
     //    같은 파일에 조용히 덮어쓰기. 노트북 Ctrl+S 가 매번 다운로드 폴더로 떨어지지 않게 한다.
@@ -2757,12 +2845,13 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
     const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
       existingOnly,
+      noPermissionPrompt: silent && existingOnly,
       mime: mime + ";charset=utf-8",
       pickerTypes: ext ? [{ description: ext === ".ipynb" ? "Jupyter Notebook" : ext.slice(1).toUpperCase() + " 파일",
         accept: { [mime]: [ext] } }] : null
     });
     if (wrote === "cancelled") return false;                 // 사용자가 위치 선택을 닫음 → 저장 안 함(다운로드도 없음)
-    if (existingOnly && wrote !== "saved") return "skipped";  // 조용한 일괄 저장: 위치를 물어야 하는 파일은 건너뜀
+    if (existingOnly && wrote !== "saved") return hadHandle ? false : "skipped";
     if (wrote === "saved"){
       if (ownerDoc){
         const oldPath = String(ownerDoc.workspacePath || ownerDoc.name || name).replace(/\\/g, "/").replace(/^\/+/, "");
@@ -2798,7 +2887,12 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     if (ownerDoc){ ownerDoc.size = blob.size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
     if (!silent) toast("파일을 내려받았어요.", 1800, { type: "success" });
     return true;
-  } catch(e){ console.error(e); if (!silent) toast("저장하지 못했어요.", 2200, { type: "error" }); return false; }
+  } catch(e){
+    console.error(e);
+    if (!silent) toast("저장하지 못했어요.", 6000, { type: "error",
+      action:{ label:"사본으로 내려받기", onClick:() => downloadTextFile(value, name) } });
+    return false;
+  }
 }
 
 // 새 빈 텍스트 파일(.txt) — renderCode 의 편집 토글로 열려 바로 편집·저장.
@@ -2858,7 +2952,7 @@ function originalSaveRootForDoc(ownerDoc){
   return null;
 }
 
-async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly){
+async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noPermissionPrompt=false){
   if (!ownerDoc || !ownerDoc.originalSaveMode) return null;
   const root = originalSaveRootForDoc(ownerDoc);
   if (!root) return null;
@@ -2871,6 +2965,7 @@ async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly){
   let permission = typeof rootHandle.queryPermission === "function"
     ? await rootHandle.queryPermission({ mode:"readwrite" })
     : "granted";
+  if (permission !== "granted" && noPermissionPrompt) return null;
   if (permission !== "granted" && typeof rootHandle.requestPermission === "function")
     permission = await rootHandle.requestPermission({ mode:"readwrite" });
   if (permission !== "granted") return null;
@@ -2895,6 +2990,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     let handle = ownerDoc && ownerDoc.fsHandle;
     if (handle && handle.queryPermission){              // 보관한 핸들의 쓰기 권한 재확인(회수됐을 수 있음)
       let perm = await handle.queryPermission({ mode: "readwrite" });
+      if (perm !== "granted" && options.noPermissionPrompt) return "denied";
       if (perm !== "granted" && handle.requestPermission) perm = await handle.requestPermission({ mode: "readwrite" });
       if (perm !== "granted"){
         if (options.existingOnly) return "denied";
@@ -2905,9 +3001,10 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     if (!handle && ownerDoc && ownerDoc.fsDirHandle && typeof ownerDoc.fsDirHandle.getFileHandle === "function"){
       let dperm = "granted";
       if (ownerDoc.fsDirHandle.queryPermission) dperm = await ownerDoc.fsDirHandle.queryPermission({ mode: "readwrite" });
+      if (dperm !== "granted" && options.noPermissionPrompt) return "denied";
       if (dperm !== "granted" && ownerDoc.fsDirHandle.requestPermission) dperm = await ownerDoc.fsDirHandle.requestPermission({ mode: "readwrite" });
       if (dperm === "granted"){
-        handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create: true });
+        handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create: !options.existingOnly });
         ownerDoc.fsHandle = handle;            // 이후 저장은 이 .py 파일을 그대로 덮어쓴다
       } else if (options.existingOnly){
         return "denied";
@@ -2917,7 +3014,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     // 기존 원본 파일은 기존대로 create:false 를 유지해 잘못된 위치에 새 파일이 생기지 않게 한다.
     const createInOriginalFolder = !!(ownerDoc && ownerDoc.isScratch && ownerDoc.originalSaveMode);
     if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name,
-      !!options.existingOnly && !createInOriginalFolder);
+      !!options.existingOnly && !createInOriginalFolder, !!options.noPermissionPrompt);
     if (!handle){
       if (options.existingOnly) return "denied";
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";
@@ -3118,4 +3215,3 @@ function newPythonScratch(){
   const name = pythonScratchFileName(_scratchCount);
   handleFiles([new File([starter], name, { type: "text/x-python" })], { isScratch: true });
 }
-

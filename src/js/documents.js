@@ -474,7 +474,11 @@ function setActiveDoc(id){
     prev.el.querySelectorAll("video").forEach(m => { try { m.pause(); } catch(_){} });
   }
   if (d.kind === "pdf" && d.pages && d.pages.length) startLazyRender(d);
-  ensureRendered(d);                                      // 아직 안 그렸으면 이때 처음 렌더(지연 렌더)
+  // 저장 버튼(=저장 동선)은 렌더가 끝나야 생기므로, 저장 위치 배지는 렌더 완료 뒤 다시 판단한다.
+  const rendered = ensureRendered(d);                     // 아직 안 그렸으면 이때 처음 렌더(지연 렌더)
+  if (rendered && typeof rendered.then === "function"){
+    rendered.then(() => { if (activeId === d.id) updateOriginalSaveBadge(d); }).catch(() => {});
+  }
   applyStudyLayout();
   updateSidebarActive();                                  // 전체 재생성 대신 활성 표시만 갱신(클릭 반응 향상)
   focusSidebarActive();                                   // 활성 파일을 사이드바에서 보이게(스크롤 + 접힌 폴더 펼침)
@@ -1167,6 +1171,8 @@ function activateIfIdle(doc, opts){
 function updateDocumentStatus(doc){
   const badge = byId("activeDocStatus");
   if (!badge || !doc || doc.id !== activeId){ if (badge) badge.hidden = true; return; }
+  // 읽기 전용 보기에서 편집으로 들어가면 그때 저장 버튼이 생긴다 — 저장 위치 안내도 같이 따라간다.
+  updateOriginalSaveBadge(doc);
   let text = "", cls = "";
   if (doc._pyAutosaveState === "saving"){ text = "자동 저장 중"; cls = "dirty"; }
   else if (doc._pyAutosaveState === "failed"){ text = "자동 저장 실패"; cls = "dirty"; }
@@ -1269,13 +1275,56 @@ function markDocumentSavedAsUtf8(doc, refresh=true){
   }, refresh);
 }
 
+/* 지금 이 문서를 저장하면 어디에 쓰이는지 한곳에서 판단한다.
+   예전에는 "원본 저장"일 때만 배지를 띄워서, 배지가 없을 때가 "사본으로 저장된다"는 뜻인지
+   "저장할 수 없는 문서"라는 뜻인지 화면만 봐서는 알 수 없었다. 두 경우를 나눠 말해 준다.
+   반환: { mode:"original"|"copy"|"", label, title } */
+function documentSaveTarget(doc){
+  if (!doc) return { mode:"", label:"", title:"" };
+  // 저장 동선이 실제로 있는 문서만 — Ctrl+S 처리(app.js)와 같은 기준을 쓴다.
+  const savable = !!(doc.notebookModel || doc.kind === "pdf" || (doc.el && doc.el.querySelector(".run-save")));
+  if (!savable) return { mode:"", label:"", title:"" };
+  const handle = doc.fsHandle;
+  const canWriteOriginal = !!(handle && typeof handle.createWritable === "function");
+  // PDF의 낱개 파일 열기는 쓰기 핸들이 있어도 `_signed.pdf` 다운로드가 기본이다.
+  // 폴더의 원본 저장 모드로 연 경우에만 exportPdf가 원본을 덮어쓴다.
+  if ((doc.kind === "pdf" && doc.originalSaveMode) || (doc.kind !== "pdf" && (canWriteOriginal || doc.originalSaveMode))){
+    return {
+      mode:"original",
+      label:"원본 저장",
+      title:"저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)"
+    };
+  }
+  const viaServer = doc.kind !== "pdf" && typeof workspaceBackendStatus === "function"
+    && workspaceBackendStatus() === true;
+  return {
+    mode:"copy",
+    label:"사본 저장",
+    title: viaServer
+      ? "원본은 그대로 두고 '설정 → 일반 → 자동 저장 폴더'에 사본으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요."
+      : "원본은 그대로 두고 사본(다운로드)으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요."
+  };
+}
+
 function updateOriginalSaveBadge(doc){
   const badge = byId("originalSaveBadge");
   if (!badge) return;
-  badge.hidden = !(doc && doc.originalSaveMode);
-  badge.title = doc && doc.originalSaveMode
-    ? "저장을 누르면 선택한 폴더의 원본 파일을 바로 덮어씁니다."
-    : "";
+  if (doc && doc.kind !== "pdf" && typeof workspaceBackendStatus === "function" && workspaceBackendStatus() === null
+      && typeof workspaceBackendAvailable === "function" && !badge._backendProbe){
+    badge._backendProbe = true;
+    workspaceBackendAvailable().finally(() => {
+      badge._backendProbe = false;
+      if (typeof state !== "undefined" && state === doc) updateOriginalSaveBadge(doc);
+    });
+  }
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const target = documentSaveTarget(doc);
+  badge.hidden = !target.mode;
+  badge.textContent = _t(target.label);
+  badge.title = _t(target.title);
+  badge.classList.toggle("is-copy", target.mode === "copy");
+  if (target.mode) badge.setAttribute("aria-label", _t(target.label) + " — " + _t(target.title));
+  else badge.removeAttribute("aria-label");
 }
 
 async function inspectTextFileEncoding(file, ext){
@@ -1345,16 +1394,16 @@ function updateModeBadges(){
 
 function closeDoc(id, options={}){
   const i = docs.findIndex(d => d.id === id);
-  if (i < 0) return;
+  if (i < 0) return false;
   const d = docs[i];
   if (!options.skipConfirm && d.hasUnsavedEdits){
-    if (!confirm(`'${d.name}'의 저장하지 않은 ${unsavedDocumentLabel(d)} 수정이 있습니다. 닫을까요?`)) return;
+    if (!confirm(`'${d.name}'의 저장하지 않은 ${unsavedDocumentLabel(d)} 수정이 있습니다. 닫을까요?`)) return false;
   }
   if (!options.skipConfirm && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d)){
     const msg = appSettings.pdfRecovery
       ? `'${d.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`
       : `'${d.name}'의 편집 내용이 사라집니다. 자동 저장·복원이 꺼져 있어 다시 열어도 복원할 수 없어요. 닫을까요?`;
-    if (!confirm(msg)) return;
+    if (!confirm(msg)) return false;
   }
   if (d.kind === "pdf"){
     clearTimeout(d.recoveryTimer);
@@ -1420,6 +1469,7 @@ function closeDoc(id, options={}){
     renderSidebar();
   }
   if (options.forgetWorkspace && forgottenPaths.length) forgetWorkspacePaths(forgottenPaths, navNodes.length === 0);
+  return true;
 }
 
 function withFileHandle(file, handle){
@@ -1794,11 +1844,15 @@ function originalRenamePath(doc){
     .replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
-function canRenameOriginalDoc(doc){
+/* 원본 파일을 손대는 동작(이름 바꾸기·삭제)이 지금 가능한지.
+   requireSaved: 이름 바꾸기는 복구 데이터 경로를 함께 옮겨야 해서 저장을 먼저 요구한다.
+                 삭제는 파일 자체를 버리는 동작이라 저장되지 않은 편집을 따지지 않는다. */
+function canModifyOriginalDoc(doc, requireSaved){
   if (!doc || !doc.originalSaveMode || (doc.isScratch && !doc.fsHandle)) return false;
-  // 복구 데이터의 경로를 안전하게 옮길 수 있도록, 저장되지 않은 편집이 있으면 먼저 저장하게 한다.
-  if (doc.hasUnsavedEdits) return false;
-  if (typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(doc)) return false;
+  if (requireSaved){
+    if (doc.hasUnsavedEdits) return false;
+    if (typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(doc)) return false;
+  }
   // .ipynb 를 메모리에서 .py 로 변환한 문서는 실제 .py 원본이 생기기 전까지 제외한다.
   if (doc.notebook && /\.py$/i.test(doc.name || "") && !doc.fsHandle) return false;
   const root = originalRenameRootForDoc(doc);
@@ -1809,8 +1863,11 @@ function canRenameOriginalDoc(doc){
   return !!(rootHandle && typeof rootHandle.getDirectoryHandle === "function");
 }
 
-async function originalRenameContext(doc){
-  if (!canRenameOriginalDoc(doc)) return null;
+function canRenameOriginalDoc(doc){ return canModifyOriginalDoc(doc, true); }
+function canDeleteOriginalDoc(doc){ return canModifyOriginalDoc(doc, false); }
+
+async function originalRenameContext(doc, requireSaved=true){
+  if (!canModifyOriginalDoc(doc, requireSaved)) return null;
   const root = originalRenameRootForDoc(doc);
   const path = originalRenamePath(doc);
   const parts = path.split("/").filter(Boolean);
@@ -1989,6 +2046,73 @@ async function renameDoc(id){
   toast("원본 파일 이름을 '" + name + "'(으)로 바꿨어요.", 3200, { type: "success" });
 }
 
+/* ===== 원본 파일 삭제 =====
+   앱에서 치우기(closeDoc)와 달리 디스크의 파일을 실제로 지운다.
+   브라우저의 폴더 권한(removeEntry)으로 지우므로 휴지통을 거치지 않는 '영구 삭제'다.
+   되돌릴 수 없으니 확인 문구에서 그 사실과 대상 이름을 분명히 밝힌다. */
+async function deleteOriginalFile(doc){
+  const ctx = await originalRenameContext(doc, false);
+  if (!ctx) throw new Error("delete-no-permission");
+  await ctx.dirHandle.removeEntry(ctx.oldName);
+  // 지운 파일의 흔적(저장 위치 기억·최근 목록·자동 복원본)도 함께 정리한다.
+  const workspacePath = doc.workspacePath || doc.relPath || doc.name;
+  if (typeof forgetFsHandle === "function") forgetFsHandle(workspacePath);
+  if (typeof MNRecent !== "undefined") MNRecent.forget("file", workspacePath);
+}
+
+function deleteConfirmMessage(targets){
+  if (targets.length === 1){
+    return "'" + targets[0].name + "' 을(를) 디스크에서 완전히 지웁니다.\n" +
+      "휴지통으로 가지 않으므로 되돌릴 수 없어요.";
+  }
+  const preview = targets.slice(0, 5).map(doc => doc.name).join(", ");
+  const rest = targets.length > 5 ? " 외 " + (targets.length - 5) + "개" : "";
+  return "파일 " + targets.length + "개를 디스크에서 완전히 지웁니다.\n" + preview + rest + "\n" +
+    "휴지통으로 가지 않으므로 되돌릴 수 없어요.";
+}
+
+/* 문서 목록을 디스크에서 지운다(확인 후). 지울 수 없는 항목은 건너뛰고 이유를 알려 준다. */
+async function deleteDocsFromDisk(ids){
+  const all = ids.map(id => docs.find(d => d.id === id)).filter(Boolean);
+  if (!all.length) return;
+  const targets = all.filter(canDeleteOriginalDoc);
+  const skipped = all.length - targets.length;
+  if (!targets.length){
+    toast(all.length === 1
+      ? "이 파일은 앱에서 지울 수 없어요. '열기 → 폴더 열기'로 연 파일만 디스크에서 지울 수 있어요."
+      : "선택한 파일 중 디스크에서 지울 수 있는 것이 없어요. '열기 → 폴더 열기'로 연 파일만 지울 수 있어요.", 5000);
+    return;
+  }
+  if (typeof confirmDialog !== "function") return;
+  const ok = await confirmDialog(deleteConfirmMessage(targets), "완전히 지우기", "취소");
+  if (!ok) return;
+
+  const failed = [];
+  let removed = 0;
+  for (const doc of targets){
+    try {
+      await deleteOriginalFile(doc);
+      closeDoc(doc.id, { forgetWorkspace:true, skipConfirm:true });
+      removed++;
+    } catch(error){
+      console.warn("original file delete failed:", doc.name, error);
+      failed.push(doc.name);
+    }
+  }
+  clearSidebarSelection();
+  if (removed && !failed.length){
+    toast(removed === 1 ? "'" + targets[0].name + "' 을(를) 지웠어요." : "파일 " + removed + "개를 지웠어요.",
+      2800, { type:"success" });
+  } else if (removed){
+    toast("파일 " + removed + "개를 지웠어요. " + failed.length + "개는 지우지 못했어요: " + failed.slice(0, 3).join(", "),
+      5000, { type:"error" });
+  } else {
+    toast("지우지 못했어요. 파일이 다른 프로그램에서 열려 있거나 권한이 없을 수 있어요.", 5000, { type:"error" });
+  }
+  // 폴더로 열지 않은 파일은 앱이 디스크 위치를 몰라 건드리지 않는다(그대로 열린 채 남는다).
+  if (skipped) toast("폴더로 열지 않은 파일 " + skipped + "개는 그대로 두었어요. 탐색기에서 직접 지워 주세요.", 4600);
+}
+
 function documentRelativePathForCopy(doc){
   return String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
     .replace(/\\/g, "/").replace(/^\/+/, "");
@@ -2091,6 +2215,12 @@ function openSidebarDocMenu(doc, x, y){
   add("이름 복사", () => copyDocumentName(doc));
   add("상대 경로 복사", () => copyDocumentRelativePath(doc));
   if (canRenameOriginalDoc(doc)) add("이름 바꾸기", () => renameDoc(doc.id));
+  if (canDeleteOriginalDoc(doc)){
+    const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
+    add("디스크에서 삭제", () => deleteDocsFromDisk([doc.id]));
+    const last = menu.querySelector("button:last-of-type");
+    if (last) last.classList.add("danger");
+  }
   document.body.appendChild(menu);
   const pad = 8, mw = menu.offsetWidth, mh = menu.offsetHeight;
   menu.style.left = Math.max(pad, Math.min(x, window.innerWidth - mw - pad)) + "px";
@@ -2500,6 +2630,7 @@ async function extractOfficeText(doc){
     const t = String(doc.el.innerText || "").replace(/\u0000/g, "").trim();
     return t || false;
   }
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("zip");   // 압축 라이브러리는 첫 사용 때 로드
   if (typeof zip === "undefined") return false;
   let reader = null;
   try {
@@ -2803,6 +2934,7 @@ function setSidebarExtensionFilter(ext){
 function renderSidebar(){
   if (uiBatchDepth > 0){ uiBatchSidebarPending = true; return; }
   closeSidebarGroupMenu();
+  pruneSidebarSelection();                 // 닫힌 문서가 선택에 남아 있지 않게
   const list = byId("sbList");
   list.innerHTML = "";
   const query = String((byId("sbSearch") && byId("sbSearch").value) || "").trim().toLocaleLowerCase();
@@ -2838,13 +2970,27 @@ function renderSidebar(){
     const doc = node.type === "doc" ? docs.find(d => d.id === node.docId) : null;
     if (node.type === "doc" && !doc) return;
     const item = document.createElement("div");
-    item.className = "sb-item" + (doc && doc.id === activeId ? " active" : "") + (doc && studyPdfId !== null && doc.id === studyPdfId && doc.id !== activeId ? " study-ref" : "") + (node.type === "group" ? " group" : "");
+    item.className = "sb-item" + (doc && doc.id === activeId ? " active" : "") + (doc && studyPdfId !== null && doc.id === studyPdfId && doc.id !== activeId ? " study-ref" : "") + (node.type === "group" ? " group" : "") + (sidebarSelection.has(node.nodeId) ? " selected" : "");
+    if (node.type === "doc") item.setAttribute("aria-selected", String(sidebarSelection.has(node.nodeId)));
     item.style.setProperty("--depth", depth);
     item.tabIndex = -1;                                     // 키보드 ↑/↓ 이동용(roving tabindex)
     item.dataset.nodeId = node.nodeId;
     if (node.type === "doc") item.dataset.docId = doc.id;   // 활성표시 갱신용 식별자
     item.onclick = (e) => {
       sidebarCursorKey = node.nodeId;                       // 클릭한 줄을 키보드 커서로 동기화
+      // 여러 파일을 한꺼번에 다루기: Ctrl(⌘)+클릭 = 하나씩 고르기, Shift+클릭 = 범위.
+      // 폴더 줄은 접기·펼치기가 우선이라 선택 대상에서 뺀다.
+      if (node.type === "doc" && (e.ctrlKey || e.metaKey)){
+        e.preventDefault(); e.stopPropagation();
+        toggleSidebarSelection(node.nodeId);
+        return;
+      }
+      if (node.type === "doc" && e.shiftKey){
+        e.preventDefault(); e.stopPropagation();
+        selectSidebarRange(node.nodeId);
+        return;
+      }
+      if (sidebarSelection.size) clearSidebarSelection();         // 평범한 클릭 = 선택 해제
       if (node.type === "group"){
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
         // 이미 펼쳐진 폴더라도 형제 중 열린 폴더가 있으면 접지 않고 형제만 접는다(첫 클릭부터 "이 폴더만 남기기").
@@ -3009,7 +3155,76 @@ function renderSidebar(){
     list.appendChild(empty);
   }
   restoreSidebarCursor();                // 다시 그린 뒤 키보드 커서(roving tabindex/포커스) 복원
+  renderSidebarSelectionBar();           // 선택한 개수·일괄 동작 바
   updateFileStats();
+}
+
+/* ===== 사이드바 다중 선택 =====
+   Ctrl(⌘)+클릭으로 하나씩 고르고 Shift+클릭으로 범위를 고른다. 평범한 클릭은 선택을 푼다.
+   고른 파일은 한꺼번에 닫거나 디스크에서 지울 수 있다(선택 바). */
+function selectedDocIds(){
+  const ids = [];
+  for (const nodeId of sidebarSelection){
+    const node = navNodes.find(n => n.nodeId === nodeId);
+    if (node && node.type === "doc" && docs.some(d => d.id === node.docId)) ids.push(node.docId);
+  }
+  return ids;
+}
+
+function clearSidebarSelection(render=true){
+  if (!sidebarSelection.size){ sidebarSelectionAnchor = null; return; }
+  sidebarSelection.clear();
+  sidebarSelectionAnchor = null;
+  if (render) renderSidebar();
+}
+
+function toggleSidebarSelection(nodeId){
+  if (sidebarSelection.has(nodeId)) sidebarSelection.delete(nodeId);
+  else sidebarSelection.add(nodeId);
+  sidebarSelectionAnchor = sidebarSelection.has(nodeId) ? nodeId : null;
+  renderSidebar();
+}
+
+// 기준 줄부터 클릭한 줄까지, 지금 화면에 보이는 순서대로 문서 줄만 고른다(접힌 폴더 안은 제외).
+function selectSidebarRange(nodeId){
+  if (!sidebarSelectionAnchor){ toggleSidebarSelection(nodeId); return; }
+  const visible = sidebarItems().map(el => el.dataset.nodeId);
+  const from = visible.indexOf(sidebarSelectionAnchor), to = visible.indexOf(nodeId);
+  if (from < 0 || to < 0){ toggleSidebarSelection(nodeId); return; }
+  const [start, end] = from <= to ? [from, to] : [to, from];
+  for (let i = start; i <= end; i++){
+    const node = navNodes.find(n => n.nodeId === visible[i]);
+    if (node && node.type === "doc") sidebarSelection.add(visible[i]);
+  }
+  renderSidebar();
+}
+
+// 선택이 사라진 문서(닫힘 등)를 정리한다 — 렌더할 때마다 불려 목록과 어긋나지 않게 한다.
+function pruneSidebarSelection(){
+  for (const nodeId of [...sidebarSelection]){
+    const node = navNodes.find(n => n.nodeId === nodeId);
+    if (!node || node.type !== "doc" || !docs.some(d => d.id === node.docId)) sidebarSelection.delete(nodeId);
+  }
+  if (sidebarSelectionAnchor && !sidebarSelection.has(sidebarSelectionAnchor)) sidebarSelectionAnchor = null;
+}
+
+function renderSidebarSelectionBar(){
+  const bar = byId("sbSelectionBar"), count = byId("sbSelectionCount");
+  if (!bar || !count) return;
+  const ids = selectedDocIds();
+  bar.hidden = ids.length === 0;
+  if (!ids.length) return;
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  count.textContent = ids.length + _t("개 선택");
+  const del = byId("sbSelectionDelete");
+  if (del){
+    // 폴더로 연 파일만 디스크에서 지울 수 있다 — 하나도 없으면 버튼을 잠가 헛클릭을 막는다.
+    const deletable = ids.map(id => docs.find(d => d.id === id)).filter(doc => doc && canDeleteOriginalDoc(doc)).length;
+    del.disabled = deletable === 0;
+    del.title = deletable === 0
+      ? _t("'열기 → 폴더 열기'로 연 파일만 디스크에서 지울 수 있어요.")
+      : _t("선택한 파일을 디스크에서 완전히 지웁니다(되돌릴 수 없음).");
+  }
 }
 
 // 같은 레벨(형제)의 펼쳐진 폴더를 접는다(node 자신은 유지). 아코디언 동작용 — 일반 클릭으로

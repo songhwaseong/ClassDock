@@ -1,6 +1,8 @@
 "use strict";
 
 async function renderPptx(file, host, options={}){
+  // PPT 미리보기 묶음(jQuery·JSZip·PPTXjs)은 .pptx 를 실제로 열 때 처음 로드한다.
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("pptx");
   if (typeof window.jQuery === "undefined" || !window.jQuery.fn || !window.jQuery.fn.pptxToHtml){
     toast("PowerPoint 뷰어 로드 실패"); return;
   }

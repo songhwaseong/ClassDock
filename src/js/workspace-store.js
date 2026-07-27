@@ -31,14 +31,24 @@ async function workspaceFetch(url, options={}){
 // ----- 저장 백엔드 선택: EXE 로컬 서버 vs 브라우저 IndexedDB -----
 // /can-save-file 은 C# 런처에서만 "yes" 를 돌려준다(한 번만 확인 후 캐시, saveFileBackendAvailable 과 동일 패턴).
 let _wsBackendProbe = null;
+let _wsBackendKnown = null;
+function setWorkspaceBackendKnown(value){
+  const next = !!value;
+  if (_wsBackendKnown === next) return next;
+  _wsBackendKnown = next;
+  try { window.dispatchEvent(new CustomEvent("mnworkspacebackendchange", { detail:{ available:next } })); } catch(_){}
+  return next;
+}
+function workspaceBackendStatus(){ return _wsBackendKnown; }
 function workspaceBackendAvailable(){
-  if (location.protocol !== "http:" && location.protocol !== "https:") return Promise.resolve(false);
+  if (location.protocol !== "http:" && location.protocol !== "https:")
+    return Promise.resolve(setWorkspaceBackendKnown(false));
   if (_wsBackendProbe === null){
     _wsBackendProbe = (async () => {
       try {
         const res = await fetch("/can-save-file", { cache: "no-store" });
-        return res.ok && (await res.text()).trim().toLowerCase() === "yes";
-      } catch(e){ return false; }
+        return setWorkspaceBackendKnown(res.ok && (await res.text()).trim().toLowerCase() === "yes");
+      } catch(e){ return setWorkspaceBackendKnown(false); }
     })();
   }
   return _wsBackendProbe;

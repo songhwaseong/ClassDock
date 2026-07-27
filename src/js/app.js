@@ -79,6 +79,8 @@ function wire(){
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
   if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
   byId("dzExamples").addEventListener("click", (e) => { e.stopPropagation(); openSnippetGallery(); });
+  wireRecentItems();
+  wireSidebarSelection();
   (() => {                                   // 드롭존 '＋ 새로 만들기' 드롭다운(파이썬·노트북·표·화이트보드·텍스트)
     const btn = byId("dzNew"), menu = byId("dzNewMenu");
     if (!btn || !menu) return;
@@ -696,7 +698,7 @@ function wire(){
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
-    byId("settingPythonAutosave").checked = !!appSettings.pythonAutosave;
+    byId("settingAutoSave").checked = !!appSettings.autoSave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
     syncToolVisibilityChecks();
     byId("settingPet").checked = !!appSettings.petEnabled;
@@ -738,7 +740,7 @@ function wire(){
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
-      pythonAutosave: byId("settingPythonAutosave").checked,
+      autoSave: byId("settingAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
       petEnabled: byId("settingPet").checked, petCount: Number(byId("settingPetCount").value) || 1,
       petFocus: { enabled: byId("settingPetFocus").checked, focusMin: Number(byId("settingPetFocusMin").value) || 25,
@@ -816,6 +818,8 @@ function wire(){
   if (welcomeExamplesBtn) welcomeExamplesBtn.onclick = () => { closeWelcome(); if (typeof openSnippetGallery === "function") openSnippetGallery(); };
   const welcomeReopenBtn = byId("welcomeReopen");
   if (welcomeReopenBtn) welcomeReopenBtn.onclick = () => { byId("helpModal").hidden = true; openWelcome(); };
+  const helpManualBtn = byId("helpManual");
+  if (helpManualBtn) helpManualBtn.onclick = () => openUserManual();
   try { if (!localStorage.getItem(ONBOARDED_KEY)) setTimeout(openWelcome, 700); } catch(_){}
 
   // 정적 모달 공통 ESC 닫기. 단순히 hidden 만 바꾸지 않고 기존 취소 버튼을 눌러
@@ -1142,6 +1146,147 @@ function wire(){
   }
 
   setupMovableModals();
+}
+
+/* ===== 사이드바 다중 선택 바 =====
+   Ctrl/Shift 클릭으로 고른 파일들을 한꺼번에 닫거나 디스크에서 지운다.
+   "파일 닫기"는 앱에서만 치우고, "삭제"는 실제 파일을 지운다 — 두 동작을 확실히 갈라 놓는다. */
+function wireSidebarSelection(){
+  const closeBtn = byId("sbSelectionClose"), deleteBtn = byId("sbSelectionDelete"), clearBtn = byId("sbSelectionClear");
+  if (closeBtn) closeBtn.addEventListener("click", () => {
+    const ids = selectedDocIds();
+    if (!ids.length) return;
+    let closed = 0;
+    for (const id of ids){
+      if (closeDoc(id, { forgetWorkspace: true }) === true) closed++;
+    }
+    renderSidebar();
+    const cancelled = ids.length - closed;
+    const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+    const _tf = (s, vars) => (typeof window.tf === "function" ? window.tf(s, vars) : s.replace(/\{(\w+)\}/g, (_, key) => vars[key]));
+    if (!closed) toast(_t("파일 닫기를 취소했어요."), 2200);
+    else if (cancelled) toast(_tf("파일 {closed}개를 닫았어요. {cancelled}개는 취소했어요.", { closed, cancelled }), 2800);
+    else toast(closed === 1 ? _t("파일을 닫았어요.") : _tf("파일 {n}개를 닫았어요.", { n:closed }), 2200);
+  });
+  if (deleteBtn) deleteBtn.addEventListener("click", () => {
+    const ids = selectedDocIds();
+    if (ids.length) deleteDocsFromDisk(ids);
+  });
+  if (clearBtn) clearBtn.addEventListener("click", () => clearSidebarSelection());
+  // Esc 로 선택을 푼다 — 입력 중이거나 다른 창이 떠 있을 때는 그쪽이 먼저 처리한다.
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !sidebarSelection.size) return;
+    if (document.querySelector(".modal:not([hidden])") || document.querySelector(".cmdk-overlay:not([hidden])")) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (document.activeElement && document.activeElement.isContentEditable)) return;
+    e.preventDefault();
+    clearSidebarSelection();
+  });
+}
+
+/* ===== 자세한 사용법 열기 =====
+   단일 파일(EXE·오프라인 HTML)에는 사용법 문서가 통째로 심겨 있어 Blob 으로 새 탭에 띄운다.
+   원본 HTML·서버 서빙에서는 옆에 있는 사용법.html 을 그대로 연다. */
+let _manualUrl = "";
+function openUserManual(){
+  const embedded = document.querySelector("script[data-mn-manual]");
+  let url = "사용법.html";
+  if (embedded){
+    if (!_manualUrl){
+      try {
+        _manualUrl = URL.createObjectURL(new Blob([embedded.textContent || ""], { type: "text/html;charset=utf-8" }));
+      } catch(e){ console.warn("사용법 문서를 준비하지 못했어요:", e); }
+    }
+    if (_manualUrl) url = _manualUrl;
+  }
+  const opened = window.open(url, "_blank");
+  if (opened){
+    try { opened.opener = null; } catch(_){}
+  }
+  if (!opened && typeof toast === "function"){
+    toast("팝업이 막혀 사용법을 열지 못했어요. 주소창 옆에서 팝업을 허용해 주세요.", 4200, { type: "error" });
+  }
+}
+
+/* ===== 최근 연 항목(빈 화면) =====
+   MNRecent 가 들고 있는 목록을 드롭존에 그린다. 항목을 누르면 보관해 둔 파일·폴더 핸들로
+   바로 다시 열고(권한 확인 1회), ×로 목록에서만 지운다(디스크의 파일은 건드리지 않는다). */
+function recentWhenLabel(at){
+  const past = Date.now() - (Number(at) || 0);
+  if (!(Number(at) > 0)) return "";
+  const minutes = Math.floor(past / 60000);
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const _tf = (s, vars) => (typeof window.tf === "function" ? window.tf(s, vars) : s.replace("{n}", vars.n));
+  if (minutes < 1) return _t("방금");
+  if (minutes < 60) return _tf("{n}분 전", { n:minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return _tf("{n}시간 전", { n:hours });
+  const days = Math.floor(hours / 24);
+  return days < 7 ? _tf("{n}일 전", { n:days }) : new Date(Number(at)).toLocaleDateString();
+}
+
+function renderRecentItems(){
+  const wrap = byId("dzRecent"), list = byId("dzRecentList");
+  if (!wrap || !list || typeof MNRecent === "undefined") return;
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const _tf = (s, vars) => (typeof window.tf === "function" ? window.tf(s, vars) : s.replace(/\{(\w+)\}/g, (_, key) => vars[key]));
+  const rows = MNRecent.list();
+  wrap.hidden = rows.length === 0;
+  if (!rows.length){ list.innerHTML = ""; return; }
+  const frag = document.createDocumentFragment();
+  for (const row of rows){
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "dz-recent-item";
+    item.setAttribute("role", "listitem");
+    item.title = row.path;
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shape.setAttribute("d", row.type === "folder"
+      ? "M3 6h7l2 2h9v11H3z"
+      : "M6 2h8l4 4v16H6zM14 2v4h4");
+    icon.appendChild(shape);
+    const name = document.createElement("span");
+    name.className = "dz-recent-name";
+    name.textContent = row.name;
+    const when = document.createElement("span");
+    when.className = "dz-recent-when";
+    when.textContent = recentWhenLabel(row.at);
+    const drop = document.createElement("span");
+    drop.className = "dz-recent-drop";
+    drop.setAttribute("role", "button");
+    drop.setAttribute("tabindex", "0");
+    drop.setAttribute("aria-label", _tf("{name} 을(를) 최근 목록에서 지우기", { name:row.name }));
+    drop.title = _t("최근 목록에서만 지우기 (파일은 그대로)");
+    drop.textContent = "×";
+    const forget = (e) => { e.stopPropagation(); e.preventDefault(); MNRecent.forget(row.type, row.path); };
+    drop.addEventListener("click", forget);
+    drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") forget(e); });
+    item.append(icon, name, when, drop);
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();                                   // 드롭존 클릭(=파일 선택창)과 겹치지 않게
+      MNRecent.openWithFeedback(row);
+    });
+    frag.appendChild(item);
+  }
+  list.innerHTML = "";
+  list.appendChild(frag);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(wrap);
+}
+
+function wireRecentItems(){
+  if (typeof MNRecent === "undefined") return;
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const clearBtn = byId("dzRecentClear");
+  if (clearBtn) clearBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    MNRecent.clear();
+    if (typeof toast === "function") toast(_t("최근 목록을 지웠어요. 파일은 그대로예요."), 2400);
+  });
+  window.addEventListener("mnrecentchange", renderRecentItems);
+  renderRecentItems();
 }
 
 /* ===== 모달 이동·크기 조절 =====

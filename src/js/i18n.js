@@ -35,6 +35,13 @@
     "왼쪽 사이드 메뉴 숨기기": "Hide sidebar",
     "만능파일교실": "Manneung File Classroom",
     "원본 저장": "Original file",
+    "사본 저장": "Saved copy",
+    "저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)":
+      "Saving overwrites this file's original directly (in the folder or file you opened).",
+    "원본은 그대로 두고 '설정 → 일반 → 자동 저장 폴더'에 사본으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요.":
+      "The original is left untouched; a copy goes to Settings → General → auto-save folder. To write the original directly, use Open → Open folder.",
+    "원본은 그대로 두고 사본(다운로드)으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요.":
+      "The original is left untouched; it saves as a downloaded copy. To write the original directly, use Open → Open folder.",
     "브라우저 파이썬(Pyodide) 준비 상태": "Browser Python (Pyodide) status",
     "편집": "Edit",
     "서명": "Signature",
@@ -708,6 +715,59 @@
     "이름 복사": "Copy name",
     "상대 경로 복사": "Copy relative path",
     "이름 바꾸기": "Rename",
+    "디스크에서 삭제": "Delete from disk",
+    "최근 연 항목": "Recently opened",
+    "목록 지우기": "Clear list",
+    "최근 목록에서만 지우기 (파일은 그대로)": "Remove from recent list only (the file stays)",
+    "목록에서 지우기": "Remove from list",
+    "이 브라우저에서는 최근 항목을 바로 열 수 없어요. '열기'로 다시 선택해 주세요.":
+      "This browser cannot reopen recent items directly. Select it again from Open.",
+    "최근 목록을 지웠어요. 파일은 그대로예요.": "Cleared the recent list. Your files are unchanged.",
+    "방금": "Just now",
+    "선택한 파일 일괄 작업": "Actions for selected files",
+    "개 선택": " selected",
+    "파일 닫기": "Close files",
+    "선택한 파일을 앱에서만 닫습니다(디스크의 파일은 그대로)": "Close selected files in the app only (files stay on disk)",
+    "파일 닫기를 취소했어요.": "Cancelled closing files.",
+    "파일을 닫았어요.": "Closed the file.",
+    "삭제": "Delete",
+    "선택 해제": "Clear selection",
+    "'열기 → 폴더 열기'로 연 파일만 디스크에서 지울 수 있어요.":
+      "Only files opened via Open → Open folder can be deleted from disk.",
+    "선택한 파일을 디스크에서 완전히 지웁니다(되돌릴 수 없음).":
+      "Permanently deletes the selected files from disk (cannot be undone).",
+    "편집한 파일을 원본에 자동 저장 — 입력을 멈춘 뒤 3초 후": "Auto-save edited files to the original 3 seconds after typing stops",
+    "파이썬을 포함한 편집 가능한 텍스트 기반 코드·문서에 적용됩니다. 원본에 바로 쓸 수 있는 파일만 저장하며, 저장 위치를 묻는 창은 뜨지 않습니다.":
+      "Applies to editable text-based code and documents, including Python. Only files that can be written directly are saved, and no save-location dialog appears.",
+    "편집 내용 복구본 남기기 — 갑자기 꺼져도 되살리기": "Keep recovery copies of edits in case the app closes unexpectedly",
+    "원본 파일은 건드리지 않고 이 브라우저 안에만 보관합니다. PDF·노트북·표·이미지·화이트보드에 적용됩니다.":
+      "Stored only in this browser without touching the original. Applies to PDFs, notebooks, sheets, images, and whiteboards.",
+    "📖 자세한 사용법": "📖 Detailed guide",
+    "모든 기능을 예시와 함께 설명한 문서를 새 탭에서 엽니다": "Open a document explaining every feature with examples in a new tab",
+    "자세한 사용법 문서": "Detailed guide",
+    "새 블록 문서 (.mnote)": "New block document (.mnote)",
+    "제출본 일괄 검수 (.taskdone)": "Batch-review submissions (.taskdone)",
+    "여러 파일 찾아 바꾸기": "Find and replace across files",
+    "한국어 맞춤법 검사": "Check Korean spelling",
+    "단계 실행 (변수 추적)": "Step through (track variables)",
+    "코드 진단": "Analyze code",
+    "자동 채점": "Auto-grade",
+    "파이썬 라이브러리 설치": "Install Python library",
+    "수업 리플레이 녹화": "Record lesson replay",
+    "원본으로 되돌리기": "Revert to original",
+    "노트북으로 변환": "Convert to notebook",
+    "커널 다시 시작 후 전체 실행": "Restart kernel and run all",
+    "노트북 목차": "Notebook outline",
+    "노트북 PDF로 내보내기": "Export notebook as PDF",
+    "노트북 위에 필기": "Draw on notebook",
+    "노트북 단축키 보기": "Show notebook shortcuts",
+    "표 편집·정렬 모드 켜기 / 끄기": "Toggle sheet edit/sort mode",
+    "화이트보드 녹화": "Record whiteboard",
+    "화이트보드 전부 지우기": "Clear whiteboard",
+    "현재 파일을 디스크에서 삭제": "Delete current file from disk",
+    "자동 저장에 실패했어요. 편집 내용은 남아 있어요.": "Auto-save failed. Your edits are still here.",
+    "팝업이 막혀 사용법을 열지 못했어요. 주소창 옆에서 팝업을 허용해 주세요.":
+      "The guide could not open because pop-ups are blocked. Allow pop-ups from the address bar.",
     "🔠 글자 추출": "🔠 Extract text",
     "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만": "Recognize text in the image (OCR) to copy or send to Notes — crop area only, if set",
     "글자 추출 결과": "Extracted text",
@@ -1322,7 +1382,16 @@
     "압축 안에 열 수 있는 형식이 없어요. · {n}개 형식 미지원": "No openable formats inside the archive. · {n} unsupported {n|format|formats}",
     "같은 {n}줄 펼치기": "Expand {n} identical {n|line|lines}",
     "성능 보호를 위해 가운데 {n}개 행을 생략했어요": "Skipped {n} middle {n|row|rows} to protect performance",
-    "추가·수정 {a}줄 · 삭제·수정 {d}줄": "{a} added/changed · {d} removed/changed {d|line|lines}"
+    "추가·수정 {a}줄 · 삭제·수정 {d}줄": "{a} added/changed · {d} removed/changed {d|line|lines}",
+    "{n}분 전": "{n} {n|minute|minutes} ago",
+    "{n}시간 전": "{n} {n|hour|hours} ago",
+    "{n}일 전": "{n} {n|day|days} ago",
+    "{name} 을(를) 최근 목록에서 지우기": "Remove {name} from the recent list",
+    "'{name}' 을(를) 다시 읽을 권한을 받지 못했어요.": "Permission to read '{name}' again was not granted.",
+    "'{name}' 을(를) 찾지 못했어요. 옮겨졌거나 지워졌을 수 있어요.": "Couldn't find '{name}'. It may have been moved or deleted.",
+    "파일 {n}개를 닫았어요.": "Closed {n} {n|file|files}.",
+    "파일 {closed}개를 닫았어요. {cancelled}개는 취소했어요.":
+      "Closed {closed} files. Cancelled {cancelled}."
   };
 
   function tf(tmpl, vars) {

@@ -23,7 +23,7 @@ test("original-save folders keep their mode and file handles across restore and 
   assert.match(source, /if \(root\.originalSaveMode\) nextPathSet\.add\(workspaceOriginalSaveMarkerPath\(selectedRootName\)\)/);
   assert.match(source, /doc\.fsHandle = file\.__fsHandle \|\| doc\.fsHandle \|\| null/);
   assert.match(source, /doc\.originalSaveMode = !!root\.originalSaveMode/);
-  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name,[\s\S]*!!options\.existingOnly && !createInOriginalFolder\)/);
+  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name,[\s\S]*!!options\.existingOnly && !createInOriginalFolder, !!options\.noPermissionPrompt\)/);
   assert.match(codeSource, /loadRememberedFolderHandle\(root\.name\)/);
 });
 
@@ -122,11 +122,14 @@ test("원본 폴더에서 만든 새 Python 파일은 원본 저장 모드와 �
   assert.match(codeSource, /!!options\.existingOnly && !createInOriginalFolder/);
 });
 
-test("사용 설명서는 폴더 드래그와 폴더 열기의 Python 저장 차이를 필수 주의사항으로 안내한다", () => {
+test("사용 설명서는 브라우저별 폴더 드래그 저장 차이를 필수 주의사항으로 안내한다", () => {
   for (const guide of [guideMarkdown, guideHtml]){
     assert.match(guide, /꼭 알아두세요/);
     assert.match(guide, /폴더를 화면으로 드래그/);
-    assert.match(guide, /드래그한 원본 파일은 변경되지 않습니다/);
+    assert.match(guide, /Chrome·Edge/);
+    assert.match(guide, /원본에 저장/);
+    assert.match(guide, /Firefox·Safari/);
+    assert.match(guide, /드래그한 원본.*변경하지 않습니다/);
     assert.match(guide, /자동 저장 폴더/);
   }
 });

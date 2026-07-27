@@ -19,6 +19,10 @@
   const canStudy = () => { const b = $("studyToggle"); return !!(b && !b.hidden); };
   const clickId = (id) => { const el = $(id); if (el) el.click(); };
   const callFn  = (name, ...args) => { if (typeof window[name] === "function") window[name](...args); };
+  // 현재 문서 화면 안의 도구막대 버튼 — 뷰어마다 자기 버튼을 갖고 있으므로 활성 문서에서만 찾는다.
+  const inDoc = (selector) => { const s = curState(); return (s && s.el && s.el.querySelector(selector)) || null; };
+  const hasBtn = (selector) => () => !!inDoc(selector);
+  const clickBtn = (selector) => () => { const b = inDoc(selector); if (b) b.click(); };
 
   // ── 명령 목록: label(표시)·icon·kw(검색 키워드)·when(문맥)·sc(연결 단축키)·run(실행) ──
   const C = (id, icon, label, run, opts) => Object.assign({ id, icon, label, run }, opts || {});
@@ -53,8 +57,53 @@
     C("screensaver","🖥️","대기 화면 지금 시작", () => callFn("startScreensaverNow"), { sc:"screensaverStart", kw:"screensaver 대기 화면 화면보호기 휴식" }),
     C("settings","⚙️","설정 열기", () => clickId("settingsOpen"), { kw:"settings 설정 환경 옵션 preferences" }),
     C("help","❓","도움말 · 단축키", () => clickId("helpOpen"), { kw:"help 도움말 단축키 shortcut 가이드" }),
+    C("manual","📖","자세한 사용법 문서", () => callFn("openUserManual"),
+      { kw:"manual guide 사용법 설명서 매뉴얼 안내 도움말 문서 어떻게" }),
+    C("spellcheck","🔤","한국어 맞춤법 검사", clickBtn(".spellcheck-trigger"),
+      { when:hasBtn(".spellcheck-trigger"), kw:"spell 맞춤법 띄어쓰기 교정 검사 오타" }),
+    // 파이썬 편집기 도구막대 — 설정에서 숨긴 버튼은 화면에 없어도 팔레트로는 계속 실행할 수 있다.
+    C("pyTrace","👣","단계 실행 (변수 추적)", clickBtn(".run-trace"),
+      { when:hasBtn(".run-trace"), kw:"trace step 단계 실행 디버그 변수 추적 한줄씩" }),
+    C("pyAnalyze","🩺","코드 진단", clickBtn(".run-analyze"),
+      { when:hasBtn(".run-analyze"), kw:"analyze lint 진단 검사 오류 문제 점검" }),
+    C("pyGrade","💯","자동 채점", clickBtn(".run-grade"),
+      { when:hasBtn(".run-grade"), kw:"grade 채점 점수 자동 테스트 과제" }),
+    C("pyPkg","📦","파이썬 라이브러리 설치", clickBtn(".run-pkg"),
+      { when:hasBtn(".run-pkg"), kw:"package pip 라이브러리 설치 모듈 numpy pandas" }),
+    C("pyRec","⏺️","수업 리플레이 녹화", clickBtn(".run-rec"),
+      { when:hasBtn(".run-rec"), kw:"record 녹화 리플레이 lesson 수업 저장" }),
+    C("pyRevert","↩️","원본으로 되돌리기", clickBtn(".run-py-revert"),
+      { when:hasBtn(".run-py-revert"), kw:"revert 원본 되돌리기 복구 처음 상태" }),
+    C("pyToNotebook","📓","노트북으로 변환", clickBtn(".run-nbconvert-group button"),
+      { when:hasBtn(".run-nbconvert-group button"), kw:"convert notebook 노트북 변환 ipynb 셀" }),
+    // 노트북 도구막대
+    C("nbRunAll","⏩","노트북 전체 셀 실행", clickBtn(".nbv-runall"),
+      { when:hasBtn(".nbv-runall"), sc:"runNotebook", kw:"run all 전체 실행 모든 셀 노트북" }),
+    C("nbRestart","🔄","커널 다시 시작 후 전체 실행", clickBtn(".nbv-restartrun"),
+      { when:hasBtn(".nbv-restartrun"), kw:"restart kernel 커널 재시작 다시 시작 초기화" }),
+    C("nbToc","📑","노트북 목차", clickBtn(".nbv-toc-open"),
+      { when:hasBtn(".nbv-toc-open"), kw:"outline toc 목차 차례 셀 이동" }),
+    C("nbExportPdf","🖨️","노트북 PDF로 내보내기", clickBtn(".nbv-export-pdf"),
+      { when:hasBtn(".nbv-export-pdf"), kw:"export pdf 내보내기 저장 인쇄 노트북" }),
+    C("nbInk","🖌️","노트북 위에 필기", clickBtn(".nbv-ink-toggle"),
+      { when:hasBtn(".nbv-ink-toggle"), kw:"ink pen 필기 펜 판서 그리기" }),
+    C("nbHelp","⌨️","노트북 단축키 보기", clickBtn(".nbv-help-open"),
+      { when:hasBtn(".nbv-help-open"), kw:"shortcut 단축키 도움말 노트북 키" }),
+    // 표(엑셀)
+    C("sheetEdit","✏️","표 편집·정렬 모드 켜기 / 끄기", clickBtn(".xlsx-editmode-btn"),
+      { when:hasBtn(".xlsx-editmode-btn"), kw:"edit sheet 표 편집 셀 정렬 필터 엑셀 수정" }),
+    C("sheetFind","🔎","표에서 찾기", clickBtn(".xlsx-tool-menu-find > summary"),
+      { when:hasBtn(".xlsx-tool-menu-find > summary"), kw:"find search 표 찾기 검색 셀" }),
+    // 화이트보드
+    C("boardRec","⏺️","화이트보드 녹화", clickBtn(".wb-rec"),
+      { when:hasBtn(".wb-rec"), kw:"record 녹화 리플레이 판서 수업 화이트보드" }),
+    C("boardClear","🧽","화이트보드 전부 지우기", clickBtn(".wb-clear"),
+      { when:hasBtn(".wb-clear"), kw:"clear erase 지우기 전체 비우기 화이트보드 칠판" }),
     // 문서(PDF) 전용
     C("closeCurrent","×","현재 파일 닫기", () => { const s = curState(); if (s) callFn("closeDoc", s.id, { forgetWorkspace:true }); }, { when:hasDoc, sc:"closeCurrent", kw:"close 닫기 탭 파일" }),
+    C("deleteCurrent","🗑️","현재 파일을 디스크에서 삭제", () => { const s = curState(); if (s) callFn("deleteDocsFromDisk", [s.id]); },
+      { when:() => { const s = curState(); return !!(s && typeof canDeleteOriginalDoc === "function" && canDeleteOriginalDoc(s)); },
+        kw:"delete remove 삭제 지우기 파일 디스크 제거 버리기" }),
     C("reopenClosed","↶","닫은 파일 다시 열기", () => callFn("reopenClosedDoc"), { sc:"reopenClosed", kw:"reopen restore 닫은 파일 탭 복원" }),
     C("previousFile","◀","이전 열린 파일", () => callFn("navigateTab", -1), { when:hasMultipleDocs, sc:"previousFile", kw:"previous 이전 파일 탭 이동" }),
     C("nextFile","▶","다음 열린 파일", () => callFn("navigateTab", 1), { when:hasMultipleDocs, sc:"nextFile", kw:"next 다음 파일 탭 이동" }),
@@ -219,6 +268,15 @@
     if (!kb || typeof window.shortcutValue !== "function" || typeof window.shortcutDisplay !== "function") return;
     try { const k = window.shortcutDisplay(window.shortcutValue("commandPalette")); if (k) kb.textContent = k; } catch(_){}
   })();
+
+  // 팔레트가 열려 있으면 포커스가 어디에 있든 Esc 로 닫힌다.
+  // (문서를 연 직후처럼 편집기가 포커스를 가져간 상황에서도 갇히지 않게 — 바깥 클릭과 같은 규칙)
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !overlay || overlay.hidden) return;
+    if (overlay.contains(document.activeElement)) return;   // 안에 있으면 입력란 핸들러가 처리
+    e.preventDefault(); e.stopPropagation();
+    close();
+  }, true);
 
   // ── 열기 단축키(기본 Ctrl+K, 설정 → 단축키에서 변경 가능) ──
   window.addEventListener("keydown", (e) => {

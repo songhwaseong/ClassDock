@@ -41,6 +41,10 @@ async function handleFiles(files, options={}){
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
     if (opts.fsHandle && !opts.fsHandle.__manneungNativeHandle && opts.workspacePath && typeof saveFsHandle === "function")
       saveFsHandle(opts.workspacePath, opts.fsHandle);
+    // 최근 목록에는 "다시 열 수 있는" 것만 남긴다 — 핸들을 보관한 최상위 파일만이고,
+    // 폴더·압축 안의 파일(parentId 있음)과 임시 문서는 각각 폴더 항목·대상 아님으로 처리한다.
+    if (opts.fsHandle && !opts.fsHandle.__manneungNativeHandle && opts.workspacePath && !options.parentId && !options.transient && !options.isScratch
+        && typeof MNRecent !== "undefined") MNRecent.rememberFile(file.name, opts.workspacePath);
     const duplicate = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
     if (duplicate){
       if (!uiBatchDepth) setActiveDoc(duplicate.id);
@@ -205,6 +209,7 @@ async function tryConvertPptxToPdf(pptxBytes){
 
 /* ===== 압축(zip) 풀어서 내부 파일을 각각 열기 (zip.js — 무암호 + AES 암호 지원) ===== */
 async function loadZip(file, options={}){
+  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("zip");   // 압축 라이브러리는 첫 사용 때 로드
   if (typeof zip === "undefined"){ toast("압축 라이브러리를 불러오지 못했습니다."); return; }
   zip.configure({ useWebWorkers: false });                 // file:// 에서도 동작하도록 워커 미사용
   showLoading("압축 여는 중…");
@@ -1059,6 +1064,8 @@ async function openFolderFiles(fileList, options={}){
   }
   hideLoading();
   if (!opened && !folderPaths.length){ closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
+  // 폴더 핸들이 있을 때만 최근 목록에 남긴다 — 없으면 다시 열어도 되살릴 수 없다.
+  if (rootGroup.folderHandle && typeof MNRecent !== "undefined") MNRecent.rememberFolder(rootName);
   if (!options.silent){
     const subfolderCount = Math.max(0, folders.size);
     const summary = opened ? opened + "개 파일" : "빈 폴더";
@@ -1107,7 +1114,12 @@ async function requestFolderRefresh(rootId){
         originalSaveMode:!!root.originalSaveMode });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
-      else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
+      else {
+        console.error(e);
+        // 일시적 실패(권한 만료·파일 잠김)가 흔하다 — 사이드바를 찾아가지 않고 바로 다시 시도하게 한다.
+        toast("폴더를 다시 읽지 못했어요.", 5200, { type:"error",
+          action:{ label:"다시 시도", onClick:() => requestFolderRefresh(rootId) } });
+      }
     } finally {
       hideLoading();
     }
@@ -1126,7 +1138,12 @@ async function requestFolderRefresh(rootId){
         originalSaveMode:true });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
-      else { console.error(e); toast("폴더를 다시 읽지 못했어요.", 3000); }
+      else {
+        console.error(e);
+        // 일시적 실패(권한 만료·파일 잠김)가 흔하다 — 사이드바를 찾아가지 않고 바로 다시 시도하게 한다.
+        toast("폴더를 다시 읽지 못했어요.", 5200, { type:"error",
+          action:{ label:"다시 시도", onClick:() => requestFolderRefresh(rootId) } });
+      }
     } finally {
       hideLoading();
     }
@@ -1470,7 +1487,8 @@ function queueDroppedItems(dataTransfer){
       return fileQueue;
     }
     if (!files.length){
-      toast("브라우저가 드롭한 폴더 정보를 전달하지 않았어요. '폴더 열기' 버튼을 사용해 주세요.", 4500);
+      toast("브라우저가 드롭한 폴더 정보를 전달하지 않았어요.", 5200, { type:"error",
+        action:{ label:"폴더 열기", onClick:() => pickFolderOrInput(byId("folderInput")) } });
       return fileQueue;
     }
     return queueFiles(files);
@@ -1505,7 +1523,9 @@ function queueDroppedItems(dataTransfer){
             let allowed = false;
             try { allowed = await ensureReadPermission(root.folderHandle); } catch(_){}
             if (!allowed){
-              toast("'" + root.name + "' 폴더가 이미 열려 있는데 다시 읽을 권한이 없어요. 사이드바의 '동기화'를 사용해 주세요.", 4600);
+              // 안내만 하고 끝내면 사용자가 사이드바에서 그 버튼을 직접 찾아야 한다 — 여기서 바로 누르게 한다.
+              toast("'" + root.name + "' 폴더를 다시 읽을 권한이 없어요.", 5200, { type:"error",
+                action:{ label:"동기화", onClick:() => requestFolderRefresh(root.nodeId) } });
               continue;
             }
             toast(related.same
@@ -1533,7 +1553,8 @@ function queueDroppedItems(dataTransfer){
       if (!hasDir){
         const regularFiles = files.length ? files : collected;
         if (!regularFiles.length){
-          toast("드롭한 폴더 정보를 읽지 못했어요. '폴더 열기' 버튼을 사용해 주세요.", 4000);
+          toast("드롭한 폴더 정보를 읽지 못했어요.", 5200, { type:"error",
+            action:{ label:"폴더 열기", onClick:() => pickFolderOrInput(byId("folderInput")) } });
           return;
         }
         let options = {};
@@ -1595,9 +1616,9 @@ function queueDroppedItems(dataTransfer){
       else {
         console.error(e);
         const reason = e && (e.name || e.message) ? " (" + (e.name || e.message) + ")" : "";
-        toast("드롭한 폴더를 읽지 못했어요" + reason, 5000);
+        toast("드롭한 폴더를 읽지 못했어요" + reason, 5600, { type:"error",
+          action:{ label:"폴더 열기", onClick:() => pickFolderOrInput(byId("folderInput")) } });
       }
     });
   return fileQueue;
 }
-

@@ -276,7 +276,14 @@ const MNKoreanSpellcheck = (() => {
     return dictionaryWorker;
   }
 
-  function checkWithDictionary(text, options={}){
+  /* 사전(hunspell) 본체는 3MB가 넘어 시작할 때 싣지 않는다. 맞춤법 검사를 처음 실행하는
+     이 시점에 MNLazy 가 한 번만 불러온다. 부르는 쪽은 이미 "기본 규칙 먼저 → 사전 결과 나중"
+     흐름이라, 로드에 걸리는 시간이 편집을 막지 않는다. */
+  async function checkWithDictionary(text, options={}){
+    if (typeof MNLazy !== "undefined"){
+      try { await MNLazy.need("spellcheck"); }
+      catch(_){ throw new Error("오프라인 한국어 사전을 불러오지 못했습니다."); }
+    }
     return new Promise((resolve, reject) => {
       let worker;
       try { worker = ensureDictionaryWorker(); }

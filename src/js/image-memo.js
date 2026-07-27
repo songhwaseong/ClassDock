@@ -515,6 +515,8 @@ function wireImageMemo(){
       entry.saved = true;
       return;
     }
+    // 여러 장을 한 번에 저장할 때만 압축 라이브러리가 필요하다 — 그때 처음 로드한다.
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("jszip");
     if (typeof JSZip !== "undefined"){
       const zip = new JSZip();
       for (const entry of pending){

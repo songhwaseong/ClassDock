@@ -125,6 +125,8 @@
     background:rgba(245,158,11,.18);color:#fde68a;border:1px solid rgba(245,158,11,.3);
     font-size:10px;font-weight:650;vertical-align:middle}
   .original-save-badge[hidden]{display:none}
+  /* 사본으로 저장되는 문서 — "원본이 안 바뀐다"가 경고가 아니라 사실 안내라 중립 색을 쓴다. */
+  .original-save-badge.is-copy{background:rgba(148,163,184,.16);color:#cbd5e1;border-color:rgba(148,163,184,.3)}
   .doc-status{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.12);color:#cbd5e1;font-size:10px;font-weight:500}
   .doc-status.dirty{background:rgba(245,158,11,.2);color:#fcd34d}.doc-status.saved{color:#a7f3d0}
   .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
@@ -277,6 +279,9 @@
   .tab-ctx-menu button:disabled{opacity:.4;cursor:default}
   .tab-ctx-menu .tcx-count{flex:0 0 auto;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
   .tab-ctx-menu .tcx-sep{height:1px;margin:5px 4px;background:var(--border)}
+  /* 되돌릴 수 없는 항목(디스크에서 삭제)은 색으로 구분해 실수 클릭을 줄인다 */
+  .tab-ctx-menu button.danger{color:#dc2626}
+  .tab-ctx-menu button.danger:hover:not(:disabled){background:rgba(220,38,38,.12);color:#b91c1c}
 
   /* ---- 본문 (사이드바 + 콘텐츠) ---- */
   main{position:relative;z-index:19;isolation:isolate;flex:1;display:flex;min-height:0;overflow:hidden}
@@ -850,6 +855,28 @@
   .dz-cmdk-hint svg{width:15px;height:15px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
   .dz-cmdk-hint kbd{font:11px Consolas,"Courier New",monospace;padding:2px 6px;margin:0 1px;border:1px solid var(--border);
     border-bottom-width:2px;border-radius:5px;background:var(--field);color:var(--ink)}
+  /* 최근 연 항목 — 빈 화면에서 "어제 그 파일"로 바로 돌아가는 길. 항목이 있을 때만 보인다. */
+  .dz-recent{margin:20px auto 0;width:min(560px,100%);text-align:left}
+  .dz-recent-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    margin-bottom:7px;font-size:12px;font-weight:700;color:var(--muted)}
+  .dz-recent-clear{border:0;background:transparent;color:var(--muted);font:inherit;font-size:11.5px;
+    padding:3px 6px;border-radius:6px;cursor:pointer;font-weight:500}
+  .dz-recent-clear:hover{background:var(--panel-hover);color:var(--ink)}
+  .dz-recent-clear:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .dz-recent-list{display:flex;flex-direction:column;gap:3px;max-height:210px;overflow:auto}
+  .dz-recent-item{display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:1px solid transparent;
+    border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:13px;cursor:pointer;text-align:left}
+  .dz-recent-item:hover{background:var(--panel-2);border-color:var(--border)}
+  .dz-recent-item:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+  .dz-recent-item svg{width:16px;height:16px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;color:var(--muted)}
+  .dz-recent-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dz-recent-when{flex:0 0 auto;font-size:11.5px;color:var(--muted)}
+  .dz-recent-drop{flex:0 0 auto;width:20px;height:20px;display:grid;place-items:center;border:0;border-radius:5px;
+    background:transparent;color:var(--muted);font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:0}
+  .dz-recent-item:hover .dz-recent-drop,.dz-recent-drop:focus-visible{opacity:1}
+  .dz-recent-drop:hover{background:var(--panel-hover);color:var(--ink)}
+  @media (hover:none){ .dz-recent-drop{opacity:1} }
   .dz-note{margin-top:18px;font-size:12px;color:var(--muted)}
   /* 창 전체 드롭 오버레이 — 파일을 끌고 들어오면 화면 전체를 덮어 어디에 떨궈도(미리보기·iframe 위까지) 받는다 */
   .drop-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
@@ -1188,7 +1215,8 @@
   .cmdk-item.active .cmdk-item-key{color:#eef;border-color:rgba(255,255,255,.4);background:rgba(255,255,255,.14)}
   .cmdk-empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:13px}
   .modal-card h3{font-size:18px;margin-bottom:4px}
-  .modal-card .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+  /* pre-line: 확인 문구가 줄바꿈을 쓸 수 있게(예: 삭제 대상 목록과 경고를 줄로 나눠 보여 주기) */
+  .modal-card .sub{color:var(--muted);font-size:13px;margin-bottom:14px;white-space:pre-line}
   .lastsig{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 12px;
     background:var(--panel-2);border-radius:10px;font-size:13px;color:var(--muted)}
   .lastsig img{max-height:46px;max-width:200px;background:#fff;border:1px solid var(--border);
@@ -1304,6 +1332,13 @@
   .settings-tools-group > strong{display:block;font-size:12.5px;margin:0 0 8px}
   .settings-tools-list{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
   .settings-tools-list .settings-check{border-bottom:none;padding:4px 0}
+  /* 설정 안 소제목 — 성격이 다른 항목(원본에 쓰는 자동 저장 ↔ 복구본만 남기기)을 갈라 준다 */
+  .settings-group-title{margin:14px 0 2px;font-size:11.5px;font-weight:700;letter-spacing:.02em;color:var(--muted);text-transform:none}
+  .settings-group-title:first-child{margin-top:2px}
+  /* 체크박스 아래 보조 설명 — 무엇이 바뀌는지 한 줄로 */
+  .settings-check span{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .settings-check small{color:var(--muted);font-size:11.5px;line-height:1.45;font-weight:400}
+  .settings-check input{align-self:flex-start;margin-top:2px;flex:0 0 auto}
   @media (max-width:480px){.settings-tools-list{grid-template-columns:1fr}}
   .pet-focus-setting-selects{display:flex;gap:6px}
   .settings-row .pet-focus-setting-selects .pw-input{width:112px}
@@ -3617,6 +3652,22 @@
   .sb-replace-all:hover{border-color:var(--accent);color:#cbd5e1;background:rgba(255,255,255,.05)}
   .sb-replace-all svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
   .sb-replace-all span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 다중 선택 바 — Ctrl/Shift 클릭으로 여러 파일을 고르면 목록 위에 나타난다 */
+  .sb-selection-bar{flex:0 0 auto;display:flex;align-items:center;gap:6px;margin:0 8px 8px;padding:6px 8px;
+    border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,transparent)}
+  .sb-selection-bar[hidden]{display:none}
+  .sb-selection-count{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:12px;font-weight:650;color:#e2e8f0}
+  .sb-selection-bar button{flex:0 0 auto;padding:4px 8px;border:1px solid var(--border);border-radius:6px;
+    background:var(--field);color:#cbd5e1;font:inherit;font-size:11.5px;cursor:pointer}
+  .sb-selection-bar button:hover:not(:disabled){border-color:var(--accent);color:#fff}
+  .sb-selection-bar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .sb-selection-bar button:disabled{opacity:.45;cursor:default}
+  .sb-selection-bar button.danger{color:#fca5a5;border-color:rgba(248,113,113,.4)}
+  .sb-selection-bar button.danger:hover:not(:disabled){background:rgba(248,113,113,.16);color:#fecaca;border-color:rgba(248,113,113,.7)}
+  .sb-selection-cancel{padding:4px 7px!important;line-height:1}
+  /* 고른 줄 — 활성 문서(.active)와 구분되게 왼쪽 띠로 표시한다 */
+  .sb-item.selected{background:color-mix(in srgb,var(--accent) 22%,transparent);box-shadow:inset 3px 0 var(--accent)}
 
   /* 여러 파일 찾아 바꾸기 패널 */
   .batch-replace-card{width:min(720px,96%);max-height:92vh;display:flex;flex-direction:column}

@@ -9,13 +9,16 @@ const port = Number(process.env.MN_E2E_PORT || 4173);
 const mime = {
   ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
-  ".ttf": "font/ttf", ".wasm": "application/wasm", ".whl": "application/octet-stream"
+  ".ttf": "font/ttf", ".wasm": "application/wasm", ".whl": "application/octet-stream",
+  ".png": "image/png"
 };
 
 function targetFor(urlText) {
   const pathname = decodeURIComponent(new URL(urlText, "http://127.0.0.1").pathname);
   const relative = pathname === "/" ? "manneung-classroom.html" : pathname.replace(/^\/+/, "");
-  if (!/^(?:manneung-classroom\.html|src\/(?:js\/|)|vendor\/)/.test(relative)) return null;
+  // 단일 파일 빌드도 열 수 있어야 한다 — 지연 로드는 원본 HTML(스크립트 주입)과
+  // 오프라인 HTML(심어 둔 text/plain 실행)에서 경로가 서로 달라, 양쪽 다 회귀 검사한다.
+  if (!/^(?:manneung-classroom(?:-offline)?\.html|사용법\.html|src\/(?:js\/|assets\/|)|vendor\/)/.test(relative)) return null;
   const target = path.resolve(root, relative);
   return target.startsWith(root + path.sep) || target === root ? target : null;
 }

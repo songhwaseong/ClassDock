@@ -41,7 +41,13 @@ for (const item of manifest.vendorScripts) {
   const raw = sha384(bytes);
   const actual = raw === item.sha384 ? raw : sha384(normalizedTextBytes(bytes));
   if (actual !== item.sha384) fail(`vendor hash mismatch: ${item.file}`);
-  if (!source.includes(`<script src="${item.src}"></script>`)) fail(`source vendor tag missing: ${item.src}`);
+  if (item.lazy) {
+    // 지연 로드본은 시작할 때 실행되지 않는 text/plain 블록으로만 들어가야 한다.
+    if (source.includes(`<script src="${item.src}"></script>`)) fail(`lazy vendor is loaded at startup: ${item.src}`);
+    if (!offline.includes(`data-mn-lazy="${item.file}"`)) fail(`offline lazy vendor block missing: ${item.file}`);
+  } else if (!source.includes(`<script src="${item.src}"></script>`)) {
+    fail(`source vendor tag missing: ${item.src}`);
+  }
 }
 
 if (executableScriptSources(source).some((src) => /^https?:\/\//i.test(src))) {

@@ -1,0 +1,130 @@
+"use strict";
+/*
+ * 지연 로드(MNLazy) — 무거운 vendor 라이브러리를 "그 파일을 열 때" 처음 불러온다.
+ *
+ * 왜: 예전에는 vendor 18개(약 7.2MB)를 시작할 때 전부 실행했다. .txt 하나를 열어도
+ *     엑셀·한글·PPT·맞춤법 사전이 함께 파싱돼, 저사양 교실 PC에서 첫 화면이 늦었다.
+ *     여기 등록된 묶음은 실제로 필요한 순간(그 형식을 열 때·그 버튼을 누를 때)에만 실행한다.
+ *     PDF(pdf.js·pdf-lib)는 앱의 중심 기능이라 지금도 시작할 때 함께 싣는다.
+ *
+ * 두 가지 모드가 있고 자동으로 판별한다.
+ *  · 단일 파일(오프라인 HTML·EXE): 빌드가 라이브러리 소스를 실행되지 않는 text/plain
+ *    스크립트 블록(data-mn-lazy 속성 = 파일명)으로 심어 둔다. 필요할 때 그 텍스트를
+ *    실행 가능한 스크립트로 옮겨 심는다(=전역 스코프, 원래 로드 순서와 동일).
+ *  · 원본 HTML(개발·서버 서빙): vendor 경로를 가리키는 스크립트를 그때 만들어 붙인다.
+ *
+ * 같은 파일은 두 번 실행하지 않고(dedupe), 같은 묶음을 동시에 여러 번 요청해도
+ * 로드는 한 번만 일어난다(진행 중 Promise 재사용).
+ */
+const MNLazy = (() => {
+  // 묶음 정의 — files 는 "반드시 이 순서로" 실행해야 하는 vendor 파일 목록이다.
+  const BUNDLES = {
+    spellcheck:  { label:"한국어 맞춤법 사전", files:["korean-hunspell-worker.js"] },
+    jszip:       { label:"압축 읽기(JSZip)",   files:["jszip.min.js", "jszip-utils.min.js"] },
+    zip:         { label:"압축 풀기",          files:["zip-full.min.js"] },
+    xlsx:        { label:"엑셀 보기",          files:["xlsx.full.min.js"] },
+    exceljs:     { label:"엑셀 편집·저장",     files:["exceljs.min.js"] },
+    hwp:         { label:"한글(HWP) 보기",     files:["hwp.global.js"] },
+    officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },
+    capture:     { label:"화면 캡처",          files:["html2canvas.min.js", "html-to-image.js"] },
+    pptx:        { label:"PowerPoint 보기",
+                   files:["jquery.min.js", "jszip.min.js", "jszip-utils.min.js", "divs2slides.min.js", "pptxjs.min.js"] },
+    // docx-preview 는 JSZip 3.x(loadAsync)를 요구해 로드 시점에 전역 JSZip 을 붙잡는다.
+    // 반면 PPTXjs·엑셀 복구 코드는 동기 API 의 JSZip 2.6.1 을 쓴다. 그래서 예전 HTML 은
+    // "3.x 로드 → docx-preview 로드 → 2.6.1 로 되돌리기" 순서였다. 지연 로드에서도 순서가
+    // 뒤바뀔 수 있으므로(예: PPT 를 먼저 연 뒤 Word 를 열기), 아래에서 그 되돌리기를 재현한다.
+    docx:        { label:"Word 보기", files:["jszip3.min.js", "docx-preview.min.js"], jszipSwap:true }
+  };
+
+  const loadedFiles = new Map();     // 파일명 -> Promise (실행 완료)
+  const loadedBundles = new Map();   // 묶음명 -> Promise
+  const JSZIP_BUNDLES = new Set(["jszip", "pptx", "docx"]);
+  let jszipBundleQueue = Promise.resolve();
+  let inlineMode = null;             // null=미판별, true=단일 파일 모드
+
+  function usesInlineSources(){
+    if (inlineMode === null){
+      inlineMode = !!(typeof document !== "undefined" && document.querySelector("script[data-mn-lazy]"));
+    }
+    return inlineMode;
+  }
+
+  // 단일 파일 모드: 심어 둔 text/plain 블록의 소스를 실행 가능한 <script> 로 옮겨 심는다.
+  // textContent 로 넣은 스크립트는 append 시점에 동기 실행되며 전역 스코프를 쓴다.
+  function runInlineSource(file){
+    const holder = document.querySelector('script[data-mn-lazy="' + file + '"]');
+    if (!holder) throw new Error("lazy-source-missing:" + file);
+    const script = document.createElement("script");
+    script.textContent = holder.textContent;
+    script.setAttribute("data-mn-lazy-loaded", file);
+    document.head.appendChild(script);
+    holder.remove();                 // 같은 소스를 두 벌 들고 있지 않게 원본 블록은 치운다
+  }
+
+  // 서버·파일 서빙 모드: 평범한 <script src> 를 붙이고 onload 를 기다린다.
+  function loadVendorSrc(file){
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "vendor/" + file;
+      script.setAttribute("data-mn-lazy-loaded", file);
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("lazy-load-failed:" + file));
+      document.head.appendChild(script);
+    });
+  }
+
+  function loadFile(file){
+    if (loadedFiles.has(file)) return loadedFiles.get(file);
+    const task = usesInlineSources()
+      ? Promise.resolve().then(() => runInlineSource(file))
+      : loadVendorSrc(file);
+    // 실패하면 다음 시도에서 다시 받을 수 있게 기억에서 지운다(일시적 오류 회복).
+    const tracked = task.catch((error) => { loadedFiles.delete(file); throw error; });
+    loadedFiles.set(file, tracked);
+    return tracked;
+  }
+
+  async function loadBundle(name){
+    const bundle = BUNDLES[name];
+    if (!bundle) throw new Error("unknown-lazy-bundle:" + name);
+    // JSZip 2.6.1 을 쓰는 코드가 이미 있으면 그 전역을 기억해 두었다가 docx-preview 로드 뒤 되돌린다.
+    const previousJSZip = bundle.jszipSwap ? (typeof window !== "undefined" ? window.JSZip : undefined) : undefined;
+    for (const file of bundle.files) await loadFile(file);
+    if (bundle.jszipSwap){
+      if (previousJSZip) window.JSZip = previousJSZip;   // 원래 쓰던 2.6.1 복원
+      else await loadFile("jszip.min.js");               // 아직 없으면 2.6.1 을 새로 싣는다
+    }
+  }
+
+  /* 묶음을 (한 번만) 불러온다. 이미 준비됐으면 즉시 끝나는 Promise 를 준다.
+     실패 시 reject 되므로, 부르는 쪽은 기존의 "…로드 실패" 안내로 이어가면 된다. */
+  function need(name){
+    if (loadedBundles.has(name)) return loadedBundles.get(name);
+    // docx는 로드 중 잠시 JSZip 3.x를 전역에 두고, pptx/jszip은 2.6.1을 쓴다.
+    // 서로 다른 묶음을 동시에 요청해도 전역 교체가 겹치지 않도록 이 세 묶음만 직렬화한다.
+    const raw = JSZIP_BUNDLES.has(name)
+      ? jszipBundleQueue.then(() => loadBundle(name), () => loadBundle(name))
+      : loadBundle(name);
+    if (JSZIP_BUNDLES.has(name)) jszipBundleQueue = raw.catch(() => {});
+    const task = raw.catch((error) => {
+      loadedBundles.delete(name);
+      console.warn("지연 로드 실패:", name, error);
+      throw error;
+    });
+    loadedBundles.set(name, task);
+    return task;
+  }
+
+  /* 실패해도 조용히 넘어가는 형태 — 있으면 좋고 없으면 건너뛰는 보조 기능용.
+     성공 여부를 boolean 으로 돌려준다. */
+  function tryNeed(name){
+    return need(name).then(() => true, () => false);
+  }
+
+  const isLoaded = (name) => loadedBundles.has(name);
+  const bundleLabel = (name) => (BUNDLES[name] && BUNDLES[name].label) || name;
+
+  return { need, tryNeed, isLoaded, bundleLabel, BUNDLES };
+})();
+
+if (typeof module !== "undefined" && module.exports) module.exports = MNLazy;

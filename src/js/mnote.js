@@ -11,6 +11,7 @@ const MNOTE_VERSION = 1;
 const MNOTE_MAX_TABLE_ROWS = 50;
 const MNOTE_MAX_TABLE_COLS = 20;
 const MNOTE_IMAGE_SIZES = new Set(["small", "medium", "large", "full"]);
+const MNOTE_RECOVERY_DELAY = 1500;   // 편집이 멈춘 뒤 복구본을 남기기까지(이미지가 커서 매 입력마다는 무겁다)
 const MNOTE_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 let _mnoteScratchCount = 0;
 
@@ -398,10 +399,29 @@ function mountMnoteEditor(doc){
 
   // immediate=true 는 구조 변경(추가·삭제·이동 등)의 되돌리기 경계 — 그 자리에서 한 단계로 확정한다.
   // 타이핑은 immediate 없이 호출해 짧은 유휴 뒤 한 단계로 묶는다(commitSoon).
+  /* 갑자기 꺼져도 되살릴 수 있게 복구본을 남긴다(PDF·노트북·표·이미지·화이트보드와 같은 경로).
+     .mnote 는 가장 늦게 들어온 형식이라 이 안전망만 빠져 있었다. 원본 파일은 건드리지 않는다. */
+  let mnoteRecoveryTimer = 0;
+  const scheduleMnoteRecovery = () => {
+    clearTimeout(mnoteRecoveryTimer);
+    if (typeof appSettings !== "object" || !appSettings || !appSettings.pdfRecovery) return;
+    if (typeof saveDocumentRecoverySnapshot !== "function") return;
+    mnoteRecoveryTimer = setTimeout(() => {
+      mnoteRecoveryTimer = 0;
+      if (!doc.hasUnsavedEdits) return;
+      let text;
+      try { text = mnoteSerialize(mnote); } catch(_){ return; }
+      saveDocumentRecoverySnapshot(doc, new TextEncoder().encode(text), "application/json").catch(() => {});
+    }, MNOTE_RECOVERY_DELAY);
+  };
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.cleanupFns.push(() => { clearTimeout(mnoteRecoveryTimer); mnoteRecoveryTimer = 0; });
+
   function touch(immediate){
     mnote.updatedAt = Date.now();
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, true);
     setStatus("● 저장 안 됨");
+    scheduleMnoteRecovery();
     if (history){ if (immediate) history.commit(); else history.commitSoon(400); }
   }
   // 구조 변경은 모델을 바꾼 뒤 전체를 다시 그리고(간단·정확), 지정 셀/영역으로 포커스를 되돌린다.

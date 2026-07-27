@@ -120,6 +120,12 @@
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h9M4 7l3-3M4 7l3 3"/><path d="M20 17h-9M20 17l-3-3M20 17l-3 3"/></svg>
       <span>여러 파일 찾아 바꾸기</span>
     </button>
+    <div class="sb-selection-bar" id="sbSelectionBar" role="toolbar" aria-label="선택한 파일 일괄 작업" hidden>
+      <span class="sb-selection-count" id="sbSelectionCount" aria-live="polite">0개 선택</span>
+      <button type="button" id="sbSelectionClose" title="선택한 파일을 앱에서만 닫습니다(디스크의 파일은 그대로)">파일 닫기</button>
+      <button type="button" id="sbSelectionDelete" class="danger" title="선택한 파일을 디스크에서 완전히 지웁니다(되돌릴 수 없음)">삭제</button>
+      <button type="button" id="sbSelectionClear" class="sb-selection-cancel" aria-label="선택 해제" title="선택 해제">×</button>
+    </div>
     <div class="sb-list" id="sbList"></div>
     <div class="sb-actions" aria-label="파일 및 도구">
       <div class="sb-more-wrap sb-open-wrap">
@@ -266,6 +272,13 @@
           </span>
         </span>
         <button type="button" id="dzExamples" class="dz-folder">✨ 파이썬 예제 갤러리</button>
+        <div class="dz-recent" id="dzRecent" hidden>
+          <div class="dz-recent-head">
+            <span>최근 연 항목</span>
+            <button type="button" id="dzRecentClear" class="dz-recent-clear">목록 지우기</button>
+          </div>
+          <div class="dz-recent-list" id="dzRecentList" role="list"></div>
+        </div>
         <button type="button" id="dzCommandPalette" class="dz-cmdk-hint" aria-haspopup="dialog">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
           <span data-i18n="dz.cmdk">뭐든 <kbd>Ctrl</kbd><kbd>K</kbd>로 검색해 실행 — 서명·필기·화이트보드·예제까지</span>
@@ -458,8 +471,10 @@
     <div class="settings-section" data-settings-panel="document" role="tabpanel" hidden>
       <label class="settings-row"><span>PDF 기본 배율</span><select id="settingPdfZoom" class="pw-input"><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select></label>
       <label class="settings-row"><span>렌더링 성능</span><select id="settingPerformance" class="pw-input"><option value="memory">메모리 절약</option><option value="quality">최고 화질</option></select></label>
-      <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>PDF 편집 내용 자동 저장·복원</span></label>
-      <label class="settings-check"><input type="checkbox" id="settingPythonAutosave"><span>Python 편집 파일 자동 저장 — 입력을 멈춘 뒤 3초 후</span></label>
+      <div class="settings-group-title">자동 저장</div>
+      <label class="settings-check"><input type="checkbox" id="settingAutoSave"><span>편집한 파일을 원본에 자동 저장 — 입력을 멈춘 뒤 3초 후<small>파이썬을 포함한 편집 가능한 텍스트 기반 코드·문서에 적용됩니다. 원본에 바로 쓸 수 있는 파일만 저장하며, 저장 위치를 묻는 창은 뜨지 않습니다.</small></span></label>
+      <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>편집 내용 복구본 남기기 — 갑자기 꺼져도 되살리기<small>원본 파일은 건드리지 않고 이 브라우저 안에만 보관합니다. PDF·노트북·표·이미지·화이트보드에 적용됩니다.</small></span></label>
+      <div class="settings-group-title">파이썬</div>
       <label class="settings-check"><input type="checkbox" id="settingPyFormatOnSave"><span>Python 저장 시 코드 자동 정렬 — 들여쓰기·공백 정리(로컬 파이썬이면 black)</span></label>
     </div>
 
@@ -628,21 +643,19 @@
     <kbd>Enter / Tab</kbd><span>자동완성 적용</span><kbd>Esc</kbd><span>자동완성 닫기</span>
     <kbd>더블클릭</kbd><span>같은 식별자 동시수정</span><kbd>Ctrl+클릭</kbd><span>함수 정의 열기</span>
     <kbd data-shortcut-action="findInDocument">Ctrl+H</kbd><span>노트북 전체 셀 찾기·바꾸기</span><kbd data-shortcut-action="findInCell">Ctrl+Shift+H</kbd><span>현재 셀에서 찾기·바꾸기</span><kbd>Esc</kbd><span>열린 검색창 모두 닫기</span>
-  </div><div class="modal-actions"><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
+  </div><div class="modal-actions"><button class="btn" id="helpManual" type="button" title="모든 기능을 예시와 함께 설명한 문서를 새 탭에서 엽니다">📖 자세한 사용법</button><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
 </div>
 
 <div class="toast" id="toast" aria-live="polite"></div>
 <div class="loading" id="loading" hidden><div class="spinner"></div><p id="loadingMsg">처리 중…</p><button class="btn" id="loadingCancel" hidden>작업 취소</button></div>
 <div class="hint" id="hint" hidden>요소를 끌어 위치 이동 · 더블클릭으로 텍스트 수정 · 모서리로 크기 조절 · Delete 키로 삭제</div>
 
-<!-- 오피스 미리보기 라이브러리 (순서 중요) -->
-<script src="vendor/jquery.min.js"></script>
-<!-- docx-preview 는 JSZip 3.x(loadAsync) 필요 → 먼저 v3 을 띄우고 docx-preview 가 이를 캡처하게 한다 -->
-<script src="vendor/jszip3.min.js"></script>
-<script src="vendor/docx-preview.min.js"></script>
-<!-- 이후 전역 JSZip 을 2.6.1 로 되돌린다 (PPTXjs/앱 repair 가 동기 new JSZip API 사용) -->
-<script src="vendor/jszip.min.js"></script>
-<script src="vendor/jszip-utils.min.js"></script>
+<!-- 시작할 때 바로 싣는 라이브러리는 PDF(앱의 중심 기능)뿐이다.
+     엑셀·한글·PPT·Word·압축·캡처·맞춤법 사전은 src/js/lazy.js(MNLazy)가 그 형식을 열 때
+     처음 불러온다. 로드 순서가 중요한 묶음(JSZip 2.6.1 ↔ 3.x)도 MNLazy 가 재현한다. -->
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/pdf-lib.min.js"></script>
+<!-- PPTXjs 가 로드 시점에 참조하는 shim — 지연 로드보다 먼저 준비돼 있어야 한다 -->
 <script>
 window.FileReaderJS = window.FileReaderJS || {
   setSync: function(){},
@@ -660,25 +673,17 @@ window.FileReaderJS = window.FileReaderJS || {
   setupInput: function(){}
 };
 </script>
-<script src="vendor/divs2slides.min.js"></script>
-<script src="vendor/pptxjs.min.js"></script>
-<script src="vendor/xlsx.full.min.js"></script>
-<!-- 스프레드시트 편집·저장 시 셀 서식(번호서식·색·글꼴·병합) 보존 -->
-<script src="vendor/exceljs.min.js"></script>
-<!-- 오피스 열기암호 복호화 (Agile) -->
-<script src="vendor/crypto-js.min.js"></script>
-<script src="vendor/office-decrypt.js"></script>
-<!-- 한글(HWP 바이너리) 뷰어: hwp.js v0.0.3 (ESM→전역 변환본) -->
-<script src="vendor/hwp.global.js"></script>
-<!-- PDF 서명/편집 라이브러리 -->
-<script src="vendor/pdf.min.js"></script>
-<script src="vendor/pdf-lib.min.js"></script>
-<!-- DOM → 이미지 캡처(노트북 전체를 PDF로 저장) -->
-<script src="vendor/html2canvas.min.js"></script>
-<script src="vendor/html-to-image.js"></script>
-<!-- 압축(zip) 풀기 + 암호 ZIP(AES) 지원 -->
-<script src="vendor/zip-full.min.js"></script>
-<script src="vendor/korean-hunspell-worker.js"></script>
+<!-- 지연 로드 라이브러리 자리. 단일 파일 빌드(build-offline.js)는 여기에 실행되지 않는
+     text/plain 블록(data-mn-lazy 속성)으로 소스를 심어 두고, MNLazy 가 필요할 때 그 텍스트를
+     실행한다. 원본 HTML·서버 서빙에서는 이 자리가 비어 있고 MNLazy 가 vendor 파일을 직접 받는다. -->
+<!--MN_LAZY_VENDOR-->
+<!-- 픽셀 펫 스프라이트(옵션에서 켤 때만 쓰는 그림) 자리. 단일 파일 빌드는 여기에 경로→데이터URL
+     대응표를 JSON 블록으로 심는다. 펫이 꺼져 있으면(기본값) 이 블록은 읽히지도 파싱되지도 않는다. -->
+<!--MN_PET_SPRITES-->
+<!-- 자세한 사용법 문서 자리. 단일 파일 빌드는 사용법.html 을 통째로 심어, EXE 하나만 받은
+     사용자도 도움말에서 바로 열 수 있게 한다(실행되지 않는 블록이라 시작 비용은 없다). -->
+<!--MN_MANUAL-->
+<script src="src/js/lazy.js"></script>
 <script src="src/js/core.js"></script>
 <script src="src/js/icons.js"></script>
 <script src="src/js/state.js"></script>
@@ -688,6 +693,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/video-viewer.js"></script>
 <script src="src/js/documents.js"></script>
 <script src="src/js/workspace-store.js"></script>
+<script src="src/js/recent-files.js"></script>
 <script src="src/js/file-loaders.js"></script>
 <script src="src/js/pdf-render.js"></script>
 <script src="src/js/pdf-ocr.js"></script>
