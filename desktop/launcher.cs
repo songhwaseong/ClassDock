@@ -311,6 +311,23 @@ class PdfSignerLauncher
     static readonly object PySessionsLock = new object();
     static readonly Dictionary<string, PythonSession> PySessions = new Dictionary<string, PythonSession>();
 
+    // pip 설치 1건. 로그를 프로세스가 끝날 때까지 붙들고 있으면 화면이 멈춘 것처럼 보이므로,
+    // 파이썬 세션과 같은 방식으로 버퍼에 흘려 담고 프런트가 /pip-install-poll 로 증분만 받아간다.
+    class PipJob
+    {
+        public string Id;
+        public Process Process;
+        public readonly object Sync = new object();
+        public readonly LimitedTextBuffer Log = new LimitedTextBuffer();
+        public bool Complete;
+        public int ExitCode = -1;
+        public bool CancelRequested;
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
+    static readonly object PipJobsLock = new object();
+    static readonly Dictionary<string, PipJob> PipJobs = new Dictionary<string, PipJob>();
+
     class TerminalSession
     {
         public string Id;
@@ -784,7 +801,8 @@ class PdfSignerLauncher
                 || path.StartsWith("/source-folder-directory", StringComparison.Ordinal)
                 || path.StartsWith("/source-folder-remove", StringComparison.Ordinal)) return true;
             if (path == "/image-memo-delete") return true;
-            if (path == "/complete" || path == "/definition" || path == "/pip-install") return true;
+            if (path == "/complete" || path == "/definition") return true;
+            if (path.StartsWith("/pip-install", StringComparison.Ordinal)) return true;   // /pip-install, -start, -cancel
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
@@ -805,6 +823,7 @@ class PdfSignerLauncher
             if (path == "/python-import-index") return true;
             if (path.StartsWith("/local-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-file?", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/pip-install-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
@@ -1836,6 +1855,39 @@ class PdfSignerLauncher
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-failed: " + FlattenMessage(ex)));
                     }
+                }
+                else if (method == "POST" && path == "/pip-install-start")
+                {
+                    string pipConfirmed;
+                    if (!headers.TryGetValue("x-manneung-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-confirmation-required"));
+                        return;
+                    }
+                    // 설치를 시작만 하고 즉시 id 를 돌려준다 — 로그는 /pip-install-poll 로 흘려 보낸다.
+                    try
+                    {
+                        string json = StartPipInstall(body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (PythonMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-python"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/pip-install-poll", StringComparison.Ordinal))
+                {
+                    string json = PollPipInstall(QueryValue(path, "id"), QueryValue(path, "from"));
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                }
+                else if (method == "POST" && path.StartsWith("/pip-install-cancel", StringComparison.Ordinal))
+                {
+                    CancelPipInstall(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
                 else if (method == "POST" && path == "/python-kernel-start-bundle")
                 {
@@ -4621,11 +4673,9 @@ class PdfSignerLauncher
     static readonly System.Text.RegularExpressions.Regex PkgNameRe =
         new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9][A-Za-z0-9._-]*([=<>!~]=?[A-Za-z0-9._*-]+)?$");
 
-    static string PipInstall(byte[] body)
+    // 본문(공백·쉼표 구분) → 설치할 패키지 목록. 주입 가능한 인자는 여기서 막는다.
+    static List<string> ParsePipPackages(byte[] body)
     {
-        string interp = FindPython();
-        if (interp == null) throw new PythonMissingException();
-
         string text = Encoding.UTF8.GetString(body ?? new byte[0]);
         string[] raw = text.Split(new char[] { ' ', '\t', '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries);
         List<string> pkgs = new List<string>();
@@ -4638,7 +4688,11 @@ class PdfSignerLauncher
             if (pkgs.Count >= 40) break;
         }
         if (pkgs.Count == 0) throw new Exception("no-packages");
+        return pkgs;
+    }
 
+    static ProcessStartInfo PipInstallStartInfo(string interp, List<string> pkgs)
+    {
         StringBuilder argSb = new StringBuilder();
         if (interp == "py") argSb.Append("-3 ");
         argSb.Append("-m pip install --disable-pip-version-check --no-input");
@@ -4655,6 +4709,120 @@ class PdfSignerLauncher
         psi.StandardOutputEncoding = new UTF8Encoding(false);
         psi.StandardErrorEncoding = new UTF8Encoding(false);
         psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+        // 파이프로 내보낼 때 pip 은 진행바를 생략한다. 대신 줄 단위 진행(Collecting/Downloading/Installing)을 바로 흘려보내게 한다.
+        psi.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
+        return psi;
+    }
+
+    // 설치를 시작만 하고 id 를 돌려준다. 로그는 버퍼에 쌓이고 프런트가 /pip-install-poll 로 증분을 받아간다.
+    static string StartPipInstall(byte[] body)
+    {
+        string interp = FindPython();
+        if (interp == null) throw new PythonMissingException();
+        List<string> pkgs = ParsePipPackages(body);
+        SweepPipJobs();
+
+        PipJob job = new PipJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.Log.AppendLine("pip install " + string.Join(" ", pkgs.ToArray()));
+
+        job.Process = new Process();
+        job.Process.StartInfo = PipInstallStartInfo(interp, pkgs);
+        job.Process.Start();
+        lock (PipJobsLock) PipJobs[job.Id] = job;
+
+        // stdout·stderr 를 한 버퍼에 모아 pip 가 낸 순서대로 보이게 한다(LimitedTextBuffer 는 내부에서 잠근다).
+        Thread outReader = StartLimitedReader(job.Process.StandardOutput, job.Log);
+        Thread errReader = StartLimitedReader(job.Process.StandardError, job.Log);
+        Thread watcher = new Thread(delegate()
+        {
+            bool exited = false;
+            try { exited = job.Process.WaitForExit(300000); } catch { }   // 최대 5분(큰 휠 다운로드 여유)
+            if (!exited)
+            {
+                bool cancelled;
+                lock (job.Sync) cancelled = job.CancelRequested;
+                if (!cancelled) job.Log.AppendLine("[시간 초과: 설치를 5분 후 중단했습니다.]");
+                KillProcessTree(job.Process);
+                try { job.Process.WaitForExit(2000); } catch { }
+            }
+            try { outReader.Join(2000); errReader.Join(2000); } catch { }
+            int code;
+            try { code = job.Process.ExitCode; } catch { code = -1; }
+            lock (job.Sync)
+            {
+                // 취소는 pip 을 죽여서 끝내므로 종료 코드가 무엇이든 실패로 보고한다.
+                job.ExitCode = job.CancelRequested ? -1 : (exited ? code : -1);
+                job.DoneAt = DateTime.UtcNow;
+                job.Complete = true;
+            }
+            try { job.Process.Dispose(); } catch { }
+            SweepPipJobs();
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+        return "{\"id\":" + JsonString(job.Id) + "}";
+    }
+
+    // 증분 폴링 — 파이썬 세션(PollPythonSession)과 같은 규약. from 이 현재 길이와 같고 아직 진행 중이면 본문 없이 짧게 답한다.
+    static string PollPipInstall(string id, string knownLen)
+    {
+        PipJob job;
+        lock (PipJobsLock) if (!PipJobs.TryGetValue(id ?? "", out job))
+            return "{\"complete\":true,\"code\":-1,\"cancelled\":false,\"log\":" + JsonString("설치 작업을 찾지 못했습니다.") + "}";
+        lock (job.Sync)
+        {
+            int from = 0;
+            bool known = int.TryParse(knownLen ?? "", out from) && from >= 0 && from <= job.Log.TextLength;
+            if (known && !job.Complete && from == job.Log.TextLength)
+                return "{\"complete\":false,\"unchanged\":true}";
+            string head = "{\"complete\":" + (job.Complete ? "true" : "false")
+                + ",\"code\":" + job.ExitCode
+                + ",\"cancelled\":" + (job.CancelRequested ? "true" : "false");
+            if (known) return head + ",\"logDelta\":" + JsonString(job.Log.GetTextFrom(from)) + "}";
+            return head + ",\"log\":" + JsonString(job.Log.GetText()) + "}";
+        }
+    }
+
+    static void CancelPipInstall(string id)
+    {
+        PipJob job;
+        lock (PipJobsLock) if (!PipJobs.TryGetValue(id ?? "", out job)) return;
+        lock (job.Sync)
+        {
+            if (job.Complete || job.CancelRequested) return;
+            job.CancelRequested = true;
+        }
+        job.Log.AppendLine("[설치를 취소했습니다. 이미 설치된 패키지는 그대로 남습니다.]");
+        KillProcessTree(job.Process);
+    }
+
+    // 끝난 작업은 로그를 잠시 남겨 두고(폴링이 늦게 와도 결과를 볼 수 있게) 오래된 것만 버린다.
+    static void SweepPipJobs()
+    {
+        lock (PipJobsLock)
+        {
+            List<PipJob> done = new List<PipJob>();
+            foreach (PipJob job in PipJobs.Values) if (job.Complete) done.Add(job);
+            done.Sort(delegate(PipJob a, PipJob b) { return a.DoneAt.CompareTo(b.DoneAt); });
+            DateTime now = DateTime.UtcNow;
+            List<PipJob> remove = new List<PipJob>();
+            foreach (PipJob job in done)
+                if ((now - job.DoneAt).TotalMinutes > 10) remove.Add(job);
+            for (int i = 0; i < done.Count - 8; i++)
+                if (!remove.Contains(done[i])) remove.Add(done[i]);
+            foreach (PipJob job in remove) PipJobs.Remove(job.Id);
+        }
+    }
+
+    // 예전 오프라인 HTML(스트리밍 폴링을 모르는 판)을 위한 한 번에 응답하는 경로. 새 화면은 /pip-install-start 를 쓴다.
+    static string PipInstall(byte[] body)
+    {
+        string interp = FindPython();
+        if (interp == null) throw new PythonMissingException();
+
+        List<string> pkgs = ParsePipPackages(body);
+        ProcessStartInfo psi = PipInstallStartInfo(interp, pkgs);
 
         StringBuilder outSb = new StringBuilder();
         int exitCode = -1;

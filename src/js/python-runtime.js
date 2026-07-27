@@ -690,46 +690,225 @@ function parseRequirements(txt){
   return out;
 }
 
+// 설치가 끝날 때까지 화면이 멈춘 것처럼 보이지 않게, pip 로그를 실시간으로 받아 보여 주고
+// 스피너 + 경과 시간을 1초마다 갱신한다. 설치 중에는 설치 조작을 잠가 pip 이 겹쳐 뜨지 않게 한다.
+let _pipInstallBusy = false;
+function pipInstallTryLock(){
+  if (_pipInstallBusy) return false;
+  _pipInstallBusy = true;
+  return true;
+}
+function pipInstallUnlock(){ _pipInstallBusy = false; }
+function pipPkgLabel(pkgs){
+  return pkgs.length > 3 ? (pkgs.slice(0, 3).join(" ") + " 외 " + (pkgs.length - 3) + "개") : pkgs.join(" ");
+}
+function pipElapsedText(ms){
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+const PIP_LOG_TAIL = 24000;                 // 진행 중 표시 상한 — 거대한 <pre> 재배치가 매 폴마다 반복되면 취소 클릭이 늦어진다
+function pipLogForDisplay(text){
+  const s = String(text || "");
+  return s.length > PIP_LOG_TAIL
+    ? "…(로그가 길어 마지막 부분만 표시 중)\n" + s.slice(-PIP_LOG_TAIL)
+    : s;
+}
+// pip 로그에서 지금 무엇을 하는 중인지 한 줄로 뽑는다(상태줄용). 진행바 파편·빈 줄은 버린다.
+// 진행바는 판에 따라 ━(U+2501)·█·#·| 등을 쓰므로 박스 그리기·블록 문자 범위를 통째로 건너뛴다.
+const PIP_BAR_ONLY_RE = /^[\s|#.─-▟-]+$/;   // ─-▟ = 박스 그리기 + 블록 문자
+function pipLogHeadline(text){
+  const lines = String(text || "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--){
+    const line = lines[i].trim();
+    if (!line || PIP_BAR_ONLY_RE.test(line)) continue;
+    return line.length > 70 ? line.slice(0, 69) + "…" : line;
+  }
+  return "";
+}
+
+// 서버가 내는 짧은 오류 코드를 사용자 문장으로 바꾼다(그대로 보여주면 "no-python" 같은 말이 화면에 뜬다).
+function pipErrorText(raw){
+  const s = String(raw || "").trim();
+  if (s === "no-python") return "이 컴퓨터에서 Python 을 찾지 못했어요. 'Py Env' 로 설치 상태를 확인해 주세요.";
+  if (s === "pip-confirmation-required") return "설치 동의가 전달되지 않았어요. 다시 시도해 주세요.";
+  if (s === "no-packages") return "설치할 패키지 이름이 없어요.";
+  const bad = /^pip-failed: invalid-package: (.+)$/.exec(s) || /^invalid-package: (.+)$/.exec(s);
+  if (bad) return "패키지 이름에 쓸 수 없는 문자가 있어요: " + bad[1];
+  return s || "알 수 없는 오류";
+}
+
+// 설치 로그를 실시간으로 받아오는 공통 드라이버(.py 뷰어·노트북이 함께 쓴다).
+// /pip-install-start 로 시작하고 /pip-install-poll 로 증분만 받아온다. 스트리밍 경로가 없는
+// 예전 exe(404)에서는 한 번에 응답하는 /pip-install 로 조용히 폴백한다.
+// hooks: { onLog(누적 로그), onCancel(취소 함수 | null) }  →  { ok, code, output, cancelled, streamed }
+async function pipInstallStream(pkgs, hooks){
+  hooks = hooks || {};
+  const body = pkgs.join(" ");
+  const headers = { "Content-Type": "text/plain; charset=utf-8", "X-Manneung-Pip-Confirm": "1" };
+  const emit = (text) => { if (typeof hooks.onLog === "function") hooks.onLog(text); };
+  const oneShot = async () => {
+    const res = await fetch("/pip-install", { method: "POST", headers, body });
+    const txt = await res.text();
+    let j; try { j = JSON.parse(txt); } catch(_){ j = { ok: res.ok, code: -1, output: txt }; }
+    const output = (j.output || "").trim();
+    if (output) emit(output);
+    return { ok: !!j.ok, code: (j.code == null ? -1 : j.code), output, cancelled: false, streamed: false };
+  };
+  const startRes = await fetch("/pip-install-start", { method: "POST", headers, body });
+  if (startRes.status === 404) return await oneShot();          // 스트리밍 경로를 모르는 예전 판
+  if (!startRes.ok) throw new Error(pipErrorText(await startRes.text()) || ("HTTP " + startRes.status));
+  let id = "";
+  try { id = (await startRes.json()).id || ""; } catch(_){ id = ""; }
+  // 시작 요청이 성공했다면 서버에서는 이미 pip 이 돌고 있을 수 있다. 응답이 깨졌다고 one-shot 을
+  // 다시 시작하면 설치가 겹치므로, 작업 번호가 없을 때는 새 설치를 만들지 않고 오류로 끝낸다.
+  if (!id) throw new Error("설치 작업 번호를 받지 못했어요. 잠시 후 다시 시도해 주세요.");
+
+  let cancelSent = false;
+  const cancel = async () => {
+    if (cancelSent) return;
+    cancelSent = true;
+    try { await fetch("/pip-install-cancel?id=" + encodeURIComponent(id), { method: "POST" }); } catch(_){}
+  };
+  if (typeof hooks.onCancel === "function") hooks.onCancel(cancel);
+  let known = -1, full = "";                 // -1 이면 서버가 누적 로그 전체를 보내 준다(세션 폴링과 같은 규약)
+  let pollFailures = 0;
+  try {
+    for (;;){
+      let data;
+      try {
+        const res = await fetch("/pip-install-poll?id=" + encodeURIComponent(id) + "&from=" + known, { cache: "no-store" });
+        if (!res.ok) throw new Error(pipErrorText(await res.text()) || ("HTTP " + res.status));
+        data = await res.json();
+        pollFailures = 0;
+      } catch(e){
+        pollFailures++;
+        if (pollFailures < 3){
+          await new Promise(resolve => setTimeout(resolve, pollFailures * 700));
+          continue;
+        }
+        // 진행 상태를 더는 확인할 수 없는데 UI 잠금만 풀면 뒤에서 도는 pip 과 새 설치가 겹친다.
+        // 서버 작업을 먼저 중단한 뒤 사용자에게 원래 오류를 함께 알려 준다.
+        await cancel();
+        throw new Error("설치 진행 상태를 확인하지 못해 설치를 중단했어요: " + ((e && e.message) || e));
+      }
+      if (!data.unchanged){
+        if (typeof data.logDelta === "string") full += data.logDelta;
+        else if (typeof data.log === "string") full = data.log;
+        known = full.length;
+        emit(full);
+        if (data.complete){
+          return { ok: data.code === 0, code: data.code, output: full, cancelled: !!data.cancelled, streamed: true };
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+  } finally {
+    if (typeof hooks.onCancel === "function") hooks.onCancel(null);
+  }
+}
+
 async function runPipInstall(pkgs, ui){
   if (!Array.isArray(pkgs) || !pkgs.length) return false;
   const { outPanel, split, status } = ui;
-  if (!(await pythonBackendAvailable())){
-    toast("브라우저 실행에서는 패키지가 자동으로 받아져요 — 따로 설치할 필요 없습니다.", 4000);
+  // Python 확인·동의창도 비동기이므로 첫 await 전에 잠금을 선점해야 빠른 중복 클릭이 함께 통과하지 않는다.
+  if (!pipInstallTryLock()){
+    toast("이미 라이브러리를 설치하는 중이에요. 끝나면 다시 눌러 주세요.", 3000);
     return false;
   }
-  const approved = typeof confirmDialog === "function" && await confirmDialog(
-    "다음 패키지를 이 컴퓨터의 Python 환경에 설치합니다.\n\n" + pkgs.join(", ") +
-    "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
-    "설치", "취소");
-  if (!approved){
-    if (status) status.textContent = "설치 취소";
-    return false;
-  }
-  split.classList.add("show-out");
-  if (ui.layoutBtn) ui.layoutBtn.hidden = false;
-  outPanel.innerHTML = "";
-  const head = document.createElement("div"); head.className = "out-head"; head.textContent = "패키지 설치";
-  const pre = document.createElement("pre"); pre.className = "out-pre out-muted";
-  pre.textContent = "pip install " + pkgs.join(" ") + " …\n(수십 초~몇 분 걸릴 수 있어요 · 인터넷 필요)";
-  outPanel.append(head, pre);
-  if (status) status.textContent = "설치 중… " + pkgs.join(" ");
   try {
-    const res = await fetch("/pip-install", { method: "POST", headers: { "Content-Type": "text/plain; charset=utf-8", "X-Manneung-Pip-Confirm":"1" }, body: pkgs.join(" ") });
-    const txt = await res.text();
-    let j; try { j = JSON.parse(txt); } catch(_){ j = { ok: res.ok, code: -1, output: txt }; }
-    pre.classList.remove("out-muted");
-    pre.textContent = (j.output || "").trim() || (j.ok ? "설치 완료" : "설치 실패");
-    if (!j.ok){ const e = document.createElement("span"); e.className = "out-err"; e.textContent = "\n\n✖ 설치 실패 (코드 " + j.code + ") — 위 로그를 확인하세요."; pre.appendChild(e); }
-    outPanel.scrollTop = outPanel.scrollHeight;
-    if (status) status.textContent = j.ok ? "설치 완료 ✓" : "설치 실패";
-    if (j.ok) resetBackendFormatterProbe();        // black/autopep8 를 방금 설치했을 수 있으니 다음 정렬 때 다시 확인
-    toast(j.ok ? ("설치 완료: " + pkgs.join(" ")) : "설치 실패 — 로그를 확인하세요", 3000);
-    return !!j.ok;
-  } catch(e){
-    pre.classList.remove("out-muted"); pre.classList.add("out-err");
-    pre.textContent = "설치 요청 실패: " + ((e && e.message) || e);
-    if (status) status.textContent = "설치 실패";
-    return false;
+    if (!(await pythonBackendAvailable())){
+      toast("브라우저 실행에서는 패키지가 자동으로 받아져요 — 따로 설치할 필요 없습니다.", 4000);
+      return false;
+    }
+    const approved = typeof confirmDialog === "function" && await confirmDialog(
+      "다음 패키지를 이 컴퓨터의 Python 환경에 설치합니다.\n\n" + pkgs.join(", ") +
+      "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
+      "설치", "취소");
+    if (!approved){
+      if (status) status.textContent = "설치 취소";
+      return false;
+    }
+    if (typeof ui.setPkgBusy === "function") ui.setPkgBusy(true);
+    // 라이브러리 팝오버는 실행 바 아래(출력 패널 위)에 겹쳐 뜬다 → 닫아야 진행 표시가 실제로 보인다.
+    if (typeof ui.closePkg === "function") ui.closePkg();
+    split.classList.add("show-out");
+    if (ui.layoutBtn) ui.layoutBtn.hidden = false;
+    outPanel.innerHTML = "";
+    const label = pipPkgLabel(pkgs);
+    const head = document.createElement("div"); head.className = "out-head"; head.textContent = "패키지 설치";
+    const prog = document.createElement("div"); prog.className = "pip-progress"; prog.setAttribute("role", "status");
+    const spin = document.createElement("span"); spin.className = "pip-spin"; spin.setAttribute("aria-hidden", "true");
+    const progLabel = document.createElement("span"); progLabel.className = "pip-progress-label"; progLabel.textContent = "설치 중… " + label;
+    // 1초마다 바뀌는 경과 시간은 스크린리더가 반복해 읽지 않도록 라이브 영역에서 제외한다.
+    const progTime = document.createElement("span"); progTime.className = "pip-progress-time"; progTime.setAttribute("aria-hidden", "true");
+    const cancelBtn = document.createElement("button"); cancelBtn.type = "button"; cancelBtn.className = "pip-cancel";
+    cancelBtn.textContent = "취소"; cancelBtn.title = "설치를 중단합니다. 이미 설치된 패키지는 그대로 남습니다."; cancelBtn.hidden = true;
+    prog.append(spin, progLabel, progTime, cancelBtn);
+    const hint = document.createElement("div"); hint.className = "pip-hint";
+    hint.textContent = "저장소 조회 → 다운로드 → 설치 순서로 진행됩니다. (수십 초~몇 분 · 인터넷 필요)";
+    const pre = document.createElement("pre"); pre.className = "out-pre out-muted";
+    pre.textContent = "pip install " + pkgs.join(" ") + " …";
+    outPanel.append(head, prog, hint, pre);
+    const startedAt = Date.now();
+    const tick = () => {
+      const el = pipElapsedText(Date.now() - startedAt);
+      progTime.textContent = el + " 경과";
+      if (status) status.textContent = "설치 중… " + label + " · " + el;
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    const stopProgress = () => { clearInterval(timer); prog.remove(); hint.remove(); };
+    let logged = false;
+    const showLog = (text) => {
+      if (!text) return;
+      if (!logged){ logged = true; pre.classList.remove("out-muted"); }
+      // 사용자가 위로 스크롤해 둔 동안에는 따라 내려가지 않는다(로그를 읽는 중일 수 있다).
+      const nearBottom = outPanel.scrollHeight - outPanel.scrollTop - outPanel.clientHeight < 40;
+      pre.textContent = pipLogForDisplay(text);
+      if (nearBottom) outPanel.scrollTop = outPanel.scrollHeight;
+    };
+    try {
+      const r = await pipInstallStream(pkgs, {
+        onLog: showLog,
+        onCancel: (cancel) => {
+          if (!cancel){ cancelBtn.hidden = true; return; }
+          cancelBtn.hidden = false;
+          cancelBtn.addEventListener("click", () => {
+            cancelBtn.disabled = true; cancelBtn.textContent = "취소 중…";
+            progLabel.textContent = "설치 취소 중… " + label;
+            cancel();
+          }, { once: true });
+        }
+      });
+      const took = pipElapsedText(Date.now() - startedAt);
+      stopProgress();
+      pre.classList.remove("out-muted");
+      pre.textContent = pipLogForDisplay(r.output).trim() || (r.ok ? "설치 완료" : "설치 실패");
+      if (!r.ok){
+        const e = document.createElement("span"); e.className = "out-err";
+        e.textContent = r.cancelled
+          ? "\n\n■ 설치를 취소했습니다."
+          : "\n\n✖ 설치 실패 (코드 " + r.code + ") — 위 로그를 확인하세요.";
+        pre.appendChild(e);
+      }
+      outPanel.scrollTop = outPanel.scrollHeight;
+      if (status) status.textContent = r.ok ? ("설치 완료 ✓ · " + took) : (r.cancelled ? "설치 취소됨" : "설치 실패");
+      if (r.ok) resetBackendFormatterProbe();        // black/autopep8 를 방금 설치했을 수 있으니 다음 정렬 때 다시 확인
+      toast(r.ok ? ("설치 완료: " + label + " · " + took)
+        : (r.cancelled ? "설치를 취소했어요" : "설치 실패 — 로그를 확인하세요"), 3000);
+      return !!r.ok;
+    } catch(e){
+      stopProgress();
+      pre.classList.remove("out-muted"); pre.classList.add("out-err");
+      pre.textContent = "설치 요청 실패: " + ((e && e.message) || e);
+      if (status) status.textContent = "설치 실패";
+      return false;
+    } finally {
+      clearInterval(timer);
+      if (typeof ui.setPkgBusy === "function") ui.setPkgBusy(false);
+    }
+  } finally {
+    pipInstallUnlock();
   }
 }
 

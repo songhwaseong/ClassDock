@@ -1545,6 +1545,13 @@ async function renderCode(file, host, ext, profile, runCtx){
     runPipInstall(pkgs.slice(0, 40), ui);
   });
   pkgWrap.append(mkSet("데이터 분석", ["matplotlib","openpyxl","seaborn","scipy"]), mkSet("크롤링", ["requests","beautifulsoup4","lxml"]), mkSet("DB(MySQL)", ["pymysql"]), pkgCustom, pkgGo, pkgVersionHint, pkgFileBtn, pkgFile, pkgList);
+  // 설치 중에는 설치 관련 조작을 모두 잠근다 — pip 프로세스가 겹쳐 뜨거나 진행 표시가 지워지는 것을 막는다.
+  const setPkgBusy = (busy) => {
+    pkgWrap.querySelectorAll("button, input").forEach(el => { el.disabled = !!busy; });
+    pkgBtn.disabled = !!busy;
+    if (busy){ pkgBtn.setAttribute("aria-busy", "true"); pkgBtn.title = "라이브러리 설치가 끝나면 다시 열 수 있어요"; }
+    else { pkgBtn.removeAttribute("aria-busy"); pkgBtn.removeAttribute("title"); }
+  };
   // 패널은 실행 바의 자식으로 두고 절대 위치로 띄운다. 그래서 열어도 편집기 높이가 줄지 않는다.
   bar.appendChild(pkgWrap);
   pkgBtn.addEventListener("click", () => {
@@ -1901,6 +1908,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   }
   // 실행 결과를 편집기 옆(가로) ↔ 아래(세로)로 토글. 선택은 저장되어 다음에 열 때도 유지.
   ui.layoutBtn = layoutBtn;
+  // 패키지 설치(runPipInstall)가 진행 표시를 가리는 팝오버를 닫고 설치 조작을 잠글 수 있게 넘겨준다.
+  ui.closePkg = closePkg;
+  ui.setPkgBusy = setPkgBusy;
   let outputStacked = false;
   try { outputStacked = localStorage.getItem("pythonSplitDir") === "col"; } catch(e){}
   const applyOutputLayout = () => {

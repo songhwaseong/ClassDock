@@ -264,37 +264,71 @@ function startLocalNotebookKernelRun(ownerDoc, source, stdin, workspaceBundle){
 
 // 로컬 커널 셀에서 누락 모듈을 만났을 때 이 PC 의 Python 에 pip 로 설치한다(동의 후).
 // 진행/결과는 노트북 상태줄·토스트로 알린다(.py 뷰어의 runPipInstall 은 별도 출력 패널을 요구해 재사용 대신 별도 구현).
+// 다만 로그 스트리밍·취소는 pipInstallStream 을 공유한다 — 상태줄에 경과 시간과 pip 진행 줄을 함께 흘려,
+// 몇 분짜리 설치에서도 멈춘 것처럼 보이지 않게 한다. 실행 바의 ■ 버튼이 그대로 설치 취소 버튼이 된다.
 // 설치가 끝나면 로컬 커널을 재시작해, 이미 import 된 이전 버전이 남지 않도록 한다. 성공 여부 반환.
 async function nbInstallMissingModule(ownerDoc, pkg){
   if (!pkg) return false;
-  if (!(await pythonBackendAvailable())) return false;   // 브라우저 커널이면 자동 설치 대상 아님
-  const approved = typeof confirmDialog === "function" && await confirmDialog(
-    "이 노트북이 쓰는 로컬 Python 환경에 다음 패키지를 설치합니다.\n\n" + pkg +
-    "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
-    "설치", "취소");
-  if (!approved){ nbSetStatus(ownerDoc, "패키지 설치를 취소했어요."); return false; }
-  nbSetStatus(ownerDoc, "패키지 설치 중… " + pkg + " (수십 초~몇 분 · 인터넷 필요)");
-  try {
-    const res = await fetch("/pip-install", {
-      method:"POST",
-      headers:{ "Content-Type":"text/plain; charset=utf-8", "X-Manneung-Pip-Confirm":"1" },
-      body:pkg
-    });
-    const txt = await res.text();
-    let j; try { j = JSON.parse(txt); } catch(_){ j = { ok:res.ok, code:-1, output:txt }; }
-    if (j.ok){
-      const restarted = await nbRestartLocalKernelAfterPackageInstall(ownerDoc);
-      const suffix = restarted ? " · 커널 재시작됨" : "";
-      if (typeof toast === "function") toast("설치 완료: " + pkg + suffix + " · 셀을 다시 실행합니다", 3600);
-      nbSetStatus(ownerDoc, "설치 완료 ✓ · " + pkg + suffix);
-    } else {
-      if (typeof toast === "function") toast("설치 실패 — 아래 상태줄/로그를 확인하세요", 3200);
-      nbSetStatus(ownerDoc, "설치 실패 (코드 " + j.code + ") · " + pkg);
-    }
-    return !!j.ok;
-  } catch(e){
-    nbSetStatus(ownerDoc, "설치 요청 실패: " + ((e && e.message) || e));
+  // .py 편집기와 같은 전역 잠금을 첫 await 전에 잡아 다른 탭·노트북의 pip 과 겹치지 않게 한다.
+  if (!pipInstallTryLock()){
+    nbSetStatus(ownerDoc, "이미 다른 라이브러리를 설치하는 중이에요. 끝나면 다시 실행해 주세요.");
+    if (typeof toast === "function") toast("이미 라이브러리를 설치하는 중이에요", 2800);
     return false;
+  }
+  try {
+    if (!(await pythonBackendAvailable())) return false;   // 브라우저 커널이면 자동 설치 대상 아님
+    const approved = typeof confirmDialog === "function" && await confirmDialog(
+      "이 노트북이 쓰는 로컬 Python 환경에 다음 패키지를 설치합니다.\n\n" + pkg +
+      "\n\n패키지 저장소에 인터넷으로 연결될 수 있으며, 설치한 패키지는 이 컴퓨터에 남습니다. 신뢰하는 패키지만 설치하세요.",
+      "설치", "취소");
+    if (!approved){ nbSetStatus(ownerDoc, "패키지 설치를 취소했어요."); return false; }
+    const startedAt = Date.now();
+    let headline = "";
+    const paint = () => {
+      const el = pipElapsedText(Date.now() - startedAt);
+      nbSetStatus(ownerDoc, "패키지 설치 중… " + pkg + " · " + el + (headline ? " · " + headline : ""));
+    };
+    paint();
+    const timer = setInterval(paint, 1000);
+    // 설치 중에는 노트북의 중지(■)가 셀 대신 pip 을 끊게 걸어 둔다. 끝나면 원래 작업으로 되돌린다.
+    const prevTask = ownerDoc ? ownerDoc._nbActiveTask : null;
+    try {
+      const r = await pipInstallStream([pkg], {
+        onLog: (text) => {
+          const line = pipLogHeadline(text);
+          if (line && line !== headline){ headline = line; paint(); }
+        },
+        onCancel: (cancel) => {
+          if (!ownerDoc) return;
+          ownerDoc._nbActiveTask = cancel ? { cancel } : prevTask;
+          if (cancel && ownerDoc._nbCancelRequested) cancel();   // 설치를 시작하기 전에 이미 눌렀던 경우
+        }
+      });
+      clearInterval(timer);
+      if (r.ok){
+        const took = pipElapsedText(Date.now() - startedAt);
+        const restarted = await nbRestartLocalKernelAfterPackageInstall(ownerDoc);
+        const suffix = restarted ? " · 커널 재시작됨" : "";
+        if (typeof toast === "function") toast("설치 완료: " + pkg + suffix + " · 셀을 다시 실행합니다", 3600);
+        nbSetStatus(ownerDoc, "설치 완료 ✓ · " + pkg + " · " + took + suffix);
+      } else if (r.cancelled){
+        if (typeof toast === "function") toast("설치를 취소했어요", 2600);
+        nbSetStatus(ownerDoc, "설치 취소됨 · " + pkg);
+      } else {
+        if (typeof toast === "function") toast("설치 실패 — 아래 상태줄/로그를 확인하세요", 3200);
+        nbSetStatus(ownerDoc, "설치 실패 (코드 " + r.code + ") · " + pkg + (headline ? " · " + headline : ""));
+      }
+      return !!r.ok;
+    } catch(e){
+      clearInterval(timer);
+      nbSetStatus(ownerDoc, "설치 요청 실패: " + ((e && e.message) || e));
+      return false;
+    } finally {
+      clearInterval(timer);
+      if (ownerDoc) ownerDoc._nbActiveTask = prevTask;
+    }
+  } finally {
+    pipInstallUnlock();
   }
 }
 
