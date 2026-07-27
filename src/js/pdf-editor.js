@@ -23,7 +23,7 @@ function scheduleQualityRefresh(doc){
 // 현재 보이는 페이지를 새 배율 해상도로 다시 그린다(지연 렌더 구조 재활용; renderPageCanvas 가 필요할 때만 갱신).
 function refreshVisibleQuality(doc){
   if (!doc || doc.closed || doc.kind !== "pdf" || !doc.pages) return;
-  doc.pages.forEach(p => { if (p.visible) renderPageCanvas(doc, p); });
+  doc.pages.forEach(p => { if (p.visible) requestPageRender(doc, p); });   // 큐를 거쳐 보이는 쪽부터
 }
 function setPdfZoom(z, doc){
   doc = doc || state;

@@ -229,10 +229,15 @@ function applyUiScale(){
 applyUiScale();
 applyToolVisibility();
 function defaultPdfZoom(){ const z = Number(appSettings.pdfZoom); return [1,1.25,1.5].includes(z) ? z : 1.25; }
+// PDF 렌더 프로필. renderScale 은 미리 그리는 페이지와 화면에 보이는 페이지가 반드시 같아야 한다.
+// 둘이 다르면 미리 그려둔 캔버스를 못 쓰고 페이지가 화면에 들어오는 순간 처음부터 다시 그려서,
+// 프리페치가 지연을 전혀 줄여주지 못한다(오히려 버려질 렌더로 CPU 만 쓴다).
+// maxConcurrent: 동시에 그리는 페이지 수. pdf.js 는 캔버스 래스터화를 메인 스레드에서 하므로
+// 제한이 없으면 스크롤로 지나친 페이지들이 정작 사용자가 멈춘 페이지를 밀어낸다.
 function pdfRenderProfile(){
   return appSettings.performance === "quality"
-    ? { prefetchScale: 3, prefetchMaxSide: 5000, rootMargin: "300% 0px" }
-    : { prefetchScale: 1.8, prefetchMaxSide: 3600, rootMargin: "100% 0px" };
+    ? { renderScale: 3, maxSide: 6000, rootMargin: "300% 0px", maxConcurrent: 3 }
+    : { renderScale: 2, maxSide: 5000, rootMargin: "200% 0px", maxConcurrent: 2 };
 }
 
 const byId = (id) => document.getElementById(id);
@@ -403,10 +408,10 @@ async function yieldToBrowserThrottled(minGapMs = 12){
   _lastYieldAt = performance.now();
 }
 // PDF 렌더 해상도: 화면에 "보이는 배율(줌)"에 맞춰 캔버스 픽셀을 잡아 크롬처럼 어느 배율이든 또렷하게 한다.
-// 최소 RENDER_SCALE 배 슈퍼샘플(작게 봐도 선명) + 줌이 커지면 그 배율로 재렌더(targetRenderDpr 참고).
-// RENDER_MAX_SIDE 로 캔버스 한 변(px)을 제한해 고배율 메모리를 보호한다(단 z=1 품질은 보존).
-const RENDER_SCALE = 4;
-const RENDER_MAX_SIDE = 6000;
+// 기본 배율은 pdfRenderProfile().renderScale(슈퍼샘플 배수) + 줌이 커지면 그 배율로 재렌더(targetRenderDpr 참고).
+// 한 변이 profile.maxSide(px) 를 넘지 않게 제한해 고배율 메모리를 보호한다(단 기본 배율 품질은 보존).
+// 2배 슈퍼샘플이면 CSS 픽셀당 4배 픽셀이라 육안으로 충분히 또렷하다. 3배는 9배 픽셀이 되어
+// A4 한 장이 1700만 픽셀(≈68MB)까지 커지고, 이 래스터화 시간이 스크롤 지연의 지배적 원인이었다.
 // PDF 기본 표시 크기 배수(맞춤 대비). 1.0 = 기본, 키우면 더 크게 열림.
 const FIT_SCALE = 1.0;
 // PDF를 처음 열 때 표시 배율. 125%에서 고해상도 렌더가 즉시 적용되도록 기본값으로 사용한다.

@@ -118,7 +118,7 @@ function createPagePlaceholder(page, doc, pageNum){
     rotation: page.rotate % 360,
     canvas: null, rendered: false, rendering: null,
     renderedDpr: 0, renderingDpr: 0, renderTask: null, gen: 0, visible: false,
-    textLayer: null, annotLayer: null, textBuilt: false, textBuilding: false, textGen: 0,
+    textLayer: null, annotLayer: null, textBuilt: false, textBuilding: false, textGen: 0, textIdle: 0,
   };
   doc.pages.push(pinfo);
   doc.allPages.push(pinfo);
@@ -126,20 +126,21 @@ function createPagePlaceholder(page, doc, pageNum){
 }
 
 // 현재 줌(보이는 배율)에 맞는 캔버스 해상도(device px 배수)를 구한다.
-//  - 최소 RENDER_SCALE 배 슈퍼샘플로 작게 봐도 또렷.
+//  - 최소 profile.renderScale 배 슈퍼샘플로 작게 봐도 또렷.
 //  - 줌을 키우면 screen*zoom 으로 따라 올라가 그 배율에서도 1:1 이상 → 크롬처럼 선명.
-//  - 캔버스 한 변이 RENDER_MAX_SIDE 를 넘지 않게 제한(메모리). 단 z=1 품질(RENDER_SCALE)은 보존.
+//  - 캔버스 한 변이 profile.maxSide 를 넘지 않게 제한(메모리). 단 기본 배율 품질은 보존.
+// 화면 밖(프리페치) 페이지는 확대 배율을 따라가지 않고 기본 배율에서 멈춘다. floor·maxSide 는
+// 보이든 안 보이든 같은 값이라, 기본 줌에서는 미리 그려둔 캔버스를 그대로 재사용한다(재렌더 없음).
 function targetRenderDpr(doc, p){
   const screen = window.devicePixelRatio || 1;
   const z = (doc.zoom || 1);
   const dr = doc.el.getBoundingClientRect(), pr = p.frame.getBoundingClientRect();
   const actuallyVisible = pr.bottom > dr.top && pr.top < dr.bottom && pr.right > dr.left && pr.left < dr.right;
   const profile = pdfRenderProfile();
-  const floor = actuallyVisible ? RENDER_SCALE : profile.prefetchScale;
-  const maxSide = actuallyVisible ? RENDER_MAX_SIDE : profile.prefetchMaxSide;
-  const want = Math.max(floor, actuallyVisible ? screen * z : Math.min(screen * z, 2));
+  const floor = profile.renderScale;
+  const want = actuallyVisible ? Math.max(floor, screen * z) : floor;
   const longSide = Math.max(p.cssW, p.cssH) || 1;
-  const cap = Math.max(floor, maxSide / longSide);
+  const cap = Math.max(floor, profile.maxSide / longSide);
   return Math.min(want, cap);
 }
 
@@ -172,7 +173,9 @@ function renderPageCanvas(doc, p){
       p.renderTask = task;
       await task.promise;
       if (typeof page.cleanup === "function") page.cleanup();
-      if (doc.closed || p.gen !== gen || !p.frame.isConnected){ canvas.width = canvas.height = 0; return; }
+      // 그리는 사이 스크롤로 프리페치 범위를 벗어났으면 결과를 버린다.
+      // (붙여두면 IntersectionObserver 의 "이탈" 이벤트는 이미 지나가서 다시 해제될 기회가 없다)
+      if (doc.closed || p.gen !== gen || !p.frame.isConnected || !p.visible){ canvas.width = canvas.height = 0; return; }
       const old = p.canvas;
       p.pageEl.insertBefore(canvas, p.pageEl.firstChild);          // 새 캔버스를 오버레이 뒤(아래)에 먼저 끼우고
       if (old && old !== canvas){ old.width = old.height = 0; old.remove(); }   // 옛 캔버스 교체(깜빡임 최소화)
@@ -189,14 +192,66 @@ function renderPageCanvas(doc, p){
 }
 
 // 멀어진 페이지의 캔버스를 비워 메모리를 회수한다(오버레이·서명은 그대로 유지).
+// 그리는 중이었다면 취소하고 결과도 버린다. 예전에는 렌더 중이면 그냥 돌아갔는데(early return),
+// 그러면 빠르게 스크롤할 때 화면 밖 대형 캔버스가 계속 쌓여 GC 압박으로 더 심하게 버벅였다.
 function releasePageCanvas(p){
-  if (!p || p.rendering) return;
+  if (!p) return;
+  if (p.rendering){
+    p.gen = (p.gen || 0) + 1;                     // 진행 중 렌더의 완료 처리를 무효화(캔버스 부착 차단)
+    if (p.renderTask){ try { p.renderTask.cancel(); } catch(e){} }
+    p.renderTask = null; p.rendering = null; p.renderingDpr = 0;
+  }
   if (p.canvas){
     p.canvas.width = 0; p.canvas.height = 0;
     p.canvas.remove();
     p.canvas = null;
   }
   p.rendered = false; p.renderedDpr = 0;
+}
+
+// ── 렌더 큐 ────────────────────────────────────────────────────────────────
+// pdf.js v3 는 캔버스 래스터화를 메인 스레드에서 한다. 그래서 교차 이벤트가 온 순서대로 전부
+// 그리기 시작하면, 빠르게 스크롤할 때 "지나쳐 버린" 페이지들이 큐 앞을 차지하고 정작 사용자가
+// 멈춘 페이지가 그 뒤에 밀린다. 동시 실행 수를 제한하고, 꺼낼 때마다 지금 화면에 가까운 것을
+// 먼저 고른다(대기 중에 화면 밖으로 나간 페이지는 시작하지 않고 버린다).
+function pdfRenderQueue(doc){
+  if (!doc.__renderQueue) doc.__renderQueue = { pending: new Set(), active: 0 };
+  return doc.__renderQueue;
+}
+function requestPageRender(doc, p){
+  if (!doc || doc.closed || !p) return;
+  pdfRenderQueue(doc).pending.add(p);
+  pumpRenderQueue(doc);
+}
+// 대기 중인 페이지 가운데 뷰포트에 가장 가까운 것을 고른다(보이는 페이지는 거리 0 → 항상 먼저).
+function takeNextRenderTarget(doc, q){
+  const dr = doc.el.getBoundingClientRect();
+  let best = null, bestDist = Infinity;
+  for (const p of Array.from(q.pending)){
+    if (!p.frame || !p.frame.isConnected){ q.pending.delete(p); continue; }
+    const pr = p.frame.getBoundingClientRect();
+    const dist = (pr.bottom > dr.top && pr.top < dr.bottom)
+      ? 0
+      : Math.min(Math.abs(pr.top - dr.bottom), Math.abs(dr.top - pr.bottom));
+    if (dist < bestDist){ bestDist = dist; best = p; }
+  }
+  return best;
+}
+function pumpRenderQueue(doc){
+  if (!doc || doc.closed) return;
+  const q = pdfRenderQueue(doc);
+  const limit = Math.max(1, pdfRenderProfile().maxConcurrent);
+  while (q.active < limit && q.pending.size){
+    const p = takeNextRenderTarget(doc, q);
+    if (!p) break;
+    q.pending.delete(p);
+    if (!p.visible || !p.frame.isConnected) continue;   // 기다리는 사이 화면 밖으로 나감 → 버림
+    q.active++;
+    Promise.resolve(renderPageCanvas(doc, p)).catch(()=>{}).then(() => {
+      q.active--;
+      pumpRenderQueue(doc);
+    });
+  }
 }
 
 // ── PDF 텍스트 선택 레이어 + 링크(URL) 레이어 ────────────────────────────────
@@ -256,8 +311,35 @@ function ensurePdfTextLinks(doc, p){
     }
   })();
 }
+// 텍스트 레이어는 페이지당 수백 개의 절대 위치 div 를 만드는 메인 스레드 작업이라, 캔버스 렌더와
+// 같은 순간에 돌면 서로 밀어낸다. 글자 선택은 사용자가 스크롤을 멈춘 뒤에나 하는 동작이므로
+// idle 시간으로 미루고, 그때 화면 근처에 있는 페이지만 만든다(멀면 그냥 두고 다음 스크롤에 재시도).
+const PDF_TEXT_NEAR_RATIO = 0.5;      // 뷰포트 높이의 ±50% 안쪽이면 "화면 근처"
+function schedulePdfTextLinks(doc, p){
+  if (!doc || doc.closed || !p || p.textBuilt || p.textBuilding || p.textIdle) return;
+  const idle = window.requestIdleCallback
+    ? (fn) => window.requestIdleCallback(fn, { timeout: 1500 })
+    : (fn) => setTimeout(fn, 200);
+  p.textIdle = idle(() => {
+    p.textIdle = 0;
+    if (doc.closed || !p.visible || !p.frame || !p.frame.isConnected) return;
+    const dr = doc.el.getBoundingClientRect(), pr = p.frame.getBoundingClientRect();
+    const pad = dr.height * PDF_TEXT_NEAR_RATIO;
+    if (pr.bottom < dr.top - pad || pr.top > dr.bottom + pad) return;   // 아직 멀다 → 다음 스크롤에 다시
+    ensurePdfTextLinks(doc, p);
+  });
+}
+// 스크롤이 멈출 때마다 화면 근처 페이지의 텍스트 레이어를 채운다(이미 있으면 즉시 반환).
+function refreshVisibleText(doc){
+  if (!doc || doc.closed || doc.kind !== "pdf" || !doc.pages) return;
+  for (const p of doc.pages){ if (p.visible) schedulePdfTextLinks(doc, p); }
+}
 function releasePdfTextLinks(p){
   if (!p) return;
+  if (p.textIdle){
+    if (window.cancelIdleCallback) window.cancelIdleCallback(p.textIdle); else clearTimeout(p.textIdle);
+    p.textIdle = 0;
+  }
   p.textGen = (p.textGen || 0) + 1;    // 진행 중인 빌드가 있으면 무효화
   p.textBuilding = false; p.textBuilt = false;
   if (p.textLayer){ p.textLayer.remove(); p.textLayer = null; }
@@ -339,7 +421,7 @@ window.addEventListener("resize", schedulePdfSelHighlight);
 function startLazyRender(doc){
   if (doc.io){ doc.io.disconnect(); doc.io = null; }
   if (typeof IntersectionObserver === "undefined"){
-    doc.pages.forEach(p => { p.visible = true; renderPageCanvas(doc, p); ensurePdfTextLinks(doc, p); });   // 폴백: 전부 렌더
+    doc.pages.forEach(p => { p.visible = true; requestPageRender(doc, p); schedulePdfTextLinks(doc, p); });   // 폴백: 전부 렌더
     return;
   }
   const io = new IntersectionObserver((entries) => {
@@ -347,8 +429,8 @@ function startLazyRender(doc){
       const p = doc.pages.find(x => x.frame === en.target);
       if (!p) continue;
       p.visible = en.isIntersecting;                 // 줌 재렌더가 참고할 가시성 기록
-      if (en.isIntersecting){ renderPageCanvas(doc, p); ensurePdfTextLinks(doc, p); }
-      else { releasePageCanvas(p); releasePdfTextLinks(p); }
+      if (en.isIntersecting){ requestPageRender(doc, p); schedulePdfTextLinks(doc, p); }
+      else { pdfRenderQueue(doc).pending.delete(p); releasePageCanvas(p); releasePdfTextLinks(p); }
     }
   }, { root: doc.el, rootMargin: pdfRenderProfile().rootMargin, threshold: 0 });
   doc.pages.forEach(p => io.observe(p.frame));
@@ -358,7 +440,7 @@ function startLazyRender(doc){
     doc.__qualityScrollHandler = () => {
       if (scheduled) return;
       scheduled = true;
-      requestAnimationFrame(() => { scheduled = false; refreshVisibleQuality(doc); if (doc.id === activeId) updatePdfPageIndicator(doc); if (doc.id === studyPdfId) updateStudyPageIndicator(); });
+      requestAnimationFrame(() => { scheduled = false; refreshVisibleQuality(doc); refreshVisibleText(doc); if (doc.id === activeId) updatePdfPageIndicator(doc); if (doc.id === studyPdfId) updateStudyPageIndicator(); });
     };
     doc.el.addEventListener("scroll", doc.__qualityScrollHandler, { passive: true });
   }
