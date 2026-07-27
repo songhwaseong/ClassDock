@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 // markDocumentDirty 로 통일하기 전에는 편집기가 상단 배지만 갱신하고 사이드바를 다시 그리지
 // 않아서, 편집을 해도 사이드바의 "저장 후 수정됨" 표시가 예전 상태로 남았다.
@@ -10,6 +11,7 @@ test("텍스트를 편집하면 상단 배지와 사이드바 표시가 함께 �
   await page.addInitScript(() => {
     try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){}
   });
+  await collapseSidebar(page);
   await page.goto("/");
 
   // 사이드바 표시: 숨김이면 "", 아니면 title(저장 후 수정됨 / 앱 작업공간에 저장됨)

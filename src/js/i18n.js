@@ -239,6 +239,10 @@
     "▶ 지금 시작": "▶ Start now",
     "모니터 전체 화면으로 지금 바로 대기 화면을 켭니다 (아무 키·클릭으로 해제)": "Turn on the idle screen full-screen right now (any key/click exits)",
     "항목을 누른 뒤 새 조합을 입력하세요.": "Click an item, then press a new combination.",
+    "마우스 측면 버튼으로 파일 탭 이동 — 뒤로 버튼: 이전 파일, 앞으로 버튼: 다음 파일 (Chrome·Edge 계열에서만 동작)":
+      "Switch file tabs with the mouse side buttons — Back: previous file, Forward: next file (Chromium browsers only)",
+    "꺼 두더라도 측면 버튼이 브라우저 '뒤로'로 동작해 작업 화면을 벗어나는 것은 항상 막습니다.":
+      "Even when off, the side buttons are always blocked from navigating away from your workspace.",
     "기본값 복원": "Restore defaults",
     "취소": "Cancel",
     "저장": "Save",

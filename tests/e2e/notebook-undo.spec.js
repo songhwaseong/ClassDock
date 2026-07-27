@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 // 노트북 셀 작업(추가·삭제·형식 변경)의 되돌리기·다시실행을 화면 기준으로 고정한다.
 // 스냅샷이 노트북 전체 ipynb 문자열이라, 단계 수(24)뿐 아니라 총 용량(12MB) 상한도 함께 걸린다.
@@ -7,6 +8,7 @@ async function openNotebook(page){
   await page.addInitScript(() => {
     try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){}
   });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.evaluate(() => newNotebookScratch());
   await expect(page.locator(".nbv-cell").first()).toBeVisible();

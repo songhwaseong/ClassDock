@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 // 공용 history.js(MNEditHistory)로 옮긴 편집기들이 실제로 되돌려지는지 확인한다.
 // 특히 capture 가 매번 새 배열/객체를 주는 편집기는 isEqual 을 빠뜨리면 undo 가 조용히
@@ -8,6 +9,7 @@ async function openApp(page){
   await page.addInitScript(() => {
     try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){}
   });
+  await collapseSidebar(page);
   await page.goto("/");
 }
 

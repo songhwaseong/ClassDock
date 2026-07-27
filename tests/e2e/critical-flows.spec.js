@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 test("command palette opens and closes without console errors", async ({ page }) => {
   const errors = [];
@@ -28,6 +29,7 @@ test("a large (>1MB) text file opens the lightweight editor and stays editable",
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });   // 첫 실행 환영 모달이 클릭을 가로막지 않게 미리 끈다
+  await collapseSidebar(page);
   await page.goto("/");
   // 1.2MB 남짓 — 편집 임계값(1MB) 초과 → 가벼운 편집기(B안)로 열려야 한다.
   const big = ("A".repeat(60) + "\n").repeat(20000);
@@ -60,6 +62,7 @@ test("in-editor find highlights Korean (full-width) matches at the correct posit
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await collapseSidebar(page);
   await page.goto("/");
   // 3번째 줄에 한글 + 고유 검색어. 뒤에 채움 텍스트로 1MB(문자 수) 초과 → 경량 편집기.
   const marker = "먼저 쓰레기표적 뒤";
@@ -117,6 +120,7 @@ test("typing in the read-only text view switches straight into the editor", asyn
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#fileInput").setInputFiles({
     name: "e2e-direct-edit.txt",
@@ -140,6 +144,7 @@ test("double-clicking a word in the read-only view enters edit with the word sel
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#fileInput").setInputFiles({
     name: "e2e-dblclick-edit.txt",
@@ -163,6 +168,7 @@ test("double-clicking a word in the read-only view enters edit with the word sel
 
 test("a new whiteboard initializes its canvas through the module boundary", async ({ page }) => {
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });   // 환영 모달이 클릭을 가로막지 않게 미리 끈다
+  await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#dzNew").click();          // '＋ 새로 만들기' 드롭다운 열기
   await page.locator("#dzNewBoard").click();      // 그 안의 '새 화이트보드' 항목
@@ -175,6 +181,7 @@ test("two text files can be compared in the diff viewer", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#fileInput").setInputFiles([
     { name: "diff-a.txt", mimeType: "text/plain", buffer: Buffer.from("line one\nsame line\nlast\n", "utf8") },

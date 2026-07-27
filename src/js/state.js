@@ -131,6 +131,7 @@ const DEFAULT_APP_SETTINGS = {
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
+  mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
   shortcuts: DEFAULT_SHORTCUTS
 };
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.

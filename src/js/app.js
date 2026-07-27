@@ -712,6 +712,7 @@ function wire(){
     byId("settingScreensaverIdle").value = String(ss.idleMin || 5);
     byId("settingScreensaverSound").checked = !!ss.sound;
     refreshScreensaverName();
+    byId("settingMouseSideButtons").checked = appSettings.mouseSideButtons !== false;
     shortcutCaptureAction = "";
     shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
     setShortcutError("");
@@ -745,6 +746,7 @@ function wire(){
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
         sound: byId("settingScreensaverSound").checked },
       toolVisibility: collectToolVisibility(),
+      mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });
     if (typeof applyToolVisibility === "function") applyToolVisibility();
@@ -1005,6 +1007,30 @@ function wire(){
       sidebarSearch.focus(); sidebarSearch.select();
     }
   });
+
+  // 마우스 측면 버튼(4=뒤로, 5=앞으로)으로 열린 탭 좌/우 이동.
+  // ▶ 기능을 꺼도 preventDefault 는 항상 한다: 이 앱은 한 페이지짜리라 브라우저 '뒤로'가
+  //    곧 화면 이탈이고, 저장까지 끝낸 문서만 열려 있으면 beforeunload 경고도 안 떠서
+  //    열어 둔 탭이 통째로 사라진다(사고 방지가 기능보다 먼저다).
+  // ▶ 크로미움(Chrome·Edge)에서만 이 버튼이 DOM 으로 들어온다. Firefox(Windows)는 브라우저가
+  //    먼저 삼켜서 아무 이벤트도 오지 않는다 — 그쪽에선 조용히 동작하지 않는다.
+  // ▶ 창(capture) 단계에서 전파를 끊는 이유: 모달 오버레이 닫기 핸들러들이 버튼 번호를
+  //    보지 않아(e.target === overlay 만 확인) 측면 클릭에도 창이 닫혀 버린다.
+  (() => {
+    const onSideButton = (e) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type !== "mousedown") return;                 // 한 번 누를 때 한 번만 이동
+      if (appSettings.mouseSideButtons === false) return;
+      if (document.querySelector(".modal:not([hidden])")) return;
+      if (tabOrder.length < 2) return;                    // 열린 탭이 2개 이상일 때만 전환
+      navigateTab(e.button === 3 ? -1 : 1);
+    };
+    // mouseup·auxclick 까지 막아야 일부 버전에서 뒤로가기가 새어 나가지 않는다.
+    for (const type of ["mousedown", "mouseup", "auxclick"]) window.addEventListener(type, onSideButton, true);
+  })();
+
   syncShortcutHints();
   if (typeof startMemStat === "function") startMemStat();   // 메모리 사용량 칩 폴링 시작
 

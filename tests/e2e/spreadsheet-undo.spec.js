@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 // 표 편집기의 되돌리기·다시실행 동작을 화면 기준으로 고정한다.
 // "새 표"는 진짜 XLSX 를 만들어 편집 모드로 열기 때문에, CSV 의 copy-on-write 가 아니라
@@ -8,6 +9,7 @@ async function openSheet(page){
   await page.addInitScript(() => {
     try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){}
   });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.evaluate(() => newSpreadsheetScratch());
   await expect(page.locator('td[data-mcol]').first()).toBeVisible();

@@ -1,7 +1,11 @@
 const { test, expect } = require("@playwright/test");
+const { collapseSidebar } = require("./helpers");
 
 // Alt+세로 드래그(열 편집)가 고정폭/가변폭 글꼴 모두에서 '가리킨 글자 경계'에 맞는지 확인한다.
 async function openPy(page, body) {
+  // 온보딩 모달은 로드 700ms 뒤에 뜬다 — 느린 실행에서 드래그 도중 튀어나와 입력을 삼키므로 미리 끈다.
+  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#fileInput").setInputFiles({
     name: "col-edit.py",
