@@ -283,17 +283,32 @@ function createPythonTerminal(options){
     if (/\s/.test(value)) return "'" + value.replace(/'/g, "''") + "'";
     return value;
   };
+  const commonCompletionPrefix = (items) => {
+    if (!items.length) return "";
+    let prefix = String(items[0].value || "");
+    for (let itemIndex = 1; itemIndex < items.length && prefix; itemIndex++){
+      const value = String(items[itemIndex].value || "");
+      let length = 0;
+      const limit = Math.min(prefix.length, value.length);
+      while (length < limit && prefix[length].toLowerCase() === value[length].toLowerCase()) length++;
+      prefix = prefix.slice(0, length);
+    }
+    return prefix;
+  };
+  const applyCompletionValue = (state, value, keepCaretInsideQuote) => {
+    const replacement = quoteCompletion(value, state.context.quote);
+    input.value = state.context.before + replacement + state.context.after;
+    const wrapped = !!state.context.quote || /\s/.test(String(value || ""));
+    const caret = state.context.before.length + replacement.length - (keepCaretInsideQuote && wrapped ? 1 : 0);
+    input.setSelectionRange(caret, caret);
+    state.renderedValue = input.value;
+    state.renderedCaret = caret;
+  };
   const applyCompletion = (state, index) => {
     const item = state.items[index];
     if (!item) return;
-    const replacement = quoteCompletion(item.value, state.context.quote);
-    input.value = state.context.before + replacement + state.context.after;
-    const wrapped = !!state.context.quote || /\s/.test(String(item.value || ""));
-    const caret = state.context.before.length + replacement.length - (item.directory && wrapped ? 1 : 0);
-    input.setSelectionRange(caret, caret);
+    applyCompletionValue(state, item.value, item.directory);
     state.index = index;
-    state.renderedValue = input.value;
-    state.renderedCaret = caret;
     mode.textContent = "경로 후보 " + (index + 1) + "/" + state.items.length + " · 로컬 PowerShell";
   };
   const insertBrowserIndent = () => {
@@ -335,7 +350,13 @@ function createPythonTerminal(options){
         return;
       }
       completionState = { context, items, index:-1, renderedValue:"", renderedCaret:-1 };
-      applyCompletion(completionState, backward ? items.length - 1 : 0);
+      const sharedPrefix = commonCompletionPrefix(items);
+      if (!backward && sharedPrefix.length > context.fragment.length){
+        applyCompletionValue(completionState, sharedPrefix, true);
+        mode.textContent = "경로 자동완성 · 공통 이름까지 · 로컬 PowerShell";
+      } else {
+        applyCompletion(completionState, backward ? items.length - 1 : 0);
+      }
     } catch(error){
       completionState = null;
       mode.textContent = "경로 자동완성 오류 · 로컬 PowerShell";
