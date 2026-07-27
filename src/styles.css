@@ -3094,10 +3094,10 @@
   .py-terminal-error{color:#f87171}
   .py-terminal-status{margin:3px 0;color:var(--code-muted);font-family:"Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif;font-size:11.5px}
   .py-terminal-status.error{color:#f87171}
-  .py-terminal-input-row{position:sticky;bottom:0;display:flex;align-items:flex-end;gap:8px;padding:9px 11px;
+  .py-terminal-input-row{position:sticky;bottom:0;display:flex;align-items:center;gap:8px;padding:9px 11px;
     border-top:1px solid var(--code-border);background:var(--code-panel-head);z-index:3}
   .py-terminal-prompt{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--code-text);font:700 var(--terminal-fs,var(--code-fs,13px))/var(--terminal-lh,var(--code-lh,21px)) var(--code-ff,Consolas,"Courier New",monospace);user-select:none}
-  .py-terminal-command{flex:1;min-width:0;min-height:24px;max-height:110px;resize:vertical;padding:2px 0;border:0;outline:0;
+  .py-terminal-command{box-sizing:border-box;flex:1;min-width:0;height:var(--terminal-lh,var(--code-lh,21px));min-height:var(--terminal-lh,var(--code-lh,21px));max-height:110px;resize:vertical;padding:0;border:0;outline:0;
     background:transparent;color:var(--code-text);caret-color:#4ade80;
     font:var(--terminal-fs,var(--code-fs,13px))/var(--terminal-lh,var(--code-lh,21px)) var(--code-ff,Consolas,"Courier New",monospace)}
   .py-terminal-command:disabled{color:var(--code-muted)}
