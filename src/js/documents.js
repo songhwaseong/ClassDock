@@ -1038,9 +1038,10 @@ function updateSidebarActive(){
 // 활성 파일이 사이드바에 보이도록: 접힌 부모 폴더/압축을 펼치고 그 항목으로 스크롤
 let sidebarContentFocusTimer = 0;
 function focusSidebarDoc(id){
-  if (sidebarCollapsed) return;                  // 사이드바 숨김 상태면 스킵
   const d = docs.find(x => x.id === id);
   if (!d) return;
+  lastFocusedDocId = d.id;                       // 숨김 상태에서도 "마지막으로 본 문서"는 기억(다시 열 때 이 줄로 이동)
+  if (sidebarCollapsed) return;                  // 사이드바 숨김 상태면 스킵
   let changed = false, node = navNodeById(d.nodeId);
   while (node && node.parentId != null){          // 부모 그룹들을 따라 올라가며 펼침
     const parent = navNodeById(node.parentId);
@@ -1060,6 +1061,30 @@ function focusSidebarDoc(id){
   }
 }
 function focusSidebarActive(){ focusSidebarDoc(activeId); }
+
+// 사이드바를 여는 공통 동선. 숨긴 동안에는 focusSidebarDoc 가 스킵되므로(폴더도 안 펼쳐지고 스크롤도 안 따라감)
+// 다시 열 때 마지막으로 보던 문서 줄을 펼치고 그 줄로 커서를 맞춰 준다.
+//   reveal:false    → 열기만 한다(검색창·확장자 필터처럼 포커스 갈 곳이 따로 있는 경우)
+//   moveFocus:true  → 실제 키보드 포커스까지 목록으로 옮긴다(키보드로 열었을 때만)
+function openSidebar(opts){
+  const o = opts || {};
+  if (sidebarCollapsed){
+    sidebarCollapsed = false;
+    try { localStorage.setItem("sidebarCollapsed", "false"); } catch(e){}
+    refreshChrome();                              // inert 해제가 먼저여야 아래 focus() 가 먹는다
+  }
+  if (o.reveal === false) return;
+  // 열림 트랜지션(transform .18s) 중에 포커스를 주면 화면이 밀릴 수 있어 한 프레임 뒤로 미룬다.
+  requestAnimationFrame(() => revealSidebarCursorDoc(!!o.moveFocus));
+}
+
+function revealSidebarCursorDoc(moveFocus){
+  if (sidebarCollapsed) return;
+  const id = docs.some(x => x.id === lastFocusedDocId) ? lastFocusedDocId : activeId;
+  focusSidebarDoc(id);                            // 상위 폴더 펼침 + 스크롤 + 잠깐 강조
+  const el = sidebarItems().find(x => x.dataset.docId === String(id));
+  if (el) focusSidebarItem(el, { focus: moveFocus });   // 검색·확장자 필터로 줄이 없으면 커서를 그대로 둔다
+}
 
 // 활성 문서의 상위 폴더 체인만 펼치고 나머지 그룹은 모두 접는다 → "정확히 활성 탭 하나만 펼침".
 // 폴더 열기·드롭·자동복원이 끝나는 순간에만 호출한다(탭 전환·수동 펼침은 건드리지 않는다).
@@ -2766,11 +2791,7 @@ function documentExtension(doc){
 }
 function setSidebarExtensionFilter(ext){
   sidebarExtFilter = ext || "";
-  if (sidebarExtFilter && sidebarCollapsed){
-    sidebarCollapsed = false;
-    try { localStorage.setItem("sidebarCollapsed", "false"); } catch(e){}
-    refreshChrome();
-  }
+  if (sidebarExtFilter && sidebarCollapsed) openSidebar({ reveal: false });   // 필터에 활성 파일이 안 걸릴 수 있어 커서는 그대로
   renderSidebar();
   const wrap = byId("fileStatsWrap"), pop = byId("fileStatsPop");
   if (wrap) wrap.dataset.pin = "0";
@@ -3002,11 +3023,13 @@ function collapseSiblingGroups(node){
 
 /* ===== 사이드바 키보드 탐색: ↑/↓ 로 줄 선택 이동, Enter/Space 로 열기·폴더 펼치기 ===== */
 function sidebarItems(){ return [...byId("sbList").querySelectorAll(".sb-item")]; }
-function focusSidebarItem(item){
+// opts.focus === false 면 roving tabindex 와 스크롤만 맞추고 실제 포커스는 옮기지 않는다
+// (마우스로 사이드바를 열었을 때 편집 중이던 곳에서 포커스를 뺏지 않기 위해).
+function focusSidebarItem(item, opts){
   if (!item) return;
   for (const el of sidebarItems()) el.tabIndex = -1;
   item.tabIndex = 0;
-  item.focus();
+  if (!opts || opts.focus !== false) item.focus({ preventScroll: true });
   item.scrollIntoView({ block: "nearest" });
   sidebarCursorKey = item.dataset.nodeId || null;
 }

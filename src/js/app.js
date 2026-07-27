@@ -864,10 +864,15 @@ function wire(){
       }
     });
   })();
-  byId("sidebarToggle").onclick = () => {
-    sidebarCollapsed = !sidebarCollapsed;
-    try { localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed)); } catch(e){}
-    refreshChrome();
+  byId("sidebarToggle").onclick = (e) => {
+    if (sidebarCollapsed){
+      // e.detail === 0 이면 Enter·Space 로 누른 것 → 키보드 동선이므로 목록으로 포커스까지 넘긴다.
+      openSidebar({ moveFocus: !!e && e.detail === 0 });
+    } else {
+      sidebarCollapsed = true;
+      try { localStorage.setItem("sidebarCollapsed", "true"); } catch(e){}
+      refreshChrome();
+    }
     scheduleViewerLayoutRefresh();
   };
   byId("sidebarBackdrop").onclick = () => {
@@ -895,9 +900,13 @@ function wire(){
       e.preventDefault();
       const wantCollapsed = sbHide;
       if (sidebarCollapsed !== wantCollapsed){
-        sidebarCollapsed = wantCollapsed;
-        try { localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed)); } catch(_){}
-        refreshChrome();
+        if (wantCollapsed){
+          sidebarCollapsed = true;
+          try { localStorage.setItem("sidebarCollapsed", "true"); } catch(_){}
+          refreshChrome();
+        } else {
+          openSidebar({ moveFocus: true });      // 키보드로 열었으니 마지막으로 보던 파일명에 커서를 둔다
+        }
         scheduleViewerLayoutRefresh();
       }
       return;
@@ -988,7 +997,7 @@ function wire(){
       e.preventDefault();
       const seed = document.activeElement === sidebarSearch
         ? "" : currentSelectionSeed();                   // focus()·select() 가 선택을 지우기 전에 붙잡는다(검색창 자신은 제외)
-      if (sidebarCollapsed){ sidebarCollapsed = false; refreshChrome(); }
+      if (sidebarCollapsed) openSidebar({ reveal: false });   // 포커스는 아래 검색창으로 간다
       if (seed && seed !== sidebarSearch.value){         // 문서에서 선택해 둔 글자가 있으면 검색어로 딸려간다
         sidebarSearch.value = seed;
         sidebarSearch.dispatchEvent(new Event("input", { bubbles: true }));   // 이름·본문 검색 즉시 실행

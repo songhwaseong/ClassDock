@@ -48,6 +48,7 @@ let tabOrder = [];        // 선택(활성화)한 문서 id 순서 — 헤더 �
 let activeMru = [];
 let sidebarCollapsed = false;
 let sidebarCursorKey = null;   // 사이드바 키보드 커서(현재 강조된 줄의 nodeId)
+let lastFocusedDocId = null;   // 마지막으로 들여다본 문서 id — 사이드바를 다시 열 때 그 파일명으로 커서를 옮긴다
 try { sidebarCollapsed = localStorage.getItem("sidebarCollapsed") === "true"; } catch(e){}
 let activeId = 0, docSeq = 0, navSeq = 0;
 let state = null;        // 활성 문서
