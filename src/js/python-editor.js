@@ -1833,6 +1833,16 @@ function buildCodeEditor(text, prof, options={}){
       if ((e.key === '"' || e.key === "'") && start === end && ta.value[start] === e.key){
         e.preventDefault(); ta.selectionStart = ta.selectionEnd = start + 1; return;
       }
+      // 도크스트링: 같은 따옴표 2개 바로 뒤에서 3번째를 치면 닫는 3개까지 한 번에 넣는다(""" """ 형태).
+      // 짝 붙이기에 맡기면 """ + " 로 4개가 되어 불편. 단, 앞이 식별자·닫는 괄호·같은 따옴표면
+      // 이미 끝난 문자열 뒤라는 뜻이므로("""abc""" 뒤 등) 새 도크스트링으로 보지 않는다.
+      if ((e.key === '"' || e.key === "'") && start === end && start >= 2
+          && ta.value.slice(start - 2, start) === e.key + e.key
+          && !/[A-Za-z0-9_)\]}"']/.test(ta.value[start - 3] || "")){
+        const nq = ta.value[start];
+        const nextIsWordQ = !!nq && (/[A-Za-z0-9_]/.test(nq) || (nq.charCodeAt(0) > 127 && !/\s/.test(nq)));
+        if (!nextIsWordQ){ e.preventDefault(); insertPair(e.key, e.key.repeat(3)); return; }
+      }
       // 함수 자동완성이 방금 넣어 준 빈 () 안에서 곧바로 ( 를 누르면 print(()) 처럼 중복되므로,
       // 그 한 번만 무시한다(같은 위치·직후에만 성립 → 튜플 인자 print((1,2)) 등 일반 중첩은 그대로 동작).
       if (e.key === "(" && start === end && start === autoParenSpot
