@@ -747,7 +747,7 @@ const PET_ART = {
 };
 
 // 사진 기반 사람 펫은 기존 15×11 펫과 분리해 16×20 전용 프레임으로 움직인다.
-function petMotionFrame(base, changes){
+function petMotionFrame(base, changes) {
   const frame = base.slice();
   for (const row in changes) frame[Number(row)] = changes[row];
   return frame;
@@ -755,42 +755,42 @@ function petMotionFrame(base, changes){
 const PET_GLASSES_MAN_MOTION = {
   walk: [
     petMotionFrame(PET_ART.glassesMan, {
-      8:"..SSBBBBBBBB....", 9:"....BBBBBBBBSS..",
-      14:".....PPP..PPP...", 15:".....PPP.PPP....", 16:"....PPP..PPP....",
-      17:"...PPP....PPP...", 18:"..FFF......FFF..", 19:"..FFF......FFF.."
+      8: "..SSBBBBBBBB....", 9: "....BBBBBBBBSS..",
+      14: ".....PPP..PPP...", 15: ".....PPP.PPP....", 16: "....PPP..PPP....",
+      17: "...PPP....PPP...", 18: "..FFF......FFF..", 19: "..FFF......FFF.."
     }),
     petMotionFrame(PET_ART.glassesMan, {
-      8:"....BBBBBBBBSS..", 9:"..SSBBBBBBBB....",
-      14:"...PPP..PPP.....", 15:"....PPP.PPP.....", 16:"....PPP..PPP....",
-      17:"...PPP....PPP...", 18:"..FFF......FFF..", 19:"..FFF......FFF.."
+      8: "....BBBBBBBBSS..", 9: "..SSBBBBBBBB....",
+      14: "...PPP..PPP.....", 15: "....PPP.PPP.....", 16: "....PPP..PPP....",
+      17: "...PPP....PPP...", 18: "..FFF......FFF..", 19: "..FFF......FFF.."
     })
   ],
   jump: [petMotionFrame(PET_ART.glassesMan, {
-    8:"..SSBBBBBBBBSS..", 9:"...BBBBBBBBBB...",
-    14:".....PPPPPP.....", 15:"....PPP..PPP....", 16:"...PPP....PPP...",
-    17:"...PPP....PPP...", 18:"....FFF..FFF....", 19:"................"
+    8: "..SSBBBBBBBBSS..", 9: "...BBBBBBBBBB...",
+    14: ".....PPPPPP.....", 15: "....PPP..PPP....", 16: "...PPP....PPP...",
+    17: "...PPP....PPP...", 18: "....FFF..FFF....", 19: "................"
   })],
   fall: null,
   climb: [
     petMotionFrame(PET_ART.glassesMan, {
-      0:"..SS.HHHHHH.....", 1:"..BBHHHHHHHH....", 2:"..BBHHHHHHHHHH..",
-      8:"..BBSSBBBBBBBS..", 14:".....PPP.PPP....", 17:"...PPP....PPP..."
+      0: "..SS.HHHHHH.....", 1: "..BBHHHHHHHH....", 2: "..BBHHHHHHHHHH..",
+      8: "..BBSSBBBBBBBS..", 14: ".....PPP.PPP....", 17: "...PPP....PPP..."
     }),
     petMotionFrame(PET_ART.glassesMan, {
-      0:".....HHHHHH.SS..", 1:"....HHHHHHHHBB..", 2:"..HHHHHHHHHHBB..",
-      8:"..SBBBBBBBSSBB..", 14:"....PPP.PPP.....", 17:"...PPP....PPP..."
+      0: ".....HHHHHH.SS..", 1: "....HHHHHHHHBB..", 2: "..HHHHHHHHHHBB..",
+      8: "..SBBBBBBBSSBB..", 14: "....PPP.PPP.....", 17: "...PPP....PPP..."
     })
   ],
   cheer: [
     petMotionFrame(PET_ART.glassesMan, {
-      0:"SS...HHHHHH...SS", 1:"BB..HHHHHHHH..BB", 2:".B.HHHHHHHHHH.B.",
-      3:".B.HHSSSSSSHH.B.", 4:".B.SGWKGGWKSS.B.", 5:".B..SSMMMMSS..B.",
-      6:".B...SSSSSS...B."
+      0: "SS...HHHHHH...SS", 1: "BB..HHHHHHHH..BB", 2: ".B.HHHHHHHHHH.B.",
+      3: ".B.HHSSSSSSHH.B.", 4: ".B.SGWKGGWKSS.B.", 5: ".B..SSMMMMSS..B.",
+      6: ".B...SSSSSS...B."
     }),
     petMotionFrame(PET_ART.glassesMan, {
-      0:".SS..HHHHHH..SS.", 1:".BB.HHHHHHHH.BB.", 2:"..BHHHHHHHHHHB..",
-      3:"..BHHSSSSSSHHB..", 4:"..BSGWKGGWKSSB..", 5:"..B.SSMMMMSS.B..",
-      6:"..B..SSSSSS..B.."
+      0: ".SS..HHHHHH..SS.", 1: ".BB.HHHHHHHH.BB.", 2: "..BHHHHHHHHHHB..",
+      3: "..BHHSSSSSSHHB..", 4: "..BSGWKGGWKSSB..", 5: "..B.SSMMMMSS.B..",
+      6: "..B..SSSSSS..B.."
     })
   ]
 };
@@ -801,352 +801,464 @@ PET_GLASSES_MAN_MOTION.glide = PET_GLASSES_MAN_MOTION.cheer;
 
 // 종족 목록: kind 가 이동 방식을 정한다. 같은 그림이라도 팔레트가 달라 저마다 다른 아이로 보인다.
 const PET_SPECIES = [
-  { kind:"climber", art:PET_ART.crab, palettes: [
-      { B:"#d8622f", D:"#a8481f", L:"#e88a52" },                 // 주황 게(원조)
-      { B:"#3f7fd6", D:"#2c5ba3", L:"#6da3e8" },                 // 파랑 게
-      { B:"#3fae6a", D:"#2a7d4a", L:"#6ecb92" },                 // 초록 게
-      { B:"#d65a9e", D:"#a33c75", L:"#e88cc0" }                  // 분홍 게
+  {
+    kind: "climber", art: PET_ART.crab, palettes: [
+      { B: "#d8622f", D: "#a8481f", L: "#e88a52" },                 // 주황 게(원조)
+      { B: "#3f7fd6", D: "#2c5ba3", L: "#6da3e8" },                 // 파랑 게
+      { B: "#3fae6a", D: "#2a7d4a", L: "#6ecb92" },                 // 초록 게
+      { B: "#d65a9e", D: "#a33c75", L: "#e88cc0" }                  // 분홍 게
     ],
-    sayings: ["폴짝!", "안녕하세요!", "열공 중이시군요", "옆차기~", "집게발 조심", "쉬엄쉬엄 하세요", "꾹 눌렀네요?", "히힛"] },
-  { kind:"climber", art:PET_ART.chick, palettes: [
-      { B:"#f6c945", D:"#c99a1e", L:"#fadf7e", O:"#e8892c" },    // 노랑 병아리
-      { B:"#f2f2ee", D:"#c9c9c2", L:"#ffffff", O:"#e8892c" }     // 하양 병아리
+    sayings: ["폴짝!", "안녕하세요!", "열공 중이시군요", "옆차기~", "집게발 조심", "쉬엄쉬엄 하세요", "꾹 눌렀네요?", "히힛"]
+  },
+  {
+    kind: "climber", art: PET_ART.chick, palettes: [
+      { B: "#f6c945", D: "#c99a1e", L: "#fadf7e", O: "#e8892c" },    // 노랑 병아리
+      { B: "#f2f2ee", D: "#c9c9c2", L: "#ffffff", O: "#e8892c" }     // 하양 병아리
     ],
-    sayings: ["삐약!", "삐약삐약", "모이 주세요", "폴짝!", "공부 화이팅!", "구구?", "히힛"] },
-  { kind:"walker", art:PET_ART.robot, palettes: [
-      { G:"#8a94a6", D:"#3f4756", L:"#5eead4", A:"#64748b" },    // 회색+민트 로봇
-      { G:"#b08968", D:"#4a3728", L:"#fbbf24", A:"#8a6d52" }     // 구리색 로봇
+    sayings: ["삐약!", "삐약삐약", "모이 주세요", "폴짝!", "공부 화이팅!", "구구?", "히힛"]
+  },
+  {
+    kind: "walker", art: PET_ART.robot, palettes: [
+      { G: "#8a94a6", D: "#3f4756", L: "#5eead4", A: "#64748b" },    // 회색+민트 로봇
+      { G: "#b08968", D: "#4a3728", L: "#fbbf24", A: "#8a6d52" }     // 구리색 로봇
     ],
-    sayings: ["삐빅. 반갑습니다", "충전 필요...", "오류 없음!", "계산 완료", "인간 감지됨"] },
-  { kind:"ghost", art:PET_ART.ghost, palettes: [
-      { P:"#c4b5fd", D:"#7c6bd4" },                              // 보라 유령
-      { P:"#a5d8e6", D:"#5aa3b8" }                               // 하늘 유령
+    sayings: ["삐빅. 반갑습니다", "충전 필요...", "오류 없음!", "계산 완료", "인간 감지됨"]
+  },
+  {
+    kind: "ghost", art: PET_ART.ghost, palettes: [
+      { P: "#c4b5fd", D: "#7c6bd4" },                              // 보라 유령
+      { P: "#a5d8e6", D: "#5aa3b8" }                               // 하늘 유령
     ],
-    sayings: ["우우~", "놀랐죠?", "심심해요", "훅-", "여기 있어요"] },
-  { kind:"bouncer", art:PET_ART.slime, palettes: [
-      { G:"#6ee7a0", D:"#2a9d5c" },                              // 초록 슬라임
-      { G:"#7cc4f2", D:"#3479b5" }                               // 파랑 슬라임
+    sayings: ["우우~", "놀랐죠?", "심심해요", "훅-", "여기 있어요"]
+  },
+  {
+    kind: "bouncer", art: PET_ART.slime, palettes: [
+      { G: "#6ee7a0", D: "#2a9d5c" },                              // 초록 슬라임
+      { G: "#7cc4f2", D: "#3479b5" }                               // 파랑 슬라임
     ],
-    sayings: ["말랑말랑", "통통!", "찌부...", "탱글", "슬라임은 무죄"] },
-  { kind:"ufo", art:PET_ART.ufo, palettes: [
-      { M:"#94a3b8", L:"#fde047", D:"#64748b", G:"#a7f3d0" }     // 은색 UFO
+    sayings: ["말랑말랑", "통통!", "찌부...", "탱글", "슬라임은 무죄"]
+  },
+  {
+    kind: "ufo", art: PET_ART.ufo, palettes: [
+      { M: "#94a3b8", L: "#fde047", D: "#64748b", G: "#a7f3d0" }     // 은색 UFO
     ],
-    sayings: ["삐용삐용", "지구 조사 중", "안녕, 지구인", "연료가 부족하다"] },
-  { kind:"hopper", art:PET_ART.pencil, trail:"scribble", palettes: [
-      { P:"#f9a8d4", Y:"#fbbf24", M:"#d6a05c", T:"#161616" }     // 노랑 연필(T=심)
+    sayings: ["삐용삐용", "지구 조사 중", "안녕, 지구인", "연료가 부족하다"]
+  },
+  {
+    kind: "hopper", art: PET_ART.pencil, trail: "scribble", palettes: [
+      { P: "#f9a8d4", Y: "#fbbf24", M: "#d6a05c", T: "#161616" }     // 노랑 연필(T=심)
     ],
-    sayings: ["사각사각", "글씨 연습!", "낙서는 즐거워", "필기 화이팅", "콩콩"] },
-  { kind:"roller", art:PET_ART.star, palettes: [
-      { Y:"#fcd34d" }                                            // 금색 별
+    sayings: ["사각사각", "글씨 연습!", "낙서는 즐거워", "필기 화이팅", "콩콩"]
+  },
+  {
+    kind: "roller", art: PET_ART.star, palettes: [
+      { Y: "#fcd34d" }                                            // 금색 별
     ],
-    sayings: ["반짝!", "데굴데굴", "별일 없죠?", "빛나는 중", "어지러워~"] },
-  { kind:"cat", art:PET_ART.cat, palettes: [
-      { C:"#9aa3ad", D:"#6b7480", N:"#e89aa8" },                 // 회색 고양이
-      { C:"#e8a94f", D:"#b57d2c", N:"#e89aa8" },                 // 치즈 고양이
-      { C:"#4a4f5a", D:"#32363f", N:"#e89aa8" }                  // 검은 고양이
+    sayings: ["반짝!", "데굴데굴", "별일 없죠?", "빛나는 중", "어지러워~"]
+  },
+  {
+    kind: "cat", art: PET_ART.cat, palettes: [
+      { C: "#9aa3ad", D: "#6b7480", N: "#e89aa8" },                 // 회색 고양이
+      { C: "#e8a94f", D: "#b57d2c", N: "#e89aa8" },                 // 치즈 고양이
+      { C: "#4a4f5a", D: "#32363f", N: "#e89aa8" }                  // 검은 고양이
     ],
-    sayings: ["야옹~", "...귀찮다냥", "츄르 있어요?", "골골골", "커서 어딨지?", "냐하!", "낮잠 시간이다냥"] },
-  { kind:"fluffyCat", art:PET_ART.fluffyCat, gridW:32, gridH:32, pixelScale:3, width:96, height:96,
-    spriteSheet:{
-      src:"src/assets/fluffy-cat-sprites-v2.png", cellW:96, cellH:96, cols:6,
-      frameMs:{ idle:120, walk:90, diagonalFly:116.67, wallBounce:116.67, land:90, groom:100, jump:116.67, fall:116.67 },
+    sayings: ["야옹~", "...귀찮다냥", "츄르 있어요?", "골골골", "커서 어딨지?", "냐하!", "낮잠 시간이다냥"]
+  },
+  {
+    kind: "fluffyCat", art: PET_ART.fluffyCat, gridW: 32, gridH: 32, pixelScale: 3, width: 96, height: 96,
+    spriteSheet: {
+      src: "src/assets/fluffy-cat-sprites-v2.png", cellW: 96, cellH: 96, cols: 6,
+      frameMs: { idle: 120, walk: 90, diagonalFly: 116.67, wallBounce: 116.67, land: 90, groom: 100, jump: 116.67, fall: 116.67 },
       // 비행 그림은 셀 안에서 걷기 그림보다 약 18px 위에 있다.
       // 모든 비행 프레임을 똑같이 내리면 원래의 작은 몸짓은 보존하면서 이륙·착지 순간이동만 줄어든다.
-      frameOffsets:{
-        6:[2,18], 7:[2,18], 8:[2,18], 9:[2,18], 10:[2,18], 11:[2,18]
+      frameOffsets: {
+        6: [2, 18], 7: [2, 18], 8: [2, 18], 9: [2, 18], 10: [2, 18], 11: [2, 18]
       },
-      frames:{
-        idle:[5], walk:[0,1,2,3,4,5],
-        diagonalFly:[6,7,8,9,10,11], wallBounce:[12,13,14,15], land:[16,17],
-        groom:[18,19,20,21,22,23], jump:[6,7,8,9,10,11], fall:[6,7,8,9,10,11]
+      frames: {
+        idle: [5], walk: [0, 1, 2, 3, 4, 5],
+        diagonalFly: [6, 7, 8, 9, 10, 11], wallBounce: [12, 13, 14, 15], land: [16, 17],
+        groom: [18, 19, 20, 21, 22, 23], jump: [6, 7, 8, 9, 10, 11], fall: [6, 7, 8, 9, 10, 11]
       }
     },
     palettes: [
-      { C:"#f5ede2", D:"#a98b7d", N:"#e99aaa" }
+      { C: "#f5ede2", D: "#a98b7d", N: "#e99aaa" }
     ],
-    sayings: ["배고프다냐옹"] },
-  { kind:"calicoCat", art:PET_ART.calicoCat, gridW:32, gridH:32, pixelScale:3, width:96, height:96,
-    spriteSheet:{
-      src:"src/assets/calico-cat-sprites.png", cellW:96, cellH:96, cols:6,
-      frames:{
-        idle:[5], walk:[0,1,2,3,4,5],
-        diagonalFly:[6,7,8,9,10,11], wallBounce:[12,13,14,15], land:[16,17],
-        groom:[18,19,20,21,22,23], jump:[6,7,8,9,10,11], fall:[6,7,8,9,10,11]
+    sayings: ["배고프다냐옹"]
+  },
+  {
+    kind: "calicoCat", art: PET_ART.calicoCat, gridW: 32, gridH: 32, pixelScale: 3, width: 96, height: 96,
+    spriteSheet: {
+      src: "src/assets/calico-cat-sprites.png", cellW: 96, cellH: 96, cols: 6,
+      frames: {
+        idle: [5], walk: [0, 1, 2, 3, 4, 5],
+        diagonalFly: [6, 7, 8, 9, 10, 11], wallBounce: [12, 13, 14, 15], land: [16, 17],
+        groom: [18, 19, 20, 21, 22, 23], jump: [6, 7, 8, 9, 10, 11], fall: [6, 7, 8, 9, 10, 11]
       }
     },
     palettes: [
-      { C:"#f6f3ec", D:"#3a3438", O:"#cb7e48", N:"#e28c98" }
+      { C: "#f6f3ec", D: "#3a3438", O: "#cb7e48", N: "#e28c98" }
     ],
-    sayings: ["...뭘 봐냥", "보초 서는 중이다냥", "간식 어디 있냥", "삼색이는 행운의 상징이다냥", "슈웅- 반사!"] },
-  { kind:"dog", art:PET_ART.dog, palettes: [
-      { B:"#c78d55", E:"#8a5a30", N:"#4a3220", T:"#8a5a30" },    // 갈색 강아지
-      { B:"#f0ede5", E:"#c9b89a", N:"#4a3220", T:"#c9b89a" }     // 하양 강아지
+    sayings: ["...뭘 봐냥", "보초 서는 중이다냥", "간식 어디 있냥", "삼색이는 행운의 상징이다냥", "슈웅- 반사!"]
+  },
+  {
+    kind: "dog", art: PET_ART.dog, palettes: [
+      { B: "#c78d55", E: "#8a5a30", N: "#4a3220", T: "#8a5a30" },    // 갈색 강아지
+      { B: "#f0ede5", E: "#c9b89a", N: "#4a3220", T: "#c9b89a" }     // 하양 강아지
     ],
-    sayings: ["멍멍!", "산책 가요!", "꼬리 살랑살랑", "킁킁... 간식 냄새?", "왈!", "고양이 어딨지?"] },
-  { kind:"spider", art:PET_ART.spider, palettes: [
-      { S:"#4a4552", L:"#2f2b38" },                              // 먹색 거미
-      { S:"#7a3b3b", L:"#4a2424" }                               // 붉은 거미
+    sayings: ["멍멍!", "산책 가요!", "꼬리 살랑살랑", "킁킁... 간식 냄새?", "왈!", "고양이 어딨지?"]
+  },
+  {
+    kind: "spider", art: PET_ART.spider, palettes: [
+      { S: "#4a4552", L: "#2f2b38" },                              // 먹색 거미
+      { S: "#7a3b3b", L: "#4a2424" }                               // 붉은 거미
     ],
-    sayings: ["줄타기 실력 봤어요?", "스르륵~", "안 물어요!", "대롱대롱", "깜짝 놀랐죠?", "거미줄은 튼튼해"] },
-  { kind:"mole", art:PET_ART.mole, palettes: [
-      { M:"#8a6a4f", N:"#e89aa8", C:"#e5d9c5" }                  // 갈색 두더지
+    sayings: ["줄타기 실력 봤어요?", "스르륵~", "안 물어요!", "대롱대롱", "깜짝 놀랐죠?", "거미줄은 튼튼해"]
+  },
+  {
+    kind: "mole", art: PET_ART.mole, palettes: [
+      { M: "#8a6a4f", N: "#e89aa8", C: "#e5d9c5" }                  // 갈색 두더지
     ],
-    sayings: ["두더지 잡기 금지!", "땅속은 아늑해", "여기서 뿅!", "흙 묻었나?", "어두운 게 좋아", "뿅!"] },
-  { kind:"frog", art:PET_ART.frog, palettes: [
-      { G:"#5cbf5c", D:"#2f8f3f" },                              // 초록 개구리
-      { G:"#d4c94f", D:"#a89a2c" }                               // 황금 개구리
+    sayings: ["두더지 잡기 금지!", "땅속은 아늑해", "여기서 뿅!", "흙 묻었나?", "어두운 게 좋아", "뿅!"]
+  },
+  {
+    kind: "frog", art: PET_ART.frog, palettes: [
+      { G: "#5cbf5c", D: "#2f8f3f" },                              // 초록 개구리
+      { G: "#d4c94f", D: "#a89a2c" }                               // 황금 개구리
     ],
-    sayings: ["개굴!", "개굴개굴", "점프 준비...", "파리 어딨지?", "비 오면 신나요", "폴짝!"] },
-  { kind:"penguin", art:PET_ART.penguin, palettes: [
-      { P:"#2f3542", B:"#f2f2ee", O:"#f2a33c" }                  // 턱시도 펭귄
+    sayings: ["개굴!", "개굴개굴", "점프 준비...", "파리 어딨지?", "비 오면 신나요", "폴짝!"]
+  },
+  {
+    kind: "penguin", art: PET_ART.penguin, palettes: [
+      { P: "#2f3542", B: "#f2f2ee", O: "#f2a33c" }                  // 턱시도 펭귄
     ],
-    sayings: ["뒤뚱뒤뚱", "미끄럼 최고!", "시원한 게 좋아", "꽥!", "배로 슝~", "남극에서 왔어요"] },
-  { kind:"balloon", art:PET_ART.balloon, palettes: [
-      { R:"#e85d5d", D:"#b53a3a" },                              // 빨강 풍선
-      { R:"#5d9de8", D:"#3a6bb5" },                              // 파랑 풍선
-      { R:"#f2c94c", D:"#c9992c" }                               // 노랑 풍선
+    sayings: ["뒤뚱뒤뚱", "미끄럼 최고!", "시원한 게 좋아", "꽥!", "배로 슝~", "남극에서 왔어요"]
+  },
+  {
+    kind: "balloon", art: PET_ART.balloon, palettes: [
+      { R: "#e85d5d", D: "#b53a3a" },                              // 빨강 풍선
+      { R: "#5d9de8", D: "#3a6bb5" },                              // 파랑 풍선
+      { R: "#f2c94c", D: "#c9992c" }                               // 노랑 풍선
     ],
-    sayings: ["둥실둥실~", "날 놓치지 마세요", "바람 빠지면 어쩌지", "하늘은 좋아", "팡 터지면 안 돼요!", "두둥실"] },
-  { kind:"snail", art:PET_ART.snail, trail:"slime", palettes: [
-      { S:"#c9995c", D:"#8a6435", B:"#b8d48f" }                  // 연두 달팽이
+    sayings: ["둥실둥실~", "날 놓치지 마세요", "바람 빠지면 어쩌지", "하늘은 좋아", "팡 터지면 안 돼요!", "두둥실"]
+  },
+  {
+    kind: "snail", art: PET_ART.snail, trail: "slime", palettes: [
+      { S: "#c9995c", D: "#8a6435", B: "#b8d48f" }                  // 연두 달팽이
     ],
-    sayings: ["느려도 괜찮아", "내 집 좋죠?", "꾸준함이 최고!", "서두르지 마세요", "음~ 촉촉해", "달팽이도 갑니다"] },
-  { kind:"ninja", art:PET_ART.ninja, palettes: [
-      { N:"#3a3f4a", F:"#e8c9a8", R:"#d64545" }                  // 검은 닌자
+    sayings: ["느려도 괜찮아", "내 집 좋죠?", "꾸준함이 최고!", "서두르지 마세요", "음~ 촉촉해", "달팽이도 갑니다"]
+  },
+  {
+    kind: "ninja", art: PET_ART.ninja, palettes: [
+      { N: "#3a3f4a", F: "#e8c9a8", R: "#d64545" }                  // 검은 닌자
     ],
-    sayings: ["...!", "닌닌!", "연막술!", "조용히...", "날 봤다면 이미 늦었다", "슉!"] },
-  { kind:"bird", art:PET_ART.bird, palettes: [
-      { B:"#5aa3e8", L:"#a8d0f2", O:"#e8892c", T:"#3f7fd6" },    // 파랑새
-      { B:"#b08a5c", L:"#d9c9a8", O:"#7a5a30", T:"#8a6a40" }     // 참새
+    sayings: ["...!", "닌닌!", "연막술!", "조용히...", "날 봤다면 이미 늦었다", "슉!"]
+  },
+  {
+    kind: "bird", art: PET_ART.bird, palettes: [
+      { B: "#5aa3e8", L: "#a8d0f2", O: "#e8892c", T: "#3f7fd6" },    // 파랑새
+      { B: "#b08a5c", L: "#d9c9a8", O: "#7a5a30", T: "#8a6a40" }     // 참새
     ],
-    sayings: ["짹짹!", "훨훨~", "높이 나는 게 최고", "여기 앉아도 돼요?", "포로롱", "바람 타는 중~"] },
-  { kind:"hopper", art:PET_ART.rabbit, palettes: [
-      { R:"#f2f0ea", I:"#f2b8c8", N:"#e88a9a" },                 // 흰 토끼
-      { R:"#b8bcc4", I:"#f2b8c8", N:"#e88a9a" }                  // 회색 토끼
+    sayings: ["짹짹!", "훨훨~", "높이 나는 게 최고", "여기 앉아도 돼요?", "포로롱", "바람 타는 중~"]
+  },
+  {
+    kind: "hopper", art: PET_ART.rabbit, palettes: [
+      { R: "#f2f0ea", I: "#f2b8c8", N: "#e88a9a" },                 // 흰 토끼
+      { R: "#b8bcc4", I: "#f2b8c8", N: "#e88a9a" }                  // 회색 토끼
     ],
-    sayings: ["깡총!", "당근 주세요", "귀가 간지러워", "깡총깡총", "엉덩이 실룩", "토끼는 빨라요"] },
-  { kind:"roller", art:PET_ART.soccer, palettes: [
-      { A:"#f2f2ee", D:"#2f3542" }                               // 축구공
+    sayings: ["깡총!", "당근 주세요", "귀가 간지러워", "깡총깡총", "엉덩이 실룩", "토끼는 빨라요"]
+  },
+  {
+    kind: "roller", art: PET_ART.soccer, palettes: [
+      { A: "#f2f2ee", D: "#2f3542" }                               // 축구공
     ],
-    sayings: ["뻥 차지 마세요!", "데굴데굴", "골인~!", "오늘 체육 있나요?", "슛~!", "동글동글"] },
-  { kind:"chameleon", art:PET_ART.chameleon, palettes: [
-      { C:"#5fbf6f", D:"#3a8f4a" }                               // 초록 카멜레온(옆 친구 색을 복사한다)
+    sayings: ["뻥 차지 마세요!", "데굴데굴", "골인~!", "오늘 체육 있나요?", "슛~!", "동글동글"]
+  },
+  {
+    kind: "chameleon", art: PET_ART.chameleon, palettes: [
+      { C: "#5fbf6f", D: "#3a8f4a" }                               // 초록 카멜레온(옆 친구 색을 복사한다)
     ],
-    sayings: ["무슨 색이 좋아요?", "슥- 변신!", "날 찾아보세요", "혀는 빠르답니다", "분위기 맞춰봤어요", "오늘의 색은 이거!"] },
-  { kind:"wizard", art:PET_ART.wizard, palettes: [
-      { H:"#7c5cd6", F:"#e8c9a8", R:"#5a3fb5" }                  // 보라 마법사
+    sayings: ["무슨 색이 좋아요?", "슥- 변신!", "날 찾아보세요", "혀는 빠르답니다", "분위기 맞춰봤어요", "오늘의 색은 이거!"]
+  },
+  {
+    kind: "wizard", art: PET_ART.wizard, palettes: [
+      { H: "#7c5cd6", F: "#e8c9a8", R: "#5a3fb5" }                  // 보라 마법사
     ],
-    sayings: ["수리수리 마수리~", "얍!", "마법은 장난이 아니야", "순간이동 보여줄까?", "지팡이 어디 갔지", "숙제 사라져라... 뻥!"] },
-  { kind:"magnet", art:PET_ART.magnet, palettes: [
-      { R:"#d65454", S:"#c9cdd6" }                               // 빨간 말굽자석
+    sayings: ["수리수리 마수리~", "얍!", "마법은 장난이 아니야", "순간이동 보여줄까?", "지팡이 어디 갔지", "숙제 사라져라... 뻥!"]
+  },
+  {
+    kind: "magnet", art: PET_ART.magnet, palettes: [
+      { R: "#d65454", S: "#c9cdd6" }                               // 빨간 말굽자석
     ],
-    sayings: ["철컥!", "끌리는 대로~", "N극? S극?", "우린 서로 끌려요", "자석은 힘이 세다", "붙지 마세요!"] },
-  { kind:"cloud", art:PET_ART.cloud, palettes: [
-      { G:"#7a8494", Y:"#fde047" }                               // 먹구름
+    sayings: ["철컥!", "끌리는 대로~", "N극? S극?", "우린 서로 끌려요", "자석은 힘이 세다", "붙지 마세요!"]
+  },
+  {
+    kind: "cloud", art: PET_ART.cloud, palettes: [
+      { G: "#7a8494", Y: "#fde047" }                               // 먹구름
     ],
-    sayings: ["우르릉...", "비 올 것 같죠?", "콰르릉!", "전기 조심", "먹구름 아니에요... 맞아요", "번쩍!"] },
-  { kind:"rocket", art:PET_ART.rocket, palettes: [
-      { N:"#d65454", R:"#e8e8e2", F:"#8a94a6" }                  // 흰 로켓
+    sayings: ["우르릉...", "비 올 것 같죠?", "콰르릉!", "전기 조심", "먹구름 아니에요... 맞아요", "번쩍!"]
+  },
+  {
+    kind: "rocket", art: PET_ART.rocket, palettes: [
+      { N: "#d65454", R: "#e8e8e2", F: "#8a94a6" }                  // 흰 로켓
     ],
-    sayings: ["3, 2, 1... 발사!", "우주까지 갑니다", "연료 만땅!", "슈우웅~", "낙하산 펴짐", "달나라 가고 싶다"] },
-  { kind:"flutter", art:PET_ART.butterfly, palettes: [
-      { B:"#e8a0c8", D:"#4a4552" },                              // 분홍 나비
-      { B:"#8ab8f2", D:"#4a4552" }                               // 파랑 나비
+    sayings: ["3, 2, 1... 발사!", "우주까지 갑니다", "연료 만땅!", "슈우웅~", "낙하산 펴짐", "달나라 가고 싶다"]
+  },
+  {
+    kind: "flutter", art: PET_ART.butterfly, palettes: [
+      { B: "#e8a0c8", D: "#4a4552" },                              // 분홍 나비
+      { B: "#8ab8f2", D: "#4a4552" }                               // 파랑 나비
     ],
-    sayings: ["팔랑팔랑~", "꽃이 어딨나요?", "날개 예쁘죠?", "살랑살랑", "봄이 좋아요", "앉아도 될까요?"] },
-  { kind:"fish", art:PET_ART.fish, palettes: [
-      { F:"#f2a04c", T:"#d67d2c", L:"#f2c98f" }                  // 주황 물고기(비눗방울 탑승)
+    sayings: ["팔랑팔랑~", "꽃이 어딨나요?", "날개 예쁘죠?", "살랑살랑", "봄이 좋아요", "앉아도 될까요?"]
+  },
+  {
+    kind: "fish", art: PET_ART.fish, palettes: [
+      { F: "#f2a04c", T: "#d67d2c", L: "#f2c98f" }                  // 주황 물고기(비눗방울 탑승)
     ],
-    sayings: ["뻐끔뻐끔", "방울 안은 안전해요", "물이 그리워", "뻐끔?", "수영 잘해요", "방울 터뜨리지 마세요!"] },
-  { kind:"snake", art:PET_ART.snake, palettes: [
-      { S:"#6fbf5f", D:"#3f8f3a" },                              // 초록 뱀
-      { S:"#d6b054", D:"#a8842c" }                               // 황금 뱀
+    sayings: ["뻐끔뻐끔", "방울 안은 안전해요", "물이 그리워", "뻐끔?", "수영 잘해요", "방울 터뜨리지 마세요!"]
+  },
+  {
+    kind: "snake", art: PET_ART.snake, palettes: [
+      { S: "#6fbf5f", D: "#3f8f3a" },                              // 초록 뱀
+      { S: "#d6b054", D: "#a8842c" }                               // 황금 뱀
     ],
-    sayings: ["스르륵~", "쉬이익-", "다리는 필요 없어", "꼬불꼬불", "혀 낼름", "놀라지 마세요"] },
-  { kind:"mouse", art:PET_ART.mouse, palettes: [
-      { M:"#a8adb8", E:"#f2b8c8", N:"#e89aa8", T:"#c99a9a" }     // 회색 생쥐
+    sayings: ["스르륵~", "쉬이익-", "다리는 필요 없어", "꼬불꼬불", "혀 낼름", "놀라지 마세요"]
+  },
+  {
+    kind: "mouse", art: PET_ART.mouse, palettes: [
+      { M: "#a8adb8", E: "#f2b8c8", N: "#e89aa8", T: "#c99a9a" }     // 회색 생쥐
     ],
-    sayings: ["찍찍!", "치즈 어딨지?", "고양이 조심!", "찍!", "구멍 어디 갔지", "빠르죠?"] },
-  { kind:"snail", art:PET_ART.turtle, palettes: [
-      { S:"#5fa86f", P:"#3f7a4a", B:"#c9b98f" }                  // 거북이(느림보 동료, 점액은 없음)
+    sayings: ["찍찍!", "치즈 어딨지?", "고양이 조심!", "찍!", "구멍 어디 갔지", "빠르죠?"]
+  },
+  {
+    kind: "snail", art: PET_ART.turtle, palettes: [
+      { S: "#5fa86f", P: "#3f7a4a", B: "#c9b98f" }                  // 거북이(느림보 동료, 점액은 없음)
     ],
-    sayings: ["엉금엉금", "느린 게 아니라 신중한 거예요", "토끼야 기다려", "등껍질은 내 집", "서두르면 지는 거야", "음~ 여유"] },
-  { kind:"bouncer", art:PET_ART.octopus, palettes: [
-      { O:"#b08ad6", D:"#7a5aa8" }                               // 보라 문어
+    sayings: ["엉금엉금", "느린 게 아니라 신중한 거예요", "토끼야 기다려", "등껍질은 내 집", "서두르면 지는 거야", "음~ 여유"]
+  },
+  {
+    kind: "bouncer", art: PET_ART.octopus, palettes: [
+      { O: "#b08ad6", D: "#7a5aa8" }                               // 보라 문어
     ],
-    sayings: ["꿈틀꿈틀", "먹물 아껴 쓰는 중", "다리가 여덟 개!", "흐물흐물", "바다가 그리워", "꾹 누르면 먹물 나와요... 뻥"] },
-  { kind:"bird", art:PET_ART.bat, palettes: [
-      { B:"#5a5468" }                                            // 박쥐
+    sayings: ["꿈틀꿈틀", "먹물 아껴 쓰는 중", "다리가 여덟 개!", "흐물흐물", "바다가 그리워", "꾹 누르면 먹물 나와요... 뻥"]
+  },
+  {
+    kind: "bird", art: PET_ART.bat, palettes: [
+      { B: "#5a5468" }                                            // 박쥐
     ],
-    sayings: ["끼익끼익", "거꾸로가 편해요", "밤이 좋아", "초음파 발사!", "깜깜한 게 최고", "낮잠... 아니 밤잠"] },
-  { kind:"bird", art:PET_ART.owl, palettes: [
-      { O:"#a8845c", F:"#e8d9b8", B:"#e8a04c", L:"#8a6a48" }     // 부엉이
+    sayings: ["끼익끼익", "거꾸로가 편해요", "밤이 좋아", "초음파 발사!", "깜깜한 게 최고", "낮잠... 아니 밤잠"]
+  },
+  {
+    kind: "bird", art: PET_ART.owl, palettes: [
+      { O: "#a8845c", F: "#e8d9b8", B: "#e8a04c", L: "#8a6a48" }     // 부엉이
     ],
-    sayings: ["부엉부엉", "밤샘은 자신 있어요", "누구? 누구?", "지혜의 새랍니다", "고개가 잘 돌아가요", "공부 열심히!"] },
-  { kind:"penguin", art:PET_ART.duck, palettes: [
-      { Y:"#f2d54c", O:"#f2a33c" }                               // 오리(뒤뚱뒤뚱+배 미끄럼)
+    sayings: ["부엉부엉", "밤샘은 자신 있어요", "누구? 누구?", "지혜의 새랍니다", "고개가 잘 돌아가요", "공부 열심히!"]
+  },
+  {
+    kind: "penguin", art: PET_ART.duck, palettes: [
+      { Y: "#f2d54c", O: "#f2a33c" }                               // 오리(뒤뚱뒤뚱+배 미끄럼)
     ],
-    sayings: ["꽥꽥!", "궁둥이 실룩", "물갈퀴 자랑", "꽥?", "미끄럼 가자~", "오리걸음 챌린지"] },
-  { kind:"climber", art:PET_ART.squirrel, palettes: [
-      { T:"#d68f4a", S:"#b06a35", C:"#f2d9b8" }                  // 다람쥐(나무 대신 벽 타기)
+    sayings: ["꽥꽥!", "궁둥이 실룩", "물갈퀴 자랑", "꽥?", "미끄럼 가자~", "오리걸음 챌린지"]
+  },
+  {
+    kind: "climber", art: PET_ART.squirrel, palettes: [
+      { T: "#d68f4a", S: "#b06a35", C: "#f2d9b8" }                  // 다람쥐(나무 대신 벽 타기)
     ],
-    sayings: ["도토리 어딨지?", "다다다닥!", "볼주머니 가득~", "나무 타기 선수", "겨울 준비 중", "폴짝폴짝"] },
-  { kind:"roller", art:PET_ART.hedgehog, palettes: [
-      { H:"#7a6a58", F:"#e8c9a0", N:"#3a3630" }                  // 고슴도치(동글동글)
+    sayings: ["도토리 어딨지?", "다다다닥!", "볼주머니 가득~", "나무 타기 선수", "겨울 준비 중", "폴짝폴짝"]
+  },
+  {
+    kind: "roller", art: PET_ART.hedgehog, palettes: [
+      { H: "#7a6a58", F: "#e8c9a0", N: "#3a3630" }                  // 고슴도치(동글동글)
     ],
-    sayings: ["따가워요? 미안!", "데굴데굴~", "가시는 장식이에요", "동글동글", "만지려면 살살", "슈웅~"] },
-  { kind:"roller", art:PET_ART.hamster, palettes: [
-      { H:"#f2d9a8", C:"#e8a868", N:"#e89aa8" }                  // 햄스터(공처럼 구른다)
+    sayings: ["따가워요? 미안!", "데굴데굴~", "가시는 장식이에요", "동글동글", "만지려면 살살", "슈웅~"]
+  },
+  {
+    kind: "roller", art: PET_ART.hamster, palettes: [
+      { H: "#f2d9a8", C: "#e8a868", N: "#e89aa8" }                  // 햄스터(공처럼 구른다)
     ],
-    sayings: ["볼이 빵빵해요", "쳇바퀴 어딨지?", "해바라기씨 주세요", "데굴데굴", "오물오물", "낮잠 자고 싶다"] },
-  { kind:"flutter", art:PET_ART.bee, palettes: [
-      { Y:"#f2c94c", D:"#3a3630", B:"#dbe8f2" }                  // 꿀벌
+    sayings: ["볼이 빵빵해요", "쳇바퀴 어딨지?", "해바라기씨 주세요", "데굴데굴", "오물오물", "낮잠 자고 싶다"]
+  },
+  {
+    kind: "flutter", art: PET_ART.bee, palettes: [
+      { Y: "#f2c94c", D: "#3a3630", B: "#dbe8f2" }                  // 꿀벌
     ],
-    sayings: ["붕붕~", "꿀 모으는 중!", "꽃가루 배달이요~", "윙윙", "일벌은 바빠요", "쏘지 않을게요"] },
-  { kind:"climber", art:PET_ART.ladybug, palettes: [
-      { R:"#d65454", D:"#2f2b30" }                               // 무당벌레(벽 타기 선수)
+    sayings: ["붕붕~", "꿀 모으는 중!", "꽃가루 배달이요~", "윙윙", "일벌은 바빠요", "쏘지 않을게요"]
+  },
+  {
+    kind: "climber", art: PET_ART.ladybug, palettes: [
+      { R: "#d65454", D: "#2f2b30" }                               // 무당벌레(벽 타기 선수)
     ],
-    sayings: ["점무늬 세보실래요?", "행운을 드려요!", "반질반질", "작아도 잘 날아요", "진딧물 어딨지", "콩콩"] },
-  { kind:"roller", art:PET_ART.dice, palettes: [
-      { A:"#f2f2ee", D:"#3a3f4a" }                               // 주사위(데굴데굴 굴러다닌다)
+    sayings: ["점무늬 세보실래요?", "행운을 드려요!", "반질반질", "작아도 잘 날아요", "진딧물 어딨지", "콩콩"]
+  },
+  {
+    kind: "roller", art: PET_ART.dice, palettes: [
+      { A: "#f2f2ee", D: "#3a3f4a" }                               // 주사위(데굴데굴 굴러다닌다)
     ],
-    sayings: ["데구르르...", "몇이 나올까요?", "6 나와라!", "굴려굴려~", "운에 맡겨요", "주사위는 던져졌다!"] },
-  { kind:"hopper", art:PET_ART.apple, palettes: [
-      { R:"#d65454", L:"#6fbf5f", S:"#8a6a48" }                  // 사과
+    sayings: ["데구르르...", "몇이 나올까요?", "6 나와라!", "굴려굴려~", "운에 맡겨요", "주사위는 던져졌다!"]
+  },
+  {
+    kind: "hopper", art: PET_ART.apple, palettes: [
+      { R: "#d65454", L: "#6fbf5f", S: "#8a6a48" }                  // 사과
     ],
-    sayings: ["아삭!", "하루 한 알!", "빨갛게 익었어요", "벌레 없어요", "비타민 충전~", "떨어져도 안 아파요"] },
-  { kind:"bouncer", art:PET_ART.eraser, trail:"dust", palettes: [
-      { E:"#f2a0b8", A:"#f2f2ee" }                               // 지우개(착지하면 가루가 남는다)
+    sayings: ["아삭!", "하루 한 알!", "빨갛게 익었어요", "벌레 없어요", "비타민 충전~", "떨어져도 안 아파요"]
+  },
+  {
+    kind: "bouncer", art: PET_ART.eraser, trail: "dust", palettes: [
+      { E: "#f2a0b8", A: "#f2f2ee" }                               // 지우개(착지하면 가루가 남는다)
     ],
-    sayings: ["쓱싹쓱싹", "실수는 지우면 돼요", "지우개 가루 미안!", "깨끗하게~", "틀려도 괜찮아", "반으로 자르지 마세요!"] },
-  { kind:"hopper", art:PET_ART.mushroom, palettes: [
-      { R:"#d65454", A:"#f2f2ee", F:"#e8d9c0" }                  // 버섯
+    sayings: ["쓱싹쓱싹", "실수는 지우면 돼요", "지우개 가루 미안!", "깨끗하게~", "틀려도 괜찮아", "반으로 자르지 마세요!"]
+  },
+  {
+    kind: "hopper", art: PET_ART.mushroom, palettes: [
+      { R: "#d65454", A: "#f2f2ee", F: "#e8d9c0" }                  // 버섯
     ],
-    sayings: ["버섯버섯", "쑥쑥 자라요", "비 온 뒤가 좋아", "폴짝!", "독 없어요, 아마도", "숲에서 왔어요"] },
-  { kind:"hopper", art:PET_ART.carrot, palettes: [
-      { O:"#e8923c", L:"#6fbf5f" }                               // 당근
+    sayings: ["버섯버섯", "쑥쑥 자라요", "비 온 뒤가 좋아", "폴짝!", "독 없어요, 아마도", "숲에서 왔어요"]
+  },
+  {
+    kind: "hopper", art: PET_ART.carrot, palettes: [
+      { O: "#e8923c", L: "#6fbf5f" }                               // 당근
     ],
-    sayings: ["아삭아삭", "토끼가 쫓아와요!", "주황이 제일 예뻐", "비타민A 담당", "흙은 툭툭 털었어요", "머리숱 자랑"] },
-  { kind:"walker", art:PET_ART.dino, palettes: [
-      { G:"#6fae5f" },                                           // 초록 공룡
-      { G:"#b08ad6" }                                            // 보라 공룡
+    sayings: ["아삭아삭", "토끼가 쫓아와요!", "주황이 제일 예뻐", "비타민A 담당", "흙은 툭툭 털었어요", "머리숱 자랑"]
+  },
+  {
+    kind: "walker", art: PET_ART.dino, palettes: [
+      { G: "#6fae5f" },                                           // 초록 공룡
+      { G: "#b08ad6" }                                            // 보라 공룡
     ],
-    sayings: ["쿵쿵!", "크앙~", "팔이 좀 짧아요", "공룡은 멋져", "운석은 무서워", "화석 아니에요!"] },
-  { kind:"walker", art:PET_ART.snowman, palettes: [
-      { A:"#f2f2f0", D:"#3a3f4a", O:"#e8923c", H:"#4a4f5a" }     // 눈사람
+    sayings: ["쿵쿵!", "크앙~", "팔이 좀 짧아요", "공룡은 멋져", "운석은 무서워", "화석 아니에요!"]
+  },
+  {
+    kind: "walker", art: PET_ART.snowman, palettes: [
+      { A: "#f2f2f0", D: "#3a3f4a", O: "#e8923c", H: "#4a4f5a" }     // 눈사람
     ],
-    sayings: ["안 녹게 조심!", "시원한 게 좋아", "눈사람은 겨울 담당", "코가 당근이에요", "굴려서 만들어졌어요", "호호 춥다"] },
-  { kind:"ninja", art:PET_ART.alien, palettes: [
-      { G:"#8fd65f", D:"#4a8f2c" }                               // 외계인(순간이동 담당)
+    sayings: ["안 녹게 조심!", "시원한 게 좋아", "눈사람은 겨울 담당", "코가 당근이에요", "굴려서 만들어졌어요", "호호 춥다"]
+  },
+  {
+    kind: "ninja", art: PET_ART.alien, palettes: [
+      { G: "#8fd65f", D: "#4a8f2c" }                               // 외계인(순간이동 담당)
     ],
-    sayings: ["삐리삐리?", "지구는 재밌군", "우리 별로 갈래?", "외계어 할 줄 알아요", "뿅!", "UFO 는 내 친구"] },
-  { kind:"climber", art:PET_ART.ant, palettes: [
-      { D:"#4a4038" }                                            // 개미(벽쯤이야)
+    sayings: ["삐리삐리?", "지구는 재밌군", "우리 별로 갈래?", "외계어 할 줄 알아요", "뿅!", "UFO 는 내 친구"]
+  },
+  {
+    kind: "climber", art: PET_ART.ant, palettes: [
+      { D: "#4a4038" }                                            // 개미(벽쯤이야)
     ],
-    sayings: ["영차영차", "일개미는 바빠요", "줄 맞춰서~", "힘은 장사예요", "설탕 어딨지?", "아자아자!"] },
-  { kind:"walker", art:PET_ART.pig, palettes: [
-      { P:"#f2b8c0", N:"#e08a98" }                               // 돼지
+    sayings: ["영차영차", "일개미는 바빠요", "줄 맞춰서~", "힘은 장사예요", "설탕 어딨지?", "아자아자!"]
+  },
+  {
+    kind: "walker", art: PET_ART.pig, palettes: [
+      { P: "#f2b8c0", N: "#e08a98" }                               // 돼지
     ],
-    sayings: ["꿀꿀!", "진흙 목욕 최고", "꿀꿀꿀", "배고파요", "코가 매력 포인트", "뒹굴뒹굴"] },
-  { kind:"bouncer", art:PET_ART.sheep, palettes: [
-      { A:"#f2f0ea", F:"#4a4540" }                               // 양(폭신폭신 통통)
+    sayings: ["꿀꿀!", "진흙 목욕 최고", "꿀꿀꿀", "배고파요", "코가 매력 포인트", "뒹굴뒹굴"]
+  },
+  {
+    kind: "bouncer", art: PET_ART.sheep, palettes: [
+      { A: "#f2f0ea", F: "#4a4540" }                               // 양(폭신폭신 통통)
     ],
-    sayings: ["메에에~", "폭신폭신", "털 깎을 때 됐나?", "양 한 마리, 양 두 마리...", "구름 아니에요", "포근하죠?"] },
-  { kind:"human", art:PET_ART.mister, cheerArt:PET_ART.misterCheer, palettes: [
-      { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#5f5340", P:"#4a4550", C:"#f2f0ea" },   // 갈색 셔츠(원조)
-      { H:"#33302c", S:"#f2c49c", G:"#2f2b30", M:"#8a4038", B:"#3f5a7a", P:"#333848", C:"#f2f0ea" }    // 남색 셔츠
+    sayings: ["메에에~", "폭신폭신", "털 깎을 때 됐나?", "양 한 마리, 양 두 마리...", "구름 아니에요", "포근하죠?"]
+  },
+  {
+    kind: "human", art: PET_ART.mister, cheerArt: PET_ART.misterCheer, palettes: [
+      { H: "#33302c", S: "#f2c49c", G: "#2f2b30", M: "#8a4038", B: "#5f5340", P: "#4a4550", C: "#f2f0ea" },   // 갈색 셔츠(원조)
+      { H: "#33302c", S: "#f2c49c", G: "#2f2b30", M: "#8a4038", B: "#3f5a7a", P: "#333848", C: "#f2f0ea" }    // 남색 셔츠
     ],
-    sayings: ["만세!", "허허허", "커피 한잔 어때요?", "오늘도 화이팅!", "열심히 하시네요", "잠깐 쉬었다 가요", "안녕하세요!"] },
-  { kind:"human", art:PET_ART.glassesMan, cheerArt:PET_GLASSES_MAN_MOTION.cheer[0],
-    motionArt:PET_GLASSES_MAN_MOTION, gridW:16, gridH:20, pixelScale:3, width:64, height:80,
-    spriteSheet:{
-      src:"src/assets/pixel-teacher.png", cellW:96, cellH:120,
-      frames:{ idle:[0], walk:[0,1,2,3,4,5], seekwall:[0,1,2,3,4,5],
-        jump:[6,7,8,9], fall:[8,9], climb:[10,11,12,13], cheer:[14,15,16,17],
-        soar:[14,15,16,17], glide:[14,15,16,17] }
+    sayings: ["만세!", "허허허", "커피 한잔 어때요?", "오늘도 화이팅!", "열심히 하시네요", "잠깐 쉬었다 가요", "안녕하세요!"]
+  },
+  {
+    kind: "human", art: PET_ART.glassesMan, cheerArt: PET_GLASSES_MAN_MOTION.cheer[0],
+    motionArt: PET_GLASSES_MAN_MOTION, gridW: 16, gridH: 20, pixelScale: 3, width: 64, height: 80,
+    spriteSheet: {
+      src: "src/assets/pixel-teacher.png", cellW: 96, cellH: 120,
+      frames: {
+        idle: [0], walk: [0, 1, 2, 3, 4, 5], seekwall: [0, 1, 2, 3, 4, 5],
+        jump: [6, 7, 8, 9], fall: [8, 9], climb: [10, 11, 12, 13], cheer: [14, 15, 16, 17],
+        soar: [14, 15, 16, 17], glide: [14, 15, 16, 17]
+      }
     }, palettes: [
-      { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#6a5238", P:"#3e424a", F:"#25272b" },
-      { H:"#302f2d", S:"#efbd91", G:"#242424", M:"#8e3d32", B:"#775b3c", P:"#313844", F:"#20242a" }
+      { H: "#302f2d", S: "#efbd91", G: "#242424", M: "#8e3d32", B: "#6a5238", P: "#3e424a", F: "#25272b" },
+      { H: "#302f2d", S: "#efbd91", G: "#242424", M: "#8e3d32", B: "#775b3c", P: "#313844", F: "#20242a" }
     ],
-    sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"] },
-  { kind:"mossGolem", art:PET_ART.mossGolem, gridW:32, gridH:40, pixelScale:4, width:128, height:160, speed:0.21,
-    spriteSheet:{
-      src:"src/assets/moss-golem-sprites.png", cellW:256, cellH:512, cols:6,
-      frameMs:{ idle:180, walk:180, look:180, laser:120 },
-      frames:{ idle:[6], walk:[0,1,2,3,4,5], look:[7], laser:[9,10] }
+    sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"]
+  },
+  {
+    kind: "mossGolem", art: PET_ART.mossGolem, gridW: 32, gridH: 40, pixelScale: 4, width: 128, height: 160, speed: 0.0001,
+    spriteSheet: {
+      src: "src/assets/moss-golem-sprites.png", cellW: 256, cellH: 512, cols: 6,
+      frameMs: { idle: 180, walk: 1000, look: 180, laser: 420 },
+      frames: { idle: [6], walk: [0, 1, 2, 3, 4, 5], look: [7], laser: [9, 10] }
     }, palettes: [
-      { D:"#514d3d", G:"#705f48", W:"#f2d466" }
+      { D: "#514d3d", G: "#705f48", W: "#f2d466" }
     ],
-    sayings: ["쿵...", "천천히 가자", "이끼가 자랐네", "눈빛 조심!", "삐빅..."] }
+    sayings: ["쿵...", "천천히 가자", "이끼가 자랐네", "눈빛 조심!", "삐빅..."]
+  }
 ];
 
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
 const PET_NAMES = {
-  crab:"게", chick:"병아리", robot:"로봇", ghost:"유령", slime:"슬라임",
-  ufo:"UFO", pencil:"연필", star:"별", cat:"고양이", fluffyCat:"복실고양이", calicoCat:"삼색고양이", dog:"강아지",
-  spider:"거미", mole:"두더지", frog:"개구리", penguin:"펭귄", balloon:"풍선",
-  snail:"달팽이", ninja:"닌자", bird:"새", rabbit:"토끼", soccer:"축구공",
-  chameleon:"카멜레온", wizard:"마법사", magnet:"자석", cloud:"번개구름", rocket:"로켓",
-  butterfly:"나비", fish:"물고기", snake:"뱀", mouse:"생쥐", turtle:"거북이",
-  octopus:"문어", bat:"박쥐", owl:"부엉이", duck:"오리", squirrel:"다람쥐",
-  hedgehog:"고슴도치", hamster:"햄스터", bee:"꿀벌", ladybug:"무당벌레", dice:"주사위",
-  apple:"사과", eraser:"지우개", mushroom:"버섯", carrot:"당근", dino:"공룡", snowman:"눈사람",
-  alien:"외계인", ant:"개미", pig:"돼지", sheep:"양", mister:"커피 아저씨", glassesMan:"픽셀 선생님", mossGolem:"이끼 골렘"
+  crab: "게", chick: "병아리", robot: "로봇", ghost: "유령", slime: "슬라임",
+  ufo: "UFO", pencil: "연필", star: "별", cat: "고양이", fluffyCat: "복실고양이", calicoCat: "삼색고양이", dog: "강아지",
+  spider: "거미", mole: "두더지", frog: "개구리", penguin: "펭귄", balloon: "풍선",
+  snail: "달팽이", ninja: "닌자", bird: "새", rabbit: "토끼", soccer: "축구공",
+  chameleon: "카멜레온", wizard: "마법사", magnet: "자석", cloud: "번개구름", rocket: "로켓",
+  butterfly: "나비", fish: "물고기", snake: "뱀", mouse: "생쥐", turtle: "거북이",
+  octopus: "문어", bat: "박쥐", owl: "부엉이", duck: "오리", squirrel: "다람쥐",
+  hedgehog: "고슴도치", hamster: "햄스터", bee: "꿀벌", ladybug: "무당벌레", dice: "주사위",
+  apple: "사과", eraser: "지우개", mushroom: "버섯", carrot: "당근", dino: "공룡", snowman: "눈사람",
+  alien: "외계인", ant: "개미", pig: "돼지", sheep: "양", mister: "커피 아저씨", glassesMan: "픽셀 선생님", mossGolem: "이끼 골렘"
 };
 
 const PET_NAMES_EN = {
-  crab:"Crab", chick:"Chick", robot:"Robot", ghost:"Ghost", slime:"Slime",
-  ufo:"UFO", pencil:"Pencil", star:"Star", cat:"Cat", fluffyCat:"Fluffy cat", calicoCat:"Calico cat", dog:"Dog",
-  spider:"Spider", mole:"Mole", frog:"Frog", penguin:"Penguin", balloon:"Balloon",
-  snail:"Snail", ninja:"Ninja", bird:"Bird", rabbit:"Rabbit", soccer:"Soccer ball",
-  chameleon:"Chameleon", wizard:"Wizard", magnet:"Magnet", cloud:"Thundercloud", rocket:"Rocket",
-  butterfly:"Butterfly", fish:"Fish", snake:"Snake", mouse:"Mouse", turtle:"Turtle",
-  octopus:"Octopus", bat:"Bat", owl:"Owl", duck:"Duck", squirrel:"Squirrel",
-  hedgehog:"Hedgehog", hamster:"Hamster", bee:"Bee", ladybug:"Ladybug", dice:"Die",
-  apple:"Apple", eraser:"Eraser", mushroom:"Mushroom", carrot:"Carrot", dino:"Dinosaur", snowman:"Snowman",
-  alien:"Alien", ant:"Ant", pig:"Pig", sheep:"Sheep", mister:"Coffee guy", glassesMan:"Pixel teacher", mossGolem:"Moss golem"
+  crab: "Crab", chick: "Chick", robot: "Robot", ghost: "Ghost", slime: "Slime",
+  ufo: "UFO", pencil: "Pencil", star: "Star", cat: "Cat", fluffyCat: "Fluffy cat", calicoCat: "Calico cat", dog: "Dog",
+  spider: "Spider", mole: "Mole", frog: "Frog", penguin: "Penguin", balloon: "Balloon",
+  snail: "Snail", ninja: "Ninja", bird: "Bird", rabbit: "Rabbit", soccer: "Soccer ball",
+  chameleon: "Chameleon", wizard: "Wizard", magnet: "Magnet", cloud: "Thundercloud", rocket: "Rocket",
+  butterfly: "Butterfly", fish: "Fish", snake: "Snake", mouse: "Mouse", turtle: "Turtle",
+  octopus: "Octopus", bat: "Bat", owl: "Owl", duck: "Duck", squirrel: "Squirrel",
+  hedgehog: "Hedgehog", hamster: "Hamster", bee: "Bee", ladybug: "Ladybug", dice: "Die",
+  apple: "Apple", eraser: "Eraser", mushroom: "Mushroom", carrot: "Carrot", dino: "Dinosaur", snowman: "Snowman",
+  alien: "Alien", ant: "Ant", pig: "Pig", sheep: "Sheep", mister: "Coffee guy", glassesMan: "Pixel teacher", mossGolem: "Moss golem"
 };
 
 const PET_KIND_SAYINGS_EN = {
-  climber:["Up we go!", "Hello!", "Keep climbing!"], walker:["On the move!", "Hello!", "Step by step!"],
-  hopper:["Boing!", "Let's hop!", "Here I go!"], bouncer:["Boing!", "So bouncy!", "Hello!"],
-  roller:["Rolling along!", "Here I go!", "Wheee!"], ghost:["Boo!", "Did I surprise you?", "Hello!"],
-  ufo:["Beep beep!", "Greetings, Earthling!", "Scanning..."], cat:["Meow!", "Time for a nap.", "Purr..."],
-  fluffyCat:["I'm hungry, meow!"],
-  calicoCat:["What are you looking at, meow?", "On patrol, meow!", "Where are the snacks?", "Calicos bring good luck!", "Whoosh, bounce!"],
-  dog:["Woof!", "Let's go!", "Sniff sniff!"], spider:["Look at my web!", "Hello!", "No biting!"],
-  mole:["Pop!", "Underground is cozy.", "Hello!"], frog:["Ribbit!", "Ready to jump!", "Hop!"],
-  penguin:["Waddle waddle!", "Sliding is the best!", "Quack!"], balloon:["Floating along!", "Don't let go!", "Up we go!"],
-  snail:["Slow is okay.", "Keep going!", "Easy does it."], ninja:["...!", "Too quiet...", "Whoosh!"],
-  bird:["Chirp chirp!", "Flying high!", "Hello!"], chameleon:["What color today?", "Color shift!", "Can you find me?"],
-  wizard:["Abracadabra!", "Ta-da!", "Magic time!"], magnet:["Click!", "Drawn together!", "So magnetic!"],
-  cloud:["Rumble...", "Stormy skies!", "Flash!"], rocket:["3, 2, 1...", "Ready for launch!", "To space!"],
-  flutter:["Flutter flutter!", "Hello!", "Such a nice breeze!"], fish:["Blub blub!", "Swimming along!", "Bubble safe!"],
-  snake:["Sss...", "Slithering along!", "Hello!"], mouse:["Squeak!", "Where's the cheese?", "So fast!"],
-  human:["Hooray!", "How about a coffee?", "Keep up the good work!"],
-  default:["Hello!", "Let's do our best!", "Nice to see you!"]
+  climber: ["Up we go!", "Hello!", "Keep climbing!"], walker: ["On the move!", "Hello!", "Step by step!"],
+  hopper: ["Boing!", "Let's hop!", "Here I go!"], bouncer: ["Boing!", "So bouncy!", "Hello!"],
+  roller: ["Rolling along!", "Here I go!", "Wheee!"], ghost: ["Boo!", "Did I surprise you?", "Hello!"],
+  ufo: ["Beep beep!", "Greetings, Earthling!", "Scanning..."], cat: ["Meow!", "Time for a nap.", "Purr..."],
+  fluffyCat: ["I'm hungry, meow!"],
+  calicoCat: ["What are you looking at, meow?", "On patrol, meow!", "Where are the snacks?", "Calicos bring good luck!", "Whoosh, bounce!"],
+  dog: ["Woof!", "Let's go!", "Sniff sniff!"], spider: ["Look at my web!", "Hello!", "No biting!"],
+  mole: ["Pop!", "Underground is cozy.", "Hello!"], frog: ["Ribbit!", "Ready to jump!", "Hop!"],
+  penguin: ["Waddle waddle!", "Sliding is the best!", "Quack!"], balloon: ["Floating along!", "Don't let go!", "Up we go!"],
+  snail: ["Slow is okay.", "Keep going!", "Easy does it."], ninja: ["...!", "Too quiet...", "Whoosh!"],
+  bird: ["Chirp chirp!", "Flying high!", "Hello!"], chameleon: ["What color today?", "Color shift!", "Can you find me?"],
+  wizard: ["Abracadabra!", "Ta-da!", "Magic time!"], magnet: ["Click!", "Drawn together!", "So magnetic!"],
+  cloud: ["Rumble...", "Stormy skies!", "Flash!"], rocket: ["3, 2, 1...", "Ready for launch!", "To space!"],
+  flutter: ["Flutter flutter!", "Hello!", "Such a nice breeze!"], fish: ["Blub blub!", "Swimming along!", "Bubble safe!"],
+  snake: ["Sss...", "Slithering along!", "Hello!"], mouse: ["Squeak!", "Where's the cheese?", "So fast!"],
+  human: ["Hooray!", "How about a coffee?", "Keep up the good work!"],
+  default: ["Hello!", "Let's do our best!", "Nice to see you!"]
 };
 
 const PET_BUBBLE_EN = {
-  "성공! 🎉":"Success! 🎉", "와~ 됐다!":"It worked!", "코드 천재!":"Code genius!", "완벽해요!":"Perfect!", "만세!":"Hooray!", "박수 짝짝!":"Clap clap!",
-  "어이쿠!":"Oops!", "으악, 빨간 글씨!":"Oh no, red text!", "괜찮아요, 다시!":"It's okay, try again!", "삐끗...":"Whoops...", "오류는 스승님":"Errors teach us!", "힘내요!":"You can do it!",
-  "슈웅~":"Whoosh!", "쑤욱~":"Digging down!", "슉!":"Whoosh!", "수리수리 마수리~":"Abracadabra!", "철컥!":"Click!", "3, 2, 1...":"3, 2, 1...",
-  "여기에도 그려야지!":"I'll draw here too!", "쓱싹쓱싹!":"Scrub scrub!", "철컥! 끌어당긴다!":"Click! Pulling in!", "과부하... 재부팅...":"Overload... rebooting...",
-  "어? 내 우주선!":"Hey, my spaceship!", "후두둑~ 소나기!":"Pitter-patter rain!", "개굴개굴!":"Ribbit ribbit!", "사과다! 기다려!":"An apple! Wait up!", "데굴데굴~":"Rolling along!",
-  "준비... 출발...":"Ready... go...", "천천히 가자!":"Let's take it slow!", "거의 다 왔다!":"Almost there!", "집중 시간! 조용히 쉴게요":"Focus time! I'll rest quietly.", "휴식 시간! 쭉쭉~":"Break time! Stretch!",
-  "납치 실패...":"Abduction failed...", "다시 둥실~":"Floating again!", "푸슈슈슉~":"Pfffft!", "콰르릉!":"Kaboom!", "우르릉...":"Rumble...", "후우- 새 방울!":"Phew—new bubble!",
-  "찍찍!":"Squeak!", "슥- 변신!":"Color shift!", "냐옹!":"Meow!", "배고프다냐옹":"I'm hungry, meow!", "멍멍!":"Woof!", "냐앗!?":"Meow!?", "개굴!":"Ribbit!", "어라?!":"Huh?!", "얍!":"Ta-da!",
-  "발사!":"Launch!", "낙하산!":"Parachute!", "...늦었다":"...Too late.", "뿅!":"Pop!", "✨ 반짝반짝!":"✨ Sparkly!", "야호~":"Yahoo!",
-  "두둥실~":"Floating up!", "저기로!":"Over there!",
-  "다 지웠다!":"All clean!", "또 그려도 돼?":"Can I draw again?", "자력 정상!":"Magnet power normal!", "재부팅 완료!":"Reboot complete!",
-  "별 구경 완료!":"Star-gazing complete!", "지구가 제일 재밌어!":"Earth is the most fun!", "개굴! 최고야!":"Ribbit! Amazing!", "촉촉하게 완료!":"Nice and damp!",
-  "거의 잡았는데!":"I almost caught it!", "아삭은 다음 기회에!":"Crunchy next time!", "내가 이겼나?":"Did I win?", "천천히 가도 도착!":"Slow still gets there!"
+  "성공! 🎉": "Success! 🎉", "와~ 됐다!": "It worked!", "코드 천재!": "Code genius!", "완벽해요!": "Perfect!", "만세!": "Hooray!", "박수 짝짝!": "Clap clap!",
+  "어이쿠!": "Oops!", "으악, 빨간 글씨!": "Oh no, red text!", "괜찮아요, 다시!": "It's okay, try again!", "삐끗...": "Whoops...", "오류는 스승님": "Errors teach us!", "힘내요!": "You can do it!",
+  "슈웅~": "Whoosh!", "쑤욱~": "Digging down!", "슉!": "Whoosh!", "수리수리 마수리~": "Abracadabra!", "철컥!": "Click!", "3, 2, 1...": "3, 2, 1...",
+  "여기에도 그려야지!": "I'll draw here too!", "쓱싹쓱싹!": "Scrub scrub!", "철컥! 끌어당긴다!": "Click! Pulling in!", "과부하... 재부팅...": "Overload... rebooting...",
+  "어? 내 우주선!": "Hey, my spaceship!", "후두둑~ 소나기!": "Pitter-patter rain!", "개굴개굴!": "Ribbit ribbit!", "사과다! 기다려!": "An apple! Wait up!", "데굴데굴~": "Rolling along!",
+  "준비... 출발...": "Ready... go...", "천천히 가자!": "Let's take it slow!", "거의 다 왔다!": "Almost there!", "집중 시간! 조용히 쉴게요": "Focus time! I'll rest quietly.", "휴식 시간! 쭉쭉~": "Break time! Stretch!",
+  "납치 실패...": "Abduction failed...", "다시 둥실~": "Floating again!", "푸슈슈슉~": "Pfffft!", "콰르릉!": "Kaboom!", "우르릉...": "Rumble...", "후우- 새 방울!": "Phew—new bubble!",
+  "찍찍!": "Squeak!", "슥- 변신!": "Color shift!", "냐옹!": "Meow!", "배고프다냐옹": "I'm hungry, meow!", "멍멍!": "Woof!", "냐앗!?": "Meow!?", "개굴!": "Ribbit!", "어라?!": "Huh?!", "얍!": "Ta-da!",
+  "발사!": "Launch!", "낙하산!": "Parachute!", "...늦었다": "...Too late.", "뿅!": "Pop!", "✨ 반짝반짝!": "✨ Sparkly!", "야호~": "Yahoo!",
+  "두둥실~": "Floating up!", "저기로!": "Over there!",
+  "다 지웠다!": "All clean!", "또 그려도 돼?": "Can I draw again?", "자력 정상!": "Magnet power normal!", "재부팅 완료!": "Reboot complete!",
+  "별 구경 완료!": "Star-gazing complete!", "지구가 제일 재밌어!": "Earth is the most fun!", "개굴! 최고야!": "Ribbit! Amazing!", "촉촉하게 완료!": "Nice and damp!",
+  "거의 잡았는데!": "I almost caught it!", "아삭은 다음 기회에!": "Crunchy next time!", "내가 이겼나?": "Did I win?", "천천히 가도 도착!": "Slow still gets there!"
 };
 
-function petUsesEnglish(){ return typeof window !== "undefined" && !!(window.MNI18N && window.MNI18N.lang === "en"); }
-function petText(korean, english){ return petUsesEnglish() ? (english || PET_BUBBLE_EN[korean] || korean) : korean; }
-function petSpeciesLabel(id){ return (petUsesEnglish() ? PET_NAMES_EN[id] : PET_NAMES[id]) || id; }
-function petDefaultSayings(speciesId, species){
+function petUsesEnglish() { return typeof window !== "undefined" && !!(window.MNI18N && window.MNI18N.lang === "en"); }
+function petText(korean, english) { return petUsesEnglish() ? (english || PET_BUBBLE_EN[korean] || korean) : korean; }
+function petSpeciesLabel(id) { return (petUsesEnglish() ? PET_NAMES_EN[id] : PET_NAMES[id]) || id; }
+function petDefaultSayings(speciesId, species) {
   if (!petUsesEnglish()) return (species && species.sayings) || [];
   return (PET_KIND_SAYINGS_EN[(species && species.kind) || "default"] || PET_KIND_SAYINGS_EN.default).slice();
 }
