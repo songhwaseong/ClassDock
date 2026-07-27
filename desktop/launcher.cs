@@ -3336,18 +3336,14 @@ class PdfSignerLauncher
                 try { exited = session.Process.WaitForExit(250); } catch { break; }
                 if (exited) break;
                 bool running;
-                DateTime startedAt;
-                lock (session.Sync) { running = session.CommandRunning; startedAt = session.CommandStartedAt; }
+                lock (session.Sync) { running = session.CommandRunning; }
                 if (!running) continue;
-                bool timedOut = (DateTime.UtcNow - startedAt).TotalMinutes >= 30;
                 bool memoryLimit = ProcessTreeWorkingSetBytes(session.Process.Id) > PythonProcessMemoryLimitBytes;
-                if (timedOut || memoryLimit)
+                if (memoryLimit)
                 {
                     lock (session.Sync)
                     {
-                        session.Stderr.AppendLine(memoryLimit
-                            ? "\n[메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다.]"
-                            : "\n[시간 초과: 터미널 명령을 30분 후 종료했습니다.]");
+                        session.Stderr.AppendLine("\n[메모리 제한: 터미널 명령이 4GB를 넘어 종료했습니다.]");
                     }
                     StopTerminalSession(session.Id);
                     break;

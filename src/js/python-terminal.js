@@ -81,6 +81,9 @@ function createPythonTerminal(options){
   let completionState = null;
   let completionPending = false;
   const browserKernelId = "py-terminal-" + Math.random().toString(36).slice(2);
+  // 응답마다 연결을 닫는 로컬 HTTP 서버이므로 너무 짧은 폴링은 TIME_WAIT 연결을 급격히 늘린다.
+  const terminalPollIntervalMs = 500;
+  const terminalPollRetryLimit = 3;
 
   const rawDocPath = String(
     (options.ownerDoc && (options.ownerDoc.nativeAbsolutePath || options.ownerDoc.workspacePath || options.ownerDoc.relPath)) ||
@@ -357,10 +360,26 @@ function createPythonTerminal(options){
       body:encodeStrings([command])
     });
     if (!response.ok) throw new Error(await response.text() || ("HTTP " + response.status));
+    let pollFailures = 0;
     for (;;){
-      const poll = await fetch("/terminal-session-poll?id=" + encodeURIComponent(sessionId), { cache:"no-store" });
-      if (!poll.ok) throw new Error(await poll.text() || ("HTTP " + poll.status));
-      const data = await poll.json();
+      let data;
+      try {
+        const poll = await fetch("/terminal-session-poll?id=" + encodeURIComponent(sessionId), { cache:"no-store" });
+        if (!poll.ok) throw new Error(await poll.text() || ("HTTP " + poll.status));
+        data = await poll.json();
+        pollFailures = 0;
+      } catch(error) {
+        pollFailures++;
+        if (pollFailures > terminalPollRetryLimit){
+          throw new Error(
+            "터미널 상태를 확인하지 못했습니다. 서버 또는 명령이 계속 실행 중일 수 있습니다. " +
+            "잠시 후 터미널을 다시 열어 확인하세요. (" + ((error && error.message) ? error.message : String(error)) + ")"
+          );
+        }
+        mode.textContent = "로컬 PowerShell · 상태 확인 재시도 (" + pollFailures + "/" + terminalPollRetryLimit + ")";
+        await new Promise((resolve) => setTimeout(resolve, terminalPollIntervalMs * pollFailures));
+        continue;
+      }
       stdoutEl.textContent = data.stdout || "";
       stderrEl.textContent = data.stderr || "";
       stderrEl.hidden = !stderrEl.textContent;
@@ -373,7 +392,7 @@ function createPythonTerminal(options){
         if (Number(data.code) !== 0 && !data.stopped) appendLog("종료 코드 " + data.code, "py-terminal-status error");
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 35));
+      await new Promise((resolve) => setTimeout(resolve, terminalPollIntervalMs));
     }
   };
 
