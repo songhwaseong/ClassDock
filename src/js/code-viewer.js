@@ -1,7 +1,13 @@
 "use strict";
 
 /* ===== 코드/설정 파일 미리보기 (자체 구문 강조 + 줄번호, 외부 의존성 없음) ===== */
-const CODE_KW = "abstract|and|arguments|as|assert|async|await|base|bool|boolean|break|byte|case|catch|chan|char|class|const|continue|debugger|def|default|defer|del|delete|do|double|elif|else|elsif|end|enum|except|export|extends|extern|false|final|finally|float|fn|for|foreach|from|func|function|global|go|goto|if|impl|implements|import|in|instanceof|int|interface|is|lambda|let|long|loop|match|mod|module|mut|namespace|new|nil|none|not|null|object|or|out|override|package|pass|private|protected|public|pub|raise|readonly|ref|return|select|self|short|sizeof|static|struct|super|switch|synchronized|template|this|throw|throws|trait|true|try|typedef|typeof|union|unsafe|use|using|var|virtual|void|volatile|when|where|while|with|yield";
+// 앞머리의 대문자 낱말은 파이썬 상수(None·True·False 등) — 강조 정규식이 대소문자를 구분하므로
+// 소문자 none|true|false 와 별개로 적어야 색이 붙는다.
+const CODE_KW = "Ellipsis|False|None|NotImplemented|True|abstract|and|arguments|as|assert|async|await|base|bool|boolean|break|byte|case|catch|chan|char|class|const|continue|debugger|def|default|defer|del|delete|do|double|elif|else|elsif|end|enum|except|export|extends|extern|false|final|finally|float|fn|for|foreach|from|func|function|global|go|goto|if|impl|implements|import|in|instanceof|int|interface|is|lambda|let|long|loop|match|mod|module|mut|namespace|new|nil|none|nonlocal|not|null|object|or|out|override|package|pass|private|protected|public|pub|raise|readonly|ref|return|select|self|short|sizeof|static|struct|super|switch|synchronized|template|this|throw|throws|trait|true|try|typedef|typeof|union|unsafe|use|using|var|virtual|void|volatile|when|where|while|with|yield";
+// 파이썬 내장 함수·형(tk-b)과 내장 예외·경고 클래스(tk-t). 키워드 목록과 겹치는 int·float·bool·
+// object·super 는 hash 프로필에서 이쪽이 먼저 매칭돼 내장색으로 통일된다.
+const PY_BUILTIN_FN = "__import__|abs|aiter|all|anext|any|ascii|bin|bool|breakpoint|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip";
+const PY_BUILTIN_EXC = "ArithmeticError|AssertionError|AttributeError|BaseException|BlockingIOError|BrokenPipeError|BufferError|BytesWarning|ChildProcessError|ConnectionAbortedError|ConnectionError|ConnectionRefusedError|ConnectionResetError|DeprecationWarning|EOFError|EncodingWarning|Exception|FileExistsError|FileNotFoundError|FloatingPointError|FutureWarning|GeneratorExit|ImportError|ImportWarning|IndentationError|IndexError|InterruptedError|IsADirectoryError|KeyError|KeyboardInterrupt|LookupError|MemoryError|ModuleNotFoundError|NameError|NotADirectoryError|NotImplementedError|OSError|OverflowError|PendingDeprecationWarning|PermissionError|ProcessLookupError|RecursionError|ReferenceError|ResourceWarning|RuntimeError|RuntimeWarning|StopAsyncIteration|StopIteration|SyntaxError|SyntaxWarning|SystemError|SystemExit|TabError|TimeoutError|TypeError|UnboundLocalError|UnicodeDecodeError|UnicodeEncodeError|UnicodeError|UnicodeTranslateError|UnicodeWarning|UserWarning|ValueError|Warning|ZeroDivisionError";
 const SQL_KW = "select|from|where|insert|into|update|delete|create|alter|drop|table|view|index|join|inner|left|right|outer|full|cross|on|group|order|by|asc|desc|having|union|all|values|set|primary|key|foreign|references|not|null|default|distinct|as|and|or|like|between|in|exists|case|when|then|else|count|sum|avg|min|max|limit|offset|begin|commit|rollback";
 window.__lastCodeLinkDocId = window.__lastCodeLinkDocId || null;
 
@@ -120,7 +126,17 @@ function highlightCodeBase(src, profile){
   const kwList = profile==="sql" ? SQL_KW : CODE_KW;
   let alts;
   if (profile==="xml") alts = ["(?<com>"+com+")", "(?<s>"+str+")", "(?<t></?[A-Za-z][\\w:.-]*|/?>)"];
-  else alts = ["(?<com>"+com+")", "(?<s>"+str+")", "(?<n>"+num+")", "(?<k>\\b(?:"+kwList+")\\b)"];
+  else {
+    alts = ["(?<com>"+com+")", "(?<s>"+str+")", "(?<n>"+num+")"];
+    // 파이썬(# 주석 프로필)에서만 내장 이름을 따로 칠한다 — 키워드 대안보다 앞에 둬야
+    // int·float·bool 처럼 양쪽 목록에 다 있는 이름이 내장색으로 잡힌다. xml 전용인 t 그룹은
+    // 이 프로필에서 비어 있으므로 내장 예외 색으로 그대로 재사용한다(전용 CSS가 이미 있음).
+    if (profile==="hash"){
+      alts.push("(?<b>\\b(?:"+PY_BUILTIN_FN+")\\b)");
+      alts.push("(?<t>\\b(?:"+PY_BUILTIN_EXC+")\\b)");
+    }
+    alts.push("(?<k>\\b(?:"+kwList+")\\b)");
+  }
   let re;
   try { re = new RegExp(alts.join("|"), profile==="sql" ? "gi" : "g"); }
   catch(e){ return escapeHtml(src); }                 // 정규식 미지원 환경 → 일반 텍스트로 폴백
@@ -131,7 +147,7 @@ function highlightCodeBase(src, profile){
     const g = m.groups;
     if (g.s && isFStringToken(m[0])) out += highlightFString(m[0]);
     else {
-      const cls = g.com?"c":g.s?"s":g.n?"n":g.k?"k":g.t?"t":"";
+      const cls = g.com?"c":g.s?"s":g.n?"n":g.b?"b":g.k?"k":g.t?"t":"";
       out += '<span class="tk-'+cls+'">' + escapeHtml(m[0]) + '</span>';
     }
     last = m.index + m[0].length;
