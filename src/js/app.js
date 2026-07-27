@@ -870,10 +870,25 @@ function wire(){
     refreshChrome();
     scheduleViewerLayoutRefresh();
   };
+  byId("sidebarBackdrop").onclick = () => {
+    if (sidebarCollapsed) return;
+    sidebarCollapsed = true;
+    try { localStorage.setItem("sidebarCollapsed", "true"); } catch(e){}
+    refreshChrome();
+    byId("sidebarToggle").focus();
+  };
 
   // 자주 쓰는 파일 작업 단축키. 편집기 안에서도 Ctrl+S는 현재 문서를 저장한다.
   window.addEventListener("keydown", (e) => {
     if (document.querySelector(".modal:not([hidden])")) return;
+    if (e.key === "Escape" && !sidebarCollapsed && !byId("sidebar").hidden){
+      e.preventDefault();
+      sidebarCollapsed = true;
+      try { localStorage.setItem("sidebarCollapsed", "true"); } catch(e){}
+      refreshChrome();
+      byId("sidebarToggle").focus();
+      return;
+    }
     // 왼쪽 사이드바 숨기기 / 보이기 (기본 Alt+←/→ — 브라우저 뒤로·앞으로가기는 막는다)
     const sbHide = shortcutMatches(e, "sidebarHide"), sbShow = shortcutMatches(e, "sidebarShow");
     if (sbHide || sbShow){
@@ -987,8 +1002,8 @@ function wire(){
   // 사이드바 너비 드래그 조절
   (function(){
     const resizer = byId("sbResizer"), sidebar = byId("sidebar");
-    try { const saved = localStorage.getItem("sbWidth"); if (saved) sidebar.style.flexBasis = saved; } catch(e){}
-    const saveWidth = () => { try { localStorage.setItem("sbWidth", sidebar.style.flexBasis); } catch(e){} };
+    try { const saved = localStorage.getItem("sbWidth"); if (saved) sidebar.style.width = saved; } catch(e){}
+    const saveWidth = () => { try { localStorage.setItem("sbWidth", sidebar.style.width); } catch(e){} };
     const fitToLongestName = () => {
       if (!navNodes.length) return;
       const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
@@ -1008,7 +1023,7 @@ function wire(){
         // 좌우 패딩 + 트위스트 + 배지 + 닫기 + gap + 스크롤바 여유 + 폴더 깊이 들여쓰기.
         needed = Math.max(needed, Math.ceil(ctx.measureText(name).width + 112 + depthOf(node) * 16));
       }
-      sidebar.style.flexBasis = Math.max(150, Math.min(needed, 600)) + "px";
+      sidebar.style.width = Math.max(150, Math.min(needed, 600)) + "px";
       saveWidth();
       scheduleViewerLayoutRefresh();
       toast(needed > 600 ? "가장 긴 파일명에 맞췄어요. 최대 너비는 600px입니다." : "파일명 길이에 맞춰 사이드바를 조절했어요.", 1800);
@@ -1022,7 +1037,7 @@ function wire(){
       const move = (ev) => {
         let w = startW + (ev.clientX - startX);
         w = Math.max(150, Math.min(w, 600));         // 최소 150 ~ 최대 600px
-        sidebar.style.flexBasis = w + "px";
+        sidebar.style.width = w + "px";
       };
       const up = () => {
         resizer.classList.remove("dragging");

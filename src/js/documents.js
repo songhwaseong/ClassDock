@@ -3180,8 +3180,15 @@ function refreshChrome(){
   if (!docs.length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateOriginalSaveBadge(null); updateModeBadges(); }
   renderTabs();
   dropzone.hidden = has;
-  byId("sidebar").hidden = sidebarCollapsed;
-  byId("sbResizer").hidden = !has || sidebarCollapsed;
+  const sidebar = byId("sidebar"), sidebarBackdrop = byId("sidebarBackdrop");
+  const sidebarOpen = has && !sidebarCollapsed;
+  sidebar.hidden = !has;
+  sidebar.classList.toggle("is-open", sidebarOpen);
+  sidebar.inert = !sidebarOpen;
+  sidebar.setAttribute("aria-hidden", String(!sidebarOpen));
+  sidebarBackdrop.hidden = !has;
+  sidebarBackdrop.classList.toggle("is-open", sidebarOpen);
+  byId("sbResizer").hidden = !sidebarOpen;
   const sidebarToggle = byId("sidebarToggle");
   sidebarToggle.title = sidebarCollapsed ? "왼쪽 사이드 메뉴 보이기" : "왼쪽 사이드 메뉴 숨기기";
   sidebarToggle.setAttribute("aria-label", sidebarToggle.title);
