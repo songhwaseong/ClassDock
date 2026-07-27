@@ -405,8 +405,8 @@ async function yieldToBrowserThrottled(minGapMs = 12){
 // PDF 렌더 해상도: 화면에 "보이는 배율(줌)"에 맞춰 캔버스 픽셀을 잡아 크롬처럼 어느 배율이든 또렷하게 한다.
 // 최소 RENDER_SCALE 배 슈퍼샘플(작게 봐도 선명) + 줌이 커지면 그 배율로 재렌더(targetRenderDpr 참고).
 // RENDER_MAX_SIDE 로 캔버스 한 변(px)을 제한해 고배율 메모리를 보호한다(단 z=1 품질은 보존).
-const RENDER_SCALE = 3;
-const RENDER_MAX_SIDE = 5000;
+const RENDER_SCALE = 4;
+const RENDER_MAX_SIDE = 6000;
 // PDF 기본 표시 크기 배수(맞춤 대비). 1.0 = 기본, 키우면 더 크게 열림.
 const FIT_SCALE = 1.0;
 // PDF를 처음 열 때 표시 배율. 125%에서 고해상도 렌더가 즉시 적용되도록 기본값으로 사용한다.

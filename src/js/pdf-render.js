@@ -13,9 +13,8 @@ async function loadPdf(arrayBuffer, name, options={}){
     try {
       await ensureWorker();
       const data = new Uint8Array(arrayBuffer.slice(0)); // pdf.js 에는 복사본 전달
-      // disableFontFace: 임베드 폰트의 글리프를 캔버스에 직접 그린다.
-      //  → 브라우저가 서브셋 한글(CJK) 폰트의 @font-face 를 거부해 두부글자(□)로 깨지는 문제 방지(특히 file://).
-      // useSystemFonts:false: 시스템 폰트로 대체하지 않고 임베드 폰트를 그대로 사용.
+      // The offline EXE cannot reliably load subset Korean fonts through FontFace.
+      // Draw embedded glyphs on the canvas instead so Korean text is never replaced by boxes.
       const pdf = await pdfjsLib.getDocument({ data, disableFontFace: true, useSystemFonts: false }).promise;
       doc.pdfjsDoc = pdf;
 
