@@ -1602,6 +1602,7 @@ function petBindPointer(p){
       if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
       else if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
       else if (p.kind === "mossGolem" && p.grav){
+        petSay(p, petRandomSaying(p), false);
         p.state = "look"; p.face = 1; p.timer = 70; p.vx = 0; p.vy = 0; p.rot = 0; p.t = 0;
       }
       else {
