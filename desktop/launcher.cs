@@ -148,6 +148,10 @@ class PdfSignerLauncher
     static readonly string InstancePortPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PdfSigner", "instance-port.txt");
+    // 포트 파일 확인 전에 두 프로세스가 동시에 기동하는 경쟁을 막는다. 뮤텍스는 프로세스가
+    // 강제 종료되어도 OS가 자동으로 해제하므로 별도의 종료 정리가 필요 없다.
+    const string SingleInstanceMutexName = @"Local\ManneungClassroom_PdfSigner_SingleInstance";
+    static Mutex SingleInstanceMutex;
     // 편집한 코드를 브라우저 권한 팝업 없이 바로 저장하는 폴더. 사용자가 바꾸지 않으면 내 문서\만능교실 저장.
     static readonly string DefaultSaveRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -976,6 +980,26 @@ class PdfSignerLauncher
             return;
         }
 
+        // 포트 기록이 생기기 전 거의 동시에 실행된 경우에도 한 프로세스만 서버와 TEMP 청소를 맡는다.
+        // 뒤에 온 프로세스는 먼저 온 프로세스가 포트를 기록할 때까지 잠시 기다린 뒤 브라우저만 연다.
+        if (!TryAcquireSingleInstanceMutex())
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                remembered = ReadInstancePort();
+                if (remembered > 0 && IsOurServerAt(remembered))
+                {
+                    if (Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1")
+                    {
+                        try { Process.Start("http://127.0.0.1:" + remembered + "/"); } catch { }
+                    }
+                    return;
+                }
+                Thread.Sleep(100);
+            }
+            return;
+        }
+
         // 2) 바인딩 가능한 첫 후보 포트를 사용한다(HTTP 확인 없이 TCP 바인드만 시도 → 점유 포트도 즉시 실패라 빠름).
         //    결정적 순서라 같은 PC 는 재실행마다 같은 포트를 재사용 → origin 이 유지된다.
         foreach (int cand in candidatePorts)
@@ -1002,6 +1026,12 @@ class PdfSignerLauncher
         string url = "http://127.0.0.1:" + port + "/";
         HeartbeatRequired = Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1";
         HeartbeatStartedAt = DateTime.UtcNow;
+
+        // 지난 실행이 %TEMP% 에 남긴 고아 작업폴더 청소. 지울 양이 수백 MB 일 수 있어
+        // 별도 스레드에서 처리한다 — 기동과 첫 화면을 붙잡지 않는다.
+        Thread tempSweeper = new Thread(delegate() { try { SweepOrphanTempEntries(); } catch { } });
+        tempSweeper.IsBackground = true;
+        tempSweeper.Start();
 
         Console.WriteLine("============================================");
         Console.WriteLine("  만능파일교실 is running");
@@ -1050,7 +1080,11 @@ class PdfSignerLauncher
                         }
                         else if ((now - HeartbeatStartedAt).TotalSeconds >= 45) shouldExit = true;
                     }
-                    if (shouldExit) Environment.Exit(0);
+                    if (shouldExit)
+                    {
+                        CleanupOwnTempEntries();   // 이 실행이 만든 임시 작업폴더를 남기지 않고 종료
+                        Environment.Exit(0);
+                    }
                 }
             });
             heartbeatWatcher.IsBackground = true;
@@ -2192,6 +2226,21 @@ class PdfSignerLauncher
             File.WriteAllText(InstancePortPath, port.ToString());
         }
         catch { }
+    }
+
+    // 포트 파일만으로는 두 프로세스가 동시에 시작하는 순간을 막을 수 없으므로 OS 뮤텍스로 보완한다.
+    // 뮤텍스 생성 자체가 실패하는 제한된 환경에서는 기존 포트 기반 동작을 유지한다.
+    static bool TryAcquireSingleInstanceMutex()
+    {
+        try
+        {
+            bool createdNew;
+            SingleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out createdNew);
+            if (createdNew) return true;
+            try { return SingleInstanceMutex.WaitOne(0); }
+            catch (AbandonedMutexException) { return true; }
+        }
+        catch { return true; }
     }
 
     // 지정 포트에 이미 '우리' 서버가 떠 있는지 확인(/ping 응답의 X-App 헤더로 식별). 외부 앱이면 false.
@@ -3972,6 +4021,149 @@ class PdfSignerLauncher
         try { if (File.Exists(session.RunnerPath)) File.Delete(session.RunnerPath); } catch { }
         try { if (Directory.Exists(session.PlotDir)) Directory.Delete(session.PlotDir, true); } catch { }
         try { if (Directory.Exists(session.TempRoot)) Directory.Delete(session.TempRoot, true); } catch { }
+    }
+
+    /* ===== %TEMP% 임시 작업폴더 청소 =====
+       파이썬 세션·노트북 커널·터미널은 각자 종료 경로에서 임시물을 지우지만, 브라우저 탭을 닫으면
+       하트비트 감시가 곧바로 프로세스를 끝내고(강제 종료·크래시도 마찬가지) 그때 살아 있던 임시물이 고아로 남는다.
+       고아 폴더는 접근 통로인 세션 ID 가 메모리에만 있어 재실행 후에는 어떤 기능으로도 쓸 수 없으므로 지워도 잃을 게 없다.
+       (설정·자동복원 데이터는 %LOCALAPPDATA%\PdfSigner 와 브라우저 IndexedDB 에 있어 이 청소와 무관하다.)
+
+       두 겹으로 막는다.
+        1) 종료 직전 CleanupOwnTempEntries — 이번 실행이 만든 것을 그 자리에서 정리.
+        2) 다음 기동 때 SweepOrphanTempEntries — 1)까지 못 간 강제 종료·크래시분을 뒤늦게 정리. */
+    const int OrphanTempMinAgeHours = 24;
+    static readonly string[] OrphanTempPrefixes = new string[] { "moidapy_", "moida_", "manneung_terminal_" };
+    // 프로세스 안에서 필요할 때 재사용하는 작은 Python 도우미. 시작 청소와 첫 요청이 겹쳐
+    // 실행 직전에 삭제되지 않도록 항상 보존한다(파일명은 고정이라 누적되지 않는다).
+    static readonly string[] PersistentTempHelperNames = new string[] {
+        "moida_sqlite_preview.py",
+        "moida_sqlite_exec.py",
+        "moida_python_import_index.py",
+        "moida_jedi_complete.py"
+    };
+
+    // 지금 이 프로세스가 쓰는 경로는 나이와 무관하게 제외하고, 그 밖에는 24시간 지난 것만 지운다.
+    // 별도 실행 인스턴스는 OS 뮤텍스로 막고, 시간 조건은 직전 실행이 막 끝낸 최근 임시물을 지켜 준다.
+    static void SweepOrphanTempEntries()
+    {
+        string temp;
+        try { temp = Path.GetTempPath(); } catch { return; }
+
+        Dictionary<string, bool> inUse = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in CurrentTempPaths()) if (path.Length > 0) inUse[path] = true;
+
+        DateTime cutoff = DateTime.UtcNow.AddHours(-OrphanTempMinAgeHours);
+        string[] dirs;
+        string[] files;
+        try { dirs = Directory.GetDirectories(temp); } catch { dirs = new string[0]; }
+        try { files = Directory.GetFiles(temp); } catch { files = new string[0]; }
+
+        foreach (string dir in dirs)
+        {
+            if (!IsOrphanTempCandidate(dir, inUse)) continue;
+            try
+            {
+                DirectoryInfo info = new DirectoryInfo(dir);
+                if (info.CreationTimeUtc > cutoff || info.LastWriteTimeUtc > cutoff) continue;
+                Directory.Delete(dir, true);
+            }
+            catch { }   // 다른 프로세스가 쓰는 중이면 잠겨서 실패 — 다음 기동에서 다시 시도한다
+        }
+        foreach (string file in files)
+        {
+            if (!IsOrphanTempCandidate(file, inUse)) continue;
+            try
+            {
+                FileInfo info = new FileInfo(file);
+                if (info.CreationTimeUtc > cutoff || info.LastWriteTimeUtc > cutoff) continue;
+                File.Delete(file);
+            }
+            catch { }
+        }
+    }
+
+    static bool IsOrphanTempCandidate(string path, Dictionary<string, bool> inUse)
+    {
+        string name = Path.GetFileName(path);
+        bool ours = false;
+        foreach (string prefix in OrphanTempPrefixes)
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { ours = true; break; }
+        if (!ours) return false;
+        return !inUse.ContainsKey(NormalizeTempPath(path));
+    }
+
+    static string NormalizeTempPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        try { return Path.GetFullPath(path).TrimEnd('\\', '/'); } catch { return path; }
+    }
+
+    // 이 프로세스가 붙들고 있는 임시 경로(살아 있거나 보존 중인 세션·커널·터미널)
+    static List<string> CurrentTempPaths()
+    {
+        List<string> paths = new List<string>();
+        lock (PySessionsLock)
+            foreach (PythonSession session in PySessions.Values)
+            {
+                paths.Add(NormalizeTempPath(session.TempRoot));
+                paths.Add(NormalizeTempPath(session.RunnerPath));
+                paths.Add(NormalizeTempPath(session.PlotDir));
+            }
+        lock (PyKernelsLock)
+            foreach (PythonKernel kernel in PyKernels.Values)
+            {
+                paths.Add(NormalizeTempPath(kernel.TempRoot));
+                paths.Add(NormalizeTempPath(kernel.RunnerPath));
+            }
+        lock (TerminalSessionsLock)
+            foreach (TerminalSession session in TerminalSessions.Values)
+                paths.Add(NormalizeTempPath(session.ScriptPath));
+        try
+        {
+            string temp = Path.GetTempPath();
+            foreach (string name in PersistentTempHelperNames)
+                paths.Add(NormalizeTempPath(Path.Combine(temp, name)));
+        }
+        catch { }
+        return paths;
+    }
+
+    // 종료 직전 정리. 아직 돌고 있는 것만 프로세스를 먼저 정리하고(끝난 것에 taskkill 을 걸어
+    // 종료를 몇 초씩 늦추지 않는다), 임시 파일은 모두 지운다.
+    static void CleanupOwnTempEntries()
+    {
+        try
+        {
+            List<PythonSession> sessions = new List<PythonSession>();
+            lock (PySessionsLock)
+            {
+                foreach (PythonSession session in PySessions.Values) sessions.Add(session);
+                PySessions.Clear();
+            }
+            foreach (PythonSession session in sessions)
+            {
+                if (!session.Complete) KillProcessTree(session.Process);
+                CleanupPythonSessionFiles(session);
+            }
+
+            List<string> kernelIds = new List<string>();
+            lock (PyKernelsLock) foreach (string id in PyKernels.Keys) kernelIds.Add(id);
+            foreach (string id in kernelIds) StopPythonKernel(id);   // 프로세스 종료 + 작업폴더 삭제
+
+            List<TerminalSession> terminals = new List<TerminalSession>();
+            lock (TerminalSessionsLock)
+            {
+                foreach (TerminalSession session in TerminalSessions.Values) terminals.Add(session);
+                TerminalSessions.Clear();
+            }
+            foreach (TerminalSession session in terminals)
+            {
+                if (!session.ShellExited) KillProcessTree(session.Process);
+                try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
+            }
+        }
+        catch { }   // 정리는 최선 노력 — 실패해도 종료는 진행하고 다음 기동의 청소가 마저 치운다
     }
 
     // ===== 파이썬(.py) 실행 — 설치된 인터프리터를 찾아 임시 파일로 실행 =====
