@@ -1098,7 +1098,10 @@ async function renderCode(file, host, ext, profile, runCtx){
             let idx = 0, from = 0, line = 1, scan = 0;
             while ((idx = hay.indexOf(needle, from)) !== -1){
               for (; scan < idx; scan++) if (viewText.charCodeAt(scan) === 10) line++;
-              roMatches.push({ line, idx });                     // 줄뿐 아니라 글자 위치(idx)도 저장 → 단어 강조
+              // 구문 강조는 code 안을 여러 text node로 나눌 수 있으므로, 실제 Range를
+              // 만들 때 사용할 줄 안의 위치도 함께 저장한다.
+              const lineStart = lineOffsets[line - 1] || 0;
+              roMatches.push({ line, idx, column: idx - lineStart });
               from = idx + Math.max(1, needle.length);
               if (roMatches.length >= 5000) break;   // 초대용량 보호
             }
@@ -1114,17 +1117,15 @@ async function renderCode(file, host, ext, profile, runCtx){
           if (!chunkStarts.length || len <= 0) return false;
           const ci = Math.floor((m.line - 1) / CHUNK);
           const chunkEl = wrap.querySelectorAll(".code-chunk")[ci];
-          const codeEl = chunkEl && chunkEl.querySelector("code");
-          const textNode = codeEl && codeEl.firstChild;
-          if (!textNode || textNode.nodeType !== 3) return false;   // heavy 파일은 prof "text" 라 단일 텍스트 노드
-          const start = m.idx - chunkStarts[ci], end = start + len;
-          if (start < 0 || end > (textNode.nodeValue || "").length) return false;
+          if (!chunkEl) return false;
           // 가상 렌더(content-visibility:auto) 청크는 오프스크린이면 측정 불가 → 이 청크만 강제로 레이아웃
           if (roForcedChunk && roForcedChunk !== chunkEl) roForcedChunk.style.contentVisibility = "";
           chunkEl.style.contentVisibility = "visible"; roForcedChunk = chunkEl;
           try {
-            const range = document.createRange();
-            range.setStart(textNode, start); range.setEnd(textNode, end);
+            // 첫 text node만 쓰면 구문 강조 span으로 쪼개진 코드에서는 좌표를 찾지
+            // 못한다. 모든 text node 기준으로 Range를 만드는 함수를 사용한다.
+            const range = codeRangeForLine(m.line, m.column, len);
+            if (!range) return false;
             const r = range.getBoundingClientRect();
             const wr = wrap.getBoundingClientRect();
             if ((!r.width && !r.height)) return false;
