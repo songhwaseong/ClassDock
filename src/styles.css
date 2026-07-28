@@ -2229,10 +2229,13 @@
   html.hide-tool-pyEnv .run-diag,
   html.hide-tool-pyNewPy .run-newpy,
   html.hide-tool-pyRevert .run-py-revert,
+  html.hide-tool-pyDedupe .run-dedupe,
+  html.hide-tool-pySpellcheck .run-spellcheck,
   html.hide-tool-pyFont .run-font-group,
   html.hide-tool-nbInk .nbv-ink-toggle,
   html.hide-tool-nbToc .nbv-toc-open,
   html.hide-tool-nbFind .nbv-find-open,
+  html.hide-tool-nbDedupe .nbv-dedupe,
   html.hide-tool-nbFont .nbv-font-group,
   /* .py 변환 그룹과 PDF 저장 메뉴만 숨긴다. 저장 버튼 자체는 항상 남긴다. */
   html.hide-tool-nbExport .nbv-export-group,
@@ -2263,9 +2266,13 @@
   [data-theme="dark"] .run-trace{background:rgba(37,99,235,.12);border-color:#60a5fa;color:#bfdbfe}
   [data-theme="dark"] .run-analyze{background:rgba(124,58,237,.12);border-color:#a78bfa;color:#ddd6fe}
   /* 보조 버튼(저장·라이브러리·되돌리기·글자크기)은 한 가지 톤으로 — ▶ 실행만 도드라지게 */
-  .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec{font:inherit;font-size:12.5px;border:1px solid var(--border);
+  .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec,.run-dedupe{font:inherit;font-size:12.5px;border:1px solid var(--border);
     background:var(--field);color:var(--muted);border-radius:8px;padding:6px 11px;cursor:pointer}
-  .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover,.run-dedupe:hover{background:var(--panel-hover);color:var(--ink)}
+  /* Python 도구막대에서는 맞춤법도 일반 보조 버튼과 같은 크기·색으로 맞춘다. */
+  .run-bar .spellcheck-trigger{font:inherit;font-size:12.5px;line-height:normal;border-color:var(--border);border-radius:8px;
+    background:var(--field);color:var(--muted);padding:6px 11px}
+  .run-bar .spellcheck-trigger:hover,.run-bar .spellcheck-trigger[aria-pressed="true"]{background:var(--panel-hover);color:var(--ink)}
   /* PDF에 핀: PDF·코드를 나란히 보는 학습 화면일 때만 쓸모가 있어 그때만 노출 */
   .run-link{display:none}
   #content.study-mode .run-link{display:inline-block}

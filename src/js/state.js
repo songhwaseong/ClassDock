@@ -105,11 +105,14 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"pyEnv",       label:"Py Env(실행 환경)",cls:"run-diag",           target:"py" },
   { id:"pyNewPy",     label:"+Py(새 파이썬)",  cls:"run-newpy",           target:"py" },
   { id:"pyRevert",    label:"원본 되돌리기",   cls:"run-py-revert",       target:"py" },
+  { id:"pyDedupe",    label:"중복 줄 삭제",     cls:"run-dedupe",          target:"py" },
+  { id:"pySpellcheck",label:"맞춤법",          cls:"run-spellcheck",      target:"py" },
   { id:"pyFont",      label:"글자 크기(A− A+)",cls:"run-font-group",      target:"py" },
   // 노트북 도구막대 (notebook-run.js)
   { id:"nbInk",       label:"필기",            cls:"nbv-ink-toggle",      target:"notebook" },
   { id:"nbToc",       label:"목차",            cls:"nbv-toc-open",        target:"notebook" },
   { id:"nbFind",      label:"전체 찾기",       cls:"nbv-find-open",       target:"notebook" },
+  { id:"nbDedupe",    label:"중복 줄 삭제",     cls:"nbv-dedupe",          target:"notebook" },
   { id:"nbFont",      label:"글자 크기(A− A+)",cls:"nbv-font-group",      target:"notebook" },
   { id:"nbExport",    label:"내보내기(.py/PDF)",cls:"nbv-export-group",   target:"notebook" },
   { id:"nbHelp",      label:"단축키",          cls:"nbv-help-open",       target:"notebook" }

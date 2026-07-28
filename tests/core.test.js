@@ -1217,3 +1217,15 @@ test("directory placeholders are not opened as zero-byte untitled files", () => 
   ]), false);
   assert.equal(droppedTransferNeedsFolderPicker({ items:[] }, []), false);
 });
+
+test("dedupe removes only duplicate selected lines and keeps their first order", () => {
+  assert.deepEqual(transformEditorLines("keep\na\nb\na\nb\ntail", 5, 12, "dedupe"), {
+    value: "keep\na\nb\ntail", selectionStart: 5, selectionEnd: 8
+  });
+  assert.deepEqual(transformEditorLines("A\na\nA ", 0, 6, "dedupe"), {
+    value: "A\na\nA ", selectionStart: 0, selectionEnd: 6
+  });
+  assert.deepEqual(transformEditorLines("a\na\nb", 0, 3, "dedupe"), {
+    value: "a\nb", selectionStart: 0, selectionEnd: 1
+  });
+});

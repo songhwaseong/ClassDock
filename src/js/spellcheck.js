@@ -483,6 +483,7 @@ const MNKoreanSpellcheck = (() => {
     if (!textarea || !buttonHost) return null;
     const button = element("button", "spellcheck-trigger", options.buttonText || "맞춤법");
     button.type = "button"; button.title = "오프라인 한국어 맞춤법 검사";
+    if (options.buttonClass) button.classList.add(options.buttonClass);
     button.setAttribute("aria-pressed", "false");
     if (options.before && options.before.parentNode === buttonHost) buttonHost.insertBefore(button, options.before);
     else buttonHost.appendChild(button);

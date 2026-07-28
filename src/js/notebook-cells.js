@@ -583,7 +583,7 @@ function nbMountMarkdown(ctrl, ownerDoc){
     ta.addEventListener("input", () => { clearSpot(); sync(); grow(); updatePreview(); });
     ta.addEventListener("blur", (e) => {
       const to = e.relatedTarget;
-      if (to && to.closest && to.closest(".nbv-find,.spellcheck-trigger,.spellcheck-panel")) return;   // 찾기·맞춤법 패널로 포커스가 간 경우엔 편집을 유지
+      if (to && to.closest && to.closest(".nbv-find,.spellcheck-trigger,.spellcheck-panel,.nbv-dedupe")) return;   // 찾기·맞춤법 패널로 포커스가 간 경우엔 편집을 유지
       commit();
     });
     wrap.append(editPane, preview, layer);

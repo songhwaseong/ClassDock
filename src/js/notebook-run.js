@@ -165,6 +165,39 @@ function renderNotebookView(model, host, ownerDoc){
   findBtn.type = "button"; findBtn.className = "nbv-find-open"; findBtn.textContent = "전체 찾기";
   findBtn.title = "노트북 전체 셀에서 찾기·바꾸기 (Ctrl+H · 현재 셀만은 Ctrl+Shift+H)";
   findBtn.addEventListener("click", () => nbOpenNotebookFind(ownerDoc));
+  const dedupeBtn = document.createElement("button");
+  dedupeBtn.type = "button"; dedupeBtn.className = "nbv-dedupe"; dedupeBtn.textContent = "중복 줄 삭제";
+  dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
+  dedupeBtn.addEventListener("click", () => {
+    const ctrl = (ownerDoc && ownerDoc._nbCtrls || [])[ownerDoc && ownerDoc._nbSelected];
+    if (!ctrl || !["code", "markdown"].includes(ctrl.type)){
+      toast("코드 또는 마크다운 셀을 선택하세요.", 1800); return;
+    }
+    if (ownerDoc._nbInkMode || ownerDoc._studyReadonly){
+      toast("읽기 전용 상태에서는 줄을 삭제할 수 없어요.", 1800); return;
+    }
+    let ta = ctrl.type === "code" ? (ctrl.editor && ctrl.editor.ta) : ctrl.cellEl.querySelector(".nbv-md-edit");
+    if (!ta){
+      ctrl.edit();
+      toast("셀에서 삭제할 줄을 선택한 뒤 다시 눌러 주세요.", 2200); return;
+    }
+    const planned = transformEditorLines(ta.value, ta.selectionStart, ta.selectionEnd, "dedupe");
+    if (planned.value === ta.value){
+      toast("선택한 줄에 중복이 없어요.", 1800); return;
+    }
+    if (typeof nbPushHistory === "function") nbPushHistory(ownerDoc, "중복 줄 삭제");
+    const beforeLineCount = ta.value.split("\n").length;
+    const removed = ctrl.type === "code"
+      ? ctrl.editor.dedupeSelectedLines()
+      : (() => {
+          ta.value = planned.value;
+          ta.setSelectionRange(planned.selectionStart, planned.selectionEnd);
+          ta.dispatchEvent(new Event("input", { bubbles:true }));
+          return Math.max(0, beforeLineCount - planned.value.split("\n").length);
+        })();
+    toast(removed ? (removed + "개의 중복 줄을 삭제했어요.") : "선택한 줄에 중복이 없어요.", 1800);
+    ta.focus();
+  });
   const fontGroup = document.createElement("span");
   fontGroup.className = "nbv-font-group";
   const fontDown = document.createElement("button");
@@ -238,7 +271,7 @@ function renderNotebookView(model, host, ownerDoc){
   };
   const saveGroup = buildToolMenuGroup(saveBtn, "PDF로 저장", [pdfBtn], "nbv-save-group");
   const exportGroup = buildToolMenuGroup(exportBtn, "변환(.py) 뷰", [toPyBtn], "nbv-export-group");
-  bar.append(tag, saveGroup, undoBtn, redoBtn, runGroup, outputGroup, inkBtn, tocBtn, findBtn, fontGroup, exportGroup, helpBtn, status);
+  bar.append(tag, saveGroup, undoBtn, redoBtn, runGroup, outputGroup, inkBtn, tocBtn, findBtn, dedupeBtn, fontGroup, exportGroup, helpBtn, status);
   root.appendChild(bar);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   const tocPanel = document.createElement("div");
@@ -1087,4 +1120,3 @@ function nbExportPy(ownerDoc){
   if (typeof handleFiles === "function") handleFiles([new File([pySrc], pyName, { type: "text/x-python" })], { isScratch: true });
   nbSetStatus(ownerDoc, nbTf("{name} 로 내보냈어요.", { name:pyName }));
 }
-

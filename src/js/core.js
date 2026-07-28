@@ -1958,6 +1958,28 @@
       return { value: lines.join("\n"), selectionStart: caret, selectionEnd: caret };
     }
 
+    if (action === "dedupe") {
+      // Compare only the selected lines. Exact matches keep code/config formatting safe.
+      const seen = new Set();
+      const kept = [];
+      for (let i = first; i <= last; i++) {
+        if (seen.has(lines[i])) continue;
+        seen.add(lines[i]);
+        kept.push(lines[i]);
+      }
+      if (kept.length === count) return { value: text, selectionStart: start, selectionEnd: end };
+      const originalLines = text.split("\n");
+      const startColumn = start - lineOffset(originalLines, first);
+      const endColumn = end - lineOffset(originalLines, last);
+      lines.splice(first, count, ...kept);
+      const endLine = first + kept.length - 1;
+      return {
+        value: lines.join("\n"),
+        selectionStart: lineOffset(lines, first) + Math.min(startColumn, lines[first].length),
+        selectionEnd: lineOffset(lines, endLine) + Math.min(endColumn, lines[endLine].length)
+      };
+    }
+
     if (action === "move-up") {
       if (first === 0) return { value: text, selectionStart: start, selectionEnd: end };
       const delta = -(lines[first - 1].length + 1);

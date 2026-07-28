@@ -1991,6 +1991,11 @@ function buildCodeEditor(text, prof, options={}){
     paramSemanticRanges = [];
     refresh(); sync();
   };
+  const dedupeSelectedLines = () => {
+    const before = ta.value;
+    applyLineAction("dedupe");
+    return Math.max(0, before.split("\n").length - ta.value.split("\n").length);
+  };
   refresh();
   return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
@@ -1998,6 +2003,7 @@ function buildCodeEditor(text, prof, options={}){
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,
     formatDocument: formatDocumentNow,
+    dedupeSelectedLines,
     canFormat: () => !plainMode && prof === "python",
     destroy: () => {
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
@@ -2178,17 +2184,27 @@ function buildLightTextEditor(text, options={}){
     findInput.focus(); findInput.select();
   };
 
+  const dedupeSelectedLines = () => {
+    const before = ta.value;
+    const next = transformEditorLines(before, ta.selectionStart, ta.selectionEnd, "dedupe");
+    if (next.value === before) return 0;
+    ta.value = next.value;
+    ta.setSelectionRange(next.selectionStart, next.selectionEnd);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    syncScroll();
+    return Math.max(0, before.split("\n").length - next.value.split("\n").length);
+  };
+
   renderGutter();
   return {
     host, ta,
     getValue: () => ta.value,
     setValue: (v) => { ta.value = v; renderGutter(); ta.dispatchEvent(new Event("input", { bubbles: true })); },
     getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
-    focusLine, openFind, closeFind, isFindOpen: () => findOpen,
+    focusLine, dedupeSelectedLines, openFind, closeFind, isFindOpen: () => findOpen,
     destroy: () => {
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove();
     }
   };
 }
-

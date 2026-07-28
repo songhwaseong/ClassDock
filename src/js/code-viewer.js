@@ -711,6 +711,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       buttonHost,
       mode:spellModeForExt(),
       fileExt:ext,
+      buttonClass:runnable ? "run-spellcheck" : "",
       label:label || ((ownerDoc && ownerDoc.name) || file.name || "맞춤법 검사")
     });
   };
@@ -1198,10 +1199,17 @@ async function renderCode(file, host, ext, profile, runCtx){
       const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "run-revert"; viewBtn.textContent = "보기로"; viewBtn.disabled = false;
       const fontDown = document.createElement("button"); fontDown.type = "button"; fontDown.className = "run-font"; fontDown.textContent = "A−"; fontDown.title = "글자 작게 (Ctrl+−)";
       const fontUp = document.createElement("button"); fontUp.type = "button"; fontUp.className = "run-font"; fontUp.textContent = "A+"; fontUp.title = "글자 크게 (Ctrl++)";
+      const dedupeBtn = document.createElement("button"); dedupeBtn.type = "button"; dedupeBtn.className = "text-edit-btn";
+      dedupeBtn.textContent = "중복 줄 삭제"; dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
+      dedupeBtn.addEventListener("click", () => {
+        const removed = editor.dedupeSelectedLines ? editor.dedupeSelectedLines() : 0;
+        toast(removed ? (removed + "개의 중복 줄을 삭제했어요.") : "선택한 줄에 중복이 없어요.", 1800);
+        editor.ta.focus();
+      });
       fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
       const status = document.createElement("span"); status.className = "run-status";
       const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
-      bar.append(saveBtn, viewBtn, fontDown, fontUp, status, diag);
+      bar.append(saveBtn, viewBtn, dedupeBtn, fontDown, fontUp, status, diag);
       attachSpellcheck(editor, bar, saveName);
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
       if (lightEdit){
@@ -1448,6 +1456,13 @@ async function renderCode(file, host, ext, profile, runCtx){
   nbConvertGroup.append(nbConvertBtn, nbConvertMore, nbConvertMenu);
   const linkBtn = document.createElement("button"); linkBtn.className = "run-link"; linkBtn.type = "button"; linkBtn.textContent = "PDF에 핀";
   linkBtn.title = "현재 코드 줄을 PDF에 핀으로 연결";
+  const dedupeBtn = document.createElement("button"); dedupeBtn.className = "run-dedupe"; dedupeBtn.type = "button"; dedupeBtn.textContent = "중복 줄 삭제";
+  dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
+  dedupeBtn.addEventListener("click", () => {
+    const removed = editor.dedupeSelectedLines ? editor.dedupeSelectedLines() : 0;
+    toast(removed ? (removed + "개의 중복 줄을 삭제했어요.") : "선택한 줄에 중복이 없어요.", 1800);
+    editor.ta.focus();
+  });
   // 필기 버튼 — 누르면 편집 잠금 + 캔버스 오버레이가 한 번에 켜짐. 다시 누르면 둘 다 해제.
   const inkBtn = document.createElement("button"); inkBtn.className = "run-ink"; inkBtn.type = "button"; inkBtn.title = "코드 위에 필기 — 켜는 동안 편집 잠금";
   if (typeof window.setUiIconLabel === "function") window.setUiIconLabel(inkBtn, "pen", "필기");
@@ -1520,6 +1535,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(outputTabs); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
   attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
+  bar.appendChild(dedupeBtn);
   syncShortcutHints(bar);
 
   // 편집기 바로 위: 마지막으로 저장한 파일의 절대경로 표시. 저장 전엔 회색 안내문.
