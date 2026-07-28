@@ -482,46 +482,87 @@ function petNoticeDuration(text, ms){
 
 function petPlayNextNotice(p, w){
   if (petWorld !== w || !p.el.isConnected){
-    p.noticeActive = false; p.noticeText = ""; p.noticeQueue.length = 0;
+    p.noticeActive = false; p.noticeText = ""; p.noticeItem = null; p.noticeQueue.length = 0;
     return;
   }
   const next = p.noticeQueue.shift();
   if (!next){
-    p.noticeActive = false; p.noticeText = ""; p.noticeBubbleWidth = 0; p.noticeBubbleHeight = 0;
+    p.noticeActive = false; p.noticeText = ""; p.noticeItem = null;
+    p.noticeBubbleWidth = 0; p.noticeBubbleHeight = 0;
     return;
   }
   p.noticeActive = true;
   p.noticeText = next.text;
+  p.noticeItem = next;                                           // 펫이 사라질 때 남은 알림을 그대로 넘기려고 보관
   petSay(p, next.text, false, {
     notice:true,
     type:next.type,
     duration:petNoticeDuration(next.text, next.ms),
     onDone:() => {
       if (petWorld !== w) return;
-      p.noticeText = "";
+      p.noticeText = ""; p.noticeItem = null;
       setTimeout(() => petPlayNextNotice(p, w), 120);
     }
   });
 }
 
-// 공용 toast()가 호출하는 연결점. 정확히 한 마리만 켜져 있고 화면에 보일 때 알림을 맡는다.
+// 알림을 맡길 수 있는 펫인지 — 붙잡히거나 연출 중이면 말풍선이 엉키고, 화면 밖이면 아예 보이지 않는다.
+function petCanNotice(p){
+  if (!p || !p.el || !p.el.isConnected || p.state === "drag" || p.petEvent) return false;
+  const pw = p.w || PET_W, ph = p.h || PET_H;
+  return p.x > -pw / 2 && p.x < window.innerWidth - pw / 2
+    && p.y > -ph / 2 && p.y < window.innerHeight - ph / 2;
+}
+
+// 같은 문구가 이미 어느 펫의 말풍선이나 대기열에 있으면 다시 배정하지 않는다(저장 연타 등).
+function petNoticeShown(w, text){
+  return w.pets.some(p => p.noticeText === text || p.noticeQueue.some(item => item.text === text));
+}
+
+// 알림을 읽을 펫 고르기. 읽는 중인 펫이 있으면 그 펫이 이어 읽어 말풍선이 한 번에 하나만 뜨게 하고,
+// 없으면 자격 있는 펫 중 직전 화자를 뺀 하나를 뽑아 알림마다 말하는 펫이 바뀌게 한다.
+function petPickNoticePet(w){
+  const busy = w.pets.find(p => p.noticeActive && p.el && p.el.isConnected);
+  if (busy) return busy;
+  const ready = w.pets.filter(petCanNotice);
+  if (!ready.length) return null;
+  const fresh = ready.filter(p => p !== w.lastNoticePet);
+  const pool = fresh.length ? fresh : ready;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// 공용 toast()가 호출하는 연결점. 켜진 펫 중 화면에 보이는 한 마리가 알림을 맡는다.
 // 반환값이 true면 일반 화면 토스트는 생략하고, 행동 버튼이 있는 토스트만 병행 표시한다.
 function petNotify(message, ms=2200, opts={}){
   const w = petWorld;
-  if (!w || w.pets.length !== 1 || document.hidden) return false;
-  const p = w.pets[0];
-  if (!p || !p.el || !p.el.isConnected || p.state === "drag") return false;
+  if (!w || !w.pets.length || document.hidden) return false;
   const text = String(message || "").trim();
   if (!text) return false;
-  if (p.noticeText === text || p.noticeQueue.some(item => item.text === text)) return true;
+  if (petNoticeShown(w, text)) return true;
+  const p = petPickNoticePet(w);
+  if (!p) return false;
   if (p.noticeQueue.length >= 2) p.noticeQueue.shift();          // 현재 알림 포함 최근 3개까지만 유지
   p.noticeQueue.push({
     text,
     ms:Number(ms) || 2200,
     type:opts.type === "success" || opts.type === "error" ? opts.type : ""
   });
+  w.lastNoticePet = p;
   if (!p.noticeActive) petPlayNextNotice(p, w);
   return true;
+}
+
+// 알림을 맡은 펫이 사라지면(마릿수 자동 감축 등) 남은 펫에게 넘긴다.
+// 화면 토스트는 펫이 맡은 시점에 이미 접혔으므로 그냥 두면 알림이 통째로 사라진다.
+function petRescueNotices(p, w){
+  const pending = (p.noticeItem ? [p.noticeItem] : []).concat(p.noticeQueue);
+  p.noticeActive = false; p.noticeText = ""; p.noticeItem = null; p.noticeQueue.length = 0;
+  if (w.lastNoticePet === p) w.lastNoticePet = null;
+  if (petWorld !== w) return;
+  for (const item of pending){
+    if (petNotify(item.text, item.ms, { type:item.type })) continue;
+    if (typeof toast === "function") toast(item.text, item.ms, { type:item.type });
+  }
 }
 
 // ----- 수업 이벤트 반응: 파이썬 실행이 끝나면 성공/오류에 맞춰 펫들이 한마디씩 한다 -----
@@ -1593,6 +1634,7 @@ function petTrimTo(w, target){
     if (!p) break;
     clearTimeout(p.bubbleTimer);
     if (p.el) p.el.remove();
+    petRescueNotices(p, w);                                       // 이 펫이 읽던 알림은 남은 펫이 이어받는다
   }
 }
 
@@ -1841,7 +1883,8 @@ function petSpawn(i, total, bag){
     t: Math.floor(Math.random() * 100), timer: 60, blink: 0, off: false, fadeT: 0,
     cool: 0, dropLen: 0, hangY: 0, landT: null, soarAfter: false, airTimer: 0,
     support: null, gTarget: null, victim: null, bubbleTimer: 0,
-    noticeActive:false, noticeText:"", noticeQueue:[], noticeBubbleWidth:0, noticeBubbleHeight:0,
+    noticeActive:false, noticeText:"", noticeItem:null, noticeQueue:[],
+    noticeBubbleWidth:0, noticeBubbleHeight:0,
     bubbleVisible:false
   };
   petBindPointer(p);
@@ -1886,7 +1929,7 @@ function petStart(count){
   const w = petWorld = { pets: [], platforms: petCollectPlatforms(), refresh: 30, raf: 0,
     mouse: { x:-9999, y:-9999, ts: 0 }, event:null,
     eventTimer:240 + Math.floor(Math.random() * 180), playedEvents:new Set(),
-    rhythm:"normal", typingQuietUntil:0,
+    rhythm:"normal", typingQuietUntil:0, lastNoticePet:null,
     startTs:performance.now(), fpsLast:0, fpsEma:0, slowMs:0, autoTrimmed:false };
   for (let i = 0; i < n; i++) w.pets.push(petSpawn(i, n, arrangedBag));
   w.onResize = () => {
@@ -1913,8 +1956,16 @@ function petStop(){
   window.removeEventListener("resize", w.onResize);
   window.removeEventListener("mousemove", w.onMouse);
   document.removeEventListener("visibilitychange", w.onVis);
-  for (const p of w.pets){ clearTimeout(p.bubbleTimer); p.el.remove(); }
+  const pending = [];
+  for (const p of w.pets){
+    if (p.noticeItem) pending.push(p.noticeItem);
+    for (const item of p.noticeQueue) pending.push(item);
+    clearTimeout(p.bubbleTimer); p.el.remove();
+  }
   petWorld = null;
+  // 펫을 끄는 순간 읽고 있던 알림은 화면 토스트로 돌려준다(펫이 맡은 알림은 토스트가 접혀 있었다)
+  if (typeof toast === "function")
+    for (const item of pending) toast(item.text, item.ms, { type:item.type });
 }
 
 // 설정 저장/시작 시 호출 — appSettings.petEnabled·petCount 를 따라 켜고 끈다.

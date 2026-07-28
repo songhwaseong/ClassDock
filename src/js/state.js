@@ -335,7 +335,7 @@ function toast(msg, ms=2200, opts={}){
   msg = (typeof window.t === "function") ? window.t(String(msg)) : String(msg);
   const hasAction = !!(opts.action && opts.action.label);
   const petHandled = typeof petNotify === "function" && petNotify(msg, ms, opts);
-  // 펫이 한 마리라 일반 알림을 대신 말한 경우, 화면 토스트는 숨기되 aria-live 안내는 유지한다.
+  // 펫 한 마리가 일반 알림을 대신 말한 경우, 화면 토스트는 숨기되 aria-live 안내는 유지한다.
   // 행동 버튼이 있는 알림은 펫도 말하고 실제 버튼이 든 토스트도 그대로 보여 준다.
   if (petHandled && !hasAction){
     for (const old of [...area.children]) if (old.dataset.msg === msg) old.remove();
