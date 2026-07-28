@@ -17,7 +17,12 @@ const guideHtml = fs.readFileSync(path.join(__dirname, "../사용법.html"), "ut
 test("original-save folders keep their mode and file handles across restore and refresh", () => {
   assert.match(source, /workspaceOriginalSaveMarkerPath\(folder\)/);
   assert.match(source, /workspaceOriginalSaveFolderPath\(row\.path\)/);
-  assert.match(source, /originalSaveMode:group\.originalSaveMode/);
+  // 네이티브·브라우저 폴더 핸들 중 하나라도 되찾았을 때만 원본 저장 모드를 유지하고,
+  // 표식만 남고 핸들이 사라졌으면 저장할 곳이 없으므로 사본 저장으로 내린다.
+  assert.match(source, /const restoredHandle = nativeHandle \|\| rememberedHandle/);
+  assert.match(source, /const restoreOriginalSaveMode = !!\(group\.originalSaveMode && restoredHandle\)/);
+  assert.match(source, /originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true,\s*folderHandle:restoredHandle, nativeRootPath:restoredHandle\.nativePath/);
+  assert.match(source, /originalSaveMode:false, restoreFromWorkspace:true \}\)/);
   assert.match(source, /originalSaveFolderPaths:root\.originalSaveMode \? \[selectedRootName\] : \[\]/);
   assert.match(source, /root\.originalSaveMode \? \[workspaceOriginalSaveMarkerPath\(selectedRootName\)\] : \[\]/);
   assert.match(source, /if \(root\.originalSaveMode\) nextPathSet\.add\(workspaceOriginalSaveMarkerPath\(selectedRootName\)\)/);
@@ -31,7 +36,9 @@ test("폴더 작업공간은 빈 폴더 경로를 저장하고 복원한다", ()
   assert.match(source, /buildWorkspacePayload\(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths\)/);
   assert.match(source, /workspaceFolderMarkerPath\(folder\)/);
   assert.match(source, /workspaceFolderPathFromMarker\(row\.path\)/);
-  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, pendingImageFolderPaths:group\.pendingImageFolderPaths,[\s\S]*originalSaveMode:group\.originalSaveMode, restoreFromWorkspace:true \}\)/);
+  // 폴더 핸들 복원 여부와 무관하게 두 갈래 모두 저장해 둔 folderPaths 를 그대로 넘겨야 빈 폴더가 되살아난다.
+  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, pendingImageFolderPaths:group\.pendingImageFolderPaths,\s*originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true,/);
+  assert.match(source, /openFolderFiles\(group\.files, \{ folderPaths:group\.folderPaths, pendingImageFolderPaths:group\.pendingImageFolderPaths,\s*originalSaveMode:false, restoreFromWorkspace:true \}\)/);
   assert.match(source, /restorePendingImages = !!options\.restoreFromWorkspace && pendingImageFolderPaths\.some\(path => path === rootName\)/);
 });
 
