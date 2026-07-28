@@ -845,11 +845,12 @@ const PET_SPECIES = [
     sayings: ["우우~", "놀랐죠?", "심심해요", "훅-", "여기 있어요"]
   },
   {
-    kind: "ghost", art: PET_ART.blueBuddy, gridW: 32, gridH: 32, pixelScale: 3, width: 96, height: 96, winkOnClick: true,
+    kind: "ghost", art: PET_ART.blueBuddy, gridW: 32, gridH: 32, pixelScale: 3, width: 96, height: 96, winkOnClick: true, fixedFacing: true,
     spriteSheet: {
       src: "src/assets/blue-buddy-sprites.png", cellW: 256, cellH: 256, cols: 4,
       frameMs: { idle: 260, float: 260, wink: 150 },
-      frames: { idle: [0, 1], float: [0, 1], wink: [2, 3] }
+      // 4번 프레임은 시트 오른쪽 경계가 잘려 있어, 온전한 3번 프레임만 클릭 표정으로 쓴다.
+      frames: { idle: [0, 1], float: [0, 1], wink: [2] }
     },
     palettes: [
       { B: "#5487ef", D: "#1c274e", W: "#7df0ff" }

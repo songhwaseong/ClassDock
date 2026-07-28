@@ -485,15 +485,22 @@ async function restoreLastWorkspace(){
       const nativeHandle = group.originalSaveMode && typeof restoreNativeSourceFolder === "function"
         ? await restoreNativeSourceFolder(group.rootName)
         : null;
+      // 브라우저 폴더 핸들도 자동 복원할 수 있다. 원본 저장 표식만 남고 실제 핸들이
+      // 사라진 경우에는 원본 저장 모드를 유지하면 저장할 곳이 없어지므로 사본 저장으로 전환한다.
+      const rememberedHandle = !nativeHandle && group.originalSaveMode && typeof loadRememberedFolderHandle === "function"
+        ? await loadRememberedFolderHandle(group.rootName)
+        : null;
+      const restoredHandle = nativeHandle || rememberedHandle;
+      const restoreOriginalSaveMode = !!(group.originalSaveMode && restoredHandle);
       // 대량 이미지가 자동 복원 저장에서 제외된 폴더는 빈 트리만 먼저 복원한다.
       // 사용자가 그 루트 폴더를 클릭하면 저장해 둔 폴더 핸들로 실제 파일을 다시 읽는다.
-      if (nativeHandle){
+      if (restoredHandle){
         await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
-          originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true,
-          folderHandle:nativeHandle, nativeRootPath:nativeHandle.nativePath });
+          originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true,
+          folderHandle:restoredHandle, nativeRootPath:restoredHandle.nativePath });
       } else {
         await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
-          originalSaveMode:group.originalSaveMode, restoreFromWorkspace:true });
+          originalSaveMode:false, restoreFromWorkspace:true });
       }
     }
     if (loose.length){

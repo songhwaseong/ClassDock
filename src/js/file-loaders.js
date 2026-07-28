@@ -828,6 +828,25 @@ async function restoreNativeSourceFolder(rootName){
   } catch(_){ return null; }
 }
 async function chooseFolderHandle(startIn=null){
+  // Chrome의 표준 선택창을 우선한다. EXE 전용 Windows 선택창은 일부 환경에서
+  // 백그라운드에 떠서 버튼이 반응하지 않는 것처럼 보일 수 있다.
+  const supportsBrowserPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
+  if (supportsBrowserPicker){
+    const options = { mode: "read" };
+    if (startIn && startIn.kind === "directory") options.startIn = startIn;
+    try { return await window.showDirectoryPicker(options); }
+    catch(e){
+      if (options.startIn && !(e && e.name === "AbortError")){
+        try { return await window.showDirectoryPicker({ mode: "read" }); }
+        catch(f){
+          if (!(f && f.name === "AbortError")) console.warn("directory picker failed:", f);
+          return null;
+        }
+      }
+      if (!(e && e.name === "AbortError")) console.warn("directory picker failed:", e);
+      return null;
+    }
+  }
   try {
     const native = await chooseNativeSourceFolder();
     if (native.supported) return native.handle;
@@ -839,21 +858,7 @@ async function chooseFolderHandle(startIn=null){
     if (typeof toast === "function")
       toast("Windows 폴더 선택창을 열지 못해 기본 폴더 선택창으로 전환합니다.", 3600);
   }
-  if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") return null;
-  const options = { mode: "read" };
-  if (startIn && startIn.kind === "directory") options.startIn = startIn;
-  try { return await window.showDirectoryPicker(options); }
-  catch(e){
-    if (options.startIn && !(e && e.name === "AbortError")){
-      try { return await window.showDirectoryPicker({ mode: "read" }); }
-      catch(f){
-        if (!(f && f.name === "AbortError")) console.warn("directory picker failed:", f);
-        return null;
-      }
-    }
-    if (!(e && e.name === "AbortError")) console.warn("directory picker failed:", e);
-    return null;
-  }
+  return null;
 }
 // 폴더로 연 파일은 항상 원본 파일에 바로 저장한다(별도 컨펌 없이). 폴더 핸들에 쓰기 권한을 한 번 받아
 // 두면 하위 파일 저장이 매번 권한 팝업 없이 조용히 진행된다(권한은 하위로 상속). 권한을 못 받아도

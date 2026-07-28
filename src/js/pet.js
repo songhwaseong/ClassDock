@@ -140,7 +140,8 @@ function petDraw(p, frameDeltaMs = PET_BASE_FRAME_MS){
   const pw = p.w || PET_W, ph = p.h || PET_H, ps = p.pixelScale || PET_SCALE;
   const moving = PET_MOVING_STATES.includes(p.state);
   const wob = moving && !p.motionArt ? Math.round(Math.sin(p.t * 0.5) * 1.5) : 0;
-  const motionState = p.state === "seekwall" ? "walk" : p.state;
+  const winkActive = p.winkOnClick && Date.now() < (p.winkUntil || 0);
+  const motionState = winkActive ? "wink" : (p.state === "seekwall" ? "walk" : p.state);
   const frames = p.motionArt && p.motionArt[motionState];
   const drawArt = frames && frames.length ? frames[Math.floor(p.t / 7) % frames.length] : p.art;
   const eyesOff = p.blink > 0 || p.off;
@@ -210,7 +211,7 @@ function petDraw(p, frameDeltaMs = PET_BASE_FRAME_MS){
   const flipY = (p.state === "ceiling" || p.state === "ceilwalk") ? -1 : 1;   // 천장에선 뒤집힌다
   const sq = p.squash > 0 ? p.squash : 0;                     // 찌부(슬라임 착지·개구리 웅크림 등)
   const pop = p.pop > 0 ? p.pop / 12 : 0;                     // 클릭했을 때 뽀잉
-  const sx = p.face * (1 + 0.30 * sq + 0.12 * pop);
+  const sx = (p.fixedFacing ? 1 : p.face) * (1 + 0.30 * sq + 0.12 * pop);
   const sy = flipY * (1 - 0.35 * sq + 0.12 * pop);
   p.el.style.transform = "translate(" + Math.round(p.x) + "px," + Math.round(p.y) + "px)";
   p.cv.style.transform = "rotate(" + rot + "deg) scale(" + sx + "," + sy + ")";
@@ -1608,6 +1609,15 @@ function petAirRelease(p){
 }
 
 // ----- 붙잡기·던지기·짧은 클릭 -----
+function petStartWink(p){
+  const now = Date.now();
+  p.state = "wink"; p.timer = 72; p.t = 0; p.pop = 8;
+  p.vx = 0; p.vy = 0; p.rot = 0; p.fadeT = 0;
+  p.winkStartedAt = now; p.winkUntil = now + 1200;
+  p.spriteDrawFrame = null;
+  petSay(p, petRandomSaying(p), false);
+}
+
 function petBindPointer(p){
   let dragging = false, moved = 0, last = null;
   const finishDrag = (cancelled) => {
@@ -1620,11 +1630,9 @@ function petBindPointer(p){
       else petAirRelease(p);
       return;
     }
-    if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
+    if (moved < 12){      // 클릭 중 생기는 미세한 포인터 흔들림은 클릭으로 처리한다
       if (p.winkOnClick){
-        p.state = "wink"; p.timer = 48; p.t = 0; p.pop = 8;
-        p.vx = 0; p.vy = 0; p.rot = 0; p.fadeT = 0;
-        petSay(p, petRandomSaying(p), false);
+        petStartWink(p);
       }
       else if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
       else if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
@@ -1651,6 +1659,7 @@ function petBindPointer(p){
     dragging = true; moved = 0; last = { x:e.clientX, y:e.clientY };
     if (p.kind === "ufo") petUfoAbort(p);                      // 납치 중이었으면 광선을 끄고 피해자를 놓아준다
     p.state = "drag"; p.rot = 0; p.vx = 0; p.vy = 0; p.blink = 0; p.off = false;
+    if (p.winkOnClick) petStartWink(p);                         // 누르는 순간 클릭 표정을 보여 준다
     if (p.thread) p.thread.style.display = "none";             // 붙잡힌 거미는 실이 끊긴다
     if (p.bolt){ p.bolt.style.display = "none"; p.victim = null; }   // 번개도 끊긴다
     if (p.chute) p.chute.style.display = "none";               // 낙하산 접힘
@@ -1670,6 +1679,10 @@ function petBindPointer(p){
   p.el.addEventListener("pointerup", () => finishDrag(false));
   p.el.addEventListener("pointercancel", () => finishDrag(true));
   p.el.addEventListener("lostpointercapture", () => finishDrag(true));
+  p.el.addEventListener("click", () => {
+    // 브라우저가 포인터 캡처 해제 순서를 다르게 처리해도 블루 버디의 표정 전환은 놓치지 않는다.
+    if (p.winkOnClick && Date.now() - (p.winkStartedAt || 0) > 80) petStartWink(p);
+  });
 }
 
 // 눈꺼풀 색: 스프라이트에서 눈흰자(W) 바로 옆 픽셀의 색 = 그 자리 몸통 색
@@ -1739,6 +1752,7 @@ function petGoldPalette(pal){
 function petSpawn(i, total, bag){
   const species = bag[i % bag.length];
   const speciesId = petSpeciesId(species);
+  const isBlueBuddy = typeof PET_ART === "object" && species.art === PET_ART.blueBuddy;
   const gridW = species.gridW || PET_GW, gridH = species.gridH || PET_GH;
   const pixelScale = species.pixelScale || PET_SCALE;
   const petW = species.width || gridW * pixelScale, petH = species.height || gridH * pixelScale;
@@ -1811,7 +1825,8 @@ function petSpawn(i, total, bag){
     ? petSayingsFor(sayingsSpeciesId, defaultSayings) : defaultSayings;
   const p = {
     el, cv, bubble, bubbleText, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
-    kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette, winkOnClick: !!species.winkOnClick,
+    kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette,
+    winkOnClick: !!species.winkOnClick || isBlueBuddy, fixedFacing: !!species.fixedFacing,
     baseArt: species.art, cheerArt: species.cheerArt || null, motionArt: species.motionArt || null,
     spriteSheet:species.spriteSheet || null, spriteImage,
     sayings, gold,

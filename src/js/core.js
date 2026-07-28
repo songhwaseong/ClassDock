@@ -757,6 +757,16 @@
     , ["Workbook", "class", "from openpyxl import Workbook"]
     , ["load_workbook", "function", "from openpyxl import load_workbook"]
     , ["Document", "class", "from docx import Document"]
+    // PDF: PyMuPDF uses `pymupdf` in current releases and supports the legacy
+    // `fitz` module name. Keep both so existing examples continue to work.
+    , ["pymupdf", "module", "import pymupdf"]
+    , ["fitz", "module", "import fitz"]
+    , ["pypdf", "module", "import pypdf"]
+    , ["PdfReader", "class", "from pypdf import PdfReader"]
+    , ["PdfWriter", "class", "from pypdf import PdfWriter"]
+    , ["PdfMerger", "class", "from pypdf import PdfMerger"]
+    , ["Transformation", "class", "from pypdf import Transformation"]
+    , ["PyMuPDFLoader", "class", "from langchain_community.document_loaders import PyMuPDFLoader"]
     , ["torch", "module", "import torch"]
     , ["nn", "module", "import torch.nn as nn"]
     , ["F", "module", "import torch.nn.functional as F"]

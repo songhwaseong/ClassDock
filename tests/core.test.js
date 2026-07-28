@@ -440,6 +440,11 @@ test("import completion suggestions carry their import statement", () => {
   assert.ok(pythonImportCompletionCandidates("Count", "Count").some(item => item.importText === "from sklearn.feature_extraction.text import CountVectorizer"));
   assert.ok(pythonImportCompletionCandidates("Sequential", "Sequential").some(item => item.importText === "from tensorflow.keras.models import Sequential"));
   assert.ok(pythonImportCompletionCandidates("word_", "word_").some(item => item.importText === "from nltk.tokenize import word_tokenize"));
+  assert.ok(pythonImportCompletionCandidates("pym", "pym").some(item => item.importText === "import pymupdf"));
+  assert.ok(pythonImportCompletionCandidates("fit", "fit").some(item => item.importText === "import fitz"));
+  assert.ok(pythonImportCompletionCandidates("PdfR", "PdfR").some(item => item.importText === "from pypdf import PdfReader"));
+  assert.ok(pythonImportCompletionCandidates("PdfW", "PdfW").some(item => item.importText === "from pypdf import PdfWriter"));
+  assert.ok(pythonImportCompletionCandidates("PyMuPDFL", "PyMuPDFL").some(item => item.importText === "from langchain_community.document_loaders import PyMuPDFLoader"));
   assert.deepEqual(pythonImportCompletionCandidates("External", "External", [{ name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool" }]), [{
     name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool"
   }]);
