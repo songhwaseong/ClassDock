@@ -2209,6 +2209,12 @@
     border-left:3px solid #facc15;pointer-events:none}
   .code-note{max-width:1080px;margin:0 auto 8px;padding:8px 12px;border-radius:8px;
     background:#fef3c7;color:#92400e;font-size:12px;border:1px solid #fde68a}
+  /* 구형 Word(.doc) 글자 미리보기 — 배너 안 '탐색기에서 보기' 버튼 + 문단 */
+  .doc-open-native{margin-left:10px;padding:2px 10px;border-radius:6px;border:1px solid #d97706;
+    background:#fffbeb;color:#92400e;font:inherit;font-size:12px;cursor:pointer}
+  .doc-open-native:hover{background:#fde68a}
+  .doc-open-native:disabled{opacity:.6;cursor:default}
+  .doc-host .doc-p{margin:0 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}
   /* 코드 실행(.py): 실행 바 + 좌(코드)·우(출력) 분할 */
   .run-wrap{max-width:1180px;margin:0 auto}
   .run-wrap .code-note{max-width:none;margin:0 0 8px}

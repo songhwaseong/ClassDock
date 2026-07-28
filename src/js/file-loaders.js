@@ -109,6 +109,13 @@ async function handleFiles(files, options={}){
         }
         }
       }
+      else if (ext === "doc"){
+        // 이름만 .doc 인 파일이 흔하다(실은 docx, 또는 그냥 텍스트). 앞부분을 보고 알맞은 통로로 보낸다.
+        const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+        const kind = docLegacyKindOf(head);
+        if (kind === "text") made = await loadText(file, opts);        // 텍스트 뷰(편집·저장 가능)
+        else made = await loadOffice(file, kind === "docx" ? "docx" : "doc", opts);
+      }
       else if (["docx","xlsx","xls","csv","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml"].includes(ext) || (ext in CODE_EXTS)) made = await loadOffice(file, ext, opts);
       else if (IMG_EXTS.includes(ext)) made = await loadImage(file, opts);
       else if (VIDEO_EXTS.includes(ext) || AUDIO_EXTS.includes(ext)) made = await loadVideo(file, opts);

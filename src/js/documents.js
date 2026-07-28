@@ -26,7 +26,7 @@ const CODE_EXTS = {
 const TEXT_ENCODING_EXTS = new Set(["csv","md","markdown","mdx","txt","html","htm","xhtml", ...Object.keys(CODE_EXTS), ...SUBTITLE_EXTS]);
 // ZIP 안에서 자동으로 열어줄 확장자(중첩 zip 포함)
 // VIDEO_EXTS·AUDIO_EXTS·SUBTITLE_EXTS 는 video-viewer.js 가 이 파일보다 먼저 로드되어 제공한다(스크립트 순서 주의).
-const ZIP_OPENABLE = ["pdf","docx","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb",
+const ZIP_OPENABLE = ["pdf","docx","doc","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb",
   ...SQLITE_EXTS, ...Object.keys(CODE_EXTS), ...BINARY_ASSET_EXTS, "zip", "tar", "gz", "tgz", ...IMG_EXTS,
   ...VIDEO_EXTS, ...AUDIO_EXTS, ...SUBTITLE_EXTS];
 // .env 계열(.env, .env.local 등)은 점으로 시작하지만 숨김 파일이 아니라 설정 파일 → 폴더/압축에서도 연다
@@ -1359,6 +1359,7 @@ function modeBadgeText(doc){
   if (doc.kind === "binary") return "이진 파일 보관";
   if (doc.kind === "video") return doc.media === "audio" ? "오디오 재생" : "영상 재생";
   if (ext === ".docx") return "Word 보기";
+  if (ext === ".doc") return "Word 글자 보기";
   if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") return "표 보기";
   if (SQLITE_EXTS.includes(ext.replace(/^\./, ""))) return "SQLite 보기";
   if (ext === ".pptx") return "PowerPoint 보기";
@@ -2405,7 +2406,7 @@ function iconFor(kind, name){
   if (kind === "diff") return "비교";
   const ext = fileExtOf(name);
   if (ext === "md" || ext === "markdown" || ext === "mdx") return "MD";
-  if (ext === "docx") return "DOC";
+  if (ext === "docx" || ext === "doc") return "DOC";
   if (ext === "pptx") return "PPT";
   if (ext === "hwp" || ext === "hwpx") return "한";
   return (ext || "?").slice(0, 4).toUpperCase();
@@ -2423,7 +2424,7 @@ function extCategory(kind, name){
   if (kind === "binary") return "binary";
   if (kind === "diff")   return "code";
   const ext = fileExtOf(name);
-  if (ext === "docx") return "word";
+  if (ext === "docx" || ext === "doc") return "word";
   if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";
   if (SQLITE_EXTS.includes(ext)) return "db";
   if (ext === "pptx") return "ppt";
@@ -2561,20 +2562,22 @@ function isTextExtSearchable(doc){
   if (ext === lower) return true;                       // 확장자 없는 파일도 텍스트일 수 있음
   return (typeof CODE_EXTS !== "undefined" && ext in CODE_EXTS) || TEXT_SEARCH_EXTS.has(ext);
 }
-// Office 문서(docx·pptx·hwpx·hwp) 본문 검색 대상 여부.
+// Office 문서(docx·pptx·hwpx·doc·hwp) 본문 검색 대상 여부.
 //  - docx/pptx/hwpx: zip 안 XML 을 직접 파싱하므로 아직 안 연 문서도 검색된다.
+//  - doc(구형 바이너리): CFB 조각표를 직접 읽어 뽑으므로 역시 안 연 문서도 검색된다.
 //  - hwp(구형 바이너리): 직접 파싱이 어려워, 이미 렌더된 화면의 글자로 검색한다(안 연 문서는 제외).
 function isOfficeSearchable(doc){
   if (!doc || doc.kind !== "office" || !doc.sourceFile) return false;
   const ext = fileExtOf(String(doc.name || "").toLowerCase());
   if (ext === "hwp") return true;
+  if (ext === "doc") return !doc.isTextFile && (doc.size || 0) <= OFFICE_SEARCH_MAX_BYTES;   // 이름만 .doc 인 텍스트는 텍스트 통로가 맡는다
   return OFFICE_SEARCH_EXTS.has(ext) && (doc.size || 0) <= OFFICE_SEARCH_MAX_BYTES;
 }
 // 사이드바 스니펫의 단위 라벨(기본 "줄"): 검색 결과 텍스트의 줄 번호가 무엇을 뜻하는지 알려준다.
 function officeSnippetUnit(doc){
   const ext = fileExtOf(String(doc.name || "").toLowerCase());
   if (ext === "pptx") return "슬라이드";
-  if (ext === "docx" || ext === "hwpx") return "문단";
+  if (ext === "docx" || ext === "doc" || ext === "hwpx") return "문단";
   return "";
 }
 // 메인 스레드 즉시 검색 대상: 소형 텍스트 + (텍스트 기반) PDF + Office 문서.
@@ -2624,11 +2627,19 @@ async function extractPdfText(doc){
 }
 // Office 문서 본문 추출. 반환: string(성공) | false(추출 불가 → 캐시) | undefined(아직 불확정 → 캐시 금지).
 async function extractOfficeText(doc){
-  const ext = fileExtOf(String(doc.name || "").toLowerCase());
+  let ext = fileExtOf(String(doc.name || "").toLowerCase());
   if (ext === "hwp"){                                     // 구형 바이너리 — 렌더된 화면의 글자로 검색
     if (!doc.rendered || !doc.el) return undefined;       // 아직 안 열었으면 다음 검색에서 다시 시도
     const t = String(doc.el.innerText || "").replace(/\u0000/g, "").trim();
     return t || false;
+  }
+  if (ext === "doc"){                                     // 구형 바이너리 Word — 파일에서 바로 본문을 뽑는다
+    if (typeof docLegacyExtractText !== "function") return false;
+    try {
+      const t = await docLegacyExtractText(doc.sourceFile);
+      if (t === null) ext = "docx";                       // 이름만 .doc 인 docx → 아래 zip 통로로 넘긴다
+      else return String(t || "").trim() ? t : false;
+    } catch(_){ return false; }
   }
   if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("zip");   // 압축 라이브러리는 첫 사용 때 로드
   if (typeof zip === "undefined") return false;
@@ -3011,7 +3022,7 @@ function renderSidebar(){
         const canFocusContentLine = !!(hit && hit.line && hit.unit !== "페이지" &&
           (ext === "txt" || ext === "html" || ext === "htm" || ext === "xhtml" ||
            (typeof CODE_EXTS !== "undefined" && ext in CODE_EXTS)));
-        const canFocusRenderedContent = !!(hit && ["md", "markdown", "mdx", "csv", "docx", "pptx", "hwp", "hwpx", "ipynb"].includes(ext));
+        const canFocusRenderedContent = !!(hit && ["md", "markdown", "mdx", "csv", "docx", "doc", "pptx", "hwp", "hwpx", "ipynb"].includes(ext));
         // 코드·텍스트는 렌더 전에도 줄 이동을 예약한다. 이미 렌더된 문서는 아래에서 즉시 이동한다.
         if (canFocusContentLine) doc.pendingFocusLine = hit.line;
         openDocInTargetPane(doc.id);           // 분할 화면이면 마지막 클릭 칸에 열기(아니면 setActiveDoc 와 동일)

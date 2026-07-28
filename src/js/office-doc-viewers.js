@@ -226,6 +226,401 @@ async function renderDocx(file, host){
   }
 }
 
+/* ===== 구형 Word(.doc, Word 6.0~2003) 글자 미리보기 =====
+ * .docx 와 달리 zip+XML 이 아니라 OLE 복합 문서(CFB)라 docx-preview 로는 못 읽는다.
+ * 쓸 만한 순수 JS 렌더러가 없어서, 여기서 CFB 를 직접 읽고 본문 "글자"만 뽑아 문단으로 보여준다.
+ * 표·그림·서식은 살리지 못하므로 상단 배너로 알리고, 정확한 모양이 필요하면 (실제 경로를 아는
+ * 파일에 한해) '탐색기에서 보기' 로 원래 프로그램에서 열도록 안내한다.
+ * 열지 않아도 통합 검색이 되도록 렌더와 추출을 분리했다(docLegacyExtractText). */
+
+const DOC_TEXT_MAX_CHARS = 2000000;    // 추출 글자 상한(PDF·Office 검색과 같은 보호선)
+const DOC_MAX_PARAGRAPHS = 20000;      // 화면에 그릴 문단 상한(초대용량 문서에서 DOM 폭주 방지)
+
+/* CFB(OLE2 복합 문서) 최소 리더 — 필요한 건 이름으로 스트림 하나 꺼내는 것뿐이라 그만큼만 구현한다.
+   반환: { read(name) -> Uint8Array|null } */
+function cfbReadStreams(bytes){
+  const SIG = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+  if (bytes.length < 512) throw new Error("doc-not-cfb");
+  for (let i = 0; i < 8; i++) if (bytes[i] !== SIG[i]) throw new Error("doc-not-cfb");
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u16 = (o) => dv.getUint16(o, true);
+  const u32 = (o) => dv.getUint32(o, true);
+  const secShift = u16(30), miniShift = u16(32);
+  if (secShift < 7 || secShift > 20 || miniShift < 4 || miniShift > secShift) throw new Error("doc-bad-cfb");
+  const secSize = 1 << secShift, miniSecSize = 1 << miniShift;
+  const perSec = secSize >> 2;                                  // 섹터 하나에 들어가는 4바이트 항목 수
+  const secCount = Math.max(0, Math.floor((bytes.length - 512) / secSize));
+  const secOffset = (id) => 512 + id * secSize;
+  const FREE = 0xFFFFFFFA;                                      // 이 값 이상은 모두 "끝/예약" 표시
+
+  // DIFAT(헤더 109개 + 이어지는 DIFAT 섹터) → FAT 섹터 번호 목록
+  const difat = [];
+  for (let i = 0; i < 109; i++){ const s = u32(76 + i * 4); if (s < FREE) difat.push(s); }
+  let next = u32(68);
+  for (let guard = 0; next < FREE && next < secCount && guard < 4096; guard++){
+    const base = secOffset(next);
+    for (let i = 0; i < perSec - 1; i++){ const s = u32(base + i * 4); if (s < FREE) difat.push(s); }
+    next = u32(base + (perSec - 1) * 4);                         // 마지막 칸은 다음 DIFAT 섹터를 가리킨다
+  }
+  const fat = new Uint32Array(difat.length * perSec);
+  fat.fill(0xFFFFFFFF);                                         // 못 읽은 자리는 "끝"으로 둔다(엉뚱한 0번 섹터 추적 방지)
+  let fi = 0;
+  for (const fs of difat){
+    if (fs < secCount){
+      const base = secOffset(fs);
+      for (let i = 0; i < perSec; i++) fat[fi + i] = u32(base + i * 4);
+    }
+    fi += perSec;
+  }
+
+  // 일반 섹터 체인을 따라가며 바이트를 모은다(size 0 이면 체인 끝까지).
+  const gather = (start, size) => {
+    const parts = [];
+    let id = start, got = 0;
+    for (let guard = 0; id < FREE && guard <= secCount; guard++){
+      if (id >= secCount) break;
+      const want = size > 0 ? Math.min(secSize, size - got) : secSize;
+      if (want <= 0) break;
+      parts.push(bytes.subarray(secOffset(id), secOffset(id) + want));
+      got += want;
+      if (size > 0 && got >= size) break;
+      id = id < fat.length ? fat[id] : 0xFFFFFFFE;
+    }
+    const out = new Uint8Array(got);
+    let w = 0;
+    for (const p of parts){ out.set(p, w); w += p.length; }
+    return out;
+  };
+
+  // 디렉터리(128바이트 항목) — 이름·종류·시작섹터·크기만 본다.
+  const dirBytes = gather(u32(48), 0);
+  const ddv = new DataView(dirBytes.buffer, dirBytes.byteOffset, dirBytes.byteLength);
+  const streams = new Map();
+  let root = null;
+  for (let off = 0; off + 128 <= dirBytes.length; off += 128){
+    const type = dirBytes[off + 66];                             // 1=저장소, 2=스트림, 5=루트
+    if (type !== 2 && type !== 5) continue;
+    const nameLen = Math.min(64, dirBytes[off + 64] | (dirBytes[off + 65] << 8));
+    let name = "";
+    for (let i = 0; i + 1 < nameLen; i += 2){
+      const c = dirBytes[off + i] | (dirBytes[off + i + 1] << 8);
+      if (!c) break;
+      name += String.fromCharCode(c);
+    }
+    const entry = { type, start: ddv.getUint32(off + 116, true), size: ddv.getUint32(off + 120, true) };
+    if (type === 5){ if (!root) root = entry; }
+    else if (name && !streams.has(name)) streams.set(name, entry);
+  }
+
+  // 작은 스트림은 미니 스트림(루트 스트림) 안에 미니 FAT 체인으로 흩어져 있다 — 필요할 때만 읽는다.
+  const miniCutoff = u32(56) || 4096;
+  let miniStream = null, miniFat = null;
+  const getMiniStream = () => (miniStream || (miniStream = root ? gather(root.start, root.size) : new Uint8Array(0)));
+  const getMiniFat = () => {
+    if (!miniFat){
+      const raw = gather(u32(60), 0);
+      const rdv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+      miniFat = new Uint32Array(raw.length >> 2);
+      for (let i = 0; i < miniFat.length; i++) miniFat[i] = rdv.getUint32(i * 4, true);
+    }
+    return miniFat;
+  };
+
+  const read = (name) => {
+    const e = streams.get(name);
+    if (!e) return null;
+    if (e.size >= miniCutoff) return gather(e.start, e.size);
+    const mf = getMiniFat(), ms = getMiniStream();
+    const out = new Uint8Array(e.size);
+    let id = e.start, w = 0;
+    for (let guard = 0; id < FREE && w < e.size && guard <= mf.length; guard++){
+      const off = id * miniSecSize;
+      const n = Math.min(miniSecSize, e.size - w);
+      if (off + n > ms.length) break;
+      out.set(ms.subarray(off, off + n), w);
+      w += n;
+      id = id < mf.length ? mf[id] : 0xFFFFFFFE;
+    }
+    return out.subarray(0, w);
+  };
+  return { read };
+}
+
+// CP1252 의 0x80~0x9F 만 유니코드로 옮긴다(나머지는 코드값이 그대로 유니코드와 같다).
+const DOC_CP1252_HIGH = {
+  0x80:0x20AC, 0x82:0x201A, 0x83:0x0192, 0x84:0x201E, 0x85:0x2026, 0x86:0x2020, 0x87:0x2021,
+  0x88:0x02C6, 0x89:0x2030, 0x8A:0x0160, 0x8B:0x2039, 0x8C:0x0152, 0x8E:0x017D, 0x91:0x2018,
+  0x92:0x2019, 0x93:0x201C, 0x94:0x201D, 0x95:0x2022, 0x96:0x2013, 0x97:0x2014, 0x98:0x02DC,
+  0x99:0x2122, 0x9A:0x0161, 0x9B:0x203A, 0x9C:0x0153, 0x9E:0x017E, 0x9F:0x0178
+};
+function docDecodeCp1252(bytes){
+  const codes = new Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++){
+    const b = bytes[i];
+    codes[i] = (b >= 0x80 && b <= 0x9F) ? (DOC_CP1252_HIGH[b] || b) : b;
+  }
+  return docCharsFromCodes(codes);
+}
+function docDecodeUtf16(bytes, off, count){
+  const codes = new Array(count);
+  for (let i = 0; i < count; i++){
+    const o = off + i * 2;
+    codes[i] = bytes[o] | (bytes[o + 1] << 8);
+  }
+  return docCharsFromCodes(codes);
+}
+function docCharsFromCodes(codes){       // 청크 단위 — 긴 문서에서 스택 오버플로 방지
+  let s = "";
+  const CH = 0x4000;
+  for (let i = 0; i < codes.length; i += CH) s += String.fromCharCode.apply(null, codes.slice(i, i + CH));
+  return s;
+}
+
+/* WordDocument 스트림에서 본문 글자를 뽑는다.
+   Word 97+ 는 본문이 조각(piece)으로 흩어져 있어 표 스트림의 조각표(CLX/PlcPcd)를 따라가야 한다.
+   조각마다 1바이트(CP1252 압축) 또는 2바이트(UTF-16)로 저장돼 한글 문서도 그대로 읽힌다. */
+function docLegacyTextFromCfb(cfb){
+  const wd = cfb.read("WordDocument");
+  if (!wd || wd.length < 96) throw new Error("doc-no-word-stream");
+  const dv = new DataView(wd.buffer, wd.byteOffset, wd.byteLength);
+  const wIdent = dv.getUint16(0, true);
+  if (wIdent !== 0xA5EC && wIdent !== 0xA5DC && wIdent !== 0xA5DB) throw new Error("doc-not-word");
+  const nFib = dv.getUint16(2, true);
+  const flags = dv.getUint16(10, true);
+  if (flags & 0x0100) throw new Error("doc-encrypted");         // 열기 암호 — 구형 RC4 라 해제 지원 대상 아님
+
+  if (nFib < 101){                                              // Word 6.0/95 — 조각표 없이 본문이 통째로 들어 있다
+    const fcMin = dv.getUint32(24, true), fcMac = dv.getUint32(28, true);
+    if (!(fcMac > fcMin) || fcMac > wd.length) throw new Error("doc-bad-range");
+    const end = Math.min(fcMac, fcMin + DOC_TEXT_MAX_CHARS);
+    return smartDecodeText(wd.subarray(fcMin, end));            // 유니코드 이전 문서 → CP949 자동 판별에 맡긴다
+  }
+
+  if (wd.length < 0x01AA) throw new Error("doc-short-fib");
+  const table = cfb.read((flags & 0x0200) ? "1Table" : "0Table");
+  if (!table) throw new Error("doc-no-table-stream");
+  const fcClx = dv.getUint32(0x01A2, true), lcbClx = dv.getUint32(0x01A6, true);
+  const ccpText = dv.getUint32(0x004C, true);                   // 본문(머리말·각주 제외) 글자 수
+  if (!lcbClx || fcClx + lcbClx > table.length) throw new Error("doc-bad-clx");
+
+  // CLX = [Prc(서식 묶음)…] + Pcdt(조각표). 앞의 Prc 들은 건너뛰고 조각표만 찾는다.
+  const clx = table.subarray(fcClx, fcClx + lcbClx);
+  const cdv = new DataView(clx.buffer, clx.byteOffset, clx.byteLength);
+  let plc = null;
+  for (let p = 0; p < clx.length; ){
+    if (clx[p] === 0x01){
+      if (p + 3 > clx.length) break;
+      p += 3 + Math.max(0, cdv.getInt16(p + 1, true));
+    } else if (clx[p] === 0x02){
+      if (p + 5 > clx.length) break;
+      const lcb = cdv.getUint32(p + 1, true);
+      plc = clx.subarray(p + 5, p + 5 + Math.min(lcb, clx.length - p - 5));
+      break;
+    } else break;
+  }
+  if (!plc || plc.length < 16) throw new Error("doc-no-piece-table");
+
+  // PlcPcd = CP 경계 (조각수+1)개 + 조각서술자(8바이트) 조각수개
+  const pieces = Math.floor((plc.length - 4) / 12);
+  const pdv = new DataView(plc.buffer, plc.byteOffset, plc.byteLength);
+  let out = "";
+  for (let i = 0; i < pieces && out.length < DOC_TEXT_MAX_CHARS; i++){
+    const count = pdv.getUint32((i + 1) * 4, true) - pdv.getUint32(i * 4, true);
+    if (!(count > 0)) continue;
+    const raw = pdv.getUint32((pieces + 1) * 4 + i * 8 + 2, true);
+    const compressed = (raw & 0x40000000) !== 0;                // 압축=1바이트(CP1252), 아니면 2바이트(UTF-16)
+    const fc = compressed ? ((raw & 0x3FFFFFFF) >> 1) : (raw & 0x3FFFFFFF);
+    const need = compressed ? count : count * 2;
+    if (fc + need > wd.length) continue;                        // 손상된 조각은 건너뛰고 나머지를 살린다
+    out += compressed ? docDecodeCp1252(wd.subarray(fc, fc + count)) : docDecodeUtf16(wd, fc, count);
+  }
+  if (!out) throw new Error("doc-empty");
+  return ccpText > 0 && out.length > ccpText ? out.slice(0, ccpText) : out;
+}
+
+/* Word 의 제어 문자를 읽을 수 있는 텍스트로 정리한다.
+   0x0D 문단 끝 · 0x07 셀/행 끝 · 0x0B 줄바꿈 · 0x0C 쪽 나눔 → 줄바꿈.
+   0x13~0x15 필드는 코드(예: HYPERLINK "…")를 버리고 화면에 보이는 결과만 남긴다. */
+function docCleanText(raw){
+  let out = "", inFieldCode = false;
+  for (let i = 0; i < raw.length; i++){
+    const c = raw.charCodeAt(i);
+    if (c === 0x13){ inFieldCode = true; continue; }
+    if (c === 0x14 || c === 0x15){ inFieldCode = false; continue; }
+    if (inFieldCode) continue;
+    if (c === 0x0D || c === 0x07 || c === 0x0B || c === 0x0C){ out += "\n"; continue; }
+    if (c === 0x1E){ out += "-"; continue; }                    // 붙임표
+    if (c === 0xA0){ out += " "; continue; }                    // 줄바꿈 없는 공백
+    if (c === 0x1F) continue;                                   // 선택적 붙임표(화면에선 안 보임)
+    if (c < 0x20 && c !== 0x09) continue;                       // 그림·각주 자리표시 등
+    out += raw[i];
+  }
+  return out;
+}
+
+function docLooksRtf(bytes){
+  return bytes.length > 5 && bytes[0] === 0x7B && bytes[1] === 0x5C &&
+         bytes[2] === 0x72 && bytes[3] === 0x74 && bytes[4] === 0x66;
+}
+/* 확장자만 .doc 인 RTF 파일용 본문 추출.
+   RTF 는 중괄호 그룹 구조라 단순 치환으로는 글꼴표·스타일표가 본문에 섞여 나온다.
+   그래서 그룹을 따라가며 "본문이 아닌 목적지"(글꼴표 등)는 통째로 건너뛴다.
+   한글은 \uN(유니코드) 또는 \'hh(코드페이지 바이트)로 오는데, 뒤엣것은 연속된 바이트를
+   모아 한 번에 디코드해야 깨지지 않는다. */
+const RTF_SKIP_DESTINATIONS = new Set([
+  "fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer", "headerl",
+  "headerr", "headerf", "footerl", "footerr", "footerf", "footnote", "listtable", "listoverridetable",
+  "filetbl", "revtbl", "rsidtbl", "generator", "themedata", "colorschememapping", "latentstyles",
+  "datastore", "xmlnstbl", "mmathPr", "panose", "falt", "bkmkstart", "bkmkend"
+]);
+function docTextFromRtf(src){
+  let out = "";
+  let bytes = [];                                               // 연속된 \'hh 바이트 모음
+  const flush = () => {
+    if (!bytes.length) return;
+    out += smartDecodeText(new Uint8Array(bytes));              // CP949/UTF-8 자동 판별
+    bytes = [];
+  };
+  const emit = (s) => { flush(); out += s; };
+  const stack = [];
+  let skip = false, uc = 1, i = 0;
+  while (i < src.length){
+    const ch = src[i];
+    if (ch === "{"){ stack.push({ skip, uc }); i++; continue; }
+    if (ch === "}"){ flush(); const s = stack.pop(); if (s){ skip = s.skip; uc = s.uc; } i++; continue; }
+    if (ch === "\\"){
+      const next = src[i + 1];
+      if (next === "'"){                                        // \'hh — 코드페이지 바이트
+        const b = parseInt(src.substr(i + 2, 2), 16);
+        if (!skip && Number.isFinite(b)) bytes.push(b);
+        i += 4; continue;
+      }
+      if (next === "*"){ skip = true; i += 2; continue; }        // {\*\…} 알 수 없는 목적지 → 건너뜀
+      if (next === "\\" || next === "{" || next === "}"){ if (!skip) emit(next); i += 2; continue; }
+      if (next === "\n" || next === "\r"){ if (!skip) emit("\n"); i += 2; continue; }
+      const m = /^\\([a-zA-Z]+)(-?\d+)? ?/.exec(src.slice(i));
+      if (!m){ i += 2; continue; }
+      const word = m[1], num = m[2] === undefined ? null : +m[2];
+      i += m[0].length;
+      if (word === "u" && num !== null){
+        if (!skip) emit(String.fromCharCode((num + 65536) % 65536));
+        for (let n = uc; n > 0 && i < src.length; n--){         // \uN 뒤 대체 문자(uc개)는 버린다
+          if (src[i] === "{" || src[i] === "}") break;
+          i += (src[i] === "\\" && src[i + 1] === "'") ? 4 : 1;
+        }
+        continue;
+      }
+      if (word === "uc" && num !== null){ uc = Math.max(0, num); continue; }
+      if (RTF_SKIP_DESTINATIONS.has(word)){ skip = true; continue; }
+      if (word === "par" || word === "line" || word === "sect" || word === "row"){ if (!skip) emit("\n"); continue; }
+      if (word === "cell" || word === "tab"){ if (!skip) emit("\t"); continue; }
+      continue;                                                 // 그 밖 제어어(서식 등)는 무시
+    }
+    if (ch === "\r" || ch === "\n"){ i++; continue; }            // RTF 에서 날 줄바꿈은 의미 없음
+    if (!skip) emit(ch);
+    i++;
+  }
+  flush();
+  return out;
+}
+
+// 바이트 → 본문 글자(문단 줄바꿈 포함). 렌더와 검색이 함께 쓴다.
+function docLegacyTextOf(bytes){
+  if (docLooksRtf(bytes)) return docTextFromRtf(smartDecodeText(bytes));
+  return docCleanText(docLegacyTextFromCfb(cfbReadStreams(bytes)));
+}
+// 이름만 .doc 이고 실제 내용은 다른 형식인 파일이 흔하다 — 앞부분 바이트로 갈래를 가른다.
+function docLooksZip(bytes){ return bytes.length > 2 && bytes[0] === 0x50 && bytes[1] === 0x4B; }
+function docLooksCfb(bytes){
+  const SIG = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+  if (bytes.length < 8) return false;
+  for (let i = 0; i < 8; i++) if (bytes[i] !== SIG[i]) return false;
+  return true;
+}
+/* .doc 파일의 실제 갈래: "docx"(zip) · "doc"(구형 바이너리·RTF) · "text"(그 밖 — 이름만 .doc 인 텍스트 등) */
+function docLegacyKindOf(head){
+  if (docLooksZip(head)) return "docx";
+  if (docLooksCfb(head) || docLooksRtf(head)) return "doc";
+  return "text";
+}
+
+/* 통합 검색용 — 화면에 그리지 않고 본문 글자만 뽑는다(안 연 문서도 검색된다).
+   이름만 .doc 인 docx 면 null 을 돌려, 부르는 쪽이 zip 통로로 넘기게 한다. */
+async function docLegacyExtractText(file){
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (docLooksZip(bytes)) return null;
+  return docLegacyTextOf(bytes);
+}
+
+function docLegacyFailMessage(code){
+  if (code === "doc-encrypted") return "암호로 보호된 .doc 이라 열 수 없어요. Word에서 암호를 풀고 다시 저장한 뒤 열어주세요.";
+  if (code === "doc-not-cfb" || code === "doc-not-word") return "Word 문서 형식이 아니에요. 이름만 .doc 인 다른 파일일 수 있어요.";
+  return "구형 Word(.doc) 본문을 읽지 못했어요. 손상됐거나 아직 다루지 못하는 형태예요.";
+}
+
+/* '탐색기에서 보기' — 작업공간에 저장된 파일에 한해 런처가 폴더를 열고 그 파일을 선택해 준다.
+   Word 가 깔려 있으면 거기서 두 번 클릭으로 원래 프로그램으로 넘어간다.
+   디스크에 실제 파일이 없으면(브라우저 단독 실행·Go 폴백 런처·압축 내부 파일) 버튼을 만들지 않는다
+   — 눌러도 실패할 버튼을 보여주지 않기 위해 저장 백엔드 유무까지 확인한다. */
+async function docExplorerButton(doc){
+  const rel = doc && doc.workspacePath ? String(doc.workspacePath) : "";
+  if (!rel) return null;
+  if (typeof saveFileBackendAvailable !== "function") return null;
+  if (!(await saveFileBackendAvailable())) return null;   // /can-save-file 프로브(한 번만 확인 후 캐시)
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "doc-open-native";
+  btn.textContent = "탐색기에서 보기";
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const res = await fetch("/open-file-folder", {
+        method: "POST",
+        headers: { "X-PdfSigner-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
+        cache: "no-store"
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch(_){ toast("폴더를 열지 못했어요.", 2400); }
+    finally { btn.disabled = false; }
+  };
+  return btn;
+}
+
+async function renderDocLegacy(file, host, doc){
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let text = "", why = "";
+  try { text = docLegacyTextOf(bytes); }
+  catch (e){ why = docLegacyFailMessage(e && e.message); }
+
+  const lines = text ? text.split("\n") : [];
+  const shell = document.createElement("div");
+  shell.className = "md-host doc-host";
+  let shown = 0, drawn = 0;
+  for (const line of lines){
+    if (drawn >= DOC_MAX_PARAGRAPHS) break;
+    const p = document.createElement("p");
+    p.className = "doc-p";
+    if (line.trim()){ p.textContent = line; shown++; }
+    else p.appendChild(document.createElement("br"));            // 빈 문단도 줄 간격 유지
+    shell.appendChild(p); drawn++;
+  }
+
+  const note = document.createElement("div");
+  note.className = "code-note";
+  const msg = document.createElement("span");
+  if (shown){
+    msg.textContent = drawn < lines.length
+      ? `구형 Word(.doc) 글자 미리보기 — 문단이 많아 앞 ${DOC_MAX_PARAGRAPHS.toLocaleString()}개만 보여줘요. 표·그림·서식은 빠집니다.`
+      : "구형 Word(.doc) 글자 미리보기 — 표·그림·서식은 빠지고 글자만 보여줘요. 정확한 모양이 필요하면 원래 프로그램에서 열어주세요.";
+  } else {
+    msg.textContent = why || "구형 Word(.doc)에서 읽을 글자를 찾지 못했어요.";
+  }
+  note.appendChild(msg);
+  const openBtn = await docExplorerButton(doc);
+  if (openBtn) note.appendChild(openBtn);
+  host.append(note, shell);
+}
+
 /* CFB(OLE2) + EncryptionInfo 스트림 → 열기 암호로 암호화된 오피스 파일인지 판별 */
 function looksEncryptedOffice(bytes){
   if (bytes.length < 16) return false;

@@ -12,6 +12,7 @@ async function loadOffice(file, ext, options={}){
     const source = doc.sourceFile || file;
     const siblingCtx = { relPath: doc.relPath || options.relPath, archiveCtx: doc.archiveCtx || options.archiveCtx };
     if (ext === "docx")      await renderDocx(source, host);
+    else if (ext === "doc")  await renderDocLegacy(source, host, doc);   // 구형 바이너리 Word — 글자만 뽑는 간이 미리보기
     else if (ext === "pptx") await renderPptx(source, host, options);
     else if (ext === "hwp" || ext === "hwpx") await renderHwp(source, ext, host);
     else if (ext === "md" || ext === "markdown" || ext === "mdx") await renderCode(source, host, ext, "text", siblingCtx);   // 미리보기 우선 + [✎ 편집]·저장 (code-viewer 의 isMd 경로)
@@ -21,7 +22,7 @@ async function loadOffice(file, ext, options={}){
     else if (CODE_EXTS[ext]) await renderCode(source, host, ext, null, siblingCtx);   // js/py/json/css/sql/xml 등
     else                     await renderXlsx(source, host, doc);   // xlsx / xls / csv (위 else 가 모두 받음 — 중복 호출 제거)
     // 본문 검색 결과 클릭 → 렌더된 화면에서 일치 글자로 스크롤+하이라이트 (마크다운·CSV 와 같은 통로)
-    if (["docx", "pptx", "hwp", "hwpx"].includes(ext)) doc.contentSearchFocus = (query) => focusRenderedTextMatch(host, query);
+    if (["docx", "doc", "pptx", "hwp", "hwpx"].includes(ext)) doc.contentSearchFocus = (query) => focusRenderedTextMatch(host, query);
   };
   refreshChrome();
   activateIfIdle(doc, options);              // 단일 열기면 즉시 렌더, 묶음이면 첫 개만

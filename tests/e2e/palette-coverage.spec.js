@@ -134,5 +134,7 @@ test("팔레트에서 표 찾기를 실행하면 찾기 메뉴가 실제로 열�
   await page.locator(".cmdk-input").fill("표에서 찾기");
   await page.keyboard.press("Enter");
   await expect(menu).toHaveAttribute("open", "");
-  await expect(menu.locator(".xlsx-find-input")).toBeVisible();
+  // '찾기·바꿈' 메뉴는 .xlsx-find-input 클래스를 찾기·바꾸기 두 칸에 함께 쓴다(클래스만으로는 하나로 못 좁힘).
+  await expect(menu.getByPlaceholder("찾을 내용")).toBeVisible();
+  await expect(menu.getByPlaceholder("바꿀 내용")).toBeVisible();
 });
