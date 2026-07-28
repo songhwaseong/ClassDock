@@ -1511,8 +1511,11 @@ function buildCodeEditor(text, prof, options={}){
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
     const top = pt + mt.line * lh, bottom = top + lh;
-    if (bottom > ta.scrollTop + ta.clientHeight - pb) ta.scrollTop = bottom - ta.clientHeight + pb;
-    else if (top < ta.scrollTop + pt) ta.scrollTop = Math.max(0, top - pt);
+    // 화면 밖일 때만 살짝 위쪽 가운데로 이동. 이미 보이면 그대로 둬야 타이핑 중 화면이 튀지 않는다.
+    if (top < ta.scrollTop + pt || bottom > ta.scrollTop + ta.clientHeight - pb){
+      const want = top - (ta.clientHeight - lh) * 0.4;
+      ta.scrollTop = Math.max(0, Math.min(want, ta.scrollHeight - ta.clientHeight));
+    }
     syncNow();
   };
   const selectMatch = (i) => {
@@ -1677,8 +1680,10 @@ function buildCodeEditor(text, prof, options={}){
     if (spotlightSegs.length){                          // 매치가 편집기 내부 스크롤 밖이면 보이도록 세로 스크롤
       const m = colMetrics();
       const top = m.pt + spotlightSegs[0].line * m.lh, bottom = top + m.lh;
-      if (bottom > ta.scrollTop + ta.clientHeight) ta.scrollTop = bottom - ta.clientHeight;
-      else if (top < ta.scrollTop) ta.scrollTop = Math.max(0, top - m.pt);
+      if (top < ta.scrollTop || bottom > ta.scrollTop + ta.clientHeight){   // 밖일 때만 위쪽 가운데로(찾기 이동과 같은 규칙)
+        const want = top - (ta.clientHeight - m.lh) * 0.4;
+        ta.scrollTop = Math.max(0, Math.min(want, ta.scrollHeight - ta.clientHeight));
+      }
     }
     try { ta.setSelectionRange(start, start); } catch(_){}   // 흐린 회색 선택 잔상을 없애고 강조는 주황 박스로만
     syncNow();

@@ -1861,8 +1861,12 @@ async function renderCode(file, host, ext, profile, runCtx){
     const head = outPanel.querySelector(".out-head");
     const chromeBottom = !outFindBar.hidden ? outFindBar.getBoundingClientRect().bottom
       : (head ? head.getBoundingClientRect().bottom : panelRect.top);
-    if (rect.top < chromeBottom + 6) outPanel.scrollTop += rect.top - chromeBottom - 8;
-    else if (rect.bottom > panelRect.bottom - 8) outPanel.scrollTop += rect.bottom - panelRect.bottom + 8;
+    // 화면 밖일 때만, 찾기 바 아래 가시 영역의 위쪽 40% 지점으로 올린다(가장자리에 붙지 않게).
+    if (rect.top < chromeBottom + 6 || rect.bottom > panelRect.bottom - 8){
+      const visibleH = Math.max(0, panelRect.bottom - chromeBottom);
+      const want = chromeBottom + Math.max(8, (visibleH - rect.height) * 0.4);
+      outPanel.scrollTop += rect.top - want;
+    }
   };
   const goOutputFindMatch = (delta) => {
     if (!outputFindMatches.length){ updateOutputFindCount(); return; }
