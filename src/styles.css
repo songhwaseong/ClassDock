@@ -2708,6 +2708,13 @@
   .py-env-modal .py-env-head{font-size:16px;margin-bottom:12px}
   .py-env-modal .py-env-grid{gap:8px 14px}
   .py-env-modal .py-env-grid dd{white-space:normal;word-break:break-all;overflow:visible;text-overflow:clip;user-select:text;-webkit-user-select:text;cursor:text}
+  .py-env-help{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-left:3px solid #b45309;
+    border-radius:8px;background:var(--panel-2);line-height:1.55}
+  .py-env-help strong{display:block;margin-bottom:4px;color:#b45309}
+  .py-env-help p{margin:0;color:var(--muted)}
+  .py-env-help ol{margin:8px 0 0;padding-left:18px}
+  .py-env-help li{margin:3px 0}
+  .py-env-help-actions{display:flex;align-items:center;gap:10px;margin-top:10px}
   .py-grade-modal .modal-card{width:min(860px,96%);max-height:92vh;display:flex;flex-direction:column}
   .py-grade-test-list{display:flex;flex-direction:column;gap:10px;overflow:auto;min-height:120px;padding:1px 4px 3px 1px}
   .py-grade-test{border:1px solid var(--border);border-radius:10px;background:var(--panel-2);padding:10px}

@@ -1720,6 +1720,72 @@ function renderPythonTrace(panel, parsed, source, ui){
   return { steps:steps.length, error:report.error };
 }
 
+// 이미 열려 있는 노트북은 툴바를 만들 때 확인한 값을 들고 있어서, 재검사로 파이썬을 찾으면 실행 메뉴도 같이 갱신한다.
+function refreshOpenNotebookLocalPython(){
+  try {
+    if (typeof docs === "undefined" || !Array.isArray(docs)) return;
+    docs.forEach(doc => {
+      if (!doc || !doc._nbLocalKernelBtn) return;
+      doc._nbLocalPythonAvailable = true;
+      if (typeof nbRefreshKernelModeUi === "function") nbRefreshKernelModeUi(doc);
+    });
+  } catch(e){}
+}
+
+// 브라우저 파이썬으로 잡혔을 때 원인별 안내와 해결 수단을 붙인다.
+// 초보자가 가장 많이 걸리는 함정이 설치 때 'Add python.exe to PATH' 체크를 놓치는 것이라 그 경우를 우선 안내한다.
+function buildPythonEnvHelp(panel, btn){
+  const box = document.createElement("div"); box.className = "py-env-help";
+  const title = document.createElement("strong");
+  const desc = document.createElement("p");
+  const steps = document.createElement("ol");
+  const addStep = (text) => { const li = document.createElement("li"); li.textContent = text; steps.appendChild(li); };
+  const isServed = location.protocol === "http:" || location.protocol === "https:";
+  const forcedWasm = /[?&]py=wasm\b/.test(location.search);
+  if (forcedWasm){
+    title.textContent = "테스트용 브라우저 모드로 고정돼 있습니다";
+    desc.textContent = "주소 끝의 ?py=wasm 은 로컬 파이썬을 일부러 무시하는 옵션입니다. 이 부분을 지우고 새로고침하면 로컬 파이썬을 다시 찾습니다.";
+  } else if (!isServed){
+    title.textContent = "지금은 로컬 파이썬을 쓸 수 없는 실행 방식입니다";
+    desc.textContent = "HTML 파일을 직접 열면 내 컴퓨터의 파이썬에 연결할 수 없습니다. manneung-classroom.exe 로 실행하면 설치된 파이썬을 자동으로 찾습니다.";
+  } else {
+    title.textContent = "내 컴퓨터에서 파이썬을 찾지 못했습니다";
+    desc.textContent = "파이썬을 설치하면 자동으로 로컬 실행으로 바뀝니다. 이미 설치했는데도 이 안내가 보이면 아래 순서를 확인해 주세요.";
+    addStep("python.org 에서 파이썬을 설치합니다. 설치 첫 화면의 'Add python.exe to PATH' 를 체크하면 가장 확실합니다.");
+    addStep("설치가 끝나면 아래 '다시 검사' 를 누릅니다. 앱을 껐다 켤 필요는 없습니다.");
+    addStep("그래도 찾지 못하면 파이썬을 기본 폴더가 아닌 곳에 설치한 경우입니다. 'Add python.exe to PATH' 를 체크해 다시 설치해 주세요.");
+  }
+  box.append(title, desc);
+  if (steps.childElementCount) box.appendChild(steps);
+  if (isServed && !forcedWasm){
+    const actions = document.createElement("div"); actions.className = "py-env-help-actions";
+    const rescan = document.createElement("button"); rescan.type = "button"; rescan.className = "btn"; rescan.textContent = "다시 검사";
+    const note = document.createElement("span"); note.className = "py-env-muted";
+    rescan.addEventListener("click", async () => {
+      rescan.disabled = true; rescan.textContent = "검사 중...";
+      note.textContent = "";
+      let found = false;
+      try {
+        const res = await fetch("/python-rescan", { method:"POST", cache:"no-store" });
+        if (res.ok){ const data = await res.json(); found = !!data.ok; }
+      } catch(e){}
+      _pyBackend = null;   // 프론트 캐시도 비워야 다음 실행이 로컬 파이썬으로 간다
+      if (typeof resetBackendFormatterProbe === "function"){ try { resetBackendFormatterProbe(); } catch(e){} }
+      if (found) refreshOpenNotebookLocalPython();
+      if (found){
+        toast("로컬 파이썬을 찾았습니다. 이제 내 컴퓨터의 파이썬으로 실행합니다.", 3200);
+        refreshPythonEnvPanel(panel, btn);
+      } else {
+        rescan.disabled = false; rescan.textContent = "다시 검사";
+        note.textContent = "아직 찾지 못했습니다.";
+      }
+    });
+    actions.append(rescan, note);
+    box.appendChild(actions);
+  }
+  return box;
+}
+
 async function refreshPythonEnvPanel(panel, btn){
   if (!panel) return;
   panel.innerHTML = '<div class="py-env-head"><span>Python 실행 환경</span><span class="py-env-muted">확인 중...</span></div>';
@@ -1750,5 +1816,6 @@ async function refreshPythonEnvPanel(panel, btn){
   const state = document.createElement("span"); state.className = statusCls; state.textContent = info.backend ? "로컬 실행" : "브라우저 실행";
   head.append(title, state);
   panel.append(head, dl);
+  if (!info.backend) panel.appendChild(buildPythonEnvHelp(panel, btn));
 }
 

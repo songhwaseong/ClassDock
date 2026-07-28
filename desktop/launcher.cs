@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -809,6 +810,7 @@ class PdfSignerLauncher
             if (path.StartsWith("/terminal-session-", StringComparison.Ordinal)) return true;
             if (path == "/terminal-complete") return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
+            if (path == "/python-rescan") return true;
         }
         if (method == "GET")
         {
@@ -1369,6 +1371,12 @@ class PdfSignerLauncher
                 }
                 else if (path == "/python-diagnostics")
                 {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PythonDiagnostics()));
+                }
+                else if (method == "POST" && path == "/python-rescan")
+                {
+                    // 파이썬을 새로 설치한 사용자가 exe 를 껐다 켜지 않아도 되도록 캐시를 비우고 다시 찾는다.
+                    ResetPythonProbe();
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PythonDiagnostics()));
                 }
                 else if (path == "/mem")
@@ -4135,28 +4143,174 @@ class PdfSignerLauncher
         {
             if (_pythonProbed) return _pythonCmd;
             _pythonProbed = true;
-            // Windows 런처 'py' 우선(버전 선택 처리), 그다음 python / python3
-            string[] cands = { "py", "python", "python3" };
-            foreach (string c in cands)
-            {
-                try
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo(c, "--version");
-                    psi.UseShellExecute = false;
-                    psi.CreateNoWindow = true;
-                    psi.RedirectStandardOutput = true;
-                    psi.RedirectStandardError = true;
-                    Process p = Process.Start(psi);
-                    if (p == null) continue;
-                    p.StandardOutput.ReadToEnd();
-                    p.StandardError.ReadToEnd();
-                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } continue; }
-                    if (p.ExitCode == 0) { _pythonCmd = c; break; }
-                }
-                catch { /* 해당 후보 없음 → 다음 */ }
-            }
+            _pythonCmd = ProbePython();
             return _pythonCmd;
         }
+    }
+
+    // 파이썬을 새로 설치한 뒤 exe 재시작 없이 다시 찾도록 캐시를 비운다(Py Env 의 '다시 검사').
+    static void ResetPythonProbe()
+    {
+        lock (PyProbeLock) { _pythonProbed = false; _pythonCmd = null; }
+        lock (JediLock) { _jediReady = null; }
+    }
+
+    /* 설치할 때 'Add python.exe to PATH' 를 체크하지 않으면 PATH 로는 찾을 수 없다.
+       그래서 PATH → 레지스트리(PEP 514) → 표준 설치 폴더 순으로 넓혀 가며 찾는다. */
+    static string ProbePython()
+    {
+        // 1) PATH — Windows 런처 'py' 우선(버전 선택 처리), 그다음 python / python3
+        string[] cands = { "py", "python", "python3" };
+        foreach (string c in cands)
+            if (IsUsablePython(c)) return c;
+        // 2) PATH 밖 — 설치된 흔적에서 python.exe 를 찾아 최신 버전부터 검사
+        foreach (string exe in InstalledPythonCandidates())
+            if (IsUsablePython(exe)) return exe;
+        return null;
+    }
+
+    // --version 이 정상 종료하고 Python 3 이라고 답할 때만 인정한다.
+    // 파이썬을 설치하지 않아도 있는 Microsoft Store 안내용 가짜 python.exe 도 여기서 걸러진다.
+    static bool IsUsablePython(string cmd)
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(cmd, "--version");
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            Process p = Process.Start(psi);
+            if (p == null) return false;
+            string stdout = p.StandardOutput.ReadToEnd();
+            string stderr = p.StandardError.ReadToEnd();
+            if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
+            if (p.ExitCode != 0) return false;
+            return (stdout + stderr).IndexOf("Python 3", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        catch { return false; }   // 해당 후보 없음 → 다음
+    }
+
+    // 레지스트리와 표준 설치 폴더에서 python.exe 후보를 모아 최신 버전부터 돌려준다.
+    static List<string> InstalledPythonCandidates()
+    {
+        var found = new List<KeyValuePair<int, string>>();   // (버전 순위, 경로)
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var paths = new List<string>();
+        try { paths.AddRange(RegistryPythonPaths()); } catch { }
+        try { paths.AddRange(WellKnownPythonPaths()); } catch { }
+        foreach (string candidate in paths)
+        {
+            if (string.IsNullOrEmpty(candidate)) continue;
+            string exe;
+            try { exe = Path.GetFullPath(candidate); } catch { continue; }
+            if (!File.Exists(exe) || !seen.Add(exe)) continue;
+            found.Add(new KeyValuePair<int, string>(PythonVersionRank(exe), exe));
+        }
+        found.Sort(delegate(KeyValuePair<int, string> a, KeyValuePair<int, string> b) { return b.Key.CompareTo(a.Key); });
+        var list = new List<string>();
+        foreach (KeyValuePair<int, string> item in found) list.Add(item.Value);
+        return list;
+    }
+
+    // 폴더 이름의 'Python313' / 'Python3.13' 에서 숫자를 뽑아 최신 우선 정렬에 쓴다(모르면 0 → 마지막).
+    static int PythonVersionRank(string exePath)
+    {
+        try
+        {
+            string parent = Path.GetDirectoryName(exePath);
+            string dir = parent == null ? "" : Path.GetFileName(parent);
+            var digits = new StringBuilder();
+            foreach (char ch in dir) if (ch >= '0' && ch <= '9') digits.Append(ch);
+            if (digits.Length < 2) return 0;                       // anaconda3 처럼 버전이 없는 경우
+            string text = digits.ToString();
+            int major = text[0] - '0';
+            int minor;
+            if (!int.TryParse(text.Substring(1), out minor)) minor = 0;
+            return major * 1000 + Math.Min(minor, 999);            // 3.13 → 3013
+        }
+        catch { return 0; }
+    }
+
+    // PEP 514: HKCU/HKLM 의 SOFTWARE\Python\<회사>\<태그>\InstallPath 에 설치 위치가 등록된다.
+    static List<string> RegistryPythonPaths()
+    {
+        var list = new List<string>();
+        var views = new KeyValuePair<RegistryHive, RegistryView>[] {
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.CurrentUser, RegistryView.Registry64),
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.LocalMachine, RegistryView.Registry64),
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.LocalMachine, RegistryView.Registry32)
+        };
+        foreach (KeyValuePair<RegistryHive, RegistryView> view in views)
+        {
+            RegistryKey baseKey = null;
+            try
+            {
+                baseKey = RegistryKey.OpenBaseKey(view.Key, view.Value);
+                if (baseKey == null) continue;
+                using (RegistryKey root = baseKey.OpenSubKey("SOFTWARE\\Python"))
+                {
+                    if (root == null) continue;
+                    foreach (string company in root.GetSubKeyNames())
+                    {
+                        using (RegistryKey companyKey = root.OpenSubKey(company))
+                        {
+                            if (companyKey == null) continue;
+                            foreach (string tag in companyKey.GetSubKeyNames())
+                            {
+                                using (RegistryKey install = companyKey.OpenSubKey(tag + "\\InstallPath"))
+                                {
+                                    if (install == null) continue;
+                                    string exe = install.GetValue("ExecutablePath") as string;
+                                    if (string.IsNullOrEmpty(exe))
+                                    {
+                                        string dir = install.GetValue(null) as string;   // 기본값 = 설치 폴더
+                                        if (!string.IsNullOrEmpty(dir)) exe = Path.Combine(dir, "python.exe");
+                                    }
+                                    if (!string.IsNullOrEmpty(exe)) list.Add(exe);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { /* 권한 없음·키 없음 → 다음 뷰 */ }
+            finally { if (baseKey != null) { try { baseKey.Close(); } catch { } } }
+        }
+        return list;
+    }
+
+    // 레지스트리에 없더라도 대부분 아래 기본 위치에 설치된다.
+    static List<string> WellKnownPythonPaths()
+    {
+        var list = new List<string>();
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        string systemDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var roots = new List<string>();
+        if (!string.IsNullOrEmpty(local)) roots.Add(Path.Combine(local, "Programs\\Python"));   // 기본 '나만 사용' 설치
+        roots.Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
+        roots.Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+        try { if (!string.IsNullOrEmpty(systemDir)) roots.Add(Path.GetPathRoot(systemDir)); } catch { }   // C:\Python313
+        foreach (string root in roots)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            try
+            {
+                if (!Directory.Exists(root)) continue;
+                foreach (string dir in Directory.GetDirectories(root, "Python3*"))
+                    list.Add(Path.Combine(dir, "python.exe"));
+            }
+            catch { /* 접근 불가 폴더 → 건너뜀 */ }
+        }
+        string[] condaNames = { "anaconda3", "miniconda3", "miniforge3" };
+        foreach (string name in condaNames)
+        {
+            if (!string.IsNullOrEmpty(profile)) list.Add(Path.Combine(profile, name + "\\python.exe"));
+            if (!string.IsNullOrEmpty(programData)) list.Add(Path.Combine(programData, name + "\\python.exe"));
+        }
+        return list;
     }
 
     // pip 패키지 이름 검증(명령 주입 방지): 이름 + 선택적 버전 지정자만 허용
