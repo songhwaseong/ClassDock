@@ -1779,6 +1779,18 @@ function buildCodeEditor(text, prof, options={}){
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "y" || e.key === "Y")){ e.preventDefault(); exitCol(); redo(); return; }
     if (e.key === "F3" && !e.ctrlKey && !e.metaKey && !e.altKey){
       e.preventDefault();
+      if (ta.selectionStart === ta.selectionEnd){   // 선택 없이 커서만 단어 안에 있으면 먼저 그 단어를 선택
+        const word = wordAtOffset(ta.selectionStart);
+        if (word && word.word.length <= 80 && /^[\w가-힣]+$/.test(word.word)){
+          exitCol();
+          hideCompletion();
+          ta.setSelectionRange(word.start, word.end);
+          scrollCaretIntoView();
+          computeWordHi();
+          sync();
+        }
+        return;
+      }
       const next = findNextIdentifierOccurrence(ta.value, ta.selectionStart, ta.selectionEnd, e.shiftKey);
       if (next){
         exitCol();
