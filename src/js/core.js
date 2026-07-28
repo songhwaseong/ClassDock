@@ -634,6 +634,7 @@
       case "c": return JS_COMPLETION_WORDS;
       case "sql": return SQL_COMPLETION_WORDS;
       case "css": return CSS_COMPLETION_WORDS;
+      case "python": return PYTHON_COMPLETION_WORDS;
       case "hash": return PYTHON_COMPLETION_WORDS;
       default: return [];                             // xml/text 등: 버퍼 단어만
     }

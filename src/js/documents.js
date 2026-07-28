@@ -10,12 +10,12 @@ const BINARY_ASSET_EXTS = new Set([
   "onnx", "tflite", "safetensors", "pt", "pth", "ckpt",
   "joblib", "pkl", "pickle", "keras", "h5", "hdf5", "pyc"
 ]);
-// 코드/설정 파일: 확장자 → 구문강조 프로파일(c=C계열, hash=#주석, css/sql/xml=전용)
+// 코드/설정 파일: 확장자 → 구문강조 프로파일(c=C계열, python=Python, hash=#주석, css/sql/xml=전용)
 const CODE_EXTS = {
   js:"c", mjs:"c", cjs:"c", ts:"c", jsx:"c", tsx:"c", java:"c", c:"c", h:"c", cpp:"c", cc:"c", hpp:"c", cxx:"c",
   cs:"c", go:"c", rs:"c", php:"c", kt:"c", kts:"c", swift:"c", scala:"c", dart:"c", vue:"c", svelte:"c",
   json:"c", json5:"c", jsonc:"c", scss:"c", less:"c", bat:"c", cmd:"c",
-  py:"hash", pyi:"hash", rb:"hash", sh:"hash", bash:"hash", zsh:"hash", ps1:"hash",
+  py:"python", pyi:"python", rb:"hash", sh:"hash", bash:"hash", zsh:"hash", ps1:"hash",
   yaml:"hash", yml:"hash", toml:"hash", ini:"hash", env:"hash", properties:"hash", conf:"hash",
   css:"css", sql:"sql",
   xml:"xml", xsl:"xml", xslt:"xml", xsd:"xml", rss:"xml", atom:"xml", plist:"xml", wsdl:"xml", dbk:"xml", docbook:"xml",

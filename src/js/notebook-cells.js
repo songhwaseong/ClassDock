@@ -399,7 +399,7 @@ function nbBuildCell(ownerDoc, cell){
       const pre = document.createElement("pre");
       pre.className = "nbv-static";
       pre.innerHTML = cell.source
-        ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "hash") : escapeForPre(cell.source))
+        ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "python") : escapeForPre(cell.source))
         : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       pre.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -424,7 +424,7 @@ function nbBuildCell(ownerDoc, cell){
 
     ctrl.mount = () => {
       if (ctrl.active) return;
-      const ed = buildCodeEditor(cell.source, "hash", {
+      const ed = buildCodeEditor(cell.source, "python", {
         completionPortal:true,
         workspaceImportCandidates:() => (typeof workspacePythonImportCandidates === "function" ? workspacePythonImportCandidates(ownerDoc) : []),
         completionContext:(currentSource) => notebookCompletionContext(
@@ -470,7 +470,7 @@ function nbBuildCell(ownerDoc, cell){
       if (ctrl.editor) ctrl.editor.setValue(cell.source);
       else if (ctrl.staticEl) {
         ctrl.staticEl.innerHTML = cell.source
-          ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "hash") : escapeForPre(cell.source))
+          ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "python") : escapeForPre(cell.source))
           : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       }
       refreshStdin();

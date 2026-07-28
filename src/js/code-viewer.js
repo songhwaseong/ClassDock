@@ -5,7 +5,7 @@
 // 소문자 none|true|false 와 별개로 적어야 색이 붙는다.
 const CODE_KW = "Ellipsis|False|None|NotImplemented|True|abstract|and|arguments|as|assert|async|await|base|bool|boolean|break|byte|case|catch|chan|char|class|const|continue|debugger|def|default|defer|del|delete|do|double|elif|else|elsif|end|enum|except|export|extends|extern|false|final|finally|float|fn|for|foreach|from|func|function|global|go|goto|if|impl|implements|import|in|instanceof|int|interface|is|lambda|let|long|loop|match|mod|module|mut|namespace|new|nil|none|nonlocal|not|null|object|or|out|override|package|pass|private|protected|public|pub|raise|readonly|ref|return|select|self|short|sizeof|static|struct|super|switch|synchronized|template|this|throw|throws|trait|true|try|typedef|typeof|union|unsafe|use|using|var|virtual|void|volatile|when|where|while|with|yield";
 // 파이썬 내장 함수·형(tk-b)과 내장 예외·경고 클래스(tk-t). 키워드 목록과 겹치는 int·float·bool·
-// object·super 는 hash 프로필에서 이쪽이 먼저 매칭돼 내장색으로 통일된다.
+// object·super 는 Python 프로필에서 이쪽이 먼저 매칭돼 내장색으로 통일된다.
 const PY_BUILTIN_FN = "__import__|abs|aiter|all|anext|any|ascii|bin|bool|breakpoint|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip";
 const PY_BUILTIN_EXC = "ArithmeticError|AssertionError|AttributeError|BaseException|BlockingIOError|BrokenPipeError|BufferError|BytesWarning|ChildProcessError|ConnectionAbortedError|ConnectionError|ConnectionRefusedError|ConnectionResetError|DeprecationWarning|EOFError|EncodingWarning|Exception|FileExistsError|FileNotFoundError|FloatingPointError|FutureWarning|GeneratorExit|ImportError|ImportWarning|IndentationError|IndexError|InterruptedError|IsADirectoryError|KeyError|KeyboardInterrupt|LookupError|MemoryError|ModuleNotFoundError|NameError|NotADirectoryError|NotImplementedError|OSError|OverflowError|PendingDeprecationWarning|PermissionError|ProcessLookupError|RecursionError|ReferenceError|ResourceWarning|RuntimeError|RuntimeWarning|StopAsyncIteration|StopIteration|SyntaxError|SyntaxWarning|SystemError|SystemExit|TabError|TimeoutError|TypeError|UnboundLocalError|UnicodeDecodeError|UnicodeEncodeError|UnicodeError|UnicodeTranslateError|UnicodeWarning|UserWarning|ValueError|Warning|ZeroDivisionError";
 const SQL_KW = "select|from|where|insert|into|update|delete|create|alter|drop|table|view|index|join|inner|left|right|outer|full|cross|on|group|order|by|asc|desc|having|union|all|values|set|primary|key|foreign|references|not|null|default|distinct|as|and|or|like|between|in|exists|case|when|then|else|count|sum|avg|min|max|limit|offset|begin|commit|rollback";
@@ -112,8 +112,9 @@ function highlightFString(token){
 }
 function highlightCodeBase(src, profile){
   if (profile === "text") return escapeHtml(src);   // 강조 없이 텍스트만(rst/adoc/org/tex 등 경량 마크업)
+  const isPython = profile === "python";
   let com;
-  if (profile==="hash") com="#[^\\n]*";
+  if (isPython || profile==="hash") com="#[^\\n]*";
   else if (profile==="sql") com="--[^\\n]*|/\\*[\\s\\S]*?\\*/";
   else if (profile==="xml") com="<!--[\\s\\S]*?-->";
   else if (profile==="css") com="/\\*[\\s\\S]*?\\*/";
@@ -131,7 +132,12 @@ function highlightCodeBase(src, profile){
     // 파이썬(# 주석 프로필)에서만 내장 이름을 따로 칠한다 — 키워드 대안보다 앞에 둬야
     // int·float·bool 처럼 양쪽 목록에 다 있는 이름이 내장색으로 잡힌다. xml 전용인 t 그룹은
     // 이 프로필에서 비어 있으므로 내장 예외 색으로 그대로 재사용한다(전용 CSS가 이미 있음).
-    if (profile==="hash"){
+    if (isPython){
+      // 문자열·주석보다 뒤에 두어 그 안의 @decorator / def name 은 건드리지 않는다.
+      // 의미 분석용 PUA 표식이 함수명에 감싸져도 함수명 색을 유지한다.
+      const semanticMarker = "[\\uE000-\\uF8FF]*";
+      alts.push("(?<d>@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)");
+      alts.push("(?<f>\\b(?:async\\s+)?def\\s+" + semanticMarker + "[A-Za-z_]\\w*" + semanticMarker + ")");
       alts.push("(?<b>\\b(?:"+PY_BUILTIN_FN+")\\b)");
       alts.push("(?<t>\\b(?:"+PY_BUILTIN_EXC+")\\b)");
     }
@@ -146,8 +152,15 @@ function highlightCodeBase(src, profile){
     out += escapeHtml(src.slice(last, m.index));
     const g = m.groups;
     if (g.s && isFStringToken(m[0])) out += highlightFString(m[0]);
+    else if (g.f){
+      const fn = m[0].match(/^((?:async\s+)?def)(\s+)([\uE000-\uF8FF]*)([A-Za-z_]\w*)([\uE000-\uF8FF]*)$/);
+      if (fn){
+        out += '<span class="tk-k">' + escapeHtml(fn[1]) + '</span>' + escapeHtml(fn[2] + fn[3])
+          + '<span class="tk-f">' + escapeHtml(fn[4]) + '</span>' + escapeHtml(fn[5]);
+      } else out += '<span class="tk-f">' + escapeHtml(m[0]) + '</span>';
+    }
     else {
-      const cls = g.com?"c":g.s?"s":g.n?"n":g.b?"b":g.k?"k":g.t?"t":"";
+      const cls = g.com?"c":g.s?"s":g.n?"n":g.d?"d":g.b?"b":g.k?"k":g.t?"t":"";
       out += '<span class="tk-'+cls+'">' + escapeHtml(m[0]) + '</span>';
     }
     last = m.index + m[0].length;

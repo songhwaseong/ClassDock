@@ -1256,7 +1256,7 @@ function wireScratchpad(){
     const source = document.createElement("pre");
     source.className = "scratchpad-notebook-source";
     if (cellType === "code" && typeof highlightCode === "function"){
-      source.innerHTML = highlightCode(String(block.cell && block.cell.source || ""), "hash");
+      source.innerHTML = highlightCode(String(block.cell && block.cell.source || ""), "python");
     } else {
       source.textContent = String(block.cell && block.cell.source || "");
     }

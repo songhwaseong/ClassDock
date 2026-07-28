@@ -585,7 +585,7 @@ function buildCodeEditor(text, prof, options={}){
   // 커서가 파이썬 주석(#) 안에 있으면 자동완성을 띄우지 않는다. 현재 줄만 훑되
   // 따옴표 안의 #(문자열 리터럴)은 주석으로 보지 않는다.
   const caretInComment = (caret) => {
-    if (prof !== "hash") return false;                    // # 주석을 쓰는 프로필(파이썬)만 대상
+    if (prof !== "python") return false;                  // Python 코드에서만 대상
     const before = ta.value.slice(0, caret);
     const line = before.slice(before.lastIndexOf("\n") + 1);
     let quote = "";
@@ -802,12 +802,12 @@ function buildCodeEditor(text, prof, options={}){
   };
 
   // ===== 코드 자동 정렬 =====
-  // 경량 재들여쓰기(오프라인·항상 가능) + 로컬 파이썬이면 black/autopep8 전체 재포맷. 파이썬 편집기(prof "hash",
+  // 경량 재들여쓰기(오프라인·항상 가능) + 로컬 파이썬이면 black/autopep8 전체 재포맷. 파이썬 편집기(prof "python",
   // plain 아님)에서만 동작한다. black 은 비동기라 도중에 사용자가 편집하면 그 결과를 버려 편집을 덮어쓰지 않는다.
   // undo 는 정렬 전/후를 한 단계로 묶고, 커서는 같은 줄·같은 칸(가능한 범위)으로 되돌린다.
   const formatDocumentNow = async (opts) => {
     opts = opts || {};
-    if (plainMode || prof !== "hash") return { changed: false };
+    if (plainMode || prof !== "python") return { changed: false };
     const before = ta.value;
     if (!before.trim()) return { changed: false };
     hideCompletion(); exitCol();
@@ -1911,7 +1911,7 @@ function buildCodeEditor(text, prof, options={}){
         ta.selectionStart = ta.selectionEnd = s + body.length;
         hideCompletion(); emitInput(); scrollCaretIntoView(); return;
       }
-      if (prof === "hash"){
+      if (prof === "python"){
         if (pythonLineOpensBlock(head)) indent += "    ";                    // Python 블록 시작(:) 뒤에 주석이 있어도 한 단계 더
       } else if (prof === "c"){
         if (/[{([]\s*$/.test(head)) indent += "    ";                       // C계열: { ( [ 로 끝나면 한 단계 더
@@ -1981,7 +1981,7 @@ function buildCodeEditor(text, prof, options={}){
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,
     formatDocument: formatDocumentNow,
-    canFormat: () => !plainMode && prof === "hash",
+    canFormat: () => !plainMode && prof === "python",
     destroy: () => {
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);
