@@ -1,0 +1,19 @@
+# 줄바꿈 정책: 저장소와 작업 트리 모두 LF 로 통일한다.
+# 빌드 도구(Node, esbuild, gofmt)는 파일을 항상 LF 로 다시 쓴다. 체크아웃을 CRLF 로 하면
+# 내용은 같은데 파일 크기만 달라지고, git 은 크기만 보고 "수정됨"으로 표시해 버린다.
+# 예: tools/build-korean-spell-worker.mjs 가 매 빌드마다 scripts.manifest.json 을 LF 로 재작성한다.
+* text=auto eol=lf
+
+# Windows 스크립트는 CRLF 유지 — cmd.exe 가 LF 배치 파일의 라벨/goto 를 잘못 처리할 수 있다.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+
+# 바이너리 — 줄바꿈 변환 금지
+*.png binary
+*.ttf binary
+*.wasm binary
+*.whl binary
+*.zip binary
+*.exe binary
