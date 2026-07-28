@@ -339,13 +339,13 @@
       "src": "vendor/divs2slides.min.js",
       "file": "divs2slides.min.js",
       "lazy": "pptx",
-      "sha384": "sha384-jlQueChw9ZQP+k4P9xVK0QtBb+yILYmVhXC7dVhAiMlvF2HcB4NY4uvETT8yY6RL"
+      "sha384": "sha384-VHfx5UADXjwi9qNrWLjF/viWLb4pTvBADeeizpsJw2wE4TuD/zL4BhuHv0NxFZwk"
     },
     {
       "src": "vendor/pptxjs.min.js",
       "file": "pptxjs.min.js",
       "lazy": "pptx",
-      "sha384": "sha384-m5yyO2mX0PtFwZpBw6YBXITQ9XCR2X6ZNlucLJ+hmJu2/znygM2PbMukiDUsI0Ai"
+      "sha384": "sha384-fdS1pdtJi9WmzcFvhzXhRLh/J1LnVhFUi0c961fYcq1NEDBdexiQiNSi7KtNNJPG"
     },
     {
       "src": "vendor/docx-preview.min.js",

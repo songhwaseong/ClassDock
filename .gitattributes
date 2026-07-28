@@ -10,6 +10,9 @@
 *.vbs text eol=crlf
 *.ps1 text eol=crlf
 
+# 서드파티 고정본은 바이트를 그대로 보존한다 — SHA-384 무결성 검사 대상이라 변환하면 해시가 깨진다.
+vendor/** -text
+
 # 바이너리 — 줄바꿈 변환 금지
 *.png binary
 *.ttf binary
