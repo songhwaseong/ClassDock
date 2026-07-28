@@ -2006,6 +2006,26 @@
     return { value: text, selectionStart: start, selectionEnd: end };
   }
 
+  // 선택 영역만 대문자/소문자로 바꾼다. 편집기는 반환된 replacement를 setRangeText로
+  // 적용해 네이티브 선택과 자체 Undo 이력을 모두 유지한다.
+  function transformSelectedTextCase(value, selectionStart, selectionEnd, mode) {
+    const text = String(value == null ? "" : value);
+    const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
+    const end = Math.max(start, Math.min(Number(selectionEnd) || 0, text.length));
+    if (start === end || (mode !== "upper" && mode !== "lower")) {
+      return { value:text, replacement:"", selectionStart:start, selectionEnd:end, changed:false };
+    }
+    const selected = text.slice(start, end);
+    const replacement = mode === "upper" ? selected.toUpperCase() : selected.toLowerCase();
+    return {
+      value:text.slice(0, start) + replacement + text.slice(end),
+      replacement,
+      selectionStart:start,
+      selectionEnd:start + replacement.length,
+      changed:replacement !== selected
+    };
+  }
+
   function inlineMarkdown(text, allowHtml) {
     const code = [];
     let out = String(text).replace(/`([^`]+)`/g, (_, value) => {
@@ -3344,7 +3364,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,

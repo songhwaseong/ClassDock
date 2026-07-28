@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -18,6 +18,18 @@ const {
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, dataTransferHasFileItems, captureDroppedFileItems,
   droppedTransferNeedsFolderPicker
 } = require("../src/js/core.js");
+
+test("selected text case conversion preserves the selected replacement range", () => {
+  assert.deepEqual(transformSelectedTextCase("앞 AbC 뒤", 2, 5, "upper"), {
+    value:"앞 ABC 뒤", replacement:"ABC", selectionStart:2, selectionEnd:5, changed:true
+  });
+  assert.deepEqual(transformSelectedTextCase("앞 AbC 뒤", 2, 5, "lower"), {
+    value:"앞 abc 뒤", replacement:"abc", selectionStart:2, selectionEnd:5, changed:true
+  });
+  assert.deepEqual(transformSelectedTextCase("ABC", 1, 1, "upper"), {
+    value:"ABC", replacement:"", selectionStart:1, selectionEnd:1, changed:false
+  });
+});
 
 test("텍스트 파일의 BOM·UTF-8·CP949·ASCII 인코딩을 구분한다", () => {
   assert.equal(detectTextEncoding(new Uint8Array([0xEF, 0xBB, 0xBF, 0x61])).label, "UTF-8 (BOM 있음)");

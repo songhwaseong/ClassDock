@@ -1,5 +1,129 @@
 "use strict";
 
+// 브라우저 기본 메뉴에는 항목을 추가할 수 없으므로, 코드/텍스트 textarea에서 공통으로
+// 쓰는 편집 메뉴를 만든다. 선택 범위는 메뉴를 누르는 동안에도 보존한다.
+let activeTextContextMenu = null;
+function closeTextContextMenu(){
+  if (typeof activeTextContextMenu === "function") activeTextContextMenu();
+}
+
+function attachTextCaseContextMenu(ta, options={}){
+  const onContextMenu = (event) => {
+    event.preventDefault();
+    closeTextContextMenu();
+
+    const value = String(ta.value || "");
+    const selection = {
+      start:Math.max(0, Math.min(ta.selectionStart || 0, value.length)),
+      end:Math.max(0, Math.min(ta.selectionEnd || 0, value.length)),
+      direction:ta.selectionDirection || "none"
+    };
+    if (selection.end < selection.start) [selection.start, selection.end] = [selection.end, selection.start];
+    const hasSelection = selection.start !== selection.end;
+    const menu = document.createElement("div");
+    menu.className = "text-context-menu";
+    menu.setAttribute("role", "menu");
+
+    const restoreSelection = () => {
+      ta.focus({ preventScroll:true });
+      try { ta.setSelectionRange(selection.start, selection.end, selection.direction); } catch(_){}
+    };
+    const replaceSelection = (replacement) => {
+      restoreSelection();
+      if (typeof options.replaceSelection === "function") return options.replaceSelection(String(replacement || ""), selection) !== false;
+      ta.setRangeText(String(replacement || ""), selection.start, selection.end, "select");
+      ta.dispatchEvent(new Event("input", { bubbles:true }));
+      return true;
+    };
+    const changeCase = (mode) => {
+      const result = typeof transformSelectedTextCase === "function"
+        ? transformSelectedTextCase(ta.value, selection.start, selection.end, mode)
+        : null;
+      if (!result || !result.changed) return;
+      replaceSelection(result.replacement);
+    };
+    const copy = () => {
+      restoreSelection();
+      try { document.execCommand("copy"); } catch(_){}
+    };
+    const cut = () => {
+      restoreSelection();
+      try { document.execCommand("cut"); } catch(_){}
+    };
+    const paste = async () => {
+      restoreSelection();
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") throw new Error("clipboard unavailable");
+        const text = await navigator.clipboard.readText();
+        replaceSelection(text);
+      } catch(_){
+        if (typeof toast === "function") toast("붙여넣기는 Ctrl+V로 할 수 있어요.", 2200);
+      }
+    };
+    const dedupeSelectedLines = () => {
+      restoreSelection();
+      if (typeof options.dedupeSelectedLines !== "function") return;
+      const removed = options.dedupeSelectedLines();
+      if (typeof toast === "function"){
+        toast(removed ? (removed + "개의 중복 줄을 제거했어요.") : "선택한 줄에 중복이 없어요.", 1800);
+      }
+    };
+    const addItem = (label, action, disabled=false) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.disabled = !!disabled;
+      button.setAttribute("role", "menuitem");
+      button.addEventListener("pointerdown", (e) => e.preventDefault());
+      button.addEventListener("click", () => { close(); if (!button.disabled) action(); });
+      menu.appendChild(button);
+    };
+    const addSeparator = () => {
+      const separator = document.createElement("div");
+      separator.className = "text-context-sep";
+      separator.setAttribute("role", "separator");
+      menu.appendChild(separator);
+    };
+    const close = () => {
+      if (!menu.isConnected) return;
+      menu.remove();
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("keydown", onKeydown, true);
+      window.removeEventListener("resize", close);
+      if (activeTextContextMenu === close) activeTextContextMenu = null;
+    };
+    const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
+    const onKeydown = (e) => { if (e.key === "Escape") close(); };
+
+    addItem("복사", copy, !hasSelection);
+    addItem("잘라내기", cut, !hasSelection);
+    addItem("붙여넣기", paste);
+    addSeparator();
+    addItem("대문자로 변경", () => changeCase("upper"), !hasSelection);
+    addItem("소문자로 변경", () => changeCase("lower"), !hasSelection);
+    addItem("선택한 줄 중복 제거", dedupeSelectedLines, !hasSelection);
+    addSeparator();
+    addItem("모두 선택", () => { ta.focus({ preventScroll:true }); ta.select(); });
+
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, event.clientX)) + "px";
+    menu.style.top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, event.clientY)) + "px";
+    activeTextContextMenu = close;
+    setTimeout(() => {
+      if (!menu.isConnected) return;
+      document.addEventListener("pointerdown", onOutside, true);
+      document.addEventListener("keydown", onKeydown, true);
+      window.addEventListener("resize", close);
+    }, 0);
+  };
+  ta.addEventListener("contextmenu", onContextMenu);
+  return () => {
+    ta.removeEventListener("contextmenu", onContextMenu);
+    if (activeTextContextMenu) closeTextContextMenu();
+  };
+}
+
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
   const gutter = document.createElement("div"); gutter.className = "code-gutter";
@@ -1996,6 +2120,20 @@ function buildCodeEditor(text, prof, options={}){
     applyLineAction("dedupe");
     return Math.max(0, before.split("\n").length - ta.value.split("\n").length);
   };
+  const detachTextContextMenu = attachTextCaseContextMenu(ta, {
+    replaceSelection: (replacement, selection) => {
+      const start = Math.max(0, Math.min(selection.start, ta.value.length));
+      const end = Math.max(start, Math.min(selection.end, ta.value.length));
+      if (ta.value.slice(start, end) === replacement) return false;
+      hideCompletion(); exitCol(); clearTimeout(coalesceTimer);
+      rememberHistoryCaret(); commitNow();
+      ta.setRangeText(replacement, start, end, "select");
+      emitInput();
+      clearTimeout(coalesceTimer); commitNow(); sync();
+      return true;
+    },
+    dedupeSelectedLines
+  });
   refresh();
   return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
@@ -2006,6 +2144,7 @@ function buildCodeEditor(text, prof, options={}){
     dedupeSelectedLines,
     canFormat: () => !plainMode && prof === "python",
     destroy: () => {
+      detachTextContextMenu();
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);
       document.removeEventListener("selectionchange", syncSelection);
@@ -2195,6 +2334,19 @@ function buildLightTextEditor(text, options={}){
     return Math.max(0, before.split("\n").length - next.value.split("\n").length);
   };
 
+  const detachTextContextMenu = attachTextCaseContextMenu(ta, {
+    replaceSelection: (replacement, selection) => {
+      const start = Math.max(0, Math.min(selection.start, ta.value.length));
+      const end = Math.max(start, Math.min(selection.end, ta.value.length));
+      if (ta.value.slice(start, end) === replacement) return false;
+      ta.setRangeText(replacement, start, end, "select");
+      ta.dispatchEvent(new Event("input", { bubbles:true }));
+      syncScroll();
+      return true;
+    },
+    dedupeSelectedLines
+  });
+
   renderGutter();
   return {
     host, ta,
@@ -2203,6 +2355,7 @@ function buildLightTextEditor(text, options={}){
     getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
     focusLine, dedupeSelectedLines, openFind, closeFind, isFindOpen: () => findOpen,
     destroy: () => {
+      detachTextContextMenu();
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove();
     }
