@@ -445,6 +445,22 @@ test("import completion suggestions carry their import statement", () => {
   assert.ok(pythonImportCompletionCandidates("PdfR", "PdfR").some(item => item.importText === "from pypdf import PdfReader"));
   assert.ok(pythonImportCompletionCandidates("PdfW", "PdfW").some(item => item.importText === "from pypdf import PdfWriter"));
   assert.ok(pythonImportCompletionCandidates("PyMuPDFL", "PyMuPDFL").some(item => item.importText === "from langchain_community.document_loaders import PyMuPDFLoader"));
+  assert.ok(pythonImportCompletionCandidates("Chroma", "Chroma").some(item => item.importText === "from langchain_chroma import Chroma"));
+  assert.ok(pythonImportCompletionCandidates("create_agent", "create_agent").some(item => item.importText === "from langchain.agents import create_agent"));
+  assert.ok(pythonImportCompletionCandidates("init_chat_model", "init_chat_model").some(item => item.importText === "from langchain.chat_models import init_chat_model"));
+  assert.ok(pythonImportCompletionCandidates("InMemoryVectorStore", "InMemoryVectorStore").some(item => item.importText === "from langchain_core.vectorstores import InMemoryVectorStore"));
+  assert.ok(pythonImportCompletionCandidates("FAISS", "FAISS").some(item => item.importText === "from langchain_community.vectorstores import FAISS"));
+  for (const loader of ["DirectoryLoader", "TextLoader", "PyPDFLoader", "WebBaseLoader", "CSVLoader", "JSONLoader"]) {
+    assert.ok(pythonImportCompletionCandidates(loader, loader).some(item => item.importText === "from langchain_community.document_loaders import " + loader), loader);
+  }
+  assert.deepEqual(
+    pythonImportCompletionCandidates("Document", "Document").filter(item => item.name === "Document").map(item => item.importText),
+    ["from docx import Document", "from langchain_core.documents import Document"]
+  );
+  assert.deepEqual(
+    pythonImportCompletionCandidates("chain", "chain").filter(item => item.name === "chain").map(item => item.importText),
+    ["from itertools import chain", "from langchain_core.runnables import chain"]
+  );
   assert.deepEqual(pythonImportCompletionCandidates("External", "External", [{ name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool" }]), [{
     name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool"
   }]);

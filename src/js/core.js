@@ -860,6 +860,9 @@
     , ["tk", "module", "import tkinter as tk"]
     , ["pygame", "module", "import pygame"]
     // ===== LangChain (로컬 Python에 설치돼 있어야 실행됨 — 브라우저 Pyodide에는 미제공) =====
+    // langchain: 현재 권장되는 모델·에이전트 시작점
+    , ["init_chat_model", "function", "from langchain.chat_models import init_chat_model"]
+    , ["create_agent", "function", "from langchain.agents import create_agent"]
     // langchain_core.messages
     , ["HumanMessage", "class", "from langchain_core.messages import HumanMessage"]
     , ["AIMessage", "class", "from langchain_core.messages import AIMessage"]
@@ -899,6 +902,8 @@
     , ["Embeddings", "class", "from langchain_core.embeddings import Embeddings"]
     , ["BaseCallbackHandler", "class", "from langchain_core.callbacks import BaseCallbackHandler"]
     , ["OutputParserException", "class", "from langchain_core.exceptions import OutputParserException"]
+    // langchain_core.vectorstores
+    , ["InMemoryVectorStore", "class", "from langchain_core.vectorstores import InMemoryVectorStore"]
     // langchain_openai
     , ["ChatOpenAI", "class", "from langchain_openai import ChatOpenAI"]
     , ["OpenAI", "class", "from langchain_openai import OpenAI"]
@@ -909,6 +914,14 @@
     // langchain_text_splitters
     , ["RecursiveCharacterTextSplitter", "class", "from langchain_text_splitters import RecursiveCharacterTextSplitter"]
     , ["CharacterTextSplitter", "class", "from langchain_text_splitters import CharacterTextSplitter"]
+    // langchain_community: RAG에서 자주 쓰는 로더·로컬 벡터 저장소
+    , ["DirectoryLoader", "class", "from langchain_community.document_loaders import DirectoryLoader"]
+    , ["TextLoader", "class", "from langchain_community.document_loaders import TextLoader"]
+    , ["PyPDFLoader", "class", "from langchain_community.document_loaders import PyPDFLoader"]
+    , ["WebBaseLoader", "class", "from langchain_community.document_loaders import WebBaseLoader"]
+    , ["CSVLoader", "class", "from langchain_community.document_loaders import CSVLoader"]
+    , ["JSONLoader", "class", "from langchain_community.document_loaders import JSONLoader"]
+    , ["FAISS", "class", "from langchain_community.vectorstores import FAISS"]
     // langchain_classic (구 langchain 체인·에이전트·메모리)
     , ["LLMChain", "class", "from langchain_classic.chains import LLMChain"]
     , ["RetrievalQA", "class", "from langchain_classic.chains import RetrievalQA"]
@@ -922,6 +935,8 @@
     , ["ConversationBufferWindowMemory", "class", "from langchain_classic.memory import ConversationBufferWindowMemory"]
     , ["ConversationSummaryMemory", "class", "from langchain_classic.memory import ConversationSummaryMemory"]
     , ["hub", "module", "from langchain_classic import hub"]
+    // langchain_chroma
+    , ["Chroma", "class", "from langchain_chroma import Chroma"]
   ].map(([name, type, importText]) => ({ name, type, importText }));
 
   function pythonCompletionCandidates(source, prefix, keywords) {
@@ -1014,11 +1029,21 @@
     const extra = Array.isArray(extraCandidates) ? extraCandidates.filter((item) => item && typeof item === "object") : [];
     const preferredExtra = extra.filter((item) => Number(item.priority) < 0);
     const regularExtra = extra.filter((item) => !(Number(item.priority) < 0));
-    return [...preferredExtra, ...PYTHON_IMPORT_COMPLETIONS, ...regularExtra]
+    // 작업공간의 같은 이름은 설치 패키지 후보보다 우선한다. 단, 기본 목록 안에서
+    // import 경로가 다른 동명 후보는 아래 key 기준으로 함께 보여 준다.
+    const preferredNames = new Set(preferredExtra.map((item) => String(item.name || "")));
+    return [
+      ...preferredExtra,
+      ...PYTHON_IMPORT_COMPLETIONS.filter((item) => !preferredNames.has(String(item.name || ""))),
+      ...regularExtra.filter((item) => !preferredNames.has(String(item.name || "")))
+    ]
       .filter((item) => !query || item.name.startsWith(query))
       .filter((item) => {
-        if (seen.has(item.name)) return false;
-        seen.add(item.name); return true;
+        // 같은 이름이라도 import 경로가 다르면 선택 목록에 함께 남긴다.
+        // 예: docx.Document / langchain_core.documents.Document, itertools.chain / LCEL chain
+        const key = String(item.name || "") + "\n" + normalizePythonImport(item.importText);
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
       })
       .filter((item) => !declared.has(item.name))
       .filter((item) => !hasPythonImport(text, item.importText))

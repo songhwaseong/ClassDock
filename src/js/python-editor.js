@@ -676,13 +676,15 @@ function buildCodeEditor(text, prof, options={}){
     }
     const imports = wantImports && typeof pythonImportCompletionCandidates === "function"
       ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
-    const names = new Set();
+    const completionKeys = new Set();
     const items = [];
     const completionLimit = memberReceiver ? 240 : 12;
     for (const item of [...members, ...local, ...imports]) {
       const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
-      if (!name || names.has(name)) continue;
-      names.add(name); items.push(item);
+      const importText = item && typeof item === "object" ? String(item.importText || "") : "";
+      const key = importText ? (name + "\n" + importText) : name;
+      if (!name || completionKeys.has(key)) continue;
+      completionKeys.add(key); items.push(item);
       if (items.length >= completionLimit) break;
     }
     if (!items.length){ hideCompletion(); return false; }
@@ -734,11 +736,13 @@ function buildCodeEditor(text, prof, options={}){
         const fallbackMembers = memberReceiver && typeof pythonMemberCompletionCandidates === "function"
           ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
         const combined = [];
-        const combinedNames = new Set();
+        const combinedKeys = new Set();
         for (const item of [...fallbackMembers, ...pruned, ...imports]) {
           const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
-          if (!name || combinedNames.has(name)) continue;
-          combinedNames.add(name); combined.push(item);
+          const importText = item && typeof item === "object" ? String(item.importText || "") : "";
+          const key = importText ? (name + "\n" + importText) : name;
+          if (!name || combinedKeys.has(key)) continue;
+          combinedKeys.add(key); combined.push(item);
         }
         if (combined.length){
           completion.items = combined.slice(0, memberReceiver ? 240 : 12); completion.index = 0;
