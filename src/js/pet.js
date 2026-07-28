@@ -837,18 +837,19 @@ function petTypingPulse(){
 // ----- 유령: 중력을 무시하고 목표 지점을 향해 스르륵 떠다닌다. 가끔 반투명해진다 -----
 function petGhostUpdate(p){
   const vw = window.innerWidth, vh = window.innerHeight;
+  const pw = p.w || PET_W, ph = p.h || PET_H;
   p.x += p.vx; p.y += p.vy; p.vx *= 0.94; p.vy *= 0.94;       // 던져진 관성은 서서히 줄어든다
   const t = p.gTarget;
   if (!t || Math.hypot(t.x - p.x, t.y - p.y) < 20 || Math.random() < 0.003)
-    p.gTarget = { x: Math.random() * Math.max(1, vw - PET_W), y: Math.random() * Math.max(60, vh * 0.75) };
+    p.gTarget = { x: Math.random() * Math.max(1, vw - pw), y: Math.random() * Math.max(60, vh * 0.75) };
   const dx = p.gTarget.x - p.x, dy = p.gTarget.y - p.y, d = Math.hypot(dx, dy) || 1;
   const sp = 0.55 * p.speed;
   p.x += dx / d * sp;
   p.y += dy / d * sp + Math.sin(p.t * 0.05) * 0.4;
   if (Math.abs(dx) > 3) p.face = dx < 0 ? -1 : 1;
   p.rot = Math.sin(p.t * 0.04) * 5;
-  p.x = Math.max(0, Math.min(vw - PET_W, p.x));
-  p.y = Math.max(0, Math.min(vh - PET_H, p.y));
+  p.x = Math.max(0, Math.min(vw - pw, p.x));
+  p.y = Math.max(0, Math.min(vh - ph, p.y));
   if (p.fadeT > 0) p.fadeT--;
   else if (Math.random() < 0.0025) p.fadeT = 110;             // 가끔 반투명하게 숨는 시늉
   p.el.style.opacity = p.fadeT > 0 ? "0.4" : "0.92";
@@ -1134,7 +1135,10 @@ function petUpdate(p, w){
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
   if (petWorldIsQuiet(w)){ petQuietUpdate(p, w); return; }
   if (p.quiet) petWakeFromQuiet(p);
-  if (p.kind === "ghost") return petGhostUpdate(p);
+  if (p.kind === "ghost"){
+    if (p.state === "wink" && --p.timer <= 0) p.state = "float";
+    return petGhostUpdate(p);
+  }
   if (p.kind === "ufo") return petUfoUpdate(p, w.pets);
   if (p.kind === "spider") return petSpiderUpdate(p);
   if (p.kind === "balloon") return petBalloonUpdate(p);
@@ -1617,7 +1621,12 @@ function petBindPointer(p){
       return;
     }
     if (moved < 6){       // 거의 안 움직였으면 클릭: 한마디 + 반응
-      if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
+      if (p.winkOnClick){
+        p.state = "wink"; p.timer = 48; p.t = 0; p.pop = 8;
+        p.vx = 0; p.vy = 0; p.rot = 0; p.fadeT = 0;
+        petSay(p, petRandomSaying(p), false);
+      }
+      else if (p.kind === "fluffyCat" || p.kind === "calicoCat"){ petStartFluffyGroom(p); }   // 두 고양이는 앞발로 얼굴을 닦는다
       else if (p.kind === "human" && p.grav){ petCheer(p, true); }   // 아저씨는 점프 대신 만세!
       else if (p.kind === "mossGolem" && p.grav){
         petSay(p, petRandomSaying(p), false);
@@ -1802,7 +1811,7 @@ function petSpawn(i, total, bag){
     ? petSayingsFor(sayingsSpeciesId, defaultSayings) : defaultSayings;
   const p = {
     el, cv, bubble, bubbleText, beam, thread, bolt, orb, chute, ctx: cv.getContext("2d"),
-    kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette,
+    kind: species.kind, speciesId, sayingsSpeciesId, art: species.art, palette, winkOnClick: !!species.winkOnClick,
     baseArt: species.art, cheerArt: species.cheerArt || null, motionArt: species.motionArt || null,
     spriteSheet:species.spriteSheet || null, spriteImage,
     sayings, gold,

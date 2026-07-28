@@ -72,6 +72,19 @@ const PET_ART = {
     "...PP.PPP.PP...",
     "...P...P...P..."
   ],
+  blueBuddy: [
+    "....BBBBBBB....",
+    "...BBBBBBBBB...",
+    "..BBBBBBBBBBB..",
+    ".BBBBDDDDDBBBB.",
+    ".BBBBDWWDWWBBBB",
+    ".BBBBDDDDDDBBBB",
+    "..BBBBBBBBBBB..",
+    "...BBBBBBBBB...",
+    "....BBBWBBB....",
+    "....BB...BB....",
+    "...BB.....BB..."
+  ],
   slime: [
     "...............",
     "...............",
@@ -832,6 +845,18 @@ const PET_SPECIES = [
     sayings: ["우우~", "놀랐죠?", "심심해요", "훅-", "여기 있어요"]
   },
   {
+    kind: "ghost", art: PET_ART.blueBuddy, gridW: 32, gridH: 32, pixelScale: 3, width: 96, height: 96, winkOnClick: true,
+    spriteSheet: {
+      src: "src/assets/blue-buddy-sprites.png", cellW: 256, cellH: 256, cols: 4,
+      frameMs: { idle: 260, float: 260, wink: 150 },
+      frames: { idle: [0, 1], float: [0, 1], wink: [2, 3] }
+    },
+    palettes: [
+      { B: "#5487ef", D: "#1c274e", W: "#7df0ff" }
+    ],
+    sayings: ["Floating along.", "Beep!", "Hello!", "Wink!", "You can do it!"]
+  },
+  {
     kind: "bouncer", art: PET_ART.slime, palettes: [
       { G: "#6ee7a0", D: "#2a9d5c" },                              // 초록 슬라임
       { G: "#7cc4f2", D: "#3479b5" }                               // 파랑 슬라임
@@ -1194,6 +1219,7 @@ const PET_SPECIES = [
 
 // 도감 표시용 이름표 — PET_ART 의 키가 종족 id 가 된다(pet.js 가 art 로 역추적).
 const PET_NAMES = {
+  blueBuddy: "블루 버디",
   crab: "게", chick: "병아리", robot: "로봇", ghost: "유령", slime: "슬라임",
   ufo: "UFO", pencil: "연필", star: "별", cat: "고양이", fluffyCat: "복실고양이", calicoCat: "삼색고양이", dog: "강아지",
   spider: "거미", mole: "두더지", frog: "개구리", penguin: "펭귄", balloon: "풍선",
@@ -1207,6 +1233,7 @@ const PET_NAMES = {
 };
 
 const PET_NAMES_EN = {
+  blueBuddy: "Blue Buddy",
   crab: "Crab", chick: "Chick", robot: "Robot", ghost: "Ghost", slime: "Slime",
   ufo: "UFO", pencil: "Pencil", star: "Star", cat: "Cat", fluffyCat: "Fluffy cat", calicoCat: "Calico cat", dog: "Dog",
   spider: "Spider", mole: "Mole", frog: "Frog", penguin: "Penguin", balloon: "Balloon",

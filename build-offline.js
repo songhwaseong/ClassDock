@@ -88,6 +88,7 @@ for (const file of manifest.localScripts) {
 // pet.js 가 실제로 펫을 만들 때 한 번만 읽는다(기본값은 펫 꺼짐이라 대개 읽히지 않는다).
 const petSpriteRelatives = [
   "src/assets/pixel-teacher.png",
+  "src/assets/blue-buddy-sprites.png",
   "src/assets/fluffy-cat-sprites-v2.png",
   "src/assets/calico-cat-sprites.png",
   "src/assets/moss-golem-sprites.png"
