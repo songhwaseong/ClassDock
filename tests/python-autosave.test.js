@@ -17,9 +17,10 @@ const pythonAutosaveTarget = new Function(
 )();
 const writeStart = codeSource.indexOf("async function writePythonAutosave");
 const writeEnd = codeSource.indexOf("function pythonDraftKey", writeStart);
-const makeWritePythonAutosave = (saveViaServer) => new Function(
-  "saveViaServer", "Blob", codeSource.slice(writeStart, writeEnd) + "\nreturn writePythonAutosave;"
-)(saveViaServer, Blob);
+const makeWritePythonAutosave = (saveViaServer, saveViaFileHandle) => new Function(
+  "saveViaServer", "saveViaFileHandle",
+  codeSource.slice(writeStart, writeEnd) + "\nreturn writePythonAutosave;"
+)(saveViaServer, saveViaFileHandle);
 
 test("자동 저장 설정은 기본적으로 꺼져 있고 설정 창에서 저장된다", () => {
   // 예전 이름(pythonAutosave)은 Python 전용이었다. 지금은 텍스트·마크다운도 같은 설정을 쓴다.
@@ -88,7 +89,8 @@ test("Python 자동저장은 이름과 조용히 쓸 수 있는 저장 대상이
   assert.equal(pythonAutosaveTarget({ ...base, isScratch:true }, true), "");
   assert.equal(pythonAutosaveTarget({ ...base, isScratch:true, _named:true }, true), "server");
   assert.equal(pythonAutosaveTarget({ ...base, fsHandle:{ createWritable(){} } }, false), "file-handle");
-  assert.equal(pythonAutosaveTarget({ ...base, originalSaveMode:true }, true), "");
+  // Ctrl+S와 같은 공통 저장 경로가 원본 폴더에서 파일 핸들을 복원할 수 있다.
+  assert.equal(pythonAutosaveTarget({ ...base, originalSaveMode:true }, true), "file-handle");
   assert.equal(pythonAutosaveTarget({ ...base, originalSaveMode:true, fsHandle:{ createWritable(){} } }, false), "file-handle");
   assert.equal(pythonAutosaveTarget(base, true, true), "");
   assert.equal(pythonAutosaveTarget({ ...base, hasUnsavedEdits:false }, true), "");
@@ -104,8 +106,9 @@ test("Python 자동저장은 3초 지연하고 저장 중 새 입력을 다시 �
 
 test("파일 핸들 자동저장은 권한 요청창을 띄우지 않고 로컬 초안을 실패 시 유지한다", () => {
   const writeBlock = codeSource.slice(writeStart, writeEnd);
-  assert.match(writeBlock, /queryPermission/);
-  assert.doesNotMatch(writeBlock, /requestPermission/);
+  assert.match(writeBlock, /saveViaFileHandle/);
+  assert.match(writeBlock, /existingOnly:true/);
+  assert.match(writeBlock, /noPermissionPrompt:true/);
   // 실패 알림은 "무슨 일이 있었는지"에 더해 "다음에 뭘 할 수 있는지"까지 준다.
   assert.match(codeSource, /자동 저장에 실패했어요\. 편집 내용은 남아 있어요\./);
   assert.match(codeSource, /label:"지금 저장"/);
@@ -115,32 +118,28 @@ test("파일 핸들 자동저장은 권한 요청창을 띄우지 않고 로컬 
   assert.doesNotMatch(failureBlock, /clearPythonDraft\(draftKey\)/);
 });
 
-test("파일 핸들 자동저장은 이미 허용된 핸들만 실제로 쓴다", async () => {
-  let opened = 0;
-  const denied = {
-    hasUnsavedEdits:true,
-    fsHandle:{
-      createWritable(){ opened++; },
-      queryPermission:async () => "prompt",
-      requestPermission:async () => { throw new Error("자동저장이 권한을 요청하면 안 됨"); }
+test("파일 핸들 자동저장은 원본 저장·Ctrl+S와 같은 공통 저장 함수를 사용한다", async () => {
+  const calls = [];
+  const ownerDoc = { hasUnsavedEdits:true, workspacePath:"수업/a.py" };
+  const writePythonAutosave = makeWritePythonAutosave(
+    async () => null,
+    async (value, name, doc, options) => {
+      calls.push({ value, name, doc, options });
+      return "saved";
     }
-  };
-  const writePythonAutosave = makeWritePythonAutosave(async () => null);
-  assert.deepEqual(await writePythonAutosave("print(1)", denied, "a.py", "file-handle"), { ok:false, path:"" });
-  assert.equal(opened, 0);
+  );
+  assert.deepEqual(
+    await writePythonAutosave("print(2)", ownerDoc, "a.py", "file-handle"),
+    { ok:true, path:"수업/a.py" }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].doc, ownerDoc);
+  assert.deepEqual(calls[0].options, {
+    existingOnly:true,
+    noPermissionPrompt:true,
+    mime:"text/x-python;charset=utf-8"
+  });
 
-  let written = "";
-  const allowed = {
-    hasUnsavedEdits:true,
-    workspacePath:"수업/a.py",
-    fsHandle:{
-      queryPermission:async () => "granted",
-      createWritable:async () => ({
-        write:async blob => { written = await blob.text(); },
-        close:async () => {}
-      })
-    }
-  };
-  assert.deepEqual(await writePythonAutosave("print(2)", allowed, "a.py", "file-handle"), { ok:true, path:"수업/a.py" });
-  assert.equal(written, "print(2)");
+  const denied = makeWritePythonAutosave(async () => null, async () => "denied");
+  assert.deepEqual(await denied("print(1)", ownerDoc, "a.py", "file-handle"), { ok:false, path:"" });
 });

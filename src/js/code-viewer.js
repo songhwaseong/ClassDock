@@ -2709,7 +2709,9 @@ function pythonAutosaveTarget(ownerDoc, serverAvailable, fromZip=false){
   if (ownerDoc.isScratch && !ownerDoc._named) return "";
   const handle = ownerDoc.fsHandle;
   const canWriteHandle = !!(handle && typeof handle.createWritable === "function");
-  if (ownerDoc.originalSaveMode) return canWriteHandle ? "file-handle" : "";
+  // 원본 저장 모드에서는 현재 파일 핸들이 잠시 비어 있어도 공통 저장 경로가
+  // 폴더 루트에서 해당 핸들을 복원할 수 있다. 자동저장도 Ctrl+S와 같은 길을 탄다.
+  if (ownerDoc.originalSaveMode) return "file-handle";
   if (canWriteHandle) return "file-handle";
   return serverAvailable && (ownerDoc.workspacePath || ownerDoc.name) ? "server" : "";
 }
@@ -2719,21 +2721,17 @@ async function writePythonAutosave(value, ownerDoc, name, target){
     return { ok:!!path, path:path || "" };
   }
   if (target !== "file-handle") return { ok:false, path:"" };
-  const handle = ownerDoc && ownerDoc.fsHandle;
-  if (!handle || typeof handle.createWritable !== "function") return { ok:false, path:"" };
-  const permission = typeof handle.queryPermission === "function"
-    ? await handle.queryPermission({ mode:"readwrite" }) : "granted";
-  // 자동저장 중에는 브라우저 권한창을 띄우지 않는다. Ctrl+S로 권한을 다시 받은 뒤 다음 편집부터 재시도한다.
-  if (permission !== "granted") return { ok:false, path:"" };
-  const writable = await handle.createWritable();
-  try {
-    await writable.write(new Blob([value], { type:"text/x-python;charset=utf-8" }));
-    await writable.close();
-  } catch(error){
-    try { if (typeof writable.abort === "function") await writable.abort(); } catch(_){}
-    throw error;
-  }
-  return { ok:true, path:ownerDoc.workspacePath || ownerDoc.name || name || "" };
+  // 원본 저장 버튼과 Ctrl+S가 사용하는 공통 저장 함수로 기록한다.
+  // 자동저장이므로 새 위치나 권한을 묻는 창은 띄우지 않는다.
+  const wrote = await saveViaFileHandle(value, name, ownerDoc, {
+    existingOnly:true,
+    noPermissionPrompt:true,
+    mime:"text/x-python;charset=utf-8"
+  });
+  return {
+    ok:wrote === "saved",
+    path:wrote === "saved" ? (ownerDoc.workspacePath || ownerDoc.name || name || "") : ""
+  };
 }
 function pythonDraftKey(file, ownerDoc, runCtx){
   // 새로 만든(아직 이름을 정해 저장하지 않은) 스크래치는 기본 이름("새 코드.py")과 스타터 내용이
