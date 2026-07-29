@@ -419,8 +419,8 @@ async function parseWorkspacePayload(buffer){
   return { rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths };
 }
 
-async function restoreLastWorkspace(){
-  if (!appSettings.autoRestore) return;
+async function restoreLastWorkspace(force=false){
+  if (!appSettings.autoRestore && !force) return;
   const useServer = await workspaceBackendAvailable();
   if (!useServer && !wsIdbSupported()) return;
   const savedTabs = loadSavedTabState();    // 파일을 열기 전에 저장된 탭 구성을 먼저 읽어둔다
@@ -554,4 +554,3 @@ function forgetWorkspacePaths(paths, clearAll=false){
   clearTimeout(workspaceRemoveTimer);
   workspaceRemoveTimer = setTimeout(() => { flushWorkspaceRemovals(); }, 80);
 }
-

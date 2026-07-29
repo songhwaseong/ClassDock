@@ -741,6 +741,8 @@ function wireImageMemo(){
     if (added && options.open) setOpen(true, false);   // 보낸 게 보이도록 패널 열기(포커스는 옮기지 않음)
     return added;
   };
+  // EXE에서 자동저장을 껐거나 아직 저장 대기 중인 이미지도 전체 백업에 포함한다.
+  window.flushImageMemoBackup = () => persistBrowserDrafts();
 
   const restoreBrowserDrafts = async () => {
     let draft = null;
@@ -792,6 +794,9 @@ function wireImageMemo(){
         await restoreBrowserDrafts();
         return;
       }
+      // 전체 백업으로 가져온 미저장 이미지와 EXE에서 자동저장을 끈 채 남긴 임시본도
+      // 실제 저장 폴더 이미지와 함께 복구한다.
+      await restoreBrowserDrafts();
       const response = await fetch("/image-memo-list", { headers:IMAGE_MEMO_HEADERS, cache:"no-store" });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();

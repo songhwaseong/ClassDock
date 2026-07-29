@@ -59,6 +59,7 @@
     "scratchpad.js",
     "mnote.js",
     "image-memo.js",
+    "backup.js",
     "app.js",
     "command-palette.js"
   ],
@@ -138,6 +139,7 @@
         "scratchpad.js",
         "mnote.js",
         "image-memo.js",
+        "backup.js",
         "app.js",
         "command-palette.js"
       ]
@@ -231,10 +233,19 @@
       "history.js",
       "spellcheck.js"
     ],
+    "backup.js": [
+      "lazy.js",
+      "workspace-store.js",
+      "pdf-recovery.js",
+      "notebook-model.js",
+      "scratchpad.js",
+      "image-memo.js"
+    ],
     "app.js": [
       "file-loaders.js",
       "notebook-cells.js",
-      "whiteboard.js"
+      "whiteboard.js",
+      "backup.js"
     ],
     "command-palette.js": [
       "app.js"
@@ -257,6 +268,7 @@
         "pptx-viewer.js",
         "notebook-pdf-export.js",
         "image-memo.js",
+        "backup.js",
         "python-run-context.js"
       ]
     },

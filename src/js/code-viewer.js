@@ -2602,13 +2602,30 @@ async function renderCode(file, host, ext, profile, runCtx){
   };
   editor.ta.addEventListener("input", refreshEditState);
   editor.ta.addEventListener("focus", () => { if (ownerDoc) window.__lastCodeLinkDocId = ownerDoc.id; });
+  const flushBackupRecovery = async () => {
+    persistDraft();
+    if (!ownerDoc || !ownerDoc.hasUnsavedEdits || typeof rememberWorkspace !== "function") return true;
+    const value = editor.getValue();
+    const name = ownerDoc.name || (file && file.name) || "새 코드.py";
+    const path = String(ownerDoc.workspacePath || ownerDoc.relPath || name)
+      .replace(/\\/g, "/").replace(/^\/+/, "");
+    const updated = new File([value], name, {
+      type:(file && file.type) || (/\.py$/i.test(name) ? "text/x-python" : "text/plain")
+    });
+    if (path && path !== name)
+      try { Object.defineProperty(updated, "webkitRelativePath", { value:path, configurable:true }); } catch(_){}
+    ownerDoc.savedInWorkspace = await rememberWorkspace([updated], false, { silent:true });
+    return !!ownerDoc.savedInWorkspace;
+  };
   if (ownerDoc){                                   // 저장하지 않고 닫은 스크래치 초안은 고유 키라 다시 안 쓰이니 정리(localStorage 찌꺼기 방지)
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
     ownerDoc.schedulePythonAutosave = schedulePythonAutosave;
+    ownerDoc.flushBackupRecovery = flushBackupRecovery;
     ownerDoc.cleanupFns.push(() => {
       pyAutosaveDisposed = true;
       clearTimeout(pyAutosaveTimer); pyAutosaveTimer = 0;
       if (ownerDoc.schedulePythonAutosave === schedulePythonAutosave) delete ownerDoc.schedulePythonAutosave;
+      if (ownerDoc.flushBackupRecovery === flushBackupRecovery) delete ownerDoc.flushBackupRecovery;
       if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey);
     });
   }

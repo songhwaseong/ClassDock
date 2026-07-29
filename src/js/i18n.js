@@ -137,6 +137,8 @@
     "리플레이 열기(.lesson)": "Open replay (.lesson)",
     "파이썬 예제 갤러리": "Python examples gallery",
     "현재 파일 새로고침": "Refresh current file",
+    "전체 백업 ZIP 내보내기": "Export full backup ZIP",
+    "백업 ZIP에서 복원": "Restore from backup ZIP",
     "최근 작업공간 지우기": "Clear recent workspace",
     "드래그: 너비 조절 · 더블클릭: 파일명에 자동 맞춤": "Drag to resize · double-click to fit filenames",
 

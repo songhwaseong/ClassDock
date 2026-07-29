@@ -1160,6 +1160,7 @@ function destroyNotebook(ownerDoc){
     ownerDoc._nbFontHost = null;
   }
   if (ownerDoc) ownerDoc._nbFind = null;
+  if (ownerDoc) delete ownerDoc.flushBackupRecovery;
   if (!ownerDoc || !Array.isArray(ownerDoc._nbCtrls)) return;
   if (ownerDoc._nbActiveTask && typeof ownerDoc._nbActiveTask.cancel === "function"){
     try { ownerDoc._nbActiveTask.cancel(); } catch(_){}

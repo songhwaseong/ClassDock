@@ -441,9 +441,21 @@ function setupImageEditor(file, host, img, ownerDoc=null){
       } catch(error){ console.warn("image recovery snapshot skipped:", error); }
     }, 1200);
   };
+  const flushImageBackup = async () => {
+    clearTimeout(imageRecoveryTimer);
+    imageRecoveryTimer = 0;
+    if (!ownerDoc || !ownerDoc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return true;
+    const flattened = renderForDisplay(state);
+    const blob = await new Promise(resolve => flattened.toBlob(resolve, "image/png"));
+    return blob ? saveDocumentRecoverySnapshot(ownerDoc, blob, "image/png") : false;
+  };
   if (ownerDoc){
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
-    ownerDoc.cleanupFns.push(() => clearTimeout(imageRecoveryTimer));
+    ownerDoc.flushBackupRecovery = flushImageBackup;
+    ownerDoc.cleanupFns.push(() => {
+      clearTimeout(imageRecoveryTimer);
+      if (ownerDoc.flushBackupRecovery === flushImageBackup) delete ownerDoc.flushBackupRecovery;
+    });
   }
 
   const zoomLabel = document.createElement("span"); zoomLabel.className = "img-zoom-label";

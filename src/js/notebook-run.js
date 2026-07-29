@@ -11,6 +11,7 @@ function renderNotebookView(model, host, ownerDoc){
     if (ownerDoc._nbCtrls) destroyNotebook(ownerDoc);
     ownerDoc._nbCtrls = [];
     if (ownerDoc._nbKernelMode !== "local") ownerDoc._nbKernelMode = "browser";
+    ownerDoc.flushBackupRecovery = () => notebookSaveRecovery(ownerDoc);
   }
   const ctrls = ownerDoc ? ownerDoc._nbCtrls : [];
 

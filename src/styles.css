@@ -51,7 +51,7 @@
   /* ---- 상단 툴바 ---- */
   header{background:var(--header);color:#fff;display:grid;grid-template-columns:auto minmax(80px,1fr) auto;
     align-items:center;gap:16px;
-    padding:10px 16px;flex:0 0 auto;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:20}
+    padding:10px 16px;flex:0 0 auto;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:30}
   .header-left{display:flex;align-items:center;gap:12px;min-width:0}
   .brand{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px;white-space:nowrap}
   .file-stats-wrap{position:relative;display:flex;flex:1 1 auto;width:100%;min-width:0}

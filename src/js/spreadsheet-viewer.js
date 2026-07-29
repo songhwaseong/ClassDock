@@ -4707,6 +4707,21 @@ async function renderXlsx(file, host, doc){
     });
     return await w.xlsx.writeBuffer();
   };
+  const flushSpreadsheetBackup = async () => {
+    clearTimeout(spreadsheetRecoveryTimer);
+    spreadsheetRecoveryTimer = 0;
+    if (!anyDirty || !doc || !doc.hasUnsavedEdits) return true;
+    const out = await exportExBytes();
+    if (!out || typeof saveDocumentRecoverySnapshot !== "function") return false;
+    return saveDocumentRecoverySnapshot(doc, out,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  };
+  if (doc){
+    doc.flushBackupRecovery = flushSpreadsheetBackup;
+    doc.cleanupFns.push(() => {
+      if (doc.flushBackupRecovery === flushSpreadsheetBackup) delete doc.flushBackupRecovery;
+    });
+  }
 
   // 원본 경로에 덮어쓰기(exe 로컬 서버가 있을 때). 성공 시 저장된 경로, 실패·미지원이면 null.
   const saveBytesInPlace = async (out) => {

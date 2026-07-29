@@ -370,7 +370,9 @@ function wire(){
   })();
   // 자주 쓰지 않는 작업은 더보기 메뉴에 두어 파일 목록의 세로 공간을 확보한다.
   (() => {
-    const more = byId("sbMore"), menu = byId("sbMoreMenu"), refresh = byId("sbRefreshActive"), clear = byId("sbClearWorkspace");
+    const more = byId("sbMore"), menu = byId("sbMoreMenu"), refresh = byId("sbRefreshActive"),
+      backupExport = byId("sbBackupExport"), backupRestore = byId("sbBackupRestore"),
+      backupInput = byId("backupRestoreInput"), clear = byId("sbClearWorkspace");
     const setOpen = (open) => {
       menu.hidden = !open;
       more.setAttribute("aria-expanded", String(open));
@@ -390,6 +392,21 @@ function wire(){
       if (!activeId){ toast("새로고침할 파일을 먼저 선택해 주세요.", 2200); return; }
       refreshDocFromSource(activeId);
     });
+    if (backupExport) backupExport.addEventListener("click", () => {
+      setOpen(false);
+      if (typeof MNBackup !== "undefined") MNBackup.exportBackup();
+    });
+    if (backupRestore && backupInput){
+      backupRestore.addEventListener("click", () => {
+        setOpen(false);
+        backupInput.value = "";
+        backupInput.click();
+      });
+      backupInput.addEventListener("change", () => {
+        const file = backupInput.files && backupInput.files[0];
+        if (file && typeof MNBackup !== "undefined") MNBackup.restoreBackup(file);
+      });
+    }
     clear.addEventListener("click", () => { setOpen(false); clearRememberedWorkspace(); });
   })();
   (() => {                                   // 사이드바 '새로 만들기'(+) 드롭다운
@@ -1426,4 +1443,9 @@ function setupSingleTab(){
   claim();                                          // 로드 시 takeover
 }
 wire();
-restoreLastWorkspace();
+{
+  const importedBackup = typeof MNBackup !== "undefined" && MNBackup.hasPendingRestore();
+  Promise.resolve(restoreLastWorkspace(importedBackup)).finally(() => {
+    if (importedBackup) MNBackup.finishPendingRestore();
+  });
+}

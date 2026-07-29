@@ -1625,6 +1625,8 @@ function wireScratchpad(){
     setOpen(true, false);
     return addImageBlobs(blobs, options);
   };
+  // 전체 백업 버튼은 0.35초 자동저장 대기 중인 마지막 입력까지 즉시 확정한다.
+  window.flushScratchpadBackup = () => persist(false);
   // 텍스트를 글 블록으로 추가(이미지 OCR 결과 등 외부 모듈용) — 메모장을 열고 새 블록에 넣는다.
   window.appendTextToScratchpad = (text) => {
     setOpen(true, false);

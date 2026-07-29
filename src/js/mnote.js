@@ -414,8 +414,19 @@ function mountMnoteEditor(doc){
       saveDocumentRecoverySnapshot(doc, new TextEncoder().encode(text), "application/json").catch(() => {});
     }, MNOTE_RECOVERY_DELAY);
   };
+  const flushMnoteBackup = () => {
+    clearTimeout(mnoteRecoveryTimer);
+    mnoteRecoveryTimer = 0;
+    if (!doc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return true;
+    return saveDocumentRecoverySnapshot(doc, new TextEncoder().encode(mnoteSerialize(mnote)), "application/json");
+  };
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(mnoteRecoveryTimer); mnoteRecoveryTimer = 0; });
+  doc.flushBackupRecovery = flushMnoteBackup;
+  doc.cleanupFns.push(() => {
+    clearTimeout(mnoteRecoveryTimer);
+    mnoteRecoveryTimer = 0;
+    if (doc.flushBackupRecovery === flushMnoteBackup) delete doc.flushBackupRecovery;
+  });
 
   function touch(immediate){
     mnote.updatedAt = Date.now();

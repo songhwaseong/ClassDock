@@ -68,8 +68,8 @@ function serializePdfElements(doc){
   }).filter(Boolean);
 }
 
-async function savePdfRecovery(doc){
-  if (!appSettings.pdfRecovery) return;
+async function savePdfRecovery(doc, options={}){
+  if (!appSettings.pdfRecovery && !options.force) return;
   if (!doc || doc.closed || !doc.recoveryKey || !doc.pages.length) return;
   const elements = serializePdfElements(doc);
   const outline = typeof serializePdfOutline === "function" ? serializePdfOutline(doc.pdfOutline) : [];
@@ -82,7 +82,11 @@ async function savePdfRecovery(doc){
     }));
     doc.recoveryDirty = false;
     updateDocumentStatus(doc);
-  } catch (e) { console.warn("PDF 편집 복구 저장 실패:", e); }
+    return true;
+  } catch (e) {
+    console.warn("PDF 편집 복구 저장 실패:", e);
+    return false;
+  }
 }
 
 function schedulePdfRecovery(doc=state){
