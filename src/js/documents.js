@@ -2338,6 +2338,11 @@ function openSidebarGroupMenu(node, x, y){
   add("+Nb  새 노트북", () => {
     if (typeof newNotebookScratchInFolder === "function") newNotebookScratchInFolder(node.newPythonContext);
   });
+  if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
+    add("＋ 새 폴더", () => {
+      if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
+    });
+  }
   if (node.folderRefreshRootId && typeof imageGalleryFolderImageCount === "function" && typeof openFolderImageGallery === "function"){
     const directCount = imageGalleryFolderImageCount(node, false);
     const nestedCount = imageGalleryFolderImageCount(node, true);
@@ -3153,7 +3158,11 @@ function renderSidebar(){
     if (doc) nm.title += " · " + humanSize(doc.size || 0);
     if (doc && doc.textEncoding) nm.title += " · 인코딩: " + doc.textEncoding.label +
       (doc.textEncoding.sampled ? " (앞부분 검사)" : "");
-    if (node.type === "group" && node.newPythonContext) nm.title += " · 우클릭: 새 Python 코드·노트북" + (node.folderRefreshRootId ? " · 동기화" : "");
+    if (node.type === "group" && node.newPythonContext){
+      nm.title += " · 우클릭: 새 Python 코드·노트북" +
+        ((typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)) ? "·폴더" : "") +
+        (node.folderRefreshRootId ? " · 동기화" : "");
+    }
     const label = document.createElement("span"); label.className = "sb-label"; label.appendChild(nm);
     if (node.type === "group" && node.zipLimits === true){
       label.classList.add("has-zip-info");

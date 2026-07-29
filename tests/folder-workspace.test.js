@@ -129,6 +129,18 @@ test("원본 폴더에서 만든 새 Python 파일은 원본 저장 모드와 �
   assert.match(codeSource, /!!options\.existingOnly && !createInOriginalFolder/);
 });
 
+test("쓰기 가능한 실제 폴더의 우클릭 메뉴에서 디스크에 빈 폴더를 만들고 트리를 갱신한다", () => {
+  assert.match(source, /function canCreateFolderOnDisk\(node\)/);
+  assert.match(source, /root\.folderHandle\.getDirectoryHandle/);
+  assert.match(source, /add\("＋ 새 폴더"/);
+  assert.match(source, /requestPermission\(\{ mode:"readwrite" \}\)/);
+  assert.match(source, /directoryEntryWithName\(targetHandle, name\)/);
+  assert.match(source, /targetHandle\.getDirectoryHandle\(name, \{ create:true \}\)/);
+  assert.match(source, /await requestFolderRefresh\(root\.nodeId\)/);
+  assert.match(source, /sidebarCursorKey = created\.nodeId/);
+  assert.match(source, /ZIP\/TAR 묶음에는 핸들이 없으므로 메뉴가 나타나지 않는다/);
+});
+
 test("사용 설명서는 브라우저별 폴더 드래그 저장 차이를 필수 주의사항으로 안내한다", () => {
   for (const guide of [guideMarkdown, guideHtml]){
     assert.match(guide, /꼭 알아두세요/);

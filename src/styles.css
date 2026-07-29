@@ -243,7 +243,7 @@
   }
 
   /* ---- 헤더 아래 탭바 (선택한 파일 작업세트) — 색조(--ic)는 [data-cat] 팔레트 공유 ---- */
-  #tabBar{position:relative;z-index:18;flex:0 0 auto;display:flex;align-items:center;gap:4px;background:var(--sidebar);
+  #tabBar{position:relative;z-index:21;flex:0 0 auto;display:flex;align-items:center;gap:4px;background:var(--sidebar);
     padding:6px 8px;overflow:visible;border-bottom:1px solid rgba(255,255,255,.06)}
   #tabBar[hidden]{display:none}
   .tab{display:flex;align-items:center;gap:7px;flex:0 0 auto;min-width:0;max-width:210px;

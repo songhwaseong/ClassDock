@@ -1113,6 +1113,127 @@ function groupStablePath(node){
   }
   return parts.filter(Boolean).join("/");
 }
+
+function physicalFolderRootForNode(node){
+  if (!node || node.type !== "group" || !node.folderRefreshRootId || !node.newPythonContext) return null;
+  return navNodes.find(item => item.nodeId === node.folderRefreshRootId && item.type === "group"
+    && item.folderRefreshRootId === item.nodeId) || null;
+}
+
+// 실제 디렉터리 핸들이 있는 일반 폴더에서만 '새 폴더' 메뉴를 노출한다.
+// webkitdirectory 폴백(읽기 전용)과 ZIP/TAR 묶음에는 핸들이 없으므로 메뉴가 나타나지 않는다.
+function canCreateFolderOnDisk(node){
+  const root = physicalFolderRootForNode(node);
+  return !!(root && root.folderHandle && root.folderHandle.kind === "directory"
+    && typeof root.folderHandle.getDirectoryHandle === "function");
+}
+
+function folderNameValidationMessage(value){
+  const name = String(value == null ? "" : value).trim();
+  if (!name) return "폴더 이름을 입력해 주세요.";
+  if (name === "." || name === "..") return "'.' 또는 '..'은 폴더 이름으로 사용할 수 없어요.";
+  if (name.charAt(0) === ".") return "점(.)으로 시작하는 숨김 폴더는 사이드바에서 지원하지 않아요.";
+  if (/[\u0000-\u001f\\/:*?"<>|]/.test(name)) return "폴더 이름에 \\\\ / : * ? \" < > | 문자를 사용할 수 없어요.";
+  if (/[. ]$/.test(name)) return "폴더 이름은 점(.)이나 공백으로 끝날 수 없어요.";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) return "Windows에서 사용할 수 없는 예약된 폴더 이름이에요.";
+  if (name.length > 255) return "폴더 이름은 255자 이내로 입력해 주세요.";
+  return "";
+}
+
+async function requestDirectoryWritePermission(handle){
+  if (!handle || handle.kind !== "directory") return false;
+  try {
+    let permission = typeof handle.queryPermission === "function"
+      ? await handle.queryPermission({ mode:"readwrite" }) : "granted";
+    if (permission !== "granted" && typeof handle.requestPermission === "function")
+      permission = await handle.requestPermission({ mode:"readwrite" });
+    return permission === "granted";
+  } catch(_){
+    return false;
+  }
+}
+
+async function directoryHandleForGroup(node, root){
+  if (!node || !root || !root.folderHandle) return null;
+  const rootPath = normalizedRunPath(root.name || "");
+  const targetPath = groupStablePath(node);
+  const parts = targetPath.split("/").filter(Boolean);
+  if (parts.length && parts[0].toLocaleLowerCase() === rootPath.toLocaleLowerCase()) parts.shift();
+  else if (node.nodeId !== root.nodeId) return null;
+  let handle = root.folderHandle;
+  for (const part of parts) handle = await handle.getDirectoryHandle(part);
+  return handle;
+}
+
+async function directoryEntryWithName(handle, name){
+  if (!handle || typeof handle.values !== "function") return null;
+  const key = name.toLocaleLowerCase();
+  for await (const entry of handle.values()){
+    if (entry && String(entry.name || "").toLocaleLowerCase() === key) return entry;
+  }
+  return null;
+}
+
+async function createFolderOnDisk(node){
+  if (!canCreateFolderOnDisk(node) || typeof askText !== "function"){
+    toast("이 폴더에는 실제 폴더를 만들 수 없어요.", 3200);
+    return false;
+  }
+  const translate = text => (typeof window.t === "function" ? window.t(text) : text);
+  const entered = await askText({
+    title: translate("새 폴더"),
+    message: translate("우클릭한 폴더 안에 실제 폴더를 만듭니다."),
+    value: translate("새 폴더"),
+    okText: translate("만들기")
+  });
+  if (entered === null) return false;
+  const name = String(entered).trim();
+  const invalid = folderNameValidationMessage(name);
+  if (invalid){ toast(invalid, 3600, { type:"error" }); return false; }
+
+  const root = physicalFolderRootForNode(node);
+  if (!root || !(await requestDirectoryWritePermission(root.folderHandle))){
+    toast("실제 폴더를 만들려면 원본 폴더 쓰기 권한이 필요해요.", 4200, { type:"error" });
+    return false;
+  }
+
+  let targetHandle;
+  try {
+    targetHandle = await directoryHandleForGroup(node, root);
+    if (!targetHandle) throw new Error("folder-target-unavailable");
+    const existing = await directoryEntryWithName(targetHandle, name);
+    if (existing){
+      toast(existing.kind === "directory"
+        ? "같은 이름의 폴더가 이미 있어요."
+        : "같은 이름의 파일이 이미 있어요.", 3400, { type:"error" });
+      return false;
+    }
+    await targetHandle.getDirectoryHandle(name, { create:true });
+  } catch(error){
+    console.warn("physical folder create failed:", error);
+    if (error && error.name === "NotAllowedError")
+      toast("원본 폴더에 새 폴더를 만들 권한이 없어요.", 3600, { type:"error" });
+    else
+      toast("실제 폴더를 만들지 못했어요.", 3600, { type:"error" });
+    return false;
+  }
+
+  // 빈 폴더도 수집하는 기존 동기화 경로를 사용해 트리·자동 복원 정보를 함께 갱신한다.
+  node.expanded = true;
+  await requestFolderRefresh(root.nodeId);
+  const createdPath = normalizedRunPath(groupStablePath(node) + "/" + name);
+  const created = navNodes.find(item => item.type === "group" && groupStablePath(item) === createdPath);
+  if (created){
+    sidebarCursorKey = created.nodeId;
+    renderSidebar();
+    const list = byId("fileList");
+    const row = list && [...list.querySelectorAll("[data-node-id]")].find(item => item.dataset.nodeId === created.nodeId);
+    if (row && typeof focusSidebarItem === "function") focusSidebarItem(row, { focus:true });
+  }
+  toast("'" + name + "' 폴더를 디스크에 만들었어요.", 3200, { type:"success" });
+  return true;
+}
+
 async function requestFolderRefresh(rootId){
   const root = navNodes.find(node => node.nodeId === rootId && node.type === "group" && node.folderRefreshRootId === node.nodeId);
   if (!root) return;

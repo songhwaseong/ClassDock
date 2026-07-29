@@ -21,3 +21,9 @@ test("수정된 탭의 닫기 버튼은 키보드와 터치 환경에서도 접�
   assert.match(styles, /@media \(hover:none\)[\s\S]*\.tab\.dirty \.tab-x\{[^}]*opacity:1;pointer-events:auto/);
   assert.doesNotMatch(styles, /\.tab\.dirty \.tab-x\{display:none\}/);
 });
+
+test("숨겨진 탭 목록은 본문보다 높은 레이어에서 아래로 펼쳐진다", () => {
+  assert.match(styles, /#tabBar\{position:relative;z-index:21/);
+  assert.match(styles, /main\{position:relative;z-index:19/);
+  assert.match(styles, /\.tab-overflow-menu\{position:absolute;right:0;top:calc\(100% \+ 7px\)/);
+});
