@@ -330,12 +330,19 @@ function buildCodeEditor(text, prof, options={}){
   const clearJump = () => { jumpLine = 0; jumpBand.hidden = true; clearTimeout(jumpTimer); };
   // ===== 현재(커서) 줄 강조: 캐럿이 있는 줄에 은은한 배경 띠. 스크롤·선택을 따라 움직인다 =====
   const positionCaretLine = () => {
+    // 범위를 선택하면 줄 전체 띠가 실제 선택 배경처럼 보인다. 선택 중에는 숨겨
+    // textarea의 네이티브 선택 영역만 보이게 한다.
+    if (ta.selectionStart !== ta.selectionEnd){
+      caretLine.hidden = true;
+      return;
+    }
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
     const caret = ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd;
     let lineNo = 0; for (let i = 0; i < caret; i++) if (ta.value.charCodeAt(i) === 10) lineNo++;
     caretLine.style.top = (pt + lineNo * lh - ta.scrollTop) + "px";
     caretLine.style.height = lh + "px";
+    caretLine.hidden = false;
   };
   // 코드로 값을 바꾸면(엔터 자동들여쓰기·Tab·줄 이동 등) 브라우저가 캐럿으로 자동 스크롤하지 않는다 →
   // 캐럿 줄이 화면 밖이면 최소한으로 스크롤해 따라가게 한다(맨 아래에서 엔터 연타 시 화면이 같이 내려감).
