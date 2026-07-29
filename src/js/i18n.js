@@ -36,6 +36,23 @@
     "만능파일교실": "Manneung File Classroom",
     "원본 저장": "Original file",
     "사본 저장": "Saved copy",
+    "저장하면 열어 둔 원본 파일을 바로 바꿉니다.": "Saving directly updates the original file you opened.",
+    "원본은 그대로 두고 설정된 자동 저장 폴더에 사본을 저장합니다.":
+      "The original stays untouched; a copy is saved in the configured auto-save folder.",
+    "원본은 그대로 두고 다운로드 사본을 저장합니다.":
+      "The original stays untouched; a downloaded copy is saved.",
+    "파일을 열어 바로 시작하세요": "Open files to get started",
+    "PDF·문서·이미지·코드 등 여러 파일을 한 작업 공간에서 다룰 수 있어요.":
+      "Work with PDFs, documents, images, code, and more in one workspace.",
+    "한 개 또는 여러 파일 선택": "Choose one or several files",
+    "폴더 전체를 원본 저장으로 열기": "Open a whole folder with original-file saving",
+    "또는 파일·폴더를 이 화면에 끌어다 놓으세요": "Or drag files or folders onto this screen",
+    "새 작업 시작": "Start a new task",
+    "빈 코드에서 작성·실행": "Write and run from a blank file",
+    "과제 제출 검수": "Review submissions",
+    ".taskdone 일괄 확인": "Review .taskdone files in bulk",
+    "＋ 다른 문서 만들기 ▾": "＋ Create another document ▾",
+    "✨ Python 예제로 시작": "✨ Start with a Python example",
     "저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)":
       "Saving overwrites this file's original directly (in the folder or file you opened).",
     "원본은 그대로 두고 '설정 → 일반 → 자동 저장 폴더'에 사본으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요.":
@@ -1302,11 +1319,11 @@
     "dz.formats": "PDF · Word · Excel · PowerPoint · images · folders · ZIP &nbsp;|&nbsp; or click to choose",
     "dz.feature": "✦ Run Python & auto-grade · Jupyter notebooks · whiteboard · PDF signing & ink &mdash; all right here",
     "dz.cmdk": "Search and run anything with <kbd>Ctrl</kbd><kbd>K</kbd> — signing, ink, whiteboard, examples",
-    "dz.note": "Everything runs inside this browser. Your files are never sent anywhere.<br>Sign & edit in PDFs, preview the rest · <b>open several at once</b>",
+    "dz.note": "Everything runs on this computer. Your files are never sent anywhere.",
     "welcome.lead": "Open and work with PDFs, Excel, images, and Python in one window — no install. Just these three things and you're ready.",
-    "welcome.step1": "<span class=\"welcome-step-ico\">📂</span><div><b>1. Open files</b><small>Drag files onto the screen or press the <b>Open</b> button at the bottom left. Several files or whole folders open at once.</small></div>",
+    "welcome.step1": "<span class=\"welcome-step-ico\">📂</span><div><b>1. Open files</b><small>Press <b>Open files</b> on the start screen or drag files onto it. Several files or whole folders open at once.</small></div>",
     "welcome.step2": "<span class=\"welcome-step-ico\">🐍</span><div><b>2. Run Python</b><small>Write code and press <b>▶ Run</b> (or <kbd>Ctrl+Enter</kbd>) to see the result right away. No Python install needed.</small></div>",
-    "welcome.step3": "<span class=\"welcome-step-ico\">💾</span><div><b>3. Save</b><small>Edited PDFs and code can be <b>downloaded</b> or saved to your save folder. The original stays untouched.</small></div>",
+    "welcome.step3": "<span class=\"welcome-step-ico\">💾</span><div><b>3. Check the save target</b><small>Check the <b>Original file</b> or <b>Saved copy</b> badge beside the file name. Hover over the badge for details.</small></div>",
     "welcome.safe": "🔒 Files are never sent anywhere — everything is processed on this computer only.",
     "help.f1": "<b>Open files</b> — drag & drop or whole folders. Open PDF, Word, Excel, PowerPoint, HWP, images, code, and ZIP together.",
     "help.f2": "<b>PDF</b> — signature, text, date, check, pen ink, <b>drag to select text → highlight</b>, page thumbnails/extract/merge, print / save as PDF.",

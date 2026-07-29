@@ -2063,6 +2063,7 @@ function writeStructuredSpreadsheetModel(ws, model, merges){
 }
 
 async function renderXlsx(file, host, doc){
+  if (doc && /\.xlsx$/i.test(String(file && file.name || doc.name || ""))) doc.saveCapability = "spreadsheet";
   if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("xlsx");   // 엑셀 뷰어는 표를 열 때 처음 로드
   if (typeof XLSX === "undefined"){ toast("Excel 뷰어 로드 실패"); return; }
   const csvFastAoa = doc && Array.isArray(doc.spreadsheetAoa) ? doc.spreadsheetAoa : null;

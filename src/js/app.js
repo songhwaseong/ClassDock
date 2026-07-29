@@ -51,12 +51,7 @@ function wire(){
 
   // 드롭존
   const fileInput = byId("fileInput");
-  byId("dzInner").addEventListener("click", (e) => {
-    // 숨겨진 file/folder input의 프로그래밍 클릭도 부모로 버블링한다.
-    // 버튼·input에서 시작한 이벤트를 다시 처리하면 선택창이 연달아 두 번 열린다.
-    if (e.target.closest("button,input")) return;
-    pickFilesOrInput(fileInput);
-  });
+  byId("dzFileBtn").addEventListener("click", (e) => { e.stopPropagation(); pickFilesOrInput(fileInput); });
   fileInput.addEventListener("change", (e) => { const fs = e.target.files; if (fs.length){ queueFiles(fs); e.target.value = ""; } });
   // 폴더 열기(webkitdirectory) — 드래그가 막히는 file:// 에서도 폴더를 통째로 연다
   const folderInput = byId("folderInput");
@@ -84,7 +79,7 @@ function wire(){
   (() => {                                   // 드롭존 '＋ 새로 만들기' 드롭다운(파이썬·노트북·표·화이트보드·텍스트)
     const btn = byId("dzNew"), menu = byId("dzNewMenu");
     if (!btn || !menu) return;
-    const items = [byId("dzNewPy"), byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson"), byId("dzTaskBatch")].filter(Boolean);
+    const items = [byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson")].filter(Boolean);
     const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
     btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
     menu.addEventListener("click", (e) => e.stopPropagation());

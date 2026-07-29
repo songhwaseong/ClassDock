@@ -1280,10 +1280,11 @@ function markDocumentSavedAsUtf8(doc, refresh=true){
    "저장할 수 없는 문서"라는 뜻인지 화면만 봐서는 알 수 없었다. 두 경우를 나눠 말해 준다.
    반환: { mode:"original"|"copy"|"", label, title } */
 function documentSaveTarget(doc){
-  if (!doc) return { mode:"", label:"", title:"" };
+  if (!doc) return { mode:"", label:"", title:"", summary:"" };
   // 저장 동선이 실제로 있는 문서만 — Ctrl+S 처리(app.js)와 같은 기준을 쓴다.
-  const savable = !!(doc.notebookModel || doc.kind === "pdf" || (doc.el && doc.el.querySelector(".run-save")));
-  if (!savable) return { mode:"", label:"", title:"" };
+  const savable = !!(doc.notebookModel || doc.kind === "pdf" || doc.saveCapability === "spreadsheet"
+    || (doc.el && doc.el.querySelector(".run-save")));
+  if (!savable) return { mode:"", label:"", title:"", summary:"" };
   const handle = doc.fsHandle;
   const canWriteOriginal = !!(handle && typeof handle.createWritable === "function");
   // PDF의 낱개 파일 열기는 쓰기 핸들이 있어도 `_signed.pdf` 다운로드가 기본이다.
@@ -1292,7 +1293,8 @@ function documentSaveTarget(doc){
     return {
       mode:"original",
       label:"원본 저장",
-      title:"저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)"
+      title:"저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)",
+      summary:"저장하면 열어 둔 원본 파일을 바로 바꿉니다."
     };
   }
   const viaServer = doc.kind !== "pdf" && typeof workspaceBackendStatus === "function"
@@ -1300,10 +1302,29 @@ function documentSaveTarget(doc){
   return {
     mode:"copy",
     label:"사본 저장",
+    summary: viaServer
+      ? "원본은 그대로 두고 설정된 자동 저장 폴더에 사본을 저장합니다."
+      : "원본은 그대로 두고 다운로드 사본을 저장합니다.",
     title: viaServer
       ? "원본은 그대로 두고 '설정 → 일반 → 자동 저장 폴더'에 사본으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요."
       : "원본은 그대로 두고 사본(다운로드)으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요."
   };
+}
+
+let saveTargetNoticeTimer = 0;
+const SAVE_TARGET_NOTICE_MS = 4000;
+
+function hideSaveTargetNotice(){
+  if (saveTargetNoticeTimer){
+    clearTimeout(saveTargetNoticeTimer);
+    saveTargetNoticeTimer = 0;
+  }
+  const bar = byId("saveTargetBar");
+  if (!bar) return;
+  bar.hidden = true;
+  bar.classList.remove("notice-active");
+  delete bar.dataset.noticeDocId;
+  delete bar.dataset.noticeKey;
 }
 
 function updateOriginalSaveBadge(doc){
@@ -1321,10 +1342,60 @@ function updateOriginalSaveBadge(doc){
   const target = documentSaveTarget(doc);
   badge.hidden = !target.mode;
   badge.textContent = _t(target.label);
-  badge.title = _t(target.title);
+  badge.title = target.mode ? _t(target.summary || target.title) : "";
   badge.classList.toggle("is-copy", target.mode === "copy");
-  if (target.mode) badge.setAttribute("aria-label", _t(target.label) + " — " + _t(target.title));
+  if (target.mode) badge.setAttribute("aria-label", _t(target.label) + " — " + _t(target.summary || target.title));
   else badge.removeAttribute("aria-label");
+  const bar = byId("saveTargetBar");
+  const barLabel = byId("saveTargetBarLabel");
+  const barText = byId("saveTargetBarText");
+  if (!doc || !target.mode){
+    hideSaveTargetNotice();
+  } else if (bar && barLabel && barText){
+    const noticeDocId = String(doc.id == null ? "" : doc.id);
+    const noticeKey = target.mode + "|" + String(target.summary || target.title || "");
+    const shouldShow = doc._saveTargetNoticeKey !== noticeKey;
+    if (!shouldShow && bar.dataset.noticeDocId !== noticeDocId){
+      hideSaveTargetNotice();
+    } else if (shouldShow){
+      doc._saveTargetNoticeKey = noticeKey;
+      if (saveTargetNoticeTimer) clearTimeout(saveTargetNoticeTimer);
+      bar.hidden = false;
+      bar.classList.remove("notice-active");
+      void bar.offsetWidth;
+      bar.classList.add("notice-active");
+      bar.dataset.noticeDocId = noticeDocId;
+      bar.dataset.noticeKey = noticeKey;
+      barLabel.textContent = _t(target.label);
+      barText.textContent = _t(target.summary);
+      bar.title = _t(target.summary || target.title);
+      saveTargetNoticeTimer = setTimeout(() => {
+        if (bar.dataset.noticeDocId === noticeDocId && bar.dataset.noticeKey === noticeKey){
+          hideSaveTargetNotice();
+        }
+      }, SAVE_TARGET_NOTICE_MS);
+    }
+    bar.classList.toggle("is-original", target.mode === "original");
+    bar.classList.toggle("is-copy", target.mode === "copy");
+  }
+  if (!doc) return;
+  const actionLabel = target.mode ? _t(target.label) : _t("저장");
+  if (doc.kind === "pdf"){
+    const pdfSave = byId("btnDownload");
+    if (pdfSave){
+      pdfSave.textContent = actionLabel;
+      pdfSave.title = target.mode ? _t(target.title) : "";
+      pdfSave.dataset.shortcutTitle = target.mode ? "PDF " + actionLabel : _t("PDF 저장");
+    }
+  }
+  if (doc.el){
+    doc.el.querySelectorAll(".run-save").forEach(button => {
+      button.textContent = actionLabel;
+      button.title = target.mode ? _t(target.title) : "";
+      button.dataset.shortcutTitle = target.mode ? actionLabel : _t("파일 저장");
+    });
+  }
+  if (doc._nbSaveBtn && typeof updateNbSaveButton === "function") updateNbSaveButton(doc, doc._nbSaveBtn);
 }
 
 async function inspectTextFileEncoding(file, ext){

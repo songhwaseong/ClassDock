@@ -127,6 +127,25 @@
   .original-save-badge[hidden]{display:none}
   /* 사본으로 저장되는 문서 — "원본이 안 바뀐다"가 경고가 아니라 사실 안내라 중립 색을 쓴다. */
   .original-save-badge.is-copy{background:rgba(148,163,184,.16);color:#cbd5e1;border-color:rgba(148,163,184,.3)}
+  .save-target-bar{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;min-height:34px;
+    padding:6px 14px;border-bottom:1px solid rgba(245,158,11,.28);background:#fffbeb;color:#92400e;
+    font-size:12.5px;line-height:1.4;z-index:17}
+  .save-target-bar[hidden]{display:none}
+  .save-target-bar.notice-active{animation:save-target-notice 4s ease both}
+  @keyframes save-target-notice{
+    0%{opacity:0;transform:translateY(-4px)}
+    6%,88%{opacity:1;transform:translateY(0)}
+    100%{opacity:0;transform:translateY(-2px)}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .save-target-bar.notice-active{animation:none}
+  }
+  .save-target-bar-icon{width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:#f59e0b}
+  .save-target-bar strong{font-size:12px;white-space:nowrap}
+  .save-target-bar.is-copy{border-bottom-color:var(--border);background:var(--panel-2);color:var(--muted)}
+  .save-target-bar.is-copy .save-target-bar-icon{background:#64748b}
+  [data-theme="dark"] .save-target-bar.is-original{background:#2a2112;color:#fde68a}
+  [data-theme="dark"] .save-target-bar.is-copy{background:#162033;color:#cbd5e1}
   .doc-status{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.12);color:#cbd5e1;font-size:10px;font-weight:500}
   .doc-status.dirty{background:rgba(245,158,11,.2);color:#fcd34d}.doc-status.saved{color:#a7f3d0}
   .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
@@ -386,9 +405,9 @@
   .header-more-btn{display:inline-flex;align-items:center;justify-content:center}
   .header-more-btn svg{width:18px;height:18px;fill:currentColor;stroke:none}
   .header-more-menu{top:calc(100% + 7px);bottom:auto;right:0;min-width:184px}
-  .dz-folder{margin-top:12px;padding:9px 16px;border:1px solid var(--accent);background:transparent;
-    color:var(--accent);border-radius:8px;font:inherit;font-size:14px;cursor:pointer}
-  .dz-folder:hover{background:var(--accent);color:#fff}
+  .dz-secondary-link{padding:7px 9px;border:0;background:transparent;color:var(--accent);border-radius:7px;
+    font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .dz-secondary-link:hover,.dz-secondary-link:focus-visible{background:var(--panel-hover);outline:0}
   /* 드롭존 '＋ 새로 만들기' 드롭다운 */
   .dz-new-wrap{position:relative;display:inline-block}
   .dz-new-menu{position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);z-index:70;min-width:170px;
@@ -826,7 +845,7 @@
     .split-drop-half,.split-drop-half span{transition:none}
   }
   #content:fullscreen{background:var(--viewer)}
-  body.viewer-fullscreen header,body.viewer-fullscreen #tabBar,body.viewer-fullscreen #sidebar,body.viewer-fullscreen #sidebarBackdrop,body.viewer-fullscreen #sbResizer,body.viewer-fullscreen #scratchpad,body.viewer-fullscreen #imageMemo{display:none!important}
+  body.viewer-fullscreen header,body.viewer-fullscreen #tabBar,body.viewer-fullscreen #saveTargetBar,body.viewer-fullscreen #sidebar,body.viewer-fullscreen #sidebarBackdrop,body.viewer-fullscreen #sbResizer,body.viewer-fullscreen #scratchpad,body.viewer-fullscreen #imageMemo{display:none!important}
   body.viewer-fullscreen main{position:fixed;inset:0;z-index:100;background:var(--viewer)}
   body.viewer-fullscreen #content{flex:1;background:var(--viewer)}
   .fs-controls{position:fixed;top:14px;right:14px;z-index:110;display:none;align-items:center;gap:6px;
@@ -843,13 +862,37 @@
   #content:fullscreen .fs-controls,body.viewer-fullscreen .fs-controls{display:flex}
 
   .dropzone{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px}
-  .dz-inner{width:min(560px,92%);border:2.5px dashed var(--dz-border);border-radius:18px;background:var(--panel);
-    padding:54px 28px;text-align:center;cursor:pointer;transition:.15s}
-  .dz-inner:hover,.dropzone.drag .dz-inner{border-color:var(--accent);background:var(--panel-hover);transform:translateY(-2px)}
+  .dz-inner{width:min(680px,96%);max-height:calc(100vh - 132px);overflow:auto;border:2.5px dashed var(--dz-border);
+    border-radius:18px;background:var(--panel);padding:32px 28px;text-align:center;transition:.15s}
+  .dropzone.drag .dz-inner{border-color:var(--accent);background:var(--panel-hover);transform:translateY(-2px)}
   .dz-icon{margin-bottom:10px;color:var(--accent);display:flex;justify-content:center;opacity:.9}
   .dz-inner h2{font-size:20px;margin-bottom:8px}
   .dz-inner p{color:var(--muted);font-size:14px}
-  .dz-feature{margin-top:9px;font-size:12.5px;color:var(--accent);font-weight:600}
+  .dz-lead{line-height:1.55}
+  .dz-open-actions{display:grid;grid-template-columns:1.15fr 1fr;gap:10px;margin:20px auto 0}
+  .dz-open-actions button,.dz-purpose-action{display:flex;align-items:center;gap:11px;min-width:0;padding:13px 15px;
+    border-radius:11px;font:inherit;text-align:left;cursor:pointer;transition:.12s}
+  .dz-open-actions svg{width:22px;height:22px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round}
+  .dz-open-actions span,.dz-purpose-action>span:last-child{display:flex;flex-direction:column;min-width:0}
+  .dz-open-actions strong,.dz-purpose-action strong{font-size:14px;line-height:1.3}
+  .dz-open-actions small,.dz-purpose-action small{margin-top:3px;font-size:11.5px;font-weight:400;line-height:1.35}
+  .dz-open-primary{border:1px solid var(--accent);background:var(--accent);color:#fff;
+    box-shadow:0 5px 14px color-mix(in srgb,var(--accent) 24%,transparent)}
+  .dz-open-primary:hover{background:var(--accent-d);border-color:var(--accent-d);transform:translateY(-1px)}
+  .dz-open-primary small{color:rgba(255,255,255,.8)}
+  .dz-open-secondary{border:1px solid var(--border);background:var(--panel-2);color:var(--ink)}
+  .dz-open-secondary:hover{border-color:var(--accent);background:var(--panel-hover)}
+  .dz-open-secondary small{color:var(--muted)}
+  .dz-open-actions button:focus-visible,.dz-purpose-action:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 40%,transparent);outline-offset:2px}
+  .dz-drop-hint{margin-top:10px!important;font-size:11.5px!important}
+  .dz-purpose-title{margin-top:19px;color:var(--muted);font-size:11.5px;font-weight:700;text-align:left}
+  .dz-purpose-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:7px}
+  .dz-purpose-action{border:1px solid var(--border);background:transparent;color:var(--ink)}
+  .dz-purpose-action:hover{border-color:var(--accent);background:var(--panel-hover)}
+  .dz-purpose-action small{color:var(--muted)}
+  .dz-purpose-icon{display:grid;place-items:center;width:28px;height:28px;flex:0 0 auto;border-radius:8px;background:var(--panel-2);font-size:17px}
+  .dz-secondary-actions{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:7px}
   .dz-cmdk-hint{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:8px 14px;
     border:1px solid var(--border);border-radius:999px;background:var(--panel-2);color:var(--muted);
     font:inherit;font-size:12.5px;cursor:pointer;transition:.12s}
@@ -880,6 +923,14 @@
   .dz-recent-drop:hover{background:var(--panel-hover);color:var(--ink)}
   @media (hover:none){ .dz-recent-drop{opacity:1} }
   .dz-note{margin-top:18px;font-size:12px;color:var(--muted)}
+  @media(max-width:640px){
+    .save-target-bar{justify-content:flex-start}
+    .save-target-bar #saveTargetBarText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dropzone{padding:10px}
+    .dz-inner{width:100%;max-height:calc(100vh - 106px);padding:24px 16px}
+    .dz-open-actions,.dz-purpose-actions{grid-template-columns:1fr}
+    .dz-secondary-actions{flex-wrap:wrap}
+  }
   /* 창 전체 드롭 오버레이 — 파일을 끌고 들어오면 화면 전체를 덮어 어디에 떨궈도(미리보기·iframe 위까지) 받는다 */
   .drop-overlay{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;
     background:rgba(15,23,42,.55);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);pointer-events:none}
@@ -3583,7 +3634,7 @@
   .vv-batch-cancel:hover:not(:disabled){border-color:#dc2626;color:#dc2626}
   .vv-batch-cancel:disabled{opacity:.6;cursor:default}
   @media print{
-    header,.hint,.toast,#dropzone,#tools,#officeTools,#loading,.img-zoom,#sidebar,#scratchpad,#imageMemo,#imageMemoPreview{display:none!important}
+    header,.hint,.toast,#dropzone,#saveTargetBar,#tools,#officeTools,#loading,.img-zoom,#sidebar,#scratchpad,#imageMemo,#imageMemoPreview{display:none!important}
     main{position:static;overflow:visible}
     .office,.viewer{position:static;overflow:visible;padding:0;background:#fff}
     .page,.docx-host,.pptx-host,.xlsx-sheet,.md-host,.txt-host{box-shadow:none!important}

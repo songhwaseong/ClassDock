@@ -39,7 +39,7 @@
     <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
     </button>
-    <button id="btnDownload" class="primary" data-shortcut-action="saveCurrent" data-shortcut-title="PDF 다운로드">다운로드</button>
+    <button id="btnDownload" class="primary" data-shortcut-action="saveCurrent" data-shortcut-title="PDF 저장">저장</button>
   </div>
   <div class="tools" id="officeTools" hidden>
     <span class="spacer"></span>
@@ -101,6 +101,11 @@
 </header>
 
 <div id="tabBar" hidden></div>
+<div id="saveTargetBar" class="save-target-bar" role="status" aria-live="polite" hidden>
+  <span class="save-target-bar-icon" aria-hidden="true"></span>
+  <strong id="saveTargetBarLabel">사본 저장</strong>
+  <span id="saveTargetBarText"></span>
+</div>
 
 <main>
   <div id="sidebar" hidden>
@@ -255,23 +260,41 @@
     <div class="dropzone" id="dropzone">
       <div class="dz-inner" id="dzInner">
         <div class="dz-icon"><svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></div>
-        <h2>파일을 여기로 끌어다 놓으세요</h2>
-        <p data-i18n="dz.formats">PDF · Word · Excel · PowerPoint · 이미지 · 폴더 · ZIP &nbsp;|&nbsp; 또는 클릭해서 선택</p>
-        <p class="dz-feature" data-i18n="dz.feature">✦ Python 실행·자동채점 · Jupyter 노트북 · 화이트보드 · PDF 서명·필기 &mdash; 모두 이 안에서</p>
-        <button type="button" id="dzFolderBtn" class="dz-folder">폴더 열기</button>
+        <h2>파일을 열어 바로 시작하세요</h2>
+        <p class="dz-lead">PDF·문서·이미지·코드 등 여러 파일을 한 작업 공간에서 다룰 수 있어요.</p>
+        <div class="dz-open-actions" aria-label="파일 열기">
+          <button type="button" id="dzFileBtn" class="dz-open-primary">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M12 11v6M9 14h6"/></svg>
+            <span><strong>파일 열기</strong><small>한 개 또는 여러 파일 선택</small></span>
+          </button>
+          <button type="button" id="dzFolderBtn" class="dz-open-secondary">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M12 11v6M9 14h6"/></svg>
+            <span><strong>폴더 열기</strong><small>폴더 전체를 원본 저장으로 열기</small></span>
+          </button>
+        </div>
+        <p class="dz-drop-hint">또는 파일·폴더를 이 화면에 끌어다 놓으세요</p>
+        <div class="dz-purpose-title">새 작업 시작</div>
+        <div class="dz-purpose-actions" aria-label="목적별 새 작업">
+          <button type="button" id="dzNewPy" class="dz-purpose-action" data-shortcut-action="newPython" data-shortcut-title="새 파이썬 코드">
+            <span class="dz-purpose-icon" aria-hidden="true">🐍</span><span><strong>Python 실습</strong><small>빈 코드에서 작성·실행</small></span>
+          </button>
+          <button type="button" id="dzTaskBatch" class="dz-purpose-action">
+            <span class="dz-purpose-icon" aria-hidden="true">🗂</span><span><strong>과제 제출 검수</strong><small>.taskdone 일괄 확인</small></span>
+          </button>
+        </div>
+        <div class="dz-secondary-actions">
         <span class="dz-new-wrap">
-          <button type="button" id="dzNew" class="dz-folder" aria-haspopup="menu" aria-expanded="false" aria-controls="dzNewMenu">＋ 새로 만들기 ▾</button>
+          <button type="button" id="dzNew" class="dz-secondary-link" aria-haspopup="menu" aria-expanded="false" aria-controls="dzNewMenu">＋ 다른 문서 만들기 ▾</button>
           <span class="dz-new-menu" id="dzNewMenu" role="menu" hidden>
-            <button type="button" id="dzNewPy" role="menuitem" data-shortcut-action="newPython" data-shortcut-title="새 파이썬 코드">새 파이썬 코드</button>
             <button type="button" id="dzNewNotebook" role="menuitem">새 노트북(.ipynb)</button>
             <button type="button" id="dzNewSheet" role="menuitem">새 빈 표(엑셀)</button>
             <button type="button" id="dzNewBoard" role="menuitem">새 화이트보드</button>
             <button type="button" id="dzNewText" role="menuitem">새 텍스트 파일</button>
             <button type="button" id="dzOpenLesson" role="menuitem">리플레이 열기(.lesson)</button>
-            <button type="button" id="dzTaskBatch" role="menuitem">제출본 일괄 검수(.taskdone)</button>
           </span>
         </span>
-        <button type="button" id="dzExamples" class="dz-folder">✨ 파이썬 예제 갤러리</button>
+        <button type="button" id="dzExamples" class="dz-secondary-link">✨ Python 예제로 시작</button>
+        </div>
         <div class="dz-recent" id="dzRecent" hidden>
           <div class="dz-recent-head">
             <span>최근 연 항목</span>
@@ -283,8 +306,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
           <span data-i18n="dz.cmdk">뭐든 <kbd>Ctrl</kbd><kbd>K</kbd>로 검색해 실행 — 서명·필기·화이트보드·예제까지</span>
         </button>
-        <div class="dz-note" data-i18n="dz.note">모든 처리는 이 브라우저 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.<br>
-          서명·편집은 PDF에서, 나머지는 미리보기로 · <b>여러 개를 한꺼번에 열 수 있어요</b></div>
+        <div class="dz-note" data-i18n="dz.note">모든 처리는 이 컴퓨터 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.</div>
         <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
         <input type="file" id="folderInput" webkitdirectory multiple hidden>
       </div>
@@ -594,9 +616,9 @@
     <h3>만능파일교실에 오신 걸 환영해요</h3>
     <p class="welcome-lead" data-i18n="welcome.lead">설치 없이 PDF·엑셀·이미지·파이썬을 한 창에서 열고 다뤄요. 아래 3가지만 알면 바로 시작할 수 있어요.</p>
     <ol class="welcome-steps">
-      <li data-i18n="welcome.step1"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3z"/></svg></span><div><b>1. 파일 열기</b><small>화면에 파일을 끌어다 놓거나 왼쪽 아래 <b>열기</b> 버튼을 눌러요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
+      <li data-i18n="welcome.step1"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3z"/></svg></span><div><b>1. 파일 열기</b><small>시작 화면의 <b>파일 열기</b>를 누르거나 파일을 끌어다 놓아요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
       <li data-i18n="welcome.step2"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M15 5l5 5-5 5M13 3l-2 14"/></svg></span><div><b>2. 파이썬 실행</b><small>코드를 쓰고 <b>▶ 실행</b>(또는 <kbd>Ctrl+Enter</kbd>)을 누르면 바로 결과가 나와요. 파이썬을 설치하지 않아도 돼요.</small></div></li>
-      <li data-i18n="welcome.step3"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg></span><div><b>3. 저장</b><small>편집한 PDF·코드는 <b>다운로드</b>하거나 저장 폴더에 저장돼요. 원본은 그대로 남아요.</small></div></li>
+      <li data-i18n="welcome.step3"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg></span><div><b>3. 저장 대상 확인</b><small>파일 이름 옆의 <b>원본 저장</b> 또는 <b>사본 저장</b> 배지로 저장 위치를 확인해요. 배지에 마우스를 올리면 자세한 설명을 볼 수 있어요.</small></div></li>
     </ol>
     <p class="welcome-safe" data-i18n="welcome.safe">파일은 외부로 전송되지 않고, 이 컴퓨터 안에서만 처리돼요.</p>
     <div class="modal-actions">

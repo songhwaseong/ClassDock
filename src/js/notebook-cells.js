@@ -1083,11 +1083,14 @@ function updateNbSaveButton(ownerDoc, btn){
   if (!btn) return;
   const dirty = !!(ownerDoc && ownerDoc.hasUnsavedEdits);
   const autosaveState = ownerDoc && ownerDoc._nbAutosaveState;
+  const target = (typeof documentSaveTarget === "function") ? documentSaveTarget(ownerDoc) : null;
+  const saveLabel = target && target.mode ? target.label : "저장";
   const label = autosaveState === "saving" ? "저장 중…"
     : autosaveState === "failed" ? "저장 실패"
-    : dirty ? "저장 *" : "저장";
+    : dirty ? saveLabel + " *" : saveLabel;
   const title = autosaveState === "saving" ? "노트북을 자동 저장하는 중입니다."
     : autosaveState === "failed" ? "자동 저장에 실패했습니다. 복구본은 유지되며 저장 버튼으로 다시 시도할 수 있습니다."
+    : target && target.mode ? target.title
     : dirty ? "저장되지 않은 변경 내용이 있습니다." : "노트북 저장";
   btn.textContent = nbT(label);
   btn.title = nbT(title);
