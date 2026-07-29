@@ -75,10 +75,16 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
     if (!code) return;
     if (diagnosing) return;
     const knownFiles = docs.map((doc) => String(doc.workspacePath || doc.relPath || doc.name || "").replace(/\\/g, "/").split("/").pop()).filter(Boolean);
-    const location = parsePythonTracebackLocation(stderr, ui.fileBase, knownFiles);
-    const line = location && location.current ? location.line : 0;
+    const locations = parsePythonTracebackLocations(stderr, ui.fileBase, knownFiles);
+    const location = locations.length ? locations[locations.length - 1] : null;
+    // The last frame is where the exception occurred.  If it is an imported
+    // module, the nearest current-file frame tells the learner what called it.
+    const caller = location && !location.current
+      ? [...locations].reverse().find((frame) => frame.current && frame.line)
+      : null;
+    const line = caller ? caller.line : (location && location.current ? location.line : 0);
     if (line && ui.markError) ui.markError(line);
-    appendPythonErrorHelp(outPanel, stderr, location, ui);
+    appendPythonErrorHelp(outPanel, stderr, location, ui, caller);
   };
   try {
     const backend = await pythonBackendAvailable();
@@ -2653,7 +2659,7 @@ function renderPyResult(panel, stdout, stderr, fatal, images, variables, code){
   if (typeof lessonPyOnResult === "function") lessonPyOnResult({ stdout, stderr, fatal, images });   // 수업 리플레이(녹화 중일 때만)
 }
 
-function appendPythonErrorHelp(panel, stderr, location, ui){
+function appendPythonErrorHelp(panel, stderr, location, ui, caller){
   const help = explainPythonError(stderr);
   if (!help || !panel) return;
   const card = document.createElement("section"); card.className = "py-error-help";
@@ -2690,6 +2696,18 @@ function appendPythonErrorHelp(panel, stderr, location, ui){
       else if (ui && ui.focusErrorLocation && !ui.focusErrorLocation(location.file, location.line)) toast("해당 Python 파일을 먼저 열어 주세요.", 2400);
     });
     card.appendChild(jump);
+  }
+  if (caller && caller.line){
+    const calledFrom = document.createElement("div"); calledFrom.className = "py-error-detail";
+    calledFrom.textContent = "호출 위치: " + (caller.file || "현재 파일") + " · " + caller.line + "줄";
+    card.appendChild(calledFrom);
+    const jumpCaller = document.createElement("button"); jumpCaller.type = "button";
+    jumpCaller.textContent = caller.line + "줄로 이동";
+    jumpCaller.addEventListener("click", () => {
+      if (ui && ui.focusLine) ui.focusLine(caller.line);
+      if (ui && ui.markError) ui.markError(caller.line);
+    });
+    card.appendChild(jumpCaller);
   }
   panel.appendChild(card);
 }

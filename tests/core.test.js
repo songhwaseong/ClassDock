@@ -8,7 +8,7 @@ const {
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
   transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
-  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr,
+  lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
   suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
@@ -987,6 +987,19 @@ test("트레이스백에서 열린 Python 파일의 정확한 위치를 고른�
   assert.deepEqual(parsePythonTracebackLocation(stderr, "main.py", ["main.py", "helper.py"]), {
     path: "helper.py", file: "helper.py", line: 9, current: false
   });
+});
+
+test("외부 Python 파일 오류에도 실행 파일의 호출 위치를 보존한다", () => {
+  const stderr = 'Traceback\\n  File "main.py", line 4, in <module>\\n  File "site-packages/pkg/helper.py", line 9, in run\\nValueError: bad';
+  assert.deepEqual(parsePythonTracebackLocations(stderr, "main.py", ["main.py"]), [
+    { path:"main.py", file:"main.py", line:4, current:true },
+    { path:"site-packages/pkg/helper.py", file:"helper.py", line:9, current:false }
+  ]);
+});
+
+test("노트북 실행 파일명도 현재 실행 파일의 호출 위치로 인식한다", () => {
+  const stderr = 'Traceback\\n  File "<notebook-cell>", line 3, in <module>\\n  File "package.py", line 8, in run\\nValueError: bad';
+  assert.equal(parsePythonTracebackLocations(stderr, "main.py", ["main.py"])[0].current, true);
 });
 
 test("선택한 코드 줄은 Tab과 Shift+Tab으로 들여쓰기와 내어쓰기를 한다", () => {

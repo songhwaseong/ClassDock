@@ -1709,12 +1709,12 @@
     return { inserted, caret: start + 1 + indent.length, variable };
   }
 
-  function parsePythonTracebackLocation(stderr, preferredFile, knownFiles=[]) {
+  function parsePythonTracebackLocations(stderr, preferredFile, knownFiles=[]) {
     const text = String(stderr || "");
     const preferred = String(preferredFile || "").replace(/\\/g, "/").split("/").pop();
     const known = new Set((knownFiles || []).map((name) => String(name || "").replace(/\\/g, "/").split("/").pop()).filter(Boolean));
     if (preferred) known.add(preferred);
-    const pseudo = new Set(["<exec>", "<string>", "<stdin>", "script.py"]);
+    const pseudo = new Set(["<exec>", "<string>", "<stdin>", "<notebook-cell>", "<셀>", "script.py"]);
     const frames = [];
     const re = /File "([^"]*)", line (\d+)/g;
     let match;
@@ -1723,12 +1723,17 @@
       const file = path.split("/").pop() || path;
       frames.push({ path, file, line: parseInt(match[2], 10) || 0 });
     }
-    for (let i = frames.length - 1; i >= 0; i--) {
-      const frame = frames[i];
-      if (pseudo.has(frame.path) || pseudo.has(frame.file)) return { ...frame, current: true };
-      if (known.has(frame.file)) return { ...frame, current: !preferred || frame.file === preferred };
-    }
-    return null;
+    return frames.map((frame) => ({
+      ...frame,
+      // A notebook cell has a virtual filename.  A normal file is current only
+      // when it is the file the user started, not merely another project file.
+      current: pseudo.has(frame.path) || pseudo.has(frame.file) || (known.has(frame.file) && (!preferred || frame.file === preferred))
+    }));
+  }
+
+  function parsePythonTracebackLocation(stderr, preferredFile, knownFiles=[]) {
+    const frames = parsePythonTracebackLocations(stderr, preferredFile, knownFiles);
+    return frames.length ? frames[frames.length - 1] : null;
   }
 
   function completionReplacementRange(value, selectionStart, selectionEnd, completionStart, completionEnd, item) {
@@ -3366,7 +3371,7 @@
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
     transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
-    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
+    lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
