@@ -875,6 +875,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
       const wrap = document.createElement("div");
       wrap.className = "code-host code-host-readonly" + (longLine ? " is-wrapped" : "") + (big ? " code-chunked" : "");
+      // 읽기 화면도 편집기에서 선택·저장한 글자 크기/줄 간격/글꼴을 그대로 사용한다.
+      applyCodeFontMetrics(wrap);
       wrap.tabIndex = -1;
       let preRef = null;                                       // 비청크 모드의 pre(focusLine 정밀 계산용)
       const CHUNK = 500;
@@ -3191,7 +3193,7 @@ function codeFontStack(value){
   return found ? found.stack : "";
 }
 const _editorHosts = new Set();
-function applyEditorFontMetrics(host){
+function applyCodeFontMetrics(host){
   host.style.setProperty("--code-fs", _codeFontSize + "px");
   host.style.setProperty("--code-lh", Math.round(_codeFontSize * 1.6) + "px");
   const stack = codeFontStack(_codeFontFamily);
@@ -3202,10 +3204,10 @@ function applyEditorFontMetrics(host){
   if (typeof host.__refreshPins === "function") host.__refreshPins();        // 줄 높이 변화 → 핀 마커도 재배치
   if (typeof host.__refreshFontMetrics === "function") host.__refreshFontMetrics();
 }
-function registerEditorFont(host){ _editorHosts.add(host); applyEditorFontMetrics(host); }
+function registerEditorFont(host){ _editorHosts.add(host); applyCodeFontMetrics(host); }
 function unregisterEditorFont(host){ _editorHosts.delete(host); }
 function reapplyAllEditorFonts(){
-  for (const h of [..._editorHosts]){ if (h.isConnected) applyEditorFontMetrics(h); else _editorHosts.delete(h); }
+  for (const h of [..._editorHosts]){ if (h.isConnected) applyCodeFontMetrics(h); else _editorHosts.delete(h); }
 }
 function bumpCodeFont(delta){
   _codeFontSize = Math.max(11, Math.min(30, _codeFontSize + delta));

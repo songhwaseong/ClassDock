@@ -2201,7 +2201,7 @@
   .html-nav-back:hover{background:#fff}
   .code-host{display:flex;max-width:1080px;margin:0 auto;background:var(--code-bg);border-radius:8px;overflow:auto;
     max-height:calc(100vh - 150px);box-shadow:0 4px 18px rgba(15,23,42,.12);
-    font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:1.6}
+    font-family:var(--code-ff,Consolas,"Courier New",monospace);font-size:var(--code-fs,13px);line-height:var(--code-lh,21px)}
   .code-gutter{position:sticky;left:0;flex:0 0 auto;padding:16px 12px;text-align:right;color:var(--code-muted);
     background:var(--code-gutter);white-space:pre;user-select:none;border-right:1px solid var(--code-border)}
   .code-pre{margin:0;padding:16px 18px;white-space:pre;color:var(--code-text);flex:1 1 auto}
