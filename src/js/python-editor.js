@@ -439,6 +439,7 @@ function buildCodeEditor(text, prof, options={}){
     const lines = val.split("\n").length;
     let nums = ""; for (let i = 1; i <= lines; i++) nums += i + "\n";
     gutter.textContent = nums;
+    scheduleScrollbarMeasure();   // 긴 줄 붙여넣기·삭제로 스크롤바가 생기거나 사라지면 예약 여백을 다시 맞춘다
   };
   // 들여쓰기 가이드: 보이는 줄의 들여쓰기 단계(4칸)마다 가는 세로 점선. 학생이 들여쓰기를 시각적 구조로 인식하게 도와 백스페이스 실수를 줄임.
   const INDENT_UNIT = 4;
@@ -572,13 +573,28 @@ function buildCodeEditor(text, prof, options={}){
     cancelAnimationFrame(syncRaf);
     syncRaf = requestAnimationFrame(syncNow);   // 드래그 선택 자동 스크롤이 이벤트 후 반영되는 Chromium 보정
   };
-  const measureScrollbars = () => {
+  // 스크롤바가 차지하는 실제 폭·높이를 재서 pre·줄번호의 예약 여백(--code-sbw/--code-sbh)에 반영한다.
+  // 값이 바뀐 경우에만 true 를 돌려줘 불필요한 재배치를 막는다.
+  let sbW = -1, sbH = -1;
+  const applyScrollbarMetrics = () => {
     const sw = Math.max(0, ta.offsetWidth - ta.clientWidth);
     const sh = Math.max(0, ta.offsetHeight - ta.clientHeight);
+    if (sw === sbW && sh === sbH) return false;
+    sbW = sw; sbH = sh;
     host.style.setProperty("--code-sbw", sw + "px");
     host.style.setProperty("--code-sbh", sh + "px");
-    sync();
+    return true;
   };
+  const measureScrollbars = () => { applyScrollbarMetrics(); sync(); };
+  // 화면보다 긴 줄을 붙여넣어 가로 스크롤바가 새로 생겨도(반대로 지워서 사라져도) .code-edit 의 크기는
+  // 그대로라 ResizeObserver 가 울리지 않는다 → 본문이 바뀔 때마다 한 프레임 뒤 다시 잰다. 예약 여백이
+  // 어긋나면 pre·줄번호의 최대 스크롤이 textarea 보다 짧아, 문서 끝에서 글자·줄번호만 덜 밀려 캐럿과 어긋난다.
+  let sbRaf = 0;
+  const scheduleScrollbarMeasure = () => {
+    if (sbRaf) return;
+    sbRaf = requestAnimationFrame(() => { sbRaf = 0; if (applyScrollbarMetrics()) sync(); });
+  };
+  host.__refreshFontMetrics = scheduleScrollbarMeasure;   // 글자 크기·글꼴 변경으로 스크롤바가 생기고 사라질 때도 재측정
   const syncSelection = () => { if (document.activeElement === ta){ computeWordHi(); sync(); } };
   document.addEventListener("selectionchange", syncSelection);
   let editorResizeObserver = null;
@@ -2172,7 +2188,7 @@ function buildCodeEditor(text, prof, options={}){
     destroy: () => {
       detachTextContextMenu();
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
-      clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf);
+      clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf); cancelAnimationFrame(sbRaf);
       document.removeEventListener("selectionchange", syncSelection);
       document.removeEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
       window.removeEventListener("scroll", hidePortalOnScroll, true);
