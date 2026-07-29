@@ -415,6 +415,16 @@ function nbBuildCell(ownerDoc, cell){
         nbSetSelected(ownerDoc, nbCtrlIndex(ownerDoc, ctrl), {});
         ctrl.edit();
       });
+      // 가상화로 정적 표시 중인 셀도 우클릭하면 편집기를 마운트한 뒤 같은 실행 메뉴를 연다.
+      pre.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        nbSetSelected(ownerDoc, nbCtrlIndex(ownerDoc, ctrl), {});
+        ctrl.edit();
+        requestAnimationFrame(() => {
+          if (ctrl.editor && typeof ctrl.editor.openContextMenu === "function") ctrl.editor.openContextMenu(e);
+        });
+      });
       return pre;
     };
     ctrl.staticEl = makeStatic();
@@ -432,7 +442,18 @@ function nbBuildCell(ownerDoc, cell){
           cell,
           currentSource,
           nbCompletionCache(ownerDoc)
-        )
+        ),
+        // 셀의 ▶ 버튼·단축키와 같은 실행 함수를 우클릭 메뉴에도 연결한다.
+        contextMenuActions:() => {
+          const running = !!(ownerDoc && (ownerDoc._nbBusy || ownerDoc._nbRunAllActive));
+          if (running) return [{ label:"■ 실행 중지", action:() => nbStopExecution(ownerDoc) }];
+          return [
+            { label:"▶ 이 셀 실행", action:() => nbRunCell(ownerDoc, ctrl, false) },
+            { label:"▶ 실행 후 다음 셀", action:() => nbRunCell(ownerDoc, ctrl, true) },
+            { label:"여기까지 실행", action:() => nbRunUpTo(ownerDoc, ctrl) },
+            { label:"전체 실행", action:() => nbRunAll(ownerDoc) }
+          ];
+        }
       });
       ed.host.classList.add("nbv-editor");
       ctrl.staticEl.replaceWith(ed.host);

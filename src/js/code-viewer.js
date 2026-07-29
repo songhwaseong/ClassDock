@@ -394,8 +394,8 @@ function setupNotebookKernelBar(ownerDoc, editor, ui, outer, split){
     }
     for (const src of result.images || []){ const im = document.createElement("img"); im.className = "nb-cell-img"; im.src = src; block.appendChild(im); }
     if (result.variables && result.variables.length){
-      const vt = document.createElement("div"); vt.className = "nb-var-list";
-      const vh = document.createElement("div"); vh.className = "nb-var-title"; vh.textContent = "변수 " + result.variables.length + "개";
+      const vt = document.createElement("details"); vt.className = "nb-var-list";
+      const vh = document.createElement("summary"); vh.className = "nb-var-title"; vh.textContent = "실행 후 변수 (" + result.variables.length + ")";
       vt.appendChild(vh);
       for (const v of result.variables.slice(0, 40)){
         const row = document.createElement("div"); row.className = "nb-var-row";
@@ -1411,7 +1411,25 @@ async function renderCode(file, host, ext, profile, runCtx){
   const restoredDraft = loadPythonDraft(draftKey, sourceFingerprint);
   const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
     resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo),
-    workspaceImportCandidates: () => workspacePythonImportCandidates(ownerDoc)
+    workspaceImportCandidates: () => workspacePythonImportCandidates(ownerDoc),
+    // 우클릭 메뉴도 실행 바·단축키와 같은 진입점을 사용한다. 콜백은 메뉴를 열 때
+    // 평가되므로 아래에서 만들어지는 ui/run 함수를 안전하게 참조할 수 있다.
+    contextMenuActions: () => {
+      const running = typeof ui !== "undefined" && typeof ui.cancelRun === "function";
+      if (running) return [{ label:"■ 실행 중지", action:() => ui.cancelRun() }];
+      if (typeof ui !== "undefined" && typeof ui.runCurrentCell === "function"){
+        return [
+          { label:"▶ 이 셀 실행", action:() => ui.runCurrentCell(false) },
+          { label:"▶ 실행 후 다음 셀", action:() => ui.runCurrentCell(true) },
+          { label:"전체 실행", action:() => run(false) }
+        ];
+      }
+      return [
+        { label:"▶ 실행", action:() => run(true) },
+        { label:"단계 실행", action:() => runPythonSource(editor.getValue(), ui, runCtxWithDoc, true, { traceMode:true }) },
+        { label:"실행 전 진단", action:() => runPythonSource(editor.getValue(), ui, runCtxWithDoc, true, { diagnoseMode:true }) }
+      ];
+    }
   });
   let savedValue = text;
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;

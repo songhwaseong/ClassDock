@@ -95,6 +95,21 @@ function attachTextCaseContextMenu(ta, options={}){
     const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
     const onKeydown = (e) => { if (e.key === "Escape") close(); };
 
+    let contextActions = [];
+    try {
+      contextActions = typeof options.contextMenuActions === "function"
+        ? options.contextMenuActions()
+        : (Array.isArray(options.contextMenuActions) ? options.contextMenuActions : []);
+    } catch(_){ contextActions = []; }
+    if (contextActions.length){
+      for (const item of contextActions){
+        if (!item) continue;
+        if (item.separator){ addSeparator(); continue; }
+        if (typeof item.action !== "function") continue;
+        addItem(String(item.label || ""), item.action, !!item.disabled);
+      }
+      addSeparator();
+    }
     addItem("복사", copy, !hasSelection);
     addItem("잘라내기", cut, !hasSelection);
     addItem("붙여넣기", paste);
@@ -118,10 +133,12 @@ function attachTextCaseContextMenu(ta, options={}){
     }, 0);
   };
   ta.addEventListener("contextmenu", onContextMenu);
-  return () => {
+  const detach = () => {
     ta.removeEventListener("contextmenu", onContextMenu);
     if (activeTextContextMenu) closeTextContextMenu();
   };
+  detach.open = onContextMenu;
+  return detach;
 }
 
 function buildCodeEditor(text, prof, options={}){
@@ -2132,11 +2149,13 @@ function buildCodeEditor(text, prof, options={}){
       clearTimeout(coalesceTimer); commitNow(); sync();
       return true;
     },
-    dedupeSelectedLines
+    dedupeSelectedLines,
+    contextMenuActions: options.contextMenuActions
   });
   refresh();
   return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
+    openContextMenu: (event) => detachTextContextMenu.open(event),
     focusLine,
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,

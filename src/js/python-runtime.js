@@ -624,7 +624,7 @@ function appendOutputFiles(panel, outputs, sessionId){
 function appendVariableInspector(panel, variables){
   const rows = normalizePythonVariables(variables);
   if (!panel || !rows.length) return;
-  const details = document.createElement("details"); details.className = "out-vars"; details.open = true;
+  const details = document.createElement("details"); details.className = "out-vars";
   const summary = document.createElement("summary"); summary.textContent = "실행 후 변수 (" + rows.length + ")";
   const tableWrap = document.createElement("div"); tableWrap.className = "out-vars-scroll";
   const table = document.createElement("table"); table.className = "out-vars-table";
