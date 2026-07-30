@@ -79,13 +79,25 @@ function petFrameScale(dt){
   return Math.min(2, dt / PET_BASE_FRAME_MS);
 }
 
+// ⛶ 문서 전체화면(#content 만 최상단 레이어로 올라감) 중에는 그 요소의 자손만 화면에 그려진다.
+// body 에 붙은 펫은 z-index 와 무관하게 통째로 가려지므로 전체화면 요소 안으로 옮겨 붙인다.
+// (화면보호기 overlay 도 같은 이유로 같은 방식을 쓴다 — screensaver.js)
+// 창 안 폴백 전체화면(body.viewer-fullscreen)은 fullscreenElement 가 없어 그대로 body 를 쓴다.
+function petHost(){
+  const fs = document.fullscreenElement;
+  return (fs && fs !== document.documentElement) ? fs : document.body;
+}
+
 // ----- 발판 수집: 화면 바닥 + 보이는 UI 요소들의 윗변(모든 펫이 공유) -----
 function petCollectPlatforms(){
   const vw = window.innerWidth, vh = window.innerHeight;
   const list = [{ x:0, y:vh, w:vw, floor:true }];
+  const host = petHost();
   for (const sel of PET_PLATFORM_SELECTORS){
     document.querySelectorAll(sel).forEach(el => {
       if (el.closest("[hidden]")) return;
+      // 전체화면 요소 밖의 헤더·탭바는 자리는 그대로지만 그려지지 않는다 — 보이지 않는 발판이 되지 않게 제외
+      if (host !== document.body && !host.contains(el)) return;
       const r = el.getBoundingClientRect();
       // 펫보다 좁거나, 너무 높아 서면 화면 밖으로 나가는 요소는 제외
       if (r.width < PET_W + 12 || r.top < PET_H + 14 || r.top > vh - 6) return;
@@ -117,7 +129,7 @@ function petTrace(x, y, cls, life){
   d.style.left = Math.round(x) + "px";
   d.style.top = Math.round(y) + "px";
   d.style.animationDuration = (life || 1400) + "ms";
-  document.body.appendChild(d);
+  petHost().appendChild(d);
   setTimeout(() => { d.remove(); petTraceCount--; }, life || 1400);
 }
 
@@ -127,7 +139,7 @@ function petSmoke(x, y){
   d.className = "pixel-pet-smoke";
   d.style.left = Math.round(x + PET_W / 2 - 17) + "px";
   d.style.top = Math.round(y + PET_H / 2 - 17) + "px";
-  document.body.appendChild(d);
+  petHost().appendChild(d);
   setTimeout(() => d.remove(), 650);
 }
 
@@ -1954,7 +1966,7 @@ function petSpawn(i, total, bag){
     chute.className = "pixel-pet-chute";
     el.appendChild(chute);
   }
-  document.body.appendChild(el);
+  petHost().appendChild(el);
   const grav = !["ghost", "ufo", "spider", "balloon", "cloud", "flutter", "fish", "skyIsland"].includes(species.kind);
   // 등장 방식: 중력 펫은 위에서 흩어져 떨어지고, 부유 펫은 제자리에서, 거미는 천장·구름은 하늘에서 시작
   let y0, state0;
@@ -2047,6 +2059,17 @@ function petStart(count){
     for (const p of w.pets) p.x = Math.min(p.x, Math.max(0, window.innerWidth - (p.w || PET_W)));
   };
   window.addEventListener("resize", w.onResize);
+  // ⛶ 문서 전체화면을 드나들면 이미 떠 있는 펫·흔적을 새 호스트로 옮겨 준다(그대로 두면 사라진다).
+  // position:fixed 라 좌표계는 뷰포트 그대로 — x·y 를 다시 계산할 필요가 없다.
+  w.onFullscreen = () => {
+    const host = petHost();
+    for (const p of w.pets) if (p.el.parentNode !== host) host.appendChild(p.el);
+    document.querySelectorAll(".pixel-pet-trace,.pixel-pet-smoke").forEach(el => {
+      if (el.parentNode !== host) host.appendChild(el);
+    });
+    w.platforms = petCollectPlatforms();   // 전체화면에서 가려지는 발판(헤더·탭바)을 다시 걸러 낸다
+  };
+  document.addEventListener("fullscreenchange", w.onFullscreen);
   // 고양이가 커서를 사냥할 수 있게 마우스 위치를 기억해 둔다
   w.onMouse = (e) => { w.mouse.x = e.clientX; w.mouse.y = e.clientY; w.mouse.ts = Date.now(); };
   window.addEventListener("mousemove", w.onMouse, { passive: true });
@@ -2064,6 +2087,7 @@ function petStop(){
   if (w.event) petEventEnd(w.event, false);
   cancelAnimationFrame(w.raf);
   window.removeEventListener("resize", w.onResize);
+  document.removeEventListener("fullscreenchange", w.onFullscreen);
   window.removeEventListener("mousemove", w.onMouse);
   document.removeEventListener("visibilitychange", w.onVis);
   const pending = [];
