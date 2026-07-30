@@ -27,7 +27,8 @@ const PET_KIND_LABELS = {
   wizard:"마법 순간이동 (마법사)", magnet:"자석으로 끌기", cloud:"번개 구름",
   rocket:"발사·낙하산 (로켓)", flutter:"팔랑팔랑 날기 (나비)", fish:"비눗방울 타기 (물고기)",
   snake:"꿈틀꿈틀 기기 (뱀)", mouse:"쪼르르 도망 (생쥐)", human:"걷고 점프하고 벽 타고 만세 (사람)",
-  mossGolem:"느린 걸음+눈 레이저 (이끼 골렘)"
+  mossGolem:"느린 걸음+눈 레이저 (이끼 골렘)",
+  skyIsland:"느리게 부유+사라졌다 나타나기 (천공의 섬)"
 };
 
 // ----- 저장소 도우미 -----
@@ -37,7 +38,7 @@ const PET_KIND_LABELS_EN = {
   penguin:"Waddle and slide", balloon:"Balloon floater", snail:"Slow crawler", ninja:"Teleport dash", bird:"Flying bird",
   chameleon:"Color changer", wizard:"Magic teleport", magnet:"Magnetic pull", cloud:"Thundercloud", rocket:"Launch and parachute",
   flutter:"Fluttering flyer", fish:"Bubble rider", snake:"Slithering snake", mouse:"Quick escape", human:"Walk, climb, cheer",
-  mossGolem:"Slow steps and eye laser"
+  mossGolem:"Slow steps and eye laser", skyIsland:"Slow drift and fade"
 };
 
 function petJSONLoad(key, fallback){
@@ -120,7 +121,10 @@ function petCustomSpecies(){
       height: (base && c.kind === base.kind && base.height) || null,
       gridW: (base && c.kind === base.kind && base.gridW) || null,
       gridH: (base && c.kind === base.kind && base.gridH) || null,
-      pixelScale: (base && c.kind === base.kind && base.pixelScale) || null, palettes: [c.palette],
+      pixelScale: (base && c.kind === base.kind && base.pixelScale) || null,
+      speed: (base && c.kind === base.kind && base.speed) || null,
+      fixedFacing: !!(base && c.kind === base.kind && base.fixedFacing),
+      palettes: [c.palette],
       sayings: petCleanSayings(c.sayings), trail: c.trail || null,
       priority: c.priority === true, priorityIndex: index
     };

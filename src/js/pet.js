@@ -897,6 +897,64 @@ function petGhostUpdate(p){
   p.el.style.opacity = p.fadeT > 0 ? "0.4" : "0.92";
 }
 
+// ----- 천공의 섬: 아주 느리게 떠다니며 완전히 사라졌다가 다시 나타난다 -----
+function petSkyIslandUpdate(p){
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const pw = p.w || 512, ph = p.h || 320;
+
+  p.x += p.vx; p.y += p.vy;
+  p.vx *= 0.92; p.vy *= 0.92;                                 // 놓았을 때의 관성도 무겁고 천천히 잦아든다
+  const target = p.gTarget;
+  if (!target || Math.hypot(target.x - p.x, target.y - p.y) < 24 || Math.random() < 0.001){
+    p.gTarget = {
+      x: Math.random() * Math.max(1, vw - pw),
+      y: Math.random() * Math.max(1, vh - ph)
+    };
+  }
+  const dx = p.gTarget.x - p.x, dy = p.gTarget.y - p.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const speed = p.speed || 0.12;
+  p.x += dx / distance * speed;
+  p.y += dy / distance * speed + Math.sin(p.t * 0.025) * 0.12;
+  p.rot = Math.sin(p.t * 0.018) * 1.2;
+  p.x = Math.max(0, Math.min(Math.max(0, vw - pw), p.x));
+  p.y = Math.max(0, Math.min(Math.max(0, vh - ph), p.y));
+
+  if (!p.fadePhase){
+    p.fadePhase = "visible";
+    p.fadeTimer = 360 + Math.random() * 360;
+  }
+  p.fadeTimer--;
+  if (p.fadePhase === "visible"){
+    p.el.style.opacity = "1";
+    p.el.style.pointerEvents = "";
+    if (p.fadeTimer <= 0){
+      p.fadePhase = "fadeOut"; p.fadeDuration = 150; p.fadeTimer = p.fadeDuration;
+    }
+  }
+  else if (p.fadePhase === "fadeOut"){
+    p.el.style.opacity = String(Math.max(0, p.fadeTimer / p.fadeDuration));
+    if (p.fadeTimer <= 0){
+      p.fadePhase = "hidden"; p.fadeTimer = 150 + Math.random() * 120;
+      p.el.style.opacity = "0"; p.el.style.pointerEvents = "none";
+    }
+  }
+  else if (p.fadePhase === "hidden"){
+    p.el.style.opacity = "0"; p.el.style.pointerEvents = "none";
+    if (p.fadeTimer <= 0){
+      p.fadePhase = "fadeIn"; p.fadeDuration = 150; p.fadeTimer = p.fadeDuration;
+      p.el.style.pointerEvents = "";
+    }
+  }
+  else {
+    p.el.style.opacity = String(Math.min(1, 1 - p.fadeTimer / p.fadeDuration));
+    if (p.fadeTimer <= 0){
+      p.fadePhase = "visible"; p.fadeTimer = 360 + Math.random() * 360;
+      p.el.style.opacity = "1";
+    }
+  }
+}
+
 // ----- UFO: 날아다니다 걷고 있는 펫 위로 가서 광선으로 납치를 시도한다(끌어올리다 실패) -----
 function petUfoAbort(p){
   p.beam.style.display = "none"; p.beam.style.height = "0px";
@@ -1177,6 +1235,7 @@ function petUpdate(p, w){
   if (p.state === "drag") return;                              // 좌표는 포인터 핸들러가 움직인다
   if (petWorldIsQuiet(w)){ petQuietUpdate(p, w); return; }
   if (p.quiet) petWakeFromQuiet(p);
+  if (p.kind === "skyIsland") return petSkyIslandUpdate(p);
   if (p.kind === "ghost"){
     if (p.state === "wink" && --p.timer <= 0) p.state = "float";
     return petGhostUpdate(p);
@@ -1641,6 +1700,7 @@ function petTrimTo(w, target){
 // 붙잡았다 놓았을 때 중력 없는 종족이 돌아가는 상태(물고기는 방울이 터져 파닥거린다)
 function petAirRelease(p){
   if (p.kind === "ghost") p.state = "float";
+  else if (p.kind === "skyIsland") p.state = "drift";
   else if (p.kind === "spider") p.state = "reel";
   else if (p.kind === "balloon") p.state = "rise";
   else if (p.kind === "cloud") p.state = "drift";
@@ -1851,10 +1911,14 @@ function petSpawn(i, total, bag){
     el.appendChild(chute);
   }
   document.body.appendChild(el);
-  const grav = !["ghost", "ufo", "spider", "balloon", "cloud", "flutter", "fish"].includes(species.kind);
+  const grav = !["ghost", "ufo", "spider", "balloon", "cloud", "flutter", "fish", "skyIsland"].includes(species.kind);
   // 등장 방식: 중력 펫은 위에서 흩어져 떨어지고, 부유 펫은 제자리에서, 거미는 천장·구름은 하늘에서 시작
   let y0, state0;
   if (species.kind === "spider"){ y0 = 0; state0 = "ceilwalk"; }
+  else if (species.kind === "skyIsland"){
+    y0 = Math.random() * Math.max(1, window.innerHeight - petH);
+    state0 = "drift";
+  }
   else if (species.kind === "balloon"){ y0 = window.innerHeight * 0.3 + Math.random() * window.innerHeight * 0.3; state0 = "rise"; }
   else if (species.kind === "cloud"){ y0 = 15 + Math.random() * Math.max(30, window.innerHeight * 0.2); state0 = "drift"; }
   else if (species.kind === "flutter"){ y0 = 60 + Math.random() * Math.max(40, window.innerHeight * 0.4); state0 = "flit"; }
@@ -1881,6 +1945,8 @@ function petSpawn(i, total, bag){
     vx: 0, vy: 0, face: 1, side: -1, rot: 0, roll: 0, squash: 0, pop: 0,
     state: state0,
     t: Math.floor(Math.random() * 100), timer: 60, blink: 0, off: false, fadeT: 0,
+    fadePhase: species.kind === "skyIsland" ? "visible" : null,
+    fadeTimer: species.kind === "skyIsland" ? 360 + Math.random() * 360 : 0, fadeDuration: 0,
     cool: 0, dropLen: 0, hangY: 0, landT: null, soarAfter: false, airTimer: 0,
     support: null, gTarget: null, victim: null, bubbleTimer: 0,
     noticeActive:false, noticeText:"", noticeItem:null, noticeQueue:[],

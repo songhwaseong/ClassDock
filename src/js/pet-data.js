@@ -59,6 +59,19 @@ const PET_ART = {
     "...D.DD.D......",
     "...D....D......"
   ],
+  skyIsland: [
+    ".....TTTTT.....",
+    "...TTTTTTTTT...",
+    "..TTTTTTTTTTT..",
+    "...SSSSSSSSS...",
+    "..SSSSSSSSSSS..",
+    ".SSSSSSSSSSSSS.",
+    "..RRRRRRRRRRR..",
+    "...RRRRRRRRR...",
+    "....RRRRRRR....",
+    ".....RRRRR.....",
+    ".......R......."
+  ],
   ghost: [
     ".....PPPPP.....",
     "....PPPPPPP....",
@@ -1206,7 +1219,7 @@ const PET_SPECIES = [
     sayings: ["만세!", "반가워요!", "오늘도 화이팅!", "산책 중이에요", "높은 곳도 문제없어요", "잠깐 쉬었다 가요"]
   },
   {
-    kind: "mossGolem", art: PET_ART.mossGolem, gridW: 32, gridH: 40, pixelScale: 4, width: 128, height: 160, speed: 0.0001,
+    kind: "mossGolem", art: PET_ART.mossGolem, gridW: 32, gridH: 40, pixelScale: 4, width: 128, height: 160, speed: 0.3,
     spriteSheet: {
       src: "src/assets/moss-golem-sprites.png", cellW: 256, cellH: 512, cols: 6,
       frameMs: { idle: 180, walk: 1000, look: 180, laser: 420 },
@@ -1215,6 +1228,17 @@ const PET_SPECIES = [
       { D: "#514d3d", G: "#705f48", W: "#f2d466" }
     ],
     sayings: ["쿵...", "천천히 가자", "이끼가 자랐네", "눈빛 조심!", "삐빅..."]
+  },
+  {
+    id: "skyIsland", kind: "skyIsland", art: PET_ART.skyIsland,
+    gridW: 128, gridH: 80, pixelScale: 4, width: 512, height: 320, speed: 0.12, fixedFacing: true,
+    spriteSheet: {
+      src: "src/assets/sky-island-clouds-sprite.png", cellW: 512, cellH: 320, cols: 1,
+      frames: { idle: [0], drift: [0], wink: [0] }
+    }, palettes: [
+      { T: "#67a84f", S: "#9a8764", R: "#3f4438" }
+    ],
+    sayings: ["두둥실...", "잠시 사라질게", "구름 위는 고요해", "아주 오래된 섬이야", "다시 보였네"]
   }
 ];
 
@@ -1230,7 +1254,8 @@ const PET_NAMES = {
   octopus: "문어", bat: "박쥐", owl: "부엉이", duck: "오리", squirrel: "다람쥐",
   hedgehog: "고슴도치", hamster: "햄스터", bee: "꿀벌", ladybug: "무당벌레", dice: "주사위",
   apple: "사과", eraser: "지우개", mushroom: "버섯", carrot: "당근", dino: "공룡", snowman: "눈사람",
-  alien: "외계인", ant: "개미", pig: "돼지", sheep: "양", mister: "커피 아저씨", glassesMan: "픽셀 선생님", mossGolem: "이끼 골렘"
+  alien: "외계인", ant: "개미", pig: "돼지", sheep: "양", mister: "커피 아저씨", glassesMan: "픽셀 선생님",
+  mossGolem: "이끼 골렘", skyIsland: "천공의 섬"
 };
 
 const PET_NAMES_EN = {
@@ -1244,7 +1269,8 @@ const PET_NAMES_EN = {
   octopus: "Octopus", bat: "Bat", owl: "Owl", duck: "Duck", squirrel: "Squirrel",
   hedgehog: "Hedgehog", hamster: "Hamster", bee: "Bee", ladybug: "Ladybug", dice: "Die",
   apple: "Apple", eraser: "Eraser", mushroom: "Mushroom", carrot: "Carrot", dino: "Dinosaur", snowman: "Snowman",
-  alien: "Alien", ant: "Ant", pig: "Pig", sheep: "Sheep", mister: "Coffee guy", glassesMan: "Pixel teacher", mossGolem: "Moss golem"
+  alien: "Alien", ant: "Ant", pig: "Pig", sheep: "Sheep", mister: "Coffee guy", glassesMan: "Pixel teacher",
+  mossGolem: "Moss golem", skyIsland: "Sky island"
 };
 
 const PET_KIND_SAYINGS_EN = {
@@ -1264,6 +1290,7 @@ const PET_KIND_SAYINGS_EN = {
   flutter: ["Flutter flutter!", "Hello!", "Such a nice breeze!"], fish: ["Blub blub!", "Swimming along!", "Bubble safe!"],
   snake: ["Sss...", "Slithering along!", "Hello!"], mouse: ["Squeak!", "Where's the cheese?", "So fast!"],
   human: ["Hooray!", "How about a coffee?", "Keep up the good work!"],
+  skyIsland: ["Drifting...", "The sky is quiet.", "See you again soon."],
   default: ["Hello!", "Let's do our best!", "Nice to see you!"]
 };
 

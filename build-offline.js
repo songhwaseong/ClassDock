@@ -91,7 +91,8 @@ const petSpriteRelatives = [
   "src/assets/blue-buddy-sprites.png",
   "src/assets/fluffy-cat-sprites-v2.png",
   "src/assets/calico-cat-sprites.png",
-  "src/assets/moss-golem-sprites.png"
+  "src/assets/moss-golem-sprites.png",
+  "src/assets/sky-island-clouds-sprite.png"
 ];
 const petSpriteMap = {};
 for (const petSpriteRelative of petSpriteRelatives) {
