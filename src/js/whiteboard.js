@@ -55,7 +55,11 @@ function renderWhiteboard(doc, host){
         return copy;
       });
       localStorage.setItem(boardRecoveryKey(doc.name), JSON.stringify({ version:1, bg:wb.bg, items }));
-    } catch(error){ console.warn("whiteboard recovery snapshot skipped:", error); }
+      return true;
+    } catch(error){
+      console.warn("whiteboard recovery snapshot skipped:", error);
+      return false;
+    }
   };
   // 탭 닫기·브라우저 종료 직전엔 0.5초 디바운스를 건너뛰고 마지막 획까지 즉시 저장한다.
   doc.flushBoardRecovery = saveBoardRecoveryNow;

@@ -25,6 +25,25 @@ class MnBackupFormatError extends Error {
   }
 }
 
+class MnBackupPreparationError extends Error {
+  constructor(failures){
+    super("backup-recovery-flush-failed");
+    this.name = "MnBackupPreparationError";
+    this.code = "backup-recovery-flush-failed";
+    this.failures = Array.isArray(failures) ? failures : [];
+  }
+}
+
+function mnBackupPreparationMessage(error){
+  const labels = [...new Set((error && error.failures || [])
+    .map(item => String(item && item.label || "").trim())
+    .filter(Boolean))];
+  const shown = labels.slice(0, 3);
+  const target = shown.length ? shown.join(", ") + (labels.length > shown.length ? ` 외 ${labels.length - shown.length}개` : "")
+    : "알 수 없는 항목";
+  return `미저장 내용을 백업 준비하지 못했어요: ${target}. 문서를 닫지 말고 다시 시도해 주세요.`;
+}
+
 function validateMnBackupManifest(manifest){
   if (!manifest || typeof manifest !== "object" || manifest.magic !== MN_BACKUP_MAGIC)
     throw new MnBackupFormatError("not-backup");
@@ -289,26 +308,47 @@ async function mnBackupRestoreWorkspace(bytes, present){
 async function mnBackupFlushUnsaved(){
   // 자동복원 설정이 꺼져 있던 경우에도 편집 복구본의 바탕이 되는 원본 파일을 함께 넣는다.
   // 그 뒤 각 편집기 훅이 같은 경로를 최신 미저장 바이트로 다시 덮어쓴다.
+  const failures = [];
+  const runFlush = async (label, task) => {
+    try {
+      const result = await task();
+      if (result === false) failures.push({ label });
+    } catch(error){
+      console.warn("backup recovery flush skipped:", label, error);
+      failures.push({ label, error });
+    }
+  };
   const sourceFiles = [...docs].map(doc => doc && doc.sourceFile).filter(file => file instanceof File);
-  if (sourceFiles.length && typeof rememberWorkspace === "function")
-    await rememberWorkspace(sourceFiles, false, { silent:true });
+  if (sourceFiles.length && typeof rememberWorkspace === "function"){
+    await runFlush("열린 파일 작업공간", () => rememberWorkspace(sourceFiles, false, { silent:true }));
+  }
   const tasks = [];
   for (const doc of [...docs]){
+    const label = String(doc && doc.name || "이름 없는 문서");
     try {
-      if (doc.kind === "board" && typeof doc.flushBoardRecovery === "function") doc.flushBoardRecovery();
+      if (!doc.hasUnsavedEdits) continue;
+      if (doc.kind === "board" && typeof doc.flushBoardRecovery === "function")
+        tasks.push({ label, task:() => doc.flushBoardRecovery() });
       if (doc.kind === "pdf" && doc.recoveryKey && typeof savePdfRecovery === "function")
-        tasks.push(savePdfRecovery(doc, { force:true }));
-      if (typeof doc.flushBackupRecovery === "function") tasks.push(doc.flushBackupRecovery());
-      else if (doc.notebookModel && typeof notebookSaveRecovery === "function") tasks.push(notebookSaveRecovery(doc));
-    } catch(error){ console.warn("backup editor flush skipped:", doc.name, error); }
+        tasks.push({ label, task:() => savePdfRecovery(doc, { force:true }) });
+      if (typeof doc.flushBackupRecovery === "function")
+        tasks.push({ label, task:() => doc.flushBackupRecovery() });
+      else if (doc.notebookModel && typeof notebookSaveRecovery === "function")
+        tasks.push({ label, task:() => notebookSaveRecovery(doc) });
+    } catch(error){
+      console.warn("backup editor flush skipped:", label, error);
+      failures.push({ label, error });
+    }
   }
-  if (typeof window.flushScratchpadBackup === "function") tasks.push(window.flushScratchpadBackup());
-  if (typeof window.flushImageMemoBackup === "function") tasks.push(window.flushImageMemoBackup());
-  const results = await Promise.all(tasks.map(task => Promise.resolve(task).catch(error => {
-    console.warn("backup recovery flush skipped:", error);
-    return false;
-  })));
-  if (results.some(result => result === false)) throw new Error("backup-recovery-flush-failed");
+  if (typeof window.flushScratchpadBackup === "function")
+    tasks.push({ label:"메모", task:() => window.flushScratchpadBackup() });
+  if (typeof window.flushImageMemoBackup === "function")
+    tasks.push({ label:"이미지 메모", task:() => window.flushImageMemoBackup() });
+  await Promise.all(tasks.map(item => runFlush(item.label, item.task)));
+  if (failures.length){
+    console.warn("backup recovery flush failed:", failures);
+    throw new MnBackupPreparationError(failures);
+  }
   if (typeof workspaceMutationQueue !== "undefined") await workspaceMutationQueue;
 }
 
@@ -374,7 +414,9 @@ async function mnBackupExport(){
     return true;
   } catch(error){
     console.error("backup export failed:", error);
-    toast("백업 ZIP을 만들지 못했어요. 저장 공간과 메모리를 확인해 주세요.", 4200, { type:"error" });
+    toast(error && error.code === "backup-recovery-flush-failed"
+      ? mnBackupPreparationMessage(error)
+      : "백업 ZIP을 만들지 못했어요. 저장 공간과 메모리를 확인해 주세요.", 5600, { type:"error" });
     return false;
   } finally {
     if (typeof hideLoading === "function") hideLoading();
@@ -559,7 +601,7 @@ const MNBackup = Object.freeze({
 
 if (typeof module === "object" && module.exports){
   module.exports = {
-    MN_BACKUP_MAGIC, MN_BACKUP_VERSION, MnBackupFormatError,
-    validateMnBackupManifest, mnBackupStamp
+    MN_BACKUP_MAGIC, MN_BACKUP_VERSION, MnBackupFormatError, MnBackupPreparationError,
+    validateMnBackupManifest, mnBackupStamp, mnBackupPreparationMessage
   };
 }

@@ -60,7 +60,8 @@ async function notebookRecoveryRequest(mode, action){
 }
 
 async function notebookSaveRecovery(ownerDoc){
-  if (!ownerDoc || !ownerDoc.notebookModel || !ownerDoc.hasUnsavedEdits) return false;
+  if (!ownerDoc || !ownerDoc.notebookModel) return false;
+  if (!ownerDoc.hasUnsavedEdits) return true;
   if (ownerDoc._nbRecoverySaving) return ownerDoc._nbRecoverySaving;
   let text;
   try {
@@ -1256,4 +1257,3 @@ function notebookReplaceAll(model, query, replacement, options){
   }
   return matches.length;
 }
-
