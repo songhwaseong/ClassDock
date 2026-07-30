@@ -3404,9 +3404,12 @@
   .regex-suggest-description{padding-left:94px}
   .regex-suggest-empty{padding:10px 6px}
   /* PDF 내 찾기(Ctrl+H) — 페이지 위 하이라이트 + 떠 있는 검색 바 */
-  .pdf-find{position:fixed;top:64px;right:24px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:5px;
-    width:max-content;max-width:calc(100vw - 48px);
+  /* 위치는 뷰포트가 아니라 #content 기준 — 헤더·탭바 높이가 바뀌어도(반응형 2줄 헤더 등) 가려지지 않는다.
+     main 이 z-index:19 + isolation:isolate 라 fixed 로 띄워도 z-index:21 인 #tabBar 위로는 절대 못 올라온다. */
+  .pdf-find{position:absolute;top:52px;right:16px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:5px;
+    width:max-content;max-width:calc(100% - 32px);
     padding:7px 9px;border-radius:9px;background:var(--panel);border:1px solid var(--border);box-shadow:0 10px 30px rgba(15,23,42,.22)}
+  #content:fullscreen .pdf-find,body.viewer-fullscreen .pdf-find{top:66px;right:14px}   /* 전체화면 컨트롤(top:14 + 44) 아래로 */
   #content.study-mode .pdf-find.study-target{position:absolute;top:52px;right:calc(100% - var(--study-split,50%) + 10px)}
   #content.study-mode.study-swapped .pdf-find.study-target{right:10px}
   #content.study-mode.study-stacked .pdf-find.study-target{top:52px;right:10px}
