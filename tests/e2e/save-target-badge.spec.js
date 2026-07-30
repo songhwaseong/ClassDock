@@ -50,7 +50,7 @@ test("원본에 바로 쓰는 문서는 '원본 저장'으로 안내한다", asy
     updateOriginalSaveBadge(doc);
   });
   await expect(badge(page)).toHaveText("원본 저장");
-  await expect(badge(page)).toHaveAttribute("title", /원본이 바로 바뀝니다/);
+  await expect(badge(page)).toHaveAttribute("title", /원본 파일을 바로 바꿉니다/);
   await expect(badge(page)).not.toHaveClass(/is-copy/);
 });
 
