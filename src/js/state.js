@@ -10,7 +10,7 @@ const {
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer,
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
-  normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand, normalizePythonVariables,
+  normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
@@ -232,7 +232,7 @@ function validateShortcutChoice(value){
   if (!hasMainModifier) return "Ctrl, Alt 또는 Win 키를 함께 눌러 주세요.";
   const unavailable = new Set([
     "Ctrl+C","Ctrl+X","Ctrl+V","Ctrl+A","Ctrl+Z","Ctrl+Shift+Z","Ctrl+Y",
-    "Ctrl+D","Ctrl+Space","Ctrl+/","Ctrl+=","Ctrl+Shift+=","Ctrl+-","Ctrl+0",
+    "Ctrl+D","Ctrl+Space","Ctrl+/","Ctrl+=","Ctrl+Shift+=","Ctrl+-","Ctrl+0","Ctrl+Home","Ctrl+End",
     "Alt+ArrowLeft","Alt+ArrowRight","Alt+ArrowUp","Alt+ArrowDown","Ctrl+Alt+ArrowDown",
     "Ctrl+L","Ctrl+T","Ctrl+N","Ctrl+R","Ctrl+Shift+T","Ctrl+Shift+R",
     "Alt+F4","F5","F11"

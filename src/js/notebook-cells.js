@@ -866,8 +866,39 @@ function nbEnterEdit(ownerDoc, idx, scrollBlock){
   if (typeof ctrl.edit === "function") ctrl.edit();
 }
 
+function nbMoveTextEditorToDocumentEdge(textarea, edge){
+  if (!textarea || (edge !== "start" && edge !== "end")) return false;
+  const offset = edge === "start" ? 0 : textarea.value.length;
+  try { textarea.focus({ preventScroll:true }); } catch(_){ try { textarea.focus(); } catch(__){} }
+  try { textarea.setSelectionRange(offset, offset); } catch(_){ return false; }
+  textarea.scrollTop = edge === "start" ? 0 : textarea.scrollHeight;
+  return true;
+}
+
+function nbFocusNotebookDocumentEdge(ownerDoc, edge){
+  const ctrls = ownerDoc && ownerDoc._nbCtrls || [];
+  if (!ctrls.length || (edge !== "start" && edge !== "end")) return false;
+  const idx = edge === "start" ? 0 : ctrls.length - 1;
+  const ctrl = ctrls[idx];
+  nbEnterEdit(ownerDoc, idx, edge);
+  const textarea = (ctrl.editor && ctrl.editor.ta) ||
+    (ctrl.cellEl && ctrl.cellEl.querySelector && ctrl.cellEl.querySelector(".nbv-md-edit"));
+  if (textarea) nbMoveTextEditorToDocumentEdge(textarea, edge);
+  else nbSetSelected(ownerDoc, idx, { focusCell:true, scroll:true, scrollBlock:edge });
+  return true;
+}
+
 // ── 명령/편집 모드 키보드 ──
 function nbOnKeydown(ownerDoc, e){
+  const documentEdge = documentEdgeShortcutCommand(e);
+  const target = e.target;
+  const textEntry = !!(target && target.closest && target.closest("input,textarea,[contenteditable='true']"));
+  const cellEditor = !!(target && target.closest && target.closest(".nbv-editor,.nbv-md-edit"));
+  if (documentEdge && (!textEntry || cellEditor)){
+    e.preventDefault(); e.stopPropagation();
+    nbFocusNotebookDocumentEdge(ownerDoc, documentEdge);
+    return;
+  }
   // Esc: 열려 있는 모든 검색창(노트북 전체 + 각 셀)을 한 번에 닫는다.
   if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && nbAnyFindOpen(ownerDoc)){
     e.preventDefault(); e.stopPropagation(); nbCloseAllFinds(ownerDoc); return;

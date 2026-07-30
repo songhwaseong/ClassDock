@@ -716,6 +716,7 @@
     "노트북 전체에서 바꿀 내용": "Replace across the notebook",
     "노트북 전체 찾기·바꾸기": "Find/replace across the notebook",
     "현재 셀 안에서 찾기·바꾸기": "Find/replace within the current cell",
+    "노트북 처음 / 끝으로 이동": "Move to the start / end of the notebook",
     "키보드 단축키": "Keyboard shortcuts",
     "결과 패널 닫기": "Close the result panel",
     "실행 결과 숨기기": "Hide run output",

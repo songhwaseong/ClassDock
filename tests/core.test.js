@@ -10,7 +10,7 @@ const {
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
-  suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
+  suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand,
   normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
   normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
@@ -262,6 +262,17 @@ test("사용자 단축키를 일관된 형식으로 정규화하고 키 이벤�
   assert.equal(shortcutMatchesEvent({ key:"Enter", ctrlKey:true }, "Ctrl+Enter"), true);
   assert.equal(shortcutMatchesEvent({ key:"Enter", altKey:true }, "Ctrl+Enter"), false);
   assert.equal(shortcutMatchesEvent({ key:"Enter", ctrlKey:true, shiftKey:true }, "Ctrl+Shift+Enter"), true);
+});
+
+test("Ctrl+Home/End는 문서 처음/끝 이동으로만 판별한다", () => {
+  assert.equal(documentEdgeShortcutCommand({ key:"Home", ctrlKey:true }), "start");
+  assert.equal(documentEdgeShortcutCommand({ key:"End", ctrlKey:true }), "end");
+  assert.equal(documentEdgeShortcutCommand({ key:"End", metaKey:true }), "end");
+  assert.equal(documentEdgeShortcutCommand({ key:"Home", ctrlKey:true, shiftKey:true }), "");
+  assert.equal(documentEdgeShortcutCommand({ key:"End", ctrlKey:true, altKey:true }), "");
+  assert.equal(documentEdgeShortcutCommand({ key:"End", ctrlKey:true, isComposing:true }), "");
+  assert.equal(documentEdgeShortcutCommand({ key:"End" }), "");
+  assert.equal(documentEdgeShortcutCommand({ key:"PageDown", ctrlKey:true }), "");
 });
 
 test("Python 결과 패널 방향 단축키는 Alt+Shift+방향키만 허용한다", () => {

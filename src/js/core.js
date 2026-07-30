@@ -2984,6 +2984,14 @@
     return !!actual && actual === normalizeShortcut(shortcut);
   }
 
+  function documentEdgeShortcutCommand(event) {
+    if (!event || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return "";
+    const key = String(event.key || "").toLowerCase();
+    if (key === "home") return "start";
+    if (key === "end") return "end";
+    return "";
+  }
+
   // Python 편집기 실행 결과 패널의 방향 단축키를 DOM과 분리해 판별한다.
   // Alt+Shift만 정확히 누른 경우에만 처리해 Ctrl/Win 조합과 편집기 기본 선택을 보존한다.
   function pythonOutputShortcutCommand(event) {
@@ -3372,7 +3380,7 @@
     transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
-    suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, pythonOutputShortcutCommand,
+    suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand,
     normalizePythonVariables, normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText,
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
