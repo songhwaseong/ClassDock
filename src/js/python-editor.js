@@ -141,6 +141,25 @@ function attachTextCaseContextMenu(ta, options={}){
   return detach;
 }
 
+// 문서 끝에 여러 빈 줄을 만들 때도 일반 Enter처럼 마지막 코드 줄의 들여쓰기를 이어받는다.
+// 이미 끝에 빈 줄이 있으면 마지막 실제 코드 줄을 기준으로 삼아 구조선이 중간에 끊기지 않게 한다.
+function documentEndBlankIndent(value, prof){
+  const lines = String(value == null ? "" : value).split("\n");
+  let lastCodeLine = "";
+  for (let i = lines.length - 1; i >= 0; i--){
+    if (!lines[i].trim()) continue;
+    lastCodeLine = lines[i];
+    break;
+  }
+  let indent = (lastCodeLine.match(/^[ \t]*/) || [""])[0];
+  if (prof === "python" && typeof pythonLineOpensBlock === "function" && pythonLineOpensBlock(lastCodeLine)){
+    indent += "    ";
+  } else if (prof === "c" && /[{([]\s*$/.test(lastCodeLine)){
+    indent += "    ";
+  }
+  return indent;
+}
+
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
   const gutter = document.createElement("div"); gutter.className = "code-gutter";
@@ -558,7 +577,8 @@ function buildCodeEditor(text, prof, options={}){
     e.preventDefault(); e.stopPropagation();
     hideCompletion(); exitCol();
     clearTimeout(coalesceTimer); commitNow();
-    ta.value = ta.value + "\n".repeat(JUMP_DOWN_LINES);
+    const blankIndent = documentEndBlankIndent(ta.value, prof);
+    ta.value = ta.value + ("\n" + blankIndent).repeat(JUMP_DOWN_LINES);
     ta.selectionStart = ta.selectionEnd = ta.value.length;   // 커서를 새로 만든 마지막 빈 줄로
     ta.focus();
     emitInput();                                             // 하이라이트·줄번호·히스토리(undo) 한 번에 반영
