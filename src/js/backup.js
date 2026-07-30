@@ -320,7 +320,12 @@ async function mnBackupFlushUnsaved(){
   };
   const sourceFiles = [...docs].map(doc => doc && doc.sourceFile).filter(file => file instanceof File);
   if (sourceFiles.length && typeof rememberWorkspace === "function"){
-    await runFlush("열린 파일 작업공간", () => rememberWorkspace(sourceFiles, false, { silent:true }));
+    const hasEligibleFiles = typeof workspaceHasBackupEligibleFiles !== "function"
+      || workspaceHasBackupEligibleFiles(sourceFiles);
+    await runFlush("열린 파일 작업공간", async () => {
+      const result = await rememberWorkspace(sourceFiles, false, { silent:true });
+      return result === false && !hasEligibleFiles ? true : result;
+    });
   }
   const tasks = [];
   for (const doc of [...docs]){

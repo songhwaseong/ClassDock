@@ -74,6 +74,14 @@ test("변경되지 않은 노트북 복구 저장은 백업 실패로 취급하�
   assert.match(source, /if \(!ownerDoc\.hasUnsavedEdits\) return true;/);
 });
 
+test("백업 제외 파일만 열린 경우 작업공간 저장 생략을 실패로 오인하지 않는다", () => {
+  const root = path.join(__dirname, "..");
+  const backup = fs.readFileSync(path.join(root, "src/js/backup.js"), "utf8");
+  const workspace = fs.readFileSync(path.join(root, "src/js/workspace-store.js"), "utf8");
+  assert.match(workspace, /function workspaceHasBackupEligibleFiles\(files\)/);
+  assert.match(backup, /result === false && !hasEligibleFiles \? true : result/);
+});
+
 test("메뉴에 내보내기·복원과 전용 파일 입력이 함께 연결된다", () => {
   const root = path.join(__dirname, "..");
   const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");

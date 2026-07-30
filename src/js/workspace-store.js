@@ -277,25 +277,37 @@ function isBulkSkippedImageName(name){
   return typeof IMG_EXTS !== "undefined" && IMG_EXTS.includes(ext);
 }
 
+function selectWorkspaceBackupFiles(files){
+  let rows = [...files].filter(file => !isMediaFileName(file && file.name));
+  const imageRows = rows.filter(file => isBulkSkippedImageName(file && file.name));
+  const imageBytes = imageRows.reduce((sum, file) => sum + (Number(file && file.size) || 0), 0);
+  const skipBulkImages = imageRows.length > WS_IMAGE_SKIP_COUNT || imageBytes > WS_IMAGE_SKIP_BYTES;
+  if (skipBulkImages) rows = rows.filter(file => !isBulkSkippedImageName(file && file.name));
+  return { rows, imageRows, skipBulkImages };
+}
+
+function workspaceHasBackupEligibleFiles(files){
+  return selectWorkspaceBackupFiles(files).rows.length > 0;
+}
+
 async function rememberWorkspace(files, replace, options={}){
   const useServer = await workspaceBackendAvailable();
   if (!useServer && !wsIdbSupported()) return false;   // 서버도 IndexedDB 도 없으면 자동 복원 저장 불가
   if (window.__tabActive === false) return false;     // 비활성 탭은 작업공간 자동저장 생략(충돌 방지)
   // 영상·오디오 원본은 자동 복원 묶음에서 제외 — 수백 MB 파일 하나가 전체 저장(256MB 제한)을 막지 않게.
   // 다음 실행에 자동 복원되지 않을 뿐, 폴더 열기나 드래그로 다시 열면 된다.
-  let rows = [...files].filter(file => !isMediaFileName(file && file.name));
-  const imageRows = rows.filter(file => isBulkSkippedImageName(file && file.name));
-  const imageBytes = imageRows.reduce((sum, file) => sum + (Number(file && file.size) || 0), 0);
+  const selection = selectWorkspaceBackupFiles(files);
+  const rows = selection.rows;
+  const imageRows = selection.imageRows;
   let skippedImages = 0;
   let skippedImagePaths = [];
-  if (imageRows.length > WS_IMAGE_SKIP_COUNT || imageBytes > WS_IMAGE_SKIP_BYTES){
+  if (selection.skipBulkImages){
     skippedImages = imageRows.length;
     // replace=false 저장은 같은 경로가 이번 입력에 없으면 예전 바이트를 그대로 병합한다.
     // 따라서 이미 저장돼 있던 대량 사진도 함께 제거 목록으로 남겨야 다음 실행이 다시 느려지지 않는다.
     skippedImagePaths = imageRows
       .map(file => normalizedRunPath(file && (file.webkitRelativePath || file.name)))
       .filter(Boolean);
-    rows = rows.filter(file => !isBulkSkippedImageName(file && file.name));
   }
   const folderPaths = options.folderPaths || [];
   const folderRoots = new Set(folderPaths.map(path => normalizedRunPath(path).split("/")[0]).filter(Boolean));
