@@ -1248,6 +1248,21 @@
     return { value:text, merged:false };
   }
 
+  // 괄호로 감싼 여러 줄 import나 백슬래시로 이어진 줄까지 한 문장으로 보고 마지막 줄 번호를 돌려준다.
+  function pythonLogicalLineEndIndex(lines, at) {
+    let depth = 0, cursor = at;
+    while (cursor < lines.length) {
+      const code = String(lines[cursor] || "").replace(/\r$/, "").replace(/\s*#.*$/, "");
+      for (const ch of code) {
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+      }
+      if (depth <= 0 && !/\\\s*$/.test(code)) return cursor;
+      cursor++;
+    }
+    return lines.length - 1;
+  }
+
   function pythonImportInsertOffset(source) {
     const text = String(source || "");
     const lines = text.split("\n");
@@ -1265,12 +1280,18 @@
         if (index < lines.length) index++;
       }
     }
-    while (index < lines.length && /^\s*from\s+__future__\s+import\b/.test(lines[index])) index++;
+    while (index < lines.length && /^\s*from\s+__future__\s+import\b/.test(lines[index])) {
+      index = pythonLogicalLineEndIndex(lines, index) + 1;
+    }
     // 기존 최상단 import 묶음 안에서는 마지막 import 다음에 둔다. 빈 줄과 주석은 묶음에 포함한다.
     let lastImport = -1, scan = index;
     while (scan < lines.length) {
       const line = lines[scan];
-      if (/^\s*(?:import\s+|from\s+[A-Za-z_][\w.]*\s+import\s+)/.test(line)) { lastImport = scan; scan++; continue; }
+      if (/^\s*(?:import\s+|from\s+[.A-Za-z_][\w.]*\s+import\b)/.test(line)) {
+        lastImport = pythonLogicalLineEndIndex(lines, scan);   // 괄호형 여러 줄 import는 닫는 줄까지 건너뛴다
+        scan = lastImport + 1;
+        continue;
+      }
       if (/^\s*(?:#.*)?$/.test(line)) { scan++; continue; }
       break;
     }

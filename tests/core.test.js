@@ -705,6 +705,26 @@ test("import completion adds one top-level import and keeps the caret at the com
   assert.equal(existing.value, "from pathlib import Path\nbase = Path");
 });
 
+test("다른 모듈 import 자동완성은 괄호형 여러 줄 import 블록 안에 끼워 넣지 않는다", () => {
+  const source = "from langchain_openai import ChatOpenAI\nfrom langchain_core.prompts import (\n    ChatPromptTemplate,\n    MessagesPlaceholder,\n)\nparser = StrOutputPar";
+  const plan = completionApplicationPlan(source, { start:source.length - "StrOutputPar".length, end:source.length }, {
+    name:"StrOutputParser", type:"class", importText:"from langchain_core.output_parsers import StrOutputParser"
+  });
+  assert.equal(
+    plan.value,
+    "from langchain_openai import ChatOpenAI\nfrom langchain_core.prompts import (\n    ChatPromptTemplate,\n    MessagesPlaceholder,\n)\nfrom langchain_core.output_parsers import StrOutputParser\nparser = StrOutputParser"
+  );
+  assert.equal(plan.caret, plan.value.length);
+  const backslash = "from langchain_core.prompts import ChatPromptTemplate, \\\n    MessagesPlaceholder\nparser = StrOutputPar";
+  const continued = completionApplicationPlan(backslash, { start:backslash.length - "StrOutputPar".length, end:backslash.length }, {
+    name:"StrOutputParser", type:"class", importText:"from langchain_core.output_parsers import StrOutputParser"
+  });
+  assert.equal(
+    continued.value,
+    "from langchain_core.prompts import ChatPromptTemplate, \\\n    MessagesPlaceholder\nfrom langchain_core.output_parsers import StrOutputParser\nparser = StrOutputParser"
+  );
+});
+
 test("같은 모듈의 import 자동완성은 기존 from 문에 쉼표로 합친다", () => {
   const source = "from sklearn.metrics import accuracy_score\nmatrix = confusion_mat";
   const plan = completionApplicationPlan(source, { start:source.length - "confusion_mat".length, end:source.length }, {
