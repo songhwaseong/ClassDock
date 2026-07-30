@@ -31,3 +31,30 @@ test("데코레이터처럼 보이는 문자열과 주석은 코드 토큰으로
   const html = context.highlightCodeBase("# @st.cache_resource\nlabel = '@st.cache_resource'", "python");
   assert.doesNotMatch(html, /tk-d/);
 });
+
+test("f-string 보간식 안의 문자열 리터럴도 문자열 색으로 강조한다", () => {
+  const html = context.highlightCodeBase(
+    "st.write(f'**채널명** : {video.get(\"channel\", \"\")}')",
+    "python"
+  );
+  assert.match(
+    html,
+    /<span class="tk-fi">\{video\.get\(<span class="tk-s">&quot;channel&quot;<\/span>, <span class="tk-s">&quot;&quot;<\/span>\)\}<\/span>/
+  );
+});
+
+test("f-string 보간식 문자열 안의 중괄호는 보간식 경계를 닫지 않는다", () => {
+  const html = context.highlightCodeBase("label = f'{lookup(\"}\")}'", "python");
+  assert.match(
+    html,
+    /<span class="tk-fi">\{lookup\(<span class="tk-s">&quot;\}&quot;<\/span>\)\}<\/span>/
+  );
+});
+
+test("f-string 보간식의 중첩 중괄호 안 문자열도 강조한다", () => {
+  const html = context.highlightCodeBase("label = f'{render({\"name\": value})}'", "python");
+  assert.match(
+    html,
+    /<span class="tk-fi">\{render\(\{<span class="tk-s">&quot;name&quot;<\/span>: value\}\)\}<\/span>/
+  );
+});

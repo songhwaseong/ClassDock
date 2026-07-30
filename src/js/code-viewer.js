@@ -68,6 +68,34 @@ function isFStringToken(token){
   const q = token.search(/["'`]/);
   return q > 0 && /[fF]/.test(token.slice(0, q));
 }
+function findFStringExpressionEnd(body, start){
+  let depth = 1;
+  for (let i = start; i < body.length; i++){
+    const c = body[i];
+    if (c === "'" || c === '"'){
+      const triple = body.slice(i, i + 3) === c.repeat(3);
+      const quoteLength = triple ? 3 : 1;
+      i += quoteLength;
+      while (i < body.length){
+        if (body[i] === "\\"){ i += 2; continue; }
+        if (triple){
+          if (body.slice(i, i + 3) === c.repeat(3)){ i += 2; break; }
+          i++;
+          continue;
+        }
+        if (body[i] === c) break;
+        i++;
+      }
+      continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}"){
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
 // f-string 한 토큰(m[0])만 받아 HTML 을 돌려주는 격리 함수 — 바깥 경계는 이미 확정돼 있어
 // 문서의 다른 부분에 영향을 줄 수 없고, 모든 원본 글자를 escapeHtml 로 한 번씩만 방출해
 // 편집 오버레이의 글자 정렬도 깨지지 않는다. { … } 안(보간식)은 기본 글자색(tk-fi), 나머지
@@ -92,16 +120,12 @@ function highlightFString(token){
     if (c === '}' && body[i+1] === '}'){ buf += '}}'; i += 2; continue; }   // 리터럴 }
     if (c === '{'){
       flush();
-      let depth = 1, j = i + 1;
-      while (j < body.length && depth > 0){
-        const cj = body[j];
-        if (cj === '{') depth++;
-        else if (cj === '}'){ depth--; if (depth === 0) break; }
-        j++;
-      }
-      const end = (j < body.length && depth === 0) ? j : body.length - 1;   // 짝 없는 { 는 남은 전부를 보간식으로
-      html += '<span class="tk-fi">' + escapeHtml(body.slice(i, end + 1)) + '</span>';
-      i = end + 1;
+      const end = findFStringExpressionEnd(body, i + 1);
+      const expressionEnd = end >= 0 ? end : body.length;
+      const expression = body.slice(i + 1, expressionEnd);
+      html += '<span class="tk-fi">{' + highlightCodeBase(expression, "python")
+        + (end >= 0 ? "}" : "") + '</span>';
+      i = end >= 0 ? end + 1 : body.length;
       continue;
     }
     buf += c; i++;
