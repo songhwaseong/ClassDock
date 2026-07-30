@@ -136,7 +136,10 @@ const DEFAULT_APP_SETTINGS = {
   // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).
   //   예전 이름은 pythonAutosave 였고 Python 에만 적용됐다 — 아래 migrateAppSettings 가 값을 옮긴다.
   // pdfRecovery: 파일에 쓰지 않고 브라우저 안에 복구본만 남긴다(꺼짐 대비 안전망) — 성격이 달라 따로 둔다.
+  // searchHistory: 찾기·검색창에 지난 검색어를 기억해 보여준다(MNSearchHistory).
+  //   공용 컴퓨터에서는 앞사람 검색어가 보일 수 있어 끌 수 있게 두었다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
+  searchHistory: true,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },

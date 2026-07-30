@@ -15,6 +15,7 @@
     "icons.js",
     "state.js",
     "history.js",
+    "search-history.js",
     "spellcheck.js",
     "pdf-recovery.js",
     "video-viewer.js",
@@ -75,6 +76,7 @@
         "icons.js",
         "state.js",
         "history.js",
+        "search-history.js",
         "spellcheck.js"
       ]
     },
@@ -280,6 +282,20 @@
       "publicApi": "MNRecent",
       "consumers": [
         "file-loaders.js",
+        "app.js"
+      ]
+    },
+    {
+      "name": "search-history",
+      "file": "search-history.js",
+      "publicApi": "MNSearchHistory",
+      "consumers": [
+        "code-viewer.js",
+        "pdf-editor.js",
+        "notebook-tools.js",
+        "spreadsheet-viewer.js",
+        "python-editor.js",
+        "batch-replace.js",
         "app.js"
       ]
     },

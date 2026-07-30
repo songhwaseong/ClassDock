@@ -3384,6 +3384,44 @@
   .code-find-do{margin-left:auto}
   .code-find-do+.code-find-do{margin-left:5px}
   .code-find-opt:hover,.code-find-nav:hover,.code-find-close:hover,.code-find-do:hover{background:var(--panel-hover);color:var(--ink)}
+  /* 최근 검색어 드롭다운 — 겹쳐 띄우지 않고 세로 흐름 안에 넣어 잘림·z-index 문제를 만들지 않는다 */
+  .search-history-toggle{font:600 11.5px system-ui,sans-serif;border:1px solid var(--border);border-radius:5px;
+    background:var(--field);color:var(--muted);padding:4px 7px;cursor:pointer;white-space:nowrap}
+  .search-history-toggle:hover{background:var(--panel-hover);color:var(--ink)}
+  .search-history-toggle.on{background:color-mix(in srgb,var(--accent) 15%,var(--field));color:var(--accent);border-color:var(--accent)}
+  .search-history{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;width:100%;min-height:0;
+    padding-top:3px;border-top:1px solid var(--border)}
+  .search-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 4px 4px}
+  .search-history-head strong{font:600 11px system-ui,sans-serif;color:var(--muted);letter-spacing:.02em}
+  .search-history-clear{border:0;background:transparent;padding:1px 3px;cursor:pointer;
+    font:11px system-ui,sans-serif;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+  .search-history-clear:hover{color:var(--danger)}
+  .search-history-list{display:flex;flex-direction:column;gap:1px;max-height:min(232px,38vh);overflow:auto}
+  .search-history-item{display:flex;align-items:center;gap:2px}
+  .search-history-pick{flex:1;min-width:0;border:1px solid transparent;border-radius:5px;background:transparent;
+    padding:5px 7px;cursor:pointer;text-align:left;color:var(--ink);
+    font:12.5px/1.25 system-ui,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .search-history-pick:hover,.search-history-pick.is-active,.search-history-pick:focus-visible{outline:0;
+    background:var(--panel-hover);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+  .search-history-del{flex:0 0 auto;width:22px;height:22px;border:0;border-radius:5px;background:transparent;
+    color:var(--muted);font-size:11px;line-height:1;cursor:pointer;opacity:.55}
+  .search-history-item:hover .search-history-del{opacity:1}
+  .search-history-del:hover{background:var(--panel-hover);color:var(--danger)}
+  /* 한 줄(flex row)로 된 찾기 바에 넣을 때 — 바에 flex-wrap:wrap 을 주고 목록이 아랫줄을 통째로 차지하게 한다 */
+  .search-history-row{flex:0 0 100%}
+  .ro-find,.out-find-bar{flex-wrap:wrap}
+  .out-find-bar .search-history{border-top-color:var(--code-border)}
+  /* 사이드바는 언제나 어두운 배색이라 변수 대신 사이드바 색을 그대로 쓴다 */
+  .sb-search-history{margin:0 8px 7px;padding-top:0;border-top:0}
+  .sb-search-history .search-history-head{padding:0 4px 3px}
+  .sb-search-history .search-history-head strong,.sb-search-history .search-history-clear{color:#64748b}
+  .sb-search-history .search-history-clear:hover{color:#f87171}
+  .sb-search-history .search-history-list{max-height:min(180px,28vh)}
+  .sb-search-history .search-history-pick{color:#cbd5e1;font-size:12px}
+  .sb-search-history .search-history-pick:hover,.sb-search-history .search-history-pick.is-active{
+    background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+  .sb-search-history .search-history-del{color:#64748b}
+  .sb-search-history .search-history-del:hover{background:rgba(255,255,255,.08);color:#f87171}
   .regex-suggest-toggle{font:600 11.5px system-ui,sans-serif;border:1px solid var(--border);border-radius:5px;
     background:var(--field);color:var(--muted);padding:4px 7px;cursor:pointer;white-space:nowrap}
   .regex-suggest-toggle:hover{background:var(--panel-hover);color:var(--ink)}

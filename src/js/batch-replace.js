@@ -334,6 +334,18 @@ if (typeof window !== "undefined" && window.document) {
       if (seed) findInput.value = seed;
     } catch(_){}
 
+    // 최근 검색어(batch 구획) — "찾을 말"에만 붙인다. "바꿀 말"은 기억하지 않는다.
+    // 여기서는 마지막 검색어를 자동으로 채우지 않는다: 이 창의 결과는 여러 파일을 한꺼번에 바꾸는 것이라,
+    // 지난 검색어가 미리 들어가 있으면 엉뚱한 대상을 바꿀 수 있다. 목록에서 직접 고른 것만 들어간다.
+    const findHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+      ? MNSearchHistory.attach(findInput, {
+          scope: "batch",
+          insertAfter: findInput.closest(".batch-replace-field"),
+          onPick: () => { clearTimeout(previewTimer); runFullPreview(); }
+        })
+      : null;
+    const rememberBatchFind = () => { if (findHistory) findHistory.remember(findInput.value); };
+
     const opts = document.createElement("div"); opts.className = "batch-replace-opts";
     const mkCheck = (labelText, titleText) => {
       const l = document.createElement("label"); l.className = "batch-replace-check"; if (titleText) l.title = titleText;
@@ -462,8 +474,15 @@ if (typeof window !== "undefined" && window.document) {
       modal.remove(); batchReplaceOpen = false;
     };
     const onKey = (e) => {
+      // 이 창의 키 처리는 window 캡처라 입력창보다 먼저 온다. 최근 검색어 목록이 열려 있는 동안에는
+      // 위/아래와 (고른 항목이 있는) Enter 를 목록에 양보하고, Esc 한 번은 목록만 닫는다.
+      if (findHistory && findHistory.isOpen()){
+        if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); findHistory.hide(); return; }
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") return;
+        if (e.key === "Enter" && findHistory.hasActive()) return;
+      }
       if (e.key === "Escape"){ e.stopPropagation(); close(); }
-      else if (e.key === "Enter" && (e.target === findInput || e.target === replaceInput)){ e.preventDefault(); clearTimeout(previewTimer); runFullPreview(); }
+      else if (e.key === "Enter" && (e.target === findInput || e.target === replaceInput)){ e.preventDefault(); clearTimeout(previewTimer); rememberBatchFind(); runFullPreview(); }
     };
     window.addEventListener("keydown", onKey, true);
     modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
@@ -488,6 +507,7 @@ if (typeof window !== "undefined" && window.document) {
       }
       const chosen = lastPreview.files.filter(f => f.checked);
       if (!chosen.length) return;
+      rememberBatchFind();                       // 실제로 바꾼 말만 기록에 남긴다
       apply.disabled = true; apply.textContent = "바꾸는 중…";
       const r = await batchReplaceApply(chosen);
       close();

@@ -498,6 +498,7 @@ function ensurePdfFindBar(){
       '<button type="button" class="pdf-find-opt" data-opt="word" title="단어 단위">\\b</button>' +
       '<button type="button" class="pdf-find-opt" data-opt="regex" title="정규식">.*</button>' +
       '<button type="button" class="regex-suggest-toggle" title="예시에서 정규식 추천" aria-expanded="false">패턴</button>' +
+      '<button type="button" class="search-history-toggle" title="최근 검색어 (↓)" aria-expanded="false">최근</button>' +
       '<button type="button" class="pdf-find-ocr" title="스캔(이미지) PDF 의 글자를 인식해 찾기·검색이 되게 하기" hidden>🔍 글자 인식</button>' +
       '<button type="button" class="pdf-find-btn" data-nav="prev" title="이전 (Shift+Enter)">↑</button>' +
       '<button type="button" class="pdf-find-btn" data-nav="next" title="다음 (Enter)">↓</button>' +
@@ -525,8 +526,28 @@ function ensurePdfFindBar(){
     if (_pdfFind.suggestOpen) renderPdfRegexSuggestions();
     _pdfFindTimer = setTimeout(() => { if (_pdfFind.doc) computePdfMatches(_pdfFind.doc); }, 180);
   });
+  // 최근 검색어 — PDF 는 pdf 구획에 따로 쌓는다(문서에서 찾는 말과 코드에서 찾는 말이 섞이면 목록이 쓸모없어진다).
+  _pdfFind.history = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(_pdfFind.input, {
+        scope: "pdf",
+        mount: bar,
+        toggleButton: bar.querySelector(".search-history-toggle"),
+        onPick: (term, meta) => {
+          if (meta){
+            _pdfFind.optCase = !!meta.case; _pdfFind.optWord = !!meta.word; _pdfFind.optRegex = !!meta.regex;
+            syncPdfFindOptionButtons();
+          }
+          if (_pdfFind.doc) computePdfMatches(_pdfFind.doc);
+        }
+      })
+    : null;
+  if (_pdfFind.history){
+    const historyButton = bar.querySelector(".search-history-toggle");
+    historyButton.addEventListener("mousedown", (e) => e.preventDefault());   // 입력창 blur 로 목록이 곧바로 닫히지 않게
+    historyButton.addEventListener("click", () => { _pdfFind.history.toggle(true); _pdfFind.input.focus(); });
+  } else bar.querySelector(".search-history-toggle").hidden = true;
   _pdfFind.input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter"){ e.preventDefault(); navPdfMatch(e.shiftKey ? -1 : 1); }
+    if (e.key === "Enter"){ e.preventDefault(); rememberPdfFindTerm(); navPdfMatch(e.shiftKey ? -1 : 1); }
     else if (e.key === "Escape"){ e.preventDefault(); closePdfFind(); }
   });
   bar.querySelectorAll(".pdf-find-opt").forEach(btn => {
@@ -543,10 +564,15 @@ function ensurePdfFindBar(){
     setPdfRegexSuggestionOpen(!_pdfFind.suggestOpen);
     if (!_pdfFind.suggestOpen) _pdfFind.input.focus();
   });
-  bar.querySelector('[data-nav="next"]').addEventListener("click", () => navPdfMatch(1));
-  bar.querySelector('[data-nav="prev"]').addEventListener("click", () => navPdfMatch(-1));
+  bar.querySelector('[data-nav="next"]').addEventListener("click", () => { rememberPdfFindTerm(); navPdfMatch(1); });
+  bar.querySelector('[data-nav="prev"]').addEventListener("click", () => { rememberPdfFindTerm(); navPdfMatch(-1); });
   bar.querySelector('[data-close]').addEventListener("click", closePdfFind);
   return _pdfFind;
+}
+// 실제로 찾은 순간(Enter·다음/이전)에만 남긴다. 찾기 옵션도 함께 기억해 되살릴 때 토글까지 복원한다.
+function rememberPdfFindTerm(){
+  if (!_pdfFind || !_pdfFind.history) return;
+  _pdfFind.history.remember(_pdfFind.input.value, { case: _pdfFind.optCase, word: _pdfFind.optWord, regex: _pdfFind.optRegex });
 }
 function syncPdfFindOptionButtons(){
   if (!_pdfFind) return;
@@ -594,6 +620,15 @@ async function openPdfFind(targetDoc){
   // PDF 본문에서 드래그해 둔 글자가 있으면 검색어로 딸려간다(이 PDF 안의 선택만, 한 줄·200자 이내).
   const seed = typeof currentSelectionSeed === "function" ? currentSelectionSeed(target.el) : "";
   if (seed && seed !== f.input.value.trim()) f.input.value = seed;
+  // 선택한 글자도, 적혀 있던 것도 없으면 마지막으로 찾던 말을 채워 준다(다른 PDF 를 열어도 이어서 찾게).
+  else if (!f.input.value && f.history){
+    const rows = MNSearchHistory.list("pdf");
+    if (rows.length){
+      f.input.value = rows[0].q;
+      const meta = rows[0].meta;
+      if (meta){ f.optCase = !!meta.case; f.optWord = !!meta.word; f.optRegex = !!meta.regex; syncPdfFindOptionButtons(); }
+    }
+  }
   f.input.focus(); f.input.select();
   if (f.ocrBtn && !target._ocrRunning) f.ocrBtn.hidden = true;   // 문서가 바뀌었을 수 있으니 일단 감춤(아래 판정 후 표시)
   if (typeof ensureRendered === "function") await ensureRendered(target);   // placeholder(페이지·오버레이) 보장

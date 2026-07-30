@@ -1622,6 +1622,7 @@ function buildCodeEditor(text, prof, options={}){
       '<button type="button" class="code-find-opt" data-opt="word" title="단어 단위">\\b</button>' +
       '<button type="button" class="code-find-opt" data-opt="regex" title="정규식">.*</button>' +
       '<button type="button" class="regex-suggest-toggle" title="예시에서 정규식 추천" aria-expanded="false">패턴</button>' +
+      '<button type="button" class="search-history-toggle" title="최근 검색어 (↓)" aria-expanded="false">최근</button>' +
       '<button type="button" class="code-find-nav" data-nav="prev" title="이전 (Shift+Enter)">↑</button>' +
       '<button type="button" class="code-find-nav" data-nav="next" title="다음 (Enter)">↓</button>' +
       '<button type="button" class="code-find-close" title="닫기 (Esc)">✕</button>' +
@@ -1637,6 +1638,7 @@ function buildCodeEditor(text, prof, options={}){
   const replaceInput = findBar.querySelector(".code-find-replace");
   const countEl = findBar.querySelector(".code-find-count");
   const patternButton = findBar.querySelector(".regex-suggest-toggle");
+  const historyButton = findBar.querySelector(".search-history-toggle");
   const suggestPanel = findBar.querySelector(".regex-suggest");
   let findOptCase = false, findOptWord = false, findOptRegex = false;
   let suggestOpen = false;
@@ -1647,6 +1649,33 @@ function buildCodeEditor(text, prof, options={}){
     findBar.querySelector('[data-opt="word"]').classList.toggle("on", findOptWord);
     findBar.querySelector('[data-opt="regex"]').classList.toggle("on", findOptRegex);
   };
+  /* 최근 검색어 — 대소문자·단어·정규식 토글까지 함께 기억한다.
+     정규식 패턴을 일반 모드로 되살리면 하나도 못 찾아 "기록이 고장났다"처럼 보이기 때문이다. */
+  const findHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(findInput, {
+        scope: "text",
+        mount: findBar,
+        toggleButton: historyButton,
+        onPick: (term, meta) => {
+          if (meta){
+            findOptCase = !!meta.case; findOptWord = !!meta.word; findOptRegex = !!meta.regex;
+            syncFindOptionButtons();
+          }
+          recomputeFind(true);
+        }
+      })
+    : null;
+  // 실제로 검색을 쓴 순간(Enter·다음/이전·바꾸기)에만 남긴다. '바꿀 내용'은 일부러 기록하지 않는다.
+  const rememberFindTerm = () => {
+    if (findHistory) findHistory.remember(findInput.value, { case: findOptCase, word: findOptWord, regex: findOptRegex });
+  };
+  if (historyButton){
+    if (findHistory){
+      // mousedown 기본동작(포커스 이동)을 막아야 입력창이 blur 되면서 목록이 곧바로 닫히는 일이 없다.
+      historyButton.addEventListener("mousedown", (e) => e.preventDefault());
+      historyButton.addEventListener("click", () => { findHistory.toggle(true); findInput.focus(); });
+    } else historyButton.hidden = true;
+  }
   const setSuggestionOpen = (open) => {
     suggestOpen = !!open;
     suggestPanel.hidden = !suggestOpen;
@@ -1772,6 +1801,15 @@ function buildCodeEditor(text, prof, options={}){
     const seed = (typeof seedText === "string" && seedText && !seedText.includes("\n") && seedText.length <= 200) ? seedText : "";
     const sel = seed || ta.value.slice(ta.selectionStart, ta.selectionEnd);
     if (sel && !sel.includes("\n") && sel.length <= 200) findInput.value = sel;
+    // 선택한 글자도, 지금 적힌 것도 없으면 마지막으로 찾던 말을 채워 준다(문서를 옮겨도 이어서 찾게).
+    else if (!findInput.value && findHistory){
+      const rows = MNSearchHistory.list("text");
+      if (rows.length){
+        findInput.value = rows[0].q;
+        const meta = rows[0].meta;
+        if (meta){ findOptCase = !!meta.case; findOptWord = !!meta.word; findOptRegex = !!meta.regex; syncFindOptionButtons(); }
+      }
+    }
     findInput.focus(); findInput.select();
     recomputeFind(true);
   };
@@ -1875,11 +1913,11 @@ function buildCodeEditor(text, prof, options={}){
   ta.addEventListener("input", clearSpotlight);          // 셀을 편집하면 위치가 어긋나므로 강조를 지운다
   findInput.addEventListener("input", () => recomputeFind(true));
   findInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter"){ e.preventDefault(); selectMatch(findIndex + (e.shiftKey ? -1 : 1)); }
+    if (e.key === "Enter"){ e.preventDefault(); rememberFindTerm(); selectMatch(findIndex + (e.shiftKey ? -1 : 1)); }
     else if (e.key === "Escape"){ e.preventDefault(); closeFind(); }
   });
   replaceInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter"){ e.preventDefault(); replaceCurrent(); }
+    if (e.key === "Enter"){ e.preventDefault(); rememberFindTerm(); replaceCurrent(); }
     else if (e.key === "Escape"){ e.preventDefault(); closeFind(); }
   });
   findBar.querySelectorAll(".code-find-opt").forEach(btn => {
@@ -1896,10 +1934,10 @@ function buildCodeEditor(text, prof, options={}){
     setSuggestionOpen(!suggestOpen);
     if (!suggestOpen) findInput.focus();
   });
-  findBar.querySelector('[data-nav="next"]').addEventListener("click", () => { selectMatch(findIndex + 1); findInput.focus(); });
-  findBar.querySelector('[data-nav="prev"]').addEventListener("click", () => { selectMatch(findIndex - 1); findInput.focus(); });
-  findBar.querySelector('[data-do="one"]').addEventListener("click", () => { replaceCurrent(); });
-  findBar.querySelector('[data-do="all"]').addEventListener("click", () => { replaceAll(); });
+  findBar.querySelector('[data-nav="next"]').addEventListener("click", () => { rememberFindTerm(); selectMatch(findIndex + 1); findInput.focus(); });
+  findBar.querySelector('[data-nav="prev"]').addEventListener("click", () => { rememberFindTerm(); selectMatch(findIndex - 1); findInput.focus(); });
+  findBar.querySelector('[data-do="one"]').addEventListener("click", () => { rememberFindTerm(); replaceCurrent(); });
+  findBar.querySelector('[data-do="all"]').addEventListener("click", () => { rememberFindTerm(); replaceAll(); });
   findBar.querySelector(".code-find-close").addEventListener("click", closeFind);
 
   ta.addEventListener("keydown", (e) => {
@@ -2327,7 +2365,7 @@ function buildLightTextEditor(text, options={}){
   };
 
   // ===== 가벼운 찾기(Ctrl+F): 문자열을 찾아 textarea 안에서 선택·스크롤(강조 오버레이 없이 네이티브 선택만) =====
-  let findBar = null, findInput = null, findCount = null, findOpen = false;
+  let findBar = null, findInput = null, findCount = null, findOpen = false, findHistory = null;
   let matches = [], matchIdx = -1;
   const computeMatches = () => {
     matches = []; matchIdx = -1;
@@ -2365,16 +2403,21 @@ function buildLightTextEditor(text, options={}){
     const close = document.createElement("button"); close.type = "button"; close.className = "text-edit-btn"; close.textContent = "✕"; close.title = "닫기 (Esc)";
     findBar.append(findInput, findCount, prev, next, close);
     const runSearch = () => { computeMatches(); if (matches.length){ matchIdx = -1; goMatch(1); } };
+    // 최근 검색어 — 강조 오버레이가 없는 가벼운 편집기도 같은 목록(text 구획)을 쓴다.
+    findHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+      ? MNSearchHistory.attach(findInput, { scope: "text", mount: findBar, className: "search-history-row", onPick: runSearch })
+      : null;
+    const remember = () => { if (findHistory) findHistory.remember(findInput.value); };
     // 한글 IME 조합 중(isComposing)에는 검색하지 않는다 — 조합 도중 재검색이 조합을 방해하지 않게, 조합 확정 후에만.
     findInput.addEventListener("input", (e) => { if (e.isComposing) return; runSearch(); });
     findInput.addEventListener("compositionend", runSearch);
     findInput.addEventListener("keydown", (e) => {
       if (e.isComposing) return;                          // 조합 확정용 Enter 는 검색 이동으로 가로채지 않는다
-      if (e.key === "Enter"){ e.preventDefault(); goMatch(e.shiftKey ? -1 : 1); }
+      if (e.key === "Enter"){ e.preventDefault(); remember(); goMatch(e.shiftKey ? -1 : 1); }
       else if (e.key === "Escape"){ e.preventDefault(); closeFind(); }
     });
-    prev.addEventListener("click", () => { goMatch(-1); findInput.focus(); });
-    next.addEventListener("click", () => { goMatch(1); findInput.focus(); });
+    prev.addEventListener("click", () => { remember(); goMatch(-1); findInput.focus(); });
+    next.addEventListener("click", () => { remember(); goMatch(1); findInput.focus(); });
     close.addEventListener("click", closeFind);
     edit.appendChild(findBar);
   };
@@ -2382,6 +2425,11 @@ function buildLightTextEditor(text, options={}){
     if (!findBar) buildFindBar();
     findBar.hidden = false; findOpen = true;
     if (seed && seed !== findInput.value){ findInput.value = seed; computeMatches(); if (matches.length){ matchIdx = -1; goMatch(1); } }
+    // 넘겨준 검색어도, 적혀 있던 것도 없으면 마지막으로 찾던 말을 채워 준다.
+    else if (!findInput.value && findHistory){
+      const last = MNSearchHistory.last("text");
+      if (last){ findInput.value = last; computeMatches(); if (matches.length){ matchIdx = -1; goMatch(1); } }
+    }
     findInput.focus(); findInput.select();
   };
 

@@ -340,6 +340,25 @@ function wire(){
   byId("sbList").addEventListener("keydown", onSidebarKey);   // 사이드바 ↑/↓ 파일 선택 이동, Enter/Space 로 열기
   const sidebarSearch = byId("sbSearch");
   sidebarSearch.addEventListener("input", onSidebarSearchInput);
+  // 최근 검색어 드롭다운 — 입력창이 비어 있을 때(또는 ↓ 키) 지난 검색어를 보여주고, 고르면 바로 검색한다.
+  // 기록은 Enter 를 눌렀거나 검색창을 떠날 때만 남긴다(타이핑 중간값이 쌓이지 않게).
+  const sidebarSearchHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(sidebarSearch, {
+        scope: "files",
+        className: "sb-search-history",
+        insertAfter: sidebarSearch.closest(".sb-search"),
+        onPick: () => onSidebarSearchInput()
+      })
+    : null;
+  const rememberSidebarSearch = (minLength) => {
+    if (!sidebarSearchHistory) return;
+    const q = String(sidebarSearch.value || "").trim();
+    if (q.length >= minLength) sidebarSearchHistory.remember(q);
+  };
+  sidebarSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) rememberSidebarSearch(1);
+  });
+  sidebarSearch.addEventListener("blur", () => rememberSidebarSearch(2));   // 한 글자 검색은 목록만 어지럽혀 제외
   sidebarSearch.addEventListener("keydown", (e) => {
     if (e.key === "Escape"){
       sidebarSearch.value = "";
@@ -709,6 +728,8 @@ function wire(){
     byId("settingPdfZoom").value = String(defaultPdfZoom());
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
+    byId("settingSearchHistory").checked = appSettings.searchHistory !== false;
+    refreshSearchHistoryCount();
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
@@ -751,6 +772,7 @@ function wire(){
     saveAppSettings({
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
+      searchHistory: byId("settingSearchHistory").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
       autoSave: byId("settingAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
@@ -781,7 +803,22 @@ function wire(){
       });
     }
     scheduleViewerLayoutRefresh();
+    // 기억을 끄면 남아 있던 검색어도 함께 지운다 — 껐는데 기록이 그대로 남아 있으면 끈 의미가 없다.
+    if (!appSettings.searchHistory && typeof MNSearchHistory === "object" && MNSearchHistory) MNSearchHistory.clear();
     toast("설정을 저장했어요. 화면 크기와 단축키는 바로 적용됩니다.", 2800);
+  };
+  // 검색 기록(최근 검색어) — 몇 개가 남아 있는지 보여주고, 지우기는 저장 버튼과 무관하게 바로 적용한다.
+  function refreshSearchHistoryCount(){
+    const el = byId("settingSearchHistoryCount"), button = byId("settingSearchHistoryClear");
+    if (!el || !button) return;
+    const count = (typeof MNSearchHistory === "object" && MNSearchHistory) ? MNSearchHistory.size() : 0;
+    el.textContent = count ? window.tf("({n}개 기억 중)", { n: count }) : "(비어 있음)";
+    button.disabled = !count;
+  }
+  if (byId("settingSearchHistoryClear")) byId("settingSearchHistoryClear").onclick = () => {
+    if (typeof MNSearchHistory === "object" && MNSearchHistory) MNSearchHistory.clear();
+    refreshSearchHistoryCount();
+    toast("검색 기록을 지웠어요.", 1800);
   };
   // 대기 화면(화면보호기) 영상 선택/지우기 — 파일 작업이라 즉시 반영(켜짐·시간은 저장 버튼을 따름).
   function refreshScreensaverName(){

@@ -1184,19 +1184,30 @@ async function renderCode(file, host, ext, profile, runCtx){
             requestAnimationFrame(() => placeRoHit(m, len));
           });
         };
+        const roRun = () => { roCompute(); if (roMatches.length){ roIdx = -1; roGo(1); } };
+        // 최근 검색어 — 편집 잠금 보기도 편집기와 같은 목록(text 구획)을 쓴다.
+        const roHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+          ? MNSearchHistory.attach(roInput, { scope: "text", mount: roFind, className: "search-history-row", onPick: roRun })
+          : null;
+        const roRemember = () => { if (roHistory) roHistory.remember(roInput.value); };
         roInput.addEventListener("input", () => { roCompute(); if (roMatches.length){ roIdx = -1; roGo(1); } });
         roInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter"){ e.preventDefault(); roGo(e.shiftKey ? -1 : 1); }
+          if (e.key === "Enter"){ e.preventDefault(); roRemember(); roGo(e.shiftKey ? -1 : 1); }
           else if (e.key === "Escape"){ e.preventDefault(); roClose.click(); }
         });
-        roPrev.addEventListener("click", () => { roGo(-1); roInput.focus(); });
-        roNext.addEventListener("click", () => { roGo(1); roInput.focus(); });
+        roPrev.addEventListener("click", () => { roRemember(); roGo(-1); roInput.focus(); });
+        roNext.addEventListener("click", () => { roRemember(); roGo(1); roInput.focus(); });
         roClose.addEventListener("click", () => { roFind.hidden = true; roHit.hidden = true;
           if (roForcedChunk){ roForcedChunk.style.contentVisibility = ""; roForcedChunk = null; }   // 강제 레이아웃 원복
           try { wrap.focus(); } catch(_){} });
         openReadonlyFind = (seedText) => {
           roFind.hidden = false;
           if (seedText && seedText !== roInput.value){ roInput.value = seedText; roCompute(); if (roMatches.length){ roIdx = -1; roGo(1); } }
+          // 넘겨준 검색어도, 적혀 있던 것도 없으면 마지막으로 찾던 말을 채워 준다.
+          else if (!roInput.value && roHistory){
+            const last = MNSearchHistory.last("text");
+            if (last){ roInput.value = last; roRun(); }
+          }
           roInput.focus(); roInput.select();
           if (roInput.value && !roMatches.length) roCompute();
         };
@@ -1952,6 +1963,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     attachOutputChrome(); outputFindOpen = true; outFindBar.hidden = false; outFindBtn.setAttribute("aria-expanded", "true");
     const selected = typeof seed === "string" ? seed : outputFindSelectionSeed();
     if (selected && selected !== outFindInput.value) outFindInput.value = selected;
+    // 드래그해 둔 글자도, 적혀 있던 것도 없으면 마지막으로 찾던 말을 채워 준다.
+    else if (!outFindInput.value && outputFindHistory) outFindInput.value = MNSearchHistory.last("text");
     recomputeOutputFind(true);
     outFindInput.focus(); outFindInput.select();
   };
@@ -1984,15 +1997,21 @@ async function renderCode(file, host, ext, profile, runCtx){
   outPanel.append(outHeadActions, outFindBar, outFindLayer);
   outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
   outFindBtn.addEventListener("click", () => outputFindOpen ? closeOutputFind(false) : openOutputFind());
+  // 최근 검색어 — 실행 결과에서도 편집기와 같은 목록(text 구획)을 쓴다. 오류 문구를 편집기에서 그대로 찾는 흐름이 잦다.
+  const outputFindHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(outFindInput, { scope: "text", mount: outFindBar, className: "search-history-row",
+        onPick: () => scheduleOutputFind(true, 0) })
+    : null;
+  const rememberOutputFind = () => { if (outputFindHistory) outputFindHistory.remember(outFindInput.value); };
   outFindInput.addEventListener("input", (e) => { if (!e.isComposing) scheduleOutputFind(true); });
   outFindInput.addEventListener("compositionend", () => scheduleOutputFind(true, 0));
   outFindInput.addEventListener("keydown", (e) => {
     if (e.isComposing) return;
-    if (e.key === "Enter"){ e.preventDefault(); goOutputFindMatch(e.shiftKey ? -1 : 1); }
+    if (e.key === "Enter"){ e.preventDefault(); rememberOutputFind(); goOutputFindMatch(e.shiftKey ? -1 : 1); }
     else if (e.key === "Escape"){ e.preventDefault(); closeOutputFind(); }
   });
-  outFindPrev.addEventListener("click", () => { goOutputFindMatch(-1); outFindInput.focus(); });
-  outFindNext.addEventListener("click", () => { goOutputFindMatch(1); outFindInput.focus(); });
+  outFindPrev.addEventListener("click", () => { rememberOutputFind(); goOutputFindMatch(-1); outFindInput.focus(); });
+  outFindNext.addEventListener("click", () => { rememberOutputFind(); goOutputFindMatch(1); outFindInput.focus(); });
   outFindClose.addEventListener("click", () => closeOutputFind());
   outHideBtn.addEventListener("click", () => {
     if (outputFindOpen) closeOutputFind(false);

@@ -1056,6 +1056,20 @@ function nbCurrentSelectionText(){
   return "";
 }
 
+// 찾기 옵션 버튼(Aa·\b·.*)의 켜짐 표시를 현재 state 에 맞춘다(최근 검색어로 옵션까지 되살릴 때 필요).
+function nbSyncNotebookFindOptionButtons(ownerDoc){
+  const state = ownerDoc && ownerDoc._nbFind;
+  if (!state) return;
+  state.panel.querySelector('[data-opt="case"]').classList.toggle("on", !!state.caseSensitive);
+  state.panel.querySelector('[data-opt="word"]').classList.toggle("on", !!state.word);
+  state.panel.querySelector('[data-opt="regex"]').classList.toggle("on", !!state.regex);
+}
+// 실제로 찾은·바꾼 순간에만 남긴다('바꿀 내용'은 기록하지 않는다).
+function nbRememberNotebookFind(ownerDoc){
+  const state = ownerDoc && ownerDoc._nbFind;
+  if (!state || !state.history) return;
+  state.history.remember(state.input.value, { case: !!state.caseSensitive, word: !!state.word, regex: !!state.regex });
+}
 function nbOpenNotebookFind(ownerDoc){
   const state = ownerDoc && ownerDoc._nbFind;
   if (!state) return;
@@ -1064,6 +1078,19 @@ function nbOpenNotebookFind(ownerDoc){
     state.input.value = sel;
     state.index = -1;
     state.navigated = false;
+  } else if (!state.input.value && state.history){
+    // 선택한 글자도, 적혀 있던 것도 없으면 마지막으로 찾던 말을 채워 준다.
+    const rows = MNSearchHistory.list("notebook");
+    if (rows.length){
+      state.input.value = rows[0].q;
+      const meta = rows[0].meta;
+      if (meta){
+        state.caseSensitive = !!meta.case; state.word = !!meta.word; state.regex = !!meta.regex;
+        nbSyncNotebookFindOptionButtons(ownerDoc);
+      }
+      state.index = -1;
+      state.navigated = false;
+    }
   }
   state.panel.hidden = false;
   nbRefreshNotebookFind(ownerDoc);
@@ -1158,6 +1185,7 @@ function nbBuildFindPanel(ownerDoc){
       '<button type="button" data-opt="case" title="대소문자 구분">Aa</button>' +
       '<button type="button" data-opt="word" title="단어 단위">\\b</button>' +
       '<button type="button" data-opt="regex" title="정규식">.*</button>' +
+      '<button type="button" class="search-history-toggle" title="최근 검색어 (↓)" aria-expanded="false">최근</button>' +
       '<button type="button" data-nav="prev" title="이전">↑</button>' +
       '<button type="button" data-nav="next" title="다음">↓</button>' +
       '<button type="button" data-do="close" title="닫기">✕</button>' +
@@ -1185,11 +1213,11 @@ function nbBuildFindPanel(ownerDoc){
     nbRefreshNotebookFind(ownerDoc, 0);
   });
   state.input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter"){ event.preventDefault(); nbMoveNotebookFind(ownerDoc, event.shiftKey ? -1 : 1); }
+    if (event.key === "Enter"){ event.preventDefault(); nbRememberNotebookFind(ownerDoc); nbMoveNotebookFind(ownerDoc, event.shiftKey ? -1 : 1); }
     else if (event.key === "Escape"){ event.preventDefault(); nbCloseNotebookFind(ownerDoc); }
   });
   state.replace.addEventListener("keydown", (event) => {
-    if (event.key === "Enter"){ event.preventDefault(); nbReplaceNotebookCurrent(ownerDoc); }
+    if (event.key === "Enter"){ event.preventDefault(); nbRememberNotebookFind(ownerDoc); nbReplaceNotebookCurrent(ownerDoc); }
     else if (event.key === "Escape"){ event.preventDefault(); nbCloseNotebookFind(ownerDoc); }
   });
   panel.querySelectorAll("[data-opt]").forEach(button => button.addEventListener("click", () => {
@@ -1203,10 +1231,31 @@ function nbBuildFindPanel(ownerDoc){
     nbRefreshNotebookFind(ownerDoc, 0);
     state.input.focus();
   }));
-  panel.querySelector('[data-nav="prev"]').addEventListener("click", () => nbMoveNotebookFind(ownerDoc, -1));
-  panel.querySelector('[data-nav="next"]').addEventListener("click", () => nbMoveNotebookFind(ownerDoc, 1));
-  panel.querySelector('[data-do="one"]').addEventListener("click", () => nbReplaceNotebookCurrent(ownerDoc));
-  panel.querySelector('[data-do="all"]').addEventListener("click", () => nbReplaceNotebookAll(ownerDoc));
+  // 최근 검색어 — 노트북은 notebook 구획에 따로 쌓고, 찾기 옵션까지 함께 되살린다.
+  const historyButton = panel.querySelector(".search-history-toggle");
+  state.history = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(state.input, {
+        scope: "notebook",
+        mount: panel,
+        toggleButton: historyButton,
+        onPick: (term, meta) => {
+          if (meta){
+            state.caseSensitive = !!meta.case; state.word = !!meta.word; state.regex = !!meta.regex;
+            nbSyncNotebookFindOptionButtons(ownerDoc);
+          }
+          state.index = -1; state.navigated = false;
+          nbRefreshNotebookFind(ownerDoc, 0);
+        }
+      })
+    : null;
+  if (state.history){
+    historyButton.addEventListener("mousedown", (e) => e.preventDefault());   // 입력창 blur 로 목록이 곧바로 닫히지 않게
+    historyButton.addEventListener("click", () => { state.history.toggle(true); state.input.focus(); });
+  } else historyButton.hidden = true;
+  panel.querySelector('[data-nav="prev"]').addEventListener("click", () => { nbRememberNotebookFind(ownerDoc); nbMoveNotebookFind(ownerDoc, -1); });
+  panel.querySelector('[data-nav="next"]').addEventListener("click", () => { nbRememberNotebookFind(ownerDoc); nbMoveNotebookFind(ownerDoc, 1); });
+  panel.querySelector('[data-do="one"]').addEventListener("click", () => { nbRememberNotebookFind(ownerDoc); nbReplaceNotebookCurrent(ownerDoc); });
+  panel.querySelector('[data-do="all"]').addEventListener("click", () => { nbRememberNotebookFind(ownerDoc); nbReplaceNotebookAll(ownerDoc); });
   panel.querySelector('[data-do="close"]').addEventListener("click", () => nbCloseNotebookFind(ownerDoc));
   return panel;
 }

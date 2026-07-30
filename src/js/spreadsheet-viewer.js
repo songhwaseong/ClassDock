@@ -5178,8 +5178,8 @@ async function renderXlsx(file, host, doc){
     const findInput = document.createElement("input"); findInput.type = "search"; findInput.className = "xlsx-sortcol xlsx-find-input"; findInput.placeholder = "찾을 내용";
     const replInput = document.createElement("input"); replInput.type = "search"; replInput.className = "xlsx-sortcol xlsx-find-input"; replInput.placeholder = "바꿀 내용";
     const replaceBtn = document.createElement("button"); replaceBtn.type = "button"; replaceBtn.textContent = "모두 바꾸기"; replaceBtn.title = "현재 시트(선택이 있으면 선택 범위)에서 모두 바꾸기 · 대소문자 무시";
-    replaceBtn.onclick = () => replaceAllInSheet(findInput.value, replInput.value);
-    replInput.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); replaceAllInSheet(findInput.value, replInput.value); } e.stopPropagation(); });
+    replaceBtn.onclick = () => { rememberSheetFind(); replaceAllInSheet(findInput.value, replInput.value); };
+    replInput.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); rememberSheetFind(); replaceAllInSheet(findInput.value, replInput.value); } e.stopPropagation(); });
     findInput.addEventListener("keydown", (e) => e.stopPropagation());
 
     // ----- 조건부 강조 -----
@@ -5334,6 +5334,15 @@ async function renderXlsx(file, host, doc){
     const alignGroup = makeGroup("", "xlsx-editgroup-align", alignLeftBtn, alignCenterBtn, alignRightBtn, vAlignSel, wrapBtn, numSel);
     const formatMenu = makeMenu("채우기·테두리", "xlsx-tool-menu-format", fillWrap, fillBtn, borderWrap, borderStyleSel, borderWhereSel, borderBtn, clearFmtBtn, copyFmtBtn, pasteFmtBtn);
     const findMenu = makeMenu("찾기·바꿈", "xlsx-tool-menu-find", findInput, replInput, replaceBtn);
+    // 최근 검색어(sheet 구획) — 찾을 내용에만 붙인다. 여기서 '바꿀 내용'은 기억하지 않는다.
+    // 자동 채우기도 하지 않는다: 이 메뉴의 동작은 '모두 바꾸기' 하나뿐이라, 지난 검색어가 미리 들어가 있으면
+    // 엉뚱한 대상을 한꺼번에 바꿔 버릴 수 있다. 목록에서 직접 고른 것만 들어간다.
+    const sheetFindHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
+      ? MNSearchHistory.attach(findInput, { scope: "sheet", mount: findMenu.panel })
+      : null;
+    // 메뉴 패널은 "버튼을 누르면 닫는다" 규칙이라, 목록 항목 클릭이 메뉴를 닫지 않게 여기서 막는다.
+    if (sheetFindHistory) sheetFindHistory.panel.addEventListener("click", (e) => e.stopPropagation());
+    const rememberSheetFind = () => { if (sheetFindHistory) sheetFindHistory.remember(findInput.value); };
     const condMenu = makeMenu("조건부 강조", "xlsx-tool-menu-cond", condSel, condVal, condColor, condBtn);
     const cfMenu = makeMenu("조건부 서식", "xlsx-tool-menu-cf", cfKind, cfOp, cfVal, cfVal2, cfColor2, cfColor, cfAddBtn, cfManageBtn);
     const dvMenu = makeMenu("유효성 드롭다운", "xlsx-tool-menu-dv", dvInput, dvApplyBtn, dvRemoveBtn);
