@@ -313,7 +313,7 @@
     opacity:0;pointer-events:none;transition:opacity .18s ease;cursor:pointer}
   #sidebarBackdrop.is-open{opacity:1;pointer-events:auto}
   .sb-title{position:relative;z-index:65;display:flex;align-items:center;gap:8px;font-size:12px;color:#94a3b8;padding:14px 14px 8px;letter-spacing:.03em}
-  .sb-search{flex:0 0 auto;display:flex;align-items:center;gap:7px;margin:0 8px 7px;padding:0 8px;height:34px;
+  .sb-search{position:relative;flex:0 0 auto;display:flex;align-items:center;gap:7px;margin:0 8px 7px;padding:0 8px;height:34px;
     border:1px solid rgba(255,255,255,.12);border-radius:8px;background:rgba(255,255,255,.05);color:#94a3b8}
   .sb-search:focus-within{border-color:var(--accent);background:rgba(255,255,255,.08);color:#cbd5e1}
   .sb-search svg{flex:0 0 auto;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
@@ -3411,12 +3411,16 @@
   .search-history-row{flex:0 0 100%}
   .ro-find,.out-find-bar{flex-wrap:wrap}
   .out-find-bar .search-history{border-top-color:var(--code-border)}
-  /* 사이드바는 언제나 어두운 배색이라 변수 대신 사이드바 색을 그대로 쓴다 */
-  .sb-search-history{margin:0 8px 7px;padding-top:0;border-top:0}
+  /* 사이드바는 언제나 어두운 배색이라 변수 대신 사이드바 색을 그대로 쓴다.
+     여기서는 흐름 안이 아니라 검색란 아래로 띄운다 — 검색어가 쌓일수록 파일 목록이 밀려 내려가면
+     "파일을 찾으려고 연 검색"이 정작 파일 목록을 가려 버린다. */
+  .sb-search-history{position:absolute;z-index:70;top:calc(100% + 5px);left:0;right:0;
+    padding:6px;border:1px solid rgba(255,255,255,.14);border-radius:9px;background:var(--sidebar);
+    box-shadow:0 14px 32px rgba(0,0,0,.45)}
   .sb-search-history .search-history-head{padding:0 4px 3px}
   .sb-search-history .search-history-head strong,.sb-search-history .search-history-clear{color:#64748b}
   .sb-search-history .search-history-clear:hover{color:#f87171}
-  .sb-search-history .search-history-list{max-height:min(180px,28vh)}
+  .sb-search-history .search-history-list{max-height:min(320px,46vh)}   /* 목록 위에 떠 있으므로 12개까지 그대로 보인다 */
   .sb-search-history .search-history-pick{color:#cbd5e1;font-size:12px}
   .sb-search-history .search-history-pick:hover,.sb-search-history .search-history-pick.is-active{
     background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}

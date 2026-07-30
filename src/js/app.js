@@ -342,11 +342,12 @@ function wire(){
   sidebarSearch.addEventListener("input", onSidebarSearchInput);
   // 최근 검색어 드롭다운 — 입력창이 비어 있을 때(또는 ↓ 키) 지난 검색어를 보여주고, 고르면 바로 검색한다.
   // 기록은 Enter 를 눌렀거나 검색창을 떠날 때만 남긴다(타이핑 중간값이 쌓이지 않게).
+  // 검색란 안에 담아 그 아래로 띄운다(흐름 안에 넣으면 검색어가 쌓일수록 파일 목록이 아래로 밀린다).
   const sidebarSearchHistory = (typeof MNSearchHistory === "object" && MNSearchHistory)
     ? MNSearchHistory.attach(sidebarSearch, {
         scope: "files",
         className: "sb-search-history",
-        insertAfter: sidebarSearch.closest(".sb-search"),
+        mount: sidebarSearch.closest(".sb-search"),
         onPick: () => onSidebarSearchInput()
       })
     : null;

@@ -34,9 +34,18 @@ test.describe("사이드바 통합검색", () => {
 
     const panel = page.locator(".sb-search-history");
     await expect(panel).toBeHidden();
+    const listTop = async () => (await page.locator("#sbList").boundingBox()).y;
+    const before = await listTop();
     await page.locator("#sbSearch").focus();
     await expect(panel).toBeVisible();
     await expect(panel.locator(".search-history-pick")).toHaveText(["성적표", "학생부"]);
+    // 목록은 파일 목록 위에 떠야 한다 — 흐름 안에 들어가면 검색어가 쌓일수록 파일이 아래로 밀린다.
+    expect(await listTop()).toBe(before);
+    expect(await page.evaluate(() => {
+      const box = document.querySelector(".sb-search-history").getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + 8);
+      return !!(hit && hit.closest(".sb-search-history"));
+    })).toBe(true);
 
     await panel.locator(".search-history-pick", { hasText: "학생부" }).click();
     await expect(panel).toBeHidden();
