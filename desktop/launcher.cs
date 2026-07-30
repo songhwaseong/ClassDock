@@ -799,7 +799,8 @@ class PdfSignerLauncher
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
             if (path.StartsWith("/app-state", StringComparison.Ordinal)) return true;
-            if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec" || path == "/save-file") return true;
+            if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec"
+                || path == "/save-file" || path == "/save-file-exists") return true;
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
             if (path == "/choose-source-folder" || path == "/source-folder-restore") return true;
             if (path.StartsWith("/source-folder-file", StringComparison.Ordinal)
@@ -1769,6 +1770,28 @@ class PdfSignerLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("image-memo-delete-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/save-file-exists")
+                {
+                    // 새 문서의 첫 저장 전에 SaveRoot의 기존 파일과 충돌하는지 확인한다.
+                    try
+                    {
+                        string rel = headers.ContainsKey("X-Save-Path") ? Uri.UnescapeDataString(headers["X-Save-Path"]) : "";
+                        string safe = SafeRelPath(rel);
+                        string full;
+                        if (safe == null || !TryResolveSaveRootPath(safe, out full))
+                        {
+                            WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-save-path"));
+                            return;
+                        }
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8",
+                            Encoding.UTF8.GetBytes(File.Exists(full) ? "yes" : "no"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8",
+                            Encoding.UTF8.GetBytes("save-exists-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (method == "POST" && path == "/save-file")

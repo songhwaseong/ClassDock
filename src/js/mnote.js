@@ -291,6 +291,13 @@ function newMnoteScratch(){
     handleFiles([new File([starter], name, { type:"application/json" })], { isScratch:true });
   }
 }
+// 폴더 우클릭에서 만든 블록 문서 — 제목은 확정된 파일 이름을 따라간다(번호가 붙으면 제목도 같이).
+function newMnoteScratchInFolder(folder){
+  if (typeof createScratchInFolder !== "function") return false;
+  return createScratchInFolder(folder, mnoteScratchFileName,
+    (name) => mnoteSerialize(mnoteEmpty(name.replace(/\.mnote$/i, ""))),
+    "application/json", "새 블록 문서를");
+}
 
 /* ===== 저장 ===== */
 async function saveMnote(doc){

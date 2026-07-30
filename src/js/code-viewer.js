@@ -2283,27 +2283,10 @@ async function renderCode(file, host, ext, profile, runCtx){
       const canSaveViaServer = !saveToOriginal && await saveFileBackendAvailable();
       // EXE 자동 저장과 원본 폴더의 새 파일 생성은 별도 파일 선택 창이 없으므로 첫 저장 전에 이름을 정한다.
       if ((saveToOriginal || canSaveViaServer) && ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
-        const base = String(ownerDoc.name || name).replace(/\.py$/i, "");
-        const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
-          placeholder: "예: 연습", value: base, okText: "저장" });
-        if (typed === null) return;                            // 취소 → 저장 안 함
-        let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim();
-        if (!fname) fname = base || "새 코드";
-        if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ".py";
-        const currentPath = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || "");
-        const currentDir = runPathDir(currentPath);
-        const nextPath = currentDir ? currentDir + "/" + fname : fname;
-        ownerDoc.name = fname; ownerDoc.workspacePath = nextPath;
-        if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
-        ownerDoc._named = true;
-        name = fname;
-        if (typeof state !== "undefined" && state === ownerDoc){
-          const hdr = byId("activeFileName");
-          if (hdr){ hdr.textContent = fname; const c = extCategory(ownerDoc.kind, fname); if (c) hdr.dataset.cat = c; }
-        }
-        if (typeof renderTabs === "function") renderTabs();
-        renderSidebar();
-        if (saveToOriginal) setSavedPath(nextPath, { original:true, pending:true });
+        const named = await askScratchSaveName(ownerDoc, name, { fallbackExt:".py", placeholder:"예: 연습" });
+        if (named === null) return;                            // 취소 → 저장 안 함
+        name = named;
+        if (saveToOriginal) setSavedPath(ownerDoc.workspacePath, { original:true, pending:true });
       }
       // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\만능교실 저장).
       if (canSaveViaServer){
@@ -2836,6 +2819,92 @@ function downloadTextFile(text, name){
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// 새로 만든 문서의 첫 저장에 파일 이름을 받는다 — 원본 폴더·EXE 서버 저장에는 OS 저장 대화상자가
+// 없어서, 여기서 묻지 않으면 "새 표.xlsx" 같은 임시 이름이 그대로 디스크에 박힌다.
+// (.py 가 쓰던 방식을 표·텍스트·노트북·블록 문서까지 공유한다.)
+// 자동 저장·일괄 저장에서는 절대 부르지 않는다 — 타이핑 도중 창이 뜨면 안 된다.
+// 반환: 확정한 파일 이름 | null(사용자가 취소 → 저장하지 않음)
+async function scratchOriginalFolderPathExists(ownerDoc, path){
+  if (!ownerDoc || !ownerDoc.originalSaveMode || typeof originalSaveRootForDoc !== "function") return false;
+  try {
+    const root = originalSaveRootForDoc(ownerDoc);
+    if (!root) return false;
+    let rootHandle = root.folderHandle || null;
+    if (!rootHandle && typeof loadRememberedFolderHandle === "function"){
+      rootHandle = await loadRememberedFolderHandle(root.name);
+      if (rootHandle) root.folderHandle = rootHandle;
+    }
+    if (!rootHandle || typeof rootHandle.getDirectoryHandle !== "function") return false;
+    const parts = normalizedRunPath(path).split("/").filter(Boolean);
+    if (parts[0] === root.name) parts.shift();
+    if (!parts.length || parts.some(part => part === "." || part === "..")) return false;
+    const fileName = parts.pop();
+    let dirHandle = rootHandle;
+    for (const part of parts) dirHandle = await dirHandle.getDirectoryHandle(part);
+    await dirHandle.getFileHandle(fileName);
+    return true;
+  } catch(error){
+    return false;
+  }
+}
+async function scratchBackendPathExists(path){
+  if (typeof location === "undefined" || (location.protocol !== "http:" && location.protocol !== "https:")
+      || typeof saveFileBackendAvailable !== "function" || !(await saveFileBackendAvailable())) return false;
+  try {
+    const response = await fetch("/save-file-exists", {
+      method:"POST",
+      headers:{ "X-Save-Path":encodeURIComponent(normalizedRunPath(path)) }
+    });
+    return response.ok && (await response.text()).trim().toLowerCase() === "yes";
+  } catch(_){
+    return false;
+  }
+}
+async function scratchSavePathExists(ownerDoc, path){
+  const key = normalizedRunPath(path).toLowerCase();
+  if (typeof docs !== "undefined" && docs.some(doc => doc !== ownerDoc
+      && normalizedRunPath(doc.workspacePath || doc.relPath || doc.name || "").toLowerCase() === key)) return true;
+  if (ownerDoc && ownerDoc.originalSaveMode) return scratchOriginalFolderPathExists(ownerDoc, path);
+  return scratchBackendPathExists(path);
+}
+async function askScratchSaveName(ownerDoc, name, options={}){
+  const current = String((ownerDoc && ownerDoc.name) || name || "");
+  const extMatch = current.match(/\.[^.\\/]+$/);
+  const ext = extMatch ? extMatch[0] : (options.fallbackExt || ".txt");
+  const base = current.replace(/\.[^.\\/]+$/, "");
+  const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
+    placeholder: options.placeholder || "예: 연습", value: base, okText: "저장" });
+  if (typed === null) return null;
+  let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim() || base || "새 파일";
+  if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ext;
+  // 폴더 안에서 만든 문서는 그 폴더 경로를 유지한 채 파일명만 바꾼다.
+  const currentDir = runPathDir(normalizedRunPath((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath)) || ""));
+  const nextPath = currentDir ? currentDir + "/" + fname : fname;
+  if (await scratchSavePathExists(ownerDoc, nextPath)){
+    if (typeof confirmDialog !== "function"
+        || !(await confirmDialog("'" + fname + "' 파일이 이미 있습니다. 기존 파일을 덮어쓸까요?", "덮어쓰기", "취소"))){
+      return null;
+    }
+  }
+  if (ownerDoc){
+    ownerDoc.name = fname;
+    ownerDoc.workspacePath = nextPath;
+    if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
+    ownerDoc._named = true;
+    if (typeof state !== "undefined" && state === ownerDoc){
+      const hdr = byId("activeFileName");
+      if (hdr){
+        hdr.textContent = fname;
+        const cat = (typeof extCategory === "function") ? extCategory(ownerDoc.kind, fname) : "";
+        if (cat) hdr.dataset.cat = cat;
+      }
+    }
+  }
+  if (typeof renderTabs === "function") renderTabs();
+  if (typeof renderSidebar === "function") renderSidebar();
+  return fname;
+}
+
 // 텍스트/코드 파일 저장(.py 외 — 노트북 .ipynb 포함): EXE면 서버에 원래 확장자로 저장,
 // 아니면 .py 저장과 동일하게 위치를 한 번 고르고 핸들을 보관해 같은 파일에 덮어쓰기, 마지막 폴백이 다운로드.
 // 스크래치 첫 저장은 이름을 받는다.
@@ -2852,6 +2921,16 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     const wantOriginal = !!(ownerDoc && ownerDoc.originalSaveMode);
     const fromFolderOriginal = !!(ownerDoc && ownerDoc.archiveCtx && ownerDoc.archiveCtx.isFolderContext
       && ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function");
+    // 저장 대화상자 없이 바로 쓰는 경로(원본 폴더·EXE 서버)라면 새 문서의 이름을 먼저 확정한다.
+    // 원본 폴더 저장도 파일을 새로 만들 수 있으므로(.py 와 동일) 서버 저장과 같은 규칙을 적용한다.
+    if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named
+        && (wantOriginal || fromFolderOriginal || await saveFileBackendAvailable())){
+      // 조용한 일괄 저장·자동 저장: 이름을 물어야 하는 문서는 건드리지 않고 수동 저장을 기다린다.
+      if (existingOnly) return "skipped";
+      const named = await askScratchSaveName(ownerDoc, name, { fallbackExt:".txt", placeholder:"예: 메모" });
+      if (named === null) return false;
+      name = named;
+    }
     if (wantOriginal || fromFolderOriginal){
       const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
@@ -2875,24 +2954,6 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       }
     }
     if (await saveFileBackendAvailable()){
-      // 조용한 일괄 저장: 아직 이름 없는 새 문서는 이름을 물어야 하므로 건너뛴다.
-      if (existingOnly && ownerDoc && ownerDoc.isScratch && !ownerDoc._named) return "skipped";
-      if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
-        const m = String(name).match(/\.[^.\\/]+$/); const ext0 = m ? m[0] : ".txt";
-        const base = String(ownerDoc.name || name).replace(/\.[^.\\/]+$/, "");
-        const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.", placeholder: "예: 메모", value: base, okText: "저장" });
-        if (typed === null) return false;
-        let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim() || base || "새 파일";
-        if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ext0;
-        const currentPath = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || "");
-        const currentDir = runPathDir(currentPath);
-        const nextPath = currentDir ? currentDir + "/" + fname : fname;
-        ownerDoc.name = fname; ownerDoc.workspacePath = nextPath; ownerDoc._named = true; name = fname;
-        if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
-        if (typeof renderTabs === "function") renderTabs();
-        if (typeof renderSidebar === "function") renderSidebar();
-        const hdr = byId("activeFileName"); if (hdr && typeof state !== "undefined" && state === ownerDoc) hdr.textContent = fname;
-      }
       const path = await saveViaServer(outValue, ownerDoc, name);
       if (path){
         if (ownerDoc){ ownerDoc.size = new Blob([value]).size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
@@ -2970,10 +3031,17 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
 
 // 새 빈 텍스트 파일(.txt) — renderCode 의 편집 토글로 열려 바로 편집·저장.
 let _textScratchCount = 0;
+function textScratchFileName(number=1){
+  return number > 1 ? ("새 메모 " + number + ".txt") : "새 메모.txt";
+}
 function newTextScratch(){
   _textScratchCount++;
-  const name = _textScratchCount > 1 ? ("새 메모 " + _textScratchCount + ".txt") : "새 메모.txt";
+  const name = textScratchFileName(_textScratchCount);
   if (typeof handleFiles === "function") handleFiles([new File([""], name, { type: "text/plain" })], { isScratch: true });
+}
+// 폴더 우클릭에서 만든 텍스트 파일은 그 폴더 문맥을 이어받는다(이름 충돌은 번호로 회피).
+function newTextScratchInFolder(folder){
+  return createScratchInFolder(folder, textScratchFileName, () => "", "text/plain", "새 텍스트 파일을");
 }
 
 // ===== 저장 위치(파일 핸들)를 IndexedDB 에 보관 → 프로그램 재실행 후에도 같은 파일에 저장(위치 재선택 불필요) =====
@@ -3258,23 +3326,31 @@ function pythonScratchFileName(number=1){
   const base = typeof window.t === "function" ? window.t("새 코드") : "새 코드";
   return base + (number > 1 ? " " + number : "") + ".py";
 }
-function createPythonScratchInFolder(folder){
+// 폴더 우클릭으로 만드는 새 문서의 공통 처리 — 종류(.py/.ipynb/.txt/.mnote/.xlsx)마다 같은 규칙을 쓴다.
+//  · makeName(번호): 1 이면 기본 이름, 2 이상이면 번호를 붙인 이름 → 같은 폴더 안 이름 충돌 회피
+//  · makeContent(이름): 파일 내용(문자열·바이트). 이름을 본문에 넣는 형식(.mnote)까지 지원하려고 콜백으로 받는다.
+//  · 폴더 문맥(parentId·archiveCtx·relPath)과 원본 저장 모드를 그대로 물려줘야 첫 저장이 그 폴더 원본에 떨어진다.
+function createScratchInFolder(folder, makeName, makeContent, mime, noticeLabel){
   if (!folder || !folder.parentId || !folder.archiveCtx || !folder.dir) return false;
-  const starter = pythonScratchStarter();
   const dir = normalizedRunPath(folder.dir);
   if (!dir) return false;
-  // 같은 폴더 안에서 이름이 겹치지 않게 정한다.
   const taken = new Set(docs.map(d => normalizedRunPath(d.workspacePath || d.relPath || "")));
-  let name = pythonScratchFileName();
-  for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = pythonScratchFileName(n);
+  let name = makeName(1);
+  for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = makeName(n);
   const relPath = dir + "/" + name;
   const originalRoot = typeof originalSaveRootForDoc === "function"
     ? originalSaveRootForDoc({ parentId:folder.parentId }) : null;
-  handleFiles([new File([starter], name, { type: "text/x-python" })],
+  handleFiles([new File([makeContent(name)], name, { type: mime })],
     { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath,
       originalSaveMode:!!(originalRoot && originalRoot.originalSaveMode) });
-  if (typeof toast === "function") toast("'" + (folder.label || dir.split("/").pop() || dir) + "' 폴더 안에 새 Python 파일을 만들었어요.", 3000);
+  if (typeof toast === "function" && noticeLabel){
+    toast("'" + (folder.label || dir.split("/").pop() || dir) + "' 폴더 안에 " + noticeLabel + " 만들었어요.", 3000);
+  }
   return true;
+}
+function createPythonScratchInFolder(folder){
+  return createScratchInFolder(folder, pythonScratchFileName, pythonScratchStarter,
+    "text/x-python", "새 Python 파일을");
 }
 function newPythonScratchInFolder(folder){
   _scratchCount++;

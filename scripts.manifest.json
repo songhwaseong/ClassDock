@@ -188,7 +188,8 @@
       "python-runtime.js"
     ],
     "notebook-model.js": [
-      "documents.js"
+      "documents.js",
+      "code-viewer.js"
     ],
     "notebook-tools.js": [
       "notebook-model.js"
@@ -203,7 +204,8 @@
     ],
     "spreadsheet-viewer.js": [
       "office-doc-viewers.js",
-      "documents.js"
+      "documents.js",
+      "code-viewer.js"
     ],
     "spreadsheet-chart.js": [
       "spreadsheet-viewer.js"

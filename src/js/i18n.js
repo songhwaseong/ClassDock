@@ -414,6 +414,12 @@
     "빈 Python 편집기 만들기": "Create a blank Python editor",
     "＋ 새 폴더": "＋ New folder",
     "새 폴더": "New folder",
+    // 폴더 우클릭 메뉴의 '새로 만들기' 묶음
+    "+Py  새 Python 코드": "+Py  New Python code",
+    "+Nb  새 노트북": "+Nb  New notebook",
+    "+Xls  새 빈 표": "+Xls  New spreadsheet",
+    "+Txt  새 텍스트 파일": "+Txt  New text file",
+    "+Mn  새 블록 문서": "+Mn  New block document",
     "우클릭한 폴더 안에 실제 폴더를 만듭니다.": "Create a real folder inside the selected folder.",
     "이전 수업 파일": "Previous lesson file",
     "이전 열린 탭으로 이동": "Move to the previous open tab",

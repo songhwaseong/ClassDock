@@ -200,26 +200,46 @@ function spreadsheetDirectSaveKind(doc){
   if (!doc) return "";
   if (doc.fsHandle) return "existing";
   if (doc.convertedFromCsv) return "create";
+  // 폴더 우클릭으로 만든 새 표는 아직 파일 핸들이 없다. 원본 폴더 문맥을 물려받았으면
+  // 저장 위치를 다시 묻지 않고 그 폴더에 파일을 새로 만든다(saveViaFileHandle 의 create 분기).
+  if (doc.isScratch && doc.originalSaveMode) return "create";
   return "";
 }
 
 // 새 빈 표(스프레드시트) 만들기 — 유효한 빈 XLSX(12행×6열)를 생성해 열고, 바로 편집 모드로 진입(isScratch).
 let _sheetScratchCount = 0;
-async function newSpreadsheetScratch(){
+const SPREADSHEET_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function spreadsheetScratchFileName(number=1){
+  return number > 1 ? ("새 표 " + number + ".xlsx") : "새 표.xlsx";
+}
+// 빈 XLSX 바이트 만들기 — XLSX 라이브러리를 지연 로드한 뒤 호출한다. 실패하면 null.
+async function spreadsheetScratchBytes(){
   if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("xlsx");   // 표를 만들 때 처음 로드
-  if (typeof XLSX === "undefined"){ toast("Excel 라이브러리를 불러오지 못했어요.", 2400); return; }
-  _sheetScratchCount++;
+  if (typeof XLSX === "undefined"){ toast("Excel 라이브러리를 불러오지 못했어요.", 2400); return null; }
   const rows = 12, cols = 6;
   const aoa = Array.from({ length: rows }, () => new Array(cols).fill(""));
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws["!ref"] = "A1:" + spreadsheetColumnName(cols - 1) + rows;   // 빈 셀이라도 격자 크기를 고정
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-  const name = _sheetScratchCount > 1 ? ("새 표 " + _sheetScratchCount + ".xlsx") : "새 표.xlsx";
-  const file = new File([out], name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+}
+async function newSpreadsheetScratch(){
+  const out = await spreadsheetScratchBytes();
+  if (!out) return;
+  _sheetScratchCount++;
+  const name = spreadsheetScratchFileName(_sheetScratchCount);
+  const file = new File([out], name, { type: SPREADSHEET_MIME });
   if (typeof handleFiles === "function") handleFiles([file], { isScratch: true });
   if (typeof toast === "function") toast("새 빈 표를 만들었어요. 셀을 더블클릭해 입력하세요.", 3200);
+}
+// 폴더 우클릭에서 만든 빈 표 — 폴더 문맥을 이어받아 첫 저장이 그 폴더로 떨어진다.
+async function newSpreadsheetScratchInFolder(folder){
+  if (typeof createScratchInFolder !== "function") return false;
+  const out = await spreadsheetScratchBytes();
+  if (!out) return false;
+  return createScratchInFolder(folder, spreadsheetScratchFileName, () => out,
+    SPREADSHEET_MIME, "새 빈 표를");
 }
 
 function enhanceSpreadsheetSelection(sheet, label, opts={}){
@@ -2102,7 +2122,7 @@ async function renderXlsx(file, host, doc){
 
   // ===== 내보내기: 현재 시트를 CSV/XLSX 로, 또는 전체 통합문서를 XLSX 로 다운로드 =====
   let currentSheet = wb.SheetNames[0];
-  const base = sheetBaseName(file.name);
+  let base = sheetBaseName(file.name);   // 첫 저장에서 이름을 바꾸면 내보내기 파일 이름도 따라간다
   const exp = document.createElement("div"); exp.className = "xlsx-export";
   const expLabel = document.createElement("span"); expLabel.className = "xlsx-export-label"; expLabel.textContent = "내보내기:";
   const mkExp = (text, title, fn) => {
@@ -4782,6 +4802,18 @@ async function renderXlsx(file, host, doc){
     }
     return true;
   };
+  // 새로 만든 표의 첫 저장에 파일 이름을 받는다. XLSX 다운로드도 a.download 로 바로 내려가
+  // 이름을 묻는 창이 없으므로 저장 방식과 무관하게 항상 거친다.
+  // 반환: 계속 저장해도 되는지(false = 사용자가 취소).
+  const askSpreadsheetScratchName = async () => {
+    if (!doc || !doc.isScratch || doc._named) return true;
+    if (typeof askScratchSaveName !== "function") return true;
+    const named = await askScratchSaveName(doc, doc.name || (base + ".xlsx"),
+      { fallbackExt:".xlsx", placeholder:"예: 성적표" });
+    if (named === null) return false;
+    base = sheetBaseName(named);
+    return true;
+  };
   // Ctrl+S 빠른 저장: 제자리 저장이 되면 원본에 덮어쓰고, 아니면 서식 유지 XLSX 다운로드.
   let quickSaving = false;
   const quickSave = async () => {
@@ -4790,6 +4822,8 @@ async function renderXlsx(file, host, doc){
     try {
       const out = await exportExBytes();
       if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
+      // 새로 만든 표의 첫 저장 — 아래 두 경로에는 저장 대화상자가 없으므로 파일 이름을 먼저 받는다(.py 저장과 동일).
+      if (!(await askSpreadsheetScratchName())) return;
       const direct = await saveBytesToDocumentHandle(out);
       if (await finishDirectSpreadsheetSave(out, direct)) return;
       const savedPath = await saveBytesInPlace(out);
@@ -5212,6 +5246,7 @@ async function renderXlsx(file, host, doc){
       try {
         const out = await exportExBytes();
         if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
+        if (!(await askSpreadsheetScratchName())) return;
         if (doc && doc.convertedFromCsv){
           const direct = await saveBytesToDocumentHandle(out);
           if (await finishDirectSpreadsheetSave(out, direct)) return;
@@ -5370,6 +5405,7 @@ async function renderXlsx(file, host, doc){
         try {
           const out = await exportExBytes();
           if (!out){ toast("저장 준비 실패(다운로드를 이용하세요).", 2600); return; }
+          if (!(await askSpreadsheetScratchName())) return;   // 새 표의 첫 저장이면 이름을 먼저 정한다
           const savedPath = await saveBytesInPlace(out);
           if (savedPath) await markSpreadsheetSaved(out);
           toast(savedPath ? ("저장했어요: " + savedPath) : "제자리 저장 실패(다운로드를 이용하세요).", savedPath ? 2600 : 2800);

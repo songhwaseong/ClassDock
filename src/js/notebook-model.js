@@ -406,35 +406,24 @@ function blankNotebookText(){
   });
 }
 
+function notebookScratchFileName(number=1){
+  return number > 1 ? ("새 노트북 " + number + ".ipynb") : "새 노트북.ipynb";
+}
+
 // 빈 새 노트북(.ipynb) 만들기 — 코드 셀 하나로 시작. 기본 보기가 셀 노트북이라 바로 셀 편집기로 열린다.
 function newNotebookScratch(){
   const blank = blankNotebookText();
   if (typeof handleFiles === "function"){
-    handleFiles([new File([blank], "새 노트북.ipynb", { type: "application/json" })], { isScratch: true });
+    handleFiles([new File([blank], notebookScratchFileName(), { type: "application/json" })], { isScratch: true });
   }
 }
 
 // 폴더 우클릭에서 만든 노트북은 Python 새 파일과 같은 폴더 문맥을 이어받는다.
 // 실제 디스크 기록은 첫 저장 때 이뤄지고, 폴더 안에서 이름이 겹치면 번호를 붙인다.
 function newNotebookScratchInFolder(folder){
-  if (!folder || !folder.parentId || !folder.archiveCtx || !folder.dir) return false;
-  const dir = normalizedRunPath(folder.dir);
-  if (!dir) return false;
-  const taken = new Set(docs.map(doc => normalizedRunPath(doc.workspacePath || doc.relPath || "")));
-  let name = "새 노트북.ipynb";
-  for (let number = 2; taken.has(normalizedRunPath(dir + "/" + name)); number++){
-    name = "새 노트북 " + number + ".ipynb";
-  }
-  const relPath = dir + "/" + name;
-  if (typeof handleFiles === "function"){
-    handleFiles([new File([blankNotebookText()], name, { type: "application/x-ipynb+json" })],
-      { isScratch:true, parentId:folder.parentId, archiveCtx:folder.archiveCtx,
-        relPath, workspacePath:relPath });
-  }
-  if (typeof toast === "function"){
-    toast("'" + (folder.label || dir.split("/").pop() || dir) + "' 폴더 안에 새 노트북을 만들었어요.", 3000);
-  }
-  return true;
+  if (typeof createScratchInFolder !== "function") return false;
+  return createScratchInFolder(folder, notebookScratchFileName, blankNotebookText,
+    "application/x-ipynb+json", "새 노트북을");
 }
 
 // ── 직렬화 ──────────────────────────────────────────────────────────────────

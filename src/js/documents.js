@@ -2332,17 +2332,35 @@ function openSidebarGroupMenu(node, x, y){
     button.addEventListener("click", () => { closeSidebarGroupMenu(); run(); });
     menu.appendChild(button);
   };
+  // 새로 만들기 — 사이드바 '새로 만들기' 메뉴와 같은 종류를 이 폴더 안에 만든다.
+  // (화이트보드는 디스크 파일 형식이 없는 가상 문서라 폴더 안에 만들 수 없어 제외한다.)
   add("+Py  새 Python 코드", () => {
     if (typeof newPythonScratchInFolder === "function") newPythonScratchInFolder(node.newPythonContext);
   });
   add("+Nb  새 노트북", () => {
     if (typeof newNotebookScratchInFolder === "function") newNotebookScratchInFolder(node.newPythonContext);
   });
+  add("+Xls  새 빈 표", () => {
+    if (typeof newSpreadsheetScratchInFolder === "function") newSpreadsheetScratchInFolder(node.newPythonContext);
+  });
+  add("+Txt  새 텍스트 파일", () => {
+    if (typeof newTextScratchInFolder === "function") newTextScratchInFolder(node.newPythonContext);
+  });
+  add("+Mn  새 블록 문서", () => {
+    if (typeof newMnoteScratchInFolder === "function") newMnoteScratchInFolder(node.newPythonContext);
+  });
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {
       if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
     });
   }
+  // '새로 만들기' 묶음과 아래 항목들을 구분선으로 나눈다(줄이 이어지는 구분선 중복은 addSep 이 막는다).
+  const addSep = () => {
+    const last = menu.lastElementChild;
+    if (!last || last.className === "tcx-sep") return;
+    const line = document.createElement("div"); line.className = "tcx-sep"; menu.appendChild(line);
+  };
+  if (node.folderRefreshRootId) addSep();
   if (node.folderRefreshRootId && typeof imageGalleryFolderImageCount === "function" && typeof openFolderImageGallery === "function"){
     const directCount = imageGalleryFolderImageCount(node, false);
     const nestedCount = imageGalleryFolderImageCount(node, true);
@@ -2363,7 +2381,7 @@ function openSidebarGroupMenu(node, x, y){
       add("▶  영상 일괄 MP4 변환 (" + videoTargets.length + "개)", () => vvBatchConvertFolder(node.folderRefreshRootId));
     }
   }
-  const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
+  addSep();
   add(node.expanded ? "폴더 접기" : "폴더 펼치기", () => { node.expanded = !node.expanded; renderSidebar(); });
   document.body.appendChild(menu);
   const pad = 8, mw = menu.offsetWidth, mh = menu.offsetHeight;
@@ -3159,7 +3177,7 @@ function renderSidebar(){
     if (doc && doc.textEncoding) nm.title += " · 인코딩: " + doc.textEncoding.label +
       (doc.textEncoding.sampled ? " (앞부분 검사)" : "");
     if (node.type === "group" && node.newPythonContext){
-      nm.title += " · 우클릭: 새 Python 코드·노트북" +
+      nm.title += " · 우클릭: 새 Python 코드·노트북·표·텍스트·블록 문서" +
         ((typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)) ? "·폴더" : "") +
         (node.folderRefreshRootId ? " · 동기화" : "");
     }
