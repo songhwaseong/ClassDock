@@ -816,32 +816,70 @@ function petWakeFromQuiet(p){
   if (!p.quiet) return;
   p.quiet = false; p.off = false; p.squash = 0; p.rot = 0;
   p.el.classList.remove("pet-quiet");
+  p.el.classList.remove("pet-quiet-top");
   if (p.state === "drag") return;
   if (p.grav){ p.state = "fall"; p.vx = 0; p.vy = 0; p.t = 0; }
   else petAirRelease(p);
 }
 function petQuietUpdate(p, w){
+  const corner = petQuietCorner(p, w);
   if (!p.quiet){
     p.quiet = true; p.victim = null; p.gTarget = null; p.vx = 0; p.vy = 0;
     p.el.classList.add("pet-quiet");
+    p.el.classList.toggle("pet-quiet-top", corner.sy === 0);   // 위쪽에서 쉴 때는 잠꼬대 "z" 를 발밑으로
     if (p.kind === "ufo") petUfoAbort(p);
     if (p.beam){ p.beam.style.display = "none"; p.beam.style.height = "0px"; }
     if (p.bolt) p.bolt.style.display = "none";
     if (p.thread) p.thread.style.display = "none";
     if (p.chute) p.chute.style.display = "none";
   }
-  const index = Math.max(0, w.pets.indexOf(p));
-  const side = index % 2, slot = Math.floor(index / 2);
+  // 같은 코너에서 쉬는 펫들끼리만 순서를 매겨 나란히 세운다(끌어다 놓아 코너가 섞여도 겹치지 않게)
+  const mates = w.pets.filter(o => {
+    const c = petQuietCorner(o, w);
+    return c.sx === corner.sx && c.sy === corner.sy;
+  });
+  const slot = Math.max(0, mates.indexOf(p));
   const pw = p.w || PET_W, ph = p.h || PET_H;
   const gap = PET_W + 7, margin = 8;
-  const tx = side === 0 ? margin + slot * gap : window.innerWidth - pw - margin - slot * gap;
-  const ty = Math.max(0, window.innerHeight - ph - 6);
+  const bottomY = Math.max(0, window.innerHeight - ph - 6);
+  const tx = corner.sx === 0 ? margin + slot * gap : window.innerWidth - pw - margin - slot * gap;
+  const ty = corner.sy === 1 ? bottomY : Math.min(petQuietTopY(), bottomY);
   p.x += (tx - p.x) * 0.065;
   p.y += (ty - p.y) * 0.065;
-  p.face = side === 0 ? 1 : -1;
+  p.face = corner.sx === 0 ? 1 : -1;
   p.rot = Math.sin(p.t * 0.035) * 2;
   p.squash = 0.08 + (Math.sin(p.t * 0.07) + 1) * 0.025;
   p.off = true;
+}
+
+// 조용히 기다릴 코너 — sx: 0=왼쪽·1=오른쪽, sy: 0=위쪽·1=아래쪽.
+// 직접 끌어다 놓은 코너(p.quietCorner)가 있으면 그쪽에서 기다리고,
+// 없으면 지금까지처럼 좌·우 번갈아 화면 아래쪽에 선다.
+function petQuietCorner(p, w){
+  const c = p.quietCorner;
+  if (c) return c;
+  const index = Math.max(0, w.pets.indexOf(p));
+  return { sx:index % 2, sy:1 };
+}
+
+// 위쪽에서 기다릴 때의 y — 보이는 탭 바 바로 아래에 앉아 탭·툴바 클릭을 가리지 않는다
+function petQuietTopY(){
+  let y = 6;
+  const bar = typeof document !== "undefined" ? document.getElementById("tabBar") : null;
+  if (bar && !bar.closest("[hidden]")){
+    const r = bar.getBoundingClientRect();
+    if (r.height > 0 && r.bottom + 4 > y) y = r.bottom + 4;
+  }
+  return y;
+}
+
+// 조용히 쉬는 중에 끌어다 놓았다면, 놓아 준 자리와 가까운 코너를 그 펫의 대기 자리로 삼는다
+function petQuietRememberCorner(p){
+  const pw = p.w || PET_W, ph = p.h || PET_H;
+  p.quietCorner = {
+    sx:(p.x + pw / 2) < window.innerWidth / 2 ? 0 : 1,
+    sy:(p.y + ph / 2) < window.innerHeight / 2 ? 0 : 1
+  };
 }
 function petSetRhythm(mode){
   const w = petWorld;
@@ -1727,11 +1765,16 @@ function petBindPointer(p){
     dragging = false;
     p.el.style.cursor = "grab";
     if (cancelled){
+      p.quietDrag = false;
       p.vx = 0; p.vy = 0; p.rot = 0;
       if (p.grav){ p.state = "fall"; p.t = 0; }
       else petAirRelease(p);
       return;
     }
+    // 쉬는 중에 실제로 끌어 옮겼다면(짧은 클릭은 제외) 놓은 쪽 코너에서 계속 기다리게 한다.
+    // 붙잡은 순간 이미 쉬고 있었으면, 그 사이 타이핑 조용 시간이 끝났어도 그 뜻을 존중한다.
+    if (moved >= 12 && (p.quietDrag || petWorldIsQuiet(petWorld))) petQuietRememberCorner(p);
+    p.quietDrag = false;
     if (moved < 12){      // 클릭 중 생기는 미세한 포인터 흔들림은 클릭으로 처리한다
       if (p.winkOnClick){
         petStartWink(p);
@@ -1757,6 +1800,7 @@ function petBindPointer(p){
   p.el.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     if (p.petEvent) petEventEnd(p.petEvent, false);             // 연출 중 붙잡으면 발견 처리 없이 자연스럽게 취소
+    p.quietDrag = !!p.quiet;                                    // 쉬던 중에 붙잡았는지 — 놓은 코너를 기억할지 가른다
     if (p.quiet) petWakeFromQuiet(p);                           // 집중 중에도 직접 붙잡는 조작은 즉시 허용
     dragging = true; moved = 0; last = { x:e.clientX, y:e.clientY };
     if (p.kind === "ufo") petUfoAbort(p);                      // 납치 중이었으면 광선을 끄고 피해자를 놓아준다

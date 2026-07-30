@@ -1631,6 +1631,8 @@
     user-select:none;-webkit-user-select:none;touch-action:none;will-change:transform}
   .pixel-pet.pet-quiet::after{content:"z";position:absolute;left:76%;top:-8px;color:#7c8ba1;font:700 11px/1 monospace;
     pointer-events:none;text-shadow:0 1px 0 var(--panel);animation:pet-sleep-z 1.8s ease-in-out infinite}
+  /* 화면 위쪽 코너에서 쉴 때는 "z" 가 화면 밖으로 잘리지 않게 발밑으로 내려 준다 */
+  .pixel-pet.pet-quiet.pet-quiet-top::after{top:auto;bottom:-10px}
   @keyframes pet-sleep-z{0%,100%{opacity:.2;transform:translate(0,3px) scale(.8)}50%{opacity:.9;transform:translate(5px,-4px) scale(1.1)}}
   .pixel-pet canvas{display:block;width:100%;height:100%;image-rendering:pixelated;pointer-events:none}
   .pixel-pet-bubble{--pet-bubble-surface:var(--panel);--pet-bubble-edge:var(--border);--pet-bubble-glow:transparent;
