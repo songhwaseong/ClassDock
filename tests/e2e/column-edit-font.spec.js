@@ -13,6 +13,23 @@ async function openPy(page, body) {
     buffer: Buffer.from(body, "utf8")
   });
   await expect(page.locator("textarea.code-input")).toBeVisible();
+  await settleEditor(page);
+}
+
+// 편집기가 보인 뒤에도 실행 패널(run-wrap/summary)이 자리를 잡으며 편집 영역이 아래로 밀린다.
+// 그 전에 잰 좌표로 드래그하면 시작점이 실행 패널 헤더에 떨어져 열 편집이 아예 시작되지 않는다
+// (한가할 땐 정착이 순식간이라 통과하고, 다른 테스트와 함께 돌 때만 간헐적으로 실패했다).
+// 편집 영역 위치가 연속 프레임에서 더 움직이지 않을 때까지 기다린다.
+async function settleEditor(page) {
+  await page.waitForFunction(() => {
+    const ta = document.querySelector("textarea.code-input");
+    if (!ta) return false;
+    const top = ta.getBoundingClientRect().top;
+    const stable = window.__prevTop !== undefined && Math.abs(window.__prevTop - top) < 0.5;
+    window.__prevTop = top;
+    window.__stableFrames = stable ? (window.__stableFrames || 0) + 1 : 0;
+    return window.__stableFrames >= 5;
+  }, null, { polling: "raf" });
 }
 
 // 편집기 좌표계: 줄 line 의 prefix 뒤 경계 x, 줄 중앙 y (클라이언트 좌표)
@@ -47,6 +64,17 @@ async function boundaryPoint(page, line, prefix) {
 async function altDragInsert(page, prefix, lineFrom, lineTo, typed) {
   const a = await boundaryPoint(page, lineFrom, prefix);
   const b = await boundaryPoint(page, lineTo, prefix);
+  // 겨냥한 두 점이 정말 편집 영역 위인지 확인한다 — 아니면 무엇을 눌렀는지 바로 드러나게 실패시킨다
+  const onEditor = await page.evaluate(({ a, b }) => {
+    const ta = document.querySelector("textarea.code-input");
+    const at = (p) => {
+      const el = document.elementFromPoint(p.x, p.y);
+      return el === ta ? "ok" : (el ? el.tagName.toLowerCase() + "." + String(el.className).split(" ")[0] : "(없음)");
+    };
+    return { from: at(a), to: at(b) };
+  }, { a, b });
+  expect(onEditor).toEqual({ from: "ok", to: "ok" });
+
   await page.mouse.move(a.x, a.y);
   await page.keyboard.down("Alt");
   await page.mouse.down();
