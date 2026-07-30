@@ -552,7 +552,7 @@ const NB_SHORTCUT_GROUPS = [
     ["Ctrl+↑ / ↓", "위 / 아래 셀 편집으로 이동"]
   ]],
   ["찾기", [
-    ["Ctrl+H", "노트북 전체 찾기·바꾸기"],
+    ["Ctrl+F", "노트북 전체 찾기·바꾸기"],
     ["Ctrl+Shift+H", "현재 셀 안에서 찾기·바꾸기"]
   ]]
 ];
@@ -1303,4 +1303,3 @@ async function notebookOfferRecovery(ownerDoc){
     await notebookDeleteRecovery(ownerDoc);
   }
 }
-

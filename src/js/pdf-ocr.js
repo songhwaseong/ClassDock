@@ -2,7 +2,7 @@
 
 /* ===== 스캔 PDF 글자 인식(OCR) =====
    글자 정보가 없는 스캔(이미지) PDF 의 텍스트를 tesseract.js 로 읽어,
-   PDF 안 찾기(Ctrl+H)와 사이드바 본문 검색이 스캔본에도 동작하게 한다.
+   PDF 안 찾기(Ctrl+F)와 사이드바 본문 검색이 스캔본에도 동작하게 한다.
    - 도구(스크립트·한국어 학습 데이터)는 필요할 때 CDN에서 동의 후 1회 받아온다(문서 내용은 전송 안 됨).
    - 인식 결과(페이지 텍스트 + 단어 좌표)는 문서 지문(fingerprint) 기준으로 IndexedDB 에 저장해
      같은 PDF 는 다시 인식하지 않는다(브라우저·EXE 공통, 완전 로컬).
@@ -90,7 +90,7 @@ async function pdfOcrCachedText(doc){
   return joined.replace(/\n/g, "").trim() ? joined : false;
 }
 
-// PDF 찾기(Ctrl+H)용: OCR 단어 좌표를 화면 배율(p.scale)로 환산해 pdfPageFindData 와 같은 모양으로 돌려준다.
+// PDF 찾기(Ctrl+F)용: OCR 단어 좌표를 화면 배율(p.scale)로 환산해 pdfPageFindData 와 같은 모양으로 돌려준다.
 async function pdfOcrFindData(doc, p){
   const data = await pdfOcrCachedData(doc);
   const pg = data && data.pages && data.pages[p.pageNum - 1];

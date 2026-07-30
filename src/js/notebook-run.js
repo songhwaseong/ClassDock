@@ -164,7 +164,10 @@ function renderNotebookView(model, host, ownerDoc){
   tocBtn.setAttribute("aria-expanded", "false");
   const findBtn = document.createElement("button");
   findBtn.type = "button"; findBtn.className = "nbv-find-open"; findBtn.textContent = "전체 찾기";
-  findBtn.title = "노트북 전체 셀에서 찾기·바꾸기 (Ctrl+H · 현재 셀만은 Ctrl+Shift+H)";
+  findBtn.dataset.shortcutAction = "findInDocument";
+  findBtn.dataset.shortcutTitle = "노트북 전체 셀에서 찾기·바꾸기";
+  findBtn.dataset.shortcutAria = "true";
+  findBtn.title = "노트북 전체 셀에서 찾기·바꾸기 (Ctrl+F)";
   findBtn.addEventListener("click", () => nbOpenNotebookFind(ownerDoc));
   const dedupeBtn = document.createElement("button");
   dedupeBtn.type = "button"; dedupeBtn.className = "nbv-dedupe"; dedupeBtn.textContent = "중복 줄 삭제";

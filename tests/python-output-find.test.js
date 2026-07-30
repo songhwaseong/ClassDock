@@ -64,7 +64,7 @@ test("실행 결과 검색은 본문만 찾아 오버레이로 강조하고 큰 
   assert.match(cssSource, /\.out-find-hit\.active\{/);
 });
 
-test("코드와 실행 결과는 포커스 문맥에 따라 Ctrl+H 검색 대상을 나눈다", () => {
+test("코드와 실행 결과는 포커스 문맥에 따라 Ctrl+F 검색 대상을 나눈다", () => {
   assert.match(codeSource, /shortcutMatches\(e, "findInDocument"\) && outputOwnsFindShortcut\(e\)/);
   assert.match(codeSource, /if \(outPanel\.contains\(document\.activeElement\) \|\| outputFindSelectionSeed\(\)\) openOutputFind\(\)/);
   assert.match(codeSource, /else editor\.openFind\(\)/);

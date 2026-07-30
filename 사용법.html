@@ -317,7 +317,7 @@ cd myOffice</code></pre>
   <li>저장하지 않은 편집은 자동복구본으로 보관되며 다음에 같은 노트북을 열 때 복원 여부를 확인. 명령 모드 <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Y</kbd> 또는 상단 ↶/↷로 셀 추가·삭제·이동·형식 변경·잘라내기·붙여넣기를 되돌리기/다시 실행</li>
   <li>셀 오른쪽 위의 <code>⋮⋮</code> 손잡이를 끌어 원하는 셀의 위·아래로 순서를 변경. 기존 위/아래 이동 버튼과 키보드 조작도 그대로 사용 가능</li>
   <li>상단 <strong>목차</strong>는 마크다운의 <code># 제목</code>을 자동 수집해 해당 셀로 이동. 셀 도구의 ▾와 실행 결과의 <strong>출력 접기</strong>로 긴 노트북을 정리</li>
-  <li>툴바 <strong>전체 찾기</strong> 또는 <kbd>Ctrl</kbd>+<kbd>H</kbd>로 코드·마크다운·raw 셀 전체를 검색하고 한 개/전체 치환. 대소문자·단어 단위·정규식 지원 (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>는 현재 코드 셀만). <kbd>Enter</kbd>로 마지막 결과를 지나면 첫 결과로, <kbd>Shift</kbd>+<kbd>Enter</kbd>로 첫 결과를 지나면 마지막 결과로 순환. 문자열을 선택한 뒤 누르면 검색란에 자동으로 채워지고, <kbd>Esc</kbd>는 열려 있는 검색창을 모두 닫음</li>
+  <li>툴바 <strong>전체 찾기</strong> 또는 <kbd>Ctrl</kbd>+<kbd>F</kbd>로 코드·마크다운·raw 셀 전체를 검색하고 한 개/전체 치환. 대소문자·단어 단위·정규식 지원 (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd>는 현재 코드 셀만). <kbd>Enter</kbd>로 마지막 결과를 지나면 첫 결과로, <kbd>Shift</kbd>+<kbd>Enter</kbd>로 첫 결과를 지나면 마지막 결과로 순환. 문자열을 선택한 뒤 누르면 검색란에 자동으로 채워지고, <kbd>Esc</kbd>는 열려 있는 검색창을 모두 닫음</li>
   <li>마크다운 셀은 <code>&lt;h1&gt;</code>, <code>&lt;font color="blue"&gt;</code> 같은 <strong>HTML 태그도 렌더</strong>함(Jupyter와 동일). <code>&lt;script&gt;</code>·이벤트 핸들러·<code>javascript:</code> 링크 등 위험한 부분은 자동으로 제거(살균)</li>
   <li>코드 셀에서 <code>display(...)</code>는 주피터처럼 동작(브라우저 커널에 자동 주입)</li>
   <li>텍스트·HTML·PNG/JPEG·SVG·JSON·LaTeX뿐 아니라 <strong>Plotly·Bokeh·Vega/Vega-Lite 인터랙티브 차트, Folium 지도, 오디오(mp3·wav·ogg 등)·비디오(mp4·webm 등)</strong> 실행 결과도 표시(차트·지도는 격리된 iframe으로 렌더, 런타임은 인터넷 연결 시 CDN에서 로드). 오류 결과의 <strong>오류 줄 N로 이동</strong>을 누르면 해당 코드 셀 줄로 이동</li>
@@ -598,7 +598,7 @@ cd myOffice</code></pre>
 <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>현재 파일 저장 (PDF 내보내기 / Python·노트북 저장)</td><td>⚙</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>현재 탭 닫기</td><td>⚙</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>닫은 파일 다시 열기</td><td>⚙</td></tr>
-<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>사이드바 검색 (파일명·내용 통합)</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>열린 파일 검색 (파일명·내용 통합)</td><td>⚙</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>임시 메모 열기/닫기</td><td>⚙</td></tr>
 <tr><td><kbd>Alt</kbd>+<kbd>N</kbd></td><td>새 파이썬 코드</td><td>⚙</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>Ctrl</kbd>+<kbd>→</kbd></td><td>같은 묶음의 이전/다음 파일로 이동</td><td>⚙</td></tr>
@@ -613,7 +613,7 @@ cd myOffice</code></pre>
 <table>
 <thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
 <tbody>
-<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>PDF 안에서 찾기 (형광 표시)</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>PDF 안에서 찾기 (형광 표시)</td><td>⚙</td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>편집·페이지 작업 되돌리기 (최대 50단계)</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>다시 실행</td><td></td></tr>
 <tr><td><kbd>Delete</kbd></td><td>선택한 요소(서명·텍스트 등) 삭제</td><td></td></tr>
@@ -626,7 +626,7 @@ cd myOffice</code></pre>
 <thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
 <tbody>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>코드 실행</td><td>⚙</td></tr>
-<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd></td><td>찾기·바꾸기</td><td>⚙</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>찾기·바꾸기</td><td>⚙</td></tr>
 <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>→</kbd></td><td>실행 결과를 오른쪽에 표시 / 숨기기 (실행 전에는 <kbd>←</kbd>로 위치만 예약)</td><td></td></tr>
 <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>↓</kbd></td><td>실행 결과를 아래에 표시 / 숨기기 (실행 전에는 <kbd>↑</kbd>로 위치만 예약)</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>선택한 줄 삭제</td><td></td></tr>
@@ -664,7 +664,7 @@ cd myOffice</code></pre>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>셀 작업 되돌리기 / 다시 실행</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>Ctrl</kbd>+<kbd>↓</kbd></td><td>위/아래 셀 편집으로 이동</td><td></td></tr>
 <tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd> · <kbd>Alt</kbd>+클릭</td><td>함수 도움말(설명) 보기</td><td></td></tr>
-<tr><td><kbd>Ctrl</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>노트북 전체 / 현재 셀 찾기·바꾸기</td><td></td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>노트북 전체 / 현재 셀 찾기·바꾸기</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd> <kbd>+</kbd> / <kbd>Ctrl</kbd> <kbd>-</kbd></td><td>코드 셀과 실행 결과 문자 크게 / 작게</td><td></td></tr>
 </tbody>
 </table>

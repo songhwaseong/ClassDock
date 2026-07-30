@@ -73,14 +73,14 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"saveCurrent", label:"현재 파일 저장", description:"PDF·Python·노트북·엑셀 편집 저장", defaultValue:"Ctrl+S" },
   { id:"closeCurrent", label:"현재 파일 닫기", description:"활성 탭 닫기", defaultValue:"Ctrl+W" },
   { id:"reopenClosed", label:"닫은 파일 다시 열기", description:"방금 닫은 탭 복원", defaultValue:"Ctrl+Shift+T" },
-  { id:"focusSearch", label:"열린 파일 검색", description:"사이드바 검색창으로 이동", defaultValue:"Ctrl+F" },
+  { id:"focusSearch", label:"열린 파일 검색", description:"사이드바 검색창으로 이동", defaultValue:"Ctrl+Shift+F" },
   { id:"sidebarHide", label:"사이드바 숨기기", description:"왼쪽 파일 목록 접기", defaultValue:"Alt+ArrowLeft" },
   { id:"sidebarShow", label:"사이드바 보이기", description:"왼쪽 파일 목록 펼치기", defaultValue:"Alt+ArrowRight" },
   { id:"scratchpad", label:"임시 메모", description:"메모 열기·닫기", defaultValue:"Ctrl+M" },
   { id:"newPython", label:"새 Python 코드", description:"빈 Python 편집기 만들기", defaultValue:"Alt+N" },
   { id:"previousFile", label:"이전 수업 파일", description:"이전 열린 탭으로 이동", defaultValue:"Ctrl+ArrowLeft" },
   { id:"nextFile", label:"다음 수업 파일", description:"다음 열린 탭으로 이동", defaultValue:"Ctrl+ArrowRight" },
-  { id:"findInDocument", label:"문서 안에서 찾기", description:"PDF·노트북·편집기 찾기·바꾸기", defaultValue:"Ctrl+H" },
+  { id:"findInDocument", label:"문서 안에서 찾기", description:"PDF·노트북·편집기 찾기·바꾸기", defaultValue:"Ctrl+F" },
   { id:"findInCell", label:"현재 셀에서 찾기", description:"노트북 현재 셀 안에서 찾기·바꾸기", defaultValue:"Ctrl+Shift+H" },
   { id:"runCode", label:"Python 코드 실행", description:"현재 Python 코드 실행 (노트북: 이 셀만)", defaultValue:"Ctrl+Enter" },
   { id:"runCellAdvance", label:"셀 실행 후 다음 셀", description:"노트북·셀 코드에서 실행 후 다음 셀로", defaultValue:"Shift+Enter" },
@@ -142,6 +142,7 @@ const DEFAULT_APP_SETTINGS = {
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
   mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
+  shortcutDefaultsVersion: 2,
   shortcuts: DEFAULT_SHORTCUTS
 };
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.
@@ -166,17 +167,42 @@ function normalizeShortcutMap(value){
     item.id, normalizeShortcut(source[item.id]) || item.defaultValue
   ]));
 }
-// 예전 설정 이름을 새 이름으로 옮긴다. 이미 켜 두었던 사용자의 선택이 조용히 꺼지지 않게 한다.
+// 예전 설정 이름·기본 단축키를 새 값으로 옮긴다.
+// 사용자가 단축키를 하나라도 직접 바꿨다면 그 선택을 우선하고, 정확히 예전 기본 조합일 때만 자동 이전한다.
 function migrateAppSettings(saved){
   const next = { ...(saved || {}) };
   if (next.autoSave === undefined && next.pythonAutosave !== undefined) next.autoSave = !!next.pythonAutosave;
   delete next.pythonAutosave;
+  if ((Number(next.shortcutDefaultsVersion) || 0) < 2){
+    const shortcuts = next.shortcuts && typeof next.shortcuts === "object" ? { ...next.shortcuts } : {};
+    const compact = (value) => String(value || "").replace(/\s+/g, "").toLowerCase();
+    const usesLegacyDefaults =
+      (!shortcuts.focusSearch || compact(shortcuts.focusSearch) === "ctrl+f") &&
+      (!shortcuts.findInDocument || compact(shortcuts.findInDocument) === "ctrl+h");
+    if (usesLegacyDefaults){
+      shortcuts.focusSearch = "Ctrl+Shift+F";
+      shortcuts.findInDocument = "Ctrl+F";
+      next.shortcuts = shortcuts;
+      next._shortcutDefaultsMigrated = true;
+    }
+    next.shortcutDefaultsVersion = 2;
+  }
   return next;
 }
+let shortcutDefaultsMigrated = false;
 let appSettings = (() => {
   try {
-    const saved = migrateAppSettings(JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}"));
-    return { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const raw = localStorage.getItem("pdfSignerSettings");
+    if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() };
+    const decoded = JSON.parse(raw);
+    const parsed = decoded && typeof decoded === "object" ? decoded : {};
+    const migrationChanged = "pythonAutosave" in parsed || (Number(parsed.shortcutDefaultsVersion) || 0) < 2;
+    const saved = migrateAppSettings(parsed);
+    shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
+    delete saved._shortcutDefaultsMigrated;
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    if (migrationChanged) localStorage.setItem("pdfSignerSettings", JSON.stringify(loaded));
+    return loaded;
   }
   catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() }; }
 })();

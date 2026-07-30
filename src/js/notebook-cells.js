@@ -872,7 +872,7 @@ function nbOnKeydown(ownerDoc, e){
   if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && nbAnyFindOpen(ownerDoc)){
     e.preventDefault(); e.stopPropagation(); nbCloseAllFinds(ownerDoc); return;
   }
-  // 노트북 전체 찾기·바꾸기(기본 Ctrl+H)·현재 셀 찾기(기본 Ctrl+Shift+H)·저장(기본 Ctrl+S)은
+  // 노트북 전체 찾기·바꾸기(기본 Ctrl+F)·현재 셀 찾기(기본 Ctrl+Shift+H)·저장(기본 Ctrl+S)은
   // 설정의 단축키 재지정을 따른다. (capture 단계라 셀 편집기보다 먼저 가로챔)
   if (typeof shortcutMatches === "function" && shortcutMatches(e, "findInCell")){
     e.preventDefault(); e.stopPropagation(); nbOpenCellFind(ownerDoc); return;

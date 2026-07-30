@@ -184,7 +184,7 @@ function buildCodeEditor(text, prof, options={}){
   const wordHi = document.createElement("div"); wordHi.className = "word-hi-layer"; wordHi.setAttribute("aria-hidden", "true");
   const defHover = document.createElement("div"); defHover.className = "code-def-layer"; defHover.setAttribute("aria-hidden", "true");
   const findHi = document.createElement("div"); findHi.className = "find-hi-layer"; findHi.setAttribute("aria-hidden", "true");
-  // 노트북 전체 찾기(Ctrl+H)가 이 셀의 현재 매치를 또렷하게 강조할 때 쓰는 별도 레이어 — 셀 안 찾기(findHi)와 겹치지 않게 분리.
+  // 노트북 전체 찾기(Ctrl+F)가 이 셀의 현재 매치를 또렷하게 강조할 때 쓰는 별도 레이어 — 셀 안 찾기(findHi)와 겹치지 않게 분리.
   const spotlightHi = document.createElement("div"); spotlightHi.className = "find-hi-layer"; spotlightHi.setAttribute("aria-hidden", "true");
   let wordHiOcc = [];                 // {line, col, len} — 화면 밖 포함 전체 매치(스크롤 시 보이는 것만 다시 그림)
   const linkedEdit = { active:false, term:"", ranges:[], primaryIndex:-1 };
@@ -197,7 +197,7 @@ function buildCodeEditor(text, prof, options={}){
   let unusedSemanticRanges = [];       // Python AST 분석이 돌려준 미사용 선언의 절대 문자 범위
   let paramSemanticRanges = [];        // 함수 매개변수·키워드 인자 이름의 절대 문자 범위(cls:"tk-param")
   let semanticRangeText = ta.value;    // 다음 입력에서 기존 범위를 안전하게 이동시키기 위한 직전 본문
-  // ===== 편집기 내 찾기/바꾸기(Ctrl+H) 상태 — 실제 구현은 아래 colMetrics 정의 후 할당 =====
+  // ===== 편집기 내 찾기/바꾸기(Ctrl+F) 상태 — 실제 구현은 아래 colMetrics 정의 후 할당 =====
   let findOpen = false, findMatches = [], findIndex = -1, findApplying = false;
   let computeWordHi = () => {};
   const clearWordHi = () => { if (wordHiOcc.length){ wordHiOcc = []; wordHi.textContent = ""; } };
@@ -1610,7 +1610,7 @@ function buildCodeEditor(text, prof, options={}){
   ta.addEventListener("scroll", () => { sync(); hideCompletion(); hideDiagnosticTooltip(); if (col.active) col.render(); });
   ta.addEventListener("select", sync);
 
-  /* ===== 편집기 내 찾기/바꾸기(Ctrl+H) =====
+  /* ===== 편집기 내 찾기/바꾸기(Ctrl+F) =====
      본문 textarea 뒤(배경) findHi 레이어에 매치를 음영 처리하고, 현재 매치는 더 진하게 강조.
      대소문자 구분(Aa)·단어 단위(\b)·정규식(.*) 토글 지원. Enter=다음, Shift+Enter=이전, Esc=닫기. */
   const findBar = document.createElement("div"); findBar.className = "code-find"; findBar.hidden = true;
@@ -1810,7 +1810,7 @@ function buildCodeEditor(text, prof, options={}){
       findHi.appendChild(box);
     });
   };
-  // ===== 노트북 전체 찾기(Ctrl+H) 강조 — 셀 안 찾기의 find-hi-active 박스를 그대로 재사용해 현재 매치를 또렷하게 표시 =====
+  // ===== 노트북 전체 찾기(Ctrl+F) 강조 — 셀 안 찾기의 find-hi-active 박스를 그대로 재사용해 현재 매치를 또렷하게 표시 =====
   let spotlightHiSpan = null;
   let spotlightSegs = null;                 // [{line, prefix, text}] — 여러 줄에 걸친 매치는 줄마다 한 박스
   const clearSpotlight = () => { if (spotlightSegs){ spotlightSegs = null; spotlightHi.textContent = ""; } };
@@ -2326,7 +2326,7 @@ function buildLightTextEditor(text, options={}){
     syncScroll();
   };
 
-  // ===== 가벼운 찾기(Ctrl+H): 문자열을 찾아 textarea 안에서 선택·스크롤(강조 오버레이 없이 네이티브 선택만) =====
+  // ===== 가벼운 찾기(Ctrl+F): 문자열을 찾아 textarea 안에서 선택·스크롤(강조 오버레이 없이 네이티브 선택만) =====
   let findBar = null, findInput = null, findCount = null, findOpen = false;
   let matches = [], matchIdx = -1;
   const computeMatches = () => {

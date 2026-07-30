@@ -48,8 +48,8 @@ test("a large (>1MB) text file opens the lightweight editor and stays editable",
   await page.keyboard.press("Control+Home");   // 문서 맨 앞으로(클릭 위치가 아닌 절대 시작)
   await page.keyboard.type("ZZZ");
   await expect.poll(() => page.evaluate(() => document.querySelector(".code-host-light .code-input").value.slice(0, 3))).toBe("ZZZ");
-  // 문서 내부 찾기(Ctrl+H)가 일치 부분을 강조 박스로 표시하는지 확인
-  await lite.press("Control+h");
+  // 문서 내부 찾기(Ctrl+F)가 일치 부분을 강조 박스로 표시하는지 확인
+  await lite.press("Control+f");
   const findInput = page.locator(".lite-find .ro-find-input");
   await expect(findInput).toBeVisible();
   await findInput.fill("AAA");
@@ -74,7 +74,7 @@ test("in-editor find highlights Korean (full-width) matches at the correct posit
   await page.getByRole("button", { name: /편집/ }).first().click();
   const lite = page.locator(".code-host-light .code-input");
   await expect(lite).toBeVisible();
-  await lite.press("Control+h");
+  await lite.press("Control+f");
   const findInput = page.locator(".lite-find .ro-find-input");
   await expect(findInput).toBeVisible();
   await findInput.fill("쓰레기표적");

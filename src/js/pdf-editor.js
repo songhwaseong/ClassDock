@@ -468,7 +468,7 @@ async function openCodeLink(el){
     : "Moved to " + doc.name + ":" + targetLine, enteredStudy ? 2200 : 1600);
 }
 
-/* ===== PDF 내 찾기(Ctrl+H) — 텍스트 기반 PDF에서 단어를 찾아 페이지 위에 하이라이트 =====
+/* ===== PDF 내 찾기(Ctrl+F) — 텍스트 기반 PDF에서 단어를 찾아 페이지 위에 하이라이트 =====
    하이라이트 박스는 각 페이지 pageEl 안의 전용 레이어에 p.scale CSS 좌표로 넣는다.
    pageEl 에는 줌/회전 CSS transform 이 걸려 있어 박스도 함께 변형 → 스크롤·줌 시 재계산이 필요 없다(가볍다).
    글자 위치는 매치가 있는 페이지만 getTextContent 로 그때그때 계산하고 검색을 닫으면 비운다. */

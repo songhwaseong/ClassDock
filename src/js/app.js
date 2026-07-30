@@ -1048,6 +1048,9 @@ function wire(){
   })();
 
   syncShortcutHints();
+  if (typeof shortcutDefaultsMigrated !== "undefined" && shortcutDefaultsMigrated){
+    toast("단축키가 변경됐어요. 문서 찾기는 Ctrl+F, 열린 파일 검색은 Ctrl+Shift+F를 사용합니다.", 5200);
+  }
   if (typeof startMemStat === "function") startMemStat();   // 메모리 사용량 칩 폴링 시작
 
   // 사이드바 너비 드래그 조절

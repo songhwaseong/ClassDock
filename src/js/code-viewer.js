@@ -774,7 +774,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     let treeData = null, treeDataFor = null;      // JSON.parse 결과 캐시(같은 원문이면 재파싱 생략)
     let treeEl = null;                            // 현재 표시 중인 트리 요소(모두 펼치기/접기 버튼이 제어)
     let activeEditor = null, viewJumpTimer = 0;
-    let findOnlyEdit = false;                     // Ctrl+H(찾기)로 편집 모드에 들어온 경우 — 찾기를 닫으면 보기로 복귀
+    let findOnlyEdit = false;                     // Ctrl+F(찾기)로 편집 모드에 들어온 경우 — 찾기를 닫으면 보기로 복귀
     let viewMode = "";                            // "view"/"edit"/"preview" — 현재 표시 모드
     let openReadonlyFind = null;                  // 읽기 전용(대용량·편집 잠금) 찾기 바 열기 — showView 가 채운다
 
@@ -1079,7 +1079,7 @@ async function renderCode(file, host, ext, profile, runCtx){
           enterEditHere();   // preventDefault 하지 않음 → 이 키 입력이 편집기 textarea 에 그대로 들어간다
         });
       }
-      // 편집 잠금(대용량) 파일용 읽기 전용 찾기 바 — 문자열에서 찾아 해당 줄로 점프·강조(Ctrl+H 로 연다).
+      // 편집 잠금(대용량) 파일용 읽기 전용 찾기 바 — 문자열에서 찾아 해당 줄로 점프·강조(Ctrl+F 로 연다).
       if (!canEdit){
         const roFind = document.createElement("div"); roFind.className = "ro-find"; roFind.hidden = true;
         const roInput = document.createElement("input"); roInput.type = "text"; roInput.className = "ro-find-input";
@@ -1184,7 +1184,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       viewMode = "edit"; openReadonlyFind = null;
       prettyText = null; treeMode = false;   // 편집·저장은 항상 원본 텍스트 기준 — 표시 전용 정렬·트리 상태는 해제
       const startedForFind = findOnlyEdit; findOnlyEdit = false;
-      // 찾기(Ctrl+H)만 하러 들어온 편집 모드면, 찾기를 닫을 때 아직 수정 전이면 보기로 되돌린다.
+      // 찾기(Ctrl+F)만 하러 들어온 편집 모드면, 찾기를 닫을 때 아직 수정 전이면 보기로 되돌린다.
       const editorOpts = { plain: true, fileExt: ext };      // 일반 텍스트/코드: 파이썬 전용 지능 없이 확장자별 버퍼 단어 완성만
       if (startedForFind) editorOpts.onFindClose = () => {
         if (ownerDoc && ownerDoc.hasUnsavedEdits) return;   // 편집을 시작했으면 그대로 편집 유지
@@ -1378,7 +1378,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         return (t && t.length <= 200) ? t : "";
       } catch(_){ return ""; }
     };
-    // Ctrl+H(문서 안에서 찾기): 이미 편집 중이면 바로 찾기, 읽기 전용 보기면 편집 모드로 전환 후 찾기(닫으면 보기 복귀).
+    // Ctrl+F(문서 안에서 찾기): 이미 편집 중이면 바로 찾기, 읽기 전용 보기면 편집 모드로 전환 후 찾기(닫으면 보기 복귀).
     const openDocFind = () => {
       const seed = getDocFindSeed();                  // 편집/DOM 전환 전에 선택어를 먼저 붙잡는다
       if (activeEditor && typeof activeEditor.openFind === "function"){ activeEditor.openFind(seed); return; }
@@ -1745,6 +1745,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const outHideBtn = document.createElement("button"); outHideBtn.className = "out-hide"; outHideBtn.type = "button";
   const outFindBtn = document.createElement("button"); outFindBtn.className = "out-find-open"; outFindBtn.type = "button";
   outFindBtn.setAttribute("aria-haspopup", "true"); outFindBtn.setAttribute("aria-expanded", "false");
+  outFindBtn.dataset.shortcutAction = "findInDocument";
+  outFindBtn.dataset.shortcutTitle = "실행 결과에서 찾기";
+  outFindBtn.dataset.shortcutAria = "true";
   const outFindIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   outFindIcon.setAttribute("viewBox", "0 0 24 24"); outFindIcon.setAttribute("aria-hidden", "true");
   const outFindCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -1771,7 +1774,8 @@ async function renderCode(file, host, ext, profile, runCtx){
   const OUTPUT_FIND_LIMIT = 2000;
   const syncOutputFindLabels = () => {
     const label = _T("실행 결과에서 찾기");
-    outFindBtn.title = label + " (Ctrl+H)"; outFindBtn.setAttribute("aria-label", outFindBtn.title);
+    if (typeof syncShortcutHints === "function") syncShortcutHints(outHeadActions);
+    else { outFindBtn.title = label + " (Ctrl+F)"; outFindBtn.setAttribute("aria-label", outFindBtn.title); }
     outFindInput.placeholder = label; outFindInput.setAttribute("aria-label", label);
     outFindPrev.title = _T("이전 결과") + " (Shift+Enter)"; outFindPrev.setAttribute("aria-label", outFindPrev.title);
     outFindNext.title = _T("다음 결과") + " (Enter)"; outFindNext.setAttribute("aria-label", outFindNext.title);
