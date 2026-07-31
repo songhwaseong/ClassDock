@@ -106,6 +106,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"pyNewPy",     label:"+Py(새 파이썬)",  cls:"run-newpy",           target:"py" },
   { id:"pyRevert",    label:"원본 되돌리기",   cls:"run-py-revert",       target:"py" },
   { id:"pyDedupe",    label:"중복 줄 삭제",     cls:"run-dedupe",          target:"py" },
+  { id:"pyPractice",  label:"따라치기(타자 연습)",cls:"run-practice-group", target:"py" },
   { id:"pySpellcheck",label:"맞춤법",          cls:"run-spellcheck",      target:"py" },
   { id:"pyFont",      label:"글자 크기(A− A+)",cls:"run-font-group",      target:"py" },
   // 노트북 도구막대 (notebook-run.js)

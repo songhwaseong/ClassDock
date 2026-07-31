@@ -1541,6 +1541,39 @@ async function renderCode(file, host, ext, profile, runCtx){
   const onRecChanged = (e) => syncRecBtn(!!(e.detail && e.detail.on));
   document.addEventListener("lesson-rec-changed", onRecChanged);
   if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(() => document.removeEventListener("lesson-rec-changed", onRecChanged)); }
+  // 코드 따라치기(타자 연습) — 지금 코드를 흐린 교본으로 깔고 그 위에 똑같이 쳐 본다.
+  const practiceGroup = document.createElement("span"); practiceGroup.className = "run-practice-group";
+  const practiceBtn = document.createElement("button"); practiceBtn.className = "run-practice"; practiceBtn.type = "button";
+  practiceBtn.textContent = "따라치기";
+  practiceBtn.title = "이 코드를 흐리게 두고 그 위에 똑같이 따라 쳐 보기 — 맞으면 제 색, 틀리면 빨강 (Esc: 그만두기)";
+  const practiceInfo = document.createElement("span"); practiceInfo.className = "run-practice-info"; practiceInfo.hidden = true;
+  practiceInfo.setAttribute("aria-live", "polite");
+  practiceGroup.append(practiceBtn, practiceInfo);
+  const setPracticeChrome = (on) => {
+    practiceBtn.classList.toggle("is-on", on);
+    practiceBtn.textContent = on ? "그만두기" : "따라치기";
+    practiceInfo.hidden = !on;
+    if (!on) practiceInfo.textContent = "";
+  };
+  practiceBtn.addEventListener("click", () => {
+    if (editor.isPracticeActive()){ editor.stopPractice("cancel"); return; }
+    const started = editor.startPractice({
+      onProgress: (s) => { practiceInfo.textContent = s.percent + "% · 정확도 " + s.accuracy + "%"; },
+      onDone: (reason, s) => {
+        setPracticeChrome(false);
+        refreshEditState();
+        if (reason !== "done"){ toast("따라치기를 그만뒀어요. 여기까지 " + s.percent + "% · 정확도 " + s.accuracy + "%", 3000); return; }
+        // 정확도는 '끝났을 때 틀린 채 남은 글자' 기준이라, 고쳐 가며 끝까지 치면 100%가 된다.
+        // 대신 고친 실수 횟수를 함께 알려 준다(다 고쳤다는 것도 칭찬거리라 뒤에 덧붙인다).
+        toast("다 따라 썼어요! 정확도 " + s.accuracy + "% · " + s.seconds + "초 · 분당 " + s.cpm + "타"
+          + (s.wrong ? " (고친 실수 " + s.wrong + "번)" : ""), 5200);
+        if (typeof petReact === "function") petReact(s.accuracy >= 90 ? "success" : "error");
+      }
+    });
+    if (!started){ toast("따라 칠 코드가 없어요.", 2000); return; }
+    setPracticeChrome(true);
+    toast("줄 앞 들여쓰기는 자동으로 넘어가요. 틀리면 빨갛게 표시되니 지우고 다시 치면 돼요. (Esc: 그만두기)", 4600);
+  });
   const status = document.createElement("span"); status.className = "run-status";
   const fontGroup = document.createElement("span"); fontGroup.className = "run-font-group";
   const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button"; fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
@@ -1588,7 +1621,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   warningToggle.append(warningCheckbox, warningText);
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
-  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(outputTabs); bar.appendChild(fontGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
+  bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(outputTabs); bar.appendChild(fontGroup); bar.appendChild(practiceGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
   attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
   bar.appendChild(dedupeBtn);
   syncShortcutHints(bar);
@@ -2622,6 +2655,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     return saving;
   }
   const refreshEditState = () => {
+    // 따라치기 중에는 본문이 그대로라(교본) 편집 상태가 바뀔 일이 없다 — 글자마다 진단·초안 저장을 돌리지 않는다.
+    if (editor.isPracticeActive && editor.isPracticeActive()) return;
     revertBtn.disabled = (editor.getValue() === text);
     markDocumentDirty(ownerDoc, editor.getValue() !== savedValue);
     inputWrap.hidden = (_pyBackend === true) ? true : !usesInput(editor.getValue());
@@ -2666,6 +2701,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (await confirmDialog("편집한 내용을 버리고 원본 코드로 되돌릴까요?", "되돌리기", "취소")){ editor.setValue(text); clearPythonDraft(draftKey); refreshEditState(); }
   });
   editor.ta.addEventListener("keydown", (e) => {
+    // 따라치기 중에는 Shift+Enter 도 그냥 '줄바꿈을 친 것'이다 — 실행 단축키로 가로채지 않는다(글자 크기는 그대로 허용).
+    if (editor.isPracticeActive() && !(e.ctrlKey || e.metaKey)) return;
     // 노트북: Shift+Enter(설정 재지정 가능) = 이 셀 실행 후 다음 셀로, Ctrl/⌘+Enter = 이 셀만(상태 유지). 일반 코드는 기존대로 전체 실행.
     if (ui.runCurrentCell && shortcutMatches(e, "runCellAdvance")){
       e.preventDefault(); ui.runCurrentCell(true); return;

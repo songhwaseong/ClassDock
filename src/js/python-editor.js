@@ -624,7 +624,58 @@ function buildCodeEditor(text, prof, options={}){
     sync();
   };
 
+  /* ===== 코드 따라치기(타자 연습) =====
+     본문을 흐린 '교본'으로 깔아 두고 그 위에 똑같이 쳐 보는 모드. 맞은 글자는 제 색, 틀린 글자는 빨강.
+     핵심 규칙 하나: textarea 는 연습 내내 교본 전체(target)를 그대로 담고 캐럿만 pos 에서 앞으로 나간다.
+     친 글자는 곧바로 지우고 '맞음/틀림' 표시만 marks 에 남긴다 → pre 와 글자가 완전히 같아 캐럿·줄·스크롤이
+     절대 어긋나지 않고, 아직 안 친 아랫줄도 평소처럼 스크롤해 미리 볼 수 있다.
+     marks[i]: 1=맞음, 2=틀림(관대 모드라 틀려도 그냥 다음 글자로 넘어간다). */
+  // shown[i]: 그 자리에 그릴 글자 — 맞았으면 교본 글자, 틀렸으면 '내가 친 글자'(무엇을 잘못 눌렀는지 보이게).
+  // bad = 지금 화면에 남아 있는 빨간 글자 수(정확도의 기준), wrong = 고친 것까지 포함한 총 실수 횟수.
+  const practice = { active:false, target:"", pos:0, marks:null, shown:null, bad:0, wrong:0,
+                     startedAt:0, composing:false, rejectAt:-1, rejectTimer:0, onProgress:null, onDone:null };
+  const practiceClass = (mark) => mark === 2 ? "tp-bad" : "tp-ok";
+  // 지나온 곳(0~end)을 맞음/틀림 색으로 조립. 같은 색이 이어지는 구간은 한 <span> 으로 묶는다 —
+  // 글자마다 span 을 만들면 한 글자 칠 때마다 수천 개가 생겨 느려진다.
+  const practiceHtmlUpTo = (end) => {
+    let html = "", runStart = 0, runClass = practiceClass(practice.marks[0]);
+    const flush = (stop) => { if (stop > runStart) html += '<span class="' + runClass + '">' + escapeHtml(practice.shown.slice(runStart, stop).join("")) + "</span>"; };
+    for (let i = 0; i < end; i++){
+      const cls = practiceClass(practice.marks[i]);
+      if (cls !== runClass){ flush(i); runClass = cls; runStart = i; }
+    }
+    flush(end);
+    return html;
+  };
+  const renderPracticeCode = () => {
+    const target = practice.target;
+    let html = practiceHtmlUpTo(practice.pos);
+    // 한글 조합 중(ㅎ→하→학)에는 아직 채점하지 않는다. 조합 글자가 textarea 에 끼어 있는 만큼(extra)
+    // pre 에도 똑같이 끼워 넣어야 글자 수가 같아 캐럿이 어긋나지 않는다.
+    let from = practice.pos;
+    const extra = ta.value.length - target.length;
+    if (extra > 0){
+      const composing = ta.value.slice(practice.pos, practice.pos + extra);
+      html += '<span class="tp-typing">' + escapeHtml(composing) + "</span>";
+      // 조합 글자가 차지하는 칸 수만큼 교본을 잠깐 가린다 — 안 그러면 한 글자 조합할 때마다 뒷글자가 밀렸다 돌아온다.
+      let cells = 0;
+      for (const ch of composing) cells += wideChar.test(ch) ? 2 : 1;
+      let covered = 0;
+      while (covered < cells && from < target.length && target[from] !== "\n"){   // 줄바꿈은 절대 넘지 않는다
+        covered += wideChar.test(target[from]) ? 2 : 1; from++;
+      }
+    }
+    // 폭이 달라 막은 키는 지금 칠 글자를 잠깐 빨갛게 깜빡여 "여기서 막혔다"를 알린다.
+    if (practice.rejectAt === practice.pos && from < target.length){
+      html += '<span class="tp-block">' + escapeHtml(target[from]) + "</span>";
+      from += 1;
+    }
+    if (from < target.length) html += '<span class="tp-ghost">' + escapeHtml(target.slice(from)) + "</span>";
+    code.innerHTML = html + "&#8203;";
+  };
+
   const refresh = () => {
+    if (practice.active){ renderPracticeCode(); scheduleScrollbarMeasure(); return; }
     const val = ta.value;
     // Keep the final empty line measurable so the highlight layer and textarea
     // have the same maximum scroll position when the source ends with a newline.
@@ -818,6 +869,7 @@ function buildCodeEditor(text, prof, options={}){
   history.reset();
   let coalesceTimer = 0;
   const rememberHistoryCaret = () => {
+    if (practice.active) return;                 // 따라치기 중 값 변화는 되돌리기 기록에 섞지 않는다
     const cur = history.isApplying() ? null : history.current();
     if (cur) history.replaceCurrent(editorHistoryCaretState(cur, ta.value, ta.selectionStart, ta.selectionEnd));
   };
@@ -1726,6 +1778,13 @@ function buildCodeEditor(text, prof, options={}){
     };
   });
   ta.addEventListener("input", (e) => {
+    if (practice.active){
+      // 조합 중에는 판정하지 않는다 — ㅎ·하 단계마다 빨간불이 깜빡이지 않게 확정(compositionend) 후에만 채점.
+      if (practice.composing || e.isComposing) renderPracticeCode();
+      else practiceGrade();
+      sync();
+      return;
+    }
     if (!help.hidden) hideHelp();   // 타이핑하면 함수 도움말은 닫는다
     if (linkedEdit.active && linkedBeforeInput && e.isTrusted){
       const before = linkedBeforeInput, partial = ta.value;
@@ -1785,6 +1844,23 @@ function buildCodeEditor(text, prof, options={}){
   ta.addEventListener("mouseleave", hideDiagnosticTooltip);
   ta.addEventListener("scroll", () => { sync(); hideCompletion(); hideDiagnosticTooltip(); if (col.active) col.render(); });
   ta.addEventListener("select", sync);
+  // ===== 따라치기 모드 입력 가로채기 =====
+  ta.addEventListener("compositionstart", () => { if (practice.active) practice.composing = true; });
+  ta.addEventListener("compositionend", () => {
+    if (!practice.active) return;
+    practice.composing = false;
+    setTimeout(() => { if (practice.active && !practice.composing) practiceGrade(); }, 0);   // 브라우저마다 input/compositionend 순서가 달라 한 박자 뒤에 채점
+  });
+  // 붙여넣기·잘라내기·끌어놓기로 통째 넘기는 건 연습이 되지 않으므로 막는다.
+  ["paste", "cut", "drop"].forEach((type) => ta.addEventListener(type, (e) => { if (practice.active) e.preventDefault(); }));
+  // 캐럿은 늘 '지금 칠 자리'에 — 클릭·더블클릭으로 중간에 끼어들지 못하게 되돌린다.
+  const practiceSnapCaret = () => {
+    if (!practice.active || practice.composing) return;
+    if (ta.selectionStart !== practice.pos || ta.selectionEnd !== practice.pos) ta.setSelectionRange(practice.pos, practice.pos);
+  };
+  ta.addEventListener("mouseup", practiceSnapCaret);
+  ta.addEventListener("dblclick", practiceSnapCaret);
+  ta.addEventListener("focus", practiceSnapCaret);
 
   /* ===== 편집기 내 찾기/바꾸기(Ctrl+F) =====
      본문 textarea 뒤(배경) findHi 레이어에 매치를 음영 처리하고, 현재 매치는 더 진하게 강조.
@@ -2117,6 +2193,20 @@ function buildCodeEditor(text, prof, options={}){
   findBar.querySelector(".code-find-close").addEventListener("click", closeFind);
 
   ta.addEventListener("keydown", (e) => {
+    // 따라치기 중에는 편집 도우미(자동 들여쓰기·짝 괄호·자동완성·열 편집…)를 전부 비켜 간다.
+    // 내가 치지 않은 글자가 저절로 들어가면 채점이 어긋나기 때문. 글자·Enter·Backspace 만 기본 동작으로 통과시킨다.
+    if (practice.active){
+      if (e.key === "Escape"){ e.preventDefault(); stopPractice("cancel"); return; }
+      if (e.ctrlKey || e.metaKey || e.altKey){
+        const key = (e.key || "").toLowerCase();
+        if (key === "v" || key === "z" || key === "y" || key === "x") e.preventDefault();   // 붙여넣기·되돌리기로 건너뛰기 방지
+        return;                                                                            // 저장 등 나머지 단축키는 그대로
+      }
+      if (e.key === "Tab"){ e.preventDefault(); return; }                                   // 줄 앞 들여쓰기는 자동으로 넘어간다
+      if (e.key === "Delete"){ e.preventDefault(); return; }                                // 앞으로 지우기는 아직 안 친 교본을 건드린다
+      if (/^(?:Arrow|Page)/.test(e.key) || e.key === "Home" || e.key === "End"){ e.preventDefault(); return; }
+      return;
+    }
     rememberHistoryCaret();
     const autoParenSpot = pendingAutoParen; pendingAutoParen = -1;   // 자동 () 중복방지 표식은 다음 키 입력 한 번만 유효(one-shot)
     if (!help.hidden && e.key === "Escape"){ e.preventDefault(); hideHelp(); return; }   // 도움말 열려 있으면 Esc 로 먼저 닫기
@@ -2340,6 +2430,7 @@ function buildCodeEditor(text, prof, options={}){
     }
   });
   const setUnusedRanges = (items) => {
+    if (practice.active) return;                 // 따라치기 중에는 본문이 '치는 중'이라 분석 결과를 입히지 않는다
     const value = ta.value, starts = [0];
     for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) === 10) starts.push(i + 1);
     const next = [];
@@ -2366,6 +2457,7 @@ function buildCodeEditor(text, prof, options={}){
   // 함수 매개변수·키워드 인자 이름 강조. 미사용 표시와 같은 방식(줄/열/길이 → 절대 범위 + 이름 검증)이되
   // cls 를 tk-param 으로 달아 refresh 가 highlightCode 로 넘길 때 매개변수색으로 칠하게 한다.
   const setParamRanges = (items) => {
+    if (practice.active) return;
     const value = ta.value, starts = [0];
     for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) === 10) starts.push(i + 1);
     const next = [];
@@ -2409,8 +2501,157 @@ function buildCodeEditor(text, prof, options={}){
     dedupeSelectedLines,
     contextMenuActions: options.contextMenuActions
   });
+  /* ===== 코드 따라치기: 채점·시작·종료 ===== */
+  // 줄 앞 들여쓰기는 자동으로 통과시킨다(맞은 것으로 처리). 파이썬 4칸을 매번 세어 치는 건 연습이 아니라
+  // 고역이고, 실제 타자 연습 도구들도 같은 방식이다.
+  const practiceSkipIndent = () => {
+    const target = practice.target;
+    while (practice.pos < target.length && (target[practice.pos] === " " || target[practice.pos] === "\t")){
+      practice.marks[practice.pos] = 1; practice.shown[practice.pos] = target[practice.pos]; practice.pos++;
+    }
+  };
+  // 줄 끝에 남아 있는 공백은 화면에 보이지 않는다 — 여기서 Enter 를 쳤다고 틀렸다고 하면 억울하므로
+  // (그리고 그 뒤가 전부 한 칸씩 밀린다) 뒤가 줄바꿈일 때만 그 공백들을 맞은 것으로 넘긴다.
+  const practiceSkipLineTail = () => {
+    const target = practice.target;
+    let at = practice.pos;
+    while (at < target.length && (target[at] === " " || target[at] === "\t")) at++;
+    if (at >= target.length || target[at] !== "\n") return;
+    while (practice.pos < at){ practice.marks[practice.pos] = 1; practice.shown[practice.pos] = target[practice.pos]; practice.pos++; }
+  };
+  // 캐럿이 줄 앞 들여쓰기 구간(앞쪽이 전부 공백)에 있나 — 학생이 직접 친 들여쓰기를 흘려보낼지 판단한다.
+  const practiceAtIndent = () => {
+    const target = practice.target;
+    for (let i = practice.pos - 1; i >= 0; i--){
+      const ch = target[i];
+      if (ch === "\n") return true;
+      if (ch !== " " && ch !== "\t") return false;
+    }
+    return true;                                 // 문서 첫 줄
+  };
+  // 틀린 자리에는 내가 친 글자를 그대로 보여 준다(무엇을 잘못 눌렀는지 바로 보이게).
+  // 줄바꿈·탭만은 그 자리에 그릴 수 없어(줄이 밀리거나 탭 정지점이 튄다) 교본 글자를 빨갛게 두는 것으로 대신한다.
+  const practiceShownChar = (typed, want) => (!typed || typed === "\n" || typed === "\t") ? want : typed;
+  // 한글·한자는 고정폭 글꼴에서 두 칸을 차지한다. 한 칸짜리 자리에 그대로 그리면 그 줄 전체가 밀리므로
+  // '영문 자리엔 영문만, 한글 자리엔 한글만' 받는다. 폭이 다른 키는 아예 넘어가지 않고 그 자리에서 막힌다
+  // (한/영 키를 안 누른 채 한 줄을 다 치면 그 뒤가 통째로 빨개지는 것도 이걸로 같이 막힌다).
+  const wideChar = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;   // 한글 자모·완성형·한자·전각 기호 등 '두 칸짜리' 글자
+  const practiceWidthMismatch = (typed, want) => wideChar.test(typed) !== wideChar.test(want);
+  let practiceHintAt = 0;
+  const practiceRejectKey = (typed, want) => {
+    practice.rejectAt = practice.pos;
+    clearTimeout(practice.rejectTimer);
+    practice.rejectTimer = setTimeout(() => { practice.rejectAt = -1; if (practice.active) renderPracticeCode(); }, 700);
+    const now = Date.now();
+    if (typeof toast === "function" && now - practiceHintAt > 4000){
+      practiceHintAt = now;
+      toast(wideChar.test(typed) ? "여기는 영문 자리예요. 한/영 키를 눌러 영문으로 바꿔 보세요."
+                                 : "여기는 한글 자리예요. 한/영 키를 눌러 한글로 바꿔 보세요.", 2600);
+    }
+  };
+  const practiceStats = () => {
+    const ms = Math.max(1, Date.now() - practice.startedAt);
+    const total = practice.target.length, done = practice.pos;
+    return { total, done, wrong:practice.wrong, bad:practice.bad,
+      percent:total ? Math.round((done / total) * 100) : 100,
+      // 정확도는 '지금 화면에 남아 있는 빨간 글자' 기준 — 틀린 자리를 지우고 다시 똑바로 치면 도로 올라간다.
+      // (wrong 은 고친 것까지 포함한 실수 횟수라 따로 센다)
+      accuracy:done ? Math.round(((done - practice.bad) / done) * 100) : 100,
+      seconds:Math.max(1, Math.round(ms / 1000)), cpm:Math.round(done / (ms / 60000)) };
+  };
+  const practiceGrade = () => {
+    const target = practice.target, current = ta.value;
+    if (current !== target){
+      const delta = current.length - target.length;
+      const keepTop = ta.scrollTop, keepLeft = ta.scrollLeft;   // 값을 다시 넣으면 스크롤이 맨 위로 튀는 브라우저 보정
+      // 캐럿 자리(pos)에 delta 글자가 끼어들었다 = 방금 친 글자. 앞뒤가 교본 그대로인지 확인해 오인식을 막는다.
+      if (delta > 0 && current.slice(0, practice.pos) === target.slice(0, practice.pos)
+          && current.slice(practice.pos + delta) === target.slice(practice.pos)){
+        const added = current.slice(practice.pos, practice.pos + delta);
+        ta.value = target;                                      // 친 글자는 지우고 교본 글자를 그대로 둔다
+        for (let i = 0; i < added.length && practice.pos < target.length; i++){
+          const ch = added[i];
+          // 줄 앞 들여쓰기는 이미 자동으로 넘어갔다. 그 자리에서 배운 대로 공백·탭을 직접 더 쳐도
+          // 틀린 것으로 세지 않고 그냥 흘려보낸다 — 안 그러면 그때부터 한 칸씩 밀려, 맞게 친 뒷글자가 전부 빨개진다.
+          if ((ch === " " || ch === "\t") && practiceAtIndent()) continue;
+          if (ch === "\n") practiceSkipLineTail();              // 줄 끝에 눈에 안 보이는 공백이 있어도 통과
+          // 영문 자리에 한글(또는 그 반대)은 폭이 달라 줄이 밀린다 → 넘어가지 않고 그 자리에서 막는다.
+          if (practiceWidthMismatch(ch, target[practice.pos])){
+            practiceRejectKey(ch, target[practice.pos]);
+            practice.wrong++;                                   // 한 칸도 못 나갔으니 실수 횟수만 센다
+            continue;
+          }
+          const want = target[practice.pos], hit = ch === want;
+          practice.marks[practice.pos] = hit ? 1 : 2;
+          practice.shown[practice.pos] = hit ? want : practiceShownChar(ch, want);
+          practice.pos++;
+          if (!hit){ practice.wrong++; practice.bad++; }        // 관대 모드: 틀려도 막지 않고 빨갛게만 남긴다
+          else if (want === "\n") practiceSkipIndent();
+        }
+      } else if (delta < 0 && current.slice(0, practice.pos + delta) === target.slice(0, practice.pos + delta)
+                 && current.slice(practice.pos + delta) === target.slice(practice.pos)){
+        const back = Math.max(0, practice.pos + delta);         // 지운(백스페이스) 만큼 되돌아간다
+        // 지워서 화면에서 사라진 빨간 글자는 정확도에서도 빠진다 → 다시 똑바로 치면 정확도가 도로 올라간다.
+        for (let i = back; i < practice.pos; i++) if (practice.marks[i] === 2) practice.bad--;
+        practice.pos = back;
+        ta.value = target;
+      } else ta.value = target;                                 // 예상 못 한 편집(전체 선택 후 입력 등) — 교본만 되돌린다
+      ta.scrollTop = keepTop; ta.scrollLeft = keepLeft;
+    }
+    ta.setSelectionRange(practice.pos, practice.pos);
+    renderPracticeCode();
+    scrollCaretIntoView();
+    if (typeof practice.onProgress === "function") { try { practice.onProgress(practiceStats()); } catch(_){} }
+    if (practice.pos >= target.length) stopPractice("done");
+  };
+  const startPractice = (options={}) => {
+    if (practice.active || !ta.value.trim()) return false;
+    const target = ta.value;
+    exitCol(); exitLinkedEdit(); hideCompletion(); hideHelp(); clearWordHi(); clearDefinitionHover();
+    clearError(); clearTraceLine(); clearUnusedRanges(); clearParamRanges();
+    if (findOpen) closeFind();
+    clearTimeout(coalesceTimer);
+    practice.active = true; practice.target = target; practice.pos = 0;
+    practice.marks = new Uint8Array(target.length);
+    practice.shown = target.split("");
+    practice.bad = 0; practice.wrong = 0; practice.composing = false;
+    practice.rejectAt = -1; clearTimeout(practice.rejectTimer); practice.rejectTimer = 0;
+    practice.startedAt = Date.now();
+    practice.onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+    practice.onDone = typeof options.onDone === "function" ? options.onDone : null;
+    edit.classList.add("code-practice");
+    practiceSkipIndent();                        // 첫 줄 들여쓰기부터 자동 통과
+    ta.setSelectionRange(practice.pos, practice.pos);
+    ta.scrollTop = 0; ta.scrollLeft = 0;
+    renderPracticeCode(); sync();
+    ta.focus({ preventScroll:true });
+    if (practice.onProgress) { try { practice.onProgress(practiceStats()); } catch(_){} }
+    return true;
+  };
+  // reason: "done"=끝까지 침 / "cancel"=Esc·버튼으로 그만둠. 본문은 연습 내내 교본 그대로였으므로 표시만 되돌리면 된다.
+  const stopPractice = (reason="cancel") => {
+    if (!practice.active) return null;
+    const stats = practiceStats();
+    const target = practice.target, done = practice.onDone;
+    practice.active = false; practice.target = ""; practice.marks = null; practice.shown = null; practice.pos = 0;
+    practice.composing = false; practice.onProgress = null; practice.onDone = null;
+    practice.rejectAt = -1; clearTimeout(practice.rejectTimer); practice.rejectTimer = 0;
+    edit.classList.remove("code-practice");
+    if (ta.value !== target) ta.value = target;  // 조합이 끝나기 전에 그만둔 경우 대비
+    ta.setSelectionRange(0, 0);
+    ta.scrollTop = 0; ta.scrollLeft = 0;
+    history.reset();                             // 연습하며 오간 값이 되돌리기(Ctrl+Z)에 남지 않게
+    semanticRangeText = ta.value;
+    refresh(); sync();
+    if (done) { try { done(reason, stats); } catch(_){} }
+    return stats;
+  };
+
   refresh();
-  return { host, ta, getValue: () => ta.value, setValue: (v) => { exitCol(); ta.value = v; emitInput(); },
+  return { host, ta,
+    // 따라치기 중에는 '교본(원본)'을 돌려준다 — 저장·자동저장·실행·초안이 치다 만 글자를 파일에 덮어쓰지 않게 하는 핵심 방어선.
+    getValue: () => practice.active ? practice.target : ta.value,
+    setValue: (v) => { stopPractice("cancel"); exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
     openContextMenu: (event) => detachTextContextMenu.open(event),
     focusLine,
@@ -2419,7 +2660,9 @@ function buildCodeEditor(text, prof, options={}){
     formatDocument: formatDocumentNow,
     dedupeSelectedLines,
     canFormat: () => !plainMode && prof === "python",
+    startPractice, stopPractice, isPracticeActive: () => practice.active,
     destroy: () => {
+      if (practice.active) stopPractice("cancel");
       detachTextContextMenu();
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
       clearJump(); hideCompletion(); hideHelp(); clearTimeout(pinRenderTimer); cancelAnimationFrame(syncRaf); cancelAnimationFrame(sbRaf);

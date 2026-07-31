@@ -2319,6 +2319,7 @@
   html.hide-tool-pyNewPy .run-newpy,
   html.hide-tool-pyRevert .run-py-revert,
   html.hide-tool-pyDedupe .run-dedupe,
+  html.hide-tool-pyPractice .run-practice-group,
   html.hide-tool-pySpellcheck .run-spellcheck,
   html.hide-tool-pyFont .run-font-group,
   html.hide-tool-nbInk .nbv-ink-toggle,
@@ -2370,6 +2371,14 @@
   .run-fontpick{min-width:0;width:auto;max-width:160px;padding:6px 8px;font-weight:500;cursor:pointer;
     appearance:auto;-webkit-appearance:auto}
   .run-newpy{padding:6px 9px;min-width:42px;font-weight:700;text-align:center}
+  .run-practice-group{display:inline-flex;align-items:center;gap:6px}
+  .run-practice{font:inherit;font-size:12.5px;border:1px solid var(--border);background:var(--field);color:var(--muted);
+    border-radius:8px;padding:6px 11px;cursor:pointer}
+  .run-practice:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-practice.is-on{border-color:#0ea5e9;background:rgba(14,165,233,.12);color:#0369a1;font-weight:700}
+  [data-theme="dark"] .run-practice.is-on{border-color:#38bdf8;background:rgba(56,189,248,.16);color:#bae6fd}
+  .run-practice-info{font-size:12px;color:var(--muted);white-space:nowrap}
+  .run-practice-info[hidden]{display:none}
   .run-warning-toggle{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:0 8px;border:1px solid var(--border);border-radius:8px;
     background:var(--field);color:var(--muted);font-size:12px;white-space:nowrap;cursor:pointer;user-select:none}
   .run-warning-toggle:hover{background:var(--panel-hover);color:var(--ink)}
@@ -3275,6 +3284,23 @@
   .code-input{position:absolute;inset:0;margin:0;border:0;outline:none;resize:none;box-sizing:border-box;
     padding:16px 18px;white-space:pre;overflow:auto;background:transparent;color:transparent;caret-color:var(--code-caret)}
   .code-input::selection{background:var(--code-select)}
+  /* ===== 코드 따라치기(타자 연습) =====
+     아직 안 친 글자는 흐린 교본, 맞게 친 글자는 제 색, 틀린 글자는 빨강. textarea 는 교본 전체를 그대로
+     담고 있으므로(글자 수가 같다) 색만 바뀌고 줄·칸은 조금도 움직이지 않는다. */
+  .code-practice .tp-ghost{color:var(--code-muted);opacity:.42}
+  .code-practice .tp-ok{color:var(--code-text)}
+  .code-practice .tp-bad{color:#dc2626;background:rgba(220,38,38,.16);border-radius:2px}
+  .code-practice .tp-typing{color:var(--accent)}                      /* 조합 중인 한글 */
+  /* 영문 자리에 한글(또는 그 반대)을 쳐서 막혔을 때 — 지금 칠 글자를 잠깐 깜빡인다 */
+  .code-practice .tp-block{color:#dc2626;background:rgba(220,38,38,.3);border-radius:2px;animation:tp-block-blink .7s ease-out}
+  @keyframes tp-block-blink{0%,55%{opacity:1}70%{opacity:.35}100%{opacity:1}}
+  [data-theme="dark"] .code-practice .tp-block{color:#fecaca;background:rgba(220,38,38,.42)}
+  [data-theme="dark"] .code-practice .tp-bad{color:#fca5a5;background:rgba(220,38,38,.28)}
+  /* 연습에 방해되거나 뜻이 없어지는 보조 레이어는 잠시 감춘다(들여쓰기 가이드·단어 강조·오류 띠 등) */
+  .code-practice .code-indent-layer,.code-practice .word-hi-layer,.code-practice .find-hi-layer,
+  .code-practice .code-def-layer,.code-practice .err-lines,.code-practice .trace-line,
+  .code-practice .jump-line,.code-practice .cell-div-layer,.code-practice .col-overlay{display:none}
+  .code-practice .code-input{caret-color:var(--accent)}
   /* 대용량 전용 가벼운 편집기: 강조 오버레이(pre)가 없으므로 textarea 글자를 직접 보여준다(일반 편집기는 투명 textarea+pre). */
   .code-host-light .code-input{color:var(--code-text)}
   /* 가벼운 편집기의 찾기 바 — 편집 영역 위에 떠 있는 작은 오버레이(읽기전용 .ro-find 재사용) */
