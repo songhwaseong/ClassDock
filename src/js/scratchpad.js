@@ -846,6 +846,9 @@ function wireScratchpad(){
       label:((activeNote() || {}).title || "메모") + " 맞춤법 검사"
     });
     if (textSpellcheck) textSpellcheck.button.disabled = !!block.locked;
+    // 우클릭 편집 메뉴(복사·붙여넣기·특수문자). 한자키가 없는 편집기라 ※ ○ ① 은 여기로 넣는다.
+    // 잠근 블록은 붙이지 않는다 — 메뉴의 넣기는 readOnly 를 그냥 통과해 버린다.
+    if (!block.locked && typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(textarea);
     textarea.addEventListener("focus", () => { activeBlockId = block.id; });
     textarea.addEventListener("input", () => {
       if (block.locked) return;
@@ -1008,6 +1011,10 @@ function wireScratchpad(){
           document.execCommand("insertText", false, String(text || "").replace(/[\t\r\n]+/g, " "));
         });
         box.addEventListener("keydown", event => handleKey(event, r, c));
+        // 셀 우클릭: 복사·붙여넣기·특수문자(한자키 대신). 셀은 한 줄이라 줄바꿈은 공백으로 눕힌다.
+        if (typeof attachEditableContextMenu === "function"){
+          attachEditableContextMenu(box, { sanitize:(text) => text.replace(/[\t\r\n]+/g, " ") });
+        }
       }
       cell.appendChild(box);
       return cell;
@@ -1200,6 +1207,7 @@ function wireScratchpad(){
       label:((activeNote() || {}).title || "메모") + " 이미지 설명 맞춤법 검사"
     });
     if (imageTextSpellcheck) imageTextSpellcheck.button.disabled = !!block.locked;
+    if (!block.locked && typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(text);
     text.addEventListener("focus", () => { activeBlockId = block.id; });
     text.addEventListener("input", () => {
       if (block.locked) return;

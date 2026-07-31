@@ -2202,6 +2202,8 @@ async function renderXlsx(file, host, doc){
   const fbInput = document.createElement("input"); fbInput.type = "text"; fbInput.className = "xlsx-fb-input";
   fbInput.placeholder = "값 또는 =수식 (예: =SUM(A1:A3))"; fbInput.disabled = true;
   formulaBar.append(fbRef, fbInput);
+  // 수식 입력줄도 편집기와 같은 우클릭 메뉴 — 셀에 들어갈 ※ ○ ① 을 여기서 넣을 수 있다.
+  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(fbInput);
   let fbCell = null;
   host.appendChild(tabs); host.appendChild(exp); host.appendChild(editBar); host.appendChild(formulaBar); host.appendChild(sheet);
 
@@ -4354,9 +4356,14 @@ async function renderXlsx(file, host, doc){
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
     const fxT = tdFxTarget(td);
     const onInput = () => updateFxMenu(fxT);
+    // 셀 우클릭 메뉴(복사·붙여넣기·특수문자). 메뉴·문자표가 떠 있는 동안은 편집을 끝내지 않는다 —
+    // 셀은 포커스를 잃는 순간 커밋되는데, 메뉴에 잠깐 포커스가 갈 수 있기 때문이다.
+    let menuOpen = false;
+    let detachCellMenu = null;
     const finish = (commit) => {
       td.removeEventListener("blur", onBlur); td.removeEventListener("keydown", onKey);
       td.removeEventListener("input", onInput);
+      if (detachCellMenu){ detachCellMenu(); detachCellMenu = null; }
       hideFxMenu();
       td.contentEditable = "false"; td.classList.remove("editing");
       if (commit) applyCellInput(name, r, c, td.textContent);
@@ -4365,7 +4372,7 @@ async function renderXlsx(file, host, doc){
       td.classList.toggle("num", typeof s.v === "number");
       updateFormulaBar();
     };
-    const onBlur = () => finish(true);
+    const onBlur = () => { if (menuOpen) return; finish(true); };
     const onKey = (e) => {
       if (fxHandleKey(e)) return;                     // 자동완성 목록이 떠 있으면 ↑↓·Tab·Enter 는 완성에 사용
       if (e.key === "Enter" && !e.altKey){ e.preventDefault(); finish(true); moveEditSelection(td, e.shiftKey ? -1 : 1, 0); }
@@ -4376,6 +4383,13 @@ async function renderXlsx(file, host, doc){
     td.addEventListener("blur", onBlur);
     td.addEventListener("keydown", onKey);
     td.addEventListener("input", onInput);
+    if (typeof attachEditableContextMenu === "function"){
+      detachCellMenu = attachEditableContextMenu(td, {
+        sanitize:(text) => text.replace(/[\t\r\n]+/g, " "),
+        onMenuOpen:() => { menuOpen = true; },
+        onMenuClose:() => { menuOpen = false; try { td.focus({ preventScroll:true }); } catch(_){} }
+      });
+    }
     if (replace) onInput();                             // '=' 로 시작하면 바로 함수 자동완성 표시
   };
 

@@ -16,6 +16,7 @@
     "state.js",
     "history.js",
     "search-history.js",
+    "special-chars.js",
     "spellcheck.js",
     "pdf-recovery.js",
     "video-viewer.js",
@@ -77,6 +78,7 @@
         "state.js",
         "history.js",
         "search-history.js",
+        "special-chars.js",
         "spellcheck.js"
       ]
     },
@@ -207,7 +209,8 @@
     "spreadsheet-viewer.js": [
       "office-doc-viewers.js",
       "documents.js",
-      "code-viewer.js"
+      "code-viewer.js",
+      "python-editor.js"
     ],
     "spreadsheet-chart.js": [
       "spreadsheet-viewer.js"
@@ -228,14 +231,16 @@
       "code-viewer.js"
     ],
     "scratchpad.js": [
-      "spellcheck.js"
+      "spellcheck.js",
+      "python-editor.js"
     ],
     "mnote.js": [
       "documents.js",
       "file-loaders.js",
       "code-viewer.js",
       "history.js",
-      "spellcheck.js"
+      "spellcheck.js",
+      "python-editor.js"
     ],
     "backup.js": [
       "lazy.js",
@@ -297,6 +302,14 @@
         "python-editor.js",
         "batch-replace.js",
         "app.js"
+      ]
+    },
+    {
+      "name": "special-chars",
+      "file": "special-chars.js",
+      "publicApi": "MNSpecialChars",
+      "consumers": [
+        "python-editor.js"
       ]
     },
     {

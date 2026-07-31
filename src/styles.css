@@ -1945,6 +1945,29 @@
   .text-context-menu button:hover:not(:disabled){background:var(--panel-hover);color:var(--accent)}
   .text-context-menu button:disabled{opacity:.45;cursor:default}
   .text-context-sep{height:1px;margin:4px 3px;background:var(--border)}
+  /* 특수문자 문자표(우클릭 → 특수문자) — 한자키 대신 쓰는 글자 고르기 창 */
+  .mn-charmap{position:fixed;z-index:1960;display:flex;flex-direction:column;gap:7px;width:396px;max-width:calc(100vw - 16px);
+    padding:9px;border:1px solid var(--border);border-radius:12px;background:var(--panel);
+    box-shadow:0 18px 44px rgba(15,23,42,.34);color:var(--ink)}
+  .mn-charmap-head{display:flex;align-items:center;gap:6px}
+  .mn-charmap-search{flex:1 1 auto;min-width:0;padding:6px 9px;border:1px solid var(--border);border-radius:7px;
+    background:var(--field);color:inherit;font:inherit;font-size:12.5px}
+  .mn-charmap-close{flex:0 0 auto;width:26px;height:26px;border:0;border-radius:7px;background:transparent;
+    color:var(--muted);font:inherit;font-size:13px;line-height:1;cursor:pointer}
+  .mn-charmap-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .mn-charmap-tabs{display:flex;flex-wrap:wrap;gap:4px;max-height:88px;overflow:auto}
+  .mn-charmap-tab{border:1px solid var(--border);border-radius:999px;padding:3px 9px;background:transparent;
+    color:var(--muted);font:inherit;font-size:11.5px;white-space:nowrap;cursor:pointer}
+  .mn-charmap-tab:hover{background:var(--panel-hover);color:var(--ink)}
+  .mn-charmap-tab.active{border-color:var(--accent);background:var(--accent);color:#fff}
+  .mn-charmap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:3px;
+    max-height:246px;overflow:auto;padding:2px;border-top:1px solid var(--border);padding-top:7px}
+  .mn-charmap-cell{aspect-ratio:1;min-height:34px;border:1px solid transparent;border-radius:7px;background:transparent;
+    color:inherit;font:inherit;font-size:17px;line-height:1;cursor:pointer}
+  .mn-charmap-cell:hover{border-color:var(--border);background:var(--panel-hover)}
+  .mn-charmap-cell:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .mn-charmap-empty{margin:10px 4px;color:var(--muted);font-size:12px}
+  .mn-charmap-foot{color:var(--muted);font-size:11px}
   /* 수식 입력줄 */
   .xlsx-formulabar{display:flex;align-items:center;gap:8px;max-width:1080px;margin:0 auto 8px;padding:5px 9px;
     border:1px solid var(--border);border-radius:9px;background:var(--field)}

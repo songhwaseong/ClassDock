@@ -552,6 +552,9 @@ function mountMnoteEditor(doc){
       activeBlockId = block.id;
       await addImages(imgs);
     });
+    // 우클릭 편집 메뉴(복사·붙여넣기·특수문자) — 텍스트 편집기와 같은 메뉴를 그대로 쓴다.
+    // 한자키가 오지 않는 편집기라, ※ ○ ① 같은 글자는 여기 "특수문자" 로만 넣을 수 있다.
+    if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
     // 스펠체크 버튼(있으면) — 전역 헬퍼 재사용
     if (typeof MNKoreanSpellcheck !== "undefined" && MNKoreanSpellcheck && typeof MNKoreanSpellcheck.attach === "function"){
       const tools = blockTools(block);
@@ -690,6 +693,10 @@ function mountMnoteEditor(doc){
         document.execCommand("insertText", false, String(text || "").replace(/[\t\r\n]+/g, " "));
       });
       box.addEventListener("keydown", (event) => handleKey(event, r, c));
+      // 셀 우클릭: 복사·붙여넣기·특수문자(한자키 대신). 셀은 한 줄이라 줄바꿈은 공백으로 눕힌다.
+      if (typeof attachEditableContextMenu === "function"){
+        attachEditableContextMenu(box, { sanitize:(text) => text.replace(/[\t\r\n]+/g, " ") });
+      }
       cell.appendChild(box);
       return cell;
     };

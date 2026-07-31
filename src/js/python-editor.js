@@ -8,6 +8,43 @@ function closeTextContextMenu(){
 }
 
 function attachTextCaseContextMenu(ta, options={}){
+  // 특수문자 문자표 — 브라우저 위에서 도는 편집기라 "ㅁ + 한자키" 가 오지 않는다.
+  // 대신 우클릭 메뉴와 Ctrl+F10(한글·워드의 문자표 단축키)으로 연다.
+  // 넣기는 편집기가 준 replaceSelection 을 타야 되돌리기(Ctrl+Z) 기록이 함께 남는다.
+  const openSpecialChars = (x, y) => {
+    if (typeof MNSpecialChars === "undefined" || !MNSpecialChars) return;
+    const len = String(ta.value || "").length;
+    let start = Math.max(0, Math.min(ta.selectionStart || 0, len));
+    let end = Math.max(0, Math.min(ta.selectionEnd || 0, len));
+    if (end < start) [start, end] = [end, start];
+    const spot = { start, end };
+    MNSpecialChars.open({
+      x, y,
+      insert: (ch) => {
+        ta.focus({ preventScroll:true });
+        try { ta.setSelectionRange(spot.start, spot.end); } catch(_){}
+        let ok = true;
+        if (typeof options.replaceSelection === "function"){
+          ok = options.replaceSelection(ch, { start:spot.start, end:spot.end }) !== false;
+        } else {
+          ta.setRangeText(ch, spot.start, spot.end, "end");
+          ta.dispatchEvent(new Event("input", { bubbles:true }));
+        }
+        // 연속으로 넣을 때(Shift+클릭) 같은 자리에 덮어쓰지 않도록 커서를 방금 넣은 글자 뒤로 민다.
+        spot.start = spot.end = spot.start + ch.length;
+        try { ta.setSelectionRange(spot.start, spot.end); } catch(_){}
+        return ok;
+      }
+    });
+  };
+  const onSpecialCharsKey = (event) => {
+    if (event.key !== "F10" || !event.ctrlKey || event.altKey || event.shiftKey) return;
+    event.preventDefault();
+    const rect = ta.getBoundingClientRect();
+    openSpecialChars(rect.left + 24, rect.top + 48);
+  };
+  ta.addEventListener("keydown", onSpecialCharsKey);
+
   const onContextMenu = (event) => {
     event.preventDefault();
     closeTextContextMenu();
@@ -114,6 +151,8 @@ function attachTextCaseContextMenu(ta, options={}){
     addItem("잘라내기", cut, !hasSelection);
     addItem("붙여넣기", paste);
     addSeparator();
+    addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY));
+    addSeparator();
     addItem("대문자로 변경", () => changeCase("upper"), !hasSelection);
     addItem("소문자로 변경", () => changeCase("lower"), !hasSelection);
     addItem("선택한 줄 중복 제거", dedupeSelectedLines, !hasSelection);
@@ -135,7 +174,144 @@ function attachTextCaseContextMenu(ta, options={}){
   ta.addEventListener("contextmenu", onContextMenu);
   const detach = () => {
     ta.removeEventListener("contextmenu", onContextMenu);
+    ta.removeEventListener("keydown", onSpecialCharsKey);
     if (activeTextContextMenu) closeTextContextMenu();
+    if (typeof MNSpecialChars !== "undefined" && MNSpecialChars) MNSpecialChars.close();
+  };
+  detach.open = onContextMenu;
+  detach.openSpecialChars = openSpecialChars;
+  return detach;
+}
+
+// 표 셀처럼 contenteditable 로 만든 입력 상자용 편집 메뉴.
+// textarea 용(attachTextCaseContextMenu)과 겉모습은 같지만, 값(value)이 아니라 선택 Range 를
+// 다뤄야 해서 따로 둔다. 대소문자 변환·중복 줄 삭제처럼 '여러 줄' 전제인 항목은 뺐다.
+//   options.sanitize     : 붙여넣기·특수문자로 들어올 글자를 다듬는다(표 셀은 줄바꿈을 공백으로).
+//   options.onMenuOpen   : 메뉴·문자표가 뜨는 동안 편집을 끝내지 말라고 알린다(표 셀 blur 커밋 방지).
+//   options.onMenuClose  : 다 끝나고 원래 자리로 포커스를 돌려줄 때.
+function attachEditableContextMenu(el, options={}){
+  const clean = (text) => {
+    const value = String(text == null ? "" : text);
+    return typeof options.sanitize === "function" ? String(options.sanitize(value) || "") : value;
+  };
+  const notifyOpen = () => { if (typeof options.onMenuOpen === "function") try { options.onMenuOpen(); } catch(_){} };
+  const notifyClose = () => { if (typeof options.onMenuClose === "function") try { options.onMenuClose(); } catch(_){} };
+  const currentRange = () => {
+    try {
+      const sel = window.getSelection && window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      const range = sel.getRangeAt(0);
+      return el.contains(range.commonAncestorContainer) ? range.cloneRange() : null;
+    } catch(_){ return null; }
+  };
+  const restore = (range) => {
+    try { el.focus({ preventScroll:true }); } catch(_){}
+    if (!range) return;
+    const sel = window.getSelection && window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges(); sel.addRange(range);
+  };
+  const openSpecialChars = (x, y, range) => {
+    if (typeof MNSpecialChars === "undefined" || !MNSpecialChars) return;
+    notifyOpen();
+    restore(range);
+    MNSpecialChars.open({ x, y, target:el, range, onClose: notifyClose });
+  };
+  const onSpecialCharsKey = (event) => {
+    if (event.key !== "F10" || !event.ctrlKey || event.altKey || event.shiftKey) return;
+    event.preventDefault(); event.stopPropagation();
+    const rect = el.getBoundingClientRect();
+    openSpecialChars(rect.left, rect.bottom + 4, currentRange());
+  };
+
+  const onContextMenu = (event) => {
+    event.preventDefault();
+    event.stopPropagation();      // 시트·본문의 다른 우클릭 메뉴가 겹쳐 뜨지 않게 한다
+    closeTextContextMenu();
+    notifyOpen();
+
+    const range = currentRange();
+    const hasSelection = !!(range && !range.collapsed);
+    const menu = document.createElement("div");
+    menu.className = "text-context-menu";
+    menu.setAttribute("role", "menu");
+
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (menu.isConnected) menu.remove();
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("keydown", onKeydown, true);
+      window.removeEventListener("resize", close);
+      if (activeTextContextMenu === close) activeTextContextMenu = null;
+      notifyClose();
+    };
+    const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
+    const onKeydown = (e) => { if (e.key === "Escape") close(); };
+    const addItem = (label, action, disabled=false) => {
+      const button = document.createElement("button");
+      button.type = "button"; button.textContent = label; button.disabled = !!disabled;
+      button.setAttribute("role", "menuitem");
+      button.addEventListener("pointerdown", (e) => e.preventDefault());   // 편집 중인 셀의 포커스를 지킨다
+      button.addEventListener("click", () => { if (button.disabled) return; close(); action(); });
+      menu.appendChild(button);
+    };
+    const addSeparator = () => {
+      const sep = document.createElement("div");
+      sep.className = "text-context-sep"; sep.setAttribute("role", "separator");
+      menu.appendChild(sep);
+    };
+
+    const insertText = (text) => {
+      restore(range);
+      const value = clean(text);
+      if (!value) return;
+      try { document.execCommand("insertText", false, value); }      // 되돌리기(Ctrl+Z)를 그대로 탄다
+      catch(_){ el.dispatchEvent(new Event("input", { bubbles:true })); }
+    };
+    addItem("복사", () => { restore(range); try { document.execCommand("copy"); } catch(_){} }, !hasSelection);
+    addItem("잘라내기", () => { restore(range); try { document.execCommand("cut"); } catch(_){} }, !hasSelection);
+    addItem("붙여넣기", async () => {
+      restore(range);
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") throw new Error("clipboard unavailable");
+        insertText(await navigator.clipboard.readText());
+      } catch(_){
+        if (typeof toast === "function") toast("붙여넣기는 Ctrl+V로 할 수 있어요.", 2200);
+      }
+    });
+    addSeparator();
+    addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY, range));
+    addSeparator();
+    addItem("모두 선택", () => {
+      try {
+        el.focus({ preventScroll:true });
+        const all = document.createRange(); all.selectNodeContents(el);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(all);
+      } catch(_){}
+    });
+
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, event.clientX)) + "px";
+    menu.style.top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, event.clientY)) + "px";
+    activeTextContextMenu = close;
+    setTimeout(() => {
+      if (!menu.isConnected) return;
+      document.addEventListener("pointerdown", onOutside, true);
+      document.addEventListener("keydown", onKeydown, true);
+      window.addEventListener("resize", close);
+    }, 0);
+  };
+
+  el.addEventListener("contextmenu", onContextMenu);
+  el.addEventListener("keydown", onSpecialCharsKey);
+  const detach = () => {
+    el.removeEventListener("contextmenu", onContextMenu);
+    el.removeEventListener("keydown", onSpecialCharsKey);
+    if (activeTextContextMenu) closeTextContextMenu();
+    if (typeof MNSpecialChars !== "undefined" && MNSpecialChars) MNSpecialChars.close();
   };
   detach.open = onContextMenu;
   return detach;
