@@ -3433,6 +3433,27 @@
   .code-find-do{margin-left:auto}
   .code-find-do+.code-find-do{margin-left:5px}
   .code-find-opt:hover,.code-find-nav:hover,.code-find-close:hover,.code-find-do:hover{background:var(--panel-hover);color:var(--ink)}
+  /* 줄 번호로 이동(Ctrl+G) — 찾기 바와 생김새는 같게, 자리는 반대쪽(왼쪽)에 둔다.
+     둘 다 열려 있어도 겹치지 않게 하려는 것 — 찾기를 대신 닫아 버리면 '찾기만 하러 들어온 편집 모드'가
+     보기 화면으로 되돌아가는 부작용이 있어서, 자리를 비켜 주는 쪽이 안전하다. */
+  .code-goto{position:absolute;top:8px;left:14px;z-index:7;display:flex;flex-direction:column;gap:5px;
+    padding:8px;border-radius:9px;background:var(--panel);border:1px solid var(--border);
+    box-shadow:0 10px 30px rgba(15,23,42,.22)}
+  .code-goto[hidden]{display:none}
+  .code-goto-row{display:flex;align-items:center;gap:5px}
+  .code-goto-title{font:600 12px system-ui,sans-serif;color:var(--muted);white-space:nowrap}
+  .code-goto-input{font:13px Consolas,"Courier New",monospace;border:1px solid var(--border);border-radius:6px;
+    padding:5px 8px;background:var(--field);color:var(--ink);width:96px;text-align:right}
+  .code-goto-input:focus{outline:0;border-color:var(--accent)}
+  .code-goto-do,.code-goto-close{font:600 12.5px system-ui,sans-serif;border:1px solid var(--border);
+    border-radius:5px;background:var(--field);color:var(--muted);padding:4px 9px;cursor:pointer;white-space:nowrap}
+  .code-goto-do:hover,.code-goto-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .code-goto-hint{font-size:11.5px;color:var(--muted);text-align:right;white-space:nowrap}
+  .code-goto-hint.is-bad{color:#dc2626}
+  /* 읽기 전용 보기용 — 겹쳐 띄우지 않고 찾기 바(.ro-find)와 같은 줄맞춤으로 문서 위에 놓는다 */
+  .code-goto-flow{position:static;flex-direction:row;align-items:center;gap:8px;max-width:1080px;
+    margin:0 auto 10px;padding:0;border:0;background:none;box-shadow:none}
+  .code-goto-flow .code-goto-hint{text-align:left}
   /* 최근 검색어 드롭다운 — 겹쳐 띄우지 않고 세로 흐름 안에 넣어 잘림·z-index 문제를 만들지 않는다 */
   .search-history-toggle{font:600 11.5px system-ui,sans-serif;border:1px solid var(--border);border-radius:5px;
     background:var(--field);color:var(--muted);padding:4px 7px;cursor:pointer;white-space:nowrap}

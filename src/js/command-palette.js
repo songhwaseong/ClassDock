@@ -61,6 +61,9 @@
       { kw:"manual guide 사용법 설명서 매뉴얼 안내 도움말 문서 어떻게" }),
     C("spellcheck","🔤","한국어 맞춤법 검사", clickBtn(".spellcheck-trigger"),
       { when:hasBtn(".spellcheck-trigger"), kw:"spell 맞춤법 띄어쓰기 교정 검사 오타" }),
+    C("goToLine","🔢","줄 번호로 이동", () => { const s = curState(); if (s && typeof s.openGotoLine === "function") s.openGotoLine(); },
+      { when:() => { const s = curState(); return !!(s && typeof s.openGotoLine === "function"); }, sc:"goToLine",
+        kw:"goto line 줄 라인 번호 이동 점프 몇번째" }),
     // 파이썬 편집기 도구막대 — 설정에서 숨긴 버튼은 화면에 없어도 팔레트로는 계속 실행할 수 있다.
     C("pyTrace","👣","단계 실행 (변수 추적)", clickBtn(".run-trace"),
       { when:hasBtn(".run-trace"), kw:"trace step 단계 실행 디버그 변수 추적 한줄씩" }),

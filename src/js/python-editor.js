@@ -336,6 +336,96 @@ function documentEndBlankIndent(value, prof){
   return indent;
 }
 
+/* ===== 줄 번호로 이동(Ctrl+G) 전용 미니 창 =====
+   찾기 바에 숫자를 섞지 않고 창을 따로 둔다 — 코드에서 숫자를 '찾는' 일과 그 줄로 '가는' 일은 둘 다 자주
+   쓰여서, 한 입력창에 접두사로 몰아넣으면 어느 쪽도 자연스럽지 않다.
+   치는 동안에는 미리보기로 화면만 옮기고(캐럿·포커스는 그대로 두어 계속 칠 수 있게), Enter 로 확정한다.
+   Esc 로 닫으면 보던 자리로 되돌아온다 — 잘못 눌러도 읽던 위치를 잃지 않게.
+   config: mount(붙일 곳) · totalLines() · snapshot()/restore(스크롤 되돌리기) · preview(line) · commit(line) · onClose
+   flow=true 면 겹쳐 띄우는 대신 문서 위쪽 흐름에 놓는다(읽기 전용 보기 — 겹칠 자리가 마땅치 않고 찾기 바와 같은 줄맞춤이 낫다). */
+function mountGotoLineBar(config){
+  const bar = document.createElement("div"); bar.className = config.flow ? "code-goto code-goto-flow" : "code-goto"; bar.hidden = true;
+  bar.innerHTML =
+    '<div class="code-goto-row">' +
+      '<span class="code-goto-title">줄 이동</span>' +
+      '<input type="text" class="code-goto-input" inputmode="numeric" autocomplete="off" placeholder="줄 번호" aria-label="이동할 줄 번호">' +
+      '<button type="button" class="code-goto-do">이동</button>' +
+      '<button type="button" class="code-goto-close" title="닫기 (Esc)">✕</button>' +
+    '</div>' +
+    '<div class="code-goto-hint" aria-live="polite"></div>';
+  if (config.prepend) config.mount.insertBefore(bar, config.mount.firstChild); else config.mount.appendChild(bar);
+  const input = bar.querySelector(".code-goto-input");
+  const hint = bar.querySelector(".code-goto-hint");
+  let open = false, snapshot = null, previewed = false;
+
+  const total = () => Math.max(1, Math.floor(config.totalLines()) || 1);
+  // 입력을 줄 번호로 읽는다. 숫자만 받고(공백·쉼표는 흘려보냄), 범위 밖이면 양 끝으로 당긴다.
+  const readLine = () => {
+    const raw = input.value.replace(/[\s,]/g, "");
+    const max = total();
+    if (!raw) return { empty:true, max };
+    if (!/^\d+$/.test(raw)) return { bad:true, max };
+    const asked = parseInt(raw, 10);
+    return { line: Math.max(1, Math.min(max, asked)), asked, clamped: asked < 1 || asked > max, max };
+  };
+  const showHint = () => {
+    const r = readLine();
+    hint.classList.remove("is-bad");
+    if (r.empty){ hint.textContent = window.tf("1 ~ {n}줄", { n:r.max }); return; }
+    if (r.bad){ hint.classList.add("is-bad"); hint.textContent = window.t("숫자만 넣어 주세요."); return; }
+    if (r.clamped){ hint.classList.add("is-bad"); hint.textContent = window.tf("{n}줄까지 있어요 — {line}줄로 갑니다.", { n:r.max, line:r.line }); return; }
+    hint.textContent = window.tf("{line} / {n}줄", { line:r.line, n:r.max });
+  };
+  const close = (rewind) => {
+    if (!open) return;
+    open = false; bar.hidden = true;
+    if (rewind && previewed && snapshot !== null && config.restore) config.restore(snapshot);
+    previewed = false; snapshot = null;
+    if (config.onClose) config.onClose();
+  };
+  const preview = () => {
+    const r = readLine();
+    showHint();
+    if (r.empty || r.bad) return;
+    config.preview(r.line);
+    previewed = true;
+  };
+  const commit = () => {
+    const r = readLine();
+    if (r.empty || r.bad){ showHint(); input.focus(); input.select(); return; }
+    previewed = false;               // 확정했으니 되돌릴 자리는 버린다
+    close(false);
+    config.commit(r.line);
+  };
+  input.addEventListener("input", preview);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){ e.preventDefault(); commit(); }
+    else if (e.key === "Escape"){ e.preventDefault(); close(true); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown"){          // ↑↓ 로 한 줄씩 옮겨 가며 훑어보기
+      e.preventDefault();
+      const r = readLine();
+      const base = (r.empty || r.bad) ? 1 : r.line;
+      input.value = String(Math.max(1, Math.min(r.max, base + (e.key === "ArrowDown" ? 1 : -1))));
+      preview();
+    }
+  });
+  bar.querySelector(".code-goto-do").addEventListener("click", commit);
+  bar.querySelector(".code-goto-close").addEventListener("click", () => close(true));
+  if (typeof MNI18N === "object" && MNI18N && typeof MNI18N.translateTree === "function") MNI18N.translateTree(bar);
+  return {
+    el: bar,
+    isOpen: () => open,
+    close: () => close(true),
+    open: () => {
+      if (!open){ snapshot = config.snapshot ? config.snapshot() : null; previewed = false; }
+      open = true; bar.hidden = false;
+      input.value = ""; showHint();
+      input.focus(); input.select();
+    },
+    destroy: () => { bar.remove(); }
+  };
+}
+
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
   const gutter = document.createElement("div"); gutter.className = "code-gutter";
@@ -2258,6 +2348,34 @@ function buildCodeEditor(text, prof, options={}){
   findBar.querySelector('[data-do="all"]').addEventListener("click", () => { rememberFindTerm(); replaceAll(); });
   findBar.querySelector(".code-find-close").addEventListener("click", closeFind);
 
+  /* ===== 줄 번호로 이동(Ctrl+G) =====
+     미리보기는 화면만 옮긴다 — 캐럿과 포커스를 건드리지 않아야 입력창에서 숫자를 계속 고칠 수 있다.
+     노란 띠(jumpBand)로 어느 줄인지 보여 주되, 확정 전에는 자동으로 지우지 않는다(고르는 중이니까). */
+  const previewGotoLine = (n) => {
+    const total = ta.value.split("\n").length;
+    const line = Math.max(1, Math.min(total, n));
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.35);
+    clearTimeout(jumpTimer);
+    jumpLine = line; positionJump();
+    sync();
+  };
+  const gotoBar = mountGotoLineBar({
+    mount: edit,
+    totalLines: () => ta.value.split("\n").length,
+    snapshot: () => ta.scrollTop,
+    restore: (top) => { clearJump(); ta.scrollTop = top; sync(); },
+    preview: previewGotoLine,
+    commit: (line) => focusLine(line),
+    onClose: () => { if (!practice.active) ta.focus(); }
+  });
+  // 따라치기 중에는 막는다 — 캐럿을 임의의 줄로 옮기면 지금 어디를 치고 있는지(practice.pos)와 어긋난다.
+  const openGoto = () => {
+    if (practice.active){ toast("따라치기 중에는 줄 이동을 쓸 수 없어요. Esc 로 먼저 끝내 주세요.", 2600); return; }
+    exitCol(); hideCompletion(); hideHelp();
+    gotoBar.open();
+  };
+
   ta.addEventListener("keydown", (e) => {
     // 따라치기 중에는 편집 도우미(자동 들여쓰기·짝 괄호·자동완성·열 편집…)를 전부 비켜 간다.
     // 내가 치지 않은 글자가 저절로 들어가면 채점이 어긋나기 때문. 글자·Enter·Backspace 만 기본 동작으로 통과시킨다.
@@ -2291,6 +2409,9 @@ function buildCodeEditor(text, prof, options={}){
     }
     if (shortcutMatches(e, "findInDocument")){
       e.preventDefault(); e.stopPropagation(); exitCol(); hideCompletion(); openFind(); return;
+    }
+    if (shortcutMatches(e, "goToLine")){
+      e.preventDefault(); e.stopPropagation(); openGoto(); return;
     }
     if (shortcutMatches(e, "formatDocument")){
       e.preventDefault(); e.stopPropagation();
@@ -2762,6 +2883,7 @@ function buildCodeEditor(text, prof, options={}){
       if (editorResizeObserver) editorResizeObserver.disconnect();
     },
     openFind, closeFind, isFindOpen: () => findOpen, isCompletionOpen: () => !complete.hidden,
+    openGoto, closeGoto: gotoBar.close, isGotoOpen: gotoBar.isOpen,
     markError, markErrorLines, setDiagnosticItems, clearError, setUnusedRanges, clearUnusedRanges, setParamRanges, clearParamRanges, showTraceLine, clearTraceLine, highlightCellRange, clearCellBand,
     setCellSplitMode, toggleCellBoundaryAtLine, isCellSplitMode: () => cellSplitMode, autoSplitCells,
     spotlightRange, clearSpotlight };
@@ -2869,6 +2991,24 @@ function buildLightTextEditor(text, options={}){
     syncScroll();
   };
 
+  // 줄 번호로 이동(Ctrl+G) — 일반 편집기와 같은 창을 쓴다(처음 열 때 만든다).
+  let gotoBar = null;
+  const openGoto = () => {
+    if (!gotoBar) gotoBar = mountGotoLineBar({
+      mount: edit,
+      totalLines: () => countLines(ta.value),
+      snapshot: () => ta.scrollTop,
+      restore: (top) => { ta.scrollTop = top; syncScroll(); },
+      preview: (line) => {
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+        ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
+        syncScroll();
+      },
+      commit: (line) => focusLine(line)
+    });
+    gotoBar.open();
+  };
+
   // ===== 가벼운 찾기(Ctrl+F): 문자열을 찾아 textarea 안에서 선택·스크롤(강조 오버레이 없이 네이티브 선택만) =====
   let findBar = null, findInput = null, findCount = null, findOpen = false, findHistory = null;
   let matches = [], matchIdx = -1;
@@ -2969,10 +3109,11 @@ function buildLightTextEditor(text, options={}){
     setValue: (v) => { ta.value = v; renderGutter(); ta.dispatchEvent(new Event("input", { bubbles: true })); },
     getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
     focusLine, dedupeSelectedLines, openFind, closeFind, isFindOpen: () => findOpen,
+    openGoto, closeGoto: () => { if (gotoBar) gotoBar.close(); }, isGotoOpen: () => !!gotoBar && gotoBar.isOpen(),
     destroy: () => {
       detachTextContextMenu();
       if (ta._mnSpellcheckController) ta._mnSpellcheckController.destroy();
-      ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove();
+      ta.removeEventListener("scroll", syncScroll); if (findBar) findBar.remove(); if (gotoBar) gotoBar.destroy();
     }
   };
 }

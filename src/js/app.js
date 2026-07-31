@@ -1049,6 +1049,11 @@ function wire(){
         return;
       }
     }
+    if (shortcutMatches(e, "goToLine") && state && typeof state.openGotoLine === "function"){
+      e.preventDefault();
+      state.openGotoLine();
+      return;
+    }
     if (shortcutMatches(e, "focusSearch") && docs.length){
       e.preventDefault();
       const seed = document.activeElement === sidebarSearch

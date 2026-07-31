@@ -82,6 +82,7 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"nextFile", label:"다음 수업 파일", description:"다음 열린 탭으로 이동", defaultValue:"Ctrl+ArrowRight" },
   { id:"findInDocument", label:"문서 안에서 찾기", description:"PDF·노트북·편집기 찾기·바꾸기", defaultValue:"Ctrl+F" },
   { id:"findInCell", label:"현재 셀에서 찾기", description:"노트북 현재 셀 안에서 찾기·바꾸기", defaultValue:"Ctrl+Shift+H" },
+  { id:"goToLine", label:"줄 번호로 이동", description:"코드·텍스트 편집기에서 원하는 줄로 바로 가기", defaultValue:"Ctrl+G" },
   { id:"runCode", label:"Python 코드 실행", description:"현재 Python 코드 실행 (노트북: 이 셀만)", defaultValue:"Ctrl+Enter" },
   { id:"runCellAdvance", label:"셀 실행 후 다음 셀", description:"노트북·셀 코드에서 실행 후 다음 셀로", defaultValue:"Shift+Enter" },
   { id:"runNotebook", label:"노트북 전체 실행", description:"현재 노트북의 모든 코드 셀 실행", defaultValue:"Ctrl+Shift+Enter" },

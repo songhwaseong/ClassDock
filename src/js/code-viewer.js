@@ -801,6 +801,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     let findOnlyEdit = false;                     // Ctrl+F(찾기)로 편집 모드에 들어온 경우 — 찾기를 닫으면 보기로 복귀
     let viewMode = "";                            // "view"/"edit"/"preview" — 현재 표시 모드
     let openReadonlyFind = null;                  // 읽기 전용(대용량·편집 잠금) 찾기 바 열기 — showView 가 채운다
+    let openReadonlyGoto = null;                  // 보기 화면의 줄 이동 창 열기 — showView 가 채운다
 
     const teardownActive = () => {
       clearTimeout(viewJumpTimer);
@@ -811,7 +812,7 @@ async function renderCode(file, host, ext, profile, runCtx){
 
     const showView = () => {
       teardownActive(); host.innerHTML = ""; if (ownerDoc) ownerDoc.codeEditor = null;
-      viewMode = "view"; openReadonlyFind = null;
+      viewMode = "view"; openReadonlyFind = null; openReadonlyGoto = null;
       // 내용 검색 등에서 줄 이동이 예약돼 있으면 줄번호가 있는 코드 보기로 받는다.
       if (treeMode && ownerDoc && ownerDoc.pendingFocusLine) treeMode = false;
       if (canEdit || jsonPretty || isHtml || isMd){
@@ -1103,6 +1104,17 @@ async function renderCode(file, host, ext, profile, runCtx){
           enterEditHere();   // preventDefault 하지 않음 → 이 키 입력이 편집기 textarea 에 그대로 들어간다
         });
       }
+      // 줄 번호로 이동(Ctrl+G) — 보기 화면에도 편집기와 같은 창을 단다. 편집 모드로 넘어가지 않고 그 자리에서
+      // 옮기므로, 편집이 잠긴 대용량 파일에서도 그대로 쓸 수 있다.
+      const viewGoto = mountGotoLineBar({
+        mount: host, prepend: true, flow: true,
+        totalLines: () => lineN,
+        snapshot: () => wrap.scrollTop,
+        restore: (top) => { clearTimeout(viewJumpTimer); jump.hidden = true; jumpWord.hidden = true; wrap.scrollTop = top; },
+        preview: (line) => focusLine(line, { noWrapFocus:true }),   // 포커스는 입력창에 두고 화면만 옮긴다
+        commit: (line) => focusLine(line)
+      });
+      openReadonlyGoto = () => viewGoto.open();
       // 편집 잠금(대용량) 파일용 읽기 전용 찾기 바 — 문자열에서 찾아 해당 줄로 점프·강조(Ctrl+F 로 연다).
       if (!canEdit){
         const roFind = document.createElement("div"); roFind.className = "ro-find"; roFind.hidden = true;
@@ -1216,7 +1228,7 @@ async function renderCode(file, host, ext, profile, runCtx){
 
     const showEdit = () => {
       teardownActive(); host.innerHTML = "";
-      viewMode = "edit"; openReadonlyFind = null;
+      viewMode = "edit"; openReadonlyFind = null; openReadonlyGoto = null;
       prettyText = null; treeMode = false;   // 편집·저장은 항상 원본 텍스트 기준 — 표시 전용 정렬·트리 상태는 해제
       const startedForFind = findOnlyEdit; findOnlyEdit = false;
       // 찾기(Ctrl+F)만 하러 들어온 편집 모드면, 찾기를 닫을 때 아직 수정 전이면 보기로 되돌린다.
@@ -1373,7 +1385,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     //  - 마크다운: markdownToHtml 로 문서 모양 렌더(저장 전 편집 내용도 반영)
     const showPreview = () => {
       teardownActive(); host.innerHTML = "";
-      viewMode = "preview"; openReadonlyFind = null;
+      viewMode = "preview"; openReadonlyFind = null; openReadonlyGoto = null;
       if (ownerDoc){ ownerDoc.codeViewer = null; ownerDoc.codeEditor = null; }
       const bar = document.createElement("div"); bar.className = "text-view-bar";
       const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
@@ -1428,7 +1440,20 @@ async function renderCode(file, host, ext, profile, runCtx){
       showView();   // 미리보기 등 다른 모드였으면 읽기 전용 보기로 전환 후 연다
       requestAnimationFrame(() => { if (typeof openReadonlyFind === "function") openReadonlyFind(seed); });
     };
-    if (ownerDoc) ownerDoc.openDocFind = openDocFind;
+    // Ctrl+G(줄 번호로 이동): 편집기가 떠 있으면 거기서, 보기 화면이면 그 자리에서(편집 모드로 넘어가지 않는다).
+    // 미리보기·트리처럼 줄 개념이 없는 화면에서는 줄이 있는 쪽으로 먼저 전환한 뒤 연다.
+    const openDocGoto = () => {
+      if (activeEditor && typeof activeEditor.openGoto === "function"){ activeEditor.openGoto(); return; }
+      if (viewMode === "view" && typeof openReadonlyGoto === "function"){ openReadonlyGoto(); return; }
+      if (!canEdit){
+        showView();
+        requestAnimationFrame(() => { if (typeof openReadonlyGoto === "function") openReadonlyGoto(); });
+        return;
+      }
+      showEdit();
+      requestAnimationFrame(() => { if (activeEditor && typeof activeEditor.openGoto === "function") activeEditor.openGoto(); });
+    };
+    if (ownerDoc){ ownerDoc.openDocFind = openDocFind; ownerDoc.openGotoLine = openDocGoto; }
 
     if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(teardownActive); }
     if (restoredTextDraft !== null){              // 저장하지 않은 편집 초안 복구 → 편집 화면으로 열어 바로 보이게
@@ -2728,6 +2753,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       else editor.openFind();
     };
     ownerDoc.openDocFind = openPythonDocFind;
+    ownerDoc.openGotoLine = () => editor.openGoto();
     ownerDoc.codeEditor = editor;
     ownerDoc.codeEditorFileBase = ui.fileBase;
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
@@ -2749,6 +2775,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       persistDraft();
       if (ownerDoc.codeEditor === editor) ownerDoc.codeEditor = null;
       if (ownerDoc.openDocFind === openPythonDocFind) delete ownerDoc.openDocFind;
+      delete ownerDoc.openGotoLine;
       editor.destroy();
       unregisterEditorFont(editor.host);
       unregisterEditorFont(outPanel);
