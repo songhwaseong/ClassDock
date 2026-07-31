@@ -1522,7 +1522,70 @@ function buildCodeEditor(text, prof, options={}){
     else colEachLine((s, a) => a < s.length ? s.slice(0, a) + s.slice(a + 1) : s);
     col.render();
   };
+  /* ===== 열 편집 클립보드(복사·잘라내기·붙여넣기) =====
+     사각 선택은 textarea 의 네이티브 선택이 아니라 오버레이 그림이라, 브라우저 기본 복사로는 아무것도
+     담기지 않는다 → 줄마다 선택 구간을 직접 잘라 "줄바꿈으로 이은 한 덩어리"로 클립보드에 넣는다. */
+  const colSelectedRows = () => {
+    const lines = ta.value.split("\n"), out = [];
+    for (let i = col.lineStart; i <= col.lineEnd && i < lines.length; i++){
+      const s = lines[i], len = s.length;
+      out.push(s.slice(Math.min(col.leftCol, len), Math.min(col.rightCol, len)));
+    }
+    return out;
+  };
+  let colClipboardBusy = false;      // 폴백 복사가 잠깐 포커스를 훔쳐도 blur 로 열 모드가 풀리지 않게
+  const colWriteClipboard = async (text) => {
+    try { await navigator.clipboard.writeText(text); return true; } catch(_){}
+    colClipboardBusy = true;         // 권한·비보안 컨텍스트로 막히면 숨은 textarea + execCommand 로
+    const box = document.createElement("textarea");
+    box.value = text; box.style.cssText = "position:fixed;top:-1000px;left:0;opacity:0";
+    document.body.appendChild(box); box.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch(_){}
+    box.remove();
+    ta.focus({ preventScroll:true });
+    colClipboardBusy = false;
+    return ok;
+  };
+  const colCopy = (cut) => {
+    if (col.rightCol <= col.leftCol) return false;        // 폭 0(세로 커서만) → 복사할 것이 없다
+    const rows = colSelectedRows();
+    const chars = rows.reduce((n, s) => n + s.length, 0);
+    colWriteClipboard(rows.join("\n")).then((ok) => {
+      if (typeof toast !== "function") return;
+      if (!ok){ toast("클립보드에 담지 못했어요.", 2200); return; }
+      toast("열 " + rows.length + "줄 " + chars + "자를 " + (cut ? "잘라냈어요." : "복사했어요."), 1600);
+    });
+    if (cut){
+      colEachLine((s, a, b) => s.slice(0, a) + s.slice(b));
+      col.rightCol = col.leftCol; col.caretSide = "left"; col.render();
+    }
+    return true;
+  };
+  // 붙여넣기: 줄 수가 선택한 줄 수와 같으면 줄별로 짝지어 넣고, 한 줄짜리는 모든 줄에 같이 넣는다.
+  // 줄 수가 어긋나면 위에서부터 맞추고(모자란 줄은 빈 값) 알려 준다.
+  const colPaste = (raw) => {
+    const text = String(raw || "").replace(/\r\n?/g, "\n");
+    if (!text) return;
+    const rows = text.split("\n");
+    const count = col.lineEnd - col.lineStart + 1;
+    if (rows.length === 1){ colInsert(rows[0]); return; }
+    let i = 0, widest = 0;
+    for (const r of rows.slice(0, count)) widest = Math.max(widest, r.length);
+    colEachLine((s, a, b) => s.slice(0, a) + (rows[i++] || "") + s.slice(b));
+    col.leftCol = col.rightCol = col.leftCol + widest; col.caretSide = "right"; col.render();
+    if (rows.length !== count && typeof toast === "function"){
+      toast("붙여넣는 " + rows.length + "줄이 선택한 " + count + "줄과 달라 위에서부터 맞췄어요.", 2600);
+    }
+  };
+  ta.addEventListener("paste", (e) => {          // Ctrl+V — clipboardData 로 받으면 읽기 권한이 필요 없다
+    if (!col.active || practice.active) return;
+    const data = e.clipboardData && e.clipboardData.getData("text");
+    if (!data) return;
+    e.preventDefault();
+    colPaste(data);
+  });
   ta.addEventListener("mousedown", (e) => {
+    if (e.button === 2 && col.active) return;    // 우클릭은 열 선택을 유지 — 상황 메뉴에서 복사할 수 있게
     if (!e.altKey || e.button !== 0){ exitCol(); return; }
     e.preventDefault(); ta.focus();
     const m = colMetrics(); col.m = m;
@@ -1546,7 +1609,10 @@ function buildCodeEditor(text, prof, options={}){
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
     move(e);
   });
-  ta.addEventListener("blur", () => { exitCol(); exitLinkedEdit(); dismissCompletion(); clearDefinitionHover(); });
+  ta.addEventListener("blur", () => {
+    if (colClipboardBusy) return;              // 폴백 복사가 잠깐 훔쳐 간 포커스 — 열 선택은 그대로 둔다
+    exitCol(); exitLinkedEdit(); dismissCompletion(); clearDefinitionHover();
+  });
   // 더블클릭 단어 선택: 기본 선택의 공백 깜빡임을 막되, 한글처럼 폭이 넓은 문자가 앞에 있어도 밀리지 않게
   // 클릭한 줄의 실제 렌더링 폭을 측정해서 문자 위치를 찾는다.
   const isWordChar = (ch) => !!ch && (/[A-Za-z0-9_]/.test(ch) || (ch.charCodeAt(0) > 127 && !/\s/.test(ch)));
@@ -2312,7 +2378,15 @@ function buildCodeEditor(text, prof, options={}){
       // 수식 키 단독 입력(Shift 등)으로 모드가 풀리면 대문자·기호 입력이 깨진다 → 무시
       if (["Shift","Alt","AltGraph","Control","Meta","CapsLock","Dead","Process","Unidentified"].includes(e.key)) return;
       if (e.key === "Escape"){ e.preventDefault(); exitCol(); return; }
-      if (e.ctrlKey || e.metaKey){ exitCol(); return; }                 // 저장 등 기존 단축키는 그대로 동작
+      if (e.ctrlKey || e.metaKey){
+        // 복사·잘라내기·붙여넣기는 열(사각) 단위로 직접 처리한다. 네이티브 복사는 이 모드에서
+        // 선택이 비어 있어(오버레이로만 그린 선택) 아무것도 담기지 않는다.
+        const key = (e.key || "").toLowerCase(), code = e.code || "";   // 한글 입력 상태에서도 잡히게 code 병행
+        if (!e.altKey && !e.shiftKey && (key === "c" || code === "KeyC")){ e.preventDefault(); colCopy(false); return; }
+        if (!e.altKey && !e.shiftKey && (key === "x" || code === "KeyX")){ e.preventDefault(); colCopy(true); return; }
+        if (!e.altKey && (key === "v" || code === "KeyV")) return;      // paste 이벤트에서 처리 — 열 모드 유지
+        exitCol(); return;                                              // 저장 등 기존 단축키는 그대로 동작
+      }
       if (e.key === "Backspace"){ e.preventDefault(); colBackspace(); return; }
       if (e.key === "Delete"){ e.preventDefault(); colDelete(); return; }
       if (e.key === "Tab"){ e.preventDefault(); colInsert("    "); return; }
@@ -2499,7 +2573,19 @@ function buildCodeEditor(text, prof, options={}){
       return true;
     },
     dedupeSelectedLines,
-    contextMenuActions: options.contextMenuActions
+    // 열 편집 중에는 사각 선택 전용 항목을 맨 위에 얹는다(네이티브 선택이 비어 있어 기본 복사 항목은 꺼져 있다).
+    contextMenuActions: () => {
+      const base = typeof options.contextMenuActions === "function"
+        ? (options.contextMenuActions() || [])
+        : (Array.isArray(options.contextMenuActions) ? options.contextMenuActions : []);
+      if (!col.active) return base;
+      const empty = col.rightCol <= col.leftCol;
+      const items = [
+        { label:"열 복사", action:() => colCopy(false), disabled:empty },
+        { label:"열 잘라내기", action:() => colCopy(true), disabled:empty }
+      ];
+      return base.length ? items.concat([{ separator:true }], base) : items;
+    }
   });
   /* ===== 코드 따라치기: 채점·시작·종료 ===== */
   // 줄 앞 들여쓰기는 자동으로 통과시킨다(맞은 것으로 처리). 파이썬 4칸을 매번 세어 치는 건 연습이 아니라
