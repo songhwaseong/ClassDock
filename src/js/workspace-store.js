@@ -516,7 +516,9 @@ async function restoreLastWorkspace(force=false){
       }
     }
     if (loose.length){
-      let opts = { bulk: loose.length > 1 };
+      // restoreFromWorkspace: 복원으로 다시 푸는 압축은 "첫 파일 자동 열기 금지" 대상이 아니다
+      // (지난번에 보던 문서를 applyTabState 가 못 찾을 때 화면이 비어 버리는 걸 막는다).
+      let opts = { bulk: loose.length > 1, restoreFromWorkspace: true };
       const siblings = loose.filter(f => !["zip","tar","gz","tgz"].includes((f.name.split(".").pop() || "").toLowerCase()));
       if (siblings.length > 1) opts.archiveCtx = makeFileSiblingCtx(siblings.map(f => ({ file: f, relPath: f.name })), "최근 작업공간");
       await handleFiles(loose, opts);

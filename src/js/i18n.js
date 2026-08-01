@@ -218,6 +218,9 @@
     "라벤더": "Lavender",
     "스카이": "Sky",
     "시작할 때 최근 작업공간 자동 복원": "Auto-restore recent workspace on startup",
+    "폴더·압축을 열 때 첫 파일 자동으로 열기": "Open the first file automatically when opening a folder or archive",
+    "꺼 두면 사이드바만 펼쳐지고, 볼 파일을 직접 고를 때까지 아무 문서도 열지 않습니다.":
+      "When off, only the sidebar expands and no document opens until you pick one.",
     "최근 검색어 기억 — 찾기·검색창에 지난 검색어를 보여줍니다":
       "Remember recent searches — show past terms in the find and search boxes",
     "이 컴퓨터 안에만 구획별로 12개까지 남기고, '바꿀 내용'은 기억하지 않습니다. 여러 사람이 함께 쓰는 컴퓨터라면 끄는 것을 권합니다.":
@@ -1368,6 +1371,9 @@
     "help.f5": "<b>Whiteboard</b> — free ink, shapes, and images. Add it from New.",
     "help.f6": "<b>Split view</b> — view any document with a reference side by side or top and bottom, then lock the reference and adjust the split ratio or positions.",
     "help.f7": "<b>Scratchpad</b> (Ctrl+M) · <b>image notes</b> (paste many captures, save in bulk) · <b>dark mode</b> · auto-restore workspace. Everything is processed on this computer only and files are never sent anywhere.",
+    "empty.title": "Pick a file from the list on the left",
+    "empty.lead": "Every file is already open. Click a name to show it here.",
+    "empty.hint": "To see the first file right away when opening a folder or archive, turn on 'Open the first file automatically' in <b>Settings → General</b>.",
     "ss.desc": "Choose a video to play (<strong>multiple loop in order</strong>), or show a clock animation if none. <strong>MP4 (H.264) / WebM recommended</strong> — unplayable files are filtered before saving. Videos are stored in this browser only, independent of the app (exe/HTML) size."
   };
 

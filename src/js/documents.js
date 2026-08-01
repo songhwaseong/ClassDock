@@ -58,10 +58,23 @@ let uiBatchSidebarPending = false;
 let uiBatchChromePending = false;
 let uiBatchActiveCandidate = null;
 let uiBatchCancelled = false;
+// 폴더·압축을 연 배치는 첫 파일을 자동으로 띄우지 않는다(설정 autoOpenFirstFile 로 되돌릴 수 있음).
+// 대신 여기 모아 둔 그룹만 펼쳐서, 사용자가 사이드바에서 볼 파일을 직접 고르게 한다.
+let uiBatchNoAutoOpen = false;
+let uiBatchOpenedGroupIds = [];
+function suppressUiBatchAutoOpen(groupId){
+  if (!uiBatchDepth) return;
+  uiBatchNoAutoOpen = true;
+  // 펼쳐 둘 곳은 최상위 그룹만 — 폴더 안에 들어 있던 압축까지 열어젖히지는 않는다.
+  const node = groupId != null ? navNodeById(groupId) : null;
+  if (node && node.parentId == null && !uiBatchOpenedGroupIds.includes(groupId)) uiBatchOpenedGroupIds.push(groupId);
+}
 function beginUiBatch(){
   if (uiBatchDepth++ === 0){
     uiBatchCancelled = false;
     uiBatchActiveCandidate = null;
+    uiBatchNoAutoOpen = false;
+    uiBatchOpenedGroupIds = [];
     const cancel = byId("loadingCancel"); if (cancel) cancel.hidden = false;
   }
 }
@@ -72,14 +85,29 @@ function endUiBatch(){
   const refreshSidebar = uiBatchSidebarPending;
   const refreshHeader = uiBatchChromePending;
   const activateId = uiBatchActiveCandidate;
+  const noAutoOpen = uiBatchNoAutoOpen;
+  const openedGroupIds = uiBatchOpenedGroupIds;
   uiBatchCancelled = false;
   uiBatchSidebarPending = false;
   uiBatchChromePending = false;
   uiBatchActiveCandidate = null;
+  uiBatchNoAutoOpen = false;
+  uiBatchOpenedGroupIds = [];
   const cancel = byId("loadingCancel"); if (cancel) cancel.hidden = true;
   byId("loading").hidden = true;
   if (refreshHeader) refreshChrome();
   if (refreshSidebar) renderSidebar();
+  if (noAutoOpen){
+    // 자동으로 여는 파일이 없으므로 방금 만든 폴더·압축 그룹은 펼쳐 둔다(닫힌 폴더 하나만 남는 걸 막는다).
+    let expanded = false;
+    openedGroupIds.forEach(nodeId => {
+      const node = navNodeById(nodeId);
+      if (node && node.type === "group" && !node.expanded){ node.expanded = true; expanded = true; }
+    });
+    if (expanded) renderSidebar();       // 위에서 이미 한 번 그렸으므로 실제로 펼친 게 있을 때만 다시 그린다
+    updateDocEmptyState();
+    return;
+  }
   if (activateId && docs.some(d => d.id === activateId)) setActiveDoc(activateId);
 }
 async function runUiBatch(task){
@@ -448,7 +476,8 @@ function setActiveDoc(id){
   // 학습 화면의 고정 PDF는 이 함수 끝의 applyStudyLayout 이 다시 표시한다.
   if (prev && prev !== d) prev.el.hidden = true;
   if (d) d.el.hidden = false;
-  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; byId("activeDocStatus").hidden=true; updateOriginalSaveBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); updateSidebarActive(); return; }
+  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; byId("activeDocStatus").hidden=true; updateOriginalSaveBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); return; }
+  updateDocEmptyState();
   state = d;
   viewer = d.el;
   byId("tools").hidden = (d.kind !== "pdf");
@@ -1735,7 +1764,7 @@ function tabLimitForWidth(width){
   return Math.max(1, Math.min(6, Math.floor(usable / 210)));
 }
 
-// 헤더 아래 탭바: tabOrder(선택한 문서 순서) 중 현재 열려있는 것만, 2개 이상일 때 표시
+// 헤더 아래 탭바: tabOrder(선택한 문서 순서) 중 현재 열려있는 것만 표시(1개여도 보인다)
 function renderTabs(){
   if (typeof closeTabMenu === "function") closeTabMenu();          // 다시 그릴 때 떠 있던 우클릭 메뉴 정리
   tabOrder = tabOrder.filter(id => docs.some(d => d.id === id));   // 닫힌 문서 정리
@@ -1744,7 +1773,7 @@ function renderTabs(){
   persistTabState();                                               // 탭 구성을 저장해 다음 실행 때 복원
   const bar = byId("tabBar");
   if (!bar) return;
-  if (tabOrder.length < 2){ bar.hidden = true; bar.innerHTML = ""; return; }   // 1개 이하면 숨겨 공간 절약
+  if (!tabOrder.length){ bar.hidden = true; bar.innerHTML = ""; return; }     // 열린 탭이 없을 때만 숨긴다
   bar.hidden = false;
   bar.innerHTML = "";
   tabLayoutLimit = tabLimitForWidth(bar.clientWidth);
@@ -1765,17 +1794,23 @@ function renderTabs(){
   visibleIds.forEach(id => {
     const d = docs.find(x => x.id === id);
     if (!d) return;
+    // 탭이 하나뿐이면 재정렬할 곳도, 사용자가 직접 고른 분할 짝도 없다.
+    // 사이드바에만 있는 다른 파일을 임의로 짝지어 분할하지 않도록 상단 탭 드래그를 막는다.
+    const canDragTab = tabOrder.length > 1;
     const tab = document.createElement("div");
     tab.className = "tab" + (id === activeId ? " active" : "") + (studyPdfId !== null && id === studyPdfId && id !== activeId ? " study-ref" : "");   // 분할 참고 문서 표시
-    tab.draggable = true;
+    tab.draggable = canDragTab;
     const cat = extCategory(d.kind, d.name);
     if (cat) tab.dataset.cat = cat;
     tab.title = d.name + (d.hasUnsavedEdits ? " · 저장 후 수정됨" : "") +
       (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
-      " · 드래그: 탭바에서 위치 변경 · 본문 좌우로 끌면 분할 · 우클릭: 탭 정리";
+      (canDragTab ? " · 드래그: 탭바에서 위치 변경 · 본문 좌우로 끌면 분할" : " · 탭이 하나일 때는 분할 드래그 안 됨") +
+      " · 우클릭: 탭 정리";
     tab.onclick = () => openDocInTargetPane(d.id);   // 분할 화면이면 마지막 클릭 칸에 열기
     tab.addEventListener("contextmenu", (e) => { e.preventDefault(); openTabMenu(id, e.clientX, e.clientY); });
     tab.addEventListener("dragstart", (e) => {
+      // draggable=false가 적용되지 않는 합성 이벤트나 브라우저 예외 상황에서도 분할 진입을 차단한다.
+      if (!canDragTab){ e.preventDefault(); return; }
       draggedTabId = id;
       tab.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
@@ -1882,6 +1917,9 @@ function untabDoc(id){
     const prevId = activeMru.find(x => x !== id && tabOrder.includes(x));
     setActiveDoc(prevId != null ? prevId : tabOrder[Math.min(i, tabOrder.length - 1)]);
   }
+  // 마지막 탭을 닫으면 보던 문서도 내린다. 그대로 두면 renderTabs 가 "보이는 문서는 탭에도 있어야 한다"는
+  // 규칙으로 방금 닫은 탭을 되살려, 탭 × 가 아무 일도 안 한 것처럼 보인다(파일은 사이드바에 그대로).
+  else if (id === activeId) setActiveDoc(0);
   else renderTabs();
 }
 
@@ -2442,12 +2480,12 @@ function loadSavedTabState(){
 }
 // 복원으로 파일이 모두 열린 뒤, 저장된 탭 순서·활성 탭을 안정 키로 매칭해 되살린다(매칭 안 되는 항목은 무시).
 function applyTabState(saved){
-  if (!saved || !Array.isArray(saved.tabs) || saved.tabs.length < 2) return;
+  if (!saved || !Array.isArray(saved.tabs) || !saved.tabs.length) return;
   const keyToId = new Map();
   docs.forEach(d => { const k = docStableKey(d); if (k && !keyToId.has(k)) keyToId.set(k, d.id); });
   const restored = [], seen = new Set();
   saved.tabs.forEach(k => { const id = keyToId.get(k); if (id != null && !seen.has(id)){ seen.add(id); restored.push(id); } });
-  if (restored.length < 2) return;     // 두 개 이상 되살릴 수 있을 때만 탭바를 복원
+  if (!restored.length) return;        // 하나도 못 되살리면 그대로 둔다(탭 1개짜리 화면도 복원한다)
   tabOrder = restored;
   const wantActive = keyToId.get(saved.active);
   setActiveDoc(seen.has(wantActive) ? wantActive : restored[0]);
@@ -3500,6 +3538,9 @@ function closeGroup(nodeId, options={}){
     });
   }
   const childDocs = docs.filter(d => ids.has(d.nodeId));
+  // 문서를 고르지 않은 상태(activeId=0)는 그대로 유지한다. 이 그룹 안의 활성 문서가 실제로
+  // 닫힐 때만 남은 문서로 이동해야, 빈 화면에서 그룹 하나를 정리했다고 첫 파일이 멋대로 열리지 않는다.
+  const activeWasInGroup = childDocs.some(d => d.id === activeId);
   if (childDocs.some(d => d.kind === "pdf" && d.elements && d.elements.length)){
     if (!confirm(`'${group.name}' 안에 추가한 서명/텍스트가 있는 PDF가 있습니다. 닫을까요?`)) return;
   }
@@ -3510,7 +3551,7 @@ function closeGroup(nodeId, options={}){
   bumpNavTree();                          // 묶음 삭제 → 인덱스/루트 캐시 무효화
   if (!docs.length){
     activeId = 0; state=null; viewer=null; byId("tools").hidden=true; byId("officeTools").hidden=true;
-  } else if (!docs.some(d => d.id === activeId)) setActiveDoc(docs[0].id);
+  } else if (activeWasInGroup && !docs.some(d => d.id === activeId)) setActiveDoc(docs[0].id);
   refreshChrome();
   applyStudyLayout();
   renderSidebar();
@@ -3521,12 +3562,21 @@ function closeGroup(nodeId, options={}){
     forgetWorkspacePaths(forgottenPaths, navNodes.length === 0);
 }
 
+// 파일은 열려 있는데 보고 있는 문서가 없을 때(폴더만 연 직후·마지막 탭을 닫은 뒤) 본문에 안내를 띄운다.
+// 시작 화면(dropzone)은 열린 항목이 하나도 없을 때만 나오므로 그 자리를 대신한다.
+function updateDocEmptyState(){
+  const el = byId("docEmpty");
+  if (!el) return;
+  el.hidden = !(navNodes.length > 0 && !docs.some(d => d.id === activeId));
+}
+
 function refreshChrome(){
   if (uiBatchDepth > 0){ uiBatchChromePending = true; return; }
   const has = navNodes.length > 0;
   if (!docs.length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateOriginalSaveBadge(null); updateModeBadges(); }
   renderTabs();
   dropzone.hidden = has;
+  updateDocEmptyState();
   const sidebar = byId("sidebar"), sidebarBackdrop = byId("sidebarBackdrop");
   const sidebarOpen = has && !sidebarCollapsed;
   sidebar.hidden = !has;

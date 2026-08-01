@@ -729,6 +729,7 @@ function wire(){
     byId("settingPdfZoom").value = String(defaultPdfZoom());
     byId("settingPerformance").value = appSettings.performance === "quality" ? "quality" : "memory";
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
+    byId("settingAutoOpenFirstFile").checked = appSettings.autoOpenFirstFile === true;
     byId("settingSearchHistory").checked = appSettings.searchHistory !== false;
     refreshSearchHistoryCount();
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
@@ -773,6 +774,7 @@ function wire(){
     saveAppSettings({
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
+      autoOpenFirstFile: byId("settingAutoOpenFirstFile").checked,
       searchHistory: byId("settingSearchHistory").checked,
       pdfRecovery: byId("settingPdfRecovery").checked,
       autoSave: byId("settingAutoSave").checked,

@@ -140,8 +140,10 @@ const DEFAULT_APP_SETTINGS = {
   // pdfRecovery: 파일에 쓰지 않고 브라우저 안에 복구본만 남긴다(꺼짐 대비 안전망) — 성격이 달라 따로 둔다.
   // searchHistory: 찾기·검색창에 지난 검색어를 기억해 보여준다(MNSearchHistory).
   //   공용 컴퓨터에서는 앞사람 검색어가 보일 수 있어 끌 수 있게 두었다.
+  // autoOpenFirstFile: 폴더·압축을 열 때 안에 있던 첫 파일을 바로 띄울지. 꺼 두면 사이드바만 펼쳐지고
+  //   본문에는 "파일을 고르세요" 안내가 뜬다 — 원치 않는 파일이 열리며 화면이 튀는 걸 막는다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
-  searchHistory: true,
+  searchHistory: true, autoOpenFirstFile: false,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
@@ -279,6 +281,8 @@ function applyUiScale(){
 applyUiScale();
 applyToolVisibility();
 function defaultPdfZoom(){ const z = Number(appSettings.pdfZoom); return [1,1.25,1.5].includes(z) ? z : 1.25; }
+// 폴더·압축을 열 때 안의 첫 파일을 자동으로 띄울지(기본 끔).
+function autoOpenFirstFileEnabled(){ return appSettings.autoOpenFirstFile === true; }
 // PDF 렌더 프로필. renderScale 은 미리 그리는 페이지와 화면에 보이는 페이지가 반드시 같아야 한다.
 // 둘이 다르면 미리 그려둔 캔버스를 못 쓰고 페이지가 화면에 들어오는 순간 처음부터 다시 그려서,
 // 프리페치가 지연을 전혀 줄여주지 못한다(오히려 버려질 렌더로 CPU 만 쓴다).

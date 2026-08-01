@@ -320,6 +320,14 @@
         <input type="file" id="folderInput" webkitdirectory multiple hidden>
       </div>
     </div>
+    <div class="doc-empty" id="docEmpty" hidden>
+      <div class="doc-empty-inner">
+        <div class="doc-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7l2 2h9v11H3z"/><path d="m9 13 2.5 2.5L16 11"/></svg></div>
+        <h2 data-i18n="empty.title">왼쪽 목록에서 볼 파일을 고르세요</h2>
+        <p data-i18n="empty.lead">파일은 모두 열려 있습니다. 이름을 누르면 이 자리에 표시돼요.</p>
+        <p class="doc-empty-hint" data-i18n="empty.hint">폴더·압축을 열 때 첫 파일을 바로 보고 싶다면 <b>설정 → 일반</b>에서 '첫 파일 자동으로 열기'를 켜세요.</p>
+      </div>
+    </div>
   </div>
   <aside class="scratchpad" id="scratchpad" role="dialog" aria-modal="false" aria-labelledby="scratchpadTitle" hidden>
     <div class="scratchpad-head">
@@ -493,6 +501,7 @@
         <button type="button" class="light-background-choice" data-light-background="sky" title="스카이" aria-label="스카이"></button>
       </div></div>
       <label class="settings-check"><input type="checkbox" id="settingAutoRestore"><span>시작할 때 최근 작업공간 자동 복원</span></label>
+      <label class="settings-check"><input type="checkbox" id="settingAutoOpenFirstFile"><span>폴더·압축을 열 때 첫 파일 자동으로 열기<small>꺼 두면 사이드바만 펼쳐지고, 볼 파일을 직접 고를 때까지 아무 문서도 열지 않습니다.</small></span></label>
       <label class="settings-check"><input type="checkbox" id="settingSearchHistory"><span>최근 검색어 기억 — 찾기·검색창에 지난 검색어를 보여줍니다<small>이 컴퓨터 안에만 구획별로 12개까지 남기고, '바꿀 내용'은 기억하지 않습니다. 여러 사람이 함께 쓰는 컴퓨터라면 끄는 것을 권합니다.</small></span></label>
       <div class="settings-row"><span>검색 기록 <span id="settingSearchHistoryCount" class="settings-inline-count" aria-live="polite"></span></span><button class="btn" id="settingSearchHistoryClear" type="button">검색 기록 지우기</button></div>
       <div class="settings-save-folder" id="settingSaveFolderWrap">

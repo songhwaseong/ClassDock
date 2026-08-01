@@ -317,7 +317,8 @@ async function loadZip(file, options={}){
         if (!knownOpenable && !(await isLikelyTextFile(innerFile))){ unsupported++; continue; }
         const parentId = zipParentFor(path);
         hideLoading();
-        await handleFiles([innerFile], { parentId, bulk: true, relPath: path, archiveCtx });
+        await handleFiles([innerFile], { parentId, bulk: true, relPath: path, archiveCtx,
+          restoreFromWorkspace: !!options.restoreFromWorkspace });
         opened++;
         await yieldToBrowser();
         showLoading(`압축 푸는 중… (${opened}/${openable})`);
@@ -333,6 +334,8 @@ async function loadZip(file, options={}){
   hideLoading();
 
   if (!opened){ closeGroup(zipGroup.nodeId); toast("압축을 풀지 못했어요.", 3000); return; }
+  // 폴더와 같은 규칙 — 압축을 열었다고 안의 첫 파일까지 띄우지는 않는다(자동 복원은 예외).
+  if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(zipGroup.nodeId);
   const summary = formatZipOpenSummary({ opened, unsupported, oversized, failed });
   toast(summary + " · ZIP은 읽기 중심이며 원본 새로고침·덮어쓰기는 지원하지 않아요. (ⓘ)", 6000);
 }
@@ -400,12 +403,16 @@ async function extractTar(tarBytes, name, options = {}){
     const base = en.name.split("/").pop();
     const m = ZIP_MIME[(base.split(".").pop() || "").toLowerCase()];
     const innerFile = new File([en.data], base, m ? { type: m } : undefined);
-    await handleFiles([innerFile], { parentId: parentFor(en.name), bulk: true, relPath: en.name, archiveCtx });
+    await handleFiles([innerFile], { parentId: parentFor(en.name), bulk: true, relPath: en.name, archiveCtx,
+      restoreFromWorkspace: !!options.restoreFromWorkspace });
     opened++;
     await yieldToBrowser();
   }
   if (!opened){ closeGroup(group.nodeId); toast("압축을 풀지 못했어요.", 3000); }
-  else toast(window.tf("{n}개 열기", { n: opened }), 3000);
+  else {
+    if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(group.nodeId);
+    toast(window.tf("{n}개 열기", { n: opened }), 3000);
+  }
 }
 
 async function loadTar(file, options = {}){
@@ -428,6 +435,8 @@ async function loadGz(file, options = {}){
       const innerName = file.name.replace(/\.gz$/i, "") || "decompressed";
       hideLoading();
       await handleFiles([new File([out], innerName)], options);
+      // tar 계열뿐 아니라 단일 파일 gzip도 설정의 "압축" 규칙을 똑같이 따른다.
+      if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(null);
     }
   } catch(e){ console.error(e); toast("gzip 압축을 풀지 못했습니다. (지원: gzip · tar.gz)", 3500); }
   finally { hideLoading(); }
@@ -962,10 +971,12 @@ function clearPendingFolderRefresh(){ pendingFolderRefreshId = null; }
 function queueFolder(fileList, options={}){
   const files = [...fileList];
   if (!files.length && !(options.folderPaths && options.folderPaths.length)) return fileQueue;
+  let keepOpenedGroupExpanded = false;
   fileQueue = fileQueue.then(() => runUiBatch(async () => {
     // 자동 복원 저장은 폴더를 먼저 연 뒤에 한다 — 수백 MB 복사를 기다리지 않고 바로 화면에 뜨게.
     const replaceWorkspace = navNodes.length === 0;
     const rootGroup = await openFolderFiles(files, options);
+    keepOpenedGroupExpanded = !!rootGroup && !options.restoreFromWorkspace && !autoOpenFirstFileEnabled();
     // webkitdirectory 폴백은 빈 폴더 경로를 주지 않는다. 그래도 상대경로의 루트는 남겨야
     // 대량 이미지가 자동 복원에서 생략됐다는 표식을 다음 실행에도 복원할 수 있다.
     const folderPaths = options.folderPaths && options.folderPaths.length
@@ -981,7 +992,11 @@ function queueFolder(fileList, options={}){
       await rememberWorkspace(files, replaceWorkspace, { silent: true, folderPaths, originalSaveFolderPaths });
     }
   }))
-    .then(() => collapseToActiveBranch())   // 폴더를 연 순간엔 활성 파일의 폴더 체인만 펼쳐 둔다
+    .then(() => {
+      // 자동으로 파일을 고르지 않은 경우에는 방금 연 폴더를 펼친 상태를 유지한다.
+      // 기존 활성 문서의 분기로 다시 접으면 사용자가 새 폴더 파일을 고를 수 없게 된다.
+      if (!keepOpenedGroupExpanded) collapseToActiveBranch();
+    })
     .catch((e) => { if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요."); else console.error(e); });
   return fileQueue;
 }
@@ -1067,7 +1082,8 @@ async function openFolderFiles(fileList, options={}){
         nativeAbsolutePath:f.__nativeAbsolutePath || (rootGroup.nativeRootPath
           ? nativeJoinAbsolute(rootGroup.nativeRootPath, rel.split("/").slice(1).join("\\"))
           : null),
-        originalSaveMode: rootGroup.originalSaveMode });   // 첫 개만 즉시 렌더, 나머지 지연
+        originalSaveMode: rootGroup.originalSaveMode,
+        restoreFromWorkspace: !!options.restoreFromWorkspace });   // 첫 개만 즉시 렌더, 나머지 지연
       opened++;
       // 진행 표시·양보는 묶어서 — 파일마다 하면 수천 개 폴더에서 그 비용만 수십 초가 된다.
       if (opened % 20 === 0 || opened === openable.length) updateLoading(`폴더 여는 중… (${opened}/${openable.length})`);
@@ -1076,6 +1092,9 @@ async function openFolderFiles(fileList, options={}){
   }
   hideLoading();
   if (!opened && !folderPaths.length){ closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
+  // 폴더를 열었다고 안의 파일 하나를 멋대로 띄우지 않는다(설정에서 되돌릴 수 있음).
+  // 자동 복원은 예외 — 지난번에 보던 문서를 그대로 되살려야 하므로 배치 활성화를 그대로 둔다.
+  if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(rootGroup.nodeId);
   // 폴더 핸들이 있을 때만 최근 목록에 남긴다 — 없으면 다시 열어도 되살릴 수 없다.
   if (rootGroup.folderHandle && typeof MNRecent !== "undefined") MNRecent.rememberFolder(rootName);
   if (!options.silent){
@@ -1627,6 +1646,7 @@ function queueDroppedItems(dataTransfer){
     return queueFiles(files);
   }
   let deferredWorkspaceSave = null;
+  let keepOpenedGroupExpanded = false;
   fileQueue = fileQueue
     .then(() => runUiBatch(async () => {
       showLoading("폴더 파일 확인 중…");
@@ -1728,6 +1748,7 @@ function queueDroppedItems(dataTransfer){
         folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null,
         originalSaveMode: modernHasDir
       });
+      keepOpenedGroupExpanded = !!rootGroup && !autoOpenFirstFileEnabled();
       // 화면과 사이드바를 먼저 표시한 뒤 자동 복원용 바이트 복사를 수행한다.
       // 이 저장은 아래 후속 then 에서 UI 배치를 끝낸 다음 헤더 상태로 조용히 진행한다.
       if (rootGroup) deferredWorkspaceSave = {
@@ -1735,7 +1756,7 @@ function queueDroppedItems(dataTransfer){
       };
     }))
     .then(async () => {
-      collapseToActiveBranch();             // UI 배치가 끝나 활성 파일과 사이드바가 먼저 보인다
+      if (!keepOpenedGroupExpanded) collapseToActiveBranch(); // 자동 선택했다면 활성 파일의 분기만 남긴다
       if (!deferredWorkspaceSave) return;
       await yieldToBrowser();               // 활성 문서가 실제로 한 프레임 그려진 뒤 저장 복사를 시작한다
       const pending = deferredWorkspaceSave;
