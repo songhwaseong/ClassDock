@@ -4892,6 +4892,8 @@ async function renderXlsx(file, host, doc){
   let editContextActions = [];
   let editContextColumn = -1;
   let editContextMenu = null;
+  let editContextLayers = [];      // 열려 있는 메뉴 층 [최상위, 하위, …] — 바깥 클릭 판정은 전부를 본다
+  let editContextSubTimer = null;
   let editContextOutside = null;
   let editContextKeydown = null;
   const closeEditToolMenus = (except=null) => {
@@ -4915,42 +4917,129 @@ async function renderXlsx(file, host, doc){
     document.addEventListener("pointerdown", editToolOutside, true);
     document.addEventListener("keydown", editToolEscape, true);
   };
+  // ----- 우클릭 메뉴 -----
+  // 항목이 많아졌으므로 같은 갈래는 하위 메뉴(▸)로 접어 오른쪽으로 펼친다.
+  // 하위 메뉴는 부모 안에 넣지 않고 body 에 따로 띄운다 — 부모에는 세로 스크롤(max-height)이 걸려 있어
+  // 자식으로 붙이면 같이 잘리기 때문. 대신 '바깥 클릭' 판정은 열린 층 전부를 검사해야 한다.
+  const cancelEditContextSubClose = () => {
+    if (editContextSubTimer){ clearTimeout(editContextSubTimer); editContextSubTimer = null; }
+  };
+  const closeEditContextLayers = (depth) => {
+    while (editContextLayers.length > depth){
+      const layer = editContextLayers.pop();
+      if (layer.__parentButton) layer.__parentButton.classList.remove("is-open");
+      layer.remove();
+    }
+  };
   const closeEditContextMenu = () => {
-    if (editContextMenu){ editContextMenu.remove(); editContextMenu = null; }
+    cancelEditContextSubClose();
+    closeEditContextLayers(0);
+    editContextMenu = null;
     if (editContextOutside){ document.removeEventListener("pointerdown", editContextOutside, true); editContextOutside = null; }
     if (editContextKeydown){ document.removeEventListener("keydown", editContextKeydown, true); editContextKeydown = null; }
   };
-  const openEditContextMenu = (x, y, actions = editContextActions) => {
-    closeEditContextMenu();
+  if (doc) doc.cleanupFns.push(closeEditContextMenu);
+  // 하위 메뉴는 부모 항목 오른쪽에 붙이되, 화면 오른쪽을 넘으면 왼쪽으로 뒤집는다(도구막대 칩과 같은 규칙).
+  const placeEditContextSub = (menu, button) => {
+    const br = button.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight, margin = 6;
+    let left = br.right - 4;
+    if (left + mw > window.innerWidth - margin) left = br.left - mw + 4;
+    if (left < margin) left = margin;
+    let top = br.top - 5;
+    if (top + mh > window.innerHeight - margin) top = window.innerHeight - margin - mh;
+    if (top < margin) top = margin;
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  };
+  const renderEditContextLayer = (actions, depth) => {
     const menu = document.createElement("div");
-    menu.className = "xlsx-context-menu";
+    menu.className = depth ? "xlsx-context-menu xlsx-context-sub" : "xlsx-context-menu";
     menu.setAttribute("role", "menu");
+    menu.addEventListener("pointerenter", cancelEditContextSubClose);
     actions.forEach(item => {
       if (item.separator){
         const sep = document.createElement("div"); sep.className = "xlsx-context-sep"; menu.appendChild(sep); return;
       }
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = item.label;
+      if (item.swatch){                                   // 색 항목: 왼쪽에 색 조각을 붙인다
+        button.className = "xlsx-context-swatch-btn";
+        const chip = document.createElement("span");
+        chip.className = "xlsx-context-swatch";
+        chip.style.background = item.swatch;
+        button.append(chip, document.createTextNode(item.label));
+      } else {
+        button.textContent = item.label;
+      }
+      if (item.title) button.title = item.title;
       button.disabled = typeof item.disabled === "function" ? !!item.disabled() : !!item.disabled;
-      button.addEventListener("click", () => {
-        closeEditContextMenu();
-        if (!button.disabled && typeof item.action === "function") item.action();
-      });
+      const kids = item.children;
+      if (kids && kids.length){
+        button.classList.add("xlsx-context-parent");
+        const openKids = () => {
+          if (button.disabled) return;
+          const opened = editContextLayers[depth + 1];
+          if (opened && opened.__parentButton === button) return;   // 이미 이 항목의 하위 메뉴가 열려 있음
+          closeEditContextLayers(depth + 1);
+          const sub = renderEditContextLayer(kids, depth + 1);
+          sub.__parentButton = button;
+          document.body.appendChild(sub);
+          editContextLayers.push(sub);
+          button.classList.add("is-open");
+          placeEditContextSub(sub, button);
+        };
+        button.addEventListener("pointerenter", () => { cancelEditContextSubClose(); openKids(); });
+        button.addEventListener("click", () => { cancelEditContextSubClose(); openKids(); });
+      } else {
+        button.addEventListener("pointerenter", () => {
+          // 열린 하위 메뉴로 대각선으로 건너가는 중일 수 있어, 형제 항목을 스쳐도 바로 닫지 않는다.
+          if (editContextLayers.length <= depth + 1) return;
+          cancelEditContextSubClose();
+          editContextSubTimer = setTimeout(() => closeEditContextLayers(depth + 1), 220);
+        });
+        button.addEventListener("click", () => {
+          closeEditContextMenu();
+          if (!button.disabled && typeof item.action === "function") item.action();
+        });
+      }
       menu.appendChild(button);
     });
+    return menu;
+  };
+  const openEditContextMenu = (x, y, actions = editContextActions) => {
+    closeEditContextMenu();
+    const menu = renderEditContextLayer(actions, 0);
     document.body.appendChild(menu);
+    editContextLayers.push(menu);
     const rect = menu.getBoundingClientRect();
     menu.style.left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, x)) + "px";
     menu.style.top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, y)) + "px";
     editContextMenu = menu;
-    editContextOutside = (event) => { if (!menu.contains(event.target)) closeEditContextMenu(); };
-    editContextKeydown = (event) => { if (event.key === "Escape") closeEditContextMenu(); };
+    editContextOutside = (event) => {
+      if (!editContextLayers.some(layer => layer.contains(event.target))) closeEditContextMenu();
+    };
+    editContextKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      if (editContextLayers.length > 1) closeEditContextLayers(editContextLayers.length - 1);   // 하위 메뉴만 닫기
+      else closeEditContextMenu();
+    };
     setTimeout(() => {
       if (!editContextMenu) return;
       document.addEventListener("pointerdown", editContextOutside, true);
       document.addEventListener("keydown", editContextKeydown, true);
     }, 0);
+  };
+  // 팔레트의 "다른 색…" — 임시 색 고르개를 띄운다(도구막대 색 칸과 섞이지 않게 매번 새로 만들고 버린다).
+  const pickCustomColor = (initial, apply) => {
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.value = /^#[0-9a-f]{6}$/i.test(String(initial || "")) ? initial : "#000000";
+    picker.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+    document.body.appendChild(picker);
+    picker.addEventListener("change", () => { apply(picker.value); picker.remove(); });
+    picker.addEventListener("blur", () => setTimeout(() => picker.remove(), 400));   // 취소해도 남지 않게
+    picker.click();
   };
   sheet.addEventListener("contextmenu", (event) => {
     if (!editMode) return;
@@ -5388,33 +5477,133 @@ async function renderXlsx(file, host, doc){
     const fmtRow = document.createElement("div"); fmtRow.className = "xlsx-editbar-row xlsx-editbar-fmt";
     fmtRow.append(fontGroup, alignGroup, formatMenu.details, condMenu.details, cfMenu.details, dvMenu.details);
     editBar.append(mainRow, fmtRow);
+    // ----- 우클릭 메뉴 구성 -----
+    // 상단 도구막대의 기능을 같은 갈래끼리 묶어 하위 메뉴로 낸다. 실제 동작은 전부 도구막대와 같은 함수를
+    // 그대로 부르므로(버튼 흉내가 아니라 setAlign·setNumberFormat 등 직접 호출) 동작이 갈라질 일이 없다.
+    // 입력 칸이 여러 개라 메뉴로 옮길 수 없는 것(조건부 강조·조건부 서식 규칙)은 해당 도구막대 칩을 열어 준다.
+    const openToolChip = (menu) => {
+      if (!menu || !menu.details) return;
+      menu.details.open = true;
+      const first = menu.panel.querySelector("input:not([type=color]),select,button");
+      if (first) setTimeout(() => first.focus(), 40);
+    };
+    const sortByContextColumn = (dir) => {
+      if (editContextColumn >= 0) sortSel.value = String(editContextColumn);
+      doSort(dir);
+    };
+    const askReplaceAll = async () => {
+      const find = await askText({ title:"찾아 바꾸기", message:"현재 시트(선택이 있으면 선택 범위)에서 찾을 내용이에요.",
+        value: findInput.value, placeholder:"찾을 내용", okText:"다음" });
+      if (find == null || !find) return;
+      const repl = await askText({ title:"찾아 바꾸기", message:"'" + find + "' 을(를) 무엇으로 바꿀까요? (비우면 지웁니다)",
+        value: replInput.value, placeholder:"바꿀 내용", okText:"모두 바꾸기" });
+      if (repl == null) return;
+      findInput.value = find; replInput.value = repl;
+      rememberSheetFind();
+      replaceAllInSheet(find, repl);
+    };
+    const askDataValidationList = async () => {
+      const typed = await askText({ title:"드롭다운 목록", message:"쉼표로 구분해 입력하세요. 선택 범위 셀에 드롭다운이 걸립니다.",
+        value: dvInput.value, placeholder:"완료,진행,보류", okText:"적용" });
+      if (typed == null) return;
+      dvInput.value = typed;
+      setDataValidation(parseDvValues(typed));
+    };
+    const applyFontColor = (hex) => { fontColor.value = hex; setFontColor(hex); };
+    const applyFillColor = (hex) => { fillColor.value = hex; setSelectionFill(hex); };
+    const swatchItems = (list, apply) => list.map(([label, hex]) => ({ label, swatch:hex, action:() => apply(hex) }));
+    const FONT_SWATCHES = [["검정","#1f2937"], ["회색","#94a3b8"], ["빨강","#dc2626"], ["주황","#ea580c"], ["노랑","#ca8a04"],
+      ["초록","#16a34a"], ["파랑","#2563eb"], ["남색","#1e3a8a"], ["보라","#7c3aed"], ["흰색","#ffffff"]];
+    const FILL_SWATCHES = [["노랑","#fde68a"], ["연두","#bbf7d0"], ["하늘","#bfdbfe"], ["분홍","#fbcfe8"],
+      ["주황","#fed7aa"], ["보라","#ddd6fe"], ["회색","#e2e8f0"], ["흰색","#ffffff"]];
+    // 글꼴·크기·표시형식은 도구막대 셀렉트의 목록을 그대로 하위 메뉴로 옮긴다(목록이 한 곳에서만 관리되게).
+    const itemsFromSelect = (sel, apply) => [...sel.options]
+      .filter(option => option.value)
+      .map(option => ({ label: option.textContent, action: () => apply(option.value) }));
     editContextActions = [
-      { label:"선택 셀 내용 지우기", action:() => clearSelectionContents() },
-      { separator:true },
-      { label:"선택 행 위에 삽입", action:() => addRowBtn.click() },
-      { label:"선택 행 삭제", action:() => delRowBtn.click() },
-      { label:"선택 열 왼쪽에 삽입", action:() => addColBtn.click() },
-      { label:"선택 열 삭제", action:() => delColBtn.click() },
-      { separator:true },
-      { label:"오름차순 정렬", action:() => { if (editContextColumn >= 0) sortSel.value = String(editContextColumn); doSort(1); } },
-      { label:"내림차순 정렬", action:() => { if (editContextColumn >= 0) sortSel.value = String(editContextColumn); doSort(-1); } },
-      { label:"셀 병합", action:() => mergeSelection() },
-      { label:"병합 해제", action:() => unmergeSelection() },
-      { separator:true },
       { label:"복사(서식 포함)", action:() => copyRichSelection() },
       { label:"붙여넣기(서식 포함)", action:() => { if (richClip) pasteRichIntoSelection(richClip); else toast("먼저 '복사(서식 포함)'를 하세요.", 1800); } },
+      { label:"선택 셀 내용 지우기", action:() => clearSelectionContents() },
       { separator:true },
-      { label:"서식 복사", action:() => copyCellFormat() },
-      { label:"서식 붙이기", action:() => pasteCellFormat() },
-      { label:"서식 지우기", action:() => clearSelectionFormat() },
+      { label:"삽입·삭제", children:[
+        { label:"선택 행 위에 삽입", action:() => addRowBtn.click() },
+        { label:"선택 행 삭제", action:() => delRowBtn.click() },
+        { separator:true },
+        { label:"선택 열 왼쪽에 삽입", action:() => addColBtn.click() },
+        { label:"선택 열 삭제", action:() => delColBtn.click() }
+      ]},
+      { label:"정렬", children:[
+        { label:"▲ 오름차순", action:() => sortByContextColumn(1) },
+        { label:"▼ 내림차순", action:() => sortByContextColumn(-1) }
+      ]},
+      { label:"병합", children:[
+        { label:"⊞ 셀 병합", action:() => mergeSelection() },
+        { label:"⊟ 병합 해제", action:() => unmergeSelection() }
+      ]},
       { separator:true },
-      { label:"드롭다운 유효성 제거", action:() => removeDataValidation() },
-      { label:"조건부 서식 규칙 관리…", action:() => openCondManager() },
+      { label:"글자", children:[
+        { label:"굵게", action:() => toggleFontProp("bold", "굵게") },
+        { label:"기울임", action:() => toggleFontProp("italic", "기울임") },
+        { label:"밑줄", action:() => toggleFontProp("underline", "밑줄") },
+        { separator:true },
+        ...swatchItems(FONT_SWATCHES, applyFontColor),
+        { label:"다른 색…", action:() => pickCustomColor(fontColor.value, applyFontColor) }
+      ]},
+      { label:"글꼴", children: itemsFromSelect(fontSel, setFontName) },
+      { label:"크기", children: itemsFromSelect(sizeSel, setFontSize) },
+      { label:"맞춤", children:[
+        { label:"◧ 왼쪽", action:() => setAlign("left") },
+        { label:"▥ 가운데", action:() => setAlign("center") },
+        { label:"◨ 오른쪽", action:() => setAlign("right") },
+        { separator:true },
+        { label:"세로 위", action:() => setVAlign("top") },
+        { label:"세로 가운데", action:() => setVAlign("middle") },
+        { label:"세로 아래", action:() => setVAlign("bottom") },
+        { separator:true },
+        { label:"↵ 자동 줄바꿈", action:() => toggleWrap() }
+      ]},
+      { label:"표시형식", children: itemsFromSelect(numSel, (v) => setNumberFormat(v === "__general" ? "" : v)) },
+      { label:"채우기·테두리", children:[
+        ...swatchItems(FILL_SWATCHES, applyFillColor),
+        { label:"채우기 다른 색…", action:() => pickCustomColor(fillColor.value, applyFillColor) },
+        { separator:true },
+        { label:"테두리 전체 얇게", action:() => setSelectionBorder(borderColor.value, "thin", "all") },
+        { label:"테두리 바깥쪽 굵게", action:() => setSelectionBorder(borderColor.value, "thick", "outline") },
+        { label:"테두리 지우기", action:() => setSelectionBorder(borderColor.value, "thin", "none") },
+        { label:"테두리 자세히 설정…", action:() => openToolChip(formatMenu) },
+        { separator:true },
+        { label:"🖌 서식 복사", action:() => copyCellFormat() },
+        { label:"서식 붙이기", action:() => pasteCellFormat() },
+        { label:"서식 지우기", action:() => clearSelectionFormat() }
+      ]},
       { separator:true },
-      { label:"Σ 선택 범위 합계", action:() => insertAutoFormula("SUM") },
-      { label:"선택 범위로 차트 만들기", action:() => insertChart() },
-      { label:"선택 범위로 미니 피벗", action:() => openPivotModal() },
-      { label:"선택 범위를 이미지 메모로 저장", action:() => saveSelectionToMemo() }
+      { label:"계산", children:[
+        { label:"Σ 합계", action:() => insertAutoFormula("SUM") },
+        { label:"평균", action:() => insertAutoFormula("AVERAGE") },
+        { label:"개수", action:() => insertAutoFormula("COUNT") },
+        { label:"최대", action:() => insertAutoFormula("MAX") },
+        { label:"최소", action:() => insertAutoFormula("MIN") }
+      ]},
+      { label:"데이터", children:[
+        { label:"찾아 바꾸기…", action:() => askReplaceAll() },
+        { separator:true },
+        { label:"조건부 강조 설정…", action:() => openToolChip(condMenu) },
+        { label:"조건부 서식 규칙 추가…", action:() => openToolChip(cfMenu) },
+        { label:"조건부 서식 규칙 관리…", action:() => openCondManager() },
+        { separator:true },
+        { label:"드롭다운 목록 적용…", action:() => askDataValidationList() },
+        { label:"드롭다운 유효성 제거", action:() => removeDataValidation() }
+      ]},
+      { label:"만들기", children:[
+        { label:"📊 선택 범위로 차트", action:() => insertChart() },
+        { label:"🧮 선택 범위로 미니 피벗", action:() => openPivotModal() },
+        { label:"📷 선택 범위를 이미지 메모로", action:() => saveSelectionToMemo() }
+      ]},
+      { label:"저장", children:[
+        { label:"XLSX 저장", action:() => xlsxBtn.click() },
+        { label:"CSV 저장", action:() => csvBtn2.click() },
+        { label:"인쇄·PDF", action:() => printCurrentSheet() }
+      ]}
     ];
     updateUndoButtons();
 
