@@ -375,10 +375,12 @@ async function deleteScratchpadAsset(id){
   });
 }
 
-// 메모창을 헤더 드래그로 옮기고, 오른쪽 아래 손잡이로 크기 조절. 위치·크기는 저장된다.
+// 메모창을 헤더 드래그로 옮기고, 네 변·네 모서리로 크기 조절. 위치·크기는 저장된다.
 function makeMemoFloatable(panel, head, handle, storageKey=SCRATCHPAD_RECT_KEY){
   const MIN_W = 280, MIN_H = 200;
   let pinned = false;
+  let edge = null;                                  // 아래에서 attachEdgeResize 로 채운다
+  const syncEdge = () => { if (edge) edge.sync(); }; // 창이 움직이면 가장자리 핸들도 따라가야 한다
   const compactLayout = () => {
     try { return window.matchMedia("(max-width:600px), (max-height:520px)").matches; }
     catch(_){ return window.innerWidth <= 600 || window.innerHeight <= 520; }
@@ -409,6 +411,7 @@ function makeMemoFloatable(panel, head, handle, storageKey=SCRATCHPAD_RECT_KEY){
     r = panel.getBoundingClientRect();
     panel.style.left = Math.max(margin, Math.min(r.left, window.innerWidth - r.width - margin)) + "px";
     panel.style.top = Math.max(margin, Math.min(r.top, window.innerHeight - r.height - margin)) + "px";
+    syncEdge();
   };
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
@@ -432,6 +435,7 @@ function makeMemoFloatable(panel, head, handle, storageKey=SCRATCHPAD_RECT_KEY){
     const move = next => {
       panel.style.left = (next.clientX - dx) + "px";
       panel.style.top = (next.clientY - dy) + "px";
+      syncEdge();
     };
     const up = () => {
       head.removeEventListener("pointermove", move);
@@ -444,31 +448,27 @@ function makeMemoFloatable(panel, head, handle, storageKey=SCRATCHPAD_RECT_KEY){
     head.addEventListener("pointerup", up);
     head.addEventListener("pointercancel", up);
   });
-  handle.addEventListener("pointerdown", event => {
-    if (compactLayout()) return;
-    event.preventDefault();
-    event.stopPropagation();
-    pin();
-    const rect = panel.getBoundingClientRect();
-    const startX = event.clientX;
-    const startY = event.clientY;
-    handle.setPointerCapture(event.pointerId);
-    const move = next => {
-      panel.style.width = Math.max(MIN_W, Math.min(rect.width + next.clientX - startX, window.innerWidth - rect.left - 6)) + "px";
-      panel.style.height = Math.max(MIN_H, Math.min(rect.height + next.clientY - startY, window.innerHeight - rect.top - 6)) + "px";
-    };
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-      save();
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  });
+  // 크기 조절은 네 변·네 모서리 어디서나(모달과 같은 공용 핸들). handle 은 우하단 손잡이 '그림'으로만 남긴다.
+  edge = typeof attachEdgeResize === "function" ? attachEdgeResize(panel, {
+    enabled: () => !panel.hidden && !compactLayout(),
+    min: () => ({ w: MIN_W, h: MIN_H }),
+    grip: false,                       // 손잡이 그림은 .scratchpad-resize 가 이미 그리고 있다
+    zIndex: () => {
+      let z = 0;
+      try { z = parseInt(getComputedStyle(panel).zIndex, 10) || 0; } catch(_){}
+      return (z || 130) + 1;           // 메모창 바로 위(테두리에 걸치는 띠라 창을 가리지 않는다)
+    },
+    onStart: pin,
+    onEnd: () => { clamp(); save(); }
+  }) : null;
+  if (handle) handle.style.pointerEvents = "none";
+  // 창을 닫을 때(hidden) 핸들도 같이 숨기고, 열 때 다시 맞춘다
+  if (typeof MutationObserver !== "undefined"){
+    new MutationObserver(() => requestAnimationFrame(syncEdge))
+      .observe(panel, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
+  }
   window.addEventListener("resize", clamp);
-  return { clampOnOpen:clamp };
+  return { clampOnOpen: () => { clamp(); syncEdge(); } };
 }
 
 function wireScratchpad(){

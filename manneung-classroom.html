@@ -329,6 +329,10 @@
       </div>
     </div>
   </div>
+</main>
+
+<!-- 떠다니는 메모창·이미지 미리보기: main 안에 두면 main(z-index:19, isolation:isolate)의
+     쌓임 맥락에 갇혀 상단 헤더(z:30)·탭바(z:21) 아래로 깔린다. 반드시 main 바깥에 둔다. -->
   <aside class="scratchpad" id="scratchpad" role="dialog" aria-modal="false" aria-labelledby="scratchpadTitle" hidden>
     <div class="scratchpad-head">
       <div><h2 id="scratchpadTitle">임시 메모</h2><span id="scratchpadStatus" aria-live="polite">자동 저장</span></div>
@@ -399,7 +403,6 @@
       </div>
     </div>
   </div>
-</main>
 
 <!-- 창 전체 드롭 안내 오버레이 -->
 <div class="drop-overlay" id="dropOverlay"><div class="doi">여기에 놓으면 새 탭으로 열려요</div></div>

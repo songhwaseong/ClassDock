@@ -1349,9 +1349,131 @@ function wireRecentItems(){
   renderRecentItems();
 }
 
+/* ===== 가장자리 크기 조절 핸들(모달·메모창 공용) =====
+   대상 요소의 네 변·네 모서리에 잡을 곳을 만든다. CSS resize 는 우하단 한 곳만 지원하므로 직접 만든다.
+   핸들을 요소 '안'에 두면 (1) 내부 스크롤에 같이 밀리고 (2) 오른쪽 세로 스크롤바를 덮어 스크롤 드래그를 뺏는다.
+   그래서 별도의 fixed 레이어를 host 에 붙이고 요소 테두리에 걸치게(바깥 8px·안쪽 2px) 띄운다.
+   opts: host(레이어를 담을 요소·기본 body) / enabled(지금 조절 가능한가) / min({w,h}) /
+         onStart(시작 직전: 위치 고정·max 해제) / onEnd(끝난 뒤: 정리·저장) / grip(우하단 손잡이 표시)
+   반환: { sync, destroy } — sync 는 대상이 움직였을 때 핸들 위치를 다시 맞춘다 */
+function attachEdgeResize(target, opts){
+  opts = opts || {};
+  const MARGIN = 6, OUT = 8, IN = 2, CORNER = 16;
+  const DIRS = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+  const call = (fn) => (typeof fn === "function" ? fn() : fn);
+  const hostOf = () => call(opts.host) || document.body;
+  const enabled = () => (opts.enabled ? !!call(opts.enabled) : true);
+  const minSize = () => {
+    const m = call(opts.min) || {};
+    return { w: m.w || 200, h: m.h || 140 };
+  };
+  let layer = null, handles = null;
+  const ensure = () => {
+    // 대상이 본문을 innerHTML 로 다시 그리면 레이어만 떨어져 나갈 수 있어 붙어 있는지 확인한다
+    if (layer && !layer.isConnected) hostOf().appendChild(layer);
+    if (layer) return layer;
+    layer = document.createElement("div");
+    layer.className = "edge-resize-layer" + (opts.grip === false ? "" : " has-grip");
+    layer.hidden = true;
+    // body 에 붙는 경우(메모창 등) 대상보다 위로 올려야 한다. 모달은 오버레이 안이라 기본값으로 충분.
+    if (opts.zIndex) layer.style.zIndex = call(opts.zIndex);
+    handles = {};
+    DIRS.forEach(dir => {
+      const h = document.createElement("div");
+      h.className = "edge-resize-handle dir-" + dir;
+      h.setAttribute("aria-hidden", "true");
+      h.addEventListener("pointerdown", (e) => startResize(e, dir));
+      handles[dir] = h;
+      layer.appendChild(h);
+    });
+    hostOf().appendChild(layer);
+    return layer;
+  };
+  const sync = () => {
+    if (!target.isConnected){ destroy(); return; }
+    if (!enabled()){ if (layer) layer.hidden = true; return; }
+    ensure().hidden = false;
+    const r = target.getBoundingClientRect();
+    const midW = Math.max(0, r.width - OUT * 2), midH = Math.max(0, r.height - OUT * 2);
+    const put = (dir, left, top, w, h) => {
+      const s = handles[dir].style;
+      s.left = left + "px"; s.top = top + "px"; s.width = w + "px"; s.height = h + "px";
+    };
+    put("n",  r.left + OUT,  r.top - OUT,    midW,     OUT + IN);
+    put("s",  r.left + OUT,  r.bottom - IN,  midW,     OUT + IN);
+    put("w",  r.left - OUT,  r.top + OUT,    OUT + IN, midH);
+    put("e",  r.right - IN,  r.top + OUT,    OUT + IN, midH);
+    put("nw", r.left - OUT,  r.top - OUT,    CORNER,   CORNER);
+    put("ne", r.right - OUT, r.top - OUT,    CORNER,   CORNER);
+    put("sw", r.left - OUT,  r.bottom - OUT, CORNER,   CORNER);
+    put("se", r.right - OUT, r.bottom - OUT, CORNER,   CORNER);
+  };
+  const startResize = (e, dir) => {
+    if (!enabled()) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (opts.onStart) opts.onStart();
+    const start = target.getBoundingClientRect();
+    target.style.width = start.width + "px";
+    target.style.height = start.height + "px";
+    const x0 = e.clientX, y0 = e.clientY;
+    const min = minSize();
+    const maxW = Math.max(min.w, window.innerWidth - MARGIN * 2);
+    const maxH = Math.max(min.h, window.innerHeight - MARGIN * 2);
+    document.body.classList.add("edge-resizing");
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch(_){}
+    const onMove = (ev) => {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0;
+      let w = start.width, h = start.height, left = start.left, top = start.top;
+      if (dir.indexOf("e") >= 0) w = Math.min(start.width + dx, window.innerWidth - MARGIN - start.left);
+      if (dir.indexOf("w") >= 0) w = Math.min(start.width - dx, start.right - MARGIN);
+      if (dir.indexOf("s") >= 0) h = Math.min(start.height + dy, window.innerHeight - MARGIN - start.top);
+      if (dir.indexOf("n") >= 0) h = Math.min(start.height - dy, start.bottom - MARGIN);
+      w = Math.max(min.w, Math.min(w, maxW));
+      h = Math.max(min.h, Math.min(h, maxH));
+      if (dir.indexOf("w") >= 0) left = start.right - w;   // 반대편 모서리를 붙박아 둔다
+      if (dir.indexOf("n") >= 0) top = start.bottom - h;
+      target.style.left = left + "px"; target.style.top = top + "px";
+      target.style.width = w + "px";   target.style.height = h + "px";
+      sync();
+    };
+    // 포인터 캡처가 걸리면 이벤트가 핸들로 리타겟되어 document 까지 올라오므로,
+    // 캡처가 안 되는 환경에서도 document 리스너면 드래그가 끊기지 않는다
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.removeEventListener("pointercancel", onUp, true);
+      document.body.classList.remove("edge-resizing");
+      swallowNextClick();
+      if (opts.onEnd) opts.onEnd();
+      sync();
+    };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("pointercancel", onUp, true);
+  };
+  const destroy = () => {
+    if (layer) layer.remove();
+    layer = null; handles = null;
+  };
+  window.addEventListener("resize", () => requestAnimationFrame(sync));
+  requestAnimationFrame(sync);
+  return { sync, destroy };
+}
+/* 크기 조절·이동 직후의 click 한 번을 삼킨다.
+   창에서 눌러 바깥(오버레이) 위에서 손을 떼면 click 의 공통 조상이 오버레이라
+   여러 모달이 쓰는 '바깥 클릭 닫기'(e.target === modal)가 오작동한다. */
+function swallowNextClick(){
+  const kill = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener("click", kill, true);
+  setTimeout(() => document.removeEventListener("click", kill, true), 0);
+}
+
 /* ===== 모달 이동·크기 조절 =====
-   모든 .modal-card 를 헤더(빈 영역) 드래그로 이동, 우하단 모서리로 크기 조절 가능하게 한다.
+   모든 .modal-card 를 헤더(빈 영역) 드래그로 이동, 네 변·네 모서리 아무 데나 잡아 크기 조절 가능하게 한다.
    - 버튼·입력·텍스트(선택용 dd 등)에서 시작한 드래그는 무시 → 본문 클릭/선택은 그대로
+   - 크기 조절은 CSS resize(우하단 전용) 대신 공용 attachEdgeResize 로 8방향 핸들을 띄운다
    - 정적 모달(HTML)·동적 모달(런타임 생성) 모두 커버(MutationObserver) */
 function makeCardMovable(card){
   if (!card || card.__movable) return;
@@ -1359,6 +1481,8 @@ function makeCardMovable(card){
   card.classList.add("modal-movable");
   const MIN_VISIBLE = 40;
   const EDGE_MARGIN = 6;
+  const MIN_H = 140;                                              // .modal-movable 의 min-height 와 맞춘다
+  const minWidth = () => Math.min(300, window.innerWidth - 12);   // 〃 min-width
   const compactLayout = () => {
     try { return window.matchMedia("(max-width:640px)").matches; }
     catch(_){ return window.innerWidth <= 640; }
@@ -1367,8 +1491,20 @@ function makeCardMovable(card){
     const modal = card.closest(".modal");
     return !!card.isConnected && !card.hidden && (!modal || !modal.hidden);
   };
+  // 카드를 화면 좌표에 고정한다(이동·좌/상단 리사이즈의 전제: flex 가운데 정렬을 끊어야 한다)
+  const pinCard = (rect) => {
+    const r = rect || card.getBoundingClientRect();
+    card.style.position = "fixed";
+    card.style.margin = "0";
+    card.style.transform = "none";
+    card.style.left = r.left + "px";
+    card.style.top = r.top + "px";
+    return r;
+  };
+  let edgeResize = null;                      // 아래에서 attachEdgeResize 로 채운다
+  const syncHandles = () => { if (edgeResize) edgeResize.sync(); };
   const clampCard = (forceFullyInside=false) => {
-    if (!modalIsVisible() || compactLayout()) return;
+    if (!modalIsVisible() || compactLayout()){ syncHandles(); return; }
     let rect = card.getBoundingClientRect();
     const maxWidth = Math.max(280, window.innerWidth - EDGE_MARGIN * 2);
     const maxHeight = Math.max(140, window.innerHeight - EDGE_MARGIN * 2);
@@ -1384,14 +1520,26 @@ function makeCardMovable(card){
     const left = Math.max(minLeft, Math.min(rect.left, maxLeft));
     const top = Math.max(minTop, Math.min(rect.top, maxTop));
     if (Math.abs(left - rect.left) > 0.5 || Math.abs(top - rect.top) > 0.5){
-      card.style.position = "fixed";
-      card.style.margin = "0";
-      card.style.transform = "none";
+      pinCard(rect);
       card.style.left = left + "px";
       card.style.top = top + "px";
     }
+    syncHandles();
   };
   card.__clampMovableModal = clampCard;
+  // 핸들 레이어는 모달 오버레이의 자식으로 둔다 → 동적 모달이 통째로 제거될 때 핸들도 같이 사라진다
+  edgeResize = attachEdgeResize(card, {
+    host: () => card.closest(".modal") || document.body,
+    enabled: () => modalIsVisible() && !compactLayout(),
+    min: () => ({ w: minWidth(), h: MIN_H }),
+    onStart: () => {
+      pinCard();
+      // CSS 의 max-width/max-height(92vh 등)가 사용자가 정한 크기를 되돌리지 못하게 인라인으로 해제
+      card.style.maxWidth = "none";
+      card.style.maxHeight = "none";
+    },
+    onEnd: () => clampCard(false)
+  });
   window.addEventListener("resize", () => requestAnimationFrame(() => clampCard(true)));
   if (typeof ResizeObserver !== "undefined"){
     const ro = new ResizeObserver(() => clampCard(false));
@@ -1403,31 +1551,38 @@ function makeCardMovable(card){
     if (compactLayout()) return;
     if (e.button !== 0) return;
     if (e.target.closest(IGNORE)) return;
-    const rect = card.getBoundingClientRect();
-    // 우하단 모서리(크기조절 그립, ~18px)에서 시작하면 브라우저 resize 에 양보
-    if (e.clientX > rect.right - 18 && e.clientY > rect.bottom - 18) return;
-    card.style.position = "fixed";
-    card.style.margin = "0";
-    card.style.left = rect.left + "px";
-    card.style.top = rect.top + "px";
+    const rect = pinCard();
     card.style.width = rect.width + "px";
     const offX = e.clientX - rect.left, offY = e.clientY - rect.top;
     e.preventDefault();
+    let moved = false;
     const onMove = (ev) => {
       const liveRect = card.getBoundingClientRect();
       let x = ev.clientX - offX, y = ev.clientY - offY;
       x = Math.max(MIN_VISIBLE - liveRect.width, Math.min(x, window.innerWidth - MIN_VISIBLE));
       y = Math.max(MIN_VISIBLE - liveRect.height, Math.min(y, window.innerHeight - MIN_VISIBLE));
       card.style.left = x + "px"; card.style.top = y + "px";
+      moved = true;
+      syncHandles();
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("mouseup", onUp, true);
+      // 카드에서 눌러 배경 위에서 놓으면 '바깥 클릭 닫기'가 오작동한다(리사이즈와 같은 함정)
+      if (moved) swallowNextClick();
       clampCard(true);
     };
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("mouseup", onUp, true);
   });
+  // 표시/숨김·클래스 변화로도 핸들을 따라가게 한다(모달 대부분이 hidden 속성으로 열고 닫힌다)
+  if (typeof MutationObserver !== "undefined"){
+    const vis = new MutationObserver(() => requestAnimationFrame(syncHandles));
+    vis.observe(card, { attributes: true, attributeFilter: ["hidden", "class", "style"] });
+    const parentModal = card.closest(".modal");
+    if (parentModal) vis.observe(parentModal, { attributes: true, attributeFilter: ["hidden", "class", "style"] });
+  }
+  requestAnimationFrame(syncHandles);
 }
 function setupMovableModals(){
   document.querySelectorAll(".modal-card").forEach(makeCardMovable);
