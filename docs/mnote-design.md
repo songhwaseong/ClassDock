@@ -1,6 +1,8 @@
 # .mnote 블록 문서 — 설계 문서
 
-> 작성 2026-07-26 · 상태: 설계(미착수) · 목표: 표·이미지·글을 한 문서에서 함께 편집
+> 작성 2026-07-26 · 상태: **P0~P3 구현 완료**(2026-07-26) — 설계 범위 전체 완료 · 목표: 표·이미지·글을 한 문서에서 함께 편집
+> 구현: `src/js/mnote.js` + 접점(`file-loaders.js`·`documents.js`·`command-palette.js`·`scratchpad.js`·`scripts.manifest.json`·`manneung-classroom.html`·`styles.css`) · 테스트: `tests/mnote.test.js`
+> 남은 것: i18n 영문 사전은 새 문서 명령 등 일부만 등록됨(편집기 안 문구는 미번역).
 
 ## 1. 목표와 범위
 
@@ -115,7 +117,7 @@ async function loadMnote(file, opts){
    - **통합검색**: `documents.js`에 `isMnoteSearchable`·`mnoteSearchText` 추가. `hasLiveDocText`·`liveDocText`·`isTextSearchable` 세 곳에 mnote 분기 — 노트북과 동일하게 sourceFile(JSON)이 아니라 **블록 모델의 plain text**를 검색(키·base64 오탐 방지). 결과 클릭 → `doc.contentSearchFocus`(mnoteFocusMatch)로 일치 블록 스크롤.
    - **되돌리기**: `mnote.js`에서 `MNEditHistory.create`(공용 history.js). 제목+블록 메타데이터를 문자열 스냅샷으로 보관하고, 변경되지 않는 이미지 base64는 문서 세션 Map에 한 번만 둔다. limit 80 + 텍스트 총량 maxBytes 24MB. 구조 변경 전에 대기 중인 타이핑을 `flush()`해 별도 경계로 확정하고, 구조 변경=`touch(true)`, 타이핑=`touch()`(commitSoon 묶기). 저장 시점도 `flush()`해 독립 기준점으로 남긴다. 상단바 ↶↷ 버튼 + Ctrl+Z/Y(스프레드시트 규약: 텍스트 입력 중엔 브라우저 기본 undo, 그 외엔 모델 undo). `doc.cleanupFns`로 리스너 정리.
    - 명령팔레트는 P1에서 이미 추가, i18n 사전은 후속 과제로 남김.
-5. **P4(선택)** — zip 컨테이너, notebook-cell 재활용, MD 내보내기, 수업 리플레이 연동.
+5. **P4(선택, 미착수)** — zip 컨테이너, notebook-cell 블록 재활용, text 블록 편집기 공용 모듈 승격, 수업 리플레이 연동, 편집기 UI 영문 번역. *(MD 내보내기는 P2에서 이미 완료.)*
 
 ## 9. 리스크·결정 필요
 
