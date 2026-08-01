@@ -12,6 +12,7 @@ const html = read("manneung-classroom.html");
 const app = read("src", "js", "app.js");
 const documents = read("src", "js", "documents.js");
 const notebook = read("src", "js", "notebook-cells.js");
+const styles = read("src", "styles.css");
 
 test("시작 화면은 명시적인 파일 열기를 기본 행동으로 제공한다", () => {
   assert.match(html, /id="dzFileBtn" class="dz-open-primary"/);
@@ -50,6 +51,9 @@ test("저장 대상 판단은 원본과 사본의 결과를 편집 전에 설명
 
 test("저장 안내는 처음 또는 방식 변경 때만 잠시 표시되고 버튼 표현과 일치한다", () => {
   assert.match(html, /id="saveTargetBar"[\s\S]*id="saveTargetBarLabel"[\s\S]*id="saveTargetBarText"/);
+  assert.match(html, /class="save-target-overlay"[\s\S]*id="saveTargetBar"[\s\S]*<main>/);
+  assert.match(styles, /\.save-target-overlay\{[^}]*flex:0 0 0;[^}]*height:0;[^}]*pointer-events:none/);
+  assert.match(styles, /\.save-target-bar\{[^}]*position:absolute;[^}]*pointer-events:auto/);
   assert.match(documents, /badge\.title = target\.mode \? _t\(target\.summary \|\| target\.title\)/);
   assert.match(documents, /doc\._saveTargetNoticeKey !== noticeKey/);
   assert.match(documents, /saveTargetNoticeTimer = setTimeout\([\s\S]*SAVE_TARGET_NOTICE_MS/);

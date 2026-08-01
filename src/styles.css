@@ -127,9 +127,11 @@
   .original-save-badge[hidden]{display:none}
   /* 사본으로 저장되는 문서 — "원본이 안 바뀐다"가 경고가 아니라 사실 안내라 중립 색을 쓴다. */
   .original-save-badge.is-copy{background:rgba(148,163,184,.16);color:#cbd5e1;border-color:rgba(148,163,184,.3)}
-  .save-target-bar{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:8px;min-height:34px;
+  /* 저장 안내는 본문 위에 겹쳐 띄워, 나타나고 사라질 때 작업 화면 높이가 바뀌지 않게 한다. */
+  .save-target-overlay{position:relative;z-index:20;flex:0 0 0;height:0;min-height:0;pointer-events:none}
+  .save-target-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:8px;min-height:34px;
     padding:6px 14px;border-bottom:1px solid rgba(245,158,11,.28);background:#fffbeb;color:#92400e;
-    font-size:12.5px;line-height:1.4;z-index:17}
+    font-size:12.5px;line-height:1.4;pointer-events:auto}
   .save-target-bar[hidden]{display:none}
   .save-target-bar.notice-active{animation:save-target-notice 4s ease both}
   @keyframes save-target-notice{
