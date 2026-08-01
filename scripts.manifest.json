@@ -46,6 +46,7 @@
     "spreadsheet-chart.js",
     "pptx-viewer.js",
     "image-viewer.js",
+    "image-lightbox.js",
     "board-render.js",
     "whiteboard.js",
     "lesson-replay.js",
@@ -123,6 +124,7 @@
         "spreadsheet-chart.js",
         "pptx-viewer.js",
         "image-viewer.js",
+        "image-lightbox.js",
         "board-render.js",
         "whiteboard.js"
       ]

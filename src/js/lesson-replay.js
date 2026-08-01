@@ -575,7 +575,8 @@ function buildLessonPyPanel(){
         outPre.classList.toggle("lr-py-muted", !out.o && !out.e && !out.x);
         if (!out.o && !out.e && !out.x) outStdout.textContent = "(출력 없음)";
         outImgs.innerHTML = "";
-        if (Array.isArray(out.img)) for (const src of out.img){ const im = document.createElement("img"); im.src = src; im.alt = "그래프"; outImgs.appendChild(im); }
+        // mn-zoomable = 클릭하면 크게 보기(image-lightbox.js). 여기 그림은 폭이 좁아 특히 필요하다
+        if (Array.isArray(out.img)) for (const src of out.img){ const im = document.createElement("img"); im.className = "mn-zoomable"; im.src = src; im.alt = "그래프"; im.title = "클릭하면 크게 보기"; im.tabIndex = 0; outImgs.appendChild(im); }
         outWrap.scrollTop = 0;
       }
     }

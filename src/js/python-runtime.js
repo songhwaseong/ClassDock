@@ -2639,6 +2639,7 @@ function appendPlotGallery(panel, images){
   const gallery = document.createElement("div"); gallery.className = "out-plots";
   images.forEach((src, i) => {
     const img = document.createElement("img"); img.className = "out-plot"; img.src = src; img.alt = "그래프 " + (i + 1);
+    img.title = "클릭하면 크게 보기"; img.tabIndex = 0;   // 확대 창은 image-lightbox.js 가 위임 클릭으로 연다
     gallery.appendChild(img);
   });
   panel.appendChild(gallery);

@@ -1356,6 +1356,7 @@ function renderCellOutputs(outputs, host, ctrl){
       const img = document.createElement("img");
       img.className = "nbv-out-img";
       img.src = "data:" + (o.mime || "image/png") + ";base64," + o.b64;
+      img.alt = "실행 결과 그림"; img.title = "클릭하면 크게 보기"; img.tabIndex = 0;
       host.appendChild(img);
     } else if (o.kind === "svg"){
       const img = document.createElement("img");
@@ -1364,6 +1365,7 @@ function renderCellOutputs(outputs, host, ctrl){
       if (svg.length <= 5 * 1024 * 1024){
         img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
         img.alt = "SVG 실행 결과";
+        img.title = "클릭하면 크게 보기"; img.tabIndex = 0;
         host.appendChild(img);
       }
     } else if (o.kind === "interactive"){

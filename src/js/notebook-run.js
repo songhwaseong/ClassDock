@@ -769,7 +769,11 @@ function renderRunResult(ctrl, result){
   wrap.className = "nbv-out";
   if (out){ const p = document.createElement("pre"); p.className = "nbv-out-text"; p.textContent = out; wrap.appendChild(p); }
   if (richOutputs.length) renderCellOutputs(richOutputs, wrap, ctrl);
-  for (const src of images){ const im = document.createElement("img"); im.className = "nbv-out-img"; im.src = src; wrap.appendChild(im); }
+  for (let i = 0; i < images.length; i++){
+    const im = document.createElement("img"); im.className = "nbv-out-img"; im.src = images[i];
+    im.alt = "그래프 " + (i + 1); im.title = "클릭하면 크게 보기"; im.tabIndex = 0;
+    wrap.appendChild(im);
+  }
   if (outputs.length){
     const files = document.createElement("div"); files.className = "nbv-out-files";
     const title = document.createElement("strong"); title.textContent = nbTf("생성·변경 파일 {n}개", { n:outputs.length });
