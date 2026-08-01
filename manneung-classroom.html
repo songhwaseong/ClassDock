@@ -123,10 +123,8 @@
       <input id="sbSearch" type="search" placeholder="파일명·내용 검색" autocomplete="off" spellcheck="false" data-shortcut-action="focusSearch" data-shortcut-title="파일명·내용 검색">
       <kbd data-shortcut-action="focusSearch">Ctrl+Shift+F</kbd>
     </label>
-    <button id="sbReplaceAll" class="sb-replace-all" type="button" title="열린 텍스트·코드 파일에서 한꺼번에 찾아 바꿔요" data-shortcut-action="replaceAcrossFiles">
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h9M4 7l3-3M4 7l3 3"/><path d="M20 17h-9M20 17l-3-3M20 17l-3 3"/></svg>
-      <span>여러 파일 찾아 바꾸기</span>
-    </button>
+    <!-- 여러 파일 찾아 바꾸기 진입점은 명령 팔레트(Ctrl+K)에만 둔다.
+         상시 버튼은 대상 파일이 없을 때도 자리를 차지해서 뺐다 — command-palette.js 의 replaceAcrossFiles 참고. -->
     <div class="sb-selection-bar" id="sbSelectionBar" role="toolbar" aria-label="선택한 파일 일괄 작업" hidden>
       <span class="sb-selection-count" id="sbSelectionCount" aria-live="polite">0개 선택</span>
       <button type="button" id="sbSelectionClose" title="선택한 파일을 앱에서만 닫습니다(디스크의 파일은 그대로)">파일 닫기</button>

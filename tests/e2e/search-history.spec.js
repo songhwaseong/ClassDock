@@ -233,7 +233,7 @@ test.describe("구획이 다른 찾기 창", () => {
     await seed(page, { batch: [{ q: "2025" }] });
     await openTextDoc(page, "안내문.txt", "2025년 안내\n2025학년도");
 
-    await page.locator("#sbReplaceAll").click();
+    await page.evaluate(() => window.openBatchReplace());   // 진입점은 명령 팔레트뿐이라 함수를 바로 부른다
     const findInput = page.locator(".batch-replace-field input").first();
     await expect(findInput).toHaveValue("");                    // 한꺼번에 바꾸는 창이라 자동으로 채우지 않는다
 

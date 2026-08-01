@@ -532,15 +532,8 @@ if (typeof window !== "undefined" && window.document) {
     requestAnimationFrame(() => { try { findInput.focus(); if (findInput.value) findInput.select(); } catch(_){} });
   }
 
-  // 사이드바 버튼 연결(있으면). 이 스크립트는 <body> 끝에서 실행되므로 DOMContentLoaded 가
-  // 이미 지났을 수 있다 → readyState 를 보고 즉시/지연 중 맞는 쪽으로 건다.
-  const wireBatchReplaceButton = () => {
-    const btn = document.getElementById("sbReplaceAll");
-    if (btn && !btn._brWired){ btn._brWired = true; btn.addEventListener("click", openBatchReplace); }
-  };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireBatchReplaceButton);
-  else wireBatchReplaceButton();
-
+  // 진입점은 명령 팔레트(Ctrl+K)의 replaceAcrossFiles 하나뿐이다. 팔레트 쪽은 바꿀 수 있는 문서가
+  // 있을 때만 항목을 보여 주므로, 사이드바 상시 버튼은 두지 않는다.
   window.openBatchReplace = openBatchReplace;
   window.batchReplaceTargetDocs = batchReplaceTargetDocs;
 }

@@ -3857,13 +3857,6 @@
   .diff-pick-row select{flex:1;min-width:0;font:inherit;font-size:13px;padding:8px 10px;
     border:1px solid var(--border);border-radius:9px;background:var(--field,var(--panel));color:var(--ink)}
 
-  /* 사이드바 진입 버튼 */
-  .sb-replace-all{flex:0 0 auto;display:flex;align-items:center;gap:7px;margin:0 8px 8px;padding:0 9px;height:30px;
-    border:1px solid var(--border);border-radius:8px;background:transparent;color:#94a3b8;font:inherit;font-size:12px;
-    cursor:pointer;text-align:left}
-  .sb-replace-all:hover{border-color:var(--accent);color:#cbd5e1;background:rgba(255,255,255,.05)}
-  .sb-replace-all svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-  .sb-replace-all span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* 다중 선택 바 — Ctrl/Shift 클릭으로 여러 파일을 고르면 목록 위에 나타난다 */
   .sb-selection-bar{flex:0 0 auto;display:flex;align-items:center;gap:6px;margin:0 8px 8px;padding:6px 8px;
     border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,transparent)}
