@@ -966,9 +966,28 @@ function wireScratchpad(){
       makeButton("＋열", "현재 열 오른쪽에 열 추가", () => { const c = focusC; addCol(c + 1); focusCell(focusR, Math.min(cols() - 1, c + 1)); }),
       makeButton("－열", "현재 열 삭제", () => { const c = focusC; delCol(c); focusCell(Math.min(block.rows.length - 1, focusR), Math.min(cols() - 1, c)); })
     );
+    // 표를 바깥으로 꺼내기 — 복사(TSV)·CSV 저장·표 편집기 탭. 읽기만 하는 동작이라 잠긴 블록에서도 쓸 수 있다.
+    const outTools = document.createElement("div");
+    outTools.className = "scratchpad-table-out";
+    const exportBaseName = () => {
+      const note = activeNote();
+      const tables = note ? note.blocks.filter(item => item.type === "table") : [];
+      const index = tables.findIndex(item => item.id === block.id);
+      return MNTableExport.suggestBase((note && note.title) || "메모", Math.max(0, index), tables.length);
+    };
+    outTools.append(
+      makeButton("복사", "표 전체를 탭 구분으로 복사 — 엑셀·한글에 그대로 붙여넣기",
+        () => MNTableExport.copyTable(block, { notify:showStatus })),
+      makeButton("⬇ CSV", "표를 엑셀에서 열 수 있는 CSV 파일로 저장",
+        () => MNTableExport.saveCsv(block, { baseName:exportBaseName(), notify:showStatus })),
+      makeButton("편집기로", "이 표의 복사본을 새 탭의 표 편집기(xlsx)로 열기 — 거기서 고친 값은 메모로 돌아오지 않아요",
+        () => MNTableExport.openInEditor(block, { baseName:exportBaseName(), notify:showStatus }))
+    );
+    tableTools.appendChild(outTools);
     if (block.locked){
       [...tools.querySelectorAll("button"), ...tableTools.querySelectorAll("button")].forEach(button => {
-        if (!button.classList.contains("scratchpad-lock")) button.disabled = true;
+        if (button.classList.contains("scratchpad-lock") || button.closest(".scratchpad-table-out")) return;
+        button.disabled = true;
       });
     }
     // 셀 입력 중 방향 이동. 구조가 바뀌는 Enter/Tab만 여기서 가로챈다.

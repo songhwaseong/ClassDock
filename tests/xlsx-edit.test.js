@@ -117,6 +117,7 @@ test("CSV 변환 문서는 원본 CSV 대신 같은 폴더의 XLSX를 저장 대
   assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true }), "create");
   assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true, fsHandle:{} }), "existing");
   assert.equal(spreadsheetDirectSaveKind({ fsHandle:{} }), "existing");
+  assert.equal(spreadsheetDirectSaveKind({ isScratch:true, fsDirHandle:{ getFileHandle(){} } }), "create");
   assert.equal(spreadsheetDirectSaveKind({}), "");
 });
 

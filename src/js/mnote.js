@@ -658,6 +658,23 @@ function mountMnoteEditor(doc){
       ttBtn("＋열", "현재 열 오른쪽에 추가", () => { const c = focusC; addCol(c + 1); focusCell(focusR, Math.min(cols() - 1, c + 1)); }),
       ttBtn("－열", "현재 열 삭제", () => { const c = focusC; delCol(c); focusCell(Math.min(block.rows.length - 1, focusR), Math.min(cols() - 1, c)); })
     );
+    // 표를 바깥으로 꺼내기 — 메모창 표와 같은 공용 모듈을 쓴다(문서 전체 HTML/MD 내보내기와는 별개).
+    const outTools = document.createElement("div");
+    outTools.className = "mnote-table-out";
+    const exportBaseName = () => {
+      const tables = mnote.blocks.filter(item => item.type === "table");
+      const index = tables.findIndex(item => item.id === block.id);
+      return MNTableExport.suggestBase(doc.name || mnote.title || "블록 문서", Math.max(0, index), tables.length);
+    };
+    outTools.append(
+      ttBtn("복사", "표 전체를 탭 구분으로 복사 — 엑셀·한글에 그대로 붙여넣기",
+        () => MNTableExport.copyTable(block, { notify:setStatus })),
+      ttBtn("⬇ CSV", "표를 엑셀에서 열 수 있는 CSV 파일로 저장",
+        () => MNTableExport.saveCsv(block, { baseName:exportBaseName(), notify:setStatus })),
+      ttBtn("편집기로", "이 표의 복사본을 새 탭의 표 편집기(xlsx)로 열기 — 거기서 고친 값은 이 문서로 돌아오지 않아요",
+        () => MNTableExport.openInEditor(block, { baseName:exportBaseName(), doc, notify:setStatus }))
+    );
+    tableTools.appendChild(outTools);
 
     const handleKey = (event, r, c) => {
       const nCols = cols(), nRows = block.rows.length;

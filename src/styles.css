@@ -543,6 +543,8 @@
   .scratchpad-table-tools button:hover{background:var(--panel-hover);color:var(--ink)}
   .scratchpad-table-tools button:disabled{opacity:.42;cursor:not-allowed}
   .scratchpad-table-tools .scratchpad-table-toggle.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* 표를 밖으로 꺼내는 버튼(복사·CSV·편집기)은 구조 편집 버튼과 섞이지 않게 오른쪽 끝으로 민다 */
+  .scratchpad-table-out{display:flex;align-items:center;gap:4px;margin-left:auto}
   .scratchpad-table-scroll{overflow-x:auto;padding:10px 12px 12px}
   table.scratchpad-table{border-collapse:collapse;width:100%;table-layout:fixed}
   table.scratchpad-table th,table.scratchpad-table td{border:1px solid var(--border);padding:0;vertical-align:top;min-width:64px}
@@ -664,6 +666,7 @@
     padding:3px 8px;font:inherit;font-size:10.5px;cursor:pointer}
   .mnote-table-tools button:hover{background:var(--panel-hover);color:var(--ink)}
   .mnote-table-tools .mnote-table-toggle.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .mnote-table-out{display:flex;align-items:center;gap:4px;margin-left:auto}
   .mnote-table-scroll{overflow-x:auto;padding:10px 12px}
   table.mnote-table{border-collapse:collapse;width:100%;table-layout:fixed}
   table.mnote-table th,table.mnote-table td{border:1px solid var(--border);padding:0;vertical-align:top;min-width:64px}

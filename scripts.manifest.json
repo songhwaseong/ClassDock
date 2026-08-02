@@ -59,6 +59,7 @@
     "pet-events.js",
     "pet.js",
     "pet-focus.js",
+    "table-export.js",
     "scratchpad.js",
     "mnote.js",
     "image-memo.js",
@@ -142,6 +143,7 @@
         "pet-events.js",
         "pet.js",
         "pet-focus.js",
+        "table-export.js",
         "scratchpad.js",
         "mnote.js",
         "image-memo.js",
@@ -232,9 +234,15 @@
       "documents.js",
       "code-viewer.js"
     ],
+    "table-export.js": [
+      "documents.js",
+      "code-viewer.js",
+      "spreadsheet-viewer.js"
+    ],
     "scratchpad.js": [
       "spellcheck.js",
-      "python-editor.js"
+      "python-editor.js",
+      "table-export.js"
     ],
     "mnote.js": [
       "documents.js",
@@ -242,7 +250,8 @@
       "code-viewer.js",
       "history.js",
       "spellcheck.js",
-      "python-editor.js"
+      "python-editor.js",
+      "table-export.js"
     ],
     "backup.js": [
       "lazy.js",
@@ -312,6 +321,15 @@
       "publicApi": "MNSpecialChars",
       "consumers": [
         "python-editor.js"
+      ]
+    },
+    {
+      "name": "table-export",
+      "file": "table-export.js",
+      "publicApi": "MNTableExport",
+      "consumers": [
+        "scratchpad.js",
+        "mnote.js"
       ]
     },
     {

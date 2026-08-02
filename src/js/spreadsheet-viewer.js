@@ -200,6 +200,8 @@ function spreadsheetDirectSaveKind(doc){
   if (!doc) return "";
   if (doc.fsHandle) return "existing";
   if (doc.convertedFromCsv) return "create";
+  // 메모·블록 문서의 표에서 만든 XLSX처럼, 저장할 디렉터리 문맥을 받은 새 표는 그 폴더에 만든다.
+  if (doc.isScratch && doc.fsDirHandle && typeof doc.fsDirHandle.getFileHandle === "function") return "create";
   // 폴더 우클릭으로 만든 새 표는 아직 파일 핸들이 없다. 원본 폴더 문맥을 물려받았으면
   // 저장 위치를 다시 묻지 않고 그 폴더에 파일을 새로 만든다(saveViaFileHandle 의 create 분기).
   if (doc.isScratch && doc.originalSaveMode) return "create";
