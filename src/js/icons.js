@@ -23,6 +23,8 @@
     undo: '<path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6"/>',
     redo: '<path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    arrowLeft: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+    arrowBoth: '<path d="M4 12h16M8 7l-5 5 5 5M16 7l5 5-5 5"/>',
     move: '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
     rect: '<rect x="4" y="5" width="16" height="14" rx="1"/>',
     mosaic: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
@@ -63,7 +65,8 @@
   const symbolIcons = new Map([
     ["✓", "check"], ["✔", "check"], ["✕", "close"], ["✖", "close"],
     ["✏", "pen"], ["✎", "pen"], ["✂", "code"], ["▶", "play"],
-    ["→", "arrow"], ["←", "arrow"], ["↔", "arrow"], ["↗", "arrow"], ["↩", "arrow"], ["⟲", "arrow"], ["↻", "refresh"],
+    // 방향 기호는 방향이 보여야 한다 — ←/↔ 를 →(arrow)로 함께 묶으면 좌우 버튼이 똑같이 보인다.
+    ["→", "arrow"], ["←", "arrowLeft"], ["↔", "arrowBoth"], ["↗", "arrow"], ["↩", "arrow"], ["⟲", "arrow"], ["↻", "refresh"],
     ["⚠", "warning"], ["⚙", "settings"], ["⛶", "arrow"], ["▭", "board"], ["▦", "board"],
     ["●", "record"], ["■", "stop"]
   ]);
