@@ -3256,7 +3256,9 @@
   .plot-zoom-stage{flex:1;min-width:0;min-height:0;overflow:auto;display:flex;
     background:var(--code-panel);border:1px solid var(--border);border-radius:10px}
   .plot-zoom-stage.pannable{cursor:grab}
-  .plot-zoom-img{margin:auto;display:block;background:#fff;border-radius:6px}
+  /* flex:none 이 없으면 무대가 flex 상자라 확대한 그림이 상자 폭까지 도로 줄어든다
+     (width 는 1200px 인데 실제로는 1150px 로 그려져 가로 스크롤이 0 → 드래그해도 안 움직임) */
+  .plot-zoom-img{flex:none;margin:auto;display:block;background:#fff;border-radius:6px}
   .plot-zoom-img.fit{max-width:100%;max-height:100%;width:auto;height:auto;cursor:zoom-in}
   .plot-zoom-stage.pannable .plot-zoom-img{cursor:inherit}
   body.plot-zoom-panning,body.plot-zoom-panning .plot-zoom-stage{cursor:grabbing;user-select:none}

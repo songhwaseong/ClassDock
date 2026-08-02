@@ -180,7 +180,10 @@ function scratchpadNormalizeBlock(raw){
       name:String(raw.name || "메모 이미지").slice(0, 180),
       mime:String(raw.mime || "image/png").slice(0, 100),
       size:Math.max(0, Number(raw.size) || 0),
-      locked:raw.locked === true
+      locked:raw.locked === true,
+      // 화이트보드에서 온 그림이면 편집용 벡터 스냅샷 에셋을 함께 가리킨다(없으면 빈 문자열).
+      boardAssetId:String(raw.boardAssetId || "").trim(),
+      boardName:String(raw.boardName || "").slice(0, 180)
     };
   }
   return { id, type:"text", text:String(raw.text == null ? "" : raw.text), locked:raw.locked === true };
@@ -569,7 +572,7 @@ function wireScratchpad(){
     else editor.focus();
   };
   const isAssetUsed = assetId => data.notes.some(note =>
-    note.blocks.some(block => block.type === "image" && block.assetId === assetId)
+    note.blocks.some(block => block.type === "image" && (block.assetId === assetId || block.boardAssetId === assetId))
   );
   const removeAssetIfUnused = async assetId => {
     if (!assetId || isAssetUsed(assetId)) return;
@@ -710,6 +713,111 @@ function wireScratchpad(){
     }
     return added;
   };
+  const findImageBlockById = blockId => {
+    if (!blockId) return null;
+    for (const note of data.notes){
+      const block = note.blocks.find(item => item && item.type === "image" && item.id === blockId);
+      if (block) return { note, block };
+    }
+    return null;
+  };
+  /* 화이트보드에서 온 그림: 보이는 PNG(에셋) + 편집용 벡터 스냅샷(JSON 에셋)을 한 블록에 묶는다.
+     options.blockId 가 살아 있으면 그 블록을 제자리에서 바꿔(왕복 편집), 없으면 새 블록으로 넣는다. */
+  const addBoardBlock = async (pngBlob, boardData, options={}) => {
+    if (!pngBlob || !pngBlob.size){ showStatus("화이트보드 그림을 받지 못했습니다.", false); return null; }
+    if (pngBlob.size > SCRATCHPAD_MAX_IMAGE_BYTES){ showStatus("이미지 한 장은 25MB까지 넣을 수 있습니다.", false); return null; }
+    let boardBlob = null;
+    try { boardBlob = new Blob([JSON.stringify(boardData || {})], { type:"application/json" }); }
+    catch(error){ console.warn("scratchpad board snapshot skipped:", error); }
+    const found = findImageBlockById(options.blockId);
+    if (found && found.block.locked){
+      showStatus("잠긴 블록은 바꿀 수 없습니다. 먼저 잠금을 해제하세요.", false);
+      return null;
+    }
+    const existing = allImageBlocks();
+    if (!found && existing.length >= SCRATCHPAD_MAX_IMAGES){
+      showStatus("메모 이미지는 최대 " + SCRATCHPAD_MAX_IMAGES + "개입니다.", false);
+      return null;
+    }
+    // 제자리 교체는 바뀔 블록의 옛 용량을 빼고 합계를 따진다.
+    let totalBytes = existing.reduce((sum, block) => sum + (Number(block.size) || 0), 0);
+    if (found) totalBytes -= Number(found.block.size) || 0;
+    if (totalBytes + pngBlob.size > SCRATCHPAD_MAX_TOTAL_IMAGE_BYTES){
+      showStatus("메모 이미지 합계가 200MB를 넘습니다.", false);
+      return null;
+    }
+    const assetId = scratchpadBlockId("asset");
+    const boardAssetId = boardBlob ? scratchpadBlockId("asset") : "";
+    let wrotePng = false, wroteBoard = false;
+    try {
+      await writeScratchpadAsset(assetId, pngBlob);
+      wrotePng = true;
+      if (boardBlob){ await writeScratchpadAsset(boardAssetId, boardBlob); wroteBoard = true; }
+    } catch(error){
+      console.error(error);
+      if (wrotePng) try { await deleteScratchpadAsset(assetId); } catch(cleanupError){ console.warn("scratchpad board png rollback failed:", cleanupError); }
+      if (wroteBoard) try { await deleteScratchpadAsset(boardAssetId); } catch(cleanupError){ console.warn("scratchpad board snapshot rollback failed:", cleanupError); }
+      showStatus("화이트보드를 메모에 저장하지 못했습니다.", false);
+      return null;
+    }
+    const name = String(options.name || "화이트보드.png").slice(0, 180);
+    const boardName = String(options.boardName || "화이트보드").slice(0, 180);
+    const previousActiveBlockId = activeBlockId;
+    let note, block;
+    let previousBlock = null, insertIndex = -1;
+    if (found){
+      note = found.note;
+      block = found.block;
+      previousBlock = { ...block };
+      Object.assign(block, {
+        assetId, boardAssetId, boardName, name,
+        mime:String(pngBlob.type || "image/png"),
+        size:pngBlob.size
+      });
+    } else {
+      note = activeNote();
+      block = {
+        id:scratchpadBlockId("image"),
+        type:"image",
+        assetId,
+        text:"",
+        position:"left",
+        width:"medium",
+        name,
+        mime:String(pngBlob.type || "image/png"),
+        size:pngBlob.size,
+        locked:false,
+        boardAssetId,
+        boardName
+      };
+      insertIndex = insertionIndex(note);
+      note.blocks.splice(insertIndex, 0, block);
+    }
+    activeBlockId = block.id;
+    const previousUpdatedAt = note.updatedAt;
+    note.updatedAt = Date.now();
+    // 새 참조가 localStorage에 확정되기 전에는 옛 에셋을 지우지 않는다. 저장 실패 시
+    // 메모 객체와 새 IndexedDB 에셋을 모두 되돌려 재실행 후 깨진 참조가 남지 않게 한다.
+    if (!persist(false)){
+      if (previousBlock) Object.assign(block, previousBlock);
+      else if (insertIndex >= 0) note.blocks.splice(insertIndex, 1);
+      note.updatedAt = previousUpdatedAt;
+      activeBlockId = previousActiveBlockId;
+      try { await deleteScratchpadAsset(assetId); } catch(error){ console.warn("scratchpad board png rollback failed:", error); }
+      if (boardAssetId) try { await deleteScratchpadAsset(boardAssetId); } catch(error){ console.warn("scratchpad board snapshot rollback failed:", error); }
+      renderEditor();
+      return null;
+    }
+    renderEditor();
+    if (previousBlock){
+      // 저장된 메타데이터가 새 id를 가리키는 것이 확정된 뒤에만 옛 에셋을 정리한다.
+      await removeAssetIfUnused(previousBlock.assetId);
+      await removeAssetIfUnused(previousBlock.boardAssetId);
+    }
+    if (options.open !== false) setOpen(true, false);
+    showStatus(found ? "화이트보드를 메모에서 바꿨습니다." : "화이트보드를 메모에 넣었습니다.");
+    return { blockId:block.id, replaced:!!found };
+  };
   const removeBlock = async block => {
     const note = activeNote();
     if (block && block.locked){
@@ -726,6 +834,7 @@ function wireScratchpad(){
     persist();
     if (result.removed && result.removed.type === "image"){
       await removeAssetIfUnused(result.removed.assetId);
+      await removeAssetIfUnused(result.removed.boardAssetId);
     }
   };
   const moveBlock = (block, direction) => {
@@ -1159,6 +1268,22 @@ function wireScratchpad(){
       setOpen(false);                                       // 메모를 닫아 새 편집 탭이 보이게
       if (typeof toast === "function") toast("메모 이미지를 편집 탭으로 열었어요. 편집 후 '📷 메모로'로 다시 넣을 수 있어요.", 2800);
     }, "scratchpad-reuse");
+    // 화이트보드에서 온 그림만: 벡터 스냅샷을 되살려 새 화이트보드 탭으로 연다(왕복 편집).
+    const boardBtn = block.boardAssetId ? makeButton("✏️ 화이트보드로", "화이트보드로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다", async () => {
+      if (typeof newWhiteboard !== "function"){ showStatus("화이트보드를 열 수 없습니다.", false); return; }
+      let state = null;
+      try {
+        const blob = await readScratchpadAsset(block.boardAssetId);
+        if (blob) state = JSON.parse(await blob.text());
+      } catch(error){ console.warn("scratchpad board read failed:", error); }
+      if (!state){
+        showStatus("이 그림의 화이트보드 정보가 저장소에서 사라졌어요 — 다시 편집할 수 없습니다.", false);
+        return;
+      }
+      newWhiteboard({ state, name:block.boardName || "화이트보드", memoBlockId:block.id });
+      setOpen(false);                                     // 메모를 닫아 새 화이트보드 탭이 보이게
+      if (typeof toast === "function") toast("화이트보드로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.", 3200);
+    }, "scratchpad-reuse") : null;
     const imageMemoBtn = makeButton("🖼️ 이미지 메모로", "이 이미지를 이미지 메모로 보내기 (EXE는 저장 폴더의 이미지메모 폴더에 자동 저장)", async () => {
       const blob = await blockBlob(); if (!blob) return;
       if (typeof window.addImagesToImageMemo !== "function"){ showStatus("이미지 메모를 열 수 없습니다.", false); return; }
@@ -1176,6 +1301,7 @@ function wireScratchpad(){
       copyBtn,
       fileBtn,
       editBtn,
+      ...(boardBtn ? [boardBtn] : []),
       imageMemoBtn,
       makeButton("삭제", "이 이미지 블록 삭제", () => removeBlock(block), "danger")
     );
@@ -1350,7 +1476,8 @@ function wireScratchpad(){
       const ok = await confirmDialog("'" + note.title + "' 메모를 삭제할까요?", "삭제", "취소");
       if (!ok) return;
     }
-    const assets = note.blocks.filter(block => block.type === "image").map(block => block.assetId);
+    const assets = note.blocks.filter(block => block.type === "image")
+      .flatMap(block => [block.assetId, block.boardAssetId]).filter(Boolean);
     const index = data.notes.findIndex(item => item.id === note.id);
     if (index < 0) return;
     data.notes.splice(index, 1);
@@ -1553,7 +1680,8 @@ function wireScratchpad(){
       return;
     }
     if (!await confirmDialog("'" + note.title + "' 내용을 모두 지울까요?", "지우기", "취소")) return;
-    const assets = note.blocks.filter(block => block.type === "image").map(block => block.assetId);
+    const assets = note.blocks.filter(block => block.type === "image")
+      .flatMap(block => [block.assetId, block.boardAssetId]).filter(Boolean);
     note.blocks = [scratchpadTextBlock("")];
     activeBlockId = note.blocks[0].id;
     note.updatedAt = Date.now();
@@ -1651,6 +1779,11 @@ function wireScratchpad(){
   window.addImagesToScratchpad = async (blobs, options={}) => {
     setOpen(true, false);
     return addImageBlobs(blobs, options);
+  };
+  // 화이트보드 → 메모(그림 + 편집용 스냅샷). 반환 {blockId,replaced} 를 보드가 기억해 다음엔 제자리 교체.
+  window.addBoardToScratchpad = async (pngBlob, boardData, options={}) => {
+    setOpen(true, false);
+    return addBoardBlock(pngBlob, boardData, options);
   };
   // 전체 백업 버튼은 0.35초 자동저장 대기 중인 마지막 입력까지 즉시 확정한다.
   window.flushScratchpadBackup = () => persist(false);

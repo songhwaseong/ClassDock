@@ -7,20 +7,48 @@
 let _boardCount = 0;
 const BOARD_RECOVERY_PREFIX = "manneung-board-recovery:";
 function boardRecoveryKey(name){ return BOARD_RECOVERY_PREFIX + String(name || "화이트보드"); }
-function readBoardRecovery(name){
-  try {
-    const saved = JSON.parse(localStorage.getItem(boardRecoveryKey(name)) || "null");
-    if (!saved || saved.version !== 1 || !Array.isArray(saved.items)) return null;
-    return { tool:"pen", color:"#111111", width:4, bg:saved.bg || "#ffffff", items:saved.items, selected:null };
-  } catch(_){ return null; }
+// 저장된 스냅샷(자동복원·메모 블록)을 편집 가능한 보드 상태로 되살린다. 이미지는 src(data URL)만
+// 들고 있다가 renderWhiteboard 의 restoreBoardImages 가 <img> 로 되살린다.
+function validBoardSnapshot(saved){
+  if (!saved || typeof saved !== "object" || saved.version !== 1 || !Array.isArray(saved.items)) return null;
+  return saved;
 }
-function newWhiteboard(){
+function boardStateFromSnapshot(saved){
+  const snapshot = validBoardSnapshot(saved);
+  if (!snapshot) return null;
+  return { tool:"pen", color:"#111111", width:4, bg:snapshot.bg || "#ffffff", items:snapshot.items, selected:null };
+}
+// 메모 에셋과 자동복원본이 모두 있으면 더 최근 스냅샷을 쓴다. 예전 스냅샷처럼 시각이
+// 없거나 같으면 메모에 확정 저장된 supplied 쪽을 우선해 낡은 복구본이 덮어쓰지 않게 한다.
+function chooseBoardSnapshot(supplied, recovered){
+  const primary = validBoardSnapshot(supplied), recovery = validBoardSnapshot(recovered);
+  if (!primary) return recovery;
+  if (!recovery) return primary;
+  return (Number(recovery.savedAt) || 0) > (Number(primary.savedAt) || 0) ? recovery : primary;
+}
+function readBoardRecoverySnapshot(name){
+  try { return validBoardSnapshot(JSON.parse(localStorage.getItem(boardRecoveryKey(name)) || "null")); }
+  catch(_){ return null; }
+}
+function readBoardRecovery(name){
+  return boardStateFromSnapshot(readBoardRecoverySnapshot(name));
+}
+/* options.state       — 메모 블록 등에서 받은 보드 스냅샷({version,bg,items}). 주면 자동복원 대신 이걸로 연다.
+   options.name        — 탭 이름(메모에서 열 때 원래 보드 이름을 되살린다)
+   options.memoBlockId — 이 보드가 온 메모 이미지 블록 id. "메모로"를 다시 누르면 그 블록을 제자리에서 바꾼다. */
+function newWhiteboard(options={}){
   _boardCount++;
-  const name = _boardCount > 1 ? ("화이트보드 " + _boardCount) : "화이트보드";
+  const name = String(options.name || "").trim() || (_boardCount > 1 ? ("화이트보드 " + _boardCount) : "화이트보드");
   const doc = makeDoc("board", name, {});
-  const recovered = readBoardRecovery(name);
-  if (recovered && recovered.items.length){
-    doc.boardState = recovered;
+  doc.memoBlockId = String(options.memoBlockId || "") || null;
+  // 같은 이름의 일반 보드와 자동복원 칸을 나눠 쓰고, 전체 백업 복원 시 전달된 식별자도 받는다.
+  doc.boardRecoveryName = String(options.recoveryName || "").trim()
+    || (doc.memoBlockId ? "메모블록:" + doc.memoBlockId : "");
+  const recoveryName = doc.boardRecoveryName || name;
+  const snapshot = chooseBoardSnapshot(options.state, readBoardRecoverySnapshot(recoveryName));
+  const restored = boardStateFromSnapshot(snapshot);
+  if (restored){
+    doc.boardState = restored;
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
     else doc.hasUnsavedEdits = true;
   }
@@ -46,15 +74,21 @@ function renderWhiteboard(doc, host){
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
   const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: "#ffffff", selected: null });
   let boardRecoveryTimer = 0;
+  // 저장·전송 공용 직렬화: <img> 객체는 못 담으므로 data URL(src)만 남긴다.
+  const boardSnapshot = () => ({
+    version:1,
+    savedAt:Date.now(),
+    bg:wb.bg,
+    items:wb.items.map(item => {
+      const copy = { ...item };
+      if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
+      return copy;
+    })
+  });
   const saveBoardRecoveryNow = () => {
     clearTimeout(boardRecoveryTimer); boardRecoveryTimer = 0;
     try {
-      const items = wb.items.map(item => {
-        const copy = { ...item };
-        if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
-        return copy;
-      });
-      localStorage.setItem(boardRecoveryKey(doc.name), JSON.stringify({ version:1, bg:wb.bg, items }));
+      localStorage.setItem(boardRecoveryKey(doc.boardRecoveryName || doc.name), JSON.stringify(boardSnapshot()));
       return true;
     } catch(error){
       console.warn("whiteboard recovery snapshot skipped:", error);
@@ -367,6 +401,32 @@ function renderWhiteboard(doc, host){
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
     }, "image/png");
   };
+  // 메모창으로 보내기: 보이는 그림(PNG)과 편집용 벡터 스냅샷을 함께 넘겨,
+  // 메모 이미지 블록의 "✏️ 화이트보드로"로 다시 편집할 수 있게 한다.
+  const sendToMemo = () => {
+    if (typeof window.addBoardToScratchpad !== "function"){
+      if (typeof toast === "function") toast("메모창을 열 수 없어요.", 2200, { type:"error" });
+      return;
+    }
+    if (!wb.items.length){ if (typeof toast === "function") toast("보드가 비어 있어요.", 2000); return; }
+    const snapshot = boardSnapshot();                    // 선택 해제 전에 떠도 모델은 같다
+    const sel = wb.selected; if (sel){ wb.selected = null; redraw(); }
+    canvas.toBlob(async (blob) => {
+      if (sel){ wb.selected = sel; redraw(); }
+      if (!blob){ if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" }); return; }
+      try {
+        const result = await window.addBoardToScratchpad(blob, snapshot, {
+          name:(doc.name || "화이트보드") + ".png",
+          boardName:doc.name || "화이트보드",
+          blockId:doc.memoBlockId                        // 있으면 그 블록을 제자리에서 교체
+        });
+        if (result && result.blockId) doc.memoBlockId = result.blockId;
+      } catch(error){
+        console.error(error);
+        if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" });
+      }
+    }, "image/png");
+  };
   const exportPdf = async () => {
     if (typeof PDFLib === "undefined"){ if (typeof toast === "function") toast("PDF 라이브러리를 불러오지 못했어요.", 2200); return; }
     try {
@@ -471,7 +531,11 @@ function renderWhiteboard(doc, host){
   actGroup.append(undoBtn, redoBtn, clearBtn);
 
   const exportGroup = grp();
-  exportGroup.append(mkBtn("PNG", "PNG 이미지로 저장", "wb-act", exportPng), mkBtn("PDF", "PDF로 저장", "wb-act", exportPdf));
+  exportGroup.append(
+    mkBtn("PNG", "PNG 이미지로 저장", "wb-act", exportPng),
+    mkBtn("PDF", "PDF로 저장", "wb-act", exportPdf),
+    mkBtn("메모로", "메모창으로 보내기 — 메모에서 '✏️ 화이트보드로'를 누르면 다시 편집할 수 있어요", "wb-act", sendToMemo)
+  );
 
   // ----- 수업 리플레이 녹화 -----
   // ● 녹화 → 판서를 시간순으로 기록, ■ 정지 → 리플레이(되감아 보기) 화면을 만든다.
@@ -561,4 +625,8 @@ function renderWhiteboard(doc, host){
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
   doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+}
+
+if (typeof module !== "undefined" && module.exports){
+  module.exports = { boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot };
 }

@@ -5,7 +5,7 @@
    하나의 ZIP으로 옮긴다. 파일/폴더 핸들과 OCR 캐시는 다른 PC에서 의미가 없거나 다시
    만들 수 있으므로 포함하지 않는다. */
 const MN_BACKUP_MAGIC = "manneung-classroom-backup";
-const MN_BACKUP_VERSION = 1;
+const MN_BACKUP_VERSION = 2;
 const MN_BACKUP_MAX_FILE = 1024 * 1024 * 1024;
 const MN_BACKUP_ACTIVE_TAB_KEY = "manneung-classroom:active-tab";
 const MN_BACKUP_PENDING_RESTORE_KEY = "manneung-backup:pending-restore:v1";
@@ -60,6 +60,14 @@ function mnBackupStamp(date=new Date()){
   const pad = value => String(value).padStart(2, "0");
   return date.getFullYear() + pad(date.getMonth() + 1) + pad(date.getDate()) + "-"
     + pad(date.getHours()) + pad(date.getMinutes()) + pad(date.getSeconds());
+}
+
+function mnBackupOpenBoardDescriptor(raw){
+  if (!raw || typeof raw !== "object") return String(raw || "");
+  const name = String(raw.name || "").trim();
+  const recoveryName = String(raw.recoveryName || "").trim();
+  const memoBlockId = String(raw.memoBlockId || "").trim();
+  return recoveryName ? { name:name || "화이트보드", recoveryName, memoBlockId } : name;
 }
 
 function mnBackupDownload(blob, name){
@@ -395,7 +403,13 @@ async function mnBackupExport(){
     const indexedDbText = JSON.stringify({ databases:dbDumps });
     zip.file("state/indexeddb.json", indexedDbText);
 
-    const openBoards = [...docs].filter(doc => doc.kind === "board").map(doc => String(doc.name || ""));
+    const openBoards = [...docs].filter(doc => doc.kind === "board").map(doc =>
+      doc.boardRecoveryName ? {
+        name:String(doc.name || "화이트보드"),
+        recoveryName:String(doc.boardRecoveryName),
+        memoBlockId:String(doc.memoBlockId || "")
+      } : String(doc.name || "")
+    );
     const manifest = {
       magic:MN_BACKUP_MAGIC,
       formatVersion:MN_BACKUP_VERSION,
@@ -494,7 +508,9 @@ function mnBackupReplaceLocalStorage(snapshot, openBoards){
   if (activeTab != null) localStorage.setItem(MN_BACKUP_ACTIVE_TAB_KEY, activeTab);
   localStorage.setItem(MN_BACKUP_PENDING_RESTORE_KEY, JSON.stringify({
     restoredAt:Date.now(),
-    boards:Array.isArray(openBoards) ? openBoards.map(String) : []
+    boards:Array.isArray(openBoards) ? openBoards.map(mnBackupOpenBoardDescriptor).filter(board =>
+      typeof board === "string" ? !!board : !!board.recoveryName
+    ) : []
   }));
 }
 
@@ -586,13 +602,20 @@ function mnBackupFinishPendingRestore(){
     localStorage.removeItem(MN_BACKUP_PENDING_RESTORE_KEY);
   } catch(_){}
   const boards = Array.isArray(pending && pending.boards) ? pending.boards : [];
-  let count = boards.length;
-  for (const name of boards){
+  const regularBoards = boards.filter(board => !board || typeof board !== "object");
+  const memoBoards = boards.map(mnBackupOpenBoardDescriptor).filter(board => board && typeof board === "object");
+  let count = regularBoards.length;
+  for (const name of regularBoards){
     const match = /^화이트보드(?: (\d+))?$/.exec(String(name || ""));
     if (match) count = Math.max(count, Number(match[1]) || 1);
   }
   for (let index = 0; index < count; index++){
     try { newWhiteboard(); } catch(error){ console.warn("backup board restore skipped:", error); break; }
+  }
+  for (const board of memoBoards){
+    try {
+      newWhiteboard({ name:board.name, recoveryName:board.recoveryName, memoBlockId:board.memoBlockId });
+    } catch(error){ console.warn("backup memo board restore skipped:", error); }
   }
 }
 
@@ -607,6 +630,6 @@ const MNBackup = Object.freeze({
 if (typeof module === "object" && module.exports){
   module.exports = {
     MN_BACKUP_MAGIC, MN_BACKUP_VERSION, MnBackupFormatError, MnBackupPreparationError,
-    validateMnBackupManifest, mnBackupStamp, mnBackupPreparationMessage
+    validateMnBackupManifest, mnBackupStamp, mnBackupPreparationMessage, mnBackupOpenBoardDescriptor
   };
 }

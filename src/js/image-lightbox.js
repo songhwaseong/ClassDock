@@ -115,9 +115,12 @@
   }
   function setScale(next){
     const stage = els.stage, img = els.img;
-    // 확대·축소해도 지금 보고 있던 지점이 가운데 남도록 스크롤을 비율로 옮긴다
-    const cx = (stage.scrollLeft + stage.clientWidth / 2) / Math.max(1, img.clientWidth);
-    const cy = (stage.scrollTop + stage.clientHeight / 2) / Math.max(1, img.clientHeight);
+    // 확대·축소해도 지금 보고 있던 지점이 가운데 남도록 스크롤을 비율로 옮긴다.
+    // 그림이 무대보다 작을 때는 margin:auto 여백만큼 밀려 있으므로 스크롤값이 아니라 실제
+    // 화면 위치로 기준점을 잡는다(여백을 빼먹으면 한 번 확대하자마자 끝으로 튀어 못 끈다).
+    const sBox = stage.getBoundingClientRect(), iBox = img.getBoundingClientRect();
+    const cx = (sBox.left + sBox.width / 2 - iBox.left) / Math.max(1, iBox.width);
+    const cy = (sBox.top + sBox.height / 2 - iBox.top) / Math.max(1, iBox.height);
     fit = false; scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number.isFinite(next) ? next : 1));
     applyScale();
     stage.scrollLeft = cx * img.clientWidth - stage.clientWidth / 2;
