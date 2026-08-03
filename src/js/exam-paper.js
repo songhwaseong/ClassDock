@@ -1293,7 +1293,8 @@ function examAttachTakeDoc(doc, paper, items){
     student: (draft && typeof draft.student === "string") ? draft.student : examRememberedStudent(),
     signature: (draft && typeof draft.signature === "string") ? draft.signature : "",
     submitted: !!done,
-    submittedAt: done ? String(done.at || "") : ""
+    submittedAt: done ? String(done.at || "") : "",
+    receipt: done ? String(done.receipt || "") : ""
   };
   doc.render = async () => { examRenderTake(doc); };
   return doc;
@@ -1344,6 +1345,11 @@ function examRenderTake(doc){
     doneBody.textContent = "제출본은 선생님만 열 수 있게 잠겼습니다. 이 기기에서는 이 시험지를 다시 풀거나 고칠 수 없어요."
       + (state.submittedAt ? (" (제출 시각 " + examTimeText(state.submittedAt) + ")") : "");
     donePanel.append(doneTitle, doneBody);
+    if (state.receipt){
+      const receipt = document.createElement("p"); receipt.className = "exam-done-receipt";
+      receipt.textContent = "선생님 PC 접수번호 " + state.receipt;
+      donePanel.appendChild(receipt);
+    }
     wrap.appendChild(donePanel);
     host.appendChild(wrap);
     examTranslate(wrap);
@@ -1473,6 +1479,8 @@ function examRenderTake(doc){
     examSaveDraft(doc);
   });
 
+  submitBox.appendChild(examRenderSendBox(doc));
+
   const submitBtn = document.createElement("button"); submitBtn.type = "button"; submitBtn.className = "btn primary exam-submit-btn";
   submitBtn.textContent = "📤 제출 확정하기";
   submitBtn.addEventListener("click", async () => {
@@ -1485,6 +1493,147 @@ function examRenderTake(doc){
 
   host.appendChild(wrap);
   examTranslate(wrap);
+}
+
+/* ===== 학생: 선생님 PC 로 바로 보내기 =====
+   보낼 것은 이미 선생님 공개키로 봉인된 제출본이라, 평문 HTTP 로 실어도 답안은 새지 않는다.
+   네트워크는 어디까지나 편의 기능이다 — 실패하면 지금까지처럼 파일로 저장해 학생 답안을 지킨다. */
+const EXAM_SEND_ADDR_KEY = "mn.examSendAddr";
+const EXAM_SEND_ON_KEY = "mn.examSendOn";
+const EXAM_SEND_TIMEOUT = 4000;
+
+function examSendSettings(){
+  let addr = "", on = false;
+  try { addr = localStorage.getItem(EXAM_SEND_ADDR_KEY) || ""; } catch(_){}
+  try { on = localStorage.getItem(EXAM_SEND_ON_KEY) === "1"; } catch(_){}
+  return { addr, on };
+}
+
+// "192.168.0.12" · "192.168.0.12:17650" · 화면에 표시되는 "192.168.0.12 : 17650" 을 받는다.
+function examSendBaseUrl(addr){
+  const text = String(addr || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (!text) return null;
+  const m = /^(\d{1,3}(?:\.\d{1,3}){3})(?:\s*:\s*(\d{2,5}))?$/.exec(text);
+  if (!m) return null;
+  for (const part of m[1].split(".")) if (Number(part) > 255) return null;
+  return "http://" + m[1] + ":" + (m[2] || "17650");
+}
+
+async function examSendFetch(url, options, timeout){
+  const controller = (typeof AbortController === "function") ? new AbortController() : null;
+  const timer = setTimeout(() => { if (controller) controller.abort(); }, timeout || EXAM_SEND_TIMEOUT);
+  try { return await fetch(url, Object.assign({}, options, controller ? { signal: controller.signal } : {})); }
+  finally { clearTimeout(timer); }
+}
+
+// { ok } | { ok:false, reason } — reason 은 화면 안내와 파일 저장 여부를 함께 결정한다.
+async function examSendSubmission(addr, code, text){
+  const base = examSendBaseUrl(addr);
+  if (!base) return { ok: false, reason: "addr" };
+  if (!/^\d{6}$/.test(String(code || "").trim())) return { ok: false, reason: "code-format" };
+  let res = null;
+  try {
+    res = await examSendFetch(base + "/exam-submit", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=UTF-8", "X-Exam-Code": String(code).trim() },
+      body: text
+    }, 8000);
+  } catch(e){ return { ok: false, reason: "offline" }; }
+  if (res.status === 403) return { ok: false, reason: "code" };
+  if (res.status === 409){
+    let body = null;
+    try { body = await res.json(); } catch(_){}
+    return { ok: false, reason: (body && body.error === "other-exam") ? "other-exam" : "closed" };
+  }
+  if (!res.ok) return { ok: false, reason: "server" };
+  let info = null;
+  try { info = await res.json(); } catch(_){}
+  if (!info || !info.ok) return { ok: false, reason: "server" };
+  return { ok: true, receipt: String(info.receipt || ""), duplicate: !!info.duplicate };
+}
+
+const EXAM_SEND_FAIL_TEXT = {
+  addr: { message: "선생님 PC 주소 형식이 올바르지 않아요. 칠판의 주소를 그대로 입력하세요.", saveFile: false },
+  "code-format": { message: "제출 코드는 숫자 6자리예요.", saveFile: false },
+  code: { message: "제출 코드가 달라요. 칠판의 6자리를 확인하세요.", saveFile: false },
+  closed: { message: "선생님이 아직 제출 받기를 시작하지 않았어요. 선생님께 알려 주세요.", saveFile: false },
+  "other-exam": { message: "선생님이 지금 받고 있는 시험이 아니에요. 선생님께 확인하세요.", saveFile: false },
+  offline: { message: "선생님 PC 에 연결하지 못했어요. 같은 와이파이인지 확인하고, 그래도 안 되면 저장된 파일을 선생님께 내세요.", saveFile: true },
+  server: { message: "선생님 PC 가 제출을 받지 못했어요. 저장된 파일을 선생님께 내세요.", saveFile: true }
+};
+
+function examRenderSendBox(doc){
+  const state = doc.examTake;
+  const saved = examSendSettings();
+  if (!state.send) state.send = { on: saved.on, addr: saved.addr, code: "" };
+  const send = state.send;
+
+  const box = document.createElement("div"); box.className = "exam-send-box";
+  const toggleRow = document.createElement("label"); toggleRow.className = "exam-check";
+  const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = send.on;
+  const toggleText = document.createElement("span"); toggleText.textContent = "선생님 PC 로 바로 보내기";
+  toggleRow.append(toggle, toggleText);
+  box.appendChild(toggleRow);
+
+  const fields = document.createElement("div"); fields.className = "exam-send-fields";
+  fields.hidden = !send.on;
+  const field = (caption, input) => {
+    const label = document.createElement("label"); label.className = "exam-field";
+    const cap = document.createElement("span"); cap.textContent = caption;
+    label.append(cap, input); fields.appendChild(label);
+    return input;
+  };
+  const addrInput = document.createElement("input"); addrInput.type = "text"; addrInput.maxLength = 30;
+  addrInput.placeholder = "예: 192.168.0.12 : 17650"; addrInput.value = send.addr;
+  addrInput.addEventListener("input", () => {
+    send.addr = addrInput.value;
+    try { localStorage.setItem(EXAM_SEND_ADDR_KEY, send.addr); } catch(_){}
+  });
+  const codeInput = document.createElement("input"); codeInput.type = "text"; codeInput.maxLength = 6;
+  codeInput.inputMode = "numeric"; codeInput.placeholder = "6자리"; codeInput.value = send.code;
+  codeInput.addEventListener("input", () => {
+    codeInput.value = codeInput.value.replace(/\D/g, "").slice(0, 6);
+    send.code = codeInput.value;
+  });
+  field("선생님 PC 주소", addrInput);
+  field("제출 코드", codeInput);
+  box.appendChild(fields);
+
+  const status = document.createElement("p"); status.className = "exam-send-status"; status.hidden = true;
+  const testBtn = document.createElement("button"); testBtn.type = "button"; testBtn.className = "btn exam-send-test";
+  testBtn.textContent = "연결 확인";
+  testBtn.hidden = !send.on;
+  testBtn.addEventListener("click", async () => {
+    const base = examSendBaseUrl(send.addr);
+    status.hidden = false;
+    if (!base){ status.className = "exam-send-status is-bad"; status.textContent = EXAM_SEND_FAIL_TEXT.addr.message; return; }
+    if (!/^\d{6}$/.test(send.code)){ status.className = "exam-send-status is-bad"; status.textContent = EXAM_SEND_FAIL_TEXT["code-format"].message; return; }
+    status.className = "exam-send-status"; status.textContent = "확인하는 중…";
+    testBtn.disabled = true;
+    try {
+      const res = await examSendFetch(base + "/exam-hello?code=" + encodeURIComponent(send.code), {}, EXAM_SEND_TIMEOUT);
+      if (res.status === 403){ status.className = "exam-send-status is-bad"; status.textContent = EXAM_SEND_FAIL_TEXT.code.message; return; }
+      if (res.status === 409){ status.className = "exam-send-status is-bad"; status.textContent = EXAM_SEND_FAIL_TEXT.closed.message; return; }
+      if (!res.ok){ status.className = "exam-send-status is-bad"; status.textContent = EXAM_SEND_FAIL_TEXT.server.message; return; }
+      let info = null;
+      try { info = await res.json(); } catch(_){}
+      status.className = "exam-send-status is-good";
+      status.textContent = "선생님 PC 에 연결됐어요" + (info && info.title ? (' · "' + info.title + '"') : "") + ". 이제 제출하면 바로 들어갑니다.";
+    } catch(e){
+      status.className = "exam-send-status is-bad";
+      status.textContent = EXAM_SEND_FAIL_TEXT.offline.message;
+    } finally { testBtn.disabled = false; }
+  });
+  box.append(testBtn, status);
+
+  toggle.addEventListener("change", () => {
+    send.on = toggle.checked;
+    fields.hidden = !send.on;
+    testBtn.hidden = !send.on;
+    status.hidden = true;
+    try { localStorage.setItem(EXAM_SEND_ON_KEY, send.on ? "1" : "0"); } catch(_){}
+  });
+  return box;
 }
 
 async function examSubmit(doc){
@@ -1536,16 +1685,44 @@ async function examSubmit(doc){
     student, submittedAt, count: state.items.length, seal
   };
   const outName = examSafeFileToken(title, "시험지") + "_" + examSafeFileToken(student, "학생") + ".examdone";
-  await examSaveTextFile(JSON.stringify(submission, null, 1), outName, "제출본");
+  const text = JSON.stringify(submission, null, 1);
+
+  // 봉인이 끝난 뒤에만 보낸다. 보내기가 실패해도 제출 확정 자체는 성립하고,
+  // 답안이 사라질 수 있는 실패(연결 불가·서버 오류)에서만 파일로 남긴다.
+  const send = state.send || { on: false };
+  let sent = null;
+  if (send.on){
+    showLoading("선생님 PC 로 보내는 중…");
+    try { sent = await examSendSubmission(send.addr, send.code, text); }
+    catch(e){ sent = { ok: false, reason: "server" }; }
+    finally { hideLoading(); }
+    if (!sent.ok){
+      const info = EXAM_SEND_FAIL_TEXT[sent.reason] || EXAM_SEND_FAIL_TEXT.server;
+      if (!info.saveFile){
+        // 고치면 바로 다시 낼 수 있는 실패다 — 제출을 확정하지 않고 돌려보낸다.
+        toast(info.message, 5200, { type: "error" });
+        return;
+      }
+      await examSaveTextFile(text, outName, "제출본");
+      toast(info.message, 7000, { type: "error" });
+    }
+  } else {
+    await examSaveTextFile(text, outName, "제출본");
+  }
 
   try { localStorage.setItem("mn.studentName", student); } catch(_){}
   try { localStorage.removeItem(examDraftKey(state.id)); } catch(_){}   // 초안을 지우고 이 기기의 완료 표식으로 다시 열기를 막는다
-  examWriteJson(examDoneKey(state.id), { at: submittedAt, student });
+  examWriteJson(examDoneKey(state.id), { at: submittedAt, student, receipt: (sent && sent.ok) ? sent.receipt : "" });
   state.submitted = true;
   state.submittedAt = submittedAt;
+  state.receipt = (sent && sent.ok) ? sent.receipt : "";
   state.answers = {};
   examRenderTake(doc);
-  toast("제출이 끝났습니다. 만들어진 " + outName + " 파일을 선생님께 내세요.", 6000, { type: "success" });
+  if (sent && sent.ok){
+    toast("선생님 PC 로 제출됐습니다. 접수번호 " + (sent.receipt || "-"), 6000, { type: "success" });
+  } else if (!send.on){
+    toast("제출이 끝났습니다. 만들어진 " + outName + " 파일을 선생님께 내세요.", 6000, { type: "success" });
+  }
 }
 
 /* ===== 선생님: 제출본 일괄 채점 ===== */
@@ -1574,7 +1751,9 @@ function openExamGrading(seed){
     if (seed && seed.master){
       existing.examGrade.master = seed.master;
       examResetGradedRows(existing.examGrade);
-      examOpenPendingRows(existing).then(() => examRenderGrading(existing));
+      examReceiveSyncMaster(existing)
+        .then(() => examOpenPendingRows(existing))
+        .then(() => examRenderGrading(existing));
     } else if (existing.rendered) examRenderGrading(existing);
     setActiveDoc(existing.id);
     return existing;
@@ -1702,11 +1881,189 @@ async function examLoadMasterForGrading(doc){
     privateJwk: opened.keys.privateJwk,
     itemsHash: await examSha256Hex(examCanonicalStringify(examStripAnswers(opened.items)))
   };
+  await examReceiveSyncMaster(doc);
   showLoading("제출본을 여는 중…");
   try { await examOpenPendingRows(doc); }
   finally { hideLoading(); }
   examRenderGrading(doc);
   toast('원본 "' + doc.examGrade.master.title + '" 을(를) 열었어요.', 3000, { type: "success" });
+}
+
+/* ===== 선생님: 제출 받기(교실 LAN) =====
+   학생 EXE 가 보낸 제출본을 이 PC 가 직접 받는다. 실제 통로는 EXE 안의 '제출 전용' 리스너이고
+   (desktop/launcher.cs), 여기서는 그 리스너를 켜고 끄며 들어온 제출을 채점표로 옮기기만 한다.
+   받은 제출은 파일로 받은 것과 똑같이 examAddSubmissions 를 타므로 채점 로직은 그대로다. */
+function examReceiveState(doc){
+  const state = doc.examGrade;
+  if (!state.receive) state.receive = { open: false, port: 0, code: "", addresses: [], total: 0, since: 0, busy: false, error: "" };
+  return state.receive;
+}
+
+async function examReceiveFetch(path, options){
+  const res = await fetch(path, options || {});
+  if (!res.ok) throw new Error("exam-receive-" + res.status);
+  return await res.json();
+}
+
+function examReceiveApply(doc, info){
+  const receive = examReceiveState(doc);
+  receive.open = !!info.open;
+  receive.port = Number(info.port) || 0;
+  receive.code = String(info.code || "");
+  receive.addresses = Array.isArray(info.addresses) ? info.addresses : [];
+  receive.total = Number(info.total) || 0;
+  receive.error = String(info.error || "");
+}
+
+// 제출 받는 중 원본을 열거나 바꾸면 EXE 쪽 시험 필터도 즉시 같은 원본으로 맞춘다.
+async function examReceiveSyncMaster(doc){
+  const receive = examReceiveState(doc);
+  if (!receive.open) return true;
+  const master = doc.examGrade.master;
+  const body = JSON.stringify({ examId: (master && master.id) || "", title: (master && master.title) || "" });
+  try {
+    const info = await examReceiveFetch("/exam-receive-start", { method: "POST", body });
+    if (!info || !info.open) throw new Error("exam-receive-sync-failed");
+    examReceiveApply(doc, info);
+    return true;
+  } catch(e){
+    examReceiveStopPolling(doc);
+    receive.open = false;
+    try { await examReceiveFetch("/exam-receive-stop", { method: "POST" }); } catch(_){}
+    toast("원본 시험지에 제출 받기 설정을 맞추지 못해 수신을 끝냈어요. [제출 받기 시작]을 다시 눌러 주세요.", 5200, { type: "error" });
+    return false;
+  }
+}
+
+// 새로 들어온 제출만 채점표로 옮긴다. 화면 갱신은 examAddSubmissions 가 알아서 한다.
+async function examReceiveDrain(doc, items){
+  const entries = [];
+  for (const item of (items || [])){
+    const submission = examValidateSubmissionPayload(item && item.payload);
+    if (submission) entries.push({ file: null, submission });
+  }
+  if (entries.length) await examAddSubmissions(doc, entries);
+  return entries.length;
+}
+
+function examReceiveStopPolling(doc){
+  if (doc.__examReceiveTimer){ clearInterval(doc.__examReceiveTimer); doc.__examReceiveTimer = 0; }
+}
+
+function examReceiveStartPolling(doc){
+  examReceiveStopPolling(doc);
+  doc.__examReceiveTimer = setInterval(async () => {
+    if (doc.closed){ examReceiveStopPolling(doc); return; }
+    const receive = examReceiveState(doc);
+    if (!receive.open || receive.busy) return;
+    receive.busy = true;
+    try {
+      const info = await examReceiveFetch("/exam-receive-status?since=" + receive.since);
+      examReceiveApply(doc, info);
+      const items = Array.isArray(info.items) ? info.items : [];
+      if (items.length){
+        receive.since += items.length;
+        await examReceiveDrain(doc, items);
+      } else examRenderReceiveStatus(doc);
+      if (!receive.open) examReceiveStopPolling(doc);
+    } catch(e){
+      examReceiveStopPolling(doc);
+      receive.open = false;
+      examRenderGrading(doc);
+    } finally { receive.busy = false; }
+  }, 1500);
+  if (!doc.__examReceiveCleanupAdded){
+    doc.__examReceiveCleanupAdded = true;
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => {
+      examReceiveStopPolling(doc);
+      const receive = examReceiveState(doc);
+      receive.open = false;
+      // 문서 탭만 닫아도 수신 서버가 보이지 않게 남지 않도록 EXE 쪽 리스너까지 닫는다.
+      examReceiveFetch("/exam-receive-stop", { method: "POST", keepalive: true }).catch(() => {});
+    });
+  }
+}
+
+// 켜고 끌 때만 화면을 다시 그린다. 폴링 중에는 숫자만 갈아 끼운다(입력 중 커서가 튀지 않게).
+function examRenderReceiveStatus(doc){
+  const receive = examReceiveState(doc);
+  if (doc._examReceiveCountEl) doc._examReceiveCountEl.textContent = "받은 제출 " + receive.total + "개";
+}
+
+function examRenderReceivePanel(doc){
+  const receive = examReceiveState(doc);
+  const panel = document.createElement("div"); panel.className = "exam-receive";
+
+  const head = document.createElement("div"); head.className = "exam-receive-head";
+  const label = document.createElement("strong");
+  label.textContent = receive.open ? "📡 제출 받는 중" : "📡 제출 받기";
+  const spacer = document.createElement("div"); spacer.className = "spacer";
+  const toggle = document.createElement("button"); toggle.type = "button";
+  toggle.className = "btn" + (receive.open ? "" : " primary");
+  toggle.textContent = receive.open ? "받기 끝내기" : "제출 받기 시작";
+  toggle.addEventListener("click", async () => {
+    if (receive.open){
+      try { await examReceiveFetch("/exam-receive-stop", { method: "POST" }); } catch(_){}
+      examReceiveStopPolling(doc);
+      receive.open = false;
+      examRenderGrading(doc);
+      toast("제출 받기를 끝냈어요.", 2400);
+      return;
+    }
+    const master = doc.examGrade.master;
+    const body = JSON.stringify({ examId: (master && master.id) || "", title: (master && master.title) || "" });
+    let info = null;
+    showLoading("제출 받을 준비 중…");
+    try { info = await examReceiveFetch("/exam-receive-start", { method: "POST", body }); }
+    catch(e){ info = null; }
+    finally { hideLoading(); }
+    if (!info || !info.open){
+      toast("제출 받기를 켜지 못했어요. 방화벽에서 이 프로그램의 네트워크 사용을 허용해야 합니다. 그대로 [＋ 제출본 추가]로 파일을 받아도 됩니다.", 6000, { type: "error" });
+      return;
+    }
+    examReceiveApply(doc, info);
+    receive.since = 0;
+    examReceiveStartPolling(doc);
+    examRenderGrading(doc);
+  });
+  head.append(label, spacer, toggle);
+  panel.appendChild(head);
+
+  if (!receive.open){
+    const help = document.createElement("p"); help.className = "exam-receive-help";
+    help.textContent = doc.examGrade.master
+      ? "켜면 학생이 [제출 확정하기]를 누를 때 이 PC 로 제출본이 바로 들어옵니다. 같은 교실 네트워크에 있어야 하고, 처음 켤 때 방화벽 허용이 필요합니다."
+      : "먼저 원본(.examkey)을 열면 그 시험의 제출만 받도록 맞춰집니다. 원본 없이 켜면 아무 시험의 제출이나 받습니다.";
+    panel.appendChild(help);
+    return panel;
+  }
+
+  const addr = receive.addresses.length ? receive.addresses[0] : "";
+  const grid = document.createElement("div"); grid.className = "exam-receive-grid";
+  const cell = (caption, value, cls) => {
+    const box = document.createElement("div"); box.className = "exam-receive-cell";
+    const cap = document.createElement("span"); cap.className = "exam-receive-cap"; cap.textContent = caption;
+    const val = document.createElement("strong"); val.className = "exam-receive-val" + (cls ? " " + cls : "");
+    val.textContent = value;
+    box.append(cap, val);
+    grid.appendChild(box);
+    return val;
+  };
+  cell("학생이 입력할 주소", addr ? (addr + " : " + receive.port) : "네트워크 주소를 찾지 못했어요", "exam-receive-addr");
+  cell("제출 코드", receive.code, "exam-receive-code");
+  doc._examReceiveCountEl = cell("접수", "받은 제출 " + receive.total + "개");
+  panel.appendChild(grid);
+
+  if (receive.addresses.length > 1){
+    const more = document.createElement("p"); more.className = "exam-receive-help";
+    more.textContent = "다른 주소로도 접속할 수 있어요: " + receive.addresses.slice(1).join(", ");
+    panel.appendChild(more);
+  }
+  const note = document.createElement("p"); note.className = "exam-receive-help";
+  note.textContent = "학생 화면에 이 주소와 6자리 코드를 불러 주세요. 받은 제출은 저장 폴더의 [제출함]에도 파일로 남습니다.";
+  panel.appendChild(note);
+  return panel;
 }
 
 function examRenderGrading(doc){
@@ -1759,6 +2116,8 @@ function examRenderGrading(doc){
   allCsvBtn.addEventListener("click", () => examExportCumulativeCsv());
   bar.append(masterBtn, addBtn, barSpacer, csvBtn, allCsvBtn);
   wrap.appendChild(bar);
+
+  wrap.appendChild(examRenderReceivePanel(doc));
 
   const tableWrap = document.createElement("div"); tableWrap.className = "exam-table-wrap";
   const table = document.createElement("table"); table.className = "exam-table";

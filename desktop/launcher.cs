@@ -809,6 +809,7 @@ class PdfSignerLauncher
             if (path == "/image-memo-delete") return true;
             if (path == "/complete" || path == "/definition") return true;
             if (path == "/python-project-sync") return true;
+            if (path == "/exam-receive-start" || path == "/exam-receive-stop") return true;
             if (path.StartsWith("/pip-install", StringComparison.Ordinal)) return true;   // /pip-install, -start, -cancel
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
@@ -821,6 +822,7 @@ class PdfSignerLauncher
         if (method == "GET")
         {
             if (path == "/workspace-load") return true;
+            if (path.StartsWith("/exam-receive-status", StringComparison.Ordinal)) return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
             if (path == "/source-folder-capability" || path == "/choose-source-folder-status") return true;
             if (path.StartsWith("/source-folder-entry", StringComparison.Ordinal)
@@ -1831,6 +1833,32 @@ class PdfSignerLauncher
                     // 설치된 패키지의 메타데이터와 Python 소스만 읽어 만든 자동 import 색인.
                     // 실제 패키지 import/실행은 하지 않으며, 생성 작업은 백그라운드에서 한 번만 한다.
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PythonImportIndexJson()));
+                }
+                else if (method == "POST" && path == "/exam-receive-start")
+                {
+                    // 선생님이 [제출 받기]를 켠다. 본문 JSON = {examId, title} — examId 가 있으면 그 시험만 받는다.
+                    string bodyText = "";
+                    try { bodyText = Encoding.UTF8.GetString(body); } catch { }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(ExamReceiveStart(ExamJsonString(bodyText, "examId"), ExamJsonString(bodyText, "title"))));
+                }
+                else if (method == "POST" && path == "/exam-receive-stop")
+                {
+                    ExamReceiveStop();
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"open\":false}"));
+                }
+                else if (method == "GET" && path.StartsWith("/exam-receive-status", StringComparison.Ordinal))
+                {
+                    int since = 0;
+                    int qm = path.IndexOf('?');
+                    if (qm >= 0)
+                    {
+                        foreach (string part in path.Substring(qm + 1).Split('&'))
+                        {
+                            if (part.StartsWith("since=", StringComparison.Ordinal)) int.TryParse(part.Substring(6), out since);
+                        }
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ExamReceiveStatusJson(since)));
                 }
                 else if (method == "POST" && path == "/python-project-sync")
                 {
@@ -6011,6 +6039,457 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
     {
         try { o.GetType().InvokeMember(name, BindingFlags.SetProperty, null, o, new object[] { val }); }
         catch { }
+    }
+
+    // ===================== 시험 제출 받기(교실 LAN) =====================
+    // 학생 EXE 가 선생님 EXE 로 제출본(.examdone)을 바로 보내는 통로.
+    //
+    // 기본 서버(루프백)에는 /save-file, /workspace-save 처럼 디스크를 건드리는 통로가 열려 있다.
+    // 거기에 외부 접속을 허용하면 제출 하나 받자고 그 통로 전체를 교실 네트워크에 내놓게 되므로,
+    // 선생님이 [제출 받기]를 켠 동안에만 열리는 '제출 전용' 리스너를 따로 둔다.
+    // 이 리스너가 아는 경로는 아래 셋뿐이고 나머지는 전부 404 다.
+    //   OPTIONS /exam-submit   CORS·사설망(PNA) 사전 요청
+    //   GET     /exam-hello    학생의 [연결 확인] — 세션 열림 여부와 시험 제목만
+    //   POST    /exam-submit   제출본 접수
+    // 학생 PC 에는 이 PC 의 로컬 토큰이 없으므로 토큰 대신 '세션 코드 + 열린 동안만 + 경로 화이트리스트'로 막는다.
+    // 제출본 자체는 이미 선생님 공개키로 봉인돼 있어 평문 HTTP 로 실어도 내용은 새지 않는다.
+    const int ExamReceiveMaxItems = 300;                 // 세션당 총 접수 상한
+    const int ExamReceiveMaxBodyBytes = 1024 * 1024;     // 제출본 1개 상한
+    const int ExamReceivePerIpPerMinute = 20;            // 같은 IP 도배 차단
+    static readonly object ExamReceiveLock = new object();
+    static TcpListener ExamReceiveListener = null;
+    static int ExamReceivePort = 0;
+    static string ExamReceiveCode = "";
+    static string ExamReceiveExamId = "";
+    static string ExamReceiveTitle = "";
+    static DateTime ExamReceiveLastActivity = DateTime.MinValue;
+    static readonly List<string> ExamReceiveItems = new List<string>();      // 접수한 .examdone 원문(색인 = seq)
+    static readonly HashSet<string> ExamReceiveSeen = new HashSet<string>(StringComparer.Ordinal);
+    static readonly Dictionary<string, int> ExamReceiveRate = new Dictionary<string, int>(StringComparer.Ordinal);
+    static DateTime ExamReceiveRateWindow = DateTime.MinValue;
+    static readonly TimeSpan ExamReceiveIdleTimeout = TimeSpan.FromHours(3);
+
+    static string ExamReceiveNewCode()
+    {
+        byte[] buf = new byte[4];
+        using (RNGCryptoServiceProvider rng = new RNGCryptoServiceProvider()) rng.GetBytes(buf);
+        int value = (int)(BitConverter.ToUInt32(buf, 0) % 1000000u);
+        return value.ToString("D6");
+    }
+
+    // 학생에게 불러 줄 이 PC 의 주소. 172.16~31 을 포함한 사설 대역만 후보로 둔다.
+    static List<string> ExamReceiveAddresses()
+    {
+        List<string> found = new List<string>();
+        try
+        {
+            foreach (IPAddress ip in Dns.GetHostAddresses(Dns.GetHostName()))
+            {
+                if (ip.AddressFamily != AddressFamily.InterNetwork) continue;
+                byte[] b = ip.GetAddressBytes();
+                if (b[0] == 127) continue;
+                bool priv = (b[0] == 10) || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] <= 31);
+                if (priv) found.Add(ip.ToString());
+            }
+        }
+        catch { }
+        return found;
+    }
+
+    static string ExamReceiveStatusJson(int since)
+    {
+        StringBuilder sb = new StringBuilder(512);
+        lock (ExamReceiveLock)
+        {
+            bool open = ExamReceiveListener != null;
+            sb.Append("{\"open\":").Append(open ? "true" : "false");
+            sb.Append(",\"port\":").Append(ExamReceivePort);
+            sb.Append(",\"code\":").Append(JsonString(ExamReceiveCode));
+            sb.Append(",\"title\":").Append(JsonString(ExamReceiveTitle));
+            sb.Append(",\"total\":").Append(ExamReceiveItems.Count);
+            sb.Append(",\"addresses\":[");
+            List<string> addr = ExamReceiveAddresses();
+            for (int i = 0; i < addr.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(JsonString(addr[i]));
+            }
+            sb.Append("]");
+            // since 이후로 새로 들어온 것만 원문 그대로 실어 보낸다(한 번에 최대 20개).
+            if (since < 0) since = 0;
+            sb.Append(",\"since\":").Append(since).Append(",\"items\":[");
+            int sent = 0;
+            for (int i = since; i < ExamReceiveItems.Count && sent < 20; i++, sent++)
+            {
+                if (sent > 0) sb.Append(',');
+                sb.Append("{\"seq\":").Append(i + 1).Append(",\"payload\":").Append(ExamReceiveItems[i]).Append('}');
+            }
+            sb.Append("]}");
+        }
+        return sb.ToString();
+    }
+
+    static string ExamReceiveStart(string examId, string title)
+    {
+        lock (ExamReceiveLock)
+        {
+            if (ExamReceiveListener != null)
+            {
+                ExamReceiveExamId = examId ?? "";
+                if (!string.IsNullOrEmpty(title)) ExamReceiveTitle = title;
+                ExamReceiveLastActivity = DateTime.UtcNow;
+                return ExamReceiveStatusJson(0);
+            }
+            TcpListener started = null;
+            int chosen = 0;
+            for (int cand = 17650; cand <= 17659 && started == null; cand++)
+            {
+                try
+                {
+                    TcpListener l = new TcpListener(IPAddress.Any, cand);
+                    l.Start();
+                    started = l;
+                    chosen = cand;
+                }
+                catch { /* 점유·차단 → 다음 후보 */ }
+            }
+            if (started == null) return "{\"open\":false,\"error\":\"listen-failed\"}";
+
+            ExamReceiveListener = started;
+            ExamReceivePort = chosen;
+            ExamReceiveCode = ExamReceiveNewCode();
+            ExamReceiveExamId = examId ?? "";
+            ExamReceiveTitle = title ?? "";
+            ExamReceiveLastActivity = DateTime.UtcNow;
+            ExamReceiveItems.Clear();
+            ExamReceiveSeen.Clear();
+            ExamReceiveRate.Clear();
+            ExamReceiveRateWindow = DateTime.UtcNow;
+
+            TcpListener captured = started;
+            Thread accept = new Thread(delegate() { ExamReceiveAcceptLoop(captured); });
+            accept.IsBackground = true;
+            accept.Start();
+            return ExamReceiveStatusJson(0);
+        }
+    }
+
+    static void ExamReceiveStop()
+    {
+        TcpListener closing = null;
+        lock (ExamReceiveLock)
+        {
+            closing = ExamReceiveListener;
+            ExamReceiveListener = null;
+            ExamReceivePort = 0;
+            ExamReceiveCode = "";
+        }
+        if (closing != null) { try { closing.Stop(); } catch { } }
+    }
+
+    static void ExamReceiveAcceptLoop(TcpListener listener)
+    {
+        while (true)
+        {
+            lock (ExamReceiveLock) { if (ExamReceiveListener != listener) break; }
+            TcpClient client = null;
+            try { client = listener.AcceptTcpClient(); }
+            catch { break; }   // Stop() 으로 닫힌 경우
+            // 아무도 보내지 않는 채로 오래 열려 있으면 스스로 닫는다(켜 둔 걸 잊는 사고 방지).
+            lock (ExamReceiveLock)
+            {
+                if (ExamReceiveListener == listener && DateTime.UtcNow - ExamReceiveLastActivity > ExamReceiveIdleTimeout)
+                {
+                    try { client.Close(); } catch { }
+                    break;
+                }
+            }
+            TcpClient captured = client;
+            Thread worker = new Thread(delegate() { ExamReceiveHandle(captured); });
+            worker.IsBackground = true;
+            worker.Start();
+        }
+        try { listener.Stop(); } catch { }
+        lock (ExamReceiveLock) { if (ExamReceiveListener == listener) { ExamReceiveListener = null; ExamReceivePort = 0; ExamReceiveCode = ""; } }
+    }
+
+    static void ExamReceiveWrite(Stream stream, string status, string body)
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(body ?? "");
+        string header =
+            "HTTP/1.1 " + status + "\r\n" +
+            "Content-Type: application/json; charset=utf-8\r\n" +
+            "Content-Length: " + payload.Length + "\r\n" +
+            "Access-Control-Allow-Origin: *\r\n" +
+            "Access-Control-Allow-Private-Network: true\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "X-Content-Type-Options: nosniff\r\n" +
+            "Connection: close\r\n" +
+            "\r\n";
+        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
+        stream.Write(headerBytes, 0, headerBytes.Length);
+        stream.Write(payload, 0, payload.Length);
+    }
+
+    static bool ExamReceiveRateOk(string ip)
+    {
+        lock (ExamReceiveLock)
+        {
+            if (DateTime.UtcNow - ExamReceiveRateWindow > TimeSpan.FromMinutes(1))
+            {
+                ExamReceiveRate.Clear();
+                ExamReceiveRateWindow = DateTime.UtcNow;
+            }
+            int used;
+            ExamReceiveRate.TryGetValue(ip, out used);
+            if (used >= ExamReceivePerIpPerMinute) return false;
+            ExamReceiveRate[ip] = used + 1;
+            return true;
+        }
+    }
+
+    // 제출본은 평문 메타데이터(format·examId·student 등)와 봉인 덩어리로 이뤄진 최상위 JSON 이다.
+    // 여기서 보는 값은 파일 이름과 대조용일 뿐이라 완전한 파서 대신 최상위 문자열만 훑어 꺼낸다.
+    static string ExamJsonString(string json, string key)
+    {
+        if (string.IsNullOrEmpty(json)) return "";
+        string needle = "\"" + key + "\"";
+        int at = json.IndexOf(needle, StringComparison.Ordinal);
+        if (at < 0) return "";
+        int i = at + needle.Length;
+        while (i < json.Length && (json[i] == ' ' || json[i] == '\t' || json[i] == '\r' || json[i] == '\n')) i++;
+        if (i >= json.Length || json[i] != ':') return "";
+        i++;
+        while (i < json.Length && (json[i] == ' ' || json[i] == '\t' || json[i] == '\r' || json[i] == '\n')) i++;
+        if (i >= json.Length || json[i] != '"') return "";
+        i++;
+        StringBuilder sb = new StringBuilder(64);
+        while (i < json.Length && json[i] != '"')
+        {
+            if (json[i] == '\\' && i + 1 < json.Length)
+            {
+                i++;
+                char esc = json[i];
+                if (esc == 'n') sb.Append('\n');
+                else if (esc == 't') sb.Append('\t');
+                else if (esc == 'u' && i + 4 < json.Length)
+                {
+                    int code;
+                    if (int.TryParse(json.Substring(i + 1, 4), System.Globalization.NumberStyles.HexNumber,
+                        System.Globalization.CultureInfo.InvariantCulture, out code)) sb.Append((char)code);
+                    i += 4;
+                }
+                else sb.Append(esc);
+            }
+            else sb.Append(json[i]);
+            i++;
+            if (sb.Length > 400) break;
+        }
+        return sb.ToString();
+    }
+
+    static string ExamSafeNameToken(string raw, string fallback)
+    {
+        if (raw == null) raw = "";
+        StringBuilder sb = new StringBuilder(raw.Length);
+        foreach (char c in raw.Trim())
+        {
+            if (char.IsControl(c)) continue;
+            if ("\\/:*?\"<>|".IndexOf(c) >= 0) { sb.Append('_'); continue; }
+            sb.Append(c);
+            if (sb.Length >= 40) break;
+        }
+        string cleaned = sb.ToString().Trim().TrimEnd('.');
+        return cleaned.Length > 0 ? cleaned : fallback;
+    }
+
+    static void ExamReceiveHandle(TcpClient client)
+    {
+        string ip = "?";
+        try
+        {
+            IPEndPoint remote = client.Client.RemoteEndPoint as IPEndPoint;
+            if (remote != null) ip = remote.Address.ToString();
+        }
+        catch { }
+        try
+        {
+            using (client)
+            using (NetworkStream stream = client.GetStream())
+            {
+                client.ReceiveTimeout = 15000;
+                client.SendTimeout = 15000;
+                List<byte> head = new List<byte>(1024);
+                bool complete = false;
+                int b;
+                while ((b = stream.ReadByte()) != -1)
+                {
+                    head.Add((byte)b);
+                    int n = head.Count;
+                    if (n >= 4 && head[n - 4] == 13 && head[n - 3] == 10 && head[n - 2] == 13 && head[n - 1] == 10) { complete = true; break; }
+                    if (n > MaxHttpHeaderBytes) { ExamReceiveWrite(stream, "431 Request Header Fields Too Large", "{\"ok\":false}"); return; }
+                }
+                if (!complete) { ExamReceiveWrite(stream, "400 Bad Request", "{\"ok\":false}"); return; }
+
+                string headerText = Encoding.ASCII.GetString(head.ToArray());
+                string[] lines = headerText.Split(new string[] { "\r\n" }, StringSplitOptions.None);
+                string[] rp = (lines.Length > 0 ? lines[0] : "").Split(' ');
+                string method = rp.Length > 0 ? rp[0] : "";
+                string rawPath = rp.Length > 1 ? rp[1] : "/";
+                string path = rawPath;
+                string query = "";
+                int q = rawPath.IndexOf('?');
+                if (q >= 0) { path = rawPath.Substring(0, q); query = rawPath.Substring(q + 1); }
+
+                int contentLength = 0;
+                string code = "";
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    int c = lines[i].IndexOf(':');
+                    if (c <= 0) continue;
+                    string key = lines[i].Substring(0, c).Trim();
+                    string val = lines[i].Substring(c + 1).Trim();
+                    if (key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) int.TryParse(val, out contentLength);
+                    else if (key.Equals("X-Exam-Code", StringComparison.OrdinalIgnoreCase)) code = val;
+                }
+
+                if (method == "OPTIONS")
+                {
+                    // 학생 앱은 127.0.0.1 오리진이라 크로스 오리진 + 사설망 사전 요청이 먼저 온다.
+                    string preflight =
+                        "HTTP/1.1 204 No Content\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                        "Access-Control-Allow-Headers: *\r\n" +
+                        "Access-Control-Allow-Private-Network: true\r\n" +
+                        "Access-Control-Max-Age: 600\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n";
+                    byte[] pre = Encoding.ASCII.GetBytes(preflight);
+                    stream.Write(pre, 0, pre.Length);
+                    return;
+                }
+
+                bool open;
+                string wantCode, wantExamId, title;
+                int total;
+                lock (ExamReceiveLock)
+                {
+                    open = ExamReceiveListener != null;
+                    wantCode = ExamReceiveCode;
+                    wantExamId = ExamReceiveExamId;
+                    title = ExamReceiveTitle;
+                    total = ExamReceiveItems.Count;
+                }
+                if (!open) { ExamReceiveWrite(stream, "409 Conflict", "{\"ok\":false,\"error\":\"closed\"}"); return; }
+                if (!ExamReceiveRateOk(ip)) { ExamReceiveWrite(stream, "429 Too Many Requests", "{\"ok\":false,\"error\":\"too-many\"}"); return; }
+
+                if (query.IndexOf("code=", StringComparison.Ordinal) >= 0 && code.Length == 0)
+                {
+                    foreach (string part in query.Split('&'))
+                    {
+                        if (part.StartsWith("code=", StringComparison.Ordinal)) code = Uri.UnescapeDataString(part.Substring(5));
+                    }
+                }
+                if (code != wantCode) { ExamReceiveWrite(stream, "403 Forbidden", "{\"ok\":false,\"error\":\"bad-code\"}"); return; }
+
+                if (method == "GET" && path == "/exam-hello")
+                {
+                    ExamReceiveWrite(stream, "200 OK", "{\"ok\":true,\"title\":" + JsonString(title) + ",\"total\":" + total + "}");
+                    return;
+                }
+                if (method != "POST" || path != "/exam-submit")
+                {
+                    ExamReceiveWrite(stream, "404 Not Found", "{\"ok\":false,\"error\":\"unknown\"}");
+                    return;
+                }
+                if (contentLength <= 0 || contentLength > ExamReceiveMaxBodyBytes)
+                {
+                    ExamReceiveWrite(stream, "413 Payload Too Large", "{\"ok\":false,\"error\":\"too-large\"}");
+                    return;
+                }
+
+                byte[] body = new byte[contentLength];
+                int read = 0;
+                while (read < contentLength)
+                {
+                    int got = stream.Read(body, read, contentLength - read);
+                    if (got <= 0) break;
+                    read += got;
+                }
+                if (read != contentLength) { ExamReceiveWrite(stream, "400 Bad Request", "{\"ok\":false,\"error\":\"incomplete\"}"); return; }
+
+                string json = Encoding.UTF8.GetString(body).Trim();
+                if (!json.StartsWith("{", StringComparison.Ordinal) || !json.EndsWith("}", StringComparison.Ordinal)
+                    || ExamJsonString(json, "format") != "manneung-exam-result")
+                {
+                    ExamReceiveWrite(stream, "400 Bad Request", "{\"ok\":false,\"error\":\"bad-format\"}");
+                    return;
+                }
+                string examId = ExamJsonString(json, "examId");
+                string student = ExamJsonString(json, "student");
+                string examTitle = ExamJsonString(json, "examTitle");
+                if (student.Length == 0) { ExamReceiveWrite(stream, "400 Bad Request", "{\"ok\":false,\"error\":\"no-student\"}"); return; }
+                if (wantExamId.Length > 0 && examId != wantExamId)
+                {
+                    ExamReceiveWrite(stream, "409 Conflict", "{\"ok\":false,\"error\":\"other-exam\"}");
+                    return;
+                }
+
+                string fingerprint;
+                using (SHA256 sha = SHA256.Create()) fingerprint = BitConverter.ToString(sha.ComputeHash(body)).Replace("-", "");
+
+                lock (ExamReceiveLock)
+                {
+                    ExamReceiveLastActivity = DateTime.UtcNow;
+                    // 저장은 됐는데 응답이 유실되면 학생 화면엔 실패로 보인다. 다시 눌렀을 때 오류를 내면
+                    // "낸 건가 안 낸 건가"가 되므로, 같은 제출본은 조용히 접수 완료로 답한다.
+                    if (ExamReceiveSeen.Contains(fingerprint))
+                    {
+                        ExamReceiveWrite(stream, "200 OK", "{\"ok\":true,\"duplicate\":true,\"receipt\":" + JsonString(fingerprint.Substring(0, 8)) + "}");
+                        return;
+                    }
+                    if (ExamReceiveItems.Count >= ExamReceiveMaxItems)
+                    {
+                        ExamReceiveWrite(stream, "507 Insufficient Storage", "{\"ok\":false,\"error\":\"full\"}");
+                        return;
+                    }
+                }
+
+                // 파일이 곧 진실이다 — 앱이 죽어도 남고, 파일로 받은 제출과 같은 물건이 된다.
+                string folder = "제출함/" + ExamSafeNameToken(examTitle.Length > 0 ? examTitle : title, "시험지");
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string rel = folder + "/" + ExamSafeNameToken(student, "학생") + "_" + stamp + ".examdone";
+                string full;
+                bool saved = false;
+                if (TryResolveSaveRootPath(rel, out full))
+                {
+                    try
+                    {
+                        string dir = Path.GetDirectoryName(full);
+                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                        File.WriteAllBytes(full, body);
+                        saved = true;
+                    }
+                    catch { }
+                }
+                if (!saved)
+                {
+                    // 학생 화면이 로컬 .examdone 파일로 폴백할 수 있도록 성공으로 접수하지 않는다.
+                    ExamReceiveWrite(stream, "500 Internal Server Error", "{\"ok\":false,\"error\":\"save-failed\"}");
+                    return;
+                }
+
+                lock (ExamReceiveLock)
+                {
+                    ExamReceiveSeen.Add(fingerprint);
+                    ExamReceiveItems.Add(json);
+                }
+                ExamReceiveWrite(stream, "200 OK", "{\"ok\":true,\"receipt\":" + JsonString(fingerprint.Substring(0, 8)) + "}");
+            }
+        }
+        catch { /* 끊긴 연결은 조용히 버린다 */ }
     }
 }
 

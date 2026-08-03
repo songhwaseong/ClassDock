@@ -4067,6 +4067,29 @@
   .exam-done-panel{margin:12px 0;padding:18px 20px;border:1px solid rgba(22,163,74,.45);border-radius:12px;
     background:rgba(22,163,74,.09);display:flex;flex-direction:column;gap:8px}
   .exam-done-panel strong{font-size:15px;color:#15803d}
+  .exam-done-receipt{margin:0;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+  /* 선생님: 제출 받기 */
+  .exam-receive{margin:0 0 12px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--panel-2)}
+  .exam-receive-head{display:flex;align-items:center;gap:9px}
+  .exam-receive-head .spacer{flex:1}
+  .exam-receive-help{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.65}
+  .exam-receive-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+  .exam-receive-cell{flex:1 1 180px;min-width:0;display:flex;flex-direction:column;gap:3px;
+    padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+  .exam-receive-cap{color:var(--muted);font-size:11px;font-weight:700}
+  .exam-receive-val{font-size:15px;overflow-wrap:anywhere}
+  .exam-receive-addr,.exam-receive-code{font-family:Consolas,"Courier New",monospace;letter-spacing:.04em;color:var(--accent)}
+  .exam-receive-code{font-size:22px;font-weight:800}
+  /* 학생: 선생님 PC 로 보내기 */
+  .exam-send-box{margin-top:12px;padding-top:11px;border-top:1px dashed var(--border)}
+  .exam-send-fields{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+  .exam-send-fields .exam-field{flex:1 1 190px}
+  .exam-send-test{margin-top:9px;font-size:12px;padding:5px 11px}
+  .exam-send-status{margin:8px 0 0;font-size:12.5px;line-height:1.6;color:var(--muted)}
+  .exam-send-status.is-good{color:#15803d;font-weight:700}
+  .exam-send-status.is-bad{color:#b45309;font-weight:700}
+  [data-theme="dark"] .exam-send-status.is-good{color:#86efac}
+  [data-theme="dark"] .exam-send-status.is-bad{color:#fcd34d}
   .exam-done-panel p{font-size:13px;line-height:1.7;color:var(--ink)}
   [data-theme="dark"] .exam-done-panel strong{color:#86efac}
   /* 채점 표 */

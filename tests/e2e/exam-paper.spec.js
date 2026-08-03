@@ -91,7 +91,7 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   await take.locator(".exam-short-input").fill(" 잎 ");                                    // 공백 포함 정답
   await expect(take.locator(".exam-progress")).toContainText("2 / 2");
 
-  await take.locator(".exam-submit-box input[type='text']").fill("12 홍길동");
+  await take.locator(".exam-submit-box > .exam-field input[type='text']").fill("12 홍길동");
   const pad = take.locator(".exam-sign-pad");
   await pad.scrollIntoViewIfNeeded();
   const box = await pad.boundingBox();
@@ -410,6 +410,67 @@ test("잠긴 시험지에서 암호를 취소해도 다시 열 수 있는 안내
   await openBtn.click();
   await typePassword(page, TEACHER_PASSWORD, false);
   await expect(editor.locator(".exam-item").first()).toBeVisible();
+});
+
+// 네트워크 제출은 편의 기능일 뿐이다. 선생님 PC 에 닿지 못했다고 학생 답안이 사라지면 안 된다 —
+// 연결 실패는 파일로 떨어뜨려 제출을 확정하고, 코드가 틀린 경우처럼 고쳐서 다시 낼 수 있는
+// 실패는 확정하지 않고 돌려보낸다.
+test("선생님 PC 로 보내기가 실패하면 파일 제출로 떨어진다", async ({ page }) => {
+  await boot(page);
+
+  const paper = await page.evaluate(async () => {
+    const keys = await examGenerateKeyPair();
+    const items = [{ ...examNewItem("short"), id: "q1", stem: "1 + 1 은?", answerText: "2" }];
+    const stripped = examStripAnswers(items);
+    return JSON.stringify({
+      format: "manneung-exam", version: 1, id: "exam-send",
+      meta: { title: "보내기 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
+      itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
+      publicJwk: keys.publicJwk, locked: false, items: stripped
+    });
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "보내기 시험.exam", mimeType: "application/json", buffer: Buffer.from(paper, "utf8")
+  });
+  const take = page.locator(".exam-take");
+  await expect(take).toBeVisible();
+
+  await take.locator(".exam-short-input").fill("2");
+  await take.locator(".exam-submit-box > .exam-field input[type='text']").fill("12 홍길동");
+  const pad = take.locator(".exam-sign-pad");
+  await pad.scrollIntoViewIfNeeded();
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 30, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 30, { steps: 8 });
+  await page.mouse.up();
+
+  // 보내기를 켜면 주소·코드 칸이 나타난다
+  const sendBox = take.locator(".exam-send-box");
+  await sendBox.locator('input[type="checkbox"]').check();
+  await expect(sendBox.locator(".exam-send-fields")).toBeVisible();
+
+  // 코드가 6자리가 아니면 제출 자체를 확정하지 않는다(고쳐서 다시 낼 수 있는 실패)
+  // 선생님 화면에 표시되는 것과 같은, 콜론 양쪽에 공백이 있는 주소도 그대로 받는다.
+  await sendBox.locator('input[placeholder*="192.168"]').fill("192.168.0.12 : 17650");
+  await sendBox.locator('input[placeholder="6자리"]').fill("12");
+  await take.locator(".exam-submit-btn").click();
+  await expect(page.locator("#confirmModal")).toBeVisible();
+  await page.locator("#confirmOk").click();
+  await expect(take.locator(".exam-submit-btn")).toBeVisible();          // 아직 제출 화면 그대로
+  expect(await page.evaluate(() => docs.find(d => d.examTake).examTake.submitted)).toBe(false);
+
+  // 코드는 맞췄지만 그 주소에 아무도 없다 → 파일로 저장하고 제출은 확정된다
+  await sendBox.locator('input[placeholder="6자리"]').fill("123456");
+  const saved = await downloadText(page, async () => {
+    await take.locator(".exam-submit-btn").click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    await page.locator("#confirmOk").click();
+  });
+  expect(saved.name).toBe("보내기 시험_12 홍길동.examdone");
+  expect(JSON.parse(saved.text).format).toBe("manneung-exam-result");
+  await expect(take.locator(".exam-done-panel")).toBeVisible();
+  expect(await page.evaluate(() => docs.find(d => d.examTake).examTake.submitted)).toBe(true);
 });
 
 test("다른 시험지의 열쇠로는 제출본을 열 수 없다", async ({ page }) => {
