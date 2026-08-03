@@ -455,7 +455,7 @@ test("DataFrame fallback completion exposes the pandas member catalog without Je
 });
 
 test("import completion suggestions carry their import statement", () => {
-  assert.deepEqual(pythonImportCompletionCandidates("Pa", "Pa"), [{
+  assert.deepEqual(pythonImportCompletionCandidates("Pa", "Pa").filter(item => item.name === "Path"), [{
     name:"Path", type:"class", importText:"from pathlib import Path"
   }]);
   assert.ok(pythonImportCompletionCandidates("", "p").some(item => item.importText === "import pandas as pd"));
@@ -473,6 +473,28 @@ test("import completion suggestions carry their import statement", () => {
   assert.ok(pythonImportCompletionCandidates("init_chat_model", "init_chat_model").some(item => item.importText === "from langchain.chat_models import init_chat_model"));
   assert.ok(pythonImportCompletionCandidates("InMemoryVectorStore", "InMemoryVectorStore").some(item => item.importText === "from langchain_core.vectorstores import InMemoryVectorStore"));
   assert.ok(pythonImportCompletionCandidates("FAISS", "FAISS").some(item => item.importText === "from langchain_community.vectorstores import FAISS"));
+  const langGraphImports = [
+    ["StateGraph", "from langgraph.graph import StateGraph"],
+    ["START", "from langgraph.graph import START"],
+    ["Command", "from langgraph.types import Command"],
+    ["interrupt", "from langgraph.types import interrupt"],
+    ["entrypoint", "from langgraph.func import entrypoint"],
+    ["Runtime", "from langgraph.runtime import Runtime"],
+    ["ToolNode", "from langgraph.prebuilt import ToolNode"],
+    ["InMemorySaver", "from langgraph.checkpoint.memory import InMemorySaver"],
+    ["SqliteSaver", "from langgraph.checkpoint.sqlite import SqliteSaver"],
+    ["PostgresSaver", "from langgraph.checkpoint.postgres import PostgresSaver"],
+    ["InMemoryStore", "from langgraph.store.memory import InMemoryStore"],
+    ["PostgresStore", "from langgraph.store.postgres import PostgresStore"],
+    ["InMemoryCache", "from langgraph.cache.memory import InMemoryCache"],
+    ["BinaryOperatorAggregate", "from langgraph.channels import BinaryOperatorAggregate"],
+    ["Pregel", "from langgraph.pregel import Pregel"],
+    ["RemainingSteps", "from langgraph.managed import RemainingSteps"],
+    ["GraphRecursionError", "from langgraph.errors import GraphRecursionError"]
+  ];
+  for (const [name, importText] of langGraphImports) {
+    assert.ok(pythonImportCompletionCandidates(name, name).some(item => item.name === name && item.importText === importText), name);
+  }
   for (const loader of ["DirectoryLoader", "TextLoader", "PyPDFLoader", "WebBaseLoader", "CSVLoader", "JSONLoader"]) {
     assert.ok(pythonImportCompletionCandidates(loader, loader).some(item => item.importText === "from langchain_community.document_loaders import " + loader), loader);
   }
@@ -487,8 +509,8 @@ test("import completion suggestions carry their import statement", () => {
   assert.deepEqual(pythonImportCompletionCandidates("External", "External", [{ name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool" }]), [{
     name:"ExternalTool", type:"class", importText:"from custom_package import ExternalTool"
   }]);
-  assert.equal(pythonImportCompletionCandidates("from pathlib import Path\nPa", "Pa").length, 0);
-  assert.equal(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa").length, 0);
+  assert.equal(pythonImportCompletionCandidates("from pathlib import Path\nPa", "Pa").filter(item => item.name === "Path").length, 0);
+  assert.equal(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa").filter(item => item.name === "Path").length, 0);
 });
 
 test("workspace import completion indexes Python modules and top-level symbols in other folders", () => {
@@ -533,7 +555,7 @@ test("workspace import completion prefers the nearest valid module path and skip
 test("workspace auto-import candidates take precedence over the installed-package catalog", () => {
   const result = pythonImportCompletionCandidates("Pa", "Pa", [{
     name:"Path", type:"class", importText:"from local_paths import Path", priority:-1
-  }]);
+  }]).filter(item => item.name === "Path");
   assert.deepEqual(result, [{
     name:"Path", type:"class", importText:"from local_paths import Path", priority:-1
   }]);
