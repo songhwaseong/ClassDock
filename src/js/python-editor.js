@@ -502,6 +502,17 @@ function buildCodeEditor(text, prof, options={}){
   const plainMode = !!options.plain;
   const completionWords = plainMode ? completionWordsForProfile(prof, options.fileExt) : undefined;
   const jediUsable = () => !plainMode && typeof jediReady === "function" && jediReady();
+  // 서버 미러 안에서 이 파일이 놓인 상대경로 — Jedi 가 "지금 이 파일이 프로젝트의 어디인지"를
+  // 알아야 같은 패키지의 형제 모듈(from .state import State 같은 상대 import)까지 풀 수 있다.
+  const jediRelPath = () => {
+    if (typeof options.workspaceRelPath !== "function") return "";
+    try { return String(options.workspaceRelPath() || ""); } catch(e){ return ""; }
+  };
+  // 실행 기준 폴더(sys.path 루트) — 자동 import 경로를 만들 때 쓰는 추정값을 Jedi 에게도 그대로 준다.
+  const jediProjectRoot = () => {
+    if (typeof options.workspaceProjectRoot !== "function") return "";
+    try { return String(options.workspaceProjectRoot() || ""); } catch(e){ return ""; }
+  };
   if (!plainMode){
     ensureJediProbe();                                     // 로컬 파이썬이면 Jedi 완성 준비(백그라운드, UI 비차단)
     if (typeof ensurePythonImportIndex === "function") ensurePythonImportIndex();
@@ -1058,7 +1069,7 @@ function buildCodeEditor(text, prof, options={}){
     const loading = document.createElement("div"); loading.className = "code-help-loading"; loading.textContent = "함수 도움말 불러오는 중…";
     help.appendChild(loading); help.hidden = false; positionHelp();
     let data = null;
-    try { data = await requestJediHelp(context.source, line, column); } catch(_){ data = null; }
+    try { data = await requestJediHelp(context.source, line, column, jediRelPath(), jediProjectRoot()); } catch(_){ data = null; }
     if (seq !== helpSeq) return;   // 더 최신 도움말 요청이 시작됐을 때만 폐기(로딩이 남지 않도록 나머지는 항상 렌더)
     renderHelp(data);
   };
@@ -1165,30 +1176,63 @@ function buildCodeEditor(text, prof, options={}){
     dismissCompletion();
   };
   document.addEventListener("pointerdown", closeCompletionOnOutsidePointer, true);
-  const showLocalCompletion = (word, contextSource=null, includeImports=false, memberReceiver="") => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
-    const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
-    const local = pythonCompletionCandidates(source, word.prefix, completionWords);
-    const members = memberReceiver && !plainMode && typeof pythonMemberCompletionCandidates === "function"
-      ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
-    const wantImports = includeImports && !plainMode;      // 파이썬 import 제안은 파이썬 편집기에서만
-    const indexed = wantImports && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
+  // 자동 import 후보 모으기 — 작업공간(같은 프로젝트의 다른 .py) 후보는 자동 팝업에도 넣고,
+  // 설치 패키지·표준 라이브러리 카탈로그는 Ctrl+Space(수동)에서만 연다. 목록이 길어져 생기는
+  // 소음은 카탈로그 쪽이 대부분이고, 옆 파일의 클래스·함수는 지금 쓰려는 이름일 확률이 높다.
+  // 멤버 접근(obj.) 문맥은 제외한다 — 거기서 필요한 건 속성이지 import 가 아니다.
+  const importCandidatesFor = (source, prefix, manual, dotContext) => {
+    if (plainMode || dotContext) return [];                // 일반 텍스트 편집·멤버 접근에서는 import 제안 없음
+    const indexed = manual && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(prefix) : [];
     let workspace = [];
-    if (wantImports && typeof options.workspaceImportCandidates === "function") {
+    if (typeof options.workspaceImportCandidates === "function") {
       try { workspace = options.workspaceImportCandidates() || []; } catch(e) { workspace = []; }
     }
-    const imports = wantImports && typeof pythonImportCompletionCandidates === "function"
-      ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
-    const completionKeys = new Set();
+    const extra = [...workspace, ...indexed];
+    if (!manual && !workspace.length) return [];
+    return typeof pythonImportCompletionCandidates === "function"
+      ? pythonImportCompletionCandidates(source, prefix, extra, { catalog: manual })
+      : extra;
+  };
+  // 앞 그룹(버퍼 단어·Jedi 후보)이 목록을 다 채워도 자동 import 가 몇 칸은 남도록 자리를 예약한다.
+  // 예약분이 남으면 다시 앞 그룹으로 채워 목록 길이는 그대로 유지한다.
+  const IMPORT_RESERVED_SLOTS = 3;
+  const mergeCompletionItems = (primary, imports, limit) => {
+    const keys = new Set();
     const items = [];
-    const completionLimit = memberReceiver ? 240 : 12;
-    for (const item of [...members, ...local, ...imports]) {
-      const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
-      const importText = item && typeof item === "object" ? String(item.importText || "") : "";
-      const key = importText ? (name + "\n" + importText) : name;
-      if (!name || completionKeys.has(key)) continue;
-      completionKeys.add(key); items.push(item);
-      if (items.length >= completionLimit) break;
-    }
+    const push = (list, max) => {
+      for (const item of list) {
+        if (items.length >= max) break;
+        const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
+        const importText = item && typeof item === "object" ? String(item.importText || "") : "";
+        const key = importText ? (name + "\n" + importText) : name;
+        if (!name || keys.has(key)) continue;
+        keys.add(key); items.push(item);
+      }
+    };
+    const reserve = Math.min(IMPORT_RESERVED_SLOTS, imports.length);
+    push(primary, Math.max(0, limit - reserve));
+    push(imports, limit);
+    push(primary, limit);
+    return items;
+  };
+  // import 문을 치는 중이면(from 패키지. / from 모듈 import 이름) 그 자리에 들어갈 이름을
+  // 작업공간 모듈 색인에서 찾는다. 이름만 넣으면 되는 자리라 import 문은 따로 붙이지 않는다.
+  const moduleCandidatesFor = (importCtx, prefix, manual) => {
+    if (plainMode || !importCtx || typeof options.workspaceModuleCandidates !== "function") return [];
+    let rows = [];
+    try { rows = options.workspaceModuleCandidates(importCtx) || []; } catch(e) { rows = []; }
+    return manual ? rows : pruneFullyTyped(rows, prefix);   // 다 친 이름은 자동 팝업에서 뺀다
+  };
+  const showLocalCompletion = (word, contextSource=null, manual=false, ctx={}) => { // 빠른 버퍼 단어 + 키워드 후보를 즉시 표시
+    const memberReceiver = ctx.memberReceiver || "", importCtx = ctx.importCtx || null;
+    const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
+    // import 줄에서 아직 아무 글자도 안 쳤으면 버퍼 단어는 빼고 모듈 후보만 보여 준다(목록 소음 방지).
+    const local = importCtx && !word.prefix ? [] : pythonCompletionCandidates(source, word.prefix, completionWords);
+    const members = memberReceiver && !plainMode && typeof pythonMemberCompletionCandidates === "function"
+      ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
+    const modules = moduleCandidatesFor(importCtx, word.prefix, manual);
+    const imports = importCtx ? [] : importCandidatesFor(source, word.prefix, manual, ctx.dotContext);
+    const items = mergeCompletionItems([...modules, ...members, ...local], imports, memberReceiver ? 240 : 12);
     if (!items.length){ hideCompletion(); return false; }
     completion.items = items; completion.index = 0; completion.start = word.start; completion.end = word.end;
     renderCompletion();
@@ -1214,47 +1258,38 @@ function buildCodeEditor(text, prof, options={}){
     const dotContext = word.start > 0 && ta.value[word.start - 1] === ".";   // obj. 처럼 멤버 접근 문맥
     const receiverMatch = dotContext ? ta.value.slice(0, word.start - 1).match(/([A-Za-z_]\w*)$/) : null;
     const memberReceiver = receiverMatch ? receiverMatch[1] : "";
-    if (!manual && !dotContext && word.prefix.length < 1){ hideCompletion(); return; }
+    // import 문 안이면 아직 한 글자도 안 쳤어도 후보를 연다(from 모듈 import ⟨여기⟩ 처럼).
+    const importCtx = !plainMode && typeof pythonImportContextAt === "function"
+      ? pythonImportContextAt(ta.value, ta.selectionStart) : null;
+    const completionCtx = { memberReceiver, dotContext, importCtx };
+    if (!manual && !dotContext && !importCtx && word.prefix.length < 1){ hideCompletion(); return; }
     completion.manual = manual;
     // 로컬 후보는 즉시 보여 주고, 더 정확한 Jedi 결과가 오면 같은 팝업을 비동기로 보강한다.
     // 네트워크 왕복과 서버의 Python 프로세스 시작을 기다리는 동안 팝업이 비어 있지 않아 체감 지연이 줄어든다.
     if (jediUsable()){
       const seq = completionSeq, caret = ta.selectionStart, currentSource = ta.value;
       const context = completionContextFor(), source = context.source;
-      const localShown = showLocalCompletion(word, source, manual, memberReceiver);
+      const localShown = showLocalCompletion(word, source, manual, completionCtx);
       const before = currentSource.slice(0, caret);
       const line = context.lineOffset + (before.match(/\n/g) || []).length + 1; // Jedi: 줄 1-based
       const column = caret - (before.lastIndexOf("\n") + 1);          // Jedi: 칸 0-based
-      requestJediCompletions(source, line, column).then(items => {
+      requestJediCompletions(source, line, column, jediRelPath(), jediProjectRoot()).then(items => {
         if (seq !== completionSeq || ta.selectionStart !== caret) return;   // 더 최신 요청·커서 이동 → 폐기
         const pruned = manual ? (items || []) : pruneFullyTyped(items, word.prefix);   // 수동(Ctrl+Space)은 그대로
-        const indexed = manual && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(word.prefix) : [];
-        let workspace = [];
-        if (manual && typeof options.workspaceImportCandidates === "function") {
-          try { workspace = options.workspaceImportCandidates() || []; } catch(e) { workspace = []; }
-        }
-        const imports = manual && typeof pythonImportCompletionCandidates === "function"
-          ? pythonImportCompletionCandidates(source, word.prefix, [...workspace, ...indexed]) : [...workspace, ...indexed];
+        const imports = importCtx ? [] : importCandidatesFor(source, word.prefix, manual, dotContext);
+        const modules = moduleCandidatesFor(importCtx, word.prefix, manual);   // 작업공간 모듈은 Jedi 가 모르는 영역이라 앞에 둔다
         const fallbackMembers = memberReceiver && typeof pythonMemberCompletionCandidates === "function"
           ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
-        const combined = [];
-        const combinedKeys = new Set();
-        for (const item of [...fallbackMembers, ...pruned, ...imports]) {
-          const name = item && typeof item === "object" ? String(item.name || "") : String(item || "");
-          const importText = item && typeof item === "object" ? String(item.importText || "") : "";
-          const key = importText ? (name + "\n" + importText) : name;
-          if (!name || combinedKeys.has(key)) continue;
-          combinedKeys.add(key); combined.push(item);
-        }
+        const combined = mergeCompletionItems([...modules, ...fallbackMembers, ...pruned], imports, memberReceiver ? 240 : 12);
         if (combined.length){
-          completion.items = combined.slice(0, memberReceiver ? 240 : 12); completion.index = 0;
+          completion.items = combined; completion.index = 0;
           completion.start = word.start; completion.end = word.end;
           renderCompletion();
         } else if (!localShown) hideCompletion();     // Jedi·로컬 후보가 모두 없을 때만 닫힘(로컬 버퍼 후보가 떠 있으면 유지)
       });
       return;
     }
-    showLocalCompletion(word, null, manual, memberReceiver);
+    showLocalCompletion(word, null, manual, completionCtx);
   };
   const scheduleCompletion = () => {
     clearTimeout(completionTimer);
@@ -1736,7 +1771,7 @@ function buildCodeEditor(text, prof, options={}){
     const before = ta.value.slice(0, wordInfo.point);
     const line = (before.match(/\n/g) || []).length + 1;
     const column = wordInfo.point - (before.lastIndexOf("\n") + 1);
-    const def = await requestJediDefinition(ta.value, line, column);
+    const def = await requestJediDefinition(ta.value, line, column, jediRelPath(), jediProjectRoot());
     if (!def || def.reason === "builtin"){
       toast("내장 함수이거나 열 수 있는 Python 소스/스텁 파일이 없습니다.", 2800);
       return;
@@ -1744,6 +1779,18 @@ function buildCodeEditor(text, prof, options={}){
     if (!def.ok || !def.path){
       toast("정의 위치를 찾지 못했습니다.", 2200);
       return;
+    }
+    // 미러 안(=내 작업공간 파일)이면 임시 복사본 대신 원래 탭을 연다.
+    if (def.workspacePath && typeof options.openWorkspaceDefinition === "function"){
+      try {
+        const opened = await options.openWorkspaceDefinition({
+          path:String(def.workspacePath),
+          line:Math.max(1, Number(def.line) || 1),
+          column:Math.max(0, Number(def.column) || 0),
+          name:String(def.name || wordInfo.word || "")
+        });
+        if (opened) return;
+      } catch(e){ console.warn("작업공간 정의 이동 실패:", e); }
     }
     const buf = await readLocalDefinitionFile(def.path);
     if (!buf){

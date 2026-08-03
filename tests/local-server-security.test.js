@@ -32,6 +32,21 @@ test("로컬 서버는 Host와 인증을 본문 수신 전에 검증한다", () 
   assert.match(launcher, /413 Payload Too Large/);
 });
 
+test("자동완성용 작업공간 미러는 토큰이 있어야 쓰고, 미러 밖 경로는 거부한다", () => {
+  // 미러를 만드는·지우는 요청도 다른 로컬 API처럼 실행별 토큰을 요구한다.
+  assert.match(launcher, /path == "\/python-project-sync"\) return true/);
+  // 미러에 쓰는 경로는 실행 번들과 같은 zip-slip 방지 검사를 거치고, .py 계열만 받는다.
+  assert.match(launcher, /string safe = SafeRelPath\(rel\);\s*\n\s*if \(safe != null && len <= ProjectMirrorMaxFileBytes && IsPythonSourcePath\(safe\)\)/);
+  assert.match(launcher, /ProjectMirrorMaxFiles = 20000/);
+  assert.match(launcher, /ProjectMirrorMaxFileBytes = 1024 \* 1024/);
+  // 프로젝트 루트는 서버만 알고 환경변수로 넘긴다 — 요청 본문이 임의 폴더를 가리킬 수 없다.
+  assert.match(launcher, /psi\.EnvironmentVariables\["MOIDA_JEDI_ROOT"\] = mirror;/);
+  assert.match(launcher, /root = os\.environ\.get\('MOIDA_JEDI_ROOT', ''\) or ''/);
+  assert.match(launcher, /candidate if \(candidate == root or candidate\.startswith\(root \+ os\.sep\)\) else ''/);
+  // 종료할 때 미러도 함께 지운다.
+  assert.match(launcher, /ClearPythonProjectMirror\(\);\s+\/\/ 자동완성용 작업공간 미러/);
+});
+
 test("저장 루트 경로는 공통 검증과 재분석 지점 차단을 거친다", () => {
   assert.match(launcher, /static bool TryResolveSaveRootPath/);
   assert.match(launcher, /static bool HasReparsePointBelowRoot/);

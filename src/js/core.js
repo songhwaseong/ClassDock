@@ -1189,7 +1189,10 @@
       .map(item => ({ ...item }));
   }
 
-  function pythonImportCompletionCandidates(source, prefix, extraCandidates=[]) {
+  // options.catalog=false 면 내장 카탈로그(설치 패키지·표준 라이브러리)를 빼고 넘겨받은 후보만 쓴다.
+  // 자동 팝업은 작업공간(같은 프로젝트) 후보만 보여 주고, 카탈로그 전체는 Ctrl+Space 에서만 연다.
+  function pythonImportCompletionCandidates(source, prefix, extraCandidates=[], options={}) {
+    const catalog = !(options && options.catalog === false);
     const text = String(source || ""), query = String(prefix || "");
     const declared = new Set();
     const seen = new Set();
@@ -1204,7 +1207,7 @@
     const preferredNames = new Set(preferredExtra.map((item) => String(item.name || "")));
     return [
       ...preferredExtra,
-      ...PYTHON_IMPORT_COMPLETIONS.filter((item) => !preferredNames.has(String(item.name || ""))),
+      ...(catalog ? PYTHON_IMPORT_COMPLETIONS.filter((item) => !preferredNames.has(String(item.name || ""))) : []),
       ...regularExtra.filter((item) => !preferredNames.has(String(item.name || "")))
     ]
       .filter((item) => !query || item.name.startsWith(query))
@@ -1220,22 +1223,30 @@
       .map((item) => ({ ...item }));
   }
 
-  // Build auto-import candidates from Python files already opened in the same
-  // workspace. The shortest module path reachable from the current script's
-  // directory (or one of its parents) mirrors the project runner's sys.path.
-  function pythonWorkspaceImportCompletionCandidates(currentPath, entries) {
+  const isPythonIdentifier = (value) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || ""));
+
+  // Build a module tree from the Python files opened in the same workspace. The
+  // shortest module path reachable from the current script's directory (or one of
+  // its parents) mirrors the project runner's sys.path.
+  // options.projectRoot: 실행 기준 폴더(sys.path 루트)를 알고 있으면 그 폴더를 가장 먼저 본다.
+  // 없으면 지금까지처럼 가장 가까운 폴더부터 — 같은 폴더 형제만 쓰는 단일 파일 실행에 맞다.
+  // 자동 import 후보(pythonWorkspaceImportRowsFromIndex)와 import 문 완성
+  // (pythonWorkspaceModuleRowsFromIndex)이 같은 색인을 나눠 쓴다 — 파일을 두 번 훑지 않도록.
+  function pythonWorkspaceModuleIndex(currentPath, entries, options={}) {
     const normalize = (value) => normalizeWorkspacePath(value).replace(/\/+$/, "");
     const dirname = (value) => {
       const path = normalize(value), index = path.lastIndexOf("/");
       return index >= 0 ? path.slice(0, index) : "";
     };
-    const isIdentifier = (value) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || ""));
     const current = normalize(currentPath);
     const bases = [];
     for (let base = dirname(current); ; base = dirname(base)) {
       if (!bases.includes(base)) bases.push(base);
       if (!base) break;
     }
+    const projectRoot = options && options.projectRoot != null ? normalize(options.projectRoot) : null;
+    const rootIndex = projectRoot == null ? -1 : bases.indexOf(projectRoot);
+    if (rootIndex > 0) bases.unshift(...bases.splice(rootIndex, 1));
     const modulePartsFor = (value) => {
       const path = normalize(value);
       if (!/\.(?:py|pyw|pyi)$/i.test(path)) return null;
@@ -1245,18 +1256,18 @@
         relative = relative.replace(/\.(?:py|pyw|pyi)$/i, "");
         let parts = relative.split("/").filter(Boolean);
         if (parts[parts.length - 1] === "__init__") parts = parts.slice(0, -1);
-        if (parts.length && parts.every(isIdentifier)) return parts;
+        if (parts.length && parts.every(isPythonIdentifier)) return parts;
       }
       return null;
     };
-    const rows = [];
-    const seen = new Set();
-    const add = (name, type, importText) => {
-      if (!isIdentifier(name) || name.startsWith("_") || !importText) return;
-      const key = name + "\n" + importText;
-      if (seen.has(key)) return;
-      seen.add(key);
-      rows.push({ name, type, importText, priority:-1, workspace:true });
+    const symbolsOf = (source) => {
+      const rows = [];
+      const definition = /^(async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
+      let match;
+      while ((match = definition.exec(source))) {
+        rows.push({ name:match[2], type:match[1] === "class" ? "class" : "function" });
+      }
+      return rows;
     };
     const files = (Array.isArray(entries) ? entries : [])
       .map((entry) => ({
@@ -1264,22 +1275,113 @@
         source:String((entry && entry.source) == null ? "" : entry.source)
       }))
       .filter((entry) => entry.path && entry.path !== current && /\.(?:py|pyw|pyi)$/i.test(entry.path))
-      .map((entry) => ({ ...entry, moduleParts:modulePartsFor(entry.path) }))
+      .map((entry) => ({ path:entry.path, moduleParts:modulePartsFor(entry.path), symbols:symbolsOf(entry.source) }))
       .filter((entry) => entry.moduleParts && entry.moduleParts.length)
       .sort((a, b) => a.moduleParts.length - b.moduleParts.length || a.path.localeCompare(b.path));
+    return { currentPath:current, files };
+  }
+
+  // 색인 → 자동 import 후보(이름 + 넣어 줄 import 문).
+  function pythonWorkspaceImportRowsFromIndex(index) {
+    const files = (index && Array.isArray(index.files)) ? index.files : [];
+    const rows = [];
+    const seen = new Set();
+    const add = (name, type, importText) => {
+      if (!isPythonIdentifier(name) || name.startsWith("_") || !importText) return;
+      const key = name + "\n" + importText;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ name, type, importText, priority:-1, workspace:true });
+    };
     for (const file of files) {
       const parts = file.moduleParts;
-      for (let index = 0; index < parts.length; index++) {
-        const name = parts[index];
-        const parent = parts.slice(0, index).join(".");
-        add(name, "module", parent ? ("from " + parent + " import " + name) : ("import " + name));
+      for (let i = 0; i < parts.length; i++) {
+        const parent = parts.slice(0, i).join(".");
+        add(parts[i], "module", parent ? ("from " + parent + " import " + parts[i]) : ("import " + parts[i]));
       }
       const moduleName = parts.join(".");
-      const definition = /^(async\s+def|def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b/gm;
-      let match;
-      while ((match = definition.exec(file.source))) {
-        add(match[2], match[1] === "class" ? "class" : "function", "from " + moduleName + " import " + match[2]);
+      for (const symbol of file.symbols) add(symbol.name, symbol.type, "from " + moduleName + " import " + symbol.name);
+    }
+    return rows;
+  }
+
+  function pythonWorkspaceImportCompletionCandidates(currentPath, entries, options={}) {
+    return pythonWorkspaceImportRowsFromIndex(pythonWorkspaceModuleIndex(currentPath, entries, options));
+  }
+
+  // 커서가 import 문 안에 있는지 읽는다(현재 줄만 본다 — 괄호로 이어진 여러 줄은 각 줄이 심볼 자리다).
+  // kind "module": from ⟨여기⟩ / import ⟨여기⟩ — 모듈 경로를 치는 중.
+  // kind "symbol": from a.b import ⟨여기⟩ — 모듈 안의 이름을 치는 중.
+  // module 은 지금까지 확정된 점 경로(마지막 조각은 아직 치는 중이라 빼고 prefix 로 돌려준다).
+  function pythonImportContextAt(source, caretOffset) {
+    const text = String(source || "");
+    const caret = Math.max(0, Math.min(Number(caretOffset) || 0, text.length));
+    const lineStart = text.lastIndexOf("\n", caret - 1) + 1;
+    const line = text.slice(lineStart, caret);
+    if (line.indexOf("#") >= 0) return null;
+    // import 목록에서 지금 치고 있는 이름 조각(쉼표 뒤 마지막 토막). 별칭(as) 자리면 null.
+    const symbolPrefix = (tail) => {
+      if (/\bas\b[^,]*$/.test(tail)) return null;
+      const last = tail.split(",").pop().trim();
+      return !last || isPythonIdentifier(last) ? last : null;
+    };
+    const symbolMatch = line.match(/^\s*from\s+([A-Za-z_][\w.]*)\s+import\s+(.*)$/);
+    if (symbolMatch) {
+      const prefix = symbolPrefix(symbolMatch[2].replace(/^[(\s]+/, ""));
+      return prefix == null ? null : { kind:"symbol", module:symbolMatch[1].replace(/\.+$/, ""), prefix };
+    }
+    const moduleMatch = line.match(/^\s*(from|import)\s+([A-Za-z_][\w.]*|)$/);
+    if (moduleMatch) {
+      const typed = moduleMatch[2];
+      const cut = typed.lastIndexOf(".");
+      return { kind:"module", module:cut < 0 ? "" : typed.slice(0, cut), prefix:cut < 0 ? typed : typed.slice(cut + 1) };
+    }
+    // from … import ( … ) 로 여러 줄에 걸친 목록 — 커서 줄이 이어진 줄이면 문을 연 줄까지 올라간다.
+    let scan = lineStart;
+    for (let step = 0; step < 50 && scan > 0; step++) {
+      const start = text.lastIndexOf("\n", scan - 2) + 1;
+      const previous = text.slice(start, scan);
+      const opener = previous.match(/^\s*from\s+([A-Za-z_][\w.]*)\s+import\s*\(/);
+      if (opener) {
+        const segment = text.slice(start, caret);
+        if ((segment.match(/\(/g) || []).length <= (segment.match(/\)/g) || []).length) return null;   // 이미 닫힌 목록
+        const prefix = symbolPrefix(segment.slice(segment.lastIndexOf("(") + 1));
+        return prefix == null ? null : { kind:"symbol", module:opener[1], prefix };
       }
+      if (!/^[\w.,\s()]*$/.test(previous)) return null;      // import 목록으로 볼 수 없는 줄에서 멈춘다
+      scan = start;
+    }
+    return null;
+  }
+
+  // 색인 + import 문맥 → 그 자리에 넣을 이름 후보(모듈·클래스·함수). import 문 안이라
+  // importText 는 붙이지 않는다 — 이름만 그대로 채워 넣는다.
+  function pythonWorkspaceModuleRowsFromIndex(index, context) {
+    const files = (index && Array.isArray(index.files)) ? index.files : [];
+    const ctx = context && typeof context === "object" ? context : null;
+    if (!ctx || !files.length) return [];
+    const base = String(ctx.module || "").split(".").filter(Boolean);
+    const prefix = String(ctx.prefix || "");
+    const rows = [];
+    const seen = new Set();
+    const add = (name, type) => {
+      if (!isPythonIdentifier(name) || name.startsWith("_")) return;
+      if (prefix && !name.startsWith(prefix)) return;
+      if (seen.has(name)) return;
+      seen.add(name);
+      rows.push({ name, type, workspace:true });
+    };
+    for (const file of files) {
+      const parts = file.moduleParts;
+      if (parts.length <= base.length) {
+        // from a.b import ⟨여기⟩ — a.b 자체가 모듈이면 그 안의 최상위 이름을 준다.
+        if (ctx.kind === "symbol" && parts.length === base.length && parts.every((part, i) => part === base[i])) {
+          for (const symbol of file.symbols) add(symbol.name, symbol.type);
+        }
+        continue;
+      }
+      if (!base.every((part, i) => parts[i] === part)) continue;
+      add(parts[base.length], "module");                        // 다음 단계 하위 모듈·패키지
     }
     return rows;
   }
@@ -3567,7 +3669,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand,

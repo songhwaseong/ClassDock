@@ -808,6 +808,7 @@ class PdfSignerLauncher
                 || path.StartsWith("/source-folder-remove", StringComparison.Ordinal)) return true;
             if (path == "/image-memo-delete") return true;
             if (path == "/complete" || path == "/definition") return true;
+            if (path == "/python-project-sync") return true;
             if (path.StartsWith("/pip-install", StringComparison.Ordinal)) return true;   // /pip-install, -start, -cancel
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
@@ -1830,6 +1831,18 @@ class PdfSignerLauncher
                     // 설치된 패키지의 메타데이터와 Python 소스만 읽어 만든 자동 import 색인.
                     // 실제 패키지 import/실행은 하지 않으며, 생성 작업은 백그라운드에서 한 번만 한다.
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PythonImportIndexJson()));
+                }
+                else if (method == "POST" && path == "/python-project-sync")
+                {
+                    // 작업공간의 .py 를 임시 폴더에 미러링 → 다음 자동완성부터 Jedi 가 프로젝트 모듈을 안다.
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(SyncPythonProjectMirror(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("project-sync-failed: " + FlattenMessage(ex)));
+                    }
                 }
                 else if (method == "POST" && path == "/complete")
                 {
@@ -4185,6 +4198,8 @@ class PdfSignerLauncher
                 if (!session.ShellExited) KillProcessTree(session.Process);
                 try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
             }
+
+            ClearPythonProjectMirror();   // 자동완성용 작업공간 미러
         }
         catch { }   // 정리는 최선 노력 — 실패해도 종료는 진행하고 다음 기동의 청소가 마저 치운다
     }
@@ -5393,6 +5408,84 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
     static bool? _jediReady = null;
     static string _jediRunnerPath = null;
 
+    // ===== Jedi 프로젝트 미러 =====
+    // 브라우저 폴더 핸들(showDirectoryPicker)로 연 작업공간에는 실제 디스크 경로가 없다. Jedi 가
+    // 프로젝트 모듈(from 내패키지.모듈 import …)을 풀려면 진짜 폴더가 필요해서, 작업공간의 .py 를
+    // 임시 폴더에 그대로 미러링하고 그 폴더를 jedi.Project 루트로 넘긴다.
+    // 미러 경로는 서버만 알고 환경변수로 러너에 준다 — 요청이 임의 폴더를 가리킬 수 없게.
+    static readonly object ProjectMirrorLock = new object();
+    static string _projectMirrorRoot = null;
+    const int ProjectMirrorMaxFiles = 20000;
+    const int ProjectMirrorMaxFileBytes = 1024 * 1024;
+
+    static string CurrentProjectMirrorRoot()
+    {
+        lock (ProjectMirrorLock)
+        {
+            return (_projectMirrorRoot != null && Directory.Exists(_projectMirrorRoot)) ? _projectMirrorRoot : null;
+        }
+    }
+
+    // body: [count]([pathLen][path][dataLen][data])*  — 실행 번들과 같은 리틀엔디언 형식(대상·표준입력 없음).
+    // 새 폴더에 통째로 쓰고 마지막에 교체한다 — 진행 중인 Jedi 프로세스가 읽던 파일이 사라지지 않도록.
+    static string SyncPythonProjectMirror(byte[] body)
+    {
+        if (body == null || body.Length > 64 * 1024 * 1024) throw new Exception("bad-project-bundle");
+        int pos = 0;
+        int count = ReadBundleInt(body, ref pos);
+        if (count < 0 || count > ProjectMirrorMaxFiles) throw new Exception("bad-project-bundle");
+        string fresh = Path.Combine(Path.GetTempPath(), "moidapy_project_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fresh);
+        int written = 0;
+        try
+        {
+            for (int i = 0; i < count; i++)
+            {
+                string rel = ReadBundleString(body, ref pos);
+                int len = ReadBundleInt(body, ref pos);
+                if (len < 0 || pos + len > body.Length) throw new Exception("bad-project-bundle");
+                string safe = SafeRelPath(rel);
+                if (safe != null && len <= ProjectMirrorMaxFileBytes && IsPythonSourcePath(safe))
+                {
+                    string full = Path.Combine(fresh, safe);
+                    string dir = Path.GetDirectoryName(full);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    using (FileStream fs = new FileStream(full, FileMode.Create, FileAccess.Write))
+                        fs.Write(body, pos, len);
+                    written++;
+                }
+                pos += len;   // 건너뛴 파일도 스트림 위치는 그대로 진행
+            }
+            if (pos != body.Length) throw new Exception("bad-project-bundle");
+        }
+        catch
+        {
+            try { Directory.Delete(fresh, true); } catch { }
+            throw;
+        }
+        string previous;
+        lock (ProjectMirrorLock)
+        {
+            previous = _projectMirrorRoot;
+            _projectMirrorRoot = fresh;
+        }
+        if (previous != null) try { Directory.Delete(previous, true); } catch { }   // 아직 읽는 중이면 다음 기회에 정리된다
+        return "{\"ok\":true,\"files\":" + written + "}";
+    }
+
+    static bool IsPythonSourcePath(string rel)
+    {
+        string lower = (rel ?? "").ToLowerInvariant();
+        return lower.EndsWith(".py") || lower.EndsWith(".pyw") || lower.EndsWith(".pyi");
+    }
+
+    static void ClearPythonProjectMirror()
+    {
+        string previous;
+        lock (ProjectMirrorLock) { previous = _projectMirrorRoot; _projectMirrorRoot = null; }
+        if (previous != null) try { Directory.Delete(previous, true); } catch { }
+    }
+
     static bool RunPyCheck(string interp, string code)
     {
         try
@@ -5443,7 +5536,7 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
             if (_jediRunnerPath != null && File.Exists(_jediRunnerPath)) return _jediRunnerPath;
             string path = Path.Combine(Path.GetTempPath(), "moida_jedi_complete.py");
             File.WriteAllText(path,
-                "import sys, json\n" +
+                "import sys, json, os\n" +
                 "data = json.load(sys.stdin)\n" +
                 "mode = data.get('mode', 'complete')\n" +
                 "try:\n" +
@@ -5452,8 +5545,35 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 "    print(json.dumps({'ok': False, 'reason': 'no-jedi'})); sys.exit(0)\n" +
                 "src = data.get('source','')\n" +
                 "line = int(data.get('line', 1)); col = int(data.get('column', 0))\n" +
+                // 프로젝트 루트는 서버가 환경변수로만 준다. 요청의 path 는 그 안의 상대경로로만 쓴다
+                // (정규화 후 루트 밖을 가리키면 버린다) — 요청이 임의 경로를 열지 못하게.
+                "root = os.environ.get('MOIDA_JEDI_ROOT', '') or ''\n" +
+                "root = os.path.normpath(root) if root else ''\n" +   // 구분자를 os 형식으로 통일 — 아래 경로 비교의 전제
+                "if root and not os.path.isdir(root): root = ''\n" +
+                "def inside(rel_path):\n" +           // 미러 안으로만 해석한다(루트 밖을 가리키면 버린다)
+                "    if not root or not rel_path: return ''\n" +
+                "    candidate = os.path.normpath(os.path.join(root, rel_path))\n" +
+                "    return candidate if (candidate == root or candidate.startswith(root + os.sep)) else ''\n" +
+                "clean = lambda value: str(value or '').replace('\\\\', '/').strip('/')\n" +
+                "script_path = inside(clean(data.get('path', ''))) or None\n" +
+                // 실행 기준 폴더(sys.path 루트)가 곧 프로젝트 루트다. 작업공간 루트와 다를 수 있어
+                // (예: llm_project/ 아래에 패키지가 있는 구조) 앱이 추정한 값을 상대경로로 받는다.
+                "project_root = inside(clean(data.get('root', ''))) or root\n" +
+                "def to_workspace(p):\n" +           // 미러 안의 경로 → 작업공간 상대경로(앱이 원래 탭을 열도록)
+                "    if not root or not p: return ''\n" +
+                "    try: full = os.path.normpath(str(p))\n" +
+                "    except Exception: return ''\n" +
+                "    if not full.startswith(root + os.sep): return ''\n" +
+                "    return full[len(root) + 1:].replace(os.sep, '/')\n" +
                 "try:\n" +
-                "    script = jedi.Script(code=src)\n" +
+                "    project = None\n" +
+                "    if project_root:\n" +
+                "        try: project = jedi.Project(project_root)\n" +
+                "        except Exception: project = None\n" +
+                "    try:\n" +
+                "        script = jedi.Script(code=src, path=script_path, project=project)\n" +
+                "    except TypeError:\n" +          // 예전 Jedi(project/path 인자 없음)에서는 지금까지처럼 코드만 본다
+                "        script = jedi.Script(code=src)\n" +
                 "    if mode == 'definition':\n" +
                 "        defs = []\n" +
                 "        try:\n" +
@@ -5466,7 +5586,7 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 "        for d in defs:\n" +
                 "            p = getattr(d, 'module_path', None)\n" +
                 "            if p:\n" +
-                "                print(json.dumps({'ok': True, 'path': str(p), 'line': getattr(d, 'line', 1) or 1, 'column': getattr(d, 'column', 0) or 0, 'name': getattr(d, 'name', '') or '', 'type': getattr(d, 'type', '') or ''})); sys.exit(0)\n" +
+                "                print(json.dumps({'ok': True, 'path': str(p), 'workspacePath': to_workspace(p), 'line': getattr(d, 'line', 1) or 1, 'column': getattr(d, 'column', 0) or 0, 'name': getattr(d, 'name', '') or '', 'type': getattr(d, 'type', '') or ''})); sys.exit(0)\n" +
                 "        print(json.dumps({'ok': False, 'reason': 'builtin'})); sys.exit(0)\n" +
                 "    elif mode == 'help':\n" +
                 "        names = []\n" +
@@ -5525,6 +5645,8 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
         psi.RedirectStandardInput = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = new UTF8Encoding(false);
         psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+        string mirror = CurrentProjectMirrorRoot();
+        if (mirror != null) psi.EnvironmentVariables["MOIDA_JEDI_ROOT"] = mirror;   // 작업공간 미러가 있으면 그 폴더를 프로젝트로
 
         Process proc = Process.Start(psi);
         if (proc == null) return "{\"ok\":false,\"reason\":\"spawn\"}";

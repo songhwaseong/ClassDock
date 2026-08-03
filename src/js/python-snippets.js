@@ -1498,15 +1498,79 @@ function ensureJediProbe(){
   _jediBackend = "pending";
   fetch("/can-complete", { method: "GET" })                // 백그라운드: 로컬 파이썬+Jedi 준비(없으면 서버가 1회 설치)
     .then(res => res.ok ? res.text() : "no")
-    .then(t => { _jediBackend = (String(t).trim().toLowerCase() === "yes"); })
-    .catch(() => { _jediBackend = false; });
+    .then(t => {
+      _jediBackend = (String(t).trim().toLowerCase() === "yes");
+      if (_jediBackend && _jediProjectPending) scheduleJediProjectSync(_jediProjectPending);
+      else if (!_jediBackend) _jediProjectPending = null;
+    })
+    .catch(() => { _jediBackend = false; _jediProjectPending = null; });
 }
 const jediReady = () => _jediBackend === true;
-async function requestJediCompletions(source, line, column){
+
+// ===== Jedi 프로젝트 인지 — 작업공간을 서버 임시폴더에 미러링 =====
+// 브라우저 폴더 핸들(showDirectoryPicker)에는 실제 디스크 경로가 없어서, 그대로는 Jedi 가
+// 내 프로젝트 모듈을 전혀 못 푼다. 작업공간의 .py 를 서버에 한 벌 복사해 두면 그 폴더가
+// jedi.Project 루트가 되어 `import 내패키지` 도 문맥으로 인식한다.
+// 보내는 시점은 '색인이 실제로 바뀐 때'뿐이고, 그마저 1.2초 묶어서 보낸다(타이핑마다 아님).
+const JEDI_PROJECT_SYNC_DELAY = 1200;
+const JEDI_PROJECT_MAX_BYTES = 32 * 1024 * 1024;
+let _jediProjectTimer = 0;
+let _jediProjectBusy = false;
+let _jediProjectPending = null;
+function buildJediProjectBundle(files){
+  const encoder = new TextEncoder();
+  const chunks = []; let total = 0;
+  const u32 = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n >>> 0, true); chunks.push(b); total += 4; };
+  const raw = (b) => { chunks.push(b); total += b.length; };
+  u32(files.length);
+  for (const file of files){
+    const pathText = String(file.path || "");
+    const sourceText = String(file.source == null ? "" : file.source);
+    // UTF-8 바이트 수는 UTF-16 문자열 길이보다 작지 않다. 먼저 싼 하한 검사로 거대한
+    // 문자열을 인코딩하지 않고 거르고, 인코딩 직후 정확한 크기도 다시 확인한다.
+    if (total + 8 + pathText.length + sourceText.length > JEDI_PROJECT_MAX_BYTES) return null;
+    const path = encoder.encode(pathText);
+    const source = encoder.encode(sourceText);
+    if (total + 8 + path.length + source.length > JEDI_PROJECT_MAX_BYTES) return null;
+    u32(path.length); raw(path); u32(source.length); raw(source);
+  }
+  const out = new Uint8Array(total); let at = 0;
+  for (const chunk of chunks){ out.set(chunk, at); at += chunk.length; }
+  return out;
+}
+async function sendJediProjectSync(files){
+  const bundle = buildJediProjectBundle(files);
+  if (!bundle) return;
+  try {
+    await fetch("/python-project-sync", { method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:bundle });
+  } catch(e){ /* 미러가 없으면 지금까지처럼 코드 텍스트만으로 완성한다 */ }
+}
+function scheduleJediProjectSync(files){
+  if (!Array.isArray(files) || !files.length || _jediBackend === false) return;
+  _jediProjectPending = files;
+  // 준비 확인이 아직 진행 중이면 최신 요청을 보존한다. probe 성공 콜백이 이 함수를 다시
+  // 호출하므로, 색인 캐시가 그대로여도 최초 프로젝트 미러가 빠지지 않는다.
+  if (!jediReady()){ ensureJediProbe(); return; }
+  if (_jediProjectBusy || _jediProjectTimer) return;
+  _jediProjectTimer = setTimeout(async () => {
+    _jediProjectTimer = 0;
+    const rows = _jediProjectPending;
+    _jediProjectPending = null;
+    if (!rows) return;
+    _jediProjectBusy = true;
+    try { await sendJediProjectSync(rows); }
+    finally {
+      _jediProjectBusy = false;
+      if (_jediProjectPending) scheduleJediProjectSync(_jediProjectPending);   // 보내는 동안 또 바뀌었으면 한 번 더
+    }
+  }, JEDI_PROJECT_SYNC_DELAY);
+}
+
+async function requestJediCompletions(source, line, column, relPath, projectRoot){
   try {
     const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/complete", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source:analysisSource, line, column }) });
+      body: JSON.stringify({ source:analysisSource, line, column, path:String(relPath || ""), root:String(projectRoot || "") }) });
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || data.ok === false || !Array.isArray(data.items)) return null;
@@ -1521,13 +1585,13 @@ async function requestJediCompletions(source, line, column){
     }).filter(Boolean);
   } catch(e){ return null; }
 }
-async function requestJediHelp(source, line, column){
+async function requestJediHelp(source, line, column, relPath, projectRoot){
   const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), 8000) : 0;   // 응답이 없으면 8초 후 포기(로딩 무한대기 방지)
   try {
     const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/complete", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source:analysisSource, line, column, mode: "help" }), signal: controller ? controller.signal : undefined });
+      body: JSON.stringify({ source:analysisSource, line, column, path:String(relPath || ""), root:String(projectRoot || ""), mode: "help" }), signal: controller ? controller.signal : undefined });
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || data.ok === false) return null;
@@ -1541,11 +1605,11 @@ async function requestJediHelp(source, line, column){
   } catch(e){ return null; }
   finally { if (timer) clearTimeout(timer); }
 }
-async function requestJediDefinition(source, line, column){
+async function requestJediDefinition(source, line, column, relPath, projectRoot){
   try {
     const analysisSource = pythonCompletionInferenceSource(source, line);
     const res = await fetch("/definition", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source:analysisSource, line, column, mode: "definition" }) });
+      body: JSON.stringify({ source:analysisSource, line, column, path:String(relPath || ""), root:String(projectRoot || ""), mode: "definition" }) });
     if (!res.ok) return null;
     const data = await res.json();
     return data && data.ok ? data : data || null;
@@ -1562,4 +1626,3 @@ async function readLocalDefinitionFile(path){
     return buffer.byteLength ? buffer : null;
   } catch(e){ return null; }
 }
-

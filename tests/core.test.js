@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -559,6 +559,75 @@ test("workspace auto-import candidates take precedence over the installed-packag
   assert.deepEqual(result, [{
     name:"Path", type:"class", importText:"from local_paths import Path", priority:-1
   }]);
+});
+
+test("catalog:false 는 설치 패키지 카탈로그를 빼고 작업공간 후보만 남긴다(자동 팝업)", () => {
+  const workspace = [{ name:"Path", type:"class", importText:"from local_paths import Path", priority:-1 }];
+  const auto = pythonImportCompletionCandidates("Pa", "Pa", workspace, { catalog:false });
+  assert.deepEqual(auto, workspace);
+  assert.deepEqual(pythonImportCompletionCandidates("Pdf", "Pdf", [], { catalog:false }), []);
+  // 기본값(수동, Ctrl+Space)은 지금까지처럼 카탈로그를 함께 보여 준다.
+  assert.ok(pythonImportCompletionCandidates("Pdf", "Pdf", [])
+    .some(item => item.importText === "from pypdf import PdfReader"));
+  // 이미 import 한 이름·현재 파일에서 선언한 이름을 거르는 규칙은 그대로다.
+  assert.deepEqual(pythonImportCompletionCandidates("from local_paths import Path\nPa", "Pa", workspace, { catalog:false }), []);
+  assert.deepEqual(pythonImportCompletionCandidates("class Path:\n    pass\nPa", "Pa", workspace, { catalog:false }), []);
+});
+
+test("workspace import completion prefers the given project root over the nearest folder", () => {
+  const entries = [{ path:"llm_project/pkg/flow/state.py", source:"class State:\n    pass" }];
+  const current = "llm_project/pkg/flow/graph.py";
+  assert.ok(pythonWorkspaceImportCompletionCandidates(current, entries)
+    .some(item => item.name === "State" && item.importText === "from state import State"));
+  const rooted = pythonWorkspaceImportCompletionCandidates(current, entries, { projectRoot:"llm_project" });
+  assert.ok(rooted.some(item => item.name === "State" && item.importText === "from pkg.flow.state import State"));
+  assert.ok(rooted.some(item => item.name === "pkg" && item.importText === "import pkg"));
+  assert.ok(rooted.some(item => item.name === "flow" && item.importText === "from pkg import flow"));
+  // 현재 파일의 상위 폴더가 아닌 값은 무시하고 지금까지의 기준(가까운 폴더)을 그대로 쓴다.
+  assert.ok(pythonWorkspaceImportCompletionCandidates(current, entries, { projectRoot:"other" })
+    .some(item => item.importText === "from state import State"));
+});
+
+test("import 문 문맥 읽기: 모듈 경로 자리와 이름 자리를 가른다", () => {
+  const at = (line) => pythonImportContextAt(line, line.length);
+  assert.deepEqual(at("from "), { kind:"module", module:"", prefix:"" });
+  assert.deepEqual(at("import chap"), { kind:"module", module:"", prefix:"chap" });
+  assert.deepEqual(at("from chapter08_langgraph."), { kind:"module", module:"chapter08_langgraph", prefix:"" });
+  assert.deepEqual(at("from chapter08_langgraph.flow_control.st"),
+    { kind:"module", module:"chapter08_langgraph.flow_control", prefix:"st" });
+  assert.deepEqual(at("from pkg.flow.state import "), { kind:"symbol", module:"pkg.flow.state", prefix:"" });
+  assert.deepEqual(at("from pkg.flow.state import Sta"), { kind:"symbol", module:"pkg.flow.state", prefix:"Sta" });
+  assert.deepEqual(at("from pkg import (\n    login_router, cart"), { kind:"symbol", module:"pkg", prefix:"cart" });
+  // import 문이 아닌 줄·주석·별칭 자리는 문맥으로 보지 않는다.
+  assert.equal(at("graph.add_node("), null);
+  assert.equal(at("value = 1"), null);
+  assert.equal(at("from pkg import State  # 메모 note"), null);
+  assert.equal(at("from pkg import State as St"), null);
+  // 앞 줄이 import 여도 커서가 있는 줄만 본다.
+  const source = "from pkg import State\nval";
+  assert.equal(pythonImportContextAt(source, source.length), null);
+});
+
+test("import 문 완성: 하위 모듈과 모듈 안의 클래스·함수를 그 자리에 넣을 이름으로 준다", () => {
+  const index = pythonWorkspaceModuleIndex("llm/chapter08/flow/graph.py", [
+    { path:"llm/chapter08/flow/state.py", source:"class State:\n    pass" },
+    { path:"llm/chapter08/flow/nodes.py", source:"def login(state):\n    pass\ndef _hidden():\n    pass" },
+    { path:"llm/chapter08/__init__.py", source:"" },
+    { path:"llm/other/util.py", source:"def helper():\n    pass" }
+  ], { projectRoot:"llm" });
+  const names = (context) => pythonWorkspaceModuleRowsFromIndex(index, context).map(item => item.name);
+
+  assert.deepEqual(names({ kind:"module", module:"", prefix:"" }).sort(), ["chapter08", "other"]);
+  assert.deepEqual(names({ kind:"module", module:"chapter08", prefix:"" }), ["flow"]);
+  assert.deepEqual(names({ kind:"module", module:"chapter08.flow", prefix:"" }).sort(), ["nodes", "state"]);
+  assert.deepEqual(names({ kind:"module", module:"chapter08.flow", prefix:"st" }), ["state"]);
+  assert.deepEqual(names({ kind:"symbol", module:"chapter08.flow.state", prefix:"" }), ["State"]);
+  assert.deepEqual(pythonWorkspaceModuleRowsFromIndex(index, { kind:"symbol", module:"chapter08.flow.state", prefix:"" }),
+    [{ name:"State", type:"class", workspace:true }]);
+  // 밑줄로 시작하는 비공개 이름과 없는 모듈은 제외한다. 패키지 자리에서는 하위 모듈을 준다.
+  assert.deepEqual(names({ kind:"symbol", module:"chapter08.flow.nodes", prefix:"" }), ["login"]);
+  assert.deepEqual(names({ kind:"symbol", module:"chapter08", prefix:"" }), ["flow"]);
+  assert.deepEqual(names({ kind:"module", module:"nowhere", prefix:"" }), []);
 });
 
 test("Class.load 대입은 Jedi 분석용 반환 타입을 보강하되 실제 입력 줄은 바꾸지 않는다", () => {

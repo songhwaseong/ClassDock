@@ -38,29 +38,175 @@ async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
   return true;
 }
 
-// 열린 작업공간의 최신 Python 문서만 읽어 로컬 자동 import 후보를 만든다.
-// 서로 다른 폴더/압축 묶음은 import 루트가 모호해지므로 같은 archiveCtx만 포함한다.
-function workspacePythonImportCandidates(ownerDoc){
-  if (!ownerDoc || typeof pythonWorkspaceImportCompletionCandidates !== "function") return [];
+// 아직 한 번도 연 적 없는 .py 의 원본 텍스트 캐시(문서 id → {stamp, text}).
+// 완성 팝업은 동기라 그 자리에서 디스크를 읽을 수 없다. 그래서 열린 문서로 먼저 답하고,
+// 비어 있는 파일은 백그라운드로 읽어 이 캐시에 채운다(다음 타이핑부터 후보에 들어온다).
+const workspacePyTextCache = new Map();
+const WORKSPACE_PY_MAX_BYTES = 512 * 1024;   // 이보다 큰 .py 는 자동완성 인덱스에서 제외(대개 생성 코드)
+const WORKSPACE_PY_PREWARM_MAX = 400;        // 한 번에 읽어 둘 파일 수 상한(대형 폴더 보호)
+let workspacePyPrewarmBusy = false;
+let workspacePyPrewarmQueuedOwner = null;
+
+function workspacePyStamp(doc){
+  const file = doc && doc.sourceFile;
+  if (!file) return "";
+  return String(file.size || 0) + ":" + String(file.lastModified || 0);
+}
+// 완성이 볼 본문 — 살아있는 편집기 > 저장된 텍스트 > 프리워밍 캐시 순(내용 검색 liveDocText 와 같은 사다리).
+function workspacePyText(doc){
+  if (typeof liveDocText === "function" && typeof hasLiveDocText === "function" && hasLiveDocText(doc)){
+    const live = liveDocText(doc);
+    if (typeof live === "string") return live;
+  } else if (doc && typeof doc.savedText === "string") return doc.savedText;
+  const cached = doc ? workspacePyTextCache.get(doc.id) : null;
+  return cached && cached.stamp === workspacePyStamp(doc) ? cached.text : null;
+}
+// 자동 import 인덱스에 넣을 문서 목록. 서로 다른 폴더/압축 묶음은 import 루트가 모호해지므로
+// 같은 archiveCtx만 포함한다.
+function workspacePythonImportTargets(ownerDoc){
   const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
     .replace(/\\/g, "/").replace(/^\/+/, "");
-  const currentPath = docPath(ownerDoc);
   const context = ownerDoc.archiveCtx || null;
-  const entries = [];
+  const rows = [];
   for (const doc of docs){
     if (!doc || doc === ownerDoc || doc.kind === "pdf") continue;
     if (doc.sourceKey && String(doc.sourceKey).startsWith("definition:")) continue;
     if ((doc.archiveCtx || null) !== context) continue;
     const path = docPath(doc);
     if (!/\.(?:py|pyw|pyi)$/i.test(path)) continue;
-    let source = null;
-    if (doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
-      try { source = doc.codeEditor.getValue(); } catch(_){}
-    }
-    if (source == null && typeof doc.savedText === "string") source = doc.savedText;
-    if (source != null) entries.push({ path, source });
+    rows.push({ doc, path });
   }
-  return pythonWorkspaceImportCompletionCandidates(currentPath, entries);
+  return { currentPath:docPath(ownerDoc), rows };
+}
+// 닫힌 문서의 캐시는 버린다(문서 목록이 곧 수명).
+function pruneWorkspacePyTextCache(){
+  if (!workspacePyTextCache.size) return;
+  const alive = new Set(docs.map(doc => doc && doc.id));
+  for (const id of [...workspacePyTextCache.keys()]) if (!alive.has(id)) workspacePyTextCache.delete(id);
+}
+// 열지 않은 .py 를 한 번씩 읽어 캐시에 채운다. 한 파일마다 프레임을 양보해 타이핑을 막지 않는다.
+// 못 읽거나(권한·스냅샷 만료) 너무 큰 파일도 빈 본문으로 표시해 둔다 — 그래야 타이핑할 때마다
+// 같은 파일을 다시 시도하지 않는다. 파일이 바뀌면 stamp 가 달라져 자동으로 다시 읽는다.
+async function runWorkspacePythonPrewarm(ownerDoc){
+  const rows = workspacePythonImportTargets(ownerDoc).rows;
+  let read = 0;
+  for (const row of rows){
+    if (workspacePyText(row.doc) != null) continue;
+    const stamp = workspacePyStamp(row.doc);
+    const file = row.doc.sourceFile;
+    if (!file || typeof file.arrayBuffer !== "function" || file.size > WORKSPACE_PY_MAX_BYTES){
+      workspacePyTextCache.set(row.doc.id, { stamp, text:"" });   // 읽지 않기로 한 파일 — 다시 시도하지 않는다
+      continue;
+    }
+    if (read >= WORKSPACE_PY_PREWARM_MAX) break;                  // 나머지는 다음 차례에(표시를 남기지 않는다)
+    read++;
+    let text = null;
+    try { text = typeof openDocRunText === "function" ? await openDocRunText(row.doc) : null; }
+    catch(_){ text = null; }
+    workspacePyTextCache.set(row.doc.id, { stamp, text:typeof text === "string" ? text : "" });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  pruneWorkspacePyTextCache();
+}
+// 프리워밍 예약 — 동시에 하나만 돌리고, 도중에 다시 요청되면 끝난 뒤 한 번 더 훑는다.
+function scheduleWorkspacePythonPrewarm(ownerDoc){
+  if (!ownerDoc) return;
+  if (workspacePyPrewarmBusy){ workspacePyPrewarmQueuedOwner = ownerDoc; return; }
+  workspacePyPrewarmBusy = true;
+  const start = () => runWorkspacePythonPrewarm(ownerDoc)
+    .catch(e => console.warn("작업공간 자동완성 인덱스 준비 실패:", e))
+    .finally(() => {
+      workspacePyPrewarmBusy = false;
+      const queuedOwner = workspacePyPrewarmQueuedOwner;
+      workspacePyPrewarmQueuedOwner = null;
+      if (queuedOwner) scheduleWorkspacePythonPrewarm(queuedOwner);
+    });
+  if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout:2000 });
+  else setTimeout(start, 200);
+}
+// 작업공간 모듈 색인(자동 import 후보 · import 문 완성이 함께 쓴다).
+// 타이핑마다 모든 .py 를 다시 훑지 않도록 지난 색인을 재사용한다. 재사용 판정은 본문 문자열
+// 비교 — 안 바뀐 파일은 같은 문자열 객체라 사실상 즉시 끝나고, 한 글자만 바뀌어도 정확히 걸린다.
+let workspacePyIndexMemo = null;
+function workspacePyIndexMemoHit(currentPath, projectRoot, entries){
+  const memo = workspacePyIndexMemo;
+  if (!memo || memo.currentPath !== currentPath || memo.projectRoot !== projectRoot) return null;
+  if (memo.entries.length !== entries.length) return null;
+  for (let i = 0; i < entries.length; i++){
+    if (memo.entries[i].path !== entries[i].path || memo.entries[i].source !== entries[i].source) return null;
+  }
+  return memo.index;
+}
+function workspacePythonModuleIndex(ownerDoc){
+  if (!ownerDoc || typeof pythonWorkspaceModuleIndex !== "function") return null;
+  const targets = workspacePythonImportTargets(ownerDoc);
+  const entries = [];
+  let missing = false;
+  for (const row of targets.rows){
+    const source = workspacePyText(row.doc);
+    if (source == null){ missing = true; continue; }
+    entries.push({ path:row.path, source });
+  }
+  if (missing) scheduleWorkspacePythonPrewarm(ownerDoc);   // 아직 못 읽은 파일은 백그라운드로 채운다
+  // import 문(from 패키지…)과 __init__.py 로 추정한 실행 기준 폴더를 넘긴다 — 실행 때 통하는
+  // 경로와 같은 모양으로 자동 import 를 넣기 위해서다(추정 실패면 가까운 폴더 기준 그대로).
+  const ownerSource = workspacePyText(ownerDoc);
+  let projectRoot = null;
+  if (typeof inferOpenPythonProjectRoot === "function"){
+    projectRoot = inferOpenPythonProjectRoot(targets.currentPath, ownerSource == null ? "" : ownerSource,
+      entries.map(entry => entry.path));
+  }
+  const hit = workspacePyIndexMemoHit(targets.currentPath, projectRoot, entries);
+  if (hit) return hit;
+  const index = pythonWorkspaceModuleIndex(targets.currentPath, entries,
+    projectRoot == null ? {} : { projectRoot });
+  workspacePyIndexMemo = { currentPath:targets.currentPath, projectRoot, entries, index };
+  // 색인이 실제로 바뀐 이 순간에만 서버 미러도 갱신한다(Jedi 가 프로젝트 모듈을 알게 하는 D 경로).
+  // 현재 파일은 완성 요청에 본문을 그대로 실어 보내므로, 미러에는 저장된 상태로 들어가도 된다.
+  if (typeof scheduleJediProjectSync === "function"){
+    const ownerPath = targets.currentPath;
+    const files = ownerSource == null ? entries : [...entries, { path:ownerPath, source:ownerSource }];
+    scheduleJediProjectSync(files.filter(file => file.path));
+  }
+  return index;
+}
+// 열린 작업공간의 Python 문서를 읽어 로컬 자동 import 후보를 만든다.
+function workspacePythonImportCandidates(ownerDoc){
+  const index = workspacePythonModuleIndex(ownerDoc);
+  if (!index || typeof pythonWorkspaceImportRowsFromIndex !== "function") return [];
+  return pythonWorkspaceImportRowsFromIndex(index);
+}
+// 실행 기준 폴더(sys.path 루트) 추정값 — 자동 import 경로와 Jedi 프로젝트 루트가 같은 값을 쓴다.
+function workspacePythonProjectRoot(ownerDoc){
+  workspacePythonModuleIndex(ownerDoc);
+  const memo = workspacePyIndexMemo;
+  return memo && memo.projectRoot ? memo.projectRoot : "";
+}
+// Jedi 가 미러 안에서 찾은 정의를 원래 작업공간 탭으로 되돌려 연다(임시 복사본을 열지 않도록).
+async function openWorkspaceDefinitionTarget(ownerDoc, hit){
+  if (!ownerDoc || !hit || !hit.path) return false;
+  const wanted = String(hit.path).replace(/\\/g, "/").replace(/^\/+/, "");
+  const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
+    .replace(/\\/g, "/").replace(/^\/+/, "");
+  const context = ownerDoc.archiveCtx || null;
+  const scoped = docs.filter(doc => doc && (doc.archiveCtx || null) === context && docPath(doc) === wanted);
+  const target = scoped.find(doc => ownerDoc.parentId != null && doc.parentId === ownerDoc.parentId) || scoped[0];
+  if (!target) return false;
+  const line = Math.max(1, Number(hit.line) || 1);
+  const focus = { column:Math.max(0, Number(hit.column) || 0), length:Math.max(1, String(hit.name || "").length) };
+  target.pendingFocusLine = line;
+  target.pendingFocusOptions = focus;
+  setActiveDoc(target.id);
+  const navigator = target.codeEditor || target.codeViewer;
+  if (navigator && navigator.focusLine) navigator.focusLine(line, focus);
+  toast("작업공간의 정의로 이동했습니다.", 1600);
+  return true;
+}
+// import 문을 치는 중일 때 그 자리에 넣을 이름(하위 모듈·모듈 안의 클래스·함수) 후보.
+function workspacePythonModuleCandidates(ownerDoc, context){
+  if (!context || typeof pythonWorkspaceModuleRowsFromIndex !== "function") return [];
+  const index = workspacePythonModuleIndex(ownerDoc);
+  return index ? pythonWorkspaceModuleRowsFromIndex(index, context) : [];
 }
 
 // 문자열 토큰이 f-string 인가? (접두사에 f/F 포함) — 바깥 정규식이 이미 잘라낸 토큰만 검사.
@@ -1471,9 +1617,15 @@ async function renderCode(file, host, ext, profile, runCtx){
   const draftKey = pythonDraftKey(file, ownerDoc, effectiveRunCtx);
   const sourceFingerprint = fingerprintBytes((file && file.name) || "code.py", sourceBytes);
   const restoredDraft = loadPythonDraft(draftKey, sourceFingerprint);
+  scheduleWorkspacePythonPrewarm(ownerDoc);   // 옆 파일 본문을 미리 읽어 둔다 — 첫 자동완성부터 후보가 나오게
   const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
     resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo),
     workspaceImportCandidates: () => workspacePythonImportCandidates(ownerDoc),
+    workspaceModuleCandidates: (context) => workspacePythonModuleCandidates(ownerDoc, context),
+    workspaceRelPath: () => String((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath || ownerDoc.name)) || "")
+      .replace(/\\/g, "/").replace(/^\/+/, ""),
+    workspaceProjectRoot: () => workspacePythonProjectRoot(ownerDoc),
+    openWorkspaceDefinition: (hit) => openWorkspaceDefinitionTarget(ownerDoc, hit),
     // 우클릭 메뉴도 실행 바·단축키와 같은 진입점을 사용한다. 콜백은 메뉴를 열 때
     // 평가되므로 아래에서 만들어지는 ui/run 함수를 안전하게 참조할 수 있다.
     contextMenuActions: () => {
