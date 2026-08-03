@@ -281,6 +281,12 @@
     .tab.dirty .tab-dot,.tab.dirty:hover .tab-dot,.tab.dirty:focus-within .tab-dot{inset:0 auto 0 0;width:18px;opacity:1}
     .tab.dirty .tab-x{inset:0 0 0 auto;width:18px;opacity:1;pointer-events:auto}
   }
+  /* 마지막 탭 옆 ＋ — 새 화이트보드(판서) 바로 열기 */
+  .tab-new-board{flex:0 0 auto;display:grid;place-items:center;width:28px;height:28px;padding:0;
+    border:1px solid transparent;border-radius:7px;background:transparent;color:#94a3b8;
+    font-family:inherit;font-size:15px;line-height:1;cursor:pointer}
+  .tab-new-board:hover{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.14);color:#fff}
+  .tab-new-board:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .tab-overflow{position:relative;flex:0 0 auto;margin-left:auto}
   .tab-more{height:28px;min-width:48px;padding:0 10px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#cbd5e1;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
   .tab-more-dirty,.tab-overflow-dirty{flex:0 0 auto;color:#fbbf24;font-size:9px}

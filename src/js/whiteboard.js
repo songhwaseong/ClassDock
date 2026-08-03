@@ -47,11 +47,8 @@ function newWhiteboard(options={}){
   const recoveryName = doc.boardRecoveryName || name;
   const snapshot = chooseBoardSnapshot(options.state, readBoardRecoverySnapshot(recoveryName));
   const restored = boardStateFromSnapshot(snapshot);
-  if (restored){
-    doc.boardState = restored;
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
-    else doc.hasUnsavedEdits = true;
-  }
+  // 복원한 판서도 ● 를 켜지 않는다 — 이 스냅샷 자체가 이미 자동 저장된 결과다(아래 recordCommit 주석 참고).
+  if (restored) doc.boardState = restored;
   doc.render = async () => { const host = doc.el; host.innerHTML = ""; host.scrollTop = 0; renderWhiteboard(doc, host); };
   if (typeof refreshChrome === "function") refreshChrome();
   activateIfIdle(doc, {});
@@ -118,8 +115,11 @@ function renderWhiteboard(doc, host){
   };
   const boundsOf = (it) => boardItemBounds(it, measureBoardText);
   // 수업 리플레이: 녹화 중이면 커밋(획/도형/텍스트/이미지/지우기/되돌리기)마다 스냅샷을 남긴다.
+  /* 화이트보드는 디스크 파일 형식이 없는 가상 문서라 "저장"으로 끌 수 있는 ● 가 없다.
+     대신 커밋마다 localStorage 복구본을 남겨(scheduleBoardRecovery) 탭을 닫거나 새로고침해도
+     같은 이름으로 열면 그대로 돌아온다. app.js 가 보드를 닫기·새로고침 경고에서 빼는 것도 같은 이유다.
+     그래서 markDocumentDirty 를 켜지 않는다 — 켜면 끄는 길이 없어 ● 가 영영 남는다. */
   const recordCommit = () => {
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc);
     scheduleBoardRecovery();
     if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }); } catch(_){} }
   };
@@ -391,7 +391,8 @@ function renderWhiteboard(doc, host){
   const withoutSelection = (fn) => { const sel = wb.selected; if (sel){ wb.selected = null; redraw(); } try { return fn(); } finally { if (sel){ wb.selected = sel; } } };
 
   // ----- 내보내기 -----
-  const exportPng = () => {
+  // notify: 버튼을 누른 게 아니라 Ctrl+S 로 부른 경우 — 화면에 아무 변화가 없어 알려줘야 한다.
+  const exportPng = (options={}) => {
     const sel = wb.selected; if (sel){ wb.selected = null; redraw(); }
     canvas.toBlob((b) => {
       if (sel){ wb.selected = sel; redraw(); }
@@ -399,8 +400,11 @@ function renderWhiteboard(doc, host){
       const u = URL.createObjectURL(b); const a = document.createElement("a");
       a.href = u; a.download = (doc.name || "화이트보드") + ".png";
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
+      if (options.notify && typeof toast === "function") toast("PNG 이미지로 저장했어요.", 2200);
     }, "image/png");
   };
+  // Ctrl+S 진입점(app.js). 없으면 브라우저 기본 "웹페이지 저장(HTML)"이 떠 버린다.
+  doc.saveBoardPng = () => exportPng({ notify:true });
   // 메모창으로 보내기: 보이는 그림(PNG)과 편집용 벡터 스냅샷을 함께 넘겨,
   // 메모 이미지 블록의 "✏️ 화이트보드로"로 다시 편집할 수 있게 한다.
   const sendToMemo = () => {

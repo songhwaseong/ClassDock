@@ -155,7 +155,8 @@ function wire(){
   // 저장하므로 이 플래그를 쓰지 않고, 표·이미지도 여기서 경고한다.
   // 단, 자동 저장·복원이 꺼져 있으면 PDF 편집을 되살릴 수단이 없으므로 함께 경고한다.
   // 화이트보드는 편집 즉시 localStorage 에 자동 저장·복원되므로(PDF 복구본과 같은 안전망)
-  // 닫기·새로고침 경고에서 제외한다. 사이드바 ● 배지로는 여전히 "저장 안 됨"을 알린다.
+  // 닫기·새로고침 경고에서 제외한다. 같은 이유로 whiteboard.js 는 ● 자체를 켜지 않는다
+  // (아래 boardEditsRecovered 는 예전 문서·복원 경로가 플래그를 켜 두었을 때를 위한 방어선).
   let suppressUnloadWarn = false;
   const pdfEditsAtRisk = (d) => d.kind === "pdf" && !appSettings.pdfRecovery
     && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d);
@@ -976,6 +977,12 @@ function wire(){
       if (typeof newPythonScratch === "function") newPythonScratch();
       return;
     }
+    // 문서를 열어 설명하는 도중에도 손을 떼지 않고 판서로 넘어갈 수 있게 한다(탭바 ＋ 버튼과 같은 동작).
+    if (shortcutMatches(e, "newBoard")){
+      e.preventDefault();
+      if (typeof newWhiteboard === "function") newWhiteboard();
+      return;
+    }
     if (shortcutMatches(e, "screensaverStart")){
       // 키 입력도 사용자 제스처라 전체화면이 허용된다(설정을 열지 않고 바로 시작).
       e.preventDefault();
@@ -1020,6 +1027,11 @@ function wire(){
         return;
       }
       if (state && state.kind === "pdf") { e.preventDefault(); exportPdf(); return; }
+      // 화이트보드는 디스크 파일 형식이 없어 .run-save 가 없다. 여기서 안 받으면 브라우저 기본
+      // "웹페이지 저장(HTML)" 대화상자가 떠 버리므로, 툴바 PNG 버튼과 같은 동작으로 받는다.
+      if (state && state.kind === "board" && typeof state.saveBoardPng === "function"){
+        e.preventDefault(); state.saveBoardPng(); return;
+      }
       const save = state && state.el && state.el.querySelector(".run-save");
       if (save) {
         e.preventDefault();

@@ -33,7 +33,7 @@
     C("newPython","🐍","새 파이썬 코드", () => callFn("newPythonScratch"), { sc:"newPython", kw:"python 파이썬 코드 새 만들기 new" }),
     C("newNotebook","📓","새 노트북 (.ipynb)", () => callFn("newNotebookScratch"), { kw:"jupyter notebook 노트북 ipynb 커널 셀" }),
     C("newSheet","📊","새 빈 표 (엑셀)", () => callFn("newSpreadsheetScratch"), { kw:"excel sheet 엑셀 표 스프레드시트 xlsx" }),
-    C("newBoard","🖊️","새 화이트보드", () => callFn("newWhiteboard"), { kw:"whiteboard 화이트보드 칠판 판서 필기" }),
+    C("newBoard","🖊️","새 화이트보드", () => callFn("newWhiteboard"), { sc:"newBoard", kw:"whiteboard 화이트보드 칠판 판서 필기" }),
     C("newText","📝","새 텍스트 파일", () => callFn("newTextScratch"), { kw:"text txt 텍스트 메모장 새" }),
     C("newMnote","🧩","새 블록 문서 (.mnote)", () => callFn("newMnoteScratch"), { kw:"block document 블록 문서 표 이미지 글 혼합 mnote 노션" }),
     C("openLesson","⏯️","수업 리플레이 열기 (.lesson)", () => callFn("openLessonFilePicker"), { kw:"lesson replay 리플레이 되감기 수업 녹화" }),

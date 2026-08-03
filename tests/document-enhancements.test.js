@@ -108,13 +108,26 @@ test("스프레드시트 편집은 공통 미저장 상태와 작업공간 복�
   assert.match(docs, /function markDocumentSavedSnapshot\(/);
 });
 
-test("이미지와 화이트보드 편집도 공통 미저장 상태를 사용한다", () => {
+test("이미지 편집은 공통 미저장 상태를 사용한다", () => {
   const image = read("image-viewer.js");
-  const board = read("whiteboard.js");
   assert.match(image, /const markImageDirty/);
   assert.match(image, /saveDocumentRecoverySnapshot\(ownerDoc, blob/);
-  assert.match(board, /markDocumentDirty\(doc\)/);
+});
+
+// 화이트보드는 디스크 파일 형식이 없어 ● 를 끌 "저장"이 없다. 예전엔 커밋마다 markDocumentDirty 를
+// 켜 놓고 끄는 곳이 없어 ● 가 영영 남았다. 지금은 복구본 자동 저장으로 대신하고 ● 는 켜지 않는다.
+test("화이트보드는 ● 대신 복구본을 남기고, Ctrl+S 는 PNG 내보내기로 받는다", () => {
+  const board = read("whiteboard.js");
+  const app = read("app.js");
+  const backup = read("backup.js");
   assert.match(board, /doc\.boardState/);
   assert.match(board, /BOARD_RECOVERY_PREFIX/);
   assert.match(board, /restoreBoardImages/);
+  assert.doesNotMatch(board, /markDocumentDirty\(/);   // 호출은 없어야 한다(설명 주석에는 이름이 남아 있다)
+  // 브라우저 기본 "웹페이지 저장(HTML)" 대신 툴바 PNG 와 같은 동작으로 받는다.
+  assert.match(board, /doc\.saveBoardPng = \(\) => exportPng\(\{ notify:true \}\)/);
+  assert.match(app, /state\.kind === "board" && typeof state\.saveBoardPng === "function"/);
+  // ● 를 안 켜므로 백업 플러시는 hasUnsavedEdits 판정 앞에서 보드를 먼저 흘려보내야 한다.
+  const flush = backup.slice(backup.indexOf("for (const doc of [...docs])"));
+  assert.match(flush, /doc\.kind === "board"[\s\S]{0,120}flushBoardRecovery[\s\S]{0,200}if \(!doc\.hasUnsavedEdits\) continue;/);
 });

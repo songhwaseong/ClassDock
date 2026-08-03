@@ -1762,7 +1762,8 @@ function moveTab(draggedId, targetId, after){
 let tabLayoutLimit = 0;
 let tabBarResizeObserver = null;
 function tabLimitForWidth(width){
-  const usable = Math.max(210, (width || window.innerWidth || 800) - 82);
+  // 오른쪽 끝에 항상 붙는 ＋(새 화이트보드, 32px)와 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
+  const usable = Math.max(210, (width || window.innerWidth || 800) - 114);
   return Math.max(1, Math.min(6, Math.floor(usable / 210)));
 }
 
@@ -1856,6 +1857,16 @@ function renderTabs(){
     tab.append(ic, nm, tail);
     bar.appendChild(tab);
   });
+  // 마지막 탭 옆 ＋ (브라우저 새 탭과 같은 자리) — 문서를 설명하다 바로 판서할 화이트보드를 연다.
+  // 사이드바가 접혀 있거나 드롭존이 문서에 가려진 상태에서도 늘 보이는 유일한 새로 만들기 진입점이다.
+  const newBoardBtn = document.createElement("button");
+  newBoardBtn.type = "button"; newBoardBtn.className = "tab-new-board"; newBoardBtn.textContent = "＋";
+  newBoardBtn.dataset.shortcutAction = "newBoard";
+  newBoardBtn.dataset.shortcutTitle = "새 화이트보드";
+  newBoardBtn.dataset.shortcutAria = "true";
+  newBoardBtn.onclick = () => { if (typeof newWhiteboard === "function") newWhiteboard(); };
+  bar.appendChild(newBoardBtn);
+  if (typeof syncShortcutHints === "function") syncShortcutHints(bar);   // 제목·aria 에 현재 단축키 표기 반영
   if (hiddenIds.length){
     const wrap = document.createElement("div"); wrap.className = "tab-overflow";
     const more = document.createElement("button"); more.type = "button"; more.className = "tab-more";

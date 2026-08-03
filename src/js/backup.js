@@ -339,9 +339,11 @@ async function mnBackupFlushUnsaved(){
   for (const doc of [...docs]){
     const label = String(doc && doc.name || "이름 없는 문서");
     try {
-      if (!doc.hasUnsavedEdits) continue;
+      // 화이트보드는 ● 를 켜지 않는(자동 저장) 문서라 hasUnsavedEdits 로 거를 수 없다.
+      // 백업에 마지막 판서까지 담기도록 dirty 판정 앞에서 항상 흘려보낸다(localStorage 쓰기 한 번).
       if (doc.kind === "board" && typeof doc.flushBoardRecovery === "function")
         tasks.push({ label, task:() => doc.flushBoardRecovery() });
+      if (!doc.hasUnsavedEdits) continue;
       if (doc.kind === "pdf" && doc.recoveryKey && typeof savePdfRecovery === "function")
         tasks.push({ label, task:() => savePdfRecovery(doc, { force:true }) });
       if (typeof doc.flushBackupRecovery === "function")

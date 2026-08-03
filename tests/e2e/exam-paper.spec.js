@@ -151,8 +151,11 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   await sheet.locator(".modal-actions .btn.primary").click();
   await expect(row.locator(".exam-score")).toHaveText("1 / 2");
 
-  // 성적 CSV
-  const csv = await downloadText(page, () => grade.locator(".btn", { hasText: "성적 CSV" }).click());
+  // 성적 CSV — 옆에 "📚 누적 성적 CSV"(모든 시험 합본)가 나란히 있어 부분 일치로는 둘 다 잡힌다.
+  // 아이콘 글자는 icons.js 가 SVG 로 바꿔 텍스트에서 사라지기도 하므로 "누적"만 배제한다.
+  const csvBtn = grade.locator(".btn").filter({ hasText: "성적 CSV" }).filter({ hasNotText: "누적" });
+  await expect(csvBtn).toHaveCount(1);
+  const csv = await downloadText(page, () => csvBtn.click());
   expect(csv.name).toMatch(/^성적_e2e 쪽지시험_/);
   expect(csv.text).toContain("12 홍길동");
   expect(csv.text).toContain("1번");
