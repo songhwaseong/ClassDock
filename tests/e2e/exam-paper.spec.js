@@ -208,6 +208,90 @@ test("열기 암호를 건 배포본과 잠긴 원본을 암호로만 연다", a
   await expect(editor.locator(".exam-answer-hint")).toContainText("정답: ③번");
 });
 
+test("문항 카드의 ＋ 버튼은 그 문항 바로 아래에 새 문항을 끼워 넣는다", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.newExamPaper());
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+
+  // 1번 지문을 채우고, 1번 카드의 ＋주관식 → 2번으로 들어가야 한다.
+  const items = editor.locator(".exam-item");
+  await items.nth(0).locator(".exam-stem-input").fill("첫 문항");
+  await editor.locator(".exam-bar .btn", { hasText: "객관식" }).click();     // 맨 뒤에 하나(→ 2번)
+  await items.nth(1).locator(".exam-stem-input").fill("끝 문항");
+  await items.nth(0).locator(".exam-item-add .btn", { hasText: "주관식" }).click();
+
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(1).locator(".exam-item-kind")).toHaveText("주관식");
+  await expect(items.nth(1).locator(".exam-stem-input")).toHaveValue("");    // 새로 끼운 빈 문항
+  await expect(items.nth(2).locator(".exam-stem-input")).toHaveValue("끝 문항");
+  await expect(items.nth(1).locator(".exam-stem-input")).toBeFocused();      // 커서까지 새 문항으로
+});
+
+test("학생 화면의 그림은 눌러 크게 볼 수 있고, 보기 그림을 눌러도 답이 찍히지 않는다", async ({ page }) => {
+  await boot(page);
+
+  const paper = await page.evaluate(async () => {
+    const draw = (bg) => {
+      const c = document.createElement("canvas"); c.width = 240; c.height = 160;
+      const g = c.getContext("2d"); g.fillStyle = bg; g.fillRect(0, 0, 240, 160);
+      return c.toDataURL("image/png");
+    };
+    const keys = await examGenerateKeyPair();
+    const items = [{
+      ...examNewItem("choice"), id: "q1", stem: "그림을 보고 답하시오.",
+      images: [draw("#fde68a")],
+      choices: [
+        { text: "가", image: draw("#bfdbfe") }, { text: "나", image: "" },
+        { text: "다", image: "" }, { text: "라", image: "" }
+      ],
+      answerIndex: 1
+    }];
+    const stripped = examStripAnswers(items);
+    return JSON.stringify({
+      format: "manneung-exam", version: 1, id: "exam-zoom",
+      meta: { title: "그림 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
+      itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
+      publicJwk: keys.publicJwk, locked: false, items: stripped
+    });
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "그림 시험.exam", mimeType: "application/json", buffer: Buffer.from(paper, "utf8")
+  });
+  await expect(page.locator(".exam-take")).toBeVisible();
+
+  // 지문 그림 → 큰 창이 열리고 [닫기]로 사라진다
+  const lightbox = page.locator(".plot-zoom");
+  await page.locator(".exam-image-cell img").first().click();
+  await expect(lightbox).toBeVisible();
+  // 시험 중에는 문제 그림을 빼갈 수 없어야 한다
+  await expect(page.locator("#plotZoomSave")).toBeHidden();
+  await expect(page.locator("#plotZoomMemo")).toBeHidden();
+  await page.locator("#plotZoomDone").click();
+  await expect(lightbox).toBeHidden();
+
+  // 보기 그림은 <label> 안에 있다 — 크게 보려고 눌렀는데 그 보기가 골라지면 안 된다
+  await page.locator(".exam-take-choice-image").click();
+  await expect(lightbox).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(lightbox).toBeHidden();
+  await expect(page.locator('.exam-take-choice input[type="radio"]').first()).not.toBeChecked();
+  expect(await page.evaluate(() => Object.keys(docs.find(d => d.examTake).examTake.answers).length)).toBe(0);
+
+  // 시험지 밖(실행 결과 그래프 등)에서는 저장·메모 버튼이 그대로 있어야 한다 — 공용 확대 창이라 같이 죽으면 안 된다
+  await page.evaluate(() => {
+    const img = document.createElement("img");
+    img.className = "mn-zoomable"; img.id = "plainZoomProbe";
+    img.src = document.querySelector(".exam-image-cell img").src;
+    document.body.appendChild(img);
+  });
+  await page.locator("#plainZoomProbe").click();
+  await expect(lightbox).toBeVisible();
+  await expect(page.locator("#plotZoomSave")).toBeVisible();
+  await expect(page.locator("#plotZoomMemo")).toBeVisible();
+  await page.keyboard.press("Escape");
+});
+
 test("서명하려고 끌어도 시험지 화면이 스크롤되지 않는다", async ({ page }) => {
   await boot(page);
 
@@ -250,6 +334,82 @@ test("서명하려고 끌어도 시험지 화면이 스크롤되지 않는다", 
   expect(await host.evaluate((el) => el.scrollTop)).toBe(before);
   const signed = await page.evaluate(() => (docs.find(d => d.examTake).examTake.signature || "").slice(0, 15));
   expect(signed).toBe("data:image/png;");                  // 스크롤 대신 서명이 그려졌다
+});
+
+// 폴더를 열면 그 안의 파일이 한꺼번에 열린다. 예전에는 .examkey 도 그때 바로 풀어서,
+// 볼 생각도 없던 시험지 때문에 시작하자마자 암호를 묻고 — 일괄로 연 문서라 탭도 없어
+// "암호를 넣었는데 아무것도 안 뜬다"가 됐다.
+test("폴더 안의 시험지 원본은 폴더를 열 때가 아니라 열어 볼 때 암호를 묻는다", async ({ page }, testInfo) => {
+  await boot(page);
+
+  // 원본(.examkey) 하나를 만들어 폴더에 넣는다
+  await page.evaluate(() => window.newExamPaper());
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+  await editor.locator(".exam-meta-row input").nth(0).fill("중간고사");
+  await editor.locator(".exam-stem-input").first().fill("1 + 1 은?");
+  const choices = editor.locator(".exam-choice-input");
+  for (let i = 0; i < 4; i++) await choices.nth(i).fill(String(i + 1));
+  await editor.locator('input[type="radio"]').nth(1).check();
+  const master = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "원본 저장" }).click();
+    await typePassword(page, TEACHER_PASSWORD, true);
+  });
+
+  const dir = testInfo.outputPath("수업폴더");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dir + "/메모.txt", "수업 메모\n", "utf8");
+  fs.writeFileSync(dir + "/중간고사.examkey", master.text, "utf8");
+  await page.evaluate(() => { docs.slice().forEach(d => closeDoc(d.id, { skipUi: true })); });
+
+  // 폴더만 열었을 때는 암호를 묻지 않는다 — 문서는 잠긴 채로만 만들어 둔다
+  await page.locator("#folderInput").setInputFiles(dir);
+  await expect(page.locator(".exam-item").first()).toBeHidden();
+  await expect(page.locator(".exam-pass-modal")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => docs.filter(d => d.examLocked).length)).toBe(1);
+
+  // 그 문서를 열면 그때 묻고, 암호를 넣으면 편집기가 뜬다
+  await page.evaluate(() => { const d = docs.find(x => x.examLocked); setActiveDoc(d.id); });
+  await typePassword(page, TEACHER_PASSWORD, false);
+  await expect(editor.locator(".exam-item").first()).toBeVisible();
+  await expect(editor.locator(".exam-stem-input").first()).toHaveValue("1 + 1 은?");
+  expect(await page.evaluate(() => docs.filter(d => d.examLocked).length)).toBe(0);
+});
+
+test("잠긴 시험지에서 암호를 취소해도 다시 열 수 있는 안내가 남는다", async ({ page }, testInfo) => {
+  await boot(page);
+  await page.evaluate(() => window.newExamPaper());
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+  await editor.locator(".exam-meta-row input").nth(0).fill("기말고사");
+  await editor.locator(".exam-stem-input").first().fill("2 + 2 는?");
+  const choices = editor.locator(".exam-choice-input");
+  for (let i = 0; i < 4; i++) await choices.nth(i).fill(String(i + 1));
+  await editor.locator('input[type="radio"]').nth(3).check();
+  const master = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "원본 저장" }).click();
+    await typePassword(page, TEACHER_PASSWORD, true);
+  });
+
+  const dir = testInfo.outputPath("취소폴더");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dir + "/기말고사.examkey", master.text, "utf8");
+  await page.evaluate(() => { docs.slice().forEach(d => closeDoc(d.id, { skipUi: true })); });
+  await page.locator("#folderInput").setInputFiles(dir);
+  await expect.poll(() => page.evaluate(() => docs.filter(d => d.examLocked).length)).toBe(1);
+
+  await page.evaluate(() => { const d = docs.find(x => x.examLocked); setActiveDoc(d.id); });
+  const modal = page.locator(".exam-pass-modal");
+  await expect(modal).toBeVisible();
+  await modal.locator(".btn").filter({ hasText: "취소" }).click();
+  await expect(modal).toBeHidden();
+
+  // 빈 화면이 아니라 다시 열 수 있는 안내가 남아야 한다
+  const openBtn = page.locator(".exam-locked-open");
+  await expect(openBtn).toBeVisible();
+  await openBtn.click();
+  await typePassword(page, TEACHER_PASSWORD, false);
+  await expect(editor.locator(".exam-item").first()).toBeVisible();
 });
 
 test("다른 시험지의 열쇠로는 제출본을 열 수 없다", async ({ page }) => {

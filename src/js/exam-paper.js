@@ -712,7 +712,8 @@ async function examExportPaper(doc){
 function examRenderEditor(doc){
   const state = doc.examEdit;
   const host = doc.el;
-  host.innerHTML = ""; host.scrollTop = 0;
+  const keepScroll = host.scrollTop;   // 문항 추가·삭제·이동마다 맨 위로 튀지 않도록 보존
+  host.innerHTML = "";
 
   const wrap = document.createElement("section"); wrap.className = "exam-edit";
 
@@ -744,9 +745,9 @@ function examRenderEditor(doc){
 
   // 도구줄
   const bar = document.createElement("div"); bar.className = "exam-bar";
-  const addChoiceBtn = document.createElement("button"); addChoiceBtn.type = "button"; addChoiceBtn.className = "btn";
+  const addChoiceBtn = document.createElement("button"); addChoiceBtn.type = "button"; addChoiceBtn.className = "btn exam-add-btn";
   addChoiceBtn.textContent = "＋ 객관식";
-  const addShortBtn = document.createElement("button"); addShortBtn.type = "button"; addShortBtn.className = "btn";
+  const addShortBtn = document.createElement("button"); addShortBtn.type = "button"; addShortBtn.className = "btn exam-add-btn";
   addShortBtn.textContent = "＋ 주관식";
   const barSpacer = document.createElement("div"); barSpacer.className = "spacer";
   const gradeBtn = document.createElement("button"); gradeBtn.type = "button"; gradeBtn.className = "btn";
@@ -766,11 +767,14 @@ function examRenderEditor(doc){
   wrap.appendChild(list);
 
   const rerender = () => examRenderEditor(doc);
-  const addItem = (type) => {
+  // at 을 주면 그 자리에 끼워 넣는다(문항 카드의 ＋ 버튼 → 그 문항 바로 아래).
+  const addItem = (type, at) => {
     if (state.items.length >= EXAM_MAX_ITEMS){ toast("문항은 최대 " + EXAM_MAX_ITEMS + "개까지예요.", 2600); return; }
-    state.items.push(examNewItem(type));
+    const index = (at === undefined) ? state.items.length : at;
+    state.items.splice(index, 0, examNewItem(type));
     examMarkEditorDirty(doc);
     rerender();
+    examFocusEditorItem(doc, index);
   };
   addChoiceBtn.addEventListener("click", () => addItem("choice"));
   addShortBtn.addEventListener("click", () => addItem("short"));
@@ -790,7 +794,7 @@ function examRenderEditor(doc){
     });
   });
 
-  state.items.forEach((item, index) => list.appendChild(examRenderEditorItem(doc, item, index, rerender)));
+  state.items.forEach((item, index) => list.appendChild(examRenderEditorItem(doc, item, index, rerender, addItem)));
 
   const total = document.createElement("div"); total.className = "exam-total";
   total.textContent = "총 " + state.items.length + "문항 · " + state.items.length + "점 만점";
@@ -798,9 +802,19 @@ function examRenderEditor(doc){
 
   host.appendChild(wrap);
   examTranslate(wrap);
+  host.scrollTop = keepScroll;
 }
 
-function examRenderEditorItem(doc, item, index, rerender){
+// 새로 만든 문항을 화면 가운데로 끌어와 지문에 커서를 둔다.
+function examFocusEditorItem(doc, index){
+  const card = doc.el.querySelectorAll(".exam-item-edit")[index];
+  if (!card) return;
+  const stem = card.querySelector(".exam-stem-input");
+  if (stem) stem.focus({ preventScroll: true });
+  card.scrollIntoView({ block: "center" });
+}
+
+function examRenderEditorItem(doc, item, index, rerender, addItem){
   const state = doc.examEdit;
   const card = document.createElement("div"); card.className = "exam-item exam-item-edit";
 
@@ -968,6 +982,20 @@ function examRenderEditorItem(doc, item, index, rerender){
     card.appendChild(looseRow);
   }
 
+  // 이 문항 바로 아래에 새 문항 — 위로 되돌아가지 않고 쓰던 자리에서 이어서 만든다.
+  const foot = document.createElement("div"); foot.className = "exam-item-add";
+  const insert = (label, type, title) => {
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn exam-add-btn exam-item-add-btn";
+    btn.textContent = label; btn.title = title;
+    btn.addEventListener("click", () => addItem(type, index + 1));
+    return btn;
+  };
+  foot.append(
+    insert("＋ 객관식", "choice", "이 문항 아래에 객관식 문항 추가"),
+    insert("＋ 주관식", "short", "이 문항 아래에 주관식 문항 추가")
+  );
+  card.appendChild(foot);
+
   return card;
 }
 
@@ -1001,6 +1029,50 @@ async function examUnlockMaster(master, purposeMessage){
   return null;
 }
 
+/* ===== 잠긴 시험지 파일 — 실제로 열어 볼 때까지 암호를 묻지 않는다 =====
+   폴더를 열거나 지난 작업공간을 복원하면 그 안의 파일이 한꺼번에 열린다. 이때 .examkey 를
+   곧바로 풀면 보려던 적도 없는 시험지 때문에 시작하자마자 암호창이 뜨고, 일괄로 연 문서는
+   탭을 만들지 않으므로 "암호를 넣었는데 아무 것도 안 뜬다"가 된다.
+   그래서 한꺼번에 여는 경우에는 껍데기 문서만 만들어 두고, 그 문서를 실제로 펼칠 때 묻는다. */
+function examShouldDeferUnlock(opts){
+  return !!(opts && (opts.bulk || opts.restoreFromWorkspace));
+}
+
+function examRenderLockedPanel(doc, info){
+  const host = doc.el;
+  host.innerHTML = ""; host.scrollTop = 0;
+  const wrap = document.createElement("section"); wrap.className = "exam-edit";
+  const panel = document.createElement("div"); panel.className = "exam-locked-panel";
+  const icon = document.createElement("div"); icon.className = "exam-locked-icon"; icon.textContent = "🔒";
+  const title = document.createElement("strong"); title.textContent = info.title;
+  const body = document.createElement("p"); body.textContent = info.message;
+  const open = document.createElement("button"); open.type = "button"; open.className = "btn primary exam-locked-open";
+  open.textContent = "암호 넣고 열기";
+  open.addEventListener("click", () => { doc.render(); });
+  panel.append(icon, title, body, open);
+  wrap.appendChild(panel);
+  host.appendChild(wrap);
+  examTranslate(wrap);
+}
+
+// unlock(doc) 가 참을 돌려주면 그 안에서 doc.render 를 진짜 화면으로 바꿔 둔 것으로 본다.
+function examMakeLockedDoc(name, opts, info, unlock){
+  const doc = makeDoc("office", name, opts || {});
+  doc.examLocked = true;
+  doc.render = async () => {
+    if (doc.__examUnlocking) return;
+    doc.__examUnlocking = true;
+    examRenderLockedPanel(doc, info);     // 암호를 취소해도 빈 화면이 아니라 [암호 넣고 열기] 가 남는다
+    try {
+      const ok = await unlock(doc);
+      if (ok){ doc.examLocked = false; await doc.render(); }
+    } finally { doc.__examUnlocking = false; }
+  };
+  refreshChrome();
+  activateIfIdle(doc, opts || {});
+  return doc;
+}
+
 async function loadExamMaster(file, opts){
   if (!examRequireCrypto()) return null;
   if (!file || Number(file.size) > EXAM_MAX_FILE_BYTES){ toast("시험지 파일은 48MB 이하만 열 수 있어요.", 3000); return null; }
@@ -1008,25 +1080,42 @@ async function loadExamMaster(file, opts){
   try { parsed = JSON.parse(await file.text()); } catch(_){}
   const master = examValidateMasterPayload(parsed);
   if (!master){ toast("시험지 원본(.examkey) 파일을 읽지 못했어요.", 3400); return null; }
+  const title = (master.meta && master.meta.title) || file.name;
+
+  const attach = async (doc, opened) => {
+    doc.examEdit = {
+      id: String(master.id || examRandomId()).slice(0, 64),
+      meta: {
+        title: String((master.meta && master.meta.title) || "").slice(0, 120),
+        author: String((master.meta && master.meta.author) || "").slice(0, 60),
+        createdAt: String((master.meta && master.meta.createdAt) || new Date().toISOString())
+      },
+      items: opened.items,
+      keys: opened.keys,
+      password: opened.password,
+      savedItemsHash: await examSha256Hex(examCanonicalStringify(examStripAnswers(opened.items))),
+      revision: 0,
+      dirty: false
+    };
+    doc.render = async () => { examRenderEditor(doc); };
+  };
+
+  if (examShouldDeferUnlock(opts)){
+    return examMakeLockedDoc(title, opts, {
+      title: title,
+      message: "선생님 암호로 잠긴 시험지 원본(.examkey)입니다. 열려면 암호가 필요해요."
+    }, async (doc) => {
+      const opened = await examUnlockMaster(master, null);
+      if (!opened) return false;
+      await attach(doc, opened);
+      return true;
+    });
+  }
+
   const opened = await examUnlockMaster(master, null);
   if (!opened) return null;
-
-  const doc = makeDoc("office", (master.meta && master.meta.title) || file.name, opts || {});
-  doc.examEdit = {
-    id: String(master.id || examRandomId()).slice(0, 64),
-    meta: {
-      title: String((master.meta && master.meta.title) || "").slice(0, 120),
-      author: String((master.meta && master.meta.author) || "").slice(0, 60),
-      createdAt: String((master.meta && master.meta.createdAt) || new Date().toISOString())
-    },
-    items: opened.items,
-    keys: opened.keys,
-    password: opened.password,
-    savedItemsHash: await examSha256Hex(examCanonicalStringify(examStripAnswers(opened.items))),
-    revision: 0,
-    dirty: false
-  };
-  doc.render = async () => { examRenderEditor(doc); };
+  const doc = makeDoc("office", title, opts || {});
+  await attach(doc, opened);
   refreshChrome();
   activateIfIdle(doc, opts || {});
   return doc;
@@ -1137,34 +1226,65 @@ async function loadExamPaper(file, opts){
   }
   if (!paper.publicJwk){ toast("이 시험지에는 제출용 열쇠가 없어요. 선생님께 파일을 다시 받으세요.", 4000, { type: "error" }); return null; }
 
-  let items = null;
+  const title = (paper.meta && paper.meta.title) || file.name;
+
   if (paper.locked){
     if (!examRequireCrypto()) return null;
-    for (let attempt = 0; attempt < 5 && !items; attempt++){
-      const password = await examAskPassword({
-        title: "시험지 열기 암호",
-        message: '"' + ((paper.meta && paper.meta.title) || file.name) + '" 시험지를 열려면 선생님이 알려준 암호를 입력하세요.',
-        okText: "열기"
+    // 열기 암호가 걸린 배포본도 원본과 같다 — 일괄로 열 때는 묻지 않고 미뤄 둔다.
+    if (examShouldDeferUnlock(opts)){
+      return examMakeLockedDoc(title, opts, {
+        title: title,
+        message: "열기 암호가 걸린 시험지입니다. 선생님이 알려준 암호를 넣어야 열립니다."
+      }, async (doc) => {
+        const unlocked = await examUnlockPaper(paper, file.name);
+        if (!unlocked) return false;
+        examAttachTakeDoc(doc, paper, unlocked);
+        return true;
       });
-      if (password === null) return null;
-      showLoading("암호를 확인하는 중…");
-      let opened = null;
-      try { opened = await examOpenWithPassword(paper.enc, password); }
-      finally { hideLoading(); }
-      if (opened && Array.isArray(opened.items)) items = examNormalizeItems(opened.items, false);
-      else toast("암호가 맞지 않아요.", 2400, { type: "error" });
     }
-    if (!items) return null;
-  } else {
-    items = examNormalizeItems(paper.items, false);
+    const unlocked = await examUnlockPaper(paper, file.name);
+    if (!unlocked) return null;
+    return openExamTakeDoc(paper, unlocked, file.name, opts || {});
   }
+
+  const items = examNormalizeItems(paper.items, false);
   if (!items.length){ toast("이 시험지에는 문항이 없어요.", 3000); return null; }
   return openExamTakeDoc(paper, items, file.name, opts || {});
 }
 
+// 열기 암호를 최대 5번까지 물어보고, 풀리면 문항 목록을 돌려준다.
+async function examUnlockPaper(paper, name){
+  for (let attempt = 0; attempt < 5; attempt++){
+    const password = await examAskPassword({
+      title: "시험지 열기 암호",
+      message: '"' + ((paper.meta && paper.meta.title) || name) + '" 시험지를 열려면 선생님이 알려준 암호를 입력하세요.',
+      okText: "열기"
+    });
+    if (password === null) return null;
+    showLoading("암호를 확인하는 중…");
+    let opened = null;
+    try { opened = await examOpenWithPassword(paper.enc, password); }
+    finally { hideLoading(); }
+    if (opened && Array.isArray(opened.items)){
+      const items = examNormalizeItems(opened.items, false);
+      if (!items.length){ toast("이 시험지에는 문항이 없어요.", 3000); return null; }
+      return items;
+    }
+    toast("암호가 맞지 않아요.", 2400, { type: "error" });
+  }
+  return null;
+}
+
 function openExamTakeDoc(paper, items, name, opts){
-  const id = String(paper.id || "").slice(0, 64) || examRandomId();
   const doc = makeDoc("office", (paper.meta && paper.meta.title) || name, opts || {});
+  examAttachTakeDoc(doc, paper, items);
+  refreshChrome();
+  activateIfIdle(doc, opts || {});
+  return doc;
+}
+
+function examAttachTakeDoc(doc, paper, items){
+  const id = String(paper.id || "").slice(0, 64) || examRandomId();
   const done = examReadJson(examDoneKey(id));
   const draft = done ? null : examReadJson(examDraftKey(id));
   doc.examTake = {
@@ -1176,8 +1296,6 @@ function openExamTakeDoc(paper, items, name, opts){
     submittedAt: done ? String(done.at || "") : ""
   };
   doc.render = async () => { examRenderTake(doc); };
-  refreshChrome();
-  activateIfIdle(doc, opts || {});
   return doc;
 }
 
@@ -1261,7 +1379,11 @@ function examRenderTake(doc){
       const images = document.createElement("div"); images.className = "exam-image-box";
       item.images.forEach((src) => {
         const cell = document.createElement("div"); cell.className = "exam-image-cell";
-        const img = document.createElement("img"); img.src = src; img.alt = "문항 이미지";
+        // mn-zoomable = 클릭하면 큰 창으로(image-lightbox.js). 카드 폭에 맞춰 줄어든 그림을 크게 본다.
+        // mn-zoom-noexport = 시험 중이라 그 창의 [PNG 저장]·[메모로 보내기]는 감춘다.
+        const img = document.createElement("img"); img.className = "mn-zoomable mn-zoom-noexport";
+        img.src = src; img.alt = "문항 이미지";
+        img.title = "클릭하면 크게 보기"; img.tabIndex = 0;
         cell.appendChild(img);
         images.appendChild(cell);
       });
@@ -1269,7 +1391,11 @@ function examRenderTake(doc){
     }
 
     if (item.type === "choice"){
-      const box = document.createElement("div"); box.className = "exam-choice-box";
+      // 보기는 지문과 다른 판 위에 올려 영역을 나눈다(문제 ↔ 보기 구분).
+      const box = document.createElement("div"); box.className = "exam-choice-box exam-take-choices";
+      const boxCap = document.createElement("div"); boxCap.className = "exam-take-choices-cap";
+      boxCap.textContent = "보기";
+      box.appendChild(boxCap);
       const groupName = "exam-take-" + item.id;
       item.choices.forEach((choice, choiceIndex) => {
         const row = document.createElement("label"); row.className = "exam-take-choice";
@@ -1285,21 +1411,28 @@ function examRenderTake(doc){
         text.textContent = choice.text;
         row.append(pick, mark, text);
         if (choice.image){
-          const img = document.createElement("img"); img.className = "exam-take-choice-image";
+          const img = document.createElement("img"); img.className = "exam-take-choice-image mn-zoomable mn-zoom-noexport";
           img.src = choice.image; img.alt = "보기 이미지";
+          img.title = "클릭하면 크게 보기"; img.tabIndex = 0;
+          // 보기 줄은 <label> 이라 그림을 눌러도 그 보기가 골라진다 — 크게 보려다 답이 찍히면 안 된다.
+          img.addEventListener("click", (e) => { e.preventDefault(); });
           row.appendChild(img);
         }
         box.appendChild(row);
       });
-      const clearRow = document.createElement("button"); clearRow.type = "button"; clearRow.className = "btn exam-item-tool";
-      clearRow.textContent = "선택 지우기";
-      clearRow.addEventListener("click", () => {
+      card.appendChild(box);
+
+      // 보기 판 밖에 두어야 다섯 번째 보기처럼 보이지 않는다.
+      const clearRow = document.createElement("div"); clearRow.className = "exam-take-clear";
+      const clearBtn = document.createElement("button"); clearBtn.type = "button"; clearBtn.className = "btn exam-item-tool";
+      clearBtn.textContent = "선택 지우기";
+      clearBtn.addEventListener("click", () => {
         delete state.answers[item.id];
         box.querySelectorAll('input[type="radio"]').forEach(input => { input.checked = false; });
         examSaveDraft(doc); updateProgress();
       });
-      box.appendChild(clearRow);
-      card.appendChild(box);
+      clearRow.appendChild(clearBtn);
+      card.appendChild(clearRow);
     } else {
       const answer = document.createElement("textarea"); answer.className = "exam-short-input"; answer.rows = 2;
       answer.placeholder = "답을 입력하세요.";

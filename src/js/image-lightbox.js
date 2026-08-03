@@ -191,10 +191,13 @@
     if (k === "0"){ e.preventDefault(); e.stopImmediatePropagation(); fit = true; applyScale(); }
   }
   function onResize(){ if (fit) applyScale(); }   // 맞춤 배율은 창 크기가 바뀌면 다시 계산해야 한다
-  function open(list, start){
+  // options.noExport = 저장·메모 버튼을 감춘다(시험지처럼 그림을 빼가면 곤란한 화면).
+  function open(list, start, options){
     const clean = (list || []).filter(it => it && it.src);
     if (!clean.length) return;
     if (!modal) build();
+    const bare = !!(options && options.noExport);
+    els.save.hidden = bare; els.memo.hidden = bare;   // 매번 정해준다 — 앞서 연 그림의 상태가 남으면 안 된다
     items = clean;
     lastFocus = document.activeElement;
     modal.hidden = false;
@@ -281,7 +284,11 @@
     const list = (found.length ? found : [img]).filter(el => el.src);
     const at = list.indexOf(img);
     const grouped = list.map(el => ({ src:el.src, alt:el.alt || "" }));
-    return { items:grouped.length ? grouped : [{ src:img.src, alt:img.alt || "" }], index:at < 0 ? 0 : at };
+    return {
+      items: grouped.length ? grouped : [{ src:img.src, alt:img.alt || "" }],
+      index: at < 0 ? 0 : at,
+      options: { noExport: img.classList.contains("mn-zoom-noexport") }
+    };
   }
   document.addEventListener("click", (e) => {
     if (modal && !modal.hidden) return;
@@ -290,7 +297,7 @@
     const img = t.closest(ZOOM_SELECTOR);
     if (!img || !img.src) return;
     const group = groupOf(img);
-    open(group.items, group.index);
+    open(group.items, group.index, group.options);
   }, true);   // 캡처 단계 — 노트북 셀 등 중간에서 클릭 전파를 끊는 곳이 있어도 확대는 열려야 한다
   document.addEventListener("keydown", (e) => {   // 키보드만 쓰는 경우: 그림에 초점이 있을 때 Enter·Space
     if (e.key !== "Enter" && e.key !== " ") return;
@@ -298,7 +305,7 @@
     if (!t || !t.matches || !t.matches(ZOOM_SELECTOR)) return;
     e.preventDefault();
     const group = groupOf(t);
-    open(group.items, group.index);
+    open(group.items, group.index, group.options);
   }, true);
 
   window.openImageLightbox = open;

@@ -3991,6 +3991,16 @@
     border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
   .exam-bar .spacer{flex:1}
   .exam-hint{margin:0 0 14px;color:var(--muted);font-size:12.5px;line-height:1.65}
+  /* 문항 카드 아래쪽 추가 버튼 — 쓰던 자리에서 바로 다음 문항을 만든다 */
+  .exam-item-add{display:flex;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);
+    opacity:.5;transition:opacity .12s}
+  .exam-item:hover .exam-item-add,.exam-item:focus-within .exam-item-add{opacity:1}
+  .exam-item-add-btn{font-size:12px;padding:4px 10px}
+  /* 기본 .btn:hover 는 배경을 --panel-2 로 바꾸는데 카드·도구줄이 같은 색이라 묻힌다 — 강조색으로 */
+  .exam-add-btn:hover,.exam-add-btn:focus-visible{background:color-mix(in srgb,var(--accent) 16%,var(--field));
+    border-color:var(--accent);color:var(--accent)}
+  [data-theme="dark"] .exam-add-btn:hover,[data-theme="dark"] .exam-add-btn:focus-visible{
+    background:color-mix(in srgb,var(--accent) 34%,var(--field));color:#e0e7ff}
   .exam-item-list{display:flex;flex-direction:column;gap:12px}
   .exam-item{border:1px solid var(--border);border-radius:12px;background:var(--panel-2);padding:12px 14px}
   .exam-item-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
@@ -4022,6 +4032,11 @@
   .exam-total{margin:16px 2px 0;color:var(--muted);font-size:12.5px;font-weight:700}
   /* 학생 응시 */
   .exam-progress{margin:0 0 8px;font-size:13px;font-weight:700}
+  /* 보기 영역 — 문항 카드(--panel-2)와 다른 판(--panel)에 올려 지문과 경계를 만든다 */
+  .exam-take-choices{margin-top:12px;padding:8px 10px 10px;gap:2px;
+    border:1px solid var(--border);border-radius:10px;background:var(--panel)}
+  .exam-take-choices-cap{margin:1px 2px 5px;font-size:11px;font-weight:700;color:var(--muted)}
+  .exam-take-clear{display:flex;justify-content:flex-end;margin-top:8px}
   .exam-take-choice{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid transparent;border-radius:9px;
     cursor:pointer;font-size:13.5px;line-height:1.6}
   .exam-take-choice:hover{background:rgba(127,127,127,.08)}
@@ -4041,6 +4056,14 @@
   .exam-sign-saved{display:flex;align-items:center;gap:10px}
   .exam-sign-saved span{color:var(--muted);font-size:11.5px;font-weight:700}
   .exam-sign-saved img{max-height:56px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:2px 6px}
+  /* 잠긴 시험지 — 열어 볼 때 암호를 묻는다(일괄 열기 때는 이 화면만 만들어 둔다) */
+  .exam-locked-panel{max-width:520px;margin:40px auto;padding:24px 26px;border:1px solid var(--border);
+    border-radius:14px;background:var(--panel-2);display:flex;flex-direction:column;align-items:center;
+    gap:10px;text-align:center}
+  .exam-locked-icon{font-size:34px;line-height:1}
+  .exam-locked-panel strong{font-size:15px;overflow-wrap:anywhere}
+  .exam-locked-panel p{margin:0;font-size:13px;line-height:1.7;color:var(--muted)}
+  .exam-locked-open{margin-top:4px}
   .exam-done-panel{margin:12px 0;padding:18px 20px;border:1px solid rgba(22,163,74,.45);border-radius:12px;
     background:rgba(22,163,74,.09);display:flex;flex-direction:column;gap:8px}
   .exam-done-panel strong{font-size:15px;color:#15803d}
