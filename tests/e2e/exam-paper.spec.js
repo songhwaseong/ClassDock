@@ -1,0 +1,265 @@
+const { test, expect } = require("@playwright/test");
+const fs = require("node:fs");
+const { collapseSidebar } = require("./helpers");
+
+/* 시험지 한 바퀴: 선생님이 만들어 배포 → 학생이 풀고 서명·제출 → 선생님이 열어 채점.
+ *
+ * 이 흐름의 핵심은 "정답은 배포본에 없고, 제출본은 선생님 열쇠로만 열린다"는 것이라
+ * 화면 조작뿐 아니라 실제로 내려받아진 파일의 내용까지 확인한다. */
+
+const TEACHER_PASSWORD = "teacher-1234";
+
+async function boot(page){
+  await page.addInitScript(() => {
+    try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){}
+  });
+  await collapseSidebar(page);
+  await page.goto("/");
+}
+
+async function downloadText(page, action){
+  const [download] = await Promise.all([page.waitForEvent("download"), action()]);
+  const path = await download.path();
+  return { name: download.suggestedFilename(), text: fs.readFileSync(path, "utf8") };
+}
+
+async function typePassword(page, value, withConfirm){
+  const modal = page.locator(".exam-pass-modal");
+  await expect(modal).toBeVisible();
+  const inputs = modal.locator('input[type="password"]');
+  await inputs.nth(0).fill(value);
+  if (withConfirm) await inputs.nth(1).fill(value);
+  await modal.locator(".btn.primary").click();
+  await expect(modal).toBeHidden({ timeout: 15_000 });
+}
+
+test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠로 채점한다", async ({ page }) => {
+  await boot(page);
+
+  // --- 선생님: 시험지 만들기 ---
+  await page.evaluate(() => window.newExamPaper());
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+  await editor.locator(".exam-meta-row input").nth(0).fill("e2e 쪽지시험");
+
+  // 1번(객관식): 지문 · 보기 · 정답
+  const first = editor.locator(".exam-item").nth(0);
+  await first.locator(".exam-stem-input").fill("1 + 1 은?");
+  const choices = first.locator(".exam-choice-input");
+  for (let i = 0; i < 4; i++) await choices.nth(i).fill(String(i + 1));
+  await first.locator('input[type="radio"]').nth(1).check();      // 정답 ② = 2
+
+  // 2번(주관식)
+  await editor.locator(".exam-bar .btn", { hasText: "주관식" }).click();
+  const second = editor.locator(".exam-item").nth(1);
+  await second.locator(".exam-stem-input").fill("광합성을 하는 기관은?");
+  await second.locator(".exam-answer-field input").fill("잎|leaf");
+
+  // --- 원본(.examkey) 저장: 선생님 암호 설정 ---
+  const master = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "원본 저장" }).click();
+    await typePassword(page, TEACHER_PASSWORD, true);
+  });
+  expect(master.name).toBe("e2e 쪽지시험.examkey");
+  const masterJson = JSON.parse(master.text);
+  expect(masterJson.format).toBe("manneung-exam-master");
+  expect(master.text).not.toContain("광합성");        // 원본은 통째로 잠긴다
+
+  // --- 배포본(.exam) 내보내기: 열기 암호 없이 ---
+  const paper = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "배포본 만들기" }).click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    await page.locator("#confirmCancel").click();                 // "암호 없이 배포"
+  });
+  expect(paper.name).toBe("e2e 쪽지시험.exam");
+  const paperJson = JSON.parse(paper.text);
+  expect(paperJson.format).toBe("manneung-exam");
+  expect(paperJson.publicJwk).toBeTruthy();
+  expect(paperJson.privateJwk).toBeUndefined();
+  expect(JSON.stringify(paperJson.items)).not.toMatch(/answerIndex|answerText/);
+  expect(paper.text).not.toContain("leaf");                       // 정답 문자열이 배포본에 없다
+
+  // --- 학생: 배포본 열어 풀기 ---
+  await page.locator("#fileInput").setInputFiles({
+    name: "e2e 쪽지시험.exam", mimeType: "application/json", buffer: Buffer.from(paper.text, "utf8")
+  });
+  const take = page.locator(".exam-take");
+  await expect(take).toBeVisible();
+  await expect(take.locator(".exam-progress")).toContainText("0 / 2");
+
+  await take.locator(".exam-item").nth(0).locator('input[type="radio"]').nth(1).check();   // 정답
+  await take.locator(".exam-short-input").fill(" 잎 ");                                    // 공백 포함 정답
+  await expect(take.locator(".exam-progress")).toContainText("2 / 2");
+
+  await take.locator(".exam-submit-box input[type='text']").fill("12 홍길동");
+  const pad = take.locator(".exam-sign-pad");
+  await pad.scrollIntoViewIfNeeded();
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 30, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + 30, { steps: 8 });
+  await page.mouse.move(box.x + 200, box.y + box.height - 20, { steps: 8 });
+  await page.mouse.up();
+
+  const submitted = await downloadText(page, async () => {
+    await take.locator(".exam-submit-btn").click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    await page.locator("#confirmOk").click();                     // "제출하기"
+  });
+  expect(submitted.name).toBe("e2e 쪽지시험_12 홍길동.examdone");
+  const doneJson = JSON.parse(submitted.text);
+  expect(doneJson.format).toBe("manneung-exam-result");
+  expect(doneJson.seal.sealedKey).toBeTruthy();
+  expect(submitted.text).not.toContain("잎");                     // 답안은 봉인 안에만 있다
+
+  // 이 기기에서는 제출 화면이 잠기고 초안도 지워진다
+  await expect(page.locator(".exam-done-panel")).toBeVisible();
+  await expect(take.locator(".exam-submit-btn")).toHaveCount(0);
+  const draftLeft = await page.evaluate((id) => localStorage.getItem("mn.exam." + id), paperJson.id);
+  expect(draftLeft).toBeNull();
+
+  // --- 선생님: 채점 ---
+  await page.evaluate(() => window.openExamGrading(null));
+  const grade = page.locator(".exam-grade");
+  await expect(grade).toBeVisible();
+
+  const [masterChooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    grade.locator(".btn", { hasText: "원본" }).click()
+  ]);
+  await masterChooser.setFiles({ name: master.name, mimeType: "application/json", buffer: Buffer.from(master.text, "utf8") });
+  await typePassword(page, TEACHER_PASSWORD, false);
+  await expect(grade.locator(".exam-head-sub")).toContainText("e2e 쪽지시험");
+
+  const [doneChooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    grade.locator(".btn", { hasText: "제출본 추가" }).click()
+  ]);
+  await doneChooser.setFiles({ name: submitted.name, mimeType: "application/json", buffer: Buffer.from(submitted.text, "utf8") });
+
+  const row = grade.locator(".exam-table tbody tr").first();
+  await expect(row).toContainText("12 홍길동");
+  await expect(row.locator(".exam-score")).toHaveText("2 / 2");    // 객관식 + 공백 무시 주관식
+
+  // 답안 상세 — 서명과 정답 대조가 보이고, O/X 를 손으로 바꿀 수 있다
+  await row.locator(".btn", { hasText: "답안 보기" }).click();
+  const sheet = page.locator(".exam-sheet-modal");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".exam-sheet-sign img")).toBeVisible();
+  await sheet.locator(".exam-mark-toggle").nth(0).click();
+  await expect(sheet.locator(".exam-sheet-score")).toContainText("1 / 2");
+  await sheet.locator(".modal-actions .btn.primary").click();
+  await expect(row.locator(".exam-score")).toHaveText("1 / 2");
+
+  // 성적 CSV
+  const csv = await downloadText(page, () => grade.locator(".btn", { hasText: "성적 CSV" }).click());
+  expect(csv.name).toMatch(/^성적_e2e 쪽지시험_/);
+  expect(csv.text).toContain("12 홍길동");
+  expect(csv.text).toContain("1번");
+});
+
+test("열기 암호를 건 배포본과 잠긴 원본을 암호로만 연다", async ({ page }) => {
+  await boot(page);
+
+  // 파일 두 개를 앱 안의 포맷 함수로 직접 만들어(편집기 조작 없이) 여는 경로만 검사한다.
+  const files = await page.evaluate(async () => {
+    const item = { ...examNewItem("choice"), id: "q1", stem: "잠긴 시험 문항", answerIndex: 3 };
+    item.choices = [{ text: "가", image: "" }, { text: "나", image: "" }, { text: "다", image: "" }];
+    const items = [item];
+    const keys = await examGenerateKeyPair();
+    const stripped = examStripAnswers(items);
+    const meta = { title: "잠금 시험", author: "김선생", createdAt: new Date().toISOString(), count: 1 };
+    return {
+      master: JSON.stringify({
+        format: "manneung-exam-master", version: 1, id: "exam-locked", meta,
+        enc: await examSealWithPassword({ items, keys }, "tpw-1234")
+      }),
+      paper: JSON.stringify({
+        format: "manneung-exam", version: 1, id: "exam-locked", meta,
+        itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
+        publicJwk: keys.publicJwk, locked: true,
+        enc: await examSealWithPassword({ items: stripped }, "open-9999")
+      })
+    };
+  });
+  expect(files.paper).not.toContain("answerIndex");
+
+  // 학생: 틀린 암호로는 열리지 않고, 맞는 암호에서만 문항이 보인다
+  await page.locator("#fileInput").setInputFiles({
+    name: "잠금 시험.exam", mimeType: "application/json", buffer: Buffer.from(files.paper, "utf8")
+  });
+  await typePassword(page, "0000", false);
+  await expect(page.locator(".exam-take")).toHaveCount(0);
+  await typePassword(page, "open-9999", false);
+  await expect(page.locator(".exam-take .exam-stem")).toHaveText("잠긴 시험 문항");
+
+  // 선생님: 잠긴 원본을 다시 열면 정답까지 복원된다
+  await page.locator("#fileInput").setInputFiles({
+    name: "잠금 시험.examkey", mimeType: "application/json", buffer: Buffer.from(files.master, "utf8")
+  });
+  await typePassword(page, "tpw-1234", false);
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+  await expect(editor.locator(".exam-meta-row input").nth(0)).toHaveValue("잠금 시험");
+  await expect(editor.locator(".exam-item").nth(0).locator('input[type="radio"]').nth(2)).toBeChecked();
+  await expect(editor.locator(".exam-answer-hint")).toContainText("정답: ③번");
+});
+
+test("서명하려고 끌어도 시험지 화면이 스크롤되지 않는다", async ({ page }) => {
+  await boot(page);
+
+  // 스크롤이 생길 만큼 긴 시험지를 만들어 연다(손바닥 드래그는 넘치는 문서에서만 동작한다).
+  const paper = await page.evaluate(async () => {
+    const keys = await examGenerateKeyPair();
+    const items = [];
+    for (let i = 0; i < 12; i++){
+      const item = { ...examNewItem("short"), id: "q" + i, stem: (i + 1) + "번 문항입니다.", answerText: "답" };
+      items.push(item);
+    }
+    const stripped = examStripAnswers(items);
+    return JSON.stringify({
+      format: "manneung-exam", version: 1, id: "exam-scroll",
+      meta: { title: "스크롤 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
+      itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
+      publicJwk: keys.publicJwk, locked: false, items: stripped
+    });
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "스크롤 시험.exam", mimeType: "application/json", buffer: Buffer.from(paper, "utf8")
+  });
+  const take = page.locator(".exam-take");
+  await expect(take).toBeVisible();
+
+  const pad = take.locator(".exam-sign-pad");
+  await pad.scrollIntoViewIfNeeded();
+  const host = page.locator(".office:not([hidden])").last();
+  const before = await host.evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(120);                     // 위로 끌어올릴 여지가 있는 화면인지 확인
+
+  // 위 → 아래로 끈다. 손바닥 드래그가 살아 있으면 scrollTop 이 끌린 만큼(약 90px) 줄어든다.
+  const box = await pad.boundingBox();
+  await page.mouse.move(box.x + 40, box.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 160, box.y + 60, { steps: 10 });
+  await page.mouse.move(box.x + 300, box.y + 105, { steps: 10 });
+  await page.mouse.up();
+
+  expect(await host.evaluate((el) => el.scrollTop)).toBe(before);
+  const signed = await page.evaluate(() => (docs.find(d => d.examTake).examTake.signature || "").slice(0, 15));
+  expect(signed).toBe("data:image/png;");                  // 스크롤 대신 서명이 그려졌다
+});
+
+test("다른 시험지의 열쇠로는 제출본을 열 수 없다", async ({ page }) => {
+  await boot(page);
+  const built = await page.evaluate(async () => {
+    const keys = await window.examGenerateKeyPair();
+    const stranger = await window.examGenerateKeyPair();
+    const seal = await window.examSealForTeacher({ student: "홍길동", answers: [] }, keys.publicJwk);
+    return {
+      mine: !!(await window.examUnsealWithPrivate(seal, keys.privateJwk)),
+      theirs: await window.examUnsealWithPrivate(seal, stranger.privateJwk)
+    };
+  });
+  expect(built.mine).toBe(true);
+  expect(built.theirs).toBeNull();
+});

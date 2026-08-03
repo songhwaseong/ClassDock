@@ -132,6 +132,7 @@ function isPanIgnoredTarget(target, container){
                  cl.contains("img-zoom") ||
                  cl.contains("run-path") ||
                  cl.contains("xlsx-sheet") || cl.contains("sqlite-host") || cl.contains("code-host") || cl.contains("code-output") || cl.contains("run-divider") ||
+                 cl.contains("exam-sign-pad") ||     // 서명은 캔버스에 그리는 드래그 — 문서 스크롤이 따라오면 획이 어긋난다
                  cl.contains("txt-host") || cl.contains("md-host") ||
                  cl.contains("html-host") || cl.contains("xlsx-tabs") ||
                  cl.contains("xlsx-tab") || cl.contains("ctrl") ||
@@ -1228,6 +1229,7 @@ function markDocumentDirty(doc, dirty=true){
 
 function unsavedDocumentLabel(doc){
   if (!doc) return "문서";
+  if (doc.examEdit) return "시험지";
   if (doc.kind === "image") return "이미지 편집";
   if (doc.kind === "board") return "화이트보드";
   if (doc.notebook) return "노트북";

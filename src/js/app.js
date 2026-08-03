@@ -336,6 +336,8 @@ function wire(){
   if (byId("sbNewMnote")) byId("sbNewMnote").onclick = () => { if (typeof newMnoteScratch === "function") newMnoteScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
+  if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };
+  if (byId("sbExamGrade")) byId("sbExamGrade").onclick = () => { if (typeof openExamGrading === "function") openExamGrading(null); };
   byId("sbExamples").onclick = () => openSnippetGallery();
   byId("sbList").addEventListener("keydown", onSidebarKey);   // 사이드바 ↑/↓ 파일 선택 이동, Enter/Space 로 열기
   const sidebarSearch = byId("sbSearch");

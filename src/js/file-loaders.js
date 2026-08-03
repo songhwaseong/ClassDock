@@ -61,6 +61,9 @@ async function handleFiles(files, options={}){
       else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);
       else if (ext === "task" && typeof loadTask === "function") made = await loadTask(file, opts);
       else if (ext === "taskdone" && typeof loadTaskSubmission === "function") made = await loadTaskSubmission(file, opts);
+      else if (ext === "examkey" && typeof loadExamMaster === "function") made = await loadExamMaster(file, opts);
+      else if (ext === "exam" && typeof loadExamPaper === "function") made = await loadExamPaper(file, opts);
+      else if (ext === "examdone" && typeof loadExamSubmission === "function") made = await loadExamSubmission(file, opts);
       else if (ext === "zip") await loadZip(file, opts);
       else if (ext === "tar") await loadTar(file, opts);
       else if (ext === "gz" || ext === "tgz") await loadGz(file, opts);   // .gz / .tgz / .tar.gz

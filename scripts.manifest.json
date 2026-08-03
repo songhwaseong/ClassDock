@@ -53,6 +53,7 @@
     "diff-viewer.js",
     "batch-replace.js",
     "task-package.js",
+    "exam-paper.js",
     "screensaver.js",
     "pet-data.js",
     "pet-custom.js",
@@ -137,6 +138,7 @@
         "diff-viewer.js",
         "batch-replace.js",
         "task-package.js",
+        "exam-paper.js",
         "screensaver.js",
         "pet-data.js",
         "pet-custom.js",
@@ -252,6 +254,12 @@
       "spellcheck.js",
       "python-editor.js",
       "table-export.js"
+    ],
+    "exam-paper.js": [
+      "documents.js",
+      "file-loaders.js",
+      "office-doc-viewers.js",
+      "pdf-editor.js"
     ],
     "backup.js": [
       "lazy.js",

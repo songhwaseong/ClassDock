@@ -39,6 +39,8 @@
     C("openLesson","⏯️","수업 리플레이 열기 (.lesson)", () => callFn("openLessonFilePicker"), { kw:"lesson replay 리플레이 되감기 수업 녹화" }),
     C("newTask","📦","과제 파일 만들기 (.task)", () => callFn("openTaskBuilderFromActive"), { kw:"task assignment 과제 만들기 배포 자동채점 숙제" }),
     C("taskBatch","🗂️","제출본 일괄 검수 (.taskdone)", () => callFn("openTaskBatchReview"), { kw:"taskdone submission 제출 검수 재채점 성적 채점 일괄 csv" }),
+    C("newExam","📝","새 시험지 만들기 (.exam)", () => callFn("newExamPaper"), { kw:"exam test quiz 시험 시험지 문제지 객관식 주관식 출제 배포" }),
+    C("examGrade","✅","시험 채점 (.examdone)", () => callFn("openExamGrading"), { kw:"examdone grading 시험 채점 성적 점수 제출 답안 csv" }),
     C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery"), { kw:"example gallery 예제 갤러리 샘플 연습" }),
     // 도구 · 보기
     C("scratchpad","🗒️","임시 메모 열기", () => callFn("openScratchpadForNotebookDrop"), { sc:"scratchpad", kw:"memo note 메모 임시 스크래치 노트" }),
