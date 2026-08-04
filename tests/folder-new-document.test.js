@@ -194,6 +194,25 @@ test("저장 전 파일을 버리면 실행 묶음에서도 해당 경로를 제
   assert.deepEqual(Array.from(await folderCtx.extract(), f => f.path), ["proj/main.py"]);
 });
 
+test("부분 동기화는 읽지 못한 이전 스냅샷을 새 실행 묶음으로 옮긴다", async () => {
+  const context = runFolderCtxHarness();
+  const run = (code) => new vm.Script(code).runInContext(context);
+  const makeFile = run("(text, name) => new File([text], name)");
+  const oldCtx = run("makeFileSiblingCtx")([
+    { file:makeFile("print('main')\n", "main.py"), relPath:"proj/main.py" },
+    { file:makeFile("잠긴 로그", "active.log"), relPath:"proj/logs/active.log" },
+    { file:makeFile("바이너리", "model.bin"), relPath:"proj/data/model.bin" }
+  ], "proj", ["proj", "proj/logs", "proj/data"]);
+  const nextCtx = run("makeFileSiblingCtx")([
+    { file:makeFile("print('new')\n", "main.py"), relPath:"proj/main.py" }
+  ], "proj", ["proj"]);
+
+  assert.equal(oldCtx.copyTo(nextCtx, path => path.startsWith("proj/logs/")), 1);
+  assert.deepEqual(nextCtx.paths, ["proj/main.py", "proj/logs/active.log"]);
+  assert.deepEqual(Array.from(await nextCtx.extract(), f => f.path),
+    ["proj/main.py", "proj/logs/active.log"]);
+});
+
 test("하위 폴더에 만든 새 파일은 그 폴더도 실행 묶음의 디렉터리 목록에 들어간다", () => {
   const context = runFolderCtxHarness();
   const run = (code) => new vm.Script(code).runInContext(context);
@@ -208,7 +227,8 @@ test("폴더 동기화는 아직 저장하지 않은 새 문서를 삭제된 파
   const loaderSource = read("file-loaders.js");
   assert.match(loaderSource, /if \(!file && doc\.isScratch && !doc\._named\)\{ keptDocs\.push\(doc\); continue; \}/);
   // 동기화가 만든 새 묶음에도 그 문서를 다시 등록해야 import 가 끊기지 않는다.
-  assert.match(loaderSource, /doc\.isScratch && !doc\._named && doc\.sourceFile && typeof folderCtx\.add === "function"/);
+  assert.match(loaderSource,
+    /\(doc\.isScratch && !doc\._named\) \|\| unreadable\(docKeyOf\(doc\)\)/);
 });
 
 test("실행 번들은 묶음에 없던 열린 문서도 실행 범위 안이면 채워 넣는다", () => {

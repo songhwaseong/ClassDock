@@ -552,11 +552,57 @@ function folderScanLoadingText(progress){
   }
   return `폴더 파일 확인 중… (파일 ${files}개 · 폴더 ${folders}개)`;
 }
+// 이미 열려 있는 문서의 원본 스냅샷을 경로별로 모은다. 디렉터리 목록이 알려준 크기·수정시각이
+// 그대로면 디스크(EXE에서는 로컬 HTTP)를 다시 읽지 않고 이 File 을 재사용한다.
+function folderSnapshotReuseMap(rootId){
+  const map = new Map();
+  if (typeof navBranchIds !== "function" || typeof docs === "undefined") return map;
+  const branchIds = navBranchIds(rootId);
+  for (const doc of docs){
+    if (!branchIds.has(doc.nodeId)) continue;
+    const file = doc.sourceFile;
+    if (!file || typeof file.arrayBuffer !== "function") continue;
+    const key = normalizedRunPath(doc.workspacePath || doc.relPath || doc.name);
+    if (key && !map.has(key)) map.set(key, file);
+  }
+  return map;
+}
+// 목록이 준 메타(size·lastModified)가 기존 스냅샷과 완전히 같을 때만 재사용한다.
+// 메타를 주지 않는 브라우저 File System Access 핸들에서는 항상 null → 기존처럼 getFile() 한다.
+function reusableSnapshotFile(reuse, relPath, meta){
+  if (!reuse || !reuse.size || !meta) return null;
+  const cached = reuse.get(normalizedRunPath(relPath));
+  if (!cached || typeof cached.arrayBuffer !== "function") return null;
+  const size = Number(meta.size), mtime = Number(meta.lastModified);
+  if (!isFinite(size) || !isFinite(mtime) || !mtime) return null;
+  if ((Number(cached.size) || 0) !== size) return null;
+  if ((Number(cached.lastModified) || 0) !== mtime) return null;
+  return cached;
+}
+function folderSyncUnreadablePath(value, skippedFiles, skippedDirs){
+  const key = normalizedRunPath(value);
+  return skippedFiles.has(key) || skippedDirs.some(dir => key === dir || key.startsWith(dir + "/"));
+}
+function retainedWorkspacePathsForSkipped(oldPaths, skippedFiles, skippedDirs){
+  return [...new Set((oldPaths || []).map(normalizedRunPath).filter(path =>
+    path && folderSyncUnreadablePath(path, skippedFiles, skippedDirs)))];
+}
+// 읽지 못한 항목을 사용자에게 한 번에 알린다(파일 하나 때문에 동기화 전체가 실패하지 않으므로,
+// 무엇이 빠졌는지는 반드시 알려야 한다).
+function reportSkippedFolderEntries(skipped){
+  const list = [...(skipped || [])];
+  if (!list.length) return;
+  const names = list.slice(0, 3).map(item => (item.path || "").split("/").pop() || item.path).join(", ");
+  const more = list.length > 3 ? " 외 " + (list.length - 3) + "개" : "";
+  toast(names + more + "을(를) 읽지 못해 건너뛰었어요. 다른 프로그램이 사용 중일 수 있어요.", 5200);
+}
 async function collectDirectoryHandleFiles(handle, options={}){
-  if (!handle || handle.kind !== "directory") return { files: [], folderPaths: [] };
+  if (!handle || handle.kind !== "directory") return { files: [], folderPaths: [], skipped: [] };
   const rootName = handle.name || "폴더";
   const found = [];                          // { entry, dir, parts } — 경로 순회로 먼저 모은다
   const folderPaths = [rootName];
+  const reuse = options.reuseFiles instanceof Map ? options.reuseFiles : null;
+  const skipped = [];                        // { path, kind } — 잠김·삭제 등으로 읽지 못한 항목
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   let lastProgressAt = 0, lastProgressCount = -1;
   const report = (phase, processed=0, total=0, force=false) => {
@@ -570,9 +616,23 @@ async function collectDirectoryHandleFiles(handle, options={}){
   };
   report("scanning", 0, 0, true);
   const walk = async (dir, parts) => {
-    for await (const entry of dir.values()){
-      throwIfUiCancelled();
-      if (!entry || !entry.name) continue;
+    // 목록 읽기와 하위 순회를 분리한다 — 깊은 곳의 실패가 이 폴더의 남은 형제까지 삼키지 않게.
+    const children = [];
+    try {
+      for await (const entry of dir.values()){
+        throwIfUiCancelled();
+        if (!entry || !entry.name) continue;
+        children.push(entry);
+      }
+    } catch(error){
+      if (error && error.message === "operation-cancelled") throw error;
+      // 순회 도중 사라지거나 접근이 막힌 폴더가 있어도 나머지 트리는 그대로 동기화한다.
+      const path = [rootName].concat(parts).join("/");
+      console.warn("폴더 목록을 읽지 못해 건너뜁니다:", path, error);
+      skipped.push({ path, kind:"directory" });
+      return;
+    }
+    for (const entry of children){
       if (entry.kind === "directory"){
         if (entry.name.charAt(0) === ".") continue;
         const nextParts = parts.concat(entry.name);
@@ -590,15 +650,29 @@ async function collectDirectoryHandleFiles(handle, options={}){
   // getFile() 은 항목마다 브라우저 왕복이 있어 수천 개 폴더에서 순차 실행이 느리다 → 순서 보존 제한 병렬.
   let loaded = 0;
   report("reading", loaded, found.length, true);
-  const files = await mapWithConcurrency(found, 8, async (item) => {
+  const collected = await mapWithConcurrency(found, 8, async (item) => {
     throwIfUiCancelled();
-    const file = withDirHandle(withFileHandle(await item.entry.getFile(), item.entry), item.dir);
-    setFileRelativePath(file, [rootName].concat(item.parts, item.entry.name).join("/"));
-    loaded++;
-    report("reading", loaded, found.length, loaded === found.length);
+    const relPath = [rootName].concat(item.parts, item.entry.name).join("/");
+    const done = () => report("reading", ++loaded, found.length, loaded === found.length);
+    let file = reusableSnapshotFile(reuse, relPath, item.entry.meta);
+    if (!file){
+      try { file = await item.entry.getFile(); }
+      catch(error){
+        if (error && error.message === "operation-cancelled") throw error;
+        // 파일 하나가 잠겨 있거나(실행 중인 파이썬의 로그 등) 스캔 뒤에 사라져도
+        // 폴더 동기화 전체를 버리지 않는다 — 그 항목만 빼고 나머지를 반영한다.
+        console.warn("파일을 읽지 못해 건너뜁니다:", relPath, error);
+        skipped.push({ path: relPath, kind:"file" });
+        done();
+        return null;
+      }
+    }
+    file = withDirHandle(withFileHandle(file, item.entry), item.dir);
+    setFileRelativePath(file, relPath);
+    done();
     return file;
   });
-  return { files, folderPaths };
+  return { files: collected.filter(Boolean), folderPaths, skipped };
 }
 async function collectFolderEntryPaths(entries, fileList){
   const paths = new Set();
@@ -956,6 +1030,7 @@ async function pickFolderOrInput(input){
   showLoading("폴더 파일 확인 중…");
   try {
     const snapshot = await collectDirectoryHandleFiles(handle);
+    reportSkippedFolderEntries(snapshot.skipped);
     queueFolder(snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths, originalSaveMode: true });
   } catch(e){
     if (e && e.message === "operation-cancelled") toast("폴더 열기를 취소했어요.");
@@ -1260,13 +1335,15 @@ async function requestFolderRefresh(rootId){
   const root = navNodes.find(node => node.nodeId === rootId && node.type === "group" && node.folderRefreshRootId === node.nodeId);
   if (!root) return;
   let handle = root.folderHandle || null;
+  const reuseFiles = folderSnapshotReuseMap(rootId);
   if (handle && handle.kind === "directory" && await ensureReadPermission(handle)){
     showLoading("폴더 변경 내용 확인 중…");
     try {
-      const snapshot = await collectDirectoryHandleFiles(handle);
+      const snapshot = await collectDirectoryHandleFiles(handle, { reuseFiles });
       root.folderHandle = handle;
+      reportSkippedFolderEntries(snapshot.skipped);
       return queueFolderRefresh(rootId, snapshot.files, { folderHandle: handle, folderPaths: snapshot.folderPaths,
-        originalSaveMode:!!root.originalSaveMode });
+        skipped: snapshot.skipped, originalSaveMode:!!root.originalSaveMode });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
       else {
@@ -1288,9 +1365,10 @@ async function requestFolderRefresh(rootId){
     await ensureFolderWriteAccess(picked);
     showLoading("폴더 변경 내용 확인 중…");
     try {
-      const snapshot = await collectDirectoryHandleFiles(picked);
+      const snapshot = await collectDirectoryHandleFiles(picked, { reuseFiles });
+      reportSkippedFolderEntries(snapshot.skipped);
       return queueFolderRefresh(rootId, snapshot.files, { folderHandle: picked, folderPaths: snapshot.folderPaths,
-        originalSaveMode:true });
+        skipped: snapshot.skipped, originalSaveMode:true });
     } catch(e){
       if (e && e.message === "operation-cancelled") toast("폴더 동기화를 취소했어요.");
       else {
@@ -1348,6 +1426,12 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const docKeyOf = (doc) => normalizedRunPath(doc.workspacePath || doc.relPath || doc.name);
   const fileKeyOf = (file) => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name));
   const nextByKey = new Map(openable.map(file => [fileKeyOf(file), file]));
+  // 잠겨 있거나 접근이 막혀 이번 스냅샷에서 빠진 항목 — '삭제됨'이 아니므로 문서를 닫지 않는다.
+  const skippedFiles = new Set((options.skipped || [])
+    .filter(item => item && item.kind !== "directory").map(item => normalizedRunPath(item.path)));
+  const skippedDirs = (options.skipped || [])
+    .filter(item => item && item.kind === "directory").map(item => normalizedRunPath(item.path)).filter(Boolean);
+  const unreadable = (key) => folderSyncUnreadablePath(key, skippedFiles, skippedDirs);
   const keptDocs = [], dropDocs = [];
   let changedCount = 0, removedCount = 0;
   for (const doc of sourceDocs){
@@ -1356,6 +1440,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     // 아직 저장하지 않은 새 문서(폴더 우클릭 '새로 만들기')는 디스크에 없는 게 정상이다.
     // 삭제된 파일로 오인해 닫으면 새 폴더를 만드는 것만으로 작성 중이던 내용이 사라진다.
     if (!file && doc.isScratch && !doc._named){ keptDocs.push(doc); continue; }
+    if (!file && unreadable(key)){ keptDocs.push(doc); continue; }
     const unchanged = !!file && doc.__srcMtime != null &&
       (Number(doc.size) || 0) === (Number(file.size) || 0) && doc.__srcMtime === (file.lastModified || 0);
     if (unchanged){
@@ -1394,6 +1479,8 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const studyRef = refForId(studyPdfId);
   const mruRefs = activeMru.map(refForId).filter(Boolean);
   const oldPaths = [...(root.workspacePaths || [])].map(normalizedRunPath);
+  const retainedWorkspacePaths = retainedWorkspacePathsForSkipped(oldPaths, skippedFiles, skippedDirs);
+  const previousFolderCtx = root.newPythonContext && root.newPythonContext.archiveCtx;
 
   for (const doc of editedPdfs){
     if (doc.recoveryKey && typeof deletePdfRecovery === "function") await deletePdfRecovery(doc.recoveryKey);
@@ -1409,6 +1496,10 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     selectedRootName,
     folderPaths
   );
+  // 이번에 못 읽은 파일·폴더는 이전 바이트 스냅샷을 유지한다. 문서로 열지 않은 데이터 파일도
+  // 포함해야 Python import와 상대경로 파일 읽기가 부분 동기화 뒤 갑자기 끊기지 않는다.
+  if (previousFolderCtx && typeof previousFolderCtx.copyTo === "function")
+    previousFolderCtx.copyTo(folderCtx, unreadable);
 
   // 기존 그룹 재사용 + 없는 폴더만 생성
   const groupByPath = new Map();
@@ -1477,6 +1568,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   root.folderPaths = folderPaths.length ? folderPaths : [selectedRootName];
   root.workspacePaths = [
     ...files.map(f => f.webkitRelativePath || (selectedRootName + "/" + f.name)),
+    ...retainedWorkspacePaths,              // 이번에 못 읽었을 뿐 이전 작업공간에 있던 파일·폴더 마커
     ...root.folderPaths.map(workspaceFolderMarkerPath),
     ...(root.originalSaveMode ? [workspaceOriginalSaveMarkerPath(selectedRootName)] : [])
   ];
@@ -1492,7 +1584,8 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     doc.archiveCtx = folderCtx;
     // 새 묶음은 디스크 스냅샷으로만 만들어지므로, 아직 저장하지 않은 새 문서는 여기서 다시 등록한다
     // (등록이 끊기면 동기화 한 번으로 같은 폴더의 다른 코드가 이 파일을 import 하지 못한다).
-    if (doc.isScratch && !doc._named && doc.sourceFile && typeof folderCtx.add === "function")
+    if (((doc.isScratch && !doc._named) || unreadable(docKeyOf(doc)))
+        && doc.sourceFile && typeof folderCtx.add === "function")
       folderCtx.add(docKeyOf(doc), doc.sourceFile);
   });
 
@@ -1542,6 +1635,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     await rememberWorkspace(files, false, { silent: true, folderPaths,
       originalSaveFolderPaths:root.originalSaveMode ? [selectedRootName] : [] });
   const nextPathSet = new Set(files.map(file => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name))));
+  retainedWorkspacePaths.forEach(path => nextPathSet.add(path));
   folderPaths.forEach(path => nextPathSet.add(workspaceFolderMarkerPath(path)));
   if (root.originalSaveMode) nextPathSet.add(workspaceOriginalSaveMarkerPath(selectedRootName));
   const deleted = oldPaths.filter(path => path && !nextPathSet.has(path));
@@ -1697,14 +1791,18 @@ function queueDroppedItems(dataTransfer){
             toast(related.same
               ? "'" + root.name + "' 폴더는 이미 열려 있어요. 새로 여는 대신 동기화합니다."
               : "드롭한 폴더는 이미 열린 '" + root.name + "' 안에 있어요. '" + root.name + "'을(를) 동기화합니다.", 3400);
-            const snapshot = await collectDirectoryHandleFiles(root.folderHandle, { onProgress:showScanProgress });
+            const snapshot = await collectDirectoryHandleFiles(root.folderHandle, { onProgress:showScanProgress,
+              reuseFiles: folderSnapshotReuseMap(root.nodeId) });
+            reportSkippedFolderEntries(snapshot.skipped);
             await refreshFolderGroup(root.nodeId, snapshot.files, { folderHandle: root.folderHandle,
-              folderPaths: snapshot.folderPaths, originalSaveMode: !!root.originalSaveMode });
+              folderPaths: snapshot.folderPaths, skipped: snapshot.skipped,
+              originalSaveMode: !!root.originalSaveMode });
             continue;
           }
           if (related.parents.length) absorbContainedFolderRoots(related.parents);
           directoryHandles.push(handle);
           const snapshot = await collectDirectoryHandleFiles(handle, { onProgress:showScanProgress });
+          reportSkippedFolderEntries(snapshot.skipped);
           collected.push(...snapshot.files);
           folderPaths.push(...snapshot.folderPaths);
         } else if ((modernHasDir || !files.length) && handle.kind === "file" && typeof handle.getFile === "function"){

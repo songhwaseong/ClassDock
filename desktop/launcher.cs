@@ -2861,13 +2861,32 @@ class PdfSignerLauncher
         return json.Append("]}").ToString();
     }
 
+    // File.ReadAllBytes 는 FileShare.Read 로 열어, 다른 프로세스가 쓰기로 잡고 있는 파일(실행 중인
+    // 파이썬의 로그 등)을 공유 위반으로 거부한다. 폴더 동기화는 그런 파일도 읽어야 하므로 쓰기·삭제
+    // 공유를 허용해서 연다. 쓰는 중인 파일은 중간 상태를 읽을 수 있지만, 못 읽어 동기화 전체가
+    // 실패하는 것보다 낫다.
+    static byte[] ReadAllBytesShared(string path)
+    {
+        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                                              FileShare.ReadWrite | FileShare.Delete))
+        {
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[1024 * 1024];
+                int read;
+                while ((read = fs.Read(chunk, 0, chunk.Length)) > 0) buffer.Write(chunk, 0, read);
+                return buffer.ToArray();
+            }
+        }
+    }
+
     static byte[] ReadSourceFolderFile(string id, string relativePath)
     {
         string root, full;
         if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
             throw new UnauthorizedAccessException("bad-source-folder-path");
         if (!File.Exists(full)) throw new FileNotFoundException("source-file-not-found");
-        return File.ReadAllBytes(full);
+        return ReadAllBytesShared(full);
     }
 
     static void WriteSourceFolderFile(string id, string relativePath, byte[] body)

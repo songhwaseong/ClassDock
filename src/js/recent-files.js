@@ -105,6 +105,7 @@ const MNRecent = (() => {
       }
       if (typeof ensureFolderWriteAccess === "function") await ensureFolderWriteAccess(handle);
       const snapshot = await collectDirectoryHandleFiles(handle);
+      if (typeof reportSkippedFolderEntries === "function") reportSkippedFolderEntries(snapshot.skipped);
       if (!snapshot.files.length && !snapshot.folderPaths.length) return "missing";
       await openFolderFiles(snapshot.files, {
         folderPaths: snapshot.folderPaths,

@@ -96,6 +96,16 @@ function makeFileSiblingCtx(pairs, name, directories=[]){
       pairs.splice(index, 1);
       return true;
     },
+    // 부분 동기화에서 읽지 못한 항목은 이전 스냅샷을 새 묶음으로 옮겨 실행 경로가 끊기지 않게 한다.
+    copyTo: (target, keep) => {
+      if (!target || typeof target.add !== "function") return 0;
+      let copied = 0;
+      for (const pair of pairs){
+        if (typeof keep === "function" && !keep(pair.relPath)) continue;
+        if (target.add(pair.relPath, pair.file)) copied++;
+      }
+      return copied;
+    },
     extract: async (keep) => {
       // keep(path) 가 주어지면 해당 파일만 읽는다 → 무관한 폴더·대용량 데이터 제외(50MB 상한 회피).
       const sel = (typeof keep === "function") ? pairs.filter(p => keep(p.relPath)) : pairs;
