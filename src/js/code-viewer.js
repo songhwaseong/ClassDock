@@ -2556,6 +2556,7 @@ async function renderCode(file, host, ext, profile, runCtx){
             markDocumentSavedAsUtf8(ownerDoc, false);
             persisted = await rememberWorkspace([updated], false, { silent:true });     // 자동 복원용 작업공간 사본도 조용히 갱신
             ownerDoc.savedInWorkspace = persisted;
+            if (ownerDoc.isScratch) ownerDoc._named = true;
           }
           savedValue = value;
           clearPythonDraft(draftKey);
@@ -2586,7 +2587,10 @@ async function renderCode(file, host, ext, profile, runCtx){
           action:{ label:"사본으로 내려받기", onClick:() => downloadTextFile(value, name) } });
         return;
       }
-      if (wrote === "unsupported") downloadTextFile(value, name);   // 미지원 브라우저/file:// → 기존 다운로드 폴백
+      if (wrote === "unsupported"){
+        downloadTextFile(value, name);                              // 미지원 브라우저/file:// → 기존 다운로드 폴백
+        if (ownerDoc && ownerDoc.isScratch) ownerDoc._named = true;
+      }
       // 다른 이름으로 저장(파일 선택 창에서 새 이름 지정)했으면 사이드바·탭·헤더 이름을 새 파일명으로 갱신
       let renamedFrom = null;
       if (wrote === "saved" && ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.name && ownerDoc.fsHandle.name !== ownerDoc.name){
@@ -3128,6 +3132,7 @@ async function scratchSavePathExists(ownerDoc, path){
 }
 async function askScratchSaveName(ownerDoc, name, options={}){
   const current = String((ownerDoc && ownerDoc.name) || name || "");
+  const oldPath = normalizedRunPath((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath)) || current);
   const extMatch = current.match(/\.[^.\\/]+$/);
   const ext = extMatch ? extMatch[0] : (options.fallbackExt || ".txt");
   const base = current.replace(/\.[^.\\/]+$/, "");
@@ -3149,7 +3154,13 @@ async function askScratchSaveName(ownerDoc, name, options={}){
     ownerDoc.name = fname;
     ownerDoc.workspacePath = nextPath;
     if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
-    ownerDoc._named = true;
+    // 폴더 묶음에는 createScratchInFolder 시점의 임시 이름이 들어 있으므로 첫 저장 이름도 함께 반영한다.
+    // 실제 저장 성공 전에는 _named 를 확정하지 않아, 쓰기 실패 뒤 동기화가 이 문서를 삭제하지 않게 한다.
+    if (ownerDoc.archiveCtx && typeof ownerDoc.archiveCtx.rename === "function"){
+      const renamed = ownerDoc.archiveCtx.rename(oldPath, nextPath, ownerDoc.sourceFile || null);
+      if (!renamed && ownerDoc.sourceFile && typeof ownerDoc.archiveCtx.add === "function")
+        ownerDoc.archiveCtx.add(nextPath, ownerDoc.sourceFile);
+    }
     if (typeof state !== "undefined" && state === ownerDoc){
       const hdr = byId("activeFileName");
       if (hdr){
@@ -3199,6 +3210,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       if (wrote === "saved"){
         ownerDoc.size = new Blob([value]).size;
         ownerDoc.savedText = value;
+        if (ownerDoc.isScratch) ownerDoc._named = true;
         markDocumentSavedAsUtf8(ownerDoc);
         if (!silent) toast("원본 파일에 바로 저장했어요.", 2200, { type: "success" });
         return true;
@@ -3215,7 +3227,12 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     if (await saveFileBackendAvailable()){
       const path = await saveViaServer(outValue, ownerDoc, name);
       if (path){
-        if (ownerDoc){ ownerDoc.size = new Blob([value]).size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
+        if (ownerDoc){
+          ownerDoc.size = new Blob([value]).size;
+          ownerDoc.savedText = value;
+          if (ownerDoc.isScratch) ownerDoc._named = true;
+          markDocumentSavedAsUtf8(ownerDoc);
+        }
         if (silent) return true;
         toast("저장 완료 · " + path, 3400, {
           type: "success",
@@ -3277,7 +3294,12 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    if (ownerDoc){ ownerDoc.size = blob.size; ownerDoc.savedText = value; markDocumentSavedAsUtf8(ownerDoc); }
+    if (ownerDoc){
+      ownerDoc.size = blob.size;
+      ownerDoc.savedText = value;
+      if (ownerDoc.isScratch) ownerDoc._named = true;
+      markDocumentSavedAsUtf8(ownerDoc);
+    }
     if (!silent) toast("파일을 내려받았어요.", 1800, { type: "success" });
     return true;
   } catch(e){
@@ -3599,7 +3621,11 @@ function createScratchInFolder(folder, makeName, makeContent, mime, noticeLabel)
   const relPath = dir + "/" + name;
   const originalRoot = typeof originalSaveRootForDoc === "function"
     ? originalSaveRootForDoc({ parentId:folder.parentId }) : null;
-  handleFiles([new File([makeContent(name)], name, { type: mime })],
+  const file = new File([makeContent(name)], name, { type: mime });
+  // 새 파일을 폴더 묶음에도 등록한다 — 등록하지 않으면 archiveCtx.paths 가 폴더를 열던 시점 그대로라
+  // 같은 폴더의 다른 코드가 이 파일을 import 하지 못하고, 경로 도우미도 '찾지 못함'으로 표시한다.
+  if (typeof folder.archiveCtx.add === "function") folder.archiveCtx.add(relPath, file);
+  handleFiles([file],
     { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath,
       originalSaveMode:!!(originalRoot && originalRoot.originalSaveMode) });
   if (typeof toast === "function" && noticeLabel){

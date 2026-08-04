@@ -136,7 +136,19 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         }
         if (liveEdits.size){
           const enc = new TextEncoder();
-          for (const f of files){ const np = normalizedRunPath(f.path); if (liveEdits.has(np)) f.bytes = enc.encode(liveEdits.get(np)); }
+          const bundled = new Set();
+          for (const f of files){
+            const np = normalizedRunPath(f.path);
+            bundled.add(np);
+            if (liveEdits.has(np)) f.bytes = enc.encode(liveEdits.get(np));
+          }
+          // 묶음에 아직 없는 파일(폴더를 연 뒤에 만든 새 문서 등)은 여기서 채워 넣는다.
+          // 실행 범위(scopeFilter)는 그대로 지켜, 무관한 폴더의 열린 파일까지 끌려오지 않게 한다.
+          for (const [rp, text] of liveEdits){
+            if (bundled.has(rp)) continue;
+            if (scopeFilter && !scopeFilter(rp)) continue;
+            files.push({ path: rp, bytes: enc.encode(text) });
+          }
         }
         // zip/tar 의 '내용물'만 압축돼 루트에 흩어져 있으면(최상위 폴더 없음) 압축 파일명을 폴더로 씌운다.
         // → 폴더 업로드와 같은 트리(somefolder/...)가 되어 import somefolder... 같은 패키지 절대 import 가 동작.

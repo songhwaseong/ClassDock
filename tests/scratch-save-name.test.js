@@ -35,20 +35,23 @@ async function rename(doc, typed, options={}){
   return named;
 }
 
-test("첫 저장에서 정한 이름은 원래 확장자를 유지한다", async () => {
+test("첫 저장에서 정한 이름은 원래 확장자를 유지하되 저장 성공 전에는 확정하지 않는다", async () => {
   const doc = { name:"새 표.xlsx", isScratch:true, workspacePath:"새 표.xlsx" };
   assert.equal(await rename(doc, "성적표"), "성적표.xlsx");
   assert.equal(doc.name, "성적표.xlsx");
   assert.equal(doc.workspacePath, "성적표.xlsx");
-  assert.equal(doc._named, true);
+  assert.equal(doc._named, undefined);
 });
 
 test("폴더 안에서 만든 문서는 폴더 경로를 유지한 채 파일명만 바뀐다", async () => {
-  const doc = { name:"새 노트북.ipynb", isScratch:true, archiveCtx:{},
+  const renamed = [];
+  const archiveCtx = { rename:(oldPath, newPath) => { renamed.push([oldPath, newPath]); return true; } };
+  const doc = { name:"새 노트북.ipynb", isScratch:true, archiveCtx,
     workspacePath:"수업/자료/새 노트북.ipynb", relPath:"수업/자료/새 노트북.ipynb" };
   assert.equal(await rename(doc, "1주차 실습"), "1주차 실습.ipynb");
   assert.equal(doc.workspacePath, "수업/자료/1주차 실습.ipynb");
   assert.equal(doc.relPath, "수업/자료/1주차 실습.ipynb");
+  assert.deepEqual(renamed, [["수업/자료/새 노트북.ipynb", "수업/자료/1주차 실습.ipynb"]]);
 });
 
 test("사용자가 확장자를 직접 적으면 그 확장자를 그대로 쓴다", async () => {

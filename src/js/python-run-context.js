@@ -59,11 +59,25 @@ function runDirectoryPaths(paths, explicit=[]){
 }
 function makeFileSiblingCtx(pairs, name, directories=[]){
   const paths = pairs.map(p => normalizedRunPath(p.relPath));
+  const dirs = runDirectoryPaths(paths, directories);
   return {
     name,
     isFolderContext: true,
     paths,                                                  // 바이트를 읽기 전 경로만 노출(실행 대상 기준 범위 좁히기용)
-    directories: runDirectoryPaths(paths, directories),
+    directories: dirs,
+    // 폴더를 연 뒤에 생긴 파일(사이드바 우클릭 '새로 만들기' 등)을 이 묶음에 등록한다.
+    // 등록하지 않으면 paths 에 없어 실행 번들·경로 도우미가 그 파일을 아예 모른다(다른 파일에서 import 실패).
+    // 디스크에 아직 없는 새 파일이라도 File 객체를 그대로 들고 있으면 extract 가 읽어 번들에 실을 수 있다.
+    add: (relPath, file) => {
+      const key = normalizedRunPath(relPath);
+      if (!key || !file) return false;
+      const index = paths.indexOf(key);
+      if (index >= 0){ pairs[index].file = file; return true; }   // 같은 경로가 이미 있으면 최신 내용으로 교체
+      paths.push(key);
+      pairs.push({ relPath: key, file });
+      for (const dir of runDirectoryPaths([key])) if (!dirs.includes(dir)) dirs.push(dir);
+      return true;
+    },
     rename: (oldPath, newPath, file) => {
       const oldKey = normalizedRunPath(oldPath), newKey = normalizedRunPath(newPath);
       const index = paths.indexOf(oldKey);

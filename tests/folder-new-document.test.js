@@ -124,3 +124,79 @@ test("종류별 폴더 생성 함수는 모두 공통 헬퍼를 거친다", () =
 test("폴더에서 만든 빈 표는 저장 위치를 다시 묻지 않고 그 폴더에 파일을 만든다", () => {
   assert.match(spreadsheetSource, /if \(doc\.isScratch && doc\.originalSaveMode\) return "create"/);
 });
+
+// 폴더를 연 시점의 파일 목록으로 고정되는 archiveCtx 에 새 문서가 등록되지 않으면,
+// 같은 폴더의 다른 코드가 그 파일을 import 하지 못하고 경로 도우미도 '찾지 못함'으로 표시한다.
+function runFolderCtxHarness(){
+  const core = require("../src/js/core.js");
+  const context = vm.createContext(Object.assign({
+    console,
+    window:{},
+    localStorage:{ getItem:() => null, setItem:() => {}, removeItem:() => {} },
+    TextEncoder, TextDecoder,
+    docs:[], navNodes:[], toast:() => {},
+    File:class {
+      constructor(parts, name, opts){
+        this.parts = parts; this.name = name; this.opts = opts;
+        this.text = String(parts[0] == null ? "" : parts[0]);
+        this.size = this.text.length;
+      }
+      async arrayBuffer(){ return new TextEncoder().encode(this.text).buffer; }
+    },
+    handleFiles:() => {}
+  }, core));
+  new vm.Script(pythonViewerSource, { filename:"python-viewer.js" }).runInContext(context);
+  return context;
+}
+
+test("폴더 우클릭으로 만든 새 파일은 실행 묶음(archiveCtx)에도 등록된다", async () => {
+  const context = runFolderCtxHarness();
+  const run = (code) => new vm.Script(code).runInContext(context);
+  const makeFile = run("(text, name) => new File([text], name)");
+  const pairs = [{ file:makeFile("import helper\n", "main.py"), relPath:"proj/main.py" }];
+  const folderCtx = run("makeFileSiblingCtx")(pairs, "proj", ["proj"]);
+  const folder = { parentId:"grp-1", dir:"proj", archiveCtx:folderCtx, label:"proj" };
+
+  run("createScratchInFolder")(folder, () => "helper.py", () => "def hi(): return 1\n", "text/x-python", null);
+
+  assert.deepEqual(folderCtx.paths, ["proj/main.py", "proj/helper.py"]);
+  // 디스크에 저장하기 전이라도 실행 번들에 실려야 main.py 의 import helper 가 동작한다.
+  const filter = run("buildArchiveScopeFilter")("proj/main.py", "import helper\n", folderCtx.paths, folderCtx.directories, "");
+  const files = await folderCtx.extract(filter);
+  assert.deepEqual(Array.from(files, f => f.path).sort(), ["proj/helper.py", "proj/main.py"]);
+});
+
+test("이미 있는 경로를 다시 등록하면 목록을 늘리지 않고 최신 내용으로 바꾼다", () => {
+  const context = runFolderCtxHarness();
+  const run = (code) => new vm.Script(code).runInContext(context);
+  const makeFile = run("(text, name) => new File([text], name)");
+  const pairs = [{ file:makeFile("옛 내용", "a.py"), relPath:"proj/a.py" }];
+  const folderCtx = run("makeFileSiblingCtx")(pairs, "proj", ["proj"]);
+
+  assert.equal(folderCtx.add("proj/a.py", makeFile("새 내용", "a.py")), true);
+  assert.deepEqual(folderCtx.paths, ["proj/a.py"]);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].file.text, "새 내용");
+});
+
+test("하위 폴더에 만든 새 파일은 그 폴더도 실행 묶음의 디렉터리 목록에 들어간다", () => {
+  const context = runFolderCtxHarness();
+  const run = (code) => new vm.Script(code).runInContext(context);
+  const makeFile = run("(text, name) => new File([text], name)");
+  const folderCtx = run("makeFileSiblingCtx")([{ file:makeFile("", "main.py"), relPath:"proj/main.py" }], "proj", ["proj"]);
+
+  folderCtx.add("proj/새 폴더/util.py", makeFile("", "util.py"));
+  assert.ok(folderCtx.directories.includes("proj/새 폴더"));
+});
+
+test("폴더 동기화는 아직 저장하지 않은 새 문서를 삭제된 파일로 보지 않는다", () => {
+  const loaderSource = read("file-loaders.js");
+  assert.match(loaderSource, /if \(!file && doc\.isScratch && !doc\._named\)\{ keptDocs\.push\(doc\); continue; \}/);
+  // 동기화가 만든 새 묶음에도 그 문서를 다시 등록해야 import 가 끊기지 않는다.
+  assert.match(loaderSource, /doc\.isScratch && !doc\._named && doc\.sourceFile && typeof folderCtx\.add === "function"/);
+});
+
+test("실행 번들은 묶음에 없던 열린 문서도 실행 범위 안이면 채워 넣는다", () => {
+  const runtimeSource = read("python-runtime.js");
+  assert.match(runtimeSource, /for \(const \[rp, text\] of liveEdits\)\{[\s\S]*?if \(scopeFilter && !scopeFilter\(rp\)\) continue;[\s\S]*?files\.push\(\{ path: rp, bytes: enc\.encode\(text\) \}\);/);
+});

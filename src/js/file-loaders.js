@@ -1353,6 +1353,9 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   for (const doc of sourceDocs){
     const key = docKeyOf(doc);
     const file = nextByKey.get(key);
+    // 아직 저장하지 않은 새 문서(폴더 우클릭 '새로 만들기')는 디스크에 없는 게 정상이다.
+    // 삭제된 파일로 오인해 닫으면 새 폴더를 만드는 것만으로 작성 중이던 내용이 사라진다.
+    if (!file && doc.isScratch && !doc._named){ keptDocs.push(doc); continue; }
     const unchanged = !!file && doc.__srcMtime != null &&
       (Number(doc.size) || 0) === (Number(file.size) || 0) && doc.__srcMtime === (file.lastModified || 0);
     if (unchanged){
@@ -1484,7 +1487,14 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     if (node.newPythonContext) node.newPythonContext.archiveCtx = folderCtx;
     else node.newPythonContext = { parentId: node.nodeId, dir: path, archiveCtx: folderCtx, label: node.name };
   });
-  keptDocs.forEach(doc => { if (doc.archiveCtx && doc.archiveCtx.isFolderContext) doc.archiveCtx = folderCtx; });
+  keptDocs.forEach(doc => {
+    if (!doc.archiveCtx || !doc.archiveCtx.isFolderContext) return;
+    doc.archiveCtx = folderCtx;
+    // 새 묶음은 디스크 스냅샷으로만 만들어지므로, 아직 저장하지 않은 새 문서는 여기서 다시 등록한다
+    // (등록이 끊기면 동기화 한 번으로 같은 폴더의 다른 코드가 이 파일을 import 하지 못한다).
+    if (doc.isScratch && !doc._named && doc.sourceFile && typeof folderCtx.add === "function")
+      folderCtx.add(docKeyOf(doc), doc.sourceFile);
+  });
 
   // 탭·활성·분할 참조 복원(유지된 문서는 id 그대로, 다시 열린 문서는 경로로 연결)
   const nextBranchIds = navBranchIds(rootId);

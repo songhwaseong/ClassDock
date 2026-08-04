@@ -2294,6 +2294,7 @@ async function renderXlsx(file, host, doc){
     if (doc && typeof markDocumentSavedSnapshot === "function"){
       await markDocumentSavedSnapshot(doc, bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }
+    if (doc && doc.isScratch) doc._named = true;
   };
   if (doc){
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
