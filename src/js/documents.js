@@ -2276,6 +2276,18 @@ function copyDocumentRelativePath(doc){
   return copyDocumentMenuText(documentRelativePathForCopy(doc), "상대 경로를 복사했어요.");
 }
 
+async function deleteUnsavedScratchDoc(doc){
+  if (!doc || !doc.isScratch || doc._named) return false;
+  const message = "'" + (doc.name || "새 문서") + "'은 아직 저장되지 않았습니다. 이 문서를 삭제할까요?";
+  const ok = typeof confirmDialog === "function"
+    ? await confirmDialog(message, "삭제", "취소")
+    : window.confirm(message);
+  if (!ok) return false;
+  const path = String(doc.workspacePath || doc.relPath || doc.name || "");
+  if (doc.archiveCtx && typeof doc.archiveCtx.remove === "function") doc.archiveCtx.remove(path);
+  return closeDoc(doc.id, { forgetWorkspace:true, skipConfirm:true });
+}
+
 // 탭 우클릭 메뉴: IDE 처럼 오른쪽/왼쪽/다른 탭을 한 번에 정리(모두 "탭만 닫기" — 파일은 사이드바에 유지)
 let tabMenuEl = null;
 function closeTabMenu(){
@@ -2338,7 +2350,12 @@ function openSidebarDocMenu(doc, x, y){
   add("이름 복사", () => copyDocumentName(doc));
   add("상대 경로 복사", () => copyDocumentRelativePath(doc));
   if (canRenameOriginalDoc(doc)) add("이름 바꾸기", () => renameDoc(doc.id));
-  if (canDeleteOriginalDoc(doc)){
+  if (doc.isScratch && !doc._named){
+    const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
+    add("미저장 파일 삭제", () => deleteUnsavedScratchDoc(doc));
+    const last = menu.querySelector("button:last-of-type");
+    if (last) last.classList.add("danger");
+  } else if (canDeleteOriginalDoc(doc)){
     const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
     add("디스크에서 삭제", () => deleteDocsFromDisk([doc.id]));
     const last = menu.querySelector("button:last-of-type");

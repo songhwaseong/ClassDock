@@ -179,6 +179,21 @@ test("이미 있는 경로를 다시 등록하면 목록을 늘리지 않고 최
   assert.equal(pairs[0].file.text, "새 내용");
 });
 
+test("저장 전 파일을 버리면 실행 묶음에서도 해당 경로를 제거한다", async () => {
+  const context = runFolderCtxHarness();
+  const run = (code) => new vm.Script(code).runInContext(context);
+  const makeFile = run("(text, name) => new File([text], name)");
+  const pairs = [
+    { file:makeFile("import helper\n", "main.py"), relPath:"proj/main.py" },
+    { file:makeFile("def hi(): return 1\n", "helper.py"), relPath:"proj/helper.py" }
+  ];
+  const folderCtx = run("makeFileSiblingCtx")(pairs, "proj", ["proj"]);
+
+  assert.equal(folderCtx.remove("proj/helper.py"), true);
+  assert.deepEqual(folderCtx.paths, ["proj/main.py"]);
+  assert.deepEqual(Array.from(await folderCtx.extract(), f => f.path), ["proj/main.py"]);
+});
+
 test("하위 폴더에 만든 새 파일은 그 폴더도 실행 묶음의 디렉터리 목록에 들어간다", () => {
   const context = runFolderCtxHarness();
   const run = (code) => new vm.Script(code).runInContext(context);

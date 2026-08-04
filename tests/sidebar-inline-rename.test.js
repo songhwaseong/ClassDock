@@ -215,6 +215,13 @@ test("이름을 짓는 새 문서는 검색·확장자 필터와 관계없이 �
     /else if \(sidebarRenameState && sidebarRenameState\.nodeId === node\.nodeId\) result = true;/);
 });
 
+test("저장 전 문서는 사이드바 메뉴에서 디스크 삭제와 구분해 버릴 수 있다", () => {
+  assert.match(documentsSource,
+    /if \(doc\.isScratch && !doc\._named\)\{[\s\S]*?add\("미저장 파일 삭제", \(\) => deleteUnsavedScratchDoc\(doc\)\)/);
+  assert.match(documentsSource,
+    /function deleteUnsavedScratchDoc\(doc\)[\s\S]*?archiveCtx\.remove\(path\)[\s\S]*?closeDoc\(doc\.id, \{ forgetWorkspace:true, skipConfirm:true \}\)/);
+});
+
 test("폴더 동기화는 인라인으로 이름만 정한 문서도 삭제된 파일로 보지 않는다", () => {
   // _named(저장 성공)만 보므로, 이름만 정하고 아직 저장하지 않은 문서는 계속 살아남는다.
   const loaderSource = read("file-loaders.js");

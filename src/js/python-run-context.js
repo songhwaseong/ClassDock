@@ -87,6 +87,15 @@ function makeFileSiblingCtx(pairs, name, directories=[]){
       if (file) pairs[index].file = file;
       return true;
     },
+    // 저장 전에 만든 문서를 버리면 실행 묶음에서도 빼야, 다른 코드가 삭제한 파일을 계속 import 하지 않는다.
+    remove: (relPath) => {
+      const key = normalizedRunPath(relPath);
+      const index = paths.indexOf(key);
+      if (index < 0) return false;
+      paths.splice(index, 1);
+      pairs.splice(index, 1);
+      return true;
+    },
     extract: async (keep) => {
       // keep(path) 가 주어지면 해당 파일만 읽는다 → 무관한 폴더·대용량 데이터 제외(50MB 상한 회피).
       const sel = (typeof keep === "function") ? pairs.filter(p => keep(p.relPath)) : pairs;
@@ -1832,4 +1841,3 @@ async function refreshPythonEnvPanel(panel, btn){
   panel.append(head, dl);
   if (!info.backend) panel.appendChild(buildPythonEnvHelp(panel, btn));
 }
-
