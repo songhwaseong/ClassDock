@@ -9,6 +9,10 @@ const {
   scratchpadNormalizeBlock,
   scratchpadNormalizeNotebookCell,
   scratchpadPlainText,
+  scratchpadPreviewLines,
+  scratchpadClipAround,
+  scratchpadSearchNotes,
+  scratchpadNoteCounts,
   scratchpadHasLockedBlocks
 } = require("../src/js/scratchpad.js");
 
@@ -184,4 +188,97 @@ test("마지막 표 블록도 삭제하면 빈 글 블록으로 돌아간다", (
   assert.equal(result.removed, table);
   assert.equal(result.blocks.length, 1);
   assert.equal(result.blocks[0].type, "text");
+});
+
+test("탭 미리보기는 빈 줄을 걸러 앞 세 줄만 뽑는다", () => {
+  const note = { blocks:[
+    { type:"text", text:"\n첫 줄\n\n  둘째 줄  \n" },
+    { type:"text", text:"셋째 줄\n넷째 줄" }
+  ] };
+  assert.deepEqual(scratchpadPreviewLines(note), ["첫 줄", "둘째 줄", "셋째 줄", "…"]);
+});
+
+test("탭 미리보기는 긴 줄을 잘라내고 내용이 없으면 빈 배열을 준다", () => {
+  const long = { blocks:[{ type:"text", text:"가".repeat(80) }] };
+  assert.deepEqual(scratchpadPreviewLines(long, 3, 10), ["가".repeat(10) + "…"]);
+  assert.deepEqual(scratchpadPreviewLines({ blocks:[{ type:"text", text:"  \n \n" }] }), []);
+  assert.deepEqual(scratchpadPreviewLines(null), []);
+});
+
+test("탭 미리보기는 이미지·표 블록도 알아볼 수 있게 보여준다", () => {
+  const note = { blocks:[
+    { type:"image", name:"수업자료.png", text:"" },
+    { type:"table", rows:[["이름", "점수"]] }
+  ] };
+  assert.deepEqual(scratchpadPreviewLines(note), ["[이미지: 수업자료.png]", "이름\t점수"]);
+});
+
+test("메모 검색: 검색어가 없으면 모든 메모를 앞부분 미리보기와 함께 준다", () => {
+  const notes = [
+    { id:"a", title:"첫 메모", blocks:[{ type:"text", text:"하나\n둘" }] },
+    { id:"b", title:"둘째 메모", blocks:[{ type:"text", text:"" }] }
+  ];
+  const found = scratchpadSearchNotes(notes, "");
+  assert.equal(found.length, 2);
+  assert.deepEqual(found[0].lines, ["하나", "둘"]);
+  assert.deepEqual(found[1].lines, []);
+});
+
+test("메모 검색: 본문이 맞는 메모만 남기고 일치한 줄을 보여 준다", () => {
+  const notes = [
+    { id:"a", title:"수업 준비", blocks:[{ type:"text", text:"색연필 24색\n도화지" }] },
+    { id:"b", title:"회의록", blocks:[{ type:"text", text:"예산 확인\n색연필 추가 주문" }] },
+    { id:"c", title:"기타", blocks:[{ type:"text", text:"관련 없음" }] }
+  ];
+  const found = scratchpadSearchNotes(notes, "색연필");
+  assert.deepEqual(found.map(item => item.note.id), ["a", "b"]);
+  assert.deepEqual(found[0].lines, ["색연필 24색"]);
+  assert.deepEqual(found[1].lines, ["색연필 추가 주문"]);
+  assert.equal(found[0].hits, 1);
+});
+
+test("메모 검색: 제목만 맞아도 남기고, 대소문자는 가리지 않는다", () => {
+  const notes = [{ id:"a", title:"Python 메모", blocks:[{ type:"text", text:"본문에는 없음" }] }];
+  const found = scratchpadSearchNotes(notes, "PYTHON");
+  assert.equal(found.length, 1);
+  assert.equal(found[0].titleHit, true);
+  assert.equal(found[0].hits, 0);
+  assert.deepEqual(found[0].lines, ["본문에는 없음"]);   // 일치한 줄이 없으면 앞부분을 보여 준다
+  assert.deepEqual(scratchpadSearchNotes(notes, "없는말"), []);
+});
+
+test("메모 검색: 표·이미지·셀 본문도 함께 찾는다", () => {
+  const notes = [
+    { id:"t", title:"표", blocks:[{ type:"table", rows:[["이름", "점수"], ["민수", "90"]] }] },
+    { id:"i", title:"그림", blocks:[{ type:"image", name:"민수사진.png", text:"" }] }
+  ];
+  assert.deepEqual(scratchpadSearchNotes(notes, "민수").map(item => item.note.id), ["t", "i"]);
+});
+
+test("긴 줄은 찾은 말이 보이도록 그 자리를 가운데 두고 자른다", () => {
+  const line = "앞".repeat(60) + "핵심어" + "뒤".repeat(60);
+  const clipped = scratchpadClipAround(line, "핵심어", 20);
+  assert.ok(clipped.includes("핵심어"));
+  assert.ok(clipped.startsWith("…") && clipped.endsWith("…"));
+  assert.equal(scratchpadClipAround("짧은 줄", "줄", 20), "짧은 줄");            // 자를 필요가 없으면 그대로
+  assert.equal(scratchpadClipAround("가".repeat(30), "없음", 10), "가".repeat(10) + "…");
+});
+
+test("미리보기 폭보다 긴 검색어도 일치한 문자열을 온전히 남긴다", () => {
+  const needle = "긴검색어".repeat(30);
+  const clipped = scratchpadClipAround("앞부분 " + needle + " 뒷부분", needle, 80);
+  assert.ok(clipped.includes(needle));
+  assert.ok(clipped.startsWith("…") && clipped.endsWith("…"));
+});
+
+test("메모 카드 요약은 글자 수와 블록 개수를 센다", () => {
+  const counts = scratchpadNoteCounts({ blocks:[
+    { type:"text", text:"열두 글자입니다" },
+    { type:"image", name:"a.png", text:"설명" },
+    { type:"table", rows:[["a"]] },
+    { type:"notebook-cell", cell:{ type:"code", source:"print(1)" } }
+  ] });
+  assert.equal(counts.chars, "열두 글자입니다".length + "설명".length);
+  assert.deepEqual([counts.images, counts.tables, counts.cells], [1, 1, 1]);
+  assert.deepEqual(scratchpadNoteCounts(null), { chars:0, images:0, tables:0, cells:0 });
 });

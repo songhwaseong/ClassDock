@@ -476,6 +476,7 @@
   .scratchpad-head button{display:grid;place-items:center;width:30px;height:30px;border:0;border-radius:7px;background:transparent;
     color:var(--muted);font-family:inherit;font-size:22px;line-height:1;cursor:pointer}
   .scratchpad-head button:hover{background:var(--panel-2);color:var(--ink)}
+  .scratchpad-head-buttons{display:flex;align-items:center;gap:2px;flex:0 0 auto}
   .scratchpad-tabbar{display:flex;align-items:stretch;gap:7px;min-width:0;padding:7px 9px 0;background:var(--panel);
     border-left:1px solid var(--border);border-right:1px solid var(--border)}
   .scratchpad-tabs{display:flex;align-items:end;gap:4px;min-width:0;flex:1;overflow-x:auto;overflow-y:hidden;padding-bottom:1px;
@@ -611,6 +612,71 @@
   .scratchpad-notebook-source .tk-d{color:var(--code-decorator)}
   .scratchpad-notebook-source .tk-f{color:var(--code-function)}
   .scratchpad-notebook-source .tk-param{color:var(--code-param)}
+  /* 메모 목록: 편집 영역과 같은 칸을 나눠 쓴다(둘 중 하나만 놓인다) */
+  .scratchpad-overview{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;background:var(--panel-2);
+    border:1px solid var(--memo-paper-border)}
+  .scratchpad-overview-bar{display:flex;align-items:center;gap:8px;padding:9px 10px;
+    border-bottom:1px solid color-mix(in srgb,var(--memo-paper-border) 70%,transparent)}
+  .scratchpad-overview-bar input{flex:1;min-width:0;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 9px;font:inherit;font-size:12.5px}
+  .scratchpad-overview-bar input:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+  .scratchpad-overview-bar button{flex:0 0 auto;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 9px;font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
+  .scratchpad-overview-bar button:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .scratchpad-overview-bar button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  .scratchpad-overview-bar span{flex:0 0 auto;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .scratchpad-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));align-content:start;gap:9px;
+    min-height:0;overflow:auto;padding:10px}
+  .scratchpad-card{display:grid;gap:4px;align-content:start;min-height:104px;padding:9px 10px;text-align:left;cursor:pointer;
+    border:1px solid var(--memo-paper-border);border-radius:9px;background:var(--memo-paper);color:var(--ink);font:inherit;
+    box-shadow:0 2px 8px rgba(0,0,0,.22)}
+  .scratchpad-card:hover{border-color:var(--accent);box-shadow:0 4px 12px rgba(0,0,0,.32)}
+  .scratchpad-card:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .scratchpad-card.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 4px 12px rgba(0,0,0,.32)}
+  .scratchpad-card-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:7px}
+  .scratchpad-card-heading{display:grid;gap:2px;min-width:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+  .scratchpad-card-heading strong{font-size:12.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .scratchpad-card-actions{display:flex;align-items:center;gap:4px}
+  .scratchpad-card-actions button{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);
+    padding:3px 6px;font:inherit;font-size:10.5px;cursor:pointer;white-space:nowrap}
+  .scratchpad-card-actions button:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .scratchpad-card-actions .scratchpad-card-enlarge[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  .scratchpad-card-meta{color:var(--muted);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .scratchpad-card-body{font-size:11.5px;line-height:1.45;white-space:pre-wrap;overflow:hidden;
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4}
+  .scratchpad-card-body.empty{color:var(--muted);font-style:italic}
+  .scratchpad-card mark{border-radius:3px;background:color-mix(in srgb,var(--accent) 34%,transparent);color:inherit;font-weight:700}
+  /* 전체 내용은 Grid 자동 행 계산을 쓰지 않고 명시적인 세로 흐름에 둔다. 긴 메모·이미지가 있어도 다음 카드와 겹치지 않는다. */
+  .scratchpad-cards.full-content{display:flex;flex-direction:column;align-items:stretch}
+  .scratchpad-cards.full-content .scratchpad-card{position:relative;isolation:isolate;display:flex;flex:0 0 auto;flex-direction:column;
+    width:100%;height:auto;box-sizing:border-box;gap:9px;min-height:0;padding:12px;cursor:default}
+  .scratchpad-cards.full-content .scratchpad-card-body{display:flex!important;flex:0 0 auto;flex-direction:column;height:auto;
+    overflow:visible;-webkit-box-orient:initial;-webkit-line-clamp:unset}
+  .scratchpad-overview-blocks{display:flex;flex-direction:column;gap:9px}
+  .scratchpad-overview-block{min-width:0;overflow:hidden;border:1px solid color-mix(in srgb,var(--memo-paper-border) 72%,var(--border));
+    border-radius:7px;background:color-mix(in srgb,var(--memo-paper) 92%,var(--panel));color:inherit}
+  .scratchpad-overview-text{margin:0;padding:9px 11px;white-space:pre-wrap;word-break:break-word;font:12px/1.6 "Malgun Gothic",system-ui,sans-serif}
+  .scratchpad-overview-image{display:grid;grid-template-columns:minmax(120px,240px) minmax(0,1fr);min-height:120px}
+  .scratchpad-overview-image-picture{position:relative;display:grid;place-items:center;min-height:120px;padding:7px;overflow:hidden;
+    background:repeating-conic-gradient(#e2e8f0 0 25%,#f8fafc 0 50%) 50%/16px 16px}
+  [data-theme="dark"] .scratchpad-overview-image-picture{background:repeating-conic-gradient(#1e293b 0 25%,#334155 0 50%) 50%/16px 16px}
+  .scratchpad-overview-image-picture img{display:block;max-width:100%;max-height:260px;object-fit:contain}
+  .scratchpad-overview-image-picture span{position:absolute;inset:auto 7px 7px;padding:3px 6px;border-radius:5px;background:rgba(15,23,42,.72);color:#fff;font-size:10px}
+  .scratchpad-overview-image-picture img[src]+span{display:none}
+  .scratchpad-overview-image-copy{display:grid;align-content:start;gap:5px;padding:10px 11px;border-left:1px solid var(--memo-paper-border)}
+  .scratchpad-overview-image-copy strong{font-size:11px;word-break:break-all}
+  .scratchpad-overview-image-copy p{margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6}
+  .scratchpad-overview-table{overflow:auto;padding:8px}
+  .scratchpad-overview-table table{border-collapse:collapse;width:100%;table-layout:auto;font-size:11.5px}
+  .scratchpad-overview-table th,.scratchpad-overview-table td{min-width:64px;padding:5px 7px;border:1px solid var(--border);white-space:pre-wrap;word-break:break-word}
+  .scratchpad-overview-table th{background:color-mix(in srgb,var(--accent) 12%,var(--field))}
+  .scratchpad-overview-cell{padding:9px 11px}
+  .scratchpad-overview-cell strong{display:inline-block;margin-bottom:6px;padding:2px 6px;border-radius:999px;background:rgba(124,58,237,.11);color:#6d28d9;font-size:10px}
+  .scratchpad-overview-cell pre{margin:0;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--code-text);font:11.5px/1.55 var(--code-ff,Consolas,monospace)}
+  .scratchpad-cards-empty{grid-column:1/-1;padding:22px 6px;color:var(--muted);font-size:12px;text-align:center}
+  /* 목록을 보는 동안에는 현재 메모를 고치는 도구를 잠근다(안 보이는 메모가 바뀌는 것을 막는다) */
+  .scratchpad.overview-open .scratchpad-insertbar,
+  .scratchpad.overview-open .scratchpad-foot button{opacity:.4;pointer-events:none}
   .scratchpad-foot{display:flex;align-items:center;gap:7px;padding:10px 24px 10px 12px;background:var(--panel);border:1px solid var(--border);
     border-top-color:var(--border);border-radius:0 0 14px 14px}
   .scratchpad-foot span{margin-right:auto;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
@@ -620,6 +686,32 @@
   .scratchpad-resize{position:absolute;right:2px;bottom:2px;width:18px;height:18px;z-index:3;cursor:nwse-resize;opacity:.55;
     background:repeating-linear-gradient(135deg,transparent 0 2px,var(--muted) 2px 3px)}
   .scratchpad-resize:hover{opacity:1}
+  /* 한 메모 크게 보기: 목록 카드 하나만 읽기 전용으로 화면을 채운다. 저장된 창 좌표는 건드리지 않는다. */
+  .scratchpad.note-focus{left:6px!important;top:6px!important;transform:none!important;width:calc(100vw - 12px)!important;
+    height:calc(100vh - 12px)!important;max-width:none;max-height:none;grid-template-rows:minmax(0,1fr)}
+  .scratchpad.note-focus .scratchpad-head,.scratchpad.note-focus .scratchpad-tabbar,
+  .scratchpad.note-focus .scratchpad-insertbar,.scratchpad.note-focus .scratchpad-foot{display:none}
+  .scratchpad.note-focus .scratchpad-overview{grid-template-rows:minmax(0,1fr)}
+  .scratchpad.note-focus .scratchpad-overview-bar{display:none}
+  .scratchpad.note-focus .scratchpad-cards.single-note{display:block;height:100%;overflow:auto;padding:12px}
+  .scratchpad.note-focus .scratchpad-card{min-height:calc(100% - 2px)}
+  .scratchpad.note-focus .scratchpad-resize{display:none}
+  /* 메모 편집 블록 크게 보기: 선택한 글·이미지·표·노트북 셀 하나만 편집 가능한 채로 화면을 채운다. */
+  .scratchpad.block-focus{left:6px!important;top:6px!important;transform:none!important;width:calc(100vw - 12px)!important;
+    height:calc(100vh - 12px)!important;max-width:none;max-height:none;grid-template-rows:minmax(0,1fr)}
+  .scratchpad.block-focus .scratchpad-head,.scratchpad.block-focus .scratchpad-tabbar,
+  .scratchpad.block-focus .scratchpad-insertbar,.scratchpad.block-focus .scratchpad-foot{display:none}
+  .scratchpad.block-focus .scratchpad-editor{height:100%;padding:12px}
+  .scratchpad.block-focus .scratchpad-block{display:none}
+  .scratchpad.block-focus .scratchpad-block.focused-block{display:flex;flex-direction:column;min-height:100%;margin:0}
+  .scratchpad.block-focus .focused-block>.scratchpad-text-block{flex:1;min-height:0;resize:none}
+  .scratchpad.block-focus .focused-block>.scratchpad-image-content,
+  .scratchpad.block-focus .focused-block>.scratchpad-table-scroll,
+  .scratchpad.block-focus .focused-block>.scratchpad-notebook-card{flex:1;min-height:0}
+  .scratchpad.block-focus .focused-block>.scratchpad-table-scroll{overflow:auto}
+  .scratchpad.block-focus .focused-block>.scratchpad-notebook-card{display:flex;flex-direction:column}
+  .scratchpad.block-focus .focused-block .scratchpad-notebook-source{flex:1;max-height:none}
+  .scratchpad.block-focus .scratchpad-resize{display:none}
   @container scratchpad (max-width:600px){
     .scratchpad-insertbar span{display:none}
     .scratchpad-insertbar{overflow-x:auto;scrollbar-width:thin}
@@ -628,6 +720,10 @@
     .scratchpad-image-text,.scratchpad-image-block.layout-right .scratchpad-image-text{border-left:0;border-right:0;border-top:1px solid var(--border)}
     .scratchpad-block-tools{overflow-x:auto;justify-content:flex-start;scrollbar-width:thin}
     .scratchpad-block-tools>*{flex:0 0 auto}
+    .scratchpad-overview-bar{flex-wrap:wrap}
+    .scratchpad-overview-bar input{flex-basis:100%}
+    .scratchpad-overview-image{grid-template-columns:1fr}
+    .scratchpad-overview-image-copy{border-left:0;border-top:1px solid var(--memo-paper-border)}
     .scratchpad-foot{flex-wrap:wrap;padding:8px 18px 8px 9px}
     .scratchpad-foot span{width:100%;margin-right:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   }

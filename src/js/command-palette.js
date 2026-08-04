@@ -44,6 +44,7 @@
     C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery"), { kw:"example gallery 예제 갤러리 샘플 연습" }),
     // 도구 · 보기
     C("scratchpad","🗒️","임시 메모 열기", () => callFn("openScratchpadForNotebookDrop"), { sc:"scratchpad", kw:"memo note 메모 임시 스크래치 노트" }),
+    C("scratchpadOverview","🔎","메모 목록·검색", () => callFn("openScratchpadOverview"), { kw:"memo note search 메모 목록 검색 찾기 훑어보기 갤러리 카드" }),
     C("compareFiles","🔀","두 파일 비교 (diff)", () => callFn("openFileComparePicker"),
       { when:() => { try { return typeof diffComparableDocs === "function" && diffComparableDocs().length >= 2; } catch(_){ return false; } },
         kw:"diff compare 비교 차이 다른 점 변경 대조" }),

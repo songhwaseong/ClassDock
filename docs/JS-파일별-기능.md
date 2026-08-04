@@ -103,7 +103,7 @@ flowchart LR
 | `data-convert.js` | 데이터 형식 변환 공용 모듈(`MNDataConvert`)입니다. JSON·JSONL·YAML·XML·CSV·TSV·마크다운 표·HTML 표를 중간 표현(Value ⇄ Table)을 거쳐 서로 변환하고, 자체 마크업 토크나이저로 XML·HTML을 브라우저 API 없이 읽으며(YAML만 `setYaml`로 주입받은 js-yaml 사용), 경로 평탄화(`주소.시`·`태그[0]`)와 되돌리기, 타입 추론(원문 `raw` 보존), 왕복 재검사로 만든 손실 리포트를 제공합니다. DOM을 쓰지 않는 순수 모듈이라 모달·버튼 배선은 별도 파일이 맡습니다. | `table-export.js`, `docs/형식변환-설계.md`, `tests/data-convert.test.js` |
 | `data-convert-ui.js` | 형식 변환 창(`Ctrl+K` → 형식 변환, 코드 뷰어의 `🔄 변환`, 표 블록의 `변환`)입니다. 입력·미리보기 두 칸, 손실 배너, 평탄화·타입 추론·빈 칸·구분자·XML 요소 이름 옵션과 복사·표 편집기·파일 저장·새 탭 열기를 담당합니다. 활성 문서가 표면 `doc.sheetRows()`로 시트를 받아 채웁니다. 변환 규칙은 두지 않고 `MNDataConvert`만 호출하며, 원본 파일에 되쓰는 경로는 만들지 않습니다. | `data-convert.js`, `table-export.js`, `command-palette.js`, `code-viewer.js`(`saveTextDoc`), `file-loaders.js`(`handleFiles`), `spreadsheet-viewer.js` |
 | `table-export.js` | 표 블록을 바깥으로 꺼내는 공용 모듈(`MNTableExport`)입니다. 메모창과 블록 문서의 표를 탭 구분(TSV)으로 복사, 엑셀용 CSV(BOM·RFC 4180 인용 — 인용 규칙 자체는 `MNDataConvert`에 위임)로 저장, 복사본을 새 탭의 표 편집기(xlsx)로 열기, 형식 변환 창으로 보내기를 담당합니다. 저장은 `saveTextDoc`에 문서를 넘기지 않아(=null) 메모·문서의 저장 상태를 건드리지 않습니다. | `scratchpad.js`, `mnote.js`, `code-viewer.js`(`saveTextDoc`), `spreadsheet-viewer.js`, `tests/table-export.test.js` |
-| `scratchpad.js` | 여러 탭 임시 메모, 글·이미지·표·노트북 셀 블록, 배치·크기·잠금·드래그 순서·자동 저장·이전 형식 마이그레이션을 담당합니다. 표 블록에는 복사·CSV·표 편집기 버튼이 붙습니다. | `notebook-cells.js`, `image-memo.js`, `table-export.js`, `tests/scratchpad.test.js` |
+| `scratchpad.js` | 여러 탭 임시 메모, 글·이미지·표·노트북 셀 블록, 배치·크기·잠금·드래그 순서·자동 저장·이전 형식 마이그레이션을 담당합니다. 각 편집 블록 도구막대의 `⤢`는 그 블록 하나만 편집 가능한 채로 화면에 펼치고 `⤡` 또는 `Esc`로 원래 메모에 복귀합니다. 표 블록에는 복사·CSV·표 편집기 버튼이 붙습니다. 탭에 마우스를 올리면 본문 앞 세 줄이 미리보기로 뜹니다. 목록의 각 메모 카드에 붙은 `⤢ 크게 보기`는 해당 카드 하나만 읽기 전용 전체 내용으로 화면에 펼치고, 같은 자리의 `⤡ 이전 크기` 또는 `Esc`로 목록에 복귀합니다. `▦ 목록`은 탭을 그대로 둔 채 메모 카드 격자를 보여 주며, `전체 내용 보기`를 켜면 모든 메모의 글·이미지·표·노트북 셀을 겹치지 않는 세로 흐름으로 이어 표시합니다. 같은 자리의 검색창은 모든 메모의 제목·본문을 걸러 일치한 내용을 강조합니다. | `notebook-cells.js`, `image-memo.js`, `table-export.js`, `tests/scratchpad.test.js` |
 | `mnote.js` | 글·이미지·표 블록을 한 문서에서 편집하고 `.mnote` JSON으로 저장·재편집하며, 내용 검색 이동·되돌리기·HTML/Markdown 내보내기를 담당합니다. 표 블록마다 복사·CSV·표 편집기 버튼도 함께 제공합니다. | `documents.js`, `file-loaders.js`, `code-viewer.js`, `history.js`, `spellcheck.js`, `table-export.js`, `tests/mnote.test.js` |
 | `image-memo.js` | 캡처 이미지 여러 장 붙여넣기·드롭, EXE 자동 저장, 브라우저 임시 복구, 다시 시도·삭제·미리보기·일반 메모 보내기를 담당합니다. | `scratchpad.js`, `desktop/launcher.cs`, `tests/image-memo.test.js` |
 | `backup.js` | 미저장 작업·메모·복구 데이터와 설정을 전용 매니페스트가 든 ZIP으로 내보내고, 형식·버전·필수 구조를 검증해 IndexedDB·localStorage·작업공간으로 복원합니다. | `workspace-store.js`, 각 편집기 복구 훅, `tests/backup.test.js` |
@@ -226,6 +226,8 @@ flowchart LR
 | `tests/e2e/recent-files.spec.js` | 최근 연 항목 목록과 다시 열기 |
 | `tests/e2e/save-target-badge.spec.js` | 원본 저장/사본 저장 배지와 상단 안내 표시 |
 | `tests/e2e/search-history.spec.js` | 찾기·검색창의 최근 검색어 채움과 드롭다운 |
+| `tests/e2e/scratchpad-focus.spec.js` | 선택한 한 메모 크게 보기와 `Esc` 복귀, 탭 미리보기 툴팁 |
+| `tests/e2e/scratchpad-overview.spec.js` | 메모 목록 카드 격자·전 메모 검색·Esc 단계별 닫기와 팔레트 진입 |
 | `tests/e2e/sidebar-overlay.spec.js` | 파일을 열 때 사이드바가 본문 위에 뜨는 서랍 동작과 접힘 상태 기억 |
 | `tests/e2e/sidebar-selection.spec.js` | 사이드바 다중 선택과 선택 기반 동작 |
 | `tests/e2e/spreadsheet-undo.spec.js` | 표 편집 되돌리기·다시 실행 |

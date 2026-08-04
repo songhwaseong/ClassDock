@@ -344,10 +344,13 @@
   <aside class="scratchpad" id="scratchpad" role="dialog" aria-modal="false" aria-labelledby="scratchpadTitle" hidden>
     <div class="scratchpad-head">
       <div><h2 id="scratchpadTitle">임시 메모</h2><span id="scratchpadStatus" aria-live="polite">자동 저장</span></div>
-      <button id="scratchpadClose" type="button" title="메모 닫기" aria-label="메모 닫기">×</button>
+      <div class="scratchpad-head-buttons">
+        <button id="scratchpadClose" type="button" title="메모 닫기" aria-label="메모 닫기">×</button>
+      </div>
     </div>
     <div class="scratchpad-tabbar">
       <div class="scratchpad-tabs" id="scratchpadTabs" role="tablist" aria-label="메모 탭"></div>
+      <button class="scratchpad-new" id="scratchpadOverviewOpen" type="button" title="모든 메모를 한눈에 훑어보기·검색" aria-label="메모 목록 보기" aria-pressed="false" aria-controls="scratchpadOverview">▦ 목록</button>
       <button class="scratchpad-new" id="scratchpadNew" type="button">+ 새 메모</button>
     </div>
     <div class="scratchpad-insertbar">
@@ -366,6 +369,14 @@
     </div>
     <input id="scratchpadImageFile" type="file" accept="image/*" multiple hidden>
     <div class="scratchpad-editor" id="scratchpadEditor" role="tabpanel" tabindex="0" aria-label="임시 메모 내용"></div>
+    <div class="scratchpad-overview" id="scratchpadOverview" role="region" aria-label="메모 목록" hidden>
+      <div class="scratchpad-overview-bar">
+        <input type="search" id="scratchpadSearch" placeholder="모든 메모에서 찾기" aria-label="모든 메모에서 찾기" autocomplete="off">
+        <button id="scratchpadOverviewFull" type="button" title="모든 메모 전체 내용 보기" aria-label="모든 메모 전체 내용 보기" aria-pressed="false">전체 내용 보기</button>
+        <span id="scratchpadOverviewCount" aria-live="polite"></span>
+      </div>
+      <div class="scratchpad-cards" id="scratchpadCards"></div>
+    </div>
     <div class="scratchpad-foot">
       <span id="scratchpadCount">0자</span>
       <button id="scratchpadRename" type="button">이름 변경</button>
