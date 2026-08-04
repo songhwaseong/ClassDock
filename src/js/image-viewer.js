@@ -428,9 +428,22 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   host.appendChild(wrap);
 
   let imageRecoveryTimer = 0;
+  // 기준선(원본 또는 마지막 저장 상태)과 비교해서 ● 를 켜고 끈다 — 코드 편집기의
+  // editor.getValue() !== savedValue 와 같은 방식이다. 무조건 켜기만 하면 되돌리기로
+  // 원본까지 되감아도 ● 가 영영 남는다. img 는 자르기·크기조절이 새 객체를 만들므로 참조로 비교.
+  const stateSignature = () => JSON.stringify([state.rotation, state.flipX, state.flipY, state.adjust, state.shapes]);
+  let cleanImg = state.img, cleanSig = stateSignature();
+  const isCleanState = () => state.img === cleanImg && stateSignature() === cleanSig;
+  const markCleanBaseline = () => { cleanImg = state.img; cleanSig = stateSignature(); };
+  state.markSavedBaseline = markCleanBaseline;             // 저장 성공 시 downloadEditedImage 가 부른다
   const markImageDirty = () => {
     if (!ownerDoc || typeof markDocumentDirty !== "function") return;
-    markDocumentDirty(ownerDoc);
+    if (isCleanState()){                                   // 원본과 같아졌다 → ● 끄고 복구 예약도 취소
+      clearTimeout(imageRecoveryTimer); imageRecoveryTimer = 0;
+      markDocumentDirty(ownerDoc, false);
+      return;
+    }
+    markDocumentDirty(ownerDoc, true);
     clearTimeout(imageRecoveryTimer);
     imageRecoveryTimer = setTimeout(async () => {
       if (!ownerDoc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return;
@@ -583,6 +596,17 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   cropRatioWrap.append(freeRatioBtn, mkRatio("1:1", 1), mkRatio("4:3", 4 / 3), mkRatio("16:9", 16 / 9));
   freeRatioBtn.classList.add("active");
   const dimsLabel = document.createElement("span"); dimsLabel.className = "img-dims"; dimsLabel.title = "현재 이미지 픽셀 크기";
+  // 원본과 같은 형식으로 저장하는 버튼에 .run-save 를 단다 — 이 클래스를 기준으로 Ctrl+S(app.js)와
+  // 저장 위치 배지·"원본/사본" 글자 바꾸기(updateOriginalSaveBadge)가 다른 편집기와 똑같이 걸린다.
+  // 그래서 첫 글자는 "저장"으로 두고(배지가 곧 원본 저장/사본 저장으로 바꾼다) 형식은 다른 버튼에 남긴다.
+  const origExt = String((file && file.name) || "").split(".").pop().toLowerCase();
+  const saveFormat = (origExt === "jpg" || origExt === "jpeg") ? "jpeg" : "png";
+  const altFormat = saveFormat === "jpeg" ? "png" : "jpeg";
+  const fmtLabel = (f) => (f === "jpeg" ? "JPG" : "PNG");
+  const saveBtn = mkBtn("저장", "현재 이미지를 " + fmtLabel(saveFormat) + "로 저장",
+    () => downloadEditedImage(state, file, saveFormat, ownerDoc), "run-save");
+  const altFormatBtn = mkBtn(fmtLabel(altFormat), "현재 이미지를 " + fmtLabel(altFormat) + "로 저장",
+    () => downloadEditedImage(state, file, altFormat, ownerDoc));
   bar.append(
     undoBtn,
     redoBtn,
@@ -593,8 +617,8 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     cropBtn,
     applyCropBtn,
     cropRatioWrap,
-    mkBtn("PNG", "현재 이미지를 PNG로 저장", () => downloadEditedImage(state, file, "png", ownerDoc)),
-    mkBtn("JPG", "현재 이미지를 JPG로 저장", () => downloadEditedImage(state, file, "jpeg", ownerDoc)),
+    saveBtn,
+    altFormatBtn,
     mkBtn("PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file)),
     mkBtn("📷 메모로", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만", () => sendImageToMemo(state, file)),
     mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state, file)),
@@ -611,6 +635,11 @@ function setupImageEditor(file, host, img, ownerDoc=null){
       cropBtn.classList.remove("active"); stage.classList.remove("crop-mode"); syncCropUi(); syncAdjustUI(); redraw(); recordEdit();
     })
   );
+  // 보통은 setActiveDoc 이 저장 버튼 글자를 맞춰 주지만, 이미 활성인 문서에서 편집기를 다시 만들면
+  // 그 기회가 없다 — 그때만 직접 한 번 부른다(다른 문서가 활성이면 그 문서 배지를 건드리지 않는다).
+  if (ownerDoc && typeof activeId !== "undefined" && ownerDoc.id === activeId && typeof updateOriginalSaveBadge === "function"){
+    updateOriginalSaveBadge(ownerDoc);
+  }
 
   // ===== 화질 보정 패널: 자동보정 · 슬라이더(밝기·대비·채도·선명도·노이즈) · 고화질 확대 =====
   const adjustPanel = document.createElement("div"); adjustPanel.className = "img-adjust"; adjustPanel.hidden = true;
@@ -1436,9 +1465,11 @@ function downloadEditedImage(state, file, format, ownerDoc=null){
   const overwriteOriginal = !!(ownerDoc && ownerDoc.originalSaveMode && imageOutputMatchesOriginal(file, format));
   const name = overwriteOriginal ? (ownerDoc.name || file.name) : imageBaseName(file) + "_edited." + (jpeg ? "jpg" : "png");
   const quality = jpeg ? Math.max(0.5, Math.min(1, (state.jpgQuality || 90) / 100)) : undefined;
-  canvas.toBlob(blob => {
+  canvas.toBlob(async blob => {
     if (!blob){ toast("이미지를 저장하지 못했어요.", 2200, { type: "error" }); return; }
-    saveImageBlobUnified(blob, file, name, ownerDoc, { overwriteOriginal });
+    const saved = await saveImageBlobUnified(blob, file, name, ownerDoc, { overwriteOriginal });
+    // 저장한 모습이 새 기준선 — 이후 편집을 되돌려 여기로 돌아오면 ● 가 다시 꺼진다.
+    if (saved && typeof state.markSavedBaseline === "function") state.markSavedBaseline();
   }, jpeg ? "image/jpeg" : "image/png", quality);
 }
 

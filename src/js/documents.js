@@ -1319,8 +1319,11 @@ function documentSaveTarget(doc){
   const handle = doc.fsHandle;
   const canWriteOriginal = !!(handle && typeof handle.createWritable === "function");
   // PDF의 낱개 파일 열기는 쓰기 핸들이 있어도 `_signed.pdf` 다운로드가 기본이다.
-  // 폴더의 원본 저장 모드로 연 경우에만 exportPdf가 원본을 덮어쓴다.
-  if ((doc.kind === "pdf" && doc.originalSaveMode) || (doc.kind !== "pdf" && (canWriteOriginal || doc.originalSaveMode))){
+  // 폴더의 원본 저장 모드로 연 경우에만 exportPdf가 원본을 덮어쓴다. 이미지도 같은 기준이고,
+  // 거기에 더해 원본이 png·jpg 일 때만 덮어쓴다(그 외 형식은 _edited.png 사본이라 "사본 저장"이 맞다).
+  const originalByHandle = doc.kind !== "pdf" && doc.kind !== "image" && canWriteOriginal;
+  const imageKeepsFormat = doc.kind !== "image" || /\.(png|jpe?g)$/i.test(doc.name || "");
+  if ((doc.originalSaveMode || originalByHandle) && imageKeepsFormat){
     return {
       mode:"original",
       label:"원본 저장",
