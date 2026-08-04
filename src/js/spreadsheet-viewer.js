@@ -985,7 +985,7 @@ function promptCsvHeaderChoice(firstRow, guessHasHeader){
 }
 
 function renderCsvPreview(text, host, filename, ownerDoc){
-  if (ownerDoc) ownerDoc.contentSearchFocus = null;
+  if (ownerDoc){ ownerDoc.contentSearchFocus = null; ownerDoc.sheetRows = null; }
   const rowStarts = indexCsvRows(text);
   if (!rowStarts.length){ host.textContent = "CSV 파일이 비어 있습니다."; return; }
   const recordAt = (index) => text.slice(rowStarts[index], index + 1 < rowStarts.length ? rowStarts[index + 1] : text.length);
@@ -1064,6 +1064,15 @@ function renderCsvPreview(text, host, filename, ownerDoc){
       ? `${firstNo.toLocaleString()}-${lastNo.toLocaleString()} / 총 ${dataRows.toLocaleString()}행`
       : (hasHeader ? "데이터 없음(머리글만)" : "데이터 없음");
     prev.disabled = page === 0; next.disabled = page >= pages - 1;
+  };
+  // 형식 변환 창이 이 CSV 를 통째로 가져갈 수 있게 하는 통로(xlsx 뷰어의 sheetRows 와 같은 규약).
+  // 아주 큰 파일은 변환 창에 올리는 것 자체가 무거우므로 넘기지 않는다 — 창은 빈 채로 열린다.
+  const CSV_CONVERT_MAX_ROWS = 20000;
+  if (ownerDoc) ownerDoc.sheetRows = () => {
+    if (rowStarts.length > CSV_CONVERT_MAX_ROWS) return null;
+    const out = [];
+    for (let i = 0; i < rowStarts.length; i++) out.push(parseCsvRecord(recordAt(i), delimiter));
+    return out;
   };
   if (ownerDoc){
     ownerDoc.contentSearchFocus = (query) => {
@@ -2266,6 +2275,20 @@ async function renderXlsx(file, host, doc){
   const styledCells = {};         // name -> Map("r,c" -> true)   (구조변경 전 서식 편집만)
   const structChanged = new Set();// 구조(정렬·행/열) 바뀐 시트 → 저장 시 전체 재작성
   const sheetsWithFormula = new Set();  // 수식이 하나라도 있는 시트 → 편집 시 재계산 대상
+
+  /* 형식 변환 창(MNDataConvert)이 지금 보고 있는 시트를 그대로 가져갈 수 있게 하는 통로.
+     화면에 보이는 글자(dispCell)를 넘겨, 사용자가 보는 값과 변환 결과가 어긋나지 않게 한다.
+     수식은 계산된 결과가, 날짜·서식 있는 숫자는 표시 문자열이 나간다(=CSV 로 내보낼 때와 같은 규칙). */
+  if (doc) doc.sheetRows = () => {
+    const model = exModels[currentSheet];
+    if (!model) return null;
+    return model.map(row => {
+      const cells = row || [];
+      const out = [];
+      for (let c = 0; c < cells.length; c++) out.push(cells[c] ? dispCell(cells[c]) : "");
+      return out;
+    });
+  };
   let csvFastModelPromise = null;
   let anyDirty = false;
   let spreadsheetRecoveryTimer = 0;

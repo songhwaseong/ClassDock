@@ -60,7 +60,9 @@
     "pet-events.js",
     "pet.js",
     "pet-focus.js",
+    "data-convert.js",
     "table-export.js",
+    "data-convert-ui.js",
     "scratchpad.js",
     "mnote.js",
     "image-memo.js",
@@ -145,7 +147,9 @@
         "pet-events.js",
         "pet.js",
         "pet-focus.js",
+        "data-convert.js",
         "table-export.js",
+        "data-convert-ui.js",
         "scratchpad.js",
         "mnote.js",
         "image-memo.js",
@@ -239,7 +243,15 @@
     "table-export.js": [
       "documents.js",
       "code-viewer.js",
-      "spreadsheet-viewer.js"
+      "spreadsheet-viewer.js",
+      "data-convert.js"
+    ],
+    "data-convert-ui.js": [
+      "documents.js",
+      "code-viewer.js",
+      "file-loaders.js",
+      "data-convert.js",
+      "table-export.js"
     ],
     "scratchpad.js": [
       "spellcheck.js",
@@ -332,10 +344,20 @@
       ]
     },
     {
+      "name": "data-convert",
+      "file": "data-convert.js",
+      "publicApi": "MNDataConvert",
+      "consumers": [
+        "table-export.js",
+        "data-convert-ui.js"
+      ]
+    },
+    {
       "name": "table-export",
       "file": "table-export.js",
       "publicApi": "MNTableExport",
       "consumers": [
+        "data-convert-ui.js",
         "scratchpad.js",
         "mnote.js"
       ]
@@ -429,6 +451,12 @@
       "file": "xlsx.full.min.js",
       "lazy": "xlsx",
       "sha384": "sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
+    },
+    {
+      "src": "vendor/js-yaml.min.js",
+      "file": "js-yaml.min.js",
+      "lazy": "yaml",
+      "sha384": "sha384-+pxiN6T7yvpryuJmE1gM9PX7yQit15auDb+ZwwvJOd/4be2Cie5/IuVXgQb/S9du"
     },
     {
       "src": "vendor/exceljs.min.js",

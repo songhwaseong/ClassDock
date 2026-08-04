@@ -19,7 +19,7 @@ const PAGES = [
 ];
 
 // 시작할 때는 없어야 하는 전역들 — 각각 지연 로드 묶음의 대표 전역이다.
-const DEFERRED_GLOBALS = ["XLSX", "ExcelJS", "JSZip", "docx", "hwpjs", "zip"];
+const DEFERRED_GLOBALS = ["XLSX", "ExcelJS", "JSZip", "docx", "hwpjs", "zip", "jsyaml"];
 
 async function boot(page, url){
   await page.addInitScript(() => {

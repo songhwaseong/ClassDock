@@ -9,6 +9,9 @@
      - 편집기 : handleFiles (CSV→XLSX 변환 탭과 같은 방식)
    메모·문서 자체의 저장 상태는 절대 건드리지 않는다(saveTextDoc 에 doc 을 넘기지 않는 이유). */
 const MNTableExport = (() => {
+  /* CSV 인용·이스케이프 규칙은 MNDataConvert 한 곳에만 둔다(RFC 4180).
+     브라우저에서는 앞서 로드된 전역을, node 테스트에서는 같은 파일을 require 로 가져온다. */
+  const DataConvert = (typeof MNDataConvert !== "undefined") ? MNDataConvert : require("./data-convert.js");
   const CSV_MIME = "text/csv;charset=utf-8";
   const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const BOM = "﻿";                       // 엑셀에서 UTF-8 한글이 깨지지 않도록(다른 CSV 내보내기와 동일)
@@ -27,16 +30,14 @@ const MNTableExport = (() => {
   // 탭·줄바꿈이 셀 안에 있으면 TSV 격자가 무너진다 — 붙여넣기 때와 같이 공백으로 눕힌다.
   const flatten = (value) => String(value).replace(/[\t\r\n]+/g, " ");
 
-  // RFC 4180: 쉼표·따옴표·줄바꿈이 든 셀만 인용하고, 안의 따옴표는 두 번 쓴다.
-  function csvCell(value){
-    const text = String(value == null ? "" : value);
-    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
-  }
-
+  // 표 블록은 헤더 행도 그냥 첫 행이므로 header:false 로 넘겨 모든 행을 그대로 적는다.
   function toCsv(block){
-    return rowsOf(block).map(row => row.map(csvCell).join(",")).join("\r\n");
+    return DataConvert.serialize({ table:DataConvert.fromRows(rowsOf(block), false) }, "csv", { bom:false }).text;
   }
 
+  /* TSV 는 클립보드 전용이라 MNDataConvert 를 쓰지 않는다.
+     그쪽 TSV 는 데이터 교환용이라 따옴표를 인용하고 줄을 CRLF 로 잇지만,
+     엑셀·한글에 붙여넣을 때는 인용부호가 그대로 보이고 줄이 어긋난다. */
   function toTsv(block){
     return rowsOf(block).map(row => row.map(flatten).join("\t")).join("\n");
   }
@@ -152,7 +153,25 @@ const MNTableExport = (() => {
     return true;
   }
 
-  return { rowsOf, hasContent, toCsv, toTsv, suggestBase, fileName, siblingWorkspacePath, copyTable, saveCsv, openInEditor };
+  /* 표 블록을 형식 변환 창으로 보낸다(JSON·XML·마크다운 등으로 바꾸려는 경우).
+     표를 CSV 로 적어 입력칸을 채우는 것뿐이라 블록 자체는 건드리지 않는다 —
+     다른 내보내기와 같은 규칙이고, 변환 결과도 복사본으로만 나간다. */
+  function openConvert(block, opts={}){
+    if (!hasContent(block)) return warn("표가 비어 있어요.", opts);
+    if (typeof window === "undefined" || typeof window.openDataConvert !== "function")
+      return warn("형식 변환 창을 열 수 없어요.", opts);
+    window.openDataConvert({
+      text:toCsv(block),
+      from:"csv",
+      header:block.header !== false,
+      name:fileName(opts.baseName || "표", "csv"),
+      doc:opts.doc || null
+    });
+    notifyWith(opts)("형식 변환 창을 열었어요.");
+    return true;
+  }
+
+  return { rowsOf, hasContent, toCsv, toTsv, suggestBase, fileName, siblingWorkspacePath, copyTable, saveCsv, openInEditor, openConvert };
 })();
 
 if (typeof module !== "undefined" && module.exports){

@@ -23,6 +23,7 @@ const MNLazy = (() => {
     jszip:       { label:"압축 읽기(JSZip)",   files:["jszip.min.js", "jszip-utils.min.js"] },
     zip:         { label:"압축 풀기",          files:["zip-full.min.js"] },
     xlsx:        { label:"엑셀 보기",          files:["xlsx.full.min.js"] },
+    yaml:        { label:"YAML 읽기·쓰기",     files:["js-yaml.min.js"] },
     exceljs:     { label:"엑셀 편집·저장",     files:["exceljs.min.js"] },
     hwp:         { label:"한글(HWP) 보기",     files:["hwp.global.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },

@@ -53,6 +53,8 @@
     C("replaceAcrossFiles","🔁","여러 파일 찾아 바꾸기", () => callFn("openBatchReplace"),
       { when:() => { try { return typeof window.batchReplaceTargetDocs === "function" && window.batchReplaceTargetDocs().length > 0; } catch(_){ return false; } },
         kw:"replace 바꾸기 치환 찾아 여러 파일 일괄 한꺼번에 replace all find" }),
+    C("convertFormat","🔄","형식 변환 (JSON·CSV·표·마크다운)", () => callFn("openDataConvert"),
+      { kw:"convert format json csv tsv xml yaml table markdown 변환 형식 포맷 표 바꾸기 데이터" }),
     C("imageMemo","🖼️","이미지 메모", () => clickId("imageMemoOpen"), { kw:"image 이미지 캡처 스크린샷 메모" }),
     C("theme","🌓","밝게 / 어둡게 전환 (테마)", () => clickId("themeToggle"), { kw:"theme dark light 다크 라이트 테마 어둡게 밝게 야간" }),
     C("sidebar","↔️","사이드바 접기 / 펼치기", () => clickId("sidebarToggle"), { kw:"sidebar 사이드바 목록 파일 접기 펼치기" }),

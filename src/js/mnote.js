@@ -672,7 +672,9 @@ function mountMnoteEditor(doc){
       ttBtn("⬇ CSV", "표를 엑셀에서 열 수 있는 CSV 파일로 저장",
         () => MNTableExport.saveCsv(block, { baseName:exportBaseName(), notify:setStatus })),
       ttBtn("편집기로", "이 표의 복사본을 새 탭의 표 편집기(xlsx)로 열기 — 거기서 고친 값은 이 문서로 돌아오지 않아요",
-        () => MNTableExport.openInEditor(block, { baseName:exportBaseName(), doc, notify:setStatus }))
+        () => MNTableExport.openInEditor(block, { baseName:exportBaseName(), doc, notify:setStatus })),
+      ttBtn("변환", "이 표를 JSON·XML·마크다운 등 다른 형식으로 바꾸기 — 결과는 복사본으로만 나가요",
+        () => MNTableExport.openConvert(block, { baseName:exportBaseName(), doc, notify:setStatus }))
     );
     tableTools.appendChild(outTools);
 

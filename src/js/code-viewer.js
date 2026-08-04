@@ -9,6 +9,8 @@ const CODE_KW = "Ellipsis|False|None|NotImplemented|True|abstract|and|arguments|
 const PY_BUILTIN_FN = "__import__|abs|aiter|all|anext|any|ascii|bin|bool|breakpoint|bytearray|bytes|callable|chr|classmethod|compile|complex|delattr|dict|dir|divmod|enumerate|eval|exec|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|isinstance|issubclass|iter|len|list|locals|map|max|memoryview|min|next|object|oct|open|ord|pow|print|property|range|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|vars|zip";
 const PY_BUILTIN_EXC = "ArithmeticError|AssertionError|AttributeError|BaseException|BlockingIOError|BrokenPipeError|BufferError|BytesWarning|ChildProcessError|ConnectionAbortedError|ConnectionError|ConnectionRefusedError|ConnectionResetError|DeprecationWarning|EOFError|EncodingWarning|Exception|FileExistsError|FileNotFoundError|FloatingPointError|FutureWarning|GeneratorExit|ImportError|ImportWarning|IndentationError|IndexError|InterruptedError|IsADirectoryError|KeyError|KeyboardInterrupt|LookupError|MemoryError|ModuleNotFoundError|NameError|NotADirectoryError|NotImplementedError|OSError|OverflowError|PendingDeprecationWarning|PermissionError|ProcessLookupError|RecursionError|ReferenceError|ResourceWarning|RuntimeError|RuntimeWarning|StopAsyncIteration|StopIteration|SyntaxError|SyntaxWarning|SystemError|SystemExit|TabError|TimeoutError|TypeError|UnboundLocalError|UnicodeDecodeError|UnicodeEncodeError|UnicodeError|UnicodeTranslateError|UnicodeWarning|UserWarning|ValueError|Warning|ZeroDivisionError";
 const SQL_KW = "select|from|where|insert|into|update|delete|create|alter|drop|table|view|index|join|inner|left|right|outer|full|cross|on|group|order|by|asc|desc|having|union|all|values|set|primary|key|foreign|references|not|null|default|distinct|as|and|or|like|between|in|exists|case|when|then|else|count|sum|avg|min|max|limit|offset|begin|commit|rollback";
+// 형식 변환 창(🔄 변환)을 띄울 데이터 파일 확장자 — MNDataConvert 가 읽을 수 있는 것들.
+const CONVERTIBLE_EXTS = new Set(["json", "jsonl", "ndjson", "yaml", "yml", "xml", "csv", "tsv", "md", "markdown", "html", "htm"]);
 window.__lastCodeLinkDocId = window.__lastCodeLinkDocId || null;
 
 function isDefinitionSourceDoc(doc){
@@ -1013,6 +1015,16 @@ async function renderCode(file, host, ext, profile, runCtx){
             collapseBtn.addEventListener("click", () => { if (treeEl && treeEl.jtCollapseAll) treeEl.jtCollapseAll(); });
             bar.append(expandBtn, collapseBtn);
           }
+        }
+        // 데이터 형식 파일에는 형식 변환 창을 여는 길을 붙인다(원본은 건드리지 않고 복사본만 만든다).
+        if (CONVERTIBLE_EXTS.has(ext) && typeof window.openDataConvert === "function"){
+          const convertBtn = document.createElement("button"); convertBtn.type = "button"; convertBtn.className = "text-edit-btn";
+          convertBtn.textContent = "🔄 변환";
+          convertBtn.title = "JSON·CSV·표·XML·마크다운 사이로 바꿔 보기 — 결과는 복사본으로만 나가요";
+          convertBtn.addEventListener("click", () => {
+            window.openDataConvert({ text:currentText, name:(ownerDoc && ownerDoc.name) || saveName, doc:ownerDoc });
+          });
+          bar.appendChild(convertBtn);
         }
         if (canEdit){
           const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
