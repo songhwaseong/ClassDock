@@ -2535,7 +2535,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     try {
       const canSaveViaServer = !saveToOriginal && await saveFileBackendAvailable();
       // EXE 자동 저장과 원본 폴더의 새 파일 생성은 별도 파일 선택 창이 없으므로 첫 저장 전에 이름을 정한다.
-      if ((saveToOriginal || canSaveViaServer) && ownerDoc && ownerDoc.isScratch && !ownerDoc._named){
+      if ((saveToOriginal || canSaveViaServer) && ownerDoc && ownerDoc.isScratch && !ownerDoc._named && !ownerDoc._nameChosen){
         const named = await askScratchSaveName(ownerDoc, name, { fallbackExt:".py", placeholder:"예: 연습" });
         if (named === null) return;                            // 취소 → 저장 안 함
         name = named;
@@ -3130,15 +3130,15 @@ async function scratchSavePathExists(ownerDoc, path){
   if (ownerDoc && ownerDoc.originalSaveMode) return scratchOriginalFolderPathExists(ownerDoc, path);
   return scratchBackendPathExists(path);
 }
-async function askScratchSaveName(ownerDoc, name, options={}){
+// 아직 디스크에 없는 새 문서(스크래치)의 이름을 확정해 메모리 상태에만 반영한다.
+// 첫 저장 대화상자와 사이드바에서 바로 이름 짓기가 같은 규칙(확장자 유지·폴더 경로 유지·중복 확인)을
+// 쓰도록 분리했다. 반환: 확정된 파일 이름. 덮어쓰기를 취소하면 null.
+async function applyScratchDocName(ownerDoc, typed, name, options={}){
   const current = String((ownerDoc && ownerDoc.name) || name || "");
   const oldPath = normalizedRunPath((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath)) || current);
   const extMatch = current.match(/\.[^.\\/]+$/);
   const ext = extMatch ? extMatch[0] : (options.fallbackExt || ".txt");
   const base = current.replace(/\.[^.\\/]+$/, "");
-  const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
-    placeholder: options.placeholder || "예: 연습", value: base, okText: "저장" });
-  if (typed === null) return null;
   let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim() || base || "새 파일";
   if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ext;
   // 폴더 안에서 만든 문서는 그 폴더 경로를 유지한 채 파일명만 바꾼다.
@@ -3175,6 +3175,15 @@ async function askScratchSaveName(ownerDoc, name, options={}){
   return fname;
 }
 
+async function askScratchSaveName(ownerDoc, name, options={}){
+  const current = String((ownerDoc && ownerDoc.name) || name || "");
+  const base = current.replace(/\.[^.\\/]+$/, "");
+  const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
+    placeholder: options.placeholder || "예: 연습", value: base, okText: "저장" });
+  if (typed === null) return null;
+  return applyScratchDocName(ownerDoc, typed, name, options);
+}
+
 // 텍스트/코드 파일 저장(.py 외 — 노트북 .ipynb 포함): EXE면 서버에 원래 확장자로 저장,
 // 아니면 .py 저장과 동일하게 위치를 한 번 고르고 핸들을 보관해 같은 파일에 덮어쓰기, 마지막 폴백이 다운로드.
 // 스크래치 첫 저장은 이름을 받는다.
@@ -3193,7 +3202,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       && ownerDoc.fsHandle && typeof ownerDoc.fsHandle.createWritable === "function");
     // 저장 대화상자 없이 바로 쓰는 경로(원본 폴더·EXE 서버)라면 새 문서의 이름을 먼저 확정한다.
     // 원본 폴더 저장도 파일을 새로 만들 수 있으므로(.py 와 동일) 서버 저장과 같은 규칙을 적용한다.
-    if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named
+    if (ownerDoc && ownerDoc.isScratch && !ownerDoc._named && !ownerDoc._nameChosen
         && (wantOriginal || fromFolderOriginal || await saveFileBackendAvailable())){
       // 조용한 일괄 저장·자동 저장: 이름을 물어야 하는 문서는 건드리지 않고 수동 저장을 기다린다.
       if (existingOnly) return "skipped";
@@ -3625,9 +3634,18 @@ function createScratchInFolder(folder, makeName, makeContent, mime, noticeLabel)
   // 새 파일을 폴더 묶음에도 등록한다 — 등록하지 않으면 archiveCtx.paths 가 폴더를 열던 시점 그대로라
   // 같은 폴더의 다른 코드가 이 파일을 import 하지 못하고, 경로 도우미도 '찾지 못함'으로 표시한다.
   if (typeof folder.archiveCtx.add === "function") folder.archiveCtx.add(relPath, file);
-  handleFiles([file],
+  const opened = handleFiles([file],
     { isScratch: true, parentId: folder.parentId, archiveCtx: folder.archiveCtx, relPath, workspacePath: relPath,
       originalSaveMode:!!(originalRoot && originalRoot.originalSaveMode) });
+  // 이름은 임시로 붙여 두고, 사이드바 줄에서 곧바로 고쳐 쓰게 한다(첫 저장 때 다시 묻지 않는다).
+  // 문서가 열리면서 편집기가 포커스를 가져가므로 한 프레임 뒤에 입력을 띄운다.
+  if (opened && typeof opened.then === "function"){
+    opened.then((newDoc) => {
+      const target = newDoc || (typeof docs !== "undefined"
+        ? docs.find(d => normalizedRunPath(d.workspacePath || d.relPath || "") === relPath) : null);
+      if (target && typeof beginSidebarRename === "function") requestAnimationFrame(() => beginSidebarRename(target));
+    }).catch(() => {});
+  }
   if (typeof toast === "function" && noticeLabel){
     toast("'" + (folder.label || dir.split("/").pop() || dir) + "' 폴더 안에 " + noticeLabel + " 만들었어요.", 3000);
   }

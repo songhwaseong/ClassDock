@@ -4824,6 +4824,8 @@ async function renderXlsx(file, host, doc){
   // 반환: 계속 저장해도 되는지(false = 사용자가 취소).
   const askSpreadsheetScratchName = async () => {
     if (!doc || !doc.isScratch || doc._named) return true;
+    // 사이드바에서 이미 이름을 정했으면 다시 묻지 않는다. 내보내기 파일 이름(base)만 그 이름에 맞춘다.
+    if (doc._nameChosen){ base = sheetBaseName(doc.name || (base + ".xlsx")); return true; }
     if (typeof askScratchSaveName !== "function") return true;
     const named = await askScratchSaveName(doc, doc.name || (base + ".xlsx"),
       { fallbackExt:".xlsx", placeholder:"예: 성적표" });

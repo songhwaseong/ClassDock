@@ -3087,10 +3087,144 @@ function setSidebarExtensionFilter(ext){
   if (button) button.setAttribute("aria-expanded", "false");
 }
 
+/* ===== 사이드바에서 바로 이름 짓기 =====
+   폴더 우클릭으로 갓 만든 문서는 아직 디스크에 파일이 없다. 그래서 이름 확정은 메모리 문서
+   (name·workspacePath·relPath·폴더 묶음)만 고치면 되고, 첫 저장 때 다시 묻지 않도록 _nameChosen 을 세운다.
+   renderSidebar 는 자동 저장·상태 갱신 등으로 수시로 다시 그리므로 입력 DOM 을 붙잡아 둘 수 없다.
+   상태(sidebarRenameState)만 들고 있다가 매 렌더에서 입력을 새로 만들고 값·선택 범위를 되살린다. */
+let sidebarRenameState = null;      // { nodeId, docId, value, selStart, selEnd, openedAt, busy }
+// 새 문서를 열면 편집기가 한두 프레임 뒤에 포커스를 가져간다. 그 사이의 blur 는 사용자가 이름을
+// 확정한 것이 아니므로, 이 시간 안에서는 확정하지 않고 입력으로 포커스를 되돌린다.
+const SIDEBAR_RENAME_FOCUS_GRACE_MS = 700;
+
+// 갓 만든 새 문서의 사이드바 줄을 입력으로 바꾼다. 확장자를 뺀 앞부분만 선택해 바로 덮어쓸 수 있게 한다.
+function beginSidebarRename(doc){
+  if (!doc || !doc.isScratch || doc._named || doc._nameChosen) return false;
+  const node = navNodeById(doc.nodeId);
+  if (!node || node.type !== "doc") return false;
+  if (sidebarCollapsed) openSidebar({ reveal:false });
+  focusSidebarDoc(doc.id);                       // 접힌 부모 폴더를 펼쳐 줄이 실제로 보이게 한다
+  const name = String(doc.name || "");
+  const dot = name.lastIndexOf(".");
+  sidebarRenameState = { nodeId:node.nodeId, docId:doc.id, value:name,
+    selStart:0, selEnd:dot > 0 ? dot : name.length, openedAt:Date.now(), busy:false };
+  sidebarCursorKey = node.nodeId;
+  renderSidebar();
+  return true;
+}
+
+// 이름 짓기를 접는다 — 만들 때 붙인 기본 이름을 그대로 두므로 첫 저장에서 다시 이름을 묻는다.
+function cancelSidebarRename(){
+  if (!sidebarRenameState) return;
+  sidebarRenameState = null;
+  renderSidebar();
+}
+
+async function commitSidebarRename(){
+  const st = sidebarRenameState;
+  if (!st || st.busy) return false;
+  const doc = docs.find(d => d.id === st.docId);
+  const typed = String(st.value || "").trim();
+  if (!doc || !typed){ cancelSidebarRename(); return false; }
+  st.busy = true;                                // Enter 와 blur 가 겹쳐도 한 번만 처리
+  sidebarRenameState = null;                     // 확정하는 동안에는 그 줄을 보통 파일 줄로 그린다
+  // 임시 이름을 그대로 쓰겠다는 Enter도 확정이다. 취소(Esc)와 구분해야 첫 저장 때 다시 묻지 않는다.
+  if (typed === doc.name){
+    doc._nameChosen = true;
+    renderSidebar();
+    return true;
+  }
+  let named = null;
+  try {
+    named = (typeof applyScratchDocName === "function")
+      ? await applyScratchDocName(doc, typed, doc.name, {}) : null;
+  } catch(error){ console.warn("sidebar rename failed:", error); }
+  if (named) doc._nameChosen = true;             // 첫 저장에서 이름을 다시 묻지 않는다
+  renderSidebar();
+  return !!named;
+}
+
+// 파일명 입력이 포커스를 가진 상태의 Ctrl+S도 평소 저장 단축키와 같아야 한다.
+// 이름 확정(중복 확인 포함)이 끝난 뒤 저장 버튼을 눌러, 첫 저장 이름 대화상자가 겹치지 않게 한다.
+function saveDocAfterSidebarRename(doc){
+  if (!doc) return;
+  if (doc.notebookModel && typeof saveNotebook === "function"){
+    saveNotebook(doc);
+    return;
+  }
+  const save = doc.el && doc.el.querySelector && doc.el.querySelector(".run-save");
+  if (save && !save.disabled) save.click();
+}
+
+function focusSidebarRenameInput(input){
+  const st = sidebarRenameState;
+  if (!st || !input) return;
+  if (document.activeElement !== input){
+    try { input.focus({ preventScroll:true }); } catch(_){ input.focus(); }
+  }
+  try { input.setSelectionRange(st.selStart, st.selEnd); } catch(_){}
+  input.scrollIntoView({ block:"nearest" });
+}
+
+// 사이드바 줄 안에 들어가는 이름 입력. 렌더될 때마다 새로 만들어지므로 값·선택 범위는 상태에서 되살린다.
+function createSidebarRenameInput(){
+  const st = sidebarRenameState;
+  const input = document.createElement("input");
+  input.type = "text"; input.className = "sb-rename"; input.value = st.value;
+  input.spellcheck = false; input.autocomplete = "off";
+  input.setAttribute("aria-label", (typeof window.t === "function" ? window.t("새 파일 이름") : "새 파일 이름"));
+  input.title = "Enter: 이름 확정 · Esc: 기본 이름 유지 (파일은 저장할 때 만들어집니다)";
+  const sync = () => {
+    if (sidebarRenameState !== st) return;
+    st.value = input.value;
+    st.selStart = input.selectionStart; st.selEnd = input.selectionEnd;
+  };
+  // 사용자가 입력을 직접 만진 뒤라면 그 다음 blur 는 확실한 의사표시다 → 유예 시간을 끝낸다.
+  const touched = () => { if (sidebarRenameState === st) st.openedAt = 0; };
+  input.addEventListener("input", sync);
+  input.addEventListener("keyup", sync);
+  input.addEventListener("select", sync);
+  // 줄 클릭(파일 열기)·드래그(분할 열기)·사이드바 ↑/↓ 이동으로 새어 나가지 않게 막는다.
+  ["click", "dblclick", "pointerdown", "mousedown", "contextmenu", "dragstart"].forEach(type =>
+    input.addEventListener(type, (e) => e.stopPropagation()));
+  ["pointerdown", "mousedown"].forEach(type => input.addEventListener(type, touched));
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    touched();
+    if (typeof shortcutMatches === "function" && shortcutMatches(e, "saveCurrent")){
+      e.preventDefault();
+      sync();
+      const doc = docs.find(d => d.id === st.docId);
+      commitSidebarRename().then((committed) => { if (committed) saveDocAfterSidebarRename(doc); });
+    }
+    else if (e.key === "Enter"){ e.preventDefault(); sync(); commitSidebarRename(); }
+    else if (e.key === "Escape"){ e.preventDefault(); cancelSidebarRename(); }
+  });
+  input.addEventListener("blur", () => {
+    if (sidebarRenameState !== st || st.busy) return;
+    if (Date.now() - st.openedAt < SIDEBAR_RENAME_FOCUS_GRACE_MS){   // 편집기가 포커스를 가져간 직후 → 되돌린다
+      requestAnimationFrame(() => {
+        if (sidebarRenameState !== st) return;
+        const list = byId("sbList");
+        const again = list && list.querySelector(".sb-rename");
+        if (again) focusSidebarRenameInput(again);
+      });
+      return;
+    }
+    sync(); commitSidebarRename();
+  });
+  requestAnimationFrame(() => { if (sidebarRenameState === st && input.isConnected) focusSidebarRenameInput(input); });
+  return input;
+}
+
 function renderSidebar(){
   if (uiBatchDepth > 0){ uiBatchSidebarPending = true; return; }
   closeSidebarGroupMenu();
   pruneSidebarSelection();                 // 닫힌 문서가 선택에 남아 있지 않게
+  if (sidebarRenameState){                 // 이름을 짓던 문서가 닫혔으면 상태를 놓아준다
+    const renaming = docs.find(d => d.id === sidebarRenameState.docId);
+    if (!renaming || renaming.nodeId !== sidebarRenameState.nodeId) sidebarRenameState = null;
+  }
   const list = byId("sbList");
   list.innerHTML = "";
   const query = String((byId("sbSearch") && byId("sbSearch").value) || "").trim().toLocaleLowerCase();
@@ -3110,6 +3244,8 @@ function renderSidebar(){
     } else {
       const doc = docs.find(d => d.id === node.docId);
       if (!doc) result = false;
+      // 갓 만든 문서의 이름 입력 줄은 검색어나 확장자 필터와 무관하게 항상 보여 준다.
+      else if (sidebarRenameState && sidebarRenameState.nodeId === node.nodeId) result = true;
       else {
         const queryMatch = !query || doc.name.toLocaleLowerCase().includes(query)
           || (contentMatchQuery === query && contentMatchIds.has(doc.id));
@@ -3233,6 +3369,10 @@ function renderSidebar(){
         (node.folderRefreshRootId ? " · 동기화" : "");
     }
     const label = document.createElement("span"); label.className = "sb-label"; label.appendChild(nm);
+    if (sidebarRenameState && sidebarRenameState.nodeId === node.nodeId){
+      item.draggable = false;                               // 이름을 드래그로 선택할 때 분할 드롭존이 뜨지 않게
+      label.replaceChild(createSidebarRenameInput(), nm);
+    }
     if (node.type === "group" && node.zipLimits === true){
       label.classList.add("has-zip-info");
       nm.title += " · " + ZIP_MODE_NOTICE;
@@ -3314,6 +3454,8 @@ function renderSidebar(){
     empty.textContent = (typeof window.t === "function" ? window.t(label) : label);
     list.appendChild(empty);
   }
+  // 트리 구조가 예상과 달라 입력 줄을 그리지 못한 경우에만 상태를 정리한다.
+  if (sidebarRenameState && !list.querySelector(".sb-rename")) sidebarRenameState = null;
   restoreSidebarCursor();                // 다시 그린 뒤 키보드 커서(roving tabindex/포커스) 복원
   renderSidebarSelectionBar();           // 선택한 개수·일괄 동작 바
   updateFileStats();
@@ -3420,7 +3562,8 @@ function restoreSidebarCursor(){
   sidebarCursorKey = target.dataset.nodeId || null;
   // 키보드로 목록을 탐색 중일 때만 포커스를 되돌린다. 검색창 등 사이드바의 다른 컨트롤에
   // 포커스가 있을 때 되돌리면, 한 글자 입력마다 포커스가 파일 항목으로 튕겨 나간다.
-  if (byId("sbList").contains(document.activeElement)){
+  // 줄 안에서 이름을 짓는 중에도 마찬가지다(포커스를 뺏기면 그 자리에서 이름이 확정돼 버린다).
+  if (!sidebarRenameState && byId("sbList").contains(document.activeElement)){
     target.focus(); target.scrollIntoView({ block: "nearest" });
   }
 }
