@@ -49,3 +49,15 @@ test("로컬 원본 폴더 API는 선택한 루트 ID와 공통 경로 검증으
   assert.match(launcher, /RequiresLocalAuthToken[\s\S]*choose-source-folder/);
   assert.match(launcher, /RequiresLocalAuthToken[\s\S]*source-folder-file/);
 });
+
+test("terminal preserves UTF-8 output and falls back to the Windows OEM code page", () => {
+  const start = launcher.indexOf("static Thread StartTerminalOutputReader");
+  const end = launcher.indexOf("static void RunTerminalCommand", start);
+  const reader = launcher.slice(start, end);
+  assert.match(reader, /StandardOutput\.BaseStream/);
+  assert.match(reader, /StandardError\.BaseStream/);
+  assert.match(reader, /new UTF8Encoding\(false, true\)/);
+  assert.match(reader, /Encoding\.GetEncoding\(\(int\)GetOEMCP\(\)\)/);
+  assert.match(reader, /catch \(DecoderFallbackException\)/);
+  assert.doesNotMatch(reader, /Standard(?:Output|Error)\.ReadLine\(\)/);
+});

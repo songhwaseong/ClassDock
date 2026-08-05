@@ -20,6 +20,8 @@ class PdfSignerLauncher
     static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
     static extern IntPtr GetForegroundWindow();
+    [DllImport("kernel32.dll")]
+    static extern uint GetOEMCP();
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct BROWSEINFO
@@ -3526,9 +3528,8 @@ class PdfSignerLauncher
         {
             try
             {
-                string line;
                 string prefix = session.Marker + "|";
-                while ((line = session.Process.StandardOutput.ReadLine()) != null)
+                ReadTerminalLines(session.Process.StandardOutput.BaseStream, delegate(string line)
                 {
                     if (line.StartsWith(prefix, StringComparison.Ordinal))
                     {
@@ -3550,11 +3551,11 @@ class PdfSignerLauncher
                                     session.LastUsed = DateTime.UtcNow;
                                 }
                             }
-                            continue;
+                            return;
                         }
                     }
                     lock (session.Sync) session.Stdout.AppendLine(line);
-                }
+                });
             }
             catch { }
         });
@@ -3569,15 +3570,64 @@ class PdfSignerLauncher
         {
             try
             {
-                string line;
-                while ((line = session.Process.StandardError.ReadLine()) != null)
+                ReadTerminalLines(session.Process.StandardError.BaseStream, delegate(string line)
+                {
                     lock (session.Sync) session.Stderr.AppendLine(line);
+                });
             }
             catch { }
         });
         thread.IsBackground = true;
         thread.Start();
         return thread;
+    }
+
+    static readonly Encoding StrictTerminalUtf8 = new UTF8Encoding(false, true);
+    static readonly Encoding TerminalOemEncoding = CreateTerminalOemEncoding();
+
+    static Encoding CreateTerminalOemEncoding()
+    {
+        try { return Encoding.GetEncoding((int)GetOEMCP()); }
+        catch { return Encoding.Default; }
+    }
+
+    // PowerShell itself writes UTF-8, but legacy Windows commands such as tree.com write
+    // the active OEM code page directly to the redirected pipe. Decode each complete line
+    // as strict UTF-8 first and fall back to the Windows OEM encoding only when necessary.
+    static string DecodeTerminalLine(byte[] bytes, int count)
+    {
+        try { return StrictTerminalUtf8.GetString(bytes, 0, count); }
+        catch (DecoderFallbackException) { return TerminalOemEncoding.GetString(bytes, 0, count); }
+    }
+
+    static void ReadTerminalLines(Stream stream, Action<string> onLine)
+    {
+        byte[] buffer = new byte[4096];
+        List<byte> pending = new List<byte>();
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            for (int i = 0; i < read; i++)
+            {
+                byte value = buffer[i];
+                if (value != (byte)'\n')
+                {
+                    pending.Add(value);
+                    continue;
+                }
+                int count = pending.Count;
+                if (count > 0 && pending[count - 1] == (byte)'\r') count--;
+                byte[] line = pending.ToArray();
+                pending.Clear();
+                onLine(DecodeTerminalLine(line, count));
+            }
+        }
+        if (pending.Count > 0)
+        {
+            int count = pending.Count;
+            if (pending[count - 1] == (byte)'\r') count--;
+            onLine(DecodeTerminalLine(pending.ToArray(), count));
+        }
     }
 
     static void RunTerminalCommand(string id, byte[] body)
