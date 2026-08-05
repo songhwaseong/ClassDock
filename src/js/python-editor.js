@@ -428,6 +428,7 @@ function mountGotoLineBar(config){
 
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
+  if (prof === "python") host.classList.add("code-color-target");
   const gutter = document.createElement("div"); gutter.className = "code-gutter";
   const edit = document.createElement("div"); edit.className = "code-edit";
   const pre = document.createElement("pre"); pre.className = "code-pre"; pre.setAttribute("aria-hidden", "true");

@@ -540,6 +540,15 @@
       <label class="settings-check"><input type="checkbox" id="settingPdfRecovery"><span>편집 내용 복구본 남기기 — 갑자기 꺼져도 되살리기<small>원본 파일은 건드리지 않고 이 브라우저 안에만 보관합니다. PDF·노트북·표·이미지·화이트보드에 적용됩니다.</small></span></label>
       <div class="settings-group-title">파이썬</div>
       <label class="settings-check"><input type="checkbox" id="settingPyFormatOnSave"><span>Python 저장 시 코드 자동 정렬 — 들여쓰기·공백 정리(로컬 파이썬이면 black)</span></label>
+      <div class="settings-group-title">코드 색(구문 강조)</div>
+      <p class="settings-hint" data-i18n="settings.codeColorHint">파이썬 편집기·노트북 셀·임시 메모에 함께 적용됩니다. 지금 보고 있는 <b id="settingCodeColorTheme">라이트 모드</b>의 색을 바꾸며, 라이트·다크 색은 따로 저장됩니다.</p>
+      <div class="code-color-presets" id="settingCodeColorPresets" role="group" aria-label="코드 색 프리셋"></div>
+      <div class="code-color-preview" id="settingCodeColorPreview" aria-hidden="true"></div>
+      <details class="code-color-details">
+        <summary>색 하나씩 고르기</summary>
+        <div class="code-color-list" id="settingCodeColorList"></div>
+      </details>
+      <div class="settings-row code-color-foot"><span class="code-color-warn" id="settingCodeColorWarn" role="status" aria-live="polite"></span><button class="btn" id="settingCodeColorReset" type="button">기본색으로 되돌리기</button></div>
     </div>
 
     <div class="settings-section" data-settings-panel="tools" role="tabpanel" hidden>

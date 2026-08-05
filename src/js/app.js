@@ -724,6 +724,149 @@ function wire(){
     }
     return out;
   };
+  // ── 코드 색(구문 강조) 설정 ──────────────────────────────────────
+  // 저장 버튼을 누를 때까지는 초안(codeColorDraft)만 바꾸고, 미리보기에 그 초안 색을 직접 얹어 보여준다.
+  // 초안은 normalizeCodeColors 형태({light:{…},dark:{…}}, 기본색과 같은 항목은 비움)를 그대로 쓴다.
+  // 주석·메시지는 화면 언어를 따르므로 그릴 때마다 만든다(길이가 달라져 범위도 함께 계산한다).
+  const tr = (text) => (typeof window.t === "function" ? window.t(text) : text);
+  // 짧은 낱말은 사전에 넣지 않고(다른 화면까지 번역됨) labelEn 을 직접 고른다.
+  const uiLabel = (item) => ((window.MNI18N && window.MNI18N.lang) === "en" && item.labelEn) ? item.labelEn : item.label;
+  const CODE_COLOR_SAMPLE_DEF = 'def area(radius, unit="cm"):';
+  const codeColorSample = () => [
+    "# " + tr("원의 넓이를 구해요"),
+    "import math",
+    "",
+    "@lru_cache",
+    CODE_COLOR_SAMPLE_DEF,
+    "    if radius <= 0:",
+    '        raise ValueError("' + tr("반지름은 0보다 커야 해요") + '")',
+    "    return round(math.pi * radius ** 2, 2)",
+    "",
+    "print(area(3))"
+  ].join("\n");
+  // 매개변수색(tk-param)은 렉서가 아니라 의미 분석 결과로 칠해지므로 미리보기에서도 범위를 직접 넘긴다.
+  const codeColorSampleParams = (sample) => {
+    const at = sample.indexOf(CODE_COLOR_SAMPLE_DEF);
+    if (at < 0) return [];
+    return ["radius", "unit"].map((name) => {
+      const start = at + CODE_COLOR_SAMPLE_DEF.indexOf(name);
+      return { start, end:start + name.length, cls:"tk-param" };
+    });
+  };
+  let codeColorDraft = normalizeCodeColors();
+  let codeColorInputsBuilt = false;
+  const CODE_COLOR_CHIP_IDS = ["keyword", "string", "function", "comment"];
+  const codeColorInputId = (id) => "settingCodeColor-" + id;
+  const draftColor = (id) => {
+    const theme = currentThemeName();
+    return codeColorValue(theme, id, codeColorDraft);
+  };
+  const setDraftColor = (id, hex) => {
+    const theme = currentThemeName(), value = normalizeHexColor(hex);
+    if (!value) return;
+    if (value === CODE_COLOR_DEFAULTS[theme][id]) delete codeColorDraft[theme][id];
+    else codeColorDraft[theme][id] = value;
+  };
+  const buildCodeColorInputs = () => {
+    if (codeColorInputsBuilt) return;
+    const host = byId("settingCodeColorList"), presetHost = byId("settingCodeColorPresets");
+    if (!host || !presetHost || typeof CODE_COLOR_DEFS === "undefined") return;
+    for (const def of CODE_COLOR_DEFS){
+      const label = document.createElement("label"); label.className = "code-color-item"; label.dataset.codeColor = def.id;
+      const input = document.createElement("input"); input.type = "color"; input.id = codeColorInputId(def.id);
+      input.addEventListener("input", () => { setDraftColor(def.id, input.value); renderCodeColorSettings(); });
+      const text = document.createElement("span");
+      const strong = document.createElement("b"); strong.dataset.codeColorLabel = def.id;   // 이름은 render 가 현재 언어로 채운다
+      const small = document.createElement("small"); small.textContent = def.hint;   // 코드 예시라 번역하지 않는다
+      text.append(strong, small);
+      label.append(input, text); host.appendChild(label);
+    }
+    for (const preset of CODE_COLOR_PRESETS){
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "code-color-preset"; button.dataset.codeColorPreset = preset.id;
+      // 프리셋 미리보기 점 — 색은 테마를 타므로 그릴 때마다 renderCodeColorSettings 가 다시 칠한다.
+      const chips = document.createElement("span"); chips.className = "code-color-preset-chips";
+      for (const id of CODE_COLOR_CHIP_IDS){
+        const chip = document.createElement("i"); chip.dataset.codeColorChip = id;
+        chips.appendChild(chip);
+      }
+      const name = document.createElement("span"); name.dataset.codeColorPresetLabel = preset.id;
+      button.append(chips, name);
+      button.addEventListener("click", () => {
+        const theme = currentThemeName();
+        // 화면에 표시한 현재 테마만 바꾸고 반대 테마에서 직접 고른 색은 보존한다.
+        codeColorDraft = normalizeCodeColors({
+          ...codeColorDraft,
+          [theme]:(preset.colors && preset.colors[theme]) || {}
+        });
+        renderCodeColorSettings();
+      });
+      presetHost.appendChild(button);
+    }
+    codeColorInputsBuilt = true;
+  };
+  // 초안 색을 미리보기·색 고르개·프리셋 선택 표시·대비 경고에 한 번에 반영한다.
+  function renderCodeColorSettings(){
+    buildCodeColorInputs();
+    if (typeof CODE_COLOR_DEFS === "undefined") return;
+    const theme = currentThemeName();
+    const en = (window.MNI18N && window.MNI18N.lang) === "en";
+    const themeLabel = byId("settingCodeColorTheme");
+    // 아래 문구들은 설정 창을 처음 열 때 만들어져 초기 번역 스캔을 놓치므로 그릴 때마다 직접 채운다.
+    if (themeLabel) themeLabel.textContent = theme === "dark"
+      ? (en ? "dark mode" : "다크 모드") : (en ? "light mode" : "라이트 모드");
+    document.querySelectorAll("[data-code-color-label]").forEach((el) => {
+      const def = CODE_COLOR_DEFS.find((item) => item.id === el.dataset.codeColorLabel);
+      if (def) el.textContent = uiLabel(def);
+    });
+    document.querySelectorAll("[data-code-color-preset-label]").forEach((el) => {
+      const preset = CODE_COLOR_PRESETS.find((item) => item.id === el.dataset.codeColorPresetLabel);
+      if (preset) el.textContent = uiLabel(preset);
+    });
+    const preview = byId("settingCodeColorPreview");
+    const lowContrast = [];
+    for (const def of CODE_COLOR_DEFS){
+      const hex = draftColor(def.id);
+      const input = byId(codeColorInputId(def.id));
+      if (input && input.value !== hex) input.value = hex;
+      if (preview) preview.style.setProperty(def.varName, hex);
+      const dim = colorContrastRatio(hex, CODE_COLOR_BACKGROUNDS[theme]) < 2.2;
+      const item = input && input.closest(".code-color-item");
+      if (item) item.classList.toggle("is-low-contrast", dim);
+      if (dim) lowContrast.push(uiLabel(def));
+    }
+    if (preview && typeof highlightCode === "function"){
+      const sample = codeColorSample();
+      preview.innerHTML = highlightCode(sample, "python", codeColorSampleParams(sample));
+    }
+    const warn = byId("settingCodeColorWarn");
+    if (warn) warn.textContent = lowContrast.length
+      ? (typeof window.tf === "function"
+          ? window.tf("{names} 색이 배경과 너무 비슷해 잘 안 보일 수 있어요.", { names: lowContrast.join("·") })
+          : lowContrast.join("·") + " 색이 배경과 너무 비슷해 잘 안 보일 수 있어요.")
+      : "";
+    document.querySelectorAll("#settingCodeColorPresets .code-color-preset").forEach((button) => {
+      const preset = CODE_COLOR_PRESETS.find((item) => item.id === button.dataset.codeColorPreset);
+      if (!preset) return;
+      // 프리셋 선택 표시도 지금 보고 있는 테마끼리만 비교한다.
+      const on = JSON.stringify(normalizeCodeColors(preset.colors)[theme]) === JSON.stringify(codeColorDraft[theme]);
+      button.setAttribute("aria-pressed", String(on));
+      // 점 색은 지금 테마 기준 — 기본 프리셋(colors:null)은 팔레트 기본색을 그대로 보여준다.
+      button.querySelectorAll("[data-code-color-chip]").forEach((chip) => {
+        const id = chip.dataset.codeColorChip;
+        chip.style.color = (preset.colors && normalizeHexColor(preset.colors[theme][id])) || CODE_COLOR_DEFAULTS[theme][id];
+      });
+    });
+  }
+  if (byId("settingCodeColorReset")) byId("settingCodeColorReset").onclick = () => {
+    const theme = currentThemeName();
+    codeColorDraft = normalizeCodeColors({ ...codeColorDraft, [theme]:{} });
+    renderCodeColorSettings();
+  };
+  // 설정 창을 열어 둔 채 언어를 바꿔도 이름·예제가 그 언어를 따라오게 한다.
+  window.addEventListener("mni18nchange", () => {
+    if (codeColorInputsBuilt && !byId("settingsModal").hidden) renderCodeColorSettings();
+  });
   byId("settingsOpen").onclick = () => {
     setSettingsTab("general");
     lightBackgroundDraft = currentLightBackground();
@@ -738,6 +881,8 @@ function wire(){
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
+    codeColorDraft = normalizeCodeColors(appSettings.codeColors);
+    renderCodeColorSettings();
     syncToolVisibilityChecks();
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
@@ -788,10 +933,12 @@ function wire(){
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
         sound: byId("settingScreensaverSound").checked },
       toolVisibility: collectToolVisibility(),
+      codeColors: codeColorDraft,
       mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });
     if (typeof applyToolVisibility === "function") applyToolVisibility();
+    if (typeof applyCodeColors === "function") applyCodeColors();
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
     if (typeof applyPetSettings === "function") applyPetSettings();
     if (typeof applyPetFocusSettings === "function") applyPetFocusSettings();
@@ -1179,6 +1326,10 @@ function wire(){
       const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("theme", next); } catch(e){}
+      // 코드 색은 <html> 인라인 스타일로 얹혀 테마 규칙을 이기므로, 테마를 바꾼 뒤 반드시 다시 칠한다.
+      // (안 하면 라이트로 돌아와도 다크에서 고른 색이 그대로 남는다.)
+      if (typeof applyCodeColors === "function") applyCodeColors();
+      if (!byId("settingsModal").hidden) renderCodeColorSettings();
       sync();
     };
     sync();

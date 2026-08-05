@@ -397,7 +397,7 @@ function nbBuildCell(ownerDoc, cell){
     // 화면에서 멀어지면 디마운트해 대형 노트북에서도 에디터 인스턴스 수를 제한한다.
     const makeStatic = () => {
       const pre = document.createElement("pre");
-      pre.className = "nbv-static";
+      pre.className = "nbv-static code-color-target";
       pre.innerHTML = cell.source
         ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "python") : escapeForPre(cell.source))
         : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';

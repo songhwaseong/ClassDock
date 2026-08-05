@@ -1139,6 +1139,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
       const wrap = document.createElement("div");
       wrap.className = "code-host code-host-readonly" + (longLine ? " is-wrapped" : "") + (big ? " code-chunked" : "");
+      if (prof === "python") wrap.classList.add("code-color-target");
       // 읽기 화면도 편집기에서 선택·저장한 글자 크기/줄 간격/글꼴을 그대로 사용한다.
       applyCodeFontMetrics(wrap);
       wrap.tabIndex = -1;

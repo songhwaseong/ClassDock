@@ -150,6 +150,117 @@ function applyToolVisibility(){
   // 이미 열려 있는 편집기가 '숨겨진 도구의 모드'(이미지 자르기·표시처럼 켜 둔 상태)를 스스로 끌 수 있게 알린다.
   try { document.dispatchEvent(new CustomEvent("mn-tool-visibility", { detail: vis })); } catch(e){}
 }
+// ── 코드 색(구문 강조) ──────────────────────────────────────────────
+// .tk-* 클래스는 색을 직접 갖지 않고 CSS 변수만 참조한다. 사용자 지정값은 --python-code-* 로
+// 따로 얹고 .code-color-target 에서만 참조해 파이썬 편집기·노트북 셀·스크래치패드에만 적용한다.
+// 라이트·다크는 배경이 정반대라 한 벌로는 쓸 수 없어 테마별로 따로 보관한다.
+// label/labelEn 을 함께 들고 있는 이유: "기본"·"주석"처럼 짧은 낱말을 i18n 사전에 넣으면
+// 화면 곳곳의 같은 글자까지 함께 번역돼 엉뚱한 곳이 바뀐다(사전은 텍스트 완전 일치로 동작).
+const CODE_COLOR_DEFS = Object.freeze([
+  { id:"keyword",   varName:"--code-keyword",   userVarName:"--python-code-keyword",   label:"키워드",     labelEn:"Keywords",             hint:"if · for · def · class" },
+  { id:"string",    varName:"--code-string",    userVarName:"--python-code-string",    label:"문자열",     labelEn:"Strings",              hint:'"글자" · f"…"' },
+  { id:"number",    varName:"--code-number",    userVarName:"--python-code-number",    label:"숫자",       labelEn:"Numbers",              hint:"0 · 3.14" },
+  { id:"comment",   varName:"--code-comment",   userVarName:"--python-code-comment",   label:"주석",       labelEn:"Comments",             hint:"# 설명" },
+  { id:"function",  varName:"--code-function",  userVarName:"--python-code-function",  label:"함수 이름",  labelEn:"Function names",       hint:"def" },
+  { id:"builtin",   varName:"--code-builtin",   userVarName:"--python-code-builtin",   label:"내장 함수",  labelEn:"Built-in functions",   hint:"print · len · range" },
+  { id:"type",      varName:"--code-type",      userVarName:"--python-code-type",      label:"내장 예외",  labelEn:"Built-in exceptions",  hint:"ValueError · TypeError" },
+  { id:"decorator", varName:"--code-decorator", userVarName:"--python-code-decorator", label:"데코레이터", labelEn:"Decorators",           hint:"@staticmethod" },
+  { id:"param",     varName:"--code-param",     userVarName:"--python-code-param",     label:"매개변수",   labelEn:"Parameters",           hint:"def f(x)" }
+]);
+// styles.css 의 :root / [data-theme="dark"] 값과 반드시 같아야 한다 — 색 고르개의 초기값이자
+// '기본색으로 되돌리기'의 기준이고, 이 값과 같으면 저장하지 않고 CSS 에 맡긴다.
+const CODE_COLOR_DEFAULTS = Object.freeze({
+  light: Object.freeze({ keyword:"#1d4ed8", string:"#047857", number:"#b91c1c", comment:"#64748b",
+    function:"#0f766e", builtin:"#795e26", type:"#a21caf", decorator:"#a16207", param:"#7c3aed" }),
+  dark: Object.freeze({ keyword:"#93c5fd", string:"#86efac", number:"#fca5a5", comment:"#64748b",
+    function:"#67e8f9", builtin:"#dcdcaa", type:"#f0abfc", decorator:"#facc15", param:"#c084fc" })
+});
+// 배경색(--code-bg)과의 대비를 계산해 "글자가 안 보이는" 선택을 경고하는 데 쓴다.
+const CODE_COLOR_BACKGROUNDS = Object.freeze({ light:"#f8fafc", dark:"#0f172a" });
+// 프리셋 — 아무 색이나 고르다 배경과 같아지는 사고를 막기 위해 검증된 조합을 먼저 제공한다.
+// 각 프리셋은 라이트·다크를 모두 정의한다(한쪽만 바꾸면 테마를 옮겼을 때 색이 깨져 보인다).
+const CODE_COLOR_PRESETS = Object.freeze([
+  { id:"default", label:"기본", labelEn:"Default", colors:null },   // null = 저장된 값 없이 CSS 기본색 사용
+  { id:"monokai", label:"모노카이", labelEn:"Monokai", colors:Object.freeze({
+    light:{ keyword:"#c2185b", string:"#7a8b1a", number:"#7c4dff", comment:"#8a8f98",
+      function:"#0f7d7d", builtin:"#0277bd", type:"#c2185b", decorator:"#b26a00", param:"#9c27b0" },
+    dark:{ keyword:"#f92672", string:"#e6db74", number:"#ae81ff", comment:"#88846f",
+      function:"#a6e22e", builtin:"#66d9ef", type:"#f92672", decorator:"#fd971f", param:"#fd971f" }
+  })},
+  { id:"solarized", label:"솔라라이즈", labelEn:"Solarized", colors:Object.freeze({
+    light:{ keyword:"#859900", string:"#2aa198", number:"#d33682", comment:"#93a1a1",
+      function:"#268bd2", builtin:"#b58900", type:"#cb4b16", decorator:"#6c71c4", param:"#6c71c4" },
+    dark:{ keyword:"#859900", string:"#2aa198", number:"#d33682", comment:"#657b83",
+      function:"#268bd2", builtin:"#b58900", type:"#cb4b16", decorator:"#6c71c4", param:"#6c71c4" }
+  })},
+  { id:"contrast", label:"고대비", labelEn:"High contrast", colors:Object.freeze({
+    light:{ keyword:"#0000cc", string:"#006600", number:"#aa0000", comment:"#555555",
+      function:"#004d80", builtin:"#804000", type:"#800080", decorator:"#804000", param:"#5c0099" },
+    dark:{ keyword:"#7dc4ff", string:"#7dffb0", number:"#ff9d9d", comment:"#a0aec0",
+      function:"#8ff0ff", builtin:"#ffe066", type:"#ffb3ff", decorator:"#ffcc66", param:"#d9a6ff" }
+  })}
+]);
+// #rgb·#rrggbb 만 받아 소문자 #rrggbb 로 통일한다(색 고르개 value 와 CSS 변수에 그대로 쓰기 위해).
+function normalizeHexColor(value){
+  const raw = String(value == null ? "" : value).trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(raw)) return raw;
+  if (/^#[0-9a-f]{3}$/.test(raw)) return "#" + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3];
+  return "";
+}
+// 기본색과 같은 항목은 아예 저장하지 않는다 — 나중에 기본 팔레트를 손봐도 사용자가 직접 고르지 않은
+// 색은 새 기본값을 따라가고, CSS 의 테마 규칙도 그대로 살아 있게 된다.
+function normalizeCodeColors(value){
+  const src = value && typeof value === "object" ? value : {};
+  const out = {};
+  for (const theme of ["light", "dark"]){
+    const saved = src[theme] && typeof src[theme] === "object" ? src[theme] : {};
+    const picked = {};
+    for (const def of CODE_COLOR_DEFS){
+      const hex = normalizeHexColor(saved[def.id]);
+      if (hex && hex !== CODE_COLOR_DEFAULTS[theme][def.id]) picked[def.id] = hex;
+    }
+    out[theme] = picked;
+  }
+  return out;
+}
+function currentThemeName(){
+  if (typeof document === "undefined") return "light";
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+// 저장값이 없으면 기본색(= styles.css 가 칠하는 색)을 돌려준다.
+function codeColorValue(theme, id, source){
+  const set = ((source || (appSettings && appSettings.codeColors) || {})[theme]) || {};
+  return normalizeHexColor(set[id]) || CODE_COLOR_DEFAULTS[theme][id] || "";
+}
+// 지금 테마의 사용자 색만 <html>의 --python-code-* 인라인 변수로 얹는다. 실제 토큰 규칙은
+// .code-color-target 에서만 이 변수를 읽으므로 JSON·다른 언어 코드에는 번지지 않는다.
+// 기본값인 항목은 반드시 removeProperty 로 걷어내야 테마를 바꿨을 때 반대편 색이 살아난다.
+// 그래서 테마 토글 직후에도 이 함수를 다시 부른다(app.js 테마 버튼).
+function applyCodeColors(){
+  if (typeof document === "undefined") return;
+  const theme = currentThemeName(), style = document.documentElement.style;
+  const set = ((appSettings && appSettings.codeColors) || {})[theme] || {};
+  for (const def of CODE_COLOR_DEFS){
+    const hex = normalizeHexColor(set[def.id]);
+    // 이전 개발 버전이 전역 --code-* 인라인 값을 남긴 채 이 함수를 다시 호출해도 즉시 범위를 복구한다.
+    style.removeProperty(def.varName);
+    if (hex && hex !== CODE_COLOR_DEFAULTS[theme][def.id]) style.setProperty(def.userVarName, hex);
+    else style.removeProperty(def.userVarName);
+  }
+}
+// WCAG 상대 휘도 기반 대비비(1~21). 배경과 너무 비슷한 색을 고르면 설정 화면에서 경고하는 용도.
+function colorContrastRatio(a, b){
+  const lum = (hex) => {
+    const h = normalizeHexColor(hex); if (!h) return 0;
+    const ch = [1, 3, 5].map((i) => {
+      const v = parseInt(h.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  };
+  const l1 = lum(a), l2 = lum(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
 const DEFAULT_APP_SETTINGS = {
   // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).
   //   예전 이름은 pythonAutosave 였고 Python 에만 적용됐다 — 아래 migrateAppSettings 가 값을 옮긴다.
@@ -164,6 +275,7 @@ const DEFAULT_APP_SETTINGS = {
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
+  codeColors: {},       // 구문 강조 색({} = 기본 팔레트) — { light:{…}, dark:{…} }, CODE_COLOR_DEFS 참고
   mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
   shortcutDefaultsVersion: 2,
   shortcuts: DEFAULT_SHORTCUTS
@@ -216,22 +328,22 @@ let shortcutDefaultsMigrated = false;
 let appSettings = (() => {
   try {
     const raw = localStorage.getItem("pdfSignerSettings");
-    if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() };
+    if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() };
     const decoded = JSON.parse(raw);
     const parsed = decoded && typeof decoded === "object" ? decoded : {};
     const migrationChanged = "pythonAutosave" in parsed || (Number(parsed.shortcutDefaultsVersion) || 0) < 2;
     const saved = migrateAppSettings(parsed);
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
-    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), shortcuts:normalizeShortcutMap(saved.shortcuts) };
     if (migrationChanged) localStorage.setItem("pdfSignerSettings", JSON.stringify(loaded));
     return loaded;
   }
-  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), shortcuts:normalizeShortcutMap() }; }
+  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() }; }
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("pdfSignerSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }
@@ -296,6 +408,7 @@ function applyUiScale(){
 }
 applyUiScale();
 applyToolVisibility();
+applyCodeColors();
 function defaultPdfZoom(){ const z = Number(appSettings.pdfZoom); return [1,1.25,1.5].includes(z) ? z : 1.25; }
 // 폴더·압축을 열 때 안의 첫 파일을 자동으로 띄울지(기본 끔).
 function autoOpenFirstFileEnabled(){ return appSettings.autoOpenFirstFile === true; }

@@ -1518,7 +1518,7 @@ function wireScratchpad(){
     badge.className = "scratchpad-notebook-badge type-" + (cellType || "code");
     badge.textContent = cellType === "markdown" ? "마크다운 셀" : cellType === "raw" ? "Raw 셀" : "코드 셀";
     const source = document.createElement("pre");
-    source.className = "scratchpad-notebook-source";
+    source.className = "scratchpad-notebook-source" + (cellType === "code" ? " code-color-target" : "");
     if (cellType === "code" && typeof highlightCode === "function"){
       source.innerHTML = highlightCode(String(block.cell && block.cell.source || ""), "python");
     } else {

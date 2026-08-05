@@ -250,6 +250,18 @@
     "Python 편집 파일 자동 저장 — 입력을 멈춘 뒤 3초 후": "Auto-save edited Python files 3 seconds after typing stops",
     "Python 저장 시 코드 자동 정렬 — 들여쓰기·공백 정리(로컬 파이썬이면 black)": "Format Python code on save — clean up indentation and spacing (uses black with local Python)",
     "코드 자동 정렬": "Format code",
+    // 코드 색(구문 강조) 설정. 여기에는 고유한 문구만 넣는다 — 프리셋·토큰 이름("기본"·"주석"처럼
+    // 짧은 낱말)은 사전이 텍스트 완전 일치로 동작해 다른 화면까지 번역해 버리므로,
+    // CODE_COLOR_DEFS/CODE_COLOR_PRESETS 의 labelEn 을 app.js 가 직접 골라 쓴다.
+    "코드 색(구문 강조)": "Code colors (syntax highlighting)",
+    "코드 색 프리셋": "Code color presets",
+    "색 하나씩 고르기": "Pick colors one by one",
+    "기본색으로 되돌리기": "Reset to default colors",
+    "{names} 색이 배경과 너무 비슷해 잘 안 보일 수 있어요.":
+      "{names}: too close to the background — the text may be hard to read.",
+    // 코드 색 미리보기 예제 안의 문구(코드 자체는 언어와 무관하게 그대로 둔다)
+    "원의 넓이를 구해요": "Work out the area of a circle",
+    "반지름은 0보다 커야 해요": "radius must be greater than 0",
     "Python 코드 들여쓰기·공백 정렬(로컬 파이썬이면 black)": "Clean up Python indentation and spacing (uses black with local Python)",
     "구문 오류가 있어 완전 정렬은 못 하고 공백만 정리했어요.": "The code has a syntax error, so only safe whitespace cleanup was applied.",
     "코드를 정렬했어요 ({engine}).": "Formatted the code ({engine}).",
@@ -1435,6 +1447,8 @@
     "welcome.step2": "<span class=\"welcome-step-ico\">🐍</span><div><b>2. Run Python</b><small>Write code and press <b>▶ Run</b> (or <kbd>Ctrl+Enter</kbd>) to see the result right away. No Python install needed.</small></div>",
     "welcome.step3": "<span class=\"welcome-step-ico\">💾</span><div><b>3. Check the save target</b><small>Check the <b>Original file</b> or <b>Saved copy</b> badge beside the file name. Hover over the badge for details.</small></div>",
     "welcome.safe": "🔒 Files are never sent anywhere — everything is processed on this computer only.",
+    // <b id="settingCodeColorTheme"> 는 app.js 가 현재 테마 이름을 채우므로 영어 문구에도 그대로 남긴다.
+    "settings.codeColorHint": "Applies to the Python editor, notebook cells, and the scratchpad. Changes the colors for the <b id=\"settingCodeColorTheme\">light mode</b> you are viewing now; light and dark colors are stored separately.",
     "help.f1": "<b>Open files</b> — drag & drop or whole folders. Open PDF, Word, Excel, PowerPoint, HWP, images, code, and ZIP together.",
     "help.f2": "<b>PDF</b> — signature, text, date, check, pen ink, <b>drag to select text → highlight</b>, page thumbnails/extract/merge, print / save as PDF.",
     "help.f3": "<b>Run Python</b> — run instantly with ▶, autocomplete & go-to-definition, <b>step run</b> to trace variables, <b>diagnose</b> and <b>auto-grade</b>, even install libraries.",
