@@ -118,7 +118,20 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"nbDedupe",    label:"중복 줄 삭제",     cls:"nbv-dedupe",          target:"notebook" },
   { id:"nbFont",      label:"글자 크기(A− A+)",cls:"nbv-font-group",      target:"notebook" },
   { id:"nbExport",    label:"내보내기(.py/PDF)",cls:"nbv-export-group",   target:"notebook" },
-  { id:"nbHelp",      label:"단축키",          cls:"nbv-help-open",       target:"notebook" }
+  { id:"nbHelp",      label:"단축키",          cls:"nbv-help-open",       target:"notebook" },
+  // 이미지 편집기 도구막대 (image-viewer.js) — 저장(run-save)·되돌리기/다시는 필수라 뺐다.
+  { id:"imgRotate",   label:"회전(↶ ↷)",       cls:"img-tool-rotate",     target:"image" },
+  { id:"imgFlip",     label:"뒤집기(좌우·상하)",cls:"img-tool-flip",       target:"image" },
+  { id:"imgCrop",     label:"자르기(비율 포함)",cls:"img-tool-crop",       target:"image" },
+  { id:"imgAltFormat",label:"다른 형식으로 저장(PNG/JPG)",cls:"img-tool-altfmt", target:"image" },
+  { id:"imgPdf",      label:"PDF로 저장",      cls:"img-tool-pdf",        target:"image" },
+  { id:"imgMemo",     label:"메모로 보내기",   cls:"img-tool-memo",       target:"image" },
+  { id:"imgOcr",      label:"글자 추출(OCR)",  cls:"img-tool-ocr",        target:"image" },
+  { id:"imgZoom",     label:"확대·축소(− + 맞춤)",cls:"img-tool-zoom",    target:"image" },
+  { id:"imgDims",     label:"이미지 크기 표시",cls:"img-tool-dims",       target:"image" },
+  { id:"imgReset",    label:"초기화",          cls:"img-tool-reset",      target:"image" },
+  { id:"imgAnnotate", label:"표시(펜·화살표·모자이크)",cls:"img-tool-ann",target:"image" },
+  { id:"imgAdjust",   label:"화질 보정·크기 조절",cls:"img-tool-adjust",  target:"image" }
 ]);
 // { id: boolean } 로 정규화. 레지스트리에 있는 id만 남기고, 지정 안 된 것·잘못된 값은 노출(true).
 function normalizeToolVisibility(value){
@@ -134,6 +147,8 @@ function applyToolVisibility(){
   const vis = normalizeToolVisibility(appSettings && appSettings.toolVisibility);
   const root = document.documentElement;
   for (const tool of TOGGLEABLE_TOOLS) root.classList.toggle("hide-tool-" + tool.id, vis[tool.id] === false);
+  // 이미 열려 있는 편집기가 '숨겨진 도구의 모드'(이미지 자르기·표시처럼 켜 둔 상태)를 스스로 끌 수 있게 알린다.
+  try { document.dispatchEvent(new CustomEvent("mn-tool-visibility", { detail: vis })); } catch(e){}
 }
 const DEFAULT_APP_SETTINGS = {
   // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).

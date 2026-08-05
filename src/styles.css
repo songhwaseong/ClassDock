@@ -2479,7 +2479,24 @@
   html.hide-tool-nbExport .nbv-export-group,
   html.hide-tool-nbExport .nbv-save-group > .nbv-run-more,
   html.hide-tool-nbExport .nbv-save-group > .nbv-run-menu,
-  html.hide-tool-nbHelp .nbv-help-open{display:none!important}
+  html.hide-tool-nbHelp .nbv-help-open,
+  /* 이미지 편집기 — 자르기는 '적용'·비율 버튼까지, 표시·보정은 딸린 패널까지 한 세트로 숨긴다. */
+  html.hide-tool-imgRotate .img-tool-rotate,
+  html.hide-tool-imgFlip .img-tool-flip,
+  html.hide-tool-imgCrop .img-tool-crop,
+  html.hide-tool-imgCrop .img-crop-ratios,
+  html.hide-tool-imgCrop .img-crop-box,
+  html.hide-tool-imgAltFormat .img-tool-altfmt,
+  html.hide-tool-imgPdf .img-tool-pdf,
+  html.hide-tool-imgMemo .img-tool-memo,
+  html.hide-tool-imgOcr .img-tool-ocr,
+  html.hide-tool-imgZoom .img-tool-zoom,
+  html.hide-tool-imgDims .img-tool-dims,
+  html.hide-tool-imgReset .img-tool-reset,
+  html.hide-tool-imgAnnotate .img-tool-ann,
+  html.hide-tool-imgAnnotate .img-annotate,
+  html.hide-tool-imgAdjust .img-tool-adjust,
+  html.hide-tool-imgAdjust .img-adjust-panel{display:none!important}
   .run-go{font:inherit;font-weight:600;font-size:15px;line-height:1;border:1.5px solid #16a34a;border-radius:8px;height:30px;padding:0 13px;cursor:pointer;
     background:transparent;color:#16a34a;display:inline-flex;align-items:center;justify-content:center;min-width:40px}
   .run-go:hover{background:rgba(22,163,74,.09);border-color:#15803d;color:#15803d}

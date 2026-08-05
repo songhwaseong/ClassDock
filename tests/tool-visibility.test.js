@@ -9,6 +9,7 @@ const stateSource = fs.readFileSync(path.join(__dirname, "../src/js/state.js"), 
 const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const codeViewerSource = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
 const notebookSource = fs.readFileSync(path.join(__dirname, "../src/js/notebook-run.js"), "utf8");
+const imageSource = fs.readFileSync(path.join(__dirname, "../src/js/image-viewer.js"), "utf8");
 const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
 const cssSource = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 
@@ -19,13 +20,14 @@ const { TOGGLEABLE_TOOLS, normalizeToolVisibility } = new Function(
   stateSource.slice(regStart, regEnd) + "\nreturn { TOGGLEABLE_TOOLS, normalizeToolVisibility };"
 )();
 
-test("도구 레지스트리는 Python·노트북 도구를 담고 필수 버튼(실행·저장)은 제외한다", () => {
+test("도구 레지스트리는 Python·노트북·이미지 도구를 담고 필수 버튼(실행·저장)은 제외한다", () => {
   const ids = TOGGLEABLE_TOOLS.map(t => t.id);
   assert.ok(ids.includes("pyTrace") && ids.includes("nbToc") && ids.includes("pyDedupe") && ids.includes("pySpellcheck") && ids.includes("nbDedupe"));
+  assert.ok(ids.includes("imgCrop") && ids.includes("imgOcr") && ids.includes("imgAnnotate") && ids.includes("imgAdjust"));
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");
-    assert.ok(tool.target === "py" || tool.target === "notebook");
+    assert.ok(tool.target === "py" || tool.target === "notebook" || tool.target === "image");
   }
   // 필수 버튼은 노출 설정 대상이 아니어야 한다.
   assert.ok(!TOGGLEABLE_TOOLS.some(t => t.cls === "run-go" || t.cls === "run-save"));
@@ -52,6 +54,8 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   assert.match(htmlSource, /data-settings-tab="tools"/);
   assert.match(htmlSource, /id="settingToolsPy"/);
   assert.match(htmlSource, /id="settingToolsNb"/);
+  assert.match(htmlSource, /id="settingToolsImg"/);
+  assert.match(appSource, /image: byId\("settingToolsImg"\)/);
   assert.match(appSource, /syncToolVisibilityChecks\(\)/);
   assert.match(appSource, /toolVisibility: collectToolVisibility\(\)/);
   assert.match(appSource, /applyToolVisibility\(\)/);
@@ -71,4 +75,21 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   assert.match(cssSource, /hide-tool-nbExport\s+\.nbv-save-group\s*>\s*\.nbv-run-menu/);
   assert.doesNotMatch(cssSource, /hide-tool-nbExport\s+\.nbv-save-group\s*[\,\{]/);
   assert.match(stateSource, /applyToolVisibility\(\);/);   // 부팅 시 1회 적용
+});
+
+test("이미지 편집기: 자르기·표시·보정은 딸린 UI까지 함께 숨기고, 켜 둔 모드는 정리한다", () => {
+  // 필수 버튼(저장)에는 숨김 클래스를 달지 않는다.
+  assert.doesNotMatch(imageSource, /run-save img-tool-|img-tool-\w+ run-save/);
+  // 자르기 세트: 버튼·'적용'·비율 프리셋·선택 상자
+  assert.equal((imageSource.match(/"img-tool-crop"/g) || []).length, 2);   // 자르기 + 적용
+  assert.match(cssSource, /hide-tool-imgCrop\s+\.img-crop-ratios/);
+  assert.match(cssSource, /hide-tool-imgCrop\s+\.img-crop-box/);
+  // 패널: 표시 패널은 .img-adjust 를 함께 쓰므로 보정 패널에는 전용 클래스가 있어야 한다.
+  assert.match(imageSource, /adjustPanel\.className = "img-adjust img-adjust-panel"/);
+  assert.match(cssSource, /hide-tool-imgAnnotate\s+\.img-annotate/);
+  assert.match(cssSource, /hide-tool-imgAdjust\s+\.img-adjust-panel/);
+  assert.doesNotMatch(cssSource, /hide-tool-imgAdjust\s+\.img-adjust[\s,\{]/);
+  // 숨김 즉시 켜져 있던 모드를 끄기 위한 알림·수신
+  assert.match(stateSource, /dispatchEvent\(new CustomEvent\("mn-tool-visibility"/);
+  assert.match(imageSource, /addEventListener\("mn-tool-visibility", onToolVisibility\)/);
 });

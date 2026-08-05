@@ -695,8 +695,8 @@ function wire(){
   let toolChecksBuilt = false;
   const buildToolVisibilityChecks = () => {
     if (toolChecksBuilt) return;
-    const hosts = { py: byId("settingToolsPy"), notebook: byId("settingToolsNb") };
-    if (!hosts.py || !hosts.notebook || typeof TOGGLEABLE_TOOLS === "undefined") return;
+    const hosts = { py: byId("settingToolsPy"), notebook: byId("settingToolsNb"), image: byId("settingToolsImg") };
+    if (!hosts.py || !hosts.notebook || !hosts.image || typeof TOGGLEABLE_TOOLS === "undefined") return;
     for (const tool of TOGGLEABLE_TOOLS){
       const host = hosts[tool.target]; if (!host) continue;
       const label = document.createElement("label"); label.className = "settings-check";
