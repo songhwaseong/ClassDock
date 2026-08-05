@@ -1,6 +1,8 @@
 "use strict";
 
 // Python 편집기의 실행 결과와 분리된 모달 터미널을 제공한다.
+// 터미널은 앱 전체에서 하나만 두고 열려 있는 py 문서들이 함께 쓴다. 세션·변수·명령 기록이
+// 파일을 옮겨도 이어지고, 다른 파일에서 열면 그 파일 폴더로 작업 폴더만 자동으로 옮긴다.
 // EXE에서는 PowerShell 명령을 로컬 런처가 실행하고, 일반 브라우저에서는
 // 같은 UI를 상태가 유지되는 Pyodide Python 콘솔로 사용한다.
 function createPythonTerminal(options){
@@ -10,8 +12,18 @@ function createPythonTerminal(options){
   if (!toggleButton) return {
     showResults:() => {},
     showTerminal:() => {},
+    close:() => {},
     destroy:() => {}
   };
+  return sharedPythonTerminal().attach(toggleButton, options);
+}
+
+createPythonTerminal.localConfirmed = false;
+createPythonTerminal.shared = null;
+
+// 모달·세션·로그·명령 기록은 여기서 한 번만 만들고, 문서마다 터미널 버튼만 등록(attach)한다.
+function sharedPythonTerminal(){
+  if (createPythonTerminal.shared) return createPythonTerminal.shared;
 
   const root = document.createElement("section"); root.className = "py-terminal";
   const head = document.createElement("div"); head.className = "out-head py-terminal-head";
@@ -71,44 +83,78 @@ function createPythonTerminal(options){
   let backendReady = null;
   let localBackend = false;
   let busy = false;
-  let destroyed = false;
   let activeTask = null;
   let localSessionId = "";
   let localShellOpening = null;
+  // 세션을 열 때 실제로 요청한 폴더(여는 도중 다른 파일에서 눌렀는지 판별용)와
+  // 그 폴더가 PC에 없어 런처가 상위 폴더로 대체했는지 여부.
+  let sessionRequestedCwd = "";
+  let sessionCwdFallback = false;
   let browserKernelStarted = false;
   let commandHistory = [];
   let historyIndex = 0;
   let completionState = null;
   let completionPending = false;
-  const browserKernelId = "py-terminal-" + Math.random().toString(36).slice(2);
+  // 모든 문서가 같은 커널을 쓰므로 브라우저 모드에서도 변수가 파일 사이에서 유지된다.
+  const browserKernelId = "py-terminal-shared";
   // 응답마다 연결을 닫는 로컬 HTTP 서버이므로 너무 짧은 폴링은 TIME_WAIT 연결을 급격히 늘린다.
   const terminalPollIntervalMs = 500;
   const terminalPollRetryLimit = 3;
 
-  const rawDocPath = String(
-    (options.ownerDoc && (options.ownerDoc.nativeAbsolutePath || options.ownerDoc.workspacePath || options.ownerDoc.relPath)) ||
-    (options.runCtx && (options.runCtx.workspacePath || options.runCtx.relPath)) || ""
-  );
-  const configuredCwd = String((options.runCtx && options.runCtx.cwd) || "");
+  // 등록된 터미널 버튼(문서 하나당 하나)과 현재 터미널이 바라보는 문서.
+  const entries = new Map();
+  let activeEntry = null;
+  // 세션을 새로 열다가 마지막 문서가 닫히는 경합을 세대 번호로 걸러낸다.
+  let generation = 0;
+  let shutdownTimer = 0;
+  // 새로고침처럼 문서를 닫고 곧바로 다시 여는 경우가 있어 잠깐 기다렸다 세션을 정리한다.
+  const shutdownDelayMs = 3000;
+
   const pathDir = (value) => {
     const normalized = String(value || "").replace(/\//g, "\\");
     const at = normalized.lastIndexOf("\\");
     return at > 0 ? normalized.slice(0, at) : "";
   };
-  const absoluteDocPath = /^[A-Za-z]:[\\/]/.test(rawDocPath) || /^\\\\/.test(rawDocPath);
-  let initialCwd = absoluteDocPath ? pathDir(rawDocPath) : (configuredCwd || pathDir(rawDocPath));
-  let currentCwd = initialCwd;
-
-  toggleButton.setAttribute("aria-haspopup", "dialog");
-  const setOpenState = (open) => {
-    toggleButton.classList.toggle("active", open);
-    toggleButton.setAttribute("aria-pressed", open ? "true" : "false");
-    toggleButton.setAttribute("aria-expanded", open ? "true" : "false");
-    toggleButton.title = open ? "터미널이 열려 있습니다" : "명령 터미널 열기";
+  const docCwdFor = (options) => {
+    const rawDocPath = String(
+      (options.ownerDoc && (options.ownerDoc.nativeAbsolutePath || options.ownerDoc.workspacePath || options.ownerDoc.relPath)) ||
+      (options.runCtx && (options.runCtx.workspacePath || options.runCtx.relPath)) || ""
+    );
+    const configuredCwd = String((options.runCtx && options.runCtx.cwd) || "");
+    const absoluteDocPath = /^[A-Za-z]:[\\/]/.test(rawDocPath) || /^\\\\/.test(rawDocPath);
+    return absoluteDocPath ? pathDir(rawDocPath) : (configuredCwd || pathDir(rawDocPath));
   };
+  const sameCwd = (a, b) => {
+    const normalize = (value) => String(value || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+    return normalize(a) === normalize(b);
+  };
+  const powerShellLiteral = (value) => "'" + String(value == null ? "" : value).replace(/'/g, "''") + "'";
+  // 작업공간 경로(가상 경로)는 사용자에게 보이는 실제 경로로 바꿔 프롬프트와 cd에 쓴다.
+  const resolveDisplayCwd = async (value) => {
+    if (!value || !localBackend || typeof displayPathForWorkspace !== "function") return value;
+    try {
+      const resolved = await displayPathForWorkspace(value);
+      return resolved || value;
+    } catch(_){ return value; }
+  };
+
+  let initialCwd = "";
+  let currentCwd = "";
+
+  const applyOpenStateTo = (button) => {
+    button.classList.toggle("active", isOpen);
+    button.setAttribute("aria-pressed", isOpen ? "true" : "false");
+    button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    // 터미널을 닫아도 명령은 계속 돌기 때문에 실행 중 점으로 알려 준다(서버를 띄워 둔 것을 잊지 않게).
+    button.classList.toggle("running", busy);
+    button.title = isOpen
+      ? "터미널이 열려 있습니다"
+      : (busy ? "명령이 실행 중입니다 · 눌러서 터미널 열기" : "명령 터미널 열기");
+  };
+  const setOpenState = () => { entries.forEach((entry) => applyOpenStateTo(entry.button)); };
   const closeTerminal = (restoreFocus=true) => {
     if (!isOpen) return;
-    isOpen = false; modal.hidden = true; setOpenState(false);
+    isOpen = false; modal.hidden = true; setOpenState();
     const focusTarget = opener; opener = null;
     if (restoreFocus && focusTarget && focusTarget.isConnected) setTimeout(() => focusTarget.focus(), 0);
   };
@@ -116,17 +162,36 @@ function createPythonTerminal(options){
     // 편집기 실행 결과는 뒤의 원래 결과 패널에 표시한다.
     closeTerminal(false);
   };
-  const showTerminal = () => {
-    if (destroyed) return;
+  const showTerminal = (entry) => {
+    const switched = !!entry && activeEntry !== entry;
+    if (entry) activeEntry = entry;
     if (!isOpen){
       opener = document.activeElement;
-      isOpen = true; modal.hidden = false; setOpenState(true);
+      isOpen = true; modal.hidden = false; setOpenState();
     }
-    ensureBackend().then((isLocal) => {
-      if (isLocal) ensureLocalShell().catch(() => {});
-      if (!destroyed && isOpen) setTimeout(() => input.focus(), 0);
+    ensureBackend().then(async (isLocal) => {
+      if (isLocal){
+        const target = await resolveDisplayCwd(activeEntry ? activeEntry.cwd : "");
+        if (target) initialCwd = target;
+        if (!localSessionId){
+          // 세션을 새로 열 때는 그 파일 폴더에서 바로 시작하므로 따로 옮길 필요가 없다.
+          if (target) currentCwd = target;
+          setPrompt();
+          await ensureLocalShell().catch(() => {});
+          // 다른 파일이 세션을 여는 중에 눌렀다면 그 세션은 다른 폴더에서 시작했으므로 옮겨 준다.
+          // 요청한 폴더가 PC에 없어 대체된 경우에는 다시 그 폴더로 옮기려 들지 않는다.
+          if (target && localSessionId && !sessionCwdFallback && !sameCwd(target, sessionRequestedCwd)){
+            await moveToDocFolder(target);
+          }
+        } else if (switched){
+          await moveToDocFolder(target);
+        }
+      }
+      if (isOpen) setTimeout(() => focusTerminal(), 0);
     }).catch(() => {});
   };
+  // 명령이 도는 동안에는 입력칸이 disabled 라 포커스를 못 받는다 → 카드로 보내 터미널 안에 머물게 한다.
+  const focusTerminal = () => { if (input.disabled) card.focus(); else input.focus(); };
 
   const scrollLog = () => {
     if (isOpen) log.scrollTop = log.scrollHeight;
@@ -145,6 +210,7 @@ function createPythonTerminal(options){
     busy = !!value;
     input.disabled = busy; runButton.disabled = busy; resetButton.disabled = busy;
     stopButton.disabled = !busy;
+    setOpenState();                                  // 열린 문서들의 터미널 버튼에 실행 중 점을 켜고 끈다
     if (!busy && isOpen) setTimeout(() => input.focus(), 0);
   };
   const setPrompt = () => {
@@ -160,17 +226,11 @@ function createPythonTerminal(options){
   };
   const ensureBackend = () => {
     if (backendReady) return backendReady;
-    backendReady = Promise.resolve(typeof pythonBackendAvailable === "function" ? pythonBackendAvailable() : false).then(async (available) => {
+    backendReady = Promise.resolve(typeof pythonBackendAvailable === "function" ? pythonBackendAvailable() : false).then((available) => {
       localBackend = !!available;
-      if (localBackend && initialCwd && typeof displayPathForWorkspace === "function"){
-        try {
-          const resolved = await displayPathForWorkspace(initialCwd);
-          if (resolved){ initialCwd = resolved; currentCwd = resolved; }
-        } catch(_){}
-      }
       mode.textContent = localBackend ? "로컬 PowerShell" : "브라우저 Python · Pyodide";
       intro.textContent = localBackend
-        ? "이 PC의 지속형 PowerShell에서 명령을 실행합니다. 현재 폴더와 변수는 다음 명령에도 유지됩니다."
+        ? "이 PC의 지속형 PowerShell에서 명령을 실행합니다. 현재 폴더와 변수는 다음 명령에도 유지됩니다. 열려 있는 파이썬 파일들이 이 터미널을 함께 씁니다."
         : "브라우저 안에서 Python을 실행합니다. 운영체제 명령과 subprocess는 사용할 수 없습니다.";
       resetButton.title = localBackend ? "PowerShell 변수와 작업 폴더 초기화" : "브라우저 Python 변수와 상태 초기화";
       setPrompt();
@@ -204,6 +264,8 @@ function createPythonTerminal(options){
   const ensureLocalShell = async () => {
     if (localSessionId) return localSessionId;
     if (localShellOpening) return localShellOpening;
+    const openedFor = generation;
+    const requestedCwd = currentCwd;
     localShellOpening = fetch("/terminal-session-open", {
       method:"POST",
       headers:{ "Content-Type":"application/octet-stream" },
@@ -213,11 +275,13 @@ function createPythonTerminal(options){
       const data = await response.json();
       const id = String(data.id || "");
       if (!id) throw new Error("PowerShell 세션을 시작하지 못했습니다.");
-      if (destroyed){
+      if (openedFor !== generation){
         fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
         throw new Error("터미널이 닫혔습니다.");
       }
       localSessionId = id;
+      sessionRequestedCwd = requestedCwd;
+      sessionCwdFallback = !!data.cwdFallback;
       if (data.cwd) currentCwd = String(data.cwd);
       if (data.cwdFallback){
         appendLog(
@@ -365,15 +429,18 @@ function createPythonTerminal(options){
     }
   };
 
-  const runLocalCommand = async (command, stdoutEl, stderrEl) => {
-    if (!createPythonTerminal.localConfirmed){
-      const confirmed = await confirmDialog(
-        "터미널 명령은 내 컴퓨터에서 직접 실행됩니다. 신뢰할 수 있는 명령만 실행하세요.",
-        "터미널 사용", "취소"
-      );
-      if (!confirmed) throw new Error("터미널 실행을 취소했습니다.");
-      createPythonTerminal.localConfirmed = true;
-    }
+  const confirmLocalUse = async () => {
+    if (createPythonTerminal.localConfirmed) return;
+    const confirmed = await confirmDialog(
+      "터미널 명령은 내 컴퓨터에서 직접 실행됩니다. 신뢰할 수 있는 명령만 실행하세요.",
+      "터미널 사용", "취소"
+    );
+    if (!confirmed) throw new Error("터미널 실행을 취소했습니다.");
+    createPythonTerminal.localConfirmed = true;
+  };
+
+  // 사용자가 친 명령과 앱이 자동으로 넣는 작업 폴더 이동이 같은 세션·같은 폴링을 쓴다.
+  const sendLocalCommand = async (command, stdoutEl, stderrEl) => {
     const sessionId = await ensureLocalShell();
     const response = await fetch("/terminal-session-run?id=" + encodeURIComponent(sessionId), {
       method:"POST",
@@ -417,6 +484,40 @@ function createPythonTerminal(options){
     }
   };
 
+  const runLocalCommand = async (command, stdoutEl, stderrEl) => {
+    await confirmLocalUse();
+    await sendLocalCommand(command, stdoutEl, stderrEl);
+  };
+
+  // 다른 파이썬 파일에서 터미널을 열면 변수는 그대로 두고 작업 폴더만 그 파일 폴더로 옮긴다.
+  // 같은 파일에서 다시 열 때는 사용자가 직접 옮긴 폴더를 되돌리지 않는다.
+  const moveToDocFolder = async (target) => {
+    if (!target || !localBackend || !localSessionId) return;
+    if (sameCwd(target, currentCwd)) return;
+    if (busy){
+      appendLog("명령이 실행 중이라 작업 폴더를 " + target + " 로 옮기지 않았습니다.", "py-terminal-status");
+      return;
+    }
+    setBusy(true);
+    const stdoutEl = appendLog("", "py-terminal-output");
+    const stderrEl = appendLog("", "py-terminal-error"); stderrEl.hidden = true;
+    try {
+      await sendLocalCommand("Set-Location -LiteralPath " + powerShellLiteral(target), stdoutEl, stderrEl);
+      if (stderrEl.textContent){
+        // 폴더가 지워졌거나 실제 경로가 아닌 경우 — PowerShell 원문 대신 무엇이 어긋났는지 알려 준다.
+        stderrEl.textContent = "작업 폴더를 " + target + " 로 옮기지 못했습니다. 지금 폴더는 " + currentCwd + " 입니다.";
+      } else {
+        stdoutEl.className = "py-terminal-status";
+        stdoutEl.textContent = "작업 폴더를 " + currentCwd + " 로 옮겼습니다.";
+      }
+    } catch(error){
+      stderrEl.hidden = false;
+      stderrEl.textContent = (error && error.message) ? error.message : String(error);
+    } finally {
+      setBusy(false); scrollLog();
+    }
+  };
+
   const browserConsoleSource = (command) =>
     "__mn_console_source = " + JSON.stringify(command) + "\n" +
     "try:\n" +
@@ -453,7 +554,7 @@ function createPythonTerminal(options){
   };
 
   const execute = async () => {
-    if (busy || destroyed) return;
+    if (busy) return;
     const command = input.value.trim();
     if (!command) return;
     input.value = ""; completionState = null;
@@ -519,18 +620,18 @@ function createPythonTerminal(options){
 
   const interruptWithKeyboard = (event) => {
     if (!busy || !isOpen || event.isComposing || event.repeat) return;
-    if (!event.ctrlKey || event.altKey || event.metaKey || String(event.key).toLowerCase() !== "c") return;
-    const focused = document.activeElement;
-    if (focused && focused !== document.body && !root.contains(focused)) return;
+    if (!event.ctrlKey || event.altKey || event.metaKey) return;
+    // 한글 입력 상태에서는 Ctrl+C 의 event.key 가 "ㅊ" 으로 와서 key 만 보면 중지가 걸리지 않는다.
+    const key = String(event.key || "").toLowerCase(), code = String(event.code || "");
+    if (key !== "c" && code !== "KeyC") return;
+    // 열려 있는 터미널은 화면 전체를 덮는 모달이라 포커스 위치를 따지지 않고 중지로 받는다.
+    // 예전에는 포커스를 따지다가 출력 로그를 클릭했을 때(포커스가 카드로 감), 닫았다 다시 열었을 때
+    // (포커스가 모달 밖 터미널 버튼에 남음) Ctrl+C 가 통째로 무시돼 중지 버튼밖에 못 썼다.
     event.preventDefault();
     event.stopPropagation();
     stop();
   };
 
-  toggleButton.addEventListener("click", () => {
-    if (isOpen) closeTerminal();
-    else showTerminal();
-  });
   runButton.addEventListener("click", execute);
   fontDownButton.addEventListener("click", () => bumpTerminalFont(-1));
   fontUpButton.addEventListener("click", () => bumpTerminalFont(1));
@@ -566,29 +667,88 @@ function createPythonTerminal(options){
     completionState = null;
     if (localBackend) mode.textContent = localSessionId ? "로컬 PowerShell · 준비됨" : "로컬 PowerShell";
   });
-  document.addEventListener("keydown", interruptWithKeyboard, true);
-  document.addEventListener("keydown", closeWithEscape, true);
-
-  return {
-    showResults,
-    showTerminal,
-    close:closeTerminal,
-    destroy:() => {
-      destroyed = true;
-      document.removeEventListener("keydown", interruptWithKeyboard, true);
-      document.removeEventListener("keydown", closeWithEscape, true);
-      modal.remove();
-      if (localSessionId){
-        const id = localSessionId;
-        localSessionId = "";
-        fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
-      }
-      if (activeTask && typeof activeTask.cancel === "function") activeTask.cancel();
-      if (!localBackend && browserKernelStarted && typeof startPyodideKernelRun === "function"){
-        startPyodideKernelRun({ kernelId:browserKernelId, reset:true }).promise.catch(() => {});
-      }
-    }
+  // 문서 전역 단축키는 파이썬 문서가 하나라도 열려 있는 동안에만 걸어 둔다.
+  let documentKeysBound = false;
+  const bindDocumentKeys = () => {
+    if (documentKeysBound) return;
+    documentKeysBound = true;
+    document.addEventListener("keydown", interruptWithKeyboard, true);
+    document.addEventListener("keydown", closeWithEscape, true);
   };
-}
+  const unbindDocumentKeys = () => {
+    if (!documentKeysBound) return;
+    documentKeysBound = false;
+    document.removeEventListener("keydown", interruptWithKeyboard, true);
+    document.removeEventListener("keydown", closeWithEscape, true);
+  };
 
-createPythonTerminal.localConfirmed = false;
+  // 파이썬 문서가 하나도 남지 않으면 셸까지 정리한다(앱 종료 시에는 런처가 남은 세션을 정리한다).
+  const shutdown = () => {
+    generation++;
+    closeTerminal(false);
+    activeEntry = null;
+    if (localSessionId){
+      const id = localSessionId;
+      localSessionId = "";
+      fetch("/terminal-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
+    }
+    if (activeTask && typeof activeTask.cancel === "function") activeTask.cancel();
+    activeTask = null;
+    if (!localBackend && browserKernelStarted && typeof startPyodideKernelRun === "function"){
+      startPyodideKernelRun({ kernelId:browserKernelId, reset:true }).promise.catch(() => {});
+    }
+    browserKernelStarted = false;
+    setBusy(false);
+    completionState = null;
+    sessionRequestedCwd = ""; sessionCwdFallback = false;
+    initialCwd = ""; currentCwd = "";
+    log.replaceChildren(intro);
+    unbindDocumentKeys();
+  };
+  const cancelShutdown = () => { if (shutdownTimer){ clearTimeout(shutdownTimer); shutdownTimer = 0; } };
+  const scheduleShutdown = () => {
+    cancelShutdown();
+    shutdownTimer = setTimeout(() => {
+      shutdownTimer = 0;
+      if (!entries.size) shutdown();
+    }, shutdownDelayMs);
+  };
+
+  const detach = (entry) => {
+    if (!entries.has(entry.button)) return;
+    entry.button.removeEventListener("click", entry.onClick);
+    entries.delete(entry.button);
+    if (activeEntry === entry) activeEntry = null;
+    if (!entries.size) scheduleShutdown();
+  };
+  const attach = (button, options) => {
+    cancelShutdown();
+    bindDocumentKeys();
+    const existing = entries.get(button);
+    if (existing){
+      existing.cwd = docCwdFor(options);
+      return existing.handle;
+    }
+    const entry = { button, cwd:docCwdFor(options), onClick:null, handle:null };
+    entry.onClick = () => {
+      // 이미 열려 있는 터미널을 다른 파일에서 누르면 닫지 않고 그 파일 폴더로 옮긴다.
+      if (isOpen && activeEntry !== entry) showTerminal(entry);
+      else if (isOpen) closeTerminal();
+      else showTerminal(entry);
+    };
+    entry.handle = {
+      showResults,
+      showTerminal:() => showTerminal(entry),
+      close:() => closeTerminal(),
+      destroy:() => detach(entry)
+    };
+    button.setAttribute("aria-haspopup", "dialog");
+    button.addEventListener("click", entry.onClick);
+    entries.set(button, entry);
+    applyOpenStateTo(button);
+    return entry.handle;
+  };
+
+  createPythonTerminal.shared = { attach };
+  return createPythonTerminal.shared;
+}

@@ -291,7 +291,7 @@ cd myOffice</code></pre>
   <li><strong>PDF에 핀</strong> — 현재 코드 줄을 PDF 위치에 연결</li>
   <li><strong>✏️ 필기</strong> — 편집 잠그고 코드·실행결과 위에 필기 (세션 한정, 문서 닫으면 사라짐)</li>
   <li><strong>라이브러리</strong> — 데이터분석·크롤링·DB 세트 원클릭 설치 (EXE+로컬 Python)</li>
-  <li><strong>결과 / 터미널</strong> — 실행 결과와 명령창을 전환. EXE에서는 현재 작업폴더를 유지하는 로컬 PowerShell, 일반 브라우저에서는 변수가 유지되는 Pyodide Python 콘솔로 동작</li>
+  <li><strong>결과 / 터미널</strong> — 실행 결과와 명령창을 전환. EXE에서는 현재 작업폴더를 유지하는 로컬 PowerShell, 일반 브라우저에서는 변수가 유지되는 Pyodide Python 콘솔로 동작. 터미널은 열려 있는 파이썬 파일들이 하나를 함께 씀</li>
   <li><strong>노트북으로 ▾</strong> — 본문을 누르면 현재 코드를 바로 노트북으로 변환. ▾에서 <strong>셀 나누기</strong>(줄번호 클릭으로 <code># %%</code> 경계 조정) 또는 <strong>자동분할</strong> 선택</li>
   <li><strong>A− / A+</strong> — 코드와 실행 결과의 문자 크기를 함께 조절. 표준 출력·오류·표·변수·진단 글자에 적용되고 그래프·이미지 크기는 유지</li>
   <li><strong>따라치기</strong> — 지금 코드를 흐린 교본으로 깔고 그 위에 그대로 쳐 보는 타자 연습(아래 참고)</li>
@@ -314,6 +314,8 @@ cd myOffice</code></pre>
   <li><strong>EXE</strong>: <code>.py</code> 파일의 작업폴더에서 지속형 PowerShell 실행. 터미널을 열 때 한 번만 준비하므로 <code>ls</code>, <code>dir</code>, <code>cd</code> 같은 짧은 명령이 빠르고 작업폴더·PowerShell 변수·환경변수가 다음 명령에도 유지됨. <strong>중지</strong> 또는 <kbd>Ctrl</kbd>+<kbd>C</kbd>로 실행 중인 명령과 자식 프로세스를 함께 종료하며 다음 명령에서 새 세션을 자동 시작</li>
   <li>EXE의 <strong>열기 → 폴더 열기</strong>는 Windows에서 선택한 실제 절대경로를 기억하므로, 자동 저장 폴더 위치와 관계없이 터미널이 원본 <code>.py</code>가 있는 폴더에서 시작합니다. 탐색기에서 화면으로 드래그한 폴더는 브라우저 보안상 절대경로를 알 수 없으므로 실제 경로가 필요한 경우 <strong>폴더 열기</strong>를 사용하세요</li>
   <li><strong>브라우저</strong>: 운영체제 명령 대신 Python 문장·식을 실행. 변수와 import 상태는 이어지며 <strong>초기화</strong>로 모두 지울 수 있음</li>
+  <li><strong>실행 중 표시</strong>: 명령이 도는 동안 <strong>터미널</strong> 버튼 왼쪽에 초록 점이 깜빡입니다. 터미널을 닫아도 명령은 계속 돌기 때문에(서버를 띄워 둔 경우 등) 이 점으로 알 수 있고, 다시 열어 <strong>중지</strong>나 <kbd>Ctrl</kbd>+<kbd>C</kbd>로 끝냅니다. 터미널이 닫혀 있는 동안에는 <kbd>Ctrl</kbd>+<kbd>C</kbd>가 평소대로 복사로 동작합니다</li>
+  <li><strong>여러 파일이 터미널 하나를 함께 사용</strong>: 어느 <code>.py</code>에서 열어도 같은 터미널·같은 세션이라 변수·환경변수·명령 기록이 파일을 옮겨도 이어집니다. 다른 파일에서 열면 작업 폴더만 그 파일 폴더로 자동으로 옮기고(<code>작업 폴더를 …로 옮겼습니다</code> 안내), 같은 파일에서 다시 열 때는 직접 <code>cd</code>한 폴더를 그대로 둡니다. 파이썬 파일을 모두 닫으면 세션이 정리됩니다</li>
   <li><kbd>Enter</kbd>는 실행, <kbd>Shift</kbd>+<kbd>Enter</kbd>는 여러 줄 입력, <kbd>↑</kbd>/<kbd>↓</kbd>는 명령 기록 이동</li>
   <li><strong>EXE 경로 자동완성</strong>: 경로 일부를 입력하고 <kbd>Tab</kbd>을 누르면 일치 후보들의 공통 이름까지 먼저 채우며, 다시 누르면 다음 후보로 이동합니다. <kbd>Shift</kbd>+<kbd>Tab</kbd>은 이전 후보로 이동합니다. <code>cd</code>·<code>Set-Location</code>에서는 폴더만 찾고 공백이 있는 경로는 자동으로 따옴표 처리</li>
   <li>로컬 명령은 PC에서 직접 실행되므로 신뢰할 수 있는 명령만 사용</li>

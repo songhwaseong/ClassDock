@@ -141,8 +141,18 @@ test("로컬 PowerShell 터미널은 Tab으로 경로를 자동 완성한다", (
 test("열린 터미널 모달은 포커스를 방해하지 않고 Ctrl+C로 중지한다", () => {
   assert.match(pythonTerminal, /const interruptWithKeyboard = \(event\) =>/);
   assert.match(pythonTerminal, /!busy \|\| !isOpen/);
-  assert.match(pythonTerminal, /focused !== document\.body && !root\.contains\(focused\)/);
-  assert.match(pythonTerminal, /String\(event\.key\)\.toLowerCase\(\) !== "c"/);
+  // 열린 터미널은 화면을 덮는 모달이라 포커스 위치로 중지를 막지 않는다.
+  // (로그를 클릭하면 카드로, 닫았다 다시 열면 모달 밖 터미널 버튼으로 포커스가 가 있었다.)
+  const interruptStart = pythonTerminal.indexOf("const interruptWithKeyboard");
+  const interruptEnd = pythonTerminal.indexOf("runButton.addEventListener", interruptStart);
+  const interrupt = pythonTerminal.slice(interruptStart, interruptEnd);
+  assert.ok(interruptStart > 0 && interruptEnd > interruptStart);
+  assert.doesNotMatch(interrupt, /document\.activeElement|contains\(focused\)/);
+  // 명령이 도는 동안에는 입력칸이 disabled 라 포커스를 카드로 보낸다(터미널 밖으로 새지 않게).
+  assert.match(pythonTerminal, /const focusTerminal = \(\) => \{ if \(input\.disabled\) card\.focus\(\); else input\.focus\(\); \}/);
+  // 한글 입력 상태에서는 event.key 가 "ㅊ" 으로 오므로 code 도 함께 본다.
+  assert.match(pythonTerminal, /const key = String\(event\.key \|\| ""\)\.toLowerCase\(\), code = String\(event\.code \|\| ""\)/);
+  assert.match(pythonTerminal, /if \(key !== "c" && code !== "KeyC"\) return/);
   assert.match(pythonTerminal, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+stop\(\);/);
   assert.match(pythonTerminal, /document\.removeEventListener\("keydown", interruptWithKeyboard, true\)/);
 });
