@@ -1080,7 +1080,11 @@ function focusSidebarDoc(id){
   while (node && node.parentId != null){          // 부모 그룹들을 따라 올라가며 펼침
     const parent = navNodeById(node.parentId);
     if (!parent) break;
-    if (parent.type === "group" && !parent.expanded){ parent.expanded = true; changed = true; }
+    if (parent.type === "group"){
+      if (!parent.expanded){ parent.expanded = true; changed = true; }
+      // 검색 중에 접어 둔 폴더라면 그 표시도 풀어야 이 줄이 실제로 그려진다
+      if (sidebarSearchCollapsed.delete(parent.nodeId)) changed = true;
+    }
     node = parent;
   }
   if (changed) renderSidebar();                   // 펼친 결과 반영(접힌 그룹 안 항목은 새로 그려짐)
@@ -2453,7 +2457,8 @@ function openSidebarGroupMenu(node, x, y){
     }
   }
   addSep();
-  add(node.expanded ? "폴더 접기" : "폴더 펼치기", () => { node.expanded = !node.expanded; renderSidebar(); });
+  add(sidebarGroupOpen(node) ? "폴더 접기" : "폴더 펼치기",
+    () => { setSidebarGroupOpen(node, !sidebarGroupOpen(node)); renderSidebar(); });
   document.body.appendChild(menu);
   const pad = 8, mw = menu.offsetWidth, mh = menu.offsetHeight;
   menu.style.left = Math.max(pad, Math.min(x, window.innerWidth - mw - pad)) + "px";
@@ -2604,6 +2609,37 @@ function extCategory(kind, name){
 }
 
 let sidebarExtFilter = "";
+
+/* ===== 검색·필터 중의 폴더 접기 =====
+   검색어나 확장자 필터가 걸리면 폴더를 강제로 펼쳐 결과가 접힌 폴더 안에 숨지 않게 한다.
+   그래서 그때 node.expanded 를 뒤집어 봐야 화면은 그대로였다(화살표만 바뀌고 안 닫힘).
+   대신 "검색 중에 사용자가 직접 접은 폴더"만 여기에 담아 두고 원래 트리의 접힘 상태는 건드리지 않는다.
+   검색어·필터가 바뀌면 표시를 비운다 → 새 결과는 다시 전부 펼친 채로 보인다. */
+let sidebarSearchCollapsed = new Set();      // nodeId 집합
+let sidebarSearchCollapsedKey = null;        // 이 집합이 대응하는 (검색어 + 확장자 필터)
+function sidebarSearchQuery(){
+  return String((byId("sbSearch") && byId("sbSearch").value) || "").trim().toLocaleLowerCase();
+}
+function sidebarFilterActive(){ return !!(sidebarSearchQuery() || sidebarExtFilter); }
+function syncSidebarSearchCollapse(query){
+  const key = query + " " + sidebarExtFilter;
+  if (key === sidebarSearchCollapsedKey) return;
+  sidebarSearchCollapsedKey = key;
+  sidebarSearchCollapsed.clear();
+}
+// 화면에 펼쳐 보일지 — 검색 중에는 "직접 접지 않았으면 펼침", 평소에는 node.expanded 그대로.
+function sidebarGroupOpen(node, filtering){
+  if (!node || node.type !== "group") return false;
+  if (filtering === undefined) filtering = sidebarFilterActive();
+  return filtering ? !sidebarSearchCollapsed.has(node.nodeId) : !!node.expanded;
+}
+function setSidebarGroupOpen(node, open, filtering){
+  if (!node || node.type !== "group") return;
+  if (filtering === undefined) filtering = sidebarFilterActive();
+  if (!filtering){ node.expanded = open; return; }
+  if (open) sidebarSearchCollapsed.delete(node.nodeId);
+  else sidebarSearchCollapsed.add(node.nodeId);
+}
 
 /* ===== 파일명 + 내용 자동 검색(텍스트·코드 한정, 비동기·디바운스·캐시) ===== */
 let contentMatchIds = new Set();             // 현재 질의에 내용이 일치하는 docId
@@ -3247,7 +3283,10 @@ function renderSidebar(){
   }
   const list = byId("sbList");
   list.innerHTML = "";
-  const query = String((byId("sbSearch") && byId("sbSearch").value) || "").trim().toLocaleLowerCase();
+  const query = sidebarSearchQuery();
+  syncSidebarSearchCollapse(query);            // 검색어·필터가 바뀌면 검색 중 접어 둔 표시를 놓아준다
+  const filtering = !!(query || sidebarExtFilter);
+  const groupOpen = (node) => sidebarGroupOpen(node, filtering);
   const childrenOf = (parentId) => navNodes.filter(n => n.parentId === parentId);
   const nodeName = (node) => {
     if (node.type === "group") return node.name || "";
@@ -3307,13 +3346,14 @@ function renderSidebar(){
         // 일반 클릭(아코디언): 펼칠 때 같은 레벨(형제) 폴더를 자동으로 접어 한 폴더만 열리게 한다.
         // 이미 펼쳐진 폴더라도 형제 중 열린 폴더가 있으면 접지 않고 형제만 접는다(첫 클릭부터 "이 폴더만 남기기").
         // 자기 혼자 열려 있을 때 클릭하면 그때 접힌다. Alt+클릭: 형제를 유지한 채 자기만 펴기/접기.
+        const open = groupOpen(node);
         const hasOpenSiblings = navNodes.some(n =>
-          n !== node && n.type === "group" && n.parentId === node.parentId && n.expanded);
-        if (!e.altKey && node.expanded && hasOpenSiblings){
-          collapseSiblingGroups(node);
+          n !== node && n.type === "group" && n.parentId === node.parentId && groupOpen(n));
+        if (!e.altKey && open && hasOpenSiblings){
+          collapseSiblingGroups(node, filtering);
         } else {
-          node.expanded = !node.expanded;
-          if (!e.altKey && node.expanded) collapseSiblingGroups(node);
+          setSidebarGroupOpen(node, !open, filtering);
+          if (!e.altKey && !open) collapseSiblingGroups(node, filtering);
         }
         renderSidebar();
       }
@@ -3369,7 +3409,7 @@ function renderSidebar(){
     }
     const twist = document.createElement("span");
     twist.className = "sb-twist";
-    twist.textContent = node.type === "group" ? (node.expanded ? "▾" : "▸") : "";
+    twist.textContent = node.type === "group" ? (groupOpen(node) ? "▾" : "▸") : "";
     if (node.type === "group") twist.title = "클릭: 이 폴더만 남기고 같은 레벨 폴더 접기 · Alt+클릭: 형제 유지한 채 자기만 토글";
     const ic = document.createElement("span");
     ic.className = "sb-ic";
@@ -3462,7 +3502,7 @@ function renderSidebar(){
     }
     list.appendChild(item);
     visibleCount++;
-    if (node.type === "group" && (node.expanded || query || sidebarExtFilter)) draw(node.nodeId, depth + 1);
+    if (node.type === "group" && groupOpen(node)) draw(node.nodeId, depth + 1);
   });
   draw(null);
   if (!visibleCount && (query || sidebarExtFilter)){
@@ -3551,10 +3591,12 @@ function renderSidebarSelectionBar(){
 
 // 같은 레벨(형제)의 펼쳐진 폴더를 접는다(node 자신은 유지). 아코디언 동작용 — 일반 클릭으로
 // 폴더를 펼칠 때 호출돼 한 폴더만 열리게 한다. 렌더는 호출자가 책임진다(node.expanded 반영과 함께 한 번만).
-function collapseSiblingGroups(node){
+// 검색·필터 중이면 원래 트리 대신 검색 한정 접힘 표시를 쓴다(sidebarSearchCollapsed).
+function collapseSiblingGroups(node, filtering){
+  if (filtering === undefined) filtering = sidebarFilterActive();
   for (const n of navNodes){
     if (n === node) continue;
-    if (n.type === "group" && n.parentId === node.parentId && n.expanded) n.expanded = false;
+    if (n.type === "group" && n.parentId === node.parentId && sidebarGroupOpen(n, filtering)) setSidebarGroupOpen(n, false, filtering);
   }
 }
 
