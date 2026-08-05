@@ -1593,8 +1593,17 @@ function parsePythonMarkedReport(stdout, marker){
   } catch(_){ return null; }
 }
 
-function finishPythonDiagnostics(rawReport, ui){
-  const diagnostics = rawReport ? normalizePythonDiagnostics(rawReport.diagnostics) : [];
+function finishPythonDiagnostics(rawReport, ui, preparedExtraDiagnostics){
+  // 하니스는 import 대상이 실제로 있는지 보지 않는다. 편집기가 작업공간 색인으로 찾아낸
+  // import 문제(없는 모듈·없는 이름)를 여기서 합쳐 요약 개수와 줄 표시에 함께 반영한다.
+  let extra = [];
+  if (rawReport && Array.isArray(preparedExtraDiagnostics)) extra = preparedExtraDiagnostics;
+  else if (rawReport && ui && typeof ui.extraDiagnostics === "function"){
+    try { extra = ui.extraDiagnostics() || []; } catch(_){ extra = []; }
+  }
+  const diagnostics = rawReport
+    ? normalizePythonDiagnostics((Array.isArray(rawReport.diagnostics) ? rawReport.diagnostics : []).concat(extra))
+    : [];
   const errors = diagnostics.filter(item => item.severity === "error").length;
   const warnings = diagnostics.filter(item => item.severity === "warning").length;
   if (!rawReport){

@@ -15,7 +15,7 @@ const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8"
 test("Python 실시간 진단은 입력을 모아 최신 코드 결과만 줄 표시에 반영한다", () => {
   assert.match(viewer, /const scheduleLiveDiagnostics = \(delay=700\)/);
   assert.match(viewer, /version === liveDiagVersion && source === editor\.getValue\(\)/);
-  assert.match(viewer, /editor\.setDiagnosticItems\(analysis\.diagnostics\)/);
+  assert.match(viewer, /editor\.setDiagnosticItems\(withImportProblems\(analysis\.diagnostics, source\)\)/);
   assert.match(editor, /const setDiagnosticItems = \(items\) =>/);
   assert.match(editor, /err-line-warning/);
   assert.match(editor, /current\.diagnostics\.push\(diagnostic\)/);

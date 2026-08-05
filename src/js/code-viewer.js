@@ -44,10 +44,15 @@ async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
 // 완성 팝업은 동기라 그 자리에서 디스크를 읽을 수 없다. 그래서 열린 문서로 먼저 답하고,
 // 비어 있는 파일은 백그라운드로 읽어 이 캐시에 채운다(다음 타이핑부터 후보에 들어온다).
 const workspacePyTextCache = new Map();
+// 끝내 읽지 못한(권한·스냅샷 만료·너무 큰) 파일의 문서 id. 캐시에는 빈 본문으로 들어가므로
+// 이 목록이 없으면 '내용이 빈 __init__.py' 와 구분되지 않는다 — import 검사가 이 둘을 다르게 본다.
+const workspacePyUnreadable = new Set();
 const WORKSPACE_PY_MAX_BYTES = 512 * 1024;   // 이보다 큰 .py 는 자동완성 인덱스에서 제외(대개 생성 코드)
 const WORKSPACE_PY_PREWARM_MAX = 400;        // 한 번에 읽어 둘 파일 수 상한(대형 폴더 보호)
 let workspacePyPrewarmBusy = false;
-let workspacePyPrewarmQueuedOwner = null;
+let workspacePyPrewarmOwner = null;
+const workspacePyPrewarmQueue = [];
+const workspacePyPrewarmCallbacks = new Map();
 
 function workspacePyStamp(doc){
   const file = doc && doc.sourceFile;
@@ -85,46 +90,76 @@ function pruneWorkspacePyTextCache(){
   if (!workspacePyTextCache.size) return;
   const alive = new Set(docs.map(doc => doc && doc.id));
   for (const id of [...workspacePyTextCache.keys()]) if (!alive.has(id)) workspacePyTextCache.delete(id);
+  for (const id of [...workspacePyUnreadable]) if (!alive.has(id)) workspacePyUnreadable.delete(id);
 }
 // 열지 않은 .py 를 한 번씩 읽어 캐시에 채운다. 한 파일마다 프레임을 양보해 타이핑을 막지 않는다.
 // 못 읽거나(권한·스냅샷 만료) 너무 큰 파일도 빈 본문으로 표시해 둔다 — 그래야 타이핑할 때마다
 // 같은 파일을 다시 시도하지 않는다. 파일이 바뀌면 stamp 가 달라져 자동으로 다시 읽는다.
 async function runWorkspacePythonPrewarm(ownerDoc){
   const rows = workspacePythonImportTargets(ownerDoc).rows;
-  let read = 0;
+  let read = 0, remaining = false;
   for (const row of rows){
     if (workspacePyText(row.doc) != null) continue;
     const stamp = workspacePyStamp(row.doc);
     const file = row.doc.sourceFile;
     if (!file || typeof file.arrayBuffer !== "function" || file.size > WORKSPACE_PY_MAX_BYTES){
       workspacePyTextCache.set(row.doc.id, { stamp, text:"" });   // 읽지 않기로 한 파일 — 다시 시도하지 않는다
+      workspacePyUnreadable.add(row.doc.id);
       continue;
     }
-    if (read >= WORKSPACE_PY_PREWARM_MAX) break;                  // 나머지는 다음 차례에(표시를 남기지 않는다)
+    if (read >= WORKSPACE_PY_PREWARM_MAX){ remaining = true; break; } // 다음 유휴 차례에 이어 읽는다
     read++;
     let text = null;
     try { text = typeof openDocRunText === "function" ? await openDocRunText(row.doc) : null; }
     catch(_){ text = null; }
     workspacePyTextCache.set(row.doc.id, { stamp, text:typeof text === "string" ? text : "" });
+    if (typeof text === "string") workspacePyUnreadable.delete(row.doc.id);
+    else workspacePyUnreadable.add(row.doc.id);
     await new Promise(resolve => setTimeout(resolve, 0));
   }
   pruneWorkspacePyTextCache();
+  return { remaining };
 }
-// 프리워밍 예약 — 동시에 하나만 돌리고, 도중에 다시 요청되면 끝난 뒤 한 번 더 훑는다.
-function scheduleWorkspacePythonPrewarm(ownerDoc){
+// 프리워밍 예약 — 동시에 하나만 돌리고 400개 단위로 끝까지 이어 읽는다.
+// 완료 콜백은 import 검사가 보류됐던 편집기의 진단을 입력 없이 다시 실행하는 데 쓴다.
+function scheduleWorkspacePythonPrewarm(ownerDoc, onReady){
   if (!ownerDoc) return;
-  if (workspacePyPrewarmBusy){ workspacePyPrewarmQueuedOwner = ownerDoc; return; }
+  if (typeof onReady === "function") {
+    let callbacks = workspacePyPrewarmCallbacks.get(ownerDoc);
+    if (!callbacks){ callbacks = new Set(); workspacePyPrewarmCallbacks.set(ownerDoc, callbacks); }
+    callbacks.add(onReady);
+  }
+  if (workspacePyPrewarmOwner !== ownerDoc && !workspacePyPrewarmQueue.includes(ownerDoc)) workspacePyPrewarmQueue.push(ownerDoc);
+  drainWorkspacePythonPrewarmQueue();
+}
+function drainWorkspacePythonPrewarmQueue(){
+  if (workspacePyPrewarmBusy || !workspacePyPrewarmQueue.length) return;
+  const ownerDoc = workspacePyPrewarmQueue.shift();
   workspacePyPrewarmBusy = true;
+  workspacePyPrewarmOwner = ownerDoc;
+  let outcome = { remaining:false };
   const start = () => runWorkspacePythonPrewarm(ownerDoc)
+    .then(result => { outcome = result || outcome; })
     .catch(e => console.warn("작업공간 자동완성 인덱스 준비 실패:", e))
     .finally(() => {
       workspacePyPrewarmBusy = false;
-      const queuedOwner = workspacePyPrewarmQueuedOwner;
-      workspacePyPrewarmQueuedOwner = null;
-      if (queuedOwner) scheduleWorkspacePythonPrewarm(queuedOwner);
+      workspacePyPrewarmOwner = null;
+      if (outcome.remaining) {
+        if (!workspacePyPrewarmQueue.includes(ownerDoc)) workspacePyPrewarmQueue.push(ownerDoc);
+      } else {
+        const callbacks = workspacePyPrewarmCallbacks.get(ownerDoc);
+        workspacePyPrewarmCallbacks.delete(ownerDoc);
+        if (callbacks) for (const callback of callbacks) try { callback(); } catch(_){ }
+      }
+      drainWorkspacePythonPrewarmQueue();
     });
   if (typeof requestIdleCallback === "function") requestIdleCallback(start, { timeout:2000 });
   else setTimeout(start, 200);
+}
+function workspacePythonPrewarmReady(ownerDoc){
+  if (!ownerDoc || !workspacePythonImportTargets(ownerDoc).rows.some(row => workspacePyText(row.doc) == null))
+    return Promise.resolve();
+  return new Promise(resolve => scheduleWorkspacePythonPrewarm(ownerDoc, resolve));
 }
 // 작업공간 모듈 색인(자동 import 후보 · import 문 완성이 함께 쓴다).
 // 타이핑마다 모든 .py 를 다시 훑지 않도록 지난 색인을 재사용한다. 재사용 판정은 본문 문자열
@@ -135,7 +170,8 @@ function workspacePyIndexMemoHit(currentPath, projectRoot, entries){
   if (!memo || memo.currentPath !== currentPath || memo.projectRoot !== projectRoot) return null;
   if (memo.entries.length !== entries.length) return null;
   for (let i = 0; i < entries.length; i++){
-    if (memo.entries[i].path !== entries[i].path || memo.entries[i].source !== entries[i].source) return null;
+    if (memo.entries[i].path !== entries[i].path || memo.entries[i].source !== entries[i].source
+      || memo.entries[i].unreadable !== entries[i].unreadable) return null;
   }
   return memo.index;
 }
@@ -147,7 +183,7 @@ function workspacePythonModuleIndex(ownerDoc){
   for (const row of targets.rows){
     const source = workspacePyText(row.doc);
     if (source == null){ missing = true; continue; }
-    entries.push({ path:row.path, source });
+    entries.push({ path:row.path, source, unreadable:workspacePyUnreadable.has(row.doc.id) });
   }
   if (missing) scheduleWorkspacePythonPrewarm(ownerDoc);   // 아직 못 읽은 파일은 백그라운드로 채운다
   // import 문(from 패키지…)과 __init__.py 로 추정한 실행 기준 폴더를 넘긴다 — 실행 때 통하는
@@ -183,6 +219,26 @@ function workspacePythonProjectRoot(ownerDoc){
   workspacePythonModuleIndex(ownerDoc);
   const memo = workspacePyIndexMemo;
   return memo && memo.projectRoot ? memo.projectRoot : "";
+}
+// 작업공간 모듈 색인으로 import 경로·이름을 검사한다(파이썬 진단 하니스는 import 대상의 실존을
+// 확인하지 않는다 — 없는 모듈이든 없는 함수든 이름만 있으면 정의된 것으로 친다).
+// 아직 못 읽은 .py 가 하나라도 있으면 "없다"고 말할 근거가 부족하므로 통째로 건너뛴다.
+function workspacePythonImportAnalysis(ownerDoc, source, onReady){
+  const empty = { problems:[], resolvedKeys:[] };
+  if (!ownerDoc || typeof pythonWorkspaceImportAnalysis !== "function") return empty;
+  const rows = workspacePythonImportTargets(ownerDoc).rows;
+  if (!rows.length) return empty;
+  if (rows.some(row => workspacePyText(row.doc) == null)){
+    scheduleWorkspacePythonPrewarm(ownerDoc, onReady);
+    return empty;
+  }
+  const index = workspacePythonModuleIndex(ownerDoc);
+  if (!index || !index.files.length) return empty;
+  try { return pythonWorkspaceImportAnalysis(source, index); }
+  catch(e){ console.warn("import 검사 실패:", e); return empty; }
+}
+function workspacePythonImportDiagnostics(ownerDoc, source, onReady){
+  return workspacePythonImportAnalysis(ownerDoc, source, onReady).problems;
 }
 // Jedi 가 미러 안에서 찾은 정의를 원래 작업공간 탭으로 되돌려 연다(임시 복사본을 열지 않도록).
 async function openWorkspaceDefinitionTarget(ownerDoc, hit){
@@ -2275,6 +2331,13 @@ async function renderCode(file, host, ext, profile, runCtx){
   ui.markError = (n) => editor.markError(n);                    // 실행 에러 줄 강조 / 해제(수정 시 자동 해제)
   ui.markErrorLines = (lines) => editor.markErrorLines(lines);
   ui.setDiagnosticItems = (items) => editor.setDiagnosticItems(items); // 진단 심각도·설명까지 보존해 줄 색상과 호버에 반영
+  // 수동 진단(진단 버튼)도 import 검사 결과를 함께 세도록 넘겨준다(화면 표시와 같은 목록).
+  ui.extraDiagnostics = () => {
+    const source = editor.getValue();
+    const knowledge = workspacePythonImportAnalysis(ownerDoc, source);
+    return knowledge.problems.concat(jediImportDiagnostics(source,
+      new Set(knowledge.problems.map(item => item.line)), new Set(knowledge.resolvedKeys)));
+  };
   ui.focusError = (n) => { editor.markError(n); editor.ta.focus(); };
   ui.focusLine = (n) => editor.focusLine(n);
   ui.showTraceLine = (n) => editor.showTraceLine(n);
@@ -2722,6 +2785,94 @@ async function renderCode(file, host, ext, profile, runCtx){
   const liveDiagnosticsEnabled = !isNotebook && typeof runPythonLiveDiagnostics === "function";
   let liveDiagTimer = 0, liveDiagVersion = 0, liveDiagRunning = false;
   let liveDiagPending = false, liveDiagPaused = false, liveDiagDestroyed = false;
+  // ── Jedi 로 한 번 더 확인하는 import 검사 ─────────────────────────────────
+  // 작업공간 색인은 '프로젝트 안의 모듈'만 안다. Jedi 는 설치 패키지까지 볼 수 있는 대신
+  // 요청마다 파이썬 프로세스가 뜨므로, import 구성이 실제로 바뀌었을 때만 묻고 결과를 기억한다.
+  // 결과는 key(모듈·이름) 기준이라 줄이 밀려도 다시 묻지 않고 새 위치에만 붙는다.
+  let jediImportSig = null, jediImportBad = new Set(), jediImportTask = null, jediImportSeq = 0;
+  const jediImportTargets = (source) =>
+    (typeof pythonImportCheckTargets === "function" ? pythonImportCheckTargets(source) : []);
+  const ensureJediImportCheck = async (source) => {
+    if (typeof waitForJediReady !== "function" || !(await waitForJediReady())) return false; // 준비 중이면 완료까지 기다린다
+    if (typeof requestJediImportChecks !== "function") return false;
+    const targets = jediImportTargets(source);
+    const signature = targets.map(item => item.key).join("\n");
+    if (signature === jediImportSig) return false;
+    // 앞 요청이 진행 중이면 끝난 뒤 현재 소스로 다시 판단한다. 요청 실패 때도 새 입력 검사가
+    // 사라지지 않게 busy 상태에서 단순 반환하지 않는다.
+    if (jediImportTask) {
+      const pending = jediImportTask;
+      try { await pending; } catch(_){ }
+      if (jediImportTask === pending) jediImportTask = null;
+      return ensureJediImportCheck(source);
+    }
+    if (!targets.length){ jediImportSig = signature; jediImportBad = new Set(); return true; }
+    const seq = ++jediImportSeq;
+    const relPath = String((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath || ownerDoc.name)) || "");
+    const task = requestJediImportChecks(source, targets, relPath, workspacePythonProjectRoot(ownerDoc))
+      .then(unresolved => {
+        if (seq !== jediImportSeq || !unresolved) return false;                // 뒤늦은 응답·Jedi 실패는 버린다
+        jediImportSig = signature;
+        jediImportBad = new Set(unresolved.map(index => targets[index] && targets[index].key).filter(Boolean));
+        return true;
+      })
+      .catch(() => false);
+    jediImportTask = task;
+    try { return await task; }
+    finally { if (jediImportTask === task) jediImportTask = null; }
+  };
+  const scheduleJediImportCheck = (source) => {
+    ensureJediImportCheck(source).then(changed => {
+      if (changed && !liveDiagDestroyed) scheduleLiveDiagnostics(120);         // 새 결과를 줄 표시에 반영
+    }).catch(() => {});
+  };
+  const jediImportDiagnostics = (source, skipLines, skipKeys) =>
+    (jediImportBad.size && typeof pythonJediImportProblems === "function"
+      ? pythonJediImportProblems(jediImportTargets(source), jediImportBad, skipLines, skipKeys) : []);
+  // 수동 진단은 실시간 진단을 일시정지하므로, 여기서 작업공간 프리워밍과 Jedi 검사를 직접 기다린다.
+  ui.prepareExtraDiagnostics = async (source) => {
+    await workspacePythonPrewarmReady(ownerDoc);
+    await ensureJediImportCheck(source);
+    const knowledge = workspacePythonImportAnalysis(ownerDoc, source);
+    return knowledge.problems.concat(jediImportDiagnostics(source,
+      new Set(knowledge.problems.map(item => item.line)), new Set(knowledge.resolvedKeys)));
+  };
+  const rerunAfterWorkspacePrewarm = () => {
+    if (!liveDiagDestroyed) scheduleLiveDiagnostics(120);
+  };
+  let liveDiagBaseItems = [], liveDiagSource = "", suppressedImportLine = 0;
+  // 하니스 진단에 import 검사 결과(작업공간 색인 → 오류, Jedi → 경고)를 얹는다.
+  // 커서가 놓인 줄은 빼둔다 — import 경로를 치는 도중에 빨간 줄이 깜빡이지 않도록.
+  const withImportProblems = (items, source) => {
+    // 편집 중일 때만 커서 줄을 빼둔다 — 붙여넣고 다른 곳을 보는 중이라면 그 줄도 그대로 알려야 한다.
+    const typing = editor.ta && document.activeElement === editor.ta;
+    const caretLine = typing ? lineNumberAtOffset(source, editor.ta.selectionStart) : 0;
+    const knowledge = workspacePythonImportAnalysis(ownerDoc, source, rerunAfterWorkspacePrewarm);
+    const workspaceAll = knowledge.problems;
+    const workspace = workspaceAll.filter(item => item.line !== caretLine);
+    scheduleJediImportCheck(source);
+    const jediAll = jediImportDiagnostics(source, new Set(workspaceAll.map(item => item.line)),
+      new Set(knowledge.resolvedKeys));
+    const jedi = jediAll.filter(item => item.line !== caretLine);
+    suppressedImportLine = caretLine && workspaceAll.concat(jediAll).some(item => item.line === caretLine)
+      ? caretLine : 0;
+    return workspace.length || jedi.length ? [...items, ...workspace, ...jedi] : items;
+  };
+  // 입력 중인 import 줄의 경고를 숨겼다면 커서가 그 줄을 떠나는 순간 다시 붙인다.
+  // 소스는 그대로이므로 무거운 Python 진단 하니스를 재실행하지 않고 직전 기본 결과를 재사용한다.
+  const refreshSuppressedImport = (outsideEditor=false) => {
+    if (!suppressedImportLine || liveDiagDestroyed || liveDiagPaused || ui.running) return;
+    const source = editor.getValue();
+    const caretLine = outsideEditor ? 0 : lineNumberAtOffset(source, editor.ta.selectionStart);
+    if (caretLine === suppressedImportLine) return;
+    suppressedImportLine = 0;
+    if (source === liveDiagSource) editor.setDiagnosticItems(withImportProblems(liveDiagBaseItems, source));
+    else scheduleLiveDiagnostics(120);
+  };
+  editor.ta.addEventListener("selectionchange", () => refreshSuppressedImport(false));
+  editor.ta.addEventListener("click", () => refreshSuppressedImport(false));
+  editor.ta.addEventListener("keyup", () => refreshSuppressedImport(false));
+  editor.ta.addEventListener("blur", () => refreshSuppressedImport(true));
   const runLiveDiagnostics = async (version, source) => {
     if (!liveDiagnosticsEnabled || liveDiagDestroyed || liveDiagPaused || ui.running) { liveDiagPending = true; return; }
     if (liveDiagRunning){ liveDiagPending = true; return; }
@@ -2729,7 +2880,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     try {
       const analysis = await runPythonLiveDiagnostics(source, ui.fileBase);
       if (!liveDiagDestroyed && !liveDiagPaused && !ui.running && version === liveDiagVersion && source === editor.getValue()){
-        editor.setDiagnosticItems(analysis.diagnostics);
+        liveDiagBaseItems = analysis.diagnostics;
+        liveDiagSource = source;
+        editor.setDiagnosticItems(withImportProblems(analysis.diagnostics, source));
         // 문법이 완성돼 AST가 만들어졌을 때만 미사용 판정을 교체한다.
         // `a.`처럼 입력 중인 SyntaxError에서는 위치 보정한 이전 표시를 유지해 흰색으로 깜빡이지 않게 한다.
         if (analysis.unusedReady){ editor.setUnusedRanges(analysis.unused); editor.setParamRanges(analysis.params); }
@@ -2757,6 +2910,14 @@ async function renderCode(file, host, ext, profile, runCtx){
     const version = liveDiagVersion;
     liveDiagTimer = setTimeout(() => runLiveDiagnostics(version, source), delay);
   };
+  let stopJediProjectSyncWatch = (typeof onJediProjectSynced === "function")
+    ? onJediProjectSynced(() => {
+      // 미러가 준비되기 전에 받은 '못 찾음' 결과는 더 이상 유효하지 않다.
+      jediImportSig = null;
+      jediImportBad = new Set();
+      jediImportSeq++;
+      scheduleLiveDiagnostics(120);
+    }) : () => {};
   ui.pauseLiveDiagnostics = () => {
     liveDiagPaused = true;
     liveDiagVersion++;
@@ -2772,6 +2933,8 @@ async function renderCode(file, host, ext, profile, runCtx){
     liveDiagVersion++;
     liveDiagPending = false;
     clearTimeout(liveDiagTimer);
+    stopJediProjectSyncWatch();
+    stopJediProjectSyncWatch = () => {};
   };
   const persistDraft = () => {
     clearTimeout(draftTimer); draftTimer = 0;

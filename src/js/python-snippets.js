@@ -1455,6 +1455,7 @@ function openSnippetGallery(){
 // 줄번호·스크롤 동기화, Tab=공백 4칸. getValue()로 현재 내용을 읽는다(저장 기능은 없음 — 실시간 편집+실행).
 // ===== Jedi(로컬 파이썬) 문맥 자동완성 — 가능할 때만, 안 되면 로컬 완성으로 폴백 =====
 let _jediBackend = null;   // null=미확인 | "pending" | true | false
+let _jediProbePromise = null;
 let _pythonImportIndex = [];
 let _pythonImportIndexState = "idle"; // idle | loading | building | ready | unavailable
 let _pythonImportIndexRetry = 0;
@@ -1493,19 +1494,30 @@ function pythonIndexedImportCandidates(prefix){
 }
 
 function ensureJediProbe(){
-  if (_jediBackend !== null) return;                       // 한 번만 확인(결과 캐시)
-  if (location.protocol !== "http:" && location.protocol !== "https:"){ _jediBackend = false; return; }
+  if (_jediBackend === true || _jediBackend === false) return Promise.resolve(_jediBackend); // 확인 결과 캐시
+  if (_jediProbePromise) return _jediProbePromise;         // 준비 중인 한 요청을 모든 소비자가 함께 기다린다
+  if (location.protocol !== "http:" && location.protocol !== "https:"){
+    _jediBackend = false;
+    return Promise.resolve(false);
+  }
   _jediBackend = "pending";
-  fetch("/can-complete", { method: "GET" })                // 백그라운드: 로컬 파이썬+Jedi 준비(없으면 서버가 1회 설치)
+  _jediProbePromise = fetch("/can-complete", { method: "GET" }) // 백그라운드: 로컬 파이썬+Jedi 준비(없으면 서버가 1회 설치)
     .then(res => res.ok ? res.text() : "no")
     .then(t => {
       _jediBackend = (String(t).trim().toLowerCase() === "yes");
       if (_jediBackend && _jediProjectPending) scheduleJediProjectSync(_jediProjectPending);
       else if (!_jediBackend) _jediProjectPending = null;
+      return _jediBackend;
     })
-    .catch(() => { _jediBackend = false; _jediProjectPending = null; });
+    .catch(() => { _jediBackend = false; _jediProjectPending = null; return false; })
+    .finally(() => { _jediProbePromise = null; });
+  return _jediProbePromise;
 }
 const jediReady = () => _jediBackend === true;
+async function waitForJediReady(){
+  if (jediReady()) return true;
+  return (await ensureJediProbe()) === true;
+}
 
 // ===== Jedi 프로젝트 인지 — 작업공간을 서버 임시폴더에 미러링 =====
 // 브라우저 폴더 핸들(showDirectoryPicker)에는 실제 디스크 경로가 없어서, 그대로는 Jedi 가
@@ -1517,6 +1529,12 @@ const JEDI_PROJECT_MAX_BYTES = 32 * 1024 * 1024;
 let _jediProjectTimer = 0;
 let _jediProjectBusy = false;
 let _jediProjectPending = null;
+const _jediProjectSyncListeners = new Set();
+function onJediProjectSynced(listener){
+  if (typeof listener !== "function") return () => {};
+  _jediProjectSyncListeners.add(listener);
+  return () => _jediProjectSyncListeners.delete(listener);
+}
 function buildJediProjectBundle(files){
   const encoder = new TextEncoder();
   const chunks = []; let total = 0;
@@ -1540,10 +1558,13 @@ function buildJediProjectBundle(files){
 }
 async function sendJediProjectSync(files){
   const bundle = buildJediProjectBundle(files);
-  if (!bundle) return;
+  if (!bundle) return false;
   try {
-    await fetch("/python-project-sync", { method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:bundle });
-  } catch(e){ /* 미러가 없으면 지금까지처럼 코드 텍스트만으로 완성한다 */ }
+    const res = await fetch("/python-project-sync", { method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:bundle });
+    if (!res.ok) return false;
+    for (const listener of [..._jediProjectSyncListeners]) try { listener(); } catch(_){ }
+    return true;
+  } catch(e){ return false; /* 미러가 없으면 지금까지처럼 코드 텍스트만으로 완성한다 */ }
 }
 function scheduleJediProjectSync(files){
   if (!Array.isArray(files) || !files.length || _jediBackend === false) return;
@@ -1614,6 +1635,28 @@ async function requestJediDefinition(source, line, column, relPath, projectRoot)
     const data = await res.json();
     return data && data.ok ? data : data || null;
   } catch(e){ return null; }
+}
+// import 문마다 Jedi 로 정의를 찾아본다. 정의 찾기와 같은 러너·같은 엔드포인트를 쓰되,
+// 파이썬 프로세스를 import 개수만큼 띄우지 않도록 위치 목록을 한 번에 실어 보낸다.
+// 결과 unresolved 는 보낸 targets 의 인덱스 목록 — 그 자리에서 정의를 못 찾았다는 뜻이다.
+async function requestJediImportChecks(source, targets, relPath, projectRoot){
+  // 자리 하나당 25ms 안팎이 든다. 서버가 8초에 프로세스를 끊으므로 넉넉히 그 안쪽으로 자른다.
+  const rows = (Array.isArray(targets) ? targets : []).slice(0, 120);
+  if (!rows.length) return [];
+  const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 10000) : 0;   // 응답이 없으면 포기(편집을 막지 않는다)
+  try {
+    const res = await fetch("/definition", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source:String(source == null ? "" : source), mode:"imports",
+        path:String(relPath || ""), root:String(projectRoot || ""),
+        targets:rows.map(item => ({ line:item.line, column:item.column })) }),
+      signal: controller ? controller.signal : undefined });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.ok !== true || !Array.isArray(data.unresolved)) return null;
+    return data.unresolved.map(value => parseInt(value, 10)).filter(value => value >= 0 && value < rows.length);
+  } catch(e){ return null; }
+  finally { if (timer) clearTimeout(timer); }
 }
 async function readLocalDefinitionFile(path){
   // Jedi가 C 확장 모듈(.dll/.pyd 등)을 정의 위치로 돌려주는 경우가 있다.

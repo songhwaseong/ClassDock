@@ -5635,6 +5635,29 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 "            if p:\n" +
                 "                print(json.dumps({'ok': True, 'path': str(p), 'workspacePath': to_workspace(p), 'line': getattr(d, 'line', 1) or 1, 'column': getattr(d, 'column', 0) or 0, 'name': getattr(d, 'name', '') or '', 'type': getattr(d, 'type', '') or ''})); sys.exit(0)\n" +
                 "        print(json.dumps({'ok': False, 'reason': 'builtin'})); sys.exit(0)\n" +
+                // import 검사: 위치 목록을 한 번에 받아 각 자리에서 정의를 찾아본다(프로세스 1회).
+                // 못 찾은 자리의 인덱스만 돌려준다 — 앱이 그 자리에 경고 표시를 붙인다.
+                "    elif mode == 'imports':\n" +
+                "        targets = data.get('targets') or []\n" +
+                "        unresolved = []\n" +
+                "        for index, target in enumerate(targets[:120]):\n" +
+                "            try:\n" +
+                "                at_line = int(target.get('line', 1)); at_col = int(target.get('column', 0))\n" +
+                "            except Exception:\n" +
+                "                continue\n" +
+                "            found = []\n" +
+                "            try:\n" +
+                "                found = script.goto(at_line, at_col, follow_imports=True, follow_builtin_imports=True)\n" +
+                "            except TypeError:\n" +
+                "                try: found = script.goto(at_line, at_col)\n" +
+                "                except Exception: found = []\n" +
+                "            except Exception:\n" +
+                "                found = []\n" +
+                "            if not found:\n" +
+                "                try: found = script.infer(at_line, at_col)\n" +
+                "                except Exception: found = []\n" +
+                "            if not found: unresolved.append(index)\n" +
+                "        print(json.dumps({'ok': True, 'unresolved': unresolved})); sys.exit(0)\n" +
                 "    elif mode == 'help':\n" +
                 "        names = []\n" +
                 "        try:\n" +

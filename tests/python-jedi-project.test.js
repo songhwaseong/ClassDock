@@ -66,7 +66,7 @@ function loadProjectSync(options={}){
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  let body = "let _jediBackend = null;\n" + snippets.slice(probeStart, probeEnd) + snippets.slice(syncStart, syncEnd);
+  let body = "let _jediBackend = null, _jediProbePromise = null;\n" + snippets.slice(probeStart, probeEnd) + snippets.slice(syncStart, syncEnd);
   if (options.maxBytes != null) body = body.replace("32 * 1024 * 1024", String(options.maxBytes));
   vm.runInContext(body + ";this.scheduleJediProjectSync=scheduleJediProjectSync;this.buildJediProjectBundle=buildJediProjectBundle;", ctx);
   return { ctx, timers, requests };
@@ -92,6 +92,8 @@ test("작업공간 미러는 색인이 바뀔 때만, 그것도 묶어서 보낸
   assert.match(snippets, /if \(_jediBackend && _jediProjectPending\) scheduleJediProjectSync\(_jediProjectPending\);/);
   assert.match(snippets, /if \(_jediProjectBusy \|\| _jediProjectTimer\) return;/);
   assert.match(snippets, /fetch\("\/python-project-sync", \{ method:"POST"/);
+  assert.match(snippets, /for \(const listener of \[\.\.\._jediProjectSyncListeners\]\)/);
+  assert.match(viewer, /onJediProjectSynced\(\(\) => \{[\s\S]*jediImportSig = null;[\s\S]*scheduleLiveDiagnostics\(120\)/);
   assert.match(snippets, /if \(total \+ 8 \+ pathText\.length \+ sourceText\.length > JEDI_PROJECT_MAX_BYTES\) return null;/);
   // 완성·도움말·정의 요청 모두 현재 파일 경로와 실행 기준 폴더를 함께 보낸다.
   assert.match(snippets, /path:String\(relPath \|\| ""\), root:String\(projectRoot \|\| ""\) \}\) \}\);/);

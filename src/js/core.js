@@ -1247,18 +1247,22 @@
     const projectRoot = options && options.projectRoot != null ? normalize(options.projectRoot) : null;
     const rootIndex = projectRoot == null ? -1 : bases.indexOf(projectRoot);
     if (rootIndex > 0) bases.unshift(...bases.splice(rootIndex, 1));
-    const modulePartsFor = (value) => {
+    const modulePathsFor = (value) => {
       const path = normalize(value);
-      if (!/\.(?:py|pyw|pyi)$/i.test(path)) return null;
+      if (!/\.(?:py|pyw|pyi)$/i.test(path)) return [];
+      const rows = [];
       for (const base of bases) {
         if (base && path !== base && !path.startsWith(base + "/")) continue;
         let relative = base ? path.slice(base.length).replace(/^\/+/, "") : path;
         relative = relative.replace(/\.(?:py|pyw|pyi)$/i, "");
         let parts = relative.split("/").filter(Boolean);
         if (parts[parts.length - 1] === "__init__") parts = parts.slice(0, -1);
-        if (parts.length && parts.every(isPythonIdentifier)) return parts;
+        if (parts.length && parts.every(isPythonIdentifier)) {
+          const modulePath = parts.join("/");
+          if (!rows.includes(modulePath)) rows.push(modulePath);
+        }
       }
-      return null;
+      return rows;
     };
     const symbolsOf = (source) => {
       const rows = [];
@@ -1272,10 +1276,22 @@
     const files = (Array.isArray(entries) ? entries : [])
       .map((entry) => ({
         path:normalize(entry && entry.path),
-        source:String((entry && entry.source) == null ? "" : entry.source)
+        source:String((entry && entry.source) == null ? "" : entry.source),
+        unreadable:!!(entry && entry.unreadable)
       }))
       .filter((entry) => entry.path && entry.path !== current && /\.(?:py|pyw|pyi)$/i.test(entry.path))
-      .map((entry) => ({ path:entry.path, moduleParts:modulePartsFor(entry.path), symbols:symbolsOf(entry.source) }))
+      .map((entry) => {
+        const bindings = pythonModuleBindings(entry.source);
+        const modulePaths = modulePathsFor(entry.path);
+        // import 검사(pythonWorkspaceImportProblems)가 쓰는 "이 모듈이 가진 이름" 목록.
+        // hasSource 는 "내용을 안다"는 뜻이다 — 못 읽은 파일(unreadable)만 false 로 두고
+        // 내용이 빈 __init__.py 는 '가진 이름이 없는 모듈'로 정확히 취급한다.
+        return {
+          path:entry.path, moduleParts:modulePaths.length ? modulePaths[0].split("/") : null,
+          modulePaths, symbols:symbolsOf(entry.source),
+          exports:bindings.names, wildcard:bindings.wildcard, hasSource:!entry.unreadable
+        };
+      })
       .filter((entry) => entry.moduleParts && entry.moduleParts.length)
       .sort((a, b) => a.moduleParts.length - b.moduleParts.length || a.path.localeCompare(b.path));
     return { currentPath:current, files };
@@ -1384,6 +1400,299 @@
       add(parts[base.length], "module");                        // 다음 단계 하위 모듈·패키지
     }
     return rows;
+  }
+
+  // ── 작업공간 기준 import 검사 ───────────────────────────────────────────────
+  // 모듈이 가진 이름(다른 파일이 from … import 로 가져갈 수 있는 이름)을 모은다.
+  // 여기서는 "넉넉하게" 잡는 편이 옳다 — 못 찾은 이름을 오류라고 잘못 말하는 것보다,
+  // 조건부 정의·들여쓰기 안의 정의까지 이름으로 인정해 조용히 넘어가는 쪽이 안전하다.
+  function pythonModuleBindings(source) {
+    const text = String(source == null ? "" : source);
+    const names = new Set();
+    let wildcard = false;
+    const bind = (value) => { if (isPythonIdentifier(value)) names.add(value); };
+    const bindList = (value) => String(value || "").split(",").forEach((part) => bind(part.trim()));
+    let match;
+    const scan = (re, handle) => { re.lastIndex = 0; while ((match = re.exec(text))) handle(match); };
+    scan(/^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm, (m) => bind(m[1]));
+    scan(/^[ \t]*([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)[ \t]*(?::[^=\n]+)?=(?!=)/gm, (m) => bindList(m[1]));
+    // a = b = value 같은 연쇄 대입은 왼쪽의 모든 이름을 모은다.
+    scan(/^[ \t]*([A-Za-z_]\w*(?:[ \t]*=[ \t]*[A-Za-z_]\w*)+)[ \t]*=(?!=)/gm,
+      (m) => m[1].split("=").forEach((name) => bind(name.trim())));
+    scan(/^[ \t]*for[ \t]+([A-Za-z_]\w*(?:[ \t]*,[ \t]*[A-Za-z_]\w*)*)[ \t]+in\b/gm, (m) => bindList(m[1]));
+    scan(/^[ \t]*(?:with|except)\b[^\n#]*?\bas[ \t]+([A-Za-z_]\w*)/gm, (m) => bind(m[1]));
+    // 실제 import 문 파서를 재사용해 괄호·역슬래시 여러 줄과 별칭을 같은 규칙으로 처리한다.
+    for (const row of pythonImportStatements(text)) {
+      if (row.kind === "import") {
+        for (const item of row.names) bind(item.asname || item.name.split(".")[0]);
+      } else {
+        for (const item of row.names) {
+          if (item.name === "*") wildcard = true;
+          else bind(item.asname || item.name);
+        }
+      }
+    }
+    // 모듈 __getattr__(PEP 562)은 어떤 이름이든 만들어 낼 수 있으니 검사를 포기한다.
+    if (names.has("__getattr__")) wildcard = true;
+    return { names:[...names], wildcard };
+  }
+
+  // 소스의 import 문을 위치까지 함께 읽는다. 괄호로 이어진 여러 줄과 역슬래시 이어쓰기를 합치고,
+  // 삼중 따옴표 문자열 안(문서의 예시 코드)은 건너뛴다 — 예시까지 검사하면 오탐이 된다.
+  function pythonImportStatements(source) {
+    const text = String(source == null ? "" : source);
+    const lines = text.split("\n");
+    const lineStarts = [];
+    for (let i = 0, at = 0; i < lines.length; i++) { lineStarts.push(at); at += lines[i].length + 1; }
+    const positionAt = (offset) => {
+      let low = 0, high = lineStarts.length - 1;
+      while (low < high) { const mid = (low + high + 1) >> 1; if (lineStarts[mid] <= offset) low = mid; else high = mid - 1; }
+      return { line:low + 1, column:offset - lineStarts[low] };
+    };
+    // 주석은 길이를 유지한 채 공백으로 지운다 — 문장 안 위치가 원본 오프셋과 계속 같도록.
+    const blankComment = (line) => {
+      const at = line.indexOf("#");
+      return at < 0 ? line : line.slice(0, at) + " ".repeat(line.length - at);
+    };
+    const tripleAfter = (line, state) => {
+      let mode = state;
+      for (let i = 0; i < line.length; i++) {
+        const three = line.slice(i, i + 3);
+        if (three === '"""' || three === "'''") {
+          if (!mode) { mode = three; i += 2; }
+          else if (mode === three) { mode = null; i += 2; }
+        }
+      }
+      return mode;
+    };
+    // 깊이 0의 쉼표로 자르되 각 조각의 원본 오프셋을 유지한다.
+    const splitTop = (body, base) => {
+      const parts = [];
+      let depth = 0, start = 0;
+      for (let i = 0; i <= body.length; i++) {
+        const ch = body[i];
+        if (i === body.length || (ch === "," && depth === 0)) {
+          parts.push({ text:body.slice(start, i), offset:base + start });
+          start = i + 1;
+        } else if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") depth--;
+      }
+      return parts;
+    };
+    const named = (piece) => {
+      const item = /^(\s*)([A-Za-z_][\w.]*|\*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/.exec(piece.text.replace(/\\/g, " "));
+      if (!item) return null;
+      return { name:item[2], asname:item[3] || "", offset:piece.offset + item[1].length };
+    };
+    const rows = [];
+    let triple = null;
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const openState = triple;
+      triple = tripleAfter(raw, triple);
+      if (openState) continue;                                  // 문자열 안에서 시작한 줄은 코드가 아니다
+      if (!/^[ \t]*(?:from|import)[ \t]/.test(raw)) continue;
+      let stmt = blankComment(raw);
+      let last = i;
+      // 괄호가 닫히지 않았거나 역슬래시로 이어지면 다음 줄까지 읽는다(줄바꿈 포함, 오프셋 유지).
+      const unbalanced = (value) => {
+        let depth = 0;
+        for (const ch of value) { if (ch === "(") depth++; else if (ch === ")") depth--; }
+        return depth > 0;
+      };
+      while (last + 1 < lines.length && (unbalanced(stmt) || /\\[ \t]*$/.test(stmt))) {
+        last++;
+        stmt += "\n" + blankComment(lines[last]);
+        triple = tripleAfter(lines[last], triple);
+      }
+      const base = lineStarts[i];
+      const fromMatch = /^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]*(?:\\\s*)?\bimport\b/.exec(stmt.replace(/\n/g, " "));
+      if (fromMatch) {
+        const level = fromMatch[1].length;
+        const moduleAt = stmt.indexOf(fromMatch[1] + fromMatch[2], stmt.indexOf("from") + 4);
+        const importAt = stmt.indexOf("import", moduleAt + fromMatch[1].length + fromMatch[2].length);
+        if (importAt < 0) { i = last; continue; }
+        let bodyStart = importAt + "import".length, bodyEnd = stmt.length;
+        let body = stmt.slice(bodyStart, bodyEnd);
+        const open = body.indexOf("(");
+        if (open >= 0) {
+          const close = body.lastIndexOf(")");
+          bodyStart += open + 1;
+          bodyEnd = close > open ? bodyStart + (close - open - 1) : stmt.length;
+          body = stmt.slice(bodyStart, bodyEnd);
+        }
+        rows.push({
+          kind:"from", level, module:fromMatch[2],
+          module_:positionAt(base + Math.max(0, moduleAt)),
+          names:splitTop(body, bodyStart).map(named).filter(Boolean)
+            .map((item) => ({ name:item.name, asname:item.asname, at:positionAt(base + item.offset) }))
+        });
+        i = last;
+        continue;
+      }
+      const importAt = /^[ \t]*import[ \t]/.test(stmt) ? stmt.indexOf("import") : -1;
+      if (importAt < 0) { i = last; continue; }
+      const bodyStart = importAt + "import".length;
+      rows.push({
+        kind:"import",
+        names:splitTop(stmt.slice(bodyStart), bodyStart).map(named).filter(Boolean)
+          .map((item) => ({ name:item.name, asname:item.asname, at:positionAt(base + item.offset) }))
+      });
+      i = last;
+    }
+    return rows;
+  }
+
+  // import 문 → Jedi 에게 "여기 정의가 있느냐"고 물어볼 자리 목록.
+  // 칸은 이름 바로 뒤(끝)를 가리킨다 — Jedi 의 goto 가 커서 위치 기준으로 이름을 잡기 때문.
+  // key 는 줄이 밀려도 같은 대상을 가리키는 이름표다. 결과를 key 로 기억해 두면 위(다른 줄)에
+  // 한 줄을 넣었다고 해서 파이썬 프로세스를 다시 띄우지 않아도 된다.
+  function pythonImportCheckTargets(source) {
+    const rows = [];
+    const add = (key, kind, label, module, at, length) => {
+      if (!at) return;
+      rows.push({ key, kind, label, module, line:at.line, column:at.column + length });
+    };
+    for (const stmt of pythonImportStatements(source)) {
+      if (stmt.kind === "import") {
+        for (const item of stmt.names) {
+          if (!item.name || item.name === "*") continue;
+          add("module:" + item.name, "module", item.name, "", item.at, item.name.length);
+        }
+        continue;
+      }
+      const dotted = String(stmt.module || "");
+      const shown = ".".repeat(stmt.level) + dotted;
+      // 상대 import 의 모듈 자리는 점만 있을 수 있어 위치를 잡기 어렵다 — 이름 쪽만 확인한다.
+      if (dotted && !stmt.level) add("module:" + dotted, "module", dotted, "", stmt.module_, dotted.length);
+      for (const item of stmt.names) {
+        if (!item.name || item.name === "*") continue;
+        add("name:" + shown + "|" + item.name, "name", item.name, shown, item.at, item.name.length);
+      }
+    }
+    return rows;
+  }
+
+  // Jedi 가 정의를 찾지 못한 자리 → 경고 진단. "없다"가 아니라 "찾지 못했다"고 적는다 —
+  // 동적으로 만들어지는 이름은 실제로 있는데도 Jedi 가 못 찾을 수 있어서다.
+  function pythonJediImportProblems(targets, unresolvedKeys, skipLines, skipKeys) {
+    const bad = unresolvedKeys instanceof Set ? unresolvedKeys : new Set(unresolvedKeys || []);
+    if (!bad.size) return [];
+    const skip = skipLines instanceof Set ? skipLines : new Set(skipLines || []);
+    const skipTarget = skipKeys instanceof Set ? skipKeys : new Set(skipKeys || []);
+    const list = Array.isArray(targets) ? targets : [];
+    // 모듈 자체를 못 찾았으면 그 모듈에서 가져오는 이름은 따로 말하지 않는다(같은 줄에 두 번 적히지 않도록).
+    const failedModules = new Set(list.filter((item) => item.kind === "module" && bad.has(item.key))
+      .map((item) => item.label));
+    const rows = [];
+    for (const item of list) {
+      if (!bad.has(item.key) || skip.has(item.line) || skipTarget.has(item.key)) continue;
+      if (item.kind === "name" && failedModules.has(item.module)) continue;
+      rows.push(item.kind === "module" ? {
+        severity:"warning", line:item.line, column:item.column, code:"PY-IMPORT-JEDI",
+        message:"'" + item.label + "' 모듈의 정의를 찾지 못했어요.",
+        hint:"설치되지 않은 패키지이거나 경로가 틀렸을 수 있어요. 철자와 pip 설치를 확인하세요."
+      } : {
+        severity:"warning", line:item.line, column:item.column, code:"PY-IMPORT-JEDI",
+        message:"'" + item.module + "' 에서 '" + item.label + "' 의 정의를 찾지 못했어요.",
+        hint:"그 모듈에 있는 이름인지 확인하세요. 실행할 때 만들어지는 이름이라면 실제로는 있을 수도 있어요."
+      });
+    }
+    return rows;
+  }
+
+  // 열려 있는 작업공간의 .py 색인만 보고 import 경로/이름이 실제로 있는지 확인한다.
+  // 설치 패키지·표준 라이브러리는 색인에 없으므로 아예 검사하지 않는다 — 최상위 이름이
+  // 작업공간 모듈일 때만(=우리가 아는 프로젝트일 때만) 문제를 보고한다.
+  function pythonWorkspaceImportAnalysis(source, index) {
+    const files = (index && Array.isArray(index.files)) ? index.files : [];
+    if (!files.length) return { problems:[], resolvedKeys:[] };
+    const current = normalizeWorkspacePath((index && index.currentPath) || "");
+    const currentDir = current.split("/").slice(0, -1);
+    // 색인이 현재 파일부터 작업공간 루트까지 계산한 가능한 모듈 경로로 맞춘다.
+    // 단순 파일 경로 suffix 로 맞추면 vendor/requests.py 때문에 외부 requests 패키지까지
+    // 작업공간 모듈로 오인할 수 있다. exact=true 인 상대 import 만 실제 파일 경로로 계산한다.
+    const wantsFor = (rel) => ["py", "pyw", "pyi"]
+      .reduce((out, ext) => out.concat([rel + "." + ext, rel + "/__init__." + ext]), []);
+    const hits = (rel, exact) => {
+      const wants = wantsFor(rel);
+      return files.filter((file) => exact
+        ? wants.includes(file.path)
+        : (Array.isArray(file.modulePaths) ? file.modulePaths.includes(rel) : file.moduleParts.join("/") === rel));
+    };
+    const isPackage = (rel, exact) => files.some((file) => exact
+      ? file.path.startsWith(rel + "/")
+      : (Array.isArray(file.modulePaths) ? file.modulePaths : [file.moduleParts.join("/")])
+        .some((modulePath) => modulePath.startsWith(rel + "/")));
+    const known = (rel, exact) => hits(rel, exact).length > 0 || isPackage(rel, exact);
+    const problems = [];
+    const resolvedKeys = new Set();
+    const addModuleProblem = (shown, at) => {
+      problems.push({
+        severity:"error", line:at.line, column:at.column, code:"PY-IMPORT-MODULE",
+        message:"'" + shown + "' 모듈을 작업공간에서 찾지 못했어요.",
+        hint:"폴더·파일 이름과 철자를 확인하세요. 실행 기준 폴더에서 시작하는 경로여야 해요."
+      });
+    };
+    const addNameProblem = (module, name, at) => {
+      problems.push({
+        severity:"error", line:at.line, column:at.column, code:"PY-IMPORT-NAME",
+        message:"'" + module + "' 안에 '" + name + "' 이름이 없어요.",
+        hint:"그 파일에 정의된 이름인지, 철자가 맞는지 확인하세요."
+      });
+    };
+    const dottedToRel = (dotted) => String(dotted || "").split(".").filter(Boolean).join("/");
+    for (const row of pythonImportStatements(source)) {
+      if (row.kind === "import") {
+        for (const item of row.names) {
+          const dotted = String(item.name || "");
+          if (!dotted || dotted === "*") continue;
+          if (!known(dotted.split(".")[0], false)) continue;      // 작업공간 밖 패키지 — 건드리지 않는다
+          if (!known(dottedToRel(dotted), false)) addModuleProblem(dotted, item.at);
+          else resolvedKeys.add("module:" + dotted);
+        }
+        continue;
+      }
+      // from … import … — 먼저 모듈이 놓인 폴더 경로를 구한다.
+      const shown = ".".repeat(row.level) + String(row.module || "");
+      const parts = String(row.module || "").split(".").filter(Boolean);
+      let rel = "", exact = false;
+      if (row.level > 0) {
+        // 상대 import 는 패키지 안에서만 쓸 수 있다 — 올라갈 폴더가 모자라면 판단하지 않는다.
+        if (currentDir.length < row.level) continue;
+        const base = currentDir.slice(0, currentDir.length - (row.level - 1));
+        if (!isPackage(base.join("/"), true)) continue;           // 그 폴더를 색인이 모르면 판단 보류
+        rel = base.concat(parts).join("/");
+        exact = true;
+      } else {
+        if (!parts.length) continue;
+        if (!known(parts[0], false)) continue;
+        rel = parts.join("/");
+      }
+      if (!known(rel, exact)) { addModuleProblem(shown, row.module_); continue; }
+      if (row.module && !row.level) resolvedKeys.add("module:" + row.module);
+      const found = hits(rel, exact);
+      if (found.length > 1) continue;                             // 같은 경로가 여럿 — 어느 파일인지 확정할 수 없다
+      const file = found[0] || null;
+      if (file && (!file.hasSource || file.wildcard)) continue;   // 못 읽었거나 import * 이면 이름 검사 포기
+      const label = rel.split("/").join(".") || shown;
+      for (const item of row.names) {
+        const name = String(item.name || "");
+        if (!name || name === "*") continue;
+        const targetKey = "name:" + shown + "|" + name;
+        if (known(rel + "/" + name, exact)) { resolvedKeys.add(targetKey); continue; } // 하위 모듈을 가져오는 형태
+        if (file) {
+          if (!file.exports.includes(name)) addNameProblem(label, name, item.at);
+          else resolvedKeys.add(targetKey);
+        }
+        else addModuleProblem(label + "." + name, item.at);       // __init__.py 없는 패키지 → 하위 모듈만 가능
+      }
+    }
+    return { problems, resolvedKeys:[...resolvedKeys] };
+  }
+
+  function pythonWorkspaceImportProblems(source, index) {
+    return pythonWorkspaceImportAnalysis(source, index).problems;
   }
 
   function normalizePythonImport(importText) {
@@ -3669,7 +3978,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonModuleBindings, pythonImportStatements, pythonWorkspaceImportAnalysis, pythonWorkspaceImportProblems, pythonImportCheckTargets, pythonJediImportProblems, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand,

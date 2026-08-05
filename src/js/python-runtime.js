@@ -54,6 +54,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
     invokeCancel(cancelCurrent);
   };
   ui.cancelRun = requestStop;
+  let preparedExtraDiagnostics = null;
   btn.textContent = "■";
   btn.title = "현재 Python 실행 중지";
   btn.setAttribute("aria-label", btn.title);
@@ -87,6 +88,12 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
     appendPythonErrorHelp(outPanel, stderr, location, ui, caller);
   };
   try {
+    if (diagnosing && typeof ui.prepareExtraDiagnostics === "function") {
+      setStatus("import 경로 확인 중…");
+      try { preparedExtraDiagnostics = await ui.prepareExtraDiagnostics(studentSource); }
+      catch(_){ preparedExtraDiagnostics = null; }
+      throwIfCancelled();
+    }
     const backend = await pythonBackendAvailable();
     throwIfCancelled();
     if (backend && !diagnosing && !_localPyConfirmed){
@@ -209,7 +216,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
         throwIfCancelled();
         if (diagnosing){
           const parsed = parsePythonMarkedReport(r.stdout, PY_DIAG_MARKER);
-          const summary = finishPythonDiagnostics(parsed && parsed.report, ui);
+          const summary = finishPythonDiagnostics(parsed && parsed.report, ui, preparedExtraDiagnostics);
           if (!parsed) applyErr(1, r.stderr || "진단 결과를 읽지 못했습니다.");
           setStatus(parsed
             ? ("진단 완료 · 오류 " + summary.errors + " · 경고 " + summary.warnings + " · 로컬 파이썬")
@@ -299,7 +306,7 @@ async function runPythonSource(src, ui, runCtx, keepEditorFocus, options){
       }
       if (diagnosing){
         const parsed = parsePythonMarkedReport(r.stdout, PY_DIAG_MARKER);
-        const summary = finishPythonDiagnostics(parsed && parsed.report, ui);
+        const summary = finishPythonDiagnostics(parsed && parsed.report, ui, preparedExtraDiagnostics);
         if (!parsed) applyErr(1, r.stderr || "진단 결과를 읽지 못했습니다.");
         setStatus(parsed
           ? ("진단 완료 · 오류 " + summary.errors + " · 경고 " + summary.warnings + " · 브라우저(Pyodide)")
