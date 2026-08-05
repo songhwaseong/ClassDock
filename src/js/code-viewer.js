@@ -1002,10 +1002,27 @@ async function renderCode(file, host, ext, profile, runCtx){
     let treeData = null, treeDataFor = null;      // JSON.parse 결과 캐시(같은 원문이면 재파싱 생략)
     let treeEl = null;                            // 현재 표시 중인 트리 요소(모두 펼치기/접기 버튼이 제어)
     let activeEditor = null, viewJumpTimer = 0;
+    let pendingViewAnchor = null;                 // 편집 → 보기 복귀 시 되살릴 위치 {line, clientY, scrollLeft} — showView 가 한 번 쓰고 비운다
     let findOnlyEdit = false;                     // Ctrl+F(찾기)로 편집 모드에 들어온 경우 — 찾기를 닫으면 보기로 복귀
     let viewMode = "";                            // "view"/"edit"/"preview" — 현재 표시 모드
     let openReadonlyFind = null;                  // 읽기 전용(대용량·편집 잠금) 찾기 바 열기 — showView 가 채운다
     let openReadonlyGoto = null;                  // 보기 화면의 줄 이동 창 열기 — showView 가 채운다
+
+    /* 보기 → 편집 전환: 보기 화면에서 그 줄이 놓였던 화면 높이(clientY)에 맞춰 편집기를 스크롤한다.
+       예전처럼 스크롤 값만 복사하면, 청크 렌더(대용량)마다 붙는 여백·툴바 높이 차이가 쌓여 편집기가
+       다른 자리에서 열렸다. textarea 는 wrap=off(줄바꿈 없음)라 (줄 번호 × 줄높이)로 정확히 계산된다. */
+    const scrollEditorToAnchor = (ta, line, clientY, scrollLeft) => {
+      if (!ta) return;
+      try {
+        const cs = getComputedStyle(ta);
+        const lh = parseFloat(cs.lineHeight) || 19, padTop = parseFloat(cs.paddingTop) || 16;
+        // 보기 화면이 편집 화면보다 세로로 길다 — 아래쪽 끝을 클릭했으면 그대로 맞출 때 캐럿이 화면 밖에 남는다.
+        let offsetY = clientY - ta.getBoundingClientRect().top;
+        offsetY = Math.max(0, Math.min(offsetY, Math.max(0, ta.clientHeight - lh * 2)));
+        ta.scrollTop = Math.max(0, padTop + (Math.max(1, line) - 1) * lh - offsetY);
+        if (scrollLeft != null) ta.scrollLeft = scrollLeft;   // null = 가로는 브라우저가 캐럿에 맞추게 둔다(줄바꿈 보기)
+      } catch(_){}
+    };
 
     const teardownActive = () => {
       clearTimeout(viewJumpTimer);
@@ -1017,6 +1034,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     const showView = () => {
       teardownActive(); host.innerHTML = ""; if (ownerDoc) ownerDoc.codeEditor = null;
       viewMode = "view"; openReadonlyFind = null; openReadonlyGoto = null;
+      // 보던 자리 그대로 편집을 여는 함수 — 아래 본문을 그린 뒤 채운다(툴바가 먼저 만들어지므로 예약 선언).
+      let enterEditAtView = null;
+      const openEditFromView = () => { if (enterEditAtView) enterEditAtView(); else showEdit(); };
       // 내용 검색 등에서 줄 이동이 예약돼 있으면 줄번호가 있는 코드 보기로 받는다.
       if (treeMode && ownerDoc && ownerDoc.pendingFocusLine) treeMode = false;
       if (canEdit || jsonPretty || isHtml || isMd){
@@ -1085,7 +1105,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         if (canEdit){
           const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
           editBtn.title = "이 파일을 편집하고 저장 — 본문을 더블클릭하거나 클릭 후 바로 입력해도 켜져요";
-          editBtn.addEventListener("click", showEdit);
+          editBtn.addEventListener("click", openEditFromView);   // 더블클릭과 같은 자리(보던 화면)에서 열린다
           bar.appendChild(editBtn);
         }
         host.appendChild(bar);
@@ -1109,6 +1129,11 @@ async function renderCode(file, host, ext, profile, runCtx){
         lineOffsets.push(sourceOffset);
         sourceOffset += allLines[i].length + 1;
       }
+      const lineAtOffset = (offset) => {                       // 글자 위치 → 줄 번호(1-based). lineOffsets 는 오름차순이라 이분 탐색
+        let lo = 0, hi = lineOffsets.length - 1;
+        while (lo < hi){ const mid = (lo + hi + 1) >> 1; if (lineOffsets[mid] <= offset) lo = mid; else hi = mid - 1; }
+        return lo + 1;
+      };
       const longLine = /[^\n]{2000}/.test(viewText);            // 초장문 단일 라인 → 줄바꿈으로 가로 레이아웃 폭발 회피
       const big = definitionSource || heavy || lineN > 6000;   // 외부 정의/다줄 파일은 청크 가상 렌더(보이는 부분만 레이아웃)
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
@@ -1245,6 +1270,52 @@ async function renderCode(file, host, ext, profile, runCtx){
         jump.hidden = false; clearTimeout(viewJumpTimer); viewJumpTimer = setTimeout(() => { jump.hidden = true; jumpWord.hidden = true; }, 2400);
       };
       const flashJumpBar = () => { jump.hidden = false; clearTimeout(viewJumpTimer); viewJumpTimer = setTimeout(() => { jump.hidden = true; }, 2400); };
+      // 그 줄 그 칸이 가로로 어디쯤인지(스크롤을 뺀 내용 좌표).
+      const columnContentLeft = (line, column) => {
+        const text = allLines[line - 1] || "";
+        const col = Math.max(0, Math.min(Math.floor(column) || 0, text.length));
+        let range = col < text.length ? codeRangeForLine(line, col, 1) : null;      // 그 칸 글자의 왼쪽
+        let useRight = false;
+        if (!range && col > 0){ range = codeRangeForLine(line, col - 1, 1); useRight = true; }   // 줄 끝이면 앞 글자의 오른쪽
+        if (!range) return 0;
+        const r = range.getBoundingClientRect();
+        if (!r.width && !r.height) return 0;
+        return (useRight ? r.right : r.left) - wrap.getBoundingClientRect().left + wrap.scrollLeft;
+      };
+      /* 가로 스크롤은 '그 자리가 화면에 남는 데 필요한 만큼'만 물려받는다.
+         값을 그대로 옮기면, 긴 줄을 보다가 짧은 줄에서 화면을 바꿨을 때 글자가 통째로 왼쪽(거터 아래)으로
+         숨어 화면이 깨진 것처럼 보였다. 기준 칸은 옮기기 전 화면에 보이던 자리라, 이렇게 줄여도 안 보이지 않는다. */
+      const usefulScrollLeft = (want, line, column) => {
+        if (wrap.classList.contains("is-wrapped")) return null;     // 줄바꿈 보기: 가로 스크롤 자체가 없다
+        if (!want) return 0;
+        const x = columnContentLeft(line, column);
+        const view = wrap.clientWidth, pad = Math.min(80, view * 0.25);   // 왼쪽 pad ≈ 고정 거터 + 여유
+        if (x >= want + pad && x <= want + view - pad) return want;       // 그 자리가 이미 잘 보이면 그대로
+        return Math.max(0, x - view * 0.4);                               // 아니면 그 자리가 보이는 만큼만
+      };
+      // ── 편집 → 보기 복귀: 편집기에서 캐럿이 있던 줄을 '화면의 같은 높이'에 그대로 놓는다.
+      // 편집 화면과 보기 화면은 서로 다른 DOM 이라 그냥 다시 그리면 늘 파일 맨 위로 튀어서,
+      // 방금 고치던 자리를 다시 찾아 내려가야 했다. 편집기에서 잡아 둔 화면 좌표(clientY)를 기준으로
+      // 보기 화면의 그 줄을 맞추면, 글자 크기·바 높이가 달라도 눈이 보던 자리에 그대로 남는다.
+      // 화면이 그대로 이어지므로 어디로 왔는지 표시(노란 줄)는 붙이지 않는다 — 줄 이동·찾기 때만 쓴다.
+      const anchor = pendingViewAnchor; pendingViewAnchor = null;
+      if (anchor && prettyText == null && !(ownerDoc && ownerDoc.pendingFocusLine)){
+        const line = Math.max(1, Math.min(lineN, anchor.line));
+        const placeAnchor = () => {
+          const fallback = measureLineTop(line);                  // 청크 모드: 대상 청크를 강제로 레이아웃하며 실측
+          const m = measureRenderedLine(line) || fallback;
+          let lineHeight = LINE_H, paddingTop = 16;
+          if (preRef){ const cs = getComputedStyle(preRef); lineHeight = parseFloat(cs.lineHeight) || lineHeight; paddingTop = parseFloat(cs.paddingTop) || paddingTop; }
+          const top = m ? m.top : paddingTop + (line - 1) * lineHeight;
+          const offsetY = anchor.clientY - wrap.getBoundingClientRect().top;   // 편집 화면에서 그 줄이 놓였던 높이
+          wrap.scrollTop = Math.max(0, top - offsetY);
+          const left = usefulScrollLeft(anchor.scrollLeft, line, anchor.column);
+          if (left != null) wrap.scrollLeft = left;
+        };
+        placeAnchor();
+        if (chunkStarts.length) requestAnimationFrame(placeAnchor);   // 이웃 청크가 실제 높이로 재렌더되며 밀리면 보정
+        try { wrap.focus({ preventScroll:true }); } catch(_){ wrap.focus(); }   // 방향키 스크롤이 바로 먹게
+      }
       if (ownerDoc){
         ownerDoc.codeViewer = { focusLine };
         if (ownerDoc.pendingFocusLine){
@@ -1281,9 +1352,48 @@ async function renderCode(file, host, ext, profile, runCtx){
           }
           return null;
         };
+        // 화면 맨 위에 걸린 줄(1-based) — 클릭한 자리가 없을 때(✎ 편집 버튼)의 기준점.
+        // 추정 줄높이(LINE_H=19)로 나누면 실제 줄높이(21px)와 어긋나 아래로 갈수록 수십 줄씩 밀렸다 → 실측값으로 센다.
+        const topVisibleLine = () => {
+          const wr = wrap.getBoundingClientRect();
+          if (chunkStarts.length){
+            const chunks = wrap.querySelectorAll(".code-chunk");
+            for (let ci = 0; ci < chunks.length; ci++){
+              const cr = chunks[ci].getBoundingClientRect();
+              if (cr.bottom <= wr.top && ci < chunks.length - 1) continue;   // 화면 위로 지나간 청크
+              const pre = chunks[ci].querySelector("pre"), cs = pre && getComputedStyle(pre);
+              const lh = (cs && parseFloat(cs.lineHeight)) || LINE_H, padTop = (cs && parseFloat(cs.paddingTop)) || 16;
+              const within = Math.max(0, Math.round((wr.top - cr.top - padTop) / lh));
+              return Math.max(1, Math.min(lineN, ci * CHUNK + within + 1));
+            }
+            return 1;
+          }
+          let lh = LINE_H, padTop = 16;
+          if (preRef){ const cs = getComputedStyle(preRef); lh = parseFloat(cs.lineHeight) || lh; padTop = parseFloat(cs.paddingTop) || padTop; }
+          return Math.max(1, Math.min(lineN, Math.round((wrap.scrollTop - padTop) / lh) + 1));
+        };
+        // 그 줄이 지금 화면의 어느 높이에 있는지 — 편집기를 같은 높이에 맞추는 기준.
+        // 여기서는 measureLineTop 처럼 청크를 강제로 레이아웃하지 않는다. 아직 안 그려진 청크가
+        // 그 순간 실제 높이로 커지면서 화면이 통째로 밀려, 방금 더블클릭한 자리와 어긋나기 때문.
+        // 기준이 되는 줄은 늘 지금 화면에 보이는 줄(클릭한 줄·맨 윗줄)이라 강제할 필요도 없다.
+        const lineClientTop = (line) => {
+          const m = measureRenderedLine(line);
+          if (m) return wrap.getBoundingClientRect().top + m.top - wrap.scrollTop;
+          if (chunkStarts.length){
+            const chunkEl = wrap.querySelectorAll(".code-chunk")[Math.floor((line - 1) / CHUNK)];
+            if (chunkEl){
+              const pre = chunkEl.querySelector("pre"), cs = pre && getComputedStyle(pre);
+              const lh = (cs && parseFloat(cs.lineHeight)) || LINE_H, padTop = (cs && parseFloat(cs.paddingTop)) || 16;
+              return chunkEl.getBoundingClientRect().top + padTop + ((line - 1) % CHUNK) * lh;
+            }
+          }
+          let lh = LINE_H, padTop = 16;
+          if (preRef){ const cs = getComputedStyle(preRef); lh = parseFloat(cs.lineHeight) || lh; padTop = parseFloat(cs.paddingTop) || padTop; }
+          return wrap.getBoundingClientRect().top + padTop + (line - 1) * lh - wrap.scrollTop;
+        };
         // 현재 선택(클릭 캐럿·더블클릭 단어)을 편집기 selection 범위로 변환. 실패 시 화면 첫 줄 근처로.
-        const selectionRangeForEdit = () => {
-          try {
+        const selectionRangeForEdit = (useSelection = true) => {
+          if (useSelection) try {
             const s = window.getSelection();
             if (s && s.rangeCount && wrap.contains(s.anchorNode)){
               const a = viewOffsetAt(s.anchorNode, s.anchorOffset);
@@ -1291,24 +1401,45 @@ async function renderCode(file, host, ext, profile, runCtx){
               if (a != null && f != null) return { start: Math.min(a, f), end: Math.max(a, f) };
             }
           } catch(_){}
-          const line = Math.max(1, Math.min(lineN, Math.round(wrap.scrollTop / LINE_H) + 1));
-          const off = lineOffsets[line - 1] || 0;
+          const off = lineOffsets[topVisibleLine() - 1] || 0;
           return { start: off, end: off };
         };
-        const enterEditHere = () => {
-          const range = selectionRangeForEdit();
-          const scrollTop = wrap.scrollTop, scrollLeft = wrap.scrollLeft;   // showEdit 이 wrap 을 없애기 전에 붙잡는다
+        const viewLineHeight = () => {
+          const pre = preRef || wrap.querySelector(".code-pre");
+          const lh = pre && parseFloat(getComputedStyle(pre).lineHeight);
+          return lh || LINE_H;
+        };
+        /* 마우스로 들어왔으면 '누른 그 높이'가 기준이다. 청크(대용량) 보기는 아직 안 그려진 청크가
+           클릭 직후 실제 높이로 커지며 화면이 통째로 밀리는데, 그러면 브라우저가 고른 단어(캐럿)는
+           밀리기 전 화면 기준이고 다시 잰 줄 위치는 밀린 뒤 기준이라 서로 어긋난다.
+           잰 값이 누른 자리와 한 줄 넘게 다르면 잰 값을 버리고 누른 높이를 쓴다 —
+           "누른 단어가 누른 자리에 그대로 열린다"가 사용자가 보는 약속이기 때문. */
+        const anchorClientTop = (line, evt) => {
+          const measured = lineClientTop(line);
+          const y = evt && typeof evt.clientY === "number" ? evt.clientY : null;
+          if (y == null) return measured;
+          const lh = viewLineHeight();
+          return (measured <= y && y < measured + lh * 1.5) ? measured : y - lh * 0.5;
+        };
+        const enterEditHere = (evt, useSelection = true) => {
+          const range = selectionRangeForEdit(useSelection);
+          // showEdit 이 wrap 을 없애기 전에, 그 줄과 그 줄의 화면 높이를 붙잡는다
+          const line = Math.max(1, Math.min(lineN, lineAtOffset(range.start)));
+          const clientY = anchorClientTop(line, evt);
+          const scrollLeft = usefulScrollLeft(wrap.scrollLeft, line, range.start - (lineOffsets[line - 1] || 0));
           showEdit();
           const ed = activeEditor;
           if (!ed || !ed.ta) return;
           try { ed.ta.focus(); } catch(_){}                                 // 동기 포커스 → 이번 키 입력이 편집기로 들어감
           const len = ed.ta.value.length;
           try { ed.ta.setSelectionRange(Math.min(range.start, len), Math.min(range.end, len)); } catch(_){}
-          ed.ta.scrollTop = scrollTop; ed.ta.scrollLeft = scrollLeft;       // 보던 위치 그대로 이어서 편집
+          scrollEditorToAnchor(ed.ta, line, clientY, scrollLeft);           // 보던 자리 그대로 이어서 편집
         };
+        // 툴바 버튼은 화면 밖에 남은 예전 DOM 선택을 무시한다. 보이는 첫 줄이 '보던 자리'다.
+        enterEditAtView = () => enterEditHere(null, false);
         wrap.addEventListener("dblclick", (e) => {
           if (e.target && e.target.closest && e.target.closest(".code-gutter")) return;   // 줄번호는 제외
-          enterEditHere();
+          enterEditHere(e);   // 누른 높이를 그대로 편집기 자리로
         });
         wrap.addEventListener("keydown", (e) => {
           if (e.ctrlKey || e.metaKey || e.altKey) return;                   // 단축키(복사·찾기 등)는 그대로
@@ -1449,7 +1580,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       const editorOpts = { plain: true, fileExt: ext };      // 일반 텍스트/코드: 파이썬 전용 지능 없이 확장자별 버퍼 단어 완성만
       if (startedForFind) editorOpts.onFindClose = () => {
         if (ownerDoc && ownerDoc.hasUnsavedEdits) return;   // 편집을 시작했으면 그대로 편집 유지
-        currentText = editor.getValue(); showView();
+        currentText = editor.getValue(); captureEditAnchor(); showView();   // 찾아 간 자리 그대로 보기 화면으로
       };
       // 대용량(1MB+·초장문)은 강조 오버레이가 없는 가벼운 편집기로 — 프리징 방지(B안).
       const editor = lightEdit ? buildLightTextEditor(currentText, editorOpts)
@@ -1564,6 +1695,25 @@ async function renderCode(file, host, ext, profile, runCtx){
         ownerDoc.cleanupFns.push(() => { clearTimeout(textAutosaveTimer); textAutosaveTimer = 0; });
       }
 
+      /* 보기로 돌아갈 때 쓸 위치 기억 — 캐럿이 있는 줄과, 그 줄이 지금 화면 어느 높이에 있는지(clientY).
+         줄 번호만 남기면 보기 화면이 그 줄을 화면 한가운데로 끌어와 눈이 튄다. 화면 높이까지 함께 잡아야
+         "편집하던 그 자리 그대로" 읽기 화면이 뜬다. textarea 는 wrap=off(줄바꿈 없음)라 줄 번호 × 줄높이로 정확히 계산된다. */
+      const captureEditAnchor = () => {
+        pendingViewAnchor = null;
+        const ta = editor.ta;
+        if (!ta) return;
+        try {
+          const value = ta.value;
+          const caret = Math.max(0, Math.min(ta.selectionStart | 0, value.length));
+          let line = 1;
+          for (let i = 0; i < caret; i++) if (value.charCodeAt(i) === 10) line++;
+          const cs = getComputedStyle(ta);
+          const lh = parseFloat(cs.lineHeight) || 19, padTop = parseFloat(cs.paddingTop) || 16;
+          const rect = ta.getBoundingClientRect();
+          pendingViewAnchor = { line, column: caret - (value.lastIndexOf("\n", caret - 1) + 1),
+            clientY: rect.top + padTop + (line - 1) * lh - ta.scrollTop, scrollLeft: ta.scrollLeft };
+        } catch(_){ pendingViewAnchor = null; }
+      };
       const markDirty = () => { currentText = editor.getValue(); const dirty = currentText !== (ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : text); status.textContent = dirty ? "저장 안 됨" : ""; markDocumentDirty(ownerDoc, dirty); if (textAutosaveBusy) textAutosaveAgain = true; scheduleTextDraft(); scheduleDiagnostic(); scheduleTextAutosave(); };
       editor.ta.addEventListener("input", markDirty);
       runDiagnostic();                                        // 편집 진입 시 1회 즉시 진단
@@ -1590,7 +1740,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         }
         finally { saveBtn.disabled = false; }
       });
-      viewBtn.addEventListener("click", () => { currentText = editor.getValue(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
+      viewBtn.addEventListener("click", () => { currentText = editor.getValue(); if (!isMd) captureEditAnchor(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
       requestAnimationFrame(() => editor.ta.focus());
     };
 
