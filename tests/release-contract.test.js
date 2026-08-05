@@ -86,7 +86,9 @@ test("앱 JavaScript 파일은 manifest와 기능 안내 문서에 빠짐없이 
 test("저장 위치·영구 삭제·다중 닫기의 회귀 계약을 지킨다", () => {
   assert.match(documentsSource, /workspaceBackendStatus\(\) === true/);
   assert.doesNotMatch(documentsSource, /viaServer\s*=\s*[^;\n]*workspaceBackendAvailable\(\)/);
-  assert.match(documentsSource, /doc\.kind === "pdf" && doc\.originalSaveMode/);
+  // PDF·이미지는 쓰기 핸들만으로 원본 저장이 되지 않는다(폴더 원본 저장 모드일 때만, 이미지는 png·jpg 유지일 때만).
+  assert.match(documentsSource, /const originalByHandle = doc\.kind !== "pdf" && doc\.kind !== "image" && canWriteOriginal/);
+  assert.match(documentsSource, /\(doc\.originalSaveMode \|\| originalByHandle\) && imageKeepsFormat/);
   assert.match(documentsSource, /viaServer = doc\.kind !== "pdf"/);
   assert.match(documentsSource, /closeDoc\(doc\.id, \{ forgetWorkspace:true, skipConfirm:true \}\)/);
   assert.match(documentsSource, /function closeDoc[\s\S]*return true;/);
