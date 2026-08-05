@@ -530,6 +530,10 @@
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath" aria-live="polite">저장 위치 확인 중…</small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>
       </div>
+      <div class="settings-save-folder" id="settingAppModeWrap" hidden>
+        <div class="settings-save-folder-copy"><strong>앱 모드 — 탭·주소창 없는 창</strong><small id="settingAppModeHint" aria-live="polite">화면을 넓게 쓰도록 브라우저 탭과 주소창 없이 엽니다.</small><span>체크는 <b>다음 실행부터</b> 적용됩니다. 지금 바로 보려면 오른쪽 버튼을 누르세요.</span></div>
+        <div class="settings-save-folder-actions"><label class="settings-check"><input type="checkbox" id="settingAppMode"><span>앱 모드로 열기</span></label><button class="btn" id="settingAppModeNow" type="button">지금 앱 모드로 열기</button></div>
+      </div>
     </div>
 
     <div class="settings-section" data-settings-panel="document" role="tabpanel" hidden>
@@ -717,7 +721,7 @@
     <kbd>Enter / Tab</kbd><span>자동완성 적용</span><kbd>Esc</kbd><span>자동완성 닫기</span>
     <kbd>더블클릭</kbd><span>같은 식별자 동시수정</span><kbd>Ctrl+클릭</kbd><span>함수 정의 열기</span>
     <kbd data-shortcut-action="findInDocument">Ctrl+F</kbd><span>노트북 전체 셀 찾기·바꾸기</span><kbd data-shortcut-action="findInCell">Ctrl+Shift+H</kbd><span>현재 셀에서 찾기·바꾸기</span><kbd>Esc</kbd><span>열린 검색창 모두 닫기</span>
-  </div><div class="modal-actions"><button class="btn" id="helpManual" type="button" title="모든 기능을 예시와 함께 설명한 문서를 새 탭에서 엽니다">📖 자세한 사용법</button><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
+  </div><div class="modal-actions"><button class="btn" id="helpManual" type="button" title="모든 기능을 예시와 함께 설명한 문서를 따로 엽니다">📖 자세한 사용법</button><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
 </div>
 
 <div class="toast" id="toast" aria-live="polite"></div>

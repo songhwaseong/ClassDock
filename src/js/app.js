@@ -637,11 +637,65 @@ function wire(){
       if (!res.ok) throw new Error("HTTP " + res.status);
     } catch(e){ toast("저장한 파일 폴더를 열지 못했어요.", 2200); }
   };
+  // 앱 모드(탭·주소창 없는 --app 창)는 브라우저가 뜨기 전에 런처가 정하므로 값이 EXE 쪽에 있다.
+  // 체크박스는 '저장'을 눌러야 다음 실행부터 반영되고, 버튼은 지금 그 창을 하나 더 띄운다.
+  let appModeSaved = null;   // 런처가 알려준 현재 값. null 이면 EXE가 아니거나 확인 실패.
+  let appModeUsable = false;
+  const APP_MODE_HINT = "화면을 넓게 쓰도록 브라우저 탭과 주소창 없이 엽니다.";
+  const APP_MODE_UNAVAILABLE_HINT = "크롬 또는 엣지가 있어야 쓸 수 있어요.";
+  const renderAppModeHint = () => {
+    const text = appModeUsable ? APP_MODE_HINT : APP_MODE_UNAVAILABLE_HINT;
+    settingAppModeHint.textContent = typeof window.t === "function" ? window.t(text) : text;
+  };
+  const refreshAppMode = async () => {
+    appModeSaved = null;
+    appModeUsable = false;
+    settingAppModeWrap.hidden = true;
+    if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    try {
+      const response = await fetch("/launcher-config", { headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const config = await response.json();
+      appModeSaved = !!config.appMode;
+      settingAppMode.checked = appModeSaved;
+      // 미지원 상태에서는 새로 켜는 것은 막되, 이미 켜진 설정을 끄는 동작은 허용한다.
+      appModeUsable = config.appModeAvailable !== false;
+      settingAppMode.disabled = !appModeUsable && !appModeSaved;
+      settingAppModeNow.disabled = !appModeUsable;
+      renderAppModeHint();
+      settingAppModeWrap.hidden = false;
+    } catch(_){ /* 일반 HTML·앱 모드를 모르는 구버전 EXE → 항목을 감춘다 */ }
+  };
+  const saveAppMode = async () => {
+    if (appModeSaved === null) return;
+    const next = !!settingAppMode.checked;
+    if (next === appModeSaved) return;
+    try {
+      const response = await fetch("/launcher-config?appMode=" + (next ? "1" : "0"), {
+        method:"POST", headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store"
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      appModeSaved = next;
+      settingAppMode.disabled = !appModeUsable && !appModeSaved;
+      toast(next ? "다음 실행부터 앱 모드로 열립니다." : "다음 실행부터 보통 브라우저 창으로 열립니다.", 2800);
+    } catch(_){ toast("앱 모드 설정을 저장하지 못했어요.", 2400); }
+  };
+  const reopenInAppMode = async () => {
+    settingAppModeNow.disabled = true;
+    try {
+      const response = await fetch("/reopen-app-mode", { method:"POST", headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      toast("앱 모드 창을 열었어요. 같은 작업 화면이니 이 탭은 닫으셔도 됩니다.", 3800);
+    } catch(_){ toast("앱 모드 창을 열지 못했어요.", 2400); }
+    finally { settingAppModeNow.disabled = false; }
+  };
   saveFolderOpen.onclick = openLastSavedFileFolder;
   // 저장 완료 토스트의 '폴더 열기' 버튼이 같은 동작을 쓸 수 있게 노출(EXE 로컬 서버에서만 목록에 뜸)
   try { window.__mnOpenLastSavedFolder = openLastSavedFileFolder; } catch(_){}
   settingSaveFolderOpen.onclick = openSaveFolder;
   settingSaveFolderChange.onclick = chooseSaveFolder;
+  settingAppModeNow.onclick = reopenInAppMode;
+  window.addEventListener("mni18nchange", renderAppModeHint);
   refreshSaveFolder();
   const syncPetFocusSettingFields = () => {
     const enabled = !!byId("settingPetFocus").checked;
@@ -903,6 +957,7 @@ function wire(){
     setShortcutError("");
     renderShortcutSettings();
     refreshSaveFolder();
+    refreshAppMode();
     byId("settingsModal").hidden = false;
   };
   byId("settingsCancel").onclick = () => {
@@ -937,6 +992,7 @@ function wire(){
       mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });
+    saveAppMode();   // 런처 파일에 남는 값이라 saveAppSettings(localStorage) 와는 따로 저장한다
     if (typeof applyToolVisibility === "function") applyToolVisibility();
     if (typeof applyCodeColors === "function") applyCodeColors();
     if (typeof applyScreensaverSettings === "function") applyScreensaverSettings();
@@ -1429,7 +1485,8 @@ function openUserManual(){
     try { opened.opener = null; } catch(_){}
   }
   if (!opened && typeof toast === "function"){
-    toast("팝업이 막혀 사용법을 열지 못했어요. 주소창 옆에서 팝업을 허용해 주세요.", 4200, { type: "error" });
+    // 앱 모드 창에는 주소창이 없으므로 '주소창 옆' 같은 위치 안내는 쓰지 않는다.
+    toast("팝업이 막혀 사용법을 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.", 4200, { type: "error" });
   }
 }
 

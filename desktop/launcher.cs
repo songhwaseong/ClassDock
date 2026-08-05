@@ -154,6 +154,13 @@ class PdfSignerLauncher
     // 강제 종료되어도 OS가 자동으로 해제하므로 별도의 종료 정리가 필요 없다.
     const string SingleInstanceMutexName = @"Local\ManneungClassroom_PdfSigner_SingleInstance";
     static Mutex SingleInstanceMutex;
+    // 앱 모드(탭·주소창 없는 --app 창)로 열지 여부. 브라우저는 앱 화면이 뜨기 전에 실행되므로
+    // 이 설정만은 localStorage 가 아니라 런처가 기동 중 읽을 수 있는 파일에 둔다. 값은 "1" 또는 "0".
+    static readonly string AppModeConfigPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PdfSigner", "app-mode.txt");
+    // 실행 중인 서버의 주소. 설정의 '지금 앱 모드로 열기'가 같은 origin 으로 새 창을 띄울 때 쓴다.
+    static string ServerUrl = "";
     // 편집한 코드를 브라우저 권한 팝업 없이 바로 저장하는 폴더. 사용자가 바꾸지 않으면 내 문서\만능교실 저장.
     static readonly string DefaultSaveRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -383,6 +390,9 @@ class PdfSignerLauncher
     static bool HeartbeatSeen;
     static DateTime HeartbeatStartedAt;
     static DateTime NoHeartbeatClientsSince = DateTime.MaxValue;
+    // 기존 창에서 새 앱 창으로 넘어가는 동안 새 페이지의 스크립트가 로드될 시간을 보장한다.
+    // 이 시간이 없으면 기존 창을 닫은 뒤 5초 안에 새 heartbeat가 오지 않을 때 서버가 먼저 종료될 수 있다.
+    static DateTime BrowserHandoffUntil = DateTime.MinValue;
 
     static byte[] ReadResource(string name)
     {
@@ -804,6 +814,8 @@ class PdfSignerLauncher
             if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec"
                 || path == "/save-file" || path == "/save-file-exists") return true;
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
+            // 앱 모드: 설정 저장은 다음 실행 동작을 바꾸고, 재열기는 브라우저 프로세스를 띄운다 → 둘 다 토큰 필요.
+            if (path.StartsWith("/launcher-config", StringComparison.Ordinal) || path == "/reopen-app-mode") return true;
             if (path == "/choose-source-folder" || path == "/source-folder-restore") return true;
             if (path.StartsWith("/source-folder-file", StringComparison.Ordinal)
                 || path.StartsWith("/source-folder-directory", StringComparison.Ordinal)
@@ -826,6 +838,7 @@ class PdfSignerLauncher
             if (path == "/workspace-load") return true;
             if (path.StartsWith("/exam-receive-status", StringComparison.Ordinal)) return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
+            if (path == "/launcher-config") return true;
             if (path == "/source-folder-capability" || path == "/choose-source-folder-status") return true;
             if (path.StartsWith("/source-folder-entry", StringComparison.Ordinal)
                 || path.StartsWith("/source-folder-list", StringComparison.Ordinal)
@@ -981,7 +994,7 @@ class PdfSignerLauncher
         {
             if (Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1")
             {
-                try { Process.Start("http://127.0.0.1:" + remembered + "/"); } catch {}
+                try { OpenAppUrl("http://127.0.0.1:" + remembered + "/", LoadAppMode()); } catch {}
             }
             return;
         }
@@ -997,7 +1010,7 @@ class PdfSignerLauncher
                 {
                     if (Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1")
                     {
-                        try { Process.Start("http://127.0.0.1:" + remembered + "/"); } catch { }
+                        try { OpenAppUrl("http://127.0.0.1:" + remembered + "/", LoadAppMode()); } catch { }
                     }
                     return;
                 }
@@ -1030,6 +1043,7 @@ class PdfSignerLauncher
         }
         WriteInstancePort(port);   // 다음 실행이 이 포트로 바로 붙을 수 있게 기록(단일 인스턴스 확인용)
         string url = "http://127.0.0.1:" + port + "/";
+        ServerUrl = url;
         HeartbeatRequired = Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1";
         HeartbeatStartedAt = DateTime.UtcNow;
 
@@ -1054,7 +1068,7 @@ class PdfSignerLauncher
                 Thread.Sleep(400);
                 try
                 {
-                    Process.Start(url);
+                    OpenAppUrl(url, LoadAppMode());
                 }
                 catch (Exception ex)
                 {
@@ -1078,7 +1092,8 @@ class PdfSignerLauncher
                             if ((now - client.Value).TotalSeconds > 90) stale.Add(client.Key);
                         foreach (string id in stale) HeartbeatClients.Remove(id);
 
-                        if (HeartbeatClients.Count > 0) NoHeartbeatClientsSince = DateTime.MaxValue;
+                        if (now < BrowserHandoffUntil) NoHeartbeatClientsSince = DateTime.MaxValue;
+                        else if (HeartbeatClients.Count > 0) NoHeartbeatClientsSince = DateTime.MaxValue;
                         else if (HeartbeatSeen)
                         {
                             if (NoHeartbeatClientsSince == DateTime.MaxValue) NoHeartbeatClientsSince = now;
@@ -1518,6 +1533,65 @@ class PdfSignerLauncher
                 {
                     // exe 로컬 서버가 디스크 저장을 지원함을 알린다(앱이 브라우저 권한 팝업 대신 서버 저장 선택)
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path == "/launcher-config")
+                {
+                    // 설정 화면이 '앱 모드' 체크박스의 현재 값과 지원 여부를 읽어간다.
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string json = "{\"appMode\":" + (LoadAppMode() ? "true" : "false")
+                        + ",\"appModeAvailable\":" + (FindChromiumBrowser() != null ? "true" : "false") + "}";
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                }
+                else if (method == "POST" && path.StartsWith("/launcher-config", StringComparison.Ordinal))
+                {
+                    // '앱 모드' 토글 저장. 브라우저는 이미 떠 있으므로 이 값은 다음 실행부터 반영된다.
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        SaveAppMode(QueryValue(path, "appMode") == "1");
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("launcher-config-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/reopen-app-mode")
+                {
+                    // 설정의 '지금 앱 모드로 열기': 지금 실행 중인 서버를 --app 창으로 한 번 더 연다.
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    if (FindChromiumBrowser() == null)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-chromium"));
+                        return;
+                    }
+                    try
+                    {
+                        lock (HeartbeatLock)
+                        {
+                            // EXE의 모든 스크립트를 읽은 뒤 heartbeat가 시작되므로 느린 PC에서도 충분히 기다린다.
+                            BrowserHandoffUntil = DateTime.UtcNow.AddSeconds(45);
+                            NoHeartbeatClientsSince = DateTime.MaxValue;
+                        }
+                        OpenAppUrl(string.IsNullOrEmpty(ServerUrl) ? "http://127.0.0.1/" : ServerUrl, true);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("reopen-failed: " + FlattenMessage(ex)));
+                    }
                 }
                 else if (method == "GET" && path == "/save-root")
                 {
@@ -2292,6 +2366,93 @@ class PdfSignerLauncher
             File.WriteAllText(InstancePortPath, port.ToString());
         }
         catch { }
+    }
+
+    // 앱 모드 설정을 읽는다. 파일이 없거나 읽지 못하면 지금까지의 동작(기본 브라우저)을 유지한다.
+    static bool LoadAppMode()
+    {
+        try
+        {
+            if (File.Exists(AppModeConfigPath)) return (File.ReadAllText(AppModeConfigPath) ?? "").Trim() == "1";
+        }
+        catch { }
+        return false;
+    }
+
+    static void SaveAppMode(bool on)
+    {
+        string dir = Path.GetDirectoryName(AppModeConfigPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        File.WriteAllText(AppModeConfigPath, on ? "1" : "0", new UTF8Encoding(false));
+    }
+
+    // 기본 브라우저의 ProgId. 크롬을 쓰는데 엣지 창이 뜨는 일이 없도록 앱 모드 브라우저 선택에 참고한다.
+    static string DefaultBrowserProgId()
+    {
+        try
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice"))
+            {
+                if (key != null) return ((key.GetValue("ProgId") as string) ?? "").ToLowerInvariant();
+            }
+        }
+        catch { }
+        return "";
+    }
+
+    // --app= 창을 띄울 수 있는 크로미움 브라우저 경로. 없으면 null(= 앱 모드 불가).
+    // 기본 브라우저가 크롬이면 크롬을, 그 밖에는 윈도우에 항상 있는 엣지를 먼저 찾는다.
+    static string FindChromiumBrowser()
+    {
+        bool chromeFirst = DefaultBrowserProgId().Contains("chrome");
+        string[] relatives = chromeFirst
+            ? new string[] { @"Google\Chrome\Application\chrome.exe", @"Microsoft\Edge\Application\msedge.exe" }
+            : new string[] { @"Microsoft\Edge\Application\msedge.exe", @"Google\Chrome\Application\chrome.exe" };
+        string[] roots = new string[] {
+            Environment.GetEnvironmentVariable("ProgramFiles"),
+            Environment.GetEnvironmentVariable("ProgramFiles(x86)"),
+            Environment.GetEnvironmentVariable("LocalAppData")   // 크롬 사용자 단독 설치
+        };
+        foreach (string relative in relatives)
+        {
+            foreach (string root in roots)
+            {
+                if (string.IsNullOrEmpty(root)) continue;
+                try
+                {
+                    string exe = Path.Combine(root, relative);
+                    if (File.Exists(exe)) return exe;
+                }
+                catch { }
+            }
+        }
+        return null;
+    }
+
+    // 앱 화면을 브라우저로 연다. appMode 면 탭·주소창이 없는 --app 창으로,
+    // 앱 모드가 꺼져 있거나 크로미움을 찾지 못하면 지금까지처럼 기본 브라우저로 연다.
+    static bool OpenAppUrl(string url, bool appMode)
+    {
+        if (appMode)
+        {
+            string exe = FindChromiumBrowser();
+            if (exe != null)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = exe;
+                    psi.Arguments = "--app=" + url + " --window-size=1440,900";
+                    psi.UseShellExecute = false;
+                    Process.Start(psi);
+                    return true;
+                }
+                catch { }   // 앱 모드로 못 띄우면 기본 브라우저로 폴백해 최소한 화면은 뜨게 한다
+            }
+        }
+        Process.Start(url);
+        return false;
     }
 
     // 포트 파일만으로는 두 프로세스가 동시에 시작하는 순간을 막을 수 없으므로 OS 뮤텍스로 보완한다.

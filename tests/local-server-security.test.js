@@ -9,6 +9,7 @@ const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const pythonRuntime = fs.readFileSync(path.join(__dirname, "../src/js/python-runtime.js"), "utf8");
 const pythonTerminal = fs.readFileSync(path.join(__dirname, "../src/js/python-terminal.js"), "utf8");
 const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
 
 test("로컬 API는 헤더 토큰만 인정하고 URL 토큰을 사용하지 않는다", () => {
   assert.match(launcher, /static bool HasLocalAuthToken\(Dictionary<string, string> headers\)/);
@@ -53,6 +54,32 @@ test("저장 루트 경로는 공통 검증과 재분석 지점 차단을 거친
   assert.match(launcher, /TryResolveSaveRootPath\(safe, out candidate\)/);
   assert.match(launcher, /TryResolveSaveRootPath\(safe, out full\)/);
   assert.match(launcher, /TryResolveSaveRootPath\(path, out full\)/);
+});
+
+test("앱 모드 설정·재열기는 토큰과 동작 헤더가 있어야 한다", () => {
+  // 저장은 다음 실행 동작을 바꾸고, 재열기는 브라우저 프로세스를 띄우므로 둘 다 인증 대상이어야 한다.
+  assert.match(launcher, /path\.StartsWith\("\/launcher-config", StringComparison\.Ordinal\) \|\| path == "\/reopen-app-mode"\) return true/);
+  assert.match(launcher, /if \(path == "\/launcher-config"\) return true/);
+  const start = launcher.indexOf('else if (method == "GET" && path == "/launcher-config")');
+  const end = launcher.indexOf('else if (method == "GET" && path == "/save-root")', start);
+  const appMode = launcher.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.equal(appMode.match(/HasLocalActionHeader\(headers\)/g).length, 3);
+  assert.match(app, /fetch\("\/reopen-app-mode", \{ method:"POST", headers:\{ "X-PdfSigner-Action":"1" \}/);
+  assert.match(launcher, /static DateTime BrowserHandoffUntil = DateTime\.MinValue/);
+  assert.match(launcher, /if \(now < BrowserHandoffUntil\) NoHeartbeatClientsSince = DateTime\.MaxValue/);
+  assert.match(launcher, /BrowserHandoffUntil = DateTime\.UtcNow\.AddSeconds\(45\)/);
+  assert.match(app, /settingAppMode\.disabled = !appModeUsable && !appModeSaved/);
+  assert.match(app, /addEventListener\("mni18nchange", renderAppModeHint\)/);
+  for (const key of [
+    "앱 모드 — 탭·주소창 없는 창",
+    "화면을 넓게 쓰도록 브라우저 탭과 주소창 없이 엽니다.",
+    "앱 모드로 열기",
+    "지금 앱 모드로 열기",
+    "크롬 또는 엣지가 있어야 쓸 수 있어요.",
+    "다음 실행부터 앱 모드로 열립니다.",
+    "앱 모드 창을 열지 못했어요."
+  ]) assert.ok(i18n.includes(JSON.stringify(key).slice(1, -1)), "번역 키 누락: " + key);
 });
 
 test("로컬 응답은 기본 보안 헤더를 포함하고 하트비트 종료도 인증한다", () => {
