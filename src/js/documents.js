@@ -1769,7 +1769,7 @@ function moveTab(draggedId, targetId, after){
 let tabLayoutLimit = 0;
 let tabBarResizeObserver = null;
 function tabLimitForWidth(width){
-  // 오른쪽 끝에 항상 붙는 ＋(새 화이트보드, 32px)와 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
+  // 오른쪽 끝에 항상 붙는 칠판 버튼(새 화이트보드, 32px)과 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
   const usable = Math.max(210, (width || window.innerWidth || 800) - 114);
   return Math.max(1, Math.min(6, Math.floor(usable / 210)));
 }
@@ -1864,10 +1864,12 @@ function renderTabs(){
     tab.append(ic, nm, tail);
     bar.appendChild(tab);
   });
-  // 마지막 탭 옆 ＋ (브라우저 새 탭과 같은 자리) — 문서를 설명하다 바로 판서할 화이트보드를 연다.
+  // 마지막 탭 옆 칠판 버튼 (브라우저 새 탭과 같은 자리) — 문서를 설명하다 바로 판서할 화이트보드를 연다.
   // 사이드바가 접혀 있거나 드롭존이 문서에 가려진 상태에서도 늘 보이는 유일한 새로 만들기 진입점이다.
   const newBoardBtn = document.createElement("button");
-  newBoardBtn.type = "button"; newBoardBtn.className = "tab-new-board"; newBoardBtn.textContent = "＋";
+  newBoardBtn.type = "button"; newBoardBtn.className = "tab-new-board";
+  // ＋ 대신 칠판 아이콘 — 눌렀을 때 무엇이 열리는지 기호만 봐도 알 수 있게 한다(엑셀 시트 탭의 ＋ 와도 구분된다).
+  if (typeof setUiIcon === "function") setUiIcon(newBoardBtn, "board"); else newBoardBtn.textContent = "＋";
   newBoardBtn.dataset.shortcutAction = "newBoard";
   newBoardBtn.dataset.shortcutTitle = "새 화이트보드";
   newBoardBtn.dataset.shortcutAria = "true";

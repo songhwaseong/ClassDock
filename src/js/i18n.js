@@ -443,7 +443,7 @@
     "새 Python 코드": "New Python code",
     "빈 Python 편집기 만들기": "Create a blank Python editor",
     "설명하다 바로 판서할 빈 화이트보드 열기": "Open a blank whiteboard to draw on mid-explanation",
-    "새 화이트보드 열기 (탭바 ＋ 와 같음)": "Open a new whiteboard (same as ＋ on the tab bar)",
+    "새 화이트보드 열기 (탭바 칠판 버튼과 같음)": "Open a new whiteboard (same as the board button on the tab bar)",
     "＋ 새 폴더": "＋ New folder",
     "새 폴더": "New folder",
     // 폴더 우클릭 메뉴의 '새로 만들기' 묶음

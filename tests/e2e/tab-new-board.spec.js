@@ -14,12 +14,12 @@ const boardCount = (page) => page.evaluate(() => {
   return all.filter(d => d.kind === "board").length;
 });
 
-test("탭바 ＋ 와 Alt+B 로 새 화이트보드가 열린다", async ({ page }) => {
+test("탭바 칠판 버튼과 Alt+B 로 새 화이트보드가 열린다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await openApp(page);
 
-  // 탭이 없으면 탭바가 숨어 있어 ＋ 도 안 보인다.
+  // 탭이 없으면 탭바가 숨어 있어 칠판 버튼도 안 보인다.
   await expect(page.locator("#tabBar")).toBeHidden();
 
   // Alt+B — 문서가 하나도 없는 상태에서도 판서를 바로 시작할 수 있다.
@@ -27,12 +27,13 @@ test("탭바 ＋ 와 Alt+B 로 새 화이트보드가 열린다", async ({ page 
   await expect(page.locator(".wb-canvas")).toHaveCount(1);
   expect(await boardCount(page)).toBe(1);
 
-  // 이제 탭바가 보이고 ＋ 가 오른쪽 끝에 붙는다.
-  const plus = page.locator("#tabBar .tab-new-board");
-  await expect(plus).toBeVisible();
-  await expect(plus).toHaveAttribute("title", /새 화이트보드.*Alt\+B/);
+  // 이제 탭바가 보이고 칠판 버튼이 오른쪽 끝에 붙는다(＋ 글자가 아니라 SVG 아이콘).
+  const boardBtn = page.locator("#tabBar .tab-new-board");
+  await expect(boardBtn).toBeVisible();
+  await expect(boardBtn).toHaveAttribute("title", /새 화이트보드.*Alt\+B/);
+  await expect(boardBtn.locator("svg.ui-icon")).toHaveCount(1);
 
-  await plus.click();
+  await boardBtn.click();
   await expect(page.locator(".wb-canvas")).toHaveCount(2);
   expect(await boardCount(page)).toBe(2);
 
