@@ -503,6 +503,7 @@
     "임시 메모 열기": "Open scratchpad",
     "밝게 / 어둡게 전환 (테마)": "Light / dark toggle (theme)",
     "사이드바 접기 / 펼치기": "Collapse / expand sidebar",
+    "한국어 / English 전환": "Korean / English toggle",
     "대기 화면 지금 시작": "Start idle screen now",
     "설정 열기": "Open settings",
     "도움말 · 단축키": "Help · shortcuts",

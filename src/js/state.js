@@ -95,6 +95,21 @@ const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.
 // CSS 숨김 클래스를 모두 구동한다(라벨·목록 이중 관리 방지). cls 는 각 버튼의 고유 클래스명.
 // ▶ 실행·저장처럼 없으면 안 되는 버튼은 일부러 뺐다. 기본값은 전부 노출(defaultVisible).
 const TOGGLEABLE_TOOLS = Object.freeze([
+  // 헤더 위쪽 막대 (manneung-classroom.html) — 문서와 무관하게 늘 떠 있는 전역 버튼들.
+  // ⚙ 설정·저장·집중(⏱)·분할 작업은 뺐다. 설정은 숨기면 되돌릴 길이 막히고, 저장은 필수,
+  // 집중은 이미 '펫 집중 모드' 설정이 켜고 끄며, 분할 작업 버튼은 원래 CSS 로 숨겨둔 상태다.
+  { id:"hdrSidebar",    label:"사이드 메뉴 접기·펼치기",       cls:"hdr-tool-sidebar",    target:"header" },
+  { id:"hdrPdfEdit",    label:"PDF 편집 메뉴(서명·텍스트·필기)",cls:"hdr-tool-pdfedit",    target:"header" },
+  { id:"hdrPdfPage",    label:"PDF 페이지 메뉴(목차·썸네일·합치기)",cls:"hdr-tool-pdfpage",target:"header" },
+  { id:"hdrMemo",       label:"메모",                          cls:"hdr-tool-memo",       target:"header" },
+  { id:"hdrFullscreen", label:"문서 전체화면",                 cls:"hdr-tool-fullscreen", target:"header" },
+  { id:"hdrPrint",      label:"인쇄 / PDF로 저장",             cls:"hdr-tool-print",      target:"header" },
+  { id:"hdrPalette",    label:"기능 검색(Ctrl+K)",             cls:"hdr-tool-palette",    target:"header" },
+  { id:"hdrSaveFolder", label:"더보기 — 저장 폴더 열기",       cls:"hdr-tool-savefolder", target:"header" },
+  { id:"hdrImageMemo",  label:"더보기 — 이미지 메모",          cls:"hdr-tool-imagememo",  target:"header" },
+  { id:"hdrLang",       label:"EN(영어로 전환)",               cls:"hdr-tool-lang",       target:"header" },
+  { id:"hdrHelp",       label:"도움말·단축키(?)",              cls:"hdr-tool-help",       target:"header" },
+  { id:"hdrTheme",      label:"다크 모드 전환",                cls:"hdr-tool-theme",      target:"header" },
   // Python 실행 바 (code-viewer.js)
   { id:"pyTrace",     label:"단계 실행",       cls:"run-trace",           target:"py" },
   { id:"pyAnalyze",   label:"진단",            cls:"run-analyze",         target:"py" },

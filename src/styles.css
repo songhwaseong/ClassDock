@@ -2509,6 +2509,19 @@
   .run-bar{position:relative;z-index:32;display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
   /* 도구 노출 설정(state.js TOGGLEABLE_TOOLS) — 숨김으로 고른 버튼만 <html>.hide-tool-<id> 로 감춘다.
      클래스만 토글하므로 이미 열려 있는 편집기·노트북 툴바에도 즉시 반영된다. */
+  /* 헤더 — 문서와 무관한 전역 버튼이라 <html> 클래스만으로 바로 사라진다. */
+  html.hide-tool-hdrSidebar .hdr-tool-sidebar,
+  html.hide-tool-hdrPdfEdit .hdr-tool-pdfedit,
+  html.hide-tool-hdrPdfPage .hdr-tool-pdfpage,
+  html.hide-tool-hdrMemo .hdr-tool-memo,
+  html.hide-tool-hdrFullscreen .hdr-tool-fullscreen,
+  html.hide-tool-hdrPrint .hdr-tool-print,
+  html.hide-tool-hdrPalette .hdr-tool-palette,
+  html.hide-tool-hdrSaveFolder .hdr-tool-savefolder,
+  html.hide-tool-hdrImageMemo .hdr-tool-imagememo,
+  html.hide-tool-hdrLang .hdr-tool-lang,
+  html.hide-tool-hdrHelp .hdr-tool-help,
+  html.hide-tool-hdrTheme .hdr-tool-theme,
   html.hide-tool-pyTrace .run-trace,
   html.hide-tool-pyAnalyze .run-analyze,
   html.hide-tool-pyGrade .run-grade,

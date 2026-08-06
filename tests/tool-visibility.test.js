@@ -20,17 +20,34 @@ const { TOGGLEABLE_TOOLS, normalizeToolVisibility } = new Function(
   stateSource.slice(regStart, regEnd) + "\nreturn { TOGGLEABLE_TOOLS, normalizeToolVisibility };"
 )();
 
-test("도구 레지스트리는 Python·노트북·이미지 도구를 담고 필수 버튼(실행·저장)은 제외한다", () => {
+test("도구 레지스트리는 헤더·Python·노트북·이미지 도구를 담고 필수 버튼(실행·저장)은 제외한다", () => {
   const ids = TOGGLEABLE_TOOLS.map(t => t.id);
   assert.ok(ids.includes("pyTrace") && ids.includes("nbToc") && ids.includes("pyDedupe") && ids.includes("pySpellcheck") && ids.includes("nbDedupe"));
   assert.ok(ids.includes("imgCrop") && ids.includes("imgOcr") && ids.includes("imgAnnotate") && ids.includes("imgAdjust"));
+  assert.ok(ids.includes("hdrSidebar") && ids.includes("hdrPrint") && ids.includes("hdrPalette") && ids.includes("hdrTheme") && ids.includes("hdrLang"));
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");
-    assert.ok(tool.target === "py" || tool.target === "notebook" || tool.target === "image");
+    assert.ok(tool.target === "py" || tool.target === "notebook" || tool.target === "image" || tool.target === "header");
   }
   // 필수 버튼은 노출 설정 대상이 아니어야 한다.
   assert.ok(!TOGGLEABLE_TOOLS.some(t => t.cls === "run-go" || t.cls === "run-save"));
+});
+
+test("헤더: 설정(⚙)·저장·집중·분할 작업은 노출 설정 대상에서 빠져 있다", () => {
+  const headerCls = TOGGLEABLE_TOOLS.filter(t => t.target === "header").map(t => t.cls);
+  // 레지스트리에 없어야 하는 것들 — 클래스를 달지 않았으므로 CSS 규칙도 생기지 않는다.
+  for (const id of ["settingsOpen", "btnDownload", "petFocusOpen", "studyToggle"]){
+    assert.ok(!new RegExp('id="' + id + '"[^>]*class="[^"]*hdr-tool-').test(htmlSource),
+      id + " 에는 숨김용 hdr-tool-* 클래스를 달지 않는다");
+  }
+  // 헤더 버튼마다 HTML 에 짝이 되는 클래스가 실제로 붙어 있어야 한다.
+  for (const cls of headerCls) assert.ok(htmlSource.includes(cls), cls + " 가 헤더 마크업에 있어야 한다");
+  // 숨길 수 있는 전역 기능은 명령 팔레트에 대체 통로가 있어야 한다.
+  const paletteSource = fs.readFileSync(path.join(__dirname, "../src/js/command-palette.js"), "utf8");
+  assert.match(paletteSource, /clickId\("langToggle"\)/);
+  assert.match(paletteSource, /clickId\("btnCodeLink"\)/);
+  assert.match(paletteSource, /callFn\("__mnOpenLastSavedFolder"\)/);
 });
 
 test("정규화: 미지정·잘못된 값은 노출(true), false 만 숨김", () => {
@@ -52,10 +69,16 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   }
   // 설정 UI 컨테이너와 배선(열기·저장·부팅 적용)
   assert.match(htmlSource, /data-settings-tab="tools"/);
+  assert.match(htmlSource, /id="settingToolsHeader"/);
   assert.match(htmlSource, /id="settingToolsPy"/);
   assert.match(htmlSource, /id="settingToolsNb"/);
   assert.match(htmlSource, /id="settingToolsImg"/);
+  assert.match(appSource, /header: byId\("settingToolsHeader"\)/);
   assert.match(appSource, /image: byId\("settingToolsImg"\)/);
+  // 더보기(⋮): 설정뿐 아니라 저장 폴더의 런타임 가용성까지 계산해 빈 메뉴를 없앤다.
+  assert.match(appSource, /const syncHeaderMoreAvailability = \(\) =>/);
+  assert.match(appSource, /!saveFolderOpen\.hidden && vis\.hdrSaveFolder !== false/);
+  assert.match(appSource, /headerMoreWrap\.hidden = !available/);
   assert.match(appSource, /syncToolVisibilityChecks\(\)/);
   assert.match(appSource, /toolVisibility: collectToolVisibility\(\)/);
   assert.match(appSource, /applyToolVisibility\(\)/);

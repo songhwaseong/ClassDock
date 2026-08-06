@@ -201,7 +201,7 @@ flowchart LR
 | `tests/task-package.test.js` | 과제·제출본 경로 충돌, 검증과 재채점 대상 선택 |
 | `tests/theme-background.test.js` | 라이트 배경 설정 저장·초기 적용·CSS 계약 |
 | `tests/tokens-extension.test.js` | `.tokens` 파일의 일반 텍스트 문서 등록 |
-| `tests/tool-visibility.test.js` | 도구막대 버튼 노출·숨김 레지스트리와 필수 버튼 제외 규칙 |
+| `tests/tool-visibility.test.js` | 헤더·도구막대 버튼 노출·숨김 레지스트리와 필수 버튼 제외 규칙 |
 | `tests/unknown-text-extension.test.js` | 모르는 확장자의 텍스트 판별 후 허용과 이진 파일 거부 |
 | `tests/ux-p0.test.js` | 시작 화면 기본 행동과 원본·사본 저장 대상 안내 |
 | `tests/video-subtitles.test.js` | 자막 변환·자동 연결과 영상 작업공간 제외 |
@@ -219,6 +219,8 @@ flowchart LR
 | `tests/e2e/dirty-indicator.spec.js` | 편집·되돌리기에 따라 상단 배지와 사이드바 표시가 함께 켜지고 꺼지는지 |
 | `tests/e2e/doc-legacy.spec.js` | 구형 `.doc` 열기와 글자 미리보기 화면 |
 | `tests/e2e/goto-line.spec.js` | `Ctrl+G` 줄 이동 창과 실제 이동 |
+| `tests/e2e/header-tool-visibility.spec.js` | 헤더 버튼 노출 설정과 설정(⚙)·더보기 예외 규칙 |
+| `tests/e2e/image-tool-visibility.spec.js` | 이미지 편집 도구 노출 설정과 켜 둔 모드 정리 |
 | `tests/e2e/lazy-vendor.spec.js` | 무거운 vendor 라이브러리를 형식을 열 때만 불러오는지 |
 | `tests/e2e/mouse-side-buttons.spec.js` | 마우스 옆 버튼의 앞·뒤 문서 이동 |
 | `tests/e2e/notebook-undo.spec.js` | 노트북 셀 작업 되돌리기·다시 실행 |

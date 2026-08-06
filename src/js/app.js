@@ -537,15 +537,31 @@ function wire(){
     renderShortcutSettings();
   };
   const saveFolderOpen = byId("saveFolderOpen");
+  const imageMemoOpen = byId("imageMemoOpen");
+  const headerMoreWrap = byId("headerMoreWrap");
+  const headerMore = byId("headerMore");
+  const headerMoreMenu = byId("headerMoreMenu");
   const settingSaveFolderWrap = byId("settingSaveFolderWrap");
   const settingSaveFolderPath = byId("settingSaveFolderPath");
   const settingSaveFolderOpen = byId("settingSaveFolderOpen");
   const settingSaveFolderChange = byId("settingSaveFolderChange");
   let currentSaveFolderPath = "";
+  const syncHeaderMoreAvailability = () => {
+    const vis = (appSettings && appSettings.toolVisibility) || {};
+    const saveVisible = !!(saveFolderOpen && !saveFolderOpen.hidden && vis.hdrSaveFolder !== false);
+    const imageVisible = !!(imageMemoOpen && vis.hdrImageMemo !== false);
+    const available = saveVisible || imageVisible;
+    if (headerMoreWrap) headerMoreWrap.hidden = !available;
+    if (!available && headerMoreMenu && headerMore){
+      headerMoreMenu.hidden = true;
+      headerMore.setAttribute("aria-expanded", "false");
+    }
+  };
   const setSaveFolderPath = (path, status="ready") => {
     currentSaveFolderPath = String(path || "").trim();
     const available = !!currentSaveFolderPath;
     saveFolderOpen.hidden = !available;
+    syncHeaderMoreAvailability();
     // 설정 항목 자체는 항상 표시한다. 경로 API를 쓸 수 없는 일반 HTML에서도 항목이
     // 사라진 것처럼 보이지 않게 하고, EXE에서만 변경할 수 있음을 명확히 안내한다.
     settingSaveFolderWrap.hidden = false;
@@ -735,7 +751,7 @@ function wire(){
     tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
   });
   (() => {                                   // 헤더 '더보기' 드롭다운(저장 폴더·이미지 메모)
-    const btn = byId("headerMore"), menu = byId("headerMoreMenu");
+    const btn = headerMore, menu = headerMoreMenu;
     if (!btn || !menu) return;
     const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
     btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
@@ -743,14 +759,27 @@ function wire(){
     [byId("saveFolderOpen"), byId("imageMemoOpen")].forEach(it => it && it.addEventListener("click", () => setOpen(false)));
     document.addEventListener("click", () => setOpen(false));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
+    // 열린 채로 숨겨지면 다시 노출했을 때 펼쳐진 상태로 나타난다 — 숨김 즉시 닫아 둔다.
+    document.addEventListener("mn-tool-visibility", (ev) => {
+      syncHeaderMoreAvailability();
+    });
+    syncHeaderMoreAvailability();
   })();
+  // 헤더 PDF 메뉴(편집·페이지)도 마찬가지로 숨김과 동시에 접는다.
+  document.addEventListener("mn-tool-visibility", (ev) => {
+    const vis = (ev && ev.detail) || {};
+    for (const [id, sel] of [["hdrPdfEdit", ".hdr-tool-pdfedit"], ["hdrPdfPage", ".hdr-tool-pdfpage"]]){
+      if (vis[id] !== false) continue;
+      document.querySelectorAll("header details" + sel + "[open]").forEach((d) => { d.open = false; });
+    }
+  });
   // '도구' 탭 체크박스를 레지스트리(TOGGLEABLE_TOOLS)에서 1회 생성한다. id: settingTool-<도구id>.
   const toolCheckId = (id) => "settingTool-" + id;
   let toolChecksBuilt = false;
   const buildToolVisibilityChecks = () => {
     if (toolChecksBuilt) return;
-    const hosts = { py: byId("settingToolsPy"), notebook: byId("settingToolsNb"), image: byId("settingToolsImg") };
-    if (!hosts.py || !hosts.notebook || !hosts.image || typeof TOGGLEABLE_TOOLS === "undefined") return;
+    const hosts = { header: byId("settingToolsHeader"), py: byId("settingToolsPy"), notebook: byId("settingToolsNb"), image: byId("settingToolsImg") };
+    if (!hosts.header || !hosts.py || !hosts.notebook || !hosts.image || typeof TOGGLEABLE_TOOLS === "undefined") return;
     for (const tool of TOGGLEABLE_TOOLS){
       const host = hosts[tool.target]; if (!host) continue;
       const label = document.createElement("label"); label.className = "settings-check";

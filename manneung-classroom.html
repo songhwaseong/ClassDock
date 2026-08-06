@@ -14,7 +14,7 @@
 
 <header>
   <div class="header-left">
-  <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="왼쪽 사이드 메뉴 숨기기" title="왼쪽 사이드 메뉴 숨기기">
+  <button id="sidebarToggle" class="sidebar-toggle hdr-tool-sidebar" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="왼쪽 사이드 메뉴 숨기기" title="왼쪽 사이드 메뉴 숨기기">
     <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg>
   </button>
   <div class="brand">만능파일교실</div>
@@ -25,10 +25,10 @@
   <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="originalSaveBadge" class="original-save-badge" hidden>원본 저장</span><span id="activeDocEncoding" class="doc-encoding" hidden></span><span id="activeDocStatus" class="doc-status" hidden></span></div>
   <div class="header-actions">
   <div class="tools" id="tools" hidden>
-    <details class="tool-menu"><summary>편집</summary><div class="tool-menu-pop">
+    <details class="tool-menu hdr-tool-pdfedit"><summary>편집</summary><div class="tool-menu-pop">
       <button id="btnSign">서명</button><button id="btnText">텍스트</button><button id="btnDate">날짜</button><button id="btnCheck">✓ 체크</button><button id="btnPen" type="button" title="PDF 위에 펜·형광펜으로 필기">✏️ 필기</button><button id="btnCodeLink" type="button" title="현재 Python 줄을 PDF에 연결">코드 연결</button>
     </div></details>
-    <details class="tool-menu"><summary>페이지</summary><div class="tool-menu-pop">
+    <details class="tool-menu hdr-tool-pdfpage"><summary>페이지</summary><div class="tool-menu-pop">
       <button id="btnOutline" type="button" title="문서 목차(책갈피)로 이동" disabled>목차</button>
       <button id="btnPages" type="button" title="페이지 썸네일·추출·정리">썸네일·정리</button>
       <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
@@ -36,21 +36,21 @@
     </div></details>
     <input type="file" id="mergePdfInput" accept=".pdf,application/pdf" multiple hidden>
     <span class="spacer"></span>
-    <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
+    <button class="scratchpad-open hdr-tool-memo" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
     </button>
     <button id="btnDownload" class="primary" data-shortcut-action="saveCurrent" data-shortcut-title="PDF 저장">저장</button>
   </div>
   <div class="tools" id="officeTools" hidden>
     <span class="spacer"></span>
-    <button class="scratchpad-open" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
+    <button class="scratchpad-open hdr-tool-memo" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
     </button>
-    <button id="btnOfficeFullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
-    <button id="btnPrint">인쇄 / PDF로 저장</button>
+    <button id="btnOfficeFullscreen" class="hdr-tool-fullscreen" type="button" title="문서 영역 전체화면">⛶ 전체화면</button>
+    <button id="btnPrint" class="hdr-tool-print">인쇄 / PDF로 저장</button>
   </div>
   <div class="header-util">
-  <button id="commandPaletteOpen" class="cmdk-trigger" type="button" data-shortcut-action="commandPalette" data-shortcut-title="기능 검색·실행" data-shortcut-aria="true" title="기능 검색·실행 (Ctrl+K)" aria-label="명령 팔레트 — 기능 검색·실행" aria-haspopup="dialog">
+  <button id="commandPaletteOpen" class="cmdk-trigger hdr-tool-palette" type="button" data-shortcut-action="commandPalette" data-shortcut-title="기능 검색·실행" data-shortcut-aria="true" title="기능 검색·실행 (Ctrl+K)" aria-label="명령 팔레트 — 기능 검색·실행" aria-haspopup="dialog">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
     <span>기능 검색</span>
   </button>
@@ -63,10 +63,10 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
     </button>
     <div class="header-more-menu sb-more-menu" id="headerMoreMenu" role="menu" hidden>
-      <button id="saveFolderOpen" class="sb-menu-item" type="button" role="menuitem" hidden title="직전에 저장한 파일이 있는 폴더 열기" aria-label="직전에 저장한 파일이 있는 폴더 열기">
+      <button id="saveFolderOpen" class="sb-menu-item hdr-tool-savefolder" type="button" role="menuitem" hidden title="직전에 저장한 파일이 있는 폴더 열기" aria-label="직전에 저장한 파일이 있는 폴더 열기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M9 14h6M12 11v6"/></svg><span>저장 폴더 열기</span>
       </button>
-      <button id="imageMemoOpen" class="sb-menu-item" type="button" role="menuitem" title="이미지 메모 열기" aria-label="이미지 메모 열기" aria-controls="imageMemo" aria-expanded="false">
+      <button id="imageMemoOpen" class="sb-menu-item hdr-tool-imagememo" type="button" role="menuitem" title="이미지 메모 열기" aria-label="이미지 메모 열기" aria-controls="imageMemo" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5"/></svg><span>이미지 메모</span>
       </button>
     </div>
@@ -92,10 +92,10 @@
       <small class="pet-focus-stats" id="petFocusStats">오늘 완료 0회</small>
     </div>
   </div>
-  <button id="langToggle" class="lang-toggle" type="button" title="Switch to English / 영어로 전환" aria-label="Switch to English / 영어로 전환">EN</button>
+  <button id="langToggle" class="lang-toggle hdr-tool-lang" type="button" title="Switch to English / 영어로 전환" aria-label="Switch to English / 영어로 전환">EN</button>
   <button id="settingsOpen" type="button" title="설정" aria-label="설정">⚙</button>
-  <button id="helpOpen" type="button" title="도움말·단축키" aria-label="도움말">?</button>
-  <button id="themeToggle" class="theme-toggle" type="button" title="다크 모드로 전환" aria-label="테마 전환"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+  <button id="helpOpen" class="hdr-tool-help" type="button" title="도움말·단축키" aria-label="도움말">?</button>
+  <button id="themeToggle" class="theme-toggle hdr-tool-theme" type="button" title="다크 모드로 전환" aria-label="테마 전환"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
   </div>
   </div>
 </header>
@@ -556,7 +556,8 @@
     </div>
 
     <div class="settings-section" data-settings-panel="tools" role="tabpanel" hidden>
-      <p class="settings-hint">체크한 도구만 도구막대에 보입니다. ▶ 실행·저장 등 꼭 필요한 버튼은 항상 표시됩니다. (변경은 저장 즉시 적용)</p>
+      <p class="settings-hint">체크한 도구만 도구막대에 보입니다. ▶ 실행·저장·설정(⚙) 등 꼭 필요한 버튼은 항상 표시됩니다. (변경은 저장 즉시 적용)</p>
+      <div class="settings-tools-group"><strong>헤더(맨 위 막대) 버튼</strong><div id="settingToolsHeader" class="settings-tools-list"></div></div>
       <div class="settings-tools-group"><strong>Python 편집기 도구</strong><div id="settingToolsPy" class="settings-tools-list"></div></div>
       <div class="settings-tools-group"><strong>노트북 도구</strong><div id="settingToolsNb" class="settings-tools-list"></div></div>
       <div class="settings-tools-group"><strong>이미지 편집 도구</strong><div id="settingToolsImg" class="settings-tools-list"></div></div>
