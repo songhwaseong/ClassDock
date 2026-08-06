@@ -1265,6 +1265,30 @@ function wire(){
       if (state && state.kind === "board" && typeof state.saveBoardPng === "function"){
         e.preventDefault(); state.saveBoardPng(); return;
       }
+      // 시험지 화면들도 kind 가 "office" 이고 .run-save 가 없어 아래 어느 경로에도 안 걸린다 —
+      // 화이트보드와 똑같은 이유로 여기서 받지 않으면 브라우저 기본 저장 대화상자가 떠 버린다.
+      if (state && state.examEdit){
+        e.preventDefault();
+        if (typeof examSaveMaster === "function") examSaveMaster(state);   // [💾 원본 저장] 버튼과 같은 길
+        return;
+      }
+      // 채점·응시 화면은 따로 저장할 파일이 없다(채점 결과도 답안도 자동 저장). 기본 동작만 막고 알려 준다.
+      // 특히 제출 확정은 되돌릴 수 없어 Ctrl+S 에 걸지 않는다 — 손버릇으로 누른 한 번에 시험이 끝나면 안 된다.
+      if (state && state.examGrade){
+        e.preventDefault();
+        toast("채점 결과는 자동으로 저장돼요. 파일로 남기려면 [⬇ 성적 CSV]를 누르세요.", 3200);
+        return;
+      }
+      if (state && state.examTake){
+        e.preventDefault();
+        toast("답안은 자동으로 저장되고 있어요. 다 풀었으면 [📤 제출 확정하기]를 누르세요.", 3200);
+        return;
+      }
+      if (state && state.examLocked){        // 아직 암호를 안 넣은 시험지 — 저장할 내용 자체가 없다
+        e.preventDefault();
+        toast("암호를 넣어 시험지를 연 뒤에 저장할 수 있어요.", 3000);
+        return;
+      }
       const save = state && state.el && state.el.querySelector(".run-save");
       if (save) {
         e.preventDefault();

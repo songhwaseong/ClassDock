@@ -686,11 +686,14 @@ async function examExportPaper(doc){
     items: stripped
   };
 
-  const wantLock = await confirmDialog(
+  // 선택지가 셋이라 세 번째 버튼을 쓴다. 두 갈래 확인창에 끼워 넣었을 때는 Esc 가 "암호 없이 배포"에
+  // 걸려서, 빠져나가려던 손짓이 오히려 암호 없는 배포본을 만들어 버렸다.
+  const lockChoice = await confirmDialog(
     "배포본에 '열기 암호'를 걸까요? 학생은 시험 시작 때 이 암호를 입력해야 시험지를 열 수 있어요(시험 시작 전 유출 방지용).",
-    "암호 걸기", "암호 없이 배포"
+    "암호 걸기", "취소", { altText: "암호 없이 배포" }
   );
-  if (wantLock){
+  if (lockChoice === "cancel") return;      // Esc 도 여기로 온다 — 파일을 만들지 않고 끝낸다
+  if (lockChoice === "ok"){
     const password = await examAskPassword({
       title: "시험지 열기 암호",
       message: "시험 시작 때 학생에게 알려줄 암호입니다. 선생님 암호와 다르게 정하세요.",
@@ -753,7 +756,11 @@ function examRenderEditor(doc){
   const gradeBtn = document.createElement("button"); gradeBtn.type = "button"; gradeBtn.className = "btn";
   gradeBtn.textContent = "🗂 채점하기"; gradeBtn.title = "학생 제출본(.examdone)을 모아 한 번에 채점";
   const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "btn";
-  saveBtn.textContent = "💾 원본 저장(.examkey)"; saveBtn.title = "정답과 채점 열쇠가 든 선생님 전용 파일 — 학생에게 주지 마세요";
+  saveBtn.textContent = "💾 원본 저장(.examkey)";
+  // 설명 문구를 shortcutTitle 에 두면 syncShortcutHints 가 "…(Ctrl+S)" 로 title 을 만들어 준다.
+  // 단축키를 설정에서 바꾸면 이 표기도 따라간다. (renderer 끝의 examTranslate → syncShortcutHints)
+  saveBtn.dataset.shortcutAction = "saveCurrent";
+  saveBtn.dataset.shortcutTitle = "정답과 채점 열쇠가 든 선생님 전용 파일 — 학생에게 주지 마세요";
   const exportBtn = document.createElement("button"); exportBtn.type = "button"; exportBtn.className = "btn primary";
   exportBtn.textContent = "📤 배포본 만들기(.exam)"; exportBtn.title = "정답을 뺀 학생 배포용 시험지 내보내기";
   bar.append(addChoiceBtn, addShortBtn, barSpacer, gradeBtn, saveBtn, exportBtn);

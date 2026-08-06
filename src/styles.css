@@ -13,6 +13,8 @@
     --code-comment:#64748b;
     --code-caret:#111827;--code-panel:#f8fafc;--code-panel-head:#eef2f7;
     --memo-paper:#fff9e6;--memo-paper-border:#ead8a0;
+    /* 시험지 화면 보조 버튼 hover — --panel-2 판 위에서도 묻히지 않게 강조색을 옅게 깐다 */
+    --exam-btn-hover-bg:color-mix(in srgb,var(--accent) 16%,var(--field));--exam-btn-hover-ink:var(--accent);
     --scratchpad-locked-border:#4f7fcb;--scratchpad-locked-bg:#edf4ff;--scratchpad-locked-field:#f4f8ff;
     --ink-cursor-pen:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M3 29l2.5-8L23 3l6 6L11 26.5z' fill='%23fbbf24' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M3 29l2.5-8L23 3l6 6L11 26.5zM20.5 5.5l6 6M5.5 21l5.5 5.5' fill='none' stroke='%23111827' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M3 29l2.5-8L11 26.5z' fill='%23111827'/%3E%3C/svg%3E") 3 29,crosshair;
     --ink-cursor-highlighter:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M4 28l2-7L21 4l7 6-15 17z' fill='%23fde047' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M4 28l2-7L21 4l7 6-15 17zM18.5 6.5l7 6M6 21l7 6' fill='none' stroke='%23111827' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M4 28l2-7 7 6z' fill='%23facc15' stroke='%23111827' stroke-width='1.5'/%3E%3C/svg%3E") 4 28,crosshair;
@@ -31,6 +33,7 @@
     --code-comment:#64748b;
     --code-caret:#e2e8f0;--code-panel:#0f172a;--code-panel-head:#0b1120;
     --memo-paper:var(--field);--memo-paper-border:var(--border);
+    --exam-btn-hover-bg:color-mix(in srgb,var(--accent) 34%,var(--field));--exam-btn-hover-ink:#e0e7ff;
     --scratchpad-locked-border:#4f7fcb;--scratchpad-locked-bg:#182536;--scratchpad-locked-field:#1e3047;
   }
   /* 라이트 배경 프리셋 — Python 편집 화면까지 바꾸되 PDF·일반 문서·메모지·다크 모드는 유지한다. */
@@ -4262,11 +4265,7 @@
     opacity:.5;transition:opacity .12s}
   .exam-item:hover .exam-item-add,.exam-item:focus-within .exam-item-add{opacity:1}
   .exam-item-add-btn{font-size:12px;padding:4px 10px}
-  /* 기본 .btn:hover 는 배경을 --panel-2 로 바꾸는데 카드·도구줄이 같은 색이라 묻힌다 — 강조색으로 */
-  .exam-add-btn:hover,.exam-add-btn:focus-visible{background:color-mix(in srgb,var(--accent) 16%,var(--field));
-    border-color:var(--accent);color:var(--accent)}
-  [data-theme="dark"] .exam-add-btn:hover,[data-theme="dark"] .exam-add-btn:focus-visible{
-    background:color-mix(in srgb,var(--accent) 34%,var(--field));color:#e0e7ff}
+  /* .exam-add-btn 의 hover 는 이 섹션 맨 아래 "판 위 버튼 hover" 블록에서 다른 버튼들과 함께 정한다 */
   .exam-item-list{display:flex;flex-direction:column;gap:12px}
   .exam-item{border:1px solid var(--border);border-radius:12px;background:var(--panel-2);padding:12px 14px}
   .exam-item-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
@@ -4407,3 +4406,37 @@
   .exam-gradebook-head strong{font-size:14px}
   .exam-gradebook-head span{font-size:11.5px;color:var(--muted)}
   .exam-gradebook-table-wrap{max-height:36vh}
+
+  /* ---- --panel-2 판 위에 놓인 버튼의 hover ----
+     기본 .btn:hover 는 배경을 --panel-2 로 바꾸는데 도구줄(.exam-bar)·문항 카드(.exam-item)·
+     표(.exam-table-wrap)·제출 받기 패널(.exam-receive)·제출 상자(.exam-submit-box)가 모두
+     같은 --panel-2 라 버튼이 판에 묻힌다.
+     다크에서는 --border 값까지 --panel-2 와 같아 테두리째 사라진다.
+     그래서 이 판들 위의 보조 버튼은 .primary 와 같은 결의 강조 hover 로 통일한다.
+     이 블록을 섹션 맨 끝에 두는 이유 — 위쪽 .exam-mark-toggle.is-* 처럼 명시도가 같은 규칙보다
+     나중에 와야 hover 가 이긴다. */
+  .exam-add-btn:hover,.exam-add-btn:focus-visible,
+  .exam-bar .btn:not(.primary):not(:disabled):hover,
+  .exam-bar .btn:not(.primary):not(:disabled):focus-visible,
+  .exam-item .btn:not(.primary):not(:disabled):hover,
+  .exam-item .btn:not(.primary):not(:disabled):focus-visible,
+  .exam-receive .btn:not(.primary):not(:disabled):hover,
+  .exam-receive .btn:not(.primary):not(:disabled):focus-visible,
+  .exam-table-wrap .btn:not(.primary):not(:disabled):hover,
+  .exam-table-wrap .btn:not(.primary):not(:disabled):focus-visible,
+  .exam-submit-box .btn:not(.primary):not(:disabled):hover,
+  .exam-submit-box .btn:not(.primary):not(:disabled):focus-visible{
+    background:var(--exam-btn-hover-bg);border-color:var(--accent);color:var(--exam-btn-hover-ink)}
+  /* 못 누르는 버튼은 흐리게 두고 hover 에도 반응하지 않는다(원본을 열기 전의 [답안 보기]).
+     기본 .btn 에는 :disabled 모양이 없어 다른 도구줄과 같은 방식(opacity+cursor)으로 맞춘다. */
+  .exam-bar .btn:disabled,.exam-item .btn:disabled,
+  .exam-receive .btn:disabled,.exam-table-wrap .btn:disabled,
+  .exam-submit-box .btn:disabled{opacity:.45;cursor:default}
+  .exam-bar .btn:disabled:hover,.exam-item .btn:disabled:hover,
+  .exam-receive .btn:disabled:hover,.exam-table-wrap .btn:disabled:hover,
+  .exam-submit-box .btn:disabled:hover{background:var(--field)}
+  /* O/X 토글은 초록·빨강이 판정을 뜻하므로 강조색으로 덮지 않고 제 색을 진하게 한다 */
+  .exam-mark-toggle.is-pass:hover,.exam-mark-toggle.is-pass:focus-visible{
+    background:rgba(22,163,74,.26);border-color:rgba(22,163,74,.75)}
+  .exam-mark-toggle.is-fail:hover,.exam-mark-toggle.is-fail:focus-visible{
+    background:rgba(239,68,68,.24);border-color:rgba(239,68,68,.75)}

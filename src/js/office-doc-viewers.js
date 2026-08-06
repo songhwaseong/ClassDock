@@ -687,26 +687,41 @@ function askText(opts){
   });
 }
 
-/* 범용 확인 모달 — Promise<boolean> 반환 (확인=true, 취소/Esc=false) */
-function confirmDialog(message, okText, cancelText){
+/* 범용 확인 모달 — Promise<boolean> 반환 (확인=true, 취소/Esc=false)
+
+   opts.altText 를 주면 가운데에 선택지가 하나 더 생기고, 반환값이 boolean 대신
+   "ok" | "alt" | "cancel" 문자열이 된다. 두 갈래 확인창에 세 번째 선택지를 억지로
+   끼워 넣으면 Esc 가 "취소"가 아닌 실제 동작에 걸려 버린다(시험지 배포본 만들기에서 겪음).
+   opts.escape 로 Esc 를 어느 선택지에 둘지 정한다 — 기본은 "cancel".
+   opts 를 넘기지 않으면 예전과 완전히 같게 동작한다. */
+function confirmDialog(message, okText, cancelText, opts){
+  opts = opts || {};
+  const altText = opts.altText || "";
   return new Promise((resolve) => {
     const modal = byId("confirmModal");
+    const altBtn = byId("confirmAlt");
     byId("confirmSub").textContent = message || "계속하시겠어요?";
     byId("confirmOk").textContent = okText || "계속";
     byId("confirmCancel").textContent = cancelText || "취소";
+    if (altBtn){
+      altBtn.hidden = !altText;
+      altBtn.textContent = altText;
+    }
     modal.hidden = false;
     setTimeout(() => byId("confirmOk").focus(), 40);
     const cleanup = () => {
       modal.hidden = true;
       byId("confirmOk").onclick = null; byId("confirmCancel").onclick = null;
+      if (altBtn){ altBtn.onclick = null; altBtn.hidden = true; }   // 공용 요소라 다음 확인창에 잔상을 남기지 않는다
       window.removeEventListener("keydown", onKey, true);
     };
-    const done = (v) => { cleanup(); resolve(v); };
-    byId("confirmOk").onclick = () => done(true);
-    byId("confirmCancel").onclick = () => done(false);
+    const done = (choice) => { cleanup(); resolve(altText ? choice : (choice === "ok")); };
+    byId("confirmOk").onclick = () => done("ok");
+    byId("confirmCancel").onclick = () => done("cancel");
+    if (altBtn) altBtn.onclick = () => done("alt");
     const onKey = (e) => {
-      if (e.key === "Escape"){ e.preventDefault(); done(false); }
-      else if (e.key === "Enter"){ e.preventDefault(); done(true); }
+      if (e.key === "Escape"){ e.preventDefault(); done(opts.escape || "cancel"); }
+      else if (e.key === "Enter"){ e.preventDefault(); done("ok"); }
     };
     window.addEventListener("keydown", onKey, true);   // capture: 새로고침 가로채기보다 먼저 처리
   });
