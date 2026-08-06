@@ -728,6 +728,7 @@ function wire(){
     });
     document.querySelectorAll("#settingsModal .settings-section").forEach((sec) => {
       sec.hidden = sec.dataset.settingsPanel !== name;
+      if (!sec.hidden) sec.scrollTop = 0;     // 긴 탭에서 스크롤한 뒤 넘어와도 항상 맨 위부터
     });
   };
   const LIGHT_BACKGROUND_VALUES = new Set(["cool", "warm", "mint", "lavender", "sky"]);

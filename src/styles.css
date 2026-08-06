@@ -1521,14 +1521,25 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   .loading p{font-size:14px;color:var(--muted)}
   .loading #loadingCancel{margin-top:4px}
-  .settings-card{width:min(640px,96%);max-height:88vh;overflow:auto}.settings-row,.settings-check{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
+  /* 탭을 바꿔도 카드가 늘었다 줄었다 하지 않도록 높이를 고정한다(모달이 가운데 정렬이라
+     높이가 변하면 제목·탭바가 위아래로 튄다). 넘치는 내용은 .settings-section 안에서만 스크롤. */
+  .settings-card{width:min(640px,96%);height:min(88vh,820px);display:flex;flex-direction:column;overflow:hidden}
+  .settings-card>h3,.settings-card>.sub,.settings-card>.settings-tabs,.settings-card>.modal-actions{flex:none}
+  /* 좁은·낮은 화면(.modal 이 align-items:stretch 로 바뀌는 구간)에서는 세로 고정 레이아웃을 풀고
+     예전처럼 카드 전체가 스크롤하게 둔다. flex 를 남겨 두면 패널이 flex:1 로 눌려 내용이 저장
+     버튼 위로 넘쳐 흐른다. 위 규칙보다 반드시 뒤에 와야 한다(미디어 쿼리는 우선순위를 올리지 않음). */
+  @media(max-width:600px),(max-height:520px){
+    .settings-card{display:block;height:auto;max-height:none;overflow:auto}
+    .settings-card .settings-section{overflow:visible}
+  }
+  .settings-row,.settings-check{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
   .settings-row .pw-input{width:140px;margin:0}.settings-check{justify-content:flex-start}.settings-check input{width:17px;height:17px;accent-color:var(--accent)}
   .settings-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 10px;padding:4px;border-radius:11px;background:var(--panel-2)}
   .settings-tab{flex:1 1 auto;min-width:64px;border:1px solid transparent;border-radius:8px;padding:7px 10px;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
   .settings-tab:hover{color:var(--ink)}
   .settings-tab.active{background:var(--panel);border-color:var(--border);color:var(--accent);box-shadow:0 2px 7px rgba(0,0,0,.08)}
   .settings-section[hidden]{display:none}
-  .settings-section{min-height:132px}
+  .settings-section{flex:1 1 auto;min-height:0;overflow:auto}
   .settings-section > .settings-row:last-child,.settings-section > .settings-check:last-child,.settings-section > .settings-save-folder:last-child{border-bottom:none}
   .settings-section .shortcut-settings{margin-top:0;padding-top:0;border-top:none}
   .settings-hint{margin:0 0 4px;padding:10px 0 0;font-size:12.5px;color:var(--muted)}
