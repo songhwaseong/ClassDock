@@ -4046,6 +4046,10 @@ class PdfSignerLauncher
         psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
         psi.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
         psi.EnvironmentVariables["MPLBACKEND"] = "Agg";
+        // 작업폴더의 다른 .py 를 import 하면 파이썬이 __pycache__/*.pyc 를 자동으로 만든다. 학생이 만든 적 없는
+        // 파일이 "실행이 만든 파일"에 섞이고 다음 실행 작업폴더로도 이어지므로 자동 생성을 끈다.
+        // (py_compile 처럼 코드가 직접 만드는 .pyc 는 생길 수 있지만 결과 목록에서는 아래 안전망으로 제외한다)
+        psi.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";
         psi.EnvironmentVariables["PDFSIGNER_SCRIPT"] = scriptPath;
         psi.EnvironmentVariables["PDFSIGNER_PROJECT_ROOT"] = tempRoot;
         psi.EnvironmentVariables["PDFSIGNER_PLOT_DIR"] = session.PlotDir;
@@ -4211,6 +4215,18 @@ class PdfSignerLauncher
         catch { }
     }
 
+    // 파이썬 바이트코드 찌꺼기(=학생이 만든 결과물이 아님) 판별. rel 은 '/' 로 정규화된 상대경로.
+    // 실행 프로세스에 PYTHONDONTWRITEBYTECODE 를 걸어 애초에 안 생기게 했지만,
+    // 그 설정 전에 만들어져 작업폴더로 이어진 것까지 걸러내는 안전망이다(셀 노트북 커널도 __pycache__ 를 제외한다).
+    static bool IsBytecodeArtifact(string rel)
+    {
+        if (string.IsNullOrEmpty(rel)) return false;
+        if (rel.EndsWith(".pyc", StringComparison.OrdinalIgnoreCase)) return true;
+        if (rel.EndsWith(".pyo", StringComparison.OrdinalIgnoreCase)) return true;
+        if (rel.StartsWith("__pycache__/", StringComparison.OrdinalIgnoreCase)) return true;
+        return rel.IndexOf("/__pycache__/", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     // 작업폴더에서 새로 생기거나 내용이 바뀐 파일을 [{name,size}] JSON 으로
     static string ScanOutputs(PythonSession session)
     {
@@ -4224,6 +4240,7 @@ class PdfSignerLauncher
             foreach (string f in files)
             {
                 string rel = f.Substring(root.Length).TrimStart('\\', '/').Replace('\\', '/');
+                if (IsBytecodeArtifact(rel)) continue;   // 파이썬이 자동으로 만든 __pycache__/*.pyc 는 출력이 아니다
                 FileInfo fi;
                 try { fi = new FileInfo(f); } catch { continue; }
                 long size = fi.Length, mtime = fi.LastWriteTimeUtc.Ticks, initSize, initMtime;
@@ -6138,6 +6155,7 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
         psi.WorkingDirectory = workDir;
         psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
         psi.EnvironmentVariables["MPLBACKEND"] = "Agg";
+        psi.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";   // 세션 실행과 동일하게 __pycache__ 찌꺼기를 남기지 않는다
         psi.EnvironmentVariables["PDFSIGNER_SCRIPT"] = scriptPath;
         psi.EnvironmentVariables["PDFSIGNER_PROJECT_ROOT"] = string.IsNullOrEmpty(projectRoot) ? workDir : projectRoot;
         psi.EnvironmentVariables["PDFSIGNER_PLOT_DIR"] = plotDir;
