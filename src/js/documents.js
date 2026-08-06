@@ -1104,6 +1104,10 @@ function focusSidebarActive(){ focusSidebarDoc(activeId); }
 // 다시 열 때 마지막으로 보던 문서 줄을 펼치고 그 줄로 커서를 맞춰 준다.
 //   reveal:false    → 열기만 한다(검색창·확장자 필터처럼 포커스 갈 곳이 따로 있는 경우)
 //   moveFocus:true  → 실제 키보드 포커스까지 목록으로 옮긴다(키보드로 열었을 때만)
+// 사이드바가 "실제로 화면에 떠 있는" 상태. 목록이 비어 있으면(파일을 하나도 안 열었으면)
+// 접힘 설정과 무관하게 닫힌 것으로 본다 — 버튼 아이콘·문구·클릭 동작이 모두 이 값을 따른다.
+function sidebarIsOpen(){ return navNodes.length > 0 && !sidebarCollapsed; }
+
 function openSidebar(opts){
   const o = opts || {};
   if (sidebarCollapsed){
@@ -3807,8 +3811,9 @@ function refreshChrome(){
   sidebarBackdrop.classList.toggle("is-open", sidebarOpen);
   byId("sbResizer").hidden = !sidebarOpen;
   const sidebarToggle = byId("sidebarToggle");
-  sidebarToggle.title = sidebarCollapsed ? "왼쪽 사이드 메뉴 보이기" : "왼쪽 사이드 메뉴 숨기기";
+  // 문구·아이콘 모두 실제 표시 여부(sidebarOpen)를 따른다 — 아이콘은 이 값으로 채움/비움이 갈린다.
+  sidebarToggle.title = sidebarOpen ? "왼쪽 사이드 메뉴 숨기기" : "왼쪽 사이드 메뉴 보이기";
   sidebarToggle.setAttribute("aria-label", sidebarToggle.title);
-  sidebarToggle.setAttribute("aria-expanded", String(!sidebarCollapsed));
+  sidebarToggle.setAttribute("aria-expanded", String(sidebarOpen));
   byId("studyToggle").hidden = !has;
 }

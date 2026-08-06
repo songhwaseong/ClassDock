@@ -1158,8 +1158,9 @@ function wire(){
     });
   })();
   byId("sidebarToggle").onclick = (e) => {
-    if (sidebarCollapsed){
+    if (!sidebarIsOpen()){
       // e.detail === 0 이면 Enter·Space 로 누른 것 → 키보드 동선이므로 목록으로 포커스까지 넘긴다.
+      // 파일이 없어 목록이 비었을 때도 "보이기" 쪽으로 붙는다 — 버튼 문구와 어긋나게 접힘 설정을 켜지 않는다.
       openSidebar({ moveFocus: !!e && e.detail === 0 });
     } else {
       sidebarCollapsed = true;

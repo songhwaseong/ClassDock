@@ -201,6 +201,10 @@
   header button.primary:hover{background:var(--accent-d)}
   .sidebar-toggle{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;padding:0;border-radius:8px}
   .sidebar-toggle svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  /* 펼침 = 왼쪽 레일이 채워진 아이콘, 접힘 = 빈 레일 + 점선 구분선 */
+  .sidebar-toggle .rail{fill:currentColor;stroke:none}
+  .sidebar-toggle[aria-expanded="false"] .rail{fill:none}
+  .sidebar-toggle[aria-expanded="false"] .divider{opacity:.45;stroke-dasharray:2.5 2.5}
   .theme-toggle{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:6px 9px}
   .light-background-setting{align-items:center}
   .light-background-options{display:inline-flex;align-items:center;gap:7px}
