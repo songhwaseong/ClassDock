@@ -189,6 +189,61 @@ async function examOpenWithPassword(env, password){
   } catch(_){ return null; }
 }
 
+/* ===== 제출 기록 초기화 코드 =====
+   원본 파일과 선생님 암호는 그 자리에 선생님이 있어야만 쓸 수 있다. 한두 명을 되돌리자고 USB 를
+   들고 자리마다 도는 건 무리라, 불러 주기만 하면 되는 코드를 따로 둔다.
+   코드는 '시험지 id + 선생님 암호'에서 항상 같은 값으로 만들어진다 → 선생님은 원본만 열면 언제든
+   다시 확인할 수 있고, 배포본에는 코드 자체가 아니라 PBKDF2 지문만 넣는다(코드가 새도 정답은
+   못 본다. 반대로 지문에서 코드를 되뽑는 것도 21만 회 늘림 때문에 현실적으로 막힌다).
+   퍼지면 그 시험지에 한해 학생이 스스로 잠금을 풀 수 있으니, 반 전체에 불러 주지는 말 것. */
+const EXAM_RESET_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // 헷갈리는 0·O·1·I 는 뺀다
+const EXAM_RESET_CODE_LEN = 8;
+
+async function examResetCodeFor(id, password){
+  if (!id || !password) return "";
+  const seed = await examSha256Hex("mn-exam-reset|" + String(id) + "|" + String(password));
+  if (!seed) return "";
+  let code = "";
+  // 256 % 32 === 0 이라 한 바이트를 그대로 접어도 글자가 치우치지 않는다
+  for (let i = 0; i < EXAM_RESET_CODE_LEN; i++){
+    const byte = parseInt(seed.slice(i * 2, i * 2 + 2), 16);
+    code += EXAM_RESET_CODE_ALPHABET[byte % EXAM_RESET_CODE_ALPHABET.length];
+  }
+  return code;
+}
+
+function examResetCodeText(code){
+  const value = String(code || "");
+  return value.length === EXAM_RESET_CODE_LEN ? (value.slice(0, 4) + "-" + value.slice(4)) : value;
+}
+
+function examNormalizeResetCode(value){
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, EXAM_RESET_CODE_LEN);
+}
+
+async function examResetFingerprint(code, saltBytes, iterations){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(code)), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" }, base, 256);
+  return examBytesToB64(new Uint8Array(bits));
+}
+
+async function examMakeResetSeal(code){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return {
+    alg: "PBKDF2-SHA256", iter: EXAM_PBKDF2_ITER,
+    salt: examBytesToB64(salt), fp: await examResetFingerprint(code, salt, EXAM_PBKDF2_ITER)
+  };
+}
+
+async function examResetCodeMatches(reset, code){
+  if (!reset || typeof reset !== "object" || !reset.salt || !reset.fp) return false;
+  if (!code) return false;
+  try {
+    const iter = Math.min(1000000, Math.max(1000, Number(reset.iter) || EXAM_PBKDF2_ITER));
+    return await examResetFingerprint(code, examB64ToBytes(reset.salt), iter) === String(reset.fp);
+  } catch(_){ return false; }
+}
+
 async function examGenerateKeyPair(){
   const pair = await crypto.subtle.generateKey(
     { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
@@ -708,8 +763,23 @@ async function examExportPaper(doc){
     delete paper.items;
   }
 
+  // 제출 기록 초기화 코드의 지문 — 코드 자체는 배포본에 넣지 않는다
+  const resetCode = await examResetCodeFor(state.id, state.password);
+  if (resetCode){
+    try { paper.reset = await examMakeResetSeal(resetCode); }
+    catch(e){ console.warn("exam reset seal failed:", e); }   // 코드는 덤이라, 실패해도 배포는 계속한다
+  }
+
   await examSaveTextFile(JSON.stringify(paper, null, 1), examSafeFileToken(title, "시험지") + ".exam", "배포용 시험지");
   toast("배포본에는 정답이 들어 있지 않아요. 정답이 든 원본(.examkey)은 선생님만 보관하세요.", 5200);
+  if (paper.reset){
+    await confirmDialog(
+      "제출 기록 초기화 코드는 " + examResetCodeText(resetCode) + " 입니다."
+      + " 학생이 잘못 냈거나 다시 풀어야 할 때, 그 학생 화면의 [제출 기록 초기화]에 이 코드를 불러 주면 잠금이 풀려요."
+      + " 이 시험지에서 계속 같은 코드가 쓰이니 반 전체에 알리지는 마세요 — 잊어버리면 채점 화면에서 원본을 열어 다시 볼 수 있습니다.",
+      "알겠어요", "닫기"
+    );
+  }
 }
 
 function examRenderEditor(doc){
@@ -1319,6 +1389,95 @@ function examSaveDraft(doc){
   });
 }
 
+/* ===== 선생님: 이 기기의 제출 기록 초기화 =====
+   제출 잠금은 파일이 아니라 시험지 id 로 걸린다(mn.examDone.<id>). 그래서 같은 원본에서 배포본을
+   새로 만들어 나눠 줘도 한 번 낸 기기에서는 계속 잠긴 채다 — 재시험이나 잘못 낸 제출을 되돌릴 길이
+   없었다. 학생 기기에는 원본이 없으니 자물쇠를 여는 열쇠는 '원본(.examkey) + 선생님 암호' 뿐이고,
+   그 둘을 그 자리에서 확인해 선생님 본인일 때만 표식을 지운다(학생이 혼자서는 못 푼다).
+   이미 만들어진 제출본 파일과 선생님 PC 로 보낸 제출은 건드리지 않는다. */
+function examClearSubmissionLock(id){
+  const key = examDoneKey(String(id || ""));
+  const had = !!examReadJson(key);
+  try { localStorage.removeItem(key); } catch(_){}
+  return had;
+}
+
+async function examResetSubmissionLock(doc){
+  const state = doc.examTake;
+  if (!state || !state.submitted) return false;
+  if (!examRequireCrypto()) return false;
+  const title = (state.paper.meta && state.paper.meta.title) || "시험지";
+  const hasCode = !!(state.paper && state.paper.reset);
+  // 코드를 넣어 만든 배포본이면 두 갈래 — 불러 주는 코드(선생님이 멀리 있어도 된다)와 원본 파일.
+  const choice = await confirmDialog(
+    '이 기기에 남은 "' + title + '" 제출 기록을 지우고 다시 풀 수 있게 할까요?'
+    + (hasCode
+      ? " 선생님께 초기화 코드를 받았다면 그 코드를, 선생님이 옆에 계시면 원본(.examkey) 파일을 쓰세요."
+      : " 시험지 원본(.examkey) 파일과 선생님 암호가 필요합니다.")
+    + " 이미 낸 답안 파일은 그대로 남아요.",
+    hasCode ? "초기화 코드 넣기" : "원본 고르기", "취소",
+    hasCode ? { altText: "원본 파일 고르기" } : null
+  );
+  if (hasCode){
+    if (choice === "cancel") return false;
+    if (choice === "ok") return await examResetByCode(doc);
+  } else if (!choice) return false;
+  return await examResetByMaster(doc, title);
+}
+
+async function examResetByCode(doc){
+  const state = doc.examTake;
+  for (let attempt = 0; attempt < 5; attempt++){
+    const typed = await askText({
+      title: "제출 기록 초기화 코드",
+      message: attempt === 0
+        ? "선생님께 받은 " + EXAM_RESET_CODE_LEN + "자리 코드를 넣으세요."
+        : "코드가 맞지 않아요. 다시 넣어 주세요.",
+      placeholder: "예: ABCD-2345", okText: "잠금 풀기"
+    });
+    if (typed === null) return false;
+    const code = examNormalizeResetCode(typed);
+    if (code.length !== EXAM_RESET_CODE_LEN){ toast("코드는 " + EXAM_RESET_CODE_LEN + "자리예요.", 2600); continue; }
+    showLoading("코드를 확인하는 중…");
+    let ok = false;
+    try { ok = await examResetCodeMatches(state.paper.reset, code); }
+    finally { hideLoading(); }
+    if (ok){ examFinishReset(doc); return true; }
+    toast("코드가 맞지 않아요.", 2400, { type: "error" });
+  }
+  return false;
+}
+
+async function examResetByMaster(doc, title){
+  const state = doc.examTake;
+  const files = await examPickFile(".examkey,application/json", false);
+  if (!files.length) return false;
+  const file = files[0];
+  if (Number(file.size) > EXAM_MAX_FILE_BYTES){ toast("시험지 파일은 48MB 이하만 열 수 있어요.", 3000); return false; }
+  let parsed = null;
+  try { parsed = JSON.parse(await file.text()); } catch(_){}
+  const master = examValidateMasterPayload(parsed);
+  if (!master){ toast("시험지 원본(.examkey) 파일을 읽지 못했어요.", 3400, { type: "error" }); return false; }
+  // 다른 시험지의 원본으로는 못 푼다 — 암호를 아는 선생님이라도 자물쇠는 시험지마다 따로다.
+  if (String(master.id || "").slice(0, 64) !== state.id){
+    toast('이 시험지의 원본이 아니에요. "' + title + '" 의 .examkey 를 골라 주세요.', 3800, { type: "error" });
+    return false;
+  }
+  const opened = await examUnlockMaster(master, "이 기기의 제출 기록을 지우려면 선생님 암호가 필요해요.");
+  if (!opened) return false;
+  examFinishReset(doc);
+  return true;
+}
+
+function examFinishReset(doc){
+  const state = doc.examTake;
+  examClearSubmissionLock(state.id);
+  state.submitted = false; state.submittedAt = ""; state.receipt = "";
+  examSaveDraft(doc);          // 화면에 남아 있던 답안을 초안으로 되돌려 둔다(바로 새로고침해도 유지)
+  examRenderTake(doc);
+  toast("제출 기록을 지웠어요. 이 기기에서 다시 풀고 제출할 수 있습니다.", 4000, { type: "success" });
+}
+
 function examAnsweredCount(state){
   let count = 0;
   for (const item of state.items){
@@ -1357,6 +1516,17 @@ function examRenderTake(doc){
       receipt.textContent = "선생님 PC 접수번호 " + state.receipt;
       donePanel.appendChild(receipt);
     }
+    const doneTools = document.createElement("div"); doneTools.className = "exam-done-tools";
+    const resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn exam-done-reset";
+    resetBtn.textContent = "🔑 제출 기록 초기화";
+    resetBtn.title = "선생님께 받은 초기화 코드나, 시험지 원본(.examkey)+선생님 암호로 이 기기의 제출 잠금을 풉니다.";
+    resetBtn.addEventListener("click", async () => {
+      resetBtn.disabled = true;
+      try { await examResetSubmissionLock(doc); }
+      finally { resetBtn.disabled = false; }   // 성공하면 화면을 다시 그려 이 버튼은 사라진다
+    });
+    doneTools.appendChild(resetBtn);
+    donePanel.appendChild(doneTools);
     wrap.appendChild(donePanel);
     host.appendChild(wrap);
     examTranslate(wrap);
@@ -1881,12 +2051,14 @@ async function examLoadMasterForGrading(doc){
   const opened = await examUnlockMaster(master, "제출본을 열려면 이 시험지를 만들 때 정한 선생님 암호가 필요해요.");
   if (!opened) return;
   examResetGradedRows(doc.examGrade);
+  const masterId = String(master.id || "").slice(0, 64);
   doc.examGrade.master = {
-    id: String(master.id || "").slice(0, 64),
+    id: masterId,
     title: String((master.meta && master.meta.title) || file.name),
     items: opened.items,
     privateJwk: opened.keys.privateJwk,
-    itemsHash: await examSha256Hex(examCanonicalStringify(examStripAnswers(opened.items)))
+    itemsHash: await examSha256Hex(examCanonicalStringify(examStripAnswers(opened.items))),
+    resetCode: await examResetCodeFor(masterId, opened.password)   // 배포본에 넣은 지문과 같은 코드
   };
   await examReceiveSyncMaster(doc);
   showLoading("제출본을 여는 중…");
@@ -2114,6 +2286,18 @@ function examRenderGrading(doc){
     try { await examAddSubmissions(doc, entries); }
     finally { hideLoading(); }
   });
+  // 코드는 원본을 연 선생님만 다시 볼 수 있다 — 잊어버려도 여기서 확인해 학생에게 불러 준다.
+  let resetBtn = null;
+  if (state.master && state.master.resetCode){
+    resetBtn = document.createElement("button"); resetBtn.type = "button"; resetBtn.className = "btn";
+    resetBtn.textContent = "🔓 초기화 코드";
+    resetBtn.title = "학생 기기의 제출 잠금을 푸는 코드를 확인합니다";
+    resetBtn.addEventListener("click", () => confirmDialog(
+      '"' + state.master.title + '" 제출 기록 초기화 코드는 ' + examResetCodeText(state.master.resetCode) + " 입니다."
+      + " 다시 풀게 할 학생에게만 불러 주세요 — 그 학생 화면의 [제출 기록 초기화]에 넣으면 잠금이 풀립니다.",
+      "알겠어요", "닫기"
+    ));
+  }
   const barSpacer = document.createElement("div"); barSpacer.className = "spacer";
   const csvBtn = document.createElement("button"); csvBtn.type = "button"; csvBtn.className = "btn";
   csvBtn.textContent = "⬇ 성적 CSV"; csvBtn.title = "표의 내용을 엑셀에서 열 수 있는 CSV 파일로 내보내기";
@@ -2121,7 +2305,9 @@ function examRenderGrading(doc){
   const allCsvBtn = document.createElement("button"); allCsvBtn.type = "button"; allCsvBtn.className = "btn";
   allCsvBtn.textContent = "📚 누적 성적 CSV"; allCsvBtn.title = "저장된 모든 시험의 학생별 점수를 한 CSV로 내보내기";
   allCsvBtn.addEventListener("click", () => examExportCumulativeCsv());
-  bar.append(masterBtn, addBtn, barSpacer, csvBtn, allCsvBtn);
+  bar.append(masterBtn, addBtn);
+  if (resetBtn) bar.appendChild(resetBtn);
+  bar.append(barSpacer, csvBtn, allCsvBtn);
   wrap.appendChild(bar);
 
   wrap.appendChild(examRenderReceivePanel(doc));

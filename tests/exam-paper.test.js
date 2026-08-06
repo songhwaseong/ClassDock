@@ -189,3 +189,62 @@ test("봉인 내부 시험지 해시가 원본과 다르면 점수를 만들지 
   assert.match(row.note, /채점 차단/);
   assert.equal(sandbox.examReadGradebook().records.length, 0);
 });
+
+test("제출 기록을 지우면 같은 배포본을 그 기기에서 다시 풀 수 있다", () => {
+  storage.clear();
+  const paper = { id: "exam-reset-1", meta: { title: "쪽지시험" } };
+  const items = sandbox.examNormalizeItems(sandbox.examStripAnswers(sampleItems()), false);
+
+  const first = {};
+  sandbox.examAttachTakeDoc(first, paper, items);
+  first.examTake.answers.i1 = 2;
+  first.examTake.student = "12 홍길동";
+  sandbox.examSaveDraft(first);
+
+  // 제출한 기기 — 초안이 지워지고 완료 표식만 남은 상태
+  storage.delete("mn.exam.exam-reset-1");
+  sandbox.examWriteJson("mn.examDone.exam-reset-1", {
+    at: "2026-08-05T05:22:30.000Z", student: "12 홍길동", receipt: "abcd1234"
+  });
+  const locked = {};
+  sandbox.examAttachTakeDoc(locked, paper, items);
+  assert.equal(locked.examTake.submitted, true);
+  assert.equal(locked.examTake.receipt, "abcd1234");
+
+  assert.equal(sandbox.examClearSubmissionLock("exam-reset-1"), true);
+  assert.equal(sandbox.examClearSubmissionLock("exam-reset-1"), false);   // 두 번 지워도 탈 나지 않는다
+
+  const again = {};
+  sandbox.examAttachTakeDoc(again, paper, items);
+  assert.equal(again.examTake.submitted, false);
+  assert.equal(again.examTake.receipt, "");
+
+  // 다른 시험지의 자물쇠는 건드리지 않는다
+  sandbox.examWriteJson("mn.examDone.exam-reset-1", { at: "2026-08-05T05:22:30.000Z", student: "12 홍길동" });
+  assert.equal(sandbox.examClearSubmissionLock("exam-reset-2"), false);
+  const still = {};
+  sandbox.examAttachTakeDoc(still, paper, items);
+  assert.equal(still.examTake.submitted, true);
+});
+
+test("초기화 코드는 시험지와 선생님 암호에서 늘 같은 값으로 나온다", async () => {
+  const code = await sandbox.examResetCodeFor("exam-1", "teacher-1234");
+  assert.equal(code.length, 8);
+  assert.match(code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);   // 헷갈리는 0·O·1·I 는 안 쓴다
+  assert.equal(await sandbox.examResetCodeFor("exam-1", "teacher-1234"), code);
+  assert.notEqual(await sandbox.examResetCodeFor("exam-2", "teacher-1234"), code);
+  assert.notEqual(await sandbox.examResetCodeFor("exam-1", "teacher-9999"), code);
+  assert.equal(sandbox.examResetCodeText(code), code.slice(0, 4) + "-" + code.slice(4));
+  assert.equal(sandbox.examNormalizeResetCode(" " + code.slice(0, 4).toLowerCase() + "-" + code.slice(4) + " "), code);
+});
+
+test("배포본에는 코드가 아니라 지문만 들어가고, 맞는 코드에서만 열린다", async () => {
+  const code = await sandbox.examResetCodeFor("exam-1", "teacher-1234");
+  const seal = await sandbox.examMakeResetSeal(code);
+  assert.equal(JSON.stringify(seal).includes(code), false);        // 코드 자체는 배포본에 없다
+  assert.equal(await sandbox.examResetCodeMatches(seal, code), true);
+  assert.equal(await sandbox.examResetCodeMatches(seal, "ABCD2345"), false);
+  assert.equal(await sandbox.examResetCodeMatches(seal, ""), false);
+  assert.equal(await sandbox.examResetCodeMatches(null, code), false);
+  assert.equal(await sandbox.examResetCodeMatches({ salt: seal.salt }, code), false);
+});

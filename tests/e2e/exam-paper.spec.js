@@ -23,6 +23,22 @@ async function downloadText(page, action){
   return { name: download.suggestedFilename(), text: fs.readFileSync(path, "utf8") };
 }
 
+// 배포본을 만들면 마지막에 "제출 기록 초기화 코드" 안내창이 뜬다 — 닫고 코드 문구를 돌려준다.
+async function exportPaper(page, editor){
+  const paper = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "배포본 만들기" }).click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    await page.locator("#confirmAlt").click();                    // 세 번째 버튼 "암호 없이 배포"
+  });
+  const notice = page.locator("#confirmModal");
+  await expect(notice).toBeVisible();
+  const text = await page.locator("#confirmSub").textContent();
+  await page.locator("#confirmOk").click();
+  await expect(notice).toBeHidden();
+  const code = (text.match(/([A-Z0-9]{4}-[A-Z0-9]{4})/) || [])[1] || "";
+  return { ...paper, code };
+}
+
 async function typePassword(page, value, withConfirm){
   const modal = page.locator(".exam-pass-modal");
   await expect(modal).toBeVisible();
@@ -66,11 +82,7 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   expect(master.text).not.toContain("광합성");        // 원본은 통째로 잠긴다
 
   // --- 배포본(.exam) 내보내기: 열기 암호 없이 ---
-  const paper = await downloadText(page, async () => {
-    await editor.locator(".btn", { hasText: "배포본 만들기" }).click();
-    await expect(page.locator("#confirmModal")).toBeVisible();
-    await page.locator("#confirmCancel").click();                 // "암호 없이 배포"
-  });
+  const paper = await exportPaper(page, editor);
   expect(paper.name).toBe("e2e 쪽지시험.exam");
   const paperJson = JSON.parse(paper.text);
   expect(paperJson.format).toBe("manneung-exam");
@@ -130,6 +142,12 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   await masterChooser.setFiles({ name: master.name, mimeType: "application/json", buffer: Buffer.from(master.text, "utf8") });
   await typePassword(page, TEACHER_PASSWORD, false);
   await expect(grade.locator(".exam-head-sub")).toContainText("e2e 쪽지시험");
+
+  // 초기화 코드는 원본만 열면 언제든 다시 확인할 수 있다 — 배포할 때 알려 준 값 그대로다
+  await grade.locator(".btn", { hasText: "초기화 코드" }).click();
+  await expect(page.locator("#confirmSub")).toContainText(paper.code);
+  await page.locator("#confirmOk").click();
+  await expect(page.locator("#confirmModal")).toBeHidden();
 
   const [doneChooser] = await Promise.all([
     page.waitForEvent("filechooser"),
@@ -486,4 +504,106 @@ test("다른 시험지의 열쇠로는 제출본을 열 수 없다", async ({ pa
   });
   expect(built.mine).toBe(true);
   expect(built.theirs).toBeNull();
+});
+
+/* 제출 잠금은 시험지 id 로 걸리므로 배포본을 새로 만들어도 낸 기기에서는 계속 잠긴다.
+ * 그 자물쇠를 여는 문이 완료 화면의 [제출 기록 초기화]인데, 학생이 혼자 열 수 있으면 잠금 자체가
+ * 의미를 잃는다 — 선생님이 불러 준 코드나 '그 시험지의 원본 + 선생님 암호' 로만 풀리는지 확인한다. */
+test("제출 기록 초기화는 선생님이 불러 준 코드나 원본+암호로만 풀린다", async ({ page }) => {
+  await boot(page);
+
+  await page.evaluate(() => window.newExamPaper());
+  const editor = page.locator(".exam-edit");
+  await expect(editor).toBeVisible();
+  await editor.locator(".exam-meta-row input").nth(0).fill("e2e 재응시");
+  const first = editor.locator(".exam-item").nth(0);
+  await first.locator(".exam-stem-input").fill("1 + 1 은?");
+  const choices = first.locator(".exam-choice-input");
+  for (let i = 0; i < 4; i++) await choices.nth(i).fill(String(i + 1));
+  await first.locator('input[type="radio"]').nth(1).check();
+
+  const master = await downloadText(page, async () => {
+    await editor.locator(".btn", { hasText: "원본 저장" }).click();
+    await typePassword(page, TEACHER_PASSWORD, true);
+  });
+  const paper = await exportPaper(page, editor);
+  const paperId = JSON.parse(paper.text).id;
+  expect(paper.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);        // 배포 직후 코드를 알려 준다
+  expect(paper.text).not.toContain(paper.code.replace("-", ""));  // 배포본에는 지문만 들어간다
+
+  // 이미 제출한 기기인 것처럼 완료 표식만 남겨 둔다(제출 흐름 자체는 위 시나리오에서 확인한다)
+  await page.evaluate((id) => {
+    localStorage.setItem("mn.examDone." + id, JSON.stringify({ at: "2026-08-05T05:22:30.000Z", student: "12 홍길동" }));
+  }, paperId);
+  await page.locator("#fileInput").setInputFiles({
+    name: "e2e 재응시.exam", mimeType: "application/json", buffer: Buffer.from(paper.text, "utf8")
+  });
+  await expect(page.locator(".exam-done-panel")).toBeVisible();
+  await expect(page.locator(".exam-submit-btn")).toHaveCount(0);
+
+  const chooseMaster = async (text) => {
+    await page.locator(".exam-done-reset").click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.locator("#confirmAlt").click()                         // 세 번째 버튼 "원본 파일 고르기"
+    ]);
+    await chooser.setFiles({ name: "e2e 재응시.examkey", mimeType: "application/json", buffer: Buffer.from(text, "utf8") });
+  };
+  const typeCode = async (code) => {
+    await page.locator(".exam-done-reset").click();
+    await expect(page.locator("#confirmModal")).toBeVisible();
+    await page.locator("#confirmOk").click();                     // "초기화 코드 넣기"
+    await expect(page.locator("#textModal")).toBeVisible();
+    await page.locator("#textInput").fill(code);
+    await page.locator("#textOk").click();
+  };
+  // 시험지를 다시 열면 예전 탭의 문서도 DOM 에 남아 있어, 보이는 문서만 골라 확인한다.
+  const stillLocked = async () => {
+    await expect(page.locator(".exam-done-panel:visible")).toBeVisible();
+    await expect(page.locator(".exam-submit-btn:visible")).toHaveCount(0);
+    expect(await page.evaluate((id) => localStorage.getItem("mn.examDone." + id), paperId)).not.toBeNull();
+  };
+
+  // 1) 틀린 코드 — 다시 물어볼 뿐 풀리지 않는다
+  await typeCode("ABCD-2345");
+  await expect(page.locator("#textModal")).toBeVisible();         // 재입력 창
+  await page.locator("#textCancel").click();
+  await stillLocked();
+
+  // 2) 다른 시험지의 원본 — 암호를 묻지도 않는다
+  await chooseMaster(JSON.stringify({ ...JSON.parse(master.text), id: "다른-시험지" }));
+  await expect(page.locator(".exam-pass-modal")).toHaveCount(0);
+  await stillLocked();
+
+  // 3) 원본은 맞지만 암호가 틀리면 역시 풀리지 않는다
+  await chooseMaster(master.text);
+  const modal = page.locator(".exam-pass-modal");
+  await expect(modal).toBeVisible();
+  await modal.locator('input[type="password"]').fill("아무-암호-9999");
+  await modal.locator(".btn.primary").click();
+  await expect(page.locator('.exam-pass-modal input[type="password"]')).toHaveValue("");  // 빈 칸 = 새로 물어본 창
+  await page.locator(".exam-pass-modal .btn", { hasText: "취소" }).click();
+  await expect(page.locator(".exam-pass-modal")).toHaveCount(0);
+  await stillLocked();
+
+  // 4) 선생님이 불러 준 코드 — 원본 파일 없이 풀린다
+  await typeCode(paper.code);
+  await expect(page.locator(".exam-done-panel:visible")).toHaveCount(0);
+  await expect(page.locator(".exam-submit-btn:visible")).toBeVisible();
+  expect(await page.evaluate((id) => localStorage.getItem("mn.examDone." + id), paperId)).toBeNull();
+
+  // 5) 다시 잠긴 기기에서 원본 + 선생님 암호로도 풀린다
+  await page.evaluate((id) => {
+    localStorage.setItem("mn.examDone." + id, JSON.stringify({ at: "2026-08-05T05:22:30.000Z", student: "12 홍길동" }));
+  }, paperId);
+  await page.locator("#fileInput").setInputFiles({
+    name: "e2e 재응시.exam", mimeType: "application/json", buffer: Buffer.from(paper.text, "utf8")
+  });
+  await stillLocked();
+  await chooseMaster(master.text);
+  await typePassword(page, TEACHER_PASSWORD, false);
+  await expect(page.locator(".exam-done-panel:visible")).toHaveCount(0);
+  await expect(page.locator(".exam-submit-btn:visible")).toBeVisible();
+  expect(await page.evaluate((id) => localStorage.getItem("mn.examDone." + id), paperId)).toBeNull();
 });

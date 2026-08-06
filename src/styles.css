@@ -4333,6 +4333,9 @@
     background:rgba(22,163,74,.09);display:flex;flex-direction:column;gap:8px}
   .exam-done-panel strong{font-size:15px;color:#15803d}
   .exam-done-receipt{margin:0;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+  /* 선생님만 쓰는 문이라 눈에 덜 띄게 오른쪽 아래 작은 버튼으로 둔다 */
+  .exam-done-tools{display:flex;justify-content:flex-end;margin-top:2px}
+  .exam-done-reset{font-size:12px;padding:5px 11px}
   /* 선생님: 제출 받기 */
   .exam-receive{margin:0 0 12px;padding:11px 13px;border:1px solid var(--border);border-radius:11px;background:var(--panel-2)}
   .exam-receive-head{display:flex;align-items:center;gap:9px}
