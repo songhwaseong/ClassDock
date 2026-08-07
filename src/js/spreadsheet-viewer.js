@@ -4783,8 +4783,12 @@ async function renderXlsx(file, host, doc){
     });
   }
 
-  // 원본 경로에 덮어쓰기(exe 로컬 서버가 있을 때). 성공 시 저장된 경로, 실패·미지원이면 null.
-  const saveBytesInPlace = async (out) => {
+  /* 자동 저장 폴더(SaveRoot) 아래에 쓴다(exe 로컬 서버가 있을 때). 성공 시 저장된 경로, 실패·미지원이면 null.
+     이름이 예전에 "saveBytesInPlace" 였는데 그건 사실이 아니다 — 서버가 X-Save-Path 를
+     SaveRoot 기준으로 풀기 때문에 원본 자리가 아니라 사본이 생긴다. 원본을 덮어쓰려면 파일 쓰기
+     핸들이 있어야 하고, 그건 saveBytesToDocumentHandle 이 맡는다. 부르는 쪽은 둘을 순서대로 쓰고
+     어느 쪽으로 저장됐는지 사용자에게 밝혀야 한다. */
+  const saveBytesToSaveRoot = async (out) => {
     try {
       if (typeof saveFileBackendAvailable !== "function" || !(await saveFileBackendAvailable())) return null;
       const rel = String((doc && (doc.relPath || doc.workspacePath || doc.name)) || file.name)
@@ -4856,7 +4860,17 @@ async function renderXlsx(file, host, doc){
     base = sheetBaseName(named);
     return true;
   };
-  // Ctrl+S 빠른 저장: 제자리 저장이 되면 원본에 덮어쓰고, 아니면 서식 유지 XLSX 다운로드.
+  /* 사본 저장 마무리 — 원본에 못 쓴 경우다. 어디에 무엇이 생겼는지와 원본을 고치는 방법을 같이 말한다.
+     "저장했어요" 로 뭉뚱그리면 원본을 고친 줄 알고 사본만 쌓인다. */
+  const saveBytesAsCopy = async (out) => {
+    const savedPath = await saveBytesToSaveRoot(out);
+    if (!savedPath) return false;
+    await markSpreadsheetSaved(out);
+    toast("사본으로 저장했어요: " + savedPath + " · 원본을 직접 고치려면 '열기 → 폴더 열기'로 여세요", 5200);
+    return true;
+  };
+
+  // Ctrl+S 빠른 저장: 원본에 쓸 수 있으면 덮어쓰고, 아니면 사본 → 그것도 안 되면 서식 유지 XLSX 다운로드.
   let quickSaving = false;
   const quickSave = async () => {
     if (quickSaving) return;
@@ -4868,8 +4882,7 @@ async function renderXlsx(file, host, doc){
       if (!(await askSpreadsheetScratchName())) return;
       const direct = await saveBytesToDocumentHandle(out);
       if (await finishDirectSpreadsheetSave(out, direct)) return;
-      const savedPath = await saveBytesInPlace(out);
-      if (savedPath){ await markSpreadsheetSaved(out); toast("저장했어요: " + savedPath, 2400, { type: "success" }); return; }
+      if (await saveBytesAsCopy(out)) return;
       downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       await markSpreadsheetSaved(out);
       toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
@@ -5635,20 +5648,25 @@ async function renderXlsx(file, host, doc){
     ];
     updateUndoButtons();
 
-    // 제자리 저장(exe 로컬 서버가 있을 때만): 서식 보존 XLSX 바이트를 원래 경로에 덮어쓴다.
+    /* 파일에 저장(exe 로컬 서버가 있을 때만 내놓는다): 서식 보존 XLSX 바이트를 파일로 쓴다.
+       Ctrl+S(quickSave)와 같은 순서를 지나야 한다 — 예전에는 이 버튼만 핸들 갈래를 건너뛰어,
+       폴더로 열어 원본에 쓸 수 있는 문서까지 사본이 생겼다. 게다가 이름이 "제자리 저장" 이라
+       사본이 생긴 걸 알 방법이 없었다. */
     saveFileBackendAvailable().then((ok) => {
       if (!ok || !editMode || editBar.querySelector(".xlsx-save-inplace")) return;
-      const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "xlsx-save-inplace"; saveBtn.textContent = "제자리 저장";
-      saveBtn.title = "편집 내용을 원본 파일에 저장(서식 유지 · Ctrl+S)";
+      const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "xlsx-save-inplace"; saveBtn.textContent = "파일에 저장";
+      saveBtn.title = "편집 내용을 원본 파일에 저장합니다(서식 유지 · Ctrl+S). "
+        + "원본에 쓸 수 없으면 자동 저장 폴더에 사본으로 저장하고 어느 쪽인지 알려 줍니다.";
       saveBtn.onclick = async () => {
         saveBtn.disabled = true;
         try {
           const out = await exportExBytes();
           if (!out){ toast("저장 준비 실패(다운로드를 이용하세요).", 2600); return; }
           if (!(await askSpreadsheetScratchName())) return;   // 새 표의 첫 저장이면 이름을 먼저 정한다
-          const savedPath = await saveBytesInPlace(out);
-          if (savedPath) await markSpreadsheetSaved(out);
-          toast(savedPath ? ("저장했어요: " + savedPath) : "제자리 저장 실패(다운로드를 이용하세요).", savedPath ? 2600 : 2800);
+          const direct = await saveBytesToDocumentHandle(out);   // 원본에 쓸 수 있으면 여기서 끝난다
+          if (await finishDirectSpreadsheetSave(out, direct)) return;
+          if (await saveBytesAsCopy(out)) return;
+          toast("저장하지 못했어요(다운로드를 이용하세요).", 2800);
         } catch(e){ console.error(e); toast("저장하지 못했어요(다운로드를 이용하세요).", 2600); }
         finally { saveBtn.disabled = false; }
       };

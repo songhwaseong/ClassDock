@@ -114,7 +114,7 @@ test("자동 저장·일괄 저장은 이름을 묻지 않고 건너뛴다", () 
 
 test("표는 저장 방식과 관계없이 첫 저장 이름을 먼저 받는다", () => {
   assert.doesNotMatch(spreadsheetSource, /const savesWithoutDialog/);
-  // Ctrl+S 빠른 저장, XLSX 저장, '제자리 저장' 모두 같은 확인을 거친다.
+  // Ctrl+S 빠른 저장, XLSX 저장, '파일에 저장' 모두 같은 확인을 거친다.
   const calls = spreadsheetSource.match(/await askSpreadsheetScratchName\(\)/g) || [];
   assert.equal(calls.length, 3);
   // 이름을 바꾸면 내보내기 파일 이름도 따라가야 한다.
@@ -124,4 +124,27 @@ test("표는 저장 방식과 관계없이 첫 저장 이름을 먼저 받는다
 test("EXE 저장 폴더의 충돌 확인 경로는 인증과 안전한 경로 해석을 거친다", () => {
   assert.match(launcherSource, /path == "\/save-file" \|\| path == "\/save-file-exists"/);
   assert.match(launcherSource, /method == "POST" && path == "\/save-file-exists"[\s\S]*?SafeRelPath\(rel\)[\s\S]*?TryResolveSaveRootPath\(safe, out full\)[\s\S]*?File\.Exists\(full\)/);
+});
+
+/* ---------- 표 저장: 원본이 먼저, 사본이면 그렇게 말한다 ---------- */
+
+// 예전엔 '제자리 저장' 버튼만 핸들 갈래를 건너뛰어, 폴더로 열어 원본에 쓸 수 있는 문서까지
+// 사본이 생겼다. 게다가 이름이 "제자리" 라 사본이 생긴 걸 알 방법이 없었다.
+test("표의 파일 저장은 원본 핸들을 먼저 시도한다", () => {
+  // 핸들 저장을 거치는 곳이 셋(Ctrl+S · CSV→XLSX 원본 · 파일에 저장 버튼)이어야 한다.
+  const direct = spreadsheetSource.match(/await saveBytesToDocumentHandle\(out\)/g) || [];
+  assert.equal(direct.length, 3);
+  // 버튼도 핸들 → 사본 순서를 지난다.
+  assert.match(spreadsheetSource,
+    /xlsx-save-inplace[\s\S]*?await saveBytesToDocumentHandle\(out\)[\s\S]*?await saveBytesAsCopy\(out\)/);
+});
+
+test("자동 저장 폴더에 쓰는 함수는 '제자리'라고 부르지 않는다", () => {
+  // 서버가 X-Save-Path 를 SaveRoot 기준으로 풀어 결과가 사본이다 — 이름이 사실과 맞아야 한다.
+  assert.doesNotMatch(spreadsheetSource, /saveBytesInPlace\s*\(/);
+  assert.match(spreadsheetSource, /const saveBytesToSaveRoot = async/);
+});
+
+test("사본으로 저장하면 원본을 고치는 방법까지 알린다", () => {
+  assert.match(spreadsheetSource, /사본으로 저장했어요[\s\S]{0,120}폴더 열기/);
 });
