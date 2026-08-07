@@ -55,14 +55,55 @@ function officeReplaceEscape(text){
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/* 같은 이름의 태그가 겹쳐 있을 때 짝을 맞춰 훑는다. 깊이 0 인 구간만 돌려준다.
+   반환: [{ start, end,           여는 태그 시작 ~ 닫는 태그 끝
+            innerStart, innerEnd }]  여는 태그 다음 ~ 닫는 태그 앞(안쪽 내용)
+
+   정규식 한 방(<w:p>[\s\S]*?</w:p>)으로 잡으면 안 되는 이유: Word 는 문단 안에 도형을 넣고
+   그 도형 안에 다시 문단을 둔다(<w:p> → <w:pict> → <w:txbxContent> → <w:p>). 그러면 바깥 문단이
+   안쪽 </w:p> 에서 끊겨, 상자 뒤 글자는 아예 안 보이고 그 문단을 지우면 XML 이 깨진다.
+   표도 셀 안에 표를 넣을 수 있어 같은 일이 생긴다. */
+function officeBalancedRanges(xml, localName){
+  const source = String(xml || "");
+  const re = new RegExp("<(/?)(?:[A-Za-z_][\\w.-]*:)?" + localName + "(\\s[^>]*?)?(/?)>", "gi");
+  const out = [];
+  let depth = 0, start = -1, innerStart = 0, match;
+  while ((match = re.exec(source))){
+    if (match[1] === "/"){                        // </w:p>
+      if (!depth) continue;                       // 짝 없는 닫는 태그는 무시한다(깨진 XML 방어)
+      depth--;
+      if (!depth && start >= 0){ out.push({ start, end: re.lastIndex, innerStart, innerEnd: match.index }); start = -1; }
+      continue;
+    }
+    if (match[3] === "/"){                        // <w:p/> — 빈 태그
+      if (!depth) out.push({ start: match.index, end: re.lastIndex, innerStart: re.lastIndex, innerEnd: re.lastIndex });
+      continue;
+    }
+    if (!depth){ start = match.index; innerStart = re.lastIndex; }
+    depth++;
+  }
+  return out;
+}
+
+// 문단 구간 목록(깊이 0 만 — 텍스트 상자 안 문단은 바깥 문단에 딸린 것으로 본다).
+function officeParagraphRanges(xml){ return officeBalancedRanges(xml, "p"); }
+
+/* 텍스트 상자 안쪽 구간. 도형 안 글자는 설정과 무관하게 바꾸지 않고 세기만 한다
+   (설계: docs/오피스-찾아바꾸기-설계.md) — 도형은 w:txbxContent·DrawingML·VML 세 갈래라
+   문단 구조가 본문과 달라 지금의 되쓰기 규칙이 그대로 통하지 않는다. */
+function officeTextboxRanges(xml){ return officeBalancedRanges(xml, "txbxContent"); }
+
 /* 문단 안에서 "본문 글자가 아닌" 구역.
     - pPr 의 탭 정의(<w:tab w:pos="720"/>)를 본문 탭으로 착각하면 없는 글자가 생겨 오프셋이 어긋난다.
-    - fld 는 자동으로 채워지는 값(슬라이드 번호·날짜)이라 사람이 바꿀 대상이 아니다. */
+    - fld 는 자동으로 채워지는 값(슬라이드 번호·날짜)이라 사람이 바꿀 대상이 아니다.
+    - txbxContent 는 도형 안 글자라 바꾸지 않는다. 여기서 빼 두어야 바깥 문단 평문이
+      "앞글자 + 상자 안 글자" 로 뒤섞이지 않는다. */
 function officeSkipRanges(paraXml){
   const ranges = [];
   const re = /<(?:[A-Za-z_][\w.-]*:)?(pPr|rPr|fld)(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?\1\s*>/gi;
   let match;
   while ((match = re.exec(paraXml))) ranges.push([match.index, match.index + match[0].length]);
+  for (const box of officeTextboxRanges(paraXml)) ranges.push([box.start, box.end]);
   return ranges;
 }
 
@@ -228,19 +269,17 @@ function officeApplyEdits(xml, edits){
   return out;
 }
 
-const OFFICE_PARA_RE = () => /<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?p\s*>/gi;
-
 /* 파트 XML 하나(본문·머리말·슬라이드 모두 같은 구조) → 치환된 XML + 보고서.
    미리보기와 실제 적용이 반드시 같은 코드를 지나야 개수가 어긋나지 않는다.
-   반환: { out, count, skipped, changes:[{ para, before, after, count }] } */
+   boxed = 텍스트 상자 안에서 걸렸지만 바꾸지 않은 곳(부르는 쪽이 "세기만 한 곳" 으로 알린다).
+   반환: { out, count, skipped, boxed, changes:[{ para, before, after, count }] } */
 function officeReplacePartXml(xml, matcher, replacement){
   const source = String(xml || "");
-  const re = OFFICE_PARA_RE();
   const edits = [], changes = [];
-  let count = 0, skipped = 0, index = 0, match;
-  while ((match = re.exec(source))){
+  let count = 0, skipped = 0, index = 0;
+  for (const range of officeParagraphRanges(source)){
     index++;
-    const model = officeParagraphModel(match[0], match.index);
+    const model = officeParagraphModel(source.slice(range.start, range.end), range.start);
     if (!model.segs.length) continue;
     const plan = officePlanParagraphEdits(model, matcher, replacement);
     skipped += plan.skipped;
@@ -249,22 +288,64 @@ function officeReplacePartXml(xml, matcher, replacement){
     for (const edit of plan.edits) edits.push(edit);
     changes.push({ para: index, before: model.text, after: plan.after, count: plan.count });
   }
-  return { out: count ? officeApplyEdits(source, edits) : source, count, skipped, changes };
+  return { out: count ? officeApplyEdits(source, edits) : source, count, skipped,
+    boxed: officeCountTextboxMatches(source, matcher), changes };
 }
 
-// 바꾸지 않고 개수만 센다(설정이 꺼져 있을 때의 머리말·노트, 언제나 메모·차트).
-function officeCountMatches(xml, matcher){
+// 문단 평문에서 몇 곳이 걸리는지 센다(도형 안은 빼고 — officeSkipRanges 가 이미 걸러 둔다).
+function officeCountParagraphMatches(xml, matcher){
   const source = String(xml || "");
-  const re = OFFICE_PARA_RE();
-  let total = 0, match;
-  while ((match = re.exec(source))){
-    const model = officeParagraphModel(match[0], match.index);
+  let total = 0;
+  for (const range of officeParagraphRanges(source)){
+    const model = officeParagraphModel(source.slice(range.start, range.end), range.start);
     if (!model.text) continue;
     const finder = new RegExp(matcher.pattern, matcher.flags.includes("g") ? matcher.flags : matcher.flags + "g");
     const found = model.text.match(finder);
     if (found) total += found.length;
   }
   return total;
+}
+
+// 텍스트 상자 안에서 걸리는 곳의 수. 상자 안 상자도 세도록 안쪽 내용을 두고 다시 센다.
+function officeCountTextboxMatches(xml, matcher){
+  const source = String(xml || "");
+  let total = 0;
+  for (const box of officeTextboxRanges(source))
+    total += officeCountMatches(source.slice(box.innerStart, box.innerEnd), matcher);
+  return total;
+}
+
+// 바꾸지 않고 개수만 센다(설정이 꺼져 있을 때의 머리말·노트, 언제나 메모·차트). 도형 안도 함께 센다.
+function officeCountMatches(xml, matcher){
+  return officeCountParagraphMatches(xml, matcher) + officeCountTextboxMatches(xml, matcher);
+}
+
+/* ---------- 미리보기 제자리 편집: 화면 문단 ↔ XML 문단 대조 ---------- */
+
+/* 대조용 열쇠 — 공백을 다 지운 글자만 남긴다.
+   docx-preview 는 <w:tab/> 을 &emsp;(U+2003) 로, <w:br/> 을 <br> 로 그린다. <br> 은 textContent 에
+   아무것도 남기지 않으므로 우리 평문의 "\t"·"\n" 과 애초에 같을 수가 없다. 여기서 알고 싶은 건
+   "이 화면 문단이 그 XML 문단이 맞나" 뿐이라, 공백 표현 차이는 버리고 글자만 본다. */
+function officeInlineTextKey(text){ return String(text == null ? "" : text).replace(/\s/g, ""); }
+
+/* 미리보기에서 뽑은 본문 문단 글자 목록 ↔ officeParagraphOutline 이 매기는 순서가 같은 것을
+   가리키는지 확인한다. 순번이 어긋난 채 저장하면 사용자가 고친 것과 다른 문단이 바뀌고,
+   화면상으로는 멀쩡해 보여 알아채지도 못한다. 그래서 붙일 때 전부 맞춰 보고 하나라도
+   어긋나면 제자리 편집을 아예 켜지 않는다(목록 화면으로 물러난다).
+
+   대응이 깨질 수 있는 자리: mc:AlternateContent(Choice·Fallback 양쪽에 <w:p> 가 있다),
+   <w:sdt>, altChunk, 렌더러가 그리지 못한 요소. 전부 여기서 걸린다.
+   반환: { ok } 또는 { ok:false, reason, at } */
+function officeInlineMapVerify(domTexts, outline){
+  const dom = Array.isArray(domTexts) ? domTexts : [];
+  const items = Array.isArray(outline) ? outline : [];
+  if (dom.length !== items.length)
+    return { ok: false, at: -1, reason: "화면 문단 " + dom.length + "개와 문서 문단 " + items.length + "개가 맞지 않아요." };
+  for (let i = 0; i < items.length; i++){
+    if (officeInlineTextKey(dom[i]) !== officeInlineTextKey(items[i].text))
+      return { ok: false, at: i, reason: (i + 1) + "번째 문단 글자가 화면과 문서에서 달라요." };
+  }
+  return { ok: true, at: -1, reason: "" };
 }
 
 /* ---------- 문단 편집(Phase 2, 설계: docs/워드-문단편집-설계.md) ---------- */
@@ -277,27 +358,30 @@ function officeCountMatches(xml, matcher){
    순수 함수가 판정해야 단위 테스트로 굳힐 수 있다. */
 function officeParagraphOutline(xml){
   const source = String(xml || "");
-  const tableRanges = [];
-  const tblRe = /<(?:[A-Za-z_][\w.-]*:)?tbl(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?tbl\s*>/gi;
-  let tbl;
-  while ((tbl = tblRe.exec(source))) tableRanges.push([tbl.index, tbl.index + tbl[0].length]);
+  // 표도 셀 안에 표가 들어갈 수 있어 짝을 맞춰 훑는다 — 안쪽 </w:tbl> 에서 끊으면
+  // 그 뒤 문단이 "표 밖" 으로 잘못 보여 지울 수 있게 되고, 그러면 셀 구조가 깨진다.
+  const tableRanges = officeBalancedRanges(source, "tbl");
 
-  const re = OFFICE_PARA_RE();
   const items = [];
-  let match, index = 0;
-  while ((match = re.exec(source))){
+  let index = 0;
+  for (const range of officeParagraphRanges(source)){
     index++;
-    const model = officeParagraphModel(match[0], match.index);
-    const styleMatch = match[0].match(/<(?:[A-Za-z_][\w.-]*:)?pStyle\s[^>]*w:val="([^"]*)"/i);
+    const paraXml = source.slice(range.start, range.end);
+    const model = officeParagraphModel(paraXml, range.start);
+    // 스타일은 이 문단 자신의 pPr 안에서만 찾는다 — 도형 안 문단의 스타일을 바깥 이름표로 쓰면 안 된다.
+    const ownPr = paraXml.match(/<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?pPr\s*>/i);
+    const styleMatch = ownPr ? ownPr[0].match(/<(?:[A-Za-z_][\w.-]*:)?pStyle\s[^>]*w:val="([^"]*)"/i) : null;
     items.push({
       index,
-      start: match.index,
-      end: match.index + match[0].length,
+      start: range.start,
+      end: range.end,
       text: model.text,
       style: styleMatch ? styleMatch[1] : "",
-      inTable: tableRanges.some(([from, to]) => match.index >= from && match.index < to),
-      hasSectPr: /<(?:[A-Za-z_][\w.-]*:)?sectPr(?:\s[^>]*)?[>/]/i.test(match[0]),
-      locked: model.segs.some(seg => seg.locked)
+      inTable: tableRanges.some(box => range.start >= box.start && range.start < box.end),
+      hasSectPr: /<(?:[A-Za-z_][\w.-]*:)?sectPr(?:\s[^>]*)?[>/]/i.test(paraXml),
+      locked: model.segs.some(seg => seg.locked),
+      // 도형이 든 문단은 글자를 고칠 수는 있어도 통째로 지우면 도형까지 사라진다 — 화면이 알려 준다.
+      hasTextbox: officeTextboxRanges(paraXml).length > 0
     });
   }
   return items;
@@ -579,11 +663,12 @@ const MNOfficeReplace = (() => {
      반환: { count, skipped, changes, replaced, outside } */
   function compute(source, matcher, replacement, opts){
     const kind = source.kind;
-    const changes = [], replaced = {};
-    let count = 0, skipped = 0;
+    const changes = [], replaced = {}, outside = [];
+    let count = 0, skipped = 0, boxed = 0;
     for (const path of officeTargetParts(source.paths, kind, opts)){
       const result = officeReplacePartXml(source.parts[path], matcher, replacement);
       skipped += result.skipped;
+      boxed += result.boxed;              // 바꾸는 파트라도 그 안 도형 글자는 바꾸지 않는다
       if (!result.count) continue;
       count += result.count;
       replaced[path] = result.out;
@@ -591,11 +676,11 @@ const MNOfficeReplace = (() => {
       for (const change of result.changes)
         changes.push({ ...change, part: path, label: naming.label, numbered: naming.numbered });
     }
-    const outside = [];
     for (const path of officeCountOnlyParts(source.paths, kind, opts)){
       const found = officeCountMatches(source.parts[path], matcher);
       if (found) outside.push({ label: officePartLabel(path, kind).label, count: found });
     }
+    if (boxed) outside.push({ label: "텍스트 상자", count: boxed });
     return { count, skipped, changes, replaced, outside };
   }
 
@@ -631,16 +716,23 @@ const MNOfficeReplace = (() => {
     } finally { try { await reader.close(); } catch(_){} }
   }
 
-  /* 오피스 문서 제자리 저장. 성공하면 저장된 경로, 실패·저장 위치 없음이면 null.
-     찾아 바꾸기와 문단 편집이 같은 규칙을 쓴다 — 사본을 만들지 않고 원래 그 파일에만 쓴다.
+  /* 오피스 문서 저장. 찾아 바꾸기와 문단 편집이 같은 규칙을 쓴다.
+     반환: { path, mode } 또는 저장하지 못했으면 null.
+       mode "original" — 열어 둔 원본 파일을 그 자리에서 덮어썼다
+       mode "copy"     — 원본은 그대로 두고 자동 저장 폴더 아래에 사본을 만들었다
 
-     이미 연결된 원본 파일이 있으면 그 파일에만 쓴다. 실패해도 다른 위치에 조용히 저장하지 않는다
-     (표 편집기의 제자리 저장과 같은 규칙 — 엉뚱한 사본이 생기면 어느 게 진짜인지 갈린다). */
-  async function saveInPlace(doc, bytes, kind){
+     갈래가 둘인 이유: 파일 쓰기 핸들이 있어야 원본을 덮어쓸 수 있다. 폴더로 연 문서는 핸들이
+     있고(exe 는 /source-folder-file 로 원본 폴더에 쓰는 네이티브 핸들을 준다), 낱개 파일로 끌어다
+     놓은 문서는 절대 경로 자체가 없어 원본을 찾아갈 방법이 없다. 그때 쓰는 /save-file 은 서버가
+     경로를 자동 저장 폴더(SaveRoot) 기준으로 풀기 때문에 결과가 사본이다.
+
+     부르는 쪽은 mode 를 반드시 사용자에게 알려야 한다 — "저장했어요" 한마디로 뭉뚱그리면
+     원본을 고친 줄 알고 사본만 남는다. 헤더 배지("원본 저장"/"사본 저장")와 같은 말을 쓴다. */
+  async function saveDocument(doc, bytes, kind){
     if (doc && doc.fsHandle && typeof saveViaFileHandle === "function"){
       try {
         const result = await saveViaFileHandle(bytes, doc.name, doc, { existingOnly: true, mime: officeReplaceMime(kind) });
-        return result === "saved" ? (doc.workspacePath || doc.relPath || doc.name) : null;
+        return result === "saved" ? { path: doc.workspacePath || doc.relPath || doc.name, mode: "original" } : null;
       } catch(e){ console.warn("오피스 문서 핸들 저장 실패:", e); return null; }
     }
     try {
@@ -656,8 +748,16 @@ const MNOfficeReplace = (() => {
       if (!response.ok) return null;
       const savedPath = (await response.text()).trim() || rel;
       try { window.__mnLastSaveRel = rel; } catch(_){}
-      return savedPath;
+      return { path: savedPath, mode: "copy" };
     } catch(e){ console.error(e); return null; }
+  }
+
+  // 저장 결과 한 줄. 사본이면 원본을 고치는 방법까지 붙인다(모르면 사본만 쌓인다).
+  function saveResultText(result){
+    if (!result) return "";
+    if (result.mode === "copy")
+      return "사본으로 저장했어요: " + result.path + " · 원본을 직접 고치려면 '열기 → 폴더 열기'로 여세요";
+    return "원본에 저장했어요: " + result.path;
   }
 
   /* 저장된 바이트를 앱이 실제로 읽는 곳에 반영한다(검색·다시 열기·자동 복원).
@@ -691,18 +791,21 @@ const MNOfficeReplace = (() => {
     } catch(e){ console.warn("복원 묶음 갱신 실패:", e); return false; }
   }
 
-  return { read, compute, preview, build, saveInPlace, reflectSaved, rememberSaved,
+  return { read, compute, preview, build, saveDocument, saveResultText, reflectSaved, rememberSaved,
     isBrowser, kindOf: officeReplaceKindOf, mimeOf: officeReplaceMime };
 })();
 
 if (typeof module === "object" && module.exports){
   module.exports = {
     OFFICE_REPLACE_MAX_BYTES, DOCX_MIME, PPTX_MIME, officeReplaceKindOf, officeReplaceMime,
-    officeReplaceDecode, officeReplaceEscape, officeSkipRanges, officeParagraphModel,
+    officeReplaceDecode, officeReplaceEscape, officeBalancedRanges, officeParagraphRanges,
+    officeTextboxRanges, officeSkipRanges, officeParagraphModel,
     officeExpandReplacement, officeOpenTagFor, officeApplyRangesToSegments, officePlanParagraphEdits,
-    officeParagraphTextEdits, officeParagraphOutline, officeNewParagraphXml, officeParagraphStructureEdits,
+    officeParagraphTextEdits, officeInlineTextKey, officeInlineMapVerify,
+    officeParagraphOutline, officeNewParagraphXml, officeParagraphStructureEdits,
     officeParagraphEditPlan, officeApplyEdits,
-    officeReplacePartXml, officeCountMatches, officePartRole, officePartLabel, officeSortParts,
+    officeReplacePartXml, officeCountMatches, officeCountParagraphMatches, officeCountTextboxMatches,
+    officePartRole, officePartLabel, officeSortParts,
     officeTargetParts, officeCountOnlyParts, officeDetectFlags, officeExclusionReason, MNOfficeReplace
   };
 }

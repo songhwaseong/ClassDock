@@ -2017,6 +2017,18 @@
     border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer}
   .docx-para-btn:hover:not(:disabled){background:rgba(127,127,127,.15);color:var(--ink)}
   .docx-para-btn:disabled{opacity:.3;cursor:default}
+  /* 제자리 편집 — 미리보기를 그대로 쓰므로 문서 모양을 건드리지 않는다.
+     테두리·배경 대신 왼쪽 여백의 얇은 표시만 써서 쪽 레이아웃이 밀리지 않게 한다. */
+  .docx-inline-editing{caret-color:var(--accent,#5b9dd9)}
+  .docx-inline-para{outline:none;position:relative}
+  .docx-inline-para[contenteditable="true"]:hover{background:rgba(127,127,127,.05)}
+  .docx-inline-para[contenteditable="true"]:focus{background:rgba(91,157,217,.08);
+    box-shadow:inset 2px 0 0 var(--accent,#5b9dd9)}
+  /* 고침·삭제·잠금 자국은 편집 중에만 보인다 — 읽기 전용으로 돌아가면 그냥 문서로 보여야 한다. */
+  .docx-inline-editing .docx-inline-para.touched{box-shadow:inset 2px 0 0 rgba(127,127,127,.45)}
+  .docx-inline-editing .docx-inline-para.touched:focus{box-shadow:inset 2px 0 0 var(--accent,#5b9dd9)}
+  .docx-inline-editing .docx-inline-para.removed{opacity:.45;text-decoration:line-through}
+  .docx-inline-editing .docx-inline-para.locked{background:repeating-linear-gradient(135deg,transparent,transparent 6px,rgba(127,127,127,.06) 6px,rgba(127,127,127,.06) 12px)}
   .hwp-host{margin:0 auto}
   .pptx-host{margin:0 auto}
   /* 슬라이드는 pptxjs 가 원본 픽셀 크기로 그린다 → 뷰어 폭에 맞춰 축소(가운데정렬은 .slide 의 margin:auto).

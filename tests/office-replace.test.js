@@ -573,3 +573,99 @@ test("저장 뒤 새 XML 로 기준을 다시 잡으면 두 번째 편집도 제
   assert.match(out, /<w:t>둘째 문단<\/w:t>/);
   assert.match(out, /<w:pgSz w:w="11906"\/>/);
 });
+
+/* ---------- 텍스트 상자(중첩 문단) ---------- */
+
+// Word 는 문단 안에 도형을 넣고 그 도형 안에 다시 문단을 둔다. 정규식 한 방으로 <w:p>…</w:p> 를
+// 잡으면 바깥 문단이 안쪽 </w:p> 에서 끊겨, 상자 뒤 글자를 놓치고 그 문단을 지우면 XML 이 깨진다.
+const textbox = (inner) => "<w:r><w:pict><v:textbox><w:txbxContent>" + inner + "</w:txbxContent></v:textbox></w:pict></w:r>";
+const BOX_XML = "<w:body><w:p>" + run("앞2025") + textbox(para(run("상자속2025"))) + run("뒤2025") + "</w:p></w:body>";
+
+test("텍스트 상자가 든 문단은 상자 뒤 글자까지 바꾼다", () => {
+  const result = api.officeReplacePartXml(BOX_XML, plain("2025"), "2026");
+  assert.equal(result.count, 2);                          // 앞2025 · 뒤2025 (상자 안은 제외)
+  assert.match(result.out, /<w:t>앞2026<\/w:t>/);
+  assert.match(result.out, /<w:t>뒤2026<\/w:t>/);
+});
+
+test("텍스트 상자 안 글자는 바꾸지 않고 개수만 센다", () => {
+  const result = api.officeReplacePartXml(BOX_XML, plain("2025"), "2026");
+  assert.match(result.out, /<w:t>상자속2025<\/w:t>/);      // 도형 안은 손대지 않는다
+  assert.equal(result.boxed, 1);
+  assert.equal(api.officeCountTextboxMatches(BOX_XML, plain("2025")), 1);
+});
+
+test("문단 평문에 상자 안 글자가 섞이지 않는다", () => {
+  const outline = api.officeParagraphOutline(BOX_XML);
+  assert.equal(outline.length, 1);                        // 상자 안 문단은 따로 세지 않는다
+  assert.equal(outline[0].text, "앞2025뒤2025");
+  assert.equal(outline[0].hasTextbox, true);
+});
+
+test("상자가 든 문단을 지워도 XML 짝이 맞는다", () => {
+  const rows = api.officeParagraphOutline(BOX_XML)
+    .map(item => ({ index: item.index, text: item.text, original: item.text, removed: true }));
+  const out = api.officeApplyEdits(BOX_XML, api.officeParagraphEditPlan(BOX_XML, rows).edits);
+  assert.equal(out, "<w:body></w:body>");                 // 열린 태그가 남지 않는다
+  assert.equal((out.match(/<w:txbxContent>/g) || []).length, (out.match(/<\/w:txbxContent>/g) || []).length);
+});
+
+test("셀 안에 표가 또 있어도 안쪽 표 뒤 문단을 '표 밖' 으로 보지 않는다", () => {
+  const inner = "<w:tbl><w:tr><w:tc>" + para(run("안쪽")) + "</w:tc></w:tr></w:tbl>";
+  const xml = "<w:body>" +
+    "<w:tbl><w:tr><w:tc>" + para(run("바깥앞")) + inner + para(run("바깥뒤")) + "</w:tc></w:tr></w:tbl>" +
+    para(run("본문")) + "</w:body>";
+  const outline = api.officeParagraphOutline(xml);
+  assert.deepEqual(outline.map(p => p.text), ["바깥앞", "안쪽", "바깥뒤", "본문"]);
+  assert.deepEqual(outline.map(p => p.inTable), [true, true, true, false]);
+});
+
+test("빈 문단(<w:p/>)도 한 문단으로 세고 범위가 자기 태그에서 끝난다", () => {
+  const xml = "<w:body><w:p/>" + para(run("글자")) + "</w:body>";
+  const ranges = api.officeParagraphRanges(xml);
+  assert.equal(ranges.length, 2);
+  assert.equal(xml.slice(ranges[0].start, ranges[0].end), "<w:p/>");
+});
+
+test("PowerPoint 슬라이드에는 중첩이 없어 결과가 그대로다", () => {
+  const xml = "<a:p><a:r><a:t>2025 계획</a:t></a:r></a:p>";
+  const result = api.officeReplacePartXml(xml, plain("2025"), "2026");
+  assert.equal(result.count, 1);
+  assert.equal(result.boxed, 0);
+  assert.match(result.out, /<a:t>2026 계획<\/a:t>/);
+});
+
+/* ---------- 미리보기 제자리 편집: 화면 ↔ XML 대조 ---------- */
+
+// 화면 문단과 XML 문단이 어긋난 채 저장하면 사용자가 고친 것과 다른 문단이 바뀌고,
+// 화면상으로는 멀쩡해 보여 알아채지도 못한다. 그래서 붙일 때 전부 맞춰 본다.
+const outlineOf = (texts) => texts.map((text, i) => ({ index: i + 1, text }));
+
+test("공백 표현이 달라도 글자가 같으면 대응으로 인정한다", () => {
+  // docx-preview 는 <w:tab/> 을 &emsp;(U+2003) 로, <w:br/> 을 <br>(글자 없음) 으로 그린다.
+  const dom = ["제목 본문", "첫째 줄둘째 줄"];
+  const outline = outlineOf(["제목\t본문", "첫째 줄\n둘째 줄"]);
+  assert.equal(api.officeInlineMapVerify(dom, outline).ok, true);
+});
+
+test("문단 수가 다르면 대응을 거부한다", () => {
+  const check = api.officeInlineMapVerify(["가", "나"], outlineOf(["가", "나", "다"]));
+  assert.equal(check.ok, false);
+  assert.match(check.reason, /2개와 문서 문단 3개/);
+});
+
+test("한 문단이라도 글자가 어긋나면 그 자리를 짚어 거부한다", () => {
+  const check = api.officeInlineMapVerify(["가", "틀림", "다"], outlineOf(["가", "나", "다"]));
+  assert.equal(check.ok, false);
+  assert.equal(check.at, 1);
+  assert.match(check.reason, /2번째 문단/);
+});
+
+test("빈 문단끼리도 짝이 맞는다", () => {
+  assert.equal(api.officeInlineMapVerify(["", "본문"], outlineOf(["", "본문"])).ok, true);
+});
+
+test("대조 열쇠는 공백을 다 지운 글자다", () => {
+  assert.equal(api.officeInlineTextKey(" 가 \t나\n다 "), "가나다");
+  assert.equal(api.officeInlineTextKey(null), "");
+});

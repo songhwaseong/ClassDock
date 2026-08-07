@@ -200,10 +200,11 @@ if (typeof window !== "undefined" && window.document) {
 
   const BATCH_OFFICE_UNDO_MAX_BYTES = 200 * 1024 * 1024;   // 되돌리기용 원본 바이트를 들고 있을 상한
 
-  /* 제자리 저장·반영은 문단 편집(docx-editor)과 같은 규칙을 써야 하므로 MNOfficeReplace 에 두었다.
+  /* 저장·반영은 문단 편집(docx-editor)과 같은 규칙을 써야 하므로 MNOfficeReplace 에 두었다.
      텍스트와 달리 "편집기에만 반영" 이 성립하지 않는다(Word·PPT 는 여기서 편집기가 없다) —
-     저장하지 못하면 화면도 바꾸지 않아야 "바뀐 줄 알았는데 파일은 그대로" 를 막는다. */
-  const batchOfficeSaveBytes = (doc, bytes, kind) => MNOfficeReplace.saveInPlace(doc, bytes, kind);
+     저장하지 못하면 화면도 바꾸지 않아야 "바뀐 줄 알았는데 파일은 그대로" 를 막는다.
+     반환은 { path, mode } — 원본을 덮어썼는지("original") 사본이 생겼는지("copy") 결과 문구에 옮긴다. */
+  const batchOfficeSaveBytes = (doc, bytes, kind) => MNOfficeReplace.saveDocument(doc, bytes, kind);
 
   // 반영 + 다음에 볼 때 새로 그리기. 지금 보이는 문서면 즉시 다시 그린다.
   function batchOfficeReflect(doc, bytes, kind){
@@ -310,7 +311,7 @@ if (typeof window !== "undefined" && window.document) {
   async function batchReplaceApply(chosen){
     const undo = [];
     const workspaceEntries = [];
-    let saved = 0, editedOnly = 0, skipped = 0, replaced = 0, undoDropped = 0, undoBytes = 0;
+    let saved = 0, editedOnly = 0, skipped = 0, replaced = 0, undoDropped = 0, undoBytes = 0, savedAsCopy = 0;
     const outside = [];
     for (const f of chosen){
       const doc = f.doc;
@@ -319,8 +320,9 @@ if (typeof window !== "undefined" && window.document) {
         let bytes = null;
         try { bytes = await MNOfficeReplace.build(f.source.bytes, f.replaced); }
         catch(e){ console.error(e); skipped++; continue; }
-        const savedPath = await batchOfficeSaveBytes(doc, bytes, f.kind);
-        if (!savedPath){ skipped++; continue; }     // 저장 못 하면 화면도 바꾸지 않는다
+        const savedAt = await batchOfficeSaveBytes(doc, bytes, f.kind);
+        if (!savedAt){ skipped++; continue; }       // 저장 못 하면 화면도 바꾸지 않는다
+        if (savedAt.mode === "copy") savedAsCopy++;  // 원본이 아니라 자동 저장 폴더에 사본이 생겼다
         batchOfficeReflect(doc, bytes, f.kind);
         workspaceEntries.push({ doc, bytes, kind: f.kind });
         // 되돌리기는 원본 바이트를 들고 있어야 한다 — 합계가 상한을 넘으면 그 뒤 파일은 되돌리기 없이 저장한다.
@@ -354,7 +356,7 @@ if (typeof window !== "undefined" && window.document) {
       }
     }
     const workspace = await batchRememberWorkspaceEntries(workspaceEntries);
-    return { undo, saved, editedOnly, skipped, replaced, undoDropped, outside,
+    return { undo, saved, editedOnly, skipped, replaced, undoDropped, savedAsCopy, outside,
       workspaceAttempted: workspace.attempted, workspaceSaved: workspace.saved };
   }
 
@@ -364,7 +366,7 @@ if (typeof window !== "undefined" && window.document) {
     for (const u of undo){
       const result = await batchRestoreUndoEntry(u, {
         save: (entry) => entry.kind
-          ? batchOfficeSaveBytes(entry.doc, entry.prev, entry.kind).then(path => !!path)
+          ? batchOfficeSaveBytes(entry.doc, entry.prev, entry.kind).then(at => !!at)
           : (typeof saveTextDoc === "function"
             ? saveTextDoc(entry.prev, entry.doc, entry.doc.name, { silent: true, existingOnly: true })
             : false),
@@ -694,8 +696,10 @@ if (typeof window !== "undefined" && window.document) {
       const outsideText = batchOutsideSummary(r.outside);
       if (outsideText) msg += " · " + outsideText + "은 안 바꿈";
       if (r.undoDropped) msg += " · " + r.undoDropped + "개는 되돌리기 없이 저장(용량)";
+      // 원본이 아니라 자동 저장 폴더에 사본이 생긴 파일은 반드시 따로 알린다.
+      if (r.savedAsCopy) msg += " · " + r.savedAsCopy + "개는 원본이 아닌 사본으로 저장(원본을 고치려면 '열기 → 폴더 열기')";
       if (r.workspaceAttempted && !r.workspaceSaved) msg += " · 자동 복원 갱신 실패";
-      const failed = r.workspaceAttempted && !r.workspaceSaved;
+      const failed = (r.workspaceAttempted && !r.workspaceSaved) || !!r.savedAsCopy;
       brToast(msg, 6000, {
         type: failed ? "error" : (r.replaced ? "success" : undefined),
         action: r.undo.length ? { label: "되돌리기", onClick: () => batchReplaceUndo(r.undo) } : null
