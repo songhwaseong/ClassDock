@@ -88,6 +88,40 @@ function batchIsTargetDoc(doc, isTextSearchable, isLocked){
   return typeof doc.savedText === "string" || !!doc.codeEditor;
 }
 
+/* .docx·.pptx 는 텍스트가 아니라 별도 통로(MNOfficeReplace)로 바꾼다 — 압축 안 XML 을 직접 고쳐 쓴다.
+   위 batchIsTargetDoc 은 확장자로 자연히 걸러내므로 두 판정이 겹치지 않는다.
+   반환값은 형식 문자열("docx"|"pptx") 또는 null 이라, 부르는 쪽이 그대로 read() 에 넘길 수 있다. */
+function batchOfficeKind(doc, isLocked){
+  if (!doc || doc.notebookModel || doc.kind === "pdf") return null;
+  if (typeof isLocked === "function" && isLocked(doc)) return null;
+  const name = String(doc.name || "").toLowerCase();
+  if (/\.docx$/.test(name)) return "docx";
+  if (/\.pptx$/.test(name)) return "pptx";
+  return null;
+}
+
+/* 미리보기 줄 앞의 이름표.
+    - 텍스트: 줄 번호("12")
+    - Word:   파트 + 문단 번호("문단 12"·"머리말 2")
+    - PPT:    파트가 이미 번호를 달고 있어 이름표만("슬라이드 3"·"노트 3") */
+function batchChangeLabel(change){
+  if (!change) return "";
+  if (change.label) return (change.para && change.numbered !== false) ? change.label + " " + change.para : change.label;
+  if (change.para) return "문단 " + change.para;
+  return String(change.line == null ? "" : change.line);
+}
+
+// 바꾸지 않은 곳을 숫자로 알린다 — "머리말 2곳 · 메모 1곳". 조용히 빠뜨리지 않기 위한 문구.
+function batchOutsideSummary(outside){
+  if (!Array.isArray(outside)) return "";
+  const merged = new Map();
+  for (const item of outside){
+    if (!item || !item.count) continue;
+    merged.set(item.label, (merged.get(item.label) || 0) + item.count);
+  }
+  return [...merged].map(([label, count]) => label + " " + count + "곳").join(" · ");
+}
+
 function batchIsVisibleDoc(doc, currentActiveId, currentStudyId){
   return !!(doc && (doc.id === currentActiveId || doc.id === currentStudyId));
 }
@@ -145,7 +179,38 @@ if (typeof window !== "undefined" && window.document) {
     if (typeof docs === "undefined") return [];
     const textCheck = typeof isTextExtSearchable === "function" ? isTextExtSearchable : null;
     const lockCheck = typeof isStudyReferenceLocked === "function" ? isStudyReferenceLocked : null;
-    return docs.filter(d => batchIsTargetDoc(d, textCheck, lockCheck));
+    return docs.filter(d => batchIsTargetDoc(d, textCheck, lockCheck) || !!batchReplaceOfficeKind(d, lockCheck));
+  }
+
+  // 오피스 문서는 원본 바이트를 다시 읽어 zip 을 고쳐 쓰므로 sourceFile 이 없으면 대상이 아니다.
+  function batchReplaceOfficeKind(doc, lockCheck){
+    if (typeof MNOfficeReplace !== "object" || !MNOfficeReplace) return null;
+    if (!doc || !doc.sourceFile) return null;
+    return batchOfficeKind(doc, lockCheck);
+  }
+
+  // 설정(설정▸문서)에서 읽는 기본값. 창이 사는 동안 고정한다 — 미리보기와 결과가 다른 값을 보면 그게 곧 사고다.
+  function batchOfficeSettings(){
+    const settings = (typeof appSettings === "object" && appSettings) ? appSettings : {};
+    return {
+      includeAttached: settings.officeReplaceAttached === true,
+      allowTrackedChanges: settings.officeReplaceTracked === true
+    };
+  }
+
+  const BATCH_OFFICE_UNDO_MAX_BYTES = 200 * 1024 * 1024;   // 되돌리기용 원본 바이트를 들고 있을 상한
+
+  /* 제자리 저장·반영은 문단 편집(docx-editor)과 같은 규칙을 써야 하므로 MNOfficeReplace 에 두었다.
+     텍스트와 달리 "편집기에만 반영" 이 성립하지 않는다(Word·PPT 는 여기서 편집기가 없다) —
+     저장하지 못하면 화면도 바꾸지 않아야 "바뀐 줄 알았는데 파일은 그대로" 를 막는다. */
+  const batchOfficeSaveBytes = (doc, bytes, kind) => MNOfficeReplace.saveInPlace(doc, bytes, kind);
+
+  // 반영 + 다음에 볼 때 새로 그리기. 지금 보이는 문서면 즉시 다시 그린다.
+  function batchOfficeReflect(doc, bytes, kind){
+    if (!MNOfficeReplace.reflectSaved(doc, bytes, kind)) return;
+    doc.rendered = false;
+    const currentStudyId = typeof studyPdfId !== "undefined" ? studyPdfId : null;
+    if (batchIsVisibleDoc(doc, activeId, currentStudyId) && typeof ensureRendered === "function") ensureRendered(doc);
   }
 
   // 문서의 현재 본문을 LF 로 정규화해 돌려준다(편집 중 > 저장본 > 디스크 순).
@@ -177,6 +242,10 @@ if (typeof window !== "undefined" && window.document) {
 
   function batchWorkspaceSnapshotFile(entry){
     if (!entry || !entry.doc || typeof recoverySnapshotFile !== "function") return null;
+    if (entry.bytes){  // 오피스 문서 — 바이트 그대로 복원 묶음에 넣는다
+      const mime = MNOfficeReplace.mimeOf(entry.kind);
+      return recoverySnapshotFile(entry.doc, new Blob([entry.bytes], { type: mime }), mime);
+    }
     const out = typeof applyDocEncodingOnSave === "function"
       ? applyDocEncodingOnSave(entry.text, entry.doc)
       : String(entry.text == null ? "" : entry.text);
@@ -241,9 +310,27 @@ if (typeof window !== "undefined" && window.document) {
   async function batchReplaceApply(chosen){
     const undo = [];
     const workspaceEntries = [];
-    let saved = 0, editedOnly = 0, skipped = 0, replaced = 0;
+    let saved = 0, editedOnly = 0, skipped = 0, replaced = 0, undoDropped = 0, undoBytes = 0;
+    const outside = [];
     for (const f of chosen){
       const doc = f.doc;
+      if (f.kind){                                  // "docx" | "pptx" — 오피스 통로
+        if (Array.isArray(f.outside)) for (const item of f.outside) outside.push(item);
+        let bytes = null;
+        try { bytes = await MNOfficeReplace.build(f.source.bytes, f.replaced); }
+        catch(e){ console.error(e); skipped++; continue; }
+        const savedPath = await batchOfficeSaveBytes(doc, bytes, f.kind);
+        if (!savedPath){ skipped++; continue; }     // 저장 못 하면 화면도 바꾸지 않는다
+        batchOfficeReflect(doc, bytes, f.kind);
+        workspaceEntries.push({ doc, bytes, kind: f.kind });
+        // 되돌리기는 원본 바이트를 들고 있어야 한다 — 합계가 상한을 넘으면 그 뒤 파일은 되돌리기 없이 저장한다.
+        if (undoBytes + f.source.bytes.length <= BATCH_OFFICE_UNDO_MAX_BYTES){
+          undo.push({ doc, prev: f.source.bytes, resave: true, kind: f.kind });
+          undoBytes += f.source.bytes.length;
+        } else undoDropped++;
+        saved++; replaced += f.count;
+        continue;
+      }
       const hadEditor = doc.codeEditor && typeof doc.codeEditor.setValue === "function";
       let res = "skipped";
       if (typeof saveTextDoc === "function"){
@@ -267,7 +354,7 @@ if (typeof window !== "undefined" && window.document) {
       }
     }
     const workspace = await batchRememberWorkspaceEntries(workspaceEntries);
-    return { undo, saved, editedOnly, skipped, replaced,
+    return { undo, saved, editedOnly, skipped, replaced, undoDropped, outside,
       workspaceAttempted: workspace.attempted, workspaceSaved: workspace.saved };
   }
 
@@ -276,16 +363,18 @@ if (typeof window !== "undefined" && window.document) {
     const workspaceEntries = [];
     for (const u of undo){
       const result = await batchRestoreUndoEntry(u, {
-        save: (entry) => typeof saveTextDoc === "function"
-          ? saveTextDoc(entry.prev, entry.doc, entry.doc.name, { silent: true, existingOnly: true })
-          : false,
-        reflect: batchReflectInDoc,
+        save: (entry) => entry.kind
+          ? batchOfficeSaveBytes(entry.doc, entry.prev, entry.kind).then(path => !!path)
+          : (typeof saveTextDoc === "function"
+            ? saveTextDoc(entry.prev, entry.doc, entry.doc.name, { silent: true, existingOnly: true })
+            : false),
+        reflect: (doc, prev) => { if (prev instanceof Uint8Array) batchOfficeReflect(doc, prev, batchOfficeKind(doc)); else batchReflectInDoc(doc, prev); },
         markDirty: typeof markDocumentDirty === "function" ? markDocumentDirty : null
       });
       done++;
       if (result.needsSave) needsSave++;
       if (result.saveFailed) saveFailed++;
-      if (result.persisted) workspaceEntries.push({ doc: u.doc, text: u.prev });
+      if (result.persisted) workspaceEntries.push(u.kind ? { doc: u.doc, bytes: u.prev, kind: u.kind } : { doc: u.doc, text: u.prev });
     }
     const workspace = await batchRememberWorkspaceEntries(workspaceEntries);
     let msg = done + "개 파일 내용을 되돌렸어요.";
@@ -311,8 +400,18 @@ if (typeof window !== "undefined" && window.document) {
     const modal = document.createElement("div"); modal.className = "modal batch-replace-modal";
     const card = document.createElement("div"); card.className = "modal-card batch-replace-card";
     const title = document.createElement("h3"); title.textContent = "여러 파일 찾아 바꾸기";
+    // 설정(설정▸문서)은 창이 열릴 때 한 번만 읽어 그 세션 내내 고정한다.
+    const officeSettings = batchOfficeSettings();
+    const officeKinds = new Set(batchReplaceTargetDocs().map(d => batchOfficeKind(d)).filter(Boolean));
+
     const sub = document.createElement("p"); sub.className = "batch-replace-sub";
-    sub.textContent = "열린 텍스트·코드 파일에서 한꺼번에 바꿔요. 미리보기로 확인한 뒤 적용하며, 적용 후에도 되돌릴 수 있어요. (PDF·오피스·노트북 제외)";
+    if (officeKinds.size){
+      const names = [officeKinds.has("docx") ? "Word(.docx)" : "", officeKinds.has("pptx") ? "PowerPoint(.pptx)" : ""].filter(Boolean);
+      sub.textContent = "열린 텍스트·코드 파일과 " + names.join("·") +
+        " 본문에서 한꺼번에 바꿔요. 미리보기로 확인한 뒤 적용하며, 적용 후에도 되돌릴 수 있어요. (PDF·노트북 제외)";
+    } else {
+      sub.textContent = "열린 텍스트·코드 파일에서 한꺼번에 바꿔요. 미리보기로 확인한 뒤 적용하며, 적용 후에도 되돌릴 수 있어요. (PDF·오피스·노트북 제외)";
+    }
 
     // 입력줄
     const form = document.createElement("div"); form.className = "batch-replace-form";
@@ -356,6 +455,17 @@ if (typeof window !== "undefined" && window.document) {
     };
     const caseChk = mkCheck("대소문자 구분", "체크하면 A 와 a 를 다르게 봐요.");
     const regexChk = mkCheck("정규식", "정규식(예: \\d+, 그룹 $1)으로 찾고 바꿔요.");
+    // 오피스 파일이 하나라도 열려 있을 때만 보여준다. 설정값으로 시작하되, 여기서 끄고 켠 값은 저장하지 않는다
+    // (대소문자·정규식과 같은 '이번 실행값'). 기본값을 바꾸려면 설정▸문서에서 바꾼다.
+    const attachedChk = officeKinds.size
+      ? mkCheck(officeKinds.has("pptx") && !officeKinds.has("docx") ? "발표자 노트 포함" : "머리말·꼬리말·노트 포함",
+          "끄면 본문(Word 본문·슬라이드)만 바꾸고, 머리말·꼬리말·각주·발표자 노트에 걸린 곳은 개수만 알려 줘요. 기본값은 설정▸문서에서 바꿔요.")
+      : null;
+    if (attachedChk) attachedChk.checked = officeSettings.includeAttached;
+    const officeOptsNow = () => ({
+      includeAttached: attachedChk ? attachedChk.checked : officeSettings.includeAttached,
+      allowTrackedChanges: officeSettings.allowTrackedChanges
+    });
 
     const status = document.createElement("div"); status.className = "batch-replace-status"; status.setAttribute("aria-live", "polite");
     const results = document.createElement("div"); results.className = "batch-replace-results";
@@ -383,24 +493,38 @@ if (typeof window !== "undefined" && window.document) {
       results.innerHTML = "";
       if (!lastPreview) return;
       const files = lastPreview.files;
-      if (!files.length){ status.textContent = "바뀔 내용이 없어요."; setApplyLabel(); return; }
+      const blocked = lastPreview.blocked || [];
+      if (!files.length && !blocked.length){ status.textContent = "바뀔 내용이 없어요."; setApplyLabel(); return; }
       const totalMatches = files.reduce((n, f) => n + f.count, 0);
-      status.textContent = files.length + "개 파일 · " + totalMatches + "곳에서 바뀔 수 있어요.";
-      files.forEach((f, idx) => {
+      status.textContent = files.length
+        ? files.length + "개 파일 · " + totalMatches + "곳에서 바뀔 수 있어요."
+        : "바뀔 내용이 없어요.";
+      files.forEach((f) => {
         const box = document.createElement("div"); box.className = "batch-replace-file";
         const head = document.createElement("label"); head.className = "batch-replace-file-head";
         const chk = document.createElement("input"); chk.type = "checkbox"; chk.checked = f.checked;
         chk.addEventListener("change", () => { f.checked = chk.checked; box.classList.toggle("off", !chk.checked); setApplyLabel(); });
         const nm = document.createElement("b"); nm.className = "batch-replace-file-name";
         nm.textContent = f.doc.workspacePath || f.doc.relPath || f.doc.name;
+        head.append(chk, nm);
+        if (f.kind){
+          const badge = document.createElement("span"); badge.className = "batch-replace-badge";
+          badge.textContent = f.kind === "pptx" ? "슬라이드" : "Word 본문"; head.appendChild(badge);
+          if (f.trackedChanges){
+            const warn = document.createElement("span"); warn.className = "batch-replace-badge warn";
+            warn.textContent = "변경 이력 있음";
+            warn.title = "이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아요.";
+            head.appendChild(warn);
+          }
+        }
         const cnt = document.createElement("span"); cnt.className = "batch-replace-file-count"; cnt.textContent = f.count + "곳";
-        head.append(chk, nm, cnt);
+        head.appendChild(cnt);
         box.appendChild(head);
         const lines = document.createElement("div"); lines.className = "batch-replace-lines";
         f.changes.slice(0, BATCH_REPLACE_PREVIEW_LINES).forEach(ch => {
           const row = document.createElement("div"); row.className = "batch-replace-line";
           row.innerHTML =
-            '<span class="brl-no">' + ch.line + '</span>' +
+            '<span class="brl-no">' + brEsc(batchChangeLabel(ch)) + '</span>' +
             '<span class="brl-before">' + brEsc(brClip(ch.before)) + '</span>' +
             '<span class="brl-after">' + brEsc(brClip(ch.after)) + '</span>';
           lines.appendChild(row);
@@ -410,7 +534,27 @@ if (typeof window !== "undefined" && window.document) {
           more.textContent = "…그리고 " + (f.changes.length - BATCH_REPLACE_PREVIEW_LINES) + "줄 더";
           lines.appendChild(more);
         }
+        // 바꾸지 않는 자리는 숨기지 않고 숫자로 적는다.
+        const notes = [];
+        const outsideText = batchOutsideSummary(f.outside);
+        if (outsideText) notes.push(outsideText + "은 바꾸지 않아요");
+        if (f.skipped) notes.push("탭·줄바꿈을 넘는 " + f.skipped + "곳은 바꿀 수 없어요");
+        if (notes.length){
+          const note = document.createElement("div"); note.className = "batch-replace-note";
+          note.textContent = notes.join(" · ");
+          lines.appendChild(note);
+        }
         box.appendChild(lines);
+        results.appendChild(box);
+      });
+      blocked.forEach((item) => {
+        const box = document.createElement("div"); box.className = "batch-replace-file blocked";
+        const head = document.createElement("div"); head.className = "batch-replace-file-head";
+        const nm = document.createElement("b"); nm.className = "batch-replace-file-name";
+        nm.textContent = item.doc.workspacePath || item.doc.relPath || item.doc.name;
+        const why = document.createElement("span"); why.className = "batch-replace-file-count"; why.textContent = item.reason;
+        head.append(nm, why);
+        box.appendChild(head);
         results.appendChild(box);
       });
       results.scrollTop = prevScroll;
@@ -426,8 +570,20 @@ if (typeof window !== "undefined" && window.document) {
       textCache.set(doc.id, t);
       return t;
     }
+    /* 오피스 문서도 같은 이유로 한 번만 푼다. 캐시에 담는 건 "찾을 말과 무관한 부분"(원본 바이트·파트 XML)이라
+       찾을 말이나 머리말 옵션이 바뀌어도 zip 을 다시 풀지 않는다. 제외 사유도 여기서 한 번 정해진다. */
+    const officeCache = new Map();
+    async function readOfficeCached(doc, kind){
+      if (officeCache.has(doc.id)) return officeCache.get(doc.id);
+      let source;
+      try { source = await MNOfficeReplace.read(doc.sourceFile, kind, officeSettings); }
+      catch(e){ console.error(e); source = { reason: "문서를 열지 못했어요." }; }
+      officeCache.set(doc.id, source);
+      return source;
+    }
     // "찾기" 조건의 지문. 이게 그대로면 걸리는 파일·줄은 안 바뀌고 "바꿀 말"만 다시 계산하면 된다.
-    const findSig = () => JSON.stringify([findInput.value, caseChk.checked, regexChk.checked]);
+    const findSig = () => JSON.stringify([findInput.value, caseChk.checked, regexChk.checked,
+      attachedChk ? attachedChk.checked : null]);
 
     // 전체 재훑기: 파일을 (캐시 경유) 읽어 걸리는 곳을 새로 찾는다. "찾을 말"·옵션이 바뀔 때만 쓴다.
     async function runFullPreview(){
@@ -440,15 +596,28 @@ if (typeof window !== "undefined" && window.document) {
       status.textContent = "훑는 중…"; results.innerHTML = "";
       try {
         const targets = batchReplaceTargetDocs();
-        const files = [];
+        const officeOpts = officeOptsNow();
+        const files = [], blocked = [];
         for (const doc of targets){
+          const checked = prevChecked.has(doc.id) ? prevChecked.get(doc.id) : true;
+          const kind = batchOfficeKind(doc);
+          if (kind){
+            const source = await readOfficeCached(doc, kind);
+            if (!source) continue;
+            // 바꿀 수 없는 문서는 목록에서 지우지 않는다 — 사라지면 "일치가 없구나" 로 오해한다.
+            if (source.reason){ blocked.push({ doc, reason: source.reason }); continue; }
+            const r = MNOfficeReplace.compute(source, matcher, replaceInput.value, officeOpts);
+            if (r.count > 0) files.push({ doc, kind, source, replaced: r.replaced, count: r.count,
+              changes: r.changes, skipped: r.skipped, outside: r.outside, checked,
+              trackedChanges: source.hasTrackedChanges });
+            continue;
+          }
           const text = await readDocCached(doc);
           if (text == null) continue;
           const r = batchComputeReplacement(text, matcher, replaceInput.value);
-          const checked = prevChecked.has(doc.id) ? prevChecked.get(doc.id) : true;
           if (r.count > 0) files.push({ doc, out: r.out, count: r.count, changes: r.changes, text, checked });
         }
-        lastPreview = { matcher, sig, files };
+        lastPreview = { matcher, sig, files, blocked };
         renderResults();
       } finally { setApplyLabel(); }
     }
@@ -456,7 +625,12 @@ if (typeof window !== "undefined" && window.document) {
     // "찾을 말"은 그대로고 "바꿀 말"만 바뀐 경우: 파일을 다시 읽지 않고 결과 문자열만 다시 계산한다(즉시).
     function recomputeReplacement(){
       if (!lastPreview) return;
+      const officeOpts = officeOptsNow();
       lastPreview.files = lastPreview.files.map(f => {
+        if (f.kind){
+          const r = MNOfficeReplace.compute(f.source, lastPreview.matcher, replaceInput.value, officeOpts);
+          return { ...f, replaced: r.replaced, count: r.count, changes: r.changes, skipped: r.skipped, outside: r.outside };
+        }
         const r = batchComputeReplacement(f.text, lastPreview.matcher, replaceInput.value);
         return { doc: f.doc, out: r.out, count: r.count, changes: r.changes, text: f.text, checked: f.checked };
       });
@@ -495,7 +669,7 @@ if (typeof window !== "undefined" && window.document) {
       if (lastPreview && lastPreview.sig === findSig()) recomputeReplacement();
       else scheduleFullPreview(250);
     });
-    [caseChk, regexChk].forEach(el => el.addEventListener("change", () => scheduleFullPreview(0)));
+    [caseChk, regexChk, attachedChk].forEach(el => { if (el) el.addEventListener("change", () => scheduleFullPreview(0)); });
 
     apply.addEventListener("click", async () => {
       if (!lastPreview){
@@ -517,6 +691,9 @@ if (typeof window !== "undefined" && window.document) {
       let msg = r.replaced + "곳 바꿈";
       if (parts.length) msg += " · " + parts.join(" · ");
       if (r.skipped) msg += " · " + r.skipped + "개 건너뜀(저장 위치 없음)";
+      const outsideText = batchOutsideSummary(r.outside);
+      if (outsideText) msg += " · " + outsideText + "은 안 바꿈";
+      if (r.undoDropped) msg += " · " + r.undoDropped + "개는 되돌리기 없이 저장(용량)";
       if (r.workspaceAttempted && !r.workspaceSaved) msg += " · 자동 복원 갱신 실패";
       const failed = r.workspaceAttempted && !r.workspaceSaved;
       brToast(msg, 6000, {

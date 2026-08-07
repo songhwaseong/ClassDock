@@ -76,7 +76,8 @@ flowchart LR
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
-| `office-doc-viewers.js` | DOCX, HWP, HWPX의 읽기 전용 미리보기와 Office 암호화 문서 판별·복호화 보조를 담당합니다. | `viewer-base.js`, `file-loaders.js` |
+| `office-doc-viewers.js` | DOCX, HWP, HWPX의 미리보기와 Office 암호화 문서 판별·복호화 보조를 담당합니다. `.docx`는 미리보기를 그린 뒤 `MNDocxEditor`의 문단 편집 토글을 붙입니다(암호를 풀어 연 문서는 저장하면 암호가 사라지므로 붙이지 않습니다). | `viewer-base.js`, `file-loaders.js`, `docx-editor.js` |
+| `docx-editor.js` | Word(.docx) 문단 편집 화면(`MNDocxEditor`)입니다. 보기는 docx-preview 그대로 두고 **편집 모드에서만 자체 문단 화면**을 만듭니다(docx-preview는 DOM ↔ 원본 XML 매핑을 남기지 않아 그 위에서 편집할 수 없습니다). 문단마다 스타일 이름 + `contenteditable` 한 칸을 두고, Enter로 문단 나누기·빈 문단에서 Backspace로 지우기·＋/🗑 버튼을 답니다. 표 안 문단과 쪽 설정(`sectPr`)이 든 문단은 추가·삭제를 막고 이유를 툴팁으로 알립니다. "글자만 고치는 간이 표시"라는 배너를 편집 모드 내내 띄웁니다. 이 파일은 화면만 맡고, 무엇을 어떻게 되쓸지는 전부 `MNOfficeReplace`의 순수 함수(`officeParagraphEditPlan`)가 정합니다. | `office-replace.js`, `office-doc-viewers.js`, `docs/워드-문단편집-설계.md`, `tests/office-replace.test.js` |
 | `spreadsheet-viewer.js` | XLSX/XLS/CSV 로딩과 시트 UI, 셀 편집·선택·복사, 수식 계산, 행/열·병합·서식·필터·정렬, 저장과 새 표 생성을 담당합니다. | `spreadsheet-chart.js`, `tests/xlsx-edit.test.js` |
 | `spreadsheet-chart.js` | 선택한 표 범위에서 차트에 적합한 데이터를 추론하고 막대·선·원형 SVG 차트를 생성합니다. | `spreadsheet-viewer.js` |
 | `pptx-viewer.js` | PPTX 간이 슬라이드 미리보기, 슬라이드 맞춤, 포함 폰트 변환과 상대 리소스 경로 해석을 담당합니다. EXE의 정확한 PDF 변환 실패 시 사용됩니다. | `file-loaders.js`, `office-doc-viewers.js` |
@@ -91,7 +92,8 @@ flowchart LR
 |---|---|---|
 | `lesson-replay.js` | `.lesson` 데이터 검증, 화이트보드·PDF·Python 이벤트 녹화, 타임라인 재생·탐색·속도 조절과 파일 저장을 담당합니다. | `board-render.js`, `whiteboard.js`, `code-viewer.js` |
 | `diff-viewer.js` | 파일 비교(diff) 문서: patience diff 자체 구현, 나란히/한 줄 보기, 공백 무시·접기, 두 파일 선택 모달과 저장본 비교, 과제 시작 코드 비교 진입점을 담당합니다. | `documents.js`, `task-package.js`, `command-palette.js`, `tests/diff-viewer.test.js` |
-| `batch-replace.js` | 여러 파일 찾아 바꾸기: 열린 텍스트·코드 문서에서 한꺼번에 찾아 바꾸기(대소문자·정규식·그룹 치환), 미리보기 체크리스트, `saveTextDoc({silent,existingOnly})`로 조용히 저장, 되돌리기를 담당합니다. | `documents.js`, `code-viewer.js`, `command-palette.js`, `tests/batch-replace.test.js` |
+| `office-replace.js` | Word(.docx)·PowerPoint(.pptx) 찾아 바꾸기 공용 모듈(`MNOfficeReplace`)입니다. 두 형식은 문단·run·글자 태그가 이름공간만 다르고 구조가 같아(`<w:p>/<w:r>/<w:t>` ↔ `<a:p>/<a:r>/<a:t>`) 한 코어가 처리하며, 형식별로 다른 건 "어느 파트를 어떻게 다루는가" 표(`officePartRole`)뿐입니다. Word·PowerPoint 가 한 낱말을 여러 run 으로 쪼개 두어도 걸리도록 문단을 이어붙인 평문에서 찾고, 되쓸 때만 run 경계를 봐서 **일치가 시작된 첫 조각에 치환문을 넣고 겹친 나머지 조각은 비웁니다**(문단 안 다른 서식이 그대로 남습니다). `xml:space="preserve"`·XML 이스케이프·탭/줄바꿈을 넘는 일치 건너뛰기·`pPr` 탭 정의와 `fld`(슬라이드 번호 등 자동 값) 제외, 파트 갈래(본문·머리말/꼬리말/각주/발표자 노트·메모/차트), 제외 사유(암호·변경 이력·데이터 바인딩·40MB) 판정이 모두 DOM 없는 순수 함수입니다. 브라우저부는 zip.js 로 파트를 한 번만 풀고(`read`) 찾을 말이 바뀔 때마다 다시 계산하며(`compute`), 저장 때 **바꾼 파트만 갈아끼운 새 zip**을 만듭니다(`build` — 나머지 엔트리는 바이트 그대로). | `batch-replace.js`, `lazy.js`(`zip` 묶음), `office-doc-viewers.js`(암호 판별), `docs/오피스-찾아바꾸기-설계.md`, `tests/office-replace.test.js`, `tests/office-replace-roundtrip.test.js` |
+| `batch-replace.js` | 여러 파일 찾아 바꾸기: 열린 텍스트·코드 문서와 **Word(.docx) 본문·PowerPoint(.pptx) 슬라이드**에서 한꺼번에 찾아 바꾸기(대소문자·정규식·그룹 치환), 미리보기 체크리스트, `saveTextDoc({silent,existingOnly})`로 조용히 저장, 되돌리기를 담당합니다. 오피스 문서는 `MNOfficeReplace`로 계산해 제자리 저장(File System Access 핸들 → exe `/save-file`)하며, 저장하지 못하면 화면도 바꾸지 않습니다(편집기가 없어 "바뀐 줄 알았는데 파일은 그대로"를 막기 위해). 본문 밖(머리말·꼬리말·각주·발표자 노트) 포함 여부와 변경 이력 문서 허용은 설정▸문서에서 정하고, 바꾸지 않은 곳은 "머리말 2곳"처럼 숫자로 알립니다. 미리보기 줄 이름표는 Word 가 `문단 12`, PowerPoint 가 `슬라이드 3`입니다. | `documents.js`, `code-viewer.js`, `office-replace.js`, `command-palette.js`, `tests/batch-replace.test.js` |
 | `task-package.js` | `.task` 과제 만들기·검증·내보내기, `.taskdone` 제출본 생성·검수·재채점, 일괄 검수와 성적 CSV를 담당합니다. | `python-runtime.js`, `file-loaders.js`, `tests/task-package.test.js` |
 | `exam-paper.js` | 시험지 만들기·배포·응시·채점: 객관식/주관식·이미지 문항 편집, 선생님 암호로 잠근 원본 `.examkey`, 최신 원본과 버전이 일치하는 정답 제거 배포본 `.exam`(열기 암호 선택), 학생 임시 저장·이름·서명 후 공개키로 봉인한 제출본 `.examdone`, 봉인 내부 신원·버전을 검증하는 일괄 채점표, 수동 채점 영구 저장과 시험별·누적 성적 CSV를 담당합니다. 교실 LAN 제출도 여기서 다룹니다 — 선생님의 [제출 받기](EXE 의 제출 전용 리스너 개폐·접수 목록 폴링)와 학생의 [선생님 PC 로 바로 보내기](주소·6자리 코드·연결 확인, 실패하면 파일 제출로 폴백)입니다. | `file-loaders.js`, `documents.js`, `pdf-editor.js`(`trimCanvas`), `code-viewer.js`(서버 저장), `desktop/launcher.cs`(제출 수신), `tests/exam-paper.test.js` |
 | `screensaver.js` | 유휴 화면 시계·영상 재생, 영상 목록 IndexedDB 저장, 재생 가능성 검사와 전체화면 종료를 담당합니다. | `app.js`, `state.js` |
@@ -248,7 +250,7 @@ flowchart LR
 | Python 실행 결과·패키지 | `python-runtime.js`, `python-run-context.js` |
 | Python 편집기 터미널 | `python-terminal.js`, `desktop/launcher.cs` |
 | Jupyter 셀 UI | `notebook-run.js`, `notebook-cells.js`, `notebook-model.js` |
-| 파일 비교(diff)·여러 파일 찾아 바꾸기 | `diff-viewer.js`, `batch-replace.js`, `command-palette.js` |
+| 파일 비교(diff)·여러 파일 찾아 바꾸기 | `diff-viewer.js`, `batch-replace.js`, `office-replace.js`, `command-palette.js` |
 | 블록 문서(`.mnote`) | `mnote.js`, `documents.js`, `file-loaders.js` |
 | 찾기 창·최근 검색어·특수문자 | `search-history.js`, `special-chars.js`, 각 편집기 |
 | 단축키 정의·기본값 | `state.js`(`SHORTCUT_DEFINITIONS`), `app.js`(설정 화면) |

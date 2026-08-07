@@ -965,6 +965,8 @@ function wire(){
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
+    byId("settingOfficeReplaceAttached").checked = appSettings.officeReplaceAttached === true;
+    byId("settingOfficeReplaceTracked").checked = appSettings.officeReplaceTracked === true;
     codeColorDraft = normalizeCodeColors(appSettings.codeColors);
     renderCodeColorSettings();
     syncToolVisibilityChecks();
@@ -1012,6 +1014,8 @@ function wire(){
       pdfRecovery: byId("settingPdfRecovery").checked,
       autoSave: byId("settingAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
+      officeReplaceAttached: byId("settingOfficeReplaceAttached").checked,
+      officeReplaceTracked: byId("settingOfficeReplaceTracked").checked,
       petEnabled: byId("settingPet").checked, petCount: Number(byId("settingPetCount").value) || 1,
       petFocus: { enabled: byId("settingPetFocus").checked, focusMin: Number(byId("settingPetFocusMin").value) || 25,
         breakMin: Number(byId("settingPetBreakMin").value) || 5, quietTyping: byId("settingPetQuietTyping").checked },

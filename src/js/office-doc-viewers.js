@@ -201,7 +201,23 @@ async function renderHwpx(file, host){
   host.append(note, shell);
 }
 
-async function renderDocx(file, host){
+/* docx 바이트를 한 칸에 그린다. 문단 편집이 저장 뒤 미리보기를 제자리에서 다시 그릴 때도 쓴다
+   (문서 전체를 다시 그리면 편집 중이던 화면이 사라진다). */
+async function docxRenderInto(data, wrap){
+  wrap.innerHTML = "";
+  const opts = { className: "docx", inWrapper: true, breakPages: true, useBase64URL: true };
+  try {
+    await docx.renderAsync(data, wrap, null, opts);
+  } catch (e){
+    // 일부 docx 는 임베디드 폰트(embedTrueTypeFonts) 처리에서 docx-preview 가 throw 한다.
+    // 폰트/페이지브레이크 처리를 끄고 1회 재시도 → 시스템 폰트로라도 내용을 표시한다.
+    console.warn("docx 렌더 실패 → 폰트 무시로 재시도:", e);
+    wrap.innerHTML = "";
+    await docx.renderAsync(data, wrap, null, { ...opts, ignoreFonts: true, ignoreLastRenderedPageBreak: true });
+  }
+}
+
+async function renderDocx(file, host, doc){
   if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("docx");   // Word 뷰어는 .docx 를 열 때 처음 로드
   if (typeof docx === "undefined"){ toast("Word 뷰어 로드 실패"); return; }
   let data = file;
@@ -214,15 +230,11 @@ async function renderDocx(file, host){
   const wrap = document.createElement("div");
   wrap.className = "docx-host";
   host.appendChild(wrap);
-  const opts = { className: "docx", inWrapper: true, breakPages: true, useBase64URL: true };
-  try {
-    await docx.renderAsync(data, wrap, null, opts);
-  } catch (e){
-    // 일부 docx 는 임베디드 폰트(embedTrueTypeFonts) 처리에서 docx-preview 가 throw 한다.
-    // 폰트/페이지브레이크 처리를 끄고 1회 재시도 → 시스템 폰트로라도 내용을 표시한다.
-    console.warn("docx 렌더 실패 → 폰트 무시로 재시도:", e);
-    wrap.innerHTML = "";
-    await docx.renderAsync(data, wrap, null, { ...opts, ignoreFonts: true, ignoreLastRenderedPageBreak: true });
+  await docxRenderInto(data, wrap);
+  // 문단 편집 토글을 미리보기 위에 붙인다(편집 모드에 들어가기 전에는 zip 을 풀지 않는다).
+  // 암호를 풀어 연 문서는 저장하면 암호가 사라지므로 편집 자체를 붙이지 않는다.
+  if (data === file && typeof MNDocxEditor === "object" && MNDocxEditor && doc){
+    try { await MNDocxEditor.attach(file, host, doc, wrap); } catch(e){ console.warn("문단 편집 준비 실패:", e); }
   }
 }
 

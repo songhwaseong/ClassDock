@@ -1981,6 +1981,42 @@
     .pet-focus-progress span{transition:none}
   }
   .docx-host{margin:0 auto}
+
+  /* Word 문단 편집 (설계: docs/워드-문단편집-설계.md)
+     보기는 docx-preview 그대로 두고, 편집 모드에서만 아래 간이 문단 화면을 보여준다. */
+  .docx-editor-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:8px 12px;margin:0 auto 10px;border:1px solid var(--border);border-radius:10px;
+    background:var(--field,rgba(255,255,255,.03))}
+  .docx-editor-title{font-size:13px;color:var(--muted)}
+  .docx-editmode-btn{font:inherit;font-size:12.5px;padding:5px 12px;border-radius:8px;
+    border:1px solid var(--border);background:transparent;color:var(--ink);cursor:pointer}
+  .docx-editmode-btn:hover{background:rgba(127,127,127,.12)}
+  .docx-editmode-btn.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9)}
+  .docx-editmode-btn:disabled{opacity:.5;cursor:default}
+  .docx-editor-status{font-size:12px;color:var(--muted)}
+  .docx-edit-note{margin-bottom:10px}
+  .docx-para-list{display:flex;flex-direction:column;gap:2px;padding:18px}
+  .docx-para{display:grid;grid-template-columns:74px 1fr 58px;gap:10px;align-items:start;
+    padding:4px 6px;border-radius:6px}
+  .docx-para:hover{background:rgba(127,127,127,.06)}
+  .docx-para-style{font-size:11px;color:var(--muted);padding-top:4px;text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none}
+  .docx-para-text{min-height:1.6em;padding:3px 6px;border-radius:5px;outline:none;
+    white-space:pre-wrap;word-break:break-word;border:1px solid transparent}
+  .docx-para-text:focus{border-color:var(--accent,#5b9dd9);background:rgba(127,127,127,.06)}
+  .docx-para-text[data-placeholder]:empty::before{content:attr(data-placeholder);color:var(--muted);opacity:.6}
+  /* 손댄 문단은 눈에 띄게 — 화면과 저장 대상이 어긋나지 않는다는 걸 보여준다. */
+  .docx-para.touched .docx-para-text{border-color:rgba(127,127,127,.35)}
+  .docx-para.touched .docx-para-style::after{content:" 고침";color:var(--accent,#5b9dd9)}
+  .docx-para.in-table{border-left:2px solid rgba(127,127,127,.3)}
+  .docx-para.locked .docx-para-style::before{content:"⇥ "}
+  .docx-para.removed .docx-para-text{opacity:.45;text-decoration:line-through}
+  .docx-para-tools{display:flex;gap:2px;opacity:0;transition:opacity .12s}
+  .docx-para:hover .docx-para-tools,.docx-para:focus-within .docx-para-tools{opacity:1}
+  .docx-para-btn{font:inherit;font-size:12px;line-height:1;padding:4px 6px;border-radius:6px;
+    border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer}
+  .docx-para-btn:hover:not(:disabled){background:rgba(127,127,127,.15);color:var(--ink)}
+  .docx-para-btn:disabled{opacity:.3;cursor:default}
   .hwp-host{margin:0 auto}
   .pptx-host{margin:0 auto}
   /* 슬라이드는 pptxjs 가 원본 픽셀 크기로 그린다 → 뷰어 폭에 맞춰 축소(가운데정렬은 .slide 의 margin:auto).
@@ -4177,13 +4213,23 @@
   .batch-replace-file-name{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .batch-replace-file-count{flex:0 0 auto;font-size:12px;color:var(--muted)}
   .batch-replace-lines{display:flex;flex-direction:column;font:12px/1.55 Consolas,"Courier New",monospace}
-  .batch-replace-line{display:grid;grid-template-columns:44px 1fr;gap:2px 8px;padding:3px 11px}
+  /* 줄 번호 칸은 Word 의 "머리말 2"·"문단 12" 같은 이름표도 받는다(텍스트는 여전히 숫자만). */
+  .batch-replace-line{display:grid;grid-template-columns:66px 1fr;gap:2px 8px;padding:3px 11px}
   .batch-replace-line:nth-child(even){background:rgba(127,127,127,.05)}
-  .brl-no{grid-row:1/3;color:var(--muted);text-align:right;user-select:none}
+  .brl-no{grid-row:1/3;color:var(--muted);text-align:right;user-select:none;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .brl-before{color:var(--danger,#e06c75);text-decoration:line-through;opacity:.75;
     overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
   .brl-after{color:var(--ok,#98c379);overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
   .batch-replace-more{padding:3px 11px;color:var(--muted);font-style:italic}
+  /* 바꾸지 않는 자리(머리말·메모·탭을 넘는 일치)를 숫자로 적어 둔다 — 조용히 빠뜨리지 않기 위해. */
+  .batch-replace-note{padding:4px 11px 6px;color:var(--muted);font-style:italic}
+  .batch-replace-badge{flex:0 0 auto;font-size:11px;line-height:1.6;padding:0 7px;border-radius:999px;
+    border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+  .batch-replace-badge.warn{border-color:var(--warn,#d19a66);color:var(--warn,#d19a66)}
+  /* 바꿀 수 없는 문서는 목록에서 지우지 않고 사유와 함께 흐리게 남긴다. */
+  .batch-replace-file.blocked{opacity:.6;border-style:dashed}
+  .batch-replace-file.blocked .batch-replace-file-head{cursor:default}
 
   /* 형식 변환 창 (JSON·CSV·표·마크다운) */
   .data-convert-card{width:min(940px,96%);max-height:92vh;display:flex;flex-direction:column}

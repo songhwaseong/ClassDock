@@ -4,6 +4,7 @@
 async function loadOffice(file, ext, options={}){
   const doc = makeDoc("office", file.name, options);
   doc.sourceFile = file;                     // 내용 검색용 원본 파일 핸들(텍스트·코드만 실제로 읽음)
+  doc.renderOptions = options;               // render 클로저가 붙든 옵션 — 파일을 갈아 끼운 쪽이 캐시된 바이트를 비울 수 있게 노출
   doc.convertedFromCsv = !!options.convertedFromCsv;
   if (Array.isArray(options.spreadsheetAoa)) doc.spreadsheetAoa = options.spreadsheetAoa;
   if (typeof options.spreadsheetHasHeader === "boolean") doc.spreadsheetHasHeader = options.spreadsheetHasHeader;   // CSV→XLSX 변환 시 '첫 줄 머리글' 선택 전달
@@ -11,7 +12,7 @@ async function loadOffice(file, ext, options={}){
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
     const source = doc.sourceFile || file;
     const siblingCtx = { relPath: doc.relPath || options.relPath, archiveCtx: doc.archiveCtx || options.archiveCtx };
-    if (ext === "docx")      await renderDocx(source, host);
+    if (ext === "docx")      await renderDocx(source, host, doc);
     else if (ext === "doc")  await renderDocLegacy(source, host, doc);   // 구형 바이너리 Word — 글자만 뽑는 간이 미리보기
     else if (ext === "pptx") await renderPptx(source, host, options);
     else if (ext === "hwp" || ext === "hwpx") await renderHwp(source, ext, host);

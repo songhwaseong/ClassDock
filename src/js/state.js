@@ -284,8 +284,13 @@ const DEFAULT_APP_SETTINGS = {
   //   공용 컴퓨터에서는 앞사람 검색어가 보일 수 있어 끌 수 있게 두었다.
   // autoOpenFirstFile: 폴더·압축을 열 때 안에 있던 첫 파일을 바로 띄울지. 꺼 두면 사이드바만 펼쳐지고
   //   본문에는 "파일을 고르세요" 안내가 뜬다 — 원치 않는 파일이 열리며 화면이 튀는 걸 막는다.
+  // officeReplaceAttached: 오피스 찾아 바꾸기가 본문 밖(Word 머리말·꼬리말·각주, PPT 발표자 노트)까지
+  //   건드릴지. 기본은 본문만 — 머리말·노트는 본문 화면에서 안 보이는 곳이라, 켜진 줄 모르고 바꾸면
+  //   바뀐 사실조차 볼 수 없다. 꺼 두어도 "머리말 3곳은 안 바꿨어요" 로 개수를 알려 준다.
+  // officeReplaceTracked: 변경 내용 추적이 켜진 문서도 바꿀지. 기본은 건너뛴다 —
+  //   이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아, 검토 중인 문서라면 이력을 믿을 수 없게 된다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
-  searchHistory: true, autoOpenFirstFile: false,
+  searchHistory: true, autoOpenFirstFile: false, officeReplaceAttached: false, officeReplaceTracked: false,
   screensaver: { enabled: false, idleMin: 5, sound: false },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },

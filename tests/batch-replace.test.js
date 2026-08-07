@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, "../src/js/batch-replace.js"
 // window.document 를 주지 않아 브라우저 전용 블록(모달·DOM)은 건너뛰고 순수 코어만 로드한다.
 const context = { window: undefined };
 vm.runInNewContext(
-  source + "\nthis.api = { batchEscapeRegExp, batchBuildMatcher, batchReplacementString, batchComputeReplacement, batchDetectDominantEol, batchRememberDocTextFormat, batchIsTargetDoc, batchIsVisibleDoc, batchRestoreUndoEntry, batchRememberSavedEntries, batchApplyButtonModel };",
+  source + "\nthis.api = { batchEscapeRegExp, batchBuildMatcher, batchReplacementString, batchComputeReplacement, batchDetectDominantEol, batchRememberDocTextFormat, batchIsTargetDoc, batchOfficeKind, batchChangeLabel, batchOutsideSummary, batchIsVisibleDoc, batchRestoreUndoEntry, batchRememberSavedEntries, batchApplyButtonModel };",
   context
 );
 const api = context.api;
@@ -167,4 +167,45 @@ test("단일 실행 버튼은 미리보기 전후에 역할과 문구가 바뀐�
     label: "바꾸고 저장 (2개 파일 · 5곳)"
   });
   assert.doesNotMatch(source, /const previewBtn\s*=/);
+});
+
+/* ---------- Word·PowerPoint 합류 ---------- */
+
+test("docx·pptx 는 텍스트 대상이 아니라 별도 통로로 잡힌다", () => {
+  const docx = { id: 1, name: "안내문.docx", kind: "office" };
+  const pptx = { id: 2, name: "수업.pptx", kind: "office" };
+  const text = { id: 3, name: "메모.txt", kind: "office", savedText: "가" };
+  assert.equal(api.batchOfficeKind(docx), "docx");
+  assert.equal(api.batchOfficeKind(pptx), "pptx");
+  assert.equal(api.batchOfficeKind(text), null);
+  // 텍스트 판정은 오피스 확장자를 자연히 걸러내므로 두 갈래가 겹치지 않는다.
+  assert.equal(api.batchIsTargetDoc(docx, (d) => /\.(txt|md)$/i.test(d.name)), false);
+});
+
+test("오피스 문서라도 PDF·노트북·잠긴 참고 문서는 대상이 아니다", () => {
+  assert.equal(api.batchOfficeKind({ name: "a.docx", kind: "pdf" }), null);
+  assert.equal(api.batchOfficeKind({ name: "a.pptx", notebookModel: {} }), null);
+  assert.equal(api.batchOfficeKind({ name: "a.docx" }, () => true), null);
+  assert.equal(api.batchOfficeKind({ name: "a.doc" }), null);      // 구형 .doc 은 읽기 전용 유지
+  assert.equal(api.batchOfficeKind({ name: "a.ppt" }), null);      // 구형 .ppt 도 마찬가지
+});
+
+test("미리보기 이름표: 텍스트는 줄 번호, Word 는 파트+문단, PPT 는 이름표만", () => {
+  assert.equal(api.batchChangeLabel({ line: 12 }), "12");
+  assert.equal(api.batchChangeLabel({ para: 3, label: "문단", numbered: true }), "문단 3");
+  assert.equal(api.batchChangeLabel({ para: 2, label: "머리말", numbered: true }), "머리말 2");
+  // 슬라이드는 파트 이름이 이미 번호를 품고 있어 문단 번호를 덧붙이지 않는다.
+  assert.equal(api.batchChangeLabel({ para: 2, label: "슬라이드 3", numbered: false }), "슬라이드 3");
+  assert.equal(api.batchChangeLabel({ para: 1 }), "문단 1");
+  assert.equal(api.batchChangeLabel(null), "");
+});
+
+test("바꾸지 않은 곳은 같은 이름끼리 합쳐 숫자로 알린다", () => {
+  assert.equal(api.batchOutsideSummary([]), "");
+  assert.equal(api.batchOutsideSummary(null), "");
+  assert.equal(api.batchOutsideSummary([{ label: "머리말", count: 2 }]), "머리말 2곳");
+  assert.equal(
+    api.batchOutsideSummary([{ label: "머리말", count: 2 }, { label: "꼬리말", count: 1 }, { label: "머리말", count: 3 }]),
+    "머리말 5곳 · 꼬리말 1곳");
+  assert.equal(api.batchOutsideSummary([{ label: "메모", count: 0 }]), "");
 });

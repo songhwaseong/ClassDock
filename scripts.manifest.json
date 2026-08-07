@@ -42,6 +42,8 @@
     "notebook-pdf-export.js",
     "notebook-cells.js",
     "office-doc-viewers.js",
+    "office-replace.js",
+    "docx-editor.js",
     "spreadsheet-viewer.js",
     "spreadsheet-chart.js",
     "pptx-viewer.js",
@@ -124,6 +126,8 @@
       "name": "document-editors",
       "scripts": [
         "office-doc-viewers.js",
+        "office-replace.js",
+        "docx-editor.js",
         "spreadsheet-viewer.js",
         "spreadsheet-chart.js",
         "pptx-viewer.js",
@@ -236,9 +240,18 @@
       "documents.js",
       "code-viewer.js"
     ],
+    "office-replace.js": [
+      "core.js",
+      "lazy.js"
+    ],
+    "docx-editor.js": [
+      "office-replace.js",
+      "office-doc-viewers.js"
+    ],
     "batch-replace.js": [
       "documents.js",
-      "code-viewer.js"
+      "code-viewer.js",
+      "office-replace.js"
     ],
     "table-export.js": [
       "documents.js",
@@ -295,6 +308,15 @@
     ]
   },
   "moduleBoundaries": [
+    {
+      "name": "office-replace",
+      "file": "office-replace.js",
+      "publicApi": "MNOfficeReplace",
+      "consumers": [
+        "docx-editor.js",
+        "batch-replace.js"
+      ]
+    },
     {
       "name": "lazy-vendor",
       "file": "lazy.js",
