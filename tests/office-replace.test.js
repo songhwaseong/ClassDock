@@ -757,3 +757,107 @@ test("병합 표와 중첩 표는 기존 구조를 보존하며 위험한 축 �
   assert.match(api.officeTableStructureEdit(nested,
     { kind: "row-delete", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /다른 표/);
 });
+
+test("선택 셀의 가로·세로 정렬만 바꾸고 다른 셀 문단은 그대로 둔다", () => {
+  let result = api.officeTableFormatEdit(SIMPLE_TABLE,
+    { kind: "horizontal", value: "center", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 }).horizontal, "center");
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 2 }).horizontal, "left");
+  assert.match(result.xml, /<w:pPr><w:jc w:val="center"\/><\/w:pPr><w:r><w:t>A/);
+
+  result = api.officeTableFormatEdit(result.xml,
+    { kind: "vertical", value: "bottom", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 }).vertical, "bottom");
+});
+
+test("셀 배경과 네 면 테두리를 적용하고 다시 지울 수 있다", () => {
+  let xml = api.officeTableFormatEdit(SIMPLE_TABLE,
+    { kind: "fill", value: "#A1B2C3", tableIndex: 1, rowIndex: 2, cellIndex: 2 }).xml;
+  xml = api.officeTableFormatEdit(xml,
+    { kind: "border", value: "112233", tableIndex: 1, rowIndex: 2, cellIndex: 2 }).xml;
+  let format = api.officeTableCellFormat(xml, { tableIndex: 1, rowIndex: 2, cellIndex: 2 });
+  assert.equal(format.fill, "A1B2C3");
+  assert.equal(format.borderColor, "112233");
+  assert.equal((xml.match(/w:color="112233"/g) || []).length, 4);
+
+  xml = api.officeTableFormatEdit(xml,
+    { kind: "fill", value: "", tableIndex: 1, rowIndex: 2, cellIndex: 2 }).xml;
+  xml = api.officeTableFormatEdit(xml,
+    { kind: "border", value: "", tableIndex: 1, rowIndex: 2, cellIndex: 2 }).xml;
+  format = api.officeTableCellFormat(xml, { tableIndex: 1, rowIndex: 2, cellIndex: 2 });
+  assert.equal(format.fill, "FFFFFF");
+  assert.equal(format.borderColor, "000000");
+});
+
+test("열 너비는 모든 행의 tcW와 tblGrid를 함께 바꾸고 행 높이는 선택 행만 바꾼다", () => {
+  let result = api.officeTableFormatEdit(SIMPLE_TABLE,
+    { kind: "column-width", delta: 240, tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 }).width, 1240);
+  assert.equal((result.xml.match(/w:tcW w:w="1240"/g) || []).length, 2);
+  assert.match(result.xml, /w:gridCol w:w="1240"/);
+
+  result = api.officeTableFormatEdit(result.xml,
+    { kind: "row-height", delta: 120, tableIndex: 1, rowIndex: 2, cellIndex: 1 });
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 2, cellIndex: 1 }).height, 480);
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 }).height, 360);
+});
+
+test("병합 표의 열 너비와 중첩 표의 셀 서식은 안전하게 제한한다", () => {
+  const merged = "<w:body><w:tbl>" + tableRow([tableCell("합침", '<w:gridSpan w:val="2"/>')]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableFormatEdit(merged,
+    { kind: "column-width", delta: 240, tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /병합/);
+
+  const nested = "<w:body><w:tbl>" + tableRow(["<w:tc>" + para(run("바깥")) + "<w:tbl>" +
+    tableRow([tableCell("안쪽")]) + "</w:tbl></w:tc>"]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableFormatEdit(nested,
+    { kind: "fill", value: "FFFF00", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /다른 표/);
+});
+
+test("선택 셀의 모든 글자 조각에 글꼴·크기·굵게를 적용하고 기존 run 서식을 보존한다", () => {
+  const richCell = "<w:tc><w:p>" + run("가", "<w:rPr><w:i/></w:rPr>") + run("나") + "</w:p></w:tc>";
+  const table = "<w:body><w:tbl>" + tableRow([richCell, tableCell("다")]) + "</w:tbl></w:body>";
+  let result = api.officeTableFormatEdit(table,
+    { kind: "font", value: "맑은 고딕", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  result = api.officeTableFormatEdit(result.xml,
+    { kind: "font-size", value: 14, tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  result = api.officeTableFormatEdit(result.xml,
+    { kind: "bold", value: true, tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  const format = api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(format.font, "맑은 고딕");
+  assert.equal(format.fontSize, 14);
+  assert.equal(format.bold, true);
+  assert.equal((result.xml.match(/w:eastAsia="맑은 고딕"/g) || []).length, 2);
+  assert.equal((result.xml.match(/<w:sz w:val="28"\/>/g) || []).length, 2);
+  assert.equal((result.xml.match(/<w:b\/>/g) || []).length, 2);
+  assert.match(result.xml, /<w:rPr><w:i\/><w:rFonts/); // 기존 기울임은 남는다
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 2 }).font, "");
+});
+
+test("굵게 해제는 상속에 다시 켜지지 않도록 명시적인 0으로 기록한다", () => {
+  const boldTable = "<w:body><w:tbl>" + tableRow([
+    "<w:tc><w:p>" + run("굵게", "<w:rPr><w:b/><w:bCs/></w:rPr>") + "</w:p></w:tc>"
+  ]) + "</w:tbl></w:body>";
+  const result = api.officeTableFormatEdit(boldTable,
+    { kind: "bold", value: false, tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.equal(api.officeTableCellFormat(result.xml, { tableIndex: 1, rowIndex: 1, cellIndex: 1 }).bold, false);
+  assert.match(result.xml, /<w:b w:val="0"\/>/);
+  assert.match(result.xml, /<w:bCs w:val="0"\/>/);
+});
+
+test("표 밖의 선택 문단에도 글꼴·크기·굵게를 적용한다", () => {
+  const xml = "<w:body>" + para(run("제목", "<w:rPr><w:u/></w:rPr>")) + para(run("본문")) + "</w:body>";
+  let result = api.officeParagraphFormatEdit(xml,
+    { kind: "font", value: "바탕", paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml,
+    { kind: "font-size", value: 18, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml,
+    { kind: "bold", value: true, paragraphIndex: 1 });
+  assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }),
+    { font: "바탕", fontSize: 18, bold: true });
+  assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 2 }),
+    { font: "", fontSize: 11, bold: false });
+  assert.match(result.xml, /<w:rPr><w:u\/><w:rFonts/); // 밑줄은 보존한다
+});

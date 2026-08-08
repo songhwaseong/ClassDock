@@ -552,6 +552,310 @@ function officeTableStructureEdit(xml, action){
   return { xml: officeApplyEdits(source, edits), changed: true, reason: "", kind, edits, selection };
 }
 
+// 요소의 맨 앞 속성 컨테이너(pPr/tcPr/trPr)에 자식 속성 하나를 추가·교체·삭제한다.
+// 속성 컨테이너를 시작 부분에서만 찾는 이유는 텍스트 상자·중첩 표 안의 pPr/tcPr를 바깥
+// 요소의 속성으로 잘못 집지 않기 위해서다.
+function officeSetWordProperty(ownerXml, ownerName, propsName, childName, childXml){
+  const source = String(ownerXml || "");
+  const open = source.match(new RegExp("^<((?:[A-Za-z_][\\w.-]*:)?)" + ownerName + "(?:\\s[^>]*)?/?>", "i"));
+  if (!open) return source;
+  const ns = open[1] || "w:";
+  const wanted = String(childXml || "");
+  if (/\/>$/.test(open[0])){
+    if (!wanted) return source;
+    return open[0].replace(/\/>$/, ">") + "<" + ns + propsName + ">" + wanted + "</" + ns + propsName + ">" +
+      "</" + ns + ownerName + ">";
+  }
+
+  const rest = source.slice(open[0].length);
+  const propsRe = new RegExp("^([\\s\\r\\n]*)(<(?:[A-Za-z_][\\w.-]*:)?" + propsName +
+    "(?:\\s[^>]*)?(?:/>|>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?" + propsName + "\\s*>))", "i");
+  const propsMatch = rest.match(propsRe);
+  if (!propsMatch){
+    if (!wanted) return source;
+    return source.slice(0, open[0].length) + "<" + ns + propsName + ">" + wanted + "</" + ns + propsName + ">" + rest;
+  }
+
+  const propsXml = propsMatch[2];
+  const childRe = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + childName +
+    "(?:\\s[^>]*)?(?:/>|>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?" + childName + "\\s*>)", "i");
+  let nextProps;
+  if (childRe.test(propsXml)) nextProps = propsXml.replace(childRe, wanted);
+  else if (!wanted) nextProps = propsXml;
+  else if (/\/>$/.test(propsXml)) nextProps = propsXml.replace(/\/>$/, ">") + wanted + "</" + ns + propsName + ">";
+  else nextProps = propsXml.replace(new RegExp("</(?:[A-Za-z_][\\w.-]*:)?" + propsName + "\\s*>$", "i"),
+    wanted + "</" + ns + propsName + ">");
+  return source.slice(0, open[0].length) + propsMatch[1] + nextProps + rest.slice(propsMatch[0].length);
+}
+
+function officeWordVal(xml, localName, attrName){
+  const source = String(xml || "");
+  const re = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + localName + "\\s[^>]*(?:[A-Za-z_][\\w.-]*:)?" +
+    (attrName || "val") + "=\"([^\"]*)\"", "i");
+  const match = source.match(re);
+  return match ? match[1] : "";
+}
+
+function officeColorValue(value, fallback){
+  const normalized = String(value || "").replace(/^#/, "").toUpperCase();
+  return /^[0-9A-F]{6}$/.test(normalized) ? normalized : (fallback || "");
+}
+
+function officeAttributeEscape(value){
+  return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function officeWordToggle(xml, localName){
+  const source = String(xml || "");
+  const re = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + localName + "(?:\\s([^>]*))?/?>", "i");
+  const match = source.match(re);
+  if (!match) return false;
+  const value = (match[1] || "").match(/(?:[A-Za-z_][\w.-]*:)?val="([^"]*)"/i);
+  return !value || !/^(0|false|off|no)$/i.test(value[1]);
+}
+
+function officeCellTextRunRanges(cellXml){
+  const source = String(cellXml || "");
+  const textboxes = officeTextboxRanges(source);
+  return officeBalancedRanges(source, "r").filter(range =>
+    !textboxes.some(box => range.start >= box.start && range.start < box.end) &&
+    /<(?:[A-Za-z_][\w.-]*:)?t(?:\s[^>]*)?>/i.test(source.slice(range.start, range.end)));
+}
+
+function officeTextFormatOfXml(ownerXml){
+  const source = String(ownerXml || "");
+  const firstRange = officeCellTextRunRanges(source)[0];
+  const firstRun = firstRange ? source.slice(firstRange.start, firstRange.end) : "";
+  const rPr = officeTableOwnProperties(firstRun, "rPr");
+  const fontSize = Number(officeWordVal(rPr, "sz", "val"));
+  return {
+    font: officeWordVal(rPr, "rFonts", "eastAsia") || officeWordVal(rPr, "rFonts", "ascii") ||
+      officeWordVal(rPr, "rFonts", "hAnsi") || "",
+    fontSize: fontSize > 0 ? fontSize / 2 : 11,
+    bold: officeWordToggle(rPr, "b")
+  };
+}
+
+function officeApplyTextRunFormat(ownerXml, kind, value){
+  const source = String(ownerXml || "");
+  const runRanges = officeCellTextRunRanges(source);
+  if (!runRanges.length) return { xml: source, changed: false, reason: "서식을 적용할 글자가 없어요." };
+  let font = "", halfPoints = 0, enabled = false;
+  if (kind === "font"){
+    font = String(value || "").trim().slice(0, 100);
+    if (!font) return { xml: source, changed: false, reason: "적용할 글꼴을 골라 주세요." };
+  } else if (kind === "font-size"){
+    const requestedPoints = Number(value);
+    if (!Number.isFinite(requestedPoints) || requestedPoints <= 0)
+      return { xml: source, changed: false, reason: "적용할 글자 크기를 골라 주세요." };
+    halfPoints = Math.round(Math.max(1, Math.min(200, requestedPoints)) * 2);
+  } else if (kind === "bold"){
+    enabled = value === true || String(value).toLowerCase() === "true" || String(value) === "1";
+  } else return { xml: source, changed: false, reason: "알 수 없는 글자 서식 편집이에요." };
+
+  const edits = [];
+  for (const range of runRanges){
+    let runXml = source.slice(range.start, range.end);
+    const prefix = (runXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)r/i) || [])[1] || "w:";
+    if (kind === "font"){
+      const escaped = officeAttributeEscape(font);
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "rFonts",
+        "<" + prefix + "rFonts " + prefix + "ascii=\"" + escaped + "\" " + prefix +
+        "hAnsi=\"" + escaped + "\" " + prefix + "eastAsia=\"" + escaped + "\" " + prefix +
+        "cs=\"" + escaped + "\"/>");
+    } else if (kind === "font-size"){
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "sz",
+        "<" + prefix + "sz " + prefix + "val=\"" + halfPoints + "\"/>");
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "szCs",
+        "<" + prefix + "szCs " + prefix + "val=\"" + halfPoints + "\"/>");
+    } else {
+      const direct = enabled ? "<" + prefix + "b/>" : "<" + prefix + "b " + prefix + "val=\"0\"/>";
+      const complex = enabled ? "<" + prefix + "bCs/>" : "<" + prefix + "bCs " + prefix + "val=\"0\"/>";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "b", direct);
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "bCs", complex);
+    }
+    edits.push({ start: range.start, end: range.end, value: runXml });
+  }
+  const xml = officeApplyEdits(source, edits);
+  return { xml, changed: xml !== source, reason: xml === source ? "같은 서식이에요." : "" };
+}
+
+function officeTableGridColumnXml(source, table, cellIndex){
+  const tableXml = source.slice(table.start, table.end);
+  const gridRange = officeBalancedRanges(tableXml, "tblGrid")[0];
+  if (!gridRange) return null;
+  const gridXml = tableXml.slice(gridRange.start, gridRange.end);
+  const cols = [];
+  const re = /<(?:[A-Za-z_][\w.-]*:)?gridCol(?:\s[^>]*)?\/?>/gi;
+  let match;
+  while ((match = re.exec(gridXml))) cols.push({ start: match.index, end: re.lastIndex, xml: match[0] });
+  const col = cols[Math.max(0, Math.min(cols.length - 1, cellIndex - 1))];
+  return col ? { ...col, absoluteStart: table.start + gridRange.start + col.start,
+    absoluteEnd: table.start + gridRange.start + col.end } : null;
+}
+
+function officeTableCellFormat(xml, request){
+  const source = String(xml || "");
+  const target = request || {};
+  const table = officeTableOutline(source)[(Number(target.tableIndex) || 0) - 1];
+  const row = table && table.rows[(Number(target.rowIndex) || 0) - 1];
+  const cell = row && row.cells[(Number(target.cellIndex) || 0) - 1];
+  if (!table || !row || !cell) return null;
+  const cellXml = source.slice(cell.start, cell.end);
+  const tcPr = officeTableOwnProperties(cellXml, "tcPr");
+  const firstParaRange = officeParagraphRanges(cellXml)[0];
+  const firstPara = firstParaRange ? cellXml.slice(firstParaRange.start, firstParaRange.end) : "";
+  const pPr = officeTableOwnProperties(firstPara, "pPr");
+  const fill = officeWordVal(tcPr, "shd", "fill");
+  const borderColor = officeWordVal(tcPr, "top", "color") || officeWordVal(tcPr, "left", "color") ||
+    officeWordVal(tcPr, "bottom", "color") || officeWordVal(tcPr, "right", "color");
+  const gridCol = officeTableGridColumnXml(source, table, cell.index);
+  const cellWidth = Number(officeWordVal(tcPr, "tcW", "w")) ||
+    Number(gridCol && officeWordVal(gridCol.xml, "gridCol", "w")) || 1440;
+  const rowXml = source.slice(row.start, row.end);
+  const textFormat = officeTextFormatOfXml(cellXml);
+  return {
+    horizontal: officeWordVal(pPr, "jc", "val") || "left",
+    vertical: officeWordVal(tcPr, "vAlign", "val") || "top",
+    fill: officeColorValue(fill, "FFFFFF"),
+    borderColor: officeColorValue(borderColor, "000000"),
+    width: cellWidth,
+    height: Number(officeWordVal(officeTableOwnProperties(rowXml, "trPr"), "trHeight", "val")) || 360,
+    font: textFormat.font,
+    fontSize: textFormat.fontSize,
+    bold: textFormat.bold,
+    canResizeColumn: table.rectangular && !table.hasNestedTable && !table.hasVerticalMerge && !table.hasGridSpan,
+    canFormat: !table.hasNestedTable
+  };
+}
+
+function officeSetGridColumnWidth(source, table, cellIndex, width){
+  const col = officeTableGridColumnXml(source, table, cellIndex);
+  if (!col) return null;
+  const prefix = (col.xml.match(/^<((?:[A-Za-z_][\w.-]*:)?)gridCol/i) || [])[1] || "w:";
+  let value = col.xml;
+  const widthRe = /\s(?:[A-Za-z_][\w.-]*:)?w="[^"]*"/i;
+  if (widthRe.test(value)) value = value.replace(widthRe, " " + prefix + "w=\"" + width + "\"");
+  else value = value.replace(/\/>$/, " " + prefix + "w=\"" + width + "\"/>");
+  return { start: col.absoluteStart, end: col.absoluteEnd, value };
+}
+
+/* 선택 셀의 정렬·색·테두리·글자 서식, 선택 행 높이, 단순 표의 선택 열 너비를 바꾼다.
+   kind: horizontal | vertical | fill | border | font | font-size | bold | column-width | row-height */
+function officeTableFormatEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const tableIndex = Number(request.tableIndex) || 0;
+  const rowIndex = Number(request.rowIndex) || 0;
+  const cellIndex = Number(request.cellIndex) || 0;
+  const table = officeTableOutline(source)[tableIndex - 1];
+  const row = table && table.rows[rowIndex - 1];
+  const cell = row && row.cells[cellIndex - 1];
+  if (!table || !row || !cell) return { xml: source, changed: false, reason: "표 셀 위치를 찾지 못했어요." };
+  if (table.hasNestedTable) return { xml: source, changed: false, reason: "표 안에 다른 표가 들어 있어 셀 서식을 바꿀 수 없어요." };
+
+  const kind = String(request.kind || "");
+  const edits = [];
+  const cellXml = source.slice(cell.start, cell.end);
+  const cellPrefix = (cellXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)tc/i) || [])[1] || "w:";
+  if (kind === "horizontal"){
+    const value = /^(left|center|right|both)$/.test(String(request.value || "")) ? String(request.value) : "left";
+    const paraEdits = [];
+    for (const range of officeParagraphRanges(cellXml)){
+      const paraXml = cellXml.slice(range.start, range.end);
+      const prefix = (paraXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)p/i) || [])[1] || "w:";
+      const next = officeSetWordProperty(paraXml, "p", "pPr", "jc",
+        "<" + prefix + "jc " + prefix + "val=\"" + value + "\"/>");
+      paraEdits.push({ start: range.start, end: range.end, value: next });
+    }
+    edits.push({ start: cell.start, end: cell.end, value: officeApplyEdits(cellXml, paraEdits) });
+  } else if (kind === "vertical"){
+    const value = /^(top|center|bottom)$/.test(String(request.value || "")) ? String(request.value) : "top";
+    edits.push({ start: cell.start, end: cell.end, value: officeSetWordProperty(cellXml, "tc", "tcPr", "vAlign",
+      "<" + cellPrefix + "vAlign " + cellPrefix + "val=\"" + value + "\"/>") });
+  } else if (kind === "fill"){
+    const color = officeColorValue(request.value, "");
+    const child = color ? "<" + cellPrefix + "shd " + cellPrefix + "val=\"clear\" " + cellPrefix +
+      "color=\"auto\" " + cellPrefix + "fill=\"" + color + "\"/>" : "";
+    edits.push({ start: cell.start, end: cell.end,
+      value: officeSetWordProperty(cellXml, "tc", "tcPr", "shd", child) });
+  } else if (kind === "border"){
+    const color = officeColorValue(request.value, "");
+    let child = "";
+    if (color){
+      const edge = (name) => "<" + cellPrefix + name + " " + cellPrefix + "val=\"single\" " + cellPrefix +
+        "sz=\"8\" " + cellPrefix + "space=\"0\" " + cellPrefix + "color=\"" + color + "\"/>";
+      child = "<" + cellPrefix + "tcBorders>" + edge("top") + edge("left") + edge("bottom") + edge("right") +
+        "</" + cellPrefix + "tcBorders>";
+    }
+    edits.push({ start: cell.start, end: cell.end,
+      value: officeSetWordProperty(cellXml, "tc", "tcPr", "tcBorders", child) });
+  } else if (kind === "font"){
+    const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
+    if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
+    edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
+  } else if (kind === "font-size"){
+    const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
+    if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
+    edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
+  } else if (kind === "bold"){
+    const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
+    if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
+    edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
+  } else if (kind === "column-width"){
+    if (!table.rectangular || table.hasVerticalMerge || table.hasGridSpan)
+      return { xml: source, changed: false, reason: "병합되거나 셀 수가 다른 표에서는 열 너비를 바꿀 수 없어요." };
+    const current = officeTableCellFormat(source, { tableIndex, rowIndex, cellIndex });
+    const width = Math.max(240, Math.min(14400, current.width + (Number(request.delta) || 0)));
+    for (const eachRow of table.rows){
+      const eachCell = eachRow.cells[cellIndex - 1];
+      const eachXml = source.slice(eachCell.start, eachCell.end);
+      const prefix = (eachXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)tc/i) || [])[1] || "w:";
+      edits.push({ start: eachCell.start, end: eachCell.end,
+        value: officeSetWordProperty(eachXml, "tc", "tcPr", "tcW",
+          "<" + prefix + "tcW " + prefix + "w=\"" + width + "\" " + prefix + "type=\"dxa\"/>") });
+    }
+    const gridEdit = officeSetGridColumnWidth(source, table, cellIndex, width);
+    if (gridEdit) edits.push(gridEdit);
+  } else if (kind === "row-height"){
+    const rowXml = source.slice(row.start, row.end);
+    const prefix = (rowXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)tr/i) || [])[1] || "w:";
+    const current = Number(officeWordVal(officeTableOwnProperties(rowXml, "trPr"), "trHeight", "val")) || 360;
+    const height = Math.max(120, Math.min(14400, current + (Number(request.delta) || 0)));
+    edits.push({ start: row.start, end: row.end, value: officeSetWordProperty(rowXml, "tr", "trPr", "trHeight",
+      "<" + prefix + "trHeight " + prefix + "val=\"" + height + "\" " + prefix + "hRule=\"atLeast\"/>") });
+  } else return { xml: source, changed: false, reason: "알 수 없는 표 서식 편집이에요." };
+
+  const out = officeApplyEdits(source, edits);
+  return { xml: out, changed: out !== source, reason: out === source ? "같은 서식이에요." : "", kind, edits,
+    selection: { tableIndex, rowIndex, cellIndex } };
+}
+
+function officeParagraphTextFormat(xml, request){
+  const source = String(xml || "");
+  const index = Number(request && request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[index - 1];
+  if (!item) return null;
+  return officeTextFormatOfXml(source.slice(item.start, item.end));
+}
+
+function officeParagraphFormatEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const paragraphIndex = Number(request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return { xml: source, changed: false, reason: "문단 위치를 찾지 못했어요." };
+  const paragraphXml = source.slice(item.start, item.end);
+  const formatted = officeApplyTextRunFormat(paragraphXml, String(request.kind || ""), request.value);
+  if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
+  return {
+    xml: officeApplyEdits(source, [{ start: item.start, end: item.end, value: formatted.xml }]),
+    changed: true, reason: "", kind: String(request.kind || ""),
+    selection: { paragraphIndex }
+  };
+}
+
 /* ---------- 문단 편집(Phase 2, 설계: docs/워드-문단편집-설계.md) ---------- */
 
 /* 파트 XML → 편집 화면이 쓸 문단 목록.
@@ -1026,6 +1330,7 @@ if (typeof module === "object" && module.exports){
     officeExpandReplacement, officeOpenTagFor, officeApplyRangesToSegments, officePlanParagraphEdits,
     officeParagraphTextEdits, officeInlineTextKey, officeInlineMapVerify, officeParagraphMarkerPlan,
     officeTableOutline, officeBlankTableCellXml, officeBlankTableRowXml, officeTableStructureEdit,
+    officeTableCellFormat, officeTableFormatEdit, officeParagraphTextFormat, officeParagraphFormatEdit,
     officeParagraphOutline, officeNewParagraphXml, officeParagraphStructureEdits,
     officeParagraphEditPlan, officeApplyEdits,
     officeReplacePartXml, officeCountMatches, officeCountParagraphMatches, officeCountTextboxMatches,

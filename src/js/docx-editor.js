@@ -438,9 +438,9 @@ const MNDocxEditor = (() => {
         state.structureDirty = !!saved.structureDirty;
         state.tableChanges = Array.isArray(saved.tableChanges) ? saved.tableChanges : [];
         state.bakedPlan = saved.bakedPlan || { changed: 0, inserted: 0, removed: 0 };
-        state.activeTableRow = null;
+        state.activeTableRow = state.activeTextRow = null;
         if (previousVersion !== state.xmlVersion && state.mode === "inline" && typeof state.renderDraft === "function")
-          state.renderDraft().catch(e => console.warn("표 편집 되돌리기 화면 갱신 실패:", e));
+          state.renderDraft().catch(e => console.warn("문서 서식 편집 되돌리기 화면 갱신 실패:", e));
         else redraw(state);
       },
       isEqual: (a, b) => a === b,
@@ -573,14 +573,88 @@ const MNDocxEditor = (() => {
       tableButtons.set(kind, button);
       return button;
     };
+    const tableToolSeparator = () => {
+      const separator = document.createElement("span");
+      separator.className = "docx-table-tools-separator";
+      separator.setAttribute("aria-hidden", "true");
+      return separator;
+    };
+    const tableSelect = (labelText, values) => {
+      const label = document.createElement("label");
+      label.className = "docx-table-format-field";
+      const caption = document.createElement("span");
+      caption.textContent = labelText;
+      const select = document.createElement("select");
+      for (const [value, text] of values){
+        const option = document.createElement("option");
+        option.value = value; option.textContent = text;
+        select.appendChild(option);
+      }
+      label.append(caption, select);
+      return { label, select };
+    };
+    const horizontalTool = tableSelect("가로", [["left", "왼쪽"], ["center", "가운데"], ["right", "오른쪽"]]);
+    const verticalTool = tableSelect("세로", [["top", "위"], ["center", "가운데"], ["bottom", "아래"]]);
+    const tableColor = (labelText, value, titleText) => {
+      const label = document.createElement("label");
+      label.className = "docx-table-color-field";
+      label.title = titleText;
+      const caption = document.createElement("span");
+      caption.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = "color"; input.value = value;
+      input.setAttribute("aria-label", titleText);
+      label.append(caption, input);
+      return { label, input };
+    };
+    const fillTool = tableColor("배경", "#ffffff", "선택한 셀의 배경색");
+    const borderTool = tableColor("선", "#000000", "선택한 셀의 테두리색");
+    const textTools = document.createElement("div");
+    textTools.className = "docx-text-tools";
+    textTools.hidden = true;
+    const textToolsLabel = document.createElement("span");
+    textToolsLabel.className = "docx-table-tools-label";
+    const fontTool = tableSelect("글꼴", [["", "선택"], ["맑은 고딕", "맑은 고딕"], ["굴림", "굴림"],
+      ["돋움", "돋움"], ["바탕", "바탕"], ["궁서", "궁서"], ["Arial", "Arial"], ["Calibri", "Calibri"],
+      ["Times New Roman", "Times New Roman"], ["Courier New", "Courier New"]]);
+    const fontSizeTool = tableSelect("크기", [["", "선택"], ...[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36]
+      .map(value => [String(value), String(value)])]);
+    const boldTextButton = document.createElement("button");
+    boldTextButton.type = "button";
+    boldTextButton.className = "docx-para-btn docx-text-bold";
+    boldTextButton.textContent = "B";
+    boldTextButton.title = "선택한 문단을 굵게 켜기/끄기";
+    boldTextButton.setAttribute("aria-pressed", "false");
+    textTools.append(textToolsLabel, fontTool.label, fontSizeTool.label, boldTextButton);
+    const formatButtons = [];
+    const formatButton = (kind, label, titleText, value) => {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "docx-para-btn";
+      button.dataset.tableFormat = kind;
+      if (value !== undefined) button.dataset.tableValue = String(value);
+      button.dataset.normalTitle = titleText;
+      button.textContent = label; button.title = titleText;
+      formatButtons.push(button);
+      return button;
+    };
     tableTools.append(tableToolsLabel,
       tableButton("row-add-above", "행↑＋", "선택한 셀 위에 빈 행 추가"),
       tableButton("row-add-below", "행↓＋", "선택한 셀 아래에 빈 행 추가"),
       tableButton("row-delete", "행 삭제", "선택한 셀이 있는 행 삭제"),
       tableButton("column-add-left", "열←＋", "선택한 셀 왼쪽에 빈 열 추가"),
       tableButton("column-add-right", "열→＋", "선택한 셀 오른쪽에 빈 열 추가"),
-      tableButton("column-delete", "열 삭제", "선택한 셀이 있는 열 삭제"));
-    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, status, tableTools);
+      tableButton("column-delete", "열 삭제", "선택한 셀이 있는 열 삭제"),
+      tableToolSeparator(), horizontalTool.label, verticalTool.label,
+      fillTool.label, formatButton("fill", "적용", "선택한 셀에 배경색 적용"),
+      formatButton("fill", "지움", "선택한 셀의 배경색 지우기", ""),
+      borderTool.label, formatButton("border", "적용", "선택한 셀 네 면에 테두리 적용"),
+      formatButton("border", "지움", "선택한 셀의 테두리 지우기", ""),
+      tableToolSeparator(),
+      formatButton("column-width", "열−", "선택한 열 너비 줄이기", -240),
+      formatButton("column-width", "열＋", "선택한 열 너비 늘리기", 240),
+      formatButton("row-height", "높이−", "선택한 행 높이 줄이기", -120),
+      formatButton("row-height", "높이＋", "선택한 행 높이 늘리기", 120));
+    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, status, textTools, tableTools);
     host.insertBefore(bar, previewEl);
 
     const note = document.createElement("div");
@@ -598,7 +672,7 @@ const MNDocxEditor = (() => {
       mode: "inline", nodeByKey: new Map(), inlineLockedKeys: new Set(),
       saving: false, rendering: false, history: null,
       structureDirty: false, tableChanges: [], bakedPlan: { changed: 0, inserted: 0, removed: 0 },
-      xmlVersion: 0, xmlVersionSeq: 0, xmlVersions: new Map(), activeTableRow: null,
+      xmlVersion: 0, xmlVersionSeq: 0, xmlVersions: new Map(), activeTableRow: null, activeTextRow: null,
       setStatus: (text) => { status.textContent = text; },
       onDirty: () => {
         const dirty = rowsDirty(state.rows) || state.structureDirty;
@@ -619,10 +693,29 @@ const MNDocxEditor = (() => {
     doc.docxEditor = state;
 
     const INLINE_NOTE = "✎ 제자리 편집 — 보이는 그대로 고쳐요. Enter 로 문단을 나누고, 빈 문단에서 Backspace 로 지웁니다. " +
-      "표 셀을 누르면 위쪽에서 행·열을 더하거나 지울 수 있습니다. 글자 서식(굵게·색·크기)은 바뀌지 않고, " +
+      "문단을 누르면 글꼴·크기·굵게를, 표 셀을 누르면 행·열과 셀 정렬·색·테두리·크기를 편집할 수 있습니다. " +
       "손대지 않은 곳은 저장할 때 바이트 그대로 남습니다.";
     const LIST_NOTE = "✎ 문단 목록 — 글자만 고치는 간이 표시예요. 글꼴·여백·쪽 나눔은 실제 문서와 다르게 보입니다. " +
       "손대지 않은 곳의 서식은 저장할 때 그대로 유지됩니다.";
+
+    const updateTextTools = (row) => {
+      state.activeTextRow = row || null;
+      const active = state.activeTextRow;
+      textTools.hidden = !state.editing || state.mode !== "inline" || !active;
+      if (!active) return;
+      textToolsLabel.textContent = active.inTable ? "셀 글자" : (active.index ? "문단 " + active.index : "새 문단");
+      const format = active.index ? officeParagraphTextFormat(state.xml, { paragraphIndex: active.index }) : null;
+      const fontValue = format ? format.font : "";
+      const sizeValue = format ? String(format.fontSize) : "";
+      fontTool.select.value = Array.from(fontTool.select.options).some(option => option.value === fontValue) ? fontValue : "";
+      fontSizeTool.select.value = Array.from(fontSizeTool.select.options).some(option => option.value === sizeValue) ? sizeValue : "";
+      const disabled = state.rendering;
+      fontTool.select.disabled = fontSizeTool.select.disabled = boldTextButton.disabled = disabled;
+      const bold = !!(format && format.bold);
+      boldTextButton.classList.toggle("active", bold);
+      boldTextButton.setAttribute("aria-pressed", bold ? "true" : "false");
+      boldTextButton.title = "선택한 문단을 굵게 켜기/끄기";
+    };
 
     const updateTableTools = (row) => {
       state.activeTableRow = row && row.inTable ? row : null;
@@ -643,6 +736,22 @@ const MNDocxEditor = (() => {
         else if (!rowAction && (active.tableHasVerticalMerge || active.tableHasGridSpan)) button.title = "병합된 셀이 있어 열 구조는 바꿀 수 없어요.";
         else button.title = button.dataset.normalTitle;
       }
+      const format = officeTableCellFormat(state.xml, {
+        tableIndex: active.tableIndex, rowIndex: active.tableRow, cellIndex: active.tableCell
+      });
+      horizontalTool.select.value = format ? format.horizontal : "left";
+      verticalTool.select.value = format ? format.vertical : "top";
+      fillTool.input.value = "#" + (format ? format.fill : "FFFFFF");
+      borderTool.input.value = "#" + (format ? format.borderColor : "000000");
+      horizontalTool.select.disabled = verticalTool.select.disabled = state.rendering || nested;
+      fillTool.input.disabled = borderTool.input.disabled = state.rendering || nested;
+      for (const button of formatButtons){
+        const widthAction = button.dataset.tableFormat === "column-width";
+        button.disabled = state.rendering || nested || (widthAction && columnBlocked);
+        if (nested) button.title = "표 안에 다른 표가 들어 있어 셀 서식은 바꿀 수 없어요.";
+        else if (widthAction && columnBlocked) button.title = "병합되거나 열 수가 다른 표에서는 열 너비를 바꿀 수 없어요.";
+        else button.title = button.dataset.normalTitle;
+      }
     };
 
     const syncToggle = () => {
@@ -656,6 +765,7 @@ const MNDocxEditor = (() => {
       previewEl.hidden = state.editing && !inline;      // 제자리 편집은 미리보기를 그대로 쓴다
       previewEl.classList.toggle("docx-inline-editing", state.editing && inline);
       undoBtn.hidden = redoBtn.hidden = saveBtn.hidden = !state.editing;
+      updateTextTools(state.activeTextRow);
       updateTableTools(state.activeTableRow);
     };
     syncToggle();
@@ -671,6 +781,7 @@ const MNDocxEditor = (() => {
         node.contentEditable = "false";
         node.classList.remove("docx-inline-para", "touched", "removed", "locked");
       }
+      updateTextTools(null);
       syncToggle();
       console.warn("제자리 편집을 쓰지 못해 문단 목록으로 물러납니다:", reason);
       if (typeof toast === "function")
@@ -682,8 +793,16 @@ const MNDocxEditor = (() => {
       "row-add-above": "표 행 추가", "row-add-below": "표 행 추가", "row-delete": "표 행 삭제",
       "column-add-left": "표 열 추가", "column-add-right": "표 열 추가", "column-delete": "표 열 삭제"
     };
+    const tableFormatLabel = {
+      horizontal: "셀 가로 정렬", vertical: "셀 세로 정렬", fill: "셀 배경",
+      border: "셀 테두리", "column-width": "표 열 너비", "row-height": "표 행 높이"
+    };
+    const textFormatLabel = { font: "문단 글꼴", "font-size": "문단 글자 크기", bold: "문단 굵게" };
     const tableRowForSelection = (selection) => state.rows.find(row => row.inTable &&
       row.tableIndex === selection.tableIndex && row.tableRow === selection.rowIndex && row.tableCell === selection.cellIndex);
+    const rowForSelection = (selection) => selection && selection.paragraphIndex
+      ? state.rows.find(row => row.index === selection.paragraphIndex)
+      : tableRowForSelection(selection || {});
 
     // 현재의 미저장 document.xml 을 임시 DOCX 로 그린다. 저장은 누르지 않았으므로 source.bytes는
     // 그대로 두고, 화면만 새 표 구조로 바꾼 뒤 문단을 다시 정확히 연결한다.
@@ -691,8 +810,9 @@ const MNDocxEditor = (() => {
       if (state.rendering || !state.source) return;
       state.rendering = true;
       state.onHistory();
+      updateTextTools(state.activeTextRow);
       updateTableTools(state.activeTableRow);
-      status.textContent = "표를 다시 그리는 중…";
+      status.textContent = "문서를 다시 그리는 중…";
       try {
         const draftBytes = await MNOfficeReplace.build(state.source.bytes, { "word/document.xml": state.xml });
         await docxRenderInto(draftBytes, previewEl);
@@ -703,18 +823,20 @@ const MNDocxEditor = (() => {
           redraw(state);
           return;
         }
-        const selected = selection ? tableRowForSelection(selection) : null;
+        const selected = selection ? rowForSelection(selection) : null;
         state.focusKey = selected ? selected.key : 0;
         redraw(state);
+        updateTextTools(selected);
         updateTableTools(selected);
       } catch(e){
-        console.warn("표 편집 미리보기 갱신 실패:", e);
-        state.fallBackToList("표를 다시 그리지 못했어요.");
+        console.warn("문서 편집 미리보기 갱신 실패:", e);
+        state.fallBackToList("문서를 다시 그리지 못했어요.");
         redraw(state);
       } finally {
         state.rendering = false;
         state.onHistory();
         state.onDirty();
+        updateTextTools(state.activeTextRow);
         updateTableTools(state.activeTableRow);
       }
     };
@@ -754,17 +876,105 @@ const MNDocxEditor = (() => {
       await state.renderDraft(result.selection);
     };
 
+    const applyTableFormat = async (kind, value) => {
+      const active = state.activeTableRow;
+      if (!active || state.rendering || state.saving || state.mode !== "inline") return;
+      if (state.history) state.history.commit();
+      const paragraphPlan = officeParagraphEditPlan(state.xml, state.rows);
+      if (paragraphPlan.skipped || paragraphPlan.refused.length){
+        toastOnce("먼저 저장할 수 없는 문단 편집을 정리해 주세요.");
+        return;
+      }
+      const withText = officeApplyEdits(state.xml, paragraphPlan.edits);
+      const request = {
+        kind, tableIndex: active.tableIndex, rowIndex: active.tableRow, cellIndex: active.tableCell
+      };
+      if (kind === "column-width" || kind === "row-height") request.delta = Number(value) || 0;
+      else request.value = value;
+      const result = officeTableFormatEdit(withText, request);
+      if (!result.changed){ toastOnce(result.reason || "표 서식을 바꾸지 못했어요."); return; }
+      state.xml = result.xml;
+      state.xmlVersion = ++state.xmlVersionSeq;
+      state.xmlVersions.set(state.xmlVersion, state.xml);
+      state.rows = rowsFromOutline(officeParagraphOutline(state.xml));
+      state.structureDirty = true;
+      state.tableChanges.push(tableFormatLabel[kind] || "표 서식 변경");
+      state.bakedPlan.changed += paragraphPlan.changed || 0;
+      state.bakedPlan.inserted += paragraphPlan.inserted || 0;
+      state.bakedPlan.removed += paragraphPlan.removed || 0;
+      state.activeTableRow = null;
+      state.onDirty();
+      state.commitNow();
+      await state.renderDraft(result.selection);
+    };
+
+    const applyTextFormat = async (kind, value) => {
+      const active = state.activeTextRow;
+      if (!active || state.rendering || state.saving || state.mode !== "inline") return;
+      if (state.history) state.history.commit();
+      const visibleRows = state.rows.filter(row => !row.removed);
+      const paragraphIndex = visibleRows.indexOf(active) + 1;
+      if (!paragraphIndex){ toastOnce("선택한 문단 위치를 찾지 못했어요."); return; }
+      const paragraphPlan = officeParagraphEditPlan(state.xml, state.rows);
+      if (paragraphPlan.skipped || paragraphPlan.refused.length){
+        toastOnce("먼저 저장할 수 없는 문단 편집을 정리해 주세요.");
+        return;
+      }
+      const withText = officeApplyEdits(state.xml, paragraphPlan.edits);
+      const result = officeParagraphFormatEdit(withText, { kind, value, paragraphIndex });
+      if (!result.changed){ toastOnce(result.reason || "글자 서식을 바꾸지 못했어요."); return; }
+      state.xml = result.xml;
+      state.xmlVersion = ++state.xmlVersionSeq;
+      state.xmlVersions.set(state.xmlVersion, state.xml);
+      state.rows = rowsFromOutline(officeParagraphOutline(state.xml));
+      state.structureDirty = true;
+      state.tableChanges.push(textFormatLabel[kind] || "문단 글자 서식");
+      state.bakedPlan.changed += paragraphPlan.changed || 0;
+      state.bakedPlan.inserted += paragraphPlan.inserted || 0;
+      state.bakedPlan.removed += paragraphPlan.removed || 0;
+      state.activeTextRow = state.activeTableRow = null;
+      state.onDirty();
+      state.commitNow();
+      await state.renderDraft(result.selection);
+    };
+
     for (const [kind, button] of tableButtons){
       button.addEventListener("mousedown", (e) => e.preventDefault());
       button.addEventListener("click", () => { applyTableAction(kind); });
     }
-    const selectTableCell = (e) => {
+    horizontalTool.select.addEventListener("change", () => applyTableFormat("horizontal", horizontalTool.select.value));
+    verticalTool.select.addEventListener("change", () => applyTableFormat("vertical", verticalTool.select.value));
+    for (const button of formatButtons){
+      button.addEventListener("mousedown", (e) => e.preventDefault());
+      button.addEventListener("click", () => {
+        const kind = button.dataset.tableFormat;
+        let value = button.dataset.tableValue;
+        if (value === undefined && kind === "fill") value = fillTool.input.value;
+        if (value === undefined && kind === "border") value = borderTool.input.value;
+        applyTableFormat(kind, value);
+      });
+    }
+    fontTool.select.addEventListener("change", () => {
+      if (fontTool.select.value) applyTextFormat("font", fontTool.select.value);
+    });
+    fontSizeTool.select.addEventListener("change", () => {
+      if (fontSizeTool.select.value) applyTextFormat("font-size", fontSizeTool.select.value);
+    });
+    boldTextButton.addEventListener("mousedown", (e) => e.preventDefault());
+    boldTextButton.addEventListener("click", () => {
+      const active = state.activeTextRow;
+      const format = active && active.index ? officeParagraphTextFormat(state.xml, { paragraphIndex: active.index }) : null;
+      applyTextFormat("bold", !(format && format.bold));
+    });
+    const selectDocumentParagraph = (e) => {
       if (!state.editing || state.mode !== "inline") return;
       const node = e.target && e.target.closest ? e.target.closest("[data-key]") : null;
-      updateTableTools(inlineRowOf(state, node));
+      const row = inlineRowOf(state, node);
+      updateTextTools(row);
+      updateTableTools(row);
     };
-    previewEl.addEventListener("focusin", selectTableCell);
-    previewEl.addEventListener("click", selectTableCell);
+    previewEl.addEventListener("focusin", selectDocumentParagraph);
+    previewEl.addEventListener("click", selectDocumentParagraph);
 
     undoBtn.addEventListener("click", () => { if (state.history) state.history.undo(); });
     redoBtn.addEventListener("click", () => { if (state.history) state.history.redo(); });

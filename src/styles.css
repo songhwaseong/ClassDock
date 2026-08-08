@@ -1994,11 +1994,23 @@
   .docx-editmode-btn.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9)}
   .docx-editmode-btn:disabled{opacity:.5;cursor:default}
   .docx-editor-status{font-size:12px;color:var(--muted)}
-  .docx-table-tools{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:auto;
+  .docx-text-tools,.docx-table-tools{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;
     padding-left:10px;border-left:1px solid var(--border)}
-  .docx-table-tools[hidden]{display:none}
+  .docx-text-tools{margin-left:auto}
+  .docx-table-tools{margin-left:0}
+  .docx-text-tools[hidden],.docx-table-tools[hidden]{display:none}
   .docx-table-tools-label{margin-right:3px;color:var(--muted);font-size:11.5px;white-space:nowrap}
-  .docx-table-tools .docx-para-btn{padding:5px 7px;white-space:nowrap}
+  .docx-text-tools .docx-para-btn,.docx-table-tools .docx-para-btn{padding:5px 7px;white-space:nowrap}
+  .docx-text-bold{font-weight:800;min-width:28px}
+  .docx-text-bold.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9);background:rgba(91,157,217,.12)}
+  .docx-table-tools-separator{width:1px;height:22px;margin:0 3px;background:var(--border)}
+  .docx-table-format-field,.docx-table-color-field{display:inline-flex;align-items:center;gap:3px;
+    color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .docx-table-format-field select{max-width:72px;padding:4px 5px;border:1px solid var(--border);
+    border-radius:6px;background:var(--field,transparent);color:var(--ink);font:inherit;font-size:11.5px}
+  .docx-table-color-field input[type="color"]{width:28px;height:26px;padding:2px;border:1px solid var(--border);
+    border-radius:6px;background:transparent;cursor:pointer}
+  .docx-table-format-field select:disabled,.docx-table-color-field input:disabled{opacity:.5;cursor:default}
   .docx-edit-note{margin-bottom:10px}
   .docx-para-list{display:flex;flex-direction:column;gap:2px;padding:18px}
   .docx-para{display:grid;grid-template-columns:74px 1fr 58px;gap:10px;align-items:start;
