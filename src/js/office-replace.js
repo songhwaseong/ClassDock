@@ -331,7 +331,8 @@ function officeInlineTextKey(text){ return String(text == null ? "" : text).repl
 /* 미리보기에서 뽑은 본문 문단 글자 목록 ↔ officeParagraphOutline 이 매기는 순서가 같은 것을
    가리키는지 확인한다. 순번이 어긋난 채 저장하면 사용자가 고친 것과 다른 문단이 바뀌고,
    화면상으로는 멀쩡해 보여 알아채지도 못한다. 그래서 붙일 때 전부 맞춰 보고 하나라도
-   어긋나면 제자리 편집을 아예 켜지 않는다(목록 화면으로 물러난다).
+   어긋나면 순번으로 붙이지 않는다. 화면 쪽에서는 임시 북마크로 정확한 위치를 한 번 더
+   확인하고, 그것도 실패할 때만 목록 화면으로 물러난다.
 
    대응이 깨질 수 있는 자리: mc:AlternateContent(Choice·Fallback 양쪽에 <w:p> 가 있다),
    <w:sdt>, altChunk, 렌더러가 그리지 못한 요소. 전부 여기서 걸린다.
@@ -348,6 +349,209 @@ function officeInlineMapVerify(domTexts, outline){
   return { ok: true, at: -1, reason: "" };
 }
 
+/* document.xml 의 본문 문단마다 임시 북마크를 넣는다. docx-preview 는 북마크 시작을
+   <span id="…"> 로 그대로 그리므로, 글자·문단 수가 달라도 화면 <p> 와 XML 문단을
+   순번 추측 없이 정확히 이을 수 있다. 반환된 XML 은 편집 화면을 다시 그리는 데만 쓰고
+   저장 바이트에는 절대 넣지 않는다.
+
+   북마크 시작/끝을 문단 맨 앞에 붙여 내용은 감싸지 않는다. 따라서 Word 필드·도형·표
+   구조에는 손대지 않고, 빈 <w:p/> 만 정상 여닫는 태그로 편다. */
+function officeParagraphMarkerPlan(xml, rawPrefix){
+  const source = String(xml || "");
+  const prefix = (String(rawPrefix || "_mn_docx_para_").replace(/[^A-Za-z0-9_]/g, "_") || "_mn_docx_para_");
+  let nextId = 1;
+  const idRe = /<(?:[A-Za-z_][\w.-]*:)?bookmarkStart\s[^>]*(?:[A-Za-z_][\w.-]*:)?id="(\d+)"/gi;
+  let idMatch;
+  while ((idMatch = idRe.exec(source))) nextId = Math.max(nextId, Number(idMatch[1]) + 1);
+
+  const edits = [], markers = [];
+  for (const [at, range] of officeParagraphRanges(source).entries()){
+    const paraXml = source.slice(range.start, range.end);
+    const open = paraXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)p(?:\s[^>]*)?\/?>/i);
+    if (!open) continue;
+    const ns = open[1] || "w:";
+    const name = prefix + (at + 1);
+    const id = nextId++;
+    const marker = "<" + ns + "bookmarkStart " + ns + "id=\"" + id + "\" " + ns + "name=\"" + name + "\"/>" +
+      "<" + ns + "bookmarkEnd " + ns + "id=\"" + id + "\"/>";
+    if (/\/>$/.test(open[0])){
+      const expanded = open[0].replace(/\/>$/, ">") + marker + "</" + ns + "p>";
+      edits.push({ start: range.start, end: range.end, value: expanded });
+    } else {
+      edits.push({ start: range.innerStart, end: range.innerStart, value: marker });
+    }
+    markers.push({ index: at + 1, name });
+  }
+  return { xml: officeApplyEdits(source, edits), edits, markers };
+}
+
+/* ---------- Word 표 구조 편집 ---------- */
+
+// Word 본문의 바깥쪽 표 → 행 → 셀 범위. 중첩 표는 바깥 셀에 속한 것으로 표시하고 구조 편집은
+// 막는다. 중첩 표까지 평평하게 좌표를 매기면 바깥 표의 열 삭제가 안쪽 셀을 지울 수 있기 때문이다.
+function officeTableOutline(xml){
+  const source = String(xml || "");
+  return officeBalancedRanges(source, "tbl").map((tableRange, tableAt) => {
+    const tableXml = source.slice(tableRange.start, tableRange.end);
+    const tableOpen = tableXml.match(/^<(?:[A-Za-z_][\w.-]*:)?tbl(?:\s[^>]*)?>/i);
+    const tableInner = tableOpen ? tableXml.slice(tableOpen[0].length, tableXml.lastIndexOf("</")) : tableXml;
+    const hasNestedTable = /<(?:[A-Za-z_][\w.-]*:)?tbl(?:\s[^>]*)?>/i.test(tableInner);
+    const rows = officeBalancedRanges(tableXml, "tr").map((rowRange, rowAt) => {
+      const rowStart = tableRange.start + rowRange.start;
+      const rowEnd = tableRange.start + rowRange.end;
+      const rowXml = source.slice(rowStart, rowEnd);
+      const cells = officeBalancedRanges(rowXml, "tc").map((cellRange, cellAt) => {
+        const start = rowStart + cellRange.start;
+        const end = rowStart + cellRange.end;
+        const cellXml = source.slice(start, end);
+        const tcPr = cellXml.match(/<(?:[A-Za-z_][\w.-]*:)?tcPr(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?tcPr\s*>/i);
+        const span = tcPr && tcPr[0].match(/<(?:[A-Za-z_][\w.-]*:)?gridSpan\s[^>]*(?:[A-Za-z_][\w.-]*:)?val="(\d+)"/i);
+        const merge = tcPr && tcPr[0].match(/<(?:[A-Za-z_][\w.-]*:)?vMerge(?:\s[^>]*)?\/?>/i);
+        const mergeVal = merge && merge[0].match(/(?:[A-Za-z_][\w.-]*:)?val="([^"]+)"/i);
+        return {
+          index: cellAt + 1, start, end,
+          gridSpan: Math.max(1, span ? Number(span[1]) || 1 : 1),
+          vMerge: merge ? (mergeVal ? mergeVal[1] : "continue") : ""
+        };
+      });
+      return { index: rowAt + 1, start: rowStart, end: rowEnd, cells };
+    });
+    const hasVerticalMerge = rows.some(row => row.cells.some(cell => !!cell.vMerge));
+    // gridSpan 외에 구형 hMerge, 행 앞뒤의 가상 격자도 열 좌표가 단순하지 않다.
+    const hasGridSpan = rows.some(row => row.cells.some(cell => cell.gridSpan > 1)) ||
+      /<(?:[A-Za-z_][\w.-]*:)?(?:hMerge|gridBefore|gridAfter)(?:\s[^>]*)?\/?>/i.test(tableXml);
+    const cellCounts = rows.map(row => row.cells.length);
+    const rectangular = !!rows.length && cellCounts.every(count => count === cellCounts[0]);
+    return {
+      index: tableAt + 1, start: tableRange.start, end: tableRange.end, rows,
+      hasNestedTable, hasVerticalMerge, hasGridSpan, rectangular,
+      columnCount: rectangular && cellCounts.length ? cellCounts[0] : 0
+    };
+  });
+}
+
+function officeTableOwnProperties(xml, localName){
+  const source = String(xml || "");
+  const re = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + localName + "(?:\\s[^>]*)?>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?" + localName + "\\s*>", "i");
+  const match = source.match(re);
+  return match ? match[0] : "";
+}
+
+// 셀의 너비·테두리·음영·정렬은 물려받고 내용은 빈 문단 하나로 만든다.
+function officeBlankTableCellXml(cellXml){
+  const source = String(cellXml || "");
+  const open = source.match(/^<((?:[A-Za-z_][\w.-]*:)?)tc(?:\s[^>]*)?>/i);
+  const ns = open ? (open[1] || "w:") : "w:";
+  const tcOpen = open ? open[0] : "<" + ns + "tc>";
+  const tcPr = officeTableOwnProperties(source, "tcPr");
+  const firstPara = officeParagraphRanges(source)[0];
+  const paraXml = firstPara ? source.slice(firstPara.start, firstPara.end) : "";
+  const pPr = officeTableOwnProperties(paraXml, "pPr");
+  return tcOpen + tcPr + "<" + ns + "p>" + pPr + "</" + ns + "p></" + ns + "tc>";
+}
+
+// 선택한 행의 높이·셀 모양을 물려받되 반복 머리글 속성은 새 행에 복제하지 않는다.
+function officeBlankTableRowXml(rowXml){
+  const source = String(rowXml || "");
+  const open = source.match(/^<((?:[A-Za-z_][\w.-]*:)?)tr(?:\s[^>]*)?>/i);
+  const ns = open ? (open[1] || "w:") : "w:";
+  const trOpen = open ? open[0] : "<" + ns + "tr>";
+  let trPr = officeTableOwnProperties(source, "trPr");
+  trPr = trPr.replace(/<(?:[A-Za-z_][\w.-]*:)?tblHeader(?:\s[^>]*)?\/>/gi, "")
+             .replace(/<(?:[A-Za-z_][\w.-]*:)?tblHeader(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?tblHeader\s*>/gi, "");
+  const cells = officeBalancedRanges(source, "tc").map(range => officeBlankTableCellXml(source.slice(range.start, range.end)));
+  return trOpen + trPr + cells.join("") + "</" + ns + "tr>";
+}
+
+function officeTableGridEdit(source, table, cellIndex, kind){
+  const tableXml = source.slice(table.start, table.end);
+  const gridRange = officeBalancedRanges(tableXml, "tblGrid")[0];
+  if (!gridRange) return null;                         // tblGrid 없는 문서도 Word가 열 수 있으므로 셀만 고친다
+  const gridXml = tableXml.slice(gridRange.start, gridRange.end);
+  const cols = [];
+  const re = /<(?:[A-Za-z_][\w.-]*:)?gridCol(?:\s[^>]*)?\/?>/gi;
+  let match;
+  while ((match = re.exec(gridXml))) cols.push({ start: match.index, end: re.lastIndex, xml: match[0] });
+  if (!cols.length) return null;
+  const at = Math.max(0, Math.min(cols.length - 1, cellIndex - 1));
+  if (kind === "column-delete")
+    return { start: table.start + gridRange.start + cols[at].start,
+      end: table.start + gridRange.start + cols[at].end, value: "" };
+  const before = kind === "column-add-left";
+  const pos = table.start + gridRange.start + (before ? cols[at].start : cols[at].end);
+  return { start: pos, end: pos, value: cols[at].xml };
+}
+
+/* 행·열 한 동작을 document.xml 편집으로 만든다.
+   kind: row-add-above | row-add-below | row-delete |
+         column-add-left | column-add-right | column-delete
+   병합 표는 기존 병합을 보존하기 위해 영향받는 축의 구조 편집을 거부한다. */
+function officeTableStructureEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const tables = officeTableOutline(source);
+  const tableIndex = Number(request.tableIndex) || 0;
+  const rowIndex = Number(request.rowIndex) || 0;
+  const cellIndex = Number(request.cellIndex) || 0;
+  const table = tables[tableIndex - 1];
+  if (!table) return { xml: source, changed: false, reason: "표 위치를 찾지 못했어요." };
+  const row = table.rows[rowIndex - 1];
+  if (!row) return { xml: source, changed: false, reason: "표 행 위치를 찾지 못했어요." };
+  const cell = row.cells[cellIndex - 1];
+  if (!cell) return { xml: source, changed: false, reason: "표 셀 위치를 찾지 못했어요." };
+  if (table.hasNestedTable)
+    return { xml: source, changed: false, reason: "표 안에 다른 표가 들어 있어 구조는 바꿀 수 없어요." };
+
+  const kind = String(request.kind || "");
+  const rowKind = /^row-/.test(kind);
+  const columnKind = /^column-/.test(kind);
+  if (!rowKind && !columnKind) return { xml: source, changed: false, reason: "알 수 없는 표 편집이에요." };
+  if (rowKind && table.hasVerticalMerge)
+    return { xml: source, changed: false, reason: "세로 병합된 셀이 있어 행 구조는 바꿀 수 없어요. 병합은 그대로 유지됩니다." };
+  if (columnKind && (table.hasVerticalMerge || table.hasGridSpan))
+    return { xml: source, changed: false, reason: "병합된 셀이 있어 열 구조는 바꿀 수 없어요. 병합은 그대로 유지됩니다." };
+  if (columnKind && !table.rectangular)
+    return { xml: source, changed: false, reason: "행마다 셀 수가 달라 열 구조는 바꿀 수 없어요." };
+
+  const edits = [];
+  let selection = { tableIndex, rowIndex, cellIndex };
+  if (kind === "row-add-above" || kind === "row-add-below"){
+    const blank = officeBlankTableRowXml(source.slice(row.start, row.end));
+    const before = kind === "row-add-above";
+    const pos = before ? row.start : row.end;
+    edits.push({ start: pos, end: pos, value: blank });
+    selection = { tableIndex, rowIndex: before ? rowIndex : rowIndex + 1, cellIndex };
+  } else if (kind === "row-delete"){
+    if (table.rows.length <= 1)
+      return { xml: source, changed: false, reason: "표의 마지막 행은 지울 수 없어요." };
+    edits.push({ start: row.start, end: row.end, value: "" });
+    const nextRowIndex = Math.min(rowIndex, table.rows.length - 1);
+    const nextRow = rowIndex < table.rows.length ? table.rows[rowIndex] : table.rows[rowIndex - 2];
+    selection = { tableIndex, rowIndex: nextRowIndex, cellIndex: Math.min(cellIndex, nextRow.cells.length) };
+  } else if (kind === "column-add-left" || kind === "column-add-right"){
+    const before = kind === "column-add-left";
+    for (const eachRow of table.rows){
+      const eachCell = eachRow.cells[cellIndex - 1];
+      const pos = before ? eachCell.start : eachCell.end;
+      edits.push({ start: pos, end: pos, value: officeBlankTableCellXml(source.slice(eachCell.start, eachCell.end)) });
+    }
+    const grid = officeTableGridEdit(source, table, cellIndex, kind);
+    if (grid) edits.push(grid);
+    selection = { tableIndex, rowIndex, cellIndex: before ? cellIndex : cellIndex + 1 };
+  } else if (kind === "column-delete"){
+    if (table.columnCount <= 1)
+      return { xml: source, changed: false, reason: "표의 마지막 열은 지울 수 없어요." };
+    for (const eachRow of table.rows){
+      const eachCell = eachRow.cells[cellIndex - 1];
+      edits.push({ start: eachCell.start, end: eachCell.end, value: "" });
+    }
+    const grid = officeTableGridEdit(source, table, cellIndex, kind);
+    if (grid) edits.push(grid);
+    selection = { tableIndex, rowIndex, cellIndex: Math.min(cellIndex, table.columnCount - 1) };
+  }
+  return { xml: officeApplyEdits(source, edits), changed: true, reason: "", kind, edits, selection };
+}
+
 /* ---------- 문단 편집(Phase 2, 설계: docs/워드-문단편집-설계.md) ---------- */
 
 /* 파트 XML → 편집 화면이 쓸 문단 목록.
@@ -361,9 +565,15 @@ function officeParagraphOutline(xml){
   // 표도 셀 안에 표가 들어갈 수 있어 짝을 맞춰 훑는다 — 안쪽 </w:tbl> 에서 끊으면
   // 그 뒤 문단이 "표 밖" 으로 잘못 보여 지울 수 있게 되고, 그러면 셀 구조가 깨진다.
   const tableRanges = officeBalancedRanges(source, "tbl");
+  const tables = officeTableOutline(source);
+  const tableCells = [];
+  for (const table of tables)
+    for (const row of table.rows)
+      for (const cell of row.cells) tableCells.push({ table, row, cell });
 
   const items = [];
   let index = 0;
+  let tableCellAt = 0;
   for (const range of officeParagraphRanges(source)){
     index++;
     const paraXml = source.slice(range.start, range.end);
@@ -371,6 +581,10 @@ function officeParagraphOutline(xml){
     // 스타일은 이 문단 자신의 pPr 안에서만 찾는다 — 도형 안 문단의 스타일을 바깥 이름표로 쓰면 안 된다.
     const ownPr = paraXml.match(/<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?pPr\s*>/i);
     const styleMatch = ownPr ? ownPr[0].match(/<(?:[A-Za-z_][\w.-]*:)?pStyle\s[^>]*w:val="([^"]*)"/i) : null;
+    while (tableCellAt < tableCells.length && tableCells[tableCellAt].cell.end <= range.start) tableCellAt++;
+    const candidateCell = tableCells[tableCellAt];
+    const tableCell = candidateCell && range.start >= candidateCell.cell.start && range.start < candidateCell.cell.end
+      ? candidateCell : null;
     items.push({
       index,
       start: range.start,
@@ -378,6 +592,15 @@ function officeParagraphOutline(xml){
       text: model.text,
       style: styleMatch ? styleMatch[1] : "",
       inTable: tableRanges.some(box => range.start >= box.start && range.start < box.end),
+      tableIndex: tableCell ? tableCell.table.index : 0,
+      tableRow: tableCell ? tableCell.row.index : 0,
+      tableCell: tableCell ? tableCell.cell.index : 0,
+      tableHasNested: tableCell ? tableCell.table.hasNestedTable : false,
+      tableHasVerticalMerge: tableCell ? tableCell.table.hasVerticalMerge : false,
+      tableHasGridSpan: tableCell ? tableCell.table.hasGridSpan : false,
+      tableRectangular: tableCell ? tableCell.table.rectangular : false,
+      tableRowCount: tableCell ? tableCell.table.rows.length : 0,
+      tableColumnCount: tableCell ? tableCell.table.columnCount : 0,
       hasSectPr: /<(?:[A-Za-z_][\w.-]*:)?sectPr(?:\s[^>]*)?[>/]/i.test(paraXml),
       locked: model.segs.some(seg => seg.locked),
       // 도형이 든 문단은 글자를 고칠 수는 있어도 통째로 지우면 도형까지 사라진다 — 화면이 알려 준다.
@@ -801,7 +1024,8 @@ if (typeof module === "object" && module.exports){
     officeReplaceDecode, officeReplaceEscape, officeBalancedRanges, officeParagraphRanges,
     officeTextboxRanges, officeSkipRanges, officeParagraphModel,
     officeExpandReplacement, officeOpenTagFor, officeApplyRangesToSegments, officePlanParagraphEdits,
-    officeParagraphTextEdits, officeInlineTextKey, officeInlineMapVerify,
+    officeParagraphTextEdits, officeInlineTextKey, officeInlineMapVerify, officeParagraphMarkerPlan,
+    officeTableOutline, officeBlankTableCellXml, officeBlankTableRowXml, officeTableStructureEdit,
     officeParagraphOutline, officeNewParagraphXml, officeParagraphStructureEdits,
     officeParagraphEditPlan, officeApplyEdits,
     officeReplacePartXml, officeCountMatches, officeCountParagraphMatches, officeCountTextboxMatches,

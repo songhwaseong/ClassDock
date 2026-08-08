@@ -669,3 +669,91 @@ test("대조 열쇠는 공백을 다 지운 글자다", () => {
   assert.equal(api.officeInlineTextKey(" 가 \t나\n다 "), "가나다");
   assert.equal(api.officeInlineTextKey(null), "");
 });
+
+test("임시 문단 표시는 본문 문단마다 고유 북마크를 넣고 원문 글자는 그대로 둔다", () => {
+  const xml = "<w:body>" + para(run("첫째")) + "<w:tbl><w:tr><w:tc>" + para(run("셀")) +
+    "</w:tc></w:tr></w:tbl></w:body>";
+  const plan = api.officeParagraphMarkerPlan(xml, "_test_para_");
+  assert.deepEqual(plan.markers.map(item => item.name), ["_test_para_1", "_test_para_2"]);
+  assert.equal(api.officeParagraphOutline(plan.xml).map(item => item.text).join("|"), "첫째|셀");
+  assert.equal((plan.xml.match(/bookmarkStart/g) || []).length, 2);
+  assert.equal((plan.xml.match(/bookmarkEnd/g) || []).length, 2);
+});
+
+test("임시 문단 표시는 빈 축약 문단을 안전한 여닫는 태그로 편다", () => {
+  const plan = api.officeParagraphMarkerPlan("<w:body><w:p w:rsidR=\"1\"/></w:body>", "_empty_");
+  assert.match(plan.xml, /<w:p w:rsidR="1"><w:bookmarkStart/);
+  assert.match(plan.xml, /<w:bookmarkEnd[^>]*\/><\/w:p>/);
+  assert.equal(api.officeParagraphOutline(plan.xml).length, 1);
+});
+
+test("임시 문단 표시는 기존 북마크 다음 id를 써서 충돌하지 않는다", () => {
+  const xml = "<w:body>" + para('<w:bookmarkStart w:id="41" w:name="old"/>' + run("본문") + '<w:bookmarkEnd w:id="41"/>') + "</w:body>";
+  const plan = api.officeParagraphMarkerPlan(xml, "_next_");
+  assert.match(plan.xml, /bookmarkStart w:id="42" w:name="_next_1"/);
+});
+
+/* ---------- Word 표 행·열 구조 편집 ---------- */
+
+const tableCell = (text, pr = "") => "<w:tc>" + (pr ? "<w:tcPr>" + pr + "</w:tcPr>" : "") + para(run(text)) + "</w:tc>";
+const tableRow = (cells, pr = "") => "<w:tr>" + (pr ? "<w:trPr>" + pr + "</w:trPr>" : "") + cells.join("") + "</w:tr>";
+const SIMPLE_TABLE = "<w:body><w:tbl><w:tblGrid><w:gridCol w:w=\"1000\"/><w:gridCol w:w=\"2000\"/></w:tblGrid>" +
+  tableRow([tableCell("A", '<w:shd w:fill="FFFF00"/>'), tableCell("B")], "<w:tblHeader/>") +
+  tableRow([tableCell("C"), tableCell("D")]) + "</w:tbl></w:body>";
+
+test("표 윤곽이 문단에 표·행·셀 좌표를 정확히 붙인다", () => {
+  const tables = api.officeTableOutline(SIMPLE_TABLE);
+  assert.equal(tables.length, 1);
+  assert.deepEqual(tables[0].rows.map(row => row.cells.length), [2, 2]);
+  assert.equal(tables[0].rectangular, true);
+  assert.deepEqual(api.officeParagraphOutline(SIMPLE_TABLE).map(p => [p.tableIndex, p.tableRow, p.tableCell]),
+    [[1, 1, 1], [1, 1, 2], [1, 2, 1], [1, 2, 2]]);
+});
+
+test("행을 추가하면 셀 모양은 물려받고 글자와 반복 머리글은 비운다", () => {
+  const result = api.officeTableStructureEdit(SIMPLE_TABLE,
+    { kind: "row-add-below", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(api.officeParagraphOutline(result.xml).map(p => p.text), ["A", "B", "", "", "C", "D"]);
+  assert.equal((result.xml.match(/tblHeader/g) || []).length, 1);      // 원래 머리글에만 남는다
+  assert.equal((result.xml.match(/w:shd w:fill="FFFF00"/g) || []).length, 2);
+  assert.deepEqual(result.selection, { tableIndex: 1, rowIndex: 2, cellIndex: 1 });
+});
+
+test("행 삭제는 선택한 행만 지우고 마지막 행 삭제는 막는다", () => {
+  const result = api.officeTableStructureEdit(SIMPLE_TABLE,
+    { kind: "row-delete", tableIndex: 1, rowIndex: 1, cellIndex: 2 });
+  assert.deepEqual(api.officeParagraphOutline(result.xml).map(p => p.text), ["C", "D"]);
+  const oneRow = "<w:body><w:tbl>" + tableRow([tableCell("한 칸")]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableStructureEdit(oneRow,
+    { kind: "row-delete", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /마지막 행/);
+});
+
+test("열을 추가·삭제하면 모든 행과 tblGrid가 함께 바뀐다", () => {
+  const added = api.officeTableStructureEdit(SIMPLE_TABLE,
+    { kind: "column-add-right", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.deepEqual(api.officeParagraphOutline(added.xml).map(p => p.text), ["A", "", "B", "C", "", "D"]);
+  assert.equal((added.xml.match(/gridCol/g) || []).length, 3);
+  assert.deepEqual(added.selection, { tableIndex: 1, rowIndex: 1, cellIndex: 2 });
+
+  const removed = api.officeTableStructureEdit(SIMPLE_TABLE,
+    { kind: "column-delete", tableIndex: 1, rowIndex: 2, cellIndex: 2 });
+  assert.deepEqual(api.officeParagraphOutline(removed.xml).map(p => p.text), ["A", "C"]);
+  assert.equal((removed.xml.match(/gridCol/g) || []).length, 1);
+});
+
+test("병합 표와 중첩 표는 기존 구조를 보존하며 위험한 축 편집을 거부한다", () => {
+  const vertical = "<w:body><w:tbl>" + tableRow([tableCell("위", '<w:vMerge w:val="restart"/>'), tableCell("옆")]) +
+    tableRow([tableCell("", "<w:vMerge/>"), tableCell("아래")]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableStructureEdit(vertical,
+    { kind: "row-add-below", tableIndex: 1, rowIndex: 1, cellIndex: 2 }).reason, /세로 병합/);
+
+  const horizontal = "<w:body><w:tbl>" + tableRow([tableCell("합침", '<w:gridSpan w:val="2"/>')]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableStructureEdit(horizontal,
+    { kind: "column-add-right", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /병합된 셀/);
+
+  const nested = "<w:body><w:tbl>" + tableRow(["<w:tc>" + para(run("바깥")) + "<w:tbl>" +
+    tableRow([tableCell("안쪽")]) + "</w:tbl></w:tc>"]) + "</w:tbl></w:body>";
+  assert.match(api.officeTableStructureEdit(nested,
+    { kind: "row-delete", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /다른 표/);
+});

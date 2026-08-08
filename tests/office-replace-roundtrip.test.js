@@ -247,3 +247,21 @@ test("문단을 고치고 더하고 지워도 나머지 엔트리는 바이트�
   assert.match(doc, /<w:pStyle w:val="Title"\/>[\s\S]*<w:pStyle w:val="Title"\/>/);   // 새 문단이 스타일을 물려받았다
   assert.match(doc, /<w:t>2025년 1학기<\/w:t>/);          // 표 셀은 손 안 댐
 });
+
+test("표 행을 추가해 저장해도 document.xml 밖의 엔트리는 바이트까지 그대로다", async () => {
+  const { officeTableStructureEdit } = require("../src/js/office-replace.js");
+  const original = await makeDocx();
+  const before = await readAll(original);
+  const source = await MNOfficeReplace.read(new Blob([original]), "docx", {});
+  const result = officeTableStructureEdit(source.parts["word/document.xml"],
+    { kind: "row-add-below", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+
+  const after = await readAll(await MNOfficeReplace.build(original, { "word/document.xml": result.xml }));
+  for (const path of before.keys()){
+    if (path === "word/document.xml") continue;
+    assert.deepEqual(after.get(path), before.get(path), path + " 이 바뀌었다");
+  }
+  assert.equal((textOf(after, "word/document.xml").match(/<w:tr>/g) || []).length, 2);
+  assert.match(textOf(after, "word/document.xml"), /<w:tr><w:tc><w:p><\/w:p><\/w:tc><\/w:tr>/);
+});

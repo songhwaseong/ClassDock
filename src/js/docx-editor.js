@@ -35,6 +35,15 @@ const MNDocxEditor = (() => {
       original: item.text,
       style: item.style,
       inTable: item.inTable,
+      tableIndex: item.tableIndex || 0,
+      tableRow: item.tableRow || 0,
+      tableCell: item.tableCell || 0,
+      tableHasNested: !!item.tableHasNested,
+      tableHasVerticalMerge: !!item.tableHasVerticalMerge,
+      tableHasGridSpan: !!item.tableHasGridSpan,
+      tableRectangular: !!item.tableRectangular,
+      tableRowCount: item.tableRowCount || 0,
+      tableColumnCount: item.tableColumnCount || 0,
       hasSectPr: item.hasSectPr,
       hasTextbox: item.hasTextbox,
       locked: item.locked,
@@ -56,7 +65,11 @@ const MNDocxEditor = (() => {
   function makeNewRow(source, text){
     return {
       key: ++rowSeq, index: 0, text: String(text || ""), original: null,
-      style: source ? source.style : "", inTable: false, hasSectPr: false, hasTextbox: false,
+      style: source ? source.style : "", inTable: false,
+      tableIndex: 0, tableRow: 0, tableCell: 0, tableHasNested: false,
+      tableHasVerticalMerge: false, tableHasGridSpan: false, tableRectangular: false,
+      tableRowCount: 0, tableColumnCount: 0,
+      hasSectPr: false, hasTextbox: false,
       locked: false, removed: false, after: 0, touched: true
     };
   }
@@ -259,12 +272,14 @@ const MNDocxEditor = (() => {
     node.classList.toggle("removed", !!row.removed);
     node.classList.toggle("touched", !!row.touched);
     node.classList.toggle("locked", !!row.locked);
-    const editable = !row.removed && !row.locked;
+    const markerLocked = state.inlineLockedKeys && state.inlineLockedKeys.has(row.key);
+    const editable = !row.removed && !row.locked && !markerLocked;
     node.contentEditable = editable ? "true" : "false";
     node.spellcheck = false;
     // 상자 안 문단은 바깥이 편집 가능해도 따라 열리지 않게 못을 박는다(상자 글자는 v1 대상이 아니다).
     for (const inner of node.querySelectorAll("p")) inner.contentEditable = "false";
-    if (row.locked) node.title = "탭·줄바꿈이 든 문단이라 여기서는 고칠 수 없어요. 문단 목록에서 고쳐 주세요.";
+    if (markerLocked) node.title = "화면 글자와 저장할 문단이 달라 이 문단은 여기서 고칠 수 없어요.";
+    else if (row.locked) node.title = "탭·줄바꿈이 든 문단이라 여기서는 고칠 수 없어요. 문단 목록에서 고쳐 주세요.";
     else if (row.hasTextbox) node.title = "텍스트 상자가 딸린 문단이에요. 상자 안 글자는 고칠 수 없고, 이 문단을 지우면 상자도 사라져요.";
     else if (row.inTable) node.title = "표 안 문단이에요. 글자는 고칠 수 있지만 더하거나 지울 수 없어요.";
     else node.removeAttribute("title");
@@ -279,6 +294,9 @@ const MNDocxEditor = (() => {
     for (const row of state.rows){
       let node = state.nodeByKey.get(row.key);
       if (!node){
+        // 임시 북마크로도 화면에 나타나지 않은 원본 문단은 만들지 않는다. 숨은 XML 문단을
+        // 억지로 화면에 끼우면 표·페이지 구조가 오히려 바뀐다. 새 문단만 실제 DOM 을 만든다.
+        if (row.index) continue;
         // 새 문단은 바로 앞 문단을 껍데기만 복제한다 — 문단 서식(정렬·들여쓰기)이 이어지고,
         // run 서식은 따라오지 않는다. officeNewParagraphXml 이 pPr 만 물려받는 것과 같은 결.
         node = anchor ? anchor.cloneNode(false) : document.createElement("p");
@@ -291,7 +309,8 @@ const MNDocxEditor = (() => {
       inlinePrepareNode(state, row, node);
       // 글자를 통째로 갈아 끼우면 그 문단의 그림·텍스트 상자가 화면에서 사라진다(XML 에는 남지만
       // 화면이 거짓말을 하게 된다). 그런 문단은 화면을 그대로 두고 행 모델만 저장에 쓴다.
-      if (inlineCanRewrite(node) && inlineTextOf(node) !== row.text) node.textContent = row.text;
+      if (!(state.inlineLockedKeys && state.inlineLockedKeys.has(row.key)) &&
+          inlineCanRewrite(node) && inlineTextOf(node) !== row.text) node.textContent = row.text;
       anchor = node;
     }
     const alive = new Set(state.rows.map(row => row.key));
@@ -317,9 +336,56 @@ const MNDocxEditor = (() => {
     const check = officeInlineMapVerify(nodes.map(inlineTextOf), state.rows);
     if (!check.ok) return check;
     state.nodeByKey = new Map();
+    state.inlineLockedKeys = new Set();
     state.rows.forEach((row, i) => state.nodeByKey.set(row.key, nodes[i]));
     state.rows.forEach(row => inlinePrepareNode(state, row, state.nodeByKey.get(row.key)));
     return { ok: true };
+  }
+
+  /* 글자/개수 대조가 실패한 문서는 임시 북마크를 넣은 바이트로 미리보기만 한 번 다시 그린다.
+     docx-preview 가 북마크 이름을 span id 로 남기므로 표 병합·필드·렌더러 생략 문단이 있어도
+     실제 XML 문단을 정확히 찾는다. 임시 바이트는 저장하지 않고 marker span 도 곧바로 걷는다. */
+  async function inlineBindWithMarkers(state){
+    if (typeof officeParagraphMarkerPlan !== "function" || typeof docxRenderInto !== "function")
+      return { ok: false, reason: "문단 위치 표시 기능을 사용할 수 없어요." };
+    const prefix = "_mn_docx_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8) + "_";
+    const plan = officeParagraphMarkerPlan(state.xml, prefix);
+    if (!plan.markers.length) return { ok: false, reason: "표시할 문단이 없어요." };
+    try {
+      const markedBytes = await MNOfficeReplace.build(state.source.bytes, { "word/document.xml": plan.xml });
+      await docxRenderInto(markedBytes, state.previewEl);
+    } catch(e){
+      console.warn("문단 위치 표시 미리보기 실패:", e);
+      return { ok: false, reason: "문단 위치를 확인하지 못했어요." };
+    }
+
+    const elementsById = new Map();
+    for (const el of state.previewEl.querySelectorAll("[id]")){
+      if (!elementsById.has(el.id)) elementsById.set(el.id, []);
+      elementsById.get(el.id).push(el);
+    }
+    const byIndex = new Map(state.rows.filter(row => row.index).map(row => [row.index, row]));
+    const nodeByKey = new Map(), locked = new Set(), markerEls = [];
+    for (const marker of plan.markers){
+      const found = elementsById.get(marker.name) || [];
+      markerEls.push(...found);
+      if (found.length !== 1) continue;                 // 중복 렌더나 미표시는 편집 대상으로 잡지 않는다
+      const row = byIndex.get(marker.index);
+      const node = found[0].closest("p");
+      if (!row || !node || !state.previewEl.contains(node) || nodeByKey.has(row.key)) continue;
+      nodeByKey.set(row.key, node);
+      if (officeInlineTextKey(inlineTextOf(node)) !== officeInlineTextKey(row.text)) locked.add(row.key);
+    }
+    for (const markerEl of markerEls) markerEl.remove();
+    if (!nodeByKey.size) return { ok: false, reason: "화면 문단과 저장할 문단을 연결하지 못했어요." };
+
+    state.nodeByKey = nodeByKey;
+    state.inlineLockedKeys = locked;
+    for (const row of state.rows){
+      const node = nodeByKey.get(row.key);
+      if (node) inlinePrepareNode(state, row, node);
+    }
+    return { ok: true, marked: true, locked: locked.size, missing: state.rows.length - nodeByKey.size };
   }
 
   // 입력·키 처리는 미리보기 한 곳에 맡긴다 — 문단을 복제해 넣어도 이벤트를 다시 붙일 필요가 없다.
@@ -336,7 +402,7 @@ const MNDocxEditor = (() => {
     });
     host.addEventListener("keydown", (e) => {
       if (state.mode !== "inline" || !state.editing) return;
-      if ((e.ctrlKey || e.metaKey) && state.history){
+      if ((e.ctrlKey || e.metaKey) && state.history && !state.rendering){
         const key = String(e.key || "").toLowerCase();
         if (key === "z" && !e.shiftKey){ e.preventDefault(); state.history.undo(); return; }
         if (key === "y" || (key === "z" && e.shiftKey)){ e.preventDefault(); state.history.redo(); return; }
@@ -354,8 +420,29 @@ const MNDocxEditor = (() => {
     if (typeof MNEditHistory !== "object" || !MNEditHistory || typeof MNEditHistory.create !== "function") return null;
     return MNEditHistory.create({
       limit: 200,
-      capture: () => JSON.stringify(state.rows),
-      apply: (snapshot) => { state.rows = JSON.parse(snapshot); redraw(state); },
+      // XML 본문은 버전 표에서 한 번만 들고, 스냅샷에는 작은 버전 번호만 넣는다. 표를 한 번
+      // 고친 뒤 타이핑할 때마다 document.xml 전체를 200벌씩 복제하지 않기 위해서다.
+      capture: () => JSON.stringify({
+        rows: state.rows,
+        xmlVersion: state.xmlVersion,
+        structureDirty: !!state.structureDirty,
+        tableChanges: state.tableChanges || [],
+        bakedPlan: state.bakedPlan || { changed: 0, inserted: 0, removed: 0 }
+      }),
+      apply: (snapshot) => {
+        const saved = JSON.parse(snapshot);
+        const previousVersion = state.xmlVersion;
+        state.rows = saved.rows || [];
+        state.xmlVersion = Number(saved.xmlVersion) || 0;
+        state.xml = state.xmlVersions.get(state.xmlVersion) || state.xml;
+        state.structureDirty = !!saved.structureDirty;
+        state.tableChanges = Array.isArray(saved.tableChanges) ? saved.tableChanges : [];
+        state.bakedPlan = saved.bakedPlan || { changed: 0, inserted: 0, removed: 0 };
+        state.activeTableRow = null;
+        if (previousVersion !== state.xmlVersion && state.mode === "inline" && typeof state.renderDraft === "function")
+          state.renderDraft().catch(e => console.warn("표 편집 되돌리기 화면 갱신 실패:", e));
+        else redraw(state);
+      },
       isEqual: (a, b) => a === b,
       onChange: () => state.onHistory()
     });
@@ -370,10 +457,12 @@ const MNDocxEditor = (() => {
   async function saveEdits(state, doc){
     if (state.saving) return;
     const plan = officeParagraphEditPlan(state.xml, state.rows);
-    if (!plan.edits.length){
+    if (!plan.edits.length && !state.structureDirty){
       if (typeof toast === "function") toast("바뀐 내용이 없어요.", 1800);
       return;
     }
+    const tableChanges = (state.tableChanges || []).slice();
+    const bakedPlan = { ...(state.bakedPlan || { changed: 0, inserted: 0, removed: 0 }) };
     state.saving = true;
     state.setStatus("저장 중…");
     try {
@@ -391,6 +480,12 @@ const MNDocxEditor = (() => {
       state.source.parts["word/document.xml"] = nextXml;
       state.xml = nextXml;
       state.rows = rowsFromOutline(officeParagraphOutline(nextXml));
+      state.structureDirty = false;
+      state.tableChanges = [];
+      state.bakedPlan = { changed: 0, inserted: 0, removed: 0 };
+      state.xmlVersion = 0;
+      state.xmlVersionSeq = 0;
+      state.xmlVersions = new Map([[0, nextXml]]);
 
       MNOfficeReplace.reflectSaved(doc, bytes, "docx");
       // 미리보기를 먼저 새로 그리고 나서 붙인다 — 제자리 편집은 그 DOM 을 그대로 쓰므로
@@ -401,7 +496,8 @@ const MNDocxEditor = (() => {
         catch(e){ console.warn("저장 뒤 미리보기 갱신 실패:", e); rebound = false; }
       }
       if (state.mode === "inline"){
-        const check = rebound ? inlineBind(state) : { ok: false, reason: "미리보기를 다시 그리지 못했어요." };
+        let check = rebound ? inlineBind(state) : { ok: false, reason: "미리보기를 다시 그리지 못했어요." };
+        if (!check.ok && rebound) check = await inlineBindWithMarkers(state);
         if (!check.ok && state.fallBackToList) state.fallBackToList(check.reason);   // 조용히 이어 가지 않는다
       }
       redraw(state);
@@ -409,9 +505,13 @@ const MNDocxEditor = (() => {
       const remembered = await MNOfficeReplace.rememberSaved(doc, bytes, "docx");
 
       const parts = [];
-      if (plan.changed) parts.push(plan.changed + "개 문단 고침");
-      if (plan.inserted) parts.push(plan.inserted + "곳에 문단 추가");
-      if (plan.removed) parts.push(plan.removed + "개 문단 삭제");
+      const changedParagraphs = (plan.changed || 0) + (bakedPlan.changed || 0);
+      const insertedParagraphs = (plan.inserted || 0) + (bakedPlan.inserted || 0);
+      const removedParagraphs = (plan.removed || 0) + (bakedPlan.removed || 0);
+      if (changedParagraphs) parts.push(changedParagraphs + "개 문단 고침");
+      if (insertedParagraphs) parts.push(insertedParagraphs + "곳에 문단 추가");
+      if (removedParagraphs) parts.push(removedParagraphs + "개 문단 삭제");
+      if (tableChanges.length) parts.push(tableChanges.join(" · "));
       let message = MNOfficeReplace.saveResultText(saved);
       if (parts.length) message += " (" + parts.join(" · ") + ")";
       if (plan.skipped) message += " · 탭·줄바꿈 자리를 건드린 " + plan.skipped + "곳은 저장에서 빠졌어요";
@@ -456,7 +556,31 @@ const MNDocxEditor = (() => {
     const status = document.createElement("span");
     status.className = "docx-editor-status";
     status.setAttribute("aria-live", "polite");
-    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, status);
+    const tableTools = document.createElement("div");
+    tableTools.className = "docx-table-tools";
+    tableTools.hidden = true;
+    const tableToolsLabel = document.createElement("span");
+    tableToolsLabel.className = "docx-table-tools-label";
+    const tableButtons = new Map();
+    const tableButton = (kind, label, titleText) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "docx-para-btn";
+      button.dataset.tableAction = kind;
+      button.dataset.normalTitle = titleText;
+      button.textContent = label;
+      button.title = titleText;
+      tableButtons.set(kind, button);
+      return button;
+    };
+    tableTools.append(tableToolsLabel,
+      tableButton("row-add-above", "행↑＋", "선택한 셀 위에 빈 행 추가"),
+      tableButton("row-add-below", "행↓＋", "선택한 셀 아래에 빈 행 추가"),
+      tableButton("row-delete", "행 삭제", "선택한 셀이 있는 행 삭제"),
+      tableButton("column-add-left", "열←＋", "선택한 셀 왼쪽에 빈 열 추가"),
+      tableButton("column-add-right", "열→＋", "선택한 셀 오른쪽에 빈 열 추가"),
+      tableButton("column-delete", "열 삭제", "선택한 셀이 있는 열 삭제"));
+    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, status, tableTools);
     host.insertBefore(bar, previewEl);
 
     const note = document.createElement("div");
@@ -471,11 +595,13 @@ const MNDocxEditor = (() => {
 
     const state = {
       rows: [], listEl, previewEl, focusKey: 0, source: null, xml: "", editing: false,
-      mode: "inline", nodeByKey: new Map(),
-      saving: false, history: null,
+      mode: "inline", nodeByKey: new Map(), inlineLockedKeys: new Set(),
+      saving: false, rendering: false, history: null,
+      structureDirty: false, tableChanges: [], bakedPlan: { changed: 0, inserted: 0, removed: 0 },
+      xmlVersion: 0, xmlVersionSeq: 0, xmlVersions: new Map(), activeTableRow: null,
       setStatus: (text) => { status.textContent = text; },
       onDirty: () => {
-        const dirty = rowsDirty(state.rows);
+        const dirty = rowsDirty(state.rows) || state.structureDirty;
         doc.docxEditDirty = dirty;
         if (!state.saving) status.textContent = dirty ? "고친 내용 있음 — 저장하지 않았어요" : "";
         saveBtn.disabled = !dirty;
@@ -484,8 +610,8 @@ const MNDocxEditor = (() => {
       },
       onHistory: () => {
         if (!state.history) return;
-        undoBtn.disabled = !state.history.canUndo();
-        redoBtn.disabled = !state.history.canRedo();
+        undoBtn.disabled = state.rendering || !state.history.canUndo();
+        redoBtn.disabled = state.rendering || !state.history.canRedo();
       },
       // 문단을 더하거나 지우는 건 한 번의 동작이므로 묶지 않고 바로 한 단계로 남긴다.
       commitNow: () => { if (state.history) state.history.commit(); }
@@ -493,9 +619,31 @@ const MNDocxEditor = (() => {
     doc.docxEditor = state;
 
     const INLINE_NOTE = "✎ 제자리 편집 — 보이는 그대로 고쳐요. Enter 로 문단을 나누고, 빈 문단에서 Backspace 로 지웁니다. " +
-      "글자 서식(굵게·색·크기)은 바뀌지 않고, 손대지 않은 곳은 저장할 때 바이트 그대로 남습니다.";
+      "표 셀을 누르면 위쪽에서 행·열을 더하거나 지울 수 있습니다. 글자 서식(굵게·색·크기)은 바뀌지 않고, " +
+      "손대지 않은 곳은 저장할 때 바이트 그대로 남습니다.";
     const LIST_NOTE = "✎ 문단 목록 — 글자만 고치는 간이 표시예요. 글꼴·여백·쪽 나눔은 실제 문서와 다르게 보입니다. " +
       "손대지 않은 곳의 서식은 저장할 때 그대로 유지됩니다.";
+
+    const updateTableTools = (row) => {
+      state.activeTableRow = row && row.inTable ? row : null;
+      const active = state.activeTableRow;
+      tableTools.hidden = !state.editing || state.mode !== "inline" || !active;
+      if (!active) return;
+      tableToolsLabel.textContent = "표 " + active.tableIndex + " · " + active.tableRow + "행 " + active.tableCell + "열";
+      const nested = active.tableHasNested;
+      const rowBlocked = nested || active.tableHasVerticalMerge;
+      const columnBlocked = nested || active.tableHasVerticalMerge || active.tableHasGridSpan || !active.tableRectangular;
+      for (const [kind, button] of tableButtons){
+        const rowAction = kind.startsWith("row-");
+        button.disabled = state.rendering || (rowAction ? rowBlocked : columnBlocked) ||
+          (kind === "row-delete" && active.tableRowCount <= 1) ||
+          (kind === "column-delete" && active.tableColumnCount <= 1);
+        if (nested) button.title = "표 안에 다른 표가 들어 있어 구조는 바꿀 수 없어요.";
+        else if (rowAction && active.tableHasVerticalMerge) button.title = "세로 병합된 셀이 있어 행 구조는 바꿀 수 없어요.";
+        else if (!rowAction && (active.tableHasVerticalMerge || active.tableHasGridSpan)) button.title = "병합된 셀이 있어 열 구조는 바꿀 수 없어요.";
+        else button.title = button.dataset.normalTitle;
+      }
+    };
 
     const syncToggle = () => {
       const inline = state.mode === "inline";
@@ -508,6 +656,7 @@ const MNDocxEditor = (() => {
       previewEl.hidden = state.editing && !inline;      // 제자리 편집은 미리보기를 그대로 쓴다
       previewEl.classList.toggle("docx-inline-editing", state.editing && inline);
       undoBtn.hidden = redoBtn.hidden = saveBtn.hidden = !state.editing;
+      updateTableTools(state.activeTableRow);
     };
     syncToggle();
 
@@ -517,6 +666,7 @@ const MNDocxEditor = (() => {
       if (state.mode !== "inline" || !state.editing) return;
       state.mode = "list";
       state.nodeByKey = new Map();
+      state.inlineLockedKeys = new Set();
       for (const node of inlineBodyParagraphs(previewEl)){
         node.contentEditable = "false";
         node.classList.remove("docx-inline-para", "touched", "removed", "locked");
@@ -528,12 +678,100 @@ const MNDocxEditor = (() => {
     };
     inlineWire(state);
 
+    const tableChangeLabel = {
+      "row-add-above": "표 행 추가", "row-add-below": "표 행 추가", "row-delete": "표 행 삭제",
+      "column-add-left": "표 열 추가", "column-add-right": "표 열 추가", "column-delete": "표 열 삭제"
+    };
+    const tableRowForSelection = (selection) => state.rows.find(row => row.inTable &&
+      row.tableIndex === selection.tableIndex && row.tableRow === selection.rowIndex && row.tableCell === selection.cellIndex);
+
+    // 현재의 미저장 document.xml 을 임시 DOCX 로 그린다. 저장은 누르지 않았으므로 source.bytes는
+    // 그대로 두고, 화면만 새 표 구조로 바꾼 뒤 문단을 다시 정확히 연결한다.
+    state.renderDraft = async (selection) => {
+      if (state.rendering || !state.source) return;
+      state.rendering = true;
+      state.onHistory();
+      updateTableTools(state.activeTableRow);
+      status.textContent = "표를 다시 그리는 중…";
+      try {
+        const draftBytes = await MNOfficeReplace.build(state.source.bytes, { "word/document.xml": state.xml });
+        await docxRenderInto(draftBytes, previewEl);
+        let check = inlineBind(state);
+        if (!check.ok) check = await inlineBindWithMarkers(state);
+        if (!check.ok){
+          state.fallBackToList(check.reason);
+          redraw(state);
+          return;
+        }
+        const selected = selection ? tableRowForSelection(selection) : null;
+        state.focusKey = selected ? selected.key : 0;
+        redraw(state);
+        updateTableTools(selected);
+      } catch(e){
+        console.warn("표 편집 미리보기 갱신 실패:", e);
+        state.fallBackToList("표를 다시 그리지 못했어요.");
+        redraw(state);
+      } finally {
+        state.rendering = false;
+        state.onHistory();
+        state.onDirty();
+        updateTableTools(state.activeTableRow);
+      }
+    };
+
+    const applyTableAction = async (kind) => {
+      const active = state.activeTableRow;
+      if (!active || state.rendering || state.saving || state.mode !== "inline") return;
+      if (state.history) state.history.commit();       // 표를 바꾸기 직전 타이핑 상태를 별도 단계로 남긴다
+
+      // 현재 화면의 글자 편집을 XML에 먼저 굳힌 뒤 그 좌표를 기준으로 행·열을 바꾼다.
+      const paragraphPlan = officeParagraphEditPlan(state.xml, state.rows);
+      if (paragraphPlan.skipped || paragraphPlan.refused.length){
+        toastOnce("먼저 저장할 수 없는 문단 편집을 정리해 주세요.");
+        return;
+      }
+      const withText = officeApplyEdits(state.xml, paragraphPlan.edits);
+      const result = officeTableStructureEdit(withText, {
+        kind,
+        tableIndex: active.tableIndex,
+        rowIndex: active.tableRow,
+        cellIndex: active.tableCell
+      });
+      if (!result.changed){ toastOnce(result.reason || "표 구조를 바꾸지 못했어요."); return; }
+
+      state.xml = result.xml;
+      state.xmlVersion = ++state.xmlVersionSeq;
+      state.xmlVersions.set(state.xmlVersion, state.xml);
+      state.rows = rowsFromOutline(officeParagraphOutline(state.xml));
+      state.structureDirty = true;
+      state.tableChanges.push(tableChangeLabel[kind] || "표 구조 변경");
+      state.bakedPlan.changed += paragraphPlan.changed || 0;
+      state.bakedPlan.inserted += paragraphPlan.inserted || 0;
+      state.bakedPlan.removed += paragraphPlan.removed || 0;
+      state.activeTableRow = null;
+      state.onDirty();
+      state.commitNow();
+      await state.renderDraft(result.selection);
+    };
+
+    for (const [kind, button] of tableButtons){
+      button.addEventListener("mousedown", (e) => e.preventDefault());
+      button.addEventListener("click", () => { applyTableAction(kind); });
+    }
+    const selectTableCell = (e) => {
+      if (!state.editing || state.mode !== "inline") return;
+      const node = e.target && e.target.closest ? e.target.closest("[data-key]") : null;
+      updateTableTools(inlineRowOf(state, node));
+    };
+    previewEl.addEventListener("focusin", selectTableCell);
+    previewEl.addEventListener("click", selectTableCell);
+
     undoBtn.addEventListener("click", () => { if (state.history) state.history.undo(); });
     redoBtn.addEventListener("click", () => { if (state.history) state.history.redo(); });
     saveBtn.addEventListener("click", () => { saveEdits(state, doc); });
     // 편집 칸은 contenteditable 이라 브라우저 기본 되돌리기가 먼저 먹는다 — 행 모델을 기준으로 가로챈다.
     listEl.addEventListener("keydown", (e) => {
-      if (!(e.ctrlKey || e.metaKey) || !state.history) return;
+      if (!(e.ctrlKey || e.metaKey) || !state.history || state.rendering) return;
       const key = String(e.key || "").toLowerCase();
       if (key === "z" && !e.shiftKey){ e.preventDefault(); state.history.undo(); }
       else if (key === "y" || (key === "z" && e.shiftKey)){ e.preventDefault(); state.history.redo(); }
@@ -567,6 +805,9 @@ const MNDocxEditor = (() => {
           state.source = source;
           state.xml = source.parts["word/document.xml"];
           state.rows = rowsFromOutline(officeParagraphOutline(state.xml));
+          state.xmlVersion = 0;
+          state.xmlVersionSeq = 0;
+          state.xmlVersions = new Map([[0, state.xml]]);
         } catch(e){
           console.error(e);
           status.textContent = "문서를 읽지 못했어요.";
@@ -576,7 +817,8 @@ const MNDocxEditor = (() => {
       state.editing = true;
       // 제자리 편집을 먼저 시도한다. 화면 문단과 문서 문단이 하나라도 어긋나면 목록으로 물러난다.
       if (state.mode === "inline"){
-        const check = inlineBind(state);
+        let check = inlineBind(state);
+        if (!check.ok) check = await inlineBindWithMarkers(state);
         if (!check.ok) state.fallBackToList(check.reason);
       }
       if (!state.history){
