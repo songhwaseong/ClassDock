@@ -1984,25 +1984,33 @@
 
   /* Word 문단 편집 (설계: docs/워드-문단편집-설계.md)
      보기는 docx-preview 그대로 두고, 편집 모드에서만 아래 간이 문단 화면을 보여준다. */
-  .docx-editor-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  .docx-editor-bar{position:sticky;top:8px;z-index:24;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:8px 12px;margin:0 auto 10px;border:1px solid var(--border);border-radius:10px;
-    background:var(--field,rgba(255,255,255,.03))}
+    background:var(--panel,var(--field));box-shadow:0 8px 24px rgba(15,23,42,.16)}
   .docx-editor-title{font-size:13px;color:var(--muted)}
   .docx-editmode-btn{font:inherit;font-size:12.5px;padding:5px 12px;border-radius:8px;
     border:1px solid var(--border);background:transparent;color:var(--ink);cursor:pointer}
   .docx-editmode-btn:hover{background:rgba(127,127,127,.12)}
   .docx-editmode-btn.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9)}
   .docx-editmode-btn:disabled{opacity:.5;cursor:default}
-  .docx-editor-status{font-size:12px;color:var(--muted)}
-  .docx-text-tools,.docx-table-tools{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;
+  .docx-editor-status{min-width:210px;font-size:12px;color:var(--muted)}
+  .docx-document-tools,.docx-text-tools,.docx-paragraph-tools,.docx-table-tools{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;
     padding-left:10px;border-left:1px solid var(--border)}
   .docx-text-tools{margin-left:auto}
-  .docx-table-tools{margin-left:0}
-  .docx-text-tools[hidden],.docx-table-tools[hidden]{display:none}
-  .docx-table-tools-label{margin-right:3px;color:var(--muted);font-size:11.5px;white-space:nowrap}
-  .docx-text-tools .docx-para-btn,.docx-table-tools .docx-para-btn{padding:5px 7px;white-space:nowrap}
-  .docx-text-bold{font-weight:800;min-width:28px}
-  .docx-text-bold.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9);background:rgba(91,157,217,.12)}
+  .docx-document-tools,.docx-paragraph-tools,.docx-table-tools{margin-left:0}
+  .docx-document-tools[hidden],.docx-text-tools[hidden],.docx-paragraph-tools[hidden],.docx-table-tools[hidden]{display:none}
+  .docx-table-tools-label{flex:0 0 78px;max-width:78px;margin-right:3px;color:var(--muted);font-size:11.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+  .docx-document-tools.is-idle,.docx-text-tools.is-idle,.docx-paragraph-tools.is-idle,.docx-table-tools.is-idle{opacity:.48}
+  .docx-document-tools .docx-para-btn,.docx-text-tools .docx-para-btn,.docx-paragraph-tools .docx-para-btn,
+  .docx-table-tools .docx-para-btn{padding:5px 7px;white-space:nowrap}
+  .docx-text-bold,.docx-text-toggle{min-width:28px}
+  .docx-text-bold{font-weight:800}
+  .docx-text-italic{font-style:italic}
+  .docx-text-underline{text-decoration:underline}
+  .docx-text-strike{text-decoration:line-through}
+  .docx-text-bold.active,.docx-text-toggle.active{border-color:var(--accent,#5b9dd9);color:var(--accent,#5b9dd9);
+    background:rgba(91,157,217,.12)}
   .docx-table-tools-separator{width:1px;height:22px;margin:0 3px;background:var(--border)}
   .docx-table-format-field,.docx-table-color-field{display:inline-flex;align-items:center;gap:3px;
     color:var(--muted);font-size:11.5px;white-space:nowrap}
@@ -2036,8 +2044,10 @@
   .docx-para-btn:disabled{opacity:.3;cursor:default}
   /* 제자리 편집 — 미리보기를 그대로 쓰므로 문서 모양을 건드리지 않는다.
      테두리·배경 대신 왼쪽 여백의 얇은 표시만 써서 쪽 레이아웃이 밀리지 않게 한다. */
-  .docx-inline-editing{caret-color:var(--accent,#5b9dd9)}
-  .docx-inline-para{outline:none;position:relative}
+  .office.pannable.docx-inline-editing,.docx-inline-editing{cursor:default;caret-color:var(--accent,#5b9dd9)}
+  .docx-inline-para{outline:none;position:relative;scroll-margin-top:var(--docx-editor-tools-height,120px)}
+  .docx-inline-editing .docx-inline-para[contenteditable="true"]{cursor:text}
+  .docx-inline-editing .docx-inline-para[contenteditable="false"]{cursor:not-allowed}
   .docx-inline-para[contenteditable="true"]:hover{background:rgba(127,127,127,.05)}
   .docx-inline-para[contenteditable="true"]:focus{background:rgba(91,157,217,.08);
     box-shadow:inset 2px 0 0 var(--accent,#5b9dd9)}
@@ -2207,6 +2217,21 @@
   .text-context-menu button:hover:not(:disabled){background:var(--panel-hover);color:var(--accent)}
   .text-context-menu button:disabled{opacity:.45;cursor:default}
   .text-context-sep{height:1px;margin:4px 3px;background:var(--border)}
+  /* DOCX 편집 우클릭 메뉴 — 표 메뉴처럼 여러 층을 body에 따로 띄워 미리보기 overflow에 잘리지 않는다. */
+  .docx-context-menu{position:fixed;z-index:1950;display:flex;flex-direction:column;min-width:220px;padding:5px;
+    max-height:calc(100vh - 20px);overflow-y:auto;overflow-x:hidden;border:1px solid var(--border);border-radius:10px;
+    background:var(--panel);box-shadow:0 14px 38px rgba(15,23,42,.3);color:var(--ink)}
+  .docx-context-sub{z-index:1951;min-width:190px}
+  .docx-context-menu button{display:block;width:100%;border:0;border-radius:6px;padding:7px 10px;background:transparent;
+    color:inherit;font:inherit;font-size:12.5px;text-align:left;white-space:nowrap;cursor:pointer}
+  .docx-context-menu button:hover:not(:disabled){background:var(--panel-hover);color:var(--accent)}
+  .docx-context-menu button:disabled{opacity:.45;cursor:default}
+  .docx-context-sep{height:1px;margin:4px 3px;background:var(--border)}
+  .docx-context-menu button.docx-context-parent,.docx-context-menu button.docx-context-swatch-btn{
+    display:flex;align-items:center;gap:8px}
+  .docx-context-menu button.docx-context-parent::after{content:"▸";margin-left:auto;opacity:.5;font-size:11px}
+  .docx-context-menu button.docx-context-parent.is-open{background:var(--panel-hover);color:var(--accent)}
+  .docx-context-swatch{flex:0 0 auto;width:13px;height:13px;border-radius:3px;border:1px solid var(--border)}
   /* 특수문자 문자표(우클릭 → 특수문자) — 한자키 대신 쓰는 글자 고르기 창 */
   .mn-charmap{position:fixed;z-index:1960;display:flex;flex-direction:column;gap:7px;width:396px;max-width:calc(100vw - 16px);
     padding:9px;border:1px solid var(--border);border-radius:12px;background:var(--panel);

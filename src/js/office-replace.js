@@ -552,6 +552,61 @@ function officeTableStructureEdit(xml, action){
   return { xml: officeApplyEdits(source, edits), changed: true, reason: "", kind, edits, selection };
 }
 
+function officeTableCellBodyXml(cellXml){
+  const source = String(cellXml || "");
+  const open = source.match(/^<(?:[A-Za-z_][\w.-]*:)?tc(?:\s[^>]*)?>/i);
+  if (!open) return "";
+  let body = source.slice(open[0].length).replace(/<\/(?:[A-Za-z_][\w.-]*:)?tc\s*>\s*$/i, "");
+  const tcPr = officeTableOwnProperties(body, "tcPr");
+  if (tcPr && body.indexOf(tcPr) === 0) body = body.slice(tcPr.length);
+  return body;
+}
+
+function officeTableCellMergeEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const tableIndex = Number(request.tableIndex) || 0;
+  const rowIndex = Number(request.rowIndex) || 0;
+  const cellIndex = Number(request.cellIndex) || 0;
+  const table = officeTableOutline(source)[tableIndex - 1];
+  const row = table && table.rows[rowIndex - 1];
+  const cell = row && row.cells[cellIndex - 1];
+  if (!table || !row || !cell) return { xml: source, changed: false, reason: "표 셀 위치를 찾지 못했어요." };
+  if (table.hasNestedTable) return { xml: source, changed: false, reason: "중첩 표에서는 셀을 병합하거나 나눌 수 없어요." };
+  if (cell.vMerge) return { xml: source, changed: false, reason: "세로 병합된 셀은 여기서 바꿀 수 없어요." };
+  const kind = String(request.kind || "");
+  const cellXml = source.slice(cell.start, cell.end);
+  const prefix = (cellXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)tc/i) || [])[1] || "w:";
+  let value = "", end = cell.end;
+  if (kind === "cell-merge-right"){
+    const right = row.cells[cellIndex];
+    if (!right) return { xml: source, changed: false, reason: "오른쪽에 합칠 셀이 없어요." };
+    if (right.vMerge) return { xml: source, changed: false, reason: "세로 병합된 셀과는 합칠 수 없어요." };
+    const span = Math.max(1, cell.gridSpan) + Math.max(1, right.gridSpan);
+    let merged = officeSetWordProperty(cellXml, "tc", "tcPr", "gridSpan",
+      "<" + prefix + "gridSpan " + prefix + "val=\"" + span + "\"/>");
+    const rightBody = officeTableCellBodyXml(source.slice(right.start, right.end));
+    merged = merged.replace(/<\/(?:[A-Za-z_][\w.-]*:)?tc\s*>\s*$/i, rightBody + "</" + prefix + "tc>");
+    value = merged;
+    end = right.end;
+  } else if (kind === "cell-split"){
+    const span = Math.max(1, cell.gridSpan);
+    if (span <= 1) return { xml: source, changed: false, reason: "나눌 수 있는 병합 셀이 아니에요." };
+    const tcPr = officeTableOwnProperties(cellXml, "tcPr");
+    const width = Number(officeWordVal(tcPr, "tcW", "w"));
+    const eachWidth = width > 0 ? Math.max(120, Math.round(width / span)) : 0;
+    let first = officeSetWordProperty(cellXml, "tc", "tcPr", "gridSpan", "");
+    if (eachWidth) first = officeSetWordProperty(first, "tc", "tcPr", "tcW",
+      "<" + prefix + "tcW " + prefix + "w=\"" + eachWidth + "\" " + prefix + "type=\"dxa\"/>");
+    let blank = officeSetWordProperty(officeBlankTableCellXml(cellXml), "tc", "tcPr", "gridSpan", "");
+    if (eachWidth) blank = officeSetWordProperty(blank, "tc", "tcPr", "tcW",
+      "<" + prefix + "tcW " + prefix + "w=\"" + eachWidth + "\" " + prefix + "type=\"dxa\"/>");
+    value = first + Array.from({ length: span - 1 }, () => blank).join("");
+  } else return { xml: source, changed: false, reason: "알 수 없는 셀 병합 편집이에요." };
+  return { xml: officeApplyEdits(source, [{ start: cell.start, end, value }]), changed: true, reason: "", kind,
+    selection: { tableIndex, rowIndex, cellIndex } };
+}
+
 // 요소의 맨 앞 속성 컨테이너(pPr/tcPr/trPr)에 자식 속성 하나를 추가·교체·삭제한다.
 // 속성 컨테이너를 시작 부분에서만 찾는 이유는 텍스트 상자·중첩 표 안의 pPr/tcPr를 바깥
 // 요소의 속성으로 잘못 집지 않기 위해서다.
@@ -588,6 +643,44 @@ function officeSetWordProperty(ownerXml, ownerName, propsName, childName, childX
   return source.slice(0, open[0].length) + propsMatch[1] + nextProps + rest.slice(propsMatch[0].length);
 }
 
+function officeSetDirectWordChild(ownerXml, ownerName, childName, childXml){
+  const source = String(ownerXml || "");
+  const open = source.match(new RegExp("^<((?:[A-Za-z_][\\w.-]*:)?)" + ownerName + "(?:\\s[^>]*)?/?>", "i"));
+  if (!open) return source;
+  const prefix = open[1] || "w:";
+  const wanted = String(childXml || "");
+  if (/\/>$/.test(open[0])){
+    if (!wanted) return source;
+    return open[0].replace(/\/>$/, ">") + wanted + "</" + prefix + ownerName + ">";
+  }
+  const childRe = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + childName +
+    "(?:\\s[^>]*)?(?:/>|>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?" + childName + "\\s*>)", "i");
+  if (childRe.test(source)) return source.replace(childRe, wanted);
+  if (!wanted) return source;
+  return source.replace(new RegExp("</(?:[A-Za-z_][\\w.-]*:)?" + ownerName + "\\s*>$", "i"),
+    wanted + "</" + prefix + ownerName + ">");
+}
+
+// spacing·ind처럼 여러 기능이 한 요소의 서로 다른 속성을 나눠 쓰는 경우, 다른 속성은 보존하고
+// 지정한 속성만 바꾼다. 예: 줄 간격을 바꿔도 문단 앞뒤 간격은 그대로 남아야 한다.
+function officeSetWordPropertyAttributes(ownerXml, ownerName, propsName, childName, updates){
+  const source = String(ownerXml || "");
+  const ownerOpen = source.match(new RegExp("^<((?:[A-Za-z_][\\w.-]*:)?)" + ownerName + "(?:\\s[^>]*)?/?>", "i"));
+  if (!ownerOpen) return source;
+  const prefix = ownerOpen[1] || "w:";
+  const propsXml = officeTableOwnProperties(source, propsName);
+  const childRe = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + childName + "(?:\\s[^>]*)?(?:/>|>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?" + childName + "\\s*>)", "i");
+  const existing = propsXml.match(childRe);
+  const openTag = existing ? (existing[0].match(/^<[^>]*>/) || [])[0] : "";
+  let child = openTag ? openTag.replace(/\s*>$/, "/>").replace(/\/\/>$/, "/>") : "<" + prefix + childName + "/>";
+  for (const [name, rawValue] of Object.entries(updates || {})){
+    child = child.replace(new RegExp("\\s(?:[A-Za-z_][\\w.-]*:)?" + name + "=\"[^\"]*\"", "gi"), "");
+    if (rawValue !== null && rawValue !== undefined)
+      child = child.replace(/\/>$/, " " + prefix + name + "=\"" + officeAttributeEscape(rawValue) + "\"/>");
+  }
+  return officeSetWordProperty(source, ownerName, propsName, childName, child);
+}
+
 function officeWordVal(xml, localName, attrName){
   const source = String(xml || "");
   const re = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + localName + "\\s[^>]*(?:[A-Za-z_][\\w.-]*:)?" +
@@ -612,7 +705,7 @@ function officeWordToggle(xml, localName){
   const match = source.match(re);
   if (!match) return false;
   const value = (match[1] || "").match(/(?:[A-Za-z_][\w.-]*:)?val="([^"]*)"/i);
-  return !value || !/^(0|false|off|no)$/i.test(value[1]);
+  return !value || !/^(0|false|off|no|none)$/i.test(value[1]);
 }
 
 function officeCellTextRunRanges(cellXml){
@@ -633,7 +726,14 @@ function officeTextFormatOfXml(ownerXml){
     font: officeWordVal(rPr, "rFonts", "eastAsia") || officeWordVal(rPr, "rFonts", "ascii") ||
       officeWordVal(rPr, "rFonts", "hAnsi") || "",
     fontSize: fontSize > 0 ? fontSize / 2 : 11,
-    bold: officeWordToggle(rPr, "b")
+    bold: officeWordToggle(rPr, "b"),
+    italic: officeWordToggle(rPr, "i"),
+    underline: officeWordToggle(rPr, "u"),
+    textColor: officeColorValue(officeWordVal(rPr, "color", "val"), "000000"),
+    highlight: officeColorValue(officeWordVal(rPr, "shd", "fill"), "FFFFFF"),
+    strike: officeWordToggle(rPr, "strike") || officeWordToggle(rPr, "dstrike"),
+    baseline: /^(superscript|subscript)$/.test(officeWordVal(rPr, "vertAlign", "val"))
+      ? officeWordVal(rPr, "vertAlign", "val") : "baseline"
   };
 }
 
@@ -641,7 +741,7 @@ function officeApplyTextRunFormat(ownerXml, kind, value){
   const source = String(ownerXml || "");
   const runRanges = officeCellTextRunRanges(source);
   if (!runRanges.length) return { xml: source, changed: false, reason: "서식을 적용할 글자가 없어요." };
-  let font = "", halfPoints = 0, enabled = false;
+  let font = "", halfPoints = 0, enabled = false, color = "";
   if (kind === "font"){
     font = String(value || "").trim().slice(0, 100);
     if (!font) return { xml: source, changed: false, reason: "적용할 글꼴을 골라 주세요." };
@@ -650,8 +750,17 @@ function officeApplyTextRunFormat(ownerXml, kind, value){
     if (!Number.isFinite(requestedPoints) || requestedPoints <= 0)
       return { xml: source, changed: false, reason: "적용할 글자 크기를 골라 주세요." };
     halfPoints = Math.round(Math.max(1, Math.min(200, requestedPoints)) * 2);
-  } else if (kind === "bold"){
+  } else if (kind === "bold" || kind === "italic" || kind === "underline" || kind === "strike"){
     enabled = value === true || String(value).toLowerCase() === "true" || String(value) === "1";
+  } else if (kind === "baseline"){
+    if (!/^(baseline|superscript|subscript)$/.test(String(value || "")))
+      return { xml: source, changed: false, reason: "올바른 첨자 위치를 골라 주세요." };
+  } else if (kind === "text-color" || kind === "highlight"){
+    color = officeColorValue(value, "");
+    if (String(value || "") && !color)
+      return { xml: source, changed: false, reason: "올바른 색을 골라 주세요." };
+  } else if (kind === "clear-format"){
+    // 아래에서 이 편집기가 다루는 직접 글자 속성만 걷어낸다. 언어·교정·숨김 등은 보존한다.
   } else return { xml: source, changed: false, reason: "알 수 없는 글자 서식 편집이에요." };
 
   const edits = [];
@@ -669,14 +778,101 @@ function officeApplyTextRunFormat(ownerXml, kind, value){
         "<" + prefix + "sz " + prefix + "val=\"" + halfPoints + "\"/>");
       runXml = officeSetWordProperty(runXml, "r", "rPr", "szCs",
         "<" + prefix + "szCs " + prefix + "val=\"" + halfPoints + "\"/>");
-    } else {
+    } else if (kind === "bold"){
       const direct = enabled ? "<" + prefix + "b/>" : "<" + prefix + "b " + prefix + "val=\"0\"/>";
       const complex = enabled ? "<" + prefix + "bCs/>" : "<" + prefix + "bCs " + prefix + "val=\"0\"/>";
       runXml = officeSetWordProperty(runXml, "r", "rPr", "b", direct);
       runXml = officeSetWordProperty(runXml, "r", "rPr", "bCs", complex);
+    } else if (kind === "italic"){
+      const direct = enabled ? "<" + prefix + "i/>" : "<" + prefix + "i " + prefix + "val=\"0\"/>";
+      const complex = enabled ? "<" + prefix + "iCs/>" : "<" + prefix + "iCs " + prefix + "val=\"0\"/>";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "i", direct);
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "iCs", complex);
+    } else if (kind === "underline"){
+      const underline = "<" + prefix + "u " + prefix + "val=\"" + (enabled ? "single" : "none") + "\"/>";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "u", underline);
+    } else if (kind === "strike"){
+      const single = enabled ? "<" + prefix + "strike/>" : "<" + prefix + "strike " + prefix + "val=\"0\"/>";
+      const doubleStrikeOff = "<" + prefix + "dstrike " + prefix + "val=\"0\"/>";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "strike", single);
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "dstrike", doubleStrikeOff);
+    } else if (kind === "baseline"){
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "vertAlign",
+        "<" + prefix + "vertAlign " + prefix + "val=\"" + String(value) + "\"/>");
+    } else if (kind === "text-color"){
+      const textColor = color ? "<" + prefix + "color " + prefix + "val=\"" + color + "\"/>" : "";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "color", textColor);
+    } else if (kind === "highlight"){
+      const shading = color ? "<" + prefix + "shd " + prefix + "val=\"clear\" " + prefix +
+        "color=\"auto\" " + prefix + "fill=\"" + color + "\"/>" : "";
+      runXml = officeSetWordProperty(runXml, "r", "rPr", "shd", shading);
+    } else {
+      for (const property of ["rFonts", "sz", "szCs", "b", "bCs", "i", "iCs", "u", "color", "shd",
+        "strike", "dstrike", "vertAlign"])
+        runXml = officeSetWordProperty(runXml, "r", "rPr", property, "");
     }
     edits.push({ start: range.start, end: range.end, value: runXml });
   }
+  const xml = officeApplyEdits(source, edits);
+  return { xml, changed: xml !== source, reason: xml === source ? "같은 서식이에요." : "" };
+}
+
+// 문단의 일부 글자만 고칠 때는 걸친 run을 앞·선택·뒤 세 조각으로 나눈다. 그림·필드·탭이
+// 섞인 복합 run은 임의로 재구성하지 않고 거부해 원본 구조를 지킨다.
+function officeTextRunWithText(runXml, text){
+  const source = String(runXml || "");
+  const matches = [];
+  const re = /<(?:[A-Za-z_][\w.-]*:)?t(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?t\s*>/gi;
+  let match;
+  while ((match = re.exec(source))) matches.push({ index: match.index, end: re.lastIndex, xml: match[0] });
+  if (matches.length !== 1 || /<(?:[A-Za-z_][\w.-]*:)?(?:tab|br|cr|drawing|object|instrText|fldChar)(?:\s|\/?>)/i.test(source))
+    return null;
+  const target = matches[0];
+  const openEnd = target.xml.indexOf(">") + 1;
+  const closeStart = target.xml.lastIndexOf("</");
+  const open = officeOpenTagFor(target.xml.slice(0, openEnd), text);
+  const value = open + officeReplaceEscape(text) + target.xml.slice(closeStart);
+  return source.slice(0, target.index) + value + source.slice(target.end);
+}
+
+function officeApplyTextRunFormatRange(ownerXml, kind, value, start, end){
+  const source = String(ownerXml || "");
+  const model = officeParagraphModel(source, 0);
+  const from = Math.max(0, Math.min(model.text.length, Number(start) || 0));
+  const to = Math.max(from, Math.min(model.text.length, Number(end) || 0));
+  if (to <= from) return officeApplyTextRunFormat(source, kind, value);
+  const edits = [];
+  for (const range of officeCellTextRunRanges(source)){
+    const segs = model.segs.filter(seg => !seg.locked && seg.tagStart >= range.start && seg.tagStart < range.end);
+    if (!segs.length) continue;
+    const runStart = Math.min(...segs.map(seg => seg.start));
+    const runEnd = Math.max(...segs.map(seg => seg.end));
+    const overlapStart = Math.max(from, runStart);
+    const overlapEnd = Math.min(to, runEnd);
+    if (overlapEnd <= overlapStart) continue;
+    const runXml = source.slice(range.start, range.end);
+    if (overlapStart === runStart && overlapEnd === runEnd){
+      const formatted = officeApplyTextRunFormat(runXml, kind, value);
+      if (!formatted.changed && formatted.reason !== "같은 서식이에요.") return formatted;
+      edits.push({ start: range.start, end: range.end, value: formatted.xml });
+      continue;
+    }
+    if (segs.length !== 1)
+      return { xml: source, changed: false, reason: "여러 글자 조각이 섞인 부분은 한 조각씩 선택해 주세요." };
+    const runText = model.text.slice(runStart, runEnd);
+    const beforeText = runText.slice(0, overlapStart - runStart);
+    const selectedText = runText.slice(overlapStart - runStart, overlapEnd - runStart);
+    const afterText = runText.slice(overlapEnd - runStart);
+    const beforeXml = beforeText ? officeTextRunWithText(runXml, beforeText) : "";
+    const selectedXml = officeTextRunWithText(runXml, selectedText);
+    const afterXml = afterText ? officeTextRunWithText(runXml, afterText) : "";
+    if (!selectedXml || (beforeText && !beforeXml) || (afterText && !afterXml))
+      return { xml: source, changed: false, reason: "필드·그림이 섞인 글자 범위는 서식을 나눌 수 없어요." };
+    const formatted = officeApplyTextRunFormat(selectedXml, kind, value);
+    if (!formatted.changed && formatted.reason !== "같은 서식이에요.") return formatted;
+    edits.push({ start: range.start, end: range.end, value: beforeXml + formatted.xml + afterXml });
+  }
+  if (!edits.length) return { xml: source, changed: false, reason: "선택한 범위에 서식을 적용할 글자가 없어요." };
   const xml = officeApplyEdits(source, edits);
   return { xml, changed: xml !== source, reason: xml === source ? "같은 서식이에요." : "" };
 }
@@ -725,6 +921,12 @@ function officeTableCellFormat(xml, request){
     font: textFormat.font,
     fontSize: textFormat.fontSize,
     bold: textFormat.bold,
+    italic: textFormat.italic,
+    underline: textFormat.underline,
+    textColor: textFormat.textColor,
+    highlight: textFormat.highlight,
+    strike: textFormat.strike,
+    baseline: textFormat.baseline,
     canResizeColumn: table.rectangular && !table.hasNestedTable && !table.hasVerticalMerge && !table.hasGridSpan,
     canFormat: !table.hasNestedTable
   };
@@ -791,15 +993,8 @@ function officeTableFormatEdit(xml, action){
     }
     edits.push({ start: cell.start, end: cell.end,
       value: officeSetWordProperty(cellXml, "tc", "tcPr", "tcBorders", child) });
-  } else if (kind === "font"){
-    const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
-    if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
-    edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
-  } else if (kind === "font-size"){
-    const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
-    if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
-    edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
-  } else if (kind === "bold"){
+  } else if (["font", "font-size", "bold", "italic", "underline", "text-color", "highlight", "strike",
+    "baseline", "clear-format"].includes(kind)){
     const formatted = officeApplyTextRunFormat(cellXml, kind, request.value);
     if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
     edits.push({ start: cell.start, end: cell.end, value: formatted.xml });
@@ -837,7 +1032,14 @@ function officeParagraphTextFormat(xml, request){
   const index = Number(request && request.paragraphIndex) || 0;
   const item = officeParagraphOutline(source)[index - 1];
   if (!item) return null;
-  return officeTextFormatOfXml(source.slice(item.start, item.end));
+  const paragraphXml = source.slice(item.start, item.end);
+  const offset = Number(request && request.offset);
+  if (!Number.isFinite(offset)) return officeTextFormatOfXml(paragraphXml);
+  const model = officeParagraphModel(paragraphXml, 0);
+  const at = Math.max(0, Math.min(model.text.length ? model.text.length - 1 : 0, offset));
+  const run = officeCellTextRunRanges(paragraphXml).find(range => model.segs.some(seg =>
+    !seg.locked && seg.tagStart >= range.start && seg.tagStart < range.end && at >= seg.start && at < seg.end));
+  return officeTextFormatOfXml(run ? paragraphXml.slice(run.start, run.end) : paragraphXml);
 }
 
 function officeParagraphFormatEdit(xml, action){
@@ -847,13 +1049,520 @@ function officeParagraphFormatEdit(xml, action){
   const item = officeParagraphOutline(source)[paragraphIndex - 1];
   if (!item) return { xml: source, changed: false, reason: "문단 위치를 찾지 못했어요." };
   const paragraphXml = source.slice(item.start, item.end);
-  const formatted = officeApplyTextRunFormat(paragraphXml, String(request.kind || ""), request.value);
+  const hasRange = Number.isFinite(Number(request.rangeStart)) && Number.isFinite(Number(request.rangeEnd)) &&
+    Number(request.rangeEnd) > Number(request.rangeStart);
+  const formatted = hasRange
+    ? officeApplyTextRunFormatRange(paragraphXml, String(request.kind || ""), request.value,
+      Number(request.rangeStart), Number(request.rangeEnd))
+    : officeApplyTextRunFormat(paragraphXml, String(request.kind || ""), request.value);
   if (!formatted.changed) return { xml: source, changed: false, reason: formatted.reason };
   return {
     xml: officeApplyEdits(source, [{ start: item.start, end: item.end, value: formatted.xml }]),
     changed: true, reason: "", kind: String(request.kind || ""),
-    selection: { paragraphIndex }
+    selection: { paragraphIndex, rangeStart: hasRange ? Number(request.rangeStart) : undefined,
+      rangeEnd: hasRange ? Number(request.rangeEnd) : undefined }
   };
+}
+
+function officeParagraphLayoutFormat(xml, request){
+  const source = String(xml || "");
+  const paragraphIndex = Number(request && request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return null;
+  const paragraphXml = source.slice(item.start, item.end);
+  const pPr = officeTableOwnProperties(paragraphXml, "pPr");
+  const line = Number(officeWordVal(pPr, "spacing", "line"));
+  return {
+    alignment: officeWordVal(pPr, "jc", "val") || "left",
+    lineSpacing: line > 0 ? Math.round((line / 240) * 100) / 100 : 1,
+    before: (Number(officeWordVal(pPr, "spacing", "before")) || 0) / 20,
+    after: (Number(officeWordVal(pPr, "spacing", "after")) || 0) / 20,
+    left: Number(officeWordVal(pPr, "ind", "left")) || 0,
+    right: Number(officeWordVal(pPr, "ind", "right")) || 0,
+    firstLine: Number(officeWordVal(pPr, "ind", "firstLine")) || 0,
+    hanging: Number(officeWordVal(pPr, "ind", "hanging")) || 0
+  };
+}
+
+function officeParagraphLayoutEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const paragraphIndex = Number(request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return { xml: source, changed: false, reason: "문단 위치를 찾지 못했어요." };
+  const paragraphXml = source.slice(item.start, item.end);
+  const prefix = (paragraphXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)p/i) || [])[1] || "w:";
+  const current = officeParagraphLayoutFormat(source, { paragraphIndex });
+  const kind = String(request.kind || "");
+  let next = paragraphXml;
+  if (kind === "alignment"){
+    const value = /^(left|center|right|both)$/.test(String(request.value || "")) ? String(request.value) : "left";
+    next = officeSetWordProperty(next, "p", "pPr", "jc",
+      "<" + prefix + "jc " + prefix + "val=\"" + value + "\"/>");
+  } else if (kind === "line-spacing"){
+    const multiple = Number(request.value);
+    if (!Number.isFinite(multiple) || multiple <= 0)
+      return { xml: source, changed: false, reason: "올바른 줄 간격을 골라 주세요." };
+    next = officeSetWordPropertyAttributes(next, "p", "pPr", "spacing",
+      { line: Math.round(Math.max(0.5, Math.min(5, multiple)) * 240), lineRule: "auto" });
+  } else if (kind === "space-before" || kind === "space-after"){
+    const points = Number(request.value);
+    if (!Number.isFinite(points) || points < 0)
+      return { xml: source, changed: false, reason: "올바른 문단 간격을 골라 주세요." };
+    const before = kind === "space-before";
+    const updates = {};
+    updates[before ? "before" : "after"] = Math.round(Math.min(200, points) * 20);
+    updates[before ? "beforeAutospacing" : "afterAutospacing"] = "0";
+    next = officeSetWordPropertyAttributes(next, "p", "pPr", "spacing", updates);
+  } else if (kind === "indent-left" || kind === "indent-right"){
+    const left = kind === "indent-left";
+    const base = left ? current.left : current.right;
+    const width = Math.max(0, Math.min(14400, base + (Number(request.delta) || 0)));
+    next = officeSetWordPropertyAttributes(next, "p", "pPr", "ind", { [left ? "left" : "right"]: width });
+  } else if (kind === "special-indent"){
+    const value = String(request.value || "none");
+    if (!/^(none|first-line|hanging)$/.test(value))
+      return { xml: source, changed: false, reason: "올바른 특수 들여쓰기를 골라 주세요." };
+    next = officeSetWordPropertyAttributes(next, "p", "pPr", "ind", {
+      firstLine: value === "first-line" ? 360 : 0,
+      hanging: value === "hanging" ? 360 : 0
+    });
+  } else if (kind === "clear-layout"){
+    for (const property of ["jc", "spacing", "ind"])
+      next = officeSetWordProperty(next, "p", "pPr", property, "");
+  } else return { xml: source, changed: false, reason: "알 수 없는 문단 서식 편집이에요." };
+
+  if (next === paragraphXml) return { xml: source, changed: false, reason: "같은 문단 서식이에요." };
+  return {
+    xml: officeApplyEdits(source, [{ start: item.start, end: item.end, value: next }]),
+    changed: true, reason: "", kind, selection: { paragraphIndex }
+  };
+}
+
+function officeParagraphListFormat(xml, request){
+  const source = String(xml || "");
+  const paragraphIndex = Number(request && request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return null;
+  const pPr = officeTableOwnProperties(source.slice(item.start, item.end), "pPr");
+  return { numId: Number(officeWordVal(pPr, "numId", "val")) || 0,
+    level: Number(officeWordVal(pPr, "ilvl", "val")) || 0 };
+}
+
+function officeParagraphListEdit(xml, action){
+  const source = String(xml || "");
+  const request = action || {};
+  const paragraphIndex = Number(request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return { xml: source, changed: false, reason: "문단 위치를 찾지 못했어요." };
+  const paragraphXml = source.slice(item.start, item.end);
+  const prefix = (paragraphXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)p/i) || [])[1] || "w:";
+  const kind = String(request.kind || "none");
+  let child = "";
+  if (kind !== "none"){
+    const numId = Number(request.numId) || 0;
+    if (!numId) return { xml: source, changed: false, reason: "글머리표 정의를 만들지 못했어요." };
+    const level = Math.max(0, Math.min(8, Number(request.level) || 0));
+    child = "<" + prefix + "numPr><" + prefix + "ilvl " + prefix + "val=\"" + level + "\"/>" +
+      "<" + prefix + "numId " + prefix + "val=\"" + numId + "\"/></" + prefix + "numPr>";
+  }
+  const next = officeSetWordProperty(paragraphXml, "p", "pPr", "numPr", child);
+  if (next === paragraphXml) return { xml: source, changed: false, reason: "같은 글머리표 형식이에요." };
+  return { xml: officeApplyEdits(source, [{ start: item.start, end: item.end, value: next }]),
+    changed: true, reason: "", kind, selection: { paragraphIndex } };
+}
+
+function officeEnsureContentType(xml, partName, contentType){
+  const source = String(xml || "");
+  if (!source || source.includes('PartName="' + partName + '"')) return source;
+  const child = '<Override PartName="' + officeAttributeEscape(partName) + '" ContentType="' +
+    officeAttributeEscape(contentType) + '"/>';
+  return source.replace(/<\/Types\s*>/i, child + "</Types>");
+}
+
+function officeEnsureRelationship(xml, type, target, preferredId){
+  const source = String(xml || "");
+  const escapedType = String(type || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = source.match(new RegExp('<Relationship\\s[^>]*Id="([^"]+)"[^>]*Type="' + escapedType + '"', "i")) ||
+    source.match(new RegExp('<Relationship\\s[^>]*Type="' + escapedType + '"[^>]*Id="([^"]+)"', "i"));
+  if (found) return { xml: source, id: found[1] };
+  const ids = Array.from(source.matchAll(/\bId="rId(\d+)"/gi), match => Number(match[1]) || 0);
+  let id = preferredId || ("rId" + (Math.max(0, ...ids) + 1));
+  if (new RegExp('\\bId="' + id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"', "i").test(source))
+    id = "rId" + (Math.max(0, ...ids) + 1);
+  const child = '<Relationship Id="' + officeAttributeEscape(id) + '" Type="' + officeAttributeEscape(type) +
+    '" Target="' + officeAttributeEscape(target) + '"/>';
+  return { xml: source.replace(/<\/Relationships\s*>/i, child + "</Relationships>"), id };
+}
+
+function officeDocumentSectionRange(xml){
+  const ranges = officeBalancedRanges(String(xml || ""), "sectPr");
+  return ranges.length ? ranges[ranges.length - 1] : null;
+}
+
+function officeDocumentPageFormat(xml){
+  const source = String(xml || "");
+  const range = officeDocumentSectionRange(source);
+  const section = range ? source.slice(range.start, range.end) : "";
+  const width = Number(officeWordVal(section, "pgSz", "w")) || 11906;
+  const height = Number(officeWordVal(section, "pgSz", "h")) || 16838;
+  return {
+    orientation: officeWordVal(section, "pgSz", "orient") === "landscape" || width > height ? "landscape" : "portrait",
+    width, height,
+    top: Number(officeWordVal(section, "pgMar", "top")) || 1440,
+    right: Number(officeWordVal(section, "pgMar", "right")) || 1440,
+    bottom: Number(officeWordVal(section, "pgMar", "bottom")) || 1440,
+    left: Number(officeWordVal(section, "pgMar", "left")) || 1440
+  };
+}
+
+function officeDocumentPageEdit(xml, action){
+  let source = String(xml || "");
+  const request = action || {};
+  let range = officeDocumentSectionRange(source);
+  if (!range){
+    const bodyClose = source.search(/<\/(?:[A-Za-z_][\w.-]*:)?body\s*>/i);
+    if (bodyClose < 0) return { xml: source, changed: false, reason: "문서 쪽 설정 위치를 찾지 못했어요." };
+    source = source.slice(0, bodyClose) + "<w:sectPr/>" + source.slice(bodyClose);
+    range = officeDocumentSectionRange(source);
+  }
+  const section = source.slice(range.start, range.end);
+  const prefix = (section.match(/^<((?:[A-Za-z_][\w.-]*:)?)sectPr/i) || [])[1] || "w:";
+  const current = officeDocumentPageFormat(source);
+  const kind = String(request.kind || "");
+  let next = section;
+  if (kind === "orientation"){
+    const orientation = request.value === "landscape" ? "landscape" : "portrait";
+    const long = Math.max(current.width, current.height), short = Math.min(current.width, current.height);
+    const width = orientation === "landscape" ? long : short;
+    const height = orientation === "landscape" ? short : long;
+    next = officeSetDirectWordChild(next, "sectPr", "pgSz", "<" + prefix + "pgSz " + prefix +
+      "w=\"" + width + "\" " + prefix + "h=\"" + height + "\"" +
+      (orientation === "landscape" ? " " + prefix + "orient=\"landscape\"" : "") + "/>");
+  } else if (kind === "margins"){
+    const preset = String(request.value || "normal");
+    const values = preset === "narrow" ? { top: 720, right: 720, bottom: 720, left: 720 } :
+      (preset === "wide" ? { top: 1440, right: 2880, bottom: 1440, left: 2880 } :
+        { top: 1440, right: 1440, bottom: 1440, left: 1440 });
+    next = officeSetDirectWordChild(next, "sectPr", "pgMar", "<" + prefix + "pgMar " + prefix +
+      "top=\"" + values.top + "\" " + prefix + "right=\"" + values.right + "\" " + prefix +
+      "bottom=\"" + values.bottom + "\" " + prefix + "left=\"" + values.left + "\"/>");
+  } else return { xml: source, changed: false, reason: "알 수 없는 페이지 설정이에요." };
+  const out = officeApplyEdits(source, [{ start: range.start, end: range.end, value: next }]);
+  return { xml: out, changed: out !== source, reason: out === source ? "같은 페이지 설정이에요." : "", kind };
+}
+
+function officeResolvePartPath(baseDir, target){
+  const raw = String(target || "").replace(/\\/g, "/");
+  if (/^\//.test(raw)) return raw.replace(/^\/+/, "");
+  const parts = (String(baseDir || "") + "/" + raw).split("/");
+  const out = [];
+  for (const part of parts){
+    if (!part || part === ".") continue;
+    if (part === "..") out.pop(); else out.push(part);
+  }
+  return out.join("/");
+}
+
+function officeHeaderFooterInfo(parts, documentXml, kind){
+  const sourceParts = parts || {};
+  const type = kind === "footer" ? "footer" : "header";
+  const document = String(documentXml || "");
+  const reference = document.match(new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + type +
+    "Reference\\s[^>]*(?:[A-Za-z_][\\w.-]*:)?id=\"([^\"]+)\"[^>]*/?>", "i"));
+  let path = "";
+  if (reference){
+    const rels = String(sourceParts["word/_rels/document.xml.rels"] || "");
+    for (const rel of rels.match(/<Relationship\s[^>]*\/>/gi) || []){
+      const id = (rel.match(/\bId="([^"]+)"/i) || [])[1];
+      const target = (rel.match(/\bTarget="([^"]+)"/i) || [])[1];
+      if (id === reference[1]){ path = officeResolvePartPath("word", target); break; }
+    }
+  }
+  const partXml = path ? String(sourceParts[path] || "") : "";
+  const first = officeParagraphOutline(partXml)[0];
+  return { type, id: reference ? reference[1] : "", path, xml: partXml, text: first ? first.text : "" };
+}
+
+function officeHeaderFooterEdit(parts, documentXml, kind, text){
+  const sourceParts = parts || {};
+  const info = officeHeaderFooterInfo(sourceParts, documentXml, kind);
+  const type = info.type;
+  const rootName = type === "footer" ? "ftr" : "hdr";
+  let document = String(documentXml || "");
+  let path = info.path;
+  let partXml = info.xml;
+  const replacements = {};
+  if (!path){
+    const numbers = Object.keys(sourceParts).map(name => {
+      const match = name.match(new RegExp("^word/" + type + "(\\d+)\\.xml$", "i"));
+      return match ? Number(match[1]) || 0 : 0;
+    });
+    path = "word/" + type + (Math.max(0, ...numbers) + 1) + ".xml";
+    partXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:' + rootName +
+      ' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t></w:t></w:r></w:p></w:' + rootName + '>';
+    const relType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/" + type;
+    const target = path.slice("word/".length);
+    const rel = officeEnsureRelationship(sourceParts["word/_rels/document.xml.rels"], relType, target);
+    replacements["word/_rels/document.xml.rels"] = rel.xml;
+    replacements["[Content_Types].xml"] = officeEnsureContentType(sourceParts["[Content_Types].xml"], "/" + path,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml." + type + "+xml");
+    if (!/\sxmlns:r="/i.test(document)) document = document.replace(/<(?:[A-Za-z_][\w.-]*:)?document\b/i,
+      '$& xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"');
+    let range = officeDocumentSectionRange(document);
+    if (!range){
+      const bodyClose = document.search(/<\/(?:[A-Za-z_][\w.-]*:)?body\s*>/i);
+      document = document.slice(0, bodyClose) + "<w:sectPr/>" + document.slice(bodyClose);
+      range = officeDocumentSectionRange(document);
+    }
+    const section = document.slice(range.start, range.end);
+    const prefix = (section.match(/^<((?:[A-Za-z_][\w.-]*:)?)sectPr/i) || [])[1] || "w:";
+    const child = "<" + prefix + type + "Reference " + prefix + "type=\"default\" r:id=\"" + rel.id + "\"/>";
+    const nextSection = officeSetDirectWordChild(section, "sectPr", type + "Reference", child);
+    document = officeApplyEdits(document, [{ start: range.start, end: range.end, value: nextSection }]);
+  }
+  const first = officeParagraphOutline(partXml)[0];
+  if (first){
+    const paragraphXml = partXml.slice(first.start, first.end);
+    const model = officeParagraphModel(paragraphXml, first.start);
+    const wantedText = String(text == null ? "" : text);
+    if (!model.segs.some(seg => !seg.locked) && wantedText){
+      const prefix = (paragraphXml.match(/^<((?:[A-Za-z_][\w.-]*:)?)p/i) || [])[1] || "w:";
+      const pPr = officeTableOwnProperties(paragraphXml, "pPr");
+      const replacement = "<" + prefix + "p>" + pPr + "<" + prefix + "r><" + prefix + "t>" +
+        officeReplaceEscape(wantedText) + "</" + prefix + "t></" + prefix + "r></" + prefix + "p>";
+      partXml = officeApplyEdits(partXml, [{ start: first.start, end: first.end, value: replacement }]);
+    } else {
+      const plan = officeParagraphTextEdits(model, wantedText);
+      if (plan.skipped) return { changed: false, reason: "머리글·바닥글의 필드나 줄바꿈은 덮어쓸 수 없어요." };
+      if (plan.edits.length) partXml = officeApplyEdits(partXml, plan.edits);
+    }
+  } else {
+    const prefix = "w:";
+    const paragraph = "<" + prefix + "p><" + prefix + "r><" + prefix + "t>" +
+      officeReplaceEscape(text) + "</" + prefix + "t></" + prefix + "r></" + prefix + "p>";
+    partXml = partXml.replace(new RegExp("</(?:[A-Za-z_][\\w.-]*:)?" + rootName + "\\s*>", "i"),
+      paragraph + "</w:" + rootName + ">");
+  }
+  replacements[path] = partXml;
+  replacements["word/document.xml"] = document;
+  return { changed: true, reason: "", documentXml: document, path, replacements, text: String(text == null ? "" : text) };
+}
+
+function officeEnsureContentTypeDefault(xml, extension, contentType){
+  const source = String(xml || "");
+  const ext = String(extension || "").replace(/^\./, "").toLowerCase();
+  if (!source || new RegExp('<Default\\s[^>]*Extension="' + ext + '"', "i").test(source)) return source;
+  const child = '<Default Extension="' + officeAttributeEscape(ext) + '" ContentType="' +
+    officeAttributeEscape(contentType) + '"/>';
+  return source.replace(/<\/Types\s*>/i, child + "</Types>");
+}
+
+function officeAddRelationship(xml, type, target){
+  const source = String(xml || "");
+  const ids = Array.from(source.matchAll(/\bId="rId(\d+)"/gi), match => Number(match[1]) || 0);
+  const id = "rId" + (Math.max(0, ...ids) + 1);
+  const child = '<Relationship Id="' + id + '" Type="' + officeAttributeEscape(type) +
+    '" Target="' + officeAttributeEscape(target) + '"/>';
+  return { id, xml: source.replace(/<\/Relationships\s*>/i, child + "</Relationships>") };
+}
+
+function officeRelationshipTarget(xml, id){
+  for (const rel of String(xml || "").match(/<Relationship\s[^>]*\/>/gi) || []){
+    if ((rel.match(/\bId="([^"]+)"/i) || [])[1] !== id) continue;
+    return (rel.match(/\bTarget="([^"]+)"/i) || [])[1] || "";
+  }
+  return "";
+}
+
+function officeSetRelationshipTarget(xml, id, target){
+  const source = String(xml || "");
+  return source.replace(/<Relationship\s[^>]*\/>/gi, rel => {
+    if ((rel.match(/\bId="([^"]+)"/i) || [])[1] !== id) return rel;
+    if (/\bTarget="[^"]*"/i.test(rel)) return rel.replace(/\bTarget="[^"]*"/i,
+      'Target="' + officeAttributeEscape(target) + '"');
+    return rel.replace(/\/>$/, ' Target="' + officeAttributeEscape(target) + '"/>');
+  });
+}
+
+function officeParagraphImageInfo(xml, request){
+  const source = String(xml || "");
+  const paragraphIndex = Number(request && request.paragraphIndex) || 0;
+  const item = officeParagraphOutline(source)[paragraphIndex - 1];
+  if (!item) return null;
+  const paragraph = source.slice(item.start, item.end);
+  const ids = Array.from(paragraph.matchAll(/<(?:[A-Za-z_][\w.-]*:)?blip\s[^>]*(?:[A-Za-z_][\w.-]*:)?embed="([^"]+)"/gi), match => match[1]);
+  const extent = paragraph.match(/<(?:[A-Za-z_][\w.-]*:)?extent\s[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/i);
+  return { count: ids.length, relationshipId: ids[0] || "", cx: extent ? Number(extent[1]) : 0,
+    cy: extent ? Number(extent[2]) : 0 };
+}
+
+function officeEnsureDrawingNamespaces(documentXml){
+  let source = String(documentXml || "");
+  const namespaces = {
+    r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    wp: "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+    pic: "http://schemas.openxmlformats.org/drawingml/2006/picture"
+  };
+  for (const [prefix, uri] of Object.entries(namespaces)){
+    if (new RegExp("\\sxmlns:" + prefix + "=", "i").test(source)) continue;
+    source = source.replace(/<(?:[A-Za-z_][\w.-]*:)?document\b/i, '$& xmlns:' + prefix + '="' + uri + '"');
+  }
+  return source;
+}
+
+function officeImageDrawingXml(relationshipId, name, cx, cy, docPrId, prefix){
+  const w = prefix || "w:";
+  const safeName = officeAttributeEscape(name || "그림");
+  return "<" + w + "r><" + w + "drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">" +
+    "<wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/><wp:docPr id=\"" + docPrId + "\" name=\"" + safeName + "\"/>" +
+    "<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" +
+    "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic>" +
+    "<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"" + safeName + "\"/><pic:cNvPicPr/></pic:nvPicPr>" +
+    "<pic:blipFill><a:blip r:embed=\"" + officeAttributeEscape(relationshipId) + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" +
+    "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm>" +
+    "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>" +
+    "</wp:inline></" + w + "drawing></" + w + "r>";
+}
+
+function officeImagePackageEdit(parts, documentXml, action){
+  const sourceParts = parts || {};
+  const request = action || {};
+  const paragraphIndex = Number(request.paragraphIndex) || 0;
+  let document = String(documentXml || "");
+  let item = officeParagraphOutline(document)[paragraphIndex - 1];
+  if (!item) return { changed: false, reason: "그림을 넣을 문단 위치를 찾지 못했어요." };
+  const kind = String(request.kind || "");
+  const replacements = {};
+  if (kind === "resize"){
+    const paragraph = document.slice(item.start, item.end);
+    const info = officeParagraphImageInfo(document, { paragraphIndex });
+    if (!info || !info.count || !info.cx || !info.cy) return { changed: false, reason: "크기를 바꿀 그림이 없어요." };
+    const scale = Math.max(0.1, Math.min(5, Number(request.scale) || 1));
+    const cx = Math.max(9525, Math.round(info.cx * scale));
+    const cy = Math.max(9525, Math.round(info.cy * scale));
+    let next = paragraph.replace(/(<(?:[A-Za-z_][\w.-]*:)?extent\s[^>]*\bcx=")\d+("[^>]*\bcy=")\d+/i,
+      "$1" + cx + "$2" + cy);
+    next = next.replace(/(<(?:[A-Za-z_][\w.-]*:)?ext\s[^>]*\bcx=")\d+("[^>]*\bcy=")\d+/i,
+      "$1" + cx + "$2" + cy);
+    document = officeApplyEdits(document, [{ start: item.start, end: item.end, value: next }]);
+    return { changed: document !== documentXml, reason: "", documentXml: document, replacements,
+      selection: { paragraphIndex } };
+  }
+
+  const inferredMime = /\.jpe?g$/i.test(String(request.name || "")) ? "image/jpeg" :
+    (/\.gif$/i.test(String(request.name || "")) ? "image/gif" :
+      (/\.png$/i.test(String(request.name || "")) ? "image/png" : ""));
+  const mimeValue = String(request.mime || inferredMime);
+  const mime = /^(image\/(?:png|jpeg|gif))$/i.test(mimeValue) ? mimeValue.toLowerCase() : "";
+  const extension = mime === "image/jpeg" ? "jpg" : (mime === "image/gif" ? "gif" : "png");
+  if (!mime || !request.bytes) return { changed: false, reason: "PNG·JPG·GIF 그림 파일을 골라 주세요." };
+  let rels = String(sourceParts["word/_rels/document.xml.rels"] || "");
+  const mediaNumbers = Object.keys(sourceParts).concat(Object.keys(request.existingChanges || {})).map(path => {
+    const match = path.match(/^word\/media\/image(\d+)\.[^.]+$/i);
+    return match ? Number(match[1]) || 0 : 0;
+  });
+  const mediaPath = "word/media/image" + (Math.max(0, ...mediaNumbers) + 1) + "." + extension;
+  let relationshipId = "";
+  if (kind === "replace"){
+    const info = officeParagraphImageInfo(document, { paragraphIndex });
+    if (!info || !info.relationshipId) return { changed: false, reason: "교체할 그림이 이 문단에 없어요." };
+    relationshipId = info.relationshipId;
+    rels = officeSetRelationshipTarget(rels, relationshipId, mediaPath.slice("word/".length));
+  } else if (kind === "add"){
+    const rel = officeAddRelationship(rels,
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", mediaPath.slice("word/".length));
+    relationshipId = rel.id;
+    rels = rel.xml;
+    document = officeEnsureDrawingNamespaces(document);
+    item = officeParagraphOutline(document)[paragraphIndex - 1];
+    const paragraph = document.slice(item.start, item.end);
+    const prefix = (paragraph.match(/^<((?:[A-Za-z_][\w.-]*:)?)p/i) || [])[1] || "w:";
+    const widthPx = Math.max(1, Number(request.widthPx) || 400);
+    const heightPx = Math.max(1, Number(request.heightPx) || 300);
+    const maxWidthPx = 600;
+    const ratio = Math.min(1, maxWidthPx / widthPx);
+    const cx = Math.round(widthPx * ratio * 9525), cy = Math.round(heightPx * ratio * 9525);
+    const ids = Array.from(document.matchAll(/<wp:docPr\s[^>]*\bid="(\d+)"/gi), match => Number(match[1]) || 0);
+    const drawing = officeImageDrawingXml(relationshipId, request.name || ("image." + extension), cx, cy,
+      Math.max(0, ...ids) + 1, prefix);
+    let next = paragraph;
+    if (/\/>$/.test(next.match(/^<[^>]+>/)[0])) next = next.replace(/\/>$/, ">" + drawing + "</" + prefix + "p>");
+    else next = next.replace(new RegExp("</(?:[A-Za-z_][\\w.-]*:)?p\\s*>$", "i"), drawing + "</" + prefix + "p>");
+    document = officeApplyEdits(document, [{ start: item.start, end: item.end, value: next }]);
+  } else return { changed: false, reason: "알 수 없는 그림 편집이에요." };
+  replacements["word/_rels/document.xml.rels"] = rels;
+  replacements["[Content_Types].xml"] = officeEnsureContentTypeDefault(sourceParts["[Content_Types].xml"], extension, mime);
+  replacements[mediaPath] = request.bytes;
+  return { changed: true, reason: "", documentXml: document, mediaPath, replacements,
+    selection: { paragraphIndex } };
+}
+
+function officeEnsureNumbering(parts, kind){
+  const sourceParts = parts || {};
+  const style = kind === "number" ? "number" : "bullet";
+  let numbering = String(sourceParts["word/numbering.xml"] ||
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:numbering>');
+  const marker = style === "bullet" ? "4D4E4255" : "4D4E4E55";
+  let abstractId = 0, numId = 0;
+  for (const range of officeBalancedRanges(numbering, "abstractNum")){
+    const block = numbering.slice(range.start, range.end);
+    if (!block.includes(marker)) continue;
+    abstractId = Number((block.match(/abstractNumId="(\d+)"/i) || [])[1]) || 0;
+    break;
+  }
+  if (abstractId || numbering.includes(marker)){
+    const nums = officeBalancedRanges(numbering, "num");
+    for (const range of nums){
+      const block = numbering.slice(range.start, range.end);
+      if (Number(officeWordVal(block, "abstractNumId", "val")) !== abstractId) continue;
+      numId = Number((block.match(/numId="(\d+)"/i) || [])[1]) || 0;
+      break;
+    }
+  }
+  if (!numId){
+    const abstractIds = Array.from(numbering.matchAll(/abstractNumId="(\d+)"/gi), match => Number(match[1]) || 0);
+    const numIds = Array.from(numbering.matchAll(/<w:num\s[^>]*w:numId="(\d+)"/gi), match => Number(match[1]) || 0);
+    abstractId = Math.max(-1, ...abstractIds) + 1;
+    numId = Math.max(0, ...numIds) + 1;
+    const numFmt = style === "bullet" ? "bullet" : "decimal";
+    const lvlText = style === "bullet" ? "●" : "%1.";
+    const font = style === "bullet" ? '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:hint="default"/></w:rPr>' : "";
+    const definition = '<w:abstractNum w:abstractNumId="' + abstractId + '"><w:nsid w:val="' + marker + '"/>' +
+      '<w:multiLevelType w:val="singleLevel"/><w:tmpl w:val="' + marker + '"/><w:lvl w:ilvl="0">' +
+      '<w:start w:val="1"/><w:numFmt w:val="' + numFmt + '"/><w:lvlText w:val="' + lvlText +
+      '"/><w:lvlJc w:val="left"/><w:pPr><w:tabs><w:tab w:val="num" w:pos="720"/></w:tabs>' +
+      '<w:ind w:left="720" w:hanging="360"/></w:pPr>' + font + '</w:lvl></w:abstractNum>' +
+      '<w:num w:numId="' + numId + '"><w:abstractNumId w:val="' + abstractId + '"/></w:num>';
+    numbering = numbering.replace(/<\/w:numbering\s*>/i, definition + "</w:numbering>");
+  }
+  const relType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering";
+  const rel = officeEnsureRelationship(sourceParts["word/_rels/document.xml.rels"], relType, "numbering.xml", "rIdMNNumbering");
+  const contentTypes = officeEnsureContentType(sourceParts["[Content_Types].xml"], "/word/numbering.xml",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml");
+  return { numId, replacements: { "word/numbering.xml": numbering,
+    "word/_rels/document.xml.rels": rel.xml, "[Content_Types].xml": contentTypes } };
+}
+
+function officeNumberingKind(parts, numId){
+  const numbering = String(parts && parts["word/numbering.xml"] || "");
+  const wanted = Number(numId) || 0;
+  if (!numbering || !wanted) return "none";
+  let abstractId = -1;
+  for (const range of officeBalancedRanges(numbering, "num")){
+    const block = numbering.slice(range.start, range.end);
+    if (Number((block.match(/numId="(\d+)"/i) || [])[1]) !== wanted) continue;
+    abstractId = Number(officeWordVal(block, "abstractNumId", "val"));
+    break;
+  }
+  if (abstractId < 0) return "list";
+  for (const range of officeBalancedRanges(numbering, "abstractNum")){
+    const block = numbering.slice(range.start, range.end);
+    if (Number((block.match(/abstractNumId="(\d+)"/i) || [])[1]) !== abstractId) continue;
+    return officeWordVal(block, "numFmt", "val") === "bullet" ? "bullet" : "number";
+  }
+  return "list";
 }
 
 /* ---------- 문단 편집(Phase 2, 설계: docs/워드-문단편집-설계.md) ---------- */
@@ -905,6 +1614,9 @@ function officeParagraphOutline(xml){
       tableRectangular: tableCell ? tableCell.table.rectangular : false,
       tableRowCount: tableCell ? tableCell.table.rows.length : 0,
       tableColumnCount: tableCell ? tableCell.table.columnCount : 0,
+      tableCellGridSpan: tableCell ? tableCell.cell.gridSpan : 1,
+      tableRowCellCount: tableCell ? tableCell.row.cells.length : 0,
+      tableCellVmerge: tableCell ? tableCell.cell.vMerge : "",
       hasSectPr: /<(?:[A-Za-z_][\w.-]*:)?sectPr(?:\s[^>]*)?[>/]/i.test(paraXml),
       locked: model.segs.some(seg => seg.locked),
       // 도형이 든 문단은 글자를 고칠 수는 있어도 통째로 지우면 도형까지 사라진다 — 화면이 알려 준다.
@@ -1157,9 +1869,13 @@ const MNOfficeReplace = (() => {
       for (const entry of entries){
         if (entry.directory) continue;
         const path = entry.filename.replace(/\\/g, "/");
-        if (!officePartRole(path, kind)) continue;
-        paths.push(path);
-        parts[path] = await entry.getData(new lib.TextWriter());
+        const role = officePartRole(path, kind);
+        const support = kind === "docx" && (/^\[Content_Types\]\.xml$/i.test(path) ||
+          /^word\/_rels\/document\.xml\.rels$/i.test(path) || /^word\/numbering\.xml$/i.test(path) ||
+          /^word\/media\//i.test(path));
+        if (!role && !support) continue;
+        if (role) paths.push(path);
+        parts[path] = /^word\/media\//i.test(path) ? null : await entry.getData(new lib.TextWriter());
       }
       return { bytes, encrypted: false, paths, parts };
     } finally { try { await reader.close(); } catch(_){} }
@@ -1227,16 +1943,29 @@ const MNOfficeReplace = (() => {
     const writer = new lib.ZipWriter(new lib.BlobWriter("application/zip"));
     try {
       const entries = await reader.getEntries();
+      const written = new Set();
+      const addReplacement = async (name, replacement) => {
+        if (typeof replacement === "string") await writer.add(name, new lib.TextReader(replacement));
+        else {
+          const value = replacement instanceof Blob ? replacement : new Blob([replacement]);
+          await writer.add(name, new lib.BlobReader(value));
+        }
+      };
       for (const entry of entries){
         if (entry.directory) continue;
         const path = entry.filename.replace(/\\/g, "/");
         const replacement = newXmlByPath && newXmlByPath[path];
-        if (typeof replacement === "string"){
-          await writer.add(entry.filename, new lib.TextReader(replacement));
+        if (replacement !== undefined){
+          await addReplacement(entry.filename, replacement);
+          written.add(path);
         } else {
           const blob = await entry.getData(new lib.BlobWriter());
           await writer.add(entry.filename, new lib.BlobReader(blob));
         }
+      }
+      for (const [path, replacement] of Object.entries(newXmlByPath || {})){
+        if (written.has(path) || replacement === undefined) continue;
+        await addReplacement(path, replacement);
       }
       const blob = await writer.close();
       return new Uint8Array(await blob.arrayBuffer());
@@ -1330,7 +2059,16 @@ if (typeof module === "object" && module.exports){
     officeExpandReplacement, officeOpenTagFor, officeApplyRangesToSegments, officePlanParagraphEdits,
     officeParagraphTextEdits, officeInlineTextKey, officeInlineMapVerify, officeParagraphMarkerPlan,
     officeTableOutline, officeBlankTableCellXml, officeBlankTableRowXml, officeTableStructureEdit,
-    officeTableCellFormat, officeTableFormatEdit, officeParagraphTextFormat, officeParagraphFormatEdit,
+    officeTableCellBodyXml, officeTableCellMergeEdit,
+    officeTableCellFormat, officeTableFormatEdit, officeTextRunWithText, officeApplyTextRunFormatRange,
+    officeParagraphTextFormat, officeParagraphFormatEdit,
+    officeParagraphLayoutFormat, officeParagraphLayoutEdit, officeParagraphListFormat, officeParagraphListEdit,
+    officeSetDirectWordChild, officeEnsureContentType, officeEnsureRelationship,
+    officeDocumentSectionRange, officeDocumentPageFormat, officeDocumentPageEdit,
+    officeResolvePartPath, officeHeaderFooterInfo, officeHeaderFooterEdit,
+    officeEnsureContentTypeDefault, officeAddRelationship, officeRelationshipTarget, officeSetRelationshipTarget,
+    officeParagraphImageInfo, officeEnsureDrawingNamespaces, officeImageDrawingXml, officeImagePackageEdit,
+    officeEnsureNumbering, officeNumberingKind,
     officeParagraphOutline, officeNewParagraphXml, officeParagraphStructureEdits,
     officeParagraphEditPlan, officeApplyEdits,
     officeReplacePartXml, officeCountMatches, officeCountParagraphMatches, officeCountTextboxMatches,

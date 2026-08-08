@@ -99,6 +99,20 @@ test("바꿀 게 없으면 아무 파트도 갈아끼우지 않는다", async ()
   for (const path of before.keys()) assert.deepEqual(after.get(path), before.get(path), path);
 });
 
+test("패키지 빌드는 새 XML·미디어 엔트리를 추가하고 기존 바이너리도 교체한다", async () => {
+  const original = await makeDocx();
+  const newImage = new Uint8Array([9, 8, 7, 6]);
+  const replacedImage = new Uint8Array([5, 4, 3]);
+  const after = await readAll(await MNOfficeReplace.build(original, {
+    "word/numbering.xml": "<w:numbering xmlns:w=\"urn:test\"/>",
+    "word/media/image2.png": newImage,
+    "word/media/image1.png": replacedImage
+  }));
+  assert.equal(textOf(after, "word/numbering.xml"), "<w:numbering xmlns:w=\"urn:test\"/>");
+  assert.deepEqual(after.get("word/media/image2.png"), Buffer.from(newImage));
+  assert.deepEqual(after.get("word/media/image1.png"), Buffer.from(replacedImage));
+});
+
 test("read 한 번으로 여러 번 compute 한다 — zip 을 다시 풀지 않는다", async () => {
   const original = await makeDocx();
   const opts = { includeAttached: true };
@@ -266,8 +280,8 @@ test("표 행을 추가해 저장해도 document.xml 밖의 엔트리는 바이�
   assert.match(textOf(after, "word/document.xml"), /<w:tr><w:tc><w:p><\/w:p><\/w:tc><\/w:tr>/);
 });
 
-test("글자·셀 서식을 바꿔 저장해도 document.xml 밖의 엔트리는 바이트까지 그대로다", async () => {
-  const { officeTableFormatEdit, officeParagraphFormatEdit } = require("../src/js/office-replace.js");
+test("글자·문단·셀 서식을 바꿔 저장해도 document.xml 밖의 엔트리는 바이트까지 그대로다", async () => {
+  const { officeTableFormatEdit, officeParagraphFormatEdit, officeParagraphLayoutEdit } = require("../src/js/office-replace.js");
   const original = await makeDocx();
   const before = await readAll(original);
   const source = await MNOfficeReplace.read(new Blob([original]), "docx", {});
@@ -277,11 +291,20 @@ test("글자·셀 서식을 바꿔 저장해도 document.xml 밖의 엔트리는
     { kind: "horizontal", value: "center", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
   const fontChanged = officeParagraphFormatEdit(aligned.xml,
     { kind: "font", value: "맑은 고딕", paragraphIndex: 1 });
+  const highlighted = officeParagraphFormatEdit(fontChanged.xml,
+    { kind: "highlight", value: "FFF2CC", paragraphIndex: 1 });
+  const superscripted = officeParagraphFormatEdit(highlighted.xml,
+    { kind: "baseline", value: "superscript", paragraphIndex: 1 });
+  const spaced = officeParagraphLayoutEdit(superscripted.xml,
+    { kind: "line-spacing", value: 1.5, paragraphIndex: 1 });
   assert.equal(filled.changed, true);
   assert.equal(aligned.changed, true);
   assert.equal(fontChanged.changed, true);
+  assert.equal(highlighted.changed, true);
+  assert.equal(superscripted.changed, true);
+  assert.equal(spaced.changed, true);
 
-  const after = await readAll(await MNOfficeReplace.build(original, { "word/document.xml": fontChanged.xml }));
+  const after = await readAll(await MNOfficeReplace.build(original, { "word/document.xml": spaced.xml }));
   for (const path of before.keys()){
     if (path === "word/document.xml") continue;
     assert.deepEqual(after.get(path), before.get(path), path + " 가 바뀌었음");
@@ -290,4 +313,7 @@ test("글자·셀 서식을 바꿔 저장해도 document.xml 밖의 엔트리는
   assert.match(doc, /<w:shd[^>]*w:fill="FFF2CC"/);
   assert.match(doc, /<w:jc[^>]*w:val="center"/);
   assert.match(doc, /<w:rFonts[^>]*w:eastAsia="맑은 고딕"/);
+  assert.match(doc, /<w:shd[^>]*w:fill="FFF2CC"/);
+  assert.match(doc, /<w:spacing[^>]*w:line="360"/);
+  assert.match(doc, /<w:vertAlign[^>]*w:val="superscript"/);
 });

@@ -121,6 +121,9 @@ async function runUiBatch(task){
    - 배치 요소(.placed), 버튼·입력 등 인터랙티브 요소 위에서는 동작 안 함
    - overflow 가 없을 때는 grab 커서를 표시하지 않음 (ResizeObserver/MutationObserver 로 갱신) */
 function isPanIgnoredTarget(target, container){
+  // Word 제자리 편집 중에는 빈 여백을 눌러도 문서 이동 모드로 들어가지 않는다.
+  // 편집 문단 밖에서 시작한 짧은 드래그가 선택을 지우거나 화면을 움직이는 일을 막는다.
+  if (container && container.classList && container.classList.contains("docx-inline-editing")) return true;
   let el = target;
   while (el && el !== container){
     if (el.nodeType === 1){

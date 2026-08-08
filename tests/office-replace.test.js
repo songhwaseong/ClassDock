@@ -758,6 +758,27 @@ test("병합 표와 중첩 표는 기존 구조를 보존하며 위험한 축 �
     { kind: "row-delete", tableIndex: 1, rowIndex: 1, cellIndex: 1 }).reason, /다른 표/);
 });
 
+test("오른쪽 셀 병합은 gridSpan과 두 셀의 문단을 보존하고 다시 나눌 수 있다", () => {
+  const table = "<w:body><w:tbl><w:tblGrid><w:gridCol w:w=\"1000\"/><w:gridCol w:w=\"1000\"/></w:tblGrid>" +
+    tableRow(["<w:tc><w:tcPr><w:tcW w:w=\"2000\" w:type=\"dxa\"/></w:tcPr>" + para(run("왼쪽")) + "</w:tc>",
+      tableCell("오른쪽")]) + "</w:tbl></w:body>";
+  let result = api.officeTableCellMergeEdit(table,
+    { kind: "cell-merge-right", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.match(result.xml, /<w:gridSpan w:val="2"\/>/);
+  assert.match(result.xml, /왼쪽[\s\S]*오른쪽/);
+  assert.equal(api.officeTableOutline(result.xml)[0].rows[0].cells.length, 1);
+
+  result = api.officeTableCellMergeEdit(result.xml,
+    { kind: "cell-split", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
+  assert.equal(result.changed, true);
+  const cells = api.officeTableOutline(result.xml)[0].rows[0].cells;
+  assert.equal(cells.length, 2);
+  assert.equal(cells[0].gridSpan, 1);
+  assert.doesNotMatch(result.xml, /<w:gridSpan/);
+  assert.match(result.xml, /<w:tcW w:w="1000" w:type="dxa"\/>/);
+});
+
 test("선택 셀의 가로·세로 정렬만 바꾸고 다른 셀 문단은 그대로 둔다", () => {
   let result = api.officeTableFormatEdit(SIMPLE_TABLE,
     { kind: "horizontal", value: "center", tableIndex: 1, rowIndex: 1, cellIndex: 1 });
@@ -856,8 +877,247 @@ test("표 밖의 선택 문단에도 글꼴·크기·굵게를 적용한다", ()
   result = api.officeParagraphFormatEdit(result.xml,
     { kind: "bold", value: true, paragraphIndex: 1 });
   assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }),
-    { font: "바탕", fontSize: 18, bold: true });
+    { font: "바탕", fontSize: 18, bold: true, italic: false, underline: true,
+      textColor: "000000", highlight: "FFFFFF", strike: false, baseline: "baseline" });
   assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 2 }),
-    { font: "", fontSize: 11, bold: false });
+    { font: "", fontSize: 11, bold: false, italic: false, underline: false,
+      textColor: "000000", highlight: "FFFFFF", strike: false, baseline: "baseline" });
   assert.match(result.xml, /<w:rPr><w:u\/><w:rFonts/); // 밑줄은 보존한다
+});
+
+test("기울임·밑줄·글자색·형광펜을 적용하고 끌 수 있다", () => {
+  const xml = "<w:body>" + para(run("서식", '<w:rPr><w:lang w:val="ko-KR"/></w:rPr>')) + "</w:body>";
+  let result = api.officeParagraphFormatEdit(xml, { kind: "italic", value: true, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "underline", value: true, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "text-color", value: "#123ABC", paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "highlight", value: "FFF2CC", paragraphIndex: 1 });
+  assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }), {
+    font: "", fontSize: 11, bold: false, italic: true, underline: true,
+    textColor: "123ABC", highlight: "FFF2CC", strike: false, baseline: "baseline"
+  });
+  assert.match(result.xml, /<w:i\/>/);
+  assert.match(result.xml, /<w:iCs\/>/);
+  assert.match(result.xml, /<w:u w:val="single"\/>/);
+
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "italic", value: false, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "underline", value: false, paragraphIndex: 1 });
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }).italic, false);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }).underline, false);
+  assert.match(result.xml, /<w:i w:val="0"\/>/);
+  assert.match(result.xml, /<w:u w:val="none"\/>/);
+});
+
+test("서식 지우기는 편집 가능한 글자 속성만 걷고 언어 속성은 보존한다", () => {
+  const rich = '<w:rPr><w:lang w:val="ko-KR"/><w:noProof/><w:rFonts w:eastAsia="굴림"/>' +
+    '<w:sz w:val="28"/><w:szCs w:val="28"/><w:b/><w:i/><w:u w:val="single"/>' +
+    '<w:color w:val="FF0000"/><w:shd w:fill="FFFF00"/><w:strike/><w:vertAlign w:val="superscript"/></w:rPr>';
+  const xml = "<w:body>" + para(run("초기화", rich)) + "</w:body>";
+  const result = api.officeParagraphFormatEdit(xml, { kind: "clear-format", paragraphIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }), {
+    font: "", fontSize: 11, bold: false, italic: false, underline: false,
+    textColor: "000000", highlight: "FFFFFF", strike: false, baseline: "baseline"
+  });
+  assert.match(result.xml, /<w:lang w:val="ko-KR"\/>/);
+  assert.match(result.xml, /<w:noProof\/>/);
+  assert.doesNotMatch(result.xml, /<w:(?:rFonts|sz|szCs|b|i|u|color|shd|strike|dstrike|vertAlign)(?:\s|\/|>)/);
+});
+
+test("취소선과 위·아래 첨자를 적용하고 정상 글자로 되돌린다", () => {
+  const xml = "<w:body>" + para(run("수식")) + "</w:body>";
+  let result = api.officeParagraphFormatEdit(xml, { kind: "strike", value: true, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "baseline", value: "superscript", paragraphIndex: 1 });
+  let format = api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 });
+  assert.equal(format.strike, true);
+  assert.equal(format.baseline, "superscript");
+  assert.match(result.xml, /<w:strike\/>/);
+  assert.match(result.xml, /<w:vertAlign w:val="superscript"\/>/);
+
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "strike", value: false, paragraphIndex: 1 });
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "baseline", value: "subscript", paragraphIndex: 1 });
+  format = api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 });
+  assert.equal(format.strike, false);
+  assert.equal(format.baseline, "subscript");
+  assert.match(result.xml, /<w:strike w:val="0"\/>/);
+
+  result = api.officeParagraphFormatEdit(result.xml, { kind: "baseline", value: "baseline", paragraphIndex: 1 });
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1 }).baseline, "baseline");
+});
+
+test("선택한 글자 범위만 run을 나눠 서식을 적용하고 앞뒤 서식은 보존한다", () => {
+  const xml = "<w:body>" + para(run("가나다라마바사", "<w:rPr><w:i/></w:rPr>")) + "</w:body>";
+  const result = api.officeParagraphFormatEdit(xml,
+    { kind: "bold", value: true, paragraphIndex: 1, rangeStart: 2, rangeEnd: 5 });
+  assert.equal(result.changed, true);
+  assert.equal((result.xml.match(/<w:r>/g) || []).length, 3);
+  assert.match(result.xml, /<w:t>가나<\/w:t>/);
+  assert.match(result.xml, /<w:i\/><w:b\/><w:bCs\/><\/w:rPr><w:t>다라마<\/w:t>/);
+  assert.match(result.xml, /<w:t>바사<\/w:t>/);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 0 }).bold, false);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 3 }).bold, true);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 6 }).bold, false);
+});
+
+test("선택 범위가 여러 run에 걸리면 양끝만 나누고 가운데 run 전체를 서식 처리한다", () => {
+  const xml = "<w:body>" + para(run("가나") + run("다라") + run("마바")) + "</w:body>";
+  const result = api.officeParagraphFormatEdit(xml,
+    { kind: "underline", value: true, paragraphIndex: 1, rangeStart: 1, rangeEnd: 5 });
+  assert.equal(result.changed, true);
+  assert.equal((result.xml.match(/<w:u w:val="single"\/>/g) || []).length, 3);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 0 }).underline, false);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 2 }).underline, true);
+  assert.equal(api.officeParagraphTextFormat(result.xml, { paragraphIndex: 1, offset: 5 }).underline, false);
+});
+
+test("글머리표·번호 정의를 패키지에 만들고 문단에 연결하거나 해제한다", () => {
+  const parts = {
+    "[Content_Types].xml": '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+    "word/_rels/document.xml.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+  };
+  const bullet = api.officeEnsureNumbering(parts, "bullet");
+  assert.equal(bullet.numId, 1);
+  assert.match(bullet.replacements["word/numbering.xml"], /w:numFmt w:val="bullet"/);
+  assert.match(bullet.replacements["word/_rels/document.xml.rels"], /relationships\/numbering/);
+  assert.match(bullet.replacements["[Content_Types].xml"], /word\/numbering\.xml/);
+
+  const xml = "<w:body>" + para(run("항목")) + "</w:body>";
+  let result = api.officeParagraphListEdit(xml,
+    { kind: "bullet", numId: bullet.numId, paragraphIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(api.officeParagraphListFormat(result.xml, { paragraphIndex: 1 }), { numId: 1, level: 0 });
+  assert.match(result.xml, /<w:numPr><w:ilvl w:val="0"\/><w:numId w:val="1"\/><\/w:numPr>/);
+  result = api.officeParagraphListEdit(result.xml, { kind: "none", paragraphIndex: 1 });
+  assert.equal(api.officeParagraphListFormat(result.xml, { paragraphIndex: 1 }).numId, 0);
+});
+
+test("기존 사용자 번호 정의와 관계를 보존하며 앱 번호 정의를 한 번만 추가한다", () => {
+  const base = api.officeEnsureNumbering({
+    "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+    "word/_rels/document.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+  }, "number");
+  const again = api.officeEnsureNumbering({ ...base.replacements }, "number");
+  assert.equal(again.numId, base.numId);
+  assert.equal((again.replacements["word/numbering.xml"].match(/4D4E4E55/g) || []).length, 2);
+  assert.equal((again.replacements["word/_rels/document.xml.rels"].match(/relationships\/numbering/g) || []).length, 1);
+});
+
+test("페이지 방향과 여백 프리셋은 마지막 구역 설정만 바꾼다", () => {
+  const xml = '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    para(run("본문")) + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/></w:sectPr>' +
+    '</w:body></w:document>';
+  let result = api.officeDocumentPageEdit(xml, { kind: "orientation", value: "landscape" });
+  assert.equal(result.changed, true);
+  assert.deepEqual(api.officeDocumentPageFormat(result.xml), {
+    orientation: "landscape", width: 16838, height: 11906, top: 1000, right: 1000, bottom: 1000, left: 1000
+  });
+  result = api.officeDocumentPageEdit(result.xml, { kind: "margins", value: "narrow" });
+  const format = api.officeDocumentPageFormat(result.xml);
+  assert.equal(format.top, 720);
+  assert.equal(format.left, 720);
+});
+
+test("머리글·바닥글이 없으면 파트·관계·참조를 만들고 기존 것이 있으면 글자만 고친다", () => {
+  const parts = {
+    "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+    "word/_rels/document.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+  };
+  const documentXml = '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    para(run("본문")) + '<w:sectPr/></w:body></w:document>';
+  const made = api.officeHeaderFooterEdit(parts, documentXml, "header", "학교 문서");
+  assert.equal(made.changed, true);
+  assert.match(made.documentXml, /w:headerReference[^>]*r:id=/);
+  assert.match(made.replacements[made.path], /<w:t>학교 문서<\/w:t>/);
+  assert.match(made.replacements["word/_rels/document.xml.rels"], /relationships\/header/);
+  const mergedParts = { ...parts, ...made.replacements };
+  assert.equal(api.officeHeaderFooterInfo(mergedParts, made.documentXml, "header").text, "학교 문서");
+  const changed = api.officeHeaderFooterEdit(mergedParts, made.documentXml, "header", "새 머리글");
+  assert.match(changed.replacements[made.path], /<w:t>새 머리글<\/w:t>/);
+  assert.equal((changed.replacements["word/_rels/document.xml.rels"] || "").length, 0);
+});
+
+test("문단에 그림을 추가하고 같은 관계의 파일을 교체한 뒤 비율대로 크기를 바꾼다", () => {
+  const parts = {
+    "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+    "word/_rels/document.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>',
+    "word/media/image1.png": null
+  };
+  const documentXml = '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    para(run("그림 아래")) + '<w:sectPr/></w:body></w:document>';
+  const added = api.officeImagePackageEdit(parts, documentXml, {
+    kind: "add", paragraphIndex: 1, bytes: new Uint8Array([1, 2, 3]), mime: "image/png",
+    widthPx: 400, heightPx: 200, name: "사진.png"
+  });
+  assert.equal(added.changed, true);
+  assert.equal(added.mediaPath, "word/media/image2.png");
+  assert.match(added.documentXml, /<w:drawing>/);
+  assert.match(added.documentXml, /r:embed="rId1"/);
+  assert.equal(api.officeParagraphImageInfo(added.documentXml, { paragraphIndex: 1 }).count, 1);
+  assert.match(added.replacements["word/_rels/document.xml.rels"], /Target="media\/image2.png"/);
+
+  const mergedParts = { ...parts, ...added.replacements };
+  const replaced = api.officeImagePackageEdit(mergedParts, added.documentXml, {
+    kind: "replace", paragraphIndex: 1, bytes: new Uint8Array([4, 5]), mime: "image/jpeg"
+  });
+  assert.equal(replaced.changed, true);
+  assert.match(replaced.replacements["word/_rels/document.xml.rels"], /Target="media\/image3.jpg"/);
+  const resized = api.officeImagePackageEdit({ ...mergedParts, ...replaced.replacements }, replaced.documentXml,
+    { kind: "resize", paragraphIndex: 1, scale: 0.5 });
+  const before = api.officeParagraphImageInfo(replaced.documentXml, { paragraphIndex: 1 });
+  const after = api.officeParagraphImageInfo(resized.documentXml, { paragraphIndex: 1 });
+  assert.equal(after.cx, Math.round(before.cx * 0.5));
+  assert.equal(after.cy, Math.round(before.cy * 0.5));
+});
+
+test("문단 정렬·줄 간격·앞뒤 간격을 바꿔도 서로의 속성과 스타일은 보존한다", () => {
+  const xml = '<w:body><w:p><w:pPr><w:pStyle w:val="Body"/>' +
+    '<w:spacing w:before="120" w:after="240"/></w:pPr>' + run("본문") + '</w:p></w:body>';
+  let result = api.officeParagraphLayoutEdit(xml,
+    { kind: "alignment", value: "both", paragraphIndex: 1 });
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "line-spacing", value: 1.5, paragraphIndex: 1 });
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "space-before", value: 8, paragraphIndex: 1 });
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "space-after", value: 10, paragraphIndex: 1 });
+  assert.deepEqual(api.officeParagraphLayoutFormat(result.xml, { paragraphIndex: 1 }), {
+    alignment: "both", lineSpacing: 1.5, before: 8, after: 10,
+    left: 0, right: 0, firstLine: 0, hanging: 0
+  });
+  assert.match(result.xml, /<w:pStyle w:val="Body"\/>/);
+  assert.match(result.xml, /<w:spacing[^>]*w:before="160"/);
+  assert.match(result.xml, /<w:spacing[^>]*w:after="200"/);
+  assert.match(result.xml, /<w:spacing[^>]*w:line="360"/);
+  assert.match(result.xml, /<w:spacing[^>]*w:lineRule="auto"/);
+});
+
+test("좌우 들여쓰기와 첫 줄·내어쓰기를 독립적으로 조절한다", () => {
+  const xml = "<w:body>" + para(run("들여쓰기")) + "</w:body>";
+  let result = api.officeParagraphLayoutEdit(xml,
+    { kind: "indent-left", delta: 360, paragraphIndex: 1 });
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "indent-right", delta: 720, paragraphIndex: 1 });
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "special-indent", value: "first-line", paragraphIndex: 1 });
+  let format = api.officeParagraphLayoutFormat(result.xml, { paragraphIndex: 1 });
+  assert.deepEqual([format.left, format.right, format.firstLine, format.hanging], [360, 720, 360, 0]);
+
+  result = api.officeParagraphLayoutEdit(result.xml,
+    { kind: "special-indent", value: "hanging", paragraphIndex: 1 });
+  format = api.officeParagraphLayoutFormat(result.xml, { paragraphIndex: 1 });
+  assert.deepEqual([format.left, format.right, format.firstLine, format.hanging], [360, 720, 0, 360]);
+});
+
+test("문단 서식 지우기는 배치 속성만 걷고 스타일과 쪽 설정은 보존한다", () => {
+  const xml = '<w:body><w:p><w:pPr><w:pStyle w:val="Title"/><w:jc w:val="center"/>' +
+    '<w:spacing w:line="360"/><w:ind w:left="720"/><w:sectPr><w:pgSz w:w="11906"/></w:sectPr>' +
+    '</w:pPr>' + run("제목") + '</w:p></w:body>';
+  const result = api.officeParagraphLayoutEdit(xml,
+    { kind: "clear-layout", paragraphIndex: 1 });
+  assert.equal(result.changed, true);
+  assert.deepEqual(api.officeParagraphLayoutFormat(result.xml, { paragraphIndex: 1 }), {
+    alignment: "left", lineSpacing: 1, before: 0, after: 0,
+    left: 0, right: 0, firstLine: 0, hanging: 0
+  });
+  assert.match(result.xml, /<w:pStyle w:val="Title"\/>/);
+  assert.match(result.xml, /<w:sectPr><w:pgSz w:w="11906"\/><\/w:sectPr>/);
 });
