@@ -85,3 +85,14 @@ test("DOCX 편집 도구막대는 긴 문서에서도 상단에 따라오고 문
   assert.match(source, /host\.style\.setProperty\("--docx-editor-tools-height"/);
   assert.match(source, /stickyToolObserver\.disconnect\(\)/);
 });
+
+test("상단 DOCX 도구는 여섯 갈래 메뉴로 정리하고 실제 컨트롤은 중복 노출하지 않는다", () => {
+  for (const kind of ["document", "text", "paragraph", "table", "image", "all"])
+    assert.ok(source.includes(`toolLauncherButton("${kind}"`), kind + " 분류 버튼이 없다");
+  assert.match(source, /const openToolbarCategory = \(kind, button\) =>/);
+  assert.match(source, /contextItemsFor\(row, paragraph, rangeInside\(paragraph\)/);
+  assert.match(source, /if \(kind === "text"\) items = \(branch\("글자 서식"\)/);
+  assert.match(source, /else if \(kind === "paragraph"\)/);
+  assert.match(styles, /\.docx-editor-bar>\.docx-document-tools[\s\S]+display:none!important/);
+  assert.match(styles, /\.docx-tool-launchers\{display:inline-flex/);
+});

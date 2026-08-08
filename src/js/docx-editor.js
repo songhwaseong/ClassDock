@@ -750,6 +750,30 @@ const MNDocxEditor = (() => {
     const footerEditButton = textActionButton("바닥글", "바닥글 글자 편집");
     documentTools.append(documentToolsLabel, orientationTool.label, marginsTool.label,
       headerEditButton, footerEditButton);
+    // 실제 select/color/button 들은 상태와 기존 이벤트 경로를 그대로 유지하되 화면에서는 감춘다.
+    // 상단에는 기능 갈래만 보여 주고, 누르면 우클릭 메뉴와 같은 계층형 메뉴를 연다.
+    const toolLaunchers = document.createElement("div");
+    toolLaunchers.className = "docx-tool-launchers";
+    toolLaunchers.hidden = true;
+    const toolLauncherLabel = document.createElement("span");
+    toolLauncherLabel.className = "docx-tool-launchers-label";
+    toolLauncherLabel.textContent = "편집 도구";
+    const toolLauncherButtons = new Map();
+    const toolLauncherButton = (kind, label, titleText) => {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "docx-tool-launcher";
+      button.dataset.docxToolMenu = kind; button.textContent = label + " ▾"; button.title = titleText;
+      button.setAttribute("aria-haspopup", "menu"); button.setAttribute("aria-expanded", "false");
+      toolLauncherButtons.set(kind, button); toolLaunchers.appendChild(button);
+      return button;
+    };
+    toolLaunchers.appendChild(toolLauncherLabel);
+    toolLauncherButton("document", "문서", "용지·여백·머리글·바닥글");
+    toolLauncherButton("text", "글자", "글꼴·크기·굵게·색상·첨자");
+    toolLauncherButton("paragraph", "문단", "정렬·간격·들여쓰기·목록·서식 복사");
+    toolLauncherButton("table", "표", "행·열·셀·병합·셀 서식");
+    toolLauncherButton("image", "그림", "그림 추가·교체·크기 조절");
+    toolLauncherButton("all", "전체", "현재 문단에서 사용할 수 있는 모든 편집 메뉴");
     const formatButtons = [];
     const formatButton = (kind, label, titleText, value) => {
       const button = document.createElement("button");
@@ -780,7 +804,8 @@ const MNDocxEditor = (() => {
       formatButton("column-width", "열＋", "선택한 열 너비 늘리기", 240),
       formatButton("row-height", "높이−", "선택한 행 높이 줄이기", -120),
       formatButton("row-height", "높이＋", "선택한 행 높이 늘리기", 120));
-    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, status, documentTools, textTools, paragraphTools, tableTools);
+    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, toolLaunchers, status,
+      documentTools, textTools, paragraphTools, tableTools);
     host.insertBefore(bar, previewEl);
 
     // 긴 문서에서도 도구막대는 스크롤 영역 상단에 붙는다. 막대는 화면 폭에 따라 여러 줄이 될 수
@@ -844,6 +869,23 @@ const MNDocxEditor = (() => {
     };
     doc.docxEditor = state;
 
+    const syncToolLaunchers = () => {
+      const editing = state.editing;
+      const busy = state.rendering || state.saving;
+      const active = state.activeTextRow;
+      toolLaunchers.hidden = !editing;
+      const setDisabled = (kind, disabled) => {
+        const button = toolLauncherButtons.get(kind);
+        if (button) button.disabled = !!disabled;
+      };
+      setDisabled("document", busy || !state.xml);
+      setDisabled("text", busy || !active);
+      setDisabled("paragraph", busy || !active);
+      setDisabled("table", busy || !state.activeTableRow);
+      setDisabled("image", busy || !active || imageAddButton.disabled);
+      setDisabled("all", busy || !active);
+    };
+
     const INLINE_NOTE = "✎ 제자리 편집 — 보이는 그대로 고쳐요. Enter 로 문단을 나누고, 빈 문단에서 Backspace 로 지웁니다. " +
       "글자를 드래그하면 그 부분만 서식을 바꾸고, 문단을 우클릭하면 문단·목록·표·페이지·머리글/바닥글·그림 편집 메뉴가 열립니다. " +
       "손대지 않은 곳은 저장할 때 바이트 그대로 남습니다.";
@@ -865,6 +907,7 @@ const MNDocxEditor = (() => {
           button.classList.remove("active"); button.setAttribute("aria-pressed", "false");
         }
         updateParagraphTools(null);
+        syncToolLaunchers();
         return;
       }
       const selected = state.textSelection && state.textSelection.key === active.key &&
@@ -904,6 +947,7 @@ const MNDocxEditor = (() => {
       strikeTextButton.setAttribute("aria-pressed", strike ? "true" : "false");
       boldTextButton.title = "선택한 문단을 굵게 켜기/끄기";
       updateParagraphTools(active);
+      syncToolLaunchers();
     };
 
     const updateParagraphTools = (row) => {
@@ -917,6 +961,7 @@ const MNDocxEditor = (() => {
           afterSpacingTool.select.disabled = specialIndentTool.select.disabled = listTool.select.disabled = true;
         for (const button of paragraphFormatButtons) button.disabled = true;
         paragraphToolsLabel.title = "편집할 문단을 선택하세요.";
+        syncToolLaunchers();
         return;
       }
       const format = active.index ? officeParagraphLayoutFormat(state.xml, { paragraphIndex: active.index }) : null;
@@ -939,6 +984,7 @@ const MNDocxEditor = (() => {
         afterSpacingTool.select.disabled = specialIndentTool.select.disabled = listTool.select.disabled = disabled;
       for (const button of paragraphFormatButtons) button.disabled = disabled;
       paragraphToolsLabel.title = "왼쪽 " + layout.left + " · 오른쪽 " + layout.right + " (Word 내부 단위)";
+      syncToolLaunchers();
     };
 
     const updateTableTools = (row) => {
@@ -952,6 +998,7 @@ const MNDocxEditor = (() => {
         for (const button of tableButtons.values()) button.disabled = true;
         horizontalTool.select.disabled = verticalTool.select.disabled = fillTool.input.disabled = borderTool.input.disabled = true;
         for (const button of formatButtons) button.disabled = true;
+        syncToolLaunchers();
         return;
       }
       tableToolsLabel.textContent = "표 " + active.tableIndex + " · " + active.tableRow + "행 " + active.tableCell + "열";
@@ -975,6 +1022,7 @@ const MNDocxEditor = (() => {
         else if (!cellAction && !rowAction && (active.tableHasVerticalMerge || active.tableHasGridSpan)) button.title = "병합된 셀이 있어 열 구조는 바꿀 수 없어요.";
         else button.title = button.dataset.normalTitle;
       }
+      syncToolLaunchers();
       const format = officeTableCellFormat(state.xml, {
         tableIndex: active.tableIndex, rowIndex: active.tableRow, cellIndex: active.tableCell
       });
@@ -1003,6 +1051,7 @@ const MNDocxEditor = (() => {
           ? "wide" : "normal");
       const disabled = state.rendering || state.saving;
       orientationTool.select.disabled = marginsTool.select.disabled = headerEditButton.disabled = footerEditButton.disabled = disabled;
+      syncToolLaunchers();
     };
 
     const syncToggle = () => {
@@ -1016,6 +1065,7 @@ const MNDocxEditor = (() => {
       previewEl.hidden = state.editing && !inline;      // 제자리 편집은 미리보기를 그대로 쓴다
       previewEl.classList.toggle("docx-inline-editing", state.editing && inline);
       undoBtn.hidden = redoBtn.hidden = saveBtn.hidden = !state.editing;
+      syncToolLaunchers();
       updateDocumentTools();
       updateTextTools(state.activeTextRow);
       updateTableTools(state.activeTableRow);
@@ -1597,6 +1647,7 @@ const MNDocxEditor = (() => {
     const closeDocxContextMenu = () => {
       cancelContextSubClose();
       closeContextLayers(0);
+      for (const button of toolLauncherButtons.values()) button.setAttribute("aria-expanded", "false");
       if (contextOutside){ document.removeEventListener("pointerdown", contextOutside, true); contextOutside = null; }
       if (contextKeydown){ document.removeEventListener("keydown", contextKeydown, true); contextKeydown = null; }
       if (contextResize){ window.removeEventListener("resize", contextResize); contextResize = null; }
@@ -1954,6 +2005,36 @@ const MNDocxEditor = (() => {
       ];
       return items;
     };
+    const openToolbarCategory = (kind, button) => {
+      const row = state.activeTextRow || state.rows.find(item =>
+        !item.removed && state.nodeByKey && state.nodeByKey.has(item.key));
+      const paragraph = row && state.nodeByKey ? state.nodeByKey.get(row.key) : null;
+      if (!row || !paragraph || !previewEl.contains(paragraph)) return;
+      const rect = button.getBoundingClientRect();
+      const root = contextItemsFor(row, paragraph, rangeInside(paragraph),
+        { x: rect.left, y: rect.bottom + 6 });
+      const branch = label => root.find(item => item && item.label === label);
+      let items = root;
+      if (kind === "text") items = (branch("글자 서식") || {}).children || [];
+      else if (kind === "table") items = (branch("표") || {}).children || [];
+      else if (kind === "image") items = (branch("그림") || {}).children || [];
+      else if (kind === "document") items = (branch("문서") || {}).children || [];
+      else if (kind === "paragraph"){
+        const layout = (branch("문단 배치") || {}).children || [];
+        const list = branch("목록"), copy = branch("서식 복사"), paste = branch("서식 붙이기");
+        items = [...layout, { separator: true }, ...(list ? [list] : []),
+          ...(copy ? [copy] : []), ...(paste ? [paste] : [])];
+      }
+      if (!items.length) return;
+      openDocxContextMenu(rect.left, rect.bottom + 6, items);
+      button.setAttribute("aria-expanded", "true");
+    };
+    for (const [kind, button] of toolLauncherButtons){
+      button.addEventListener("pointerdown", event => event.preventDefault());
+      button.addEventListener("click", () => {
+        if (!button.disabled) openToolbarCategory(kind, button);
+      });
+    }
     const onDocxContextMenu = event => {
       if (!state.editing || state.mode !== "inline") return;
       const paragraph = event.target && event.target.closest ? event.target.closest("[data-key]") : null;
