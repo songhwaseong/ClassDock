@@ -28,6 +28,14 @@ test(".lesson 입력은 정상 리플레이만 받아들이고 손상된 장면�
   assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:0, s:[pen([{ x:1, y:"bad" }])] }] }).ok, false);
   assert.equal(validateLessonPayload({ ...valid, keyframes:new Array(100001).fill({ t:0, s:[] }) }).ok, false);
 
+  const group = { type:"group",x:20,y:30,w:240,h:190,sourceW:240,sourceH:190,items:[
+    { type:"line",x1:0,y1:0,x2:100,y2:100,color:"#111",width:2 },
+    { type:"polyline",color:"#111",width:2,points:[{x:0,y:10},{x:50,y:20}] },
+    { type:"text",x:20,y:30,text:"벡터",fontSize:18,color:"#111" }
+  ] };
+  assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:0, s:[group] }] }).ok, true);
+  assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:0, s:[{ ...group, items:new Array(1001).fill(group.items[0]) }] }] }).ok, false);
+
   const shapeReplay = {
     format:"manneung-lesson", version:1, kind:"pdf-ink", duration:50,
     pages:{ 0:{ w:800, h:1200 } },

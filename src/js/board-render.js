@@ -9,9 +9,11 @@
 const MNBoardRenderer = (() => {
 function applyStroke(ctx, it, bg){
   ctx.lineCap = "round"; ctx.lineJoin = "round";
-  ctx.lineWidth = it.width; ctx.strokeStyle = it.color; ctx.fillStyle = it.color;
+  ctx.setLineDash(Array.isArray(it.dash) ? it.dash : []);
+  ctx.lineWidth = Number(it.width) || 1; ctx.strokeStyle = it.color || "#111111"; ctx.fillStyle = it.color || "#111111";
   ctx.globalAlpha = (it.type === "highlighter") ? 0.30 : 1;
   if (it.type === "eraser"){ ctx.strokeStyle = bg; ctx.globalAlpha = 1; }
+  if (Number.isFinite(it.alpha)) ctx.globalAlpha *= Math.max(0, Math.min(1, it.alpha));
 }
 
 function drawArrowHead(ctx, x1, y1, x2, y2, w){
@@ -27,6 +29,12 @@ function drawArrowHead(ctx, x1, y1, x2, y2, w){
 //        null/undefined 면 전체를 그린다.
 function drawItem(ctx, it, bg, limit){
   if (!it) return;
+  if (it.type === "group"){
+    const sw = Math.max(1, Number(it.sourceW) || Number(it.w) || 1), sh = Math.max(1, Number(it.sourceH) || Number(it.h) || 1);
+    ctx.save(); ctx.translate(Number(it.x) || 0, Number(it.y) || 0); ctx.scale((Number(it.w) || sw) / sw, (Number(it.h) || sh) / sh);
+    for (const child of (Array.isArray(it.items) ? it.items : [])) drawItem(ctx, child, bg);
+    ctx.restore(); ctx.globalAlpha = 1; return;
+  }
   applyStroke(ctx, it, bg);
   if (it.type === "pen" || it.type === "highlighter" || it.type === "eraser"){
     const p = it.points; if (!p || !p.length){ ctx.globalAlpha = 1; return; }
@@ -39,11 +47,20 @@ function drawItem(ctx, it, bg, limit){
     ctx.beginPath(); ctx.moveTo(it.x1, it.y1); ctx.lineTo(it.x2, it.y2); ctx.stroke();
     if (it.type === "arrow") drawArrowHead(ctx, it.x1, it.y1, it.x2, it.y2, it.width);
   } else if (it.type === "rect"){
-    ctx.strokeRect(Math.min(it.x1, it.x2), Math.min(it.y1, it.y2), Math.abs(it.x2 - it.x1), Math.abs(it.y2 - it.y1));
+    const x = Math.min(it.x1, it.x2), y = Math.min(it.y1, it.y2), w = Math.abs(it.x2 - it.x1), h = Math.abs(it.y2 - it.y1);
+    if (it.fill) ctx.fillRect(x, y, w, h); else ctx.strokeRect(x, y, w, h);
   } else if (it.type === "ellipse"){
     ctx.beginPath();
-    ctx.ellipse((it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2, Math.abs(it.x2 - it.x1) / 2, Math.abs(it.y2 - it.y1) / 2, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.ellipse((it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2, Math.abs(it.x2 - it.x1) / 2, Math.abs(it.y2 - it.y1) / 2, Number(it.rotation) || 0, 0, Math.PI * 2);
+    if (it.fill) ctx.fill(); else ctx.stroke();
+  } else if (it.type === "polyline"){
+    const points = Array.isArray(it.points) ? it.points : [];
+    if (points.length){
+      ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+      for (let i=1;i<points.length;i++) ctx.lineTo(points[i].x, points[i].y);
+      if (it.closed) ctx.closePath();
+      if (it.fill) ctx.fill(); else ctx.stroke();
+    }
   } else if (it.type === "text"){
     ctx.globalAlpha = 1; ctx.fillStyle = it.color; ctx.textBaseline = "top";
     ctx.font = it.fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
@@ -64,7 +81,7 @@ function drawItems(ctx, items, opts){
   }
 }
 
-const SELECTABLE_TYPES = new Set(["image", "line", "arrow", "rect", "ellipse", "text"]);
+const SELECTABLE_TYPES = new Set(["image", "line", "arrow", "rect", "ellipse", "polyline", "text", "group"]);
 
 function isSelectable(it){
   return !!(it && SELECTABLE_TYPES.has(it.type));
@@ -73,7 +90,7 @@ function isSelectable(it){
 // 선택 표시와 히트테스트에 쓰는 항목 경계. 텍스트 폭은 화면과 같은 캔버스 글꼴로 외부에서 측정한다.
 function itemBounds(it, measureText){
   if (!isSelectable(it)) return null;
-  if (it.type === "image") return { x:it.x, y:it.y, w:it.w, h:it.h };
+  if (it.type === "image" || it.type === "group") return { x:it.x, y:it.y, w:it.w, h:it.h };
   if (it.type === "text"){
     const fs = Math.max(1, Number(it.fontSize) || 16);
     const lines = String(it.text || "").split("\n");
@@ -81,6 +98,19 @@ function itemBounds(it, measureText){
     let w = 1;
     for (const line of lines) w = Math.max(w, Number(widthOf(line, fs)) || 0);
     return { x:it.x, y:it.y, w, h:Math.max(fs, lines.length * fs * 1.25) };
+  }
+  if (it.type === "ellipse" && Number(it.rotation)){
+    const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, rx=Math.abs(it.x2-it.x1)/2, ry=Math.abs(it.y2-it.y1)/2, a=Number(it.rotation);
+    const bw=Math.sqrt(rx*rx*Math.cos(a)*Math.cos(a)+ry*ry*Math.sin(a)*Math.sin(a));
+    const bh=Math.sqrt(rx*rx*Math.sin(a)*Math.sin(a)+ry*ry*Math.cos(a)*Math.cos(a));
+    return { x:cx-bw,y:cy-bh,w:bw*2,h:bh*2 };
+  }
+  if (it.type === "polyline"){
+    const points = Array.isArray(it.points) ? it.points : [];
+    if (!points.length) return null;
+    const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+    const x = Math.min(...xs), y = Math.min(...ys);
+    return { x, y, w:Math.max(...xs)-x, h:Math.max(...ys)-y };
   }
   const x = Math.min(it.x1, it.x2), y = Math.min(it.y1, it.y2);
   return { x, y, w:Math.abs(it.x2 - it.x1), h:Math.abs(it.y2 - it.y1) };
@@ -99,20 +129,27 @@ function hitTestItem(it, p, measureText, tolerance){
   if (it.type === "line" || it.type === "arrow"){
     return pointSegmentDistance(p, { x:it.x1, y:it.y1 }, { x:it.x2, y:it.y2 }) <= tol;
   }
-  const b = itemBounds(it, measureText); if (!b) return false;
-  if (it.type === "ellipse"){
-    const rx = Math.max(b.w / 2, tol), ry = Math.max(b.h / 2, tol);
-    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    return ((p.x - cx) * (p.x - cx)) / (rx * rx) + ((p.y - cy) * (p.y - cy)) / (ry * ry) <= 1;
+  if (it.type === "polyline"){
+    const points = Array.isArray(it.points) ? it.points : [];
+    for (let i=1;i<points.length;i++) if (pointSegmentDistance(p, points[i-1], points[i]) <= tol) return true;
+    return false;
   }
+  if (it.type === "ellipse"){
+    const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, rx=Math.max(Math.abs(it.x2-it.x1)/2,tol), ry=Math.max(Math.abs(it.y2-it.y1)/2,tol), a=-(Number(it.rotation)||0);
+    const dx=p.x-cx, dy=p.y-cy, lx=dx*Math.cos(a)-dy*Math.sin(a), ly=dx*Math.sin(a)+dy*Math.cos(a);
+    return (lx*lx)/(rx*rx)+(ly*ly)/(ry*ry)<=1;
+  }
+  const b = itemBounds(it, measureText); if (!b) return false;
   return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
 }
 
 function translateItem(it, dx, dy){
   if (!isSelectable(it)) return it;
   const moved = Object.assign({}, it);
-  if (it.type === "image" || it.type === "text"){
+  if (it.type === "image" || it.type === "text" || it.type === "group"){
     moved.x = it.x + dx; moved.y = it.y + dy;
+  } else if (it.type === "polyline"){
+    moved.points = (it.points || []).map((p) => ({ x:p.x + dx, y:p.y + dy }));
   } else {
     moved.x1 = it.x1 + dx; moved.y1 = it.y1 + dy;
     moved.x2 = it.x2 + dx; moved.y2 = it.y2 + dy;
@@ -120,5 +157,30 @@ function translateItem(it, dx, dy){
   return moved;
 }
 
-return Object.freeze({ applyStroke, drawItem, drawItems, isSelectable, itemBounds, hitTestItem, translateItem });
+// 그룹을 현재 보드 좌표의 독립 항목들로 푼다. 기존 그룹 객체와 자식은 바꾸지 않는다.
+function ungroupItem(group){
+  if (!group || group.type !== "group" || !Array.isArray(group.items)) return [];
+  const sw = Math.max(1, Number(group.sourceW) || Number(group.w) || 1), sh = Math.max(1, Number(group.sourceH) || Number(group.h) || 1);
+  const sx = (Number(group.w) || sw) / sw, sy = (Number(group.h) || sh) / sh;
+  const ox = Number(group.x) || 0, oy = Number(group.y) || 0, widthScale = (Math.abs(sx) + Math.abs(sy)) / 2;
+  const scaleOne = (it) => {
+    const out = Object.assign({}, it);
+    if (it.type === "text" || it.type === "image" || it.type === "group"){
+      out.x = ox + it.x * sx; out.y = oy + it.y * sy;
+      if (it.type !== "text"){ out.w = it.w * sx; out.h = it.h * sy; }
+      else out.fontSize = Math.max(1, (Number(it.fontSize) || 16) * widthScale);
+    } else if (it.type === "polyline"){
+      out.points = (it.points || []).map((p) => ({ x:ox + p.x * sx, y:oy + p.y * sy }));
+    } else {
+      out.x1 = ox + it.x1 * sx; out.y1 = oy + it.y1 * sy;
+      out.x2 = ox + it.x2 * sx; out.y2 = oy + it.y2 * sy;
+    }
+    if (out.width != null) out.width = Math.max(.5, Number(out.width) * widthScale);
+    if (Array.isArray(out.dash)) out.dash = out.dash.map((n) => n * widthScale);
+    return out;
+  };
+  return group.items.map(scaleOne);
+}
+
+return Object.freeze({ applyStroke, drawItem, drawItems, isSelectable, itemBounds, hitTestItem, translateItem, ungroupItem });
 })();

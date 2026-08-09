@@ -108,6 +108,10 @@
     C("sheetFind","🔎","표에서 찾기", clickBtn(".xlsx-tool-menu-find > summary"),
       { when:hasBtn(".xlsx-tool-menu-find > summary"), kw:"find search 표 찾기 검색 셀" }),
     // 화이트보드
+    C("boardEducation","∑","수학·과학 도구상자", clickBtn(".wb-edu-toggle"),
+      { when:hasBtn(".wb-edu-toggle"), kw:"math science 수학 과학 기호 수식 도형 좌표축 회로 도구상자" }),
+    C("boardUngroup","▦","교육 도형 그룹 풀기", clickBtn(".wb-ungroup"),
+      { when:hasBtn(".wb-ungroup:not(:disabled)"), kw:"ungroup 분리 그룹 풀기 구성 요소 도형" }),
     C("boardRec","⏺️","화이트보드 녹화", clickBtn(".wb-rec"),
       { when:hasBtn(".wb-rec"), kw:"record 녹화 리플레이 판서 수업 화이트보드" }),
     C("boardClear","🧽","화이트보드 전부 지우기", clickBtn(".wb-clear"),

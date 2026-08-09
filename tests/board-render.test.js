@@ -30,3 +30,57 @@ test("화이트보드 항목 이동은 원본을 바꾸지 않고 좌표를 함�
   assert.deepEqual([movedText.x, movedText.y], [3, 17]);
   assert.deepEqual([text.x, text.y], [5, 8]);
 });
+
+test("교육 도형 그룹은 한 덩어리로 선택·이동하고 현재 크기의 독립 벡터로 풀린다", () => {
+  const group = {
+    type:"group", x:100, y:50, w:240, h:95, sourceW:120, sourceH:95,
+    items:[
+      { type:"line", x1:0, y1:10, x2:120, y2:10, color:"#111", width:2 },
+      { type:"text", x:30, y:20, text:"x", fontSize:20, color:"#111" },
+      { type:"polyline", points:[{x:0,y:40},{x:60,y:80},{x:120,y:40}], color:"#111", width:3 }
+    ]
+  };
+  const bounds = renderer.itemBounds(group);
+  assert.deepEqual([bounds.x,bounds.y,bounds.w,bounds.h], [100,50,240,95]);
+  assert.equal(renderer.hitTestItem(group, { x:200, y:80 }, null, 7), true);
+  const moved = renderer.translateItem(group, 15, -5);
+  assert.deepEqual([moved.x,moved.y], [115,45]);
+  assert.deepEqual([group.x,group.y], [100,50]);
+
+  const parts = renderer.ungroupItem(group);
+  assert.equal(parts.length, 3);
+  assert.deepEqual([parts[0].x1,parts[0].y1,parts[0].x2,parts[0].y2], [100,60,340,60]);
+  assert.deepEqual([parts[1].x,parts[1].y,parts[1].fontSize], [160,70,30]);
+  assert.deepEqual(Array.from(parts[2].points, (p) => [p.x,p.y]), [[100,90],[220,130],[340,90]]);
+  assert.deepEqual(group.items[2].points.map((p) => [p.x,p.y]), [[0,40],[60,80],[120,40]]);
+});
+
+test("그룹을 푼 회전 타원과 폴리라인도 선택 판정할 수 있다", () => {
+  const ellipse = { type:"ellipse", x1:20,y1:40,x2:120,y2:80,rotation:Math.PI/4,color:"#111",width:2 };
+  assert.equal(renderer.hitTestItem(ellipse,{x:70,y:60},null,5),true);
+  const poly = { type:"polyline",points:[{x:0,y:0},{x:50,y:50},{x:100,y:0}],color:"#111",width:2 };
+  assert.equal(renderer.hitTestItem(poly,{x:48,y:51},null,5),true);
+  assert.equal(renderer.hitTestItem(poly,{x:50,y:80},null,5),false);
+});
+
+test("벡터 그룹 렌더링은 캔버스 변환 안에서 자식 도형을 순서대로 그린다", () => {
+  const calls = [];
+  const ctx = {
+    save:()=>calls.push("save"), restore:()=>calls.push("restore"),
+    translate:(x,y)=>calls.push(["translate",x,y]), scale:(x,y)=>calls.push(["scale",x,y]),
+    setLineDash:(v)=>calls.push(["dash",...v]), beginPath:()=>calls.push("begin"),
+    moveTo:(x,y)=>calls.push(["move",x,y]), lineTo:(x,y)=>calls.push(["line",x,y]),
+    stroke:()=>calls.push("stroke"), fill:()=>calls.push("fill"), closePath:()=>calls.push("close"),
+    strokeRect:()=>{}, fillRect:()=>{}, ellipse:()=>{}, fillText:()=>{}, drawImage:()=>{}
+  };
+  renderer.drawItem(ctx, { type:"group",x:10,y:20,w:200,h:100,sourceW:100,sourceH:100,items:[
+    { type:"polyline",points:[{x:0,y:0},{x:100,y:50}],color:"#111",width:2 },
+    { type:"ellipse",x1:20,y1:20,x2:40,y2:40,color:"#111",width:2,fill:true }
+  ]}, "#fff");
+  assert.deepEqual(calls[0], "save");
+  assert.deepEqual(calls[1], ["translate",10,20]);
+  assert.deepEqual(calls[2], ["scale",2,1]);
+  assert.ok(calls.includes("stroke"));
+  assert.ok(calls.includes("fill"));
+  assert.equal(calls.at(-1), "restore");
+});

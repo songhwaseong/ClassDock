@@ -34,11 +34,17 @@ function lessonValidStroke(stroke){
       !stroke.points.length || stroke.points.length > LESSON_MAX_STROKE_POINTS) return false;
   return stroke.points.every(lessonValidPoint);
 }
-function lessonValidItem(item){
+function lessonValidItem(item, depth=0){
   if (!item || typeof item !== "object" || typeof item.type !== "string") return false;
   if (["pen", "highlighter", "eraser"].includes(item.type)) return lessonValidStroke(item);
   if (item.type === "text") return lessonShortText(String(item.text || ""));
   if (item.type === "image") return !item.src || lessonShortText(item.src);
+  if (item.type === "polyline") return lessonValidStroke(item);
+  if (item.type === "group"){
+    return depth < 8 && lessonFinite(item.x) && lessonFinite(item.y) && lessonFinite(item.w) && lessonFinite(item.h) &&
+      item.w > 0 && item.h > 0 && Array.isArray(item.items) && item.items.length <= 1000 &&
+      item.items.every((child) => lessonValidItem(child, depth + 1));
+  }
   return ["line", "arrow", "rect", "ellipse"].includes(item.type);
 }
 function lessonValidKeyframeTime(frame, previous){

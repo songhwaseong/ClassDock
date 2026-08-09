@@ -1768,6 +1768,72 @@
   .wb-canvas[data-tool="eraser"]{cursor:var(--ink-cursor-eraser)}
   .wb-textinput{position:absolute;z-index:5;min-width:80px;background:rgba(255,255,255,.9);border:1px dashed var(--accent);
     border-radius:4px;padding:2px 4px;font-family:system-ui,"Malgun Gothic",sans-serif;line-height:1.25;resize:both;outline:none;overflow:hidden}
+  .wb-edu-toggle{font-size:20px;font-family:Georgia,"Times New Roman",serif;font-weight:700;line-height:1}
+  .wb-edu-toggle.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .wb-edu-panel{position:absolute;z-index:12;right:12px;top:12px;width:min(390px,calc(100% - 24px));max-height:calc(100% - 24px);
+    display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);
+    color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.22)}
+  .wb-edu-panel[hidden]{display:none}
+  .wb-edu-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .wb-edu-head strong{font-size:14px}
+  .wb-edu-close{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:20px;cursor:pointer}
+  .wb-edu-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .wb-edu-search{width:100%;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:13px;outline:none}
+  .wb-edu-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  .wb-edu-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .wb-edu-tab{height:30px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+  .wb-edu-tab:hover{background:var(--panel-hover)}
+  .wb-edu-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wb-formula-builder{padding:8px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--accent) 5%,var(--field))}
+  .wb-formula-builder[hidden]{display:none}
+  .wb-formula-input{display:block;width:100%;min-height:50px;max-height:100px;padding:7px 8px;resize:vertical;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);font:13px/1.35 ui-monospace,Consolas,monospace;outline:none}
+  .wb-formula-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  .wb-formula-preview{display:flex;align-items:center;justify-content:center;min-height:48px;margin-top:6px;padding:4px 8px;border-radius:6px;background:#fff;color:#111;font:24px/1.25 Cambria Math,"Times New Roman",serif;overflow:auto}
+  .wb-formula-preview math{font-size:1em}
+  .wb-formula-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}
+  .wb-formula-save{margin-right:auto}
+  .wb-formula-insert,.wb-formula-cancel,.wb-formula-save,.wb-formula-save-confirm,.wb-formula-save-cancel{height:29px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit;font-size:11.5px;cursor:pointer}
+  .wb-formula-insert{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wb-formula-insert:hover{filter:brightness(1.06)}
+  .wb-formula-cancel:hover,.wb-formula-save:hover,.wb-formula-save-cancel:hover{background:var(--panel-hover)}
+  .wb-formula-save-row{display:flex;gap:6px;margin-top:6px}
+  .wb-formula-save-row[hidden]{display:none}
+  .wb-formula-name{min-width:0;flex:1;height:29px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;font-size:11.5px;outline:none}
+  .wb-formula-name:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  .wb-formula-save-confirm{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wb-formula-groups{display:flex;flex:0 0 auto;min-width:0;min-height:37px;gap:5px;overflow-x:auto;overflow-y:hidden;padding:1px 0 3px;scrollbar-width:thin}
+  .wb-formula-groups::-webkit-scrollbar{height:6px}
+  .wb-formula-groups::-webkit-scrollbar-thumb{border-radius:999px;background:color-mix(in srgb,var(--muted) 45%,transparent)}
+  .wb-formula-groups[hidden]{display:none}
+  .wb-edu-subgroups{min-height:43px;border-top:1px solid color-mix(in srgb,var(--border) 65%,transparent);padding-top:6px}
+  .wb-formula-group{flex:none;height:27px;padding:0 9px;border:1px solid var(--border);border-radius:999px;background:var(--field);color:var(--muted);font:inherit;font-size:10.5px;cursor:pointer;white-space:nowrap}
+  .wb-formula-group:hover{border-color:var(--accent);color:var(--ink)}
+  .wb-formula-group.active{background:color-mix(in srgb,var(--accent) 14%,var(--field));border-color:var(--accent);color:var(--accent);font-weight:700}
+  .wb-edu-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;flex:1 1 auto;min-height:92px;overflow:auto;padding:1px 2px 2px 1px}
+  .wb-edu-card{min-width:0;min-height:66px;padding:6px 4px;border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--ink);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:inherit;cursor:grab;user-select:none}
+  .wb-edu-card:hover{background:var(--panel-hover);border-color:var(--accent);transform:translateY(-1px)}
+  .wb-edu-card:active{cursor:grabbing;transform:none}
+  .wb-edu-visual{display:flex;align-items:center;justify-content:center;width:100%;min-height:32px;font-family:Cambria Math,"Times New Roman",serif;font-size:27px;line-height:1.1;overflow:hidden}
+  .wb-edu-label{max-width:100%;color:var(--muted);font-size:10.5px;line-height:1.15;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+  .wb-edu-formula-shell{position:relative;grid-column:span 4;display:flex;min-width:0}
+  .wb-edu-formula{width:100%;min-height:66px;flex-direction:row;justify-content:flex-start;padding:8px 70px 8px 10px;cursor:grab;text-align:left}
+  .wb-edu-formula .wb-edu-visual{justify-content:flex-start;width:auto;font-size:22px;white-space:nowrap}
+  .wb-edu-formula .wb-edu-visual math{font-size:1em}
+  .wb-edu-formula .wb-edu-label{flex:none;margin-left:auto;font-size:11px}
+  .wb-edu-description{position:absolute;left:10px;right:72px;bottom:5px;color:var(--muted);font-size:9.5px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+  .wb-edu-card-actions{position:absolute;top:6px;right:6px;bottom:6px;display:flex;align-items:center;gap:3px}
+  .wb-formula-favorite,.wb-formula-delete{height:27px;min-width:27px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+  .wb-formula-favorite[aria-pressed="true"]{color:#d97706;background:#fffbeb;border-color:#fbbf24}
+  .wb-formula-delete{font-size:9.5px;color:#b91c1c}
+  .wb-formula-favorite:hover,.wb-formula-delete:hover{border-color:var(--accent);color:var(--ink)}
+  .wb-edu-stencil{grid-column:span 2;min-height:112px}
+  .wb-edu-stencil .wb-edu-visual{height:78px}
+  .wb-edu-stencil svg{display:block;width:100%;height:100%;pointer-events:none}
+  .wb-edu-hint{margin:0;color:var(--muted);font-size:10.5px;line-height:1.35}
+  .wb-edu-empty{grid-column:1/-1;margin:auto;color:var(--muted);font-size:12px}
+  .wb-formula-probe{position:absolute;left:-10000px;top:-10000px;z-index:-1;display:inline-block;width:max-content;max-width:none;padding:6px;visibility:hidden;white-space:nowrap;color:#111;font:32px/1.25 Cambria Math,"Times New Roman",serif}
+  .wb-formula-probe math{font-size:1em}
   /* ===== 수업 리플레이(재생) ===== */
   .office.lr-doc{padding:0;overflow:hidden}
   .lr-wrap{display:flex;flex-direction:column;height:100%;background:var(--viewer)}
