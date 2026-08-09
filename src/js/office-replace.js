@@ -140,7 +140,10 @@ function officeParagraphModel(paraXml, baseOffset){
       start: text.length, end: text.length + decoded.length, locked: false });
     text += decoded;
   }
-  return { text, segs };
+  // source/base are also kept so an originally empty paragraph (no <w:t> at all)
+  // can receive its first run. Without them the editor could mark an empty form
+  // cell dirty, but the save planner had no text segment to target.
+  return { text, segs, source, base };
 }
 
 /* 정규식 치환문의 $$ · $& · $1~$99 를 편다. String.replace 가 하는 일과 같지만,
@@ -245,6 +248,33 @@ function officePlanParagraphEdits(model, matcher, replacement){
 function officeParagraphTextEdits(model, newText){
   const before = model.text, after = String(newText == null ? "" : newText);
   if (before === after) return { edits: [], changed: false, skipped: 0 };
+
+  // Empty Word paragraphs commonly contain only <w:pPr> (or are <w:p/>), so
+  // there is no existing <w:t> segment for officeApplyRangesToSegments to edit.
+  // Insert the first run immediately before </w:p>, preserving paragraph
+  // properties, bookmarks, drawings, and any other non-text children byte-for-byte.
+  if (!model.segs.length && !before && after){
+    const source = String(model.source || "");
+    const base = Number(model.base) || 0;
+    const prefixMatch = source.match(/^<((?:[A-Za-z_][\w.-]*:)?)p(?:\s[^>]*)?\/?\s*>/i);
+    const ns = prefixMatch ? prefixMatch[1] : "w:";
+    const escaped = officeReplaceEscape(after);
+    const space = /^\s|\s$/.test(after) ? ' xml:space="preserve"' : "";
+    const run = "<" + ns + "r><" + ns + "t" + space + ">" + escaped +
+      "</" + ns + "t></" + ns + "r>";
+    if (prefixMatch && /\/\s*>$/.test(prefixMatch[0])){
+      const open = prefixMatch[0].replace(/\/\s*>$/, ">");
+      const close = "</" + ns + "p>";
+      return { edits: [{ start: base, end: base + source.length, value: open + run + close }],
+        changed: true, skipped: 0 };
+    }
+    const closeRe = new RegExp("</(?:[A-Za-z_][\\w.-]*:)?p\\s*>\\s*$", "i");
+    const closeMatch = source.match(closeRe);
+    if (closeMatch){
+      const at = base + closeMatch.index;
+      return { edits: [{ start: at, end: at, value: run }], changed: true, skipped: 0 };
+    }
+  }
   const diff = typeof diffTextEdit === "function"
     ? diffTextEdit(before, after)
     : officeFallbackDiff(before, after);
@@ -1656,13 +1686,28 @@ function officeParagraphStructureEdits(outline, removeIndexes, inserts){
   const items = Array.isArray(outline) ? outline : [];
   const byIndex = new Map(items.map(item => [item.index, item]));
   const edits = [], refused = [];
+  const tableCellKey = item => [item.tableIndex, item.tableRow, item.tableCell].join(":");
+  const tableCellCounts = new Map(), tableCellRemoved = new Map();
+  for (const item of items){
+    if (!item.inTable) continue;
+    const key = tableCellKey(item);
+    tableCellCounts.set(key, (tableCellCounts.get(key) || 0) + 1);
+  }
   let removed = 0, inserted = 0;
 
   for (const rawIndex of (Array.isArray(removeIndexes) ? removeIndexes : [])){
     const item = byIndex.get(rawIndex);
     if (!item){ refused.push({ index: rawIndex, reason: "없는 문단이에요." }); continue; }
     if (item.hasSectPr){ refused.push({ index: rawIndex, reason: "쪽 설정이 든 문단이라 지울 수 없어요." }); continue; }
-    if (item.inTable){ refused.push({ index: rawIndex, reason: "표 안 문단은 지울 수 없어요." }); continue; }
+    if (item.inTable){
+      const key = tableCellKey(item);
+      const removedInCell = tableCellRemoved.get(key) || 0;
+      if (item.tableHasNested || String(item.text || "") || removedInCell >= (tableCellCounts.get(key) || 1) - 1){
+        refused.push({ index: rawIndex, reason: "표 안 문단은 셀에 문단 하나를 남겨야 하며 추가 빈 문단만 지울 수 있어요." });
+        continue;
+      }
+      tableCellRemoved.set(key, removedInCell + 1);
+    }
     edits.push({ start: item.start, end: item.end, value: "" });
     removed++;
   }

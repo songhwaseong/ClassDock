@@ -1119,6 +1119,10 @@
   .img-ocr-text:focus{border-color:var(--accent)}
   /* 손바닥 도구: 내용이 보이는 화면보다 크면 grab, 드래그 중엔 grabbing */
   .viewer.pannable,.office.pannable{cursor:grab}
+  /* 읽기 전용 문서도 글자 위에서는 선택 커서를 우선한다. 빈 종이 부분은 grab을 유지한다. */
+  .viewer.pannable :where(p,pre,code,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,dt,dd),
+  .office.pannable :where(p,pre,code,li,td,th,h1,h2,h3,h4,h5,h6,blockquote,dt,dd),
+  .office.pannable :where(.docx-host,.hwp-host,.pptx-host,.doc-host) span{cursor:text}
   .viewer.panning,.office.panning{cursor:grabbing!important;user-select:none}
   .viewer.panning *,.office.panning *{cursor:grabbing!important;user-select:none!important}
   .page-frame{margin:0 auto 22px}            /* 줌 시 레이아웃 공간 확보용 래퍼 */
@@ -2067,6 +2071,7 @@
   .docx-inline-editing .docx-inline-para.touched{box-shadow:inset 2px 0 0 rgba(127,127,127,.45)}
   .docx-inline-editing .docx-inline-para.touched:focus{box-shadow:inset 2px 0 0 var(--accent,#5b9dd9)}
   .docx-inline-editing .docx-inline-para.removed{opacity:.45;text-decoration:line-through}
+  .docx-inline-editing .docx-inline-para.removed.empty{display:none}
   .docx-inline-editing .docx-inline-para.locked{background:repeating-linear-gradient(135deg,transparent,transparent 6px,rgba(127,127,127,.06) 6px,rgba(127,127,127,.06) 12px)}
   .hwp-host{margin:0 auto}
   .pptx-host{margin:0 auto}

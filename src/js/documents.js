@@ -128,6 +128,18 @@ function isPanIgnoredTarget(target, container){
   while (el && el !== container){
     if (el.nodeType === 1){
       const cl = el.classList;
+      // Read-only document text must keep the browser's normal drag-to-select
+      // behavior. Office renderers do not share one host class, but they all
+      // produce ordinary semantic text elements (or a leaf containing text).
+      // Blank paper around them still starts hand-tool panning.
+      const tag = el.tagName;
+      const semanticText = /^(P|SPAN|PRE|CODE|LI|TD|TH|H[1-6]|BLOCKQUOTE|DT|DD)$/.test(tag || "");
+      const leafText = !el.firstElementChild && String(el.textContent || "").trim();
+      if ((semanticText || leafText) && String(el.textContent || "").trim()){
+        const selectable = typeof getComputedStyle !== "function" ||
+          !/none/i.test(String(getComputedStyle(el).userSelect || ""));
+        if (selectable) return true;
+      }
       // .img-view(이미지)는 제외하지 않음 — 줌인된 큰 이미지도 드래그로 이동.
       // 짧은 클릭은 임계값(4px) 안이라 통과되어 기존 줌 토글이 그대로 동작한다.
       if (cl && (cl.contains("placed") || cl.contains("text-edit") ||
@@ -140,7 +152,6 @@ function isPanIgnoredTarget(target, container){
                  cl.contains("html-host") || cl.contains("xlsx-tabs") ||
                  cl.contains("xlsx-tab") || cl.contains("ctrl") ||
                  cl.contains("grip"))) return true;
-      const tag = el.tagName;
       if (tag === "BUTTON" || tag === "A" || tag === "INPUT" || tag === "TEXTAREA" ||
           tag === "SELECT" || tag === "IFRAME" || tag === "LABEL") return true;
       if (el.isContentEditable) return true;

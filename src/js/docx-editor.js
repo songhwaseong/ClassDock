@@ -81,6 +81,19 @@ const MNDocxEditor = (() => {
   const rowsDirty = (rows) => rows.some(row =>
     row.removed || !row.index || String(row.text) !== String(row.original));
 
+  const sameTableCell = (left, right) => !!left && !!right && left.inTable && right.inTable &&
+    left.tableIndex === right.tableIndex && left.tableRow === right.tableRow &&
+    left.tableCell === right.tableCell;
+
+  // A Word table cell must keep at least one paragraph. An extra paragraph that
+  // was already empty in the source is safe to remove when another one remains.
+  function canRemoveParagraph(rows, row){
+    if (!row || row.hasSectPr) return false;
+    if (!row.inTable) return true;
+    if (row.tableHasNested || !row.index || String(row.original || "") || String(row.text || "")) return false;
+    return (rows || []).filter(other => !other.removed && sameTableCell(other, row)).length > 1;
+  }
+
   /* ---------- 화면 ---------- */
 
   function styleLabelOf(row){
@@ -101,7 +114,9 @@ const MNDocxEditor = (() => {
     style.className = "docx-para-style";
     style.textContent = styleLabelOf(row);
     if (row.hasSectPr) style.title = "쪽 설정(용지·여백·머리말 연결)이 든 문단이라 지울 수 없어요.";
-    else if (row.inTable) style.title = "표 안 문단이에요. 글자는 고칠 수 있지만 더하거나 지울 수 없어요.";
+    else if (row.inTable) style.title = canRemoveParagraph(state.rows, row)
+      ? "표 셀의 추가 빈 문단이에요. 맨 앞에서 Backspace를 누르면 지울 수 있어요."
+      : "표 안 문단이에요. 셀에는 문단 하나가 반드시 남아야 해요.";
     else if (row.hasTextbox) style.title = "텍스트 상자가 딸린 문단이에요. 상자 안 글자는 여기서 고칠 수 없고, 이 문단을 지우면 상자도 함께 사라져요.";
 
     const text = document.createElement("div");
@@ -132,7 +147,7 @@ const MNDocxEditor = (() => {
     delBtn.type = "button"; delBtn.className = "docx-para-btn"; delBtn.textContent = row.removed ? "↩" : "🗑";
     delBtn.title = row.removed ? "삭제 취소"
       : (row.hasTextbox ? "이 문단 지우기 — 딸린 텍스트 상자도 함께 사라져요" : "이 문단 지우기");
-    delBtn.disabled = !row.removed && (row.inTable || row.hasSectPr);
+    delBtn.disabled = !row.removed && !canRemoveParagraph(state.rows, row);
     delBtn.addEventListener("click", () => {
       if (!row.index){ state.rows.splice(state.rows.indexOf(row), 1); }      // 새로 만든 문단은 그냥 뺀다
       else row.removed = !row.removed;
@@ -155,7 +170,7 @@ const MNDocxEditor = (() => {
   }
 
   /* Enter = 커서 자리에서 문단 나누기(Word 와 같다) · 빈 문단에서 Backspace = 그 문단 지우기.
-     표 안 문단에서는 둘 다 막는다 — 셀 구조가 깨진다. */
+     표 안에서는 문단 나누기를 막고, 원본부터 비어 있던 추가 문단만 하나를 남기는 범위에서 지운다. */
   function onRowKey(e, state, row, textEl){
     // 제자리 편집에서는 상자 안 글자를 빼고 탭·줄바꿈을 되돌린 평문을 쓴다(목록 화면은 칸 글자 그대로).
     const textIn = (el) => state.mode === "inline" ? inlineTextOf(el) : el.textContent;
@@ -178,12 +193,17 @@ const MNDocxEditor = (() => {
     }
     if (e.key === "Backspace" && !textIn(textEl) && caretOffsetIn(textEl) === 0){
       const at = state.rows.indexOf(row);
-      if (at <= 0) return;
-      if (row.inTable || row.hasSectPr){ toastOnce("이 문단은 지울 수 없어요."); e.preventDefault(); return; }
+      if (!row.inTable && at <= 0) return;
+      if (!canRemoveParagraph(state.rows, row)){
+        toastOnce(row.inTable ? "표 셀에는 문단 하나를 남겨야 해요." : "이 문단은 지울 수 없어요.");
+        e.preventDefault(); return;
+      }
       e.preventDefault();
       if (!row.index) state.rows.splice(at, 1);
       else row.removed = true;
-      state.focusKey = state.rows[at - 1] && state.rows[at - 1].key;
+      const sameCellNeighbor = row.inTable && state.rows.find((other, index) =>
+        index !== at && !other.removed && sameTableCell(other, row));
+      state.focusKey = (sameCellNeighbor || state.rows[at - 1] || state.rows[at + 1] || {}).key || 0;
       redraw(state);
       state.commitNow();
     }
@@ -291,6 +311,7 @@ const MNDocxEditor = (() => {
     node.dataset.key = String(row.key);
     node.classList.add("docx-inline-para");
     node.classList.toggle("removed", !!row.removed);
+    node.classList.toggle("empty", !row.text);
     node.classList.toggle("touched", !!row.touched);
     node.classList.toggle("locked", !!row.locked);
     const markerLocked = state.inlineLockedKeys && state.inlineLockedKeys.has(row.key);
@@ -302,7 +323,9 @@ const MNDocxEditor = (() => {
     if (markerLocked) node.title = "화면 글자와 저장할 문단이 달라 이 문단은 여기서 고칠 수 없어요.";
     else if (row.locked) node.title = "탭·줄바꿈이 든 문단이라 여기서는 고칠 수 없어요. 문단 목록에서 고쳐 주세요.";
     else if (row.hasTextbox) node.title = "텍스트 상자가 딸린 문단이에요. 상자 안 글자는 고칠 수 없고, 이 문단을 지우면 상자도 사라져요.";
-    else if (row.inTable) node.title = "표 안 문단이에요. 글자는 고칠 수 있지만 더하거나 지울 수 없어요.";
+    else if (row.inTable) node.title = canRemoveParagraph(state.rows, row)
+      ? "표 셀의 추가 빈 문단이에요. 맨 앞에서 Backspace를 누르면 지울 수 있어요."
+      : "표 안 문단이에요. 셀에는 문단 하나가 반드시 남아야 해요.";
     else node.removeAttribute("title");
   }
 
@@ -483,7 +506,11 @@ const MNDocxEditor = (() => {
     if (state.saving) return;
     const plan = officeParagraphEditPlan(state.xml, state.rows);
     if (!plan.edits.length && !state.structureDirty){
-      if (typeof toast === "function") toast("바뀐 내용이 없어요.", 1800);
+      if (plan.skipped || plan.refused.length){
+        state.setStatus("저장할 수 없는 문단 편집이 있어요");
+        if (typeof toast === "function")
+          toast("탭·줄바꿈 또는 보호된 문단의 변경은 저장할 수 없어요.", 3200, { type: "error" });
+      } else if (typeof toast === "function") toast("바뀐 내용이 없어요.", 1800);
       return;
     }
     const tableChanges = (state.tableChanges || []).slice();
@@ -1799,7 +1826,7 @@ const MNDocxEditor = (() => {
     };
     const toggleParagraphRemoved = () => {
       const row = state.activeTextRow;
-      if (!row || (!row.removed && (row.inTable || row.hasSectPr)) || state.rendering || state.saving) return;
+      if (!row || (!row.removed && !canRemoveParagraph(state.rows, row)) || state.rendering || state.saving) return;
       if (!row.index) state.rows.splice(state.rows.indexOf(row), 1);
       else row.removed = !row.removed;
       state.focusKey = 0; redraw(state); state.commitNow();
@@ -1976,7 +2003,7 @@ const MNDocxEditor = (() => {
         { separator: true },
         { label: "아래에 문단 추가", action: addParagraphBelow, disabled: row.inTable || busy },
         { label: row.removed ? "문단 삭제 취소" : "현재 문단 삭제", action: toggleParagraphRemoved,
-          disabled: busy || (!row.removed && (row.inTable || row.hasSectPr)) },
+          disabled: busy || (!row.removed && !canRemoveParagraph(state.rows, row)) },
         ...tableItems.length ? [{ label: "표", children: tableItems }] : [],
         { label: "그림", children: [
           { label: "그림 추가…", action: () => requestImage("add"), disabled: imageAddButton.disabled },
