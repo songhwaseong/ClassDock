@@ -785,6 +785,20 @@ const MNDocxEditor = (() => {
     const toolLauncherLabel = document.createElement("span");
     toolLauncherLabel.className = "docx-tool-launchers-label";
     toolLauncherLabel.textContent = "편집 도구";
+    const editHelp = document.createElement("span");
+    editHelp.className = "docx-edit-help";
+    const editHelpButton = document.createElement("button");
+    editHelpButton.type = "button";
+    editHelpButton.className = "docx-edit-help-btn";
+    editHelpButton.textContent = "?";
+    editHelpButton.setAttribute("aria-label", "DOCX 편집 도움말");
+    editHelpButton.setAttribute("aria-expanded", "false");
+    const editHelpPopup = document.createElement("span");
+    editHelpPopup.className = "docx-edit-help-pop";
+    editHelpPopup.id = "docx-edit-help-" + String(doc.id || Math.random().toString(36).slice(2));
+    editHelpPopup.setAttribute("role", "tooltip");
+    editHelpButton.setAttribute("aria-describedby", editHelpPopup.id);
+    editHelp.append(editHelpButton, editHelpPopup);
     const toolLauncherButtons = new Map();
     const toolLauncherButton = (kind, label, titleText) => {
       const button = document.createElement("button");
@@ -794,7 +808,7 @@ const MNDocxEditor = (() => {
       toolLauncherButtons.set(kind, button); toolLaunchers.appendChild(button);
       return button;
     };
-    toolLaunchers.appendChild(toolLauncherLabel);
+    toolLaunchers.append(toolLauncherLabel, editHelp);
     toolLauncherButton("document", "문서", "용지·여백·머리글·바닥글");
     toolLauncherButton("text", "글자", "글꼴·크기·굵게·색상·첨자");
     toolLauncherButton("paragraph", "문단", "정렬·간격·들여쓰기·목록·서식 복사");
@@ -851,11 +865,6 @@ const MNDocxEditor = (() => {
       if (stickyToolObserver) stickyToolObserver.disconnect();
       host.style.removeProperty("--docx-editor-tools-height");
     });
-
-    const note = document.createElement("div");
-    note.className = "code-note docx-edit-note";
-    note.hidden = true;
-    host.insertBefore(note, previewEl);
 
     const listEl = document.createElement("div");
     listEl.className = "docx-para-list md-host";
@@ -918,6 +927,24 @@ const MNDocxEditor = (() => {
       "손대지 않은 곳은 저장할 때 바이트 그대로 남습니다.";
     const LIST_NOTE = "✎ 문단 목록 — 글자만 고치는 간이 표시예요. 글꼴·여백·쪽 나눔은 실제 문서와 다르게 보입니다. " +
       "손대지 않은 곳의 서식은 저장할 때 그대로 유지됩니다.";
+
+    const closeEditHelp = () => {
+      editHelp.classList.remove("open");
+      editHelpButton.setAttribute("aria-expanded", "false");
+    };
+    editHelpButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = !editHelp.classList.contains("open");
+      editHelp.classList.toggle("open", open);
+      editHelpButton.setAttribute("aria-expanded", String(open));
+    });
+    editHelp.addEventListener("keydown", (event) => {
+      if (event.key === "Escape"){ closeEditHelp(); editHelpButton.focus(); }
+    });
+    const closeEditHelpOutside = (event) => { if (!editHelp.contains(event.target)) closeEditHelp(); };
+    document.addEventListener("pointerdown", closeEditHelpOutside, true);
+    if (doc.cleanupFns) doc.cleanupFns.push(() =>
+      document.removeEventListener("pointerdown", closeEditHelpOutside, true));
 
     const updateTextTools = (row) => {
       state.activeTextRow = row || null;
@@ -1086,8 +1113,8 @@ const MNDocxEditor = (() => {
       toggle.textContent = state.editing ? "읽기 전용" : "✎ 문단 편집";
       toggle.title = state.editing ? "편집을 마치고 원래 미리보기로 돌아가기" : "문서를 보이는 자리에서 그대로 고치기";
       toggle.classList.toggle("active", state.editing);
-      note.hidden = !state.editing;
-      note.textContent = inline ? INLINE_NOTE : LIST_NOTE;
+      editHelpPopup.textContent = inline ? INLINE_NOTE : LIST_NOTE;
+      if (!state.editing) closeEditHelp();
       listEl.hidden = !state.editing || inline;
       previewEl.hidden = state.editing && !inline;      // 제자리 편집은 미리보기를 그대로 쓴다
       previewEl.classList.toggle("docx-inline-editing", state.editing && inline);

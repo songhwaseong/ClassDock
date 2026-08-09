@@ -86,6 +86,16 @@ test("DOCX 편집 도구막대는 긴 문서에서도 상단에 따라오고 문
   assert.match(source, /stickyToolObserver\.disconnect\(\)/);
 });
 
+test("DOCX 편집 안내는 상시 배너 대신 편집 도구 옆 도움말로 연다", () => {
+  assert.match(source, /editHelpButton\.textContent = "\?"/);
+  assert.match(source, /editHelpPopup\.textContent = inline \? INLINE_NOTE : LIST_NOTE/);
+  assert.match(source, /editHelpButton\.addEventListener\("click"/);
+  assert.match(source, /document\.addEventListener\("pointerdown", closeEditHelpOutside, true\)/);
+  assert.doesNotMatch(source, /docx-edit-note/);
+  assert.match(styles, /\.docx-edit-help:hover \.docx-edit-help-pop/);
+  assert.match(styles, /\.docx-edit-help\.open \.docx-edit-help-pop/);
+});
+
 test("상단 DOCX 도구는 여섯 갈래 메뉴로 정리하고 실제 컨트롤은 중복 노출하지 않는다", () => {
   for (const kind of ["document", "text", "paragraph", "table", "image", "all"])
     assert.ok(source.includes(`toolLauncherButton("${kind}"`), kind + " 분류 버튼이 없다");

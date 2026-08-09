@@ -2007,6 +2007,20 @@
     border-left:1px solid var(--border)}
   .docx-tool-launchers[hidden]{display:none}
   .docx-tool-launchers-label{margin-right:2px;color:var(--muted);font-size:11.5px;white-space:nowrap}
+  .docx-edit-help{position:relative;display:inline-flex;align-items:center}
+  .docx-edit-help-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;
+    border:1px solid var(--border);border-radius:50%;background:transparent;color:var(--muted);
+    font:700 12px/1 inherit;cursor:help}
+  .docx-edit-help-btn:hover,.docx-edit-help-btn:focus-visible,.docx-edit-help.open .docx-edit-help-btn{
+    border-color:var(--accent);background:var(--panel-hover);color:var(--accent);outline:none}
+  .docx-edit-help-pop{position:absolute;left:-8px;top:calc(100% + 8px);z-index:120;
+    width:min(680px,calc(100vw - 32px));padding:10px 12px;border:1px solid #e4c34f;border-radius:9px;
+    background:#fff3bf;color:#8a4600;box-shadow:0 10px 28px rgba(15,23,42,.24);
+    font-size:12px;line-height:1.55;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;
+    transform:translateY(-3px);transition:opacity .12s,transform .12s,visibility 0s linear .12s}
+  .docx-edit-help:hover .docx-edit-help-pop,
+  .docx-edit-help.open .docx-edit-help-pop{opacity:1;visibility:visible;pointer-events:auto;transform:none;transition-delay:0s}
+  [data-theme="dark"] .docx-edit-help-pop{border-color:#8a6a18;background:#40330e;color:#ffe28a}
   .docx-tool-launcher{padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:var(--field);
     color:var(--ink);font:inherit;font-size:11.5px;white-space:nowrap;cursor:pointer}
   .docx-tool-launcher:hover:not(:disabled),.docx-tool-launcher[aria-expanded="true"]{
@@ -2035,7 +2049,6 @@
   .docx-table-color-field input[type="color"]{width:28px;height:26px;padding:2px;border:1px solid var(--border);
     border-radius:6px;background:transparent;cursor:pointer}
   .docx-table-format-field select:disabled,.docx-table-color-field input:disabled{opacity:.5;cursor:default}
-  .docx-edit-note{margin-bottom:10px}
   .docx-para-list{display:flex;flex-direction:column;gap:2px;padding:18px}
   .docx-para{display:grid;grid-template-columns:74px 1fr 58px;gap:10px;align-items:start;
     padding:4px 6px;border-radius:6px}
