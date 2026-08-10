@@ -1237,6 +1237,22 @@ function renderWhiteboard(doc, host){
   const eduHint = document.createElement("p"); eduHint.className = "wb-edu-hint";
   eduHint.textContent = "클릭하면 가운데에, 끌어 놓으면 원하는 위치에 들어갑니다.";
   eduPanel.append(eduHead, eduSearch, eduTabs, formulaBuilder, formulaGroupBar, eduSubgroupBar, eduGrid, eduHint); stage.appendChild(eduPanel);
+  // 메모창처럼 제목줄을 끌어 옮기고, 네 변·네 모서리로 크기를 조절한다(위치·크기는 저장된다).
+  // 무대 밖으로도 나갈 수 있게 화면 좌표로 띄우되, 앱 헤더는 이 창보다 위 층이라 가려 버리므로
+  // 움직일 수 있는 범위는 작업 영역(#content)으로 잡는다.
+  const eduFloat = typeof makeFloatingPanel === "function" ? makeFloatingPanel(eduPanel, eduHead, {
+    storageKey: "manneung-whiteboard:edu-rect:v1",
+    min: { w:300, h:280 },
+    bounds: () => {
+      const box = typeof byId === "function" ? byId("content") : null;
+      return box ? box.getBoundingClientRect() : null;
+    },
+    // 전체화면(#content)에서는 핸들 레이어도 그 안에 있어야 보인다
+    host: () => document.fullscreenElement || document.body,
+    // 핸들 띠는 body 에 붙으므로 main(z-index:19)·헤더(30)·사이드바(40)보다 위여야 잡힌다.
+    // 창 자체는 main 안이라 그 위로 못 올라가지만, 움직이는 범위를 헤더 아래로 잡아 두어 어긋나지 않는다.
+    zIndex: () => 61
+  }) : null;
 
   const EDU_CATEGORIES = [
     ["symbol", "기호"], ["formula", "수식"], ["geometry", "도형"], ["science", "과학"]
@@ -1439,7 +1455,7 @@ function renderWhiteboard(doc, host){
     const open = force == null ? eduPanel.hidden : !!force;
     eduPanel.hidden = !open;
     if (eduToolBtn){ eduToolBtn.classList.toggle("active", open); eduToolBtn.setAttribute("aria-expanded", open ? "true" : "false"); }
-    if (open){ renderEducationPanel(); requestAnimationFrame(() => (editingFormulaItem ? formulaInput : eduSearch).focus({ preventScroll:true })); }
+    if (open){ renderEducationPanel(); if (eduFloat) eduFloat.clampOnOpen(); requestAnimationFrame(() => (editingFormulaItem ? formulaInput : eduSearch).focus({ preventScroll:true })); }
     else if (editingFormulaItem) resetFormulaEditor();
   }
   eduSearch.addEventListener("input", renderEducationPanel);
@@ -1684,7 +1700,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){

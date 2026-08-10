@@ -1811,7 +1811,12 @@
     display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);
     color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.22)}
   .wb-edu-panel[hidden]{display:none}
-  .wb-edu-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  /* 제목줄을 끌어 옮긴 뒤(메모창과 같은 방식): 화면 좌표로 떠 있고 크기는 인라인 style 이 정한다.
+     무대 기준이던 max-height 를 놓아 주지 않으면 세로로 늘릴 수 없다. */
+  .wb-edu-panel.is-floating{z-index:60;max-height:none;box-shadow:0 18px 50px rgba(0,0,0,.42)}
+  .wb-edu-head{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:move;user-select:none;touch-action:none}
+  /* 좁은 화면에서는 창을 옮기지 않는다(makeFloatingPanel 의 판정과 같은 조건) */
+  @media (max-width:600px),(max-height:520px){.wb-edu-head{cursor:default}}
   .wb-edu-head strong{font-size:14px}
   .wb-edu-close{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:20px;cursor:pointer}
   .wb-edu-close:hover{background:var(--panel-hover);color:var(--ink)}

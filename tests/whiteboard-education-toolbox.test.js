@@ -165,3 +165,24 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   assert.match(palette, /수학·과학 도구상자[\s\S]*?\.wb-edu-toggle/);
   assert.match(palette, /교육 도형 그룹 풀기[\s\S]*?\.wb-ungroup:not\(:disabled\)/);
 });
+
+test("도구상자는 메모창과 같은 공용 헬퍼로 옮기고 크기를 조절한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/whiteboard.js"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  const memo = fs.readFileSync(path.join(__dirname, "../src/js/scratchpad.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  // 공용 헬퍼는 app.js 한 곳에만 있고, 메모창도 같은 것을 쓴다
+  assert.match(app, /function makeFloatingPanel\(panel, head, opts\)/);
+  assert.match(memo, /return makeFloatingPanel\(panel, head, \{/);
+  assert.doesNotMatch(memo, /attachEdgeResize/);
+  // 화이트보드 도구상자 배선: 저장 키·작업 영역 안으로 제한·전체화면 대응·창을 닫을 때 정리
+  assert.match(source, /makeFloatingPanel\(eduPanel, eduHead, \{/);
+  assert.match(source, /storageKey: "manneung-whiteboard:edu-rect:v1"/);
+  assert.match(source, /bounds: \(\) => \{[\s\S]*?byId\("content"\)/);
+  assert.match(source, /host: \(\) => document\.fullscreenElement \|\| document\.body/);
+  assert.match(source, /if \(eduFloat\) eduFloat\.clampOnOpen\(\);/);
+  assert.match(source, /if \(eduFloat\) eduFloat\.destroy\(\);/);
+  // 떠 있는 상태에서는 무대 기준 max-height 를 놓아 주어야 세로로 늘릴 수 있다
+  assert.match(css, /\.wb-edu-panel\.is-floating\{[^}]*max-height:none/);
+  assert.match(css, /\.wb-edu-head\{[^}]*cursor:move/);
+});

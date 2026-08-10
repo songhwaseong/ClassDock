@@ -1782,6 +1782,145 @@ function attachEdgeResize(target, opts){
   requestAnimationFrame(sync);
   return { sync, destroy };
 }
+
+/* ===== 떠 있는 창(메모창·화이트보드 도구상자 공용) =====
+   헤더를 끌어 옮기고, 네 변·네 모서리로 크기를 조절한다. 위치·크기는 storageKey 에 저장한다.
+   좌표는 늘 화면(뷰포트) 기준이다 — 무대 안에 absolute 로 놓인 창도 처음 끌 때 fixed 로 바꿔 다는데,
+   그 순간의 화면 좌표를 그대로 넣으므로 눈에는 창이 움직이지 않는다(.is-floating 이 붙는다).
+   opts: storageKey / min({w,h}) / locked(지금은 못 움직이는 상태인가) / bounds(가둘 범위·기본 화면 전체) /
+         host(크기 조절 핸들 레이어를 담을 곳) / handle(창이 직접 그린 우하단 손잡이 그림) /
+         grip(공용 손잡이 표시) / compact(좁은 화면 판정 미디어쿼리)
+   반환: { clampOnOpen, destroy } */
+function makeFloatingPanel(panel, head, opts){
+  opts = opts || {};
+  const MARGIN = 6;
+  const call = (fn) => (typeof fn === "function" ? fn() : fn);
+  const storageKey = opts.storageKey || "";
+  const minSize = () => {
+    const m = call(opts.min) || {};
+    return { w: m.w || 280, h: m.h || 200 };
+  };
+  const compactLayout = () => {
+    const query = opts.compact || "(max-width:600px), (max-height:520px)";
+    try { return window.matchMedia(query).matches; }
+    catch(_){ return window.innerWidth <= 600 || window.innerHeight <= 520; }
+  };
+  const locked = () => compactLayout() || !!call(opts.locked);
+  // 창을 가둘 범위(화면 좌표). bounds 를 주면 그 안에만 — 화이트보드 도구상자는 헤더 아래 작업 영역에 둔다.
+  const area = () => {
+    const b = call(opts.bounds);
+    if (!b) return { left:MARGIN, top:MARGIN, right:window.innerWidth - MARGIN, bottom:window.innerHeight - MARGIN };
+    return { left:b.left + MARGIN, top:b.top + MARGIN, right:b.right - MARGIN, bottom:b.bottom - MARGIN };
+  };
+  let pinned = false;
+  let edge = null;                                  // 아래에서 attachEdgeResize 로 채운다
+  const syncEdge = () => { if (edge) edge.sync(); }; // 창이 움직이면 가장자리 핸들도 따라가야 한다
+  const save = () => {
+    if (!pinned || !storageKey || locked()) return;
+    const r = panel.getBoundingClientRect();
+    try { localStorage.setItem(storageKey, JSON.stringify({ left:Math.round(r.left), top:Math.round(r.top), w:Math.round(r.width), h:Math.round(r.height) })); } catch(_){}
+  };
+  const place = (left, top, w, h) => {
+    panel.style.position = "fixed";
+    panel.style.left = left + "px";
+    panel.style.top = top + "px";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    panel.style.width = w + "px";
+    panel.style.height = h + "px";
+    panel.style.transform = "none";
+    panel.classList.add("is-floating");
+    pinned = true;
+  };
+  const pin = () => {
+    if (pinned) return;
+    const r = panel.getBoundingClientRect();
+    place(r.left, r.top, r.width, r.height);
+  };
+  const clamp = () => {
+    if (!pinned || panel.hidden || locked()) return;
+    const box = area();
+    const min = minSize();
+    let r = panel.getBoundingClientRect();
+    const width = Math.min(r.width, Math.max(min.w, box.right - box.left));
+    const height = Math.min(r.height, Math.max(min.h, box.bottom - box.top));
+    if (Math.abs(width - r.width) > 0.5) panel.style.width = width + "px";
+    if (Math.abs(height - r.height) > 0.5) panel.style.height = height + "px";
+    r = panel.getBoundingClientRect();
+    panel.style.left = Math.max(box.left, Math.min(r.left, box.right - r.width)) + "px";
+    panel.style.top = Math.max(box.top, Math.min(r.top, box.bottom - r.height)) + "px";
+    syncEdge();
+  };
+  if (storageKey){
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || "null");
+      // 예전 창 전체 최대화 저장본은 확대 전 좌표로 되돌리고, 이후에는 일반 좌표만 저장한다.
+      const saved = stored && stored.max ? stored.prev : stored;
+      const min = minSize();
+      if (saved && saved.w >= min.w && saved.h >= min.h){
+        place(saved.left, saved.top, saved.w, saved.h);
+        if (stored && stored.max) localStorage.setItem(storageKey, JSON.stringify(saved));
+      } else if (stored && stored.max){
+        localStorage.removeItem(storageKey);
+      }
+    } catch(_){}
+  }
+  head.addEventListener("pointerdown", event => {
+    if (locked() || event.target.closest("button, input, textarea, select")) return;
+    event.preventDefault();
+    pin();
+    const rect = panel.getBoundingClientRect();
+    const dx = event.clientX - rect.left;
+    const dy = event.clientY - rect.top;
+    head.setPointerCapture(event.pointerId);
+    const move = next => {
+      panel.style.left = (next.clientX - dx) + "px";
+      panel.style.top = (next.clientY - dy) + "px";
+      syncEdge();
+    };
+    const up = () => {
+      head.removeEventListener("pointermove", move);
+      head.removeEventListener("pointerup", up);
+      head.removeEventListener("pointercancel", up);
+      clamp();
+      save();
+    };
+    head.addEventListener("pointermove", move);
+    head.addEventListener("pointerup", up);
+    head.addEventListener("pointercancel", up);
+  });
+  // 크기 조절은 네 변·네 모서리 어디서나(모달과 같은 공용 핸들).
+  edge = typeof attachEdgeResize === "function" ? attachEdgeResize(panel, {
+    host: opts.host,
+    enabled: () => !panel.hidden && !locked(),
+    min: minSize,
+    grip: opts.grip !== false,
+    zIndex: opts.zIndex || (() => {
+      let z = 0;
+      try { z = parseInt(getComputedStyle(panel).zIndex, 10) || 0; } catch(_){}
+      return (z || 130) + 1;           // 창 바로 위(테두리에 걸치는 띠라 창을 가리지 않는다)
+    }),
+    onStart: pin,
+    onEnd: () => { clamp(); save(); }
+  }) : null;
+  if (opts.handle) opts.handle.style.pointerEvents = "none";
+  // 창을 닫을 때(hidden) 핸들도 같이 숨기고, 열 때 다시 맞춘다
+  const observer = typeof MutationObserver !== "undefined"
+    ? new MutationObserver(() => requestAnimationFrame(syncEdge))
+    : null;
+  if (observer) observer.observe(panel, { attributes: true, attributeFilter: ["hidden", "style", "class"] });
+  const onWindowResize = () => clamp();
+  window.addEventListener("resize", onWindowResize);
+  return {
+    clampOnOpen: () => { clamp(); syncEdge(); },
+    destroy: () => {
+      window.removeEventListener("resize", onWindowResize);
+      if (observer) observer.disconnect();
+      if (edge) edge.destroy();
+    }
+  };
+}
+
 /* 크기 조절·이동 직후의 click 한 번을 삼킨다.
    창에서 눌러 바깥(오버레이) 위에서 손을 떼면 click 의 공통 조상이 오버레이라
    여러 모달이 쓰는 '바깥 클릭 닫기'(e.target === modal)가 오작동한다. */
