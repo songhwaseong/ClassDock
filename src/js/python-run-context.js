@@ -2,6 +2,15 @@
 
 // 브라우저에서 실행할 수 있는(=실행 버튼을 붙일) 확장자
 const RUN_EXTS = new Set(["py"]);
+// 브라우저 워커에서 그대로 실행하는 자바스크립트 연습 파일(별도 런타임 없이 실행된다)
+const JS_RUN_EXTS = new Set(["js", "mjs"]);
+// 확장자 → 실행 언어("python" | "js" | null). 실행 바를 붙일지, 어느 실행기를 쓸지 한 곳에서 정한다.
+function runLangForExt(ext){
+  const key = String(ext || "").toLowerCase();
+  if (RUN_EXTS.has(key)) return "python";
+  if (JS_RUN_EXTS.has(key)) return "js";
+  return null;
+}
 let _pyBackend = null;          // null=미확인, true/false=캐시(로컬 python 백엔드 가용 여부)
 let _localPyConfirmed = false;  // 로컬 실행 1회 동의(세션)
 const PYODIDE_VER = "0.27.7";

@@ -83,6 +83,9 @@ function nbBuildCell(ownerDoc, cell){
   const cellEl = document.createElement("div");
   cellEl.className = "nbv-cell nbv-cell-" + cell.type;
   cellEl.tabIndex = -1;
+  // 셀 편집기·구문 강조 프로파일은 노트북 언어를 따른다(자바스크립트는 C 계열 강조를 쓴다).
+  const cellLang = notebookLanguageOf(ownerDoc && ownerDoc.notebookModel);
+  const cellProfile = cellLang === "javascript" ? "c" : "python";
   const ctrl = { ownerDoc, type: cell.type, cell, cellEl, body: null, editor: null, runBtn: null,
     runCount: null, stateLabel: null, execState: null, outWrap: null,
     stdin: null, stdinWrap: null, refreshStdin: function(){}, stdinText: function(){ return ""; },
@@ -399,7 +402,7 @@ function nbBuildCell(ownerDoc, cell){
       const pre = document.createElement("pre");
       pre.className = "nbv-static code-color-target";
       pre.innerHTML = cell.source
-        ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "python") : escapeForPre(cell.source))
+        ? ((typeof highlightCode === "function") ? highlightCode(cell.source, cellProfile) : escapeForPre(cell.source))
         : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       pre.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -434,7 +437,7 @@ function nbBuildCell(ownerDoc, cell){
 
     ctrl.mount = () => {
       if (ctrl.active) return;
-      const ed = buildCodeEditor(cell.source, "python", {
+      const ed = buildCodeEditor(cell.source, cellProfile, {
         completionPortal:true,
         workspaceImportCandidates:() => (typeof workspacePythonImportCandidates === "function" ? workspacePythonImportCandidates(ownerDoc) : []),
         workspaceModuleCandidates:(context) => (typeof workspacePythonModuleCandidates === "function" ? workspacePythonModuleCandidates(ownerDoc, context) : []),
@@ -492,7 +495,7 @@ function nbBuildCell(ownerDoc, cell){
       if (ctrl.editor) ctrl.editor.setValue(cell.source);
       else if (ctrl.staticEl) {
         ctrl.staticEl.innerHTML = cell.source
-          ? ((typeof highlightCode === "function") ? highlightCode(cell.source, "python") : escapeForPre(cell.source))
+          ? ((typeof highlightCode === "function") ? highlightCode(cell.source, cellProfile) : escapeForPre(cell.source))
           : '<span class="nbv-md-empty">' + (typeof window !== "undefined" && typeof window.t === "function" ? window.t("빈 코드 셀 — 클릭해 편집") : "빈 코드 셀 — 클릭해 편집") + '</span>';
       }
       refreshStdin();

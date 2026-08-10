@@ -501,7 +501,11 @@ function buildCodeEditor(text, prof, options={}){
   // 파이썬 import 제안)을 끄고, 프로파일에 맞는 버퍼 단어 완성만 쓴다. 로컬 파이썬이 떠 있어도(jediReady=true)
   // JS·JSON 소스를 파이썬으로 보내지 않도록 이 플래그로 함께 막는다.
   const plainMode = !!options.plain;
-  const completionWords = plainMode ? completionWordsForProfile(prof, options.fileExt) : undefined;
+  // 일반(plain) 편집은 확장자에 맞는 키워드를 쓰되, 부르는 쪽이 목록을 직접 줄 수도 있다
+  // (실행 편집기처럼 "이 실행 환경에서 실제로 되는 것"만 제안해야 하는 경우).
+  const completionWords = plainMode
+    ? (Array.isArray(options.completionWords) ? options.completionWords : completionWordsForProfile(prof, options.fileExt))
+    : undefined;
   const jediUsable = () => !plainMode && typeof jediReady === "function" && jediReady();
   // 서버 미러 안에서 이 파일이 놓인 상대경로 — Jedi 가 "지금 이 파일이 프로젝트의 어디인지"를
   // 알아야 같은 패키지의 형제 모듈(from .state import State 같은 상대 import)까지 풀 수 있다.
@@ -1229,8 +1233,17 @@ function buildCodeEditor(text, prof, options={}){
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
     // import 줄에서 아직 아무 글자도 안 쳤으면 버퍼 단어는 빼고 모듈 후보만 보여 준다(목록 소음 방지).
     const local = importCtx && !word.prefix ? [] : pythonCompletionCandidates(source, word.prefix, completionWords);
-    const members = memberReceiver && !plainMode && typeof pythonMemberCompletionCandidates === "function"
-      ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
+    // 멤버 후보는 부르는 쪽이 준 함수를 먼저 쓴다(자바스크립트 실행 편집기 등 파이썬이 아닌 언어).
+    // 없으면 기존대로 파이썬 추론을 쓴다 — 일반 텍스트 편집(plainMode)에서는 둘 다 쓰지 않는다.
+    let members = [];
+    if (memberReceiver){
+      if (typeof options.memberCandidates === "function"){
+        try { members = options.memberCandidates(source, memberReceiver, word.prefix) || []; }
+        catch(e){ members = []; }
+      } else if (!plainMode && typeof pythonMemberCompletionCandidates === "function"){
+        members = pythonMemberCompletionCandidates(source, memberReceiver, word.prefix);
+      }
+    }
     const modules = moduleCandidatesFor(importCtx, word.prefix, manual);
     const imports = importCtx ? [] : importCandidatesFor(source, word.prefix, manual, ctx.dotContext);
     const items = mergeCompletionItems([...modules, ...members, ...local], imports, memberReceiver ? 240 : 12);

@@ -330,6 +330,7 @@ function wire(){
     else if (e.key === "0"){ e.preventDefault(); setPdfZoom(1); }
   });
   byId("sbNewPy").onclick = () => newPythonScratch();
+  if (byId("sbNewJs")) byId("sbNewJs").onclick = () => { if (typeof newJsScratch === "function") newJsScratch(); };
   if (byId("sbNewNotebook")) byId("sbNewNotebook").onclick = () => { if (typeof newNotebookScratch === "function") newNotebookScratch(); };
   byId("sbNewSheet").onclick = () => { if (typeof newSpreadsheetScratch === "function") newSpreadsheetScratch(); };
   byId("sbNewBoard").onclick = () => { if (typeof newWhiteboard === "function") newWhiteboard(); };
@@ -436,7 +437,7 @@ function wire(){
     const btn = byId("sbNew"), menu = byId("sbNewMenu");
     if (!btn || !menu) return;
     const home = menu.parentNode;
-    const items = [byId("sbNewPy"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbNewMnote"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
+    const items = [byId("sbNewPy"), byId("sbNewJs"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbNewMnote"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
     const placeMenu = () => {
       const rect = btn.getBoundingClientRect();
       document.body.appendChild(menu);               // 좁은 사이드바의 overflow:hidden에 잘리지 않게 화면 레이어로 이동

@@ -926,7 +926,11 @@ async function renderCode(file, host, ext, profile, runCtx){
   const lineCount = text.split("\n").length;
   const ownerDoc = docs.find(d => d.el === host) || null;
   const definitionSource = isDefinitionSourceDoc(ownerDoc);
-  const runnable = RUN_EXTS.has(ext) && !definitionSource;
+  const extRunLang = definitionSource ? null : runLangForExt(ext);
+  // 압축된 라이브러리(.min.js)처럼 크거나 한 줄이 아주 긴 파일은 연습용 코드가 아니다 —
+  // 실행 화면 대신 기존 코드 보기/가벼운 편집기로 열어 편집이 멈추지 않게 한다.
+  const runLang = (extRunLang === "js" && (heavy || lightEdit)) ? null : extRunLang;   // "python" | "js" | null
+  const runnable = !!runLang;
   const spellModeForExt = () => {
     if (ext === "md" || ext === "markdown" || ext === "mdx") return "markdown";
     if (!ext || ["txt","text","log","srt","vtt","smi","rst","adoc","asciidoc","org","textile","wiki","mediawiki"].includes(ext)) return "plain";
@@ -1829,6 +1833,12 @@ async function renderCode(file, host, ext, profile, runCtx){
     else if (canEdit && ownerDoc && ownerDoc.isScratch) showEdit();
     else if (isMd) showPreview();                 // 마크다운은 문서 모양(미리보기)이 기본
     else showView();
+    return;
+  }
+
+  // ── 실행 가능한 코드(.js/.mjs): 같은 뼈대를 쓰되 실행기는 브라우저 워커(js-editor.js) ──
+  if (runLang === "js"){
+    renderJsRunnable({ outer, host, text, prof, ext, file, ownerDoc, runCtx: effectiveRunCtx, sourceBytes });
     return;
   }
 

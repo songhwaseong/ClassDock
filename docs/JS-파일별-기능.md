@@ -19,8 +19,9 @@
 flowchart LR
   A["1. bootstrap<br/>설정·공통 상태"] --> B["2. documents<br/>파일·문서·PDF·코드"]
   B --> C["3. python-and-notebooks<br/>Python·Jupyter"]
-  C --> D["4. document-editors<br/>Office·표·이미지·칠판"]
-  D --> E["5. learning-tools<br/>수업·과제·펫·메모·이벤트"]
+  C --> D["4. javascript<br/>자바스크립트 실행"]
+  D --> E["5. document-editors<br/>Office·표·이미지·칠판"]
+  E --> F["6. learning-tools<br/>수업·과제·펫·메모·이벤트"]
 ```
 
 ## 1. bootstrap — 초기 설정과 공통 기반
@@ -66,13 +67,20 @@ flowchart LR
 | `python-run-context.js` | 함께 연 프로젝트 파일을 실행 번들로 구성하고 Python의 작업폴더·프로젝트 루트·상대경로·import·출력 파일 경로를 계산합니다. | `file-loaders.js`, `python-runtime.js`, `tests/python-path-helper.test.js` |
 | `python-runtime.js` | Python 실행의 총괄입니다. EXE 로컬 Python과 브라우저 Pyodide를 선택하고 패키지 준비, 입력, 스트리밍 출력, 중지, 진단·단계 실행, 결과 파일 수집을 처리합니다. | `python-run-context.js`, `desktop/launcher.cs`, `korean-font.js` |
 | `python-terminal.js` | Python 편집기의 결과/터미널 전환, 명령 기록·중지·초기화, EXE의 지속형 로컬 PowerShell 세션과 브라우저의 상태 유지 Pyodide 콘솔을 담당합니다. 터미널은 `sharedPythonTerminal()`로 앱에 하나만 만들고 각 문서는 자기 터미널 버튼만 등록(`attach`)·해제(`detach`)하므로, 열려 있는 파이썬 파일들이 세션·변수·명령 기록을 함께 씁니다. 다른 파일에서 열면 작업 폴더만 그 파일 폴더로 자동 이동(`Set-Location`)하고, 같은 파일에서 다시 열 때는 사용자가 직접 옮긴 폴더를 유지합니다. 마지막 파이썬 문서가 닫히면 잠깐 뒤(새로고침 대비) 셸과 전역 단축키를 정리합니다. | `code-viewer.js`, `python-runtime.js`, `desktop/launcher.cs`, `tests/python-terminal-shared.test.js` |
-| `notebook-model.js` | `.ipynb` 파싱·직렬화, 셀·출력 모델, 복구본·자동 저장, 실행 상태 해시, 셀 추가·삭제·이동 같은 DOM 비종속 모델 기능을 담당합니다. | `notebook-run.js`, `notebook-cells.js`, `tests/notebook-serialize.test.js` |
+| `notebook-model.js` | `.ipynb` 파싱·직렬화, 셀·출력 모델, 복구본·자동 저장, 실행 상태 해시, 셀 추가·삭제·이동 같은 DOM 비종속 모델 기능을 담당합니다. 노트북 언어 판별(`notebookLanguageOf` — metadata 의 kernelspec·language_info)도 여기 있어 실행기·강조·커널이 같은 기준을 씁니다. | `notebook-run.js`, `notebook-cells.js`, `tests/notebook-serialize.test.js` |
 | `notebook-tools.js` | 노트북 실행 작업공간과 파일 번들, 로컬 셀 커널 선택·시작·중지, 로컬 Python 설치 안내와 커널 통신을 담당합니다. | `notebook-model.js`, `python-runtime.js`, `desktop/python_kernel.py` |
 | `notebook-run.js` | 노트북 전체 화면과 상단 도구막대를 만들고 셀 렌더링, 전체 실행, 저장, 목차, 찾기, 출력 메뉴, 커널 상태 UI를 연결합니다. | `notebook-model.js`, `notebook-tools.js`, `notebook-cells.js` |
 | `notebook-pdf-export.js` | 노트북을 A4 PDF로 내보냅니다. 셀 경계를 고려한 페이지 분할, 캔버스 배치, 지도·iframe 리치 출력 스냅샷을 처리합니다. | `notebook-run.js`, `tests/pdf-layout.test.js` |
 | `notebook-cells.js` | 개별 코드·마크다운·Raw 셀 UI, 셀 실행·입력, 선택·복사·붙여넣기, 드래그 순서 변경, 접기, 메모 보내기와 셀 도구 버튼을 담당합니다. | `notebook-run.js`, `python-editor.js`, `scratchpad.js` |
 
-## 4. document-editors — Office, 표, 이미지와 화이트보드
+## 4. javascript — 자바스크립트 연습 실행
+
+| 파일 | 담당 기능 | 주로 함께 확인할 파일 |
+|---|---|---|
+| `js-runtime.js` | `.js`·`.mjs` 실행의 총괄입니다. 실행마다 Blob 워커를 새로 띄워 `console` 출력을 스트림(보통·경고·오류)별로 모으고, `input()`·`prompt()`를 입력값 칸과 잇고, 실행 전 문법 검사·스택에서 사용자 코드 줄 번호 찾기·10초 시간 제한·중지를 처리합니다. 출력은 모아 뒀다 한 번에 주지 않고 **실행 중에 조금씩 흘려보내서**(시간 80ms 또는 8KB 기준) 오래 걸리는 코드도 진행이 보이고, 중지하거나 시간이 넘어 워커를 끊어도 그때까지 찍힌 내용이 남습니다. 엔진이 문법 오류의 위치를 알려주지 않으므로 소스를 훑어 **닫히지 않은 괄호·따옴표의 줄**을 짚고, 자주 나는 오류에는 한국어 도움말 카드를 붙입니다. **자동완성**도 여기서 정합니다 — 낱말 목록은 이 실행 환경에서 실제로 되는 것만 담고(`document`·`require` 제외, `input`·`prompt` 포함), 점(`.`) 뒤 멤버는 잘 알려진 전역 카탈로그(`console`·`Math`·`JSON`…)와 리터럴 추론(배열·문자열·수·Map·Set·객체 리터럴의 키)으로 답합니다. 알 수 없으면 아무것도 내지 않습니다. 별도 런타임을 내려받지 않고 브라우저 엔진을 그대로 씁니다. **과제 자동채점**(`runJsGrading`)은 테스트마다 워커를 새로 띄워 코드를 처음부터 다시 돌리므로 테스트끼리 변수가 섞이지 않고, 보고서 모양이 파이썬과 같아 채점 결과 화면(`renderAssignmentGradingResult`)을 그대로 씁니다. 노트북용으로는 문서마다 워커를 살려 두는 **커널**(`startJsKernelRun`)도 제공합니다 — 셀을 전역에서 실행해 앞 셀의 값이 이어지고, 결과 모양은 Pyodide 커널과 같게 맞춰 노트북 화면이 그대로 씁니다. | `js-editor.js`, `notebook-run.js`, `tests/js-runtime.test.js` |
+| `js-editor.js` | `.js`·`.mjs` 편집·실행 화면을 만듭니다. 파이썬과 같은 실행 바·좌우 분할·출력 패널 뼈대를 쓰되 실행/채점/저장/원본 되돌리기만 두고, 편집기·초안·저장·분할선·채점 테스트 편집 창은 파이썬 쪽 공용 함수를 재사용합니다(채점 테스트 저장 자리는 `pdf-signer-js-grade:` 로 파이썬과 분리). 과제 패키지(`.task`) 내보내기는 아직 파이썬(`main.py`) 전용이라 넣지 않습니다. | `js-runtime.js`, `code-viewer.js`, `python-editor.js`, `python-run-context.js` |
+
+## 5. document-editors — Office, 표, 이미지와 화이트보드
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
@@ -86,7 +94,7 @@ flowchart LR
 | `board-render.js` | 화이트보드와 수업 리플레이가 공유하는 선·도형·텍스트·이미지 벡터 렌더러입니다. | `whiteboard.js`, `lesson-replay.js` |
 | `whiteboard.js` | 독립 화이트보드 문서, 그리기 도구, 선택·이동, 이미지, Undo/Redo, 복구 저장과 리플레이 녹화 연결을 담당합니다. | `board-render.js`, `lesson-replay.js` |
 
-## 5. learning-tools — 수업, 과제, 펫, 메모와 앱 이벤트
+## 6. learning-tools — 수업, 과제, 펫, 메모와 앱 이벤트
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|

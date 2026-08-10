@@ -129,6 +129,7 @@
     "새로 만들기 (Alt+N)": "New (Alt+N)",
     "새로 만들기": "New",
     "새 파이썬 코드": "New Python file",
+    "새 자바스크립트 코드": "New JavaScript file",
     "새 코드": "New code",
     "새 노트북(.ipynb)": "New notebook (.ipynb)",
     "새 빈 표(엑셀)": "New spreadsheet (Excel)",
@@ -461,6 +462,7 @@
     "새 폴더": "New folder",
     // 폴더 우클릭 메뉴의 '새로 만들기' 묶음
     "+Py  새 Python 코드": "+Py  New Python code",
+    "+Js  새 자바스크립트 코드": "+Js  New JavaScript code",
     "+Nb  새 노트북": "+Nb  New notebook",
     "+Xls  새 빈 표": "+Xls  New spreadsheet",
     "+Txt  새 텍스트 파일": "+Txt  New text file",
@@ -1306,6 +1308,7 @@
     "변환본으로 재생": "Play the converted file",
     "영상 일괄 MP4 변환": "Batch-convert videos to MP4",
     "여기에 파이썬 코드를 작성하고 ▶ 실행": "Write Python code here and press ▶ Run",
+    "여기에 자바스크립트 코드를 작성하고 ▶ 실행": "Write JavaScript code here and press ▶ Run",
     "영상 하나씩 차례로 변환해 폴더에 저장해요. 개수와 길이에 따라 오래 걸릴 수 있어요 — 창을 닫지 마세요.": "Convert videos one by one and save them to the folder. It may take a while depending on count and length — don't close the window.",
     "영상은 그대로 두고 브라우저가 지원하는 코덱으로 바꿔 새 탭에서 열어요": "Keep the original and open a browser-supported codec in a new tab",
     "이 브라우저에서는 저장 폴더를 고를 수 없어요. 영상을 하나씩 변환해 주세요.": "This browser can't pick a save folder. Convert videos one at a time.",

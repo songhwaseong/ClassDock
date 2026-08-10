@@ -41,6 +41,8 @@
     "notebook-run.js",
     "notebook-pdf-export.js",
     "notebook-cells.js",
+    "js-runtime.js",
+    "js-editor.js",
     "office-doc-viewers.js",
     "office-replace.js",
     "docx-editor.js",
@@ -120,6 +122,13 @@
         "notebook-run.js",
         "notebook-pdf-export.js",
         "notebook-cells.js"
+      ]
+    },
+    {
+      "name": "javascript",
+      "scripts": [
+        "js-runtime.js",
+        "js-editor.js"
       ]
     },
     {
@@ -219,6 +228,11 @@
     "notebook-cells.js": [
       "notebook-run.js",
       "spellcheck.js"
+    ],
+    "js-editor.js": [
+      "code-viewer.js",
+      "python-editor.js",
+      "js-runtime.js"
     ],
     "spreadsheet-viewer.js": [
       "office-doc-viewers.js",

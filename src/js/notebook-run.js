@@ -444,7 +444,7 @@ function renderNotebookView(model, host, ownerDoc){
       destroyNotebook(ownerDoc);
     });
     ownerDoc.cleanupFns.push(() => {
-      try { startPyodideKernelRun({ kernelId: nbKernelId(ownerDoc), reset: true }).promise.catch(() => {}); } catch(e){}
+      try { Promise.resolve(nbResetKernel(ownerDoc)).catch(() => {}); } catch(e){}
     });
   }
   if (ownerDoc){
@@ -460,6 +460,15 @@ function renderNotebookView(model, host, ownerDoc){
 
 // ── 셀 실행(Phase 3): 기존 Pyodide 커널을 셀에 연결. 같은 kernelId 로 변수·상태가 셀 간 누적된다. ──
 function nbKernelId(ownerDoc){ return "nbv:" + (ownerDoc && ownerDoc.id != null ? ownerDoc.id : "default"); }
+// 이 노트북이 자바스크립트인지 — .ipynb metadata 를 보고 실행기·강조·커널을 고른다.
+function nbIsJavascript(ownerDoc){
+  return notebookLanguageOf(ownerDoc && ownerDoc.notebookModel) === "javascript";
+}
+// 커널 재시작 — 언어에 맞는 커널을 끊는다(둘 다 변수가 사라지는 건 같다).
+function nbResetKernel(ownerDoc){
+  if (nbIsJavascript(ownerDoc)){ resetJsKernel(nbKernelId(ownerDoc)); return Promise.resolve(); }
+  return startPyodideKernelRun({ kernelId:nbKernelId(ownerDoc), reset:true }).promise;
+}
 
 function nbSetStatus(ownerDoc, msg){
   if (ownerDoc && ownerDoc._nbStatusEl) ownerDoc._nbStatusEl.textContent = nbT(msg || "");
@@ -845,10 +854,13 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
   const onMsg = (m) => nbSetStatus(ownerDoc, m);
   let result = null;
   try {
-    const localKernel = ownerDoc._nbKernelMode === "local";
+    // 자바스크립트 노트북은 브라우저 워커 커널 하나로 끝난다 —
+    // 로컬 Python·패키지 준비·작업폴더 번들이 모두 해당 없으므로 그 준비 과정을 건너뛴다.
+    const jsNotebook = nbIsJavascript(ownerDoc);
+    const localKernel = !jsNotebook && ownerDoc._nbKernelMode === "local";
     let workspaceBundle = null;
     let workspaceSync = null;
-    try {
+    if (!jsNotebook) try {
       workspaceBundle = await buildNotebookWorkspaceBundle(ownerDoc);
       nbThrowIfCancelled(ownerDoc);
       if (!localKernel){
@@ -860,9 +872,17 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
       nbSetStatus(ownerDoc, nbTf("작업폴더 준비 오류: {message}", { message:(e && e.message) ? e.message : e }));
       throw e;
     }
-    const workspaceCwd = notebookCellWorkspaceCwd(ownerDoc, cell, workspaceBundle);
+    const workspaceCwd = jsNotebook ? "" : notebookCellWorkspaceCwd(ownerDoc, cell, workspaceBundle);
     let task;
-    if (localKernel){
+    if (jsNotebook){
+      nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel}", { kernel:nbT("브라우저 자바스크립트") }));
+      task = startJsKernelRun({
+        kernelId:nbKernelId(ownerDoc),
+        source:cell.source,
+        stdin:ctrl.stdinText ? ctrl.stdinText() : "",
+        userFile:"cell.js"
+      });
+    } else if (localKernel){
       nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel} · 기준 {cwd}", { kernel:nbT("로컬 Python"), cwd:workspaceCwd || "." }));
       task = startLocalNotebookKernelRun(
         ownerDoc,
@@ -959,7 +979,7 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     markNbDirty(ownerDoc);
     nbRefreshExecutionStates(ownerDoc);
     const elapsedText = notebookElapsedText(result.elapsedMs);
-    const kernelName = nbT(localKernel ? "로컬 Python" : "브라우저");
+    const kernelName = nbT(jsNotebook ? "브라우저 자바스크립트" : localKernel ? "로컬 Python" : "브라우저");
     nbSetStatus(ownerDoc, result.ok === false
       ? nbTf("오류 · {kernel} · 기준 {cwd} · 커널 유지{elapsed}", { kernel:kernelName, cwd:workspaceCwd || ".", elapsed:elapsedText ? " · " + elapsedText : "" })
       : nbTf("완료{warning} · {kernel} · 기준 {cwd}{files}{elapsed}", {
@@ -1046,8 +1066,8 @@ async function nbRestartKernel(ownerDoc){
   if (!ownerDoc || ownerDoc._nbBusy || ownerDoc._nbLocalRunActive) return false;
   ownerDoc._nbBusy = true;
   try {
-    if (ownerDoc._nbKernelMode === "local") await nbStopLocalNotebookKernel(ownerDoc);
-    else await startPyodideKernelRun({ kernelId: nbKernelId(ownerDoc), reset: true }).promise;
+    if (!nbIsJavascript(ownerDoc) && ownerDoc._nbKernelMode === "local") await nbStopLocalNotebookKernel(ownerDoc);
+    else await nbResetKernel(ownerDoc);
   } catch(e){
     nbSetStatus(ownerDoc, nbTf("커널 재시작 실패: {message}", { message:(e && e.message) ? e.message : e }));
     ownerDoc._nbBusy = false;

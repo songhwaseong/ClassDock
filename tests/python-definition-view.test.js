@@ -31,9 +31,14 @@ test("external Python definitions use the chunked read-only viewer", () => {
   );
   assert.equal(sandbox.isDefinitionSourceDoc(null), false);
 
+  // 정의 미리보기 문서에는 어떤 언어든 실행 바를 붙이지 않는다(언어 판별 자체를 건너뛴다).
   assert.match(
     source,
-    /const runnable = RUN_EXTS\.has\(ext\) && !definitionSource;/
+    /const extRunLang = definitionSource \? null : runLangForExt\(ext\);/
+  );
+  assert.match(
+    source,
+    /const runnable = !!runLang;/
   );
   assert.match(
     source,

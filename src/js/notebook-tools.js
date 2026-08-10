@@ -88,6 +88,16 @@ function nbShowLocalPythonInstallGuide(ownerDoc){
 
 function nbRefreshKernelModeUi(ownerDoc){
   if (!ownerDoc) return;
+  // 자바스크립트 노트북에는 로컬 Python 이 해당 없다 — 관련 버튼을 감추고 커널 이름만 알린다.
+  if (notebookLanguageOf(ownerDoc.notebookModel) === "javascript"){
+    if (ownerDoc._nbLocalKernelBtn) ownerDoc._nbLocalKernelBtn.hidden = true;
+    if (ownerDoc._nbLocalRunBtn) ownerDoc._nbLocalRunBtn.hidden = true;
+    if (ownerDoc._nbKernelTag){
+      ownerDoc._nbKernelTag.textContent = "브라우저 자바스크립트";
+      ownerDoc._nbKernelTag.classList.remove("is-local");
+    }
+    return;
+  }
   const local = ownerDoc._nbKernelMode === "local";
   const missing = ownerDoc._nbLocalPythonAvailable === false;
   if (ownerDoc._nbKernelTag){

@@ -2432,6 +2432,9 @@ function openSidebarGroupMenu(node, x, y){
   add("+Py  새 Python 코드", () => {
     if (typeof newPythonScratchInFolder === "function") newPythonScratchInFolder(node.newPythonContext);
   });
+  add("+Js  새 자바스크립트 코드", () => {
+    if (typeof newJsScratchInFolder === "function") newJsScratchInFolder(node.newPythonContext);
+  });
   add("+Nb  새 노트북", () => {
     if (typeof newNotebookScratchInFolder === "function") newNotebookScratchInFolder(node.newPythonContext);
   });

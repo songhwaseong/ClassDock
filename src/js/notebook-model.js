@@ -426,6 +426,17 @@ function newNotebookScratchInFolder(folder){
     "application/x-ipynb+json", "새 노트북을");
 }
 
+// 노트북이 어떤 언어인지 — .ipynb 의 metadata(kernelspec·language_info)를 본다.
+// 표시가 없으면 파이썬으로 본다(이 앱이 만든 노트북과 지금까지의 파일이 모두 파이썬이었다).
+// 반환: "javascript" | "python"
+function notebookLanguageOf(model){
+  const meta = (model && model.metadata) || {};
+  const kernelspec = meta.kernelspec || {};
+  const languageInfo = meta.language_info || {};
+  const raw = String(kernelspec.language || languageInfo.name || kernelspec.name || "").toLowerCase();
+  return /^(javascript|js|node|nodejs|deno)$/.test(raw) ? "javascript" : "python";
+}
+
 // ── 직렬화 ──────────────────────────────────────────────────────────────────
 // .ipynb(JSON 문자열 또는 객체) → 내부 모델. nbformat 4 기준, nbformat 3(worksheets/input)도 받아들인다.
 function ipynbToModel(jsonOrText){
