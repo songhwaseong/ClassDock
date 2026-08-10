@@ -337,6 +337,15 @@ cd myOffice</code></pre>
 </ul>
 <blockquote><p><strong>파이썬 준비 배지</strong> — 브라우저 실행에서는 파이썬 파일·노트북을 여는 순간 런타임을 미리 준비합니다. 헤더에 <strong>파이썬 준비 중… → 준비 완료 ✓</strong> 배지가 떠서 첫 실행 대기가 짧아집니다(로컬 파이썬이 있으면 표시되지 않고 바로 대화형 실행).</p></blockquote>
 
+<h3>🟨 JavaScript (.js / .mjs)</h3>
+<ol>
+  <li><code>.js</code>·<code>.mjs</code> 파일을 열거나 사이드바 <strong>새로 만들기 → 새 자바스크립트 코드</strong>를 선택합니다.</li>
+  <li>코드 입력 후 <strong>▶</strong> 또는 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행합니다. 실행은 화면과 분리된 브라우저 Worker에서 이뤄지며, 무한 반복은 10초 제한이나 빨간 <strong>■</strong> 버튼으로 멈출 수 있습니다.</li>
+  <li><strong>라이브러리</strong> 버튼에서 Lodash(<code>_</code>)·Day.js(<code>dayjs</code>)·Papa Parse(<code>Papa</code>)·Math.js(<code>math</code>)를 선택합니다. 선택은 현재 문서에만 저장되고 실행·채점에 함께 적용됩니다.</li>
+  <li><strong>+ .js 파일</strong>로 직접 받은 라이브러리를 추가할 수도 있습니다. 해당 코드는 실행할 때마다 실행되므로 출처를 신뢰하는 파일만 추가하세요(한 파일 512KB, 문서당 최대 8개·합계 1MB).</li>
+</ol>
+<blockquote><p>내장 라이브러리는 오프라인 HTML·EXE에 포함되어 인터넷 없이 동작합니다. npm 설치와 <code>import ... from ...</code> 문은 지원하지 않으므로 각 라이브러리의 전역 이름을 사용하세요. 이 실행기는 <code>window</code>·<code>document</code>가 없는 Worker 환경이라 React·DOM 기반 차트처럼 화면을 직접 다루는 라이브러리는 HTML 미리보기에서 사용해야 합니다.</p></blockquote>
+
 <h3>📓 Jupyter 노트북 (.ipynb)</h3>
 <ul>
   <li>코드 셀에서 문자를 입력하면 자동완성 후보가 셀 밖에 잘리지 않고 표시됨</li>

@@ -41,6 +41,7 @@
     "notebook-run.js",
     "notebook-pdf-export.js",
     "notebook-cells.js",
+    "js-libraries.js",
     "js-runtime.js",
     "js-editor.js",
     "office-doc-viewers.js",
@@ -127,6 +128,7 @@
     {
       "name": "javascript",
       "scripts": [
+        "js-libraries.js",
         "js-runtime.js",
         "js-editor.js"
       ]
@@ -232,6 +234,7 @@
     "js-editor.js": [
       "code-viewer.js",
       "python-editor.js",
+      "js-libraries.js",
       "js-runtime.js"
     ],
     "spreadsheet-viewer.js": [
@@ -493,6 +496,30 @@
       "file": "js-yaml.min.js",
       "lazy": "yaml",
       "sha384": "sha384-+pxiN6T7yvpryuJmE1gM9PX7yQit15auDb+ZwwvJOd/4be2Cie5/IuVXgQb/S9du"
+    },
+    {
+      "src": "vendor/lodash.min.js",
+      "file": "lodash.min.js",
+      "lazy": "jsLodash",
+      "sha384": "sha384-H6KKS1H1WwuERMSm+54dYLzjg0fKqRK5ZRyASdbrI/lwrCc6bXEmtGYr5SwvP1pZ"
+    },
+    {
+      "src": "vendor/dayjs.min.js",
+      "file": "dayjs.min.js",
+      "lazy": "jsDayjs",
+      "sha384": "sha384-DpVxUeeBWjUvUV1czyIHJAjh+jYUZFu2lLakbdua5vbwOrBGi1UgaKCHjTC+x3Ky"
+    },
+    {
+      "src": "vendor/papaparse.min.js",
+      "file": "papaparse.min.js",
+      "lazy": "jsPapaParse",
+      "sha384": "sha384-D/t0ZMqQW31H3az8ktEiNb39wyKnS82iFY52QPACM+IjKW3jDUhyIgh2PApRqJZs"
+    },
+    {
+      "src": "vendor/math.min.js",
+      "file": "math.min.js",
+      "lazy": "jsMath",
+      "sha384": "sha384-h89MtFxYUpvSrN4/iHXHDPFENeYlne1rtRmGo4hHOgWSK6lf1RFrdMccVRSbMiPl"
     },
     {
       "src": "vendor/exceljs.min.js",

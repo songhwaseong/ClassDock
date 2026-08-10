@@ -2733,7 +2733,8 @@
   html.hide-tool-pyNbConvert .run-nbconvert-group,
   html.hide-tool-pyInk .run-ink,
   html.hide-tool-pyRec .run-rec,
-  html.hide-tool-pyPkg .run-pkg,
+  html.hide-tool-pyPkg .run-py-pkg,
+  html.hide-tool-jsPkg .run-js-library,
   html.hide-tool-pyEnv .run-diag,
   html.hide-tool-pyNewPy .run-newpy,
   html.hide-tool-pyRevert .run-py-revert,
@@ -2795,6 +2796,8 @@
   .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec,.run-dedupe{font:inherit;font-size:12.5px;border:1px solid var(--border);
     background:var(--field);color:var(--muted);border-radius:8px;padding:6px 11px;cursor:pointer}
   .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover,.run-dedupe:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-pkg.has-selection{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));color:var(--accent);font-weight:700;
+    background:color-mix(in srgb,var(--accent) 8%,var(--field))}
   /* Python 도구막대에서는 맞춤법도 일반 보조 버튼과 같은 크기·색으로 맞춘다. */
   .run-bar .spellcheck-trigger{font:inherit;font-size:12.5px;line-height:normal;border-color:var(--border);border-radius:8px;
     background:var(--field);color:var(--muted);padding:6px 11px}
@@ -3360,6 +3363,49 @@
   .pkg-set:disabled,.pkg-go:disabled,.pkg-custom:disabled{opacity:.45;cursor:not-allowed}
   .pkg-set:disabled{background:var(--field);color:var(--muted)}
   .run-pkg:disabled{opacity:.55;cursor:progress}
+  .js-library-picker{display:block;max-height:min(68vh,430px);width:min(720px,100%);padding:14px}
+  .js-library-intro{display:flex;align-items:baseline;gap:9px;margin-bottom:10px}
+  .js-library-intro strong{font-size:13.5px;color:var(--ink)}
+  .js-library-intro span{font-size:11.5px;color:var(--muted)}
+  .js-library-tabs{display:flex;gap:4px;margin:0 0 10px;padding:3px;border:1px solid var(--border);border-radius:9px;background:var(--field)}
+  .js-library-tab{flex:1;height:28px;border:0;border-radius:6px;background:transparent;color:var(--muted);font:600 11.5px/1 inherit;cursor:pointer}
+  .js-library-tab:hover{color:var(--ink);background:var(--panel-hover)}
+  .js-library-tab.active{color:var(--accent);background:var(--panel);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+  .js-library-tab-view{min-height:115px;max-height:275px;overflow:auto;padding:1px}
+  .js-library-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .js-library-choice{height:auto;min-height:48px;display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:7px 10px}
+  .js-library-choice strong{font-size:12.5px;color:var(--ink)}
+  .js-library-choice small{font-size:10.5px;color:var(--muted)}
+  .js-library-choice.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 11%,var(--field));box-shadow:inset 3px 0 0 var(--accent)}
+  .js-library-choice.active strong{color:var(--accent)}
+  .js-library-custom-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:13px;padding-top:10px;border-top:1px solid var(--border)}
+  .js-library-tab-view>.js-library-custom-head{margin-top:0;padding-top:0;border-top:0}
+  .js-library-custom-head strong{font-size:12.5px;color:var(--ink)}
+  .js-library-custom-list{display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-top:7px}
+  .js-library-empty{align-self:center;font-size:11.5px;color:var(--muted)}
+  .js-library-file{display:inline-flex;align-items:center;max-width:250px;border:1px solid var(--border);border-radius:999px;background:var(--field);font-size:11.5px;color:var(--ink);overflow:hidden}
+  .js-library-file>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 2px 4px 9px}
+  .js-library-file button{flex:none;width:25px;height:25px;padding:0;border:0;background:transparent;color:var(--muted);font:16px/1 inherit;cursor:pointer}
+  .js-library-file button:hover{color:#b91c1c;background:rgba(239,68,68,.09)}
+  .js-library-note{margin:10px 0 0;font-size:11px;line-height:1.45;color:var(--muted)}
+  .js-npm-status{margin:1px 0 8px;font-size:11.5px;color:var(--muted)}
+  .js-npm-form{display:grid;grid-template-columns:minmax(170px,1.35fr) minmax(130px,1fr) auto;gap:6px}
+  .js-npm-form input{min-width:0;height:31px;border:1px solid var(--border);border-radius:7px;padding:0 8px;background:var(--field);color:var(--ink);font:12px/1 Consolas,"Courier New",monospace;outline:none}
+  .js-npm-form input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(99,102,241,.15)}
+  .js-npm-warning{margin-top:7px;padding:7px 8px;border-radius:7px;background:rgba(245,158,11,.08);color:color-mix(in srgb,#b45309 78%,var(--muted))}
+  .js-npm-list{display:flex;flex-direction:column;gap:5px;margin-top:9px;min-height:28px}
+  .js-npm-row{display:flex;align-items:stretch;gap:5px}
+  .js-npm-select{min-width:0;flex:1;display:flex;align-items:baseline;justify-content:space-between;gap:10px;border:1px solid var(--border);border-radius:7px;padding:6px 8px;background:var(--field);color:var(--ink);text-align:left;cursor:pointer}
+  .js-npm-select:hover{background:var(--panel-hover)}
+  .js-npm-select.active{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--field))}
+  .js-npm-select strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}
+  .js-npm-select small{flex:none;font-size:10.5px;color:var(--muted)}
+  .js-npm-delete{flex:none;border:1px solid var(--border);border-radius:7px;padding:0 8px;background:var(--field);color:var(--muted);font:11px/1 inherit;cursor:pointer}
+  .js-npm-delete:hover{border-color:#ef4444;color:#b91c1c;background:rgba(239,68,68,.08)}
+  .js-npm-progress{margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--field)}
+  .js-npm-progress-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--ink)}
+  .js-npm-log{max-height:115px;overflow:auto;margin:0;padding:8px;white-space:pre-wrap;word-break:break-word;color:var(--muted);font:10.5px/1.45 Consolas,"Courier New",monospace}
+  @media (max-width:620px){.js-library-choices{grid-template-columns:1fr}.js-library-intro{align-items:flex-start;flex-direction:column;gap:3px}.js-npm-form{grid-template-columns:1fr auto}.js-npm-form input:nth-child(2){grid-column:1/-1;grid-row:2}.js-npm-form button{grid-column:2;grid-row:1}}
   .run-input-wrap{margin:0 0 10px;padding:9px 11px;background:var(--panel);border:1px solid var(--border);
     border-radius:8px;display:flex;flex-direction:column;gap:7px}
   .run-input-label{font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap}

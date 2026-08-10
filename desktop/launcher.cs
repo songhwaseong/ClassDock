@@ -118,6 +118,7 @@ class PdfSignerLauncher
     static readonly string LocalAuthToken = CreateLocalAuthToken();
     static readonly byte[] Page = InjectLocalAuthToken(ReadResource("app.html"));
     static readonly byte[] PythonKernelRunner = ReadResource("python_kernel.py");
+    static readonly byte[] NpmPackageRunner = ReadResource("npm_package_runner.js");
     static readonly object ConvLock = new object();   // PowerPoint 변환은 한 번에 하나만
     static readonly object MediaConvLock = new object();   // ffmpeg 영상 변환도 한 번에 하나만
     static readonly object FfmpegProbeLock = new object();
@@ -136,6 +137,12 @@ class PdfSignerLauncher
     static readonly string AppStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PdfSigner", "app-state.json");
+    static readonly string NpmPackageCachePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PdfSigner", "js-npm-packages");
+    static readonly string NpmPackageRunnerPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PdfSigner", "npm-package-runner.js");
     static readonly object AppStateLock = new object();
     const int AppStateMaxBytes = 8 * 1024 * 1024;
     const int MaxHttpHeaderBytes = 64 * 1024;
@@ -341,6 +348,22 @@ class PdfSignerLauncher
 
     static readonly object PipJobsLock = new object();
     static readonly Dictionary<string, PipJob> PipJobs = new Dictionary<string, PipJob>();
+
+    // npm 설치·브라우저 번들 작업. 사용자 패키지 설치 스크립트는 helper가 --ignore-scripts로 차단한다.
+    class NpmJob
+    {
+        public string Id;
+        public Process Process;
+        public readonly object Sync = new object();
+        public readonly LimitedTextBuffer Log = new LimitedTextBuffer();
+        public bool Complete;
+        public int ExitCode = -1;
+        public bool CancelRequested;
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
+    static readonly object NpmJobsLock = new object();
+    static readonly Dictionary<string, NpmJob> NpmJobs = new Dictionary<string, NpmJob>();
 
     class TerminalSession
     {
@@ -825,6 +848,7 @@ class PdfSignerLauncher
             if (path == "/python-project-sync") return true;
             if (path == "/exam-receive-start" || path == "/exam-receive-stop") return true;
             if (path.StartsWith("/pip-install", StringComparison.Ordinal)) return true;   // /pip-install, -start, -cancel
+            if (path.StartsWith("/js-npm-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
@@ -849,6 +873,7 @@ class PdfSignerLauncher
             if (path.StartsWith("/local-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/pip-install-poll", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/js-npm-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
@@ -2014,6 +2039,56 @@ class PdfSignerLauncher
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pyodide-read-failed: " + FlattenMessage(ex)));
                     }
+                }
+                else if (method == "GET" && path == "/js-npm-status")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JsNpmStatus()));
+                }
+                else if (method == "GET" && path == "/js-npm-list")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ListJsNpmPackages()));
+                }
+                else if (method == "GET" && path.StartsWith("/js-npm-bundle?", StringComparison.Ordinal))
+                {
+                    byte[] bundle;
+                    if (TryReadJsNpmBundle(QueryValue(path, "id"), out bundle))
+                        WriteResponse(stream, "200 OK", "text/javascript; charset=utf-8", bundle);
+                    else
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("npm-package-not-found"));
+                }
+                else if (method == "POST" && path == "/js-npm-install-start")
+                {
+                    string confirmed;
+                    if (!headers.TryGetValue("x-manneung-npm-confirm", out confirmed) || confirmed != "1")
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("npm-confirmation-required"));
+                        return;
+                    }
+                    try
+                    {
+                        string json = StartJsNpmInstall(body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("npm-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/js-npm-install-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(PollJsNpmInstall(QueryValue(path, "id"), QueryValue(path, "from"))));
+                }
+                else if (method == "POST" && path.StartsWith("/js-npm-install-cancel", StringComparison.Ordinal))
+                {
+                    CancelJsNpmInstall(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/js-npm-delete", StringComparison.Ordinal))
+                {
+                    bool deleted = DeleteJsNpmPackage(QueryValue(path, "id"));
+                    WriteResponse(stream, deleted ? "200 OK" : "404 Not Found", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(deleted ? "ok" : "npm-package-not-found"));
                 }
                 else if (method == "POST" && path == "/pip-install")
                 {
@@ -4474,6 +4549,15 @@ class PdfSignerLauncher
                 try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
             }
 
+            List<NpmJob> npmJobs = new List<NpmJob>();
+            lock (NpmJobsLock)
+            {
+                foreach (NpmJob job in NpmJobs.Values) npmJobs.Add(job);
+                NpmJobs.Clear();
+            }
+            foreach (NpmJob job in npmJobs)
+                if (!job.Complete) KillProcessTree(job.Process);
+
             ClearPythonProjectMirror();   // 자동완성용 작업공간 미러
         }
         catch { }   // 정리는 최선 노력 — 실패해도 종료는 진행하고 다음 기동의 청소가 마저 치운다
@@ -5323,6 +5407,408 @@ class PdfSignerLauncher
             string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + full + "\" exec \"" + backup + "\"";
             return RunSqliteRunner(interp, args, sql);
         }
+    }
+
+    static readonly System.Text.RegularExpressions.Regex NpmPackageNameRe =
+        new System.Text.RegularExpressions.Regex(@"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$");
+    static readonly System.Text.RegularExpressions.Regex NpmVersionRe =
+        new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9][A-Za-z0-9._+~-]*$");
+    static readonly System.Text.RegularExpressions.Regex JsGlobalNameRe =
+        new System.Text.RegularExpressions.Regex(@"^[A-Za-z_$][A-Za-z0-9_$]*$");
+
+    static bool IsSafeNpmId(string id)
+    {
+        if (string.IsNullOrEmpty(id) || id.Length != 32) return false;
+        for (int i = 0; i < id.Length; i++)
+        {
+            char c = id[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        }
+        return true;
+    }
+
+    static string NpmPackageId(string spec, string globalName)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(spec + "\n" + globalName);
+        byte[] hash;
+        using (SHA256 sha = SHA256.Create()) hash = sha.ComputeHash(bytes);
+        StringBuilder result = new StringBuilder(32);
+        for (int i = 0; i < 16; i++) result.Append(hash[i].ToString("x2"));
+        return result.ToString();
+    }
+
+    static string[] ParseNpmInstallRequest(byte[] body)
+    {
+        string text = Encoding.UTF8.GetString(body ?? new byte[0]).Replace("\r", "");
+        string[] lines = text.Split('\n');
+        string spec = lines.Length > 0 ? lines[0].Trim() : "";
+        string globalName = lines.Length > 1 ? lines[1].Trim() : "";
+        if (spec.Length == 0 || spec.Length > 160) throw new InvalidDataException("invalid-package-spec");
+        if (!JsGlobalNameRe.IsMatch(globalName) || globalName.Length > 80) throw new InvalidDataException("invalid-global-name");
+
+        string packageName = spec;
+        string version = "";
+        if (spec.StartsWith("@", StringComparison.Ordinal))
+        {
+            int slash = spec.IndexOf('/');
+            if (slash < 2) throw new InvalidDataException("invalid-package-spec");
+            int versionAt = spec.IndexOf('@', slash + 1);
+            if (versionAt >= 0)
+            {
+                packageName = spec.Substring(0, versionAt);
+                version = spec.Substring(versionAt + 1);
+            }
+        }
+        else
+        {
+            int versionAt = spec.IndexOf('@');
+            if (versionAt >= 0)
+            {
+                packageName = spec.Substring(0, versionAt);
+                version = spec.Substring(versionAt + 1);
+            }
+        }
+        if (!NpmPackageNameRe.IsMatch(packageName) || packageName.Length > 120)
+            throw new InvalidDataException("invalid-package-spec");
+        if (version.Length > 0 && (!NpmVersionRe.IsMatch(version) || version.Length > 80))
+            throw new InvalidDataException("invalid-package-version");
+        if (spec.EndsWith("@", StringComparison.Ordinal)) throw new InvalidDataException("invalid-package-version");
+        return new string[] { spec, packageName, globalName };
+    }
+
+    static string FindPathExecutable(string fileName)
+    {
+        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (string raw in path.Split(';'))
+        {
+            string dir = raw.Trim().Trim('"');
+            if (dir.Length == 0) continue;
+            try
+            {
+                string candidate = Path.Combine(dir, fileName);
+                if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    static string FindNodeExecutable()
+    {
+        string found = FindPathExecutable("node.exe");
+        if (!string.IsNullOrEmpty(found)) return found;
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string candidate = Path.Combine(programFiles, "nodejs", "node.exe");
+        return File.Exists(candidate) ? candidate : null;
+    }
+
+    static string FindNpmCli(string nodePath)
+    {
+        List<string> roots = new List<string>();
+        if (!string.IsNullOrEmpty(nodePath)) roots.Add(Path.GetDirectoryName(nodePath));
+        string npmCmd = FindPathExecutable("npm.cmd");
+        if (!string.IsNullOrEmpty(npmCmd)) roots.Add(Path.GetDirectoryName(npmCmd));
+        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrEmpty(appData)) roots.Add(Path.Combine(appData, "npm"));
+        foreach (string root in roots)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            string candidate = Path.Combine(root, "node_modules", "npm", "bin", "npm-cli.js");
+            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
+        }
+        return null;
+    }
+
+    static string QuoteProcessArgument(string value)
+    {
+        value = value ?? "";
+        if (value.Length > 0 && value.IndexOfAny(new char[] { ' ', '\t', '\n', '\v', '"' }) < 0) return value;
+        StringBuilder result = new StringBuilder("\"");
+        int slashes = 0;
+        foreach (char c in value)
+        {
+            if (c == '\\') { slashes++; continue; }
+            if (c == '"')
+            {
+                result.Append('\\', slashes * 2 + 1).Append('"');
+                slashes = 0;
+                continue;
+            }
+            result.Append('\\', slashes).Append(c);
+            slashes = 0;
+        }
+        result.Append('\\', slashes * 2).Append('"');
+        return result.ToString();
+    }
+
+    static string RunVersionProbe(string executable, string arguments)
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(executable, arguments);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            using (Process process = Process.Start(psi))
+            {
+                if (process == null || !process.WaitForExit(5000))
+                {
+                    try { if (process != null) process.Kill(); } catch { }
+                    return "";
+                }
+                string output = process.StandardOutput.ReadToEnd().Trim();
+                if (output.Length == 0) output = process.StandardError.ReadToEnd().Trim();
+                return process.ExitCode == 0 ? output : "";
+            }
+        }
+        catch { return ""; }
+    }
+
+    static string JsNpmStatus()
+    {
+        string node = FindNodeExecutable();
+        string npm = FindNpmCli(node);
+        string nodeVersion = string.IsNullOrEmpty(node) ? "" : RunVersionProbe(node, "--version");
+        string npmVersion = string.IsNullOrEmpty(node) || string.IsNullOrEmpty(npm)
+            ? "" : RunVersionProbe(node, QuoteProcessArgument(npm) + " --version");
+        bool available = nodeVersion.Length > 0 && npmVersion.Length > 0;
+        return "{\"available\":" + (available ? "true" : "false")
+            + ",\"node\":" + JsonString(nodeVersion) + ",\"npm\":" + JsonString(npmVersion) + "}";
+    }
+
+    static void PrepareNpmRunner()
+    {
+        string dir = Path.GetDirectoryName(NpmPackageRunnerPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bool same = false;
+        try
+        {
+            if (File.Exists(NpmPackageRunnerPath))
+            {
+                byte[] old = File.ReadAllBytes(NpmPackageRunnerPath);
+                if (old.Length == NpmPackageRunner.Length)
+                {
+                    same = true;
+                    for (int i = 0; i < old.Length; i++) if (old[i] != NpmPackageRunner[i]) { same = false; break; }
+                }
+            }
+        }
+        catch { }
+        if (!same) File.WriteAllBytes(NpmPackageRunnerPath, NpmPackageRunner);
+    }
+
+    static int InstalledNpmPackageCount()
+    {
+        if (!Directory.Exists(NpmPackageCachePath)) return 0;
+        int count = 0;
+        foreach (string dir in Directory.GetDirectories(NpmPackageCachePath))
+            if (IsSafeNpmId(Path.GetFileName(dir)) && File.Exists(Path.Combine(dir, "metadata.json"))) count++;
+        return count;
+    }
+
+    // 취소·강제 종료가 설치 교체 중간에 일어나도 다음 설치 전에 작업폴더를 정리하고 이전 캐시를 복구한다.
+    static void RecoverNpmPackageCache()
+    {
+        try
+        {
+            if (!Directory.Exists(NpmPackageCachePath)) return;
+            foreach (string dir in Directory.GetDirectories(NpmPackageCachePath))
+            {
+                string name = Path.GetFileName(dir);
+                if (name.StartsWith(".work-", StringComparison.Ordinal))
+                {
+                    try { Directory.Delete(dir, true); } catch { }
+                    continue;
+                }
+                if (name.Length > 37 && IsSafeNpmId(name.Substring(0, 32))
+                    && name.Substring(32).StartsWith(".old-", StringComparison.Ordinal))
+                {
+                    string target = Path.Combine(NpmPackageCachePath, name.Substring(0, 32));
+                    try
+                    {
+                        if (!Directory.Exists(target)) Directory.Move(dir, target);
+                        else Directory.Delete(dir, true);
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+    }
+
+    static string StartJsNpmInstall(byte[] body)
+    {
+        string[] request = ParseNpmInstallRequest(body);
+        string node = FindNodeExecutable();
+        if (string.IsNullOrEmpty(node)) throw new InvalidOperationException("no-node");
+        string npmCli = FindNpmCli(node);
+        if (string.IsNullOrEmpty(npmCli)) throw new InvalidOperationException("no-npm");
+        lock (NpmJobsLock)
+            foreach (NpmJob active in NpmJobs.Values)
+                if (!active.Complete) throw new InvalidOperationException("npm-busy");
+        SweepNpmJobs();
+        RecoverNpmPackageCache();
+        string packageId = NpmPackageId(request[0], request[2]);
+        string target = Path.Combine(NpmPackageCachePath, packageId);
+        if (File.Exists(Path.Combine(target, "metadata.json")))
+            throw new InvalidOperationException("npm-package-exists");
+        if (!Directory.Exists(target) && InstalledNpmPackageCount() >= 20)
+            throw new InvalidOperationException("npm-package-limit");
+        PrepareNpmRunner();
+
+        NpmJob job = new NpmJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.Log.AppendLine("npm 패키지를 별도 캐시에 설치합니다. install script는 실행하지 않습니다.");
+        string[] args = new string[] { NpmPackageRunnerPath, NpmPackageCachePath, packageId, npmCli, request[0], request[1], request[2] };
+        StringBuilder command = new StringBuilder();
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (i > 0) command.Append(' ');
+            command.Append(QuoteProcessArgument(args[i]));
+        }
+        ProcessStartInfo psi = new ProcessStartInfo(node, command.ToString());
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = new UTF8Encoding(false);
+        psi.StandardErrorEncoding = new UTF8Encoding(false);
+        psi.EnvironmentVariables["NO_COLOR"] = "1";
+
+        job.Process = new Process();
+        job.Process.StartInfo = psi;
+        job.Process.Start();
+        lock (NpmJobsLock) NpmJobs[job.Id] = job;
+        Thread outReader = StartLimitedReader(job.Process.StandardOutput, job.Log);
+        Thread errReader = StartLimitedReader(job.Process.StandardError, job.Log);
+        Thread watcher = new Thread(delegate()
+        {
+            bool exited = false;
+            try { exited = job.Process.WaitForExit(480000); } catch { }
+            if (!exited)
+            {
+                bool cancelled;
+                lock (job.Sync) cancelled = job.CancelRequested;
+                if (!cancelled) job.Log.AppendLine("[시간 초과: 설치를 8분 후 중단했습니다.]");
+                KillProcessTree(job.Process);
+                try { job.Process.WaitForExit(3000); } catch { }
+            }
+            try { outReader.Join(2500); errReader.Join(2500); } catch { }
+            int code;
+            try { code = job.Process.ExitCode; } catch { code = -1; }
+            lock (job.Sync)
+            {
+                job.ExitCode = job.CancelRequested ? -1 : (exited ? code : -1);
+                job.DoneAt = DateTime.UtcNow;
+                job.Complete = true;
+            }
+            try { job.Process.Dispose(); } catch { }
+            SweepNpmJobs();
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+        return "{\"id\":" + JsonString(job.Id) + "}";
+    }
+
+    static string PollJsNpmInstall(string id, string knownLen)
+    {
+        NpmJob job;
+        lock (NpmJobsLock) if (!NpmJobs.TryGetValue(id ?? "", out job))
+            return "{\"complete\":true,\"code\":-1,\"cancelled\":false,\"log\":" + JsonString("설치 작업을 찾지 못했습니다.") + "}";
+        lock (job.Sync)
+        {
+            int from = 0;
+            bool known = int.TryParse(knownLen ?? "", out from) && from >= 0 && from <= job.Log.TextLength;
+            if (known && !job.Complete && from == job.Log.TextLength) return "{\"complete\":false,\"unchanged\":true}";
+            string head = "{\"complete\":" + (job.Complete ? "true" : "false")
+                + ",\"code\":" + job.ExitCode + ",\"cancelled\":" + (job.CancelRequested ? "true" : "false");
+            if (known) return head + ",\"logDelta\":" + JsonString(job.Log.GetTextFrom(from)) + "}";
+            return head + ",\"log\":" + JsonString(job.Log.GetText()) + "}";
+        }
+    }
+
+    static void CancelJsNpmInstall(string id)
+    {
+        NpmJob job;
+        lock (NpmJobsLock) if (!NpmJobs.TryGetValue(id ?? "", out job)) return;
+        lock (job.Sync)
+        {
+            if (job.Complete || job.CancelRequested) return;
+            job.CancelRequested = true;
+        }
+        job.Log.AppendLine("[설치를 취소했습니다. 이전에 완료된 캐시는 그대로 남습니다.]");
+        KillProcessTree(job.Process);
+    }
+
+    static void SweepNpmJobs()
+    {
+        lock (NpmJobsLock)
+        {
+            List<NpmJob> done = new List<NpmJob>();
+            foreach (NpmJob job in NpmJobs.Values) if (job.Complete) done.Add(job);
+            done.Sort(delegate(NpmJob a, NpmJob b) { return a.DoneAt.CompareTo(b.DoneAt); });
+            DateTime now = DateTime.UtcNow;
+            List<NpmJob> remove = new List<NpmJob>();
+            foreach (NpmJob job in done) if ((now - job.DoneAt).TotalMinutes > 10) remove.Add(job);
+            for (int i = 0; i < done.Count - 8; i++) if (!remove.Contains(done[i])) remove.Add(done[i]);
+            foreach (NpmJob job in remove) NpmJobs.Remove(job.Id);
+        }
+    }
+
+    static string ListJsNpmPackages()
+    {
+        StringBuilder json = new StringBuilder("[");
+        try
+        {
+            if (Directory.Exists(NpmPackageCachePath))
+            {
+                foreach (string dir in Directory.GetDirectories(NpmPackageCachePath))
+                {
+                    string id = Path.GetFileName(dir);
+                    if (!IsSafeNpmId(id)) continue;
+                    string metadataPath = Path.Combine(dir, "metadata.json");
+                    if (!File.Exists(metadataPath) || new FileInfo(metadataPath).Length > 64 * 1024) continue;
+                    string metadata = File.ReadAllText(metadataPath, Encoding.UTF8).Trim();
+                    if (!metadata.StartsWith("{", StringComparison.Ordinal) || !metadata.EndsWith("}", StringComparison.Ordinal)) continue;
+                    if (json.Length > 1) json.Append(',');
+                    json.Append(metadata);
+                }
+            }
+        }
+        catch { }
+        return json.Append(']').ToString();
+    }
+
+    static bool TryReadJsNpmBundle(string id, out byte[] bundle)
+    {
+        bundle = null;
+        if (!IsSafeNpmId(id)) return false;
+        string dir = Path.Combine(NpmPackageCachePath, id);
+        string metadata = Path.Combine(dir, "metadata.json");
+        string path = Path.Combine(dir, "bundle.js");
+        try
+        {
+            if (!File.Exists(metadata) || !File.Exists(path)) return false;
+            FileInfo info = new FileInfo(path);
+            if (info.Length <= 0 || info.Length > 8L * 1024 * 1024) return false;
+            bundle = File.ReadAllBytes(path);
+            return true;
+        }
+        catch { bundle = null; return false; }
+    }
+
+    static bool DeleteJsNpmPackage(string id)
+    {
+        if (!IsSafeNpmId(id)) return false;
+        string dir = Path.Combine(NpmPackageCachePath, id);
+        try
+        {
+            if (!Directory.Exists(dir)) return false;
+            Directory.Delete(dir, true);
+            return true;
+        }
+        catch { return false; }
     }
 
     static readonly System.Text.RegularExpressions.Regex PkgNameRe =

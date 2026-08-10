@@ -62,6 +62,7 @@ function runInWorker(source, options = {}){
       token,
       source,
       stdin: options.stdin || "",
+      libraries: options.libraries || [],
       head,
       tail: tailHead + "practice.js\n",
       headLimit: options.headLimit || 1024 * 1024,
@@ -125,6 +126,7 @@ function makeWorkerKernel(){
           code: transform(source).code,
           userFile:"cell.js",
           stdin: options.stdin || "",
+          libraries: options.libraries || [],
           headLimit: 1024 * 1024,
           segmentLimit: 4000,
           graceMs: options.graceMs || 200,
@@ -184,6 +186,26 @@ test("console 은 스트림별로 나뉘어 기록된다", async () => {
   assert.equal(textOf(result, "out"), "보통\n");
   assert.equal(textOf(result, "warn"), "경고\n");
   assert.equal(textOf(result, "err"), "오류\n");
+});
+
+test("선택한 라이브러리는 사용자 코드보다 먼저 별도 소스로 실행된다", async () => {
+  const result = await runInWorker("console.log(StudyLib.twice(7));", {
+    libraries:[{
+      id:"study-lib@1", name:"Study Lib", global:"StudyLib", sourceURL:"study-lib.js",
+      source:"globalThis.StudyLib = { twice(n){ return n * 2; } };"
+    }]
+  });
+  assert.equal(result.error, null);
+  assert.equal(textOf(result, "out"), "14\n");
+});
+
+test("라이브러리 로드 오류는 사용자 코드 오류와 구분해 이름을 알려준다", async () => {
+  const result = await runInWorker("console.log('실행되면 안 됨');", {
+    libraries:[{ id:"broken@1", name:"깨진 도구", sourceURL:"broken.js", source:"const = ;" }]
+  });
+  assert.ok(result.error);
+  assert.match(result.error.message, /깨진 도구 불러오기 실패/);
+  assert.equal(textOf(result, "out"), "");
 });
 
 test("console.clear 는 이미 보낸 출력까지 비우고 실행을 계속한다", async () => {
@@ -658,7 +680,7 @@ test("노트북 셀 편집기·강조는 노트북 언어를 따른다", () => {
 test("js 편집기는 파이썬 전용 지능을 끄고 자바스크립트 기준으로 완성한다", () => {
   const editorSource = fs.readFileSync(path.join(root, "src/js/js-editor.js"), "utf8");
   // plain 을 넘기지 않으면 파이썬 키워드로 완성하고, 로컬 Python 이 있으면 Jedi(파이썬 분석기)에 물어본다.
-  assert.match(editorSource, /plain: true,\s*\n\s*fileExt: ext,\s*\n\s*completionWords: JS_RUN_COMPLETION_WORDS,/);
+  assert.match(editorSource, /plain: true,\s*\n\s*fileExt: ext,\s*\n\s*completionWords,/);
   // 편집기는 목록을 직접 받을 수 있어야 한다.
   const pyEditor = fs.readFileSync(path.join(root, "src/js/python-editor.js"), "utf8");
   assert.match(pyEditor, /Array\.isArray\(options\.completionWords\) \? options\.completionWords : completionWordsForProfile/);
@@ -741,6 +763,22 @@ test("새 자바스크립트 파일은 사이드바 + 메뉴와 폴더 우클릭
   assert.match(editorSource, /createScratchInFolder\(folder, jsScratchFileName, jsScratchStarter,\s*\n?\s*"text\/javascript"/);
   assert.match(editorSource, /function newJsScratch\(\)\{[\s\S]{0,320}activeFolderContextForNewFile\(\)/);
   assert.match(editorSource, /base \+ \(number > 1 \? " " \+ number : ""\) \+ "\.js"/);
+});
+
+test("미저장 새 자바스크립트 파일도 자동복원 작업공간에 바탕 문서를 남긴다", () => {
+  const editorSource = fs.readFileSync(path.join(root, "src/js/js-editor.js"), "utf8");
+  const codeViewer = fs.readFileSync(path.join(root, "src/js/code-viewer.js"), "utf8");
+
+  // 최상위 새 JS는 일반 파일과 같은 queueFiles 경로에서 열기 뒤 rememberWorkspace까지 수행한다.
+  assert.match(editorSource,
+    /function newJsScratch\(\)\{[\s\S]{0,500}typeof queueFiles === "function"[\s\S]{0,120}queueFiles\(\[file\], \{ isScratch:true \}\)/);
+  // 폴더 안 새 파일은 즉시 렌더를 유지하면서 별도 스냅샷을 저장하고, 이름 변경 시 예전 경로를 교체한다.
+  assert.match(codeViewer,
+    /async function rememberScratchWorkspaceFile\([\s\S]{0,900}rememberWorkspace\(\[snapshot\], false, \{ silent:true \}\)/);
+  assert.match(codeViewer,
+    /rememberScratchWorkspaceFile\(target, file\)/);
+  assert.match(codeViewer,
+    /rememberScratchWorkspaceFile\(ownerDoc, ownerDoc\.sourceFile, oldPath\)/);
 });
 
 test("새 파일 메뉴 문구는 영어 번역이 함께 있다", () => {

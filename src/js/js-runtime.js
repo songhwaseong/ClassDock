@@ -135,10 +135,14 @@ function jsInferredMembers(text, name){
 }
 
 // 편집기가 'obj.' 뒤에서 부른다. 후보가 없으면 빈 배열 — 그러면 버퍼 단어 완성으로 넘어간다.
-function jsMemberCompletionCandidates(source, receiver, prefix){
+function jsMemberCompletionCandidates(source, receiver, prefix, libraries){
   const name = String(receiver || "");
   if (!/^[A-Za-z_$][\w$]*$/.test(name)) return [];
   const query = String(prefix || "");
+  const libraryItems = typeof jsLibraryMemberCandidates === "function"
+    ? jsLibraryMemberCandidates(libraries, name, query)
+    : [];
+  if (libraryItems.length) return libraryItems;
   const items = JS_MEMBER_CATALOG[name] || jsInferredMembers(String(source || ""), name);
   if (!items || !items.length) return [];
   return items
@@ -475,6 +479,7 @@ function jsWorkerMain(formatValue){
   // 처리되지 않은 거부는 워커에 한 번만 등록하고, 지금 돌고 있는 실행으로 넘긴다.
   // (셀마다 등록하면 리스너가 쌓이고 이미 끝난 셀로 오류가 흘러간다.)
   let activeFail = null;
+  const loadedLibraries = new Set();             // 노트북 커널에서는 같은 라이브러리를 셀마다 다시 실행하지 않는다
   self.addEventListener("unhandledrejection", (event) => {
     try { event.preventDefault(); } catch(_){}
     if (activeFail) activeFail(event && event.reason);
@@ -672,6 +677,26 @@ function jsWorkerMain(formatValue){
       return realClearInterval(id);
     };
 
+    // 라이브러리는 사용자 코드와 별도 eval 로 실행한다. 사용자 코드 앞에 문자열로 붙이지 않으므로
+    // practice.js·cell.js 오류 줄 번호가 라이브러리 크기만큼 밀리지 않는다.
+    for (const library of Array.isArray(job.libraries) ? job.libraries : []){
+      const libraryId = String((library && library.id) || "");
+      if (!libraryId || loadedLibraries.has(libraryId)) continue;
+      const libraryName = String(library.name || libraryId);
+      try {
+        const sourceURL = String(library.sourceURL || "mn-library.js").replace(/[\r\n]/g, "");
+        geval(String(library.source || "") + "\n//# sourceURL=" + sourceURL + "\n");
+        if (library.global && typeof self[String(library.global)] === "undefined")
+          throw new Error("전역 이름 ‘" + library.global + "’을 만들지 않았어요.");
+        loadedLibraries.add(libraryId);
+      } catch(error){
+        const detail = describe(error);
+        failure = { name:detail.name, message:libraryName + " 불러오기 실패: " + detail.message, stack:detail.stack };
+        finish();
+        return;
+      }
+    }
+
     let started;
     if (job.type === "cell"){
       // 노트북 셀: 전역에서 실행해야 앞 셀의 값이 이어진다. 간접 eval 은 마지막 식의 값도 돌려준다.
@@ -777,6 +802,7 @@ function startJsWorkerRun(source, options){
       token,
       source: String(source == null ? "" : source),
       stdin: String(options.stdin || ""),
+      libraries: Array.isArray(options.libraries) ? options.libraries : [],
       head: JS_WRAPPER_HEAD,
       tail: JS_WRAPPER_TAIL_HEAD + userFile + "\n",
       headLimit: JS_OUTPUT_HEAD_LIMIT,
@@ -808,7 +834,7 @@ async function runJsGrading(source, tests, hooks){
   for (let index = 0; index < cases.length; index++){
     if (typeof hooks.isCancelled === "function" && hooks.isCancelled()) break;
     if (typeof hooks.onProgress === "function") hooks.onProgress(index, cases.length);
-    const handle = startJsWorkerRun(source, { stdin:cases[index].input });
+    const handle = startJsWorkerRun(source, { stdin:cases[index].input, libraries:hooks.libraries });
     if (typeof hooks.onHandle === "function") hooks.onHandle(handle);
     results.push(jsGradingRow(cases[index], index, await handle.promise));
   }
@@ -945,6 +971,7 @@ function startJsKernelRun(opts){
       code: transformed.code,
       userFile: opts.userFile || "cell.js",
       stdin: String(opts.stdin || ""),
+      libraries: Array.isArray(opts.libraries) ? opts.libraries : [],
       headLimit: JS_OUTPUT_HEAD_LIMIT,
       segmentLimit: JS_SEGMENT_LIMIT,
       graceMs: opts.graceMs || JS_PENDING_GRACE_MS,
@@ -1113,7 +1140,13 @@ async function runJsSource(src, ui, options){
   try {
     if (grading){
       outPanel.innerHTML = '<div class="out-head">과제 자동채점</div><pre class="out-pre out-muted">테스트 실행 중…</pre>';
+      let libraries = [];
+      if (!checkJsSyntax(source) && typeof prepareJsLibrarySources === "function" && typeof ui.libraryState === "function"){
+        setStatus("라이브러리 준비 중…");
+        libraries = await prepareJsLibrarySources(ui.libraryState());
+      }
       const report = await runJsGrading(source, gradeTests, {
+        libraries,
         isCancelled: () => cancelled,
         onHandle: (running) => { handle = running; },
         onProgress: (index, total) => setStatus("채점 중… " + (index + 1) + "/" + total)
@@ -1134,8 +1167,15 @@ async function runJsSource(src, ui, options){
     // 실행하는 동안 들어오는 출력을 바로 이어 붙인다 — 오래 걸리는 코드도 진행이 보이고,
     // 중지하거나 시간이 넘어 워커를 끊어도 그때까지 찍힌 내용이 남는다.
     const pre = beginJsOutput(outPanel, "실행 중…");
+    let libraries = [];
+    if (typeof prepareJsLibrarySources === "function" && typeof ui.libraryState === "function"){
+      setStatus("라이브러리 준비 중…");
+      libraries = await prepareJsLibrarySources(ui.libraryState());
+      setStatus("실행 중…");
+    }
     handle = startJsWorkerRun(source, {
       stdin: ui.stdin ? ui.stdin.value : "",
+      libraries,
       onChunk: (chunk) => appendJsSegments(pre, chunk),
       onClear: () => clearJsOutput(pre)
     });

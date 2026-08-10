@@ -437,7 +437,7 @@ function nbBuildCell(ownerDoc, cell){
 
     ctrl.mount = () => {
       if (ctrl.active) return;
-      const ed = buildCodeEditor(cell.source, cellProfile, {
+      const editorOptions = {
         completionPortal:true,
         workspaceImportCandidates:() => (typeof workspacePythonImportCandidates === "function" ? workspacePythonImportCandidates(ownerDoc) : []),
         workspaceModuleCandidates:(context) => (typeof workspacePythonModuleCandidates === "function" ? workspacePythonModuleCandidates(ownerDoc, context) : []),
@@ -458,7 +458,18 @@ function nbBuildCell(ownerDoc, cell){
             { label:"전체 실행", action:() => nbRunAll(ownerDoc) }
           ];
         }
-      });
+      };
+      if (cellLang === "javascript"){
+        editorOptions.plain = true;
+        editorOptions.fileExt = ".js";
+        // 노트북 상단 라이브러리 선택기가 이 배열을 제자리에서 갱신하므로 이미 열린 셀도 즉시 따라간다.
+        editorOptions.completionWords = ownerDoc._jsCompletionWords || JS_RUN_COMPLETION_WORDS;
+        editorOptions.memberCandidates = (source, receiver, prefix) => jsMemberCompletionCandidates(
+          source, receiver, prefix,
+          typeof ownerDoc._jsLibraryState === "function" ? ownerDoc._jsLibraryState() : null
+        );
+      }
+      const ed = buildCodeEditor(cell.source, cellProfile, editorOptions);
       ed.host.classList.add("nbv-editor");
       ctrl.staticEl.replaceWith(ed.host);
       ed.ta.addEventListener("input", () => {

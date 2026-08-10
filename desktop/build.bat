@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 echo [2/3] Building exe...
 if exist "%CSC%" (
-  "%CSC%" /nologo /target:winexe /r:System.IO.Compression.dll /out:"..\manneung-classroom.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py "launcher.cs"
+  "%CSC%" /nologo /target:winexe /r:System.IO.Compression.dll /out:"..\manneung-classroom.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py /resource:npm_package_runner.js,npm_package_runner.js "launcher.cs"
 ) else (
   echo ^>^> C# compiler not found; building Go fallback without PowerPoint PPTX-to-PDF conversion.
   go build -ldflags "-s -w -H=windowsgui" -o "..\manneung-classroom.exe" .

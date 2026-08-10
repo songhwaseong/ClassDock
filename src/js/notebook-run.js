@@ -5,6 +5,7 @@
 // 저장(💾/Ctrl+S)은 modelToIpynb → saveTextDoc 로 .ipynb 에 기록한다.
 function renderNotebookView(model, host, ownerDoc){
   if (typeof prewarmBrowserPython === "function") prewarmBrowserPython();   // 실행 전에 브라우저 파이썬 미리 준비
+  const jsNotebookDocument = notebookLanguageOf(model) === "javascript";
   // 같은 doc 을 다시 렌더하지 않도록(탭 전환 시 el 은 유지됨) 한 번만 빌드한다.
   if (ownerDoc){
     ownerDoc.notebookModel = model;
@@ -81,6 +82,8 @@ function renderNotebookView(model, host, ownerDoc){
   const runGroup = document.createElement("span");
   runGroup.className = "nbv-run-group";
   runGroup.append(runAllBtn, runMore, runMenu);
+  const jsLibraryBtn = document.createElement("button");
+  jsLibraryBtn.type = "button"; jsLibraryBtn.className = "nbv-js-library run-pkg run-js-library"; jsLibraryBtn.textContent = "라이브러리";
   const closeRunMenu = () => { if (!runMenu.hidden){ runMenu.hidden = true; runMore.setAttribute("aria-expanded", "false"); } };
   runMore.addEventListener("click", () => {
     const open = runMenu.hidden;
@@ -275,8 +278,39 @@ function renderNotebookView(model, host, ownerDoc){
   };
   const saveGroup = buildToolMenuGroup(saveBtn, "PDF로 저장", [pdfBtn], "nbv-save-group");
   const exportGroup = buildToolMenuGroup(exportBtn, "변환(.py) 뷰", [toPyBtn], "nbv-export-group");
-  bar.append(tag, saveGroup, undoBtn, redoBtn, runGroup, outputGroup, inkBtn, tocBtn, findBtn, dedupeBtn, fontGroup, exportGroup, helpBtn, status);
+  bar.append(tag, saveGroup, undoBtn, redoBtn, runGroup);
+  if (jsNotebookDocument) bar.appendChild(jsLibraryBtn);
+  bar.append(outputGroup, inkBtn, tocBtn, findBtn, dedupeBtn, fontGroup, exportGroup, helpBtn, status);
   root.appendChild(bar);
+  if (jsNotebookDocument && typeof buildJsLibraryPicker === "function"){
+    const libraryKey = jsLibraryStorageKey(notebookRecoveryKey(ownerDoc));
+    let activeLibraries = loadJsLibraryState(libraryKey);
+    const completionWords = [...JS_RUN_COMPLETION_WORDS, ...jsLibraryCompletionWords(activeLibraries)];
+    if (ownerDoc){
+      ownerDoc._jsCompletionWords = completionWords;
+      ownerDoc._nbJsLibraryBtn = jsLibraryBtn;
+    }
+    const jsLibraryPicker = buildJsLibraryPicker(bar, jsLibraryBtn, libraryKey, {
+      onChange:(next) => {
+        activeLibraries = next;
+        completionWords.splice(0, completionWords.length, ...JS_RUN_COMPLETION_WORDS, ...jsLibraryCompletionWords(activeLibraries));
+        if (ownerDoc){
+          resetJsKernel(nbKernelId(ownerDoc));
+          nbSetStatus(ownerDoc, "라이브러리가 바뀌어 JavaScript 커널을 재시작했어요.");
+        }
+      }
+    });
+    if (ownerDoc){
+      ownerDoc._jsLibraryState = () => jsLibraryPicker.getState();
+      if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
+      ownerDoc.cleanupFns.push(() => {
+        jsLibraryPicker.destroy();
+        delete ownerDoc._jsLibraryState;
+        delete ownerDoc._jsCompletionWords;
+        delete ownerDoc._nbJsLibraryBtn;
+      });
+    }
+  }
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   const tocPanel = document.createElement("div");
   tocPanel.className = "nbv-toc";
@@ -500,6 +534,7 @@ function nbSetRunningUi(ownerDoc, running){
   }
   if (ownerDoc._nbRunGroup) ownerDoc._nbRunGroup.classList.toggle("is-running", !!running);
   if (ownerDoc._nbRunMoreBtn) ownerDoc._nbRunMoreBtn.disabled = !!running;
+  if (ownerDoc._nbJsLibraryBtn) ownerDoc._nbJsLibraryBtn.disabled = !!running;
 }
 
 function nbCancellationError(){
@@ -876,11 +911,19 @@ async function nbRunCell(ownerDoc, ctrl, advance, runOptions){
     let task;
     if (jsNotebook){
       nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel}", { kernel:nbT("브라우저 자바스크립트") }));
+      let libraries = [];
+      if (typeof prepareJsLibrarySources === "function" && typeof ownerDoc._jsLibraryState === "function"){
+        nbSetStatus(ownerDoc, "JavaScript 라이브러리 준비 중…");
+        libraries = await prepareJsLibrarySources(ownerDoc._jsLibraryState());
+        nbThrowIfCancelled(ownerDoc);
+        nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel}", { kernel:nbT("브라우저 자바스크립트") }));
+      }
       task = startJsKernelRun({
         kernelId:nbKernelId(ownerDoc),
         source:cell.source,
         stdin:ctrl.stdinText ? ctrl.stdinText() : "",
-        userFile:"cell.js"
+        userFile:"cell.js",
+        libraries
       });
     } else if (localKernel){
       nbSetStatus(ownerDoc, nbTf("셀 실행 중… · {kernel} · 기준 {cwd}", { kernel:nbT("로컬 Python"), cwd:workspaceCwd || "." }));

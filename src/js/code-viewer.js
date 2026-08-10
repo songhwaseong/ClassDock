@@ -1890,7 +1890,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "Python 파일 저장";
   // 일반 텍스트 편집기의 '보기로'도 run-revert 스타일을 공유하므로, 설정에서 숨길 Python 전용 표식은 따로 둔다.
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
-  const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
+  const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg run-py-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
   // 터미널은 실행 결과와 분리된 모달 창으로 연다.
@@ -3497,6 +3497,10 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
       if (!renamed && ownerDoc.sourceFile && typeof ownerDoc.archiveCtx.add === "function")
         ownerDoc.archiveCtx.add(nextPath, ownerDoc.sourceFile);
     }
+    if (oldPath !== nextPath && ownerDoc.isScratch && ownerDoc.sourceFile){
+      rememberScratchWorkspaceFile(ownerDoc, ownerDoc.sourceFile, oldPath)
+        .catch(error => console.warn("renamed scratch workspace save skipped:", error));
+    }
     if (typeof state !== "undefined" && state === ownerDoc){
       const hdr = byId("activeFileName");
       if (hdr){
@@ -3952,6 +3956,26 @@ function pythonScratchFileName(number=1){
   const base = typeof window.t === "function" ? window.t("새 코드") : "새 코드";
   return base + (number > 1 ? " " + number : "") + ".py";
 }
+
+// 아직 디스크에 저장하지 않은 새 문서를 자동복원 묶음에 넣는 공용 경로.
+// File.name은 바꿀 수 없으므로 현재 문서 경로로 작은 스냅샷을 만들어 저장한다.
+async function rememberScratchWorkspaceFile(doc, sourceFile, previousPath=""){
+  if (!doc || !doc.isScratch || !sourceFile || typeof rememberWorkspace !== "function") return false;
+  const path = normalizedRunPath(doc.workspacePath || doc.relPath || doc.name || sourceFile.name);
+  if (!path) return false;
+  const oldPath = normalizedRunPath(previousPath);
+  const name = String(doc.name || path.split("/").pop() || sourceFile.name || "새 파일");
+  const snapshot = new File([sourceFile], name, {
+    type:sourceFile.type || "application/octet-stream",
+    lastModified:Number(sourceFile.lastModified) || Date.now()
+  });
+  if (typeof setFileRelativePath === "function") setFileRelativePath(snapshot, path);
+  if (oldPath && oldPath !== path && typeof forgetWorkspacePaths === "function") forgetWorkspacePaths([oldPath]);
+  const saved = await rememberWorkspace([snapshot], false, { silent:true });
+  doc.savedInWorkspace = !!saved;
+  return !!saved;
+}
+
 // 폴더 우클릭으로 만드는 새 문서의 공통 처리 — 종류(.py/.ipynb/.txt/.mnote/.xlsx)마다 같은 규칙을 쓴다.
 //  · makeName(번호): 1 이면 기본 이름, 2 이상이면 번호를 붙인 이름 → 같은 폴더 안 이름 충돌 회피
 //  · makeContent(이름): 파일 내용(문자열·바이트). 이름을 본문에 넣는 형식(.mnote)까지 지원하려고 콜백으로 받는다.
@@ -3979,7 +4003,11 @@ function createScratchInFolder(folder, makeName, makeContent, mime, noticeLabel)
     opened.then((newDoc) => {
       const target = newDoc || (typeof docs !== "undefined"
         ? docs.find(d => normalizedRunPath(d.workspacePath || d.relPath || "") === relPath) : null);
-      if (target && typeof beginSidebarRename === "function") requestAnimationFrame(() => beginSidebarRename(target));
+      if (target){
+        // 편집 내용은 문서별 draft가 보관하므로, 그 draft를 다시 붙일 바탕 파일부터 기억한다.
+        rememberScratchWorkspaceFile(target, file).catch(error => console.warn("scratch workspace save skipped:", error));
+        if (typeof beginSidebarRename === "function") requestAnimationFrame(() => beginSidebarRename(target));
+      }
     }).catch(() => {});
   }
   if (typeof toast === "function" && noticeLabel){

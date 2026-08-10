@@ -34,11 +34,18 @@ const MNLazy = (() => {
     // 반면 PPTXjs·엑셀 복구 코드는 동기 API 의 JSZip 2.6.1 을 쓴다. 그래서 예전 HTML 은
     // "3.x 로드 → docx-preview 로드 → 2.6.1 로 되돌리기" 순서였다. 지연 로드에서도 순서가
     // 뒤바뀔 수 있으므로(예: PPT 를 먼저 연 뒤 Word 를 열기), 아래에서 그 되돌리기를 재현한다.
-    docx:        { label:"Word 보기", files:["jszip3.min.js", "docx-preview.min.js"], jszipSwap:true }
+    docx:        { label:"Word 보기", files:["jszip3.min.js", "docx-preview.min.js"], jszipSwap:true },
+    // 자바스크립트 연습 실행기는 소스를 부모 화면에서 실행하지 않고 Worker로 전달한다.
+    // manifest의 지연 로드 계약에 등록하되, 실제 읽기는 source(file)를 사용한다.
+    jsLodash:    { label:"JavaScript Lodash",    files:["lodash.min.js"] },
+    jsDayjs:     { label:"JavaScript Day.js",    files:["dayjs.min.js"] },
+    jsPapaParse: { label:"JavaScript Papa Parse", files:["papaparse.min.js"] },
+    jsMath:      { label:"JavaScript Math.js",   files:["math.min.js"] }
   };
 
   const loadedFiles = new Map();     // 파일명 -> Promise (실행 완료)
   const loadedBundles = new Map();   // 묶음명 -> Promise
+  const sourceFiles = new Map();     // 파일명 -> Promise<string> (Worker 전달용 원문)
   const JSZIP_BUNDLES = new Set(["jszip", "pptx", "docx"]);
   let jszipBundleQueue = Promise.resolve();
   let inlineMode = null;             // null=미판별, true=단일 파일 모드
@@ -55,6 +62,7 @@ const MNLazy = (() => {
   function runInlineSource(file){
     const holder = document.querySelector('script[data-mn-lazy="' + file + '"]');
     if (!holder) throw new Error("lazy-source-missing:" + file);
+    if (!sourceFiles.has(file)) sourceFiles.set(file, Promise.resolve(holder.textContent));
     const script = document.createElement("script");
     script.textContent = holder.textContent;
     script.setAttribute("data-mn-lazy-loaded", file);
@@ -72,6 +80,28 @@ const MNLazy = (() => {
       script.onerror = () => reject(new Error("lazy-load-failed:" + file));
       document.head.appendChild(script);
     });
+  }
+
+  // 실행하지 않은 원문을 돌려준다. 단일 파일에서는 text/plain 블록, 개발 서버에서는
+  // vendor 파일을 읽는다. JavaScript 연습 Worker처럼 부모 전역을 오염시키면 안 되는 곳에서 쓴다.
+  function source(file){
+    file = String(file || "");
+    if (sourceFiles.has(file)) return sourceFiles.get(file);
+    let task;
+    if (usesInlineSources()){
+      const holder = document.querySelector('script[data-mn-lazy="' + file + '"]');
+      task = holder
+        ? Promise.resolve(holder.textContent)
+        : Promise.reject(new Error("lazy-source-missing:" + file));
+    } else {
+      task = fetch("vendor/" + file, { cache:"force-cache" }).then((response) => {
+        if (!response.ok) throw new Error("lazy-source-http:" + response.status);
+        return response.text();
+      });
+    }
+    const tracked = task.catch((error) => { sourceFiles.delete(file); throw error; });
+    sourceFiles.set(file, tracked);
+    return tracked;
   }
 
   function loadFile(file){
@@ -125,7 +155,7 @@ const MNLazy = (() => {
   const isLoaded = (name) => loadedBundles.has(name);
   const bundleLabel = (name) => (BUNDLES[name] && BUNDLES[name].label) || name;
 
-  return { need, tryNeed, isLoaded, bundleLabel, BUNDLES };
+  return { need, tryNeed, source, isLoaded, bundleLabel, BUNDLES };
 })();
 
 if (typeof module !== "undefined" && module.exports) module.exports = MNLazy;
