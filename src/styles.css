@@ -1766,6 +1766,10 @@
   .wb-canvas[data-tool="pen"]{cursor:var(--ink-cursor-pen)}
   .wb-canvas[data-tool="highlighter"]{cursor:var(--ink-cursor-highlighter)}
   .wb-canvas[data-tool="eraser"]{cursor:var(--ink-cursor-eraser)}
+  .wb-canvas.pan-ready{cursor:grab!important}
+  .wb-canvas.panning{cursor:grabbing!important}
+  .wb-zoom-step{font-size:18px;padding:0 7px}
+  .wb-zoom-label{min-width:52px;padding:0 6px;font-variant-numeric:tabular-nums}
   .wb-textinput{position:absolute;z-index:5;min-width:80px;background:rgba(255,255,255,.9);border:1px dashed var(--accent);
     border-radius:4px;padding:2px 4px;font-family:system-ui,"Malgun Gothic",sans-serif;line-height:1.25;resize:both;outline:none;overflow:hidden}
   .wb-edu-toggle{font-size:20px;font-family:Georgia,"Times New Roman",serif;font-weight:700;line-height:1}

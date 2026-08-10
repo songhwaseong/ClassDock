@@ -18,19 +18,19 @@ const {
 
 test("수학·과학 도구상자는 기호·수식·도형·과학 묶음을 빠짐없이 제공한다", () => {
   const entries = whiteboardEducationCatalog();
-  assert.ok(entries.length >= 50, "1차 도구 목록이 너무 적다");
+  assert.ok(entries.length >= 230, "확장된 도구 목록이 너무 적다");
   assert.equal(new Set(entries.map((entry) => entry.id)).size, entries.length, "도구 id가 중복된다");
   for (const category of ["symbol", "formula", "geometry", "science"]){
     assert.ok(entries.some((entry) => entry.category === category), category + " 묶음이 비어 있다");
   }
-  for (const value of ["±", "√", "∑", "∫", "π", "℃", "Ω"]){
+  for (const value of ["±", "√", "∑", "∫", "π", "∴", "∅", "ℝ", "℃", "Ω", "Pa", "V"]){
     assert.ok(entries.some((entry) => entry.value === value), value + " 기호가 없다");
   }
 });
 
 test("수식 틀은 LaTeX 원문을 보존하는 편집 가능한 formula 항목으로 정의한다", () => {
   const formulas = whiteboardEducationCatalog().filter((entry) => entry.category === "formula");
-  assert.ok(formulas.length >= 6);
+  assert.ok(formulas.length >= 75);
   for (const entry of formulas){
     assert.equal(entry.kind, "formula", entry.label + " 수식이 formula가 아니다");
     assert.ok(entry.source && typeof entry.source === "string");
@@ -42,7 +42,7 @@ test("수식 틀은 LaTeX 원문을 보존하는 편집 가능한 formula 항목
 
 test("수식 사전은 교과별 50개 이상의 검색 가능한 틀과 정확한 입력 위치를 제공한다", () => {
   const formulas = whiteboardFormulaDictionary();
-  assert.ok(formulas.length >= 50, "수식 사전 항목이 너무 적다");
+  assert.ok(formulas.length >= 75, "수식 사전 확장 항목이 너무 적다");
   assert.equal(new Set(formulas.map((entry) => entry.id)).size, formulas.length);
   for (const group of ["basic", "algebra", "calculus", "set", "statistics", "geometry-formula", "science-formula"]){
     assert.ok(formulas.some((entry) => entry.formulaGroup === group), group + " 분야가 비어 있다");
@@ -75,7 +75,7 @@ test("내 수식·즐겨찾기·최근 사용 저장값은 유효한 항목만 �
 
 test("교육 도형 SVG는 외부 자원이나 실행 코드를 포함하지 않는다", () => {
   const stencils = whiteboardEducationCatalog().filter((entry) => entry.kind === "stencil");
-  assert.ok(stencils.length >= 60);
+  assert.ok(stencils.length >= 100);
   for (const entry of stencils){
     const svg = whiteboardStencilSvg(entry.id, "#2563eb");
     assert.match(svg, /^<svg[^>]+width="240"[^>]+height="190"[^>]+viewBox="0 0 240 190"/);
@@ -92,19 +92,27 @@ test("교육 도형 SVG는 외부 자원이나 실행 코드를 포함하지 않
   }
 });
 
+test("교육 도형 미리보기는 테마 글자색을 따르되 임의 CSS 값은 받지 않는다", () => {
+  const direct = whiteboardStencilSvg("stencil-angle", "currentColor");
+  const generated = whiteboardStencilSvg("stencil-cube", "currentColor");
+  assert.ok(direct.includes('stroke="currentColor"'));
+  assert.ok(generated.includes('stroke="currentColor"'));
+  assert.doesNotMatch(whiteboardStencilSvg("stencil-angle", "currentColor;filter:url(x)"), /filter:url|stroke="currentColor;/);
+});
+
 test("도형·과학 확장팩은 교과 분야별 벡터 스텐실을 빠짐없이 제공한다", () => {
   const stencils = whiteboardEducationCatalog().filter((entry) => entry.kind === "stencil");
   const geometry = stencils.filter((entry) => entry.category === "geometry");
   const science = stencils.filter((entry) => entry.category === "science");
-  assert.ok(geometry.length >= 25);
-  assert.ok(science.length >= 35);
-  for (const group of ["plane","solid","construction","graph"]){
+  assert.ok(geometry.length >= 45);
+  assert.ok(science.length >= 60);
+  for (const group of ["plane","solid","construction","graph","data"]){
     assert.ok(geometry.some((entry) => entry.stencilGroup === group), group + " 도형 분야가 비어 있다");
   }
-  for (const group of ["mechanics","electricity","optics","chemistry","biology","earth"]){
+  for (const group of ["mechanics","waves","electricity","optics","chemistry","biology","earth"]){
     assert.ok(science.some((entry) => entry.stencilGroup === group), group + " 과학 분야가 비어 있다");
   }
-  for (const id of ["stencil-cube","stencil-angle-bisector","stencil-parabola","stencil-pulley","stencil-parallel-circuit","stencil-convex-lens","stencil-burette","stencil-plant-cell","stencil-earth-layers"]){
+  for (const id of ["stencil-cube","stencil-angle-bisector","stencil-parabola","stencil-bar-chart","stencil-cube-net","stencil-pulley","stencil-transverse-wave","stencil-magnetic-field","stencil-refraction","stencil-parallel-circuit","stencil-convex-lens","stencil-burette","stencil-particle-states","stencil-plant-cell","stencil-punnett-square","stencil-earth-layers","stencil-rock-cycle"]){
     const entry = stencils.find((item) => item.id === id);
     assert.ok(entry, id + " 항목이 없다");
     const group = whiteboardStencilGroup(id, "#16a34a");
@@ -128,11 +136,15 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   const palette = fs.readFileSync(path.join(__dirname, "../src/js/command-palette.js"), "utf8");
   assert.match(source, /WB_EDU_TRANSFER_TYPE/);
-  assert.match(source, /insertEducationEntry\(entry, W \/ 2, H \/ 2\)/);
+  assert.match(source, /insertEducationEntry\(entry, center\.x, center\.y\)/);
   assert.match(source, /setData\(WB_EDU_TRANSFER_TYPE, entry\.id\)/);
   assert.match(source, /getData\(WB_EDU_TRANSFER_TYPE\)/);
   assert.match(source, /role:"education-stencil"/);
   assert.match(source, /role:"education-formula"/);
+  assert.match(source, /whiteboardStencilSvg\(entry\.id, "currentColor"\)/);
+  assert.match(source, /flipXBtn = mkBtn\("↔", "선택한 교육 도형 좌우 반전"/);
+  assert.match(source, /flipYBtn = mkBtn\("↕", "선택한 교육 도형 상하 반전"/);
+  assert.match(source, /selected\.role !== "education-stencil"/);
   assert.match(source, /groupActionBtn = mkBtn\("분리"/);
   assert.match(source, /PdfSignerCore\.latexToMathML/);
   assert.match(source, /WB_FORMULA_LIBRARY_KEY/);

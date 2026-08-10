@@ -33,6 +33,11 @@ function whiteboardFormulaDictionary(){
   add("difference-squares","algebra","제곱의 차",String.raw`[[a]]^2 - [[b]]^2 = ([[a]]-[[b]])([[a]]+[[b]])`,String.raw`a^2-b^2=(a-b)(a+b)`,"인수분해 곱셈공식 factor","제곱의 차 인수분해");
   add("slope","algebra","기울기",String.raw`m = \frac{[[y_2]] - [[y_1]]}{[[x_2]] - [[x_1]]}`,String.raw`m=\frac{y_2-y_1}{x_2-x_1}`,"직선 변화율 slope","두 점을 지나는 직선의 기울기");
   add("proportion","algebra","비례식",String.raw`[[a]]:[[b]] = [[c]]:[[d]]`,String.raw`a:b=c:d`,"비율 비례 proportion ratio","두 비가 같은 비례식");
+  add("point-slope","algebra","점과 기울기의 직선",String.raw`y - [[y_1]] = [[m]](x - [[x_1]])`,String.raw`y-y_1=m(x-x_1)`,"직선 방정식 점 기울기 point slope","한 점과 기울기로 나타낸 직선의 방정식");
+  add("exponent-product","algebra","지수법칙 곱",String.raw`[[a]]^{[[m]]} [[a]]^{[[n]]} = [[a]]^{[[m]]+[[n]]}`,String.raw`a^m a^n=a^{m+n}`,"지수법칙 거듭제곱 exponent law","밑이 같은 거듭제곱의 곱");
+  add("arithmetic-term","algebra","등차수열 일반항",String.raw`a_{[[n]]} = [[a_1]] + ([[n]]-1)[[d]]`,String.raw`a_n=a_1+(n-1)d`,"등차수열 일반항 arithmetic sequence","첫째항과 공차로 구하는 등차수열 일반항");
+  add("arithmetic-sum","algebra","등차수열의 합",String.raw`S_{[[n]]} = \frac{[[n]]([[a_1]]+[[a_n]])}{2}`,String.raw`S_n=\frac{n(a_1+a_n)}{2}`,"등차수열 합 arithmetic series","등차수열의 첫 n개 항의 합");
+  add("geometric-term","algebra","등비수열 일반항",String.raw`a_{[[n]]} = [[a_1]][[r]]^{[[n]]-1}`,String.raw`a_n=a_1r^{n-1}`,"등비수열 일반항 geometric sequence","첫째항과 공비로 구하는 등비수열 일반항");
 
   add("limit","calculus","극한",String.raw`\lim_{x \to [[a]]} [[f(x)]]`,String.raw`\lim_{x \to a} f(x)`,"미적분 극한 limit","x가 a로 갈 때의 극한");
   add("sum","calculus","수열의 합",String.raw`\sum_{[[i]]=[[시작]]}^{[[끝]]} [[a_i]]`,String.raw`\sum_{i=1}^{n} a_i`,"시그마 합계 sigma sum","시작과 끝이 있는 합");
@@ -43,6 +48,9 @@ function whiteboardFormulaDictionary(){
   add("integral","calculus","부정적분",String.raw`\int [[f(x)]]\,d[[x]]`,String.raw`\int f(x)\,dx`,"적분 integral 부정적분","적분 구간이 없는 적분");
   add("definite-integral","calculus","정적분",String.raw`\int_{[[아래끝]]}^{[[위끝]]} [[f(x)]]\,d[[x]]`,String.raw`\int_{a}^{b} f(x)\,dx`,"구간 적분 definite integral","아래끝과 위끝이 있는 적분");
   add("double-integral","calculus","이중적분",String.raw`\iint [[f(x,y)]]\,d[[x]]\,d[[y]]`,String.raw`\iint f(x,y)\,dx\,dy`,"다중적분 double integral","두 변수에 대한 이중적분");
+  add("chain-rule","calculus","연쇄법칙",String.raw`\frac{d}{d[[x]]} f(g([[x]])) = f'(g([[x]]))g'([[x]])`,String.raw`\frac{d}{dx}f(g(x))=f'(g(x))g'(x)`,"합성함수 미분 연쇄법칙 chain rule","합성함수의 미분법");
+  add("tangent-line","calculus","접선의 방정식",String.raw`y - f([[a]]) = f'([[a]])(x-[[a]])`,String.raw`y-f(a)=f'(a)(x-a)`,"미분 접선 기울기 tangent line","함수 위 한 점에서의 접선 방정식");
+  add("integration-parts","calculus","부분적분",String.raw`\int [[u]]\,d[[v]] = [[u]][[v]] - \int [[v]]\,d[[u]]`,String.raw`\int u\,dv=uv-\int v\,du`,"적분 부분적분 integration by parts","곱 형태를 적분하는 부분적분 공식");
 
   add("element","set","원소",String.raw`[[x]] \in [[A]]`,String.raw`x \in A`,"집합 포함 원소 element in","x가 집합 A의 원소");
   add("subset","set","부분집합",String.raw`[[A]] \subseteq [[B]]`,String.raw`A \subseteq B`,"부분집합 subset 포함","A가 B의 부분집합");
@@ -60,6 +68,10 @@ function whiteboardFormulaDictionary(){
   add("probability","statistics","확률",String.raw`P([[사건]]) = \frac{[[유리한 경우]]}{[[전체 경우]]}`,String.raw`P(A)=\frac{n(A)}{n(S)}`,"경우의수 probability 확률","사건이 일어날 확률");
   add("conditional-probability","statistics","조건부확률",String.raw`P([[A]] \mid [[B]]) = \frac{P([[A]] \cap [[B]])}{P([[B]])}`,String.raw`P(A\mid B)=\frac{P(A\cap B)}{P(B)}`,"조건부 확률 conditional probability","B가 일어났을 때 A의 확률");
   add("normal-distribution","statistics","정규분포",String.raw`[[X]] \sim N([[평균]],[[표준편차]]^2)`,String.raw`X \sim N(\mu,\sigma^2)`,"정규분포 normal distribution","평균과 분산으로 나타낸 정규분포");
+  add("permutation","statistics","순열",String.raw`{}_{[[n]]}P_{[[r]]} = \frac{[[n]]!}{([[n]]-[[r]])!}`,String.raw`{}_nP_r=\frac{n!}{(n-r)!}`,"순열 경우의수 permutation","n개에서 r개를 순서 있게 고르는 경우의 수");
+  add("combination","statistics","조합",String.raw`{}_{[[n]]}C_{[[r]]} = \frac{[[n]]!}{[[r]]!([[n]]-[[r]])!}`,String.raw`{}_nC_r=\frac{n!}{r!(n-r)!}`,"조합 경우의수 combination","n개에서 r개를 순서 없이 고르는 경우의 수");
+  add("binomial-probability","statistics","이항확률",String.raw`P(X=[[k]]) = \binom{[[n]]}{[[k]]}[[p]]^{[[k]]}(1-[[p]])^{[[n]]-[[k]]}`,String.raw`P(X=k)=\binom{n}{k}p^k(1-p)^{n-k}`,"이항분포 베르누이 확률 binomial","독립 시행에서 성공 횟수의 확률");
+  add("z-score","statistics","표준점수",String.raw`z = \frac{[[값]]-[[평균]]}{[[표준편차]]}`,String.raw`z=\frac{x-\mu}{\sigma}`,"표준화 표준점수 z score","자료를 평균과 표준편차로 표준화한 점수");
 
   add("pythagorean","geometry-formula","피타고라스 정리",String.raw`[[a]]^2 + [[b]]^2 = [[c]]^2`,String.raw`a^2+b^2=c^2`,"직각삼각형 피타고라스 geometry","직각삼각형 세 변의 관계");
   add("distance","geometry-formula","두 점 사이 거리",String.raw`d = \sqrt{([[x_2]]-[[x_1]])^2 + ([[y_2]]-[[y_1]])^2}`,String.raw`d=\sqrt{(x_2-x_1)^2+(y_2-y_1)^2}`,"좌표 거리 distance","평면 위 두 점 사이의 거리");
@@ -69,6 +81,10 @@ function whiteboardFormulaDictionary(){
   add("triangle-area","geometry-formula","삼각형 넓이",String.raw`A = \frac{1}{2}[[밑변]][[높이]]`,String.raw`A=\frac{1}{2}bh`,"밑변 높이 triangle area","밑변과 높이로 구하는 삼각형 넓이");
   add("sine-law","geometry-formula","사인 법칙",String.raw`\frac{[[a]]}{\sin [[A]]} = \frac{[[b]]}{\sin [[B]]} = \frac{[[c]]}{\sin [[C]]}`,String.raw`\frac{a}{\sin A}=\frac{b}{\sin B}=\frac{c}{\sin C}`,"삼각형 사인법칙 sine law","삼각형의 변과 맞은편 각의 관계");
   add("cosine-law","geometry-formula","코사인 법칙",String.raw`[[c]]^2 = [[a]]^2 + [[b]]^2 - 2[[a]][[b]]\cos [[C]]`,String.raw`c^2=a^2+b^2-2ab\cos C`,"삼각형 코사인법칙 cosine law","두 변과 끼인각으로 나머지 변 구하기");
+  add("circumference","geometry-formula","원의 둘레",String.raw`C = 2\pi [[r]]`,String.raw`C=2\pi r`,"원 둘레 원주 circumference","반지름으로 구하는 원의 둘레");
+  add("arc-length","geometry-formula","호의 길이",String.raw`l = \frac{[[각도]]}{360^\circ}\cdot 2\pi [[r]]`,String.raw`l=\frac{\theta}{360^\circ}\cdot2\pi r`,"부채꼴 호 길이 arc length","중심각과 반지름으로 구하는 호의 길이");
+  add("sector-area","geometry-formula","부채꼴 넓이",String.raw`A = \frac{[[각도]]}{360^\circ}\cdot \pi [[r]]^2`,String.raw`A=\frac{\theta}{360^\circ}\pi r^2`,"부채꼴 넓이 sector area","중심각과 반지름으로 구하는 부채꼴 넓이");
+  add("cylinder-volume","geometry-formula","원기둥 부피",String.raw`V = \pi [[r]]^2 [[h]]`,String.raw`V=\pi r^2h`,"원기둥 부피 cylinder volume","밑면 반지름과 높이로 구하는 원기둥 부피");
 
   add("speed","science-formula","속력",String.raw`v = \frac{[[거리]]}{[[시간]]}`,String.raw`v=\frac{d}{t}`,"물리 속도 speed distance time","거리와 시간으로 구하는 속력");
   add("newton","science-formula","뉴턴 제2법칙",String.raw`F = [[질량]][[가속도]]`,String.raw`F=ma`,"물리 힘 질량 가속도 Newton","힘은 질량과 가속도의 곱");
@@ -81,6 +97,10 @@ function whiteboardFormulaDictionary(){
   add("ideal-gas","science-formula","이상기체 상태방정식",String.raw`[[압력]][[부피]] = [[몰수]][[기체상수]][[온도]]`,String.raw`PV=nRT`,"화학 기체 압력 부피 온도 ideal gas","이상기체의 상태방정식");
   add("reaction","science-formula","화학 반응식",String.raw`[[반응물]] \rightarrow [[생성물]]`,String.raw`A+B \rightarrow C`,"화학 반응 화살표 reaction","반응물에서 생성물로 향하는 반응식");
   add("equilibrium","science-formula","화학 평형",String.raw`[[반응물]] \leftrightarrow [[생성물]]`,String.raw`A+B \leftrightarrow C+D`,"화학 평형 가역반응 equilibrium","양방향으로 진행되는 반응");
+  add("acceleration","science-formula","가속도",String.raw`a = \frac{[[속도 변화량]]}{[[시간]]}`,String.raw`a=\frac{\Delta v}{\Delta t}`,"물리 가속도 속도 변화 acceleration","단위 시간당 속도 변화량");
+  add("momentum","science-formula","운동량",String.raw`p = [[질량]][[속도]]`,String.raw`p=mv`,"물리 운동량 momentum 질량 속도","질량과 속도의 곱으로 나타낸 운동량");
+  add("pressure","science-formula","압력",String.raw`P = \frac{[[힘]]}{[[넓이]]}`,String.raw`P=\frac{F}{A}`,"물리 압력 힘 넓이 pressure","단위 넓이에 작용하는 힘");
+  add("heat","science-formula","열량",String.raw`Q = [[질량]][[비열]][[온도 변화]]`,String.raw`Q=mc\Delta T`,"열량 비열 온도 변화 heat","물질의 온도를 변화시키는 데 필요한 열량");
   return rows;
 }
 
@@ -125,7 +145,9 @@ function whiteboardEducationCatalog(){
     ["sigma","합 시그마","∑"], ["integral","적분","∫"], ["partial","편미분","∂"],
     ["nabla","나블라","∇"], ["angle-symbol","각","∠"], ["perpendicular","수직","⊥"],
     ["parallel","평행","∥"], ["element","원소","∈"], ["not-element","원소 아님","∉"],
-    ["subset","부분집합","⊂"], ["union","합집합","∪"], ["intersection","교집합","∩"]
+    ["subset","부분집합","⊂"], ["union","합집합","∪"], ["intersection","교집합","∩"],
+    ["therefore","그러므로","∴"], ["because","왜냐하면","∵"], ["congruent","합동","≅"], ["similar","닮음","∼"],
+    ["superset","상위집합","⊃"], ["empty-set","공집합","∅"], ["real-numbers","실수 집합","ℝ"], ["natural-numbers","자연수 집합","ℕ"]
   ].forEach(([id, label, value]) => addText("symbol", "symbol-" + id, label, value, "수학 기호 연산 집합"));
   rows.push(...whiteboardFormulaDictionary());
   [
@@ -141,41 +163,67 @@ function whiteboardEducationCatalog(){
     ["circle-parts","원의 구성 요소","반지름 지름 현 중심","construction"], ["sector","부채꼴","중심각 호 넓이","construction"],
     ["cube","정육면체","입체도형 모서리","solid"], ["cuboid","직육면체","입체도형 상자","solid"],
     ["cylinder","원기둥","입체도형 밑면 높이","solid"], ["cone","원뿔","입체도형 밑면 꼭짓점","solid"],
-    ["sphere","구","입체도형 구면 반지름","solid"], ["pyramid","각뿔","입체도형 사각뿔","solid"]
+    ["sphere","구","입체도형 구면 반지름","solid"], ["pyramid","각뿔","입체도형 사각뿔","solid"],
+    ["linear-graph","일차함수 그래프","직선 함수 기울기 절편","graph"], ["absolute-graph","절댓값 그래프","V자 함수 절대값","graph"],
+    ["exponential-graph","지수함수 그래프","지수 증가 감소 함수","graph"], ["logarithmic-graph","로그함수 그래프","로그 지수 역함수","graph"],
+    ["regular-pentagon","정오각형","평면도형 다각형 오각형","plane"], ["regular-octagon","정팔각형","평면도형 다각형 팔각형","plane"],
+    ["similar-triangles","닮은 삼각형","삼각형 닮음 대응변","plane"], ["parallel-transversal","평행선과 각","엇각 동위각 평행선","plane"],
+    ["triangular-prism","삼각기둥","입체도형 각기둥","solid"], ["hemisphere","반구","입체도형 구 절반","solid"],
+    ["cube-net","정육면체 전개도","입체도형 전개도","solid"], ["cylinder-net","원기둥 전개도","입체도형 전개도 옆면","solid"],
+    ["bar-chart","막대그래프","통계 자료 막대 차트","data"], ["line-chart","꺾은선그래프","통계 변화 추세 차트","data"],
+    ["histogram","히스토그램","통계 도수분포 연속자료","data"], ["pie-chart","원그래프","통계 비율 원형 차트","data"],
+    ["scatter-plot","산점도","통계 상관관계 점 그래프","data"], ["box-plot","상자그림","통계 사분위수 중앙값","data"],
+    ["venn-diagram","벤다이어그램","집합 교집합 합집합","data"]
   ].forEach(([id, label, keywords, group]) => addStencil("geometry", "stencil-" + id, label, keywords, group));
   [
     ["force","힘과 운동","물리 힘 중력 수직항력 벡터","mechanics"], ["spring","용수철","물리 탄성 진동","mechanics"],
     ["inclined-plane","빗면의 힘","물리 경사면 중력 수직항력","mechanics"], ["pulley","도르래","물리 장력 추","mechanics"],
     ["lever","지레","물리 받침점 힘 거리","mechanics"], ["projectile","포물선 운동","물리 투사체 속도 중력","mechanics"],
-    ["pendulum","단진자","물리 진동 주기","mechanics"],
+    ["pendulum","단진자","물리 진동 주기","mechanics"], ["collision","충돌과 운동량","물리 충돌 운동량 보존","mechanics"],
+    ["circular-motion","원운동","물리 구심력 속도","mechanics"], ["buoyancy","부력","물리 유체 뜨는 힘","mechanics"],
+    ["pressure-diagram","압력과 넓이","물리 압력 힘 접촉면","mechanics"],
     ["circuit","간단한 전기회로","물리 전지 저항 전구 회로","electricity"], ["series-circuit","직렬회로","전기 저항 직렬 전류","electricity"],
     ["parallel-circuit","병렬회로","전기 저항 병렬 전압","electricity"], ["circuit-symbols","회로 기호 모음","전지 저항 전구 스위치 전류계 전압계","electricity"],
+    ["magnetic-field","막대자석의 자기장","자기장 자석 N극 S극","electricity"], ["electromagnet","전자석","코일 전류 철심 자기장","electricity"],
+    ["generator","발전기 원리","전자기 유도 코일 자석","electricity"],
     ["ray","빛의 반사","과학 광선 거울 입사 반사","optics"], ["convex-lens","볼록렌즈 광선도","광학 초점 실상 렌즈","optics"],
-    ["concave-lens","오목렌즈 광선도","광학 초점 허상 렌즈","optics"],
+    ["concave-lens","오목렌즈 광선도","광학 초점 허상 렌즈","optics"], ["refraction","빛의 굴절","광학 매질 입사각 굴절각","optics"],
+    ["prism-dispersion","프리즘 분산","광학 스펙트럼 색 분리","optics"], ["total-internal-reflection","전반사","광학 임계각 굴절 전반사","optics"],
     ["beaker","비커","화학 실험 용액","chemistry"], ["test-tube","시험관","화학 실험 가열 용액","chemistry"],
     ["flask","삼각 플라스크","화학 실험 용액 혼합","chemistry"], ["graduated-cylinder","메스실린더","화학 부피 측정 눈금","chemistry"],
     ["burette","뷰렛","화학 적정 콕 눈금","chemistry"], ["gas-collection","기체 포집 장치","화학 수상치환 집기병","chemistry"],
     ["reaction","화학 반응식","화학 반응 화살표 생성물","chemistry"], ["atom","원자 모형","과학 원자 전자","chemistry"],
     ["bohr-atom","전자껍질 모형","보어 원자 전자 배치","chemistry"], ["molecule","분자 결합 모형","화학 공유결합 분자","chemistry"],
     ["ph-scale","pH 눈금","화학 산성 중성 염기성","chemistry"], ["energy-profile","반응 에너지 그래프","화학 활성화에너지 발열 흡열","chemistry"],
+    ["particle-states","물질의 세 상태","화학 고체 액체 기체 입자","chemistry"], ["electrolysis","전기분해","화학 전극 이온 전해질","chemistry"],
+    ["titration","중화 적정 장치","화학 뷰렛 플라스크 적정","chemistry"],
     ["plant-cell","식물세포","생명 세포벽 엽록체 액포","biology"], ["animal-cell","동물세포","생명 핵 세포막 미토콘드리아","biology"],
     ["dna","DNA 이중나선","생명 유전 염기","biology"], ["mitosis","세포분열","생명 체세포 분열 염색체","biology"],
-    ["food-chain","먹이사슬","생태계 생산자 소비자","biology"],
+    ["food-chain","먹이사슬","생태계 생산자 소비자","biology"], ["meiosis","감수분열","생명 생식세포 염색체","biology"],
+    ["punnett-square","유전 조합표","생명 유전 우열 퍼넷 사각형","biology"], ["photosynthesis","광합성 과정","생명 빛 이산화탄소 산소 포도당","biology"],
+    ["ecology-pyramid","생태 피라미드","생태계 에너지 생산자 소비자","biology"],
     ["solar-system","태양계","지구과학 행성 공전","earth"], ["moon-phases","달의 위상","지구과학 초승 상현 보름 하현","earth"],
     ["earth-layers","지구 내부 구조","지각 맨틀 외핵 내핵","earth"], ["water-cycle","물의 순환","증발 응결 강수 지하수","earth"],
-    ["weather-front","기상 전선","온난전선 한랭전선","earth"], ["tectonic-plates","판 구조와 맨틀 대류","지구과학 판 경계 화산","earth"]
+    ["weather-front","기상 전선","온난전선 한랭전선","earth"], ["tectonic-plates","판 구조와 맨틀 대류","지구과학 판 경계 화산","earth"],
+    ["seasons","계절 변화","지구과학 자전축 공전 계절","earth"], ["eclipse","일식과 월식","지구과학 태양 지구 달 그림자","earth"],
+    ["rock-cycle","암석의 순환","지구과학 화성암 퇴적암 변성암","earth"],
+    ["transverse-wave","횡파","파동 진폭 파장 마루 골","waves"], ["longitudinal-wave","종파","파동 압축 소밀 음파","waves"],
+    ["standing-wave","정상파","파동 마디 배 정상파","waves"], ["sound-reflection","소리의 반사","파동 소리 메아리 반사","waves"]
   ].forEach(([id, label, keywords, group]) => addStencil("science", "stencil-" + id, label, keywords, group));
   [
     ["degree","각도 단위","°"], ["celsius","섭씨","℃"], ["millimeter","밀리미터","㎜"],
     ["centimeter","센티미터","㎝"], ["square-meter","제곱미터","㎡"], ["cubic-meter","세제곱미터","㎥"],
-    ["kilogram","킬로그램","㎏"], ["ohm","옴","Ω"], ["hertz","헤르츠","㎐"]
+    ["kilogram","킬로그램","㎏"], ["ohm","옴","Ω"], ["hertz","헤르츠","㎐"],
+    ["meter","미터","m"], ["second","초","s"], ["newton","뉴턴","N"], ["joule","줄","J"],
+    ["watt","와트","W"], ["pascal","파스칼","Pa"], ["volt","볼트","V"]
   ].forEach(([id, label, value]) => addText("science", "unit-" + id, label, value, "과학 단위"));
   return rows;
 }
 
 function whiteboardVectorGroupSvg(group, color="#111111"){
   if (!group || !Array.isArray(group.items)) return "";
-  const c = /^#[0-9a-f]{6}$/i.test(String(color || "")) ? color : "#111111";
+  const rawColor = String(color || "");
+  const c = rawColor === "currentColor" || /^#[0-9a-f]{6}$/i.test(rawColor) ? rawColor : "#111111";
   const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g,(ch)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const attrs = (item, fill=false) => {
     const stroke = esc(item.color || c), width = Math.max(.5, Number(item.width) || 3);
@@ -204,7 +252,8 @@ function whiteboardVectorGroupSvg(group, color="#111111"){
 }
 
 function whiteboardStencilSvg(id, color="#111111"){
-  const c = /^#[0-9a-f]{6}$/i.test(String(color || "")) ? color : "#111111";
+  const rawColor = String(color || "");
+  const c = rawColor === "currentColor" || /^#[0-9a-f]{6}$/i.test(rawColor) ? rawColor : "#111111";
   const common = `fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"`;
   const text = `fill="${c}" stroke="none" font-family="system-ui,Malgun Gothic,sans-serif" font-size="18"`;
   const shapes = {
@@ -230,7 +279,8 @@ function whiteboardStencilSvg(id, color="#111111"){
 // 2차 도구상자는 같은 스텐실을 실제 보드 벡터 묶음으로 삽입한다. 그룹을 풀면
 // 선·도형·글자가 기존 선택 도구로 각각 편집 가능하고, 그룹 상태에서는 한 번에 이동·확대한다.
 function whiteboardStencilGroup(id, color="#111111"){
-  const c = /^#[0-9a-f]{6}$/i.test(String(color || "")) ? color : "#111111";
+  const rawColor = String(color || "");
+  const c = rawColor === "currentColor" || /^#[0-9a-f]{6}$/i.test(rawColor) ? rawColor : "#111111";
   const line = (x1,y1,x2,y2,extra={}) => Object.assign({ type:"line", x1,y1,x2,y2, color:c, width:3 }, extra);
   const arrow = (x1,y1,x2,y2,extra={}) => Object.assign({ type:"arrow", x1,y1,x2,y2, color:c, width:3 }, extra);
   const rect = (x1,y1,x2,y2,extra={}) => Object.assign({ type:"rect", x1,y1,x2,y2, color:c, width:3 }, extra);
@@ -321,7 +371,54 @@ function whiteboardStencilGroup(id, color="#111111"){
     "stencil-earth-layers": () => [ellipse(30,5,210,185),ellipse(55,30,185,160),ellipse(82,57,158,133),ellipse(105,80,135,110,{fill:true}),line(120,95,211,30),label(154,18,"지각",13),label(163,47,"맨틀",13),label(145,75,"외핵",13),label(91,92,"내핵",13)],
     "stencil-water-cycle": () => [ellipse(24,126,216,175),arc(120,76,25,Math.PI,Math.PI*2,10),arc(88,82,20,Math.PI,Math.PI*2,8),arc(150,83,18,Math.PI,Math.PI*2,8),line(68,83,168,83),ellipse(27,20,61,54,{fill:true}),...[0,1,2,3,4,5,6,7].map((i)=>line(44+Math.cos(i*Math.PI/4)*24,37+Math.sin(i*Math.PI/4)*24,44+Math.cos(i*Math.PI/4)*34,37+Math.sin(i*Math.PI/4)*34)),arrow(65,147,82,100),arrow(171,91,183,139),label(51,105,"증발",14),label(158,105,"강수",14),label(94,53,"응결",14)],
     "stencil-weather-front": () => [line(20,70,220,70,{width:4}),...[45,85,125,165,205].map((x)=>poly([[x-8,70],[x,54],[x+8,70]],{closed:true,fill:true})),label(70,26,"한랭전선",16),line(20,130,220,130,{width:4}),...[45,85,125,165,205].map((x)=>arc(x,130,9,Math.PI,Math.PI*2,8,{fill:false})),label(70,146,"온난전선",16)],
-    "stencil-tectonic-plates": () => [poly([[15,86],[70,80],[105,94],[135,94],[170,80],[225,86]]),arrow(105,70,48,70),arrow(135,70,192,70),poly([[105,94],[120,118],[135,94]]),arc(82,135,34,0,Math.PI,12),arc(158,135,34,Math.PI,Math.PI*2,12),arrow(52,139,83,118),arrow(188,139,157,118),label(90,36,"판 경계",15),label(76,157,"맨틀 대류",15)]
+    "stencil-tectonic-plates": () => [poly([[15,86],[70,80],[105,94],[135,94],[170,80],[225,86]]),arrow(105,70,48,70),arrow(135,70,192,70),poly([[105,94],[120,118],[135,94]]),arc(82,135,34,0,Math.PI,12),arc(158,135,34,Math.PI,Math.PI*2,12),arrow(52,139,83,118),arrow(188,139,157,118),label(90,36,"판 경계",15),label(76,157,"맨틀 대류",15)],
+
+    // 수학 확장: 함수 그래프·평면/입체도형·자료 시각화
+    "stencil-linear-graph": () => [arrow(18,155,224,155),arrow(45,176,45,18),arrow(30,150,205,45,{width:4}),label(207,160,"x"),label(52,18,"y"),label(118,82,"y=ax+b",15)],
+    "stencil-absolute-graph": () => [arrow(18,155,224,155),arrow(45,176,45,18),poly([[65,48],[125,145],[205,36]],{width:4}),label(207,160,"x"),label(52,18,"y"),label(126,108,"|x|",16)],
+    "stencil-exponential-graph": () => [arrow(18,155,224,155),arrow(45,176,45,18),curve(50,210,36,(x)=>150-8*Math.exp((x-95)/32),{width:4}),line(45,150,215,150,{dash:[5,4],alpha:.35}),label(207,160,"x"),label(52,18,"y"),label(148,45,"y=aˣ",16)],
+    "stencil-logarithmic-graph": () => [arrow(18,155,224,155),arrow(45,176,45,18),curve(49,215,38,(x)=>142-32*Math.log((x-43)/24),{width:4}),line(45,20,45,170,{dash:[5,4],alpha:.35}),label(207,160,"x"),label(52,18,"y"),label(137,62,"y=log x",15)],
+    "stencil-regular-pentagon": () => [regular(120,98,78,5),...[0,1,2,3,4].map((i)=>line(120,98,120+Math.cos(-Math.PI/2+i*Math.PI*2/5)*78,98+Math.sin(-Math.PI/2+i*Math.PI*2/5)*78,{dash:[4,4],alpha:.35})),ellipse(116,94,124,102,{fill:true}),label(126,101,"O")],
+    "stencil-regular-octagon": () => [regular(120,95,78,8,Math.PI/8),line(48,95,192,95,{dash:[5,4],alpha:.4}),line(120,23,120,167,{dash:[5,4],alpha:.4}),ellipse(116,91,124,99,{fill:true})],
+    "stencil-similar-triangles": () => [poly([[18,150],[72,55],[126,150],[18,150]]),poly([[142,150],[174,92],[218,150],[142,150]]),label(48,32,"△ABC",14),label(164,68,"△DEF",14),label(83,157,"∼",22),line(36,117,48,123),line(158,126,170,132)],
+    "stencil-parallel-transversal": () => [line(20,55,220,55,{width:4}),line(20,137,220,137,{width:4}),line(72,175,165,18),arc(143,55,24,0,1.02,8),arc(94,137,24,Math.PI,4.15,8),label(153,66,"θ",18),label(69,108,"θ",18),poly([[108,48],[120,48]]),poly([[108,144],[120,144]])],
+    "stencil-triangular-prism": () => [poly([[30,145],[82,45],[132,145],[30,145]]),poly([[108,115],[160,15],[212,115],[108,115]],{dash:[5,4]}),line(30,145,108,115),line(82,45,160,15),line(132,145,212,115),label(147,148,"삼각기둥",15)],
+    "stencil-hemisphere": () => [arc(120,105,82,Math.PI,Math.PI*2,24),ellipse(38,80,202,130),arc(120,105,82,0,Math.PI,18,{dash:[5,4],alpha:.45}),line(120,105,197,105),label(157,83,"r"),label(91,148,"반구",16)],
+    "stencil-cube-net": () => [rect(80,15,130,65),rect(30,65,80,115),rect(80,65,130,115),rect(130,65,180,115),rect(180,65,230,115),rect(80,115,130,165),label(96,78,"전개도",14)],
+    "stencil-cylinder-net": () => [rect(45,40,195,145),ellipse(3,73,45,115),ellipse(195,73,237,115),line(45,58,195,58,{dash:[5,4],alpha:.35}),label(102,82,"2πr",16),label(199,118,"r",14)],
+    "stencil-bar-chart": () => [arrow(28,165,222,165),arrow(28,165,28,18),rect(50,105,78,165,{fill:true,alpha:.22}),rect(91,65,119,165,{fill:true,alpha:.22}),rect(132,35,160,165,{fill:true,alpha:.22}),rect(173,85,201,165,{fill:true,alpha:.22}),label(58,168,"A",13),label(99,168,"B",13),label(140,168,"C",13),label(181,168,"D",13)],
+    "stencil-line-chart": () => [arrow(28,165,222,165),arrow(28,165,28,18),poly([[48,130],[85,92],[123,112],[161,52],[203,75]],{width:4}),...[ [48,130],[85,92],[123,112],[161,52],[203,75] ].map(([x,y])=>ellipse(x-5,y-5,x+5,y+5,{fill:true})),label(192,168,"시간",13)],
+    "stencil-histogram": () => [arrow(25,165,222,165),arrow(25,165,25,18),rect(45,115,75,165,{fill:true,alpha:.2}),rect(75,75,105,165,{fill:true,alpha:.2}),rect(105,40,135,165,{fill:true,alpha:.2}),rect(135,62,165,165,{fill:true,alpha:.2}),rect(165,122,195,165,{fill:true,alpha:.2}),label(78,18,"도수분포",14)],
+    "stencil-pie-chart": () => [ellipse(38,12,202,176),line(120,94,120,12),line(120,94,197,68),line(120,94,65,158),label(137,40,"25%",14),label(137,112,"40%",14),label(67,75,"35%",14)],
+    "stencil-scatter-plot": () => [arrow(25,165,222,165),arrow(25,165,25,18),...[ [48,142],[67,126],[78,137],[95,103],[112,115],[128,86],[145,92],[158,64],[179,72],[198,39] ].map(([x,y])=>ellipse(x-4,y-4,x+4,y+4,{fill:true})),line(42,148,207,42,{dash:[6,4],alpha:.45}),label(171,18,"양의 상관",14)],
+    "stencil-box-plot": () => [line(25,105,215,105),line(42,88,42,122),line(198,88,198,122),line(42,105,76,105),rect(76,66,170,144),line(118,66,118,144,{width:4}),line(170,105,198,105),...[42,76,118,170,198].map((x)=>line(x,154,x,164,{width:2})),label(95,35,"상자그림",15)],
+    "stencil-venn-diagram": () => [ellipse(30,35,145,158),ellipse(95,35,210,158),rect(12,15,228,176,{alpha:.35}),label(66,65,"A",20),label(158,65,"B",20),label(111,101,"A∩B",15),label(18,18,"U",14)],
+
+    // 과학 확장: 역학·파동·전기자기·광학·화학·생명·지구과학
+    "stencil-collision": () => [line(18,145,222,145),rect(28,88,82,144),rect(158,88,212,144),arrow(18,75,78,75),arrow(222,75,162,75),label(43,105,"m₁",16),label(173,105,"m₂",16),label(37,48,"v₁",15),label(183,48,"v₂",15)],
+    "stencil-circular-motion": () => [ellipse(38,15,202,179),ellipse(112,89,128,105,{fill:true}),ellipse(188,89,204,105,{fill:true}),line(120,97,196,97),arrow(196,97,196,38),arrow(196,97,150,97),label(157,74,"r"),label(203,43,"v"),label(151,105,"Fᶜ",15)],
+    "stencil-buoyancy": () => [rect(24,35,216,174),line(24,85,216,85,{width:4}),rect(87,65,153,130,{fill:true,alpha:.15}),arrow(120,66,120,20),arrow(120,130,120,168),label(128,25,"부력",15),label(128,145,"무게",15),poly([[25,93],[45,87],[65,93],[85,87],[105,93],[125,87],[145,93],[165,87],[185,93],[215,87]],{alpha:.4})],
+    "stencil-pressure-diagram": () => [line(15,160,225,160),rect(38,55,88,160,{fill:true,alpha:.14}),rect(135,105,215,160,{fill:true,alpha:.14}),arrow(63,20,63,52),arrow(175,70,175,102),label(42,166,"좁은 면",13),label(151,166,"넓은 면",13),label(48,21,"F",16),label(183,71,"F",16)],
+    "stencil-transverse-wave": () => [arrow(18,100,224,100),curve(20,220,48,(x)=>100-55*Math.sin((x-20)*Math.PI/60),{width:4}),arrow(82,100,82,45),arrow(82,100,82,155),line(82,45,202,45,{dash:[5,4],alpha:.4}),label(91,55,"진폭",14),label(126,21,"파장 λ",15)],
+    "stencil-longitudinal-wave": () => [arrow(18,95,222,95),...[35,41,47,70,88,106,129,135,141,164,182,200].map((x)=>line(x,55,x,135,{width:2})),arrow(45,35,105,35),arrow(195,155,135,155),label(31,14,"압축",14),label(83,137,"소밀",14),label(159,14,"압축",14)],
+    "stencil-standing-wave": () => [line(20,95,220,95,{alpha:.35}),curve(20,220,48,(x)=>95-58*Math.sin((x-20)*Math.PI/50),{width:4}),curve(20,220,48,(x)=>95+58*Math.sin((x-20)*Math.PI/50),{dash:[5,4],alpha:.45}),...[20,70,120,170,220].map((x)=>ellipse(x-4,91,x+4,99,{fill:true})),label(96,18,"배",14),label(23,103,"마디",13)],
+    "stencil-sound-reflection": () => [line(190,20,190,170,{width:6}),arrow(35,140,190,75),arrow(190,75,70,28),arc(45,120,20,-1.1,.7,10),arc(45,120,34,-1.1,.7,10),label(23,148,"소리",15),label(197,81,"벽",15),label(101,38,"반사음",14)],
+    "stencil-magnetic-field": () => [rect(72,72,168,120,{fill:true,alpha:.15}),line(120,72,120,120),label(88,82,"N",20),label(137,82,"S",20),arc(120,96,80,Math.PI,Math.PI*2,18),arc(120,96,80,0,Math.PI,18),arc(120,96,105,Math.PI,Math.PI*2,18,{alpha:.5}),arc(120,96,105,0,Math.PI,18,{alpha:.5})],
+    "stencil-electromagnet": () => [rect(55,62,190,126,{fill:true,alpha:.12}),poly([[45,78],[58,52],[72,136],[86,52],[100,136],[114,52],[128,136],[142,52],[156,136],[170,52],[184,136],[198,78]]),line(45,78,25,78),line(198,78,218,78),line(25,78,25,160),line(218,78,218,160),line(25,160,100,160),line(140,160,218,160),line(100,147,100,173),line(140,153,140,167),label(83,22,"전자석",16)],
+    "stencil-generator": () => [rect(25,50,70,140,{fill:true,alpha:.15}),rect(170,50,215,140,{fill:true,alpha:.15}),label(39,82,"N",20),label(184,82,"S",20),rect(88,48,152,142),line(120,48,120,20),line(120,142,120,172),arc(120,95,48,-1.1,.8,12),arrow(155,60,171,80),label(85,174,"발전기 코일",14)],
+    "stencil-refraction": () => [line(18,98,222,98,{width:4}),line(120,18,120,175,{dash:[6,5],alpha:.5}),arrow(45,28,120,98),arrow(120,98,165,168),arc(120,98,32,-2.36,-1.57,8),arc(120,98,28,.78,1.57,8),label(62,108,"매질 1",14),label(171,108,"매질 2",14),label(84,62,"i"),label(138,126,"r")],
+    "stencil-prism-dispersion": () => [regular(112,95,65,3,0),arrow(18,88,56,88),line(166,80,220,40,{width:2}),line(166,87,224,70,{width:2}),line(166,94,224,96,{width:2}),line(166,101,224,122,{width:2}),line(166,108,218,153,{width:2}),label(13,62,"백색광",14),label(181,161,"스펙트럼",13)],
+    "stencil-total-internal-reflection": () => [rect(20,35,220,150,{alpha:.35}),line(20,92,220,92,{dash:[6,5],alpha:.45}),arrow(45,135,120,92),arrow(120,92,195,45),line(120,20,120,170,{dash:[5,4],alpha:.4}),arc(120,92,32,.55,1.57,8),label(126,117,"임계각",14),label(158,28,"전반사",15)],
+    "stencil-particle-states": () => [rect(8,45,76,155),rect(86,45,154,155),rect(164,45,232,155),...[ [22,130],[42,130],[62,130],[22,110],[42,110],[62,110] ].map(([x,y])=>ellipse(x-4,y-4,x+4,y+4,{fill:true})),...[ [98,128],[118,120],[140,132],[105,96],[135,88],[122,145] ].map(([x,y])=>ellipse(x-4,y-4,x+4,y+4,{fill:true})),...[ [177,62],[216,76],[184,112],[221,138],[198,91] ].map(([x,y])=>ellipse(x-4,y-4,x+4,y+4,{fill:true})),label(22,160,"고체",13),label(104,160,"액체",13),label(184,160,"기체",13)],
+    "stencil-electrolysis": () => [rect(35,55,205,170),line(35,95,205,95,{width:4}),line(80,35,80,145,{width:6}),line(160,35,160,145,{width:6}),line(80,35,80,18),line(160,35,160,18),line(80,18,105,18),line(135,18,160,18),line(105,8,105,28),line(135,13,135,23),...[55,75,115,135].map((y)=>ellipse(70,y,78,y+8)),...[65,85,125].map((y)=>ellipse(164,y,172,y+8)),label(58,150,"전해질",14),label(71,18,"+"),label(164,18,"−")],
+    "stencil-titration": () => [line(30,20,210,20),line(112,20,112,118),...[42,62,82,102].map((y)=>line(112,y,128,y,{width:1.5})),line(98,118,126,118),line(112,118,112,140),ellipse(108,136,116,144,{fill:true}),poly([[88,145],[72,178],[72,184],[152,184],[152,178],[136,145],[88,145]]),line(85,164,139,164),label(132,109,"콕",13)],
+    "stencil-meiosis": () => [ellipse(8,55,66,113),line(24,72,50,96),line(50,72,24,96),arrow(70,84,94,84),ellipse(98,35,150,87),ellipse(98,105,150,157),line(112,50,136,72),line(112,120,136,142),arrow(154,84,176,84),ellipse(180,18,220,58),ellipse(180,62,220,102),ellipse(180,106,220,146),ellipse(180,150,220,188),label(13,121,"2n",13),label(109,165,"1차",13),label(190,80,"n",13)],
+    "stencil-punnett-square": () => [rect(55,35,205,175),line(105,35,105,175),line(155,35,155,175),line(55,80,205,80),line(55,127,205,127),label(122,48,"A",18),label(172,48,"a",18),label(72,92,"A",18),label(72,139,"a",18),label(118,93,"AA",15),label(168,93,"Aa",15),label(118,140,"Aa",15),label(168,140,"aa",15)],
+    "stencil-photosynthesis": () => [ellipse(80,52,165,132,{rotation:-.35}),line(122,92,180,160),ellipse(22,20,58,56,{fill:true}),...[0,1,2,3,4,5,6,7].map((i)=>line(40+Math.cos(i*Math.PI/4)*23,38+Math.sin(i*Math.PI/4)*23,40+Math.cos(i*Math.PI/4)*32,38+Math.sin(i*Math.PI/4)*32)),arrow(60,55,96,73),arrow(22,120,88,105),arrow(152,74,218,52),label(7,130,"CO₂",15),label(181,28,"O₂",15),label(73,145,"물+빛 → 포도당",14)],
+    "stencil-ecology-pyramid": () => [poly([[120,20],[25,170],[215,170],[120,20]],{closed:true}),line(50,130,190,130),line(75,90,165,90),label(90,143,"생산자",15),label(85,104,"1차 소비자",14),label(92,54,"2차 소비자",13),arrow(220,160,220,40),label(169,20,"에너지",13)],
+    "stencil-seasons": () => [ellipse(102,77,138,113,{fill:true}),ellipse(20,75,44,99),ellipse(196,75,220,99),ellipse(108,13,132,37),ellipse(108,153,132,177),ellipse(30,25,210,165,{alpha:.3}),...[ [32,87],[208,87],[120,25],[120,165] ].map(([x,y])=>line(x-4,y-12,x+4,y+12,{width:2})),label(5,105,"봄",13),label(205,105,"가을",13),label(128,8,"여름",13),label(128,166,"겨울",13)],
+    "stencil-eclipse": () => [ellipse(12,65,68,121,{fill:true}),ellipse(102,78,136,112),ellipse(180,55,228,135),line(68,78,180,55,{alpha:.45}),line(68,108,180,135,{alpha:.45}),poly([[68,78],[180,55],[180,135],[68,108]],{closed:true,alpha:.12,fill:true}),label(20,130,"태양",13),label(105,120,"달",13),label(188,142,"지구",13)],
+    "stencil-rock-cycle": () => [label(92,18,"마그마",17),label(18,120,"화성암",17),label(94,160,"변성암",17),label(176,120,"퇴적암",17),arrow(105,42,48,108),arrow(59,132,105,158),arrow(139,158,183,132),arrow(190,108,139,42),arrow(58,116,177,116,{alpha:.45}),label(85,66,"냉각",13),label(77,132,"열·압력",12),label(145,87,"퇴적",12)]
   };
   const factory = groups[id];
   if (!factory) return null;
@@ -335,6 +432,21 @@ function whiteboardFormulaSvg(mathMl, color="#111111", width=320, height=80){
 }
 
 function whiteboardSvgDataUrl(svg){ return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(String(svg || "")); }
+function whiteboardClampView(raw, width, height){
+  const scale=Math.max(.25,Math.min(4,Number(raw && raw.scale)||1)), W=Math.max(0,Number(width)||0), H=Math.max(0,Number(height)||0);
+  let x=Number(raw && raw.x)||0, y=Number(raw && raw.y)||0;
+  // 배율이 100% 이하일 때도 화면을 끌어 옮길 수 있게 하되,
+  // 원래 보드를 완전히 잃어버리지 않도록 가장자리 48px은 남긴다.
+  if (W){ const sw=W*scale, edge=Math.min(48,W,sw); x=Math.max(edge-sw,Math.min(W-edge,x)); }
+  if (H){ const sh=H*scale, edge=Math.min(48,H,sh); y=Math.max(edge-sh,Math.min(H-edge,y)); }
+  return { scale,x,y };
+}
+function whiteboardZoomAt(raw, nextScale, anchor, width, height){
+  const current=whiteboardClampView(raw,width,height), point=anchor||{x:(Number(width)||0)/2,y:(Number(height)||0)/2};
+  const scale=Math.max(.25,Math.min(4,Number(nextScale)||1));
+  const bx=(Number(point.x)-current.x)/current.scale, by=(Number(point.y)-current.y)/current.scale;
+  return whiteboardClampView({scale,x:Number(point.x)-bx*scale,y:Number(point.y)-by*scale},width,height);
+}
 function boardRecoveryKey(name){ return BOARD_RECOVERY_PREFIX + String(name || "화이트보드"); }
 // 저장된 스냅샷(자동복원·메모 블록)을 편집 가능한 보드 상태로 되살린다. 이미지는 src(data URL)만
 // 들고 있다가 renderWhiteboard 의 restoreBoardImages 가 <img> 로 되살린다.
@@ -399,6 +511,16 @@ function renderWhiteboard(doc, host){
   // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
   const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: "#ffffff", selected: null });
+  // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
+  const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
+  Object.assign(view, whiteboardClampView(view, 0, 0));
+  let zoomLabelBtn = null, positionTextEditor = null, spacePanning = false;
+  const clampView = () => {
+    Object.assign(view, whiteboardClampView(view, W, H));
+  };
+  const screenPoint = (e) => { const r = canvas.getBoundingClientRect(); return { x:e.clientX-r.left, y:e.clientY-r.top }; };
+  const boardPointFromScreen = (p) => ({ x:(p.x-view.x)/view.scale, y:(p.y-view.y)/view.scale });
+  const visibleBoardCenter = () => boardPointFromScreen({ x:W/2, y:H/2 });
   let boardRecoveryTimer = 0;
   // 저장·전송 공용 직렬화: <img> 객체는 못 담으므로 data URL(src)만 남긴다.
   const boardSnapshot = () => ({
@@ -463,28 +585,36 @@ function renderWhiteboard(doc, host){
   const handlePos = (it, h) => ({ x: it.x + it.w * h.hx, y: it.y + it.h * h.hy });
   const handleAt = (it, p) => {
     if (!it || (it.type !== "image" && it.type !== "group")) return null;
-    for (const h of HANDLES){ const hp = handlePos(it, h); if (Math.abs(p.x - hp.x) <= HANDLE && Math.abs(p.y - hp.y) <= HANDLE) return h; }
+    const tolerance = HANDLE / view.scale;
+    for (const h of HANDLES){ const hp = handlePos(it, h); if (Math.abs(p.x - hp.x) <= tolerance && Math.abs(p.y - hp.y) <= tolerance) return h; }
     return null;
   };
-  let editingTextItem = null, openFormulaEditor = null, groupActionBtn = null;
+  let editingTextItem = null, openFormulaEditor = null, groupActionBtn = null, flipXBtn = null, flipYBtn = null;
   const redraw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.fillStyle = wb.bg; ctx.fillRect(0, 0, W, H);
+    ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
     for (const it of wb.items) if (it !== editingTextItem) drawItem(it);
     const s = wb.selected;                            // 선택 표시(점선 테두리, 이미지는 8핸들). 내보낼 땐 잠시 해제하므로 안 박힘.
     const sb = s && boundsOf(s);
     if (s && sb){
-      ctx.save(); ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = "#2563eb";
+      ctx.save(); ctx.globalAlpha = 1; ctx.lineWidth = 1.5 / view.scale; ctx.strokeStyle = "#2563eb";
       const resizable = s.type === "image" || s.type === "group";
-      const pad = resizable ? 0 : 4;
-      ctx.setLineDash([6, 4]); ctx.strokeRect(sb.x - pad, sb.y - pad, Math.max(1, sb.w) + pad * 2, Math.max(1, sb.h) + pad * 2); ctx.setLineDash([]);
+      const pad = resizable ? 0 : 4 / view.scale;
+      ctx.setLineDash([6 / view.scale, 4 / view.scale]); ctx.strokeRect(sb.x - pad, sb.y - pad, Math.max(1, sb.w) + pad * 2, Math.max(1, sb.h) + pad * 2); ctx.setLineDash([]);
       if (resizable){
         ctx.fillStyle = "#fff";
-        for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); ctx.strokeRect(hp.x - HANDLE / 2, hp.y - HANDLE / 2, HANDLE, HANDLE); }
+        const handleSize = HANDLE / view.scale;
+        for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); ctx.strokeRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); }
       }
       ctx.restore();
     }
     if (groupActionBtn) groupActionBtn.disabled = !(s && s.type === "group");
+    const canFlip = !!(s && s.type === "group" && s.role === "education-stencil");
+    if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
+    if (flipYBtn){ flipYBtn.disabled = !canFlip; flipYBtn.setAttribute("aria-pressed", canFlip && s.flipY ? "true" : "false"); }
+    if (zoomLabelBtn) zoomLabelBtn.textContent = Math.round(view.scale * 100) + "%";
+    if (typeof positionTextEditor === "function") positionTextEditor();
   };
   const restoreBoardImages = () => {
     for (const item of wb.items){
@@ -508,10 +638,17 @@ function renderWhiteboard(doc, host){
   const doUndo = () => { if (history.undo()) recordCommit(); };
   const doRedo = () => { if (history.redo()) recordCommit(); };
   const clearAll = () => { if (!wb.items.length) return; wb.items = []; wb.selected = null; redraw(); history.commit(); recordCommit(); };
+  const flipSelected = (axis) => {
+    const selected = wb.selected;
+    if (!selected || selected.type !== "group" || selected.role !== "education-stencil") return;
+    const idx = wb.items.indexOf(selected); if (idx < 0) return;
+    const flipped = Object.assign({}, selected, { [axis]:!selected[axis] });
+    wb.items[idx] = flipped; wb.selected = flipped; redraw(); history.commit(); recordCommit();
+  };
   const ungroupSelected = () => {
     const selected = wb.selected;
     if (!selected || selected.type !== "group") return;
-    const idx = wb.items.indexOf(selected), children = ungroupBoardItem(selected);
+    const idx = wb.items.indexOf(selected), children = ungroupBoardItem(selected, measureBoardText);
     if (idx < 0 || !children.length) return;
     wb.items.splice(idx, 1, ...children); wb.selected = null; redraw(); history.commit(); recordCommit();
     if (typeof toast === "function") toast("교육 도형을 구성 요소로 분리했어요.", 1800);
@@ -524,16 +661,45 @@ function renderWhiteboard(doc, host){
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    clampView();
     redraw();
   };
 
   // ----- 포인터 그리기 -----
-  const pt = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const pt = (e) => boardPointFromScreen(screenPoint(e));
   // 선택 도구: 이미지·도형·텍스트 중 위에 그려진 항목부터 히트테스트
   const itemAt = (p) => {
-    for (let i = wb.items.length - 1; i >= 0; i--){ const it = wb.items[i]; if (hitTestBoardItem(it, p, measureBoardText, 7)) return it; }
+    for (let i = wb.items.length - 1; i >= 0; i--){ const it = wb.items[i]; if (hitTestBoardItem(it, p, measureBoardText, 7 / view.scale)) return it; }
     return null;
   };
+  const setViewScale = (nextScale, clientX, clientY) => {
+    const anchor = Number.isFinite(clientX) && Number.isFinite(clientY) ? screenPoint({ clientX, clientY }) : { x:W/2, y:H/2 };
+    Object.assign(view, whiteboardZoomAt(view, nextScale, anchor, W, H)); redraw();
+  };
+  const resetView = () => { view.scale = 1; view.x = 0; view.y = 0; redraw(); };
+  const beginViewPan = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+    canvas.classList.remove("pan-ready"); canvas.classList.add("panning");
+    const startX=e.clientX, startY=e.clientY, originX=view.x, originY=view.y;
+    const pointerId=e.pointerId;
+    const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      view.x=originX+ev.clientX-startX; view.y=originY+ev.clientY-startY; clampView(); redraw();
+    };
+    const up = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      canvas.removeEventListener("pointermove",move); canvas.removeEventListener("pointerup",up); canvas.removeEventListener("pointercancel",up); canvas.removeEventListener("lostpointercapture",up);
+      canvas.classList.remove("panning");
+      if (spacePanning) canvas.classList.add("pan-ready");
+    };
+    canvas.addEventListener("pointermove",move); canvas.addEventListener("pointerup",up); canvas.addEventListener("pointercancel",up); canvas.addEventListener("lostpointercapture",up);
+  };
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    setViewScale(view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
+  }, { passive:false });
+  canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
   const beginSelDrag = (e, mode, handle) => {
     canvas.setPointerCapture(e.pointerId);
     const it = wb.selected; const start = pt(e);
@@ -564,15 +730,21 @@ function renderWhiteboard(doc, host){
   const startSelect = (e) => {
     const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
-    if (h){ beginSelDrag(e, "resize", h); return; }                                       // 핸들 → 그 방향으로 크기조절
+    if (h){ beginSelDrag(e, "resize", h); return true; }                                  // 핸들 → 그 방향으로 크기조절
     const item = itemAt(p);
     wb.selected = item || null; redraw();
-    if (item) beginSelDrag(e, "move");                                                    // 항목 본체 → 이동
+    if (item){ beginSelDrag(e, "move"); return true; }                                    // 항목 본체 → 이동
+    return false;
   };
   let cur = null, drawing = false, lastPt = null;
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.button === 1 || (e.button === 0 && spacePanning)){ beginViewPan(e); return; }
     if (e.button !== 0) return;
-    if (wb.tool === "select"){ startSelect(e); return; }
+    if (wb.tool === "select"){
+      // 선택 도구의 빈 공간은 손바닥 이동 영역으로 쓴다. 항목 위에서는 기존처럼 항목을 이동한다.
+      if (!startSelect(e)) beginViewPan(e);
+      return;
+    }
     if (wb.tool === "text"){ e.preventDefault(); startText(pt(e)); return; }
     canvas.setPointerCapture(e.pointerId); drawing = true;
     const p = pt(e);
@@ -607,9 +779,10 @@ function renderWhiteboard(doc, host){
   // 선택 도구 호버 커서: 선택 가능한 항목 위=이동, 이미지 핸들=크기조절
   canvas.addEventListener("pointermove", (e) => {
     if (wb.tool !== "select" || drawing) return;
+    if (spacePanning){ canvas.style.cursor = ""; return; }
     const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
-    canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "default");
+    canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "grab");
   });
   canvas.addEventListener("dblclick", (e) => {
     if (wb.tool !== "select") return;
@@ -627,7 +800,12 @@ function renderWhiteboard(doc, host){
     const ta = document.createElement("textarea"); ta.className = "wb-textinput"; ta.rows = 1;
     const fs = existing ? Math.max(14, Number(existing.fontSize) || 16) : Math.max(14, wb.width * 4);
     const color = existing ? existing.color : wb.color;
-    ta.style.left = p.x + "px"; ta.style.top = p.y + "px"; ta.style.color = color; ta.style.fontSize = fs + "px";
+    ta.style.color = color; ta.style.fontSize = fs + "px"; ta.style.transformOrigin = "0 0";
+    positionTextEditor = () => {
+      ta.style.left = (view.x + p.x * view.scale) + "px"; ta.style.top = (view.y + p.y * view.scale) + "px";
+      ta.style.transform = `scale(${view.scale})`;
+    };
+    positionTextEditor();
     ta.placeholder = "텍스트 입력";
     if (existing){
       ta.value = String(existing.text || "");
@@ -646,7 +824,7 @@ function renderWhiteboard(doc, host){
     const commit = () => {
       if (done) return; done = true;
       const txt = ta.value; ta.remove();
-      editingTextItem = null;
+      editingTextItem = null; positionTextEditor = null;
       if (existing){
         const idx = wb.items.indexOf(existing);
         if (idx < 0){ redraw(); return; }
@@ -666,7 +844,7 @@ function renderWhiteboard(doc, host){
     ta.addEventListener("blur", commit);
     ta.addEventListener("keydown", (e) => {
       if (e.key === "Escape"){
-        e.preventDefault(); done = true; ta.remove(); editingTextItem = null;
+        e.preventDefault(); done = true; ta.remove(); editingTextItem = null; positionTextEditor = null;
         if (existing) wb.selected = existing; redraw();
       }
       else if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ta.blur(); }
@@ -696,7 +874,8 @@ function renderWhiteboard(doc, host){
     const maxW = W * 0.85, maxH = H * 0.85;
     let w = img.naturalWidth || 300, h = img.naturalHeight || 200;
     const sc = Math.min(1, maxW / w, maxH / h); w = Math.round(w * sc); h = Math.round(h * sc);
-    const ccx = (cx == null) ? W / 2 : cx, ccy = (cy == null) ? H / 2 : cy;
+    const center = visibleBoardCenter();
+    const ccx = (cx == null) ? center.x : cx, ccy = (cy == null) ? center.y : cy;
     let x = Math.round(ccx - w / 2), y = Math.round(ccy - h / 2);
     x = Math.max(0, Math.min(x, Math.max(0, W - w))); y = Math.max(0, Math.min(y, Math.max(0, H - h)));
     const it = Object.assign({ type: "image", img, src:img.__boardSrc || img.src || "", x, y, w, h }, extra);
@@ -777,7 +956,8 @@ function renderWhiteboard(doc, host){
   const insertEducationEntry = (entryOrId, cx, cy) => {
     const entry = typeof entryOrId === "string" ? educationById.get(entryOrId) : entryOrId;
     if (!entry) return false;
-    const centerX = cx == null ? W / 2 : cx, centerY = cy == null ? H / 2 : cy;
+    const center = visibleBoardCenter();
+    const centerX = cx == null ? center.x : cx, centerY = cy == null ? center.y : cy;
     if (entry.kind === "formula"){ rememberFormula(entry.id); return insertFormulaSource(entry.source, centerX, centerY); }
     if (entry.kind === "text"){
       let fontSize = entry.category === "formula" ? 27 : 32;
@@ -839,21 +1019,24 @@ function renderWhiteboard(doc, host){
     if (imgFile){ e.preventDefault(); e.stopPropagation(); const p = pt(e); insertImageBlob(imgFile, p.x, p.y); }
   });
 
-  // 내보내기 전 선택 표시(점선·핸들)를 잠깐 지워 PNG/PDF 에 안 박히게 한다.
-  const withoutSelection = (fn) => { const sel = wb.selected; if (sel){ wb.selected = null; redraw(); } try { return fn(); } finally { if (sel){ wb.selected = sel; } } };
+  // 내보내기는 선택 표시와 화면 확대·이동을 제외하고 원래 보드 좌표로 만든다.
+  const withBoardExport = (fn) => {
+    const selected=wb.selected, saved={ scale:view.scale, x:view.x, y:view.y };
+    wb.selected=null; view.scale=1; view.x=0; view.y=0; redraw();
+    try { return fn(); }
+    finally { wb.selected=selected; view.scale=saved.scale; view.x=saved.x; view.y=saved.y; clampView(); redraw(); }
+  };
 
   // ----- 내보내기 -----
   // notify: 버튼을 누른 게 아니라 Ctrl+S 로 부른 경우 — 화면에 아무 변화가 없어 알려줘야 한다.
   const exportPng = (options={}) => {
-    const sel = wb.selected; if (sel){ wb.selected = null; redraw(); }
-    canvas.toBlob((b) => {
-      if (sel){ wb.selected = sel; redraw(); }
+    withBoardExport(() => canvas.toBlob((b) => {
       if (!b){ if (typeof toast === "function") toast("이미지를 저장하지 못했어요.", 2000, { type: "error" }); return; }
       const u = URL.createObjectURL(b); const a = document.createElement("a");
       a.href = u; a.download = (doc.name || "화이트보드") + ".png";
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
       if (options.notify && typeof toast === "function") toast("PNG 이미지로 저장했어요.", 2200);
-    }, "image/png");
+    }, "image/png"));
   };
   // Ctrl+S 진입점(app.js). 없으면 브라우저 기본 "웹페이지 저장(HTML)"이 떠 버린다.
   doc.saveBoardPng = () => exportPng({ notify:true });
@@ -866,9 +1049,7 @@ function renderWhiteboard(doc, host){
     }
     if (!wb.items.length){ if (typeof toast === "function") toast("보드가 비어 있어요.", 2000); return; }
     const snapshot = boardSnapshot();                    // 선택 해제 전에 떠도 모델은 같다
-    const sel = wb.selected; if (sel){ wb.selected = null; redraw(); }
-    canvas.toBlob(async (blob) => {
-      if (sel){ wb.selected = sel; redraw(); }
+    withBoardExport(() => canvas.toBlob(async (blob) => {
       if (!blob){ if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" }); return; }
       try {
         const result = await window.addBoardToScratchpad(blob, snapshot, {
@@ -881,13 +1062,12 @@ function renderWhiteboard(doc, host){
         console.error(error);
         if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" });
       }
-    }, "image/png");
+    }, "image/png"));
   };
   const exportPdf = async () => {
     if (typeof PDFLib === "undefined"){ if (typeof toast === "function") toast("PDF 라이브러리를 불러오지 못했어요.", 2200); return; }
     try {
-      const png = withoutSelection(() => canvas.toDataURL("image/png"));
-      if (wb.selected) redraw();
+      const png = withBoardExport(() => canvas.toDataURL("image/png"));
       const { PDFDocument } = PDFLib;
       const pdf = await PDFDocument.create();
       const img = await pdf.embedPng(png);
@@ -1003,8 +1183,8 @@ function renderWhiteboard(doc, host){
     ["geometry-formula", "기하"], ["science-formula", "과학"], ["custom", "내 수식"]
   ];
   const STENCIL_GROUPS = {
-    geometry:[["all","전체"],["plane","평면도형"],["solid","입체도형"],["construction","작도·원"],["graph","좌표·그래프"]],
-    science:[["all","전체"],["mechanics","역학"],["electricity","전기"],["optics","광학"],["chemistry","화학"],["biology","생명"],["earth","지구과학"]]
+    geometry:[["all","전체"],["plane","평면도형"],["solid","입체도형"],["construction","작도·원"],["graph","좌표·그래프"],["data","자료·통계"]],
+    science:[["all","전체"],["mechanics","역학"],["waves","파동·소리"],["electricity","전기·자기"],["optics","광학"],["chemistry","화학"],["biology","생명"],["earth","지구과학"]]
   };
   const stencilGroup = { geometry:"all", science:"all" };
   let eduCategory = "symbol", formulaGroup = "all", eduToolBtn, editingFormulaItem = null;
@@ -1090,7 +1270,8 @@ function renderWhiteboard(doc, host){
     const source = formulaInput.value.trim(); if (!source){ if (typeof toast === "function") toast("수식을 입력하세요.", 1800); formulaInput.focus(); return; }
     if (formulaStops.length){ selectFormulaStop(Math.max(0, formulaStopIndex)); if (typeof toast === "function") toast("표시된 입력 부분을 모두 채워 주세요. Tab으로 이동할 수 있어요.", 2200); return; }
     const target = editingFormulaItem;
-    if (insertFormulaSource(source, W/2, H/2, target)){ resetFormulaEditor(); toggleEducationPanel(false); }
+    const center = visibleBoardCenter();
+    if (insertFormulaSource(source, center.x, center.y, target)){ resetFormulaEditor(); toggleEducationPanel(false); }
   }
   openFormulaEditor = (item) => {
     editingFormulaItem = item; eduCategory = "formula"; eduSearch.value = ""; formulaInput.value = String(item.formulaSource || ""); formulaStops = []; formulaStopIndex = -1;
@@ -1123,7 +1304,7 @@ function renderWhiteboard(doc, host){
   function renderEducationPanel(){
     const term = eduSearch.value.trim();
     eduTitle.textContent = eduCategory === "formula" ? "수학·과학 도구상자 · 수식 사전" : "수학·과학 도구상자";
-    eduSearch.placeholder = eduCategory === "formula" ? "한글·영문·LaTeX 수식 검색" : eduCategory === "geometry" ? "평면·입체·작도·그래프 검색" : eduCategory === "science" ? "역학·전기·광학·화학·생명·지구 검색" : "기호·수식·도형 검색";
+    eduSearch.placeholder = eduCategory === "formula" ? "한글·영문·LaTeX 수식 검색" : eduCategory === "geometry" ? "평면·입체·작도·그래프·통계 검색" : eduCategory === "science" ? "역학·파동·전기·광학·화학·생명·지구 검색" : "기호·수식·도형 검색";
     formulaBuilder.hidden = eduCategory !== "formula";
     if (!formulaBuilder.hidden) refreshFormulaPreview();
     formulaGroupBar.hidden = eduCategory !== "formula";
@@ -1164,13 +1345,14 @@ function renderWhiteboard(doc, host){
       card.title = entry.label + (entry.kind === "formula" ? " — 입력창에 넣기 또는 보드로 끌어 놓기" : " — 클릭해서 넣기 또는 보드로 끌어 놓기");
       card.setAttribute("aria-label", entry.label); card.draggable = true;
       const visual = document.createElement("span"); visual.className = "wb-edu-visual";
-      if (entry.kind === "stencil") visual.innerHTML = whiteboardStencilSvg(entry.id, wb.color);
+      // 미리보기는 패널의 테마 글자색을 따르고, 실제 삽입 도형은 아래 insertEducationEntry 에서 wb.color 를 유지한다.
+      if (entry.kind === "stencil") visual.innerHTML = whiteboardStencilSvg(entry.id, "currentColor");
       else if (entry.kind === "formula") visual.innerHTML = formulaMathMl(entry.source);
       else visual.textContent = entry.value;
       const label = document.createElement("span"); label.className = "wb-edu-label"; label.textContent = entry.label;
       card.append(visual, label);
       if (entry.kind === "formula" && entry.description){ const description = document.createElement("span"); description.className = "wb-edu-description"; description.textContent = entry.description; card.appendChild(description); }
-      card.addEventListener("click", () => entry.kind === "formula" ? insertFormulaTemplate(entry) : insertEducationEntry(entry, W / 2, H / 2));
+      card.addEventListener("click", () => { const center=visibleBoardCenter(); return entry.kind === "formula" ? insertFormulaTemplate(entry) : insertEducationEntry(entry, center.x, center.y); });
       card.addEventListener("dragstart", (e) => {
         if (!e.dataTransfer) return;
         e.dataTransfer.setData(WB_EDU_TRANSFER_TYPE, entry.id); e.dataTransfer.effectAllowed = "copy";
@@ -1214,6 +1396,12 @@ function renderWhiteboard(doc, host){
   const widthGroup = grp();
   [["2", "S", 2], ["4", "M", 4], ["8", "L", 8]].forEach(([k, label, w]) => { const b = mkBtn(label, "굵기 " + label, "wb-width", () => setWidth(w)); widthBtns[k] = b; widthGroup.appendChild(b); });
 
+  const zoomGroup = grp();
+  const zoomOutBtn = mkBtn("−", "화이트보드 화면 축소", "wb-act wb-zoom-step", () => setViewScale(view.scale / 1.25));
+  zoomLabelBtn = mkBtn(Math.round(view.scale * 100) + "%", "화이트보드 배율 100%로 초기화", "wb-act wb-zoom-label", resetView);
+  const zoomInBtn = mkBtn("+", "화이트보드 화면 확대", "wb-act wb-zoom-step", () => setViewScale(view.scale * 1.25));
+  zoomGroup.append(zoomOutBtn, zoomLabelBtn, zoomInBtn);
+
   const imgGroup = grp();
   eduToolBtn = mkBtn("∑", "수학·과학 도구상자", "wb-act wb-edu-toggle", () => toggleEducationPanel());
   eduToolBtn.setAttribute("aria-controls", eduPanel.id); eduToolBtn.setAttribute("aria-expanded", "false");
@@ -1224,13 +1412,15 @@ function renderWhiteboard(doc, host){
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
   redoBtn = mkIconBtn("redo", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
+  flipXBtn = mkBtn("↔", "선택한 교육 도형 좌우 반전", "wb-act wb-flip-x", () => flipSelected("flipX")); flipXBtn.disabled = true;
+  flipYBtn = mkBtn("↕", "선택한 교육 도형 상하 반전", "wb-act wb-flip-y", () => flipSelected("flipY")); flipYBtn.disabled = true;
   groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup", ungroupSelected); groupActionBtn.disabled = true;
   const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", () => {
     if (!wb.items.length) return;
     if (typeof confirmDialog === "function"){ confirmDialog("보드 내용을 모두 지울까요?", "지우기", "취소").then(ok => { if (ok) clearAll(); }); }
     else clearAll();
   });
-  actGroup.append(undoBtn, redoBtn, groupActionBtn, clearBtn);
+  actGroup.append(undoBtn, redoBtn, flipXBtn, flipYBtn, groupActionBtn, clearBtn);
 
   const exportGroup = grp();
   exportGroup.append(
@@ -1299,7 +1489,7 @@ function renderWhiteboard(doc, host){
   posGroup.appendChild(dragHandle);
   applyPos(curPos);
 
-  tools.append(posGroup, toolGroup, colorGroup, widthGroup, imgGroup, actGroup, exportGroup, recGroup);
+  tools.append(posGroup, toolGroup, colorGroup, widthGroup, zoomGroup, imgGroup, actGroup, exportGroup, recGroup);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(tools);
   setTool("select"); setColor("#111111"); setWidth(4); history.reset();   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로
 
@@ -1308,6 +1498,10 @@ function renderWhiteboard(doc, host){
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
     if (ae && ae.classList && ae.classList.contains("wb-textinput")) return;
+    const interactive = ae && (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(ae.tagName) || ae.isContentEditable);
+    if (e.code === "Space" && !interactive && eduPanel.hidden){
+      e.preventDefault(); e.stopPropagation(); spacePanning = true; canvas.classList.add("pan-ready"); return;
+    }
     if (e.key === "Escape" && !eduPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleEducationPanel(false); return;
     }
@@ -1321,7 +1515,14 @@ function renderWhiteboard(doc, host){
       wb.items = wb.items.filter(it => it !== wb.selected); wb.selected = null; redraw(); history.commit(); recordCommit();
     } else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
   };
+  const onKeyUp = (e) => {
+    if (e.code !== "Space") return;
+    spacePanning = false; canvas.classList.remove("pan-ready");
+  };
+  const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); };
   document.addEventListener("keydown", onKey, true);
+  document.addEventListener("keyup", onKeyUp, true);
+  window.addEventListener("blur", onWindowBlur);
 
   // ----- 사이즈 추적 + 정리 -----
   let ro = null;
@@ -1330,13 +1531,14 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, normalizeWhiteboardFormulaLibrary,
-    whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl
+    whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
+    whiteboardClampView, whiteboardZoomAt
   };
 }

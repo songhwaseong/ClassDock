@@ -27,12 +27,19 @@ function drawArrowHead(ctx, x1, y1, x2, y2, w){
 // 항목 하나를 그린다.
 // limit: 펜/형광펜/지우개 스트로크에서 그릴 점 개수 상한(재생 시 획이 "그려지는" 성장 애니메이션용).
 //        null/undefined 면 전체를 그린다.
-function drawItem(ctx, it, bg, limit){
+function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false){
   if (!it) return;
   if (it.type === "group"){
     const sw = Math.max(1, Number(it.sourceW) || Number(it.w) || 1), sh = Math.max(1, Number(it.sourceH) || Number(it.h) || 1);
     ctx.save(); ctx.translate(Number(it.x) || 0, Number(it.y) || 0); ctx.scale((Number(it.w) || sw) / sw, (Number(it.h) || sh) / sh);
-    for (const child of (Array.isArray(it.items) ? it.items : [])) drawItem(ctx, child, bg);
+    const flipX = !!it.flipX, flipY = !!it.flipY;
+    if (flipX || flipY){
+      ctx.translate(flipX ? sw : 0, flipY ? sh : 0);
+      ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    }
+    for (const child of (Array.isArray(it.items) ? it.items : [])){
+      drawItem(ctx, child, bg, null, inheritedFlipX !== flipX, inheritedFlipY !== flipY);
+    }
     ctx.restore(); ctx.globalAlpha = 1; return;
   }
   applyStroke(ctx, it, bg);
@@ -64,9 +71,27 @@ function drawItem(ctx, it, bg, limit){
   } else if (it.type === "text"){
     ctx.globalAlpha = 1; ctx.fillStyle = it.color; ctx.textBaseline = "top";
     ctx.font = it.fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
-    String(it.text || "").split("\n").forEach((ln, i) => ctx.fillText(ln, it.x, it.y + i * it.fontSize * 1.25));
+    const lines = String(it.text || "").split("\n");
+    if (inheritedFlipX || inheritedFlipY){
+      const fs = Math.max(1, Number(it.fontSize) || 16);
+      const widthOf = (line) => (typeof ctx.measureText === "function" ? ctx.measureText(line).width : String(line).length * fs * .6);
+      const textW = Math.max(1, ...lines.map(widthOf)), textH = Math.max(fs, lines.length * fs * 1.25);
+      ctx.save();
+      ctx.translate(inheritedFlipX ? 2 * it.x + textW : 0, inheritedFlipY ? 2 * it.y + textH : 0);
+      ctx.scale(inheritedFlipX ? -1 : 1, inheritedFlipY ? -1 : 1);
+      lines.forEach((ln, i) => ctx.fillText(ln, it.x, it.y + i * fs * 1.25));
+      ctx.restore();
+    } else {
+      lines.forEach((ln, i) => ctx.fillText(ln, it.x, it.y + i * it.fontSize * 1.25));
+    }
   } else if (it.type === "image"){
-    ctx.globalAlpha = 1; if (it.img && it.img.complete) ctx.drawImage(it.img, it.x, it.y, it.w, it.h);
+    ctx.globalAlpha = 1;
+    if (it.img && it.img.complete){
+      if (it.flipX || it.flipY){
+        ctx.save(); ctx.translate(it.x + it.w / 2, it.y + it.h / 2); ctx.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1);
+        ctx.drawImage(it.img, -it.w / 2, -it.h / 2, it.w, it.h); ctx.restore();
+      } else ctx.drawImage(it.img, it.x, it.y, it.w, it.h);
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -158,22 +183,33 @@ function translateItem(it, dx, dy){
 }
 
 // 그룹을 현재 보드 좌표의 독립 항목들로 푼다. 기존 그룹 객체와 자식은 바꾸지 않는다.
-function ungroupItem(group){
+function ungroupItem(group, measureText){
   if (!group || group.type !== "group" || !Array.isArray(group.items)) return [];
   const sw = Math.max(1, Number(group.sourceW) || Number(group.w) || 1), sh = Math.max(1, Number(group.sourceH) || Number(group.h) || 1);
   const sx = (Number(group.w) || sw) / sw, sy = (Number(group.h) || sh) / sh;
   const ox = Number(group.x) || 0, oy = Number(group.y) || 0, widthScale = (Math.abs(sx) + Math.abs(sy)) / 2;
+  const flipX = !!group.flipX, flipY = !!group.flipY;
+  const mapX = (x) => ox + (flipX ? sw - x : x) * sx;
+  const mapY = (y) => oy + (flipY ? sh - y : y) * sy;
   const scaleOne = (it) => {
     const out = Object.assign({}, it);
-    if (it.type === "text" || it.type === "image" || it.type === "group"){
-      out.x = ox + it.x * sx; out.y = oy + it.y * sy;
-      if (it.type !== "text"){ out.w = it.w * sx; out.h = it.h * sy; }
-      else out.fontSize = Math.max(1, (Number(it.fontSize) || 16) * widthScale);
+    if (it.type === "text"){
+      const b = itemBounds(it, measureText) || { x:it.x, y:it.y, w:0, h:0 };
+      out.x = ox + (flipX ? sw - b.x - b.w : it.x) * sx;
+      out.y = oy + (flipY ? sh - b.y - b.h : it.y) * sy;
+      out.fontSize = Math.max(1, (Number(it.fontSize) || 16) * widthScale);
+    } else if (it.type === "image" || it.type === "group"){
+      out.x = ox + (flipX ? sw - it.x - it.w : it.x) * sx;
+      out.y = oy + (flipY ? sh - it.y - it.h : it.y) * sy;
+      out.w = it.w * sx; out.h = it.h * sy;
+      if (flipX) out.flipX = !out.flipX;
+      if (flipY) out.flipY = !out.flipY;
     } else if (it.type === "polyline"){
-      out.points = (it.points || []).map((p) => ({ x:ox + p.x * sx, y:oy + p.y * sy }));
+      out.points = (it.points || []).map((p) => ({ x:mapX(p.x), y:mapY(p.y) }));
     } else {
-      out.x1 = ox + it.x1 * sx; out.y1 = oy + it.y1 * sy;
-      out.x2 = ox + it.x2 * sx; out.y2 = oy + it.y2 * sy;
+      out.x1 = mapX(it.x1); out.y1 = mapY(it.y1);
+      out.x2 = mapX(it.x2); out.y2 = mapY(it.y2);
+      if (it.type === "ellipse" && flipX !== flipY && Number(out.rotation)) out.rotation = -Number(out.rotation);
     }
     if (out.width != null) out.width = Math.max(.5, Number(out.width) * widthScale);
     if (Array.isArray(out.dash)) out.dash = out.dash.map((n) => n * widthScale);
