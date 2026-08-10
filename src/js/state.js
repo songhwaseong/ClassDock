@@ -277,6 +277,27 @@ function colorContrastRatio(a, b){
   const l1 = lum(a), l2 = lum(b);
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
+// ── 화이트보드 배경색 ───────────────────────────────────────────────
+// 배경색은 보드마다 스냅샷(bg)에 따로 저장된다. 아래 설정값은 "새 보드를 열 때 쓸 기본색"일 뿐이라,
+// 설정을 바꿔도 이미 그려 둔 보드의 배경은 건드리지 않는다(칠판 한 장, 흰 종이 한 장을 같이 쓰는 경우).
+const BOARD_BG_DEFAULT = "#ffffff";
+const BOARD_BG_PRESETS = Object.freeze([
+  { id:"white",  color:"#ffffff", label:"흰색",      labelEn:"White" },
+  { id:"paper",  color:"#f1f5f9", label:"연회색",    labelEn:"Light gray" },
+  { id:"cream",  color:"#fdf6e3", label:"크림",      labelEn:"Cream" },
+  { id:"chalk",  color:"#0f5132", label:"칠판 초록", labelEn:"Chalkboard green" },
+  { id:"night",  color:"#111827", label:"검정",      labelEn:"Black" }
+]);
+function normalizeBoardBg(value){ return normalizeHexColor(value) || BOARD_BG_DEFAULT; }
+// 어두운 배경으로 바꾸면 검정 펜은 그은 자리가 보이지 않는다. 대비가 너무 낮을 때 바꿔 줄 펜 색을
+// 돌려준다(지금 색으로 충분하면 ""). 기준 2.2 는 코드 색 설정의 대비 경고와 같은 값이다.
+function boardInkForBackground(bg, ink){
+  const background = normalizeBoardBg(bg), current = normalizeHexColor(ink) || "#111111";
+  if (colorContrastRatio(current, background) >= 2.2) return "";
+  const best = colorContrastRatio("#ffffff", background) >= colorContrastRatio("#111111", background) ? "#ffffff" : "#111111";
+  return best === current ? "" : best;
+}
+
 const DEFAULT_APP_SETTINGS = {
   // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).
   //   예전 이름은 pythonAutosave 였고 Python 에만 적용됐다 — 아래 migrateAppSettings 가 값을 옮긴다.
@@ -296,6 +317,7 @@ const DEFAULT_APP_SETTINGS = {
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
+  boardBg: BOARD_BG_DEFAULT,   // 새 화이트보드의 기본 배경색 — BOARD_BG_PRESETS 참고(보드별 색은 스냅샷에 따로 저장)
   codeColors: {},       // 구문 강조 색({} = 기본 팔레트) — { light:{…}, dark:{…} }, CODE_COLOR_DEFS 참고
   mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
   shortcutDefaultsVersion: 2,
@@ -356,7 +378,7 @@ let appSettings = (() => {
     const saved = migrateAppSettings(parsed);
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
-    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), shortcuts:normalizeShortcutMap(saved.shortcuts) };
     if (migrationChanged) localStorage.setItem("pdfSignerSettings", JSON.stringify(loaded));
     return loaded;
   }
@@ -364,7 +386,7 @@ let appSettings = (() => {
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("pdfSignerSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }

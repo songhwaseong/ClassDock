@@ -448,6 +448,19 @@ function whiteboardZoomAt(raw, nextScale, anchor, width, height){
   return whiteboardClampView({scale,x:Number(point.x)-bx*scale,y:Number(point.y)-by*scale},width,height);
 }
 function boardRecoveryKey(name){ return BOARD_RECOVERY_PREFIX + String(name || "화이트보드"); }
+// 새 보드를 열 때 쓸 배경색(설정값). 테스트가 이 파일만 node 로 불러오는 경우도 있어 설정이 없어도 견딘다.
+function defaultBoardBg(){
+  try {
+    if (typeof normalizeBoardBg === "function" && typeof appSettings === "object" && appSettings) return normalizeBoardBg(appSettings.boardBg);
+  } catch(_){}
+  return "#ffffff";
+}
+// 스냅샷에 담긴 배경색. 배경색이 없던 시절의 스냅샷은 흰 종이에 그린 것이므로 흰색으로 되살린다
+// (지금 설정한 기본색을 씌우면 그때 쓴 검정 펜이 사라져 보인다).
+function boardSnapshotBg(value){
+  if (typeof normalizeBoardBg === "function") return normalizeBoardBg(value);
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : "#ffffff";
+}
 // 저장된 스냅샷(자동복원·메모 블록)을 편집 가능한 보드 상태로 되살린다. 이미지는 src(data URL)만
 // 들고 있다가 renderWhiteboard 의 restoreBoardImages 가 <img> 로 되살린다.
 function validBoardSnapshot(saved){
@@ -457,7 +470,7 @@ function validBoardSnapshot(saved){
 function boardStateFromSnapshot(saved){
   const snapshot = validBoardSnapshot(saved);
   if (!snapshot) return null;
-  return { tool:"pen", color:"#111111", width:4, bg:snapshot.bg || "#ffffff", items:snapshot.items, selected:null };
+  return { tool:"pen", color:"#111111", width:4, bg:boardSnapshotBg(snapshot.bg), items:snapshot.items, selected:null };
 }
 // 메모 에셋과 자동복원본이 모두 있으면 더 최근 스냅샷을 쓴다. 예전 스냅샷처럼 시각이
 // 없거나 같으면 메모에 확정 저장된 supplied 쪽을 우선해 낡은 복구본이 덮어쓰지 않게 한다.
@@ -510,7 +523,7 @@ function renderWhiteboard(doc, host){
   // wb: 보드 상태(전역 active 문서 변수 state 와 헷갈리지 않게 이름 분리)
   // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
-  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: "#ffffff", selected: null });
+  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: defaultBoardBg(), selected: null });
   // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
   const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
   Object.assign(view, whiteboardClampView(view, 0, 0));
@@ -590,6 +603,16 @@ function renderWhiteboard(doc, host){
     return null;
   };
   let editingTextItem = null, openFormulaEditor = null, groupActionBtn = null, flipXBtn = null, flipYBtn = null;
+  // 배경색은 캔버스에만 칠하면 부족하다. 무대(.wb-stage)는 창 크기를 바꾸는 순간 캔버스보다 잠깐 커져
+  // 흰 테두리가 번쩍이고, 텍스트 입력칸이 흰 상자로 남으면 어두운 배경에 흰 글씨를 칠 때 글자가 안 보인다.
+  // CSS 변수 하나로 셋을 같이 움직인다.
+  wb.bg = boardSnapshotBg(wb.bg);
+  const applyBoardBackground = () => {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(wb.bg.slice(i, i + 2), 16));
+    wrap.style.setProperty("--wb-bg", wb.bg);
+    wrap.style.setProperty("--wb-textbg", `rgba(${r},${g},${b},.88)`);
+  };
+  applyBoardBackground();
   const redraw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.fillStyle = wb.bg; ctx.fillRect(0, 0, W, H);
@@ -1023,6 +1046,8 @@ function renderWhiteboard(doc, host){
   });
 
   // 내보내기는 선택 표시와 화면 확대·이동을 제외하고 원래 보드 좌표로 만든다.
+  // 배경색은 화면 그대로 담는다 — 인쇄·PDF만 흰 배경으로 바꾸면, 칠판 배경에 흰 펜으로 쓴 판서가
+  // 흰 종이에 흰 글씨가 되어 통째로 사라진다. 어두운 배경으로 인쇄할지는 화면에서 이미 보고 판단한다.
   const withBoardExport = (fn) => {
     const selected=wb.selected, saved={ scale:view.scale, x:view.x, y:view.y };
     wb.selected=null; view.scale=1; view.x=0; view.y=0; redraw();
@@ -1432,6 +1457,80 @@ function renderWhiteboard(doc, host){
   customColor.addEventListener("input", () => setColor(customColor.value));
   colorGroup.appendChild(customColor);
 
+  // ----- 배경색 -----
+  // 도구막대가 이미 빽빽해서 프리셋을 늘어놓는 대신 버튼 하나로 접어 두고, 누르면 무대 왼쪽 위에
+  // 작은 판이 뜬다(수학·과학 도구상자와 같은 방식이라 위치 계산이 필요 없다).
+  const bgPanel = document.createElement("div");
+  bgPanel.className = "wb-bg-panel"; bgPanel.hidden = true;
+  bgPanel.id = "wb-bg-panel-" + doc.id;
+  bgPanel.setAttribute("role", "dialog"); bgPanel.setAttribute("aria-label", "보드 배경색");
+  const bgHead = document.createElement("div"); bgHead.className = "wb-bg-head";
+  const bgTitle = document.createElement("strong"); bgTitle.textContent = "배경색";
+  bgHead.append(bgTitle, mkBtn("×", "배경색 고르기 닫기 (Esc)", "wb-edu-close", () => toggleBackgroundPanel(false)));
+  const bgChoices = document.createElement("div"); bgChoices.className = "wb-bg-choices";
+  const bgChoiceEls = [];
+  for (const preset of (typeof BOARD_BG_PRESETS !== "undefined" ? BOARD_BG_PRESETS : [])){
+    const choice = mkBtn("", preset.label, "wb-bg-choice", () => setBackground(preset.color));
+    choice.style.background = preset.color; choice.dataset.boardBg = preset.color;
+    bgChoiceEls.push(choice); bgChoices.appendChild(choice);
+  }
+  const bgCustomRow = document.createElement("label"); bgCustomRow.className = "wb-bg-custom";
+  const bgCustomLabel = document.createElement("span"); bgCustomLabel.textContent = "직접 고르기";
+  const bgCustom = document.createElement("input"); bgCustom.type = "color"; bgCustom.className = "wb-color-input";
+  bgCustom.value = wb.bg; bgCustom.title = "배경색 직접 고르기";
+  // 색 고르개는 끌 때마다 input 이 쏟아진다 — 배경만 따라 바꿔 보여 주고, 펜 색 조정은 다 고른
+  // 뒤(change) 한 번만 한다. 안 그러면 밝은 색과 어두운 색 사이를 지날 때마다 알림이 쌓인다.
+  bgCustom.addEventListener("input", () => setBackground(bgCustom.value, { adjustInk:false }));
+  bgCustom.addEventListener("change", () => setBackground(bgCustom.value));
+  bgCustomRow.append(bgCustomLabel, bgCustom);
+  const bgHint = document.createElement("p"); bgHint.className = "wb-bg-hint";
+  bgHint.textContent = "이 보드에만 적용돼요. 새 보드의 기본 배경은 설정 › 문서에서 정합니다.";
+  bgPanel.append(bgHead, bgChoices, bgCustomRow, bgHint);
+  stage.appendChild(bgPanel);
+
+  const bgGroup = grp();
+  const bgToggleBtn = mkBtn("", "보드 배경색 바꾸기", "wb-act wb-bg-toggle", () => toggleBackgroundPanel());
+  const bgToggleDot = document.createElement("span"); bgToggleDot.className = "wb-bg-dot";
+  bgToggleBtn.appendChild(bgToggleDot);
+  bgToggleBtn.setAttribute("aria-controls", bgPanel.id); bgToggleBtn.setAttribute("aria-expanded", "false");
+  bgGroup.appendChild(bgToggleBtn);
+
+  function toggleBackgroundPanel(force){
+    const open = force == null ? bgPanel.hidden : !!force;
+    bgPanel.hidden = !open;
+    bgToggleBtn.classList.toggle("active", open);
+    bgToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) requestAnimationFrame(() => { if (bgCustom.isConnected) bgCustom.focus({ preventScroll:true }); });
+  }
+  const syncBackgroundChoices = () => {
+    bgToggleDot.style.background = wb.bg;
+    if (bgCustom.value !== wb.bg) bgCustom.value = wb.bg;
+    for (const choice of bgChoiceEls) choice.setAttribute("aria-pressed", String(choice.dataset.boardBg === wb.bg));
+  };
+  // 배경색은 판서 내용이 아니라 보드의 속성이라 되돌리기(Ctrl+Z) 대상에서 뺐다.
+  // 대신 복구 스냅샷에 바로 남겨 탭을 닫았다 다시 열어도 고른 색이 그대로 온다.
+  const setBackground = (value, options={}) => {
+    const next = typeof normalizeBoardBg === "function" ? normalizeBoardBg(value) : boardSnapshotBg(value);
+    const changed = next !== wb.bg;
+    wb.bg = next;
+    applyBoardBackground();
+    syncBackgroundChoices();
+    redraw();
+    if (changed){
+      scheduleBoardRecovery();
+      // 녹화 중에 배경을 바꿨다면 리플레이도 같은 배경으로 재생돼야 한다.
+      if (doc.recorder && doc.recorder.active && typeof doc.recorder.setBackground === "function") doc.recorder.setBackground(next);
+    }
+    if (options.adjustInk === false) return;
+    // 어두운 배경으로 바꾸면 검정 펜은 그은 자리가 보이지 않는다 — 읽히는 색으로 맞춰 주고 알린다.
+    const ink = typeof boardInkForBackground === "function" ? boardInkForBackground(next, wb.color) : "";
+    if (!ink) return;
+    setColor(ink);
+    if (typeof toast === "function"){
+      toast(ink === "#ffffff" ? "배경이 어두워 펜 색을 흰색으로 맞췄어요." : "배경이 밝아 펜 색을 검정으로 맞췄어요.", 2400);
+    }
+  };
+
   const widthGroup = grp();
   [["2", "S", 2], ["4", "M", 4], ["8", "L", 8]].forEach(([k, label, w]) => { const b = mkBtn(label, "굵기 " + label, "wb-width", () => setWidth(w)); widthBtns[k] = b; widthGroup.appendChild(b); });
 
@@ -1528,9 +1627,12 @@ function renderWhiteboard(doc, host){
   posGroup.appendChild(dragHandle);
   applyPos(curPos);
 
-  tools.append(posGroup, toolGroup, colorGroup, widthGroup, zoomGroup, imgGroup, actGroup, exportGroup, recGroup);
-  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(tools);
-  setTool("select"); setColor("#111111"); setWidth(4); history.reset();   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로
+  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, zoomGroup, imgGroup, actGroup, exportGroup, recGroup);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){ window.MNI18N.translateTree(tools); window.MNI18N.translateTree(bgPanel); }
+  // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로. 펜 색은 배경에 묻히지 않는 쪽으로 시작한다
+  // (칠판 배경으로 저장해 둔 보드를 다시 열었을 때 검정 펜으로 시작하면 그어도 아무것도 안 보인다).
+  const startInk = (typeof boardInkForBackground === "function" && boardInkForBackground(wb.bg, "#111111")) || "#111111";
+  setTool("select"); setColor(startInk); setWidth(4); syncBackgroundChoices(); history.reset();
 
   // ----- 키보드(이 보드가 활성일 때만): Ctrl+Z / Ctrl+Y -----
   const onKey = (e) => {
@@ -1538,12 +1640,16 @@ function renderWhiteboard(doc, host){
     const ae = document.activeElement;
     if (ae && ae.classList && ae.classList.contains("wb-textinput")) return;
     const interactive = ae && (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(ae.tagName) || ae.isContentEditable);
-    if (e.code === "Space" && !interactive && eduPanel.hidden){
+    if (e.code === "Space" && !interactive && eduPanel.hidden && bgPanel.hidden){
       e.preventDefault(); e.stopPropagation(); spacePanning = true; canvas.classList.add("pan-ready"); return;
+    }
+    if (e.key === "Escape" && !bgPanel.hidden){
+      e.preventDefault(); e.stopPropagation(); toggleBackgroundPanel(false); bgToggleBtn.focus(); return;
     }
     if (e.key === "Escape" && !eduPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleEducationPanel(false); return;
     }
+    if (!bgPanel.hidden && ae && bgPanel.contains(ae)) return;
     if (!eduPanel.hidden && ae && eduPanel.contains(ae)) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey){
       const k = String(e.key).toLowerCase();
@@ -1559,6 +1665,14 @@ function renderWhiteboard(doc, host){
     spacePanning = false; canvas.classList.remove("pan-ready");
   };
   const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); };
+  // 배경색 판은 색만 고르면 볼 일이 끝나므로 바깥을 누르면 닫는다(색 고르개 창은 문서 밖이라 걸리지 않는다).
+  const onPointerDownOutside = (e) => {
+    if (bgPanel.hidden) return;
+    const target = e.target;
+    if (bgPanel.contains(target) || bgToggleBtn.contains(target)) return;
+    toggleBackgroundPanel(false);
+  };
+  document.addEventListener("pointerdown", onPointerDownOutside, true);
   document.addEventListener("keydown", onKey, true);
   document.addEventListener("keyup", onKeyUp, true);
   window.addEventListener("blur", onWindowBlur);
@@ -1570,12 +1684,12 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
-    boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot,
+    boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt

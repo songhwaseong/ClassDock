@@ -754,6 +754,36 @@ function wire(){
     lightBackgroundDraft = normalizeLightBackground(button.dataset.lightBackground);
     syncLightBackgroundButtons();
   }));
+  // 새 화이트보드의 기본 배경색. 프리셋 목록(BOARD_BG_PRESETS) 하나로 버튼을 만들어 팔레트를
+  // 설정 화면과 보드 도구막대에 이중으로 적어 두지 않는다.
+  let boardBgDraft = BOARD_BG_DEFAULT;
+  let boardBgCustom = null;
+  const boardBgHost = byId("settingBoardBg");
+  const syncBoardBgChoices = () => {
+    if (!boardBgHost) return;
+    boardBgHost.querySelectorAll(".board-bg-choice").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.boardBg === boardBgDraft));
+    });
+    if (boardBgCustom && boardBgCustom.value !== boardBgDraft) boardBgCustom.value = boardBgDraft;
+  };
+  const buildBoardBgChoices = () => {
+    if (!boardBgHost || boardBgHost.childElementCount) return;
+    for (const preset of BOARD_BG_PRESETS){
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "board-bg-choice";
+      button.dataset.boardBg = preset.color; button.style.background = preset.color;
+      // 이름은 한국어로 넣고 번역은 i18n 바인딩에 맡긴다 — 언어를 바꿔도 다시 그릴 필요가 없다.
+      button.title = preset.label; button.setAttribute("aria-label", preset.label);
+      button.addEventListener("click", () => { boardBgDraft = preset.color; syncBoardBgChoices(); });
+      boardBgHost.appendChild(button);
+    }
+    boardBgCustom = document.createElement("input");
+    boardBgCustom.type = "color"; boardBgCustom.className = "wb-color-input board-bg-custom";
+    boardBgCustom.title = "배경색 직접 고르기"; boardBgCustom.setAttribute("aria-label", "배경색 직접 고르기");
+    boardBgCustom.addEventListener("input", () => { boardBgDraft = normalizeBoardBg(boardBgCustom.value); syncBoardBgChoices(); });
+    boardBgHost.appendChild(boardBgCustom);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(boardBgHost);
+  };
   document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
     tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
   });
@@ -975,6 +1005,9 @@ function wire(){
     byId("settingOfficeReplaceTracked").checked = appSettings.officeReplaceTracked === true;
     codeColorDraft = normalizeCodeColors(appSettings.codeColors);
     renderCodeColorSettings();
+    boardBgDraft = normalizeBoardBg(appSettings.boardBg);
+    buildBoardBgChoices();
+    syncBoardBgChoices();
     syncToolVisibilityChecks();
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
@@ -1029,6 +1062,7 @@ function wire(){
         sound: byId("settingScreensaverSound").checked },
       toolVisibility: collectToolVisibility(),
       codeColors: codeColorDraft,
+      boardBg: boardBgDraft,
       mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });

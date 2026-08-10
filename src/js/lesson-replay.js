@@ -141,9 +141,13 @@ function LessonRecorder(items, bg, dim){
 
   return {
     active: true,
-    bg: bg,
+    get bg(){ return bg; },
+    // 녹화 도중 보드 배경색을 바꾸면 재생도 그 배경을 따라야 한다. 키프레임마다 배경을 담지는 않으므로
+    // 마지막으로 고른 배경 하나로 전체를 재생한다(배경은 판서와 달리 도중에 자주 바뀌지 않는다).
+    setBackground(next){ if (next) bg = next; },
     capture(its, b, d){
       if (!this.active) return;
+      if (b) bg = b;
       if (d){ maxW = Math.max(maxW, d.W || 0); maxH = Math.max(maxH, d.H || 0); }
       if (isSameAs(last, its)) return;                 // 바뀐 게 없으면 스냅샷 생략(정지 시 중복 방지)
       if (isAppendOf(last, its)){
