@@ -657,6 +657,9 @@ function renderWhiteboard(doc, host){
   // ----- 사이즈/DPR (리사이즈해도 좌표는 CSS px 그대로라 그림 위치 유지) -----
   const resize = () => {
     const r = stage.getBoundingClientRect();
+    // 인쇄·탭 전환처럼 잠깐 감춰진 순간(크기 0)에는 건너뛴다 — 1×1로 줄였다가는 화면 이동 위치가
+    // clampView 에 눌려 사라진다. 다시 보이면 ResizeObserver 가 제 크기로 한 번 더 불러 준다.
+    if (!r.width || !r.height) return;
     W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -1077,6 +1080,42 @@ function renderWhiteboard(doc, host){
       if (typeof downloadPdfBytes === "function") downloadPdfBytes(bytes, (doc.name || "화이트보드") + ".pdf");
     } catch(e){ console.error(e); if (typeof toast === "function") toast("PDF로 저장하지 못했어요.", 2200, { type: "error" }); }
   };
+  // 헤더의 "인쇄 / PDF로 저장"(window.print) 전용 경로.
+  // 판서는 <canvas> 라서 화면 DOM을 그대로 인쇄하면 빈 종이가 나온다 — 인쇄 레이아웃에서는
+  // .office 가 position:static 이 되며 .wb-wrap/.wb-stage 높이가 0으로 무너지고(캔버스는 absolute라
+  // 자리를 안 차지한다) ResizeObserver 가 캔버스를 1×1로 다시 그려 내용까지 지운다.
+  // 그래서 PDF 내보내기와 같은 그림을 만들어 그 이미지 한 장만 인쇄한다.
+  const printBoard = async () => {
+    let png = "";
+    try { png = withBoardExport(() => canvas.toDataURL("image/png")); }
+    catch(e){ console.error(e); }
+    if (!png){ if (typeof toast === "function") toast("인쇄할 그림을 만들지 못했어요.", 2200, { type: "error" }); return; }
+    const old = document.getElementById("boardPrintLayer");
+    if (old) old.remove();
+    const layer = document.createElement("div");
+    layer.id = "boardPrintLayer"; layer.className = "board-print";
+    const img = document.createElement("img");
+    img.alt = doc.name || "화이트보드";
+    layer.appendChild(img); document.body.appendChild(layer);
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("afterprint", cleanup);
+      document.body.classList.remove("board-printing");
+      layer.remove();
+    };
+    try {
+      // data URL 도 로딩은 비동기라, 다 그려지기 전에 print() 를 부르면 빈 페이지가 나온다.
+      await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; img.src = png; });
+      window.addEventListener("afterprint", cleanup);
+      document.body.classList.add("board-printing");
+      window.print();                                  // 크로미움에서는 인쇄창이 닫힐 때까지 여기서 멈춘다
+    } catch(e){ console.error(e); }
+    finally { cleanup(); }
+  };
+  // 헤더 인쇄 버튼 진입점(app.js) — 보드 문서일 때만 window.print() 대신 이걸 쓴다.
+  doc.printBoard = printBoard;
 
   // ----- 도구막대 -----
   const COLORS = [

@@ -4309,7 +4309,14 @@
     .pptx-host .slide{zoom:var(--pptx-print-zoom, var(--pptx-zoom,1))!important;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
     .pptx-print-page{display:flex!important;justify-content:center;align-items:flex-start;padding-top:90mm;break-inside:avoid;page-break-inside:avoid;break-after:page;page-break-after:always}
     .pptx-print-page:last-child{break-after:auto;page-break-after:auto}
+    /* 화이트보드 인쇄(whiteboard.js printBoard) — 보드 그림만 남기고 화면 요소는 전부 비운다.
+       body 바로 아래를 통째로 숨기므로 탭바·판서 도구막대도 함께 사라진다. */
+    body.board-printing>*{display:none!important}
+    body.board-printing>.board-print{display:block!important}
+    .board-print img{display:block;max-width:100%;height:auto;margin:0 auto}
   }
+  /* 인쇄용 임시 레이어 — 화면에는 절대 보이지 않는다 */
+  .board-print{display:none}
 
   /* ===== 스프레드시트 차트 모달 ===== */
   .chart-card{width:min(860px,96%);display:flex;flex-direction:column;gap:12px}

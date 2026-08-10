@@ -256,7 +256,12 @@ function wire(){
     if (files.length && state && state.kind === "pdf") mergePdfFiles(state, files);
   });
   byId("btnDownload").onclick = exportPdf;
-  byId("btnPrint").onclick = () => window.print();
+  // 화이트보드는 판서가 <canvas> 라 화면 인쇄로는 도구막대만 찍히고 그림이 빠진다 —
+  // 보드 그림 한 장을 만들어 그것만 인쇄한다(whiteboard.js 의 printBoard).
+  byId("btnPrint").onclick = () => {
+    if (state && state.kind === "board" && typeof state.printBoard === "function"){ state.printBoard(); return; }
+    window.print();
+  };
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("studyToggle").onclick = toggleStudyMode;
