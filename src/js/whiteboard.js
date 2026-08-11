@@ -56,6 +56,14 @@ function whiteboardFormulaDictionary(){
   add("arithmetic-term","algebra","등차수열 일반항",String.raw`a_{[[n]]} = [[a_1]] + ([[n]]-1)[[d]]`,String.raw`a_n=a_1+(n-1)d`,"등차수열 일반항 arithmetic sequence","첫째항과 공차로 구하는 등차수열 일반항");
   add("arithmetic-sum","algebra","등차수열의 합",String.raw`S_{[[n]]} = \frac{[[n]]([[a_1]]+[[a_n]])}{2}`,String.raw`S_n=\frac{n(a_1+a_n)}{2}`,"등차수열 합 arithmetic series","등차수열의 첫 n개 항의 합");
   add("geometric-term","algebra","등비수열 일반항",String.raw`a_{[[n]]} = [[a_1]][[r]]^{[[n]]-1}`,String.raw`a_n=a_1r^{n-1}`,"등비수열 일반항 geometric sequence","첫째항과 공비로 구하는 등비수열 일반항");
+  add("matrix-2x2","algebra","2×2 행렬",String.raw`A = \begin{pmatrix} [[왼쪽 위]] & [[오른쪽 위]] \\ [[왼쪽 아래]] & [[오른쪽 아래]] \end{pmatrix}`,String.raw`A=\begin{pmatrix}a&b\\c&d\end{pmatrix}`,"행렬 2x2 matrix entries","두 행 두 열로 이루어진 기본 행렬");
+  add("determinant-2x2","algebra","2×2 행렬식",String.raw`\det A = \begin{vmatrix} [[왼쪽 위]] & [[오른쪽 위]] \\ [[왼쪽 아래]] & [[오른쪽 아래]] \end{vmatrix}`,String.raw`\det A=\begin{vmatrix}a&b\\c&d\end{vmatrix}=ad-bc`,"행렬식 determinant det 2x2","2×2 행렬의 행렬식");
+  add("inverse-matrix-2x2","algebra","2×2 역행렬",String.raw`A^{-1} = \frac{1}{[[a]][[d]]-[[b]][[c]]}\begin{pmatrix} [[d]] & -[[b]] \\ -[[c]] & [[a]] \end{pmatrix}`,String.raw`A^{-1}=\frac{1}{ad-bc}\begin{pmatrix}d&-b\\-c&a\end{pmatrix}`,"역행렬 inverse matrix 2x2","행렬식이 0이 아닐 때의 2×2 역행렬");
+  add("simultaneous-equations","algebra","연립방정식",String.raw`\begin{cases} [[a]]x + [[b]]y = [[c]] \\ [[d]]x + [[e]]y = [[f]] \end{cases}`,String.raw`\begin{cases}2x+y=5\\x-y=1\end{cases}`,"연립방정식 연립 일차 simultaneous equations system","두 일차방정식을 한 묶음으로 나타낸 식");
+  add("piecewise-function","algebra","구간별 함수",String.raw`f(x) = \begin{cases} [[첫째 식]] & [[첫째 조건]] \\ [[둘째 식]] & [[둘째 조건]] \end{cases}`,String.raw`f(x)=\begin{cases}x^2&x\geq0\\-x&x<0\end{cases}`,"구간별 함수 조각함수 piecewise cases","조건에 따라 서로 다른 식을 사용하는 함수");
+  add("log-product-law","algebra","로그의 곱셈 법칙",String.raw`\log_{[[밑]]}([[첫째 수]][[둘째 수]]) = \log_{[[밑]]}[[첫째 수]] + \log_{[[밑]]}[[둘째 수]]`,String.raw`\log_a(xy)=\log_a x+\log_a y`,"로그 법칙 곱셈 product logarithm","곱의 로그를 로그의 합으로 바꾸는 법칙");
+  add("log-quotient-law","algebra","로그의 나눗셈 법칙",String.raw`\log_{[[밑]]}\frac{[[분자]]}{[[분모]]} = \log_{[[밑]]}[[분자]] - \log_{[[밑]]}[[분모]]`,String.raw`\log_a\frac{x}{y}=\log_a x-\log_a y`,"로그 법칙 나눗셈 몫 quotient logarithm","몫의 로그를 로그의 차로 바꾸는 법칙");
+  add("log-power-law","algebra","로그의 거듭제곱 법칙",String.raw`\log_{[[밑]]}([[진수]]^{[[지수]]}) = [[지수]]\log_{[[밑]]}[[진수]]`,String.raw`\log_a(x^n)=n\log_a x`,"로그 법칙 지수 거듭제곱 power logarithm","거듭제곱의 지수를 로그 앞으로 내리는 법칙");
 
   add("limit","calculus","극한",String.raw`\lim_{x \to [[a]]} [[f(x)]]`,String.raw`\lim_{x \to a} f(x)`,"미적분 극한 limit","x가 a로 갈 때의 극한");
   add("sum","calculus","수열의 합",String.raw`\sum_{[[i]]=[[시작]]}^{[[끝]]} [[a_i]]`,String.raw`\sum_{i=1}^{n} a_i`,"시그마 합계 sigma sum","시작과 끝이 있는 합");
@@ -103,6 +111,13 @@ function whiteboardFormulaDictionary(){
   add("arc-length","geometry-formula","호의 길이",String.raw`l = \frac{[[각도]]}{360^\circ}\cdot 2\pi [[r]]`,String.raw`l=\frac{\theta}{360^\circ}\cdot2\pi r`,"부채꼴 호 길이 arc length","중심각과 반지름으로 구하는 호의 길이");
   add("sector-area","geometry-formula","부채꼴 넓이",String.raw`A = \frac{[[각도]]}{360^\circ}\cdot \pi [[r]]^2`,String.raw`A=\frac{\theta}{360^\circ}\pi r^2`,"부채꼴 넓이 sector area","중심각과 반지름으로 구하는 부채꼴 넓이");
   add("cylinder-volume","geometry-formula","원기둥 부피",String.raw`V = \pi [[r]]^2 [[h]]`,String.raw`V=\pi r^2h`,"원기둥 부피 cylinder volume","밑면 반지름과 높이로 구하는 원기둥 부피");
+  add("vector-components","geometry-formula","벡터 성분",String.raw`\vec{[[벡터]]} = \begin{pmatrix} [[가로 성분]] \\ [[세로 성분]] \end{pmatrix}`,String.raw`\vec{v}=\begin{pmatrix}v_x\\v_y\end{pmatrix}`,"벡터 성분 좌표 vector components","평면 벡터를 가로·세로 성분으로 나타낸 식");
+  add("vector-dot-product","geometry-formula","벡터의 내적",String.raw`\vec{[[a]]}\cdot\vec{[[b]]} = [[a_x]][[b_x]] + [[a_y]][[b_y]]`,String.raw`\vec{a}\cdot\vec{b}=a_xb_x+a_yb_y`,"벡터 내적 스칼라곱 dot product","두 벡터의 대응 성분 곱을 더한 값");
+  add("vector-cross-product","geometry-formula","벡터의 외적",String.raw`\vec{[[a]]}\times\vec{[[b]]} = \left|\vec{[[a]]}\right|\left|\vec{[[b]]}\right|\sin[[각]]\,\vec{[[방향]]}`,String.raw`\vec{a}\times\vec{b}=|\vec{a}||\vec{b}|\sin\theta\,\vec{n}`,"벡터 외적 벡터곱 cross product","두 벡터에 수직인 방향과 크기를 나타내는 외적");
+  add("parabola-standard","geometry-formula","포물선 표준형",String.raw`(x-[[가로 꼭짓점]])^2 = 4[[초점 거리]](y-[[세로 꼭짓점]])`,String.raw`(x-h)^2=4p(y-k)`,"포물선 표준형 초점 parabola conic","꼭짓점과 초점 거리를 사용하는 포물선 방정식");
+  add("ellipse-standard","geometry-formula","타원 표준형",String.raw`\frac{(x-[[가로 중심]])^2}{[[가로 반지름]]^2} + \frac{(y-[[세로 중심]])^2}{[[세로 반지름]]^2} = 1`,String.raw`\frac{(x-h)^2}{a^2}+\frac{(y-k)^2}{b^2}=1`,"타원 표준형 장축 단축 ellipse conic","중심과 두 반지름을 사용하는 타원 방정식");
+  add("hyperbola-standard","geometry-formula","쌍곡선 표준형",String.raw`\frac{(x-[[가로 중심]])^2}{[[가로 기준]]^2} - \frac{(y-[[세로 중심]])^2}{[[세로 기준]]^2} = 1`,String.raw`\frac{(x-h)^2}{a^2}-\frac{(y-k)^2}{b^2}=1`,"쌍곡선 표준형 점근선 hyperbola conic","중심과 두 기준 길이를 사용하는 쌍곡선 방정식");
+  add("general-conic","geometry-formula","원뿔곡선 일반형",String.raw`[[A]]x^2 + [[B]]xy + [[C]]y^2 + [[D]]x + [[E]]y + [[F]] = 0`,String.raw`Ax^2+Bxy+Cy^2+Dx+Ey+F=0`,"원뿔곡선 일반형 이차곡선 conic general","포물선·타원·쌍곡선을 포함하는 이차곡선 일반형");
 
   add("speed","science-formula","속력",String.raw`v = \frac{[[거리]]}{[[시간]]}`,String.raw`v=\frac{d}{t}`,"물리 속도 speed distance time","거리와 시간으로 구하는 속력");
   add("newton","science-formula","뉴턴 제2법칙",String.raw`F = [[질량]][[가속도]]`,String.raw`F=ma`,"물리 힘 질량 가속도 Newton","힘은 질량과 가속도의 곱");
@@ -115,6 +130,16 @@ function whiteboardFormulaDictionary(){
   add("ideal-gas","science-formula","이상기체 상태방정식",String.raw`[[압력]][[부피]] = [[몰수]][[기체상수]][[온도]]`,String.raw`PV=nRT`,"화학 기체 압력 부피 온도 ideal gas","이상기체의 상태방정식");
   add("reaction","science-formula","화학 반응식",String.raw`[[반응물]] \rightarrow [[생성물]]`,String.raw`A+B \rightarrow C`,"화학 반응 화살표 reaction","반응물에서 생성물로 향하는 반응식");
   add("equilibrium","science-formula","화학 평형",String.raw`[[반응물]] \leftrightarrow [[생성물]]`,String.raw`A+B \leftrightarrow C+D`,"화학 평형 가역반응 equilibrium","양방향으로 진행되는 반응");
+  add("chemical-formula","science-formula","화학식과 아래첨자",String.raw`\mathrm{[[첫째 원소]]}_{[[첫째 개수]]}\mathrm{[[둘째 원소]]}_{[[둘째 개수]]}`,String.raw`\mathrm{H}_2\mathrm{SO}_4`,"화학식 원소 아래첨자 분자식 chemical formula subscript","원소 기호와 원자 개수를 함께 나타내는 화학식");
+  add("ion-charge","science-formula","이온 전하",String.raw`\mathrm{[[이온]]}^{[[전하]]}`,String.raw`\mathrm{Ca}^{2+}`,"화학 이온 전하 양이온 음이온 ion charge","원소나 원자단의 전하를 위첨자로 나타낸 식");
+  add("balanced-reaction","science-formula","계수를 넣은 반응식",String.raw`[[첫째 계수]]\mathrm{[[첫째 반응물]]} + [[둘째 계수]]\mathrm{[[둘째 반응물]]} \rightarrow [[생성물 계수]]\mathrm{[[생성물]]}`,String.raw`2\mathrm{H}_2+\mathrm{O}_2\rightarrow2\mathrm{H}_2\mathrm{O}`,"화학 반응식 계수 균형식 balanced equation","반응물과 생성물의 계수를 맞춘 화학 반응식");
+  add("uniform-motion","science-formula","등속 직선 운동",String.raw`x = [[처음 위치]] + [[속도]][[시간]]`,String.raw`x=x_0+vt`,"물리 등속 운동 위치 시간 uniform motion","일정한 속도로 움직이는 물체의 위치");
+  add("velocity-acceleration","science-formula","등가속도 속도",String.raw`v = [[처음 속도]] + [[가속도]][[시간]]`,String.raw`v=v_0+at`,"물리 등가속도 속도 시간 kinematics","일정한 가속도에서 시간에 따른 속도");
+  add("displacement-acceleration","science-formula","등가속도 이동거리",String.raw`s = [[처음 속도]][[시간]] + \frac{1}{2}[[가속도]][[시간]]^2`,String.raw`s=v_0t+\frac{1}{2}at^2`,"물리 등가속도 이동거리 변위 kinematics","일정한 가속도에서 시간에 따른 이동거리");
+  add("mechanical-work","science-formula","역학적 일",String.raw`W = [[힘]][[이동거리]]\cos[[각]]`,String.raw`W=Fs\cos\theta`,"물리 일 힘 거리 각도 work mechanics","힘과 이동 방향이 이루는 각을 고려한 일");
+  add("coulomb-law","science-formula","쿨롱 법칙",String.raw`F = [[쿨롱 상수]]\frac{[[첫째 전하]][[둘째 전하]]}{[[거리]]^2}`,String.raw`F=k\frac{q_1q_2}{r^2}`,"물리 전기력 전하 거리 쿨롱 Coulomb law","두 전하 사이에 작용하는 전기력");
+  add("series-resistance","science-formula","직렬 합성저항",String.raw`R = [[첫째 저항]] + [[둘째 저항]] + \cdots + [[마지막 저항]]`,String.raw`R=R_1+R_2+\cdots+R_n`,"물리 전기 직렬 저항 합성 series resistance","직렬로 연결한 저항의 합성저항");
+  add("parallel-resistance","science-formula","병렬 합성저항",String.raw`\frac{1}{R} = \frac{1}{[[첫째 저항]]} + \frac{1}{[[둘째 저항]]} + \cdots + \frac{1}{[[마지막 저항]]}`,String.raw`\frac{1}{R}=\frac{1}{R_1}+\frac{1}{R_2}+\cdots+\frac{1}{R_n}`,"물리 전기 병렬 저항 합성 parallel resistance","병렬로 연결한 저항의 합성저항");
   add("acceleration","science-formula","가속도",String.raw`a = \frac{[[속도 변화량]]}{[[시간]]}`,String.raw`a=\frac{\Delta v}{\Delta t}`,"물리 가속도 속도 변화 acceleration","단위 시간당 속도 변화량");
   add("momentum","science-formula","운동량",String.raw`p = [[질량]][[속도]]`,String.raw`p=mv`,"물리 운동량 momentum 질량 속도","질량과 속도의 곱으로 나타낸 운동량");
   add("pressure","science-formula","압력",String.raw`P = \frac{[[힘]]}{[[넓이]]}`,String.raw`P=\frac{F}{A}`,"물리 압력 힘 넓이 pressure","단위 넓이에 작용하는 힘");

@@ -377,6 +377,29 @@ test("화이트보드용 수식 배치는 입력한 공백·줄바꿈·빈 줄�
   assert.match(math, /<mspace width="0\.28em"\/>/);
 });
 
+test("괄호 뒤 제곱은 닫는 괄호가 아니라 괄호식 전체에 붙는다", () => {
+  const plain = latexToMathML("(x-a)^2 + (y-b)^2", false, true);
+  assert.equal((plain.match(/<msup><mrow><mo stretchy="false">\(<\/mo>/g) || []).length, 2);
+  assert.equal((plain.match(/<mo stretchy="false">\)<\/mo><\/mrow>/g) || []).length, 2);
+  assert.doesNotMatch(plain, /<msup><mo>\)<\/mo>/);
+
+  const sized = latexToMathML(String.raw`\left(x-a\right)^2`, false, true);
+  assert.match(sized, /<msup><mrow><mo stretchy="true">\(<\/mo>[\s\S]*<mo stretchy="true">\)<\/mo><\/mrow><mn>2<\/mn><\/msup>/);
+});
+
+test("행렬과 연립·구간 수식 환경을 표와 확대 괄호로 변환한다", () => {
+  const matrix = latexToMathML(String.raw`A=\begin{pmatrix}a&b\\c&d\end{pmatrix}`);
+  assert.match(matrix, /<mo stretchy="true">\(<\/mo><mtable/);
+  assert.equal((matrix.match(/<mtr>/g) || []).length, 2);
+  assert.equal((matrix.match(/<mtd>/g) || []).length, 4);
+  assert.match(matrix, /<mo stretchy="true">\)<\/mo>/);
+
+  const cases = latexToMathML(String.raw`f(x)=\begin{cases}x^2&x\geq0\\-x&x<0\end{cases}`);
+  assert.match(cases, /<mo stretchy="true">\{<\/mo><mtable columnalign="left left"/);
+  assert.equal((cases.match(/<mtr>/g) || []).length, 2);
+  assert.equal((cases.match(/<mtd>/g) || []).length, 4);
+});
+
 test("화이트보드 수식의 작은따옴표 문자열은 일반 글자로 렌더하고 미분 기호와 구분한다", () => {
   const mixed = latexToMathML(String.raw`'이도이는' \frac{c}{a}`, false, true);
   assert.match(mixed, /<mtext>이도이는<\/mtext>/);

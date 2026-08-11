@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { latexToMathML } = require("../src/js/core.js");
 const {
   whiteboardEducationCatalog,
   whiteboardFormulaDictionary,
@@ -49,7 +50,7 @@ test("수학·과학 도구상자는 기호·수식·도형·과학 묶음을 �
 
 test("수식 틀은 LaTeX 원문을 보존하는 편집 가능한 formula 항목으로 정의한다", () => {
   const formulas = whiteboardEducationCatalog().filter((entry) => entry.category === "formula");
-  assert.ok(formulas.length >= 75);
+  assert.ok(formulas.length >= 100);
   for (const entry of formulas){
     assert.equal(entry.kind, "formula", entry.label + " 수식이 formula가 아니다");
     assert.ok(entry.source && typeof entry.source === "string");
@@ -61,7 +62,7 @@ test("수식 틀은 LaTeX 원문을 보존하는 편집 가능한 formula 항목
 
 test("수식 사전은 교과별 50개 이상의 검색 가능한 틀과 정확한 입력 위치를 제공한다", () => {
   const formulas = whiteboardFormulaDictionary();
-  assert.ok(formulas.length >= 75, "수식 사전 확장 항목이 너무 적다");
+  assert.ok(formulas.length >= 100, "수식 사전 확장 항목이 너무 적다");
   assert.equal(new Set(formulas.map((entry) => entry.id)).size, formulas.length);
   for (const group of ["basic", "algebra", "calculus", "set", "statistics", "geometry-formula", "science-formula"]){
     assert.ok(formulas.some((entry) => entry.formulaGroup === group), group + " 분야가 비어 있다");
@@ -74,6 +75,27 @@ test("수식 사전은 교과별 50개 이상의 검색 가능한 틀과 정확�
   }
   assert.equal(expandWhiteboardFormulaTemplate(String.raw`\frac{[[분자]]}{[[분모]]}`).text, String.raw`\frac{분자}{분모}`);
   assert.equal(expandWhiteboardFormulaTemplate(formulas.find((entry) => entry.id === "formula-nth-root").template).text, String.raw`\sqrt[ 차수 ]{값}`);
+});
+
+test("행렬·로그·벡터·원뿔곡선·화학·물리 확장 수식을 빠짐없이 제공한다", () => {
+  const formulas = whiteboardFormulaDictionary();
+  const expected = [
+    "matrix-2x2","determinant-2x2","inverse-matrix-2x2","simultaneous-equations","piecewise-function",
+    "log-product-law","log-quotient-law","log-power-law",
+    "vector-components","vector-dot-product","vector-cross-product","parabola-standard","ellipse-standard","hyperbola-standard","general-conic",
+    "chemical-formula","ion-charge","balanced-reaction","uniform-motion","velocity-acceleration","displacement-acceleration",
+    "mechanical-work","coulomb-law","series-resistance","parallel-resistance"
+  ];
+  for (const id of expected){
+    const entry = formulas.find((item) => item.id === "formula-" + id);
+    assert.ok(entry, id + " 수식이 없다");
+    assert.ok(entry.label && entry.template && entry.source && entry.keywords && entry.description, id + " 검색 정보가 부족하다");
+    assert.doesNotMatch(latexToMathML(entry.source), /<mi>begin<\/mi>|<mtext>(?:pmatrix|vmatrix|cases)<\/mtext>/);
+  }
+  for (const id of ["matrix-2x2","determinant-2x2","inverse-matrix-2x2","simultaneous-equations","piecewise-function","vector-components"]){
+    const entry = formulas.find((item) => item.id === "formula-" + id);
+    assert.match(latexToMathML(entry.source), /<mtable/);
+  }
 });
 
 test("한글 입력 자리만 미완성으로 보고 영문·기호 수식은 수정 없이 넣을 수 있다", () => {

@@ -2780,6 +2780,24 @@
   const TEX_VARIANTS = { mathbf:"bold",boldsymbol:"bold",mathbb:"double-struck",mathcal:"script",mathscr:"script",mathfrak:"fraktur",mathrm:"normal",mathsf:"sans-serif",mathtt:"monospace",mathit:"italic" };
 
   function texMo(ch){ return "<mo>" + escapeHtml(ch) + "</mo>"; }
+  function texFixedMo(ch){ return "<mo stretchy=\"false\">" + escapeHtml(ch) + "</mo>"; }
+  function texDelimiter(st){
+    const tk = st.toks[st.pos];
+    if (!tk) return "";
+    if (tk.t === "char"){ st.pos++; return tk.v === "." ? "" : tk.v; }
+    if (tk.t === "cmd"){ st.pos++; return TEX_OPS[tk.v] || TEX_SYMBOLS[tk.v] || ""; }
+    return "";
+  }
+  function texHasClosingChar(st, open, close){
+    let depth = 0;
+    for (let i = st.pos; i < st.toks.length; i++){
+      const tk = st.toks[i];
+      if (tk.t !== "char") continue;
+      if (tk.v === open) depth++;
+      else if (tk.v === close && --depth === 0) return true;
+    }
+    return false;
+  }
   function texTokenize(s){
     const toks = []; let i = 0;
     while (i < s.length){
@@ -2803,7 +2821,7 @@
       else if (c === "^"){ toks.push({ t:"^" }); i++; }
       else if (c === "_"){ toks.push({ t:"_" }); i++; }
       else if (c === " " || c === "\t" || c === "\n"){ toks.push({ t:"sp", n:c === "\t" ? 4 : 1 }); i++; }
-      else if (c === "&"){ i++; }
+      else if (c === "&"){ toks.push({ t:"&" }); i++; }
       else { toks.push({ t:"char", v:c }); i++; }
     }
     return toks;
@@ -2837,6 +2855,49 @@
     }
     return out;
   }
+  function texEnvironmentEndAt(toks, index){
+    if (!toks[index] || toks[index].t !== "cmd" || toks[index].v !== "end" || !toks[index + 1] || toks[index + 1].t !== "{") return null;
+    let name = "", i = index + 2;
+    while (toks[i] && toks[i].t !== "}"){
+      const tk = toks[i++];
+      if (tk.t === "char" || tk.t === "cmd") name += tk.v || "";
+    }
+    return toks[i] && toks[i].t === "}" ? { name, next:i + 1 } : null;
+  }
+  function texEnvironment(st, name){
+    const supported = new Set(["matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases"]);
+    if (!supported.has(name)) return "<mtext>" + escapeHtml(name) + "</mtext>";
+    const rows = [], row = [];
+    let cell = [], depth = 0, closed = false;
+    const pushCell = () => { row.push(cell); cell = []; };
+    const pushRow = () => { pushCell(); rows.push(row.splice(0)); };
+    while (st.pos < st.toks.length){
+      const end = depth === 0 ? texEnvironmentEndAt(st.toks, st.pos) : null;
+      if (end && end.name === name){ st.pos = end.next; closed = true; break; }
+      const tk = st.toks[st.pos++];
+      if (tk.t === "{") depth++;
+      else if (tk.t === "}") depth = Math.max(0, depth - 1);
+      if (depth === 0 && tk.t === "&"){ pushCell(); continue; }
+      if (depth === 0 && tk.t === "cmd" && tk.v === "\\"){ pushRow(); continue; }
+      cell.push(tk);
+    }
+    if (cell.length || row.length || !rows.length) pushRow();
+    const align = name === "cases" ? "left left" : "center";
+    const table = "<mtable columnalign=\"" + align + "\" columnspacing=\"0.8em\" rowspacing=\"0.25em\">" + rows.map(cells =>
+      "<mtr>" + cells.map(tokens => {
+        const sub = { toks:tokens, pos:0, display:st.display, preserveSpaces:st.preserveSpaces };
+        return "<mtd><mrow>" + (texNodes(sub, false).join("") || "<mspace width=\"0.1em\"/>") + "</mrow></mtd>";
+      }).join("") + "</mtr>"
+    ).join("") + "</mtable>";
+    const delimiters = {
+      pmatrix:["(", ")"], bmatrix:["[", "]"], vmatrix:["|", "|"], Vmatrix:["∥", "∥"], cases:["{", ""]
+    };
+    const pair = delimiters[name];
+    if (!pair) return table;
+    const left = pair[0] ? "<mo stretchy=\"true\">" + escapeHtml(pair[0]) + "</mo>" : "";
+    const right = pair[1] ? "<mo stretchy=\"true\">" + escapeHtml(pair[1]) + "</mo>" : "";
+    return "<mrow>" + left + table + right + (closed ? "" : "<mspace width=\"0.1em\"/>") + "</mrow>";
+  }
   function texScripts(st, base, big){
     let sub = null, sup = null;
     while (st.pos < st.toks.length && (st.toks[st.pos].t === "_" || st.toks[st.pos].t === "^")){
@@ -2865,8 +2926,16 @@
       st.pos++;
       return { mml:"<mtext>" + escapeHtml(tk.v) + "</mtext>", big:false };
     }
+    if (tk.t === "&"){ st.pos++; return null; }
     if (tk.t === "char"){
       const c = tk.v;
+      if ((c === "(" || c === "[") && texHasClosingChar(st, c, c === "(" ? ")" : "]")){
+        const close = c === "(" ? ")" : "]";
+        st.pos++;
+        const inside = texNodes(st, false, close);
+        if (st.toks[st.pos] && st.toks[st.pos].t === "char" && st.toks[st.pos].v === close) st.pos++;
+        return { mml:"<mrow>" + texFixedMo(c) + inside.join("") + texFixedMo(close) + "</mrow>", big:false };
+      }
       if (/[0-9.]/.test(c)){
         let num = ""; while (st.toks[st.pos] && st.toks[st.pos].t === "char" && /[0-9.]/.test(st.toks[st.pos].v)) num += st.toks[st.pos++].v;
         return { mml:"<mn>" + escapeHtml(num) + "</mn>", big:false };
@@ -2879,6 +2948,10 @@
     // cmd
     st.pos++;
     const name = tk.v;
+    if (name === "begin"){
+      const environment = texRawGroup(st);
+      return { mml:texEnvironment(st, environment), big:false };
+    }
     if (name === "frac" || name === "dfrac" || name === "tfrac"){
       const a = texArg(st), b = texArg(st);
       return { mml:"<mfrac>" + a + b + "</mfrac>", big:false };
@@ -2908,11 +2981,19 @@
     if (TEX_ACCENTS[name]){
       return { mml:"<mover accent=\"true\">" + texArg(st) + texMo(TEX_ACCENTS[name]) + "</mover>", big:false };
     }
-    if (name === "left" || name === "right"){
-      const d = st.toks[st.pos];
-      let ch = "";
-      if (d && d.t === "char"){ ch = d.v === "." ? "" : d.v; st.pos++; }
-      else if (d && d.t === "cmd"){ ch = TEX_OPS[d.v] || TEX_SYMBOLS[d.v] || ""; st.pos++; }
+    if (name === "left"){
+      const open = texDelimiter(st);
+      const inside = texNodes(st, false, null, "right");
+      let close = "";
+      if (st.toks[st.pos] && st.toks[st.pos].t === "cmd" && st.toks[st.pos].v === "right"){
+        st.pos++; close = texDelimiter(st);
+      }
+      const left = open ? "<mo stretchy=\"true\">" + escapeHtml(open) + "</mo>" : "";
+      const right = close ? "<mo stretchy=\"true\">" + escapeHtml(close) + "</mo>" : "";
+      return { mml:"<mrow>" + left + inside.join("") + right + "</mrow>", big:false };
+    }
+    if (name === "right"){
+      const ch = texDelimiter(st);
       return ch ? { mml:"<mo stretchy=\"true\">" + escapeHtml(ch) + "</mo>", big:false } : null;
     }
     if (name === "," || name === ":" || name === ";" || name === "!" || name === " " || name === "quad" || name === "qquad"){
@@ -2947,13 +3028,15 @@
     if (nt.t === "cmd") return !TEX_OPS[nt.v] && nt.v !== "right" && nt.v !== ")" && nt.v !== "]";
     return false;
   }
-  function texNodes(st, stopAtBrace){
+  function texNodes(st, stopAtBrace, stopChar, stopCommand){
     const out = [];
     let guard = 0;
     while (st.pos < st.toks.length){
       if (++guard > 20000) break;
       const tk = st.toks[st.pos];
       if (stopAtBrace && tk.t === "}") break;
+      if (stopChar && tk.t === "char" && tk.v === stopChar) break;
+      if (stopCommand && tk.t === "cmd" && tk.v === stopCommand) break;
       if (tk.t === "sp"){
         let spaces = 0;
         while (st.toks[st.pos] && st.toks[st.pos].t === "sp") spaces += st.toks[st.pos++].n || 1;
