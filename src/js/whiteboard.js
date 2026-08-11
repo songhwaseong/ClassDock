@@ -28,6 +28,54 @@ function whiteboardClipboardItem(value){
   }
 }
 
+const WB_COLORABLE_TYPES = new Set(["pen", "highlighter", "line", "arrow", "rect", "ellipse", "polyline", "text"]);
+
+// 선택 항목의 색을 바꿀 때 이전 Undo 스냅샷이 함께 변하지 않도록 새 객체로 만든다.
+// 교육 도형은 자식마다 굵기·투명도가 다르므로 그 값은 보존하고 색만 재귀적으로 교체한다.
+function whiteboardRecolorItem(value, color){
+  if (!value || typeof value !== "object" || !/^#[0-9a-f]{6}$/i.test(String(color || ""))) return value;
+  const nextColor = String(color).toLowerCase();
+  if (value.type === "group" && Array.isArray(value.items)){
+    let changed = value.educationColor !== nextColor;
+    const items = value.items.map((child) => {
+      const recolored = whiteboardRecolorItem(child, nextColor);
+      if (recolored !== child) changed = true;
+      return recolored;
+    });
+    return changed ? Object.assign({}, value, { items, educationColor:nextColor }) : value;
+  }
+  if (!WB_COLORABLE_TYPES.has(value.type) || String(value.color || "").toLowerCase() === nextColor) return value;
+  return Object.assign({}, value, { color:nextColor });
+}
+
+function whiteboardItemColor(value){
+  if (!value || typeof value !== "object") return "";
+  if (/^#[0-9a-f]{6}$/i.test(String(value.formulaColor || ""))) return String(value.formulaColor).toLowerCase();
+  if (/^#[0-9a-f]{6}$/i.test(String(value.educationColor || ""))) return String(value.educationColor).toLowerCase();
+  if (/^#[0-9a-f]{6}$/i.test(String(value.color || ""))) return String(value.color).toLowerCase();
+  if (value.type === "group" && Array.isArray(value.items)){
+    for (const child of value.items){ const color = whiteboardItemColor(child); if (color) return color; }
+  }
+  return "";
+}
+
+// S/M/L은 수식과 같은 75%/100%/150% 비율을 사용한다. 텍스트는 처음 크기를 기준으로,
+// 교육 도형 그룹은 원본 벡터 크기(sourceW/sourceH)를 기준으로 계산한다.
+function whiteboardPresetResizeItem(value, scale){
+  if (!value || typeof value !== "object") return null;
+  const ratio = Math.max(.25, Math.min(4, Number(scale) || 1));
+  if (value.type === "text"){
+    const baseFontSize = Math.max(14, Number(value.textBaseFontSize) || Number(value.fontSize) || 16);
+    return Object.assign({}, value, { fontSize:Math.max(14, Math.round(baseFontSize * ratio)), textBaseFontSize:baseFontSize });
+  }
+  if (value.type === "group" && value.role === "education-stencil"){
+    const baseW = Math.max(24, Number(value.sourceW) || Number(value.w) || 240);
+    const baseH = Math.max(16, Number(value.sourceH) || Number(value.h) || 190);
+    return Object.assign({}, value, { w:Math.max(24, Math.round(baseW * ratio)), h:Math.max(16, Math.round(baseH * ratio)) });
+  }
+  return null;
+}
+
 function whiteboardFormulaDictionary(){
   const rows = [];
   const add = (id, group, label, template, source, keywords, description) => rows.push({
@@ -475,7 +523,7 @@ function whiteboardStencilGroup(id, color="#111111"){
   };
   const factory = groups[id];
   if (!factory) return null;
-  return { type:"group", x:0,y:0,w:240,h:190,sourceW:240,sourceH:190,items:factory(),role:"education-stencil",educationId:id };
+  return { type:"group", x:0,y:0,w:240,h:190,sourceW:240,sourceH:190,items:factory(),role:"education-stencil",educationId:id,educationColor:c };
 }
 
 function whiteboardFormulaSvg(mathMl, color="#111111", width=320, height=80){
@@ -821,6 +869,13 @@ function renderWhiteboard(doc, host){
   const doUndo = () => { if (history.undo()) recordCommit(); };
   const doRedo = () => { if (history.redo()) recordCommit(); };
   const clearAll = () => { if (!wb.items.length) return; wb.items = []; wb.selected = null; redraw(); history.commit(); recordCommit(); };
+  const deleteSelected = () => {
+    if (!wb.selected) return false;
+    const selected = wb.selected;
+    wb.items = wb.items.filter(it => it !== selected); wb.selected = null;
+    redraw(); history.commit(); recordCommit();
+    return true;
+  };
   const flipSelected = (axis) => {
     const selected = wb.selected;
     if (!selected || selected.type !== "group" || selected.role !== "education-stencil") return;
@@ -851,6 +906,31 @@ function renderWhiteboard(doc, host){
     });
     wb.items[idx] = resized; wb.selected = resized; redraw(); history.commit(); recordCommit();
     return true;
+  };
+  const replaceSelectedItem = (selected, next) => {
+    if (!selected || !next || selected === next) return false;
+    const idx = wb.items.indexOf(selected); if (idx < 0) return false;
+    wb.items[idx] = next; wb.selected = next; redraw(); history.commit(); recordCommit();
+    return true;
+  };
+  const resizeSelectedPreset = (scale) => {
+    const selected = wb.selected, before = selected && boundsOf(selected);
+    if (!selected || !before) return false;
+    let resized = whiteboardPresetResizeItem(selected, scale);
+    if (!resized) return false;
+    if (resized.type === "group"){
+      const fit = W && H ? Math.min(1, W * .85 / resized.w, H * .85 / resized.h) : 1;
+      resized.w = Math.max(24, Math.round(resized.w * fit)); resized.h = Math.max(16, Math.round(resized.h * fit));
+    }
+    const after = boundsOf(resized); if (!after) return false;
+    const dx = before.x + before.w / 2 - after.x - after.w / 2;
+    const dy = before.y + before.h / 2 - after.y - after.h / 2;
+    resized = translateBoardItem(resized, dx, dy);
+    const unchanged = resized.type === "text"
+      ? Number(resized.fontSize) === Number(selected.fontSize)
+      : Number(resized.w) === Number(selected.w) && Number(resized.h) === Number(selected.h);
+    if (unchanged) return false;
+    return replaceSelectedItem(selected, resized);
   };
 
   // ----- 사이즈/DPR (리사이즈해도 좌표는 CSS px 그대로라 그림 위치 유지) -----
@@ -1056,7 +1136,7 @@ function renderWhiteboard(doc, host){
         redraw(); history.commit(); recordCommit(); return;
       }
       if (txt.trim()){
-        const item = { type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs };
+        const item = { type: "text", color: wb.color, x: p.x, y: p.y, text: txt, fontSize: fs, textBaseFontSize:fs };
         wb.items.push(item); wb.selected = item; setTool("select"); redraw(); history.commit(); recordCommit();
       }
     };
@@ -1193,7 +1273,7 @@ function renderWhiteboard(doc, host){
         type:"text", color:wb.color,
         x:Math.max(8, Math.min(centerX - textW / 2, Math.max(8, W - textW - 8))),
         y:Math.max(8, Math.min(centerY - fontSize * 0.7, Math.max(8, H - fontSize * 1.4))),
-        text:content, fontSize,
+        text:content, fontSize, textBaseFontSize:fontSize,
         educationId:entry.id
       };
       wb.items.push(item); wb.selected = item; setTool("select"); redraw(); history.commit(); recordCommit();
@@ -1248,6 +1328,7 @@ function renderWhiteboard(doc, host){
     const fallback = item.role === "education-formula" ? item.formulaSource
       : item.type === "text" ? item.text : "화이트보드 항목";
     e.clipboardData.setData("text/plain", String(fallback || "화이트보드 항목"));
+    contextCopyHandled = true;
   };
   // 붙여넣기(Ctrl+V): 화이트보드 항목을 우선 복원하고, 없으면 외부 클립보드 이미지를 넣는다.
   const onPaste = (e) => {
@@ -1266,6 +1347,29 @@ function renderWhiteboard(doc, host){
   };
   document.addEventListener("copy", onCopy);
   document.addEventListener("paste", onPaste);
+  let contextCopyHandled = false;
+  const copySelectedFromMenu = () => {
+    if (!whiteboardClipboardItem(wb.selected)) return false;
+    contextCopyHandled = false;
+    try { document.execCommand("copy"); } catch(_){}
+    if (typeof toast === "function") toast(contextCopyHandled ? "선택한 항목을 복사했어요." : "복사하지 못했어요. Ctrl+C를 사용해 주세요.", 1800);
+    return contextCopyHandled;
+  };
+  const duplicateSelected = () => {
+    const item = whiteboardClipboardItem(wb.selected);
+    if (!item || !pasteBoardClipboardItem(item)) return false;
+    if (typeof toast === "function") toast("선택한 항목을 복제했어요.", 1500);
+    return true;
+  };
+  const editSelected = () => {
+    const selected = wb.selected;
+    if (!selected) return false;
+    if (selected.type === "text"){ startText({ x:selected.x, y:selected.y }, selected); return true; }
+    if (selected.type === "image" && selected.role === "education-formula" && typeof openFormulaEditor === "function"){
+      openFormulaEditor(selected); return true;
+    }
+    return false;
+  };
   // 드래그&드롭: 캡처/이미지 파일을 보드에 떨구면 그 위치에 넣는다.
   stage.addEventListener("dragover", (e) => {
     if (!e.dataTransfer) return;
@@ -1409,13 +1513,17 @@ function renderWhiteboard(doc, host){
     ["line", "line", "직선"], ["arrow", "arrow", "화살표"], ["rect", "rect", "사각형"], ["ellipse", "ellipse", "원"], ["text", "text", "텍스트"]
   ];
   const toolBtns = {};
+  const contextToolBtns = {};
   const swatchEls = {};
+  const contextSwatchEls = {};
   const widthBtns = {};
+  const contextWidthBtns = {};
   const FORMULA_SIZE_PRESETS = { 2:.75, 4:1, 8:1.5 };
-  let customColor = null;
-  let undoBtn, redoBtn;
+  let customColor = null, contextCustomColor = null;
+  let undoBtn, redoBtn, contextUndoBtn, contextRedoBtn;
   const setTool = (t) => {
     wb.tool = t; for (const k in toolBtns) toolBtns[k].classList.toggle("active", k === t);
+    for (const k in contextToolBtns) contextToolBtns[k].classList.toggle("active", k === t);
     if (t !== "select" && wb.selected){ wb.selected = null; redraw(); }   // 다른 도구로 가면 선택 해제
     canvas.style.cursor = "";
     canvas.dataset.tool = t;
@@ -1423,10 +1531,16 @@ function renderWhiteboard(doc, host){
   const setColor = (c, options={}) => {
     wb.color = c;
     for (const k in swatchEls) swatchEls[k].classList.toggle("active", k === c);
+    for (const k in contextSwatchEls) contextSwatchEls[k].classList.toggle("active", k === c);
     if (customColor) customColor.value = c;
+    if (contextCustomColor) contextCustomColor.value = c;
     const selected = wb.selected;
-    if (options.applySelected !== false && selected && selected.type === "image" && selected.role === "education-formula" && selected.formulaSource && selected.formulaColor !== c){
-      insertFormulaSource(selected.formulaSource, selected.x + selected.w / 2, selected.y + selected.h / 2, selected, c);
+    if (options.applySelected !== false && selected){
+      if (selected.type === "image" && selected.role === "education-formula" && selected.formulaSource && selected.formulaColor !== c){
+        insertFormulaSource(selected.formulaSource, selected.x + selected.w / 2, selected.y + selected.h / 2, selected, c);
+      } else {
+        replaceSelectedItem(selected, whiteboardRecolorItem(selected, c));
+      }
     }
     if (typeof renderEducationPanel === "function" && !eduPanel.hidden) renderEducationPanel();
   };
@@ -1436,28 +1550,62 @@ function renderWhiteboard(doc, host){
       resizeSelectedFormula(FORMULA_SIZE_PRESETS[w] || 1);
       return;
     }
+    if (selected && (selected.type === "text" || (selected.type === "group" && selected.role === "education-stencil"))){
+      resizeSelectedPreset(FORMULA_SIZE_PRESETS[w] || 1);
+      return;
+    }
+    if (selected && ["line","arrow","rect","ellipse","polyline"].includes(selected.type)){
+      if (Number(selected.width) === Number(w)) return;
+      replaceSelectedItem(selected, Object.assign({}, selected, { width:w }));
+      return;
+    }
     wb.width = w; syncSelectionControls();
   };
   function syncSelectionControls(){
     const selected = wb.selected;
     const formula = selected && selected.type === "image" && selected.role === "education-formula" ? selected : null;
-    const activeColor = formula && formula.formulaColor ? formula.formulaColor : wb.color;
-    for (const k in swatchEls) swatchEls[k].classList.toggle("active", k === activeColor);
+    const text = selected && selected.type === "text" ? selected : null;
+    const stencil = selected && selected.type === "group" && selected.role === "education-stencil" ? selected : null;
+    const stroke = selected && ["line","arrow","rect","ellipse","polyline"].includes(selected.type) ? selected : null;
+    const activeColor = whiteboardItemColor(selected) || wb.color;
+    for (const k in swatchEls){ swatchEls[k].classList.toggle("active", k === activeColor); swatchEls[k].setAttribute("aria-pressed",String(k === activeColor)); }
+    for (const k in contextSwatchEls){ contextSwatchEls[k].classList.toggle("active", k === activeColor); contextSwatchEls[k].setAttribute("aria-checked",String(k === activeColor)); }
     if (customColor && /^#[0-9a-f]{6}$/i.test(activeColor)) customColor.value = activeColor;
-    let currentScale = 0;
+    if (contextCustomColor && /^#[0-9a-f]{6}$/i.test(activeColor)) contextCustomColor.value = activeColor;
+    let currentScale = 0, sizeLabel = "굵기";
     if (formula){
       const baseW = Number(formula.formulaBaseW) || (formula.img && formula.img.naturalWidth) || formula.w;
       const baseH = Number(formula.formulaBaseH) || (formula.img && formula.img.naturalHeight) || formula.h;
       currentScale = Math.sqrt(Math.max(.0001, formula.w * formula.h / Math.max(1, baseW * baseH)));
+      sizeLabel = "선택한 수식 크기";
+    } else if (text){
+      currentScale = (Number(text.fontSize) || 16) / Math.max(14, Number(text.textBaseFontSize) || Number(text.fontSize) || 16);
+      sizeLabel = "선택한 텍스트 크기";
+    } else if (stencil){
+      const baseW = Number(stencil.sourceW) || Number(stencil.w) || 240;
+      const baseH = Number(stencil.sourceH) || Number(stencil.h) || 190;
+      currentScale = Math.sqrt(Math.max(.0001, stencil.w * stencil.h / Math.max(1, baseW * baseH)));
+      sizeLabel = "선택한 교육 도형 크기";
+    } else if (stroke){
+      sizeLabel = "선택한 도형 선 굵기";
     }
     for (const k in widthBtns){
       const button = widthBtns[k], preset = FORMULA_SIZE_PRESETS[k];
-      button.title = formula ? "선택한 수식 크기 " + button.textContent : "굵기 " + button.textContent;
+      button.title = sizeLabel + " " + button.textContent;
       button.setAttribute("aria-label", button.title);
-      button.classList.toggle("active", formula ? Math.abs(currentScale - preset) < .08 : Number(k) === wb.width);
+      button.classList.toggle("active", formula || text || stencil ? Math.abs(currentScale - preset) < .08 : Number(k) === (stroke ? Number(stroke.width) : wb.width));
+    }
+    for (const k in contextWidthBtns){
+      const button = contextWidthBtns[k], preset = FORMULA_SIZE_PRESETS[k];
+      button.title = sizeLabel + " " + button.textContent;
+      button.setAttribute("aria-label", button.title);
+      button.classList.toggle("active", formula || text || stencil ? Math.abs(currentScale - preset) < .08 : Number(k) === (stroke ? Number(stroke.width) : wb.width));
     }
   }
-  const updateUndoButtons = () => { if (undoBtn) undoBtn.disabled = !history.canUndo(); if (redoBtn) redoBtn.disabled = !history.canRedo(); };
+  const updateUndoButtons = () => {
+    if (undoBtn) undoBtn.disabled = !history.canUndo(); if (redoBtn) redoBtn.disabled = !history.canRedo();
+    if (contextUndoBtn) contextUndoBtn.disabled = !history.canUndo(); if (contextRedoBtn) contextRedoBtn.disabled = !history.canRedo();
+  };
 
   const mkBtn = (label, title, cls, fn) => {
     const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = label; b.title = title; b.setAttribute("aria-label", title);
@@ -1546,26 +1694,113 @@ function renderWhiteboard(doc, host){
   focusActions.append(focusResetBtn,focusControlsBtn,focusPowerBtn);
   const focusHint=document.createElement("p"); focusHint.className="wb-focus-hint"; focusHint.textContent="조절점이 보이면 보드 입력을 잠급니다. 숨긴 뒤에는 판서하거나 선택 도구로 밝은 영역을 끌어 이동할 수 있습니다.";
   focusPanel.append(focusHead,focusModes,spotShapeRow,dimRow,flashlightRow,edgeRow,curtainAmountRow,colorRow,focusActions,focusHint); stage.appendChild(focusPanel);
-  const focusContextMenu=document.createElement("div"); focusContextMenu.className="wb-focus-context-menu"; focusContextMenu.hidden=true; focusContextMenu.setAttribute("role","menu"); focusContextMenu.setAttribute("aria-label","집중 도구 빠른 메뉴");
-  const focusContextToggle=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","",()=>{
+  // ----- 화이트보드 우클릭 빠른 메뉴 -----
+  // 집중 도구 전용으로 시작했던 메뉴를 일반 편집 메뉴로 확장한다. 도구막대와 같은 실행 함수를
+  // 연결해 양쪽의 활성 상태와 Undo 기록이 어긋나지 않게 한다.
+  const focusContextMenu=document.createElement("div"); focusContextMenu.className="wb-focus-context-menu"; focusContextMenu.hidden=true; focusContextMenu.setAttribute("role","menu"); focusContextMenu.setAttribute("aria-label","화이트보드 빠른 메뉴");
+  const makeContextSection=(title,cls="")=>{
+    const section=document.createElement("section"); section.className="wb-context-section "+cls;
+    if(title){const heading=document.createElement("div");heading.className="wb-context-title";heading.textContent=title;section.appendChild(heading);}
+    return section;
+  };
+  const contextAction=(label,title,cls,fn)=>{
+    const button=mkBtn(label,title,cls,(e)=>{e.preventDefault();closeFocusContextMenu();fn();});
+    button.setAttribute("role","menuitem"); return button;
+  };
+
+  const focusContextSection=makeContextSection("집중 도구","wb-context-focus");
+  const focusContextToggle=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","wb-context-wide",()=>{
     const next=!focus.controlsVisible; setFocusControlsVisible(next); closeFocusContextMenu();
     if(typeof toast==="function")toast(next?"집중 도구 조절점을 표시했어요.":"집중 도구 조절점을 숨겼어요.",1300);
   });
-  focusContextToggle.setAttribute("role","menuitem"); focusContextMenu.appendChild(focusContextToggle);
+  focusContextToggle.setAttribute("role","menuitem"); focusContextSection.appendChild(focusContextToggle);
+
+  const contextItemSection=makeContextSection("선택 항목","wb-context-item");
+  const contextItemName=document.createElement("div"); contextItemName.className="wb-context-target";
+  const contextItemActions=document.createElement("div"); contextItemActions.className="wb-context-actions";
+  const contextEditBtn=contextAction("편집","선택한 텍스트 또는 수식 편집","",editSelected);
+  const contextCopyBtn=contextAction("복사","선택한 항목 복사 (Ctrl+C)","",copySelectedFromMenu);
+  const contextDuplicateBtn=contextAction("복제","선택한 항목을 오른쪽 아래에 복제","",duplicateSelected);
+  const contextFlipXBtn=contextAction("좌우 반전","선택한 교육 도형 좌우 반전","",()=>flipSelected("flipX"));
+  const contextFlipYBtn=contextAction("상하 반전","선택한 교육 도형 상하 반전","",()=>flipSelected("flipY"));
+  const contextUngroupBtn=contextAction("분리","선택한 그룹의 구성 요소 분리","",ungroupSelected);
+  const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
+  contextItemActions.append(contextEditBtn,contextCopyBtn,contextDuplicateBtn,contextFlipXBtn,contextFlipYBtn,contextUngroupBtn,contextDeleteBtn);
+  contextItemSection.append(contextItemName,contextItemActions);
+
+  const contextToolSection=makeContextSection("필기·도형 도구");
+  const contextToolGrid=document.createElement("div"); contextToolGrid.className="wb-context-tools";
+  const contextToolLabels={select:"선택",pen:"펜",highlighter:"형광펜",eraser:"지우개",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",text:"텍스트"};
+  TOOLS.forEach(([tool,icon,title])=>{
+    const button=contextAction(contextToolLabels[tool]||tool,title,"wb-context-tool",()=>setTool(tool));
+    button.prepend(mkIcon(icon)); contextToolBtns[tool]=button; contextToolGrid.appendChild(button);
+  });
+  contextToolSection.appendChild(contextToolGrid);
+
+  const contextInkSection=makeContextSection("색상·굵기");
+  const contextInkRow=document.createElement("div"); contextInkRow.className="wb-context-ink";
+  const contextColors=document.createElement("div"); contextColors.className="wb-context-colors"; contextColors.setAttribute("role","group"); contextColors.setAttribute("aria-label","필기 색상");
+  COLORS.forEach(([color,name])=>{
+    const swatch=mkBtn("",name,"wb-context-swatch",()=>{setColor(color);closeFocusContextMenu();});
+    swatch.style.background=color; swatch.setAttribute("role","menuitemradio"); swatch.setAttribute("aria-label",name); swatch.setAttribute("aria-checked",String(wb.color===color));
+    if(color==="#ffffff")swatch.classList.add("light"); contextSwatchEls[color]=swatch; contextColors.appendChild(swatch);
+  });
+  contextCustomColor=document.createElement("input"); contextCustomColor.type="color"; contextCustomColor.className="wb-context-custom-color"; contextCustomColor.value=wb.color; contextCustomColor.title="색 직접 고르기"; contextCustomColor.setAttribute("aria-label","색 직접 고르기");
+  contextCustomColor.addEventListener("input",()=>setColor(contextCustomColor.value,{applySelected:false}));
+  contextCustomColor.addEventListener("change",()=>{setColor(contextCustomColor.value);closeFocusContextMenu();}); contextColors.appendChild(contextCustomColor);
+  const contextWidths=document.createElement("div"); contextWidths.className="wb-context-widths"; contextWidths.setAttribute("role","group"); contextWidths.setAttribute("aria-label","필기 굵기");
+  [["2","S",2],["4","M",4],["8","L",8]].forEach(([key,label,width])=>{
+    const button=contextAction(label,"굵기 "+label,"wb-context-width",()=>setWidth(width)); contextWidthBtns[key]=button; contextWidths.appendChild(button);
+  });
+  contextInkRow.append(contextColors,contextWidths); contextInkSection.appendChild(contextInkRow);
+
+  const contextHistorySection=makeContextSection("","wb-context-history");
+  const contextHistoryActions=document.createElement("div"); contextHistoryActions.className="wb-context-actions wb-context-history-actions";
+  contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
+  contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
+  contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextToolSection,contextInkSection,contextHistorySection);
+
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
-    if(!focus.active||focusPanel.contains(e.target)||focusControls.contains(e.target))return;
+    if(focusPanel.contains(e.target)||focusControls.contains(e.target)||(!eduPanel.hidden&&eduPanel.contains(e.target))||(!bgPanel.hidden&&bgPanel.contains(e.target)))return;
     e.preventDefault();e.stopPropagation();
+    const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen);
+    const canSelect=!(focus.active&&focus.controlsVisible)&&focusAllowsScreenPoint(screen);
+    wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw();
+
+    const selected=wb.selected,formula=selected&&selected.type==="image"&&selected.role==="education-formula";
+    const stencil=selected&&selected.type==="group"&&selected.role==="education-stencil";
+    const typeLabels={image:formula?"수식":"이미지",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",polyline:"도형",text:"텍스트",group:stencil?"교육 도형":"그룹"};
+    focusContextSection.hidden=!focus.active;
+    contextItemSection.hidden=!selected;
+    contextItemName.textContent=selected?(typeLabels[selected.type]||"화이트보드 항목"):"";
+    contextEditBtn.hidden=!(selected&&(selected.type==="text"||formula));
+    contextFlipXBtn.hidden=!stencil; contextFlipYBtn.hidden=!stencil;
+    contextUngroupBtn.hidden=!(selected&&selected.type==="group");
     focusContextToggle.textContent=focus.controlsVisible?"조절점 숨기기":"조절점 보이기";
     focusContextToggle.title=focusContextToggle.textContent;focusContextToggle.setAttribute("aria-label",focusContextToggle.textContent);
+    syncSelectionControls(); updateUndoButtons();
+    for(const color in contextSwatchEls)contextSwatchEls[color].setAttribute("aria-checked",String(contextSwatchEls[color].classList.contains("active")));
     const menuHost=document.fullscreenElement||document.body;
     if(focusContextMenu.parentElement!==menuHost)menuHost.appendChild(focusContextMenu);
     focusContextMenu.hidden=false;focusContextMenu.style.left="0px";focusContextMenu.style.top="0px";
     const rect=focusContextMenu.getBoundingClientRect(),margin=6;
     focusContextMenu.style.left=Math.max(margin,Math.min(e.clientX,window.innerWidth-rect.width-margin))+"px";
     focusContextMenu.style.top=Math.max(margin,Math.min(e.clientY,window.innerHeight-rect.height-margin))+"px";
-    requestAnimationFrame(()=>focusContextToggle.focus({preventScroll:true}));
+    requestAnimationFrame(()=>{
+      const first=[...focusContextMenu.querySelectorAll("button:not(:disabled)")].find(button=>!button.hidden&&!button.closest("[hidden]"));
+      if(first)first.focus({preventScroll:true});
+    });
   }
+  focusContextMenu.addEventListener("keydown",e=>{
+    if(!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key))return;
+    const buttons=[...focusContextMenu.querySelectorAll("button:not(:disabled)")].filter(button=>!button.hidden&&!button.closest("[hidden]"));
+    if(!buttons.length)return; e.preventDefault();
+    const current=Math.max(0,buttons.indexOf(document.activeElement));
+    const next=e.key==="Home"?0:e.key==="End"?buttons.length-1:(current+(["ArrowDown","ArrowRight"].includes(e.key)?1:-1)+buttons.length)%buttons.length;
+    buttons[next].focus({preventScroll:true});
+  });
   stage.addEventListener("contextmenu",onFocusContextMenu);
   let focusToolBtn=null, focusFlashTimer=0, focusDragCleanup=null;
 
@@ -2065,7 +2300,7 @@ function renderWhiteboard(doc, host){
     // 어두운 배경으로 바꾸면 검정 펜은 그은 자리가 보이지 않는다 — 읽히는 색으로 맞춰 주고 알린다.
     const ink = typeof boardInkForBackground === "function" ? boardInkForBackground(next, wb.color) : "";
     if (!ink) return;
-    setColor(ink);
+    setColor(ink, { applySelected:false });
     if (typeof toast === "function"){
       toast(ink === "#ffffff" ? "배경이 어두워 펜 색을 흰색으로 맞췄어요." : "배경이 밝아 펜 색을 검정으로 맞췄어요.", 2400);
     }
@@ -2208,7 +2443,7 @@ function renderWhiteboard(doc, host){
       else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
     } else if ((e.key === "Delete" || e.key === "Backspace") && wb.selected){      // 선택한 이미지·도형·텍스트 삭제
       e.preventDefault(); e.stopPropagation();
-      wb.items = wb.items.filter(it => it !== wb.selected); wb.selected = null; redraw(); history.commit(); recordCommit();
+      deleteSelected();
     } else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
   };
   const onKeyUp = (e) => {
@@ -2242,7 +2477,7 @@ function renderWhiteboard(doc, host){
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
-    whiteboardClipboardItem,
+    whiteboardClipboardItem, whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,
