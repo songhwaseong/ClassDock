@@ -1799,7 +1799,7 @@ function renderWhiteboard(doc, host){
   const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
   const contextBoardActions=document.createElement("div"); contextBoardActions.className="wb-context-actions";
   const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
-  const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",()=>fileInput.click());
+  const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",openImageFilePicker);
   const contextEducationBtn=contextAction("수학·과학","수학·과학 도구상자 열기","",()=>toggleEducationPanel(true));
   const contextBackgroundBtn=contextAction("배경색","보드 배경색 바꾸기","",()=>toggleBackgroundPanel(true));
   const contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
@@ -2451,9 +2451,17 @@ function renderWhiteboard(doc, host){
   const imgGroup = grp();
   eduToolBtn = mkBtn("∑", "수학·과학 도구상자", "wb-act wb-edu-toggle", () => toggleEducationPanel());
   eduToolBtn.setAttribute("aria-controls", eduPanel.id); eduToolBtn.setAttribute("aria-expanded", "false");
-  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.hidden = true;
+  const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = ".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif,.ico"; fileInput.hidden = true;
   fileInput.addEventListener("change", () => { const f = fileInput.files && fileInput.files[0]; if (f) insertImageBlob(f); fileInput.value = ""; });
-  imgGroup.append(eduToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", () => fileInput.click()), fileInput);
+  function openImageFilePicker(){
+    // 전용 picker API는 합성 click 경로보다 브라우저가 파일 선택창을 바로 준비할 수 있어
+    // Windows 탐색기 UI가 덜 그려진 첫 프레임이 노출되는 시간을 줄인다.
+    try {
+      if (typeof fileInput.showPicker === "function"){ fileInput.showPicker(); return; }
+    } catch(_){}
+    fileInput.click();
+  }
+  imgGroup.append(eduToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
 
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
