@@ -1519,7 +1519,7 @@
     "help.f2": "<b>PDF</b> — signature, text, date, check, pen ink, <b>drag to select text → highlight</b>, page thumbnails/extract/merge, print / save as PDF.",
     "help.f3": "<b>Run Python</b> — run instantly with ▶, autocomplete & go-to-definition, <b>step run</b> to trace variables, <b>diagnose</b> and <b>auto-grade</b>, even install libraries.",
     "help.f4": "<b>Jupyter notebook (.ipynb)</b> — run cells one by one (Shift+Enter) in kernel mode, carrying variables to the next cell.",
-    "help.f5": "<b>Whiteboard</b> — free ink, shapes, images, and a math & science toolbox. Add it from New.",
+    "help.f5": "<b>Whiteboard</b> — free ink, shapes, images, a math & science toolbox, spotlight, and screen curtain. Add it from New.",
     "help.f6": "<b>Split view</b> — view any document with a reference side by side or top and bottom, then lock the reference and adjust the split ratio or positions.",
     "help.f7": "<b>Scratchpad</b> (Ctrl+M) · <b>image notes</b> (paste many captures, save in bulk) · <b>dark mode</b> · auto-restore workspace. Everything is processed on this computer only and files are never sent anywhere.",
     "empty.title": "Pick a file from the list on the left",

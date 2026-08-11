@@ -1781,6 +1781,61 @@
   .wb-canvas[data-tool="eraser"]{cursor:var(--ink-cursor-eraser)}
   .wb-canvas.pan-ready{cursor:grab!important}
   .wb-canvas.panning{cursor:grabbing!important}
+  /* ── 집중 도구: 판서 캔버스 위의 화면 기준 시각층과 별도 조절층 ── */
+  .wb-focus-visual{position:absolute;inset:0;z-index:8;width:100%;height:100%;pointer-events:none;overflow:visible}
+  .wb-focus-visual[hidden]{display:none}
+  .wb-focus-visual.blocked{animation:wb-focus-blocked .26s ease-out}
+  @keyframes wb-focus-blocked{0%,100%{filter:none}45%{filter:drop-shadow(0 0 8px #ef4444)}}
+  .wb-flashlight-beam{fill:#fde68a;fill-opacity:.22;stroke:#fef3c7;stroke-opacity:.34;stroke-width:1.5;filter:drop-shadow(0 0 7px rgba(253,230,138,.28));animation:wb-flashlight-glow 1.9s ease-in-out infinite}
+  .wb-flashlight-body{filter:drop-shadow(0 3px 4px rgba(0,0,0,.52))}
+  .wb-flashlight-lens-glow{fill:#fef3c7;fill-opacity:.34;filter:drop-shadow(0 0 7px rgba(254,243,199,.82));animation:wb-flashlight-glow 1.9s ease-in-out infinite}
+  @keyframes wb-flashlight-glow{0%,100%{opacity:.78}50%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){.wb-flashlight-beam,.wb-flashlight-lens-glow{animation:none}}
+  .wb-focus-controls{position:absolute;inset:0;z-index:9;pointer-events:none}
+  .wb-focus-controls[hidden]{display:none}
+  .wb-focus-frame{position:absolute;box-sizing:border-box;pointer-events:none;box-shadow:0 0 0 1px rgba(15,23,42,.38),0 0 12px rgba(0,0,0,.28)}
+  .wb-focus-frame.is-curtain.horizontal{border-top:2px solid rgba(59,130,246,.95)!important;box-shadow:0 -1px 0 rgba(255,255,255,.82)}
+  .wb-focus-frame.is-curtain.vertical{border-left:2px solid rgba(59,130,246,.95)!important;box-shadow:-1px 0 0 rgba(255,255,255,.82)}
+  .wb-focus-handle{position:absolute;z-index:2;transform:translate(-50%,-50%);width:16px;height:16px;min-width:0;padding:0;border:2px solid #2563eb;border-radius:50%;background:#fff;color:#1d4ed8;
+    box-shadow:0 1px 5px rgba(15,23,42,.4);pointer-events:auto;touch-action:none;user-select:none;font:700 11px/1 system-ui;display:flex;align-items:center;justify-content:center}
+  .wb-focus-handle[hidden]{display:none}
+  .wb-focus-handle:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 40%,transparent);outline-offset:2px}
+  .wb-focus-move{width:28px;height:28px;cursor:move;background:#2563eb;color:#fff;border-color:#fff;font-size:15px}
+  .wb-curtain-handle{width:46px;height:24px;border-radius:999px;background:#2563eb;color:#fff;border-color:#fff;font-size:18px;letter-spacing:2px}
+  .wb-focus-toggle{font-size:18px;line-height:1}
+  .wb-focus-toggle.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .wb-focus-panel{position:absolute;z-index:11;right:12px;top:12px;width:min(330px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;
+    display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.26)}
+  .wb-focus-panel[hidden]{display:none}
+  .wb-focus-panel.is-floating{z-index:62;max-height:none;box-shadow:0 18px 50px rgba(0,0,0,.42)}
+  .wb-focus-head{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:10px;cursor:move;user-select:none;touch-action:none}
+  .wb-focus-head strong{font-size:14px}
+  .wb-focus-modes{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .wb-focus-choice,.wb-focus-small,.wb-focus-action{height:31px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+  .wb-focus-choice:hover,.wb-focus-small:hover,.wb-focus-action:hover:not(:disabled){background:var(--panel-hover);border-color:var(--accent)}
+  .wb-focus-choice.selected:not(.active){border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--field))}
+  .wb-focus-choice.active,.wb-focus-small.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wb-focus-row{display:flex;align-items:center;gap:10px;min-height:32px}
+  .wb-focus-row[hidden]{display:none}
+  .wb-focus-label{flex:0 0 48px;color:var(--muted);font-size:12px}
+  .wb-focus-choices{display:flex;flex:1 1 auto;gap:5px;min-width:0}
+  .wb-focus-small{flex:1 1 auto;min-width:0;height:29px;padding:0 7px;font-size:11.5px}
+  .wb-focus-range-wrap{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0}
+  .wb-focus-range-wrap input[type="range"]{min-width:0;flex:1 1 auto;accent-color:var(--accent)}
+  .wb-focus-output{flex:0 0 38px;text-align:right;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .wb-focus-actions{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
+  .wb-focus-action{flex:1 1 auto;height:30px;font-size:11px;white-space:nowrap}
+  .wb-focus-action:disabled{opacity:.45;cursor:default}
+  .wb-focus-stop{color:#b91c1c;font-weight:700}
+  .wb-focus-stop:not(:disabled){border-color:color-mix(in srgb,#dc2626 42%,var(--border))}
+  .wb-focus-start{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+  .wb-focus-start:hover:not(:disabled){filter:brightness(1.06);background:var(--accent)}
+  .wb-focus-hint{margin:0;color:var(--muted);font-size:10.5px;line-height:1.4}
+  .wb-focus-context-menu{position:fixed;z-index:1970;min-width:174px;padding:5px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);box-shadow:0 12px 30px rgba(0,0,0,.34)}
+  .wb-focus-context-menu[hidden]{display:none}
+  .wb-focus-context-menu button{display:block;width:100%;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+  .wb-focus-context-menu button:hover,.wb-focus-context-menu button:focus-visible{background:var(--panel-hover);color:var(--accent);outline:none}
+  @media (max-width:600px),(max-height:520px){.wb-focus-head{cursor:default}.wb-focus-panel{right:8px;top:8px;width:min(330px,calc(100% - 16px));max-height:calc(100% - 16px)}}
   .wb-zoom-step{font-size:18px;padding:0 7px}
   .wb-zoom-label{min-width:52px;padding:0 6px;font-variant-numeric:tabular-nums}
   /* 입력칸 배경도 보드 배경을 따라간다 — 흰 상자로 두면 칠판 배경에 흰 글씨를 칠 때 글자가 안 보인다. */

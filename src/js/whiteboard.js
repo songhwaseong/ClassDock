@@ -9,6 +9,7 @@ const BOARD_RECOVERY_PREFIX = "manneung-board-recovery:";
 const WB_EDU_TRANSFER_TYPE = "application/x-manneung-whiteboard-education";
 const WB_ITEM_TRANSFER_TYPE = "application/x-manneung-whiteboard-item";
 const WB_FORMULA_LIBRARY_KEY = "mn.wbFormulaLibrary.v1";
+const WB_FOCUS_PREFS_KEY = "manneung-whiteboard:focus-prefs:v1";
 
 // Ctrl+C/Ctrl+V에서는 캔버스의 선택 항목을 화면 캡처가 아닌 편집 가능한 모델로 전달한다.
 function whiteboardClipboardItem(value){
@@ -499,6 +500,85 @@ function whiteboardZoomAt(raw, nextScale, anchor, width, height){
   const bx=(Number(point.x)-current.x)/current.scale, by=(Number(point.y)-current.y)/current.scale;
   return whiteboardClampView({scale,x:Number(point.x)-bx*scale,y:Number(point.y)-by*scale},width,height);
 }
+function normalizeWhiteboardFocusState(value){
+  const raw=value&&typeof value==="object"?value:{}, spot=raw.spotlight&&typeof raw.spotlight==="object"?raw.spotlight:{}, curtain=raw.curtain&&typeof raw.curtain==="object"?raw.curtain:{};
+  const clamp=(n,min,max,fallback)=>{ n=Number(n); return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback; };
+  return {
+    active:raw.active===true,
+    mode:raw.mode==="curtain"?"curtain":"spotlight",
+    controlsVisible:raw.controlsVisible!==false,
+    dimOpacity:clamp(raw.dimOpacity,.35,.9,.72),
+    spotlight:{
+      shape:spot.shape==="rect"?"rect":"ellipse",
+      cx:clamp(spot.cx,0,1,.5),cy:clamp(spot.cy,0,1,.5),
+      width:clamp(spot.width,.05,1,.36),height:clamp(spot.height,.05,1,.28),
+      flashlight:spot.flashlight===true
+    },
+    curtain:{
+      edge:["top","bottom","left","right"].includes(curtain.edge)?curtain.edge:"bottom",
+      amount:clamp(curtain.amount,0,1,.5),
+      color:curtain.color==="light"?"light":"dark"
+    }
+  };
+}
+function whiteboardFocusGeometry(value, width, height){
+  const focus=normalizeWhiteboardFocusState(value), W=Math.max(0,Number(width)||0), H=Math.max(0,Number(height)||0);
+  if (focus.mode==="spotlight"){
+    const w=Math.min(W,Math.max(Math.min(96,W),focus.spotlight.width*W));
+    const h=Math.min(H,Math.max(Math.min(72,H),focus.spotlight.height*H));
+    const cx=Math.max(w/2,Math.min(Math.max(w/2,W-w/2),focus.spotlight.cx*W));
+    const cy=Math.max(h/2,Math.min(Math.max(h/2,H-h/2),focus.spotlight.cy*H));
+    return {mode:"spotlight",shape:focus.spotlight.shape,x:cx-w/2,y:cy-h/2,w,h,cx,cy,rx:w/2,ry:h/2};
+  }
+  const amount=focus.curtain.amount, edge=focus.curtain.edge;
+  let x=0,y=0,w=W,h=H;
+  if (edge==="top") h=H*amount;
+  else if (edge==="bottom"){ h=H*amount; y=H-h; }
+  else if (edge==="left") w=W*amount;
+  else { w=W*amount; x=W-w; }
+  return {mode:"curtain",edge,amount,x,y,w,h,boundary:(edge==="top"||edge==="bottom")?(edge==="top"?h:y):(edge==="left"?w:x)};
+}
+function whiteboardFocusAllowsPoint(value, point, width, height){
+  const focus=normalizeWhiteboardFocusState(value);
+  if (!focus.active) return true;
+  const W=Math.max(0,Number(width)||0), H=Math.max(0,Number(height)||0), x=Number(point&&point.x), y=Number(point&&point.y);
+  if (!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>W||y>H) return false;
+  const g=whiteboardFocusGeometry(focus,W,H);
+  if (g.mode==="spotlight"){
+    if (g.shape==="rect") return x>=g.x&&x<=g.x+g.w&&y>=g.y&&y<=g.y+g.h;
+    if (!g.rx||!g.ry) return false;
+    const dx=(x-g.cx)/g.rx,dy=(y-g.cy)/g.ry;
+    return dx*dx+dy*dy<=1;
+  }
+  if (g.amount<=0) return true;
+  if (g.amount>=1) return false;
+  if (g.edge==="top") return y>=g.boundary;
+  if (g.edge==="bottom") return y<=g.boundary;
+  if (g.edge==="left") return x>=g.boundary;
+  return x<=g.boundary;
+}
+function whiteboardFlashlightGeometry(value,width,height){
+  const focus=normalizeWhiteboardFocusState(value),W=Math.max(0,Number(width)||0),H=Math.max(0,Number(height)||0);
+  if (!focus.active||focus.mode!=="spotlight"||focus.controlsVisible||!focus.spotlight.flashlight||!W||!H) return {visible:false};
+  const spot=whiteboardFocusGeometry(focus,W,H);
+  const spaces={right:W-(spot.x+spot.w),left:spot.x,bottom:H-(spot.y+spot.h),top:spot.y};
+  const priority=["right","left","bottom","top"];
+  let side=priority.find(name=>spaces[name]>=70);
+  if (!side){ side=priority.slice().sort((a,b)=>spaces[b]-spaces[a])[0]; if (spaces[side]<70) return {visible:false}; }
+  const gap=Math.min(16,Math.max(8,spaces[side]-62));
+  const spreadX=Math.max(18,Math.min(42,spot.w*.22)),spreadY=Math.max(18,Math.min(42,spot.h*.22));
+  let lensX=spot.cx,lensY=spot.cy,angle=0,beam=[];
+  if (side==="right"){
+    lensX=spot.x+spot.w+gap; beam=[[spot.x+spot.w,spot.cy-spreadY],[lensX,spot.cy-7],[lensX,spot.cy+7],[spot.x+spot.w,spot.cy+spreadY]];
+  } else if (side==="left"){
+    lensX=spot.x-gap; angle=180; beam=[[spot.x,spot.cy-spreadY],[lensX,spot.cy-7],[lensX,spot.cy+7],[spot.x,spot.cy+spreadY]];
+  } else if (side==="bottom"){
+    lensY=spot.y+spot.h+gap; angle=90; beam=[[spot.cx-spreadX,spot.y+spot.h],[spot.cx-7,lensY],[spot.cx+7,lensY],[spot.cx+spreadX,spot.y+spot.h]];
+  } else {
+    lensY=spot.y-gap; angle=-90; beam=[[spot.cx-spreadX,spot.y],[spot.cx-7,lensY],[spot.cx+7,lensY],[spot.cx+spreadX,spot.y]];
+  }
+  return {visible:true,side,lensX,lensY,angle,beam};
+}
 function boardRecoveryKey(name){ return BOARD_RECOVERY_PREFIX + String(name || "화이트보드"); }
 // 새 보드를 열 때 쓸 배경색(설정값). 테스트가 이 파일만 node 로 불러오는 경우도 있어 설정이 없어도 견딘다.
 function defaultBoardBg(){
@@ -579,7 +659,32 @@ function renderWhiteboard(doc, host){
   // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
   const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
   Object.assign(view, whiteboardClampView(view, 0, 0));
+  const readFocusPrefs = () => {
+    try { return JSON.parse(localStorage.getItem(WB_FOCUS_PREFS_KEY) || "null"); }
+    catch(_){ return null; }
+  };
+  let focus = normalizeWhiteboardFocusState(doc.boardFocus || readFocusPrefs());
+  focus.active = !!(doc.boardFocus && doc.boardFocus.active);
+  doc.boardFocus = focus;
+  const focusMaskId = "wb-focus-mask-" + String(doc.id || _boardCount).replace(/[^a-zA-Z0-9_-]/g, "-");
+  const focusVisual = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  focusVisual.classList.add("wb-focus-visual"); focusVisual.setAttribute("hidden", ""); focusVisual.style.display = "none"; focusVisual.setAttribute("aria-hidden", "true");
+  const focusDefs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const focusMask = document.createElementNS("http://www.w3.org/2000/svg", "mask"); focusMask.id = focusMaskId; focusMask.setAttribute("maskUnits", "userSpaceOnUse");
+  const focusMaskBase = document.createElementNS("http://www.w3.org/2000/svg", "rect"); focusMaskBase.setAttribute("fill", "white");
+  const focusMaskEllipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse"); focusMaskEllipse.setAttribute("fill", "black");
+  const focusMaskRect = document.createElementNS("http://www.w3.org/2000/svg", "rect"); focusMaskRect.setAttribute("fill", "black"); focusMaskRect.setAttribute("rx", "12");
+  focusMask.append(focusMaskBase, focusMaskEllipse, focusMaskRect); focusDefs.appendChild(focusMask);
+  const focusDim = document.createElementNS("http://www.w3.org/2000/svg", "rect"); focusDim.setAttribute("fill", "#000000"); focusDim.setAttribute("mask", `url(#${focusMaskId})`);
+  const focusCurtain = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  const flashlightBeam = document.createElementNS("http://www.w3.org/2000/svg", "path"); flashlightBeam.classList.add("wb-flashlight-beam"); flashlightBeam.style.display="none";
+  const flashlightBody = document.createElementNS("http://www.w3.org/2000/svg", "g"); flashlightBody.classList.add("wb-flashlight-body"); flashlightBody.style.display="none";
+  // 렌즈가 (0,0), 손잡이가 +x 방향인 손전등. renderFocus 에서 화면 가장자리 여유에 따라 회전한다.
+  flashlightBody.innerHTML='<ellipse class="wb-flashlight-lens-glow" cx="0" cy="0" rx="15" ry="18"/><path d="M1-12 14-8v16L1 12Z" fill="#e2e8f0" stroke="#334155" stroke-width="2"/><rect x="12" y="-8" width="44" height="16" rx="7" fill="#475569" stroke="#1e293b" stroke-width="2"/><path d="M18-4h29" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="50" y="-9" width="10" height="18" rx="4" fill="#334155" stroke="#1e293b" stroke-width="2"/><rect x="26" y="-11" width="12" height="5" rx="2.5" fill="#1e293b"/><circle cx="32" cy="-8.5" r="2" fill="#ef4444"/><path d="M2-9v18" stroke="#fef3c7" stroke-width="3" stroke-linecap="round"/>';
+  focusVisual.append(focusDefs, focusDim, focusCurtain, flashlightBeam, flashlightBody); stage.appendChild(focusVisual);
   let zoomLabelBtn = null, positionTextEditor = null, spacePanning = false, lastBoardPointer = null;
+  let renderFocus = () => {}, flashFocusBoundary = () => {};
+  const focusAllowsScreenPoint = (p) => whiteboardFocusAllowsPoint(focus, p, W, H);
   const clampView = () => {
     Object.assign(view, whiteboardClampView(view, W, H));
   };
@@ -692,6 +797,7 @@ function renderWhiteboard(doc, host){
     syncSelectionControls();
     if (zoomLabelBtn) zoomLabelBtn.textContent = Math.round(view.scale * 100) + "%";
     if (typeof positionTextEditor === "function") positionTextEditor();
+    renderFocus();
   };
   const restoreBoardImages = () => {
     for (const item of wb.items){
@@ -793,6 +899,7 @@ function renderWhiteboard(doc, host){
   };
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
+    if (focus.active && focus.controlsVisible){ flashFocusBoundary(); return; }
     setViewScale(view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
   }, { passive:false });
   canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
@@ -834,10 +941,18 @@ function renderWhiteboard(doc, host){
   };
   let cur = null, drawing = false, lastPt = null;
   canvas.addEventListener("pointerdown", (e) => {
-    lastBoardPointer = pt(e);
+    const screen = screenPoint(e);
+    lastBoardPointer = boardPointFromScreen(screen);
+    // 조절점이 보일 때는 집중 영역을 조정하는 단계다. 캔버스 입력을 먼저 끊어
+    // 뒤의 선택·이동·판서·화면 이동이 실수로 실행되지 않게 한다.
+    if (focus.active && focus.controlsVisible && e.button !== 2){ e.preventDefault(); flashFocusBoundary(); return; }
     if (e.button === 1 || (e.button === 0 && spacePanning)){ beginViewPan(e); return; }
     if (e.button !== 0) return;
+    if (!focusAllowsScreenPoint(screen)){ e.preventDefault(); flashFocusBoundary(); return; }
     if (wb.tool === "select"){
+      // 조절점을 숨긴 스포트라이트는 밝은 영역 자체를 이동 손잡이로 쓴다.
+      // 보드 이동이 필요하면 기존처럼 Space+드래그 또는 가운데 버튼을 사용한다.
+      if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ beginSpotlightDrag(e,.5,.5,true); return; }
       // 선택 도구의 빈 공간은 손바닥 이동 영역으로 쓴다. 항목 위에서는 기존처럼 항목을 이동한다.
       if (!startSelect(e)) beginViewPan(e);
       return;
@@ -855,6 +970,7 @@ function renderWhiteboard(doc, host){
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!drawing || !cur) return;
+    if (!focusAllowsScreenPoint(screenPoint(e))){ flashFocusBoundary(); finishStroke(); return; }
     const p = pt(e);
     if (cur.points){
       cur.points.push(p);
@@ -873,15 +989,21 @@ function renderWhiteboard(doc, host){
   };
   canvas.addEventListener("pointerup", finishStroke);
   canvas.addEventListener("pointercancel", finishStroke);
-  // 선택 도구 호버 커서: 선택 가능한 항목 위=이동, 이미지 핸들=크기조절
+  // 가린 곳은 입력 불가, 드러난 곳의 선택 도구는 항목 위=이동, 이미지 핸들=크기조절.
   canvas.addEventListener("pointermove", (e) => {
-    if (wb.tool !== "select" || drawing) return;
+    if (drawing) return;
+    if (focus.active && focus.controlsVisible){ canvas.style.cursor = "not-allowed"; return; }
     if (spacePanning){ canvas.style.cursor = ""; return; }
+    if (!focusAllowsScreenPoint(screenPoint(e))){ canvas.style.cursor = "not-allowed"; return; }
+    canvas.style.cursor = "";
+    if (wb.tool !== "select") return;
+    if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ canvas.style.cursor = "move"; return; }
     const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
     canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "grab");
   });
   canvas.addEventListener("dblclick", (e) => {
+    if (focus.active && focus.controlsVisible){ e.preventDefault(); e.stopPropagation(); flashFocusBoundary(); return; }
     if (wb.tool !== "select") return;
     const item = itemAt(pt(e));
     if (!item) return;
@@ -1149,9 +1271,11 @@ function renderWhiteboard(doc, host){
     if (!e.dataTransfer) return;
     const hasEducation = [...(e.dataTransfer.types || [])].includes(WB_EDU_TRANSFER_TYPE);
     const hasFile = [...(e.dataTransfer.items || [])].some(i => i.kind === "file");
+    if (focus.active && focus.controlsVisible && (hasEducation || hasFile)){ e.preventDefault(); e.dataTransfer.dropEffect = "none"; return; }
     if (hasEducation || hasFile){ e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
   });
   stage.addEventListener("drop", (e) => {
+    if (focus.active && focus.controlsVisible){ e.preventDefault(); e.stopPropagation(); flashFocusBoundary(); return; }
     const educationId = e.dataTransfer && e.dataTransfer.getData(WB_EDU_TRANSFER_TYPE);
     if (educationId){
       e.preventDefault(); e.stopPropagation();
@@ -1352,6 +1476,257 @@ function renderWhiteboard(doc, host){
     return b;
   };
   const grp = () => { const g = document.createElement("span"); g.className = "wb-group"; return g; };
+
+  // ----- 집중 도구(스포트라이트·화면 가리개) -----
+  const focusControls = document.createElement("div"); focusControls.className = "wb-focus-controls"; focusControls.hidden = true;
+  const focusFrame = document.createElement("div"); focusFrame.className = "wb-focus-frame";
+  const focusHandleDefs = [
+    [0,0,"nwse-resize","왼쪽 위"],[.5,0,"ns-resize","위"],[1,0,"nesw-resize","오른쪽 위"],
+    [0,.5,"ew-resize","왼쪽"],[1,.5,"ew-resize","오른쪽"],
+    [0,1,"nesw-resize","왼쪽 아래"],[.5,1,"ns-resize","아래"],[1,1,"nwse-resize","오른쪽 아래"]
+  ];
+  const focusHandles = focusHandleDefs.map(([hx,hy,cursor,label]) => {
+    const button = mkBtn("", "스포트라이트 " + label + " 크기 조절", "wb-focus-handle", (e) => e.preventDefault());
+    button.dataset.hx = String(hx); button.dataset.hy = String(hy); button.style.cursor = cursor;
+    focusControls.appendChild(button); return button;
+  });
+  const focusMoveHandle = mkBtn("✥", "스포트라이트 이동", "wb-focus-handle wb-focus-move", (e) => e.preventDefault());
+  const curtainHandle = mkBtn("⋮", "화면 가리개 경계 조절", "wb-focus-handle wb-curtain-handle", (e) => e.preventDefault());
+  curtainHandle.setAttribute("role", "slider");
+  focusControls.prepend(focusFrame); focusControls.append(focusMoveHandle, curtainHandle); stage.appendChild(focusControls);
+
+  const focusPanel = document.createElement("section"); focusPanel.className = "wb-focus-panel"; focusPanel.hidden = true;
+  focusPanel.id = "wb-focus-panel-" + doc.id; focusPanel.setAttribute("role", "dialog"); focusPanel.setAttribute("aria-label", "집중 도구 설정");
+  const focusHead = document.createElement("div"); focusHead.className = "wb-focus-head";
+  const focusTitle = document.createElement("strong"); focusTitle.textContent = "집중 도구";
+  const focusClose = mkBtn("×", "집중 도구 설정 닫기 (효과는 유지)", "wb-edu-close", () => toggleFocusPanel(false));
+  focusHead.append(focusTitle, focusClose);
+  const focusModes = document.createElement("div"); focusModes.className = "wb-focus-modes"; focusModes.setAttribute("role", "group"); focusModes.setAttribute("aria-label", "집중 도구 종류");
+  const spotlightModeBtn = mkBtn("스포트라이트", "사용할 집중 도구로 스포트라이트 선택", "wb-focus-choice", () => selectFocusMode("spotlight"));
+  const curtainModeBtn = mkBtn("화면 가리개", "사용할 집중 도구로 화면 가리개 선택", "wb-focus-choice", () => selectFocusMode("curtain"));
+  focusModes.append(spotlightModeBtn, curtainModeBtn);
+  const makeFocusRow = (label, controls) => {
+    const row=document.createElement("div"); row.className="wb-focus-row";
+    const name=document.createElement("span"); name.className="wb-focus-label"; name.textContent=label;
+    row.append(name,controls); return row;
+  };
+  const spotShapeChoices = document.createElement("div"); spotShapeChoices.className = "wb-focus-choices";
+  const ellipseFocusBtn = mkBtn("원형", "타원형 스포트라이트", "wb-focus-small", () => setFocus({spotlight:{...focus.spotlight,shape:"ellipse"}}));
+  const rectFocusBtn = mkBtn("사각형", "사각형 스포트라이트", "wb-focus-small", () => setFocus({spotlight:{...focus.spotlight,shape:"rect"}}));
+  spotShapeChoices.append(ellipseFocusBtn, rectFocusBtn);
+  const spotShapeRow = makeFocusRow("모양", spotShapeChoices);
+  const dimControls = document.createElement("div"); dimControls.className = "wb-focus-range-wrap";
+  const dimRange = document.createElement("input"); dimRange.type="range"; dimRange.min="35"; dimRange.max="90"; dimRange.step="1"; dimRange.setAttribute("aria-label","스포트라이트 어둡기");
+  const dimOutput = document.createElement("output"); dimOutput.className="wb-focus-output";
+  dimControls.append(dimRange,dimOutput); const dimRow = makeFocusRow("어둡기",dimControls);
+  const flashlightChoices=document.createElement("div"); flashlightChoices.className="wb-focus-choices";
+  const flashlightOffBtn=mkBtn("끔","손전등 효과 끄기","wb-focus-small",()=>setFocus({spotlight:{...focus.spotlight,flashlight:false}}));
+  const flashlightOnBtn=mkBtn("켬","조절점을 숨겼을 때 손전등과 빛줄기 표시","wb-focus-small",()=>setFocus({spotlight:{...focus.spotlight,flashlight:true}}));
+  flashlightChoices.append(flashlightOffBtn,flashlightOnBtn); const flashlightRow=makeFocusRow("손전등",flashlightChoices);
+  const edgeChoices = document.createElement("div"); edgeChoices.className="wb-focus-choices wb-focus-directions";
+  const edgeLabels = {top:"위",bottom:"아래",left:"왼쪽",right:"오른쪽"};
+  const edgeBtns = {};
+  for (const edge of ["top","bottom","left","right"]){
+    const button=mkBtn(edgeLabels[edge],edgeLabels[edge]+"에서 화면 가리기","wb-focus-small",()=>setFocus({curtain:{...focus.curtain,edge}}));
+    edgeBtns[edge]=button; edgeChoices.appendChild(button);
+  }
+  const edgeRow = makeFocusRow("방향",edgeChoices);
+  const curtainAmountControls=document.createElement("div"); curtainAmountControls.className="wb-focus-range-wrap";
+  const curtainAmount=document.createElement("input"); curtainAmount.type="range"; curtainAmount.min="0"; curtainAmount.max="100"; curtainAmount.step="1"; curtainAmount.setAttribute("aria-label","화면 가림 비율");
+  const curtainOutput=document.createElement("output"); curtainOutput.className="wb-focus-output";
+  curtainAmountControls.append(curtainAmount,curtainOutput); const curtainAmountRow=makeFocusRow("가림",curtainAmountControls);
+  const colorChoices=document.createElement("div"); colorChoices.className="wb-focus-choices";
+  const darkCurtainBtn=mkBtn("어두움","어두운 화면 가리개","wb-focus-small",()=>setFocus({curtain:{...focus.curtain,color:"dark"}}));
+  const lightCurtainBtn=mkBtn("밝음","밝은 화면 가리개","wb-focus-small",()=>setFocus({curtain:{...focus.curtain,color:"light"}}));
+  colorChoices.append(darkCurtainBtn,lightCurtainBtn); const colorRow=makeFocusRow("색",colorChoices);
+  const focusActions=document.createElement("div"); focusActions.className="wb-focus-actions";
+  const focusResetBtn=mkBtn("위치 초기화","집중 도구 위치와 크기 초기화","wb-focus-action",resetFocusGeometry);
+  const focusControlsBtn=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","wb-focus-action",()=>setFocusControlsVisible(!focus.controlsVisible));
+  const focusPowerBtn=mkBtn("시작","선택한 집중 효과 시작","wb-focus-action wb-focus-start",toggleFocusActive);
+  focusActions.append(focusResetBtn,focusControlsBtn,focusPowerBtn);
+  const focusHint=document.createElement("p"); focusHint.className="wb-focus-hint"; focusHint.textContent="조절점이 보이면 보드 입력을 잠급니다. 숨긴 뒤에는 판서하거나 선택 도구로 밝은 영역을 끌어 이동할 수 있습니다.";
+  focusPanel.append(focusHead,focusModes,spotShapeRow,dimRow,flashlightRow,edgeRow,curtainAmountRow,colorRow,focusActions,focusHint); stage.appendChild(focusPanel);
+  const focusContextMenu=document.createElement("div"); focusContextMenu.className="wb-focus-context-menu"; focusContextMenu.hidden=true; focusContextMenu.setAttribute("role","menu"); focusContextMenu.setAttribute("aria-label","집중 도구 빠른 메뉴");
+  const focusContextToggle=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","",()=>{
+    const next=!focus.controlsVisible; setFocusControlsVisible(next); closeFocusContextMenu();
+    if(typeof toast==="function")toast(next?"집중 도구 조절점을 표시했어요.":"집중 도구 조절점을 숨겼어요.",1300);
+  });
+  focusContextToggle.setAttribute("role","menuitem"); focusContextMenu.appendChild(focusContextToggle);
+  function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
+  function onFocusContextMenu(e){
+    if(!focus.active||focusPanel.contains(e.target)||focusControls.contains(e.target))return;
+    e.preventDefault();e.stopPropagation();
+    focusContextToggle.textContent=focus.controlsVisible?"조절점 숨기기":"조절점 보이기";
+    focusContextToggle.title=focusContextToggle.textContent;focusContextToggle.setAttribute("aria-label",focusContextToggle.textContent);
+    const menuHost=document.fullscreenElement||document.body;
+    if(focusContextMenu.parentElement!==menuHost)menuHost.appendChild(focusContextMenu);
+    focusContextMenu.hidden=false;focusContextMenu.style.left="0px";focusContextMenu.style.top="0px";
+    const rect=focusContextMenu.getBoundingClientRect(),margin=6;
+    focusContextMenu.style.left=Math.max(margin,Math.min(e.clientX,window.innerWidth-rect.width-margin))+"px";
+    focusContextMenu.style.top=Math.max(margin,Math.min(e.clientY,window.innerHeight-rect.height-margin))+"px";
+    requestAnimationFrame(()=>focusContextToggle.focus({preventScroll:true}));
+  }
+  stage.addEventListener("contextmenu",onFocusContextMenu);
+  let focusToolBtn=null, focusFlashTimer=0, focusDragCleanup=null;
+
+  const saveFocusPrefs = () => {
+    try { localStorage.setItem(WB_FOCUS_PREFS_KEY,JSON.stringify({...focus,active:false})); } catch(_){}
+  };
+  function setFocus(changes,options={}){
+    focus=normalizeWhiteboardFocusState({
+      ...focus,...changes,
+      spotlight:changes&&changes.spotlight?changes.spotlight:focus.spotlight,
+      curtain:changes&&changes.curtain?changes.curtain:focus.curtain
+    });
+    doc.boardFocus=focus;
+    if (options.persist!==false) saveFocusPrefs();
+    renderFocus();
+  }
+  function selectFocusMode(mode){
+    const changed=focus.mode!==mode;
+    setFocus({mode});
+    if (changed && focus.active && typeof toast==="function") toast(mode==="spotlight"?"스포트라이트로 바꿨어요.":"화면 가리개로 바꿨어요.",1400);
+  }
+  function startFocus(){
+    if (focus.active) return;
+    wb.selected=null;
+    setFocus({active:true,controlsVisible:true}); redraw();
+    if (typeof toast==="function") toast(focus.mode==="spotlight"?"스포트라이트를 켰어요.":"화면 가리개를 켰어요.",1600);
+  }
+  function stopFocus(){
+    if (!focus.active) return;
+    closeFocusContextMenu();
+    setFocus({active:false}); canvas.style.cursor="";
+    if (typeof toast==="function") toast("집중 효과를 종료했어요.",1400);
+  }
+  function toggleFocusActive(){ if (focus.active) stopFocus(); else startFocus(); }
+  function setFocusControlsVisible(visible){
+    if(visible&&wb.selected){wb.selected=null;redraw();}
+    setFocus({controlsVisible:!!visible});
+  }
+  function resetFocusGeometry(){
+    if (focus.mode==="spotlight") setFocus({spotlight:{...focus.spotlight,cx:.5,cy:.5,width:.36,height:.28},controlsVisible:true});
+    else setFocus({curtain:{...focus.curtain,amount:.5},controlsVisible:true});
+  }
+  function syncFocusPanel(){
+    const spotlight=focus.mode==="spotlight";
+    spotlightModeBtn.classList.toggle("selected",spotlight); curtainModeBtn.classList.toggle("selected",!spotlight);
+    spotlightModeBtn.classList.toggle("active",spotlight&&focus.active); curtainModeBtn.classList.toggle("active",!spotlight&&focus.active);
+    spotlightModeBtn.setAttribute("aria-pressed",String(spotlight)); curtainModeBtn.setAttribute("aria-pressed",String(!spotlight));
+    spotShapeRow.hidden=!spotlight; dimRow.hidden=!spotlight; flashlightRow.hidden=!spotlight; edgeRow.hidden=spotlight; curtainAmountRow.hidden=spotlight; colorRow.hidden=spotlight;
+    ellipseFocusBtn.classList.toggle("active",focus.spotlight.shape==="ellipse"); rectFocusBtn.classList.toggle("active",focus.spotlight.shape==="rect");
+    flashlightOffBtn.classList.toggle("active",!focus.spotlight.flashlight); flashlightOnBtn.classList.toggle("active",focus.spotlight.flashlight);
+    for (const edge in edgeBtns) edgeBtns[edge].classList.toggle("active",focus.curtain.edge===edge);
+    darkCurtainBtn.classList.toggle("active",focus.curtain.color==="dark"); lightCurtainBtn.classList.toggle("active",focus.curtain.color==="light");
+    dimRange.value=String(Math.round(focus.dimOpacity*100)); dimOutput.value=dimRange.value+"%"; dimOutput.textContent=dimOutput.value;
+    curtainAmount.value=String(Math.round(focus.curtain.amount*100)); curtainOutput.value=curtainAmount.value+"%"; curtainOutput.textContent=curtainOutput.value;
+    focusControlsBtn.textContent=focus.controlsVisible?"조절점 숨기기":"조절점 보이기";
+    focusControlsBtn.disabled=!focus.active; focusResetBtn.disabled=!focus.active;
+    focusPowerBtn.textContent=focus.active?"종료":"시작";
+    focusPowerBtn.title=focus.active?"집중 효과 종료 (Esc)":"선택한 집중 효과 시작"; focusPowerBtn.setAttribute("aria-label",focusPowerBtn.title);
+    focusPowerBtn.classList.toggle("wb-focus-stop",focus.active); focusPowerBtn.classList.toggle("wb-focus-start",!focus.active);
+    focusTitle.textContent="집중 도구"+(focus.active?(spotlight?" · 스포트라이트 켜짐":" · 가리개 켜짐"):" · 사용 안 함");
+    focusHint.textContent=!focus.active?"사용할 도구와 설정을 고른 뒤 시작을 누르세요.":focus.controlsVisible?"조절점이 보이면 보드 입력을 잠급니다. 숨기면 판서와 밝은 영역 이동이 가능합니다.":"드러난 영역에 판서하거나 선택 도구로 밝은 영역을 끌어 이동할 수 있습니다.";
+    if (focusToolBtn){ focusToolBtn.classList.toggle("active",focus.active); focusToolBtn.setAttribute("aria-pressed",String(focus.active)); focusToolBtn.setAttribute("aria-expanded",String(!focusPanel.hidden)); }
+  }
+  dimRange.addEventListener("input",()=>setFocus({dimOpacity:Number(dimRange.value)/100}));
+  curtainAmount.addEventListener("input",()=>setFocus({curtain:{...focus.curtain,amount:Number(curtainAmount.value)/100}}));
+  function toggleFocusPanel(force){
+    const open=force==null?focusPanel.hidden:!!force;
+    focusPanel.hidden=!open;
+    if (open){
+      if (typeof toggleEducationPanel==="function") toggleEducationPanel(false);
+      if (typeof toggleBackgroundPanel==="function") toggleBackgroundPanel(false);
+      if (focusFloat) focusFloat.clampOnOpen();
+    }
+    syncFocusPanel();
+  }
+
+  const setSvgBox=(el,x,y,w,h)=>{ el.setAttribute("x",String(x));el.setAttribute("y",String(y));el.setAttribute("width",String(Math.max(0,w)));el.setAttribute("height",String(Math.max(0,h))); };
+  renderFocus=()=>{
+    const active=focus.active&&W>0&&H>0;
+    // SVGSVGElement의 .hidden 프로퍼티는 Chromium 버전에 따라 HTML 요소처럼 속성에
+    // 반영되지 않을 수 있다. 실제 hidden 속성과 display를 함께 바꿔 종료 즉시 걷는다.
+    focusVisual.toggleAttribute("hidden",!active); focusVisual.style.display=active?"":"none";
+    focusControls.hidden=!(active&&focus.controlsVisible);
+    if (focusToolBtn){ focusToolBtn.classList.toggle("active",active); focusToolBtn.setAttribute("aria-pressed",String(active)); }
+    syncFocusPanel();
+    if (!active) return;
+    focusVisual.setAttribute("viewBox",`0 0 ${W} ${H}`); focusVisual.setAttribute("width",String(W)); focusVisual.setAttribute("height",String(H));
+    setSvgBox(focusMaskBase,0,0,W,H); setSvgBox(focusDim,0,0,W,H);
+    const g=whiteboardFocusGeometry(focus,W,H);
+    if (g.mode==="spotlight"){
+      focusDim.style.display=""; focusCurtain.style.display="none";
+      focusDim.setAttribute("fill-opacity",String(focus.dimOpacity));
+      const ellipse=g.shape==="ellipse";
+      focusMaskEllipse.style.display=ellipse?"":"none"; focusMaskRect.style.display=ellipse?"none":"";
+      focusMaskEllipse.setAttribute("cx",String(g.cx)); focusMaskEllipse.setAttribute("cy",String(g.cy)); focusMaskEllipse.setAttribute("rx",String(g.rx)); focusMaskEllipse.setAttribute("ry",String(g.ry));
+      setSvgBox(focusMaskRect,g.x,g.y,g.w,g.h);
+      focusFrame.className="wb-focus-frame"; Object.assign(focusFrame.style,{left:g.x+"px",top:g.y+"px",width:g.w+"px",height:g.h+"px",borderRadius:ellipse?"50%":"12px",border:"2px solid rgba(255,255,255,.92)"});
+      focusHandles.forEach((button,index)=>{ const [hx,hy]=focusHandleDefs[index]; button.hidden=false; button.style.left=(g.x+g.w*hx)+"px"; button.style.top=(g.y+g.h*hy)+"px"; });
+      focusMoveHandle.hidden=false; focusMoveHandle.style.left=g.cx+"px"; focusMoveHandle.style.top=g.cy+"px"; curtainHandle.hidden=true;
+      const lamp=whiteboardFlashlightGeometry(focus,W,H);
+      flashlightBeam.style.display=lamp.visible?"":"none"; flashlightBody.style.display=lamp.visible?"":"none";
+      if (lamp.visible){
+        flashlightBeam.setAttribute("d","M"+lamp.beam.map(point=>point[0]+","+point[1]).join(" L")+" Z");
+        flashlightBody.setAttribute("transform",`translate(${lamp.lensX} ${lamp.lensY}) rotate(${lamp.angle})`);
+      }
+    } else {
+      focusDim.style.display="none"; focusCurtain.style.display=""; focusMaskEllipse.style.display="none"; focusMaskRect.style.display="none";
+      flashlightBeam.style.display="none"; flashlightBody.style.display="none";
+      setSvgBox(focusCurtain,g.x,g.y,g.w,g.h); focusCurtain.setAttribute("fill",focus.curtain.color==="light"?"#ffffff":"#111827");
+      const horizontal=g.edge==="top"||g.edge==="bottom";
+      focusFrame.className="wb-focus-frame is-curtain "+(horizontal?"horizontal":"vertical");
+      Object.assign(focusFrame.style,{left:(horizontal?0:g.boundary)+"px",top:(horizontal?g.boundary:0)+"px",width:(horizontal?W:0)+"px",height:(horizontal?0:H)+"px",borderRadius:"0",border:"0"});
+      focusHandles.forEach(button=>button.hidden=true); focusMoveHandle.hidden=true; curtainHandle.hidden=false;
+      curtainHandle.textContent=horizontal?"⋯":"⋮"; curtainHandle.style.cursor=horizontal?"ns-resize":"ew-resize"; curtainHandle.style.left=(horizontal?W/2:g.boundary)+"px"; curtainHandle.style.top=(horizontal?g.boundary:H/2)+"px";
+      curtainHandle.setAttribute("aria-orientation",horizontal?"vertical":"horizontal"); curtainHandle.setAttribute("aria-valuemin","0"); curtainHandle.setAttribute("aria-valuemax","100"); curtainHandle.setAttribute("aria-valuenow",String(Math.round(g.amount*100))); curtainHandle.setAttribute("aria-valuetext",Math.round(g.amount*100)+"% 가림");
+    }
+  };
+  flashFocusBoundary=()=>{
+    if (!focus.active) return;
+    clearTimeout(focusFlashTimer); focusVisual.classList.remove("blocked"); void focusVisual.getBoundingClientRect(); focusVisual.classList.add("blocked");
+    focusFlashTimer=setTimeout(()=>focusVisual.classList.remove("blocked"),260);
+  };
+
+  const beginSpotlightDrag=(e,hx,hy,moveOnly=false)=>{
+    if (!focus.active||focus.mode!=="spotlight"||!W||!H) return;
+    e.preventDefault(); e.stopPropagation(); const target=e.currentTarget,pointerId=e.pointerId,startX=e.clientX,startY=e.clientY,g=whiteboardFocusGeometry(focus,W,H);
+    const start={left:g.x/W,top:g.y/H,right:(g.x+g.w)/W,bottom:(g.y+g.h)/H};
+    try{target.setPointerCapture(pointerId);}catch(_){}
+    const move=(ev)=>{
+      if(ev.pointerId!==pointerId)return; const dx=(ev.clientX-startX)/W,dy=(ev.clientY-startY)/H,minW=Math.min(1,96/W),minH=Math.min(1,72/H); let {left,top,right,bottom}=start;
+      if(moveOnly){ const width=right-left,height=bottom-top; left=Math.max(0,Math.min(1-width,left+dx));top=Math.max(0,Math.min(1-height,top+dy));right=left+width;bottom=top+height; }
+      else {
+        if(hx===0)left=Math.max(0,Math.min(right-minW,left+dx)); else if(hx===1)right=Math.min(1,Math.max(left+minW,right+dx));
+        if(hy===0)top=Math.max(0,Math.min(bottom-minH,top+dy)); else if(hy===1)bottom=Math.min(1,Math.max(top+minH,bottom+dy));
+      }
+      setFocus({spotlight:{...focus.spotlight,cx:(left+right)/2,cy:(top+bottom)/2,width:right-left,height:bottom-top}},{persist:false});
+    };
+    const end=(ev)=>{if(ev&&ev.pointerId!==pointerId)return;target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",end);target.removeEventListener("pointercancel",end);target.removeEventListener("lostpointercapture",end);focusDragCleanup=null;saveFocusPrefs();};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",end);target.addEventListener("pointercancel",end);target.addEventListener("lostpointercapture",end); focusDragCleanup=()=>end();
+  };
+  focusHandles.forEach(button=>button.addEventListener("pointerdown",e=>beginSpotlightDrag(e,Number(button.dataset.hx),Number(button.dataset.hy))));
+  focusMoveHandle.addEventListener("pointerdown",e=>beginSpotlightDrag(e,.5,.5,true));
+  const beginCurtainDrag=(e)=>{
+    if(!focus.active||focus.mode!=="curtain"||!W||!H)return;
+    e.preventDefault();e.stopPropagation();const target=e.currentTarget,pointerId=e.pointerId,startX=e.clientX,startY=e.clientY,startAmount=focus.curtain.amount,edge=focus.curtain.edge;
+    try{target.setPointerCapture(pointerId);}catch(_){}
+    const move=(ev)=>{if(ev.pointerId!==pointerId)return;let amount=startAmount;if(edge==="top")amount+=(ev.clientY-startY)/H;else if(edge==="bottom")amount-=(ev.clientY-startY)/H;else if(edge==="left")amount+=(ev.clientX-startX)/W;else amount-=(ev.clientX-startX)/W;amount=Math.max(0,Math.min(1,amount));if(amount<.02)amount=0;else if(amount>.98)amount=1;setFocus({curtain:{...focus.curtain,amount}},{persist:false});};
+    const end=(ev)=>{if(ev&&ev.pointerId!==pointerId)return;target.removeEventListener("pointermove",move);target.removeEventListener("pointerup",end);target.removeEventListener("pointercancel",end);target.removeEventListener("lostpointercapture",end);focusDragCleanup=null;saveFocusPrefs();};
+    target.addEventListener("pointermove",move);target.addEventListener("pointerup",end);target.addEventListener("pointercancel",end);target.addEventListener("lostpointercapture",end);focusDragCleanup=()=>end();
+  };
+  curtainHandle.addEventListener("pointerdown",beginCurtainDrag);
+  curtainHandle.addEventListener("keydown",e=>{
+    if(!focus.active||focus.mode!=="curtain"||!["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))return;
+    e.preventDefault();const delta=(e.shiftKey ? .05 : .01),increase=(focus.curtain.edge==="top"?e.key==="ArrowDown":focus.curtain.edge==="bottom"?e.key==="ArrowUp":focus.curtain.edge==="left"?e.key==="ArrowRight":e.key==="ArrowLeft");
+    setFocus({curtain:{...focus.curtain,amount:Math.max(0,Math.min(1,focus.curtain.amount+(increase?delta:-delta)))}});
+  });
+  const focusFloat=typeof makeFloatingPanel==="function"?makeFloatingPanel(focusPanel,focusHead,{
+    storageKey:"manneung-whiteboard:focus-rect:v1",min:{w:280,h:250},
+    bounds:()=>{const box=typeof byId==="function"?byId("content"):null;return box?box.getBoundingClientRect():null;},
+    host:()=>document.fullscreenElement||document.body,zIndex:()=>63
+  }):null;
 
   // ----- 수학·과학 도구상자 -----
   const eduPanel = document.createElement("section");
@@ -1603,7 +1978,7 @@ function renderWhiteboard(doc, host){
     const open = force == null ? eduPanel.hidden : !!force;
     eduPanel.hidden = !open;
     if (eduToolBtn){ eduToolBtn.classList.toggle("active", open); eduToolBtn.setAttribute("aria-expanded", open ? "true" : "false"); }
-    if (open){ renderEducationPanel(); if (eduFloat) eduFloat.clampOnOpen(); requestAnimationFrame(() => (editingFormulaItem ? formulaInput : eduSearch).focus({ preventScroll:true })); }
+    if (open){ toggleFocusPanel(false); renderEducationPanel(); if (eduFloat) eduFloat.clampOnOpen(); requestAnimationFrame(() => (editingFormulaItem ? formulaInput : eduSearch).focus({ preventScroll:true })); }
     else if (editingFormulaItem) resetFormulaEditor();
   }
   eduSearch.addEventListener("input", renderEducationPanel);
@@ -1665,7 +2040,7 @@ function renderWhiteboard(doc, host){
     bgPanel.hidden = !open;
     bgToggleBtn.classList.toggle("active", open);
     bgToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) requestAnimationFrame(() => { if (bgCustom.isConnected) bgCustom.focus({ preventScroll:true }); });
+    if (open){ toggleFocusPanel(false); requestAnimationFrame(() => { if (bgCustom.isConnected) bgCustom.focus({ preventScroll:true }); }); }
   }
   const syncBackgroundChoices = () => {
     bgToggleDot.style.background = wb.bg;
@@ -1704,6 +2079,11 @@ function renderWhiteboard(doc, host){
   zoomLabelBtn = mkBtn(Math.round(view.scale * 100) + "%", "화이트보드 배율 100%로 초기화", "wb-act wb-zoom-label", resetView);
   const zoomInBtn = mkBtn("+", "화이트보드 화면 확대", "wb-act wb-zoom-step", () => setViewScale(view.scale * 1.25));
   zoomGroup.append(zoomOutBtn, zoomLabelBtn, zoomInBtn);
+
+  const focusGroup=grp();
+  focusToolBtn=mkBtn("◉","집중 도구 — 스포트라이트·화면 가리개","wb-act wb-focus-toggle",()=>toggleFocusPanel());
+  focusToolBtn.setAttribute("aria-controls",focusPanel.id); focusToolBtn.setAttribute("aria-expanded","false"); focusToolBtn.setAttribute("aria-pressed",String(focus.active));
+  focusGroup.appendChild(focusToolBtn);
 
   const imgGroup = grp();
   eduToolBtn = mkBtn("∑", "수학·과학 도구상자", "wb-act wb-edu-toggle", () => toggleEducationPanel());
@@ -1792,8 +2172,8 @@ function renderWhiteboard(doc, host){
   posGroup.appendChild(dragHandle);
   applyPos(curPos);
 
-  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, zoomGroup, imgGroup, actGroup, exportGroup, recGroup);
-  if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){ window.MNI18N.translateTree(tools); window.MNI18N.translateTree(bgPanel); }
+  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, zoomGroup, focusGroup, imgGroup, actGroup, exportGroup, recGroup);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){ window.MNI18N.translateTree(tools); window.MNI18N.translateTree(bgPanel); window.MNI18N.translateTree(focusPanel); }
   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로. 펜 색은 배경에 묻히지 않는 쪽으로 시작한다
   // (칠판 배경으로 저장해 둔 보드를 다시 열었을 때 검정 펜으로 시작하면 그어도 아무것도 안 보인다).
   const startInk = (typeof boardInkForBackground === "function" && boardInkForBackground(wb.bg, "#111111")) || "#111111";
@@ -1805,7 +2185,7 @@ function renderWhiteboard(doc, host){
     const ae = document.activeElement;
     if (ae && ae.classList && ae.classList.contains("wb-textinput")) return;
     const interactive = ae && (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(ae.tagName) || ae.isContentEditable);
-    if (e.code === "Space" && !interactive && eduPanel.hidden && bgPanel.hidden){
+    if (e.code === "Space" && !interactive && eduPanel.hidden && bgPanel.hidden && focusPanel.hidden){
       e.preventDefault(); e.stopPropagation(); spacePanning = true; canvas.classList.add("pan-ready"); return;
     }
     if (e.key === "Escape" && !bgPanel.hidden){
@@ -1814,8 +2194,14 @@ function renderWhiteboard(doc, host){
     if (e.key === "Escape" && !eduPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleEducationPanel(false); return;
     }
+    if (e.key === "Escape" && !focusContextMenu.hidden){ e.preventDefault(); e.stopPropagation(); closeFocusContextMenu(); return; }
+    if (e.key === "Escape" && !focusPanel.hidden){
+      e.preventDefault(); e.stopPropagation(); toggleFocusPanel(false); if (focusToolBtn) focusToolBtn.focus(); return;
+    }
+    if (e.key === "Escape" && focus.active){ e.preventDefault(); e.stopPropagation(); stopFocus(); return; }
     if (!bgPanel.hidden && ae && bgPanel.contains(ae)) return;
     if (!eduPanel.hidden && ae && eduPanel.contains(ae)) return;
+    if (!focusPanel.hidden && ae && focusPanel.contains(ae)) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey){
       const k = String(e.key).toLowerCase();
       if (k === "z" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); doUndo(); }
@@ -1829,9 +2215,10 @@ function renderWhiteboard(doc, host){
     if (e.code !== "Space") return;
     spacePanning = false; canvas.classList.remove("pan-ready");
   };
-  const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); };
+  const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); closeFocusContextMenu(); };
   // 배경색 판은 색만 고르면 볼 일이 끝나므로 바깥을 누르면 닫는다(색 고르개 창은 문서 밖이라 걸리지 않는다).
   const onPointerDownOutside = (e) => {
+    if (!focusContextMenu.hidden && !focusContextMenu.contains(e.target)) closeFocusContextMenu();
     if (bgPanel.hidden) return;
     const target = e.target;
     if (bgPanel.contains(target) || bgToggleBtn.contains(target)) return;
@@ -1849,7 +2236,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
@@ -1858,6 +2245,7 @@ if (typeof module !== "undefined" && module.exports){
     whiteboardClipboardItem,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
-    whiteboardClampView, whiteboardZoomAt
+    whiteboardClampView, whiteboardZoomAt,
+    normalizeWhiteboardFocusState, whiteboardFocusGeometry, whiteboardFocusAllowsPoint, whiteboardFlashlightGeometry
   };
 }
