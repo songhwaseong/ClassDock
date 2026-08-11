@@ -10,6 +10,39 @@ const WB_EDU_TRANSFER_TYPE = "application/x-manneung-whiteboard-education";
 const WB_ITEM_TRANSFER_TYPE = "application/x-manneung-whiteboard-item";
 const WB_FORMULA_LIBRARY_KEY = "mn.wbFormulaLibrary.v1";
 const WB_FOCUS_PREFS_KEY = "manneung-whiteboard:focus-prefs:v1";
+const WB_TEXT_SIZE_MIN = 12;
+const WB_TEXT_SIZE_MAX = 72;
+const WB_OBJECT_SCALE_MIN = 25;
+const WB_OBJECT_SCALE_MAX = 400;
+
+function normalizeWhiteboardTextSize(value, fallback=16){
+  const fallbackNumber = Number(fallback);
+  const safeFallback = Number.isFinite(fallbackNumber) ? fallbackNumber : 16;
+  const number = value == null || String(value).trim() === "" ? NaN : Number(value);
+  return Math.max(WB_TEXT_SIZE_MIN, Math.min(WB_TEXT_SIZE_MAX, Math.round(Number.isFinite(number) ? number : safeFallback)));
+}
+
+function normalizeWhiteboardObjectScale(value, fallback=100){
+  const fallbackNumber = Number(fallback);
+  const safeFallback = Number.isFinite(fallbackNumber) ? fallbackNumber : 100;
+  const number = value == null || String(value).trim() === "" ? NaN : Number(value);
+  return Math.max(WB_OBJECT_SCALE_MIN, Math.min(WB_OBJECT_SCALE_MAX, Math.round(Number.isFinite(number) ? number : safeFallback)));
+}
+
+function whiteboardObjectScalePercent(value){
+  if (!value || typeof value !== "object") return 0;
+  if (value.type === "image" && value.role === "education-formula"){
+    const baseW = Number(value.formulaBaseW) || (value.img && value.img.naturalWidth) || value.w;
+    const baseH = Number(value.formulaBaseH) || (value.img && value.img.naturalHeight) || value.h;
+    return Math.round(Math.sqrt(Math.max(.0001, Number(value.w) * Number(value.h) / Math.max(1, baseW * baseH))) * 100);
+  }
+  if (value.type === "group" && value.role === "education-stencil"){
+    const baseW = Number(value.sourceW) || Number(value.w) || 240;
+    const baseH = Number(value.sourceH) || Number(value.h) || 190;
+    return Math.round(Math.sqrt(Math.max(.0001, Number(value.w) * Number(value.h) / Math.max(1, baseW * baseH))) * 100);
+  }
+  return 0;
+}
 
 // Ctrl+C/Ctrl+V에서는 캔버스의 선택 항목을 화면 캡처가 아닌 편집 가능한 모델로 전달한다.
 function whiteboardClipboardItem(value){
@@ -663,7 +696,7 @@ function validBoardSnapshot(saved){
 function boardStateFromSnapshot(saved){
   const snapshot = validBoardSnapshot(saved);
   if (!snapshot) return null;
-  return { tool:"pen", color:"#111111", width:4, bg:boardSnapshotBg(snapshot.bg), items:snapshot.items, selected:null };
+  return { tool:"pen", color:"#111111", width:4, textSize:normalizeWhiteboardTextSize(snapshot.textSize), bg:boardSnapshotBg(snapshot.bg), items:snapshot.items, selected:null };
 }
 // 메모 에셋과 자동복원본이 모두 있으면 더 최근 스냅샷을 쓴다. 예전 스냅샷처럼 시각이
 // 없거나 같으면 메모에 확정 저장된 supplied 쪽을 우선해 낡은 복구본이 덮어쓰지 않게 한다.
@@ -716,7 +749,8 @@ function renderWhiteboard(doc, host){
   // wb: 보드 상태(전역 active 문서 변수 state 와 헷갈리지 않게 이름 분리)
   // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
-  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, items: [], bg: defaultBoardBg(), selected: null });
+  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, textSize:16, items: [], bg: defaultBoardBg(), selected: null });
+  wb.textSize = normalizeWhiteboardTextSize(wb.textSize);
   // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
   const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
   Object.assign(view, whiteboardClampView(view, 0, 0));
@@ -758,6 +792,7 @@ function renderWhiteboard(doc, host){
     version:1,
     savedAt:Date.now(),
     bg:wb.bg,
+    textSize:wb.textSize,
     items:wb.items.map(item => {
       const copy = { ...item };
       if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
@@ -1130,7 +1165,7 @@ function renderWhiteboard(doc, host){
   // ----- 텍스트 도구: 클릭 위치에 인라인 입력 -----
   function startText(p, existing){
     const ta = document.createElement("textarea"); ta.className = "wb-textinput"; ta.rows = 1;
-    const fs = existing ? Math.max(14, Number(existing.fontSize) || 16) : Math.max(14, wb.width * 4);
+    const fs = existing ? Math.max(14, Number(existing.fontSize) || 16) : normalizeWhiteboardTextSize(wb.textSize);
     const color = existing ? existing.color : wb.color;
     ta.style.color = color; ta.style.fontSize = fs + "px"; ta.style.transformOrigin = "0 0";
     positionTextEditor = () => {
@@ -1573,7 +1608,8 @@ function renderWhiteboard(doc, host){
   const widthBtns = {};
   const contextWidthBtns = {};
   const FORMULA_SIZE_PRESETS = { 2:.75, 4:1, 8:1.5 };
-  let customColor = null, contextCustomColor = null;
+  let customColor = null, contextCustomColor = null, textSizeInput = null, contextTextSizeInput = null;
+  let textSizeCaption = null, textSizeUnit = null, contextTextSizeLabel = null, contextTextSizeUnit = null;
   let undoBtn, redoBtn, contextUndoBtn, contextRedoBtn;
   const setTool = (t) => {
     wb.tool = t; for (const k in toolBtns) toolBtns[k].classList.toggle("active", k === t);
@@ -1615,6 +1651,37 @@ function renderWhiteboard(doc, host){
     }
     wb.width = w; syncSelectionControls();
   };
+  const setTextSize = (value) => {
+    const selected = wb.selected;
+    const fallback = selected && selected.type === "text" ? selected.fontSize : wb.textSize;
+    const size = normalizeWhiteboardTextSize(value, fallback);
+    wb.textSize = size;
+    if (selected && selected.type === "text"){
+      if (Number(selected.fontSize) === size && Number(selected.textBaseFontSize) === size){ syncSelectionControls(); return; }
+      replaceSelectedItem(selected, Object.assign({}, selected, { fontSize:size, textBaseFontSize:size }));
+      return;
+    }
+    syncSelectionControls(); scheduleBoardRecovery();
+  };
+  const setDirectSize = (value) => {
+    const selected = wb.selected;
+    const objectScale = whiteboardObjectScalePercent(selected);
+    if (objectScale){
+      const percent = normalizeWhiteboardObjectScale(value, objectScale);
+      if (Math.abs(objectScale - percent) < 1){ syncSelectionControls(); return; }
+      if (selected.type === "image") resizeSelectedFormula(percent / 100);
+      else resizeSelectedPreset(percent / 100);
+      return;
+    }
+    setTextSize(value);
+  };
+  const bindTextSizeInput = (input) => {
+    input.addEventListener("change", () => setDirectSize(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault(); setDirectSize(input.value); input.select();
+    });
+  };
   function syncSelectionControls(){
     const selected = wb.selected;
     const formula = selected && selected.type === "image" && selected.role === "education-formula" ? selected : null;
@@ -1626,6 +1693,22 @@ function renderWhiteboard(doc, host){
     for (const k in contextSwatchEls){ contextSwatchEls[k].classList.toggle("active", k === activeColor); contextSwatchEls[k].setAttribute("aria-checked",String(k === activeColor)); }
     if (customColor && /^#[0-9a-f]{6}$/i.test(activeColor)) customColor.value = activeColor;
     if (contextCustomColor && /^#[0-9a-f]{6}$/i.test(activeColor)) contextCustomColor.value = activeColor;
+    const objectScale = whiteboardObjectScalePercent(formula || stencil);
+    const directValue = objectScale || normalizeWhiteboardTextSize(text ? text.fontSize : wb.textSize);
+    const directLabel = formula ? "수식" : stencil ? "도형" : "글자";
+    const directUnit = objectScale ? "%" : "px";
+    const directMin = objectScale ? WB_OBJECT_SCALE_MIN : WB_TEXT_SIZE_MIN;
+    const directMax = objectScale ? WB_OBJECT_SCALE_MAX : WB_TEXT_SIZE_MAX;
+    const directTitle = objectScale ? `${directLabel} 크기 직접 입력 (${directMin}~${directMax}%)` : `글자 크기 직접 입력 (${directMin}~${directMax}px)`;
+    if (textSizeCaption) textSizeCaption.textContent = directLabel;
+    if (contextTextSizeLabel) contextTextSizeLabel.textContent = directLabel;
+    if (textSizeUnit) textSizeUnit.textContent = directUnit;
+    if (contextTextSizeUnit) contextTextSizeUnit.textContent = directUnit;
+    for (const input of [textSizeInput, contextTextSizeInput]){
+      if (!input) continue;
+      input.min = String(directMin); input.max = String(directMax); input.title = directTitle; input.setAttribute("aria-label", directTitle);
+      if (document.activeElement !== input) input.value = String(directValue);
+    }
     let currentScale = 0, sizeLabel = "굵기";
     if (formula){
       const baseW = Number(formula.formulaBaseW) || (formula.img && formula.img.naturalWidth) || formula.w;
@@ -1858,12 +1941,21 @@ function renderWhiteboard(doc, host){
   });
   contextInkRow.append(contextColors,contextWidths); contextInkSection.appendChild(contextInkRow);
 
+  const contextTextSizeSection=makeContextSection("크기 직접 입력","wb-context-text-size-section");
+  const contextTextSizeControl=document.createElement("label"); contextTextSizeControl.className="wb-context-text-size-control";
+  contextTextSizeLabel=document.createElement("span"); contextTextSizeLabel.textContent="글자";
+  contextTextSizeInput=document.createElement("input"); contextTextSizeInput.type="number"; contextTextSizeInput.className="wb-text-size-input";
+  contextTextSizeInput.min=String(WB_TEXT_SIZE_MIN); contextTextSizeInput.max=String(WB_TEXT_SIZE_MAX); contextTextSizeInput.step="1"; contextTextSizeInput.inputMode="numeric";
+  contextTextSizeInput.value=String(wb.textSize); contextTextSizeInput.title="글자 크기 직접 입력 (12~72px)"; contextTextSizeInput.setAttribute("aria-label",contextTextSizeInput.title);
+  contextTextSizeUnit=document.createElement("span"); contextTextSizeUnit.textContent="px";
+  bindTextSizeInput(contextTextSizeInput); contextTextSizeControl.append(contextTextSizeLabel,contextTextSizeInput,contextTextSizeUnit); contextTextSizeSection.appendChild(contextTextSizeControl);
+
   const contextHistorySection=makeContextSection("","wb-context-history");
   const contextHistoryActions=document.createElement("div"); contextHistoryActions.className="wb-context-actions wb-context-history-actions";
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextOutputSection,contextRecordSection,contextPositionSection,contextToolSection,contextInkSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextOutputSection,contextRecordSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
@@ -1919,6 +2011,7 @@ function renderWhiteboard(doc, host){
     });
   }
   focusContextMenu.addEventListener("keydown",e=>{
+    if(e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLSelectElement)return;
     if(!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key))return;
     const buttons=[...focusContextMenu.querySelectorAll("button:not(:disabled)")].filter(button=>!button.hidden&&!button.closest("[hidden]"));
     if(!buttons.length)return; e.preventDefault();
@@ -2437,6 +2530,15 @@ function renderWhiteboard(doc, host){
   const widthGroup = grp();
   [["2", "S", 2], ["4", "M", 4], ["8", "L", 8]].forEach(([k, label, w]) => { const b = mkBtn(label, "굵기 " + label, "wb-width", () => setWidth(w)); widthBtns[k] = b; widthGroup.appendChild(b); });
 
+  const textSizeGroup = grp(); textSizeGroup.classList.add("wb-text-size-group");
+  const textSizeLabel = document.createElement("label"); textSizeLabel.className = "wb-text-size-control";
+  textSizeCaption = document.createElement("span"); textSizeCaption.textContent = "글자";
+  textSizeInput = document.createElement("input"); textSizeInput.type = "number"; textSizeInput.className = "wb-text-size-input";
+  textSizeInput.min = String(WB_TEXT_SIZE_MIN); textSizeInput.max = String(WB_TEXT_SIZE_MAX); textSizeInput.step = "1"; textSizeInput.inputMode = "numeric";
+  textSizeInput.value = String(wb.textSize); textSizeInput.title = "글자 크기 직접 입력 (12~72px)"; textSizeInput.setAttribute("aria-label", textSizeInput.title);
+  textSizeUnit = document.createElement("span"); textSizeUnit.textContent = "px";
+  bindTextSizeInput(textSizeInput); textSizeLabel.append(textSizeCaption, textSizeInput, textSizeUnit); textSizeGroup.appendChild(textSizeLabel);
+
   const zoomGroup = grp();
   const zoomOutBtn = mkBtn("−", "화이트보드 화면 축소", "wb-act wb-zoom-step", () => setViewScale(view.scale / 1.25));
   zoomLabelBtn = mkBtn(Math.round(view.scale * 100) + "%", "화이트보드 배율 100%로 초기화", "wb-act wb-zoom-label", resetView);
@@ -2551,7 +2653,7 @@ function renderWhiteboard(doc, host){
   posGroup.appendChild(dragHandle);
   applyPos(curPos);
 
-  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, zoomGroup, focusGroup, imgGroup, actGroup, exportGroup, recGroup);
+  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, textSizeGroup, zoomGroup, focusGroup, imgGroup, actGroup, exportGroup, recGroup);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){ window.MNI18N.translateTree(tools); window.MNI18N.translateTree(bgPanel); window.MNI18N.translateTree(focusPanel); }
   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로. 펜 색은 배경에 묻히지 않는 쪽으로 시작한다
   // (칠판 배경으로 저장해 둔 보드를 다시 열었을 때 검정 펜으로 시작하면 그어도 아무것도 안 보인다).
@@ -2629,7 +2731,7 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
     whiteboardClipboardItem, setWhiteboardInternalClipboard, getWhiteboardInternalClipboard, hasWhiteboardInternalClipboard,
-    whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem,
+    whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem, normalizeWhiteboardTextSize, normalizeWhiteboardObjectScale, whiteboardObjectScalePercent,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,

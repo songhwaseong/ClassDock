@@ -33,6 +33,9 @@ test("화이트보드 우클릭 메뉴는 도구·색상·굵기·이력을 도�
   assert.match(source, /focusContextSection\.hidden=!focus\.active/);
   assert.match(css, /\.wb-context-tools\{display:grid/);
   assert.match(css, /\.wb-context-swatch\.active/);
+  assert.match(css, /\.wb-focus-context-menu\{[^}]*box-sizing:border-box[^}]*overflow-x:hidden[^}]*overflow-y:auto/);
+  assert.match(css, /\.wb-context-ink\{[^}]*flex-wrap:wrap/);
+  assert.match(css, /\.wb-context-colors,\.wb-context-widths\{[^}]*flex-wrap:wrap[^}]*max-width:100%/);
 });
 
 test("화이트보드 우클릭 메뉴는 키보드 이동과 바깥 클릭 닫기를 지원한다", () => {
