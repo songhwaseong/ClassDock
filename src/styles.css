@@ -1843,13 +1843,16 @@
   .wb-context-wide{display:block;width:100%;text-align:left!important}
   .wb-context-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
   .wb-focus-context-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wb-context-output-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .wb-context-record-actions{grid-template-columns:1fr}
+  .wb-context-position-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
   .wb-context-actions .wb-context-danger{color:#dc2626}
   .wb-context-actions .wb-context-danger:hover,.wb-context-actions .wb-context-danger:focus-visible{background:color-mix(in srgb,#dc2626 12%,transparent);color:#dc2626}
   .wb-context-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
   .wb-context-tool{display:flex;align-items:center;justify-content:flex-start;gap:5px;width:100%;text-align:left!important}
   .wb-context-tool .wb-icon{width:15px;height:15px;flex:0 0 auto}
-  .wb-context-tool.active,.wb-context-width.active,.wb-focus-context-choice.active{background:var(--accent);color:#fff}
-  .wb-context-tool.active:hover,.wb-context-tool.active:focus-visible,.wb-context-width.active:hover,.wb-context-width.active:focus-visible,.wb-focus-context-choice.active:hover,.wb-focus-context-choice.active:focus-visible{background:var(--accent);color:#fff;filter:brightness(1.06)}
+  .wb-context-tool.active,.wb-context-width.active,.wb-focus-context-choice.active,.wb-context-position.active{background:var(--accent);color:#fff}
+  .wb-context-tool.active:hover,.wb-context-tool.active:focus-visible,.wb-context-width.active:hover,.wb-context-width.active:focus-visible,.wb-focus-context-choice.active:hover,.wb-focus-context-choice.active:focus-visible,.wb-context-position.active:hover,.wb-context-position.active:focus-visible{background:var(--accent);color:#fff;filter:brightness(1.06)}
   .wb-context-ink{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .wb-context-colors,.wb-context-widths{display:flex;align-items:center;gap:4px}
   .wb-focus-context-menu .wb-context-swatch{display:block;width:21px;height:21px;padding:0;border:1px solid transparent;border-radius:50%}

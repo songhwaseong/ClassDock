@@ -136,5 +136,5 @@ test("집중 도구 UI는 화면 오버레이·입력 차단·정리·원본 내
   assert.match(css,/\.wb-flashlight-body/);
   assert.match(css,/\.wb-focus-context-menu/);
   assert.match(css,/\.wb-focus-context-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
-  assert.match(css,/\.wb-focus-context-choice\.active\{background:var\(--accent\);color:#fff\}/);
+  assert.match(css,/\.wb-focus-context-choice\.active(?:,[^{]+)?\{background:var\(--accent\);color:#fff\}/);
 });

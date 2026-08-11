@@ -1810,6 +1810,28 @@ function renderWhiteboard(doc, host){
   contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextEducationBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
   contextBoardSection.appendChild(contextBoardActions);
 
+  const contextOutputSection=makeContextSection("출력·공유","wb-context-output");
+  const contextOutputActions=document.createElement("div"); contextOutputActions.className="wb-context-actions wb-context-output-actions";
+  const contextPngBtn=contextAction("PNG 저장","현재 보드를 PNG 이미지로 저장","",exportPng);
+  const contextPdfBtn=contextAction("PDF 저장","현재 보드를 PDF로 저장","",exportPdf);
+  const contextPrintBtn=contextAction("인쇄","현재 보드 판서 내용 인쇄","",printBoard);
+  const contextMemoBtn=contextAction("메모로","현재 보드를 편집 가능한 상태로 메모창에 보내기","",sendToMemo);
+  contextOutputActions.append(contextPngBtn,contextPdfBtn,contextPrintBtn,contextMemoBtn); contextOutputSection.appendChild(contextOutputActions);
+
+  const contextRecordSection=makeContextSection("수업 기록","wb-context-record-section");
+  const contextRecordActions=document.createElement("div"); contextRecordActions.className="wb-context-actions wb-context-record-actions";
+  const contextRecordBtn=contextAction("● 녹화 시작","수업 리플레이 녹화 시작","wb-context-record",toggleRecord);
+  contextRecordActions.appendChild(contextRecordBtn); contextRecordSection.appendChild(contextRecordActions);
+
+  const contextPositionSection=makeContextSection("도구막대 위치","wb-context-position-section");
+  const contextPositionActions=document.createElement("div"); contextPositionActions.className="wb-context-actions wb-context-position-actions";
+  const contextPositionBtns={};
+  [["top","위"],["right","오른쪽"],["bottom","아래"],["left","왼쪽"]].forEach(([position,label])=>{
+    const button=contextAction(label,"도구막대를 "+label+"에 배치","wb-context-position",()=>setToolbarPosition(position));
+    button.setAttribute("aria-pressed","false"); contextPositionBtns[position]=button; contextPositionActions.appendChild(button);
+  });
+  contextPositionSection.appendChild(contextPositionActions);
+
   const contextToolSection=makeContextSection("필기·도형 도구");
   const contextToolGrid=document.createElement("div"); contextToolGrid.className="wb-context-tools";
   const contextToolLabels={select:"선택",pen:"펜",highlighter:"형광펜",eraser:"지우개",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",text:"텍스트"};
@@ -1841,7 +1863,7 @@ function renderWhiteboard(doc, host){
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextToolSection,contextInkSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextOutputSection,contextRecordSection,contextPositionSection,contextToolSection,contextInkSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
@@ -1857,6 +1879,7 @@ function renderWhiteboard(doc, host){
     focusContextSection.hidden=!focus.active;
     contextItemSection.hidden=!selected;
     contextBoardSection.hidden=!!selected;
+    contextOutputSection.hidden=!!selected; contextRecordSection.hidden=!!selected; contextPositionSection.hidden=!!selected;
     contextItemName.textContent=selected?(typeLabels[selected.type]||"화이트보드 항목"):"";
     contextEditBtn.hidden=!(selected&&(selected.type==="text"||formula));
     contextFlipXBtn.hidden=!stencil; contextFlipYBtn.hidden=!stencil;
@@ -1868,6 +1891,12 @@ function renderWhiteboard(doc, host){
     const focusBlocksInsert=focus.active&&focus.controlsVisible;
     contextImageBtn.disabled=focusBlocksInsert; contextEducationBtn.disabled=focusBlocksInsert; contextPasteBoardBtn.disabled=contextPasteBoardBtn.disabled||focusBlocksInsert;
     contextClearBtn.disabled=!wb.items.length;
+    const boardEmpty=!wb.items.length;
+    contextPngBtn.disabled=boardEmpty; contextPdfBtn.disabled=boardEmpty; contextPrintBtn.disabled=boardEmpty; contextMemoBtn.disabled=boardEmpty;
+    syncRecordButtons();
+    for(const position in contextPositionBtns){
+      const active=position===curPos; contextPositionBtns[position].classList.toggle("active",active); contextPositionBtns[position].setAttribute("aria-pressed",String(active));
+    }
     const spotlightMode=focus.mode==="spotlight";
     focusContextEllipseBtn.hidden=!spotlightMode; focusContextRectBtn.hidden=!spotlightMode;
     focusContextEllipseBtn.classList.toggle("active",spotlightMode&&focus.spotlight.shape==="ellipse");
@@ -2447,19 +2476,27 @@ function renderWhiteboard(doc, host){
   const recGroup = grp();
   const recBtn = mkBtn("● 녹화", "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요", "wb-act wb-rec", () => toggleRecord());
   recGroup.appendChild(recBtn);
+  function syncRecordButtons(){
+    const recording=!!(doc.recorder&&doc.recorder.active);
+    recBtn.classList.toggle("recording",recording);
+    recBtn.textContent=recording?"■ 정지":"● 녹화";
+    recBtn.title=recording?"녹화 정지 — 지금까지 판서를 리플레이로 만들기":"수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요";
+    contextRecordBtn.classList.toggle("recording",recording); contextRecordBtn.classList.toggle("wb-context-danger",recording);
+    contextRecordBtn.textContent=recording?"■ 녹화 정지":"● 녹화 시작";
+    contextRecordBtn.title=recording?"녹화를 정지하고 수업 리플레이 만들기":"수업 리플레이 녹화 시작";
+    contextRecordBtn.setAttribute("aria-label",contextRecordBtn.title);
+  }
   function toggleRecord(){
     if (typeof LessonRecorder !== "function"){ if (typeof toast === "function") toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
     if (doc.recorder && doc.recorder.active){
       const lesson = doc.recorder.stop(wb.items, wb.bg, { W, H });
       doc.recorder = null;
-      recBtn.classList.remove("recording"); recBtn.textContent = "● 녹화";
-      recBtn.title = "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요";
+      syncRecordButtons();
       if (lesson && lesson.keyframes.length > 1 && typeof finishLessonRecording === "function") finishLessonRecording(lesson, doc.name);
       else if (typeof toast === "function") toast("녹화된 판서가 없어요.", 2000);
     } else {
       doc.recorder = LessonRecorder(wb.items, wb.bg, { W, H });
-      recBtn.classList.add("recording"); recBtn.textContent = "■ 정지";
-      recBtn.title = "녹화 정지 — 지금까지 판서를 리플레이로 만들기";
+      syncRecordButtons();
       if (typeof toast === "function") toast("녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
     }
   }
@@ -2470,6 +2507,10 @@ function renderWhiteboard(doc, host){
   let curPos = readPos();
   const applyPos = (p) => { POS_SEQ.forEach(x => wrap.classList.toggle("tb-pos-" + x, x === p)); };
   const savePos = (p) => { try { localStorage.setItem("wbToolbarPos", p); } catch(_){} };
+  function setToolbarPosition(position){
+    if(!POS_SEQ.includes(position))return;
+    curPos=position; applyPos(curPos); savePos(curPos);
+  }
   const dragHandle = document.createElement("span");
   dragHandle.className = "wb-drag"; dragHandle.title = "끌어서 도구막대 위치 바꾸기 — 상/하 가로, 좌/우 세로";
   dragHandle.textContent = "⋮⋮";
