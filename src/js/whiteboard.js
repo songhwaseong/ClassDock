@@ -28,6 +28,19 @@ function whiteboardClipboardItem(value){
   }
 }
 
+let _whiteboardInternalClipboard = null;
+function setWhiteboardInternalClipboard(value){
+  const item = whiteboardClipboardItem(value);
+  _whiteboardInternalClipboard = item;
+  return !!item;
+}
+function getWhiteboardInternalClipboard(){
+  return whiteboardClipboardItem(_whiteboardInternalClipboard);
+}
+function hasWhiteboardInternalClipboard(){
+  return !!_whiteboardInternalClipboard;
+}
+
 const WB_COLORABLE_TYPES = new Set(["pen", "highlighter", "line", "arrow", "rect", "ellipse", "polyline", "text"]);
 
 // 선택 항목의 색을 바꿀 때 이전 Undo 스냅샷이 함께 변하지 않도록 새 객체로 만든다.
@@ -869,11 +882,31 @@ function renderWhiteboard(doc, host){
   const doUndo = () => { if (history.undo()) recordCommit(); };
   const doRedo = () => { if (history.redo()) recordCommit(); };
   const clearAll = () => { if (!wb.items.length) return; wb.items = []; wb.selected = null; redraw(); history.commit(); recordCommit(); };
+  const confirmClearAll = () => {
+    if (!wb.items.length) return;
+    if (typeof confirmDialog === "function") confirmDialog("보드 내용을 모두 지울까요?", "지우기", "취소").then(ok => { if (ok) clearAll(); });
+    else clearAll();
+  };
   const deleteSelected = () => {
     if (!wb.selected) return false;
     const selected = wb.selected;
     wb.items = wb.items.filter(it => it !== selected); wb.selected = null;
     redraw(); history.commit(); recordCommit();
+    return true;
+  };
+  const moveSelectedLayer = (direction) => {
+    const selected = wb.selected, index = selected ? wb.items.indexOf(selected) : -1;
+    if (index < 0) return false;
+    const last = wb.items.length - 1;
+    if ((direction === "forward" || direction === "front") && index >= last) return false;
+    if ((direction === "backward" || direction === "back") && index <= 0) return false;
+    const next = wb.items.slice();
+    if (direction === "forward") [next[index], next[index + 1]] = [next[index + 1], next[index]];
+    else if (direction === "backward") [next[index], next[index - 1]] = [next[index - 1], next[index]];
+    else if (direction === "front"){ next.splice(index, 1); next.push(selected); }
+    else if (direction === "back"){ next.splice(index, 1); next.unshift(selected); }
+    else return false;
+    wb.items = next; redraw(); history.commit(); recordCommit();
     return true;
   };
   const flipSelected = (axis) => {
@@ -1289,12 +1322,12 @@ function renderWhiteboard(doc, host){
     wb.items.push(group); wb.selected = group; setTool("select"); redraw(); history.commit(); recordCommit();
     return true;
   };
-  const pasteBoardClipboardItem = (raw) => {
+  const pasteBoardClipboardItem = (raw, destinationOverride=null) => {
     let item = whiteboardClipboardItem(raw);
     if (!item || !isSelectableBoardItem(item)) return false;
     const bounds = boundsOf(item);
     if (!bounds) return false;
-    const destination = !wb.selected && lastBoardPointer;
+    const destination = destinationOverride || (!wb.selected && lastBoardPointer);
     const dx = destination ? destination.x - (bounds.x + bounds.w / 2) : 24;
     const dy = destination ? destination.y - (bounds.y + bounds.h / 2) : 24;
     item = translateBoardItem(item, dx, dy);
@@ -1317,26 +1350,31 @@ function renderWhiteboard(doc, host){
     } else commit();
     return true;
   };
-  const onCopy = (e) => {
+  let contextCopyHandled = false;
+  const writeSelectedClipboardEvent = (e) => {
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
     if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
     const item = whiteboardClipboardItem(wb.selected);
     if (!item || !e.clipboardData) return;
+    setWhiteboardInternalClipboard(item);
     e.preventDefault();
     e.clipboardData.setData(WB_ITEM_TRANSFER_TYPE, JSON.stringify(item));
     const fallback = item.role === "education-formula" ? item.formulaSource
       : item.type === "text" ? item.text : "화이트보드 항목";
     e.clipboardData.setData("text/plain", String(fallback || "화이트보드 항목"));
     contextCopyHandled = true;
+    return true;
   };
+  const onCopy = (e) => { writeSelectedClipboardEvent(e); };
+  const onCut = (e) => { if (writeSelectedClipboardEvent(e)) deleteSelected(); };
   // 붙여넣기(Ctrl+V): 화이트보드 항목을 우선 복원하고, 없으면 외부 클립보드 이미지를 넣는다.
   const onPaste = (e) => {
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
     if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
     const boardItem = e.clipboardData && e.clipboardData.getData(WB_ITEM_TRANSFER_TYPE);
-    if (boardItem && pasteBoardClipboardItem(boardItem)){ e.preventDefault(); return; }
+    if (boardItem && pasteBoardClipboardItem(boardItem)){ setWhiteboardInternalClipboard(boardItem); e.preventDefault(); return; }
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for (const it of items){
       if (it.kind === "file" && /^image\//.test(it.type)){
@@ -1346,14 +1384,30 @@ function renderWhiteboard(doc, host){
     }
   };
   document.addEventListener("copy", onCopy);
+  document.addEventListener("cut", onCut);
   document.addEventListener("paste", onPaste);
-  let contextCopyHandled = false;
   const copySelectedFromMenu = () => {
-    if (!whiteboardClipboardItem(wb.selected)) return false;
+    const item = whiteboardClipboardItem(wb.selected);
+    if (!item || !setWhiteboardInternalClipboard(item)) return false;
     contextCopyHandled = false;
     try { document.execCommand("copy"); } catch(_){}
-    if (typeof toast === "function") toast(contextCopyHandled ? "선택한 항목을 복사했어요." : "복사하지 못했어요. Ctrl+C를 사용해 주세요.", 1800);
-    return contextCopyHandled;
+    if (typeof toast === "function") toast("선택한 항목을 복사했어요.", 1500);
+    return true;
+  };
+  const cutSelectedFromMenu = () => {
+    const item = whiteboardClipboardItem(wb.selected);
+    if (!item || !setWhiteboardInternalClipboard(item)) return false;
+    contextCopyHandled = false;
+    try { document.execCommand("copy"); } catch(_){}
+    if (!deleteSelected()) return false;
+    if (typeof toast === "function") toast("선택한 항목을 잘라냈어요.", 1500);
+    return true;
+  };
+  const pasteInternalClipboardAt = (point) => {
+    const item = getWhiteboardInternalClipboard();
+    if (!item || !pasteBoardClipboardItem(item, point || lastBoardPointer)) return false;
+    if (typeof toast === "function") toast("복사한 항목을 붙여넣었어요.", 1500);
+    return true;
   };
   const duplicateSelected = () => {
     const item = whiteboardClipboardItem(wb.selected);
@@ -1698,6 +1752,7 @@ function renderWhiteboard(doc, host){
   // 집중 도구 전용으로 시작했던 메뉴를 일반 편집 메뉴로 확장한다. 도구막대와 같은 실행 함수를
   // 연결해 양쪽의 활성 상태와 Undo 기록이 어긋나지 않게 한다.
   const focusContextMenu=document.createElement("div"); focusContextMenu.className="wb-focus-context-menu"; focusContextMenu.hidden=true; focusContextMenu.setAttribute("role","menu"); focusContextMenu.setAttribute("aria-label","화이트보드 빠른 메뉴");
+  let contextMenuBoardPoint=null;
   const makeContextSection=(title,cls="")=>{
     const section=document.createElement("section"); section.className="wb-context-section "+cls;
     if(title){const heading=document.createElement("div");heading.className="wb-context-title";heading.textContent=title;section.appendChild(heading);}
@@ -1709,24 +1764,51 @@ function renderWhiteboard(doc, host){
   };
 
   const focusContextSection=makeContextSection("집중 도구","wb-context-focus");
-  const focusContextToggle=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","wb-context-wide",()=>{
+  const focusContextActions=document.createElement("div"); focusContextActions.className="wb-context-actions wb-focus-context-actions";
+  const focusContextEllipseBtn=contextAction("원형","원형 스포트라이트로 변경","wb-focus-context-choice",()=>setFocus({spotlight:{...focus.spotlight,shape:"ellipse"}}));
+  const focusContextRectBtn=contextAction("사각형","사각형 스포트라이트로 변경","wb-focus-context-choice",()=>setFocus({spotlight:{...focus.spotlight,shape:"rect"}}));
+  const focusContextResetBtn=contextAction("위치 초기화","집중 도구 위치와 크기 초기화","",resetFocusGeometry);
+  const focusContextToggle=mkBtn("조절점 숨기기","집중 도구 조절점 숨기기","",()=>{
     const next=!focus.controlsVisible; setFocusControlsVisible(next); closeFocusContextMenu();
     if(typeof toast==="function")toast(next?"집중 도구 조절점을 표시했어요.":"집중 도구 조절점을 숨겼어요.",1300);
   });
-  focusContextToggle.setAttribute("role","menuitem"); focusContextSection.appendChild(focusContextToggle);
+  focusContextToggle.setAttribute("role","menuitem");
+  const focusContextStopBtn=contextAction("종료","집중 도구 종료","wb-context-danger",stopFocus);
+  focusContextActions.append(focusContextEllipseBtn,focusContextRectBtn,focusContextResetBtn,focusContextToggle,focusContextStopBtn);
+  focusContextSection.appendChild(focusContextActions);
 
   const contextItemSection=makeContextSection("선택 항목","wb-context-item");
   const contextItemName=document.createElement("div"); contextItemName.className="wb-context-target";
   const contextItemActions=document.createElement("div"); contextItemActions.className="wb-context-actions";
   const contextEditBtn=contextAction("편집","선택한 텍스트 또는 수식 편집","",editSelected);
   const contextCopyBtn=contextAction("복사","선택한 항목 복사 (Ctrl+C)","",copySelectedFromMenu);
+  const contextCutBtn=contextAction("잘라내기","선택한 항목 잘라내기 (Ctrl+X)","",cutSelectedFromMenu);
+  const contextPasteItemBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
   const contextDuplicateBtn=contextAction("복제","선택한 항목을 오른쪽 아래에 복제","",duplicateSelected);
+  const contextForwardBtn=contextAction("앞으로","선택한 항목을 한 단계 앞으로","",()=>moveSelectedLayer("forward"));
+  const contextBackwardBtn=contextAction("뒤로","선택한 항목을 한 단계 뒤로","",()=>moveSelectedLayer("backward"));
+  const contextFrontBtn=contextAction("맨 앞으로","선택한 항목을 맨 앞으로","",()=>moveSelectedLayer("front"));
+  const contextBackBtn=contextAction("맨 뒤로","선택한 항목을 맨 뒤로","",()=>moveSelectedLayer("back"));
   const contextFlipXBtn=contextAction("좌우 반전","선택한 교육 도형 좌우 반전","",()=>flipSelected("flipX"));
   const contextFlipYBtn=contextAction("상하 반전","선택한 교육 도형 상하 반전","",()=>flipSelected("flipY"));
   const contextUngroupBtn=contextAction("분리","선택한 그룹의 구성 요소 분리","",ungroupSelected);
   const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
-  contextItemActions.append(contextEditBtn,contextCopyBtn,contextDuplicateBtn,contextFlipXBtn,contextFlipYBtn,contextUngroupBtn,contextDeleteBtn);
+  contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextFlipXBtn,contextFlipYBtn,contextUngroupBtn,contextDeleteBtn);
   contextItemSection.append(contextItemName,contextItemActions);
+
+  const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
+  const contextBoardActions=document.createElement("div"); contextBoardActions.className="wb-context-actions";
+  const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
+  const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",()=>fileInput.click());
+  const contextEducationBtn=contextAction("수학·과학","수학·과학 도구상자 열기","",()=>toggleEducationPanel(true));
+  const contextBackgroundBtn=contextAction("배경색","보드 배경색 바꾸기","",()=>toggleBackgroundPanel(true));
+  const contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
+  const contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
+  const contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
+  const contextFocusBtn=contextAction("집중 도구","스포트라이트·화면 가리개 설정 열기","",()=>toggleFocusPanel(true));
+  const contextClearBtn=contextAction("전체 지우기","보드 내용 전체 지우기","wb-context-danger wb-context-clear",confirmClearAll);
+  contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextEducationBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
+  contextBoardSection.appendChild(contextBoardActions);
 
   const contextToolSection=makeContextSection("필기·도형 도구");
   const contextToolGrid=document.createElement("div"); contextToolGrid.className="wb-context-tools";
@@ -1759,13 +1841,13 @@ function renderWhiteboard(doc, host){
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextToolSection,contextInkSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextToolSection,contextInkSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
     if(focusPanel.contains(e.target)||focusControls.contains(e.target)||(!eduPanel.hidden&&eduPanel.contains(e.target))||(!bgPanel.hidden&&bgPanel.contains(e.target)))return;
     e.preventDefault();e.stopPropagation();
-    const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen);
+    const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen); contextMenuBoardPoint={x:lastBoardPointer.x,y:lastBoardPointer.y};
     const canSelect=!(focus.active&&focus.controlsVisible)&&focusAllowsScreenPoint(screen);
     wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw();
 
@@ -1774,10 +1856,24 @@ function renderWhiteboard(doc, host){
     const typeLabels={image:formula?"수식":"이미지",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",polyline:"도형",text:"텍스트",group:stencil?"교육 도형":"그룹"};
     focusContextSection.hidden=!focus.active;
     contextItemSection.hidden=!selected;
+    contextBoardSection.hidden=!!selected;
     contextItemName.textContent=selected?(typeLabels[selected.type]||"화이트보드 항목"):"";
     contextEditBtn.hidden=!(selected&&(selected.type==="text"||formula));
     contextFlipXBtn.hidden=!stencil; contextFlipYBtn.hidden=!stencil;
     contextUngroupBtn.hidden=!(selected&&selected.type==="group");
+    const selectedIndex=selected?wb.items.indexOf(selected):-1, lastIndex=wb.items.length-1;
+    contextPasteItemBtn.disabled=!hasWhiteboardInternalClipboard(); contextPasteBoardBtn.disabled=!hasWhiteboardInternalClipboard();
+    contextForwardBtn.disabled=selectedIndex<0||selectedIndex>=lastIndex; contextFrontBtn.disabled=contextForwardBtn.disabled;
+    contextBackwardBtn.disabled=selectedIndex<=0; contextBackBtn.disabled=contextBackwardBtn.disabled;
+    const focusBlocksInsert=focus.active&&focus.controlsVisible;
+    contextImageBtn.disabled=focusBlocksInsert; contextEducationBtn.disabled=focusBlocksInsert; contextPasteBoardBtn.disabled=contextPasteBoardBtn.disabled||focusBlocksInsert;
+    contextClearBtn.disabled=!wb.items.length;
+    const spotlightMode=focus.mode==="spotlight";
+    focusContextEllipseBtn.hidden=!spotlightMode; focusContextRectBtn.hidden=!spotlightMode;
+    focusContextEllipseBtn.classList.toggle("active",spotlightMode&&focus.spotlight.shape==="ellipse");
+    focusContextRectBtn.classList.toggle("active",spotlightMode&&focus.spotlight.shape==="rect");
+    focusContextEllipseBtn.setAttribute("aria-pressed",String(spotlightMode&&focus.spotlight.shape==="ellipse"));
+    focusContextRectBtn.setAttribute("aria-pressed",String(spotlightMode&&focus.spotlight.shape==="rect"));
     focusContextToggle.textContent=focus.controlsVisible?"조절점 숨기기":"조절점 보이기";
     focusContextToggle.title=focusContextToggle.textContent;focusContextToggle.setAttribute("aria-label",focusContextToggle.textContent);
     syncSelectionControls(); updateUndoButtons();
@@ -1834,7 +1930,10 @@ function renderWhiteboard(doc, host){
     setFocus({active:false}); canvas.style.cursor="";
     if (typeof toast==="function") toast("집중 효과를 종료했어요.",1400);
   }
-  function toggleFocusActive(){ if (focus.active) stopFocus(); else startFocus(); }
+  function toggleFocusActive(){
+    if (focus.active) stopFocus();
+    else { startFocus(); toggleFocusPanel(false); }
+  }
   function setFocusControlsVisible(visible){
     if(visible&&wb.selected){wb.selected=null;redraw();}
     setFocus({controlsVisible:!!visible});
@@ -2333,11 +2432,7 @@ function renderWhiteboard(doc, host){
   flipXBtn = mkBtn("↔", "선택한 교육 도형 좌우 반전", "wb-act wb-flip-x", () => flipSelected("flipX")); flipXBtn.disabled = true;
   flipYBtn = mkBtn("↕", "선택한 교육 도형 상하 반전", "wb-act wb-flip-y", () => flipSelected("flipY")); flipYBtn.disabled = true;
   groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup", ungroupSelected); groupActionBtn.disabled = true;
-  const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", () => {
-    if (!wb.items.length) return;
-    if (typeof confirmDialog === "function"){ confirmDialog("보드 내용을 모두 지울까요?", "지우기", "취소").then(ok => { if (ok) clearAll(); }); }
-    else clearAll();
-  });
+  const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", confirmClearAll);
   actGroup.append(undoBtn, redoBtn, flipXBtn, flipYBtn, groupActionBtn, clearBtn);
 
   const exportGroup = grp();
@@ -2433,7 +2528,14 @@ function renderWhiteboard(doc, host){
     if (e.key === "Escape" && !focusPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleFocusPanel(false); if (focusToolBtn) focusToolBtn.focus(); return;
     }
-    if (e.key === "Escape" && focus.active){ e.preventDefault(); e.stopPropagation(); stopFocus(); return; }
+    if (e.key === "Escape" && focus.active){
+      e.preventDefault(); e.stopPropagation();
+      if (focus.controlsVisible){
+        setFocusControlsVisible(false);
+        if (typeof toast==="function") toast("집중 도구 조절점을 숨겼어요. Esc를 한 번 더 누르면 종료됩니다.",1800);
+      } else stopFocus();
+      return;
+    }
     if (!bgPanel.hidden && ae && bgPanel.contains(ae)) return;
     if (!eduPanel.hidden && ae && eduPanel.contains(ae)) return;
     if (!focusPanel.hidden && ae && focusPanel.contains(ae)) return;
@@ -2471,13 +2573,14 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
-    whiteboardClipboardItem, whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem,
+    whiteboardClipboardItem, setWhiteboardInternalClipboard, getWhiteboardInternalClipboard, hasWhiteboardInternalClipboard,
+    whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,

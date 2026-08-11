@@ -102,10 +102,16 @@ test("집중 도구 UI는 화면 오버레이·입력 차단·정리·원본 내
   assert.match(source,/focus\.active && focus\.mode === "spotlight" && !focus\.controlsVisible\)\{ canvas\.style\.cursor = "move"; return; \}/);
   assert.match(source,/focusToolBtn=mkBtn\("◉","집중 도구 — 스포트라이트·화면 가리개"/);
   assert.match(source,/focusPowerBtn=mkBtn\("시작","선택한 집중 효과 시작"/);
-  assert.match(source,/function toggleFocusActive\(\)\{ if \(focus\.active\) stopFocus\(\); else startFocus\(\); \}/);
+  assert.match(source,/function toggleFocusActive\(\)\{\s*if \(focus\.active\) stopFocus\(\);\s*else \{ startFocus\(\); toggleFocusPanel\(false\); \}\s*\}/);
   assert.match(source,/spotlightModeBtn\.classList\.toggle\("selected",spotlight\)/);
   assert.match(source,/focusPowerBtn\.textContent=focus\.active\?"종료":"시작"/);
   assert.match(source,/focusContextMenu\.className="wb-focus-context-menu"/);
+  assert.match(source,/focusContextEllipseBtn=contextAction\("원형","원형 스포트라이트로 변경"/);
+  assert.match(source,/focusContextRectBtn=contextAction\("사각형","사각형 스포트라이트로 변경"/);
+  assert.match(source,/focusContextResetBtn=contextAction\("위치 초기화","집중 도구 위치와 크기 초기화","",resetFocusGeometry\)/);
+  assert.match(source,/focusContextStopBtn=contextAction\("종료","집중 도구 종료","wb-context-danger",stopFocus\)/);
+  assert.match(source,/focusContextEllipseBtn\.hidden=!spotlightMode; focusContextRectBtn\.hidden=!spotlightMode/);
+  assert.match(source,/focusContextEllipseBtn\.classList\.toggle\("active",spotlightMode&&focus\.spotlight\.shape==="ellipse"\)/);
   assert.match(source,/focus\.controlsVisible\?"조절점 숨기기":"조절점 보이기"/);
   assert.match(source,/stage\.addEventListener\("contextmenu",onFocusContextMenu\)/);
   assert.match(source,/!focusContextMenu\.hidden && !focusContextMenu\.contains\(e\.target\)/);
@@ -115,7 +121,7 @@ test("집중 도구 UI는 화면 오버레이·입력 차단·정리·원본 내
   assert.match(source,/whiteboardFlashlightGeometry\(focus,W,H\)/);
   assert.match(source,/flashlightBody\.setAttribute\("transform",`translate/);
   assert.match(source,/" · 사용 안 함"/);
-  assert.match(source,/focus\.active\)\{ e\.preventDefault\(\); e\.stopPropagation\(\); stopFocus\(\); return; \}/);
+  assert.match(source,/if \(e\.key === "Escape" && focus\.active\)\{[\s\S]{0,280}if \(focus\.controlsVisible\)\{[\s\S]{0,180}setFocusControlsVisible\(false\);[\s\S]{0,220}else stopFocus\(\);[\s\S]{0,40}return;/);
   assert.match(source,/if \(focusFloat\) focusFloat\.destroy\(\)/);
   assert.match(source,/const boardSnapshot = \(\) => \(\{[\s\S]{0,180}items:wb\.items/);
   assert.doesNotMatch(source,/const boardSnapshot = \(\) => \(\{[\s\S]{0,220}boardFocus/);
@@ -129,4 +135,6 @@ test("집중 도구 UI는 화면 오버레이·입력 차단·정리·원본 내
   assert.match(css,/\.wb-flashlight-beam/);
   assert.match(css,/\.wb-flashlight-body/);
   assert.match(css,/\.wb-focus-context-menu/);
+  assert.match(css,/\.wb-focus-context-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(css,/\.wb-focus-context-choice\.active\{background:var\(--accent\);color:#fff\}/);
 });
