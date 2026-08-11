@@ -7,7 +7,25 @@
 let _boardCount = 0;
 const BOARD_RECOVERY_PREFIX = "manneung-board-recovery:";
 const WB_EDU_TRANSFER_TYPE = "application/x-manneung-whiteboard-education";
+const WB_ITEM_TRANSFER_TYPE = "application/x-manneung-whiteboard-item";
 const WB_FORMULA_LIBRARY_KEY = "mn.wbFormulaLibrary.v1";
+
+// Ctrl+C/Ctrl+V에서는 캔버스의 선택 항목을 화면 캡처가 아닌 편집 가능한 모델로 전달한다.
+function whiteboardClipboardItem(value){
+  try {
+    const json = typeof value === "string"
+      ? value
+      : JSON.stringify(value, (key, item) => key === "img" ? undefined : item);
+    if (!json || json.length > 16 * 1024 * 1024) return null;
+    const copy = JSON.parse(json);
+    const selectable = new Set(["image", "line", "arrow", "rect", "ellipse", "polyline", "text", "group"]);
+    if (!copy || !selectable.has(copy.type)) return null;
+    if (copy.type === "image" && !/^data:image\//i.test(String(copy.src || ""))) return null;
+    return copy;
+  } catch(_){
+    return null;
+  }
+}
 
 function whiteboardFormulaDictionary(){
   const rows = [];
@@ -114,6 +132,15 @@ function expandWhiteboardFormulaTemplate(template){
   });
   text += String(template || "").slice(last);
   return { text, fields };
+}
+
+function whiteboardFormulaNeedsInput(source, stops){
+  const value = String(source || "");
+  return Array.isArray(stops) && stops.some((stop) => {
+    const start = Math.max(0, Number(stop && stop.start) || 0);
+    const end = Math.max(start, Number(stop && stop.end) || start);
+    return /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(value.slice(start, end));
+  });
 }
 
 function normalizeWhiteboardFormulaLibrary(saved){
@@ -527,7 +554,7 @@ function renderWhiteboard(doc, host){
   // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
   const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
   Object.assign(view, whiteboardClampView(view, 0, 0));
-  let zoomLabelBtn = null, positionTextEditor = null, spacePanning = false;
+  let zoomLabelBtn = null, positionTextEditor = null, spacePanning = false, lastBoardPointer = null;
   const clampView = () => {
     Object.assign(view, whiteboardClampView(view, W, H));
   };
@@ -569,6 +596,7 @@ function renderWhiteboard(doc, host){
     drawItem: drawBoardItem,
     itemBounds: boardItemBounds,
     hitTestItem: hitTestBoardItem,
+    isSelectable: isSelectableBoardItem,
     translateItem: translateBoardItem,
     ungroupItem: ungroupBoardItem
   } = MNBoardRenderer;
@@ -636,6 +664,7 @@ function renderWhiteboard(doc, host){
     const canFlip = !!(s && s.type === "group" && s.role === "education-stencil");
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
     if (flipYBtn){ flipYBtn.disabled = !canFlip; flipYBtn.setAttribute("aria-pressed", canFlip && s.flipY ? "true" : "false"); }
+    syncSelectionControls();
     if (zoomLabelBtn) zoomLabelBtn.textContent = Math.round(view.scale * 100) + "%";
     if (typeof positionTextEditor === "function") positionTextEditor();
   };
@@ -675,6 +704,22 @@ function renderWhiteboard(doc, host){
     if (idx < 0 || !children.length) return;
     wb.items.splice(idx, 1, ...children); wb.selected = null; redraw(); history.commit(); recordCommit();
     if (typeof toast === "function") toast("교육 도형을 구성 요소로 분리했어요.", 1800);
+  };
+  const resizeSelectedFormula = (scale) => {
+    const selected = wb.selected;
+    if (!selected || selected.type !== "image" || selected.role !== "education-formula") return false;
+    const idx = wb.items.indexOf(selected); if (idx < 0) return false;
+    const baseW = Number(selected.formulaBaseW) || (selected.img && selected.img.naturalWidth) || selected.w;
+    const baseH = Number(selected.formulaBaseH) || (selected.img && selected.img.naturalHeight) || selected.h;
+    let w = Math.max(24, Math.round(baseW * scale)), h = Math.max(16, Math.round(baseH * scale));
+    const fit = Math.min(1, W * .85 / w, H * .85 / h); w = Math.round(w * fit); h = Math.round(h * fit);
+    const centerX = selected.x + selected.w / 2, centerY = selected.y + selected.h / 2;
+    const resized = Object.assign({}, selected, {
+      x:Math.max(0, Math.min(Math.round(centerX - w / 2), Math.max(0, W - w))),
+      y:Math.max(0, Math.min(Math.round(centerY - h / 2), Math.max(0, H - h))), w, h
+    });
+    wb.items[idx] = resized; wb.selected = resized; redraw(); history.commit(); recordCommit();
+    return true;
   };
 
   // ----- 사이즈/DPR (리사이즈해도 좌표는 CSS px 그대로라 그림 위치 유지) -----
@@ -764,6 +809,7 @@ function renderWhiteboard(doc, host){
   };
   let cur = null, drawing = false, lastPt = null;
   canvas.addEventListener("pointerdown", (e) => {
+    lastBoardPointer = pt(e);
     if (e.button === 1 || (e.button === 0 && spacePanning)){ beginViewPan(e); return; }
     if (e.button !== 0) return;
     if (wb.tool === "select"){
@@ -944,7 +990,7 @@ function renderWhiteboard(doc, host){
   });
   const formulaMathMl = (source) => {
     if (typeof PdfSignerCore !== "undefined" && PdfSignerCore && typeof PdfSignerCore.latexToMathML === "function")
-      return PdfSignerCore.latexToMathML(String(source || ""), false);
+      return PdfSignerCore.latexToMathML(String(source || ""), false, true);
     const safe = document.createElement("span"); safe.textContent = String(source || "");
     return `<math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mtext>${safe.innerHTML}</mtext></math>`;
   };
@@ -952,17 +998,19 @@ function renderWhiteboard(doc, host){
     const mathMl = formulaMathMl(source);
     const probe = document.createElement("div"); probe.className = "wb-formula-probe"; probe.innerHTML = mathMl; stage.appendChild(probe);
     const rect = probe.getBoundingClientRect();
-    const width = Math.min(900, Math.max(80, Math.ceil(rect.width) + 18));
-    const height = Math.min(260, Math.max(54, Math.ceil(rect.height) + 16));
+    // 긴 문장도 먼저 실제 크기의 SVG로 만든 뒤 placeImage에서 보드 안에 맞춰 축소한다.
+    // 여기서 보드 표시 폭(900px)으로 잘라 버리면 축소 전에 오른쪽 글자가 영구히 사라진다.
+    const width = Math.min(16000, Math.max(80, Math.ceil(rect.width) + 18));
+    const height = Math.min(16000, Math.max(54, Math.ceil(rect.height) + 16));
     probe.remove();
     const src = whiteboardSvgDataUrl(whiteboardFormulaSvg(mathMl, color, width, height));
     return loadBoardImageSource(src).then((img) => ({ img, src, width, height }));
   };
-  const insertFormulaSource = (source, cx, cy, existing=null) => {
+  const insertFormulaSource = (source, cx, cy, existing=null, colorOverride="") => {
     source = String(source || "").trim();
     if (!source){ if (typeof toast === "function") toast("수식을 입력하세요.", 1800); return false; }
     if (source.length > FORMULA_MAX_CHARS){ if (typeof toast === "function") toast("수식이 너무 깁니다. 4,000자 이하로 입력하세요.", 2200); return false; }
-    const formulaColor = existing && existing.formulaColor ? existing.formulaColor : wb.color;
+    const formulaColor = /^#[0-9a-f]{6}$/i.test(colorOverride) ? colorOverride : existing && existing.formulaColor ? existing.formulaColor : wb.color;
     buildFormulaImage(source, formulaColor).then(({img,src,width:baseW,height:baseH}) => {
       if (!existing){
         placeImage(img, cx, cy, { role:"education-formula", formulaSource:source, formulaColor, formulaBaseW:baseW, formulaBaseH:baseH, src });
@@ -975,7 +1023,8 @@ function renderWhiteboard(doc, host){
       const sc = Math.min(1, W * .85 / w, H * .85 / h); w = Math.round(w * sc); h = Math.round(h * sc);
       const x=Math.max(0,Math.min(Math.round(centerX-w/2),Math.max(0,W-w))), y=Math.max(0,Math.min(Math.round(centerY-h/2),Math.max(0,H-h)));
       const item = { type:"image",img,src,x,y,w,h,role:"education-formula",formulaSource:source,formulaColor,formulaBaseW:baseW,formulaBaseH:baseH };
-      wb.items[idx] = item; wb.selected = item; redraw(); history.commit(); recordCommit();
+      const keepSelected = wb.selected === existing;
+      wb.items[idx] = item; if (keepSelected) wb.selected = item; redraw(); history.commit(); recordCommit();
     }).catch(() => { if (typeof toast === "function") toast("수식을 그리지 못했어요.", 2000); });
     return true;
   };
@@ -1013,11 +1062,53 @@ function renderWhiteboard(doc, host){
     wb.items.push(group); wb.selected = group; setTool("select"); redraw(); history.commit(); recordCommit();
     return true;
   };
-  // 붙여넣기(Ctrl+V): 이 보드가 활성이고 텍스트 입력 중이 아닐 때 클립보드 이미지를 넣는다.
+  const pasteBoardClipboardItem = (raw) => {
+    let item = whiteboardClipboardItem(raw);
+    if (!item || !isSelectableBoardItem(item)) return false;
+    const bounds = boundsOf(item);
+    if (!bounds) return false;
+    const destination = !wb.selected && lastBoardPointer;
+    const dx = destination ? destination.x - (bounds.x + bounds.w / 2) : 24;
+    const dy = destination ? destination.y - (bounds.y + bounds.h / 2) : 24;
+    item = translateBoardItem(item, dx, dy);
+    const moved = boundsOf(item);
+    if (moved && moved.w <= W && moved.h <= H){
+      let adjustX = 0, adjustY = 0;
+      if (moved.x < 0) adjustX = -moved.x;
+      else if (moved.x + moved.w > W) adjustX = W - moved.x - moved.w;
+      if (moved.y < 0) adjustY = -moved.y;
+      else if (moved.y + moved.h > H) adjustY = H - moved.y - moved.h;
+      if (adjustX || adjustY) item = translateBoardItem(item, adjustX, adjustY);
+    }
+    const commit = () => {
+      wb.items.push(item); wb.selected = item; setTool("select");
+      redraw(); history.commit(); recordCommit();
+    };
+    if (item.type === "image"){
+      loadBoardImageSource(item.src).then((img) => { item.img = img; commit(); })
+        .catch(() => { if (typeof toast === "function") toast("복사한 항목을 붙여넣지 못했어요.", 2000); });
+    } else commit();
+    return true;
+  };
+  const onCopy = (e) => {
+    if (typeof activeId !== "undefined" && activeId !== doc.id) return;
+    const ae = document.activeElement;
+    if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+    const item = whiteboardClipboardItem(wb.selected);
+    if (!item || !e.clipboardData) return;
+    e.preventDefault();
+    e.clipboardData.setData(WB_ITEM_TRANSFER_TYPE, JSON.stringify(item));
+    const fallback = item.role === "education-formula" ? item.formulaSource
+      : item.type === "text" ? item.text : "화이트보드 항목";
+    e.clipboardData.setData("text/plain", String(fallback || "화이트보드 항목"));
+  };
+  // 붙여넣기(Ctrl+V): 화이트보드 항목을 우선 복원하고, 없으면 외부 클립보드 이미지를 넣는다.
   const onPaste = (e) => {
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
-    if (ae && ae.classList && ae.classList.contains("wb-textinput")) return;
+    if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+    const boardItem = e.clipboardData && e.clipboardData.getData(WB_ITEM_TRANSFER_TYPE);
+    if (boardItem && pasteBoardClipboardItem(boardItem)){ e.preventDefault(); return; }
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for (const it of items){
       if (it.kind === "file" && /^image\//.test(it.type)){
@@ -1026,6 +1117,7 @@ function renderWhiteboard(doc, host){
       }
     }
   };
+  document.addEventListener("copy", onCopy);
   document.addEventListener("paste", onPaste);
   // 드래그&드롭: 캡처/이미지 파일을 보드에 떨구면 그 위치에 넣는다.
   stage.addEventListener("dragover", (e) => {
@@ -1170,6 +1262,8 @@ function renderWhiteboard(doc, host){
   const toolBtns = {};
   const swatchEls = {};
   const widthBtns = {};
+  const FORMULA_SIZE_PRESETS = { 2:.75, 4:1, 8:1.5 };
+  let customColor = null;
   let undoBtn, redoBtn;
   const setTool = (t) => {
     wb.tool = t; for (const k in toolBtns) toolBtns[k].classList.toggle("active", k === t);
@@ -1177,13 +1271,43 @@ function renderWhiteboard(doc, host){
     canvas.style.cursor = "";
     canvas.dataset.tool = t;
   };
-  const setColor = (c) => {
+  const setColor = (c, options={}) => {
     wb.color = c;
     for (const k in swatchEls) swatchEls[k].classList.toggle("active", k === c);
-    customColor.value = c;
+    if (customColor) customColor.value = c;
+    const selected = wb.selected;
+    if (options.applySelected !== false && selected && selected.type === "image" && selected.role === "education-formula" && selected.formulaSource && selected.formulaColor !== c){
+      insertFormulaSource(selected.formulaSource, selected.x + selected.w / 2, selected.y + selected.h / 2, selected, c);
+    }
     if (typeof renderEducationPanel === "function" && !eduPanel.hidden) renderEducationPanel();
   };
-  const setWidth = (w) => { wb.width = w; for (const k in widthBtns) widthBtns[k].classList.toggle("active", Number(k) === w); };
+  const setWidth = (w) => {
+    const selected = wb.selected;
+    if (selected && selected.type === "image" && selected.role === "education-formula"){
+      resizeSelectedFormula(FORMULA_SIZE_PRESETS[w] || 1);
+      return;
+    }
+    wb.width = w; syncSelectionControls();
+  };
+  function syncSelectionControls(){
+    const selected = wb.selected;
+    const formula = selected && selected.type === "image" && selected.role === "education-formula" ? selected : null;
+    const activeColor = formula && formula.formulaColor ? formula.formulaColor : wb.color;
+    for (const k in swatchEls) swatchEls[k].classList.toggle("active", k === activeColor);
+    if (customColor && /^#[0-9a-f]{6}$/i.test(activeColor)) customColor.value = activeColor;
+    let currentScale = 0;
+    if (formula){
+      const baseW = Number(formula.formulaBaseW) || (formula.img && formula.img.naturalWidth) || formula.w;
+      const baseH = Number(formula.formulaBaseH) || (formula.img && formula.img.naturalHeight) || formula.h;
+      currentScale = Math.sqrt(Math.max(.0001, formula.w * formula.h / Math.max(1, baseW * baseH)));
+    }
+    for (const k in widthBtns){
+      const button = widthBtns[k], preset = FORMULA_SIZE_PRESETS[k];
+      button.title = formula ? "선택한 수식 크기 " + button.textContent : "굵기 " + button.textContent;
+      button.setAttribute("aria-label", button.title);
+      button.classList.toggle("active", formula ? Math.abs(currentScale - preset) < .08 : Number(k) === wb.width);
+    }
+  }
   const updateUndoButtons = () => { if (undoBtn) undoBtn.disabled = !history.canUndo(); if (redoBtn) redoBtn.disabled = !history.canRedo(); };
 
   const mkBtn = (label, title, cls, fn) => {
@@ -1218,7 +1342,7 @@ function renderWhiteboard(doc, host){
   const eduTabs = document.createElement("div"); eduTabs.className = "wb-edu-tabs"; eduTabs.setAttribute("role", "tablist");
   const formulaBuilder = document.createElement("div"); formulaBuilder.className = "wb-formula-builder"; formulaBuilder.hidden = true;
   const formulaInput = document.createElement("textarea"); formulaInput.className = "wb-formula-input"; formulaInput.rows = 2;
-  formulaInput.placeholder = String.raw`LaTeX 수식 (예: \frac{a}{b}, x^2, \sqrt{x})`; formulaInput.setAttribute("aria-label", "LaTeX 수식 입력");
+  formulaInput.placeholder = String.raw`LaTeX 수식 또는 '일반 문자열' (예: '속력은' \frac{d}{t})`; formulaInput.setAttribute("aria-label", "LaTeX 수식과 일반 문자열 입력");
   const formulaPreview = document.createElement("div"); formulaPreview.className = "wb-formula-preview"; formulaPreview.setAttribute("aria-label", "수식 미리보기");
   const formulaActions = document.createElement("div"); formulaActions.className = "wb-formula-actions";
   const formulaSave = mkBtn("내 수식 저장", "현재 LaTeX 수식을 수식 사전에 저장", "wb-formula-save", openFormulaSave);
@@ -1348,10 +1472,10 @@ function renderWhiteboard(doc, host){
   }
   function submitFormulaEditor(){
     const source = formulaInput.value.trim(); if (!source){ if (typeof toast === "function") toast("수식을 입력하세요.", 1800); formulaInput.focus(); return; }
-    if (formulaStops.length){ selectFormulaStop(Math.max(0, formulaStopIndex)); if (typeof toast === "function") toast("표시된 입력 부분을 모두 채워 주세요. Tab으로 이동할 수 있어요.", 2200); return; }
+    if (whiteboardFormulaNeedsInput(source, formulaStops)){ selectFormulaStop(Math.max(0, formulaStopIndex)); if (typeof toast === "function") toast("표시된 한글 입력 부분을 모두 채워 주세요. Tab으로 이동할 수 있어요.", 2200); return; }
     const target = editingFormulaItem;
     const center = visibleBoardCenter();
-    if (insertFormulaSource(source, center.x, center.y, target)){ resetFormulaEditor(); toggleEducationPanel(false); }
+    if (insertFormulaSource(source, center.x, center.y, target)){ resetFormulaEditor(); }
   }
   openFormulaEditor = (item) => {
     editingFormulaItem = item; eduCategory = "formula"; eduSearch.value = ""; formulaInput.value = String(item.formulaSource || ""); formulaStops = []; formulaStopIndex = -1;
@@ -1431,7 +1555,6 @@ function renderWhiteboard(doc, host){
       else visual.textContent = entry.value;
       const label = document.createElement("span"); label.className = "wb-edu-label"; label.textContent = entry.label;
       card.append(visual, label);
-      if (entry.kind === "formula" && entry.description){ const description = document.createElement("span"); description.className = "wb-edu-description"; description.textContent = entry.description; card.appendChild(description); }
       card.addEventListener("click", () => { const center=visibleBoardCenter(); return entry.kind === "formula" ? insertFormulaTemplate(entry) : insertEducationEntry(entry, center.x, center.y); });
       card.addEventListener("dragstart", (e) => {
         if (!e.dataTransfer) return;
@@ -1469,8 +1592,9 @@ function renderWhiteboard(doc, host){
     if (c === "#ffffff") s.style.border = "1px solid #cbd5e1";
     s.addEventListener("click", () => setColor(c)); swatchEls[c] = s; colorGroup.appendChild(s);
   });
-  const customColor = document.createElement("input"); customColor.type = "color"; customColor.className = "wb-color-input"; customColor.value = wb.color; customColor.title = "색 직접 고르기";
-  customColor.addEventListener("input", () => setColor(customColor.value));
+  customColor = document.createElement("input"); customColor.type = "color"; customColor.className = "wb-color-input"; customColor.value = wb.color; customColor.title = "색 직접 고르기";
+  customColor.addEventListener("input", () => setColor(customColor.value, { applySelected:false }));
+  customColor.addEventListener("change", () => setColor(customColor.value));
   colorGroup.appendChild(customColor);
 
   // ----- 배경색 -----
@@ -1700,13 +1824,14 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); if (doc.recorder) doc.recorder.active = false; document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
-    whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, normalizeWhiteboardFormulaLibrary,
+    whiteboardClipboardItem,
+    whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt
   };

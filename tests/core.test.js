@@ -367,6 +367,29 @@ test("LaTeX 수식을 MathML 로 변환한다(첨자·분수·근호·합·기�
   assert.doesNotThrow(() => latexToMathML(String.raw`\frac{`));
 });
 
+test("화이트보드용 수식 배치는 입력한 공백·줄바꿈·빈 줄을 보존한다", () => {
+  const math = latexToMathML("x=1  y=2\n\n z=3", false, true);
+  assert.match(math, /<mtable[^>]*columnalign="left"/);
+  assert.equal((math.match(/<mtr>/g) || []).length, 3);
+  assert.equal((math.match(/<mtd columnalign="left" style="text-align:left">/g) || []).length, 3);
+  assert.match(math, /<mspace width="0\.56em"\/>/);
+  assert.match(math, /<mspace width="0\.1em" height="1em"\/>/);
+  assert.match(math, /<mspace width="0\.28em"\/>/);
+});
+
+test("화이트보드 수식의 작은따옴표 문자열은 일반 글자로 렌더하고 미분 기호와 구분한다", () => {
+  const mixed = latexToMathML(String.raw`'이도이는' \frac{c}{a}`, false, true);
+  assert.match(mixed, /<mtext>이도이는<\/mtext>/);
+  assert.match(mixed, /<mfrac>/);
+
+  const prime = latexToMathML("f''(x)", false, true);
+  assert.doesNotMatch(prime, /<mtext>/);
+  assert.match(prime, /<mo>′′<\/mo>/);
+
+  const escaped = latexToMathML(String.raw`'don\'t'`, false, true);
+  assert.match(escaped, /<mtext>don&amp;#39;t<\/mtext>|<mtext>don&#39;t<\/mtext>|<mtext>don' t<\/mtext>/);
+});
+
 test("마크다운의 $…$ 수식을 렌더하되 코드 안 $ 는 건드리지 않는다", () => {
   // allowHtml:true 경로의 sanitize 는 브라우저 DOMParser 를 쓰므로 여기선 보호/복원 로직만 검증한다.
   const html = markdownToHtml("에너지 $E=mc^2$ 와 `$x$` 코드", { allowHtml: false });

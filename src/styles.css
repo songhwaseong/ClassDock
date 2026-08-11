@@ -1814,19 +1814,19 @@
   /* 제목줄을 끌어 옮긴 뒤(메모창과 같은 방식): 화면 좌표로 떠 있고 크기는 인라인 style 이 정한다.
      무대 기준이던 max-height 를 놓아 주지 않으면 세로로 늘릴 수 없다. */
   .wb-edu-panel.is-floating{z-index:60;max-height:none;box-shadow:0 18px 50px rgba(0,0,0,.42)}
-  .wb-edu-head{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:move;user-select:none;touch-action:none}
+  .wb-edu-head{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:10px;cursor:move;user-select:none;touch-action:none}
   /* 좁은 화면에서는 창을 옮기지 않는다(makeFloatingPanel 의 판정과 같은 조건) */
   @media (max-width:600px),(max-height:520px){.wb-edu-head{cursor:default}}
   .wb-edu-head strong{font-size:14px}
   .wb-edu-close{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font:inherit;font-size:20px;cursor:pointer}
   .wb-edu-close:hover{background:var(--panel-hover);color:var(--ink)}
-  .wb-edu-search{width:100%;height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:13px;outline:none}
+  .wb-edu-search{flex:0 0 34px;width:100%;height:34px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:13px;outline:none}
   .wb-edu-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
-  .wb-edu-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .wb-edu-tabs{display:grid;flex:0 0 30px;grid-template-columns:repeat(4,1fr);gap:5px}
   .wb-edu-tab{height:30px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
   .wb-edu-tab:hover{background:var(--panel-hover)}
   .wb-edu-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
-  .wb-formula-builder{padding:8px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--accent) 5%,var(--field))}
+  .wb-formula-builder{flex:0 0 auto;padding:8px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--accent) 5%,var(--field))}
   .wb-formula-builder[hidden]{display:none}
   .wb-formula-input{display:block;width:100%;min-height:50px;max-height:100px;padding:7px 8px;resize:vertical;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);font:13px/1.35 ui-monospace,Consolas,monospace;outline:none}
   .wb-formula-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
@@ -1863,7 +1863,6 @@
   .wb-edu-formula .wb-edu-visual{justify-content:flex-start;width:auto;font-size:22px;white-space:nowrap}
   .wb-edu-formula .wb-edu-visual math{font-size:1em}
   .wb-edu-formula .wb-edu-label{flex:none;margin-left:auto;font-size:11px}
-  .wb-edu-description{position:absolute;left:10px;right:72px;bottom:5px;color:var(--muted);font-size:9.5px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
   .wb-edu-card-actions{position:absolute;top:6px;right:6px;bottom:6px;display:flex;align-items:center;gap:3px}
   .wb-formula-favorite,.wb-formula-delete{height:27px;min-width:27px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
   .wb-formula-favorite[aria-pressed="true"]{color:#d97706;background:#fffbeb;border-color:#fbbf24}

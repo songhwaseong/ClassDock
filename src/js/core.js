@@ -2784,7 +2784,16 @@
     const toks = []; let i = 0;
     while (i < s.length){
       const c = s[i];
-      if (c === "\\"){
+      const prev = i > 0 ? s[i - 1] : "";
+      if (c === "'" && (i === 0 || /\s/.test(prev) || "=+-*/,:;([{ ".includes(prev))){
+        let j = i + 1, value = "";
+        while (j < s.length && s[j] !== "'"){
+          if (s[j] === "\\" && s[j + 1] === "'"){ value += "'"; j += 2; }
+          else value += s[j++];
+        }
+        if (value && s[j] === "'"){ toks.push({ t:"text", v:value }); i = j + 1; }
+        else { toks.push({ t:"char", v:c }); i++; }
+      } else if (c === "\\"){
         if (/[a-zA-Z]/.test(s[i + 1] || "")){
           let j = i + 1; while (j < s.length && /[a-zA-Z]/.test(s[j])) j++;
           toks.push({ t:"cmd", v:s.slice(i + 1, j) }); i = j;
@@ -2793,7 +2802,7 @@
       else if (c === "}"){ toks.push({ t:"}" }); i++; }
       else if (c === "^"){ toks.push({ t:"^" }); i++; }
       else if (c === "_"){ toks.push({ t:"_" }); i++; }
-      else if (c === " " || c === "\t" || c === "\n"){ toks.push({ t:"sp" }); i++; }
+      else if (c === " " || c === "\t" || c === "\n"){ toks.push({ t:"sp", n:c === "\t" ? 4 : 1 }); i++; }
       else if (c === "&"){ i++; }
       else { toks.push({ t:"char", v:c }); i++; }
     }
@@ -2852,6 +2861,10 @@
     if (!tk) return null;
     if (tk.t === "}"){ st.pos++; return null; }
     if (tk.t === "{"){ return { mml:texArg(st), big:false }; }
+    if (tk.t === "text"){
+      st.pos++;
+      return { mml:"<mtext>" + escapeHtml(tk.v) + "</mtext>", big:false };
+    }
     if (tk.t === "char"){
       const c = tk.v;
       if (/[0-9.]/.test(c)){
@@ -2941,7 +2954,12 @@
       if (++guard > 20000) break;
       const tk = st.toks[st.pos];
       if (stopAtBrace && tk.t === "}") break;
-      if (tk.t === "sp"){ st.pos++; continue; }
+      if (tk.t === "sp"){
+        let spaces = 0;
+        while (st.toks[st.pos] && st.toks[st.pos].t === "sp") spaces += st.toks[st.pos++].n || 1;
+        if (st.preserveSpaces) out.push('<mspace width="' + Math.min(40, spaces) * .28 + 'em"/>');
+        continue;
+      }
       const atom = texAtom(st);
       if (!atom) continue;
       const node = texScripts(st, atom.mml, atom.big);
@@ -2949,10 +2967,20 @@
     }
     return out;
   }
-  function latexToMathML(tex, display){
+  function latexToMathML(tex, display, preserveLayout){
     const attrs = "xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"" + (display ? "block" : "inline") + "\"";
     try {
-      const st = { toks:texTokenize(String(tex || "")), pos:0, display:!!display };
+      const source = String(tex || "");
+      if (preserveLayout){
+        const lines = source.replace(/\r\n?/g, "\n").split("\n");
+        const rows = lines.map(line => {
+          const st = { toks:texTokenize(line), pos:0, display:!!display, preserveSpaces:true };
+          const body = texNodes(st, false).join("") || '<mspace width="0.1em" height="1em"/>';
+          return "<mtr><mtd columnalign=\"left\" style=\"text-align:left\"><mrow>" + body + "</mrow></mtd></mtr>";
+        }).join("");
+        return "<math " + attrs + "><mtable columnalign=\"left\" rowspacing=\"0.35em\">" + rows + "</mtable></math>";
+      }
+      const st = { toks:texTokenize(source), pos:0, display:!!display, preserveSpaces:false };
       const body = texNodes(st, false).join("");
       return "<math " + attrs + "><mrow>" + (body || "<mspace width=\"0.1em\"/>") + "</mrow></math>";
     } catch(_){

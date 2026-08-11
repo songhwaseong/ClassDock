@@ -8,13 +8,32 @@ const {
   whiteboardEducationCatalog,
   whiteboardFormulaDictionary,
   expandWhiteboardFormulaTemplate,
+  whiteboardFormulaNeedsInput,
   normalizeWhiteboardFormulaLibrary,
+  whiteboardClipboardItem,
   whiteboardStencilSvg,
   whiteboardStencilGroup,
   whiteboardVectorGroupSvg,
   whiteboardFormulaSvg,
   whiteboardSvgDataUrl
 } = require("../src/js/whiteboard.js");
+
+test("선택한 수식은 이미지 캡처가 아닌 편집 가능한 화이트보드 항목으로 복사된다", () => {
+  const formula = {
+    type:"image", role:"education-formula", formulaSource:String.raw`x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}`,
+    formulaColor:"#e11d48", formulaBaseW:420, formulaBaseH:90,
+    src:"data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C%2Fsvg%3E", x:100, y:120, w:315, h:68,
+    img:{ complete:true }
+  };
+  const copy = whiteboardClipboardItem(formula);
+  assert.notEqual(copy, formula);
+  assert.equal(copy.formulaSource, formula.formulaSource);
+  assert.equal(copy.formulaColor, formula.formulaColor);
+  assert.equal(copy.w, formula.w);
+  assert.equal(copy.img, undefined);
+  assert.deepEqual(whiteboardClipboardItem(JSON.stringify(copy)), copy);
+  assert.equal(whiteboardClipboardItem({ type:"image", src:"https://example.com/image.png" }), null);
+});
 
 test("수학·과학 도구상자는 기호·수식·도형·과학 묶음을 빠짐없이 제공한다", () => {
   const entries = whiteboardEducationCatalog();
@@ -55,6 +74,16 @@ test("수식 사전은 교과별 50개 이상의 검색 가능한 틀과 정확�
   }
   assert.equal(expandWhiteboardFormulaTemplate(String.raw`\frac{[[분자]]}{[[분모]]}`).text, String.raw`\frac{분자}{분모}`);
   assert.equal(expandWhiteboardFormulaTemplate(formulas.find((entry) => entry.id === "formula-nth-root").template).text, String.raw`\sqrt[ 차수 ]{값}`);
+});
+
+test("한글 입력 자리만 미완성으로 보고 영문·기호 수식은 수정 없이 넣을 수 있다", () => {
+  const latin = expandWhiteboardFormulaTemplate(String.raw`[[a]]^2 + [[b]]^2 = [[c]]^2`);
+  assert.equal(whiteboardFormulaNeedsInput(latin.text, latin.fields), false);
+
+  const korean = expandWhiteboardFormulaTemplate(String.raw`\frac{[[분자]]}{[[분모]]}`);
+  assert.equal(whiteboardFormulaNeedsInput(korean.text, korean.fields), true);
+  assert.equal(whiteboardFormulaNeedsInput(String.raw`\frac{a}{분모}`, korean.fields), true);
+  assert.equal(whiteboardFormulaNeedsInput(String.raw`\frac{a}{b}`, []), false);
 });
 
 test("내 수식·즐겨찾기·최근 사용 저장값은 유효한 항목만 정규화한다", () => {
@@ -136,6 +165,11 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   const palette = fs.readFileSync(path.join(__dirname, "../src/js/command-palette.js"), "utf8");
   assert.match(source, /WB_EDU_TRANSFER_TYPE/);
+  assert.match(source, /WB_ITEM_TRANSFER_TYPE/);
+  assert.match(source, /setData\(WB_ITEM_TRANSFER_TYPE, JSON\.stringify\(item\)\)/);
+  assert.match(source, /getData\(WB_ITEM_TRANSFER_TYPE\)/);
+  assert.match(source, /document\.addEventListener\("copy", onCopy\)/);
+  assert.match(source, /document\.removeEventListener\("copy", onCopy\)/);
   assert.match(source, /insertEducationEntry\(entry, center\.x, center\.y\)/);
   assert.match(source, /setData\(WB_EDU_TRANSFER_TYPE, entry\.id\)/);
   assert.match(source, /getData\(WB_EDU_TRANSFER_TYPE\)/);
@@ -147,11 +181,23 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   assert.match(source, /selected\.role !== "education-stencil"/);
   assert.match(source, /groupActionBtn = mkBtn\("분리"/);
   assert.match(source, /PdfSignerCore\.latexToMathML/);
+  assert.match(source, /latexToMathML\(String\(source \|\| ""\), false, true\)/);
+  assert.match(source, /LaTeX 수식 또는 '일반 문자열'/);
+  assert.match(source, /const width = Math\.min\(16000,/);
+  assert.match(source, /const height = Math\.min\(16000,/);
+  assert.doesNotMatch(source, /const width = Math\.min\(900,/);
+  assert.match(source, /FORMULA_SIZE_PRESETS = \{ 2:\.75, 4:1, 8:1\.5 \}/);
+  assert.match(source, /resizeSelectedFormula\(FORMULA_SIZE_PRESETS\[w\] \|\| 1\)/);
+  assert.match(source, /selected\.role === "education-formula"[\s\S]*?insertFormulaSource\(selected\.formulaSource/);
+  assert.match(source, /colorOverride=""/);
   assert.match(source, /WB_FORMULA_LIBRARY_KEY/);
   assert.match(source, /insertFormulaTemplate\(entry\)/);
+  assert.match(source, /if \(insertFormulaSource\(source, center\.x, center\.y, target\)\)\{ resetFormulaEditor\(\); \}/);
+  assert.doesNotMatch(source, /insertFormulaSource\(source, center\.x, center\.y, target\)[^\n]*toggleEducationPanel\(false\)/);
   assert.match(source, /e\.key === "Tab" && formulaStops\.length/);
   assert.match(source, /toggleFormulaFavorite/);
   assert.match(source, /saveCustomFormula/);
+  assert.doesNotMatch(source, /createElement\("span"\); description\.className = "wb-edu-description"/);
   assert.match(source, /STENCIL_GROUPS/);
   assert.match(source, /stencilGroup\[eduCategory\]/);
   assert.match(css, /\.wb-edu-panel/);
@@ -160,6 +206,8 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   assert.match(css, /\.wb-formula-groups/);
   assert.match(css, /\.wb-formula-favorite/);
   assert.match(css, /\.wb-edu-subgroups/);
+  assert.match(css, /\.wb-edu-search\{[^}]*flex:0 0 34px[^}]*min-height:34px/);
+  assert.doesNotMatch(css, /\.wb-edu-description\{/);
   assert.match(css, /\.wb-formula-groups\{[^}]*flex:0 0 auto[^}]*overflow-y:hidden/);
   assert.match(css, /\.wb-edu-subgroups\{[^}]*min-height:43px/);
   assert.match(palette, /수학·과학 도구상자[\s\S]*?\.wb-edu-toggle/);
