@@ -1906,6 +1906,11 @@ function renderWhiteboard(doc, host){
   const contextRecordBtn=contextAction("● 녹화 시작","수업 리플레이 녹화 시작","wb-context-record",toggleRecord);
   contextRecordActions.appendChild(contextRecordBtn); contextRecordSection.appendChild(contextRecordActions);
 
+  const contextToolbarSection=makeContextSection("도구막대","wb-context-toolbar-section");
+  const contextToolbarActions=document.createElement("div"); contextToolbarActions.className="wb-context-actions wb-context-toolbar-actions";
+  const contextToolbarToggle=contextAction("편집 도구막대 숨기기","편집 도구막대 숨기기","wb-context-toolbar-toggle",toggleToolbarVisibility);
+  contextToolbarActions.appendChild(contextToolbarToggle); contextToolbarSection.appendChild(contextToolbarActions);
+
   const contextPositionSection=makeContextSection("도구막대 위치","wb-context-position-section");
   const contextPositionActions=document.createElement("div"); contextPositionActions.className="wb-context-actions wb-context-position-actions";
   const contextPositionBtns={};
@@ -1955,7 +1960,7 @@ function renderWhiteboard(doc, host){
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextOutputSection,contextRecordSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
@@ -1989,6 +1994,8 @@ function renderWhiteboard(doc, host){
     for(const position in contextPositionBtns){
       const active=position===curPos; contextPositionBtns[position].classList.toggle("active",active); contextPositionBtns[position].setAttribute("aria-pressed",String(active));
     }
+    contextToolbarToggle.textContent=toolbarVisible?"편집 도구막대 숨기기":"편집 도구막대 보이기";
+    contextToolbarToggle.title=contextToolbarToggle.textContent; contextToolbarToggle.setAttribute("aria-label",contextToolbarToggle.textContent);
     const spotlightMode=focus.mode==="spotlight";
     focusContextEllipseBtn.hidden=!spotlightMode; focusContextRectBtn.hidden=!spotlightMode;
     focusContextEllipseBtn.classList.toggle("active",spotlightMode&&focus.spotlight.shape==="ellipse");
@@ -2610,6 +2617,21 @@ function renderWhiteboard(doc, host){
       if (typeof toast === "function") toast("녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
     }
   }
+
+  // 도구막대 표시 여부와 위치는 모든 화이트보드에서 이어 쓰는 화면 환경설정으로 기억한다.
+  const readToolbarVisible = () => { try { return localStorage.getItem("wbToolbarVisible") !== "false"; } catch(_){ return true; } };
+  let toolbarVisible = readToolbarVisible();
+  const applyToolbarVisible = () => { tools.hidden = !toolbarVisible; };
+  const saveToolbarVisible = () => { try { localStorage.setItem("wbToolbarVisible", String(toolbarVisible)); } catch(_){} };
+  function setToolbarVisible(visible){
+    toolbarVisible=!!visible; applyToolbarVisible(); saveToolbarVisible();
+    requestAnimationFrame(resize);
+  }
+  function toggleToolbarVisibility(){
+    const next=!toolbarVisible; setToolbarVisible(next);
+    if(typeof toast==="function")toast(next?"편집 도구막대를 표시했어요.":"편집 도구막대를 숨겼어요. 보드 우클릭 메뉴에서 다시 표시할 수 있어요.",next?1300:2400);
+  }
+  applyToolbarVisible();
 
   // 도구막대 위치(상/우/하/좌) — ⋮⋮ 핸들을 끌면 마우스에서 가장 가까운 변에 자동 도킹.
   const POS_SEQ = ["top", "right", "bottom", "left"];

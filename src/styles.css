@@ -1736,6 +1736,7 @@
   .wb-wrap.tb-pos-right{flex-direction:row-reverse}
   .wb-tools{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 12px;
     background:var(--panel);border-bottom:1px solid var(--border)}
+  .wb-tools[hidden]{display:none}
   .wb-wrap.tb-pos-bottom>.wb-tools{border-bottom:0;border-top:1px solid var(--border)}
   /* 좌/우 세로 배치: 좁은 사이드바로 변경, 그룹은 행으로 감싸 자동 줄바꿈, 사이드바 자체는 세로 스크롤 */
   .wb-wrap.tb-pos-left>.wb-tools,
@@ -1849,6 +1850,7 @@
   .wb-focus-context-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wb-context-output-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wb-context-record-actions{grid-template-columns:1fr}
+  .wb-context-toolbar-actions{grid-template-columns:1fr}
   .wb-context-position-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
   .wb-context-actions .wb-context-danger{color:#dc2626}
   .wb-context-actions .wb-context-danger:hover,.wb-context-actions .wb-context-danger:focus-visible{background:color-mix(in srgb,#dc2626 12%,transparent);color:#dc2626}
