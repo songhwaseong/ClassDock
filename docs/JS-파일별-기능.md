@@ -1,6 +1,6 @@
 # JavaScript 파일별 기능 안내
 
-**최종 업데이트: 2026년 8월 5일**
+**최종 업데이트: 2026년 8월 12일**
 
 이 문서는 만능파일교실의 JavaScript 파일이 각각 어떤 기능을 담당하는지 빠르게 찾기 위한 유지보수용 색인입니다. 기능을 추가하거나 파일 책임이 바뀌면 해당 행과 날짜를 함께 갱신합니다.
 
@@ -92,8 +92,8 @@ flowchart LR
 | `pptx-viewer.js` | PPTX 간이 슬라이드 미리보기, 슬라이드 맞춤, 포함 폰트 변환과 상대 리소스 경로 해석을 담당합니다. EXE의 정확한 PDF 변환 실패 시 사용됩니다. | `file-loaders.js`, `office-doc-viewers.js` |
 | `image-viewer.js` | 이미지 보기·확대·회전·뒤집기·자르기·내보내기, 작업공간 복구와 폴더 이미지/PDF 갤러리를 담당합니다. | `file-loaders.js`, `documents.js` |
 | `image-lightbox.js` | 파이썬 실행 결과 그래프와 노트북 출력 그림을 클릭하면 큰 오버레이 창으로 띄우고 확대·이동·넘기기·PNG 저장·메모 보내기를 제공합니다. | `python-runtime.js`, `notebook-cells.js`, `image-viewer.js` |
-| `board-render.js` | 화이트보드와 수업 리플레이가 공유하는 선·도형·텍스트·이미지 벡터 렌더러입니다. | `whiteboard.js`, `lesson-replay.js` |
-| `whiteboard.js` | 독립 화이트보드 문서, 그리기 도구, 선택·이동, 이미지, Undo/Redo, 복구 저장과 리플레이 녹화 연결을 담당합니다. | `board-render.js`, `lesson-replay.js` |
+| `board-render.js` | 화이트보드와 수업 리플레이가 공유하는 선·도형·텍스트·이미지 벡터 렌더러입니다. 교육 도형 같은 `group` 항목을 자식까지 재귀로 그리고 좌우·상하 반전(`flipX`/`flipY`)을 부모→자식으로 물려주며, 선택 판정(`hitTestItem`)·경계 계산·항목 이동도 여기 순수 함수로 둡니다. | `whiteboard.js`, `lesson-replay.js`, `tests/board-render.test.js` |
+| `whiteboard.js` | 독립 화이트보드 문서 전체입니다. 그리기 도구(펜·형광펜·지우개·직선·화살표·사각형·원·텍스트), 선택·이동·크기 조절, 이미지 넣기, Undo/Redo, 복구 저장과 리플레이 녹화 연결이 기본이고 다음이 함께 들어 있습니다. **화면 배율·이동**(휠·`−`/`100%`/`+` 버튼·`Space`+드래그·휠 클릭 드래그, 0.25~4배, 순수 함수 `whiteboardClampView`·`whiteboardZoomAt`), **좌우·상하 반전**(이미지·교육 도형), **보드 배경색**(프리셋·직접 고르기·펜 색 자동 대비), **수학·과학 도구상자**(기호·수식 사전·도형·과학 스텐실, 떠 있는 창 이동·크기), **LaTeX 수식 항목**(원문 보존·재편집), **집중 도구**(스포트라이트·화면 가리개·조절점 숨김·손전등), **우클릭 빠른 메뉴**(선택 항목 편집·복사/잘라내기/붙여넣기·복제·레이어 4방향 이동·반전·분리·삭제 / 보드 작업·출력·녹화·도구막대 표시와 위치·도구·색·굵기·크기 직접 입력·이력), **편집 도구막대 숨기기/보이기**, **인쇄**(`doc.printBoard`)와 **메모창 왕복**. | `board-render.js`, `lesson-replay.js`, `scratchpad.js`, `docs/화이트보드-집중도구-설계.md`, `tests/whiteboard-*.test.js` |
 
 ## 6. learning-tools — 수업, 과제, 펫, 메모와 앱 이벤트
 
@@ -105,7 +105,7 @@ flowchart LR
 | `batch-replace.js` | 여러 파일 찾아 바꾸기: 열린 텍스트·코드 문서와 **Word(.docx) 본문·PowerPoint(.pptx) 슬라이드**에서 한꺼번에 찾아 바꾸기(대소문자·정규식·그룹 치환), 미리보기 체크리스트, `saveTextDoc({silent,existingOnly})`로 조용히 저장, 되돌리기를 담당합니다. 오피스 문서는 `MNOfficeReplace`로 계산해 저장하며(File System Access 핸들이면 **원본**, 없으면 exe `/save-file` 로 자동 저장 폴더에 **사본** — 어느 쪽인지 결과 문구로 알립니다), 저장하지 못하면 화면도 바꾸지 않습니다(편집기가 없어 "바뀐 줄 알았는데 파일은 그대로"를 막기 위해). 본문 밖(머리말·꼬리말·각주·발표자 노트) 포함 여부와 변경 이력 문서 허용은 설정▸문서에서 정하고, 바꾸지 않은 곳은 "머리말 2곳"처럼 숫자로 알립니다. 미리보기 줄 이름표는 Word 가 `문단 12`, PowerPoint 가 `슬라이드 3`입니다. | `documents.js`, `code-viewer.js`, `office-replace.js`, `command-palette.js`, `tests/batch-replace.test.js` |
 | `task-package.js` | `.task` 과제 만들기·검증·내보내기, `.taskdone` 제출본 생성·검수·재채점, 일괄 검수와 성적 CSV를 담당합니다. | `python-runtime.js`, `file-loaders.js`, `tests/task-package.test.js` |
 | `exam-paper.js` | 시험지 만들기·배포·응시·채점: 객관식/주관식·이미지 문항 편집, 선생님 암호로 잠근 원본 `.examkey`, 최신 원본과 버전이 일치하는 정답 제거 배포본 `.exam`(열기 암호 선택), 학생 임시 저장·이름·서명 후 공개키로 봉인한 제출본 `.examdone`, 봉인 내부 신원·버전을 검증하는 일괄 채점표, 수동 채점 영구 저장과 시험별·누적 성적 CSV를 담당합니다. 교실 LAN 제출도 여기서 다룹니다 — 선생님의 [제출 받기](EXE 의 제출 전용 리스너 개폐·접수 목록 폴링)와 학생의 [선생님 PC 로 바로 보내기](주소·6자리 코드·연결 확인, 실패하면 파일 제출로 폴백)입니다. | `file-loaders.js`, `documents.js`, `pdf-editor.js`(`trimCanvas`), `code-viewer.js`(서버 저장), `desktop/launcher.cs`(제출 수신), `tests/exam-paper.test.js` |
-| `screensaver.js` | 유휴 화면 시계·영상·웹 주소(iframe) 표시, 영상 목록 IndexedDB 저장, 재생 가능성 검사, 삽입 차단 판정과 폴백, 전체화면 종료를 담당합니다. | `app.js`, `state.js` |
+| `screensaver.js` | 유휴 화면 시계·영상·웹 주소(iframe) 표시, 영상 목록 IndexedDB 저장, 재생 가능성 검사, 삽입 차단 판정과 폴백(웹 → 영상 → 시계), 전체화면 종료를 담당합니다. 웹 주소는 크로스 오리진 iframe이라 입력이 부모로 올라오지 않으므로 투명 막을 덮어 해제 입력만 받고 이동·다운로드를 막습니다. 주소 정규화(http/https만 통과·스킴 보정)와 유튜브 → 퍼가기 주소 변환(반복 재생용 `playlist`·`mute`·시작 시간 이전)은 `state.js`·`app.js` 설정 화면 쪽에 있습니다. | `app.js`, `state.js`, `tests/screensaver-web.test.js` |
 | `pet-data.js` | 픽셀 펫 종족별 스프라이트, 팔레트, 이름과 기본 대사를 정의합니다. | `pet.js`, `pet-custom.js` |
 | `pet-custom.js` | 펫 대사 편집, 사용자별 종족 대사, 나만의 펫 외형 조합과 저장·복원을 담당합니다. | `pet-data.js`, `pet.js` |
 | `pet-events.js` | 펫 행동 도감의 고유 이벤트 이름과 한국어·영어 설명을 정의합니다. | `pet.js`, `tests/pet-events.test.js` |
@@ -133,6 +133,7 @@ flowchart LR
 | `tools/check-release.js` | 오프라인 HTML에 로컬 경로가 남지 않았는지, vendor 파일·해시와 배포 산출물이 올바른지 확인합니다. |
 | `tools/download-pyodide.js` | EXE의 오프라인 Python 실행에 필요한 Pyodide 코어·패키지를 내려받아 `vendor/pyodide`를 구성합니다. |
 | `tools/build-korean-spell-worker.mjs` | `hunspell-wasm`·`hunspell-dict-ko`를 esbuild로 묶어 맞춤법 사전 워커 `vendor/korean-hunspell-worker.js`를 만들고 `scripts.manifest.json`의 sha384도 함께 갱신합니다. `npm run build`가 오프라인 HTML을 만들기 전에 먼저 실행합니다. |
+| `tools/build-manual-html.mjs` | 사용자용 사용법 문서를 `사용법.md` → `사용법.html`로 변환합니다(`npm run build:manual`). 목차·절 앵커·`↑ 목차` 링크를 자동으로 만들고, 키 조합 코드(`` `Ctrl+Shift+O` ``)는 키캡으로, ⚠ 로 시작하는 인용문은 경고 상자로, 박스 그림 문자가 든 코드 울타리는 ASCII 상자로 그립니다. **`사용법.html`은 생성물이라 직접 고치지 않습니다.** `--check`로 두 파일이 어긋났는지만 검사할 수 있고(`npm run check:manual`), `npm run build`가 오프라인 HTML에 넣기 전에 먼저 실행합니다. |
 | `tools/e2e-server.js` | Playwright 테스트용 로컬 정적 서버입니다. 실제 EXE 백엔드를 대신해 화면 흐름 테스트에 필요한 파일을 제공합니다. |
 | `tools/recolor-calico-sprites.js` | 픽셀 펫 복실고양이 스프라이트 시트를 삼색고양이 배색으로 리컬러하는 1회성 자산 도구입니다(앱에 로드되지 않음). |
 
@@ -148,19 +149,26 @@ flowchart LR
 | `tests/batch-replace.test.js` | 여러 파일 찾아 바꾸기: 정규식 이스케이프·대소문자·그룹 치환·줄 단위 변경 기록·위험 패턴 거부 |
 | `tests/binary-model-extension.test.js` | 학습 모델·NumPy 이진 파일의 안전 보관 경로와 Word2Vec 텍스트 내보내기 검색 등록 |
 | `tests/board-render.test.js` | 화이트보드 공용 렌더러의 선택 판정과 항목 이동 좌표 계산 |
+| `tests/code-color-settings.test.js` | 설정에서 고른 코드 색이 `<html>` 인라인 변수로 적용되고 테마 전환에도 유지되는지 |
 | `tests/content-search-live-text.test.js` | 사이드바 내용 검색이 저장 전 편집기 내용을 보는지, 깨끗한 문서는 `savedText`를 쓰는지 |
 | `tests/core.test.js` | 공통 경로·인코딩·Markdown·코드 편집·Python 분석 등 `core.js` 중심 순수 함수 |
 | `tests/diff-viewer.test.js` | 파일 비교 diff 판정·chg 짝짓기·인라인 강조·접기·행 HTML 이스케이프 |
 | `tests/doc-legacy.test.js` | 구형 `.doc`(Word 97) 조각표에서 유니코드·CP1252 본문을 문단으로 뽑는 파서 |
 | `tests/document-edge-shortcuts.test.js` | `Ctrl+Home`/`Ctrl+End`의 편집기·노트북(첫 셀 시작·마지막 셀 끝) 동작 |
 | `tests/document-enhancements.test.js` | 표시 이름, 문서 복구 스냅샷, 검색·편집기 보강 계약 |
+| `tests/document-pan-selection.test.js` | 읽기 전용 문서에서 글자 선택이 손 도구 화면 끌기보다 우선하는지, 빈 여백은 잡는 커서를 유지하는지 |
+| `tests/docx-empty-paragraph-save.test.js` | 빈 문단(자기 닫힘 `<w:p/>` 포함)에 처음 넣은 글자 저장과 표 셀의 여분 빈 문단 정리 |
 | `tests/e2e-contract.test.js` | E2E 설정과 필수 시나리오가 유지되는지 확인하는 계약 테스트 |
 | `tests/folder-new-document.test.js` | 폴더 안 새 문서의 문맥 상속(부모·묶음·상대경로)과 이름 충돌 시 번호 붙이기 |
+| `tests/folder-sync-resilience.test.js` | 폴더 동기화가 파일 하나 실패로 통째로 취소되지 않고, 연결을 재사용해 소켓을 고갈시키지 않는지 |
 | `tests/folder-workspace.test.js` | 폴더 저장·복원·새로고침, 자동 저장 폴더 UI, 원본 미저장 안내와 설명서 주의사항 |
 | `tests/image-memo.test.js` | 이미지 메모 파일명·자동 저장·임시 복구 조건 |
 | `tests/ink-toolbar-icons.test.js` | 필기·표시 도구막대가 이모지 대신 공용 SVG 아이콘을 쓰는지 |
+| `tests/js-libraries.test.js` | 내장 JavaScript 라이브러리의 고정 버전·전역 이름, 문서별 선택 상태 정리와 자동완성 전역 제공 |
+| `tests/js-npm-desktop.test.js` | EXE npm 설치·폴링·취소·목록·번들·삭제 API의 토큰 보호, install script 차단과 번들 상한, EXE 리소스 포함 |
 | `tests/lesson-ocr.test.js` | `.lesson` 검증과 OCR 캐시 문서 식별 |
 | `tests/local-server-security.test.js` | EXE 로컬 API 인증·경로 검증·보안 헤더·실행 상한 |
+| `tests/manual-html-build.test.js` | `사용법.html`이 `사용법.md`에서 생성한 결과와 같은지(문서 어긋남 방지)와 키캡·이스케이프·목차·경고/ASCII 상자·목록 안 코드 울타리 변환 규칙 |
 | `tests/mnote.test.js` | `.mnote` 직렬화 안정성, 지원하지 않는 버전·블록 거부, 블록 본문 검색 규칙 |
 | `tests/native-folder-terminal.test.js` | EXE 폴더 열기의 실제 경로 전달과 Windows Shell 직접 호출 |
 | `tests/notebook-serialize.test.js` | ipynb 모델 왕복, 셀·출력·첨부·히스토리·자동 저장·커널 UI |
@@ -187,6 +195,7 @@ flowchart LR
 | `tests/python-editor-word-select.test.js` | 선택 없이 커서만 단어 안에 있을 때의 `F3` 단어 선택 |
 | `tests/python-import-check.test.js` | 없는 모듈·없는 이름 import 표시(작업공간 색인=오류, Jedi 정의 찾기=경고) |
 | `tests/python-indirect-path.test.js` | import된 모듈의 상대 출력 폴더까지 실행 묶음에 포함 |
+| `tests/python-jedi-project.test.js` | 작업공간 `.py`를 서버 임시 폴더에 미러링해 `jedi.Project` 루트로 넘기는 경로(경로는 서버만 알고 환경변수로 전달) |
 | `tests/python-kernel.test.js` | 로컬 노트북 커널의 셀 간 상태 유지(환경에 따라 제외 가능) |
 | `tests/python-light-format.test.js` | 8칸 탭 스톱 기준 선행 탭 변환과 혼합 들여쓰기 깊이 보존 |
 | `tests/python-live-diagnostics.test.js` | 실시간 진단의 입력 묶기·최신 결과 반영과 심각도 표시 |
@@ -197,12 +206,16 @@ flowchart LR
 | `tests/python-pip-install-progress.test.js` | 패키지 설치 진행 라벨 축약과 경과 시간 표시 |
 | `tests/python-stderr-classify.test.js` | Python 경고·실패 stderr 분류 |
 | `tests/python-syntax-highlighting.test.js` | 데코레이터·정의 함수명·async·f-string 등 전용 토큰 강조 |
+| `tests/python-workspace-import-index.test.js` | 한 번도 열지 않은 옆 `.py`도 백그라운드로 읽어 자동 import 후보 캐시에 채우는지 |
 | `tests/recent-files.test.js` | 최근 목록 정렬·중복 승격과 같은 이름 다른 경로 구분 |
 | `tests/release-contract.test.js` | vendor 고정본, manifest 로딩·의존성·공개 API 및 이 문서의 JS 목록 완전성 |
 | `tests/scratch-save-name.test.js` | 첫 저장 이름 지정 시 확장자·폴더 경로 유지 |
 | `tests/scratchpad.test.js` | 임시 메모 데이터 이전, 블록·잠금·노트북 셀 처리 |
+| `tests/screensaver-web.test.js` | 대기 화면 웹 주소 정규화(http/https만 통과·스킴 보정)와 코드 실행이 가능한 스킴 차단 |
 | `tests/search-history.test.js` | 최근 검색어 구획 분리·상한·옵션 기억과 자동채움 정책 |
 | `tests/shortcut-migration.test.js` | 새 기본 단축키의 충돌 회피와 예전 조합 사용자만 1회 이전 |
+| `tests/sidebar-inline-rename.test.js` | 폴더에서 만든 새 문서의 이름을 사이드바 줄에서 바로 받고 저장 때 다시 묻지 않는 규칙 |
+| `tests/sidebar-search-collapse.test.js` | 검색·확장자 필터 중 강제로 펼친 폴더를 다시 접을 수 있는지, 검색을 지운 뒤 상태 복귀 |
 | `tests/single-tab-and-auto-open.test.js` | 파일 하나만 열려도 탭바 표시, 폴더·압축 첫 파일 자동 열기 억제와 빈 화면 |
 | `tests/special-chars.test.js` | 특수문자 문자표 묶음·한자키 자모 대응·최근 사용 기록 |
 | `tests/spellcheck.test.js` | 오프라인 한국어 규칙, 마크다운 코드 제외, 코드 주석·문자열 범위, 사용자 사전과 화면 연결 |
@@ -216,6 +229,16 @@ flowchart LR
 | `tests/unknown-text-extension.test.js` | 모르는 확장자의 텍스트 판별 후 허용과 이진 파일 거부 |
 | `tests/ux-p0.test.js` | 시작 화면 기본 행동과 원본·사본 저장 대상 안내 |
 | `tests/video-subtitles.test.js` | 자막 변환·자동 연결과 영상 작업공간 제외 |
+| `tests/whiteboard-background.test.js` | 보드별 배경색이 스냅샷·복원·리플레이까지 따라가고 펜 색·텍스트 입력칸이 함께 맞춰지는지 |
+| `tests/whiteboard-context-menu.test.js` | 우클릭 메뉴가 클릭 대상 판정과 도구·색·굵기·이력을 도구막대 실행 함수와 공유하는지, 키보드 이동·바깥 클릭 닫기 |
+| `tests/whiteboard-context-menu-phase2.test.js` | 보드 내부 클립보드(독립 복제)와 복사·잘라내기·우클릭 위치 붙여넣기, 레이어 4방향 이동과 경계 비활성화 |
+| `tests/whiteboard-context-menu-phase3.test.js` | 빈 공간 메뉴의 출력·공유(PNG·PDF·인쇄·메모), 녹화 상태 표시와 도구막대 위치 4방향 저장 |
+| `tests/whiteboard-education-toolbox.test.js` | 수학·과학 도구상자 묶음의 완전성, 수식을 이미지가 아닌 편집 가능한 `formula` 항목으로 넣는 규칙 |
+| `tests/whiteboard-focus-tools.test.js` | 집중 도구 상태 정규화, 스포트라이트 화면 유지·최소 크기, 밝은 영역 안에서만 입력 허용 |
+| `tests/whiteboard-memo-roundtrip.test.js` | 메모 이미지 블록이 보드 스냅샷 고리(`boardAssetId`)를 저장·복원 뒤에도 유지하고 다시 보드로 되살아나는지 |
+| `tests/whiteboard-print.test.js` | 보드 문서의 인쇄가 화면 DOM 대신 보드 그림 인쇄 경로로 가는지 |
+| `tests/whiteboard-selection-style.test.js` | 색 변경이 원본을 보존한 새 항목을 만드는지, 교육 도형의 내부 굵기·투명도 보존과 텍스트 S/M/L 왕복 |
+| `tests/whiteboard-zoom.test.js` | 배율·화면 이동 범위 제한(0.25~4배), 포인터 중심 확대의 좌표 유지와 휠·내보내기 배선 |
 | `tests/xlsx-edit.test.js` | 표 편집, 수식, 병합, 행·열, 차트와 XLSX 저장 왕복 |
 
 ### 화면 흐름 테스트 (Playwright, `tests/e2e/*.spec.js`)
@@ -224,13 +247,18 @@ flowchart LR
 |---|---|
 | `tests/e2e/critical-flows.spec.js` | 파일 열기·탭 전환·저장 등 핵심 사용자 흐름 |
 | `tests/e2e/autosave-and-recovery.spec.js` | 설정 창의 자동 저장 항목 묶음, 예전 설정 이어받기, 조용한 저장 |
+| `tests/e2e/code-colors.spec.js` | 코드 색 설정의 미리보기·저장과 테마 전환까지의 반영 |
 | `tests/e2e/code-practice.spec.js` | 코드 따라치기 시작·오타 표시·그만두기 |
 | `tests/e2e/column-clipboard.spec.js` | 열 편집 사각 선택의 복사·잘라내기·붙여넣기 |
 | `tests/e2e/column-edit-font.spec.js` | 고정폭·가변폭 글꼴에서 열 편집이 가리킨 경계에 정확히 놓이는지 |
+| `tests/e2e/data-convert.spec.js` | 형식 변환 창 열기, JSON→CSV 격자 미리보기·손실 안내와 디바운스 중 내보내기 차단 |
 | `tests/e2e/dirty-indicator.spec.js` | 편집·되돌리기에 따라 상단 배지와 사이드바 표시가 함께 켜지고 꺼지는지 |
 | `tests/e2e/doc-legacy.spec.js` | 구형 `.doc` 열기와 글자 미리보기 화면 |
+| `tests/e2e/exam-cumulative-csv.spec.js` | 시험 채점 화면의 누적 성적 CSV를 실제 저장 경로 기준으로 뽑는지 |
+| `tests/e2e/exam-paper.spec.js` | 시험지 만들기→배포→학생 제출→선생님 열쇠 채점 한 바퀴와 열기 암호 배포본 |
 | `tests/e2e/goto-line.spec.js` | `Ctrl+G` 줄 이동 창과 실제 이동 |
 | `tests/e2e/header-tool-visibility.spec.js` | 헤더 버튼 노출 설정과 설정(⚙)·더보기 예외 규칙 |
+| `tests/e2e/image-lightbox.spec.js` | 실행 결과 그래프 확대 창 열기·배율 계산과 `Esc` 닫기 |
 | `tests/e2e/image-tool-visibility.spec.js` | 이미지 편집 도구 노출 설정과 켜 둔 모드 정리 |
 | `tests/e2e/lazy-vendor.spec.js` | 무거운 vendor 라이브러리를 형식을 열 때만 불러오는지 |
 | `tests/e2e/mouse-side-buttons.spec.js` | 마우스 옆 버튼의 앞·뒤 문서 이동 |
@@ -244,9 +272,16 @@ flowchart LR
 | `tests/e2e/scratchpad-overview.spec.js` | 메모 목록 카드 격자·전 메모 검색·Esc 단계별 닫기와 팔레트 진입 |
 | `tests/e2e/sidebar-overlay.spec.js` | 파일을 열 때 사이드바가 본문 위에 뜨는 서랍 동작과 접힘 상태 기억 |
 | `tests/e2e/sidebar-selection.spec.js` | 사이드바 다중 선택과 선택 기반 동작 |
+| `tests/e2e/spreadsheet-context-menu.spec.js` | 표 편집 우클릭 메뉴의 갈래별 하위 메뉴(▸) 열림과 바깥 클릭 닫힘 규칙 |
 | `tests/e2e/spreadsheet-undo.spec.js` | 표 편집 되돌리기·다시 실행 |
 | `tests/e2e/tab-drag-split.spec.js` | 탭 드래그 순서 변경과 분할 작업 진입 |
+| `tests/e2e/tab-new-board.spec.js` | 탭바 칠판 버튼과 `Alt+B`로 새 화이트보드 열기 |
+| `tests/e2e/terminal-interrupt.spec.js` | 터미널에서 도는 명령을 `Ctrl+C`로 중지하는 경로 |
+| `tests/e2e/text-edit-return-position.spec.js` | 텍스트 보기↔편집을 오갈 때 보던 자리(스크롤 위치) 유지 |
 | `tests/e2e/undo-redo.spec.js` | 화이트보드 획 되돌리기·다시실행과 redo 기록 무효화, 단축키 |
+| `tests/e2e/whiteboard-memo.spec.js` | 화이트보드→메모창→다시 화이트보드 왕복과 같은 블록 제자리 갱신 |
+| `tests/e2e/whiteboard-save.spec.js` | 보드는 수정 표시(●)를 켜지 않고 `Ctrl+S`를 PNG 내보내기로 받는지 |
+| `tests/e2e/whiteboard-toolbox-move.spec.js` | 수학·과학 도구상자 창 이동·크기 조절과 위치 기억, 헤더 아래 유지 |
 
 ## 기능을 찾을 때 빠른 기준
 
@@ -261,6 +296,10 @@ flowchart LR
 | Jupyter 셀 UI | `notebook-run.js`, `notebook-cells.js`, `notebook-model.js` |
 | 파일 비교(diff)·여러 파일 찾아 바꾸기 | `diff-viewer.js`, `batch-replace.js`, `office-replace.js`, `command-palette.js` |
 | 블록 문서(`.mnote`) | `mnote.js`, `documents.js`, `file-loaders.js` |
+| 화이트보드 도구·우클릭 메뉴·집중 도구 | `whiteboard.js`, `board-render.js`, `docs/화이트보드-집중도구-설계.md` |
+| 과제(`.task`)·시험지(`.exam`) | `task-package.js`, `exam-paper.js`, `docs/시험지-설계.md` |
+| 대기 화면(화면보호기)·웹 주소 | `screensaver.js`, `state.js`(설정·주소 정규화), `app.js`(설정 화면) |
+| 데이터 형식 변환 | `data-convert.js`, `data-convert-ui.js`, `docs/형식변환-설계.md` |
 | 찾기 창·최근 검색어·특수문자 | `search-history.js`, `special-chars.js`, 각 편집기 |
 | 단축키 정의·기본값 | `state.js`(`SHORTCUT_DEFINITIONS`), `app.js`(설정 화면) |
 | 설정창·전역 이벤트 | `app.js`, `state.js` |

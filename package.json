@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "build:spellcheck-worker": "node tools/build-korean-spell-worker.mjs",
-    "build": "npm run build:spellcheck-worker && node build-offline.js",
+    "build:manual": "node tools/build-manual-html.mjs",
+    "check:manual": "node tools/build-manual-html.mjs --check",
+    "build": "npm run build:spellcheck-worker && npm run build:manual && node build-offline.js",
     "check": "node tools/check-source.js",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
