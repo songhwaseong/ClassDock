@@ -1355,6 +1355,8 @@
     "선택한 교육 도형의 그룹 풀기": "Ungroup the selected education shape",
     "선택한 교육 도형 좌우 반전": "Flip the selected education shape horizontally",
     "선택한 교육 도형 상하 반전": "Flip the selected education shape vertically",
+    "선택한 이미지 또는 교육 도형 좌우 반전": "Flip the selected image or education shape horizontally",
+    "선택한 이미지 또는 교육 도형 상하 반전": "Flip the selected image or education shape vertically",
     "보드 배경색 바꾸기": "Change the board background",
     "보드 배경색": "Board background",
     "배경색": "Background",

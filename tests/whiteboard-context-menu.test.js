@@ -15,7 +15,7 @@ test("화이트보드 우클릭 메뉴는 클릭 대상과 기존 편집 동작�
   assert.match(source, /contextAction\("복제"[\s\S]{0,120}duplicateSelected\)/);
   assert.match(source, /contextAction\("삭제"[\s\S]{0,120}deleteSelected\)/);
   assert.match(source, /selected\.type==="text"\|\|formula/);
-  assert.match(source, /contextFlipXBtn\.hidden=!stencil/);
+  assert.match(source, /contextFlipXBtn\.hidden=!flippable/);
   assert.match(source, /contextUngroupBtn\.hidden=!\(selected&&selected\.type==="group"\)/);
 });
 

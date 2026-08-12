@@ -105,6 +105,29 @@ function whiteboardItemColor(value){
   return "";
 }
 
+function whiteboardCanFlipItem(value){
+  return !!(value && (value.type === "image" || (value.type === "group" && value.role === "education-stencil")));
+}
+
+// 수식 색상 변경은 SVG를 다시 만들지만, 보드 위 배치까지 다시 계산할 이유는 없다.
+// 화면 이동·확대 뒤의 수식 좌표는 현재 스테이지 W/H 밖일 수 있으므로 색만 바꿀 때
+// 화면 크기로 좌표를 clamp하면 수식이 다른 위치로 튄다.
+function whiteboardFormulaReplacementRect(existing, baseW, baseH, stageW, stageH, preserveGeometry=false){
+  if (!existing || typeof existing !== "object") return null;
+  if (preserveGeometry){
+    return { x:existing.x, y:existing.y, w:existing.w, h:existing.h };
+  }
+  const centerX = existing.x + existing.w / 2, centerY = existing.y + existing.h / 2;
+  const displayScale = existing.formulaBaseH ? Math.max(.2, existing.h / existing.formulaBaseH) : 1;
+  let w = baseW * displayScale, h = baseH * displayScale;
+  const sc = Math.min(1, stageW * .85 / w, stageH * .85 / h); w = Math.round(w * sc); h = Math.round(h * sc);
+  return {
+    x:Math.max(0, Math.min(Math.round(centerX - w / 2), Math.max(0, stageW - w))),
+    y:Math.max(0, Math.min(Math.round(centerY - h / 2), Math.max(0, stageH - h))),
+    w, h
+  };
+}
+
 // S/M/L은 수식과 같은 75%/100%/150% 비율을 사용한다. 텍스트는 처음 크기를 기준으로,
 // 교육 도형 그룹은 원본 벡터 크기(sourceW/sourceH)를 기준으로 계산한다.
 function whiteboardPresetResizeItem(value, scale){
@@ -887,7 +910,7 @@ function renderWhiteboard(doc, host){
       ctx.restore();
     }
     if (groupActionBtn) groupActionBtn.disabled = !(s && s.type === "group");
-    const canFlip = !!(s && s.type === "group" && s.role === "education-stencil");
+    const canFlip = whiteboardCanFlipItem(s);
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
     if (flipYBtn){ flipYBtn.disabled = !canFlip; flipYBtn.setAttribute("aria-pressed", canFlip && s.flipY ? "true" : "false"); }
     syncSelectionControls();
@@ -946,7 +969,7 @@ function renderWhiteboard(doc, host){
   };
   const flipSelected = (axis) => {
     const selected = wb.selected;
-    if (!selected || selected.type !== "group" || selected.role !== "education-stencil") return;
+    if (!whiteboardCanFlipItem(selected)) return;
     const idx = wb.items.indexOf(selected); if (idx < 0) return;
     const flipped = Object.assign({}, selected, { [axis]:!selected[axis] });
     wb.items[idx] = flipped; wb.selected = flipped; redraw(); history.commit(); recordCommit();
@@ -1312,12 +1335,9 @@ function renderWhiteboard(doc, host){
         return;
       }
       const idx = wb.items.indexOf(existing); if (idx < 0) return;
-      const centerX = existing.x + existing.w / 2, centerY = existing.y + existing.h / 2;
-      const displayScale = existing.formulaBaseH ? Math.max(.2, existing.h / existing.formulaBaseH) : 1;
-      let w = (img.naturalWidth || baseW) * displayScale, h = (img.naturalHeight || baseH) * displayScale;
-      const sc = Math.min(1, W * .85 / w, H * .85 / h); w = Math.round(w * sc); h = Math.round(h * sc);
-      const x=Math.max(0,Math.min(Math.round(centerX-w/2),Math.max(0,W-w))), y=Math.max(0,Math.min(Math.round(centerY-h/2),Math.max(0,H-h)));
-      const item = { type:"image",img,src,x,y,w,h,role:"education-formula",formulaSource:source,formulaColor,formulaBaseW:baseW,formulaBaseH:baseH };
+      const preserveGeometry = existing.formulaSource === source && existing.formulaColor !== formulaColor;
+      const {x,y,w,h} = whiteboardFormulaReplacementRect(existing, img.naturalWidth || baseW, img.naturalHeight || baseH, W, H, preserveGeometry);
+      const item = Object.assign({}, existing, { type:"image",img,src,x,y,w,h,role:"education-formula",formulaSource:source,formulaColor,formulaBaseW:baseW,formulaBaseH:baseH });
       const keepSelected = wb.selected === existing;
       wb.items[idx] = item; if (keepSelected) wb.selected = item; redraw(); history.commit(); recordCommit();
     }).catch(() => { if (typeof toast === "function") toast("수식을 그리지 못했어요.", 2000); });
@@ -1872,8 +1892,8 @@ function renderWhiteboard(doc, host){
   const contextBackwardBtn=contextAction("뒤로","선택한 항목을 한 단계 뒤로","",()=>moveSelectedLayer("backward"));
   const contextFrontBtn=contextAction("맨 앞으로","선택한 항목을 맨 앞으로","",()=>moveSelectedLayer("front"));
   const contextBackBtn=contextAction("맨 뒤로","선택한 항목을 맨 뒤로","",()=>moveSelectedLayer("back"));
-  const contextFlipXBtn=contextAction("좌우 반전","선택한 교육 도형 좌우 반전","",()=>flipSelected("flipX"));
-  const contextFlipYBtn=contextAction("상하 반전","선택한 교육 도형 상하 반전","",()=>flipSelected("flipY"));
+  const contextFlipXBtn=contextAction("좌우 반전","선택한 이미지 또는 교육 도형 좌우 반전","",()=>flipSelected("flipX"));
+  const contextFlipYBtn=contextAction("상하 반전","선택한 이미지 또는 교육 도형 상하 반전","",()=>flipSelected("flipY"));
   const contextUngroupBtn=contextAction("분리","선택한 그룹의 구성 요소 분리","",ungroupSelected);
   const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
   contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextFlipXBtn,contextFlipYBtn,contextUngroupBtn,contextDeleteBtn);
@@ -1971,7 +1991,7 @@ function renderWhiteboard(doc, host){
     wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw();
 
     const selected=wb.selected,formula=selected&&selected.type==="image"&&selected.role==="education-formula";
-    const stencil=selected&&selected.type==="group"&&selected.role==="education-stencil";
+    const stencil=selected&&selected.type==="group"&&selected.role==="education-stencil",flippable=whiteboardCanFlipItem(selected);
     const typeLabels={image:formula?"수식":"이미지",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",polyline:"도형",text:"텍스트",group:stencil?"교육 도형":"그룹"};
     focusContextSection.hidden=!focus.active;
     contextItemSection.hidden=!selected;
@@ -1979,7 +1999,9 @@ function renderWhiteboard(doc, host){
     contextOutputSection.hidden=!!selected; contextRecordSection.hidden=!!selected; contextPositionSection.hidden=!!selected;
     contextItemName.textContent=selected?(typeLabels[selected.type]||"화이트보드 항목"):"";
     contextEditBtn.hidden=!(selected&&(selected.type==="text"||formula));
-    contextFlipXBtn.hidden=!stencil; contextFlipYBtn.hidden=!stencil;
+    contextFlipXBtn.hidden=!flippable; contextFlipYBtn.hidden=!flippable;
+    contextFlipXBtn.classList.toggle("active",flippable&&!!selected.flipX); contextFlipYBtn.classList.toggle("active",flippable&&!!selected.flipY);
+    contextFlipXBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipX)); contextFlipYBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipY));
     contextUngroupBtn.hidden=!(selected&&selected.type==="group");
     const selectedIndex=selected?wb.items.indexOf(selected):-1, lastIndex=wb.items.length-1;
     contextPasteItemBtn.disabled=!hasWhiteboardInternalClipboard(); contextPasteBoardBtn.disabled=!hasWhiteboardInternalClipboard();
@@ -2575,8 +2597,8 @@ function renderWhiteboard(doc, host){
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
   redoBtn = mkIconBtn("redo", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
-  flipXBtn = mkBtn("↔", "선택한 교육 도형 좌우 반전", "wb-act wb-flip-x", () => flipSelected("flipX")); flipXBtn.disabled = true;
-  flipYBtn = mkBtn("↕", "선택한 교육 도형 상하 반전", "wb-act wb-flip-y", () => flipSelected("flipY")); flipYBtn.disabled = true;
+  flipXBtn = mkBtn("↔", "선택한 이미지 또는 교육 도형 좌우 반전", "wb-act wb-flip-x", () => flipSelected("flipX")); flipXBtn.disabled = true;
+  flipYBtn = mkBtn("↕", "선택한 이미지 또는 교육 도형 상하 반전", "wb-act wb-flip-y", () => flipSelected("flipY")); flipYBtn.disabled = true;
   groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup", ungroupSelected); groupActionBtn.disabled = true;
   const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", confirmClearAll);
   actGroup.append(undoBtn, redoBtn, flipXBtn, flipYBtn, groupActionBtn, clearBtn);
@@ -2753,7 +2775,7 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
     whiteboardClipboardItem, setWhiteboardInternalClipboard, getWhiteboardInternalClipboard, hasWhiteboardInternalClipboard,
-    whiteboardRecolorItem, whiteboardItemColor, whiteboardPresetResizeItem, normalizeWhiteboardTextSize, normalizeWhiteboardObjectScale, whiteboardObjectScalePercent,
+    whiteboardRecolorItem, whiteboardItemColor, whiteboardCanFlipItem, whiteboardFormulaReplacementRect, whiteboardPresetResizeItem, normalizeWhiteboardTextSize, normalizeWhiteboardObjectScale, whiteboardObjectScalePercent,
     whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,

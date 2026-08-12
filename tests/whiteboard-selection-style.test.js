@@ -8,6 +8,8 @@ const path = require("node:path");
 const {
   whiteboardRecolorItem,
   whiteboardItemColor,
+  whiteboardCanFlipItem,
+  whiteboardFormulaReplacementRect,
   whiteboardPresetResizeItem,
   normalizeWhiteboardTextSize,
   normalizeWhiteboardObjectScale,
@@ -80,6 +82,26 @@ test("수식과 수학·과학 도형의 직접 크기는 원본 대비 25~400%�
   assert.equal(normalizeWhiteboardObjectScale(225.6), 226);
   assert.equal(normalizeWhiteboardObjectScale(10), 25);
   assert.equal(normalizeWhiteboardObjectScale(500), 400);
+});
+
+test("옮긴 수식의 색상 변경은 화면 범위와 관계없이 위치와 크기를 보존한다", () => {
+  const moved = {
+    type:"image", role:"education-formula",
+    x:1480, y:-220, w:300, h:150,
+    formulaBaseW:200, formulaBaseH:100
+  };
+
+  assert.deepEqual(
+    whiteboardFormulaReplacementRect(moved, 200, 100, 900, 600, true),
+    { x:1480, y:-220, w:300, h:150 }
+  );
+});
+
+test("화이트보드 일반 이미지와 수식 이미지는 좌우·상하 반전할 수 있다", () => {
+  assert.equal(whiteboardCanFlipItem({ type:"image" }), true);
+  assert.equal(whiteboardCanFlipItem({ type:"image", role:"education-formula" }), true);
+  assert.equal(whiteboardCanFlipItem({ type:"group", role:"education-stencil" }), true);
+  assert.equal(whiteboardCanFlipItem({ type:"text" }), false);
 });
 
 test("교육 도형 S/M/L은 원본 벡터 비율을 유지한다", () => {

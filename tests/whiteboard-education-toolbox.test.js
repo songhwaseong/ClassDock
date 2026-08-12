@@ -198,9 +198,9 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   assert.match(source, /role:"education-stencil"/);
   assert.match(source, /role:"education-formula"/);
   assert.match(source, /whiteboardStencilSvg\(entry\.id, "currentColor"\)/);
-  assert.match(source, /flipXBtn = mkBtn\("↔", "선택한 교육 도형 좌우 반전"/);
-  assert.match(source, /flipYBtn = mkBtn\("↕", "선택한 교육 도형 상하 반전"/);
-  assert.match(source, /selected\.role !== "education-stencil"/);
+  assert.match(source, /flipXBtn = mkBtn\("↔", "선택한 이미지 또는 교육 도형 좌우 반전"/);
+  assert.match(source, /flipYBtn = mkBtn\("↕", "선택한 이미지 또는 교육 도형 상하 반전"/);
+  assert.match(source, /if \(!whiteboardCanFlipItem\(selected\)\) return/);
   assert.match(source, /groupActionBtn = mkBtn\("분리"/);
   assert.match(source, /PdfSignerCore\.latexToMathML/);
   assert.match(source, /latexToMathML\(String\(source \|\| ""\), false, true\)/);
