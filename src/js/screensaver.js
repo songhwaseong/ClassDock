@@ -2,8 +2,9 @@
 
 /* ===== 화면보호기(대기 화면) =====
    옵션에서 켤 때만 동작한다(기본 꺼짐). 일정 시간 입력이 없으면 전체 화면 오버레이로,
-   사용자가 고른 영상(브라우저 저장소에 보관 — exe/HTML 배포 용량과 무관)을 재생하거나,
-   영상이 없으면 내장 애니메이션(떠다니는 입자 + 시계)을 보여준다.
+   웹 주소(URL)를 걸어 두었으면 그 페이지를, 아니면 사용자가 고른 영상(브라우저 저장소에 보관 —
+   exe/HTML 배포 용량과 무관)을 재생하고, 둘 다 없으면 내장 애니메이션(떠다니는 입자 + 시계)을 보여준다.
+   내용은 웹 주소 → 영상 → 애니메이션 순으로 폴백한다(인터넷이 끊겨도 대기 화면 자체는 항상 뜬다).
    작업 중(파이썬·노트북 실행, 미디어 재생, 처리 중, 모달, iframe 사용)에는 뜨지 않는다.
    아무 입력(마우스·키·터치)이면 즉시 사라지며, 그 첫 입력은 아래 UI 로 새지 않게 삼킨다. */
 
@@ -138,6 +139,7 @@ async function clearScreensaverVideo(){
 // ----- 유휴 감지 -----
 let ssTimer = 0, ssActive = false, ssOverlay = null, ssRaf = 0, ssObjUrl = null, ssKeyHandler = null;
 let ssManualFullscreen = false;   // '지금 시작'으로 우리가 올린 전체화면이면 해제할 때 함께 내린다
+let ssWebGuard = 0, ssWebTimer = 0, ssWebAbort = null;   // 웹 주소 모드: 포커스 · 로드 대기 · 네트워크 확인
 function ssSettings(){ return (typeof appSettings !== "undefined" && appSettings.screensaver) || { enabled: false, idleMin: 5 }; }
 
 // 작업 중이면 대기화면 금지(무입력이어도 바쁠 수 있는 상황).
@@ -181,48 +183,21 @@ async function showScreensaver(opts){
   const ov = document.createElement("div"); ov.className = "screensaver"; ov.id = "screensaver";
   ssOverlay = ov;
 
+  const s = ssSettings();
   const keys = await ssGetVideoKeys();
   if (!ssActive){ return; }   // 로드 도중 해제됐으면 중단
-  let usedVideo = false;
-  if (keys.length){
-    try {
-      const v = document.createElement("video");
-      v.className = "ss-video"; v.muted = !sound; v.defaultMuted = !sound;
-      v.autoplay = true; v.setAttribute("playsinline", ""); v.playsInline = true;
-      v.loop = keys.length === 1;               // 1개면 기존처럼 loop(재로딩 공백 없음), 여러 개면 ended 로 이어 붙임
-      let idx = 0, failed = 0;
-      const playAt = async (i) => {
-        const blob = await ssGetVideoByKey(keys[i]);
-        if (!ssActive || v.parentNode !== ov) return;
-        if (!blob){ onFail(); return; }
-        const prev = ssObjUrl;
-        ssObjUrl = URL.createObjectURL(blob);   // 영상당 그때그때 URL 생성 → 메모리는 항상 1개분
-        v.src = ssObjUrl;
-        if (prev){ try { URL.revokeObjectURL(prev); } catch(_){} }
-        v.play().catch(() => {
-          // 소리 켠 재생이 자동재생 정책에 막히면 무음으로라도 재생한다
-          if (!v.muted){ v.muted = true; v.play().catch(() => {}); }
-        });
-      };
-      const onFail = () => {
-        failed++;
-        if (failed >= keys.length){             // 전부 실패 → 시계 애니메이션 폴백
-          if (v.parentNode === ov){ ov.removeChild(v); startScreensaverAnimation(ov); }
-          return;
-        }
-        idx = (idx + 1) % keys.length; playAt(idx);
-      };
-      v.addEventListener("ended", () => { if (keys.length > 1){ failed = 0; idx = (idx + 1) % keys.length; playAt(idx); } });
-      v.addEventListener("error", onFail);
-      ov.appendChild(v);
-      playAt(0);
-      usedVideo = true;
-    } catch(_){ usedVideo = false; }
-  }
-  if (!usedVideo) startScreensaverAnimation(ov);
+  // 내용 폴백 사슬: 웹 주소 → 영상 → 시계 애니메이션.
+  // 인터넷이 끊겼거나 사이트가 삽입을 막아 두어도 대기 화면 자체는 반드시 뜨게 한다.
+  const fallbackFromWeb = () => {
+    if (!ssActive || ssOverlay !== ov) return;
+    ssClearContent(ov);
+    if (!startScreensaverVideo(ov, keys, sound)) startScreensaverAnimation(ov);
+  };
+  const usedWeb = (s.mode === "web" && s.url) ? startScreensaverWeb(ov, s.url, fallbackFromWeb) : false;
+  if (!usedWeb && !startScreensaverVideo(ov, keys, sound)) startScreensaverAnimation(ov);
 
   const hint = document.createElement("div"); hint.className = "ss-hint";
-  hint.textContent = "아무 키나 누르거나 화면을 클릭하면 돌아갑니다";
+  hint.textContent = screensaverText("아무 키나 누르거나 화면을 클릭하면 돌아갑니다");
   ov.appendChild(hint);
   // ⛶ 문서 전체화면(특정 요소만 최상단 레이어) 중에는 body 에 붙이면 가려져 안 보이므로
   // 그 요소 안에 붙인다 → 전체화면 수업 중 유휴 대기 화면도 모니터 전체를 덮는다.
@@ -241,6 +216,199 @@ async function showScreensaver(opts){
   ov.addEventListener("touchstart", (e) => dismissScreensaver(e, "pointer"), { capture: true, passive: false });
   ssKeyHandler = (e) => { if (pastGrace()) dismissScreensaver(e, "key"); };
   document.addEventListener("keydown", ssKeyHandler, true);
+}
+
+// 오버레이 안 내용물만 비운다(해제용 힌트는 남긴다) — 폴백으로 갈아 끼울 때 쓴다.
+function ssClearContent(ov){
+  ssStopWebGuard();
+  if (ssRaf){ cancelAnimationFrame(ssRaf); ssRaf = 0; }
+  ov.querySelectorAll(".ss-video,.ss-web,.ss-capture,.ss-canvas").forEach((el) => {
+    if (el.tagName === "VIDEO"){ try { el.pause(); el.removeAttribute("src"); el.load(); } catch(_){} }
+    try { el.remove(); } catch(_){}
+  });
+  const url = ssObjUrl; ssObjUrl = null;
+  if (url){ try { URL.revokeObjectURL(url); } catch(_){} }
+}
+
+// 영상 재생 — 저장된 영상이 하나도 없으면 false(호출한 쪽이 애니메이션으로 넘어간다).
+function startScreensaverVideo(ov, keys, sound){
+  if (!keys || !keys.length) return false;
+  try {
+    const v = document.createElement("video");
+    v.className = "ss-video"; v.muted = !sound; v.defaultMuted = !sound;
+    v.autoplay = true; v.setAttribute("playsinline", ""); v.playsInline = true;
+    v.loop = keys.length === 1;               // 1개면 기존처럼 loop(재로딩 공백 없음), 여러 개면 ended 로 이어 붙임
+    let idx = 0, failed = 0;
+    const playAt = async (i) => {
+      const blob = await ssGetVideoByKey(keys[i]);
+      if (!ssActive || v.parentNode !== ov) return;
+      if (!blob){ onFail(); return; }
+      const prev = ssObjUrl;
+      ssObjUrl = URL.createObjectURL(blob);   // 영상당 그때그때 URL 생성 → 메모리는 항상 1개분
+      v.src = ssObjUrl;
+      if (prev){ try { URL.revokeObjectURL(prev); } catch(_){} }
+      v.play().catch(() => {
+        // 소리 켠 재생이 자동재생 정책에 막히면 무음으로라도 재생한다
+        if (!v.muted){ v.muted = true; v.play().catch(() => {}); }
+      });
+    };
+    const onFail = () => {
+      failed++;
+      if (failed >= keys.length){             // 전부 실패 → 시계 애니메이션 폴백
+        if (v.parentNode === ov){ ov.removeChild(v); startScreensaverAnimation(ov); }
+        return;
+      }
+      idx = (idx + 1) % keys.length; playAt(idx);
+    };
+    v.addEventListener("ended", () => { if (keys.length > 1){ failed = 0; idx = (idx + 1) % keys.length; playAt(idx); } });
+    v.addEventListener("error", onFail);
+    ov.appendChild(v);
+    playAt(0);
+    return true;
+  } catch(_){ return false; }
+}
+
+// 삽입 차단(X-Frame-Options·CSP frame-ancestors) 판정.
+// 크로스 오리진이라 내용은 못 읽지만, 바로 그 점을 신호로 쓴다 —
+//   정상 로드: 다른 오리진 문서가 들어와 location.href 읽기가 SecurityError 로 막힌다 → 차단 아님
+//   삽입 거부: 프레임이 처음의 about:blank 에 머물러 우리 오리진으로 그냥 읽힌다 → 차단
+// (DNS 실패 같은 네트워크 오류도 오류 문서가 들어와 '차단 아님'으로 보일 수 있어, 부르는 쪽에서 타임아웃을 함께 건다.)
+function screensaverFrameBlocked(frame){
+  try {
+    const href = frame.contentWindow.location.href;
+    return !href || href === "about:blank";
+  } catch(_){ return false; }
+}
+
+// 프레임에 넘겨 주는 기능 권한. 유튜브 퍼가기(embed) 처럼 흔히 쓰는 주소가 그냥 재생되도록
+// 유튜브가 안내하는 조합에 맞춘다 — encrypted-media 가 없으면 DRM 스트림이 재생되지 않는다.
+// 카메라·마이크·위치는 넣지 않는다(대기 화면에 필요 없고, 넣으면 권한 창이 뜬다).
+const SS_WEB_ALLOW = "autoplay; encrypted-media; picture-in-picture; accelerometer; gyroscope; clipboard-write";
+// 리퍼러는 브라우저 기본값(출처만 전달)을 쓴다. no-referrer 로 아예 끊으면 유튜브 등에서
+// '동영상을 재생할 수 없음' 으로 막히는 영상이 생기는데, 여기서 전달되는 출처는 http://localhost:<포트> 뿐이라
+// 감출 정보가 없다 — 어떤 주소를 넣을지 모르는 기능이라 호환성을 택한다.
+const SS_WEB_REFERRER = "strict-origin-when-cross-origin";
+
+function screensaverText(value){
+  return (typeof window.t === "function") ? window.t(value) : value;
+}
+
+// iframe 은 DNS·인증서·삽입 차단 오류에서도 load 를 보낼 수 있어 load 하나만 성공 신호로 쓸 수 없다.
+// no-cors fetch 는 응답 내용을 읽지 않고 네트워크 연결 성립 여부만 알려 주므로, 프레임 load 와 둘 다
+// 확인해야 성공으로 본다. X-Frame-Options/CSP 로 about:blank 에 남은 경우는 screensaverFrameBlocked 가 맡는다.
+function probeScreensaverWebUrl(url, signal){
+  if (typeof fetch !== "function") return Promise.resolve(true);
+  return fetch(url, { method:"GET", mode:"no-cors", credentials:"include", cache:"no-store", signal })
+    .then(() => true, () => false);
+}
+
+function ssStopWebGuard(){
+  if (ssWebGuard){ clearInterval(ssWebGuard); ssWebGuard = 0; }
+  if (ssWebTimer){ clearTimeout(ssWebTimer); ssWebTimer = 0; }
+  if (ssWebAbort){ try { ssWebAbort.abort(); } catch(_){} ssWebAbort = null; }
+}
+
+// 웹 주소 대기 화면. 크로스 오리진 iframe 안에서 일어난 마우스·키 이벤트는 부모로 올라오지 않아
+// 그대로 두면 대기 화면이 안 꺼진다. 그래서 위에 투명 캡처 레이어를 덮어(마우스) 거기에 포커스를 붙들어 둔다(키보드).
+// 지도를 조작할 일이 없으니 아래로 이벤트를 흘려보낼 필요도 없다.
+// false 를 돌려주면 아직 아무것도 붙이지 않은 것이라 부르는 쪽이 곧바로 다음 수단으로 넘어간다.
+// onFail 은 이미 프레임을 붙인 뒤 뒤늦게 실패했을 때만(차단·응답 없음) 부른다 — 그래야 폴백이 두 번 돌지 않는다.
+function startScreensaverWeb(ov, url, onFail){
+  let settled = false, frameLoaded = false, networkReady = false;
+  const fail = (why) => {
+    if (settled) return;
+    settled = true;
+    ssStopWebGuard();
+    if (!ssActive || ssOverlay !== ov) return;
+    if (typeof onFail === "function") onFail(why);
+  };
+  const ready = () => {
+    if (settled || !frameLoaded || !networkReady) return;
+    settled = true;
+    if (ssWebTimer){ clearTimeout(ssWebTimer); ssWebTimer = 0; }
+    ssWebAbort = null;   // probe 는 이미 끝났으므로 포커스 감시만 계속 유지한다
+  };
+  if (navigator.onLine === false) return false;   // 오프라인이면 시도조차 하지 않는다
+  try {
+    const frame = document.createElement("iframe");
+    frame.className = "ss-web";
+    frame.setAttribute("tabindex", "-1");
+    frame.setAttribute("referrerpolicy", SS_WEB_REFERRER);
+    // 스크립트는 있어야 지도가 움직이고, allow-same-origin 이 있어야 그 사이트가 제 서버에서 자료를 받아온다.
+    // 대신 최상위 이동·팝업·다운로드·폼 전송은 주지 않는다 — 대기 화면이 우리 앱을 떠나 버리는 것을 막는다.
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    frame.setAttribute("allow", SS_WEB_ALLOW);
+    frame.src = url;
+    ov.insertBefore(frame, ov.firstChild);
+
+    const cap = document.createElement("div");
+    cap.className = "ss-capture"; cap.tabIndex = 0;
+    ov.appendChild(cap);
+
+    // 포커스를 캡처 레이어에 붙들어 둔다 — iframe 이 포커스를 가져가면 키보드 해제가 먹지 않는다.
+    // (오버레이는 아직 문서에 붙기 전이라 첫 포커스도 이 타이머가 맡는다.)
+    ssWebGuard = setInterval(() => {
+      if (!ssActive || cap.parentNode !== ov){ ssStopWebGuard(); return; }
+      if (document.activeElement !== cap){
+        try { if (document.activeElement === frame) frame.blur(); } catch(_){}
+        try { cap.focus({ preventScroll: true }); } catch(_){ try { cap.focus(); } catch(_){} }
+      }
+    }, 400);
+
+    ssWebTimer = setTimeout(() => fail("timeout"), 12000);
+    const controller = (typeof AbortController === "function") ? new AbortController() : null;
+    ssWebAbort = controller;
+    probeScreensaverWebUrl(url, controller ? controller.signal : undefined).then((ok) => {
+      if (settled) return;
+      if (!ok){ fail("network"); return; }
+      networkReady = true; ready();
+    });
+    frame.addEventListener("load", () => {
+      if (screensaverFrameBlocked(frame)){ fail("blocked"); return; }
+      frameLoaded = true; ready();
+    });
+    return true;
+  } catch(_){ ssClearContent(ov); return false; }   // 만들다 실패했으면 흔적을 지우고 다음 수단으로 넘긴다
+}
+
+// 설정의 '미리보기 · 테스트' — host 안에 실제로 띄워 눈으로 확인시키고, 안 되면 이유를 말해 준다.
+// 화면보호기 본체와 같은 판정을 쓰므로 여기서 통과하면 대기 화면에서도 뜬다.
+function testScreensaverUrl(rawUrl, host){
+  return new Promise((resolve) => {
+    const url = (typeof normalizeScreensaverUrl === "function") ? normalizeScreensaverUrl(rawUrl) : String(rawUrl || "").trim();
+    if (!url){ resolve({ ok:false, url:"", message:screensaverText("주소가 올바르지 않아요. http:// 또는 https:// 로 시작하는 웹 주소를 넣어 주세요.") }); return; }
+    if (navigator.onLine === false){ resolve({ ok:false, url, message:screensaverText("인터넷에 연결되어 있지 않아요. 연결한 뒤 다시 테스트해 주세요.") }); return; }
+    if (!host){ resolve({ ok:false, url, message:screensaverText("미리보기 자리를 찾지 못했어요.") }); return; }
+    host.textContent = "";
+    const frame = document.createElement("iframe");
+    frame.className = "ss-web-preview-frame";
+    frame.setAttribute("referrerpolicy", SS_WEB_REFERRER);
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    frame.setAttribute("allow", SS_WEB_ALLOW);   // 대기 화면과 같은 권한이라야 미리보기가 실제 모습과 같다
+    let settled = false, frameLoaded = false, networkReady = false;
+    const controller = (typeof AbortController === "function") ? new AbortController() : null;
+    const done = (ok, message) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      if (!ok && controller){ try { controller.abort(); } catch(_){} }
+      resolve({ ok, url, message });
+    };
+    const ready = () => {
+      if (frameLoaded && networkReady) done(true, screensaverText("정상적으로 열렸어요. 아래 미리보기를 확인한 뒤 설정을 저장하세요."));
+    };
+    const timer = setTimeout(() => done(false, screensaverText("12초 안에 페이지가 열리지 않았어요. 주소와 인터넷 연결을 확인해 주세요.")), 12000);
+    probeScreensaverWebUrl(url, controller ? controller.signal : undefined).then((ok) => {
+      if (settled) return;
+      if (!ok){ done(false, screensaverText("페이지에 연결할 수 없어요. 주소·인터넷 연결·보안 인증서를 확인해 주세요.")); return; }
+      networkReady = true; ready();
+    });
+    frame.addEventListener("load", () => {
+      if (screensaverFrameBlocked(frame)) done(false, screensaverText("이 사이트는 다른 화면 안에 넣는 것을 막아 두었어요(X-Frame-Options·CSP). 다른 주소를 쓰거나, 그 사이트가 알려 주는 '퍼가기(embed)' 주소를 넣어 보세요."));
+      else { frameLoaded = true; ready(); }
+    });
+    frame.src = url;
+    host.appendChild(frame);
+  });
 }
 
 function dismissScreensaver(e, source){
@@ -281,11 +449,14 @@ function hideScreensaver(){
     }
   }
   if (ssRaf){ cancelAnimationFrame(ssRaf); ssRaf = 0; }
+  ssStopWebGuard();
   if (ssKeyHandler){ document.removeEventListener("keydown", ssKeyHandler, true); ssKeyHandler = null; }
   if (ssOverlay){
     const ov = ssOverlay; ssOverlay = null;
     ov.classList.remove("show");
     const v = ov.querySelector("video"); if (v){ try { v.pause(); v.removeAttribute("src"); v.load(); } catch(_){} }
+    // 웹 주소 프레임은 남겨 두면 계속 돌아가며 CPU 를 먹으므로 즉시 끊는다.
+    const w = ov.querySelector(".ss-web"); if (w){ try { w.src = "about:blank"; } catch(_){} }
     const url = ssObjUrl; ssObjUrl = null;
     setTimeout(() => { try { ov.remove(); } catch(_){} if (url){ try { URL.revokeObjectURL(url); } catch(_){} } }, 280);
   }

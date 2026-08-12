@@ -589,6 +589,14 @@
       <label class="settings-check"><input type="checkbox" id="settingScreensaver"><span>대기 화면(화면보호기) — 일정 시간 입력이 없으면 전체 화면 표시</span></label>
       <div class="settings-row"><span>표시까지 대기 시간</span><select id="settingScreensaverIdle" class="pw-input"><option value="1">1분</option><option value="3">3분</option><option value="5">5분</option><option value="10">10분</option><option value="20">20분</option></select></div>
       <label class="settings-check"><input type="checkbox" id="settingScreensaverSound"><span>▶ 지금 시작으로 켤 때 영상 소리 재생 — 자동(유휴) 대기 화면은 항상 무음</span></label>
+      <div class="settings-row"><span>보여줄 내용</span><select id="settingScreensaverMode" class="pw-input"><option value="video">영상 · 기본 애니메이션</option><option value="web">웹 주소(URL)</option></select></div>
+      <div class="ss-web-setting" id="settingScreensaverWebRow" hidden>
+        <div class="settings-row ss-web-row"><span>웹 주소</span><input type="text" id="settingScreensaverUrl" class="pw-input ss-web-url" spellcheck="false" autocomplete="off" placeholder="https://earth.nullschool.net/ko/#current/wind/surface/level"><button class="btn" id="settingScreensaverYoutube" type="button" title="유튜브 주소는 그대로는 안 열립니다 — 반복·자동재생까지 맞춘 퍼가기 주소로 바꿉니다" hidden>유튜브 → 퍼가기 주소</button><button class="btn" id="settingScreensaverTest" type="button">미리보기 · 테스트</button></div>
+        <p class="settings-hint" data-i18n="ss.web.warn"><strong>⚠ 로그인된 페이지는 넣지 마세요.</strong> 대기 화면은 이 컴퓨터의 브라우저 로그인 상태를 그대로 씁니다 — 메일·성적·개인 페이지를 걸면 <strong>교실 화면에 그 내용이 그대로 뜹니다</strong>. 로그인이 필요 없는 공개 페이지만 쓰세요.</p>
+        <p class="settings-hint" data-i18n="ss.web.desc">네이버·구글·유튜브 메인처럼 <strong>다른 화면 안에 넣는 것을 막아 둔 사이트가 많습니다</strong>. 저장 전에 <strong>미리보기 · 테스트</strong>로 실제로 뜨는지 꼭 확인하세요. 대기 화면에서 페이지가 안 열리면 저장해 둔 영상, 그것도 없으면 시계 애니메이션으로 자동 전환됩니다.</p>
+        <div class="ss-web-preview" id="settingScreensaverPreview" hidden></div>
+        <p class="settings-hint ss-web-result" id="settingScreensaverTestResult" hidden></p>
+      </div>
       <div class="settings-save-folder">
         <div class="settings-save-folder-copy"><strong>대기 화면 내용</strong><small id="settingScreensaverName">기본 애니메이션(시계)</small><span data-i18n="ss.desc">영상을 고르면 재생하고(<strong>여러 개 선택 시 차례대로 반복</strong>), 없으면 시계 애니메이션을 보여줍니다. <strong>MP4(H.264)·WebM 권장</strong> — 재생이 안 되는 파일은 저장 전에 걸러 드립니다. 영상은 이 브라우저에만 저장되어 프로그램(exe·HTML) 용량과 무관합니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingScreensaverVideo" type="button" title="여러 개를 선택하면 차례대로 반복 재생 · MP4·WebM 권장">영상 선택</button><button class="btn" id="settingScreensaverClear" type="button">영상 지우기</button><button class="btn primary" id="settingScreensaverStart" type="button" title="모니터 전체 화면으로 지금 바로 대기 화면을 켭니다 (아무 키·클릭으로 해제)">▶ 지금 시작</button></div>

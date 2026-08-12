@@ -1021,7 +1021,10 @@ function wire(){
     byId("settingScreensaver").checked = !!ss.enabled;
     byId("settingScreensaverIdle").value = String(ss.idleMin || 5);
     byId("settingScreensaverSound").checked = !!ss.sound;
-    refreshScreensaverName();
+    byId("settingScreensaverMode").value = ss.mode === "web" ? "web" : "video";
+    byId("settingScreensaverUrl").value = ss.url || "";
+    clearScreensaverPreview();
+    syncScreensaverModeFields();
     byId("settingMouseSideButtons").checked = appSettings.mouseSideButtons !== false;
     shortcutCaptureAction = "";
     shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
@@ -1033,6 +1036,7 @@ function wire(){
   };
   byId("settingsCancel").onclick = () => {
     shortcutCaptureAction = "";
+    clearScreensaverPreview();   // 미리보기 프레임을 남겨 두면 설정을 닫아도 계속 돌아간다
     byId("settingsModal").hidden = true;
   };
   byId("settingsSave").onclick = () => {
@@ -1041,6 +1045,15 @@ function wire(){
       const first = SHORTCUT_DEFINITIONS.find((item) => item.id === conflict.first);
       const second = SHORTCUT_DEFINITIONS.find((item) => item.id === conflict.second);
       setShortcutError("'" + first.label + "'과 '" + second.label + "'의 단축키가 같습니다.");
+      return;
+    }
+    // 대기 화면 웹 주소 — 잘못된 주소로 저장하면 대기 화면이 검은 화면으로 뜨므로 저장을 막는다.
+    const ssMode = byId("settingScreensaverMode").value === "web" ? "web" : "video";
+    const ssUrl = normalizeScreensaverUrl(byId("settingScreensaverUrl").value);
+    if (ssMode === "web" && !ssUrl){
+      toast(typeof window.t === "function" ? window.t("대기 화면 웹 주소가 올바르지 않아요. http:// 또는 https:// 로 시작하는 주소를 넣어 주세요.")
+        : "대기 화면 웹 주소가 올바르지 않아요. http:// 또는 https:// 로 시작하는 주소를 넣어 주세요.", 3800);
+      byId("settingScreensaverUrl").focus();
       return;
     }
     const previousPerformance = appSettings.performance;
@@ -1059,7 +1072,7 @@ function wire(){
       petFocus: { enabled: byId("settingPetFocus").checked, focusMin: Number(byId("settingPetFocusMin").value) || 25,
         breakMin: Number(byId("settingPetBreakMin").value) || 5, quietTyping: byId("settingPetQuietTyping").checked },
       screensaver: { enabled: byId("settingScreensaver").checked, idleMin: Number(byId("settingScreensaverIdle").value) || 5,
-        sound: byId("settingScreensaverSound").checked },
+        sound: byId("settingScreensaverSound").checked, mode: ssMode, url: ssUrl },
       toolVisibility: collectToolVisibility(),
       codeColors: codeColorDraft,
       boardBg: boardBgDraft,
@@ -1076,6 +1089,7 @@ function wire(){
     applyUiScale();
     syncShortcutHints();
     if (state && state.kind === "pdf" && !appSettings.pdfRecovery) state.recoveryDirty = false;
+    clearScreensaverPreview();
     byId("settingsModal").hidden = true;
     updateDocumentStatus(state);
     if (previousPerformance !== appSettings.performance){
@@ -1104,11 +1118,85 @@ function wire(){
     toast("검색 기록을 지웠어요.", 1800);
   };
   // 대기 화면(화면보호기) 영상 선택/지우기 — 파일 작업이라 즉시 반영(켜짐·시간은 저장 버튼을 따름).
+  const screensaverT = (text) => (typeof window.t === "function" ? window.t(text) : text);
+  function translateScreensaverNote(note){
+    const timed = String(note || "").match(/^시작 시간 (\d+)초를 함께 옮겼어요\.$/);
+    if (timed && typeof window.tf === "function") return window.tf("시작 시간 {n}초를 함께 옮겼어요.", { n:Number(timed[1]) });
+    return screensaverT(note);
+  }
+  let screensaverPreviewRun = 0;
   function refreshScreensaverName(){
     const el = byId("settingScreensaverName"); if (!el) return;
     const names = (typeof screensaverVideoNames === "function") ? screensaverVideoNames() : [];
-    el.textContent = names.length > 1 ? ("영상 " + names.length + "개: " + names[0] + " 외 " + (names.length - 1) + "개 (차례대로 반복)")
+    const videoText = names.length > 1 ? ("영상 " + names.length + "개: " + names[0] + " 외 " + (names.length - 1) + "개 (차례대로 반복)")
       : names.length === 1 ? ("영상: " + names[0]) : "기본 애니메이션(시계)";
+    // 웹 주소 모드면 주소가 주인공이고, 영상·애니메이션은 페이지가 안 열릴 때의 대비책이라 함께 적어 준다.
+    if (byId("settingScreensaverMode") && byId("settingScreensaverMode").value === "web"){
+      const url = (byId("settingScreensaverUrl").value || "").trim();
+      el.textContent = (url ? "웹 주소: " + url : "웹 주소: (아직 입력 전)") + " · 안 열리면 " + videoText;
+      return;
+    }
+    el.textContent = videoText;
+  }
+  // 웹 주소 칸은 그 모드일 때만 보인다.
+  function syncScreensaverModeFields(){
+    const row = byId("settingScreensaverWebRow"), mode = byId("settingScreensaverMode");
+    if (row && mode) row.hidden = mode.value !== "web";
+    refreshScreensaverName();
+    syncScreensaverYoutubeButton();
+  }
+  // 미리보기 프레임은 남겨 두면 설정을 닫은 뒤에도 계속 돌아간다 — 열고 닫을 때마다 비운다.
+  function clearScreensaverPreview(){
+    screensaverPreviewRun++;
+    const host = byId("settingScreensaverPreview"), result = byId("settingScreensaverTestResult"), button = byId("settingScreensaverTest");
+    if (host){ host.textContent = ""; host.hidden = true; }
+    if (result){ result.textContent = ""; result.hidden = true; result.classList.remove("ok", "bad"); }
+    if (button){ button.disabled = false; button.textContent = screensaverT("미리보기 · 테스트"); }
+  }
+  // 유튜브 주소는 그대로는 안 열린다 — 바꿔 줄 수 있을 때만 버튼을 띄운다.
+  // 조용히 바꿔치기하지 않는다: 누른 뒤에 무엇을 왜 바꿨는지 그대로 보여 준다.
+  function syncScreensaverYoutubeButton(){
+    const button = byId("settingScreensaverYoutube"), input = byId("settingScreensaverUrl");
+    if (!button || !input) return;
+    button.hidden = !(typeof youtubeEmbedUrl === "function" && youtubeEmbedUrl(input.value));
+  }
+  if (byId("settingScreensaverMode")) byId("settingScreensaverMode").onchange = () => { clearScreensaverPreview(); syncScreensaverModeFields(); };
+  if (byId("settingScreensaverUrl")) byId("settingScreensaverUrl").addEventListener("input", () => {
+    clearScreensaverPreview();
+    refreshScreensaverName(); syncScreensaverYoutubeButton();
+  });
+  if (byId("settingScreensaverYoutube")){
+    byId("settingScreensaverYoutube").onclick = () => {
+      const input = byId("settingScreensaverUrl"), result = byId("settingScreensaverTestResult");
+      const converted = (typeof youtubeEmbedUrl === "function") ? youtubeEmbedUrl(input.value) : null;
+      if (!converted) return;
+      input.value = converted.url;
+      clearScreensaverPreview();
+      result.hidden = false; result.classList.remove("ok", "bad");
+      result.textContent = screensaverT("퍼가기 주소로 바꿨어요.") + " "
+        + converted.notes.map(translateScreensaverNote).join(" ") + " "
+        + screensaverT("실제로 재생되는지 미리보기 · 테스트로 확인해 주세요.");
+      refreshScreensaverName(); syncScreensaverYoutubeButton();
+    };
+  }
+  if (byId("settingScreensaverTest")){
+    byId("settingScreensaverTest").onclick = async () => {
+      const button = byId("settingScreensaverTest"), host = byId("settingScreensaverPreview"), result = byId("settingScreensaverTestResult");
+      if (typeof testScreensaverUrl !== "function") return;
+      const run = ++screensaverPreviewRun;
+      button.disabled = true;
+      const label = button.textContent;
+      button.textContent = screensaverT("여는 중…");
+      host.hidden = false;
+      result.hidden = false; result.classList.remove("ok", "bad"); result.textContent = screensaverT("페이지를 여는 중이에요…");
+      const res = await testScreensaverUrl(byId("settingScreensaverUrl").value, host);
+      if (run !== screensaverPreviewRun) return;   // 주소 수정·설정 닫기 뒤 도착한 예전 결과는 버린다
+      button.disabled = false; button.textContent = label;
+      result.classList.add(res.ok ? "ok" : "bad");
+      result.textContent = (res.ok ? "✔ " : "✘ ") + res.message;
+      if (res.ok && res.url){ byId("settingScreensaverUrl").value = res.url; refreshScreensaverName(); }   // https:// 를 붙였으면 칸에도 반영
+      else if (!res.ok){ host.textContent = ""; host.hidden = true; }
+    };
   }
   const ssVideoInput = byId("screensaverVideoInput");
   if (byId("settingScreensaverVideo") && ssVideoInput){

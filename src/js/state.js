@@ -313,7 +313,7 @@ const DEFAULT_APP_SETTINGS = {
   //   이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아, 검토 중인 문서라면 이력을 믿을 수 없게 된다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
   searchHistory: true, autoOpenFirstFile: false, officeReplaceAttached: false, officeReplaceTracked: false,
-  screensaver: { enabled: false, idleMin: 5, sound: false },
+  screensaver: { enabled: false, idleMin: 5, sound: false, mode: "video", url: "" },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
@@ -323,11 +323,101 @@ const DEFAULT_APP_SETTINGS = {
   shortcutDefaultsVersion: 2,
   shortcuts: DEFAULT_SHORTCUTS
 };
+// 대기 화면 웹 주소 정규화 — 실제로 화면에 띄우는 주소라 http/https 만 통과시킨다.
+// javascript:·data: 같은 스킴은 오버레이 안에서 코드를 실행시킬 수 있어 여기서 잘라낸다.
+// 스킴을 안 적었으면(earth.nullschool.net/ko/) https 를 붙여 준다 — 교사가 주소를 복사해 넣는 자리라서.
+const SS_BLOCKED_SCHEME = /^\s*(javascript|data|vbscript|file|blob|about|chrome|chrome-extension|view-source)\s*:/i;
+function normalizeScreensaverUrl(value){
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw || SS_BLOCKED_SCHEME.test(raw)) return "";
+  const hasScheme = /^https?:\/\//i.test(raw);
+  if (!hasScheme){
+    // 스킴을 붙여 주기 전에 주소처럼 생겼는지 본다 — 'abc' 같은 오타까지 https://abc 로 만들면
+    // 저장은 되는데 대기 화면에서만 안 열려 원인을 찾기 어렵다.
+    const host = raw.split(/[/?#]/)[0];
+    if (!host.includes(".") && !/^localhost(:\d+)?$/i.test(host)) return "";
+  }
+  const candidate = hasScheme ? raw : "https://" + raw;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    if (!url.hostname) return "";
+    return url.href;
+  } catch(_){ return ""; }
+}
+// ----- 유튜브 주소 → 퍼가기(embed) 주소 -----
+// 유튜브 메인·watch 주소는 다른 화면 안에 넣는 것이 막혀 있어 대기 화면에 그대로 쓸 수 없다.
+// /embed/ 주소로 바꿔야 하는데, 손으로 만들면 두 가지를 빠뜨리기 쉽다 —
+//   · loop=1 만으로는 한 번 재생하고 멈춘다. 자기 자신을 playlist 로 지정해야 반복된다.
+//   · mute=1 이 없으면 브라우저 자동재생 정책에 막혀 아예 시작되지 않는다.
+// 이 두 가지를 대신 챙겨 주는 것이 이 변환의 목적이다.
+const YT_HOSTS = ["youtube.com", "youtube-nocookie.com", "youtu.be"];
+// 시작 시간(t) — "90", "90s", "1m30s", "1h2m3s" 를 초로 바꾼다. 못 읽으면 0(시작 시간 없음).
+function youtubeStartSeconds(value){
+  const raw = String(value == null ? "" : value).trim().toLowerCase();
+  if (!raw) return 0;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  const m = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!m || (!m[1] && !m[2] && !m[3])) return 0;
+  return (Number(m[1]) || 0) * 3600 + (Number(m[2]) || 0) * 60 + (Number(m[3]) || 0);
+}
+// 바꿀 것이 없으면 null(유튜브가 아니거나 이미 필요한 값이 다 붙은 퍼가기 주소). 바꿨으면 { url, notes } —
+// notes 는 무엇을 왜 바꿨는지 사용자에게 그대로 보여 주는 문장이다(조용히 바꿔치기하지 않는다).
+function youtubeEmbedUrl(value){
+  const base = normalizeScreensaverUrl(value);
+  if (!base) return null;
+  let u;
+  try { u = new URL(base); } catch(_){ return null; }
+  const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+  if (YT_HOSTS.indexOf(host) < 0) return null;
+  const seg = u.pathname.split("/").filter(Boolean);
+  const notes = [];
+  const captionNote = "자막은 기본적으로 꺼지도록 cc_load_policy=0 을 붙였어요(유튜브 설정에 따라 다시 보일 수 있습니다).";
+  if (seg[0] === "embed"){
+    if (u.searchParams.get("cc_load_policy") === "0") return null;
+    u.searchParams.set("cc_load_policy", "0");
+    notes.push(captionNote);
+    return { url:u.href, notes };                                // 기존 퍼가기 옵션은 그대로 두고 자막 기본값만 보완
+  }
+  let id = "", list = "";
+  if (host === "youtu.be") id = seg[0] || "";                   // youtu.be/ID
+  else if (seg[0] === "watch") id = u.searchParams.get("v") || "";
+  else if (seg[0] === "shorts" || seg[0] === "live" || seg[0] === "v") id = seg[1] || "";
+  else if (seg[0] === "playlist") list = u.searchParams.get("list") || "";
+  if (seg[0] === "watch" || host === "youtu.be") list = u.searchParams.get("list") || list;
+  if (!/^[\w-]{11}$/.test(id)) id = "";                          // 영상 ID 는 11자
+  if (!/^[\w-]{2,}$/.test(list)) list = "";
+  if (!id && !list) return null;                                 // 채널·검색 주소 등 — 틀 영상이 없다
+  const origin = host === "youtube-nocookie.com" ? "https://www.youtube-nocookie.com" : "https://www.youtube.com";
+  const params = new URLSearchParams();
+  let path;
+  if (id){
+    path = "/embed/" + id;
+    params.set("autoplay", "1"); params.set("mute", "1");
+    params.set("loop", "1"); params.set("playlist", id);
+    notes.push("한 영상을 계속 반복하도록 loop 와 playlist 를 함께 붙였어요(유튜브는 이 둘이 짝이어야 반복됩니다).");
+    if (list) notes.push("주소에 있던 재생목록(list)은 뺐어요 — 목록 전체를 틀려면 재생목록 주소를 넣어 주세요.");
+  } else {
+    path = "/embed/videoseries";
+    params.set("list", list);
+    params.set("autoplay", "1"); params.set("mute", "1"); params.set("loop", "1");
+    notes.push("재생목록을 처음부터 끝까지 반복하도록 만들었어요.");
+  }
+  params.set("cc_load_policy", "0");
+  notes.push(captionNote);
+  const start = youtubeStartSeconds(u.searchParams.get("t") || u.searchParams.get("start"));
+  if (start){ params.set("start", String(start)); notes.push("시작 시간 " + start + "초를 함께 옮겼어요."); }
+  notes.push("소리가 꺼져 있을 때만 자동재생이 시작돼서 mute 도 켰어요.");
+  return { url: origin + path + "?" + params.toString(), notes };
+}
 // 화면보호기 설정 정규화(옵션에서 켤 때만 동작·유효한 대기 시간만 허용). sound 는 '지금 시작' 수동 재생 전용.
+// mode: "video"(영상·기본 애니메이션) | "web"(웹 주소) — 주소가 비면 web 이어도 영상·애니메이션으로 돌아간다.
 function normalizeScreensaver(value){
   const s = value && typeof value === "object" ? value : {};
   const idle = Number(s.idleMin);
-  return { enabled: !!s.enabled, idleMin: [1, 3, 5, 10, 20].includes(idle) ? idle : 5, sound: !!s.sound };
+  const url = normalizeScreensaverUrl(s.url);
+  return { enabled: !!s.enabled, idleMin: [1, 3, 5, 10, 20].includes(idle) ? idle : 5, sound: !!s.sound,
+    mode: s.mode === "web" ? "web" : "video", url };
 }
 function normalizePetFocus(value){
   const s = value && typeof value === "object" ? value : {};
