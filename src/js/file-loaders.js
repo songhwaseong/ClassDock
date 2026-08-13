@@ -59,6 +59,7 @@ async function handleFiles(files, options={}){
       if (ext === "pdf") await loadPdf(await file.arrayBuffer(), file.name, opts);
       else if (ext === "mnote" && typeof loadMnote === "function") made = await loadMnote(file, opts);
       else if (ext === "msheet" && typeof loadMusicSheet === "function") made = await loadMusicSheet(file, opts);
+      else if ((ext === "musicxml" || ext === "mxl") && typeof loadMusicXml === "function") made = await loadMusicXml(file, opts);
       else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);
       else if (ext === "task" && typeof loadTask === "function") made = await loadTask(file, opts);
       else if (ext === "taskdone" && typeof loadTaskSubmission === "function") made = await loadTaskSubmission(file, opts);

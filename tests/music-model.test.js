@@ -19,7 +19,8 @@ function loadMusic(){
       musicVexNote, musicTimeline, MUSIC_TICKS_PER_QUARTER,
       musicDiatonicValue, musicPitchFromDiatonic, musicPitchFromStaveLine,
       musicStaveLineForNote, musicShiftPitch, musicMidiInRange,
-      musicRetuneForKey, musicPackLines, musicBarWidthHint
+      musicRetuneForKey, musicPackLines, musicBarWidthHint,
+      musicClampXOffset, MUSIC_X_OFFSET_MAX
     };`, context);
   return context.__music;
 }
@@ -84,6 +85,24 @@ test("계이름 노출 여부는 새 악보에서 켜지고 .msheet에 저장·�
   const legacy = JSON.parse(saved);
   delete legacy.showSolfege;
   assert.equal(api.musicParse(JSON.stringify(legacy)).showSolfege, true);
+});
+
+test("음표 좌우 미세 조정값은 안전한 범위로 제한되어 .msheet에 저장된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("위치 조정");
+  sheet.measures[0].notes = [
+    api.musicNote("C", 4, { xOffset:18 }),
+    api.musicRest("quarter", 0, { xOffset:-12 }),
+    api.musicNote("E", 4, { xOffset:999 })
+  ];
+  const saved = api.musicSerialize(sheet);
+  const reopened = api.musicParse(saved);
+  assert.equal(reopened.measures[0].notes[0].xOffset, 18);
+  assert.equal(reopened.measures[0].notes[1].xOffset, -12);
+  assert.equal(reopened.measures[0].notes[2].xOffset, api.MUSIC_X_OFFSET_MAX);
+  assert.equal(api.musicClampXOffset(-999), -api.MUSIC_X_OFFSET_MAX);
+  reopened.measures[0].notes[0].xOffset = 0;
+  assert.doesNotMatch(api.musicSerialize(reopened), /"xOffset": 0/);
 });
 
 test("수동 오선 줄바꿈은 .msheet에 저장되고 다시 열어도 유지된다", () => {

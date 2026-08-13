@@ -71,6 +71,7 @@
     "scratchpad.js",
     "mnote.js",
     "music-model.js",
+    "music-xml.js",
     "music-audio.js",
     "music-editor.js",
     "image-memo.js",
@@ -171,6 +172,7 @@
         "scratchpad.js",
         "mnote.js",
         "music-model.js",
+        "music-xml.js",
         "music-audio.js",
         "music-editor.js",
         "image-memo.js",
@@ -306,12 +308,18 @@
     "music-audio.js": [
       "music-model.js"
     ],
+    "music-xml.js": [
+      "file-loaders.js",
+      "lazy.js",
+      "music-model.js"
+    ],
     "music-editor.js": [
       "documents.js",
       "file-loaders.js",
       "code-viewer.js",
       "lazy.js",
       "music-model.js",
+      "music-xml.js",
       "music-audio.js"
     ],
     "exam-paper.js": [
@@ -366,6 +374,7 @@
         "image-memo.js",
         "backup.js",
         "python-run-context.js",
+        "music-xml.js",
         "music-editor.js"
       ]
     },

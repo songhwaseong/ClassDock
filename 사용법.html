@@ -127,7 +127,7 @@
   <li><strong>과제 패키지</strong> — 문제·시작 코드·자동채점을 한 파일(<code>.task</code>)로 배포하고 제출본(<code>.taskdone</code>)을 걷어 <strong>재채점·성적 CSV</strong></li>
   <li><strong>시험지</strong> — 객관식·주관식·이미지 문항을 <code>.exam</code> 한 파일로 배포하고, 학생이 이름·서명해 낸 제출본(<code>.examdone</code>)을 <strong>선생님만 열어 일괄 채점·성적 CSV</strong></li>
   <li><strong>블록 문서</strong> — 글·표·이미지를 한 문서에 섞어 쓰는 노션형 문서(<code>.mnote</code>)</li>
-  <li><strong>악보</strong> — 오선을 눌러 음표를 놓고 바로 들어 보는 악보(<code>.msheet</code>), 전체·부분 재생과 <strong>WAV 소리 파일 저장</strong></li>
+  <li><strong>악보</strong> — 오선을 눌러 음표를 놓고 바로 들어 보는 악보(<code>.msheet</code>), <strong>MusicXML 가져오기·내보내기</strong>, 전체·부분 재생과 WAV 소리 파일 저장</li>
   <li><strong>파일 비교·여러 파일 찾아 바꾸기</strong> — 두 파일의 달라진 곳을 나란히 보고, 열린 파일들(Word 본문 포함)을 한꺼번에 치환</li>
 </ul>
 
@@ -722,11 +722,12 @@ cd myOffice</code></pre>
 <ol>
   <li>사이드바 <strong>새로 만들기 → 새 악보</strong> (또는 <kbd>Ctrl</kbd>+<kbd>K</kbd> → "새 악보", 폴더 우클릭 메뉴)</li>
   <li>도구상자에서 <strong>음표 길이</strong>(온·2분·4분·8분·16분)를 고르고 오선 위에 마우스를 올리면 오른쪽에 <code>입력 위치: 솔4 (G4) · 4분음표</code>처럼 실제로 들어갈 계이름이 보입니다. 오선 위·아래의 보이지 않는 음높이에서는 해당 마디에 옅은 점선 덧줄이 나타나 클릭할 자리를 알려줍니다. 포인터가 십자선으로 바뀐 자리에서 클릭하면 음표가 들어가며, 넣는 순간 소리도 함께 납니다. 가득 찬 마디나 음역 밖에서는 붉은 점선·금지 포인터와 이유가 표시됩니다</li>
-  <li><strong>점</strong>(한 번 더 누르면 겹점), <strong>쉼표</strong>, <strong>♯ ♭ ♮</strong>, <strong>지우개</strong>를 도구상자에서 켜고 끕니다. <strong>계이름</strong>을 켜면 각 음표 아래의 오선 밖 전용 줄에 <code>도·레·미·파♯</code>가 표시되며, 끈 상태도 악보 파일에 저장됩니다. <code>＋마디</code>/<code>－마디</code>로 마디를 더하거나 지우고, <code>＋오선</code>/<code>－오선</code>으로 마지막에 오선 한 단을 추가하거나 제거합니다. 지울 오선에 음표나 쉼표가 들어 있으면 삭제 전에 확인합니다</li>
-  <li><strong>음표를 누르면 그 음이 들립니다.</strong> 고른 뒤 <kbd>↑</kbd>/<kbd>↓</kbd>로 한 음씩(<kbd>Shift</kbd>와 함께 누르면 한 옥타브) 옮기고, <kbd>←</kbd>/<kbd>→</kbd>로 이웃 음표로 이동하고, <kbd>Delete</kbd>로 지웁니다</li>
+  <li><strong>점</strong>(한 번 더 누르면 겹점), <strong>쉼표</strong>, <strong>♯ ♭ ♮</strong>, <strong>지우개</strong>를 도구상자에서 켜고 끕니다. 악보를 <strong>마우스 오른쪽 버튼으로 누르면</strong> 같은 입력 도구와 마디·오선·배율·되돌리기 메뉴를 포인터 옆에서 바로 쓸 수 있습니다. 음표를 우클릭하면 그 음의 미리 듣기·임시표·음높이 이동·삭제 메뉴가 먼저 나옵니다. <strong>계이름</strong>을 켜면 각 음표 아래의 오선 밖 전용 줄에 <code>도·레·미·파♯</code>가 표시되며, 끈 상태도 악보 파일에 저장됩니다. <code>＋마디</code>/<code>－마디</code>로 마디를 더하거나 지우고, <code>＋오선</code>/<code>－오선</code>으로 마지막에 오선 한 단을 추가하거나 제거합니다. 지울 오선에 음표나 쉼표가 들어 있으면 삭제 전에 확인합니다</li>
+  <li><strong>음표를 누르면 그 음이 들립니다.</strong> 고른 뒤 <kbd>↑</kbd>/<kbd>↓</kbd>로 한 음씩(<kbd>Shift</kbd>와 함께 누르면 한 옥타브) 옮기고, <kbd>←</kbd>/<kbd>→</kbd>로 이웃 음표로 이동하고, <kbd>Delete</kbd>로 지웁니다. <strong>위치 조정</strong>을 켜고 음표를 좌우로 드래그하면 자동 조판 위치에서 조금 옮길 수 있습니다. 도구를 켜지 않아도 <kbd>Alt</kbd>+드래그로 바로 조정할 수 있으며, 음표는 이웃 음표나 마디 경계를 넘어가지 않습니다. 우클릭 메뉴의 <strong>좌우 위치 원래대로</strong>를 누르면 자동 조판 위치로 돌아갑니다</li>
   <li><strong>▶ 전체 재생</strong>으로 처음부터, <strong>마디 3 ~ 6</strong>처럼 범위를 적고 <strong>▶ 이 구간만</strong>으로 부분만 들어 봅니다. 재생 중에는 지금 울리는 음표가 파랗게 표시됩니다</li>
   <li>위쪽에서 <strong>♩빠르기</strong>(40~208), <strong>박자</strong>(2/4·3/4·4/4·6/8), <strong>조표</strong>(다·사·라·바·내림나장조), <strong>음색</strong>을 바꿉니다. 새 악보는 실제 녹음을 사용하는 <strong>피아노(추천)</strong> 가 기본이며, 삼각파·사인파·사각파 합성음도 선택할 수 있습니다. 피아노는 처음 재생할 때만 음원을 준비하고 이후에는 바로 납니다</li>
   <li>악보 오른쪽의 <strong>− / ＋</strong>로 50~200% 범위에서 확대·축소하고 <strong>맞춤</strong>으로 100%에 돌아옵니다. 악보 위에서 <kbd>Ctrl</kbd>+마우스 휠을 돌려도 되며, 일반 휠은 긴 악보를 위아래로 움직입니다. 확대되어 스크롤할 공간이 생기면 오선 밖 여백의 손바닥 포인터를 좌클릭해 끌어서 악보를 상하좌우로 이동할 수 있습니다</li>
+  <li>MuseScore 같은 다른 악보 프로그램에서 만든 <strong><code>.musicxml</code> 또는 압축형 <code>.mxl</code></strong> 파일을 열거나 끌어다 놓으면 편집 가능한 새 <code>.msheet</code> 악보로 가져옵니다. 원본 파일은 덮어쓰지 않습니다. 반대로 <strong>⬇ MusicXML</strong>을 누르면 현재 악보를 다른 프로그램에서 열 수 있는 <code>.musicxml</code>로 저장합니다</li>
   <li><strong>⬇ WAV 저장</strong>을 누르면 연주 결과가 <strong>소리 파일(.wav)</strong> 로 저장됩니다. 다른 프로그램에 넣거나 학생에게 들려줄 때 쓰세요</li>
   <li><strong>🖨 인쇄</strong>를 누르고 인쇄 대화상자에서 프린터 대신 <strong>PDF로 저장</strong>을 고르면 악보 PDF가 됩니다. 화면 배율과 관계없이 인쇄본은 종이 폭에 맞습니다</li>
   <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.msheet</code> 파일 하나</strong>가 만들어집니다. <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Y</kbd> 되돌리기도 됩니다</li>
@@ -739,7 +740,7 @@ cd myOffice</code></pre>
 <p><strong>자판 단축키</strong> — <code>1</code>~<code>5</code> 음표 길이, <code>R</code> 쉼표, <kbd>.</kbd> 점, <code>↑↓←→</code> 이동, <kbd>Delete</kbd> 지우기, <kbd>Esc</kbd> 선택 풀기, <kbd>Ctrl</kbd>+<code>+</code>/<kbd>-</kbd> 확대·축소, <kbd>Ctrl</kbd>+<kbd>0</kbd> 100%</p>
 
 <blockquote>
-  <p>지금은 <strong>한 성부 단선율</strong>(동요 수준)을 다룹니다. 화음(한 자리에 여러 음), 두 성부(피아노 대·소보표), 붙임줄·가사·도돌이표는 아직 없습니다. 조표를 바꾸면 <strong>임시표 없이 적혀 있던 음은 새 조표를 따라갑니다</strong>(다장조 파 → 사장조 파샵). 일부러 ♯·♭를 붙여 둔 음은 그대로 둡니다. 박자를 바꿔서 마디가 넘치면 아래에 경고가 뜹니다 — 음표를 지우거나 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌리세요.</p>
+  <p>지금은 <strong>한 성부 단선율</strong>(동요 수준)을 다룹니다. 화음(한 자리에 여러 음), 두 성부(피아노 대·소보표), 붙임줄·가사·도돌이표는 아직 없습니다. MusicXML을 가져올 때도 이 범위에 맞춥니다. 여러 파트·성부는 첫 파트와 첫 성부, 화음은 먼저 나온 음만 가져오며 붙임줄·꾸밈음 등은 단순화하거나 제외했다는 안내가 뜹니다. Finale·Sibelius·MuseScore의 전용 파일을 직접 여는 기능은 아니므로 해당 프로그램에서 먼저 MusicXML로 내보내세요. 조표를 바꾸면 <strong>임시표 없이 적혀 있던 음은 새 조표를 따라갑니다</strong>(다장조 파 → 사장조 파샵). 일부러 ♯·♭를 붙여 둔 음은 그대로 둡니다. 박자를 바꿔서 마디가 넘치면 아래에 경고가 뜹니다 — 음표를 지우거나 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌리세요.</p>
 </blockquote>
 
 <h3>🔀 파일 비교 (diff) — 뭐가 달라졌는지 보기</h3>
@@ -1298,7 +1299,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>과제 패키지(.task)</strong></td><td>파이썬 단일 파일 과제만(노트북 과제는 추후). 테스트 최대 20개·첨부 합계 8MB. <code>.task</code>는 텍스트(JSON)라 <strong>숨김 테스트·봉인은 완전한 보안이 아님</strong> — 확실한 확인은 선생님 재채점으로</td></tr>
 <tr><td><strong>시험지(.exam)</strong></td><td>문항 최대 100개(모두 1점)·보기 8개·문항당 이미지 4장·이미지 합계 12MB. 주관식 자동 채점은 정답 목록과의 글자 비교라 <strong>표현이 다르면 선생님이 [답안 보기]에서 판단</strong>해야 합니다. <strong>암호 기능이 필요해 EXE(또는 https)에서만 동작</strong>하고, <code>file://</code>로 연 페이지에서는 막힙니다. <strong>선생님 암호를 잊으면 제출본을 열 수 없습니다</strong>(복구 불가). 시험 중 화면 캡처·검색 같은 부정행위는 막지 못합니다</td></tr>
 <tr><td><strong>블록 문서(.mnote)</strong></td><td>표 하나는 50행 × 20열, 이미지 한 장 25MB까지. 이미지가 파일 안에 들어가므로 사진이 많으면 파일이 커짐</td></tr>
-<tr><td><strong>악보(.msheet)</strong></td><td>한 성부 단선율·높은음자리표만. 화음, 두 성부(피아노 대·소보표), 붙임줄·이음줄, 가사, 셈여림, 도돌이표는 없음. 박자는 2/4·3/4·4/4·6/8, 조표는 ♯·♭ 두 개까지, 음역은 G3~C6. 소리는 오실레이터 합성음(실제 악기 녹음이 아님)이고, 저장되는 소리 파일은 WAV(MP3 아님). 마이크 녹음은 없음</td></tr>
+<tr><td><strong>악보(.msheet)</strong></td><td>한 성부 단선율·높은음자리표만. 화음, 두 성부(피아노 대·소보표), 붙임줄·이음줄, 가사, 셈여림, 도돌이표는 없음. 박자는 2/4·3/4·4/4·6/8, 조표는 ♯·♭ 두 개까지, 음역은 G3~C6. MusicXML(<code>.musicxml</code>, <code>.mxl</code>) 가져오기·내보내기는 이 범위로 단순화하며 프로그램 전용 악보 파일은 직접 열지 못함. 기본 음색은 내장 피아노 녹음이고 합성음도 선택 가능. 저장되는 소리 파일은 WAV(MP3 아님). 마이크 녹음은 없음</td></tr>
 <tr><td><strong>파일 비교(diff)</strong></td><td>텍스트·코드만. 파일 하나가 5MB 또는 5만 줄을 넘으면 비교하지 않음. 비교 화면은 저장·자동 복원 대상이 아님</td></tr>
 <tr><td><strong>여러 파일 찾아 바꾸기</strong></td><td>열려 있는 텍스트·코드 문서와 Word(<code>.docx</code>) 본문·PowerPoint(<code>.pptx</code>) 슬라이드(PDF·Excel·한글·노트북 제외). 빈 문자열에도 일치하는 정규식은 거부</td></tr>
 <tr><td><strong>Word·PowerPoint 찾아 바꾸기</strong></td><td>본문 글자만. 문단 추가·삭제나 글꼴 바꾸기는 안 됨. 머리말·꼬리말·각주·발표자 노트는 설정에서 켤 때만, 메모·차트·도형 안 글자와 슬라이드 마스터·레이아웃·자동 슬라이드 번호는 언제나 제외. 암호·내용 컨트롤 연결·40MB 초과 문서는 제외되고, 변경 이력이 켜진 문서는 기본 제외(설정에서 허용 가능 — 바꾼 내용이 Word 변경 이력에 남지 않음). 탭·줄바꿈을 넘나드는 일치는 건너뜀. <strong>PowerPoint 설치 PC에서 PDF로 변환되어 열린 <code>.pptx</code>는 대상 아님</strong></td></tr>

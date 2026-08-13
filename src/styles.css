@@ -826,6 +826,8 @@
   .music-score.is-invalid-entry{cursor:not-allowed}
   .music-score.is-pan-ready{cursor:grab}
   .music-score.is-panning,.music-score.is-panning *{cursor:grabbing!important;user-select:none!important}
+  .music-score.is-position-tool [data-note-id]{cursor:ew-resize;touch-action:none}
+  .music-score.is-positioning,.music-score.is-positioning *{cursor:ew-resize!important;user-select:none!important}
   .music-pitch-guide{stroke:var(--accent);stroke-width:1.25;stroke-dasharray:4 5;opacity:.32;
     pointer-events:none;vector-effect:non-scaling-stroke}
   .music-pitch-guide.is-invalid{stroke:#dc2626;opacity:.4}
@@ -833,7 +835,7 @@
     fill:#2563eb;stroke:none;cursor:pointer;user-select:none}
   .music-solfege.is-playing{fill:var(--accent)}
   .music-solfege.is-selected{fill:#c2410c}
-  .music-note{cursor:pointer}
+  .music-score.is-note-entry .music-note{cursor:pointer}
   .music-note:hover{opacity:.65}
   .music-note.is-playing path,.music-note.is-playing rect,.music-note.is-playing text{fill:var(--accent);stroke:var(--accent)}
   .music-note.is-selected path,.music-note.is-selected rect,.music-note.is-selected text{fill:#c2410c;stroke:#c2410c}
@@ -852,6 +854,19 @@
   .music-hover-readout{flex:1 1 250px;min-width:220px;text-align:right;font-variant-numeric:tabular-nums}
   .music-history{display:flex;gap:2px}
   .music-history .music-btn{width:30px;padding:6px 0;font-size:14px}
+  .music-context-menu{position:fixed;z-index:1960;display:flex;flex-direction:column;min-width:220px;
+    max-width:min(320px,calc(100vw - 12px));max-height:calc(100vh - 12px);overflow-y:auto;padding:5px;
+    border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);
+    box-shadow:0 12px 30px rgba(0,0,0,.34)}
+  .music-context-sub{z-index:1961;min-width:205px}
+  .music-context-menu button{display:flex;align-items:center;width:100%;border:0;border-radius:6px;padding:7px 10px;
+    background:transparent;color:inherit;font:inherit;font-size:12px;text-align:left;white-space:nowrap;cursor:pointer}
+  .music-context-menu button:hover:not(:disabled),.music-context-menu button:focus-visible,
+  .music-context-menu button.music-context-parent.is-open{background:var(--panel-hover);color:var(--accent);outline:0}
+  .music-context-menu button:disabled{opacity:.4;cursor:default}
+  .music-context-menu button.is-active::before{content:"✓";width:17px;color:var(--accent);font-weight:800}
+  .music-context-menu button.music-context-parent::after{content:"▸";margin-left:auto;padding-left:18px;opacity:.55}
+  .music-context-sep{height:1px;margin:4px 3px;background:var(--border)}
   @media(max-width:600px),(max-height:520px){
     .scratchpad,.image-memo{left:6px!important;top:6px!important;transform:none!important;
       width:calc(100vw - 12px)!important;height:calc(100vh - 12px)!important;

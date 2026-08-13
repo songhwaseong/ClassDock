@@ -14,6 +14,7 @@ const MUSIC_VERSION = 2;
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
 const MUSIC_MAX_DOTS = 2;
+const MUSIC_X_OFFSET_MAX = 36;       // 자동 조판 위치에서 허용하는 좌우 미세 조정(조판 좌표)
 
 // value → VexFlow 표기와 틱. 온음표~16분음표(동요 범위).
 const MUSIC_NOTE_VALUES = {
@@ -52,7 +53,7 @@ function musicId(prefix){
 
 function musicNote(step, octave, opts){
   const o = opts || {};
-  return {
+  const note = {
     id:musicId("n"),
     rest:false,
     step:MUSIC_STEP_SEMITONES[step] === undefined ? "C" : step,
@@ -61,15 +62,21 @@ function musicNote(step, octave, opts){
     value:MUSIC_NOTE_VALUES[o.value] ? o.value : "quarter",
     dots:musicClampDots(o.dots)
   };
+  const xOffset = musicClampXOffset(o.xOffset);
+  if (xOffset) note.xOffset = xOffset;
+  return note;
 }
 
-function musicRest(value, dots){
-  return {
+function musicRest(value, dots, opts){
+  const rest = {
     id:musicId("n"),
     rest:true,
     value:MUSIC_NOTE_VALUES[value] ? value : "quarter",
     dots:musicClampDots(dots)
   };
+  const xOffset = musicClampXOffset(opts && opts.xOffset);
+  if (xOffset) rest.xOffset = xOffset;
+  return rest;
 }
 
 function musicClampAlter(alter){
@@ -80,6 +87,11 @@ function musicClampAlter(alter){
 function musicClampDots(dots){
   const n = Math.round(Number(dots) || 0);
   return Math.max(0, Math.min(MUSIC_MAX_DOTS, n));
+}
+
+function musicClampXOffset(value){
+  const n = Math.round(Number(value) || 0);
+  return Math.max(-MUSIC_X_OFFSET_MAX, Math.min(MUSIC_X_OFFSET_MAX, n));
 }
 
 function musicMeasure(notes, opts){
@@ -406,14 +418,14 @@ function musicNormalizeNote(raw){
   if (!MUSIC_NOTE_VALUES[raw.value]) throw new Error("지원하지 않는 음표 길이: " + raw.value);
   const dots = musicClampDots(raw.dots);
   if (raw.rest === true){
-    const rest = musicRest(raw.value, dots);
+    const rest = musicRest(raw.value, dots, { xOffset:raw.xOffset });
     if (typeof raw.id === "string" && raw.id) rest.id = raw.id.slice(0, 80);
     return rest;
   }
   if (MUSIC_STEP_SEMITONES[raw.step] === undefined) throw new Error("지원하지 않는 음이름: " + raw.step);
   const octave = Math.round(Number(raw.octave));
   if (!Number.isFinite(octave) || octave < 0 || octave > 9) throw new Error("음높이가 범위를 벗어났습니다.");
-  const note = musicNote(raw.step, octave, { alter:raw.alter, value:raw.value, dots });
+  const note = musicNote(raw.step, octave, { alter:raw.alter, value:raw.value, dots, xOffset:raw.xOffset });
   if (typeof raw.id === "string" && raw.id) note.id = raw.id.slice(0, 80);
   return note;
 }
@@ -486,8 +498,8 @@ function musicSerialize(sheet){
       const outMeasure = { id:String(measure && measure.id || musicId("m")) };
       // 기존 .msheet와 불필요한 diff를 만들지 않도록 수동 줄바꿈이 있을 때만 기록한다.
       if (index > 0 && measure && measure.lineBreakBefore === true) outMeasure.lineBreakBefore = true;
-      outMeasure.notes = ((measure && Array.isArray(measure.notes)) ? measure.notes : []).map(note => (
-        note.rest
+      outMeasure.notes = ((measure && Array.isArray(measure.notes)) ? measure.notes : []).map(note => {
+        const outNote = note.rest
           ? { id:String(note.id || musicId("n")), rest:true, value:note.value, dots:musicClampDots(note.dots) }
           : {
               id:String(note.id || musicId("n")),
@@ -497,8 +509,11 @@ function musicSerialize(sheet){
               alter:musicClampAlter(note.alter),
               value:note.value,
               dots:musicClampDots(note.dots)
-            }
-      ));
+            };
+        const xOffset = musicClampXOffset(note.xOffset);
+        if (xOffset) outNote.xOffset = xOffset;
+        return outNote;
+      });
       return outMeasure;
     })
   };

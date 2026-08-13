@@ -71,15 +71,17 @@ test("악보 편집기는 모델·소리 엔진 뒤에 로드된다", () => {
   assert.ok(html.indexOf('src/js/music-audio.js') < html.indexOf('src/js/music-editor.js'));
 });
 
-test("도구상자는 길이 5종·점·쉼표·임시표·지우개·마디·오선을 갖춘다", () => {
+test("도구상자는 길이 5종·점·쉼표·임시표·지우개·위치 조정·마디·오선을 갖춘다", () => {
   assert.match(editorSource, /const MUSIC_TOOL_VALUES = \[/);
   for (const value of ["whole", "half", "quarter", "eighth", "16th"]){
     assert.ok(editorSource.includes(`value:"${value}"`), `도구상자에 ${value} 가 있어야 한다`);
   }
-  assert.match(editorSource, /tool\.dots = \(tool\.dots \+ 1\) % \(MUSIC_MAX_DOTS \+ 1\)/);
-  assert.match(editorSource, /tool\.rest = !tool\.rest/);
+  assert.match(editorSource, /setToolDots\(\(tool\.dots \+ 1\) % \(MUSIC_MAX_DOTS \+ 1\)\)/);
+  assert.match(editorSource, /setToolRest\(!tool\.rest\)/);
   assert.match(editorSource, /function applyAccidental\(alter\)/);
-  assert.match(editorSource, /tool\.eraser = !tool\.eraser/);
+  assert.match(editorSource, /setToolEraser\(!tool\.eraser\)/);
+  assert.match(editorSource, /const positionBtn = musicButton\("위치 조정"/);
+  assert.match(editorSource, /setPositionTool\(!tool\.position\)/);
   assert.match(editorSource, /function addMeasure\(\)/);
   assert.match(editorSource, /const addStaffBtn = musicButton\("＋오선"/);
   assert.match(editorSource, /function addStaffLine\(\)/);
@@ -88,7 +90,7 @@ test("도구상자는 길이 5종·점·쉼표·임시표·지우개·마디·�
   assert.match(editorSource, /function removeStaffLine\(\)/);
   assert.match(editorSource, /if \(sheet\.measures\[index\] && sheet\.measures\[index\]\.lineBreakBefore\)/);
   assert.match(editorSource, /마지막 오선에 음표 또는 쉼표 \$\{noteCount\}개가 있어요/);
-  assert.match(editorSource, /function removeMeasure\(\)/);
+  assert.match(editorSource, /function removeMeasure\(measureIndex\)/);
   assert.match(editorSource, /const solfegeBtn = musicButton\("계이름"/);
   assert.match(editorSource, /sheet\.showSolfege = sheet\.showSolfege === false/);
 });
@@ -123,11 +125,11 @@ test("오선 hover는 실제 입력될 계이름을 다른 영역에 보여주�
   assert.match(editorSource, /alter:toolAlterForPitch\(pitch\)/);     // 조표·임시표까지 반영
   assert.match(editorSource, /musicCanFit\(sheet, box\.index, preview\)/);
   assert.match(editorSource, /입력 위치: /);
-  assert.match(editorSource, /scoreHost\.addEventListener\("pointerleave", \(\) => \{\s*resetHoverReadout\(\)/);
+  assert.match(editorSource, /scoreHost\.addEventListener\("pointerleave", \(\) => \{\s*if \(!noteDrag\) resetHoverReadout\(\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-score\.is-note-entry\{cursor:crosshair\}/);
   assert.match(css, /\.music-score\.is-invalid-entry\{cursor:not-allowed\}/);
-  assert.match(css, /\.music-note\{cursor:pointer\}/);
+  assert.match(css, /\.music-score\.is-note-entry \.music-note\{cursor:pointer\}/);
 });
 
 test("오선 위아래 hover는 현재 음높이를 옅은 가상 덧줄로 보여준다", () => {
@@ -147,7 +149,7 @@ test("오선 위아래 hover는 현재 음높이를 옅은 가상 덧줄로 보�
 test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표시하고 선택·재생·인쇄와 함께 움직인다", () => {
   assert.match(editorSource, /const MUSIC_LINE_HEIGHT = 145/);
   assert.match(editorSource, /const solfegePlaces = \[\]/);
-  assert.match(editorSource, /solfegePlaces\.push\(\{ note, index, x:staveNote\.getAbsoluteX\(\), y:bottomY \+ 42 \}\)/);
+  assert.match(editorSource, /x:staveNote\.getAbsoluteX\(\) \+ staveNote\.getXShift\(\), y:bottomY \+ 42/);
   assert.match(editorSource, /document\.createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "text"\)/);
   assert.match(editorSource, /MUSIC_SOLFEGE_LABELS\[place\.note\.step\]/);
   assert.match(editorSource, /if \(sheet\.showSolfege !== false && !note\.rest && scoreSvg\)/);
@@ -157,6 +159,24 @@ test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표
   const css = read("src/styles.css");
   assert.match(css, /\.music-solfege\{[^}]*font-size:13px[^}]*fill:#2563eb/);
   assert.match(css, /\.music-print \.music-solfege\{fill:#111\}/);
+});
+
+test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 같은 동작 경로로 제공한다", () => {
+  assert.match(editorSource, /scoreHost\.addEventListener\("contextmenu", onScoreContextMenu\)/);
+  assert.match(editorSource, /const noteTarget = target && target\.closest \? target\.closest\("\[data-note-id\]"\)/);
+  assert.match(editorSource, /if \(noteInfo\) select\(noteInfo\.measureIndex, noteInfo\.note\.id, \{ scroll:false \}\)/);
+  assert.match(editorSource, /label:"이 음표 미리 듣기"/);
+  assert.match(editorSource, /label:"이 음표 삭제 \(Delete\)"/);
+  assert.match(editorSource, /label:"다음 입력 도구", children:nextInputContextItems\(\)/);
+  assert.match(editorSource, /label:`\$\{targetMeasure \+ 1\}마디 삭제`/);
+  assert.match(editorSource, /label:"계이름 표시", active:sheet\.showSolfege !== false, action:toggleSolfege/);
+  assert.match(editorSource, /setToolValue\(item\.value\)/); // 도구막대와 메뉴가 같은 함수로 상태를 바꾼다.
+  assert.match(editorSource, /event\.key === "ContextMenu" \|\| \(event\.shiftKey && event\.key === "F10"\)/);
+  assert.match(editorSource, /closeMusicContextMenu\(\);\s*scoreHost\.removeEventListener\("contextmenu"/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-context-menu\{position:fixed;z-index:1960/);
+  assert.match(css, /\.music-context-menu button\.is-active::before\{content:"✓"/);
+  assert.match(css, /\.music-context-menu button\.music-context-parent::after\{content:"▸"/);
 });
 
 test("되돌리기는 공용 MNEditHistory 로 하고 악보 JSON 을 스냅샷으로 쓴다", () => {
@@ -244,6 +264,26 @@ test("확대된 악보의 입력 영역 밖은 손바닥 드래그로 상하좌�
   assert.match(css, /\.music-score\.is-panning,.music-score\.is-panning \*\{cursor:grabbing!important/);
 });
 
+test("음표 좌우 위치는 위치 조정 도구나 Alt+드래그로 이웃과 마디 안에서 미세 조정된다", () => {
+  assert.match(editorSource, /const noteHorizontalLimits = new Map\(\)/);
+  assert.match(editorSource, /\(baseX - baseXs\[at - 1\]\) \/ 2 - 6/);
+  assert.match(editorSource, /noteEndX - baseX - 6/);
+  assert.match(editorSource, /Math\.max\(-MUSIC_X_OFFSET_MAX/);
+  assert.match(editorSource, /item\.staveNote\.setXShift/);
+  assert.match(editorSource, /staveNote\.getAbsoluteX\(\) \+ staveNote\.getXShift\(\)/); // 계이름도 함께 이동한다.
+  assert.match(editorSource, /tool\.position \|\| \(event\.pointerType !== "touch" && event\.altKey\)/);
+  assert.match(editorSource, /noteHorizontalLimits\.set\(item\.note\.id, \{ min, max, applied \}\)/);
+  assert.match(editorSource, /startOffset:limits\.applied/);
+  assert.match(editorSource, /Math\.round\(noteDrag\.startOffset \+ point\.x - noteDrag\.startX\)/);
+  assert.match(editorSource, /delete noteDrag\.note\.xOffset/);
+  assert.match(editorSource, /if \(history && !history\.isApplying\(\)\) history\.commit\(\)/);
+  assert.match(editorSource, /label:"좌우 위치 원래대로"/);
+  assert.match(editorSource, /label:"위치 조정 모드", active:tool\.position/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-score\.is-position-tool \[data-note-id\]\{cursor:ew-resize;touch-action:none\}/);
+  assert.match(css, /\.music-score\.is-positioning,.music-score\.is-positioning \*\{cursor:ew-resize!important/);
+});
+
 test("인쇄는 같은 문서 안에서 찍어 악보 글꼴을 지킨다", () => {
   // 새 창·iframe 으로 SVG 만 옮기면 Bravura 글꼴이 없어 음표가 깨진다.
   assert.doesNotMatch(editorSource, /window\.open|createElement\("iframe"\)/);
@@ -260,9 +300,12 @@ test("인쇄는 같은 문서 안에서 찍어 악보 글꼴을 지킨다", () =
 });
 
 test("조판은 VexFlow 5 API 로 부르고, 실패해도 문서를 열 수 있다", () => {
-  // v5 는 옵션 이름이 camelCase 다(autoBeam). snake_case 로 부르면 조용히 무시된다.
-  assert.match(editorSource, /VF\.Formatter\.FormatAndDraw\(context, stave,/);
-  assert.match(editorSource, /\{ autoBeam:true, alignRests:true \}/);
+  // 자동 조판과 그리기 사이에 xShift를 넣어야 꼬리 잇기도 새 위치를 따라간다.
+  assert.match(editorSource, /new VF\.Voice\(VF\.TIME4_4\)\.setMode\(VF\.Voice\.Mode\.SOFT\)/);
+  assert.match(editorSource, /VF\.Beam\.applyAndGetBeams\(voice\)/);
+  assert.match(editorSource, /new VF\.Formatter\(\)\.joinVoices\(\[voice\]\)\.formatToStave/);
+  assert.match(editorSource, /voice\.setContext\(context\)\.setStave\(stave\)\.drawWithStyle\(\)/);
+  assert.match(editorSource, /beams\.forEach\(\(beam\) => beam\.setContext\(context\)\.drawWithStyle\(\)\)/);
   assert.doesNotMatch(editorSource, /auto_beam|align_rests|num_beats|beat_value/);
   assert.match(editorSource, /new VF\.Stave\(x, y, staveWidth\)/);
   assert.match(editorSource, /VF\.Renderer\.Backends\.SVG/);
