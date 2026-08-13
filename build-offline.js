@@ -110,8 +110,8 @@ html = html.replace(
   () => `<script type="application/json" id="mnPetSprites">${esc(JSON.stringify(petSpriteMap))}</script>`
 );
 
-// 실제 피아노 샘플은 앱 시작 때 JavaScript 로 파싱하지 않는다. 실행되지 않는 JSON 블록에
-// MP3 데이터 URL로 넣고, 악보에서 피아노 음색을 처음 재생할 때 music-audio.js 가 읽는다.
+// 실제 피아노·기타 샘플은 앱 시작 때 JavaScript 로 파싱하지 않는다. 악기별로 분리한
+// 실행되지 않는 JSON 블록에 MP3 데이터 URL로 넣고, 해당 음색을 처음 재생할 때만 읽는다.
 const pianoSamples = [
   ["Gs3.mp3", "f82a08ce29f7fc2a1bfd2ffcb6846956f5cb1fbde1d6480e8f11912f120140de"],
   ["C4.mp3",  "a265c8cfd4140cf27b55054b4953b6c691fce3523530ca8ae0faed5e4cd39063"],
@@ -140,11 +140,40 @@ for (const [file, expectedHash] of pianoSamples) {
   }
   pianoSampleMap[file] = "data:audio/mpeg;base64," + bytes.toString("base64");
 }
+const guitarSamples = [
+  ["G3.mp3",  "85cbc7aeb84956c5b30333d73fedb57f1c393d04302684566ca77523015a6449"],
+  ["A3.mp3",  "a4b25e648ce07f79ecb0c00f8a788add2a77e19163cd656ca48e10713854a5ea"],
+  ["Cs4.mp3", "a4cc76204d938edb2190d70a16d916bdbc1db12ec751fe9b5f1edb38dd0e0527"],
+  ["E4.mp3",  "3f95d206021f8935d79da1f1b5bffe45c17f8dbfb598148e6a3ac4999cb0fa0b"],
+  ["Gs4.mp3", "3310492adef184214d85d87e4d30ace28c6f5274a5883fb85db4bb730135dd4c"],
+  ["B4.mp3",  "74cbac2107e258ff27198e87081a76677ca8820e0b257db004eb979429f47469"],
+  ["D5.mp3",  "b14bda1a35b55008042de4d1443f8dc585fd990133b07d81d233dfe9f6f29570"],
+  ["Fs5.mp3", "259a7b727dce9d31e12316dff887148360de02aec774ea999d47bd399388f0fe"],
+  ["Gs5.mp3", "3714d1e2cd35be502a8b522db02207031b37d1495c6608548c31f1402532db3a"],
+  ["As5.mp3", "8b58374042aa47d7aef055afca8492a0e25faeecee9ac44fb098afff53e6cb97"]
+];
+const guitarSampleMap = {};
+for (const [file, expectedHash] of guitarSamples) {
+  const relative = "src/assets/guitar-nylon/" + file;
+  const fullPath = path.join(root, relative);
+  if (!fs.existsSync(fullPath)) {
+    console.error("Guitar sample not found:", relative);
+    process.exit(1);
+  }
+  const bytes = fs.readFileSync(fullPath);
+  const actualHash = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (actualHash !== expectedHash) {
+    console.error("Guitar sample SHA-256 mismatch:", relative);
+    process.exit(1);
+  }
+  guitarSampleMap[file] = "data:audio/mpeg;base64," + bytes.toString("base64");
+}
 const musicSamplesPlaceholder = "<!--MN_MUSIC_SAMPLES-->";
 requireTag(html, musicSamplesPlaceholder, "Music sample placeholder");
 html = html.replace(
   musicSamplesPlaceholder,
-  () => `<script type="application/json" id="mnMusicSamples">${esc(JSON.stringify(pianoSampleMap))}</script>`
+  () => `<script type="application/json" id="mnMusicSamples">${esc(JSON.stringify(pianoSampleMap))}</script>\n` +
+    `<script type="application/json" id="mnGuitarSamples">${esc(JSON.stringify(guitarSampleMap))}</script>`
 );
 
 // 시작할 때 실행하는 vendor 는 원래 자리에 그대로 인라인한다.

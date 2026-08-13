@@ -159,6 +159,26 @@ test("피아노 음색은 가까운 실제 녹음을 골라 재생 속도로 음
   assert.ok(nodes[0].stopAt > 0.6); // 음 길이 뒤 피아노 여운을 남긴다.
 });
 
+test("나일론 기타 음색도 실제 녹음과 악기별 여운을 사용한다", () => {
+  const api = loadMusicAudio();
+  const sheet = api.musicEmpty("기타 샘플");
+  sheet.timbre = "guitar";
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 6)])]; // C6=84, A#5=82가 가장 가깝다.
+  const ctx = fakeContext();
+  const buffers = [
+    { midi:80, file:"Gs5.mp3", buffer:{ name:"Gs5" } },
+    { midi:82, file:"As5.mp3", buffer:{ name:"As5" } }
+  ];
+  const nodes = api.MNMusicAudio.scheduleInto(ctx, {}, api.musicTimeline(sheet).events, 1, "guitar", buffers);
+  assert.equal(nodes.length, 1);
+  assert.equal(ctx.oscillators.length, 0);
+  assert.equal(ctx.bufferSources[0].buffer.name, "As5");
+  assert.equal(ctx.bufferSources[0].startedAt, 1);
+  assert.ok(Math.abs(ctx.bufferSources[0].rates[0].value - Math.pow(2, 2 / 12)) < 1e-9);
+  assert.equal(nodes[0].sampleMidi, 82);
+  assert.ok(nodes[0].stopAt >= 0.6 + api.MNMusicAudio.GUITAR_RELEASE);
+});
+
 test("번들 피아노는 악보 음역을 덮는 10개 녹음과 출처 표기를 갖는다", () => {
   const api = loadMusicAudio();
   assert.equal(api.MNMusicAudio.PIANO_SAMPLE_ROOTS.length, 10);
@@ -169,6 +189,20 @@ test("번들 피아노는 악보 음역을 덮는 10개 녹음과 출처 표기�
     assert.ok(fs.statSync(fullPath).size > 40_000, `${sample.file} 녹음이 있어야 한다`);
   }
   assert.match(fs.readFileSync(path.join(__dirname, "../src/assets/piano/ATTRIBUTION.md"), "utf8"), /CC BY 3\.0|Attribution 3\.0/);
+});
+
+test("번들 나일론 기타는 악보 음역을 덮는 10개 녹음과 출처 표기를 갖는다", () => {
+  const api = loadMusicAudio();
+  assert.equal(api.MNMusicAudio.GUITAR_SAMPLE_ROOTS.length, 10);
+  assert.equal(api.MNMusicAudio.GUITAR_SAMPLE_ROOTS[0].midi, 55);
+  assert.equal(api.MNMusicAudio.GUITAR_SAMPLE_ROOTS.at(-1).midi, 82);
+  for (const sample of api.MNMusicAudio.GUITAR_SAMPLE_ROOTS){
+    const fullPath = path.join(__dirname, "../src/assets/guitar-nylon", sample.file);
+    assert.ok(fs.statSync(fullPath).size > 30_000, `${sample.file} 녹음이 있어야 한다`);
+  }
+  const attribution = fs.readFileSync(path.join(__dirname, "../src/assets/guitar-nylon/ATTRIBUTION.md"), "utf8");
+  assert.match(attribution, /CC BY 3\.0|Attribution 3\.0/);
+  assert.match(attribution, /11573__quartertone__classicalguitar-multisampled/);
 });
 
 test("WAV 인코더는 규격대로 44바이트 헤더와 16bit 샘플을 쓴다", () => {

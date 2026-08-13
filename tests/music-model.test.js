@@ -72,6 +72,9 @@ test("새 악보와 v1 기본 삼각파 악보는 실제 피아노 음색을 기
   assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, "piano");
   legacy.timbre = "sine"; // 사용자가 일부러 고른 다른 합성음은 보존한다.
   assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, "sine");
+  legacy.version = 2;
+  legacy.timbre = "guitar";
+  assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, "guitar");
 });
 
 test("계이름 노출 여부는 새 악보에서 켜지고 .msheet에 저장·복원된다", () => {

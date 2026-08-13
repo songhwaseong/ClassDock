@@ -214,14 +214,16 @@ test("조표·박자표는 화면에서 바꾸고, 조표는 소리까지 맞춘
   assert.match(editorSource, /박자와 맞지 않는 마디는 아래에 표시했어요/);
 });
 
-test("실제 피아노 음색은 기본 선택이며 재생 준비와 WAV 실패를 안내한다", () => {
+test("실제 피아노·기타 음색을 선택하며 재생 준비와 WAV 실패를 안내한다", () => {
   assert.match(editorSource, /piano:"피아노\(추천\)"/);
+  assert.match(editorSource, /guitar:"기타\(나일론\)"/);
   assert.match(editorSource, /async function startPlay\(range\)/);
-  assert.match(editorSource, /status\.textContent = "피아노 음원 준비 중…"/);
+  assert.match(editorSource, /sheet\.timbre === "piano" \|\| sheet\.timbre === "guitar"/);
+  assert.match(editorSource, /sheet\.timbre === "guitar" \? "기타" : "피아노"/);
   assert.match(editorSource, /await MNMusicAudio\.play\(sheet/);
-  assert.match(editorSource, /피아노 음원을 읽지 못해 삼각파로 재생해요/);
+  assert.match(editorSource, /label \+ " 음원을 읽지 못해 삼각파로 재생해요/);
   assert.match(editorSource, /MNMusicAudio\.renderWav\(sheet, \{/);
-  assert.match(editorSource, /피아노 음원을 읽지 못해 삼각파 WAV로 저장해요/);
+  assert.match(editorSource, /label \+ " 음원을 읽지 못해 삼각파 WAV로 저장해요/);
 });
 
 test("줄 나누기는 화면 폭을 따라간다", () => {

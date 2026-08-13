@@ -67,5 +67,15 @@ if (pianoFiles.length !== 10) fail(`offline piano sample count is ${pianoFiles.l
 if (pianoFiles.some((file) => !/^data:audio\/mpeg;base64,/.test(pianoRegistry[file]))) {
   fail("offline piano sample data is missing");
 }
+const guitarBlock = /<script type="application\/json" id="mnGuitarSamples">([^<]+)<\/script>/.exec(offline);
+if (!guitarBlock) fail("offline guitar sample registry is missing");
+let guitarRegistry;
+try { guitarRegistry = JSON.parse(guitarBlock[1]); }
+catch(_) { fail("offline guitar sample registry is invalid JSON"); }
+const guitarFiles = Object.keys(guitarRegistry || {});
+if (guitarFiles.length !== 10) fail(`offline guitar sample count is ${guitarFiles.length}, expected 10`);
+if (guitarFiles.some((file) => !/^data:audio\/mpeg;base64,/.test(guitarRegistry[file]))) {
+  fail("offline guitar sample data is missing");
+}
 
 console.log(`릴리스 산출물 검사 완료: vendor ${manifest.vendorScripts.length}개, 단일 HTML ${Math.round(fs.statSync(offlinePath).size / 1024)} KB`);

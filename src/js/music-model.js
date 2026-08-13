@@ -37,7 +37,7 @@ const MUSIC_KEYS = {
   Bb: { label:"내림나장조", vex:"Bb", alterations:{ B:-1, E:-1 } }
 };
 
-const MUSIC_TIMBRES = ["piano", "triangle", "sine", "square"];
+const MUSIC_TIMBRES = ["piano", "guitar", "triangle", "sine", "square"];
 const MUSIC_TEMPO_MIN = 40;
 const MUSIC_TEMPO_MAX = 208;
 const MUSIC_DEFAULT_TEMPO = 100;

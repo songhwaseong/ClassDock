@@ -192,7 +192,8 @@ async function mountMusicEditor(doc){
   const timbreSelect = document.createElement("select");
   timbreSelect.className = "music-timbre";
   const TIMBRE_LABELS = {
-    piano:"피아노(추천)", triangle:"삼각파", sine:"사인파(부드럽게)", square:"사각파(또렷하게)"
+    piano:"피아노(추천)", guitar:"기타(나일론)",
+    triangle:"삼각파", sine:"사인파(부드럽게)", square:"사각파(또렷하게)"
   };
   for (const name of MUSIC_TIMBRES){
     const option = document.createElement("option");
@@ -1459,14 +1460,17 @@ async function mountMusicEditor(doc){
 
   async function startPlay(range){
     setPlaying(true);
-    if (sheet.timbre === "piano") status.textContent = "피아노 음원 준비 중…";
+    if (sheet.timbre === "piano" || sheet.timbre === "guitar"){
+      status.textContent = (sheet.timbre === "guitar" ? "기타" : "피아노") + " 음원 준비 중…";
+    }
     try {
       const handle = await MNMusicAudio.play(sheet, Object.assign({
         onNote:highlight,
         onEnd:() => { highlight(null); setPlaying(false); updateStatus(); },
-        onError:(error) => {
-          if (typeof toast === "function") toast("피아노 음원을 읽지 못해 삼각파로 재생해요.", 3200);
-          console.warn("피아노 음원을 읽지 못했습니다:", error);
+        onError:(error, timbre) => {
+          const label = timbre === "guitar" ? "기타" : "피아노";
+          if (typeof toast === "function") toast(label + " 음원을 읽지 못해 삼각파로 재생해요.", 3200);
+          console.warn(label + " 음원을 읽지 못했습니다:", error);
         }
       }, range || {}));
       if (!handle){
@@ -1516,9 +1520,10 @@ async function mountMusicEditor(doc){
     wavBtn.textContent = "만드는 중…";
     try {
       const blob = await MNMusicAudio.renderWav(sheet, {
-        onError:(error) => {
-          if (typeof toast === "function") toast("피아노 음원을 읽지 못해 삼각파 WAV로 저장해요.", 3200);
-          console.warn("피아노 WAV 음원을 읽지 못했습니다:", error);
+        onError:(error, timbre) => {
+          const label = timbre === "guitar" ? "기타" : "피아노";
+          if (typeof toast === "function") toast(label + " 음원을 읽지 못해 삼각파 WAV로 저장해요.", 3200);
+          console.warn(label + " WAV 음원을 읽지 못했습니다:", error);
         }
       });
       musicDownloadBlob(musicExportName(doc, "wav"), blob);

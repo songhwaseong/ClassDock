@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== .msheet 악보 — 소리 엔진 (P0) =====
-   실제 피아노 샘플 + 오실레이터 신디사이저 + 예약 재생 + WAV 저장.
+   실제 피아노·나일론 기타 샘플 + 오실레이터 신디사이저 + 예약 재생 + WAV 저장.
 
    설계의 핵심 두 가지(docs/악보-설계.md §5):
    1) setTimeout 으로 음을 울리지 않는다. AudioContext.currentTime 기준으로 25ms마다 200ms 앞을
@@ -20,6 +20,9 @@ const MNMusicAudio = (() => {
   const PIANO_GAIN = 0.82;
   const PIANO_ATTACK = 0.004;
   const PIANO_RELEASE = 0.32;
+  const GUITAR_GAIN = 0.9;
+  const GUITAR_ATTACK = 0.003;
+  const GUITAR_RELEASE = 0.18;
   // 앱의 G3~C6 음역을 단3도 간격 실제 녹음으로 덮는다. 사이는 재생 속도로 최대 2반음만 옮긴다.
   const PIANO_SAMPLE_ROOTS = Object.freeze([
     { midi:56, file:"Gs3.mp3" }, { midi:60, file:"C4.mp3" },
@@ -28,21 +31,39 @@ const MNMusicAudio = (() => {
     { midi:75, file:"Ds5.mp3" }, { midi:78, file:"Fs5.mp3" },
     { midi:81, file:"A5.mp3" },  { midi:84, file:"C6.mp3" }
   ]);
+  // 나일론 기타도 같은 음역을 10개 실제 녹음으로 덮는다. 가장 먼 음도 2반음만 옮긴다.
+  const GUITAR_SAMPLE_ROOTS = Object.freeze([
+    { midi:55, file:"G3.mp3" },  { midi:57, file:"A3.mp3" },
+    { midi:61, file:"Cs4.mp3" }, { midi:64, file:"E4.mp3" },
+    { midi:68, file:"Gs4.mp3" }, { midi:71, file:"B4.mp3" },
+    { midi:74, file:"D5.mp3" },  { midi:78, file:"Fs5.mp3" },
+    { midi:80, file:"Gs5.mp3" }, { midi:82, file:"As5.mp3" }
+  ]);
+  const SAMPLE_INSTRUMENTS = Object.freeze({
+    piano:{
+      label:"피아노", roots:PIANO_SAMPLE_ROOTS, path:"src/assets/piano/",
+      registryId:"mnMusicSamples", gain:PIANO_GAIN, attack:PIANO_ATTACK, release:PIANO_RELEASE
+    },
+    guitar:{
+      label:"기타", roots:GUITAR_SAMPLE_ROOTS, path:"src/assets/guitar-nylon/",
+      registryId:"mnGuitarSamples", gain:GUITAR_GAIN, attack:GUITAR_ATTACK, release:GUITAR_RELEASE
+    }
+  });
   const RENDER_SAMPLE_RATE = 44100;
   const LOOKAHEAD_SEC = 0.2;         // 얼마나 앞을 미리 예약할지
   const TIMER_MS = 25;               // 예약 타이머 주기
   const START_DELAY = 0.08;          // 첫 음까지의 여유(예약이 늦어 첫 음이 잘리는 것 방지)
-  const TAIL_SEC = Math.max(ADSR.release, PIANO_RELEASE) + 0.4; // 마지막 음의 여운까지 담을 꼬리
+  const TAIL_SEC = Math.max(ADSR.release, PIANO_RELEASE, GUITAR_RELEASE) + 0.4; // 마지막 음의 여운까지 담을 꼬리
   const PREVIEW_SEC = 0.45;          // 음표 하나 눌렀을 때 들려줄 길이
   const MIN_NOTE_SEC = 0.03;
 
   let ctx = null;          // 실시간 컨텍스트(첫 소리 요청 때 만든다)
   let master = null;
   let live = null;         // 재생 중 상태
-  let playRequest = 0;     // 피아노 로딩 중 정지를 눌렀을 때 뒤늦게 재생되지 않게 한다
+  let playRequest = 0;     // 샘플 로딩 중 정지를 눌렀을 때 뒤늦게 재생되지 않게 한다
   let previewRequest = 0;
-  let pianoBuffersPromise = null;
-  let pianoSampleRegistryCache = null;
+  const sampleBufferPromises = { piano:null, guitar:null };
+  const sampleRegistryCaches = { piano:null, guitar:null };
 
   function contextClass(){
     if (typeof AudioContext !== "undefined") return AudioContext;
@@ -78,56 +99,64 @@ const MNMusicAudio = (() => {
   }
 
   function timbreOf(name){
-    return name === "piano" || TIMBRE_GAIN[name] ? name : "piano";
+    return SAMPLE_INSTRUMENTS[name] || TIMBRE_GAIN[name] ? name : "piano";
   }
 
-  function pianoSampleRegistry(){
-    if (pianoSampleRegistryCache) return pianoSampleRegistryCache;
-    pianoSampleRegistryCache = {};
-    if (typeof document === "undefined") return pianoSampleRegistryCache;
-    const node = document.getElementById("mnMusicSamples");
-    if (!node) return pianoSampleRegistryCache;
-    try { pianoSampleRegistryCache = JSON.parse(node.textContent || "{}"); }
-    catch(error){ console.warn("내장 피아노 음원 목록을 읽지 못했습니다:", error); }
-    return pianoSampleRegistryCache;
+  function sampleRegistry(timbre){
+    const spec = SAMPLE_INSTRUMENTS[timbre];
+    if (!spec) return {};
+    if (sampleRegistryCaches[timbre]) return sampleRegistryCaches[timbre];
+    sampleRegistryCaches[timbre] = {};
+    if (typeof document === "undefined") return sampleRegistryCaches[timbre];
+    const node = document.getElementById(spec.registryId);
+    if (!node) return sampleRegistryCaches[timbre];
+    try { sampleRegistryCaches[timbre] = JSON.parse(node.textContent || "{}"); }
+    catch(error){ console.warn(`내장 ${spec.label} 음원 목록을 읽지 못했습니다:`, error); }
+    return sampleRegistryCaches[timbre];
   }
 
-  function pianoSampleUrl(file){
-    const embedded = pianoSampleRegistry()[file];
-    return embedded || "src/assets/piano/" + file;
+  function sampleUrl(timbre, file){
+    const spec = SAMPLE_INSTRUMENTS[timbre];
+    const embedded = sampleRegistry(timbre)[file];
+    return embedded || (spec ? spec.path : "") + file;
   }
 
-  async function ensurePianoBuffers(target){
-    if (pianoBuffersPromise) return pianoBuffersPromise;
+  async function ensureSampleBuffers(target, timbre){
+    const spec = SAMPLE_INSTRUMENTS[timbre];
+    if (!spec) throw new Error("지원하지 않는 샘플 음색입니다.");
+    if (sampleBufferPromises[timbre]) return sampleBufferPromises[timbre];
     if (!target || typeof target.decodeAudioData !== "function" || typeof fetch !== "function"){
-      throw new Error("피아노 음원을 읽을 수 없는 환경입니다.");
+      throw new Error(`${spec.label} 음원을 읽을 수 없는 환경입니다.`);
     }
-    pianoBuffersPromise = Promise.all(PIANO_SAMPLE_ROOTS.map(async (root) => {
-      const response = await fetch(pianoSampleUrl(root.file));
-      if (!response.ok) throw new Error(`피아노 음원 ${root.file}을 읽지 못했습니다.`);
+    sampleBufferPromises[timbre] = Promise.all(spec.roots.map(async (root) => {
+      const response = await fetch(sampleUrl(timbre, root.file));
+      if (!response.ok) throw new Error(`${spec.label} 음원 ${root.file}을 읽지 못했습니다.`);
       const bytes = await response.arrayBuffer();
       const buffer = await target.decodeAudioData(bytes.slice(0));
       return { midi:root.midi, file:root.file, buffer };
     })).then((buffers) => {
       // 단일 HTML의 base64 문자열은 디코딩 뒤 놓아 메모리를 이중으로 오래 잡지 않는다.
       if (typeof document !== "undefined"){
-        const node = document.getElementById("mnMusicSamples");
+        const node = document.getElementById(spec.registryId);
         if (node) node.textContent = "{}";
       }
-      pianoSampleRegistryCache = {};
+      sampleRegistryCaches[timbre] = {};
       return buffers;
     }).catch((error) => {
-      pianoBuffersPromise = null;    // 일시 실패면 다음 재생에서 다시 시도할 수 있다
+      sampleBufferPromises[timbre] = null;    // 일시 실패면 다음 재생에서 다시 시도할 수 있다
       throw error;
     });
-    return pianoBuffersPromise;
+    return sampleBufferPromises[timbre];
   }
+
+  const ensurePianoBuffers = (target) => ensureSampleBuffers(target, "piano");
+  const ensureGuitarBuffers = (target) => ensureSampleBuffers(target, "guitar");
 
   /* 음 하나를 예약한다. start·duration 은 그 컨텍스트의 시간(초).
      짧은 음(빠른 16분음표)에서도 엔벨로프가 음 길이를 넘지 않도록 각 구간을 끝 시각으로 자른다. */
   function scheduleNote(target, destination, frequency, start, duration, timbre){
     const requested = timbreOf(timbre);
-    const type = requested === "piano" ? "triangle" : requested;
+    const type = SAMPLE_INSTRUMENTS[requested] ? "triangle" : requested;
     const peak = TIMBRE_GAIN[type];
     const end = start + Math.max(MIN_NOTE_SEC, duration);
     const attackEnd = Math.min(start + ADSR.attack, end);
@@ -152,7 +181,7 @@ const MNMusicAudio = (() => {
     return { source:osc, osc, gain, stopAt };
   }
 
-  function nearestPianoSample(midi, buffers){
+  function nearestSample(midi, buffers){
     let best = null;
     for (const sample of (buffers || [])){
       if (!sample || !sample.buffer || !Number.isFinite(sample.midi)) continue;
@@ -161,20 +190,21 @@ const MNMusicAudio = (() => {
     return best;
   }
 
-  function schedulePianoNote(target, destination, midi, start, duration, buffers){
-    const sample = nearestPianoSample(midi, buffers);
+  function scheduleSampleNote(target, destination, midi, start, duration, buffers, timbre){
+    const spec = SAMPLE_INSTRUMENTS[timbre] || SAMPLE_INSTRUMENTS.piano;
+    const sample = nearestSample(midi, buffers);
     if (!sample) return null;
     const end = start + Math.max(MIN_NOTE_SEC, duration);
-    const attackEnd = Math.min(start + PIANO_ATTACK, end);
-    const stopAt = end + PIANO_RELEASE;
+    const attackEnd = Math.min(start + spec.attack, end);
+    const stopAt = end + spec.release;
     const source = target.createBufferSource();
     source.buffer = sample.buffer;
     source.playbackRate.setValueAtTime(Math.pow(2, (midi - sample.midi) / 12), start);
 
     const gain = target.createGain();
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(PIANO_GAIN, attackEnd);
-    gain.gain.setValueAtTime(PIANO_GAIN, end);
+    gain.gain.linearRampToValueAtTime(spec.gain, attackEnd);
+    gain.gain.setValueAtTime(spec.gain, end);
     gain.gain.linearRampToValueAtTime(0, stopAt);
 
     source.connect(gain);
@@ -184,17 +214,21 @@ const MNMusicAudio = (() => {
     return { source, gain, stopAt, sampleMidi:sample.midi };
   }
 
+  const nearestPianoSample = nearestSample; // 기존 테스트·진단 API 호환
+  const schedulePianoNote = (target, destination, midi, start, duration, buffers) =>
+    scheduleSampleNote(target, destination, midi, start, duration, buffers, "piano");
+
   /* 실시간·오프라인 공용 예약. events 는 musicTimeline 이 만든 목록,
      offset 은 "타임라인 0초"가 그 컨텍스트의 몇 초에 해당하는지. */
-  function scheduleInto(target, destination, events, offset, timbre, pianoBuffers){
+  function scheduleInto(target, destination, events, offset, timbre, sampleBuffers){
     const nodes = [];
     const type = timbreOf(timbre);
     for (const event of (events || [])){
       if (!event || event.rest || !(event.frequency > 0)) continue;   // 쉼표는 시간만 흐른다
-      const node = type === "piano" && pianoBuffers
-        ? schedulePianoNote(target, destination, event.midi, offset + event.start, event.duration, pianoBuffers)
+      const node = SAMPLE_INSTRUMENTS[type] && sampleBuffers
+        ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, sampleBuffers, type)
         : scheduleNote(target, destination, event.frequency, offset + event.start, event.duration,
-            type === "piano" ? "triangle" : type);
+            SAMPLE_INSTRUMENTS[type] ? "triangle" : type);
       if (node) nodes.push(node);
     }
     return nodes;
@@ -240,18 +274,19 @@ const MNMusicAudio = (() => {
     const timeline = musicTimeline(sheet, { from:options.from, to:options.to });
     if (!timeline.events.length) return null;
     let timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
-    let pianoBuffers = null;
-    if (timbre === "piano"){
-      try { pianoBuffers = await ensurePianoBuffers(target); }
+    let sampleBuffers = null;
+    if (SAMPLE_INSTRUMENTS[timbre]){
+      const failedTimbre = timbre;
+      try { sampleBuffers = await ensureSampleBuffers(target, timbre); }
       catch(error){
         timbre = "triangle";
-        if (typeof options.onError === "function") options.onError(error);
+        if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
     if (request !== playRequest) return null;
 
     const state = {
-      timeline, timbre, pianoBuffers,
+      timeline, timbre, sampleBuffers,
       startAt:target.currentTime + START_DELAY,
       nodes:[], next:0, timer:0, raf:0, currentId:null,
       onNote:options.onNote, onEnd:options.onEnd
@@ -266,7 +301,7 @@ const MNMusicAudio = (() => {
         const event = timeline.events[state.next++];
         if (!event.rest && event.frequency > 0){
           state.nodes.push(...scheduleInto(target, master, [event], state.startAt,
-            state.timbre, state.pianoBuffers));
+            state.timbre, state.sampleBuffers));
         }
       }
     };
@@ -312,14 +347,14 @@ const MNMusicAudio = (() => {
     if (!(frequency > 0)) return false;   // 쉼표는 소리내지 않는다
     const request = ++previewRequest;
     const type = timbreOf(timbre);
-    if (type === "piano"){
+    if (SAMPLE_INSTRUMENTS[type]){
       const midi = musicMidiNumber(note);
-      ensurePianoBuffers(target).then((buffers) => {
+      ensureSampleBuffers(target, type).then((buffers) => {
         if (request !== previewRequest) return;
-        schedulePianoNote(target, master, midi, target.currentTime + 0.005, PREVIEW_SEC, buffers);
+        scheduleSampleNote(target, master, midi, target.currentTime + 0.005, PREVIEW_SEC, buffers, type);
       }).catch((error) => {
         if (request !== previewRequest) return;
-        console.warn("피아노 음원을 읽지 못해 삼각파로 미리듣습니다:", error);
+        console.warn(`${SAMPLE_INSTRUMENTS[type].label} 음원을 읽지 못해 삼각파로 미리듣습니다:`, error);
         scheduleNote(target, master, frequency, target.currentTime + 0.005, PREVIEW_SEC, "triangle");
       });
     } else {
@@ -343,15 +378,16 @@ const MNMusicAudio = (() => {
     bus.gain.value = MASTER_GAIN;
     bus.connect(target.destination);
     let timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
-    let pianoBuffers = null;
-    if (timbre === "piano"){
-      try { pianoBuffers = await ensurePianoBuffers(ensureContext() || target); }
+    let sampleBuffers = null;
+    if (SAMPLE_INSTRUMENTS[timbre]){
+      const failedTimbre = timbre;
+      try { sampleBuffers = await ensureSampleBuffers(ensureContext() || target, timbre); }
       catch(error){
         timbre = "triangle";
-        if (typeof options.onError === "function") options.onError(error);
+        if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
-    scheduleInto(target, bus, timeline.events, 0, timbre, pianoBuffers);
+    scheduleInto(target, bus, timeline.events, 0, timbre, sampleBuffers);
 
     const buffer = await target.startRendering();
     const wav = encodeWav([buffer.getChannelData(0)], buffer.sampleRate);
@@ -402,6 +438,7 @@ const MNMusicAudio = (() => {
 
   return {
     play, stop, playing, supported, previewNote, renderWav, encodeWav, scheduleInto,
-    ensurePianoBuffers, nearestPianoSample, PIANO_SAMPLE_ROOTS, ADSR, MASTER_GAIN, PIANO_RELEASE
+    ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample,
+    PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, ADSR, MASTER_GAIN, PIANO_RELEASE, GUITAR_RELEASE
   };
 })();
