@@ -137,7 +137,7 @@ async function mountMusicEditor(doc){
   let scorePan = null;              // 확대된 악보 여백을 손바닥으로 끌 때의 시작 좌표·스크롤
   let suppressScoreClick = false;   // 드래그를 끝낼 때 생기는 click 이 음표를 넣지 못하게 막는다
   let pitchGuideEl = null;          // 오선 위·아래의 보이지 않는 음높이를 보여주는 가상 덧줄
-  let noteDrag = null;              // 위치 조정 중인 음표와 드래그 시작 좌표
+  let noteDrag = null;              // 좌우 위치 또는 위아래 음높이 조정 중인 음표와 드래그 시작 좌표
   let contextLayers = [];           // 악보 우클릭 메뉴와 열린 하위 메뉴
   let contextOutside = null;
   let contextKeydown = null;
@@ -1161,25 +1161,36 @@ async function mountMusicEditor(doc){
     if (event.button !== 0) return;
     const target = event.target && event.target.closest ? event.target.closest("[data-note-id]") : null;
     const existing = noteByElement(target);
-    if (existing && (tool.position || (event.pointerType !== "touch" && event.altKey))){
+    const horizontalDrag = existing && (tool.position || (event.pointerType !== "touch" && event.altKey));
+    const pitchDrag = existing && !existing.note.rest && !tool.eraser && !tool.position && !event.altKey
+      && event.pointerType !== "touch";
+    if (horizontalDrag || pitchDrag){
       const point = scorePoint(event);
       const limits = noteHorizontalLimits.get(existing.note.id) ||
         { min:-MUSIC_X_OFFSET_MAX, max:MUSIC_X_OFFSET_MAX, applied:musicClampXOffset(existing.note.xOffset) };
+      const box = staveBoxes.find((item) => item.index === existing.measureIndex);
       if (!point) return;
       select(existing.measureIndex, existing.note.id, { scroll:false });
       noteDrag = {
         pointerId:event.pointerId,
+        kind:horizontalDrag ? "horizontal" : "pitch",
         note:existing.note,
+        measureIndex:existing.measureIndex,
         startX:point.x,
+        startY:point.y,
+        startPitch:{ step:existing.note.step, octave:existing.note.octave, alter:existing.note.alter },
+        spacing:box && box.spacing,
         startOffset:limits.applied,
         min:limits.min,
         max:limits.max,
+        appliedSteps:0,
         moved:false
       };
       closeMusicContextMenu();
-      scoreHost.classList.add("is-positioning");
+      scoreHost.classList.add(horizontalDrag ? "is-positioning" : "is-pitching");
       if (scoreHost.setPointerCapture) scoreHost.setPointerCapture(event.pointerId);
-      event.preventDefault();
+      // 일반 클릭의 미리듣기는 뒤의 click 경로가 맡는다. 실제 이동이 시작된 뒤에만 기본 동작을 막는다.
+      if (horizontalDrag) event.preventDefault();
       return;
     }
     if (event.pointerType === "touch" || !updateScorePanCursor(event)) return;
@@ -1198,6 +1209,32 @@ async function mountMusicEditor(doc){
     if (noteDrag && noteDrag.pointerId === event.pointerId){
       const point = scorePoint(event);
       if (!point) return;
+      if (noteDrag.kind === "pitch"){
+        const dy = point.y - noteDrag.startY;
+        if (!noteDrag.moved && Math.abs(dy) < 3) return;
+        noteDrag.moved = true;
+        const steps = -Math.round(dy / Math.max(1, (noteDrag.spacing || 10) / 2));
+        const moved = musicShiftPitch(noteDrag.startPitch, steps);
+        if (!moved){
+          hidePitchGuide();
+          setHoverReadout("음높이 이동 불가: 사용할 수 있는 음역을 벗어났어요", true);
+          event.preventDefault();
+          return;
+        }
+        if (steps !== noteDrag.appliedSteps){
+          noteDrag.appliedSteps = steps;
+          noteDrag.note.step = moved.step;
+          noteDrag.note.octave = moved.octave;
+          touch();
+          drawScore();
+        }
+        const dragBox = staveBoxes.find((item) => item.index === noteDrag.measureIndex);
+        updatePitchGuide(point, dragBox, false);
+        scoreHost.classList.add("is-pitching");
+        setHoverReadout("음높이 이동: " + musicSolfegeLabel(noteDrag.note), false);
+        event.preventDefault();
+        return;
+      }
       const next = Math.max(noteDrag.min, Math.min(noteDrag.max,
         Math.round(noteDrag.startOffset + point.x - noteDrag.startX)));
       if (!noteDrag.moved && Math.abs(point.x - noteDrag.startX) < 2) return;
@@ -1230,7 +1267,7 @@ async function mountMusicEditor(doc){
     const existing = noteByElement(target);
     if (existing){
       hidePitchGuide();
-      setHoverReadout((tool.eraser ? "지우기: " : tool.position ? "위치 조정: " : "현재 음표: ")
+      setHoverReadout((tool.eraser ? "지우기: " : tool.position ? "위치 조정: " : existing.note.rest ? "현재 쉼표: " : "위아래로 드래그: ")
         + musicSolfegeLabel(existing.note), false);
       return;
     }
@@ -1264,13 +1301,17 @@ async function mountMusicEditor(doc){
   function finishNoteDrag(event){
     if (!noteDrag || noteDrag.pointerId !== event.pointerId) return;
     const moved = noteDrag.moved;
+    const pitchChanged = noteDrag.kind === "pitch" && noteDrag.appliedSteps !== 0;
+    const draggedNote = noteDrag.note;
     noteDrag = null;
-    scoreHost.classList.remove("is-positioning");
+    scoreHost.classList.remove("is-positioning", "is-pitching");
+    hidePitchGuide();
     if (scoreHost.hasPointerCapture && scoreHost.hasPointerCapture(event.pointerId)){
       scoreHost.releasePointerCapture(event.pointerId);
     }
     if (moved){
       if (history && !history.isApplying()) history.commit();
+      if (pitchChanged) MNMusicAudio.previewNote(draggedNote, sheet.timbre);
       suppressScoreClick = true;
       setTimeout(() => { suppressScoreClick = false; }, 0);
       event.preventDefault();

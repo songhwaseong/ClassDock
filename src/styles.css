@@ -828,6 +828,7 @@
   .music-score.is-panning,.music-score.is-panning *{cursor:grabbing!important;user-select:none!important}
   .music-score.is-position-tool [data-note-id]{cursor:ew-resize;touch-action:none}
   .music-score.is-positioning,.music-score.is-positioning *{cursor:ew-resize!important;user-select:none!important}
+  .music-score.is-pitching,.music-score.is-pitching *{cursor:ns-resize!important;user-select:none!important}
   .music-pitch-guide{stroke:var(--accent);stroke-width:1.25;stroke-dasharray:4 5;opacity:.32;
     pointer-events:none;vector-effect:non-scaling-stroke}
   .music-pitch-guide.is-invalid{stroke:#dc2626;opacity:.4}
@@ -835,7 +836,7 @@
     fill:#2563eb;stroke:none;cursor:pointer;user-select:none}
   .music-solfege.is-playing{fill:var(--accent)}
   .music-solfege.is-selected{fill:#c2410c}
-  .music-score.is-note-entry .music-note{cursor:pointer}
+  .music-score.is-note-entry [data-note-id]:not(.is-rest){cursor:ns-resize}
   .music-note:hover{opacity:.65}
   .music-note.is-playing path,.music-note.is-playing rect,.music-note.is-playing text{fill:var(--accent);stroke:var(--accent)}
   .music-note.is-selected path,.music-note.is-selected rect,.music-note.is-selected text{fill:#c2410c;stroke:#c2410c}

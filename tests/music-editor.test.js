@@ -129,7 +129,7 @@ test("오선 hover는 실제 입력될 계이름을 다른 영역에 보여주�
   const css = read("src/styles.css");
   assert.match(css, /\.music-score\.is-note-entry\{cursor:crosshair\}/);
   assert.match(css, /\.music-score\.is-invalid-entry\{cursor:not-allowed\}/);
-  assert.match(css, /\.music-score\.is-note-entry \.music-note\{cursor:pointer\}/);
+  assert.match(css, /\.music-score\.is-note-entry \[data-note-id\]:not\(\.is-rest\)\{cursor:ns-resize\}/);
 });
 
 test("오선 위아래 hover는 현재 음높이를 옅은 가상 덧줄로 보여준다", () => {
@@ -282,6 +282,22 @@ test("음표 좌우 위치는 위치 조정 도구나 Alt+드래그로 이웃과
   const css = read("src/styles.css");
   assert.match(css, /\.music-score\.is-position-tool \[data-note-id\]\{cursor:ew-resize;touch-action:none\}/);
   assert.match(css, /\.music-score\.is-positioning,.music-score\.is-positioning \*\{cursor:ew-resize!important/);
+});
+
+test("일반 상태에서 음표를 위아래로 드래그하면 줄·칸 단위로 음높이가 바뀐다", () => {
+  assert.match(editorSource, /const pitchDrag = existing && !existing\.note\.rest && !tool\.eraser && !tool\.position/);
+  assert.match(editorSource, /kind:horizontalDrag \? "horizontal" : "pitch"/);
+  assert.match(editorSource, /startPitch:\{ step:existing\.note\.step, octave:existing\.note\.octave, alter:existing\.note\.alter \}/);
+  assert.match(editorSource, /const steps = -Math\.round\(dy \/ Math\.max\(1, \(noteDrag\.spacing \|\| 10\) \/ 2\)\)/);
+  assert.match(editorSource, /const moved = musicShiftPitch\(noteDrag\.startPitch, steps\)/);
+  assert.match(editorSource, /음높이 이동 불가: 사용할 수 있는 음역을 벗어났어요/);
+  assert.match(editorSource, /noteDrag\.note\.step = moved\.step/);
+  assert.match(editorSource, /noteDrag\.note\.octave = moved\.octave/);
+  assert.match(editorSource, /음높이 이동: /);
+  assert.match(editorSource, /if \(pitchChanged\) MNMusicAudio\.previewNote\(draggedNote, sheet\.timbre\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-score\.is-note-entry \[data-note-id\]:not\(\.is-rest\)\{cursor:ns-resize\}/);
+  assert.match(css, /\.music-score\.is-pitching,.music-score\.is-pitching \*\{cursor:ns-resize!important/);
 });
 
 test("인쇄는 같은 문서 안에서 찍어 악보 글꼴을 지킨다", () => {
