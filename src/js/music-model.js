@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== .msheet 악보 문서 — 모델 (P0) =====
-   - 저장 포맷: UTF-8 JSON 한 개(format:"manneung-sheet"). 동요 수준 단선율 한 성부.
+   - 저장 포맷: UTF-8 JSON 한 개(format:"manneung-sheet"). 단선율과 피아노 대보표를 함께 지원.
    - 이 파일은 순수 모델이다. DOM·오디오·VexFlow 를 일절 참조하지 않는다
      (그래야 node --test 로 조판·소리 없이 규칙을 검증할 수 있다).
    - 이름을 music* 로 잡은 이유: 이 코드베이스에서 sheet* 는 이미 스프레드시트를 뜻한다
@@ -9,7 +9,7 @@
    설계: docs/악보-설계.md */
 
 const MUSIC_FORMAT = "manneung-sheet";
-const MUSIC_VERSION = 2;
+const MUSIC_VERSION = 4;
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
@@ -28,16 +28,42 @@ const MUSIC_NOTE_VALUES = {
 const MUSIC_STEPS = ["C", "D", "E", "F", "G", "A", "B"];
 const MUSIC_STEP_SEMITONES = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
 
-// 조표 — 설계대로 #·b 각각 2개까지. alterations 는 "그 음이름은 기본으로 이만큼 변한다".
+function musicAlterationsFromFifths(fifths){
+  const count = Math.max(-7, Math.min(7, Math.round(Number(fifths) || 0)));
+  const order = count > 0 ? ["F", "C", "G", "D", "A", "E", "B"] : ["B", "E", "A", "D", "G", "C", "F"];
+  const alterations = {};
+  for (let index = 0; index < Math.abs(count); index++) alterations[order[index]] = count > 0 ? 1 : -1;
+  return alterations;
+}
+
+function musicKeySpec(label, vex, fifths, mode){
+  return { label, vex, fifths, mode:mode || "major", alterations:musicAlterationsFromFifths(fifths) };
+}
+
+// 장·단조 조표를 임시표 7개까지 제공한다. alterations 는 "그 음이름은 기본으로 이만큼 변한다".
 const MUSIC_KEYS = {
-  C:  { label:"다장조",  vex:"C",  alterations:{} },
-  G:  { label:"사장조",  vex:"G",  alterations:{ F:1 } },
-  D:  { label:"라장조",  vex:"D",  alterations:{ F:1, C:1 } },
-  F:  { label:"바장조",  vex:"F",  alterations:{ B:-1 } },
-  Bb: { label:"내림나장조", vex:"Bb", alterations:{ B:-1, E:-1 } }
+  C:musicKeySpec("다장조", "C", 0), G:musicKeySpec("사장조", "G", 1),
+  D:musicKeySpec("라장조", "D", 2), A:musicKeySpec("가장조", "A", 3),
+  E:musicKeySpec("마장조", "E", 4), B:musicKeySpec("나장조", "B", 5),
+  "F#":musicKeySpec("올림바장조", "F#", 6), "C#":musicKeySpec("올림다장조", "C#", 7),
+  F:musicKeySpec("바장조", "F", -1), Bb:musicKeySpec("내림나장조", "Bb", -2),
+  Eb:musicKeySpec("내림마장조", "Eb", -3), Ab:musicKeySpec("내림가장조", "Ab", -4),
+  Db:musicKeySpec("내림라장조", "Db", -5), Gb:musicKeySpec("내림사장조", "Gb", -6),
+  Cb:musicKeySpec("내림다장조", "Cb", -7),
+  Am:musicKeySpec("가단조", "Am", 0, "minor"), Em:musicKeySpec("마단조", "Em", 1, "minor"),
+  Bm:musicKeySpec("나단조", "Bm", 2, "minor"), "F#m":musicKeySpec("올림바단조", "F#m", 3, "minor"),
+  "C#m":musicKeySpec("올림다단조", "C#m", 4, "minor"), "G#m":musicKeySpec("올림사단조", "G#m", 5, "minor"),
+  "D#m":musicKeySpec("올림라단조", "D#m", 6, "minor"), "A#m":musicKeySpec("올림가단조", "A#m", 7, "minor"),
+  Dm:musicKeySpec("라단조", "Dm", -1, "minor"), Gm:musicKeySpec("사단조", "Gm", -2, "minor"),
+  Cm:musicKeySpec("다단조", "Cm", -3, "minor"), Fm:musicKeySpec("바단조", "Fm", -4, "minor"),
+  Bbm:musicKeySpec("내림나단조", "Bbm", -5, "minor"), Ebm:musicKeySpec("내림마단조", "Ebm", -6, "minor"),
+  Abm:musicKeySpec("내림가단조", "Abm", -7, "minor")
 };
 
-const MUSIC_TIMBRES = ["piano", "guitar", "triangle", "sine", "square"];
+const MUSIC_TIMBRES = [
+  "piano", "guitar", "xylophone", "harp", "flute", "clarinet",
+  "triangle", "sine", "square"
+];
 const MUSIC_TEMPO_MIN = 40;
 const MUSIC_TEMPO_MAX = 208;
 const MUSIC_DEFAULT_TEMPO = 100;
@@ -46,6 +72,8 @@ const MUSIC_DEFAULT_TEMPO = 100;
 // 파일에서 읽을 때는 조금 넉넉히 받아 준다(다른 곳에서 만든 파일을 거절하지 않으려고).
 const MUSIC_RANGE_MIN_MIDI = 55;   // G3
 const MUSIC_RANGE_MAX_MIDI = 84;   // C6
+const MUSIC_BASS_RANGE_MIN_MIDI = 36; // C2
+const MUSIC_BASS_RANGE_MAX_MIDI = 72; // C5
 
 function musicId(prefix){
   return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 9);
@@ -64,7 +92,74 @@ function musicNote(step, octave, opts){
   };
   const xOffset = musicClampXOffset(o.xOffset);
   if (xOffset) note.xOffset = xOffset;
+  if (Array.isArray(o.chord)){
+    note.chord = o.chord.map(musicNormalizePitch).filter(Boolean);
+    if (!note.chord.length) delete note.chord;
+  }
+  if (o.tieToNext === true) note.tieToNext = true;
+  if (o.slurToNext === true) note.slurToNext = true;
+  const chordSymbol = musicClampChordSymbol(o.chordSymbol);
+  if (chordSymbol) note.chordSymbol = chordSymbol;
+  const lyric = musicClampText(o.lyric, 80);
+  if (lyric) note.lyric = lyric;
+  if (["pp", "p", "mp", "mf", "f", "ff"].includes(o.dynamic)) note.dynamic = o.dynamic;
+  if (["staccato", "accent", "tenuto"].includes(o.articulation)) note.articulation = o.articulation;
+  const fingering = Math.round(Number(o.fingering) || 0);
+  if (fingering >= 1 && fingering <= 5) note.fingering = fingering;
+  if (["start", "stop"].includes(o.pedal)) note.pedal = o.pedal;
+  if (Number(o.tuplet) === 3) note.tuplet = 3;
   return note;
+}
+
+function musicNormalizePitch(raw){
+  if (!raw || typeof raw !== "object" || MUSIC_STEP_SEMITONES[raw.step] === undefined) return null;
+  const octave = Math.round(Number(raw.octave));
+  if (!Number.isFinite(octave) || octave < 0 || octave > 9) return null;
+  return { step:raw.step, octave, alter:musicClampAlter(raw.alter) };
+}
+
+function musicPitchKey(pitch){
+  return pitch ? `${pitch.step}:${Math.round(Number(pitch.octave) || 0)}:${musicClampAlter(pitch.alter)}` : "";
+}
+
+function musicNotePitches(note){
+  if (!note || note.rest) return [];
+  const first = musicNormalizePitch(note);
+  if (!first) return [];
+  const out = [first], seen = new Set([musicPitchKey(first)]);
+  for (const raw of (Array.isArray(note.chord) ? note.chord : [])){
+    const pitch = musicNormalizePitch(raw);
+    const key = musicPitchKey(pitch);
+    if (!pitch || seen.has(key)) continue;
+    seen.add(key);
+    out.push(pitch);
+  }
+  out.sort((a, b) => musicMidiNumber(a) - musicMidiNumber(b));
+  return out;
+}
+
+function musicAddChordPitch(note, rawPitch){
+  if (!note || note.rest) return false;
+  const pitch = musicNormalizePitch(rawPitch);
+  if (!pitch || musicNotePitches(note).some((item) => musicPitchKey(item) === musicPitchKey(pitch))) return false;
+  if (!Array.isArray(note.chord)) note.chord = [];
+  note.chord.push(pitch);
+  return true;
+}
+
+function musicRemoveChordPitch(note){
+  if (!note || !Array.isArray(note.chord) || !note.chord.length) return null;
+  const removed = note.chord.pop();
+  if (!note.chord.length) delete note.chord;
+  return removed;
+}
+
+function musicClampChordSymbol(value){
+  return String(value || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 32);
+}
+
+function musicClampText(value, limit){
+  return String(value || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, Math.max(1, Number(limit) || 80));
 }
 
 function musicRest(value, dots, opts){
@@ -76,6 +171,7 @@ function musicRest(value, dots, opts){
   };
   const xOffset = musicClampXOffset(opts && opts.xOffset);
   if (xOffset) rest.xOffset = xOffset;
+  if (opts && Number(opts.tuplet) === 3) rest.tuplet = 3;
   return rest;
 }
 
@@ -96,11 +192,26 @@ function musicClampXOffset(value){
 
 function musicMeasure(notes, opts){
   const o = opts || {};
-  return {
+  const measure = {
     id:musicId("m"),
     notes:Array.isArray(notes) ? notes : [],
+    voice2Notes:Array.isArray(o.voice2Notes) ? o.voice2Notes : [],
+    bassNotes:Array.isArray(o.bassNotes) ? o.bassNotes : [],
+    bassVoice2Notes:Array.isArray(o.bassVoice2Notes) ? o.bassVoice2Notes : [],
     lineBreakBefore:o.lineBreakBefore === true
   };
+  if (o.repeatStart === true) measure.repeatStart = true;
+  if (o.repeatEnd === true) measure.repeatEnd = true;
+  const ending = Math.round(Number(o.ending) || 0);
+  if (ending === 1 || ending === 2) measure.ending = ending;
+  const pickupTicks = Math.round(Number(o.pickupTicks) || 0);
+  if (pickupTicks > 0) measure.pickupTicks = pickupTicks;
+  const timeChange = musicNormalizeTime(o.timeChange);
+  if (timeChange) measure.timeChange = timeChange;
+  if (MUSIC_KEYS[o.keyChange]) measure.keyChange = o.keyChange;
+  const tempoChange = Number(o.tempoChange);
+  if (tempoChange > 0) measure.tempoChange = musicClampTempo(tempoChange);
+  return measure;
 }
 
 function musicEmpty(title){
@@ -115,10 +226,38 @@ function musicEmpty(title){
     time:{ beats:4, beatValue:4 },
     key:"C",
     clef:"treble",
+    grandStaff:false,
     timbre:"piano",
     showSolfege:true,
     measures:[musicMeasure(), musicMeasure(), musicMeasure(), musicMeasure()]
   };
+}
+
+function musicExampleSheet(name){
+  const key = String(name || "").toLowerCase();
+  if (key === "school-bell"){
+    const sheet = musicEmpty("학교종");
+    sheet.tempo = 100;
+    sheet.measures = [
+      musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("A", 4), musicNote("A", 4)]),
+      musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("E", 4, { value:"half" })]),
+      musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("E", 4), musicNote("E", 4)]),
+      musicMeasure([musicNote("D", 4, { value:"half" }), musicRest("half")])
+    ];
+    return sheet;
+  }
+  if (key === "twinkle"){
+    const sheet = musicEmpty("작은별");
+    sheet.tempo = 90;
+    sheet.measures = [
+      musicMeasure([musicNote("C", 4), musicNote("C", 4), musicNote("G", 4), musicNote("G", 4)]),
+      musicMeasure([musicNote("A", 4), musicNote("A", 4), musicNote("G", 4, { value:"half" })]),
+      musicMeasure([musicNote("F", 4), musicNote("F", 4), musicNote("E", 4), musicNote("E", 4)]),
+      musicMeasure([musicNote("D", 4), musicNote("D", 4), musicNote("C", 4, { value:"half" })])
+    ];
+    return sheet;
+  }
+  return null;
 }
 
 /* ----- 음높이 ----------------------------------------------------------------
@@ -160,7 +299,15 @@ function musicNoteTicks(note){
   if (!spec) return 0;
   const dots = musicClampDots(note.dots);
   // 점 하나면 1.5배, 둘이면 1.75배 — 정수를 유지하려고 곱하고 나눈다.
-  return (spec.ticks * (Math.pow(2, dots + 1) - 1)) / Math.pow(2, dots);
+  const ticks = (spec.ticks * (Math.pow(2, dots + 1) - 1)) / Math.pow(2, dots);
+  return note && Number(note.tuplet) === 3 ? ticks * 2 / 3 : ticks;
+}
+
+function musicNormalizeTime(raw){
+  if (!raw || typeof raw !== "object") return null;
+  const beats = Math.max(1, Math.min(16, Math.round(Number(raw.beats) || 0)));
+  const beatValue = Math.round(Number(raw.beatValue) || 0);
+  return [2, 4, 8, 16].includes(beatValue) ? { beats, beatValue } : null;
 }
 
 function musicMeasureTicks(time){
@@ -169,11 +316,48 @@ function musicMeasureTicks(time){
   return beats * ((MUSIC_TICKS_PER_QUARTER * 4) / beatValue);
 }
 
-function musicMeasureUsedTicks(measure){
-  if (!measure || !Array.isArray(measure.notes)) return 0;
+function musicStaffNotes(measure, staff){
+  return musicVoiceNotes(measure, staff, 1);
+}
+
+function musicVoiceNotes(measure, staff, voice){
+  if (!measure) return [];
+  const second = Number(voice) === 2;
+  const key = staff === "bass"
+    ? (second ? "bassVoice2Notes" : "bassNotes")
+    : (second ? "voice2Notes" : "notes");
+  return Array.isArray(measure[key]) ? measure[key] : [];
+}
+
+function musicMeasureUsedTicks(measure, staff, voice){
+  const notes = musicVoiceNotes(measure, staff, voice);
   let total = 0;
-  for (const note of measure.notes) total += musicNoteTicks(note);
+  for (const note of notes) total += musicNoteTicks(note);
   return total;
+}
+
+function musicEffectiveMeasureSettings(sheet, measureIndex){
+  const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
+  const settings = {
+    time:musicNormalizeTime(sheet && sheet.time) || { beats:4, beatValue:4 },
+    key:MUSIC_KEYS[sheet && sheet.key] ? sheet.key : "C",
+    tempo:musicClampTempo(sheet && sheet.tempo)
+  };
+  const last = Math.max(0, Math.min(measures.length - 1, Math.round(Number(measureIndex) || 0)));
+  for (let index = 0; index <= last; index++){
+    const measure = measures[index];
+    if (!measure) continue;
+    if (musicNormalizeTime(measure.timeChange)) settings.time = musicNormalizeTime(measure.timeChange);
+    if (MUSIC_KEYS[measure.keyChange]) settings.key = measure.keyChange;
+    if (Number(measure.tempoChange) > 0) settings.tempo = musicClampTempo(measure.tempoChange);
+  }
+  return settings;
+}
+
+function musicMeasureCapacity(sheet, measureIndex){
+  const measure = sheet && Array.isArray(sheet.measures) ? sheet.measures[measureIndex] : null;
+  const pickup = Math.round(Number(measure && measure.pickupTicks) || 0);
+  return pickup > 0 ? pickup : musicMeasureTicks(musicEffectiveMeasureSettings(sheet, measureIndex).time);
 }
 
 /* ----- 검사 -----------------------------------------------------------------
@@ -184,24 +368,49 @@ function musicMeasureUsedTicks(measure){
 function musicValidate(sheet){
   const issues = [];
   const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
-  const expected = musicMeasureTicks(sheet && sheet.time);
   measures.forEach((measure, index) => {
-    const used = musicMeasureUsedTicks(measure);
-    if (used === 0) return;
-    if (used > expected) issues.push({ measure:index + 1, kind:"over", expected, actual:used });
-    else if (used < expected && index < measures.length - 1){
-      issues.push({ measure:index + 1, kind:"under", expected, actual:used });
+    for (const staff of ((sheet && sheet.grandStaff) ? ["treble", "bass"] : ["treble"])){
+      for (const voice of [1, 2]){
+        const used = musicMeasureUsedTicks(measure, staff, voice);
+        const expected = musicMeasureCapacity(sheet, index);
+        if (used === 0) continue;
+        if (used > expected) issues.push({ measure:index + 1, staff, voice, kind:"over", expected, actual:used });
+        else if (used < expected && index < measures.length - 1){
+          issues.push({ measure:index + 1, staff, voice, kind:"under", expected, actual:used });
+        }
+      }
     }
   });
   return { ok:issues.length === 0, issues };
 }
 
 // 이 음표를 그 마디에 더 넣을 수 있는지(편집기가 입력을 막는 기준).
-function musicCanFit(sheet, measureIndex, note){
+function musicCanFit(sheet, measureIndex, note, staff, voice){
   const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
   const measure = measures[measureIndex];
   if (!measure) return false;
-  return musicMeasureUsedTicks(measure) + musicNoteTicks(note) <= musicMeasureTicks(sheet && sheet.time);
+  return musicMeasureUsedTicks(measure, staff, voice) + musicNoteTicks(note) <= musicMeasureCapacity(sheet, measureIndex);
+}
+
+function musicMeasureProgress(sheet, measureIndex, staff, voice){
+  const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
+  const index = Math.max(0, Math.min(Math.max(0, measures.length - 1), Math.round(Number(measureIndex) || 0)));
+  const settings = musicEffectiveMeasureSettings(sheet, index);
+  const expected = musicMeasureCapacity(sheet, index);
+  const used = musicMeasureUsedTicks(measures[index], staff, voice);
+  const beatValue = settings.time.beatValue;
+  const ticksPerBeat = MUSIC_TICKS_PER_QUARTER * 4 / beatValue;
+  return {
+    measure:index + 1,
+    used, expected,
+    remaining:Math.max(0, expected - used),
+    over:Math.max(0, used - expected),
+    usedBeats:used / ticksPerBeat,
+    expectedBeats:expected / ticksPerBeat,
+    remainingBeats:Math.max(0, expected - used) / ticksPerBeat,
+    overBeats:Math.max(0, used - expected) / ticksPerBeat,
+    complete:used === expected
+  };
 }
 
 /* ----- VexFlow 로 넘길 형태 ---------------------------------------------------
@@ -222,22 +431,30 @@ function musicAccidentalSymbol(alter){
   return null;
 }
 
-function musicVexNote(note, key){
+function musicVexNote(note, key, clef){
   const value = MUSIC_NOTE_VALUES[note && note.value] || MUSIC_NOTE_VALUES.quarter;
   const dots = musicClampDots(note && note.dots);
   if (!note || note.rest){
-    // 쉼표는 높은음자리표에서 b/4 자리에 그린다(VexFlow 관례).
-    return { keys:["b/4"], duration:value.vex + "r", dots, rest:true, accidental:null };
+    const restKey = clef === "bass" ? "d/3" : "b/4";
+    return { keys:[restKey], duration:value.vex + "r", dots, rest:true, accidentals:[], accidental:null };
   }
-  const alter = musicClampAlter(note.alter);
-  const mark = alter === 0 ? "" : alter > 0 ? "#".repeat(alter) : "b".repeat(-alter);
-  const keyAlter = musicKeyAlterations(key)[note.step] || 0;
+  const pitches = musicNotePitches(note);
+  const accidentals = pitches.map((pitch) => {
+    const alter = musicClampAlter(pitch.alter);
+    const keyAlter = musicKeyAlterations(key)[pitch.step] || 0;
+    return alter === keyAlter ? null : musicAccidentalSymbol(alter);
+  });
   return {
-    keys:[note.step.toLowerCase() + mark + "/" + note.octave],
+    keys:pitches.map((pitch) => {
+      const alter = musicClampAlter(pitch.alter);
+      const mark = alter === 0 ? "" : alter > 0 ? "#".repeat(alter) : "b".repeat(-alter);
+      return pitch.step.toLowerCase() + mark + "/" + pitch.octave;
+    }),
     duration:value.vex,
     dots,
     rest:false,
-    accidental:alter === keyAlter ? null : musicAccidentalSymbol(alter)
+    accidentals,
+    accidental:accidentals[0]
   };
 }
 
@@ -252,6 +469,7 @@ function musicVexNote(note, key){
 
 const MUSIC_DIATONIC_STEPS = { C:0, D:1, E:2, F:3, G:4, A:5, B:6 };
 const MUSIC_TREBLE_TOP_DIATONIC = 5 * 7 + 3;   // F5
+const MUSIC_BASS_TOP_DIATONIC = 3 * 7 + 5;     // A3
 
 function musicDiatonicValue(note){
   if (!note || MUSIC_DIATONIC_STEPS[note.step] === undefined) return null;
@@ -264,29 +482,33 @@ function musicPitchFromDiatonic(value){
 }
 
 // 오선 줄 값(0=맨 윗줄, 0.5=그 아래 칸 …) → 음높이. 0.5 단위로 맞춰 받는다.
-function musicPitchFromStaveLine(lineValue){
-  return musicPitchFromDiatonic(MUSIC_TREBLE_TOP_DIATONIC - Math.round(Number(lineValue) * 2));
+function musicPitchFromStaveLine(lineValue, clef){
+  const top = clef === "bass" ? MUSIC_BASS_TOP_DIATONIC : MUSIC_TREBLE_TOP_DIATONIC;
+  return musicPitchFromDiatonic(top - Math.round(Number(lineValue) * 2));
 }
 
-function musicStaveLineForNote(note){
+function musicStaveLineForNote(note, clef){
   const diatonic = musicDiatonicValue(note);
-  return diatonic === null ? null : (MUSIC_TREBLE_TOP_DIATONIC - diatonic) / 2;
+  const top = clef === "bass" ? MUSIC_BASS_TOP_DIATONIC : MUSIC_TREBLE_TOP_DIATONIC;
+  return diatonic === null ? null : (top - diatonic) / 2;
 }
 
-function musicMidiInRange(midi){
-  return Number.isFinite(midi) && midi >= MUSIC_RANGE_MIN_MIDI && midi <= MUSIC_RANGE_MAX_MIDI;
+function musicMidiInRange(midi, staff){
+  const min = staff === "bass" ? MUSIC_BASS_RANGE_MIN_MIDI : MUSIC_RANGE_MIN_MIDI;
+  const max = staff === "bass" ? MUSIC_BASS_RANGE_MAX_MIDI : MUSIC_RANGE_MAX_MIDI;
+  return Number.isFinite(midi) && midi >= min && midi <= max;
 }
 
 /* 음표를 흰건반 기준으로 steps 만큼 올리고 내린다(↑↓ 한 음씩, Shift 면 한 옥타브).
    음역을 벗어나면 null 을 준다 — 호출부가 "더 못 올라가요"로 처리한다.
    임시표(alter)는 그대로 들고 간다: 사장조에서 F#을 올리면 G#이 아니라 G 가 되는 게 아니라
    같은 임시표를 유지한 G# 이 된다. 교실에서 쓰기엔 이 규칙이 예측 가능하다. */
-function musicShiftPitch(note, steps){
+function musicShiftPitch(note, steps, staff){
   const diatonic = musicDiatonicValue(note);
   if (diatonic === null) return null;
   const moved = musicPitchFromDiatonic(diatonic + Math.round(Number(steps) || 0));
   const midi = musicMidiNumber({ step:moved.step, octave:moved.octave, alter:musicClampAlter(note.alter) });
-  return musicMidiInRange(midi) ? moved : null;
+  return musicMidiInRange(midi, staff) ? moved : null;
 }
 
 /* ----- 재생 타임라인 ----------------------------------------------------------
@@ -294,42 +516,117 @@ function musicShiftPitch(note, steps){
    from·to 는 1부터 세는 마디 번호(양끝 포함). 부분 재생은 그 구간만 잘라 0초부터 다시 센다.
    tempo 는 4분음표 기준 BPM 이다(6/8 도 ♩ 기준으로 읽는다 — 설계 결정). */
 
+function musicPlaybackMeasureIndexes(measures, first, last, useRepeats){
+  const order = [];
+  let index = first, repeatStart = first;
+  const repeatedEnds = new Set();
+  let repeatPass = 1;
+  let guard = 0;
+  while (index <= last && guard++ < Math.max(32, measures.length * 4)){
+    const measure = measures[index];
+    if (measure && measure.repeatStart) repeatStart = index;
+    const ending = Math.round(Number(measure && measure.ending) || 0);
+    if (!useRepeats || !ending || ending === repeatPass) order.push(index);
+    if (useRepeats && measure && measure.repeatEnd && !repeatedEnds.has(index)){
+      repeatedEnds.add(index);
+      repeatPass = 2;
+      index = repeatStart;
+    } else {
+      index++;
+      if (repeatPass === 2 && ending === 2) repeatPass = 1;
+    }
+  }
+  return order;
+}
+
+function musicDynamicGain(dynamic){
+  return ({ pp:0.42, p:0.58, mp:0.72, mf:0.86, f:1, ff:1.15 })[dynamic] || 1;
+}
+
 function musicTimeline(sheet, opts){
   const options = opts || {};
   const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
-  const tempo = musicClampTempo(sheet && sheet.tempo);
+  const playbackRate = Math.max(0.25, Math.min(2, Number(options.playbackRate) || 1));
+  const tempo = musicClampTempo(sheet && sheet.tempo) * playbackRate;
   const secondsPerTick = 60 / tempo / MUSIC_TICKS_PER_QUARTER;
-  const fullMeasure = musicMeasureTicks(sheet && sheet.time);
-
-  const first = Math.max(1, Math.round(Number(options.from) || 1));
-  const last = Math.min(measures.length, Math.round(Number(options.to) || measures.length));
-
+  const first = Math.max(1, Math.round(Number(options.from) || 1)) - 1;
+  const last = Math.min(measures.length, Math.round(Number(options.to) || measures.length)) - 1;
+  const requestedStaff = options.staff === "bass" ? "bass" : options.staff === "treble" ? "treble" : null;
+  const staffs = requestedStaff ? [requestedStaff] : (sheet && sheet.grandStaff ? ["treble", "bass"] : ["treble"]);
+  const order = musicPlaybackMeasureIndexes(measures, first, last, options.repeats !== false);
   const events = [];
-  let cursor = 0;
-  for (let index = first - 1; index <= last - 1; index++){
+  const metronome = [];
+  const tied = new Map();
+  const currentGain = new Map();
+  let measureStartSeconds = 0;
+  let previousIndex = null;
+
+  for (const index of order){
     const measure = measures[index];
     if (!measure) continue;
-    const measureStart = cursor;
-    for (const note of (Array.isArray(measure.notes) ? measure.notes : [])){
-      const ticks = musicNoteTicks(note);
-      if (ticks <= 0) continue;
-      const midi = musicMidiNumber(note);
-      events.push({
-        id:note.id,
-        measure:index + 1,
-        rest:!!note.rest || midi === null,
-        midi:note.rest ? null : midi,
-        frequency:note.rest || midi === null ? 0 : musicFrequency(midi),
-        start:cursor * secondsPerTick,
-        duration:ticks * secondsPerTick
-      });
-      cursor += ticks;
+    if (previousIndex !== null && index !== previousIndex + 1) tied.clear();
+    previousIndex = index;
+    const settings = musicEffectiveMeasureSettings(sheet, index);
+    const localTempo = settings.tempo * playbackRate;
+    const localSecondsPerTick = 60 / localTempo / MUSIC_TICKS_PER_QUARTER;
+    const capacity = musicMeasureCapacity(sheet, index);
+    const beatTicks = MUSIC_TICKS_PER_QUARTER * 4 / settings.time.beatValue;
+    for (let tick = 0; tick < capacity; tick += beatTicks){
+      metronome.push({ start:measureStartSeconds + tick * localSecondsPerTick, accented:tick === 0,
+        measure:index + 1 });
     }
-    // 덜 찬 마디도 마디 길이만큼은 흐르게 한다(빈 마디를 건너뛰면 박자가 어긋난다).
-    const used = cursor - measureStart;
-    if (used < fullMeasure) cursor = measureStart + fullMeasure;
+    for (const staff of staffs){
+      for (const voice of [1, 2]){
+        const voiceKey = `${staff}:${voice}`;
+        let cursorTicks = 0;
+        let tiedPitches = tied.get(voiceKey) || new Map();
+        let gain = currentGain.get(voiceKey) || 1;
+        for (const note of musicVoiceNotes(measure, staff, voice)){
+          const ticks = musicNoteTicks(note);
+          if (ticks <= 0) continue;
+          const start = measureStartSeconds + cursorTicks * localSecondsPerTick;
+          const fullDuration = ticks * localSecondsPerTick;
+          if (note.dynamic){ gain = musicDynamicGain(note.dynamic); currentGain.set(voiceKey, gain); }
+          if (note.rest){
+            events.push({ id:note.id, noteId:note.id, staff, voice, measure:index + 1, rest:true,
+              midi:null, frequency:0, start, duration:fullDuration, gain });
+            tiedPitches = new Map();
+            cursorTicks += ticks;
+            continue;
+          }
+          const nextTied = new Map();
+          const durationFactor = note.tieToNext ? 1 : note.articulation === "staccato" ? 0.52
+            : note.articulation === "tenuto" ? 0.96 : 1;
+          const noteGain = gain * (note.articulation === "accent" ? 1.18 : 1);
+          for (const pitch of musicNotePitches(note)){
+            const midi = musicMidiNumber(pitch);
+            if (midi === null) continue;
+            const previous = tiedPitches.get(midi);
+            let event;
+            if (previous && Math.abs((previous.start + previous.duration) - start) < 1e-7){
+              previous.duration += fullDuration;
+              event = previous;
+            } else {
+              event = { id:note.id, noteId:note.id, staff, voice, measure:index + 1, rest:false, midi,
+                frequency:musicFrequency(midi), start, duration:fullDuration * durationFactor, gain:noteGain };
+              events.push(event);
+            }
+            if (note.tieToNext) nextTied.set(midi, event);
+          }
+          tiedPitches = nextTied;
+          cursorTicks += ticks;
+        }
+        tied.set(voiceKey, tiedPitches);
+      }
+    }
+    measureStartSeconds += capacity * localSecondsPerTick;
   }
-  return { tempo, secondsPerTick, totalSeconds:cursor * secondsPerTick, events };
+  events.sort((a, b) => a.start - b.start || a.staff.localeCompare(b.staff) || a.voice - b.voice);
+  const firstSettings = musicEffectiveMeasureSettings(sheet, order.length ? order[0] : first);
+  return { tempo, playbackRate, secondsPerTick, totalSeconds:measureStartSeconds, events,
+    metronome, countInBeats:firstSettings.time.beats,
+    countInBeatSeconds:(60 / (firstSettings.tempo * playbackRate)) * (4 / firstSettings.time.beatValue),
+    measureOrder:order.map((index) => index + 1) };
 }
 
 function musicClampTempo(tempo){
@@ -348,12 +645,17 @@ function musicRetuneForKey(sheet, nextKey){
   const after = musicKeyAlterations(nextKey);
   let changed = 0;
   for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
-    for (const note of (Array.isArray(measure.notes) ? measure.notes : [])){
+    for (const note of [
+      ...musicVoiceNotes(measure, "treble", 1), ...musicVoiceNotes(measure, "treble", 2),
+      ...musicVoiceNotes(measure, "bass", 1), ...musicVoiceNotes(measure, "bass", 2)
+    ]){
       if (note.rest) continue;
-      const wasDefault = musicClampAlter(note.alter) === (before[note.step] || 0);
-      if (!wasDefault) continue;                       // 임시표를 일부러 적은 음은 건드리지 않는다
-      const next = after[note.step] || 0;
-      if (next !== musicClampAlter(note.alter)){ note.alter = next; changed++; }
+      for (const pitch of [note, ...(Array.isArray(note.chord) ? note.chord : [])]){
+        const wasDefault = musicClampAlter(pitch.alter) === (before[pitch.step] || 0);
+        if (!wasDefault) continue;                     // 임시표를 일부러 적은 음은 건드리지 않는다
+        const next = after[pitch.step] || 0;
+        if (next !== musicClampAlter(pitch.alter)){ pitch.alter = next; changed++; }
+      }
     }
   }
   sheet.key = nextKey;
@@ -372,7 +674,10 @@ const MUSIC_LINE_HEAD_EXTRA = 80;    // 줄 첫 마디의 음자리표·조표 �
 const MUSIC_MAX_BARS_PER_LINE = 8;
 
 function musicBarWidthHint(measure){
-  const count = (measure && Array.isArray(measure.notes)) ? measure.notes.length : 0;
+  const count = Math.max(
+    musicVoiceNotes(measure, "treble", 1).length, musicVoiceNotes(measure, "treble", 2).length,
+    musicVoiceNotes(measure, "bass", 1).length, musicVoiceNotes(measure, "bass", 2).length
+  );
   return Math.max(MUSIC_BAR_MIN_WIDTH, MUSIC_BAR_BASE_WIDTH + count * MUSIC_BAR_NOTE_WIDTH);
 }
 
@@ -418,26 +723,52 @@ function musicNormalizeNote(raw){
   if (!MUSIC_NOTE_VALUES[raw.value]) throw new Error("지원하지 않는 음표 길이: " + raw.value);
   const dots = musicClampDots(raw.dots);
   if (raw.rest === true){
-    const rest = musicRest(raw.value, dots, { xOffset:raw.xOffset });
+    const rest = musicRest(raw.value, dots, { xOffset:raw.xOffset, tuplet:raw.tuplet });
     if (typeof raw.id === "string" && raw.id) rest.id = raw.id.slice(0, 80);
     return rest;
   }
   if (MUSIC_STEP_SEMITONES[raw.step] === undefined) throw new Error("지원하지 않는 음이름: " + raw.step);
   const octave = Math.round(Number(raw.octave));
   if (!Number.isFinite(octave) || octave < 0 || octave > 9) throw new Error("음높이가 범위를 벗어났습니다.");
-  const note = musicNote(raw.step, octave, { alter:raw.alter, value:raw.value, dots, xOffset:raw.xOffset });
+  const note = musicNote(raw.step, octave, {
+    alter:raw.alter, value:raw.value, dots, xOffset:raw.xOffset,
+    chord:raw.chord, tieToNext:raw.tieToNext, slurToNext:raw.slurToNext,
+    chordSymbol:raw.chordSymbol, lyric:raw.lyric, dynamic:raw.dynamic,
+    articulation:raw.articulation, fingering:raw.fingering, pedal:raw.pedal, tuplet:raw.tuplet
+  });
   if (typeof raw.id === "string" && raw.id) note.id = raw.id.slice(0, 80);
   return note;
 }
 
 function musicNormalizeMeasure(raw){
   const notes = [];
+  const voice2Notes = [];
+  const bassNotes = [];
+  const bassVoice2Notes = [];
   const rawNotes = (raw && Array.isArray(raw.notes)) ? raw.notes : [];
   for (const rawNote of rawNotes){
     const note = musicNormalizeNote(rawNote);
     if (note) notes.push(note);
   }
-  const measure = musicMeasure(notes, { lineBreakBefore:raw && raw.lineBreakBefore === true });
+  const rawBassNotes = (raw && Array.isArray(raw.bassNotes)) ? raw.bassNotes : [];
+  for (const rawNote of rawBassNotes){
+    const note = musicNormalizeNote(rawNote);
+    if (note) bassNotes.push(note);
+  }
+  for (const rawNote of ((raw && Array.isArray(raw.voice2Notes)) ? raw.voice2Notes : [])){
+    const note = musicNormalizeNote(rawNote); if (note) voice2Notes.push(note);
+  }
+  for (const rawNote of ((raw && Array.isArray(raw.bassVoice2Notes)) ? raw.bassVoice2Notes : [])){
+    const note = musicNormalizeNote(rawNote); if (note) bassVoice2Notes.push(note);
+  }
+  const measure = musicMeasure(notes, {
+    voice2Notes, bassNotes, bassVoice2Notes,
+    lineBreakBefore:raw && raw.lineBreakBefore === true,
+    repeatStart:raw && raw.repeatStart === true, repeatEnd:raw && raw.repeatEnd === true,
+    ending:raw && raw.ending,
+    pickupTicks:raw && raw.pickupTicks, timeChange:raw && raw.timeChange,
+    keyChange:raw && raw.keyChange, tempoChange:raw && raw.tempoChange
+  });
   if (raw && typeof raw.id === "string" && raw.id) measure.id = raw.id.slice(0, 80);
   return measure;
 }
@@ -466,7 +797,9 @@ function musicParse(text){
     tempo:musicClampTempo(raw.tempo),
     time:{ beats, beatValue },
     key:MUSIC_KEYS[raw.key] ? raw.key : "C",
-    clef:"treble",                                        // 1차는 높은음자리표 하나만
+    clef:"treble",
+    grandStaff:raw.grandStaff === true || measures.some((measure) =>
+      measure.bassNotes.length > 0 || measure.bassVoice2Notes.length > 0),
     // v1의 triangle 은 당시 새 악보 기본값이었다. v2에서 실제 피아노가 기본이 되었으므로
     // 기존 악보도 별도 설정 없이 개선된 소리를 듣도록 자동 이전한다.
     timbre:(version === 1 && raw.timbre === "triangle")
@@ -492,13 +825,21 @@ function musicSerialize(sheet){
     },
     key:MUSIC_KEYS[model.key] ? model.key : "C",
     clef:"treble",
+    grandStaff:model.grandStaff === true,
     timbre:MUSIC_TIMBRES.includes(model.timbre) ? model.timbre : "piano",
     showSolfege:model.showSolfege !== false,
     measures:(Array.isArray(model.measures) ? model.measures : []).map((measure, index) => {
       const outMeasure = { id:String(measure && measure.id || musicId("m")) };
       // 기존 .msheet와 불필요한 diff를 만들지 않도록 수동 줄바꿈이 있을 때만 기록한다.
       if (index > 0 && measure && measure.lineBreakBefore === true) outMeasure.lineBreakBefore = true;
-      outMeasure.notes = ((measure && Array.isArray(measure.notes)) ? measure.notes : []).map(note => {
+      if (measure && measure.repeatStart === true) outMeasure.repeatStart = true;
+      if (measure && measure.repeatEnd === true) outMeasure.repeatEnd = true;
+      if (measure && (measure.ending === 1 || measure.ending === 2)) outMeasure.ending = measure.ending;
+      if (Math.round(Number(measure && measure.pickupTicks) || 0) > 0) outMeasure.pickupTicks = Math.round(Number(measure.pickupTicks));
+      if (musicNormalizeTime(measure && measure.timeChange)) outMeasure.timeChange = musicNormalizeTime(measure.timeChange);
+      if (measure && MUSIC_KEYS[measure.keyChange]) outMeasure.keyChange = measure.keyChange;
+      if (measure && Number(measure.tempoChange) > 0) outMeasure.tempoChange = musicClampTempo(measure.tempoChange);
+      const serializeNote = (note) => {
         const outNote = note.rest
           ? { id:String(note.id || musicId("n")), rest:true, value:note.value, dots:musicClampDots(note.dots) }
           : {
@@ -512,8 +853,33 @@ function musicSerialize(sheet){
             };
         const xOffset = musicClampXOffset(note.xOffset);
         if (xOffset) outNote.xOffset = xOffset;
+        if (!note.rest){
+          const chord = musicNotePitches(note).filter((pitch) => musicPitchKey(pitch) !== musicPitchKey(note));
+          if (chord.length) outNote.chord = chord.map((pitch) => ({
+            step:pitch.step, octave:pitch.octave, alter:musicClampAlter(pitch.alter)
+          }));
+          if (note.tieToNext === true) outNote.tieToNext = true;
+          if (note.slurToNext === true) outNote.slurToNext = true;
+          const chordSymbol = musicClampChordSymbol(note.chordSymbol);
+          if (chordSymbol) outNote.chordSymbol = chordSymbol;
+          const lyric = musicClampText(note.lyric, 80);
+          if (lyric) outNote.lyric = lyric;
+          if (["pp", "p", "mp", "mf", "f", "ff"].includes(note.dynamic)) outNote.dynamic = note.dynamic;
+          if (["staccato", "accent", "tenuto"].includes(note.articulation)) outNote.articulation = note.articulation;
+          const fingering = Math.round(Number(note.fingering) || 0);
+          if (fingering >= 1 && fingering <= 5) outNote.fingering = fingering;
+          if (["start", "stop"].includes(note.pedal)) outNote.pedal = note.pedal;
+        }
+        if (Number(note.tuplet) === 3) outNote.tuplet = 3;
         return outNote;
-      });
+      };
+      outMeasure.notes = musicStaffNotes(measure, "treble").map(serializeNote);
+      const voice2Notes = musicVoiceNotes(measure, "treble", 2);
+      if (voice2Notes.length) outMeasure.voice2Notes = voice2Notes.map(serializeNote);
+      const bassNotes = musicStaffNotes(measure, "bass");
+      if (model.grandStaff === true || bassNotes.length) outMeasure.bassNotes = bassNotes.map(serializeNote);
+      const bassVoice2Notes = musicVoiceNotes(measure, "bass", 2);
+      if (bassVoice2Notes.length) outMeasure.bassVoice2Notes = bassVoice2Notes.map(serializeNote);
       return outMeasure;
     })
   };

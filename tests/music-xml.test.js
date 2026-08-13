@@ -70,7 +70,7 @@ test("단선율 msheet를 표준 score-partwise MusicXML로 내보낸다", () =>
   assert.match(xml, /<print new-system="yes"\/>/);
 });
 
-test("가져오기 제한을 명시하고 지원 길이는 msheet 길이로 정규화한다", () => {
+test("가져오기는 각 오선의 두 성부를 고르고 지원 길이를 정규화한다", () => {
   const api = loadMusicXmlApi();
   const warnings = new Set();
   assert.deepEqual(
@@ -78,9 +78,55 @@ test("가져오기 제한을 명시하고 지원 길이는 msheet 길이로 정�
     { value:"quarter", dots:2 }
   );
   assert.match(xmlSource, /여러 파트 중 첫 번째 파트만 가져왔어요/);
-  assert.match(xmlSource, /화음은 가장 먼저 나온 음만 가져왔어요/);
-  assert.match(xmlSource, /여러 성부 중 첫 번째 성부만 가져왔어요/);
-  assert.match(xmlSource, /붙임줄은 개별 음표로 가져왔어요/);
+  assert.match(xmlSource, /각 오선의 성부는 두 개까지만 가져왔어요/);
+  assert.match(xmlSource, /musicVoiceNotes\(measure, staff, editorVoice\)/);
+  assert.match(xmlSource, /musicAddChordPitch\(lastNote\[voiceKey\], pitch\)/);
+  assert.match(xmlSource, /if \(tieStart\) lastNote\[voiceKey\]\.tieToNext = true/);
+});
+
+test("두 성부·표현 기호·반복·중간 설정을 MusicXML로 내보낸다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("확장 악보");
+  sheet.measures = [api.musicMeasure([
+    api.musicNote("C", 4, { value:"eighth", tuplet:3, slurToNext:true, lyric:"봄",
+      dynamic:"mf", articulation:"staccato", fingering:1, pedal:"start" }),
+    api.musicNote("D", 4, { value:"eighth", tuplet:3 }),
+    api.musicNote("E", 4, { value:"eighth", tuplet:3 })
+  ], { voice2Notes:[api.musicNote("G", 3, { value:"half" })], repeatStart:true, repeatEnd:true, ending:1,
+    pickupTicks:480, timeChange:{ beats:3, beatValue:4 }, keyChange:"G", tempoChange:90 })];
+  const xml = api.musicSerializeXml(sheet);
+  assert.match(xml, /<measure number="1" implicit="yes">/);
+  assert.match(xml, /<voice>2<\/voice>/);
+  assert.match(xml, /<actual-notes>3<\/actual-notes>/);
+  assert.match(xml, /<slur type="start"/);
+  assert.match(xml, /<lyric><text>봄<\/text><\/lyric>/);
+  assert.match(xml, /<dynamics><mf\/><\/dynamics>/);
+  assert.match(xml, /<articulations><staccato\/><\/articulations>/);
+  assert.match(xml, /<fingering>1<\/fingering>/);
+  assert.match(xml, /<pedal type="start"\/>/);
+  assert.match(xml, /<repeat direction="forward"\/>/);
+  assert.match(xml, /<ending number="1" type="start"\/>/);
+});
+
+test("피아노 대보표·화음·붙임줄·코드 기호를 MusicXML로 내보낸다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("피아노");
+  sheet.grandStaff = true;
+  sheet.key = "Cm";
+  sheet.measures = [api.musicMeasure([
+    api.musicNote("C", 4, { value:"half", chordSymbol:"Cm7", tieToNext:true,
+      chord:[{ step:"E", octave:4, alter:-1 }, { step:"G", octave:4, alter:0 }] }),
+    api.musicNote("C", 4, { value:"half", chord:[{ step:"E", octave:4, alter:-1 }, { step:"G", octave:4, alter:0 }] })
+  ], { bassNotes:[api.musicNote("C", 3, { value:"whole" })] })];
+  const xml = api.musicSerializeXml(sheet);
+  assert.match(xml, /<fifths>-3<\/fifths><mode>minor<\/mode>/);
+  assert.match(xml, /<staves>2<\/staves>/);
+  assert.match(xml, /<clef number="2"><sign>F<\/sign><line>4<\/line><\/clef>/);
+  assert.match(xml, /<kind text="Cm7">other<\/kind>/);
+  assert.equal((xml.match(/<chord\/>/g) || []).length, 4);
+  assert.match(xml, /<tie type="start"\/>/);
+  assert.match(xml, /<tie type="stop"\/>/);
+  assert.match(xml, /<backup>[\s\S]*<staff>2<\/staff>/);
 });
 
 test("편집기에서 MusicXML 내려받기 버튼을 제공한다", () => {

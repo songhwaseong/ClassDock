@@ -139,6 +139,29 @@ test("아주 짧은 음표에서도 엔벨로프가 음 길이를 넘지 않는�
   assert.ok(ctx.oscillators[1].startedAt > ctx.oscillators[0].startedAt);
 });
 
+test("메트로놈은 첫 박을 더 높고 크게 예약한다", () => {
+  const api = loadMusicAudio();
+  const ctx = fakeContext();
+  const accent = api.MNMusicAudio.scheduleMetronomeClick(ctx, {}, 2, true);
+  const plain = api.MNMusicAudio.scheduleMetronomeClick(ctx, {}, 3, false);
+  assert.equal(ctx.oscillators[0].startedAt, 2);
+  assert.equal(ctx.oscillators[1].startedAt, 3);
+  assert.ok(ctx.oscillators[0].frequencyAt[0].value > ctx.oscillators[1].frequencyAt[0].value);
+  assert.ok(ctx.gains[0].envelope[1].value > ctx.gains[1].envelope[1].value);
+  assert.ok(accent.stopAt < plain.stopAt || accent.stopAt === 2.05);
+});
+
+test("악보 음량과 음소거 상태는 안전한 범위에서 바뀐다", () => {
+  const api = loadMusicAudio();
+  assert.equal(api.MNMusicAudio.getVolume(), 1);
+  assert.equal(api.MNMusicAudio.setVolume(0.45), 0.45);
+  assert.equal(api.MNMusicAudio.setVolume(2), 1);
+  assert.equal(api.MNMusicAudio.setVolume(-1), 0);
+  assert.equal(api.MNMusicAudio.setMuted(true), true);
+  assert.equal(api.MNMusicAudio.muted(), true);
+  assert.equal(api.MNMusicAudio.setMuted(false), false);
+});
+
 test("피아노 음색은 가까운 실제 녹음을 골라 재생 속도로 음높이를 맞춘다", () => {
   const api = loadMusicAudio();
   const sheet = api.musicEmpty("피아노 샘플");
@@ -203,6 +226,40 @@ test("번들 나일론 기타는 악보 음역을 덮는 10개 녹음과 출처 
   const attribution = fs.readFileSync(path.join(__dirname, "../src/assets/guitar-nylon/ATTRIBUTION.md"), "utf8");
   assert.match(attribution, /CC BY 3\.0|Attribution 3\.0/);
   assert.match(attribution, /11573__quartertone__classicalguitar-multisampled/);
+});
+
+test("실로폰·하프·플루트·클라리넷 샘플과 출처 표기를 함께 번들한다", () => {
+  const api = loadMusicAudio();
+  const instruments = [
+    ["xylophone", api.MNMusicAudio.XYLOPHONE_SAMPLE_ROOTS, 4],
+    ["harp", api.MNMusicAudio.HARP_SAMPLE_ROOTS, 10],
+    ["flute", api.MNMusicAudio.FLUTE_SAMPLE_ROOTS, 7],
+    ["clarinet", api.MNMusicAudio.CLARINET_SAMPLE_ROOTS, 8]
+  ];
+  for (const [name, roots, count] of instruments){
+    assert.equal(roots.length, count);
+    assert.equal(api.MNMusicAudio.sampledTimbre(name), true);
+    for (const sample of roots){
+      const fullPath = path.join(__dirname, "../src/assets", name, sample.file);
+      assert.ok(fs.statSync(fullPath).size > 30_000, `${name}/${sample.file} 녹음이 있어야 한다`);
+    }
+    const attribution = fs.readFileSync(path.join(__dirname, "../src/assets", name, "ATTRIBUTION.md"), "utf8");
+    assert.match(attribution, /CC BY 3\.0|Attribution 3\.0/);
+  }
+});
+
+test("플루트와 클라리넷은 안정 구간을 반복하고 음 끝에서 릴리스한다", () => {
+  const api = loadMusicAudio();
+  const ctx = fakeContext();
+  const buffers = [{ midi:60, file:"C4.mp3", buffer:{ name:"C4", duration:5 } }];
+  const events = [{ rest:false, frequency:261.626, midi:60, start:0, duration:6 }];
+  const [node] = api.MNMusicAudio.scheduleInto(ctx, {}, events, 0, "flute", buffers);
+  const source = ctx.bufferSources[0];
+  assert.equal(source.loop, true);
+  assert.equal(source.loopStart, 0.7);
+  assert.equal(source.loopEnd, 4.6);
+  assert.ok(node.stopAt > 6);
+  assert.equal(ctx.gains[0].envelope.at(-1).value, 0);
 });
 
 test("WAV 인코더는 규격대로 44바이트 헤더와 16bit 샘플을 쓴다", () => {

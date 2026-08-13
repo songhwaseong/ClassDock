@@ -812,17 +812,33 @@
     padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
   .music-btn:hover:not(:disabled),.music-save:hover{background:var(--panel-hover);border-color:var(--accent)}
   .music-btn:disabled{opacity:.4;cursor:not-allowed}
+  .music-btn.music-reset{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 38%,var(--border))}
+  .music-btn.music-reset:hover:not(:disabled){color:#fff;background:var(--danger);border-color:var(--danger)}
   .music-save{font-weight:600;margin-left:auto}
   .music-status{font-size:12px;color:var(--muted);margin-left:auto}
+  .music-volume{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .music-volume .music-btn{min-width:34px;padding:6px}
+  .music-volume-range{width:86px;accent-color:var(--accent);cursor:pointer}
+  .music-volume-label{width:34px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
   .music-zoom{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}
   .music-zoom .music-btn{min-width:30px;padding:6px 8px}
   .music-zoom-label{min-width:46px;text-align:center;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
   .music-notice{padding:6px 12px;font-size:12px;background:color-mix(in srgb,var(--warn,#d98324) 16%,transparent);
     color:var(--ink);border-bottom:1px solid var(--border)}
-  .music-score{flex:1;min-height:0;overflow:auto;padding:12px;background:#fff}
+  .music-score-workspace{display:flex;flex:1;min-height:0;overflow:hidden;background:#fff}
+  .music-score{flex:1;min-width:0;min-height:0;overflow:auto;padding:12px;background:#fff}
+  .music-image-reference{display:flex;flex:0 0 min(38%,520px);min-width:240px;min-height:0;flex-direction:column;
+    border-right:1px solid var(--border);background:var(--panel);color:var(--ink)}
+  .music-image-reference[hidden]{display:none}
+  .music-image-reference-controls{display:flex;align-items:center;gap:8px;padding:7px;border-bottom:1px solid var(--border)}
+  .music-image-reference-controls strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .music-image-reference-controls input{min-width:70px;flex:1;accent-color:var(--accent)}
+  .music-image-reference-viewport{flex:1;min-height:0;overflow:auto;padding:8px;background:#e5e7eb}
+  .music-image-reference-viewport img{display:block;width:100%;max-width:none;height:auto;margin:0 auto;background:#fff}
   /* VexFlow 는 검은 잉크로 그린다. 어두운 주제에서도 악보는 흰 종이 위에 두어 대비를 지킨다. */
   .music-score svg{display:block;margin:0 auto}
   .music-score.is-note-entry{cursor:crosshair}
+  .music-score.is-chord-entry{cursor:cell}
   .music-score.is-invalid-entry{cursor:not-allowed}
   .music-score.is-pan-ready{cursor:grab}
   .music-score.is-panning,.music-score.is-panning *{cursor:grabbing!important;user-select:none!important}
@@ -836,6 +852,15 @@
     fill:#2563eb;stroke:none;cursor:pointer;user-select:none}
   .music-solfege.is-playing{fill:var(--accent)}
   .music-solfege.is-selected{fill:#c2410c}
+  .music-chord-symbol{font-family:"Noto Sans KR","Malgun Gothic",sans-serif;font-size:14px;font-weight:700;
+    font-style:italic;fill:#111;stroke:none;cursor:pointer;user-select:none}
+  .music-chord-symbol.is-playing{fill:var(--accent)}
+  .music-chord-symbol.is-selected{fill:#c2410c}
+  .music-notation,.music-measure-setting{font-family:"Noto Sans KR","Malgun Gothic",sans-serif;fill:#111;stroke:none;cursor:pointer;user-select:none}
+  .music-lyric{font-size:13px}.music-dynamic{font-size:15px;font-weight:700}.music-fingering{font-size:12px;font-weight:700}
+  .music-articulation{font-size:16px;font-weight:800}.music-pedal{font-size:13px}.music-measure-setting{font-size:11px;font-weight:700}
+  .music-notation.is-selected{fill:#c2410c}.music-notation.is-playing{fill:var(--accent)}
+  .music-slur{fill:none;stroke:#111;stroke-width:1.4;stroke-linecap:round;pointer-events:none}
   .music-score.is-note-entry [data-note-id]:not(.is-rest){cursor:ns-resize}
   .music-note:hover{opacity:.65}
   .music-note.is-playing path,.music-note.is-playing rect,.music-note.is-playing text{fill:var(--accent);stroke:var(--accent)}
@@ -846,11 +871,20 @@
   /* 도구상자 */
   .music-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}
+  .music-beginner-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 12px;
+    border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 5%,var(--panel));font-size:12px}
+  .music-beginner-tools>strong{color:var(--accent);white-space:nowrap}
+  .music-easy-notes .music-btn{min-width:42px;min-height:36px;padding:7px 12px;font-size:14px;font-weight:700}
+  .music-easy-help{color:var(--muted);font-size:11.5px}
   .music-group{display:flex;gap:2px}
   .music-group .music-btn{border-radius:0;margin-left:-1px}
   .music-group .music-btn:first-child{border-radius:7px 0 0 7px;margin-left:0}
   .music-group .music-btn:last-child{border-radius:0 7px 7px 0}
   .music-btn.is-on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .music-measure-progress{font-size:11.5px;color:var(--muted);padding:4px 8px;border-radius:999px;
+    background:color-mix(in srgb,var(--accent) 8%,var(--field));font-variant-numeric:tabular-nums;white-space:nowrap}
+  .music-measure-progress.is-complete{color:#166534;background:color-mix(in srgb,#22c55e 18%,var(--field));font-weight:700}
+  .music-measure-progress.is-over{color:#b91c1c;background:color-mix(in srgb,#ef4444 16%,var(--field));font-weight:700}
   .music-hint{font-size:11.5px;color:var(--muted);margin-left:auto}
   .music-hover-readout{flex:1 1 250px;min-width:220px;text-align:right;font-variant-numeric:tabular-nums}
   .music-history{display:flex;gap:2px}
@@ -868,6 +902,10 @@
   .music-context-menu button.is-active::before{content:"✓";width:17px;color:var(--accent);font-weight:800}
   .music-context-menu button.music-context-parent::after{content:"▸";margin-left:auto;padding-left:18px;opacity:.55}
   .music-context-sep{height:1px;margin:4px 3px;background:var(--border)}
+  @media(max-width:760px){
+    .music-score-workspace{flex-direction:column}
+    .music-image-reference{flex:0 0 38%;min-width:0;border-right:0;border-bottom:1px solid var(--border)}
+  }
   @media(max-width:600px),(max-height:520px){
     .scratchpad,.image-memo{left:6px!important;top:6px!important;transform:none!important;
       width:calc(100vw - 12px)!important;height:calc(100vh - 12px)!important;

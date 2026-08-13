@@ -13,14 +13,16 @@ function loadMusic(){
   const source = fs.readFileSync(path.join(__dirname, "../src/js/music-model.js"), "utf8");
   vm.runInContext(source + `
     ;globalThis.__music = {
-      musicEmpty, musicNote, musicRest, musicMeasure, musicParse, musicSerialize,
-      musicNoteTicks, musicMeasureTicks, musicMeasureUsedTicks, musicValidate, musicCanFit,
+      musicEmpty, musicExampleSheet, musicNote, musicRest, musicMeasure, musicParse, musicSerialize,
+      musicNoteTicks, musicMeasureTicks, musicMeasureUsedTicks, musicValidate, musicCanFit, musicMeasureProgress,
       musicMidiNumber, musicFrequency, musicNoteFrequency, musicNoteName,
       musicVexNote, musicTimeline, MUSIC_TICKS_PER_QUARTER,
       musicDiatonicValue, musicPitchFromDiatonic, musicPitchFromStaveLine,
       musicStaveLineForNote, musicShiftPitch, musicMidiInRange,
+      musicNotePitches, musicAddChordPitch, musicRemoveChordPitch, musicPitchKey, musicStaffNotes,
+      musicVoiceNotes, musicEffectiveMeasureSettings, musicMeasureCapacity, musicPlaybackMeasureIndexes,
       musicRetuneForKey, musicPackLines, musicBarWidthHint,
-      musicClampXOffset, MUSIC_X_OFFSET_MAX
+      musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS
     };`, context);
   return context.__music;
 }
@@ -63,6 +65,47 @@ test(".msheet는 같은 모델을 항상 같은 JSON으로 직렬화하고 그�
   assert.equal(api.musicSerialize(reopened), first);
 });
 
+test("두 성부와 표현 기호는 저장 후에도 독립적으로 유지된다", () => {
+  const api = loadMusic();
+  const first = api.musicNote("C", 4, { slurToNext:true, lyric:"봄", dynamic:"mf",
+    articulation:"staccato", fingering:1, pedal:"start", tuplet:3 });
+  const secondVoice = api.musicNote("E", 4, { value:"half" });
+  const sheet = api.musicEmpty("두 성부");
+  sheet.measures = [api.musicMeasure([first], { voice2Notes:[secondVoice], repeatStart:true,
+    repeatEnd:true, ending:1 })];
+  const reopened = api.musicParse(api.musicSerialize(sheet));
+  assert.equal(reopened.measures[0].notes[0].lyric, "봄");
+  assert.equal(reopened.measures[0].notes[0].dynamic, "mf");
+  assert.equal(reopened.measures[0].notes[0].articulation, "staccato");
+  assert.equal(reopened.measures[0].notes[0].tuplet, 3);
+  assert.equal(reopened.measures[0].voice2Notes[0].step, "E");
+  assert.equal(reopened.measures[0].ending, 1);
+  assert.equal(api.musicNoteTicks(reopened.measures[0].notes[0]), 320);
+});
+
+test("반복선과 1·2번 괄호는 재생 순서를 만든다", () => {
+  const api = loadMusic();
+  const measures = [
+    api.musicMeasure([], { repeatStart:true }),
+    api.musicMeasure([], { repeatEnd:true, ending:1 }),
+    api.musicMeasure([], { ending:2 })
+  ];
+  assert.deepEqual(Array.from(api.musicPlaybackMeasureIndexes(measures, 0, 2, true)), [0, 1, 0, 2]);
+});
+
+test("못갖춘마디와 중간 박자·조표·빠르기 변경은 마디별로 계산된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("변경");
+  sheet.measures = [
+    api.musicMeasure([api.musicNote("C", 4)], { pickupTicks:480 }),
+    api.musicMeasure([api.musicNote("D", 4)], { timeChange:{ beats:3, beatValue:4 }, keyChange:"G", tempoChange:60 })
+  ];
+  assert.equal(api.musicMeasureCapacity(sheet, 0), 480);
+  assert.equal(api.musicMeasureCapacity(sheet, 1), 1440);
+  assert.equal(api.musicEffectiveMeasureSettings(sheet, 1).key, "G");
+  assert.equal(api.musicTimeline(sheet).totalSeconds, 3.6);
+});
+
 test("새 악보와 v1 기본 삼각파 악보는 실제 피아노 음색을 기본으로 쓴다", () => {
   const api = loadMusic();
   assert.equal(api.musicEmpty("피아노").timbre, "piano");
@@ -75,6 +118,25 @@ test("새 악보와 v1 기본 삼각파 악보는 실제 피아노 음색을 기
   legacy.version = 2;
   legacy.timbre = "guitar";
   assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, "guitar");
+  for (const timbre of ["xylophone", "harp", "flute", "clarinet"]){
+    legacy.timbre = timbre;
+    assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, timbre);
+  }
+});
+
+test("학생용 예제 악보는 완성된 4마디와 안정된 제목·빠르기를 제공한다", () => {
+  const api = loadMusic();
+  const school = api.musicExampleSheet("school-bell");
+  const twinkle = api.musicExampleSheet("twinkle");
+  assert.equal(school.title, "학교종");
+  assert.equal(school.measures.length, 4);
+  assert.equal(school.tempo, 100);
+  assert.equal(twinkle.title, "작은별");
+  assert.equal(twinkle.measures.length, 4);
+  assert.equal(twinkle.tempo, 90);
+  assert.equal(api.musicValidate(school).ok, true);
+  assert.equal(api.musicValidate(twinkle).ok, true);
+  assert.equal(api.musicExampleSheet("unknown"), null);
 });
 
 test("계이름 노출 여부는 새 악보에서 켜지고 .msheet에 저장·복원된다", () => {
@@ -185,6 +247,50 @@ test("임시표는 조표와 다를 때만 그린다", () => {
   assert.equal(rest.keys.join(","), "b/4");
 });
 
+test("화음과 피아노 대보표는 저장·조판·재생에서 동시에 유지된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("피아노 화음");
+  sheet.grandStaff = true;
+  const chord = api.musicNote("C", 4, { value:"half", chordSymbol:"Cm7", tieToNext:true,
+    chord:[{ step:"E", octave:4, alter:-1 }, { step:"G", octave:4, alter:0 }] });
+  sheet.measures = [api.musicMeasure([
+    chord, api.musicNote("C", 4, { value:"half", chord:[{ step:"E", octave:4, alter:-1 }, { step:"G", octave:4, alter:0 }] })
+  ], { bassNotes:[api.musicNote("C", 3, { value:"whole" })] })];
+
+  const vex = api.musicVexNote(chord, "Cm", "treble");
+  assert.equal(vex.keys.join(","), "c/4,eb/4,g/4");
+  assert.equal(vex.accidentals.filter(Boolean).length, 0);
+  assert.equal(api.musicMeasureUsedTicks(sheet.measures[0], "bass"), 1920);
+  assert.equal(api.musicValidate(sheet).ok, true);
+
+  const timeline = api.musicTimeline(sheet);
+  assert.equal(timeline.events.filter((event) => event.staff === "treble").length, 3,
+    "붙임줄로 이어진 세 화음음은 각각 한 이벤트여야 한다");
+  assert.equal(timeline.events.filter((event) => event.staff === "bass").length, 1);
+  assert.ok(timeline.events.filter((event) => event.staff === "treble").every((event) => round3(event.duration) === 2.4));
+  assert.ok(api.musicTimeline(sheet, { staff:"treble" }).events.every((event) => event.staff === "treble"));
+  assert.ok(api.musicTimeline(sheet, { staff:"bass" }).events.every((event) => event.staff === "bass"));
+
+  const reopened = api.musicParse(api.musicSerialize(sheet));
+  assert.equal(reopened.grandStaff, true);
+  assert.equal(reopened.measures[0].bassNotes[0].step, "C");
+  assert.equal(reopened.measures[0].notes[0].chord.length, 2);
+  assert.equal(reopened.measures[0].notes[0].tieToNext, true);
+  assert.equal(reopened.measures[0].notes[0].chordSymbol, "Cm7");
+});
+
+test("장·단조 조표는 임시표 일곱 개 범위와 낮은음자리표 입력을 지원한다", () => {
+  const api = loadMusic();
+  assert.equal(Object.keys(api.MUSIC_KEYS).length, 30);
+  assert.equal(api.MUSIC_KEYS.Eb.fifths, -3);
+  assert.equal(api.MUSIC_KEYS.Cm.fifths, -3);
+  assert.equal(api.MUSIC_KEYS["C#"].fifths, 7);
+  assert.equal(api.musicPitchFromStaveLine(0, "bass").step + api.musicPitchFromStaveLine(0, "bass").octave, "A3");
+  assert.equal(api.musicStaveLineForNote(api.musicNote("F", 2), "bass"), 4.5);
+  assert.equal(api.musicMidiInRange(36, "bass"), true);
+  assert.equal(api.musicMidiInRange(35, "bass"), false);
+});
+
 test("마디 채움 검사는 넘침과 덜 참을 가려낸다", () => {
   const api = loadMusic();
   const sheet = schoolBell(api);
@@ -217,6 +323,21 @@ test("마디 채움 검사는 넘침과 덜 참을 가려낸다", () => {
   assert.equal(api.musicCanFit(sheet, 1, api.musicNote("G", 4)), true);
 });
 
+test("마디 진행 상태는 사용·남은·초과 박자를 학생용 값으로 계산한다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("박자 안내");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4), api.musicNote("D", 4)])];
+  let progress = api.musicMeasureProgress(sheet, 0);
+  assert.equal(progress.usedBeats, 2);
+  assert.equal(progress.expectedBeats, 4);
+  assert.equal(progress.remainingBeats, 2);
+  assert.equal(progress.complete, false);
+  sheet.measures[0].notes.push(api.musicNote("E", 4, { value:"half" }));
+  progress = api.musicMeasureProgress(sheet, 0);
+  assert.equal(progress.complete, true);
+  assert.equal(progress.remainingBeats, 0);
+});
+
 test("타임라인은 마디를 초로 펼치고, 부분 재생은 0초부터 다시 센다", () => {
   const api = loadMusic();
   const sheet = schoolBell(api);   // ♩=100 → 4분음표 0.6초, 한 마디 2.4초
@@ -243,6 +364,18 @@ test("타임라인은 마디를 초로 펼치고, 부분 재생은 0초부터 �
   // 빠르기를 두 배로 하면 전체 길이는 절반이 된다.
   sheet.tempo = 200;
   assert.equal(round3(api.musicTimeline(sheet).totalSeconds), 4.8);
+});
+
+test("연습 재생 속도는 음높이는 그대로 두고 시간만 늘이거나 줄인다", () => {
+  const api = loadMusic();
+  const sheet = schoolBell(api);
+  const normal = api.musicTimeline(sheet);
+  const slow = api.musicTimeline(sheet, { playbackRate:0.5 });
+  const quick = api.musicTimeline(sheet, { playbackRate:0.75 });
+  assert.equal(slow.playbackRate, 0.5);
+  assert.equal(slow.totalSeconds, normal.totalSeconds * 2);
+  assert.ok(Math.abs(quick.totalSeconds - normal.totalSeconds / 0.75) < 1e-9);
+  assert.equal(slow.events[0].frequency, normal.events[0].frequency);
 });
 
 test("덜 찬 마디도 마디 길이만큼 시간이 흐른다", () => {

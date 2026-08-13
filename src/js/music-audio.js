@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== .msheet 악보 — 소리 엔진 (P0) =====
-   실제 피아노·나일론 기타 샘플 + 오실레이터 신디사이저 + 예약 재생 + WAV 저장.
+   실제 악기 샘플 + 오실레이터 신디사이저 + 예약 재생 + WAV 저장.
 
    설계의 핵심 두 가지(docs/악보-설계.md §5):
    1) setTimeout 으로 음을 울리지 않는다. AudioContext.currentTime 기준으로 25ms마다 200ms 앞을
@@ -23,6 +23,29 @@ const MNMusicAudio = (() => {
   const GUITAR_GAIN = 0.9;
   const GUITAR_ATTACK = 0.003;
   const GUITAR_RELEASE = 0.18;
+  const XYLOPHONE_SAMPLE_ROOTS = Object.freeze([
+    { midi:67, file:"G4.mp3" }, { midi:72, file:"C5.mp3" },
+    { midi:79, file:"G5.mp3" }, { midi:84, file:"C6.mp3" }
+  ]);
+  const HARP_SAMPLE_ROOTS = Object.freeze([
+    { midi:55, file:"G3.mp3" }, { midi:59, file:"B3.mp3" },
+    { midi:62, file:"D4.mp3" }, { midi:65, file:"F4.mp3" },
+    { midi:69, file:"A4.mp3" }, { midi:72, file:"C5.mp3" },
+    { midi:76, file:"E5.mp3" }, { midi:79, file:"G5.mp3" },
+    { midi:83, file:"B5.mp3" }, { midi:86, file:"D6.mp3" }
+  ]);
+  const FLUTE_SAMPLE_ROOTS = Object.freeze([
+    { midi:60, file:"C4.mp3" }, { midi:64, file:"E4.mp3" },
+    { midi:69, file:"A4.mp3" }, { midi:72, file:"C5.mp3" },
+    { midi:76, file:"E5.mp3" }, { midi:81, file:"A5.mp3" },
+    { midi:84, file:"C6.mp3" }
+  ]);
+  const CLARINET_SAMPLE_ROOTS = Object.freeze([
+    { midi:58, file:"As3.mp3" }, { midi:62, file:"D4.mp3" },
+    { midi:65, file:"F4.mp3" },  { midi:70, file:"As4.mp3" },
+    { midi:74, file:"D5.mp3" },  { midi:77, file:"F5.mp3" },
+    { midi:82, file:"As5.mp3" }, { midi:86, file:"D6.mp3" }
+  ]);
   // 앱의 G3~C6 음역을 단3도 간격 실제 녹음으로 덮는다. 사이는 재생 속도로 최대 2반음만 옮긴다.
   const PIANO_SAMPLE_ROOTS = Object.freeze([
     { midi:56, file:"Gs3.mp3" }, { midi:60, file:"C4.mp3" },
@@ -47,23 +70,44 @@ const MNMusicAudio = (() => {
     guitar:{
       label:"기타", roots:GUITAR_SAMPLE_ROOTS, path:"src/assets/guitar-nylon/",
       registryId:"mnGuitarSamples", gain:GUITAR_GAIN, attack:GUITAR_ATTACK, release:GUITAR_RELEASE
+    },
+    xylophone:{
+      label:"실로폰", roots:XYLOPHONE_SAMPLE_ROOTS, path:"src/assets/xylophone/",
+      registryId:"mnXylophoneSamples", gain:0.72, attack:0.002, release:0.16
+    },
+    harp:{
+      label:"하프", roots:HARP_SAMPLE_ROOTS, path:"src/assets/harp/",
+      registryId:"mnHarpSamples", gain:0.78, attack:0.003, release:0.3
+    },
+    flute:{
+      label:"플루트", roots:FLUTE_SAMPLE_ROOTS, path:"src/assets/flute/",
+      registryId:"mnFluteSamples", gain:0.72, attack:0.025, release:0.16,
+      sustainLoop:{ start:0.7, endPadding:0.4 }
+    },
+    clarinet:{
+      label:"클라리넷", roots:CLARINET_SAMPLE_ROOTS, path:"src/assets/clarinet/",
+      registryId:"mnClarinetSamples", gain:0.68, attack:0.022, release:0.18,
+      sustainLoop:{ start:0.7, endPadding:0.4 }
     }
   });
   const RENDER_SAMPLE_RATE = 44100;
   const LOOKAHEAD_SEC = 0.2;         // 얼마나 앞을 미리 예약할지
   const TIMER_MS = 25;               // 예약 타이머 주기
   const START_DELAY = 0.08;          // 첫 음까지의 여유(예약이 늦어 첫 음이 잘리는 것 방지)
-  const TAIL_SEC = Math.max(ADSR.release, PIANO_RELEASE, GUITAR_RELEASE) + 0.4; // 마지막 음의 여운까지 담을 꼬리
+  const TAIL_SEC = Math.max(ADSR.release,
+    ...Object.values(SAMPLE_INSTRUMENTS).map((spec) => spec.release)) + 0.4; // 마지막 음의 여운까지 담을 꼬리
   const PREVIEW_SEC = 0.45;          // 음표 하나 눌렀을 때 들려줄 길이
   const MIN_NOTE_SEC = 0.03;
 
   let ctx = null;          // 실시간 컨텍스트(첫 소리 요청 때 만든다)
   let master = null;
+  let outputVolume = 1;
+  let outputMuted = false;
   let live = null;         // 재생 중 상태
   let playRequest = 0;     // 샘플 로딩 중 정지를 눌렀을 때 뒤늦게 재생되지 않게 한다
   let previewRequest = 0;
-  const sampleBufferPromises = { piano:null, guitar:null };
-  const sampleRegistryCaches = { piano:null, guitar:null };
+  const sampleBufferPromises = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
+  const sampleRegistryCaches = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
 
   function contextClass(){
     if (typeof AudioContext !== "undefined") return AudioContext;
@@ -81,6 +125,20 @@ const MNMusicAudio = (() => {
     return !!contextClass();
   }
 
+  function applyMasterVolume(){
+    if (master) master.gain.value = MASTER_GAIN * (outputMuted ? 0 : outputVolume);
+  }
+
+  function setVolume(value){
+    outputVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    applyMasterVolume();
+    return outputVolume;
+  }
+
+  function getVolume(){ return outputVolume; }
+  function setMuted(muted){ outputMuted = !!muted; applyMasterVolume(); return outputMuted; }
+  function muted(){ return outputMuted; }
+
   // 문서를 여는 것만으로는 만들지 않는다. 브라우저 자동재생 정책 때문에
   // 반드시 사용자 제스처(클릭) 안에서 불려야 소리가 난다.
   function ensureContext(){
@@ -89,7 +147,7 @@ const MNMusicAudio = (() => {
     if (!ctx){
       ctx = new Ctor();
       master = ctx.createGain();
-      master.gain.value = MASTER_GAIN;
+      applyMasterVolume();
       master.connect(ctx.destination);
     }
     if (ctx.state === "suspended" && typeof ctx.resume === "function"){
@@ -151,13 +209,14 @@ const MNMusicAudio = (() => {
 
   const ensurePianoBuffers = (target) => ensureSampleBuffers(target, "piano");
   const ensureGuitarBuffers = (target) => ensureSampleBuffers(target, "guitar");
+  const sampledTimbre = (name) => !!SAMPLE_INSTRUMENTS[name];
 
   /* 음 하나를 예약한다. start·duration 은 그 컨텍스트의 시간(초).
      짧은 음(빠른 16분음표)에서도 엔벨로프가 음 길이를 넘지 않도록 각 구간을 끝 시각으로 자른다. */
-  function scheduleNote(target, destination, frequency, start, duration, timbre){
+  function scheduleNote(target, destination, frequency, start, duration, timbre, level){
     const requested = timbreOf(timbre);
     const type = SAMPLE_INSTRUMENTS[requested] ? "triangle" : requested;
-    const peak = TIMBRE_GAIN[type];
+    const peak = TIMBRE_GAIN[type] * Math.max(0.1, Math.min(1.3, Number(level) || 1));
     const end = start + Math.max(MIN_NOTE_SEC, duration);
     const attackEnd = Math.min(start + ADSR.attack, end);
     const decayEnd = Math.min(attackEnd + ADSR.decay, end);
@@ -181,6 +240,22 @@ const MNMusicAudio = (() => {
     return { source:osc, osc, gain, stopAt };
   }
 
+  function scheduleMetronomeClick(target, destination, start, accented){
+    const osc = target.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(accented ? 1500 : 1050, start);
+    const gain = target.createGain();
+    const peak = accented ? 0.34 : 0.22;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(peak, start + 0.002);
+    gain.gain.linearRampToValueAtTime(0, start + 0.045);
+    osc.connect(gain);
+    gain.connect(destination);
+    osc.start(start);
+    osc.stop(start + 0.05);
+    return { source:osc, osc, gain, stopAt:start + 0.05 };
+  }
+
   function nearestSample(midi, buffers){
     let best = null;
     for (const sample of (buffers || [])){
@@ -190,7 +265,7 @@ const MNMusicAudio = (() => {
     return best;
   }
 
-  function scheduleSampleNote(target, destination, midi, start, duration, buffers, timbre){
+  function scheduleSampleNote(target, destination, midi, start, duration, buffers, timbre, level){
     const spec = SAMPLE_INSTRUMENTS[timbre] || SAMPLE_INSTRUMENTS.piano;
     const sample = nearestSample(midi, buffers);
     if (!sample) return null;
@@ -199,12 +274,25 @@ const MNMusicAudio = (() => {
     const stopAt = end + spec.release;
     const source = target.createBufferSource();
     source.buffer = sample.buffer;
-    source.playbackRate.setValueAtTime(Math.pow(2, (midi - sample.midi) / 12), start);
+    const playbackRate = Math.pow(2, (midi - sample.midi) / 12);
+    source.playbackRate.setValueAtTime(playbackRate, start);
+    // 관악기는 녹음의 안정 구간을 반복해 아주 느린 온음표도 중간에 끊기지 않게 한다.
+    // 짧은 음은 loopEnd 전에 정지하므로 원래 어택과 음색을 그대로 듣는다.
+    if (spec.sustainLoop && sample.buffer && Number.isFinite(sample.buffer.duration)){
+      const loopStart = spec.sustainLoop.start;
+      const loopEnd = sample.buffer.duration - spec.sustainLoop.endPadding;
+      if (loopEnd > loopStart + 0.12){
+        source.loop = true;
+        source.loopStart = loopStart;
+        source.loopEnd = loopEnd;
+      }
+    }
 
     const gain = target.createGain();
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(spec.gain, attackEnd);
-    gain.gain.setValueAtTime(spec.gain, end);
+    const peak = spec.gain * Math.max(0.1, Math.min(1.3, Number(level) || 1));
+    gain.gain.linearRampToValueAtTime(peak, attackEnd);
+    gain.gain.setValueAtTime(peak, end);
     gain.gain.linearRampToValueAtTime(0, stopAt);
 
     source.connect(gain);
@@ -226,9 +314,9 @@ const MNMusicAudio = (() => {
     for (const event of (events || [])){
       if (!event || event.rest || !(event.frequency > 0)) continue;   // 쉼표는 시간만 흐른다
       const node = SAMPLE_INSTRUMENTS[type] && sampleBuffers
-        ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, sampleBuffers, type)
+        ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, sampleBuffers, type, event.gain)
         : scheduleNote(target, destination, event.frequency, offset + event.start, event.duration,
-            SAMPLE_INSTRUMENTS[type] ? "triangle" : type);
+            SAMPLE_INSTRUMENTS[type] ? "triangle" : type, event.gain);
       if (node) nodes.push(node);
     }
     return nodes;
@@ -259,6 +347,7 @@ const MNMusicAudio = (() => {
     clearTimers(state);
     if (!completed && ctx) releaseNodes(state.nodes, ctx.currentTime);
     if (typeof state.onNote === "function" && state.currentId !== null) state.onNote(null);
+    if (typeof state.onCount === "function" && state.countCurrent !== null) state.onCount(null);
     if (typeof state.onEnd === "function") state.onEnd(!!completed);
   }
 
@@ -271,7 +360,9 @@ const MNMusicAudio = (() => {
     stop();
     const request = ++playRequest;
 
-    const timeline = musicTimeline(sheet, { from:options.from, to:options.to });
+    const timeline = musicTimeline(sheet, {
+      from:options.from, to:options.to, playbackRate:options.playbackRate, staff:options.staff
+    });
     if (!timeline.events.length) return null;
     let timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
     let sampleBuffers = null;
@@ -285,13 +376,25 @@ const MNMusicAudio = (() => {
     }
     if (request !== playRequest) return null;
 
+    const beatsPerMeasure = Math.max(1, Math.round(Number(timeline.countInBeats) || 4));
+    const beatSeconds = Math.max(0.01, Number(timeline.countInBeatSeconds) || (60 / timeline.tempo));
+    const countInBeats = options.countIn ? beatsPerMeasure : 0;
+    const countInSeconds = countInBeats * beatSeconds;
+    const countStartAt = target.currentTime + START_DELAY;
     const state = {
       timeline, timbre, sampleBuffers,
-      startAt:target.currentTime + START_DELAY,
-      nodes:[], next:0, timer:0, raf:0, currentId:null,
-      onNote:options.onNote, onEnd:options.onEnd
+      startAt:countStartAt + countInSeconds,
+      countStartAt, countInBeats, countCurrent:null,
+      beatsPerMeasure, beatSeconds, metronome:!!options.metronome, loop:!!options.loop,
+      nodes:[], next:0, nextBeat:0, timer:0, raf:0, currentId:null,
+      onNote:options.onNote, onCount:options.onCount, onEnd:options.onEnd
     };
     live = state;
+
+    for (let beat = 0; beat < countInBeats; beat++){
+      state.nodes.push(scheduleMetronomeClick(target, master,
+        countStartAt + beat * beatSeconds, beat === 0));
+    }
 
     // 예약: 지금부터 LOOKAHEAD 안에 시작할 음들만 그때그때 예약한다.
     const pump = () => {
@@ -304,6 +407,12 @@ const MNMusicAudio = (() => {
             state.timbre, state.sampleBuffers));
         }
       }
+      while (state.metronome && state.nextBeat < timeline.metronome.length &&
+             timeline.metronome[state.nextBeat].start <= horizon){
+        const beat = timeline.metronome[state.nextBeat++];
+        state.nodes.push(scheduleMetronomeClick(target, master,
+          state.startAt + beat.start, beat.accented));
+      }
     };
     pump();
     state.timer = setInterval(pump, TIMER_MS);
@@ -311,8 +420,28 @@ const MNMusicAudio = (() => {
     // 강조: 오디오 시계를 보고 화면만 갱신한다.
     const follow = () => {
       if (live !== state) return;
-      const elapsed = target.currentTime - state.startAt;
-      if (elapsed >= timeline.totalSeconds){ finish(true); return; }
+      let elapsed = target.currentTime - state.startAt;
+      if (elapsed < 0 && state.countInBeats && typeof state.onCount === "function"){
+        const beat = Math.max(1, Math.min(state.countInBeats,
+          Math.floor((target.currentTime - state.countStartAt) / state.beatSeconds) + 1));
+        if (beat !== state.countCurrent){ state.countCurrent = beat; state.onCount(beat, state.countInBeats); }
+      } else if (state.countCurrent !== null && typeof state.onCount === "function"){
+        state.countCurrent = null;
+        state.onCount(null);
+      }
+      if (elapsed >= timeline.totalSeconds){
+        if (!state.loop){ finish(true); return; }
+        while (elapsed >= timeline.totalSeconds){
+          state.startAt += timeline.totalSeconds;
+          elapsed = target.currentTime - state.startAt;
+        }
+        state.nodes = state.nodes.filter((node) => node && node.stopAt > target.currentTime);
+        state.next = 0;
+        state.nextBeat = 0;
+        state.currentId = null;
+        if (typeof state.onNote === "function") state.onNote(null);
+        pump();
+      }
       if (typeof state.onNote === "function"){
         let current = null;
         for (const event of timeline.events){
@@ -327,7 +456,7 @@ const MNMusicAudio = (() => {
     };
     if (typeof requestAnimationFrame === "function") state.raf = requestAnimationFrame(follow);
 
-    return { totalSeconds:timeline.totalSeconds, stop };
+    return { totalSeconds:timeline.totalSeconds, countInSeconds, loop:state.loop, stop };
   }
 
   function stop(){
@@ -339,26 +468,31 @@ const MNMusicAudio = (() => {
     return !!live;
   }
 
-  // 음표 하나 미리듣기 — 도구상자·음표 클릭에서 쓴다.
+  // 음표 또는 화음 미리듣기 — 도구상자·음표 클릭에서 쓴다.
   function previewNote(note, timbre){
     const target = ensureContext();
     if (!target) return false;
-    const frequency = musicNoteFrequency(note);
-    if (!(frequency > 0)) return false;   // 쉼표는 소리내지 않는다
+    const pitches = typeof musicNotePitches === "function" ? musicNotePitches(note) : [note];
+    const playable = pitches.map((pitch) => ({
+      midi:musicMidiNumber(pitch), frequency:musicNoteFrequency(pitch)
+    })).filter((pitch) => pitch.midi !== null && pitch.frequency > 0);
+    if (!playable.length) return false;   // 쉼표는 소리내지 않는다
     const request = ++previewRequest;
     const type = timbreOf(timbre);
     if (SAMPLE_INSTRUMENTS[type]){
-      const midi = musicMidiNumber(note);
       ensureSampleBuffers(target, type).then((buffers) => {
         if (request !== previewRequest) return;
-        scheduleSampleNote(target, master, midi, target.currentTime + 0.005, PREVIEW_SEC, buffers, type);
+        const start = target.currentTime + 0.005;
+        for (const pitch of playable) scheduleSampleNote(target, master, pitch.midi, start, PREVIEW_SEC, buffers, type);
       }).catch((error) => {
         if (request !== previewRequest) return;
         console.warn(`${SAMPLE_INSTRUMENTS[type].label} 음원을 읽지 못해 삼각파로 미리듣습니다:`, error);
-        scheduleNote(target, master, frequency, target.currentTime + 0.005, PREVIEW_SEC, "triangle");
+        const start = target.currentTime + 0.005;
+        for (const pitch of playable) scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, "triangle");
       });
     } else {
-      scheduleNote(target, master, frequency, target.currentTime + 0.005, PREVIEW_SEC, type);
+      const start = target.currentTime + 0.005;
+      for (const pitch of playable) scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, type);
     }
     return true;
   }
@@ -438,7 +572,10 @@ const MNMusicAudio = (() => {
 
   return {
     play, stop, playing, supported, previewNote, renderWav, encodeWav, scheduleInto,
-    ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample,
-    PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, ADSR, MASTER_GAIN, PIANO_RELEASE, GUITAR_RELEASE
+    scheduleMetronomeClick, setVolume, getVolume, setMuted, muted,
+    ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
+    PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,
+    FLUTE_SAMPLE_ROOTS, CLARINET_SAMPLE_ROOTS, SAMPLE_INSTRUMENTS,
+    ADSR, MASTER_GAIN, PIANO_RELEASE, GUITAR_RELEASE
   };
 })();

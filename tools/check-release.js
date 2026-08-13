@@ -57,25 +57,24 @@ if (executableScriptSources(offline).length) fail("offline HTML contains an exte
 if (/\b(?:src|href)=["'](?:src|vendor)\//i.test(offline)) fail("offline HTML still references source or vendor files");
 if (!offline.includes("window.__MN_PYODIDE_WHEELS__")) fail("offline Pyodide wheel registry is missing");
 if (!offline.includes('id="pdfWorkerSrc"')) fail("offline PDF worker is missing");
-const pianoBlock = /<script type="application\/json" id="mnMusicSamples">([^<]+)<\/script>/.exec(offline);
-if (!pianoBlock) fail("offline piano sample registry is missing");
-let pianoRegistry;
-try { pianoRegistry = JSON.parse(pianoBlock[1]); }
-catch(_) { fail("offline piano sample registry is invalid JSON"); }
-const pianoFiles = Object.keys(pianoRegistry || {});
-if (pianoFiles.length !== 10) fail(`offline piano sample count is ${pianoFiles.length}, expected 10`);
-if (pianoFiles.some((file) => !/^data:audio\/mpeg;base64,/.test(pianoRegistry[file]))) {
-  fail("offline piano sample data is missing");
-}
-const guitarBlock = /<script type="application\/json" id="mnGuitarSamples">([^<]+)<\/script>/.exec(offline);
-if (!guitarBlock) fail("offline guitar sample registry is missing");
-let guitarRegistry;
-try { guitarRegistry = JSON.parse(guitarBlock[1]); }
-catch(_) { fail("offline guitar sample registry is invalid JSON"); }
-const guitarFiles = Object.keys(guitarRegistry || {});
-if (guitarFiles.length !== 10) fail(`offline guitar sample count is ${guitarFiles.length}, expected 10`);
-if (guitarFiles.some((file) => !/^data:audio\/mpeg;base64,/.test(guitarRegistry[file]))) {
-  fail("offline guitar sample data is missing");
+const expectedMusicSamples = {
+  mnMusicSamples:["piano", 10], mnGuitarSamples:["guitar", 10],
+  mnXylophoneSamples:["xylophone", 4], mnHarpSamples:["harp", 10],
+  mnFluteSamples:["flute", 7], mnClarinetSamples:["clarinet", 8]
+};
+for (const [id, [label, expectedCount]] of Object.entries(expectedMusicSamples)) {
+  const block = new RegExp(`<script type="application/json" id="${id}">([^<]+)<\\/script>`).exec(offline);
+  if (!block) fail(`offline ${label} sample registry is missing`);
+  let registry;
+  try { registry = JSON.parse(block[1]); }
+  catch(_) { fail(`offline ${label} sample registry is invalid JSON`); }
+  const files = Object.keys(registry || {});
+  if (files.length !== expectedCount) {
+    fail(`offline ${label} sample count is ${files.length}, expected ${expectedCount}`);
+  }
+  if (files.some((file) => !/^data:audio\/mpeg;base64,/.test(registry[file]))) {
+    fail(`offline ${label} sample data is missing`);
+  }
 }
 
 console.log(`릴리스 산출물 검사 완료: vendor ${manifest.vendorScripts.length}개, 단일 HTML ${Math.round(fs.statSync(offlinePath).size / 1024)} KB`);
