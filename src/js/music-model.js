@@ -662,6 +662,153 @@ function musicRetuneForKey(sheet, nextKey){
   return changed;
 }
 
+/* ----- 조옮김(전조) -----------------------------------------------------------
+   조표 바꾸기(musicRetuneForKey)와 다르다. 저건 음표를 제자리에 두고 조표만 갈아끼우고,
+   이건 노래 전체를 통째로 올리거나 내린다("아이들 목소리에 맞게 두 음 올려 주세요").
+
+   반음 수만으로는 어떻게 적을지가 정해지지 않는다(올림다 = 내림라). 그래서 순서를 이렇게 잡는다.
+     1) 새 조표를 먼저 정한다 — 5도권에서 옮긴 뒤 임시표가 적은 쪽을 고른다(다장조 +1반음 → 내림라장조).
+     2) 그 조표의 으뜸음이 몇 칸 움직였는지로 음이름의 이동 칸수(diatonicSteps)를 얻는다.
+     3) 모든 음을 "칸수만큼 이름을 옮기고, 남는 차이는 임시표로" 적는다.
+   이러면 조표와 음 하나하나의 적는 법이 서로 어긋나지 않는다. */
+
+const MUSIC_TRANSPOSE_LIMIT = 12;    // 위아래 한 옥타브까지(그 이상은 옥타브를 겹쳐 쓰면 된다)
+
+const MUSIC_MIDI_SHARP_SPELLING = [
+  ["C", 0], ["C", 1], ["D", 0], ["D", 1], ["E", 0], ["F", 0],
+  ["F", 1], ["G", 0], ["G", 1], ["A", 0], ["A", 1], ["B", 0]
+];
+const MUSIC_MIDI_FLAT_SPELLING = [
+  ["C", 0], ["D", -1], ["D", 0], ["E", -1], ["E", 0], ["F", 0],
+  ["G", -1], ["G", 0], ["A", -1], ["A", 0], ["B", -1], ["B", 0]
+];
+
+// MIDI 번호 하나를 음이름으로 — 같은 소리를 두 이름으로 적을 수 있어 어느 쪽을 쓸지 받는다.
+function musicPitchFromMidi(midi, preferFlats){
+  const value = Math.round(Number(midi));
+  if (!Number.isFinite(value)) return null;
+  const [step, alter] = (preferFlats ? MUSIC_MIDI_FLAT_SPELLING : MUSIC_MIDI_SHARP_SPELLING)[((value % 12) + 12) % 12];
+  return { step, octave:Math.floor(value / 12) - 1, alter };
+}
+
+function musicKeyTonic(key){
+  const spec = MUSIC_KEYS[key];
+  if (!spec) return null;
+  const mark = String(key).charAt(1);
+  return { step:String(key).charAt(0), alter:mark === "#" ? 1 : mark === "b" ? -1 : 0, mode:spec.mode };
+}
+
+function musicKeyIdFor(tonic, mode){
+  if (!tonic) return null;
+  const mark = tonic.alter === 1 ? "#" : tonic.alter === -1 ? "b" : tonic.alter === 0 ? "" : null;
+  if (mark === null) return null;                  // 겹올림표 으뜸음(G##장조)은 조표로 적지 않는다
+  const id = tonic.step + mark + (mode === "minor" ? "m" : "");
+  return MUSIC_KEYS[id] ? id : null;
+}
+
+// 옮긴 뒤의 조표. 같은 소리를 내는 후보 중 임시표가 적은 쪽을 고르고,
+// 6개로 같으면(올림바 ↔ 내림사) 올리는 방향이면 올림표 쪽을 쓴다.
+function musicTransposedKey(key, semitones){
+  const spec = MUSIC_KEYS[key];
+  if (!spec) return null;
+  const amount = Math.round(Number(semitones) || 0);
+  const wanted = spec.fifths + 7 * amount;
+  let best = null;
+  for (let fifths = -7; fifths <= 7; fifths++){
+    if (((fifths - wanted) % 12 + 12) % 12 !== 0) continue;
+    if (best === null || Math.abs(fifths) < Math.abs(best)
+      || (Math.abs(fifths) === Math.abs(best) && (amount > 0 ? fifths > best : fifths < best))) best = fifths;
+  }
+  if (best === null) return null;
+  for (const [id, candidate] of Object.entries(MUSIC_KEYS)){
+    if (candidate.fifths === best && candidate.mode === spec.mode) return id;
+  }
+  return null;
+}
+
+// 으뜸음이 움직인 칸수. 반음 수의 옥타브 부분은 그대로 7칸씩 더한다.
+function musicTransposeSteps(fromKey, toKey, semitones){
+  const from = musicKeyTonic(fromKey), to = musicKeyTonic(toKey);
+  if (!from || !to) return null;
+  const amount = Math.round(Number(semitones) || 0);
+  const within = ((amount % 12) + 12) % 12;
+  const octaves = (amount - within) / 12;
+  const steps = ((MUSIC_DIATONIC_STEPS[to.step] - MUSIC_DIATONIC_STEPS[from.step]) % 7 + 7) % 7;
+  return steps + octaves * 7;
+}
+
+/* 음 하나를 옮긴다. 이름은 diatonicSteps 칸 옮기고, 남는 반음 차이를 임시표로 적는다.
+   이름을 7칸(한 옥타브) 어긋나게 잡으면 임시표가 12씩 튀므로, ±2 안에 드는 자리는 하나뿐이다.
+   그 자리를 못 찾으면(겹올림표를 넘어서면) null — 호출부가 반음만 맞는 이름으로 대신 적는다. */
+function musicTransposePitch(pitch, semitones, diatonicSteps){
+  const diatonic = musicDiatonicValue(pitch);
+  const midi = musicMidiNumber(pitch);
+  if (diatonic === null || midi === null) return null;
+  const target = midi + Math.round(Number(semitones) || 0);
+  for (const octaveShift of [0, 7, -7]){
+    const spelled = musicPitchFromDiatonic(diatonic + Math.round(Number(diatonicSteps) || 0) + octaveShift);
+    const alter = target - musicMidiNumber({ step:spelled.step, octave:spelled.octave, alter:0 });
+    if (Math.abs(alter) <= 2) return { step:spelled.step, octave:spelled.octave, alter };
+  }
+  return null;
+}
+
+/* 악보 전체를 옮긴다. opts.apply === false 면 세어 보기만 한다(편집기가 먼저 물어보려고).
+   · outOfRange = 옮기면 권장 음역(오른손 G3~C6·왼손 C2~C5)을 벗어나는 음. 막지 않고 알리기만 한다.
+   · blocked = 저장할 수 있는 옥타브(0~9)를 벗어나 적을 수 없는 음. 하나라도 있으면 아무것도 옮기지 않는다
+     — 일부만 옮긴 악보는 고치기보다 다시 그리는 게 빠를 만큼 망가진다. */
+function musicTransposeSheet(sheet, semitones, opts){
+  const amount = Math.round(Number(semitones) || 0);
+  const fromKey = (sheet && MUSIC_KEYS[sheet.key]) ? sheet.key : "C";
+  const empty = { changed:0, outOfRange:0, blocked:0, semitones:0, previousKey:fromKey, key:fromKey };
+  if (!sheet || !amount || Math.abs(amount) > MUSIC_TRANSPOSE_LIMIT) return empty;
+  const toKey = musicTransposedKey(fromKey, amount);
+  const diatonicSteps = musicTransposeSteps(fromKey, toKey, amount);
+  if (!toKey || diatonicSteps === null) return empty;
+
+  const edits = [];
+  let outOfRange = 0, blocked = 0;
+  for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
+    for (const staff of ["treble", "bass"]){
+      for (const voice of [1, 2]){
+        for (const note of musicVoiceNotes(measure, staff, voice)){
+          if (note.rest) continue;
+          for (const pitch of [note, ...(Array.isArray(note.chord) ? note.chord : [])]){
+            const midi = musicMidiNumber(pitch);
+            if (midi === null) continue;
+            const moved = musicTransposePitch(pitch, amount, diatonicSteps)
+              // 겹올림표를 넘는 음은 소리만 맞춰 적는다(방향에 맞는 임시표로).
+              || musicPitchFromMidi(midi + amount, amount < 0);
+            if (!moved || moved.octave < 0 || moved.octave > 9){ blocked++; continue; }
+            if (!musicMidiInRange(midi + amount, staff)) outOfRange++;
+            edits.push({ pitch, moved });
+          }
+        }
+      }
+    }
+  }
+
+  const report = { changed:edits.length, outOfRange, blocked, semitones:amount,
+    previousKey:fromKey, key:toKey, diatonicSteps };
+  if (blocked > 0 || (opts && opts.apply === false)) return report;
+
+  for (const edit of edits){
+    edit.pitch.step = edit.moved.step;
+    edit.pitch.octave = edit.moved.octave;
+    edit.pitch.alter = musicClampAlter(edit.moved.alter);
+  }
+  // 중간에 조표가 바뀌는 악보는 그 조표도 같은 간격으로 옮겨야 앞뒤가 맞는다.
+  for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
+    if (!measure || !MUSIC_KEYS[measure.keyChange]) continue;
+    const tonic = musicKeyTonic(measure.keyChange);
+    const moved = musicTransposePitch({ step:tonic.step, octave:4, alter:tonic.alter }, amount, diatonicSteps);
+    measure.keyChange = (moved && musicKeyIdFor(moved, tonic.mode))
+      || musicTransposedKey(measure.keyChange, amount) || measure.keyChange;
+  }
+  sheet.key = toKey;
+  return report;
+}
+
 /* ----- 줄 나누기(조판 폭 배분) --------------------------------------------------
    마디를 몇 개씩 한 줄에 놓을지 정한다. 화면 폭과 마디마다 든 음표 수로 정하므로
    16분음표가 빽빽한 마디는 넓게, 온음표 한 개짜리 마디는 좁게 간다.

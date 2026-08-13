@@ -17,6 +17,16 @@ const MUSIC_ZOOM_MIN = 0.5;
 const MUSIC_ZOOM_MAX = 2;
 const MUSIC_ZOOM_STEP = 0.1;
 const MUSIC_TIME_CHOICES = ["2/4", "3/4", "4/4", "6/8"];
+// 조옮김 메뉴에 세울 간격. 반음 수만 넘기면 새 조표와 적는 법은 music-model.js 가 정한다.
+const MUSIC_TRANSPOSE_CHOICES = [
+  { semitones:1,  label:"반음(단2도)" },
+  { semitones:2,  label:"온음(장2도)" },
+  { semitones:3,  label:"단3도" },
+  { semitones:4,  label:"장3도" },
+  { semitones:5,  label:"완전4도" },
+  { semitones:7,  label:"완전5도" },
+  { semitones:12, label:"한 옥타브" }
+];
 const MUSIC_TYPING_DELAY = 600;     // 제목 타자를 한 단계로 묶는 시간
 const MUSIC_HISTORY_LIMIT = 200;    // 악보 JSON 은 가벼워서 깊게 쌓아도 된다
 const MUSIC_TOOL_VALUES = [
@@ -268,6 +278,8 @@ async function mountMusicEditor(doc){
   keyWrap.append("조표");
   const keySelect = document.createElement("select");
   keySelect.className = "music-timbre";
+  // 옆의 조옮김과 헷갈리기 쉬운 자리라 무엇이 다른지 적어 둔다.
+  keySelect.title = "음표는 그 자리에 두고 조표만 바꿉니다. 노래 높이를 통째로 올리거나 내리려면 조옮김을 쓰세요.";
   for (const name of Object.keys(MUSIC_KEYS)){
     const option = document.createElement("option");
     option.value = name;
@@ -283,6 +295,13 @@ async function mountMusicEditor(doc){
     }
   });
   keyWrap.appendChild(keySelect);
+
+  const transposeBtn = musicButton("조옮김",
+    "노래 전체를 올리거나 내립니다 — 음표와 조표가 함께 움직여 멜로디는 그대로입니다");
+  transposeBtn.addEventListener("click", () => {
+    const rect = transposeBtn.getBoundingClientRect();
+    openMusicContextMenu(rect.left, rect.bottom + 4, transposeContextItems());
+  });
 
   const grandStaffBtn = musicButton(sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선",
     "오른손 높은음자리표와 왼손 낮은음자리표를 함께 사용합니다");
@@ -300,7 +319,8 @@ async function mountMusicEditor(doc){
   saveBtn.textContent = "💾 저장";
   saveBtn.addEventListener("click", () => { saveMusicSheet(doc); });
 
-  bar.append(titleInput, tempoWrap, timeWrap, keyWrap, timbreWrap, grandStaffBtn, exampleWrap, historyWrap, saveBtn);
+  bar.append(titleInput, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
+    historyWrap, saveBtn);
 
   /* ----- 도구상자 ----- */
   const tools = document.createElement("div");
@@ -1178,6 +1198,57 @@ async function mountMusicEditor(doc){
     if (history && !history.isApplying()) history.commit();
   }
 
+  /* ----- 조옮김 -----
+     조표 선택(musicRetuneForKey)은 음표를 제자리에 두고 조표만 바꾼다. 여기는 반대로
+     노래 전체를 올리고 내린다. 음역을 벗어나는 음이 생겨도 막지 않고 물어보기만 한다
+     — 박자 바꾸기와 같은 규칙이고, 되돌리기 한 번으로 취소된다. */
+  function transposeLabel(semitones){
+    const item = MUSIC_TRANSPOSE_CHOICES.find((choice) => choice.semitones === Math.abs(semitones));
+    const name = item ? item.label : `${Math.abs(semitones)}반음`;
+    return `${name} ${semitones > 0 ? "올리기" : "내리기"}`;
+  }
+
+  function applyTranspose(semitones){
+    const preview = musicTransposeSheet(sheet, semitones, { apply:false });
+    if (preview.blocked > 0){
+      if (typeof toast === "function"){
+        toast(`음 ${preview.blocked}개가 너무 높거나 낮아 옮길 수 없어요. 더 작은 간격으로 나눠 옮겨 보세요.`,
+          3600, { type:"error" });
+      }
+      return;
+    }
+    if (!preview.changed && preview.key === sheet.key) return;
+    if (preview.outOfRange > 0 && typeof confirm === "function"
+      && !confirm(`${transposeLabel(semitones)}: 음 ${preview.outOfRange}개가 이 오선에서 권장하는 음역`
+        + `(오른손 G3~C6·왼손 C2~C5)을 벗어나요.\n그래도 옮길까요? (Ctrl+Z로 되돌릴 수 있어요)`)) return;
+
+    MNMusicAudio.stop();
+    const result = musicTransposeSheet(sheet, semitones);
+    keySelect.value = sheet.key;
+    afterEdit();
+    if (selection) select(selection.measure, selection.id, { staff:selection.staff, voice:selection.voice });
+    if (typeof toast === "function"){
+      const keyText = result.previousKey === result.key
+        ? MUSIC_KEYS[result.key].label
+        : `${MUSIC_KEYS[result.previousKey].label} → ${MUSIC_KEYS[result.key].label}`;
+      // changed 는 화음음까지 따로 세므로 "음표"가 아니라 "음"이다.
+      toast(`${transposeLabel(semitones)} · ${keyText} · 음 ${result.changed}개를 옮겼어요.`, 3000);
+    }
+  }
+
+  function transposeContextItems(){
+    const item = (semitones) => {
+      const nextKey = musicTransposedKey(sheet.key, semitones);
+      const keyText = nextKey && MUSIC_KEYS[nextKey] ? ` — ${MUSIC_KEYS[nextKey].label}` : "";
+      return { label:`${transposeLabel(semitones)}${keyText}`, action:() => applyTranspose(semitones) };
+    };
+    return [
+      ...MUSIC_TRANSPOSE_CHOICES.map((choice) => item(choice.semitones)),
+      { separator:true },
+      ...MUSIC_TRANSPOSE_CHOICES.map((choice) => item(-choice.semitones))
+    ];
+  }
+
   function loadSelectedExample(){
     const example = musicExampleSheet(exampleSelect.value);
     if (!example){
@@ -2025,6 +2096,7 @@ async function mountMusicEditor(doc){
         { separator:true },
         { label:"악보 내용 초기화…", action:resetScoreContent }
       ] },
+      { label:"조옮김", children:transposeContextItems() },
       { separator:true },
       { label:"재생·연습", children:playbackContextItems(targetMeasure) },
       { label:"계이름 표시", active:sheet.showSolfege !== false, action:toggleSolfege },
@@ -2555,14 +2627,10 @@ async function mountMusicEditor(doc){
   midiExportBtn.addEventListener("click", exportMusicMidi);
 
   function pitchFromMidiInput(midi){
-    const sharp = [["C",0],["C",1],["D",0],["D",1],["E",0],["F",0],
-      ["F",1],["G",0],["G",1],["A",0],["A",1],["B",0]];
-    const flat = [["C",0],["D",-1],["D",0],["E",-1],["E",0],["F",0],
-      ["G",-1],["G",0],["A",-1],["A",0],["B",-1],["B",0]];
+    // 검은건반을 어느 이름으로 적을지는 그 자리의 조표를 따른다(내림표 조표면 B♭, 아니면 A♯).
     const settings = musicEffectiveMeasureSettings(sheet, activeMeasureIndex());
     const useFlats = ((MUSIC_KEYS[settings.key] || {}).vex || "").includes("b");
-    const [step, alter] = (useFlats ? flat : sharp)[midi % 12];
-    return { step, alter, octave:Math.floor(midi / 12) - 1 };
+    return musicPitchFromMidi(midi, useFlats);
   }
 
   function handleMidiMessage(event){

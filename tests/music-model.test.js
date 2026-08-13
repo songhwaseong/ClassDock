@@ -22,6 +22,7 @@ function loadMusic(){
       musicNotePitches, musicAddChordPitch, musicRemoveChordPitch, musicPitchKey, musicStaffNotes,
       musicVoiceNotes, musicEffectiveMeasureSettings, musicMeasureCapacity, musicPlaybackMeasureIndexes,
       musicRetuneForKey, musicPackLines, musicBarWidthHint,
+      musicTransposeSheet, musicTransposedKey, musicTransposeSteps, musicTransposePitch, musicPitchFromMidi,
       musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS
     };`, context);
   return context.__music;
@@ -448,6 +449,118 @@ test("조표를 바꾸면 임시표 없던 음만 새 조표를 따라간다", (
   api.musicRetuneForKey(sheet, "C");
   assert.equal(notes[0].alter, 0);
   assert.equal(notes[1].alter, -1);
+});
+
+test("조옮김은 음표와 조표를 함께 옮긴다", () => {
+  const api = loadMusic();
+  const sheet = schoolBell(api);            // 다장조 학교종
+
+  const result = api.musicTransposeSheet(sheet, 2);
+  assert.equal(result.semitones, 2);
+  assert.equal(sheet.key, "D");             // 다장조 + 온음 = 라장조
+  assert.equal(result.previousKey, "C");
+  assert.equal(result.blocked, 0);
+
+  // 솔라솔라 → 라시라시. 멜로디 모양(음 사이 간격)이 그대로여야 한다.
+  const first = sheet.measures[0].notes;
+  assert.deepEqual(first.map((note) => note.step + note.octave), ["A4", "A4", "B4", "B4"]);
+  // 라장조는 F#·C# — 3마디의 미(E4)는 파샵(F#4)이 되고 임시표는 그리지 않는다.
+  const third = sheet.measures[2].notes;
+  assert.equal(third[2].step, "F");
+  assert.equal(third[2].alter, 1);
+  assert.equal(api.musicVexNote(third[2], sheet.key).accidental, null);
+  assert.equal(result.changed, first.length + 3 + 4 + 1);   // 쉼표는 세지 않는다
+});
+
+test("조옮김은 임시표가 적은 조표를 고르고 음도 같은 방식으로 적는다", () => {
+  const api = loadMusic();
+
+  // 다장조에서 반음 올리면 올림다장조(♯7)가 아니라 내림라장조(♭5)로 적는다.
+  assert.equal(api.musicTransposedKey("C", 1), "Db");
+  assert.equal(api.musicTransposedKey("C", -1), "B");
+  assert.equal(api.musicTransposedKey("C", 12), "C");       // 옥타브는 조표를 바꾸지 않는다
+  assert.equal(api.musicTransposedKey("Am", 2), "Bm");      // 단조는 단조로 남는다
+
+  const sheet = api.musicEmpty("적는 법");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4), api.musicNote("E", 4)])];
+  api.musicTransposeSheet(sheet, 1);
+  const notes = sheet.measures[0].notes;
+  assert.equal(sheet.key, "Db");
+  assert.deepEqual(notes.map((note) => [note.step, note.alter]), [["D", -1], ["F", 0]]);
+  // 소리는 정확히 반음 위여야 한다(적는 법이 달라도 울리는 음은 하나뿐이다).
+  assert.equal(api.musicMidiNumber(notes[0]), 61);
+  assert.equal(api.musicMidiNumber(notes[1]), 65);
+});
+
+test("조옮김은 화음·성부·왼손·중간 조표를 빠짐없이 옮긴다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("빠짐없이");
+  sheet.grandStaff = true;
+  const chord = api.musicNote("C", 4, { chord:[{ step:"E", octave:4 }, { step:"G", octave:4 }] });
+  sheet.measures = [
+    api.musicMeasure([chord], {
+      voice2Notes:[api.musicNote("E", 5)],
+      bassNotes:[api.musicNote("C", 3)],
+      bassVoice2Notes:[api.musicNote("G", 2)]
+    }),
+    api.musicMeasure([api.musicNote("D", 4)], { keyChange:"F" })
+  ];
+
+  api.musicTransposeSheet(sheet, 2);
+  assert.equal(sheet.key, "D");
+  const moved = sheet.measures[0];
+  assert.equal(api.musicNotePitches(moved.notes[0]).map((pitch) => pitch.step + pitch.octave).join(" "),
+    "D4 F4 A4");
+  assert.equal(api.musicNotePitches(moved.notes[0])[1].alter, 1);   // 미 → 파샵
+  assert.equal(moved.voice2Notes[0].step + moved.voice2Notes[0].octave, "F5");
+  assert.equal(moved.bassNotes[0].step + moved.bassNotes[0].octave, "D3");
+  assert.equal(moved.bassVoice2Notes[0].step + moved.bassVoice2Notes[0].octave, "A2");
+  // 중간에 바뀌는 조표도 같은 간격으로 따라간다(바장조 + 온음 = 사장조).
+  assert.equal(sheet.measures[1].keyChange, "G");
+  assert.equal(api.musicEffectiveMeasureSettings(sheet, 1).key, "G");
+});
+
+test("조옮김 미리보기는 악보를 바꾸지 않고 음역 밖 음을 세어 준다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("미리보기");
+  sheet.measures = [api.musicMeasure([api.musicNote("A", 5), api.musicNote("G", 4)])];
+  const before = api.musicSerialize(sheet);
+
+  const preview = api.musicTransposeSheet(sheet, 5, { apply:false });
+  assert.equal(api.musicSerialize(sheet), before, "미리보기는 악보를 건드리지 않는다");
+  assert.equal(preview.changed, 2);
+  assert.equal(preview.outOfRange, 1);            // A5 + 완전4도 = D6 → 권장 음역(C6) 밖
+  assert.equal(preview.key, "F");
+
+  // 저장할 수 없는 옥타브로 밀려나는 악보는 하나라도 있으면 통째로 옮기지 않는다.
+  // (0옥타브는 우리 편집기로는 넣을 수 없고 MusicXML 로 들어올 수 있어 opts 로 만든다.)
+  const extreme = api.musicEmpty("맨 아래");
+  extreme.measures = [api.musicMeasure([api.musicNote("C", 4, { octave:0 })])];
+  const blockedText = api.musicSerialize(extreme);
+  const blocked = api.musicTransposeSheet(extreme, -12);
+  assert.ok(blocked.blocked > 0);
+  assert.equal(api.musicSerialize(extreme), blockedText);
+
+  // 옮길 수 없는 간격은 아무 일도 하지 않는다.
+  assert.equal(api.musicTransposeSheet(sheet, 0).changed, 0);
+  assert.equal(api.musicTransposeSheet(sheet, 13).changed, 0);
+  assert.equal(api.musicSerialize(sheet), before);
+});
+
+test("MIDI 번호는 조표 방향에 맞는 이름으로 적는다", () => {
+  const api = loadMusic();
+  const spell = (midi, flats) => {
+    const pitch = api.musicPitchFromMidi(midi, flats);
+    return `${pitch.step}${pitch.alter > 0 ? "#" : pitch.alter < 0 ? "b" : ""}${pitch.octave}`;
+  };
+  assert.equal(spell(61, false), "C#4");
+  assert.equal(spell(61, true), "Db4");
+  assert.equal(spell(60, false), "C4");
+  // 어느 쪽으로 적어도 울리는 음은 같다.
+  for (const midi of [55, 60, 66, 70, 84]){
+    assert.equal(api.musicMidiNumber(api.musicPitchFromMidi(midi, true)), midi);
+    assert.equal(api.musicMidiNumber(api.musicPitchFromMidi(midi, false)), midi);
+  }
 });
 
 test("줄 나누기는 화면 폭과 마디의 음표 수에 따라 마디를 나눈다", () => {

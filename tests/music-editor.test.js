@@ -458,3 +458,30 @@ test("조판은 VexFlow 5 API 로 부르고, 실패해도 문서를 열 수 있�
   // 그리기가 실패해도 재생·저장은 살아 있어야 한다.
   assert.match(editorSource, /catch\(error\)\{\s*console\.warn\("악보를 그리지 못했습니다:"/);
 });
+
+test("조옮김은 미리 세어 보고 물어본 뒤에 옮긴다", () => {
+  // 머리말 버튼과 우클릭 메뉴가 같은 목록을 쓴다(같은 기능을 두 번 만들지 않는다).
+  assert.match(editorSource, /const transposeBtn = musicButton\("조옮김"/);
+  assert.match(editorSource, /openMusicContextMenu\(rect\.left, rect\.bottom \+ 4, transposeContextItems\(\)\)/);
+  assert.match(editorSource, /\{ label:"조옮김", children:transposeContextItems\(\) \}/);
+  // 올리기·내리기 간격은 한 곳에서만 정의한다.
+  assert.match(editorSource, /const MUSIC_TRANSPOSE_CHOICES = \[/);
+  for (const semitones of [1, 2, 3, 4, 5, 7, 12]){
+    assert.ok(editorSource.includes(`semitones:${semitones},`), `조옮김 간격 ${semitones}반음이 있어야 한다`);
+  }
+  // 음역 밖 음이 생기면 먼저 물어보고, 옮긴 뒤에는 조표 선택도 새 조표를 가리킨다.
+  assert.match(editorSource, /musicTransposeSheet\(sheet, semitones, \{ apply:false \}\)/);
+  assert.match(editorSource, /preview\.blocked > 0/);
+  assert.match(editorSource, /preview\.outOfRange > 0 && typeof confirm === "function"/);
+  assert.match(editorSource, /const result = musicTransposeSheet\(sheet, semitones\);/);
+  assert.match(editorSource, /keySelect\.value = sheet\.key;/);
+  // 한 단계로 되돌릴 수 있어야 한다(afterEdit 가 history.commit 까지 한다).
+  assert.match(editorSource, /function applyTranspose\(semitones\)\{[\s\S]*?afterEdit\(\);/);
+});
+
+test("MIDI 건반 입력은 모델의 음이름 표기를 함께 쓴다", () => {
+  // 같은 표를 편집기에 다시 적지 않는다(조옮김도 같은 함수를 쓴다).
+  assert.match(editorSource, /return musicPitchFromMidi\(midi, useFlats\)/);
+  assert.doesNotMatch(editorSource, /\[\["C",0\],\["C",1\],\["D",0\]/);
+  assert.match(read("src/js/music-model.js"), /function musicPitchFromMidi\(midi, preferFlats\)/);
+});
