@@ -57,5 +57,15 @@ if (executableScriptSources(offline).length) fail("offline HTML contains an exte
 if (/\b(?:src|href)=["'](?:src|vendor)\//i.test(offline)) fail("offline HTML still references source or vendor files");
 if (!offline.includes("window.__MN_PYODIDE_WHEELS__")) fail("offline Pyodide wheel registry is missing");
 if (!offline.includes('id="pdfWorkerSrc"')) fail("offline PDF worker is missing");
+const pianoBlock = /<script type="application\/json" id="mnMusicSamples">([^<]+)<\/script>/.exec(offline);
+if (!pianoBlock) fail("offline piano sample registry is missing");
+let pianoRegistry;
+try { pianoRegistry = JSON.parse(pianoBlock[1]); }
+catch(_) { fail("offline piano sample registry is invalid JSON"); }
+const pianoFiles = Object.keys(pianoRegistry || {});
+if (pianoFiles.length !== 10) fail(`offline piano sample count is ${pianoFiles.length}, expected 10`);
+if (pianoFiles.some((file) => !/^data:audio\/mpeg;base64,/.test(pianoRegistry[file]))) {
+  fail("offline piano sample data is missing");
+}
 
 console.log(`릴리스 산출물 검사 완료: vendor ${manifest.vendorScripts.length}개, 단일 HTML ${Math.round(fs.statSync(offlinePath).size / 1024)} KB`);

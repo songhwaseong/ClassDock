@@ -110,6 +110,43 @@ html = html.replace(
   () => `<script type="application/json" id="mnPetSprites">${esc(JSON.stringify(petSpriteMap))}</script>`
 );
 
+// 실제 피아노 샘플은 앱 시작 때 JavaScript 로 파싱하지 않는다. 실행되지 않는 JSON 블록에
+// MP3 데이터 URL로 넣고, 악보에서 피아노 음색을 처음 재생할 때 music-audio.js 가 읽는다.
+const pianoSamples = [
+  ["Gs3.mp3", "f82a08ce29f7fc2a1bfd2ffcb6846956f5cb1fbde1d6480e8f11912f120140de"],
+  ["C4.mp3",  "a265c8cfd4140cf27b55054b4953b6c691fce3523530ca8ae0faed5e4cd39063"],
+  ["Ds4.mp3", "981383275cc1021b425f5c3e4fab8e9ee4385e4023e82993e04140ad325d0f08"],
+  ["Fs4.mp3", "0b23feb9c67e409aa18b7bd2b1897f198e5914121a709e4dfd9996af4f0a15b4"],
+  ["A4.mp3",  "a3b829eb92b37fd1174227bc83757f3a62bc3f9efbaf79503e83447c52338d44"],
+  ["C5.mp3",  "54a9304d2c609328580c0e06a394670559fe5f594f643d5d12c6dae158051b4a"],
+  ["Ds5.mp3", "30f6a5ba2494603fb7c1cbb43c50769858f252a1a2111e1bd8c02d358513e2cd"],
+  ["Fs5.mp3", "2ed25faa160029fcd28071ffa98f9504588511b2cb2179f74d7da00284f1bc33"],
+  ["A5.mp3",  "d121012517f4985f66a72eb3947a9f5de3d7489260c6deb97022191d23670212"],
+  ["C6.mp3",  "c3c9ee316e7b98a07d89be2340c2382aa689826b50db9080dab7f6e23ebc3d7c"]
+];
+const pianoSampleMap = {};
+for (const [file, expectedHash] of pianoSamples) {
+  const relative = "src/assets/piano/" + file;
+  const fullPath = path.join(root, relative);
+  if (!fs.existsSync(fullPath)) {
+    console.error("Piano sample not found:", relative);
+    process.exit(1);
+  }
+  const bytes = fs.readFileSync(fullPath);
+  const actualHash = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (actualHash !== expectedHash) {
+    console.error("Piano sample SHA-256 mismatch:", relative);
+    process.exit(1);
+  }
+  pianoSampleMap[file] = "data:audio/mpeg;base64," + bytes.toString("base64");
+}
+const musicSamplesPlaceholder = "<!--MN_MUSIC_SAMPLES-->";
+requireTag(html, musicSamplesPlaceholder, "Music sample placeholder");
+html = html.replace(
+  musicSamplesPlaceholder,
+  () => `<script type="application/json" id="mnMusicSamples">${esc(JSON.stringify(pianoSampleMap))}</script>`
+);
+
 // 시작할 때 실행하는 vendor 는 원래 자리에 그대로 인라인한다.
 for (const item of manifest.vendorScripts.filter((item) => !item.lazy)) {
   verifyVendorIntegrity(item);

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>악보 소리 확인 (P0)</title>
+<!--
+  .msheet 악보 P0 확인용 페이지 — 앱에 붙이기 전에 소리부터 귀로 듣는 용도다.
+  화면(VexFlow)·편집 없이 src/js/music-model.js + music-audio.js 만 그대로 불러 쓴다.
+  이 파일을 브라우저에서 그냥 열면 된다(서버 불필요). 설계: docs/악보-설계.md
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: "Malgun Gothic", system-ui, sans-serif; margin: 0; padding: 24px;
+         background: #f6f7f9; color: #1b1d21; }
+  @media (prefers-color-scheme: dark) { body { background: #16181d; color: #e8eaed; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { opacity: .7; font-size: 13px; margin-bottom: 20px; }
+  .card { background: rgba(127,127,127,.08); border: 1px solid rgba(127,127,127,.25);
+          border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; opacity: .8; font-weight: 600; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+           border: 1px solid rgba(127,127,127,.4); background: rgba(127,127,127,.12); color: inherit; }
+  button:hover { background: rgba(127,127,127,.22); }
+  button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  label { font-size: 13px; opacity: .85; }
+  input[type=range] { vertical-align: middle; }
+  .notes { display: flex; flex-wrap: wrap; gap: 6px; }
+  .notes button { min-width: 56px; }
+  .score { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+  .bar { border: 1px solid rgba(127,127,127,.3); border-radius: 8px; padding: 8px; }
+  .bar .barno { font-size: 11px; opacity: .55; margin-bottom: 6px; }
+  .ev { display: inline-block; padding: 4px 8px; border-radius: 6px; margin: 2px;
+        background: rgba(127,127,127,.14); transition: background .08s, color .08s; }
+  .ev.on { background: #2f7bd6; color: #fff; font-weight: 700; }
+  .ev.rest { opacity: .55; }
+  pre#log { margin: 0; font-size: 12px; line-height: 1.6; max-height: 190px; overflow: auto;
+            white-space: pre-wrap; }
+  audio { width: 100%; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>악보 소리 확인 <span style="opacity:.6;font-size:14px">P0</span></h1>
+<div class="sub">모델(<code>music-model.js</code>) + 소리 엔진(<code>music-audio.js</code>)만 불러 씁니다. 표본: 학교종 앞 4마디(4/4, 다장조).</div>
+
+<div class="card">
+  <h2>1. 음표 하나씩 눌러 듣기</h2>
+  <div class="notes" id="keys"></div>
+</div>
+
+<div class="card">
+  <h2>2. 전체·부분 재생</h2>
+  <div class="row">
+    <button id="playAll">▶ 전체 재생</button>
+    <button id="playPart">▶ 3~4마디만</button>
+    <button id="stop" disabled>■ 정지</button>
+  </div>
+  <div class="row">
+    <label>빠르기 ♩=<b id="tempoLabel">100</b></label>
+    <input type="range" id="tempo" min="40" max="208" value="100" style="width:200px">
+    <label style="margin-left:12px">음색</label>
+    <select id="timbre">
+      <option value="triangle">삼각파(기본·부드럽고 또렷)</option>
+      <option value="sine">사인파(가장 부드럽게)</option>
+      <option value="square">사각파(또렷·전자음)</option>
+    </select>
+  </div>
+  <div class="score" id="score"></div>
+</div>
+
+<div class="card">
+  <h2>3. WAV로 저장 — 들은 것과 저장본이 같은지 확인</h2>
+  <div class="row">
+    <button id="render">🎧 렌더해서 여기서 들어보기</button>
+    <button id="download" disabled>⬇ 학교종.wav 저장</button>
+  </div>
+  <audio id="preview" controls hidden></audio>
+</div>
+
+<div class="card">
+  <h2>기록</h2>
+  <pre id="log"></pre>
+</div>
+
+<script src="../src/js/music-model.js"></script>
+<script src="../src/js/music-audio.js"></script>
+<script>
+"use strict";
+
+const logEl = document.getElementById("log");
+function log(message){
+  const time = new Date().toLocaleTimeString("ko-KR", { hour12:false });
+  logEl.textContent = `[${time}] ${message}\n` + logEl.textContent;
+}
+
+// ----- 표본 악보: 학교종 앞 4마디 -------------------------------------------
+function schoolBell(){
+  const sheet = musicEmpty("학교종");
+  sheet.tempo = 100;
+  sheet.measures = [
+    musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("A", 4), musicNote("A", 4)]),
+    musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("E", 4, { value:"half" })]),
+    musicMeasure([musicNote("G", 4), musicNote("G", 4), musicNote("E", 4), musicNote("E", 4)]),
+    musicMeasure([musicNote("D", 4, { value:"half" }), musicRest("half")])
+  ];
+  return sheet;
+}
+const sheet = schoolBell();
+
+// ----- 1. 음표 하나씩 -------------------------------------------------------
+const SCALE = [
+  ["도", "C", 4], ["레", "D", 4], ["미", "E", 4], ["파", "F", 4], ["솔", "G", 4],
+  ["라", "A", 4], ["시", "B", 4], ["높은도", "C", 5], ["파#", "F", 4, 1], ["시b", "B", 4, -1]
+];
+const keysEl = document.getElementById("keys");
+for (const [label, step, octave, alter] of SCALE){
+  const button = document.createElement("button");
+  const note = musicNote(step, octave, { alter:alter || 0 });
+  button.textContent = label + " " + musicNoteName(note);
+  button.addEventListener("click", () => {
+    MNMusicAudio.previewNote(note, timbreEl.value);
+    log(`미리듣기 ${musicNoteName(note)} — ${musicNoteFrequency(note).toFixed(2)}Hz`);
+  });
+  keysEl.appendChild(button);
+}
+
+// ----- 2. 악보 표시 + 재생 --------------------------------------------------
+const scoreEl = document.getElementById("score");
+const tempoEl = document.getElementById("tempo");
+const tempoLabel = document.getElementById("tempoLabel");
+const timbreEl = document.getElementById("timbre");
+const stopButton = document.getElementById("stop");
+const cells = new Map();   // 음표 id → 화면 요소(재생 중 강조용)
+
+function drawScore(){
+  scoreEl.replaceChildren();
+  cells.clear();
+  sheet.measures.forEach((measure, index) => {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const no = document.createElement("div");
+    no.className = "barno";
+    no.textContent = (index + 1) + "마디";
+    bar.appendChild(no);
+    for (const note of measure.notes){
+      const cell = document.createElement("span");
+      cell.className = "ev" + (note.rest ? " rest" : "");
+      cell.textContent = (note.rest ? "쉼표" : musicNoteName(note)) + " " + valueLabel(note);
+      bar.appendChild(cell);
+      cells.set(note.id, cell);
+    }
+    scoreEl.appendChild(bar);
+  });
+}
+function valueLabel(note){
+  const names = { whole:"온", half:"2분", quarter:"4분", eighth:"8분", "16th":"16분" };
+  return (names[note.value] || note.value) + (note.dots ? "점" : "");
+}
+drawScore();
+
+function highlight(event){
+  for (const cell of cells.values()) cell.classList.remove("on");
+  if (event && cells.has(event.id)) cells.get(event.id).classList.add("on");
+}
+
+tempoEl.addEventListener("input", () => {
+  sheet.tempo = Number(tempoEl.value);
+  tempoLabel.textContent = sheet.tempo;
+});
+timbreEl.addEventListener("change", () => { sheet.timbre = timbreEl.value; });
+
+function start(range){
+  sheet.timbre = timbreEl.value;
+  const handle = MNMusicAudio.play(sheet, Object.assign({
+    onNote:highlight,
+    onEnd:(completed) => {
+      highlight(null);
+      stopButton.disabled = true;
+      log(completed ? "재생 끝" : "재생 정지");
+    }
+  }, range || {}));
+  if (!handle){ log("소리를 낼 수 없습니다(브라우저가 Web Audio 를 지원하지 않음)."); return; }
+  stopButton.disabled = false;
+  const where = range ? `${range.from}~${range.to}마디` : "전체";
+  log(`재생 시작 — ${where}, ♩=${sheet.tempo}, ${timbreEl.value}, ${handle.totalSeconds.toFixed(2)}초`);
+}
+
+document.getElementById("playAll").addEventListener("click", () => start(null));
+document.getElementById("playPart").addEventListener("click", () => start({ from:3, to:4 }));
+stopButton.addEventListener("click", () => MNMusicAudio.stop());
+
+// ----- 3. WAV -------------------------------------------------------------
+const previewEl = document.getElementById("preview");
+const downloadButton = document.getElementById("download");
+let wavBlob = null, wavUrl = null;
+
+document.getElementById("render").addEventListener("click", async () => {
+  try {
+    sheet.timbre = timbreEl.value;
+    const began = performance.now();
+    wavBlob = await MNMusicAudio.renderWav(sheet);
+    const took = Math.round(performance.now() - began);
+    if (wavUrl) URL.revokeObjectURL(wavUrl);
+    wavUrl = URL.createObjectURL(wavBlob);
+    previewEl.src = wavUrl;
+    previewEl.hidden = false;
+    downloadButton.disabled = false;
+    const seconds = musicTimeline(sheet).totalSeconds;
+    log(`WAV 렌더 완료 — ${(wavBlob.size / 1024).toFixed(1)}KB, 곡 길이 ${seconds.toFixed(2)}초, 걸린 시간 ${took}ms`);
+  } catch(error){
+    log("WAV 렌더 실패: " + (error && error.message ? error.message : error));
+  }
+});
+
+downloadButton.addEventListener("click", () => {
+  if (!wavBlob) return;
+  const link = document.createElement("a");
+  link.href = wavUrl;
+  link.download = "학교종.wav";
+  link.click();
+  log("WAV 저장 요청 — 학교종.wav");
+});
+
+log("준비 완료. 소리는 브라우저 정책상 첫 버튼을 누른 뒤부터 납니다.");
+</script>
+</body>
+</html>

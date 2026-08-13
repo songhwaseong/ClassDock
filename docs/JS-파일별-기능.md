@@ -116,6 +116,9 @@ flowchart LR
 | `table-export.js` | 표 블록을 바깥으로 꺼내는 공용 모듈(`MNTableExport`)입니다. 메모창과 블록 문서의 표를 탭 구분(TSV)으로 복사, 엑셀용 CSV(BOM·RFC 4180 인용 — 인용 규칙 자체는 `MNDataConvert`에 위임)로 저장, 복사본을 새 탭의 표 편집기(xlsx)로 열기, 형식 변환 창으로 보내기를 담당합니다. 저장은 `saveTextDoc`에 문서를 넘기지 않아(=null) 메모·문서의 저장 상태를 건드리지 않습니다. | `scratchpad.js`, `mnote.js`, `code-viewer.js`(`saveTextDoc`), `spreadsheet-viewer.js`, `tests/table-export.test.js` |
 | `scratchpad.js` | 여러 탭 임시 메모, 글·이미지·표·노트북 셀 블록, 배치·크기·잠금·드래그 순서·자동 저장·이전 형식 마이그레이션을 담당합니다. 각 편집 블록 도구막대의 `⤢`는 그 블록 하나만 편집 가능한 채로 화면에 펼치고 `⤡` 또는 `Esc`로 원래 메모에 복귀합니다. 표 블록에는 복사·CSV·표 편집기 버튼이 붙습니다. 탭에 마우스를 올리면 본문 앞 세 줄이 미리보기로 뜹니다. 목록의 각 메모 카드에 붙은 `⤢ 크게 보기`는 해당 카드 하나만 읽기 전용 전체 내용으로 화면에 펼치고, 같은 자리의 `⤡ 이전 크기` 또는 `Esc`로 목록에 복귀합니다. `▦ 목록`은 탭을 그대로 둔 채 메모 카드 격자를 보여 주며, `전체 내용 보기`를 켜면 모든 메모의 글·이미지·표·노트북 셀을 겹치지 않는 세로 흐름으로 이어 표시합니다. 같은 자리의 검색창은 모든 메모의 제목·본문을 걸러 일치한 내용을 강조합니다. | `notebook-cells.js`, `image-memo.js`, `table-export.js`, `tests/scratchpad.test.js` |
 | `mnote.js` | 글·이미지·표 블록을 한 문서에서 편집하고 `.mnote` JSON으로 저장·재편집하며, 내용 검색 이동·되돌리기·HTML/Markdown 내보내기를 담당합니다. 표 블록마다 복사·CSV·표 편집기 버튼도 함께 제공합니다. | `documents.js`, `file-loaders.js`, `code-viewer.js`, `history.js`, `spellcheck.js`, `table-export.js`, `tests/mnote.test.js` |
+| `music-model.js` | 악보 문서(`.msheet`)의 순수 모델입니다. 마디·음표·쉼표 구조, `.msheet` JSON 읽기·쓰기(같은 모델은 항상 같은 바이트), 4분음표=480틱 정수 길이 계산과 점음표, 마디 채움 검사, 음높이 → MIDI 번호 → 주파수 변환, 조표와 비교해 임시표를 그릴지 정하는 VexFlow 변환, 재생·저장이 함께 쓰는 초 단위 타임라인, 편집에 쓰는 오선 자리 계산(줄 값 ↔ 음높이, 흰건반 한 음씩 올리고 내리기, 음역 검사), 조표를 바꿀 때 임시표 없던 음만 새 조표로 맞추기, 화면 폭과 마디별 음표 수로 줄을 나누는 폭 배분을 담당합니다. 음높이는 VexFlow 표기가 아니라 `{step, octave, alter}`로 저장해 파일 형식이 그리기 라이브러리에 묶이지 않게 합니다. DOM·오디오·VexFlow를 참조하지 않아 브라우저 없이 검증합니다. | `music-audio.js`, `docs/악보-설계.md`, `tests/music-model.test.js` |
+| `music-audio.js` | 악보를 소리로 만드는 엔진(`MNMusicAudio`)입니다. 오실레이터(사인·삼각·사각) + ADSR 엔벨로프로 음을 만들고, `setTimeout`이 아니라 `AudioContext.currentTime` 기준으로 25ms마다 200ms 앞을 예약해(lookahead) 파이썬 실행 등으로 메인 스레드가 밀려도 박자가 흔들리지 않게 합니다. 음표 하나 미리듣기, 전체·부분(마디 범위) 재생, 재생 중 음표 강조 콜백, `OfflineAudioContext` 렌더 + 16bit PCM WAV 인코딩으로 오디오 파일 저장을 담당합니다. 재생과 저장이 **같은 예약 함수**를 써서 들은 것과 저장본이 어긋나지 않습니다. | `music-model.js`, `docs/악보-설계.md`, `tests/music-audio.test.js` |
+| `music-editor.js` | 악보 문서(`.msheet`)의 화면과 편집입니다. 파일 열기·저장(기존 `saveTextDoc` 경로 재사용), VexFlow로 오선·음자리표·조표·박자표·음표·꼬리 잇기 조판(한 줄 4마디), **도구상자**(온~16분음표·점/겹점·쉼표·♯♭♮·지우개·마디 추가/삭제)와 **오선을 눌러 그 높이에 음표 넣기**, 음표 선택 후 ↑↓ 한 음 이동(Shift는 한 옥타브)·←→ 이웃 음표·Delete 삭제, 자판 단축키(1~5·R·`.`·Ctrl+Z/Y), 되돌리기(`MNEditHistory`), 음표를 누르면 그 음 들려주기, 전체·구간(마디 번호) 재생과 재생 중 음표 강조, WAV 파일 저장, 제목·빠르기(♩)·박자표·조표·음색 바꾸기, 화면 폭에 맞춘 자동 줄바꿈, **인쇄**(화이트보드와 같이 같은 문서 안에 인쇄용 층을 만들어 Bravura 글꼴을 지킵니다 — PDF는 인쇄 대화상자의 'PDF로 저장'), 박자를 넘기는 입력 차단과 맞지 않는 마디 경고를 담당합니다. VexFlow는 시작할 때가 아니라 이 문서를 열 때 `MNLazy`로 불러오고, 그리기에 실패해도 재생·저장은 그대로 됩니다. 재생 중에는 편집기에 `.is-running`을 붙여 대기 화면이 뜨지 않게 합니다. | `music-model.js`, `music-audio.js`, `lazy.js`, `history.js`, `documents.js`, `file-loaders.js`, `code-viewer.js`, `vendor/vexflow-bravura.min.js`, `docs/악보-설계.md`, `tests/music-editor.test.js` |
 | `image-memo.js` | 캡처 이미지 여러 장 붙여넣기·드롭, EXE 자동 저장, 브라우저 임시 복구, 다시 시도·삭제·미리보기·일반 메모 보내기를 담당합니다. | `scratchpad.js`, `desktop/launcher.cs`, `tests/image-memo.test.js` |
 | `backup.js` | 미저장 작업·메모·복구 데이터와 설정을 전용 매니페스트가 든 ZIP으로 내보내고, 형식·버전·필수 구조를 검증해 IndexedDB·localStorage·작업공간으로 복원합니다. | `workspace-store.js`, 각 편집기 복구 훅, `tests/backup.test.js` |
 | `app.js` | 최종 이벤트 배선 파일입니다. 드래그 앤 드롭, 파일/폴더 열기, 설정 모달, 자동 저장 폴더, 도움말, 단축키, 헤더 메뉴, 서버 heartbeat와 앱 시작·종료 흐름을 연결합니다. | 사실상 모든 기능 파일, 특히 `state.js`, `file-loaders.js` |
@@ -170,6 +173,9 @@ flowchart LR
 | `tests/local-server-security.test.js` | EXE 로컬 API 인증·경로 검증·보안 헤더·실행 상한 |
 | `tests/manual-html-build.test.js` | `사용법.html`이 `사용법.md`에서 생성한 결과와 같은지(문서 어긋남 방지)와 키캡·이스케이프·목차·경고/ASCII 상자·목록 안 코드 울타리 변환 규칙 |
 | `tests/mnote.test.js` | `.mnote` 직렬화 안정성, 지원하지 않는 버전·블록 거부, 블록 본문 검색 규칙 |
+| `tests/music-model.test.js` | `.msheet` 직렬화 안정성·재열기, 서명·버전·음표 종류 거부, 점음표·마디 틱, 음높이→MIDI→주파수, 조표별 임시표 표시 규칙, 마디 채움 검사, 재생 타임라인(전체·부분·덜 찬 마디), 오선 줄 값 ↔ 음높이 왕복, ↑↓ 한 음 이동과 음역 한계, 조표 변경 시 임시표 없던 음만 따라감, 폭·음표 수에 따른 줄 나누기 |
+| `tests/music-audio.test.js` | 가짜 AudioContext로 확인하는 예약 시각·주파수, 쉼표 건너뛰기, 엔벨로프가 0에서 시작해 0으로 끝나고 시각이 역전되지 않음, 짧은 음표 엔벨로프 잘림, WAV 헤더·16bit 샘플 변환 |
+| `tests/music-editor.test.js` | `.msheet` 접점 계약 — 확장자 분기·읽기 실패 시 텍스트 폴백, 새 문서 세 경로(명령 팔레트·사이드바·폴더 우클릭), `saveTextDoc` 재사용과 `.run-save`, VexFlow 지연 로드(MNLazy 묶음·manifest·라이선스 일치), 재생 중 `.is-running`으로 대기 화면 차단, 스크립트 로드 순서, VexFlow 5 camelCase 옵션, 도구상자 구성, 오선 클릭 삽입과 박자·음역 차단, `MNEditHistory` 스냅샷 규칙, 입력칸 안에서 단축키 무시, 조표·박자 변경 경로, 폭 기반 줄바꿈, 같은 문서 안에서 인쇄 |
 | `tests/native-folder-terminal.test.js` | EXE 폴더 열기의 실제 경로 전달과 Windows Shell 직접 호출 |
 | `tests/notebook-serialize.test.js` | ipynb 모델 왕복, 셀·출력·첨부·히스토리·자동 저장·커널 UI |
 | `tests/notebook-workspace-path.test.js` | 노트북 작업폴더와 출력 파일 경로 |
@@ -296,6 +302,7 @@ flowchart LR
 | Jupyter 셀 UI | `notebook-run.js`, `notebook-cells.js`, `notebook-model.js` |
 | 파일 비교(diff)·여러 파일 찾아 바꾸기 | `diff-viewer.js`, `batch-replace.js`, `office-replace.js`, `command-palette.js` |
 | 블록 문서(`.mnote`) | `mnote.js`, `documents.js`, `file-loaders.js` |
+| 악보(`.msheet`)·소리·WAV 저장 | `music-model.js`, `music-audio.js`, `music-editor.js`, `docs/악보-설계.md` |
 | 화이트보드 도구·우클릭 메뉴·집중 도구 | `whiteboard.js`, `board-render.js`, `docs/화이트보드-집중도구-설계.md` |
 | 과제(`.task`)·시험지(`.exam`) | `task-package.js`, `exam-paper.js`, `docs/시험지-설계.md` |
 | 대기 화면(화면보호기)·웹 주소 | `screensaver.js`, `state.js`(설정·주소 정규화), `app.js`(설정 화면) |

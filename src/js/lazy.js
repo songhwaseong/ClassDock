@@ -26,6 +26,8 @@ const MNLazy = (() => {
     yaml:        { label:"YAML 읽기·쓰기",     files:["js-yaml.min.js"] },
     exceljs:     { label:"엑셀 편집·저장",     files:["exceljs.min.js"] },
     hwp:         { label:"한글(HWP) 보기",     files:["hwp.global.js"] },
+    // 악보 조판(VexFlow). 음악 글꼴(Bravura)까지 담긴 배포본이라 네트워크 없이 그린다.
+    vexflow:     { label:"악보 그리기",        files:["vexflow-bravura.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },
     capture:     { label:"화면 캡처",          files:["html2canvas.min.js", "html-to-image.js"] },
     pptx:        { label:"PowerPoint 보기",

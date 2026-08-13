@@ -181,6 +181,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/></svg>
             <span>새 블록 문서(.mnote)</span>
           </button>
+          <button class="sb-menu-item" id="sbNewMusic" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
+            <span>새 악보(.msheet)</span>
+          </button>
           <button class="sb-menu-item" id="sbOpenLesson" type="button" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/><path d="M10.5 8.5v4l3.5-2z"/></svg>
             <span>리플레이 열기(.lesson)</span>
@@ -778,6 +782,9 @@ window.FileReaderJS = window.FileReaderJS || {
 <!-- 픽셀 펫 스프라이트(옵션에서 켤 때만 쓰는 그림) 자리. 단일 파일 빌드는 여기에 경로→데이터URL
      대응표를 JSON 블록으로 심는다. 펫이 꺼져 있으면(기본값) 이 블록은 읽히지도 파싱되지도 않는다. -->
 <!--MN_PET_SPRITES-->
+<!-- 악보 피아노 샘플 자리. 단일 파일 빌드는 실제 녹음 MP3를 실행되지 않는 JSON 블록으로
+     심고, 사용자가 피아노 음색을 처음 재생할 때만 읽고 디코딩한다. -->
+<!--MN_MUSIC_SAMPLES-->
 <!-- 자세한 사용법 문서 자리. 단일 파일 빌드는 사용법.html 을 통째로 심어, EXE 하나만 받은
      사용자도 도움말에서 바로 열 수 있게 한다(실행되지 않는 블록이라 시작 비용은 없다). -->
 <!--MN_MANUAL-->
@@ -841,6 +848,9 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/data-convert-ui.js"></script>
 <script src="src/js/scratchpad.js"></script>
 <script src="src/js/mnote.js"></script>
+<script src="src/js/music-model.js"></script>
+<script src="src/js/music-audio.js"></script>
+<script src="src/js/music-editor.js"></script>
 <script src="src/js/image-memo.js"></script>
 <script src="src/js/backup.js"></script>
 <script src="src/js/app.js"></script>

@@ -795,6 +795,63 @@
     font:14px/1.6 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
   table.mnote-table th .mnote-table-cell{font-weight:700}
   .mnote-table-cell:focus{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 0 0 0 2px var(--accent)}
+  /* ===== .msheet 악보 문서 ===== */
+  .music-doc{display:flex;flex-direction:column;height:100%;min-height:0}
+  .music-bar,.music-play{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .music-title{flex:1 1 200px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:600 15px/1.3 inherit}
+  .music-field{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+  .music-tempo,.music-range{width:64px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:5px 6px;font:inherit;font-size:12px}
+  .music-range{width:56px}
+  .music-timbre{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:5px 6px;font:inherit;font-size:12px}
+  .music-meta{font-size:12px;color:var(--muted)}
+  .music-btn,.music-save{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .music-btn:hover:not(:disabled),.music-save:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .music-btn:disabled{opacity:.4;cursor:not-allowed}
+  .music-save{font-weight:600;margin-left:auto}
+  .music-status{font-size:12px;color:var(--muted);margin-left:auto}
+  .music-zoom{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}
+  .music-zoom .music-btn{min-width:30px;padding:6px 8px}
+  .music-zoom-label{min-width:46px;text-align:center;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .music-notice{padding:6px 12px;font-size:12px;background:color-mix(in srgb,var(--warn,#d98324) 16%,transparent);
+    color:var(--ink);border-bottom:1px solid var(--border)}
+  .music-score{flex:1;min-height:0;overflow:auto;padding:12px;background:#fff}
+  /* VexFlow 는 검은 잉크로 그린다. 어두운 주제에서도 악보는 흰 종이 위에 두어 대비를 지킨다. */
+  .music-score svg{display:block;margin:0 auto}
+  .music-score.is-note-entry{cursor:crosshair}
+  .music-score.is-invalid-entry{cursor:not-allowed}
+  .music-score.is-pan-ready{cursor:grab}
+  .music-score.is-panning,.music-score.is-panning *{cursor:grabbing!important;user-select:none!important}
+  .music-pitch-guide{stroke:var(--accent);stroke-width:1.25;stroke-dasharray:4 5;opacity:.32;
+    pointer-events:none;vector-effect:non-scaling-stroke}
+  .music-pitch-guide.is-invalid{stroke:#dc2626;opacity:.4}
+  .music-solfege{font-family:"Noto Sans KR","Malgun Gothic",sans-serif;font-size:13px;font-weight:700;
+    fill:#2563eb;stroke:none;cursor:pointer;user-select:none}
+  .music-solfege.is-playing{fill:var(--accent)}
+  .music-solfege.is-selected{fill:#c2410c}
+  .music-note{cursor:pointer}
+  .music-note:hover{opacity:.65}
+  .music-note.is-playing path,.music-note.is-playing rect,.music-note.is-playing text{fill:var(--accent);stroke:var(--accent)}
+  .music-note.is-selected path,.music-note.is-selected rect,.music-note.is-selected text{fill:#c2410c;stroke:#c2410c}
+  .music-score.is-erasing{cursor:crosshair}
+  .music-score.is-erasing .music-note{cursor:crosshair}
+  .music-score.is-erasing .music-note:hover path,.music-score.is-erasing .music-note:hover rect{fill:#dc2626;stroke:#dc2626}
+  /* 도구상자 */
+  .music-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .music-group{display:flex;gap:2px}
+  .music-group .music-btn{border-radius:0;margin-left:-1px}
+  .music-group .music-btn:first-child{border-radius:7px 0 0 7px;margin-left:0}
+  .music-group .music-btn:last-child{border-radius:0 7px 7px 0}
+  .music-btn.is-on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .music-hint{font-size:11.5px;color:var(--muted);margin-left:auto}
+  .music-hover-readout{flex:1 1 250px;min-width:220px;text-align:right;font-variant-numeric:tabular-nums}
+  .music-history{display:flex;gap:2px}
+  .music-history .music-btn{width:30px;padding:6px 0;font-size:14px}
   @media(max-width:600px),(max-height:520px){
     .scratchpad,.image-memo{left:6px!important;top:6px!important;transform:none!important;
       width:calc(100vw - 12px)!important;height:calc(100vh - 12px)!important;
@@ -4460,9 +4517,17 @@
     body.board-printing>*{display:none!important}
     body.board-printing>.board-print{display:block!important}
     .board-print img{display:block;max-width:100%;height:auto;margin:0 auto}
+    /* 악보 인쇄(music-editor.js printScore) — 같은 문서 안에서 찍어야 Bravura 글꼴이 살아 있다. */
+    body.music-printing>*{display:none!important}
+    body.music-printing>.music-print{display:block!important}
+    .music-print h1{font-size:18px;margin:0 0 2px}
+    .music-print .music-print-sub{font-size:12px;color:#444;margin-bottom:10px}
+    .music-print svg{display:block;max-width:100%;height:auto}
+    .music-print .music-solfege{fill:#111}
   }
   /* 인쇄용 임시 레이어 — 화면에는 절대 보이지 않는다 */
   .board-print{display:none}
+  .music-print{display:none}
 
   /* ===== 스프레드시트 차트 모달 ===== */
   .chart-card{width:min(860px,96%);display:flex;flex-direction:column;gap:12px}

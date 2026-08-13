@@ -70,6 +70,9 @@
     "data-convert-ui.js",
     "scratchpad.js",
     "mnote.js",
+    "music-model.js",
+    "music-audio.js",
+    "music-editor.js",
     "image-memo.js",
     "backup.js",
     "app.js",
@@ -167,6 +170,9 @@
         "data-convert-ui.js",
         "scratchpad.js",
         "mnote.js",
+        "music-model.js",
+        "music-audio.js",
+        "music-editor.js",
         "image-memo.js",
         "backup.js",
         "app.js",
@@ -297,6 +303,17 @@
       "python-editor.js",
       "table-export.js"
     ],
+    "music-audio.js": [
+      "music-model.js"
+    ],
+    "music-editor.js": [
+      "documents.js",
+      "file-loaders.js",
+      "code-viewer.js",
+      "lazy.js",
+      "music-model.js",
+      "music-audio.js"
+    ],
     "exam-paper.js": [
       "documents.js",
       "file-loaders.js",
@@ -348,7 +365,8 @@
         "notebook-pdf-export.js",
         "image-memo.js",
         "backup.js",
-        "python-run-context.js"
+        "python-run-context.js",
+        "music-editor.js"
       ]
     },
     {
@@ -421,7 +439,8 @@
         "spreadsheet-viewer.js",
         "image-viewer.js",
         "whiteboard.js",
-        "mnote.js"
+        "mnote.js",
+        "music-editor.js"
       ]
     },
     {
@@ -433,6 +452,14 @@
         "notebook-cells.js",
         "scratchpad.js",
         "mnote.js"
+      ]
+    },
+    {
+      "name": "music-audio",
+      "file": "music-audio.js",
+      "publicApi": "MNMusicAudio",
+      "consumers": [
+        "music-editor.js"
       ]
     }
   ],
@@ -448,6 +475,12 @@
       "file": "jquery.min.js",
       "lazy": "pptx",
       "sha384": "sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs"
+    },
+    {
+      "src": "vendor/vexflow-bravura.min.js",
+      "file": "vexflow-bravura.min.js",
+      "lazy": "vexflow",
+      "sha384": "sha384-eVgY5nkAnSIGsItE78COaqJXhVabClly0vVcDkXMbaW4PRKzKyRqNXRXXWmWjVx0"
     },
     {
       "src": "vendor/jszip3.min.js",

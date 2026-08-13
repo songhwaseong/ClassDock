@@ -873,6 +873,8 @@
     "모든 기능을 예시와 함께 설명한 문서를 따로 엽니다": "Open a document explaining every feature with examples in a separate window",
     "자세한 사용법 문서": "Detailed guide",
     "새 블록 문서 (.mnote)": "New block document (.mnote)",
+    "새 악보 (.msheet)": "New music score (.msheet)",
+    "새 악보(.msheet)": "New music score (.msheet)",
     "제출본 일괄 검수 (.taskdone)": "Batch-review submissions (.taskdone)",
     "여러 파일 찾아 바꾸기": "Find and replace across files",
     "형식 변환 (JSON·CSV·표·마크다운)": "Convert format (JSON, CSV, table, Markdown)",

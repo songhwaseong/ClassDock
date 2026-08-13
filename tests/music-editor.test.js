@@ -1,0 +1,272 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+/* 악보 문서(.msheet)가 앱에 붙는 접점 계약. 편집기는 DOM·VexFlow 위에서 도는 코드라
+   여기서는 "어디에 어떻게 연결돼 있는가"를 지킨다(동작 확인은 브라우저에서). */
+
+const root = path.join(__dirname, "..");
+const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
+
+const manifest = JSON.parse(read("scripts.manifest.json"));
+const html = read("manneung-classroom.html");
+const editorSource = read("src/js/music-editor.js");
+const lazySource = read("src/js/lazy.js");
+
+test("확장자 .msheet 는 악보 편집기로 열린다", () => {
+  const loaders = read("src/js/file-loaders.js");
+  assert.match(loaders, /ext === "msheet" && typeof loadMusicSheet === "function"/);
+  assert.match(editorSource, /async function loadMusicSheet\(file, opts = \{\}\)/);
+  // 읽지 못하는 파일은 앱을 막지 않고 텍스트로 연다(다른 문서 종류와 같은 규칙).
+  assert.match(editorSource, /return typeof loadText === "function" \? loadText\(file, opts\) : null/);
+});
+
+test("새 악보는 명령 팔레트·사이드바·폴더 우클릭 세 곳에서 만든다", () => {
+  assert.match(read("src/js/command-palette.js"), /newMusicScratch/);
+  assert.match(read("src/js/app.js"), /sbNewMusic/);
+  assert.ok(html.includes('id="sbNewMusic"'), "사이드바 새로 만들기 버튼이 HTML 에 있어야 한다");
+  assert.match(read("src/js/documents.js"), /newMusicScratchInFolder/);
+  assert.match(editorSource, /function newMusicScratch\(\)/);
+  assert.match(editorSource, /function newMusicScratchInFolder\(folder\)/);
+});
+
+test("저장은 기존 문서 저장 경로(saveTextDoc)를 그대로 쓴다", () => {
+  // 원본 덮어쓰기·서버 저장·다운로드 세 경로를 다시 만들지 않는다.
+  assert.match(editorSource, /saveTextDoc\(json, doc, doc\.name\)/);
+  assert.match(editorSource, /const json = musicSerialize\(doc\.sheet\)/);
+  assert.match(editorSource, /markDocumentDirty/);
+  // Ctrl+S 는 전역 핸들러가 .run-save 버튼을 누르는 방식으로 연결된다.
+  assert.match(editorSource, /className = "run-save music-save"/);
+});
+
+test("VexFlow 는 시작할 때가 아니라 악보를 열 때 불러온다", () => {
+  assert.match(editorSource, /MNLazy\.tryNeed\("vexflow"\)/);
+  // MNLazy 묶음 · manifest · 실제 파일이 같은 것을 가리켜야 한다.
+  assert.match(lazySource, /vexflow:\s*\{[^}]*files:\["vexflow-bravura\.min\.js"\]/);
+  const vendor = manifest.vendorScripts.find((item) => item.file === "vexflow-bravura.min.js");
+  assert.ok(vendor, "manifest 에 VexFlow 가 등록돼야 한다");
+  assert.equal(vendor.lazy, "vexflow");
+  assert.ok(!html.includes('<script src="vendor/vexflow-bravura.min.js"></script>'),
+    "지연 로드 대상은 시작 시 로드하지 않는다");
+  assert.ok(fs.existsSync(path.join(root, "vendor/licenses/vexflow-5.0.0.txt")), "라이선스 파일이 있어야 한다");
+});
+
+test("재생 중에는 대기 화면(화면보호기)이 뜨지 않는다", () => {
+  // screensaverBusy() 는 <video>/<audio> 만 미디어로 보는데 Web Audio 는 그 검사에 걸리지 않는다.
+  // 대신 이미 "실행 중"으로 취급되는 .is-running 을 재생 동안 붙인다 — screensaver.js 는 고치지 않는다.
+  assert.match(editorSource, /classList\.toggle\("is-running", on\)/);
+  assert.match(read("src/js/screensaver.js"), /querySelector\("\.is-running"\)/);
+});
+
+test("악보 편집기는 모델·소리 엔진 뒤에 로드된다", () => {
+  const order = manifest.localScripts;
+  const at = (name) => order.indexOf(name);
+  assert.ok(at("music-model.js") >= 0 && at("music-audio.js") >= 0 && at("music-editor.js") >= 0);
+  assert.ok(at("music-model.js") < at("music-audio.js"));
+  assert.ok(at("music-audio.js") < at("music-editor.js"));
+  // HTML 태그 순서도 같아야 한다(tools/check-source.js 가 강제하는 계약).
+  assert.ok(html.indexOf('src/js/music-audio.js') < html.indexOf('src/js/music-editor.js'));
+});
+
+test("도구상자는 길이 5종·점·쉼표·임시표·지우개·마디·오선을 갖춘다", () => {
+  assert.match(editorSource, /const MUSIC_TOOL_VALUES = \[/);
+  for (const value of ["whole", "half", "quarter", "eighth", "16th"]){
+    assert.ok(editorSource.includes(`value:"${value}"`), `도구상자에 ${value} 가 있어야 한다`);
+  }
+  assert.match(editorSource, /tool\.dots = \(tool\.dots \+ 1\) % \(MUSIC_MAX_DOTS \+ 1\)/);
+  assert.match(editorSource, /tool\.rest = !tool\.rest/);
+  assert.match(editorSource, /function applyAccidental\(alter\)/);
+  assert.match(editorSource, /tool\.eraser = !tool\.eraser/);
+  assert.match(editorSource, /function addMeasure\(\)/);
+  assert.match(editorSource, /const addStaffBtn = musicButton\("＋오선"/);
+  assert.match(editorSource, /function addStaffLine\(\)/);
+  assert.match(editorSource, /musicMeasure\(\[\], \{ lineBreakBefore:true \}\)/);
+  assert.match(editorSource, /const removeStaffBtn = musicButton\("－오선"/);
+  assert.match(editorSource, /function removeStaffLine\(\)/);
+  assert.match(editorSource, /if \(sheet\.measures\[index\] && sheet\.measures\[index\]\.lineBreakBefore\)/);
+  assert.match(editorSource, /마지막 오선에 음표 또는 쉼표 \$\{noteCount\}개가 있어요/);
+  assert.match(editorSource, /function removeMeasure\(\)/);
+  assert.match(editorSource, /const solfegeBtn = musicButton\("계이름"/);
+  assert.match(editorSource, /sheet\.showSolfege = sheet\.showSolfege === false/);
+});
+
+test("새 음표는 현재 조표를 따르고 제자리표 선택과 미선택을 구분한다", () => {
+  // null=미선택, 0=제자리표. 0 하나로 합치면 사장조의 F가 F#이 아니라 F♮로 들어간다.
+  assert.match(editorSource, /accidental:null/);
+  assert.match(editorSource, /const keyAlter = musicKeyAlterations\(sheet\.key\)\[pitch\.step\] \|\| 0/);
+  assert.match(editorSource, /return tool\.accidental === null \? keyAlter : tool\.accidental/);
+  assert.match(editorSource, /alter:toolAlterForPitch\(pitch\)/);
+  assert.match(editorSource, /tool\.accidental = null;\s*\/\/ 임시표는 한 번 쓰면 풀리고 다시 조표를 따른다/);
+});
+
+test("오선을 누르면 그 자리의 음높이로 음표가 들어가고, 가득 찬 마디는 막는다", () => {
+  // 클릭 y → 줄 값 → 음높이 변환은 모델(music-model.js)에 있고 편집기는 부르기만 한다.
+  assert.match(editorSource, /musicPitchFromStaveLine\(lineValue\)/);
+  assert.match(editorSource, /Math\.round\(\(\(point\.y - box\.topY\) \/ box\.spacing\) \* 2\) \/ 2/);
+  assert.match(editorSource, /getYForLine\(0\)/);
+  // 박자를 넘기는 입력은 넣지 않고 안내한다.
+  assert.match(editorSource, /if \(!musicCanFit\(sheet, measureIndex, note\)\)/);
+  // 음역 밖은 넣지 않는다.
+  assert.match(editorSource, /musicMidiInRange\(midi\)/);
+});
+
+test("오선 hover는 실제 입력될 계이름을 다른 영역에 보여주고 포인터 상태를 바꾼다", () => {
+  assert.match(editorSource, /const MUSIC_SOLFEGE_LABELS = \{ C:"도", D:"레", E:"미", F:"파", G:"솔", A:"라", B:"시" \}/);
+  assert.match(editorSource, /hint\.className = "music-hint music-hover-readout"/);
+  assert.match(editorSource, /scoreHost\.addEventListener\("pointermove"/);
+  assert.match(editorSource, /if \(!tool\.rest && !musicMidiInRange\(midi\)\)/);
+  assert.match(editorSource, /const point = scorePoint\(event\)/);
+  assert.match(editorSource, /const pitch = pitchAtScorePoint\(point, box\)/);
+  assert.match(editorSource, /alter:toolAlterForPitch\(pitch\)/);     // 조표·임시표까지 반영
+  assert.match(editorSource, /musicCanFit\(sheet, box\.index, preview\)/);
+  assert.match(editorSource, /입력 위치: /);
+  assert.match(editorSource, /scoreHost\.addEventListener\("pointerleave", \(\) => \{\s*resetHoverReadout\(\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-score\.is-note-entry\{cursor:crosshair\}/);
+  assert.match(css, /\.music-score\.is-invalid-entry\{cursor:not-allowed\}/);
+  assert.match(css, /\.music-note\{cursor:pointer\}/);
+});
+
+test("오선 위아래 hover는 현재 음높이를 옅은 가상 덧줄로 보여준다", () => {
+  assert.match(editorSource, /document\.createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "line"\)/);
+  assert.match(editorSource, /guide\.classList\.add\("music-pitch-guide"\)/);
+  assert.match(editorSource, /lineValue >= 0 && lineValue <= 4/); // 보이는 오선 안에서는 숨긴다.
+  assert.match(editorSource, /const y = box\.topY \+ lineValue \* box\.spacing/);
+  assert.match(editorSource, /pitchGuideEl\.setAttribute\("x1", String\(box\.x \+ 5\)\)/);
+  assert.match(editorSource, /pitchGuideEl\.classList\.toggle\("is-invalid", !!invalid\)/);
+  assert.match(editorSource, /if \(tool\.rest\) hidePitchGuide\(\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-pitch-guide\{stroke:var\(--accent\);stroke-width:1\.25;stroke-dasharray:4 5;opacity:\.32/);
+  assert.match(css, /pointer-events:none/);
+  assert.match(css, /\.music-pitch-guide\.is-invalid\{stroke:#dc2626;opacity:\.4\}/);
+});
+
+test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표시하고 선택·재생·인쇄와 함께 움직인다", () => {
+  assert.match(editorSource, /const MUSIC_LINE_HEIGHT = 145/);
+  assert.match(editorSource, /const solfegePlaces = \[\]/);
+  assert.match(editorSource, /solfegePlaces\.push\(\{ note, index, x:staveNote\.getAbsoluteX\(\), y:bottomY \+ 42 \}\)/);
+  assert.match(editorSource, /document\.createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "text"\)/);
+  assert.match(editorSource, /MUSIC_SOLFEGE_LABELS\[place\.note\.step\]/);
+  assert.match(editorSource, /if \(sheet\.showSolfege !== false && !note\.rest && scoreSvg\)/);
+  assert.match(editorSource, /for \(const el of solfegeEls\.values\(\)\) el\.classList\.remove\("is-selected"\)/);
+  assert.match(editorSource, /for \(const el of solfegeEls\.values\(\)\) el\.classList\.remove\("is-playing"\)/);
+  assert.match(editorSource, /sheet\.showSolfege = restored\.showSolfege/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-solfege\{[^}]*font-size:13px[^}]*fill:#2563eb/);
+  assert.match(css, /\.music-print \.music-solfege\{fill:#111\}/);
+});
+
+test("되돌리기는 공용 MNEditHistory 로 하고 악보 JSON 을 스냅샷으로 쓴다", () => {
+  assert.match(editorSource, /MNEditHistory\.create\(\{/);
+  assert.match(editorSource, /capture:\(\) => musicSerialize\(sheet\)/);
+  assert.match(editorSource, /isEqual:\(a, b\) => a === b/);
+  // 되돌리는 중 일어난 변경을 다시 기록하면 스택이 꼬인다.
+  assert.match(editorSource, /if \(history && !history\.isApplying\(\)\) history\.commit\(\)/);
+  // 제목 타자는 한 단계로 묶는다.
+  assert.match(editorSource, /history\.commitSoon\(MUSIC_TYPING_DELAY\)/);
+  // 저장으로 updatedAt 이 바뀌면 현재 스냅샷도 새 저장본과 맞춰야 이후 Undo가 깨끗한 상태로 돌아온다.
+  assert.match(editorSource, /doc\._musicHistory\.replaceCurrent\(json\)/);
+  // 박자·조표 Undo 뒤 선택 상자도 복원된 모델과 같아야 한다.
+  assert.match(editorSource, /timeSelect\.value = `\$\{sheet\.time\.beats\}\/\$\{sheet\.time\.beatValue\}`/);
+  assert.match(editorSource, /keySelect\.value = sheet\.key/);
+  const boundary = manifest.moduleBoundaries.find((item) => item.file === "history.js");
+  assert.ok(boundary.consumers.includes("music-editor.js"));
+});
+
+test("자판 단축키는 입력칸 안에서는 동작하지 않는다", () => {
+  assert.match(editorSource, /function editableTarget\(target\)/);
+  assert.match(editorSource, /if \(editableTarget\(event\.target\)\) return;/);
+  assert.match(editorSource, /if \(doc\.el\.hidden\) return;/);      // 다른 문서를 보고 있을 때 가로채지 않는다
+  for (const key of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Delete", "Escape"]){
+    assert.ok(editorSource.includes(`"${key}"`), `${key} 처리가 있어야 한다`);
+  }
+  assert.match(editorSource, /document\.removeEventListener\("keydown", onKeyDown, true\)/);
+});
+
+test("조표·박자표는 화면에서 바꾸고, 조표는 소리까지 맞춘다", () => {
+  assert.match(editorSource, /musicRetuneForKey\(sheet, keySelect\.value\)/);
+  assert.match(editorSource, /const MUSIC_TIME_CHOICES = \["2\/4", "3\/4", "4\/4", "6\/8"\]/);
+  assert.match(editorSource, /sheet\.time = \{ beats, beatValue \}/);
+  // 박자를 줄이면 넘치는 마디가 생길 수 있다 — 막지 않고 알린다(되돌리기로 취소).
+  assert.match(editorSource, /박자와 맞지 않는 마디는 아래에 표시했어요/);
+});
+
+test("실제 피아노 음색은 기본 선택이며 재생 준비와 WAV 실패를 안내한다", () => {
+  assert.match(editorSource, /piano:"피아노\(추천\)"/);
+  assert.match(editorSource, /async function startPlay\(range\)/);
+  assert.match(editorSource, /status\.textContent = "피아노 음원 준비 중…"/);
+  assert.match(editorSource, /await MNMusicAudio\.play\(sheet/);
+  assert.match(editorSource, /피아노 음원을 읽지 못해 삼각파로 재생해요/);
+  assert.match(editorSource, /MNMusicAudio\.renderWav\(sheet, \{/);
+  assert.match(editorSource, /피아노 음원을 읽지 못해 삼각파 WAV로 저장해요/);
+});
+
+test("줄 나누기는 화면 폭을 따라간다", () => {
+  assert.match(editorSource, /musicPackLines\(sheet\.measures, width - 20\)/);
+  assert.match(editorSource, /const scoreHeight = layout\.length \* MUSIC_LINE_HEIGHT \+ 30/);
+  assert.match(editorSource, /renderer\.resize\(width, scoreHeight\)/);
+  // 고정 4마디 배치는 더 쓰지 않는다.
+  assert.doesNotMatch(editorSource, /MUSIC_BARS_PER_LINE/);
+  assert.match(editorSource, /new ResizeObserver\(scheduleRedraw\)/);
+});
+
+test("악보 배율은 버튼·Ctrl+휠·자판으로 바꾸고 포인터 위치를 지킨다", () => {
+  assert.match(editorSource, /const MUSIC_ZOOM_MIN = 0\.5/);
+  assert.match(editorSource, /const MUSIC_ZOOM_MAX = 2/);
+  assert.match(editorSource, /zoomWrap\.append\(zoomOutBtn, zoomLabel, zoomInBtn, zoomFitBtn\)/);
+  assert.match(editorSource, /scoreHost\.addEventListener\("wheel", \(event\) => \{/);
+  assert.match(editorSource, /if \(!\(event\.ctrlKey \|\| event\.metaKey\)\) return/);
+  assert.match(editorSource, /\}, \{ passive:false \}\)/);
+  assert.match(editorSource, /svg\.style\.width = Math\.max\(1, Math\.round\(baseWidth \* scoreZoom\)\)/);
+  assert.match(editorSource, /scoreHost\.scrollLeft \+=/);
+  assert.match(editorSource, /scoreHost\.scrollTop \+=/);
+  // 다시 그린 SVG에도 현재 배율이 살아 있어야 한다.
+  assert.match(editorSource, /svg\.dataset\.musicBaseWidth = String\(width\)/);
+  assert.match(editorSource, /applyScoreZoom\(\);\s*paintSelection\(\)/);
+  // 배율은 보기 상태이므로 touch/history 커밋 경로를 타지 않는다.
+  assert.doesNotMatch(editorSource.match(/function setScoreZoom[\s\S]*?\n  \}/)[0], /touch\(|history\.commit/);
+});
+
+test("확대된 악보의 입력 영역 밖은 손바닥 드래그로 상하좌우 이동한다", () => {
+  assert.match(editorSource, /function scoreHasOverflow\(\)/);
+  assert.match(editorSource, /return !target && !staveBoxAtPoint\(scorePoint\(event\)\)/);
+  assert.match(editorSource, /scoreHost\.addEventListener\("pointerdown"/);
+  assert.match(editorSource, /Math\.abs\(dx\) \+ Math\.abs\(dy\) < 4/);
+  assert.match(editorSource, /scoreHost\.scrollLeft = scorePan\.left - dx/);
+  assert.match(editorSource, /scoreHost\.scrollTop = scorePan\.top - dy/);
+  assert.match(editorSource, /scoreHost\.setPointerCapture\(event\.pointerId\)/);
+  assert.match(editorSource, /if \(suppressScoreClick\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-score\.is-pan-ready\{cursor:grab\}/);
+  assert.match(css, /\.music-score\.is-panning,.music-score\.is-panning \*\{cursor:grabbing!important/);
+});
+
+test("인쇄는 같은 문서 안에서 찍어 악보 글꼴을 지킨다", () => {
+  // 새 창·iframe 으로 SVG 만 옮기면 Bravura 글꼴이 없어 음표가 깨진다.
+  assert.doesNotMatch(editorSource, /window\.open|createElement\("iframe"\)/);
+  assert.match(editorSource, /document\.body\.classList\.add\("music-printing"\)/);
+  assert.match(editorSource, /window\.addEventListener\("afterprint", cleanup\)/);
+  assert.match(editorSource, /copy\.style\.removeProperty\("width"\)/);
+  assert.match(editorSource, /copy\.style\.removeProperty\("height"\)/);
+  assert.match(editorSource, /doc\.printScore = printScore/);
+  // 머리말 인쇄 버튼도 같은 경로로 들어온다(화이트보드와 같은 방식).
+  assert.match(read("src/js/app.js"), /state\.kind === "music" && typeof state\.printScore === "function"/);
+  const css = read("src/styles.css");
+  assert.match(css, /body\.music-printing>\*\{display:none!important\}/);
+  assert.match(css, /body\.music-printing>\.music-print\{display:block!important\}/);
+});
+
+test("조판은 VexFlow 5 API 로 부르고, 실패해도 문서를 열 수 있다", () => {
+  // v5 는 옵션 이름이 camelCase 다(autoBeam). snake_case 로 부르면 조용히 무시된다.
+  assert.match(editorSource, /VF\.Formatter\.FormatAndDraw\(context, stave,/);
+  assert.match(editorSource, /\{ autoBeam:true, alignRests:true \}/);
+  assert.doesNotMatch(editorSource, /auto_beam|align_rests|num_beats|beat_value/);
+  assert.match(editorSource, /new VF\.Stave\(x, y, staveWidth\)/);
+  assert.match(editorSource, /VF\.Renderer\.Backends\.SVG/);
+  assert.match(editorSource, /VF\.Dot\.buildAndAttach/);
+  // 그리기가 실패해도 재생·저장은 살아 있어야 한다.
+  assert.match(editorSource, /catch\(error\)\{\s*console\.warn\("악보를 그리지 못했습니다:"/);
+});

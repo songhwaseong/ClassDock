@@ -2447,6 +2447,9 @@ function openSidebarGroupMenu(node, x, y){
   add("+Mn  새 블록 문서", () => {
     if (typeof newMnoteScratchInFolder === "function") newMnoteScratchInFolder(node.newPythonContext);
   });
+  add("+Ms  새 악보", () => {
+    if (typeof newMusicScratchInFolder === "function") newMusicScratchInFolder(node.newPythonContext);
+  });
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {
       if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
