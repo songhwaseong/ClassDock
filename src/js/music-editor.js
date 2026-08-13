@@ -13,6 +13,7 @@ const MUSIC_GRAND_LINE_HEIGHT = 330;
 const MUSIC_STAFF_GAP = 92;
 const MUSIC_SCORE_MIN_WIDTH = 480;
 const MUSIC_REDRAW_DELAY = 180;     // 창 크기 변경 뒤 다시 그리기까지(매 픽셀마다 재조판하면 무겁다)
+const MUSIC_RECOVERY_DELAY = 1500;  // 편집이 멈춘 뒤 복구본을 남기기까지(.mnote 와 같은 간격)
 const MUSIC_ZOOM_MIN = 0.5;
 const MUSIC_ZOOM_MAX = 2;
 const MUSIC_ZOOM_STEP = 0.1;
@@ -93,7 +94,12 @@ async function saveMusicSheet(doc){
     if (doc._musicHistory && typeof doc._musicHistory.replaceCurrent === "function"){
       doc._musicHistory.replaceCurrent(json);
     }
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+    // 자동 복원은 문서를 열 때 담아 둔 File 바이트로 되살린다. 저장했다고 그 사본이 저절로 바뀌지는
+    // 않으므로(saveTextDoc 은 디스크에만 쓴다) 여기서 작업공간 사본까지 새 내용으로 바꿔 준다.
+    // 이걸 빠뜨리면 저장한 악보가 다음 실행 때 "만들 때의 빈 악보"로 되돌아온다(표·이미지와 같은 경로).
+    if (typeof markDocumentSavedSnapshot === "function"){
+      await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json");
+    } else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
   } else {
     // 취소·실패한 저장이 메타데이터만 몰래 바꾸지 않게 원래 시각을 복원한다.
     doc.sheet.updatedAt = previousUpdatedAt;
@@ -169,8 +175,41 @@ async function mountMusicEditor(doc){
   // null 은 임시표 미선택, 0 은 사용자가 고른 제자리표다. 둘을 나눠야 새 음표가 현재 조표를 따른다.
   const tool = { value:"quarter", dots:0, rest:false, accidental:null, eraser:false, position:false, chord:false };
 
+  /* 저장하기 전에 창을 닫거나 갑자기 꺼져도 되살릴 수 있게 복구본을 남긴다.
+     PDF·노트북·표·이미지·블록 문서와 같은 경로(saveDocumentRecoverySnapshot)이고, 원본 파일은 건드리지 않는다. */
+  let recoveryTimer = 0;
+  const musicRecoveryBytes = () => {
+    try { return new TextEncoder().encode(musicSerialize(sheet)); } catch(_){ return null; }
+  };
+  const scheduleMusicRecovery = () => {
+    clearTimeout(recoveryTimer);
+    if (typeof appSettings !== "object" || !appSettings || !appSettings.pdfRecovery) return;
+    if (typeof saveDocumentRecoverySnapshot !== "function") return;
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = 0;
+      if (!doc.hasUnsavedEdits) return;
+      const bytes = musicRecoveryBytes();
+      if (bytes) saveDocumentRecoverySnapshot(doc, bytes, "application/json").catch(() => {});
+    }, MUSIC_RECOVERY_DELAY);
+  };
+  const flushMusicBackup = () => {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = 0;
+    if (!doc.hasUnsavedEdits || typeof saveDocumentRecoverySnapshot !== "function") return true;
+    const bytes = musicRecoveryBytes();
+    return bytes ? saveDocumentRecoverySnapshot(doc, bytes, "application/json") : true;
+  };
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.flushBackupRecovery = flushMusicBackup;
+  doc.cleanupFns.push(() => {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = 0;
+    if (doc.flushBackupRecovery === flushMusicBackup) delete doc.flushBackupRecovery;
+  });
+
   const touch = () => {
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, musicSerialize(sheet) !== doc.savedText);
+    scheduleMusicRecovery();
   };
 
   /* ----- 상단 바 ----- */

@@ -306,7 +306,12 @@ async function saveMnote(doc){
   const ok = (typeof saveTextDoc === "function") ? await saveTextDoc(json, doc, doc.name) : false;
   if (ok){
     doc.savedText = json;
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+    // saveTextDoc 은 디스크에만 쓴다. 복구본은 편집이 멈춘 뒤(MNOTE_RECOVERY_DELAY) 남기므로
+    // 편집 직후 바로 저장하면 그 타이머가 hasUnsavedEdits=false 를 보고 건너뛰어 작업공간 사본이
+    // 저장 직전 상태로 남는다 → 다음 실행 때 마지막 편집분이 사라진다. 여기서 사본까지 맞춰 준다.
+    if (typeof markDocumentSavedSnapshot === "function"){
+      await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json");
+    } else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
   }
   return ok;
 }

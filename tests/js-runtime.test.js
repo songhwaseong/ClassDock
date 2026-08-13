@@ -520,6 +520,14 @@ test("js 편집기의 채점 버튼은 파이썬 테스트 창을 쓰되 저장 
   assert.match(runtimeSrc, /renderAssignmentGradingResult\(outPanel, report,/);
 });
 
+test("js 편집기의 저장은 자동 복원 사본까지 갱신한다", () => {
+  // saveTextDoc 은 디스크에만 쓴다. 편집 직후 저장하면 디바운스 복구 스냅샷도 건너뛰므로
+  // 저장 자리에서 공용 헬퍼로 작업공간 사본을 저장한 내용으로 바꿔야 한다(악보·.mnote 와 같은 경로).
+  const editorSource = fs.readFileSync(path.join(root, "src/js/js-editor.js"), "utf8");
+  const calls = editorSource.match(/markDocumentSavedSnapshot\(ownerDoc, new TextEncoder\(\)\.encode\(value\), "text\/plain;charset=utf-8"\)/g) || [];
+  assert.equal(calls.length, 2, "저장 버튼과 자동 저장 두 곳 모두에서 사본을 갱신한다");
+});
+
 test("셀 변환은 맨 바깥 선언만 var 로 바꾼다", () => {
   const transform = loadRuntime().get("transformJsCellSource");
   const code = (src) => transform(src).code;

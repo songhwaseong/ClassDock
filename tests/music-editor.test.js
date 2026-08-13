@@ -485,3 +485,21 @@ test("MIDI 건반 입력은 모델의 음이름 표기를 함께 쓴다", () => 
   assert.doesNotMatch(editorSource, /\[\["C",0\],\["C",1\],\["D",0\]/);
   assert.match(read("src/js/music-model.js"), /function musicPitchFromMidi\(midi, preferFlats\)/);
 });
+
+test("저장·편집 중 내용이 자동 복원 사본에도 반영된다", () => {
+  // saveTextDoc 은 디스크에만 쓴다. 작업공간 사본을 갱신하지 않으면 다음 실행 때
+  // "만들 때의 빈 악보"가 되살아난다 — 표·이미지와 같은 공용 헬퍼로 사본까지 바꾼다.
+  assert.match(editorSource, /markDocumentSavedSnapshot\(doc, new TextEncoder\(\)\.encode\(json\), "application\/json"\)/);
+  // 저장 전에 꺼져도 복구되도록 편집이 멈추면 복구본을 남긴다(.mnote 와 같은 경로·간격).
+  assert.match(editorSource, /const MUSIC_RECOVERY_DELAY = 1500;/);
+  assert.match(editorSource, /saveDocumentRecoverySnapshot\(doc, bytes, "application\/json"\)/);
+  assert.match(editorSource, /appSettings\.pdfRecovery/);
+  assert.match(editorSource, /doc\.flushBackupRecovery = flushMusicBackup/);
+  // 편집이 일어나는 자리(touch)에서 예약하고, 문서를 닫을 때 타이머를 정리한다.
+  assert.match(editorSource, /markDocumentDirty\(doc, musicSerialize\(sheet\) !== doc\.savedText\);\s*\n\s*scheduleMusicRecovery\(\);/);
+  assert.match(editorSource, /doc\.cleanupFns\.push\(\(\) => \{\s*\n\s*clearTimeout\(recoveryTimer\);/);
+  // 공용 헬퍼는 documents.js 것을 쓴다(같은 기능을 다시 만들지 않는다).
+  const documents = read("src/js/documents.js");
+  assert.match(documents, /async function markDocumentSavedSnapshot\(doc, bytes, type\)/);
+  assert.match(documents, /async function saveDocumentRecoverySnapshot\(doc, bytes, type\)/);
+});

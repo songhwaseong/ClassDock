@@ -459,6 +459,10 @@ function renderJsRunnable(context){
       const ok = await saveTextDoc(value, ownerDoc, ownerDoc.name || saveName, { silent:true, existingOnly:true });
       if (ok === true){
         savedValue = value;
+        // 자동 저장도 디스크에만 쓴다 — 저장 버튼과 같은 헬퍼로 작업공간 사본까지 맞춘다.
+        if (typeof markDocumentSavedSnapshot === "function"){
+          await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(value), "text/plain;charset=utf-8");
+        }
         refreshEditState();
         ownerDoc._jsAutosaveFailureNotified = false;
       } else if (ok !== "skipped" && !ownerDoc._jsAutosaveFailureNotified){
@@ -503,6 +507,11 @@ function renderJsRunnable(context){
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
       clearPythonDraft(draftKey);
+      // saveTextDoc 은 디스크에만 쓰므로 자동 복원용 작업공간 사본은 그대로 남는다.
+      // 편집 직후 저장하면 디바운스 복구 스냅샷도 건너뛰므로 여기서 사본을 저장한 내용으로 맞춘다.
+      if (ownerDoc && typeof markDocumentSavedSnapshot === "function"){
+        await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(value), "text/plain;charset=utf-8");
+      }
       refreshEditState();                        // 사이드바·탭의 저장 표시는 markDocumentDirty 가 갱신한다
     } finally { saveBtn.disabled = false; }
   });

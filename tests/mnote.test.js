@@ -107,3 +107,10 @@ test("사이드바 아래 + 메뉴에서 새 .mnote 문서를 만들 수 있다"
   assert.match(app, /byId\("sbNewMnote"\)\.onclick[\s\S]*newMnoteScratch\(\)/);
   assert.match(app, /const items = \[[^\]]*byId\("sbNewMnote"\)/);
 });
+
+test("저장한 .mnote 는 자동 복원 사본에도 반영된다", () => {
+  // saveTextDoc 은 디스크에만 쓴다. 편집 직후 저장하면 MNOTE_RECOVERY_DELAY 타이머가
+  // hasUnsavedEdits=false 를 보고 건너뛰므로, 저장 자리에서 작업공간 사본까지 맞춰야 한다.
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/mnote.js"), "utf8");
+  assert.match(source, /markDocumentSavedSnapshot\(doc, new TextEncoder\(\)\.encode\(json\), "application\/json"\)/);
+});
