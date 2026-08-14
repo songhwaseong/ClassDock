@@ -75,7 +75,7 @@ def make_pdf():
         c.setFont(F, 9); c.setFillColorRGB(.45, .45, .45)
         c.drawCentredString(W / 2, 30, "- %d -" % n); c.setFillColorRGB(0, 0, 0)
 
-    c.setFont(F, 22); c.drawString(60, H - 90, "만능파일교실 PDF 테스트 문서")
+    c.setFont(F, 22); c.drawString(60, H - 90, "ClassDock PDF 테스트 문서")
     c.setFont(F, 11)
     lines = [
         "이 문서는 PDF 보기·편집 기능을 확인하려고 만든 샘플입니다.",
@@ -154,7 +154,7 @@ def make_docx():
                    for i, row in enumerate(table_rows)) +
            "</w:tbl>")
 
-    body = (para("만능파일교실 Word 테스트 문서", "Heading1")
+    body = (para("ClassDock Word 테스트 문서", "Heading1")
             + para("이 파일은 .docx 미리보기를 확인하려고 만든 샘플입니다.")
             + para("굵은 글씨 문단입니다.", bold=True)
             + para("글자 크기를 키운 문단입니다.", size=18)
@@ -208,7 +208,7 @@ def make_doc_legacy():
     """구형 .doc 은 단위 테스트 픽스처(build-doc.js)를 node 로 그대로 쓴다 — 규격을 두 벌 두지 않는다."""
     script = os.path.join(REPO, "tests", "fixtures", "build-doc.js").replace("\\", "/")
     target = p("문서-구형샘플.doc").replace("\\", "/")
-    text = ("만능파일교실 구형 워드(.doc) 테스트 문서입니다. 이 뷰어는 글자만 뽑아 보여 줍니다"
+    text = ("ClassDock 구형 워드(.doc) 테스트 문서입니다. 이 뷰어는 글자만 뽑아 보여 줍니다"
             "(표·그림·서식 제외). 통합 검색으로 구형워드검색테스트 를 찾아보세요.")
     js = ("const {buildWordDoc}=require(%s);require('fs').writeFileSync(%s,Buffer.from(buildWordDoc({text:%s})));"
           % (json.dumps(script), json.dumps(target), json.dumps(text)))
@@ -285,7 +285,7 @@ def make_pptx():
     from pptx.enum.shapes import MSO_SHAPE
     prs = Presentation()
     s = prs.slides.add_slide(prs.slide_layouts[0])
-    s.shapes.title.text = "만능파일교실 발표 자료 샘플"
+    s.shapes.title.text = "ClassDock 발표 자료 샘플"
     s.placeholders[1].text = "PPTX 미리보기 확인용 · 2026"
 
     s = prs.slides.add_slide(prs.slide_layouts[1])
@@ -337,7 +337,7 @@ def make_hwpx():
     tbl = "<hp:tbl>" + "".join("<hp:tr>%s</hp:tr>" % "".join(tcell(c) for c in r) for r in rows) + "</hp:tbl>"
 
     section = ('<?xml version="1.0" encoding="UTF-8"?><hs:sec %s>' % NS
-               + para("만능파일교실 HWPX 테스트 문서", cid="2", pid="1")
+               + para("ClassDock HWPX 테스트 문서", cid="2", pid="1")
                + para("")
                + para("이 파일은 .hwpx 간이 미리보기를 확인하려고 만든 샘플입니다.")
                + para("굵은 글씨 · 색 글씨도 확인해 보세요.", cid="3")
@@ -382,7 +382,7 @@ def make_hwpx():
         z.writestr("Contents/section0.xml", section)
         # 본문 파싱이 실패해도 텍스트 미리보기로 폴백되는지 함께 확인할 수 있게 넣어 둔다.
         z.writestr("Preview/PrvText.txt",
-                   "만능파일교실 HWPX 테스트 문서\n간이 미리보기가 실패하면 이 텍스트가 보입니다.\n".encode("utf-8"))
+                   "ClassDock HWPX 테스트 문서\n간이 미리보기가 실패하면 이 텍스트가 보입니다.\n".encode("utf-8"))
     done("한글-샘플.hwpx")
 
 
@@ -677,7 +677,7 @@ def make_notebook():
         "cells": [
             md("# 주피터 노트북 테스트\n\n셀 편집·실행·순서 바꾸기를 확인하는 샘플입니다.\n\n"
                "- 코드 셀과 마크다운 셀이 섞여 있습니다\n- 셀별 실행과 커널 상태 유지를 확인해 보세요"),
-            code("이름 = '만능파일교실'\n합계 = sum(range(1, 101))\nprint(이름, '합계:', 합계)\n"),
+            code("이름 = 'ClassDock'\n합계 = sum(range(1, 101))\nprint(이름, '합계:', 합계)\n"),
             md("## 커널 상태 유지 확인\n\n위 셀에서 만든 변수를 아래 셀에서 그대로 씁니다."),
             code("print(이름[::-1])\nprint('합계의 두 배 =', 합계 * 2)\n"),
             md("## 그래프 출력"),
@@ -728,7 +728,7 @@ def make_db():
 def make_texts():
     write_text("마크다운-샘플.md", '''# 마크다운 테스트 문서
 
-만능파일교실의 **마크다운 렌더**를 확인하는 샘플입니다.
+ClassDock의 **마크다운 렌더**를 확인하는 샘플입니다.
 
 ## 목록
 
@@ -800,7 +800,7 @@ print(인사("선생님"))
     done("웹페이지-샘플.html")
 
     write_text("텍스트-샘플.txt", "\n".join(
-        ["만능파일교실 텍스트 파일 테스트", "=" * 34, "",
+        ["ClassDock 텍스트 파일 테스트", "=" * 34, "",
          "이 파일은 일반 텍스트 보기를 확인하는 샘플입니다.",
          "한글 · English · 123456 · !@#$%^&*() · 특수문자 ①②③ ㉠㉡ ★☆ ",
          "탭\t문자와\t줄맞춤도 확인해 보세요.", ""]
@@ -879,7 +879,7 @@ const 명단: 학생[] = [
     done("코드-샘플.ts")
 
     write_text("설정-샘플.json", json.dumps({
-        "이름": "만능파일교실 테스트 설정",
+        "이름": "ClassDock 테스트 설정",
         "버전": "1.0.0",
         "사용": True,
         "허용확장자": ["pdf", "docx", "xlsx", "pptx", "hwpx", "py", "ipynb"],
@@ -968,7 +968,7 @@ LIMIT 10;
     done("데이터-샘플.xml")
 
     write_text("설정-샘플.yaml", '''# YAML 구문 강조 확인용 샘플
-이름: 만능파일교실
+이름: ClassDock
 버전: 1.0.0
 사용: true
 
@@ -1036,7 +1036,7 @@ def make_lesson():
     t += 1200
 
     write_text("수업리플레이-샘플.lesson", json.dumps(
-        {"format": "manneung-lesson", "version": 1, "kind": "board",
+        {"format": "classdock-lesson", "version": 1, "kind": "board",
          "createdAt": int(time.time() * 1000), "bg": "#ffffff", "W": 1280, "H": 720,
          "duration": t, "keyframes": keyframes}, ensure_ascii=False))
     done("수업리플레이-샘플.lesson")
@@ -1046,7 +1046,7 @@ def make_task():
     """src/js/task-package.js 의 validateTaskPayload 가 받는 스키마(숨김 테스트·첨부 포함)."""
     data_csv = "이름,점수\n김하늘,92\n이바다,78\n박구름,85\n최나무,61\n정바람,99\n"
     task = {
-        "format": "manneung-task", "version": 1, "id": "sample-task-0001",
+        "format": "classdock-task", "version": 1, "id": "sample-task-0001",
         "meta": {"title": "평균 구하기", "author": "선생님", "createdAt": "2026-08-06"},
         "problem": {"md": """# 평균 구하기
 
@@ -1096,7 +1096,7 @@ def make_mnote():
     src = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
     now = int(time.time() * 1000)
     write_text("블록문서-샘플.mnote", json.dumps({
-        "format": "manneung-note", "version": 1, "title": "블록 문서 샘플",
+        "format": "classdock-note", "version": 1, "title": "블록 문서 샘플",
         "createdAt": now, "updatedAt": now,
         "blocks": [
             {"id": "text-1", "type": "text",
@@ -1141,7 +1141,7 @@ def make_archives():
 
 # ---------------------------------------------------------------- 안내 문서
 def make_readme():
-    write_text("00-읽어보세요.md", '''# 만능파일교실 테스트 파일 모음
+    write_text("00-읽어보세요.md", '''# ClassDock 테스트 파일 모음
 
 이 폴더 하나를 프로그램에 **드래그**하거나 **열기 → 폴더 열기(Ctrl+Shift+O)** 로 열면,
 지원하는 형식을 한 번에 확인할 수 있습니다.

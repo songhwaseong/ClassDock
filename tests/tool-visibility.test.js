@@ -10,7 +10,7 @@ const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf
 const codeViewerSource = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
 const notebookSource = fs.readFileSync(path.join(__dirname, "../src/js/notebook-run.js"), "utf8");
 const imageSource = fs.readFileSync(path.join(__dirname, "../src/js/image-viewer.js"), "utf8");
-const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+const htmlSource = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
 const cssSource = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 
 // state.js 에서 레지스트리와 정규화 함수만 떼어내 실행한다(문서·localStorage 없이 검증).

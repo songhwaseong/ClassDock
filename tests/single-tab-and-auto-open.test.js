@@ -8,7 +8,7 @@ const documents = read("src/js/documents.js");
 const loaders = read("src/js/file-loaders.js");
 const state = read("src/js/state.js");
 const app = read("src/js/app.js");
-const shell = read("manneung-classroom.html");
+const shell = read("classdock.html");
 const styles = read("src/styles.css");
 
 test("탭바는 파일이 하나만 열려 있어도 보인다", () => {

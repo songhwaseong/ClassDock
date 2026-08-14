@@ -6,7 +6,7 @@
 
 const JS_DRAFT_DELAY = 700;      // 편집이 멈춘 뒤 초안(localStorage) 저장까지 기다리는 시간
 const JS_AUTOSAVE_DELAY = 3000;  // 편집이 멈춘 뒤 파일 자동 저장까지(텍스트 편집기와 같은 간격)
-const JS_GRADE_PREFIX = "pdf-signer-js-grade:";   // 파일마다 채점 테스트를 저장하는 키(파이썬과 분리)
+const JS_GRADE_PREFIX = "classdock-js-grade:";   // 파일마다 채점 테스트를 저장하는 키(파이썬과 분리)
 
 // 일반 .js 실행 화면과 JavaScript 노트북이 함께 쓰는 라이브러리 선택 팝오버.
 // 선택은 문서별 localStorage에 저장하고, 로컬 파일 원문도 같은 상태에 넣는다.
@@ -162,7 +162,7 @@ function buildJsLibraryPicker(bar, button, storageKey, options){
     if (destroyed) return;
     if (!status.available){
       npmStatus.textContent = status.reason === "not-exe"
-        ? "npm 설치는 만능파일교실 EXE에서만 사용할 수 있어요."
+        ? "npm 설치는 ClassDock EXE에서만 사용할 수 있어요."
         : "Node.js 또는 npm을 찾지 못했어요. Node.js LTS 설치 후 EXE를 다시 열어 주세요.";
       npmLoaded = true; npmInstalled = []; renderNpmList();
       return;

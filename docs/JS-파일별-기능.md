@@ -2,13 +2,13 @@
 
 **최종 업데이트: 2026년 8월 12일**
 
-이 문서는 만능파일교실의 JavaScript 파일이 각각 어떤 기능을 담당하는지 빠르게 찾기 위한 유지보수용 색인입니다. 기능을 추가하거나 파일 책임이 바뀌면 해당 행과 날짜를 함께 갱신합니다.
+이 문서는 ClassDock의 JavaScript 파일이 각각 어떤 기능을 담당하는지 빠르게 찾기 위한 유지보수용 색인입니다. 기능을 추가하거나 파일 책임이 바뀌면 해당 행과 날짜를 함께 갱신합니다.
 
 ## 가장 먼저 알아둘 점
 
 - 앱 실행 코드의 원본은 `src/js/*.js`입니다.
 - 실제 로딩 순서와 계층은 `scripts.manifest.json`이 기준입니다. 새 파일을 만들면 HTML에 태그만 추가하지 말고 manifest에도 등록해야 합니다.
-- `manneung-classroom-offline.html`과 `desktop/app.html`은 생성 파일입니다. 직접 수정하지 않습니다.
+- `classdock-offline.html`과 `desktop/app.html`은 생성 파일입니다. 직접 수정하지 않습니다.
 - 수정 후 `node build-offline.js`를 실행하면 모든 로컬·vendor JS가 오프라인 HTML 하나로 합쳐집니다.
 - 각 파일은 ES module이 아닌 전역 스크립트입니다. 이름 충돌과 로딩 순서가 중요하므로 `npm run check`로 전역 선언·의존성 계약을 확인합니다.
 - 자동 생성 파일인 `src/js/korean-font.js`는 직접 수정하지 않습니다.
@@ -33,7 +33,7 @@ flowchart LR
 | `i18n.js` | 한국어·영어 사전, 매개변수 번역, DOM 텍스트·title·aria 자동 번역과 언어 전환을 담당합니다. 사용자에게 보이는 새 문구를 추가하면 이 파일의 영문 사전도 확인합니다. | 모든 UI 파일, `app.js` |
 | `lazy.js` | 무거운 vendor 라이브러리를 시작할 때가 아니라 그 형식을 열 때 처음 불러오는 지연 로더(`MNLazy`)입니다. 엑셀·한글·PPT·Word·압축·캡처·맞춤법 사전 묶음과 로드 순서(JSZip 2.6.1 ↔ 3.x 교체)를 정의하며, 단일 파일 빌드에서는 `text/plain` 블록을, 서버 서빙에서는 `vendor/` 스크립트를 씁니다. 새 vendor 를 추가하면 `scripts.manifest.json`의 `lazy` 값과 이 파일의 묶음을 함께 맞춥니다. | `scripts.manifest.json`, `build-offline.js`, `spreadsheet-viewer.js`, `office-doc-viewers.js`, `tests/release-contract.test.js` |
 | `interaction-core.js` | 분할 학습 화면의 문서 교체·역할 전환, 참고 잠금 입력 허용, 내부 탭 드래그와 외부 파일·폴더 드롭 판정을 DOM 없이 계산하는 순수 모듈(`MNInteractionCore`)입니다. | `core.js`, `documents.js`, `app.js`, `tests/study-mode.test.js` |
-| `core.js` | 경로 정규화, 작업공간 마커, 인코딩 판별, Python 오류 설명·경로 분석, Markdown/HTML 살균, 코드 편집 순수 함수 등 여러 기능이 공유하는 기반 유틸리티 모음입니다. 기존 `PdfSignerCore` 공개 API를 유지하며 상호작용 판정은 `interaction-core.js`에서 받아 제공합니다. | `interaction-core.js`, `documents.js`, `python-run-context.js`, `tests/core.test.js` |
+| `core.js` | 경로 정규화, 작업공간 마커, 인코딩 판별, Python 오류 설명·경로 분석, Markdown/HTML 살균, 코드 편집 순수 함수 등 여러 기능이 공유하는 기반 유틸리티 모음입니다. 기존 `ClassDockCore` 공개 API를 유지하며 상호작용 판정은 `interaction-core.js`에서 받아 제공합니다. | `interaction-core.js`, `documents.js`, `python-run-context.js`, `tests/core.test.js` |
 | `icons.js` | 앱의 이모지형 버튼을 테마에 맞는 단색 SVG 아이콘으로 정리하고 동적으로 추가되는 UI도 관찰해 보정합니다. | UI를 만드는 모든 파일 |
 | `state.js` | 열린 문서·탭·사이드바·학습 화면의 전역 상태, 앱 설정과 단축키, 공용 토스트·로딩 UI를 관리합니다. | `documents.js`, `app.js`, `i18n.js` |
 | `history.js` | 편집기 공용 되돌리기·다시실행(`MNEditHistory`)입니다. 스냅샷 스택·상한(개수·총량)·redo 무효화·버튼 상태·연속 입력 묶기를 담당하고, 각 편집기는 capture·apply·isEqual 만 넘깁니다. PDF·표·노트북·이미지·화이트보드·파이썬 편집기가 모두 씁니다. | `pdf-recovery.js`, `spreadsheet-viewer.js`, `notebook-model.js`, `image-viewer.js`, `whiteboard.js`, `python-editor.js`, `tests/edit-history.test.js` |
@@ -82,7 +82,7 @@ flowchart LR
 |---|---|---|
 | `js-libraries.js` | 자바스크립트 실행용 오프라인 라이브러리 카탈로그(Lodash·Day.js·Papa Parse·Math.js), 문서별 선택·로컬 `.js` 보관, EXE의 npm 설치 캐시 조회·설치 진행/취소·삭제·번들 로드, Worker에 넣을 원문 준비와 전역 자동완성 목록을 담당합니다. npm 패키지는 런처가 고정된 esbuild로 브라우저용 번들을 만든 뒤 전달합니다. | `js-runtime.js`, `js-editor.js`, `lazy.js`, `scripts.manifest.json`, `desktop/launcher.cs`, `desktop/npm_package_runner.js` |
 | `js-runtime.js` | `.js`·`.mjs` 실행의 총괄입니다. 실행마다 Blob 워커를 새로 띄워 `console` 출력을 스트림(보통·경고·오류)별로 모으고, `input()`·`prompt()`를 입력값 칸과 잇고, 실행 전 문법 검사·스택에서 사용자 코드 줄 번호 찾기·10초 시간 제한·중지를 처리합니다. 출력은 모아 뒀다 한 번에 주지 않고 **실행 중에 조금씩 흘려보내서**(시간 80ms 또는 8KB 기준) 오래 걸리는 코드도 진행이 보이고, 중지하거나 시간이 넘어 워커를 끊어도 그때까지 찍힌 내용이 남습니다. 엔진이 문법 오류의 위치를 알려주지 않으므로 소스를 훑어 **닫히지 않은 괄호·따옴표의 줄**을 짚고, 자주 나는 오류에는 한국어 도움말 카드를 붙입니다. **자동완성**도 여기서 정합니다 — 낱말 목록은 이 실행 환경에서 실제로 되는 것만 담고(`document`·`require` 제외, `input`·`prompt` 포함), 점(`.`) 뒤 멤버는 잘 알려진 전역 카탈로그(`console`·`Math`·`JSON`…)와 리터럴 추론(배열·문자열·수·Map·Set·객체 리터럴의 키)으로 답합니다. 알 수 없으면 아무것도 내지 않습니다. 별도 런타임을 내려받지 않고 브라우저 엔진을 그대로 씁니다. **과제 자동채점**(`runJsGrading`)은 테스트마다 워커를 새로 띄워 코드를 처음부터 다시 돌리므로 테스트끼리 변수가 섞이지 않고, 보고서 모양이 파이썬과 같아 채점 결과 화면(`renderAssignmentGradingResult`)을 그대로 씁니다. 노트북용으로는 문서마다 워커를 살려 두는 **커널**(`startJsKernelRun`)도 제공합니다 — 셀을 전역에서 실행해 앞 셀의 값이 이어지고, 결과 모양은 Pyodide 커널과 같게 맞춰 노트북 화면이 그대로 씁니다. | `js-editor.js`, `notebook-run.js`, `tests/js-runtime.test.js` |
-| `js-editor.js` | `.js`·`.mjs` 편집·실행 화면을 만듭니다. 파이썬과 같은 실행 바·좌우 분할·출력 패널 뼈대를 쓰되 실행/채점/저장/원본 되돌리기만 두고, 편집기·초안·저장·분할선·채점 테스트 편집 창은 파이썬 쪽 공용 함수를 재사용합니다(채점 테스트 저장 자리는 `pdf-signer-js-grade:` 로 파이썬과 분리). 과제 패키지(`.task`) 내보내기는 아직 파이썬(`main.py`) 전용이라 넣지 않습니다. | `js-runtime.js`, `code-viewer.js`, `python-editor.js`, `python-run-context.js` |
+| `js-editor.js` | `.js`·`.mjs` 편집·실행 화면을 만듭니다. 파이썬과 같은 실행 바·좌우 분할·출력 패널 뼈대를 쓰되 실행/채점/저장/원본 되돌리기만 두고, 편집기·초안·저장·분할선·채점 테스트 편집 창은 파이썬 쪽 공용 함수를 재사용합니다(채점 테스트 저장 자리는 `classdock-js-grade:` 로 파이썬과 분리). 과제 패키지(`.task`) 내보내기는 아직 파이썬(`main.py`) 전용이라 넣지 않습니다. | `js-runtime.js`, `code-viewer.js`, `python-editor.js`, `python-run-context.js` |
 
 ## 5. document-editors — Office, 표, 이미지와 화이트보드
 
@@ -135,7 +135,7 @@ flowchart LR
 
 | 파일 | 담당 기능 |
 |---|---|
-| `build-offline.js` | `manneung-classroom.html`, `src/styles.css`, manifest의 로컬 JS와 vendor 자산을 하나의 `manneung-classroom-offline.html`로 합치고 무결성을 확인합니다. |
+| `build-offline.js` | `classdock.html`, `src/styles.css`, manifest의 로컬 JS와 vendor 자산을 하나의 `classdock-offline.html`로 합치고 무결성을 확인합니다. |
 | `playwright.config.js` | Playwright E2E 테스트의 서버·브라우저·테스트 경로를 설정합니다. |
 | `tools/check-source.js` | JavaScript 문법, 전역 선언 충돌, manifest 로딩 계층과 공개 API 경계를 검사합니다. |
 | `tools/check-release.js` | 오프라인 HTML에 로컬 경로가 남지 않았는지, vendor 파일·해시와 배포 산출물이 올바른지 확인합니다. |

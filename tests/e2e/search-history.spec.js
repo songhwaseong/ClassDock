@@ -82,9 +82,9 @@ test.describe("사이드바 통합검색", () => {
     await seed(page, { files: [{ q: "성적표" }] });
     await page.addInitScript(() => {
       try {
-        const saved = JSON.parse(localStorage.getItem("pdfSignerSettings") || "{}");
+        const saved = JSON.parse(localStorage.getItem("classDockSettings") || "{}");
         saved.searchHistory = false;
-        localStorage.setItem("pdfSignerSettings", JSON.stringify(saved));
+        localStorage.setItem("classDockSettings", JSON.stringify(saved));
       } catch(_){}
     });
     await openTextDoc(page, "메모.txt", "요약 내용");

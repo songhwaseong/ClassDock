@@ -28,7 +28,7 @@ function validManifest(){
   };
 }
 
-test("전용 매니페스트만 만능파일교실 백업으로 인정한다", () => {
+test("전용 매니페스트만 ClassDock 백업으로 인정한다", () => {
   assert.equal(validateMnBackupManifest(validManifest()).magic, MN_BACKUP_MAGIC);
   assert.throws(
     () => validateMnBackupManifest({ magic:"ordinary-zip", formatVersion:1, files:{} }),
@@ -98,7 +98,7 @@ test("백업 제외 파일만 열린 경우 작업공간 저장 생략을 실패
 
 test("메뉴에 내보내기·복원과 전용 파일 입력이 함께 연결된다", () => {
   const root = path.join(__dirname, "..");
-  const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
   const app = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
   assert.match(html, /id="sbBackupExport"/);
   assert.match(html, /id="sbBackupRestore"/);

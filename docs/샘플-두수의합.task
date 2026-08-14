@@ -1,10 +1,10 @@
 {
- "format": "manneung-task",
+ "format": "classdock-task",
  "version": 1,
  "id": "sample-task-0001",
  "meta": {
   "title": "두 수의 합",
-  "author": "만능파일교실",
+  "author": "ClassDock",
   "createdAt": "2026-07-12T12:58:35.629Z"
  },
  "problem": {

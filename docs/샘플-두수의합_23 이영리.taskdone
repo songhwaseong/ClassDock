@@ -1,5 +1,5 @@
 {
- "format": "manneung-task-result",
+ "format": "classdock-task-result",
  "version": 1,
  "taskId": "sample-task-0001",
  "taskTitle": "두 수의 합",

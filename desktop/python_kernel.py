@@ -11,7 +11,7 @@ import traceback
 import types
 
 
-ROOT = os.path.abspath(os.environ["MANNEUNG_KERNEL_ROOT"])
+ROOT = os.path.abspath(os.environ["CLASSDOCK_KERNEL_ROOT"])
 CWD = os.path.abspath(os.getcwd())        # 실행 작업폴더(= 연 노트북의 폴더). __file__ 기준으로 삼는다.
 _path = CWD
 _import_paths = []
@@ -36,7 +36,7 @@ except Exception:
 NAMESPACE = {
     "__name__": "__main__",
     # 셀 코드가 직접 __file__ 을 쓸 때(경로 계산 등) 작업폴더 기준이 되도록 CWD 안의 가상 경로로 둔다.
-    "__file__": os.path.join(CWD, "__manneung_notebook__.py"),
+    "__file__": os.path.join(CWD, "__classdock_notebook__.py"),
 }
 ACTIVE_RICH_OUTPUTS = None
 MAX_TEXT = 4 * 1024 * 1024
@@ -392,7 +392,7 @@ def run_line_magic(name, argument):
     raise RuntimeError("지원하지 않는 IPython 매직 명령입니다: %" + magic)
 
 
-class ManneungIPython:
+class ClassDockIPython:
     def system(self, command):
         return run_shell(command)
 
@@ -400,7 +400,7 @@ class ManneungIPython:
         return run_line_magic(name, argument)
 
 
-NAMESPACE["get_ipython"] = lambda: ManneungIPython()
+NAMESPACE["get_ipython"] = lambda: ClassDockIPython()
 NAMESPACE["display"] = display
 
 

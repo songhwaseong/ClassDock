@@ -618,7 +618,7 @@ function appendOutputFiles(panel, outputs, sessionId){
       dl.href = URL.createObjectURL(new Blob([f.bytes]));
       open.addEventListener("click", () => handleFiles([new File([f.bytes], base)]));
     } else {                                        // 로컬 세션: 서버에서 받기
-      // <a href> 직접 다운로드는 X-Manneung-Token 헤더를 못 붙여 서버가 403으로 거절한다
+      // <a href> 직접 다운로드는 X-ClassDock-Token 헤더를 못 붙여 서버가 403으로 거절한다
       // → fetch(래퍼가 토큰 자동 첨부)로 받아 Blob 으로 저장
       const url = "/python-session-file?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(f.name);
       dl.href = "#";
@@ -769,7 +769,7 @@ function pipErrorText(raw){
 async function pipInstallStream(pkgs, hooks){
   hooks = hooks || {};
   const body = pkgs.join(" ");
-  const headers = { "Content-Type": "text/plain; charset=utf-8", "X-Manneung-Pip-Confirm": "1" };
+  const headers = { "Content-Type": "text/plain; charset=utf-8", "X-ClassDock-Pip-Confirm": "1" };
   const emit = (text) => { if (typeof hooks.onLog === "function") hooks.onLog(text); };
   const oneShot = async () => {
     const res = await fetch("/pip-install", { method: "POST", headers, body });
@@ -1435,7 +1435,7 @@ function pyodideWorkerMain(){
   const protocolLimit = 6 * 1024 * 1024;
   const truncatedNotice = "\n\n[출력이 4MB를 넘어 이후 내용은 생략했습니다. 실행은 계속됩니다.]\n";
   const makeOutputCollector = () => {
-    const markers = ["__MANNEUNG_DIAG__", "__MANNEUNG_GRADE__", "__MANNEUNG_TRACE__"];
+    const markers = ["__CLASSDOCK_DIAG__", "__CLASSDOCK_GRADE__", "__CLASSDOCK_TRACE__"];
     const scanSize = Math.max(...markers.map(marker => marker.length)) - 1;
     let head = "", protocol = "", scanTail = "", capturing = false, truncated = false;
     return {
@@ -2509,7 +2509,7 @@ function startPyodideKernelVariableLookup(opts){
 async function runPythonViaPyodide(src, onMsg, stdin, packageSource){
   let py;
   try { py = await ensurePyodide(onMsg); }
-  catch(e){ throw new Error("브라우저 파이썬 런타임을 불러오지 못했어요. 인터넷 연결이 필요합니다(또는 manneung-classroom.exe + 로컬 파이썬으로 실행)."); }
+  catch(e){ throw new Error("브라우저 파이썬 런타임을 불러오지 못했어요. 인터넷 연결이 필요합니다(또는 ClassDock.exe + 로컬 파이썬으로 실행)."); }
   const out = createPythonOutputCollector(), err = createPythonOutputCollector();
   let outputs = [], variables = [], snap = null, baseDir = "/home/pyodide";
   try { baseDir = String(py.runPython("import os; os.getcwd()")) || baseDir; } catch(_){}
@@ -2572,7 +2572,7 @@ async function runBundleViaBackend(bundle, stdin){
 async function runBundleViaPyodide(bundle, onMsg, stdin, packageSource){
   let py;
   try { py = await ensurePyodide(onMsg); }
-  catch(e){ throw new Error("브라우저 파이썬 런타임을 불러오지 못했어요. 인터넷 연결이 필요합니다(또는 manneung-classroom.exe + 로컬 파이썬으로 실행)."); }
+  catch(e){ throw new Error("브라우저 파이썬 런타임을 불러오지 못했어요. 인터넷 연결이 필요합니다(또는 ClassDock.exe + 로컬 파이썬으로 실행)."); }
   const root = "/runproj_" + Date.now();
   py.FS.mkdirTree(root);
   for (const dir of bundle.dirs || []){

@@ -509,7 +509,7 @@ test("js 편집기의 채점 버튼은 파이썬 테스트 창을 쓰되 저장 
   assert.match(editorSource, /openAssignmentGradingModal\(\{/);
   assert.match(editorSource, /onRun: \(tests\) => runJsSource\(editor\.getValue\(\), ui, \{ gradeTests:tests \}\)/);
   // 파이썬 테스트와 섞이지 않게 저장 키를 분리한다.
-  assert.match(editorSource, /const JS_GRADE_PREFIX = "pdf-signer-js-grade:"/);
+  assert.match(editorSource, /const JS_GRADE_PREFIX = "classdock-js-grade:"/);
   // 과제 패키지(.task)는 아직 파이썬 전용이라 넘기지 않는다.
   assert.doesNotMatch(editorSource, /taskExport/);
   // 채점 중에는 채점 버튼을 잠근다.
@@ -753,7 +753,7 @@ test("점 뒤 멤버 완성 — 객체 리터럴은 적힌 키를 그대로 쓴�
 });
 
 test("새 자바스크립트 파일은 사이드바 + 메뉴와 폴더 우클릭 양쪽에서 만들 수 있다", () => {
-  const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
   const appSource = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
   const documentsSource = fs.readFileSync(path.join(root, "src/js/documents.js"), "utf8");
   const editorSource = fs.readFileSync(path.join(root, "src/js/js-editor.js"), "utf8");

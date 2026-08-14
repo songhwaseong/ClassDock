@@ -16,7 +16,7 @@ test("EXE는 npm 설치·폴링·취소·목록·번들·삭제 API를 로컬 �
     "/js-npm-install-poll", "/js-npm-install-cancel", "/js-npm-delete"
   ]) assert.ok(launcher.includes(route), route);
   assert.match(launcher, /path\.StartsWith\("\/js-npm-"/);
-  assert.match(launcher, /x-manneung-npm-confirm/);
+  assert.match(launcher, /x-classdock-npm-confirm/);
 });
 
 test("npm 러너는 설치 스크립트를 차단하고 브라우저 Worker 번들에 제한을 둔다", () => {

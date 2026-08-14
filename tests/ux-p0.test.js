@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
-const html = read("manneung-classroom.html");
+const html = read("classdock.html");
 const app = read("src", "js", "app.js");
 const documents = read("src", "js", "documents.js");
 const notebook = read("src", "js", "notebook-cells.js");

@@ -5,9 +5,9 @@
    학생은 더블클릭으로 열어(문제=참고 화면, 코드=편집기) 풀고, 과제 바의 채점을 거쳐
    제출본(.taskdone: 이름·최종 코드·채점 결과)을 내보낸다. .lesson 과 같은 JSON 파일 패턴.
 
-   .task = { format:"manneung-task", version:1, id, meta:{title,author,createdAt},
+   .task = { format:"classdock-task", version:1, id, meta:{title,author,createdAt},
              problem:{md}, starter:{name,code}, files:[{path,b64}], tests:[{name,input,expected,hidden?}], options:{} }
-   .taskdone = { format:"manneung-task-result", version:1, taskId, taskTitle, taskHash,
+   .taskdone = { format:"classdock-task-result", version:1, taskId, taskTitle, taskHash,
                  student, code, grade:{passed,total,results:[{name,passed,actual,error}]},
                  gradedWith, submittedAt, seal }
 
@@ -15,8 +15,8 @@
    막지 못한다. 제출 검증의 기준은 선생님이 원본 .task 의 테스트로 다시 채점하는 것이고(Phase 2),
    seal 은 파일 손상·단순 수기 수정을 감지하는 보조 수단이다. */
 
-const TASK_FORMAT = "manneung-task";
-const TASK_RESULT_FORMAT = "manneung-task-result";
+const TASK_FORMAT = "classdock-task";
+const TASK_RESULT_FORMAT = "classdock-task-result";
 const TASK_VERSION = 1;
 const TASK_MAX_FILE_BYTES = 32 * 1024 * 1024;      // .task 파일 전체 상한
 const TASK_MAX_ATTACH_TOTAL = 8 * 1024 * 1024;     // 첨부(데이터 파일) 원본 합계 상한
@@ -317,7 +317,7 @@ async function exportTaskSubmission(ctx, student, grade){
   await saveTaskJsonUnified(JSON.stringify(submission, null, 1), outName, "제출본");
 }
 
-// EXE 로컬 서버가 있으면 저장 폴더(내 문서\만능교실 저장)에 권한 팝업 없이 쓰고 [폴더 열기] 토스트,
+// EXE 로컬 서버가 있으면 저장 폴더(내 문서\ClassDock 저장)에 권한 팝업 없이 쓰고 [폴더 열기] 토스트,
 // 아니면 다운로드로 폴백 — 이미지 저장(saveImageBlobUnified)과 같은 동선.
 async function saveTaskJsonUnified(text, outName, label, mime){
   try {

@@ -1,6 +1,6 @@
 "use strict";
 
-const PDF_RECOVERY_DB = "pdf-signer-recovery";
+const PDF_RECOVERY_DB = "classdock-recovery";
 const PDF_RECOVERY_STORE = "documents";
 const PDF_SIGNATURE_STORE = "signatures";
 const PDF_RECOVERY_VERSION = 1;

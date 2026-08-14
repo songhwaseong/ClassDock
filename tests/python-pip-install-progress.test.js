@@ -281,7 +281,7 @@ test("서버는 설치를 시작·폴링·취소로 나누고 시작에는 여�
   assert.match(launcherSource, /method == "POST" && path\.StartsWith\("\/pip-install-cancel", StringComparison\.Ordinal\)/);
   // 시작 경로도 확인 헤더가 없으면 403 — 기존 /pip-install 과 같은 문턱.
   assert.match(launcherSource,
-    /path == "\/pip-install-start"\)\s*\n\s*\{\s*\n\s*string pipConfirmed;\s*\n\s*if \(!headers\.TryGetValue\("x-manneung-pip-confirm", out pipConfirmed\) \|\| pipConfirmed != "1"\)/);
+    /path == "\/pip-install-start"\)\s*\n\s*\{\s*\n\s*string pipConfirmed;\s*\n\s*if \(!headers\.TryGetValue\("x-classdock-pip-confirm", out pipConfirmed\) \|\| pipConfirmed != "1"\)/);
   // 예전 오프라인 HTML 을 위해 한 번에 응답하는 경로는 남겨 둔다.
   assert.match(launcherSource, /method == "POST" && path == "\/pip-install"\)/);
 });

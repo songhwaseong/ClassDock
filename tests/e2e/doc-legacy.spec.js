@@ -8,7 +8,7 @@ const { buildWordDoc } = require("../fixtures/build-doc");
  * 배포본마다 스크립트 로드 방식이 달라 원본 HTML 과 단일 파일 양쪽에서 확인한다. */
 const PAGES = [
   { name: "원본 HTML", url: "/" },
-  { name: "단일 파일(EXE 산출물)", url: "/manneung-classroom-offline.html" }
+  { name: "단일 파일(EXE 산출물)", url: "/classdock-offline.html" }
 ];
 
 async function openDoc(page, url, name, buffer){
@@ -25,11 +25,11 @@ for (const target of PAGES){
   test(`${target.name}: 구형 .doc 을 열면 본문 문단이 보인다`, async ({ page }) => {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const bytes = buildWordDoc({ text: "만능파일교실 문서\r둘째 문단입니다\r" });
+    const bytes = buildWordDoc({ text: "ClassDock 문서\r둘째 문단입니다\r" });
     await openDoc(page, target.url, "e2e-legacy.doc", Buffer.from(bytes));
 
     await expect(page.locator(".doc-host")).toBeVisible();
-    await expect(page.locator(".doc-host .doc-p", { hasText: "만능파일교실 문서" })).toBeVisible();
+    await expect(page.locator(".doc-host .doc-p", { hasText: "ClassDock 문서" })).toBeVisible();
     await expect(page.locator(".doc-host .doc-p", { hasText: "둘째 문단입니다" })).toBeVisible();
     await expect(page.locator(".code-note")).toContainText("표·그림·서식은 빠지고");
     expect(errors).toEqual([]);

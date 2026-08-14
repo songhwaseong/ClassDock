@@ -104,7 +104,7 @@ test("목록이 바뀌면 화면이 다시 그릴 수 있게 알린다", () => {
 
 test("EXE 최근 폴더는 IndexedDB 핸들이 없어도 기억한 실제 경로로 복원한다", async () => {
   let opened = null;
-  const nativeHandle = { kind:"directory", name:"수업자료", __manneungNativeHandle:true };
+  const nativeHandle = { kind:"directory", name:"수업자료", __classdockNativeHandle:true };
   const { MNRecent } = loadRecent({
     loadFsHandle: async () => null,
     restoreNativeSourceFolder: async (name) => {
@@ -144,5 +144,5 @@ test("이미 열린 최근 폴더는 중복으로 열지 않고 기존 트리를
 
 test("네이티브 낱개 핸들은 다시 열 수 없으므로 최근 파일로 기록하지 않는다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/file-loaders.js"), "utf8");
-  assert.match(source, /opts\.fsHandle && !opts\.fsHandle\.__manneungNativeHandle[\s\S]*MNRecent\.rememberFile/);
+  assert.match(source, /opts\.fsHandle && !opts\.fsHandle\.__classdockNativeHandle[\s\S]*MNRecent\.rememberFile/);
 });

@@ -13,7 +13,7 @@ const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
 
 test("로컬 API는 헤더 토큰만 인정하고 URL 토큰을 사용하지 않는다", () => {
   assert.match(launcher, /static bool HasLocalAuthToken\(Dictionary<string, string> headers\)/);
-  assert.match(launcher, /X-Manneung-Token/);
+  assert.match(launcher, /X-ClassDock-Token/);
   assert.doesNotMatch(launcher, /mn_token/);
   assert.doesNotMatch(stateSync, /mn_token|tokenUrl\(|navigator\.sendBeacon/);
   assert.match(stateSync, /keepalive:\s*true/);
@@ -65,7 +65,7 @@ test("앱 모드 설정·재열기는 토큰과 동작 헤더가 있어야 한�
   const appMode = launcher.slice(start, end);
   assert.ok(start > 0 && end > start);
   assert.equal(appMode.match(/HasLocalActionHeader\(headers\)/g).length, 3);
-  assert.match(app, /fetch\("\/reopen-app-mode", \{ method:"POST", headers:\{ "X-PdfSigner-Action":"1" \}/);
+  assert.match(app, /fetch\("\/reopen-app-mode", \{ method:"POST", headers:\{ "X-ClassDock-Action":"1" \}/);
   assert.match(launcher, /static DateTime BrowserHandoffUntil = DateTime\.MinValue/);
   assert.match(launcher, /if \(now < BrowserHandoffUntil\) NoHeartbeatClientsSince = DateTime\.MaxValue/);
   assert.match(launcher, /BrowserHandoffUntil = DateTime\.UtcNow\.AddSeconds\(45\)/);
@@ -87,13 +87,13 @@ test("로컬 응답은 기본 보안 헤더를 포함하고 하트비트 종료�
   assert.match(launcher, /Referrer-Policy: no-referrer/);
   assert.match(launcher, /path\.StartsWith\("\/heartbeat", StringComparison\.Ordinal\)\) return true/);
   assert.match(app, /fetch\("\/heartbeat-close\?id=/);
-  assert.match(app, /X-PdfSigner-Heartbeat/);
+  assert.match(app, /X-ClassDock-Heartbeat/);
 });
 
 test("패키지 설치는 사용자 확인과 확인 헤더가 있어야 진행한다", () => {
   assert.match(pythonRuntime, /신뢰하는 패키지만 설치하세요/);
-  assert.match(pythonRuntime, /X-Manneung-Pip-Confirm/);
-  assert.match(launcher, /x-manneung-pip-confirm/);
+  assert.match(pythonRuntime, /X-ClassDock-Pip-Confirm/);
+  assert.match(launcher, /x-classdock-pip-confirm/);
   assert.match(launcher, /pip-confirmation-required/);
 });
 

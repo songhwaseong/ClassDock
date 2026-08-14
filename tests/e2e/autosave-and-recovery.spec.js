@@ -13,7 +13,7 @@ async function boot(page, settings){
     try {
       localStorage.setItem("mn_onboarded_v1", "1");
       localStorage.setItem("uiLang", "ko");
-      if (extra) localStorage.setItem("pdfSignerSettings", JSON.stringify(extra));
+      if (extra) localStorage.setItem("classDockSettings", JSON.stringify(extra));
     } catch(_){}
   }, settings || null);
   await collapseSidebar(page);

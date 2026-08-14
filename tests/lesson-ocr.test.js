@@ -19,7 +19,7 @@ function pen(points=[{ x:1, y:2 }, { x:3, y:4 }]){
 test(".lesson 입력은 정상 리플레이만 받아들이고 손상된 장면은 거부한다", () => {
   const { validateLessonPayload } = loadBrowserScript("lesson-replay.js");
   const valid = {
-    format:"manneung-lesson", version:1, kind:"board", duration:120, W:1280, H:720,
+    format:"classdock-lesson", version:1, kind:"board", duration:120, W:1280, H:720,
     keyframes:[{ t:0, s:[] }, { t:120, a:pen() }]
   };
   assert.equal(validateLessonPayload(valid).ok, true);
@@ -37,7 +37,7 @@ test(".lesson 입력은 정상 리플레이만 받아들이고 손상된 장면�
   assert.equal(validateLessonPayload({ ...valid, keyframes:[{ t:0, s:[{ ...group, items:new Array(1001).fill(group.items[0]) }] }] }).ok, false);
 
   const shapeReplay = {
-    format:"manneung-lesson", version:1, kind:"pdf-ink", duration:50,
+    format:"classdock-lesson", version:1, kind:"pdf-ink", duration:50,
     pages:{ 0:{ w:800, h:1200 } },
     keyframes:[{ t:50, p:0, a:{ tool:"mosaic", color:"#999", width:3, points:[{ x:10, y:20 }, { x:80, y:60 }] } }]
   };

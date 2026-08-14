@@ -22,7 +22,7 @@ const JS_LIBRARY_CATALOG = Object.freeze([
   })
 ]);
 
-const JS_LIBRARY_STORAGE_PREFIX = "pdf-signer-js-libraries:";
+const JS_LIBRARY_STORAGE_PREFIX = "classdock-js-libraries:";
 const JS_LIBRARY_MAX_CUSTOM = 8;
 const JS_LIBRARY_MAX_CUSTOM_SOURCE = 512 * 1024;
 const JS_LIBRARY_MAX_CUSTOM_TOTAL = 1024 * 1024;
@@ -253,7 +253,7 @@ async function jsNpmInstallStream(spec, globalName, hooks){
   const emit = (value) => { if (typeof hooks.onLog === "function") hooks.onLog(String(value || "")); };
   const response = await fetch("/js-npm-install-start", {
     method:"POST",
-    headers:{ "Content-Type":"text/plain; charset=utf-8", "X-Manneung-Npm-Confirm":"1" },
+    headers:{ "Content-Type":"text/plain; charset=utf-8", "X-ClassDock-Npm-Confirm":"1" },
     body:String(spec || "").trim() + "\n" + String(globalName || "").trim()
   });
   if (!response.ok) throw new Error(jsNpmErrorText(await response.text()));

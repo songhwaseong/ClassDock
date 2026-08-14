@@ -6,13 +6,13 @@
    그리기는 board-render.js 공용 함수를 재사용해 재생 화면이 판서 화면과 일치한다.
 
    .lesson = JSON:
-     { format:"manneung-lesson", version:1, kind:"board", createdAt, bg, W, H, duration,
+     { format:"classdock-lesson", version:1, kind:"board", createdAt, bg, W, H, duration,
        keyframes:[ {t, s:[...items]} | {t, a:item} ] }
      - s: 그 시점의 전체 항목(초기 상태·지우기·되돌리기·이동처럼 배열이 통째로 바뀔 때)
      - a: 직전 상태에 항목 하나 추가(대부분의 판서). 파일 크기를 줄이고 획 성장 애니메이션의 단서가 된다.
    확장 여지: PDF 잉크·파이썬 실행을 keyframe kind(track)로 추가하면 같은 타임라인에 얹을 수 있다. */
 
-const LESSON_FORMAT = "manneung-lesson";
+const LESSON_FORMAT = "classdock-lesson";
 const LESSON_VERSION = 1;
 // 외부 .lesson 은 JSON 파싱 전에 파일 크기를 제한하고, 파싱 뒤에는 배열/문자열의
 // 상한을 확인한다. 영상이 아니라 이벤트 데이터이므로 이 정도면 충분히 넉넉하면서도

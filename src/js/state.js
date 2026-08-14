@@ -17,7 +17,7 @@ const {
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,
   splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
   INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
-} = PdfSignerCore;
+} = ClassDockCore;
 
 /* ===== 다중 문서 상태 =====
  * docs: 열린 문서들. 각 문서는 자체 컨테이너(el)를 가지며 활성 문서만 보인다.
@@ -95,7 +95,7 @@ const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.
 // CSS 숨김 클래스를 모두 구동한다(라벨·목록 이중 관리 방지). cls 는 각 버튼의 고유 클래스명.
 // ▶ 실행·저장처럼 없으면 안 되는 버튼은 일부러 뺐다. 기본값은 전부 노출(defaultVisible).
 const TOGGLEABLE_TOOLS = Object.freeze([
-  // 헤더 위쪽 막대 (manneung-classroom.html) — 문서와 무관하게 늘 떠 있는 전역 버튼들.
+  // 헤더 위쪽 막대 (classdock.html) — 문서와 무관하게 늘 떠 있는 전역 버튼들.
   // ⚙ 설정·저장·집중(⏱)·분할 작업은 뺐다. 설정은 숨기면 되돌릴 길이 막히고, 저장은 필수,
   // 집중은 이미 '펫 집중 모드' 설정이 켜고 끄며, 분할 작업 버튼은 원래 CSS 로 숨겨둔 상태다.
   { id:"hdrSidebar",    label:"사이드 메뉴 접기·펼치기",       cls:"hdr-tool-sidebar",    target:"header" },
@@ -460,7 +460,7 @@ function migrateAppSettings(saved){
 let shortcutDefaultsMigrated = false;
 let appSettings = (() => {
   try {
-    const raw = localStorage.getItem("pdfSignerSettings");
+    const raw = localStorage.getItem("classDockSettings");
     if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() };
     const decoded = JSON.parse(raw);
     const parsed = decoded && typeof decoded === "object" ? decoded : {};
@@ -469,7 +469,7 @@ let appSettings = (() => {
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
     const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), shortcuts:normalizeShortcutMap(saved.shortcuts) };
-    if (migrationChanged) localStorage.setItem("pdfSignerSettings", JSON.stringify(loaded));
+    if (migrationChanged) localStorage.setItem("classDockSettings", JSON.stringify(loaded));
     return loaded;
   }
   catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() }; }
@@ -477,7 +477,7 @@ let appSettings = (() => {
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
   appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), shortcuts:normalizeShortcutMap(merged.shortcuts) };
-  try { localStorage.setItem("pdfSignerSettings", JSON.stringify(appSettings)); } catch(e){}
+  try { localStorage.setItem("classDockSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }
 function shortcutMatches(e, action){ return !e.isComposing && shortcutMatchesEvent(e, shortcutValue(action)); }

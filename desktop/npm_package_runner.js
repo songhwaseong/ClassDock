@@ -1,6 +1,6 @@
 "use strict";
 
-// 만능파일교실 EXE가 시작하는 npm 설치 도우미.
+// ClassDock EXE가 시작하는 npm 설치 도우미.
 // 사용자 패키지의 install script는 서버가 npm에 --ignore-scripts를 넘겨 실행하지 않는다.
 const fs = require("fs");
 const path = require("path");
@@ -66,7 +66,7 @@ function main(){
 
   try {
     fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({
-      name:"manneung-js-package-cache", private:true, version:"1.0.0"
+      name:"classdock-js-package-cache", private:true, version:"1.0.0"
     }, null, 2));
 
     process.stdout.write("npm install " + spec + "\n");

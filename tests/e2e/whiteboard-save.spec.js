@@ -62,7 +62,7 @@ test("판서해도 ● 가 켜지지 않고, 복구본은 남는다", async ({ p
     if (board && typeof board.flushBoardRecovery === "function") board.flushBoardRecovery();
   });
   const saved = await page.evaluate(() =>
-    Object.keys(localStorage).filter(k => k.startsWith("manneung-board-recovery:")).length);
+    Object.keys(localStorage).filter(k => k.startsWith("classdock-board-recovery:")).length);
   expect(saved).toBeGreaterThan(0);
 
   expect(errors).toEqual([]);

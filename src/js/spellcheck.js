@@ -4,7 +4,7 @@
    브라우저 사전이나 외부 API에 의존하지 않고, 확실성이 높은 상용 표현·띄어쓰기 규칙만 검사한다.
    UI와 규칙 엔진을 분리해 나중에 더 정교한 로컬 엔진으로 check()만 교체할 수 있다. */
 const MNKoreanSpellcheck = (() => {
-  const STORAGE_KEY = "manneung-korean-spell-user-dictionary-v1";
+  const STORAGE_KEY = "classdock-korean-spell-user-dictionary-v1";
   const MAX_SCOPE_CHARS = 240000;
   const DICTIONARY_WORKER_TIMEOUT = 45000;
   const HASH_COMMENT_EXTS = new Set([

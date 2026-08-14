@@ -2,8 +2,8 @@
 ffmpeg.exe
 
 # 빌드 산출물 (커밋된 소스로부터 재생성됨 — node build-offline.js + desktop/build.bat)
-manneung-classroom-offline.html
-manneung-classroom.exe
+classdock-offline.html
+ClassDock.exe
 desktop/app.html
 
 # 배포용 테스트 패키지 (pack.bat 로 재생성)

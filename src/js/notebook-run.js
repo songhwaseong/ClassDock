@@ -754,8 +754,8 @@ function nbBuildVarRow(item, sanitizer, lookupVariable){
 function renderNotebookVariables(host, variables, ownerDoc){
   const rows = notebookVariables(variables);
   if (!rows.length) return;
-  const sanitizer = (typeof PdfSignerCore !== "undefined" && PdfSignerCore && typeof PdfSignerCore.sanitizeHtml === "function")
-    ? PdfSignerCore.sanitizeHtml : null;
+  const sanitizer = (typeof ClassDockCore !== "undefined" && ClassDockCore && typeof ClassDockCore.sanitizeHtml === "function")
+    ? ClassDockCore.sanitizeHtml : null;
   const details = document.createElement("details");
   details.className = "nbv-vars";
   const summary = document.createElement("summary");

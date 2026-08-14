@@ -5,7 +5,7 @@ const vm = require("vm");
 const crypto = require("crypto");
 
 const root = path.resolve(__dirname, "..");
-const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
 const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
 const normalizedTextBytes = (bytes) => Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
@@ -14,7 +14,7 @@ const manifestScripts = manifest.localScripts.map((file) => "src/js/" + file);
 
 if (!scripts.length) throw new Error("Application script tags were not found.");
 if (scripts.join("\n") !== manifestScripts.join("\n")) {
-  throw new Error("manneung-classroom.html script order does not match scripts.manifest.json");
+  throw new Error("classdock.html script order does not match scripts.manifest.json");
 }
 const layerScripts = (manifest.applicationLayers || []).flatMap((layer) => layer.scripts || []);
 if (layerScripts.join("\n") !== manifest.localScripts.join("\n")) {
@@ -154,7 +154,7 @@ const outputLimitCheck = new vm.Script(`(() => {
   const normal = createPythonOutputCollector(8, 64);
   normal.append("12345678"); normal.append("ABCDEFGHIJ");
   const protocol = createPythonOutputCollector(8, 64);
-  protocol.append("1234567890__MANNEUNG_");
+  protocol.append("1234567890__CLASSDOCK_");
   protocol.append("TRACE__payload");
   return {
     normal: normal.value(),
@@ -162,7 +162,7 @@ const outputLimitCheck = new vm.Script(`(() => {
   };
 })()`).runInContext(workerContext);
 if (!outputLimitCheck.normal.includes("생략") || outputLimitCheck.normal.includes("ABCDEFGHIJ") ||
-    !outputLimitCheck.protocol.includes("__MANNEUNG_TRACE__payload")) {
+    !outputLimitCheck.protocol.includes("__CLASSDOCK_TRACE__payload")) {
   throw new Error("Python output limit check failed");
 }
 const workerSource = new vm.Script(
@@ -178,7 +178,7 @@ if (pythonProbe.status === 0) {
       `buildPythonDiagnosticHarness(${JSON.stringify(source)}, "check.py")`
     ).runInContext(workerContext);
     const diagnosticRun = spawnSync("python", ["-"], { input:diagnosticHarness, encoding:"utf8" });
-    const marker = String(diagnosticRun.stdout).match(/__MANNEUNG_DIAG__([A-Za-z0-9+/=]+)/);
+    const marker = String(diagnosticRun.stdout).match(/__CLASSDOCK_DIAG__([A-Za-z0-9+/=]+)/);
     if (diagnosticRun.status !== 0 || !marker) {
       process.stderr.write(diagnosticRun.stderr || "Python diagnostic harness check failed\n");
       process.exit(diagnosticRun.status || 1);
@@ -204,7 +204,7 @@ if (pythonProbe.status === 0) {
     "buildPythonTraceHarness(\"value = 1\\nvalue += 2\\nprint(value)\", \"check.py\", 30)"
   ).runInContext(workerContext);
   const traceRun = spawnSync("python", ["-"], { input:traceHarness, encoding:"utf8" });
-  if (traceRun.status !== 0 || !String(traceRun.stdout).includes("__MANNEUNG_TRACE__")) {
+  if (traceRun.status !== 0 || !String(traceRun.stdout).includes("__CLASSDOCK_TRACE__")) {
     process.stderr.write(traceRun.stderr || "Python trace harness check failed\n");
     process.exit(traceRun.status || 1);
   }

@@ -31,7 +31,7 @@ const PAGE_HEAD = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>만능파일교실 사용법</title>
+<title>ClassDock 사용법</title>
 <style>
   :root{
     --ink:#1e293b; --muted:#64748b; --border:#e2e8f0; --panel:#f8fafc;

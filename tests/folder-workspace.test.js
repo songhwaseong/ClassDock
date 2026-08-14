@@ -10,7 +10,7 @@ const source = ["documents.js", "workspace-store.js", "file-loaders.js", "pdf-re
   .map((file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const codeSource = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
-const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+const htmlSource = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
 const guideMarkdown = fs.readFileSync(path.join(__dirname, "../사용법.md"), "utf8");
 const guideHtml = fs.readFileSync(path.join(__dirname, "../사용법.html"), "utf8");
 

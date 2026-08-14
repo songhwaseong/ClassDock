@@ -15,10 +15,10 @@ const mime = {
 
 function targetFor(urlText) {
   const pathname = decodeURIComponent(new URL(urlText, "http://127.0.0.1").pathname);
-  const relative = pathname === "/" ? "manneung-classroom.html" : pathname.replace(/^\/+/, "");
+  const relative = pathname === "/" ? "classdock.html" : pathname.replace(/^\/+/, "");
   // 단일 파일 빌드도 열 수 있어야 한다 — 지연 로드는 원본 HTML(스크립트 주입)과
   // 오프라인 HTML(심어 둔 text/plain 실행)에서 경로가 서로 달라, 양쪽 다 회귀 검사한다.
-  if (!/^(?:manneung-classroom(?:-offline)?\.html|사용법\.html|src\/(?:js\/|assets\/|)|vendor\/)/.test(relative)) return null;
+  if (!/^(?:classdock(?:-offline)?\.html|사용법\.html|src\/(?:js\/|assets\/|)|vendor\/)/.test(relative)) return null;
   const target = path.resolve(root, relative);
   return target.startsWith(root + path.sep) || target === root ? target : null;
 }

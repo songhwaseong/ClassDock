@@ -34,7 +34,7 @@ function verifyVendorIntegrity(item) {
   }
 }
 
-let html = read("manneung-classroom.html");
+let html = read("classdock.html");
 
 const localStyleTag = `<link rel="stylesheet" href="${manifest.styles.local}">`;
 requireTag(html, localStyleTag, "Local stylesheet");
@@ -248,7 +248,7 @@ html = html.replace(
   () => `<script type="text/plain" data-mn-manual="사용법.html">\n${esc(read("사용법.html"))}\n</script>`
 );
 
-const out = "manneung-classroom-offline.html";
+const out = "classdock-offline.html";
 if (/\b(?:src|href)=["']src\//.test(html)) {
   console.error("Offline output still contains local source references.");
   process.exit(1);

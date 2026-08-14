@@ -8,8 +8,8 @@ const path = require("path");
 const crypto = require("crypto");
 
 const root = path.resolve(__dirname, "..");
-const source = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
-const offlinePath = path.join(root, "manneung-classroom-offline.html");
+const source = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
+const offlinePath = path.join(root, "classdock-offline.html");
 const offline = fs.readFileSync(offlinePath, "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
 const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");

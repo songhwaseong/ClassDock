@@ -81,7 +81,7 @@ function notebookRequiresLocalPython(source){
 }
 
 function nbShowLocalPythonInstallGuide(ownerDoc){
-  const message = "이 크롤링은 로컬 Python이 필요합니다. Python을 설치할 때 'Add python.exe to PATH'를 선택한 뒤 만능파일교실을 다시 실행해 주세요.";
+  const message = "이 크롤링은 로컬 Python이 필요합니다. Python을 설치할 때 'Add python.exe to PATH'를 선택한 뒤 ClassDock을 다시 실행해 주세요.";
   if (typeof toast === "function") toast(message, 7000);
   nbSetStatus(ownerDoc, "로컬 Python 설치 필요 · 설치 후 앱 다시 실행");
 }
@@ -185,7 +185,7 @@ async function nbToggleLocalKernelMode(ownerDoc){
 }
 
 function nbLocalKernelBundle(workspaceBundle){
-  const marker = "__manneung_notebook_kernel__.py";
+  const marker = "__classdock_notebook_kernel__.py";
   if (!workspaceBundle){
     return {
       files:[{ path:marker, bytes:new Uint8Array(0) }],
@@ -412,7 +412,7 @@ async function nbRunNotebookLocalPythonOnce(ownerDoc){
     const ws = await buildNotebookWorkspaceBundle(ownerDoc);
     if (ws && Array.isArray(ws.files)){
       const cwd = normalizedRunPath(ws.cwd);
-      const scriptRel = (cwd ? cwd + "/" : "") + "__manneung_notebook_run__.py";
+      const scriptRel = (cwd ? cwd + "/" : "") + "__classdock_notebook_run__.py";
       const files = ws.files.filter(f => normalizedRunPath(f.path) !== scriptRel);
       files.push({ path: scriptRel, bytes: new TextEncoder().encode(script) });
       bundle = { files, target: scriptRel, cwd, dirs: ws.dirs || [], logicalRoot: ws.logicalRoot || "" };

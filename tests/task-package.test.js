@@ -18,7 +18,7 @@ const { validateTaskPayload, findOpenTaskCtx, countOpenTaskVersions } = sandbox.
 
 function task(files=[]){
   return {
-    format: "manneung-task", version: 1, id: "task-1",
+    format: "classdock-task", version: 1, id: "task-1",
     meta: { title: "두 수의 합" }, problem: { md: "" },
     starter: { name: "main.py", code: "print(1)" },
     files, tests: [{ name: "기본", input: "", expected: "1" }]

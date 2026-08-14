@@ -70,7 +70,7 @@ test("프리셋 미리보기 점은 지금 테마의 색을 보여준다", async
 
 test("프리셋과 되돌리기는 현재 테마만 바꾸고 반대 테마 색을 보존한다", async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("pdfSignerSettings", JSON.stringify({
+    localStorage.setItem("classDockSettings", JSON.stringify({
       codeColors:{ light:{}, dark:{ keyword:"#abcdef" } }
     }));
   });
@@ -80,7 +80,7 @@ test("프리셋과 되돌리기는 현재 테마만 바꾸고 반대 테마 색�
   await expect(page.locator('[data-code-color-preset="monokai"]')).toHaveAttribute("aria-pressed", "true");
   await page.locator("#settingsSave").click();
 
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("pdfSignerSettings")).codeColors);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("classDockSettings")).codeColors);
   expect(saved.light.keyword).toBe("#c2185b");
   expect(saved.dark.keyword).toBe("#abcdef");
 
@@ -89,7 +89,7 @@ test("프리셋과 되돌리기는 현재 테마만 바꾸고 반대 테마 색�
   await page.locator("#settingCodeColorReset").click();
   await expect(page.locator('[data-code-color-preset="default"]')).toHaveAttribute("aria-pressed", "true");
   await page.locator("#settingsSave").click();
-  const cleared = await page.evaluate(() => JSON.parse(localStorage.getItem("pdfSignerSettings")).codeColors);
+  const cleared = await page.evaluate(() => JSON.parse(localStorage.getItem("classDockSettings")).codeColors);
   expect(Object.keys(cleared.light)).toEqual([]);
   expect(cleared.dark.keyword).toBe("#abcdef");
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue("--python-code-keyword"))).toBe("");

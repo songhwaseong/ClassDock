@@ -17,9 +17,9 @@
    - WebCrypto(crypto.subtle)는 EXE(로컬 서버)나 https 에서만 동작한다. file:// 로 연 오프라인 HTML 에서는
      브라우저가 막으므로, 그 경우 시험 기능은 EXE 로 안내한다. */
 
-const EXAM_MASTER_FORMAT = "manneung-exam-master";
-const EXAM_FORMAT = "manneung-exam";
-const EXAM_RESULT_FORMAT = "manneung-exam-result";
+const EXAM_MASTER_FORMAT = "classdock-exam-master";
+const EXAM_FORMAT = "classdock-exam";
+const EXAM_RESULT_FORMAT = "classdock-exam-result";
 const EXAM_VERSION = 1;
 
 const EXAM_MAX_FILE_BYTES = 48 * 1024 * 1024;
@@ -157,7 +157,7 @@ function examCryptoReady(){
 // 암호 기능이 필요한 모든 동선의 첫 관문 — 막힌 이유와 해결책을 한 문장으로 알린다.
 function examRequireCrypto(){
   if (examCryptoReady()) return true;
-  toast("이 화면에서는 암호 기능을 쓸 수 없어요. 시험지 기능은 만능파일교실 EXE 로 열어서 사용하세요(file:// 로 연 페이지는 브라우저가 암호 기능을 막습니다).", 6000, { type: "error" });
+  toast("이 화면에서는 암호 기능을 쓸 수 없어요. 시험지 기능은 ClassDock EXE 로 열어서 사용하세요(file:// 로 연 페이지는 브라우저가 암호 기능을 막습니다).", 6000, { type: "error" });
   return false;
 }
 

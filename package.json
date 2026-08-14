@@ -1,5 +1,5 @@
 {
-  "name": "pdf-signer-local",
+  "name": "classdock-local",
   "private": true,
   "scripts": {
     "build:spellcheck-worker": "node tools/build-korean-spell-worker.mjs",

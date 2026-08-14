@@ -588,7 +588,7 @@ async function docExplorerButton(doc){
     try {
       const res = await fetch("/open-file-folder", {
         method: "POST",
-        headers: { "X-PdfSigner-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
+        headers: { "X-ClassDock-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
         cache: "no-store"
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -775,4 +775,3 @@ async function decryptOffice(bytes, password /*, kind */){
   if (typeof OfficeDecrypt === "undefined" || !OfficeDecrypt.decrypt) throw new Error("복호화 모듈 없음");
   return OfficeDecrypt.decrypt(bytes, password);   // Uint8Array 반환(동기)
 }
-

@@ -6,7 +6,7 @@ function wire(){
   wireScratchpad();
   wireImageMemo();
   // 일반 EXE 실행에서는 마지막 브라우저 탭이 닫히면 로컬 서버도 자동 종료한다.
-  // 시작프로그램용 상시 서버(PDFSIGNER_NO_BROWSER=1)는 백엔드가 heartbeat 종료를 사용하지 않는다.
+  // 시작프로그램용 상시 서버(CLASSDOCK_NO_BROWSER=1)는 백엔드가 heartbeat 종료를 사용하지 않는다.
   (() => {
     if (location.protocol !== "http:" || !/^(127\.0\.0\.1|localhost)$/i.test(location.hostname)) return;
     const clientId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2));
@@ -20,12 +20,12 @@ function wire(){
       wrap.classList.toggle("down", !ok);
       text.textContent = ok ? "서버 연결됨" : "서버 끊김";
       wrap.setAttribute("aria-label", text.textContent);
-      wrap.title = ok ? "로컬 서버와 연결되어 있습니다." : "로컬 서버가 종료되었습니다. manneung-classroom.exe 를 다시 실행하세요.";
+      wrap.title = ok ? "로컬 서버와 연결되어 있습니다." : "로컬 서버가 종료되었습니다. ClassDock.exe 를 다시 실행하세요.";
     };
     const beat = () => {
       if (closed) return;
       fetch("/heartbeat?id=" + encodeURIComponent(clientId), {
-        method: "POST", headers: { "X-PdfSigner-Heartbeat": "1" }, cache: "no-store", keepalive: true
+        method: "POST", headers: { "X-ClassDock-Heartbeat": "1" }, cache: "no-store", keepalive: true
       }).then(r => setServerStatus(!!r && r.ok)).catch(() => setServerStatus(false));
     };
     beat();
@@ -33,7 +33,7 @@ function wire(){
     window.addEventListener("focus", beat);
     window.addEventListener("pagehide", () => {
       closed = true; clearInterval(timer);
-      try { fetch("/heartbeat-close?id=" + encodeURIComponent(clientId), { method:"POST", headers:{ "X-PdfSigner-Heartbeat":"1" }, keepalive:true }); } catch(e){}
+      try { fetch("/heartbeat-close?id=" + encodeURIComponent(clientId), { method:"POST", headers:{ "X-ClassDock-Heartbeat":"1" }, keepalive:true }); } catch(e){}
     }, { once: true });
   })();
 
@@ -587,7 +587,7 @@ function wire(){
   const saveFolderRequest = async (path, method="GET") => {
     const response = await fetch(path, {
       method,
-      headers: { "X-PdfSigner-Action":"1" },
+      headers: { "X-ClassDock-Action":"1" },
       cache: "no-store"
     });
     if (!response.ok) throw new Error("HTTP " + response.status);
@@ -626,7 +626,7 @@ function wire(){
         await new Promise(resolve => setTimeout(resolve, 250));
         const response = await fetch("/choose-save-folder-status", {
           method:"GET",
-          headers:{ "X-PdfSigner-Action":"1" },
+          headers:{ "X-ClassDock-Action":"1" },
           cache:"no-store"
         });
         if (!response.ok) throw new Error("HTTP " + response.status);
@@ -656,7 +656,7 @@ function wire(){
     try {
       const res = await fetch("/open-file-folder", {
         method: "POST",
-        headers: { "X-PdfSigner-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
+        headers: { "X-ClassDock-Action": "1", "X-Save-Path": encodeURIComponent(rel) },
         cache: "no-store"
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -682,7 +682,7 @@ function wire(){
     settingAppModeWrap.hidden = true;
     if (location.protocol !== "http:" && location.protocol !== "https:") return;
     try {
-      const response = await fetch("/launcher-config", { headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store" });
+      const response = await fetch("/launcher-config", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
       if (!response.ok) throw new Error("HTTP " + response.status);
       const config = await response.json();
       appModeSaved = !!config.appMode;
@@ -701,7 +701,7 @@ function wire(){
     if (next === appModeSaved) return;
     try {
       const response = await fetch("/launcher-config?appMode=" + (next ? "1" : "0"), {
-        method:"POST", headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store"
+        method:"POST", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store"
       });
       if (!response.ok) throw new Error("HTTP " + response.status);
       appModeSaved = next;
@@ -712,7 +712,7 @@ function wire(){
   const reopenInAppMode = async () => {
     settingAppModeNow.disabled = true;
     try {
-      const response = await fetch("/reopen-app-mode", { method:"POST", headers:{ "X-PdfSigner-Action":"1" }, cache:"no-store" });
+      const response = await fetch("/reopen-app-mode", { method:"POST", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
       if (!response.ok) throw new Error("HTTP " + response.status);
       toast("앱 모드 창을 열었어요. 같은 작업 화면이니 이 탭은 닫으셔도 됩니다.", 3800);
     } catch(_){ toast("앱 모드 창을 열지 못했어요.", 2400); }
@@ -2165,7 +2165,7 @@ function setupMovableModals(){
    localStorage 하트비트로 '한 번에 한 창만 활성'을 보장한다. 새로 연 창이 활성권을 가져가고(takeover),
    기존 창은 안내 오버레이로 잠시 멈춘다. 활성 창이 닫히면 남은 창이 자동으로 이어받는다. */
 function setupSingleTab(){
-  const KEY = "manneung-classroom:active-tab";
+  const KEY = "classdock:active-tab";
   const myId = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
   let amActive = false, overlay = null;
   const readActive = () => { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch(_){ return null; } };

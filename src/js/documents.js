@@ -2469,7 +2469,7 @@ function docStableKey(doc){
   }
   return parts.join("/");
 }
-const TAB_STATE_KEY = "pdf-signer-tabs:v1";
+const TAB_STATE_KEY = "classdock-tabs:v1";
 let tabRestoreInProgress = false;
 let tabStateTimer = 0;
 function persistTabState(){       // 탭 순서·활성 탭을 디바운스 저장(복원 중에는 건너뜀)

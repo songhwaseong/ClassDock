@@ -394,7 +394,7 @@ function renderVideoPlayer(file, doc){
       startConvert();                        // 설치 직후 바로 변환까지
     } catch(e){
       noticeBtn.disabled = false;
-      setNotice("자동 설치에 실패했어요 (" + ((e && e.message) || e) + "). 인터넷 연결을 확인하고 다시 눌러주세요. 인터넷이 안 되는 컴퓨터라면 다른 곳에서 ffmpeg.exe 를 받아 manneung-classroom.exe 옆에 복사해 두면 돼요.");
+      setNotice("자동 설치에 실패했어요 (" + ((e && e.message) || e) + "). 인터넷 연결을 확인하고 다시 눌러주세요. 인터넷이 안 되는 컴퓨터라면 다른 곳에서 ffmpeg.exe 를 받아 ClassDock.exe 옆에 복사해 두면 돼요.");
     }
   }
 
@@ -404,7 +404,7 @@ function renderVideoPlayer(file, doc){
       return;
     }
     if (location.protocol !== "http:" && location.protocol !== "https:"){
-      setNotice("영상 변환은 manneung-classroom.exe 로 실행할 때만 쓸 수 있어요.");
+      setNotice("영상 변환은 ClassDock.exe 로 실행할 때만 쓸 수 있어요.");
       return;
     }
     if (!(await vvMediaBackendAvailable())){
@@ -433,7 +433,7 @@ function renderVideoPlayer(file, doc){
       noticeBtn.disabled = false;
       const msg = String((e && e.message) || e);
       setNotice(msg.indexOf("no-ffmpeg") >= 0
-        ? "ffmpeg를 찾지 못했어요. ffmpeg.exe 를 manneung-classroom.exe 옆에 놓고 다시 시도해 주세요."
+        ? "ffmpeg를 찾지 못했어요. ffmpeg.exe 를 ClassDock.exe 옆에 놓고 다시 시도해 주세요."
         : "변환에 실패했어요: " + msg);
     }
   }

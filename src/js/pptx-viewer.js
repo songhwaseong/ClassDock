@@ -9,7 +9,7 @@ async function renderPptx(file, host, options={}){
   if (options.pptxConvertError) {
     const note = document.createElement("div");
     note.className = "code-note";
-    note.textContent = "간이 PPTX 미리보기입니다. 도형/그룹이 원본과 다르면 manneung-classroom.exe로 열고 PowerPoint 변환 상태를 확인하세요. 사유: " + options.pptxConvertError;
+    note.textContent = "간이 PPTX 미리보기입니다. 도형/그룹이 원본과 다르면 ClassDock.exe로 열고 PowerPoint 변환 상태를 확인하세요. 사유: " + options.pptxConvertError;
     host.appendChild(note);
   }
   let pptxBytes = options.pptxBytes || await readPptxBytes(file);
@@ -312,4 +312,3 @@ function waitForPptxRender(div){
     observer.observe(div, { childList: true, subtree: true });
   });
 }
-

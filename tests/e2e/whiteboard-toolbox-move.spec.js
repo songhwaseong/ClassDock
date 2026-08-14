@@ -5,7 +5,7 @@ const { collapseSidebar } = require("./helpers");
 // 화면 기준으로 확인한다: 제목줄을 끌면 무대(보드) 밖으로도 나가는지, 가장자리를 잡아
 // 늘리고 줄일 수 있는지, 새로 고쳐도 그 자리에 다시 뜨는지, 앱 헤더 아래에 머무는지.
 
-const RECT_KEY = "manneung-whiteboard:edu-rect:v1";
+const RECT_KEY = "classdock-whiteboard:edu-rect:v1";
 
 async function openApp(page){
   await page.addInitScript(() => {
@@ -111,7 +111,7 @@ test("메모창도 예전처럼 제목줄로 옮겨지고 자리가 저장된다
   expect(Math.round(after.x - before.x)).toBeLessThan(-120);
   expect(Math.round(after.y - before.y)).toBeGreaterThan(50);
 
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("manneung-scratchpad:rect:v1") || "null"));
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("classdock-scratchpad:rect:v1") || "null"));
   expect(saved).not.toBeNull();
   expect(Math.abs(saved.left - after.x)).toBeLessThan(2);
 });

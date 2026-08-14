@@ -1,11 +1,11 @@
 "use strict";
 
-const IMAGE_MEMO_RECT_KEY = "manneung-image-memo:rect:v1";
+const IMAGE_MEMO_RECT_KEY = "classdock-image-memo:rect:v1";
 const IMAGE_MEMO_MAX_ITEMS = 50;
 const IMAGE_MEMO_MAX_BYTES = 200 * 1024 * 1024;
-const IMAGE_MEMO_HEADERS = { "X-PdfSigner-Image-Memo":"1" };
-const IMAGE_MEMO_AUTO_KEY = "manneung-image-memo:auto-save:v1";
-const IMAGE_MEMO_DRAFT_DB = "manneung-image-memo-drafts";
+const IMAGE_MEMO_HEADERS = { "X-ClassDock-Image-Memo":"1" };
+const IMAGE_MEMO_AUTO_KEY = "classdock-image-memo:auto-save:v1";
+const IMAGE_MEMO_DRAFT_DB = "classdock-image-memo-drafts";
 const IMAGE_MEMO_DRAFT_STORE = "state";
 const IMAGE_MEMO_AUTO_DELAY = 1400;
 

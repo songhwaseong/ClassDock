@@ -12,7 +12,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
-class PdfSignerLauncher
+class ClassDockLauncher
 {
     [DllImport("user32.dll")]
     static extern bool AllowSetForegroundWindow(int dwProcessId);
@@ -131,18 +131,18 @@ class PdfSignerLauncher
     static readonly object WorkspaceLock = new object();
     static readonly string WorkspacePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "workspace.bin");
+        "ClassDock", "workspace.bin");
     // 브라우저 origin(포트) 변경과 무관하게 유지할 설정 저장소(localStorage 스냅샷 JSON).
     // 런처가 다른 포트로 떠도 테마·자동복원·탭 순서 등이 초기화되지 않도록 서버측 원본으로 삼는다.
     static readonly string AppStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "app-state.json");
+        "ClassDock", "app-state.json");
     static readonly string NpmPackageCachePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "js-npm-packages");
+        "ClassDock", "js-npm-packages");
     static readonly string NpmPackageRunnerPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "npm-package-runner.js");
+        "ClassDock", "npm-package-runner.js");
     static readonly object AppStateLock = new object();
     const int AppStateMaxBytes = 8 * 1024 * 1024;
     const int MaxHttpHeaderBytes = 64 * 1024;
@@ -156,25 +156,25 @@ class PdfSignerLauncher
     // 단일 인스턴스 여부를 빠르게 판단하도록 기록한다(기동 지연 방지).
     static readonly string InstancePortPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "instance-port.txt");
+        "ClassDock", "instance-port.txt");
     // 포트 파일 확인 전에 두 프로세스가 동시에 기동하는 경쟁을 막는다. 뮤텍스는 프로세스가
     // 강제 종료되어도 OS가 자동으로 해제하므로 별도의 종료 정리가 필요 없다.
-    const string SingleInstanceMutexName = @"Local\ManneungClassroom_PdfSigner_SingleInstance";
+    const string SingleInstanceMutexName = @"Local\ClassDock_SingleInstance";
     static Mutex SingleInstanceMutex;
     // 앱 모드(탭·주소창 없는 --app 창)로 열지 여부. 브라우저는 앱 화면이 뜨기 전에 실행되므로
     // 이 설정만은 localStorage 가 아니라 런처가 기동 중 읽을 수 있는 파일에 둔다. 값은 "1" 또는 "0".
     static readonly string AppModeConfigPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "app-mode.txt");
+        "ClassDock", "app-mode.txt");
     // 실행 중인 서버의 주소. 설정의 '지금 앱 모드로 열기'가 같은 origin 으로 새 창을 띄울 때 쓴다.
     static string ServerUrl = "";
-    // 편집한 코드를 브라우저 권한 팝업 없이 바로 저장하는 폴더. 사용자가 바꾸지 않으면 내 문서\만능교실 저장.
+    // 편집한 코드를 브라우저 권한 팝업 없이 바로 저장하는 폴더. 사용자가 바꾸지 않으면 내 문서\ClassDock 저장.
     static readonly string DefaultSaveRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-        "만능교실 저장");
+        "ClassDock 저장");
     static readonly string SaveRootConfigPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "save-root.txt");
+        "ClassDock", "save-root.txt");
     static readonly object SaveRootLock = new object();
     static string SaveRoot = LoadSaveRoot();
     static readonly object ImageMemoLock = new object();
@@ -188,7 +188,7 @@ class PdfSignerLauncher
     static readonly Dictionary<string, string> SourceFolders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     static readonly string SourceFolderConfigPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PdfSigner", "source-folders.txt");
+        "ClassDock", "source-folders.txt");
     static readonly object SourceFolderPickerLock = new object();
     static string SourceFolderPickerState = "idle";
     static string SourceFolderPickerResult = "";
@@ -210,7 +210,7 @@ class PdfSignerLauncher
         const int HeadLimit = 4 * 1024 * 1024;
         const int ProtocolLimit = 6 * 1024 * 1024;
         const string Notice = "\n\n[출력이 4MB를 넘어 이후 내용은 생략했습니다. 실행은 계속됩니다.]\n";
-        static readonly string[] Markers = { "__MANNEUNG_DIAG__", "__MANNEUNG_GRADE__", "__MANNEUNG_TRACE__" };
+        static readonly string[] Markers = { "__CLASSDOCK_DIAG__", "__CLASSDOCK_GRADE__", "__CLASSDOCK_TRACE__" };
         readonly object Sync = new object();
         readonly StringBuilder Head = new StringBuilder();
         readonly StringBuilder Protocol = new StringBuilder();
@@ -449,7 +449,7 @@ class PdfSignerLauncher
     static byte[] InjectLocalAuthToken(byte[] page)
     {
         string html = Encoding.UTF8.GetString(page);
-        string tokenScript = "<script>window.__MANNEUNG_LOCAL_TOKEN__=" + JsonString(LocalAuthToken) + ";</script>\n";
+        string tokenScript = "<script>window.__CLASSDOCK_LOCAL_TOKEN__=" + JsonString(LocalAuthToken) + ";</script>\n";
         int at = html.IndexOf("<script", StringComparison.OrdinalIgnoreCase);
         if (at < 0) at = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
         if (at >= 0) html = html.Insert(at, tokenScript);
@@ -546,7 +546,7 @@ class PdfSignerLauncher
             "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n" +
             "$shell = New-Object -ComObject Shell.Application\n" +
             "try {\n" +
-            "  $folder = $shell.BrowseForFolder(0, '만능파일교실에서 파일을 자동 저장할 폴더를 선택하세요.', 81, 0)\n" +
+            "  $folder = $shell.BrowseForFolder(0, 'ClassDock에서 파일을 자동 저장할 폴더를 선택하세요.', 81, 0)\n" +
             "  if ($null -ne $folder) { [Console]::Write($folder.Self.Path) }\n" +
             "} finally {\n" +
             "  [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)\n" +
@@ -632,7 +632,7 @@ class PdfSignerLauncher
             // 사용자가 버튼을 누른 브라우저 창을 소유자로 지정해 선택창이 뒤에 숨지 않게 한다.
             info.hwndOwner = GetForegroundWindow();
             info.pszDisplayName = displayName;
-            info.lpszTitle = "만능파일교실에서 열 폴더를 선택하세요.";
+            info.lpszTitle = "ClassDock에서 열 폴더를 선택하세요.";
             // BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX | BIF_NONEWFOLDERBUTTON
             info.ulFlags = 1 | 64 | 16 | 512;
             pidl = SHBrowseForFolder(ref info);
@@ -776,13 +776,13 @@ class PdfSignerLauncher
     static bool HasLocalActionHeader(Dictionary<string, string> headers)
     {
         string value;
-        return headers != null && headers.TryGetValue("X-PdfSigner-Action", out value) && value == "1";
+        return headers != null && headers.TryGetValue("X-ClassDock-Action", out value) && value == "1";
     }
 
     static bool HasImageMemoHeader(Dictionary<string, string> headers)
     {
         string value;
-        return headers != null && headers.TryGetValue("X-PdfSigner-Image-Memo", out value) && value == "1";
+        return headers != null && headers.TryGetValue("X-ClassDock-Image-Memo", out value) && value == "1";
     }
 
     static bool TokenEquals(string value)
@@ -800,7 +800,7 @@ class PdfSignerLauncher
     static bool HasLocalAuthToken(Dictionary<string, string> headers)
     {
         string value;
-        if (headers != null && headers.TryGetValue("X-Manneung-Token", out value) && TokenEquals(value)) return true;
+        if (headers != null && headers.TryGetValue("X-ClassDock-Token", out value) && TokenEquals(value)) return true;
         return false;
     }
 
@@ -1017,7 +1017,7 @@ class PdfSignerLauncher
         int remembered = ReadInstancePort();
         if (remembered > 0 && IsOurServerAt(remembered))
         {
-            if (Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1")
+            if (Environment.GetEnvironmentVariable("CLASSDOCK_NO_BROWSER") != "1")
             {
                 try { OpenAppUrl("http://127.0.0.1:" + remembered + "/", LoadAppMode()); } catch {}
             }
@@ -1033,7 +1033,7 @@ class PdfSignerLauncher
                 remembered = ReadInstancePort();
                 if (remembered > 0 && IsOurServerAt(remembered))
                 {
-                    if (Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1")
+                    if (Environment.GetEnvironmentVariable("CLASSDOCK_NO_BROWSER") != "1")
                     {
                         try { OpenAppUrl("http://127.0.0.1:" + remembered + "/", LoadAppMode()); } catch { }
                     }
@@ -1069,7 +1069,7 @@ class PdfSignerLauncher
         WriteInstancePort(port);   // 다음 실행이 이 포트로 바로 붙을 수 있게 기록(단일 인스턴스 확인용)
         string url = "http://127.0.0.1:" + port + "/";
         ServerUrl = url;
-        HeartbeatRequired = Environment.GetEnvironmentVariable("PDFSIGNER_NO_BROWSER") != "1";
+        HeartbeatRequired = Environment.GetEnvironmentVariable("CLASSDOCK_NO_BROWSER") != "1";
         HeartbeatStartedAt = DateTime.UtcNow;
 
         // 지난 실행이 %TEMP% 에 남긴 고아 작업폴더 청소. 지울 양이 수백 MB 일 수 있어
@@ -1079,13 +1079,13 @@ class PdfSignerLauncher
         tempSweeper.Start();
 
         Console.WriteLine("============================================");
-        Console.WriteLine("  만능파일교실 is running");
+        Console.WriteLine("  ClassDock is running");
         Console.WriteLine("============================================");
         Console.WriteLine("  URL: " + url);
         Console.WriteLine("  Close this window to stop.");
         Console.WriteLine("============================================");
 
-        // PDFSIGNER_NO_BROWSER=1 이면 자동 브라우저 실행을 끈다(테스트/자동화용).
+        // CLASSDOCK_NO_BROWSER=1 이면 자동 브라우저 실행을 끈다(테스트/자동화용).
         if (HeartbeatRequired)
         {
             Thread browser = new Thread(delegate()
@@ -1267,7 +1267,7 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path.StartsWith("/workspace-save", StringComparison.Ordinal))
                 {
-                    if (!headers.ContainsKey("X-PdfSigner-Workspace"))
+                    if (!headers.ContainsKey("X-ClassDock-Workspace"))
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("workspace-header-required"));
                         return;
@@ -1290,7 +1290,7 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path == "/workspace-clear")
                 {
-                    if (!headers.ContainsKey("X-PdfSigner-Workspace"))
+                    if (!headers.ContainsKey("X-ClassDock-Workspace"))
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("workspace-header-required"));
                         return;
@@ -1300,7 +1300,7 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path == "/workspace-remove")
                 {
-                    if (!headers.ContainsKey("X-PdfSigner-Workspace"))
+                    if (!headers.ContainsKey("X-ClassDock-Workspace"))
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("workspace-header-required"));
                         return;
@@ -1361,7 +1361,7 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path.StartsWith("/heartbeat?", StringComparison.Ordinal))
                 {
-                    if (!headers.ContainsKey("X-PdfSigner-Heartbeat"))
+                    if (!headers.ContainsKey("X-ClassDock-Heartbeat"))
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("heartbeat-header-required"));
                         return;
@@ -1371,7 +1371,7 @@ class PdfSignerLauncher
                 }
                 else if (method == "POST" && path.StartsWith("/heartbeat-close?", StringComparison.Ordinal))
                 {
-                    if (!headers.ContainsKey("X-PdfSigner-Heartbeat"))
+                    if (!headers.ContainsKey("X-ClassDock-Heartbeat"))
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("heartbeat-header-required"));
                         return;
@@ -2059,7 +2059,7 @@ class PdfSignerLauncher
                 else if (method == "POST" && path == "/js-npm-install-start")
                 {
                     string confirmed;
-                    if (!headers.TryGetValue("x-manneung-npm-confirm", out confirmed) || confirmed != "1")
+                    if (!headers.TryGetValue("x-classdock-npm-confirm", out confirmed) || confirmed != "1")
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("npm-confirmation-required"));
                         return;
@@ -2093,7 +2093,7 @@ class PdfSignerLauncher
                 else if (method == "POST" && path == "/pip-install")
                 {
                     string pipConfirmed;
-                    if (!headers.TryGetValue("x-manneung-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
+                    if (!headers.TryGetValue("x-classdock-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-confirmation-required"));
                         return;
@@ -2116,7 +2116,7 @@ class PdfSignerLauncher
                 else if (method == "POST" && path == "/pip-install-start")
                 {
                     string pipConfirmed;
-                    if (!headers.TryGetValue("x-manneung-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
+                    if (!headers.TryGetValue("x-classdock-pip-confirm", out pipConfirmed) || pipConfirmed != "1")
                     {
                         WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("pip-confirmation-required"));
                         return;
@@ -2558,7 +2558,7 @@ class PdfSignerLauncher
             req.ReadWriteTimeout = 700;
             using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
             {
-                return resp.Headers["X-App"] == "manneung-classroom";
+                return resp.Headers["X-App"] == "classdock";
             }
         }
         catch { return false; }
@@ -2573,7 +2573,7 @@ class PdfSignerLauncher
             "Cache-Control: no-store\r\n" +
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
-            "X-App: manneung-classroom\r\n" +      // 우리 서버 식별용(중복 실행 시 단일 인스턴스 판별)
+            "X-App: classdock\r\n" +      // 우리 서버 식별용(중복 실행 시 단일 인스턴스 판별)
             "Connection: close\r\n" +
             "\r\n";
         byte[] headerBytes = Encoding.ASCII.GetBytes(header);
@@ -2592,7 +2592,7 @@ class PdfSignerLauncher
             "Cache-Control: max-age=600\r\n" +
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
-            "X-App: manneung-classroom\r\n" +
+            "X-App: classdock\r\n" +
             "Connection: close\r\n" +
             "\r\n";
         byte[] headerBytes = Encoding.ASCII.GetBytes(header);
@@ -2632,7 +2632,7 @@ class PdfSignerLauncher
                 TileTlsReady = true;
             }
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(uri);
-            request.UserAgent = "ManneungClassroom/1.0 (local classroom app; PDF export)";
+            request.UserAgent = "ClassDock/1.0 (local classroom app; PDF export)";
             request.Accept = "image/*";
             request.Timeout = 10000;
             request.ReadWriteTimeout = 10000;
@@ -3254,7 +3254,7 @@ class PdfSignerLauncher
             psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
             psi.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
             psi.EnvironmentVariables["MPLBACKEND"] = "Agg";
-            psi.EnvironmentVariables["MANNEUNG_KERNEL_ROOT"] = tempRoot;
+            psi.EnvironmentVariables["CLASSDOCK_KERNEL_ROOT"] = tempRoot;
 
             PythonKernel kernel = new PythonKernel();
             kernel.Id = id;
@@ -3619,8 +3619,8 @@ class PdfSignerLauncher
         bool cwdFallback;
         session.Cwd = ResolveTerminalWorkingDirectory(requestedCwd, out cwdFallback);
         session.CwdFallback = cwdFallback;
-        session.Marker = "__MANNEUNG_TERMINAL_DONE_" + session.Id + "__";
-        session.ScriptPath = Path.Combine(Path.GetTempPath(), "manneung_terminal_" + session.Id + ".ps1");
+        session.Marker = "__CLASSDOCK_TERMINAL_DONE_" + session.Id + "__";
+        session.ScriptPath = Path.Combine(Path.GetTempPath(), "classdock_terminal_" + session.Id + ".ps1");
 
         // 명령은 UTF-8 Base64 한 줄로 전달한다. 스크립트블록을 현재 범위에 dot-source하여
         // cd, 환경변수와 PowerShell 변수가 다음 명령에도 그대로 유지되게 한다.
@@ -4059,9 +4059,9 @@ class PdfSignerLauncher
         SnapshotInputs(session);   // 실행 전 작업폴더 파일 목록 기록(나중에 생성/변경된 출력 파일을 구분)
         File.WriteAllText(session.RunnerPath,
             "import os, runpy, sys\n" +
-            "sys.argv[0] = os.environ['PDFSIGNER_SCRIPT']\n" +
-            "_ps_script_dir = os.path.dirname(os.environ['PDFSIGNER_SCRIPT'])\n" +
-            "_ps_project_root = os.environ.get('PDFSIGNER_PROJECT_ROOT', '')\n" +
+            "sys.argv[0] = os.environ['CLASSDOCK_SCRIPT']\n" +
+            "_ps_script_dir = os.path.dirname(os.environ['CLASSDOCK_SCRIPT'])\n" +
+            "_ps_project_root = os.environ.get('CLASSDOCK_PROJECT_ROOT', '')\n" +
             "_ps_paths = []\n" +
             "_ps_cur = _ps_script_dir\n" +
             "while _ps_cur:\n" +
@@ -4076,12 +4076,12 @@ class PdfSignerLauncher
             "    if _ps_path and _ps_path not in sys.path:\n" +
             "        sys.path.insert(0, _ps_path)\n" +
             "try:\n" +
-            "    _ps_vars = runpy.run_path(os.environ['PDFSIGNER_SCRIPT'], run_name='__main__')\n" +
+            "    _ps_vars = runpy.run_path(os.environ['CLASSDOCK_SCRIPT'], run_name='__main__')\n" +
             "finally:\n" +
             "    try:\n" +
             "        import matplotlib.pyplot as _ps_plt\n" +
             "        for _ps_i, _ps_n in enumerate(_ps_plt.get_fignums()[:8]):\n" +
-            "            _ps_plt.figure(_ps_n).savefig(os.path.join(os.environ['PDFSIGNER_PLOT_DIR'], 'plot_%02d.png' % _ps_i), bbox_inches='tight')\n" +
+            "            _ps_plt.figure(_ps_n).savefig(os.path.join(os.environ['CLASSDOCK_PLOT_DIR'], 'plot_%02d.png' % _ps_i), bbox_inches='tight')\n" +
             "        _ps_plt.close('all')\n" +
             "    except Exception:\n" +
             "        pass\n" +
@@ -4103,7 +4103,7 @@ class PdfSignerLauncher
             "            _ps_items.append({'name': _ps_name[:120], 'type': type(_ps_value).__name__[:120], 'value': _ps_text})\n" +
             "            if len(_ps_items) >= 80:\n" +
             "                break\n" +
-            "        with open(os.path.join(os.environ['PDFSIGNER_PLOT_DIR'], 'variables.json'), 'w', encoding='utf-8') as _ps_file:\n" +
+            "        with open(os.path.join(os.environ['CLASSDOCK_PLOT_DIR'], 'variables.json'), 'w', encoding='utf-8') as _ps_file:\n" +
             "            _ps_json.dump(_ps_items, _ps_file, ensure_ascii=False)\n" +
             "    except Exception:\n" +
             "        pass\n", new UTF8Encoding(false));
@@ -4125,9 +4125,9 @@ class PdfSignerLauncher
         // 파일이 "실행이 만든 파일"에 섞이고 다음 실행 작업폴더로도 이어지므로 자동 생성을 끈다.
         // (py_compile 처럼 코드가 직접 만드는 .pyc 는 생길 수 있지만 결과 목록에서는 아래 안전망으로 제외한다)
         psi.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";
-        psi.EnvironmentVariables["PDFSIGNER_SCRIPT"] = scriptPath;
-        psi.EnvironmentVariables["PDFSIGNER_PROJECT_ROOT"] = tempRoot;
-        psi.EnvironmentVariables["PDFSIGNER_PLOT_DIR"] = session.PlotDir;
+        psi.EnvironmentVariables["CLASSDOCK_SCRIPT"] = scriptPath;
+        psi.EnvironmentVariables["CLASSDOCK_PROJECT_ROOT"] = tempRoot;
+        psi.EnvironmentVariables["CLASSDOCK_PLOT_DIR"] = session.PlotDir;
 
         session.Process = new Process();
         session.Process.StartInfo = psi;
@@ -4413,13 +4413,13 @@ class PdfSignerLauncher
        파이썬 세션·노트북 커널·터미널은 각자 종료 경로에서 임시물을 지우지만, 브라우저 탭을 닫으면
        하트비트 감시가 곧바로 프로세스를 끝내고(강제 종료·크래시도 마찬가지) 그때 살아 있던 임시물이 고아로 남는다.
        고아 폴더는 접근 통로인 세션 ID 가 메모리에만 있어 재실행 후에는 어떤 기능으로도 쓸 수 없으므로 지워도 잃을 게 없다.
-       (설정·자동복원 데이터는 %LOCALAPPDATA%\PdfSigner 와 브라우저 IndexedDB 에 있어 이 청소와 무관하다.)
+       (설정·자동복원 데이터는 %LOCALAPPDATA%\ClassDock 와 브라우저 IndexedDB 에 있어 이 청소와 무관하다.)
 
        두 겹으로 막는다.
         1) 종료 직전 CleanupOwnTempEntries — 이번 실행이 만든 것을 그 자리에서 정리.
         2) 다음 기동 때 SweepOrphanTempEntries — 1)까지 못 간 강제 종료·크래시분을 뒤늦게 정리. */
     const int OrphanTempMinAgeHours = 24;
-    static readonly string[] OrphanTempPrefixes = new string[] { "moidapy_", "moida_", "manneung_terminal_" };
+    static readonly string[] OrphanTempPrefixes = new string[] { "moidapy_", "moida_", "classdock_terminal_" };
     // 프로세스 안에서 필요할 때 재사용하는 작은 Python 도우미. 시작 청소와 첫 요청이 겹쳐
     // 실행 직전에 삭제되지 않도록 항상 보존한다(파일명은 고정이라 누적되지 않는다).
     static readonly string[] PersistentTempHelperNames = new string[] {
@@ -6599,9 +6599,9 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
         Directory.CreateDirectory(plotDir);
         File.WriteAllText(runnerPath,
             "import os, runpy, sys\n" +
-            "sys.argv[0] = os.environ['PDFSIGNER_SCRIPT']\n" +
-            "_ps_script_dir = os.path.dirname(os.environ['PDFSIGNER_SCRIPT'])\n" +
-            "_ps_project_root = os.environ.get('PDFSIGNER_PROJECT_ROOT', '')\n" +
+            "sys.argv[0] = os.environ['CLASSDOCK_SCRIPT']\n" +
+            "_ps_script_dir = os.path.dirname(os.environ['CLASSDOCK_SCRIPT'])\n" +
+            "_ps_project_root = os.environ.get('CLASSDOCK_PROJECT_ROOT', '')\n" +
             "_ps_paths = []\n" +
             "_ps_cur = _ps_script_dir\n" +
             "while _ps_cur:\n" +
@@ -6616,12 +6616,12 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
             "    if _ps_path and _ps_path not in sys.path:\n" +
             "        sys.path.insert(0, _ps_path)\n" +
             "try:\n" +
-            "    runpy.run_path(os.environ['PDFSIGNER_SCRIPT'], run_name='__main__')\n" +
+            "    runpy.run_path(os.environ['CLASSDOCK_SCRIPT'], run_name='__main__')\n" +
             "finally:\n" +
             "    try:\n" +
             "        import matplotlib.pyplot as _ps_plt\n" +
             "        for _ps_i, _ps_n in enumerate(_ps_plt.get_fignums()[:8]):\n" +
-            "            _ps_plt.figure(_ps_n).savefig(os.path.join(os.environ['PDFSIGNER_PLOT_DIR'], 'plot_%02d.png' % _ps_i), bbox_inches='tight')\n" +
+            "            _ps_plt.figure(_ps_n).savefig(os.path.join(os.environ['CLASSDOCK_PLOT_DIR'], 'plot_%02d.png' % _ps_i), bbox_inches='tight')\n" +
             "        _ps_plt.close('all')\n" +
             "    except Exception:\n" +
             "        pass\n",
@@ -6642,9 +6642,9 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
         psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
         psi.EnvironmentVariables["MPLBACKEND"] = "Agg";
         psi.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";   // 세션 실행과 동일하게 __pycache__ 찌꺼기를 남기지 않는다
-        psi.EnvironmentVariables["PDFSIGNER_SCRIPT"] = scriptPath;
-        psi.EnvironmentVariables["PDFSIGNER_PROJECT_ROOT"] = string.IsNullOrEmpty(projectRoot) ? workDir : projectRoot;
-        psi.EnvironmentVariables["PDFSIGNER_PLOT_DIR"] = plotDir;
+        psi.EnvironmentVariables["CLASSDOCK_SCRIPT"] = scriptPath;
+        psi.EnvironmentVariables["CLASSDOCK_PROJECT_ROOT"] = string.IsNullOrEmpty(projectRoot) ? workDir : projectRoot;
+        psi.EnvironmentVariables["CLASSDOCK_PLOT_DIR"] = plotDir;
 
         LimitedTextBuffer outSb = new LimitedTextBuffer();
         LimitedTextBuffer errSb = new LimitedTextBuffer();
@@ -7179,7 +7179,7 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
 
                 string json = Encoding.UTF8.GetString(body).Trim();
                 if (!json.StartsWith("{", StringComparison.Ordinal) || !json.EndsWith("}", StringComparison.Ordinal)
-                    || ExamJsonString(json, "format") != "manneung-exam-result")
+                    || ExamJsonString(json, "format") != "classdock-exam-result")
                 {
                     ExamReceiveWrite(stream, "400 Bad Request", "{\"ok\":false,\"error\":\"bad-format\"}");
                     return;

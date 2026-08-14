@@ -9,14 +9,14 @@ if exist "build-tmp" (
   rmdir /s /q "build-tmp"
 )
 
-if exist "manneung-classroom-offline.html" (
-  echo - manneung-classroom-offline.html
-  del /f /q "manneung-classroom-offline.html"
+if exist "classdock-offline.html" (
+  echo - classdock-offline.html
+  del /f /q "classdock-offline.html"
 )
 
-if exist "manneung-classroom.exe" (
-  echo - manneung-classroom.exe
-  del /f /q "manneung-classroom.exe"
+if exist "ClassDock.exe" (
+  echo - ClassDock.exe
+  del /f /q "ClassDock.exe"
 )
 
 if exist "desktop\app.html" (

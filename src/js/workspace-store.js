@@ -55,7 +55,7 @@ function workspaceBackendAvailable(){
 }
 
 // ----- 브라우저(IndexedDB) 작업공간 저장소 -----
-const WS_IDB_NAME = "manneung-workspace", WS_IDB_STORE = "workspace", WS_IDB_KEY = "payload";
+const WS_IDB_NAME = "classdock-workspace", WS_IDB_STORE = "workspace", WS_IDB_KEY = "payload";
 function wsIdbSupported(){ try { return typeof indexedDB !== "undefined" && !!indexedDB; } catch(e){ return false; } }
 function wsIdbOpen(){
   return new Promise((resolve, reject) => {
@@ -186,7 +186,7 @@ async function flushWorkspaceRemovals(){
     return await queueWorkspaceMutation(async () => {
       if (!useServer){ await browserWorkspaceRemove(rows, clearAll); return true; }
       const res = await workspaceFetch(clearAll ? "/workspace-clear" : "/workspace-remove", {
-        method: "POST", headers: { "X-PdfSigner-Workspace": "1" },
+        method: "POST", headers: { "X-ClassDock-Workspace": "1" },
         ...(clearAll ? {} : { body: encodeWorkspacePathList(rows) })
       });
       if (!res.ok) throw new Error(await res.text());
@@ -356,7 +356,7 @@ async function rememberWorkspace(files, replace, options={}){
     const body = await buildWorkspacePayload(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths);
     if (useServer){
       const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-save?replace=" + (replace ? "1" : "0"), {
-        method: "POST", headers: { "Content-Type": "application/octet-stream", "X-PdfSigner-Workspace": "1" }, body
+        method: "POST", headers: { "Content-Type": "application/octet-stream", "X-ClassDock-Workspace": "1" }, body
       }));
       if (!res.ok) throw new Error(await res.text());
     } else {
@@ -445,7 +445,7 @@ async function restoreLastWorkspace(force=false){
       if (!res.ok) return;
       const savedSize = Number(res.headers.get("Content-Length")) || 0;
       if (savedSize > WORKSPACE_CAP){
-        await workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }).catch(() => {});
+        await workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-ClassDock-Workspace": "1" } }).catch(() => {});
         toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
         return;
       }
@@ -546,7 +546,7 @@ async function clearRememberedWorkspace(){
   try {
     await flushWorkspaceRemovals();
     if (useServer){
-      const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-PdfSigner-Workspace": "1" } }));
+      const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-ClassDock-Workspace": "1" } }));
       if (!res.ok) throw new Error(await res.text());
     } else {
       await queueWorkspaceMutation(() => wsIdbClearPayload());

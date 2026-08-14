@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>만능파일교실 사용법</title>
+<title>ClassDock 사용법</title>
 <style>
   :root{
     --ink:#1e293b; --muted:#64748b; --border:#e2e8f0; --panel:#f8fafc;
@@ -88,7 +88,7 @@
 <body>
 <div class="wrap">
 
-<h1>만능파일교실 사용법 — 처음부터 끝까지</h1>
+<h1>ClassDock 사용법 — 처음부터 끝까지</h1>
 
 <p class="updated"><strong>최종 업데이트: 2026년 8월 13일</strong></p>
 
@@ -172,23 +172,23 @@ cd myOffice</code></pre>
 <table>
 <thead><tr><th>방법</th><th>누가 쓰면 좋아요?</th><th>더블클릭할 파일</th></tr></thead>
 <tbody>
-<tr><td><strong>① EXE</strong></td><td>가장 추천. 자동 복원·로컬 Python·정확한 PPT 변환 등 모든 기능 사용</td><td><code>manneung-classroom.exe</code></td></tr>
-<tr><td><strong>② 오프라인 HTML</strong></td><td>USB로 들고 다니거나 다른 PC에 파일 하나만 주고 싶을 때</td><td><code>manneung-classroom-offline.html</code></td></tr>
-<tr><td><strong>③ 온라인 HTML</strong></td><td>개발자가 소스 수정하며 바로 확인할 때</td><td><code>manneung-classroom.html</code></td></tr>
+<tr><td><strong>① EXE</strong></td><td>가장 추천. 자동 복원·로컬 Python·정확한 PPT 변환 등 모든 기능 사용</td><td><code>ClassDock.exe</code></td></tr>
+<tr><td><strong>② 오프라인 HTML</strong></td><td>USB로 들고 다니거나 다른 PC에 파일 하나만 주고 싶을 때</td><td><code>classdock-offline.html</code></td></tr>
+<tr><td><strong>③ 온라인 HTML</strong></td><td>개발자가 소스 수정하며 바로 확인할 때</td><td><code>classdock.html</code></td></tr>
 </tbody>
 </table>
 
 <h3>① EXE 실행 (가장 추천)</h3>
 
 <ol>
-  <li><code>manneung-classroom.exe</code> 더블클릭</li>
+  <li><code>ClassDock.exe</code> 더블클릭</li>
   <li><strong>처음 실행 시 Windows SmartScreen 경고</strong>가 뜰 수 있어요 (서명되지 않은 빌드라서). 다음처럼 진행:
     <ul>
       <li>"Windows의 PC 보호" 창에서 <strong>추가 정보</strong> → <strong>실행</strong> 클릭</li>
     </ul>
   </li>
   <li>콘솔창 없이 로컬 서버가 뜨고 기본 브라우저가 자동으로 열립니다.</li>
-  <li>끝낼 때는 브라우저 탭만 닫지 말고 <strong>트레이/작업관리자에서 <code>manneung-classroom.exe</code>도 종료</strong>하세요. 또는 <code>desktop/stop-server.cmd</code>를 실행.</li>
+  <li>끝낼 때는 브라우저 탭만 닫지 말고 <strong>트레이/작업관리자에서 <code>ClassDock.exe</code>도 종료</strong>하세요. 또는 <code>desktop/stop-server.cmd</code>를 실행.</li>
 </ol>
 
 <blockquote>
@@ -198,7 +198,7 @@ cd myOffice</code></pre>
 <h3>② 오프라인 HTML 실행</h3>
 
 <ol>
-  <li><code>manneung-classroom-offline.html</code> 더블클릭 → 기본 브라우저에서 바로 열림</li>
+  <li><code>classdock-offline.html</code> 더블클릭 → 기본 브라우저에서 바로 열림</li>
   <li>인터넷이 없어도 PDF·문서 보기·편집은 그대로 동작</li>
   <li>단, <strong>Python을 처음 실행할 때</strong>는 인터넷이 필요합니다 (Pyodide 런타임 다운로드)</li>
 </ol>
@@ -206,7 +206,7 @@ cd myOffice</code></pre>
 <h3>③ 온라인 HTML 실행</h3>
 
 <ol>
-  <li>인터넷 연결 상태에서 <code>manneung-classroom.html</code> 더블클릭</li>
+  <li>인터넷 연결 상태에서 <code>classdock.html</code> 더블클릭</li>
   <li>라이브러리를 CDN에서 받아오므로 <strong>첫 실행은 반드시 인터넷 필요</strong></li>
 </ol>
 
@@ -656,7 +656,7 @@ cd myOffice</code></pre>
 </ol>
 
 <blockquote>
-  <p><strong>제출하면 학생도 답안 파일을 다시 못 엽니다.</strong> 제출본은 시험지에 들어 있던 <strong>공개키로 봉인</strong>되고, 그 짝인 개인키는 선생님 암호로 잠긴 <code>.examkey</code> 안에만 있습니다. 제출 순간 해당 기기의 임시 답안이 지워지고 시험지가 잠깁니다. 브라우저 저장소를 지우거나 다른 기기를 쓰면 재제출할 수 있으므로, 같은 학생의 복수 제출은 채점표에서 확인해야 합니다. <strong>선생님 암호를 잊으면 제출본을 영영 열 수 없습니다</strong> — 복구 경로가 없습니다(있으면 그게 곧 뒷문이라서). 시험지마다 암호를 따로 정했다면 어느 시험지의 암호인지 함께 적어 두세요. <strong>정답은 배포본에 없습니다.</strong> 학생이 <code>.exam</code> 을 텍스트로 열어봐도 정답 자체가 파일에 없습니다. 다만 시험 중 화면 캡처·검색 같은 부정행위는 이 도구가 막지 못하니 교실 운영으로 함께 관리하세요. <strong>시험 기능은 EXE(만능파일교실)에서 사용하세요.</strong> 브라우저가 <code>file://</code> 로 연 페이지에서는 암호 기능을 막기 때문에 시험지를 만들 수도, 제출할 수도 없습니다.</p>
+  <p><strong>제출하면 학생도 답안 파일을 다시 못 엽니다.</strong> 제출본은 시험지에 들어 있던 <strong>공개키로 봉인</strong>되고, 그 짝인 개인키는 선생님 암호로 잠긴 <code>.examkey</code> 안에만 있습니다. 제출 순간 해당 기기의 임시 답안이 지워지고 시험지가 잠깁니다. 브라우저 저장소를 지우거나 다른 기기를 쓰면 재제출할 수 있으므로, 같은 학생의 복수 제출은 채점표에서 확인해야 합니다. <strong>선생님 암호를 잊으면 제출본을 영영 열 수 없습니다</strong> — 복구 경로가 없습니다(있으면 그게 곧 뒷문이라서). 시험지마다 암호를 따로 정했다면 어느 시험지의 암호인지 함께 적어 두세요. <strong>정답은 배포본에 없습니다.</strong> 학생이 <code>.exam</code> 을 텍스트로 열어봐도 정답 자체가 파일에 없습니다. 다만 시험 중 화면 캡처·검색 같은 부정행위는 이 도구가 막지 못하니 교실 운영으로 함께 관리하세요. <strong>시험 기능은 EXE(ClassDock)에서 사용하세요.</strong> 브라우저가 <code>file://</code> 로 연 페이지에서는 암호 기능을 막기 때문에 시험지를 만들 수도, 제출할 수도 없습니다.</p>
 </blockquote>
 
 <h3>🖥 대기 화면 (화면보호기)</h3>
@@ -876,7 +876,7 @@ cd myOffice</code></pre>
   <li><strong>자르기</strong> — 영역을 드래그한 뒤 <strong>모서리 핸들로 조절·안쪽 드래그로 이동</strong>, 자유·1:1·4:3·16:9 비율 프리셋</li>
   <li><strong>보정</strong> — 자동보정·밝기·대비·채도·선명도·노이즈완화 + <strong>크기 줄이기(½·⅓·폭 입력)</strong> + <strong>JPG 품질 슬라이더</strong> + 2x/4x 고화질 확대</li>
   <li><strong>📷 메모로</strong> — 현재 편집본을 일반 메모에 이미지 블록으로 넣기. <strong>자르기 영역을 선택해 두면 그 부분만 발췌</strong>(원본은 그대로), 표시·모자이크·보정 포함</li>
-  <li>EXE에서는 저장 시 권한 팝업 없이 <strong>저장 폴더(내 문서\만능교실 저장)</strong>에 기록되고 완료 알림에서 바로 <strong>폴더 열기</strong> 가능 (일반 브라우저는 다운로드)</li>
+  <li>EXE에서는 저장 시 권한 팝업 없이 <strong>저장 폴더(내 문서\ClassDock 저장)</strong>에 기록되고 완료 알림에서 바로 <strong>폴더 열기</strong> 가능 (일반 브라우저는 다운로드)</li>
 </ul>
 
 <h3>🎞 영상·오디오·자막</h3>
@@ -942,9 +942,9 @@ cd myOffice</code></pre>
 <h3>💻 학생들에게 배포하려면?</h3>
 
 <ul>
-  <li><strong>단일 파일 배포 = <code>manneung-classroom-offline.html</code> 한 파일만</strong> USB·메신저로 주면 끝</li>
+  <li><strong>단일 파일 배포 = <code>classdock-offline.html</code> 한 파일만</strong> USB·메신저로 주면 끝</li>
   <li>학생이 더블클릭하면 바로 브라우저에서 열림, 파이썬·라이브러리 설치 불필요</li>
-  <li>더 강력한 기능(로컬 Python 실행·자동 복원·PPT 변환)이 필요하면 <code>manneung-classroom.exe</code> 배포</li>
+  <li>더 강력한 기능(로컬 Python 실행·자동 복원·PPT 변환)이 필요하면 <code>ClassDock.exe</code> 배포</li>
   <li><strong>숙제·수행평가는 <a href="#-과제-패키지-task--만들고--풀고--검수하기">과제 패키지(.task)</a></strong> 로 — 문제·시작 코드·자동채점을 한 파일로 배포하고 제출본(<code>.taskdone</code>)을 걷어 일괄 재채점·성적 CSV까지</li>
 </ul>
 
@@ -973,7 +973,7 @@ cd myOffice</code></pre>
 <h3>📌 작업 표시줄에 고정하고 싶어요</h3>
 
 <ol>
-  <li>파일 탐색기에서 <code>manneung-classroom.exe</code> 위치를 엽니다</li>
+  <li>파일 탐색기에서 <code>ClassDock.exe</code> 위치를 엽니다</li>
   <li>EXE를 <strong>마우스 오른쪽 클릭</strong></li>
   <li>Windows 11: <strong>더 많은 옵션 표시</strong> → <strong>작업 표시줄에 고정</strong></li>
   <li>Windows 10: 바로 <strong>작업 표시줄에 고정</strong></li>
@@ -1005,7 +1005,7 @@ cd myOffice</code></pre>
 <ul>
   <li>사이드바 <strong>더보기 → 전체 백업 ZIP 내보내기</strong>로 작업공간, PDF 편집, 노트북, 임시 메모·이미지 메모, 화이트보드, 코드 초안과 설정을 한 번에 백업</li>
   <li><strong>백업 ZIP에서 복원</strong>을 누르고 내보낸 ZIP을 선택하면 현재 복구 데이터를 교체한 뒤 자동으로 다시 불러옴</li>
-  <li>일반 ZIP이나 손상된 파일은 복원하지 않고 올바른 만능파일교실 백업을 선택하라는 안내 표시</li>
+  <li>일반 ZIP이나 손상된 파일은 복원하지 않고 올바른 ClassDock 백업을 선택하라는 안내 표시</li>
   <li>다른 PC에서는 파일·폴더 쓰기 권한을 다시 받아야 함. Python 실행 변수·되돌리기 기록·OCR 캐시는 백업 제외</li>
 </ul>
 
@@ -1174,8 +1174,8 @@ cd myOffice</code></pre>
 <p>이 프로젝트의 EXE 빌드는 다음 두 단계로 진행됩니다.</p>
 
 <ol>
-  <li><code>manneung-classroom.html</code>, <code>src/</code>, <code>vendor/</code>를 합쳐 <code>manneung-classroom-offline.html</code> 생성</li>
-  <li>오프라인 HTML을 C# 런처에 내장해 <code>manneung-classroom.exe</code> 생성</li>
+  <li><code>classdock.html</code>, <code>src/</code>, <code>vendor/</code>를 합쳐 <code>classdock-offline.html</code> 생성</li>
+  <li>오프라인 HTML을 C# 런처에 내장해 <code>ClassDock.exe</code> 생성</li>
 </ol>
 
 <h3>준비물</h3>
@@ -1198,7 +1198,7 @@ cd myOffice</code></pre>
 <pre><code class="language-powershell">cd &lt;저장소를 클론한 폴더&gt;       # 예: D:\my
 
 # 실행 중인 기존 EXE가 있다면 종료
-Get-Process manneung-classroom -ErrorAction SilentlyContinue |
+Get-Process classdock -ErrorAction SilentlyContinue |
     Stop-Process -Force
 
 # 구문 검사 + 자동 테스트 + 오프라인 HTML 생성 + 배포물 검사
@@ -1239,23 +1239,23 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tbody>
 <tr><td><code>vendor/korean-hunspell-worker.js</code></td><td>한국어 맞춤법 사전 Worker (<code>npm run build</code>가 먼저 생성)</td></tr>
 <tr><td><code>사용법.html</code></td><td>이 문서(<code>사용법.md</code>)를 변환한 사용자용 HTML (<code>npm run build:manual</code>, 오프라인 HTML에 함께 내장)</td></tr>
-<tr><td><code>manneung-classroom-offline.html</code></td><td>CSS·JavaScript·문서 라이브러리를 합친 단일 오프라인 HTML</td></tr>
+<tr><td><code>classdock-offline.html</code></td><td>CSS·JavaScript·문서 라이브러리를 합친 단일 오프라인 HTML</td></tr>
 <tr><td><code>desktop/app.html</code></td><td>EXE에 내장하기 위해 복사된 오프라인 HTML</td></tr>
-<tr><td><code>manneung-classroom.exe</code></td><td>최종 Windows 실행 파일</td></tr>
+<tr><td><code>ClassDock.exe</code></td><td>최종 Windows 실행 파일</td></tr>
 </tbody>
 </table>
 
 <p>결과 파일의 크기와 수정 시각은 다음 명령으로 확인할 수 있습니다.</p>
 
-<pre><code class="language-powershell">Get-Item .\manneung-classroom.exe |
+<pre><code class="language-powershell">Get-Item .\ClassDock.exe |
     Select-Object FullName, Length, LastWriteTime</code></pre>
 
 <h3>자주 발생하는 빌드 오류</h3>
 
 <ul>
   <li><strong><code>npm.ps1</code>을 로드할 수 없음</strong>: <code>npm</code> 대신 <code>npm.cmd</code> 사용</li>
-  <li><strong><code>manneung-classroom.exe</code> 액세스 거부</strong>: 실행 중인 EXE를 위의 <code>Stop-Process</code> 명령으로 종료한 뒤 재시도</li>
-  <li><strong><code>manneung-classroom-offline.html</code>이 없음</strong>: <code>node build-offline.js</code> 또는 <code>npm.cmd run build</code>를 먼저 실행</li>
+  <li><strong><code>ClassDock.exe</code> 액세스 거부</strong>: 실행 중인 EXE를 위의 <code>Stop-Process</code> 명령으로 종료한 뒤 재시도</li>
+  <li><strong><code>classdock-offline.html</code>이 없음</strong>: <code>node build-offline.js</code> 또는 <code>npm.cmd run build</code>를 먼저 실행</li>
   <li><strong>C# compiler not found</strong>: .NET Framework 개발 구성 요소를 설치하거나 Go 1.21 이상을 설치</li>
 </ul>
 
@@ -1264,7 +1264,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <h3>배포할 때</h3>
 
 <ul>
-  <li>기본 앱 기능은 <code>manneung-classroom.exe</code> 하나로 실행할 수 있습니다.</li>
+  <li>기본 앱 기능은 <code>ClassDock.exe</code> 하나로 실행할 수 있습니다.</li>
   <li>인터넷 없이 브라우저 Python(Pyodide)까지 사용하려면 EXE와 함께 <code>vendor/pyodide/</code> 폴더를 같은 상대 위치로 배포합니다.</li>
   <li>로컬 Python의 번들 패키지 설치까지 오프라인으로 지원하려면 <code>vendor/wheels/</code>도 함께 배포합니다.</li>
   <li>자체 코드 서명을 하지 않은 EXE에는 Windows SmartScreen 경고가 표시될 수 있습니다.</li>
@@ -1328,7 +1328,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <p>EXE가 실행됐는데 브라우저가 안 뜨면:</p>
 
 <ol>
-  <li>작업관리자에서 <code>manneung-classroom.exe</code> 프로세스가 살아 있는지 확인</li>
+  <li>작업관리자에서 <code>ClassDock.exe</code> 프로세스가 살아 있는지 확인</li>
   <li>살아 있으면 브라우저에서 <code>http://127.0.0.1:17645/</code> 직접 접속</li>
   <li>17645가 다른 프로그램에 점유돼 있으면 <strong>다음 고정 후보 포트(18645 · 19645 · 27645 · 37645 · 47645)</strong> 중 하나로 떠 있을 수 있음 → 그 주소로 접속하거나, 콘솔창이 안 보이므로 종료 후 재실행. 한 번 뜬 포트는 기억되어 다음 실행 때 재사용됩니다</li>
 </ol>
@@ -1361,7 +1361,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <h3>Q6. 저장한 파일이 안 보여요</h3>
 
 <ul>
-  <li>EXE에서 Python·Excel 저장 위치: <strong><code>내 문서\만능교실 저장\</code></strong> 폴더</li>
+  <li>EXE에서 Python·Excel 저장 위치: <strong><code>내 문서\ClassDock 저장\</code></strong> 폴더</li>
   <li>PDF·이미지 내보내기는 브라우저 기본 다운로드 폴더로 떨어짐</li>
   <li>편집기 상단에 마지막 저장 경로가 표시됨</li>
 </ul>

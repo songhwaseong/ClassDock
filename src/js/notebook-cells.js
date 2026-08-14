@@ -126,7 +126,7 @@ function nbBuildCell(ownerDoc, cell){
       try { e.dataTransfer.setData("text/plain", String(cell.id || from)); } catch(_){}
       try {
         const snapshots = notebookCellClipboardSnapshot(nbSelectedCtrls(ownerDoc).map(item => item.cell));
-        e.dataTransfer.setData("application/x-manneung-notebook-cells", JSON.stringify(snapshots));
+        e.dataTransfer.setData("application/x-classdock-notebook-cells", JSON.stringify(snapshots));
       } catch(_){}
     }
     if (typeof window !== "undefined" && typeof window.openScratchpadForNotebookDrop === "function"){
@@ -212,7 +212,7 @@ function nbBuildCell(ownerDoc, cell){
   cellEl.addEventListener("dragover", (e) => {
     const drag = ownerDoc && ownerDoc._nbDrag;
     const hasMemoCells = !drag && e.dataTransfer &&
-      Array.from(e.dataTransfer.types || []).includes("application/x-manneung-notebook-cells");
+      Array.from(e.dataTransfer.types || []).includes("application/x-classdock-notebook-cells");
     if (hasMemoCells){
       e.preventDefault();
       for (const item of (ownerDoc._nbCtrls || [])) item.cellEl.classList.remove("nbv-drop-before", "nbv-drop-after");
@@ -230,11 +230,11 @@ function nbBuildCell(ownerDoc, cell){
   cellEl.addEventListener("drop", (e) => {
     const drag = ownerDoc && ownerDoc._nbDrag;
     if (!drag && e.dataTransfer &&
-        Array.from(e.dataTransfer.types || []).includes("application/x-manneung-notebook-cells")){
+        Array.from(e.dataTransfer.types || []).includes("application/x-classdock-notebook-cells")){
       e.preventDefault();
       e.stopPropagation();
       let snapshots = [];
-      try { snapshots = JSON.parse(e.dataTransfer.getData("application/x-manneung-notebook-cells") || "[]"); } catch(_){}
+      try { snapshots = JSON.parse(e.dataTransfer.getData("application/x-classdock-notebook-cells") || "[]"); } catch(_){}
       const target = nbCtrlIndex(ownerDoc, ctrl);
       const rect = cellEl.getBoundingClientRect();
       const at = target + (e.clientY >= rect.top + rect.height / 2 ? 1 : 0);
@@ -1402,9 +1402,9 @@ function renderCellOutputs(outputs, host, ctrl){
       } else {
         const rich = document.createElement("div");
         rich.className = "nbv-out-html";
-        const sanitizer = typeof PdfSignerCore !== "undefined" &&
-          PdfSignerCore && typeof PdfSignerCore.sanitizeHtml === "function"
-          ? PdfSignerCore.sanitizeHtml
+        const sanitizer = typeof ClassDockCore !== "undefined" &&
+          ClassDockCore && typeof ClassDockCore.sanitizeHtml === "function"
+          ? ClassDockCore.sanitizeHtml
           : null;
         if (sanitizer) rich.innerHTML = sanitizer(o.html || "");
         else rich.textContent = o.html || "";
@@ -1428,9 +1428,9 @@ function renderCellOutputs(outputs, host, ctrl){
       const tex = String(o.text || "")
         .replace(/^\s*\$\$([\s\S]*)\$\$\s*$/, "$1")
         .replace(/^\s*\\\[([\s\S]*)\\\]\s*$/, "$1");
-      const renderer = typeof PdfSignerCore !== "undefined" &&
-        PdfSignerCore && typeof PdfSignerCore.latexToMathML === "function"
-        ? PdfSignerCore.latexToMathML
+      const renderer = typeof ClassDockCore !== "undefined" &&
+        ClassDockCore && typeof ClassDockCore.latexToMathML === "function"
+        ? ClassDockCore.latexToMathML
         : null;
       if (renderer) box.innerHTML = renderer(tex, true);
       else box.textContent = tex;

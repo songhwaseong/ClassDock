@@ -10,9 +10,9 @@ const read = (rel) => fs.readFileSync(path.join(__dirname, "..", rel), "utf8");
 const styles = read("src/styles.css");
 const stateSrc = read("src/js/state.js");
 const app = read("src/js/app.js");
-const html = read("manneung-classroom.html");
+const html = read("classdock.html");
 
-// state.js 는 PdfSignerCore 구조분해로 시작해 통째로는 못 돌린다 — 코드 색 구획만 떼어 실행한다.
+// state.js 는 ClassDockCore 구조분해로 시작해 통째로는 못 돌린다 — 코드 색 구획만 떼어 실행한다.
 const start = stateSrc.indexOf("const CODE_COLOR_DEFS");
 const end = stateSrc.indexOf("const DEFAULT_APP_SETTINGS");
 assert.ok(start > 0 && end > start, "state.js 에서 코드 색 구획을 찾지 못했습니다");

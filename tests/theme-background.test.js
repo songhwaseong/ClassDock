@@ -32,7 +32,7 @@ test("잘못된 라이트 배경 프리셋은 기본 쿨 그레이로 정규화�
 });
 
 test("라이트 모드 배경 설정은 메모 색과 분리된 본 화면 전용 UI·CSS를 가진다", () => {
-  const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
   const css = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
   assert.match(html, /id="settingLightBackground"/);
   for (const value of ["cool", "warm", "mint", "lavender", "sky"])

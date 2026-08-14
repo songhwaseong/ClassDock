@@ -120,7 +120,7 @@ test("모바일 교체 배치는 참고와 작업의 위아래 영역을 완전�
 test("상하 분할은 높이 비율·가로 분할바·위아래 드롭 판정을 사용한다", () => {
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
-  const html = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
   assert.match(css, /#content\.study-mode\.study-stacked \.study-reference\{left:0;right:0;top:0;bottom:calc\(100% - var\(--study-split,50%\)\)/);
   assert.match(css, /#content\.study-mode\.study-stacked \.study-divider\{left:0;right:0;top:var\(--study-split,50%\);bottom:auto;width:auto;height:8px/);
   assert.match(docs, /stacked = dy > dx/);

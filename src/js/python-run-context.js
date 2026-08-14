@@ -708,7 +708,7 @@ async function markRunTouchedFolderRoots(runCtx){
   if (marked && typeof renderSidebar === "function") renderSidebar();
 }
 // 실행 산출물이 열려 있는 폴더 트리 안 경로면 그 폴더의 디렉터리 핸들로 원본 위치에 직접 쓴다.
-// (/save-file 은 '만능교실 저장' 폴더에만 쓰므로, 원본 폴더를 다시 읽는 동기화가 새 파일을 보려면
+// (/save-file 은 'ClassDock 저장' 폴더에만 쓰므로, 원본 폴더를 다시 읽는 동기화가 새 파일을 보려면
 // 여기서 실제 폴더에 써 두어야 한다.) 하나라도 써지면 루트에 표식을 남겨 '↻ 동기화' 버튼을 띄운다.
 async function writeRunOutputsToFolderRoots(rows){
   if (typeof navNodes === "undefined") return;
@@ -1077,7 +1077,7 @@ function openAssignmentGradingModal(options){
   setTimeout(() => { const first = list.querySelector(".py-grade-name"); if (first) first.focus(); }, 0);
 }
 
-const PY_GRADE_MARKER = "__MANNEUNG_GRADE__";
+const PY_GRADE_MARKER = "__CLASSDOCK_GRADE__";
 function utf8ToBase64(value){
   const bytes = new TextEncoder().encode(String(value == null ? "" : value));
   let binary = "";
@@ -1210,8 +1210,8 @@ function renderAssignmentGradingResult(panel, report, stderr, gradeTests){
   return { passed, total:results.length };
 }
 
-const PY_DIAG_MARKER = "__MANNEUNG_DIAG__";
-const PY_TRACE_MARKER = "__MANNEUNG_TRACE__";
+const PY_DIAG_MARKER = "__CLASSDOCK_DIAG__";
+const PY_TRACE_MARKER = "__CLASSDOCK_TRACE__";
 
 function buildPythonDiagnosticHarness(source, fileName){
   const source64 = utf8ToBase64(source);
@@ -1798,7 +1798,7 @@ function buildPythonEnvHelp(panel, btn){
     desc.textContent = "주소 끝의 ?py=wasm 은 로컬 파이썬을 일부러 무시하는 옵션입니다. 이 부분을 지우고 새로고침하면 로컬 파이썬을 다시 찾습니다.";
   } else if (!isServed){
     title.textContent = "지금은 로컬 파이썬을 쓸 수 없는 실행 방식입니다";
-    desc.textContent = "HTML 파일을 직접 열면 내 컴퓨터의 파이썬에 연결할 수 없습니다. manneung-classroom.exe 로 실행하면 설치된 파이썬을 자동으로 찾습니다.";
+    desc.textContent = "HTML 파일을 직접 열면 내 컴퓨터의 파이썬에 연결할 수 없습니다. ClassDock.exe 로 실행하면 설치된 파이썬을 자동으로 찾습니다.";
   } else {
     title.textContent = "내 컴퓨터에서 파이썬을 찾지 못했습니다";
     desc.textContent = "파이썬을 설치하면 자동으로 로컬 실행으로 바뀝니다. 이미 설치했는데도 이 안내가 보이면 아래 순서를 확인해 주세요.";

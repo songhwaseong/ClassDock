@@ -113,7 +113,7 @@ test("노트북 셀 블록은 코드·마크다운 내용을 보존하고 실행
       type:"markdown",
       source:"## 메모 셀",
       attachments:{ "figure.png":{ "image/png":"AAAA" } },
-      metadata:{ keep:true, manneung_execution:{ hash:"old" }, manneung_ink:[1, 2] }
+      metadata:{ keep:true, classdock_execution:{ hash:"old" }, classdock_ink:[1, 2] }
     }
   });
   assert.equal(block.type, "notebook-cell");

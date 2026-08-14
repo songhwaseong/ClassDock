@@ -12,7 +12,7 @@ const root = path.join(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
 const manifest = JSON.parse(read("scripts.manifest.json"));
-const html = read("manneung-classroom.html");
+const html = read("classdock.html");
 const editorSource = read("src/js/music-editor.js");
 const lazySource = read("src/js/lazy.js");
 

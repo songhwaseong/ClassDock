@@ -19,7 +19,7 @@ function loadMusicXmlApi(){
 
 test("MusicXML 파일과 압축형 MXL을 전용 가져오기로 연다", () => {
   const loaders = read("src/js/file-loaders.js");
-  const html = read("manneung-classroom.html");
+  const html = read("classdock.html");
   assert.match(loaders, /\(ext === "musicxml" \|\| ext === "mxl"\) && typeof loadMusicXml === "function"/);
   assert.match(html, /id="fileInput"[^>]*accept="[^"]*\.msheet,[^"]*\.musicxml,[^"]*\.mxl/);
   assert.match(xmlSource, /async function loadMusicXml\(file, opts = \{\}\)/);
@@ -34,7 +34,7 @@ test("MusicXML 파일과 압축형 MXL을 전용 가져오기로 연다", () => 
 
 test("MusicXML 변환 계층은 모델 다음, 편집기 전에 로드된다", () => {
   const manifest = JSON.parse(read("scripts.manifest.json"));
-  const html = read("manneung-classroom.html");
+  const html = read("classdock.html");
   const at = (name) => manifest.localScripts.indexOf(name);
   assert.ok(at("music-model.js") < at("music-xml.js"));
   assert.ok(at("music-xml.js") < at("music-editor.js"));

@@ -4,17 +4,17 @@
    사용자가 원본 파일로 저장하지 않은 작업공간 복구본, 편집 초안, 메모와 사용자 설정을
    하나의 ZIP으로 옮긴다. 파일/폴더 핸들과 OCR 캐시는 다른 PC에서 의미가 없거나 다시
    만들 수 있으므로 포함하지 않는다. */
-const MN_BACKUP_MAGIC = "manneung-classroom-backup";
+const MN_BACKUP_MAGIC = "classdock-backup";
 const MN_BACKUP_VERSION = 2;
 const MN_BACKUP_MAX_FILE = 1024 * 1024 * 1024;
-const MN_BACKUP_ACTIVE_TAB_KEY = "manneung-classroom:active-tab";
-const MN_BACKUP_PENDING_RESTORE_KEY = "manneung-backup:pending-restore:v1";
+const MN_BACKUP_ACTIVE_TAB_KEY = "classdock:active-tab";
+const MN_BACKUP_PENDING_RESTORE_KEY = "classdock-backup:pending-restore:v1";
 
 const MN_BACKUP_IDB = [
-  { name:"pdf-signer-recovery", stores:["documents", "signatures"], open:() => openPdfRecoveryDb() },
-  { name:"manneung-notebook-recovery", stores:["drafts"], open:() => notebookRecoveryOpen() },
-  { name:"manneung-scratchpad-assets", stores:["assets"], open:() => openScratchpadAssetDb() },
-  { name:"manneung-image-memo-drafts", stores:["state"], open:() => openImageMemoDraftDb() }
+  { name:"classdock-recovery", stores:["documents", "signatures"], open:() => openPdfRecoveryDb() },
+  { name:"classdock-notebook-recovery", stores:["drafts"], open:() => notebookRecoveryOpen() },
+  { name:"classdock-scratchpad-assets", stores:["assets"], open:() => openScratchpadAssetDb() },
+  { name:"classdock-image-memo-drafts", stores:["state"], open:() => openImageMemoDraftDb() }
 ];
 
 class MnBackupFormatError extends Error {
@@ -295,7 +295,7 @@ async function mnBackupRestoreWorkspace(bytes, present){
   if (!present || !bytes.length){
     if (useServer){
       const response = await fetch("/workspace-clear", {
-        method:"POST", headers:{ "X-PdfSigner-Workspace":"1" }
+        method:"POST", headers:{ "X-ClassDock-Workspace":"1" }
       });
       if (!response.ok) throw new Error("workspace-clear-failed");
     } else await wsIdbClearPayload();
@@ -306,7 +306,7 @@ async function mnBackupRestoreWorkspace(bytes, present){
   if (useServer){
     const response = await fetch("/workspace-save?replace=1", {
       method:"POST",
-      headers:{ "Content-Type":"application/octet-stream", "X-PdfSigner-Workspace":"1" },
+      headers:{ "Content-Type":"application/octet-stream", "X-ClassDock-Workspace":"1" },
       body:bytes
     });
     if (!response.ok) throw new Error("workspace-write-failed");
@@ -430,7 +430,7 @@ async function mnBackupExport(){
     if (typeof updateLoading === "function") updateLoading("백업 ZIP 만드는 중…");
     await new Promise(resolve => setTimeout(resolve, 0));
     const blob = await mnBackupGenerateZip(zip);
-    mnBackupDownload(blob, "만능파일교실-백업_" + mnBackupStamp() + ".zip");
+    mnBackupDownload(blob, "ClassDock-백업_" + mnBackupStamp() + ".zip");
     toast("전체 백업 ZIP을 만들었어요.", 2800, { type:"success" });
     return true;
   } catch(error){
@@ -447,10 +447,10 @@ async function mnBackupExport(){
 function mnBackupFormatMessage(error){
   const code = error && error.code;
   if (code === "unsupported-version")
-    return "이 백업은 더 최신 버전의 만능파일교실에서 만들어졌습니다. 프로그램을 업데이트한 뒤 다시 시도해 주세요.";
+    return "이 백업은 더 최신 버전의 ClassDock에서 만들어졌습니다. 프로그램을 업데이트한 뒤 다시 시도해 주세요.";
   if (code === "damaged")
     return "백업 ZIP이 손상되었거나 필수 데이터가 없습니다. 다른 백업 파일을 선택해 주세요.";
-  return "만능파일교실에서 만든 백업 ZIP이 아닙니다. 올바른 백업 파일을 선택해 주세요.";
+  return "ClassDock에서 만든 백업 ZIP이 아닙니다. 올바른 백업 파일을 선택해 주세요.";
 }
 
 async function mnBackupParseRestore(file){

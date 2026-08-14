@@ -1,7 +1,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
-  if (root) root.PdfSignerCore = api;
+  if (root) root.ClassDockCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
@@ -9,9 +9,9 @@
     return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "");
   }
 
-  const WORKSPACE_FOLDER_MARKER = ".manneung-folder-keep-9f4d2a7b";
-  const WORKSPACE_IMAGE_SKIP_MARKER = ".manneung-images-skipped-4e72c1b9";
-  const WORKSPACE_ORIGINAL_SAVE_MARKER = ".manneung-original-save-6c87f41e";
+  const WORKSPACE_FOLDER_MARKER = ".classdock-folder-keep-9f4d2a7b";
+  const WORKSPACE_IMAGE_SKIP_MARKER = ".classdock-images-skipped-4e72c1b9";
+  const WORKSPACE_ORIGINAL_SAVE_MARKER = ".classdock-original-save-6c87f41e";
   function workspaceFolderMarkerPath(value) {
     const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
     return path ? path + "/" + WORKSPACE_FOLDER_MARKER : "";

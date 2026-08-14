@@ -36,7 +36,7 @@ function officeReplaceKindOf(name){
 
 function officeReplaceMime(kind){ return kind === "pptx" ? PPTX_MIME : DOCX_MIME; }
 
-// XML 엔티티 → 글자. 코어(PdfSignerCore.officeXmlDecodeText)가 있으면 그걸 쓰고,
+// XML 엔티티 → 글자. 코어(ClassDockCore.officeXmlDecodeText)가 있으면 그걸 쓰고,
 // 없으면(단위 테스트 등) 같은 규칙을 그대로 쓴다.
 function officeReplaceDecode(value){
   if (typeof officeXmlDecodeText === "function") return officeXmlDecodeText(value);
@@ -282,7 +282,7 @@ function officeParagraphTextEdits(model, newText){
   return { edits: plan.edits, changed: plan.applied > 0, skipped: plan.skipped };
 }
 
-// 코어(PdfSignerCore.diffTextEdit)가 없을 때만 쓰는 같은 규칙의 대체 구현(단위 테스트 대비).
+// 코어(ClassDockCore.diffTextEdit)가 없을 때만 쓰는 같은 규칙의 대체 구현(단위 테스트 대비).
 function officeFallbackDiff(before, after){
   let start = 0;
   while (start < before.length && start < after.length && before[start] === after[start]) start++;

@@ -30,7 +30,7 @@ const sharedRuntimeGlobals = {
   htmlToImage: "readonly",
   $: "readonly",
   jQuery: "readonly"
-  ,PdfSignerCore: "readonly"
+  ,ClassDockCore: "readonly"
   ,MNI18N: "readonly"
   ,t: "readonly"
   ,setUiIcon: "readonly"
@@ -80,7 +80,7 @@ module.exports = [
       "vendor/**",
       "dist/**",
       "test-results/**",
-      "manneung-classroom-offline.html",
+      "classdock-offline.html",
       "사용법.html"
     ]
   },

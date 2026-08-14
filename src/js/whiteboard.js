@@ -5,11 +5,11 @@
    PNG/PDF 로 내보낸다. 새 라이브러리 없이 캔버스만 사용. */
 
 let _boardCount = 0;
-const BOARD_RECOVERY_PREFIX = "manneung-board-recovery:";
-const WB_EDU_TRANSFER_TYPE = "application/x-manneung-whiteboard-education";
-const WB_ITEM_TRANSFER_TYPE = "application/x-manneung-whiteboard-item";
+const BOARD_RECOVERY_PREFIX = "classdock-board-recovery:";
+const WB_EDU_TRANSFER_TYPE = "application/x-classdock-whiteboard-education";
+const WB_ITEM_TRANSFER_TYPE = "application/x-classdock-whiteboard-item";
 const WB_FORMULA_LIBRARY_KEY = "mn.wbFormulaLibrary.v1";
-const WB_FOCUS_PREFS_KEY = "manneung-whiteboard:focus-prefs:v1";
+const WB_FOCUS_PREFS_KEY = "classdock-whiteboard:focus-prefs:v1";
 const WB_TEXT_SIZE_MIN = 12;
 const WB_TEXT_SIZE_MAX = 72;
 const WB_OBJECT_SCALE_MIN = 25;
@@ -1307,8 +1307,8 @@ function renderWhiteboard(doc, host){
     img.src = src;
   });
   const formulaMathMl = (source) => {
-    if (typeof PdfSignerCore !== "undefined" && PdfSignerCore && typeof PdfSignerCore.latexToMathML === "function")
-      return PdfSignerCore.latexToMathML(String(source || ""), false, true);
+    if (typeof ClassDockCore !== "undefined" && ClassDockCore && typeof ClassDockCore.latexToMathML === "function")
+      return ClassDockCore.latexToMathML(String(source || ""), false, true);
     const safe = document.createElement("span"); safe.textContent = String(source || "");
     return `<math xmlns="http://www.w3.org/1998/Math/MathML" display="inline"><mtext>${safe.innerHTML}</mtext></math>`;
   };
@@ -2204,7 +2204,7 @@ function renderWhiteboard(doc, host){
     setFocus({curtain:{...focus.curtain,amount:Math.max(0,Math.min(1,focus.curtain.amount+(increase?delta:-delta)))}});
   });
   const focusFloat=typeof makeFloatingPanel==="function"?makeFloatingPanel(focusPanel,focusHead,{
-    storageKey:"manneung-whiteboard:focus-rect:v1",min:{w:280,h:250},
+    storageKey:"classdock-whiteboard:focus-rect:v1",min:{w:280,h:250},
     bounds:()=>{const box=typeof byId==="function"?byId("content"):null;return box?box.getBoundingClientRect():null;},
     host:()=>document.fullscreenElement||document.body,zIndex:()=>63
   }):null;
@@ -2246,7 +2246,7 @@ function renderWhiteboard(doc, host){
   // 무대 밖으로도 나갈 수 있게 화면 좌표로 띄우되, 앱 헤더는 이 창보다 위 층이라 가려 버리므로
   // 움직일 수 있는 범위는 작업 영역(#content)으로 잡는다.
   const eduFloat = typeof makeFloatingPanel === "function" ? makeFloatingPanel(eduPanel, eduHead, {
-    storageKey: "manneung-whiteboard:edu-rect:v1",
+    storageKey: "classdock-whiteboard:edu-rect:v1",
     min: { w:300, h:280 },
     bounds: () => {
       const box = typeof byId === "function" ? byId("content") : null;

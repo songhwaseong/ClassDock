@@ -8,11 +8,11 @@ const { spawn, spawnSync } = require("node:child_process");
 const python = spawnSync("python", ["--version"], { encoding:"utf8" }).status === 0 ? "python" : "";
 
 test("로컬 Python 커널은 셀 사이의 변수와 파일을 유지한다", { skip:!python }, async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "manneung-kernel-test-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "classdock-kernel-test-"));
   const runner = path.resolve(__dirname, "../desktop/python_kernel.py");
   const child = spawn(python, ["-u", "-X", "utf8", runner], {
     cwd:root,
-    env:{ ...process.env, MANNEUNG_KERNEL_ROOT:root, PYTHONIOENCODING:"utf-8" },
+    env:{ ...process.env, CLASSDOCK_KERNEL_ROOT:root, PYTHONIOENCODING:"utf-8" },
     stdio:["pipe", "pipe", "pipe"]
   });
   let stdout = "", stderr = "", waiting = null;

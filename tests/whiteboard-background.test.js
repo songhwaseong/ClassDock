@@ -86,7 +86,7 @@ test("내보내기는 화면에 보이는 배경을 그대로 담는다", () => 
 });
 
 test("설정 › 문서에 새 보드 기본 배경 칸이 있고 저장 목록에 실린다", () => {
-  const html = read("manneung-classroom.html");
+  const html = read("classdock.html");
   assert.match(html, /data-settings-panel="document"[\s\S]{0,2600}id="settingBoardBg"/);
 
   const app = read("src/js/app.js");

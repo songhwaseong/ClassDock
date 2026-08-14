@@ -23,9 +23,9 @@ const doc = new Function("smartDecodeText", viewerSrc + `
 const { buildWordDoc } = require("./fixtures/build-doc");
 
 test(".doc(Word 97) 조각표에서 유니코드 본문을 문단으로 뽑는다", () => {
-  const bytes = buildWordDoc({ text: "만능파일교실\r한글 본문입니다\r" });
+  const bytes = buildWordDoc({ text: "ClassDock\r한글 본문입니다\r" });
   const out = doc.docLegacyTextOf(bytes);
-  assert.deepEqual(out.split("\n").filter(l => l.trim()), ["만능파일교실", "한글 본문입니다"]);
+  assert.deepEqual(out.split("\n").filter(l => l.trim()), ["ClassDock", "한글 본문입니다"]);
 });
 
 test(".doc 압축 조각(1바이트 CP1252)도 읽는다", () => {

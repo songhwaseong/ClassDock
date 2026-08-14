@@ -67,7 +67,7 @@ test("집중 모드 스크립트와 필수 조작 UI가 올바른 순서로 포�
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
   assert.ok(manifest.localScripts.indexOf("pet.js") < manifest.localScripts.indexOf("pet-focus.js"));
   assert.ok(manifest.localScripts.indexOf("pet-focus.js") < manifest.localScripts.indexOf("app.js"));
-  const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
   for (const id of ["petFocusOpen", "petFocusPanel", "petFocusStart", "petFocusPause", "petFocusStop", "settingPetFocus"])
     assert.match(html, new RegExp(`id="${id}"`));
 });

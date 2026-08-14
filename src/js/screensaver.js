@@ -495,7 +495,7 @@ function startScreensaverAnimation(ov){
     ctx.fillStyle = "rgba(226,232,240,.72)"; ctx.font = Math.round(m * 0.036) + 'px system-ui,"Malgun Gothic",sans-serif';
     ctx.fillText(now.getFullYear() + ". " + (now.getMonth() + 1) + ". " + now.getDate() + ". (" + days[now.getDay()] + ")", cx, cy + H * 0.10);
     ctx.fillStyle = "rgba(148,163,184,.55)"; ctx.font = Math.round(m * 0.028) + 'px system-ui,"Malgun Gothic",sans-serif';
-    ctx.fillText("만능파일교실", cx, cy + H * 0.16);
+    ctx.fillText("ClassDock", cx, cy + H * 0.16);
     ssRaf = requestAnimationFrame(draw);
   };
   draw();

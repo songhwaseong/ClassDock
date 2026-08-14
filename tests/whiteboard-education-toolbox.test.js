@@ -202,7 +202,7 @@ test("도구상자 UI는 클릭 삽입과 보드 드래그앤드롭을 함께 �
   assert.match(source, /flipYBtn = mkBtn\("↕", "선택한 이미지 또는 교육 도형 상하 반전"/);
   assert.match(source, /if \(!whiteboardCanFlipItem\(selected\)\) return/);
   assert.match(source, /groupActionBtn = mkBtn\("분리"/);
-  assert.match(source, /PdfSignerCore\.latexToMathML/);
+  assert.match(source, /ClassDockCore\.latexToMathML/);
   assert.match(source, /latexToMathML\(String\(source \|\| ""\), false, true\)/);
   assert.match(source, /LaTeX 수식 또는 '일반 문자열'/);
   assert.match(source, /const width = Math\.min\(16000,/);
@@ -247,7 +247,7 @@ test("도구상자는 메모창과 같은 공용 헬퍼로 옮기고 크기를 �
   assert.doesNotMatch(memo, /attachEdgeResize/);
   // 화이트보드 도구상자 배선: 저장 키·작업 영역 안으로 제한·전체화면 대응·창을 닫을 때 정리
   assert.match(source, /makeFloatingPanel\(eduPanel, eduHead, \{/);
-  assert.match(source, /storageKey: "manneung-whiteboard:edu-rect:v1"/);
+  assert.match(source, /storageKey: "classdock-whiteboard:edu-rect:v1"/);
   assert.match(source, /bounds: \(\) => \{[\s\S]*?byId\("content"\)/);
   assert.match(source, /host: \(\) => document\.fullscreenElement \|\| document\.body/);
   assert.match(source, /if \(eduFloat\) eduFloat\.clampOnOpen\(\);/);

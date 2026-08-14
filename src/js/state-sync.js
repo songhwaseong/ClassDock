@@ -13,7 +13,7 @@
                 (location.hostname === "127.0.0.1" || location.hostname === "localhost");
   if (!isLocal) return;
 
-  var localToken = String(window.__MANNEUNG_LOCAL_TOKEN__ || "");
+  var localToken = String(window.__CLASSDOCK_LOCAL_TOKEN__ || "");
   function isSameOriginRequest(input) {
     try {
       var raw = (typeof input === "string") ? input : (input && input.url) || "";
@@ -30,7 +30,7 @@
             init = init ? Object.assign({}, init) : {};
             var baseHeaders = init.headers || (input && input.headers) || undefined;
             var headers = new Headers(baseHeaders);
-            if (!headers.has("X-Manneung-Token")) headers.set("X-Manneung-Token", localToken);
+            if (!headers.has("X-ClassDock-Token")) headers.set("X-ClassDock-Token", localToken);
             init.headers = headers;
           }
         } catch (_) {}
@@ -49,7 +49,7 @@
       };
       XMLHttpRequest.prototype.send = function () {
         if (this.__mnSameOrigin) {
-          try { this.setRequestHeader("X-Manneung-Token", localToken); } catch (_) {}
+          try { this.setRequestHeader("X-ClassDock-Token", localToken); } catch (_) {}
         }
         return rawSend.apply(this, arguments);
       };

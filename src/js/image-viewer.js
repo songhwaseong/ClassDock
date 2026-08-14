@@ -1317,7 +1317,7 @@ function imageBaseName(file){
   return String(file && file.name || "image").replace(/\.[^.]+$/, "") || "image";
 }
 
-// 저장 동선 통일: EXE 로컬 서버가 있으면 권한 팝업 없이 저장 폴더(내 문서\만능교실 저장)에 쓰고
+// 저장 동선 통일: EXE 로컬 서버가 있으면 권한 팝업 없이 저장 폴더(내 문서\ClassDock 저장)에 쓰고
 // 저장 완료 토스트에 절대경로·[폴더 열기]를 띄운다. 없으면 기존 다운로드로 폴백(.py 저장과 같은 흐름).
 async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options={}){
   if (options.overwriteOriginal && ownerDoc && ownerDoc.originalSaveMode){

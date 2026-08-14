@@ -136,7 +136,7 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
   }
   if (location.protocol !== "http:" && location.protocol !== "https:"){
     shell.textContent = "";
-    sqliteMessage(shell, "EXE에서 열어주세요", "SQLite 표 미리보기는 만능교실 EXE의 읽기 전용 데이터베이스 엔진을 사용합니다.");
+    sqliteMessage(shell, "EXE에서 열어주세요", "SQLite 표 미리보기는 ClassDock EXE의 읽기 전용 데이터베이스 엔진을 사용합니다.");
     return;
   }
 
@@ -247,7 +247,7 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
     head.append(label, hint);
 
     const message = document.createElement("p"); message.className = "sqlite-readonly-copy";
-    message.textContent = "이 데이터베이스는 읽기 전용으로 열렸습니다. SQL 실행과 데이터 변경은 안전을 위해 만능교실 저장 폴더에 있는 DB 파일에서만 사용할 수 있습니다.";
+    message.textContent = "이 데이터베이스는 읽기 전용으로 열렸습니다. SQL 실행과 데이터 변경은 안전을 위해 ClassDock 저장 폴더에 있는 DB 파일에서만 사용할 수 있습니다.";
 
     const actions = document.createElement("div"); actions.className = "sqlite-editor-actions";
     const copy = document.createElement("button"); copy.type = "button"; copy.className = "sqlite-run";
@@ -297,7 +297,7 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
       try {
         const response = await fetch("/open-save-folder", {
           method: "POST",
-          headers: { "X-PdfSigner-Action":"1" },
+          headers: { "X-ClassDock-Action":"1" },
           cache: "no-store"
         });
         if (!response.ok) throw new Error("HTTP " + response.status);

@@ -14,7 +14,7 @@ const PDF_OCR_TARGET_WIDTH = 1800;        // 인식용 렌더 폭(px) — 정확
 const PDF_OCR_CACHE_VERSION = 2;
 
 // ----- 결과 캐시(IndexedDB) -----
-const PDF_OCR_DB = "manneung-ocr", PDF_OCR_STORE = "pages";
+const PDF_OCR_DB = "classdock-ocr", PDF_OCR_STORE = "pages";
 function pdfOcrIdbOpen(){
   return new Promise((resolve, reject) => {
     let req;

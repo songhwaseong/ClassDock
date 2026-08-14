@@ -2398,7 +2398,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   traceBtn.addEventListener("click", () => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { traceMode:true }));
   analyzeBtn.addEventListener("click", () => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { diagnoseMode:true }));
   gradeBtn.addEventListener("click", () => openAssignmentGradingModal({
-    storageKey: "pdf-signer-python-grade:" + draftKey.slice(PY_DRAFT_PREFIX.length),
+    storageKey: "classdock-python-grade:" + draftKey.slice(PY_DRAFT_PREFIX.length),
     onRun: (tests) => runPythonSource(editor.getValue(), ui, runCtxWithDoc, false, { gradeTests:tests }),
     // 과제 패키지(.task) 내보내기 — 현재 코드를 시작 코드로 넘긴다
     taskExport: {
@@ -2528,7 +2528,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         name = named;
         if (saveToOriginal) setSavedPath(ownerDoc.workspacePath, { original:true, pending:true });
       }
-      // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\만능교실 저장).
+      // 0) exe 로컬 서버가 있으면 브라우저 권한 팝업 없이 서버로 바로 저장(내 문서\ClassDock 저장).
       if (canSaveViaServer){
         const savedPath = await saveViaServer(value, ownerDoc, name);
         if (savedPath){
@@ -3037,7 +3037,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 다른 파일과 동일하게, 열어도 포커스는 사이드바에 둔다(편집기는 클릭/Tab 으로 진입).
 }
 
-const PY_DRAFT_PREFIX = "pdf-signer-python-draft:";
+const PY_DRAFT_PREFIX = "classdock-python-draft:";
 const PY_DRAFT_MAX = 768 * 1024;
 const PYTHON_AUTOSAVE_DELAY = 3000;
 const TEXT_AUTOSAVE_DELAY = 3000;   // 텍스트·마크다운 편집기도 같은 간격으로 자동 저장(입력이 멈춘 뒤)
@@ -3428,7 +3428,7 @@ function newTextScratchInFolder(folder){
 // ===== 저장 위치(파일 핸들)를 IndexedDB 에 보관 → 프로그램 재실행 후에도 같은 파일에 저장(위치 재선택 불필요) =====
 // FileSystemFileHandle 은 구조화 복제로 IndexedDB 에 저장 가능. 단, 새 세션의 첫 저장 때 브라우저가
 // 쓰기 권한을 1회 다시 묻는다(보안상 세션 간 자동 유지 안 됨) — 그래도 파일은 기억하므로 클릭 한 번이면 된다.
-const FS_HANDLE_DB = "pdf-signer-fs-handles";
+const FS_HANDLE_DB = "classdock-fs-handles";
 const FS_HANDLE_STORE = "handles";
 let _fsHandleDbPromise = null;
 function openFsHandleDb(){
@@ -3444,7 +3444,7 @@ function openFsHandleDb(){
 }
 function fsHandleKey(path){ return String(path || "").replace(/\\/g, "/").replace(/^\/+/, ""); }
 async function saveFsHandle(path, handle){
-  const key = fsHandleKey(path); if (!key || !handle || handle.__manneungNativeHandle) return;
+  const key = fsHandleKey(path); if (!key || !handle || handle.__classdockNativeHandle) return;
   try { const db = await openFsHandleDb(); await new Promise((res, rej) => { const tx = db.transaction(FS_HANDLE_STORE, "readwrite"); tx.objectStore(FS_HANDLE_STORE).put(handle, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); }
   catch(e){ console.warn("fs handle save skipped:", e); }
 }

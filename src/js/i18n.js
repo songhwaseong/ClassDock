@@ -33,7 +33,7 @@
   var DICT = {
     // 헤더
     "왼쪽 사이드 메뉴 숨기기": "Hide sidebar",
-    "만능파일교실": "Manneung File Classroom",
+    "ClassDock": "ClassDock",
     "원본 저장": "Original file",
     "사본 저장": "Saved copy",
     "저장하면 열어 둔 원본 파일을 바로 바꿉니다.": "Saving directly updates the original file you opened.",
@@ -407,7 +407,7 @@
     "이 펫 저장": "Save this pet",
 
     // 환영 / 도움말
-    "만능파일교실에 오신 걸 환영해요 👋": "Welcome to Manneung File Classroom 👋",
+    "ClassDock에 오신 걸 환영해요 👋": "Welcome to ClassDock 👋",
     "✨ 파이썬 예제로 시작": "✨ Start with Python examples",
     "시작하기": "Get started",
     "기능 둘러보기": "Feature tour",
@@ -1205,7 +1205,7 @@
     "가장 긴 파일명에 맞췄어요. 최대 너비는 600px입니다.": "Fit to the longest filename. Max width is 600px.",
     "다른 창에서 사용 중이에요": "In use by another window",
     "라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.": "Couldn't load the library. Check your internet connection.",
-    "로컬 서버가 종료되었습니다. manneung-classroom.exe 를 다시 실행하세요.": "The local server stopped. Run manneung-classroom.exe again.",
+    "로컬 서버가 종료되었습니다. ClassDock.exe 를 다시 실행하세요.": "The local server stopped. Run ClassDock.exe again.",
     "로컬 서버와 연결되어 있습니다.": "Connected to the local server.",
     "새 키를 누르세요…": "Press a new key…",
     "새로고침할 파일을 먼저 선택해 주세요.": "Select a file to refresh first.",
@@ -1763,7 +1763,7 @@
     }
     bindings = live;
     if (KO_TITLE == null) KO_TITLE = document.title;
-    document.title = (lang === "en") ? "Manneung File Classroom" : KO_TITLE;
+    document.title = (lang === "en") ? "ClassDock" : KO_TITLE;
     try { document.documentElement.lang = lang; } catch (_) {}
     if (typeof window.syncShortcutHints === "function") {
       try { window.syncShortcutHints(); } catch (_) {}

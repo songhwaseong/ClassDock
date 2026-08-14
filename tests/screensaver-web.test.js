@@ -11,7 +11,7 @@ const path = require("node:path");
 const stateSource = fs.readFileSync(path.join(__dirname, "../src/js/state.js"), "utf8");
 const ssSource = fs.readFileSync(path.join(__dirname, "../src/js/screensaver.js"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
-const htmlSource = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+const htmlSource = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
 const cssSource = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 
 // state.js 에서 정규화 함수만 떼어내 실행한다(문서·localStorage 없이 검증).

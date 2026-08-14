@@ -39,11 +39,11 @@ async function handleFiles(files, options={}){
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
-    if (opts.fsHandle && !opts.fsHandle.__manneungNativeHandle && opts.workspacePath && typeof saveFsHandle === "function")
+    if (opts.fsHandle && !opts.fsHandle.__classdockNativeHandle && opts.workspacePath && typeof saveFsHandle === "function")
       saveFsHandle(opts.workspacePath, opts.fsHandle);
     // 최근 목록에는 "다시 열 수 있는" 것만 남긴다 — 핸들을 보관한 최상위 파일만이고,
     // 폴더·압축 안의 파일(parentId 있음)과 임시 문서는 각각 폴더 항목·대상 아님으로 처리한다.
-    if (opts.fsHandle && !opts.fsHandle.__manneungNativeHandle && opts.workspacePath && !options.parentId && !options.transient && !options.isScratch
+    if (opts.fsHandle && !opts.fsHandle.__classdockNativeHandle && opts.workspacePath && !options.parentId && !options.transient && !options.isScratch
         && typeof MNRecent !== "undefined") MNRecent.rememberFile(file.name, opts.workspacePath);
     const duplicate = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
     if (duplicate){
@@ -180,7 +180,7 @@ async function tryConvertPptxToPdf(pptxBytes){
   if (!(await pptxBackendAvailable())) {
     const msg = (location.protocol === "http:" || location.protocol === "https:")
       ? "PowerPoint 변환 백엔드를 사용할 수 없어 간이 미리보기로 열어요."
-      : "PPTX 도형을 정확히 보려면 manneung-classroom.exe로 열어주세요.";
+      : "PPTX 도형을 정확히 보려면 ClassDock.exe로 열어주세요.";
     _lastPptxConvertError = msg;
     toast(msg, 4000);
     return null;
@@ -526,7 +526,7 @@ async function loadRememberedFolderHandle(rootName){
 function rememberFolderHandle(rootGroup, rootName){
   if (typeof saveFsHandle !== "function" || typeof loadFsHandle !== "function") return;
   if (rootGroup.folderHandle){
-    if (!rootGroup.folderHandle.__manneungNativeHandle)
+    if (!rootGroup.folderHandle.__classdockNativeHandle)
       saveFsHandle(FOLDER_HANDLE_KEY_PREFIX + rootName, rootGroup.folderHandle);
     return;
   }
@@ -707,7 +707,7 @@ async function collectFolderEntryPaths(entries, fileList){
 // EXE에서는 Windows 폴더 선택창이 고른 실제 절대경로를 로컬 서버가 보관하고,
 // 아래 핸들이 File System Access API와 같은 최소 인터페이스를 제공한다.
 // 일반 브라우저에는 이 엔드포인트가 없으므로 기존 showDirectoryPicker를 그대로 사용한다.
-const NATIVE_SOURCE_ROOTS_KEY = "manneung-native-source-roots:v1";
+const NATIVE_SOURCE_ROOTS_KEY = "classdock-native-source-roots:v1";
 let nativeSourceFolderCapability = null;
 function nativeSourceUrl(path, id, rel, extra=""){
   return path + "?id=" + encodeURIComponent(id || "") + "&path=" + encodeURIComponent(rel || "") + extra;
@@ -769,7 +769,7 @@ async function nativeWritableBytes(value){
 class NativeSourceFileHandle {
   constructor(rootId, rootPath, relPath, meta=null){
     this.kind = "file";
-    this.__manneungNativeHandle = true;
+    this.__classdockNativeHandle = true;
     this.rootId = rootId;
     this.rootPath = rootPath;
     this.relPath = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -808,7 +808,7 @@ class NativeSourceFileHandle {
         closed = true;
         await nativeSourceFetch(nativeSourceUrl("/source-folder-file", handle.rootId, handle.relPath), {
           method:"POST",
-          headers:{ "Content-Type":"application/octet-stream", "X-PdfSigner-Action":"1" },
+          headers:{ "Content-Type":"application/octet-stream", "X-ClassDock-Action":"1" },
           body:bytes
         });
         handle.meta = { kind:"file", name:handle.name, size:bytes.byteLength, lastModified:Date.now() };
@@ -820,7 +820,7 @@ class NativeSourceFileHandle {
 class NativeSourceDirectoryHandle {
   constructor(rootId, rootPath, relPath=""){
     this.kind = "directory";
-    this.__manneungNativeHandle = true;
+    this.__classdockNativeHandle = true;
     this.rootId = rootId;
     this.rootPath = String(rootPath || "").replace(/[\\/]+$/, "");
     this.relPath = String(relPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -859,7 +859,7 @@ class NativeSourceDirectoryHandle {
     } catch(error){
       if (!options.create || error.name !== "NotFoundError") throw error;
       await nativeSourceFetch(nativeSourceUrl("/source-folder-directory", this.rootId, rel), {
-        method:"POST", headers:{ "X-PdfSigner-Action":"1" }
+        method:"POST", headers:{ "X-ClassDock-Action":"1" }
       });
     }
     return new NativeSourceDirectoryHandle(this.rootId, this.rootPath, rel);
@@ -874,7 +874,7 @@ class NativeSourceDirectoryHandle {
       if (!options.create || error.name !== "NotFoundError") throw error;
       await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, rel), {
         method:"POST",
-        headers:{ "Content-Type":"application/octet-stream", "X-PdfSigner-Action":"1" },
+        headers:{ "Content-Type":"application/octet-stream", "X-ClassDock-Action":"1" },
         body:new Uint8Array(0)
       });
       meta = { kind:"file", name:String(name), size:0, lastModified:Date.now() };
@@ -885,13 +885,13 @@ class NativeSourceDirectoryHandle {
     const rel = nativeJoinRel(this.relPath, name);
     await nativeSourceFetch(nativeSourceUrl("/source-folder-remove", this.rootId, rel,
       "&recursive=" + (options.recursive ? "1" : "0")), {
-      method:"POST", headers:{ "X-PdfSigner-Action":"1" }
+      method:"POST", headers:{ "X-ClassDock-Action":"1" }
     });
   }
 }
 async function chooseNativeSourceFolder(){
   if (!(await nativeSourceSupported())) return { supported:false, handle:null };
-  const headers = { "X-PdfSigner-Action":"1" };
+  const headers = { "X-ClassDock-Action":"1" };
   await nativeSourceFetch("/choose-source-folder", { method:"POST", headers });
   for (let attempt = 0; attempt < 1200; attempt++){
     await new Promise(resolve => setTimeout(resolve, 250));
@@ -915,7 +915,7 @@ async function restoreNativeSourceFolder(rootName){
   try {
     const response = await nativeSourceFetch("/source-folder-restore", {
       method:"POST",
-      headers:{ "Content-Type":"text/plain;charset=utf-8", "X-PdfSigner-Action":"1" },
+      headers:{ "Content-Type":"text/plain;charset=utf-8", "X-ClassDock-Action":"1" },
       body:path
     });
     const data = await response.json();
@@ -1104,7 +1104,7 @@ async function openFolderFiles(fileList, options={}){
   rootGroup.originalSaveMode = !!options.originalSaveMode;
   rootGroup.folderHandle = options.folderHandle || null;
   rootGroup.nativeRootPath = String(options.nativeRootPath ||
-    (rootGroup.folderHandle && rootGroup.folderHandle.__manneungNativeHandle && rootGroup.folderHandle.nativePath) || "");
+    (rootGroup.folderHandle && rootGroup.folderHandle.__classdockNativeHandle && rootGroup.folderHandle.nativePath) || "");
   rememberFolderHandle(rootGroup, rootName);   // 핸들 IDB 보관/복구 — 재실행 뒤에도 '폴더 새로고침'이 권한 1클릭으로 동작
   // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
   rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
@@ -1563,7 +1563,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   // 루트·하위 그룹 메타데이터를 새 스냅샷 기준으로 갱신
   root.folderHandle = options.folderHandle || root.folderHandle || null;
   root.nativeRootPath = String(options.nativeRootPath || root.nativeRootPath ||
-    (root.folderHandle && root.folderHandle.__manneungNativeHandle && root.folderHandle.nativePath) || "");
+    (root.folderHandle && root.folderHandle.__classdockNativeHandle && root.folderHandle.nativePath) || "");
   rememberFolderHandle(root, selectedRootName);
   root.restorePendingImages = false;
   root.runOutputsPending = false;

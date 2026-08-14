@@ -1,10 +1,10 @@
 "use strict";
 
-const SCRATCHPAD_TEXT_KEY = "manneung-scratchpad:text:v1";
-const SCRATCHPAD_TABS_KEY = "manneung-scratchpad:tabs:v2";
-const SCRATCHPAD_OPEN_KEY = "manneung-scratchpad:open:v1";
-const SCRATCHPAD_RECT_KEY = "manneung-scratchpad:rect:v1";
-const SCRATCHPAD_ASSET_DB = "manneung-scratchpad-assets";
+const SCRATCHPAD_TEXT_KEY = "classdock-scratchpad:text:v1";
+const SCRATCHPAD_TABS_KEY = "classdock-scratchpad:tabs:v2";
+const SCRATCHPAD_OPEN_KEY = "classdock-scratchpad:open:v1";
+const SCRATCHPAD_RECT_KEY = "classdock-scratchpad:rect:v1";
+const SCRATCHPAD_ASSET_DB = "classdock-scratchpad-assets";
 const SCRATCHPAD_ASSET_STORE = "assets";
 const SCRATCHPAD_MAX_NOTES = 30;
 const SCRATCHPAD_MAX_IMAGES = 50;
@@ -130,8 +130,8 @@ function scratchpadNormalizeNotebookCell(raw){
   let metadata = {};
   let attachments = null;
   try { metadata = JSON.parse(JSON.stringify(raw.metadata || {})); } catch(_){}
-  delete metadata.manneung_execution;
-  delete metadata.manneung_ink;
+  delete metadata.classdock_execution;
+  delete metadata.classdock_ink;
   if (type === "markdown"){
     try { attachments = raw.attachments == null ? null : JSON.parse(JSON.stringify(raw.attachments)); } catch(_){}
   }
@@ -929,7 +929,7 @@ function wireScratchpad(){
       event.dataTransfer.effectAllowed = block.type === "notebook-cell" ? "copyMove" : "move";
       event.dataTransfer.setData("text/x-scratchpad-block", block.id);
       if (block.type === "notebook-cell"){
-        event.dataTransfer.setData("application/x-manneung-notebook-cells", JSON.stringify([block.cell]));
+        event.dataTransfer.setData("application/x-classdock-notebook-cells", JSON.stringify([block.cell]));
       }
       requestAnimationFrame(() => handle.closest(".scratchpad-block").classList.add("dragging"));
     });
@@ -2007,10 +2007,10 @@ function wireScratchpad(){
     return types.includes("Files") || types.includes("text/uri-list") || types.includes("text/html");
   };
   const transferHasNotebookCells = transfer =>
-    Array.from((transfer && transfer.types) || []).includes("application/x-manneung-notebook-cells");
+    Array.from((transfer && transfer.types) || []).includes("application/x-classdock-notebook-cells");
   const transferNotebookCells = transfer => {
     try {
-      const parsed = JSON.parse(transfer.getData("application/x-manneung-notebook-cells") || "[]");
+      const parsed = JSON.parse(transfer.getData("application/x-classdock-notebook-cells") || "[]");
       return (Array.isArray(parsed) ? parsed : []).map(scratchpadNormalizeNotebookCell).filter(Boolean);
     } catch(_){ return []; }
   };

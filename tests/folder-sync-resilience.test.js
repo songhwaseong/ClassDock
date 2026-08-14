@@ -53,14 +53,14 @@ test("읽지 못한 파일·폴더는 문서와 자동 복원 정리에서 모�
   const skippedDirs = ["proj/data"];
   const oldPaths = [
     "proj/main.py", "proj/active.log", "proj/data/model.bin",
-    "proj/data/nested/.manneung-folder-keep-9f4d2a7b", "proj/other.txt"
+    "proj/data/nested/.classdock-folder-keep-9f4d2a7b", "proj/other.txt"
   ];
 
   assert.equal(unreadable("proj/active.log", skippedFiles, skippedDirs), true);
   assert.equal(unreadable("proj/data/model.bin", skippedFiles, skippedDirs), true);
   assert.equal(unreadable("proj/other.txt", skippedFiles, skippedDirs), false);
   assert.deepEqual(Array.from(retained(oldPaths, skippedFiles, skippedDirs)), [
-    "proj/active.log", "proj/data/model.bin", "proj/data/nested/.manneung-folder-keep-9f4d2a7b"
+    "proj/active.log", "proj/data/model.bin", "proj/data/nested/.classdock-folder-keep-9f4d2a7b"
   ]);
   assert.match(loaders,
     /const unreadable = \(key\) => folderSyncUnreadablePath\(key, skippedFiles, skippedDirs\)/);

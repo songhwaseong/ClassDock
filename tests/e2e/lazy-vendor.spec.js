@@ -10,12 +10,12 @@ const { collapseSidebar } = require("./helpers");
  *
  * 로드 방식이 배포본마다 다르므로 양쪽을 모두 본다.
  *   · "/"                              = 원본 HTML → vendor 스크립트를 그때 붙이는 경로
- *   · "/manneung-classroom-offline.html" = 단일 파일(EXE 와 같은 산출물) → 심어 둔 text/plain 실행 경로
+ *   · "/classdock-offline.html" = 단일 파일(EXE 와 같은 산출물) → 심어 둔 text/plain 실행 경로
  */
 
 const PAGES = [
   { name: "원본 HTML(스크립트 주입)", url: "/" },
-  { name: "단일 파일(text/plain 실행)", url: "/manneung-classroom-offline.html" }
+  { name: "단일 파일(text/plain 실행)", url: "/classdock-offline.html" }
 ];
 
 // 시작할 때는 없어야 하는 전역들 — 각각 지연 로드 묶음의 대표 전역이다.
@@ -118,7 +118,7 @@ for (const target of PAGES){
 // 펫 그림(약 1.6MB)도 옵션을 켤 때까지 JavaScript 로 파싱하지 않는다.
 // 단일 파일 빌드에서는 경로가 데이터 URL 로 바뀌어야 실제로 그려진다.
 test("단일 파일: 펫 스프라이트는 JSON 표에서 데이터 URL 로 풀린다", async ({ page }) => {
-  await boot(page, "/manneung-classroom-offline.html");
+  await boot(page, "/classdock-offline.html");
   const resolved = await page.evaluate(() => petSpriteUrl("src/assets/fluffy-cat-sprites-v2.png"));
   expect(resolved.startsWith("data:image/png;base64,")).toBe(true);
   // 표에 없는 경로는 그대로 돌려줘, 서버로 서빙될 때의 상대 경로 동작이 유지된다.

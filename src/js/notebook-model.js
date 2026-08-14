@@ -21,7 +21,7 @@ function nbTf(template, values){
 function notebookModeEnabled(){
   try { return localStorage.getItem("mn.notebookMode") !== "0"; } catch(e){ return true; }
 }
-const NOTEBOOK_RECOVERY_DB = "manneung-notebook-recovery";
+const NOTEBOOK_RECOVERY_DB = "classdock-notebook-recovery";
 const NOTEBOOK_RECOVERY_STORE = "drafts";
 const NOTEBOOK_RECOVERY_MAX_TEXT = 20 * 1024 * 1024;
 const NOTEBOOK_HISTORY_MAX_TEXT = 12 * 1024 * 1024;   // 단계 수 상한은 MNEditHistory.LIMITS.notebook
@@ -809,7 +809,7 @@ function notebookMimeShouldPersist(key){
 
 function modelToIpynb(model){
   const cells = ((model && model.cells) || []).map(cell => {
-    // 필기 저장 보류: manneung_ink 메타데이터는 파일로 직렬화하지 않는다(세션 한정).
+    // 필기 저장 보류: classdock_ink 메타데이터는 파일로 직렬화하지 않는다(세션 한정).
     const rawMeta = (cell.metadata && typeof cell.metadata === "object") ? cell.metadata : {};
     const metadata = {};
     for (const key in rawMeta){ if (key !== NB_INK_META_KEY) metadata[key] = rawMeta[key]; }
@@ -906,8 +906,8 @@ function splitSourceLines(text){
 
 // 실행 당시 코드와 앞쪽 코드 셀 구성을 짧은 해시로 기록해, 저장·재실행 후에도
 // 현재 화면의 출력이 최신 코드에서 나온 것인지 판별한다.
-const NB_EXEC_META_KEY = "manneung_execution";
-const NB_INK_META_KEY = "manneung_ink";
+const NB_EXEC_META_KEY = "classdock_execution";
+const NB_INK_META_KEY = "classdock_ink";
 let _notebookCellClipboard = [];
 
 function notebookJsonClone(value, fallback){

@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 
 const root = path.join(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
-const html = fs.readFileSync(path.join(root, "manneung-classroom.html"), "utf8");
+const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
 const sha384 = (bytes) => "sha384-" + crypto.createHash("sha384").update(bytes).digest("base64");
 const normalizedTextBytes = (bytes) => Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
 const jsGuide = fs.readFileSync(path.join(root, "docs", "JS-파일별-기능.md"), "utf8");

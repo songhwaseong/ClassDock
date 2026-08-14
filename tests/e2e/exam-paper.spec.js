@@ -78,14 +78,14 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   });
   expect(master.name).toBe("e2e 쪽지시험.examkey");
   const masterJson = JSON.parse(master.text);
-  expect(masterJson.format).toBe("manneung-exam-master");
+  expect(masterJson.format).toBe("classdock-exam-master");
   expect(master.text).not.toContain("광합성");        // 원본은 통째로 잠긴다
 
   // --- 배포본(.exam) 내보내기: 열기 암호 없이 ---
   const paper = await exportPaper(page, editor);
   expect(paper.name).toBe("e2e 쪽지시험.exam");
   const paperJson = JSON.parse(paper.text);
-  expect(paperJson.format).toBe("manneung-exam");
+  expect(paperJson.format).toBe("classdock-exam");
   expect(paperJson.publicJwk).toBeTruthy();
   expect(paperJson.privateJwk).toBeUndefined();
   expect(JSON.stringify(paperJson.items)).not.toMatch(/answerIndex|answerText/);
@@ -120,7 +120,7 @@ test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠�
   });
   expect(submitted.name).toBe("e2e 쪽지시험_12 홍길동.examdone");
   const doneJson = JSON.parse(submitted.text);
-  expect(doneJson.format).toBe("manneung-exam-result");
+  expect(doneJson.format).toBe("classdock-exam-result");
   expect(doneJson.seal.sealedKey).toBeTruthy();
   expect(submitted.text).not.toContain("잎");                     // 답안은 봉인 안에만 있다
 
@@ -192,11 +192,11 @@ test("열기 암호를 건 배포본과 잠긴 원본을 암호로만 연다", a
     const meta = { title: "잠금 시험", author: "김선생", createdAt: new Date().toISOString(), count: 1 };
     return {
       master: JSON.stringify({
-        format: "manneung-exam-master", version: 1, id: "exam-locked", meta,
+        format: "classdock-exam-master", version: 1, id: "exam-locked", meta,
         enc: await examSealWithPassword({ items, keys }, "tpw-1234")
       }),
       paper: JSON.stringify({
-        format: "manneung-exam", version: 1, id: "exam-locked", meta,
+        format: "classdock-exam", version: 1, id: "exam-locked", meta,
         itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
         publicJwk: keys.publicJwk, locked: true,
         enc: await examSealWithPassword({ items: stripped }, "open-9999")
@@ -267,7 +267,7 @@ test("학생 화면의 그림은 눌러 크게 볼 수 있고, 보기 그림을 
     }];
     const stripped = examStripAnswers(items);
     return JSON.stringify({
-      format: "manneung-exam", version: 1, id: "exam-zoom",
+      format: "classdock-exam", version: 1, id: "exam-zoom",
       meta: { title: "그림 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
       itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
       publicJwk: keys.publicJwk, locked: false, items: stripped
@@ -323,7 +323,7 @@ test("서명하려고 끌어도 시험지 화면이 스크롤되지 않는다", 
     }
     const stripped = examStripAnswers(items);
     return JSON.stringify({
-      format: "manneung-exam", version: 1, id: "exam-scroll",
+      format: "classdock-exam", version: 1, id: "exam-scroll",
       meta: { title: "스크롤 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
       itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
       publicJwk: keys.publicJwk, locked: false, items: stripped
@@ -441,7 +441,7 @@ test("선생님 PC 로 보내기가 실패하면 파일 제출로 떨어진다",
     const items = [{ ...examNewItem("short"), id: "q1", stem: "1 + 1 은?", answerText: "2" }];
     const stripped = examStripAnswers(items);
     return JSON.stringify({
-      format: "manneung-exam", version: 1, id: "exam-send",
+      format: "classdock-exam", version: 1, id: "exam-send",
       meta: { title: "보내기 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
       itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
       publicJwk: keys.publicJwk, locked: false, items: stripped
@@ -486,7 +486,7 @@ test("선생님 PC 로 보내기가 실패하면 파일 제출로 떨어진다",
     await page.locator("#confirmOk").click();
   });
   expect(saved.name).toBe("보내기 시험_12 홍길동.examdone");
-  expect(JSON.parse(saved.text).format).toBe("manneung-exam-result");
+  expect(JSON.parse(saved.text).format).toBe("classdock-exam-result");
   await expect(take.locator(".exam-done-panel")).toBeVisible();
   expect(await page.evaluate(() => docs.find(d => d.examTake).examTake.submitted)).toBe(true);
 });

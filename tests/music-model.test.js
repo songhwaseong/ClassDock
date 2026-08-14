@@ -187,13 +187,13 @@ test("서명·버전·음표 종류가 맞지 않으면 편집 모델로 열지 
   const api = loadMusic();
   assert.throws(() => api.musicParse("{}"), /악보 파일이 아닙니다/);
   assert.throws(() => api.musicParse("깨진 내용"), /읽지 못했습니다/);
-  assert.throws(() => api.musicParse(JSON.stringify({ format:"manneung-sheet", version:99 })), /지원하지 않는 악보 버전/);
+  assert.throws(() => api.musicParse(JSON.stringify({ format:"classdock-sheet", version:99 })), /지원하지 않는 악보 버전/);
   assert.throws(() => api.musicParse(JSON.stringify({
-    format:"manneung-sheet", version:1,
+    format:"classdock-sheet", version:1,
     measures:[{ notes:[{ step:"C", octave:4, value:"32nd" }] }]
   })), /지원하지 않는 음표 길이/);
   assert.throws(() => api.musicParse(JSON.stringify({
-    format:"manneung-sheet", version:1,
+    format:"classdock-sheet", version:1,
     measures:[{ notes:[{ step:"H", octave:4, value:"quarter" }] }]
   })), /지원하지 않는 음이름/);
 });

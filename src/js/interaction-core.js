@@ -1,7 +1,7 @@
 "use strict";
 
 const MNInteractionCore = (() => {
-  const INTERNAL_DRAG_MIME = "application/x-manneung-internal-drag";
+  const INTERNAL_DRAG_MIME = "application/x-classdock-internal-drag";
 
   function studyPaneSelectionAction(referenceId, workId, targetPane, selectedId) {
     const split = referenceId != null && workId != null && referenceId !== workId;

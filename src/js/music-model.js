@@ -1,14 +1,14 @@
 "use strict";
 
 /* ===== .msheet 악보 문서 — 모델 (P0) =====
-   - 저장 포맷: UTF-8 JSON 한 개(format:"manneung-sheet"). 단선율과 피아노 대보표를 함께 지원.
+   - 저장 포맷: UTF-8 JSON 한 개(format:"classdock-sheet"). 단선율과 피아노 대보표를 함께 지원.
    - 이 파일은 순수 모델이다. DOM·오디오·VexFlow 를 일절 참조하지 않는다
      (그래야 node --test 로 조판·소리 없이 규칙을 검증할 수 있다).
    - 이름을 music* 로 잡은 이유: 이 코드베이스에서 sheet* 는 이미 스프레드시트를 뜻한다
      (spreadsheet-viewer.js 의 sheetBaseName 등). 파일 확장자만 .msheet 이고 코드는 music* 로 통일한다.
    설계: docs/악보-설계.md */
 
-const MUSIC_FORMAT = "manneung-sheet";
+const MUSIC_FORMAT = "classdock-sheet";
 const MUSIC_VERSION = 4;
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).

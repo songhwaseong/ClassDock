@@ -252,8 +252,8 @@ test("노트북 셀 복사본은 순서·첨부를 보존하고 실행 결과·�
       rawOutputs:[{ output_type:"stream", text:["42\n"] }],
       metadata:{
         tags:["keep"],
-        manneung_execution:{ sourceHash:"old" },
-        manneung_ink:{ strokes:[{ tool:"pen" }] }
+        classdock_execution:{ sourceHash:"old" },
+        classdock_ink:{ strokes:[{ tool:"pen" }] }
       }
     },
     {
@@ -557,7 +557,7 @@ test("노트북 실행 메타데이터 해시는 저장 왕복 후에도 유지�
   notebookRecordExecution(model, cell, true);
   const before = notebookExecutionHash(cell.source);
   const restored = ipynbToModel(modelToIpynb(model));
-  assert.equal(restored.cells[0].metadata.manneung_execution.source_hash, before);
+  assert.equal(restored.cells[0].metadata.classdock_execution.source_hash, before);
   assert.equal(notebookUpstreamHash(restored, restored.cells[0]), notebookUpstreamHash(model, cell));
   assert.equal(notebookCellExecutionState(restored, restored.cells[0]).status, "fresh");
   notebookClearExecution(restored.cells[0]);
@@ -577,19 +577,19 @@ test("노트북 셀 필기는 안전한 벡터 획으로 정규화하되 파일�
   assert.equal(normalized[1].width, 60);
   assert.deepEqual(normalized[1].points, [{ x:0.2, y:0.3 }]);
 
-  // 필기 저장 보류: manneung_ink 는 .ipynb 로 직렬화되지 않는다(세션 한정). 다른 메타데이터는 보존.
+  // 필기 저장 보류: classdock_ink 는 .ipynb 로 직렬화되지 않는다(세션 한정). 다른 메타데이터는 보존.
   const cell = { id:"ink-cell", type:"markdown", source:"설명", metadata:{
     tags:["keep"],
-    manneung_ink:{ version:1, strokes:normalized }
+    classdock_ink:{ version:1, strokes:normalized }
   } };
   const restored = ipynbToModel(modelToIpynb({ cells:[cell], metadata:{} }));
-  assert.equal("manneung_ink" in restored.cells[0].metadata, false);
+  assert.equal("classdock_ink" in restored.cells[0].metadata, false);
   assert.deepEqual(restored.cells[0].metadata.tags, ["keep"]);
 
   // 인메모리 정리 헬퍼는 그대로 동작한다.
-  const memCell = { metadata:{ manneung_ink:{ version:1, strokes:[] } } };
+  const memCell = { metadata:{ classdock_ink:{ version:1, strokes:[] } } };
   notebookDropEmptyInkMetadata(memCell);
-  assert.equal("manneung_ink" in memCell.metadata, false);
+  assert.equal("classdock_ink" in memCell.metadata, false);
 });
 
 test("셀 재정렬은 위·아래 이동 후에도 배열 순서를 정확히 유지한다", () => {

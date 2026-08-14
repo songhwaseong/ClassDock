@@ -1,12 +1,12 @@
 "use strict";
 
 /* ===== .mnote 블록 문서 (표·이미지·글 혼합 편집) =====
-   - 저장 포맷: UTF-8 JSON 한 개(format:"manneung-note"). 이미지는 base64 data URI 로 파일 안에 담는다.
+   - 저장 포맷: UTF-8 JSON 한 개(format:"classdock-note"). 이미지는 base64 data URI 로 파일 안에 담는다.
    - 저장 경로는 기존 saveTextDoc(원본 파일/서버/다운로드)을 그대로 재사용한다.
    - 텍스트 편집기는 scratchpad 와 공유하지 않고 여기서 독립 구현한다(회귀 위험 차단, 나중 공용화 여지).
    설계: docs/mnote-design.md */
 
-const MNOTE_FORMAT = "manneung-note";
+const MNOTE_FORMAT = "classdock-note";
 const MNOTE_VERSION = 1;
 const MNOTE_MAX_TABLE_ROWS = 50;
 const MNOTE_MAX_TABLE_COLS = 20;

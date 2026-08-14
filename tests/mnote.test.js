@@ -39,7 +39,7 @@ test(".mnote는 같은 모델을 항상 같은 JSON으로 직렬화한다", () =
 test("지원하지 않는 버전과 블록 종류는 편집 모델로 열지 않는다", () => {
   const api = loadMnote();
   const base = {
-    format:"manneung-note", version:1, title:"안전",
+    format:"classdock-note", version:1, title:"안전",
     createdAt:1, updatedAt:1, blocks:[{ type:"text", text:"보존" }]
   };
   assert.throws(() => api.mnoteParse(JSON.stringify({ ...base, version:2 })), /mnote-format/);
@@ -101,7 +101,7 @@ test("HTML과 Markdown 내보내기는 혼합 블록을 모두 포함한다", ()
 });
 
 test("사이드바 아래 + 메뉴에서 새 .mnote 문서를 만들 수 있다", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../manneung-classroom.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
   const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
   assert.match(html, /id="sbNewMnote"[\s\S]*새 블록 문서\(\.mnote\)/);
   assert.match(app, /byId\("sbNewMnote"\)\.onclick[\s\S]*newMnoteScratch\(\)/);

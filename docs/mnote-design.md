@@ -1,7 +1,7 @@
 # .mnote 블록 문서 — 설계 문서
 
 > 작성 2026-07-26 · 상태: **P0~P3 구현 완료**(2026-07-26) — 설계 범위 전체 완료 · 목표: 표·이미지·글을 한 문서에서 함께 편집
-> 구현: `src/js/mnote.js` + 접점(`file-loaders.js`·`documents.js`·`command-palette.js`·`scratchpad.js`·`scripts.manifest.json`·`manneung-classroom.html`·`styles.css`) · 테스트: `tests/mnote.test.js`
+> 구현: `src/js/mnote.js` + 접점(`file-loaders.js`·`documents.js`·`command-palette.js`·`scratchpad.js`·`scripts.manifest.json`·`classdock.html`·`styles.css`) · 테스트: `tests/mnote.test.js`
 > 남은 것: i18n 영문 사전은 새 문서 명령 등 일부만 등록됨(편집기 안 문구는 미번역).
 
 ## 1. 목표와 범위
@@ -22,7 +22,7 @@
 
 ```jsonc
 {
-  "format": "manneung-note",     // 판별 서명
+  "format": "classdock-note",     // 판별 서명
   "version": 1,
   "title": "문서 제목",
   "createdAt": 0, "updatedAt": 0,
@@ -43,7 +43,7 @@
 | **A. base64 임베드** (1차 추천) | 이미지 바이트를 `src`에 data URI로 박음 | 파일 하나로 완결·이동 자유. 단점: 큰 이미지 시 JSON 비대(1.33배) |
 | B. zip 컨테이너 | `.mnote`를 zip으로: `note.json` + `assets/*.png` | 큰 이미지 효율적. 단점: 로직 복잡, `.task/.lesson` 포맷 확인 필요 |
 
-> scratchpad는 이미지를 **브라우저 로컬 IndexedDB**(`manneung-scratchpad-assets`)에 assetId로 보관한다. 이건 메모가 브라우저에 갇혀 있어서 가능한 방식이고, **이동 가능한 파일**인 `.mnote`에는 맞지 않는다 → **파일 안에 바이트를 담아야** 한다. 편집 중 메모리에서는 IDB 캐시를 재활용하되, 저장 시 base64로 인라인.
+> scratchpad는 이미지를 **브라우저 로컬 IndexedDB**(`classdock-scratchpad-assets`)에 assetId로 보관한다. 이건 메모가 브라우저에 갇혀 있어서 가능한 방식이고, **이동 가능한 파일**인 `.mnote`에는 맞지 않는다 → **파일 안에 바이트를 담아야** 한다. 편집 중 메모리에서는 IDB 캐시를 재활용하되, 저장 시 base64로 인라인.
 
 **결정**: 1차는 A(base64). 이미지 다수 문서에서 느려지면 B로 승격.
 
@@ -110,8 +110,8 @@ async function loadMnote(file, opts){
 
 ## 8. 단계별 구현 계획
 
-1. **P0 — 표 블록 프로토타입** ✅ *(2026-07-26 구현)*: scratchpad에 `type:"table"` 블록 추가. 셀 편집(contenteditable, 셀 단위라 리치텍스트 함정 없음)·Tab/Enter 이동·행열 추가삭제·머리글 토글·잠금·드래그이동. 저장은 기존 scratchpad 경로(localStorage) 재사용. 접점: `scratchpad.js`(scratchpadTableBlock/normalize/plainText/makeTableBlock/insertTableBlock/카운트), `manneung-classroom.html`(+표 버튼), `styles.css`(.scratchpad-table*). *→ 실제 표 편집 UX 검증용.*
-2. **P1 — .mnote 문서 종류** ✅ *(2026-07-26 구현)*: 신규 `src/js/mnote.js`(자립 모듈) — 모델·파서(mnoteParse/Serialize)·블록 편집기(text·table·image 세 블록 모두)·저장(saveTextDoc 재사용)·열기(loadMnote)·새 문서(newMnoteScratch). 이미지는 base64 임베드(결정대로). 접점: `file-loaders.js`(.mnote 분기 한 줄), `command-palette.js`(새 블록 문서 명령), `scripts.manifest.json`(localScripts+layer+deps), `manneung-classroom.html`(script 태그), `styles.css`(.mnote-*). 표는 P0 UX를 이식. Ctrl+S는 `.run-save` 버튼으로 전역 핸들러와 자동 연동.
+1. **P0 — 표 블록 프로토타입** ✅ *(2026-07-26 구현)*: scratchpad에 `type:"table"` 블록 추가. 셀 편집(contenteditable, 셀 단위라 리치텍스트 함정 없음)·Tab/Enter 이동·행열 추가삭제·머리글 토글·잠금·드래그이동. 저장은 기존 scratchpad 경로(localStorage) 재사용. 접점: `scratchpad.js`(scratchpadTableBlock/normalize/plainText/makeTableBlock/insertTableBlock/카운트), `classdock.html`(+표 버튼), `styles.css`(.scratchpad-table*). *→ 실제 표 편집 UX 검증용.*
+2. **P1 — .mnote 문서 종류** ✅ *(2026-07-26 구현)*: 신규 `src/js/mnote.js`(자립 모듈) — 모델·파서(mnoteParse/Serialize)·블록 편집기(text·table·image 세 블록 모두)·저장(saveTextDoc 재사용)·열기(loadMnote)·새 문서(newMnoteScratch). 이미지는 base64 임베드(결정대로). 접점: `file-loaders.js`(.mnote 분기 한 줄), `command-palette.js`(새 블록 문서 명령), `scripts.manifest.json`(localScripts+layer+deps), `classdock.html`(script 태그), `styles.css`(.mnote-*). 표는 P0 UX를 이식. Ctrl+S는 `.run-save` 버튼으로 전역 핸들러와 자동 연동.
 3. **P2 — 내보내기** ✅ *(2026-07-26 구현)*: `mnote.js`에 `mnoteToHtml`(pre-wrap 문단·thead/tbody 표·figure 이미지, 자립 HTML 문서)·`mnoteToMarkdown`(GFM 표·`![](data:)` 이미지·캡션) + `mnoteDownload`(Blob+`<a download>`). 편집기 상단바에 "⬇ HTML"·"⬇ MD" 버튼. 표 블록 정식 편입은 P1에 이미 포함. node로 출력 검증 완료.
 4. **P3 — 검색·되돌리기 통합** ✅ *(2026-07-26 구현)*:
    - **통합검색**: `documents.js`에 `isMnoteSearchable`·`mnoteSearchText` 추가. `hasLiveDocText`·`liveDocText`·`isTextSearchable` 세 곳에 mnote 분기 — 노트북과 동일하게 sourceFile(JSON)이 아니라 **블록 모델의 plain text**를 검색(키·base64 오탐 방지). 결과 클릭 → `doc.contentSearchFocus`(mnoteFocusMatch)로 일치 블록 스크롤.
