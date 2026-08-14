@@ -622,7 +622,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     altFormatBtn,
     mkBtn("PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file), "img-tool-pdf"),
     mkBtn("📷 메모로", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만", () => sendImageToMemo(state, file), "img-tool-memo"),
-    mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state, file), "img-tool-ocr"),
+    mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state), "img-tool-ocr"),
     mkBtn("-", "축소", () => { state.zoom = Math.max(0.1, (state.zoom === null ? 1 : state.zoom) - 0.25); redraw(); }, "img-tool-compact img-tool-zoom"),
     zoomLabel,
     mkBtn("+", "확대", () => { state.zoom = Math.min(8, (state.zoom === null ? 1 : state.zoom) + 0.25); redraw(); }, "img-tool-compact img-tool-zoom"),
@@ -1403,7 +1403,7 @@ function sendImageToMemo(state, file){
  * 현재 화면의 이미지(자르기 영역이 있으면 그 부분만)에서 글자를 읽어 복사·메모로 보낸다.
  * 인식은 이 컴퓨터 안에서만 처리되고 이미지가 외부로 전송되지 않는 점도 동일하다. */
 let _imgOcrRunning = false;
-async function extractImageText(state, file){
+async function extractImageText(state){
   if (_imgOcrRunning){ toast("이미 글자를 인식하는 중이에요.", 2000); return; }
   if (typeof pdfOcrEnsureTesseract !== "function" || !(await pdfOcrEnsureTesseract())) return;
   const full = renderForDisplay(state);

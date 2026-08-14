@@ -303,9 +303,6 @@ const MNMusicAudio = (() => {
   }
 
   const nearestPianoSample = nearestSample; // 기존 테스트·진단 API 호환
-  const schedulePianoNote = (target, destination, midi, start, duration, buffers) =>
-    scheduleSampleNote(target, destination, midi, start, duration, buffers, "piano");
-
   /* 실시간·오프라인 공용 예약. events 는 musicTimeline 이 만든 목록,
      offset 은 "타임라인 0초"가 그 컨텍스트의 몇 초에 해당하는지. */
   function scheduleInto(target, destination, events, offset, timbre, sampleBuffers){

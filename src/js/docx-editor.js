@@ -103,7 +103,7 @@ const MNDocxEditor = (() => {
 
   /* 문단 한 줄. 처음에는 원문 글자를 그대로 보여주고, 사용자가 손대면 그 문단은
      '고침' 표시를 달아 화면과 저장 대상이 어긋나지 않는다는 걸 눈으로 알린다. */
-  function renderRow(state, row, position){
+  function renderRow(state, row){
     const wrap = document.createElement("div");
     wrap.className = "docx-para";
     if (row.inTable) wrap.classList.add("in-table");
@@ -249,7 +249,7 @@ const MNDocxEditor = (() => {
     if (state.mode === "inline") return redrawInline(state);
     const list = state.listEl;
     list.innerHTML = "";
-    state.rows.forEach((row, position) => list.appendChild(renderRow(state, row, position)));
+    state.rows.forEach((row) => list.appendChild(renderRow(state, row)));
     state.onDirty();
     focusRowKey(state, (key) => list.querySelector('[data-key="' + key + '"]'));
   }

@@ -1,56 +1,14 @@
 "use strict";
 
 /* ===== 문서 관리(사이드바/탭) ===== */
-const IMG_EXTS = ["png","jpg","jpeg","gif","webp","bmp","svg","avif","ico"];
-const SQLITE_EXTS = ["db","sqlite","sqlite3"];
-// 학습 모델과 NumPy 배열은 이진 파일이므로 텍스트 편집기로 열지 않고 원본 바이트를 보존한다.
-// .pyc(컴파일된 Python 바이트코드)도 소스가 없는 이진 파일이라 같은 경로로 다룬다.
-const BINARY_ASSET_EXTS = new Set([
-  "model", "npy", "npz", "kv",
-  "onnx", "tflite", "safetensors", "pt", "pth", "ckpt",
-  "joblib", "pkl", "pickle", "keras", "h5", "hdf5", "pyc"
-]);
-// 코드/설정 파일: 확장자 → 구문강조 프로파일(c=C계열, python=Python, hash=#주석, css/sql/xml=전용)
-const CODE_EXTS = {
-  js:"c", mjs:"c", cjs:"c", ts:"c", jsx:"c", tsx:"c", java:"c", c:"c", h:"c", cpp:"c", cc:"c", hpp:"c", cxx:"c",
-  cs:"c", go:"c", rs:"c", php:"c", kt:"c", kts:"c", swift:"c", scala:"c", dart:"c", vue:"c", svelte:"c",
-  json:"c", json5:"c", jsonc:"c", scss:"c", less:"c", bat:"c", cmd:"c",
-  py:"python", pyi:"python", rb:"hash", sh:"hash", bash:"hash", zsh:"hash", ps1:"hash",
-  yaml:"hash", yml:"hash", toml:"hash", ini:"hash", env:"hash", properties:"hash", conf:"hash",
-  css:"css", sql:"sql",
-  xml:"xml", xsl:"xml", xslt:"xml", xsd:"xml", rss:"xml", atom:"xml", plist:"xml", wsdl:"xml", dbk:"xml", docbook:"xml",
-  rst:"text", adoc:"text", asciidoc:"text", asc:"text", org:"text", textile:"text", tex:"text", latex:"text", sty:"text", cls:"text", wiki:"text", mediawiki:"text",
-  r:"hash", lua:"c", pl:"hash", pm:"hash", tcl:"hash", awk:"hash", groovy:"c", gradle:"c", proto:"c", coffee:"hash", cmake:"hash", dockerfile:"hash", makefile:"hash", mk:"hash",
-  tsv:"text", log:"text", diff:"text", patch:"text", tokens:"text", vec:"text", vocab:"text"
-};
-const TEXT_ENCODING_EXTS = new Set(["csv","md","markdown","mdx","txt","html","htm","xhtml", ...Object.keys(CODE_EXTS), ...SUBTITLE_EXTS]);
-// ZIP 안에서 자동으로 열어줄 확장자(중첩 zip 포함)
-// VIDEO_EXTS·AUDIO_EXTS·SUBTITLE_EXTS 는 video-viewer.js 가 이 파일보다 먼저 로드되어 제공한다(스크립트 순서 주의).
-const ZIP_OPENABLE = ["pdf","docx","doc","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb",
-  ...SQLITE_EXTS, ...Object.keys(CODE_EXTS), ...BINARY_ASSET_EXTS, "zip", "tar", "gz", "tgz", ...IMG_EXTS,
-  ...VIDEO_EXTS, ...AUDIO_EXTS, ...SUBTITLE_EXTS];
-// .env 계열(.env, .env.local 등)은 점으로 시작하지만 숨김 파일이 아니라 설정 파일 → 폴더/압축에서도 연다
-function isEnvFile(name){ return /^\.env(\.[^\\/]+)?$/i.test(String(name || "")); }
-// 파일 확장자 판정(.env 계열은 "env"로 취급 → 코드 뷰어·ZIP_OPENABLE 매칭)
-function fileExtOf(name){
-  const base = String(name || "");
-  return isEnvFile(base) ? "env" : (base.split(".").pop() || "").toLowerCase();
-}
-// 폴더 트리의 숨김 경로 판정: 점(.) 폴더 하위이거나 파일명이 점으로 시작하면 숨김(.env 계열만 예외)
-function isHiddenFolderEntry(rel){
-  const parts = String(rel || "").replace(/\\/g, "/").split("/").filter(Boolean);
-  if (!parts.length) return true;
-  const base = parts[parts.length - 1];
-  if (parts.slice(0, -1).some(part => part.charAt(0) === ".")) return true;
-  return base.charAt(0) === "." && !isEnvFile(base);
-}
-// zip에서 꺼낸 파일은 MIME이 비어 있어 일부 형식(특히 SVG)이 미리보기에서 거부됨 → 확장자로 보강
-const ZIP_MIME = { svg:"image/svg+xml", png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg",
-  gif:"image/gif", webp:"image/webp", bmp:"image/bmp", avif:"image/avif", ico:"image/x-icon", pdf:"application/pdf",
-  html:"text/html", htm:"text/html" };
-const ZIP_EXTRACT_CAP = 256 * 1024 * 1024;
-const ZIP_ENTRY_CAP = 128 * 1024 * 1024;
-const ZIP_MODE_NOTICE = "ZIP 모드: 원본 압축의 새로고침·덮어쓰기는 지원하지 않으며, 편집한 파일은 별도로 저장됩니다. Python 옆 파일 실행은 합계 50MB까지 지원합니다.";
+const documentTypesApi = typeof MNDocumentTypes !== "undefined"
+  ? MNDocumentTypes
+  : (typeof require === "function" ? require("./document-types.js") : globalThis);
+const {
+  IMG_EXTS, SQLITE_EXTS, BINARY_ASSET_EXTS, CODE_EXTS, TEXT_ENCODING_EXTS,
+  ZIP_OPENABLE, ZIP_MIME, ZIP_EXTRACT_CAP, ZIP_ENTRY_CAP, ZIP_MODE_NOTICE,
+  isEnvFile, fileExtOf, isHiddenFolderEntry, iconFor, extCategory
+} = documentTypesApi;
 
 // 여러 파일을 복원할 때 각 항목마다 사이드바·탭을 다시 그리지 않고 마지막에 한 번만 반영한다.
 let uiBatchDepth = 0;
@@ -2587,51 +2545,6 @@ function restoreStudyState(saved){
     }
   });
   return true;
-}
-
-function iconFor(kind, name){
-  if (kind === "folder") return "DIR";
-  if (kind === "zip") return "ZIP";
-  if (kind === "pdf") return "PDF";
-  if (kind === "image") return "IMG";
-  if (kind === "image-gallery") return "▦";
-  if (kind === "pdf-gallery") return "▦";
-  if (kind === "video") return AUDIO_EXTS.includes(fileExtOf(name)) ? "AUD" : "VID";
-  if (kind === "board") return "칠판";
-  if (kind === "replay") return "▶";
-  if (kind === "diff") return "비교";
-  const ext = fileExtOf(name);
-  if (ext === "md" || ext === "markdown" || ext === "mdx") return "MD";
-  if (ext === "docx" || ext === "doc") return "DOC";
-  if (ext === "pptx") return "PPT";
-  if (ext === "hwp" || ext === "hwpx") return "한";
-  return (ext || "?").slice(0, 4).toUpperCase();
-}
-
-// 배지 색 분류: iconFor 와 같은 (kind, name) 으로 호출 — 종류별 색조 키를 돌려준다(없으면 "" → 기본 회색)
-function extCategory(kind, name){
-  if (kind === "folder") return "dir";
-  if (kind === "zip")    return "zip";
-  if (kind === "pdf")    return "pdf";
-  if (kind === "image")  return "img";
-  if (kind === "image-gallery") return "img";
-  if (kind === "pdf-gallery") return "pdf";
-  if (kind === "video")  return "media";
-  if (kind === "binary") return "binary";
-  if (kind === "diff")   return "code";
-  const ext = fileExtOf(name);
-  if (ext === "docx" || ext === "doc") return "word";
-  if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";
-  if (SQLITE_EXTS.includes(ext)) return "db";
-  if (ext === "pptx") return "ppt";
-  if (ext === "hwp" || ext === "hwpx") return "hwp";
-  if (ext === "md" || ext === "markdown" || ext === "mdx") return "md";
-  if (ext === "html" || ext === "htm" || ext === "xhtml") return "html";
-  if (ext === "py") return "py";
-  if (ext === "zip" || ext === "tar" || ext === "gz" || ext === "tgz") return "zip";
-  if (IMG_EXTS.includes(ext)) return "img";
-  if (ext in CODE_EXTS) return "code";
-  return "";
 }
 
 let sidebarExtFilter = "";

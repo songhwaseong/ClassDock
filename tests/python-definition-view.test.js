@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
+const { isDefinitionSourceDoc } = require("../src/js/workspace-python.js");
 
 const source = fs.readFileSync(
   path.join(__dirname, "../src/js/code-viewer.js"),
@@ -10,26 +10,17 @@ const source = fs.readFileSync(
 );
 
 test("external Python definitions use the chunked read-only viewer", () => {
-  const start = source.indexOf("function isDefinitionSourceDoc");
-  const end = source.indexOf("async function openWorkspacePythonImportDefinition", start);
-  const sandbox = {};
-  vm.runInNewContext(
-    source.slice(start, end) +
-      "; this.isDefinitionSourceDoc = isDefinitionSourceDoc;",
-    sandbox
-  );
-
   assert.equal(
-    sandbox.isDefinitionSourceDoc({
+    isDefinitionSourceDoc({
       sourceKey:"definition:C:/Python/site-packages/pkg/base.py"
     }),
     true
   );
   assert.equal(
-    sandbox.isDefinitionSourceDoc({ sourceKey:"workspace:main.py" }),
+    isDefinitionSourceDoc({ sourceKey:"workspace:main.py" }),
     false
   );
-  assert.equal(sandbox.isDefinitionSourceDoc(null), false);
+  assert.equal(isDefinitionSourceDoc(null), false);
 
   // 정의 미리보기 문서에는 어떤 언어든 실행 바를 붙이지 않는다(언어 판별 자체를 건너뛴다).
   assert.match(

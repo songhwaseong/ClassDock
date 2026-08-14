@@ -310,11 +310,6 @@ function musicXmlEscape(value){
 function musicSerializeXml(sheet){
   const model = sheet || musicEmpty();
   const title = musicXmlEscape(model.title || "악보");
-  const beats = Math.max(1, Math.round(Number(model.time && model.time.beats) || 4));
-  const beatValue = Math.max(1, Math.round(Number(model.time && model.time.beatValue) || 4));
-  const fifths = MUSIC_XML_KEY_TO_FIFTHS[model.key] == null ? 0 : MUSIC_XML_KEY_TO_FIFTHS[model.key];
-  const tempo = musicClampTempo(model.tempo);
-  const keySpec = MUSIC_KEYS[model.key] || MUSIC_KEYS.C;
   const grandStaff = model.grandStaff === true;
   const measures = Array.isArray(model.measures) && model.measures.length ? model.measures : [musicMeasure()];
   const lines = [

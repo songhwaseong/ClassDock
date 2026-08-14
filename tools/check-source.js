@@ -136,7 +136,7 @@ for (const name of ["normalizePythonDiagnostics", "normalizePythonTraceReport"])
 }
 
 // python-viewer.js 분할본 — 같은 컨텍스트에 순서대로 로드하면 번들과 동일한 전역 환경이 된다.
-const pythonViewerFiles = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"];
+const pythonViewerFiles = ["workspace-python.js", "code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"];
 const workerContext = vm.createContext({
   console,
   window:{},

@@ -27,7 +27,6 @@ const {
   notebookClearExecution,
   notebookCellExecutionState,
   notebookNormalizeInkStrokes,
-  notebookEnsureInkStrokes,
   notebookDropEmptyInkMetadata,
   notebookMoveArrayItem,
   notebookCellClipboardSnapshot,

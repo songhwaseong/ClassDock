@@ -1405,7 +1405,6 @@ function renderWhiteboard(doc, host){
     } else commit();
     return true;
   };
-  let contextCopyHandled = false;
   const writeSelectedClipboardEvent = (e) => {
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
@@ -1418,7 +1417,6 @@ function renderWhiteboard(doc, host){
     const fallback = item.role === "education-formula" ? item.formulaSource
       : item.type === "text" ? item.text : "화이트보드 항목";
     e.clipboardData.setData("text/plain", String(fallback || "화이트보드 항목"));
-    contextCopyHandled = true;
     return true;
   };
   const onCopy = (e) => { writeSelectedClipboardEvent(e); };
@@ -1444,7 +1442,6 @@ function renderWhiteboard(doc, host){
   const copySelectedFromMenu = () => {
     const item = whiteboardClipboardItem(wb.selected);
     if (!item || !setWhiteboardInternalClipboard(item)) return false;
-    contextCopyHandled = false;
     try { document.execCommand("copy"); } catch(_){}
     if (typeof toast === "function") toast("선택한 항목을 복사했어요.", 1500);
     return true;
@@ -1452,7 +1449,6 @@ function renderWhiteboard(doc, host){
   const cutSelectedFromMenu = () => {
     const item = whiteboardClipboardItem(wb.selected);
     if (!item || !setWhiteboardInternalClipboard(item)) return false;
-    contextCopyHandled = false;
     try { document.execCommand("copy"); } catch(_){}
     if (!deleteSelected()) return false;
     if (typeof toast === "function") toast("선택한 항목을 잘라냈어요.", 1500);

@@ -11,6 +11,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const documentTypes = require("../src/js/document-types.js");
 
 // documents.js 는 브라우저 전역에 기대므로 최소한만 흉내 낸다. 검색창은 값만 있으면 된다.
 function loadSidebar(){
@@ -21,6 +22,7 @@ function loadSidebar(){
   });
   const searchInput = { value:"" };
   const ctx = {
+    MNDocumentTypes:documentTypes,
     SUBTITLE_EXTS:[], SQLITE_EXTS:[], BINARY_ASSET_EXTS:new Set(),
     IMG_EXTS:[], VIDEO_EXTS:[], AUDIO_EXTS:[],
     console, setTimeout, clearTimeout, requestAnimationFrame:() => 0,

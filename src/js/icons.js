@@ -44,12 +44,12 @@
     ,stop: '<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>'
     ,refresh: '<path d="M21.5 4.5v5.2h-5.2"/><path d="M19.6 14.5a8 8 0 1 1-1.9-8.3l3.8 3.5"/>'
   };
-  window.uiIcon = function(name, label){
+  window.uiIcon = function(name){
     const content = paths[name] || paths.code;
     return '<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + content + '</svg>';
   };
   window.setUiIcon = function(element, name, label){
-    element.innerHTML = window.uiIcon(name, label);
+    element.innerHTML = window.uiIcon(name);
     if (label) element.setAttribute("aria-label", label);
     return element;
   };

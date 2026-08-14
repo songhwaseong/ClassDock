@@ -668,6 +668,10 @@ function wire(){
   let appModeUsable = false;
   const APP_MODE_HINT = "화면을 넓게 쓰도록 브라우저 탭과 주소창 없이 엽니다.";
   const APP_MODE_UNAVAILABLE_HINT = "크롬 또는 엣지가 있어야 쓸 수 있어요.";
+  const settingAppModeWrap = byId("settingAppModeWrap");
+  const settingAppModeHint = byId("settingAppModeHint");
+  const settingAppMode = byId("settingAppMode");
+  const settingAppModeNow = byId("settingAppModeNow");
   const renderAppModeHint = () => {
     const text = appModeUsable ? APP_MODE_HINT : APP_MODE_UNAVAILABLE_HINT;
     settingAppModeHint.textContent = typeof window.t === "function" ? window.t(text) : text;
@@ -800,7 +804,7 @@ function wire(){
     document.addEventListener("click", () => setOpen(false));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
     // 열린 채로 숨겨지면 다시 노출했을 때 펼쳐진 상태로 나타난다 — 숨김 즉시 닫아 둔다.
-    document.addEventListener("mn-tool-visibility", (ev) => {
+    document.addEventListener("mn-tool-visibility", () => {
       syncHeaderMoreAvailability();
     });
     syncHeaderMoreAvailability();

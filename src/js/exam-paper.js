@@ -1944,7 +1944,7 @@ function openExamGrading(seed){
 }
 
 // .examdone 을 더블클릭하면 채점 화면으로 모은다.
-async function loadExamSubmission(file, opts){
+async function loadExamSubmission(file){
   if (!file || Number(file.size) > EXAM_MAX_FILE_BYTES){ toast("제출본 파일은 48MB 이하만 열 수 있어요.", 3000); return null; }
   let parsed = null;
   try { parsed = JSON.parse(await file.text()); } catch(_){}

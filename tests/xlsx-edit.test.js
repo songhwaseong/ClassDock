@@ -615,7 +615,7 @@ test("Ctrl+방향키 데이터 경계 점프: 블록 끝·다음 데이터·시�
   const { spreadsheetJumpToDataEdge, spreadsheetModelCellEmpty } = require("../src/js/spreadsheet-viewer.js");
   // 6행×1열: 데이터 A1:A3, A5 (A4·A6 빈 칸)
   const col = ["v", "v", "v", "", "v", ""];
-  const empty = (r, c) => col[r] === "";
+  const empty = (r) => col[r] === "";
   const jump = (row, dr) => spreadsheetJumpToDataEdge(empty, col.length, 1, row, 0, dr, 0).row;
   assert.equal(jump(0, 1), 2);   // 블록 안 → 블록 끝
   assert.equal(jump(2, 1), 4);   // 블록 끝 → 다음 데이터 셀

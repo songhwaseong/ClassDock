@@ -685,7 +685,7 @@ function finishLessonRecording(lesson, name){
 }
 
 // .lesson 파일 열기(파일 오픈 파이프라인 + 메뉴 공용).
-async function loadLesson(file, opts){
+async function loadLesson(file){
   let lesson = null;
   if (!file || (Number(file.size) > LESSON_MAX_FILE_BYTES)){
     if (typeof toast === "function") toast("리플레이 파일은 128MB 이하만 열 수 있어요.", 3000);

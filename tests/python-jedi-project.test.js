@@ -16,6 +16,7 @@ const launcher = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"),
 const snippets = fs.readFileSync(path.join(__dirname, "../src/js/python-snippets.js"), "utf8");
 const editor = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
 const viewer = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
+const workspacePython = fs.readFileSync(path.join(__dirname, "../src/js/workspace-python.js"), "utf8");
 
 // launcher.cs 의 JediRunner() 안 문자열 연결을 이어 붙여 실제로 실행되는 러너 .py 를 만든다.
 function extractJediRunner(){
@@ -86,7 +87,7 @@ test("Jedi 러너는 프로젝트 루트를 환경변수로만 받고 미러 밖
 
 test("작업공간 미러는 색인이 바뀔 때만, 그것도 묶어서 보낸다", () => {
   // 타이핑마다 보내면 안 된다 — 색인을 새로 만든 순간에만 예약하고 1.2초 묶는다.
-  assert.match(viewer, /workspacePyIndexMemo = \{ currentPath:targets\.currentPath, projectRoot, entries, index \};[\s\S]{0,400}scheduleJediProjectSync\(/);
+  assert.match(workspacePython, /workspacePyIndexMemo = \{ currentPath:targets\.currentPath, projectRoot, entries, index \};[\s\S]{0,400}scheduleJediProjectSync\(/);
   assert.match(snippets, /const JEDI_PROJECT_SYNC_DELAY = 1200;/);
   assert.match(snippets, /_jediProjectPending = files;[\s\S]{0,300}if \(!jediReady\(\)\)\{ ensureJediProbe\(\); return; \}/);
   assert.match(snippets, /if \(_jediBackend && _jediProjectPending\) scheduleJediProjectSync\(_jediProjectPending\);/);
@@ -102,7 +103,7 @@ test("작업공간 미러는 색인이 바뀔 때만, 그것도 묶어서 보낸
   assert.match(editor, /requestJediCompletions\(source, line, column, jediRelPath\(\), jediProjectRoot\(\)\)/);
   // 미러 안에서 찾은 정의는 임시 복사본이 아니라 원래 탭으로 연다.
   assert.match(editor, /if \(def\.workspacePath && typeof options\.openWorkspaceDefinition === "function"\)/);
-  assert.match(viewer, /async function openWorkspaceDefinitionTarget\(ownerDoc, hit\)/);
+  assert.match(workspacePython, /async function openWorkspaceDefinitionTarget\(ownerDoc, hit\)/);
   assert.match(viewer, /openWorkspaceDefinitionTarget\(ownerDoc, hit\)/);
 });
 

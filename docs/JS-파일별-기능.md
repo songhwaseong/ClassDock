@@ -32,7 +32,8 @@ flowchart LR
 | `theme.js` | 문서가 그려지기 전에 저장된 다크·라이트 테마를 적용해 초기 화면 깜빡임을 막습니다. | `state.js`, `src/styles.css` |
 | `i18n.js` | 한국어·영어 사전, 매개변수 번역, DOM 텍스트·title·aria 자동 번역과 언어 전환을 담당합니다. 사용자에게 보이는 새 문구를 추가하면 이 파일의 영문 사전도 확인합니다. | 모든 UI 파일, `app.js` |
 | `lazy.js` | 무거운 vendor 라이브러리를 시작할 때가 아니라 그 형식을 열 때 처음 불러오는 지연 로더(`MNLazy`)입니다. 엑셀·한글·PPT·Word·압축·캡처·맞춤법 사전 묶음과 로드 순서(JSZip 2.6.1 ↔ 3.x 교체)를 정의하며, 단일 파일 빌드에서는 `text/plain` 블록을, 서버 서빙에서는 `vendor/` 스크립트를 씁니다. 새 vendor 를 추가하면 `scripts.manifest.json`의 `lazy` 값과 이 파일의 묶음을 함께 맞춥니다. | `scripts.manifest.json`, `build-offline.js`, `spreadsheet-viewer.js`, `office-doc-viewers.js`, `tests/release-contract.test.js` |
-| `core.js` | 경로 정규화, 작업공간 마커, 인코딩 판별, Python 오류 설명·경로 분석, Markdown/HTML 살균, 코드 편집 순수 함수 등 여러 기능이 공유하는 기반 유틸리티 모음입니다. | `documents.js`, `python-run-context.js`, `tests/core.test.js` |
+| `interaction-core.js` | 분할 학습 화면의 문서 교체·역할 전환, 참고 잠금 입력 허용, 내부 탭 드래그와 외부 파일·폴더 드롭 판정을 DOM 없이 계산하는 순수 모듈(`MNInteractionCore`)입니다. | `core.js`, `documents.js`, `app.js`, `tests/study-mode.test.js` |
+| `core.js` | 경로 정규화, 작업공간 마커, 인코딩 판별, Python 오류 설명·경로 분석, Markdown/HTML 살균, 코드 편집 순수 함수 등 여러 기능이 공유하는 기반 유틸리티 모음입니다. 기존 `PdfSignerCore` 공개 API를 유지하며 상호작용 판정은 `interaction-core.js`에서 받아 제공합니다. | `interaction-core.js`, `documents.js`, `python-run-context.js`, `tests/core.test.js` |
 | `icons.js` | 앱의 이모지형 버튼을 테마에 맞는 단색 SVG 아이콘으로 정리하고 동적으로 추가되는 UI도 관찰해 보정합니다. | UI를 만드는 모든 파일 |
 | `state.js` | 열린 문서·탭·사이드바·학습 화면의 전역 상태, 앱 설정과 단축키, 공용 토스트·로딩 UI를 관리합니다. | `documents.js`, `app.js`, `i18n.js` |
 | `history.js` | 편집기 공용 되돌리기·다시실행(`MNEditHistory`)입니다. 스냅샷 스택·상한(개수·총량)·redo 무효화·버튼 상태·연속 입력 묶기를 담당하고, 각 편집기는 capture·apply·isEqual 만 넘깁니다. PDF·표·노트북·이미지·화이트보드·파이썬 편집기가 모두 씁니다. | `pdf-recovery.js`, `spreadsheet-viewer.js`, `notebook-model.js`, `image-viewer.js`, `whiteboard.js`, `python-editor.js`, `tests/edit-history.test.js` |
@@ -46,7 +47,8 @@ flowchart LR
 |---|---|---|
 | `pdf-recovery.js` | PDF 편집 복구본을 IndexedDB에 저장·복원하고 PDF 편집 Undo/Redo 히스토리를 관리합니다. | `pdf-editor.js`, `pdf-pages.js`, `tests/pdf-recovery.test.js` |
 | `video-viewer.js` | 영상·오디오 재생, SRT/VTT/SMI 자막 변환·자동 연결, EXE 영상 변환과 폴더 일괄 MP4 변환을 담당합니다. | `file-loaders.js`, `desktop/launcher.cs`, `tests/video-subtitles.test.js` |
-| `documents.js` | 문서 객체 생성, 탭·사이드바·그룹 트리, 활성 문서 전환, 검색, 분할 작업, 새로고침·닫기 등 다중 문서 생명주기의 중심입니다. 지원 확장자와 코드 프로파일도 정의합니다. 탭바는 파일이 하나만 열려 있어도 표시하고, 폴더·압축을 열 때 첫 파일을 자동으로 띄우지 않는 배치(`suppressUiBatchAutoOpen`)와 아무 문서도 없을 때의 빈 화면(`#docEmpty`) 전환도 여기서 관리합니다. | `state.js`, `file-loaders.js`, `viewer-base.js`, `tests/single-tab-and-auto-open.test.js` |
+| `document-types.js` | 지원 확장자·코드 강조 프로파일·ZIP 허용 형식과 파일 형식 판별, 사이드바 아이콘·색상 분류를 제공하는 순수 모듈(`MNDocumentTypes`)입니다. | `video-viewer.js`, `documents.js`, `file-loaders.js` |
+| `documents.js` | 문서 객체 생성, 탭·사이드바·그룹 트리, 활성 문서 전환, 검색, 분할 작업, 새로고침·닫기 등 다중 문서 생명주기의 중심입니다. 형식 레지스트리와 표시 규칙은 `document-types.js`에서 받아 씁니다. 탭바는 파일이 하나만 열려 있어도 표시하고, 폴더·압축을 열 때 첫 파일을 자동으로 띄우지 않는 배치(`suppressUiBatchAutoOpen`)와 아무 문서도 없을 때의 빈 화면(`#docEmpty`) 전환도 여기서 관리합니다. | `document-types.js`, `state.js`, `file-loaders.js`, `viewer-base.js`, `tests/single-tab-and-auto-open.test.js` |
 | `workspace-store.js` | 최근 작업공간을 서버 또는 IndexedDB에 바이너리로 저장·병합·삭제하고 재실행 시 파일·폴더·탭 상태를 복원합니다. | `file-loaders.js`, `desktop/launcher.cs`, `tests/folder-workspace.test.js` |
 | `recent-files.js` | 최근 연 파일·폴더 목록(`MNRecent`)입니다. 목록은 `localStorage`에 두고, 다시 열 때는 이미 보관된 File System Access 핸들(`saveFsHandle`·`rememberFolderHandle`)을 찾아 권한 확인 1회로 되살립니다. 옮겨지거나 지워진 항목은 안내와 함께 목록에서 지울 수 있습니다. | `file-loaders.js`, `app.js`, `code-viewer.js`(핸들 보관), `tests/recent-files.test.js` |
 | `file-loaders.js` | 파일·폴더·드래그 입력을 문서 종류별 로더로 전달합니다. 폴더 핸들, 빈 폴더, 새로고침, ZIP/TAR/GZ 해제, PPTX 변환 폴백을 관리합니다. | `documents.js`, `workspace-store.js`, 각 형식 뷰어 |
@@ -56,7 +58,8 @@ flowchart LR
 | `pdf-pages.js` | PDF 다운로드 바이트 생성, 책갈피 목차, 페이지 선택·추출·삭제·회전·순서 변경·합치기를 담당합니다. | `pdf-editor.js`, `pdf-recovery.js`, `tests/pdf-outline.test.js` |
 | `viewer-base.js` | Office/텍스트 문서 로더의 공통 진입점입니다. Markdown, 일반 텍스트, HTML 상대 리소스, SQLite 읽기 전용 미리보기를 렌더합니다. | `office-doc-viewers.js`, `code-viewer.js`, `pptx-viewer.js` |
 | `korean-font.js` | Pyodide Matplotlib용 NanumGothic gzip+base64 데이터입니다. 자동 생성 파일이므로 직접 수정하지 않습니다. | `python-runtime.js`, 생성 도구 |
-| `code-viewer.js` | 코드·설정 파일의 구문 강조와 줄번호, Python 실행 바, `.py`·텍스트 저장, 원본 핸들/자동 저장 폴더 분기, 노트북 변환, 정의 이동 연결을 담당합니다. 실행 바의 **따라치기**(교본 위에 그대로 쳐 보는 타자 연습) 버튼과 진행률·정확도 표시, 편집 화면과 읽기 화면 양쪽의 **줄 번호로 이동(Ctrl+G)** 진입점도 여기서 답니다. | `python-editor.js`, `python-runtime.js`, `python-run-context.js` |
+| `workspace-python.js` | 열린 Python 파일을 백그라운드에서 읽어 모듈·심볼 색인을 만들고 자동 import 후보, 작업공간 import 진단, 로컬 정의 이동 대상을 제공하는 모듈(`MNWorkspacePython`)입니다. 캐시·사전 읽기 큐·Jedi 프로젝트 동기화 시점을 함께 소유합니다. | `code-viewer.js`, `core.js`, `tests/python-workspace-import-index.test.js` |
+| `code-viewer.js` | 코드·설정 파일의 구문 강조와 줄번호, Python 실행 바, `.py`·텍스트 저장, 원본 핸들/자동 저장 폴더 분기, 노트북 변환, 정의 이동 연결을 담당합니다. 실행 바의 **따라치기**(교본 위에 그대로 쳐 보는 타자 연습) 버튼과 진행률·정확도 표시, 편집 화면과 읽기 화면 양쪽의 **줄 번호로 이동(Ctrl+G)** 진입점도 여기서 답니다. 작업공간 Python 색인과 자동 import는 `workspace-python.js`를 사용합니다. | `workspace-python.js`, `python-editor.js`, `python-runtime.js`, `python-run-context.js` |
 
 ## 3. python-and-notebooks — Python 편집·실행과 Jupyter
 
@@ -87,7 +90,8 @@ flowchart LR
 |---|---|---|
 | `office-doc-viewers.js` | DOCX, HWP, HWPX의 미리보기와 Office 암호화 문서 판별·복호화 보조를 담당합니다. `.docx`는 미리보기를 그린 뒤 `MNDocxEditor`의 문단 편집 토글을 붙입니다(암호를 풀어 연 문서는 저장하면 암호가 사라지므로 붙이지 않습니다). | `viewer-base.js`, `file-loaders.js`, `docx-editor.js` |
 | `docx-editor.js` | Word(.docx) 제자리 편집 화면(`MNDocxEditor`)입니다. docx-preview 문단과 XML을 대조하고 어긋나면 임시 북마크로 정확한 위치를 다시 찾습니다. 드래그한 글자 범위 또는 문단 전체의 글자 서식, 문단 배치·글머리표/번호·서식 복사/붙이기, 표 행/열·셀 서식·오른쪽 병합/가로 분할, 용지 방향·여백·머리글/바닥글, PNG/JPG/GIF 추가·교체·크기를 편집합니다. 제자리 문단 우클릭 메뉴는 이 기능들과 복사·잘라내기·붙여넣기·특수문자·문단 추가/삭제·이력·저장을 대상별 하위 메뉴로 제공하며 상단 도구와 같은 실행 경로를 씁니다. XML과 추가 패키지 파트의 버전을 함께 기록해 Ctrl+Z/Ctrl+Y로 되돌리고, 세로 병합·중첩 표처럼 위험한 구조는 제한합니다. | `office-replace.js`, `office-doc-viewers.js`, `docs/워드-문단편집-설계.md`, `tests/office-replace.test.js`, `tests/docx-context-menu.test.js` |
-| `spreadsheet-viewer.js` | XLSX/XLS/CSV 로딩과 시트 UI, 셀 편집·선택·복사, 수식 계산, 행/열·병합·서식·필터·정렬, 저장과 새 표 생성을 담당합니다. | `spreadsheet-chart.js`, `tests/xlsx-edit.test.js` |
+| `spreadsheet-formula.js` | 표 편집기의 순수 수식 엔진(`MNSpreadsheetFormula`)입니다. 수식 파싱·계산, 셀/시트 참조 재작성, 날짜·텍스트·조회 함수, 자동 채우기 패턴과 자동합계 작업 계획을 담당하며 브라우저 없이 테스트할 수 있습니다. | `spreadsheet-viewer.js`, `tests/xlsx-edit.test.js` |
+| `spreadsheet-viewer.js` | XLSX/XLS/CSV 로딩과 시트 UI, 셀 편집·선택·복사, 행/열·병합·서식·필터·정렬, 저장과 새 표 생성을 담당합니다. 수식 계산과 참조 변환은 `spreadsheet-formula.js`를 사용합니다. | `spreadsheet-formula.js`, `spreadsheet-chart.js`, `tests/xlsx-edit.test.js` |
 | `spreadsheet-chart.js` | 선택한 표 범위에서 차트에 적합한 데이터를 추론하고 막대·선·원형 SVG 차트를 생성합니다. | `spreadsheet-viewer.js` |
 | `pptx-viewer.js` | PPTX 간이 슬라이드 미리보기, 슬라이드 맞춤, 포함 폰트 변환과 상대 리소스 경로 해석을 담당합니다. EXE의 정확한 PDF 변환 실패 시 사용됩니다. | `file-loaders.js`, `office-doc-viewers.js` |
 | `image-viewer.js` | 이미지 보기·확대·회전·뒤집기·자르기·내보내기, 작업공간 복구와 폴더 이미지/PDF 갤러리를 담당합니다. | `file-loaders.js`, `documents.js` |

@@ -13,8 +13,9 @@ const vm = require("node:vm");
 
 const read = (file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8");
 const documentsSource = read("documents.js");
+const documentTypes = require("../src/js/document-types.js");
 const spreadsheetSource = read("spreadsheet-viewer.js");
-const pythonViewerSource = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
+const pythonViewerSource = ["workspace-python.js", "code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
   .map(read).join("\n");
 
 /* ===== documents.js 의 이름 짓기 상태기계 ===== */
@@ -29,6 +30,7 @@ function loadRenameStateMachine(options={}){
   });
   const calls = [];
   const ctx = {
+    MNDocumentTypes:documentTypes,
     SUBTITLE_EXTS:[], SQLITE_EXTS:[], BINARY_ASSET_EXTS:new Set(),
     IMG_EXTS:[], VIDEO_EXTS:[], AUDIO_EXTS:[],
     console, setTimeout, clearTimeout, requestAnimationFrame:() => 0,

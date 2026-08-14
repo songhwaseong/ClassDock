@@ -11,6 +11,7 @@
     "theme.js",
     "i18n.js",
     "lazy.js",
+    "interaction-core.js",
     "core.js",
     "icons.js",
     "state.js",
@@ -20,6 +21,7 @@
     "spellcheck.js",
     "pdf-recovery.js",
     "video-viewer.js",
+    "document-types.js",
     "documents.js",
     "workspace-store.js",
     "recent-files.js",
@@ -30,6 +32,7 @@
     "pdf-pages.js",
     "viewer-base.js",
     "korean-font.js",
+    "workspace-python.js",
     "code-viewer.js",
     "python-snippets.js",
     "python-editor.js",
@@ -47,6 +50,7 @@
     "office-doc-viewers.js",
     "office-replace.js",
     "docx-editor.js",
+    "spreadsheet-formula.js",
     "spreadsheet-viewer.js",
     "spreadsheet-chart.js",
     "pptx-viewer.js",
@@ -87,6 +91,7 @@
         "theme.js",
         "i18n.js",
         "lazy.js",
+        "interaction-core.js",
         "core.js",
         "icons.js",
         "state.js",
@@ -101,6 +106,7 @@
       "scripts": [
         "pdf-recovery.js",
         "video-viewer.js",
+        "document-types.js",
         "documents.js",
         "workspace-store.js",
         "recent-files.js",
@@ -111,6 +117,7 @@
         "pdf-pages.js",
         "viewer-base.js",
         "korean-font.js",
+        "workspace-python.js",
         "code-viewer.js"
       ]
     },
@@ -143,6 +150,7 @@
         "office-doc-viewers.js",
         "office-replace.js",
         "docx-editor.js",
+        "spreadsheet-formula.js",
         "spreadsheet-viewer.js",
         "spreadsheet-chart.js",
         "pptx-viewer.js",
@@ -183,12 +191,19 @@
     }
   ],
   "scriptDependencies": {
+    "core.js": [
+      "interaction-core.js"
+    ],
     "state.js": [
       "core.js",
       "theme.js"
     ],
+    "document-types.js": [
+      "video-viewer.js"
+    ],
     "documents.js": [
-      "state.js"
+      "state.js",
+      "document-types.js"
     ],
     "workspace-store.js": [
       "documents.js"
@@ -209,7 +224,8 @@
     ],
     "code-viewer.js": [
       "documents.js",
-      "spellcheck.js"
+      "spellcheck.js",
+      "workspace-python.js"
     ],
     "python-editor.js": [
       "code-viewer.js",
@@ -249,7 +265,8 @@
       "office-doc-viewers.js",
       "documents.js",
       "code-viewer.js",
-      "python-editor.js"
+      "python-editor.js",
+      "spreadsheet-formula.js"
     ],
     "spreadsheet-chart.js": [
       "spreadsheet-viewer.js"
@@ -351,6 +368,30 @@
   },
   "moduleBoundaries": [
     {
+      "name": "document-types",
+      "file": "document-types.js",
+      "publicApi": "MNDocumentTypes",
+      "consumers": [
+        "documents.js"
+      ]
+    },
+    {
+      "name": "workspace-python",
+      "file": "workspace-python.js",
+      "publicApi": "MNWorkspacePython",
+      "consumers": [
+        "code-viewer.js"
+      ]
+    },
+    {
+      "name": "interaction-core",
+      "file": "interaction-core.js",
+      "publicApi": "MNInteractionCore",
+      "consumers": [
+        "core.js"
+      ]
+    },
+    {
       "name": "office-replace",
       "file": "office-replace.js",
       "publicApi": "MNOfficeReplace",
@@ -426,6 +467,14 @@
         "data-convert-ui.js",
         "scratchpad.js",
         "mnote.js"
+      ]
+    },
+    {
+      "name": "spreadsheet-formula",
+      "file": "spreadsheet-formula.js",
+      "publicApi": "MNSpreadsheetFormula",
+      "consumers": [
+        "spreadsheet-viewer.js"
       ]
     },
     {

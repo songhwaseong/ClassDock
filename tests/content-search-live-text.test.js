@@ -12,6 +12,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const core = require("../src/js/core.js");
+const documentTypes = require("../src/js/document-types.js");
 const MB = 1024 * 1024;
 
 // documents.js 는 브라우저 전역에 기대므로 최소한의 흉내만 내어 vm 에 올린다.
@@ -23,6 +24,7 @@ function loadDocuments(docs){
     querySelectorAll: () => [], focus(){}, scrollIntoView(){}
   });
   const ctx = {
+    MNDocumentTypes: documentTypes,
     SUBTITLE_EXTS: [], SQLITE_EXTS: [], BINARY_ASSET_EXTS: new Set(),
     IMG_EXTS: [], VIDEO_EXTS: [], AUDIO_EXTS: [],
     console, setTimeout, clearTimeout, requestAnimationFrame: () => 0,

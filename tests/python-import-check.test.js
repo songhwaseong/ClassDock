@@ -14,6 +14,7 @@ const path = require("node:path");
 const core = require("../src/js/core.js");
 const read = (name) => fs.readFileSync(path.join(__dirname, "../src/js", name), "utf8");
 const viewer = read("code-viewer.js");
+const workspacePython = read("workspace-python.js");
 const runContext = read("python-run-context.js");
 const runtime = read("python-runtime.js");
 
@@ -164,9 +165,9 @@ test("모듈 __getattr__ 이 있으면 이름 검사를 포기한다", () => {
 });
 
 test("실시간 진단과 수동 진단이 같은 import 검사 결과를 함께 반영한다", () => {
-  assert.match(viewer, /function workspacePythonImportAnalysis\(ownerDoc, source, onReady\)/);
-  assert.match(viewer, /function workspacePythonImportDiagnostics\(ownerDoc, source, onReady\)/);
-  assert.match(viewer, /if \(rows\.some\(row => workspacePyText\(row\.doc\) == null\)\)/);   // 못 읽은 파일이 있으면 검사 보류
+  assert.match(workspacePython, /function workspacePythonImportAnalysis\(ownerDoc, source, onReady\)/);
+  assert.match(workspacePython, /function workspacePythonImportDiagnostics\(ownerDoc, source, onReady\)/);
+  assert.match(workspacePython, /if \(rows\.some\(row => workspacePyText\(row\.doc\) == null\)\)/);   // 못 읽은 파일이 있으면 검사 보류
   assert.match(viewer, /editor\.setDiagnosticItems\(withImportProblems\(analysis\.diagnostics, source\)\)/);
   assert.match(viewer, /workspacePythonImportAnalysis\(ownerDoc, source, rerunAfterWorkspacePrewarm\)/);
   assert.match(viewer, /ui\.extraDiagnostics = \(\) => \{/);
@@ -181,9 +182,9 @@ test("실시간 진단과 수동 진단이 같은 import 검사 결과를 함께
 });
 
 test("프리워밍은 파일 상한 뒤에도 이어지고 완료되면 진단을 다시 예약한다", () => {
-  assert.match(viewer, /if \(read >= WORKSPACE_PY_PREWARM_MAX\)\{ remaining = true; break; \}/);
-  assert.match(viewer, /if \(outcome\.remaining\) \{/);
-  assert.match(viewer, /callbacks\.add\(onReady\)/);
+  assert.match(workspacePython, /if \(read >= WORKSPACE_PY_PREWARM_MAX\)\{ remaining = true; break; \}/);
+  assert.match(workspacePython, /if \(outcome\.remaining\) \{/);
+  assert.match(workspacePython, /callbacks\.add\(onReady\)/);
   assert.match(viewer, /const rerunAfterWorkspacePrewarm = \(\) => \{/);
 });
 
@@ -267,8 +268,8 @@ test("Jedi import 검사는 준비 완료를 기다리고 구성이 바뀔 때�
 });
 
 test("못 읽은 파일은 색인에 '내용을 모르는 모듈'로 표시된다", () => {
-  assert.match(viewer, /const workspacePyUnreadable = new Set\(\)/);
-  assert.match(viewer, /entries\.push\(\{ path:row\.path, source, unreadable:workspacePyUnreadable\.has\(row\.doc\.id\) \}\)/);
+  assert.match(workspacePython, /const workspacePyUnreadable = new Set\(\)/);
+  assert.match(workspacePython, /entries\.push\(\{ path:row\.path, source, unreadable:workspacePyUnreadable\.has\(row\.doc\.id\) \}\)/);
   const index = indexFor("a/main.py", [{ path:"a/mod.py", source:"", unreadable:true }, { path:"a/plain.py", source:"" }]);
   assert.equal(index.files.find(file => file.path === "a/mod.py").hasSource, false);
   assert.equal(index.files.find(file => file.path === "a/plain.py").hasSource, true);

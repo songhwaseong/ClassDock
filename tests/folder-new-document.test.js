@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 const read = (file) => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8");
 // python-viewer.js 분할본을 이어붙여 실행 — 번들과 동일한 전역 환경이 된다.
-const pythonViewerSource = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
+const pythonViewerSource = ["workspace-python.js", "code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
   .map(read).join("\n");
 const documentsSource = read("documents.js");
 const notebookSource = read("notebook-model.js");

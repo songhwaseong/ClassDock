@@ -2806,7 +2806,7 @@ function buildCodeEditor(text, prof, options={}){
   const wideChar = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/;   // 한글 자모·완성형·한자·전각 기호 등 '두 칸짜리' 글자
   const practiceWidthMismatch = (typed, want) => wideChar.test(typed) !== wideChar.test(want);
   let practiceHintAt = 0;
-  const practiceRejectKey = (typed, want) => {
+  const practiceRejectKey = (typed) => {
     practice.rejectAt = practice.pos;
     clearTimeout(practice.rejectTimer);
     practice.rejectTimer = setTimeout(() => { practice.rejectAt = -1; if (practice.active) renderPracticeCode(); }, 700);
@@ -2845,7 +2845,7 @@ function buildCodeEditor(text, prof, options={}){
           if (ch === "\n") practiceSkipLineTail();              // 줄 끝에 눈에 안 보이는 공백이 있어도 통과
           // 영문 자리에 한글(또는 그 반대)은 폭이 달라 줄이 밀린다 → 넘어가지 않고 그 자리에서 막는다.
           if (practiceWidthMismatch(ch, target[practice.pos])){
-            practiceRejectKey(ch, target[practice.pos]);
+          practiceRejectKey(ch);
             practice.wrong++;                                   // 한 칸도 못 나갔으니 실수 횟수만 센다
             continue;
           }

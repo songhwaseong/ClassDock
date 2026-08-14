@@ -11,13 +11,10 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const core = require("../src/js/core.js");
-const source = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../src/js/workspace-python.js"), "utf8");
 
 // 프리워밍 캐시 블록만 잘라 vm 에 올린다(DOM 의존 코드 제외).
 function loadWorkspaceIndex(docs, options={}){
-  const start = source.indexOf("// 아직 한 번도 연 적 없는 .py");
-  const end = source.indexOf("// 문자열 토큰이 f-string 인가?", start);
-  assert.ok(start > 0 && end > start, "코드 블록 경계를 찾지 못했습니다");
   const reads = [];
   const idleCalls = [];
   const activeIds = [];
@@ -35,14 +32,8 @@ function loadWorkspaceIndex(docs, options={}){
   if (options.trackIdle) ctx.requestIdleCallback = (fn) => { idleCalls.push(fn); };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
-  vm.runInContext(source.slice(start, end)
-    + ";this.workspacePythonImportCandidates = workspacePythonImportCandidates;"
-    + "this.workspacePythonModuleCandidates = workspacePythonModuleCandidates;"
-    + "this.workspacePythonModuleIndex = workspacePythonModuleIndex;"
-    + "this.runWorkspacePythonPrewarm = runWorkspacePythonPrewarm;"
-    + "this.scheduleWorkspacePythonPrewarm = scheduleWorkspacePythonPrewarm;"
-    + "this.openWorkspaceDefinitionTarget = openWorkspaceDefinitionTarget;"
-    + "this.workspacePyTextCache = workspacePyTextCache;", ctx);
+  vm.runInContext(source + ";this.workspaceApi = MNWorkspacePython;", ctx);
+  Object.assign(ctx, ctx.workspaceApi);
   return { ctx, reads, idleCalls, activeIds };
 }
 
