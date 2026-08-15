@@ -29,7 +29,8 @@ test("화이트보드 휠·화면 이동·원본 내보내기 배선이 함께 �
   assert.match(source,/e\.button === 1 \|\| \(e\.button === 0 && spacePanning\)/);
   assert.match(source,/if \(!startSelect\(e\)\) beginViewPan\(e\)/);
   assert.match(source,/itemAt\(p\) \? "move" : "grab"/);
-  assert.match(source,/e\.code === "Space"[\s\S]{0,180}pan-ready/);
+  // Space 손바닥 이동은 열려 있는 패널이 하나라도 있으면 양보한다(패널이 늘면 조건도 길어진다).
+  assert.match(source,/e\.code === "Space"[\s\S]{0,240}pan-ready/);
   assert.match(source,/withBoardExport[\s\S]{0,260}view\.scale=1; view\.x=0; view\.y=0/);
   assert.match(source,/zoomLabelBtn = mkBtn\([\s\S]{0,220}resetView/);
   assert.match(css,/\.wb-canvas\.pan-ready\{cursor:grab!important\}/);

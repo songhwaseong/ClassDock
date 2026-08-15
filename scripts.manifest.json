@@ -57,6 +57,7 @@
     "image-viewer.js",
     "image-lightbox.js",
     "board-render.js",
+    "board-tools.js",
     "whiteboard.js",
     "lesson-replay.js",
     "diff-viewer.js",
@@ -157,6 +158,7 @@
         "image-viewer.js",
         "image-lightbox.js",
         "board-render.js",
+        "board-tools.js",
         "whiteboard.js"
       ]
     },
@@ -276,6 +278,7 @@
     ],
     "whiteboard.js": [
       "board-render.js",
+      "board-tools.js",
       "documents.js"
     ],
     "diff-viewer.js": [
@@ -483,6 +486,14 @@
       "publicApi": "MNBoardRenderer",
       "consumers": [
         "lesson-replay.js",
+        "whiteboard.js"
+      ]
+    },
+    {
+      "name": "board-tools",
+      "file": "board-tools.js",
+      "publicApi": "MNBoardTools",
+      "consumers": [
         "whiteboard.js"
       ]
     },

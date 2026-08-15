@@ -1975,6 +1975,11 @@
   .wb-context-record-actions{grid-template-columns:1fr}
   .wb-context-toolbar-actions{grid-template-columns:1fr}
   .wb-context-position-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .wb-context-gear-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* 켜 둔 교구·옵션과 열려 있는 변환 창은 도구막대와 같이 눌린 상태로 보인다 */
+  .wb-context-gear-actions button.active,.wb-context-actions button.active{background:var(--accent);color:#fff}
+  .wb-context-gear-actions button.active:hover,.wb-context-gear-actions button.active:focus-visible,
+  .wb-context-actions button.active:hover,.wb-context-actions button.active:focus-visible{background:var(--accent);color:#fff;filter:brightness(1.06)}
   .wb-context-actions .wb-context-danger{color:#dc2626}
   .wb-context-actions .wb-context-danger:hover,.wb-context-actions .wb-context-danger:focus-visible{background:color-mix(in srgb,#dc2626 12%,transparent);color:#dc2626}
   .wb-context-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
@@ -2038,7 +2043,7 @@
   .wb-edu-close:hover{background:var(--panel-hover);color:var(--ink)}
   .wb-edu-search{flex:0 0 34px;width:100%;height:34px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:13px;outline:none}
   .wb-edu-search:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
-  .wb-edu-tabs{display:grid;flex:0 0 30px;grid-template-columns:repeat(4,1fr);gap:5px}
+  .wb-edu-tabs{display:grid;flex:0 0 auto;grid-template-columns:repeat(3,1fr);gap:5px}
   .wb-edu-tab{height:30px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
   .wb-edu-tab:hover{background:var(--panel-hover)}
   .wb-edu-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -2089,6 +2094,72 @@
   .wb-edu-stencil svg{display:block;width:100%;height:100%;pointer-events:none}
   .wb-edu-hint{margin:0;color:var(--muted);font-size:10.5px;line-height:1.35}
   .wb-edu-empty{grid-column:1/-1;margin:auto;color:var(--muted);font-size:12px}
+  /* ----- 교구(자·각도기·컴퍼스)와 길이·각도 딱지 ----- */
+  .wb-gear.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wb-gear-snap{font-size:11.5px;font-weight:700}
+  .wb-measure{position:absolute;z-index:14;padding:3px 8px;border-radius:6px;background:rgba(15,23,42,.86);color:#fff;
+    font:12px/1.3 ui-monospace,Consolas,monospace;white-space:nowrap;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.28)}
+  .wb-measure[hidden]{display:none}
+  /* ----- 변환(대칭·회전·평행이동·닮음) 패널 ----- */
+  .wb-transform-panel{position:absolute;z-index:13;left:12px;top:12px;width:min(300px,calc(100% - 24px));
+    display:flex;flex-direction:column;gap:8px;padding:11px;border:1px solid var(--border);border-radius:11px;
+    background:var(--panel);color:var(--ink);box-shadow:0 14px 34px rgba(15,23,42,.24)}
+  .wb-transform-panel[hidden]{display:none}
+  .wb-transform-kinds,.wb-transform-axis{flex-wrap:wrap;min-height:auto;overflow:visible}
+  .wb-transform-axis[hidden]{display:none}
+  .wb-transform-fields{display:flex;flex-wrap:wrap;gap:8px}
+  .wb-transform-field[hidden]{display:none}
+  .wb-transform-pivot{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .wb-transform-pivot[hidden]{display:none}
+  .wb-transform-pivot-text{flex:1;min-width:96px;color:var(--muted);font-size:11px}
+  .wb-transform-pivot .wb-formula-save{margin-right:0}
+  .wb-transform-pivot .wb-formula-save.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* ----- 화학: 주기율표·반응식 ----- */
+  .wb-chem-input{height:32px;font-size:13px}
+  .wb-chem-result{min-height:34px;margin:7px 0 0;padding:5px 8px;border-radius:6px;background:var(--field);
+    color:var(--ink);font-size:19px;line-height:1.35;text-align:center;word-break:break-all}
+  .wb-chem-result:empty{display:none}
+  .wb-edu-grid.wb-periodic{grid-template-columns:repeat(18,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:2px;align-content:start}
+  .wb-element{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;min-height:0;
+    padding:2px 1px;border:1px solid color-mix(in srgb,var(--wb-element-color) 55%,transparent);border-radius:4px;
+    background:color-mix(in srgb,var(--wb-element-color) 12%,var(--field));color:var(--ink);font:inherit;cursor:pointer;overflow:hidden}
+  .wb-element:hover{background:color-mix(in srgb,var(--wb-element-color) 26%,var(--field));border-color:var(--wb-element-color)}
+  .wb-element-no{font-size:8px;line-height:1;color:var(--muted)}
+  .wb-element-sym{font-size:12px;font-weight:700;line-height:1.15;color:var(--wb-element-color)}
+  .wb-element-name{font-size:9.5px;line-height:1.1;color:var(--muted);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:100%}
+  .wb-periodic .wb-element{aspect-ratio:1/1}
+  .wb-periodic .wb-element-name{display:none}
+  .wb-edu-grid:not(.wb-periodic) .wb-element{grid-column:span 2;min-height:56px;gap:1px}
+  .wb-edu-grid:not(.wb-periodic) .wb-element-sym{font-size:19px}
+  .wb-sim-row{margin-bottom:6px}
+  .wb-sim-count{margin-left:auto}
+  .wb-sim-count .wb-graph-number{width:64px}
+  /* ----- 함수 그래프·자료 차트 만들기 ----- */
+  .wb-graph-rows{display:flex;flex-direction:column;gap:5px}
+  .wb-graph-row{display:flex;align-items:center;gap:6px}
+  .wb-graph-dot{flex:none;width:10px;height:10px;border-radius:50%}
+  .wb-graph-caption{flex:none;color:var(--muted);font-size:12px;font-family:Cambria Math,"Times New Roman",serif}
+  .wb-graph-input{min-width:0;flex:1;height:29px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:12.5px/1.3 ui-monospace,Consolas,monospace;outline:none}
+  .wb-graph-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  .wb-graph-range{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
+  .wb-graph-field{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11.5px}
+  .wb-graph-field.is-off{opacity:.45}
+  .wb-graph-number{width:56px;height:26px;padding:0 5px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;font-size:11.5px;outline:none}
+  .wb-graph-check{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11.5px;cursor:pointer}
+  .wb-graph-params{display:flex;flex-direction:column;gap:4px;margin-top:7px}
+  .wb-graph-params[hidden]{display:none}
+  .wb-graph-param{display:flex;align-items:center;gap:7px;font-size:11.5px}
+  .wb-graph-param-name{flex:none;width:14px;color:var(--accent);font-weight:700;font-family:Cambria Math,"Times New Roman",serif;font-size:14px}
+  .wb-graph-param input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+  .wb-graph-param output{flex:none;width:34px;color:var(--muted);text-align:right;font-family:ui-monospace,Consolas,monospace}
+  .wb-chart-types{min-height:auto;margin-bottom:6px}
+  .wb-chart-title{display:block;width:100%;height:28px;margin-bottom:6px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;font-size:12px;outline:none}
+  .wb-tool-preview{display:block;width:100%;margin-top:7px;border:1px solid var(--border);border-radius:7px;background:#fff}
+  .wb-tool-preview[hidden]{display:none}
+  .wb-tool-message{margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.4}
+  .wb-tool-message.is-error{color:#dc2626}
+  .wb-edu-preset{grid-column:span 2;min-height:58px}
+  .wb-edu-preset .wb-edu-visual{min-height:22px;font-size:14px;white-space:nowrap;text-overflow:ellipsis}
   .wb-formula-probe{position:absolute;left:-10000px;top:-10000px;z-index:-1;display:inline-block;width:max-content;max-width:none;padding:6px;visibility:hidden;white-space:nowrap;color:#111;font:32px/1.25 Cambria Math,"Times New Roman",serif}
   .wb-formula-probe math{font-size:1em}
   /* ===== 수업 리플레이(재생) ===== */

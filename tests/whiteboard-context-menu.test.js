@@ -14,7 +14,9 @@ test("화이트보드 우클릭 메뉴는 클릭 대상과 기존 편집 동작�
   assert.match(source, /contextAction\("복사"[\s\S]{0,100}copySelectedFromMenu\)/);
   assert.match(source, /contextAction\("복제"[\s\S]{0,120}duplicateSelected\)/);
   assert.match(source, /contextAction\("삭제"[\s\S]{0,120}deleteSelected\)/);
-  assert.match(source, /selected\.type==="text"\|\|formula/);
+  // 편집 버튼은 다시 고칠 수 있는 항목(텍스트·수식·그래프·차트)에만 뜬다.
+  assert.match(source, /contextEditBtn\.hidden=!canEditSelected\(selected\)/);
+  assert.match(source, /const canEditSelected = \(item\) =>[\s\S]{0,300}education-chart/);
   assert.match(source, /contextFlipXBtn\.hidden=!flippable/);
   assert.match(source, /contextUngroupBtn\.hidden=!\(selected&&selected\.type==="group"\)/);
 });

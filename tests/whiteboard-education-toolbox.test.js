@@ -12,6 +12,8 @@ const {
   whiteboardFormulaNeedsInput,
   normalizeWhiteboardFormulaLibrary,
   whiteboardClipboardItem,
+  whiteboardDetachedClipboardItem,
+  whiteboardGraphUsesManualY,
   whiteboardStencilSvg,
   whiteboardStencilGroup,
   whiteboardVectorGroupSvg,
@@ -34,6 +36,26 @@ test("선택한 수식은 이미지 캡처가 아닌 편집 가능한 화이트�
   assert.equal(copy.img, undefined);
   assert.deepEqual(whiteboardClipboardItem(JSON.stringify(copy)), copy);
   assert.equal(whiteboardClipboardItem({ type:"image", src:"https://example.com/image.png" }), null);
+});
+
+test("측정 항목을 붙여넣으면 원본 연결과 식별자를 물려받지 않는다", () => {
+  const target = whiteboardDetachedClipboardItem({ type:"rect", x1:0, y1:0, x2:100, y2:50, mid:"m-original" });
+  assert.equal(target.mid, undefined);
+
+  const label = whiteboardDetachedClipboardItem({
+    type:"text", role:"measure", measureFor:"m-original", measureKind:"area",
+    text:"3.5cm²", x:20, y:30, anchorX:10, anchorY:15, fontSize:15, color:"#111111"
+  });
+  assert.equal(label.role, undefined);
+  assert.equal(label.measureFor, undefined);
+  assert.equal(label.anchorX, undefined);
+  assert.equal(label.text, "3.5cm²");
+});
+
+test("그래프 자동 y 범위의 null은 수동 범위로 오인하지 않는다", () => {
+  assert.equal(whiteboardGraphUsesManualY({ yMin:null, yMax:null }), false);
+  assert.equal(whiteboardGraphUsesManualY({}), false);
+  assert.equal(whiteboardGraphUsesManualY({ yMin:-5, yMax:5 }), true);
 });
 
 test("수학·과학 도구상자는 기호·수식·도형·과학 묶음을 빠짐없이 제공한다", () => {

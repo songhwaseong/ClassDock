@@ -123,8 +123,9 @@ test("집중 도구 UI는 화면 오버레이·입력 차단·정리·원본 내
   assert.match(source,/" · 사용 안 함"/);
   assert.match(source,/if \(e\.key === "Escape" && focus\.active\)\{[\s\S]{0,280}if \(focus\.controlsVisible\)\{[\s\S]{0,180}setFocusControlsVisible\(false\);[\s\S]{0,220}else stopFocus\(\);[\s\S]{0,40}return;/);
   assert.match(source,/if \(focusFloat\) focusFloat\.destroy\(\)/);
-  assert.match(source,/const boardSnapshot = \(\) => \(\{[\s\S]{0,180}items:wb\.items/);
-  assert.doesNotMatch(source,/const boardSnapshot = \(\) => \(\{[\s\S]{0,220}boardFocus/);
+  // 저장 스냅샷은 판서 모델만 담는다(측정값 갱신 같은 앞단 호출은 붙을 수 있다).
+  assert.match(source,/const boardSnapshot = \(\) => \((?:syncMeasureItems\(\), )?\{[\s\S]{0,180}items:wb\.items/);
+  assert.doesNotMatch(source,/const boardSnapshot = \(\) => \((?:syncMeasureItems\(\), )?\{[\s\S]{0,220}boardFocus/);
   assert.match(source,/withBoardExport\(\(\) => canvas\.toDataURL\("image\/png"\)\)/);
   assert.match(css,/\.wb-focus-visual\{[^}]*pointer-events:none/);
   assert.match(css,/\.wb-focus-controls\{[^}]*pointer-events:none/);
