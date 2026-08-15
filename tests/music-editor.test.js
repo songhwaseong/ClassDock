@@ -241,6 +241,34 @@ test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 �
   assert.match(css, /\.music-context-menu button\.music-context-parent::after\{content:"▸"/);
 });
 
+test("도구막대는 접어서 악보만 넓게 볼 수 있고, 우클릭 메뉴·자판으로 다시 편다", () => {
+  // 요소를 지우지 않고 hidden 으로만 감춘다 — 우클릭 메뉴가 읽는 값(속도·음역·구간·음량)이 살아 있어야 한다.
+  assert.match(editorSource, /for \(const row of \[tools, beginnerTools, playBar\]\) row\.hidden = !toolbarVisible;/);
+  // 접어도 상단 바는 남아서 다시 펴는 단추가 늘 보인다(우클릭 메뉴만이 유일한 길이 아니다).
+  assert.match(editorSource, /toolbarToggleBtn, historyWrap, saveBtn\);/);
+  assert.match(editorSource, /label:toolbarVisible \? "편집 도구막대 숨기기 \(H\)" : "편집 도구막대 보이기 \(H\)"/);
+  assert.match(editorSource, /case "h": case "H":\s*\n\s*toggleToolbarVisibility\(\);/);
+  // 배율과 같은 보기 상태라 .msheet·되돌리기가 아니라 화면 환경설정으로 기억한다.
+  assert.match(editorSource, /localStorage\.setItem\(MUSIC_TOOLBAR_KEY, String\(toolbarVisible\)\)/);
+  assert.doesNotMatch(editorSource, /sheet\.toolbarVisible/);
+});
+
+test("⛶ 전체화면에서는 머리말까지 접어 악보만 남기고, 나가면 원래대로 되돌린다", () => {
+  // 창 모드에서는 머리말을 남긴다(다시 펴는 단추가 보여야 한다) — 전체화면일 때만 함께 접는다.
+  assert.match(editorSource, /bar\.hidden = fullscreenNow && !toolbarVisible;/);
+  // 전체화면 판정은 앱의 공용 함수를 쓴다(창 안 폴백 body\.viewer-fullscreen 까지 같은 기준).
+  assert.match(editorSource, /typeof isViewerFullscreen === "function" \? isViewerFullscreen\(\) : false/);
+  assert.match(read("src/js/documents.js"), /function isViewerFullscreen\(\)/);
+  // 폴백 전체화면은 이벤트가 없어 body 클래스 변화도 함께 지켜본다.
+  assert.match(editorSource, /document\.addEventListener\("fullscreenchange", syncFullscreenState\)/);
+  assert.match(editorSource, /attributes:true, attributeFilter:\["class"\]/);
+  assert.match(editorSource, /fullscreenClassWatch\.disconnect\(\)/);
+  // 전체화면이 임시로 접은 것은 저장하지 않고 나갈 때 되돌린다.
+  assert.match(editorSource, /toolbarBeforeFullscreen = toolbarVisible;\s*\n\s*toolbarVisible = false;/);
+  assert.match(editorSource, /toolbarBeforeFullscreen !== null\)\{ toolbarVisible = toolbarBeforeFullscreen;/);
+  assert.match(editorSource, /toolbarBeforeFullscreen = null;\s*\/\/ 직접 고른 값이/);
+});
+
 test("되돌리기는 공용 MNEditHistory 로 하고 악보 JSON 을 스냅샷으로 쓴다", () => {
   assert.match(editorSource, /MNEditHistory\.create\(\{/);
   assert.match(editorSource, /capture:\(\) => musicSerialize\(sheet\)/);
@@ -484,6 +512,8 @@ test("MIDI 건반 입력은 모델의 음이름 표기를 함께 쓴다", () => 
   assert.match(editorSource, /return musicPitchFromMidi\(midi, useFlats\)/);
   assert.doesNotMatch(editorSource, /\[\["C",0\],\["C",1\],\["D",0\]/);
   assert.match(read("src/js/music-model.js"), /function musicPitchFromMidi\(midi, preferFlats\)/);
+  // 도구막대를 접어도 켤 수 있게 우클릭 메뉴(입력 도구)에도 같은 토글을 둔다.
+  assert.match(editorSource, /label:"MIDI 건반으로 입력", active:midiInputEnabled/);
 });
 
 test("저장·편집 중 내용이 자동 복원 사본에도 반영된다", () => {

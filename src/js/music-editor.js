@@ -346,6 +346,10 @@ async function mountMusicEditor(doc){
     "오른손 높은음자리표와 왼손 낮은음자리표를 함께 사용합니다");
   grandStaffBtn.addEventListener("click", () => setGrandStaff(!sheet.grandStaff));
 
+  // 도구막대 접기 단추 — 접으면 이 줄(상단 바)만 남아 다시 펴는 길이 늘 보인다.
+  const toolbarToggleBtn = musicButton("▤ 도구 숨기기", "", "music-btn music-toolbar-toggle");
+  toolbarToggleBtn.addEventListener("click", toggleToolbarVisibility);
+
   const undoBtn = musicButton("↶", "되돌리기 (Ctrl+Z)");
   const redoBtn = musicButton("↷", "다시 실행 (Ctrl+Y)");
   const historyWrap = document.createElement("span");
@@ -359,7 +363,7 @@ async function mountMusicEditor(doc){
   saveBtn.addEventListener("click", () => { saveMusicSheet(doc); });
 
   bar.append(titleInput, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
-    historyWrap, saveBtn);
+    toolbarToggleBtn, historyWrap, saveBtn);
 
   /* ----- 도구상자 ----- */
   const tools = document.createElement("div");
@@ -615,6 +619,71 @@ async function mountMusicEditor(doc){
   imageReferenceInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
   root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, imageReferenceInput);
+
+  /* ----- 도구막대 접기 -----
+     악보만 넓게 보고 싶을 때 편집 도구·쉬운 입력·재생 세 줄을 접는다. 접어도 우클릭 메뉴에
+     같은 기능이 다 있어 편집을 이어 갈 수 있고, 요소를 지우지 않고 hidden 으로만 감추므로
+     메뉴가 읽는 값(속도·음역·구간 등)도 그대로 살아 있다. 배율과 같은 보기 상태라 .msheet
+     에는 저장하지 않고, 모든 악보가 이어 쓰는 화면 환경설정으로 기억한다.
+
+     창 모드에서는 머리말(제목·저장·되돌리기)을 늘 남긴다 — 다시 펴는 단추가 보여야 한다.
+     ⛶ 전체화면에서는 나가는 길이 Esc·⛶ 컨트롤로 따로 있으므로 머리말까지 접어 악보만 남긴다. */
+  const MUSIC_TOOLBAR_KEY = "musicToolbarVisible";
+  let toolbarVisible = true;
+  try { toolbarVisible = localStorage.getItem(MUSIC_TOOLBAR_KEY) !== "false"; } catch(_){}
+  let fullscreenNow = false;
+  let toolbarBeforeFullscreen = null;   // 전체화면이 임시로 접었을 때만 담는다(나가면 되돌린다)
+  function applyToolbarVisible(){
+    bar.hidden = fullscreenNow && !toolbarVisible;
+    for (const row of [tools, beginnerTools, playBar]) row.hidden = !toolbarVisible;
+    toolbarToggleBtn.textContent = toolbarVisible ? "▤ 도구 숨기기" : "▤ 도구 보이기";
+    toolbarToggleBtn.title = toolbarVisible
+      ? "편집·쉬운 입력·재생 줄을 접고 악보를 넓게 봅니다 (H)"
+      : "접어 둔 도구막대를 다시 폅니다 (H)";
+    toolbarToggleBtn.classList.toggle("is-on", !toolbarVisible);
+    toolbarToggleBtn.setAttribute("aria-pressed", toolbarVisible ? "false" : "true");
+  }
+  function setToolbarVisible(visible){
+    toolbarVisible = !!visible;
+    toolbarBeforeFullscreen = null;     // 직접 고른 값이 전체화면의 임시 접기보다 우선한다
+    applyToolbarVisible();
+    try { localStorage.setItem(MUSIC_TOOLBAR_KEY, String(toolbarVisible)); } catch(_){}
+  }
+  function toggleToolbarVisibility(){
+    const next = !toolbarVisible;
+    setToolbarVisible(next);
+    if (typeof toast !== "function") return;
+    if (next) toast("도구막대를 다시 폈어요.", 1300);
+    else toast("도구막대를 접었어요. 악보를 마우스 오른쪽 버튼으로 누르면 같은 기능을 쓸 수 있어요.", 2800);
+  }
+
+  /* ⛶ 문서 영역 전체화면이면 머리말까지 접어 악보만 남기고, 나가면 들어가기 전 상태로 되돌린다.
+     실제 전체화면은 fullscreenchange 로 알 수 있지만 창 안 폴백(body.viewer-fullscreen)은
+     이벤트가 없어 클래스 변화를 함께 지켜본다(documents.js setViewerFullscreenFallback). */
+  function syncFullscreenState(){
+    const on = typeof isViewerFullscreen === "function" ? isViewerFullscreen() : false;
+    if (on === fullscreenNow) return;
+    fullscreenNow = on;
+    const announce = !doc.el.hidden && typeof toast === "function";
+    if (on){
+      toolbarBeforeFullscreen = toolbarVisible;
+      toolbarVisible = false;
+      applyToolbarVisible();
+      if (announce) toast("전체화면 — 악보만 남겼어요. H 를 누르거나 악보를 오른쪽 버튼으로 누르면 도구가 다시 나와요.", 3000);
+      return;
+    }
+    if (toolbarBeforeFullscreen !== null){ toolbarVisible = toolbarBeforeFullscreen; toolbarBeforeFullscreen = null; }
+    applyToolbarVisible();
+  }
+  document.addEventListener("fullscreenchange", syncFullscreenState);
+  const fullscreenClassWatch = typeof MutationObserver === "function" ? new MutationObserver(syncFullscreenState) : null;
+  if (fullscreenClassWatch) fullscreenClassWatch.observe(document.body, { attributes:true, attributeFilter:["class"] });
+  doc.cleanupFns.push(() => {
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    if (fullscreenClassWatch) fullscreenClassWatch.disconnect();
+  });
+  applyToolbarVisible();
+  syncFullscreenState();              // 이미 전체화면인 채로 악보를 열었을 때
 
   /* ----- 도구·상태 표시 ----- */
   function setToolValue(value){
@@ -2024,7 +2093,8 @@ async function mountMusicEditor(doc){
       { separator:true },
       { label:"화음음 추가 모드", active:tool.chord, action:() => setChordEntry(!tool.chord),
         disabled:!selectedNote() || selectedNote().rest },
-      { label:"지우개 모드", active:tool.eraser, action:() => setToolEraser(!tool.eraser) }
+      { label:"지우개 모드", active:tool.eraser, action:() => setToolEraser(!tool.eraser) },
+      { label:"MIDI 건반으로 입력", active:midiInputEnabled, action:() => { toggleMidiInput(); } }
     ];
   }
 
@@ -2139,6 +2209,7 @@ async function mountMusicEditor(doc){
       { separator:true },
       { label:"재생·연습", children:playbackContextItems(targetMeasure) },
       { label:"계이름 표시", active:sheet.showSolfege !== false, action:toggleSolfege },
+      { label:toolbarVisible ? "편집 도구막대 숨기기 (H)" : "편집 도구막대 보이기 (H)", action:toggleToolbarVisibility },
       { label:"보기 배율", children:[
         { label:"확대 (Ctrl++)", action:() => stepScoreZoom(1), disabled:scoreZoom >= MUSIC_ZOOM_MAX - 0.001 },
         { label:"축소 (Ctrl+-)", action:() => stepScoreZoom(-1), disabled:scoreZoom <= MUSIC_ZOOM_MIN + 0.001 },
@@ -2462,6 +2533,8 @@ async function mountMusicEditor(doc){
     switch (event.key){
       case "r": case "R":
         setToolRest(!tool.rest); event.preventDefault(); break;
+      case "h": case "H":
+        toggleToolbarVisibility(); event.preventDefault(); break;
       case ".":
         setToolDots((tool.dots + 1) % (MUSIC_MAX_DOTS + 1)); event.preventDefault(); break;
       case "ArrowUp":
