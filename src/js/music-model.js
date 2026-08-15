@@ -354,6 +354,32 @@ function musicEffectiveMeasureSettings(sheet, measureIndex){
   return settings;
 }
 
+/* 고른 마디만 담은 발췌 악보 — 오선 한 단을 메모로 보냈다가 다시 열 때 쓴다.
+   첫 마디에 걸리는 조표·박자·빠르기는 앞 마디에서 이어받은 값이라 마디만 떼어 오면 사라진다.
+   그래서 그 자리의 실제 설정을 발췌본의 기본값으로 옮겨 적는다(도중에 조가 바뀌는 악보). */
+function musicExcerpt(sheet, indexes, options){
+  const list = (Array.isArray(indexes) ? indexes : []).filter((index) => Number.isInteger(index));
+  if (!list.length) return null;
+  const excerpt = musicParse(musicSerialize(sheet));      // 저장 형식을 거쳐 깊게 복사
+  const measures = list.map((index) => excerpt.measures[index]).filter(Boolean);
+  if (!measures.length) return null;
+  const effective = musicEffectiveMeasureSettings(sheet, list[0]);
+  excerpt.measures = measures;
+  excerpt.time = effective.time;
+  excerpt.key = effective.key;
+  excerpt.tempo = effective.tempo;
+  const head = measures[0];
+  head.lineBreakBefore = false;
+  // 기본값으로 올린 설정이 첫 마디에도 남아 있으면 발췌본에 조표·박자가 두 번 적힌다.
+  delete head.timeChange;
+  delete head.keyChange;
+  delete head.tempoChange;
+  const title = options && options.title;
+  if (title) excerpt.title = String(title).slice(0, 200);
+  excerpt.updatedAt = Date.now();
+  return excerpt;
+}
+
 function musicMeasureCapacity(sheet, measureIndex){
   const measure = sheet && Array.isArray(sheet.measures) ? sheet.measures[measureIndex] : null;
   const pickup = Math.round(Number(measure && measure.pickupTicks) || 0);

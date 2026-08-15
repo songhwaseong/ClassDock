@@ -38,7 +38,66 @@ const MUSIC_TOOL_VALUES = [
   { value:"16th",    label:"16분" }
 ];
 const MUSIC_SOLFEGE_LABELS = { C:"도", D:"레", E:"미", F:"파", G:"솔", A:"라", B:"시" };
+const MUSIC_IMAGE_SCALE = 2;        // 메모 그림은 2배로 구워 확대해도 뭉개지지 않게 한다
+const MUSIC_IMAGE_TOP_PAD = 26;     // 화음기호·빠르기 표시는 오선 위에 붙는다 — 단 위쪽 여유
+// 브라우저마다 캔버스 한 변·전체 픽셀 한계가 다르다. 보수적인 공통 범위 안에서만 굽고,
+// 긴 악보는 2배보다 낮춰 담되 글자를 읽기 어려운 배율까지 억지로 줄이지 않는다.
+const MUSIC_IMAGE_MAX_SIDE = 16384;
+const MUSIC_IMAGE_MAX_PIXELS = 16 * 1024 * 1024;
+const MUSIC_IMAGE_MIN_SCALE = 0.75;
 let _musicScratchCount = 0;
+
+function musicSafeImageScale(width, height){
+  const w = Number(width), h = Number(height);
+  if (!(w > 0) || !(h > 0)) return 0;
+  return Math.min(MUSIC_IMAGE_SCALE, MUSIC_IMAGE_MAX_SIDE / w, MUSIC_IMAGE_MAX_SIDE / h,
+    Math.sqrt(MUSIC_IMAGE_MAX_PIXELS / (w * h)));
+}
+
+/* ===== 악보 그림(메모로 보내기) =====
+   VexFlow 5 는 음표를 Bravura 글꼴의 "글자"로 그리고, 그 글꼴은 new FontFace 로 이 문서에만
+   등록된다. 그래서 SVG 를 떼어내 <img> 로 구우면 그 그림 문서에는 글꼴이 없어 음표가 전부
+   깨진다(인쇄를 새 창이 아니라 같은 문서 안에서 하는 이유와 같다). vendor 원문에서 글꼴
+   데이터를 뽑아 복제 SVG 안에 @font-face 로 심으면 네트워크 없이 그대로 구울 수 있다.
+   MNLazy.source 는 단일 파일(내장 블록)·서버 서빙 두 모드 모두에서 원문을 돌려준다. */
+let musicFontCssTask = null;
+function musicEmbeddedFontCss(){
+  if (musicFontCssTask) return musicFontCssTask;
+  musicFontCssTask = MNLazy.source("vexflow-bravura.min.js").then((text) => {
+    const rules = [];
+    const seen = new Set();
+    // 번들 안의 등록 구문: Font.load("Bravura","data:font/woff2;…base64,…",{…})
+    const pattern = /"(Bravura|Academico)","(data:font\/woff2;[^"]+)"/g;
+    let match;
+    while ((match = pattern.exec(text))){
+      if (seen.has(match[1])) continue;      // 같은 글꼴의 굵기·기울임 변형은 첫 벌만 쓴다
+      seen.add(match[1]);
+      rules.push(`@font-face{font-family:"${match[1]}";src:url("${match[2]}") format("woff2")}`);
+    }
+    return seen.has("Bravura") ? rules.join("\n") : "";
+  }).catch((error) => {
+    console.warn("악보 글꼴을 그림에 심지 못했어요:", error);
+    return "";
+  });
+  return musicFontCssTask;
+}
+
+/* 계이름·가사 같은 덧글자는 styles.css 의 클래스에서 색과 크기를 받는다. SVG 를 문서 밖으로
+   떼어내면 그 규칙이 사라지므로 그림에 필요한 것만 함께 심는다(커서·선택 색은 뺀다). */
+const MUSIC_IMAGE_CSS = [
+  ".music-solfege{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:13px;font-weight:700;fill:#2563eb;stroke:none}",
+  ".music-chord-symbol{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:14px;font-weight:700;font-style:italic;fill:#111;stroke:none}",
+  ".music-notation,.music-measure-setting{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;fill:#111;stroke:none}",
+  ".music-lyric{font-size:13px}.music-dynamic{font-size:15px;font-weight:700}.music-fingering{font-size:12px;font-weight:700}",
+  ".music-articulation{font-size:16px;font-weight:800}.music-pedal{font-size:13px}.music-measure-setting{font-size:11px;font-weight:700}",
+  ".music-slur{fill:none;stroke:#111;stroke-width:1.4;stroke-linecap:round}"
+].join("\n");
+
+function musicRangeLabel(indexes){
+  const first = indexes[0] + 1;
+  const last = indexes[indexes.length - 1] + 1;
+  return first === last ? `${first}마디` : `${first}~${last}마디`;
+}
 
 /* ===== 열기 ===== */
 async function loadMusicSheet(file, opts = {}){
@@ -51,6 +110,8 @@ async function loadMusicSheet(file, opts = {}){
   }
   const doc = makeDoc("music", file.name, opts);
   doc.sheet = sheet;
+  // 메모 이미지 블록에서 되살린 악보 — "메모로"를 누르면 새 블록을 만들지 않고 그 블록을 바꾼다.
+  doc.memoBlockId = String(opts.memoBlockId || "") || null;
   doc.sourceFile = file;
   doc.savedText = musicSerialize(sheet);
   doc.render = async () => {
@@ -78,6 +139,32 @@ function newMusicScratchInFolder(folder){
   return createScratchInFolder(folder, musicScratchFileName,
     (name) => musicSerialize(musicEmpty(name.replace(/\.msheet$/i, ""))),
     "application/json", "새 악보를");
+}
+
+/* 메모 이미지 블록의 "✏️ 악보로" — 그림과 함께 넣어 둔 악보 스냅샷을 새 탭으로 되살린다.
+   options.state       — 메모 블록에 담긴 악보 객체(musicSerialize 형식)
+   options.name        — 탭 이름(메모에 적힌 이름을 되살린다)
+   options.memoBlockId — 돌아갈 메모 블록 id. 고친 뒤 "메모로"를 누르면 그 블록을 제자리에서 바꾼다. */
+async function openMusicSheetFromMemo(options = {}){
+  const blockId = String(options.memoBlockId || "");
+  // 같은 블록을 두 탭으로 열면 둘 다 그 블록을 덮어써 나중 것이 앞의 편집을 지운다.
+  const opened = (typeof docs !== "undefined" ? docs : []).find((item) =>
+    item && item.kind === "music" && blockId && item.memoBlockId === blockId);
+  if (opened){
+    if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+    return opened;
+  }
+  let json;
+  try { json = musicSerialize(musicParse(JSON.stringify(options.state || {}))); }
+  catch(error){
+    console.warn("메모의 악보 스냅샷을 읽지 못했어요:", error);
+    if (typeof toast === "function") toast("메모에 담긴 악보 정보를 읽지 못했어요.", 2800, { type:"error" });
+    return null;
+  }
+  if (typeof handleFiles !== "function") return null;
+  const base = String(options.name || "악보").replace(/\.msheet$/i, "").trim() || "악보";
+  return handleFiles([new File([json], base + ".msheet", { type:"application/json" })],
+    { isScratch:true, memoBlockId:blockId });
 }
 
 /* ===== 저장 ===== */
@@ -147,6 +234,7 @@ async function mountMusicEditor(doc){
   const solfegeEls = new Map();     // 음표 id → 오선 밖 계이름 SVG 글자
   const noteHorizontalLimits = new Map(); // 음표 id → 현재 조판에서 이웃·마디를 넘지 않는 xOffset 범위
   let staveBoxes = [];              // 마디별 조판 좌표 — 오선 클릭을 마디·음높이로 옮길 때 쓴다
+  let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — "이 단을 메모로"가 쓴다
   let selection = null;             // { measure:0부터, staff:"treble"|"bass", voice:1|2, id }
   let activeStaff = "treble";       // 다음 음을 넣을 손/오선
   let activeVoice = 1;              // 같은 오선 안의 독립 성부
@@ -567,6 +655,8 @@ async function mountMusicEditor(doc){
   const midiExportBtn = musicButton("⬇ MIDI", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
   const imageReferenceBtn = musicButton("🖼 악보 이미지 참고", "이미지를 옆에 열어 보며 악보를 옮겨 적습니다");
   const wavBtn = musicButton("⬇ WAV 저장");
+  const memoBtn = musicButton("📋 메모로",
+    "악보를 그림으로 메모창에 보내기 — 메모에서 '✏️ 악보로'를 누르면 다시 편집할 수 있어요 (오선 한 단만 보내려면 그 단에서 오른쪽 버튼)");
   const printBtn = musicButton("🖨 인쇄", "인쇄 대화상자에서 'PDF로 저장'을 고르면 PDF가 됩니다");
   const zoomWrap = document.createElement("span");
   zoomWrap.className = "music-zoom";
@@ -582,7 +672,7 @@ async function mountMusicEditor(doc){
 
   playBar.append(playAllBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
     countInBtn, metronomeBtn, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
-    imageReferenceBtn, wavBtn, printBtn, zoomWrap, status);
+    imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 악보 ----- */
   const scoreHost = document.createElement("div");
@@ -958,6 +1048,7 @@ async function mountMusicEditor(doc){
     solfegeEls.clear();
     noteHorizontalLimits.clear();
     staveBoxes = [];
+    scoreLines = [];
     pitchGuideEl = null;
     scoreHost.replaceChildren();
     if (!VF){
@@ -968,6 +1059,7 @@ async function mountMusicEditor(doc){
       const width = Math.max(MUSIC_SCORE_MIN_WIDTH, Math.floor(scoreHost.clientWidth || MUSIC_SCORE_MIN_WIDTH) - 8);
       // 한 줄에 몇 마디를 놓을지는 화면 폭과 마디마다 든 음표 수로 정한다(music-model.js).
       const layout = musicPackLines(sheet.measures, width - 20);
+      scoreLines = layout.map((line) => line.indexes.slice());
       const lineHeight = sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
       const renderer = new VF.Renderer(scoreHost, VF.Renderer.Backends.SVG);
       const scoreHeight = layout.length * lineHeight + 30;
@@ -1129,7 +1221,7 @@ async function mountMusicEditor(doc){
         for (const entry of [{ staff:"treble", stave:trebleStave }, ...(bassStave ? [{ staff:"bass", stave:bassStave }] : [])]){
           const topY = entry.stave.getYForLine(0);
           const bottomY = entry.stave.getYForLine(4);
-          staveBoxes.push({ index, staff:entry.staff, x, width:staveWidth, topY, bottomY,
+          staveBoxes.push({ index, lineIndex, staff:entry.staff, x, width:staveWidth, topY, bottomY,
             spacing:(bottomY - topY) / 4, hitTop:topY - 28, hitBottom:bottomY + 28 });
           drawStaff(measure, index, lineIndex, entry.stave, entry.staff);
         }
@@ -2141,6 +2233,8 @@ async function mountMusicEditor(doc){
     const targetMeasure = Math.max(0, Math.min(sheet.measures.length - 1,
       Number.isInteger(measureIndex) ? measureIndex : (selection ? selection.measure : sheet.measures.length - 1)));
     const canRemoveStaff = sheet.measures.some((measure, index) => index > 0 && measure && measure.lineBreakBefore);
+    // 누른 마디가 놓인 단 — 조판은 창 폭에 따라 바뀌므로 그때그때 찾는다.
+    const targetLine = scoreLines.findIndex((indexes) => indexes.includes(targetMeasure));
     const items = [];
     if (note){
       items.push(
@@ -2217,6 +2311,9 @@ async function mountMusicEditor(doc){
       ] },
       { label:"저장·내보내기", children:[
         { label:"악보 저장 (Ctrl+S)", action:() => saveMusicSheet(doc) },
+        { label:targetLine >= 0 ? `이 단(${musicRangeLabel(scoreLines[targetLine])})을 메모로` : "이 단을 메모로",
+          action:() => sendScoreToMemo(targetLine), disabled:targetLine < 0 },
+        { label:"악보 전체를 메모로", action:() => sendScoreToMemo(null) },
         { label:"MusicXML 저장", action:exportMusicXml },
         { label:"MIDI 저장", action:exportMusicMidi },
         { label:"악보 이미지 참고…", action:() => imageReferenceInput.click() },
@@ -2846,6 +2943,116 @@ async function mountMusicEditor(doc){
   wavBtn.addEventListener("click", exportMusicWav);
 
   for (const input of [fromInput, toInput]) input.addEventListener("change", clampRange);
+
+  /* ----- 메모로 보내기 -----
+     화면의 SVG 를 복제해 글꼴·색 정의를 심고, 고른 단만 잘라 PNG 로 굽는다.
+     화면 배율과 선택·재생 표시는 보기 상태일 뿐이라 그림에는 남기지 않는다(인쇄와 같은 이유). */
+  async function scoreImageBlob(lineIndex){
+    const svg = scoreHost.querySelector("svg");
+    if (!svg){
+      if (typeof toast === "function") toast("악보가 아직 그려지지 않았어요.", 2400);
+      return null;
+    }
+    const fontCss = await musicEmbeddedFontCss();
+    if (!fontCss){
+      if (typeof toast === "function") toast("악보 글꼴을 찾지 못해 그림을 만들지 못했어요.", 3000, { type:"error" });
+      return null;
+    }
+    const baseWidth = Number(svg.dataset.musicBaseWidth) || 0;
+    const baseHeight = Number(svg.dataset.musicBaseHeight) || 0;
+    const lineHeight = sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
+    let top = 0, height = baseHeight;
+    if (lineIndex != null){
+      top = Math.max(0, 10 + lineIndex * lineHeight - MUSIC_IMAGE_TOP_PAD);
+      height = Math.min(baseHeight - top, lineHeight + MUSIC_IMAGE_TOP_PAD);
+    }
+    if (!(baseWidth > 0) || !(height > 0)) return null;
+    const rasterScale = musicSafeImageScale(baseWidth, height);
+    if (rasterScale < MUSIC_IMAGE_MIN_SCALE){
+      if (typeof toast === "function") toast(
+        "악보가 너무 길어 한 장의 그림으로 만들 수 없어요. 오선에서 오른쪽 버튼을 눌러 단별로 메모에 보내 주세요.",
+        4200, { type:"error" });
+      return null;
+    }
+
+    const copy = svg.cloneNode(true);
+    copy.style.removeProperty("width");
+    copy.style.removeProperty("height");
+    copy.style.removeProperty("max-width");
+    copy.querySelectorAll(".is-selected,.is-playing").forEach((el) => el.classList.remove("is-selected", "is-playing"));
+    const guide = copy.querySelector(".music-pitch-guide");
+    if (guide) guide.remove();
+    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    copy.setAttribute("width", String(baseWidth));
+    copy.setAttribute("height", String(height));
+    copy.setAttribute("viewBox", `0 ${top} ${baseWidth} ${height}`);
+    const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.textContent = fontCss + "\n" + MUSIC_IMAGE_CSS;
+    copy.insertBefore(style, copy.firstChild);
+
+    const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)],
+      { type:"image/svg+xml;charset=utf-8" }));
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.floor(baseWidth * rasterScale));
+      canvas.height = Math.max(1, Math.floor(height * rasterScale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx){
+        if (typeof toast === "function") toast("악보 그림을 만들 수 없는 환경이에요.", 3000, { type:"error" });
+        return null;
+      }
+      // 악보는 늘 흰 종이 위에 둔다 — 메모가 어두운 주제여도 검은 잉크가 보이게.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob && typeof toast === "function"){
+        toast("악보 그림을 만들지 못했어요. 긴 악보라면 단별로 보내 주세요.", 3600, { type:"error" });
+      }
+      return blob;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  /* lineIndex 가 null 이면 악보 전체. 그림(PNG)과 편집용 악보 스냅샷을 함께 넘겨,
+     메모 블록의 "✏️ 악보로"로 다시 편집할 수 있게 한다. */
+  async function sendScoreToMemo(lineIndex){
+    if (typeof window.addMusicToScratchpad !== "function"){
+      if (typeof toast === "function") toast("메모창을 열 수 없어요.", 2200, { type:"error" });
+      return;
+    }
+    const indexes = (lineIndex != null && scoreLines[lineIndex]) ? scoreLines[lineIndex] : null;
+    const excerpt = indexes
+      ? musicExcerpt(sheet, indexes, { title:(sheet.title || "악보") + " — " + musicRangeLabel(indexes) })
+      : sheet;
+    if (!excerpt){
+      if (typeof toast === "function") toast("보낼 악보를 찾지 못했어요.", 2400, { type:"error" });
+      return;
+    }
+    // 이 탭이 담고 있는 내용을 통째로 보낼 때만 원래 메모 블록을 바꾼다. 여러 단 중 한 단만
+    // 보내면서 블록을 갈아치우면 나머지 단이 메모에서 사라져 버린다.
+    const coversAll = !indexes || indexes.length === sheet.measures.length;
+    const base = String(doc.name || sheet.title || "악보").replace(/\.msheet$/i, "");
+    const label = base + (indexes ? " — " + musicRangeLabel(indexes) : "");
+    try {
+      const blob = await scoreImageBlob(indexes ? lineIndex : null);
+      if (!blob) return;
+      const result = await window.addMusicToScratchpad(blob, JSON.parse(musicSerialize(excerpt)), {
+        name:label + ".png",
+        boardName:label,
+        blockId:coversAll ? doc.memoBlockId : null
+      });
+      if (result && result.blockId && coversAll) doc.memoBlockId = result.blockId;
+    } catch(error){
+      console.error(error);
+      if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2400, { type:"error" });
+    }
+  }
+  memoBtn.addEventListener("click", () => sendScoreToMemo(null));
 
   /* ----- 인쇄 -----
      VexFlow 5 는 음표를 Bravura 글꼴의 글자로 그린다. 그래서 새 창·iframe 으로 SVG 만 옮기면

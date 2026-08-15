@@ -181,8 +181,10 @@ function scratchpadNormalizeBlock(raw){
       mime:String(raw.mime || "image/png").slice(0, 100),
       size:Math.max(0, Number(raw.size) || 0),
       locked:raw.locked === true,
-      // 화이트보드에서 온 그림이면 편집용 벡터 스냅샷 에셋을 함께 가리킨다(없으면 빈 문자열).
+      // 화이트보드·악보에서 온 그림이면 편집용 스냅샷 에셋을 함께 가리킨다(없으면 빈 문자열).
       boardAssetId:String(raw.boardAssetId || "").trim(),
+      // 그 스냅샷을 어느 편집기로 되열지. 화이트보드만 있던 시절의 블록에는 없으므로 보드가 기본이다.
+      boardKind:raw.boardKind === "music" ? "music" : "board",
       boardName:String(raw.boardName || "").slice(0, 180)
     };
   }
@@ -725,10 +727,13 @@ function wireScratchpad(){
     }
     return null;
   };
-  /* 화이트보드에서 온 그림: 보이는 PNG(에셋) + 편집용 벡터 스냅샷(JSON 에셋)을 한 블록에 묶는다.
-     options.blockId 가 살아 있으면 그 블록을 제자리에서 바꿔(왕복 편집), 없으면 새 블록으로 넣는다. */
+  /* 화이트보드·악보에서 온 그림: 보이는 PNG(에셋) + 편집용 스냅샷(JSON 에셋)을 한 블록에 묶는다.
+     options.kind    — "board"(화이트보드, 기본) 또는 "music"(악보). 되열 편집기를 가른다.
+     options.blockId — 살아 있으면 그 블록을 제자리에서 바꿔(왕복 편집), 없으면 새 블록으로 넣는다. */
   const addBoardBlock = async (pngBlob, boardData, options={}) => {
-    if (!pngBlob || !pngBlob.size){ showStatus("화이트보드 그림을 받지 못했습니다.", false); return null; }
+    const kind = options.kind === "music" ? "music" : "board";
+    const kindLabel = kind === "music" ? "악보" : "화이트보드";
+    if (!pngBlob || !pngBlob.size){ showStatus(kindLabel + " 그림을 받지 못했습니다.", false); return null; }
     if (pngBlob.size > SCRATCHPAD_MAX_IMAGE_BYTES){ showStatus("이미지 한 장은 25MB까지 넣을 수 있습니다.", false); return null; }
     let boardBlob = null;
     try { boardBlob = new Blob([JSON.stringify(boardData || {})], { type:"application/json" }); }
@@ -761,11 +766,11 @@ function wireScratchpad(){
       console.error(error);
       if (wrotePng) try { await deleteScratchpadAsset(assetId); } catch(cleanupError){ console.warn("scratchpad board png rollback failed:", cleanupError); }
       if (wroteBoard) try { await deleteScratchpadAsset(boardAssetId); } catch(cleanupError){ console.warn("scratchpad board snapshot rollback failed:", cleanupError); }
-      showStatus("화이트보드를 메모에 저장하지 못했습니다.", false);
+      showStatus(kindLabel + "를 메모에 저장하지 못했습니다.", false);
       return null;
     }
-    const name = String(options.name || "화이트보드.png").slice(0, 180);
-    const boardName = String(options.boardName || "화이트보드").slice(0, 180);
+    const name = String(options.name || (kindLabel + ".png")).slice(0, 180);
+    const boardName = String(options.boardName || kindLabel).slice(0, 180);
     const previousActiveBlockId = activeBlockId;
     let note, block;
     let previousBlock = null, insertIndex = -1;
@@ -774,7 +779,7 @@ function wireScratchpad(){
       block = found.block;
       previousBlock = { ...block };
       Object.assign(block, {
-        assetId, boardAssetId, boardName, name,
+        assetId, boardAssetId, boardKind:kind, boardName, name,
         mime:String(pngBlob.type || "image/png"),
         size:pngBlob.size
       });
@@ -792,6 +797,7 @@ function wireScratchpad(){
         size:pngBlob.size,
         locked:false,
         boardAssetId,
+        boardKind:kind,
         boardName
       };
       insertIndex = insertionIndex(note);
@@ -819,7 +825,7 @@ function wireScratchpad(){
       await removeAssetIfUnused(previousBlock.boardAssetId);
     }
     if (options.open !== false) setOpen(true, false);
-    showStatus(found ? "화이트보드를 메모에서 바꿨습니다." : "화이트보드를 메모에 넣었습니다.");
+    showStatus(kindLabel + (found ? "를 메모에서 바꿨습니다." : "를 메모에 넣었습니다."));
     return { blockId:block.id, replaced:!!found };
   };
   const removeBlock = async block => {
@@ -1289,21 +1295,32 @@ function wireScratchpad(){
       setOpen(false);                                       // 메모를 닫아 새 편집 탭이 보이게
       if (typeof toast === "function") toast("메모 이미지를 편집 탭으로 열었어요. 편집 후 '📷 메모로'로 다시 넣을 수 있어요.", 2800);
     }, "scratchpad-reuse");
-    // 화이트보드에서 온 그림만: 벡터 스냅샷을 되살려 새 화이트보드 탭으로 연다(왕복 편집).
-    const boardBtn = block.boardAssetId ? makeButton("✏️ 화이트보드로", "화이트보드로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다", async () => {
-      if (typeof newWhiteboard !== "function"){ showStatus("화이트보드를 열 수 없습니다.", false); return; }
+    // 화이트보드·악보에서 온 그림만: 편집용 스냅샷을 되살려 새 탭으로 연다(왕복 편집).
+    const sourceKind = block.boardKind === "music" ? "music" : "board";
+    const sourceLabel = sourceKind === "music" ? "악보" : "화이트보드";
+    const boardBtn = block.boardAssetId ? makeButton("✏️ " + sourceLabel + "로", sourceLabel + "로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다", async () => {
+      const canOpen = sourceKind === "music"
+        ? typeof openMusicSheetFromMemo === "function"
+        : typeof newWhiteboard === "function";
+      if (!canOpen){ showStatus(sourceLabel + "를 열 수 없습니다.", false); return; }
       let state = null;
       try {
         const blob = await readScratchpadAsset(block.boardAssetId);
         if (blob) state = JSON.parse(await blob.text());
-      } catch(error){ console.warn("scratchpad board read failed:", error); }
+      } catch(error){ console.warn("scratchpad snapshot read failed:", error); }
       if (!state){
-        showStatus("이 그림의 화이트보드 정보가 저장소에서 사라졌어요 — 다시 편집할 수 없습니다.", false);
+        showStatus("이 그림의 " + sourceLabel + " 정보가 저장소에서 사라졌어요 — 다시 편집할 수 없습니다.", false);
         return;
       }
-      newWhiteboard({ state, name:block.boardName || "화이트보드", memoBlockId:block.id });
-      setOpen(false);                                     // 메모를 닫아 새 화이트보드 탭이 보이게
-      if (typeof toast === "function") toast("화이트보드로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.", 3200);
+      const openOptions = { state, name:block.boardName || sourceLabel, memoBlockId:block.id };
+      const openedDoc = sourceKind === "music"
+        ? await openMusicSheetFromMemo(openOptions)
+        : newWhiteboard(openOptions);
+      // 손상된 악보 스냅샷처럼 편집 탭을 만들지 못한 경우에는 openMusicSheetFromMemo가
+      // 이미 구체적인 오류를 알린다. 메모를 닫거나 성공 안내로 그 오류를 덮지 않는다.
+      if (!openedDoc) return;
+      setOpen(false);                                     // 메모를 닫아 새 탭이 보이게
+      if (typeof toast === "function") toast(sourceLabel + "로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.", 3200);
     }, "scratchpad-reuse") : null;
     const imageMemoBtn = makeButton("🖼️ 이미지 메모로", "이 이미지를 이미지 메모로 보내기 (EXE는 저장 폴더의 이미지메모 폴더에 자동 저장)", async () => {
       const blob = await blockBlob(); if (!blob) return;
@@ -2095,6 +2112,11 @@ function wireScratchpad(){
   window.addBoardToScratchpad = async (pngBlob, boardData, options={}) => {
     setOpen(true, false);
     return addBoardBlock(pngBlob, boardData, options);
+  };
+  // 악보 → 메모(오선 한 단 또는 전체 그림 + 편집용 악보 스냅샷). 되열 때는 "✏️ 악보로".
+  window.addMusicToScratchpad = async (pngBlob, sheetData, options={}) => {
+    setOpen(true, false);
+    return addBoardBlock(pngBlob, sheetData, { ...options, kind:"music" });
   };
   // 전체 백업 버튼은 0.35초 자동저장 대기 중인 마지막 입력까지 즉시 확정한다.
   window.flushScratchpadBackup = () => persist(false);
