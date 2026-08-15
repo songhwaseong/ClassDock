@@ -662,6 +662,151 @@ function structuredEditDiagnostic(ext, prof, text){
   return null;
 }
 
+/* ===== 줄 정리 메뉴 =====
+   정렬·빈 줄 삭제·번호 매기기처럼 "줄 묶음을 통째로 다시 쓰는" 도구 모음. 도구막대에 열한 개를 늘어놓으면
+   저장·보기로 같은 핵심 버튼이 묻히므로 한 버튼 아래로 접는다. 대상 범위는 transformEditorLines 가 정한 규칙
+   그대로 — 고른 줄이 있으면 그 범위만, 없으면 파일 전체. */
+const LINE_TIDY_ITEMS = [
+  { action:"sort-asc", label:"가나다순 정렬", done:"가나다순으로 정렬했어요.",
+    title:"고른 줄을 가나다·알파벳순으로 정렬" },
+  { action:"sort-desc", label:"역순 정렬", done:"역순으로 정렬했어요.",
+    title:"가나다·알파벳 반대 순서로 정렬" },
+  { action:"sort-numeric", label:"숫자순 정렬", done:"숫자순으로 정렬했어요.",
+    title:"줄에 처음 나오는 숫자를 기준으로 정렬 (숫자가 없는 줄은 뒤로 밀어요)" },
+  { action:"reverse", label:"줄 순서 뒤집기", done:"줄 순서를 뒤집었어요.",
+    title:"맨 위와 맨 아래를 통째로 뒤집기" },
+  { action:"shuffle", label:"무작위 섞기", done:"줄 순서를 섞었어요.",
+    title:"줄 순서를 무작위로 — 이름 뽑기·문제 순서 섞기에" },
+  { separator:true },
+  { action:"dedupe-lines", label:"중복 줄 삭제", done:"중복 줄을 지웠어요.",
+    title:"똑같은 줄은 맨 처음 하나만 남기기 (공백·대소문자까지 같아야 같은 줄)" },
+  { action:"remove-blank", label:"빈 줄 삭제", done:"빈 줄을 지웠어요.",
+    title:"아무것도 없거나 공백뿐인 줄을 모두 지우기" },
+  { action:"trim-trailing", label:"줄 끝 공백 지우기", done:"줄 끝 공백을 지웠어요.",
+    title:"줄 끝에 남은 눈에 안 보이는 공백·탭 없애기" },
+  { separator:true },
+  { action:"number-lines", label:"줄 번호 매기기", done:"줄 번호를 매겼어요.",
+    title:"각 줄 앞에 1. 2. 3. … 붙이기 (자릿수를 맞춰 오른쪽 정렬)" },
+  { action:"tabs-to-spaces", label:"탭 → 공백", done:"탭을 공백으로 바꿨어요.",
+    title:"탭을 4칸 정지점에 맞춘 공백으로 바꾸기" },
+  { action:"spaces-to-tabs", label:"공백 → 탭", done:"들여쓰기를 탭으로 바꿨어요.",
+    title:"줄 앞 들여쓰기 4칸을 탭 하나로 (글 중간 공백은 그대로)" }
+];
+
+function buildLineTidyMenu(getEditor){
+  const menu = document.createElement("details"); menu.className = "text-tidy-menu";
+  const summary = document.createElement("summary"); summary.className = "text-edit-btn";
+  summary.textContent = "줄 정리";
+  summary.title = "정렬·중복 삭제·번호 매기기 — 고른 줄이 있으면 그 부분만, 없으면 파일 전체에 적용해요";
+  const pop = document.createElement("div"); pop.className = "text-tidy-pop"; pop.setAttribute("role", "menu");
+  const note = document.createElement("p"); note.className = "text-tidy-note";
+  note.textContent = "고른 줄이 있으면 그 부분만, 없으면 파일 전체";
+  pop.appendChild(note);
+  for (const item of LINE_TIDY_ITEMS){
+    if (item.separator){
+      const sep = document.createElement("div"); sep.className = "text-tidy-sep"; sep.setAttribute("role", "separator");
+      pop.appendChild(sep); continue;
+    }
+    const btn = document.createElement("button"); btn.type = "button"; btn.setAttribute("role", "menuitem");
+    btn.textContent = item.label; btn.title = item.title;
+    btn.addEventListener("click", () => {
+      menu.open = false;
+      const editor = getEditor();
+      if (!editor || typeof editor.applyLineTidy !== "function") return;
+      const result = editor.applyLineTidy(item.action);
+      if (!result){ toast("따라치기 중에는 줄 정리를 쓸 수 없어요.", 2200); return; }
+      if (!result.changed){ toast("바뀐 줄이 없어요.", 1600); }
+      // 줄이 사라지는 도구는 몇 줄이 줄었는지가 실제로 궁금한 정보다.
+      else toast(item.done + (result.lineDelta > 0 ? " (" + result.lineDelta + "줄 줄었어요)" : ""), 1900);
+      if (editor.ta) editor.ta.focus();
+    });
+    pop.appendChild(btn);
+  }
+  menu.append(summary, pop);
+  // 바깥 클릭·Esc 로 닫기. 메뉴가 화면에서 사라지면(모드 전환으로 host 가 비워짐) 리스너도 함께 뗀다.
+  const onOutside = (e) => {
+    if (!menu.isConnected){ document.removeEventListener("pointerdown", onOutside, true); document.removeEventListener("keydown", onKey, true); return; }
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  };
+  const onKey = (e) => {
+    if (!menu.isConnected){ document.removeEventListener("pointerdown", onOutside, true); document.removeEventListener("keydown", onKey, true); return; }
+    if (e.key === "Escape" && menu.open){ menu.open = false; summary.focus(); }
+  };
+  document.addEventListener("pointerdown", onOutside, true);
+  document.addEventListener("keydown", onKey, true);
+  return menu;
+}
+
+/* ===== 문서 정보(줄·낱말·글자 수와 커서 자리) =====
+   글쓰기 과제 분량을 확인하려고 다른 도구로 옮겨 붙이지 않게 한다. 큰 파일에서도 타이핑이 밀리지 않도록
+   한 번의 순회로 네 값을 함께 세고(문자열을 새로 만들지 않는다), 입력이 멎은 뒤에만 다시 센다. */
+function countTextStats(s){
+  let lines = 1, nonSpace = 0, words = 0, inWord = false;
+  for (let i = 0; i < s.length; i++){
+    const c = s.charCodeAt(i);
+    if (c === 10) lines++;
+    const space = c === 32 || c === 9 || c === 10 || c === 13 || c === 11 || c === 12;
+    if (space) inWord = false;
+    else { nonSpace++; if (!inWord){ inWord = true; words++; } }
+  }
+  return { lines, chars:s.length, nonSpace, words };
+}
+
+function attachTextStats(editor, bar, before){
+  const ta = editor && editor.ta;
+  if (!ta) return null;
+  const el = document.createElement("span"); el.className = "text-edit-stats";
+  const n = (v) => v.toLocaleString();
+  let timer = 0;
+  const render = () => {
+    timer = 0;
+    const value = ta.value;
+    const start = Math.min(ta.selectionStart, ta.selectionEnd), end = Math.max(ta.selectionStart, ta.selectionEnd);
+    const selected = end > start;
+    const stats = countTextStats(selected ? value.slice(start, end) : value);
+    // 커서 자리는 늘 문서 기준 — 선택 중이면 방금 움직인 쪽 끝을 가리킨다.
+    const caret = ta.selectionDirection === "backward" ? start : end;
+    let line = 1, lineStart = 0;
+    for (let i = 0; i < caret; i++) if (value.charCodeAt(i) === 10){ line++; lineStart = i + 1; }
+    const column = caret - lineStart + 1;
+    el.textContent = (selected ? "선택 " : "")
+      + n(stats.lines) + "줄 · " + n(stats.words) + "낱말 · " + n(stats.chars) + "자"
+      + "   " + line + ":" + column;
+    el.title = "공백 뺀 글자 " + n(stats.nonSpace) + "자"
+      + (selected ? " (고른 부분 기준)" : "")
+      + " · 커서는 " + n(line) + "번째 줄 " + n(column) + "칸";
+  };
+  const schedule = () => { if (!timer) timer = setTimeout(render, 200); };
+  // selectionchange 는 document 에만 오므로 쓰지 않는다 — 편집기를 닫아도 남아 새는 리스너가 되기 때문.
+  // 커서가 움직이는 경로(타이핑·키 이동·클릭·드래그 끝)를 textarea 위에서 직접 받으면 요소와 함께 사라진다.
+  for (const type of ["input", "keyup", "mouseup", "focus", "select"]) ta.addEventListener(type, schedule);
+  render();
+  bar.insertBefore(el, before || null);
+  return el;
+}
+
+// 줄바꿈(자동 개행) 보기 — 편집·읽기 화면이 같은 설정을 쓴다.
+let _textWrapOn = (() => { try { return localStorage.getItem("mn.textWrap") === "1"; } catch(_){ return false; } })();
+function textWrapEnabled(){ return _textWrapOn; }
+function setTextWrapEnabled(on){
+  _textWrapOn = !!on;
+  try { localStorage.setItem("mn.textWrap", _textWrapOn ? "1" : "0"); } catch(_){}
+}
+function buildWrapButton(onToggle){
+  const btn = document.createElement("button"); btn.type = "button"; btn.className = "text-edit-btn";
+  const sync = () => {
+    const on = textWrapEnabled();
+    btn.textContent = on ? "줄바꿈 끔" : "줄바꿈";
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on
+      ? "긴 줄을 화면 폭에서 끊어 보는 중 — 끄면 원래대로 가로로 이어져요"
+      : "긴 줄을 화면 폭에 맞춰 접어 보기 (가로 스크롤 없이 읽기 · 편집 중에는 구문 강조와 줄번호가 잠시 꺼져요)";
+  };
+  btn.addEventListener("click", () => { setTextWrapEnabled(!textWrapEnabled()); sync(); onToggle(textWrapEnabled()); });
+  sync();
+  return btn;
+}
+
 async function renderCode(file, host, ext, profile, runCtx){
   const sourceBytes = new Uint8Array(await file.arrayBuffer());
   const rawText = smartDecodeText(sourceBytes);
@@ -858,6 +1003,8 @@ async function renderCode(file, host, ext, profile, runCtx){
           });
           bar.appendChild(convertBtn);
         }
+        // 읽기 화면에서도 같은 줄바꿈 설정을 쓴다 — 긴 줄을 읽으려고 편집을 켤 필요가 없게. 트리 보기엔 줄 개념이 없어 뺀다.
+        if (!treeMode) bar.appendChild(buildWrapButton(() => showView()));
         if (canEdit){
           const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
           editBtn.title = "이 파일을 편집하고 저장 — 본문을 더블클릭하거나 클릭 후 바로 입력해도 켜져요";
@@ -890,7 +1037,8 @@ async function renderCode(file, host, ext, profile, runCtx){
         while (lo < hi){ const mid = (lo + hi + 1) >> 1; if (lineOffsets[mid] <= offset) lo = mid; else hi = mid - 1; }
         return lo + 1;
       };
-      const longLine = /[^\n]{2000}/.test(viewText);            // 초장문 단일 라인 → 줄바꿈으로 가로 레이아웃 폭발 회피
+      // 초장문 단일 라인은 가로 레이아웃이 폭발하므로 설정과 무관하게 늘 접는다. 그 밖에는 사용자가 고른 대로.
+      const longLine = /[^\n]{2000}/.test(viewText) || textWrapEnabled();
       const big = definitionSource || heavy || lineN > 6000;   // 외부 정의/다줄 파일은 청크 가상 렌더(보이는 부분만 레이아웃)
       const LINE_H = 19;                                       // 가상 스크롤 높이 추정용 대략 줄높이
       const wrap = document.createElement("div");
@@ -1350,17 +1498,15 @@ async function renderCode(file, host, ext, profile, runCtx){
       const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "run-revert"; viewBtn.textContent = "보기로"; viewBtn.disabled = false;
       const fontDown = document.createElement("button"); fontDown.type = "button"; fontDown.className = "run-font"; fontDown.textContent = "A−"; fontDown.title = "글자 작게 (Ctrl+−)";
       const fontUp = document.createElement("button"); fontUp.type = "button"; fontUp.className = "run-font"; fontUp.textContent = "A+"; fontUp.title = "글자 크게 (Ctrl++)";
-      const dedupeBtn = document.createElement("button"); dedupeBtn.type = "button"; dedupeBtn.className = "text-edit-btn";
-      dedupeBtn.textContent = "중복 줄 삭제"; dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
-      dedupeBtn.addEventListener("click", () => {
-        const removed = editor.dedupeSelectedLines ? editor.dedupeSelectedLines() : 0;
-        toast(removed ? (removed + "개의 중복 줄을 삭제했어요.") : "선택한 줄에 중복이 없어요.", 1800);
-        editor.ta.focus();
-      });
+      const tidyMenu = buildLineTidyMenu(() => editor);
+      // 줄바꿈은 편집·읽기 화면이 같은 설정을 쓴다 — 편집기에 바로 걸고, 보기로 돌아가도 그대로 이어진다.
+      const wrapBtn = buildWrapButton((on) => { if (editor.setWrap) editor.setWrap(on); editor.ta.focus(); });
+      if (editor.setWrap) editor.setWrap(textWrapEnabled());
       fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
       const status = document.createElement("span"); status.className = "run-status";
       const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
-      bar.append(saveBtn, viewBtn, dedupeBtn, fontDown, fontUp, status, diag);
+      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status, diag);
+      attachTextStats(editor, bar, diag);      // 상태 문구 다음, 구조 진단 배지 앞
       attachSpellcheck(editor, bar, saveName);
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
       if (lightEdit){

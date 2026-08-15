@@ -1422,3 +1422,56 @@ test("dedupe removes only duplicate selected lines and keeps their first order",
     value: "a\nb", selectionStart: 0, selectionEnd: 1
   });
 });
+
+test("줄 정리는 고른 줄만, 선택이 없으면 문서 전체를 대상으로 삼는다", () => {
+  // 선택(2~3번째 줄)만 정렬하고 바깥 줄은 그대로 둔다. 결과 선택은 바뀐 범위 전체.
+  assert.deepEqual(transformEditorLines("머리\n나\n가\n꼬리", 3, 6, "sort-asc"), {
+    value: "머리\n가\n나\n꼬리", selectionStart: 3, selectionEnd: 6
+  });
+  // 커서만 있으면(선택 없음) 파일 전체가 대상
+  assert.deepEqual(transformEditorLines("다\n가\n나", 0, 0, "sort-asc"), {
+    value: "가\n나\n다", selectionStart: 0, selectionEnd: 5
+  });
+  assert.equal(transformEditorLines("다\n가\n나", 0, 0, "sort-desc").value, "다\n나\n가");
+  // 이미 정렬돼 있으면 원래 선택을 그대로 돌려준다(편집기가 no-op 으로 판단해 되돌리기 기록을 남기지 않는다)
+  assert.deepEqual(transformEditorLines("가\n나", 1, 1, "sort-asc"), {
+    value: "가\n나", selectionStart: 1, selectionEnd: 1
+  });
+});
+
+test("숫자순 정렬은 줄 앞 숫자를 기준으로 하고 숫자 없는 줄은 뒤로 민다", () => {
+  assert.equal(transformEditorLines("10등\n2등\n등수없음\n1등", 0, 0, "sort-numeric").value,
+    "1등\n2등\n10등\n등수없음");
+  // 음수·소수도 값으로 비교한다(문자열 정렬이면 -3 이 1.5 뒤로 갔을 것)
+  assert.equal(transformEditorLines("1.5\n-3\n0.5", 0, 0, "sort-numeric").value, "-3\n0.5\n1.5");
+});
+
+test("줄 순서 뒤집기·중복·빈 줄·줄 끝 공백 정리", () => {
+  assert.equal(transformEditorLines("a\nb\nc", 0, 0, "reverse").value, "c\nb\na");
+  assert.equal(transformEditorLines("a\nb\na\nb", 0, 0, "dedupe-lines").value, "a\nb");
+  assert.equal(transformEditorLines("a\n\n \nb", 0, 0, "remove-blank").value, "a\nb");
+  assert.equal(transformEditorLines("a  \nb\t\nc", 0, 0, "trim-trailing").value, "a\nb\nc");
+  // 모두 지워지는 경우에도 빈 줄 하나는 남겨 문서가 사라지지 않게 한다
+  assert.equal(transformEditorLines("\n \n\t", 0, 0, "remove-blank").value, "");
+});
+
+test("줄 번호는 자릿수를 맞춰 오른쪽으로 정렬한다", () => {
+  const rows = Array.from({ length: 10 }, (_, i) => "이름" + (i + 1)).join("\n");
+  const numbered = transformEditorLines(rows, 0, 0, "number-lines").value.split("\n");
+  assert.equal(numbered[0], " 1. 이름1");
+  assert.equal(numbered[9], "10. 이름10");
+});
+
+test("탭↔공백 변환은 탭 정지점(4칸)을 지키고 공백→탭은 줄 앞만 바꾼다", () => {
+  // 탭은 다음 4칸 정지점까지 — "ab" 뒤의 탭은 2칸, 줄 앞 탭은 4칸
+  assert.equal(transformEditorLines("ab\tc\n\tx", 0, 0, "tabs-to-spaces").value, "ab  c\n    x");
+  assert.equal(transformEditorLines("        a\n     b", 0, 0, "spaces-to-tabs").value, "\t\ta\n\t b");
+  // 글 중간의 공백은 건드리지 않는다(문자열·본문이 망가지지 않게)
+  assert.equal(transformEditorLines("    x    y", 0, 0, "spaces-to-tabs").value, "\tx    y");
+});
+
+test("무작위 섞기는 줄을 잃거나 만들지 않는다", () => {
+  const source = Array.from({ length: 40 }, (_, i) => "줄" + i).join("\n");
+  const shuffled = transformEditorLines(source, 0, 0, "shuffle").value;
+  assert.deepEqual(shuffled.split("\n").slice().sort(), source.split("\n").slice().sort());
+});

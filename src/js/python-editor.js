@@ -426,6 +426,22 @@ function mountGotoLineBar(config){
   };
 }
 
+/* ===== 줄바꿈(자동 개행) 보기 =====
+   편집기는 평소 wrap=off — 강조 pre·줄번호·찾기 상자·들여쓰기 안내가 모두 "몇 번째 줄 × 줄높이"로 자리를
+   잡기 때문이다. 줄이 접히면 그 산술이 전부 어긋난다. 그래서 줄바꿈을 켤 때는 겹쳐 그리던 층을 CSS 로
+   싹 내리고(is-wrapped) textarea 글자를 직접 보여 준다 — 가벼운 편집기가 평소 쓰는 방식 그대로다.
+   구문 강조와 줄번호를 잠시 포기하는 대신, 긴 줄을 가로 스크롤 없이 읽는 게 목적인 산문(.txt·.md)에서
+   제값을 한다. 코드에서는 켜지 않으면 그만이라 기존 동작에는 손대지 않는다. */
+function setEditorWrap(host, ta, on){
+  const wrapped = !!on;
+  host.classList.toggle("is-wrapped", wrapped);
+  // 캐럿을 잃지 않게 자리만 기억했다 되돌린다 — wrap 속성이 바뀌면 브라우저가 스크롤을 처음으로 되감는다.
+  const caret = ta.selectionStart, caretEnd = ta.selectionEnd, dir = ta.selectionDirection;
+  ta.wrap = wrapped ? "soft" : "off";
+  try { ta.setSelectionRange(caret, caretEnd, dir); } catch(_){}
+  return wrapped;
+}
+
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
   if (prof === "python") host.classList.add("code-color-target");
@@ -2742,6 +2758,16 @@ function buildCodeEditor(text, prof, options={}){
     applyLineAction("dedupe");
     return Math.max(0, before.split("\n").length - ta.value.split("\n").length);
   };
+  /* 줄 정리(정렬·빈 줄 삭제·번호 매기기 …) — 되돌리기는 applyLineAction 이 앞뒤로 commitNow 를 부르므로
+     아무리 많은 줄이 바뀌어도 Ctrl+Z 한 번에 통째로 돌아간다. 따라치기 중에는 막는다: 교본 위에 그대로
+     치는 중이라 내가 치지 않은 변화가 끼어들면 채점 위치(practice.pos)가 어긋난다. */
+  const applyLineTidy = (action) => {
+    if (practice.active) return null;
+    const before = ta.value;
+    applyLineAction(action);
+    if (ta.value === before) return { changed:false, lineDelta:0 };
+    return { changed:true, lineDelta: before.split("\n").length - ta.value.split("\n").length };
+  };
   const detachTextContextMenu = attachTextCaseContextMenu(ta, {
     replaceSelection: (replacement, selection) => {
       const start = Math.max(0, Math.min(selection.start, ta.value.length));
@@ -2922,11 +2948,13 @@ function buildCodeEditor(text, prof, options={}){
     setValue: (v) => { stopPractice("cancel"); exitCol(); ta.value = v; emitInput(); },
     getCursorLine: () => lineNumberAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
     openContextMenu: (event) => detachTextContextMenu.open(event),
+    // 줄바꿈을 켜면 겹쳐 그리던 층(강조·열 편집·찾기 상자)이 CSS 로 내려가므로, 열 편집 중이면 먼저 빠져나온다.
+    setWrap: (on) => { if (on) exitCol(); return setEditorWrap(host, ta, on); },
     focusLine,
     setPinProvider: (fn) => { pinProvider = fn; buildPinMarks(); },         // 코드→PDF 역방향 핀 공급자 등록 후 즉시 그림
     refreshPins: buildPinMarks,
     formatDocument: formatDocumentNow,
-    dedupeSelectedLines,
+    dedupeSelectedLines, applyLineTidy,
     canFormat: () => !plainMode && prof === "python",
     startPractice, stopPractice, isPracticeActive: () => practice.active,
     destroy: () => {
@@ -3139,15 +3167,29 @@ function buildLightTextEditor(text, options={}){
     findInput.focus(); findInput.select();
   };
 
-  const dedupeSelectedLines = () => {
+  /* 가벼운 편집기에는 자체 되돌리기 이력이 없어 브라우저 기본 undo 에 기댄다. ta.value 에 직접 대입하면
+     그 이력이 통째로 지워지므로(정렬을 잘못 눌러도 Ctrl+Z 가 먹지 않는다) 문서 전체를 setRangeText 로
+     한 번에 갈아 끼운다 — 한 단계로 묶이면서 되돌리기가 남는다. */
+  const applyLineAction = (action) => {
     const before = ta.value;
-    const next = transformEditorLines(before, ta.selectionStart, ta.selectionEnd, "dedupe");
-    if (next.value === before) return 0;
-    ta.value = next.value;
+    const next = transformEditorLines(before, ta.selectionStart, ta.selectionEnd, action);
+    if (next.value === before) return false;
+    ta.focus({ preventScroll:true });
+    ta.setRangeText(next.value, 0, before.length, "end");
     ta.setSelectionRange(next.selectionStart, next.selectionEnd);
     ta.dispatchEvent(new Event("input", { bubbles: true }));
     syncScroll();
-    return Math.max(0, before.split("\n").length - next.value.split("\n").length);
+    return true;
+  };
+  const dedupeSelectedLines = () => {
+    const before = ta.value;
+    if (!applyLineAction("dedupe")) return 0;
+    return Math.max(0, before.split("\n").length - ta.value.split("\n").length);
+  };
+  const applyLineTidy = (action) => {
+    const before = ta.value;
+    if (!applyLineAction(action)) return { changed:false, lineDelta:0 };
+    return { changed:true, lineDelta: before.split("\n").length - ta.value.split("\n").length };
   };
 
   const detachTextContextMenu = attachTextCaseContextMenu(ta, {
@@ -3169,7 +3211,8 @@ function buildLightTextEditor(text, options={}){
     getValue: () => ta.value,
     setValue: (v) => { ta.value = v; renderGutter(); ta.dispatchEvent(new Event("input", { bubbles: true })); },
     getCursorLine: () => lineAtOffset(ta.value, ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd),
-    focusLine, dedupeSelectedLines, openFind, closeFind, isFindOpen: () => findOpen,
+    setWrap: (on) => setEditorWrap(host, ta, on),
+    focusLine, dedupeSelectedLines, applyLineTidy, openFind, closeFind, isFindOpen: () => findOpen,
     openGoto, closeGoto: () => { if (gotoBar) gotoBar.close(); }, isGotoOpen: () => !!gotoBar && gotoBar.isOpen(),
     destroy: () => {
       detachTextContextMenu();

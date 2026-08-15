@@ -2475,6 +2475,62 @@
     return null;
   }
 
+  /* ===== 줄 정리 =====
+     정렬·빈 줄 삭제·번호 매기기처럼 "고른 줄 묶음을 통째로 다시 쓰는" 갈래. 위쪽 동작들(들여쓰기·줄 이동 등)은
+     커서 열까지 따라 옮겨야 해서 저마다 위치 계산이 다르지만, 이 갈래는 줄 배열 → 줄 배열 함수 하나면 끝난다.
+     탭 정지점(4칸) 환산 — tab-size:4 로 그려지는 편집기와 같은 규칙이라야 눈에 보이는 대로 바뀐다. */
+  const expandLineTabs = (row) => {
+    let out = "";
+    for (const ch of String(row)) out += ch === "\t" ? " ".repeat(4 - (out.length % 4)) : ch;
+    return out;
+  };
+  // 줄 맨 앞 숫자로 비교. 숫자가 없는 줄은 뒤로 몰되 원래 순서를 지킨다(정렬이 안정적이라 그대로 유지된다).
+  const leadingNumber = (row) => {
+    const m = /-?\d+(?:\.\d+)?/.exec(String(row));
+    return m ? parseFloat(m[0]) : null;
+  };
+  const LINE_TIDY_ACTIONS = {
+    "sort-asc": (rows) => rows.slice().sort((a, b) => a.localeCompare(b, "ko")),
+    "sort-desc": (rows) => rows.slice().sort((a, b) => b.localeCompare(a, "ko")),
+    "sort-numeric": (rows) => rows.slice().sort((a, b) => {
+      const na = leadingNumber(a), nb = leadingNumber(b);
+      if (na === null && nb === null) return 0;
+      if (na === null) return 1;
+      if (nb === null) return -1;
+      return na - nb;
+    }),
+    "reverse": (rows) => rows.slice().reverse(),
+    "shuffle": (rows) => {
+      const out = rows.slice();
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+      return out;
+    },
+    // 위 dedupe 동작과 규칙은 같지만(정확히 같은 줄만 묶는다) 선택 없이 눌러도 문서 전체에 걸리는 갈래다.
+    // 기존 dedupe 는 노트북 도구막대·우클릭 메뉴가 "선택한 줄만"으로 쓰고 있어 그대로 둔다.
+    "dedupe-lines": (rows) => {
+      const seen = new Set();
+      return rows.filter((row) => (seen.has(row) ? false : (seen.add(row), true)));
+    },
+    "remove-blank": (rows) => rows.filter((row) => row.trim() !== ""),
+    "trim-trailing": (rows) => rows.map((row) => row.replace(/[ \t]+$/, "")),
+    // 번호는 오른쪽 맞춤 — 고정폭 글꼴에서 1·10·100 의 마침표가 한 줄로 서야 목록으로 읽힌다.
+    "number-lines": (rows) => {
+      const width = String(rows.length).length;
+      return rows.map((row, i) => String(i + 1).padStart(width, " ") + ". " + row);
+    },
+    "tabs-to-spaces": (rows) => rows.map(expandLineTabs),
+    // 공백 → 탭은 줄 앞 들여쓰기만 바꾼다. 글 중간의 공백까지 탭으로 묶으면 문자열·본문이 망가진다.
+    "spaces-to-tabs": (rows) => rows.map((row) => {
+      const m = /^[ \t]+/.exec(row);
+      if (!m) return row;
+      const columns = expandLineTabs(m[0]).length;
+      return "\t".repeat(Math.floor(columns / 4)) + " ".repeat(columns % 4) + row.slice(m[0].length);
+    })
+  };
+
   function transformEditorLines(value, selectionStart, selectionEnd, action) {
     const text = String(value || "");
     const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
@@ -2605,6 +2661,27 @@
       const delta = block.reduce((sum, line) => sum + line.length + 1, 0);
       lines.splice(last + 1, 0, ...block);
       return { value: lines.join("\n"), selectionStart: start + delta, selectionEnd: end + delta };
+    }
+
+    const tidy = LINE_TIDY_ACTIONS[action];
+    if (tidy) {
+      /* 선택이 없으면 문서 전체가 대상이다. '정렬'을 누르자고 파일을 통째로 먼저 선택하게 만들 이유가 없고,
+         커서만 놓고 눌렀을 때 기대하는 동작도 '이 파일을 정렬'이다. 결과는 바뀐 범위 전체를 선택해
+         무엇이 달라졌는지 눈에 보이게 하고, Ctrl+Z 한 번으로 통째 되돌아가게 한다. */
+      const whole = start === end;
+      const from = whole ? 0 : first;
+      const to = whole ? lines.length - 1 : last;
+      const rows = tidy(lines.slice(from, to + 1));
+      const kept = rows.length ? rows : [""];        // 전부 지워져도 빈 줄 하나는 남긴다(문서가 사라지지 않게)
+      lines.splice(from, to - from + 1, ...kept);
+      const next = lines.join("\n");
+      if (next === text) return { value: text, selectionStart: start, selectionEnd: end };
+      const endLine = from + kept.length - 1;
+      return {
+        value: next,
+        selectionStart: lineOffset(lines, from),
+        selectionEnd: lineOffset(lines, endLine) + lines[endLine].length
+      };
     }
 
     return { value: text, selectionStart: start, selectionEnd: end };

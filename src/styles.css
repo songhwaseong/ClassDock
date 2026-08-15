@@ -1799,6 +1799,24 @@
     text-overflow:ellipsis;max-width:60ch}
   .text-edit-diag[data-level="ok"]{color:#16a34a}
   .text-edit-diag[data-level="warn"]{color:#ca8a04}
+  /* 문서 정보(줄·낱말·글자 수와 커서 자리): 상태 문구 옆에 붙는 읽을거리라 버튼처럼 보이지 않게 */
+  .text-edit-stats{order:-1;font-size:12px;color:var(--muted);white-space:nowrap;
+    font-variant-numeric:tabular-nums;cursor:default}
+  /* 줄 정리 메뉴 — 버튼 생김새는 .text-edit-btn 그대로, 아래로 펼쳐지는 목록만 새로 */
+  .text-tidy-menu{position:relative;flex:0 0 auto}
+  .text-tidy-menu>summary{list-style:none;display:inline-block}
+  .text-tidy-menu>summary::-webkit-details-marker{display:none}
+  .text-tidy-menu>summary::after{content:" ▾";font-size:9px}
+  .text-tidy-menu[open]>summary{background:var(--accent);color:#fff}
+  .text-tidy-pop{position:absolute;z-index:90;top:calc(100% + 6px);right:0;min-width:190px;padding:6px;
+    display:grid;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 12px 30px rgba(15,23,42,.26)}
+  .text-tidy-note{margin:2px 8px 6px;font-size:11px;line-height:1.4;color:var(--muted);white-space:nowrap}
+  .text-tidy-pop button{font:inherit;font-size:13px;text-align:left;white-space:nowrap;border:0;border-radius:7px;
+    background:transparent;color:var(--ink);padding:7px 10px;cursor:pointer}
+  .text-tidy-pop button:hover{background:var(--panel-hover)}
+  .text-tidy-sep{height:1px;margin:4px 6px;background:var(--border)}
+  @media(max-width:600px){ .text-edit-stats{display:none} }
   /* ===== 오프라인 한국어 맞춤법 검사 ===== */
   .spellcheck-trigger{font:inherit;font-size:12px;line-height:1.15;border:1px solid #0f766e;border-radius:7px;
     background:transparent;color:#0f766e;padding:5px 10px;cursor:pointer;white-space:nowrap}
@@ -4161,6 +4179,24 @@
   .code-practice .code-input{caret-color:var(--accent)}
   /* 대용량 전용 가벼운 편집기: 강조 오버레이(pre)가 없으므로 textarea 글자를 직접 보여준다(일반 편집기는 투명 textarea+pre). */
   .code-host-light .code-input{color:var(--code-text)}
+  /* ===== 줄바꿈(자동 개행) 보기 =====
+     겹쳐 그리는 층은 전부 "줄 번호 × 줄높이"로 자리를 잡아, 줄이 접히면 글자와 어긋난다. 줄바꿈을 켜는 동안은
+     그 층들을 내리고 textarea 글자를 직접 보여 준다(가벼운 편집기와 같은 방식). 찾기는 네이티브 선택으로 보인다. */
+  .code-host-edit.is-wrapped .code-input{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;
+    color:var(--code-text);padding-right:18px}
+  .code-host-edit.is-wrapped .code-pre,
+  .code-host-edit.is-wrapped .code-gutter,
+  .code-host-edit.is-wrapped .code-indent-layer,
+  .code-host-edit.is-wrapped .word-hi-layer,
+  .code-host-edit.is-wrapped .find-hi-layer,
+  .code-host-edit.is-wrapped .code-def-layer,
+  .code-host-edit.is-wrapped .err-lines,
+  .code-host-edit.is-wrapped .trace-line,
+  .code-host-edit.is-wrapped .jump-line,
+  .code-host-edit.is-wrapped .cell-band,
+  .code-host-edit.is-wrapped .cell-div-layer,
+  .code-host-edit.is-wrapped .col-overlay,
+  .code-host-edit.is-wrapped .lite-hit-layer{display:none}
   /* 가벼운 편집기의 찾기 바 — 편집 영역 위에 떠 있는 작은 오버레이(읽기전용 .ro-find 재사용) */
   .code-edit .lite-find{position:absolute;top:8px;right:16px;left:auto;z-index:6;margin:0;
     width:min(360px,calc(100% - 32px));padding:6px 8px;box-sizing:border-box;background:var(--panel);
