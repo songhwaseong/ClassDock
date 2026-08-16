@@ -916,6 +916,7 @@ function renderWhiteboard(doc, host){
   const GEAR_PREFS_KEY = "classdock-whiteboard:gear-prefs:v1";
   const GEAR_LINE = "#2563eb";
   const RULER_THICKNESS = 58, PROTRACTOR_RADIUS = 155, GEAR_SNAP_BAND = 32;
+  const RULER_MIN_CM = 2, RULER_MAX_CM = 40;   // 왼쪽 손잡이로 늘릴 수 있는 범위(칠판 자 정도까지)
   const readGearPrefs = () => {
     try { return JSON.parse(localStorage.getItem(GEAR_PREFS_KEY) || "null") || {}; }
     catch(_){ return {}; }
@@ -959,10 +960,11 @@ function renderWhiteboard(doc, host){
       ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d, major ? 15 : 8); ctx.stroke();
       if (major && d > 0.5) ctx.fillText(String(Math.round(d / cm)), d + 3, 16);
     }
-    ctx.fillText("자 (cm)", 6, RULER_THICKNESS - 18);
+    ctx.fillText("자 (cm)", 22, RULER_THICKNESS - 18);   // 왼쪽 길이 손잡이를 피해 살짝 안쪽에
     ctx.restore();
     const nx = -Math.sin(edge.angle), ny = Math.cos(edge.angle);
-    drawGearHandle(edge.b.x + nx * RULER_THICKNESS / 2, edge.b.y + ny * RULER_THICKNESS / 2, false);
+    drawGearHandle(edge.a.x + nx * RULER_THICKNESS / 2, edge.a.y + ny * RULER_THICKNESS / 2, false);  // 왼쪽=길이
+    drawGearHandle(edge.b.x + nx * RULER_THICKNESS / 2, edge.b.y + ny * RULER_THICKNESS / 2, false);  // 오른쪽=회전
   };
   const drawProtractorGear = () => {
     const protractor = gear.protractor; if (!protractor) return;
@@ -1338,6 +1340,9 @@ function renderWhiteboard(doc, host){
       const nx = -Math.sin(edge.angle), ny = Math.cos(edge.angle);
       const handle = { x:edge.b.x + nx * RULER_THICKNESS / 2, y:edge.b.y + ny * RULER_THICKNESS / 2 };
       if (Math.hypot(p.x - handle.x, p.y - handle.y) <= r * 1.2) return { kind:"ruler-rotate", cursor:"grab" };
+      // 길이 손잡이는 몸통(옮기기)보다 먼저 판정해야 잡힌다.
+      const grip = { x:edge.a.x + nx * RULER_THICKNESS / 2, y:edge.a.y + ny * RULER_THICKNESS / 2 };
+      if (Math.hypot(p.x - grip.x, p.y - grip.y) <= r * 1.2) return { kind:"ruler-resize", cursor:"ew-resize" };
       const dx = p.x - edge.a.x, dy = p.y - edge.a.y;
       const along = dx * Math.cos(edge.angle) + dy * Math.sin(edge.angle), across = dx * nx + dy * ny;
       if (along >= 0 && along <= edge.length && across >= 3 && across <= RULER_THICKNESS) return { kind:"ruler-move", cursor:"move" };
@@ -1364,6 +1369,15 @@ function renderWhiteboard(doc, host){
         if (ev.shiftKey || gear.snap) angle = Math.round(angle * 180 / Math.PI / 15) * 15 * Math.PI / 180;
         gear.ruler.angle = angle;
         showMeasure(Math.round(((angle * 180 / Math.PI) % 360 + 360) % 360) + "°", screen);
+      } else if (hit.kind === "ruler-resize"){
+        // 왼쪽 끝을 끌어 길이만 바꾼다. 각도와 오른쪽 끝(회전 손잡이 쪽)은 제자리에 둔다.
+        const cm = MNBoardTools.PX_PER_CM;
+        const angle = ruler.angle || 0, cos = Math.cos(angle), sin = Math.sin(angle);
+        const was = Math.max(60, ruler.length || 420);
+        const bx = ruler.x + cos * was, by = ruler.y + sin * was;
+        const length = Math.min(RULER_MAX_CM * cm, Math.max(RULER_MIN_CM * cm, (bx - p.x) * cos + (by - p.y) * sin));
+        gear.ruler.length = length; gear.ruler.x = bx - cos * length; gear.ruler.y = by - sin * length;
+        showMeasure(formatCm(length), screen);
       } else if (hit.kind === "protractor-move"){
         gear.protractor.x = protractor.x + p.x - start.x; gear.protractor.y = protractor.y + p.y - start.y;
       } else if (hit.kind === "protractor-rotate"){
@@ -2450,7 +2464,7 @@ function renderWhiteboard(doc, host){
   // 교구는 판서 내용이 아니라 손에 든 도구라 보드 작업과 같은 자리(선택 없을 때)에 둔다.
   const contextGearSection=makeContextSection("교구·정리","wb-context-gear-section");
   const contextGearActions=document.createElement("div"); contextGearActions.className="wb-context-actions wb-context-gear-actions";
-  const contextRulerBtn=contextAction("자","자 꺼내기 — 대고 그으면 곧게 그려집니다","",()=>setGear("ruler"));
+  const contextRulerBtn=contextAction("자","자 꺼내기 — 대고 그으면 곧게 그려집니다 (왼쪽 손잡이로 길이 조절)","",()=>setGear("ruler"));
   const contextProtractorBtn=contextAction("각도기","각도기 꺼내기 — 가운데에서 그으면 1°씩 맞춰집니다","",()=>setGear("protractor"));
   const contextCompassBtn=contextAction("컴퍼스","컴퍼스 꺼내기 — 연필 손잡이를 돌리면 호·원이 그려집니다","",()=>setGear("compass"));
   const contextSnapBtn=contextAction("15° 맞추기","직선·화살표를 15°씩 맞춰 긋기","",()=>{gear.snap=!gear.snap;saveGearPrefs();syncGearButtons();});
@@ -3678,9 +3692,9 @@ function renderWhiteboard(doc, host){
 
   // ----- 교구(자·각도기·컴퍼스)와 손그림 정리 -----
   const gearGroup = grp();
-  const rulerBtn = mkIconBtn("ruler", "자 — 대고 그으면 곧게 그려지고 cm 눈금이 보입니다", "wb-act wb-gear", () => {
+  const rulerBtn = mkIconBtn("ruler", "자 — 대고 그으면 곧게 그려지고 cm 눈금이 보입니다 (길이 2~40cm 조절)", "wb-act wb-gear", () => {
     const on = setGear("ruler");
-    if (on && typeof toast === "function") toast("자를 놓았어요. 몸통을 끌어 옮기고, 끝의 동그라미로 돌립니다. 눈금 쪽 모서리를 따라 그어 보세요.", 3200);
+    if (on && typeof toast === "function") toast("자를 놓았어요. 몸통을 끌어 옮기고, 오른쪽 동그라미로 돌리고, 왼쪽 동그라미를 끌어 길이를 40cm까지 늘립니다.", 3600);
   });
   const protractorBtn = mkIconBtn("protractor", "각도기 — 가운데에서 시작해 그으면 각도가 1°씩 맞춰집니다", "wb-act wb-gear", () => {
     const on = setGear("protractor");
