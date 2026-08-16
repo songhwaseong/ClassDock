@@ -3339,6 +3339,24 @@ function renderWhiteboard(doc, host){
     if (!balanced){ chemInput.focus(); return; }
     placeBoardText(balanced.text, 34);
   }
+  // 반응식 칸에 커서가 있으면 아래 주기율표의 원소 칩이 ‘보드에 카드 넣기’ 대신 ‘기호 이어 적기’로 움직인다.
+  // (칩을 누를 때 focus 가 옮겨가지 않도록 mousedown 을 막아 두므로 여기서 activeElement 로 판단할 수 있다.)
+  function chemInputActive(){ return !chemBuilder.hidden && document.activeElement === chemInput; }
+  function typeChemSymbol(symbol){
+    const value = chemInput.value;
+    const start = chemInput.selectionStart == null ? value.length : chemInput.selectionStart;
+    const end = chemInput.selectionEnd == null ? start : chemInput.selectionEnd;
+    chemInput.value = value.slice(0, start) + symbol + value.slice(end);
+    const caret = start + symbol.length;
+    chemInput.focus(); chemInput.setSelectionRange(caret, caret);
+    refreshChemistry();
+  }
+  function syncChemHint(){
+    if (chemBuilder.hidden) return;
+    eduHint.textContent = chemInputActive()
+      ? "반응식 칸에 커서가 있어요 — 원소를 누르면 기호가 커서 자리에 들어갑니다."
+      : "원소를 누르면 번호·기호·이름·원자량 카드가 들어갑니다. 반응식 칸에 커서를 두고 누르면 기호가 그 자리에 적혀요.";
+  }
   function refreshChartPreview(note){
     for (const chip of chartTypeBar.children){
       const active = chip.dataset.chartType === chartType;
@@ -3420,6 +3438,8 @@ function renderWhiteboard(doc, host){
   chartData.addEventListener("input", () => refreshChartPreview());
   chartTitle.addEventListener("input", () => refreshChartPreview());
   chemInput.addEventListener("input", refreshChemistry);
+  chemInput.addEventListener("focus", syncChemHint);
+  chemInput.addEventListener("blur", () => requestAnimationFrame(syncChemHint));
   chemInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter"){ e.preventDefault(); insertBalancedEquation(); }
     e.stopPropagation();
@@ -3479,6 +3499,8 @@ function renderWhiteboard(doc, host){
       const cell = document.createElement("button"); cell.type = "button"; cell.className = "wb-element";
       cell.title = `${element.number} ${element.name}(${element.symbol}) · 원자량 ${element.mass} · ${element.category}`;
       cell.setAttribute("aria-label", cell.title);
+      // 반응식 칸을 쓰던 중이면 커서를 뺏지 않는다 — 그래야 누른 기호가 커서 자리에 이어 적힌다.
+      cell.addEventListener("mousedown", (e) => { if (chemInputActive()) e.preventDefault(); });
       cell.style.setProperty("--wb-element-color", MNBoardTools.ELEMENT_CATEGORY_COLORS[element.category] || "#64748b");
       if (laidOut){
         // 란타넘족(57~71)·악티늄족(89~103)은 표 아래 두 줄에 3열부터 늘어놓는 표준 배치를 따른다.
@@ -3491,6 +3513,7 @@ function renderWhiteboard(doc, host){
       const name = document.createElement("span"); name.className = "wb-element-name"; name.textContent = element.name;
       cell.append(number, symbol, name);
       cell.addEventListener("click", () => {
+        if (chemInputActive()){ typeChemSymbol(element.symbol); return; }
         try { placeBoardGroup(MNBoardTools.elementCardGroup(element, wb.color)); }
         catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "원소 카드를 넣지 못했어요.", 2200); }
       });
@@ -3516,8 +3539,9 @@ function renderWhiteboard(doc, host){
     if (!chemBuilder.hidden) refreshChemistry();
     eduHint.textContent = buildingTool
       ? "넣은 뒤에도 두 번 누르면 다시 고칠 수 있어요. ‘분리’를 누르면 선·글자로 흩어집니다."
-      : eduCategory === "chemistry" ? "원소를 누르면 번호·기호·이름·원자량 카드가 들어갑니다."
+      : eduCategory === "chemistry" ? "원소를 누르면 번호·기호·이름·원자량 카드가 들어갑니다. 반응식 칸에 커서를 두고 누르면 기호가 그 자리에 적혀요."
       : "클릭하면 가운데에, 끌어 놓으면 원하는 위치에 들어갑니다.";
+    if (eduCategory === "chemistry") syncChemHint();
     formulaBuilder.hidden = eduCategory !== "formula";
     if (!formulaBuilder.hidden) refreshFormulaPreview();
     if (!graphBuilder.hidden) requestAnimationFrame(refreshGraphPreview);
