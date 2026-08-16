@@ -97,6 +97,44 @@ test("자료 차트는 쉼표·탭·띄어쓰기로 적은 표를 읽어 종류�
   assert.throws(() => MNBoardTools.chartGroup({ type:"bar", data:"이름만\n또 이름만" }), (error) => error.boardTool === true);
 });
 
+test("자료를 여러 열 적으면 묶음(계열)이 여러 개인 차트가 된다", () => {
+  const table = MNBoardTools.parseChartTable("과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8");
+  assert.deepEqual(table.series, ["1반", "2반"]);
+  assert.deepEqual(table.rows, [{ label:"국어", values:[7, 9] }, { label:"수학", values:[12, 8] }]);
+  // 첫 칸은 언제나 이름이라 산점도의 "1, 3" 은 x=1,y=3 그대로다.
+  assert.deepEqual(MNBoardTools.parseChartTable("1, 3\n2, 5").rows, [{ label:"1", values:[3] }, { label:"2", values:[5] }]);
+  // 이름에 띄어쓰기가 있어도 값만 뒤에서 걷어 낸다.
+  assert.deepEqual(MNBoardTools.parseChartTable("홍 길동 7 9").rows, [{ label:"홍 길동", values:[7, 9] }]);
+  // 줄마다 열 개수가 달라도 짧은 줄은 빈칸으로 채워 계열 수를 맞춘다.
+  assert.deepEqual(MNBoardTools.parseChartTable("가, 1\n나, 2, 3").rows[0].values, [1, null]);
+
+  const grouped = MNBoardTools.chartGroup({ type:"bar", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8" });
+  assert.deepEqual(grouped.chartSpec.series, ["1반", "2반"]);
+  // 묶음마다 막대가 따로 서고(테두리 포함 2개씩), 범례 이름이 붙는다.
+  assert.equal(grouped.items.filter((item) => item.type === "rect" && item.fill).length, 4 + 2);
+  for (const name of ["1반", "2반"]) assert.ok(grouped.items.some((item) => item.type === "text" && item.text === name));
+  const single = MNBoardTools.chartGroup({ type:"bar", data:"국어, 7\n수학, 12" });
+  assert.ok(!single.items.some((item) => item.type === "text" && /^자료 \d$/.test(item.text)), "묶음이 하나면 범례를 달지 않는다");
+
+  const lines = MNBoardTools.chartGroup({ type:"line", data:"월, 작년, 올해\n3월, 8, 9\n4월, 14, 16" });
+  assert.equal(lines.items.filter((item) => item.type === "polyline").length, 2);
+  // 원그래프·히스토그램은 첫 묶음만 쓴다(부채꼴은 겹칠 수 없다).
+  const pie = MNBoardTools.chartGroup({ type:"pie", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8" });
+  assert.equal(pie.items.filter((item) => item.type === "polyline" && item.fill).length, 2);
+});
+
+test("묶음 색을 골라 넘기면 그 색으로 그리고 차트에 함께 저장한다", () => {
+  const colored = MNBoardTools.chartGroup({ type:"bar", data:"과목, 1반, 2반\n국어, 7, 9", palette:["#ff0000", "#00ff00"] });
+  assert.ok(colored.items.some((item) => item.type === "rect" && item.fill && item.color === "#ff0000"));
+  assert.ok(colored.items.some((item) => item.type === "rect" && item.fill && item.color === "#00ff00"));
+  assert.deepEqual(colored.chartSpec.palette, ["#ff0000", "#00ff00"]);
+  // 저장본에서 되살린 색이 망가져 있으면 기본 색으로 대신한다(잘못된 색 문자열이 그림에 새지 않게).
+  const broken = MNBoardTools.chartGroup({ type:"bar", data:"가, 1\n나, 2", palette:["red", "#00FF00"] });
+  assert.deepEqual(broken.chartSpec.palette, [MNBoardTools.CHART_PALETTE[0], "#00ff00"]);
+  // 색을 고르지 않으면 기본 팔레트 그대로다.
+  assert.deepEqual(MNBoardTools.chartGroup({ type:"bar", data:"가, 1" }).chartSpec.palette, MNBoardTools.CHART_PALETTE);
+});
+
 test("차트·그래프 항목은 공용 렌더러가 그릴 수 있는 종류만 쓴다", () => {
   const drawable = new Set(["line", "arrow", "rect", "ellipse", "polyline", "text", "image", "group"]);
   const groups = [

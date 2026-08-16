@@ -917,6 +917,26 @@ function renderWhiteboard(doc, host){
   const GEAR_LINE = "#2563eb";
   const RULER_THICKNESS = 58, PROTRACTOR_RADIUS = 155, GEAR_SNAP_BAND = 32;
   const RULER_MIN_CM = 2, RULER_MAX_CM = 40;   // 왼쪽 손잡이로 늘릴 수 있는 범위(칠판 자 정도까지)
+  const PROTRACTOR_MIN_R = 76, PROTRACTOR_MAX_R = 567;   // 밑변(지름) 4~30cm
+  // 각도기 크기는 도구마다 다르므로 인스턴스 값을 쓰되, 예전 도구·잘못된 값은 기본 크기로 되돌린다.
+  const protractorRadiusOf = (protractor) => {
+    const radius = protractor && Number(protractor.radius);
+    return Number.isFinite(radius) ? Math.min(PROTRACTOR_MAX_R, Math.max(PROTRACTOR_MIN_R, radius)) : PROTRACTOR_RADIUS;
+  };
+  // 가운데 붙잡기(1°씩 맞추기) 판정 반경 — 작은 각도기에서 너무 넓게 먹지 않게 크기를 따라간다.
+  const protractorHoldBand = (radius) => Math.max(12, Math.min(30, radius * .17));
+  const COMPASS_MIN_R = 76, COMPASS_MAX_R = 1134;   // 반지름 2~30cm
+  // 컴퍼스를 너무 좁히면 바늘·반지름·연필 손잡이가 서로를 덮어 다시 벌릴 수 없게 된다.
+  const compassRadiusOf = (compass) => {
+    const radius = compass && Number(compass.radius);
+    return Number.isFinite(radius) ? Math.min(COMPASS_MAX_R, Math.max(COMPASS_MIN_R, radius)) : 120;
+  };
+  // 반지름 손잡이는 팔의 55% 지점. 양 끝 손잡이와 최소 간격을 두어 항상 따로 잡힌다.
+  const compassGripAt = (compass) => {
+    const radius = compassRadiusOf(compass), to = (compass && compass.to) || 0;
+    const along = Math.min(Math.max(radius * .55, 30), radius - 28);
+    return { x:compass.cx + Math.cos(to) * along, y:compass.cy + Math.sin(to) * along };
+  };
   const readGearPrefs = () => {
     try { return JSON.parse(localStorage.getItem(GEAR_PREFS_KEY) || "null") || {}; }
     catch(_){ return {}; }
@@ -968,44 +988,48 @@ function renderWhiteboard(doc, host){
   };
   const drawProtractorGear = () => {
     const protractor = gear.protractor; if (!protractor) return;
-    const radius = PROTRACTOR_RADIUS;
+    const radius = protractorRadiusOf(protractor);
+    const size = radius / PROTRACTOR_RADIUS;                 // 눈금·글자도 함께 커지고 작아진다
+    const fontSize = Math.round(Math.min(20, Math.max(9, 11 * size)));
     ctx.save();
     ctx.translate(protractor.x, protractor.y); ctx.rotate(protractor.angle || 0);
     ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt";
     ctx.beginPath(); ctx.moveTo(-radius, 0); ctx.arc(0, 0, radius, Math.PI, 0); ctx.closePath();
     ctx.fillStyle = "rgba(59,130,246,.10)"; ctx.fill();
     ctx.strokeStyle = GEAR_LINE; ctx.lineWidth = gearUi(1.6); ctx.stroke();
-    ctx.fillStyle = GEAR_LINE; ctx.font = '11px system-ui,"Malgun Gothic",sans-serif';
+    ctx.fillStyle = GEAR_LINE; ctx.font = fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (let degree = 0; degree <= 180; degree += 5){
       const angle = -degree * Math.PI / 180;
       const major = degree % 10 === 0, long = degree % 30 === 0;
-      const inner = radius - (long ? 17 : major ? 12 : 7);
+      const inner = radius - (long ? 17 : major ? 12 : 7) * size;
       ctx.beginPath();
       ctx.moveTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
       ctx.lineTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
       ctx.lineWidth = gearUi(major ? 1.5 : 1); ctx.stroke();
-      if (long) ctx.fillText(String(degree), Math.cos(angle) * (radius - 28), Math.sin(angle) * (radius - 28));
+      if (long) ctx.fillText(String(degree), Math.cos(angle) * (radius - 28 * size), Math.sin(angle) * (radius - 28 * size));
     }
     ctx.beginPath(); ctx.arc(0, 0, gearUi(4), 0, Math.PI * 2); ctx.fill();
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText("각도기", -18, 8);
     ctx.restore();
     const angle = protractor.angle || 0;
-    drawGearHandle(protractor.x + Math.cos(angle) * radius, protractor.y + Math.sin(angle) * radius, false);
+    drawGearHandle(protractor.x - Math.cos(angle) * radius, protractor.y - Math.sin(angle) * radius, false);  // 왼쪽=크기
+    drawGearHandle(protractor.x + Math.cos(angle) * radius, protractor.y + Math.sin(angle) * radius, false);  // 오른쪽=회전
   };
   const drawCompassGear = () => {
     const compass = gear.compass; if (!compass) return;
-    const pencil = { x:compass.cx + Math.cos(compass.to) * compass.radius, y:compass.cy + Math.sin(compass.to) * compass.radius };
-    const grip = { x:compass.cx + Math.cos(compass.to) * compass.radius * .55, y:compass.cy + Math.sin(compass.to) * compass.radius * .55 };
+    const radius = compassRadiusOf(compass);
+    const pencil = { x:compass.cx + Math.cos(compass.to) * radius, y:compass.cy + Math.sin(compass.to) * radius };
+    const grip = compassGripAt(compass);
     ctx.save(); ctx.globalAlpha = 1;
     ctx.strokeStyle = GEAR_LINE; ctx.lineWidth = gearUi(1.2); ctx.setLineDash([gearUi(5), gearUi(5)]);
-    ctx.beginPath(); ctx.arc(compass.cx, compass.cy, compass.radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(compass.cx, compass.cy, radius, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
     if (compass.drawing){                                                // 지금 돌리고 있는 호를 펜 색으로 미리 보여 준다
       ctx.strokeStyle = wb.color; ctx.lineWidth = Math.max(1, wb.width);
       ctx.beginPath();
-      ctx.arc(compass.cx, compass.cy, compass.radius, Math.min(compass.from, compass.to), Math.max(compass.from, compass.to));
+      ctx.arc(compass.cx, compass.cy, radius, Math.min(compass.from, compass.to), Math.max(compass.from, compass.to));
       ctx.stroke();
       ctx.strokeStyle = GEAR_LINE;
     }
@@ -1306,7 +1330,7 @@ function renderWhiteboard(doc, host){
     const on = force == null ? !gear[kind] : !!force;
     if (!on){ gear[kind] = null; }
     else if (kind === "ruler") gear.ruler = { x:center.x - 210, y:center.y - RULER_THICKNESS / 2, angle:0, length:420 };
-    else if (kind === "protractor") gear.protractor = { x:center.x, y:center.y + PROTRACTOR_RADIUS / 2, angle:0 };
+    else if (kind === "protractor") gear.protractor = { x:center.x, y:center.y + PROTRACTOR_RADIUS / 2, angle:0, radius:PROTRACTOR_RADIUS };
     else if (kind === "compass") gear.compass = { cx:center.x - 60, cy:center.y + 40, radius:120, from:-Math.PI / 2, to:-Math.PI / 2, drawing:false };
     syncGearButtons(); redraw();
     return on;
@@ -1315,23 +1339,27 @@ function renderWhiteboard(doc, host){
     const r = gearHandleRadius();
     const compass = gear.compass;
     if (compass){
-      const pencil = { x:compass.cx + Math.cos(compass.to) * compass.radius, y:compass.cy + Math.sin(compass.to) * compass.radius };
-      const grip = { x:compass.cx + Math.cos(compass.to) * compass.radius * .55, y:compass.cy + Math.sin(compass.to) * compass.radius * .55 };
+      const radius = compassRadiusOf(compass);
+      const pencil = { x:compass.cx + Math.cos(compass.to) * radius, y:compass.cy + Math.sin(compass.to) * radius };
+      const grip = compassGripAt(compass);
       if (Math.hypot(p.x - pencil.x, p.y - pencil.y) <= r * 1.3) return { kind:"compass-draw", cursor:"crosshair" };
       if (Math.hypot(p.x - grip.x, p.y - grip.y) <= r) return { kind:"compass-radius", cursor:"ew-resize" };
       if (Math.hypot(p.x - compass.cx, p.y - compass.cy) <= r * 1.3) return { kind:"compass-move", cursor:"move" };
     }
     const protractor = gear.protractor;
     if (protractor){
-      const angle = protractor.angle || 0;
-      const handle = { x:protractor.x + Math.cos(angle) * PROTRACTOR_RADIUS, y:protractor.y + Math.sin(angle) * PROTRACTOR_RADIUS };
+      const angle = protractor.angle || 0, radius = protractorRadiusOf(protractor);
+      const handle = { x:protractor.x + Math.cos(angle) * radius, y:protractor.y + Math.sin(angle) * radius };
       if (Math.hypot(p.x - handle.x, p.y - handle.y) <= r * 1.2) return { kind:"protractor-rotate", cursor:"grab" };
+      // 크기 손잡이는 밑변 왼쪽 끝에 있어서 몸통(옮기기)보다 먼저 판정해야 잡힌다.
+      const grip = { x:protractor.x - Math.cos(angle) * radius, y:protractor.y - Math.sin(angle) * radius };
+      if (Math.hypot(p.x - grip.x, p.y - grip.y) <= r * 1.2) return { kind:"protractor-resize", cursor:"nwse-resize" };
       const dx = p.x - protractor.x, dy = p.y - protractor.y;
       const local = { x:dx * Math.cos(-angle) - dy * Math.sin(-angle), y:dx * Math.sin(-angle) + dy * Math.cos(-angle) };
       const distance = Math.hypot(local.x, local.y);
       // 안쪽은 비워 둬야 각도기 위로 선을 그을 수 있다. 테두리 띠와 밑변만 손잡이로 쓴다.
-      const onRim = local.y <= 0 && Math.abs(distance - PROTRACTOR_RADIUS) <= 26;
-      const onBase = Math.abs(local.y) <= 14 && Math.abs(local.x) <= PROTRACTOR_RADIUS;
+      const onRim = local.y <= 0 && Math.abs(distance - radius) <= 26;
+      const onBase = Math.abs(local.y) <= 14 && Math.abs(local.x) <= radius;
       if (onRim || onBase) return { kind:"protractor-move", cursor:"move" };
     }
     const ruler = gear.ruler;
@@ -1385,12 +1413,19 @@ function renderWhiteboard(doc, host){
         if (ev.shiftKey || gear.snap) angle = Math.round(angle * 180 / Math.PI / 15) * 15 * Math.PI / 180;
         gear.protractor.angle = angle;
         showMeasure(Math.round(((angle * 180 / Math.PI) % 360 + 360) % 360) + "°", screen);
+      } else if (hit.kind === "protractor-resize"){
+        // 가운데(각을 재는 기준점)는 그대로 두고 반지름만 키운다.
+        const radius = Math.min(PROTRACTOR_MAX_R, Math.max(PROTRACTOR_MIN_R, Math.hypot(p.x - gear.protractor.x, p.y - gear.protractor.y)));
+        gear.protractor.radius = radius;
+        showMeasure("밑변 " + formatCm(radius * 2), screen);
       } else if (hit.kind === "compass-move"){
         gear.compass.cx = compass.cx + p.x - start.x; gear.compass.cy = compass.cy + p.y - start.y;
       } else if (hit.kind === "compass-radius"){
-        gear.compass.radius = Math.max(12, Math.hypot(p.x - gear.compass.cx, p.y - gear.compass.cy));
+        // 손잡이는 팔의 55% 지점이라, 잡은 자리까지의 거리를 팔 길이로 되돌려야 손을 따라온다.
+        const reach = Math.hypot(p.x - gear.compass.cx, p.y - gear.compass.cy) / .55;
+        gear.compass.radius = Math.min(COMPASS_MAX_R, Math.max(COMPASS_MIN_R, reach));
         gear.compass.to = Math.atan2(p.y - gear.compass.cy, p.x - gear.compass.cx);
-        showMeasure("반지름 " + formatCm(gear.compass.radius), screen);
+        showMeasure(`반지름 ${formatCm(gear.compass.radius)} · 지름 ${formatCm(gear.compass.radius * 2)}`, screen);
       } else if (hit.kind === "compass-draw"){
         // 바늘을 축으로 돈 만큼만 호가 자란다(반지름은 고정). ±180°를 넘어가도 이어서 센다.
         const angle = Math.atan2(p.y - gear.compass.cy, p.x - gear.compass.cx);
@@ -1425,7 +1460,8 @@ function renderWhiteboard(doc, host){
   };
   const protractorCenterHold = (point) => {
     const protractor = gear.protractor;
-    return !!(protractor && Math.hypot(point.x - protractor.x, point.y - protractor.y) <= 26);
+    if (!protractor) return false;
+    return Math.hypot(point.x - protractor.x, point.y - protractor.y) <= protractorHoldBand(protractorRadiusOf(protractor));
   };
   const gearSnapStart = (p) => {
     if (protractorCenterHold(p)) return { x:gear.protractor.x, y:gear.protractor.y };
@@ -2465,8 +2501,8 @@ function renderWhiteboard(doc, host){
   const contextGearSection=makeContextSection("교구·정리","wb-context-gear-section");
   const contextGearActions=document.createElement("div"); contextGearActions.className="wb-context-actions wb-context-gear-actions";
   const contextRulerBtn=contextAction("자","자 꺼내기 — 대고 그으면 곧게 그려집니다 (왼쪽 손잡이로 길이 조절)","",()=>setGear("ruler"));
-  const contextProtractorBtn=contextAction("각도기","각도기 꺼내기 — 가운데에서 그으면 1°씩 맞춰집니다","",()=>setGear("protractor"));
-  const contextCompassBtn=contextAction("컴퍼스","컴퍼스 꺼내기 — 연필 손잡이를 돌리면 호·원이 그려집니다","",()=>setGear("compass"));
+  const contextProtractorBtn=contextAction("각도기","각도기 꺼내기 — 가운데에서 그으면 1°씩 맞춰집니다 (왼쪽 손잡이로 크기 조절)","",()=>setGear("protractor"));
+  const contextCompassBtn=contextAction("컴퍼스","컴퍼스 꺼내기 — 연필 손잡이를 돌리면 호·원이 그려집니다 (중간 손잡이로 반지름 조절)","",()=>setGear("compass"));
   const contextSnapBtn=contextAction("15° 맞추기","직선·화살표를 15°씩 맞춰 긋기","",()=>{gear.snap=!gear.snap;saveGearPrefs();syncGearButtons();});
   const contextTidyBtn=contextAction("손그림 정리","대충 그린 도형을 반듯하게 바꾸기","",()=>{
     gear.tidy=!gear.tidy;saveGearPrefs();syncGearButtons();
@@ -2842,6 +2878,8 @@ function renderWhiteboard(doc, host){
     row.append(dot, caption, input); graphRows.appendChild(row);
     return input;
   });
+  // 예시 식은 "커서가 있던 칸"에 들어간다. 예시 카드를 누르면 초점이 카드로 옮겨가므로 마지막 칸을 기억해 둔다.
+  let graphFocusIndex = 0;
   const makeGearNumber = (caption, value, title, className) => {
     const wrap = document.createElement("label"); wrap.className = "wb-graph-field";
     const name = document.createElement("span"); name.textContent = caption;
@@ -2879,13 +2917,18 @@ function renderWhiteboard(doc, host){
   const chartTitle = document.createElement("input"); chartTitle.type = "text"; chartTitle.className = "wb-chart-title";
   chartTitle.placeholder = "차트 제목(선택)"; chartTitle.setAttribute("aria-label", "차트 제목");
   const chartData = document.createElement("textarea"); chartData.className = "wb-formula-input"; chartData.rows = 4;
-  chartData.placeholder = "한 줄에 하나씩: 국어, 12\n히스토그램·산점도는 숫자만 또는 ‘x, y’";
+  chartData.placeholder = "한 줄에 하나씩: 국어, 12\n묶음을 더 넣으려면 값을 여러 열로: 국어, 7, 9\n첫 줄에 ‘과목, 1반, 2반’처럼 이름을 적으면 범례가 붙어요";
+  chartData.rows = 5;
   chartData.setAttribute("aria-label", "차트에 쓸 자료");
+  // 묶음(또는 항목)마다 색을 고른다. 고른 색은 차트에 저장돼 다시 열어도 그대로다.
+  const chartColorRow = document.createElement("div"); chartColorRow.className = "wb-chart-colors"; chartColorRow.hidden = true;
+  chartColorRow.setAttribute("aria-label", "묶음 색");
+  let chartPalette = [];
   const chartPreview = document.createElement("canvas"); chartPreview.className = "wb-tool-preview";
   chartPreview.setAttribute("aria-label", "차트 미리보기");
   const chartMessage = document.createElement("p"); chartMessage.className = "wb-tool-message";
   const chartActions = document.createElement("div"); chartActions.className = "wb-formula-actions";
-  const chartClear = mkBtn("비우기", "입력한 자료 지우기", "wb-formula-save", () => { chartData.value = ""; chartTitle.value = ""; refreshChartPreview(); });
+  const chartClear = mkBtn("비우기", "입력한 자료 지우기", "wb-formula-save", () => { chartData.value = ""; chartTitle.value = ""; chartPalette = []; refreshChartPreview(); });
   const chartCancel = mkBtn("취소", "차트 편집 취소", "wb-formula-cancel", resetChartEditor); chartCancel.hidden = true;
   const chartInsert = mkBtn("차트 넣기", "입력한 자료로 만든 차트를 화이트보드에 넣기", "wb-formula-insert", submitChart);
   chartActions.append(chartClear, chartCancel, chartInsert);
@@ -2900,7 +2943,7 @@ function renderWhiteboard(doc, host){
   const simCount = document.createElement("input"); simCount.type = "number"; simCount.min = "1"; simCount.max = "10000"; simCount.step = "10";
   simCount.value = "100"; simCount.className = "wb-graph-number"; simCount.title = "실험 횟수"; simCount.setAttribute("aria-label", simCount.title);
   simCountWrap.append(simCountName, simCount); simRow.appendChild(simCountWrap);
-  chartBuilder.append(simRow, chartTypeBar, chartTitle, chartData, chartPreview, chartMessage, chartActions);
+  chartBuilder.append(simRow, chartTypeBar, chartTitle, chartData, chartColorRow, chartPreview, chartMessage, chartActions);
 
   // ----- 화학: 주기율표와 반응식 균형 -----
   const chemBuilder = document.createElement("div"); chemBuilder.className = "wb-formula-builder wb-chem-builder"; chemBuilder.hidden = true;
@@ -2975,7 +3018,9 @@ function renderWhiteboard(doc, host){
     { label:"꺾은선그래프", type:"line", title:"월별 기온(℃)", data:"3월, 8\n4월, 14\n5월, 19\n6월, 23\n7월, 26" },
     { label:"원그래프", type:"pie", title:"쉬는 시간에 하는 일", data:"독서, 5\n운동, 9\n이야기, 12\n기타, 4" },
     { label:"히스토그램", type:"histogram", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77" },
-    { label:"산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88" }
+    { label:"산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88" },
+    { label:"반별 비교(묶음 막대)", type:"bar", title:"반별 좋아하는 과목", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8\n영어, 5, 11\n과학, 9, 6" },
+    { label:"두 해 비교(꺾은선)", type:"line", title:"월별 기온(℃)", data:"월, 작년, 올해\n3월, 8, 9\n4월, 14, 16\n5월, 19, 21\n6월, 23, 26\n7월, 26, 29" }
   ];
   let formulaStops = [], formulaStopIndex = -1, formulaInputBefore = null;
   const educationMatches = (entry, term) => {
@@ -3147,7 +3192,17 @@ function renderWhiteboard(doc, host){
     editingPlotItem = null; graphInsert.textContent = "그래프 넣기"; graphCancel.hidden = true; refreshGraphPreview();
   }
   function applyGraphPreset(preset){
-    graphInputs.forEach((input, index) => { input.value = preset.curves[index] || ""; });
+    // 커서가 있던 칸부터 채운다. 나머지 칸은 건드리지 않아야 식 여러 개를 골라 담을 수 있다.
+    const curves = Array.isArray(preset.curves) ? preset.curves : [];
+    const start = Math.max(0, Math.min(graphFocusIndex, graphInputs.length - curves.length));
+    curves.forEach((source, offset) => {
+      const input = graphInputs[start + offset];
+      if (input) input.value = source;
+    });
+    const landed = graphInputs[Math.min(start + Math.max(1, curves.length) - 1, graphInputs.length - 1)];
+    graphFocusIndex = graphInputs.indexOf(landed);
+    landed.focus({ preventScroll:true });
+    try { landed.setSelectionRange(landed.value.length, landed.value.length); } catch(_){}
     if (Number.isFinite(preset.xMin)) graphXMin.input.value = String(preset.xMin);
     if (Number.isFinite(preset.xMax)) graphXMax.input.value = String(preset.xMax);
     if (preset.params) Object.assign(graphParamValues, preset.params);
@@ -3184,10 +3239,70 @@ function renderWhiteboard(doc, host){
     toggleEducationPanel(true);
   };
 
+  /* 색을 몇 개 고르게 할지는 차트 종류마다 다르다. chartGroup 이 palette 를 쓰는 순서와 똑같이 맞춘다.
+     묶음이 여럿이면 묶음마다, 막대·원그래프 한 묶음이면 항목마다, 꺾은선·산점도·히스토그램은 하나. */
+  const CHART_COLOR_LIMIT = 12;
+  function chartColorSlots(){
+    let table = null;
+    try { table = MNBoardTools.parseChartTable(chartData.value); } catch(_){ return []; }
+    const rows = table.rows;
+    const seriesCount = Math.max(1, rows.reduce((most, row) => Math.max(most, row.values.length), 1));
+    if (chartType === "histogram") return ["기둥"];
+    if (seriesCount > 1 && chartType !== "pie"){
+      return Array.from({ length:Math.min(seriesCount, CHART_COLOR_LIMIT) }, (_, index) => table.series[index] || `자료 ${index + 1}`);
+    }
+    if (chartType === "line") return ["꺾은선"];
+    if (chartType === "scatter") return ["점"];
+    return rows.slice(0, CHART_COLOR_LIMIT).map((row, index) => String(row.label || index + 1));
+  }
+  // 고른 색은 자리(index)로 기억한다. 고르지 않은 자리는 기본 팔레트가 그대로 온다.
+  function chartPaletteFor(slotCount){
+    const base = MNBoardTools.CHART_PALETTE;
+    const count = Math.max(base.length, slotCount || 0);
+    return Array.from({ length:count }, (_, index) => chartPalette[index] || base[index % base.length]);
+  }
+  let chartColorKey = "";
+  function syncChartColorReset(){
+    const existing = chartColorRow.querySelector(".wb-chart-colors-reset");
+    const wanted = chartPalette.some((color) => color);
+    if (wanted && !existing){
+      const reset = document.createElement("button"); reset.type = "button"; reset.className = "wb-chart-colors-reset";
+      reset.textContent = "색 되돌리기"; reset.title = "고른 색을 기본 색으로 되돌리기";
+      reset.addEventListener("click", () => { chartPalette = []; refreshChartPreview(); });
+      chartColorRow.appendChild(reset);
+    } else if (!wanted && existing){
+      existing.remove();
+    }
+  }
+  function renderChartColors(slots){
+    const key = JSON.stringify(slots);
+    const palette = chartPaletteFor(slots.length);
+    if (key === chartColorKey){
+      // 자리 구성이 그대로면 색만 갱신한다. 다시 만들면 열려 있는 색 고르기 창이 끊긴다.
+      chartColorRow.querySelectorAll("input[type=color]").forEach((picker, index) => {
+        if (picker !== document.activeElement && palette[index]) picker.value = palette[index];
+      });
+      syncChartColorReset();
+      return;
+    }
+    chartColorKey = key;
+    chartColorRow.textContent = "";
+    chartColorRow.hidden = !slots.length;
+    if (!slots.length) return;
+    slots.forEach((name, index) => {
+      const chip = document.createElement("label"); chip.className = "wb-chart-color";
+      const picker = document.createElement("input"); picker.type = "color"; picker.value = palette[index];
+      picker.title = `${name} 색 고르기`; picker.setAttribute("aria-label", picker.title);
+      picker.addEventListener("input", () => { chartPalette[index] = picker.value; refreshChartPreview(); });
+      const text = document.createElement("span"); text.textContent = name; text.title = name;
+      chip.append(picker, text); chartColorRow.appendChild(chip);
+    });
+    syncChartColorReset();
+  }
   function readChartSpec(size){
     return {
       type:chartType, data:chartData.value, title:chartTitle.value.trim(),
-      axisColor:boardInkColor(),
+      axisColor:boardInkColor(), palette:chartPaletteFor(chartColorSlots().length),
       width:(size && size.width) || 560, height:(size && size.height) || 400
     };
   }
@@ -3196,7 +3311,7 @@ function renderWhiteboard(doc, host){
     let result;
     try { result = MNBoardTools.simulateTrials(kind, Number(simCount.value) || 100, { min:1, max:10 }); }
     catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "실험을 하지 못했어요.", 2400); return; }
-    chartType = "bar"; chartTitle.value = result.title; chartData.value = result.data;
+    chartType = "bar"; chartTitle.value = result.title; chartData.value = result.data; chartPalette = [];
     refreshChartPreview(result.summary);
   }
   function refreshChemistry(){
@@ -3232,12 +3347,14 @@ function renderWhiteboard(doc, host){
     if (!chartData.value.trim()){
       chartMessage.textContent = "자료를 입력하면 미리보기가 나타나요. 아래 예시를 눌러 시작해도 좋아요.";
       chartMessage.classList.remove("is-error");
+      chartColorRow.hidden = true; chartColorRow.textContent = ""; chartColorKey = "";
       chartPreview.hidden = true; chartInsert.disabled = true; return;
     }
+    renderChartColors(chartColorSlots());
     try {
       const group = MNBoardTools.chartGroup(readChartSpec({ width:560, height:400 }));
       chartPreview.hidden = false; drawToolPreview(chartPreview, group);
-      chartMessage.textContent = note || "쉼표·탭·띄어쓰기로 이름과 값을 나눠 적으면 됩니다. 표를 복사해 붙여넣어도 돼요.";
+      chartMessage.textContent = note || "쉼표·탭·띄어쓰기로 이름과 값을 나눠 적으면 됩니다. 값을 여러 열 적으면 묶음끼리 나란히 비교하고, 표를 복사해 붙여넣어도 돼요.";
       chartMessage.classList.remove("is-error"); chartInsert.disabled = false;
     } catch(error){
       chartPreview.hidden = true; chartInsert.disabled = true;
@@ -3250,6 +3367,7 @@ function renderWhiteboard(doc, host){
   }
   function applyChartPreset(preset){
     chartType = preset.type; chartTitle.value = preset.title || ""; chartData.value = preset.data || "";
+    chartPalette = [];                      // 자료가 통째로 바뀌므로 색도 기본으로 되돌린다
     refreshChartPreview();
   }
   function submitChart(){
@@ -3267,7 +3385,14 @@ function renderWhiteboard(doc, host){
     if (spec){
       chartType = CHART_TYPES.some(([id]) => id === spec.type) ? spec.type : "bar";
       chartTitle.value = String(spec.title || "");
-      chartData.value = (Array.isArray(spec.rows) ? spec.rows : []).map((row) => `${row.label}, ${row.value}`).join("\n");
+      // 계열이 여럿이면 이름 줄까지 되살려야 다시 열었을 때 같은 차트가 나온다.
+      const rows = Array.isArray(spec.rows) ? spec.rows : [];
+      const series = Array.isArray(spec.series) ? spec.series : [];
+      const cells = (row) => (Array.isArray(row.values) ? row.values : [row.value]).map((value) => (value == null ? "" : value));
+      const lines = rows.map((row) => [row.label].concat(cells(row)).join(", "));
+      if (series.length) lines.unshift(["항목"].concat(series).join(", "));
+      chartData.value = lines.join("\n");
+      chartPalette = Array.isArray(spec.palette) ? spec.palette.slice() : [];
     }
     chartInsert.textContent = "차트 바꾸기"; chartCancel.hidden = false;
     toggleEducationPanel(true);
@@ -3276,8 +3401,9 @@ function renderWhiteboard(doc, host){
     const chip = mkBtn(label, label + " 차트로 만들기", "wb-formula-group", () => { chartType = id; refreshChartPreview(); });
     chip.dataset.chartType = id; chartTypeBar.appendChild(chip);
   }
-  graphInputs.forEach((input) => {
+  graphInputs.forEach((input, index) => {
     input.addEventListener("input", refreshGraphPreview);
+    input.addEventListener("focus", () => { graphFocusIndex = index; });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitGraph(); } e.stopPropagation(); });
   });
   for (const field of [graphXMin, graphXMax, graphYMin, graphYMax]) field.input.addEventListener("change", refreshGraphPreview);
@@ -3334,7 +3460,7 @@ function renderWhiteboard(doc, host){
     const presets = eduCategory === "graph" ? GRAPH_PRESETS : CHART_PRESETS;
     for (const preset of presets){
       const card = document.createElement("button"); card.type = "button"; card.className = "wb-edu-card wb-edu-preset";
-      card.title = preset.label + " — 눌러서 입력칸 채우기";
+      card.title = preset.label + (eduCategory === "graph" ? " — 눌러서 커서가 있는 식 칸 채우기" : " — 눌러서 입력칸 채우기");
       const visual = document.createElement("span"); visual.className = "wb-edu-visual";
       visual.textContent = eduCategory === "graph" ? "y = " + preset.curves[0] : preset.title;
       const label = document.createElement("span"); label.className = "wb-edu-label"; label.textContent = preset.label;
@@ -3696,13 +3822,13 @@ function renderWhiteboard(doc, host){
     const on = setGear("ruler");
     if (on && typeof toast === "function") toast("자를 놓았어요. 몸통을 끌어 옮기고, 오른쪽 동그라미로 돌리고, 왼쪽 동그라미를 끌어 길이를 40cm까지 늘립니다.", 3600);
   });
-  const protractorBtn = mkIconBtn("protractor", "각도기 — 가운데에서 시작해 그으면 각도가 1°씩 맞춰집니다", "wb-act wb-gear", () => {
+  const protractorBtn = mkIconBtn("protractor", "각도기 — 가운데에서 시작해 그으면 각도가 1°씩 맞춰집니다 (밑변 4~30cm 조절)", "wb-act wb-gear", () => {
     const on = setGear("protractor");
-    if (on && typeof toast === "function") toast("각도기를 놓았어요. 가운데 점에서 시작해 그으면 각도가 표시됩니다.", 3200);
+    if (on && typeof toast === "function") toast("각도기를 놓았어요. 가운데 점에서 시작해 그으면 각도가 표시되고, 왼쪽 동그라미를 끌면 크기가 커집니다.", 3600);
   });
-  const compassBtn = mkIconBtn("compass", "컴퍼스 — 연필 손잡이를 돌리면 호와 원이 그려집니다", "wb-act wb-gear", () => {
+  const compassBtn = mkIconBtn("compass", "컴퍼스 — 연필 손잡이를 돌리면 호와 원이 그려집니다 (반지름 2~30cm 조절)", "wb-act wb-gear", () => {
     const on = setGear("compass");
-    if (on && typeof toast === "function") toast("컴퍼스를 놓았어요. 가운데=바늘, 가운데 손잡이=반지름, 끝 손잡이를 돌리면 호가 그려집니다.", 3600);
+    if (on && typeof toast === "function") toast("컴퍼스를 놓았어요. 가운데=바늘, 중간 손잡이를 끌면 반지름이 2~30cm로 벌어지고, 끝 손잡이를 돌리면 호가 그려집니다.", 3600);
   });
   const snapBtn = mkBtn("15°", "각도 맞추기 — 직선·화살표를 15°씩 맞춰 긋습니다 (Shift 를 눌러도 같아요)", "wb-act wb-gear wb-gear-snap", () => {
     gear.snap = !gear.snap; saveGearPrefs(); syncGearButtons();

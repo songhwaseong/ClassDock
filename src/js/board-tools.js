@@ -380,24 +380,61 @@ const MNBoardTools = (() => {
 
   /* ---------- 3. 자료 차트 ---------- */
 
-  // "국어, 30" · "국어\t30" · "국어 30" · 숫자만 나열 — 교실에서 실제로 칠 법한 형태를 모두 받는다.
-  function parseChartData(text){
+  const chartNumber = (part) => {
+    const value = Number(String(part).replace(/,/g, ""));
+    return Number.isFinite(value) ? value : null;
+  };
+
+  /* "국어, 30" · "국어\t30" · "국어 30" · 숫자만 나열 — 교실에서 실제로 칠 법한 형태를 모두 받는다.
+     값을 여러 열 적으면 자료 묶음(계열)이 여러 개인 표가 된다.
+       과목, 1반, 2반      ← 첫 줄의 둘째 칸부터가 전부 숫자가 아니면 이름 줄
+       국어, 7, 9
+     결과: { series:["1반","2반"], rows:[{ label:"국어", values:[7, 9] }] } */
+  function parseChartTable(text){
     const lines = String(text == null ? "" : text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const rows = [];
-    for (const line of lines){
+    let series = [];
+    lines.forEach((line, index) => {
       const parts = line.split(/\s*[,\t;]\s*|\s{2,}|\s+/).filter((part) => part !== "");
-      if (parts.length === 1){
-        const value = Number(parts[0].replace(/,/g, ""));
-        if (Number.isFinite(value)) rows.push({ label:"", value });
-        continue;
+      if (!parts.length) return;
+      if (index === 0 && parts.length > 1 && parts.slice(1).every((part) => chartNumber(part) === null)){
+        series = parts.slice(1); return;
       }
-      const tail = Number(String(parts[parts.length - 1]).replace(/,/g, ""));
-      if (Number.isFinite(tail)) rows.push({ label:parts.slice(0, -1).join(" "), value:tail });
-    }
+      if (parts.length === 1){
+        const only = chartNumber(parts[0]);
+        if (only !== null) rows.push({ label:"", values:[only] });
+        return;
+      }
+      // 뒤에서부터 숫자만 값으로 걷되 첫 칸은 언제나 이름으로 남긴다("1, 3" 은 산점도의 x,y다).
+      let start = parts.length;
+      while (start > 1 && chartNumber(parts[start - 1]) !== null) start--;
+      if (start >= parts.length) return;                       // 값이 하나도 없는 줄은 건너뛴다
+      rows.push({ label:parts.slice(0, start).join(" "), values:parts.slice(start).map(chartNumber) });
+    });
     if (!rows.length) throw toolError("자료를 읽지 못했어요. 한 줄에 ‘이름, 값’ 형식으로 적어 주세요.");
     // 이름이 하나도 없으면 1,2,3… 을 붙여 준다(숫자만 붙여넣은 경우).
     if (rows.every((row) => !row.label)) rows.forEach((row, index) => { row.label = String(index + 1); });
-    return rows;
+    // 줄마다 열 개수가 다르면 짧은 줄은 빈칸으로 채워 계열 수를 맞춘다.
+    const width = rows.reduce((most, row) => Math.max(most, row.values.length), 0);
+    for (const row of rows) while (row.values.length < width) row.values.push(null);
+    return { series:series.slice(0, width), rows };
+  }
+
+  // 계열이 하나뿐인 옛 형태({label, value})가 필요한 곳을 위한 얇은 껍데기.
+  function parseChartData(text){
+    return parseChartTable(text).rows.map((row) => ({ label:row.label, value:row.values[0] }));
+  }
+
+  // 호출자가 rows 를 직접 넘긴 경우({label,value} 도 받아 준다) 표 형태로 맞춘다.
+  function normalizeChartTable(rows, series){
+    const normalized = rows.map((row) => {
+      const values = Array.isArray(row && row.values) ? row.values.map((value) => (value == null ? null : num(value)))
+        : [num(row && row.value)];
+      return { label:String((row && row.label) || ""), values };
+    });
+    const width = normalized.reduce((most, row) => Math.max(most, row.values.length), 0);
+    for (const row of normalized) while (row.values.length < width) row.values.push(null);
+    return { series:(Array.isArray(series) ? series : []).slice(0, width), rows:normalized };
   }
 
   function histogramBins(values, binCount){
@@ -438,9 +475,25 @@ const MNBoardTools = (() => {
     const width = Math.round(clamp(num(options.width, 560), 220, 2400));
     const height = Math.round(clamp(num(options.height, 400), 180, 2400));
     const axisColor = /^#[0-9a-f]{6}$/i.test(String(options.axisColor || "")) ? String(options.axisColor).toLowerCase() : "#111111";
-    const palette = Array.isArray(options.palette) && options.palette.length ? options.palette : CHART_PALETTE;
-    const rows = Array.isArray(options.rows) && options.rows.length ? options.rows.slice() : parseChartData(options.data);
+    // 색은 고른 것만 받아 쓰되, 문서에서 되살린 값이 망가져 있으면 기본 색으로 대신한다.
+    const chosen = Array.isArray(options.palette) ? options.palette : [];
+    const palette = chosen.length
+      ? chosen.map((color, index) => (/^#[0-9a-f]{6}$/i.test(String(color)) ? String(color).toLowerCase() : CHART_PALETTE[index % CHART_PALETTE.length]))
+      : CHART_PALETTE;
+    const table = Array.isArray(options.rows) && options.rows.length
+      ? normalizeChartTable(options.rows, options.series)
+      : parseChartTable(options.data);
+    const rows = table.rows;
     const title = String(options.title || "").trim();
+    // 원그래프·히스토그램은 한 묶음만 그린다(부채꼴을 겹칠 수 없고, 도수분포는 값 목록 자체가 자료다).
+    const seriesCount = type === "pie" || type === "histogram"
+      ? 1
+      : Math.max(1, rows.reduce((most, row) => Math.max(most, row.values.length), 1));
+    const seriesName = (index) => String(table.series[index] || `자료 ${index + 1}`);
+    const valueAt = (row, index) => {
+      const value = row.values[index];
+      return value == null || !Number.isFinite(Number(value)) ? null : num(value);
+    };
 
     const items = [];
     const line = (x1, y1, x2, y2, extra) => Object.assign({ type:"line", x1, y1, x2, y2, color:axisColor, width:1.6 }, extra || {});
@@ -449,13 +502,13 @@ const MNBoardTools = (() => {
     const top = title ? 34 : 16;
 
     if (type === "pie"){
-      const total = rows.reduce((sum, row) => sum + Math.max(0, num(row.value)), 0);
+      const total = rows.reduce((sum, row) => sum + Math.max(0, num(valueAt(row, 0))), 0);
       if (total <= 0) throw toolError("원그래프는 0보다 큰 값이 필요해요.");
       const radius = Math.max(30, Math.min(width * 0.3, (height - top - 24) / 2));
       const cx = radius + 24, cy = top + radius + 6;
       let angle = -Math.PI / 2;
       rows.forEach((row, index) => {
-        const value = Math.max(0, num(row.value));
+        const value = Math.max(0, num(valueAt(row, 0)));
         const sweep = (value / total) * Math.PI * 2;
         const color = palette[index % palette.length];
         const points = [{ x:cx, y:cy }, ...arcPoints(cx, cy, radius, angle, angle + sweep), { x:cx, y:cy }];
@@ -466,14 +519,38 @@ const MNBoardTools = (() => {
         items.push(label(cx + radius + 46, legendY, `${row.label} ${formatNumber(value, 0.01)} (${Math.round(value / total * 100)}%)`, 13));
         angle += sweep;
       });
-      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"원그래프", educationColor:axisColor, chartSpec:{ type, rows, title, width, height } };
+      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"원그래프", educationColor:axisColor, chartSpec:{ type, rows, series:table.series, palette, title, width, height } };
     }
 
-    const plotRows = type === "histogram" ? histogramBins(rows.map((row) => num(row.value)), options.bins) : rows;
-    const area = { x:52, y:top + 8, w:width - 52 - 20, h:height - top - 8 - 44 };
+    const plotRows = type === "histogram"
+      ? histogramBins(rows.map((row) => num(valueAt(row, 0))), options.bins).map((bin) => ({ label:bin.label, values:[bin.value] }))
+      : rows;
+    // 계열이 여럿이면 맨 아래 한 줄을 범례 자리로 비워 둔다(가로축 이름과 겹치지 않게).
+    const legendHeight = seriesCount > 1 ? 24 : 0;
+    const area = { x:52, y:top + 8, w:width - 52 - 20, h:height - top - 8 - 44 - legendHeight };
     if (area.w < 40 || area.h < 40) throw toolError("차트를 그리기에 크기가 너무 작아요.");
 
-    const values = plotRows.map((row) => num(row.value));
+    // 범례는 가로축 이름 아래 한 줄로 깐다. 어느 색이 어느 묶음인지 보여 준다.
+    const drawSeriesLegend = () => {
+      if (seriesCount < 2) return;
+      let x = area.x;
+      const y = area.y + area.h + 30;
+      for (let series = 0; series < seriesCount; series++){
+        const name = seriesName(series), color = palette[series % palette.length];
+        items.push({ type:"rect", x1:x, y1:y, x2:x + 14, y2:y + 12, color, width:1, fill:true, alpha:0.78 });
+        items.push(label(x + 19, y - 1, name, 12));
+        x += 19 + Math.max(24, name.length * 9) + 12;
+        if (x > area.x + area.w - 40) break;                 // 넘치면 자른다(색 순서는 표 순서와 같다)
+      }
+    };
+
+    const values = [];
+    for (const row of plotRows){
+      for (let index = 0; index < seriesCount; index++){
+        const value = valueAt(row, index);
+        if (value !== null) values.push(value);
+      }
+    }
     let maxValue = Math.max(...values, 0), minValue = Math.min(...values, 0);
     if (maxValue === minValue) maxValue = minValue + 1;
     const step = niceStep(maxValue - minValue, Math.max(3, Math.round(area.h / 46)));
@@ -500,29 +577,52 @@ const MNBoardTools = (() => {
         items.push(line(px(value), area.y + area.h, px(value), area.y + area.h + 4, { width:1.4 }));
         items.push(label(px(value) - 10, area.y + area.h + 8, formatNumber(value, xStep), 11));
       }
-      usable.forEach((x, index) => {
-        const cx = px(x), cy = vy(values[index]), r = 4.5;
-        items.push({ type:"ellipse", x1:cx - r, y1:cy - r, x2:cx + r, y2:cy + r, color:palette[0], width:1.6, fill:true, alpha:0.85 });
-      });
-      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"산점도", educationColor:axisColor, chartSpec:{ type, rows, title, width, height } };
+      for (let series = 0; series < seriesCount; series++){
+        const color = palette[series % palette.length];
+        usable.forEach((x, index) => {
+          const value = valueAt(plotRows[index], series);
+          if (value === null) return;
+          const cx = px(x), cy = vy(value), r = 4.5;
+          items.push({ type:"ellipse", x1:cx - r, y1:cy - r, x2:cx + r, y2:cy + r, color, width:1.6, fill:true, alpha:0.85 });
+        });
+      }
+      drawSeriesLegend();
+      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"산점도", educationColor:axisColor, chartSpec:{ type, rows, series:table.series, palette, title, width, height } };
     }
 
     const slot = area.w / plotRows.length;
     if (type === "line"){
-      const points = plotRows.map((row, index) => ({ x:area.x + slot * (index + 0.5), y:vy(num(row.value)) }));
-      items.push({ type:"polyline", points, color:palette[0], width:2.6 });
-      points.forEach((point) => {
-        items.push({ type:"ellipse", x1:point.x - 4, y1:point.y - 4, x2:point.x + 4, y2:point.y + 4, color:palette[0], width:1.5, fill:true });
-      });
+      for (let series = 0; series < seriesCount; series++){
+        const color = palette[series % palette.length];
+        const points = [];
+        plotRows.forEach((row, index) => {
+          const value = valueAt(row, series);
+          if (value !== null) points.push({ x:area.x + slot * (index + 0.5), y:vy(value) });
+        });
+        if (points.length > 1) items.push({ type:"polyline", points, color, width:2.6 });
+        points.forEach((point) => {
+          items.push({ type:"ellipse", x1:point.x - 4, y1:point.y - 4, x2:point.x + 4, y2:point.y + 4, color, width:1.5, fill:true });
+        });
+      }
     } else {
-      const barWidth = Math.max(6, slot * (type === "histogram" ? 0.94 : 0.62));
+      // 계열이 여럿이면 한 칸 안에 묶음 막대로 나란히 세운다.
+      const groupWidth = slot * (type === "histogram" ? 0.94 : 0.62);
+      const barWidth = Math.max(seriesCount > 1 ? 3 : 6, groupWidth / seriesCount);
+      const showValues = plotRows.length * seriesCount <= 12;
       plotRows.forEach((row, index) => {
-        const value = num(row.value), center = area.x + slot * (index + 0.5);
-        const color = type === "histogram" ? palette[0] : palette[index % palette.length];
-        const y1 = vy(0), y2 = vy(value);
-        items.push({ type:"rect", x1:center - barWidth / 2, y1:Math.min(y1, y2), x2:center + barWidth / 2, y2:Math.max(y1, y2), color, width:1.4, fill:true, alpha:0.78 });
-        items.push({ type:"rect", x1:center - barWidth / 2, y1:Math.min(y1, y2), x2:center + barWidth / 2, y2:Math.max(y1, y2), color:axisColor, width:1.2 });
-        items.push(label(center - String(formatNumber(value, step)).length * 3.2, Math.min(y1, y2) - 15, formatNumber(value, step), 12));
+        const center = area.x + slot * (index + 0.5);
+        for (let series = 0; series < seriesCount; series++){
+          const value = valueAt(row, series);
+          if (value === null) continue;
+          // 한 묶음(막대 하나면 예전과 같은 자리)의 왼쪽 끝에서 계열 순서만큼 옮겨 세운다.
+          const barCenter = center - groupWidth / 2 + barWidth * (series + 0.5);
+          const color = type === "histogram" ? palette[0]
+            : seriesCount > 1 ? palette[series % palette.length] : palette[index % palette.length];
+          const y1 = vy(0), y2 = vy(value);
+          items.push({ type:"rect", x1:barCenter - barWidth / 2, y1:Math.min(y1, y2), x2:barCenter + barWidth / 2, y2:Math.max(y1, y2), color, width:1.4, fill:true, alpha:0.78 });
+          items.push({ type:"rect", x1:barCenter - barWidth / 2, y1:Math.min(y1, y2), x2:barCenter + barWidth / 2, y2:Math.max(y1, y2), color:axisColor, width:1.2 });
+          if (showValues) items.push(label(barCenter - String(formatNumber(value, step)).length * 3.2, Math.min(y1, y2) - 15, formatNumber(value, step), 12));
+        }
       });
     }
     plotRows.forEach((row, index) => {
@@ -530,12 +630,13 @@ const MNBoardTools = (() => {
       const text = String(row.label || "");
       items.push(label(center - Math.min(text.length * 3.4, slot / 2), area.y + area.h + 8, text, plotRows.length > 9 ? 10 : 12));
     });
+    drawSeriesLegend();
 
     const labels = { bar:"막대그래프", line:"꺾은선그래프", histogram:"히스토그램" };
     return {
       type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items,
       educationLabel:labels[type] || "차트", educationColor:axisColor,
-      chartSpec:{ type, rows, title, width, height, bins:options.bins || null }
+      chartSpec:{ type, rows, series:table.series, palette, title, width, height, bins:options.bins || null }
     };
   }
 
@@ -1172,7 +1273,7 @@ const MNBoardTools = (() => {
   return Object.freeze({
     PX_PER_CM, CHART_PALETTE, CURVE_COLORS, PERIODIC_TABLE, ELEMENT_CATEGORY_COLORS,
     parseExpression, stripEquationPrefix, plotGroup, niceStep, formatNumber, clipSegment,
-    parseChartData, chartGroup, histogramBins, arcPoints,
+    parseChartData, parseChartTable, chartGroup, histogramBins, arcPoints,
     recognizeStroke, recognizedShapeName, simplifyPath,
     rulerEdge, projectOnSegment, snapToRuler, snapAngle, measureAngle, lengthInCm, compassArcItem,
     makeTransform, canTransformItem, transformedItem, transformName, itemBoundsSafe,
