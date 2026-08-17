@@ -734,6 +734,99 @@ function wire(){
     byId("settingPetQuietTyping").disabled = !enabled;
   };
   byId("settingPetFocus").addEventListener("change", syncPetFocusSettingFields);
+  const mapSearchProviderInput = byId("settingMapSearchProvider");
+  const mapSearchKeyWrap = byId("settingMapSearchKeyWrap");
+  const mapSearchKeyInput = byId("settingMapSearchKey");
+  const mapSearchRemember = byId("settingMapSearchRemember");
+  const mapSearchRememberWrap = byId("settingMapSearchRememberWrap");
+  const mapSearchStatus = byId("settingMapSearchStatus");
+  const mapSearchTest = byId("settingMapSearchTest");
+  const mapSearchClear = byId("settingMapSearchClear");
+  let mapSearchKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setMapSearchStatus = (text, kind) => {
+    mapSearchStatus.textContent = typeof window.t === "function" ? window.t(text) : text;
+    mapSearchStatus.classList.toggle("ok", kind === "ok");
+    mapSearchStatus.classList.toggle("bad", kind === "bad");
+  };
+  const syncMapSearchFields = () => {
+    const kakao = mapSearchProviderInput.value === "kakao";
+    mapSearchKeyWrap.hidden = !kakao;
+    if (!kakao) return;
+    const available = mapSearchKeyStatus.available;
+    mapSearchKeyInput.disabled = !available;
+    mapSearchTest.disabled = !available;
+    mapSearchClear.disabled = !available || !mapSearchKeyStatus.hasKey;
+    mapSearchRemember.disabled = !available || !mapSearchKeyStatus.persistentSupported;
+    mapSearchRememberWrap.hidden = !mapSearchKeyStatus.persistentSupported;
+    mapSearchRemember.checked = !!mapSearchKeyStatus.remembered;
+    mapSearchKeyInput.placeholder = mapSearchKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "REST API 키 입력";
+  };
+  const refreshMapSearchKeyStatus = async (message, kind) => {
+    mapSearchKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/map-search-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      mapSearchKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      // 앱 모드가 일반 웹 창과 다른 Chromium 프로필로 열려도 런처에 저장한 공급자를 이어 쓴다.
+      if (status.provider === "kakao" || status.provider === "osm"){
+        mapSearchProviderInput.value = status.provider;
+        if (appSettings.mapSearchProvider !== status.provider) saveAppSettings({ mapSearchProvider:status.provider });
+      }
+      if (message) setMapSearchStatus(message, kind);
+      else if (mapSearchKeyStatus.hasKey) setMapSearchStatus(mapSearchKeyStatus.remembered
+        ? "카카오 키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "카카오 키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setMapSearchStatus("카카오 REST API 키가 아직 없습니다.", "");
+    } catch(_){ setMapSearchStatus("카카오 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncMapSearchFields();
+  };
+  const saveMapSearchProviderToLauncher = async (provider) => {
+    try {
+      const value = provider === "kakao" ? "kakao" : "osm";
+      await fetch("/map-search-provider?value=" + value, {
+        method:"POST", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store"
+      });
+    } catch(_){}
+  };
+  mapSearchProviderInput.addEventListener("change", syncMapSearchFields);
+  mapSearchTest.addEventListener("click", async () => {
+    const key = mapSearchKeyInput.value.trim();
+    if (!key){ setMapSearchStatus("저장할 카카오 REST API 키를 입력해 주세요.", "bad"); mapSearchKeyInput.focus(); return; }
+    mapSearchTest.disabled = true; mapSearchClear.disabled = true;
+    setMapSearchStatus("카카오 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/map-search-key?remember=" + (mapSearchRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      mapSearchKeyInput.value = "";
+      // '키 저장·연결 시험'은 런처에 즉시 반영되는 동작이다. 공급자만 아래 설정 저장을 한 번 더
+      // 눌러야 바뀌면 연결 성공 직후 지도에서는 여전히 OSM을 써 혼란스럽다 — 성공한 순간부터
+      // 카카오를 현재 공급자로 저장한다.
+      mapSearchProviderInput.value = "kakao";
+      saveAppSettings({ mapSearchProvider:"kakao" });
+      await refreshMapSearchKeyStatus("카카오 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      setMapSearchStatus(error && error.message === "kakao-key-save-failed"
+        ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : "카카오 키를 확인하지 못했습니다. REST API 키인지 확인해 주세요.", "bad");
+      syncMapSearchFields();
+    }
+  });
+  mapSearchClear.addEventListener("click", async () => {
+    mapSearchClear.disabled = true;
+    try {
+      const response = await fetch("/map-search-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      mapSearchKeyInput.value = "";
+      await refreshMapSearchKeyStatus("카카오 키를 지웠습니다.", "ok");
+    } catch(_){ setMapSearchStatus("카카오 키를 지우지 못했습니다.", "bad"); syncMapSearchFields(); }
+  });
+  // 지도 검색 전에 앱 모드/일반 창이 같은 런처 공급자 설정을 보도록 시작과 함께 동기화한다.
+  window.__classDockMapSearchProviderReady = refreshMapSearchKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;
@@ -1005,6 +1098,10 @@ function wire(){
     byId("settingAutoRestore").checked = !!appSettings.autoRestore;
     byId("settingAutoOpenFirstFile").checked = appSettings.autoOpenFirstFile === true;
     byId("settingSearchHistory").checked = appSettings.searchHistory !== false;
+    mapSearchProviderInput.value = appSettings.mapSearchProvider === "kakao" ? "kakao" : "osm";
+    mapSearchKeyInput.value = "";
+    syncMapSearchFields();
+    refreshMapSearchKeyStatus();
     refreshSearchHistoryCount();
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
@@ -1071,6 +1168,7 @@ function wire(){
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,
       autoOpenFirstFile: byId("settingAutoOpenFirstFile").checked,
       searchHistory: byId("settingSearchHistory").checked,
+      mapSearchProvider: mapSearchProviderInput.value === "kakao" ? "kakao" : "osm",
       pdfRecovery: byId("settingPdfRecovery").checked,
       autoSave: byId("settingAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
@@ -1087,6 +1185,7 @@ function wire(){
       mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });
+    saveMapSearchProviderToLauncher(appSettings.mapSearchProvider);
     saveAppMode();   // 런처 파일에 남는 값이라 saveAppSettings(localStorage) 와는 따로 저장한다
     if (typeof applyToolVisibility === "function") applyToolVisibility();
     if (typeof applyCodeColors === "function") applyCodeColors();

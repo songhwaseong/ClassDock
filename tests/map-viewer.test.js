@@ -326,7 +326,7 @@ test("타일 프록시 판단은 저장 가능 여부가 아니라 전용 프로
 
 test("Go 폴백 런처도 타일 프록시·디스크 캐시·장소 검색을 갖춘다", () => {
   const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
-  for (const route of ["/tile-proxy", "/tile-cache-status", "/tile-cache-clear", "/geocode", "/can-proxy-tiles"]){
+  for (const route of ["/tile-proxy", "/tile-cache-status", "/tile-cache-clear", "/geocode", "/can-proxy-tiles", "/map-search-key", "/map-search-key-status", "/map-search-provider"]){
     assert.ok(go.includes('"' + route + '"'), route);
   }
   // 디스크를 인터넷보다 먼저 본다(끊긴 교실에서 열리는 근거).
@@ -349,13 +349,13 @@ test("장소 검색은 런처 프록시에서만 실행되고 공급자를 설�
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 
-  const csGeo = /static bool TryGeocodePlace\(([\s\S]*?)\n    \}/.exec(csharp);
+  const csGeo = /static bool TryFetchGeocode\(([\s\S]*?)\n    \}/.exec(csharp);
   assert.ok(csGeo);
   assert.match(csGeo[1], /request\.UserAgent = "ClassDock/);
   assert.match(csGeo[1], /GeocodeMinIntervalMs/);
   assert.match(csharp, /const int GeocodeMinIntervalMs = 11\d\d;/);
 
-  const goGeo = /func geocodePlace\(([\s\S]*?)\n\}/.exec(go);
+  const goGeo = /func fetchGeocode\(([\s\S]*?)\n\}/.exec(go);
   assert.ok(goGeo);
   assert.match(goGeo[1], /User-Agent/);
   assert.match(goGeo[1], /geocodeMinGap/);
@@ -383,6 +383,87 @@ test("장소 검색은 런처 프록시에서만 실행되고 공급자를 설�
   const resultsLayer = /\.map-results\{[^}]*z-index:(\d+)/.exec(styles);
   assert.ok(resultsLayer);
   assert.ok(Number(resultsLayer[1]) > 1000);
+});
+
+test("카카오 주소·키워드 검색은 런처가 REST 키를 붙이고 실패하면 OSM으로 돌아간다", () => {
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+
+  for (const launcher of [csharp, go]){
+    assert.match(launcher, /https:\/\/dapi\.kakao\.com\/v2\/local\/search\/address\.json/);
+    assert.match(launcher, /https:\/\/dapi\.kakao\.com\/v2\/local\/search\/keyword\.json/);
+    assert.match(launcher, /KakaoAK /);
+    assert.match(launcher, /kakao-key-required/);
+  }
+  assert.match(source, /mapFetchGeocode\(q, "kakao-address"\)/);
+  assert.match(source, /mapFetchGeocode\(q, "kakao-keyword"\)/);
+  assert.match(source, /mapFetchGeocode\(q, "osm"\)/);
+  assert.ok(source.indexOf('mapFetchGeocode(q, "kakao-address")') < source.indexOf('mapFetchGeocode(q, "kakao-keyword")'));
+  assert.ok(source.indexOf('mapFetchGeocode(q, "kakao-keyword")') < source.indexOf('mapFetchGeocode(q, "osm")'));
+  assert.match(source, /raw && Array\.isArray\(raw\.documents\)/);
+  assert.match(source, /"\/geocode\?provider=" \+ encodeURIComponent\(provider\)/);
+});
+
+test("카카오 REST 키는 브라우저 설정에 남기지 않고 로컬 런처가 보호한다", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  const state = fs.readFileSync(path.join(__dirname, "../src/js/state.js"), "utf8");
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  const build = fs.readFileSync(path.join(__dirname, "../desktop/build.bat"), "utf8");
+
+  assert.match(html, /id="settingMapSearchProvider"/);
+  assert.match(html, /type="password" id="settingMapSearchKey"/);
+  assert.match(html, /Admin 키는 입력하지 마세요/);
+  assert.match(state, /mapSearchProvider:\s*"osm"/);
+  assert.doesNotMatch(state, /mapSearchKey\s*:/);
+  assert.match(app, /fetch\("\/map-search-key\?remember="/);
+  assert.match(app, /method:"DELETE"/);
+  assert.match(app, /"X-ClassDock-Action":"1"/);
+  assert.match(app, /saveAppSettings\(\{ mapSearchProvider:"kakao" \}\)/);
+  assert.match(app, /\/map-search-provider\?value=/);
+
+  assert.match(csharp, /ProtectedData\.Protect\([\s\S]*DataProtectionScope\.CurrentUser/);
+  assert.match(csharp, /ProtectedData\.Unprotect\([\s\S]*DataProtectionScope\.CurrentUser/);
+  assert.match(csharp, /kakao-map-key\.bin/);
+  assert.match(csharp, /RequiresLocalAuthToken[\s\S]*\/map-search-key/);
+  assert.match(csharp, /KakaoMapKeyStatusJson\(\)[\s\S]*hasKey[\s\S]*remembered[\s\S]*persistentSupported[\s\S]*provider/);
+  assert.match(csharp, /map-search-provider\.txt/);
+  assert.match(build, /\/r:System\.Security\.dll/);
+
+  assert.match(go, /persistentSupported": false/);
+  assert.match(go, /Go 폴백은 OS 키 저장소를 가정할 수 없어 실행 중에만 기억한다/);
+});
+
+test("앱 모드와 일반 브라우저가 달라도 런처의 지도 검색 공급자를 동기화한다", () => {
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+
+  assert.match(app, /status\.provider === "kakao" \|\| status\.provider === "osm"/);
+  assert.match(app, /saveAppSettings\(\{ mapSearchProvider:status\.provider \}\)/);
+  assert.match(app, /window\.__classDockMapSearchProviderReady = refreshMapSearchKeyStatus\(\)/);
+  assert.match(source, /await window\.__classDockMapSearchProviderReady/);
+  assert.match(csharp, /SaveMapSearchProvider\("kakao"\)/);
+  assert.match(csharp, /SaveMapSearchProvider\("osm"\)/);
+  assert.match(csharp, /path\.StartsWith\("\/map-search-provider"/);
+  assert.match(go, /setMapSearchProvider\("kakao"\)/);
+  assert.match(go, /setMapSearchProvider\("osm"\)/);
+});
+
+test("주소 검색은 첫 결과 위치를 즉시 표시하고 임시 표식은 지도 캡처에서 뺀다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const search = /function mapAttachPlaceSearch\(([\s\S]*?)\n\}/.exec(source);
+  const mover = /function mapSearchLocationMover\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(search);
+  assert.ok(mover);
+  assert.match(search[1], /if \(items\.length\) onMove\(items\[0\]\.lat, items\[0\]\.lng, 15, items\[0\]\.name\)/);
+  assert.match(search[1], /onMove\(place\.lat, place\.lng, 15, place\.name\)/);
+  assert.match(mover[1], /L\.circleMarker/);
+  assert.match(mover[1], /fillColor:"#e11d48"/);
+  assert.match(source, /MAP_CAPTURE_HIDDEN_PANES[^\n]*\.map-search-location-pane/);
 });
 
 test("지도 고르기에서 지도를 드래그해도 모달 이동이 함께 시작되지 않는다", () => {

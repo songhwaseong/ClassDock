@@ -53,16 +53,21 @@ const (
 	geocodeMinGap     = 1100 * time.Millisecond
 	userAgent         = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)"
 	defaultGeocoder   = "https://nominatim.openstreetmap.org/search"
+	kakaoAddressURL   = "https://dapi.kakao.com/v2/local/search/address.json"
+	kakaoKeywordURL   = "https://dapi.kakao.com/v2/local/search/keyword.json"
 	geocoderEnv       = "CLASSDOCK_GEOCODER_URL"
 )
 
 var (
-	tileDiskMu    sync.Mutex
-	tileDiskBytes int64 = -1
-	geocodeMu     sync.Mutex
-	geocodeLast   time.Time
-	geocodeCache  = map[string][]byte{}
-	httpClient    = &http.Client{Timeout: 15 * time.Second}
+	tileDiskMu        sync.Mutex
+	tileDiskBytes     int64 = -1
+	geocodeMu         sync.Mutex
+	geocodeLast       time.Time
+	geocodeCache      = map[string][]byte{}
+	mapSearchKeyMu    sync.RWMutex
+	kakaoMapKey       string
+	mapSearchProvider = "osm"
+	httpClient        = &http.Client{Timeout: 15 * time.Second}
 )
 
 // 캐시 자리는 launcher.cs 와 같은 폴더를 쓴다(Windows 에서 %LOCALAPPDATA%\ClassDock\tile-cache).
@@ -254,70 +259,156 @@ func proxyMapTile(rawURL string) ([]byte, string, bool) {
 	return data, mime, true
 }
 
+func validKakaoMapKey(value string) bool {
+	key := strings.TrimSpace(value)
+	if len(key) < 16 || len(key) > 128 {
+		return false
+	}
+	for _, ch := range key {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func currentKakaoMapKey() string {
+	mapSearchKeyMu.RLock()
+	defer mapSearchKeyMu.RUnlock()
+	return kakaoMapKey
+}
+
+func setKakaoMapKey(value string) {
+	mapSearchKeyMu.Lock()
+	kakaoMapKey = strings.TrimSpace(value)
+	mapSearchKeyMu.Unlock()
+	geocodeMu.Lock()
+	geocodeCache = map[string][]byte{}
+	geocodeMu.Unlock()
+}
+
+func currentMapSearchProvider() string {
+	mapSearchKeyMu.RLock()
+	defer mapSearchKeyMu.RUnlock()
+	return mapSearchProvider
+}
+
+func setMapSearchProvider(value string) {
+	if value != "kakao" {
+		value = "osm"
+	}
+	mapSearchKeyMu.Lock()
+	mapSearchProvider = value
+	mapSearchKeyMu.Unlock()
+}
+
 /*
 ===== 장소 이름 검색 =====
 
-	Nominatim 은 알아볼 수 있는 User-Agent 와 "초당 1건 이하"를 요구한다. 서버에서 부르면 UA 를
-	제대로 붙이고 간격도 한 곳에서 지킨다. 공급자는 CLASSDOCK_GEOCODER_URL 로 바꿀 수 있다.
+	OSM 은 식별 User-Agent 와 요청 간격을 런처에서 지키고, 카카오 키는 브라우저가 아닌 런처 메모리에
+	둔다. Go 폴백은 OS 키 저장소를 가정할 수 없어 실행 중에만 기억한다.
 */
-func geocodePlace(query string) ([]byte, bool) {
-	query = strings.TrimSpace(query)
-	if query == "" || len(query) > 200 {
-		return nil, false
-	}
-	geocodeMu.Lock()
-	if cached, ok := geocodeCache[query]; ok {
+func fetchGeocode(query, provider, kakaoKey string) ([]byte, string) {
+	kakao := provider == "kakao-address" || provider == "kakao-keyword"
+	if !kakao {
+		geocodeMu.Lock()
+		if waited := time.Since(geocodeLast); waited < geocodeMinGap {
+			time.Sleep(geocodeMinGap - waited)
+		}
+		geocodeLast = time.Now()
 		geocodeMu.Unlock()
-		return cached, true
 	}
-	if waited := time.Since(geocodeLast); waited < geocodeMinGap {
-		time.Sleep(geocodeMinGap - waited)
-	}
-	geocodeLast = time.Now()
-	geocodeMu.Unlock()
 
-	endpointURL := strings.TrimSpace(os.Getenv(geocoderEnv))
-	if endpointURL == "" {
-		endpointURL = defaultGeocoder
+	var endpoint string
+	if kakao {
+		endpoint = kakaoAddressURL
+		if provider == "kakao-keyword" {
+			endpoint = kakaoKeywordURL
+		}
+		values := url.Values{}
+		values.Set("size", "5")
+		values.Set("query", query)
+		endpoint += "?" + values.Encode()
+	} else {
+		endpointURL := strings.TrimSpace(os.Getenv(geocoderEnv))
+		if endpointURL == "" {
+			endpointURL = defaultGeocoder
+		}
+		parsedEndpoint, err := url.Parse(endpointURL)
+		if err != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Hostname() == "" {
+			parsedEndpoint, _ = url.Parse(defaultGeocoder)
+		}
+		parsedEndpoint.RawQuery = ""
+		parsedEndpoint.Fragment = ""
+		values := parsedEndpoint.Query()
+		values.Set("format", "jsonv2")
+		values.Set("limit", "5")
+		values.Set("accept-language", "ko")
+		values.Set("q", query)
+		parsedEndpoint.RawQuery = values.Encode()
+		endpoint = parsedEndpoint.String()
 	}
-	parsedEndpoint, err := url.Parse(endpointURL)
-	if err != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Hostname() == "" {
-		parsedEndpoint, _ = url.Parse(defaultGeocoder)
-	}
-	parsedEndpoint.RawQuery = ""
-	parsedEndpoint.Fragment = ""
-	values := parsedEndpoint.Query()
-	values.Set("format", "jsonv2")
-	values.Set("limit", "5")
-	values.Set("accept-language", "ko")
-	values.Set("q", query)
-	parsedEndpoint.RawQuery = values.Encode()
-	endpoint := parsedEndpoint.String()
 	request, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
-		return nil, false
+		return nil, "geocode-failed"
 	}
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "application/json")
+	if kakao {
+		request.Header.Set("Authorization", "KakaoAK "+kakaoKey)
+	}
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return nil, false
+		return nil, "geocode-failed"
 	}
 	defer response.Body.Close()
-	if response.StatusCode != 200 {
-		return nil, false
+	if kakao && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+		return nil, "kakao-key-invalid"
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 512*1024))
-	if err != nil {
-		return nil, false
+	if response.StatusCode != http.StatusOK {
+		return nil, "geocode-failed"
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 512*1024+1))
+	if err != nil || len(data) > 512*1024 {
+		return nil, "geocode-failed"
+	}
+	return data, ""
+}
+
+func geocodePlace(query, requestedProvider string) ([]byte, string) {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 200 {
+		return nil, "geocode-bad-query"
+	}
+	provider := "osm"
+	if requestedProvider == "kakao-address" || requestedProvider == "kakao-keyword" {
+		provider = requestedProvider
+	}
+	key := ""
+	if strings.HasPrefix(provider, "kakao-") {
+		key = currentKakaoMapKey()
+		if key == "" {
+			return nil, "kakao-key-required"
+		}
+	}
+	cacheKey := provider + "\n" + query
+	geocodeMu.Lock()
+	if cached, ok := geocodeCache[cacheKey]; ok {
+		geocodeMu.Unlock()
+		return cached, ""
+	}
+	geocodeMu.Unlock()
+	data, code := fetchGeocode(query, provider, key)
+	if code != "" {
+		return nil, code
 	}
 	geocodeMu.Lock()
 	if len(geocodeCache) > 200 {
 		geocodeCache = map[string][]byte{}
 	}
-	geocodeCache[query] = data
+	geocodeCache[cacheKey] = data
 	geocodeMu.Unlock()
-	return data, true
+	return data, ""
 }
 
 // loopback 에만 바인딩하더라도 DNS rebinding 등으로 다른 Host 가 들어오는 요청은 받지 않는다.
@@ -434,13 +525,77 @@ func main() {
 			http.Error(w, "invalid-host", http.StatusForbidden)
 			return
 		}
-		data, ok := geocodePlace(r.URL.Query().Get("q"))
-		if !ok {
-			http.Error(w, "geocode-failed", http.StatusBadGateway)
+		data, code := geocodePlace(r.URL.Query().Get("q"), r.URL.Query().Get("provider"))
+		if code != "" {
+			status := http.StatusBadGateway
+			if code == "kakao-key-required" {
+				status = http.StatusPreconditionRequired
+			}
+			http.Error(w, code, status)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(data)
+	})
+
+	mux.HandleFunc("/map-search-key-status", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"hasKey": currentKakaoMapKey() != "", "remembered": false, "persistentSupported": false,
+			"provider": currentMapSearchProvider(),
+		})
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(body)
+	})
+
+	mux.HandleFunc("/map-search-key", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			setKakaoMapKey("")
+			setMapSearchProvider("osm")
+			w.Write([]byte("ok"))
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+		key := strings.TrimSpace(string(body))
+		if err != nil || len(body) > 1024 || !validKakaoMapKey(key) {
+			http.Error(w, "kakao-key-invalid", http.StatusBadRequest)
+			return
+		}
+		if _, code := fetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key); code != "" {
+			http.Error(w, code, http.StatusBadRequest)
+			return
+		}
+		setKakaoMapKey(key)
+		setMapSearchProvider("kakao")
+		w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/map-search-provider", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		setMapSearchProvider(r.URL.Query().Get("value"))
+		w.Write([]byte("ok"))
 	})
 
 	// 127.0.0.1 의 빈 포트에 바인딩 (외부에는 노출되지 않음)

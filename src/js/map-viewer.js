@@ -361,26 +361,56 @@ async function mapTileProxyBase(){
 }
 
 /* ===== 장소 이름 검색 =====
-   이름 검색은 런처의 /geocode 만 쓴다. file:// 페이지에서 공개 Nominatim 을 직접 부르면 브라우저가
-   ClassDock 을 식별하는 User-Agent 를 붙일 수 없고 유효한 HTTP Referer 도 없기 때문이다. 런처는
-   식별 UA·요청 간격·캐시를 한 곳에서 적용하며, 공급자 주소도 환경 설정으로 교체할 수 있다. */
+   이름 검색은 런처의 /geocode 만 쓴다. 카카오를 고르면 주소 → 장소명 순서로 찾고, 키가 없거나
+   결과가 없으면 OSM 으로 자동 재검색한다. API 키는 appSettings/localStorage 에 두지 않고 런처가
+   Authorization 헤더를 붙인다. */
 const _mapGeocodeCache = new Map();
 
+function mapOsmPlaces(raw){
+  return (Array.isArray(raw) ? raw : []).map((item) => ({
+    name: String(item.display_name || "").trim(), lat:mapClampLat(item.lat), lng:mapClampLng(item.lon)
+  })).filter(place => place.name);
+}
+function mapKakaoPlaces(raw){
+  return (raw && Array.isArray(raw.documents) ? raw.documents : []).map((item) => {
+    const placeName = String(item.place_name || "").trim();
+    const road = String(item.road_address_name || (item.road_address && item.road_address.address_name) || "").trim();
+    const address = String(item.address_name || (item.address && item.address.address_name) || "").trim();
+    const detail = road || address;
+    const lat = Number(item.y), lng = Number(item.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { name:placeName && detail ? placeName + " · " + detail : (placeName || detail),
+      lat:mapClampLat(lat), lng:mapClampLng(lng) };
+  }).filter(place => place && place.name);
+}
+async function mapFetchGeocode(q, provider){
+  const response = await fetch("/geocode?provider=" + encodeURIComponent(provider) + "&q=" + encodeURIComponent(q), { cache:"no-store" });
+  if (!response.ok) throw new Error((await response.text()).trim() || "geocode-failed");
+  return await response.json();
+}
 async function mapGeocode(query){
   const q = String(query || "").trim();
   if (!q || q.length > 200) return [];
-  if (_mapGeocodeCache.has(q)) return _mapGeocodeCache.get(q);
+  // 앱 모드가 별도 브라우저 프로필로 열렸을 때 런처에 저장된 공급자 선택을 먼저 받아 온다.
+  try { if (window.__classDockMapSearchProviderReady) await window.__classDockMapSearchProviderReady; } catch(_){}
+  const provider = typeof appSettings === "object" && appSettings && appSettings.mapSearchProvider === "kakao" ? "kakao" : "osm";
+  const cacheKey = provider + "\n" + q;
+  if (_mapGeocodeCache.has(cacheKey)) return _mapGeocodeCache.get(cacheKey);
   const proxyBase = await mapTileProxyBase();
   if (!proxyBase) throw new Error("geocode-launcher-required");
-  const response = await fetch("/geocode?q=" + encodeURIComponent(q), { cache:"no-store" });
-  if (!response.ok) throw new Error("geocode-failed");
-  const raw = await response.json();
-  const places = (Array.isArray(raw) ? raw : []).map((item) => ({
-    name: String(item.display_name || "").trim(),
-    lat: mapClampLat(item.lat),
-    lng: mapClampLng(item.lon)
-  })).filter(place => place.name);
-  _mapGeocodeCache.set(q, places);
+  let places = [], lastError = null, osmSucceeded = false;
+  if (provider === "kakao"){
+    try {
+      places = mapKakaoPlaces(await mapFetchGeocode(q, "kakao-address"));
+      if (!places.length) places = mapKakaoPlaces(await mapFetchGeocode(q, "kakao-keyword"));
+    } catch(error){ lastError = error; }
+  }
+  if (!places.length){
+    try { places = mapOsmPlaces(await mapFetchGeocode(q, "osm")); osmSucceeded = true; }
+    catch(error){ if (!lastError) lastError = error; }
+  }
+  if (!places.length && lastError && !osmSucceeded) throw lastError;
+  _mapGeocodeCache.set(cacheKey, places);
   return places;
 }
 // "37.5665, 126.978" 처럼 생겼으면 좌표로 본다(쉼표·공백 아무거나).
@@ -410,6 +440,27 @@ function mapCreateTileLayer(basemapId, proxyBase, onProxyTrouble){
     });
   }
   return layer;
+}
+
+/* 검색 결과는 지도 이동만으로는 어느 점을 찾았는지 알기 어렵다. 저장되는 수업용 표시와 구분되는
+   임시 빨간 점을 올리고, 칠판/그림 캡처에는 들어가지 않도록 전용 pane에 둔다. */
+function mapSearchLocationMover(map){
+  const paneName = "mapSearchLocationPane";
+  const pane = map.getPane(paneName) || map.createPane(paneName);
+  pane.classList.add("map-search-location-pane");
+  pane.style.zIndex = "650";
+  let marker = null;
+  return (lat, lng, zoom, label) => {
+    map.setView([lat, lng], Math.max(map.getZoom(), zoom));
+    if (!marker){
+      marker = L.circleMarker([lat, lng], {
+        pane:paneName, radius:8, color:"#fff", weight:3,
+        fillColor:"#e11d48", fillOpacity:1, interactive:false
+      }).addTo(map);
+    } else marker.setLatLng([lat, lng]);
+    marker.unbindTooltip();
+    if (label) marker.bindTooltip(String(label), { pane:paneName, direction:"top", offset:[0,-8], opacity:.96 }).openTooltip();
+  };
 }
 
 /* 인터넷이 끊기면 지도 칸 위에 남는 안내. navigator.onLine 이 확실히 false 면 즉시 알리고,
@@ -575,7 +626,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-network-notice"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다. */
@@ -626,7 +677,8 @@ function mapFormatBytes(bytes){
 }
 /* ===== "장소 이름 또는 좌표" 한 칸 =====
    지도 문서와 지도 고르기 창이 같은 것을 쓴다. 좌표처럼 생기면 곧장 옮기고, 아니면 이름으로 찾아
-   결과를 목록으로 띄운다. setNote 로 진행·오류를 알리고, 고르면 onMove(lat, lng, zoom) 을 부른다. */
+   결과를 목록으로 띄운다. setNote 로 진행·오류를 알리고, 찾은 첫 결과와 고른 후보는
+   onMove(lat, lng, zoom, label) 로 위치를 바로 보여 준다. */
 function mapAttachPlaceSearch(input, button, results, onMove, setNote){
   let items = [];
   let searching = false;
@@ -643,11 +695,14 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       button.addEventListener("click", () => {
         closeResults();
         input.value = "";
-        onMove(place.lat, place.lng, 15);
+        onMove(place.lat, place.lng, 15, place.name);
       });
       results.appendChild(button);
     }
     results.hidden = !items.length;
+    // 정확한 주소처럼 후보가 하나뿐인 검색뿐 아니라 여러 후보가 있을 때도 첫 결과를 즉시 보여 준다.
+    // 목록은 그대로 남겨 사용자가 다른 후보를 고를 수 있게 한다.
+    if (items.length) onMove(items[0].lat, items[0].lng, 15, items[0].name);
   };
 
   const search = async () => {
@@ -659,7 +714,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       closeResults();
       input.value = "";
       setNote("");
-      onMove(coords[0], coords[1], 14);
+      onMove(coords[0], coords[1], 14, text);
       return;
     }
     searching = true;
@@ -828,10 +883,11 @@ async function openMapPicker(){
   mapTranslate(modal);
 
   const map = L.map(stage, { center:start.center, zoom:start.zoom, zoomControl:true });
+  const moveToSearchLocation = mapSearchLocationMover(map);
   /* 프록시 확인을 기다리는 동안에도 창은 이미 보인다. 검색 이벤트를 먼저 붙여, 사용자가 창을
      열자마자 Enter 를 누르거나 버튼을 눌러도 입력이 사라지지 않게 한다. */
   mapAttachPlaceSearch(gotoInput, modal.querySelector(".map-search-submit"), modal.querySelector(".map-results"),
-    (lat, lng, zoom) => map.setView([lat, lng], Math.max(map.getZoom(), zoom)),
+    moveToSearchLocation,
     (message) => { note.textContent = message; });
   let tiles = null;
   const cleanupNetworkNotice = mapAttachNetworkNotice(stage, map, () => tiles);
@@ -1554,9 +1610,8 @@ async function mountMapEditor(doc){
     if (typeof toast === "function") toast(mapTf("표시 {count}개를 CSV로 내보냈습니다", { count:model.markers.length }), 2800);
   });
 
-  mapAttachPlaceSearch(gotoInput, searchBtn, searchResults,
-    (lat, lng, zoom) => map.setView([lat, lng], Math.max(map.getZoom(), zoom)),
-    setStatus);
+  const moveToSearchLocation = mapSearchLocationMover(map);
+  mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, moveToSearchLocation, setStatus);
 
   saveBtn.addEventListener("click", async () => { await saveMapDoc(doc); touch(); });
 

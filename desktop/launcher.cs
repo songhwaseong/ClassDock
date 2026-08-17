@@ -858,6 +858,8 @@ class ClassDockLauncher
             if (path == "/run-python" || path == "/run-python-bundle") return true;
             if (path == "/python-rescan") return true;
             if (path == "/tile-cache-clear") return true;
+            if (path.StartsWith("/map-search-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -880,8 +882,10 @@ class ClassDockLauncher
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
             if (path == "/tile-cache-status" || path == "/can-proxy-tiles") return true;
+            if (path == "/map-search-key-status") return true;
             if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
         }
+        if (method == "DELETE" && path == "/map-search-key") return true;
         return false;
     }
 
@@ -2300,10 +2304,55 @@ class ClassDockLauncher
                 else if (method == "GET" && path.StartsWith("/geocode?", StringComparison.Ordinal))
                 {
                     byte[] found; string error;
-                    if (TryGeocodePlace(QueryValue(path, "q"), out found, out error))
+                    if (TryGeocodePlace(QueryValue(path, "q"), QueryValue(path, "provider"), out found, out error))
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", found);
                     else
-                        WriteResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
+                        WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
+                }
+                else if (method == "GET" && path == "/map-search-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(KakaoMapKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/map-search-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string error;
+                    bool saved = TrySetKakaoMapKey(Encoding.UTF8.GetString(body ?? new byte[0]), QueryValue(path, "remember") == "1", out error);
+                    WriteResponse(stream, saved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(saved ? "ok" : error));
+                }
+                else if (method == "DELETE" && path == "/map-search-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool cleared = ClearKakaoMapKey();
+                    WriteResponse(stream, cleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(cleared ? "ok" : "map-search-key-clear-failed"));
+                }
+                else if (method == "POST" && path.StartsWith("/map-search-provider", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string provider = QueryValue(path, "value") == "kakao" ? "kakao" : "osm";
+                    bool saved = SaveMapSearchProvider(provider);
+                    WriteResponse(stream, saved ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(saved ? "ok" : "map-search-provider-save-failed"));
                 }
                 else if (method == "GET" && path == "/tile-cache-status")
                 {
@@ -2811,15 +2860,25 @@ class ClassDockLauncher
         catch { return false; }
     }
     /* ===== 장소 이름 검색(지오코딩) =====
-       브라우저에서 곧장 부르지 않고 런처를 거치는 이유: Nominatim 은 애플리케이션을 알아볼 수 있는
-       User-Agent 와 "초당 1건 이하"를 요구한다. 서버에서 부르면 UA 를 제대로 붙이고 간격도 한 곳에서
-       지킬 수 있다(탭을 여러 개 열어도 창구가 하나다). 공급자는 CLASSDOCK_GEOCODER_URL 로 바꿀 수 있다. */
+       브라우저에서 API 를 직접 부르지 않고 런처를 거친다. OSM 은 식별 User-Agent·호출 간격을 한 곳에서
+       지키고, 카카오 REST API 키는 HTML·localStorage·작업공간에 노출하지 않는다. Windows 에서 '기억'
+       을 켜면 DPAPI(CurrentUser)로 암호화해 같은 Windows 사용자만 복호화할 수 있게 저장한다. */
     const string DefaultGeocodeEndpoint = "https://nominatim.openstreetmap.org/search";
     const string GeocodeEndpointEnvironment = "CLASSDOCK_GEOCODER_URL";
+    const string KakaoAddressEndpoint = "https://dapi.kakao.com/v2/local/search/address.json";
+    const string KakaoKeywordEndpoint = "https://dapi.kakao.com/v2/local/search/keyword.json";
     const int GeocodeMinIntervalMs = 1100;      // 정책상 초당 1건 — 여유를 조금 둔다
     static readonly object GeocodeLock = new object();
     static DateTime GeocodeLastCall = DateTime.MinValue;
     static readonly Dictionary<string, byte[]> GeocodeCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+    static readonly object KakaoMapKeyLock = new object();
+    static readonly byte[] KakaoMapKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.KakaoMapKey.v1");
+    static readonly string KakaoMapKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "kakao-map-key.bin");
+    static readonly string MapSearchProviderFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "map-search-provider.txt");
+    static bool KakaoMapKeyLoaded;
+    static string KakaoMapKey = "";
     static Uri GeocodeEndpoint()
     {
         string configured = (Environment.GetEnvironmentVariable(GeocodeEndpointEnvironment) ?? "").Trim();
@@ -2829,31 +2888,163 @@ class ClassDockLauncher
             Uri.TryCreate(DefaultGeocodeEndpoint, UriKind.Absolute, out endpoint);
         return endpoint;
     }
-    static bool TryGeocodePlace(string query, out byte[] data, out string error)
+    static bool ValidKakaoMapKey(string value)
     {
-        data = null; error = "geocode-failed";
-        string q = (query ?? "").Trim();
-        if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
-        lock (GeocodeLock) if (GeocodeCache.TryGetValue(q, out data)) return true;
+        string key = (value ?? "").Trim();
+        if (key.Length < 16 || key.Length > 128) return false;
+        foreach (char ch in key)
+            if (!(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_')) return false;
+        return true;
+    }
+    static string CurrentKakaoMapKey()
+    {
+        lock (KakaoMapKeyLock)
+        {
+            if (!KakaoMapKeyLoaded)
+            {
+                KakaoMapKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(KakaoMapKeyFile))
+                    {
+                        byte[] encrypted = File.ReadAllBytes(KakaoMapKeyFile);
+                        byte[] plain = ProtectedData.Unprotect(encrypted, KakaoMapKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidKakaoMapKey(key)) KakaoMapKey = key;
+                    }
+                }
+                catch { KakaoMapKey = ""; }
+            }
+            return KakaoMapKey;
+        }
+    }
+    static bool KakaoMapKeyRemembered()
+    {
+        try { return File.Exists(KakaoMapKeyFile) && CurrentKakaoMapKey().Length > 0; }
+        catch { return false; }
+    }
+    static string CurrentMapSearchProvider()
+    {
         try
         {
-            lock (GeocodeLock)
+            if (File.Exists(MapSearchProviderFile))
             {
-                // 마지막 호출과의 간격을 여기서 지킨다(창구가 하나라 탭을 여러 개 열어도 안전).
-                double waited = (DateTime.UtcNow - GeocodeLastCall).TotalMilliseconds;
-                if (waited < GeocodeMinIntervalMs) Thread.Sleep((int)(GeocodeMinIntervalMs - waited));
-                GeocodeLastCall = DateTime.UtcNow;
+                string saved = File.ReadAllText(MapSearchProviderFile, Encoding.UTF8).Trim().ToLowerInvariant();
+                if (saved == "kakao" || saved == "osm") return saved;
+            }
+        }
+        catch { }
+        // 이 기능을 넣기 전에 이미 키를 저장한 사용자는 앱 모드에서 바로 카카오를 이어 쓴다.
+        return CurrentKakaoMapKey().Length > 0 ? "kakao" : "osm";
+    }
+    static bool SaveMapSearchProvider(string value)
+    {
+        string provider = value == "kakao" ? "kakao" : "osm";
+        try
+        {
+            string dir = Path.GetDirectoryName(MapSearchProviderFile);
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(MapSearchProviderFile, provider, new UTF8Encoding(false));
+            return true;
+        }
+        catch { return false; }
+    }
+    static string KakaoMapKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentKakaoMapKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (KakaoMapKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true,\"provider\":" + JsonString(CurrentMapSearchProvider()) + "}";
+    }
+    static bool SaveProtectedKakaoMapKey(string key)
+    {
+        try
+        {
+            string dir = Path.GetDirectoryName(KakaoMapKeyFile);
+            Directory.CreateDirectory(dir);
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), KakaoMapKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = KakaoMapKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(KakaoMapKeyFile)) File.Delete(KakaoMapKeyFile);
+            File.Move(temp, KakaoMapKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    static bool ClearKakaoMapKey()
+    {
+        lock (KakaoMapKeyLock)
+        {
+            KakaoMapKeyLoaded = true;
+            KakaoMapKey = "";
+            try { if (File.Exists(KakaoMapKeyFile)) File.Delete(KakaoMapKeyFile); }
+            catch { return false; }
+        }
+        lock (GeocodeLock) GeocodeCache.Clear();
+        SaveMapSearchProvider("osm");
+        return true;
+    }
+    static bool TrySetKakaoMapKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "kakao-key-invalid";
+        if (!ValidKakaoMapKey(key)) return false;
+        byte[] probe;
+        if (!TryFetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key, out probe, out error)) return false;
+        string previous = CurrentKakaoMapKey();
+        lock (KakaoMapKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedKakaoMapKey(key)) { KakaoMapKey = previous; error = "kakao-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(KakaoMapKeyFile)) File.Delete(KakaoMapKeyFile); }
+                catch { KakaoMapKey = previous; error = "kakao-key-save-failed"; return false; }
+            }
+            KakaoMapKeyLoaded = true;
+            KakaoMapKey = key;
+        }
+        lock (GeocodeLock) GeocodeCache.Clear();
+        SaveMapSearchProvider("kakao");
+        error = "";
+        return true;
+    }
+    static bool TryFetchGeocode(string q, string provider, string kakaoKey, out byte[] data, out string error)
+    {
+        data = null; error = "geocode-failed";
+        bool kakao = provider == "kakao-address" || provider == "kakao-keyword";
+        try
+        {
+            if (!kakao)
+            {
+                lock (GeocodeLock)
+                {
+                    double waited = (DateTime.UtcNow - GeocodeLastCall).TotalMilliseconds;
+                    if (waited < GeocodeMinIntervalMs) Thread.Sleep((int)(GeocodeMinIntervalMs - waited));
+                    GeocodeLastCall = DateTime.UtcNow;
+                }
             }
             if (!TileTlsReady)
             {
                 try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
                 TileTlsReady = true;
             }
-            Uri endpoint = GeocodeEndpoint();
-            string url = endpoint.GetLeftPart(UriPartial.Path) + "?format=jsonv2&limit=5&accept-language=ko&q=" + Uri.EscapeDataString(q);
+            string url;
+            if (kakao)
+            {
+                string endpoint = provider == "kakao-keyword" ? KakaoKeywordEndpoint : KakaoAddressEndpoint;
+                url = endpoint + "?size=5&query=" + Uri.EscapeDataString(q);
+            }
+            else
+            {
+                Uri endpoint = GeocodeEndpoint();
+                url = endpoint.GetLeftPart(UriPartial.Path) + "?format=jsonv2&limit=5&accept-language=ko&q=" + Uri.EscapeDataString(q);
+            }
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
             request.Accept = "application/json";
+            if (kakao) request.Headers[HttpRequestHeader.Authorization] = "KakaoAK " + kakaoKey;
             request.Timeout = 12000;
             request.ReadWriteTimeout = 12000;
             using (WebResponse response = request.GetResponse())
@@ -2870,14 +3061,39 @@ class ClassDockLauncher
                 }
                 data = buffer.ToArray();
             }
-            lock (GeocodeLock)
-            {
-                if (GeocodeCache.Count > 200) GeocodeCache.Clear();
-                GeocodeCache[q] = data;
-            }
             return true;
         }
-        catch (Exception ex) { error = "geocode-failed: " + FlattenMessage(ex); data = null; return false; }
+        catch (WebException ex)
+        {
+            HttpWebResponse response = ex.Response as HttpWebResponse;
+            error = kakao && response != null && (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+                ? "kakao-key-invalid" : "geocode-failed";
+            data = null; return false;
+        }
+        catch { error = "geocode-failed"; data = null; return false; }
+    }
+    static bool TryGeocodePlace(string query, string requestedProvider, out byte[] data, out string error)
+    {
+        data = null; error = "geocode-failed";
+        string q = (query ?? "").Trim();
+        if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
+        string provider = requestedProvider == "kakao-address" || requestedProvider == "kakao-keyword"
+            ? requestedProvider : "osm";
+        string kakaoKey = "";
+        if (provider.StartsWith("kakao-", StringComparison.Ordinal))
+        {
+            kakaoKey = CurrentKakaoMapKey();
+            if (kakaoKey.Length == 0) { error = "kakao-key-required"; return false; }
+        }
+        string cacheKey = provider + "\n" + q;
+        lock (GeocodeLock) if (GeocodeCache.TryGetValue(cacheKey, out data)) return true;
+        if (!TryFetchGeocode(q, provider, kakaoKey, out data, out error)) return false;
+        lock (GeocodeLock)
+        {
+            if (GeocodeCache.Count > 200) GeocodeCache.Clear();
+            GeocodeCache[cacheKey] = data;
+        }
+        return true;
     }
 
     static bool TryProxyMapTile(string url, out byte[] data, out string mime)

@@ -313,6 +313,7 @@ const DEFAULT_APP_SETTINGS = {
   //   이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아, 검토 중인 문서라면 이력을 믿을 수 없게 된다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
   searchHistory: true, autoOpenFirstFile: false, officeReplaceAttached: false, officeReplaceTracked: false,
+  mapSearchProvider: "osm",   // API 키는 여기에 저장하지 않는다. 공급자 선택만 설정에 남긴다.
   screensaver: { enabled: false, idleMin: 5, sound: false, mode: "video", url: "" },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
@@ -429,6 +430,7 @@ function normalizePetFocus(value){
     quietTyping: s.quietTyping !== false
   };
 }
+function normalizeMapSearchProvider(value){ return value === "kakao" ? "kakao" : "osm"; }
 function normalizeShortcutMap(value){
   const source = value && typeof value === "object" ? value : {};
   return Object.fromEntries(SHORTCUT_DEFINITIONS.map((item) => [
@@ -468,7 +470,7 @@ let appSettings = (() => {
     const saved = migrateAppSettings(parsed);
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
-    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), mapSearchProvider:normalizeMapSearchProvider(saved.mapSearchProvider), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), shortcuts:normalizeShortcutMap(saved.shortcuts) };
     if (migrationChanged) localStorage.setItem("classDockSettings", JSON.stringify(loaded));
     return loaded;
   }
@@ -476,7 +478,7 @@ let appSettings = (() => {
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), mapSearchProvider:normalizeMapSearchProvider(merged.mapSearchProvider), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("classDockSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }

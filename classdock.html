@@ -541,6 +541,13 @@
       <label class="settings-check"><input type="checkbox" id="settingAutoOpenFirstFile"><span>폴더·압축을 열 때 첫 파일 자동으로 열기<small>꺼 두면 사이드바만 펼쳐지고, 볼 파일을 직접 고를 때까지 아무 문서도 열지 않습니다.</small></span></label>
       <label class="settings-check"><input type="checkbox" id="settingSearchHistory"><span>최근 검색어 기억 — 찾기·검색창에 지난 검색어를 보여줍니다<small>이 컴퓨터 안에만 구획별로 12개까지 남기고, '바꿀 내용'은 기억하지 않습니다. 여러 사람이 함께 쓰는 컴퓨터라면 끄는 것을 권합니다.</small></span></label>
       <div class="settings-row"><span>검색 기록 <span id="settingSearchHistoryCount" class="settings-inline-count" aria-live="polite"></span></span><button class="btn" id="settingSearchHistoryClear" type="button">검색 기록 지우기</button></div>
+      <div class="settings-group-title">지도 검색</div>
+      <label class="settings-row"><span>검색 공급자<small>카카오는 국내 상세주소·건물 검색에 유리하며 개인 REST API 키가 필요합니다.</small></span><select id="settingMapSearchProvider" class="pw-input"><option value="osm">OpenStreetMap — 키 없음</option><option value="kakao">카카오 — 개인 API 키</option></select></label>
+      <div class="map-search-settings" id="settingMapSearchKeyWrap" hidden>
+        <label class="settings-row"><span>카카오 REST API 키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다. Admin 키는 입력하지 마세요.</small></span><input type="password" id="settingMapSearchKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="REST API 키 입력" aria-label="카카오 REST API 키"></label>
+        <label class="settings-check" id="settingMapSearchRememberWrap"><input type="checkbox" id="settingMapSearchRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
+        <div class="settings-row"><span id="settingMapSearchStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingMapSearchTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingMapSearchClear" type="button">키 지우기</button></span></div>
+      </div>
       <div class="settings-save-folder" id="settingSaveFolderWrap">
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath" aria-live="polite">저장 위치 확인 중…</small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>
