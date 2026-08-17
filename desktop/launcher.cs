@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -856,6 +857,7 @@ class ClassDockLauncher
             if (path == "/terminal-complete") return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
             if (path == "/python-rescan") return true;
+            if (path == "/tile-cache-clear") return true;
         }
         if (method == "GET")
         {
@@ -877,6 +879,8 @@ class ClassDockLauncher
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
+            if (path == "/tile-cache-status" || path == "/can-proxy-tiles") return true;
+            if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
         }
         return false;
     }
@@ -2286,6 +2290,41 @@ class ClassDockLauncher
                     else
                         WriteCorsResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("tile-proxy-failed"));
                 }
+                else if (method == "GET" && path == "/can-proxy-tiles")
+                {
+                    // 지도 문서가 "이 런처가 타일을 대신 받아 디스크에 남겨 주는가"를 묻는 자리.
+                    // 파일 저장 가능 여부(/can-save-file)와는 다른 능력이라 따로 둔다 — Go 폴백 런처는
+                    // 파일 저장은 못 해도 타일 프록시는 한다.
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/geocode?", StringComparison.Ordinal))
+                {
+                    byte[] found; string error;
+                    if (TryGeocodePlace(QueryValue(path, "q"), out found, out error))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", found);
+                    else
+                        WriteResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
+                }
+                else if (method == "GET" && path == "/tile-cache-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(TileCacheStatusJson()));
+                }
+                else if (method == "POST" && path == "/tile-cache-clear")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool cleared = ClearTileCache();
+                    WriteResponse(stream, cleared ? "200 OK" : "500 Internal Server Error",
+                        "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(cleared ? "ok" : "tile-cache-clear-failed"));
+                }
                 else if (method == "GET" && path.StartsWith("/python-session-file", StringComparison.Ordinal))
                 {
                     // 실행이 만든 출력 파일 1개 내려주기(작업폴더 안으로 제한). 파일명은 프런트의 <a download> 가 지정.
@@ -2600,21 +2639,252 @@ class ClassDockLauncher
         stream.Write(body, 0, body.Length);
     }
 
-    /* ===== 지도 타일 프록시 (노트북 PDF 의 지도 스냅샷 전용) =====
-       캡처 라이브러리는 타일 이미지를 fetch 로 다시 받아 인라인하는데, sandbox iframe 의 fetch 는
-       Origin: null 로 나가 OSM 정책에 차단된다(화면의 <img> 요청은 통과). 캡처 순간에만 타일 주소를
-       이 프록시로 바꿔, 서버가 올바른 User-Agent 로 대신 받아온다. SSRF 방지를 위해 https + 알려진
-       타일 호스트만 허용하고, 같은 타일 반복 요청은 짧게 캐시한다. */
+    /* ===== 지도 타일 프록시 =====
+       두 곳이 쓴다. (1) 노트북 PDF 의 지도 스냅샷 — 캡처 라이브러리가 타일을 fetch 로 다시 받아
+       인라인하는데 sandbox iframe 의 fetch 는 Origin: null 로 나가 OSM 정책에 차단된다(화면의 <img>
+       요청은 통과). (2) 지도 문서(.map) 의 배경 타일 — 이쪽은 화면 표시부터 프록시를 거친다.
+       SSRF 방지를 위해 https + 알려진 타일 호스트만 허용한다.
+
+       캐시는 두 층이다. 메모리는 같은 화면을 다시 그릴 때, 디스크는 "인터넷 없는 교실"을 위한 것이다.
+       디스크가 있어야 하는 이유: 런처는 실행할 때마다 다른 포트를 잡으므로 브라우저 origin 이 매번
+       바뀐다 → IndexedDB·Cache API 는 다음 실행에서 남의 저장소가 되어 못 읽는다. 한 번 본 지역을
+       다음 수업에서도 열려면 서버가 파일로 들고 있어야 한다. */
     static readonly string[] TileProxyHosts = {
         "tile.openstreetmap.org", "basemaps.cartocdn.com", "tile.opentopomap.org",
         "server.arcgisonline.com", "tiles.stadiamaps.com", "tile.thunderforest.com"
     };
+    sealed class TileMemoryEntry
+    {
+        public byte[] Data;
+        public string Mime;
+        public DateTime CachedAtUtc;
+        public TileMemoryEntry(byte[] data, string mime, DateTime cachedAtUtc)
+        { Data = data; Mime = mime; CachedAtUtc = cachedAtUtc; }
+    }
     static readonly object TileCacheLock = new object();
-    static readonly Dictionary<string, byte[]> TileCache = new Dictionary<string, byte[]>();
+    static readonly Dictionary<string, TileMemoryEntry> TileCache = new Dictionary<string, TileMemoryEntry>();
     static bool TileTlsReady;
+    static readonly string TileCacheDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ClassDock", "tile-cache");
+    const long TileCacheMaxBytes = 400L * 1024 * 1024;
+    static readonly TimeSpan TileCacheMaxAge = TimeSpan.FromDays(7);
+    static readonly object TileDiskLock = new object();
+    static long TileDiskBytes = -1;
+    static readonly string[] TileCacheExtensions = { ".png", ".jpg", ".webp" };
+
+    static string TileCacheKey(string url)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {
+            byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(url));
+            var text = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash) text.Append(b.ToString("x2"));
+            return text.ToString();
+        }
+    }
+    static string TileCacheExtensionFor(string mime)
+    {
+        string value = (mime ?? "").ToLowerInvariant();
+        if (value.Contains("jpeg") || value.Contains("jpg")) return ".jpg";
+        if (value.Contains("webp")) return ".webp";
+        return ".png";
+    }
+    // 파일이 한 폴더에 수만 개 쌓이면 탐색기도 열거도 느려진다 — 해시 앞 두 글자로 256칸에 나눈다.
+    static string TileCacheFile(string key, string ext)
+    {
+        return Path.Combine(TileCacheDir, key.Substring(0, 2), key + ext);
+    }
+    static bool TryReadCachedTile(string url, out byte[] data, out string mime, out DateTime cachedAtUtc)
+    {
+        data = null; mime = "image/png"; cachedAtUtc = DateTime.MinValue;
+        try
+        {
+            string key = TileCacheKey(url);
+            foreach (string ext in TileCacheExtensions)
+            {
+                string file = TileCacheFile(key, ext);
+                if (!File.Exists(file)) continue;
+                cachedAtUtc = File.GetLastWriteTimeUtc(file);
+                data = File.ReadAllBytes(file);
+                mime = ext == ".jpg" ? "image/jpeg" : (ext == ".webp" ? "image/webp" : "image/png");
+                return data.Length > 0;
+            }
+        }
+        catch { data = null; }
+        return false;
+    }
+    static bool IsTileCacheFresh(DateTime cachedAtUtc)
+    {
+        return cachedAtUtc != DateTime.MinValue && DateTime.UtcNow - cachedAtUtc <= TileCacheMaxAge;
+    }
+    static void WriteCachedTile(string url, byte[] data, string mime)
+    {
+        if (data == null || data.Length == 0) return;
+        try
+        {
+            string key = TileCacheKey(url);
+            string file = TileCacheFile(key, TileCacheExtensionFor(mime));
+            lock (TileDiskLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(file));
+                if (TileDiskBytes < 0) TileDiskBytes = TileCacheFiles().Sum(f => f.Length);
+                long replacedBytes = 0;
+                foreach (string ext in TileCacheExtensions)
+                {
+                    string previous = TileCacheFile(key, ext);
+                    if (!File.Exists(previous)) continue;
+                    long previousBytes = 0;
+                    try { previousBytes = new FileInfo(previous).Length; } catch { }
+                    if (string.Equals(previous, file, StringComparison.OrdinalIgnoreCase)) replacedBytes += previousBytes;
+                    else
+                    {
+                        try { File.Delete(previous); replacedBytes += previousBytes; } catch { }
+                    }
+                }
+                // 같은 타일을 동시에 두 번 받아도 반쯤 쓰인 파일이 남지 않게 임시 이름으로 쓰고 옮긴다.
+                string temp = file + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+                File.WriteAllBytes(temp, data);
+                if (File.Exists(file)) File.Delete(file);
+                File.Move(temp, file);
+                TileDiskBytes = Math.Max(0, TileDiskBytes - replacedBytes) + data.LongLength;
+                if (TileDiskBytes > TileCacheMaxBytes) SweepTileCache();
+            }
+        }
+        catch { }
+    }
+    // 상한을 넘으면 오래 전에 받은 것부터 80% 아래로 내려갈 때까지 지운다.
+    static FileInfo[] TileCacheFiles()
+    {
+        if (!Directory.Exists(TileCacheDir)) return new FileInfo[0];
+        return new DirectoryInfo(TileCacheDir).GetFiles("*", SearchOption.AllDirectories)
+            .Where(file => TileCacheExtensions.Contains(file.Extension.ToLowerInvariant())).ToArray();
+    }
+    static void SweepTileCache()
+    {
+        try
+        {
+            var files = TileCacheFiles();
+            long total = 0;
+            foreach (var file in files) total += file.Length;
+            if (total > TileCacheMaxBytes)
+            {
+                Array.Sort(files, (a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
+                long target = (long)(TileCacheMaxBytes * 0.8);
+                foreach (var file in files)
+                {
+                    if (total <= target) break;
+                    long size = file.Length;
+                    try { file.Delete(); total -= size; } catch { }
+                }
+            }
+            TileDiskBytes = total;
+        }
+        catch { TileDiskBytes = -1; }
+    }
+    static string TileCacheStatusJson()
+    {
+        long bytes = 0; int count = 0;
+        try
+        {
+            lock (TileDiskLock)
+            {
+                foreach (var file in TileCacheFiles()) { bytes += file.Length; count++; }
+                TileDiskBytes = bytes;
+            }
+        }
+        catch { }
+        return "{\"files\":" + count + ",\"bytes\":" + bytes + ",\"maxBytes\":" + TileCacheMaxBytes + "}";
+    }
+    static bool ClearTileCache()
+    {
+        try
+        {
+            lock (TileDiskLock)
+            {
+                if (Directory.Exists(TileCacheDir)) Directory.Delete(TileCacheDir, true);
+                TileDiskBytes = 0;
+            }
+            lock (TileCacheLock) TileCache.Clear();
+            return true;
+        }
+        catch { return false; }
+    }
+    /* ===== 장소 이름 검색(지오코딩) =====
+       브라우저에서 곧장 부르지 않고 런처를 거치는 이유: Nominatim 은 애플리케이션을 알아볼 수 있는
+       User-Agent 와 "초당 1건 이하"를 요구한다. 서버에서 부르면 UA 를 제대로 붙이고 간격도 한 곳에서
+       지킬 수 있다(탭을 여러 개 열어도 창구가 하나다). 공급자는 CLASSDOCK_GEOCODER_URL 로 바꿀 수 있다. */
+    const string DefaultGeocodeEndpoint = "https://nominatim.openstreetmap.org/search";
+    const string GeocodeEndpointEnvironment = "CLASSDOCK_GEOCODER_URL";
+    const int GeocodeMinIntervalMs = 1100;      // 정책상 초당 1건 — 여유를 조금 둔다
+    static readonly object GeocodeLock = new object();
+    static DateTime GeocodeLastCall = DateTime.MinValue;
+    static readonly Dictionary<string, byte[]> GeocodeCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+    static Uri GeocodeEndpoint()
+    {
+        string configured = (Environment.GetEnvironmentVariable(GeocodeEndpointEnvironment) ?? "").Trim();
+        Uri endpoint;
+        if (!Uri.TryCreate(configured.Length > 0 ? configured : DefaultGeocodeEndpoint, UriKind.Absolute, out endpoint)
+            || endpoint.Scheme != "https")
+            Uri.TryCreate(DefaultGeocodeEndpoint, UriKind.Absolute, out endpoint);
+        return endpoint;
+    }
+    static bool TryGeocodePlace(string query, out byte[] data, out string error)
+    {
+        data = null; error = "geocode-failed";
+        string q = (query ?? "").Trim();
+        if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
+        lock (GeocodeLock) if (GeocodeCache.TryGetValue(q, out data)) return true;
+        try
+        {
+            lock (GeocodeLock)
+            {
+                // 마지막 호출과의 간격을 여기서 지킨다(창구가 하나라 탭을 여러 개 열어도 안전).
+                double waited = (DateTime.UtcNow - GeocodeLastCall).TotalMilliseconds;
+                if (waited < GeocodeMinIntervalMs) Thread.Sleep((int)(GeocodeMinIntervalMs - waited));
+                GeocodeLastCall = DateTime.UtcNow;
+            }
+            if (!TileTlsReady)
+            {
+                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+                TileTlsReady = true;
+            }
+            Uri endpoint = GeocodeEndpoint();
+            string url = endpoint.GetLeftPart(UriPartial.Path) + "?format=jsonv2&limit=5&accept-language=ko&q=" + Uri.EscapeDataString(q);
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
+            request.Accept = "application/json";
+            request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream())
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[8192];
+                int read; long total = 0;
+                while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    total += read;
+                    if (total > 512 * 1024) { error = "geocode-too-large"; return false; }
+                    buffer.Write(chunk, 0, read);
+                }
+                data = buffer.ToArray();
+            }
+            lock (GeocodeLock)
+            {
+                if (GeocodeCache.Count > 200) GeocodeCache.Clear();
+                GeocodeCache[q] = data;
+            }
+            return true;
+        }
+        catch (Exception ex) { error = "geocode-failed: " + FlattenMessage(ex); data = null; return false; }
+    }
+
     static bool TryProxyMapTile(string url, out byte[] data, out string mime)
     {
         data = null; mime = "image/png";
+        byte[] staleData = null;
+        string staleMime = "image/png";
         try
         {
             Uri uri;
@@ -2625,7 +2895,31 @@ class ClassDockLauncher
             foreach (string candidate in TileProxyHosts)
                 if (host == candidate || host.EndsWith("." + candidate, StringComparison.Ordinal)) { allowed = true; break; }
             if (!allowed) return false;
-            lock (TileCacheLock) if (TileCache.TryGetValue(url, out data)) return true;
+            lock (TileCacheLock)
+            {
+                TileMemoryEntry cached;
+                if (TileCache.TryGetValue(url, out cached))
+                {
+                    if (IsTileCacheFresh(cached.CachedAtUtc))
+                    {
+                        data = cached.Data; mime = cached.Mime;
+                        return data != null && data.Length > 0;
+                    }
+                    staleData = cached.Data; staleMime = cached.Mime;
+                }
+            }
+            // 7일 안에 받은 타일은 그대로 쓴다. 만료된 타일은 새로 받되, 오프라인이면 catch 에서
+            // stale 복사본을 반환해 인터넷 없는 교실에서도 전에 본 지역은 계속 열리게 한다.
+            DateTime cachedAtUtc;
+            if (staleData == null && TryReadCachedTile(url, out data, out mime, out cachedAtUtc))
+            {
+                if (IsTileCacheFresh(cachedAtUtc))
+                {
+                    lock (TileCacheLock) TileCache[url] = new TileMemoryEntry(data, mime, cachedAtUtc);
+                    return true;
+                }
+                staleData = data; staleMime = mime;
+            }
             if (!TileTlsReady)
             {
                 try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
@@ -2645,7 +2939,11 @@ class ClassDockLauncher
                 while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
                 {
                     total += read;
-                    if (total > 2 * 1024 * 1024) return false;   // 타일치고 비정상적으로 크면 중단
+                    if (total > 2 * 1024 * 1024)
+                    {
+                        if (staleData != null) { data = staleData; mime = staleMime; return true; }
+                        return false;   // 타일치고 비정상적으로 크면 중단
+                    }
                     buffer.Write(chunk, 0, read);
                 }
                 if (!string.IsNullOrEmpty(response.ContentType)) mime = response.ContentType;
@@ -2654,11 +2952,19 @@ class ClassDockLauncher
             lock (TileCacheLock)
             {
                 if (TileCache.Count > 500) TileCache.Clear();   // 단순 상한 — 지도 몇 장 분량이면 충분
-                TileCache[url] = data;
+                TileCache[url] = new TileMemoryEntry(data, mime, DateTime.UtcNow);
             }
+            WriteCachedTile(url, data, mime);
             return true;
         }
-        catch { data = null; return false; }
+        catch
+        {
+            // 갱신에 실패해도 디스크에 남은 만료 타일은 오프라인 fallback으로 계속 쓴다.
+            if (staleData != null) { data = staleData; mime = staleMime; return true; }
+            DateTime cachedAtUtc;
+            if (TryReadCachedTile(url, out data, out mime, out cachedAtUtc)) return true;
+            data = null; return false;
+        }
     }
 
     // 번들된 Pyodide 코어 파일(vendor/pyodide/<파일명>)을 안전하게 읽어 적절한 MIME 과 돌려준다.

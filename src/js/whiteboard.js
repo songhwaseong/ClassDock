@@ -1989,6 +1989,23 @@ function renderWhiteboard(doc, host){
     loadImageBlob(blob).then(img => placeImage(img, cx, cy)).catch(() => { if (typeof toast === "function") toast("이미지를 넣지 못했어요.", 2000); });
     return true;
   };
+  /* 다른 문서(지도 등)가 만든 그림을 이 보드에 넣는다.
+     placeImage 를 그대로 타므로 크기 맞춤·선택 상태·되돌리기·리플레이 녹화가 손으로 넣은 그림과
+     똑같이 동작한다. data URL 만 받는다 — 바깥 주소를 그대로 넣으면 자동복원 스냅샷이 그 주소에
+     매여, 인터넷이 없는 다음 수업에서 빈 칸으로 되살아난다. */
+  doc.insertBoardImage = async (src) => {
+    if (typeof src !== "string" || !/^data:image\//.test(src)) return false;
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => { el.__boardSrc = src; resolve(el); };
+        el.onerror = () => reject(new Error("image-load-failed"));
+        el.src = src;
+      });
+      placeImage(img);
+      return true;
+    } catch(_){ return false; }
+  };
   const educationCatalog = whiteboardEducationCatalog();
   let formulaLibrary;
   try { formulaLibrary = normalizeWhiteboardFormulaLibrary(JSON.parse(localStorage.getItem(WB_FORMULA_LIBRARY_KEY) || "null")); }
@@ -4685,7 +4702,21 @@ function renderWhiteboard(doc, host){
     } catch(_){}
     fileInput.click();
   }
-  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
+  /* 지도 넣기 — map-viewer.js 의 지도 고르기 창을 띄워 고른 화면을 그림으로 받아 넣는다.
+     map-viewer 는 이 파일보다 뒤에 실행되므로 있는지 확인하고 부른다(순환 참조라 어느 쪽을
+     먼저 싣든 한쪽은 실행 시점에 확인해야 한다 — 지도 쪽도 newWhiteboard 를 같은 방식으로 부른다). */
+  const insertMapFromPicker = async () => {
+    if (typeof openMapPicker !== "function"){
+      if (typeof toast === "function") toast("지도를 열 수 없어요.", 2200);
+      return;
+    }
+    const png = await openMapPicker();
+    if (!png) return;                                  // 취소
+    const placed = await doc.insertBoardImage(png);
+    if (!placed && typeof toast === "function") toast("지도를 넣지 못했어요.", 2200);
+  };
+  const mapToolBtn = mkBtn("🗺️", "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다", "wb-act wb-map", insertMapFromPicker);
+  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mapToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
 
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);

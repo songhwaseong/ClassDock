@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { collapseSidebar } = require("./helpers");
+const { collapseSidebar, stableBox } = require("./helpers");
 
 // 악보 → 메모창 → 다시 악보 왕복.
 // 여기서만 확인할 수 있는 것: VexFlow 가 Bravura "글꼴 글자"로 그린 오선을 문서 밖으로 떼어
@@ -117,8 +117,12 @@ test("오른쪽 버튼으로 오선 한 단만 메모로 보낸다", async ({ pa
     return sheet;
   })()`);
 
+  // VexFlow 조판은 지연 로드된 뒤 여러 번에 나눠 그려진다 — "보임"이 된 직후에도 자리가 다시
+  // 잡히는 중이라, 그때 잰 사각형은 null 이거나 곧 낡는다(병렬 실행에서 실제로 터졌다).
+  // stableBox 는 두 번 연속 같은 자리가 될 때까지 기다린다.
   const score = page.locator(".music-score svg").last();
-  const box = await score.boundingBox();
+  await expect(score).toBeVisible({ timeout:15_000 });
+  const box = await stableBox(score);
   await page.mouse.click(box.x + box.width / 2, box.y + 60, { button:"right" });
   await page.locator(".music-context-menu button", { hasText:"저장·내보내기" }).hover();
   // 라벨에 마디 범위가 들어간다: "이 단(1~4마디)을 메모로"

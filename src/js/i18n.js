@@ -1527,7 +1527,134 @@
     "파일 끝 개행 있음": "Final newline present",
     "파일 끝 개행 없음": "No final newline",
     "🔀 시작 코드와 비교": "🔀 Compare with starter code",
-    "학생이 과제 시작 코드에서 무엇을 바꿨는지 나란히 비교해 보기": "See side by side what the student changed from the starter code"
+    "학생이 과제 시작 코드에서 무엇을 바꿨는지 나란히 비교해 보기": "See side by side what the student changed from the starter code",
+
+    // 지도(.map)
+    "새 지도(.map)": "New map (.map)",
+    "새 지도 (.map)": "New map (.map)",
+    "지도를 칠판으로": "Map to whiteboard",
+    "칠판에 지도 넣기": "Insert a map on the whiteboard",
+    "지도 오프라인 현황": "Offline map status",
+    "지도 제목": "Map title",
+    "배경지도": "Base map",
+    "배경지도 바꾸기": "Change the base map",
+    "일반 지도": "Standard",
+    "지형(등고선)": "Terrain (contours)",
+    "흑백(판서용)": "Grayscale (for drawing on)",
+    "위성 사진": "Satellite",
+    "📍 표시 추가": "📍 Add a pin",
+    "누른 뒤 지도를 클릭하면 그 자리에 표시가 생겨요": "Press this, then click the map to drop a pin there",
+    "🖊️ 칠판으로": "🖊️ To whiteboard",
+    "지금 보이는 지도를 그림으로 굳혀 새 화이트보드에 올려요 — 그 위에 바로 판서할 수 있어요":
+      "Freezes the current view into an image on a new whiteboard so you can draw on it right away",
+    "🗂️ 오프라인 지도": "🗂️ Offline maps",
+    "실제로 본 지역은 자동으로 보관됩니다 — 현황을 확인하거나 비울 수 있어요":
+      "Areas you actually view are cached automatically — check or clear the cache",
+    "내 지도 이미지": "My map image",
+    "사용자 지도": "Custom map",
+    "거리": "Distance",
+    "면적": "Area",
+    "🖼️ 내 지도": "🖼️ My map",
+    "학교 배치도·평면도 같은 이미지를 오프라인 지도 배경으로 사용":
+      "Use a school layout or floor-plan image as an offline map background",
+    "이미지 지우기": "Remove image",
+    "📏 거리선": "📏 Distance line",
+    "지도에 점을 찍어 경로와 전체 거리를 표시": "Place points to show a route and its total distance",
+    "▱ 면적 영역": "▱ Area",
+    "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
+    "CSV 들이기": "Import CSV",
+    "이름·위도·경도·메모·색상 열의 CSV에서 표시 추가": "Add pins from CSV columns for name, latitude, longitude, note, and color",
+    "CSV 내보내기": "Export CSV",
+    "지도 표시를 Excel에서 열 수 있는 CSV로 저장": "Save map pins as a CSV that opens in Excel",
+    "영역 이름": "Area name",
+    "경로 이름": "Route name",
+    "도형 색상": "Shape color",
+    "도형 지우기": "Delete shape",
+    "장소 이름 또는 좌표": "Place name or coordinates",
+    "장소 이름 또는 좌표로 이동": "Go to a place name or coordinates",
+    "예: 경복궁 · 37.5665, 126.9780 — 적고 Enter": "e.g. Gyeongbokgung · 37.5665, 126.9780 — type it and press Enter",
+    "검색": "Search",
+    "장소 검색 (Enter)": "Search for a place (Enter)",
+    "찾는 중…": "Searching…",
+    "그런 이름의 장소를 찾지 못했어요.": "No place found with that name.",
+    "장소를 찾지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't search for places — check your internet connection.",
+    "인터넷 연결 없음 — 새 지역 지도는 표시할 수 없습니다. 이전에 저장된 지역만 볼 수 있습니다.":
+      "No internet connection — new map areas cannot be displayed. You can only view previously cached areas.",
+    "배경지도를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.":
+      "Couldn't load the base map. Check your internet connection.",
+    "장소 이름 검색은 ClassDock 런처에서 사용할 수 있어요. 좌표 이동은 그대로 쓸 수 있습니다.":
+      "Place-name search is available in the ClassDock launcher. You can still move by coordinates.",
+    "지도 저장 (Ctrl+S)": "Save map (Ctrl+S)",
+    "지도": "Map",
+    "지도 만들기": "Map editor",
+    "표시 이름": "Pin name",
+    "표시 메모": "Pin note",
+    "메모(수업 설명·관찰 기록)": "Note (lesson notes, observations)",
+    "이름 없는 표시": "Unnamed pin",
+    "표시": "Pin",
+    "표시 지우기": "Delete pin",
+    "빨강": "Red",
+    "파랑": "Blue",
+    "초록": "Green",
+    "노랑": "Yellow",
+    "보라": "Purple",
+    "검정": "Black",
+    "지도를 클릭하면 그 자리에 표시가 생겨요 (Esc 로 취소)": "Click the map to drop a pin there (Esc to cancel)",
+    "인터넷이 없어 배경지도를 못 받았어요 — 표시와 메모는 그대로 저장돼요.":
+      "No internet, so the base map couldn't load — your pins and notes still save normally.",
+    "배경지도를 직접 내려받는 방식으로 바꿨어요.": "Switched to downloading the base map directly.",
+    "면적 영역은 점을 3개 이상 찍어 주세요.": "Place at least three points for an area.",
+    "거리선은 점을 2개 이상 찍어 주세요.": "Place at least two points for a distance line.",
+    "영역 꼭짓점을 차례로 찍고 Enter 또는 면적 영역 버튼을 다시 누르세요 (Esc 취소)":
+      "Place the area's corners, then press Enter or the Area button again (Esc to cancel)",
+    "경로의 점을 차례로 찍고 Enter 또는 거리선 버튼을 다시 누르세요 (Esc 취소)":
+      "Place route points, then press Enter or the Distance line button again (Esc to cancel)",
+    "점 {count}개 — 계속 찍거나 Enter로 완료하세요": "{count} points — keep placing points or press Enter to finish",
+    "지도 이미지를 준비하는 중…": "Preparing the map image…",
+    "현재 화면 범위에 내 지도 이미지를 넣었습니다. 인터넷 없이도 표시됩니다.":
+      "Added your map image to the current view. It remains visible without internet.",
+    "PNG·JPG·WebP 지도 이미지를 골라 주세요.": "Choose a PNG, JPG, or WebP map image.",
+    "지도 이미지는 20MB 이하로 골라 주세요.": "Choose a map image no larger than 20 MB.",
+    "지도 이미지를 넣지 못했습니다. 더 작은 이미지를 사용해 주세요.": "Couldn't add the map image. Try a smaller image.",
+    "이 지도 파일에 넣은 사용자 이미지를 지울까요?": "Remove the custom image embedded in this map file?",
+    "CSV 첫 줄에 위도·경도 열이 필요합니다.": "The first CSV row must include latitude and longitude columns.",
+    "CSV 파일은 5MB 이하로 골라 주세요.": "Choose a CSV file no larger than 5 MB.",
+    "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the CSV.",
+    "CSV에서 표시 {count}개를 추가했습니다": "Added {count} pins from the CSV",
+    " · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외":
+      " · skipped {skipped} invalid coordinates · skipped {truncated} above the limit",
+    "내보낼 표시가 없습니다.": "There are no pins to export.",
+    "표시 {count}개를 CSV로 내보냈습니다": "Exported {count} pins to CSV",
+    "지도를 칠판으로 옮기는 중…": "Moving the map to the whiteboard…",
+    "지도를 칠판으로 옮겼어요 — 그 위에 바로 판서할 수 있어요.": "Moved the map to a whiteboard — you can draw on it right away.",
+    "칠판에 지도를 넣지 못했어요.": "Couldn't place the map on the whiteboard.",
+    "지도를 그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요.":
+      "Couldn't freeze the map into an image — wait for the base map to finish loading and try again.",
+    "화이트보드를 열 수 없어요.": "Can't open a whiteboard.",
+    "지도 문서(.map)를 읽지 못해 텍스트로 열었어요.": "Couldn't read the map document (.map), so it opened as text.",
+    "지도 라이브러리를 불러오지 못했어요.": "Couldn't load the map library.",
+    "지도 라이브러리를 불러오지 못했어요": "Couldn't load the map library",
+    // 지도 고르기 창(칠판 → 🗺️)
+    "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다": "Insert a map — pick a spot and drop the base map in as an image",
+    "지도를 열 수 없어요.": "Can't open the map picker.",
+    "지도를 넣지 못했어요.": "Couldn't insert the map.",
+    "지도 고르기": "Pick a map",
+    "보여 줄 자리를 잡고 이 화면 넣기를 누르면 칠판에 그림으로 들어갑니다. 넣은 뒤에는 그 위에 바로 판서할 수 있어요.":
+      "Choose the area to show and select Insert this view to add it to the whiteboard as an image. You can draw on it immediately.",
+    "이 화면 넣기": "Insert this view",
+    "그림으로 굳히는 중…": "Freezing into an image…",
+    "그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요.":
+      "Couldn't freeze it — wait for the base map to finish loading and try again.",
+    // 오프라인 지도 현황 창
+    "오프라인 지도": "Offline maps",
+    "런처로 지도를 볼 때 화면에 표시된 배경은 자동으로 보관됩니다. 공개 지도 서버 정책에 따라 보지 않은 지역을 미리 내려받지는 않습니다.":
+      "When you view maps in the launcher, displayed base-map tiles are cached automatically. To respect public map-server policies, unseen areas are not downloaded in advance.",
+    "받아 둔 지도 비우기": "Clear downloaded maps",
+    "받아 둔 배경지도를 모두 지웁니다. 인터넷이 없으면 지도가 비어 보이게 됩니다.":
+      "Deletes every downloaded base map. Without internet, maps will appear blank.",
+    "비우기": "Clear",
+    "받아 둔 지도를 비웠어요.": "Cleared the downloaded maps.",
+    "비우지 못했어요.": "Couldn't clear them."
   };
 
   /* ── 리치 블록 사전(data-i18n="key" → English HTML). 한국어 원문은 스캔 때 기억. ── */
@@ -1639,7 +1766,10 @@
     "'{name}' 을(를) 찾지 못했어요. 옮겨졌거나 지워졌을 수 있어요.": "Couldn't find '{name}'. It may have been moved or deleted.",
     "파일 {n}개를 닫았어요.": "Closed {n} {n|file|files}.",
     "파일 {closed}개를 닫았어요. {cancelled}개는 취소했어요.":
-      "Closed {closed} files. Cancelled {cancelled}."
+      "Closed {closed} files. Cancelled {cancelled}.",
+    // 지도(.map)
+    "중심 {lat}, {lng} · 확대 {zoom}": "Center {lat}, {lng} · zoom {zoom}",
+    "지금 받아 둔 지도: {files}장 · {size} (최대 {max})": "Downloaded so far: {files} tiles · {size} (up to {max})"
   };
 
   function tf(tmpl, vars) {

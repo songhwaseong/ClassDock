@@ -28,6 +28,8 @@ const MNLazy = (() => {
     hwp:         { label:"한글(HWP) 보기",     files:["hwp.global.js"] },
     // 악보 조판(VexFlow). 음악 글꼴(Bravura)까지 담긴 배포본이라 네트워크 없이 그린다.
     vexflow:     { label:"악보 그리기",        files:["vexflow-bravura.min.js"] },
+    // 지도 렌더러(Leaflet). 라이브러리 자체는 오프라인이고, 배경 타일만 인터넷에서 받는다.
+    leaflet:     { label:"지도 그리기",        files:["leaflet.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },
     capture:     { label:"화면 캡처",          files:["html2canvas.min.js", "html-to-image.js"] },
     pptx:        { label:"PowerPoint 보기",

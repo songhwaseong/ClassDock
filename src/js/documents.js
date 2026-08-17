@@ -1212,6 +1212,7 @@ function unsavedDocumentLabel(doc){
   if (doc.examEdit) return "시험지";
   if (doc.kind === "image") return "이미지 편집";
   if (doc.kind === "board") return "화이트보드";
+  if (doc.kind === "map") return "지도";
   if (doc.notebook) return "노트북";
   if (doc.kind === "office" && /\.(xlsx|xls|csv)$/i.test(doc.name || "")) return "스프레드시트";
   if (doc.kind === "office") return "문서";
@@ -1435,6 +1436,7 @@ function modeBadgeText(doc){
   const ext = documentExtension(doc).toLowerCase();
   if (doc.kind === "pdf") return "PDF 편집";
   if (doc.kind === "board") return "화이트보드";
+  if (doc.kind === "map") return "지도 만들기";
   if (doc.kind === "replay") return "수업 리플레이";
   if (doc.kind === "diff") return "파일 비교";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
@@ -2407,6 +2409,9 @@ function openSidebarGroupMenu(node, x, y){
   });
   add("+Ms  새 악보", () => {
     if (typeof newMusicScratchInFolder === "function") newMusicScratchInFolder(node.newPythonContext);
+  });
+  add("+Map 새 지도", () => {
+    if (typeof newMapScratchInFolder === "function") newMapScratchInFolder(node.newPythonContext);
   });
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {

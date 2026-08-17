@@ -4,6 +4,10 @@
     "pptx": {
       "src": "vendor/pptxjs.css",
       "file": "pptxjs.css"
+    },
+    "leaflet": {
+      "src": "vendor/leaflet.css",
+      "file": "leaflet.css"
     }
   },
   "localScripts": [
@@ -59,6 +63,7 @@
     "board-render.js",
     "board-tools.js",
     "whiteboard.js",
+    "map-viewer.js",
     "lesson-replay.js",
     "diff-viewer.js",
     "batch-replace.js",
@@ -159,7 +164,8 @@
         "image-lightbox.js",
         "board-render.js",
         "board-tools.js",
-        "whiteboard.js"
+        "whiteboard.js",
+        "map-viewer.js"
       ]
     },
     {
@@ -280,6 +286,12 @@
       "board-render.js",
       "board-tools.js",
       "documents.js"
+    ],
+    "map-viewer.js": [
+      "lazy.js",
+      "documents.js",
+      "file-loaders.js",
+      "code-viewer.js"
     ],
     "diff-viewer.js": [
       "documents.js",
@@ -419,7 +431,8 @@
         "backup.js",
         "python-run-context.js",
         "music-xml.js",
-        "music-editor.js"
+        "music-editor.js",
+        "map-viewer.js"
       ]
     },
     {
@@ -675,6 +688,12 @@
       "file": "zip-full.min.js",
       "lazy": "zip",
       "sha384": "sha384-I/HWtwluKZIVzQnugyNZWTtzOTrBIK7nsdVnB1a+tLSTplwghWXI0AFsDxmFlXvW"
+    },
+    {
+      "src": "vendor/leaflet.min.js",
+      "file": "leaflet.min.js",
+      "lazy": "leaflet",
+      "sha384": "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
     }
   ]
 }

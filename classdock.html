@@ -9,6 +9,7 @@
 <script src="src/js/i18n.js"></script>
 <link rel="stylesheet" href="src/styles.css">
 <link rel="stylesheet" href="vendor/pptxjs.css">
+<link rel="stylesheet" href="vendor/leaflet.css">
 </head>
 <body>
 
@@ -185,6 +186,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
             <span>새 악보(.msheet)</span>
           </button>
+          <button class="sb-menu-item" id="sbNewMap" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/></svg>
+            <span>새 지도(.map)</span>
+          </button>
           <button class="sb-menu-item" id="sbOpenLesson" type="button" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 20h8M12 17v3"/><path d="M10.5 8.5v4l3.5-2z"/></svg>
             <span>리플레이 열기(.lesson)</span>
@@ -332,7 +337,7 @@
           <span data-i18n="dz.cmdk">뭐든 <kbd>Ctrl</kbd><kbd>K</kbd>로 검색해 실행 — 서명·필기·화이트보드·예제까지</span>
         </button>
         <div class="dz-note" data-i18n="dz.note">모든 처리는 이 컴퓨터 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.</div>
-        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.msheet,.musicxml,.mxl,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.msheet,.musicxml,.mxl,.map,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
         <input type="file" id="folderInput" webkitdirectory multiple hidden>
       </div>
     </div>
@@ -837,6 +842,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/board-render.js"></script>
 <script src="src/js/board-tools.js"></script>
 <script src="src/js/whiteboard.js"></script>
+<script src="src/js/map-viewer.js"></script>
 <script src="src/js/lesson-replay.js"></script>
 <script src="src/js/diff-viewer.js"></script>
 <script src="src/js/batch-replace.js"></script>

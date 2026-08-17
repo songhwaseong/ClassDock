@@ -380,6 +380,7 @@
   [data-cat="dir"]{--ic:#94a3b8}
   [data-cat="code"]{--ic:#6b8aa3}
   [data-cat="media"]{--ic:#6366f1}
+  [data-cat="map"]{--ic:#0d9488}
   .sb-label{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden}
   .sb-label.has-zip-info,.sb-label.has-image-restore{flex-direction:row;align-items:center;gap:5px}
   .sb-label.has-zip-info .sb-name,.sb-label.has-image-restore .sb-name{flex:1}
@@ -795,6 +796,77 @@
     font:14px/1.6 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
   table.mnote-table th .mnote-table-cell{font-weight:700}
   .mnote-table-cell:focus{background:color-mix(in srgb,var(--accent) 14%,transparent);box-shadow:inset 0 0 0 2px var(--accent)}
+  /* ===== .map 지도 문서(Leaflet) ===== */
+  .map-doc{display:flex;flex-direction:column;height:100%;min-height:0}
+  .map-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .map-title{flex:1 1 180px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:600 15px/1.3 inherit}
+  .map-select,.map-goto{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 8px;font:inherit;font-size:12px}
+  .map-goto{width:168px}
+  /* 검색칸 + 결과 목록. 목록은 도구막대 높이를 밀지 않게 칸 아래에 떠 있는다. */
+  .map-search{position:relative;display:flex;gap:4px}
+  .map-search-submit:disabled{opacity:.65;cursor:wait}
+  /* Leaflet의 지도 pane·확대 단추는 z-index가 최대 1000이다. 검색 후보가 지도 뒤에 숨으면
+     성공 상태 문구까지 지워진 뒤라 완전히 무반응처럼 보이므로 그보다 위에 둔다. */
+  .map-results{position:absolute;top:calc(100% + 4px);left:0;z-index:1200;display:flex;flex-direction:column;
+    min-width:100%;max-width:min(420px,70vw);max-height:240px;overflow-y:auto;
+    border:1px solid var(--border);border-radius:8px;background:var(--panel);box-shadow:0 10px 28px rgba(0,0,0,.22)}
+  .map-results[hidden]{display:none}
+  .map-result{border:0;border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);background:transparent;
+    color:var(--ink);padding:7px 10px;font:inherit;font-size:12px;text-align:left;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .map-result:last-child{border-bottom:0}
+  .map-result:hover{background:var(--panel-hover)}
+  .map-network-notice{position:absolute;top:12px;left:50%;z-index:1100;transform:translateX(-50%);
+    width:max-content;max-width:calc(100% - 96px);padding:9px 13px;border:1px solid rgba(251,191,36,.8);
+    border-radius:9px;background:rgba(120,53,15,.94);color:#fff;font-size:12.5px;font-weight:700;
+    line-height:1.45;text-align:center;box-shadow:0 5px 18px rgba(15,23,42,.28);pointer-events:none}
+  .map-network-notice[hidden]{display:none}
+  .map-btn,.map-save{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .map-btn:hover,.map-save:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .map-btn.is-on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .map-stage.is-drawing,.map-stage.is-adding{cursor:crosshair}
+  .map-shape-popup{display:flex;flex-direction:column;gap:7px;min-width:180px}
+  .map-shape-color{width:100%;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:2px}
+  .map-shape-label{border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:6px;
+    background:color-mix(in srgb,var(--panel) 92%,transparent);color:var(--ink);font-weight:700;box-shadow:0 2px 8px rgba(15,23,42,.18)}
+  .map-save{font-weight:600}
+  .map-coord{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .map-status{color:var(--muted);font-size:11px;margin-left:auto}
+  .map-stage{flex:1 1 auto;min-height:0;background:var(--panel)}
+  /* Leaflet 은 넘겨준 칸 "자체"에 leaflet-* 클래스를 붙인다(자식이 아니다) — 그래서 붙여 쓴다.
+     타일이 아직 안 온 칸은 배경색으로 남겨, 어두운 화면에서 흰 판이 번쩍이지 않게 한다. */
+  .map-stage.leaflet-container{background:var(--panel);font:inherit}
+  .map-stage.is-adding{cursor:crosshair}
+  .map-fallback{padding:24px;color:var(--muted);font-size:13px}
+  .map-pin{background:none;border:0}
+  .map-popup{display:flex;flex-direction:column;gap:6px;min-width:196px}
+  .map-popup-label{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);
+    padding:5px 7px;font:600 13px/1.3 inherit}
+  .map-popup-note{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);
+    padding:5px 7px;font:inherit;font-size:12px;resize:vertical}
+  .map-popup-colors{display:flex;gap:4px}
+  .map-swatch{width:20px;height:20px;border:2px solid transparent;border-radius:50%;cursor:pointer;padding:0}
+  .map-swatch[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 1px var(--panel) inset}
+  .map-popup-coord{margin:0;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .map-popup-remove{border:1px solid color-mix(in srgb,var(--danger) 38%,var(--border));border-radius:6px;
+    background:var(--field);color:var(--danger);padding:5px 8px;font:inherit;font-size:11.5px;cursor:pointer}
+  .map-popup-remove:hover{background:var(--danger);border-color:var(--danger);color:#fff}
+  /* 지도 고르기 창(칠판 → 🗺️)과 오프라인 지도 현황 창 */
+  .map-picker-modal .modal-card{width:min(900px,96%);max-height:92vh;display:flex;flex-direction:column}
+  .map-picker-bar{position:relative;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .map-picker-bar .map-goto{width:200px}
+  .map-picker-note{color:var(--muted);font-size:12px}
+  .map-picker-stage{flex:1 1 auto;min-height:min(58vh,460px);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .map-picker-stage.leaflet-container{background:var(--panel);font:inherit}
+  .map-prepare-modal .modal-card{width:min(520px,96%)}
+  .map-prepare-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);margin-bottom:10px}
+  .map-prepare-count{margin:0 0 4px;font-size:12.5px;color:var(--muted)}
+  .map-prepare-count.is-over{color:var(--danger)}
+  .map-prepare-status{margin:0 0 4px;font-size:12.5px;color:var(--muted);min-height:17px}
   /* ===== .msheet 악보 문서 ===== */
   .music-doc{display:flex;flex-direction:column;height:100%;min-height:0}
   .music-bar,.music-play{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;

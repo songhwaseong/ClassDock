@@ -344,6 +344,7 @@ function wire(){
   byId("sbNewText").onclick = () => { if (typeof newTextScratch === "function") newTextScratch(); };
   if (byId("sbNewMnote")) byId("sbNewMnote").onclick = () => { if (typeof newMnoteScratch === "function") newMnoteScratch(); };
   if (byId("sbNewMusic")) byId("sbNewMusic").onclick = () => { if (typeof newMusicScratch === "function") newMusicScratch(); };
+  if (byId("sbNewMap")) byId("sbNewMap").onclick = () => { if (typeof newMapScratch === "function") newMapScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };
@@ -445,7 +446,7 @@ function wire(){
     const btn = byId("sbNew"), menu = byId("sbNewMenu");
     if (!btn || !menu) return;
     const home = menu.parentNode;
-    const items = [byId("sbNewPy"), byId("sbNewJs"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbNewMnote"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
+    const items = [byId("sbNewPy"), byId("sbNewJs"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbNewMnote"), byId("sbNewMap"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
     const placeMenu = () => {
       const rect = btn.getBoundingClientRect();
       document.body.appendChild(menu);               // 좁은 사이드바의 overflow:hidden에 잘리지 않게 화면 레이어로 이동
@@ -2101,7 +2102,7 @@ function makeCardMovable(card){
     ro.observe(card);
   }
   // 드래그 시작을 무시할 대상: 상호작용·텍스트 선택 영역
-  const IGNORE = "button,input,textarea,select,a,canvas,label,dd,[contenteditable],.modal-actions,.py-terminal-log";
+  const IGNORE = "button,input,textarea,select,a,canvas,label,dd,[contenteditable],.modal-actions,.py-terminal-log,.leaflet-container";
   card.addEventListener("mousedown", (e) => {
     if (compactLayout()) return;
     if (e.button !== 0) return;

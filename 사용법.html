@@ -90,7 +90,7 @@
 
 <h1>ClassDock 사용법 — 처음부터 끝까지</h1>
 
-<p class="updated"><strong>최종 업데이트: 2026년 8월 13일</strong></p>
+<p class="updated"><strong>최종 업데이트: 2026년 8월 17일</strong></p>
 
 <p class="lead">이 문서는 <strong>처음 쓰는 분</strong>도 따라할 수 있게 클론부터 실제 사용까지 단계별로 정리한 가이드입니다. 자세한 기능 설명·릴리스 노트는 <a href="README.md">README.md</a>를 참고하세요.</p>
 
@@ -128,6 +128,7 @@
   <li><strong>시험지</strong> — 객관식·주관식·이미지 문항을 <code>.exam</code> 한 파일로 배포하고, 학생이 이름·서명해 낸 제출본(<code>.examdone</code>)을 <strong>선생님만 열어 일괄 채점·성적 CSV</strong></li>
   <li><strong>블록 문서</strong> — 글·표·이미지를 한 문서에 섞어 쓰는 노션형 문서(<code>.mnote</code>)</li>
   <li><strong>악보</strong> — 두 성부·가사·표현·반복을 넣고 바로 듣는 악보(<code>.msheet</code>), <strong>조옮김</strong>, <strong>MusicXML 가져오기·내보내기</strong>, MIDI 건반 입력·MIDI/WAV 저장과 참고 이미지 나란히 보기</li>
+  <li><strong>지도</strong> — 배경지도 위에 표시를 찍어 이름·메모를 붙이는 수업용 지도(<code>.map</code>), 그대로 <strong>칠판으로 보내 판서</strong>, 런처에서 실제로 본 지역은 <strong>자동 보관해 다시 오프라인으로</strong></li>
   <li><strong>파일 비교·여러 파일 찾아 바꾸기</strong> — 두 파일의 달라진 곳을 나란히 보고, 열린 파일들(Word 본문 포함)을 한꺼번에 치환</li>
 </ul>
 
@@ -513,6 +514,7 @@ cd myOffice</code></pre>
     </ul>
   </li>
   <li><strong>벡터 합성</strong>(도구막대·우클릭 메뉴) — <strong>같은 점에서 그린 화살표 두 개</strong> 중 하나를 고르고 누르면 평행사변형과 <strong>합력 화살표</strong>가 붙고 크기(cm)·각도가 적힙니다. 합성에 쓰인 화살표는 <strong>끝점에 손잡이</strong>가 생겨 끌어 길이·방향을 바꿀 수 있고, 그때마다 합력이 따라 바뀝니다. 원본 화살표를 지우면 합력도 함께 사라지고, 한 번 더 누르면 뗍니다</li>
+  <li><strong>지도 넣기</strong>(도구막대 🗺️) — 지도 고르기 창이 열립니다. 배경지도를 고르고 끌거나 <strong>장소 이름·좌표</strong>를 적은 뒤 <strong>검색</strong>(또는 <kbd>Enter</kbd>)으로 자리를 잡고 <strong>이 화면 넣기</strong>를 누르면 지금 보이는 지도가 <strong>그림으로 보드에 들어옵니다</strong>. 들어온 뒤에는 여느 이미지처럼 옮기고 크기를 바꾸며 그 위에 바로 판서할 수 있습니다. 마지막에 보던 자리를 기억하므로 다음에 열면 거기서 시작합니다. 지도를 계속 고쳐 가며 쓰려면 이 창 대신 <strong>지도 문서(<code>.map</code>)</strong> 를 만들고 그쪽의 <strong>🖊️ 칠판으로</strong>를 쓰세요</li>
   <li>도구상자 항목은 클릭하면 보드 가운데에, 끌어 놓으면 원하는 위치에 삽입. 교육 도형은 선명한 벡터 그룹으로 한꺼번에 이동·크기 조절하고, 선택 후 <strong>분리</strong>를 누르면 선·원·글자 같은 구성 요소를 개별 수정</li>
   <li><strong>선택·이동</strong> 도구로 이미지·직선·화살표·사각형·원·텍스트를 클릭해 옮기고 <kbd>Delete</kbd>로 삭제</li>
   <li>만든 텍스트는 <strong>선택·이동 도구로 더블클릭</strong>해 내용을 다시 수정</li>
@@ -802,6 +804,34 @@ cd myOffice</code></pre>
 
 <blockquote>
   <p>각 오선은 독립 성부 두 개까지 지원합니다. 꾸밈음과 3잇단 이외의 복잡한 잇단음표는 아직 없으며, 붙임줄은 바로 다음의 같은 높이 음에만 연결됩니다. MusicXML은 첫 파트와 각 오선의 성부 두 개까지 가져옵니다. 프로그램마다 표현 방식이 다른 고급 표기는 단순화될 수 있습니다. Finale·Sibelius·MuseScore의 전용 파일은 해당 프로그램에서 먼저 MusicXML로 내보내세요. 조표를 바꾸면 <strong>임시표 없이 적혀 있던 음은 새 조표를 따라갑니다</strong>(다장조 파 → 사장조 파샵). 일부러 ♯·♭를 붙여 둔 음은 그대로 둡니다. 박자를 바꿔서 마디가 넘치면 아래에 경고가 뜹니다 — 음표를 지우거나 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌리세요.</p>
+</blockquote>
+
+<h3>🗺️ 지도 (.map) — 표시를 찍어 만드는 수업 지도</h3>
+
+<ol>
+  <li>사이드바 <strong>새로 만들기 → 새 지도</strong> (또는 <kbd>Ctrl</kbd>+<kbd>K</kbd> → "새 지도", 폴더 우클릭 메뉴). 처음에는 남한 전체가 한 화면에 들어오는 자리에서 시작합니다</li>
+  <li>마우스로 끌어 옮기고 휠로 확대·축소합니다. 위쪽 칸에 <strong>장소 이름</strong>(예: <code>경복궁</code>)을 적고 <strong>검색</strong>을 누르면 후보가 목록으로 뜨고, 고르면 그 자리로 갑니다. <kbd>Enter</kbd>를 눌러도 같습니다. <strong><code>37.5665, 126.978</code></strong> 처럼 위도·경도를 적으면 목록 없이 바로 이동합니다</li>
+  <li><strong>배경지도</strong>는 네 가지입니다 — <strong>일반 지도</strong>(길·건물 이름이 가장 자세함), <strong>지형(등고선)</strong>(산과 높이), <strong>흑백(판서용)</strong>(색이 옅어 그 위에 그리기 좋음), <strong>위성 사진</strong>. 배경마다 확대할 수 있는 한계가 달라, 덜 자세한 배경으로 바꾸면 확대가 자동으로 한 단계 물러납니다</li>
+  <li><strong>🖼️ 내 지도</strong>로 학교 배치도·교실 평면도·박물관 안내도 같은 PNG/JPG/WebP 이미지를 고르면, 그 이미지가 <strong>현재 보고 있는 지도 범위에 맞춰져 오프라인 배경</strong>으로 들어갑니다. 원본은 20MB 이하만 받고 긴 변 2400px 안으로 정리해 <code>.map</code> 파일에 함께 담습니다. 배경지도 선택에서 일반 지도와 내 지도 이미지를 오갈 수 있고 <strong>이미지 지우기</strong>로 제거합니다</li>
+  <li><strong>📍 표시 추가</strong>를 누른 뒤 지도를 클릭하면 그 자리에 핀이 생기고 편집 풍선이 열립니다. <strong>이름</strong>(예: 우리 학교)과 <strong>메모</strong>(수업 설명·관찰 기록)를 적고 <strong>색 여섯 가지</strong> 중에서 고릅니다. 잘못 눌렀으면 <kbd>Esc</kbd>로 추가를 취소합니다</li>
+  <li><strong>📏 거리선</strong>은 경로의 점을 차례로 찍고 <kbd>Enter</kbd>(또는 같은 버튼 다시 누르기)로 끝내 전체 거리를 표시합니다. <strong>▱ 면적 영역</strong>도 꼭짓점을 3개 이상 찍어 같은 방식으로 끝내면 면적을 표시합니다. 선·영역을 누르면 이름·색을 바꾸거나 지울 수 있고 <kbd>Esc</kbd>로 그리기를 취소합니다</li>
+  <li><strong>CSV 들이기</strong>는 첫 줄에 <code>이름,위도,경도,메모,색상</code> 열이 있는 UTF-8 CSV에서 표시를 한꺼번에 추가합니다(<code>위도</code>·<code>경도</code>는 필수, 최대 5MB·5,000개). <strong>CSV 내보내기</strong>는 현재 표시를 Excel에서 열 수 있는 같은 형식으로 저장합니다. 색상은 <code>red</code>, <code>blue</code>, <code>green</code>, <code>amber</code>, <code>purple</code>, <code>slate</code> 또는 한국어 색 이름을 씁니다</li>
+  <li>찍어 둔 핀은 <strong>끌어서 옮기고</strong>, 다시 누르면 풍선이 열려 고칠 수 있습니다. 풍선의 <strong>표시 지우기</strong>로 뺍니다</li>
+  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시·거리선·면적 영역과 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다</li>
+  <li><strong>🖊️ 칠판으로</strong>를 누르면 지금 보이는 지도가 <strong>그림으로 굳어 새 화이트보드에 올라갑니다.</strong> 표시 이름·거리·면적과 출처가 그림에 함께 새겨지고, 확대·이동 단추와 편집 풍선은 빠집니다. 칠판에서는 그 위에 바로 판서할 수 있고, <strong>지도 문서는 그대로 남아</strong> 계속 고칠 수 있습니다. 같은 지도를 두 번 보내면 서로 다른 칠판이 열립니다</li>
+  <li>EXE로 지도를 보면 <strong>화면에 실제로 표시된 배경이 자동으로 보관</strong>됩니다. 다시 방문한 지역은 받아 둔 타일 범위에서 인터넷 없이 열립니다. <strong>🗂️ 오프라인 지도</strong>에서 지금까지 받아 둔 양을 확인하고 <strong>비울</strong> 수 있습니다. 공개 지도 서버 정책에 따라 보지 않은 지역이나 더 자세한 확대 단계를 미리 일괄 다운로드하지는 않습니다</li>
+</ol>
+
+<blockquote>
+  <p><strong>인터넷이 필요한 곳은 배경지도뿐입니다.</strong> 연결이 없으면 배경만 비어 보이고 표시·메모·저장은 그대로 동작합니다. 전에 실제로 보아 자동 보관된 지역이라면 배경도 나옵니다. <strong>내 지도 이미지</strong>는 인터넷 없이 항상 표시됩니다. 다만 이미지를 넣을 때 현재 화면의 위·경도 범위에 맞춰 놓는 방식이므로, 평면도처럼 실제 지도 축척과 다른 그림에서 표시되는 거리·면적 값은 참고용입니다. 배경지도는 <strong>종류마다 캐시가 따로</strong>입니다. 전에 일반 지도로 본 지역이라도 수업에서 처음 위성으로 바꾸면 그 배경은 비어 보일 수 있습니다. 지도를 조금 움직였다고 <strong>저장 안 됨(●)</strong> 이 켜지지는 않습니다. 표시·이름·배경지도를 바꿀 때만 켜지며, 저장할 때는 그 순간 보고 있던 자리가 함께 담깁니다.</p>
+</blockquote>
+
+<blockquote>
+  <p>장소 이름 검색에는 <strong>인터넷과 ClassDock 런처가 필요합니다</strong>(받아 둔 지역이라도 검색은 인터넷을 씁니다). 인터넷이 끊기면 지도 위에 <strong>새 지역은 표시할 수 없고 이전에 저장된 지역만 볼 수 있다</strong>는 안내가 나타납니다. 연결이 돌아오면 현재 지도를 자동으로 다시 요청합니다. 제공처 정책상 글자를 칠 때마다가 아니라 <strong>검색</strong> 또는 <kbd>Enter</kbd>를 눌렀을 때만 찾고, 잇단 검색 사이에는 1초를 둡니다. HTML을 직접 연 화면에서도 좌표 이동은 그대로 쓸 수 있습니다.</p>
+</blockquote>
+
+<blockquote>
+  <p>배경지도는 <strong>OpenStreetMap</strong>(일반·지형)·<strong>CARTO</strong>(흑백)·<strong>Esri</strong>(위성)에서 받아 옵니다. 장소 이름 검색은 <strong>Nominatim</strong>(OpenStreetMap)을 씁니다. 만들어진 그림에 출처가 함께 적히는 것은 이 지도들의 이용 조건입니다.</p>
 </blockquote>
 
 <h3>🔀 파일 비교 (diff) — 뭐가 달라졌는지 보기</h3>
@@ -1345,7 +1375,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>구형 Word(.doc)</strong></td><td><strong>글자만</strong> 뽑는 간이 미리보기(표·그림·서식 제외). 암호 걸린 <code>.doc</code>은 열 수 없음. 이름만 <code>.doc</code>인 docx·RTF·텍스트는 내용을 보고 알맞은 뷰어로 자동 연결</td></tr>
 <tr><td><strong>PDF 암호</strong></td><td>열 수 없음</td></tr>
 <tr><td><strong>HWPX(신형 한글)</strong></td><td>간이 미리보기(문단·표·그림). DRM·암호 문서 제외</td></tr>
-<tr><td><strong>ZIP</strong></td><td>읽기 전용. 항목당 64MB, 해제 합계 256MB 제한</td></tr>
+<tr><td><strong>ZIP</strong></td><td>읽기 전용. 항목당 64MB, 해제 합계 256MB 제한. 앱 전용 문서(<code>.map</code>·<code>.mnote</code>·<code>.msheet</code>)와 악보(<code>.musicxml</code>·압축형 <code>.mxl</code>)도 압축 안에서 제 편집기로 열림</td></tr>
 <tr><td><strong>Python 옆 파일 함께 실행</strong></td><td>합계 50MB 초과 시 단독 실행으로 폴백</td></tr>
 <tr><td><strong>Python 실행 시간</strong></td><td>터미널의 로컬 PowerShell 명령은 시간 제한 없음(프로세스 트리 메모리 4GB 제한 유지). 일반 로컬 Python 실행은 30분, Pyodide(브라우저)는 5분 자동 중지</td></tr>
 <tr><td><strong>Python 출력</strong></td><td>표준출력·오류는 각각 앞 4MB까지 보관(진단·채점·단계 실행의 내부 결과는 별도 6MB 제한)</td></tr>
@@ -1361,6 +1391,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>시험지(.exam)</strong></td><td>문항 최대 100개(모두 1점)·보기 8개·문항당 이미지 4장·이미지 합계 12MB. 주관식 자동 채점은 정답 목록과의 글자 비교라 <strong>표현이 다르면 선생님이 [답안 보기]에서 판단</strong>해야 합니다. <strong>암호 기능이 필요해 EXE(또는 https)에서만 동작</strong>하고, <code>file://</code>로 연 페이지에서는 막힙니다. <strong>선생님 암호를 잊으면 제출본을 열 수 없습니다</strong>(복구 불가). 시험 중 화면 캡처·검색 같은 부정행위는 막지 못합니다</td></tr>
 <tr><td><strong>블록 문서(.mnote)</strong></td><td>표 하나는 50행 × 20열, 이미지 한 장 25MB까지. 이미지가 파일 안에 들어가므로 사진이 많으면 파일이 커짐</td></tr>
 <tr><td><strong>악보(.msheet)</strong></td><td>단일 높은음자리표 또는 피아노 대보표, 오선별 성부 2개, 화음·붙임줄·이음줄·가사·코드·셈여림·연주 기호·셋잇단·운지·페달·반복선과 1·2번 괄호·못갖춘마디·중간 박자/조표/빠르기 변경 지원. 장·단조 조표는 ♯·♭ 7개까지, 오른손 음역 G3~C6·왼손 C2~C5. 조옮김은 위아래 한 옥타브까지이며 새 조표는 임시표가 적은 쪽으로 정해짐(다장조 반음 위 = 내림라장조). MusicXML은 첫 파트와 오선별 두 성부까지 사용하며 고급 표기는 단순화할 수 있음. MIDI 건반 입력과 MIDI·WAV 저장, 참고 이미지 나란히 보기를 제공하지만 이미지 자동 악보 인식과 마이크 녹음은 없음. 기본 음색은 내장 피아노 녹음이며 기타·실로폰·하프·플루트·클라리넷 녹음과 합성음도 선택 가능</td></tr>
+<tr><td><strong>지도(.map)</strong></td><td>배경지도에 <strong>인터넷 필요</strong>(표시·메모·저장은 오프라인에서도 동작). 장소 <strong>이름 검색은 인터넷과 ClassDock 런처 필요</strong>(<strong>검색</strong> 또는 <kbd>Enter</kbd>에서 조회하고 잇단 검색 사이 1초 — 제공처 정책); 좌표 이동은 HTML 직접 실행에서도 가능. 런처는 화면에 실제로 표시된 타일만 자동 보관하고 공개 서버가 금지하는 사전 일괄 다운로드는 하지 않음. 캐시는 이 컴퓨터에 정확히 최대 400MB까지 보관하고 넘치면 오래된 것부터 지우며, 배경지도 종류마다 따로 쌓임. 칠판으로 보낸 지도는 <strong>그림</strong>이라 그 뒤에는 확대·이동이 안 됨</td></tr>
 <tr><td><strong>파일 비교(diff)</strong></td><td>텍스트·코드만. 파일 하나가 5MB 또는 5만 줄을 넘으면 비교하지 않음. 비교 화면은 저장·자동 복원 대상이 아님</td></tr>
 <tr><td><strong>여러 파일 찾아 바꾸기</strong></td><td>열려 있는 텍스트·코드 문서와 Word(<code>.docx</code>) 본문·PowerPoint(<code>.pptx</code>) 슬라이드(PDF·Excel·한글·노트북 제외). 빈 문자열에도 일치하는 정규식은 거부</td></tr>
 <tr><td><strong>Word·PowerPoint 찾아 바꾸기</strong></td><td>본문 글자만. 문단 추가·삭제나 글꼴 바꾸기는 안 됨. 머리말·꼬리말·각주·발표자 노트는 설정에서 켤 때만, 메모·차트·도형 안 글자와 슬라이드 마스터·레이아웃·자동 슬라이드 번호는 언제나 제외. 암호·내용 컨트롤 연결·40MB 초과 문서는 제외되고, 변경 이력이 켜진 문서는 기본 제외(설정에서 허용 가능 — 바꾼 내용이 Word 변경 이력에 남지 않음). 탭·줄바꿈을 넘나드는 일치는 건너뜀. <strong>PowerPoint 설치 PC에서 PDF로 변환되어 열린 <code>.pptx</code>는 대상 아님</strong></td></tr>
@@ -1442,6 +1473,17 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
   <li>도구바의 <strong>✏️ 필기</strong> 버튼을 한 번 더 누르면 편집 잠금 해제 + 캔버스 OFF</li>
   <li>필기는 세션 한정이라 문서를 닫으면 자동으로 사라집니다 (저장되지 않음)</li>
 </ul>
+
+<h3>Q10. 지도가 회색으로만 보여요</h3>
+
+<p>배경지도는 인터넷에서 받아 옵니다. 표시·메모·저장은 그대로 되지만 배경만 비어 보이는 상태입니다.</p>
+
+<ol>
+  <li>인터넷 연결을 확인합니다</li>
+  <li>연결이 안 되는 교실에서 쓸 지역은, 연결되는 곳에서 <strong>ClassDock EXE로 실제 수업 때 볼 자리와 확대 단계까지 직접 열어</strong> 두세요. 화면에 표시된 타일은 자동 보관되어 다시 방문할 때 인터넷 없이 나옵니다</li>
+  <li>전에 본 것 같은데도 비어 보이면 <strong>배경지도 종류나 확대 단계가 달라지지 않았는지</strong> 확인하세요 — 일반·지형·흑백·위성은 각각 따로 보관됩니다</li>
+  <li><strong>🗂️ 오프라인 지도</strong> 버튼이 안 보이면 브라우저에서 HTML을 직접 열어 쓰는 중입니다. 자동 디스크 캐시와 현황·비우기는 런처(EXE)에서만 동작합니다</li>
+</ol>
 
 <hr>
 

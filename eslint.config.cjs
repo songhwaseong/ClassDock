@@ -29,7 +29,8 @@ const sharedRuntimeGlobals = {
   html2canvas: "readonly",
   htmlToImage: "readonly",
   $: "readonly",
-  jQuery: "readonly"
+  jQuery: "readonly",
+  L: "readonly"
   ,ClassDockCore: "readonly"
   ,MNI18N: "readonly"
   ,t: "readonly"

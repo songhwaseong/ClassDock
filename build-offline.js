@@ -233,6 +233,12 @@ if (html.includes(pptxCssTag)) {
   html = html.replace(pptxCssTag, () => `<style>\n${read("vendor/" + manifest.styles.pptx.file)}\n</style>`);
 }
 
+// Leaflet 스타일도 같은 방식으로 심는다. 라이브러리(js)는 지연 로드지만 CSS 는 15KB 라 시작에 둔다.
+const leafletCssTag = `<link rel="stylesheet" href="${manifest.styles.leaflet.src}">`;
+if (html.includes(leafletCssTag)) {
+  html = html.replace(leafletCssTag, () => `<style>\n${read("vendor/" + manifest.styles.leaflet.file)}\n</style>`);
+}
+
 html = html.replace(
   "모든 처리는 이 브라우저 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.",
   "인터넷 없이 동작합니다. 모든 처리는 이 브라우저 안에서만 이뤄지며 파일은 외부로 전송되지 않아요."

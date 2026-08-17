@@ -39,14 +39,20 @@ async function exportPaper(page, editor){
   return { ...paper, code };
 }
 
+/* 암호창은 "제출 → 검사 → 틀리면 새 창"이 한 흐름이다. 그래서 '.exam-pass-modal 이 숨겨졌는지'로
+   기다리면 틀린 암호에서 깨진다 — 헌 창이 사라지기 무섭게 새 창이 떠서, 선택자는 계속 '보임'으로
+   남는다(그 찰나를 잡느냐 마느냐가 운이라 병렬 실행에서 간헐적으로 실패했다).
+   대신 방금 제출한 '그 창 요소'가 DOM 을 떠났는지를 본다 — 맞든 틀리든 확실한 신호다. */
 async function typePassword(page, value, withConfirm){
   const modal = page.locator(".exam-pass-modal");
   await expect(modal).toBeVisible();
+  const submitted = await modal.elementHandle();
   const inputs = modal.locator('input[type="password"]');
   await inputs.nth(0).fill(value);
   if (withConfirm) await inputs.nth(1).fill(value);
   await modal.locator(".btn.primary").click();
-  await expect(modal).toBeHidden({ timeout: 15_000 });
+  await page.waitForFunction((el) => !el.isConnected, submitted, { timeout: 15_000 });
+  await submitted.dispose();
 }
 
 test("시험지를 만들어 배포하고, 학생 제출본을 선생님 열쇠로 채점한다", async ({ page }) => {
