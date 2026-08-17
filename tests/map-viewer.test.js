@@ -169,6 +169,19 @@ test("칠판 캡처는 프록시 쿼리별 타일을 구분해 한 타일을 반
   assert.match(capture[1], /includeQueryParams:\s*true/);
 });
 
+test("완료하거나 클릭한 면적 영역은 Esc·Delete로 지우고 입력 중에는 보존한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /model\.shapes\.push\(shape\); addShapeLayer\(shape\); selectShape\(shape\)/);
+  assert.match(source, /layer\.on\("click", \(\) => selectShape\(shape\)\)/);
+  const handler = /function onSelectedShapeKey\(e\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(handler, "onSelectedShapeKey 를 찾지 못했다");
+  assert.match(handler[1], /adding \|\| drawingMode/);
+  assert.match(handler[1], /input,textarea,select,\[contenteditable\]/);
+  for (const key of ["Escape", "Delete", "Backspace"]) assert.ok(handler[1].includes('e.key !== "' + key + '"'));
+  assert.match(handler[1], /removeShape\(selectedShape\)/);
+  assert.match(source, /window\.removeEventListener\("keydown", onSelectedShapeKey\)/);
+});
+
 test("캐시 용량은 사람이 읽는 단위로 보여 준다", () => {
   const api = loadMapViewer();
   assert.equal(api.mapFormatBytes(0), "1KB");

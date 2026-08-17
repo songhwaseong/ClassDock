@@ -1282,6 +1282,15 @@ async function mountMapEditor(doc){
 
   /* ── 거리선·면적 영역 ── */
   const shapeLayers = new Map();
+  let selectedShape = null;
+  const selectShape = (shape) => {
+    selectedShape = shape || null;
+    if (selectedShape){
+      setStatus(mapT(selectedShape.type === "area"
+        ? "면적 영역을 선택했어요. Esc 또는 Delete로 지울 수 있어요."
+        : "거리선을 선택했어요. Esc 또는 Delete로 지울 수 있어요."));
+    }
+  };
   const shapeTooltip = (shape) => {
     const measure = mapShapeMeasureText(shape);
     return (shape.label ? shape.label + " · " : "") + measure;
@@ -1291,6 +1300,8 @@ async function mountMapEditor(doc){
     if (index >= 0) model.shapes.splice(index, 1);
     const layer = shapeLayers.get(shape.id);
     if (layer){ map.removeLayer(layer); shapeLayers.delete(shape.id); }
+    if (selectedShape === shape) selectedShape = null;
+    setStatus("");
     touch();
   };
   const buildShapePopup = (shape, layer) => {
@@ -1326,6 +1337,8 @@ async function mountMapEditor(doc){
       className:"map-shape-label"
     });
     layer.bindPopup(buildShapePopup(shape, layer), { minWidth:190 });
+    layer.on("click", () => selectShape(shape));
+    layer.on("popupopen", () => selectShape(shape));
     layer.addTo(map); shapeLayers.set(shape.id, layer);
     return layer;
   };
@@ -1368,7 +1381,7 @@ async function mountMapEditor(doc){
     stage.classList.remove("is-drawing"); syncInteractionKeyListener();
     if (save){
       const shape = mapNormalizeShape({ type:mode, points });
-      model.shapes.push(shape); addShapeLayer(shape); touch();
+      model.shapes.push(shape); addShapeLayer(shape); selectShape(shape); touch();
     } else setStatus("");
     return true;
   }
@@ -1404,6 +1417,24 @@ async function mountMapEditor(doc){
       e.preventDefault(); finishDrawing(true);
     }
   }
+  function onSelectedShapeKey(e){
+    if (!selectedShape || adding || drawingMode || (doc.el && doc.el.hidden)) return;
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+    const target = e.target;
+    if (target && typeof target.matches === "function" &&
+        (target.matches("input,textarea,select,[contenteditable]") || target.closest("[contenteditable]"))) return;
+    if (e.key !== "Escape" && e.key !== "Delete" && e.key !== "Backspace") return;
+    e.preventDefault();
+    map.closePopup();
+    removeShape(selectedShape);
+  }
+  window.addEventListener("keydown", onSelectedShapeKey);
+  // 다른 곳을 누르면 선택을 풀어, 나중에 누른 Esc가 뜻밖에 오래된 영역을 지우지 않게 한다.
+  stage.addEventListener("pointerdown", (e) => {
+    const target = e.target;
+    if (target && target.closest && target.closest(".leaflet-overlay-pane .leaflet-interactive")) return;
+    selectedShape = null;
+  });
   addBtn.addEventListener("click", () => setAdding(!adding));
   lineBtn.addEventListener("click", () => setDrawing("line"));
   areaBtn.addEventListener("click", () => setDrawing("area"));
@@ -1594,6 +1625,7 @@ async function mountMapEditor(doc){
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
     window.removeEventListener("keydown", onInteractionKey);
+    window.removeEventListener("keydown", onSelectedShapeKey);
     cleanupNetworkNotice();
     if (mapResizeObserver) mapResizeObserver.disconnect();
     try { map.remove(); } catch(_){}

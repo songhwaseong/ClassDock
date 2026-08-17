@@ -1610,6 +1610,8 @@
     "경로의 점을 차례로 찍고 Enter 또는 거리선 버튼을 다시 누르세요 (Esc 취소)":
       "Place route points, then press Enter or the Distance line button again (Esc to cancel)",
     "점 {count}개 — 계속 찍거나 Enter로 완료하세요": "{count} points — keep placing points or press Enter to finish",
+    "면적 영역을 선택했어요. Esc 또는 Delete로 지울 수 있어요.": "Area selected. Press Esc or Delete to remove it.",
+    "거리선을 선택했어요. Esc 또는 Delete로 지울 수 있어요.": "Distance line selected. Press Esc or Delete to remove it.",
     "지도 이미지를 준비하는 중…": "Preparing the map image…",
     "현재 화면 범위에 내 지도 이미지를 넣었습니다. 인터넷 없이도 표시됩니다.":
       "Added your map image to the current view. It remains visible without internet.",
