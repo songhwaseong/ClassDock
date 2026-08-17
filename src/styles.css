@@ -2046,7 +2046,8 @@
   .wb-bg-hint{margin:0;color:var(--muted);font-size:11.5px;line-height:1.45}
   .wb-edu-toggle{font-size:20px;font-family:Georgia,"Times New Roman",serif;font-weight:700;line-height:1}
   .wb-edu-toggle.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .wb-edu-panel{position:absolute;z-index:12;right:12px;top:12px;width:min(390px,calc(100% - 24px));max-height:calc(100% - 24px);
+  /* 창보다 내용이 길어지면(작은 화면·칸이 많은 도구) 창 자체가 스크롤해 아래쪽 단추까지 닿게 한다 */
+  .wb-edu-panel{position:absolute;z-index:12;right:12px;top:12px;width:min(390px,calc(100% - 24px));max-height:calc(100% - 24px);overflow-y:auto;
     display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);
     color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.22)}
   .wb-edu-panel[hidden]{display:none}
@@ -2066,6 +2067,8 @@
   .wb-edu-tab:hover{background:var(--panel-hover)}
   .wb-edu-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
   .wb-formula-builder{flex:0 0 auto;padding:8px;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:9px;background:color-mix(in srgb,var(--accent) 5%,var(--field))}
+  /* 수 모형·과학 계산 탭은 카탈로그 칸을 쓰지 않으므로 그 자리를 만들기 화면에 넘긴다 */
+  .wb-edu-panel.is-tool-tab .wb-edu-grid{display:none}
   .wb-formula-builder[hidden]{display:none}
   .wb-formula-input{display:block;width:100%;min-height:50px;max-height:100px;padding:7px 8px;resize:vertical;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);font:13px/1.35 ui-monospace,Consolas,monospace;outline:none}
   .wb-formula-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
@@ -2149,9 +2152,28 @@
   .wb-periodic .wb-element-name{display:none}
   .wb-edu-grid:not(.wb-periodic) .wb-element{grid-column:span 2;min-height:56px;gap:1px}
   .wb-edu-grid:not(.wb-periodic) .wb-element-sym{font-size:19px}
-  .wb-sim-row{margin-bottom:6px}
-  .wb-sim-count{margin-left:auto}
-  .wb-sim-count .wb-graph-number{width:64px}
+  /* ----- 만들기 화면의 구획(이름표 + 격자) -----
+     칩 줄(.wb-formula-groups)은 가로로 흐르는 띠라 항목이 많으면 오른쪽이 잘린다.
+     구획 안에서는 격자로 깔아 줄이 맞고 무엇도 숨지 않게 한다. */
+  .wb-tool-section{margin-top:8px;padding-top:7px;border-top:1px dashed var(--border)}
+  .wb-tool-section:first-child{margin-top:0;padding-top:0;border-top:0}
+  .wb-tool-caption{display:block;margin-bottom:5px;color:var(--muted);font-size:10.5px;font-weight:700;letter-spacing:.01em}
+  /* 접이식 구획 — 이름표를 누르면 펴진다(가끔 쓰는 도구는 접어 두어 아래쪽 단추를 밀지 않는다) */
+  .wb-tool-fold>summary{display:flex;align-items:center;gap:5px;cursor:pointer;list-style:none;user-select:none}
+  .wb-tool-fold>summary::-webkit-details-marker{display:none}
+  .wb-tool-fold>summary::before{content:"▸";font-size:9px;line-height:1}
+  .wb-tool-fold[open]>summary::before{content:"▾"}
+  .wb-tool-fold>summary:hover{color:var(--ink)}
+  .wb-tool-fold:not([open])>summary{margin-bottom:0}
+  .wb-chip-grid{display:grid;gap:4px}
+  .wb-chip-grid .wb-formula-group{width:100%;height:26px;padding:0 6px;overflow:hidden;text-overflow:ellipsis}
+  .wb-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;align-items:center;margin-top:7px}
+  .wb-field-grid .wb-graph-field{justify-content:space-between;gap:6px;min-width:0}
+  .wb-field-grid .wb-graph-field .wb-graph-number{width:60px}
+  .wb-field-grid .wb-graph-field .wb-graph-input{flex:1 1 auto;min-width:0;height:26px;font-size:11.5px}
+  .wb-field-grid .wb-field-wide{grid-column:1/-1}
+  .wb-button-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:5px;margin-top:7px}
+  .wb-button-row button{width:100%;margin:0}
   /* ----- 함수 그래프·자료 차트 만들기 ----- */
   .wb-graph-rows{display:flex;flex-direction:column;gap:5px}
   .wb-graph-row{display:flex;align-items:center;gap:6px}
@@ -2159,7 +2181,18 @@
   .wb-graph-caption{flex:none;color:var(--muted);font-size:12px;font-family:Cambria Math,"Times New Roman",serif}
   .wb-graph-input{min-width:0;flex:1;height:29px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:12.5px/1.3 ui-monospace,Consolas,monospace;outline:none}
   .wb-graph-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  /* 관계 기호(y = · y > …) — 자리는 그대로 두고 고를 수 있게만 바꾼 캡션 */
+  .wb-graph-relation{flex:none;height:24px;padding:0 2px;border:1px solid transparent;border-radius:5px;background:none;color:var(--muted);font-family:Cambria Math,"Times New Roman",serif;font-size:12.5px;cursor:pointer}
+  .wb-graph-relation:hover,.wb-graph-relation:focus{border-color:var(--border);background:var(--panel);color:var(--ink);outline:none}
   .wb-graph-range{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
+  /* 해석 도구 줄은 앞선 줄과 갈라 보이게 옅은 구분선을 둔다 */
+  .wb-graph-analysis{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)}
+  .wb-graph-analysis .wb-graph-number{width:48px}
+  /* 값의 표 줄 — 그래프와 같은 식으로 x·y 대응표를 만든다 */
+  .wb-graph-table-row{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)}
+  .wb-graph-table-row .wb-graph-number{width:48px}
+  .wb-graph-table-row button{margin-left:auto}
+  .wb-graph-table-row button+button{margin-left:4px}
   .wb-graph-field{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11.5px}
   .wb-graph-field.is-off{opacity:.45}
   .wb-graph-number{width:56px;height:26px;padding:0 5px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;font-size:11.5px;outline:none}
@@ -2170,7 +2203,20 @@
   .wb-graph-param-name{flex:none;width:14px;color:var(--accent);font-weight:700;font-family:Cambria Math,"Times New Roman",serif;font-size:14px}
   .wb-graph-param input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
   .wb-graph-param output{flex:none;width:34px;color:var(--muted);text-align:right;font-family:ui-monospace,Consolas,monospace}
-  .wb-chart-types{min-height:auto;margin-bottom:6px}
+  /* 값을 넣어 만드는 도구(수 모형·과학 계산) — 종류 칩 + 그 종류의 칸만 */
+  .wb-tool-kinds{min-height:auto;margin-bottom:6px}
+  .wb-tool-form{margin-top:0}
+  .wb-tool-form .wb-graph-input{flex:none;height:26px;font-size:11.5px}
+  .wb-chart-types{margin-bottom:2px}
+  /* 통계 도구 줄 — 추세선·계급 수와 자료로 바로 만드는 표 단추 */
+
+  /* 몰 계산 줄과 그 결과 한 줄 */
+  .wb-chem-mole{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)}
+  .wb-chem-mole[hidden]{display:none}
+  .wb-chem-mole .wb-chem-species{width:auto;max-width:120px}
+  .wb-chem-mole .wb-chem-unit{width:52px}
+  .wb-chem-mole button{margin-left:auto}
+  .wb-chem-mole-result{margin:5px 0 0;color:var(--muted);font-size:11.5px;line-height:1.5;word-break:break-all}
   /* 묶음 색 고르기 — 자료에서 찾아낸 묶음(또는 항목) 수만큼 색칩이 생긴다 */
   .wb-chart-colors{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:6px 0 0}
   .wb-chart-colors[hidden]{display:none}

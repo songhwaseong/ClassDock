@@ -461,16 +461,27 @@ cd myOffice</code></pre>
   <li><strong>과학</strong> 탭은 역학·전기·광학·화학·생명·지구과학으로 분류됩니다. 도르래·빗면·진자, 직렬·병렬회로와 회로 기호, 렌즈 광선도, 실험기구, 세포·DNA, 태양계·물의 순환 등을 제공합니다.</li>
   <li><strong>수식</strong> 탭에는 기본·대수·미적분·집합·확률통계·기하·과학으로 나눈 수식 사전이 있습니다. 한글·영문·LaTeX로 검색하고 수식 틀을 누르면 현재 커서 위치에 들어가며, 선택된 입력 부분은 <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd>으로 이동해 채웁니다.</li>
   <li>직접 LaTeX(<code>\frac{a}{b}</code>, <code>x^2</code>, <code>\sqrt{x}</code> 등)를 쓰면 바로 미리보기됩니다. 자주 쓰는 식은 <strong>내 수식 저장</strong>으로 이름을 붙여 보관하고, 별표 즐겨찾기와 최근 사용 목록에서 다시 찾을 수 있습니다. <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 보드에 넣고, 보드의 수식을 더블클릭하면 원문을 다시 수정합니다.</li>
-  <li><strong>그래프</strong> 탭(도구막대 📈 버튼)은 <strong>식을 실제로 계산해 그린 곡선</strong>을 넣습니다. <code>y =</code> 칸에 <code>x^2 - 3x + 1</code>, <code>sin x</code>, <code>2^x</code>, <code>sqrt(x)</code> 처럼 쓰면 아래에 미리보기가 나오고, 식을 세 개까지 겹쳐 그릴 수 있습니다. <code>2x</code>·<code>sin x</code>처럼 곱셈 기호와 괄호를 생략해도 되고 <code>abs</code>·<code>sqrt</code>·<code>log</code>(상용로그)·<code>ln</code>을 쓸 수 있습니다. x 범위와 모눈을 정하고 y 범위는 자동에 맡기거나 직접 넣습니다. 식에 <code>x</code> 말고 다른 문자(<code>a</code> 등)를 쓰면 <strong>슬라이더</strong>가 생겨 "a를 키우면 어떻게 될까?"를 그 자리에서 움직여 보여 줄 수 있습니다. 아래쪽 예시(일차·이차·삼차·절댓값·반비례·지수·로그·삼각함수 등)를 누르면 <strong>커서가 있던 식 칸</strong>에 들어갑니다. 두 번째·세 번째 칸을 먼저 클릭해 두면 그 칸에 채워지고, 이미 적어 둔 다른 칸은 그대로 남아 예시를 골라 담아 겹쳐 그릴 수 있습니다</li>
-  <li><strong>차트</strong> 탭(도구막대 📊 버튼)은 <strong>입력한 자료로 진짜 그래프</strong>를 만듭니다. <code>국어, 7</code> 처럼 한 줄에 하나씩(쉼표·탭·띄어쓰기 모두 가능) 적거나 표를 복사해 붙여넣고 <strong>막대·꺾은선·원·히스토그램·산점도</strong> 중에서 고릅니다. 히스토그램은 숫자만, 산점도는 <code>1, 60</code> 처럼 두 값을 적습니다
+  <li><strong>그래프</strong> 탭(도구막대 📈 버튼)은 <strong>식을 실제로 계산해 그린 곡선</strong>을 넣습니다. <code>y =</code> 칸에 <code>x^2 - 3x + 1</code>, <code>sin x</code>, <code>2^x</code>, <code>sqrt(x)</code> 처럼 쓰면 아래에 미리보기가 나오고, 식을 세 개까지 겹쳐 그릴 수 있습니다. <code>2x</code>·<code>sin x</code>처럼 곱셈 기호와 괄호를 생략해도 되고 <code>abs</code>·<code>sqrt</code>·<code>log</code>(상용로그)·<code>ln</code>을 쓸 수 있습니다. x 범위와 모눈을 정하고 y 범위는 자동에 맡기거나 직접 넣습니다. 식에 <code>x</code> 말고 다른 문자(<code>a</code> 등)를 쓰면 <strong>슬라이더</strong>가 생겨 "a를 키우면 어떻게 될까?"를 그 자리에서 움직여 보여 줄 수 있습니다. 아래쪽 예시(일차·이차·삼차·절댓값·반비례·지수·로그·삼각함수, 교점·접선·넓이·부등식 등)를 누르면 <strong>커서가 있던 식 칸</strong>에 들어갑니다. 두 번째·세 번째 칸을 먼저 클릭해 두면 그 칸에 채워지고, 이미 적어 둔 다른 칸은 그대로 남아 예시를 골라 담아 겹쳐 그릴 수 있습니다
     <ul>
+      <li><strong>보드 슬라이더</strong> — <code>a</code> 같은 문자를 쓴 식을 넣으면 그래프 <strong>안에 손잡이 띠가 함께 들어갑니다</strong>. 수업 중에 도구상자를 열지 않고 보드에서 손잡이를 바로 끌면 그 자리에서 곡선이 다시 그려집니다(−10~10, 0.1 단위). 끄는 동안 세로 눈금은 붙잡아 두어 <strong>무엇이 달라지는지</strong>가 보이고, 손을 뗄 때 한 번만 기록되므로 <kbd>Ctrl</kbd>+<kbd>Z</kbd> 한 번이면 끌기 전으로 돌아옵니다. 필요 없으면 <strong>보드 슬라이더</strong> 체크를 끕니다</li>
+      <li><strong>부등식 영역</strong> — 식 칸 앞의 <code>y =</code> 를 눌러 <code>y &gt;</code>·<code>y ≥</code>·<code>y &lt;</code>·<code>y ≤</code> 로 바꾸면 그쪽 반평면이 옅게 칠해집니다. 등호가 없는 <code>&gt;</code>·<code>&lt;</code> 는 경계선을 <strong>점선</strong>으로 긋습니다</li>
+      <li><strong>교점 · 접선 · 넓이</strong> — 아래 해석 줄에서 켭니다. <strong>교점</strong>은 두 곡선이 만나는 자리를 찾아 좌표를 찍고, <strong>접선</strong>은 정한 <code>x</code> 자리의 접선과 <strong>기울기(순간변화율)</strong> 를 적으며, <strong>넓이</strong>는 <code>a~b</code> 구간과 x축 사이를 칠하고 <strong>정적분 값</strong>을 적습니다. 넓이 옆 <strong>직사각형</strong> 칸에 개수를 넣으면 리만 직사각형으로 바꿔 그리고 그 합을 알려 줍니다(0이면 매끄럽게 칠합니다). 식이 둘 이상이면 <strong>대상</strong>에서 어느 식에 쓸지 고릅니다</li>
+      <li><strong>값의 표</strong> — 같은 식으로 <code>x</code>·<code>y</code> 대응표를 만들어 넣습니다. 표에 넣을 <code>x</code> 시작·끝·간격을 정하고 <strong>값의 표 넣기</strong>를 누르면 됩니다(칸은 21개까지). 정의역 밖은 <code>—</code> 로 적고, 넣은 표도 <strong>두 번 누르면 다시 고칠 수 있습니다</strong></li>
+    </ul>
+  </li>
+  <li><strong>차트</strong> 탭(도구막대 📊 버튼)은 <strong>입력한 자료로 진짜 그래프</strong>를 만듭니다. 화면은 위에서 아래로 <strong>차트 종류 → 제목 → 자료 → 묶음 색 → 통계 도구 → 확률 실험 → 미리보기</strong> 순서이고, 가끔 쓰는 <strong>통계 도구·확률 실험</strong>은 접혀 있습니다(이름표를 누르면 펴집니다). <code>국어, 7</code> 처럼 한 줄에 하나씩(쉼표·탭·띄어쓰기 모두 가능) 적거나 표를 복사해 붙여넣고 <strong>막대·꺾은선·원·히스토그램·산점도·상자그림</strong> 중에서 고릅니다. 히스토그램·상자그림은 숫자만, 산점도는 <code>1, 60</code> 처럼 두 값을 적습니다
+    <ul>
+      <li><strong>상자그림</strong>은 적어 넣은 숫자로 <strong>다섯 수 요약</strong>(최솟값·Q1·중앙값·Q3·최댓값)을 직접 계산해 그립니다. 수염은 사분범위의 1.5배까지 뻗고 그 밖의 값은 점으로 따로 찍습니다. 값을 <strong>열로 더 적으면</strong>(<code>번호, 1반, 2반</code>) 반마다 상자가 하나씩 서서 두 집단을 나란히 비교합니다</li>
+      <li><strong>추세선</strong>(산점도) — 체크하면 <strong>최소제곱 직선</strong>과 상관계수 <code>r</code> 을 함께 그려, 자료가 어느 쪽으로 기우는지 한 줄로 보여 줍니다</li>
+      <li><strong>요약 카드</strong> — 같은 자료로 <strong>자료 수·합·평균·중앙값·최빈값·최솟값·최댓값·범위·Q1·Q3·사분범위·분산·표준편차</strong>를 한 장의 표로 넣습니다</li>
+      <li><strong>도수분포표</strong> — <strong>계급·도수·상대도수·누적도수</strong>를 표로 넣습니다. <strong>계급 수</strong> 칸에 숫자를 넣으면 그 개수로 나누고, 0이면 자료 수에 맞춰 자동으로 정합니다(히스토그램도 같은 값을 씁니다)</li>
       <li><strong>자료 묶음을 여러 개 겹쳐 비교</strong>하려면 값을 <strong>열로 더 적습니다</strong>. <code>국어, 7, 9</code> 처럼 적으면 막대가 나란히 서고(묶음 막대), 꺾은선은 선이 여러 개, 산점도는 점 무리가 여러 개가 됩니다</li>
       <li>첫 줄에 <code>과목, 1반, 2반</code> 처럼 <strong>이름 줄</strong>을 적으면 그 이름으로 <strong>범례</strong>가 붙습니다(첫 줄의 둘째 칸부터가 숫자가 아니면 이름 줄로 봅니다). 엑셀 표를 그대로 복사해 붙여넣어도 됩니다</li>
       <li>줄마다 열 개수가 달라도 되고, <strong>원그래프·히스토그램은 첫 묶음만</strong> 씁니다(부채꼴은 겹칠 수 없어서요)</li>
       <li>자료 칸 아래에 <strong>묶음마다 색칩</strong>이 생깁니다. 동그란 색을 눌러 원하는 색으로 바꾸면 미리보기가 바로 따라오고, 고른 색은 차트에 저장돼 다시 열어도 그대로입니다(<strong>색 되돌리기</strong>로 기본 색 복귀). 묶음이 하나인 막대·원그래프는 <strong>항목마다</strong> 색을 고릅니다</li>
     </ul>
   </li>
-  <li>넣은 그래프·차트는 <strong>두 번 누르면 다시 고칠 수 있고</strong>(자리와 크기는 그대로), <strong>분리</strong>를 누르면 축·눈금·곡선이 각각 편집할 수 있는 선과 글자로 흩어집니다</li>
+  <li>넣은 그래프·차트·표는 <strong>두 번 누르면 다시 고칠 수 있고</strong>(자리와 크기는 그대로), <strong>분리</strong>를 누르면 축·눈금·곡선이 각각 편집할 수 있는 선과 글자로 흩어집니다</li>
   <li><strong>교구(자·각도기·컴퍼스)</strong> — 도구막대의 자·각도기·컴퍼스 버튼으로 화면 위에 꺼내 놓습니다. 교구는 판서가 아니라 손에 든 도구여서 저장·내보내기 그림에는 남지 않습니다(<kbd>Esc</kbd>로 치웁니다)
     <ul>
       <li><strong>자</strong>: 몸통을 끌어 옮기고 <strong>오른쪽</strong> 동그라미로 돌립니다. <strong>왼쪽 동그라미를 끌면 길이가 2~40cm 사이에서 늘었다 줄고</strong>(끄는 동안 cm가 표시됩니다), 오른쪽 끝과 각도는 제자리에 있습니다. 눈금(cm) 쪽 모서리 가까이에서 그으면 획이 모서리에 붙어 곧게 나갑니다(지우개는 붙지 않습니다)</li>
@@ -482,8 +493,26 @@ cd myOffice</code></pre>
   <li><strong>손그림 정리</strong>(요술봉 버튼) — 켜 두면 대충 그린 동그라미·세모·네모·직선을 <strong>반듯한 도형으로 바꿔</strong> 줍니다. 글씨만 한 작은 획과 애매한 낙서는 건드리지 않고, <kbd>Ctrl</kbd>+<kbd>Z</kbd> 한 번이면 그은 그대로 돌아옵니다</li>
   <li><strong>측정</strong>(눈금 버튼) — 도형을 고르고 누르면 <strong>길이·각도·넓이</strong>가 붙습니다. 직선은 길이(cm), 사각형은 <code>가로 × 세로 = 넓이</code>, 원은 반지름과 넓이, 다각형은 넓이, 꺾인 점이 하나뿐인 선은 그 자리의 각도를 잽니다. 붙인 값은 <strong>도형이 바뀌면 따라 바뀌고</strong>(끌어 크기를 바꾸거나 닮음 변환을 하면 즉시 갱신), 라벨을 끌어 원하는 자리에 두면 그 위치를 지킵니다. 한 번 더 누르면 뗍니다</li>
   <li><strong>변환</strong>(변환 버튼) — 고른 도형을 <strong>선대칭·점대칭·회전·평행이동·닮음</strong>으로 바꿉니다. 기준점은 도형의 중심이 기본이고 <strong>기준점 찍기</strong>로 보드의 아무 자리나 지정할 수 있으며(빨간 ✛ 로 표시), 선대칭 축은 세로축·가로축·<strong>자 모서리</strong> 중에서 고릅니다. <strong>원본 남기고 사본 만들기</strong>를 켜 두면 원본과 나란히 놓여 대응점을 비교할 수 있고, 끄면 그 도형이 바뀝니다(붙여 둔 측정값도 함께 따라갑니다). 글자는 읽을 수 있도록 눕히지 않습니다</li>
-  <li><strong>화학</strong> 탭 — <strong>주기율표</strong>(118개 원소)를 족·주기 배치 그대로 보여 주고, 누르면 번호·기호·이름·원자량이 담긴 <strong>원소 카드</strong>가 들어갑니다. 이름·기호·번호(예: <code>산소</code>, <code>Na</code>, <code>26</code>)로 검색할 수 있습니다. 위쪽 칸에 <code>CH4 + O2 -&gt; CO2 + H2O</code> 처럼 적으면 <strong>계수를 맞춰</strong>(<code>CH₄ + 2O₂ → CO₂ + 2H₂O</code>) 보드에 넣어 줍니다. <code>Ca(OH)2</code> 처럼 괄호가 있어도 되고, 맞출 수 없는 식은 이유를 알려 줍니다</li>
-  <li><strong>확률 실험</strong>(차트 탭 위쪽) — <strong>동전·주사위·주사위 2개·무작위 수</strong>를 정한 횟수만큼 실제로 굴려 자료를 만들고 평균·최빈값을 알려 줍니다. 그대로 <strong>차트 넣기</strong>를 누르면 결과 그래프가 보드에 들어갑니다(큰 수의 법칙 수업용)</li>
+  <li><strong>화학</strong> 탭 — <strong>주기율표</strong>(118개 원소)를 족·주기 배치 그대로 보여 주고, 누르면 번호·기호·이름·원자량이 담긴 <strong>원소 카드</strong>가 들어갑니다. 이름·기호·번호(예: <code>산소</code>, <code>Na</code>, <code>26</code>)로 검색할 수 있습니다. 위쪽 칸에 <code>CH4 + O2 -&gt; CO2 + H2O</code> 처럼 적으면 <strong>계수를 맞춰</strong>(<code>CH₄ + 2O₂ → CO₂ + 2H₂O</code>) 보드에 넣어 줍니다. <code>Ca(OH)2</code> 처럼 괄호가 있어도 되고, 맞출 수 없는 식은 이유를 알려 줍니다
+    <ul>
+      <li><strong>몰 계산(화학량론)</strong> — 계수가 맞으면 아래에 계산 줄이 열립니다. <strong>아는 물질</strong>을 고르고 <strong>양</strong>과 단위(<code>g</code>·<code>mol</code>)를 넣으면 나머지 물질의 몰수·질량이 바로 나오고, <strong>몰 계산표 넣기</strong>로 <strong>물질·계수·몰질량·몰수·질량</strong> 표를 보드에 넣습니다(예: <code>CH4 + O2 -&gt; CO2 + H2O</code> 에서 CH₄ 8g → CO₂ 21.95g). 몰질량은 주기율표의 원자량으로 계산합니다</li>
+    </ul>
+  </li>
+  <li><strong>확률 실험</strong>(차트 탭 위쪽) — <strong>동전·주사위·주사위 2개·무작위 수·주머니·스피너</strong>를 정한 횟수만큼 실제로 굴려 자료를 만들고 평균·최빈값을 알려 줍니다. 그대로 <strong>차트 넣기</strong>를 누르면 결과 그래프가 보드에 들어갑니다
+    <ul>
+      <li><strong>주머니·스피너</strong>는 <strong>구성</strong> 칸에 <code>빨강 3, 파랑 2</code> 처럼 적습니다. 주머니는 <strong>뽑기</strong> 개수를 2 이상으로 두면 한 번에 여러 개를 뽑아 <code>빨강1·파랑1</code> 같은 <strong>조합</strong>을 세고, <strong>되돌려 넣기</strong>를 끄면 <strong>비복원 추출</strong>이 됩니다(파랑이 2개뿐이면 <code>파랑3</code>은 나오지 않습니다). 스피너는 적은 수만큼 <strong>넓이(확률)</strong> 가 커집니다</li>
+      <li><strong>누적 그래프</strong>를 누르면 방금 한 실험을 다시 굴리면서 <strong>누적 상대도수</strong>를 꺾은선으로 그리고, 이론값을 아는 실험이면 점선으로 함께 그어 <strong>큰 수의 법칙</strong>을 눈으로 보여 줍니다</li>
+    </ul>
+  </li>
+  <li><strong>수 모형</strong> 탭 — 초등 수업용 모형을 값만 넣어 만듭니다. <strong>분수</strong>(<code>3/4, 2/3</code> 처럼 적으면 막대나 원으로 나란히 놓고 크기 비교, 가분수는 전체를 여러 개), <strong>자릿값 블록</strong>(천 덩어리·백 판·십 막대·일 칸으로 수를 펼치기), <strong>수직선 뛰어세기</strong>(뛰는 크기를 음수로 적으면 거꾸로), <strong>양팔 저울</strong>(x 상자와 1 블록으로 등식을 보여 주고 풀 수 있으면 <code>x = 4</code>까지 적기)</li>
+  <li><strong>과학 계산</strong> 탭 — 값을 넣으면 계산해서 그려 줍니다.
+    <ul>
+      <li><strong>렌즈·거울 광선도</strong>: 볼록·오목렌즈와 오목·볼록거울에서 <code>1/a + 1/b = 1/f</code> 로 상의 자리를 구해 <strong>광선 세 개</strong>와 상을 긋고, <strong>상거리·배율·실상/허상·정립/도립·확대/축소</strong>를 적습니다(허상은 점선)</li>
+      <li><strong>퍼넷 사각형</strong>: <code>Aa × Aa</code> 는 3 : 1, <code>AaBb × AaBb</code> 는 9 : 3 : 3 : 1 — 배우자를 만들어 칸을 채우고 <strong>유전자형·표현형 비율</strong>까지 셉니다</li>
+      <li><strong>회로 계산</strong>: 저항을 <code>6, 3, 2</code> 처럼 적고 전압을 넣으면 <strong>직렬·병렬 회로 그림</strong>과 함께 합성저항·전체 전류, 저항마다의 전압(직렬)·전류(병렬)를 붙입니다</li>
+    </ul>
+  </li>
+  <li><strong>벡터 합성</strong>(도구막대·우클릭 메뉴) — <strong>같은 점에서 그린 화살표 두 개</strong> 중 하나를 고르고 누르면 평행사변형과 <strong>합력 화살표</strong>가 붙고 크기(cm)·각도가 적힙니다. 합성에 쓰인 화살표는 <strong>끝점에 손잡이</strong>가 생겨 끌어 길이·방향을 바꿀 수 있고, 그때마다 합력이 따라 바뀝니다. 원본 화살표를 지우면 합력도 함께 사라지고, 한 번 더 누르면 뗍니다</li>
   <li>도구상자 항목은 클릭하면 보드 가운데에, 끌어 놓으면 원하는 위치에 삽입. 교육 도형은 선명한 벡터 그룹으로 한꺼번에 이동·크기 조절하고, 선택 후 <strong>분리</strong>를 누르면 선·원·글자 같은 구성 요소를 개별 수정</li>
   <li><strong>선택·이동</strong> 도구로 이미지·직선·화살표·사각형·원·텍스트를 클릭해 옮기고 <kbd>Delete</kbd>로 삭제</li>
   <li>만든 텍스트는 <strong>선택·이동 도구로 더블클릭</strong>해 내용을 다시 수정</li>
@@ -503,7 +532,7 @@ cd myOffice</code></pre>
 <table>
 <thead><tr><th>묶음</th><th>항목</th></tr></thead>
 <tbody>
-<tr><td><strong>선택 항목</strong> (누른 자리에 항목이 있을 때)</td><td>편집(텍스트·수식·그래프·차트) · 복사 · 잘라내기 · 붙여넣기 · 복제 · 앞으로 / 뒤로 / 맨 앞으로 / 맨 뒤로 · 좌우 반전 · 상하 반전 · <strong>측정 / 측정 떼기</strong> · <strong>변환</strong> · 분리 · 삭제</td></tr>
+<tr><td><strong>선택 항목</strong> (누른 자리에 항목이 있을 때)</td><td>편집(텍스트·수식·그래프·차트·표·수 모형·과학 계산) · 복사 · 잘라내기 · 붙여넣기 · 복제 · 앞으로 / 뒤로 / 맨 앞으로 / 맨 뒤로 · 좌우 반전 · 상하 반전 · <strong>측정 / 측정 떼기</strong> · <strong>합성 / 합성 떼기</strong>(화살표) · <strong>변환</strong> · 분리 · 삭제</td></tr>
 <tr><td><strong>보드 작업</strong></td><td>붙여넣기(누른 자리에) · 이미지 · 수학·과학 · <strong>그래프</strong> · <strong>차트</strong> · <strong>주기율표</strong> · 배경색 · 축소 / 100% / 확대 · 집중 도구 · 전체 지우기</td></tr>
 <tr><td><strong>교구·정리</strong></td><td>자 · 각도기 · 컴퍼스 · 15° 맞추기 · 손그림 정리 · 교구 치우기 (켜 둔 것은 눌린 상태로 보입니다)</td></tr>
 <tr><td><strong>출력·공유</strong></td><td>PNG 저장 · PDF 저장 · 인쇄 · 메모로</td></tr>

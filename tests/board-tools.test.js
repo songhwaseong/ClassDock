@@ -79,6 +79,110 @@ test("매개변수가 있는 식은 값을 넣어 계산하고 자동 y 범위�
   assert.ok(hyperbola.items.some((item) => item.type === "polyline" && item.points.length > 20));
 });
 
+test("매개변수가 있는 그래프는 보드에 슬라이더를 함께 그리고 손잡이 자리를 알려 준다", () => {
+  const group = MNBoardTools.plotGroup({ curves:[{ source:"a sin(x)" }], params:{ a:2 }, xMin:-6, xMax:6, width:520, height:360 });
+  assert.equal(group.sliders.length, 1);
+  const slider = group.sliders[0];
+  assert.equal(slider.name, "a");
+  assert.equal(slider.value, 2);
+  assert.ok(slider.y > 360 - 40 && slider.y < 360, "슬라이더 띠는 그림 아래쪽에 놓인다");
+  assert.ok(group.items.some((item) => item.type === "text" && item.text === "a = 2"));
+  // 슬라이더가 있으면 세로 눈금을 붙잡아 둔다 — 값을 끌 때 축이 따라 움직이면 무엇이 변했는지 안 보인다.
+  assert.ok(Number.isFinite(group.plotSpec.yMin) && Number.isFinite(group.plotSpec.yMax));
+  assert.equal(group.plotSpec.showSliders, true);
+  // 끄지 않기로 하면 띠가 사라지고 자동 y 범위로 돌아간다.
+  const plain = MNBoardTools.plotGroup({ curves:[{ source:"a sin(x)" }], params:{ a:2 }, showSliders:false, width:520, height:360 });
+  assert.deepEqual(plain.sliders, []);
+  assert.equal(plain.plotSpec.yMin, null);
+
+  // 보드에 놓인 그룹은 크기가 바뀌고 좌우로 뒤집힐 수 있다 — 그 좌표를 되돌려 손잡이를 찾는다.
+  const placed = Object.assign({}, group, { x:100, y:50, w:1040, h:720 });
+  const knobX = 100 + (slider.x1 + (slider.x2 - slider.x1) * (2 - slider.min) / (slider.max - slider.min)) * 2;
+  const hit = MNBoardTools.plotSliderAt(placed, { x:knobX, y:50 + slider.y * 2 });
+  assert.equal(hit && hit.index, 0);
+  assert.equal(MNBoardTools.plotSliderAt(placed, { x:knobX, y:60 }), null);
+  // 끌어 놓은 자리는 0.1 눈금으로 읽고 띠 밖은 양 끝 값으로 붙잡는다.
+  assert.equal(MNBoardTools.sliderValueAt(slider, (slider.x1 + slider.x2) / 2), 0);
+  assert.equal(MNBoardTools.sliderValueAt(slider, slider.x2 + 500), 10);
+  assert.equal(MNBoardTools.sliderValueAt(slider, slider.x1 - 500), -10);
+  const quarter = MNBoardTools.sliderValueAt(slider, slider.x1 + (slider.x2 - slider.x1) * .25);
+  assert.equal(quarter, -5);
+  // 값을 바꿔 다시 그리면 같은 자리에 손잡이만 옮겨 간다.
+  const moved = MNBoardTools.plotGroup(Object.assign({}, group.plotSpec, { params:{ a:5 } }));
+  assert.equal(moved.sliders[0].y, slider.y);
+  assert.ok(moved.sliders[0].x1 === slider.x1 && moved.sliders[0].value === 5);
+  assert.deepEqual([moved.plotSpec.yMin, moved.plotSpec.yMax], [group.plotSpec.yMin, group.plotSpec.yMax]);
+});
+
+test("그래프 해석 도구는 교점·접선·구간 넓이·부등식 영역을 실제로 계산한다", () => {
+  const textOf = (group) => group.items.filter((item) => item.type === "text").map((item) => item.text);
+  // 교점: x^2-2 와 x 는 x=-1, 2 에서 만난다.
+  const crossing = MNBoardTools.plotGroup({
+    curves:[{ source:"x^2 - 2" }, { source:"x" }], xMin:-4, xMax:4, width:520, height:360, showIntersections:true
+  });
+  assert.ok(textOf(crossing).includes("(-1, -1)"));
+  assert.ok(textOf(crossing).includes("(2, 2)"));
+  // 점근선을 사이에 둔 부호 뒤집힘은 교점으로 세지 않는다.
+  const fake = MNBoardTools.plotGroup({ curves:[{ source:"1/x" }, { source:"0" }], xMin:-4, xMax:4, showIntersections:true });
+  assert.equal(textOf(fake).filter((text) => /^\(/.test(text)).length, 0);
+
+  // 접선: x^2 의 x=1.5 에서 기울기는 3.
+  const tangent = MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-4, xMax:4, tangentX:1.5 });
+  assert.ok(textOf(tangent).some((text) => text === "x = 1.5에서 기울기 3"));
+  assert.ok(tangent.items.some((item) => item.type === "line" && Array.isArray(item.dash)), "접선은 점선으로 긋는다");
+
+  // 넓이: ∫₀² x² dx = 8/3, 직사각형 8개(가운데 높이)면 2.6563.
+  const integral = MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-1, xMax:3, areaFrom:0, areaTo:2 });
+  assert.ok(textOf(integral).some((text) => text === "0~2 넓이 ≈ 2.6667"));
+  assert.ok(integral.items.some((item) => item.type === "polyline" && item.fill && item.closed));
+  const riemann = MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-1, xMax:3, areaFrom:0, areaTo:2, areaBars:8 });
+  assert.ok(textOf(riemann).some((text) => text === "직사각형 8개의 합 ≈ 2.6563"));
+  assert.equal(riemann.items.filter((item) => item.type === "rect" && item.fill).length, 8);
+
+  // 부등식: y > x+1 은 위쪽 반평면을 칠하고 경계선을 점선으로 긋는다.
+  const region = MNBoardTools.plotGroup({ curves:[{ source:"x + 1", relation:"gt" }], xMin:-5, xMax:5, width:520, height:360 });
+  const shade = region.items.find((item) => item.type === "polyline" && item.fill && item.closed);
+  assert.ok(shade && shade.points.every((point) => point.y >= -0.01 && point.y <= 360.01));
+  assert.ok(region.items.some((item) => item.type === "polyline" && !item.fill && Array.isArray(item.dash)));
+  assert.ok(textOf(region).includes("y > x + 1"));
+  // 등호가 있는 부등식은 경계선을 실선으로 둔다.
+  const closed = MNBoardTools.plotGroup({ curves:[{ source:"x + 1", relation:"le" }], xMin:-5, xMax:5 });
+  assert.ok(!closed.items.some((item) => item.type === "polyline" && !item.fill && Array.isArray(item.dash)));
+
+  // 설정은 그대로 저장돼 다시 열면 같은 그림이 나온다. 값을 안 정한 자리는 0 이 아니라 null 로 남는다.
+  assert.deepEqual(
+    [crossing.plotSpec.showIntersections, crossing.plotSpec.tangentX, crossing.plotSpec.areaFrom, crossing.plotSpec.areaBars],
+    [true, null, null, 0]
+  );
+  assert.equal(MNBoardTools.plotGroup(integral.plotSpec).items.length, integral.items.length);
+});
+
+test("값의 표는 식에서 x·y 대응표를 만들고 칸이 너무 많으면 막는다", () => {
+  const group = MNBoardTools.valueTableGroup({ curves:[{ source:"2x + 1" }, { source:"x^2" }], from:-3, to:3, step:1, title:"값의 표" });
+  assert.equal(group.role, "education-table");
+  assert.equal(group.tableSpec.kind, "values");
+  // 줄(y 좌표)별로 글자를 모으면 머리글 x 줄과 식마다 한 줄이 나온다.
+  const lines = new Map();
+  for (const item of group.items.filter((it) => it.type === "text")){
+    const key = Math.round(item.y);
+    if (!lines.has(key)) lines.set(key, []);
+    lines.get(key).push(item.text);
+  }
+  const rows = [...lines.entries()].sort((a, b) => a[0] - b[0]).map(([, cells]) => cells);
+  assert.deepEqual(rows[0], ["값의 표"]);
+  assert.deepEqual(rows[1], ["x", "-3", "-2", "-1", "0", "1", "2", "3"]);
+  assert.deepEqual(rows[2], ["y = 2x + 1", "-5", "-3", "-1", "1", "3", "5", "7"]);
+  assert.deepEqual(rows[3], ["y = x^2", "9", "4", "1", "0", "1", "4", "9"]);
+  // 정의역 밖은 빈칸이 아니라 —(값 없음)으로 적는다.
+  const root = MNBoardTools.valueTableGroup({ curves:[{ source:"sqrt(x)" }], from:-1, to:1, step:1 });
+  assert.ok(root.items.some((item) => item.type === "text" && item.text === "—"));
+  // 매개변수가 있는 식도 슬라이더로 정한 값을 그대로 넣어 계산한다.
+  const withParam = MNBoardTools.valueTableGroup({ curves:[{ source:"a x" }], params:{ a:3 }, from:1, to:3, step:1 });
+  assert.ok(withParam.items.some((item) => item.type === "text" && item.text === "9"));
+  assert.throws(() => MNBoardTools.valueTableGroup({ curves:[{ source:"x" }], from:0, to:100, step:1 }), (error) => /칸이 너무 많/.test(error.message));
+  assert.throws(() => MNBoardTools.valueTableGroup({ curves:[{ source:"x" }], from:5, to:1, step:1 }), (error) => error.boardTool === true);
+});
+
 test("자료 차트는 쉼표·탭·띄어쓰기로 적은 표를 읽어 종류별 벡터로 만든다", () => {
   assert.deepEqual(MNBoardTools.parseChartData("국어, 7\n수학\t12\n영어 5"), [
     { label:"국어", value:7 }, { label:"수학", value:12 }, { label:"영어", value:5 }
@@ -135,12 +239,238 @@ test("묶음 색을 골라 넘기면 그 색으로 그리고 차트에 함께 �
   assert.deepEqual(MNBoardTools.chartGroup({ type:"bar", data:"가, 1" }).chartSpec.palette, MNBoardTools.CHART_PALETTE);
 });
 
+test("자료 요약은 학교식 사분위수로 재고 상자그림·도수분포표·추세선이 그 값을 쓴다", () => {
+  const scores = "62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77";
+  const stat = MNBoardTools.describeData([62, 71, 75, 78, 80, 83, 85, 88, 91, 95, 72, 77]);
+  assert.equal(stat.n, 12);
+  assert.equal(stat.median, 79);                       // 78 과 80 의 평균
+  assert.equal(stat.q1, 73.5);                         // 아래 반쪽(6개)의 중앙값
+  assert.equal(stat.q3, 86.5);
+  assert.equal(stat.range, 33);
+  assert.deepEqual(stat.modes, []);                    // 한 번씩만 나오면 최빈값은 없다
+  assert.deepEqual(MNBoardTools.describeData([1, 2, 2, 3, 3]).modes, [2, 3]);
+  assert.equal(MNBoardTools.describeData([5]).q1, 5);  // 자료가 하나여도 무너지지 않는다
+  assert.equal(Math.round(MNBoardTools.describeData([2, 4, 4, 4, 5, 5, 7, 9]).sd * 100) / 100, 2);
+  assert.throws(() => MNBoardTools.describeData([]), (error) => error.boardTool === true);
+
+  const card = MNBoardTools.statsSummaryGroup({ data:scores, title:"수학 점수" });
+  const cardText = card.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.equal(card.tableSpec.kind, "stats");
+  for (const cell of ["평균", "79.75", "중앙값", "79", "표준편차", "제1사분위수 Q1", "73.5"]) assert.ok(cardText.includes(cell), cell);
+
+  const frequency = MNBoardTools.frequencyTableGroup({ data:scores, bins:4 });
+  const rows = frequency.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.equal(frequency.tableSpec.kind, "frequency");
+  assert.deepEqual(rows.slice(1, 5), ["계급", "도수", "상대도수", "누적도수"]);
+  assert.equal(rows[rows.length - 3], "합계");         // 마지막 줄은 합계(누적도수 칸은 비운다)
+
+  // 상자그림은 다섯 수 요약을 실제로 계산해 그린다.
+  const box = MNBoardTools.chartGroup({ type:"box", data:scores, title:"수학 점수", width:560, height:400 });
+  assert.equal(box.educationLabel, "상자그림");
+  assert.equal(box.chartSpec.type, "box");
+  const boxText = box.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.ok(boxText.includes("중앙값 79") && boxText.includes("Q1 73.5") && boxText.includes("Q3 86.5"));
+  // 열이 여럿이면 상자도 여럿(테두리 사각형이 묶음마다 두 개씩).
+  const two = MNBoardTools.chartGroup({ type:"box", data:"번호, 1반, 2반\n1, 62, 71\n2, 75, 68\n3, 88, 79\n4, 91, 84" });
+  assert.equal(two.items.filter((item) => item.type === "rect" && item.fill).length, 2);
+  for (const name of ["1반", "2반"]) assert.ok(two.items.some((item) => item.type === "text" && item.text === name));
+  assert.throws(() => MNBoardTools.chartGroup({ type:"box", data:"이름만\n또 이름만" }), (error) => error.boardTool === true);
+
+  // 산점도 추세선 — 최소제곱 직선과 상관계수.
+  const fit = MNBoardTools.linearFit([{ x:1, y:2 }, { x:2, y:4 }, { x:3, y:6 }]);
+  assert.deepEqual([fit.slope, fit.intercept, Math.round(fit.r)], [2, 0, 1]);
+  assert.equal(MNBoardTools.linearFit([{ x:1, y:2 }]), null);
+  assert.equal(MNBoardTools.linearFit([{ x:1, y:2 }, { x:1, y:5 }]), null);   // 세로로 늘어선 점은 직선을 못 정한다
+  const scatter = MNBoardTools.chartGroup({ type:"scatter", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88", trend:true });
+  assert.ok(scatter.items.some((item) => item.type === "line" && Array.isArray(item.dash)));
+  assert.ok(scatter.items.some((item) => item.type === "text" && /r = 0\.99/.test(item.text)));
+  assert.equal(scatter.chartSpec.trend, true);
+});
+
+test("수 모형은 분수·자릿값·뛰어세기·저울을 값 그대로 그린다", () => {
+  const textOf = (group) => group.items.filter((item) => item.type === "text").map((item) => item.text);
+  // 분수 막대: 분모만큼 칸을 나누고 분자만큼 칠한다(칠한 칸 + 테두리 칸이 각각 생긴다).
+  const bar = MNBoardTools.fractionModelGroup({ fractions:"3/4, 2/3" });
+  assert.equal(bar.role, "education-tool");
+  assert.deepEqual(bar.toolSpec, { kind:"fraction", values:{ shape:"bar", fractions:"3/4, 2/3" } });
+  assert.equal(bar.items.filter((item) => item.type === "rect" && item.fill).length, 5);   // 3 + 2
+  assert.equal(bar.items.filter((item) => item.type === "rect" && !item.fill).length, 7);  // 4 + 3
+  assert.deepEqual(textOf(bar), ["3", "4", "2", "3"]);
+  // 가분수는 전체를 여러 개 그린다(5/3 → 두 개).
+  const improper = MNBoardTools.fractionModelGroup({ shape:"circle", fractions:"5/3" });
+  assert.equal(improper.items.filter((item) => item.fill).length, 5);
+  assert.throws(() => MNBoardTools.fractionModelGroup({ fractions:"3-4" }), (error) => /3\/4 처럼/.test(error.message));
+  assert.throws(() => MNBoardTools.fractionModelGroup({ fractions:"" }), (error) => error.boardTool === true);
+
+  // 자릿값 블록: 앞자리 0 은 그리지 않고, 자리마다 개수를 적는다.
+  const blocks = MNBoardTools.placeValueGroup({ value:1347 });
+  assert.deepEqual(textOf(blocks), ["1347 = 1000 + 300 + 40 + 7", "천 1", "백 3", "십 4", "일 7"]);
+  assert.deepEqual(textOf(MNBoardTools.placeValueGroup({ value:7 })), ["7", "일 7"]);
+  assert.equal(MNBoardTools.placeValueGroup({ value:99999 }).toolSpec.values.value, 9999);  // 범위 밖은 붙잡는다
+
+  // 수직선 뛰어세기: 2에서 3씩 네 번 → 14, 수직선 밖으로는 뛰지 않는다.
+  const jumps = MNBoardTools.numberLineJumpGroup({ from:0, to:20, start:2, step:3, jumps:4 });
+  assert.ok(textOf(jumps).includes("2에서 3씩 뛰어 세기 → 14"));
+  assert.ok(textOf(jumps).filter((text) => text === "+3").length === 4);
+  const clipped = MNBoardTools.numberLineJumpGroup({ from:0, to:10, start:8, step:3, jumps:5 });
+  assert.ok(textOf(clipped).includes("8에서 3씩 뛰어 세기 → 8"));
+  assert.ok(textOf(MNBoardTools.numberLineJumpGroup({ from:0, to:20, start:18, step:-4, jumps:3 })).includes("18에서 4씩 거꾸로 뛰어 세기 → 6"));
+  assert.throws(() => MNBoardTools.numberLineJumpGroup({ from:5, to:5 }), (error) => error.boardTool === true);
+  assert.throws(() => MNBoardTools.numberLineJumpGroup({ from:0, to:20, step:0 }), (error) => /0이 될 수 없/.test(error.message));
+
+  // 양팔 저울: 식을 적고 풀 수 있으면 답까지 적는다.
+  const scale = MNBoardTools.balanceScaleGroup({ leftX:2, leftOne:3, rightX:0, rightOne:11 });
+  assert.ok(textOf(scale).includes("2x + 3 = 11"));
+  assert.ok(textOf(scale).some((text) => /x = 4$/.test(text)));
+  assert.equal(scale.items.filter((item) => item.type === "text" && item.text === "x").length, 2);
+  assert.equal(scale.items.filter((item) => item.type === "text" && item.text === "1").length, 14);
+  // 양변의 x 개수가 같으면 x 를 정할 수 없다 — 답을 적지 않는다.
+  assert.ok(!MNBoardTools.balanceScaleGroup({ leftX:2, leftOne:3, rightX:2, rightOne:3 }).items.some((item) => item.type === "text" && /x = /.test(item.text)));
+  assert.throws(() => MNBoardTools.balanceScaleGroup({ leftX:0, rightX:0 }), (error) => error.boardTool === true);
+});
+
+test("벡터 합성은 평행사변형과 합력을 재어 그린다", () => {
+  const cm = MNBoardTools.PX_PER_CM;
+  // 3cm(→)와 4cm(↑)의 합은 5cm, 화면 좌표에서 위로 53.1°
+  const group = MNBoardTools.vectorSumGroup(
+    { type:"arrow", x1:100, y1:200, x2:100 + cm * 3, y2:200 },
+    { type:"arrow", x1:100, y1:200, x2:100, y2:200 - cm * 4 }
+  );
+  assert.equal(group.role, "vector-sum");
+  assert.equal(group.vectorSum.text, "합력 5.0cm · 53.1°");
+  assert.equal(group.items.filter((item) => item.type === "arrow").length, 1);
+  assert.equal(group.items.filter((item) => item.type === "line" && Array.isArray(item.dash)).length, 2);
+  // 그룹은 두 화살표와 합력을 모두 감싸는 자리에 놓인다(보드 좌표 그대로).
+  assert.ok(group.x <= 100 && group.y <= 200 - cm * 4 && group.x + group.w >= 100 + cm * 3);
+  // 눈금을 정해 주면 힘의 단위로 적는다(1cm = 2N).
+  assert.equal(MNBoardTools.vectorSumGroup(
+    { x1:0, y1:0, x2:cm * 3, y2:0 }, { x1:0, y1:0, x2:0, y2:-cm * 4 }, { perCm:2, unit:"N" }
+  ).vectorSum.text, "합력 10N · 53.1°");
+  assert.throws(() => MNBoardTools.vectorSumGroup({ x1:0, y1:0, x2:20, y2:0 }, { x1:0, y1:0, x2:-20, y2:0 }), (error) => error.boardTool === true);
+});
+
+test("광선 작도는 상의 자리·크기를 렌즈 공식으로 구한다", () => {
+  const textOf = (group) => group.items.filter((item) => item.type === "text").map((item) => item.text);
+  // 볼록렌즈 f=4, a=6 → b=12, 배율 -2(실상·도립·확대)
+  const lens = MNBoardTools.opticsSolve("convex-lens", 4, 6);
+  assert.deepEqual([lens.b, lens.magnification, lens.real], [12, -2, true]);
+  // 초점 안쪽(돋보기)은 허상·정립·확대
+  const magnifier = MNBoardTools.opticsSolve("convex-lens", 4, 3);
+  assert.deepEqual([magnifier.b, magnifier.magnification, magnifier.real], [-12, 4, false]);
+  // 오목렌즈·볼록거울은 언제나 허상·정립·축소
+  for (const kind of ["concave-lens", "convex-mirror"]){
+    const solved = MNBoardTools.opticsSolve(kind, 4, 6);
+    assert.ok(!solved.real && solved.magnification > 0 && solved.magnification < 1, kind);
+  }
+  assert.equal(MNBoardTools.opticsSolve("concave-mirror", 4, 6).b, 12);
+  assert.throws(() => MNBoardTools.opticsSolve("convex-lens", 4, 4), (error) => /초점에 있으면/.test(error.message));
+
+  const group = MNBoardTools.opticsGroup({ kind:"convex-lens", focal:4, distance:6, height:2 });
+  assert.equal(group.role, "education-tool");
+  assert.deepEqual(group.toolSpec.values, { kind:"convex-lens", focal:4, distance:6, height:2 });
+  assert.ok(textOf(group).includes("상거리 12cm · 배율 -2배 (실상·도립·확대)"));
+  assert.ok(textOf(group).includes("실상") && textOf(group).includes("물체"));
+  assert.equal(group.items.filter((item) => item.type === "polyline").length, 3);   // 광선 세 개
+  // 허상이면 상 화살표와 연장선을 점선으로 그린다.
+  const virtual = MNBoardTools.opticsGroup({ kind:"convex-lens", focal:4, distance:3, height:2 });
+  assert.ok(virtual.items.some((item) => item.type === "arrow" && Array.isArray(item.dash)));
+  assert.ok(textOf(virtual).includes("허상"));
+});
+
+test("퍼넷 사각형은 배우자를 만들어 칸을 채우고 비율을 센다", () => {
+  const textOf = (group) => group.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.deepEqual(MNBoardTools.punnettGametes("AaBb").gametes, ["AB", "Ab", "aB", "ab"]);
+  assert.deepEqual(MNBoardTools.punnettGametes("AA").gametes, ["A", "A"]);
+  assert.throws(() => MNBoardTools.punnettGametes("Ab"), (error) => /같은 형질끼리/.test(error.message));
+  assert.throws(() => MNBoardTools.punnettGametes("A"), (error) => error.boardTool === true);
+  assert.throws(() => MNBoardTools.punnettGametes("AaBbCc"), (error) => /두 가지까지/.test(error.message));
+
+  const single = MNBoardTools.punnettGroup({ parentA:"Aa", parentB:"Aa" });
+  const cells = textOf(single);
+  assert.equal(single.toolSpec.kind, "punnett");
+  assert.ok(cells.includes("AA") && cells.includes("aa"));
+  assert.equal(cells.filter((text) => text === "Aa").length, 2);
+  assert.ok(cells.includes("유전자형 AA 1 : Aa 2 : aa 1"));
+  assert.ok(cells.includes("표현형 A_ 3 : aa 1  (전체 4칸)"));
+  // 두 형질이면 9 : 3 : 3 : 1
+  const dihybrid = textOf(MNBoardTools.punnettGroup({ parentA:"AaBb", parentB:"AaBb" }));
+  assert.ok(dihybrid.includes("표현형 A_B_ 9 : A_bb 3 : aaB_ 3 : aabb 1  (전체 16칸)"));
+  assert.throws(() => MNBoardTools.punnettGroup({ parentA:"Aa", parentB:"AaBb" }), (error) => /형질 수/.test(error.message));
+  assert.throws(() => MNBoardTools.punnettGroup({ parentA:"Aa", parentB:"Bb" }), (error) => /형질 문자/.test(error.message));
+});
+
+test("확률 실험은 주머니·스피너까지 굴리고 누적 상대도수로 큰 수의 법칙을 보여 준다", () => {
+  let seed = 11;
+  const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const items = [{ label:"빨강", value:3 }, { label:"파랑", value:2 }];
+  const bag = MNBoardTools.simulateTrials("bag", 500, { items, random });
+  assert.deepEqual(bag.rows.map((row) => row.label), ["빨강", "파랑"]);
+  assert.equal(bag.rows.reduce((sum, row) => sum + row.value, 0), 500);
+  assert.ok(Math.abs(bag.rows[0].value / 500 - 0.6) < 0.08, "5개 중 3개가 빨강이면 60% 근처");
+  assert.equal(bag.title, "주머니 500회");
+
+  // 두 개를 비복원으로 뽑으면 결과가 조합이 되고, 같은 색 두 개도 나올 수 있다.
+  const pair = MNBoardTools.simulateTrials("bag", 500, { items, draws:2, random });
+  assert.ok(pair.rows.every((row) => /·|\d/.test(row.label)));
+  assert.equal(pair.rows.reduce((sum, row) => sum + row.value, 0), 500);
+  assert.ok(pair.rows.some((row) => row.label === "빨강1·파랑1"));
+  // 파랑은 2개뿐이라 비복원으로 3개를 뽑으면 파랑3 은 나올 수 없다.
+  const three = MNBoardTools.simulateTrials("bag", 300, { items, draws:3, random });
+  assert.ok(!three.rows.some((row) => row.label === "파랑3"));
+
+  // 스피너는 넓이(가중치)만큼 자주 나온다.
+  const spinner = MNBoardTools.simulateTrials("spinner", 800, { items:[{ label:"A", value:3 }, { label:"B", value:1 }], random });
+  assert.ok(Math.abs(spinner.rows[0].value / 800 - 0.75) < 0.06);
+
+  const law = MNBoardTools.runningRatioGroup("coin", 400, { random, target:"앞" });
+  assert.equal(law.educationLabel, "큰 수의 법칙");
+  const text = law.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.ok(text.includes("이론값 0.5"));
+  assert.ok(text.some((line) => /^400회 뒤 0\.\d+ \(\d+회\)$/.test(line)));
+  assert.ok(law.items.some((item) => item.type === "line" && Array.isArray(item.dash)));
+  // 이론값을 모르는 실험(여러 개 뽑기)은 점선 없이 곡선만 그린다.
+  const unknown = MNBoardTools.runningRatioGroup("bag", 200, { items, draws:2, target:"빨강1·파랑1", random });
+  assert.ok(!unknown.items.some((item) => item.type === "line" && Array.isArray(item.dash)));
+});
+
+test("회로 계산은 합성저항·전체 전류와 저항마다의 값을 구한다", () => {
+  const textOf = (group) => group.items.filter((item) => item.type === "text").map((item) => item.text);
+  // 직렬 6+3+2 = 11Ω, I = 12/11 ≒ 1.09A, 전압은 저항에 비례해 나뉜다
+  const series = textOf(MNBoardTools.circuitGroup({ mode:"series", resistors:"6, 3, 2", voltage:12 }));
+  assert.ok(series.includes("직렬회로 · R = 6 + 3 + 2 = 11Ω"));
+  assert.ok(series.includes("전체 전류 I = V ÷ R = 12 ÷ 11 = 1.09A"));
+  assert.ok(series.includes("6.55V") && series.includes("3.27V") && series.includes("2.18V"));
+  // 병렬 6∥3 = 2Ω, 가지 전류 2A + 4A = 6A
+  const parallel = textOf(MNBoardTools.circuitGroup({ mode:"parallel", resistors:"6, 3", voltage:12 }));
+  assert.ok(parallel.includes("병렬회로 · 1/R = 1/6 + 1/3 → R = 2Ω"));
+  assert.ok(parallel.includes("2A") && parallel.includes("4A"));
+  assert.ok(parallel.includes("전체 전류 I = V ÷ R = 12 ÷ 2 = 6A"));
+  assert.deepEqual(MNBoardTools.parseResistors("6, 3, 2"), [6, 3, 2]);
+  assert.throws(() => MNBoardTools.circuitGroup({ resistors:"0" }), (error) => /0보다 커야/.test(error.message));
+  assert.throws(() => MNBoardTools.circuitGroup({ resistors:"" }), (error) => /저항 값을 적어/.test(error.message));
+  assert.throws(() => MNBoardTools.circuitGroup({ resistors:"1,2,3,4,5,6" }), (error) => /다섯 개까지/.test(error.message));
+});
+
 test("차트·그래프 항목은 공용 렌더러가 그릴 수 있는 종류만 쓴다", () => {
   const drawable = new Set(["line", "arrow", "rect", "ellipse", "polyline", "text", "image", "group"]);
   const groups = [
     MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-4, xMax:4 }),
+    MNBoardTools.plotGroup({ curves:[{ source:"a x", relation:"gt" }], params:{ a:2 }, showIntersections:true, tangentX:1, areaFrom:0, areaTo:2 }),
     MNBoardTools.chartGroup({ type:"bar", data:"가, 3\n나, 6" }),
-    MNBoardTools.chartGroup({ type:"pie", data:"가, 3\n나, 6" })
+    MNBoardTools.chartGroup({ type:"pie", data:"가, 3\n나, 6" }),
+    MNBoardTools.chartGroup({ type:"box", data:"3\n6\n9\n12" }),
+    MNBoardTools.valueTableGroup({ curves:[{ source:"x^2" }], from:-2, to:2, step:1 }),
+    MNBoardTools.statsSummaryGroup({ data:"3\n6\n9" }),
+    MNBoardTools.frequencyTableGroup({ data:"3\n6\n9\n12" }),
+    MNBoardTools.fractionModelGroup({ shape:"circle", fractions:"3/4" }),
+    MNBoardTools.placeValueGroup({ value:1347 }),
+    MNBoardTools.numberLineJumpGroup({ from:0, to:20, start:2, step:3, jumps:3 }),
+    MNBoardTools.balanceScaleGroup({ leftX:2, leftOne:3, rightX:0, rightOne:11 }),
+    MNBoardTools.vectorSumGroup({ x1:0, y1:0, x2:80, y2:0 }, { x1:0, y1:0, x2:0, y2:-60 }),
+    MNBoardTools.opticsGroup({ kind:"concave-mirror", focal:4, distance:6, height:2 }),
+    MNBoardTools.punnettGroup({ parentA:"AaBb", parentB:"Aabb" }),
+    MNBoardTools.circuitGroup({ mode:"parallel", resistors:"6, 3", voltage:12 }),
+    MNBoardTools.runningRatioGroup("dice", 120, { target:"6" })
   ];
   for (const group of groups){
     assert.ok(MNBoardRenderer.isSelectable(group));
@@ -281,6 +611,37 @@ test("반응식 균형은 정수 계수를 정확히 구하고 못 맞추는 식
   assert.throws(() => MNBoardTools.balanceEquation("H2O"), (error) => /화살표/.test(error.message));
 });
 
+test("화학량론은 균형 반응식과 한 물질의 양으로 나머지 물질의 몰수·질량을 구한다", () => {
+  assert.equal(MNBoardTools.molarMass("H2O").toFixed(3), "18.015");
+  assert.equal(MNBoardTools.molarMass("Ca(OH)2").toFixed(3), "74.092");
+  assert.throws(() => MNBoardTools.molarMass("Xx2"), (error) => /모르는 원소/.test(error.message));
+
+  // CH₄ 8g(≈0.4987mol) → O₂ 2배, CO₂ 같은 몰수, H₂O 2배
+  const result = MNBoardTools.stoichiometry("CH4 + O2 -> CO2 + H2O", { species:0, amount:8, unit:"g" });
+  assert.deepEqual(result.rows.map((row) => row.coefficient), [1, 2, 1, 2]);
+  assert.deepEqual(result.rows.map((row) => row.side), ["반응물", "반응물", "생성물", "생성물"]);
+  assert.equal(result.rows[0].moles.toFixed(4), "0.4987");
+  assert.equal(result.rows[1].moles / result.rows[0].moles, 2);            // 계수비 그대로
+  assert.equal(result.rows[2].grams.toFixed(2), "21.95");
+  assert.equal(result.rows[0].grams.toFixed(2), "8.00");     // 아는 양은 그대로 돌아온다
+
+  // 화학식으로 골라도 되고, 몰 단위로 줘도 된다.
+  const byName = MNBoardTools.stoichiometry("H2 + O2 -> H2O", { species:"H2O", amount:2, unit:"mol" });
+  assert.deepEqual(byName.rows.map((row) => row.moles), [2, 1, 2]);
+  assert.throws(() => MNBoardTools.stoichiometry("H2 + O2 -> H2O", { species:"NaCl", amount:1 }), (error) => /반응식에 없는/.test(error.message));
+  assert.throws(() => MNBoardTools.stoichiometry("H2 + O2 -> H2O", { species:0, amount:0 }), (error) => /0보다 큰/.test(error.message));
+  assert.throws(() => MNBoardTools.stoichiometry("H2O", { species:0, amount:1 }), (error) => /화살표/.test(error.message));
+
+  const group = MNBoardTools.stoichiometryGroup("CH4 + O2 -> CO2 + H2O", { species:0, amount:8, unit:"g" });
+  const text = group.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.equal(group.role, "education-table");
+  assert.deepEqual(group.tableSpec, { kind:"stoichiometry", equation:"CH4 + O2 -> CO2 + H2O", species:0, amount:8, unit:"g", color:"#111111" });
+  assert.ok(text.includes("CH₄ + 2O₂ → CO₂ + 2H₂O"), "제목은 균형을 맞춘 반응식");
+  assert.ok(text.includes("CH₄ ◀ 아는 양"));
+  assert.ok(text.includes("21.95"));
+  for (const head of ["물질", "계수", "몰질량(g/mol)", "몰수(mol)", "질량(g)"]) assert.ok(text.includes(head), head);
+});
+
 test("주기율표는 118개 원소와 배치·검색·원소 카드를 제공한다", () => {
   assert.equal(MNBoardTools.PERIODIC_TABLE.length, 118);
   const oxygen = MNBoardTools.findElements("산소")[0];
@@ -336,14 +697,36 @@ test("화이트보드는 새 도구를 교구·그래프·차트 접점에 배�
   assert.match(whiteboardSource, /MNBoardTools\.plotGroup\(spec\)/);
   assert.match(whiteboardSource, /MNBoardTools\.chartGroup\(readChartSpec/);
   // 측정 라벨은 그릴 때마다 다시 재고, 저장·녹화 직전에 모델에도 같은 값을 적는다.
-  assert.match(whiteboardSource, /drawItem\(isMeasureItem\(it\) \? \(liveMeasureItem\(it\) \|\| it\) : it\)/);
+  assert.match(whiteboardSource, /drawItem\(isMeasureItem\(it\) \? \(liveMeasureItem\(it\) \|\| it\) : isVectorSumItem\(it\) \? \(liveVectorSumItem\(it\) \|\| it\) : it\)/);
   assert.match(whiteboardSource, /const recordCommit = \(\) => \{\s*\n\s*syncMeasureItems\(\);/);
   assert.match(whiteboardSource, /const boardSnapshot = \(\) => \(syncMeasureItems\(\),/);
   // 잰 도형을 지우면 라벨도 함께 사라지고, 원본을 대신하는 변환은 이름표를 물려받는다.
-  assert.match(whiteboardSource, /const label = measureLabelOf\(selected\);/);
+  assert.match(whiteboardSource, /const label = measureLabelOf\(selected\), sums = vectorSumsFor\(selected\);/);
   assert.match(whiteboardSource, /if \(selected\.mid\) moved\.mid = selected\.mid; else delete moved\.mid;/);
   assert.match(whiteboardSource, /\["chemistry", "화학"\]/);
   assert.match(whiteboardSource, /MNBoardTools\.balanceEquation\(source\)/);
   assert.match(whiteboardSource, /MNBoardTools\.elementCardGroup\(element, wb\.color\)/);
   assert.match(whiteboardSource, /MNBoardTools\.simulateTrials\(kind, Number\(simCount\.value\)/);
+  // 보드 위 슬라이더는 교구 손잡이 다음, 판서보다 먼저 잡는다(그래프 위로 선이 그어지면 안 된다).
+  assert.match(whiteboardSource, /const sliderHit = plotSliderHitAt\(lastBoardPointer\);\s*\n\s*if \(sliderHit\)\{ beginSliderDrag\(e, sliderHit\); return; \}/);
+  // 끄는 동안은 되돌리기 칸을 만들지 않고 손을 뗄 때 한 번만 남긴다.
+  assert.match(whiteboardSource, /if \(state\.changed\)\{ history\.commit\(\); recordCommit\(\); \}/);
+  // 표(값의 표·요약 카드·도수분포표·몰 계산표)도 두 번 눌러 다시 고칠 수 있다.
+  assert.match(whiteboardSource, /item\.role === "education-table" && item\.tableSpec/);
+  assert.match(whiteboardSource, /MNBoardTools\.valueTableGroup\(readValueTableSpec\(\)\)/);
+  assert.match(whiteboardSource, /MNBoardTools\.statsSummaryGroup\(/);
+  assert.match(whiteboardSource, /MNBoardTools\.frequencyTableGroup\(/);
+  assert.match(whiteboardSource, /MNBoardTools\.stoichiometryGroup\(chemInput\.value, readStoichiometrySpec\(\)\)/);
+  assert.match(whiteboardSource, /\["box", "상자그림"\]/);
+  // 값을 넣어 만드는 도구 탭(수 모형·과학 계산)과 그 도구들.
+  assert.match(whiteboardSource, /\["number", "수 모형"\], \["lab", "과학 계산"\]/);
+  for (const call of ["fractionModelGroup", "placeValueGroup", "numberLineJumpGroup", "balanceScaleGroup",
+    "opticsGroup", "punnettGroup", "circuitGroup", "runningRatioGroup"]){
+    assert.match(whiteboardSource, new RegExp(`MNBoardTools\\.${call}\\(`), call);
+  }
+  assert.match(whiteboardSource, /item\.role === "education-tool" && item\.toolSpec/);
+  // 합력은 원본 화살표에서 다시 계산하는 파생 항목 — 그리기·저장·지우기 접점이 모두 있어야 한다.
+  assert.match(whiteboardSource, /if \(syncVectorSumItems\(\)\) dropped = true;/);
+  assert.match(whiteboardSource, /const tipHit = arrowTipAt\(lastBoardPointer\);/);
+  assert.match(whiteboardSource, /if \(isVectorSumItem\(it\)\) continue;/);        // 합력은 클릭으로 고르지 않는다
 });

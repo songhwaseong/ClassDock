@@ -898,7 +898,7 @@ function renderWhiteboard(doc, host){
     for (const h of HANDLES){ const hp = handlePos(it, h); if (Math.abs(p.x - hp.x) <= tolerance && Math.abs(p.y - hp.y) <= tolerance) return h; }
     return null;
   };
-  let editingTextItem = null, openFormulaEditor = null, openPlotEditor = null, openChartEditor = null, groupActionBtn = null, flipXBtn = null, flipYBtn = null;
+  let editingTextItem = null, openFormulaEditor = null, openPlotEditor = null, openChartEditor = null, openTableEditor = null, openToolItemEditor = null, groupActionBtn = null, flipXBtn = null, flipYBtn = null;
   // 배경색은 캔버스에만 칠하면 부족하다. 무대(.wb-stage)는 창 크기를 바꾸는 순간 캔버스보다 잠깐 커져
   // 흰 테두리가 번쩍이고, 텍스트 입력칸이 흰 상자로 남으면 어두운 배경에 흰 글씨를 칠 때 글자가 안 보인다.
   // CSS 변수 하나로 셋을 같이 움직인다.
@@ -1072,12 +1072,69 @@ function renderWhiteboard(doc, host){
       Object.assign(item, values);
     }
     if (dropped) wb.items = wb.items.filter((item) => !isMeasureItem(item) || measureTargetOf(item));
+    if (syncVectorSumItems()) dropped = true;              // 합력도 같은 파생 항목이라 여기서 함께 맞춘다
     return dropped;
+  };
+
+  /* ----- 벡터(힘) 합성 -----
+     같은 점에서 출발한 두 화살표를 골라 합력을 붙인다. 측정 라벨과 같은 파생 항목이라
+     원본 화살표를 끌면 그릴 때마다 다시 계산해 평행사변형과 합력이 따라 움직인다. */
+  const VECTOR_SUM_ROLE = "vector-sum";
+  const isVectorSumItem = (item) => !!(item && item.role === VECTOR_SUM_ROLE && Array.isArray(item.vectorSumOf));
+  const vectorSumSources = (item) => {
+    const found = item.vectorSumOf.map((mid) => wb.items.find((entry) => entry && entry.mid === mid && entry.type === "arrow") || null);
+    return found.length === 2 && found.every(Boolean) ? found : null;
+  };
+  const vectorSumShape = (item) => {
+    const sources = vectorSumSources(item);
+    if (!sources) return null;
+    try { return MNBoardTools.vectorSumGroup(sources[0], sources[1], { color:item.educationColor, sumColor:item.sumColor }); }
+    catch(_){ return null; }                               // 합이 0이면 그리지 못한다 — 방금 모양을 그대로 둔다
+  };
+  const vectorSumFields = (shape) => ({
+    x:shape.x, y:shape.y, w:shape.w, h:shape.h, sourceW:shape.sourceW, sourceH:shape.sourceH,
+    items:shape.items, vectorSum:shape.vectorSum
+  });
+  const liveVectorSumItem = (item) => {
+    const shape = vectorSumShape(item);
+    return shape ? Object.assign({}, item, vectorSumFields(shape)) : null;
+  };
+  const syncVectorSumItems = () => {
+    let dropped = false;
+    for (const item of wb.items){
+      if (!isVectorSumItem(item)) continue;
+      const shape = vectorSumShape(item);
+      if (!shape){ if (!vectorSumSources(item)) dropped = true; continue; }
+      Object.assign(item, vectorSumFields(shape));
+    }
+    if (dropped) wb.items = wb.items.filter((item) => !isVectorSumItem(item) || vectorSumSources(item));
+    return dropped;
+  };
+  const vectorSumsFor = (target) => (target && target.mid
+    ? wb.items.filter((item) => isVectorSumItem(item) && item.vectorSumOf.includes(target.mid)) : []);
+
+  /* 합성에 쓰인 화살표는 끝점에 손잡이가 생겨 길이·방향을 끌어 바꿀 수 있다.
+     (보통 화살표는 통째로 옮기기만 되므로, 합력을 붙인 화살표에만 이 손잡이를 보인다.) */
+  const ARROW_TIP_GRAB = 13;
+  const arrowTipAt = (p) => {
+    for (let i = wb.items.length - 1; i >= 0; i--){
+      const item = wb.items[i];
+      if (!item || item.type !== "arrow" || !item.mid || !vectorSumsFor(item).length) continue;
+      if (Math.hypot(p.x - item.x2, p.y - item.y2) <= ARROW_TIP_GRAB / view.scale) return item;
+    }
+    return null;
+  };
+  const drawVectorTipHandles = () => {
+    for (const item of wb.items){
+      if (!item || item.type !== "arrow" || !item.mid || !vectorSumsFor(item).length) continue;
+      drawGearHandle(item.x2, item.y2, false);
+    }
   };
 
   const drawGear = () => {
     // 교구는 손에 든 도구지 판서가 아니다 — 내보내기·인쇄·메모 전송 그림에는 넣지 않는다.
     if (gearHidden) return;
+    drawVectorTipHandles();
     if (transformPivot && transformPanel && !transformPanel.hidden) drawTransformPivot();
     if (!gear.ruler && !gear.protractor && !gear.compass) return;
     ctx.save();
@@ -1093,7 +1150,7 @@ function renderWhiteboard(doc, host){
     for (const it of wb.items){
       if (it === editingTextItem) continue;
       // 측정 라벨은 그릴 때마다 대상 도형에서 값을 다시 재 끌고 있는 동안에도 숫자가 살아 움직인다.
-      drawItem(isMeasureItem(it) ? (liveMeasureItem(it) || it) : it);
+      drawItem(isMeasureItem(it) ? (liveMeasureItem(it) || it) : isVectorSumItem(it) ? (liveVectorSumItem(it) || it) : it);
     }
     const s = wb.selected;                            // 선택 표시(점선 테두리, 이미지는 8핸들). 내보낼 땐 잠시 해제하므로 안 박힘.
     const sb = s && boundsOf(s);
@@ -1150,8 +1207,8 @@ function renderWhiteboard(doc, host){
     if (!wb.selected) return false;
     const selected = wb.selected;
     // 잰 도형을 지우면 그 값을 가리키던 라벨도 함께 사라져야 한다.
-    const label = measureLabelOf(selected);
-    wb.items = wb.items.filter(it => it !== selected && it !== label); wb.selected = null;
+    const label = measureLabelOf(selected), sums = vectorSumsFor(selected);
+    wb.items = wb.items.filter(it => it !== selected && it !== label && !sums.includes(it)); wb.selected = null;
     redraw(); history.commit(); recordCommit();
     return true;
   };
@@ -1245,7 +1302,13 @@ function renderWhiteboard(doc, host){
   const pt = (e) => boardPointFromScreen(screenPoint(e));
   // 선택 도구: 이미지·도형·텍스트 중 위에 그려진 항목부터 히트테스트
   const itemAt = (p) => {
-    for (let i = wb.items.length - 1; i >= 0; i--){ const it = wb.items[i]; if (hitTestBoardItem(it, p, measureBoardText, 7 / view.scale)) return it; }
+    for (let i = wb.items.length - 1; i >= 0; i--){
+      const it = wb.items[i];
+      // 합력은 원본 화살표에서 계산해 덮어 그리는 그림이라 고르지 않는다 — 그러지 않으면
+      // 평행사변형 넓이만 한 상자가 그 안의 화살표를 전부 가려 잡을 수 없다(떼기는 화살표 쪽 메뉴에서).
+      if (isVectorSumItem(it)) continue;
+      if (hitTestBoardItem(it, p, measureBoardText, 7 / view.scale)) return it;
+    }
     return null;
   };
   const setViewScale = (nextScale, clientX, clientY) => {
@@ -1534,6 +1597,41 @@ function renderWhiteboard(doc, host){
     return true;
   };
 
+  // ----- 벡터 합성 붙이기/떼기 -----
+  const VECTOR_SUM_SNAP = 28;                              // 두 화살표의 출발점이 이만큼 가까우면 "같은 점"으로 본다
+  const toggleVectorSumOnSelection = () => {
+    const selected = wb.selected;
+    if (!selected){ if (typeof toast === "function") toast("합성할 화살표를 먼저 고르세요.", 2200); return false; }
+    if (isVectorSumItem(selected)){ deleteSelected(); if (typeof toast === "function") toast("합력을 뗐어요.", 1600); return true; }
+    if (selected.type !== "arrow"){ if (typeof toast === "function") toast("화살표 두 개를 같은 점에서 그린 뒤 그중 하나를 고르세요.", 2800); return false; }
+    const existing = vectorSumsFor(selected);
+    if (existing.length){
+      wb.items = wb.items.filter((item) => !existing.includes(item));
+      redraw(); history.commit(); recordCommit();
+      if (typeof toast === "function") toast("합력을 뗐어요.", 1600);
+      return true;
+    }
+    const partner = wb.items.find((item) => item !== selected && item && item.type === "arrow"
+      && Math.hypot(item.x1 - selected.x1, item.y1 - selected.y1) <= VECTOR_SUM_SNAP);
+    if (!partner){ if (typeof toast === "function") toast("같은 점에서 출발한 화살표가 하나 더 있어야 해요.", 2800); return false; }
+    let shape;
+    try { shape = MNBoardTools.vectorSumGroup(selected, partner, { color:boardInkColor() }); }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "합력을 구하지 못했어요.", 2400); return false; }
+    // 이름표(mid)를 붙일 때도 제자리에서 고치지 않고 사본으로 바꿔 끼운다(이전 되돌리기 단계 보호).
+    const named = (item) => {
+      if (item.mid) return item;
+      const copy = Object.assign({}, item, { mid:nextMeasureId() });
+      wb.items[wb.items.indexOf(item)] = copy;
+      return copy;
+    };
+    const first = named(selected), second = named(partner);
+    wb.items.push(Object.assign({}, shape, { vectorSumOf:[first.mid, second.mid] }));
+    wb.selected = first;
+    redraw(); history.commit(); recordCommit();
+    if (typeof toast === "function") toast("합력을 붙였어요. 화살표를 끌면 합력이 따라 바뀝니다.", 2800);
+    return true;
+  };
+
   // ----- 변환 기하(평행이동·회전·선대칭·점대칭·닮음) -----
   const transformState = { kind:"reflect", dx:2, dy:0, degrees:90, factor:2, axis:"vertical", keepOriginal:true };
   let transformPickPivot = false, syncTransformPanel = () => {};
@@ -1606,6 +1704,84 @@ function renderWhiteboard(doc, host){
     return true;
   };
 
+  /* ----- 보드 위 매개변수 슬라이더 -----
+     그래프 안에 함께 그려 둔 손잡이를 끌면 그 자리에서 곡선을 다시 계산한다. 끄는 동안은
+     되돌리기 칸을 만들지 않고 손을 뗄 때 한 번만 남긴다(a를 10번 움직여도 Ctrl+Z 한 번). */
+  const plotSliderHitAt = (p) => {
+    for (let index = wb.items.length - 1; index >= 0; index--){
+      const item = wb.items[index];
+      if (!item || item.type !== "group" || item.role !== "education-plot" || !item.plotSpec) continue;
+      const hit = MNBoardTools.plotSliderAt(item, p);
+      if (hit) return { item, sliderIndex:hit.index };
+    }
+    return null;
+  };
+  const beginSliderDrag = (e, found) => {
+    e.preventDefault(); e.stopPropagation();
+    try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+    const state = { item:found.item, sliderIndex:found.sliderIndex, changed:false };
+    const sliderReadout = () => {
+      const slider = (state.item.sliders || [])[state.sliderIndex];
+      return slider ? `${slider.name} = ${slider.value}` : "";
+    };
+    const apply = (point) => {
+      const index = wb.items.indexOf(state.item); if (index < 0) return;
+      const slider = (state.item.sliders || [])[state.sliderIndex]; if (!slider) return;
+      const local = MNBoardTools.groupLocalPoint(state.item, point);
+      const value = MNBoardTools.sliderValueAt(slider, local.x);
+      if (value === slider.value) return;
+      const before = state.item.plotSpec;
+      const spec = Object.assign({}, before, { params:Object.assign({}, before.params, { [slider.name]:value }) });
+      let group;
+      try { group = MNBoardTools.plotGroup(spec); }
+      catch(_){ return; }                                   // 그 값에서 값이 없는 식이면 방금 모양을 그대로 둔다
+      const next = Object.assign({}, group, {
+        x:state.item.x, y:state.item.y, w:state.item.w, h:state.item.h, flipX:state.item.flipX, flipY:state.item.flipY
+      });
+      if (state.item.mid) next.mid = state.item.mid;
+      if (wb.selected === state.item) wb.selected = next;
+      wb.items[index] = next; state.item = next; state.changed = true;
+      redraw();
+    };
+    const move = (ev) => { apply(pt(ev)); showMeasure(sliderReadout(), screenPoint(ev)); };
+    const up = () => {
+      canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
+      hideMeasure();
+      if (state.changed){ history.commit(); recordCommit(); }
+    };
+    apply(pt(e)); showMeasure(sliderReadout(), screenPoint(e));
+    canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  };
+
+  const beginArrowTipDrag = (e, arrow) => {
+    e.preventDefault(); e.stopPropagation();
+    try { canvas.setPointerCapture(e.pointerId); } catch(_){}
+    const state = { item:arrow, changed:false };
+    const apply = (point, event) => {
+      const index = wb.items.indexOf(state.item); if (index < 0) return;
+      const end = gearSnapEnd({ x:state.item.x1, y:state.item.y1 }, point, event);
+      if (end.x === state.item.x2 && end.y === state.item.y2) return;
+      const next = Object.assign({}, state.item, { x2:end.x, y2:end.y });
+      if (wb.selected === state.item) wb.selected = next;
+      wb.items[index] = next; state.item = next; state.changed = true;
+      redraw();
+    };
+    const readout = (event) => {
+      const item = state.item;
+      const length = Math.hypot(item.x2 - item.x1, item.y2 - item.y1);
+      const degrees = MNBoardTools.measureAngle({ x:item.x1, y:item.y1 }, { x:item.x2, y:item.y2 }, 0);
+      showMeasure(`${formatCm(length)} · ${degrees.toFixed(degrees % 1 ? 1 : 0)}°`, screenPoint(event));
+    };
+    const move = (ev) => { apply(pt(ev), ev); readout(ev); };
+    const up = () => {
+      canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
+      hideMeasure();
+      if (state.changed){ history.commit(); recordCommit(); }
+    };
+    apply(pt(e), e); readout(e);
+    canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  };
+
   let cur = null, drawing = false, lastPt = null;
   canvas.addEventListener("pointerdown", (e) => {
     const screen = screenPoint(e);
@@ -1627,6 +1803,11 @@ function renderWhiteboard(doc, host){
     // 교구의 손잡이는 어떤 도구를 쓰고 있든 먼저 잡힌다(자를 옮기려다 선이 그어지면 곤란하다).
     const gearHit = gearHandleAt(lastBoardPointer);
     if (gearHit){ beginGearDrag(e, gearHit); return; }
+    // 그래프의 슬라이더 손잡이도 교구처럼 먼저 잡는다(그래프 위로 선이 그어지면 곤란하다).
+    const sliderHit = plotSliderHitAt(lastBoardPointer);
+    if (sliderHit){ beginSliderDrag(e, sliderHit); return; }
+    const tipHit = arrowTipAt(lastBoardPointer);
+    if (tipHit){ beginArrowTipDrag(e, tipHit); return; }
     if (wb.tool === "select"){
       // 조절점을 숨긴 스포트라이트는 밝은 영역 자체를 이동 손잡이로 쓴다.
       // 보드 이동이 필요하면 기존처럼 Space+드래그 또는 가운데 버튼을 사용한다.
@@ -1683,6 +1864,8 @@ function renderWhiteboard(doc, host){
     canvas.style.cursor = "";
     const gearHover = gearHandleAt(pt(e));
     if (gearHover){ canvas.style.cursor = gearHover.cursor; return; }
+    if (plotSliderHitAt(pt(e))){ canvas.style.cursor = "ew-resize"; return; }
+    if (arrowTipAt(pt(e))){ canvas.style.cursor = "grab"; return; }
     if (wb.tool !== "select") return;
     if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ canvas.style.cursor = "move"; return; }
     const p = pt(e);
@@ -1702,6 +1885,12 @@ function renderWhiteboard(doc, host){
     }
     if (item.type === "group" && item.role === "education-chart" && item.chartSpec && typeof openChartEditor === "function"){
       e.preventDefault(); e.stopPropagation(); openChartEditor(item); return;
+    }
+    if (item.type === "group" && item.role === "education-table" && item.tableSpec && typeof openTableEditor === "function"){
+      e.preventDefault(); e.stopPropagation(); openTableEditor(item); return;
+    }
+    if (item.type === "group" && item.role === "education-tool" && item.toolSpec && typeof openToolItemEditor === "function"){
+      e.preventDefault(); e.stopPropagation(); openToolItemEditor(item); return;
     }
     if (item.type !== "text") return;
     e.preventDefault(); e.stopPropagation(); startText({ x:item.x, y:item.y }, item);
@@ -2042,13 +2231,21 @@ function renderWhiteboard(doc, host){
     if (selected.type === "group" && selected.role === "education-chart" && selected.chartSpec && typeof openChartEditor === "function"){
       openChartEditor(selected); return true;
     }
+    if (selected.type === "group" && selected.role === "education-table" && selected.tableSpec && typeof openTableEditor === "function"){
+      openTableEditor(selected); return true;
+    }
+    if (selected.type === "group" && selected.role === "education-tool" && selected.toolSpec && typeof openToolItemEditor === "function"){
+      openToolItemEditor(selected); return true;
+    }
     return false;
   };
   // 우클릭 메뉴·더블클릭이 "편집"을 보여 줄 수 있는 항목인지.
   const canEditSelected = (item) => !!(item && (item.type === "text"
     || (item.type === "image" && item.role === "education-formula")
     || (item.type === "group" && item.role === "education-plot" && item.plotSpec)
-    || (item.type === "group" && item.role === "education-chart" && item.chartSpec)));
+    || (item.type === "group" && item.role === "education-chart" && item.chartSpec)
+    || (item.type === "group" && item.role === "education-table" && item.tableSpec)
+    || (item.type === "group" && item.role === "education-tool" && item.toolSpec)));
   // 드래그&드롭: 캡처/이미지 파일을 보드에 떨구면 그 위치에 넣는다.
   stage.addEventListener("dragover", (e) => {
     if (!e.dataTransfer) return;
@@ -2192,7 +2389,8 @@ function renderWhiteboard(doc, host){
     plot: '<path d="M4 4v16h16"/><path d="M6.5 16.5c2.5 0 3.2-8 6-8s3 5 5.5 5"/>',
     chart: '<path d="M4 4v16h16"/><path d="M7.5 18v-5M12 18V8.5M16.5 18v-3"/>',
     measure: '<path d="M4 15.5h16"/><path d="M4 12.5v3M9 11v4.5M14 11v4.5M20 12.5v3"/><path d="M6 8.5h12M6 6.5v4M18 6.5v4"/>',
-    transform: '<path d="M4 20V9l6-5v11z"/><path d="M20 20V9l-6-5v11z" stroke-dasharray="3 2.5"/><path d="M12 3.5v17"/>'
+    transform: '<path d="M4 20V9l6-5v11z"/><path d="M20 20V9l-6-5v11z" stroke-dasharray="3 2.5"/><path d="M12 3.5v17"/>',
+    vectorsum: '<path d="M4 20 14 10M14 10h-4.5M14 10v4.5"/><path d="M4 20 9 7M9 7 7 10.5M9 7l3 2" stroke-dasharray="3 2.5"/><path d="m14 10 5-6M19 4h-4.5M19 4v4.5"/>',
   };
   const TOOLS = [
     ["select", "select", "선택·이동 (이미지·수식·교육 도형 옮기기·크기조절)"],
@@ -2475,6 +2673,7 @@ function renderWhiteboard(doc, host){
   const contextFlipYBtn=contextAction("상하 반전","선택한 이미지 또는 교육 도형 상하 반전","",()=>flipSelected("flipY"));
   const contextUngroupBtn=contextAction("분리","선택한 그룹의 구성 요소 분리","",ungroupSelected);
   const contextMeasureBtn=contextAction("측정","선택한 도형의 길이·각도·넓이 붙이기","",toggleMeasureOnSelection);
+  const contextVectorBtn=contextAction("합성","같은 점에서 출발한 두 화살표의 합력 붙이기","",toggleVectorSumOnSelection);
   const contextTransformBtn=contextAction("변환","대칭·회전·평행이동·닮음으로 바꾸기","",()=>toggleTransformPanel(true));
   const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
   contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextFlipXBtn,contextFlipYBtn,contextMeasureBtn,contextTransformBtn,contextUngroupBtn,contextDeleteBtn);
@@ -2604,6 +2803,9 @@ function renderWhiteboard(doc, host){
     const element=selected&&selected.type==="group"&&selected.role==="education-element";
     const measureLabelItem=isMeasureItem(selected);
     if(plot)typeLabels.group="함수 그래프"; else if(chart)typeLabels.group="차트"; else if(element)typeLabels.group="원소 카드";
+    else if(selected&&selected.role==="vector-sum")typeLabels.group="벡터 합성";
+    else if(selected&&selected.role==="education-table")typeLabels.group="표";
+    else if(selected&&selected.role==="education-tool")typeLabels.group=selected.educationLabel||"수 모형";
     if(measureLabelItem)typeLabels.text="측정값";
     contextItemName.textContent=selected?(typeLabels[selected.type]||"화이트보드 항목"):"";
     contextEditBtn.hidden=!canEditSelected(selected);
@@ -2614,7 +2816,14 @@ function renderWhiteboard(doc, host){
     contextMeasureBtn.textContent=(measured||measureLabelItem)?"측정 떼기":"측정";
     contextMeasureBtn.title=(measured||measureLabelItem)?"붙여 둔 길이·각도·넓이 떼기":"선택한 도형의 길이·각도·넓이 붙이기";
     contextMeasureBtn.setAttribute("aria-label",contextMeasureBtn.title);
-    contextTransformBtn.hidden=!selected||measureLabelItem;
+    // 화살표에만 합성을 보여 주고, 이미 붙어 있으면 떼는 단추가 된다.
+    const vectorSumItem=isVectorSumItem(selected);
+    const vectorSummed=!!(selected&&vectorSumsFor(selected).length);
+    contextVectorBtn.hidden=!(vectorSumItem||(selected&&selected.type==="arrow"));
+    contextVectorBtn.textContent=(vectorSumItem||vectorSummed)?"합성 떼기":"합성";
+    contextVectorBtn.title=(vectorSumItem||vectorSummed)?"붙여 둔 합력 떼기":"같은 점에서 출발한 두 화살표의 합력 붙이기";
+    contextVectorBtn.setAttribute("aria-label",contextVectorBtn.title);
+    contextTransformBtn.hidden=!selected||measureLabelItem||vectorSumItem;
     contextTransformBtn.classList.toggle("active",!transformPanel.hidden);
     contextFlipXBtn.hidden=!flippable; contextFlipYBtn.hidden=!flippable;
     contextFlipXBtn.classList.toggle("active",flippable&&!!selected.flipX); contextFlipYBtn.classList.toggle("active",flippable&&!!selected.flipY);
@@ -2868,14 +3077,23 @@ function renderWhiteboard(doc, host){
   // 식을 치면 실제로 값을 계산해 그린 곡선을 넣는다(모양만 흉내 낸 그림이 아니다).
   const graphBuilder = document.createElement("div"); graphBuilder.className = "wb-formula-builder wb-graph-builder"; graphBuilder.hidden = true;
   const graphRows = document.createElement("div"); graphRows.className = "wb-graph-rows";
+  // 관계 기호를 = 아닌 것으로 바꾸면 곡선 대신 그쪽 반평면을 칠한 부등식 영역이 된다.
+  const GRAPH_RELATIONS = [["eq", "y ="], ["gt", "y >"], ["ge", "y ≥"], ["lt", "y <"], ["le", "y ≤"]];
+  const graphRelations = [];
   const graphInputs = MNBoardTools.CURVE_COLORS.map((color, index) => {
     const row = document.createElement("label"); row.className = "wb-graph-row";
     const dot = document.createElement("span"); dot.className = "wb-graph-dot"; dot.style.background = color;
-    const caption = document.createElement("span"); caption.className = "wb-graph-caption"; caption.textContent = "y =";
+    const relation = document.createElement("select"); relation.className = "wb-graph-caption wb-graph-relation";
+    relation.title = "관계 기호 — 부등호를 고르면 그쪽 영역을 칠합니다";
+    relation.setAttribute("aria-label", `${index + 1}번째 식의 관계 기호`);
+    for (const [id, text] of GRAPH_RELATIONS){
+      const option = document.createElement("option"); option.value = id; option.textContent = text; relation.appendChild(option);
+    }
     const input = document.createElement("input"); input.type = "text"; input.className = "wb-graph-input";
     input.placeholder = index === 0 ? "예: x^2 - 3x + 1" : "식을 더 넣으면 함께 그려요";
     input.setAttribute("aria-label", `${index + 1}번째 함수식`);
-    row.append(dot, caption, input); graphRows.appendChild(row);
+    row.append(dot, relation, input); graphRows.appendChild(row);
+    graphRelations.push(relation);
     return input;
   });
   // 예시 식은 "커서가 있던 칸"에 들어간다. 예시 카드를 누르면 초점이 카드로 옮겨가므로 마지막 칸을 기억해 둔다.
@@ -2898,7 +3116,49 @@ function renderWhiteboard(doc, host){
   const graphGridWrap = document.createElement("label"); graphGridWrap.className = "wb-graph-check";
   const graphGrid = document.createElement("input"); graphGrid.type = "checkbox"; graphGrid.checked = true;
   graphGridWrap.append(graphGrid, document.createTextNode("모눈"));
-  graphRange.append(graphXMin.wrap, graphXMax.wrap, graphAutoWrap, graphYMin.wrap, graphYMax.wrap, graphGridWrap);
+  // 식에 a·b 같은 문자가 있으면 그 값을 보드에서 바로 끌어 바꿀 수 있게 슬라이더 띠를 함께 넣는다.
+  const graphSliderWrap = document.createElement("label"); graphSliderWrap.className = "wb-graph-check";
+  graphSliderWrap.title = "a·b 값을 보드 위에서 끌어 바꿀 수 있는 슬라이더를 그래프에 함께 넣습니다.";
+  const graphSlider = document.createElement("input"); graphSlider.type = "checkbox"; graphSlider.checked = true;
+  graphSliderWrap.append(graphSlider, document.createTextNode("보드 슬라이더"));
+  graphRange.append(graphXMin.wrap, graphXMax.wrap, graphAutoWrap, graphYMin.wrap, graphYMax.wrap, graphGridWrap, graphSliderWrap);
+  // ----- 그래프 해석(교점·접선·구간 넓이) -----
+  const makeGraphCheck = (text, title) => {
+    const wrap = document.createElement("label"); wrap.className = "wb-graph-check"; wrap.title = title;
+    const box = document.createElement("input"); box.type = "checkbox"; box.setAttribute("aria-label", title);
+    wrap.append(box, document.createTextNode(text));
+    return { wrap, box };
+  };
+  const graphAnalysis = document.createElement("div"); graphAnalysis.className = "wb-graph-range wb-graph-analysis";
+  graphAnalysis.setAttribute("aria-label", "그래프 해석 도구");
+  const graphCross = makeGraphCheck("교점", "두 곡선이 만나는 점의 좌표를 찍습니다.");
+  const graphTangent = makeGraphCheck("접선", "고른 x 자리의 접선과 기울기(순간변화율)를 그립니다.");
+  const graphTangentX = makeGearNumber("x", 1, "접선을 그을 x 값");
+  const graphArea = makeGraphCheck("넓이", "구간과 x축 사이를 칠하고 넓이를 적습니다.");
+  const graphAreaFrom = makeGearNumber("", 0, "넓이를 구할 구간의 시작");
+  const graphAreaTo = makeGearNumber("~", 2, "넓이를 구할 구간의 끝");
+  const graphAreaBars = makeGearNumber("직사각형", 0, "직사각형 개수 — 0이면 매끄럽게 칠하고 정적분 값을 적습니다");
+  // 식을 여러 개 적었을 때 접선·넓이를 어느 식에 쓸지 고른다(하나뿐이면 숨긴다).
+  const graphTargetWrap = document.createElement("label"); graphTargetWrap.className = "wb-graph-field";
+  graphTargetWrap.append(document.createTextNode("대상"));
+  const graphTarget = document.createElement("select"); graphTarget.className = "wb-graph-number";
+  graphTarget.title = "접선·넓이를 적용할 식"; graphTarget.setAttribute("aria-label", graphTarget.title);
+  graphInputs.forEach((_, index) => {
+    const option = document.createElement("option"); option.value = String(index); option.textContent = `${index + 1}번 식`;
+    graphTarget.appendChild(option);
+  });
+  graphTargetWrap.appendChild(graphTarget); graphTargetWrap.hidden = true;
+  graphAnalysis.append(graphCross.wrap, graphTangent.wrap, graphTangentX.wrap, graphArea.wrap, graphAreaFrom.wrap, graphAreaTo.wrap, graphAreaBars.wrap, graphTargetWrap);
+  // ----- 식 ↔ 값의 표 -----
+  // 같은 식에서 x·y 대응표를 만든다. 그래프와 짝을 이뤄 "표로 보고 그래프로 보기"를 한 화면에서 한다.
+  const graphTableRow = document.createElement("div"); graphTableRow.className = "wb-graph-range wb-graph-table-row";
+  graphTableRow.setAttribute("aria-label", "값의 표 만들기");
+  const graphTableFrom = makeGearNumber("표 x", -3, "표에 넣을 x 시작 값");
+  const graphTableTo = makeGearNumber("~", 3, "표에 넣을 x 끝 값");
+  const graphTableStep = makeGearNumber("간격", 1, "x 를 얼마씩 건너뛸지");
+  const graphTableInsert = mkBtn("값의 표 넣기", "식의 x·y 대응표를 화이트보드에 넣기", "wb-formula-save wb-graph-table-insert", submitValueTable);
+  const graphTableCancel = mkBtn("표 편집 취소", "값의 표 편집 취소", "wb-formula-cancel", resetTableEditor); graphTableCancel.hidden = true;
+  graphTableRow.append(graphTableFrom.wrap, graphTableTo.wrap, graphTableStep.wrap, graphTableInsert, graphTableCancel);
   const graphParams = document.createElement("div"); graphParams.className = "wb-graph-params"; graphParams.hidden = true;
   const graphPreview = document.createElement("canvas"); graphPreview.className = "wb-tool-preview";
   graphPreview.setAttribute("aria-label", "그래프 미리보기");
@@ -2908,12 +3168,32 @@ function renderWhiteboard(doc, host){
   const graphCancel = mkBtn("취소", "그래프 편집 취소", "wb-formula-cancel", resetGraphEditor); graphCancel.hidden = true;
   const graphInsert = mkBtn("그래프 넣기", "계산한 그래프를 화이트보드에 넣기", "wb-formula-insert", submitGraph);
   graphActions.append(graphClear, graphCancel, graphInsert);
-  graphBuilder.append(graphRows, graphRange, graphParams, graphPreview, graphMessage, graphActions);
+  graphBuilder.append(graphRows, graphRange, graphAnalysis, graphTableRow, graphParams, graphPreview, graphMessage, graphActions);
+
+  /* 만들기 화면 안의 구획 — 이름표를 단 묶음. 무엇이 무엇인지 보이고 줄이 뒤섞이지 않는다.
+     (칩 줄은 가로로 흐르는 띠라 항목이 많으면 잘려 보이므로, 구획 안에서는 격자로 깐다.) */
+  // fold 를 켜면 접이식(details) 구획이 된다 — 가끔 쓰는 도구는 접어 두어야 아래쪽 ‘넣기’가 안 밀린다.
+  const makeToolSection = (caption, className, fold) => {
+    const section = document.createElement(fold ? "details" : "section");
+    section.className = "wb-tool-section" + (fold ? " wb-tool-fold" : "") + (className ? " " + className : "");
+    section.setAttribute("aria-label", caption);
+    const title = document.createElement(fold ? "summary" : "span");
+    title.className = "wb-tool-caption"; title.textContent = caption;
+    section.appendChild(title);
+    return section;
+  };
+  const makeChipGrid = (columns) => {
+    const grid = document.createElement("div"); grid.className = "wb-chip-grid";
+    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    return grid;
+  };
 
   // ----- 자료 차트 만들기 -----
   const chartBuilder = document.createElement("div"); chartBuilder.className = "wb-formula-builder wb-chart-builder"; chartBuilder.hidden = true;
-  const CHART_TYPES = [["bar", "막대"], ["line", "꺾은선"], ["pie", "원"], ["histogram", "히스토그램"], ["scatter", "산점도"]];
-  const chartTypeBar = document.createElement("div"); chartTypeBar.className = "wb-formula-groups wb-chart-types";
+  const CHART_TYPES = [["bar", "막대"], ["line", "꺾은선"], ["pie", "원"], ["histogram", "히스토그램"], ["scatter", "산점도"], ["box", "상자그림"]];
+  const chartTypeSection = makeToolSection("차트 종류", "wb-chart-type-section");
+  const chartTypeBar = makeChipGrid(3); chartTypeBar.classList.add("wb-chart-types");
+  chartTypeSection.appendChild(chartTypeBar);
   const chartTitle = document.createElement("input"); chartTitle.type = "text"; chartTitle.className = "wb-chart-title";
   chartTitle.placeholder = "차트 제목(선택)"; chartTitle.setAttribute("aria-label", "차트 제목");
   const chartData = document.createElement("textarea"); chartData.className = "wb-formula-input"; chartData.rows = 4;
@@ -2924,6 +3204,20 @@ function renderWhiteboard(doc, host){
   const chartColorRow = document.createElement("div"); chartColorRow.className = "wb-chart-colors"; chartColorRow.hidden = true;
   chartColorRow.setAttribute("aria-label", "묶음 색");
   let chartPalette = [];
+  // 통계 도구 — 추세선·계급 수와, 자료에서 바로 만드는 요약 카드·도수분포표.
+  const chartExtras = makeToolSection("통계 도구 — 추세선·요약 카드·도수분포표", "wb-chart-extras", true);
+  const chartExtraFields = document.createElement("div"); chartExtraFields.className = "wb-field-grid";
+  const chartTrendWrap = document.createElement("label"); chartTrendWrap.className = "wb-graph-check";
+  chartTrendWrap.title = "산점도에 최소제곱 추세선과 상관계수 r 을 함께 그립니다.";
+  const chartTrend = document.createElement("input"); chartTrend.type = "checkbox";
+  chartTrendWrap.append(chartTrend, document.createTextNode("추세선"));
+  const chartBins = makeGearNumber("계급 수", 0, "히스토그램·도수분포표의 계급 수 (0이면 자동)");
+  chartExtraFields.append(chartTrendWrap, chartBins.wrap);
+  const chartExtraButtons = document.createElement("div"); chartExtraButtons.className = "wb-button-row";
+  const chartStatsBtn = mkBtn("요약 카드", "평균·중앙값·최빈값·사분위수·표준편차를 표로 넣기", "wb-formula-save wb-chart-stats", insertStatsCard);
+  const chartFreqBtn = mkBtn("도수분포표", "계급·도수·상대도수·누적도수 표로 넣기", "wb-formula-save wb-chart-frequency", insertFrequencyTable);
+  chartExtraButtons.append(chartStatsBtn, chartFreqBtn);
+  chartExtras.append(chartExtraFields, chartExtraButtons);
   const chartPreview = document.createElement("canvas"); chartPreview.className = "wb-tool-preview";
   chartPreview.setAttribute("aria-label", "차트 미리보기");
   const chartMessage = document.createElement("p"); chartMessage.className = "wb-tool-message";
@@ -2932,18 +3226,41 @@ function renderWhiteboard(doc, host){
   const chartCancel = mkBtn("취소", "차트 편집 취소", "wb-formula-cancel", resetChartEditor); chartCancel.hidden = true;
   const chartInsert = mkBtn("차트 넣기", "입력한 자료로 만든 차트를 화이트보드에 넣기", "wb-formula-insert", submitChart);
   chartActions.append(chartClear, chartCancel, chartInsert);
-  // 확률 실험: 동전·주사위를 실제로 굴려 자료를 만들고, 그대로 차트로 넣는다.
-  const simRow = document.createElement("div"); simRow.className = "wb-formula-groups wb-sim-row";
-  const SIMULATION_KINDS = [["coin", "동전"], ["dice", "주사위"], ["dice2", "주사위 2개"], ["number", "무작위 수"]];
+  /* 확률 실험: 동전·주사위를 실제로 굴려 자료를 만들고, 그대로 차트로 넣는다.
+     실험 단추는 격자로 깔고 설정은 이름표를 붙여 두 칸씩 맞춘다(한 줄에 몰면 오른쪽이 잘린다). */
+  const simRow = makeToolSection("확률 실험 — 동전·주사위·주머니·스피너", "wb-sim-row", true);
+  const SIMULATION_KINDS = [["coin", "동전"], ["dice", "주사위"], ["dice2", "주사위 2개"], ["number", "무작위 수"], ["bag", "주머니"], ["spinner", "스피너"]];
+  const simKinds = makeChipGrid(3);
   for (const [id, label] of SIMULATION_KINDS){
-    simRow.appendChild(mkBtn(label, `${label} 실험 자료 만들기`, "wb-formula-group", () => runSimulation(id)));
+    simKinds.appendChild(mkBtn(label, `${label} 실험 자료 만들기`, "wb-formula-group wb-sim-" + id, () => runSimulation(id)));
   }
+  simRow.appendChild(simKinds);
+  const simFields = document.createElement("div"); simFields.className = "wb-field-grid";
+  // 주머니·스피너는 무엇을 몇 개 넣었는지가 있어야 굴릴 수 있다(자료 칸은 결과가 들어가는 자리라 따로 받는다).
+  const simBagWrap = document.createElement("label"); simBagWrap.className = "wb-graph-field wb-sim-bag wb-field-wide";
+  simBagWrap.append(document.createTextNode("구성"));
+  const simBag = document.createElement("input"); simBag.type = "text"; simBag.className = "wb-graph-input";
+  simBag.value = "빨강 3, 파랑 2";
+  simBag.title = "주머니·스피너에 넣을 것 — ‘빨강 3, 파랑 2’ 처럼"; simBag.setAttribute("aria-label", simBag.title);
+  simBagWrap.appendChild(simBag);
+  const simDraws = makeGearNumber("뽑기", 1, "한 번에 몇 개를 뽑을지(주머니)");
+  simDraws.input.min = "1"; simDraws.input.max = "6";
+  const simReplaceWrap = document.createElement("label"); simReplaceWrap.className = "wb-graph-check";
+  simReplaceWrap.title = "뽑은 것을 다시 넣고 뽑습니다(끄면 비복원 추출)";
+  const simReplace = document.createElement("input"); simReplace.type = "checkbox";
+  simReplaceWrap.append(simReplace, document.createTextNode("되돌려 넣기"));
   const simCountWrap = document.createElement("label"); simCountWrap.className = "wb-graph-field wb-sim-count";
   const simCountName = document.createElement("span"); simCountName.textContent = "횟수";
   const simCount = document.createElement("input"); simCount.type = "number"; simCount.min = "1"; simCount.max = "10000"; simCount.step = "10";
   simCount.value = "100"; simCount.className = "wb-graph-number"; simCount.title = "실험 횟수"; simCount.setAttribute("aria-label", simCount.title);
-  simCountWrap.append(simCountName, simCount); simRow.appendChild(simCountWrap);
-  chartBuilder.append(simRow, chartTypeBar, chartTitle, chartData, chartColorRow, chartPreview, chartMessage, chartActions);
+  simCountWrap.append(simCountName, simCount);
+  simFields.append(simBagWrap, simDraws.wrap, simReplaceWrap, simCountWrap);
+  simRow.appendChild(simFields);
+  const simLawRow = document.createElement("div"); simLawRow.className = "wb-button-row";
+  simLawRow.appendChild(mkBtn("누적 그래프(큰 수의 법칙)", "방금 한 실험을 다시 굴리며 누적 상대도수를 그려 큰 수의 법칙을 보여 주기", "wb-formula-save wb-sim-law", () => insertRunningRatio()));
+  simRow.appendChild(simLawRow);
+  // 위에서 아래로 한 줄기: 무엇을 그릴지 → 무엇으로 → 곁들이 도구 → 실험으로 자료 만들기 → 결과.
+  chartBuilder.append(chartTypeSection, chartTitle, chartData, chartColorRow, chartExtras, simRow, chartPreview, chartMessage, chartActions);
 
   // ----- 화학: 주기율표와 반응식 균형 -----
   const chemBuilder = document.createElement("div"); chemBuilder.className = "wb-formula-builder wb-chem-builder"; chemBuilder.hidden = true;
@@ -2959,13 +3276,219 @@ function renderWhiteboard(doc, host){
   });
   const chemInsert = mkBtn("반응식 넣기", "균형을 맞춘 반응식을 화이트보드에 넣기", "wb-formula-insert", insertBalancedEquation);
   chemActions.append(chemSample, chemInsert);
-  chemBuilder.append(chemInput, chemResult, chemMessage, chemActions);
+  /* 화학량론(몰 계산) — 균형을 맞춘 식에서 한 물질의 양을 알면 나머지가 모두 정해진다.
+     반응식이 읽히기 전에는 이 줄을 아예 감춰 둔다. */
+  const chemMoleRow = document.createElement("div"); chemMoleRow.className = "wb-graph-range wb-chem-mole"; chemMoleRow.hidden = true;
+  chemMoleRow.setAttribute("aria-label", "몰 계산");
+  const chemSpeciesWrap = document.createElement("label"); chemSpeciesWrap.className = "wb-graph-field";
+  chemSpeciesWrap.append(document.createTextNode("아는 물질"));
+  const chemSpecies = document.createElement("select"); chemSpecies.className = "wb-graph-number wb-chem-species";
+  chemSpecies.title = "양을 아는 물질"; chemSpecies.setAttribute("aria-label", chemSpecies.title);
+  chemSpeciesWrap.appendChild(chemSpecies);
+  const chemAmount = makeGearNumber("양", 1, "아는 물질의 양");
+  chemAmount.input.min = "0";
+  const chemUnit = document.createElement("select"); chemUnit.className = "wb-graph-number wb-chem-unit";
+  chemUnit.title = "단위"; chemUnit.setAttribute("aria-label", chemUnit.title);
+  for (const unit of ["g", "mol"]){
+    const option = document.createElement("option"); option.value = unit; option.textContent = unit; chemUnit.appendChild(option);
+  }
+  const chemMoleBtn = mkBtn("몰 계산표 넣기", "계수·몰질량·몰수·질량을 표로 넣기", "wb-formula-save wb-chem-mole-insert", insertStoichiometry);
+  chemMoleRow.append(chemSpeciesWrap, chemAmount.wrap, chemUnit, chemMoleBtn);
+  const chemMoleResult = document.createElement("p"); chemMoleResult.className = "wb-chem-mole-result"; chemMoleResult.setAttribute("aria-live", "polite");
+  chemBuilder.append(chemInput, chemResult, chemMoleRow, chemMoleResult, chemMessage, chemActions);
+  /* ----- 값을 넣어 만드는 도구(수 모형·과학 계산) -----
+     종류 칩을 고르면 그 종류에 필요한 칸만 나타나고, 미리보기·넣기·다시 고치기는 모두 공통이다.
+     만든 그룹은 role "education-tool" + toolSpec{kind,values} 라 두 번 눌러 그대로 되살린다. */
+  const toolBuilders = [];
+  function makeToolBuilder(config){
+    const builder = document.createElement("div");
+    builder.className = "wb-formula-builder wb-tool-builder " + config.className;
+    builder.hidden = true; builder.setAttribute("aria-label", config.title);
+    const kinds = document.createElement("div"); kinds.className = "wb-formula-groups wb-tool-kinds";
+    const form = document.createElement("div"); form.className = "wb-graph-range wb-tool-form";
+    const preview = document.createElement("canvas"); preview.className = "wb-tool-preview";
+    preview.setAttribute("aria-label", config.title + " 미리보기");
+    const message = document.createElement("p"); message.className = "wb-tool-message";
+    const actions = document.createElement("div"); actions.className = "wb-formula-actions";
+    let kind = config.tools[0].id, editing = null, formKind = "";
+    const inputs = new Map();
+    const values = new Map(config.tools.map((tool) => [tool.id, Object.fromEntries(tool.fields.map((field) => [field.key, field.value]))]));
+    const currentTool = () => config.tools.find((tool) => tool.id === kind) || config.tools[0];
+    const cancel = mkBtn("취소", "편집 취소", "wb-formula-cancel", () => { editing = null; sync(); });
+    cancel.hidden = true;
+    const insert = mkBtn("넣기", "만든 것을 화이트보드에 넣기", "wb-formula-insert", () => submit());
+    actions.append(cancel, insert);
+    builder.append(kinds, form, preview, message, actions);
+
+    function renderKinds(){
+      kinds.textContent = "";
+      for (const tool of config.tools){
+        const chip = mkBtn(tool.label, tool.title || tool.label + " 만들기", "wb-formula-group" + (tool.id === kind ? " active" : ""), () => {
+          if (kind === tool.id) return;
+          kind = tool.id; editing = null; sync();
+        });
+        chip.dataset.toolKind = tool.id;
+        chip.setAttribute("aria-pressed", tool.id === kind ? "true" : "false");
+        kinds.appendChild(chip);
+      }
+    }
+    // 칸은 종류가 바뀔 때만 다시 만든다(입력 중에 다시 만들면 초점과 커서가 끊긴다).
+    function renderForm(){
+      const tool = currentTool();
+      if (formKind === tool.id) return;
+      formKind = tool.id; form.textContent = ""; inputs.clear();
+      const current = values.get(tool.id);
+      for (const field of tool.fields){
+        const wrap = document.createElement("label"); wrap.className = "wb-graph-field";
+        wrap.append(document.createTextNode(field.label));
+        let input;
+        if (field.type === "select"){
+          input = document.createElement("select"); input.className = "wb-graph-number";
+          for (const [id, text] of field.options){
+            const option = document.createElement("option"); option.value = id; option.textContent = text; input.appendChild(option);
+          }
+        } else {
+          input = document.createElement("input");
+          input.type = field.type === "number" ? "number" : "text";
+          input.className = field.type === "number" ? "wb-graph-number" : "wb-graph-input";
+          if (field.type === "number"){ input.step = field.step || "1"; }
+          if (field.min != null) input.min = String(field.min);
+          if (field.max != null) input.max = String(field.max);
+          if (field.width) input.style.width = field.width + "px";
+        }
+        input.title = field.title || field.label;
+        input.setAttribute("aria-label", input.title);
+        input.value = String(current[field.key]);
+        input.addEventListener(field.type === "select" ? "change" : "input", () => { current[field.key] = input.value; refresh(); });
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submit(); } e.stopPropagation(); });
+        wrap.appendChild(input); form.appendChild(wrap);
+        inputs.set(field.key, input);
+      }
+    }
+    function syncFields(){
+      const current = values.get(currentTool().id);
+      for (const [key, input] of inputs) if (input !== document.activeElement) input.value = String(current[key]);
+    }
+    const specOf = () => Object.assign({}, values.get(currentTool().id), { color:boardInkColor() });
+    function refresh(){
+      const tool = currentTool();
+      let group;
+      try { group = tool.build(specOf()); }
+      catch(error){
+        preview.hidden = true; insert.disabled = true;
+        message.textContent = error && error.message ? error.message : "만들지 못했어요.";
+        message.classList.add("is-error"); return;
+      }
+      preview.hidden = false; drawToolPreview(preview, group);
+      message.textContent = tool.hint || "";
+      message.classList.remove("is-error"); insert.disabled = false;
+    }
+    function submit(){
+      const tool = currentTool();
+      let group;
+      try { group = tool.build(specOf()); }
+      catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "만들지 못했어요.", 2400); return; }
+      const target = editing;
+      editing = null;
+      if (target && replaceBoardGroup(target, group)){ sync(); return; }
+      placeBoardGroup(group); sync();
+    }
+    function sync(){
+      insert.textContent = editing ? "바꾸기" : "넣기";
+      cancel.hidden = !editing;
+      renderKinds(); renderForm(); syncFields(); refresh();
+    }
+    renderKinds(); renderForm();                            // 미리보기는 패널을 열 때(sync) 처음 그린다
+    const handle = {
+      builder, category:config.category, title:config.title, hint:config.hint, sync,
+      reset(){ if (editing){ editing = null; sync(); } },
+      open(item){
+        const spec = item && item.toolSpec;
+        const tool = spec && config.tools.find((entry) => entry.id === spec.kind);
+        if (!tool) return false;
+        kind = tool.id; editing = item;
+        Object.assign(values.get(tool.id), spec.values || {});
+        eduCategory = config.category;
+        toggleEducationPanel(true); sync();
+        return true;
+      }
+    };
+    toolBuilders.push(handle);
+    return handle;
+  }
+
+  // 수 모형 — 분수·자릿값 블록·수직선 뛰어세기·양팔 저울(등식). 만들어 두면 toolBuilders 가 들고 있는다.
+  makeToolBuilder({
+    category:"number", className:"wb-number-builder", title:"수 모형",
+    hint:"값을 바꾸면 미리보기가 바로 따라옵니다. 넣은 뒤에도 두 번 누르면 다시 고칠 수 있어요.",
+    tools:[
+      { id:"fraction", label:"분수", hint:"3/4, 2/3 처럼 쉼표로 나눠 적으면 나란히 놓고 크기를 견줍니다(전체 3개까지).",
+        fields:[
+          { key:"shape", label:"모양", type:"select", value:"bar", options:[["bar", "막대"], ["circle", "원"]] },
+          { key:"fractions", label:"분수", type:"text", value:"3/4, 2/3", width:150, title:"3/4, 2/3 처럼 적기" }
+        ],
+        build:(spec) => MNBoardTools.fractionModelGroup(spec) },
+      { id:"place-value", label:"자릿값 블록", hint:"천 덩어리·백 판·십 막대·일 칸으로 수를 펼쳐 보여 줍니다(0~9999).",
+        fields:[{ key:"value", label:"수", type:"number", value:1347, min:0, max:9999 }],
+        build:(spec) => MNBoardTools.placeValueGroup(spec) },
+      { id:"number-line", label:"수직선 뛰어세기", hint:"뛰는 크기를 음수로 적으면 거꾸로 뛰어 셉니다.",
+        fields:[
+          { key:"from", label:"처음", type:"number", value:0 },
+          { key:"to", label:"끝", type:"number", value:20 },
+          { key:"start", label:"출발", type:"number", value:2 },
+          { key:"step", label:"뛰기", type:"number", value:3 },
+          { key:"jumps", label:"번", type:"number", value:4, min:0, max:20 }
+        ],
+        build:(spec) => MNBoardTools.numberLineJumpGroup(spec) },
+      { id:"balance", label:"양팔 저울", hint:"x 상자와 1 블록을 접시에 올려 등식을 보여 주고, 풀 수 있으면 답도 적습니다.",
+        fields:[
+          { key:"leftX", label:"왼쪽 x", type:"number", value:2, min:0, max:8 },
+          { key:"leftOne", label:"왼쪽 1", type:"number", value:3, min:0, max:20 },
+          { key:"rightX", label:"오른쪽 x", type:"number", value:0, min:0, max:8 },
+          { key:"rightOne", label:"오른쪽 1", type:"number", value:11, min:0, max:20 }
+        ],
+        build:(spec) => MNBoardTools.balanceScaleGroup(spec) }
+    ]
+  });
+
+  // 과학 계산 — 값을 넣으면 계산해서 그려 주는 도구(렌즈·거울 광선도)
+  makeToolBuilder({
+    category:"lab", className:"wb-lab-builder", title:"과학 계산",
+    hint:"값을 바꾸면 미리보기가 바로 따라옵니다. 넣은 뒤에도 두 번 누르면 다시 고칠 수 있어요.",
+    tools:[
+      { id:"optics", label:"렌즈·거울 광선도", hint:"1/a + 1/b = 1/f 로 상의 자리를 구해 광선을 긋습니다. 물체가 초점 안쪽이면 허상(점선)이 됩니다.",
+        fields:[
+          { key:"kind", label:"종류", type:"select", value:"convex-lens", options:[
+            ["convex-lens", "볼록렌즈"], ["concave-lens", "오목렌즈"], ["concave-mirror", "오목거울"], ["convex-mirror", "볼록거울"]
+          ] },
+          { key:"focal", label:"초점거리", type:"number", value:4, min:0.5, step:"0.5", title:"초점거리(cm)" },
+          { key:"distance", label:"물체거리", type:"number", value:6, min:0.5, step:"0.5", title:"물체까지의 거리(cm)" },
+          { key:"height", label:"물체 크기", type:"number", value:2, min:0.2, step:"0.5", title:"물체의 크기(cm)" }
+        ],
+        build:(spec) => MNBoardTools.opticsGroup(spec) },
+      { id:"punnett", label:"퍼넷 사각형", hint:"Aa × Aa 는 3 : 1, AaBb × AaBb 는 9 : 3 : 3 : 1 — 배우자를 만들어 칸을 채우고 비율까지 셉니다.",
+        fields:[
+          { key:"parentA", label:"부모 1", type:"text", value:"Aa", width:80, title:"한쪽 부모의 유전자형(Aa·AaBb)" },
+          { key:"parentB", label:"부모 2", type:"text", value:"Aa", width:80, title:"다른 쪽 부모의 유전자형(Aa·AaBb)" }
+        ],
+        build:(spec) => MNBoardTools.punnettGroup(spec) },
+      { id:"circuit", label:"회로 계산", hint:"직렬은 전류가 같고 전압이 나뉘며, 병렬은 전압이 같고 전류가 나뉩니다. 저항은 쉼표로 나눠 적어요.",
+        fields:[
+          { key:"mode", label:"연결", type:"select", value:"series", options:[["series", "직렬"], ["parallel", "병렬"]] },
+          { key:"resistors", label:"저항(Ω)", type:"text", value:"6, 3, 2", width:110, title:"저항 값 — 6, 3, 2 처럼" },
+          { key:"voltage", label:"전압(V)", type:"number", value:12, min:0.1, step:"0.5" }
+        ],
+        build:(spec) => MNBoardTools.circuitGroup(spec) }
+    ]
+  });
+
   const formulaGroupBar = document.createElement("div"); formulaGroupBar.className = "wb-formula-groups"; formulaGroupBar.hidden = true; formulaGroupBar.setAttribute("aria-label", "수식 분야");
   const eduSubgroupBar = document.createElement("div"); eduSubgroupBar.className = "wb-formula-groups wb-edu-subgroups"; eduSubgroupBar.hidden = true; eduSubgroupBar.setAttribute("aria-label", "도구 분야");
   const eduGrid = document.createElement("div"); eduGrid.className = "wb-edu-grid";
   const eduHint = document.createElement("p"); eduHint.className = "wb-edu-hint";
   eduHint.textContent = "클릭하면 가운데에, 끌어 놓으면 원하는 위치에 들어갑니다.";
-  eduPanel.append(eduHead, eduSearch, eduTabs, formulaBuilder, graphBuilder, chartBuilder, chemBuilder, formulaGroupBar, eduSubgroupBar, eduGrid, eduHint); stage.appendChild(eduPanel);
+  eduPanel.append(eduHead, eduSearch, eduTabs, formulaBuilder, graphBuilder, chartBuilder, chemBuilder,
+    ...toolBuilders.map((tool) => tool.builder), formulaGroupBar, eduSubgroupBar, eduGrid, eduHint); stage.appendChild(eduPanel);
   // 메모창처럼 제목줄을 끌어 옮기고, 네 변·네 모서리로 크기를 조절한다(위치·크기는 저장된다).
   // 무대 밖으로도 나갈 수 있게 화면 좌표로 띄우되, 앱 헤더는 이 창보다 위 층이라 가려 버리므로
   // 움직일 수 있는 범위는 작업 영역(#content)으로 잡는다.
@@ -2984,7 +3507,8 @@ function renderWhiteboard(doc, host){
   }) : null;
 
   const EDU_CATEGORIES = [
-    ["symbol", "기호"], ["formula", "수식"], ["geometry", "도형"], ["science", "과학"], ["graph", "그래프"], ["chart", "차트"], ["chemistry", "화학"]
+    ["symbol", "기호"], ["formula", "수식"], ["geometry", "도형"], ["science", "과학"],
+    ["graph", "그래프"], ["chart", "차트"], ["chemistry", "화학"], ["number", "수 모형"], ["lab", "과학 계산"]
   ];
   const FORMULA_GROUPS = [
     ["all", "전체"], ["recent", "최근"], ["favorite", "즐겨찾기"], ["basic", "기본"],
@@ -2997,7 +3521,7 @@ function renderWhiteboard(doc, host){
   };
   const stencilGroup = { geometry:"all", science:"all" };
   let eduCategory = "symbol", formulaGroup = "all", eduToolBtn, editingFormulaItem = null;
-  let editingPlotItem = null, editingChartItem = null, chartType = "bar", graphParamKey = "";
+  let editingPlotItem = null, editingChartItem = null, editingTableItem = null, chartType = "bar", graphParamKey = "";
   const graphParamValues = {};
   const GRAPH_PRESETS = [
     { label:"일차함수", curves:["a x + 1"], params:{ a:2 } },
@@ -3011,7 +3535,13 @@ function renderWhiteboard(doc, host){
     { label:"로그함수", curves:["log(x)"], xMin:-1, xMax:12 },
     { label:"사인·코사인", curves:["sin(x)", "cos(x)"], xMin:-6.5, xMax:6.5 },
     { label:"진폭 바꾸기", curves:["a sin(x)"], xMin:-6.5, xMax:6.5, params:{ a:2 } },
-    { label:"원(위·아래)", curves:["sqrt(9 - x^2)", "-sqrt(9 - x^2)"], xMin:-4, xMax:4 }
+    { label:"원(위·아래)", curves:["sqrt(9 - x^2)", "-sqrt(9 - x^2)"], xMin:-4, xMax:4 },
+    // 해석 도구는 예시로 한 번 눌러 보면 무엇을 하는 도구인지 바로 보인다.
+    { label:"두 그래프의 교점", curves:["x^2 - 2", "x"], xMin:-4, xMax:4, cross:true },
+    { label:"접선과 기울기", curves:["x^2"], xMin:-4, xMax:4, tangent:1.5 },
+    { label:"구간 넓이(정적분)", curves:["x^2"], xMin:-1, xMax:3, area:[0, 2] },
+    { label:"리만 직사각형", curves:["x^2"], xMin:-1, xMax:3, area:[0, 2], bars:8 },
+    { label:"부등식 영역", curves:["x + 1"], xMin:-5, xMax:5, relations:["gt"] }
   ];
   const CHART_PRESETS = [
     { label:"막대그래프", type:"bar", title:"좋아하는 과목", data:"국어, 7\n수학, 12\n영어, 5\n과학, 9" },
@@ -3020,7 +3550,10 @@ function renderWhiteboard(doc, host){
     { label:"히스토그램", type:"histogram", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77" },
     { label:"산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88" },
     { label:"반별 비교(묶음 막대)", type:"bar", title:"반별 좋아하는 과목", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8\n영어, 5, 11\n과학, 9, 6" },
-    { label:"두 해 비교(꺾은선)", type:"line", title:"월별 기온(℃)", data:"월, 작년, 올해\n3월, 8, 9\n4월, 14, 16\n5월, 19, 21\n6월, 23, 26\n7월, 26, 29" }
+    { label:"두 해 비교(꺾은선)", type:"line", title:"월별 기온(℃)", data:"월, 작년, 올해\n3월, 8, 9\n4월, 14, 16\n5월, 19, 21\n6월, 23, 26\n7월, 26, 29" },
+    { label:"상자그림", type:"box", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77" },
+    { label:"두 반 비교(상자그림)", type:"box", title:"반별 수학 점수", data:"번호, 1반, 2반\n1, 62, 71\n2, 75, 68\n3, 88, 79\n4, 91, 84\n5, 70, 95\n6, 83, 77" },
+    { label:"추세선이 있는 산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88", trend:true }
   ];
   let formulaStops = [], formulaStopIndex = -1, formulaInputBefore = null;
   const educationMatches = (entry, term) => {
@@ -3107,33 +3640,72 @@ function renderWhiteboard(doc, host){
     const center = visibleBoardCenter();
     if (insertFormulaSource(source, center.x, center.y, target)){ resetFormulaEditor(); }
   }
-  // 미리보기는 실제로 보드에 들어갈 벡터 묶음을 그대로 축소해 그린다(넣고 나서 달라 보이는 일이 없다).
+  /* 미리보기는 실제로 보드에 들어갈 벡터 묶음을 그대로 축소해 그린다(넣고 나서 달라 보이는 일이 없다).
+     세로로 긴 그림(원 분수 모형·회로 등)을 비율 그대로 키우면 미리보기가 창을 밀어내
+     아래쪽 ‘넣기’ 단추가 화면 밖으로 나간다 — 높이 한도 안에 맞춰 줄이고 가운데에 둔다. */
+  const TOOL_PREVIEW_MAX_HEIGHT = 180;
   function drawToolPreview(canvasEl, group){
     const cssWidth = canvasEl.clientWidth || 320;
-    const cssHeight = Math.max(90, Math.round(cssWidth * group.h / group.w));
+    // 창에 남은 자리를 재어 그 안에서만 키운다 — 칸이 많은 도구일수록 미리보기가 알아서 작아진다.
+    let limit = TOOL_PREVIEW_MAX_HEIGHT;
+    const box = canvasEl.closest(".wb-formula-builder");
+    const panel = canvasEl.closest(".wb-edu-panel");
+    if (box && panel && panel.clientHeight > 0){
+      let used = 0;
+      for (const child of panel.children){
+        if (child === box || child.hidden || child.offsetHeight === 0) continue;
+        // 카탈로그(예시 카드) 칸은 줄어들 수 있으니 최소 높이만 자리로 잡는다.
+        used += (child.classList.contains("wb-edu-grid") ? Math.min(child.offsetHeight, 96) : child.offsetHeight) + 9;
+      }
+      const others = box.scrollHeight - canvasEl.offsetHeight;   // 만들기 화면에서 미리보기를 뺀 높이
+      limit = Math.min(limit, panel.clientHeight - used - others - 26);
+    }
+    const cssHeight = Math.max(76, Math.round(Math.min(cssWidth * group.h / group.w, limit)));
     const ratio = window.devicePixelRatio || 1;
     canvasEl.style.height = cssHeight + "px";
     canvasEl.width = Math.round(cssWidth * ratio); canvasEl.height = Math.round(cssHeight * ratio);
     const preview = canvasEl.getContext("2d");
     preview.setTransform(ratio, 0, 0, ratio, 0, 0);
     preview.fillStyle = wb.bg; preview.fillRect(0, 0, cssWidth, cssHeight);
-    const scale = cssWidth / group.w;
-    preview.setTransform(ratio * scale, 0, 0, ratio * scale, 0, 0);
+    const scale = Math.min(cssWidth / group.w, cssHeight / group.h);
+    const offsetX = (cssWidth - group.w * scale) / 2, offsetY = (cssHeight - group.h * scale) / 2;
+    preview.setTransform(ratio * scale, 0, 0, ratio * scale, ratio * offsetX, ratio * offsetY);
     MNBoardRenderer.drawItems(preview, group.items, { bg:wb.bg });
     preview.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
   const boardInkColor = () => (/^#[0-9a-f]{6}$/i.test(String(wb.color)) ? String(wb.color).toLowerCase() : "#111111");
   function readGraphSpec(size){
     const manualY = !graphAuto.checked;
+    const filled = graphInputs.map((input, index) => index).filter((index) => graphInputs[index].value.trim());
+    // 접선·넓이는 "몇 번 칸"이 아니라 "실제로 그린 몇 번째 곡선"에 붙는다(빈 칸을 건너뛰기 때문이다).
+    const target = Math.max(0, filled.indexOf(Number(graphTarget.value)));
     return {
-      curves:graphInputs.map((input, index) => ({ source:input.value.trim(), color:MNBoardTools.CURVE_COLORS[index] })).filter((curve) => curve.source),
+      curves:graphInputs.map((input, index) => ({
+        source:input.value.trim(), color:MNBoardTools.CURVE_COLORS[index], relation:graphRelations[index].value
+      })).filter((curve) => curve.source),
       xMin:Number(graphXMin.input.value), xMax:Number(graphXMax.input.value),
       yMin:manualY ? Number(graphYMin.input.value) : undefined,
       yMax:manualY ? Number(graphYMax.input.value) : undefined,
       params:Object.assign({}, graphParamValues),
-      showGrid:graphGrid.checked, axisColor:boardInkColor(),
+      showGrid:graphGrid.checked, showSliders:graphSlider.checked, axisColor:boardInkColor(),
+      showIntersections:graphCross.box.checked,
+      tangentX:graphTangent.box.checked ? Number(graphTangentX.input.value) : null, tangentCurve:target,
+      areaFrom:graphArea.box.checked ? Number(graphAreaFrom.input.value) : null,
+      areaTo:graphArea.box.checked ? Number(graphAreaTo.input.value) : null,
+      areaBars:Number(graphAreaBars.input.value) || 0, areaCurve:target,
       width:(size && size.width) || 560, height:(size && size.height) || 400
     };
+  }
+  // 켜 둔 것만 값 칸을 살려 둔다(꺼 두면 흐릿하게). 식이 하나뿐이면 대상 고르기는 숨긴다.
+  function syncGraphAnalysisFields(){
+    for (const [field, on] of [[graphTangentX, graphTangent.box.checked], [graphAreaFrom, graphArea.box.checked],
+      [graphAreaTo, graphArea.box.checked], [graphAreaBars, graphArea.box.checked]]){
+      field.wrap.classList.toggle("is-off", !on);
+      field.input.disabled = !on;
+    }
+    const filled = graphInputs.filter((input) => input.value.trim()).length;
+    graphTargetWrap.hidden = filled < 2 || !(graphTangent.box.checked || graphArea.box.checked);
+    graphCross.wrap.classList.toggle("is-off", filled < 2);
   }
   // 식에 x 말고 다른 문자가 있으면 그 문자를 슬라이더로 만들어 "a를 키우면?"을 바로 보여 준다.
   function refreshGraphParams(){
@@ -3166,7 +3738,7 @@ function renderWhiteboard(doc, host){
     }
   }
   function refreshGraphPreview(){
-    refreshGraphParams();
+    refreshGraphParams(); syncGraphAnalysisFields();
     const spec = readGraphSpec({ width:560, height:400 });
     if (!spec.curves.length){
       graphMessage.textContent = "식을 입력하면 미리보기가 나타나요. 예) x^2 - 3x + 1, sin(x), 2^x";
@@ -3176,7 +3748,9 @@ function renderWhiteboard(doc, host){
     try {
       const group = MNBoardTools.plotGroup(spec);
       graphPreview.hidden = false; drawToolPreview(graphPreview, group);
-      graphMessage.textContent = "×· ÷ 없이 2x, sin x 처럼 써도 되고 sqrt·abs·log·ln 을 쓸 수 있어요.";
+      graphMessage.textContent = group.sliders && group.sliders.length
+        ? "보드에 넣은 뒤에도 그래프 아래 손잡이를 끌면 그 자리에서 곡선이 다시 그려집니다."
+        : "×· ÷ 없이 2x, sin x 처럼 써도 되고 sqrt·abs·log·ln 을 쓸 수 있어요.";
       graphMessage.classList.remove("is-error"); graphInsert.disabled = false;
     } catch(error){
       graphPreview.hidden = true; graphInsert.disabled = true;
@@ -3186,6 +3760,8 @@ function renderWhiteboard(doc, host){
   }
   function clearGraphInputs(){
     graphInputs.forEach((input) => { input.value = ""; });
+    graphRelations.forEach((relation) => { relation.value = "eq"; });
+    graphCross.box.checked = false; graphTangent.box.checked = false; graphArea.box.checked = false;
     graphParamKey = "__reset__"; refreshGraphPreview(); graphInputs[0].focus({ preventScroll:true });
   }
   function resetGraphEditor(){
@@ -3206,6 +3782,19 @@ function renderWhiteboard(doc, host){
     if (Number.isFinite(preset.xMin)) graphXMin.input.value = String(preset.xMin);
     if (Number.isFinite(preset.xMax)) graphXMax.input.value = String(preset.xMax);
     if (preset.params) Object.assign(graphParamValues, preset.params);
+    // 해석 예시(교점·접선·넓이·부등식)는 켜 둔 것만 바꾸고 나머지는 쓰던 대로 둔다.
+    (Array.isArray(preset.relations) ? preset.relations : []).forEach((relation, offset) => {
+      const select = graphRelations[start + offset];
+      if (select && GRAPH_RELATIONS.some(([id]) => id === relation)) select.value = relation;
+    });
+    if (preset.cross != null) graphCross.box.checked = !!preset.cross;
+    if (Number.isFinite(preset.tangent)){ graphTangent.box.checked = true; graphTangentX.input.value = String(preset.tangent); }
+    if (Array.isArray(preset.area)){
+      graphArea.box.checked = true;
+      graphAreaFrom.input.value = String(preset.area[0]); graphAreaTo.input.value = String(preset.area[1]);
+      graphAreaBars.input.value = String(preset.bars || 0);
+    }
+    if (preset.cross || Number.isFinite(preset.tangent) || Array.isArray(preset.area) || Array.isArray(preset.relations)) graphTarget.value = String(start);
     graphParamKey = "__reset__"; refreshGraphPreview();
   }
   function submitGraph(){
@@ -3219,12 +3808,110 @@ function renderWhiteboard(doc, host){
     if (target && replaceBoardGroup(target, group)){ resetGraphEditor(); return; }
     placeBoardGroup(group); resetGraphEditor();
   }
+  // ----- 값의 표 넣기/고치기 -----
+  function readValueTableSpec(){
+    const spec = readGraphSpec({ width:560, height:400 });
+    return {
+      curves:spec.curves, params:spec.params, variable:"x", color:boardInkColor(), title:"",
+      from:Number(graphTableFrom.input.value), to:Number(graphTableTo.input.value), step:Number(graphTableStep.input.value)
+    };
+  }
+  function resetTableEditor(){
+    editingTableItem = null;
+    graphTableInsert.textContent = "값의 표 넣기"; graphTableCancel.hidden = true;
+    chartStatsBtn.textContent = "요약 카드"; chartFreqBtn.textContent = "도수분포표";
+    chemMoleBtn.textContent = "몰 계산표 넣기";
+  }
+  // 표는 종류(kind)마다 만드는 곳이 다르다 — 같은 종류를 고쳐 넣는 중이면 그 자리에 갈아 끼운다.
+  function placeTableGroup(group, kind){
+    const target = editingTableItem && editingTableItem.tableSpec && editingTableItem.tableSpec.kind === kind ? editingTableItem : null;
+    if (target && replaceBoardGroup(target, group)){ resetTableEditor(); return; }
+    placeBoardGroup(group); resetTableEditor();
+  }
+  function submitValueTable(){
+    let group;
+    try { group = MNBoardTools.valueTableGroup(readValueTableSpec()); }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "표를 만들지 못했어요.", 2400); return; }
+    placeTableGroup(group, "values");
+  }
+  function insertStatsCard(){
+    let group;
+    try { group = MNBoardTools.statsSummaryGroup({ data:chartData.value, title:chartTitle.value.trim(), color:boardInkColor() }); }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "요약 카드를 만들지 못했어요.", 2400); chartData.focus(); return; }
+    placeTableGroup(group, "stats");
+  }
+  function insertFrequencyTable(){
+    let group;
+    try {
+      group = MNBoardTools.frequencyTableGroup({
+        data:chartData.value, title:chartTitle.value.trim(), bins:Number(chartBins.input.value) || null, color:boardInkColor()
+      });
+    }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "도수분포표를 만들지 못했어요.", 2400); chartData.focus(); return; }
+    placeTableGroup(group, "frequency");
+  }
+  openTableEditor = (item) => {
+    const spec = item && item.tableSpec ? item.tableSpec : null;
+    if (spec && (spec.kind === "stats" || spec.kind === "frequency")){
+      // 자료로 만든 표는 차트 탭에서 같은 자료를 고쳐 다시 만든다.
+      resetChartEditor();
+      editingTableItem = item; eduCategory = "chart";
+      chartData.value = String(spec.data || ""); chartTitle.value = String(spec.title || "");
+      if (spec.kind === "frequency") chartBins.input.value = String(Number(spec.bins) || 0);
+      if (spec.kind === "stats") chartStatsBtn.textContent = "요약 카드 바꾸기"; else chartFreqBtn.textContent = "도수분포표 바꾸기";
+      toggleEducationPanel(true); refreshChartPreview();
+      return;
+    }
+    if (spec && spec.kind === "stoichiometry"){
+      editingTableItem = item; eduCategory = "chemistry";
+      chemInput.value = String(spec.equation || "");
+      refreshChemistry();                                 // 물질 목록을 먼저 채워야 고른 물질이 되살아난다
+      chemSpecies.value = String(Number(spec.species) || 0);
+      chemAmount.input.value = String(spec.amount); chemUnit.value = spec.unit === "mol" ? "mol" : "g";
+      refreshMolePreview();
+      chemMoleBtn.textContent = "몰 계산표 바꾸기";
+      toggleEducationPanel(true);
+      return;
+    }
+    if (!spec || spec.kind !== "values"){ if (typeof toast === "function") toast("이 표는 만든 재료가 없어 고칠 수 없어요. 지우고 다시 넣어 주세요.", 2600); return; }
+    resetGraphEditor();                                  // 표를 고치는 중엔 그래프 편집 상태를 함께 들고 있지 않는다
+    editingTableItem = item; eduCategory = "graph";
+    const curves = Array.isArray(spec.curves) ? spec.curves : [];
+    graphInputs.forEach((input, index) => { input.value = curves[index] ? String(curves[index].source || "") : ""; });
+    graphRelations.forEach((relation, index) => {
+      const wanted = curves[index] ? String(curves[index].relation || "eq") : "eq";
+      relation.value = GRAPH_RELATIONS.some(([id]) => id === wanted) ? wanted : "eq";
+    });
+    graphTableFrom.input.value = String(spec.from); graphTableTo.input.value = String(spec.to); graphTableStep.input.value = String(spec.step);
+    if (spec.params) Object.assign(graphParamValues, spec.params);
+    graphParamKey = "__reset__";
+    graphTableInsert.textContent = "표 바꾸기"; graphTableCancel.hidden = false;
+    toggleEducationPanel(true);
+  };
+
   openPlotEditor = (item) => {
     const spec = item && item.plotSpec ? item.plotSpec : null;
+    resetTableEditor();
     editingPlotItem = item; eduCategory = "graph";
     if (spec){
       const curves = Array.isArray(spec.curves) ? spec.curves : [];
       graphInputs.forEach((input, index) => { input.value = curves[index] ? String(curves[index].source || "") : ""; });
+      graphRelations.forEach((relation, index) => {
+        const wanted = curves[index] ? String(curves[index].relation || "eq") : "eq";
+        relation.value = GRAPH_RELATIONS.some(([id]) => id === wanted) ? wanted : "eq";
+      });
+      graphCross.box.checked = !!spec.showIntersections;
+      graphTangent.box.checked = Number.isFinite(Number(spec.tangentX)) && spec.tangentX !== null;
+      if (graphTangent.box.checked) graphTangentX.input.value = String(spec.tangentX);
+      graphArea.box.checked = spec.areaFrom !== null && spec.areaTo !== null
+        && Number.isFinite(Number(spec.areaFrom)) && Number.isFinite(Number(spec.areaTo));
+      if (graphArea.box.checked){
+        graphAreaFrom.input.value = String(spec.areaFrom); graphAreaTo.input.value = String(spec.areaTo);
+        graphAreaBars.input.value = String(Number(spec.areaBars) || 0);
+      }
+      // 저장된 대상은 "그린 곡선의 순서"인데, 여기서는 그 순서대로 빈칸 없이 다시 채우므로 그대로 쓴다.
+      const target = Number(graphTangent.box.checked ? spec.tangentCurve : spec.areaCurve) || 0;
+      graphTarget.value = String(Math.min(graphInputs.length - 1, Math.max(0, target)));
       if (Number.isFinite(Number(spec.xMin))) graphXMin.input.value = String(spec.xMin);
       if (Number.isFinite(Number(spec.xMax))) graphXMax.input.value = String(spec.xMax);
       const manualY = whiteboardGraphUsesManualY(spec);
@@ -3232,6 +3919,7 @@ function renderWhiteboard(doc, host){
       if (manualY){ graphYMin.input.value = String(spec.yMin); graphYMax.input.value = String(spec.yMax); }
       syncGraphAutoFields();
       graphGrid.checked = spec.showGrid !== false;
+      graphSlider.checked = spec.showSliders !== false;
       if (spec.params) Object.assign(graphParamValues, spec.params);
       graphParamKey = "__reset__";
     }
@@ -3248,6 +3936,7 @@ function renderWhiteboard(doc, host){
     const rows = table.rows;
     const seriesCount = Math.max(1, rows.reduce((most, row) => Math.max(most, row.values.length), 1));
     if (chartType === "histogram") return ["기둥"];
+    if (chartType === "box" && seriesCount < 2) return ["상자"];
     if (seriesCount > 1 && chartType !== "pie"){
       return Array.from({ length:Math.min(seriesCount, CHART_COLOR_LIMIT) }, (_, index) => table.series[index] || `자료 ${index + 1}`);
     }
@@ -3302,17 +3991,44 @@ function renderWhiteboard(doc, host){
   function readChartSpec(size){
     return {
       type:chartType, data:chartData.value, title:chartTitle.value.trim(),
+      bins:Number(chartBins.input.value) || null, trend:chartTrend.checked,
       axisColor:boardInkColor(), palette:chartPaletteFor(chartColorSlots().length),
       width:(size && size.width) || 560, height:(size && size.height) || 400
     };
   }
   // 동전·주사위를 실제로 굴려 만든 자료를 차트 입력칸에 그대로 채운다(그다음은 차트 만들기와 같은 길).
+  let lastSimulation = null;
+  function simulationSettings(kind){
+    const settings = { min:1, max:10 };
+    if (kind !== "bag" && kind !== "spinner") return settings;
+    // "빨강 3, 파랑 2" 를 자료 표와 같은 규칙으로 읽는다(쉼표가 줄바꿈 노릇을 한다).
+    settings.items = MNBoardTools.parseChartData(simBag.value.split(",").join("\n"))
+      .map((row) => ({ label:row.label, count:row.value }));
+    settings.draws = Number(simDraws.input.value) || 1;
+    settings.replace = simReplace.checked;
+    return settings;
+  }
   function runSimulation(kind){
-    let result;
-    try { result = MNBoardTools.simulateTrials(kind, Number(simCount.value) || 100, { min:1, max:10 }); }
+    let result, settings;
+    try {
+      settings = simulationSettings(kind);
+      result = MNBoardTools.simulateTrials(kind, Number(simCount.value) || 100, settings);
+    }
     catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "실험을 하지 못했어요.", 2400); return; }
+    lastSimulation = { kind, settings, target:result.rows[0] ? result.rows[0].label : "" };
     chartType = "bar"; chartTitle.value = result.title; chartData.value = result.data; chartPalette = [];
     refreshChartPreview(result.summary);
+  }
+  // 큰 수의 법칙 — 방금 한 실험(없으면 동전)을 다시 굴리며 누적 상대도수를 그린다.
+  function insertRunningRatio(){
+    const source = lastSimulation || { kind:"coin", settings:{}, target:"" };
+    let group;
+    try {
+      group = MNBoardTools.runningRatioGroup(source.kind, Number(simCount.value) || 200,
+        Object.assign({}, source.settings, { target:source.target, color:boardInkColor() }));
+    }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "누적 그래프를 만들지 못했어요.", 2400); return; }
+    placeBoardGroup(group);
   }
   function refreshChemistry(){
     const source = chemInput.value.trim();
@@ -3326,13 +4042,57 @@ function renderWhiteboard(doc, host){
       chemResult.textContent = balanced.text; chemInsert.disabled = false;
       chemMessage.textContent = "계수: " + balanced.coefficients.join(" · ");
       chemMessage.classList.remove("is-error");
+      syncChemSpecies(balanced);
       return balanced;
     } catch(error){
       chemResult.textContent = ""; chemInsert.disabled = true;
       chemMessage.textContent = error && error.message ? error.message : "균형을 맞추지 못했어요.";
       chemMessage.classList.add("is-error");
+      syncChemSpecies(null);
       return null;
     }
+  }
+  // 균형이 맞은 식에서만 몰 계산 줄을 보여 준다. 물질 목록이 그대로면 고른 물질을 유지한다.
+  let chemSpeciesKey = "";
+  function syncChemSpecies(balanced){
+    chemMoleRow.hidden = !balanced;
+    const key = balanced ? balanced.species.join("+") : "";
+    if (key !== chemSpeciesKey){
+      chemSpeciesKey = key;
+      chemSpecies.textContent = "";
+      if (balanced) balanced.species.forEach((formula, index) => {
+        const option = document.createElement("option"); option.value = String(index);
+        option.textContent = MNBoardTools.formulaWithSubscripts(formula);
+        chemSpecies.appendChild(option);
+      });
+    }
+    refreshMolePreview();
+  }
+  function readStoichiometrySpec(){
+    return {
+      species:Number(chemSpecies.value) || 0, amount:Number(chemAmount.input.value),
+      unit:chemUnit.value === "mol" ? "mol" : "g", color:boardInkColor()
+    };
+  }
+  function refreshMolePreview(){
+    if (chemMoleRow.hidden){ chemMoleResult.textContent = ""; chemMoleBtn.disabled = true; return; }
+    let result;
+    try { result = MNBoardTools.stoichiometry(chemInput.value, readStoichiometrySpec()); }
+    catch(error){
+      chemMoleResult.textContent = error && error.message ? error.message : "";
+      chemMoleBtn.disabled = true; return;
+    }
+    chemMoleBtn.disabled = false;
+    const known = result.rows[result.basis.index];
+    const others = result.rows.filter((row, index) => index !== result.basis.index)
+      .map((row) => `${MNBoardTools.formulaWithSubscripts(row.formula)} ${row.moles.toFixed(3)}mol(${row.grams.toFixed(2)}g)`);
+    chemMoleResult.textContent = `${MNBoardTools.formulaWithSubscripts(known.formula)} ${result.basis.amount}${result.basis.unit} → ` + others.join(" · ");
+  }
+  function insertStoichiometry(){
+    let group;
+    try { group = MNBoardTools.stoichiometryGroup(chemInput.value, readStoichiometrySpec()); }
+    catch(error){ if (typeof toast === "function") toast(error && error.message ? error.message : "몰 계산표를 만들지 못했어요.", 2400); return; }
+    placeTableGroup(group, "stoichiometry");
   }
   function insertBalancedEquation(){
     const balanced = refreshChemistry();
@@ -3368,6 +4128,10 @@ function renderWhiteboard(doc, host){
       chartColorRow.hidden = true; chartColorRow.textContent = ""; chartColorKey = "";
       chartPreview.hidden = true; chartInsert.disabled = true; return;
     }
+    // 추세선은 산점도에서만, 계급 수는 히스토그램에서만 쓴다(도수분포표 단추는 늘 계급 수를 본다).
+    chartTrendWrap.classList.toggle("is-off", chartType !== "scatter");
+    chartTrend.disabled = chartType !== "scatter";
+    chartBins.wrap.classList.toggle("is-off", chartType !== "histogram");
     renderChartColors(chartColorSlots());
     try {
       const group = MNBoardTools.chartGroup(readChartSpec({ width:560, height:400 }));
@@ -3386,6 +4150,7 @@ function renderWhiteboard(doc, host){
   function applyChartPreset(preset){
     chartType = preset.type; chartTitle.value = preset.title || ""; chartData.value = preset.data || "";
     chartPalette = [];                      // 자료가 통째로 바뀌므로 색도 기본으로 되돌린다
+    chartTrend.checked = !!preset.trend;
     refreshChartPreview();
   }
   function submitChart(){
@@ -3399,6 +4164,7 @@ function renderWhiteboard(doc, host){
   }
   openChartEditor = (item) => {
     const spec = item && item.chartSpec ? item.chartSpec : null;
+    resetTableEditor();
     editingChartItem = item; eduCategory = "chart";
     if (spec){
       chartType = CHART_TYPES.some(([id]) => id === spec.type) ? spec.type : "bar";
@@ -3411,6 +4177,8 @@ function renderWhiteboard(doc, host){
       if (series.length) lines.unshift(["항목"].concat(series).join(", "));
       chartData.value = lines.join("\n");
       chartPalette = Array.isArray(spec.palette) ? spec.palette.slice() : [];
+      chartBins.input.value = String(Number(spec.bins) || 0);
+      chartTrend.checked = !!spec.trend;
     }
     chartInsert.textContent = "차트 바꾸기"; chartCancel.hidden = false;
     toggleEducationPanel(true);
@@ -3424,7 +4192,12 @@ function renderWhiteboard(doc, host){
     input.addEventListener("focus", () => { graphFocusIndex = index; });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitGraph(); } e.stopPropagation(); });
   });
-  for (const field of [graphXMin, graphXMax, graphYMin, graphYMax]) field.input.addEventListener("change", refreshGraphPreview);
+  for (const field of [graphXMin, graphXMax, graphYMin, graphYMax, graphTangentX, graphAreaFrom, graphAreaTo, graphAreaBars]){
+    field.input.addEventListener("change", refreshGraphPreview);
+  }
+  for (const box of [graphCross.box, graphTangent.box, graphArea.box]) box.addEventListener("change", refreshGraphPreview);
+  for (const relation of graphRelations) relation.addEventListener("change", refreshGraphPreview);
+  graphTarget.addEventListener("change", refreshGraphPreview);
   function syncGraphAutoFields(){
     graphYMin.wrap.classList.toggle("is-off", graphAuto.checked);
     graphYMax.wrap.classList.toggle("is-off", graphAuto.checked);
@@ -3435,9 +4208,15 @@ function renderWhiteboard(doc, host){
   });
   graphAuto.dispatchEvent(new Event("change"));
   graphGrid.addEventListener("change", refreshGraphPreview);
+  graphSlider.addEventListener("change", refreshGraphPreview);
+  chartTrend.addEventListener("change", () => refreshChartPreview());
+  chartBins.input.addEventListener("change", () => refreshChartPreview());
   chartData.addEventListener("input", () => refreshChartPreview());
   chartTitle.addEventListener("input", () => refreshChartPreview());
   chemInput.addEventListener("input", refreshChemistry);
+  chemSpecies.addEventListener("change", refreshMolePreview);
+  chemUnit.addEventListener("change", refreshMolePreview);
+  chemAmount.input.addEventListener("input", refreshMolePreview);
   chemInput.addEventListener("focus", syncChemHint);
   chemInput.addEventListener("blur", () => requestAnimationFrame(syncChemHint));
   chemInput.addEventListener("keydown", (e) => {
@@ -3482,7 +4261,8 @@ function renderWhiteboard(doc, host){
       const card = document.createElement("button"); card.type = "button"; card.className = "wb-edu-card wb-edu-preset";
       card.title = preset.label + (eduCategory === "graph" ? " — 눌러서 커서가 있는 식 칸 채우기" : " — 눌러서 입력칸 채우기");
       const visual = document.createElement("span"); visual.className = "wb-edu-visual";
-      visual.textContent = eduCategory === "graph" ? "y = " + preset.curves[0] : preset.title;
+      const relation = GRAPH_RELATIONS.find(([id]) => id === ((preset.relations || [])[0] || "eq"));
+      visual.textContent = eduCategory === "graph" ? `${relation[1]} ${preset.curves[0]}` : preset.title;
       const label = document.createElement("span"); label.className = "wb-edu-label"; label.textContent = preset.label;
       card.append(visual, label);
       card.addEventListener("click", () => (eduCategory === "graph" ? applyGraphPreset(preset) : applyChartPreset(preset)));
@@ -3527,17 +4307,27 @@ function renderWhiteboard(doc, host){
   function renderEducationPanel(){
     const term = eduSearch.value.trim();
     const buildingTool = eduCategory === "graph" || eduCategory === "chart";
+    // 값을 넣어 만드는 도구 탭(수 모형·과학 계산)은 카탈로그 대신 만들기 화면만 보여 준다.
+    const openTool = toolBuilders.find((tool) => tool.category === eduCategory) || null;
     eduTitle.textContent = eduCategory === "formula" ? "수학·과학 도구상자 · 수식 사전"
       : eduCategory === "graph" ? "수학·과학 도구상자 · 함수 그래프"
       : eduCategory === "chart" ? "수학·과학 도구상자 · 자료 차트"
-      : eduCategory === "chemistry" ? "수학·과학 도구상자 · 주기율표" : "수학·과학 도구상자";
-    eduSearch.hidden = buildingTool;
+      : eduCategory === "chemistry" ? "수학·과학 도구상자 · 주기율표"
+      : openTool ? "수학·과학 도구상자 · " + openTool.title : "수학·과학 도구상자";
+    eduSearch.hidden = buildingTool || !!openTool;
     eduSearch.placeholder = eduCategory === "formula" ? "한글·영문·LaTeX 수식 검색" : eduCategory === "geometry" ? "평면·입체·작도·그래프·통계 검색" : eduCategory === "science" ? "역학·파동·전기·광학·화학·생명·지구 검색" : eduCategory === "chemistry" ? "원소 이름·기호·번호 검색 (예: 산소, Na, 26)" : "기호·수식·도형 검색";
     graphBuilder.hidden = eduCategory !== "graph";
     chartBuilder.hidden = eduCategory !== "chart";
     chemBuilder.hidden = eduCategory !== "chemistry";
     if (!chemBuilder.hidden) refreshChemistry();
-    eduHint.textContent = buildingTool
+    for (const tool of toolBuilders){
+      tool.builder.hidden = tool !== openTool;
+      if (tool !== openTool) tool.reset();
+    }
+    // 만들기 화면만 쓰는 탭에서는 빈 카탈로그 칸이 자리를 차지하지 않게 접어 둔다.
+    eduPanel.classList.toggle("is-tool-tab", !!openTool);
+    if (openTool) requestAnimationFrame(openTool.sync);
+    eduHint.textContent = openTool ? openTool.hint : buildingTool
       ? "넣은 뒤에도 두 번 누르면 다시 고칠 수 있어요. ‘분리’를 누르면 선·글자로 흩어집니다."
       : eduCategory === "chemistry" ? "원소를 누르면 번호·기호·이름·원자량 카드가 들어갑니다. 반응식 칸에 커서를 두고 누르면 기호가 그 자리에 적혀요."
       : "클릭하면 가운데에, 끌어 놓으면 원하는 위치에 들어갑니다.";
@@ -3569,12 +4359,14 @@ function renderWhiteboard(doc, host){
       const tab = mkBtn(label, label + " 도구", "wb-edu-tab" + (id === eduCategory ? " active" : ""), () => {
         if (eduCategory === "graph" && id !== "graph") resetGraphEditor();
         if (eduCategory === "chart" && id !== "chart") resetChartEditor();
+        if (openTool && id !== eduCategory) openTool.reset();
         eduCategory = id; eduSearch.value = ""; renderEducationPanel();
       });
       tab.setAttribute("role", "tab"); tab.setAttribute("aria-selected", id === eduCategory ? "true" : "false");
       eduTabs.appendChild(tab);
     }
     if (buildingTool){ renderToolPresets(); return; }
+    if (openTool){ eduGrid.classList.remove("wb-periodic"); eduGrid.textContent = ""; return; }
     if (eduCategory === "chemistry"){ renderPeriodicTable(term); return; }
     eduGrid.classList.remove("wb-periodic");
     eduGrid.textContent = "";
@@ -3629,6 +4421,12 @@ function renderWhiteboard(doc, host){
       if (editingChartItem) resetChartEditor();
     }
   }
+  // 보드의 도구 그룹을 두 번 누르면 만든 재료를 든 채로 그 종류의 탭이 열린다.
+  openToolItemEditor = (item) => {
+    for (const tool of toolBuilders) if (tool.open(item)) return true;
+    if (typeof toast === "function") toast("이 도구는 만든 재료가 없어 고칠 수 없어요.", 2400);
+    return false;
+  };
   eduSearch.addEventListener("input", renderEducationPanel);
 
   const toolGroup = grp();
@@ -3862,9 +4660,10 @@ function renderWhiteboard(doc, host){
     if (typeof toast === "function") toast(gear.tidy ? "손그림 정리를 켰어요. 크게 그린 도형만 반듯하게 바꿉니다(글씨는 그대로)." : "손그림 정리를 껐어요.", 2600);
   });
   const measureToolBtn = mkIconBtn("measure", "측정 — 고른 도형의 길이·각도·넓이를 붙입니다(도형을 끌면 값이 따라 바뀜)", "wb-act wb-gear", () => toggleMeasureOnSelection());
+  const vectorSumBtn = mkIconBtn("vectorsum", "벡터 합성 — 같은 점에서 출발한 두 화살표의 합력을 붙입니다(화살표를 끌면 따라 바뀜)", "wb-act wb-gear", () => toggleVectorSumOnSelection());
   transformToolBtn = mkIconBtn("transform", "변환 — 고른 도형을 대칭·회전·평행이동·닮음으로 바꿉니다", "wb-act wb-gear", () => toggleTransformPanel());
   transformToolBtn.setAttribute("aria-controls", transformPanel.id); transformToolBtn.setAttribute("aria-expanded", "false");
-  gearGroup.append(rulerBtn, protractorBtn, compassBtn, snapBtn, tidyBtn, measureToolBtn, transformToolBtn);
+  gearGroup.append(rulerBtn, protractorBtn, compassBtn, snapBtn, tidyBtn, measureToolBtn, vectorSumBtn, transformToolBtn);
   syncGearButtons = () => {
     const states = [[rulerBtn, !!gear.ruler], [protractorBtn, !!gear.protractor], [compassBtn, !!gear.compass], [snapBtn, !!gear.snap], [tidyBtn, !!gear.tidy]];
     for (const [button, on] of states){ button.classList.toggle("active", on); button.setAttribute("aria-pressed", String(on)); }

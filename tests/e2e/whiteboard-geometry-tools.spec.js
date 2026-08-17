@@ -65,6 +65,42 @@ test("고른 도형에 길이·넓이를 붙이고, 변환으로 바뀌면 값�
   expect(errors).toEqual([]);
 });
 
+test("같은 점에서 그린 두 화살표를 합성하면 합력이 붙고, 화살표를 끌면 따라 바뀐다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  const stage = await stageBox(page);
+  const cm = 37.8, origin = { x:stage.x + 160, y:stage.y + 260 };
+
+  await useTool(page, 5);                                             // 화살표
+  await dragOnBoard(page, origin, { x:origin.x + cm * 3, y:origin.y });          // → 3cm
+  await dragOnBoard(page, origin, { x:origin.x, y:origin.y - cm * 4 });          // ↑ 4cm
+  await useTool(page, 0);                                             // 선택
+  await page.mouse.click(origin.x + cm * 1.5, origin.y);              // 가로 화살표 고르기
+
+  await page.getByRole("button", { name:/^벡터 합성 —/ }).last().click();
+  let items = await boardItems(page);
+  const sum = items.find((item) => item.role === "vector-sum");
+  expect(sum).toBeTruthy();                                            // 3-4-5 → 5cm
+  expect(sum.text || (await page.evaluate(() => docs.find((d) => d.id === activeId).boardState.items.find((it) => it.role === "vector-sum").vectorSum.text)))
+    .toContain("5.0cm");
+
+  // 합성에 쓰인 화살표는 끝점 손잡이가 생긴다 — 끝을 끌면 합력도 그 자리에서 다시 계산된다
+  await dragOnBoard(page, { x:origin.x, y:origin.y - cm * 4 }, { x:origin.x, y:origin.y - cm * 8 });
+  const after = await page.evaluate(() => {
+    const doc = docs.find((d) => d.id === activeId);
+    return doc.boardState.items.filter((item) => item.role === "vector-sum").map((item) => item.vectorSum.text);
+  });
+  expect(after).toHaveLength(1);
+  expect(after[0]).not.toContain("5.0cm");
+
+  // 원본 화살표를 지우면 딸린 합력도 함께 사라진다
+  await page.keyboard.press("Delete");
+  items = await boardItems(page);
+  expect(items.filter((item) => item.role === "vector-sum")).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
 test("선대칭·회전은 원본을 남긴 사본을 만든다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -105,7 +141,7 @@ test("반응식 계수를 맞춰 넣고, 주기율표에서 원소 카드를 꺼
   await panel.locator(".wb-edu-tab", { hasText:"화학" }).click();
 
   const builder = panel.locator(".wb-chem-builder");
-  await builder.locator("input").fill("CH4 + O2 -> CO2 + H2O");
+  await builder.locator(".wb-chem-input").fill("CH4 + O2 -> CO2 + H2O");
   // 미리보기의 → 는 앱 공통 규칙대로 icons.js 가 SVG 화살표로 바꾸므로 글자만 비교한다.
   await expect(builder.locator(".wb-chem-result")).toContainText("CH₄ + 2O₂");
   await expect(builder.locator(".wb-chem-result")).toContainText("CO₂ + 2H₂O");
@@ -113,12 +149,16 @@ test("반응식 계수를 맞춰 넣고, 주기율표에서 원소 카드를 꺼
   await builder.locator(".wb-formula-insert").click();
 
   // 잘못된 식은 넣지 않고 이유를 알려 준다
-  await builder.locator("input").fill("H2 + O2 -> H2");
+  await builder.locator(".wb-chem-input").fill("H2 + O2 -> H2");
   await expect(builder.locator(".wb-tool-message.is-error")).toBeVisible();
   await expect(builder.locator(".wb-formula-insert")).toBeDisabled();
 
-  // 주기율표는 18족 × 7주기로 깔리고, 누르면 원소 카드가 들어간다
+  // 주기율표는 18족 × 7주기로 깔린다. 반응식 칸에 커서가 있으면 원소를 눌러도 카드가 아니라 기호가 적힌다.
   await expect(panel.locator(".wb-edu-grid.wb-periodic .wb-element")).toHaveCount(118);
+  await panel.locator(".wb-element", { hasText:"Na" }).first().click();
+  await expect(builder.locator(".wb-chem-input")).toHaveValue("H2 + O2 -> H2Na");
+  // 커서를 빼면 같은 자리를 눌러도 원소 카드가 보드에 들어간다.
+  await page.evaluate(() => document.activeElement.blur());
   await panel.locator(".wb-element", { hasText:"Na" }).first().click();
 
   const items = await boardItems(page);
@@ -167,12 +207,36 @@ test("우클릭 메뉴로도 교구·측정·변환·그래프를 꺼낼 수 있
   expect(errors).toEqual([]);
 });
 
+test("주머니에서 비복원으로 뽑고, 누적 그래프로 큰 수의 법칙을 보여 준다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  await page.getByRole("button", { name:/자료 차트/ }).last().click();
+  const builder = page.locator(".wb-edu-panel").last().locator(".wb-chart-builder");
+  await builder.locator(".wb-sim-row > summary").click();               // 확률 실험 구획 펴기
+  await builder.locator(".wb-sim-bag input").fill("빨강 3, 파랑 2");
+  await builder.locator(".wb-graph-number[title='한 번에 몇 개를 뽑을지(주머니)']").fill("2");
+  await builder.locator(".wb-sim-row button", { hasText:"주머니" }).click();
+
+  // 두 개를 비복원으로 뽑으면 결과는 "빨강1·파랑1" 같은 조합이 된다
+  const data = await builder.locator("textarea").inputValue();
+  expect(data).toMatch(/빨강1·파랑1|빨강2|파랑2/);
+  await builder.locator(".wb-formula-insert").click();
+
+  // 누적 그래프는 방금 한 실험을 다시 굴려 이론값과 함께 그린다
+  await builder.locator(".wb-sim-law").click();
+  const items = await boardItems(page);
+  expect(items.map((item) => item.label)).toEqual(["막대그래프", "큰 수의 법칙"]);
+  expect(errors).toEqual([]);
+});
+
 test("주사위를 굴려 만든 자료가 그대로 차트가 된다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await openBoard(page);
   await page.getByRole("button", { name:/자료 차트/ }).last().click();
   const builder = page.locator(".wb-edu-panel").last().locator(".wb-chart-builder");
+  await builder.locator(".wb-sim-row > summary").click();               // 확률 실험 구획 펴기
   await builder.locator(".wb-sim-count input").fill("600");
   await builder.locator(".wb-sim-row button", { hasText:"주사위" }).first().click();
 
