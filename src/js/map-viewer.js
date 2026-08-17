@@ -592,7 +592,10 @@ async function mapCaptureDataUrl(stage, attribution, labels){
     const png = await htmlToImage.toPng(stage, {
       backgroundColor: "#ffffff",
       pixelRatio: MAP_BOARD_CAPTURE_SCALE,
-      cacheBust: false
+      cacheBust: false,
+      // 런처 타일은 /tile-proxy?u=<원본 주소> 형식이다. html-to-image 기본 캐시는 쿼리를
+      // 제외하므로 이 옵션이 없으면 모든 타일을 같은 주소로 보고 첫 타일을 격자처럼 반복한다.
+      includeQueryParams: true
     });
     return await mapStampCapture(png, attribution, labels);
   } finally {

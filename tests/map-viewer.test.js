@@ -161,6 +161,14 @@ test("공개 타일을 미리 받지 않고 실제로 본 타일만 자동 캐�
   assert.match(source, /openMapOfflineStatus/);
 });
 
+test("칠판 캡처는 프록시 쿼리별 타일을 구분해 한 타일을 반복하지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const capture = /async function mapCaptureDataUrl\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(capture, "mapCaptureDataUrl 을 찾지 못했다");
+  assert.match(capture[1], /htmlToImage\.toPng\(stage/);
+  assert.match(capture[1], /includeQueryParams:\s*true/);
+});
+
 test("캐시 용량은 사람이 읽는 단위로 보여 준다", () => {
   const api = loadMapViewer();
   assert.equal(api.mapFormatBytes(0), "1KB");
