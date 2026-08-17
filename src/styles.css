@@ -855,6 +855,27 @@
   .map-popup-remove{border:1px solid color-mix(in srgb,var(--danger) 38%,var(--border));border-radius:6px;
     background:var(--field);color:var(--danger);padding:5px 8px;font:inherit;font-size:11.5px;cursor:pointer}
   .map-popup-remove:hover{background:var(--danger);border-color:var(--danger);color:#fff}
+  .map-popup-address{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);
+    padding:5px 8px;font:inherit;font-size:11.5px;cursor:pointer}
+  .map-popup-address:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .map-popup-address:disabled{opacity:.65;cursor:wait}
+  /* 주변 시설 찾기 창 */
+  .map-nearby-modal .modal-card{width:min(520px,96%)}
+  .map-nearby-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .map-nearby-field{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
+  .map-nearby-check{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
+  .map-nearby-note{margin:0 0 4px;font-size:12.5px;color:var(--muted);min-height:17px}
+  /* 지역 통계 창 */
+  .map-region-modal .modal-card{width:min(560px,96%)}
+  .map-region-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .map-region-note{font-size:12.5px;color:var(--muted)}
+  .map-region-list{max-height:min(46vh,320px);overflow-y:auto;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);margin-bottom:10px}
+  .map-region-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;
+    border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);font-size:12.5px}
+  .map-region-item:last-child{border-bottom:0}
+  .map-region-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .map-region-count{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
   /* 지도 고르기 창(칠판 → 🗺️)과 오프라인 지도 현황 창 */
   .map-picker-modal .modal-card{width:min(900px,96%);max-height:92vh;display:flex;flex-direction:column}
   .map-picker-bar{position:relative;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}

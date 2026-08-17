@@ -24,6 +24,9 @@ function loadMapViewer(){
       mapFormatBytes, mapParseCoords, mapDistanceMeters, mapLineLengthMeters,
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
       , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv
+      , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
+      , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
+      , mapCirclePoints, mapRegionNameOf, mapRegionTally
     };`, context);
   return context.__map;
 }
@@ -512,6 +515,246 @@ test("좌표처럼 생긴 입력만 좌표로 읽는다", () => {
   assert.equal(api.mapParseCoords("서울 시청"), null);
   assert.equal(api.mapParseCoords("37.5665"), null);
   assert.equal(api.mapParseCoords(""), null);
+});
+
+/* ===== 주소 CSV 일괄 지오코딩 ===== */
+
+/* 학교에서 만드는 표는 좌표가 아니라 주소만 있는 쪽이 훨씬 흔하다. 그런 표를 "쓸 수 없는 CSV"로
+   되돌리면 기능 전체가 무용지물이 되므로, 찾아야 할 줄로 넘겨받는 것이 이 기능의 전부다. */
+test("좌표 없이 주소만 있는 CSV도 받아 찾을 줄로 돌려준다", () => {
+  const api = loadMapViewer();
+  const parsed = api.mapMarkersFromCsv('이름,주소,메모\r\n시청,서울특별시 중구 세종대로 110,답사 시작\r\n');
+  assert.equal(parsed.markers.length, 0);
+  assert.equal(parsed.pending.length, 1);
+  assert.equal(parsed.pending[0].query, "서울특별시 중구 세종대로 110");
+  assert.equal(parsed.pending[0].label, "시청");
+  assert.equal(parsed.pending[0].note, "답사 시작");
+
+  // 좌표가 있는 줄과 주소만 있는 줄이 섞여 있어도 각각 제 갈래로 간다.
+  const mixed = api.mapMarkersFromCsv('이름,위도,경도,주소\r\n학교,37.5,127.0,\r\n시청,,,서울시청\r\n');
+  assert.equal(mixed.markers.length, 1);
+  assert.equal(mixed.pending.length, 1);
+  assert.equal(mixed.pending[0].query, "서울시청");
+
+  // 주소도 좌표도 없이 이름만 있으면 이름으로 찾아본다("경복궁").
+  const nameOnly = api.mapMarkersFromCsv('이름,주소\r\n경복궁,\r\n');
+  assert.equal(nameOnly.pending[0].query, "경복궁");
+});
+
+/* 좌표를 적었는데 999 같은 오타면 그건 자료 오류다. 이름을 장소로 착각해 검색을 부르면
+   수업 중에 엉뚱한 자리에 표시가 생긴다 — 예전처럼 조용히 제외해야 한다. */
+test("좌표 칸을 채웠지만 값이 잘못된 줄은 검색하지 않고 제외한다", () => {
+  const api = loadMapViewer();
+  const parsed = api.mapMarkersFromCsv('이름,위도,경도\r\n학교,37.5,127.0\r\n오류,999,127\r\n');
+  assert.equal(parsed.markers.length, 1);
+  assert.equal(parsed.skipped, 1);
+  assert.equal(parsed.pending.length, 0);
+  // 좌표 칸을 아예 비운 줄은 (0, 0) 표시가 아니라 찾을 줄이 된다.
+  const blank = api.mapMarkersFromCsv('이름,위도,경도,주소\r\n시청,,,서울시청\r\n');
+  assert.equal(blank.markers.length, 0);
+  assert.equal(blank.pending[0].query, "서울시청");
+});
+
+test("위도·경도도 주소도 없는 CSV만 형식 오류로 되돌린다", () => {
+  const api = loadMapViewer();
+  assert.throws(() => api.mapMarkersFromCsv('이름,메모\r\n학교,여기\r\n'), /csv-columns/);
+});
+
+test("한 번에 찾는 주소는 상한을 넘기지 않는다", () => {
+  const api = loadMapViewer();
+  const rows = ["이름,주소"];
+  for (let i = 0; i < api.MAP_GEOCODE_BATCH_MAX + 25; i++) rows.push("자리" + i + ",서울시 " + i + "로");
+  const parsed = api.mapMarkersFromCsv(rows.join("\r\n") + "\r\n");
+  assert.equal(parsed.pending.length, api.MAP_GEOCODE_BATCH_MAX);
+  assert.equal(parsed.skipped, 25);
+});
+
+test("CSV 내보내기·들이기는 시도·시군구까지 왕복한다", () => {
+  const api = loadMapViewer();
+  const marker = api.mapNormalizeMarker({ lat:37.5665, lng:126.978, label:"시청", region:"서울특별시", district:"중구" });
+  const back = api.mapMarkersFromCsv(api.mapMarkersToCsv([marker]));
+  assert.equal(back.markers[0].region, "서울특별시");
+  assert.equal(back.markers[0].district, "중구");
+  // 지역이 없던 옛 .map 도 그대로 열린다(빈 문자열로 시작).
+  const old = api.mapDocParse(JSON.stringify({
+    type:"classdock-map", version:2, markers:[{ lat:37, lng:127, label:"옛 표시" }]
+  }));
+  assert.equal(old.markers[0].region, "");
+  assert.equal(old.markers[0].district, "");
+});
+
+/* ===== 좌표 → 주소·행정구역 ===== */
+
+test("카카오·OSM의 서로 다른 응답을 같은 모양의 자리 정보로 읽는다", () => {
+  const api = loadMapViewer();
+  const kakao = api.mapKakaoAddressInfo({ documents:[{
+    road_address:{ address_name:"서울 중구 세종대로 110", building_name:"서울시청", region_1depth_name:"서울", region_2depth_name:"중구" },
+    address:{ address_name:"서울 중구 태평로1가 31" }
+  }] });
+  assert.equal(kakao.name, "서울시청");
+  assert.equal(kakao.region, "서울");
+  assert.equal(kakao.district, "중구");
+
+  const region = api.mapKakaoRegionInfo({ documents:[
+    { region_type:"B", region_1depth_name:"서울특별시", region_2depth_name:"중구", region_3depth_name:"태평로1가" },
+    { region_type:"H", region_1depth_name:"서울특별시", region_2depth_name:"중구", region_3depth_name:"명동" }
+  ] });
+  assert.equal(region.town, "명동", "수업에서 쓰는 이름은 행정동(H) 쪽이다");
+
+  const osm = api.mapOsmReverseInfo({ name:"서울특별시청", display_name:"서울특별시청, 세종대로",
+    address:{ road:"세종대로", city:"서울특별시", borough:"중구", state:"서울특별시" } });
+  assert.equal(osm.name, "서울특별시청");
+  assert.equal(osm.region, "서울특별시");
+  // 시도와 시군구가 같은 이름으로 오면(특별시) 한 단계 아래를 시군구로 쓴다.
+  assert.equal(osm.district, "중구");
+
+  assert.equal(api.mapKakaoAddressInfo({ documents:[] }), null);
+  assert.equal(api.mapOsmReverseInfo({}), null);
+});
+
+/* ===== 반경 안 시설 ===== */
+
+test("카카오 카테고리 응답에서 좌표가 성한 장소만 표시로 쓴다", () => {
+  const api = loadMapViewer();
+  const places = api.mapKakaoCategoryPlaces({ documents:[
+    { place_name:"○○초등학교", x:"127.0", y:"37.5", road_address_name:"○○로 1", distance:"320" },
+    { place_name:"좌표 없음", x:"", y:"" },
+    { place_name:"", x:"127.1", y:"37.6" }
+  ] });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].name, "○○초등학교");
+  assert.equal(places[0].distance, 320);
+});
+
+/* 지도 모델에는 원이 없다. 반경을 눈에 보이게 하려고 다각형으로 만드는데, 그 다각형이 실제
+   반경·넓이와 맞지 않으면 "반경 1km 원의 넓이"를 그대로 읽는 수업이 틀린 값을 가르치게 된다. */
+test("반경 원은 실제 반경과 넓이(πr²)에 맞는 다각형으로 만든다", () => {
+  const api = loadMapViewer();
+  const points = api.mapCirclePoints(37.5, 127.0, 1000, 72);
+  assert.equal(points.length, 72);
+  for (const point of points){
+    const meters = api.mapDistanceMeters([37.5, 127.0], point);
+    assert.ok(Math.abs(meters - 1000) < 20, "반경에서 " + Math.round(meters) + "m 떨어졌다");
+  }
+  const area = api.mapPolygonAreaSquareMeters(points);
+  const circle = Math.PI * 1000 * 1000;
+  assert.ok(Math.abs(area - circle) / circle < 0.01);
+});
+
+test("카카오 갈래 목록은 코드·색이 모두 성하다", () => {
+  const api = loadMapViewer();
+  assert.ok(api.MAP_KAKAO_CATEGORIES.length >= 8);
+  const colors = api.MAP_MARKER_COLORS.map(color => color.id);
+  for (const item of api.MAP_KAKAO_CATEGORIES){
+    assert.match(item.code, /^[A-Z]{2}[0-9]$/, item.code);
+    assert.ok(colors.includes(item.color), item.label + " 의 색 " + item.color);
+  }
+});
+
+/* ===== 지역별 개수 ===== */
+
+test("지역별 개수는 많은 곳부터 세고 '지역 없음'은 언제나 맨 뒤에 둔다", () => {
+  const api = loadMapViewer();
+  const markers = [
+    { region:"경기도", district:"수원시" },
+    { region:"경기도", district:"수원시" },
+    { region:"서울특별시", district:"중구" },
+    { region:"", district:"" }
+  ].map(api.mapNormalizeMarker);
+  const byDistrict = api.mapRegionTally(markers, "district").map(row => [row.label, row.count]);
+  assert.deepEqual(byDistrict[0], ["수원시", 2]);
+  assert.deepEqual(byDistrict[byDistrict.length - 1], [api.MAP_REGION_UNKNOWN, 1]);
+
+  const byRegion = api.mapRegionTally(markers, "region").map(row => [row.label, row.count]);
+  assert.deepEqual(byRegion[0], ["경기도", 2]);
+
+  // 시군구가 비면 시도라도 쓴다(세종·제주처럼 한 단계인 곳이 있다).
+  const oneLevel = api.mapNormalizeMarker({ region:"세종특별자치시", district:"" });
+  assert.equal(api.mapRegionNameOf(oneLevel, "district"), "세종특별자치시");
+  assert.equal(api.mapRegionNameOf(api.mapNormalizeMarker({}), "district"), "");
+});
+
+/* 세는 것으로 끝나면 지도와 통계가 따로 논다. 이 앱의 값은 지도 → 칠판 차트가 한 흐름이라는
+   점이므로, 칠판 쪽 훅과 지도 쪽 호출이 함께 있어야 한다. */
+test("지역별 개수는 칠판의 자료 차트 훅으로 이어진다", () => {
+  const board = fs.readFileSync(path.join(__dirname, "../src/js/whiteboard.js"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const hook = /doc\.insertBoardChart = \(spec\) => \{([\s\S]*?)\n  \};/.exec(board);
+  assert.ok(hook, "insertBoardChart 훅을 찾지 못했다");
+  assert.match(hook[1], /MNBoardTools\.chartGroup/);
+  assert.match(hook[1], /placeBoardGroup\(group\)/);
+  // 그림이 아니라 그룹으로 넣어야 칠판에서 다시 고치고 되돌릴 수 있다.
+  assert.doesNotMatch(hook[1], /insertBoardImage|toDataURL/);
+  assert.match(source, /boardDoc\.insertBoardChart\(\{/);
+  assert.match(source, /rows: rows\.map\(row => \(\{ label:row\.label, values:\[row\.count\] \}\)\)/);
+});
+
+/* ===== 카카오 확장 API의 계약 ===== */
+
+/* 런처가 둘이라 한쪽만 늘리면 그 기능이 조용히 한쪽에서만 동작한다(타일 허용 목록과 같은 함정). */
+test("두 런처가 같은 카카오 Local API 엔드포인트를 갖춘다", () => {
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  for (const launcher of [csharp, go]){
+    assert.match(launcher, /https:\/\/dapi\.kakao\.com\/v2\/local\/search\/category\.json/);
+    assert.match(launcher, /https:\/\/dapi\.kakao\.com\/v2\/local\/geo\/coord2address\.json/);
+    assert.match(launcher, /https:\/\/dapi\.kakao\.com\/v2\/local\/geo\/coord2regioncode\.json/);
+    for (const provider of ["kakao-category", "kakao-coord2address", "kakao-coord2region", "osm-reverse"]){
+      assert.ok(launcher.includes('"' + provider + '"'), provider);
+    }
+  }
+});
+
+/* 브라우저가 보낸 값을 그대로 주소에 붙이면 남의 서버로 보내는 요청을 만들 수 있다.
+   좌표·반경·갈래는 런처에서 숫자·코드 꼴만 통과시킨다. */
+test("좌표로 부르는 요청은 런처가 숫자·코드 꼴만 통과시킨다", () => {
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  const csSpot = /static GeocodeSpot ReadGeocodeSpot\(([\s\S]*?)\n    \}/.exec(csharp);
+  assert.ok(csSpot);
+  assert.match(csSpot[1], /GeocodeNumber\(QueryValue\(path, "x"\), -180, 180\)/);
+  assert.match(csSpot[1], /GeocodeNumber\(QueryValue\(path, "y"\), -85, 85\)/);
+  assert.match(csSpot[1], /GeocodeNumber\(QueryValue\(path, "radius"\), 1, 20000\)/);
+  const goSpot = /func readGeocodeSpot\(([\s\S]*?)\n\}/.exec(go);
+  assert.ok(goSpot);
+  assert.match(goSpot[1], /geocodeNumber\(query\.Get\("x"\), -180, 180\)/);
+  assert.match(goSpot[1], /geocodeNumber\(query\.Get\("radius"\), 1, 20000\)/);
+  // 기준점 없이 부르면 검색어 대신 오류를 돌려준다.
+  assert.match(csharp, /geocode-bad-point/);
+  assert.match(go, /geocode-bad-point/);
+  assert.match(csharp, /geocode-bad-category/);
+  assert.match(go, /geocode-bad-category/);
+});
+
+/* 카카오에만 있는 기능은 OSM 폴백이 없다. 꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 된다. */
+test("주변 시설은 카카오를 켰을 때만 화면에 내놓고 주소 확인은 OSM으로도 돌아간다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /nearbyBtn\.hidden = true/);
+  assert.match(source, /mapProviderIsKakao\(\)\.then\(\(kakao\) => \{ nearbyBtn\.hidden = !kakao; \}\)/);
+  const nearby = /async function mapNearbyPlaces\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(nearby);
+  assert.match(nearby[1], /throw new Error\("kakao-required"\)/);
+  // 반대로 주소·행정구역은 OSM 역지오코딩으로 대신할 수 있어야 두 기능이 모두에게 열린다.
+  const info = /async function mapPlaceInfoAt\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(info);
+  assert.match(info[1], /"kakao-coord2region"/);
+  assert.match(info[1], /"osm-reverse"/);
+  assert.ok(info[1].indexOf("kakao-coord2address") < info[1].indexOf("osm-reverse"), "카카오를 먼저 보고 OSM 으로 돌아간다");
+});
+
+/* 표시 하나마다 한 번씩 부르는 길이라, 같은 자리를 다시 물으면 그만큼 남의 서버를 두드린다. */
+test("좌표로 물어본 자리 정보는 캐시해 같은 자리를 두 번 묻지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const info = /async function mapPlaceInfoAt\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(info);
+  assert.match(info[1], /_mapPlaceInfoCache\.has\(cacheKey\)/);
+  assert.match(info[1], /_mapPlaceInfoCache\.set\(cacheKey, info\)/);
+  // 한 줄씩 차례로 찾는다 — 한꺼번에 던지면 공급자 쪽 초당 제한에 걸린다.
+  const batch = /async function mapResolvePendingMarkers\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(batch);
+  assert.doesNotMatch(batch[1], /Promise\.all|Promise\.allSettled/);
+  assert.match(batch[1], /shouldStop\(\)/);
+  assert.match(batch[1], /message === "geocode-launcher-required"\) throw error/);
 });
 
 test("새 지도 파일 이름은 두 번째부터 번호가 붙는다", () => {

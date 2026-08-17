@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -2304,7 +2305,7 @@ class ClassDockLauncher
                 else if (method == "GET" && path.StartsWith("/geocode?", StringComparison.Ordinal))
                 {
                     byte[] found; string error;
-                    if (TryGeocodePlace(QueryValue(path, "q"), QueryValue(path, "provider"), out found, out error))
+                    if (TryGeocodePlace(QueryValue(path, "q"), QueryValue(path, "provider"), ReadGeocodeSpot(path), out found, out error))
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", found);
                     else
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
@@ -2867,6 +2868,12 @@ class ClassDockLauncher
     const string GeocodeEndpointEnvironment = "CLASSDOCK_GEOCODER_URL";
     const string KakaoAddressEndpoint = "https://dapi.kakao.com/v2/local/search/address.json";
     const string KakaoKeywordEndpoint = "https://dapi.kakao.com/v2/local/search/keyword.json";
+    /* 같은 REST 키로 쓰는 나머지 Local API. 신청이 따로 필요 없고 도메인 등록도 없다.
+       category  = 반경 안의 학교·병원 같은 갈래별 장소
+       coord2address / coord2regioncode = 찍은 자리의 주소·행정구역 */
+    const string KakaoCategoryEndpoint = "https://dapi.kakao.com/v2/local/search/category.json";
+    const string KakaoCoordAddressEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2address.json";
+    const string KakaoCoordRegionEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json";
     const int GeocodeMinIntervalMs = 1100;      // 정책상 초당 1건 — 여유를 조금 둔다
     static readonly object GeocodeLock = new object();
     static DateTime GeocodeLastCall = DateTime.MinValue;
@@ -2989,7 +2996,7 @@ class ClassDockLauncher
         error = "kakao-key-invalid";
         if (!ValidKakaoMapKey(key)) return false;
         byte[] probe;
-        if (!TryFetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key, out probe, out error)) return false;
+        if (!TryFetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key, null, out probe, out error)) return false;
         string previous = CurrentKakaoMapKey();
         lock (KakaoMapKeyLock)
         {
@@ -3010,10 +3017,44 @@ class ClassDockLauncher
         error = "";
         return true;
     }
-    static bool TryFetchGeocode(string q, string provider, string kakaoKey, out byte[] data, out string error)
+    /* 검색어 말고 좌표로 부르는 요청(반경 시설·좌표→주소)의 딸린 값.
+       브라우저가 보낸 문자열을 그대로 URL 에 붙이지 않고 여기서 숫자·코드 꼴만 통과시킨다. */
+    class GeocodeSpot
+    {
+        public string X = "";
+        public string Y = "";
+        public string Radius = "";
+        public string Category = "";
+        public string Page = "";
+        public bool HasPoint { get { return X.Length > 0 && Y.Length > 0; } }
+        public string CacheKey { get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page; } }
+    }
+    static string GeocodeNumber(string value, double min, double max)
+    {
+        double parsed;
+        if (!double.TryParse((value ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) return "";
+        if (double.IsNaN(parsed) || double.IsInfinity(parsed) || parsed < min || parsed > max) return "";
+        return parsed.ToString("0.######", CultureInfo.InvariantCulture);
+    }
+    static GeocodeSpot ReadGeocodeSpot(string path)
+    {
+        GeocodeSpot spot = new GeocodeSpot();
+        spot.X = GeocodeNumber(QueryValue(path, "x"), -180, 180);
+        spot.Y = GeocodeNumber(QueryValue(path, "y"), -85, 85);
+        spot.Radius = GeocodeNumber(QueryValue(path, "radius"), 1, 20000);      // 카카오 반경 상한
+        spot.Page = GeocodeNumber(QueryValue(path, "page"), 1, 3);
+        // 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
+        string category = (QueryValue(path, "category") ?? "").Trim().ToUpperInvariant();
+        if (category.Length == 3 && category[0] >= 'A' && category[0] <= 'Z'
+            && category[1] >= 'A' && category[1] <= 'Z' && category[2] >= '0' && category[2] <= '9')
+            spot.Category = category;
+        return spot;
+    }
+    static bool TryFetchGeocode(string q, string provider, string kakaoKey, GeocodeSpot spot, out byte[] data, out string error)
     {
         data = null; error = "geocode-failed";
-        bool kakao = provider == "kakao-address" || provider == "kakao-keyword";
+        bool kakao = provider.StartsWith("kakao-", StringComparison.Ordinal);
+        if (spot == null) spot = new GeocodeSpot();
         try
         {
             if (!kakao)
@@ -3031,10 +3072,34 @@ class ClassDockLauncher
                 TileTlsReady = true;
             }
             string url;
-            if (kakao)
+            if (provider == "kakao-coord2address" || provider == "kakao-coord2region")
+            {
+                string endpoint = provider == "kakao-coord2region" ? KakaoCoordRegionEndpoint : KakaoCoordAddressEndpoint;
+                url = endpoint + "?x=" + spot.X + "&y=" + spot.Y;
+            }
+            else if (provider == "kakao-category")
+            {
+                url = KakaoCategoryEndpoint + "?category_group_code=" + spot.Category
+                    + "&x=" + spot.X + "&y=" + spot.Y
+                    + "&radius=" + (spot.Radius.Length > 0 ? spot.Radius : "1000")
+                    + "&size=15&sort=distance&page=" + (spot.Page.Length > 0 ? spot.Page : "1");
+            }
+            else if (kakao)
             {
                 string endpoint = provider == "kakao-keyword" ? KakaoKeywordEndpoint : KakaoAddressEndpoint;
                 url = endpoint + "?size=5&query=" + Uri.EscapeDataString(q);
+                // 키워드 검색에 기준점이 오면 그 둘레만 본다(반경 시설 찾기가 이 길을 쓴다).
+                if (provider == "kakao-keyword" && spot.HasPoint)
+                    url += "&x=" + spot.X + "&y=" + spot.Y + "&sort=distance"
+                        + (spot.Radius.Length > 0 ? "&radius=" + spot.Radius : "");
+            }
+            else if (provider == "osm-reverse")
+            {
+                // Nominatim 의 역지오코딩은 같은 서버의 이웃 경로다(/search → /reverse).
+                string basePath = GeocodeEndpoint().GetLeftPart(UriPartial.Path);
+                if (basePath.EndsWith("/search", StringComparison.Ordinal))
+                    basePath = basePath.Substring(0, basePath.Length - "/search".Length) + "/reverse";
+                url = basePath + "?format=jsonv2&zoom=18&accept-language=ko&lat=" + spot.Y + "&lon=" + spot.X;
             }
             else
             {
@@ -3072,22 +3137,34 @@ class ClassDockLauncher
         }
         catch { error = "geocode-failed"; data = null; return false; }
     }
-    static bool TryGeocodePlace(string query, string requestedProvider, out byte[] data, out string error)
+    static readonly string[] GeocodeProviders = {
+        "osm", "osm-reverse", "kakao-address", "kakao-keyword",
+        "kakao-category", "kakao-coord2address", "kakao-coord2region"
+    };
+    static bool TryGeocodePlace(string query, string requestedProvider, GeocodeSpot spot, out byte[] data, out string error)
     {
         data = null; error = "geocode-failed";
+        if (spot == null) spot = new GeocodeSpot();
         string q = (query ?? "").Trim();
-        if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
-        string provider = requestedProvider == "kakao-address" || requestedProvider == "kakao-keyword"
-            ? requestedProvider : "osm";
+        string provider = Array.IndexOf(GeocodeProviders, requestedProvider ?? "") >= 0 ? requestedProvider : "osm";
+        // 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
+        bool needsPoint = provider == "kakao-category" || provider == "kakao-coord2address"
+            || provider == "kakao-coord2region" || provider == "osm-reverse";
+        if (needsPoint)
+        {
+            if (!spot.HasPoint) { error = "geocode-bad-point"; return false; }
+            if (provider == "kakao-category" && spot.Category.Length == 0) { error = "geocode-bad-category"; return false; }
+        }
+        else if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
         string kakaoKey = "";
         if (provider.StartsWith("kakao-", StringComparison.Ordinal))
         {
             kakaoKey = CurrentKakaoMapKey();
             if (kakaoKey.Length == 0) { error = "kakao-key-required"; return false; }
         }
-        string cacheKey = provider + "\n" + q;
+        string cacheKey = provider + "\n" + q + "\n" + spot.CacheKey;
         lock (GeocodeLock) if (GeocodeCache.TryGetValue(cacheKey, out data)) return true;
-        if (!TryFetchGeocode(q, provider, kakaoKey, out data, out error)) return false;
+        if (!TryFetchGeocode(q, provider, kakaoKey, spot, out data, out error)) return false;
         lock (GeocodeLock)
         {
             if (GeocodeCache.Count > 200) GeocodeCache.Clear();

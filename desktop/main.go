@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +57,11 @@ const (
 	defaultGeocoder   = "https://nominatim.openstreetmap.org/search"
 	kakaoAddressURL   = "https://dapi.kakao.com/v2/local/search/address.json"
 	kakaoKeywordURL   = "https://dapi.kakao.com/v2/local/search/keyword.json"
-	geocoderEnv       = "CLASSDOCK_GEOCODER_URL"
+	// 같은 REST 키로 쓰는 나머지 Local API — 반경 갈래별 장소, 좌표→주소·행정구역.
+	kakaoCategoryURL     = "https://dapi.kakao.com/v2/local/search/category.json"
+	kakaoCoordAddressURL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
+	kakaoCoordRegionURL  = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
+	geocoderEnv          = "CLASSDOCK_GEOCODER_URL"
 )
 
 var (
@@ -308,8 +314,45 @@ func setMapSearchProvider(value string) {
 	OSM 은 식별 User-Agent 와 요청 간격을 런처에서 지키고, 카카오 키는 브라우저가 아닌 런처 메모리에
 	둔다. Go 폴백은 OS 키 저장소를 가정할 수 없어 실행 중에만 기억한다.
 */
-func fetchGeocode(query, provider, kakaoKey string) ([]byte, string) {
-	kakao := provider == "kakao-address" || provider == "kakao-keyword"
+/*
+좌표로 부르는 요청(반경 시설·좌표→주소)의 딸린 값. 브라우저가 보낸 문자열을 그대로 URL 에 붙이지
+않고 숫자·코드 꼴만 통과시킨다(launcher.cs 의 GeocodeSpot 과 같은 규칙).
+*/
+type geocodeSpot struct {
+	x, y, radius, category, page string
+}
+
+func (s geocodeSpot) hasPoint() bool { return s.x != "" && s.y != "" }
+func (s geocodeSpot) cacheKey() string {
+	return s.x + "|" + s.y + "|" + s.radius + "|" + s.category + "|" + s.page
+}
+
+func geocodeNumber(value string, min, max float64) string {
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < min || parsed > max {
+		return ""
+	}
+	return strconv.FormatFloat(parsed, 'f', -1, 64)
+}
+
+func readGeocodeSpot(query url.Values) geocodeSpot {
+	spot := geocodeSpot{
+		x:      geocodeNumber(query.Get("x"), -180, 180),
+		y:      geocodeNumber(query.Get("y"), -85, 85),
+		radius: geocodeNumber(query.Get("radius"), 1, 20000), // 카카오 반경 상한
+		page:   geocodeNumber(query.Get("page"), 1, 3),
+	}
+	// 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
+	category := strings.ToUpper(strings.TrimSpace(query.Get("category")))
+	if len(category) == 3 && category[0] >= 'A' && category[0] <= 'Z' &&
+		category[1] >= 'A' && category[1] <= 'Z' && category[2] >= '0' && category[2] <= '9' {
+		spot.category = category
+	}
+	return spot
+}
+
+func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, string) {
+	kakao := strings.HasPrefix(provider, "kakao-")
 	if !kakao {
 		geocodeMu.Lock()
 		if waited := time.Since(geocodeLast); waited < geocodeMinGap {
@@ -320,7 +363,34 @@ func fetchGeocode(query, provider, kakaoKey string) ([]byte, string) {
 	}
 
 	var endpoint string
-	if kakao {
+	if provider == "kakao-coord2address" || provider == "kakao-coord2region" {
+		endpoint = kakaoCoordAddressURL
+		if provider == "kakao-coord2region" {
+			endpoint = kakaoCoordRegionURL
+		}
+		values := url.Values{}
+		values.Set("x", spot.x)
+		values.Set("y", spot.y)
+		endpoint += "?" + values.Encode()
+	} else if provider == "kakao-category" {
+		radius := spot.radius
+		if radius == "" {
+			radius = "1000"
+		}
+		page := spot.page
+		if page == "" {
+			page = "1"
+		}
+		values := url.Values{}
+		values.Set("category_group_code", spot.category)
+		values.Set("x", spot.x)
+		values.Set("y", spot.y)
+		values.Set("radius", radius)
+		values.Set("size", "15")
+		values.Set("sort", "distance")
+		values.Set("page", page)
+		endpoint = kakaoCategoryURL + "?" + values.Encode()
+	} else if kakao {
 		endpoint = kakaoAddressURL
 		if provider == "kakao-keyword" {
 			endpoint = kakaoKeywordURL
@@ -328,7 +398,36 @@ func fetchGeocode(query, provider, kakaoKey string) ([]byte, string) {
 		values := url.Values{}
 		values.Set("size", "5")
 		values.Set("query", query)
+		// 키워드 검색에 기준점이 오면 그 둘레만 본다(반경 시설 찾기가 이 길을 쓴다).
+		if provider == "kakao-keyword" && spot.hasPoint() {
+			values.Set("x", spot.x)
+			values.Set("y", spot.y)
+			values.Set("sort", "distance")
+			if spot.radius != "" {
+				values.Set("radius", spot.radius)
+			}
+		}
 		endpoint += "?" + values.Encode()
+	} else if provider == "osm-reverse" {
+		// Nominatim 의 역지오코딩은 같은 서버의 이웃 경로다(/search → /reverse).
+		endpointURL := strings.TrimSpace(os.Getenv(geocoderEnv))
+		if endpointURL == "" {
+			endpointURL = defaultGeocoder
+		}
+		parsedEndpoint, err := url.Parse(endpointURL)
+		if err != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Hostname() == "" {
+			parsedEndpoint, _ = url.Parse(defaultGeocoder)
+		}
+		parsedEndpoint.Path = strings.TrimSuffix(parsedEndpoint.Path, "/search") + "/reverse"
+		parsedEndpoint.Fragment = ""
+		values := url.Values{}
+		values.Set("format", "jsonv2")
+		values.Set("zoom", "18")
+		values.Set("accept-language", "ko")
+		values.Set("lat", spot.y)
+		values.Set("lon", spot.x)
+		parsedEndpoint.RawQuery = values.Encode()
+		endpoint = parsedEndpoint.String()
 	} else {
 		endpointURL := strings.TrimSpace(os.Getenv(geocoderEnv))
 		if endpointURL == "" {
@@ -375,14 +474,32 @@ func fetchGeocode(query, provider, kakaoKey string) ([]byte, string) {
 	return data, ""
 }
 
-func geocodePlace(query, requestedProvider string) ([]byte, string) {
+var geocodeProviders = []string{
+	"osm", "osm-reverse", "kakao-address", "kakao-keyword",
+	"kakao-category", "kakao-coord2address", "kakao-coord2region",
+}
+
+func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, string) {
 	query = strings.TrimSpace(query)
-	if query == "" || len(query) > 200 {
-		return nil, "geocode-bad-query"
-	}
 	provider := "osm"
-	if requestedProvider == "kakao-address" || requestedProvider == "kakao-keyword" {
-		provider = requestedProvider
+	for _, candidate := range geocodeProviders {
+		if requestedProvider == candidate {
+			provider = candidate
+			break
+		}
+	}
+	// 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
+	needsPoint := provider == "kakao-category" || provider == "kakao-coord2address" ||
+		provider == "kakao-coord2region" || provider == "osm-reverse"
+	if needsPoint {
+		if !spot.hasPoint() {
+			return nil, "geocode-bad-point"
+		}
+		if provider == "kakao-category" && spot.category == "" {
+			return nil, "geocode-bad-category"
+		}
+	} else if query == "" || len(query) > 200 {
+		return nil, "geocode-bad-query"
 	}
 	key := ""
 	if strings.HasPrefix(provider, "kakao-") {
@@ -391,14 +508,14 @@ func geocodePlace(query, requestedProvider string) ([]byte, string) {
 			return nil, "kakao-key-required"
 		}
 	}
-	cacheKey := provider + "\n" + query
+	cacheKey := provider + "\n" + query + "\n" + spot.cacheKey()
 	geocodeMu.Lock()
 	if cached, ok := geocodeCache[cacheKey]; ok {
 		geocodeMu.Unlock()
 		return cached, ""
 	}
 	geocodeMu.Unlock()
-	data, code := fetchGeocode(query, provider, key)
+	data, code := fetchGeocode(query, provider, key, spot)
 	if code != "" {
 		return nil, code
 	}
@@ -525,7 +642,7 @@ func main() {
 			http.Error(w, "invalid-host", http.StatusForbidden)
 			return
 		}
-		data, code := geocodePlace(r.URL.Query().Get("q"), r.URL.Query().Get("provider"))
+		data, code := geocodePlace(r.URL.Query().Get("q"), r.URL.Query().Get("provider"), readGeocodeSpot(r.URL.Query()))
 		if code != "" {
 			status := http.StatusBadGateway
 			if code == "kakao-key-required" {
@@ -576,7 +693,7 @@ func main() {
 			http.Error(w, "kakao-key-invalid", http.StatusBadRequest)
 			return
 		}
-		if _, code := fetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key); code != "" {
+		if _, code := fetchGeocode("서울특별시 중구 세종대로 110", "kakao-address", key, geocodeSpot{}); code != "" {
 			http.Error(w, code, http.StatusBadRequest)
 			return
 		}

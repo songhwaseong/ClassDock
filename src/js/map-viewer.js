@@ -15,9 +15,12 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 2;
+const MAP_DOC_VERSION = 3;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 const MAP_CSV_MAX_MARKERS = 5000;
+/* 주소만 적힌 CSV 를 좌표로 바꿀 때의 상한. 한 줄에 한 번씩 검색을 부르므로(OSM 은 정책상 1초에
+   한 건) 수업 시간 안에 끝나는 만큼만 받는다. */
+const MAP_GEOCODE_BATCH_MAX = 200;
 
 /* 배경지도 — 여기 넣는 호스트는 런처의 허용 목록(launcher.cs TileProxyHosts)에 반드시 있어야 한다.
    목록에 없는 호스트를 쓰면 프록시가 502 를 돌려주고 지도가 회색으로 남는다. */
@@ -56,6 +59,16 @@ const MAP_MARKER_COLORS = [
   { id:"purple", label:"보라", hex:"#7c3aed" },
   { id:"slate",  label:"검정", hex:"#334155" }
 ];
+
+/* 표시를 새로 찍을 때 그 자리의 주소를 이름에 채울지. 지도 문서마다가 아니라 사람마다의 습관이라
+   .map 파일이 아닌 이 브라우저에 남긴다(지도 고르기 창의 마지막 위치와 같은 자리). */
+const MAP_AUTO_ADDRESS_KEY = "mn.mapAutoAddress";
+function mapAutoAddressOn(){
+  try { return localStorage.getItem(MAP_AUTO_ADDRESS_KEY) === "1"; } catch(_){ return false; }
+}
+function mapRememberAutoAddress(on){
+  try { localStorage.setItem(MAP_AUTO_ADDRESS_KEY, on ? "1" : "0"); } catch(_){}
+}
 
 // 프록시로 받던 타일이 계속 실패하면(옛 exe 등) 조용히 직접 주소로 되돌린다.
 const MAP_PROXY_FAIL_LIMIT = 6;
@@ -110,7 +123,10 @@ function mapNormalizeMarker(raw){
     lng: mapClampLng(value.lng),
     label: String(value.label == null ? "" : value.label).slice(0, 120),
     note: String(value.note == null ? "" : value.note).slice(0, 2000),
-    color: colorId
+    color: colorId,
+    // 행정구역(시도·시군구)은 '지역 통계'가 채워 넣는다. 옛 .map 에는 없으므로 늘 빈 문자열로 시작한다.
+    region: String(value.region == null ? "" : value.region).slice(0, 40),
+    district: String(value.district == null ? "" : value.district).slice(0, 40)
   };
 }
 function mapNormalizePoint(raw){
@@ -272,6 +288,10 @@ function mapCsvRows(text){
   if (field || row.length){ row.push(field.replace(/\r$/, "")); rows.push(row); }
   return rows.filter(values => values.some(value => String(value).trim()));
 }
+/* CSV → 표시.
+   학교에서 만드는 표는 좌표가 아니라 주소만 있는 쪽이 훨씬 흔하다(답사지 목록·우리 동네 조사).
+   그래서 위도·경도가 없어도 주소 열이 있으면 실패로 보지 않고, 찾아야 할 줄(pending)로 돌려준다 —
+   실제 검색은 네트워크를 쓰므로 화면 쪽(mapResolvePendingMarkers)에서 진행 표시와 함께 돈다. */
 function mapMarkersFromCsv(text){
   const rows = mapCsvRows(text);
   if (rows.length < 2) throw new Error("csv-empty");
@@ -282,32 +302,50 @@ function mapMarkersFromCsv(text){
   const lngAt = find(["경도", "lng", "lon", "longitude"]);
   const noteAt = find(["메모", "설명", "note", "description"]);
   const colorAt = find(["색", "색상", "color"]);
-  if (latAt < 0 || lngAt < 0) throw new Error("csv-columns");
+  const addressAt = find(["주소", "도로명주소", "지번주소", "소재지", "address", "addr"]);
+  const regionAt = find(["시도", "광역시도", "region"]);
+  const districtAt = find(["시군구", "구", "district"]);
+  if ((latAt < 0 || lngAt < 0) && addressAt < 0) throw new Error("csv-columns");
   const markers = [];
+  const pending = [];
   let skipped = 0;
   for (const row of rows.slice(1, MAP_CSV_MAX_MARKERS + 1)){
-    const lat = Number(row[latAt]), lng = Number(row[lngAt]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -85 || lat > 85 || lng < -180 || lng > 180){ skipped++; continue; }
     const colorRaw = colorAt >= 0 ? String(row[colorAt] || "").trim().toLowerCase() : "red";
     const colorMatch = MAP_MARKER_COLORS.find(item => item.id === colorRaw || item.label === colorRaw);
-    const color = colorMatch ? colorMatch.id : "red";
-    markers.push(mapNormalizeMarker({
-      lat, lng, color,
-      label: labelAt >= 0 ? row[labelAt] : "",
-      note: noteAt >= 0 ? row[noteAt] : ""
-    }));
+    const shared = {
+      color: colorMatch ? colorMatch.id : "red",
+      label: labelAt >= 0 ? String(row[labelAt] || "") : "",
+      note: noteAt >= 0 ? String(row[noteAt] || "") : "",
+      region: regionAt >= 0 ? String(row[regionAt] || "") : "",
+      district: districtAt >= 0 ? String(row[districtAt] || "") : ""
+    };
+    /* 빈 칸을 숫자로 읽으면 Number("")는 0 이다 — 그대로 두면 좌표를 비워 둔 줄이 아프리카 앞바다
+       (0, 0)에 표시로 찍힌다. 그래서 "좌표를 적었는가"를 먼저 보고 값을 읽는다. */
+    const wroteCoords = latAt >= 0 && lngAt >= 0
+      && String(row[latAt] || "").trim() !== "" && String(row[lngAt] || "").trim() !== "";
+    const lat = wroteCoords ? Number(row[latAt]) : NaN;
+    const lng = wroteCoords ? Number(row[lngAt]) : NaN;
+    const usable = Number.isFinite(lat) && Number.isFinite(lng) && lat >= -85 && lat <= 85 && lng >= -180 && lng <= 180;
+    if (usable){ markers.push(mapNormalizeMarker({ ...shared, lat, lng })); continue; }
+    const address = addressAt >= 0 ? String(row[addressAt] || "").trim() : "";
+    /* 좌표를 적기는 했는데 쓸 수 없는 값이면(999 같은 오타) 그건 자료 오류다 — 이름을 장소로
+       착각해 검색을 부르지 않고 예전처럼 제외한다. 좌표 칸이 아예 비어 있을 때만 찾아 나선다. */
+    const query = address || (wroteCoords ? "" : shared.label.trim());
+    if (query && pending.length < MAP_GEOCODE_BATCH_MAX) pending.push({ ...shared, query });
+    else skipped++;
   }
-  if (!markers.length) throw new Error("csv-no-markers");
-  return { markers, skipped, truncated: Math.max(0, rows.length - 1 - MAP_CSV_MAX_MARKERS) };
+  if (!markers.length && !pending.length) throw new Error("csv-no-markers");
+  return { markers, pending, skipped, truncated: Math.max(0, rows.length - 1 - MAP_CSV_MAX_MARKERS) };
 }
 function mapCsvEscape(value){
   const text = String(value == null ? "" : value);
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 function mapMarkersToCsv(markers){
-  const rows = [["이름", "위도", "경도", "메모", "색상"]];
+  const rows = [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]];
   for (const marker of Array.isArray(markers) ? markers : []){
-    rows.push([marker.label, Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6), marker.note, marker.color]);
+    rows.push([marker.label, Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6),
+      marker.note, marker.color, marker.region || "", marker.district || ""]);
   }
   return "\uFEFF" + rows.map(row => row.map(mapCsvEscape).join(",")).join("\r\n") + "\r\n";
 }
@@ -377,23 +415,35 @@ function mapKakaoPlaces(raw){
     const road = String(item.road_address_name || (item.road_address && item.road_address.address_name) || "").trim();
     const address = String(item.address_name || (item.address && item.address.address_name) || "").trim();
     const detail = road || address;
+    // 빈 문자열은 Number("")=0 이라 좌표처럼 통과한다 — 적혀 있는지부터 본다.
+    if (String(item.y || "").trim() === "" || String(item.x || "").trim() === "") return null;
     const lat = Number(item.y), lng = Number(item.x);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     return { name:placeName && detail ? placeName + " · " + detail : (placeName || detail),
       lat:mapClampLat(lat), lng:mapClampLng(lng) };
   }).filter(place => place && place.name);
 }
-async function mapFetchGeocode(q, provider){
-  const response = await fetch("/geocode?provider=" + encodeURIComponent(provider) + "&q=" + encodeURIComponent(q), { cache:"no-store" });
+async function mapFetchGeocode(q, provider, spot){
+  let url = "/geocode?provider=" + encodeURIComponent(provider) + "&q=" + encodeURIComponent(q);
+  // 좌표·반경·갈래처럼 검색어가 아닌 값은 런처가 숫자·코드 꼴만 통과시킨다(launcher.cs ReadGeocodeSpot).
+  for (const [key, value] of Object.entries(spot || {})){
+    if (value == null || value === "") continue;
+    url += "&" + key + "=" + encodeURIComponent(value);
+  }
+  const response = await fetch(url, { cache:"no-store" });
   if (!response.ok) throw new Error((await response.text()).trim() || "geocode-failed");
   return await response.json();
+}
+/* 지금 고른 검색 공급자가 카카오인지. 앱 모드가 별도 브라우저 프로필로 열렸을 때 런처에 저장된
+   선택을 먼저 받아 와야 하므로 비동기다. */
+async function mapProviderIsKakao(){
+  try { if (window.__classDockMapSearchProviderReady) await window.__classDockMapSearchProviderReady; } catch(_){}
+  return typeof appSettings === "object" && !!appSettings && appSettings.mapSearchProvider === "kakao";
 }
 async function mapGeocode(query){
   const q = String(query || "").trim();
   if (!q || q.length > 200) return [];
-  // 앱 모드가 별도 브라우저 프로필로 열렸을 때 런처에 저장된 공급자 선택을 먼저 받아 온다.
-  try { if (window.__classDockMapSearchProviderReady) await window.__classDockMapSearchProviderReady; } catch(_){}
-  const provider = typeof appSettings === "object" && appSettings && appSettings.mapSearchProvider === "kakao" ? "kakao" : "osm";
+  const provider = await mapProviderIsKakao() ? "kakao" : "osm";
   const cacheKey = provider + "\n" + q;
   if (_mapGeocodeCache.has(cacheKey)) return _mapGeocodeCache.get(cacheKey);
   const proxyBase = await mapTileProxyBase();
@@ -413,6 +463,171 @@ async function mapGeocode(query){
   _mapGeocodeCache.set(cacheKey, places);
   return places;
 }
+/* ===== 좌표 → 주소·행정구역 =====
+   찍은 자리가 어디인지 되묻는 길. 카카오를 켜면 도로명 주소와 행정동까지 오고, OSM 만 있으면
+   Nominatim 의 /reverse 로 같은 자리를 묻는다(런처가 경로를 갈아 끼운다). 표시 하나마다 한 번씩
+   부르게 되므로 좌표를 소수점 5자리로 끊어 캐시한다 — 같은 자리를 두 번 묻지 않는다. */
+const _mapPlaceInfoCache = new Map();
+
+function mapKakaoAddressInfo(raw){
+  const doc = raw && Array.isArray(raw.documents) ? raw.documents[0] : null;
+  if (!doc) return null;
+  const road = doc.road_address ? String(doc.road_address.address_name || "").trim() : "";
+  const lot = doc.address ? String(doc.address.address_name || "").trim() : "";
+  const building = doc.road_address ? String(doc.road_address.building_name || "").trim() : "";
+  const source = doc.road_address || doc.address || {};
+  const name = building || road || lot;
+  if (!name) return null;
+  return {
+    name, road, address: lot,
+    region: String(source.region_1depth_name || "").trim(),
+    district: String(source.region_2depth_name || "").trim()
+  };
+}
+function mapKakaoRegionInfo(raw){
+  const list = raw && Array.isArray(raw.documents) ? raw.documents : [];
+  // 행정동(H)이 있으면 그쪽이 수업에서 쓰는 이름이다. 없으면 법정동(B)으로 대신한다.
+  const doc = list.find(item => item && item.region_type === "H") || list[0];
+  if (!doc) return null;
+  const region = String(doc.region_1depth_name || "").trim();
+  const district = String(doc.region_2depth_name || "").trim();
+  if (!region && !district) return null;
+  return { region, district, town:String(doc.region_3depth_name || "").trim(),
+    name:String(doc.address_name || "").trim() };
+}
+function mapOsmReverseInfo(raw){
+  if (!raw || typeof raw !== "object") return null;
+  const address = raw.address && typeof raw.address === "object" ? raw.address : {};
+  const name = String(raw.name || "").trim() || String(raw.display_name || "").trim();
+  if (!name) return null;
+  const region = String(address.state || address.province || address.city || "").trim();
+  let district = String(address.city || address.county || address.town || "").trim();
+  // 시도와 시군구가 같은 이름으로 오면(특별시 등) 한 단계 아래를 시군구로 쓴다.
+  if (district === region) district = String(address.borough || address.city_district || address.suburb || "").trim();
+  return { name, road:String(address.road || "").trim(), address:String(raw.display_name || "").trim(), region, district };
+}
+async function mapPlaceInfoAt(lat, lng, want){
+  const y = Number(lat).toFixed(6), x = Number(lng).toFixed(6);
+  const kakao = await mapProviderIsKakao();
+  const cacheKey = (kakao ? "kakao" : "osm") + "\n" + want + "\n" + y + "," + x;
+  if (_mapPlaceInfoCache.has(cacheKey)) return _mapPlaceInfoCache.get(cacheKey);
+  const proxyBase = await mapTileProxyBase();
+  if (!proxyBase) throw new Error("geocode-launcher-required");
+  let info = null, lastError = null;
+  if (kakao){
+    const provider = want === "region" ? "kakao-coord2region" : "kakao-coord2address";
+    const read = want === "region" ? mapKakaoRegionInfo : mapKakaoAddressInfo;
+    try { info = read(await mapFetchGeocode("", provider, { x, y })); }
+    catch(error){ lastError = error; }
+  }
+  if (!info){
+    // OSM 의 역지오코딩 한 번에 주소와 행정구역이 함께 온다 — 카카오가 없어도 두 기능 다 돌아간다.
+    try { info = mapOsmReverseInfo(await mapFetchGeocode("", "osm-reverse", { x, y })); }
+    catch(error){ if (!lastError) lastError = error; }
+  }
+  if (!info && lastError) throw lastError;
+  _mapPlaceInfoCache.set(cacheKey, info);
+  return info;
+}
+function mapAddressAt(lat, lng){ return mapPlaceInfoAt(lat, lng, "address"); }
+function mapRegionAt(lat, lng){ return mapPlaceInfoAt(lat, lng, "region"); }
+
+/* ===== 반경 안 갈래별 장소(카카오 전용) =====
+   OSM 에는 대응하는 길이 없어(Overpass 는 별개 서비스다) 카카오를 켰을 때만 화면에 내놓는다. */
+const MAP_KAKAO_CATEGORIES = [
+  { code:"SC4", label:"학교", color:"blue" },
+  { code:"AC5", label:"학원", color:"blue" },
+  { code:"PS3", label:"어린이집·유치원", color:"purple" },
+  { code:"SW8", label:"지하철역", color:"slate" },
+  { code:"HP8", label:"병원", color:"red" },
+  { code:"PM9", label:"약국", color:"red" },
+  { code:"CS2", label:"편의점", color:"green" },
+  { code:"MT1", label:"대형마트", color:"green" },
+  { code:"PO3", label:"공공기관", color:"amber" },
+  { code:"BK9", label:"은행", color:"amber" },
+  { code:"CT1", label:"문화시설", color:"purple" },
+  { code:"AT4", label:"관광명소", color:"amber" },
+  { code:"PK6", label:"주차장", color:"slate" }
+];
+const MAP_NEARBY_RADIUS_CHOICES = [500, 1000, 2000, 3000];
+const MAP_NEARBY_MAX_PAGES = 3;      // 한 쪽 15개 — 한 번에 최대 45곳
+
+function mapKakaoCategoryPlaces(raw){
+  return (raw && Array.isArray(raw.documents) ? raw.documents : []).map((item) => {
+    // 빈 문자열은 Number("")=0 이라 좌표처럼 통과한다 — 적혀 있는지부터 본다.
+    if (String(item.y || "").trim() === "" || String(item.x || "").trim() === "") return null;
+    const lat = Number(item.y), lng = Number(item.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const name = String(item.place_name || "").trim();
+    if (!name) return null;
+    return {
+      name, lat:mapClampLat(lat), lng:mapClampLng(lng),
+      address: String(item.road_address_name || item.address_name || "").trim(),
+      distance: Number(item.distance) || 0
+    };
+  }).filter(Boolean);
+}
+/* 반경 안의 한 갈래를 모아 온다. 카카오는 한 번에 15개씩 주므로 끝(meta.is_end)이 나오거나
+   상한에 닿을 때까지만 이어서 부른다 — 도심 한복판에서 수백 개를 긁어 오지 않게. */
+async function mapNearbyPlaces(code, lat, lng, radius){
+  const proxyBase = await mapTileProxyBase();
+  if (!proxyBase) throw new Error("geocode-launcher-required");
+  if (!await mapProviderIsKakao()) throw new Error("kakao-required");
+  const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)), category:code };
+  const places = [];
+  for (let page = 1; page <= MAP_NEARBY_MAX_PAGES; page++){
+    const raw = await mapFetchGeocode("", "kakao-category", { ...spot, page:String(page) });
+    places.push(...mapKakaoCategoryPlaces(raw));
+    if (!raw || !raw.meta || raw.meta.is_end !== false) break;
+  }
+  return places;
+}
+// 반경을 눈에 보이게 하는 원. 지도 모델에는 원이 없으므로 면적 영역(다각형)으로 만든다 —
+// 이미 있는 넓이 계산·이름표·되돌리기를 그대로 타고, 반경 1km 원의 넓이까지 화면에 나온다.
+function mapCirclePoints(lat, lng, radiusMeters, steps){
+  const count = Math.max(12, Math.min(180, Math.round(steps || 60)));
+  const latSpan = (radiusMeters / MAP_EARTH_RADIUS_M) * (180 / Math.PI);
+  const lngSpan = latSpan / Math.max(0.01, Math.cos(lat * Math.PI / 180));
+  const points = [];
+  for (let i = 0; i < count; i++){
+    const angle = (i / count) * Math.PI * 2;
+    points.push([mapClampLat(lat + latSpan * Math.cos(angle)), mapClampLng(lng + lngSpan * Math.sin(angle))]);
+  }
+  return points;
+}
+
+/* ===== 주소 목록 → 표시 =====
+   한 줄씩 차례로 찾는다. 동시에 던지면 공급자 쪽 초당 제한에 걸리고, OSM 은 런처가 1초 간격을
+   지키느라 어차피 줄을 선다. 진행률을 그때그때 알려 주고(onProgress) 중간에 멈출 수 있다. */
+async function mapResolvePendingMarkers(pending, onProgress, shouldStop, onMarker){
+  const list = (Array.isArray(pending) ? pending : []).slice(0, MAP_GEOCODE_BATCH_MAX);
+  const markers = [];
+  const failed = [];
+  let stopped = false;
+  for (let index = 0; index < list.length; index++){
+    if (shouldStop && shouldStop()){ stopped = true; break; }
+    const row = list[index];
+    let place = null;
+    try {
+      place = (await mapGeocode(row.query))[0] || null;
+    } catch(error){
+      // 런처가 없으면 다음 줄도 똑같이 실패한다 — 200번 헛돌지 않고 곧장 알린다.
+      if (error && error.message === "geocode-launcher-required") throw error;
+      place = null;
+    }
+    if (place){
+      const marker = mapNormalizeMarker({
+        ...row, lat:place.lat, lng:place.lng,
+        label: String(row.label || "").trim() || place.name
+      });
+      markers.push(marker);
+      if (onMarker) onMarker(marker);
+    } else failed.push(row.query);
+    if (onProgress) onProgress(index + 1, list.length, markers.length);
+  }
+  return { markers, failed, stopped };
+}
+
 // "37.5665, 126.978" 처럼 생겼으면 좌표로 본다(쉼표·공백 아무거나).
 function mapParseCoords(text){
   const parts = String(text || "").split(/[,\s]+/).filter(Boolean).map(Number);
@@ -567,8 +782,8 @@ function mapAttributionText(model){
 }
 /* 칠판에 열릴 이름. 같은 지도를 두 번 보내도 서로 다른 칠판이 되도록 번호를 붙인다 —
    이름이 겹치면 자동복원 칸(boardRecoveryKey)까지 함께 쓰게 돼 앞 판서를 덮어쓴다. */
-function mapBoardName(model){
-  const base = "지도 – " + (String(model.title || "").trim() || "지도");
+function mapBoardName(model, prefix){
+  const base = (prefix || "지도") + " – " + (String(model.title || "").trim() || "지도");
   const open = typeof docs !== "undefined" ? docs : [];
   const taken = new Set(open.filter(d => d.kind === "board").map(d => d.name));
   if (!taken.has(base)) return base;
@@ -815,6 +1030,259 @@ function openMapOfflineStatus(){
     }
     status.textContent = mapT(await mapTileCacheClear() ? "받아 둔 지도를 비웠어요." : "비우지 못했어요.");
     await refreshStatus();
+  });
+}
+
+/* ===== 지역별 개수 =====
+   표시에 붙은 행정구역으로 세어 표를 만든다. 지도를 세는 것으로 끝내지 않고 그대로 칠판 차트로
+   보내는 것이 요점이라, 세는 규칙은 화면과 떨어진 순수 함수로 둔다(테스트 대상). */
+const MAP_REGION_UNKNOWN = "지역 없음";
+
+function mapRegionNameOf(marker, level){
+  const value = level === "region" ? (marker && marker.region) : (marker && marker.district);
+  const text = String(value == null ? "" : value).trim();
+  // 시군구 기준인데 시군구가 비었으면 시도라도 쓴다(세종·제주처럼 한 단계인 곳이 있다).
+  if (text) return text;
+  const fallback = String((marker && marker.region) || "").trim();
+  return level === "region" ? "" : fallback;
+}
+function mapRegionTally(markers, level){
+  const counts = new Map();
+  for (const marker of Array.isArray(markers) ? markers : []){
+    const name = mapRegionNameOf(marker, level) || MAP_REGION_UNKNOWN;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    // 많은 곳부터, 같으면 이름 순. '지역 없음'은 자료가 아니므로 언제나 맨 뒤로 보낸다.
+    .sort((a, b) => {
+      if (a.label === MAP_REGION_UNKNOWN) return 1;
+      if (b.label === MAP_REGION_UNKNOWN) return -1;
+      return b.count - a.count || a.label.localeCompare(b.label);
+    });
+}
+
+/* ===== 지역 통계 창 =====
+   hooks.touch  = 표시가 바뀌었음을 문서에 알린다
+   hooks.toChart = 센 결과를 칠판 차트로 보낸다(성공하면 true) */
+function openMapRegionStats(model, hooks){
+  const modal = document.createElement("div");
+  modal.className = "modal map-region-modal";
+  modal.innerHTML =
+    '<div class="modal-card map-region-card">' +
+      '<h3>지역 통계</h3>' +
+      '<p class="sub">표시마다 시도·시군구를 채우고, 지역별 개수를 세어 칠판 차트로 보냅니다.</p>' +
+      '<div class="map-region-row">' +
+        '<label class="map-nearby-field"><span>기준</span>' +
+          '<select class="map-select map-region-level">' +
+            '<option value="district">시군구</option><option value="region">시도</option>' +
+          '</select></label>' +
+        '<span class="map-region-note" aria-live="polite"></span>' +
+      '</div>' +
+      '<div class="map-region-list"></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn map-region-fill" type="button">지역 채우기</button>' +
+        '<span class="spacer"></span>' +
+        '<button class="btn map-region-close" type="button">닫기</button>' +
+        '<button class="btn primary map-region-chart" type="button">칠판으로 차트</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  const levelSelect = modal.querySelector(".map-region-level");
+  const note = modal.querySelector(".map-region-note");
+  const list = modal.querySelector(".map-region-list");
+  const fillBtn = modal.querySelector(".map-region-fill");
+  const chartBtn = modal.querySelector(".map-region-chart");
+  mapTranslate(modal);
+
+  let busy = false;
+  let stop = false;
+  const level = () => (levelSelect.value === "region" ? "region" : "district");
+  const missingMarkers = () => model.markers.filter(marker => !mapRegionNameOf(marker, level()));
+
+  const render = () => {
+    const rows = mapRegionTally(model.markers, level());
+    list.innerHTML = "";
+    for (const row of rows){
+      const line = document.createElement("div");
+      line.className = "map-region-item";
+      const name = document.createElement("span");
+      name.className = "map-region-name";
+      name.textContent = row.label === MAP_REGION_UNKNOWN ? mapT(MAP_REGION_UNKNOWN) : row.label;
+      const count = document.createElement("span");
+      count.className = "map-region-count";
+      count.textContent = mapTf("{count}곳", { count:row.count });
+      line.append(name, count);
+      list.appendChild(line);
+    }
+    const missing = missingMarkers().length;
+    note.textContent = model.markers.length
+      ? mapTf("표시 {total}개 · 지역 없음 {missing}개", { total:model.markers.length, missing })
+      : mapT("아직 표시가 없습니다.");
+    fillBtn.disabled = busy || !missing;
+    chartBtn.disabled = busy || !model.markers.length;
+    return rows;
+  };
+  render();
+
+  const close = () => {
+    if (busy) return;
+    window.removeEventListener("keydown", onKey, true);
+    modal.remove();
+  };
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (busy){ stop = true; return; }
+    close();
+  };
+  window.addEventListener("keydown", onKey, true);
+  modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
+  modal.querySelector(".map-region-close").addEventListener("click", close);
+  levelSelect.addEventListener("change", render);
+
+  /* 표시 하나마다 한 번씩 물어야 해서 시간이 걸린다(OSM 은 1초 간격). 진행률을 적고
+     같은 버튼으로 멈출 수 있게 한다 — CSV 좌표 찾기와 같은 방식이다. */
+  fillBtn.addEventListener("click", async () => {
+    if (busy){ stop = true; return; }
+    const targets = missingMarkers();
+    if (!targets.length) return;
+    busy = true; stop = false;
+    fillBtn.textContent = mapT("그만두기");
+    fillBtn.disabled = false;
+    chartBtn.disabled = true;
+    let done = 0, filled = 0;
+    try {
+      for (const marker of targets){
+        if (stop) break;
+        let info = null;
+        try { info = await mapRegionAt(marker.lat, marker.lng); }
+        catch(error){
+          if (error && error.message === "geocode-launcher-required") throw error;
+          info = null;
+        }
+        if (info && (info.region || info.district)){
+          marker.region = info.region || "";
+          marker.district = info.district || "";
+          filled++;
+        }
+        done++;
+        note.textContent = mapTf("지역을 채우는 중… {done}/{total} · 채움 {filled}개", { done, total:targets.length, filled });
+      }
+      if (filled && hooks && typeof hooks.touch === "function") hooks.touch();
+    } catch(error){
+      note.textContent = mapT(error && error.message === "geocode-launcher-required"
+        ? "지역 채우기는 ClassDock 런처에서 사용할 수 있어요."
+        : "지역을 채우지 못했어요 — 인터넷 연결을 확인해 주세요.");
+    } finally {
+      busy = false; stop = false;
+      fillBtn.textContent = mapT("지역 채우기");
+      render();
+    }
+  });
+
+  chartBtn.addEventListener("click", async () => {
+    if (busy) return;
+    const rows = mapRegionTally(model.markers, level()).filter(row => row.label !== MAP_REGION_UNKNOWN);
+    if (!rows.length){
+      note.textContent = mapT("셀 지역이 없습니다 — 먼저 지역 채우기를 눌러 주세요.");
+      return;
+    }
+    chartBtn.disabled = true;
+    const sent = hooks && typeof hooks.toChart === "function" ? await hooks.toChart(rows, level()) : false;
+    if (sent) close();
+    else { note.textContent = mapT("칠판에 차트를 넣지 못했어요."); chartBtn.disabled = false; }
+  });
+}
+
+/* ===== 주변 시설 찾기 창 =====
+   지도 가운데를 기준으로 반경 안의 한 갈래를 모아 온다. '우리 동네에 학교가 몇 곳인가'처럼
+   사회과에서 바로 쓰는 물음이라, 찾은 개수를 창 안에서 먼저 보여 주고 넣을지 고르게 한다.
+   돌려주는 값: { places, category, radius, circle } · 취소하면 null. */
+function openMapNearby(center){
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.className = "modal map-nearby-modal";
+    modal.innerHTML =
+      '<div class="modal-card map-nearby-card">' +
+        '<h3>주변 시설 찾기</h3>' +
+        '<p class="sub">지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.</p>' +
+        '<div class="map-nearby-row">' +
+          '<label class="map-nearby-field"><span>갈래</span><select class="map-select map-nearby-category"></select></label>' +
+          '<label class="map-nearby-field"><span>반경</span><select class="map-select map-nearby-radius"></select></label>' +
+          '<label class="map-nearby-check"><input type="checkbox" class="map-nearby-circle" checked><span>반경 원도 그리기</span></label>' +
+        '</div>' +
+        '<p class="map-nearby-note" aria-live="polite"></p>' +
+        '<div class="modal-actions">' +
+          '<span class="spacer"></span>' +
+          '<button class="btn map-nearby-cancel" type="button">취소</button>' +
+          '<button class="btn primary map-nearby-ok" type="button">찾아서 넣기</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    const categorySelect = modal.querySelector(".map-nearby-category");
+    const radiusSelect = modal.querySelector(".map-nearby-radius");
+    const circleCheck = modal.querySelector(".map-nearby-circle");
+    const note = modal.querySelector(".map-nearby-note");
+    const okBtn = modal.querySelector(".map-nearby-ok");
+    for (const item of MAP_KAKAO_CATEGORIES){
+      const option = document.createElement("option");
+      option.value = item.code; option.textContent = item.label;
+      categorySelect.appendChild(option);
+    }
+    for (const meters of MAP_NEARBY_RADIUS_CHOICES){
+      const option = document.createElement("option");
+      option.value = String(meters); option.textContent = mapFormatDistance(meters);
+      radiusSelect.appendChild(option);
+    }
+    radiusSelect.value = "1000";
+    mapTranslate(modal);
+
+    let settled = false;
+    let busy = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("keydown", onKey, true);
+      modal.remove();
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key !== "Escape" || busy) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      finish(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    modal.addEventListener("mousedown", (e) => { if (e.target === modal && !busy) finish(null); });
+    modal.querySelector(".map-nearby-cancel").addEventListener("click", () => { if (!busy) finish(null); });
+
+    okBtn.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      okBtn.disabled = true;
+      const category = MAP_KAKAO_CATEGORIES.find(item => item.code === categorySelect.value) || MAP_KAKAO_CATEGORIES[0];
+      const radius = Number(radiusSelect.value) || 1000;
+      note.textContent = mapT("찾는 중…");
+      try {
+        const places = await mapNearbyPlaces(category.code, center.lat, center.lng, radius);
+        if (!places.length){
+          note.textContent = mapTf("반경 {radius} 안에서 {label}을(를) 찾지 못했어요.",
+            { radius:mapFormatDistance(radius), label:mapT(category.label) });
+          busy = false; okBtn.disabled = false;
+          return;
+        }
+        finish({ places, category, radius, circle:circleCheck.checked });
+      } catch(error){
+        note.textContent = mapT(error && error.message === "kakao-required"
+          ? "주변 시설 찾기는 카카오 지도 검색을 켰을 때만 쓸 수 있어요(설정 → 지도 검색)."
+          : error && error.message === "geocode-launcher-required"
+            ? "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요."
+            : "주변 시설을 찾지 못했어요 — 인터넷 연결을 확인해 주세요.");
+        busy = false; okBtn.disabled = false;
+      }
+    });
   });
 }
 
@@ -1074,6 +1542,26 @@ async function mountMapEditor(doc){
   addBtn.title = "누른 뒤 지도를 클릭하면 그 자리에 표시가 생겨요";
   addBtn.setAttribute("aria-pressed", "false");
 
+  const addressBtn = document.createElement("button");
+  addressBtn.type = "button";
+  addressBtn.className = "map-btn map-auto-address";
+  addressBtn.textContent = "📮 주소 자동";
+  addressBtn.title = "켜 두면 새로 찍은 표시의 이름에 그 자리의 주소를 채워 넣어요";
+  addressBtn.setAttribute("aria-pressed", "false");
+
+  const nearbyBtn = document.createElement("button");
+  nearbyBtn.type = "button";
+  nearbyBtn.className = "map-btn map-nearby";
+  nearbyBtn.textContent = "🏫 주변 시설";
+  nearbyBtn.title = "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시";
+  nearbyBtn.hidden = true;      // 카카오 검색을 켰을 때만 보인다
+
+  const regionBtn = document.createElement("button");
+  regionBtn.type = "button";
+  regionBtn.className = "map-btn map-region-stats";
+  regionBtn.textContent = "🧭 지역 통계";
+  regionBtn.title = "표시마다 시도·시군구를 채우고 지역별 개수를 칠판 차트로 보내요";
+
   const boardBtn = document.createElement("button");
   boardBtn.type = "button";
   boardBtn.className = "map-btn map-to-board";
@@ -1107,7 +1595,7 @@ async function mountMapEditor(doc){
 
   const csvImportBtn = document.createElement("button");
   csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import";
-  csvImportBtn.textContent = "CSV 들이기"; csvImportBtn.title = "이름·위도·경도·메모·색상 열의 CSV에서 표시 추가";
+  csvImportBtn.textContent = "CSV 들이기"; csvImportBtn.title = "이름·위도·경도 열의 CSV에서 표시 추가 — 좌표 없이 주소 열만 있어도 됩니다";
   const csvExportBtn = document.createElement("button");
   csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
@@ -1147,8 +1635,8 @@ async function mountMapEditor(doc){
   status.className = "map-status";
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
-  bar.append(titleInput, basemapSelect, addBtn, lineBtn, areaBtn, imageBtn, imageClearBtn,
-    csvImportBtn, csvExportBtn, boardBtn, searchWrap, saveBtn, coord, status);
+  bar.append(titleInput, basemapSelect, addBtn, addressBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
+    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, boardBtn, searchWrap, saveBtn, coord, status);
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
@@ -1250,6 +1738,47 @@ async function mountMapEditor(doc){
     touch();
   };
 
+  /* ── 이 자리의 주소 ──
+     이름을 손으로 치지 않고 지도에서 되받아 온다. 기다리는 사이 표시를 지웠을 수 있으므로
+     돌아온 뒤에 아직 살아 있는 표시인지 확인하고 넣는다. */
+  const applyMarkerLabel = (marker, text) => {
+    marker.label = String(text || "").slice(0, 120);
+    const layer = markerLayers.get(marker.id);
+    if (layer){
+      layer.setTooltipContent(marker.label || mapT("이름 없는 표시"));
+      const popup = typeof layer.getPopup === "function" ? layer.getPopup() : null;
+      const form = popup && typeof popup.getContent === "function" ? popup.getContent() : null;
+      if (form && form._labelInput) form._labelInput.value = marker.label;
+    }
+    touch();
+  };
+  const fillMarkerAddress = async (marker, opts = {}) => {
+    try {
+      const info = await mapAddressAt(marker.lat, marker.lng);
+      if (!markerLayers.has(marker.id)) return false;              // 기다리는 동안 지워진 표시
+      if (!info){
+        if (!opts.quiet) setStatus(mapT("이 자리의 주소를 찾지 못했어요."));
+        return false;
+      }
+      // 자동 채우기는 사람이 적어 둔 이름을 덮지 않는다.
+      if (opts.onlyEmpty && String(marker.label || "").trim()) return false;
+      applyMarkerLabel(marker, info.name);
+      if (info.region || info.district){
+        marker.region = info.region || "";
+        marker.district = info.district || "";
+        touch();
+      }
+      return true;
+    } catch(error){
+      if (!opts.quiet){
+        setStatus(mapT(error && error.message === "geocode-launcher-required"
+          ? "주소 확인은 ClassDock 런처에서 사용할 수 있어요."
+          : "주소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요."));
+      }
+      return false;
+    }
+  };
+
   // 팝업 안의 작은 편집 서식 — 이름·메모·색을 고치고 지울 수 있다.
   const buildPopup = (marker, layer) => {
     const form = document.createElement("div");
@@ -1307,8 +1836,22 @@ async function mountMapEditor(doc){
     };
     showCoord();
     form._showCoord = showCoord;
+    form._labelInput = labelInput;
 
-    form.append(labelInput, noteInput, colorRow, coordText, removeBtn);
+    // 이름 칸을 이 자리의 주소로 채운다(자동 채우기를 꺼 둬도 한 표시씩은 언제든 부를 수 있게).
+    const addressFillBtn = document.createElement("button");
+    addressFillBtn.type = "button";
+    addressFillBtn.className = "map-popup-address";
+    addressFillBtn.textContent = "이 자리 주소 넣기";
+    addressFillBtn.addEventListener("click", async () => {
+      addressFillBtn.disabled = true;
+      addressFillBtn.textContent = mapT("찾는 중…");
+      await fillMarkerAddress(marker);
+      addressFillBtn.textContent = mapT("이 자리 주소 넣기");
+      addressFillBtn.disabled = false;
+    });
+
+    form.append(labelInput, noteInput, colorRow, coordText, addressFillBtn, removeBtn);
     mapTranslate(form);
     return form;
   };
@@ -1495,6 +2038,21 @@ async function mountMapEditor(doc){
   lineBtn.addEventListener("click", () => setDrawing("line"));
   areaBtn.addEventListener("click", () => setDrawing("area"));
 
+  let autoAddress = mapAutoAddressOn();
+  const syncAutoAddressButton = () => {
+    addressBtn.classList.toggle("is-on", autoAddress);
+    addressBtn.setAttribute("aria-pressed", String(autoAddress));
+  };
+  syncAutoAddressButton();
+  addressBtn.addEventListener("click", () => {
+    autoAddress = !autoAddress;
+    mapRememberAutoAddress(autoAddress);
+    syncAutoAddressButton();
+    setStatus(mapT(autoAddress
+      ? "새로 찍는 표시에 그 자리의 주소를 이름으로 채웁니다."
+      : "주소 자동 채우기를 껐습니다."));
+  });
+
   map.on("click", (e) => {
     if (drawingMode){
       draftPoints.push([mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng)]);
@@ -1510,6 +2068,8 @@ async function mountMapEditor(doc){
     setAdding(false);
     touch();
     layer.openPopup();
+    // 주소는 네트워크를 기다리므로 표시부터 찍고 이름은 도착하는 대로 채운다.
+    if (autoAddress) fillMarkerAddress(marker, { onlyEmpty:true, quiet:true });
   });
 
   /* ── 보기 위치는 조용히 따라간다(● 를 켜지 않는다) ── */
@@ -1581,7 +2141,55 @@ async function mountMapEditor(doc){
     applyBasemap(); touch();
   });
 
-  csvImportBtn.addEventListener("click", () => { csvInput.value = ""; csvInput.click(); });
+  /* 들여온 표시로 화면을 맞춘다. 한 곳이면 그 자리로, 여럿이면 전부 담기게. */
+  const fitToMarkers = (markers) => {
+    if (!markers.length) return;
+    if (markers.length === 1) map.setView([markers[0].lat, markers[0].lng], Math.max(map.getZoom(), 14));
+    else map.fitBounds(markers.map(marker => [marker.lat, marker.lng]), { padding:[24,24], maxZoom:15 });
+  };
+  /* 주소만 적힌 줄을 좌표로 바꾼다. 한 줄에 한 번씩 검색을 부르므로 시간이 걸린다 —
+     진행률을 상태 줄에 적고, 그동안 'CSV 들이기' 버튼을 '그만두기'로 바꿔 멈출 수 있게 한다. */
+  let geocodingStop = false;
+  const runPendingGeocode = async (pending) => {
+    const ok = typeof confirmDialog !== "function" || await confirmDialog(
+      mapTf("주소만 있는 줄이 {count}개 있습니다. 인터넷 지도 검색으로 좌표를 찾을까요?", { count:pending.length }),
+      mapT("좌표 찾기"), mapT("건너뛰기"));
+    if (!ok) return null;
+    geocodingStop = false;
+    const previousLabel = csvImportBtn.textContent;
+    csvImportBtn.textContent = mapT("그만두기");
+    csvImportBtn.classList.add("is-on");
+    csvInput.disabled = true;
+    const found = [];
+    try {
+      const result = await mapResolvePendingMarkers(pending,
+        (done, total, count) => setStatus(mapTf("주소를 좌표로 바꾸는 중… {done}/{total} · 찾음 {count}개", { done, total, count })),
+        () => geocodingStop,
+        (marker) => { model.markers.push(marker); addMarkerLayer(marker); touch(); });
+      found.push(...result.markers);
+      const parts = [mapTf("주소 {count}개를 지도에 올렸습니다", { count:result.markers.length })];
+      if (result.failed.length) parts.push(mapTf("{count}개는 찾지 못했습니다", { count:result.failed.length }));
+      if (result.stopped) parts.push(mapT("중간에 멈췄습니다"));
+      setStatus("");
+      if (typeof toast === "function") toast(parts.join(" · "), 4600);
+    } catch(error){
+      setStatus(mapT(error && error.message === "geocode-launcher-required"
+        ? "주소를 좌표로 바꾸려면 ClassDock 런처에서 열어 주세요."
+        : "주소를 좌표로 바꾸지 못했습니다 — 인터넷 연결을 확인해 주세요."));
+    } finally {
+      csvImportBtn.textContent = previousLabel;
+      csvImportBtn.classList.remove("is-on");
+      csvInput.disabled = false;
+      geocodingStop = false;
+    }
+    return found;
+  };
+
+  csvImportBtn.addEventListener("click", () => {
+    // 좌표를 찾는 동안에는 같은 버튼이 '그만두기'다.
+    if (csvInput.disabled){ geocodingStop = true; return; }
+    csvInput.value = ""; csvInput.click();
+  });
   csvInput.addEventListener("change", async () => {
     const file = csvInput.files && csvInput.files[0];
     if (!file) return;
@@ -1589,17 +2197,22 @@ async function mountMapEditor(doc){
       if (file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
       const imported = mapMarkersFromCsv(await file.text());
       imported.markers.forEach(marker => { model.markers.push(marker); addMarkerLayer(marker); });
-      if (imported.markers.length === 1) map.setView([imported.markers[0].lat, imported.markers[0].lng], Math.max(map.getZoom(), 14));
-      else map.fitBounds(imported.markers.map(marker => [marker.lat, marker.lng]), { padding:[24,24], maxZoom:15 });
+      fitToMarkers(imported.markers);
       touch();
-      const extra = imported.skipped || imported.truncated
-        ? mapTf(" · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외", imported) : "";
-      if (typeof toast === "function") toast(mapTf("CSV에서 표시 {count}개를 추가했습니다", { count:imported.markers.length }) + extra, 4200);
+      if (imported.markers.length){
+        const extra = imported.skipped || imported.truncated
+          ? mapTf(" · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외", imported) : "";
+        if (typeof toast === "function") toast(mapTf("CSV에서 표시 {count}개를 추가했습니다", { count:imported.markers.length }) + extra, 4200);
+      }
+      if (imported.pending.length){
+        const found = await runPendingGeocode(imported.pending);
+        if (found && found.length && !imported.markers.length) fitToMarkers(found);
+      }
     } catch(error){
       const message = error && error.message === "csv-too-large"
         ? "CSV 파일은 5MB 이하로 골라 주세요."
         : error && error.message === "csv-columns"
-        ? "CSV 첫 줄에 위도·경도 열이 필요합니다."
+        ? "CSV 첫 줄에 위도·경도 열이나 주소 열이 필요합니다."
         : "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.";
       setStatus(mapT(message));
     }
@@ -1610,6 +2223,45 @@ async function mountMapEditor(doc){
     if (typeof toast === "function") toast(mapTf("표시 {count}개를 CSV로 내보냈습니다", { count:model.markers.length }), 2800);
   });
 
+  /* ── 주변 시설 ──
+     카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 켰을 때만 내놓는다.
+     꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 되기 때문이다. */
+  mapProviderIsKakao().then((kakao) => { nearbyBtn.hidden = !kakao; }).catch(() => {});
+  nearbyBtn.addEventListener("click", async () => {
+    const center = map.getCenter();
+    const picked = await openMapNearby({ lat:center.lat, lng:center.lng });
+    if (!picked) return;
+    const added = [];
+    for (const place of picked.places){
+      const marker = mapNormalizeMarker({
+        lat:place.lat, lng:place.lng, color:picked.category.color,
+        label:place.name,
+        // 주소와 거리는 수업에서 그대로 읽는 값이라 메모에 남긴다.
+        note:[place.address, place.distance ? mapTf("중심에서 {distance}", { distance:mapFormatDistance(place.distance) }) : ""]
+          .filter(Boolean).join("\n")
+      });
+      model.markers.push(marker);
+      addMarkerLayer(marker);
+      added.push(marker);
+    }
+    if (picked.circle){
+      const shape = mapNormalizeShape({
+        type:"area",
+        points:mapCirclePoints(center.lat, center.lng, picked.radius),
+        label:mapT(picked.category.label) + " " + mapFormatDistance(picked.radius),
+        color:"#2563eb"
+      });
+      model.shapes.push(shape);
+      addShapeLayer(shape);
+    }
+    touch();
+    fitToMarkers(added);
+    if (typeof toast === "function"){
+      toast(mapTf("{label} {count}곳을 반경 {radius} 안에서 찾아 넣었습니다",
+        { label:mapT(picked.category.label), count:added.length, radius:mapFormatDistance(picked.radius) }), 4200);
+    }
+  });
+
   const moveToSearchLocation = mapSearchLocationMover(map);
   mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, moveToSearchLocation, setStatus);
 
@@ -1618,6 +2270,44 @@ async function mountMapEditor(doc){
   /* ── 칠판으로 ──
      지도를 그림으로 굳혀 새 화이트보드에 올린다. 지도 문서 자체는 그대로 남으므로, 판서한
      칠판과 계속 고칠 수 있는 지도를 둘 다 갖게 된다. */
+  /* 새 칠판을 하나 열고 그릴 준비가 될 때까지 기다린다(지도 그림·지역 차트가 같이 쓴다).
+     빈 스냅샷을 "지금" 시각으로 넘겨, 같은 이름으로 쓰던 옛 판서가 되살아나지 않게 한다
+     (chooseBoardSnapshot 은 savedAt 이 더 새 쪽을 고른다). */
+  const createMapBoard = async (name) => {
+    if (typeof newWhiteboard !== "function") return null;
+    const boardDoc = newWhiteboard({
+      name,
+      state: {
+        version: 1,
+        savedAt: Date.now(),
+        bg: typeof defaultBoardBg === "function" ? defaultBoardBg() : "#ffffff",
+        items: []
+      }
+    });
+    if (typeof setActiveDoc === "function") setActiveDoc(boardDoc.id);
+    // 렌더가 끝나야 insertBoardImage·insertBoardChart 가 붙는다(훅은 renderWhiteboard 안에서 매단다).
+    if (typeof ensureRendered === "function") await ensureRendered(boardDoc);
+    return boardDoc;
+  };
+
+  /* ── 지역 통계 ── */
+  regionBtn.addEventListener("click", () => {
+    openMapRegionStats(model, {
+      touch,
+      toChart: async (rows, level) => {
+        const boardDoc = await createMapBoard(mapBoardName(model, "지역 통계"));
+        if (!boardDoc || typeof boardDoc.insertBoardChart !== "function") return false;
+        const title = (String(model.title || "").trim() || mapT("지도")) + " · "
+          + mapT(level === "region" ? "시도별 표시 수" : "시군구별 표시 수");
+        return boardDoc.insertBoardChart({
+          type: "bar",
+          title,
+          rows: rows.map(row => ({ label:row.label, values:[row.count] }))
+        });
+      }
+    });
+  });
+
   boardBtn.addEventListener("click", async () => {
     if (typeof newWhiteboard !== "function"){ setStatus(mapT("화이트보드를 열 수 없어요.")); return; }
     boardBtn.disabled = true;
@@ -1640,21 +2330,8 @@ async function mountMapEditor(doc){
         labels.push({ x:point.x, y:point.y, text:shapeTooltip(shape), offsetY:0 });
       }
       const png = await mapCaptureDataUrl(stage, mapAttributionText(model), labels);
-      const boardDoc = newWhiteboard({
-        name: mapBoardName(model),
-        // 빈 스냅샷을 "지금" 시각으로 넘겨, 같은 이름으로 쓰던 옛 판서가 되살아나지 않게 한다
-        // (chooseBoardSnapshot 은 savedAt 이 더 새 쪽을 고른다).
-        state: {
-          version: 1,
-          savedAt: Date.now(),
-          bg: typeof defaultBoardBg === "function" ? defaultBoardBg() : "#ffffff",
-          items: []
-        }
-      });
-      if (typeof setActiveDoc === "function") setActiveDoc(boardDoc.id);
-      // 렌더가 끝나야 insertBoardImage 가 붙는다(훅은 renderWhiteboard 안에서 문서에 매단다).
-      if (typeof ensureRendered === "function") await ensureRendered(boardDoc);
-      const placed = typeof boardDoc.insertBoardImage === "function"
+      const boardDoc = await createMapBoard(mapBoardName(model));
+      const placed = boardDoc && typeof boardDoc.insertBoardImage === "function"
         ? await boardDoc.insertBoardImage(png) : false;
       if (placed){
         touch();
@@ -1693,10 +2370,13 @@ async function mountMapEditor(doc){
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     MAP_DOC_TYPE, MAP_DOC_VERSION, MAP_BASEMAPS, MAP_MARKER_COLORS,
+    MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX,
     mapDocEmpty, mapDocParse, mapDocSerialize, mapDocContentKey,
     mapNormalizeMarker, mapNormalizeShape, mapNormalizeBackgroundImage,
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
-    mapMarkersFromCsv, mapMarkersToCsv
+    mapMarkersFromCsv, mapMarkersToCsv,
+    mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
+    mapCirclePoints, mapRegionNameOf, mapRegionTally
   };
 }

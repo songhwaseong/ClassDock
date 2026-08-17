@@ -2137,6 +2137,16 @@ function renderWhiteboard(doc, host){
     wb.items.push(item); wb.selected = item; setTool("select"); redraw(); history.commit(); recordCommit();
     return true;
   };
+  /* 다른 문서(지도 등)가 센 자료를 이 보드의 차트로 넣는다. 그림이 아니라 도구상자가 만드는
+     것과 똑같은 그룹이라, 넣은 뒤에도 차트로 다시 고치고 크기를 바꾸고 되돌릴 수 있다. */
+  doc.insertBoardChart = (spec) => {
+    if (!spec || typeof MNBoardTools === "undefined") return false;
+    const boardWidth = Math.max(320, Math.min(W ? W * .8 : 640, 680));
+    let group;
+    try { group = MNBoardTools.chartGroup(Object.assign({}, spec, { width:Math.round(boardWidth), height:Math.round(boardWidth * .72) })); }
+    catch(error){ console.warn("insertBoardChart failed:", error); return false; }
+    return placeBoardGroup(group);
+  };
   // 고쳐 넣을 때는 보드에 놓인 자리와 크기를 그대로 두고 내용만 갈아 끼운다.
   const replaceBoardGroup = (existing, group) => {
     const index = wb.items.indexOf(existing);

@@ -814,6 +814,7 @@ cd myOffice</code></pre>
     <ul>
       <li>국내 상세주소·건물 이름을 더 자세히 찾으려면 <strong>설정 → 일반 → 지도 검색</strong>에서 <strong>카카오 — 개인 API 키</strong>를 고릅니다. Kakao Developers에서 만든 앱의 <strong>REST API 키</strong>를 넣고 <strong>키 저장·연결 시험</strong>을 누르세요. 연결에 성공하면 카카오 검색이 즉시 적용됩니다. <strong>Admin 키는 사용하지 않습니다.</strong></li>
       <li>카카오 검색은 <strong>주소 검색 → 장소명 검색</strong> 순서로 시도하고, 키가 없거나 응답을 받지 못하면 OpenStreetMap 검색으로 자동 전환합니다. 화이트보드의 <strong>지도 넣기</strong> 검색에도 같은 설정이 적용됩니다.</li>
+      <li>키를 넣으면 <strong>주소 CSV 좌표 찾기·주소 자동 채우기·지역 통계</strong>가 더 정확해지고, <strong>🏫 주변 시설</strong>은 카카오에만 있는 기능이라 이때만 버튼이 나타납니다.</li>
       <li><code>ClassDock.exe</code>에서 <strong>이 Windows 사용자 계정에 암호화하여 기억</strong>을 켜면 키는 Windows 계정 보호 기능으로 암호화되어 이 PC의 현재 사용자만 읽을 수 있게 저장됩니다. HTML·브라우저 설정·작업공간·백업에는 들어가지 않습니다. 체크를 끄면 이번 실행 동안만 기억하며, <strong>키 지우기</strong>로 즉시 삭제할 수 있습니다.</li>
       <li>일반 브라우저 창과 주소창 없는 <strong>앱 모드</strong>가 서로 다른 브라우저로 열리더라도, EXE가 검색 공급자 선택을 함께 보관해 카카오 설정을 자동으로 이어 줍니다.</li>
     </ul>
@@ -822,9 +823,17 @@ cd myOffice</code></pre>
   <li><strong>🖼️ 내 지도</strong>로 학교 배치도·교실 평면도·박물관 안내도 같은 PNG/JPG/WebP 이미지를 고르면, 그 이미지가 <strong>현재 보고 있는 지도 범위에 맞춰져 오프라인 배경</strong>으로 들어갑니다. 원본은 20MB 이하만 받고 긴 변 2400px 안으로 정리해 <code>.map</code> 파일에 함께 담습니다. 배경지도 선택에서 일반 지도와 내 지도 이미지를 오갈 수 있고 <strong>이미지 지우기</strong>로 제거합니다</li>
   <li><strong>📍 표시 추가</strong>를 누른 뒤 지도를 클릭하면 그 자리에 핀이 생기고 편집 풍선이 열립니다. <strong>이름</strong>(예: 우리 학교)과 <strong>메모</strong>(수업 설명·관찰 기록)를 적고 <strong>색 여섯 가지</strong> 중에서 고릅니다. 잘못 눌렀으면 <kbd>Esc</kbd>로 추가를 취소합니다</li>
   <li><strong>📏 거리선</strong>은 경로의 점을 차례로 찍고 <kbd>Enter</kbd>(또는 같은 버튼 다시 누르기)로 끝내 전체 거리를 표시합니다. <strong>▱ 면적 영역</strong>도 꼭짓점을 3개 이상 찍어 같은 방식으로 끝내면 면적을 표시합니다. 선·영역을 누르면 이름·색을 바꾸거나 지울 수 있고 <kbd>Esc</kbd>로 그리기를 취소합니다</li>
-  <li><strong>CSV 들이기</strong>는 첫 줄에 <code>이름,위도,경도,메모,색상</code> 열이 있는 UTF-8 CSV에서 표시를 한꺼번에 추가합니다(<code>위도</code>·<code>경도</code>는 필수, 최대 5MB·5,000개). <strong>CSV 내보내기</strong>는 현재 표시를 Excel에서 열 수 있는 같은 형식으로 저장합니다. 색상은 <code>red</code>, <code>blue</code>, <code>green</code>, <code>amber</code>, <code>purple</code>, <code>slate</code> 또는 한국어 색 이름을 씁니다</li>
+  <li><strong>CSV 들이기</strong>는 첫 줄에 <code>이름,위도,경도,메모,색상,시도,시군구</code> 열이 있는 UTF-8 CSV에서 표시를 한꺼번에 추가합니다(최대 5MB·5,000개). <strong>CSV 내보내기</strong>는 현재 표시를 Excel에서 열 수 있는 같은 형식으로 저장합니다. 색상은 <code>red</code>, <code>blue</code>, <code>green</code>, <code>amber</code>, <code>purple</code>, <code>slate</code> 또는 한국어 색 이름을 씁니다
+    <ul>
+      <li><strong>좌표가 없어도 됩니다.</strong> <code>주소</code>(또는 <code>소재지</code>·<code>도로명주소</code>) 열만 있으면 지도 검색으로 좌표를 찾아 표시로 올립니다. 주소도 좌표도 없이 <code>이름</code>만 있는 줄은 이름을 장소로 보고 찾습니다. 한 번에 <strong>최대 200줄</strong>까지 찾고, 찾는 동안 <strong>CSV 들이기</strong> 버튼이 <strong>그만두기</strong>로 바뀌어 언제든 멈출 수 있습니다. 좌표를 적었는데 값이 잘못된 줄(예: 위도 <code>999</code>)은 자료 오류로 보고 검색하지 않고 건너뜁니다</li>
+      <li>인터넷과 ClassDock 런처가 필요하고, 줄마다 한 번씩 검색하므로 시간이 걸립니다(OpenStreetMap 검색은 제공처 정책상 1초에 한 줄). 카카오 키를 넣어 두면 훨씬 빠르고 국내 주소를 더 정확히 찾습니다</li>
+    </ul>
+  </li>
+  <li><strong>📮 주소 자동</strong>을 켜 두면 새로 찍는 표시의 <strong>이름 칸에 그 자리의 주소</strong>가 채워집니다(직접 적어 둔 이름은 덮지 않습니다). 켜 두지 않아도 표시의 편집 풍선에서 <strong>이 자리 주소 넣기</strong>로 한 표시씩 부를 수 있습니다. 카카오 키가 있으면 도로명 주소와 건물 이름을, 없으면 OpenStreetMap 역검색 결과를 씁니다. 이 설정은 지도 파일이 아니라 이 컴퓨터에 남아 다음에 열 때도 이어집니다</li>
+  <li><strong>🏫 주변 시설</strong>(카카오 검색을 켰을 때만 나옵니다)은 지금 보고 있는 <strong>지도 가운데를 기준으로 반경 안의 시설</strong>을 한 번에 표시로 넣습니다. 갈래(학교·병원·편의점·지하철역·공공기관 등)와 반경(500m~3km)을 고르면 가까운 곳부터 최대 45곳까지 찾아 넣고, 각 표시의 메모에 <strong>주소와 중심에서의 거리</strong>가 함께 적힙니다. <strong>반경 원도 그리기</strong>를 켜 두면 그 반경이 면적 영역으로 그려져 <strong>원의 넓이</strong>까지 함께 보여 줍니다</li>
+  <li><strong>🧭 지역 통계</strong>는 표시마다 <strong>시도·시군구</strong>를 채우고 지역별 개수를 셉니다. <strong>지역 채우기</strong>를 누르면 지역이 비어 있는 표시만 좌표로 물어 채우고(진행 중에는 같은 버튼이 <strong>그만두기</strong>), 기준을 <strong>시군구/시도</strong>로 바꿔 볼 수 있습니다. <strong>칠판으로 차트</strong>를 누르면 그 표를 <strong>새 화이트보드의 자료 차트</strong>로 보냅니다 — 그림이 아니라 도구상자가 만드는 것과 같은 차트라 칠판에서 다시 고치고 되돌릴 수 있습니다. 채운 지역은 <code>.map</code> 파일과 CSV 내보내기에도 함께 담깁니다</li>
   <li>찍어 둔 핀은 <strong>끌어서 옮기고</strong>, 다시 누르면 풍선이 열려 고칠 수 있습니다. 풍선의 <strong>표시 지우기</strong>로 뺍니다</li>
-  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시·거리선·면적 영역과 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다</li>
+  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역 포함)·거리선·면적 영역과 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다</li>
   <li><strong>🖊️ 칠판으로</strong>를 누르면 지금 보이는 지도가 <strong>그림으로 굳어 새 화이트보드에 올라갑니다.</strong> 표시 이름·거리·면적과 출처가 그림에 함께 새겨지고, 확대·이동 단추와 편집 풍선은 빠집니다. 칠판에서는 그 위에 바로 판서할 수 있고, <strong>지도 문서는 그대로 남아</strong> 계속 고칠 수 있습니다. 같은 지도를 두 번 보내면 서로 다른 칠판이 열립니다</li>
   <li>EXE로 지도를 보면 <strong>화면에 실제로 표시된 배경이 자동으로 보관</strong>됩니다. 다시 방문한 지역은 받아 둔 타일 범위에서 인터넷 없이 열립니다. <strong>🗂️ 오프라인 지도</strong>에서 지금까지 받아 둔 양을 확인하고 <strong>비울</strong> 수 있습니다. 공개 지도 서버 정책에 따라 보지 않은 지역이나 더 자세한 확대 단계를 미리 일괄 다운로드하지는 않습니다</li>
 </ol>

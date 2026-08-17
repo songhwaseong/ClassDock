@@ -1590,7 +1590,75 @@
     "▱ 면적 영역": "▱ Area",
     "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
     "CSV 들이기": "Import CSV",
-    "이름·위도·경도·메모·색상 열의 CSV에서 표시 추가": "Add pins from CSV columns for name, latitude, longitude, note, and color",
+    "이름·위도·경도 열의 CSV에서 표시 추가 — 좌표 없이 주소 열만 있어도 됩니다":
+      "Add pins from a CSV with name, latitude, and longitude columns — an address column alone works too",
+    // 주소만 있는 CSV → 좌표 찾기
+    "그만두기": "Stop",
+    "좌표 찾기": "Find coordinates",
+    "건너뛰기": "Skip",
+    "중간에 멈췄습니다": "Stopped partway",
+    "주소를 좌표로 바꾸려면 ClassDock 런처에서 열어 주세요.": "Open this in the ClassDock launcher to turn addresses into coordinates.",
+    "주소를 좌표로 바꾸지 못했습니다 — 인터넷 연결을 확인해 주세요.":
+      "Couldn't turn the addresses into coordinates — check your internet connection.",
+    "CSV 첫 줄에 위도·경도 열이나 주소 열이 필요합니다.": "The first CSV row needs latitude and longitude columns, or an address column.",
+    // 표시 이름에 그 자리의 주소 채우기
+    "📮 주소 자동": "📮 Auto address",
+    "켜 두면 새로 찍은 표시의 이름에 그 자리의 주소를 채워 넣어요":
+      "Leave this on to name each new pin with the address of that spot",
+    "이 자리 주소 넣기": "Use this spot's address",
+    "이 자리의 주소를 찾지 못했어요.": "Couldn't find an address for this spot.",
+    "새로 찍는 표시에 그 자리의 주소를 이름으로 채웁니다.": "New pins will be named with the address of that spot.",
+    "주소 자동 채우기를 껐습니다.": "Turned off automatic addresses.",
+    "주소 확인은 ClassDock 런처에서 사용할 수 있어요.": "Address lookup is available in the ClassDock launcher.",
+    "주소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't look up the address — check your internet connection.",
+    // 주변 시설 찾기(카카오)
+    "🏫 주변 시설": "🏫 Nearby places",
+    "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시":
+      "Drop pins for every school, hospital, and the like within a radius of the map center",
+    "주변 시설 찾기": "Find nearby places",
+    "지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.":
+      "Finds places within a radius of the current map center and adds them as pins.",
+    "갈래": "Kind",
+    "반경": "Radius",
+    "반경 원도 그리기": "Draw the radius circle too",
+    "찾아서 넣기": "Find and add",
+    "주변 시설 찾기는 카카오 지도 검색을 켰을 때만 쓸 수 있어요(설정 → 지도 검색).":
+      "Nearby places need Kakao map search turned on (Settings → Map search).",
+    "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요.": "Nearby places is available in the ClassDock launcher.",
+    "주변 시설을 찾지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't find nearby places — check your internet connection.",
+    "학교": "Schools",
+    "학원": "Academies",
+    "어린이집·유치원": "Daycares & kindergartens",
+    "지하철역": "Subway stations",
+    "병원": "Hospitals",
+    "약국": "Pharmacies",
+    "편의점": "Convenience stores",
+    "대형마트": "Supermarkets",
+    "공공기관": "Public offices",
+    "은행": "Banks",
+    "문화시설": "Cultural venues",
+    "관광명소": "Attractions",
+    "주차장": "Parking",
+    // 지역 통계 → 칠판 차트
+    "🧭 지역 통계": "🧭 Region stats",
+    "표시마다 시도·시군구를 채우고 지역별 개수를 칠판 차트로 보내요":
+      "Fills in the province and district for each pin and sends the per-region counts to a whiteboard chart",
+    "지역 통계": "Region stats",
+    "표시마다 시도·시군구를 채우고, 지역별 개수를 세어 칠판 차트로 보냅니다.":
+      "Fills in each pin's province and district, then counts them by region and sends a whiteboard chart.",
+    "기준": "Group by",
+    "시군구": "District",
+    "시도": "Province",
+    "지역 채우기": "Fill in regions",
+    "칠판으로 차트": "Chart to whiteboard",
+    "지역 없음": "No region",
+    "아직 표시가 없습니다.": "No pins yet.",
+    "셀 지역이 없습니다 — 먼저 지역 채우기를 눌러 주세요.": "Nothing to count yet — press Fill in regions first.",
+    "칠판에 차트를 넣지 못했어요.": "Couldn't put the chart on the whiteboard.",
+    "지역 채우기는 ClassDock 런처에서 사용할 수 있어요.": "Filling in regions is available in the ClassDock launcher.",
+    "지역을 채우지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't fill in the regions — check your internet connection.",
+    "시도별 표시 수": "Pins by province",
+    "시군구별 표시 수": "Pins by district",
     "CSV 내보내기": "Export CSV",
     "지도 표시를 Excel에서 열 수 있는 CSV로 저장": "Save map pins as a CSV that opens in Excel",
     "영역 이름": "Area name",
@@ -1798,7 +1866,18 @@
       "Closed {closed} files. Cancelled {cancelled}.",
     // 지도(.map)
     "중심 {lat}, {lng} · 확대 {zoom}": "Center {lat}, {lng} · zoom {zoom}",
-    "지금 받아 둔 지도: {files}장 · {size} (최대 {max})": "Downloaded so far: {files} tiles · {size} (up to {max})"
+    "지금 받아 둔 지도: {files}장 · {size} (최대 {max})": "Downloaded so far: {files} tiles · {size} (up to {max})",
+    "주소만 있는 줄이 {count}개 있습니다. 인터넷 지도 검색으로 좌표를 찾을까요?":
+      "{count} {count|row has|rows have} only an address. Look up their coordinates with online map search?",
+    "주소를 좌표로 바꾸는 중… {done}/{total} · 찾음 {count}개": "Turning addresses into coordinates… {done}/{total} · found {count}",
+    "주소 {count}개를 지도에 올렸습니다": "Placed {count} {count|address|addresses} on the map",
+    "{count}개는 찾지 못했습니다": "Couldn't find {count}",
+    "중심에서 {distance}": "{distance} from the center",
+    "{label} {count}곳을 반경 {radius} 안에서 찾아 넣었습니다": "Added {count} {label} within {radius}",
+    "반경 {radius} 안에서 {label}을(를) 찾지 못했어요.": "No {label} found within {radius}.",
+    "{count}곳": "{count}",
+    "표시 {total}개 · 지역 없음 {missing}개": "{total} pins · {missing} without a region",
+    "지역을 채우는 중… {done}/{total} · 채움 {filled}개": "Filling in regions… {done}/{total} · filled {filled}"
   };
 
   function tf(tmpl, vars) {
