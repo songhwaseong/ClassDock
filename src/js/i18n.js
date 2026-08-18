@@ -1621,6 +1621,26 @@
     "주소 자동 채우기를 껐습니다.": "Turned off automatic addresses.",
     "주소 확인은 ClassDock 런처에서 사용할 수 있어요.": "Address lookup is available in the ClassDock launcher.",
     "주소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't look up the address — check your internet connection.",
+    // 클릭한 자리 안내
+    "🔎 장소 정보": "🔎 What's here",
+    "켜 두면 지도를 클릭한 자리의 건물·시설 이름과 주소를 말풍선으로 보여 줘요":
+      "Leave this on to see the name and address of whatever you click on the map",
+    "지도를 클릭하면 그 자리가 어디인지 말풍선으로 보여 줍니다.":
+      "Clicking the map shows what is at that spot.",
+    "클릭한 자리 안내를 껐습니다.": "Turned off the click-to-see popup.",
+    "장소를 찾는 중…": "Looking up the place…",
+    "이 자리가 어디인지 찾지 못했어요.": "Couldn't tell what is at this spot.",
+    "클릭한 자리 안내는 ClassDock 런처에서 사용할 수 있어요.":
+      "The click-to-see popup is available in the ClassDock launcher.",
+    "장소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요.":
+      "Couldn't look up the place — check your internet connection.",
+    "📍 표시로 넣기": "📍 Add as a pin",
+    "이 자리를 이름과 주소가 담긴 표시로 지도에 남겨요":
+      "Keeps this spot on the map as a pin holding its name and address",
+    "📋 주소 복사": "📋 Copy the address",
+    "이 자리의 주소를 클립보드로 복사": "Copies this spot's address to the clipboard",
+    "이 자리를 가운데로 삼아 반경 안의 시설을 찾아요":
+      "Finds places within a radius of this spot",
     // 주변 시설 찾기(카카오)
     "🏫 주변 시설": "🏫 Nearby places",
     "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시":
@@ -1722,6 +1742,7 @@
     "검색": "Search",
     "장소 검색 (Enter)": "Search for a place (Enter)",
     "찾는 중…": "Searching…",
+    "찾은 곳을 아래에서 고르면 그 자리로 갑니다.": "Pick one of the results below to go there.",
     "그런 이름의 장소를 찾지 못했어요.": "No place found with that name.",
     "장소를 찾지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't search for places — check your internet connection.",
     "인터넷 연결 없음 — 새 지역 지도는 표시할 수 없습니다. 이전에 저장된 지역만 볼 수 있습니다.":
@@ -1939,6 +1960,8 @@
     "주소 {count}개를 지도에 올렸습니다": "Placed {count} {count|address|addresses} on the map",
     "{count}개는 찾지 못했습니다": "Couldn't find {count}",
     "중심에서 {distance}": "{distance} from the center",
+    "조금 더 확대하면 누른 자리가 어디인지 볼 수 있어요 — 지금 확대 {zoom}, {need}단계부터":
+      "Zoom in a little to see what you clicked on — you're at {zoom}, this needs {need}",
     "{label} {count}곳을 반경 {radius} 안에서 찾아 넣었습니다": "Added {count} {label} within {radius}",
     "반경 {radius} 안에서 {label}을(를) 찾지 못했어요.": "No {label} found within {radius}.",
     "{count}곳": "{count}",

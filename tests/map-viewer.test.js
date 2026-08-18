@@ -26,9 +26,16 @@ function loadMapViewer(){
       , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
+      , mapKakaoSpotPlaces, mapKakaoCategoryTail, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
     };`, context);
   return context.__map;
+}
+
+/* 지도 편집기는 정리(cleanupFns)를 여러 덩어리로 나눠 등록한다 — Leaflet·우클릭 메뉴·복구본
+   타이머가 각자 자기 것을 걷는다. 어느 덩어리를 보는지 시험마다 골라 쓰라고 모아서 돌려준다. */
+function mapCleanupBodies(source){
+  return [...source.matchAll(/doc\.cleanupFns\.push\(\(\) => \{([\s\S]*?)\n  \}\);/g)].map(match => match[1]);
 }
 
 test(".map은 같은 모델을 항상 같은 JSON으로 직렬화하고 그대로 되읽는다", () => {
@@ -292,11 +299,11 @@ test("동적으로 만든 지도 화면은 현재 언어로 다시 훑고 상태
 
 test("지도 문서를 닫으면 Leaflet·옵저버·전역 키 리스너를 함께 정리한다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  const cleanup = /doc\.cleanupFns\.push\(\(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
-  assert.ok(cleanup);
-  assert.match(cleanup[1], /mapResizeObserver\.disconnect/);
-  assert.match(cleanup[1], /map\.remove/);
-  assert.match(cleanup[1], /removeEventListener\("keydown", onInteractionKey\)/);
+  // 정리 블록은 여럿이다(복구본 타이머 등) — Leaflet 을 걷는 쪽을 집어서 본다.
+  const cleanup = mapCleanupBodies(source).find(body => /map\.remove/.test(body));
+  assert.ok(cleanup, "Leaflet 을 걷는 정리 블록이 있어야 한다");
+  assert.match(cleanup, /mapResizeObserver\.disconnect/);
+  assert.match(cleanup, /removeEventListener\("keydown", onInteractionKey\)/);
 });
 
 /* 런처가 둘(C#·Go)이라 목록이 갈라지면 그 배경지도만 한쪽에서 조용히 회색으로 남는다.
@@ -459,14 +466,25 @@ test("앱 모드와 일반 브라우저가 달라도 런처의 지도 검색 공
   assert.match(go, /setMapSearchProvider\("osm"\)/);
 });
 
-test("주소 검색은 첫 결과 위치를 즉시 표시하고 임시 표식은 지도 캡처에서 뺀다", () => {
+test("주소 검색은 고른 후보로만 옮기고 임시 표식은 지도 캡처에서 뺀다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   const search = /function mapAttachPlaceSearch\(([\s\S]*?)\n\}/.exec(source);
   const mover = /function mapSearchLocationMover\(([\s\S]*?)\n\}/.exec(source);
   assert.ok(search);
   assert.ok(mover);
-  assert.match(search[1], /if \(items\.length\) onMove\(items\[0\]\.lat, items\[0\]\.lng, 15, items\[0\]\.name\)/);
+  /* 후보가 여럿인데 찾자마자 옮기면, 첫 결과가 엉뚱할 때 목록에서 제 후보를 찾는 동안 보던
+     자리를 잃는다 — 고른 뒤에 움직인다. 옮기는 길은 pick 하나뿐이라 두 갈래로 갈라지지 않는다. */
+  const shown = /const showResults = \(places\) => \{([\s\S]*?)\n  \};/.exec(search[1]);
+  assert.ok(shown);
+  assert.doesNotMatch(shown[1], /onMove\(/);
+  // 후보가 하나면 고를 것이 없다 — 한 줄짜리 목록을 한 번 더 누르게 하지 않고 곧장 옮긴다.
+  assert.match(shown[1], /if \(items\.length === 1\)\{[\s\S]*?pick\(items\[0\]\);[\s\S]*?return true;/);
+  // 여럿일 때는 첫 줄을 짚어 두어, 검색한 Enter 에 이어 Enter 한 번이면 첫 후보로 간다.
+  assert.match(shown[1], /if \(items\.length\) setActive\(0\)/);
   assert.match(search[1], /onMove\(place\.lat, place\.lng, 15, place\.name\)/);
+  assert.equal((search[1].match(/onMove\(/g) || []).length, 2, "좌표 입력과 pick 두 곳뿐이다");
+  // 곧장 옮긴 자리에서는 "아래에서 고르세요" 안내가 뜨지 않아야 한다.
+  assert.match(search[1], /if \(!showResults\(places\)\) setNote\(/);
   assert.match(mover[1], /L\.circleMarker/);
   assert.match(mover[1], /fillColor:"#e11d48"/);
   assert.match(source, /MAP_CAPTURE_HIDDEN_PANES[^\n]*\.map-search-location-pane/);
@@ -588,9 +606,9 @@ test("지도 우클릭 메뉴는 누른 자리를 기준으로 열리고 도구�
   assert.match(close[1], /document\.removeEventListener\("pointerdown", onContextOutside, true\)/);
   assert.match(close[1], /window\.removeEventListener\("keydown", onContextKey, true\)/);
   assert.match(close[1], /map\.off\("movestart zoomstart", closeContextMenu\)/);
-  const cleanup = /doc\.cleanupFns\.push\(\(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
-  assert.match(cleanup[1], /closeContextMenu\(\);/);
-  assert.match(cleanup[1], /contextMenu\.remove\(\)/);
+  const cleanup = mapCleanupBodies(source).find(body => /contextMenu\.remove\(\)/.test(body));
+  assert.ok(cleanup, "우클릭 메뉴를 걷는 정리 블록이 있어야 한다");
+  assert.match(cleanup, /closeContextMenu\(\);/);
   assert.match(styles, /\.map-context-menu\{/);
   assert.match(styles, /\.map-context-menu\[hidden\]\{display:none\}/);
   /* 확대 버튼 위 우클릭은 브라우저 기본 메뉴만 막는다. Leaflet 이 컨트롤에서 전파를 끊으므로
@@ -642,8 +660,12 @@ test("최근 검색어는 최신순 8개까지 중복 없이 남고 성공한 �
   assert.ok(search);
   // 못 찾은 검색어는 기록하지 않는다(빈 결과로 빠져나간 뒤에 기록한다).
   const notFound = search[1].indexOf("그런 이름의 장소를 찾지 못했어요");
-  const remembered = search[1].indexOf("mapRememberSearch(text);\n      showResults(places)");
+  /* 좌표로 옮기는 길에도 같은 기록 호출이 있으므로(그쪽은 못 찾을 일이 없다) 빈 결과로
+     빠져나가는 줄 뒤에서부터 찾는다. */
+  const remembered = notFound > 0 ? search[1].indexOf("mapRememberSearch(text);", notFound) : -1;
   assert.ok(notFound > 0 && remembered > notFound);
+  // 기록한 뒤에 목록을 그린다(찾아낸 말만 남기고, 그 자리에서 바로 다시 쓸 수 있게).
+  assert.ok(search[1].indexOf("showResults(places)") > remembered);
 });
 
 test("검색란을 누르면 최근 검색어를 펼치고 화살표·Enter 로 고를 수 있다", () => {
@@ -680,6 +702,22 @@ test("검색 표식은 지도를 눌러도 남고 Esc 로만 지운다", () => {
   assert.match(key[1], /moveToSearchLocation\.clear\(\)/);
   assert.match(source, /window\.addEventListener\("keydown", onSearchLocationKey\)/);
   assert.match(source, /window\.removeEventListener\("keydown", onSearchLocationKey\)/);
+
+  /* 검색을 마치면 후보 목록이 열린 채로 남고 지도에는 표식이 찍힌다. 검색칸이 Esc 를 삼키면
+     그 한 번이 표식을 지우지 못해 "Esc 가 안 먹는다"로 보인다 — 목록을 닫고 흘려보내야 한다. */
+  const inputKey = /input\.addEventListener\("keydown", \(e\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  assert.ok(inputKey);
+  const escBranch = /if \(e\.key === "Escape" && !results\.hidden\)\{([\s\S]*?)\n    \}/.exec(inputKey[1]);
+  assert.ok(escBranch);
+  assert.match(escBranch[1], /closeResults\(\)/);
+  assert.doesNotMatch(escBranch[1], /preventDefault|stopPropagation/);
+
+  /* Leaflet 은 말풍선을 닫아도 map._popup 을 비우지 않는다. 그대로 두면 키보드 처리기가 그 뒤의
+     Esc 를 모두 삼켜, 말풍선을 한 번이라도 연 지도에서는 표식이 Esc 로 지워지지 않는다. */
+  assert.match(source, /if \(map\._popup === e\.popup\) map\._popup = null/);
+  const leaflet = fs.readFileSync(path.join(__dirname, "../vendor/leaflet.min.js"), "utf8");
+  assert.match(leaflet, /closePopup:function\(t\)\{return\(t=arguments\.length\?t:this\._popup\)&&t\.close\(\),this\}/,
+    "Leaflet 이 closePopup 에서 _popup 을 비우게 바뀌면 이 우회는 걷어낼 수 있다");
 });
 
 test("지도 고르기에서 지도를 드래그해도 모달 이동이 함께 시작되지 않는다", () => {
@@ -973,6 +1011,127 @@ test("주변 시설은 카카오를 켰을 때만 화면에 내놓고 주소 확
   assert.match(info[1], /"kakao-coord2region"/);
   assert.match(info[1], /"osm-reverse"/);
   assert.ok(info[1].indexOf("kakao-coord2address") < info[1].indexOf("osm-reverse"), "카카오를 먼저 보고 OSM 으로 돌아간다");
+});
+
+/* ===== 클릭한 자리 안내 ===== */
+
+test("클릭한 자리 안내는 장소 이름·갈래·전화까지 읽고 큰 갈래는 버린다", () => {
+  const api = loadMapViewer();
+  const places = api.mapKakaoSpotPlaces({ documents:[
+    { place_name:"서울역", x:"126.97", y:"37.55", category_name:"교통,수송 > 지하철,전철 > 수도권1호선",
+      road_address_name:"서울 중구 한강대로 405", address_name:"서울 중구 봉래동2가 122",
+      phone:"02-1234-5678", distance:"42" },
+    { place_name:"좌표 없음", x:"", y:"" }
+  ] });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].name, "서울역");
+  // 말풍선에는 맨 끝 갈래만 쓴다 — "교통,수송 > …" 를 그대로 보여 주면 이름보다 길다.
+  assert.equal(places[0].category, "수도권1호선");
+  assert.equal(places[0].phone, "02-1234-5678");
+  assert.equal(places[0].distance, 42);
+  assert.equal(api.mapKakaoCategoryTail("가 > 나 > 다"), "다");
+  assert.equal(api.mapKakaoCategoryTail(""), "");
+
+  /* 누른 곳이 '무엇'인지 아는 값은 이름이 붙은 자리에서만 오는 building 뿐이다. 주소로 메운
+     이름(도로명·display_name)이 여기 섞이면 빈 들판을 눌러도 건물을 찾은 것처럼 보인다. */
+  const kakao = api.mapKakaoAddressInfo({ documents:[{
+    road_address:{ address_name:"서울 중구 세종대로 110", building_name:"서울시청" },
+    address:{ address_name:"서울 중구 태평로1가 31" }
+  }] });
+  assert.equal(kakao.building, "서울시청");
+  assert.equal(api.mapKakaoAddressInfo({ documents:[{
+    road_address:{ address_name:"서울 중구 세종대로 110", building_name:"" },
+    address:{ address_name:"서울 중구 태평로1가 31" }
+  }] }).building, "");
+  assert.equal(api.mapOsmReverseInfo({ name:"서울역", display_name:"서울역, 한강대로", address:{} }).building, "서울역");
+  assert.equal(api.mapOsmReverseInfo({ display_name:"한강대로 405", address:{} }).building, "");
+});
+
+/* Leaflet 은 말풍선을 흰 바탕·#333 글자로 못박아 둔다. 그 안의 글씨는 앱 색표로 그리므로,
+   바탕을 앱 쪽으로 가져오지 않으면 다크모드에서 밝은 글자가 흰 바탕에 묻힌다. */
+test("지도 말풍선은 Leaflet 기본색 대신 앱 테마 색을 쓴다", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const rule = /\.leaflet-container \.leaflet-popup-content-wrapper,\s*\n\s*\.leaflet-container \.leaflet-popup-tip\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "말풍선 바탕·글자색을 앱 색표로 덮어써야 한다");
+  assert.match(rule[1], /background:var\(--panel\)/);
+  assert.match(rule[1], /color:var\(--ink\)/);
+  /* Leaflet 쪽 선택자(.leaflet-popup-content-wrapper)보다 구체적이어야 한다 — 그래야 두 CSS 의
+     싣는 차례와 상관없이 이긴다(leaflet.css 는 늦게 붙을 수도 있다). */
+  const leafletCss = fs.readFileSync(path.join(__dirname, "../vendor/leaflet.css"), "utf8");
+  assert.match(leafletCss, /\.leaflet-popup-content-wrapper,\s*\n\.leaflet-popup-tip \{[^}]*background: white/);
+  // 제목은 말풍선에서 가장 진해야 하는 줄이다(주소·갈래보다 먼저 읽힌다).
+  assert.match(css, /\.map-spot-title\{[^}]*color:var\(--ink\)/);
+});
+
+test("클릭한 자리 안내는 카카오가 없어도 주소까지는 나오고, 검색은 많아야 두 번이다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const spot = /async function mapSpotAt\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(spot);
+  // 좌표 → 주소가 먼저다. 카카오 검색은 갈래·전화를 곁들이는 자리라 실패해도 말풍선은 열린다.
+  assert.ok(spot[1].indexOf("mapPlaceInfoAt") < spot[1].indexOf("mapProviderIsKakao"));
+  assert.match(spot[1], /catch\(_\)\{ \}/);
+  assert.match(spot[1], /throw new Error\("geocode-launcher-required"\)/);
+  // 갈래를 다 훑으면 클릭 한 번에 검색이 열세 번 나간다 — 이름으로 한 번, 지하철역으로 한 번뿐이다.
+  assert.equal((spot[1].match(/mapSpotSearch\(/g) || []).length, 2);
+  assert.match(spot[1], /mapSpotSearch\(\{ code:"SW8" \}/);
+  // 한 쪽(15개)만 받는다 — 첫 곳만 쓸 것이라 쪽을 이어 받을 까닭이 없다.
+  const search = /async function mapSpotSearch\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(search);
+  assert.doesNotMatch(search[1], /for \(let page/);
+
+  /* 멀리서 누른 자리는 몇 백 미터를 가리킨다. 그 자리의 주소를 그대로 보여 주면 누른 건물의
+     것이 아니어서, 가르치는 자리에서 틀린 값을 읽게 된다. */
+  const api = loadMapViewer();
+  assert.ok(api.MAP_SPOT_MIN_ZOOM >= 15);
+  const show = /async function showSpotInfo\(([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(show);
+  assert.match(show[1], /map\.getZoom\(\) < MAP_SPOT_MIN_ZOOM/);
+  assert.match(show[1], /if \(spotBusy\) return/);
+  /* 말풍선을 닫으려고 누른 클릭이 곧바로 새 말풍선을 열면 지도를 눌러 닫을 방법이 없어진다.
+     Leaflet 은 preclick 에서 닫으므로 그 전의 상태를 봐 둔다. */
+  assert.match(source, /map\.on\("preclick", \(\) => \{ popupWasOpen = popupOpen; \}\)/);
+  // 도형에서 올라온 클릭(propagatedFrom)은 그 도형의 말풍선 자리라 안내가 덮지 않는다.
+  assert.match(source, /if \(spotInfo && !spotBtn\.hidden && !popupWasOpen && !e\.propagatedFrom\) showSpotInfo\(e\.latlng\)/);
+  // 읽기만 하는 말풍선이라 문서를 건드리지 않는다 — 남기려면 '표시로 넣기'를 눌러야 한다.
+  assert.doesNotMatch(show[1], /model\.markers\.push/);
+  assert.match(source, /spotBtn\.hidden = true/);
+  assert.match(source, /mapTileProxyBase\(\)\.then\(\(base\) => \{ spotBtn\.hidden = !base; \}\)/);
+});
+
+/* ===== 저장 전 안전망 ===== */
+
+/* 새로고침 한 번에 저장 안 한 지도가 사라지면 수업 중에 되살릴 길이 없다. 다른 형식(.mnote·
+   노트북·표·이미지)이 쓰는 작업공간 복구본을 지도도 같이 쓴다. */
+test("저장하지 않은 지도는 작업공간 복구본으로 새로고침을 넘긴다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const save = /async function mapSaveRecovery\(doc\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(save);
+  /* 아직 저장하지 않은 새 지도는 ● 가 켜지기 전에도 남겨야 한다 — 정작 가장 잃기 쉬운 문서라
+     hasUnsavedEdits 만 보면 빈 지도 탭이 그대로 사라진다. */
+  assert.match(save[1], /if \(!doc\.hasUnsavedEdits && !\(doc\.isScratch && !doc\._named\)\) return false/);
+  assert.match(save[1], /recoverySnapshotFile\(doc, new TextEncoder\(\)\.encode\(json\), "application\/json"\)/);
+  assert.match(save[1], /rememberWorkspace\(\[file\], false, \{ silent:true \}\)/);
+  /* saveDocumentRecoverySnapshot 은 workspacePath 가 있어야 움직인다 — 새 지도에는 그 값이 없어
+     조용히 걸러진다. 그래서 경로를 세우는 부분만 빌려 쓰고 작업공간에는 직접 넣는다. */
+  const docs = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  assert.match(docs, /async function saveDocumentRecoverySnapshot[\s\S]*?!doc\.workspacePath/);
+  assert.match(docs, /workspacePath: options\.workspacePath \|\| null/);
+
+  // 편집할 때마다 곧바로 쓰지 않는다 — 표시를 끌면 touch 가 연달아 들어온다.
+  assert.match(source, /const MAP_RECOVERY_DELAY = \d+/);
+  const schedule = /const scheduleRecovery = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(schedule);
+  assert.match(schedule[1], /appSettings\.pdfRecovery/, "설정의 자동 저장·복원을 따른다");
+  assert.match(schedule[1], /setTimeout\([\s\S]*?mapSaveRecovery\(doc\)/);
+  // 저장 안 됨(●) 판정과 같은 자리에서 예약한다 — 고침이 한 갈래로 모이는 곳이다.
+  const touch = /const touch = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(touch);
+  assert.match(touch[1], /scheduleRecovery\(\)/);
+  // 백업 내보내기도 마지막 편집분까지 담도록 공용 훅에 매단다(다른 형식과 같은 이름).
+  assert.match(source, /doc\.flushBackupRecovery = flushMapBackup/);
+  assert.match(source, /if \(doc\.flushBackupRecovery === flushMapBackup\) delete doc\.flushBackupRecovery/);
+  // 표시를 찍기 전의 빈 새 지도도 한 번은 남긴다.
+  assert.match(source, /if \(doc\.isScratch && !doc\._named\) scheduleRecovery\(\)/);
 });
 
 /* 표시 하나마다 한 번씩 부르는 길이라, 같은 자리를 다시 물으면 그만큼 남의 서버를 두드린다. */

@@ -890,6 +890,25 @@
     padding:5px 8px;font:inherit;font-size:11.5px;cursor:pointer}
   .map-popup-address:hover{background:var(--panel-hover);border-color:var(--accent)}
   .map-popup-address:disabled{opacity:.65;cursor:wait}
+  /* Leaflet 은 말풍선을 흰 바탕·#333 글자로 못박아 둔다(vendor/leaflet.css). 그 안의 내용은 앱
+     색표(--ink·--muted)로 그리므로 다크모드에서 두 색이 서로 어긋나 글씨가 묻힌다. 바탕과 기본
+     글자색을 앱 쪽으로 가져와 두 테마 모두에서 같은 대비가 나오게 한다. */
+  .leaflet-container .leaflet-popup-content-wrapper,
+  .leaflet-container .leaflet-popup-tip{background:var(--panel);color:var(--ink)}
+  .leaflet-container a.leaflet-popup-close-button{color:var(--muted)}
+  .leaflet-container a.leaflet-popup-close-button:hover,
+  .leaflet-container a.leaflet-popup-close-button:focus{color:var(--ink)}
+  /* 클릭한 자리 안내 — 읽기만 하는 말풍선이라 표시 말풍선보다 조용하게 */
+  .map-spot{display:flex;flex-direction:column;gap:4px;min-width:196px;max-width:260px}
+  .map-spot-title{margin:0;font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.3}
+  .map-spot-kind{margin:0;font-size:11.5px;color:var(--accent);font-weight:600}
+  .map-spot-road,.map-spot-lot,.map-spot-phone{margin:0;font-size:11.5px;color:var(--muted);line-height:1.45;
+    word-break:keep-all}
+  .map-spot-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+  .map-spot-btn{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);
+    padding:4px 7px;font:inherit;font-size:11.5px;cursor:pointer}
+  .map-spot-btn:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .map-spot-btn[hidden]{display:none}
   /* 주변 시설 찾기 창 */
   .map-nearby-modal .modal-card{width:min(520px,96%)}
   .map-nearby-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}

@@ -70,6 +70,17 @@ function mapRememberAutoAddress(on){
   try { localStorage.setItem(MAP_AUTO_ADDRESS_KEY, on ? "1" : "0"); } catch(_){}
 }
 
+/* 지도를 누른 자리가 어디인지 말풍선으로 띄울지. 주소 자동 채우기와 같은 갈래(사람마다의 습관)라
+   .map 파일이 아닌 이 브라우저에 남긴다. 기본은 켬 — 카카오 지도를 쓰다 온 사람은 건물을 누르면
+   무언가 뜨는 것을 먼저 기대하기 때문이다. */
+const MAP_SPOT_INFO_KEY = "mn.mapSpotInfo";
+function mapSpotInfoOn(){
+  try { return localStorage.getItem(MAP_SPOT_INFO_KEY) !== "0"; } catch(_){ return true; }
+}
+function mapRememberSpotInfo(on){
+  try { localStorage.setItem(MAP_SPOT_INFO_KEY, on ? "1" : "0"); } catch(_){}
+}
+
 /* 최근 검색어 — 검색란을 누르면 아래로 펼친다. 같은 사람이 같은 곳을 되찾는 습관이므로 .map 파일이
    아니라 이 브라우저에 남긴다(문서를 나눠 줘도 남의 검색어가 따라가지 않는다). */
 const MAP_SEARCH_HISTORY_KEY = "mn.mapSearchHistory";
@@ -566,7 +577,8 @@ function mapKakaoAddressInfo(raw){
   const name = building || road || lot;
   if (!name) return null;
   return {
-    name, road, address: lot,
+    // building 은 이름이 붙은 자리에서만 온다 — 누른 곳이 '무엇'인지(주소가 아니라) 아는 유일한 값이다.
+    name, building, road, address: lot,
     region: String(source.region_1depth_name || "").trim(),
     district: String(source.region_2depth_name || "").trim()
   };
@@ -591,7 +603,10 @@ function mapOsmReverseInfo(raw){
   let district = String(address.city || address.county || address.town || "").trim();
   // 시도와 시군구가 같은 이름으로 오면(특별시 등) 한 단계 아래를 시군구로 쓴다.
   if (district === region) district = String(address.borough || address.city_district || address.suburb || "").trim();
-  return { name, road:String(address.road || "").trim(), address:String(raw.display_name || "").trim(), region, district };
+  /* OSM 도 이름이 붙은 자리에는 name 을 준다(건물·역·공원 …). display_name 으로 메운 이름은
+     주소일 뿐이라 건물 이름 자리에 넣지 않는다 — 카카오의 building_name 과 뜻을 맞춘다. */
+  return { name, building:String(raw.name || "").trim(), road:String(address.road || "").trim(),
+    address:String(raw.display_name || "").trim(), region, district };
 }
 async function mapPlaceInfoAt(lat, lng, want){
   const y = Number(lat).toFixed(6), x = Number(lng).toFixed(6);
@@ -676,6 +691,84 @@ async function mapNearbyPlaces(target, lat, lng, radius){
     if (!raw || !raw.meta || raw.meta.is_end !== false) break;
   }
   return places;
+}
+
+/* ===== 누른 자리가 어디인지 =====
+   카카오 지도에서 건물이나 역을 누르면 뜨는 그 안내를 흉내 낸다. 다만 배경지도가 OSM 타일 —
+   건물이 그려진 그림 — 이라 눌린 건물을 지도에서 집어낼 수는 없다. 대신 누른 좌표를 되물어
+   (좌표 → 주소) 건물 이름과 주소를 얻고, 카카오를 켰으면 그 이름으로 한 번 더 찾아 갈래와
+   전화번호까지 채운다. 그래서 건물 한가운데를 눌러야 잘 맞는다.
+
+   건물 이름이 없는 자리(역 출입구·공원 앞 …)에서는 지하철역만 한 번 더 물어본다. 갈래를 모두
+   훑으면 클릭 한 번에 검색을 열세 번 부르게 되는데, 그렇게까지 해서 얻을 것 중 수업에서 실제로
+   누르는 곳은 역이기 때문이다. */
+const MAP_SPOT_MIN_ZOOM = 15;         // 이보다 멀리서 누른 자리는 건물 하나를 가리킨 것으로 볼 수 없다
+const MAP_SPOT_NAME_RADIUS = 80;      // 건물 이름으로 그 자리를 되찾을 때의 반경
+const MAP_SPOT_STATION_RADIUS = 150;  // 역은 출입구에서 조금 떨어진 곳이 눌리므로 넉넉히 본다
+
+function mapKakaoCategoryTail(text){
+  // "교통,수송 > 지하철,전철 > 수도권1호선" — 앞의 큰 갈래는 말풍선에서 군더더기다.
+  const parts = String(text || "").split(">").map(part => part.trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+/* 갈래·키워드 검색의 같은 응답에서 말풍선에 쓸 값까지 읽는다. mapKakaoCategoryPlaces 는 표시로
+   넣을 최소한만 보는데, 그쪽은 수십 개를 한꺼번에 다루는 길이라 가볍게 두었다. */
+function mapKakaoSpotPlaces(raw){
+  return (raw && Array.isArray(raw.documents) ? raw.documents : []).map((item) => {
+    // 빈 문자열은 Number("")=0 이라 좌표처럼 통과한다 — 적혀 있는지부터 본다.
+    if (String(item.y || "").trim() === "" || String(item.x || "").trim() === "") return null;
+    const lat = Number(item.y), lng = Number(item.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const name = String(item.place_name || "").trim();
+    if (!name) return null;
+    return {
+      name, lat:mapClampLat(lat), lng:mapClampLng(lng),
+      category: mapKakaoCategoryTail(item.category_name) || String(item.category_group_name || "").trim(),
+      address: String(item.road_address_name || "").trim(),
+      lot: String(item.address_name || "").trim(),
+      phone: String(item.phone || "").trim(),
+      distance: Number(item.distance) || 0
+    };
+  }).filter(Boolean);
+}
+/* 기준점을 준 검색은 카카오가 가까운 차례로 돌려주므로(런처가 sort=distance 를 붙인다) 첫 곳이
+   그 자리다. 여러 쪽을 이어 받지 않는다 — 한 곳만 쓸 것이라 첫 쪽이면 넉넉하다. */
+async function mapSpotSearch(target, lat, lng, radius){
+  const keyword = String((target && target.keyword) || "").trim().slice(0, MAP_NEARBY_KEYWORD_MAX);
+  const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)) };
+  if (!keyword) spot.category = String((target && target.code) || "");
+  return mapKakaoSpotPlaces(await mapFetchGeocode(keyword, keyword ? "kakao-keyword" : "kakao-category", spot));
+}
+/* 돌려주는 값: { title, category, road, address, phone, distance, lat, lng } · 아무것도 못 찾으면 null.
+   카카오를 꺼 두어도 OSM 역지오코딩으로 이름과 주소까지는 나온다(갈래·전화만 빈다). */
+async function mapSpotAt(lat, lng){
+  const proxyBase = await mapTileProxyBase();
+  if (!proxyBase) throw new Error("geocode-launcher-required");
+  const info = await mapPlaceInfoAt(lat, lng, "address");
+  const spot = {
+    title: info && info.building ? info.building : "",
+    category: "", phone: "", distance: 0,
+    road: info ? info.road : "", address: info ? info.address : "",
+    lat: mapClampLat(lat), lng: mapClampLng(lng)
+  };
+  if (await mapProviderIsKakao()){
+    let place = null;
+    /* 갈래·전화는 곁들이는 값이다. 여기서 실패해도 주소만으로 말풍선을 연다 — 누를 때마다
+       "찾지 못했어요"가 뜨면 카카오 지도처럼 가볍게 눌러 보는 맛이 사라진다. */
+    try {
+      if (spot.title) place = (await mapSpotSearch({ keyword:spot.title }, lat, lng, MAP_SPOT_NAME_RADIUS))[0] || null;
+      if (!place) place = (await mapSpotSearch({ code:"SW8" }, lat, lng, MAP_SPOT_STATION_RADIUS))[0] || null;
+    } catch(_){ }
+    if (place){
+      spot.title = place.name;
+      spot.category = place.category;
+      spot.phone = place.phone;
+      spot.distance = place.distance;
+      if (!spot.road) spot.road = place.address;
+      if (!spot.address) spot.address = place.lot;
+    }
+  }
+  return (spot.title || spot.road || spot.address) ? spot : null;
 }
 // 반경을 눈에 보이게 하는 원. 지도 모델에는 원이 없으므로 면적 영역(다각형)으로 만든다 —
 // 이미 있는 넓이 계산·이름표·되돌리기를 그대로 타고, 반경 1km 원의 넓이까지 화면에 나온다.
@@ -1014,9 +1107,9 @@ function mapFormatBytes(bytes){
   return (value / (1024 * 1024)).toFixed(value < 100 * 1024 * 1024 ? 1 : 0) + "MB";
 }
 /* ===== "장소 이름 또는 좌표" 한 칸 =====
-   지도 문서와 지도 고르기 창이 같은 것을 쓴다. 좌표처럼 생기면 곧장 옮기고, 아니면 이름으로 찾아
-   결과를 목록으로 띄운다. setNote 로 진행·오류를 알리고, 찾은 첫 결과와 고른 후보는
-   onMove(lat, lng, zoom, label) 로 위치를 바로 보여 준다. */
+   지도 문서와 지도 고르기 창이 같은 것을 쓴다. 좌표처럼 생기면 곧장 옮기고(고를 후보가 없다),
+   아니면 이름으로 찾아 결과를 목록으로 띄운다. setNote 로 진행·오류를 알리고, 목록에서 고른
+   후보(또는 후보가 하나뿐이라 고를 것이 없는 자리)만 onMove(lat, lng, zoom, label) 로 옮겨 보여 준다. */
 function mapAttachPlaceSearch(input, button, results, onMove, setNote){
   let items = [];
   let searching = false;
@@ -1055,20 +1148,33 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
     options.push(option);
     return option;
   };
+  /* 후보 하나를 고른 것으로 치고 그 자리로 옮긴다. 목록에서 누르든 후보가 하나뿐이든 같은
+     길이라, 검색어 지우기·안내 걷기가 두 갈래로 갈라지지 않는다. */
+  const pick = (place) => {
+    closeResults();
+    input.value = "";
+    // 고르라는 안내는 여기서 걷는다 — onMove 가 곧바로 제 안내(빨간 점 지우는 법)를 쓴다.
+    setNote("");
+    onMove(place.lat, place.lng, 15, place.name);
+  };
+  // 곧장 옮겼으면 true — 부르는 쪽이 "고르세요" 안내를 띄울지 판단할 수 있게.
   const showResults = (places) => {
     resetList();
     items = places.slice(0, 5);
     for (const place of items){
-      results.appendChild(addOption(place.name, "map-result", () => {
-        closeResults();
-        input.value = "";
-        onMove(place.lat, place.lng, 15, place.name);
-      }));
+      results.appendChild(addOption(place.name, "map-result", () => pick(place)));
     }
     results.hidden = !items.length;
-    // 정확한 주소처럼 후보가 하나뿐인 검색뿐 아니라 여러 후보가 있을 때도 첫 결과를 즉시 보여 준다.
-    // 목록은 그대로 남겨 사용자가 다른 후보를 고를 수 있게 한다.
-    if (items.length) onMove(items[0].lat, items[0].lng, 15, items[0].name);
+    /* 여럿일 때는 찾자마자 옮기지 않는다 — 첫 결과가 엉뚱하면 지도가 먼저 튀어, 목록에서 제
+       후보를 찾는 동안 보던 자리를 잃기 때문이다. 대신 첫 줄을 짚어 둔다: 검색한 Enter 에 이어
+       Enter 를 한 번 더 누르면 첫 후보로 옮겨 간다. */
+    if (items.length === 1){
+      // 후보가 하나면 고를 것이 없다 — 한 줄짜리 목록을 펼쳐 한 번 더 누르게 하는 것은 군더더기다.
+      pick(items[0]);
+      return true;
+    }
+    if (items.length) setActive(0);
+    return false;
   };
 
   /* 검색란을 누르면(또는 글자를 지우면) 최근 검색어를 같은 자리에 펼친다. 치는 중에는 그 글자가
@@ -1124,10 +1230,10 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
     try {
       const places = await mapGeocode(text);
       if (!places.length){ setNote(mapT("그런 이름의 장소를 찾지 못했어요.")); return; }
-      setNote("");
       // 찾아낸 말만 기록한다 — 오타로 헛친 말까지 남으면 목록이 금세 쓸모없어진다.
       mapRememberSearch(text);
-      showResults(places);
+      // 후보가 하나뿐이면 여기서 이미 옮겨 갔다 — 그때는 고르라고 하지 않는다.
+      if (!showResults(places)) setNote(mapT("찾은 곳을 아래에서 고르면 그 자리로 갑니다."));
     } catch(error){
       setNote(mapT(error && error.message === "geocode-launcher-required"
         ? "장소 이름 검색은 ClassDock 런처에서 사용할 수 있어요. 좌표 이동은 그대로 쓸 수 있습니다."
@@ -1140,7 +1246,10 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !results.hidden){
-      e.preventDefault(); e.stopPropagation();
+      /* 목록만 닫고 Esc 는 그대로 흘려보낸다. 검색을 마치면 후보 목록이 열린 채로 남고(다른
+         후보를 고를 수 있게) 지도에는 빨간 표식이 찍히는데, 여기서 Esc 를 삼키면 그 한 번이
+         눈에 띄는 일을 아무것도 하지 않는다 — 목록은 어차피 곧 닫히고 표식은 그대로 남아,
+         화면에서는 "Esc 가 안 먹는다"로 보인다. 한 번에 목록도 닫고 표식도 지운다. */
       closeResults();
       return;
     }
@@ -1824,6 +1933,36 @@ async function saveMapDoc(doc){
   return ok;
 }
 
+/* ===== 저장 전 안전망 =====
+   새로고침·창 닫기로 사라지지 않도록 지금 편집분을 작업공간 사본으로 남긴다. 다음 실행에서
+   그 사본이 그대로 다시 열린다. 파이썬·노트북·표·이미지·메모(.mnote)가 이미 쓰는 길인데
+   지도만 빠져 있어, 저장 전에 새로고침하면 되살릴 근거가 없었다.
+
+   saveDocumentRecoverySnapshot 을 쓰지 않는 까닭: 그쪽은 workspacePath 가 있어야 하는데, 아직
+   한 번도 저장하지 않은 새 지도에는 그 값이 없다(makeDoc 이 null 로 둔다) — 정작 가장 잃기
+   쉬운 문서가 걸러진다. recoverySnapshotFile 이 이름으로 경로를 대신 세워 주므로 그것만 빌려
+   쓰고 작업공간에는 직접 넣는다(파이썬 초안과 같은 방식). */
+const MAP_RECOVERY_DELAY = 800;
+async function mapSaveRecovery(doc){
+  if (!doc || !doc.mapDoc) return false;
+  /* 저장해 둔 지도는 고친 것이 있을 때만 남긴다. 아직 한 번도 저장하지 않은 새 지도(초안)는
+     고친 것이 없어도 남긴다 — 표시를 찍기 전이라 ● 가 켜지지 않았을 뿐, 새로고침하면 탭째
+     사라지기 때문이다. 한 번 저장하고 나면 _named 가 서고, 그때부터는 앞줄로 갈린다. */
+  if (!doc.hasUnsavedEdits && !(doc.isScratch && !doc._named)) return false;
+  if (typeof rememberWorkspace !== "function" || typeof recoverySnapshotFile !== "function") return false;
+  let json;
+  try { json = mapDocSerialize(doc.mapDoc); } catch(_){ return false; }
+  const file = recoverySnapshotFile(doc, new TextEncoder().encode(json), "application/json");
+  if (!file) return false;
+  try {
+    doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true });
+    return !!doc.savedInWorkspace;
+  } catch(error){
+    console.warn("지도 복구본을 남기지 못했어요:", error);
+    return false;
+  }
+}
+
 /* ===== 편집기 ===== */
 async function mountMapEditor(doc){
   const model = doc.mapDoc;
@@ -1870,6 +2009,14 @@ async function mountMapEditor(doc){
   addressBtn.textContent = "📮 주소 자동";
   addressBtn.title = "켜 두면 새로 찍은 표시의 이름에 그 자리의 주소를 채워 넣어요";
   addressBtn.setAttribute("aria-pressed", "false");
+
+  const spotBtn = document.createElement("button");
+  spotBtn.type = "button";
+  spotBtn.className = "map-btn map-spot-info";
+  spotBtn.textContent = "🔎 장소 정보";
+  spotBtn.title = "켜 두면 지도를 클릭한 자리의 건물·시설 이름과 주소를 말풍선으로 보여 줘요";
+  spotBtn.setAttribute("aria-pressed", "false");
+  spotBtn.hidden = true;        // 좌표를 주소로 되묻는 길(런처)이 있을 때만 보인다
 
   const nearbyBtn = document.createElement("button");
   nearbyBtn.type = "button";
@@ -1975,7 +2122,7 @@ async function mountMapEditor(doc){
   status.className = "map-status";
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
-  bar.append(titleInput, basemapSelect, addBtn, addressBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
+  bar.append(titleInput, basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
     imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn, boardBtn, memoBtn, searchWrap,
     undoBtn, redoBtn, saveBtn, coord, status);
 
@@ -2078,12 +2225,42 @@ async function mountMapEditor(doc){
     imageVersions.set(imageVersion, model.backgroundImage || null);
   };
 
+  /* ── 저장 전 안전망 ──
+     고칠 때마다 곧바로 쓰지 않고 잠시 모아 둔다. 표시를 끌어 옮기는 동안에는 touch 가 연달아
+     들어오는데, 그때마다 작업공간을 다시 쓰면 지도가 눈에 띄게 끊긴다. */
+  let recoveryTimer = 0;
+  const scheduleRecovery = () => {
+    clearTimeout(recoveryTimer);
+    // 설정의 '자동 저장·복원'을 따른다 — 꺼 둔 사람에게는 사본을 남기지 않는다(.mnote 와 같은 규칙).
+    if (typeof appSettings !== "object" || !appSettings || !appSettings.pdfRecovery) return;
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = 0;
+      mapSaveRecovery(doc).catch(() => {});
+    }, MAP_RECOVERY_DELAY);
+  };
+  const flushMapBackup = () => {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = 0;
+    return mapSaveRecovery(doc);
+  };
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.flushBackupRecovery = flushMapBackup;     // 백업 내보내기도 마지막 편집분까지 담는다
+  doc.cleanupFns.push(() => {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = 0;
+    if (doc.flushBackupRecovery === flushMapBackup) delete doc.flushBackupRecovery;
+  });
+  /* 아직 저장하지 않은 새 지도는 손대기 전에도 한 번 남긴다 — 표시를 찍기 전에 새로고침해도
+     빈 지도 탭이 그대로 돌아오게. 저장해 둔 지도는 고칠 때 남기면 되므로 여기서는 지나친다. */
+  if (doc.isScratch && !doc._named) scheduleRecovery();
+
   /* ── 저장 안 됨(●) 표시 ── */
   const touch = () => {
     const dirty = mapDocContentKey(model) !== doc.savedContentKey;
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
     setStatus(dirty ? "● " + mapT("저장 안 됨") : "");
     recordSoon();
+    scheduleRecovery();
   };
 
   /* ── 표시(마커) ── */
@@ -2424,6 +2601,41 @@ async function mountMapEditor(doc){
       : "주소 자동 채우기를 껐습니다."));
   });
 
+  let spotInfo = mapSpotInfoOn();
+  const syncSpotButton = () => {
+    spotBtn.classList.toggle("is-on", spotInfo);
+    spotBtn.setAttribute("aria-pressed", String(spotInfo));
+  };
+  syncSpotButton();
+  spotBtn.addEventListener("click", () => {
+    spotInfo = !spotInfo;
+    mapRememberSpotInfo(spotInfo);
+    syncSpotButton();
+    if (!spotInfo) map.closePopup();
+    setStatus(mapT(spotInfo
+      ? "지도를 클릭하면 그 자리가 어디인지 말풍선으로 보여 줍니다."
+      : "클릭한 자리 안내를 껐습니다."));
+  });
+  /* 주소를 되묻는 길은 런처의 /geocode 뿐이다 — 그 길이 없으면 눌러도 안 되는 단추라 감춘다
+     (주변 시설을 카카오일 때만 내놓는 것과 같은 이유다). */
+  mapTileProxyBase().then((base) => { spotBtn.hidden = !base; }).catch(() => {});
+
+  /* 말풍선이 떠 있었다면 이번 클릭은 그것을 닫는 클릭이다. 닫자마자 새 말풍선을 열면 지도를
+     눌러 닫을 방법이 없어진다. Leaflet 은 말풍선을 열 때 preclick 에 닫기를 매므로, 지도를 만들
+     때 걸어 두는 이쪽이 언제나 먼저 불린다 — 닫히기 전의 상태를 볼 수 있다. */
+  let popupOpen = false, popupWasOpen = false;
+  map.on("popupopen", () => { popupOpen = true; });
+  map.on("popupclose", (e) => {
+    popupOpen = false;
+    /* Leaflet 은 말풍선을 닫아도 map._popup 을 그대로 둔다(closePopup 이 비워 주지 않는다).
+       그러면 키보드 처리기가 그 뒤의 Esc 마다 "닫을 말풍선이 아직 있다"고 보고 닫기를 한 번 더
+       부른 뒤 이벤트를 삼켜 버려(preventDefault + stopPropagation), 검색 표식 지우기처럼 뒤에
+       선 Esc 가 영영 오지 않는다. 한 번이라도 말풍선을 연 지도에서는 Esc 가 통째로 먹통이 되는
+       셈이다. 닫힌 것은 닫힌 것으로 적어 둔다 — 다음 말풍선이 열리면 Leaflet 이 다시 채운다. */
+    if (map._popup === e.popup) map._popup = null;
+  });
+  map.on("preclick", () => { popupWasOpen = popupOpen; });
+
   map.on("click", (e) => {
     if (drawingMode){
       draftPoints.push([mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng)]);
@@ -2432,7 +2644,12 @@ async function mountMapEditor(doc){
       setStatus(mapTf("점 {count}개 — 계속 찍거나 Enter로 완료하세요", { count }));
       return;
     }
-    if (!adding) return;
+    if (!adding){
+      /* 거리선·면적에서 올라온 클릭은 그 도형의 말풍선이 열릴 자리다(우클릭 메뉴와 같은 판정).
+         여기서 걸러 내지 않으면 방금 열린 그 말풍선을 이 안내가 덮어 버린다. */
+      if (spotInfo && !spotBtn.hidden && !popupWasOpen && !e.propagatedFrom) showSpotInfo(e.latlng);
+      return;
+    }
     const marker = mapNormalizeMarker({ lat:e.latlng.lat, lng:e.latlng.lng, label:"", color:"red" });
     model.markers.push(marker);
     const layer = addMarkerLayer(marker);
@@ -2691,6 +2908,103 @@ async function mountMapEditor(doc){
   };
   nearbyBtn.addEventListener("click", () => runNearby(map.getCenter()));
 
+  /* ── 클릭한 자리 안내 ──
+     읽기만 하는 말풍선이라 문서를 건드리지 않는다. 남기고 싶을 때만 '표시로 넣기'로 지도에
+     들어간다 — 그래야 눌러 본 자리마다 표시가 쌓이지 않는다. */
+  let spotBusy = false;
+  const spotLine = (className, text) => {
+    if (!text) return null;
+    const line = document.createElement("p");
+    line.className = className;
+    line.textContent = text;
+    return line;
+  };
+  function buildSpotPopup(spot){
+    const box = document.createElement("div");
+    box.className = "map-spot";
+    const name = spot.title || spot.road || spot.address;
+    const title = document.createElement("h4");
+    title.className = "map-spot-title";
+    title.textContent = name;
+    box.appendChild(title);
+    // 제목으로 이미 쓴 줄은 다시 적지 않는다(이름 없는 자리에서는 주소가 곧 제목이다).
+    for (const line of [
+      spotLine("map-spot-kind", spot.category),
+      spotLine("map-spot-road", spot.road !== name ? spot.road : ""),
+      spotLine("map-spot-lot", spot.address !== name ? spot.address : ""),
+      spotLine("map-spot-phone", spot.phone ? "☎ " + spot.phone : "")
+    ]) if (line) box.appendChild(line);
+
+    const actions = document.createElement("div");
+    actions.className = "map-spot-actions";
+    const pinBtn = document.createElement("button");
+    pinBtn.type = "button"; pinBtn.className = "map-spot-btn";
+    pinBtn.textContent = "📍 표시로 넣기";
+    pinBtn.title = "이 자리를 이름과 주소가 담긴 표시로 지도에 남겨요";
+    pinBtn.addEventListener("click", () => {
+      map.closePopup();
+      const marker = mapNormalizeMarker({
+        lat:spot.lat, lng:spot.lng, color:"red", label:name,
+        // 수업에서 그대로 읽는 값들이라 메모에 담아 둔다(주소 자동 채우기와 같은 자리).
+        note:[spot.category, spot.road, spot.address, spot.phone].filter(Boolean).join("\n")
+      });
+      model.markers.push(marker);
+      addMarkerLayer(marker).openPopup();
+      touch();
+    });
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button"; copyBtn.className = "map-spot-btn";
+    copyBtn.textContent = "📋 주소 복사";
+    copyBtn.title = "이 자리의 주소를 클립보드로 복사";
+    copyBtn.addEventListener("click", async () => {
+      const text = spot.road || spot.address || name;
+      const copied = await mapCopyText(text);
+      if (typeof toast === "function"){
+        toast(copied ? mapTf("주소를 복사했어요 — {text}", { text }) : mapT("주소를 복사하지 못했어요."), 3000);
+      }
+    });
+    const nearBtn = document.createElement("button");
+    nearBtn.type = "button"; nearBtn.className = "map-spot-btn";
+    nearBtn.textContent = "🏫 주변 시설";
+    nearBtn.title = "이 자리를 가운데로 삼아 반경 안의 시설을 찾아요";
+    nearBtn.hidden = nearbyBtn.hidden;      // 도구막대와 같다 — 카카오를 껐으면 눌러도 안 되는 항목이다
+    nearBtn.addEventListener("click", () => {
+      map.closePopup();
+      runNearby({ lat:spot.lat, lng:spot.lng }, { atPoint:true });
+    });
+    actions.append(pinBtn, copyBtn, nearBtn);
+    box.appendChild(actions);
+    mapTranslate(box);
+    return box;
+  }
+  async function showSpotInfo(latlng){
+    // 답을 기다리는 사이의 클릭은 흘린다 — 지도를 몇 번 누르는 동안 검색이 겹겹이 나가지 않게.
+    if (spotBusy) return;
+    /* 멀리서 누른 자리는 몇 백 미터를 가리킨다. 그 자리의 주소를 돌려줘도 누른 건물의 것이 아니라
+       가르치는 자리에서 오히려 헷갈린다 — 찾지 않고 까닭을 알려 준다. */
+    if (map.getZoom() < MAP_SPOT_MIN_ZOOM){
+      // 얼마나 더 확대해야 하는지 숫자로 말해 준다 — 도구막대의 '확대 N' 과 같은 눈금이다.
+      setStatus(mapTf("조금 더 확대하면 누른 자리가 어디인지 볼 수 있어요 — 지금 확대 {zoom}, {need}단계부터",
+        { zoom:map.getZoom(), need:MAP_SPOT_MIN_ZOOM }));
+      return;
+    }
+    spotBusy = true;
+    setStatus(mapT("장소를 찾는 중…"));
+    try {
+      const spot = await mapSpotAt(latlng.lat, latlng.lng);
+      if (!spot){ setStatus(mapT("이 자리가 어디인지 찾지 못했어요.")); return; }
+      L.popup({ className:"map-spot-popup", minWidth:210, autoPan:false })
+        .setLatLng([spot.lat, spot.lng])
+        .setContent(buildSpotPopup(spot))
+        .openOn(map);
+      touch();      // 잠시 덮어 뒀던 '저장 안 됨' 표시를 제자리로 돌린다(문서는 건드리지 않는다)
+    } catch(error){
+      setStatus(mapT(error && error.message === "geocode-launcher-required"
+        ? "클릭한 자리 안내는 ClassDock 런처에서 사용할 수 있어요."
+        : "장소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요."));
+    } finally { spotBusy = false; }
+  }
+
   /* ── 지도 우클릭 빠른 메뉴 ──
      도구막대는 그대로 두고 통로만 하나 더 낸다. 여기서만 할 수 있는 일은 "누른 자리"를 아는
      것이다 — 도구막대의 표시 추가는 모드를 켜고 한 번 더 클릭해야 하고, 주변 시설은 언제나
@@ -2838,6 +3152,7 @@ async function mountMapEditor(doc){
   contextMirror(lineBtn);
   contextMirror(areaBtn);
   contextMirror(addressBtn);
+  contextMirror(spotBtn);
 
   contextSep();
   contextMirror(clearItemsBtn);
