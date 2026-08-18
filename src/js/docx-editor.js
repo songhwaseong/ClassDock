@@ -1868,9 +1868,10 @@ const MNDocxEditor = (() => {
       if ((!commandRange || commandRange.collapsed) && selected)
         commandRange = rangeAtOffsets(paragraph, selected.start, selected.end);
       const hasSelection = !!(commandRange && !commandRange.collapsed);
-      // 지도로 넘길 수 있는 말인지(짧은 지명인지) 미리 가려 둔다 — 빈 값이면 메뉴를 흐리게 둔다.
-      const mapQuery = typeof mapSearchTextFrom === "function" && typeof searchMapForText === "function"
-        ? mapSearchTextFrom(hasSelection ? commandRange.toString() : "") : "";
+      /* 고른 글자를 지도·파일 검색으로 잇는 줄. 다른 편집기의 우클릭 메뉴와 같은 함수에서 받아
+         같은 문구·같은 판정(너무 길면 흐리게)을 쓴다. */
+      const searchItems = typeof selectionSearchMenuItems === "function"
+        ? selectionSearchMenuItems(hasSelection ? commandRange.toString() : "") : [];
       const editable = paragraph.contentEditable === "true";
       const format = row.index ? officeParagraphTextFormat(state.xml,
         { paragraphIndex: row.index, offset: selected ? selected.start : undefined }) : null;
@@ -2020,9 +2021,7 @@ const MNDocxEditor = (() => {
             MNSpecialChars.open({ x: point.x, y: point.y, target: paragraph, range: commandRange });
         }, disabled: !editable || busy || typeof MNSpecialChars === "undefined" || !MNSpecialChars },
         { label: "문단 전체 선택", action: selectAll },
-        /* 고른 지명을 지도 탭의 검색칸으로 넘긴다. 지도 문서가 없으면 새로 열고, 여러 개면 가장
-           최근에 보던 지도로 간다(map-viewer.js 의 searchMapForText). */
-        { label: "지도에서 검색", action: () => searchMapForText(mapQuery), disabled: !mapQuery },
+        ...searchItems,
         { separator: true },
         { label: "글자 서식", children: textItems },
         { label: "문단 배치", children: paragraphItems },

@@ -131,3 +131,33 @@ test("화이트보드는 ● 대신 복구본을 남기고, Ctrl+S 는 PNG 내�
   const flush = backup.slice(backup.indexOf("for (const doc of [...docs])"));
   assert.match(flush, /doc\.kind === "board"[\s\S]{0,120}flushBoardRecovery[\s\S]{0,200}if \(!doc\.hasUnsavedEdits\) continue;/);
 });
+
+/* 문서에서 고른 낱말을 사이드바 검색창(파일명·내용)으로 넘기는 길 — 사람이 직접 친 것과 같은
+   길(onSidebarSearchInput)을 타야 이름 거르기·내용 검색·최근 검색어가 갈라지지 않는다. */
+test("고른 글자로 파일 검색을 걸면 사이드바를 펴고 같은 검색 경로를 탄다", () => {
+  const source = read("documents.js");
+  const body = source.slice(source.indexOf("function searchFilesForText"), source.indexOf("function fileSearchMenuItem"));
+  assert.match(body, /const input = byId\("sbSearch"\)/);
+  assert.match(body, /if \(!text \|\| !input\) return false/);
+  // 접어 둔 사이드바에 결과만 넣으면 아무 일도 없는 것처럼 보인다. 커서는 건드리지 않고 편다.
+  assert.match(body, /if \(sidebarCollapsed\) openSidebar\(\{ reveal:false \}\)/);
+  assert.match(body, /input\.value = text;\s*\n\s*onSidebarSearchInput\(\)/);
+  // 결과를 보며 고쳐 칠 수 있게 검색어를 통째로 골라 둔다.
+  assert.match(body, /input\.setSelectionRange\(0, input\.value\.length\)/);
+});
+
+test("파일 검색으로 넘길 글자는 문단째 긁은 것만 거른다", () => {
+  const source = read("documents.js");
+  const context = { console };
+  context.globalThis = context;
+  vm.createContext(context);
+  const start = source.indexOf("const FILE_SEARCH_MENU_LABEL");
+  vm.runInContext(source.slice(start, source.indexOf("function searchFilesForText")) + `
+    ;globalThis.__files = { FILE_SEARCH_TEXT_MAX, fileSearchTextFrom };`, context);
+  const api = context.__files;
+  assert.equal(api.fileSearchTextFrom("  세종대왕 "), "세종대왕");
+  // 장소 이름보다 너그럽다 — 문장 조각으로 본문을 찾는 것도 쓸모가 있다.
+  assert.equal(api.fileSearchTextFrom("조선\n전기의\t문화"), "조선 전기의 문화");
+  assert.equal(api.fileSearchTextFrom(""), "");
+  assert.equal(api.fileSearchTextFrom("가".repeat(api.FILE_SEARCH_TEXT_MAX + 1)), "");
+});

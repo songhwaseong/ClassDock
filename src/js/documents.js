@@ -3107,6 +3107,40 @@ function onSidebarSearchInput(){                          // 입력 즉시 이�
   renderSidebar();
   contentSearchTimer = setTimeout(() => runContentSearch(q), CONTENT_SEARCH_DEBOUNCE_MS);
 }
+/* ===== 고른 글자로 파일 찾기 =====
+   문서에서 낱말을 긁고 우클릭 → "파일에서 검색" 을 누르면 사이드바 검색창(파일명·내용)에 그 말을
+   넣고 곧장 찾는다. 사람이 직접 친 것과 같은 길(onSidebarSearchInput)이라 이름 거르기·내용 검색·
+   최근 검색어가 따로 갈라지지 않는다. */
+const FILE_SEARCH_MENU_LABEL = "파일에서 검색";
+/* 장소 이름보다는 너그럽게 — 문장 조각으로 본문을 찾는 것도 쓸모가 있다. 다만 문단째 긁은 것은
+   검색어로 쓸모가 없고 내용 검색을 무겁게만 하므로 자른다. */
+const FILE_SEARCH_TEXT_MAX = 80;
+function fileSearchTextFrom(raw){
+  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+  return text && text.length <= FILE_SEARCH_TEXT_MAX ? text : "";
+}
+function searchFilesForText(raw){
+  const text = fileSearchTextFrom(raw);
+  const input = byId("sbSearch");
+  if (!text || !input) return false;
+  // 접어 둔 사이드바에 검색 결과를 넣으면 아무 일도 없는 것처럼 보인다 — 커서는 건드리지 않고 편다.
+  if (sidebarCollapsed) openSidebar({ reveal:false });
+  input.value = text;
+  onSidebarSearchInput();
+  // 결과를 보며 검색어를 고쳐 칠 수 있게 통째로 골라 둔다.
+  input.focus();
+  try { input.setSelectionRange(0, input.value.length); } catch(_){}
+  return true;
+}
+// 우클릭 메뉴 한 줄 — 지도 검색과 같은 꼴로 만들어 어느 메뉴에서든 같이 쓴다.
+function fileSearchMenuItem(selectedText){
+  return {
+    label: FILE_SEARCH_MENU_LABEL,
+    action: () => searchFilesForText(selectedText),
+    disabled: !fileSearchTextFrom(selectedText)
+  };
+}
+
 function documentExtension(doc){
   const name = String(doc && doc.name || "");
   const ext = fileExtOf(name);

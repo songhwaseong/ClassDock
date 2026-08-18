@@ -7,13 +7,22 @@ function closeTextContextMenu(){
   if (typeof activeTextContextMenu === "function") activeTextContextMenu();
 }
 
-/* 고른 지명을 지도 탭 검색칸으로 보내는 한 줄을 메뉴에 얹는다(map-viewer.js 가 실제 일을 한다).
-   지도 모듈이 없는 화면에서는 아무것도 얹지 않아, 눌러도 아무 일 없는 항목이 남지 않게 한다. */
-function addMapSearchItem(addItem, addSeparator, selectedText){
-  if (typeof mapSearchMenuItem !== "function") return false;
-  const item = mapSearchMenuItem(String(selectedText == null ? "" : selectedText));
+/* 고른 글자로 다른 화면에서 이어 찾는 항목들 — 지도(장소 이름)와 사이드바(파일명·내용).
+   실제 일은 map-viewer.js·documents.js 가 하고, 여기서는 어느 메뉴에서든 같은 줄이 같은 자리에
+   오도록 모아 두기만 한다. 그 기능이 없는 화면에서는 그 줄을 얹지 않아, 눌러도 아무 일 없는
+   항목이 남지 않게 한다. */
+function selectionSearchMenuItems(selectedText){
+  const text = String(selectedText == null ? "" : selectedText);
+  const items = [];
+  if (typeof mapSearchMenuItem === "function") items.push(mapSearchMenuItem(text));
+  if (typeof fileSearchMenuItem === "function") items.push(fileSearchMenuItem(text));
+  return items;
+}
+function addSelectionSearchItems(addItem, addSeparator, selectedText){
+  const items = selectionSearchMenuItems(selectedText);
+  if (!items.length) return false;
   addSeparator();
-  addItem(item.label, item.action, item.disabled);
+  for (const item of items) addItem(item.label, item.action, item.disabled);
   return true;
 }
 
@@ -160,7 +169,7 @@ function attachTextCaseContextMenu(ta, options={}){
     addItem("복사", copy, !hasSelection);
     addItem("잘라내기", cut, !hasSelection);
     addItem("붙여넣기", paste);
-    addMapSearchItem(addItem, addSeparator, value.slice(selection.start, selection.end));
+    addSelectionSearchItems(addItem, addSeparator, value.slice(selection.start, selection.end));
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY));
     addSeparator();
@@ -292,7 +301,7 @@ function attachEditableContextMenu(el, options={}){
         if (typeof toast === "function") toast("붙여넣기는 Ctrl+V로 할 수 있어요.", 2200);
       }
     });
-    addMapSearchItem(addItem, addSeparator, range ? range.toString() : "");
+    addSelectionSearchItems(addItem, addSeparator, range ? range.toString() : "");
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY, range));
     addSeparator();
@@ -381,7 +390,7 @@ function openViewSelectionMenu(x, y, text){
       else document.execCommand("copy");
     } catch(_){ try { document.execCommand("copy"); } catch(__){} }
   });
-  addMapSearchItem(addItem, addSeparator, text);
+  addSelectionSearchItems(addItem, addSeparator, text);
 
   document.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();

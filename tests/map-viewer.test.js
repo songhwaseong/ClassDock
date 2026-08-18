@@ -1208,14 +1208,19 @@ test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁�
 
 /* 편집기·표 셀은 공용 메뉴 두 개가 모두 쓰므로, 거기에 한 번 넣으면 텍스트·코드·노트북 셀·
    메모·스프레드시트 셀이 함께 따라온다. 부르는 쪽마다 옵션을 넘기지 않는다. */
-test("글자를 다루는 공용 우클릭 메뉴에는 지도 검색이 내장된다", () => {
+test("글자를 다루는 공용 우클릭 메뉴에는 지도·파일 검색이 내장된다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
   // textarea 편집기(코드·텍스트·노트북 셀·메모 글 블록)
-  assert.match(source, /addMapSearchItem\(addItem, addSeparator, value\.slice\(selection\.start, selection\.end\)\)/);
+  assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, value\.slice\(selection\.start, selection\.end\)\)/);
   // contenteditable(메모·스프레드시트 표 셀)
-  assert.match(source, /addMapSearchItem\(addItem, addSeparator, range \? range\.toString\(\) : ""\)/);
-  // 지도 모듈이 없는 화면에서는 눌러도 아무 일 없는 항목을 남기지 않는다.
-  assert.match(source, /if \(typeof mapSearchMenuItem !== "function"\) return false/);
+  assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, range \? range\.toString\(\) : ""\)/);
+  // 그 기능이 없는 화면에서는 눌러도 아무 일 없는 항목을 남기지 않는다.
+  assert.match(source, /if \(typeof mapSearchMenuItem === "function"\) items\.push/);
+  assert.match(source, /if \(typeof fileSearchMenuItem === "function"\) items\.push/);
+  // DOCX 는 제 계층 메뉴를 쓰지만 같은 목록을 받아 문구·판정이 갈라지지 않는다.
+  const docx = fs.readFileSync(path.join(__dirname, "../src/js/docx-editor.js"), "utf8");
+  assert.match(docx, /selectionSearchMenuItems\(hasSelection \? commandRange\.toString\(\) : ""\)/);
+  assert.match(docx, /\.\.\.searchItems,/);
 });
 
 /* 보기 전용 화면(PDF·한글·PPT·텍스트 보기)에는 편집기가 없어 매달 자리가 없다 — 문서 영역에서
@@ -1229,8 +1234,8 @@ test("보기 화면의 선택 글자 메뉴는 브라우저 기본 메뉴를 함
   assert.match(body[1], /getElementById\("content"\)/);                        // 사이드바·탭은 제외
   assert.match(body[1], /selection\.isCollapsed \|\| !selection\.rangeCount/);  // 고른 글자가 있을 때만
   assert.match(body[1], /selectionHitsPoint\(selection\.getRangeAt\(0\), event\.clientX, event\.clientY\)/);
-  // 메뉴는 복사와 지도 검색 두 줄. 시작할 때 한 번만 매단다.
-  assert.match(source, /addMapSearchItem\(addItem, addSeparator, text\)/);
+  // 메뉴는 복사 + 이어 찾기 줄들. 시작할 때 한 번만 매단다.
+  assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, text\)/);
   const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
   assert.match(app, /installViewSelectionContextMenu\(\)/);
 });
