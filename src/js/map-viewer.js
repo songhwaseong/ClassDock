@@ -1284,6 +1284,16 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
     cancelPendingClose();
     closeTimer = setTimeout(closeResults, 150);
   });
+  /* 밖에서 건네준 낱말로 이 칸을 채우고 곧장 찾는다(문서 우클릭 "지도에서 검색"). 칸에 글자를
+     남긴 채 시작해야 무엇을 찾는 중인지 보이고, 결과가 엉뚱하면 그 자리에서 고쳐 칠 수 있다.
+     찾은 뒤의 처리는 사람이 직접 친 것과 완전히 같다 — 후보가 하나면 바로 그 자리로 간다. */
+  closeResults.searchFor = (text) => {
+    const value = String(text == null ? "" : text).trim();
+    if (!value) return;
+    closeResults();          // 최근 검색어가 펼쳐져 있으면 먼저 걷는다
+    input.value = value;
+    search();
+  };
   return closeResults;
 }
 
@@ -1809,13 +1819,13 @@ async function loadMapDoc(file, opts = {}){
 function mapScratchFileName(n){
   return n && n > 1 ? "지도 " + n + ".map" : "지도.map";
 }
+// 만든 문서를 돌려준다 — 새 지도를 열자마자 무엇을 시키려는 쪽(searchMapForText)이 기다릴 수 있게.
 function newMapScratch(){
   _mapScratchCount++;
   const name = mapScratchFileName(_mapScratchCount);
   const starter = mapDocSerialize(mapDocEmpty(mapDocDefaultTitle(name)));
-  if (typeof handleFiles === "function"){
-    handleFiles([new File([starter], name, { type:"application/json" })], { isScratch:true });
-  }
+  if (typeof handleFiles !== "function") return Promise.resolve(null);
+  return Promise.resolve(handleFiles([new File([starter], name, { type:"application/json" })], { isScratch:true }));
 }
 function newMapScratchInFolder(folder){
   if (typeof createScratchInFolder !== "function") return false;
@@ -1914,6 +1924,60 @@ async function openMapFromMemo(options = {}){
   finally {
     if (blockId && _mapMemoOpenTasks.get(blockId) === opening) _mapMemoOpenTasks.delete(blockId);
   }
+}
+
+/* ===== 다른 문서에서 고른 낱말로 찾기 =====
+   글 문서에서 지명을 긁고 우클릭 → "지도에서 검색" 을 누르면 지도 탭으로 건너가 그 말을 검색칸에
+   넣고 찾는다. 후보가 여럿이면 주소 목록이 검색칸 아래에 펼쳐지고, 하나뿐이면 곧장 그 자리로
+   간다(사람이 직접 친 것과 같은 길 — mapAttachPlaceSearch). */
+const MAP_SEARCH_MENU_LABEL = "지도에서 검색";
+/* 문단을 통째로 긁어 넘기면 찾을 수 없는 말이 된다. 장소 이름은 짧으므로 줄바꿈을 눕히고
+   길이로 걸러, 메뉴에서 미리 흐리게 만들 근거로 쓴다(빈 문자열 = 쓸 수 없는 선택). */
+const MAP_SEARCH_TEXT_MAX = 40;
+function mapSearchTextFrom(raw){
+  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+  return text && text.length <= MAP_SEARCH_TEXT_MAX ? text : "";
+}
+/* 어느 지도로 보낼지 — 열어 둔 지도 중 가장 최근에 본 것. 한 번도 활성화한 적 없는 탭(파일을
+   여럿 열어 두기만 한 경우)은 뒤로 민다. 열린 지도가 없으면 부르는 쪽이 새로 만든다. */
+function mapRecentMapDoc(){
+  const open = (typeof docs !== "undefined" && Array.isArray(docs) ? docs : [])
+    .filter(item => item && item.kind === "map" && !item.closed);
+  if (open.length < 2) return open[0] || null;
+  const mru = typeof activeMru !== "undefined" && Array.isArray(activeMru) ? activeMru : [];
+  const rank = (item) => {
+    const at = mru.indexOf(item.id);
+    return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+  };
+  return open.slice().sort((a, b) => rank(a) - rank(b))[0];
+}
+async function searchMapForText(raw){
+  const text = mapSearchTextFrom(raw);
+  if (!text){
+    if (typeof toast === "function") toast(mapT("지도에서 찾을 장소 이름을 짧게 골라 주세요."), 2600);
+    return null;
+  }
+  const doc = mapRecentMapDoc() || await newMapScratch();
+  if (!doc) return null;
+  if (typeof setActiveDoc === "function") setActiveDoc(doc.id);
+  /* 아직 그리지 않은 탭에는 검색칸이 없다 — 이 말을 담아 두면 마운트가 끝나는 자리에서 받아
+     찾는다(mountMapEditor). 이미 그려 둔 탭이면 아래에서 곧장 부르므로 담긴 말은 남지 않는다. */
+  doc._mapPendingSearch = text;
+  if (typeof ensureRendered === "function") await ensureRendered(doc);
+  if (doc._mapPendingSearch === text && typeof doc.mapSearchFor === "function"){
+    doc._mapPendingSearch = null;
+    doc.mapSearchFor(text);
+  }
+  return doc;
+}
+/* 우클릭 메뉴 한 줄 — 글자를 다루는 메뉴라면 어디서든 같은 꼴로 쓴다(편집기·표 셀·보기 화면).
+   고른 것이 없거나 문단째 긁었으면 흐리게 둔다 — 감추면 이런 길이 있다는 것을 알 수 없다. */
+function mapSearchMenuItem(selectedText){
+  return {
+    label: MAP_SEARCH_MENU_LABEL,
+    action: () => searchMapForText(selectedText),
+    disabled: !mapSearchTextFrom(selectedText)
+  };
 }
 
 /* ===== 저장 ===== */
@@ -3204,11 +3268,19 @@ async function mountMapEditor(doc){
   mapTranslate(contextMenu);
 
   const moveToSearchLocation = mapSearchLocationMover(map);
-  mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label) => {
+  const placeSearch = mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label) => {
     moveToSearchLocation(lat, lng, zoom, label);
     // 이제 표식이 계속 남으므로, 지우는 법을 한 줄로 알려 준다.
     if (label) setStatus(mapT("찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)"));
   }, setStatus);
+  /* 다른 문서에서 고른 낱말로 찾아 달라는 부탁(searchMapForText)을 받는 창구. 탭이 그려지기 전에
+     들어온 부탁은 _mapPendingSearch 에 담겨 오므로, 검색칸이 준비된 지금 자리에서 함께 처리한다. */
+  doc.mapSearchFor = (text) => placeSearch.searchFor(text);
+  if (doc._mapPendingSearch){
+    const pending = doc._mapPendingSearch;
+    doc._mapPendingSearch = null;
+    doc.mapSearchFor(pending);
+  }
   /* 검색 표식은 지도를 눌러도 남으므로 Esc 로 지운다. 표시 추가·그리기·영역 선택 중이면 Esc 는
      원래 하던 일(취소·삭제)이 먼저다 — onSelectedShapeKey 가 먼저 등록돼 있어 그쪽이 preventDefault
      한 Esc 는 여기서 건너뛴다. */
@@ -3435,6 +3507,7 @@ async function mountMapEditor(doc){
     if (mapResizeObserver) mapResizeObserver.disconnect();
     try { map.remove(); } catch(_){}
     doc.mapInstance = null;
+    doc.mapSearchFor = null;      // 닫힌 탭의 검색칸을 다른 문서가 계속 부르지 않게
   });
 
   touch();
@@ -3450,6 +3523,7 @@ if (typeof module !== "undefined" && module.exports){
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
     mapMarkersFromCsv, mapMarkersToCsv,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
-    mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
+    mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
+    MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom
   };
 }

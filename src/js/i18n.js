@@ -1744,6 +1744,7 @@
     "찾는 중…": "Searching…",
     "찾은 곳을 아래에서 고르면 그 자리로 갑니다.": "Pick one of the results below to go there.",
     "그런 이름의 장소를 찾지 못했어요.": "No place found with that name.",
+    "지도에서 찾을 장소 이름을 짧게 골라 주세요.": "Select a short place name to look up on the map.",
     "장소를 찾지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't search for places — check your internet connection.",
     "인터넷 연결 없음 — 새 지역 지도는 표시할 수 없습니다. 이전에 저장된 지역만 볼 수 있습니다.":
       "No internet connection — new map areas cannot be displayed. You can only view previously cached areas.",

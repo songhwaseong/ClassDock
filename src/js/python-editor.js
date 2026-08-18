@@ -7,6 +7,16 @@ function closeTextContextMenu(){
   if (typeof activeTextContextMenu === "function") activeTextContextMenu();
 }
 
+/* 고른 지명을 지도 탭 검색칸으로 보내는 한 줄을 메뉴에 얹는다(map-viewer.js 가 실제 일을 한다).
+   지도 모듈이 없는 화면에서는 아무것도 얹지 않아, 눌러도 아무 일 없는 항목이 남지 않게 한다. */
+function addMapSearchItem(addItem, addSeparator, selectedText){
+  if (typeof mapSearchMenuItem !== "function") return false;
+  const item = mapSearchMenuItem(String(selectedText == null ? "" : selectedText));
+  addSeparator();
+  addItem(item.label, item.action, item.disabled);
+  return true;
+}
+
 function attachTextCaseContextMenu(ta, options={}){
   // 특수문자 문자표 — 브라우저 위에서 도는 편집기라 "ㅁ + 한자키" 가 오지 않는다.
   // 대신 우클릭 메뉴와 Ctrl+F10(한글·워드의 문자표 단축키)으로 연다.
@@ -150,6 +160,7 @@ function attachTextCaseContextMenu(ta, options={}){
     addItem("복사", copy, !hasSelection);
     addItem("잘라내기", cut, !hasSelection);
     addItem("붙여넣기", paste);
+    addMapSearchItem(addItem, addSeparator, value.slice(selection.start, selection.end));
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY));
     addSeparator();
@@ -281,6 +292,7 @@ function attachEditableContextMenu(el, options={}){
         if (typeof toast === "function") toast("붙여넣기는 Ctrl+V로 할 수 있어요.", 2200);
       }
     });
+    addMapSearchItem(addItem, addSeparator, range ? range.toString() : "");
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY, range));
     addSeparator();
@@ -315,6 +327,93 @@ function attachEditableContextMenu(el, options={}){
   };
   detach.open = onContextMenu;
   return detach;
+}
+
+/* ===== 보기 화면(읽기 전용)에서 고른 글자 =====
+   PDF·한글·PowerPoint·텍스트 보기처럼 편집기가 없는 화면에는 우클릭 메뉴가 없었다. 여기서는
+   문서마다 메뉴를 매달지 않고 문서 영역 전체에서 한 번만 받는다 — 뷰어가 몇 개든 같은 메뉴가
+   따라온다.
+   뺏지 않는 것: 글자를 고르지 않았거나, 고른 글자에서 떨어진 곳을 눌렀거나, 제 메뉴를 가진
+   화면(편집기·칠판·지도·악보·표 — 이미 preventDefault 로 잡아 간다)이면 그대로 흘려보낸다.
+   그림 저장·링크 열기 같은 브라우저 기본 메뉴가 살아 있어야 하기 때문이다. */
+let _viewSelectionMenuOn = false;
+// 고른 글자 위를 눌렀는지. 줄마다 사각형이 따로 오므로(여러 줄 선택) 하나라도 품으면 맞다.
+function selectionHitsPoint(range, x, y){
+  const rects = range && typeof range.getClientRects === "function" ? [...range.getClientRects()] : [];
+  const pad = 2;
+  return rects.some(rect => x >= rect.left - pad && x <= rect.right + pad &&
+    y >= rect.top - pad && y <= rect.bottom + pad);
+}
+function openViewSelectionMenu(x, y, text){
+  closeTextContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "text-context-menu";
+  menu.setAttribute("role", "menu");
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (menu.isConnected) menu.remove();
+    document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("keydown", onKeydown, true);
+    window.removeEventListener("resize", close);
+    if (activeTextContextMenu === close) activeTextContextMenu = null;
+  };
+  const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
+  const onKeydown = (e) => { if (e.key === "Escape") close(); };
+  const addItem = (label, action, disabled=false) => {
+    const button = document.createElement("button");
+    button.type = "button"; button.textContent = label; button.disabled = !!disabled;
+    button.setAttribute("role", "menuitem");
+    // 메뉴를 누르는 동안 고른 글자가 풀리지 않아야 "복사"가 빈손으로 끝나지 않는다.
+    button.addEventListener("pointerdown", (e) => e.preventDefault());
+    button.addEventListener("click", () => { if (button.disabled) return; close(); action(); });
+    menu.appendChild(button);
+  };
+  const addSeparator = () => {
+    const sep = document.createElement("div");
+    sep.className = "text-context-sep"; sep.setAttribute("role", "separator");
+    menu.appendChild(sep);
+  };
+  addItem("복사", async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else document.execCommand("copy");
+    } catch(_){ try { document.execCommand("copy"); } catch(__){} }
+  });
+  addMapSearchItem(addItem, addSeparator, text);
+
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, x)) + "px";
+  menu.style.top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, y)) + "px";
+  activeTextContextMenu = close;
+  setTimeout(() => {
+    if (!menu.isConnected) return;
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("keydown", onKeydown, true);
+    window.addEventListener("resize", close);
+  }, 0);
+}
+function installViewSelectionContextMenu(){
+  if (_viewSelectionMenuOn) return false;
+  _viewSelectionMenuOn = true;
+  document.addEventListener("contextmenu", (event) => {
+    if (event.defaultPrevented) return;                    // 제 메뉴를 가진 화면이 이미 가져갔다
+    const target = event.target;
+    if (!target || typeof target.closest !== "function") return;
+    if (target.closest("input, textarea, [contenteditable='true']")) return;   // 편집 메뉴가 맡는 자리
+    const host = document.getElementById("content");
+    if (!host || !host.contains(target)) return;           // 사이드바·탭·도구막대는 건드리지 않는다
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const text = String(selection).trim();
+    if (!text) return;
+    if (!selectionHitsPoint(selection.getRangeAt(0), event.clientX, event.clientY)) return;
+    event.preventDefault();
+    openViewSelectionMenu(event.clientX, event.clientY, text);
+  });
+  return true;
 }
 
 // 문서 끝에 여러 빈 줄을 만들 때도 일반 Enter처럼 마지막 코드 줄의 들여쓰기를 이어받는다.

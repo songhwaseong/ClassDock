@@ -396,7 +396,7 @@ cd myOffice</code></pre>
 
 <ul>
   <li><strong><kbd>Ctrl</kbd>+<kbd>G</kbd> 줄 번호로 이동</strong> — 작은 창에 줄 번호를 넣으면 그 줄로 바로 갑니다. 줄 수를 넘는 숫자는 마지막 줄로 당기고 알려 주며, <kbd>Esc</kbd>로 닫으면 보던 자리로 돌아옵니다. 읽기 전용 코드 보기에서도 편집 모드로 넘어가지 않고 이동합니다</li>
-  <li><strong>우클릭 메뉴</strong> — 복사·잘라내기·붙여넣기와 함께 <strong>대문자/소문자로 변경</strong>, <strong>선택한 줄 중복 제거</strong>, <strong>모두 선택</strong>을 쓸 수 있습니다</li>
+  <li><strong>우클릭 메뉴</strong> — 복사·잘라내기·붙여넣기와 함께 <strong>대문자/소문자로 변경</strong>, <strong>선택한 줄 중복 제거</strong>, <strong>모두 선택</strong>을 쓸 수 있습니다. 고른 글자가 지명이면 <strong>지도에서 검색</strong>으로 지도 탭에서 바로 찾아볼 수 있습니다</li>
   <li><strong><kbd>Ctrl</kbd>+<kbd>F10</kbd> 특수문자</strong> — 브라우저 위 편집기라 "ㅁ + 한자키"가 오지 않으므로, 우클릭 → <strong>특수문자…</strong> 또는 <kbd>Ctrl</kbd>+<kbd>F10</kbd>으로 문자표를 엽니다. ※ ○ ① ㎡ 같은 글자를 <strong>한자키 자모(ㄱ·ㄴ·ㄷ…) 순서 그대로</strong> 찾을 수 있고, 최근 쓴 20자를 기억합니다. <kbd>Shift</kbd>+클릭이면 창을 닫지 않고 이어서 넣습니다</li>
   <li><strong>열 편집 복사·붙여넣기</strong> — <kbd>Alt</kbd>+세로 드래그로 만든 사각 선택을 <kbd>Ctrl</kbd>+<kbd>C</kbd>·<kbd>Ctrl</kbd>+<kbd>X</kbd>로 담고 <kbd>Ctrl</kbd>+<kbd>V</kbd>로 붙여넣습니다. 붙여넣는 줄 수가 선택한 줄 수와 같으면 줄별로 짝짓고, 한 줄짜리는 모든 줄에 같이 들어갑니다</li>
 </ul>
@@ -813,6 +813,13 @@ cd myOffice</code></pre>
   <li>마우스로 끌어 옮기고 휠로 확대·축소합니다. 위쪽 칸에 <strong>장소 이름</strong>(예: <code>경복궁</code>)을 적고 <strong>검색</strong>을 누르면 <strong>후보 목록이 칸 아래로 펼쳐지고, 그중 하나를 눌러야 그 자리로 이동</strong>해 <strong>임시 빨간 점</strong>으로 보여 줍니다(검색만으로는 지도가 움직이지 않습니다 — 첫 후보가 엉뚱할 때 보던 자리를 잃지 않게). <kbd>Enter</kbd>를 눌러도 같으며, 첫 줄이 미리 짚어져 있어 <kbd>Enter</kbd>를 한 번 더 누르면 첫 후보로 갑니다. <kbd>↓</kbd>·<kbd>↑</kbd>로 다른 후보를 고를 수 있습니다. <strong>후보가 하나뿐이면 고를 것이 없으므로 곧장 그 자리로 이동합니다.</strong> 빨간 점은 검색 위치 안내라 지도 파일이나 칠판 그림에는 들어가지 않습니다. <strong><code>37.5665, 126.978</code></strong> 처럼 위도·경도를 적으면 목록 없이 바로 이동합니다. 빨간 점과 이름표는 지도를 눌러도 남아 있고 <kbd>Esc</kbd>로 지웁니다(표시 추가·그리기 중이거나 영역을 고른 상태에서는 그쪽 취소가 먼저입니다)
     <ul>
       <li>검색칸을 누르면 <strong>최근 검색어</strong>가 아래로 펼쳐집니다(최근 8개). 글자를 치면 그 글자가 든 기록만 남고, <kbd>↓</kbd>·<kbd>↑</kbd>로 고른 뒤 <kbd>Enter</kbd>로 검색합니다. 줄 오른쪽 <code>×</code>는 그 한 줄만, 맨 아래 <strong>검색 기록 지우기</strong>는 전부 지웁니다. 검색어는 지도 파일이 아니라 이 컴퓨터에만 남습니다</li>
+      <li><strong>글에서 고른 지명을 그대로 검색</strong> — 어떤 문서에서든 지명을 마우스로 긁고 <strong>오른쪽 버튼 → 지도에서 검색</strong>을 누르면, 지도 탭으로 건너가 그 낱말이 검색칸에 들어가고 <strong>주소 후보 목록</strong>이 칸 아래에 펼쳐집니다(후보가 하나뿐이면 곧장 그 자리로 이동). 열어 둔 지도가 있으면 <strong>가장 최근에 보던 지도 탭</strong>으로 가고, 없으면 새 지도를 하나 엽니다. 고른 글자가 없거나 문단째 긁었을 때(40자 초과)는 메뉴가 흐리게 보입니다
+        <ul>
+          <li><strong>쓸 수 있는 곳</strong> — 텍스트·코드 문서(보기·편집 모두), PDF, Word(<code>.docx</code>), 한글·PowerPoint 미리보기, 노트북 셀, 표(스프레드시트) 셀, 메모장·블록 문서(글·표 셀), 파일 비교 화면 등 <strong>글자를 고를 수 있는 화면 대부분</strong>입니다</li>
+          <li><strong>보기 전용 화면</strong>에서는 글자를 고른 뒤 <strong>고른 글자 위에서</strong> 오른쪽 버튼을 눌러야 <code>복사 · 지도에서 검색</code> 메뉴가 뜹니다. 아무 글자도 고르지 않았거나 고른 글자에서 떨어진 곳을 누르면 브라우저 기본 메뉴가 그대로 나옵니다(그림 저장 같은 기능을 막지 않기 위해서입니다)</li>
+          <li>화이트보드·지도·악보처럼 <strong>자기 우클릭 메뉴가 있는 화면</strong>은 원래 메뉴를 그대로 씁니다</li>
+        </ul>
+      </li>
       <li>국내 상세주소·건물 이름을 더 자세히 찾으려면 <strong>설정 → 일반 → 지도 검색</strong>에서 <strong>카카오 — 개인 API 키</strong>를 고릅니다. Kakao Developers에서 만든 앱의 <strong>REST API 키</strong>를 넣고 <strong>키 저장·연결 시험</strong>을 누르세요. 연결에 성공하면 카카오 검색이 즉시 적용됩니다. <strong>Admin 키는 사용하지 않습니다.</strong></li>
       <li>카카오 검색은 <strong>주소 검색 → 장소명 검색</strong> 순서로 시도하고, 키가 없거나 응답을 받지 못하면 OpenStreetMap 검색으로 자동 전환합니다. 화이트보드의 <strong>지도 넣기</strong> 검색에도 같은 설정이 적용됩니다.</li>
       <li>키를 넣으면 <strong>주소 CSV 좌표 찾기·주소 자동 채우기·지역 통계</strong>가 더 정확해지고, <strong>🏫 주변 시설</strong>은 카카오에만 있는 기능이라 이때만 버튼이 나타납니다.</li>

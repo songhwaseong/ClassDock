@@ -28,6 +28,7 @@ function loadMapViewer(){
       , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
+      , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom, mapSearchMenuItem
     };`, context);
   return context.__map;
 }
@@ -1154,4 +1155,82 @@ test("새 지도 파일 이름은 두 번째부터 번호가 붙는다", () => {
   assert.equal(api.mapScratchFileName(1), "지도.map");
   assert.equal(api.mapScratchFileName(3), "지도 3.map");
   assert.equal(api.mapDocDefaultTitle("지도 3.map"), "지도 3");
+});
+
+/* ===== 글 문서에서 고른 지명으로 찾기 =====
+   .docx·메모에서 낱말을 긁고 우클릭 → "지도에서 검색" 을 누르면 지도 탭의 검색칸으로 넘어간다. */
+test("지도로 넘길 낱말은 줄바꿈을 눕히고 문단째 긁은 것은 거른다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapSearchTextFrom("  경복궁 "), "경복궁");
+  assert.equal(api.mapSearchTextFrom("서울특별시\n종로구\t세종로"), "서울특별시 종로구 세종로");
+  assert.equal(api.mapSearchTextFrom(""), "");
+  assert.equal(api.mapSearchTextFrom(null), "");
+  // 장소 이름은 짧다 — 문단을 통째로 넘기면 찾을 수 없는 말이 되므로 쓸 수 없는 선택으로 본다.
+  assert.equal(api.mapSearchTextFrom("가".repeat(api.MAP_SEARCH_TEXT_MAX)), "가".repeat(api.MAP_SEARCH_TEXT_MAX));
+  assert.equal(api.mapSearchTextFrom("가".repeat(api.MAP_SEARCH_TEXT_MAX + 1)), "");
+});
+
+test("우클릭 메뉴 항목은 고른 글자가 쓸 만할 때만 켜진다", () => {
+  const api = loadMapViewer();
+  const enabled = api.mapSearchMenuItem("경복궁");
+  assert.equal(enabled.label, api.MAP_SEARCH_MENU_LABEL);
+  assert.equal(enabled.disabled, false);
+  assert.equal(typeof enabled.action, "function");
+  // 고른 것이 없어도 항목은 남긴다 — 감추면 이런 길이 있다는 것을 알 수 없다.
+  assert.equal(api.mapSearchMenuItem("").disabled, true);
+  assert.equal(api.mapSearchMenuItem("가".repeat(api.MAP_SEARCH_TEXT_MAX + 1)).disabled, true);
+});
+
+test("고른 낱말은 최근에 보던 지도로, 열린 지도가 없으면 새 지도로 간다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const body = /async function searchMapForText\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(body);
+  assert.match(body[1], /mapRecentMapDoc\(\) \|\| await newMapScratch\(\)/);
+  assert.match(body[1], /setActiveDoc\(doc\.id\)/);
+  /* 탭이 아직 그려지지 않았으면 검색칸도 없다 — 담아 두고 마운트가 받아 처리한다. 이미 그려 둔
+     탭이면 담긴 말이 그대로 남아 있으므로 여기서 곧장 부른다(두 번 찾지 않게 담긴 말을 지운다). */
+  assert.match(body[1], /doc\._mapPendingSearch = text/);
+  assert.match(body[1], /await ensureRendered\(doc\)/);
+  assert.match(body[1], /doc\._mapPendingSearch === text && typeof doc\.mapSearchFor === "function"/);
+  // 새 지도를 연 쪽이 기다릴 수 있어야 한다 — handleFiles 가 만든 문서를 돌려준다.
+  assert.match(source, /return Promise\.resolve\(handleFiles\(\[new File\(\[starter\]/);
+});
+
+test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁을 받는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /closeResults\.searchFor = \(text\) => \{/);
+  assert.match(source, /const placeSearch = mapAttachPlaceSearch\(gotoInput, searchBtn, searchResults/);
+  assert.match(source, /doc\.mapSearchFor = \(text\) => placeSearch\.searchFor\(text\)/);
+  assert.match(source, /if \(doc\._mapPendingSearch\)\{[\s\S]*?doc\.mapSearchFor\(pending\)/);
+  // 닫힌 탭의 검색칸을 다른 문서가 계속 부르지 않게 정리에서 함께 끊는다.
+  assert.ok(mapCleanupBodies(source).some(body => /doc\.mapSearchFor = null/.test(body)));
+});
+
+/* 편집기·표 셀은 공용 메뉴 두 개가 모두 쓰므로, 거기에 한 번 넣으면 텍스트·코드·노트북 셀·
+   메모·스프레드시트 셀이 함께 따라온다. 부르는 쪽마다 옵션을 넘기지 않는다. */
+test("글자를 다루는 공용 우클릭 메뉴에는 지도 검색이 내장된다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
+  // textarea 편집기(코드·텍스트·노트북 셀·메모 글 블록)
+  assert.match(source, /addMapSearchItem\(addItem, addSeparator, value\.slice\(selection\.start, selection\.end\)\)/);
+  // contenteditable(메모·스프레드시트 표 셀)
+  assert.match(source, /addMapSearchItem\(addItem, addSeparator, range \? range\.toString\(\) : ""\)/);
+  // 지도 모듈이 없는 화면에서는 눌러도 아무 일 없는 항목을 남기지 않는다.
+  assert.match(source, /if \(typeof mapSearchMenuItem !== "function"\) return false/);
+});
+
+/* 보기 전용 화면(PDF·한글·PPT·텍스트 보기)에는 편집기가 없어 매달 자리가 없다 — 문서 영역에서
+   한 번만 받아 모든 뷰어가 같은 메뉴를 쓰게 한다. */
+test("보기 화면의 선택 글자 메뉴는 브라우저 기본 메뉴를 함부로 뺏지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
+  const body = /function installViewSelectionContextMenu\(\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(body);
+  assert.match(body[1], /if \(event\.defaultPrevented\) return/);              // 제 메뉴를 가진 화면
+  assert.match(body[1], /input, textarea, \[contenteditable='true'\]/);        // 편집 메뉴가 맡는 자리
+  assert.match(body[1], /getElementById\("content"\)/);                        // 사이드바·탭은 제외
+  assert.match(body[1], /selection\.isCollapsed \|\| !selection\.rangeCount/);  // 고른 글자가 있을 때만
+  assert.match(body[1], /selectionHitsPoint\(selection\.getRangeAt\(0\), event\.clientX, event\.clientY\)/);
+  // 메뉴는 복사와 지도 검색 두 줄. 시작할 때 한 번만 매단다.
+  assert.match(source, /addMapSearchItem\(addItem, addSeparator, text\)/);
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  assert.match(app, /installViewSelectionContextMenu\(\)/);
 });

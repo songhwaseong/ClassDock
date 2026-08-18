@@ -3,6 +3,8 @@
 /* ===== 이벤트 연결 ===== */
 function wire(){
   setupSingleTab();          // 같은 앱이 여러 탭/창으로 동시에 떠 자동저장이 충돌하지 않게 — 한 번에 한 창만 활성
+  // 보기 전용 화면(PDF·한글·PPT·텍스트 보기)에서 고른 글자의 우클릭 메뉴 — 문서 영역에서 한 번만 받는다.
+  if (typeof installViewSelectionContextMenu === "function") installViewSelectionContextMenu();
   wireScratchpad();
   wireImageMemo();
   // 일반 EXE 실행에서는 마지막 브라우저 탭이 닫히면 로컬 서버도 자동 종료한다.

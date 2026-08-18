@@ -106,3 +106,12 @@ test("상단 DOCX 도구는 여섯 갈래 메뉴로 정리하고 실제 컨트�
   assert.match(styles, /\.docx-editor-bar>\.docx-document-tools[\s\S]+display:none!important/);
   assert.match(styles, /\.docx-tool-launchers\{display:inline-flex/);
 });
+
+/* 글 문서에서 지명을 긁어 지도 탭으로 보내는 길 — 지도 쪽 배선은 tests/map-viewer.test.js 가 본다. */
+test("우클릭 메뉴에서 고른 지명을 지도 검색으로 보낸다", () => {
+  assert.ok(source.includes('label: "지도에서 검색"'), "지도에서 검색 메뉴가 없다");
+  assert.match(source, /action: \(\) => searchMapForText\(mapQuery\), disabled: !mapQuery/);
+  // 지도 모듈이 없거나, 고른 것이 없거나, 문단째 긁었으면 흐리게 둔다.
+  assert.match(source, /typeof mapSearchTextFrom === "function" && typeof searchMapForText === "function"/);
+  assert.match(source, /mapSearchTextFrom\(hasSelection \? commandRange\.toString\(\) : ""\)/);
+});
