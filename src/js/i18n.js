@@ -1618,6 +1618,8 @@
     "주변 시설 찾기": "Find nearby places",
     "지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.":
       "Finds places within a radius of the current map center and adds them as pins.",
+    "지도에서 오른쪽 버튼으로 누른 자리를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.":
+      "Finds places within a radius of the spot you right-clicked and adds them as pins.",
     "갈래": "Kind",
     "직접 찾기": "Your own word",
     "예: 로또 · 빵집 — 적으면 갈래 대신 이 말로 찾아요":
@@ -1631,6 +1633,29 @@
     "되돌리기": "Undo",
     "다시 실행 (Ctrl+Shift+Z)": "Redo (Ctrl+Shift+Z)",
     "방금 넣은 주변 시설을 도로 뺐습니다": "Removed the nearby places you just added",
+    // 지도 우클릭 빠른 메뉴 — 누른 자리를 기준으로 움직이는 항목들
+    "지도 빠른 메뉴": "Map quick menu",
+    "📍 여기에 표시 추가": "📍 Add a pin here",
+    "누른 자리에 표시를 바로 만들어요": "Drops a pin right where you clicked",
+    "🏫 여기를 중심으로 주변 시설": "🏫 Nearby places around here",
+    "누른 자리를 가운데로 삼아 반경 안의 학교·병원 같은 시설을 찾아요":
+      "Finds schools, hospitals, and the like within a radius of the spot you clicked",
+    "📋 이 자리 좌표 복사": "📋 Copy this spot's coordinates",
+    "위도, 경도를 클립보드로 복사": "Copies the latitude and longitude to the clipboard",
+    "📮 이 자리 주소 복사": "📮 Copy this spot's address",
+    "이 지점의 주소를 찾아 클립보드로 복사": "Looks up the address here and copies it to the clipboard",
+    "🎯 여기를 가운데로": "🎯 Center on here",
+    "누른 자리를 지도 한가운데로 옮겨요": "Moves the spot you clicked to the middle of the map",
+    "🔍 여기로 확대": "🔍 Zoom in here",
+    "누른 자리를 가운데에 두고 한 단계 확대해요": "Zooms in one step, keeping the clicked spot centered",
+    // 화살표뿐인 도구막대 단추는 메뉴에서 읽히지 않아 이름을 따로 준다.
+    "↶ 되돌리기 (Ctrl+Z)": "↶ Undo (Ctrl+Z)",
+    "↷ 다시 실행 (Ctrl+Shift+Z)": "↷ Redo (Ctrl+Shift+Z)",
+    "주소를 찾는 중…": "Looking up the address…",
+    "좌표를 복사했어요 — {text}": "Copied the coordinates — {text}",
+    "좌표를 복사하지 못했어요.": "Couldn't copy the coordinates.",
+    "주소를 복사했어요 — {text}": "Copied the address — {text}",
+    "주소를 복사하지 못했어요.": "Couldn't copy the address.",
     // 한꺼번에 지우기
     "🧹 지우기": "🧹 Clear",
     "표시·거리선·면적을 한꺼번에 지워요 — 주변 시설로 넣은 것만 골라 지울 수도 있어요":

@@ -424,6 +424,25 @@ function mapDownloadText(text, name, mime){
 function mapSafeDownloadName(value){
   return String(value || "지도").replace(/[\\/:*?"<>|]+/g, "_").trim() || "지도";
 }
+/* 우클릭 메뉴에서 좌표·주소를 클립보드로 보낸다. 표·문서 편집기와 같은 방식으로, clipboard 를
+   못 쓰는 자리(권한이 없거나 옛 웹뷰)에서는 숨긴 입력칸으로 되돌아간다. */
+async function mapCopyText(text){
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function"){
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch(_){ }
+  const area = document.createElement("textarea");
+  area.value = value; area.style.position = "fixed"; area.style.opacity = "0";
+  document.body.appendChild(area); area.select();
+  let copied = false;
+  try { copied = !!document.execCommand("copy"); } catch(_){ }
+  area.remove();
+  return copied;
+}
 async function mapPrepareBackgroundImage(file){
   if (!file || !/^image\/(?:png|jpeg|webp)$/i.test(String(file.type || ""))) throw new Error("image-type");
   if (file.size > 20 * 1024 * 1024) throw new Error("image-too-large");
@@ -1366,14 +1385,19 @@ function openMapRegionStats(model, hooks){
    지도 가운데를 기준으로 반경 안의 한 갈래를 모아 온다. '우리 동네에 학교가 몇 곳인가'처럼
    사회과에서 바로 쓰는 물음이라, 찾은 개수를 창 안에서 먼저 보여 주고 넣을지 고르게 한다.
    돌려주는 값: { places, category, radius, circle } · 취소하면 null. */
-function openMapNearby(center){
+function openMapNearby(center, opts = {}){
   return new Promise((resolve) => {
+    /* 도구막대로 부르면 화면 가운데가, 우클릭 메뉴로 부르면 누른 자리가 기준이다. 어디를 중심으로
+       찾는지 모르면 결과를 읽을 수 없으므로 설명 줄을 부른 쪽에 맞춘다. */
+    const subText = opts.atPoint
+      ? "지도에서 오른쪽 버튼으로 누른 자리를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다."
+      : "지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.";
     const modal = document.createElement("div");
     modal.className = "modal map-nearby-modal";
     modal.innerHTML =
       '<div class="modal-card map-nearby-card">' +
         '<h3>주변 시설 찾기</h3>' +
-        '<p class="sub">지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.</p>' +
+        '<p class="sub">' + subText + '</p>' +
         '<div class="map-nearby-row">' +
           '<label class="map-nearby-field"><span>갈래</span><select class="map-select map-nearby-category"></select></label>' +
           '<label class="map-nearby-field"><span>반경</span><select class="map-select map-nearby-radius"></select></label>' +
@@ -2315,11 +2339,14 @@ async function mountMapEditor(doc){
   /* ── 나머지 도구 ── */
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
 
+  // 배경마다 더 들어갈 수 있는 확대가 다르다 — 배경을 바꿀 때도, 우클릭으로 확대할 때도 이 한계를 쓴다.
+  const maxViewZoom = () => (model.basemap === "custom" ? 19 : MAP_BASEMAPS[model.basemap].maxZoom);
+
   basemapSelect.addEventListener("change", () => {
     model.basemap = basemapSelect.value === "custom" && model.backgroundImage
       ? "custom" : (MAP_BASEMAPS[basemapSelect.value] ? basemapSelect.value : "osm");
     // 배경마다 최대 확대가 달라, 더 얕은 지도로 바꿀 땐 확대를 먼저 낮춰야 빈 화면이 안 남는다.
-    const limit = model.basemap === "custom" ? 19 : MAP_BASEMAPS[model.basemap].maxZoom;
+    const limit = maxViewZoom();
     if (map.getZoom() > limit) map.setZoom(limit);
     applyBasemap();
     touch();
@@ -2500,9 +2527,11 @@ async function mountMapEditor(doc){
      카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 켰을 때만 내놓는다.
      꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 되기 때문이다. */
   mapProviderIsKakao().then((kakao) => { nearbyBtn.hidden = !kakao; }).catch(() => {});
-  nearbyBtn.addEventListener("click", async () => {
-    const center = map.getCenter();
-    const picked = await openMapNearby({ lat:center.lat, lng:center.lng });
+  /* 도구막대는 화면 가운데를, 우클릭 메뉴는 누른 자리를 기준으로 부른다 — 기준점만 다르고 찾아
+     넣는 길은 하나다(꼬리표·되돌리기·토스트가 두 갈래로 갈라지지 않게). */
+  const runNearby = async (at, opts = {}) => {
+    const center = { lat:mapClampLat(at.lat), lng:mapClampLng(at.lng) };
+    const picked = await openMapNearby(center, opts);
     if (!picked) return;
     // 이번에 들어오는 것들을 한 묶음으로 묶는다 — 되돌리기가 딱 이 묶음만 도로 빼낼 수 있게.
     const batch = mapBatchId();
@@ -2541,7 +2570,204 @@ async function mountMapEditor(doc){
         if (typeof toast === "function") toast(mapT("방금 넣은 주변 시설을 도로 뺐습니다"), 2600);
       } } });
     }
+  };
+  nearbyBtn.addEventListener("click", () => runNearby(map.getCenter()));
+
+  /* ── 지도 우클릭 빠른 메뉴 ──
+     도구막대는 그대로 두고 통로만 하나 더 낸다. 여기서만 할 수 있는 일은 "누른 자리"를 아는
+     것이다 — 도구막대의 표시 추가는 모드를 켜고 한 번 더 클릭해야 하고, 주변 시설은 언제나
+     화면 가운데를 기준으로 삼는다. 실행은 도구막대와 같은 함수를 부르므로 되돌리기 기록과
+     '저장 안 됨' 표시가 두 갈래로 갈라지지 않는다. */
+  const contextMenu = document.createElement("div");
+  contextMenu.className = "map-context-menu";
+  contextMenu.hidden = true;
+  contextMenu.setAttribute("role", "menu");
+  contextMenu.setAttribute("aria-label", "지도 빠른 메뉴");
+  const contextHead = document.createElement("div");
+  contextHead.className = "map-context-head";
+  contextMenu.appendChild(contextHead);
+  let contextLatLng = null;
+
+  function closeContextMenu(){
+    if (contextMenu.hidden) return;
+    // 키보드로 항목을 고르던 중이면 포커스를 지도로 돌려준다(감춘 버튼에 갇히지 않게).
+    if (contextMenu.contains(document.activeElement)){
+      const container = map.getContainer();
+      if (container && typeof container.focus === "function") container.focus({ preventScroll:true });
+    }
+    contextMenu.hidden = true;
+    contextLatLng = null;
+    document.removeEventListener("pointerdown", onContextOutside, true);
+    window.removeEventListener("keydown", onContextKey, true);
+    map.off("movestart zoomstart", closeContextMenu);
+  }
+  function onContextOutside(e){
+    if (contextMenu.contains(e.target)) return;
+    closeContextMenu();
+  }
+  /* Esc 는 표시 추가 취소·도형 삭제·검색 표식 지우기가 이미 나눠 쓰고 있다. 메뉴가 떠 있는
+     동안에는 메뉴 닫기가 먼저라, 잡아서 다른 곳으로 넘기지 않는다. */
+  function onContextKey(e){
+    if (e.key === "Escape"){
+      e.preventDefault(); e.stopImmediatePropagation();
+      closeContextMenu();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const items = [...contextMenu.querySelectorAll("button")].filter(button => !button.hidden && !button.disabled);
+    if (!items.length) return;
+    e.preventDefault();
+    const at = items.indexOf(document.activeElement);
+    const next = e.key === "Home" ? 0
+      : e.key === "End" ? items.length - 1
+      : (Math.max(0, at) + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next].focus({ preventScroll:true });
+  }
+
+  const contextItem = (label, title, run) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.textContent = label;
+    if (title) button.title = title;
+    // 자리를 먼저 손에 쥐고 메뉴를 닫는다 — 닫으면서 contextLatLng 을 비우기 때문이다.
+    button.addEventListener("click", () => {
+      const at = contextLatLng;
+      closeContextMenu();
+      if (at) run(at);
+    });
+    contextMenu.appendChild(button);
+    return button;
+  };
+  const contextSep = () => {
+    const sep = document.createElement("div");
+    sep.className = "map-context-sep";
+    sep.setAttribute("role", "separator");
+    contextMenu.appendChild(sep);
+  };
+
+  contextItem("📍 여기에 표시 추가", "누른 자리에 표시를 바로 만들어요", (at) => {
+    const marker = mapNormalizeMarker({ lat:at.lat, lng:at.lng, label:"", color:"red" });
+    model.markers.push(marker);
+    const layer = addMarkerLayer(marker);
+    touch();
+    layer.openPopup();
+    // 지도를 눌러 찍을 때와 같다 — 표시부터 남기고 이름은 주소가 도착하는 대로 채운다.
+    if (autoAddress) fillMarkerAddress(marker, { onlyEmpty:true, quiet:true });
   });
+  const contextNearbyBtn = contextItem("🏫 여기를 중심으로 주변 시설",
+    "누른 자리를 가운데로 삼아 반경 안의 학교·병원 같은 시설을 찾아요",
+    (at) => runNearby(at, { atPoint:true }));
+
+  contextSep();
+  contextItem("📋 이 자리 좌표 복사", "위도, 경도를 클립보드로 복사", async (at) => {
+    const text = at.lat.toFixed(6) + ", " + at.lng.toFixed(6);
+    const copied = await mapCopyText(text);
+    if (typeof toast === "function"){
+      toast(copied ? mapTf("좌표를 복사했어요 — {text}", { text }) : mapT("좌표를 복사하지 못했어요."), 2600);
+    }
+  });
+  contextItem("📮 이 자리 주소 복사", "이 지점의 주소를 찾아 클립보드로 복사", async (at) => {
+    setStatus(mapT("주소를 찾는 중…"));
+    try {
+      const info = await mapAddressAt(at.lat, at.lng);
+      if (!info || !info.name){ setStatus(mapT("이 자리의 주소를 찾지 못했어요.")); return; }
+      const copied = await mapCopyText(info.name);
+      touch();          // 잠시 덮어 뒀던 '저장 안 됨' 표시를 제자리로 돌린다
+      if (typeof toast === "function"){
+        toast(copied ? mapTf("주소를 복사했어요 — {text}", { text:info.name }) : mapT("주소를 복사하지 못했어요."), 3000);
+      }
+    } catch(error){
+      setStatus(mapT(error && error.message === "geocode-launcher-required"
+        ? "주소 확인은 ClassDock 런처에서 사용할 수 있어요."
+        : "주소를 확인하지 못했어요 — 인터넷 연결을 확인해 주세요."));
+    }
+  });
+
+  contextSep();
+  contextItem("🎯 여기를 가운데로", "누른 자리를 지도 한가운데로 옮겨요", (at) => map.panTo(at));
+  const contextZoomBtn = contextItem("🔍 여기로 확대", "누른 자리를 가운데에 두고 한 단계 확대해요",
+    (at) => map.setView(at, Math.min(map.getZoom() + 1, maxViewZoom())));
+
+  /* 도구막대 단추를 그대로 비추는 항목. 이름·설명·꺼짐·숨김·켜짐을 열 때마다 그 단추에서 읽어
+     오고, 누르면 그 단추를 누른다. 메뉴가 상태를 따로 들지 않으니 어긋날 길이 없다 — 좌표를
+     찾는 동안 'CSV 들이기'가 '그만두기'로 바뀌는 것도, 되돌릴 게 없어 꺼진 되돌리기도 저절로
+     따라온다. 되돌리기 기록도 도구막대와 같은 함수를 타므로 한 갈래로 남는다. */
+  const contextMirrors = [];
+  const contextMirror = (button, label) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    // 화살표 하나뿐인 단추(↶ ↷)는 메뉴에서 읽히지 않으므로 이름을 따로 준다.
+    if (label) item.textContent = label;
+    item.addEventListener("click", () => { closeContextMenu(); button.click(); });
+    contextMenu.appendChild(item);
+    contextMirrors.push({ item, button, fixedLabel:!!label });
+    return item;
+  };
+  const syncContextMirrors = () => {
+    for (const mirror of contextMirrors){
+      if (!mirror.fixedLabel) mirror.item.textContent = mirror.button.textContent;
+      mirror.item.title = mirror.button.title || "";
+      mirror.item.hidden = !!mirror.button.hidden;
+      mirror.item.disabled = !!mirror.button.disabled;
+      // 켜 둔 도구(주소 자동 등)는 도구막대처럼 눈에 띄게 — 메뉴에서는 체크로 보인다.
+      mirror.item.classList.toggle("is-on", mirror.button.classList.contains("is-on"));
+    }
+  };
+
+  contextSep();
+  contextMirror(lineBtn);
+  contextMirror(areaBtn);
+  contextMirror(addressBtn);
+
+  contextSep();
+  contextMirror(clearItemsBtn);
+  contextMirror(regionBtn);
+  contextMirror(boardBtn);
+
+  contextSep();
+  contextMirror(undoBtn, "↶ 되돌리기 (Ctrl+Z)");
+  contextMirror(redoBtn, "↷ 다시 실행 (Ctrl+Shift+Z)");
+  contextMirror(saveBtn);
+
+  map.on("contextmenu", (e) => {
+    /* 마커·도형에서 올라온 우클릭은 각자의 메뉴가 붙을 자리라 여기서 가로채지 않는다. */
+    if (e.propagatedFrom) return;
+    /* 표시를 찍거나 선을 그리는 중에는 왼쪽 클릭이 하던 일이 이어져야 한다 — 메뉴로 끊지 않는다.
+       (그리는 중 우클릭에 완료·마지막 점 취소를 붙이는 것은 다음 단계 몫이다.) */
+    if (adding || drawingMode) return;
+    const origin = e.originalEvent || {};
+    contextLatLng = L.latLng(mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng));
+    contextHead.textContent = contextLatLng.lat.toFixed(5) + ", " + contextLatLng.lng.toFixed(5);
+    // 카카오 검색을 껐으면 주변 시설은 눌러도 안 되는 항목이다 — 도구막대와 똑같이 감춘다.
+    contextNearbyBtn.hidden = nearbyBtn.hidden;
+    contextZoomBtn.disabled = map.getZoom() >= maxViewZoom();
+    syncContextMirrors();
+    contextMenu.hidden = false;
+    // 화면 밖으로 넘치지 않게 보정(탭 우클릭 메뉴와 같은 방식).
+    const pad = 8;
+    const width = contextMenu.offsetWidth, height = contextMenu.offsetHeight;
+    const x = Number(origin.clientX) || 0, y = Number(origin.clientY) || 0;
+    contextMenu.style.left = Math.max(pad, Math.min(x, window.innerWidth - width - pad)) + "px";
+    contextMenu.style.top = Math.max(pad, Math.min(y, window.innerHeight - height - pad)) + "px";
+    const first = contextMenu.querySelector("button:not([hidden])");
+    if (first) first.focus({ preventScroll:true });
+    document.addEventListener("pointerdown", onContextOutside, true);
+    window.addEventListener("keydown", onContextKey, true);
+    map.on("movestart zoomstart", closeContextMenu);
+  });
+  /* 확대·축소 버튼 위 우클릭은 브라우저 기본 메뉴만 막는다. Leaflet 이 컨트롤에서 전파를 끊어
+     두므로 지도 메뉴는 어차피 열리지 않는데, 아무것도 안 하면 그 자리에서 크롬 메뉴가 튀어나와
+     수업 중에 당황스럽다. 끊기는 것은 거슬러 오르는 길뿐이라 내려가는 길(캡처)에서 잡는다.
+     오른쪽 아래 저작권 줄은 링크라서 그대로 둔다 — 거기서는 주소 복사가 쓸모 있다. */
+  stage.addEventListener("contextmenu", (e) => {
+    const target = e.target;
+    if (target && typeof target.closest === "function" && target.closest(".leaflet-control-zoom")) e.preventDefault();
+  }, true);
+  document.body.appendChild(contextMenu);
+  // 도구막대와 같이 한 번만 훑는다 — 언어를 바꾸면 i18n 이 매어 둔 문구를 알아서 다시 그린다.
+  mapTranslate(contextMenu);
 
   const moveToSearchLocation = mapSearchLocationMover(map);
   mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label) => {
@@ -2715,6 +2941,8 @@ async function mountMapEditor(doc){
   if (typeof ResizeObserver !== "undefined"){
     mapResizeObserver = new ResizeObserver(() => {
       if (stage.clientWidth > 0 && stage.clientHeight > 0) map.invalidateSize();
+      // 다른 탭으로 넘어가면 지도 칸이 0×0 이 된다 — 몸통 위에 떠 있는 메뉴만 남지 않게 접는다.
+      else closeContextMenu();
     });
     mapResizeObserver.observe(stage);
   }
@@ -2725,6 +2953,8 @@ async function mountMapEditor(doc){
     window.removeEventListener("keydown", onSelectedShapeKey);
     window.removeEventListener("keydown", onSearchLocationKey);
     window.removeEventListener("keydown", onHistoryKey);
+    closeContextMenu();                 // 열려 있던 우클릭 메뉴의 document 리스너까지 함께 뗀다
+    contextMenu.remove();
     if (history) history.cancel();      // 묶는 중이던 변경을 버린다(사라진 화면을 capture 하지 않게)
     cleanupNetworkNotice();
     if (mapResizeObserver) mapResizeObserver.disconnect();

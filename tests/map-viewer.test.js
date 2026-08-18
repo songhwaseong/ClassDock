@@ -546,8 +546,10 @@ test("주변 시설로 넣은 표시·반경 원은 꼬리표를 달고 묶음�
   }
   assert.match(source, /function mapNormalizeSource\(value\)\{[\s\S]*?\/\^\[a-z\]\{1,12\}\$\//);
   // 주변 시설은 표시와 반경 원에 같은 묶음 번호를 단다.
-  const nearby = /nearbyBtn\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  // 도구막대(화면 가운데)와 우클릭 메뉴(누른 자리)가 같은 runNearby 를 타므로 여기 한 곳만 본다.
+  const nearby = /const runNearby = async \(at, opts = \{\}\) => \{([\s\S]*?)\n  \};/.exec(source);
   assert.ok(nearby);
+  assert.match(source, /nearbyBtn\.addEventListener\("click", \(\) => runNearby\(map\.getCenter\(\)\)\)/);
   assert.match(nearby[1], /const batch = mapBatchId\(\)/);
   assert.equal((nearby[1].match(/source:"nearby", batch/g) || []).length, 2);
   assert.match(nearby[1], /action:\{ label:mapT\("되돌리기"\)/);
@@ -560,6 +562,71 @@ test("주변 시설로 넣은 표시·반경 원은 꼬리표를 달고 묶음�
   assert.match(clear[1], /else if \(answer === "alt"\) announceRemoved\(removeTagged\(\(\) => true\)\)/);
   // 손으로 찍은 표시는 꼬리표가 없으므로 '주변 시설만' 에 휩쓸리지 않는다.
   assert.match(source, /const isNearbyItem = \(item\) => item\.source === "nearby"/);
+});
+
+test("지도 우클릭 메뉴는 누른 자리를 기준으로 열리고 도구막대와 같은 함수를 부른다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const open = /map\.on\("contextmenu", \(e\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  assert.ok(open);
+  // 마커·도형에서 올라온 우클릭과 그리는 중의 우클릭은 여기서 가로채지 않는다.
+  assert.match(open[1], /if \(e\.propagatedFrom\) return;/);
+  assert.match(open[1], /if \(adding \|\| drawingMode\) return;/);
+  // 누른 자리는 지구 밖으로 나가지 않게 눌러 두고, 메뉴 머리말에 그대로 보여 준다.
+  assert.match(open[1], /contextLatLng = L\.latLng\(mapClampLat\(e\.latlng\.lat\), mapClampLng\(e\.latlng\.lng\)\)/);
+  // 카카오 검색을 껐으면 도구막대와 똑같이 감춘다(눌러도 안 되는 항목을 두지 않는다).
+  assert.match(open[1], /contextNearbyBtn\.hidden = nearbyBtn\.hidden/);
+  // 메뉴 문구는 도구막대처럼 만들 때 한 번만 훑는다(언어 전환은 i18n 이 되돌려 그린다).
+  assert.match(source, /document\.body\.appendChild\(contextMenu\);\n[\s\S]{0,120}?mapTranslate\(contextMenu\);/);
+  // 실행은 도구막대와 같은 함수 — 되돌리기 기록이 두 갈래로 갈라지지 않는다.
+  assert.match(source, /runNearby\(at, \{ atPoint:true \}\)/);
+  assert.match(source, /if \(autoAddress\) fillMarkerAddress\(marker, \{ onlyEmpty:true, quiet:true \}\)[\s\S]*?contextNearbyBtn/);
+  assert.match(source, /Math\.min\(map\.getZoom\(\) \+ 1, maxViewZoom\(\)\)/);
+  // 열고 닫을 때 문서에 건 리스너를 짝 맞춰 뗀다.
+  const close = /function closeContextMenu\(\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(close);
+  assert.match(close[1], /document\.removeEventListener\("pointerdown", onContextOutside, true\)/);
+  assert.match(close[1], /window\.removeEventListener\("keydown", onContextKey, true\)/);
+  assert.match(close[1], /map\.off\("movestart zoomstart", closeContextMenu\)/);
+  const cleanup = /doc\.cleanupFns\.push\(\(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  assert.match(cleanup[1], /closeContextMenu\(\);/);
+  assert.match(cleanup[1], /contextMenu\.remove\(\)/);
+  assert.match(styles, /\.map-context-menu\{/);
+  assert.match(styles, /\.map-context-menu\[hidden\]\{display:none\}/);
+  /* 확대 버튼 위 우클릭은 브라우저 기본 메뉴만 막는다. Leaflet 이 컨트롤에서 전파를 끊으므로
+     버블 단계로는 오지 않는다 — 캡처(true)로 걸어야 잡힌다. */
+  const guard = /stage\.addEventListener\("contextmenu", \(e\) => \{([\s\S]*?)\n  \}, true\);/.exec(source);
+  assert.ok(guard, "확대 버튼 우클릭 가드는 캡처 단계여야 한다");
+  assert.match(guard[1], /closest\("\.leaflet-control-zoom"\)\) e\.preventDefault\(\)/);
+});
+
+test("우클릭 메뉴의 도구 항목은 도구막대 단추를 그대로 비춘다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+  // 누르면 그 단추를 누른다 — 실행 경로가 갈라지지 않으니 되돌리기 기록도 한 갈래다.
+  const mirror = /const contextMirror = \(button, label\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(mirror);
+  assert.match(mirror[1], /closeContextMenu\(\); button\.click\(\);/);
+  // 이름·설명·꺼짐·숨김·켜짐은 열 때마다 단추에서 읽어 온다(따로 들지 않는다).
+  const sync = /const syncContextMirrors = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(sync);
+  assert.match(sync[1], /if \(!mirror\.fixedLabel\) mirror\.item\.textContent = mirror\.button\.textContent/);
+  assert.match(sync[1], /mirror\.item\.hidden = !!mirror\.button\.hidden/);
+  assert.match(sync[1], /mirror\.item\.disabled = !!mirror\.button\.disabled/);
+  assert.match(sync[1], /classList\.toggle\("is-on", mirror\.button\.classList\.contains\("is-on"\)\)/);
+  assert.match(source, /syncContextMirrors\(\);\n\s*contextMenu\.hidden = false;/);
+  // 지우기·되돌리기·저장까지 수업 중에 쓰는 도구가 메뉴에 함께 있다.
+  for (const button of ["lineBtn", "areaBtn", "addressBtn", "clearItemsBtn", "regionBtn", "boardBtn", "saveBtn"])
+    assert.match(source, new RegExp("contextMirror\\(" + button + "\\)"), button + " 미러 항목이 없다");
+  // 화살표뿐인 단추는 메뉴용 이름을 따로 주고, 그 이름도 영어 사전에 있어야 한다.
+  for (const label of ["↶ 되돌리기 (Ctrl+Z)", "↷ 다시 실행 (Ctrl+Shift+Z)"])
+    assert.ok(i18n.includes('"' + label + '"'), label + " 사전 항목이 없다");
+  assert.match(source, /contextMirror\(undoBtn, "↶ 되돌리기 \(Ctrl\+Z\)"\)/);
+  assert.match(source, /contextMirror\(redoBtn, "↷ 다시 실행 \(Ctrl\+Shift\+Z\)"\)/);
+  // 항목이 늘었으므로 작은 화면에서도 메뉴가 화면 밖으로 흘러넘치지 않아야 한다.
+  assert.match(styles, /\.map-context-menu\{[\s\S]*?max-height:calc\(100vh - 16px\);overflow-y:auto/);
+  assert.match(styles, /\.map-context-menu button\.is-on::after\{content:"✓"/);
 });
 
 test("최근 검색어는 최신순 8개까지 중복 없이 남고 성공한 검색만 기록한다", () => {
