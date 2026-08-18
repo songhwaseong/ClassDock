@@ -15,8 +15,13 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 3;
+const MAP_DOC_VERSION = 5;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
+/* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
+   빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
+const MAP_PHOTO_MAX_DATA_CHARS = 900 * 1024;          // 한 장(약 660KB 원본)
+const MAP_PHOTO_TOTAL_MAX_CHARS = 12 * 1024 * 1024;   // 한 지도의 사진 전체
+const MAP_PHOTO_MAX_SIDE = 1280;
 const MAP_CSV_MAX_MARKERS = 5000;
 /* 주소만 적힌 CSV 를 좌표로 바꿀 때의 상한. 한 줄에 한 번씩 검색을 부르므로(OSM 은 정책상 1초에
    한 건) 수업 시간 안에 끝나는 만큼만 받는다. */
@@ -79,6 +84,17 @@ function mapSpotInfoOn(){
 }
 function mapRememberSpotInfo(on){
   try { localStorage.setItem(MAP_SPOT_INFO_KEY, on ? "1" : "0"); } catch(_){}
+}
+
+/* 표시 목록 패널을 펴 둘지. 격자와 달리 이것은 문서가 아니라 사람의 작업 방식이라(같은 지도를
+   누구는 목록으로, 누구는 지도만 보고 다룬다) 이 브라우저에 남긴다. 기본은 접힘 — 표시가 몇 개
+   뿐인 지도에서는 지도 칸을 좁히는 값이 더 크다. */
+const MAP_LIST_PANEL_KEY = "mn.mapListPanel";
+function mapListPanelOn(){
+  try { return localStorage.getItem(MAP_LIST_PANEL_KEY) === "1"; } catch(_){ return false; }
+}
+function mapRememberListPanel(on){
+  try { localStorage.setItem(MAP_LIST_PANEL_KEY, on ? "1" : "0"); } catch(_){}
 }
 
 /* 최근 검색어 — 검색란을 누르면 아래로 펼친다. 같은 사람이 같은 곳을 되찾는 습관이므로 .map 파일이
@@ -187,8 +203,33 @@ function mapNormalizeMarker(raw){
     /* 어디서 한꺼번에 들어온 표시인지(주변 시설 등)와 그때의 묶음 번호. 손으로 찍은 표시는 늘
        빈 값이라, '주변 시설로 넣은 것만 지우기'가 직접 찍은 표시를 건드리지 않는다. */
     source: mapNormalizeSource(value.source),
-    batch: mapNormalizeBatch(value.batch)
+    batch: mapNormalizeBatch(value.batch),
+    // 답사 사진 한 장(버전 4 이하에는 없다). 손으로 고친 .map 이 바깥 주소를 넣어도 받지 않는다.
+    photo: mapNormalizePhoto(value.photo)
   };
+}
+/* 사진은 data URL 만 받는다. 바깥 주소(http)를 허용하면 인터넷이 없을 때 빈 칸이 되고, 지도를
+   나눠 준 사람의 화면에서는 남의 서버로 요청이 나간다 — 칠판 그림이 data URL 만 받는 것과 같다. */
+function mapNormalizePhoto(raw){
+  const value = raw && typeof raw === "object" ? raw : null;
+  if (!value) return null;
+  const dataUrl = String(value.dataUrl || "");
+  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(dataUrl)) return null;
+  if (dataUrl.length > MAP_PHOTO_MAX_DATA_CHARS) return null;
+  return {
+    name: String(value.name || "사진").slice(0, 120),
+    dataUrl,
+    width: Math.max(1, Math.min(10000, Math.round(Number(value.width) || 1))),
+    height: Math.max(1, Math.min(10000, Math.round(Number(value.height) || 1)))
+  };
+}
+// 지도 하나에 담긴 사진 전체 크기(넣기 전에 상한을 넘는지 보는 데 쓴다).
+function mapPhotoTotalChars(markers){
+  let total = 0;
+  for (const marker of Array.isArray(markers) ? markers : []){
+    if (marker && marker.photo && marker.photo.dataUrl) total += marker.photo.dataUrl.length;
+  }
+  return total;
 }
 function mapNormalizePoint(raw){
   return Array.isArray(raw) && raw.length >= 2
@@ -239,6 +280,9 @@ function mapDocEmpty(title){
     zoom: MAP_DEFAULT_ZOOM,
     markers: [],
     shapes: [],
+    // 위경도 격자는 문서에 딸린 성질로 둔다 — 수업용 지도는 "격자를 보이게 만들어 둔 지도"로
+    // 건네지기 때문이다(다음에 열 사람이 다시 켜야 한다면 만들어 둔 뜻이 사라진다).
+    grid: false,
     backgroundImage: null
   };
 }
@@ -259,6 +303,8 @@ function mapDocParse(text){
     zoom: Number.isFinite(zoomRaw) ? Math.min(19, Math.max(1, Math.round(zoomRaw))) : MAP_DEFAULT_ZOOM,
     markers: Array.isArray(raw.markers) ? raw.markers.map(mapNormalizeMarker) : [],
     shapes: Array.isArray(raw.shapes) ? raw.shapes.map(mapNormalizeShape).filter(shape => shape.points.length >= (shape.type === "area" ? 3 : 2)) : [],
+    // 버전 3 이하에는 없던 값이다 — 없으면 끈 것으로 본다(옛 지도의 화면이 달라지지 않게).
+    grid: raw.grid === true,
     backgroundImage
   };
 }
@@ -272,6 +318,7 @@ function mapDocSerialize(model){
     zoom: model.zoom,
     markers: model.markers,
     shapes: Array.isArray(model.shapes) ? model.shapes : [],
+    grid: !!model.grid,
     backgroundImage: model.backgroundImage || null
   }, null, 2) + "\n";
 }
@@ -288,7 +335,7 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(0, 80),
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
-  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], background]);
+  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -346,6 +393,53 @@ function mapShapeLabelAnchor(shape){
 }
 function mapShapeMeasureText(shape){
   return shape && shape.type === "area" ? mapFormatArea(mapPolygonAreaSquareMeters(shape.points)) : mapFormatDistance(mapLineLengthMeters(shape && shape.points));
+}
+
+/* ===== 축척 막대 · 방위표 · 위경도 격자 =====
+   거리선이 "3.2 km"라고 알려 줘도 화면에 견줄 기준이 없으면 그 길이를 가늠할 수 없다. 축척과
+   방위는 사회 교과에서 지도를 읽는 첫 단추이기도 해서, 화면과 인쇄물 양쪽에 늘 남아야 한다.
+   그래서 Leaflet 이 주는 축척 컨트롤을 쓰지 않는다 — 컨트롤은 .leaflet-control-container
+   안에 들어가는데 그 칸은 캡처 직전에 통째로 감춘다(확대 단추가 그림에 박히지 않게). 지도 칸에
+   직접 얹은 우리 요소라야 칠판·메모·PNG·인쇄에 그대로 따라간다. */
+const MAP_SCALE_MAX_PX = 130;     // 축척 막대가 넘지 않을 길이(지도 칸을 가리지 않는 선)
+/* 1·2·5 계열에서 주어진 길이를 넘지 않는 가장 큰 값. 축척은 "1.37km"가 아니라 "1km"처럼
+   눈금으로 읽을 수 있는 수라야 뜻이 있다. */
+function mapNiceScaleMeters(meters){
+  const value = Number(meters);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const pow = Math.pow(10, Math.floor(Math.log10(value)));
+  const scaled = value / pow;
+  return (scaled >= 5 ? 5 : scaled >= 2 ? 2 : 1) * pow;
+}
+/* 격자 간격도 같은 이유로 눈금 값에서 고른다. 화면 폭을 서너 칸 이상으로 나누는 가장 큰 간격을
+   써서, 확대할수록 촘촘한 눈금이 저절로 따라오게 한다. */
+const MAP_GRID_STEPS = [30, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001];
+const MAP_GRID_MAX_LINES = 60;    // 손으로 고친 .map 이 이상한 범위를 들고 와도 선이 폭주하지 않게
+function mapGridStep(spanDegrees){
+  const span = Math.abs(Number(spanDegrees));
+  if (!Number.isFinite(span) || span <= 0) return MAP_GRID_STEPS[MAP_GRID_STEPS.length - 1];
+  for (const step of MAP_GRID_STEPS) if (span / step >= 3) return step;
+  return MAP_GRID_STEPS[MAP_GRID_STEPS.length - 1];
+}
+function mapGridValues(min, max, step){
+  const out = [];
+  const from = Number(min), to = Number(max);
+  if (!(step > 0) || !Number.isFinite(from) || !Number.isFinite(to) || to < from) return out;
+  // 눈금은 0 을 지나는 자리에 맞춘다 — 적도·본초자오선이 언제나 격자선 위에 오도록.
+  for (let value = Math.ceil(from / step) * step; value <= to + step * 1e-6; value += step){
+    out.push(Number(value.toFixed(6)));
+    if (out.length >= MAP_GRID_MAX_LINES) break;
+  }
+  return out;
+}
+/* 눈금 이름표. 간격보다 잘게 적으면 "37.50000°N"처럼 읽히지 않으므로 간격에 맞춰 자릿수를 정한다.
+   적도·본초자오선은 수업에서 따로 부르는 선이라 이름을 적어 준다. */
+function mapGridLabel(value, step, axis){
+  const number = Number(value) || 0;
+  if (Math.abs(number) < 1e-9) return axis === "lat" ? mapT("0° 적도") : mapT("0° 본초자오선");
+  const decimals = step >= 1 ? 0 : step >= 0.1 ? 1 : step >= 0.01 ? 2 : 3;
+  const direction = axis === "lat" ? (number > 0 ? "N" : "S") : (number > 0 ? "E" : "W");
+  return Math.abs(number).toFixed(decimals) + "°" + direction;
 }
 
 function mapCsvRows(text){
@@ -435,6 +529,25 @@ function mapDownloadText(text, name, mime){
   link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+/* 캡처한 그림을 파일로 떨군다. data URL 을 그대로 href 에 넣어도 되지만, 2배로 찍은 지도는
+   수 MB 라 주소 줄에 통째로 실린다 — Blob 으로 바꿔 넘긴다(CSV 내보내기와 같은 길). */
+async function mapDownloadPng(dataUrl, name){
+  const blob = await mapDataUrlToBlob(dataUrl);
+  if (!blob) return false;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
+/* 표시 목록에서 묶음을 가르는 이름. source 는 '어디서 한꺼번에 들어왔는가'를 적어 둔 꼬리표라
+   (손으로 찍은 표시는 빈 값), 그대로 사람이 읽을 말로 바꿔 준다. */
+function mapSourceLabel(source){
+  const key = String(source || "");
+  if (!key) return mapT("직접 찍은 표시");
+  if (key === "nearby") return mapT("주변 시설");
+  return key;
+}
 function mapSafeDownloadName(value){
   return String(value || "지도").replace(/[\\/:*?"<>|]+/g, "_").trim() || "지도";
 }
@@ -475,6 +588,34 @@ async function mapPrepareBackgroundImage(file){
     if (dataUrl.length > MAP_BACKGROUND_MAX_DATA_CHARS) dataUrl = canvas.toDataURL("image/jpeg", 0.78);
     if (dataUrl.length > MAP_BACKGROUND_MAX_DATA_CHARS) throw new Error("image-output-too-large");
     return { name:String(file.name || "내 지도 이미지").slice(0, 180), dataUrl, width, height };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/* 표시에 붙일 사진. 배경 이미지와 달리 화면에 작게 보이는 그림이라 긴 변 1280px·JPEG 로 줄여
+   담는다 — 요즘 휴대전화 사진은 한 장이 5MB 라, 원본대로 담으면 지도 파일이 열리지 않는다. */
+async function mapPrepareMarkerPhoto(file){
+  if (!file || !/^image\/(?:png|jpeg|webp)$/i.test(String(file.type || ""))) throw new Error("photo-type");
+  if (file.size > 20 * 1024 * 1024) throw new Error("photo-too-large");
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error("photo-read")); img.src = url;
+    });
+    const naturalW = image.naturalWidth || image.width;
+    const naturalH = image.naturalHeight || image.height;
+    const scale = Math.min(1, MAP_PHOTO_MAX_SIDE / Math.max(naturalW, naturalH));
+    const width = Math.max(1, Math.round(naturalW * scale));
+    const height = Math.max(1, Math.round(naturalH * scale));
+    const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff"; context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    // 사진은 늘 JPEG 로 담는다(PNG 사진은 같은 화질에 몇 배로 커진다). 넘치면 화질을 두 번 더 낮춘다.
+    let dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+    if (dataUrl.length > MAP_PHOTO_MAX_DATA_CHARS) dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    if (dataUrl.length > MAP_PHOTO_MAX_DATA_CHARS) dataUrl = canvas.toDataURL("image/jpeg", 0.55);
+    if (dataUrl.length > MAP_PHOTO_MAX_DATA_CHARS) throw new Error("photo-output-too-large");
+    return { name:String(file.name || "사진").slice(0, 120), dataUrl, width, height };
   } finally { URL.revokeObjectURL(url); }
 }
 
@@ -1815,6 +1956,49 @@ async function loadMapDoc(file, opts = {}){
   return doc;
 }
 
+/* ===== 지도 문제(.task) 학생 화면 =====
+   과제 패키지(task-package.js)가 `kind:"map"` 인 .task 를 열 때 부른다. 같은 지도 편집기를 쓰되
+   도구막대를 감추고 문제 바를 얹는다 — 학생 화면에서 표시를 찍고 CSV 를 내보내는 길이 열려 있으면
+   답을 찍는 클릭과 섞이고, 정답을 문서에 적어 넣는 것도 되어 버린다.
+   문제의 정답 좌표는 .task 안에 있다(숨김 테스트와 같은 정직한 한계 — 파일을 열어 보면 보인다).
+   기준은 선생님이 원본 .task 로 다시 채점하는 것이다. */
+function mapTaskDocName(title){
+  return mapSafeDownloadName(String(title || "지도 문제")) + ".map";
+}
+function openMapTaskDoc(task, hash, opts = {}){
+  const spec = (task && task.map) || {};
+  const model = mapDocParse(JSON.stringify({
+    type: MAP_DOC_TYPE,
+    version: MAP_DOC_VERSION,
+    title: (task && task.meta && task.meta.title) || "지도 문제",
+    basemap: spec.basemap,
+    center: spec.center,
+    zoom: spec.zoom,
+    grid: spec.grid === true,
+    markers: [],                          // 정답 표시는 학생 지도에 넣지 않는다
+    shapes: [],
+    backgroundImage: spec.backgroundImage || null
+  }));
+  const doc = makeDoc("map", mapTaskDocName(model.title), opts);
+  doc.mapDoc = model;
+  doc.isScratch = true;                   // 학생이 저장하지 않아도 되는 화면(문제 풀이 자체가 목적)
+  doc.savedText = mapDocSerialize(model);
+  doc.savedContentKey = mapDocContentKey(model);
+  /* 문제 풀이 상태(답·지금 문제)와 "이 탭에 열려 있는 과제"는 같은 객체다 — 검수 화면이 원본
+     과제를 찾을 때 보는 곳이 doc.taskCtx 라(findOpenTaskCtx), 여기에도 같이 걸어 두지 않으면
+     선생님이 .task 를 열어 놓고도 지도 문제 제출본을 재채점할 수 없다. */
+  doc.mapTaskCtx = doc.taskCtx = { task, hash: hash || "", answers: new Map(), index: 0, lastGrade: null };
+  doc.render = async () => {
+    if (doc._mapMounted) return;
+    doc.el.innerHTML = "";
+    doc._mapMounted = true;
+    await mountMapEditor(doc);
+  };
+  if (typeof refreshChrome === "function") refreshChrome();
+  if (typeof activateIfIdle === "function") activateIfIdle(doc, opts);
+  return doc;
+}
+
 /* ===== 새 문서 만들기 ===== */
 function mapScratchFileName(n){
   return n && n > 1 ? "지도 " + n + ".map" : "지도.map";
@@ -2141,6 +2325,39 @@ async function mountMapEditor(doc){
   const csvInput = document.createElement("input");
   csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
 
+  const gridBtn = document.createElement("button");
+  gridBtn.type = "button"; gridBtn.className = "map-btn map-grid-toggle";
+  gridBtn.textContent = "🌐 위경도 격자";
+  gridBtn.title = "위선·경선을 눈금으로 그려요 — 적도와 본초자오선은 굵게 표시됩니다";
+  gridBtn.setAttribute("aria-pressed", "false");
+
+  const presentBtn = document.createElement("button");
+  presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start";
+  presentBtn.textContent = "🎬 발표 모드";
+  presentBtn.title = "표시를 목록 순서대로 하나씩 보여 줘요 — 이름·메모·사진이 큰 카드로 뜹니다 (Esc 로 끝내기)";
+
+  // 지도 문제 만들기 — 과제 패키지(task-package.js)가 있어야 뜻이 있는 단추라 그때만 붙인다.
+  const taskBtn = document.createElement("button");
+  taskBtn.type = "button"; taskBtn.className = "map-btn map-make-task";
+  taskBtn.textContent = "🎯 지도 문제";
+  taskBtn.title = "찍어 둔 표시로 '여기가 어디?' 위치 찾기 문제(.task)를 만들어요";
+
+  const listBtn = document.createElement("button");
+  listBtn.type = "button"; listBtn.className = "map-btn map-list-toggle";
+  listBtn.textContent = "🧾 표시 목록";
+  listBtn.title = "표시를 옆 목록으로 봐요 — 이름으로 찾고, 묶음별로 감추고, 눌러서 그 자리로 갑니다";
+  listBtn.setAttribute("aria-pressed", "false");
+
+  const pngBtn = document.createElement("button");
+  pngBtn.type = "button"; pngBtn.className = "map-btn map-save-png";
+  pngBtn.textContent = "📷 PNG 저장";
+  pngBtn.title = "지금 보이는 지도를 그림 파일로 저장해요 (학습지·게시물용)";
+
+  const printBtn = document.createElement("button");
+  printBtn.type = "button"; printBtn.className = "map-btn map-print-btn";
+  printBtn.textContent = "🖨️ 인쇄";
+  printBtn.title = "지금 보이는 지도를 인쇄해요 (Ctrl+P 와 같은 그림)";
+
   const clearItemsBtn = document.createElement("button");
   clearItemsBtn.type = "button"; clearItemsBtn.className = "map-btn map-clear-items";
   clearItemsBtn.textContent = "🧹 지우기";
@@ -2186,14 +2403,57 @@ async function mountMapEditor(doc){
   status.className = "map-status";
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
-  bar.append(titleInput, basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
-    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn, boardBtn, memoBtn, searchWrap,
-    undoBtn, redoBtn, saveBtn, coord, status);
+  bar.append(titleInput, basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, listBtn,
+    presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn,
+    boardBtn, memoBtn, pngBtn, printBtn, taskBtn, searchWrap, undoBtn, redoBtn, saveBtn, coord, status);
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
 
-  root.append(bar, stage, imageInput, csvInput);
+  /* 지도 칸과 표시 목록은 나란히 놓는다. 목록을 지도 위에 띄우지 않는 까닭: 목록을 펴 둔 채로
+     지도를 눌러 표시를 찍는 일이 잦은데, 떠 있는 칸은 그 클릭을 가로챈다. */
+  const body = document.createElement("div");
+  body.className = "map-body";
+
+  const listPanel = document.createElement("aside");
+  listPanel.className = "map-list";
+  listPanel.hidden = true;
+  listPanel.setAttribute("aria-label", "표시 목록");
+  const listFilter = document.createElement("input");
+  listFilter.type = "search"; listFilter.className = "map-list-filter";
+  listFilter.placeholder = "표시 이름 찾기";
+  listFilter.setAttribute("aria-label", "표시 이름 찾기");
+  const listGroups = document.createElement("div");
+  listGroups.className = "map-list-groups";
+  const listItems = document.createElement("ul");
+  listItems.className = "map-list-items";
+  const listFoot = document.createElement("p");
+  listFoot.className = "map-list-foot";
+  listPanel.append(listFilter, listGroups, listItems, listFoot);
+
+  /* 발표 카드는 지도 칸(stage) 이 아니라 그 바깥(body)에 얹는다 — stage 안에 두면 칠판·PNG 로
+     내보낼 때 캡처 그림에 카드가 통째로 찍힌다. */
+  const present = document.createElement("div");
+  present.className = "map-present";
+  present.hidden = true;
+  present.innerHTML =
+    '<div class="map-present-card">' +
+      '<img class="map-present-photo" alt="" hidden>' +
+      '<div class="map-present-text">' +
+        '<h3 class="map-present-name"></h3>' +
+        '<p class="map-present-note"></p>' +
+        '<p class="map-present-where"></p>' +
+      '</div>' +
+    '</div>' +
+    '<div class="map-present-bar">' +
+      '<button type="button" class="map-btn map-present-prev" title="이전 표시 (←)">◀</button>' +
+      '<span class="map-present-count" aria-live="polite"></span>' +
+      '<button type="button" class="map-btn map-present-next" title="다음 표시 (→)">▶</button>' +
+      '<button type="button" class="map-btn map-present-end" title="발표 끝내기 (Esc)">끝내기</button>' +
+    '</div>';
+
+  body.append(stage, listPanel, present);
+  root.append(bar, body, imageInput, csvInput);
   doc.el.appendChild(root);
   mapTranslate(bar);
 
@@ -2215,6 +2475,87 @@ async function mountMapEditor(doc){
   const imagePane = map.createPane("mapImagePane");
   imagePane.style.zIndex = "150";
   imagePane.style.pointerEvents = "none";
+  // 격자는 배경 위·도형(overlayPane 400) 아래에 둔다 — 눈금이 거리선과 영역을 가리지 않게.
+  const gridPane = map.createPane("mapGridPane");
+  gridPane.style.zIndex = "350";
+  gridPane.style.pointerEvents = "none";
+
+  /* ── 축척 막대 · 방위표 ──
+     지도 칸에 직접 얹는다(컨트롤 칸이 아니라). 캡처는 컨트롤 칸만 감추므로 이 자리에 있어야
+     칠판·메모·PNG·인쇄에도 축척이 따라간다. 저작권 줄은 캡처 때 그림 왼쪽 아래에 새겨지니
+     화면에서는 오른쪽 아래(Leaflet 저작권 줄 바로 위)에 두어 서로 겹치지 않는다. */
+  const legend = document.createElement("div");
+  legend.className = "map-legend";
+  legend.innerHTML =
+    '<span class="map-north" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 34" width="16" height="23" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">' +
+        '<path d="M12 2 19 20 12 16 5 20z" fill="currentColor" stroke="none"/>' +
+        '<path d="M8 33V25l8 8v-8"/>' +
+      '</svg></span>' +
+    '<span class="map-scale"><span class="map-scale-bar"></span><span class="map-scale-text"></span></span>';
+  stage.appendChild(legend);
+  const scaleBar = legend.querySelector(".map-scale-bar");
+  const scaleText = legend.querySelector(".map-scale-text");
+  const updateScale = () => {
+    const size = map.getSize();
+    if (!size.x || !size.y) return;                 // 감춰 둔 탭 — 크기가 돌아오면 다시 부른다
+    const row = Math.round(size.y / 2);
+    const metersPerPixel = map.distance(map.containerPointToLatLng([0, row]),
+      map.containerPointToLatLng([100, row])) / 100;
+    const nice = mapNiceScaleMeters(metersPerPixel * MAP_SCALE_MAX_PX);
+    if (!nice || !Number.isFinite(metersPerPixel) || metersPerPixel <= 0) return;
+    scaleBar.style.width = Math.round(nice / metersPerPixel) + "px";
+    scaleText.textContent = mapFormatDistance(nice);
+  };
+
+  /* ── 위경도 격자 ──
+     보이는 범위만 그린다. 지구 전체를 한 번에 그려 두면 확대할수록 선이 화면 밖에서 촘촘해져
+     쓸데없이 무겁고, 이름표를 화면 가장자리에 붙일 수도 없다. 그래서 움직일 때마다 다시 그린다. */
+  let gridLayer = null;
+  const drawGrid = () => {
+    if (gridLayer){ map.removeLayer(gridLayer); gridLayer = null; }
+    if (!model.grid) return;
+    const bounds = map.getBounds();
+    const south = bounds.getSouth(), north = bounds.getNorth();
+    const west = bounds.getWest(), east = bounds.getEast();
+    const latStep = mapGridStep(north - south);
+    const lngStep = mapGridStep(east - west);
+    const layers = [];
+    const lineStyle = (isZero) => ({
+      pane: "mapGridPane",
+      color: isZero ? "#b91c1c" : "#334155",
+      weight: isZero ? 2 : 1,
+      opacity: isZero ? 0.65 : 0.35,
+      dashArray: isZero ? null : "4 5",
+      interactive: false
+    });
+    // 이름표 글자는 우리가 만든 숫자·방위뿐이라(사용자 입력이 섞이지 않는다) divIcon 에 그대로 넣는다.
+    const labelMarker = (latlng, text, isZero, axis) => L.marker(latlng, {
+      pane: "mapGridPane",
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "map-grid-label" + (isZero ? " is-zero" : "") + (axis === "lat" ? " is-lat" : " is-lng"),
+        html: text,
+        iconSize: null
+      })
+    });
+    for (const lat of mapGridValues(south, north, latStep)){
+      const isZero = Math.abs(lat) < 1e-9;
+      layers.push(L.polyline([[lat, west], [lat, east]], lineStyle(isZero)));
+      layers.push(labelMarker([lat, west], mapGridLabel(lat, latStep, "lat"), isZero, "lat"));
+    }
+    for (const lng of mapGridValues(west, east, lngStep)){
+      const isZero = Math.abs(lng) < 1e-9;
+      layers.push(L.polyline([[south, lng], [north, lng]], lineStyle(isZero)));
+      layers.push(labelMarker([south, lng], mapGridLabel(lng, lngStep, "lng"), isZero, "lng"));
+    }
+    gridLayer = L.layerGroup(layers).addTo(map);
+  };
+  const syncGridButton = () => {
+    gridBtn.classList.toggle("is-on", !!model.grid);
+    gridBtn.setAttribute("aria-pressed", String(!!model.grid));
+  };
 
   const proxyBase = await mapTileProxyBase();
   let usingProxy = !!proxyBase;
@@ -2295,6 +2636,9 @@ async function mountMapEditor(doc){
   let recoveryTimer = 0;
   const scheduleRecovery = () => {
     clearTimeout(recoveryTimer);
+    /* 문제 풀이 화면은 남기지 않는다 — 새로고침 뒤에 문제 바 없는 빈 지도가 "그 탭"인 것처럼
+       되살아나면, 학생은 문제지를 잃은 채 지도만 보게 된다. 문제는 .task 를 다시 열면 된다. */
+    if (doc.mapTaskCtx) return;
     // 설정의 '자동 저장·복원'을 따른다 — 꺼 둔 사람에게는 사본을 남기지 않는다(.mnote 와 같은 규칙).
     if (typeof appSettings !== "object" || !appSettings || !appSettings.pdfRecovery) return;
     recoveryTimer = setTimeout(() => {
@@ -2318,6 +2662,12 @@ async function mountMapEditor(doc){
      빈 지도 탭이 그대로 돌아오게. 저장해 둔 지도는 고칠 때 남기면 되므로 여기서는 지나친다. */
   if (doc.isScratch && !doc._named) scheduleRecovery();
 
+  /* 표시 목록은 마커 함수가 다 갖춰진 뒤에 만든다(아래) — 내용이 바뀌는 길은 전부 touch 를
+     지나므로, 목록 새로 그리기도 거기 한 곳에 걸어 빠뜨리는 길이 없게 한다. */
+  let scheduleListRefresh = () => {};
+  /* 문제 풀이 화면(지도 문제)에서만 채워진다 — 지도 클릭을 답 찍기로 가로챈다. 아래에서 만든다. */
+  let quizPlaceAnswer = null;
+
   /* ── 저장 안 됨(●) 표시 ── */
   const touch = () => {
     const dirty = mapDocContentKey(model) !== doc.savedContentKey;
@@ -2325,6 +2675,7 @@ async function mountMapEditor(doc){
     setStatus(dirty ? "● " + mapT("저장 안 됨") : "");
     recordSoon();
     scheduleRecovery();
+    scheduleListRefresh();
   };
 
   /* ── 표시(마커) ── */
@@ -2384,7 +2735,12 @@ async function mountMapEditor(doc){
     }
   };
 
-  // 팝업 안의 작은 편집 서식 — 이름·메모·색을 고치고 지울 수 있다.
+  const syncMarkerPhotoBadge = (layer, marker) => {
+    const element = layer && typeof layer.getElement === "function" ? layer.getElement() : null;
+    if (element) element.classList.toggle("has-photo", !!(marker && marker.photo && marker.photo.dataUrl));
+  };
+
+  // 팝업 안의 작은 편집 서식 — 이름·메모·색·사진을 고치고 지울 수 있다.
   const buildPopup = (marker, layer) => {
     const form = document.createElement("div");
     form.className = "map-popup";
@@ -2421,6 +2777,7 @@ async function mountMapEditor(doc){
       swatch.addEventListener("click", () => {
         marker.color = color.id;
         layer.setIcon(mapPinIcon(color.id));
+        syncMarkerPhotoBadge(layer, marker);      // 아이콘을 새로 만들면 사진 표가 함께 지워진다
         colorRow.querySelectorAll(".map-swatch").forEach(el => el.setAttribute("aria-pressed", "false"));
         swatch.setAttribute("aria-pressed", "true");
         touch();
@@ -2456,7 +2813,85 @@ async function mountMapEditor(doc){
       addressFillBtn.disabled = false;
     });
 
-    form.append(labelInput, noteInput, colorRow, coordText, addressFillBtn, removeBtn);
+    /* ── 사진 한 장 ──
+       답사·관찰 기록은 "여기서 무엇을 보았는가"가 핵심이라 글보다 사진이 먼저다. 지도 파일 안에
+       함께 담아(base64) 파일 하나만 건네면 사진까지 따라가게 한다. */
+    const photoBox = document.createElement("div");
+    photoBox.className = "map-popup-photo";
+    const photoInput = document.createElement("input");
+    photoInput.type = "file"; photoInput.accept = "image/png,image/jpeg,image/webp"; photoInput.hidden = true;
+    const photoAddBtn = document.createElement("button");
+    photoAddBtn.type = "button"; photoAddBtn.className = "map-popup-photo-add";
+    photoAddBtn.textContent = "📷 사진 넣기";
+    photoAddBtn.title = "이 자리에서 찍은 사진을 지도 파일에 함께 담아요";
+    const photoRemoveBtn = document.createElement("button");
+    photoRemoveBtn.type = "button"; photoRemoveBtn.className = "map-popup-photo-remove";
+    photoRemoveBtn.textContent = "사진 빼기";
+    const photoImg = document.createElement("img");
+    photoImg.className = "map-popup-photo-img";
+    photoImg.alt = "";
+    photoImg.addEventListener("click", () => {
+      const live = liveMarker(marker) || marker;
+      if (!live.photo) return;
+      // 확대는 앱 공용 그림 확대 창을 그대로 쓴다(저장·메모 보내기까지 같은 자리에서 된다).
+      if (typeof window.openImageLightbox === "function"){
+        window.openImageLightbox([{ src:live.photo.dataUrl, alt:live.label || live.photo.name }], 0, {});
+      }
+    });
+    const syncPhoto = () => {
+      const live = liveMarker(marker) || marker;
+      const has = !!(live.photo && live.photo.dataUrl);
+      photoImg.hidden = !has;
+      if (has){
+        photoImg.src = live.photo.dataUrl;
+        photoImg.alt = live.label || live.photo.name;
+        photoImg.title = mapT("눌러서 크게 보기");
+      } else photoImg.removeAttribute("src");
+      photoRemoveBtn.hidden = !has;
+      photoAddBtn.textContent = mapT(has ? "📷 사진 바꾸기" : "📷 사진 넣기");
+      syncMarkerPhotoBadge(layer, live);      // 사진이 붙은 표시는 핀에 표가 나야 훑을 때 눈에 띈다
+    };
+    photoAddBtn.addEventListener("click", () => { photoInput.value = ""; photoInput.click(); });
+    photoInput.addEventListener("change", async () => {
+      const file = photoInput.files && photoInput.files[0];
+      if (!file) return;
+      photoAddBtn.disabled = true;
+      const previous = photoAddBtn.textContent;
+      photoAddBtn.textContent = mapT("사진을 담는 중…");
+      try {
+        const photo = await mapPrepareMarkerPhoto(file);
+        const live = liveMarker(marker) || marker;
+        // 지금 붙어 있는 사진은 갈아 끼우는 것이므로 합계에서 빼고 센다.
+        const others = mapPhotoTotalChars(model.markers) - (live.photo ? live.photo.dataUrl.length : 0);
+        if (others + photo.dataUrl.length > MAP_PHOTO_TOTAL_MAX_CHARS) throw new Error("photo-total-too-large");
+        live.photo = mapNormalizePhoto(photo);
+        syncPhoto();
+        touch();
+      } catch(error){
+        const message = error && error.message === "photo-type"
+          ? "PNG·JPG·WebP 사진을 골라 주세요."
+          : error && error.message === "photo-total-too-large"
+            ? "이 지도에 담긴 사진이 너무 많아요 — 몇 장을 빼고 다시 넣어 주세요."
+            : error && error.message === "photo-too-large"
+              ? "사진은 20MB 이하로 골라 주세요."
+              : "사진을 담지 못했어요. 더 작은 사진을 사용해 주세요.";
+        setStatus(mapT(message));
+      } finally {
+        photoAddBtn.disabled = false;
+        if (photoAddBtn.textContent === mapT("사진을 담는 중…")) photoAddBtn.textContent = previous;
+        syncPhoto();
+      }
+    });
+    photoRemoveBtn.addEventListener("click", () => {
+      const live = liveMarker(marker) || marker;
+      live.photo = null;
+      syncPhoto();
+      touch();
+    });
+    photoBox.append(photoImg, photoAddBtn, photoRemoveBtn, photoInput);
+    syncPhoto();
+
+    form.append(labelInput, noteInput, colorRow, photoBox, coordText, addressFillBtn, removeBtn);
     mapTranslate(form);
     return form;
   };
@@ -2478,11 +2913,242 @@ async function mountMapEditor(doc){
       touch();
     });
     layer.addTo(map);
+    // 사진이 붙은 표시는 핀에 표를 낸다(색을 바꾸면 아이콘을 새로 만드므로 그때도 다시 붙인다).
+    syncMarkerPhotoBadge(layer, marker);
     markerLayers.set(marker.id, layer);
     return layer;
   };
 
   model.markers.forEach(addMarkerLayer);
+
+  /* ── 표시 목록 패널 ──
+     CSV 로 수십·수백 개를 들여오면 표시는 지도 위에만 있어 손댈 방법이 없다(어디에 있는지 알아야
+     누를 수 있는데, 찾으려면 그 자리를 이미 알아야 한다). 목록에서 이름으로 찾고, 눌러 그 자리로
+     가고, 묶음째 감춘다. 감춘 것은 저장하지 않는다 — 파일이 아니라 지금 보는 방식일 뿐이다. */
+  const MAP_LIST_MAX_ROWS = 300;      // 수천 개짜리 지도에서 한 번에 다 그리면 목록이 먼저 멎는다
+  const hiddenSources = new Set();
+  let listOpen = mapListPanelOn();
+  const markerVisible = (marker) => !hiddenSources.has(marker.source || "");
+  const applyMarkerVisibility = () => {
+    for (const marker of model.markers){
+      const layer = markerLayers.get(marker.id);
+      if (!layer) continue;
+      const show = markerVisible(marker);
+      if (show && !map.hasLayer(layer)) layer.addTo(map);
+      else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
+    }
+  };
+  const focusMarker = (marker) => {
+    map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 15));
+    const layer = markerLayers.get(marker.id);
+    if (layer && map.hasLayer(layer)) layer.openPopup();
+  };
+  const renderMarkerList = () => {
+    if (!listOpen) return;
+    applyMarkerVisibility();
+
+    // 묶음 단추는 갈래가 둘 이상일 때만 뜻이 있다(전부 손으로 찍은 지도에서는 군더더기다).
+    listGroups.textContent = "";
+    const sources = [...new Set(model.markers.map(marker => marker.source || ""))].sort();
+    if (sources.length > 1){
+      for (const source of sources){
+        const count = model.markers.filter(marker => (marker.source || "") === source).length;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "map-list-group";
+        button.textContent = mapSourceLabel(source) + " " + count;
+        button.classList.toggle("is-off", hiddenSources.has(source));
+        button.setAttribute("aria-pressed", String(!hiddenSources.has(source)));
+        button.addEventListener("click", () => {
+          if (hiddenSources.has(source)) hiddenSources.delete(source);
+          else hiddenSources.add(source);
+          renderMarkerList();
+        });
+        listGroups.appendChild(button);
+      }
+    }
+
+    const query = listFilter.value.trim().toLowerCase();
+    const matched = model.markers.filter((marker) => {
+      if (!markerVisible(marker)) return false;
+      if (!query) return true;
+      return [marker.label, marker.note, marker.region, marker.district]
+        .join(" ").toLowerCase().includes(query);
+    });
+    listItems.textContent = "";
+    for (const marker of matched.slice(0, MAP_LIST_MAX_ROWS)){
+      const row = document.createElement("li");
+      row.className = "map-list-item";
+      const go = document.createElement("button");
+      go.type = "button"; go.className = "map-list-go";
+      const dot = document.createElement("span");
+      dot.className = "map-list-dot"; dot.style.background = mapColorHex(marker.color);
+      const name = document.createElement("span");
+      name.className = "map-list-name";
+      name.textContent = marker.label || mapT("이름 없는 표시");
+      const sub = document.createElement("span");
+      sub.className = "map-list-sub";
+      sub.textContent = [marker.region, marker.district].filter(Boolean).join(" ")
+        || (marker.lat.toFixed(4) + ", " + marker.lng.toFixed(4));
+      go.append(dot, name, sub);
+      go.addEventListener("click", () => focusMarker(marker));
+      /* 목록 순서 = 발표 순서다. 옮기기는 "지금 보이는 줄"의 앞뒤와 자리를 바꾸는 것으로 정의한다
+         — 걸러 놓은 목록에서도 눈에 보이는 대로 움직여야 헷갈리지 않는다. */
+      const moveBy = (delta) => {
+        const shownIndex = matched.indexOf(marker);
+        const neighbour = matched[shownIndex + delta];
+        if (!neighbour) return;
+        const from = model.markers.indexOf(marker);
+        const to = model.markers.indexOf(neighbour);
+        if (from < 0 || to < 0) return;
+        model.markers[from] = neighbour;
+        model.markers[to] = marker;
+        touch();
+        renderMarkerList();
+      };
+      const up = document.createElement("button");
+      up.type = "button"; up.className = "map-list-move";
+      up.textContent = "▲";
+      up.title = mapT("발표 순서를 앞으로");
+      up.setAttribute("aria-label", mapT("발표 순서를 앞으로"));
+      up.addEventListener("click", () => moveBy(-1));
+      const down = document.createElement("button");
+      down.type = "button"; down.className = "map-list-move";
+      down.textContent = "▼";
+      down.title = mapT("발표 순서를 뒤로");
+      down.setAttribute("aria-label", mapT("발표 순서를 뒤로"));
+      down.addEventListener("click", () => moveBy(1));
+      const remove = document.createElement("button");
+      remove.type = "button"; remove.className = "map-list-remove";
+      remove.textContent = "✕";
+      remove.title = mapT("이 표시 지우기");
+      remove.setAttribute("aria-label", mapT("이 표시 지우기"));
+      remove.addEventListener("click", () => { map.closePopup(); removeMarker(marker); });
+      row.append(go, up, down, remove);
+      listItems.appendChild(row);
+    }
+    listFoot.textContent = !model.markers.length
+      ? mapT("아직 표시가 없습니다.")
+      : mapTf("{shown}개 보임 · 모두 {total}개", { shown:Math.min(matched.length, MAP_LIST_MAX_ROWS), total:model.markers.length });
+  };
+  let listTimer = 0;
+  scheduleListRefresh = () => {
+    if (!listOpen) return;
+    clearTimeout(listTimer);
+    // 이름을 타자하는 동안 글자마다 목록을 다시 그리면 수백 줄짜리 지도에서 입력이 끌린다.
+    listTimer = setTimeout(renderMarkerList, 150);
+  };
+  const syncListPanel = () => {
+    listPanel.hidden = !listOpen;
+    listBtn.classList.toggle("is-on", listOpen);
+    listBtn.setAttribute("aria-pressed", String(listOpen));
+    // 지도 칸의 폭이 바뀐다 — 크기 회복은 stage 의 ResizeObserver 가 알아서 invalidateSize 한다.
+    if (listOpen) renderMarkerList();
+  };
+  listFilter.addEventListener("input", () => renderMarkerList());
+  listBtn.addEventListener("click", () => {
+    listOpen = !listOpen;
+    mapRememberListPanel(listOpen);
+    syncListPanel();
+  });
+  mapTranslate(listPanel);        // 목록의 붙박이 글자만 — 줄 내용은 사람이 적은 이름이라 손대지 않는다
+  syncListPanel();
+
+  /* ── 발표 모드 ──
+     찍어 둔 표시를 목록 순서대로 하나씩 보여 준다(역사 진격로·답사 코스·실크로드처럼 "순서가
+     곧 이야기"인 수업 자료가 지도 파일 하나로 발표 자료가 된다). 순서를 새 필드로 두지 않고
+     목록 순서를 그대로 쓰는 까닭: 순서는 이미 저장되는 것이고(표시 배열), 옮기는 자리도 목록
+     한 곳이면 충분하다 — 화면마다 따로 노는 '발표 순서' 를 만들지 않는다. */
+  const presentPhoto = present.querySelector(".map-present-photo");
+  const presentName = present.querySelector(".map-present-name");
+  const presentNote = present.querySelector(".map-present-note");
+  const presentWhere = present.querySelector(".map-present-where");
+  const presentCount = present.querySelector(".map-present-count");
+  let presenting = false;
+  let presentIndex = 0;
+  let presentReturn = null;                      // 발표를 시작하기 전에 보던 자리
+  const presentList = () => model.markers.filter(markerVisible);   // 감춰 둔 묶음은 발표에서도 빠진다
+  const markCurrentPin = (id) => {
+    for (const [markerId, layer] of markerLayers){
+      const element = layer.getElement && layer.getElement();
+      if (element) element.classList.toggle("is-current", markerId === id);
+    }
+  };
+  const showPresentStep = (index) => {
+    const list = presentList();
+    if (!list.length){ stopPresent(); return; }
+    presentIndex = Math.max(0, Math.min(list.length - 1, index));
+    const marker = list[presentIndex];
+    presentName.textContent = marker.label || mapT("이름 없는 표시");
+    presentNote.textContent = marker.note || "";
+    presentNote.hidden = !marker.note;
+    presentWhere.textContent = [marker.region, marker.district].filter(Boolean).join(" ")
+      || (marker.lat.toFixed(5) + ", " + marker.lng.toFixed(5));
+    const photo = marker.photo && marker.photo.dataUrl;
+    presentPhoto.hidden = !photo;
+    if (photo){ presentPhoto.src = marker.photo.dataUrl; presentPhoto.alt = marker.label || ""; }
+    else presentPhoto.removeAttribute("src");
+    presentCount.textContent = mapTf("{index} / {total}", { index:presentIndex + 1, total:list.length });
+    // 이미 가까이 보고 있으면 그 확대를 지킨다 — 발표 중에 배율이 널뛰면 어디인지 놓친다.
+    map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 14));
+    markCurrentPin(marker.id);
+  };
+  function startPresent(){
+    if (presenting) return;
+    if (!presentList().length){ setStatus(mapT("발표할 표시가 없어요 — 먼저 표시를 찍어 주세요.")); return; }
+    if (adding) setAdding(false);
+    if (drawingMode) finishDrawing(false);
+    map.closePopup();
+    presenting = true;
+    presentReturn = { center:map.getCenter(), zoom:map.getZoom() };
+    root.classList.add("is-presenting");
+    present.hidden = false;
+    presentBtn.classList.add("is-on");
+    presentBtn.setAttribute("aria-pressed", "true");
+    window.addEventListener("keydown", onPresentKey);
+    showPresentStep(0);
+  }
+  function stopPresent(){
+    if (!presenting) return;
+    presenting = false;
+    root.classList.remove("is-presenting");
+    present.hidden = true;
+    presentBtn.classList.remove("is-on");
+    presentBtn.setAttribute("aria-pressed", "false");
+    window.removeEventListener("keydown", onPresentKey);
+    markCurrentPin(null);
+    /* 발표하느라 돌아다닌 자리를 원래대로 돌려놓는다. 보기 위치는 저장 안 됨(●) 판정에 들어가지
+       않으므로 이 이동만으로 문서가 고쳐진 것이 되지는 않는다. */
+    if (presentReturn) map.setView(presentReturn.center, presentReturn.zoom);
+    presentReturn = null;
+  }
+  function onPresentKey(e){
+    if (!presenting || (doc.el && doc.el.hidden) || e.defaultPrevented) return;
+    const target = e.target;
+    if (target && typeof target.matches === "function" &&
+        (target.matches("input,textarea,select,[contenteditable]") || target.closest("[contenteditable]"))) return;
+    if (e.key === "Escape"){ e.preventDefault(); stopPresent(); }
+    else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown"){ e.preventDefault(); showPresentStep(presentIndex + 1); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp"){ e.preventDefault(); showPresentStep(presentIndex - 1); }
+  }
+  presentBtn.addEventListener("click", () => { if (presenting) stopPresent(); else startPresent(); });
+  present.querySelector(".map-present-prev").addEventListener("click", () => showPresentStep(presentIndex - 1));
+  present.querySelector(".map-present-next").addEventListener("click", () => showPresentStep(presentIndex + 1));
+  present.querySelector(".map-present-end").addEventListener("click", stopPresent);
+  presentPhoto.addEventListener("click", () => {
+    const list = presentList();
+    const marker = list[presentIndex];
+    if (!marker || !marker.photo || typeof window.openImageLightbox !== "function") return;
+    window.openImageLightbox([{ src:marker.photo.dataUrl, alt:marker.label || marker.photo.name }], 0, {});
+  });
+  mapTranslate(present);
+
+  /* ── 지도 문제 만들기(선생님) ──
+     과제 패키지가 함께 실려 있을 때만 내놓는다. 문제 파일의 모양·저장은 그쪽(task-package.js)이
+     맡고, 여기서는 지금 지도(배경·자리·표시)를 넘겨줄 뿐이다. */
+  if (typeof openMapTaskBuilder === "function"){
+    taskBtn.addEventListener("click", () => openMapTaskBuilder(model));
+  } else taskBtn.hidden = true;
 
   /* ── 거리선·면적 영역 ── */
   const shapeLayers = new Map();
@@ -2701,6 +3367,8 @@ async function mountMapEditor(doc){
   map.on("preclick", () => { popupWasOpen = popupOpen; });
 
   map.on("click", (e) => {
+    // 문제 풀이 화면에서는 지도 클릭이 곧 "지금 문제의 답 찍기"다.
+    if (quizPlaceAnswer && quizPlaceAnswer(e.latlng)) return;
     if (drawingMode){
       draftPoints.push([mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng)]);
       updateDraft();
@@ -2716,6 +3384,8 @@ async function mountMapEditor(doc){
     }
     const marker = mapNormalizeMarker({ lat:e.latlng.lat, lng:e.latlng.lng, label:"", color:"red" });
     model.markers.push(marker);
+    // 감춰 둔 묶음에 표시를 찍으면 눌러도 아무 일이 없는 것처럼 보인다 — 그 묶음을 다시 편다.
+    hiddenSources.delete(marker.source || "");
     const layer = addMarkerLayer(marker);
     setAdding(false);
     touch();
@@ -2731,9 +3401,25 @@ async function mountMapEditor(doc){
     model.zoom = map.getZoom();
     coord.textContent = mapTf("중심 {lat}, {lng} · 확대 {zoom}",
       { lat:model.center[0].toFixed(4), lng:model.center[1].toFixed(4), zoom:model.zoom });
+    // 축척과 격자는 보이는 범위를 따라간다 — 자리를 옮기면 눈금도 다시 잡아야 한다.
+    updateScale();
+    drawGrid();
   };
-  map.on("moveend zoomend", syncView);
+  // 탭을 다시 열면 지도 칸이 0×0 에서 제 크기로 돌아온다 — 그때도 축척·격자를 다시 잡는다.
+  map.on("moveend zoomend resize", syncView);
   syncView();
+  syncGridButton();
+  gridBtn.addEventListener("click", () => {
+    model.grid = !model.grid;
+    syncGridButton();
+    drawGrid();
+    /* 안내는 토스트로 띄운다 — 상태 줄에 적으면 방금 켠 격자가 저장되지 않았다는 ● 를 덮어쓴다
+       (격자는 문서에 저장되는 내용이라 그 표시가 더 중요하다). */
+    if (model.grid && typeof toast === "function"){
+      toast(mapT("위선·경선을 눈금으로 그렸어요 — 붉은 선이 적도와 본초자오선입니다."), 3000);
+    }
+    touch();
+  });
 
   /* ── 나머지 도구 ── */
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
@@ -3232,6 +3918,8 @@ async function mountMapEditor(doc){
   map.on("contextmenu", (e) => {
     /* 마커·도형에서 올라온 우클릭은 각자의 메뉴가 붙을 자리라 여기서 가로채지 않는다. */
     if (e.propagatedFrom) return;
+    // 문제 풀이 화면에는 편집 메뉴를 내놓지 않는다(표시 추가·정답 적기가 그 길로 열린다).
+    if (doc.mapTaskCtx) return;
     /* 표시를 찍거나 선을 그리는 중에는 왼쪽 클릭이 하던 일이 이어져야 한다 — 메뉴로 끊지 않는다.
        (그리는 중 우클릭에 완료·마지막 점 취소를 붙이는 것은 다음 단계 몫이다.) */
     if (adding || drawingMode) return;
@@ -3326,7 +4014,8 @@ async function mountMapEditor(doc){
     setAdding(false);
     if (drawingMode) finishDrawing(false);
     await waitForTiles(8000);
-    const labels = model.markers.filter(m => m.label).map((m) => {
+    // 목록에서 감춘 묶음은 그림에도 없어야 한다 — 화면에 없는 표시의 이름만 떠 있으면 읽을 수 없다.
+    const labels = model.markers.filter(m => m.label && markerVisible(m)).map((m) => {
       const point = map.latLngToContainerPoint([m.lat, m.lng]);
       return { x:point.x, y:point.y, text:m.label };
     });
@@ -3412,6 +4101,66 @@ async function mountMapEditor(doc){
     } finally { memoBtn.disabled = false; }
   });
 
+  /* ── PNG 저장 · 인쇄 ──
+     칠판을 거치지 않고 곧장 그림·종이로 내보내는 길이다. 학습지에 붙이거나 나눠 줄 때 쓰는 것이라
+     칠판으로 보내기와 같은 캡처를 쓴다 — 축척·격자·표시 이름·출처가 그림 안에 함께 새겨진다. */
+  const mapPngFileName = () =>
+    mapSafeDownloadName(String(model.title || "").trim() || mapT("지도")) + ".png";
+  pngBtn.addEventListener("click", async () => {
+    pngBtn.disabled = true;
+    setStatus(mapT("지도를 그림으로 굳히는 중…"));
+    try {
+      const png = await captureMapPng();
+      const name = mapPngFileName();
+      if (await mapDownloadPng(png, name)){
+        touch();                                  // 캡처하느라 비워 둔 상태 줄을 제자리로
+        if (typeof toast === "function") toast(mapTf("{name} 으로 저장했어요.", { name }), 2800);
+      } else setStatus(mapT("그림 파일로 저장하지 못했어요."));
+    } catch(error){
+      console.warn("map png export failed:", error);
+      setStatus(mapT("지도를 그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요."));
+    } finally { pngBtn.disabled = false; }
+  });
+
+  /* 화면을 그대로 인쇄하면 도구막대·목록만 찍히고 지도는 빠진다(화이트보드·악보와 같은 사정).
+     캡처한 그림 한 장만 남긴 인쇄 층을 body 바로 아래에 세워 그것만 찍는다. */
+  const printMap = async () => {
+    let png = "";
+    try { png = await captureMapPng(); }
+    catch(error){ console.warn("map print capture failed:", error); }
+    if (!png){ setStatus(mapT("인쇄할 그림을 만들지 못했어요.")); return; }
+    const previous = document.getElementById("mapPrintLayer");
+    if (previous) previous.remove();
+    const layer = document.createElement("div");
+    layer.id = "mapPrintLayer";
+    layer.className = "map-print";
+    const image = document.createElement("img");
+    image.alt = String(model.title || "").trim() || mapT("지도");
+    layer.appendChild(image);
+    document.body.appendChild(layer);
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("afterprint", cleanup);
+      document.body.classList.remove("map-printing");
+      layer.remove();
+    };
+    try {
+      // data URL 도 다 그려지기 전에 print() 를 부르면 빈 종이가 나온다.
+      await new Promise((resolve) => { image.onload = resolve; image.onerror = resolve; image.src = png; });
+      window.addEventListener("afterprint", cleanup);
+      document.body.classList.add("map-printing");
+      window.print();                     // 크로미움에서는 인쇄창이 닫힐 때까지 여기서 멈춘다
+    } catch(error){ console.warn("map print failed:", error); }
+    finally { cleanup(); touch(); }
+  };
+  printBtn.addEventListener("click", () => {
+    printBtn.disabled = true;
+    printMap().finally(() => { printBtn.disabled = false; });
+  });
+  doc.printMap = printMap;                // 머리글의 인쇄 단추(app.js) 진입점
+
   /* ── 되돌리기 / 다시 실행 ──
      스냅샷은 "저장되는 내용"과 같은 범위다 — 제목·배경지도·표시·도형·배경 이미지(버전 번호).
      보고 있는 자리(중심·확대)는 일부러 뺐다. 지도를 조금 움직인 것이 되돌릴 '편집'으로 쌓이면
@@ -3426,12 +4175,13 @@ async function mountMapEditor(doc){
       // CSV 로 표시 수천 개를 들여오면 한 단계가 1MB 를 넘는다. 단계 수와 별개로 총량도 막는다.
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
-      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion]),
+      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
-        // 반쯤 찍던 선이나 열려 있던 말풍선은 되돌리기와 함께 정리한다.
+        // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
         if (adding) setAdding(false);
         if (drawingMode) finishDrawing(false);
+        if (presenting) stopPresent();
         map.closePopup();
         selectedShape = null;
         model.title = saved[0];
@@ -3439,6 +4189,7 @@ async function mountMapEditor(doc){
         model.markers = saved[2].map(mapNormalizeMarker);
         model.shapes = saved[3].map(mapNormalizeShape);
         imageVersion = saved[4];
+        model.grid = saved[5] === true;
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();
@@ -3450,6 +4201,8 @@ async function mountMapEditor(doc){
         ensureCustomOption();
         basemapSelect.value = model.basemap;
         imageClearBtn.hidden = !model.backgroundImage;
+        syncGridButton();
+        drawGrid();
         applyBasemap();
         touch();
       },
@@ -3481,6 +4234,153 @@ async function mountMapEditor(doc){
   }
   window.addEventListener("keydown", onHistoryKey);
 
+  /* ── 지도 문제(학생 화면) ──
+     같은 편집기를 쓰되 도구막대를 감추고 문제 바를 얹는다. 답은 문서(model.markers)가 아니라
+     따로 들고 있는다 — 답을 표시로 넣으면 "지도 파일에 정답이 적힌" 셈이 되고, 저장·CSV 로
+     빠져나가며, 되돌리기 한 번에 답이 사라진다. */
+  if (doc.mapTaskCtx && doc.mapTaskCtx.task && doc.mapTaskCtx.task.map){
+    const ctx = doc.mapTaskCtx;
+    const questions = Array.isArray(ctx.task.map.questions) ? ctx.task.map.questions : [];
+    bar.hidden = true;                       // 편집 도구는 문제 풀이 화면에 내놓지 않는다
+    listPanel.hidden = true;
+
+    const taskBar = document.createElement("div");
+    taskBar.className = "map-task-bar";
+    taskBar.innerHTML =
+      '<span class="map-task-title"></span>' +
+      '<span class="map-task-step"></span>' +
+      '<strong class="map-task-prompt"></strong>' +
+      '<span class="map-task-state" aria-live="polite"></span>' +
+      '<span class="map-task-spacer"></span>' +
+      '<button type="button" class="map-btn map-task-intro" hidden>안내</button>' +
+      '<button type="button" class="map-btn map-task-prev" title="이전 문제 (←)">◀</button>' +
+      '<button type="button" class="map-btn map-task-next" title="다음 문제 (→)">▶</button>' +
+      '<span class="map-task-score"></span>' +
+      '<button type="button" class="map-btn map-task-grade">✓ 채점</button>' +
+      '<button type="button" class="map-btn map-task-submit">📤 제출본 내보내기</button>';
+    root.insertBefore(taskBar, body);
+    const titleEl = taskBar.querySelector(".map-task-title");
+    const stepEl = taskBar.querySelector(".map-task-step");
+    const promptEl = taskBar.querySelector(".map-task-prompt");
+    const stateEl = taskBar.querySelector(".map-task-state");
+    const scoreEl = taskBar.querySelector(".map-task-score");
+    const introBtn = taskBar.querySelector(".map-task-intro");
+    const gradeBtn = taskBar.querySelector(".map-task-grade");
+    const submitBtn = taskBar.querySelector(".map-task-submit");
+    titleEl.textContent = (ctx.task.meta && ctx.task.meta.title) || mapT("지도 문제");
+    const intro = String((ctx.task.problem && ctx.task.problem.md) || "").trim();
+    introBtn.hidden = !intro;
+    introBtn.addEventListener("click", () => { if (typeof toast === "function") toast(intro.slice(0, 400), 6000); });
+
+    const answerLayers = new Map();          // 문제 id → L.marker(학생이 찍은 답)
+    const answerIcon = (number, current) => L.divIcon({
+      className: "map-answer-pin" + (current ? " is-current" : ""),
+      html: String(number),
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+    const syncAnswerPins = () => {
+      questions.forEach((question, index) => {
+        const layer = answerLayers.get(question.id);
+        if (layer) layer.setIcon(answerIcon(index + 1, index === ctx.index));
+      });
+    };
+    const setAnswer = (question, latlng) => {
+      const point = { lat:mapClampLat(latlng.lat), lng:mapClampLng(latlng.lng) };
+      ctx.answers.set(question.id, point);
+      let layer = answerLayers.get(question.id);
+      if (layer) layer.setLatLng([point.lat, point.lng]);
+      else {
+        layer = L.marker([point.lat, point.lng], {
+          icon: answerIcon(questions.indexOf(question) + 1, true),
+          draggable: true,
+          title: mapT("내가 찍은 답 — 끌어서 고칠 수 있어요")
+        });
+        layer.on("dragend", () => {
+          const moved = layer.getLatLng();
+          ctx.answers.set(question.id, { lat:mapClampLat(moved.lat), lng:mapClampLng(moved.lng) });
+          ctx.lastGrade = null;               // 답이 바뀌면 앞서 낸 점수는 더 이상 지금 답의 점수가 아니다
+          syncTaskBar();
+        });
+        layer.addTo(map);
+        answerLayers.set(question.id, layer);
+      }
+      ctx.lastGrade = null;
+      syncAnswerPins();
+      syncTaskBar();
+    };
+    const syncTaskBar = () => {
+      const question = questions[ctx.index] || null;
+      stepEl.textContent = mapTf("문제 {index}/{total}", { index:ctx.index + 1, total:questions.length });
+      promptEl.textContent = question ? question.prompt : "";
+      const answered = question && ctx.answers.has(question.id);
+      stateEl.textContent = mapT(answered ? "답을 찍었어요 (끌어서 고칠 수 있어요)" : "지도에서 그 자리를 눌러 답하세요");
+      stateEl.classList.toggle("is-done", !!answered);
+      const grade = ctx.lastGrade;
+      scoreEl.textContent = grade
+        ? mapTf("맞힘 {passed}/{total}", { passed:grade.passed, total:grade.total })
+        : mapTf("답한 문제 {done}/{total}", { done:ctx.answers.size, total:questions.length });
+      scoreEl.classList.toggle("is-pass", !!grade && grade.passed === grade.total);
+      scoreEl.classList.toggle("is-fail", !!grade && grade.passed !== grade.total);
+      syncAnswerPins();
+    };
+    const setQuestion = (index) => {
+      if (!questions.length) return;
+      ctx.index = Math.max(0, Math.min(questions.length - 1, index));
+      syncTaskBar();
+    };
+    // 지도 클릭 → 지금 문제의 답. 여기서 true 를 돌려주면 편집기 쪽 클릭 처리는 건너뛴다.
+    quizPlaceAnswer = (latlng) => {
+      const question = questions[ctx.index];
+      if (!question) return false;
+      setAnswer(question, latlng);
+      return true;
+    };
+    taskBar.querySelector(".map-task-prev").addEventListener("click", () => setQuestion(ctx.index - 1));
+    taskBar.querySelector(".map-task-next").addEventListener("click", () => setQuestion(ctx.index + 1));
+    function onTaskKey(e){
+      if (doc.el && doc.el.hidden) return;
+      const target = e.target;
+      if (target && typeof target.matches === "function" && target.matches("input,textarea,select,[contenteditable]")) return;
+      if (e.key === "ArrowRight"){ e.preventDefault(); setQuestion(ctx.index + 1); }
+      else if (e.key === "ArrowLeft"){ e.preventDefault(); setQuestion(ctx.index - 1); }
+    }
+    window.addEventListener("keydown", onTaskKey);
+
+    const answerList = () => questions
+      .filter(question => ctx.answers.has(question.id))
+      .map(question => ({ id:question.id, ...ctx.answers.get(question.id) }));
+    gradeBtn.addEventListener("click", () => {
+      if (typeof mapTaskGrade !== "function"){ setStatus(mapT("채점 기능을 불러오지 못했어요.")); return; }
+      const grade = mapTaskGrade(ctx.task, answerList());
+      ctx.lastGrade = grade;
+      syncTaskBar();
+      // 문제마다 얼마나 빗나갔는지 알려 준다. 정답 자리는 보여 주지 않는다(다시 풀 수 있어야 한다).
+      const lines = grade.results.map((row, index) => (index + 1) + ". " + (row.passed ? "○ " : "✗ ") + row.actual);
+      if (typeof toast === "function") toast(lines.join("\n") || mapT("아직 답한 문제가 없어요."), 6000);
+    });
+    submitBtn.addEventListener("click", async () => {
+      if (typeof exportMapTaskSubmission !== "function"){ setStatus(mapT("제출 기능을 불러오지 못했어요.")); return; }
+      if (!ctx.lastGrade){
+        if (typeof mapTaskGrade !== "function") return;
+        ctx.lastGrade = mapTaskGrade(ctx.task, answerList());
+        syncTaskBar();
+      }
+      submitBtn.disabled = true;
+      try { await exportMapTaskSubmission(ctx, ctx.lastGrade); }
+      finally { submitBtn.disabled = false; }
+    });
+
+    mapTranslate(taskBar);
+    setQuestion(0);
+    if (intro && typeof toast === "function") toast(intro.slice(0, 400), 5200);
+    doc.cleanupFns.push(() => {
+      window.removeEventListener("keydown", onTaskKey);
+      answerLayers.clear();
+      quizPlaceAnswer = null;
+    });
+  }
+
   /* ── 탭을 다시 열었을 때 ──
      문서는 el.hidden 으로 감췄다 보여주는데, 숨은 동안 지도 칸은 0×0 이 된다. render() 는 처음
      한 번만 불리므로(ensureRendered) 크기 회복은 여기서 스스로 감지해야 한다. */
@@ -3498,6 +4398,7 @@ async function mountMapEditor(doc){
   doc.cleanupFns.push(() => {
     window.removeEventListener("keydown", onInteractionKey);
     window.removeEventListener("keydown", onSelectedShapeKey);
+    window.removeEventListener("keydown", onPresentKey);      // 발표 중에 탭을 닫아도 키가 남지 않게
     window.removeEventListener("keydown", onSearchLocationKey);
     window.removeEventListener("keydown", onHistoryKey);
     closeContextMenu();                 // 열려 있던 우클릭 메뉴의 document 리스너까지 함께 뗀다
@@ -3505,9 +4406,11 @@ async function mountMapEditor(doc){
     if (history) history.cancel();      // 묶는 중이던 변경을 버린다(사라진 화면을 capture 하지 않게)
     cleanupNetworkNotice();
     if (mapResizeObserver) mapResizeObserver.disconnect();
+    clearTimeout(listTimer);      // 사라진 목록을 뒤늦게 다시 그리지 않게
     try { map.remove(); } catch(_){}
     doc.mapInstance = null;
     doc.mapSearchFor = null;      // 닫힌 탭의 검색칸을 다른 문서가 계속 부르지 않게
+    doc.printMap = null;          // 닫힌 지도를 머리글 인쇄 단추가 계속 부르지 않게
   });
 
   touch();
@@ -3524,6 +4427,8 @@ if (typeof module !== "undefined" && module.exports){
     mapMarkersFromCsv, mapMarkersToCsv,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
+    mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,
+    mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS,
     MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom
   };
 }

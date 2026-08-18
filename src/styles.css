@@ -867,7 +867,99 @@
   .map-save{font-weight:600}
   .map-coord{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .map-status{color:var(--muted);font-size:11px;margin-left:auto}
-  .map-stage{flex:1 1 auto;min-height:0;background:var(--panel)}
+  /* 지도 칸 + 표시 목록을 나란히 놓는 줄 */
+  .map-body{flex:1 1 auto;display:flex;min-height:0;min-width:0}
+  .map-stage{flex:1 1 auto;min-height:0;min-width:0;background:var(--panel)}
+  /* ── 표시 목록 패널 ── */
+  .map-list{flex:0 0 262px;display:flex;flex-direction:column;min-height:0;overflow:hidden;
+    border-left:1px solid var(--border);background:var(--panel)}
+  .map-list[hidden]{display:none}
+  .map-list-filter{margin:8px 8px 6px;border:1px solid var(--border);border-radius:7px;
+    background:var(--field);color:var(--ink);padding:6px 8px;font:inherit;font-size:12px}
+  .map-list-groups{display:flex;flex-wrap:wrap;gap:5px;padding:0 8px 6px}
+  .map-list-group{border:1px solid var(--border);border-radius:999px;background:var(--field);color:var(--ink);
+    padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}
+  .map-list-group:hover{border-color:var(--accent)}
+  /* 감춘 묶음은 "지금 안 보이는 것"이지 지워진 것이 아니다 — 흐리게만 두고 자리는 지킨다. */
+  .map-list-group.is-off{opacity:.45;text-decoration:line-through}
+  .map-list-items{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0;padding:0;list-style:none}
+  .map-list-item{display:flex;align-items:stretch;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent)}
+  .map-list-go{flex:1;min-width:0;display:flex;align-items:center;gap:7px;border:0;background:transparent;
+    color:var(--ink);padding:7px 6px 7px 10px;font:inherit;font-size:12px;text-align:left;cursor:pointer}
+  .map-list-go:hover{background:var(--panel-hover)}
+  .map-list-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;box-shadow:0 0 0 1px rgba(15,23,42,.25)}
+  .map-list-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .map-list-sub{flex:0 0 auto;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+  .map-list-remove{border:0;background:transparent;color:var(--muted);padding:0 9px;font:inherit;font-size:12px;cursor:pointer}
+  .map-list-remove:hover{color:#dc2626;background:var(--panel-hover)}
+  .map-list-foot{margin:0;padding:7px 10px;border-top:1px solid var(--border);color:var(--muted);font-size:11px}
+  .map-list-move{border:0;background:transparent;color:var(--muted);padding:0 5px;font:inherit;font-size:9px;cursor:pointer;line-height:1}
+  .map-list-move:hover{color:var(--accent);background:var(--panel-hover)}
+  /* ── 표시 사진(말풍선 안) ── */
+  .map-popup-photo{display:flex;flex-direction:column;gap:5px}
+  .map-popup-photo-img{width:100%;max-height:140px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in}
+  .map-popup-photo-img[hidden]{display:none}
+  .map-popup-photo-add,.map-popup-photo-remove{border:1px solid var(--border);border-radius:6px;background:var(--field);
+    color:var(--ink);padding:4px 8px;font:inherit;font-size:11.5px;cursor:pointer}
+  .map-popup-photo-add:hover,.map-popup-photo-remove:hover{border-color:var(--accent)}
+  .map-popup-photo-remove[hidden]{display:none}
+  /* 사진이 붙은 핀은 오른쪽 위에 작은 표를 단다 — 지도를 훑을 때 사진 있는 자리가 먼저 보이게. */
+  .map-pin.has-photo::after{content:"";position:absolute;right:-1px;top:-1px;width:9px;height:9px;border-radius:50%;
+    background:#0ea5e9;box-shadow:0 0 0 2px #fff}
+  .map-pin.is-current{filter:drop-shadow(0 0 7px rgba(37,99,235,.95));z-index:1000!important}
+  /* ── 발표 모드 ── */
+  .map-doc.is-presenting .map-bar,.map-doc.is-presenting .map-list{display:none}
+  .map-present{position:absolute;left:0;right:0;bottom:0;z-index:900;display:flex;flex-direction:column;gap:8px;
+    padding:12px;pointer-events:none}
+  .map-present[hidden]{display:none}
+  .map-present-card{pointer-events:auto;display:flex;gap:12px;align-items:flex-start;max-width:min(760px,100%);
+    margin:0 auto;padding:12px 14px;border:1px solid var(--border);border-radius:12px;
+    background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 10px 30px rgba(15,23,42,.28)}
+  .map-present-photo{width:180px;max-height:150px;object-fit:cover;border-radius:8px;cursor:zoom-in}
+  .map-present-photo[hidden]{display:none}
+  .map-present-text{min-width:0;flex:1}
+  .map-present-name{margin:0 0 4px;font-size:20px;line-height:1.25}
+  .map-present-note{margin:0 0 4px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink)}
+  .map-present-note[hidden]{display:none}
+  .map-present-where{margin:0;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .map-present-bar{pointer-events:auto;display:flex;align-items:center;justify-content:center;gap:8px}
+  .map-present-count{color:var(--ink);font-size:12px;font-variant-numeric:tabular-nums;
+    padding:5px 9px;border-radius:999px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--border)}
+  /* ── 지도 문제(학생 화면) ── */
+  .map-task-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
+    border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 10%,var(--panel))}
+  .map-task-title{font-weight:700;font-size:12.5px}
+  .map-task-step{color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .map-task-prompt{font-size:14px}
+  .map-task-state{color:var(--muted);font-size:11.5px}
+  .map-task-state.is-done{color:#16a34a}
+  .map-task-spacer{flex:1 1 auto}
+  .map-task-score{font-size:11.5px;font-variant-numeric:tabular-nums;padding:3px 8px;border-radius:999px;
+    border:1px solid var(--border);background:var(--field)}
+  .map-task-score.is-pass{border-color:#16a34a;color:#16a34a}
+  .map-task-score.is-fail{border-color:#dc2626;color:#dc2626}
+  /* 학생이 찍은 답 — 문제 번호를 단 동그란 핀(정답 위치와 헷갈리지 않게 표시 핀과 모양이 다르다) */
+  .map-answer-pin{display:flex;align-items:center;justify-content:center;border-radius:50%;
+    background:#7c3aed;color:#fff;font:700 12px/1 "Malgun Gothic",system-ui,sans-serif;
+    box-shadow:0 0 0 2px #fff,0 2px 6px rgba(15,23,42,.4)}
+  .map-answer-pin.is-current{background:#2563eb;box-shadow:0 0 0 2px #fff,0 0 0 5px rgba(37,99,235,.35)}
+  /* ── 축척 막대 · 방위표 ──
+     Leaflet 컨트롤이 아니라 지도 칸에 직접 얹는다(그래야 캡처·인쇄에도 남는다). 오른쪽 아래
+     저작권 줄 위에 앉히고, 클릭은 지도로 흘려보낸다. */
+  .map-legend{position:absolute;right:8px;bottom:22px;z-index:800;display:flex;align-items:flex-end;gap:9px;
+    padding:5px 8px;border-radius:7px;background:rgba(255,255,255,.86);color:#1f2937;
+    font:600 11px/1.2 "Malgun Gothic",system-ui,sans-serif;box-shadow:0 1px 5px rgba(15,23,42,.2);pointer-events:none}
+  .map-north{display:flex;align-items:flex-end;color:#1f2937}
+  .map-scale{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+  .map-scale-bar{display:block;height:6px;min-width:24px;border:1.5px solid #1f2937;border-top:0;background:transparent}
+  .map-scale-text{font-variant-numeric:tabular-nums}
+  /* ── 위경도 격자 이름표 ── */
+  .map-grid-label{width:auto!important;height:auto!important;white-space:nowrap;
+    padding:1px 4px;border-radius:4px;background:rgba(255,255,255,.82);color:#334155;
+    font:600 10.5px/1.3 "Malgun Gothic",system-ui,sans-serif}
+  .map-grid-label.is-zero{background:rgba(185,28,28,.9);color:#fff}
+  .map-grid-label.is-lat{margin-left:4px}         /* 위선 이름표는 왼쪽 가장자리에서 안쪽으로 */
+  .map-grid-label.is-lng{margin-top:-18px}        /* 경선 이름표는 아래 가장자리에서 위로 */
   /* Leaflet 은 넘겨준 칸 "자체"에 leaflet-* 클래스를 붙인다(자식이 아니다) — 그래서 붙여 쓴다.
      타일이 아직 안 온 칸은 배경색으로 남겨, 어두운 화면에서 흰 판이 번쩍이지 않게 한다. */
   .map-stage.leaflet-container{background:var(--panel);font:inherit}
@@ -4133,6 +4225,14 @@
   .task-review-reported-row.is-pass .py-grade-result-mark{background:rgba(22,163,74,.12);color:#15803d}
   .task-review-reported-row.is-fail .py-grade-result-mark{background:rgba(239,68,68,.12);color:#b91c1c}
   .task-review-reported-err{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px}
+  /* 지도 문제 제출본 — 코드 자리에 학생이 찍은 좌표와 빗나간 거리가 온다. */
+  .task-review-mapanswers{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;padding:10px 12px;
+    border:1px solid var(--border);border-radius:10px;background:var(--panel-2)}
+  .task-review-mapanswers[hidden]{display:none}
+  .task-review-mapanswers h4{margin:0 0 4px;font-size:12.5px}
+  /* 체크 하나짜리 줄은 이름이 위가 아니라 옆에 와야 읽힌다. */
+  .task-builder-field.task-builder-inline{flex-direction:row-reverse;align-items:center;justify-content:flex-end;gap:8px}
+  .task-builder-field.task-builder-inline[hidden]{display:none}
   /* ===== 제출본 일괄 검수 표 ===== */
   .task-batch-hint{margin:0 0 12px;color:var(--muted);font-size:12.5px;line-height:1.6}
   .task-batch-table-wrap{border:1px solid var(--border);border-radius:10px;background:var(--panel-2);overflow:auto;max-height:60vh}
@@ -4893,6 +4993,11 @@
     body.board-printing>*{display:none!important}
     body.board-printing>.board-print{display:block!important}
     .board-print img{display:block;max-width:100%;height:auto;margin:0 auto}
+    /* 지도 인쇄(map-viewer.js printMap) — 화면을 그대로 찍으면 도구막대·표시 목록만 나오고
+       지도 칸은 빈 종이가 된다. 칠판으로 보낼 때와 같은 캡처 그림 한 장만 남겨 찍는다. */
+    body.map-printing>*{display:none!important}
+    body.map-printing>.map-print{display:block!important}
+    .map-print img{display:block;max-width:100%;height:auto;margin:0 auto}
     /* 악보 인쇄(music-editor.js printScore) — 같은 문서 안에서 찍어야 Bravura 글꼴이 살아 있다. */
     body.music-printing>*{display:none!important}
     body.music-printing>.music-print{display:block!important}
@@ -4904,6 +5009,7 @@
   /* 인쇄용 임시 레이어 — 화면에는 절대 보이지 않는다 */
   .board-print{display:none}
   .music-print{display:none}
+  .map-print{display:none}
 
   /* ===== 스프레드시트 차트 모달 ===== */
   .chart-card{width:min(860px,96%);display:flex;flex-direction:column;gap:12px}

@@ -264,6 +264,8 @@ function wire(){
     if (state && state.kind === "board" && typeof state.printBoard === "function"){ state.printBoard(); return; }
     // 악보도 같은 사정이다 — 도구막대·재생바를 빼고 오선만 남겨 찍는다(music-editor.js).
     if (state && state.kind === "music" && typeof state.printScore === "function"){ state.printScore(); return; }
+    // 지도도 같다 — 화면을 그대로 찍으면 도구막대만 나오므로 캡처한 그림 한 장을 찍는다(map-viewer.js).
+    if (state && state.kind === "map" && typeof state.printMap === "function"){ state.printMap(); return; }
     window.print();
   };
   byId("btnFullscreen").onclick = toggleViewerFullscreen;

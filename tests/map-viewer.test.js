@@ -29,6 +29,9 @@ function loadMapViewer(){
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
       , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom, mapSearchMenuItem
+      , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
+      , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
+      , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
     };`, context);
   return context.__map;
 }
@@ -526,12 +529,13 @@ test("지도 문서는 공용 되돌리기 이력을 쓰고 touch() 한 곳에�
   assert.match(touch[1], /recordSoon\(\)/);
   assert.match(source, /const recordSoon = \(\) => \{ if \(history && !bulkDepth\) history\.commitSoon\(200\); \};/);
   // 스냅샷 범위 = 저장되는 내용. 보고 있는 자리(중심·확대)는 넣지 않는다.
-  const capture = /capture: \(\) => JSON\.stringify\((\[.*imageVersion\])\)/.exec(source);
+  const capture = /capture: \(\) => JSON\.stringify\((\[.*imageVersion.*\])\)/.exec(source);
   assert.ok(capture);
   assert.match(capture[1], /model\.title/);
   assert.match(capture[1], /model\.markers/);
   assert.match(capture[1], /model\.shapes/);
   assert.match(capture[1], /imageVersion/);
+  assert.match(capture[1], /model\.grid/);          // 격자는 저장되는 내용이므로 되돌리기에도 들어간다
   assert.doesNotMatch(capture[1], /model\.center|model\.zoom/);
   // 배경 이미지(dataUrl 수 MB)는 단계마다 복제하지 않고 버전 표에 한 번만 둔다.
   assert.match(source, /const imageVersions = new Map\(\[\[0, model\.backgroundImage \|\| null\]\]\)/);
@@ -1238,4 +1242,193 @@ test("보기 화면의 선택 글자 메뉴는 브라우저 기본 메뉴를 함
   assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, text\)/);
   const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
   assert.match(app, /installViewSelectionContextMenu\(\)/);
+});
+
+/* ===== 축척 막대 · 위경도 격자 · 표시 목록 (2026-08-18) ===== */
+
+test("축척 막대 길이는 1·2·5 눈금으로 내려 맞춘다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapNiceScaleMeters(1370), 1000);
+  assert.equal(api.mapNiceScaleMeters(2400), 2000);
+  assert.equal(api.mapNiceScaleMeters(7800), 5000);
+  assert.equal(api.mapNiceScaleMeters(96), 50);
+  assert.equal(api.mapNiceScaleMeters(1), 1);
+  // 지도 칸이 아직 0×0 이면 화면 거리가 0 으로 온다 — 막대를 그리지 않는다는 뜻으로 0.
+  assert.equal(api.mapNiceScaleMeters(0), 0);
+  assert.equal(api.mapNiceScaleMeters(NaN), 0);
+});
+
+test("격자 간격은 화면을 서너 칸 이상으로 나누는 가장 큰 눈금", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapGridStep(90), 30);      // 대륙이 보이는 자리
+  assert.equal(api.mapGridStep(4), 1);        // 나라 하나쯤
+  assert.equal(api.mapGridStep(0.9), 0.2);    // 도시 하나
+  assert.equal(api.mapGridStep(0.01), 0.002); // 학교 둘레
+  // 간격이 화면보다 크면 선이 한 줄도 안 보인다 — 늘 화면보다 잘게 잡힌다.
+  for (const span of [90, 12, 4, 0.9, 0.05, 0.01]) assert.ok(api.mapGridStep(span) <= span / 3 + 1e-9, String(span));
+  assert.equal(api.mapGridStep(0), api.MAP_GRID_STEPS[api.MAP_GRID_STEPS.length - 1]);
+});
+
+test("격자 눈금은 0(적도·본초자오선) 에 맞춰 떨어지고 폭주하지 않는다", () => {
+  const api = loadMapViewer();
+  assert.deepEqual([...api.mapGridValues(-1.2, 1.2, 1)], [-1, 0, 1]);
+  assert.deepEqual([...api.mapGridValues(36.05, 36.35, 0.1)], [36.1, 36.2, 36.3]);
+  // 뒤집힌 범위·잘못된 간격은 선을 그리지 않는다(손으로 고친 .map).
+  assert.deepEqual([...api.mapGridValues(10, 5, 1)], []);
+  assert.deepEqual([...api.mapGridValues(0, 10, 0)], []);
+  assert.equal(api.mapGridValues(-90, 90, 0.001).length, api.MAP_GRID_MAX_LINES);
+});
+
+test("격자 이름표는 간격만큼만 자세히 적고 0 은 이름으로 부른다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapGridLabel(37.5, 0.5, "lat"), "37.5°N");
+  assert.equal(api.mapGridLabel(-37.5, 1, "lat"), "38°S");
+  assert.equal(api.mapGridLabel(127.025, 0.005, "lng"), "127.025°E");
+  assert.equal(api.mapGridLabel(-127, 1, "lng"), "127°W");
+  assert.equal(api.mapGridLabel(0, 1, "lat"), "0° 적도");
+  assert.equal(api.mapGridLabel(0, 1, "lng"), "0° 본초자오선");
+});
+
+/* 격자는 "격자를 보이게 만들어 둔 지도"로 건네지는 것이라 문서에 저장한다.
+   옛 .map 에는 없던 값이므로 없으면 끈 것으로 봐야 옛 지도의 화면이 달라지지 않는다. */
+test("위경도 격자는 .map 에 저장되고 옛 파일은 꺼진 채로 열린다", () => {
+  const api = loadMapViewer();
+  const old = api.mapDocParse(JSON.stringify({
+    type:"classdock-map", version:3, title:"옛 지도", basemap:"osm", center:[37,127], zoom:10, markers:[]
+  }));
+  assert.equal(old.grid, false);
+
+  const model = api.mapDocEmpty("격자 지도");
+  const before = api.mapDocContentKey(model);
+  model.grid = true;
+  assert.notEqual(api.mapDocContentKey(model), before, "격자를 켜면 저장 안 됨(●) 이 켜진다");
+  const again = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(again.grid, true);
+  assert.equal(again.version, api.MAP_DOC_VERSION);
+});
+
+test("표시 목록의 묶음 이름은 꼬리표를 사람 말로 바꾼다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapSourceLabel(""), "직접 찍은 표시");
+  assert.equal(api.mapSourceLabel("nearby"), "주변 시설");
+  assert.equal(api.mapSourceLabel("unknown"), "unknown");   // 모르는 꼬리표도 묶음은 갈라 준다
+});
+
+/* 축척·방위·격자는 화면 장식이 아니라 인쇄물에 남아야 하는 것이다. Leaflet 컨트롤 칸은 캡처
+   직전에 통째로 감추므로(확대 단추가 그림에 박히지 않게) 그 안에 두면 그림에서 사라진다. */
+test("축척·방위표는 컨트롤 칸이 아니라 지도 칸에 붙어 캡처에 남는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /legend\.className = "map-legend"/);
+  assert.match(source, /stage\.appendChild\(legend\)/);
+  const hidden = /const MAP_CAPTURE_HIDDEN_PANES = \[(.*?)\];/.exec(source);
+  assert.ok(hidden);
+  assert.doesNotMatch(hidden[1], /map-legend|map-grid/);
+  // 격자는 배경 위·도형 아래(overlayPane 400) 라야 거리선과 영역을 가리지 않는다.
+  assert.match(source, /createPane\("mapGridPane"\)/);
+  assert.match(source, /gridPane\.style\.zIndex = "350"/);
+  assert.doesNotMatch(source, /L\.control\.scale/);   // Leaflet 컨트롤은 캡처에서 감춰지므로 쓰지 않는다
+});
+
+test("목록에서 감춘 묶음은 지도에서도 그림에서도 함께 빠진다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const visibility = /const applyMarkerVisibility = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(visibility);
+  assert.match(visibility[1], /map\.hasLayer\(layer\)/);
+  // 화면에 없는 표시의 이름만 그림에 새겨지면 읽을 수 없다.
+  assert.match(source, /model\.markers\.filter\(m => m\.label && markerVisible\(m\)\)/);
+  // 감춰 둔 묶음에 새 표시를 찍으면 눌러도 아무 일이 없는 것처럼 보인다.
+  assert.match(source, /hiddenSources\.delete\(marker\.source \|\| ""\)/);
+  // 목록은 내용이 바뀌는 길 한 곳(touch)에서만 다시 그린다 — 빠뜨리는 길이 생기지 않게.
+  const touch = /const touch = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.match(touch[1], /scheduleListRefresh\(\)/);
+});
+
+/* 화면을 그대로 인쇄하면 도구막대·목록만 찍히고 지도 칸은 빈 종이가 된다(화이트보드·악보와 같다). */
+test("지도 인쇄는 캡처한 그림 한 장을 찍고 머리글 인쇄 단추도 그 길로 온다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const print = /const printMap = async \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(print);
+  assert.match(print[1], /await captureMapPng\(\)/);
+  assert.match(print[1], /classList\.add\("map-printing"\)/);
+  assert.match(print[1], /image\.onload = resolve/);        // 다 그려지기 전에 찍으면 빈 종이
+  assert.match(print[1], /removeEventListener\("afterprint", cleanup\)/);
+  assert.match(source, /doc\.printMap = printMap/);
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  assert.match(app, /state\.kind === "map" && typeof state\.printMap === "function"/);
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.match(css, /body\.map-printing>\*\{display:none!important\}/);
+  assert.match(css, /body\.map-printing>\.map-print\{display:block!important\}/);
+  // 탭을 닫으면 머리글 단추가 사라진 지도를 계속 부르지 않게 고리를 끊는다.
+  const cleanups = mapCleanupBodies(source).join("\n");
+  assert.match(cleanups, /doc\.printMap = null/);
+  assert.match(cleanups, /clearTimeout\(listTimer\)/);
+});
+
+/* ===== 표시 사진 · 발표 모드 · 지도 문제 (2026-08-18) ===== */
+
+test("표시 사진은 data URL 만 받고 한 장·전체 크기를 눌러 담는다", () => {
+  const api = loadMapViewer();
+  const small = "data:image/jpeg;base64," + "A".repeat(100);
+  const marker = api.mapNormalizeMarker({ lat:37, lng:127, photo:{ name:"답사.jpg", dataUrl:small, width:800, height:600 } });
+  assert.equal(marker.photo.dataUrl, small);
+  assert.equal(marker.photo.width, 800);
+  // 바깥 주소는 받지 않는다 — 인터넷이 없으면 빈 칸이 되고, 남의 서버로 요청이 나간다.
+  assert.equal(api.mapNormalizeMarker({ lat:37, lng:127, photo:{ dataUrl:"https://example.com/a.jpg" } }).photo, null);
+  // 한 장 상한을 넘는 사진은 통째로 버린다(반쯤 담긴 지도를 만들지 않는다).
+  const huge = "data:image/jpeg;base64," + "A".repeat(api.MAP_PHOTO_MAX_DATA_CHARS);
+  assert.equal(api.mapNormalizeMarker({ lat:37, lng:127, photo:{ dataUrl:huge } }).photo, null);
+  // 옛 .map 의 표시에는 사진 칸이 없다 — null 로 시작한다.
+  assert.equal(api.mapNormalizeMarker({ lat:37, lng:127 }).photo, null);
+  assert.equal(api.mapPhotoTotalChars([
+    { photo:{ dataUrl:small } }, { photo:null }, {}, { photo:{ dataUrl:small } }
+  ]), small.length * 2);
+});
+
+test("사진은 .map 에 함께 저장되고 저장 안 됨(●) 판정에도 들어간다", () => {
+  const api = loadMapViewer();
+  const model = api.mapDocEmpty("답사 지도");
+  model.markers.push(api.mapNormalizeMarker({ lat:37.5, lng:127, label:"운동장" }));
+  const before = api.mapDocContentKey(model);
+  model.markers[0].photo = { name:"a.jpg", dataUrl:"data:image/jpeg;base64,AAAA", width:10, height:10 };
+  assert.notEqual(api.mapDocContentKey(model), before);
+  const again = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(again.markers[0].photo.dataUrl, "data:image/jpeg;base64,AAAA");
+  assert.equal(again.version, api.MAP_DOC_VERSION);
+});
+
+/* 발표 순서를 새 필드로 두지 않은 까닭 — 순서는 이미 저장되는 표시 배열 그 자체다. 목록의 ▲▼가
+   배열을 바꾸고, 발표는 그 배열을 그대로 훑는다(화면마다 따로 노는 순서를 만들지 않는다). */
+test("발표 모드는 표시 배열 순서를 그대로 돌고 감춘 묶음은 뺀다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /const presentList = \(\) => model\.markers\.filter\(markerVisible\)/);
+  assert.doesNotMatch(source, /marker\.step|questionOrder/);          // 순서 전용 필드를 만들지 않았다
+  // 목록의 ▲▼ 는 "지금 보이는 줄"의 앞뒤와 자리를 바꾼다(걸러 놓은 목록에서도 눈에 보이는 대로).
+  const move = /const moveBy = \(delta\) => \{([\s\S]*?)\n      \};/.exec(source);
+  assert.ok(move);
+  assert.match(move[1], /matched\.indexOf\(marker\)/);
+  assert.match(move[1], /model\.markers\[from\] = neighbour/);
+  assert.match(move[1], /touch\(\)/);
+  // 발표 카드는 지도 칸 바깥에 얹는다 — 안에 두면 칠판·PNG 캡처에 카드가 통째로 찍힌다.
+  assert.match(source, /body\.append\(stage, listPanel, present\)/);
+  // 발표는 보기만 하는 일이라, 끝내면 보던 자리로 돌려놓는다.
+  assert.match(source, /if \(presentReturn\) map\.setView\(presentReturn\.center, presentReturn\.zoom\)/);
+});
+
+test("지도 문제 학생 화면은 편집 도구를 감추고 답을 문서에 적지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  // 문제 파일의 지도만 가져오고 정답 표시는 학생 지도에 넣지 않는다.
+  const opener = /function openMapTaskDoc\(task, hash, opts = \{\}\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(opener);
+  assert.match(opener[1], /markers: \[\],/);
+  assert.match(opener[1], /answers: new Map\(\)/);
+  // 학생 화면에서는 도구막대·목록·우클릭 메뉴를 내놓지 않는다(답 찍기와 섞이고 정답을 적게 된다).
+  assert.match(source, /bar\.hidden = true;\s+\/\/ 편집 도구는 문제 풀이 화면에 내놓지 않는다/);
+  assert.match(source, /if \(doc\.mapTaskCtx\) return;/);
+  // 답은 model.markers 가 아니라 ctx.answers 에만 쌓인다.
+  assert.match(source, /ctx\.answers\.set\(question\.id, point\)/);
+  assert.doesNotMatch(source, /model\.markers\.push\(.*answer/i);
+  // 채점·제출은 과제 패키지가 맡는다 — 없으면 눌러도 안 되는 단추를 만들지 않는다.
+  assert.match(source, /typeof mapTaskGrade !== "function"/);
+  assert.match(source, /typeof exportMapTaskSubmission !== "function"/);
+  assert.match(source, /if \(typeof openMapTaskBuilder === "function"\)/);
 });

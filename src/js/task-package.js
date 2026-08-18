@@ -85,6 +85,86 @@ function taskSafeFileToken(value, fallback){
   return (cleaned || fallback || "과제").slice(0, 60);
 }
 
+/* ===== 지도 문제(kind:"map") =====
+   같은 .task 봉투에 파이썬 과제 대신 "여기가 어디?" 위치 찾기 문제를 담는다. 배포·제출·검수
+   배관(파일 형식·seal·일괄 검수·성적 CSV)을 그대로 쓰고, 채점만 코드 실행이 아니라 거리 계산이다.
+
+   task.kind === "map" 이면 tests·starter 대신 map 이 있다:
+     map: { basemap, center:[lat,lng], zoom, grid, backgroundImage, questions:[{id,prompt,lat,lng,toleranceM}] }
+   정답 좌표가 파일 안에 있다는 것은 숨김 테스트와 같은 정직한 한계다(파일을 열면 보인다).
+   기준은 선생님이 원본 .task 로 다시 채점하는 것. */
+const TASK_MAP_MAX_QUESTIONS = 30;
+const TASK_MAP_MIN_TOLERANCE = 10;          // 10m 보다 좁으면 지도에서 손으로 찍을 수 없다
+const TASK_MAP_MAX_TOLERANCE = 200000;      // 200km — 대륙·나라 찾기 문제까지
+const TASK_MAP_DEFAULT_TOLERANCE = 500;
+
+function taskMapNumber(value, fallback){
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+// 문제 하나. 좌표·허용 오차를 눌러 담아 손으로 고친 파일이 들어와도 채점이 깨지지 않게 한다.
+function normalizeMapQuestion(raw, index){
+  const value = raw && typeof raw === "object" ? raw : {};
+  const prompt = String(value.prompt == null ? "" : value.prompt).trim().slice(0, 200);
+  const lat = Math.min(85, Math.max(-85, taskMapNumber(value.lat, NaN)));
+  const lng = Math.min(180, Math.max(-180, taskMapNumber(value.lng, NaN)));
+  if (!prompt || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const tolerance = Math.round(Math.min(TASK_MAP_MAX_TOLERANCE, Math.max(TASK_MAP_MIN_TOLERANCE,
+    taskMapNumber(value.toleranceM, TASK_MAP_DEFAULT_TOLERANCE))));
+  const id = String(value.id || "").trim().slice(0, 40) || ("q" + (index + 1));
+  if (taskHasControlChars(id)) return null;
+  return { id, prompt, lat, lng, toleranceM: tolerance };
+}
+function normalizeMapTaskSpec(raw){
+  const value = raw && typeof raw === "object" ? raw : {};
+  const questions = [];
+  const usedIds = new Set();
+  const list = Array.isArray(value.questions) ? value.questions.slice(0, TASK_MAP_MAX_QUESTIONS) : [];
+  list.forEach((item, index) => {
+    const question = normalizeMapQuestion(item, index);
+    if (!question || usedIds.has(question.id)) return;
+    usedIds.add(question.id);
+    questions.push(question);
+  });
+  if (!questions.length) return null;
+  const center = Array.isArray(value.center) && value.center.length === 2
+    ? [taskMapNumber(value.center[0], 36.35), taskMapNumber(value.center[1], 127.85)] : [36.35, 127.85];
+  const zoom = Math.min(19, Math.max(1, Math.round(taskMapNumber(value.zoom, 7))));
+  // 배경 이미지는 지도 쪽 검증기가 있으면 그것으로 거른다(data URL 만·크기 상한). 없으면 버린다.
+  const backgroundImage = (typeof mapNormalizeBackgroundImage === "function")
+    ? mapNormalizeBackgroundImage(value.backgroundImage) : null;
+  return {
+    basemap: String(value.basemap || "osm").slice(0, 20),
+    center, zoom,
+    grid: value.grid === true,
+    backgroundImage,
+    questions
+  };
+}
+
+/* 채점 = 거리 재기. 코드 실행이 없으므로 학생 화면·단독 검수·일괄 검수가 모두 이 한 함수를 쓴다
+   (제출본이 신고한 점수와 선생님이 다시 낸 점수가 어긋날 여지를 만들지 않기 위해서다). */
+function mapTaskGrade(task, answers){
+  const questions = (task && task.map && Array.isArray(task.map.questions)) ? task.map.questions : [];
+  const byId = new Map();
+  for (const answer of Array.isArray(answers) ? answers : []){
+    if (answer && answer.id != null) byId.set(String(answer.id), answer);
+  }
+  const results = questions.map((question) => {
+    const answer = byId.get(String(question.id));
+    if (!answer || !Number.isFinite(Number(answer.lat)) || !Number.isFinite(Number(answer.lng))){
+      return { name: question.prompt, passed: false, actual: "답하지 않음", error: "" };
+    }
+    const meters = (typeof mapDistanceMeters === "function")
+      ? mapDistanceMeters([Number(answer.lat), Number(answer.lng)], [question.lat, question.lng]) : Infinity;
+    const passed = meters <= question.toleranceM;
+    const near = (typeof mapFormatDistance === "function") ? mapFormatDistance(meters) : Math.round(meters) + " m";
+    const allow = (typeof mapFormatDistance === "function") ? mapFormatDistance(question.toleranceM) : question.toleranceM + " m";
+    return { name: question.prompt, passed, actual: near + " (허용 " + allow + ")", error: "" };
+  });
+  return { passed: results.filter(row => row.passed).length, total: results.length, results, answers: [...byId.values()] };
+}
+
 // ----- 검증 -----
 function validateTaskPayload(task){
   if (!task || typeof task !== "object" || Array.isArray(task)) return taskValidationError("올바른 JSON 객체가 아니에요.");
@@ -96,6 +176,18 @@ function validateTaskPayload(task){
   if (!title || taskHasControlChars(title)) return taskValidationError("과제 제목이 없어요.");
   const md = String((task.problem && task.problem.md) || "");
   if (md.length > TASK_MAX_TEXT_CHARS) return taskValidationError("문제 설명이 너무 길어요.");
+  /* 지도 문제는 시작 코드도 채점 테스트도 없다 — 여기서 갈라 내지 않으면 "채점 테스트가 없어요"
+     로 막힌다. 나머지(제목·id·설명·seal)는 파이썬 과제와 똑같이 다룬다. */
+  if (task.kind === "map"){
+    const spec = normalizeMapTaskSpec(task.map);
+    if (!spec) return taskValidationError("지도 문제에 풀 문제가 없어요.");
+    return { ok:true, task: {
+      format: TASK_FORMAT, version: TASK_VERSION, id, kind: "map",
+      meta: { title, author: String((meta && meta.author) || "").trim().slice(0, 60), createdAt: String((meta && meta.createdAt) || "") },
+      problem: { md }, map: spec,
+      options: (task.options && typeof task.options === "object") ? { ...task.options } : {}
+    } };
+  }
   const starter = (task.starter && typeof task.starter === "object") ? task.starter : {};
   const rawName = String(starter.name || "main.py").replace(/\\/g, "/").split("/").pop();
   const starterName = (taskSafeRelPath(rawName) && /\.py$/i.test(rawName) && rawName.length <= 120) ? rawName : "main.py";
@@ -121,7 +213,7 @@ function validateTaskPayload(task){
     }
   }
   return { ok:true, task: {
-    format: TASK_FORMAT, version: TASK_VERSION, id,
+    format: TASK_FORMAT, version: TASK_VERSION, id, kind: "python",
     meta: { title, author: String((meta && meta.author) || "").trim().slice(0, 60), createdAt: String((meta && meta.createdAt) || "") },
     problem: { md }, starter: { name: starterName, code }, files, tests,
     options: (task.options && typeof task.options === "object") ? { ...task.options } : {}
@@ -162,6 +254,18 @@ function taskSiblingPairs(task){
 async function openTaskDoc(task, opts){
   opts = opts || {};
   const hash = await taskSha256Hex(taskCanonicalStringify(task));
+  /* 지도 문제는 코드 편집기가 아니라 지도 화면으로 연다. 문제 바·답 찍기는 지도 편집기가 맡고
+     (map-viewer.js), 여기서는 문제 파일과 해시만 넘긴다. */
+  if (task.kind === "map"){
+    if (typeof openMapTaskDoc !== "function"){
+      toast("이 버전에서는 지도 문제를 열 수 없어요.", 3200);
+      return null;
+    }
+    const mapDoc = openMapTaskDoc(task, hash, opts);
+    if (mapDoc && !opts.bulk && typeof setActiveDoc === "function") setActiveDoc(mapDoc.id);
+    toast('지도 문제 "' + task.meta.title + '"를 열었어요. 지도를 눌러 답하고 [✓ 채점] → [📤 제출본 내보내기]를 누르세요.', 4600);
+    return mapDoc;
+  }
   const { safeTitle, root, pyRel, starterFile, pairs } = taskSiblingPairs(task);
   const archiveCtx = (typeof makeFileSiblingCtx === "function") ? makeFileSiblingCtx(pairs, root) : null;
 
@@ -314,6 +418,44 @@ async function exportTaskSubmission(ctx, student, grade){
   // seal 은 위·변조 '방지'가 아니라 파일 손상·단순 수기 수정 '감지'용 — 진짜 검증은 선생님 쪽 재채점.
   submission.seal = await taskSha256Hex(taskCanonicalStringify(submission));
   const outName = taskSafeFileToken(ctx.task.meta.title, "과제") + "_" + taskSafeFileToken(student, "학생") + ".taskdone";
+  await saveTaskJsonUnified(JSON.stringify(submission, null, 1), outName, "제출본");
+}
+
+/* 지도 문제 제출본. 파이썬 제출본과 같은 봉투를 쓰되 코드 대신 학생이 찍은 좌표가 들어간다 —
+   결과 줄(results)의 모양이 같아서 단독·일괄 검수 화면이 그대로 읽는다. */
+async function exportMapTaskSubmission(ctx, grade){
+  if (!ctx || !ctx.task) return;
+  let studentName = "";
+  try { studentName = localStorage.getItem("mn.studentName") || ""; } catch(_){}
+  const entered = await askText({
+    title: "제출본 내보내기", message: "학생 이름(번호+이름 권장)을 입력하세요.",
+    placeholder: "예: 12 홍길동", value: studentName, okText: "내보내기"
+  });
+  if (entered === null) return;
+  const student = String(entered).trim().slice(0, 60);
+  if (!student){ toast("이름을 입력해야 제출본을 만들 수 있어요.", 2600); return; }
+  try { localStorage.setItem("mn.studentName", student); } catch(_){}
+
+  const clip = (v, n) => String(v == null ? "" : v).slice(0, n);
+  const submission = {
+    format: TASK_RESULT_FORMAT, version: TASK_VERSION, kind: "map",
+    taskId: ctx.task.id, taskTitle: ctx.task.meta.title, taskHash: ctx.hash || "",
+    student,
+    code: "",
+    answers: (grade.answers || []).slice(0, TASK_MAP_MAX_QUESTIONS).map(answer => ({
+      id: clip(answer.id, 40), lat: Number(Number(answer.lat).toFixed(6)), lng: Number(Number(answer.lng).toFixed(6))
+    })),
+    grade: {
+      passed: Number(grade.passed) || 0, total: Number(grade.total) || 0,
+      results: (grade.results || []).slice(0, TASK_MAP_MAX_QUESTIONS).map(row => ({
+        name: clip(row.name, 120), passed: !!row.passed, actual: clip(row.actual, 2000), error: clip(row.error, 2000)
+      }))
+    },
+    gradedWith: "map-distance",
+    submittedAt: new Date().toISOString()
+  };
+  submission.seal = await taskSha256Hex(taskCanonicalStringify(submission));
+  const outName = taskSafeFileToken(ctx.task.meta.title, "지도문제") + "_" + taskSafeFileToken(student, "학생") + ".taskdone";
   await saveTaskJsonUnified(JSON.stringify(submission, null, 1), outName, "제출본");
 }
 
@@ -519,6 +661,143 @@ function openTaskBuilderModal(seed){
   setTimeout(() => { try { titleInput.focus(); } catch(_){} }, 0);
 }
 
+/* ----- 지도 문제 만들기 (선생님: 지도 도구막대의 '🎯 지도 문제') -----
+   지금 지도의 표시가 곧 문제 목록이 된다 — 답사 지도를 만들어 두면 그 자리에서 문제지가 나온다.
+   문제 글은 표시 이름을 기본값으로 두되 고칠 수 있게 한다("경복궁" → "조선의 법궁은 어디일까요?"). */
+const TASK_MAP_TOLERANCE_CHOICES = [100, 300, 500, 1000, 2000, 5000];
+
+function openMapTaskBuilder(model){
+  const markers = (model && Array.isArray(model.markers) ? model.markers : []).filter(m => String(m.label || "").trim());
+  if (!markers.length){
+    toast("먼저 이름이 있는 표시를 찍어 주세요 — 표시 하나가 문제 하나가 됩니다.", 3600);
+    return;
+  }
+  const taskId = taskRandomId();
+  const modal = document.createElement("div"); modal.className = "modal task-builder-modal";
+  const card = document.createElement("div"); card.className = "modal-card";
+  const title = document.createElement("h3"); title.textContent = "지도 문제 만들기 (.task)";
+  const sub = document.createElement("p"); sub.className = "sub";
+  sub.textContent = "표시 하나가 '여기가 어디?' 문제 하나가 됩니다. 학생은 지도를 눌러 답하고, 정답 자리에서 허용 오차 안이면 맞은 것으로 채점합니다. 학생 화면에는 표시가 보이지 않습니다.";
+
+  const body = document.createElement("div"); body.className = "task-builder-body";
+  const field = (labelText, el) => {
+    const wrap = document.createElement("label"); wrap.className = "task-builder-field";
+    const cap = document.createElement("span"); cap.textContent = labelText;
+    wrap.append(cap, el); return wrap;
+  };
+  const titleInput = document.createElement("input"); titleInput.type = "text"; titleInput.maxLength = 120;
+  titleInput.placeholder = "예: 우리 지역 문화재 찾기";
+  titleInput.value = String((model && model.title) || "").trim();
+  const authorInput = document.createElement("input"); authorInput.type = "text"; authorInput.maxLength = 60;
+  authorInput.placeholder = "예: 김선생";
+  try { authorInput.value = localStorage.getItem("mn.taskAuthor") || ""; } catch(_){}
+  const introArea = document.createElement("textarea"); introArea.rows = 3; introArea.spellcheck = false;
+  introArea.placeholder = "학생에게 보여 줄 안내(선택) — 문제를 열 때 알림으로 뜹니다.";
+
+  const toleranceSelect = document.createElement("select");
+  for (const meters of TASK_MAP_TOLERANCE_CHOICES){
+    const option = document.createElement("option");
+    option.value = String(meters);
+    option.textContent = (typeof mapFormatDistance === "function") ? mapFormatDistance(meters) : meters + " m";
+    toleranceSelect.appendChild(option);
+  }
+  toleranceSelect.value = String(TASK_MAP_DEFAULT_TOLERANCE);
+
+  // 문제 목록 — 체크로 고르고, 글은 그 자리에서 고친다.
+  const listBox = document.createElement("div"); listBox.className = "task-builder-tests";
+  const rows = markers.map((marker, index) => {
+    const row = document.createElement("div"); row.className = "task-builder-test-row";
+    const check = document.createElement("input"); check.type = "checkbox"; check.checked = true;
+    const number = document.createElement("span"); number.className = "task-builder-test-tag"; number.textContent = String(index + 1);
+    const prompt = document.createElement("input"); prompt.type = "text"; prompt.maxLength = 200;
+    prompt.className = "task-builder-test-name"; prompt.value = String(marker.label || "").slice(0, 200);
+    row.append(check, number, prompt); listBox.appendChild(row);
+    return { marker, check, prompt };
+  });
+
+  const includeImage = document.createElement("input"); includeImage.type = "checkbox"; includeImage.checked = true;
+  const imageField = field("내 지도 이미지도 함께 담기(학교 배치도 등)", includeImage);
+  imageField.classList.add("task-builder-inline");
+  imageField.hidden = !(model && model.backgroundImage);
+
+  body.append(
+    field("문제 제목", titleInput),
+    field("출제자(선택)", authorInput),
+    field("안내(선택)", introArea),
+    field("허용 오차 — 정답 자리에서 이만큼 안이면 정답", toleranceSelect)
+  );
+  const listCap = document.createElement("div"); listCap.className = "task-builder-field";
+  const listLabel = document.createElement("span");
+  listLabel.textContent = "문제로 낼 표시 " + markers.length + "개 — 체크를 풀면 빠지고, 글은 고칠 수 있어요 (최대 " + TASK_MAP_MAX_QUESTIONS + "개)";
+  listCap.append(listLabel, listBox); body.appendChild(listCap);
+  body.appendChild(imageField);
+
+  const buildTask = () => {
+    const titleValue = titleInput.value.trim().slice(0, 120);
+    if (!titleValue){ toast("문제 제목을 입력하세요.", 2400); titleInput.focus(); return null; }
+    const author = authorInput.value.trim().slice(0, 60);
+    try { localStorage.setItem("mn.taskAuthor", author); } catch(_){}
+    const tolerance = Number(toleranceSelect.value) || TASK_MAP_DEFAULT_TOLERANCE;
+    const questions = rows.filter(row => row.check.checked).slice(0, TASK_MAP_MAX_QUESTIONS).map((row, index) => ({
+      id: "q" + (index + 1),
+      prompt: row.prompt.value.trim().slice(0, 200) || row.marker.label,
+      lat: row.marker.lat, lng: row.marker.lng, toleranceM: tolerance
+    }));
+    if (!questions.length){ toast("문제로 낼 표시를 하나 이상 골라 주세요.", 2600); return null; }
+    const built = {
+      format: TASK_FORMAT, version: TASK_VERSION, id: taskId, kind: "map",
+      meta: { title: titleValue, author, createdAt: new Date().toISOString() },
+      problem: { md: introArea.value.slice(0, TASK_MAX_TEXT_CHARS) },
+      map: {
+        basemap: model.basemap, center: model.center, zoom: model.zoom, grid: !!model.grid,
+        // 배경 이미지는 문제 파일이 그만큼 커진다 — 학교 배치도처럼 꼭 필요할 때만 담는다.
+        backgroundImage: (includeImage.checked && model.backgroundImage) ? model.backgroundImage : null,
+        questions
+      },
+      options: {}
+    };
+    const checked = validateTaskPayload(built);
+    if (!checked.ok){ toast("지도 문제를 만들지 못했어요: " + checked.message, 3400); return null; }
+    return checked.task;
+  };
+
+  const actions = document.createElement("div"); actions.className = "modal-actions";
+  const previewBtn = document.createElement("button"); previewBtn.type = "button"; previewBtn.className = "btn";
+  previewBtn.textContent = "👀 학생 화면 미리보기";
+  previewBtn.title = "만든 문제를 학생이 여는 그대로 새 탭에서 열어보기";
+  const spacer = document.createElement("div"); spacer.className = "spacer";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "btn"; cancel.textContent = "닫기";
+  const exportBtn = document.createElement("button"); exportBtn.type = "button"; exportBtn.className = "btn primary";
+  exportBtn.textContent = "📦 .task 내보내기";
+
+  const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault(); e.stopPropagation(); close();
+  };
+  cancel.addEventListener("click", close);
+  previewBtn.addEventListener("click", async () => {
+    const task = buildTask(); if (!task) return;
+    close();
+    await openTaskDoc(task, {});
+  });
+  exportBtn.addEventListener("click", async () => {
+    const task = buildTask(); if (!task) return;
+    exportBtn.disabled = true;
+    try { await saveTaskJsonUnified(JSON.stringify(task, null, 1), taskSafeFileToken(task.meta.title, "지도문제") + ".task", "지도 문제"); }
+    finally { exportBtn.disabled = false; }
+    close();
+  });
+
+  actions.append(previewBtn, spacer, cancel, exportBtn);
+  card.append(title, sub, body, actions); modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+  window.addEventListener("keydown", onKey, true);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(card);
+  setTimeout(() => { try { titleInput.focus(); } catch(_){} }, 0);
+}
+
 /* ===== Phase 2: 제출본(.taskdone) 검수 — 열기 · seal 검사 · 원본 과제로 재채점 ===== */
 
 function validateTaskSubmissionPayload(sub){
@@ -537,8 +816,15 @@ function validateTaskSubmissionPayload(sub){
     actual: String((row && row.actual) || "").slice(0, 2000),
     error: String((row && row.error) || "").slice(0, 2000)
   })) : [];
+  /* 지도 문제 제출본은 코드 대신 좌표를 들고 온다. 여기서 함께 정규화하지 않으면 검수 화면이
+     학생이 어디를 찍었는지 알 수 없고, 재채점도 할 수 없다(정답은 원본 .task 에만 있다). */
+  const kind = sub.kind === "map" ? "map" : "python";
+  const answers = Array.isArray(sub.answers) ? sub.answers.slice(0, TASK_MAP_MAX_QUESTIONS).map((row) => ({
+    id: String((row && row.id) || "").slice(0, 40),
+    lat: Number(row && row.lat), lng: Number(row && row.lng)
+  })).filter(row => row.id && Number.isFinite(row.lat) && Number.isFinite(row.lng)) : [];
   return { ok:true, submission: {
-    format: TASK_RESULT_FORMAT, version: TASK_VERSION,
+    format: TASK_RESULT_FORMAT, version: TASK_VERSION, kind, answers,
     taskId: String(sub.taskId || "").slice(0, 64), taskTitle: String(sub.taskTitle || "").slice(0, 120),
     taskHash: String(sub.taskHash || "").slice(0, 64),
     student, code,
@@ -661,6 +947,8 @@ function renderTaskSubmissionView(doc, host, sub, sealState){
   regradeBtn.textContent = "🔁 재채점"; regradeBtn.title = "제출 코드를 원본 과제의 테스트로 이 컴퓨터에서 다시 채점";
   const diffBtn = document.createElement("button"); diffBtn.type = "button"; diffBtn.className = "btn";
   diffBtn.textContent = "🔀 시작 코드와 비교"; diffBtn.title = "학생이 과제 시작 코드에서 무엇을 바꿨는지 나란히 비교해 보기";
+  diffBtn.hidden = sub.kind === "map";      // 지도 문제에는 견줄 시작 코드가 없다
+  if (sub.kind === "map") regradeBtn.title = "제출한 좌표를 원본 문제의 정답·허용 오차로 다시 채점";
   const compareEl = document.createElement("div"); compareEl.className = "task-review-compare"; compareEl.hidden = true;
   matchBox.append(matchMsg, openTaskBtn, refreshBtn, diffBtn, regradeBtn);
   wrap.appendChild(matchBox);
@@ -722,9 +1010,64 @@ function renderTaskSubmissionView(doc, host, sub, sealState){
   regradeSection.appendChild(fakeBtn);
   const ui = { btn: fakeBtn, status: statusEl, outPanel, split: regradeSection, fileBase: "main.py" };
 
+  // 지도 문제 재채점은 거리 계산이라 실행기가 필요 없다 — 결과 줄까지 그 자리에서 그린다.
+  const mapAnswerBox = document.createElement("div"); mapAnswerBox.className = "task-review-mapanswers";
+  mapAnswerBox.hidden = sub.kind !== "map";
+  wrap.appendChild(mapAnswerBox);
+  const renderMapAnswers = (ctx, grade) => {
+    mapAnswerBox.innerHTML = "";
+    if (sub.kind !== "map") return;
+    const questions = (ctx && ctx.task && ctx.task.map && ctx.task.map.questions) || [];
+    const answerById = new Map(sub.answers.map(answer => [answer.id, answer]));
+    const head = document.createElement("h4"); head.textContent = "학생이 찍은 답";
+    mapAnswerBox.appendChild(head);
+    const rows = questions.length
+      ? questions.map((question, index) => ({
+          label: (index + 1) + ". " + question.prompt,
+          answer: answerById.get(question.id) || null,
+          result: grade ? grade.results[index] : null
+        }))
+      // 원본 문제가 열려 있지 않으면 문제 글은 알 수 없다 — 좌표와 제출본이 신고한 줄만 보여 준다.
+      : sub.answers.map((answer, index) => ({
+          label: (index + 1) + ". " + (sub.grade.results[index] ? sub.grade.results[index].name : answer.id),
+          answer, result: sub.grade.results[index] || null
+        }));
+    for (const row of rows){
+      const item = document.createElement("div");
+      item.className = "task-review-reported-row " + (row.result ? (row.result.passed ? "is-pass" : "is-fail") : "");
+      const mark = document.createElement("span"); mark.className = "py-grade-result-mark";
+      mark.textContent = row.result ? (row.result.passed ? "정답" : "오답") : "—";
+      const name = document.createElement("span"); name.textContent = row.label;
+      const where = document.createElement("code"); where.className = "task-review-reported-err";
+      where.textContent = row.answer
+        ? row.answer.lat.toFixed(5) + ", " + row.answer.lng.toFixed(5) + (row.result ? " · " + row.result.actual : "")
+        : "답하지 않음";
+      item.append(mark, name, where);
+      mapAnswerBox.appendChild(item);
+    }
+  };
+  renderMapAnswers(null, null);
+
   regradeBtn.addEventListener("click", async () => {
     const ctx = refreshMatch();
     if (!ctx || ui.running) return;
+    if (sub.kind === "map" || ctx.task.kind === "map"){
+      if (ctx.task.kind !== "map" || sub.kind !== "map"){
+        statusEl.textContent = "제출본과 과제의 종류가 서로 달라요(지도 문제 ↔ 파이썬 과제).";
+        return;
+      }
+      const res = mapTaskGrade(ctx.task, sub.answers);
+      const same = res.passed === sub.grade.passed && res.total === sub.grade.total;
+      compareEl.hidden = false;
+      compareEl.classList.toggle("is-pass", same);
+      compareEl.classList.toggle("is-fail", !same);
+      compareEl.textContent = same
+        ? "✓ 재채점 결과가 제출본의 점수와 일치해요 (" + res.passed + "/" + res.total + ")"
+        : "⚠ 점수 불일치 — 제출본 " + sub.grade.passed + "/" + sub.grade.total + " · 재채점 " + res.passed + "/" + res.total + " (제출본 수정 또는 문제 버전 차이 가능)";
+      statusEl.textContent = "재채점 완료 · 거리로 채점했어요.";
+      renderMapAnswers(ctx, res);
+      return;
+    }
     const parts = taskSiblingPairs(ctx.task);
     ui.fileBase = ctx.task.starter.name;
     outPanel.hidden = false;
@@ -755,8 +1098,9 @@ function renderTaskSubmissionView(doc, host, sub, sealState){
     }
   });
 
-  // 제출 코드(읽기 전용) + 새 탭으로 열기
+  // 제출 코드(읽기 전용) + 새 탭으로 열기 — 지도 문제에는 코드가 없다(위의 답 목록이 그 자리다).
   const codeBox = document.createElement("details"); codeBox.className = "task-review-code"; codeBox.open = true;
+  codeBox.hidden = sub.kind === "map";
   const codeSummary = document.createElement("summary");
   const lineCount = sub.code ? sub.code.split("\n").length : 0;
   codeSummary.textContent = "제출 코드 (" + lineCount + "줄)";
@@ -965,6 +1309,17 @@ function renderTaskBatchView(doc, host){
         const ctx = findOpenTaskCtx(row.sub.taskId, row.sub.taskHash);
         if (!ctx){ row.regrade = null; row.note = "과제 안 열림"; renderRows(); continue; }
         statusLine.textContent = (i + 1) + "/" + state.rows.length + " 재채점 중: " + row.sub.student;
+        /* 지도 문제는 거리 계산이라 실행기를 돌리지 않는다 — 반 전체를 한 번에 다시 채점해도
+           파이썬 과제처럼 오래 걸리지 않는다. */
+        if (ctx.task.kind === "map"){
+          if (row.sub.kind !== "map"){ row.regrade = null; row.note = "종류 불일치"; renderRows(); continue; }
+          const res = mapTaskGrade(ctx.task, row.sub.answers);
+          row.regrade = { passed: res.passed, total: res.total };
+          row.note = "";
+          row.hashWarn = !!(ctx.hash && row.sub.taskHash && ctx.hash !== row.sub.taskHash);
+          renderRows();
+          continue;
+        }
         const parts = taskSiblingPairs(ctx.task);
         ui.fileBase = ctx.task.starter.name;
         const visibleTests = ctx.task.tests.map(t => ({ name: t.name, input: t.input, expected: t.expected }));
