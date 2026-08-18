@@ -70,6 +70,35 @@ function mapRememberAutoAddress(on){
   try { localStorage.setItem(MAP_AUTO_ADDRESS_KEY, on ? "1" : "0"); } catch(_){}
 }
 
+/* 최근 검색어 — 검색란을 누르면 아래로 펼친다. 같은 사람이 같은 곳을 되찾는 습관이므로 .map 파일이
+   아니라 이 브라우저에 남긴다(문서를 나눠 줘도 남의 검색어가 따라가지 않는다). */
+const MAP_SEARCH_HISTORY_KEY = "mn.mapSearchHistory";
+const MAP_SEARCH_HISTORY_MAX = 8;
+function mapSearchHistory(){
+  try {
+    const saved = JSON.parse(localStorage.getItem(MAP_SEARCH_HISTORY_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+    return saved.map(item => String(item || "").trim()).filter(Boolean).slice(0, MAP_SEARCH_HISTORY_MAX);
+  } catch(_){ return []; }
+}
+function mapWriteSearchHistory(list){
+  try { localStorage.setItem(MAP_SEARCH_HISTORY_KEY, JSON.stringify(list)); } catch(_){}
+  return list;
+}
+// 찾았던 말을 또 찾으면 줄을 늘리지 않고 맨 위로만 올린다(대소문자·앞뒤 공백은 같은 말로 본다).
+function mapRememberSearch(text){
+  const value = String(text || "").trim();
+  if (!value) return mapSearchHistory();
+  const key = value.toLowerCase();
+  return mapWriteSearchHistory(
+    [value, ...mapSearchHistory().filter(item => item.toLowerCase() !== key)].slice(0, MAP_SEARCH_HISTORY_MAX));
+}
+function mapForgetSearch(text){
+  const key = String(text || "").trim().toLowerCase();
+  return mapWriteSearchHistory(mapSearchHistory().filter(item => item.toLowerCase() !== key));
+}
+function mapClearSearchHistory(){ return mapWriteSearchHistory([]); }
+
 // 프록시로 받던 타일이 계속 실패하면(옛 exe 등) 조용히 직접 주소로 되돌린다.
 const MAP_PROXY_FAIL_LIMIT = 6;
 // 남한 전체가 한 화면에 들어오는 자리 — 새 지도의 기본값.
@@ -101,6 +130,20 @@ function mapMarkerId(){
 function mapShapeId(){
   return "sh-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
 }
+/* 한 번에 넣은 표시·도형을 한 묶음으로 묶는 번호. '주변 시설'처럼 수십 개가 한꺼번에 들어오는
+   길에 붙여 두면 그 묶음만 골라 되돌리거나 지울 수 있다. */
+function mapBatchId(){
+  return "bt-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+}
+// 꼬리표는 우리가 붙이는 짧은 슬러그만 받아들인다(손으로 고친 .map 이 들어와도 안전하게).
+function mapNormalizeSource(value){
+  const text = String(value == null ? "" : value).trim().toLowerCase();
+  return /^[a-z]{1,12}$/.test(text) ? text : "";
+}
+function mapNormalizeBatch(value){
+  const text = String(value == null ? "" : value).trim();
+  return /^[A-Za-z0-9_-]{1,40}$/.test(text) ? text : "";
+}
 function mapColorHex(id){
   const found = MAP_MARKER_COLORS.find(c => c.id === id);
   return found ? found.hex : MAP_MARKER_COLORS[0].hex;
@@ -126,7 +169,11 @@ function mapNormalizeMarker(raw){
     color: colorId,
     // 행정구역(시도·시군구)은 '지역 통계'가 채워 넣는다. 옛 .map 에는 없으므로 늘 빈 문자열로 시작한다.
     region: String(value.region == null ? "" : value.region).slice(0, 40),
-    district: String(value.district == null ? "" : value.district).slice(0, 40)
+    district: String(value.district == null ? "" : value.district).slice(0, 40),
+    /* 어디서 한꺼번에 들어온 표시인지(주변 시설 등)와 그때의 묶음 번호. 손으로 찍은 표시는 늘
+       빈 값이라, '주변 시설로 넣은 것만 지우기'가 직접 찍은 표시를 건드리지 않는다. */
+    source: mapNormalizeSource(value.source),
+    batch: mapNormalizeBatch(value.batch)
   };
 }
 function mapNormalizePoint(raw){
@@ -142,7 +189,10 @@ function mapNormalizeShape(raw){
     type,
     points,
     label: String(value.label == null ? "" : value.label).slice(0, 120),
-    color: /^#[0-9a-f]{6}$/i.test(String(value.color || "")) ? String(value.color).toLowerCase() : (type === "area" ? "#16a34a" : "#2563eb")
+    color: /^#[0-9a-f]{6}$/i.test(String(value.color || "")) ? String(value.color).toLowerCase() : (type === "area" ? "#16a34a" : "#2563eb"),
+    // 표시와 같은 꼬리표 — 주변 시설의 반경 원도 그 묶음과 함께 지워지도록.
+    source: mapNormalizeSource(value.source),
+    batch: mapNormalizeBatch(value.batch)
   };
 }
 function mapNormalizeBackgroundImage(raw){
@@ -665,7 +715,7 @@ function mapSearchLocationMover(map){
   pane.classList.add("map-search-location-pane");
   pane.style.zIndex = "650";
   let marker = null;
-  return (lat, lng, zoom, label) => {
+  const move = (lat, lng, zoom, label) => {
     map.setView([lat, lng], Math.max(map.getZoom(), zoom));
     if (!marker){
       marker = L.circleMarker([lat, lng], {
@@ -674,8 +724,19 @@ function mapSearchLocationMover(map){
       }).addTo(map);
     } else marker.setLatLng([lat, lng]);
     marker.unbindTooltip();
-    if (label) marker.bindTooltip(String(label), { pane:paneName, direction:"top", offset:[0,-8], opacity:.96 }).openTooltip();
+    /* permanent 가 아니면 Leaflet 이 지도 클릭(preclick)마다 말풍선을 스스로 닫는데, 점은 클릭을
+       받지 않으므로(interactive:false) 한 번 닫히면 다시 열 방법이 없다. 찾은 곳 이름은 계속
+       보이는 편이 쓸모 있으니 고정해 두고, 지우는 건 clear() — 화면에서는 Esc — 로만 한다. */
+    if (label) marker.bindTooltip(String(label), { pane:paneName, permanent:true, direction:"top", offset:[0,-8], opacity:.96 }).openTooltip();
   };
+  // 지운 게 있을 때만 true — 부르는 쪽이 Esc 를 먹었는지 판단할 수 있게.
+  move.clear = () => {
+    if (!marker) return false;
+    map.removeLayer(marker);
+    marker = null;
+    return true;
+  };
+  return move;
 }
 
 /* 인터넷이 끊기면 지도 칸 위에 남는 안내. navigator.onLine 이 확실히 false 면 즉시 알리고,
@@ -897,27 +958,88 @@ function mapFormatBytes(bytes){
 function mapAttachPlaceSearch(input, button, results, onMove, setNote){
   let items = [];
   let searching = false;
-  const closeResults = () => { results.innerHTML = ""; results.hidden = true; items = []; };
+  // 바깥을 눌러 목록을 닫기로 예약해 둔 것 — 다시 포커스가 돌아오면 취소한다.
+  let closeTimer = 0;
+  const cancelPendingClose = () => { clearTimeout(closeTimer); closeTimer = 0; };
+  /* 후보 목록과 최근 검색어가 같은 칸을 나눠 쓴다. 화살표 키가 훑을 줄을 그린 순서대로 모아 두고,
+     지금 짚은 줄만 is-current 로 표시한다(포커스는 입력칸에 그대로 둬야 계속 칠 수 있다). */
+  const options = [];
+  let active = -1;
+  // 목록을 다시 그릴 때마다 예약된 닫기를 취소한다 — 방금 그린 목록이 150ms 뒤에 사라지지 않게.
+  const resetList = () => {
+    cancelPendingClose();
+    results.innerHTML = ""; options.length = 0; active = -1; items = [];
+  };
+  const closeResults = () => { resetList(); results.hidden = true; };
+  const setActive = (index) => {
+    active = index;
+    options.forEach((option, i) => option.classList.toggle("is-current", i === index));
+    const current = options[index];
+    if (current && current.scrollIntoView) current.scrollIntoView({ block:"nearest" });
+  };
+  const moveActive = (step) => {
+    if (!options.length) return;
+    setActive(active < 0
+      ? (step > 0 ? 0 : options.length - 1)
+      : (active + step + options.length) % options.length);
+  };
+  const addOption = (label, className, onPick) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = className;
+    option.textContent = label;
+    option.title = label;
+    option.addEventListener("click", onPick);
+    options.push(option);
+    return option;
+  };
   const showResults = (places) => {
-    results.innerHTML = "";
+    resetList();
     items = places.slice(0, 5);
     for (const place of items){
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "map-result";
-      button.textContent = place.name;
-      button.title = place.name;
-      button.addEventListener("click", () => {
+      results.appendChild(addOption(place.name, "map-result", () => {
         closeResults();
         input.value = "";
         onMove(place.lat, place.lng, 15, place.name);
-      });
-      results.appendChild(button);
+      }));
     }
     results.hidden = !items.length;
     // 정확한 주소처럼 후보가 하나뿐인 검색뿐 아니라 여러 후보가 있을 때도 첫 결과를 즉시 보여 준다.
     // 목록은 그대로 남겨 사용자가 다른 후보를 고를 수 있게 한다.
     if (items.length) onMove(items[0].lat, items[0].lng, 15, items[0].name);
+  };
+
+  /* 검색란을 누르면(또는 글자를 지우면) 최근 검색어를 같은 자리에 펼친다. 치는 중에는 그 글자가
+     든 기록만 남겨, 다 지우지 않고도 예전에 찾던 말을 이어 쓸 수 있게 한다. */
+  const showHistory = () => {
+    const typed = input.value.trim().toLowerCase();
+    const history = mapSearchHistory().filter(item => !typed || item.toLowerCase().includes(typed));
+    resetList();
+    if (!history.length){ results.hidden = true; return; }
+    for (const query of history){
+      const row = document.createElement("div");
+      row.className = "map-result-row";
+      const option = addOption(query, "map-result is-history", () => {
+        input.value = query;
+        search();
+      });
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "map-result-x";
+      forget.textContent = "×";
+      forget.title = mapT("이 검색어 지우기");
+      forget.setAttribute("aria-label", mapT("이 검색어 지우기"));
+      // 한 줄만 지우는 것이므로 목록은 닫지 않고 그 자리에서 다시 그린다.
+      forget.addEventListener("click", () => { mapForgetSearch(query); input.focus(); showHistory(); });
+      row.append(option, forget);
+      results.appendChild(row);
+    }
+    results.appendChild(addOption(mapT("검색 기록 지우기"), "map-result is-clear", () => {
+      mapClearSearchHistory();
+      closeResults();
+      input.focus();
+    }));
+    results.hidden = false;
   };
 
   const search = async () => {
@@ -929,6 +1051,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       closeResults();
       input.value = "";
       setNote("");
+      mapRememberSearch(text);
       onMove(coords[0], coords[1], 14, text);
       return;
     }
@@ -940,6 +1063,8 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       const places = await mapGeocode(text);
       if (!places.length){ setNote(mapT("그런 이름의 장소를 찾지 못했어요.")); return; }
       setNote("");
+      // 찾아낸 말만 기록한다 — 오타로 헛친 말까지 남으면 목록이 금세 쓸모없어진다.
+      mapRememberSearch(text);
       showResults(places);
     } catch(error){
       setNote(mapT(error && error.message === "geocode-launcher-required"
@@ -957,20 +1082,36 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       closeResults();
       return;
     }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp"){
+      e.preventDefault(); e.stopPropagation();
+      if (results.hidden) showHistory();   // 닫혀 있으면 ↓ 로 최근 검색어를 펼치는 것부터
+      if (!results.hidden) moveActive(e.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
     if (e.key !== "Enter") return;
     e.preventDefault(); e.stopPropagation();
-    search();
+    // 화살표로 짚어 둔 줄이 있으면 그 줄을 고른 것으로 본다.
+    if (active >= 0 && options[active]) options[active].click();
+    else search();
   });
   button.addEventListener("click", () => {
     // 버튼을 누르며 입력칸이 blur 되어도 결과가 뜨자마자 닫히지 않게 검색 포커스를 돌려준다.
     input.focus();
     search();
   });
+  /* 최근 검색어는 칸을 누르거나 글자를 고칠 때마다 다시 추린다. 검색 결과가 떠 있는 동안에는
+     그 자리를 뺏지 않는다(고르려던 후보가 눈앞에서 사라지지 않게). */
+  const openHistory = () => { cancelPendingClose(); if (results.hidden) showHistory(); };
+  input.addEventListener("focus", openHistory);
+  input.addEventListener("click", openHistory);
+  input.addEventListener("input", () => { cancelPendingClose(); showHistory(); });
   // 바깥을 누르면 목록을 닫는다(지도를 조작하려던 클릭이 목록에 막히지 않게).
   input.addEventListener("blur", (e) => {
     // 입력칸 → 검색 버튼 이동은 바깥 클릭이 아니다. click 핸들러가 포커스를 되돌린다.
     if (e.relatedTarget === button) return;
-    setTimeout(closeResults, 150);
+    // 목록 안의 ✕ 를 누른 경우도 곧바로 포커스를 돌려주므로 그때는 이 예약을 취소한다.
+    cancelPendingClose();
+    closeTimer = setTimeout(closeResults, 150);
   });
   return closeResults;
 }
@@ -1602,6 +1743,11 @@ async function mountMapEditor(doc){
   const csvInput = document.createElement("input");
   csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
 
+  const clearItemsBtn = document.createElement("button");
+  clearItemsBtn.type = "button"; clearItemsBtn.className = "map-btn map-clear-items";
+  clearItemsBtn.textContent = "🧹 지우기";
+  clearItemsBtn.title = "표시·거리선·면적을 한꺼번에 지워요 — 주변 시설로 넣은 것만 골라 지울 수도 있어요";
+
   // 검색칸과 결과 목록은 한 덩어리로 묶는다(목록이 칸 바로 아래에 뜨도록).
   const searchWrap = document.createElement("div");
   searchWrap.className = "map-search";
@@ -1621,6 +1767,13 @@ async function mountMapEditor(doc){
   searchResults.hidden = true;
   searchWrap.append(gotoInput, searchBtn, searchResults);
 
+  const undoBtn = document.createElement("button");
+  undoBtn.type = "button"; undoBtn.className = "map-btn map-undo";
+  undoBtn.textContent = "↶"; undoBtn.title = "되돌리기 (Ctrl+Z)"; undoBtn.disabled = true;
+  const redoBtn = document.createElement("button");
+  redoBtn.type = "button"; redoBtn.className = "map-btn map-redo";
+  redoBtn.textContent = "↷"; redoBtn.title = "다시 실행 (Ctrl+Shift+Z)"; redoBtn.disabled = true;
+
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.className = "run-save map-save";     // .run-save → 전역 Ctrl+S 가 이 버튼을 클릭한다
@@ -1636,7 +1789,8 @@ async function mountMapEditor(doc){
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
   bar.append(titleInput, basemapSelect, addBtn, addressBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
-    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, boardBtn, searchWrap, saveBtn, coord, status);
+    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn, boardBtn, searchWrap,
+    undoBtn, redoBtn, saveBtn, coord, status);
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
@@ -1720,11 +1874,29 @@ async function mountMapEditor(doc){
   };
   applyBasemap();
 
+  /* ── 되돌리기 ──
+     내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
+     생기지 않게). 잇단 변경은 commitSoon 이 한 단계로 묶는다 — 이름을 타자할 때나 표시를 끌 때
+     글자·픽셀마다 단계가 쌓이지 않는다. 기록 자체는 아래(레이어 함수가 다 갖춰진 뒤)에서 만든다. */
+  let history = null;
+  // 주소 CSV 좌표 찾기처럼 한 줄씩 몇 분에 걸쳐 들어오는 일은 줄마다가 아니라 통째로 한 단계다.
+  let bulkDepth = 0;
+  const recordSoon = () => { if (history && !bulkDepth) history.commitSoon(200); };
+  /* 배경 이미지는 dataUrl 이 수 MB 라 단계마다 복제하면 안 된다. 실제 이미지는 버전 표에 한 번만
+     두고 스냅샷에는 버전 번호만 넣는다(문서 서식 편집기가 document.xml 을 다루는 방식과 같다). */
+  let imageVersion = 0;
+  const imageVersions = new Map([[0, model.backgroundImage || null]]);
+  const noteImageChange = () => {
+    imageVersion++;
+    imageVersions.set(imageVersion, model.backgroundImage || null);
+  };
+
   /* ── 저장 안 됨(●) 표시 ── */
   const touch = () => {
     const dirty = mapDocContentKey(model) !== doc.savedContentKey;
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
     setStatus(dirty ? "● " + mapT("저장 안 됨") : "");
+    recordSoon();
   };
 
   /* ── 표시(마커) ── */
@@ -1741,31 +1913,36 @@ async function mountMapEditor(doc){
   /* ── 이 자리의 주소 ──
      이름을 손으로 치지 않고 지도에서 되받아 온다. 기다리는 사이 표시를 지웠을 수 있으므로
      돌아온 뒤에 아직 살아 있는 표시인지 확인하고 넣는다. */
+  /* 되돌리기는 표시 객체를 새로 만들어 끼우므로, 기다렸다 돌아온 뒤에는 손에 든 객체가 이미
+     모델에서 빠진 옛 것일 수 있다. 언제나 같은 id 로 지금 살아 있는 표시를 다시 찾는다. */
+  const liveMarker = (marker) => model.markers.find(item => item.id === marker.id) || null;
   const applyMarkerLabel = (marker, text) => {
-    marker.label = String(text || "").slice(0, 120);
-    const layer = markerLayers.get(marker.id);
+    const live = liveMarker(marker) || marker;
+    live.label = String(text || "").slice(0, 120);
+    const layer = markerLayers.get(live.id);
     if (layer){
-      layer.setTooltipContent(marker.label || mapT("이름 없는 표시"));
+      layer.setTooltipContent(live.label || mapT("이름 없는 표시"));
       const popup = typeof layer.getPopup === "function" ? layer.getPopup() : null;
       const form = popup && typeof popup.getContent === "function" ? popup.getContent() : null;
-      if (form && form._labelInput) form._labelInput.value = marker.label;
+      if (form && form._labelInput) form._labelInput.value = live.label;
     }
     touch();
   };
   const fillMarkerAddress = async (marker, opts = {}) => {
     try {
       const info = await mapAddressAt(marker.lat, marker.lng);
-      if (!markerLayers.has(marker.id)) return false;              // 기다리는 동안 지워진 표시
+      const live = liveMarker(marker);
+      if (!live || !markerLayers.has(live.id)) return false;        // 기다리는 동안 지워진 표시
       if (!info){
         if (!opts.quiet) setStatus(mapT("이 자리의 주소를 찾지 못했어요."));
         return false;
       }
       // 자동 채우기는 사람이 적어 둔 이름을 덮지 않는다.
-      if (opts.onlyEmpty && String(marker.label || "").trim()) return false;
-      applyMarkerLabel(marker, info.name);
+      if (opts.onlyEmpty && String(live.label || "").trim()) return false;
+      applyMarkerLabel(live, info.name);
       if (info.region || info.district){
-        marker.region = info.region || "";
-        marker.district = info.district || "";
+        live.region = info.region || "";
+        live.district = info.district || "";
         touch();
       }
       return true;
@@ -2119,6 +2296,7 @@ async function mountMapEditor(doc){
       });
       if (!model.backgroundImage) throw new Error("image-output-too-large");
       model.basemap = "custom";
+      noteImageChange();
       ensureCustomOption(); basemapSelect.value = "custom"; imageClearBtn.hidden = false;
       applyBasemap(); touch();
       if (typeof toast === "function") toast(mapT("현재 화면 범위에 내 지도 이미지를 넣었습니다. 인터넷 없이도 표시됩니다."), 3600);
@@ -2137,6 +2315,7 @@ async function mountMapEditor(doc){
     if (!ok) return;
     model.backgroundImage = null;
     if (model.basemap === "custom") model.basemap = "osm";
+    noteImageChange();
     ensureCustomOption(); basemapSelect.value = model.basemap; imageClearBtn.hidden = true;
     applyBasemap(); touch();
   });
@@ -2156,6 +2335,7 @@ async function mountMapEditor(doc){
       mapT("좌표 찾기"), mapT("건너뛰기"));
     if (!ok) return null;
     geocodingStop = false;
+    bulkDepth++;                       // 줄마다 되돌리기 단계를 만들지 않는다(끝난 뒤 한 단계)
     const previousLabel = csvImportBtn.textContent;
     csvImportBtn.textContent = mapT("그만두기");
     csvImportBtn.classList.add("is-on");
@@ -2181,6 +2361,8 @@ async function mountMapEditor(doc){
       csvImportBtn.classList.remove("is-on");
       csvInput.disabled = false;
       geocodingStop = false;
+      bulkDepth--;
+      recordSoon();
     }
     return found;
   };
@@ -2223,6 +2405,45 @@ async function mountMapEditor(doc){
     if (typeof toast === "function") toast(mapTf("표시 {count}개를 CSV로 내보냈습니다", { count:model.markers.length }), 2800);
   });
 
+  /* ── 한꺼번에 지우기 ──
+     '주변 시설'은 표시 수십 개와 반경 원을 한 번에 넣는다. 말풍선을 하나씩 열어 지우는 길밖에
+     없으면 사실상 못 지우므로, 꼬리표(source·batch)로 묶음째 무는 길을 둔다. 손으로 찍은 표시는
+     꼬리표가 비어 있어 '주변 시설로 넣은 것만' 에 휩쓸리지 않는다. */
+  const removeTagged = (match) => {
+    const markers = model.markers.filter(match);
+    const shapes = (model.shapes || []).filter(match);
+    for (const marker of markers) removeMarker(marker);
+    for (const shape of shapes) removeShape(shape);
+    return markers.length + shapes.length;
+  };
+  const isNearbyItem = (item) => item.source === "nearby";
+  const countNearbyItems = () =>
+    model.markers.filter(isNearbyItem).length + (model.shapes || []).filter(isNearbyItem).length;
+  // 지운 뒤에는 touch() 가 상태줄을 '저장 안 됨' 으로 덮으므로 결과는 토스트로 알린다.
+  const announceRemoved = (count) => {
+    if (typeof toast === "function") toast(mapTf("{count}개를 지웠습니다", { count }), 2600);
+  };
+
+  clearItemsBtn.addEventListener("click", async () => {
+    const markers = model.markers.length;
+    const shapes = (model.shapes || []).length;
+    if (!markers && !shapes){ setStatus(mapT("지울 표시나 도형이 없어요.")); return; }
+    if (typeof confirmDialog !== "function"){ announceRemoved(removeTagged(() => true)); return; }
+    const nearby = countNearbyItems();
+    const message = mapTf("표시 {markers}개, 거리선·면적 {shapes}개가 있어요. 무엇을 지울까요?", { markers, shapes });
+    const allText = mapTf("모두 지우기 ({count}개)", { count:markers + shapes });
+    /* 주변 시설로 넣은 것이 있으면 그쪽을 기본(Enter·ok)으로 둔다 — Enter 한 번에 직접 찍은
+       표시까지 날아가지 않게, 더 좁게 지우는 쪽이 언제나 기본이다. */
+    if (nearby){
+      const answer = await confirmDialog(message,
+        mapTf("주변 시설로 넣은 것만 ({count}개)", { count:nearby }), mapT("취소"), { altText:allText });
+      if (answer === "ok") announceRemoved(removeTagged(isNearbyItem));
+      else if (answer === "alt") announceRemoved(removeTagged(() => true));
+      return;
+    }
+    if (await confirmDialog(message, allText, mapT("취소"))) announceRemoved(removeTagged(() => true));
+  });
+
   /* ── 주변 시설 ──
      카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 켰을 때만 내놓는다.
      꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 되기 때문이다. */
@@ -2231,6 +2452,8 @@ async function mountMapEditor(doc){
     const center = map.getCenter();
     const picked = await openMapNearby({ lat:center.lat, lng:center.lng });
     if (!picked) return;
+    // 이번에 들어오는 것들을 한 묶음으로 묶는다 — 되돌리기가 딱 이 묶음만 도로 빼낼 수 있게.
+    const batch = mapBatchId();
     const added = [];
     for (const place of picked.places){
       const marker = mapNormalizeMarker({
@@ -2238,7 +2461,8 @@ async function mountMapEditor(doc){
         label:place.name,
         // 주소와 거리는 수업에서 그대로 읽는 값이라 메모에 남긴다.
         note:[place.address, place.distance ? mapTf("중심에서 {distance}", { distance:mapFormatDistance(place.distance) }) : ""]
-          .filter(Boolean).join("\n")
+          .filter(Boolean).join("\n"),
+        source:"nearby", batch
       });
       model.markers.push(marker);
       addMarkerLayer(marker);
@@ -2249,7 +2473,8 @@ async function mountMapEditor(doc){
         type:"area",
         points:mapCirclePoints(center.lat, center.lng, picked.radius),
         label:mapT(picked.category.label) + " " + mapFormatDistance(picked.radius),
-        color:"#2563eb"
+        color:"#2563eb",
+        source:"nearby", batch
       });
       model.shapes.push(shape);
       addShapeLayer(shape);
@@ -2258,12 +2483,31 @@ async function mountMapEditor(doc){
     fitToMarkers(added);
     if (typeof toast === "function"){
       toast(mapTf("{label} {count}곳을 반경 {radius} 안에서 찾아 넣었습니다",
-        { label:mapT(picked.category.label), count:added.length, radius:mapFormatDistance(picked.radius) }), 4200);
+        { label:mapT(picked.category.label), count:added.length, radius:mapFormatDistance(picked.radius) }),
+      6000, { action:{ label:mapT("되돌리기"), onClick:() => {
+        removeTagged(item => item.batch === batch);
+        if (typeof toast === "function") toast(mapT("방금 넣은 주변 시설을 도로 뺐습니다"), 2600);
+      } } });
     }
   });
 
   const moveToSearchLocation = mapSearchLocationMover(map);
-  mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, moveToSearchLocation, setStatus);
+  mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label) => {
+    moveToSearchLocation(lat, lng, zoom, label);
+    // 이제 표식이 계속 남으므로, 지우는 법을 한 줄로 알려 준다.
+    if (label) setStatus(mapT("찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)"));
+  }, setStatus);
+  /* 검색 표식은 지도를 눌러도 남으므로 Esc 로 지운다. 표시 추가·그리기·영역 선택 중이면 Esc 는
+     원래 하던 일(취소·삭제)이 먼저다 — onSelectedShapeKey 가 먼저 등록돼 있어 그쪽이 preventDefault
+     한 Esc 는 여기서 건너뛴다. */
+  function onSearchLocationKey(e){
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if (adding || drawingMode || selectedShape) return;
+    if (doc.el && doc.el.hidden) return;
+    if (!moveToSearchLocation.clear()) return;
+    e.preventDefault();
+  }
+  window.addEventListener("keydown", onSearchLocationKey);
 
   saveBtn.addEventListener("click", async () => { await saveMapDoc(doc); touch(); });
 
@@ -2343,6 +2587,75 @@ async function mountMapEditor(doc){
     } finally { boardBtn.disabled = false; }
   });
 
+  /* ── 되돌리기 / 다시 실행 ──
+     스냅샷은 "저장되는 내용"과 같은 범위다 — 제목·배경지도·표시·도형·배경 이미지(버전 번호).
+     보고 있는 자리(중심·확대)는 일부러 뺐다. 지도를 조금 움직인 것이 되돌릴 '편집'으로 쌓이면
+     정작 표시를 지운 단계가 뒤로 밀려나기 때문이다(저장 안 됨 판정과 같은 기준). */
+  const syncHistoryButtons = () => {
+    undoBtn.disabled = !history || !history.canUndo();
+    redoBtn.disabled = !history || !history.canRedo();
+  };
+  if (typeof MNEditHistory === "object" && MNEditHistory && typeof MNEditHistory.create === "function"){
+    history = MNEditHistory.create({
+      limit: MNEditHistory.LIMITS.board,
+      // CSV 로 표시 수천 개를 들여오면 한 단계가 1MB 를 넘는다. 단계 수와 별개로 총량도 막는다.
+      sizeOf: (snapshot) => snapshot.length,
+      maxBytes: 24 * 1024 * 1024,
+      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion]),
+      apply: (snapshot) => {
+        const saved = JSON.parse(snapshot);
+        // 반쯤 찍던 선이나 열려 있던 말풍선은 되돌리기와 함께 정리한다.
+        if (adding) setAdding(false);
+        if (drawingMode) finishDrawing(false);
+        map.closePopup();
+        selectedShape = null;
+        model.title = saved[0];
+        model.basemap = saved[1];
+        model.markers = saved[2].map(mapNormalizeMarker);
+        model.shapes = saved[3].map(mapNormalizeShape);
+        imageVersion = saved[4];
+        model.backgroundImage = imageVersions.get(imageVersion) || null;
+        for (const layer of markerLayers.values()) map.removeLayer(layer);
+        markerLayers.clear();
+        model.markers.forEach(addMarkerLayer);
+        for (const layer of shapeLayers.values()) map.removeLayer(layer);
+        shapeLayers.clear();
+        model.shapes.forEach(addShapeLayer);
+        titleInput.value = model.title;
+        ensureCustomOption();
+        basemapSelect.value = model.basemap;
+        imageClearBtn.hidden = !model.backgroundImage;
+        applyBasemap();
+        touch();
+      },
+      isEqual: (a, b) => a === b,
+      onChange: syncHistoryButtons
+    });
+    history.reset();
+  }
+  syncHistoryButtons();
+  undoBtn.addEventListener("click", () => { if (history) history.undo(); });
+  redoBtn.addEventListener("click", () => { if (history) history.redo(); });
+  /* 이름 칸이나 말풍선 입력 안에서는 브라우저의 글자 되돌리기를 그대로 둔다 — 한 글자 고치려다
+     지도 전체가 이전 단계로 돌아가면 놀란다. */
+  function onHistoryKey(e){
+    if (!history || e.defaultPrevented) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (doc.el && doc.el.hidden) return;
+    const target = e.target;
+    if (target && typeof target.closest === "function" &&
+        target.closest("input,textarea,select,[contenteditable='true']")) return;
+    const key = String(e.key || "").toLowerCase();
+    if (key === "z"){
+      e.preventDefault();
+      if (e.shiftKey) history.redo(); else history.undo();
+    } else if (key === "y"){
+      e.preventDefault();
+      history.redo();
+    }
+  }
+  window.addEventListener("keydown", onHistoryKey);
+
   /* ── 탭을 다시 열었을 때 ──
      문서는 el.hidden 으로 감췄다 보여주는데, 숨은 동안 지도 칸은 0×0 이 된다. render() 는 처음
      한 번만 불리므로(ensureRendered) 크기 회복은 여기서 스스로 감지해야 한다. */
@@ -2358,6 +2671,9 @@ async function mountMapEditor(doc){
   doc.cleanupFns.push(() => {
     window.removeEventListener("keydown", onInteractionKey);
     window.removeEventListener("keydown", onSelectedShapeKey);
+    window.removeEventListener("keydown", onSearchLocationKey);
+    window.removeEventListener("keydown", onHistoryKey);
+    if (history) history.cancel();      // 묶는 중이던 변경을 버린다(사라진 화면을 capture 하지 않게)
     cleanupNetworkNotice();
     if (mapResizeObserver) mapResizeObserver.disconnect();
     try { map.remove(); } catch(_){}

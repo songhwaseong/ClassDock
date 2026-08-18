@@ -818,7 +818,16 @@
     color:var(--ink);padding:7px 10px;font:inherit;font-size:12px;text-align:left;cursor:pointer;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .map-result:last-child{border-bottom:0}
-  .map-result:hover{background:var(--panel-hover)}
+  .map-result:hover,.map-result.is-current{background:var(--panel-hover)}   /* is-current: 화살표로 짚은 줄 */
+  /* 최근 검색어 줄 — 검색어 단추와 한 줄 지우기(✕)가 한 칸을 나눠 쓴다. */
+  .map-result-row{display:flex;align-items:stretch;
+    border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+  .map-result-row:last-child{border-bottom:0}
+  .map-result-row .map-result{flex:1;min-width:0;border-bottom:0}
+  .map-result-x{border:0;background:transparent;color:var(--muted);cursor:pointer;
+    padding:0 9px;font:inherit;font-size:13px;line-height:1}
+  .map-result-x:hover{color:var(--ink);background:var(--panel-hover)}
+  .map-result.is-clear{color:var(--muted);font-size:11.5px}
   .map-network-notice{position:absolute;top:12px;left:50%;z-index:1100;transform:translateX(-50%);
     width:max-content;max-width:calc(100% - 96px);padding:9px 13px;border:1px solid rgba(251,191,36,.8);
     border-radius:9px;background:rgba(120,53,15,.94);color:#fff;font-size:12.5px;font-weight:700;
@@ -828,6 +837,10 @@
     padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
   .map-btn:hover,.map-save:hover{background:var(--panel-hover);border-color:var(--accent)}
   .map-btn.is-on{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* 되돌리기·다시 실행은 할 게 없으면 흐리게 — 눌러도 아무 일 없는 단추를 또렷하게 두지 않는다. */
+  .map-btn:disabled{opacity:.42;cursor:default}
+  .map-btn:disabled:hover{background:var(--field);border-color:var(--border)}
+  .map-undo,.map-redo{padding:6px 9px;font-size:14px;line-height:1}
   .map-stage.is-drawing,.map-stage.is-adding{cursor:crosshair}
   .map-shape-popup{display:flex;flex-direction:column;gap:7px;min-width:180px}
   .map-shape-color{width:100%;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:2px}

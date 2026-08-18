@@ -374,7 +374,10 @@ test("장소 검색은 런처 프록시에서만 실행되고 공급자를 설�
   assert.match(search[1], /button\.addEventListener\("click"/);
   assert.match(search[1], /input\.focus\(\);\s*search\(\)/);
   assert.match(search[1], /e\.relatedTarget === button/);
-  assert.doesNotMatch(search[1], /addEventListener\("input"/);
+  // 입력 중에 도는 것은 최근 검색어를 추리는 일뿐이어야 한다(글자마다 지오코더를 부르지 않는다).
+  const onInput = /input\.addEventListener\("input", \(\) => \{([^}]*)\}\)/.exec(search[1]);
+  assert.ok(onInput);
+  assert.doesNotMatch(onInput[1], /search\(\)|mapGeocode/);
   assert.match(source, /class="map-btn map-search-submit"[^>]*>검색<\/button>/);
 
   // 프록시 확인이 느려도 창을 열자마자 검색할 수 있어야 한다.
@@ -467,6 +470,122 @@ test("주소 검색은 첫 결과 위치를 즉시 표시하고 임시 표식은
   assert.match(mover[1], /L\.circleMarker/);
   assert.match(mover[1], /fillColor:"#e11d48"/);
   assert.match(source, /MAP_CAPTURE_HIDDEN_PANES[^\n]*\.map-search-location-pane/);
+});
+
+test("지도 문서는 공용 되돌리기 이력을 쓰고 touch() 한 곳에서 기록한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  // 내용이 바뀌는 곳은 모두 touch() 를 부르므로 기록도 거기 한 곳에 건다.
+  const touch = /const touch = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(touch);
+  assert.match(touch[1], /recordSoon\(\)/);
+  assert.match(source, /const recordSoon = \(\) => \{ if \(history && !bulkDepth\) history\.commitSoon\(200\); \};/);
+  // 스냅샷 범위 = 저장되는 내용. 보고 있는 자리(중심·확대)는 넣지 않는다.
+  const capture = /capture: \(\) => JSON\.stringify\((\[.*imageVersion\])\)/.exec(source);
+  assert.ok(capture);
+  assert.match(capture[1], /model\.title/);
+  assert.match(capture[1], /model\.markers/);
+  assert.match(capture[1], /model\.shapes/);
+  assert.match(capture[1], /imageVersion/);
+  assert.doesNotMatch(capture[1], /model\.center|model\.zoom/);
+  // 배경 이미지(dataUrl 수 MB)는 단계마다 복제하지 않고 버전 표에 한 번만 둔다.
+  assert.match(source, /const imageVersions = new Map\(\[\[0, model\.backgroundImage \|\| null\]\]\)/);
+  assert.equal((source.match(/noteImageChange\(\);/g) || []).length, 2);
+  // 단계 수와 총량을 함께 막는다(CSV 로 표시 수천 개가 들어올 수 있다).
+  assert.match(source, /limit: MNEditHistory\.LIMITS\.board/);
+  assert.match(source, /maxBytes: 24 \* 1024 \* 1024/);
+  // 주소 좌표 찾기는 줄마다가 아니라 통째로 한 단계.
+  const geocode = /const runPendingGeocode = async \(pending\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(geocode);
+  assert.match(geocode[1], /bulkDepth\+\+/);
+  assert.match(geocode[1], /bulkDepth--;\s*\n\s*recordSoon\(\);/);
+  // 입력칸 안에서는 브라우저의 글자 되돌리기를 그대로 둔다.
+  const key = /function onHistoryKey\(e\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(key);
+  assert.match(key[1], /closest\("input,textarea,select,\[contenteditable='true'\]"\)\) return/);
+  assert.match(key[1], /if \(e\.shiftKey\) history\.redo\(\); else history\.undo\(\)/);
+  assert.match(source, /window\.removeEventListener\("keydown", onHistoryKey\)/);
+  assert.match(source, /if \(history\) history\.cancel\(\)/);
+});
+
+test("주변 시설로 넣은 표시·반경 원은 꼬리표를 달고 묶음째 되돌리거나 지운다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  // 꼬리표는 .map 에 함께 저장된다(정규화에 들어 있어야 옛 파일도 빈 값으로 열린다).
+  const marker = /function mapNormalizeMarker\(raw\)\{([\s\S]*?)\n\}/.exec(source);
+  const shape = /function mapNormalizeShape\(raw\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(marker); assert.ok(shape);
+  for (const normalize of [marker[1], shape[1]]){
+    assert.match(normalize, /source: mapNormalizeSource\(value\.source\)/);
+    assert.match(normalize, /batch: mapNormalizeBatch\(value\.batch\)/);
+  }
+  assert.match(source, /function mapNormalizeSource\(value\)\{[\s\S]*?\/\^\[a-z\]\{1,12\}\$\//);
+  // 주변 시설은 표시와 반경 원에 같은 묶음 번호를 단다.
+  const nearby = /nearbyBtn\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  assert.ok(nearby);
+  assert.match(nearby[1], /const batch = mapBatchId\(\)/);
+  assert.equal((nearby[1].match(/source:"nearby", batch/g) || []).length, 2);
+  assert.match(nearby[1], /action:\{ label:mapT\("되돌리기"\)/);
+  assert.match(nearby[1], /removeTagged\(item => item\.batch === batch\)/);
+  // 지우기: 좁게 지우는 쪽(주변 시설만)이 Enter 기본값인 ok 자리에 온다.
+  const clear = /clearItemsBtn\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
+  assert.ok(clear);
+  assert.match(clear[1], /confirmDialog\(message,\s*\n?\s*mapTf\("주변 시설로 넣은 것만[^)]*\)[\s\S]*?altText:allText/);
+  assert.match(clear[1], /if \(answer === "ok"\) announceRemoved\(removeTagged\(isNearbyItem\)\)/);
+  assert.match(clear[1], /else if \(answer === "alt"\) announceRemoved\(removeTagged\(\(\) => true\)\)/);
+  // 손으로 찍은 표시는 꼬리표가 없으므로 '주변 시설만' 에 휩쓸리지 않는다.
+  assert.match(source, /const isNearbyItem = \(item\) => item\.source === "nearby"/);
+});
+
+test("최근 검색어는 최신순 8개까지 중복 없이 남고 성공한 검색만 기록한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /const MAP_SEARCH_HISTORY_KEY = "mn\.mapSearchHistory"/);
+  assert.match(source, /const MAP_SEARCH_HISTORY_MAX = 8/);
+  const remember = /function mapRememberSearch\(text\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(remember);
+  // 같은 말을 또 찾으면 줄이 늘지 않고 맨 위로만 올라간다.
+  assert.match(remember[1], /filter\(item => item\.toLowerCase\(\) !== key\)/);
+  assert.match(remember[1], /slice\(0, MAP_SEARCH_HISTORY_MAX\)/);
+  const search = /const search = async \(\) =>([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(search);
+  // 못 찾은 검색어는 기록하지 않는다(빈 결과로 빠져나간 뒤에 기록한다).
+  const notFound = search[1].indexOf("그런 이름의 장소를 찾지 못했어요");
+  const remembered = search[1].indexOf("mapRememberSearch(text);\n      showResults(places)");
+  assert.ok(notFound > 0 && remembered > notFound);
+});
+
+test("검색란을 누르면 최근 검색어를 펼치고 화살표·Enter 로 고를 수 있다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const attach = /function mapAttachPlaceSearch\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(attach);
+  assert.match(attach[1], /input\.addEventListener\("focus", openHistory\)/);
+  assert.match(attach[1], /input\.addEventListener\("click", openHistory\)/);
+  assert.match(attach[1], /input\.addEventListener\("input", \(\) => \{ cancelPendingClose\(\); showHistory\(\); \}\)/);
+  // 치는 중에는 그 글자가 든 기록만 남긴다.
+  assert.match(attach[1], /history = mapSearchHistory\(\)\.filter\(item => !typed \|\| item\.toLowerCase\(\)\.includes\(typed\)\)/);
+  assert.match(attach[1], /e\.key === "ArrowDown" \|\| e\.key === "ArrowUp"/);
+  assert.match(attach[1], /moveActive\(e\.key === "ArrowDown" \? 1 : -1\)/);
+  assert.match(attach[1], /if \(active >= 0 && options\[active\]\) options\[active\]\.click\(\)/);
+  // 한 줄 지우기·전체 지우기
+  assert.match(attach[1], /mapForgetSearch\(query\)/);
+  assert.match(attach[1], /mapClearSearchHistory\(\)/);
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.match(css, /\.map-result\.is-current\{background:var\(--panel-hover\)\}|\.map-result:hover,\.map-result\.is-current\{background:var\(--panel-hover\)\}/);
+  assert.match(css, /\.map-result-row\{display:flex/);
+});
+
+test("검색 표식은 지도를 눌러도 남고 Esc 로만 지운다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const mover = /function mapSearchLocationMover\(([\s\S]*?)\n\}/.exec(source);
+  assert.ok(mover);
+  // permanent 가 빠지면 Leaflet 이 지도 클릭마다 말풍선을 닫아 버리고, 점은 클릭을 받지 않아 다시 못 연다.
+  assert.match(mover[1], /bindTooltip\([^\n]*permanent:true/);
+  assert.match(mover[1], /move\.clear = \(\) =>/);
+  const key = /function onSearchLocationKey\(e\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(key);
+  assert.match(key[1], /e\.key !== "Escape" \|\| e\.defaultPrevented/);
+  assert.match(key[1], /if \(adding \|\| drawingMode \|\| selectedShape\) return/);
+  assert.match(key[1], /moveToSearchLocation\.clear\(\)/);
+  assert.match(source, /window\.addEventListener\("keydown", onSearchLocationKey\)/);
+  assert.match(source, /window\.removeEventListener\("keydown", onSearchLocationKey\)/);
 });
 
 test("지도 고르기에서 지도를 드래그해도 모달 이동이 함께 시작되지 않는다", () => {

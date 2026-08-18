@@ -1625,6 +1625,19 @@
     "주변 시설 찾기는 카카오 지도 검색을 켰을 때만 쓸 수 있어요(설정 → 지도 검색).":
       "Nearby places need Kakao map search turned on (Settings → Map search).",
     "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요.": "Nearby places is available in the ClassDock launcher.",
+    "되돌리기": "Undo",
+    "다시 실행 (Ctrl+Shift+Z)": "Redo (Ctrl+Shift+Z)",
+    "방금 넣은 주변 시설을 도로 뺐습니다": "Removed the nearby places you just added",
+    // 한꺼번에 지우기
+    "🧹 지우기": "🧹 Clear",
+    "표시·거리선·면적을 한꺼번에 지워요 — 주변 시설로 넣은 것만 골라 지울 수도 있어요":
+      "Clear pins, paths, and areas at once — or only the ones added by Nearby places",
+    "지울 표시나 도형이 없어요.": "There are no pins or shapes to clear.",
+    "표시 {markers}개, 거리선·면적 {shapes}개가 있어요. 무엇을 지울까요?":
+      "There are {markers} pins and {shapes} paths/areas. What should be cleared?",
+    "주변 시설로 넣은 것만 ({count}개)": "Only from Nearby places ({count})",
+    "모두 지우기 ({count}개)": "Clear everything ({count})",
+    "{count}개를 지웠습니다": "Cleared {count} items",
     "주변 시설을 찾지 못했어요 — 인터넷 연결을 확인해 주세요.": "Couldn't find nearby places — check your internet connection.",
     "학교": "Schools",
     "학원": "Academies",
@@ -1695,6 +1708,9 @@
     "보라": "Purple",
     "검정": "Black",
     "지도를 클릭하면 그 자리에 표시가 생겨요 (Esc 로 취소)": "Click the map to drop a pin there (Esc to cancel)",
+    "찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)": "Marked the place you found with a red dot (Esc to clear)",
+    "이 검색어 지우기": "Remove this search",
+    "검색 기록 지우기": "Clear search history",
     "인터넷이 없어 배경지도를 못 받았어요 — 표시와 메모는 그대로 저장돼요.":
       "No internet, so the base map couldn't load — your pins and notes still save normally.",
     "배경지도를 직접 내려받는 방식으로 바꿨어요.": "Switched to downloading the base map directly.",
