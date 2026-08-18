@@ -106,6 +106,9 @@ const MAP_DEFAULT_CENTER = [36.35, 127.85];
 const MAP_DEFAULT_ZOOM = 7;
 
 let _mapScratchCount = 0;
+// 같은 메모 블록을 여는 동안 두 번째 클릭이 들어오면 첫 작업을 함께 기다린다. 열린 docs 만
+// 검사하면 IndexedDB 읽기·파일 로딩 사이의 틈에 같은 블록을 두 탭으로 만들 수 있다.
+const _mapMemoOpenTasks = new Map();
 
 /* 한/EN 전환. 버튼·설명처럼 DOM 에 그대로 있는 문구는 mapTranslate 로 통째 번역하고(사전에
    없으면 한국어로 남는다), 숫자가 끼어 조립되는 문구만 mapT/mapTf 로 그때그때 옮긴다. */
@@ -974,6 +977,21 @@ async function mapCaptureDataUrl(stage, attribution, labels){
   }
 }
 
+/* 캡처 결과(data URL)를 메모가 받는 Blob 으로 바꾼다. 메모의 그림 에셋은 IndexedDB 에
+   Blob 으로 들어가므로, base64 문자열 그대로는 넣을 수 없다. */
+async function mapDataUrlToBlob(dataUrl){
+  const text = String(dataUrl || "");
+  if (!text.startsWith("data:")) return null;
+  try {
+    const response = await fetch(text);
+    const blob = await response.blob();
+    return blob && blob.size ? blob : null;
+  } catch(error){
+    console.warn("map data url to blob failed:", error);
+    return null;
+  }
+}
+
 /* ===== 타일 캐시(런처 디스크) =====
    실제 저장은 런처가 한다(desktop/launcher.cs). exe 는 실행마다 포트가 달라 브라우저 origin 이
    바뀌므로 IndexedDB 에 담아 두면 다음 실행에서 못 읽는다 — 그래서 서버 쪽 파일이 유일한 방법이다. */
@@ -1662,6 +1680,8 @@ async function loadMapDoc(file, opts = {}){
   if (!model.title) model.title = mapDocDefaultTitle(file.name);
   const doc = makeDoc("map", file.name, opts);
   doc.mapDoc = model;
+  // 메모 그림 블록에서 되살린 지도 — "메모로"를 누르면 새 블록을 만들지 않고 그 블록을 바꾼다.
+  doc.memoBlockId = String(opts.memoBlockId || "") || null;
   doc.sourceFile = file;
   doc.savedText = mapDocSerialize(model);
   doc.savedContentKey = mapDocContentKey(model);
@@ -1693,6 +1713,98 @@ function newMapScratchInFolder(folder){
   return createScratchInFolder(folder, mapScratchFileName,
     (name) => mapDocSerialize(mapDocEmpty(mapDocDefaultTitle(name))),
     "application/json", "지도");
+}
+
+/* 메모 그림과 같은 자리(중심·확대)를 보여 준다. 아직 그리지 않은 탭은 모델만 고쳐 두면
+   마운트할 때 그 자리에서 뜬다(mountMapEditor 의 L.map({center, zoom})). 보던 자리는 저장 안 됨(●)
+   판정에 들어가지 않으므로 이렇게 옮겨도 문서가 고쳐진 것으로 표시되지 않는다. */
+function mapApplyMemoView(doc, snapshot){
+  if (!doc || !snapshot) return;
+  if (doc.mapDoc){
+    doc.mapDoc.center = [snapshot.center[0], snapshot.center[1]];
+    doc.mapDoc.zoom = snapshot.zoom;
+  }
+  const map = doc.mapInstance;
+  if (map && typeof map.setView === "function"){
+    try { map.setView(snapshot.center, snapshot.zoom); }
+    catch(error){ console.warn("메모 그림의 자리로 옮기지 못했어요:", error); }
+  }
+}
+
+/* 이 블록과 이미 이어져 있는 지도 탭을 만났을 때 — true 면 그 탭을 그대로 쓰고, false 면
+   메모 그림의 스냅샷으로 새 탭을 연다.
+   · 내용(제목·배경지도·표시·도형)이 같으면 그 탭으로 가서 보던 자리만 그림과 맞춘다. 탭을
+     열어 둔 채 지도를 옮겨 놨거나 파일을 다시 열어 저장된 자리로 돌아온 뒤에도, 메모에서 누른
+     사람이 기대하는 "그림 속 그 자리"가 보인다.
+   · 내용이 다르면 묻는다. 열린 탭을 스냅샷으로 되돌리면 메모로 보낸 뒤의 편집이 사라지고,
+     그렇다고 말없이 그 탭을 보여 주면 메모 그림과 딴판인 지도가 뜨기 때문이다. 새로 열기를
+     고르면 부르는 쪽이 옛 탭의 고리를 끊는다(그 탭의 지도 자체는 그대로 남는다). */
+async function mapKeepOpenedMemoTab(opened, snapshot){
+  const same = !!(opened && opened.mapDoc) && mapDocContentKey(opened.mapDoc) === mapDocContentKey(snapshot);
+  if (!same && typeof confirmDialog === "function"){
+    const openNew = await confirmDialog(
+      mapTf("이미 열려 있는 '{name}' 탭이 이 메모 그림과 이어져 있는데, 그 지도는 그림과 내용이 달라요. 메모 그림의 지도를 새 탭으로 열까요?",
+        { name: String((opened && opened.name) || "지도") }),
+      mapT("메모 그림으로 열기"), mapT("열린 탭 보기"));
+    if (openNew) return false;
+  }
+  if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+  if (same) mapApplyMemoView(opened, snapshot);
+  if (typeof toast === "function"){
+    toast(same
+      ? mapT("이미 열려 있는 지도 탭으로 갔어요 — 메모 그림과 같은 자리로 옮겼어요.")
+      : mapT("이미 열려 있는 지도 탭으로 갔어요 — 이 탭의 지도는 메모 그림과 내용이 다릅니다."), 3600);
+  }
+  opened.memoReusedTab = true;      // 메모창이 "지도로 열었어요" 안내를 겹쳐 띄우지 않게
+  return true;
+}
+
+/* 메모 그림 블록의 "✏️ 지도로" — 그림과 함께 넣어 둔 지도 스냅샷을 새 탭으로 되살린다.
+   options.state       — 메모 블록에 담긴 지도 객체(mapDocSerialize 형식)
+   options.name        — 탭 이름(메모에 적힌 이름을 되살린다)
+   options.memoBlockId — 돌아갈 메모 블록 id. 고친 뒤 "메모로"를 누르면 그 블록을 제자리에서 바꾼다. */
+async function openMapFromMemo(options = {}){
+  const blockId = String(options.memoBlockId || "");
+  const pending = blockId ? _mapMemoOpenTasks.get(blockId) : null;
+  if (pending){
+    const pendingDoc = await pending;
+    if (pendingDoc && typeof setActiveDoc === "function") setActiveDoc(pendingDoc.id);
+    return pendingDoc;
+  }
+  const opening = (async () => {
+    // 같은 블록을 두 탭으로 열면 둘 다 그 블록을 덮어써 나중 것이 앞의 편집을 지운다.
+    const opened = (typeof docs !== "undefined" ? docs : []).find((item) =>
+      item && item.kind === "map" && blockId && item.memoBlockId === blockId);
+    let snapshot = null;
+    try { snapshot = mapDocParse(JSON.stringify(options.state || {})); }
+    catch(error){
+      console.warn("메모의 지도 스냅샷을 읽지 못했어요:", error);
+      // 스냅샷이 깨졌더라도 이 블록과 이어져 있던 탭은 그대로 보여 준다.
+      if (opened){
+        if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+        return opened;
+      }
+      if (typeof toast === "function") toast(mapT("메모에 담긴 지도 정보를 읽지 못했어요."), 2800, { type:"error" });
+      return null;
+    }
+    if (opened){
+      if (await mapKeepOpenedMemoTab(opened, snapshot)) return opened;
+      // "메모 그림으로 열기"를 골랐다 — 옛 탭의 고리를 먼저 끊어야 한 블록을 두 탭이 덮어쓰지 않는다.
+      opened.memoBlockId = null;
+      if (typeof persistTabState === "function") persistTabState();
+    }
+    if (typeof handleFiles !== "function") return null;
+    const base = mapSafeDownloadName(String(options.name || "지도").replace(/\.map$/i, "").trim() || "지도");
+    const made = await handleFiles([new File([mapDocSerialize(snapshot)], base + ".map", { type:"application/json" })],
+      { isScratch:true, memoBlockId:blockId });
+    if (made) made.memoReusedTab = false;
+    return made;
+  })();
+  if (blockId) _mapMemoOpenTasks.set(blockId, opening);
+  try { return await opening; }
+  finally {
+    if (blockId && _mapMemoOpenTasks.get(blockId) === opening) _mapMemoOpenTasks.delete(blockId);
+  }
 }
 
 /* ===== 저장 ===== */
@@ -1778,6 +1890,12 @@ async function mountMapEditor(doc){
   boardBtn.textContent = "🖊️ 칠판으로";
   boardBtn.title = "지금 보이는 지도를 그림으로 굳혀 새 화이트보드에 올려요 — 그 위에 바로 판서할 수 있어요";
 
+  const memoBtn = document.createElement("button");
+  memoBtn.type = "button";
+  memoBtn.className = "map-btn map-to-memo";
+  memoBtn.textContent = "📋 메모로";
+  memoBtn.title = "지금 보이는 지도를 메모창에 넣어요 — 메모에서 '✏️ 지도로'를 누르면 다시 편집할 수 있어요";
+
   // 자동 캐시 현황은 런처가 디스크에 남겨 주는 기능이라 exe 로 돌 때만 뜻이 있다(아래에서 표시 결정).
   const prepareBtn = document.createElement("button");
   prepareBtn.type = "button";
@@ -1858,7 +1976,7 @@ async function mountMapEditor(doc){
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
   bar.append(titleInput, basemapSelect, addBtn, addressBtn, lineBtn, areaBtn, nearbyBtn, regionBtn,
-    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn, boardBtn, searchWrap,
+    imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn, boardBtn, memoBtn, searchWrap,
     undoBtn, redoBtn, saveBtn, coord, status);
 
   const stage = document.createElement("div");
@@ -2725,6 +2843,7 @@ async function mountMapEditor(doc){
   contextMirror(clearItemsBtn);
   contextMirror(regionBtn);
   contextMirror(boardBtn);
+  contextMirror(memoBtn);
 
   contextSep();
   contextMirror(undoBtn, "↶ 되돌리기 (Ctrl+Z)");
@@ -2812,6 +2931,28 @@ async function mountMapEditor(doc){
     return boardDoc;
   };
 
+  /* 지금 보이는 지도를 PNG data URL 로 굳힌다(칠판·메모가 함께 쓴다).
+     말풍선과 그리던 선을 먼저 정리하고 타일이 다 뜨기를 기다린 뒤, 표시·도형의 이름을 지도 칸
+     좌표로 바꿔 넘긴다 — 화면 말풍선은 캡처에서 감추므로 그림에 직접 새겨야 남는다. */
+  const captureMapPng = async () => {
+    map.closePopup();
+    setAdding(false);
+    if (drawingMode) finishDrawing(false);
+    await waitForTiles(8000);
+    const labels = model.markers.filter(m => m.label).map((m) => {
+      const point = map.latLngToContainerPoint([m.lat, m.lng]);
+      return { x:point.x, y:point.y, text:m.label };
+    });
+    for (const shape of model.shapes){
+      if (!shape.points.length) continue;
+      const center = shape.points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0,0])
+        .map(value => value / shape.points.length);
+      const point = map.latLngToContainerPoint(center);
+      labels.push({ x:point.x, y:point.y, text:shapeTooltip(shape), offsetY:0 });
+    }
+    return mapCaptureDataUrl(stage, mapAttributionText(model), labels);
+  };
+
   /* ── 지역 통계 ── */
   regionBtn.addEventListener("click", () => {
     openMapRegionStats(model, {
@@ -2835,23 +2976,7 @@ async function mountMapEditor(doc){
     boardBtn.disabled = true;
     setStatus(mapT("지도를 칠판으로 옮기는 중…"));
     try {
-      map.closePopup();
-      setAdding(false);
-      if (drawingMode) finishDrawing(false);
-      await waitForTiles(8000);
-      // 이름표는 지도 칸 좌표로 바꿔 캡처 뒤에 그려 넣는다(화면 말풍선은 캡처에서 감춘다).
-      const labels = model.markers.filter(m => m.label).map((m) => {
-        const point = map.latLngToContainerPoint([m.lat, m.lng]);
-        return { x:point.x, y:point.y, text:m.label };
-      });
-      for (const shape of model.shapes){
-        if (!shape.points.length) continue;
-        const center = shape.points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0,0])
-          .map(value => value / shape.points.length);
-        const point = map.latLngToContainerPoint(center);
-        labels.push({ x:point.x, y:point.y, text:shapeTooltip(shape), offsetY:0 });
-      }
-      const png = await mapCaptureDataUrl(stage, mapAttributionText(model), labels);
+      const png = await captureMapPng();
       const boardDoc = await createMapBoard(mapBoardName(model));
       const placed = boardDoc && typeof boardDoc.insertBoardImage === "function"
         ? await boardDoc.insertBoardImage(png) : false;
@@ -2863,6 +2988,41 @@ async function mountMapEditor(doc){
       console.warn("map board capture failed:", error);
       setStatus(mapT("지도를 그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요."));
     } finally { boardBtn.disabled = false; }
+  });
+
+  /* ── 메모로 ──
+     보이는 그림(PNG)과 편집용 스냅샷(.map 과 같은 JSON)을 메모 블록 하나에 묶어 보낸다.
+     메모의 "✏️ 지도로"가 그 스냅샷으로 지도를 되살리고, 고친 뒤 다시 "메모로"를 누르면
+     doc.memoBlockId 덕에 새 블록이 아니라 그 블록이 제자리에서 바뀐다(화이트보드와 같은 규약). */
+  memoBtn.addEventListener("click", async () => {
+    if (typeof window.addMapToScratchpad !== "function"){ setStatus(mapT("메모창을 열 수 없어요.")); return; }
+    memoBtn.disabled = true;
+    setStatus(mapT("지도를 메모로 보내는 중…"));
+    try {
+      const png = await captureMapPng();
+      const blob = await mapDataUrlToBlob(png);
+      if (!blob){ setStatus(mapT("메모에 지도를 넣지 못했어요.")); return; }
+      const title = String(model.title || "").trim() || mapT("지도");
+      const result = await window.addMapToScratchpad(blob, JSON.parse(mapDocSerialize(model)), {
+        name: mapSafeDownloadName(title) + ".png",
+        boardName: title,
+        blockId: doc.memoBlockId          // 있으면 그 블록을 제자리에서 교체
+      });
+      if (result && result.blockId){
+        doc.memoBlockId = result.blockId;
+        // 이 고리는 탭 상태에 함께 저장된다 — 다시 실행한 뒤에도 같은 블록으로 돌아가게.
+        if (typeof persistTabState === "function") persistTabState();
+        touch();                          // 잠시 덮어 뒀던 '저장 안 됨' 표시를 제자리로 돌린다
+        if (result.snapshotDropped && typeof toast === "function"){
+          toast(mapT("지도가 너무 커서 그림만 넣었어요 — 메모에서 다시 지도로 열 수는 없어요."), 3800);
+        } else if (typeof toast === "function"){
+          toast(mapT("지도를 메모로 보냈어요 — 메모에서 '✏️ 지도로'를 누르면 다시 편집할 수 있어요."), 3200);
+        }
+      } else touch();                     // 메모창이 이미 구체적인 사유를 알렸다(용량·잠금 등)
+    } catch(error){
+      console.warn("map memo capture failed:", error);
+      setStatus(mapT("지도를 그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요."));
+    } finally { memoBtn.disabled = false; }
   });
 
   /* ── 되돌리기 / 다시 실행 ──

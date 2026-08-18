@@ -2496,7 +2496,15 @@ function persistTabState(){       // 탭 순서·활성 탭을 디바운스 저�
             targetPane: studyTargetPane === "reference" ? "reference" : "work"
           }
         : null;
-      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, savedAt: Date.now() }));
+      /* 메모 그림 블록에서 되살린 문서(지도·악보)는 "돌아갈 블록"도 함께 남긴다. 문서 자체는
+         작업공간이 되살리지만 이 고리가 없으면 다시 실행한 뒤 '메모로'가 그 블록을 바꾸지 않고
+         새 블록을 만들어, 같은 지도가 메모에 두 벌로 남는다. 화이트보드는 파일이 아니라 다시
+         실행하면 탭 자체가 없으므로(전체 백업 복원만 되살린다) 여기 대상이 아니다. */
+      const memoLinks = docs
+        .filter(d => d && d.memoBlockId && (d.kind === "map" || d.kind === "music"))
+        .map(d => ({ doc: docStableKey(d), block: String(d.memoBlockId) }))
+        .filter(link => link.doc && link.block);
+      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, memoLinks, savedAt: Date.now() }));
     } catch(e){}
   }, 400);
 }
@@ -2516,6 +2524,34 @@ function applyTabState(saved){
   tabOrder = restored;
   const wantActive = keyToId.get(saved.active);
   setActiveDoc(seen.has(wantActive) ? wantActive : restored[0]);
+}
+
+/* 작업공간 복원이 끝난 뒤, 메모 블록과의 왕복 고리를 안정 키로 다시 잇는다(참고·작업 짝과 같은 방식).
+   · 안정 키는 경로+이름이라 같은 이름의 문서가 여럿이면 겹칠 수 있다 — 첫 문서에만 잇고 그 키는
+     더 쓰지 않는다. 두 탭이 한 블록을 서로 덮어쓰는 것이 잘못 이어진 것보다 나쁘기 때문이다.
+   · 가리키던 블록이 그새 지워졌어도 그냥 둔다. 다음 '메모로'에서 그 블록을 못 찾으면 새 블록을
+     만들고 그 id 로 고리를 바꾸므로 저절로 낫는다(scratchpad 의 addBoardBlock). */
+function restoreMemoLinks(saved){
+  const links = saved && Array.isArray(saved.memoLinks) ? saved.memoLinks : [];
+  if (!links.length) return 0;
+  const keyToDoc = new Map();
+  docs.forEach(d => {
+    const key = docStableKey(d);
+    if (key && !keyToDoc.has(key)) keyToDoc.set(key, d);
+  });
+  const used = new Set();
+  let restored = 0;
+  for (const link of links){
+    const key = String(link && link.doc || "");
+    const block = String(link && link.block || "");
+    if (!key || !block || used.has(key)) continue;
+    const doc = keyToDoc.get(key);
+    if (!doc || doc.memoBlockId) continue;      // 이미 고리를 가진 문서는 건드리지 않는다
+    doc.memoBlockId = block;
+    used.add(key);
+    restored++;
+  }
+  return restored;
 }
 
 // Reconnect the split pair after all workspace files have been restored.

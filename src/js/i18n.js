@@ -1442,6 +1442,13 @@
     "✏️ 화이트보드로": "✏️ To whiteboard",
     "화이트보드로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다": "Reopen in the whiteboard to edit — press 'To notes' after editing and this block is updated",
     "화이트보드로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.": "Opened in the whiteboard. After editing, press 'To notes' to update this note block.",
+    "✏️ 지도로": "✏️ To map",
+    "지도로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다": "Reopen the map to edit — press 'To notes' after editing and this block is updated",
+    "지도로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.": "Opened the map. After editing, press 'To notes' to update this note block.",
+    "이 그림의 지도 정보가 저장소에서 사라졌어요 — 다시 편집할 수 없습니다.": "The editable map data for this image is missing from storage, so it can't be edited again.",
+    "지도를 메모에서 바꿨습니다.": "Updated the map in Notes.",
+    "지도를 메모에 넣었습니다.": "Added the map to Notes.",
+    "지도가 너무 커서 그림만 넣었어요 — 메모에서 다시 지도로 열 수는 없어요.": "The map was too large, so only the image was added — it can't be reopened as an editable map from Notes.",
     "화이트보드 그림을 받지 못했습니다.": "Couldn't receive the whiteboard image.",
     "화이트보드를 메모에 저장하지 못했습니다.": "Couldn't save the whiteboard to Notes.",
     "화이트보드를 메모에서 바꿨습니다.": "Updated the whiteboard in Notes.",
@@ -1574,6 +1581,9 @@
     "🖊️ 칠판으로": "🖊️ To whiteboard",
     "지금 보이는 지도를 그림으로 굳혀 새 화이트보드에 올려요 — 그 위에 바로 판서할 수 있어요":
       "Freezes the current view into an image on a new whiteboard so you can draw on it right away",
+    "📋 메모로": "📋 To notes",
+    "지금 보이는 지도를 메모창에 넣어요 — 메모에서 '✏️ 지도로'를 누르면 다시 편집할 수 있어요":
+      "Puts the current view into the notes panel — press '✏️ To map' there to edit it again",
     "🗂️ 오프라인 지도": "🗂️ Offline maps",
     "실제로 본 지역은 자동으로 보관됩니다 — 현황을 확인하거나 비울 수 있어요":
       "Areas you actually view are cached automatically — check or clear the cache",
@@ -1772,6 +1782,18 @@
     "지도를 그림으로 굳히지 못했어요 — 배경지도가 다 뜬 뒤에 다시 눌러 주세요.":
       "Couldn't freeze the map into an image — wait for the base map to finish loading and try again.",
     "화이트보드를 열 수 없어요.": "Can't open a whiteboard.",
+    "지도를 메모로 보내는 중…": "Sending the map to notes…",
+    "지도를 메모로 보냈어요 — 메모에서 '✏️ 지도로'를 누르면 다시 편집할 수 있어요.":
+      "Sent the map to notes — press '✏️ To map' there to edit it again.",
+    "메모에 지도를 넣지 못했어요.": "Couldn't place the map in the notes panel.",
+    "메모에 담긴 지도 정보를 읽지 못했어요.": "Couldn't read the map data stored in the note.",
+    // 메모 그림과 이어져 있는 지도 탭이 이미 열려 있을 때
+    "이미 열려 있는 지도 탭으로 갔어요 — 메모 그림과 같은 자리로 옮겼어요.":
+      "Switched to the map tab that was already open — moved it to the same spot as the note image.",
+    "이미 열려 있는 지도 탭으로 갔어요 — 이 탭의 지도는 메모 그림과 내용이 다릅니다.":
+      "Switched to the map tab that was already open — its map differs from the note image.",
+    "메모 그림으로 열기": "Open the note image",
+    "열린 탭 보기": "Show the open tab",
     "지도 문서(.map)를 읽지 못해 텍스트로 열었어요.": "Couldn't read the map document (.map), so it opened as text.",
     "지도 라이브러리를 불러오지 못했어요.": "Couldn't load the map library.",
     "지도 라이브러리를 불러오지 못했어요": "Couldn't load the map library",
@@ -1921,7 +1943,9 @@
     "반경 {radius} 안에서 {label}을(를) 찾지 못했어요.": "No {label} found within {radius}.",
     "{count}곳": "{count}",
     "표시 {total}개 · 지역 없음 {missing}개": "{total} pins · {missing} without a region",
-    "지역을 채우는 중… {done}/{total} · 채움 {filled}개": "Filling in regions… {done}/{total} · filled {filled}"
+    "지역을 채우는 중… {done}/{total} · 채움 {filled}개": "Filling in regions… {done}/{total} · filled {filled}",
+    "이미 열려 있는 '{name}' 탭이 이 메모 그림과 이어져 있는데, 그 지도는 그림과 내용이 달라요. 메모 그림의 지도를 새 탭으로 열까요?":
+      "The already-open '{name}' tab is linked to this note image, but its map differs from the image. Open the note image's map in a new tab?"
   };
 
   function tf(tmpl, vars) {

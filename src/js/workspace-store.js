@@ -531,6 +531,7 @@ async function restoreLastWorkspace(force=false){
     endUiBatch();
     applyTabState(savedTabs);   // 파일이 모두 열린 뒤 탭 순서·활성 탭 복원
     restoreStudyState(savedTabs); // 참고·작업 문서 짝도 마지막에 다시 구성
+    restoreMemoLinks(savedTabs);  // 지도·악보가 돌아갈 메모 블록 고리도 다시 잇는다
     collapseToActiveBranch();   // 복원 완료 후 활성 탭의 폴더 체인만 남기고 나머지는 접는다(배치 대표·활성 탭 이중 펼침 정리)
     tabRestoreInProgress = false;
   }

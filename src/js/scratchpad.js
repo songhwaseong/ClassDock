@@ -17,6 +17,17 @@ const SCRATCHPAD_LAYOUTS = new Set(["top", "left", "right", "bottom"]);
 const SCRATCHPAD_IMAGE_SIZES = new Set(["small", "medium", "large", "full"]);
 const SCRATCHPAD_COLORS = new Set(["yellow", "sage", "lavender", "rose", "ivory"]);
 const SCRATCHPAD_CUSTOM_COLOR_RE = /^#[0-9a-f]{6}$/i;
+/* 그림 블록에 편집용 스냅샷을 함께 담아 두는 편집기들. 되열 때 어느 편집기로 갈지 가른다. */
+const SCRATCHPAD_BOARD_KINDS = new Set(["board", "music", "map"]);
+/* 스냅샷(편집용 JSON)의 상한. 지도는 '내 지도' 배경 이미지를 data URI 로 품을 수 있어 홀로 커질 수
+   있다. 넘으면 그림만 넣고 되열기를 포기한다 — 메모 전체를 못 쓰게 만드는 것보다 낫다. */
+const SCRATCHPAD_MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024;
+
+function scratchpadBoardKindLabel(kind){
+  if (kind === "music") return "악보";
+  if (kind === "map") return "지도";
+  return "화이트보드";
+}
 
 // 프리셋 이름 또는 직접 고른 hex(#rrggbb)만 허용하고, 그 외에는 기본색으로 되돌린다.
 function scratchpadNormalizeColor(value){
@@ -181,10 +192,10 @@ function scratchpadNormalizeBlock(raw){
       mime:String(raw.mime || "image/png").slice(0, 100),
       size:Math.max(0, Number(raw.size) || 0),
       locked:raw.locked === true,
-      // 화이트보드·악보에서 온 그림이면 편집용 스냅샷 에셋을 함께 가리킨다(없으면 빈 문자열).
+      // 화이트보드·악보·지도에서 온 그림이면 편집용 스냅샷 에셋을 함께 가리킨다(없으면 빈 문자열).
       boardAssetId:String(raw.boardAssetId || "").trim(),
       // 그 스냅샷을 어느 편집기로 되열지. 화이트보드만 있던 시절의 블록에는 없으므로 보드가 기본이다.
-      boardKind:raw.boardKind === "music" ? "music" : "board",
+      boardKind:SCRATCHPAD_BOARD_KINDS.has(raw.boardKind) ? raw.boardKind : "board",
       boardName:String(raw.boardName || "").slice(0, 180)
     };
   }
@@ -727,17 +738,23 @@ function wireScratchpad(){
     }
     return null;
   };
-  /* 화이트보드·악보에서 온 그림: 보이는 PNG(에셋) + 편집용 스냅샷(JSON 에셋)을 한 블록에 묶는다.
-     options.kind    — "board"(화이트보드, 기본) 또는 "music"(악보). 되열 편집기를 가른다.
+  /* 화이트보드·악보·지도에서 온 그림: 보이는 PNG(에셋) + 편집용 스냅샷(JSON 에셋)을 한 블록에 묶는다.
+     options.kind    — "board"(화이트보드, 기본)·"music"(악보)·"map"(지도). 되열 편집기를 가른다.
      options.blockId — 살아 있으면 그 블록을 제자리에서 바꿔(왕복 편집), 없으면 새 블록으로 넣는다. */
   const addBoardBlock = async (pngBlob, boardData, options={}) => {
-    const kind = options.kind === "music" ? "music" : "board";
-    const kindLabel = kind === "music" ? "악보" : "화이트보드";
+    const kind = SCRATCHPAD_BOARD_KINDS.has(options.kind) ? options.kind : "board";
+    const kindLabel = scratchpadBoardKindLabel(kind);
     if (!pngBlob || !pngBlob.size){ showStatus(kindLabel + " 그림을 받지 못했습니다.", false); return null; }
     if (pngBlob.size > SCRATCHPAD_MAX_IMAGE_BYTES){ showStatus("이미지 한 장은 25MB까지 넣을 수 있습니다.", false); return null; }
     let boardBlob = null;
     try { boardBlob = new Blob([JSON.stringify(boardData || {})], { type:"application/json" }); }
     catch(error){ console.warn("scratchpad board snapshot skipped:", error); }
+    // 스냅샷이 상한을 넘으면 그림만 남긴다(되열기 단추가 사라지므로 아래에서 그 사실을 알린다).
+    let snapshotDropped = false;
+    if (boardBlob && boardBlob.size > SCRATCHPAD_MAX_SNAPSHOT_BYTES){
+      boardBlob = null;
+      snapshotDropped = true;
+    }
     const found = findImageBlockById(options.blockId);
     if (found && found.block.locked){
       showStatus("잠긴 블록은 바꿀 수 없습니다. 먼저 잠금을 해제하세요.", false);
@@ -825,8 +842,14 @@ function wireScratchpad(){
       await removeAssetIfUnused(previousBlock.boardAssetId);
     }
     if (options.open !== false) setOpen(true, false);
-    showStatus(kindLabel + (found ? "를 메모에서 바꿨습니다." : "를 메모에 넣었습니다."));
-    return { blockId:block.id, replaced:!!found };
+    if (snapshotDropped){
+      showStatus(kindLabel + "가 너무 커서 그림만 넣었습니다 — 메모에서 다시 " + kindLabel + "로 열 수는 없어요.", false);
+    } else {
+      showStatus(kindLabel + (found ? "를 메모에서 바꿨습니다." : "를 메모에 넣었습니다."));
+    }
+    // 호출부도 편집용 스냅샷이 빠졌는지 알아야 "다시 열 수 있다"는 잘못된 성공 안내를
+    // 내보내지 않는다. 기존 호출부는 blockId/replaced 만 읽으므로 필드 추가는 하위 호환이다.
+    return { blockId:block.id, replaced:!!found, snapshotDropped };
   };
   const removeBlock = async block => {
     const note = activeNote();
@@ -1295,12 +1318,12 @@ function wireScratchpad(){
       setOpen(false);                                       // 메모를 닫아 새 편집 탭이 보이게
       if (typeof toast === "function") toast("메모 이미지를 편집 탭으로 열었어요. 편집 후 '📷 메모로'로 다시 넣을 수 있어요.", 2800);
     }, "scratchpad-reuse");
-    // 화이트보드·악보에서 온 그림만: 편집용 스냅샷을 되살려 새 탭으로 연다(왕복 편집).
-    const sourceKind = block.boardKind === "music" ? "music" : "board";
-    const sourceLabel = sourceKind === "music" ? "악보" : "화이트보드";
+    // 화이트보드·악보·지도에서 온 그림만: 편집용 스냅샷을 되살려 새 탭으로 연다(왕복 편집).
+    const sourceKind = SCRATCHPAD_BOARD_KINDS.has(block.boardKind) ? block.boardKind : "board";
+    const sourceLabel = scratchpadBoardKindLabel(sourceKind);
     const boardBtn = block.boardAssetId ? makeButton("✏️ " + sourceLabel + "로", sourceLabel + "로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다", async () => {
-      const canOpen = sourceKind === "music"
-        ? typeof openMusicSheetFromMemo === "function"
+      const canOpen = sourceKind === "music" ? typeof openMusicSheetFromMemo === "function"
+        : sourceKind === "map" ? typeof openMapFromMemo === "function"
         : typeof newWhiteboard === "function";
       if (!canOpen){ showStatus(sourceLabel + "를 열 수 없습니다.", false); return; }
       let state = null;
@@ -1313,13 +1336,16 @@ function wireScratchpad(){
         return;
       }
       const openOptions = { state, name:block.boardName || sourceLabel, memoBlockId:block.id };
-      const openedDoc = sourceKind === "music"
-        ? await openMusicSheetFromMemo(openOptions)
+      const openedDoc = sourceKind === "music" ? await openMusicSheetFromMemo(openOptions)
+        : sourceKind === "map" ? await openMapFromMemo(openOptions)
         : newWhiteboard(openOptions);
-      // 손상된 악보 스냅샷처럼 편집 탭을 만들지 못한 경우에는 openMusicSheetFromMemo가
-      // 이미 구체적인 오류를 알린다. 메모를 닫거나 성공 안내로 그 오류를 덮지 않는다.
+      // 손상된 악보·지도 스냅샷처럼 편집 탭을 만들지 못한 경우에는 openMusicSheetFromMemo·
+      // openMapFromMemo 가 이미 구체적인 오류를 알린다. 메모를 닫거나 성공 안내로 그 오류를 덮지 않는다.
       if (!openedDoc) return;
       setOpen(false);                                     // 메모를 닫아 새 탭이 보이게
+      // 이 블록과 이미 이어져 있던 탭으로 옮겨 간 경우에는 그쪽이 사정을 정확히 알렸다.
+      // 여기서 "열었어요"를 겹쳐 띄우면 그림과 다른 지도를 보고도 그림이 열린 줄 알게 된다.
+      if (openedDoc.memoReusedTab) return;
       if (typeof toast === "function") toast(sourceLabel + "로 열었어요. 고친 뒤 '메모로'를 누르면 이 메모 블록이 바뀝니다.", 3200);
     }, "scratchpad-reuse") : null;
     const imageMemoBtn = makeButton("🖼️ 이미지 메모로", "이 이미지를 이미지 메모로 보내기 (EXE는 저장 폴더의 이미지메모 폴더에 자동 저장)", async () => {
@@ -1478,6 +1504,9 @@ function wireScratchpad(){
         : block.type === "table" ? makeTableBlock(block)
         : makeTextBlock(block)
     ));
+    // 언어를 먼저 영어로 바꾼 뒤 새 그림 블록이 생겨도 "✏️ 지도로" 같은 동적 단추가
+    // 한국어로 남지 않게, 이번에 갈아 끼운 서브트리를 현재 언어의 번역 바인딩에 등록한다.
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(editor);
     updateCount();
   }
   const renameNote = async (note=activeNote()) => {
@@ -2118,6 +2147,11 @@ function wireScratchpad(){
     setOpen(true, false);
     return addBoardBlock(pngBlob, sheetData, { ...options, kind:"music" });
   };
+  // 지도 → 메모(지금 보이는 지도 그림 + 편집용 지도 스냅샷). 되열 때는 "✏️ 지도로".
+  window.addMapToScratchpad = async (pngBlob, mapData, options={}) => {
+    setOpen(true, false);
+    return addBoardBlock(pngBlob, mapData, { ...options, kind:"map" });
+  };
   // 전체 백업 버튼은 0.35초 자동저장 대기 중인 마지막 입력까지 즉시 확정한다.
   window.flushScratchpadBackup = () => persist(false);
   // 텍스트를 글 블록으로 추가(이미지 OCR 결과 등 외부 모듈용) — 메모장을 열고 새 블록에 넣는다.
@@ -2161,6 +2195,7 @@ if (typeof module !== "undefined" && module.exports){
     scratchpadRemoveBlock,
     scratchpadNormalizeBlock,
     scratchpadNormalizeNotebookCell,
+    scratchpadBoardKindLabel,
     scratchpadPlainText,
     scratchpadPreviewLines,
     scratchpadClipAround,

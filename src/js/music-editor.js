@@ -141,6 +141,46 @@ function newMusicScratchInFolder(folder){
     "application/json", "새 악보를");
 }
 
+/* 악보 내용 비교용 열쇠 — 만든·고친 시각은 뺀다. 저장할 때마다 updatedAt 이 바뀌므로 그것까지
+   넣으면 내용이 똑같은 악보도 "다르다"고 잘못 판단한다. 읽지 못하면 빈 문자열을 돌려주고,
+   부르는 쪽은 빈 값을 "같다"로 보지 않는다. */
+function musicMemoContentKey(sheet){
+  if (!sheet) return "";
+  try {
+    const raw = JSON.parse(musicSerialize(sheet));
+    delete raw.createdAt;
+    delete raw.updatedAt;
+    return JSON.stringify(raw);
+  } catch(error){
+    console.warn("악보 내용을 비교하지 못했어요:", error);
+    return "";
+  }
+}
+
+/* 이 블록과 이미 이어져 있는 악보 탭을 만났을 때 — true 면 그 탭을 그대로 쓰고, false 면 메모
+   그림의 스냅샷으로 새 탭을 연다(지도의 mapKeepOpenedMemoTab 과 같은 규약).
+   내용이 다른데도 말없이 그 탭을 보여 주면 메모 그림과 딴판인 악보가 뜨고, 그렇다고 열린 탭을
+   스냅샷으로 되돌리면 메모로 보낸 뒤의 편집이 사라진다. 그래서 그 갈림길만 사용자에게 묻는다. */
+async function musicKeepOpenedMemoTab(opened, snapshot){
+  const openedKey = musicMemoContentKey(opened && opened.sheet);
+  const same = !!openedKey && openedKey === musicMemoContentKey(snapshot);
+  if (!same && typeof confirmDialog === "function"){
+    const openNew = await confirmDialog(
+      "이미 열려 있는 '" + String((opened && opened.name) || "악보")
+        + "' 탭이 이 메모 그림과 이어져 있는데, 그 악보는 그림과 내용이 달라요. 메모 그림의 악보를 새 탭으로 열까요?",
+      "메모 그림으로 열기", "열린 탭 보기");
+    if (openNew) return false;
+  }
+  if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+  if (typeof toast === "function"){
+    toast(same
+      ? "이미 열려 있는 악보 탭으로 갔어요."
+      : "이미 열려 있는 악보 탭으로 갔어요 — 이 탭의 악보는 메모 그림과 내용이 다릅니다.", 3600);
+  }
+  opened.memoReusedTab = true;      // 메모창이 "악보로 열었어요" 안내를 겹쳐 띄우지 않게
+  return true;
+}
+
 /* 메모 이미지 블록의 "✏️ 악보로" — 그림과 함께 넣어 둔 악보 스냅샷을 새 탭으로 되살린다.
    options.state       — 메모 블록에 담긴 악보 객체(musicSerialize 형식)
    options.name        — 탭 이름(메모에 적힌 이름을 되살린다)
@@ -150,21 +190,30 @@ async function openMusicSheetFromMemo(options = {}){
   // 같은 블록을 두 탭으로 열면 둘 다 그 블록을 덮어써 나중 것이 앞의 편집을 지운다.
   const opened = (typeof docs !== "undefined" ? docs : []).find((item) =>
     item && item.kind === "music" && blockId && item.memoBlockId === blockId);
-  if (opened){
-    if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
-    return opened;
-  }
-  let json;
-  try { json = musicSerialize(musicParse(JSON.stringify(options.state || {}))); }
+  let snapshot;
+  try { snapshot = musicParse(JSON.stringify(options.state || {})); }
   catch(error){
     console.warn("메모의 악보 스냅샷을 읽지 못했어요:", error);
+    // 스냅샷이 깨졌더라도 이 블록과 이어져 있던 탭은 그대로 보여 준다.
+    if (opened){
+      if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+      return opened;
+    }
     if (typeof toast === "function") toast("메모에 담긴 악보 정보를 읽지 못했어요.", 2800, { type:"error" });
     return null;
   }
+  if (opened){
+    if (await musicKeepOpenedMemoTab(opened, snapshot)) return opened;
+    // "메모 그림으로 열기"를 골랐다 — 옛 탭의 고리를 먼저 끊어야 한 블록을 두 탭이 덮어쓰지 않는다.
+    opened.memoBlockId = null;
+    if (typeof persistTabState === "function") persistTabState();
+  }
   if (typeof handleFiles !== "function") return null;
   const base = String(options.name || "악보").replace(/\.msheet$/i, "").trim() || "악보";
-  return handleFiles([new File([json], base + ".msheet", { type:"application/json" })],
+  const made = await handleFiles([new File([musicSerialize(snapshot)], base + ".msheet", { type:"application/json" })],
     { isScratch:true, memoBlockId:blockId });
+  if (made) made.memoReusedTab = false;
+  return made;
 }
 
 /* ===== 저장 ===== */
@@ -3046,7 +3095,11 @@ async function mountMusicEditor(doc){
         boardName:label,
         blockId:coversAll ? doc.memoBlockId : null
       });
-      if (result && result.blockId && coversAll) doc.memoBlockId = result.blockId;
+      if (result && result.blockId && coversAll){
+        doc.memoBlockId = result.blockId;
+        // 이 고리는 탭 상태에 함께 저장된다 — 다시 실행한 뒤에도 같은 블록으로 돌아가게.
+        if (typeof persistTabState === "function") persistTabState();
+      }
     } catch(error){
       console.error(error);
       if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2400, { type:"error" });
