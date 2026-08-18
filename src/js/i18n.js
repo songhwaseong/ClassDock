@@ -1619,6 +1619,9 @@
     "지금 보고 있는 지도 가운데를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.":
       "Finds places within a radius of the current map center and adds them as pins.",
     "갈래": "Kind",
+    "직접 찾기": "Your own word",
+    "예: 로또 · 빵집 — 적으면 갈래 대신 이 말로 찾아요":
+      "e.g. lottery · bakery — fill this in to search by your word instead of a kind",
     "반경": "Radius",
     "반경 원도 그리기": "Draw the radius circle too",
     "찾아서 넣기": "Find and add",

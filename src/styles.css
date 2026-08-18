@@ -876,6 +876,11 @@
   .map-nearby-modal .modal-card{width:min(520px,96%)}
   .map-nearby-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
   .map-nearby-field{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
+  /* 직접 찾기 칸은 한 줄을 다 쓴다 — 예시 문구가 잘리지 않게. */
+  .map-nearby-wide{flex:1;min-width:260px}
+  .map-input{flex:1;min-width:0;border:1px solid var(--border);border-radius:7px;background:var(--field);
+    color:var(--ink);padding:6px 8px;font:inherit;font-size:12px}
+  .map-select:disabled{opacity:.5}
   .map-nearby-check{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
   .map-nearby-note{margin:0 0 4px;font-size:12.5px;color:var(--muted);min-height:17px}
   /* 지역 통계 창 */

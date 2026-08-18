@@ -26,7 +26,7 @@ function loadMapViewer(){
       , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
-      , mapCirclePoints, mapRegionNameOf, mapRegionTally
+      , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
     };`, context);
   return context.__map;
 }
@@ -472,6 +472,33 @@ test("주소 검색은 첫 결과 위치를 즉시 표시하고 임시 표식은
   assert.match(source, /MAP_CAPTURE_HIDDEN_PANES[^\n]*\.map-search-location-pane/);
 });
 
+test("주변 시설은 갈래 대신 직접 적은 말로도 반경 안을 찾는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const nearby = /async function mapNearbyPlaces\(target, lat, lng, radius\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(nearby);
+  // 적은 말이 있으면 키워드 검색, 없으면 갈래 검색 — 기준점·반경·쪽수는 두 길이 같다.
+  assert.match(nearby[1], /keyword \? "kakao-keyword" : "kakao-category"/);
+  assert.match(nearby[1], /if \(!keyword\) spot\.category = code/);
+  assert.match(nearby[1], /slice\(0, MAP_NEARBY_KEYWORD_MAX\)/);
+  // 직접 적은 말은 갈래가 아니므로 이름표·색을 그 말로 만든다.
+  assert.match(source, /\{ code:"", label:keyword, color:"purple" \}/);
+  assert.match(source, /mapNearbyPlaces\(keyword \? \{ keyword \} : \{ code:category\.code \}/);
+  assert.match(source, /class="map-input map-nearby-keyword"/);
+  // 갈래 칸은 직접 찾기를 적는 순간 흐려져 어느 쪽으로 찾는지 보인다.
+  assert.match(source, /categorySelect\.disabled = !!keywordInput\.value\.trim\(\)/);
+
+  // 두 런처 모두 기준점이 있는 키워드 검색은 갈래 검색과 같은 쪽수(15개·page)로 받아야 한다.
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  assert.match(csharp, /bool around = provider == "kakao-keyword" && spot\.HasPoint/);
+  assert.match(csharp, /"\?size=" \+ \(around \? "15" : "5"\)/);
+  assert.match(csharp, /"&page=" \+ \(spot\.Page\.Length > 0 \? spot\.Page : "1"\)/);
+  const goKeyword = /if provider == "kakao-keyword" && spot\.hasPoint\(\) \{([\s\S]*?)\n\t\t\}/.exec(go);
+  assert.ok(goKeyword);
+  assert.match(goKeyword[1], /values\.Set\("size", "15"\)/);
+  assert.match(goKeyword[1], /values\.Set\("page", page\)/);
+});
+
 test("지도 문서는 공용 되돌리기 이력을 쓰고 touch() 한 곳에서 기록한다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   // 내용이 바뀌는 곳은 모두 touch() 를 부르므로 기록도 거기 한 곳에 건다.
@@ -758,6 +785,26 @@ test("반경 원은 실제 반경과 넓이(πr²)에 맞는 다각형으로 만
   const area = api.mapPolygonAreaSquareMeters(points);
   const circle = Math.PI * 1000 * 1000;
   assert.ok(Math.abs(area - circle) / circle < 0.01);
+  // 기본 꼭짓점 수가 적으면 크게 확대했을 때 변이 눈에 띄어 원이 삐뚤삐뚤해 보인다.
+  assert.equal(api.mapCirclePoints(37.5, 127.0, 1000).length, 120);
+  // 반경 원의 이름표는 한가운데(정작 보려는 곳)를 덮지 않도록 위쪽 테두리에 둔다.
+  const radiusCircle = { type:"area", source:"nearby", points:api.mapCirclePoints(37.5, 127.0, 1000) };
+  const anchor = api.mapShapeLabelAnchor(radiusCircle);
+  assert.ok(anchor);
+  assert.ok(anchor[0] > 37.5, "위쪽 테두리라 중심보다 북쪽이다");
+  assert.ok(Math.abs(anchor[1] - 127.0) < 0.0001, "좌우로는 가운데다");
+  assert.ok(Math.abs(api.mapDistanceMeters([37.5, 127.0], anchor) - 1000) < 20);
+  // 손으로 그린 영역은 지금까지처럼 한가운데에 둔다.
+  assert.equal(api.mapShapeLabelAnchor({ type:"area", source:"", points:radiusCircle.points }), null);
+  // Leaflet 기본 smoothFactor 는 점을 픽셀 기준으로 솎아 낸다 — 원이 찌그러지고 찍은 꼭짓점도 사라진다.
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const addShape = /const addShapeLayer = \(shape\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(addShape);
+  assert.match(addShape[1], /smoothFactor:0/);
+  // 이름표 자리는 레이어를 지도에 붙인 뒤에 옮겨야 한다(붙기 전에는 말풍선이 뜨지 않는다).
+  assert.ok(addShape[1].indexOf("layer.addTo(map)") < addShape[1].indexOf("layer.openTooltip(anchor)"));
+  assert.match(addShape[1], /direction:\(shape\.type === "area" && !anchor\) \? "center" : "top"/);
+  assert.match(source, /dashArray:"7 6", fillOpacity:0\.12, smoothFactor:0/);
 });
 
 test("카카오 갈래 목록은 코드·색이 모두 성하다", () => {

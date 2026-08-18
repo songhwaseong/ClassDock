@@ -3087,10 +3087,13 @@ class ClassDockLauncher
             else if (kakao)
             {
                 string endpoint = provider == "kakao-keyword" ? KakaoKeywordEndpoint : KakaoAddressEndpoint;
-                url = endpoint + "?size=5&query=" + Uri.EscapeDataString(q);
-                // 키워드 검색에 기준점이 오면 그 둘레만 본다(반경 시설 찾기가 이 길을 쓴다).
-                if (provider == "kakao-keyword" && spot.HasPoint)
+                // 키워드 검색에 기준점이 오면 그 둘레만 본다 — 갈래에 없는 말로 주변 시설을 찾는
+                // 길이라(로또·빵집 …) 갈래 검색과 같은 쪽수(15개·페이지)로 받는다.
+                bool around = provider == "kakao-keyword" && spot.HasPoint;
+                url = endpoint + "?size=" + (around ? "15" : "5") + "&query=" + Uri.EscapeDataString(q);
+                if (around)
                     url += "&x=" + spot.X + "&y=" + spot.Y + "&sort=distance"
+                        + "&page=" + (spot.Page.Length > 0 ? spot.Page : "1")
                         + (spot.Radius.Length > 0 ? "&radius=" + spot.Radius : "");
             }
             else if (provider == "osm-reverse")

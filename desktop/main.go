@@ -398,11 +398,18 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		values := url.Values{}
 		values.Set("size", "5")
 		values.Set("query", query)
-		// 키워드 검색에 기준점이 오면 그 둘레만 본다(반경 시설 찾기가 이 길을 쓴다).
+		// 키워드 검색에 기준점이 오면 그 둘레만 본다 — 갈래에 없는 말로 주변 시설을 찾는
+		// 길이라(로또·빵집 …) 갈래 검색과 같은 쪽수(15개·페이지)로 받는다.
 		if provider == "kakao-keyword" && spot.hasPoint() {
+			values.Set("size", "15")
 			values.Set("x", spot.x)
 			values.Set("y", spot.y)
 			values.Set("sort", "distance")
+			page := spot.page
+			if page == "" {
+				page = "1"
+			}
+			values.Set("page", page)
 			if spot.radius != "" {
 				values.Set("radius", spot.radius)
 			}

@@ -315,6 +315,21 @@ function mapFormatArea(squareMeters){
   const value = Math.max(0, Number(squareMeters) || 0);
   return value >= 1000000 ? (value / 1000000).toFixed(value >= 10000000 ? 1 : 2) + " km²" : Math.round(value).toLocaleString() + " m²";
 }
+/* 이름표를 도형 한가운데가 아니라 위쪽 테두리에 두어야 하는 도형이면 그 자리를 돌려준다.
+   지금은 '주변 시설'의 반경 원 — 그 한가운데가 정작 보려는 곳(기준점 둘레의 시설)이라 이름표가
+   가려 버린다. 손으로 그린 영역은 한가운데가 자연스러우므로 그대로 둔다(null). */
+function mapShapeLabelAnchor(shape){
+  if (!shape || shape.type !== "area" || shape.source !== "nearby") return null;
+  const points = Array.isArray(shape.points) ? shape.points : [];
+  if (!points.length) return null;
+  let north = points[0][0], west = points[0][1], east = points[0][1];
+  for (const point of points){
+    if (point[0] > north) north = point[0];
+    if (point[1] < west) west = point[1];
+    if (point[1] > east) east = point[1];
+  }
+  return [north, (west + east) / 2];
+}
 function mapShapeMeasureText(shape){
   return shape && shape.type === "area" ? mapFormatArea(mapPolygonAreaSquareMeters(shape.points)) : mapFormatDistance(mapLineLengthMeters(shape && shape.points));
 }
@@ -617,16 +632,24 @@ function mapKakaoCategoryPlaces(raw){
     };
   }).filter(Boolean);
 }
-/* 반경 안의 한 갈래를 모아 온다. 카카오는 한 번에 15개씩 주므로 끝(meta.is_end)이 나오거나
-   상한에 닿을 때까지만 이어서 부른다 — 도심 한복판에서 수백 개를 긁어 오지 않게. */
-async function mapNearbyPlaces(code, lat, lng, radius){
+const MAP_NEARBY_KEYWORD_MAX = 30;   // 검색어 길이 — 카카오 키워드 검색에 넣을 말
+
+/* 반경 안의 한 갈래(target.code)나 사용자가 직접 적은 말(target.keyword)을 모아 온다. 갈래 목록에
+   없는 것 — 로또 판매점·빵집처럼 — 은 카카오 키워드 검색을 같은 기준점·반경으로 부른다.
+   카카오는 한 번에 15개씩 주므로 끝(meta.is_end)이 나오거나 상한에 닿을 때까지만 이어 부른다
+   — 도심 한복판에서 수백 개를 긁어 오지 않게. */
+async function mapNearbyPlaces(target, lat, lng, radius){
+  const keyword = String((target && target.keyword) || "").trim().slice(0, MAP_NEARBY_KEYWORD_MAX);
+  const code = keyword ? "" : String((target && target.code) || target || "");
   const proxyBase = await mapTileProxyBase();
   if (!proxyBase) throw new Error("geocode-launcher-required");
   if (!await mapProviderIsKakao()) throw new Error("kakao-required");
-  const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)), category:code };
+  const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)) };
+  if (!keyword) spot.category = code;
   const places = [];
   for (let page = 1; page <= MAP_NEARBY_MAX_PAGES; page++){
-    const raw = await mapFetchGeocode("", "kakao-category", { ...spot, page:String(page) });
+    const raw = await mapFetchGeocode(keyword, keyword ? "kakao-keyword" : "kakao-category",
+      { ...spot, page:String(page) });
     places.push(...mapKakaoCategoryPlaces(raw));
     if (!raw || !raw.meta || raw.meta.is_end !== false) break;
   }
@@ -634,8 +657,10 @@ async function mapNearbyPlaces(code, lat, lng, radius){
 }
 // 반경을 눈에 보이게 하는 원. 지도 모델에는 원이 없으므로 면적 영역(다각형)으로 만든다 —
 // 이미 있는 넓이 계산·이름표·되돌리기를 그대로 타고, 반경 1km 원의 넓이까지 화면에 나온다.
+/* 꼭짓점 수: 60개면 크게 확대했을 때 변이 눈에 띄어 원이 삐뚤삐뚤해 보인다. 120개면 반경 3km
+   원도 화면에서 매끈하고, .map 에 늘어나는 무게는 몇 KB 수준이라 그냥 넉넉히 찍는다. */
 function mapCirclePoints(lat, lng, radiusMeters, steps){
-  const count = Math.max(12, Math.min(180, Math.round(steps || 60)));
+  const count = Math.max(12, Math.min(360, Math.round(steps || 120)));
   const latSpan = (radiusMeters / MAP_EARTH_RADIUS_M) * (180 / Math.PI);
   const lngSpan = latSpan / Math.max(0.01, Math.cos(lat * Math.PI / 180));
   const points = [];
@@ -1354,6 +1379,11 @@ function openMapNearby(center){
           '<label class="map-nearby-field"><span>반경</span><select class="map-select map-nearby-radius"></select></label>' +
           '<label class="map-nearby-check"><input type="checkbox" class="map-nearby-circle" checked><span>반경 원도 그리기</span></label>' +
         '</div>' +
+        '<div class="map-nearby-row">' +
+          '<label class="map-nearby-field map-nearby-wide"><span>직접 찾기</span>' +
+            '<input type="text" class="map-input map-nearby-keyword" maxlength="30" ' +
+              'placeholder="예: 로또 · 빵집 — 적으면 갈래 대신 이 말로 찾아요"></label>' +
+        '</div>' +
         '<p class="map-nearby-note" aria-live="polite"></p>' +
         '<div class="modal-actions">' +
           '<span class="spacer"></span>' +
@@ -1365,6 +1395,7 @@ function openMapNearby(center){
 
     const categorySelect = modal.querySelector(".map-nearby-category");
     const radiusSelect = modal.querySelector(".map-nearby-radius");
+    const keywordInput = modal.querySelector(".map-nearby-keyword");
     const circleCheck = modal.querySelector(".map-nearby-circle");
     const note = modal.querySelector(".map-nearby-note");
     const okBtn = modal.querySelector(".map-nearby-ok");
@@ -1379,6 +1410,15 @@ function openMapNearby(center){
       radiusSelect.appendChild(option);
     }
     radiusSelect.value = "1000";
+    // 직접 찾기에 무언가 적으면 그 말이 갈래를 대신한다 — 갈래 칸을 흐려 어느 쪽으로 찾는지 보인다.
+    const syncKeywordMode = () => { categorySelect.disabled = !!keywordInput.value.trim(); };
+    keywordInput.addEventListener("input", syncKeywordMode);
+    keywordInput.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault(); e.stopPropagation();
+      okBtn.click();
+    });
+    syncKeywordMode();
     mapTranslate(modal);
 
     let settled = false;
@@ -1403,11 +1443,16 @@ function openMapNearby(center){
       if (busy) return;
       busy = true;
       okBtn.disabled = true;
-      const category = MAP_KAKAO_CATEGORIES.find(item => item.code === categorySelect.value) || MAP_KAKAO_CATEGORIES[0];
+      const keyword = keywordInput.value.trim().slice(0, MAP_NEARBY_KEYWORD_MAX);
+      /* 직접 적은 말은 갈래가 아니므로 이름표·색을 그 말로 만든다. 아래(표시 넣기·반경 원 이름)는
+         갈래든 직접 찾기든 같은 모양({label, color})을 받으므로 나머지 길은 그대로다. */
+      const category = keyword
+        ? { code:"", label:keyword, color:"purple" }
+        : (MAP_KAKAO_CATEGORIES.find(item => item.code === categorySelect.value) || MAP_KAKAO_CATEGORIES[0]);
       const radius = Number(radiusSelect.value) || 1000;
       note.textContent = mapT("찾는 중…");
       try {
-        const places = await mapNearbyPlaces(category.code, center.lat, center.lng, radius);
+        const places = await mapNearbyPlaces(keyword ? { keyword } : { code:category.code }, center.lat, center.lng, radius);
         if (!places.length){
           note.textContent = mapTf("반경 {radius} 안에서 {label}을(를) 찾지 못했어요.",
             { radius:mapFormatDistance(radius), label:mapT(category.label) });
@@ -2103,19 +2148,25 @@ async function mountMapEditor(doc){
     return form;
   };
   const addShapeLayer = (shape) => {
-    const options = { color:shape.color, weight:4, opacity:0.9 };
+    /* smoothFactor 를 끈다. Leaflet 은 기본값 1.0 으로 점을 화면 픽셀 기준으로 솎아 내는데,
+       그러면 반경 원의 변 길이가 들쭉날쭉해져 삐뚤삐뚤해 보이고 손으로 찍은 꼭짓점도 조용히
+       사라진다. 우리 도형은 점 수가 많아야 수백 개라 솎아 낼 이유가 없다. */
+    const options = { color:shape.color, weight:4, opacity:0.9, smoothFactor:0 };
     const layer = shape.type === "area"
       ? L.polygon(shape.points, { ...options, fillColor:shape.color, fillOpacity:0.18 })
       : L.polyline(shape.points, options);
+    const anchor = mapShapeLabelAnchor(shape);
     layer.bindTooltip(shapeTooltip(shape), {
       permanent:true,
-      direction:shape.type === "area" ? "center" : "top",
+      direction:(shape.type === "area" && !anchor) ? "center" : "top",
       className:"map-shape-label"
     });
     layer.bindPopup(buildShapePopup(shape, layer), { minWidth:190 });
     layer.on("click", () => selectShape(shape));
     layer.on("popupopen", () => selectShape(shape));
     layer.addTo(map); shapeLayers.set(shape.id, layer);
+    // 반경 원은 한가운데가 정작 보려는 곳이라 이름표를 위쪽 테두리로 올린다(레이어에 붙은 뒤라야 뜬다).
+    if (anchor) layer.openTooltip(anchor);
     return layer;
   };
   model.shapes.forEach(addShapeLayer);
@@ -2137,7 +2188,8 @@ async function mountMapEditor(doc){
     if (draftLayer) map.removeLayer(draftLayer);
     draftLayer = null;
     if (!draftPoints.length) return;
-    const options = { color:drawingMode === "area" ? "#16a34a" : "#2563eb", weight:4, dashArray:"7 6", fillOpacity:0.12 };
+    // 그리는 중에도 점을 솎지 않는다(완성한 도형과 같은 모양으로 보이게).
+    const options = { color:drawingMode === "area" ? "#16a34a" : "#2563eb", weight:4, dashArray:"7 6", fillOpacity:0.12, smoothFactor:0 };
     draftLayer = drawingMode === "area" && draftPoints.length >= 3
       ? L.polygon(draftPoints, options) : L.polyline(draftPoints, options);
     draftLayer.addTo(map);
@@ -2693,6 +2745,6 @@ if (typeof module !== "undefined" && module.exports){
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
     mapMarkersFromCsv, mapMarkersToCsv,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
-    mapCirclePoints, mapRegionNameOf, mapRegionTally
+    mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
   };
 }
