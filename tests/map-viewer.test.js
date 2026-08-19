@@ -33,6 +33,7 @@ function loadMapViewer(){
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
+      , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_PER_KIND_CHOICES, mapNearbyKindColors
     };`, context);
   return context.__map;
 }
@@ -497,18 +498,22 @@ test("주소 검색은 고른 후보로만 옮기고 임시 표식은 지도 캡
 
 test("주변 시설은 갈래 대신 직접 적은 말로도 반경 안을 찾는다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  const nearby = /async function mapNearbyPlaces\(target, lat, lng, radius\)\{([\s\S]*?)\n\}/.exec(source);
+  const nearby = /async function mapNearbyPlaces\(target, lat, lng, radius, limit\)\{([\s\S]*?)\n\}/.exec(source);
   assert.ok(nearby);
   // 적은 말이 있으면 키워드 검색, 없으면 갈래 검색 — 기준점·반경·쪽수는 두 길이 같다.
   assert.match(nearby[1], /keyword \? "kakao-keyword" : "kakao-category"/);
   assert.match(nearby[1], /if \(!keyword\) spot\.category = code/);
   assert.match(nearby[1], /slice\(0, MAP_NEARBY_KEYWORD_MAX\)/);
   // 직접 적은 말은 갈래가 아니므로 이름표·색을 그 말로 만든다.
-  assert.match(source, /\{ code:"", label:keyword, color:"purple" \}/);
-  assert.match(source, /mapNearbyPlaces\(keyword \? \{ keyword \} : \{ code:category\.code \}/);
+  assert.match(source, /\[\{ code:"", label:keyword, color:"purple" \}\]/);
+  assert.match(source, /mapNearbyPlaces\(\{ keyword \}, center\.lat, center\.lng, radius\)/);
   assert.match(source, /class="map-input map-nearby-keyword"/);
   // 갈래 칸은 직접 찾기를 적는 순간 흐려져 어느 쪽으로 찾는지 보인다.
-  assert.match(source, /categorySelect\.disabled = !!keywordInput\.value\.trim\(\)/);
+  assert.match(source, /const keywordMode = !!keywordInput\.value\.trim\(\)/);
+  assert.match(source, /row\.box\.disabled = keywordMode \|\| \(full && !row\.box\.checked\)/);
+  assert.match(source, /perSelect\.disabled = keywordMode/);
+  // 직접 찾기는 갈래가 하나뿐이라 예전처럼 쪽을 이어 받는다 — 갈래당 개수로 자르지 않는다.
+  assert.doesNotMatch(source, /mapNearbyPlaces\(\{ keyword \}[^)]*perKind/);
 
   // 두 런처 모두 기준점이 있는 키워드 검색은 갈래 검색과 같은 쪽수(15개·page)로 받아야 한다.
   const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
@@ -1027,12 +1032,81 @@ test("반경 원은 실제 반경과 넓이(πr²)에 맞는 다각형으로 만
 
 test("카카오 갈래 목록은 코드·색이 모두 성하다", () => {
   const api = loadMapViewer();
-  assert.ok(api.MAP_KAKAO_CATEGORIES.length >= 8);
+  const list = api.MAP_KAKAO_CATEGORIES;
+  /* 카카오가 나눠 둔 category_group_code 는 열여덟 가지이고 그 전부를 담는다 — 하나라도 빠지면
+     그 갈래는 '직접 찾기'로만 닿을 수 있는데, 키워드 검색은 이름에 그 말이 든 곳만 찾아
+     갈래 검색과 결과가 다르다(숙박으로 적으면 이름에 '숙박'이 든 곳만 나온다). */
+  assert.equal(list.length, 18);
   const colors = api.MAP_MARKER_COLORS.map(color => color.id);
-  for (const item of api.MAP_KAKAO_CATEGORIES){
+  for (const item of list){
     assert.match(item.code, /^[A-Z]{2}[0-9]$/, item.code);
     assert.ok(colors.includes(item.color), item.label + " 의 색 " + item.color);
+    assert.ok(item.label, item.code + " 에 이름이 없다");
   }
+  assert.equal(new Set(list.map(item => item.code)).size, list.length, "코드가 겹친다");
+  assert.equal(new Set(list.map(item => item.label)).size, list.length, "이름이 겹친다");
+  // 창에 펼쳐지는 이름은 모두 영어 사전에 있어야 EN 으로 바꿨을 때 한국어로 남지 않는다.
+  const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+  for (const item of list) assert.ok(i18n.includes('"' + item.label + '":'), item.label + " 의 영문이 없다");
+});
+
+test("주변 시설은 갈래를 여러 개 골라 한 번에 넣는다", () => {
+  const api = loadMapViewer();
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  /* 상한이 서로 맞물려 있다. 갈래당 15곳 × 다섯 갈래 = 75곳이라 이름표를 접는 문턱 아래에
+     머물고, 15 는 카카오 한 쪽(15개)이라 갈래마다 검색이 한 번으로 끝난다. */
+  assert.equal(api.MAP_NEARBY_MAX_KINDS, 5);
+  const perMax = Math.max(...api.MAP_NEARBY_PER_KIND_CHOICES);
+  assert.equal(perMax, 15);
+  assert.ok(perMax * api.MAP_NEARBY_MAX_KINDS < api.MAP_LABEL_MAX_MARKERS,
+    "고를 수 있는 최대치가 이름표를 접는 문턱을 넘으면 안 된다");
+  // 15 이하를 고르면 첫 쪽에서 멈춘다 — 갈래를 다섯 골라도 검색은 다섯 번이다.
+  const nearby = /async function mapNearbyPlaces\(target, lat, lng, radius, limit\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(nearby);
+  assert.match(nearby[1], /if \(cap && places\.length >= cap\) break;/);
+  assert.match(nearby[1], /return cap \? places\.slice\(0, cap\) : places;/);
+
+  /* 색: 여섯 색을 열세 갈래가 나눠 써 겹친다(학교·학원이 둘 다 파랑). 같이 고르면 지도에서
+     갈래를 가를 수 없으므로 뒤엣것이 남는 색으로 비껴야 한다. */
+  const byLabel = (label) => api.MAP_KAKAO_CATEGORIES.find(item => item.label === label);
+  const pair = [byLabel("학교"), byLabel("학원")];
+  assert.equal(pair[0].color, pair[1].color, "이 검사는 색이 겹치는 짝을 전제로 한다");
+  const colored = api.mapNearbyKindColors(pair);
+  assert.equal(colored[0].color, pair[0].color, "먼저 고른 갈래는 제 색을 지킨다");
+  assert.notEqual(colored[1].color, colored[0].color);
+  // 어떤 다섯을 골라도 서로 다른 색이 나온다(색이 여섯이라 늘 자리가 남는다).
+  const five = ["학교", "학원", "병원", "약국", "편의점"].map(byLabel);
+  const fiveColors = api.mapNearbyKindColors(five).map(kind => kind.color);
+  assert.equal(new Set(fiveColors).size, 5);
+  for (const color of fiveColors) assert.ok(api.MAP_MARKER_COLORS.some(item => item.id === color));
+  // 배정은 원본을 건드리지 않는다 — 목록은 창을 여닫는 사이 그대로여야 한다.
+  assert.equal(byLabel("학원").color, pair[1].color);
+
+  // 창: 갈래는 체크박스로 펼쳐지고, 다 채우면 아직 안 고른 것만 잠긴다.
+  assert.match(source, /class="map-nearby-kind-grid"/);
+  assert.match(source, /box\.type = "checkbox"; box\.value = item\.code/);
+  assert.match(source, /const full = picked\.length >= MAP_NEARBY_MAX_KINDS/);
+  /* 창은 빈 채로 열린다 — 셀렉트 때처럼 하나가 미리 골라져 있으면 병원만 보려던 사람이 그것을
+     풀지 않고 넣게 된다. 대신 하나를 고를 때까지 '찾아서 넣기'가 잠긴다. */
+  assert.doesNotMatch(source, /kindRows\[0\]\.box\.checked = true/);
+  assert.match(source, /okBtn\.disabled = !keywordMode && !picked\.length/);
+  // 색 점은 고르는 사이에 따라 움직여야 넣기 전에 어느 색인지 읽힌다.
+  assert.match(source, /row\.dot\.style\.background = mapColorHex\(row\.box\.checked \? colored\[at\+\+\]\.color : row\.item\.color\)/);
+
+  /* 한 갈래가 넘어져도 나머지는 넣는다. 다만 하나도 못 건지면 까닭을 그대로 올려야
+     카카오 꺼짐·런처 없음 안내가 살아 있다. */
+  const byKinds = /async function mapNearbyPlacesByKinds\(kinds, lat, lng, radius, perKind\)\{([\s\S]*?)\n\}/.exec(source);
+  assert.ok(byKinds);
+  assert.match(byKinds[1], /catch\(error\)\{ failed\.push\(kind\); if \(!firstError\) firstError = error; continue; \}/);
+  assert.match(byKinds[1], /if \(!places\.length && firstError\) throw firstError;/);
+  assert.match(byKinds[1], /places\.push\(\{ \.\.\.place, kind \}\)/);
+  // 못 부른 갈래는 상태줄에 남긴다 — 토스트 자리는 되돌리기가 쓰고 있다.
+  assert.match(source, /setStatus\(mapTf\("\{labels\}은\(는\) 찾지 못해 나머지만 넣었습니다"/);
+
+  // 표시는 제 갈래 색으로 들어가고, 갈래 이름이 메모 첫 줄에 남아 색이 겹쳐도 되짚을 수 있다.
+  assert.match(source, /const kind = place\.kind \|\| picked\.kinds\[0\]/);
+  assert.match(source, /color:kind\.color,/);
+  assert.match(source, /note:\[kind\.code \? mapT\(kind\.label\) : ""/);
 });
 
 /* ===== 지역별 개수 ===== */

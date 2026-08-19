@@ -785,24 +785,40 @@ function mapAddressAt(lat, lng){ return mapPlaceInfoAt(lat, lng, "address"); }
 function mapRegionAt(lat, lng){ return mapPlaceInfoAt(lat, lng, "region"); }
 
 /* ===== 반경 안 갈래별 장소(카카오 전용) =====
-   OSM 에는 대응하는 길이 없어(Overpass 는 별개 서비스다) 카카오를 켰을 때만 화면에 내놓는다. */
+   OSM 에는 대응하는 길이 없어(Overpass 는 별개 서비스다) 카카오를 켰을 때만 화면에 내놓는다.
+   갈래는 우리가 정하는 것이 아니라 카카오가 나눠 둔 열여덟 가지가 전부다(category_group_code).
+   여기 그 열여덟을 다 담아 두고 비슷한 것끼리 붙여 놓는다 — 창에서 격자로 펼쳐지므로 이 차례가
+   곧 화면에 놓이는 차례다. 목록에 없는 것(로또 판매점·빵집처럼)은 '직접 찾기'가 맡는다. */
 const MAP_KAKAO_CATEGORIES = [
   { code:"SC4", label:"학교", color:"blue" },
   { code:"AC5", label:"학원", color:"blue" },
   { code:"PS3", label:"어린이집·유치원", color:"purple" },
-  { code:"SW8", label:"지하철역", color:"slate" },
   { code:"HP8", label:"병원", color:"red" },
   { code:"PM9", label:"약국", color:"red" },
+  { code:"SW8", label:"지하철역", color:"slate" },
+  { code:"PK6", label:"주차장", color:"slate" },
+  { code:"OL7", label:"주유소·충전소", color:"slate" },
   { code:"CS2", label:"편의점", color:"green" },
   { code:"MT1", label:"대형마트", color:"green" },
+  { code:"FD6", label:"음식점", color:"green" },
+  { code:"CE7", label:"카페", color:"green" },
+  { code:"AD5", label:"숙박", color:"purple" },
+  { code:"AG2", label:"중개업소", color:"amber" },
   { code:"PO3", label:"공공기관", color:"amber" },
   { code:"BK9", label:"은행", color:"amber" },
   { code:"CT1", label:"문화시설", color:"purple" },
-  { code:"AT4", label:"관광명소", color:"amber" },
-  { code:"PK6", label:"주차장", color:"slate" }
+  { code:"AT4", label:"관광명소", color:"amber" }
 ];
 const MAP_NEARBY_RADIUS_CHOICES = [500, 1000, 2000, 3000];
 const MAP_NEARBY_MAX_PAGES = 3;      // 한 쪽 15개 — 한 번에 최대 45곳
+/* 한 번에 고를 수 있는 갈래 수. 다섯에서 끊는 까닭은 요청 수가 아니라 읽힘이다 — 갈래당 15곳이면
+   다섯 갈래라도 75곳이라, 이름표를 접는 문턱(MAP_LABEL_MAX_MARKERS)에 닿지 않아 넣은 곳마다
+   이름이 그대로 보인다. 표시 색도 여섯 가지뿐이라 다섯까지는 서로 다른 색을 줄 수 있다. */
+const MAP_NEARBY_MAX_KINDS = 5;
+/* 갈래당 몇 곳까지 넣을지. 카카오가 한 쪽에 15개를 가까운 차례로 주므로 상한이 15면 갈래마다
+   검색은 한 번이다(다섯 갈래를 골라도 다섯 번). 5·10 을 골라도 받아 온 것을 앞에서 자르기만 해
+   요청 수는 같고, 가까운 차례라 '가장 가까운 다섯 곳씩'이라는 뜻이 된다. */
+const MAP_NEARBY_PER_KIND_CHOICES = [5, 10, 15];
 
 function mapKakaoCategoryPlaces(raw){
   return (raw && Array.isArray(raw.documents) ? raw.documents : []).map((item) => {
@@ -824,8 +840,9 @@ const MAP_NEARBY_KEYWORD_MAX = 30;   // 검색어 길이 — 카카오 키워드
 /* 반경 안의 한 갈래(target.code)나 사용자가 직접 적은 말(target.keyword)을 모아 온다. 갈래 목록에
    없는 것 — 로또 판매점·빵집처럼 — 은 카카오 키워드 검색을 같은 기준점·반경으로 부른다.
    카카오는 한 번에 15개씩 주므로 끝(meta.is_end)이 나오거나 상한에 닿을 때까지만 이어 부른다
-   — 도심 한복판에서 수백 개를 긁어 오지 않게. */
-async function mapNearbyPlaces(target, lat, lng, radius){
+   — 도심 한복판에서 수백 개를 긁어 오지 않게.
+   limit 을 주면 그 개수에서 멈춘다. 15 이하면 첫 쪽으로 이미 다 채우므로 쪽 넘기기가 아예 없다. */
+async function mapNearbyPlaces(target, lat, lng, radius, limit){
   const keyword = String((target && target.keyword) || "").trim().slice(0, MAP_NEARBY_KEYWORD_MAX);
   const code = keyword ? "" : String((target && target.code) || target || "");
   const proxyBase = await mapTileProxyBase();
@@ -833,14 +850,59 @@ async function mapNearbyPlaces(target, lat, lng, radius){
   if (!await mapProviderIsKakao()) throw new Error("kakao-required");
   const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)) };
   if (!keyword) spot.category = code;
+  const cap = Number(limit) > 0 ? Math.round(Number(limit)) : 0;
   const places = [];
   for (let page = 1; page <= MAP_NEARBY_MAX_PAGES; page++){
     const raw = await mapFetchGeocode(keyword, keyword ? "kakao-keyword" : "kakao-category",
       { ...spot, page:String(page) });
     places.push(...mapKakaoCategoryPlaces(raw));
+    if (cap && places.length >= cap) break;
     if (!raw || !raw.meta || raw.meta.is_end !== false) break;
   }
-  return places;
+  return cap ? places.slice(0, cap) : places;
+}
+
+/* 고른 갈래에 표시 색을 배정한다. 갈래마다 제 색이 정해져 있지만 여섯 색을 열세 갈래가 나눠 쓰는
+   터라 겹친다(학교·학원이 둘 다 파랑, 병원·약국이 둘 다 빨강). 같이 고른 갈래끼리 색이 같으면
+   지도에서 갈래를 가를 수 없으므로, 뒤엣것을 아직 안 쓴 색으로 비껴 준다 — 제 색을 지키는 것보다
+   서로 다른 것이 먼저다. 한 번에 다섯 갈래까지라 색은 언제나 남는다. */
+function mapNearbyKindColors(kinds){
+  const used = new Set();
+  return (Array.isArray(kinds) ? kinds : []).map((kind) => {
+    let color = kind.color;
+    if (used.has(color)){
+      const spare = MAP_MARKER_COLORS.find(item => !used.has(item.id));
+      if (spare) color = spare.id;
+    }
+    used.add(color);
+    return { ...kind, color };
+  });
+}
+
+/* 고른 갈래를 하나씩 찾아 한 벌로 모은다. 갈래당 15곳까지면 갈래마다 요청이 한 번이라 다섯을
+   골라도 검색은 다섯 번이다 — 차례로 불러도 몇 초면 끝나므로 한꺼번에 몰아 부치지 않는다.
+   한 갈래가 넘어져도 나머지는 넣는다. 다섯 중 하나가 실패했다고 이미 찾은 것까지 버리면 수업
+   도중에 "아까는 됐는데"가 되기 때문이다. 다만 하나도 못 건졌다면 그것은 통신이 끊긴 것이라
+   까닭을 그대로 올려 보낸다(카카오 꺼짐·런처 없음 안내가 살아 있어야 한다).
+   돌려주는 값: { places, failed } · places 의 항목마다 어느 갈래에서 왔는지 kind 가 붙는다. */
+async function mapNearbyPlacesByKinds(kinds, lat, lng, radius, perKind){
+  const places = [], failed = [], seen = new Set();
+  let firstError = null;
+  for (const kind of kinds){
+    let found = [];
+    try { found = await mapNearbyPlaces({ code:kind.code }, lat, lng, radius, perKind); }
+    catch(error){ failed.push(kind); if (!firstError) firstError = error; continue; }
+    for (const place of found){
+      /* 같은 곳이 두 갈래에 걸리는 일은 드물지만(카카오는 장소마다 갈래가 하나다) 겹치면 먼저
+         고른 갈래로 남긴다 — 같은 자리에 표시가 둘 포개지면 아래쪽을 누를 수 없다. */
+      const key = place.name + "\n" + place.lat.toFixed(6) + "," + place.lng.toFixed(6);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      places.push({ ...place, kind });
+    }
+  }
+  if (!places.length && firstError) throw firstError;
+  return { places, failed };
 }
 
 /* ===== 누른 자리가 어디인지 =====
@@ -1676,9 +1738,12 @@ function openMapRegionStats(model, hooks){
 }
 
 /* ===== 주변 시설 찾기 창 =====
-   지도 가운데를 기준으로 반경 안의 한 갈래를 모아 온다. '우리 동네에 학교가 몇 곳인가'처럼
+   지도 가운데를 기준으로 반경 안의 갈래들을 모아 온다. '우리 동네에 학교와 병원이 몇 곳인가'처럼
    사회과에서 바로 쓰는 물음이라, 찾은 개수를 창 안에서 먼저 보여 주고 넣을지 고르게 한다.
-   돌려주는 값: { places, category, radius, circle } · 취소하면 null. */
+   갈래를 접어 두지 않고 체크박스로 펼쳐 두는 까닭: 무엇을 찾을 수 있는지가 창을 열자마자 보이고,
+   색 점이 곁에 있어 어느 색으로 지도에 들어갈지도 넣기 전에 읽힌다.
+   돌려주는 값: { places, kinds, failed, radius, circle } · 취소하면 null.
+   places 의 항목마다 어느 갈래에서 왔는지 kind 가 붙어 있다. */
 function openMapNearby(center, opts = {}){
   return new Promise((resolve) => {
     /* 도구막대로 부르면 화면 가운데가, 우클릭 메뉴로 부르면 누른 자리가 기준이다. 어디를 중심으로
@@ -1692,9 +1757,16 @@ function openMapNearby(center, opts = {}){
       '<div class="modal-card map-nearby-card">' +
         '<h3>주변 시설 찾기</h3>' +
         '<p class="sub">' + subText + '</p>' +
+        '<div class="map-nearby-kinds">' +
+          '<div class="map-nearby-kinds-head">' +
+            '<span>갈래</span>' +
+            '<span class="map-nearby-kinds-count" aria-live="polite"></span>' +
+          '</div>' +
+          '<div class="map-nearby-kind-grid"></div>' +
+        '</div>' +
         '<div class="map-nearby-row">' +
-          '<label class="map-nearby-field"><span>갈래</span><select class="map-select map-nearby-category"></select></label>' +
           '<label class="map-nearby-field"><span>반경</span><select class="map-select map-nearby-radius"></select></label>' +
+          '<label class="map-nearby-field"><span>갈래당</span><select class="map-select map-nearby-per"></select></label>' +
           '<label class="map-nearby-check"><input type="checkbox" class="map-nearby-circle" checked><span>반경 원도 그리기</span></label>' +
         '</div>' +
         '<div class="map-nearby-row">' +
@@ -1711,32 +1783,75 @@ function openMapNearby(center, opts = {}){
       '</div>';
     document.body.appendChild(modal);
 
-    const categorySelect = modal.querySelector(".map-nearby-category");
+    const kindGrid = modal.querySelector(".map-nearby-kind-grid");
+    const kindCount = modal.querySelector(".map-nearby-kinds-count");
     const radiusSelect = modal.querySelector(".map-nearby-radius");
+    const perSelect = modal.querySelector(".map-nearby-per");
     const keywordInput = modal.querySelector(".map-nearby-keyword");
     const circleCheck = modal.querySelector(".map-nearby-circle");
     const note = modal.querySelector(".map-nearby-note");
     const okBtn = modal.querySelector(".map-nearby-ok");
-    for (const item of MAP_KAKAO_CATEGORIES){
-      const option = document.createElement("option");
-      option.value = item.code; option.textContent = item.label;
-      categorySelect.appendChild(option);
-    }
+    const kindRows = MAP_KAKAO_CATEGORIES.map((item) => {
+      const row = document.createElement("label");
+      row.className = "map-nearby-kind";
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.value = item.code;
+      const dot = document.createElement("span");
+      dot.className = "map-nearby-dot";
+      const text = document.createElement("span");
+      text.textContent = item.label;
+      row.append(box, dot, text);
+      kindGrid.appendChild(row);
+      return { item, row, box, dot };
+    });
+    /* 창은 아무 갈래도 골라지지 않은 채로 열린다. 셀렉트 때는 늘 첫 항목이 골라져 있었지만,
+       그러면 병원만 보려던 사람이 학교 체크를 풀지 않고 넣어 "왜 학교가 같이 들어왔지"가 된다.
+       고르는 일이 눈에 보이는 선택이 되도록 비워 두고, 하나를 고를 때까지 '찾아서 넣기'를 잠근다. */
     for (const meters of MAP_NEARBY_RADIUS_CHOICES){
       const option = document.createElement("option");
       option.value = String(meters); option.textContent = mapFormatDistance(meters);
       radiusSelect.appendChild(option);
     }
     radiusSelect.value = "1000";
-    // 직접 찾기에 무언가 적으면 그 말이 갈래를 대신한다 — 갈래 칸을 흐려 어느 쪽으로 찾는지 보인다.
-    const syncKeywordMode = () => { categorySelect.disabled = !!keywordInput.value.trim(); };
-    keywordInput.addEventListener("input", syncKeywordMode);
+    for (const count of MAP_NEARBY_PER_KIND_CHOICES){
+      const option = document.createElement("option");
+      option.value = String(count); option.textContent = mapTf("{count}곳", { count });
+      perSelect.appendChild(option);
+    }
+    const perKindMax = MAP_NEARBY_PER_KIND_CHOICES[MAP_NEARBY_PER_KIND_CHOICES.length - 1];
+    perSelect.value = String(perKindMax);
+
+    const pickedKinds = () => kindRows.filter(row => row.box.checked).map(row => row.item);
+    /* 고른 갈래와 직접 찾기에 맞춰 창을 다시 맞춘다. 색까지 여기서 배정하는 까닭은 고르는 사이에
+       색 점이 따라 움직여야 '학원은 이번엔 초록이구나'가 넣기 전에 보이기 때문이다. */
+    const syncKinds = () => {
+      // 직접 찾기에 무언가 적으면 그 말이 갈래를 대신한다 — 갈래 칸을 흐려 어느 쪽으로 찾는지 보인다.
+      const keywordMode = !!keywordInput.value.trim();
+      const picked = pickedKinds();
+      const colored = mapNearbyKindColors(picked);
+      const full = picked.length >= MAP_NEARBY_MAX_KINDS;
+      let at = 0;
+      for (const row of kindRows){
+        row.dot.style.background = mapColorHex(row.box.checked ? colored[at++].color : row.item.color);
+        // 다 채웠으면 아직 안 고른 것만 잠근다 — 이미 고른 것은 언제든 풀 수 있어야 한다.
+        row.box.disabled = keywordMode || (full && !row.box.checked);
+        row.row.classList.toggle("is-off", row.box.disabled);
+      }
+      perSelect.disabled = keywordMode;
+      // 갈래를 다 풀면 찾을 것이 없다(셀렉트 때는 늘 하나가 골라져 있어 없던 갈래다).
+      okBtn.disabled = !keywordMode && !picked.length;
+      kindCount.textContent = keywordMode ? ""
+        : full ? mapTf("최대 {max}갈래까지 고를 수 있어요", { max:MAP_NEARBY_MAX_KINDS })
+        : mapTf("{count}/{max}갈래", { count:picked.length, max:MAP_NEARBY_MAX_KINDS });
+    };
+    for (const row of kindRows) row.box.addEventListener("change", syncKinds);
+    keywordInput.addEventListener("input", syncKinds);
     keywordInput.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault(); e.stopPropagation();
       okBtn.click();
     });
-    syncKeywordMode();
+    syncKinds();
     mapTranslate(modal);
 
     let settled = false;
@@ -1759,32 +1874,42 @@ function openMapNearby(center, opts = {}){
 
     okBtn.addEventListener("click", async () => {
       if (busy) return;
-      busy = true;
-      okBtn.disabled = true;
       const keyword = keywordInput.value.trim().slice(0, MAP_NEARBY_KEYWORD_MAX);
       /* 직접 적은 말은 갈래가 아니므로 이름표·색을 그 말로 만든다. 아래(표시 넣기·반경 원 이름)는
-         갈래든 직접 찾기든 같은 모양({label, color})을 받으므로 나머지 길은 그대로다. */
-      const category = keyword
-        ? { code:"", label:keyword, color:"purple" }
-        : (MAP_KAKAO_CATEGORIES.find(item => item.code === categorySelect.value) || MAP_KAKAO_CATEGORIES[0]);
+         갈래든 직접 찾기든 같은 모양({ code, label, color })의 벌을 받으므로 나머지 길은 하나다. */
+      const kinds = keyword
+        ? [{ code:"", label:keyword, color:"purple" }]
+        : mapNearbyKindColors(pickedKinds());
+      if (!kinds.length) return;
+      busy = true;
+      okBtn.disabled = true;
       const radius = Number(radiusSelect.value) || 1000;
+      const perKind = Number(perSelect.value) || perKindMax;
       note.textContent = mapT("찾는 중…");
       try {
-        const places = await mapNearbyPlaces(keyword ? { keyword } : { code:category.code }, center.lat, center.lng, radius);
-        if (!places.length){
-          note.textContent = mapTf("반경 {radius} 안에서 {label}을(를) 찾지 못했어요.",
-            { radius:mapFormatDistance(radius), label:mapT(category.label) });
-          busy = false; okBtn.disabled = false;
+        /* 직접 찾기는 갈래가 하나뿐이라 예전 길(쪽을 이어 받아 최대 45곳) 그대로 두고, 고른
+           갈래들만 갈래당 개수로 자른다 — '갈래당'이라는 칸이 흐려져 있는 쪽의 규칙을 몰래
+           바꾸지 않기 위해서다. */
+        const found = keyword
+          ? { places:(await mapNearbyPlaces({ keyword }, center.lat, center.lng, radius))
+              .map(place => ({ ...place, kind:kinds[0] })), failed:[] }
+          : await mapNearbyPlacesByKinds(kinds, center.lat, center.lng, radius, perKind);
+        if (!found.places.length){
+          note.textContent = kinds.length === 1
+            ? mapTf("반경 {radius} 안에서 {label}을(를) 찾지 못했어요.",
+                { radius:mapFormatDistance(radius), label:mapT(kinds[0].label) })
+            : mapTf("반경 {radius} 안에서 고른 갈래를 찾지 못했어요.", { radius:mapFormatDistance(radius) });
+          busy = false; syncKinds();
           return;
         }
-        finish({ places, category, radius, circle:circleCheck.checked });
+        finish({ places:found.places, kinds, failed:found.failed, radius, circle:circleCheck.checked });
       } catch(error){
         note.textContent = mapT(error && error.message === "kakao-required"
           ? "주변 시설 찾기는 카카오 지도 검색을 켰을 때만 쓸 수 있어요(설정 → 지도 검색)."
           : error && error.message === "geocode-launcher-required"
             ? "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요."
             : "주변 시설을 찾지 못했어요 — 인터넷 연결을 확인해 주세요.");
-        busy = false; okBtn.disabled = false;
+        busy = false; syncKinds();
       }
     });
   });
@@ -3842,11 +3967,15 @@ async function mountMapEditor(doc){
     const batch = mapBatchId();
     const added = [];
     for (const place of picked.places){
+      const kind = place.kind || picked.kinds[0];
       const marker = mapNormalizeMarker({
-        lat:place.lat, lng:place.lng, color:picked.category.color,
+        lat:place.lat, lng:place.lng, color:kind.color,
         label:place.name,
-        // 주소와 거리는 수업에서 그대로 읽는 값이라 메모에 남긴다.
-        note:[place.address, place.distance ? mapTf("중심에서 {distance}", { distance:mapFormatDistance(place.distance) }) : ""]
+        /* 주소와 거리는 수업에서 그대로 읽는 값이라 메모에 남긴다. 갈래 이름을 맨 앞에 두는 까닭:
+           여러 갈래를 함께 넣으면 색만으로는 어느 갈래인지 되짚기 어렵다(색은 다섯까지만 갈린다).
+           직접 찾기로 넣은 것은 갈래가 없으므로(code 가 빈다) 넣지 않는다 — 이름과 같은 말이다. */
+        note:[kind.code ? mapT(kind.label) : "", place.address,
+          place.distance ? mapTf("중심에서 {distance}", { distance:mapFormatDistance(place.distance) }) : ""]
           .filter(Boolean).join("\n"),
         source:"nearby", batch
       });
@@ -3854,11 +3983,16 @@ async function mountMapEditor(doc){
       addMarkerLayer(marker);
       added.push(marker);
     }
+    // 갈래가 여럿이면 원 이름에 다 늘어놓는 대신 기능 이름으로 부른다 — 원은 하나뿐이라 갈래를 못 가른다.
+    const kindText = picked.kinds.length === 1
+      ? mapT(picked.kinds[0].label)
+      : mapTf("{count}갈래", { count:picked.kinds.length });
     if (picked.circle){
       const shape = mapNormalizeShape({
         type:"area",
         points:mapCirclePoints(center.lat, center.lng, picked.radius),
-        label:mapT(picked.category.label) + " " + mapFormatDistance(picked.radius),
+        label:(picked.kinds.length === 1 ? mapT(picked.kinds[0].label) : mapT("주변 시설"))
+          + " " + mapFormatDistance(picked.radius),
         color:"#2563eb",
         source:"nearby", batch
       });
@@ -3867,9 +4001,15 @@ async function mountMapEditor(doc){
     }
     touch();
     fitToMarkers(added);
+    /* 못 부른 갈래는 토스트에 얹지 않는다 — 그 자리는 되돌리기가 쓰고 있어 지우면 넣은 것을 도로
+       뺄 길이 사라진다. 대신 상태줄에 남겨 두면 넣은 뒤에도 계속 읽을 수 있다. */
+    if (picked.failed && picked.failed.length){
+      setStatus(mapTf("{labels}은(는) 찾지 못해 나머지만 넣었습니다",
+        { labels:picked.failed.map(kind => mapT(kind.label)).join(" · ") }));
+    }
     if (typeof toast === "function"){
       toast(mapTf("{label} {count}곳을 반경 {radius} 안에서 찾아 넣었습니다",
-        { label:mapT(picked.category.label), count:added.length, radius:mapFormatDistance(picked.radius) }),
+        { label:kindText, count:added.length, radius:mapFormatDistance(picked.radius) }),
       6000, { action:{ label:mapT("되돌리기"), onClick:() => {
         removeTagged(item => item.batch === batch);
         if (typeof toast === "function") toast(mapT("방금 넣은 주변 시설을 도로 뺐습니다"), 2600);
@@ -4652,6 +4792,7 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = {
     MAP_DOC_TYPE, MAP_DOC_VERSION, MAP_BASEMAPS, MAP_MARKER_COLORS,
     MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX,
+    MAP_NEARBY_MAX_KINDS, MAP_NEARBY_PER_KIND_CHOICES, mapNearbyKindColors,
     mapDocEmpty, mapDocParse, mapDocSerialize, mapDocContentKey,
     mapNormalizeMarker, mapNormalizeShape, mapNormalizeBackgroundImage,
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,

@@ -1019,8 +1019,24 @@
   .map-spot-btn:hover{background:var(--panel-hover);border-color:var(--accent)}
   .map-spot-btn[hidden]{display:none}
   /* 주변 시설 찾기 창 */
-  .map-nearby-modal .modal-card{width:min(520px,96%)}
+  .map-nearby-modal .modal-card{width:min(560px,96%)}
   .map-nearby-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  /* 갈래는 접지 않고 펼쳐 둔다 — 무엇을 찾을 수 있는지가 창을 열자마자 보이게. */
+  .map-nearby-kinds{margin-bottom:10px}
+  .map-nearby-kinds-head{display:flex;align-items:baseline;gap:8px;margin-bottom:5px;
+    font-size:12.5px;color:var(--ink)}
+  .map-nearby-kinds-count{font-size:11.5px;color:var(--muted)}
+  /* 열세 갈래가 좁은 화면에서도 서너 줄에 들어오게 — 칸 너비는 가장 긴 이름(어린이집·유치원)에 맞춘다. */
+  .map-nearby-kind-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));
+    gap:2px 10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--field)}
+  .map-nearby-kind{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);
+    padding:3px 2px;cursor:pointer;min-width:0}
+  .map-nearby-kind>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 다 채웠을 때 아직 안 고른 갈래 — 왜 안 눌리는지는 위 개수 문구가 말해 준다. */
+  .map-nearby-kind.is-off{opacity:.42;cursor:default}
+  /* 지도에 들어갈 색을 미리 보여 준다. 고른 갈래끼리 색이 겹치면 여기 점이 먼저 바뀐다. */
+  .map-nearby-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;
+    box-shadow:0 0 0 1px rgba(0,0,0,.18) inset}
   .map-nearby-field{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
   /* 직접 찾기 칸은 한 줄을 다 쓴다 — 예시 문구가 잘리지 않게. */
   .map-nearby-wide{flex:1;min-width:260px}
