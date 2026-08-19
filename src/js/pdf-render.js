@@ -31,6 +31,7 @@ async function loadPdf(arrayBuffer, name, options={}){
         if (n % 8 === 0) await yieldToBrowser();
       }
       if (doc.closed) return;
+      applyStoredPdfPageMode(doc);   // 지난번에 고른 보기 방식(이어보기 / 한 장씩)으로 시작
       startLazyRender(doc);          // 보이는 페이지부터 렌더, 멀어지면 캔버스 해제
       createPdfPagePanel(doc);
       await initPdfOutline(doc);     // 원본 책갈피를 편집 모델로 바꾼 뒤 복구본·히스토리와 합친다
@@ -420,6 +421,14 @@ window.addEventListener("resize", schedulePdfSelHighlight);
 // 지연 렌더 옵저버: 화면 근처(±3화면) 페이지만 렌더하고, 멀어지면 해제한다.
 function startLazyRender(doc){
   if (doc.io){ doc.io.disconnect(); doc.io = null; }
+  /* 한 장씩 보기에서는 현재 페이지 말고는 display:none 이라 교차 관찰이 아무것도 알려 주지
+     못한다(감춘 것은 영원히 '안 보임'이다). 그 모드에서는 관찰을 걸지 않고 그릴 페이지를
+     직접 고른다 — 아래 syncPdfSingleRender. */
+  if (pdfIsSinglePage(doc)){
+    syncPdfSingleRender(doc);
+    if (doc.id === activeId) updatePdfPageIndicator(doc);
+    return;
+  }
   if (typeof IntersectionObserver === "undefined"){
     doc.pages.forEach(p => { p.visible = true; requestPageRender(doc, p); schedulePdfTextLinks(doc, p); });   // 폴백: 전부 렌더
     return;
@@ -445,4 +454,163 @@ function startLazyRender(doc){
     doc.el.addEventListener("scroll", doc.__qualityScrollHandler, { passive: true });
   }
   if (doc.id === activeId) updatePdfPageIndicator(doc);   // 페이지 수가 바뀌었을 수 있으니 총 페이지 갱신
+}
+
+/* ===== 보기 방식: 이어보기 ↔ 한 장씩 =====
+   이어보기(기본)는 페이지를 세로로 쌓아 스크롤한다 — 여러 페이지에 걸친 글자 선택이나 훑어보기가
+   쉽다. 한 장씩 보기는 현재 페이지만 남기고 나머지를 감춰 ◀ ▶ 로 넘긴다 — 수업 중 발표처럼
+   "지금 이 쪽"만 보여 주고 싶을 때 쓴다. 어느 쪽이 편한지는 사람마다·상황마다 달라 골라 쓰게 하고,
+   고른 값은 문서가 아니라 화면 환경설정으로 모든 PDF 가 이어 쓴다. */
+const PDF_PAGE_MODE_KEY = "pdfPageMode";
+const PDF_SINGLE_NEIGHBORS = 1;        // 앞뒤 한 장은 미리 그려 둔다 — 넘기자마자 보이도록
+
+function pdfStoredPageMode(){
+  try { return localStorage.getItem(PDF_PAGE_MODE_KEY) === "single" ? "single" : "flow"; }
+  catch(_){ return "flow"; }
+}
+function pdfIsSinglePage(doc){
+  return !!doc && doc.kind === "pdf" && doc.pageMode === "single" && !!(doc.pages && doc.pages.length);
+}
+/* 한 장씩 보기에서 지금 몇 쪽인지. 이어보기는 화면 한가운데에 가장 가까운 페이지로 판단하지만
+   (currentPageIndex), 한 장씩 볼 때는 우리가 고른 쪽이 곧 답이다. */
+function pdfSingleIndex(doc){
+  const total = (doc && doc.pages && doc.pages.length) || 0;
+  if (!total) return 0;
+  return Math.max(0, Math.min(total - 1, doc.singleIndex || 0));
+}
+
+/* 현재 페이지와 그 이웃만 그리고 나머지는 캔버스를 돌려준다. 이어보기의 교차 관찰이 하던 일을
+   여기서 대신한다 — 넘길 때마다, 그리고 확대·문서 전환 뒤에도 불린다. */
+function syncPdfSingleRender(doc){
+  if (!doc || !doc.pages) return;
+  const cur = pdfSingleIndex(doc);
+  doc.pages.forEach((p, i) => {
+    if (!p.frame) return;
+    const near = Math.abs(i - cur) <= PDF_SINGLE_NEIGHBORS;
+    p.visible = (i === cur);            // 확대 재렌더(refreshVisibleQuality)가 보는 값
+    if (near){
+      requestPageRender(doc, p);
+      if (i === cur) schedulePdfTextLinks(doc, p);
+    } else {
+      pdfRenderQueue(doc).pending.delete(p);
+      releasePageCanvas(p);
+      releasePdfTextLinks(p);
+    }
+  });
+}
+
+/* 한 장이 화면에 다 들어오는 배율. 페이지 크기는 가로 폭에만 맞춰 잡히므로(createPagePlaceholder)
+   A4 는 세로가 화면보다 커서, 그대로 두면 한 장씩 넘겨도 그 안에서 또 스크롤해야 한다. */
+function pdfFitPageZoom(doc){
+  const p = doc && doc.pages && doc.pages[pdfSingleIndex(doc)];
+  if (!p || !doc.el || !p.cssW || !p.cssH) return null;
+  const availH = doc.el.clientHeight - 30;     // .page-frame 아래 여백(22) + 숨 쉴 틈
+  const availW = doc.el.clientWidth - 24;
+  if (availH <= 0 || availW <= 0) return null;
+  const fit = Math.min(availH / p.cssH, availW / p.cssW);
+  if (!Number.isFinite(fit) || fit <= 0) return null;
+  return Math.max(0.3, Math.min(4, Math.round(fit * 100) / 100));
+}
+
+// 넘길 페이지를 고른다(0부터). 범위를 벗어난 값은 양 끝으로 눌러 담는다.
+function showPdfSinglePage(doc, index){
+  if (!pdfIsSinglePage(doc)) return;
+  doc.singleIndex = Math.max(0, Math.min(doc.pages.length - 1, Math.round(Number(index) || 0)));
+  const cur = doc.singleIndex;
+  doc.pages.forEach((p, i) => { if (p.frame) p.frame.classList.toggle("is-current-page", i === cur); });
+  doc.el.scrollTop = 0;                        // 새 쪽은 늘 맨 위에서 시작한다
+  syncPdfSingleRender(doc);
+  if (typeof updatePdfPageIndicator === "function") updatePdfPageIndicator(doc);
+  updatePdfPageStepButtons();
+  if (typeof refreshPdfSelHighlight === "function") refreshPdfSelHighlight();
+}
+function stepPdfSinglePage(doc, delta){
+  if (!pdfIsSinglePage(doc)) return;
+  showPdfSinglePage(doc, pdfSingleIndex(doc) + delta);
+}
+
+function setPdfPageMode(doc, mode, opts = {}){
+  if (!doc || doc.kind !== "pdf" || !doc.el) return;
+  const next = mode === "single" ? "single" : "flow";
+  if (doc.pageMode === next && !opts.force) return;
+  const wasIndex = typeof currentPageIndex === "function" ? currentPageIndex(doc) : 0;
+  doc.pageMode = next;
+  doc.el.classList.toggle("pdf-single-page", next === "single");
+  if (next === "single"){
+    doc.singleIndex = wasIndex;
+    /* 들어올 때 한 번 페이지 맞춤으로 맞춰 준다. 그 뒤 사용자가 확대하면 그대로 두고, 이어보기로
+       나갈 때 들어오기 전 배율로 되돌린다 — 넘겨 보려고 줄인 배율이 계속 남지 않게. */
+    if (doc.zoomBeforeSingle == null) doc.zoomBeforeSingle = doc.zoom || 1;
+    /* 아직 화면에 놓이지 않은 문서(여러 파일을 한꺼번에 열 때)는 칸 크기가 0 이라 맞출 수가
+       없다 — 표시만 해 두고 처음 보일 때 맞춘다(pdfFitPageIfPending). */
+    const fit = pdfFitPageZoom(doc);
+    if (fit && typeof setPdfZoom === "function"){ setPdfZoom(fit, doc); doc.needsPageFit = false; }
+    else doc.needsPageFit = true;
+    showPdfSinglePage(doc, wasIndex);
+  } else {
+    doc.needsPageFit = false;
+    doc.pages.forEach(p => { if (p.frame) p.frame.classList.remove("is-current-page"); });
+    if (doc.zoomBeforeSingle != null && typeof setPdfZoom === "function"){
+      setPdfZoom(doc.zoomBeforeSingle, doc);
+      doc.zoomBeforeSingle = null;
+    }
+    startLazyRender(doc);
+    if (typeof goToPdfPage === "function") goToPdfPage(doc, wasIndex + 1);
+  }
+  updatePdfPageModeButton(doc);
+  updatePdfPageStepButtons();
+}
+function togglePdfPageMode(doc){
+  doc = doc || (typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null) || (typeof state !== "undefined" ? state : null);
+  if (!doc || doc.kind !== "pdf") return;
+  const next = pdfIsSinglePage(doc) ? "flow" : "single";
+  setPdfPageMode(doc, next);
+  try { localStorage.setItem(PDF_PAGE_MODE_KEY, next); } catch(_){}
+  if (typeof toast === "function"){          // toast 가 스스로 번역한다(state.js)
+    toast(next === "single"
+      ? "한 장씩 보기 — ◀ ▶ 또는 PageUp·PageDown 으로 넘깁니다."
+      : "이어보기 — 페이지를 스크롤해서 봅니다.", 2600);
+  }
+}
+/* 새로 연 PDF 는 지난번에 고른 보기 방식으로 시작한다(페이지를 다 만든 뒤에 부른다). */
+function applyStoredPdfPageMode(doc){
+  if (!doc || doc.kind !== "pdf" || !doc.pages || !doc.pages.length) return;
+  if (pdfStoredPageMode() !== "single") return;
+  setPdfPageMode(doc, "single", { force: true });
+}
+
+/* 크기가 0 이라 미뤄 둔 페이지 맞춤을, 문서가 실제로 화면에 놓인 뒤에 한 번 해 준다. */
+function pdfFitPageIfPending(doc){
+  if (!doc || !doc.needsPageFit || !pdfIsSinglePage(doc)) return;
+  const fit = pdfFitPageZoom(doc);
+  if (!fit || typeof setPdfZoom !== "function") return;
+  doc.needsPageFit = false;
+  setPdfZoom(fit, doc);
+}
+
+function updatePdfPageModeButton(doc){
+  const button = typeof byId === "function" ? byId("btnPdfPageMode") : null;
+  if (!button) return;
+  const target = doc || (typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null);
+  const single = pdfIsSinglePage(target);
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  // 아이콘 두 벌은 HTML 에 함께 두고 CSS(.is-on)가 골라 보여 준다 — 여기서는 상태만 적는다.
+  button.classList.toggle("is-on", single);
+  button.setAttribute("aria-pressed", String(single));
+  const title = _t(single ? "이어보기로 — 페이지를 스크롤해서 봅니다" : "한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다");
+  button.title = title;
+  button.setAttribute("aria-label", title);
+}
+// ◀ ▶ 는 한 장씩 볼 때만 내놓고, 양 끝에서는 그쪽만 잠근다.
+function updatePdfPageStepButtons(){
+  const target = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null;
+  const single = pdfIsSinglePage(target);
+  const index = single ? pdfSingleIndex(target) : 0;
+  const last = single ? target.pages.length - 1 : 0;
+  for (const [prevId, nextId] of [["pagePrev", "pageNext"], ["fsPagePrev", "fsPageNext"]]){
+    const prev = typeof byId === "function" ? byId(prevId) : null;
+    const next = typeof byId === "function" ? byId(nextId) : null;
+    if (prev){ prev.hidden = !single; prev.disabled = index <= 0; }
+    if (next){ next.hidden = !single; next.disabled = index >= last; }
+  }
 }

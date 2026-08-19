@@ -62,6 +62,9 @@ const (
 	kakaoCoordAddressURL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 	kakaoCoordRegionURL  = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
 	geocoderEnv          = "CLASSDOCK_GEOCODER_URL"
+	// 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·C# 런처
+	// (launcher.cs GeocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다.
+	geocodeResultLimit = "8"
 )
 
 var (
@@ -396,7 +399,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 			endpoint = kakaoKeywordURL
 		}
 		values := url.Values{}
-		values.Set("size", "5")
+		values.Set("size", geocodeResultLimit)
 		values.Set("query", query)
 		// 키워드 검색에 기준점이 오면 그 둘레만 본다 — 갈래에 없는 말로 주변 시설을 찾는
 		// 길이라(로또·빵집 …) 갈래 검색과 같은 쪽수(15개·페이지)로 받는다.
@@ -448,7 +451,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		parsedEndpoint.Fragment = ""
 		values := parsedEndpoint.Query()
 		values.Set("format", "jsonv2")
-		values.Set("limit", "5")
+		values.Set("limit", geocodeResultLimit)
 		values.Set("accept-language", "ko")
 		values.Set("q", query)
 		parsedEndpoint.RawQuery = values.Encode()

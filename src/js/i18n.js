@@ -152,6 +152,17 @@
     "확대 (Ctrl++)": "Zoom in (Ctrl++)",
     "페이지 번호 입력 후 Enter로 이동": "Enter a page number, then press Enter",
     "현재 페이지": "Current page",
+    // 보기 방식: 이어보기 ↔ 한 장씩
+    "한 장씩 보기": "One page at a time",
+    "한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다": "One page at a time — flip through pages one by one",
+    "이어보기로 — 페이지를 스크롤해서 봅니다": "Back to continuous — scroll through the pages",
+    "한 장씩 보기 — ◀ ▶ 또는 PageUp·PageDown 으로 넘깁니다.":
+      "One page at a time — flip with ◀ ▶ or PageUp/PageDown.",
+    "이어보기 — 페이지를 스크롤해서 봅니다.": "Continuous — scroll through the pages.",
+    "이전 페이지": "Previous page",
+    "다음 페이지": "Next page",
+    "이전 페이지 (PageUp)": "Previous page (PageUp)",
+    "다음 페이지 (PageDown)": "Next page (PageDown)",
     "전체화면 종료": "Exit fullscreen",
     "참조 PDF에서 찾기": "Find in reference PDF",
     "읽기 전용": "Read-only",
@@ -1754,6 +1765,21 @@
       "Place-name search is available in the ClassDock launcher. You can still move by coordinates.",
     "지도 저장 (Ctrl+S)": "Save map (Ctrl+S)",
     "지도": "Map",
+    // 아직 쓸 수 없는 도구 안내(흐리게 두고 누르면 켜는 법을 알려 준다)
+    "주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.":
+      "Nearby places need Kakao map search — pick Kakao under Settings → Map search and enter a REST API key.",
+    "장소 정보는 ClassDock 런처로 열었을 때 쓸 수 있어요 — 브라우저로 연 화면에서는 누른 자리를 되물을 수 없습니다.":
+      "Place info works when opened through the ClassDock launcher — a plain browser page cannot look up the spot you clicked.",
+    // 편집 도구 접기(H)
+    "▤ 도구 숨기기": "▤ Hide tools",
+    "▤ 도구 보이기": "▤ Show tools",
+    "편집 도구 줄을 접고 지도를 넓게 봅니다 (H)": "Folds the editing tool row for a wider map (H)",
+    "접어 둔 편집 도구를 다시 폅니다 (H)": "Unfolds the editing tools again (H)",
+    "편집 도구를 다시 폈어요.": "Editing tools are back.",
+    "편집 도구를 접었어요. 지도를 마우스 오른쪽 버튼으로 누르면 같은 기능을 쓸 수 있어요.":
+      "Folded the editing tools. Right-click the map to reach the same features.",
+    "전체화면 — 지도만 남겼어요. H 를 누르거나 지도를 오른쪽 버튼으로 누르면 도구가 다시 나와요.":
+      "Fullscreen — only the map is left. Press H or right-click the map to bring the tools back.",
     // 위경도 격자 · 축척 · 표시 목록 · PNG/인쇄
     "🌐 위경도 격자": "🌐 Lat/long grid",
     "위선·경선을 눈금으로 그려요 — 적도와 본초자오선은 굵게 표시됩니다":
@@ -1762,6 +1788,15 @@
       "Drew the lat/long grid — the red lines are the equator and the prime meridian.",
     "0° 적도": "0° Equator",
     "0° 본초자오선": "0° Prime meridian",
+    "🏷️ 이름 보이기": "🏷️ Show names",
+    "표시 이름을 마우스를 올리지 않아도 늘 보이게 해요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다":
+      "Keeps pin names on screen without hovering — they hide while zoomed out so they don't overlap",
+    "표시 이름을 늘 보이게 했어요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다.":
+      "Pin names now stay on screen — they hide while zoomed out so they don't overlap.",
+    "이름표는 확대 {need}단계부터 보여요 — 지금 확대 {zoom}, 조금 더 다가가면 나타납니다.":
+      "Name labels appear from zoom {need} — you are at zoom {zoom}, move a little closer.",
+    "표시가 {count}개라 이름을 한꺼번에 띄우면 지도가 느려져요 — {max}개까지 켤 수 있습니다.":
+      "With {count} pins, showing every name would slow the map down — up to {max} pins can be labelled.",
     "🧾 표시 목록": "🧾 Pin list",
     "표시를 옆 목록으로 봐요 — 이름으로 찾고, 묶음별로 감추고, 눌러서 그 자리로 갑니다":
       "Shows pins in a side list — search by name, hide a group, click to fly there",

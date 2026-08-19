@@ -2874,6 +2874,9 @@ class ClassDockLauncher
     const string KakaoCategoryEndpoint = "https://dapi.kakao.com/v2/local/search/category.json";
     const string KakaoCoordAddressEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2address.json";
     const string KakaoCoordRegionEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json";
+    /* 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·Go 폴백
+       런처(main.go geocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다. */
+    const string GeocodeResultLimit = "8";      // 주소 뒤에 그대로 붙이는 값이라 문자열로 둔다
     const int GeocodeMinIntervalMs = 1100;      // 정책상 초당 1건 — 여유를 조금 둔다
     static readonly object GeocodeLock = new object();
     static DateTime GeocodeLastCall = DateTime.MinValue;
@@ -3090,7 +3093,7 @@ class ClassDockLauncher
                 // 키워드 검색에 기준점이 오면 그 둘레만 본다 — 갈래에 없는 말로 주변 시설을 찾는
                 // 길이라(로또·빵집 …) 갈래 검색과 같은 쪽수(15개·페이지)로 받는다.
                 bool around = provider == "kakao-keyword" && spot.HasPoint;
-                url = endpoint + "?size=" + (around ? "15" : "5") + "&query=" + Uri.EscapeDataString(q);
+                url = endpoint + "?size=" + (around ? "15" : GeocodeResultLimit) + "&query=" + Uri.EscapeDataString(q);
                 if (around)
                     url += "&x=" + spot.X + "&y=" + spot.Y + "&sort=distance"
                         + "&page=" + (spot.Page.Length > 0 ? spot.Page : "1")
@@ -3107,7 +3110,7 @@ class ClassDockLauncher
             else
             {
                 Uri endpoint = GeocodeEndpoint();
-                url = endpoint.GetLeftPart(UriPartial.Path) + "?format=jsonv2&limit=5&accept-language=ko&q=" + Uri.EscapeDataString(q);
+                url = endpoint.GetLeftPart(UriPartial.Path) + "?format=jsonv2&limit=" + GeocodeResultLimit + "&accept-language=ko&q=" + Uri.EscapeDataString(q);
             }
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";

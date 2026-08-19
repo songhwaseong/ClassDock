@@ -36,6 +36,40 @@ const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64");
 
+/* 전체화면에서 지도를 넓게 보려고 편집 도구를 접는다. 접어도 제목·저장 줄과 우클릭 메뉴가 남아
+   편집을 이어 갈 수 있어야 하고, 접은 상태는 다음에 여는 지도에도 이어져야 한다. */
+test("편집 도구를 접으면 지도가 넓어지고, 머리말 줄과 우클릭 메뉴로 다시 편다", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => newMapScratch());
+  await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
+
+  const tools = page.locator(".map-tools");
+  const toggle = page.locator(".map-tools-toggle");
+  await expect(tools).toBeVisible();
+  const tallBefore = (await page.locator(".map-stage").boundingBox()).height;
+
+  await toggle.click();
+  await expect(tools).toBeHidden();
+  await expect(page.locator(".map-bar")).toBeVisible();          // 제목·저장 줄은 남는다
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect((await page.locator(".map-stage").boundingBox()).height).toBeGreaterThan(tallBefore);
+
+  // 접어 둔 채로도 우클릭 메뉴에 같은 항목이 있고, 거기서 다시 편다.
+  const stage = page.locator(".map-stage");
+  const box = await stage.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button:"right" });
+  const menuItem = page.locator(".map-context-menu button", { hasText:"도구 보이기" });
+  await expect(menuItem).toBeVisible();
+  await menuItem.click();
+  await expect(tools).toBeVisible();
+
+  // H 로도 접히고, 접은 상태는 화면 환경설정으로 남는다(문서가 아니라).
+  await page.keyboard.press("h");
+  await expect(tools).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem("mapToolbarVisible"))).toBe("false");
+  expect((await mapModel(page)).toolbarVisible).toBe(undefined);   // .map 파일에는 담지 않는다
+});
+
 test("발표 모드는 목록 순서대로 돌고, 순서는 목록에서 바꾼다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -54,6 +88,7 @@ test("발표 모드는 목록 순서대로 돌고, 순서는 목록에서 바꾼
   await page.locator(".map-present-start").click();
   await expect(page.locator(".map-present")).toBeVisible();
   await expect(page.locator(".map-bar")).toBeHidden();              // 발표 중에는 도구막대를 감춘다
+  await expect(page.locator(".map-tools")).toBeHidden();            // 접을 수 있는 편집 도구 줄도 함께
   await expect(page.locator(".map-present-name")).toHaveText("둘째 자리");
   await expect(page.locator(".map-present-count")).toHaveText("1 / 2");
 
@@ -67,6 +102,7 @@ test("발표 모드는 목록 순서대로 돌고, 순서는 목록에서 바꾼
   await page.keyboard.press("Escape");
   await expect(page.locator(".map-present")).toBeHidden();
   await expect(page.locator(".map-bar")).toBeVisible();
+  await expect(page.locator(".map-tools")).toBeVisible();
   // 발표는 보기만 하는 일이라 문서를 고친 것으로 보지 않는다(순서를 바꾼 ● 는 그대로 남는다).
   await expect(page.locator(".map-status")).toContainText("저장 안 됨");
 
@@ -137,6 +173,7 @@ test("지도 문제는 지도를 눌러 답하고 거리로 채점한다", async
   const taskBar = page.locator(".map-task-bar");
   await expect(taskBar).toBeVisible();
   await expect(page.locator(".map-bar")).toBeHidden();          // 학생 화면에는 편집 도구를 내놓지 않는다
+  await expect(page.locator(".map-tools")).toBeHidden();        // 접기 토글이 이 값을 되돌리지 않는다
   await expect(page.locator(".map-task-step")).toContainText("1/2");
   await expect(page.locator(".map-task-prompt")).toHaveText("여기는 어디일까요?");
 

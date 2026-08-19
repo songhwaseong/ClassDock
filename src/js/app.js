@@ -310,6 +310,29 @@ function wire(){
   byId("zoomIn").onclick  = () => setPdfZoom(((state && state.zoom) || 1) * 1.25);
   byId("zoomOut").onclick = () => setPdfZoom(((state && state.zoom) || 1) / 1.25);
   byId("zoomLabel").onclick = () => setPdfZoom(1);
+  /* 보기 방식(이어보기 ↔ 한 장씩)과 페이지 넘기기. 넘기기 단추는 한 장씩 볼 때만 나오고,
+     전체화면에도 같은 짝을 둔다 — 발표 중에는 그쪽이 손에 닿는 유일한 컨트롤이다. */
+  if (byId("btnPdfPageMode")) byId("btnPdfPageMode").onclick = () => togglePdfPageMode();
+  for (const [prevId, nextId] of [["pagePrev", "pageNext"], ["fsPagePrev", "fsPageNext"]]){
+    if (byId(prevId)) byId(prevId).onclick = () => { stepPdfSinglePage(fullscreenPdfTarget(), -1); showFullscreenControls(); };
+    if (byId(nextId)) byId(nextId).onclick = () => { stepPdfSinglePage(fullscreenPdfTarget(), 1); showFullscreenControls(); };
+  }
+  /* 자판으로 넘기기. 한 장씩 볼 때만 가로채고, 글자를 치는 자리에서는 손대지 않는다. 이어보기에서
+     PageUp/PageDown 은 브라우저의 스크롤이 그대로 맡는다 — 그 편이 익숙하다. */
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    const doc = fullscreenPdfTarget();
+    if (!doc || typeof pdfIsSinglePage !== "function" || !pdfIsSinglePage(doc)) return;
+    const target = e.target;
+    if (target && typeof target.closest === "function" &&
+        target.closest("input,textarea,select,[contenteditable='true']")) return;
+    let delta = 0;
+    if (e.key === "PageDown" || e.key === "ArrowRight") delta = 1;
+    else if (e.key === "PageUp" || e.key === "ArrowLeft") delta = -1;
+    if (!delta) return;
+    e.preventDefault();
+    stepPdfSinglePage(doc, delta);
+  });
   // 페이지 입력: 숫자 입력 후 Enter → 해당 페이지로 이동(헤더·전체화면 공용)
   const wirePageInput = (numId, targetDoc, refresh) => {
     const input = byId(numId); if (!input) return;

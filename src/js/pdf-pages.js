@@ -232,7 +232,11 @@ function updatePdfPagePanel(doc){
     const rotation = document.createElement("span"); rotation.className = "pdf-thumb-rotation";
     rotation.textContent = p.exportRotation ? "↻" + p.exportRotation + "°" : "";
     meta.append(number, rotation); row.append(check, canvas, meta);
-    row.onclick = () => p.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+    // 한 장씩 보기에서는 감춰 둔 페이지로 스크롤할 수 없다 — 그 쪽으로 넘긴다.
+    row.onclick = () => {
+      if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)) showPdfSinglePage(doc, index);
+      else p.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
     doc.pageThumbList.appendChild(row);
   });
 }
@@ -561,7 +565,8 @@ function gotoPdfOutlineItem(doc, item){
   }
   const page = Number.isInteger(item.originalIndex) ? doc.pages.find(p => p.originalIndex === item.originalIndex) : null;
   if (!page){ toast("이 목차 항목의 위치를 찾지 못했어요.", 2200); return; }
-  page.frame.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)) showPdfSinglePage(doc, doc.pages.indexOf(page));
+  else page.frame.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function extractPdfPages(doc){

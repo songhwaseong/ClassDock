@@ -469,6 +469,9 @@ function setActiveDoc(id){
   renderTabs();
   updateZoomLabel();
   updatePdfPageIndicator(d);                             // 헤더 '현재/총 페이지' 갱신
+  if (typeof pdfFitPageIfPending === "function") pdfFitPageIfPending(d);           // 배경에서 열려 못 맞춘 페이지 맞춤
+  if (typeof updatePdfPageModeButton === "function") updatePdfPageModeButton(d);   // 보기 방식은 문서마다 다르다
+  if (typeof updatePdfPageStepButtons === "function") updatePdfPageStepButtons();
   // 메모리 절약: 떠나는 PDF 의 캔버스만 비운다(매 클릭마다 모든 문서를 훑지 않음). 활성 PDF 는 보이는 페이지를 다시 렌더.
   if (prev && prev.id !== id && prev.kind === "pdf" && prev.pages) prev.pages.forEach(releasePageCanvas);
   // 다른 탭으로 옮기면 보이지 않는 영상은 일시정지한다(소리만 계속 나는 혼란 방지 — 오디오 문서는 계속 재생).

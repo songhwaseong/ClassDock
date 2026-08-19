@@ -15,7 +15,7 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 5;
+const MAP_DOC_VERSION = 6;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 /* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
    빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
@@ -101,6 +101,10 @@ function mapRememberListPanel(on){
    아니라 이 브라우저에 남긴다(문서를 나눠 줘도 남의 검색어가 따라가지 않는다). */
 const MAP_SEARCH_HISTORY_KEY = "mn.mapSearchHistory";
 const MAP_SEARCH_HISTORY_MAX = 8;
+/* 검색 후보를 몇 줄까지 보여 줄지. 런처가 그만큼만 받아 오므로(launcher.cs GeocodeResultLimit ·
+   main.go geocodeResultLimit) 세 값이 같아야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다.
+   목록 높이(.map-results max-height:240px)가 감당하는 줄 수이기도 하다. */
+const MAP_SEARCH_RESULT_MAX = 8;
 function mapSearchHistory(){
   try {
     const saved = JSON.parse(localStorage.getItem(MAP_SEARCH_HISTORY_KEY) || "[]");
@@ -283,6 +287,8 @@ function mapDocEmpty(title){
     // 위경도 격자는 문서에 딸린 성질로 둔다 — 수업용 지도는 "격자를 보이게 만들어 둔 지도"로
     // 건네지기 때문이다(다음에 열 사람이 다시 켜야 한다면 만들어 둔 뜻이 사라진다).
     grid: false,
+    // 표시 이름표도 같은 뜻으로 문서에 담는다 — "이름이 다 보이게 만들어 둔 지도"로 건네진다.
+    labels: false,
     backgroundImage: null
   };
 }
@@ -305,6 +311,8 @@ function mapDocParse(text){
     shapes: Array.isArray(raw.shapes) ? raw.shapes.map(mapNormalizeShape).filter(shape => shape.points.length >= (shape.type === "area" ? 3 : 2)) : [],
     // 버전 3 이하에는 없던 값이다 — 없으면 끈 것으로 본다(옛 지도의 화면이 달라지지 않게).
     grid: raw.grid === true,
+    // 버전 5 이하에는 없던 값이다 — 같은 까닭으로 없으면 끈 것으로 본다.
+    labels: raw.labels === true,
     backgroundImage
   };
 }
@@ -319,6 +327,7 @@ function mapDocSerialize(model){
     markers: model.markers,
     shapes: Array.isArray(model.shapes) ? model.shapes : [],
     grid: !!model.grid,
+    labels: !!model.labels,
     backgroundImage: model.backgroundImage || null
   }, null, 2) + "\n";
 }
@@ -335,7 +344,7 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(0, 80),
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
-  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background]);
+  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -844,6 +853,13 @@ async function mapNearbyPlaces(target, lat, lng, radius){
    훑으면 클릭 한 번에 검색을 열세 번 부르게 되는데, 그렇게까지 해서 얻을 것 중 수업에서 실제로
    누르는 곳은 역이기 때문이다. */
 const MAP_SPOT_MIN_ZOOM = 15;         // 이보다 멀리서 누른 자리는 건물 하나를 가리킨 것으로 볼 수 없다
+/* 표시 이름표를 늘 보이게 켰을 때, 이보다 멀리서는 이름표를 내지 않는다. Leaflet 에는 이름표
+   겹침을 정리해 주는 길이 없어서 축소할수록 글자가 서로 포개져 오히려 못 읽는다 — 읽을 수 있는
+   확대에서만 내놓는 편이 낫다. 13 단계면 동네 하나가 화면에 들어오는 정도다. */
+const MAP_LABEL_MIN_ZOOM = 13;
+/* 이름표는 표시마다 DOM 을 하나씩 만든다. CSV 로 수백 개를 들여온 지도에서 한꺼번에 켜면
+   지도가 먼저 멎으므로, 그때는 켜지 않고 까닭을 알려 준다. */
+const MAP_LABEL_MAX_MARKERS = 200;
 const MAP_SPOT_NAME_RADIUS = 80;      // 건물 이름으로 그 자리를 되찾을 때의 반경
 const MAP_SPOT_STATION_RADIUS = 150;  // 역은 출입구에서 조금 떨어진 곳이 눌리므로 넉넉히 본다
 
@@ -1301,7 +1317,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
   // 곧장 옮겼으면 true — 부르는 쪽이 "고르세요" 안내를 띄울지 판단할 수 있게.
   const showResults = (places) => {
     resetList();
-    items = places.slice(0, 5);
+    items = places.slice(0, MAP_SEARCH_RESULT_MAX);
     for (const place of items){
       results.appendChild(addOption(place.name, "map-result", () => pick(place)));
     }
@@ -2218,8 +2234,13 @@ async function mountMapEditor(doc){
   const root = document.createElement("div");
   root.className = "map-doc";
 
+  /* 도구막대는 두 줄이다 — 늘 남는 머리말 줄(제목·검색·되돌리기·저장)과 접을 수 있는 편집 도구
+     줄. 한 줄로 두면 도구를 접을 때 저장·'저장 안 됨' 표시·다시 펴는 단추까지 함께 사라진다. */
   const bar = document.createElement("div");
   bar.className = "map-bar";
+
+  const toolRow = document.createElement("div");
+  toolRow.className = "map-tools";
 
   const titleInput = document.createElement("input");
   titleInput.className = "map-title";
@@ -2264,14 +2285,16 @@ async function mountMapEditor(doc){
   spotBtn.textContent = "🔎 장소 정보";
   spotBtn.title = "켜 두면 지도를 클릭한 자리의 건물·시설 이름과 주소를 말풍선으로 보여 줘요";
   spotBtn.setAttribute("aria-pressed", "false");
-  spotBtn.hidden = true;        // 좌표를 주소로 되묻는 길(런처)이 있을 때만 보인다
+  /* 좌표를 주소로 되묻는 길(런처)이 있어야 쓸 수 있다. 없으면 감추지 않고 흐리게 둔다 —
+     감추면 이런 기능이 있다는 것조차 모르고 지나친다(아래 setSpotReady). */
+  spotBtn.classList.add("is-unavailable");
 
   const nearbyBtn = document.createElement("button");
   nearbyBtn.type = "button";
   nearbyBtn.className = "map-btn map-nearby";
   nearbyBtn.textContent = "🏫 주변 시설";
   nearbyBtn.title = "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시";
-  nearbyBtn.hidden = true;      // 카카오 검색을 켰을 때만 보인다
+  nearbyBtn.classList.add("is-unavailable");   // 카카오 검색을 켜야 쓸 수 있다(아래 setNearbyReady)
 
   const regionBtn = document.createElement("button");
   regionBtn.type = "button";
@@ -2331,6 +2354,12 @@ async function mountMapEditor(doc){
   gridBtn.title = "위선·경선을 눈금으로 그려요 — 적도와 본초자오선은 굵게 표시됩니다";
   gridBtn.setAttribute("aria-pressed", "false");
 
+  const labelsBtn = document.createElement("button");
+  labelsBtn.type = "button"; labelsBtn.className = "map-btn map-labels-toggle";
+  labelsBtn.textContent = "🏷️ 이름 보이기";
+  labelsBtn.title = "표시 이름을 마우스를 올리지 않아도 늘 보이게 해요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다";
+  labelsBtn.setAttribute("aria-pressed", "false");
+
   const presentBtn = document.createElement("button");
   presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start";
   presentBtn.textContent = "🎬 발표 모드";
@@ -2382,6 +2411,11 @@ async function mountMapEditor(doc){
   searchResults.hidden = true;
   searchWrap.append(gotoInput, searchBtn, searchResults);
 
+  const toolsToggleBtn = document.createElement("button");
+  toolsToggleBtn.type = "button";
+  toolsToggleBtn.className = "map-btn map-tools-toggle";
+  toolsToggleBtn.textContent = "▤ 도구 숨기기";     // 이름·설명은 applyToolbarVisible 이 채운다
+
   const undoBtn = document.createElement("button");
   undoBtn.type = "button"; undoBtn.className = "map-btn map-undo";
   undoBtn.textContent = "↶"; undoBtn.title = "되돌리기 (Ctrl+Z)"; undoBtn.disabled = true;
@@ -2403,9 +2437,10 @@ async function mountMapEditor(doc){
   status.className = "map-status";
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
-  bar.append(titleInput, basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, listBtn,
+  bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
+  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, listBtn,
     presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn,
-    boardBtn, memoBtn, pngBtn, printBtn, taskBtn, searchWrap, undoBtn, redoBtn, saveBtn, coord, status);
+    boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
@@ -2453,9 +2488,103 @@ async function mountMapEditor(doc){
     '</div>';
 
   body.append(stage, listPanel, present);
-  root.append(bar, body, imageInput, csvInput);
+  root.append(bar, toolRow, body, imageInput, csvInput);
   doc.el.appendChild(root);
   mapTranslate(bar);
+  mapTranslate(toolRow);
+
+  /* ── 편집 도구 접기 ──
+     전체화면에서 지도를 넓게 보려는 것이 목적이다. 접어도 지도 우클릭 메뉴에 같은 기능이 있고
+     (contextMirror), 요소를 지우지 않고 hidden 으로만 감추므로 메뉴가 읽는 단추 상태(켜짐·꺼짐)
+     도 그대로 살아 있다. 배율과 같은 보기 상태라 .map 파일에는 담지 않고, 모든 지도가 이어 쓰는
+     화면 환경설정으로 기억한다.
+
+     창 모드에서는 머리말 줄을 늘 남긴다 — 다시 펴는 단추가 보여야 한다. ⛶ 전체화면에서는
+     나가는 길이 Esc·⛶ 컨트롤로 따로 있으므로 머리말까지 접어 지도만 남긴다. */
+  const MAP_TOOLBAR_KEY = "mapToolbarVisible";
+  // 지도 문제(학생 화면)는 두 줄 다 접은 채로 두므로 접기 자체를 붙이지 않는다.
+  const taskMode = !!(doc.mapTaskCtx && doc.mapTaskCtx.task && doc.mapTaskCtx.task.map);
+  let toolbarVisible = true;
+  try { toolbarVisible = localStorage.getItem(MAP_TOOLBAR_KEY) !== "false"; } catch(_){}
+  let fullscreenNow = false;
+  let toolbarBeforeFullscreen = null;      // 전체화면이 임시로 접었을 때만 담는다(나가면 되돌린다)
+  toolsToggleBtn.hidden = taskMode;        // 숨긴 단추는 우클릭 메뉴에서도 함께 빠진다
+  function applyToolbarVisible(){
+    if (taskMode) return;
+    bar.hidden = fullscreenNow && !toolbarVisible;
+    toolRow.hidden = !toolbarVisible;
+    bar.classList.toggle("has-tools", toolbarVisible);
+    toolsToggleBtn.textContent = mapT(toolbarVisible ? "▤ 도구 숨기기" : "▤ 도구 보이기");
+    toolsToggleBtn.title = mapT(toolbarVisible
+      ? "편집 도구 줄을 접고 지도를 넓게 봅니다 (H)"
+      : "접어 둔 편집 도구를 다시 폅니다 (H)");
+    toolsToggleBtn.classList.toggle("is-on", !toolbarVisible);
+    toolsToggleBtn.setAttribute("aria-pressed", toolbarVisible ? "false" : "true");
+  }
+  function setToolbarVisible(visible){
+    toolbarVisible = !!visible;
+    toolbarBeforeFullscreen = null;        // 직접 고른 값이 전체화면의 임시 접기보다 우선한다
+    applyToolbarVisible();
+    try { localStorage.setItem(MAP_TOOLBAR_KEY, String(toolbarVisible)); } catch(_){}
+  }
+  function toggleToolbarVisibility(){
+    if (taskMode) return;
+    const next = !toolbarVisible;
+    setToolbarVisible(next);
+    if (typeof toast !== "function") return;
+    if (next) toast(mapT("편집 도구를 다시 폈어요."), 1300);
+    else toast(mapT("편집 도구를 접었어요. 지도를 마우스 오른쪽 버튼으로 누르면 같은 기능을 쓸 수 있어요."), 2800);
+  }
+  toolsToggleBtn.addEventListener("click", toggleToolbarVisibility);
+
+  /* ⛶ 문서 영역 전체화면이면 머리말까지 접어 지도만 남기고, 나가면 들어가기 전 상태로 되돌린다.
+     실제 전체화면은 fullscreenchange 로 알 수 있지만 창 안 폴백(body.viewer-fullscreen)은
+     이벤트가 없어 클래스 변화를 함께 지켜본다(documents.js setViewerFullscreenFallback). */
+  function syncFullscreenState(){
+    if (taskMode) return;
+    const on = typeof isViewerFullscreen === "function" ? isViewerFullscreen() : false;
+    if (on === fullscreenNow) return;
+    fullscreenNow = on;
+    const announce = !(doc.el && doc.el.hidden) && typeof toast === "function";
+    if (on){
+      toolbarBeforeFullscreen = toolbarVisible;
+      toolbarVisible = false;              // 임시 접기라 환경설정에는 쓰지 않는다
+      applyToolbarVisible();
+      if (announce) toast(mapT("전체화면 — 지도만 남겼어요. H 를 누르거나 지도를 오른쪽 버튼으로 누르면 도구가 다시 나와요."), 3000);
+      return;
+    }
+    if (toolbarBeforeFullscreen !== null){ toolbarVisible = toolbarBeforeFullscreen; toolbarBeforeFullscreen = null; }
+    applyToolbarVisible();
+  }
+
+  /* H — 도구 접기·펴기. 발표 중에는 화살표·Esc 가 발표를 몰고, 대화창이 떠 있으면 그쪽이 먼저다.
+     'is-presenting' 클래스로 보는 까닭: 이 블록은 Leaflet 을 불러오기 전이라 아래에서 만드는
+     presenting 변수를 여기서 읽으면 지도 로딩이 실패했을 때 초기화 전 접근이 된다. */
+  function onToolbarKey(e){
+    if (taskMode || e.defaultPrevented) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (String(e.key || "").toLowerCase() !== "h") return;
+    if (doc.el && doc.el.hidden) return;
+    if (root.classList.contains("is-presenting")) return;
+    if (document.querySelector(".modal")) return;
+    const target = e.target;
+    if (target && typeof target.closest === "function" &&
+        target.closest("input,textarea,select,[contenteditable='true']")) return;
+    e.preventDefault();
+    toggleToolbarVisibility();
+  }
+  window.addEventListener("keydown", onToolbarKey);
+  document.addEventListener("fullscreenchange", syncFullscreenState);
+  const fullscreenClassWatch = typeof MutationObserver === "function" ? new MutationObserver(syncFullscreenState) : null;
+  if (fullscreenClassWatch) fullscreenClassWatch.observe(document.body, { attributes:true, attributeFilter:["class"] });
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.cleanupFns.push(() => {
+    window.removeEventListener("keydown", onToolbarKey);
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    if (fullscreenClassWatch) fullscreenClassWatch.disconnect();
+  });
+  applyToolbarVisible();
+  syncFullscreenState();                   // 이미 전체화면인 채로 지도를 열었을 때
 
   try { await MNLazy.need("leaflet"); }
   catch(_){
@@ -2567,8 +2696,8 @@ async function mountMapEditor(doc){
   // 경우에는 아예 붙이지 않는다 — 눌러도 아무 데도 남지 않는 버튼을 보여 주지 않기 위해서다.
   if (proxyBase){
     prepareBtn.addEventListener("click", openMapOfflineStatus);
-    bar.insertBefore(prepareBtn, searchWrap);
-    mapTranslate(bar);
+    toolRow.appendChild(prepareBtn);
+    mapTranslate(toolRow);
   }
 
   /* 캡처는 타일이 다 들어온 뒤에 찍어야 반쯤 빈 그림이 안 나온다. Leaflet 은 보이는 타일이
@@ -2896,13 +3025,30 @@ async function mountMapEditor(doc){
     return form;
   };
 
+  /* ── 표시 이름표 ──
+     기본은 마우스를 올렸을 때만 뜨는 말풍선이다. '🏷️ 이름 보이기'를 켜면 permanent 로 바꿔 늘
+     보이게 한다. Leaflet 은 bindTooltip 뒤에 permanent 를 바꿀 수 없어 다시 매다는 수밖에 없고,
+     그래서 효과가 실제로 달라질 때만 부른다(확대할 때마다 수백 개를 다시 매달지 않게). */
+  let labelsShown = false;
+  const labelsWanted = () => !!model.labels && map.getZoom() >= MAP_LABEL_MIN_ZOOM;
+  const bindMarkerTooltip = (layer, marker) => {
+    const permanent = labelsShown;
+    layer.unbindTooltip();
+    layer.bindTooltip(marker.label || mapT("이름 없는 표시"), {
+      permanent,
+      direction: "top",
+      offset: [0, -32],
+      className: permanent ? "map-pin-label" : ""
+    });
+  };
+
   const addMarkerLayer = (marker) => {
     const layer = L.marker([marker.lat, marker.lng], {
       icon: mapPinIcon(marker.color),
       draggable: true,
       title: marker.label || mapT("표시")
     });
-    layer.bindTooltip(marker.label || mapT("이름 없는 표시"), { direction:"top", offset:[0, -32] });
+    bindMarkerTooltip(layer, marker);
     const popup = buildPopup(marker, layer);
     layer.bindPopup(popup, { minWidth: 210 });
     layer.on("dragend", () => {
@@ -2919,7 +3065,45 @@ async function mountMapEditor(doc){
     return layer;
   };
 
+  labelsShown = labelsWanted();     // 켜 둔 채로 저장된 지도는 처음부터 이름표를 달고 연다
   model.markers.forEach(addMarkerLayer);
+
+  const syncLabelsButton = () => {
+    labelsBtn.classList.toggle("is-on", !!model.labels);
+    labelsBtn.setAttribute("aria-pressed", String(!!model.labels));
+  };
+  /* 확대를 오갈 때마다 불린다 — 효과가 실제로 달라질 때만 다시 매단다. */
+  const syncMarkerLabels = () => {
+    if (labelsWanted() === labelsShown) return;
+    labelsShown = !labelsShown;
+    for (const marker of model.markers){
+      const layer = markerLayers.get(marker.id);
+      if (layer) bindMarkerTooltip(layer, marker);
+    }
+  };
+  map.on("zoomend", syncMarkerLabels);
+  syncLabelsButton();
+  labelsBtn.addEventListener("click", () => {
+    if (!model.labels && model.markers.length > MAP_LABEL_MAX_MARKERS){
+      const guide = mapTf("표시가 {count}개라 이름을 한꺼번에 띄우면 지도가 느려져요 — {max}개까지 켤 수 있습니다.",
+        { count:model.markers.length, max:MAP_LABEL_MAX_MARKERS });
+      if (typeof toast === "function") toast(guide, 4200);
+      setStatus(guide);
+      return;
+    }
+    model.labels = !model.labels;
+    syncLabelsButton();
+    syncMarkerLabels();
+    /* 격자와 같은 까닭으로 안내는 토스트로 띄운다 — 상태 줄에 적으면 방금 켠 값이 저장되지
+       않았다는 ● 를 덮어쓴다. 다만 확대가 모자라 아직 안 보이는 경우는 그 까닭이 더 급하다. */
+    if (model.labels && map.getZoom() < MAP_LABEL_MIN_ZOOM){
+      setStatus(mapTf("이름표는 확대 {need}단계부터 보여요 — 지금 확대 {zoom}, 조금 더 다가가면 나타납니다.",
+        { need:MAP_LABEL_MIN_ZOOM, zoom:map.getZoom() }));
+    } else if (model.labels && typeof toast === "function"){
+      toast(mapT("표시 이름을 늘 보이게 했어요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다."), 3200);
+    }
+    touch();
+  });
 
   /* ── 표시 목록 패널 ──
      CSV 로 수십·수백 개를 들여오면 표시는 지도 위에만 있어 손댈 방법이 없다(어디에 있는지 알아야
@@ -3337,7 +3521,27 @@ async function mountMapEditor(doc){
     spotBtn.setAttribute("aria-pressed", String(spotInfo));
   };
   syncSpotButton();
-  spotBtn.addEventListener("click", () => {
+  /* 주소를 되묻는 길은 런처의 /geocode 뿐이다. 그 길이 없어도 단추를 감추지 않고 흐리게 두고,
+     눌렀을 때 까닭을 알려 준다 — disabled 를 쓰지 않는 까닭은 disabled 인 단추에는 클릭이 오지
+     않아 안내할 자리가 없기 때문이다. */
+  let spotReady = false;
+  const setSpotReady = (ready) => {
+    spotReady = !!ready;
+    spotBtn.classList.toggle("is-unavailable", !spotReady);
+  };
+  mapTileProxyBase().then((base) => setSpotReady(!!base)).catch(() => {});
+  spotBtn.addEventListener("click", async () => {
+    /* 흐린 채로 눌렀다면 그 사이에 런처로 다시 열었을 수도 있으니 한 번 더 확인하고 나서 안내한다
+       (지도를 열 때 한 번 본 값만 믿으면 "켰는데도 안 된다"가 된다). */
+    if (!spotReady){
+      try { setSpotReady(!!await mapTileProxyBase()); } catch(_){}
+      if (!spotReady){
+        const guide = mapT("장소 정보는 ClassDock 런처로 열었을 때 쓸 수 있어요 — 브라우저로 연 화면에서는 누른 자리를 되물을 수 없습니다.");
+        if (typeof toast === "function") toast(guide, 4200);
+        setStatus(guide);
+        return;
+      }
+    }
     spotInfo = !spotInfo;
     mapRememberSpotInfo(spotInfo);
     syncSpotButton();
@@ -3346,9 +3550,6 @@ async function mountMapEditor(doc){
       ? "지도를 클릭하면 그 자리가 어디인지 말풍선으로 보여 줍니다."
       : "클릭한 자리 안내를 껐습니다."));
   });
-  /* 주소를 되묻는 길은 런처의 /geocode 뿐이다 — 그 길이 없으면 눌러도 안 되는 단추라 감춘다
-     (주변 시설을 카카오일 때만 내놓는 것과 같은 이유다). */
-  mapTileProxyBase().then((base) => { spotBtn.hidden = !base; }).catch(() => {});
 
   /* 말풍선이 떠 있었다면 이번 클릭은 그것을 닫는 클릭이다. 닫자마자 새 말풍선을 열면 지도를
      눌러 닫을 방법이 없어진다. Leaflet 은 말풍선을 열 때 preclick 에 닫기를 매므로, 지도를 만들
@@ -3379,7 +3580,7 @@ async function mountMapEditor(doc){
     if (!adding){
       /* 거리선·면적에서 올라온 클릭은 그 도형의 말풍선이 열릴 자리다(우클릭 메뉴와 같은 판정).
          여기서 걸러 내지 않으면 방금 열린 그 말풍선을 이 안내가 덮어 버린다. */
-      if (spotInfo && !spotBtn.hidden && !popupWasOpen && !e.propagatedFrom) showSpotInfo(e.latlng);
+      if (spotInfo && spotReady && !popupWasOpen && !e.propagatedFrom) showSpotInfo(e.latlng);
       return;
     }
     const marker = mapNormalizeMarker({ lat:e.latlng.lat, lng:e.latlng.lng, label:"", color:"red" });
@@ -3609,12 +3810,31 @@ async function mountMapEditor(doc){
   });
 
   /* ── 주변 시설 ──
-     카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 켰을 때만 내놓는다.
-     꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 되기 때문이다. */
-  mapProviderIsKakao().then((kakao) => { nearbyBtn.hidden = !kakao; }).catch(() => {});
+     카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 껐으면 쓸 수 없다.
+     장소 정보와 같은 방식으로 감추지 않고 흐리게 두고, 눌렀을 때 켜는 법을 알려 준다. */
+  let nearbyReady = false;
+  // 같은 일을 부르는 자리가 셋이다(도구막대·우클릭 메뉴·자리 안내 말풍선) — 만들 때 여기에 담아
+  // 두면 상태가 바뀔 때 한꺼번에 따라온다.
+  const nearbyButtons = [nearbyBtn];
+  const setNearbyReady = (ready) => {
+    nearbyReady = !!ready;
+    for (const button of nearbyButtons) button.classList.toggle("is-unavailable", !nearbyReady);
+  };
+  mapProviderIsKakao().then((kakao) => setNearbyReady(kakao)).catch(() => {});
   /* 도구막대는 화면 가운데를, 우클릭 메뉴는 누른 자리를 기준으로 부른다 — 기준점만 다르고 찾아
      넣는 길은 하나다(꼬리표·되돌리기·토스트가 두 갈래로 갈라지지 않게). */
   const runNearby = async (at, opts = {}) => {
+    /* 흐린 채로 눌렀다면 그 사이 설정에서 카카오를 켰을 수도 있으니 한 번 더 확인하고 나서
+       안내한다 — 지도를 열 때 본 값만 믿으면 "켰는데도 안 된다"가 된다. */
+    if (!nearbyReady){
+      try { setNearbyReady(await mapProviderIsKakao()); } catch(_){}
+      if (!nearbyReady){
+        const guide = mapT("주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.");
+        if (typeof toast === "function") toast(guide, 5000);
+        setStatus(guide);
+        return;
+      }
+    }
     const center = { lat:mapClampLat(at.lat), lng:mapClampLng(at.lng) };
     const picked = await openMapNearby(center, opts);
     if (!picked) return;
@@ -3717,7 +3937,7 @@ async function mountMapEditor(doc){
     nearBtn.type = "button"; nearBtn.className = "map-spot-btn";
     nearBtn.textContent = "🏫 주변 시설";
     nearBtn.title = "이 자리를 가운데로 삼아 반경 안의 시설을 찾아요";
-    nearBtn.hidden = nearbyBtn.hidden;      // 도구막대와 같다 — 카카오를 껐으면 눌러도 안 되는 항목이다
+    nearBtn.classList.toggle("is-unavailable", !nearbyReady);   // 도구막대와 같은 잣대로 흐려진다
     nearBtn.addEventListener("click", () => {
       map.closePopup();
       runNearby({ lat:spot.lat, lng:spot.lng }, { atPoint:true });
@@ -3840,6 +4060,8 @@ async function mountMapEditor(doc){
   const contextNearbyBtn = contextItem("🏫 여기를 중심으로 주변 시설",
     "누른 자리를 가운데로 삼아 반경 안의 학교·병원 같은 시설을 찾아요",
     (at) => runNearby(at, { atPoint:true }));
+  nearbyButtons.push(contextNearbyBtn);
+  contextNearbyBtn.classList.toggle("is-unavailable", !nearbyReady);
 
   contextSep();
   contextItem("📋 이 자리 좌표 복사", "위도, 경도를 클립보드로 복사", async (at) => {
@@ -3895,6 +4117,8 @@ async function mountMapEditor(doc){
       mirror.item.disabled = !!mirror.button.disabled;
       // 켜 둔 도구(주소 자동 등)는 도구막대처럼 눈에 띄게 — 메뉴에서는 체크로 보인다.
       mirror.item.classList.toggle("is-on", mirror.button.classList.contains("is-on"));
+      // 아직 쓸 수 없는 도구(장소 정보 등)도 도구막대처럼 흐리게 — 눌러 보면 까닭을 알려 준다.
+      mirror.item.classList.toggle("is-unavailable", mirror.button.classList.contains("is-unavailable"));
     }
   };
 
@@ -3909,6 +4133,11 @@ async function mountMapEditor(doc){
   contextMirror(regionBtn);
   contextMirror(boardBtn);
   contextMirror(memoBtn);
+
+  contextSep();
+  /* 도구를 접으면 이 메뉴가 유일한 길이 된다 — 이름을 고정하지 않아 '숨기기 ↔ 보이기'가
+     단추를 따라 바뀌고, 문제 풀이 화면에서는 단추가 hidden 이라 항목째 빠진다. */
+  contextMirror(toolsToggleBtn);
 
   contextSep();
   contextMirror(undoBtn, "↶ 되돌리기 (Ctrl+Z)");
@@ -3926,8 +4155,6 @@ async function mountMapEditor(doc){
     const origin = e.originalEvent || {};
     contextLatLng = L.latLng(mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng));
     contextHead.textContent = contextLatLng.lat.toFixed(5) + ", " + contextLatLng.lng.toFixed(5);
-    // 카카오 검색을 껐으면 주변 시설은 눌러도 안 되는 항목이다 — 도구막대와 똑같이 감춘다.
-    contextNearbyBtn.hidden = nearbyBtn.hidden;
     contextZoomBtn.disabled = map.getZoom() >= maxViewZoom();
     syncContextMirrors();
     contextMenu.hidden = false;
@@ -4175,7 +4402,7 @@ async function mountMapEditor(doc){
       // CSV 로 표시 수천 개를 들여오면 한 단계가 1MB 를 넘는다. 단계 수와 별개로 총량도 막는다.
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
-      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid]),
+      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
         // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
@@ -4190,9 +4417,12 @@ async function mountMapEditor(doc){
         model.shapes = saved[3].map(mapNormalizeShape);
         imageVersion = saved[4];
         model.grid = saved[5] === true;
+        model.labels = saved[6] === true;
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();
+        // 표시를 다시 그리기 전에 이름표 상태를 맞춘다 — addMarkerLayer 가 그 값을 보고 매단다.
+        labelsShown = labelsWanted();
         model.markers.forEach(addMarkerLayer);
         for (const layer of shapeLayers.values()) map.removeLayer(layer);
         shapeLayers.clear();
@@ -4202,6 +4432,7 @@ async function mountMapEditor(doc){
         basemapSelect.value = model.basemap;
         imageClearBtn.hidden = !model.backgroundImage;
         syncGridButton();
+        syncLabelsButton();
         drawGrid();
         applyBasemap();
         touch();
@@ -4242,6 +4473,7 @@ async function mountMapEditor(doc){
     const ctx = doc.mapTaskCtx;
     const questions = Array.isArray(ctx.task.map.questions) ? ctx.task.map.questions : [];
     bar.hidden = true;                       // 편집 도구는 문제 풀이 화면에 내놓지 않는다
+    toolRow.hidden = true;                   // (taskMode 라 접기 토글이 이 값을 되돌리지 않는다)
     listPanel.hidden = true;
 
     const taskBar = document.createElement("div");
@@ -4429,6 +4661,8 @@ if (typeof module !== "undefined" && module.exports){
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
     mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,
     mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS,
-    MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom
+    MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom,
+    MAP_SEARCH_HISTORY_MAX, MAP_SEARCH_RESULT_MAX,
+    MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
   };
 }

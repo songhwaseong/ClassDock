@@ -247,8 +247,10 @@
         <button id="fsZoomIn" type="button" title="확대">＋</button>
       </span>
       <span class="page-ctl fs-page-ctl" id="fsPageCtl" title="페이지 번호 입력 후 Enter로 이동">
+        <button id="fsPagePrev" type="button" class="page-step-btn" title="이전 페이지 (PageUp)" aria-label="이전 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"></path></svg></button>
         <input id="fsPageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
         <span class="page-sep" id="fsPageTotal">/ 1</span>
+        <button id="fsPageNext" type="button" class="page-step-btn" title="다음 페이지 (PageDown)" aria-label="다음 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg></button>
       </span>
       <button id="fsExit" type="button">전체화면 종료</button>
     </div>
@@ -282,8 +284,14 @@
         <button id="zoomIn" type="button" title="확대 (Ctrl++)">＋</button>
       </span>
       <span class="pv-divider" aria-hidden="true"></span>
+      <button id="btnPdfPageMode" type="button" class="page-mode-btn" title="한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다" aria-label="한 장씩 보기" aria-pressed="false">
+        <span class="page-mode-single" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5"></rect><path d="M9 8h6M9 12h6M9 16h3"></path></svg></span>
+        <span class="page-mode-flow" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="9" rx="1.5"></rect><rect x="6" y="13" width="12" height="9" rx="1.5"></rect></svg></span>
+      </button>
+      <button id="pagePrev" type="button" class="page-step-btn" title="이전 페이지 (PageUp)" aria-label="이전 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"></path></svg></button>
       <input id="pageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
       <span class="page-sep" id="pageTotal">/ 1</span>
+      <button id="pageNext" type="button" class="page-step-btn" title="다음 페이지 (PageDown)" aria-label="다음 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg></button>
       <button id="btnPdfFind" type="button" class="page-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="PDF에서 찾기" data-shortcut-aria="true" aria-label="PDF에서 찾기"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg></button>
       <button id="btnFullscreen" type="button" class="page-fs-btn" title="문서 영역 전체화면" aria-label="문서 영역 전체화면"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
     </span>

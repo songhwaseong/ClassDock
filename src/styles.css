@@ -800,6 +800,11 @@
   .map-doc{display:flex;flex-direction:column;height:100%;min-height:0}
   .map-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}
+  /* 편집 도구 줄은 접을 수 있다(H) — 머리말 줄은 남아 다시 펴는 길이 된다. 두 줄이 붙어 있을
+     때는 사이 선을 옅게 해 하나의 도구막대로 보이게 한다. */
+  .map-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 12px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .map-bar.has-tools{border-bottom-color:color-mix(in srgb,var(--border) 45%,transparent)}
   .map-title{flex:1 1 180px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
     padding:6px 10px;font:600 15px/1.3 inherit}
   .map-select,.map-goto{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
@@ -840,6 +845,10 @@
   /* 되돌리기·다시 실행은 할 게 없으면 흐리게 — 눌러도 아무 일 없는 단추를 또렷하게 두지 않는다. */
   .map-btn:disabled{opacity:.42;cursor:default}
   .map-btn:disabled:hover{background:var(--field);border-color:var(--border)}
+  /* 아직 조건이 갖춰지지 않은 도구(주변 시설=카카오 · 장소 정보=런처)는 감추지 않고 흐리게 둔다.
+     disabled 가 아니라 클래스인 까닭: 눌렀을 때 켜는 법을 안내해야 하는데 disabled 인 단추에는
+     클릭이 오지 않는다. 그래서 커서도 그대로 손가락으로 둔다 — 눌러 보라는 뜻이다. */
+  .map-btn.is-unavailable,.map-spot-btn.is-unavailable,.map-context-menu button.is-unavailable{opacity:.45}
   .map-undo,.map-redo{padding:6px 9px;font-size:14px;line-height:1}
   /* 지도 우클릭 빠른 메뉴 — 표·문서 편집기의 우클릭 메뉴와 같은 모양새로 맞춘다. */
   .map-context-menu{position:fixed;z-index:1900;display:flex;flex-direction:column;min-width:214px;
@@ -864,6 +873,13 @@
   .map-shape-color{width:100%;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--field);padding:2px}
   .map-shape-label{border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));border-radius:6px;
     background:color-mix(in srgb,var(--panel) 92%,transparent);color:var(--ink);font-weight:700;box-shadow:0 2px 8px rgba(15,23,42,.18)}
+  /* 늘 보이는 표시 이름표(🏷️ 이름 보이기). 배경지도 위 어디에서나 읽히도록 옅은 판을 깔되,
+     핀 자체를 가리지 않게 도형 이름표보다 작고 얇게 둔다. 클릭은 핀이 받아야 하므로 통과시킨다. */
+  .map-pin-label{border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:5px;
+    background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--ink);
+    padding:1px 5px;font-size:11.5px;font-weight:600;box-shadow:0 1px 4px rgba(15,23,42,.16);
+    pointer-events:none;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .map-pin-label::before{display:none}          /* Leaflet 기본 말꼬리 — 이름표가 촘촘할 때 거슬린다 */
   .map-save{font-weight:600}
   .map-coord{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .map-status{color:var(--muted);font-size:11px;margin-left:auto}
@@ -908,7 +924,8 @@
     background:#0ea5e9;box-shadow:0 0 0 2px #fff}
   .map-pin.is-current{filter:drop-shadow(0 0 7px rgba(37,99,235,.95));z-index:1000!important}
   /* ── 발표 모드 ── */
-  .map-doc.is-presenting .map-bar,.map-doc.is-presenting .map-list{display:none}
+  .map-doc.is-presenting .map-bar,.map-doc.is-presenting .map-tools,
+  .map-doc.is-presenting .map-list{display:none}
   .map-present{position:absolute;left:0;right:0;bottom:0;z-index:900;display:flex;flex-direction:column;gap:8px;
     padding:12px;pointer-events:none}
   .map-present[hidden]{display:none}
@@ -1477,6 +1494,10 @@
   .viewer.panning,.office.panning{cursor:grabbing!important;user-select:none}
   .viewer.panning *,.office.panning *{cursor:grabbing!important;user-select:none!important}
   .page-frame{margin:0 auto 22px}            /* 줌 시 레이아웃 공간 확보용 래퍼 */
+  /* 한 장씩 보기: 지금 쪽만 남기고 나머지는 자리째 뺀다(감춘 쪽은 스크롤 높이에도 들어가지 않아야
+     "한 장"이 된다). 요소를 지우지 않으므로 필기·서명·검색 하이라이트는 그대로 살아 있다. */
+  .viewer.pdf-single-page .page-frame{display:none}
+  .viewer.pdf-single-page .page-frame.is-current-page{display:block}
   .page{position:relative;margin:0;background:#fff;box-shadow:0 4px 18px rgba(15,23,42,.14);
     border-radius:4px;transform-origin:top left}
   .page canvas{display:block;border-radius:4px}
@@ -1610,6 +1631,25 @@
   .view-page-ctl .page-fs-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
   .view-page-ctl .page-fs-btn.active{background:var(--accent);border-color:var(--accent)}
   .view-page-ctl .pv-divider{width:1px;align-self:stretch;background:rgba(255,255,255,.2);margin:1px 2px}
+  /* 보기 방식(한 장씩 / 이어보기) · 페이지 넘기기(◀ ▶). 줌·전체화면 단추와 같은 옷을 입혀 한
+     줄로 읽히게 한다. 아이콘은 이모지가 아니라 인라인 SVG 다 — 이모지는 글꼴에 따라 빈 네모로
+     나오거나 아예 그려지지 않아 무슨 단추인지 알 수 없게 된다. */
+  .page-mode-btn,.page-step-btn{font:inherit;font-size:12.5px;line-height:1;
+    display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#fff;
+    border-radius:6px;padding:4px 6px;cursor:pointer}
+  .page-mode-btn span{display:flex;align-items:center;justify-content:center}
+  .page-mode-btn svg,.page-step-btn svg{display:block;width:16px;height:16px;fill:none;
+    stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .page-mode-btn:hover:not(:disabled),.page-step-btn:hover:not(:disabled){background:rgba(255,255,255,.2)}
+  .page-mode-btn.is-on{background:var(--accent);border-color:var(--accent)}
+  /* 아이콘은 "지금 어느 쪽인가"가 아니라 "누르면 어떻게 되는가"를 보여 준다(전체화면 단추와 같은
+     규칙). 이어보기일 때는 한 장(single) 그림, 한 장씩일 때는 이어진 쪽(flow) 그림이 보인다. */
+  .page-mode-btn .page-mode-flow{display:none}
+  .page-mode-btn.is-on .page-mode-single{display:none}
+  .page-mode-btn.is-on .page-mode-flow{display:flex}
+  .page-step-btn:disabled{opacity:.38;cursor:default}
+  .page-mode-btn[hidden],.page-step-btn[hidden]{display:none}
 
   /* ---- 배치된 요소 ---- */
   .placed{position:absolute;cursor:move;touch-action:none;user-select:none;z-index:8}   /* 텍스트/링크 레이어(6·7)보다 위에 둬 글자 위에 놓인 서명·상자도 잡히게 */

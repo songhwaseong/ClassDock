@@ -78,6 +78,8 @@ function fullscreenPdfTarget(){
 /* ===== 현재 보고 있는 페이지 ===== */
 function currentPageIndex(doc=state){
   if (!doc || doc.kind !== "pdf" || !doc.pages || !doc.pages.length) return 0;
+  // 한 장씩 볼 때는 우리가 고른 쪽이 곧 답이다(나머지는 감춰져 있어 기하로는 알 수 없다).
+  if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)) return pdfSingleIndex(doc);
   const host = doc.el || viewer;
   const vr = host.getBoundingClientRect();
   const center = vr.top + vr.height/2;
@@ -126,6 +128,8 @@ function goToPdfPage(doc, n){
   const idx = Math.max(0, Math.min(doc.pages.length - 1, (parseInt(n, 10) || 1) - 1));
   const p = doc.pages[idx];
   if (!p || !p.frame) return;
+  // 한 장씩 볼 때는 스크롤이 아니라 그 쪽으로 넘긴다 — 페이지 입력·책갈피·검색이 모두 이 길로 온다.
+  if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)){ showPdfSinglePage(doc, idx); return; }
   const fr = p.frame.getBoundingClientRect(), hr = doc.el.getBoundingClientRect();
   doc.el.scrollTop += fr.top - hr.top - 8;
   startLazyRender(doc);                 // 점프 위치 주변 페이지 렌더 보장
@@ -408,6 +412,12 @@ async function revealCodeLinkPin(pdfDoc, pinEl){
   if (typeof ensureRendered === "function") await ensureRendered(pdfDoc);
   requestAnimationFrame(() => {
     const host = pdfDoc.el;
+    /* 한 장씩 보기: 핀이 놓인 쪽이 감춰져 있으면 아무리 스크롤해도 보이지 않는다 — 먼저 넘긴다. */
+    if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(pdfDoc)){
+      const frame = pinEl.closest ? pinEl.closest(".page-frame") : null;
+      const at = frame ? pdfDoc.pages.findIndex(p => p.frame === frame) : -1;
+      if (at >= 0 && at !== pdfSingleIndex(pdfDoc)) showPdfSinglePage(pdfDoc, at);
+    }
     if (host && pinEl.isConnected){
       const er = pinEl.getBoundingClientRect(), hr = host.getBoundingClientRect();
       host.scrollTop += (er.top - hr.top) - host.clientHeight * 0.35;       // 핀을 화면 상단 1/3 근처로
@@ -788,6 +798,12 @@ function gotoPdfMatch(doc, index){
   doc.pages.forEach(p => { if (p.findLayer) p.findLayer.querySelectorAll(".pdf-find-box.active").forEach(b => b.classList.remove("active")); });
   const mt = M[index];
   if (mt.p.findLayer) mt.p.findLayer.querySelectorAll('.pdf-find-box[data-mi="' + index + '"]').forEach(b => b.classList.add("active"));
+  /* 한 장씩 보기: 찾은 글자가 다른 쪽에 있으면 먼저 그 쪽으로 넘긴다(감춘 페이지로는 스크롤할
+     수 없다). 넘긴 뒤 그 쪽 안에서의 세로 위치는 아래 보정이 그대로 맡는다. */
+  if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)){
+    const at = doc.pages.indexOf(mt.p);
+    if (at >= 0 && at !== pdfSingleIndex(doc)) showPdfSinglePage(doc, at);
+  }
   if (doc.el && mt.p.frame){     // offsetParent 에 의존하지 않게 현재 화면 위치 기준으로 스크롤 보정
     const yInFrame = (mt.rects[0] ? mt.rects[0].y : 0) * (doc.zoom || 1);
     const hostTop = doc.el.getBoundingClientRect().top, frameTop = mt.p.frame.getBoundingClientRect().top;

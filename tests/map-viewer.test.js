@@ -32,6 +32,7 @@ function loadMapViewer(){
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
+      , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
     };`, context);
   return context.__map;
 }
@@ -513,7 +514,8 @@ test("주변 시설은 갈래 대신 직접 적은 말로도 반경 안을 찾�
   const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
   const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
   assert.match(csharp, /bool around = provider == "kakao-keyword" && spot\.HasPoint/);
-  assert.match(csharp, /"\?size=" \+ \(around \? "15" : "5"\)/);
+  // 이름 검색 쪽 후보 수는 따로 정한다(GeocodeResultLimit) — 여기서는 15개 길만 본다.
+  assert.match(csharp, /"\?size=" \+ \(around \? "15" : GeocodeResultLimit\)/);
   assert.match(csharp, /"&page=" \+ \(spot\.Page\.Length > 0 \? spot\.Page : "1"\)/);
   const goKeyword = /if provider == "kakao-keyword" && spot\.hasPoint\(\) \{([\s\S]*?)\n\t\t\}/.exec(go);
   assert.ok(goKeyword);
@@ -597,8 +599,9 @@ test("지도 우클릭 메뉴는 누른 자리를 기준으로 열리고 도구�
   assert.match(open[1], /if \(adding \|\| drawingMode\) return;/);
   // 누른 자리는 지구 밖으로 나가지 않게 눌러 두고, 메뉴 머리말에 그대로 보여 준다.
   assert.match(open[1], /contextLatLng = L\.latLng\(mapClampLat\(e\.latlng\.lat\), mapClampLng\(e\.latlng\.lng\)\)/);
-  // 카카오 검색을 껐으면 도구막대와 똑같이 감춘다(눌러도 안 되는 항목을 두지 않는다).
-  assert.match(open[1], /contextNearbyBtn\.hidden = nearbyBtn\.hidden/);
+  // 카카오 검색을 껐어도 감추지 않는다 — 도구막대와 같은 잣대로 흐려지기만 한다(nearbyButtons).
+  assert.match(source, /nearbyButtons\.push\(contextNearbyBtn\)/);
+  assert.doesNotMatch(open[1], /contextNearbyBtn\.hidden/);
   // 메뉴 문구는 도구막대처럼 만들 때 한 번만 훑는다(언어 전환은 i18n 이 되돌려 그린다).
   assert.match(source, /document\.body\.appendChild\(contextMenu\);\n[\s\S]{0,120}?mapTranslate\(contextMenu\);/);
   // 실행은 도구막대와 같은 함수 — 되돌리기 기록이 두 갈래로 갈라지지 않는다.
@@ -650,6 +653,111 @@ test("우클릭 메뉴의 도구 항목은 도구막대 단추를 그대로 비�
   // 항목이 늘었으므로 작은 화면에서도 메뉴가 화면 밖으로 흘러넘치지 않아야 한다.
   assert.match(styles, /\.map-context-menu\{[\s\S]*?max-height:calc\(100vh - 16px\);overflow-y:auto/);
   assert.match(styles, /\.map-context-menu button\.is-on::after\{content:"✓"/);
+});
+
+/* 전체화면에서 지도를 넓게 보려고 편집 도구를 접는다. 접는 대상이 도구 줄뿐이어야 저장·되돌리기
+   ·'저장 안 됨' 표시와 다시 펴는 단추가 창 모드에 남는다. */
+test("편집 도구는 접을 수 있고 머리말 줄은 창 모드에 남는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  // 도구막대는 두 줄이다 — 머리말(.map-bar)과 접히는 도구 줄(.map-tools).
+  assert.match(source, /toolRow\.className = "map-tools"/);
+  assert.match(source, /root\.append\(bar, toolRow, body, imageInput, csvInput\)/);
+  const head = /bar\.append\(([^)]*)\);/.exec(source);
+  assert.ok(head, "머리말 줄 append 를 찾지 못했다");
+  for (const keep of ["titleInput", "searchWrap", "toolsToggleBtn", "undoBtn", "redoBtn", "saveBtn", "status"])
+    assert.ok(head[1].includes(keep), keep + " 는 머리말 줄에 남아야 한다");
+  const tools = /toolRow\.append\(([\s\S]*?)\);/.exec(source);
+  assert.ok(tools, "도구 줄 append 를 찾지 못했다");
+  for (const moved of ["addBtn", "lineBtn", "areaBtn", "clearItemsBtn", "pngBtn", "taskBtn"])
+    assert.ok(tools[1].includes(moved), moved + " 는 도구 줄에 있어야 한다");
+  // 오프라인 지도 단추(런처 전용)도 머리말이 아니라 도구 줄에 붙는다.
+  assert.match(source, /toolRow\.appendChild\(prepareBtn\)/);
+  // 창 모드에서는 도구 줄만 접는다.
+  const apply = /function applyToolbarVisible\(\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(apply);
+  assert.match(apply[1], /bar\.hidden = fullscreenNow && !toolbarVisible/);
+  assert.match(apply[1], /toolRow\.hidden = !toolbarVisible/);
+  // 보기 상태라 .map 파일이 아니라 화면 환경설정으로 기억한다.
+  assert.match(source, /const MAP_TOOLBAR_KEY = "mapToolbarVisible"/);
+  assert.match(source, /localStorage\.getItem\(MAP_TOOLBAR_KEY\) !== "false"/);
+  assert.match(source, /localStorage\.setItem\(MAP_TOOLBAR_KEY, String\(toolbarVisible\)\)/);
+  // 접은 뒤에도 우클릭 메뉴가 같은 단추를 비춘다 — 이름을 고정하지 않아 숨기기↔보이기가 따라 바뀐다.
+  assert.match(source, /contextMirror\(toolsToggleBtn\);/);
+  // 새 줄도 발표 모드에서는 함께 사라지고, 두 줄이 붙어 있을 때 사이 선은 옅다.
+  assert.match(styles, /\.map-doc\.is-presenting \.map-tools/);
+  assert.match(styles, /\.map-tools\{display:flex/);
+  assert.match(styles, /\.map-bar\.has-tools\{border-bottom-color/);
+});
+
+/* ⛶ 전체화면은 Esc·⛶ 로 나가는 길이 따로 있으니 머리말까지 접어 지도만 남긴다. 다만 임시 접기라
+   환경설정에 쓰지 않고, 나가면 들어가기 전 상태로 되돌린다. */
+test("전체화면에서는 머리말까지 접고 나오면 들어가기 전 상태로 되돌린다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const sync = /function syncFullscreenState\(\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(sync);
+  assert.match(sync[1], /toolbarBeforeFullscreen = toolbarVisible/);
+  assert.match(sync[1], /if \(toolbarBeforeFullscreen !== null\)\{ toolbarVisible = toolbarBeforeFullscreen/);
+  // 임시 접기는 저장하지 않는다 — 기억을 쓰는 길은 직접 고른 setToolbarVisible 뿐이다.
+  assert.ok(!/localStorage\.setItem/.test(sync[1]), "전체화면 임시 접기를 환경설정에 쓰면 안 된다");
+  const setter = /function setToolbarVisible\(visible\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(setter);
+  assert.match(setter[1], /toolbarBeforeFullscreen = null/);   // 직접 고른 값이 임시 접기보다 우선
+  // 창 안 폴백(body.viewer-fullscreen)은 이벤트가 없어 클래스 변화도 함께 지켜본다.
+  assert.match(source, /document\.addEventListener\("fullscreenchange", syncFullscreenState\)/);
+  assert.match(source, /attributeFilter:\["class"\]/);
+  assert.match(source, /syncFullscreenState\(\);\s*\/\/ 이미 전체화면인 채로/);
+  // 열어 둔 문서를 닫으면 키·전체화면 감시를 함께 걷는다.
+  const cleanup = mapCleanupBodies(source).find(body => /onToolbarKey/.test(body));
+  assert.ok(cleanup, "접기 관련 정리 블록이 있어야 한다");
+  assert.match(cleanup, /removeEventListener\("keydown", onToolbarKey\)/);
+  assert.match(cleanup, /fullscreenClassWatch\.disconnect/);
+});
+
+/* H 한 글자짜리 단축키라 글자를 치는 자리에서는 절대 걸리면 안 된다. */
+test("H 접기는 입력칸·발표·대화창·문제 풀이 화면에서는 걸리지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const key = /function onToolbarKey\(e\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.ok(key);
+  assert.match(key[1], /if \(taskMode \|\| e\.defaultPrevented\) return/);
+  assert.match(key[1], /if \(e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey\) return/);
+  assert.match(key[1], /doc\.el && doc\.el\.hidden/);
+  assert.match(key[1], /root\.classList\.contains\("is-presenting"\)/);
+  assert.match(key[1], /document\.querySelector\("\.modal"\)/);
+  assert.match(key[1], /closest\("input,textarea,select,\[contenteditable='true'\]"\)/);
+  // 지도 문제(학생 화면)에서는 두 줄 다 접힌 채로 두고, 우클릭 메뉴에서도 항목이 빠진다.
+  assert.match(source, /toolsToggleBtn\.hidden = taskMode/);
+  assert.match(source, /toolRow\.hidden = true;/);
+  const apply = /function applyToolbarVisible\(\)\{([\s\S]*?)\n  \}/.exec(source);
+  assert.match(apply[1], /^\s*if \(taskMode\) return;/);
+});
+
+/* 검색 후보 수는 세 곳(화면 목록·C# 런처·Go 런처)이 함께 정한다. 한쪽만 올리면 다른 쪽에서
+   잘려 아무 효과가 없으므로 값이 갈라지지 않는지 본다. */
+test("검색 후보 개수는 화면 목록과 두 런처가 같은 값을 쓴다", () => {
+  const api = loadMapViewer();
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const launcher = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  const limit = api.MAP_SEARCH_RESULT_MAX;
+  assert.equal(limit, 8);
+  // 화면 목록은 상수로 자른다(숫자를 그 자리에 박아 두면 런처와 어긋난 것을 알 길이 없다).
+  assert.match(source, /items = places\.slice\(0, MAP_SEARCH_RESULT_MAX\)/);
+  // C# 런처 — Nominatim limit 과 카카오 주소·키워드 size 가 같은 상수를 쓴다.
+  const csharp = /const string GeocodeResultLimit = "(\d+)";/.exec(launcher);
+  assert.ok(csharp, "launcher.cs 에서 GeocodeResultLimit 을 찾지 못했다");
+  assert.equal(Number(csharp[1]), limit);
+  assert.match(launcher, /"\?format=jsonv2&limit=" \+ GeocodeResultLimit/);
+  assert.match(launcher, /"\?size=" \+ \(around \? "15" : GeocodeResultLimit\)/);
+  // Go 폴백 런처도 같은 값이어야 한다.
+  const golang = /geocodeResultLimit = "(\d+)"/.exec(go);
+  assert.ok(golang, "main.go 에서 geocodeResultLimit 을 찾지 못했다");
+  assert.equal(Number(golang[1]), limit);
+  assert.match(go, /values\.Set\("limit", geocodeResultLimit\)/);
+  assert.match(go, /values\.Set\("size", geocodeResultLimit\)/);
+  // 주변 시설은 다른 길이라 그대로 15개씩 받는다(여기를 함께 건드리지 않았는지 확인).
+  assert.match(launcher, /"&size=15&sort=distance&page="/);
+  assert.match(go, /values\.Set\("size", "15"\)/);
 });
 
 test("최근 검색어는 최신순 8개까지 중복 없이 남고 성공한 검색만 기록한다", () => {
@@ -1002,11 +1110,12 @@ test("좌표로 부르는 요청은 런처가 숫자·코드 꼴만 통과시킨
   assert.match(go, /geocode-bad-category/);
 });
 
-/* 카카오에만 있는 기능은 OSM 폴백이 없다. 꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 된다. */
-test("주변 시설은 카카오를 켰을 때만 화면에 내놓고 주소 확인은 OSM으로도 돌아간다", () => {
+/* 카카오에만 있는 기능은 OSM 폴백이 없다. 감추는 대신 흐리게 두고 눌렀을 때 켜는 법을 알려 준다
+   — 감추면 이런 기능이 있다는 것조차 모르고 지나친다. */
+test("주변 시설은 카카오를 껐을 때 흐려지고 주소 확인은 OSM으로도 돌아간다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  assert.match(source, /nearbyBtn\.hidden = true/);
-  assert.match(source, /mapProviderIsKakao\(\)\.then\(\(kakao\) => \{ nearbyBtn\.hidden = !kakao; \}\)/);
+  assert.match(source, /nearbyBtn\.classList\.add\("is-unavailable"\)/);
+  assert.match(source, /mapProviderIsKakao\(\)\.then\(\(kakao\) => setNearbyReady\(kakao\)\)/);
   const nearby = /async function mapNearbyPlaces\(([\s\S]*?)\n\}/.exec(source);
   assert.ok(nearby);
   assert.match(nearby[1], /throw new Error\("kakao-required"\)/);
@@ -1096,11 +1205,43 @@ test("클릭한 자리 안내는 카카오가 없어도 주소까지는 나오�
      Leaflet 은 preclick 에서 닫으므로 그 전의 상태를 봐 둔다. */
   assert.match(source, /map\.on\("preclick", \(\) => \{ popupWasOpen = popupOpen; \}\)/);
   // 도형에서 올라온 클릭(propagatedFrom)은 그 도형의 말풍선 자리라 안내가 덮지 않는다.
-  assert.match(source, /if \(spotInfo && !spotBtn\.hidden && !popupWasOpen && !e\.propagatedFrom\) showSpotInfo\(e\.latlng\)/);
+  assert.match(source, /if \(spotInfo && spotReady && !popupWasOpen && !e\.propagatedFrom\) showSpotInfo\(e\.latlng\)/);
   // 읽기만 하는 말풍선이라 문서를 건드리지 않는다 — 남기려면 '표시로 넣기'를 눌러야 한다.
   assert.doesNotMatch(show[1], /model\.markers\.push/);
-  assert.match(source, /spotBtn\.hidden = true/);
-  assert.match(source, /mapTileProxyBase\(\)\.then\(\(base\) => \{ spotBtn\.hidden = !base; \}\)/);
+  // 런처가 없어도 감추지 않는다 — 흐리게 두고 눌렀을 때 까닭을 알려 준다.
+  assert.match(source, /spotBtn\.classList\.add\("is-unavailable"\)/);
+  assert.match(source, /mapTileProxyBase\(\)\.then\(\(base\) => setSpotReady\(!!base\)\)/);
+});
+
+/* 쓸 수 없는 도구를 감추면 그런 기능이 있다는 것조차 모르고 지나친다. 흐리게 두고, 눌렀을 때
+   켜는 법을 알려 주되, 그때 상태를 한 번 더 확인해 "켰는데도 안 된다"가 없게 한다. */
+test("아직 쓸 수 없는 도구는 감추지 않고 흐리게 두고 누르면 켜는 법을 알려 준다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+  // 감추던 자리가 남아 있으면 안내가 영영 닿지 않는다.
+  assert.doesNotMatch(source, /nearbyBtn\.hidden/);
+  assert.doesNotMatch(source, /spotBtn\.hidden/);
+  // 흐린 채로 눌렀을 때 상태를 다시 확인하고 나서 안내한다(그 사이 설정을 켰을 수 있다).
+  const nearby = /const runNearby = async \(at, opts = \{\}\) => \{([\s\S]*?)\n    const center =/.exec(source);
+  assert.ok(nearby, "runNearby 앞머리의 안내 갈래를 찾지 못했다");
+  assert.match(nearby[1], /setNearbyReady\(await mapProviderIsKakao\(\)\)/);
+  assert.match(nearby[1], /if \(!nearbyReady\)\{[\s\S]*?return;/);
+  assert.match(source, /setSpotReady\(!!await mapTileProxyBase\(\)\)/);
+  // 안내 문구는 켜는 자리(설정 · 런처)를 짚어 주고, 영어 사전에도 있어야 한다.
+  for (const guide of [
+    "주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.",
+    "장소 정보는 ClassDock 런처로 열었을 때 쓸 수 있어요 — 브라우저로 연 화면에서는 누른 자리를 되물을 수 없습니다."
+  ]){
+    assert.ok(source.includes(guide), "안내 문구가 없다: " + guide);
+    assert.ok(i18n.includes('"' + guide + '"'), "사전에 없다: " + guide);
+  }
+  // 우클릭 메뉴도 도구막대의 흐림을 그대로 비춘다.
+  const sync = /const syncContextMirrors = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(sync);
+  assert.match(sync[1], /classList\.toggle\("is-unavailable", mirror\.button\.classList\.contains\("is-unavailable"\)\)/);
+  // disabled 가 아니라 클래스다 — disabled 인 단추에는 클릭이 오지 않아 안내할 자리가 없다.
+  assert.match(styles, /\.map-btn\.is-unavailable,\.map-spot-btn\.is-unavailable,\.map-context-menu button\.is-unavailable\{opacity/);
 });
 
 /* ===== 저장 전 안전망 ===== */
@@ -1305,6 +1446,47 @@ test("위경도 격자는 .map 에 저장되고 옛 파일은 꺼진 채로 열�
   const again = api.mapDocParse(api.mapDocSerialize(model));
   assert.equal(again.grid, true);
   assert.equal(again.version, api.MAP_DOC_VERSION);
+});
+
+/* 표시 이름은 마우스를 올려야 보였다. 늘 보이게 켤 수 있게 하되, 겹쳐서 못 읽는 축소에서는
+   잠시 숨긴다(Leaflet 에 이름표 겹침 정리가 없다). 격자와 같은 성격이라 .map 에 함께 담는다. */
+test("표시 이름표는 .map 에 저장되고 옛 파일은 꺼진 채로 열린다", () => {
+  const api = loadMapViewer();
+  const old = api.mapDocParse(JSON.stringify({
+    type:"classdock-map", version:5, title:"옛 지도", basemap:"osm", center:[37,127], zoom:10, markers:[]
+  }));
+  assert.equal(old.labels, false);
+
+  const model = api.mapDocEmpty("이름표 지도");
+  const before = api.mapDocContentKey(model);
+  model.labels = true;
+  assert.notEqual(api.mapDocContentKey(model), before, "이름표를 켜면 저장 안 됨(●) 이 켜진다");
+  const again = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(again.labels, true);
+  assert.equal(again.version, api.MAP_DOC_VERSION);
+});
+
+test("이름표는 읽을 수 있는 확대에서만 내놓고 표시가 너무 많으면 켜지 않는다", () => {
+  const api = loadMapViewer();
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.ok(api.MAP_LABEL_MIN_ZOOM > 1 && api.MAP_LABEL_MIN_ZOOM < 19);
+  assert.ok(api.MAP_LABEL_MAX_MARKERS >= 100);
+  // 켜 두었어도 확대가 모자라면 내지 않는다.
+  assert.match(source, /const labelsWanted = \(\) => !!model\.labels && map\.getZoom\(\) >= MAP_LABEL_MIN_ZOOM/);
+  // Leaflet 은 매단 뒤에 permanent 를 바꿀 수 없다 — 다시 매다는 수밖에 없고, 그래서 실제로
+  // 달라질 때만 부른다(확대할 때마다 수백 개를 다시 매달면 지도가 끊긴다).
+  const sync = /const syncMarkerLabels = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(sync);
+  assert.match(sync[1], /if \(labelsWanted\(\) === labelsShown\) return/);
+  assert.match(sync[1], /bindMarkerTooltip\(layer, marker\)/);
+  assert.match(source, /map\.on\("zoomend", syncMarkerLabels\)/);
+  // 켜 둔 채로 저장된 지도는 처음부터, 되돌리기로 되살아난 지도도 그 상태로 다시 매단다.
+  assert.equal((source.match(/labelsShown = labelsWanted\(\);/g) || []).length, 2);
+  // 표시가 너무 많으면 켜지 않고 까닭을 알려 준다(켜 둔 것을 끄는 길은 막지 않는다).
+  assert.match(source, /if \(!model\.labels && model\.markers\.length > MAP_LABEL_MAX_MARKERS\)\{/);
+  // 이름표는 클릭을 가로채지 않는다 — 핀을 눌러 편집 풍선을 여는 길이 막히면 안 된다.
+  assert.match(styles, /\.map-pin-label\{[\s\S]*?pointer-events:none/);
 });
 
 test("표시 목록의 묶음 이름은 꼬리표를 사람 말로 바꾼다", () => {
