@@ -1659,6 +1659,10 @@
     "카카오맵의 영업시간·메뉴·리뷰 등 상세 페이지 보기":
       "View details such as hours, menus, and reviews on Kakao Map",
     "카카오맵 상세 페이지를 불러오는 중…": "Loading the Kakao Map details…",
+    "카카오맵 상세 페이지": "Kakao Map details page",
+    "장소": "Place",
+    "이전 주변 시설": "Previous nearby place",
+    "다음 주변 시설": "Next nearby place",
     "새 창에서 열기": "Open in a new window",
     "카카오맵 상세 주소를 열 수 없어요.": "Couldn't open the Kakao Map details address.",
     "새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요.":

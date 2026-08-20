@@ -26,7 +26,7 @@ function loadMapViewer(){
       , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
-      , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, MAP_SPOT_MIN_ZOOM
+      , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
       , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom, mapSearchMenuItem
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
@@ -494,21 +494,35 @@ test("카카오 상세 창은 Local API의 장소 주소만 iframe으로 연다"
   assert.equal(api.mapKakaoPlaceUrl("https://evil.example/26338954"), "");
   assert.equal(api.mapKakaoPlaceUrl("https://place.map.kakao.com/not-a-place"), "");
   assert.equal(api.mapKakaoPlaceUrl("javascript:alert(1)"), "");
+  assert.deepEqual(JSON.parse(JSON.stringify(api.mapKakaoPlaceSlides([
+    { id:"a", name:"학교", placeUrl:"http://place.map.kakao.com/26338954/" },
+    { id:"b", label:"병원", url:"https://place.map.kakao.com/17866469" },
+    { id:"c", name:"중복", placeUrl:"https://place.map.kakao.com/26338954" },
+    { id:"d", name:"외부", placeUrl:"https://evil.example/1" }
+  ]))), [
+    { id:"a", name:"학교", url:"https://place.map.kakao.com/26338954" },
+    { id:"b", name:"병원", url:"https://place.map.kakao.com/17866469" }
+  ]);
 
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   const modal = /function openMapKakaoPlaceModal\(([^]*?)\n\}/.exec(source);
   assert.ok(modal);
-  assert.match(modal[1], /frame\.src = url/);
+  assert.match(modal[1], /frame\.src = activeUrl/);
   assert.match(modal[1], /frame\.src = "about:blank"/);
-  assert.match(modal[1], /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
+  assert.match(modal[1], /window\.open\(activeUrl, "_blank", "noopener,noreferrer"\)/);
+  assert.match(modal[1], /position\.textContent = \(placeIndex \+ 1\) \+ " \/ " \+ places\.length/);
+  assert.match(modal[1], /prevBtn\.disabled = placeIndex === 0/);
+  assert.match(modal[1], /nextBtn\.disabled = placeIndex === places\.length - 1/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(spot\.placeUrl\)/);
-  assert.match(source, /openMapKakaoPlaceModal\(spot\.placeUrl, spot\.title \|\| name\)/);
+  assert.match(source, /openMapKakaoPlaceModal\(\[\{ name:spot\.title \|\| name, placeUrl:spot\.placeUrl \}\], 0\)/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(marker\.placeUrl\)/);
-  assert.match(source, /openMapKakaoPlaceModal\(marker\.placeUrl, marker\.label\)/);
+  assert.match(source, /item\.source === "nearby" && item\.batch === marker\.batch/);
+  assert.match(source, /openMapKakaoPlaceModal\(peers\.map/);
 
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(css, /\.modal-card\.map-place-card\{[^}]*height:min\(88vh,900px\)/);
   assert.match(css, /\.map-place-frame\{[^}]*width:100%;height:100%;border:0/);
+  assert.match(css, /\.map-place-nav-btn\{/);
 });
 
 test("카카오 REST 키는 브라우저 설정에 남기지 않고 로컬 런처가 보호한다", () => {

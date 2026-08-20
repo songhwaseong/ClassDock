@@ -1019,14 +1019,34 @@ function mapKakaoPlaceUrl(raw){
   } catch(_){ return ""; }
 }
 
+/* 상세 창에 넣을 장소를 한 번 더 거른다. 주변 시설 묶음은 저장된 .map 에서 되읽을 수도 있으므로
+   호출하는 쪽을 믿지 않고 URL 을 다시 검사하고, 같은 장소가 겹치면 먼저 나온 것만 남긴다. */
+function mapKakaoPlaceSlides(rawPlaces){
+  const slides = [], seen = new Set();
+  for (const raw of (Array.isArray(rawPlaces) ? rawPlaces : [])){
+    const item = raw && typeof raw === "object" ? raw : {};
+    const url = mapKakaoPlaceUrl(item.placeUrl || item.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    slides.push({
+      id:String(item.id || ""),
+      name:String(item.name || item.label || "").trim().slice(0, 120),
+      url
+    });
+  }
+  return slides;
+}
+
 /* 카카오 장소 상세 페이지는 카카오 안내에 따라 화면 일부를 덮거나 잘라 내지 않고 iframe 전체로
-   보여 준다. ClassDock 쪽 머리말은 iframe 바깥이라 카카오 페이지 내용과 겹치지 않는다. */
-function openMapKakaoPlaceModal(rawUrl, placeName){
-  const url = mapKakaoPlaceUrl(rawUrl);
-  if (!url){
+   보여 준다. ClassDock 쪽 머리말은 iframe 바깥이라 카카오 페이지 내용과 겹치지 않는다.
+   주변 시설은 한 검색 묶음이 많게는 100곳이므로 iframe 을 장소마다 만들지 않고 하나만 갈아 끼운다. */
+function openMapKakaoPlaceModal(rawPlaces, startIndex){
+  const places = mapKakaoPlaceSlides(rawPlaces);
+  if (!places.length){
     if (typeof toast === "function") toast(mapT("카카오맵 상세 주소를 열 수 없어요."), 3000, { type:"error" });
     return false;
   }
+  let placeIndex = Math.max(0, Math.min(places.length - 1, Math.floor(Number(startIndex) || 0)));
   const modal = document.createElement("div");
   modal.className = "modal map-place-modal";
   const card = document.createElement("div");
@@ -1038,14 +1058,25 @@ function openMapKakaoPlaceModal(rawUrl, placeName){
   const head = document.createElement("div");
   head.className = "map-place-head";
   const title = document.createElement("h3");
-  title.textContent = String(placeName || "").trim() || "카카오맵 상세 보기";
+  const nav = document.createElement("div");
+  nav.className = "map-place-nav";
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button"; prevBtn.className = "map-place-nav-btn map-place-prev";
+  prevBtn.textContent = "‹"; prevBtn.setAttribute("aria-label", "이전 주변 시설");
+  const position = document.createElement("span");
+  position.className = "map-place-position"; position.setAttribute("aria-live", "polite");
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button"; nextBtn.className = "map-place-nav-btn map-place-next";
+  nextBtn.textContent = "›"; nextBtn.setAttribute("aria-label", "다음 주변 시설");
+  nav.append(prevBtn, position, nextBtn);
+  nav.hidden = places.length < 2;
   const external = document.createElement("button");
   external.type = "button"; external.className = "btn map-place-external";
   external.textContent = "새 창에서 열기";
   const closeBtn = document.createElement("button");
   closeBtn.type = "button"; closeBtn.className = "map-place-close";
   closeBtn.textContent = "×"; closeBtn.setAttribute("aria-label", "닫기");
-  head.append(title, external, closeBtn);
+  head.append(title, nav, external, closeBtn);
 
   const frameWrap = document.createElement("div");
   frameWrap.className = "map-place-frame-wrap";
@@ -1054,9 +1085,7 @@ function openMapKakaoPlaceModal(rawUrl, placeName){
   loading.textContent = "카카오맵 상세 페이지를 불러오는 중…";
   const frame = document.createElement("iframe");
   frame.className = "map-place-frame";
-  frame.title = (String(placeName || "").trim() || "장소") + " 카카오맵 상세 페이지";
   frame.referrerPolicy = "strict-origin-when-cross-origin";
-  frame.src = url;
   frameWrap.append(loading, frame);
   card.append(head, frameWrap);
   modal.appendChild(card);
@@ -1064,6 +1093,26 @@ function openMapKakaoPlaceModal(rawUrl, placeName){
   mapTranslate(modal);
 
   let closed = false;
+  let activeUrl = "";
+  const showPlace = (nextIndex, direction) => {
+    const bounded = Math.max(0, Math.min(places.length - 1, nextIndex));
+    if (bounded === placeIndex && activeUrl) return;
+    placeIndex = bounded;
+    const place = places[placeIndex];
+    activeUrl = place.url;
+    title.textContent = place.name || mapT("카카오맵 상세 보기");
+    position.textContent = (placeIndex + 1) + " / " + places.length;
+    prevBtn.disabled = placeIndex === 0;
+    nextBtn.disabled = placeIndex === places.length - 1;
+    loading.hidden = false;
+    frame.title = (place.name || mapT("장소")) + " " + mapT("카카오맵 상세 페이지");
+    frame.src = activeUrl;
+    if (direction){
+      frameWrap.classList.remove("is-slide-prev", "is-slide-next");
+      void frameWrap.offsetWidth;
+      frameWrap.classList.add(direction < 0 ? "is-slide-prev" : "is-slide-next");
+    }
+  };
   const close = () => {
     if (closed) return;
     closed = true;
@@ -1072,19 +1121,32 @@ function openMapKakaoPlaceModal(rawUrl, placeName){
     modal.remove();
   };
   const onKey = (e) => {
-    if (e.key !== "Escape") return;
-    e.preventDefault(); e.stopImmediatePropagation();
-    close();
+    if (e.key === "Escape"){
+      e.preventDefault(); e.stopImmediatePropagation();
+      close();
+    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowLeft" && placeIndex > 0){
+      e.preventDefault(); e.stopImmediatePropagation();
+      showPlace(placeIndex - 1, -1);
+    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowRight" && placeIndex < places.length - 1){
+      e.preventDefault(); e.stopImmediatePropagation();
+      showPlace(placeIndex + 1, 1);
+    }
   };
   window.addEventListener("keydown", onKey, true);
   modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
   closeBtn.addEventListener("click", close);
   frame.addEventListener("load", () => { loading.hidden = true; });
+  frameWrap.addEventListener("animationend", () => {
+    frameWrap.classList.remove("is-slide-prev", "is-slide-next");
+  });
+  prevBtn.addEventListener("click", () => showPlace(placeIndex - 1, -1));
+  nextBtn.addEventListener("click", () => showPlace(placeIndex + 1, 1));
   external.addEventListener("click", () => {
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    const opened = window.open(activeUrl, "_blank", "noopener,noreferrer");
     if (opened){ try { opened.opener = null; } catch(_){} }
     else if (typeof toast === "function") toast(mapT("새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요."), 3800);
   });
+  showPlace(placeIndex, 0);
   closeBtn.focus({ preventScroll:true });
   return true;
 }
@@ -3258,7 +3320,16 @@ async function mountMapEditor(doc){
     detailBtn.hidden = !mapKakaoPlaceUrl(marker.placeUrl);
     detailBtn.addEventListener("click", () => {
       map.closePopup();
-      openMapKakaoPlaceModal(marker.placeUrl, marker.label);
+      /* 한 번에 찾은 주변 시설만 한 벌로 넘긴다. 지도에 예전 검색 결과가 함께 있어도 batch 가
+         다르면 섞이지 않으며, 모델 순서가 곧 검색 결과 순서다. */
+      const peers = marker.source === "nearby" && marker.batch
+        ? model.markers.filter(item => item.source === "nearby" && item.batch === marker.batch
+          && mapKakaoPlaceUrl(item.placeUrl))
+        : [marker];
+      const startIndex = Math.max(0, peers.findIndex(item => item.id === marker.id));
+      openMapKakaoPlaceModal(peers.map(item => ({
+        id:item.id, name:item.label, placeUrl:item.placeUrl
+      })), startIndex);
     });
 
     /* ── 사진 한 장 ──
@@ -4325,7 +4396,7 @@ async function mountMapEditor(doc){
     detailBtn.hidden = !mapKakaoPlaceUrl(spot.placeUrl);
     detailBtn.addEventListener("click", () => {
       map.closePopup();
-      openMapKakaoPlaceModal(spot.placeUrl, spot.title || name);
+      openMapKakaoPlaceModal([{ name:spot.title || name, placeUrl:spot.placeUrl }], 0);
     });
     actions.append(pinBtn, copyBtn, nearBtn, detailBtn);
     box.appendChild(actions);
