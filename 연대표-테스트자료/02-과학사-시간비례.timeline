@@ -1,0 +1,140 @@
+{
+  "type": "classdock-timeline",
+  "version": 1,
+  "title": "과학기술사 - 시간 비례 보기 테스트",
+  "viewMode": "scale",
+  "events": [
+    {
+      "id": "sci-001",
+      "title": "코페르니쿠스의 천구의 회전에 관하여 출간",
+      "start": "1543",
+      "end": "",
+      "category": "천문학",
+      "description": "초기 사건과 뒤 사건 사이의 실제 시간 간격을 확인합니다.",
+      "color": "purple",
+      "image": null,
+      "order": 0
+    },
+    {
+      "id": "sci-002",
+      "title": "갈릴레이의 천체 관측 보고",
+      "start": "1610",
+      "end": "",
+      "category": "천문학",
+      "description": "망원경 관측으로 알려진 시기의 사건입니다.",
+      "color": "purple",
+      "image": null,
+      "order": 1
+    },
+    {
+      "id": "sci-003",
+      "title": "뉴턴의 프린키피아 출간",
+      "start": "1687",
+      "end": "",
+      "category": "물리학",
+      "description": "시간 비례 보기에서 17세기 사건 사이의 간격을 살펴보세요.",
+      "color": "blue",
+      "image": null,
+      "order": 2
+    },
+    {
+      "id": "sci-004",
+      "title": "와트의 증기기관 특허",
+      "start": "1769",
+      "end": "",
+      "category": "기술",
+      "description": "산업혁명과 관련된 기술 사건입니다.",
+      "color": "amber",
+      "image": null,
+      "order": 3
+    },
+    {
+      "id": "sci-005",
+      "title": "다윈의 종의 기원 출간",
+      "start": "1859-11-24",
+      "end": "",
+      "category": "생물학",
+      "description": "정확한 날짜가 있는 사건입니다.",
+      "color": "green",
+      "image": null,
+      "order": 4
+    },
+    {
+      "id": "sci-006",
+      "title": "멘델의 유전 연구 발표",
+      "start": "1865",
+      "end": "1866",
+      "category": "생물학",
+      "description": "짧은 기간 표시가 보이는지 확인합니다.",
+      "color": "green",
+      "image": null,
+      "order": 5
+    },
+    {
+      "id": "sci-007",
+      "title": "주기율표 발표",
+      "start": "1869",
+      "end": "",
+      "category": "화학",
+      "description": "1860년대에 사건이 몰렸을 때 카드가 겹치지 않는지 확인합니다.",
+      "color": "rose",
+      "image": null,
+      "order": 6
+    },
+    {
+      "id": "sci-008",
+      "title": "X선 발견",
+      "start": "1895",
+      "end": "",
+      "category": "물리학",
+      "description": "분류 검색에서 '물리학'을 입력해 보세요.",
+      "color": "blue",
+      "image": null,
+      "order": 7
+    },
+    {
+      "id": "sci-009",
+      "title": "특수 상대성 이론 발표",
+      "start": "1905",
+      "end": "",
+      "category": "물리학",
+      "description": "20세기 초 사건입니다.",
+      "color": "blue",
+      "image": null,
+      "order": 8
+    },
+    {
+      "id": "sci-010",
+      "title": "DNA 이중나선 구조 제안",
+      "start": "1953",
+      "end": "",
+      "category": "생물학",
+      "description": "생물학 분류의 세 번째 사건입니다.",
+      "color": "green",
+      "image": null,
+      "order": 9
+    },
+    {
+      "id": "sci-011",
+      "title": "스푸트니크 1호 발사",
+      "start": "1957-10-04",
+      "end": "",
+      "category": "우주",
+      "description": "날짜 정밀도가 서로 달라도 정렬되는지 확인합니다.",
+      "color": "slate",
+      "image": null,
+      "order": 10
+    },
+    {
+      "id": "sci-012",
+      "title": "아폴로 11호 달 착륙",
+      "start": "1969-07-20",
+      "end": "",
+      "category": "우주",
+      "description": "발표 모드에서 마지막 사건까지 이동해 보세요.",
+      "color": "slate",
+      "image": null,
+      "order": 11
+    }
+  ]
+}

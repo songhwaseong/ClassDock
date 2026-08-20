@@ -1,0 +1,957 @@
+"use strict";
+
+/* ===== 연대표 문서(.timeline) =====
+   사건·기간·사진을 JSON 한 파일에 담아, 인터넷 없이 만들고 발표하는 수업용 연대표다.
+   날짜는 2026 / 2026-08 / 2026-08-20뿐 아니라 "기원전 300"·"BC 300"도 받는다.
+   화면 배치는 보기 상태지만 균등/시간 비례 방식은 자료를 만든 의도라 문서에 함께 저장한다. */
+
+const TIMELINE_DOC_TYPE = "classdock-timeline";
+const TIMELINE_DOC_VERSION = 1;
+const TIMELINE_MAX_EVENTS = 1000;
+const TIMELINE_PHOTO_MAX_DATA_CHARS = 900 * 1024;
+const TIMELINE_PHOTO_TOTAL_MAX_CHARS = 12 * 1024 * 1024;
+const TIMELINE_PHOTO_MAX_SIDE = 1280;
+const TIMELINE_RECOVERY_DELAY = 900;
+const TIMELINE_TYPING_DELAY = 550;
+const TIMELINE_HISTORY_LIMIT = 80;
+const TIMELINE_ZOOM_MIN = 0.55;
+const TIMELINE_ZOOM_MAX = 2.2;
+const TIMELINE_ZOOM_STEP = 0.15;
+
+const TIMELINE_COLORS = [
+  { id:"rose",   label:"빨강", hex:"#e11d48" },
+  { id:"blue",   label:"파랑", hex:"#2563eb" },
+  { id:"green",  label:"초록", hex:"#16a34a" },
+  { id:"amber",  label:"노랑", hex:"#d97706" },
+  { id:"purple", label:"보라", hex:"#7c3aed" },
+  { id:"slate",  label:"검정", hex:"#475569" }
+];
+
+let _timelineScratchCount = 0;
+
+function timelineT(text){
+  return typeof window !== "undefined" && typeof window.t === "function" ? window.t(text) : text;
+}
+
+function timelineEventId(){
+  return "ev-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
+function timelineColorHex(id){
+  const found = TIMELINE_COLORS.find(item => item.id === id);
+  return found ? found.hex : TIMELINE_COLORS[0].hex;
+}
+
+function timelineLeapYear(year){
+  const value = Math.abs(Number(year) || 0);
+  return value % 4 === 0 && (value % 100 !== 0 || value % 400 === 0);
+}
+
+/* 입력 날짜를 정렬 가능한 값으로 바꾼다. 역사 연대표에서 자주 쓰는 기원전은 별도 달력
+   라이브러리 없이도 정렬되게 천문학적 연도(기원전 1년=0년)로 환산한다. */
+function timelineParseDate(raw){
+  const original = String(raw == null ? "" : raw).trim();
+  if (!original) return null;
+  let source = original.replace(/[–—]/g, "-").trim();
+  let approximate = false;
+  if (/^(?:약|경|~|c\.?|circa)\s*/i.test(source)){
+    approximate = true;
+    source = source.replace(/^(?:약|경|~|c\.?|circa)\s*/i, "").trim();
+  }
+  let era = "ce";
+  if (/^(?:기원전|bce?|bc)\s*/i.test(source)){
+    era = "bce";
+    source = source.replace(/^(?:기원전|bce?|bc)\s*/i, "").trim();
+  } else {
+    source = source.replace(/^(?:서기|ce|ad)\s*/i, "").trim();
+  }
+  if (/^-\d/.test(source)){
+    era = "bce";
+    source = source.slice(1);
+  }
+  source = source
+    .replace(/\s*년\s*/g, "-")
+    .replace(/\s*월\s*/g, "-")
+    .replace(/\s*일\s*$/g, "")
+    .replace(/[./\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  const parts = source.split("-");
+  if (!/^\d{1,6}$/.test(parts[0] || "") || parts.length > 3) return null;
+  const year = Number(parts[0]);
+  const month = parts.length >= 2 && parts[1] !== "" ? Number(parts[1]) : 1;
+  const day = parts.length >= 3 && parts[2] !== "" ? Number(parts[2]) : 1;
+  if (!Number.isInteger(year) || year < 1 || year > 999999) return null;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  const monthDays = [31, timelineLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (!Number.isInteger(day) || day < 1 || day > monthDays[month - 1]) return null;
+  const precision = parts.length >= 3 ? "day" : parts.length >= 2 ? "month" : "year";
+  const astronomicalYear = era === "bce" ? 1 - year : year;
+  const key = astronomicalYear * 372 + (month - 1) * 31 + (day - 1);
+  return { original, era, year, month, day, precision, approximate, key };
+}
+
+function timelineFormatDate(raw){
+  const parsed = typeof raw === "object" && raw && raw.key != null ? raw : timelineParseDate(raw);
+  if (!parsed) return String(raw == null ? "" : raw);
+  let value = (parsed.era === "bce" ? "기원전 " : "") + parsed.year + "년";
+  if (parsed.precision === "month" || parsed.precision === "day") value += " " + parsed.month + "월";
+  if (parsed.precision === "day") value += " " + parsed.day + "일";
+  return (parsed.approximate ? "약 " : "") + value;
+}
+
+function timelineNormalizePhoto(raw){
+  const value = raw && typeof raw === "object" ? raw : null;
+  if (!value) return null;
+  const dataUrl = String(value.dataUrl || "");
+  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(dataUrl)) return null;
+  if (dataUrl.length > TIMELINE_PHOTO_MAX_DATA_CHARS) return null;
+  return {
+    name:String(value.name || "사진").slice(0, 120),
+    dataUrl,
+    width:Math.max(1, Math.min(10000, Math.round(Number(value.width) || 1))),
+    height:Math.max(1, Math.min(10000, Math.round(Number(value.height) || 1)))
+  };
+}
+
+function timelineNormalizeEvent(raw, index){
+  const value = raw && typeof raw === "object" ? raw : {};
+  const color = TIMELINE_COLORS.some(item => item.id === value.color) ? value.color : "blue";
+  return {
+    id:String(value.id || "") || timelineEventId(),
+    title:String(value.title == null ? "" : value.title).slice(0, 120),
+    start:String(value.start == null ? "" : value.start).trim().slice(0, 40),
+    end:String(value.end == null ? "" : value.end).trim().slice(0, 40),
+    category:String(value.category == null ? "" : value.category).trim().slice(0, 60),
+    description:String(value.description == null ? "" : value.description).slice(0, 4000),
+    color,
+    image:timelineNormalizePhoto(value.image),
+    order:Number.isInteger(value.order) ? value.order : (Number(index) || 0)
+  };
+}
+
+function timelineDocEmpty(title){
+  return {
+    type:TIMELINE_DOC_TYPE,
+    version:TIMELINE_DOC_VERSION,
+    title:String(title || "연대표").slice(0, 160),
+    viewMode:"even",
+    events:[]
+  };
+}
+
+function timelineDocParse(text){
+  const raw = JSON.parse(String(text || ""));
+  if (!raw || typeof raw !== "object" || raw.type !== TIMELINE_DOC_TYPE) throw new Error("not-a-timeline-doc");
+  return {
+    type:TIMELINE_DOC_TYPE,
+    version:TIMELINE_DOC_VERSION,
+    title:String(raw.title == null ? "" : raw.title).slice(0, 160),
+    viewMode:raw.viewMode === "scale" ? "scale" : "even",
+    events:(Array.isArray(raw.events) ? raw.events : []).slice(0, TIMELINE_MAX_EVENTS)
+      .map((item, index) => timelineNormalizeEvent(item, index))
+  };
+}
+
+function timelineDocSerialize(model){
+  return JSON.stringify({
+    type:TIMELINE_DOC_TYPE,
+    version:TIMELINE_DOC_VERSION,
+    title:String(model && model.title || "").slice(0, 160),
+    viewMode:model && model.viewMode === "scale" ? "scale" : "even",
+    events:(model && Array.isArray(model.events) ? model.events : []).slice(0, TIMELINE_MAX_EVENTS)
+      .map((item, index) => timelineNormalizeEvent(item, index))
+  }, null, 2);
+}
+
+function timelineDocContentKey(model){
+  try { return timelineDocSerialize(model); } catch(_){ return ""; }
+}
+
+function timelineSortedEvents(events){
+  return (Array.isArray(events) ? events : []).map((event, index) => ({
+    event,
+    index,
+    date:timelineParseDate(event.start),
+    endDate:timelineParseDate(event.end)
+  })).sort((a, b) => {
+    if (a.date && b.date && a.date.key !== b.date.key) return a.date.key - b.date.key;
+    if (a.date && !b.date) return -1;
+    if (!a.date && b.date) return 1;
+    const orderA = Number.isInteger(a.event.order) ? a.event.order : a.index;
+    const orderB = Number.isInteger(b.event.order) ? b.event.order : b.index;
+    return orderA - orderB || a.index - b.index;
+  });
+}
+
+/* 렌더러와 단위 테스트가 함께 쓰는 배치 계산. 시간 비례는 실제 간격을 보존하되, 날짜가
+   몰린 사건은 최소 간격을 주어 카드를 누를 수 있게 한다. */
+function timelineLayoutEntries(events, mode, zoom){
+  const sorted = timelineSortedEvents(events);
+  const factor = Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, Number(zoom) || 1));
+  const gap = 250 * factor;
+  let width = Math.max(840, 280 + Math.max(0, sorted.length - 1) * gap);
+  const keys = [];
+  for (const row of sorted){
+    if (row.date) keys.push(row.date.key);
+    if (row.endDate) keys.push(row.endDate.key);
+  }
+  const min = keys.length ? Math.min(...keys) : 0;
+  const max = keys.length ? Math.max(...keys) : min;
+  const span = Math.max(1, max - min);
+  let previous = -Infinity;
+  const entries = sorted.map((row, index) => {
+    let x;
+    if (mode === "scale" && row.date){
+      x = 140 + ((row.date.key - min) / span) * (width - 280);
+      x = Math.max(x, previous + 42 * factor);
+    } else x = 140 + index * gap;
+    previous = x;
+    let endX = x;
+    if (row.endDate && row.date && row.endDate.key > row.date.key){
+      if (mode === "scale") endX = 140 + ((row.endDate.key - min) / span) * (width - 280);
+      else endX = x + Math.min(gap * 0.72, 150 * factor);
+      endX = Math.max(x + 18, endX);
+    }
+    return { ...row, x, endX, lane:index % 4 };
+  });
+  const farthest = entries.reduce((value, row) => Math.max(value, row.endX), 0);
+  width = Math.max(width, farthest + 150);
+  return { entries, width, min, max };
+}
+
+function timelinePhotoTotalChars(events){
+  return (Array.isArray(events) ? events : []).reduce((sum, event) =>
+    sum + (event && event.image && event.image.dataUrl ? event.image.dataUrl.length : 0), 0);
+}
+
+function timelineCsvRows(text){
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  const source = String(text || "").replace(/^\uFEFF/, "");
+  for (let i = 0; i < source.length; i++){
+    const ch = source[i];
+    if (quoted){
+      if (ch === '"' && source[i + 1] === '"'){ field += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ","){ row.push(field); field = ""; }
+    else if (ch === "\n"){ row.push(field.replace(/\r$/, "")); rows.push(row); row = []; field = ""; }
+    else field += ch;
+  }
+  if (field || row.length){ row.push(field.replace(/\r$/, "")); rows.push(row); }
+  return rows.filter(values => values.some(value => String(value).trim()));
+}
+
+function timelineCsvCell(value){
+  const text = String(value == null ? "" : value);
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+function timelineEventsToCsv(events){
+  const lines = [["시작", "종료", "제목", "분류", "설명", "색상"]];
+  for (const row of timelineSortedEvents(events)){
+    const event = row.event;
+    lines.push([event.start, event.end, event.title, event.category, event.description, event.color]);
+  }
+  return lines.map(row => row.map(timelineCsvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+function timelineEventsFromCsv(text){
+  const rows = timelineCsvRows(text);
+  if (rows.length < 2) throw new Error("csv-empty");
+  const headers = rows[0].map(value => String(value).trim().toLowerCase());
+  const find = aliases => headers.findIndex(value => aliases.includes(value));
+  const startAt = find(["시작", "시작일", "날짜", "연도", "start", "date", "year"]);
+  const endAt = find(["종료", "종료일", "끝", "end"]);
+  const titleAt = find(["제목", "사건", "이름", "title", "event", "name"]);
+  const categoryAt = find(["분류", "갈래", "category", "group"]);
+  const descAt = find(["설명", "내용", "메모", "description", "note"]);
+  const colorAt = find(["색", "색상", "color"]);
+  if (startAt < 0 || titleAt < 0) throw new Error("csv-columns");
+  const events = [];
+  let skipped = 0;
+  for (const row of rows.slice(1, TIMELINE_MAX_EVENTS + 1)){
+    const start = String(row[startAt] || "").trim();
+    const title = String(row[titleAt] || "").trim();
+    const parsedStart = timelineParseDate(start);
+    const end = endAt >= 0 ? String(row[endAt] || "").trim() : "";
+    const parsedEnd = end ? timelineParseDate(end) : null;
+    if (!title || !parsedStart || (end && (!parsedEnd || parsedEnd.key < parsedStart.key))){ skipped++; continue; }
+    const colorRaw = colorAt >= 0 ? String(row[colorAt] || "").trim().toLowerCase() : "blue";
+    const color = TIMELINE_COLORS.find(item => item.id === colorRaw || item.label === colorRaw);
+    events.push(timelineNormalizeEvent({
+      start,
+      end,
+      title,
+      category:categoryAt >= 0 ? row[categoryAt] : "",
+      description:descAt >= 0 ? row[descAt] : "",
+      color:color ? color.id : "blue"
+    }, events.length));
+  }
+  if (!events.length) throw new Error("csv-no-events");
+  return { events, skipped, truncated:rows.length - 1 > TIMELINE_MAX_EVENTS };
+}
+
+function timelineDefaultTitle(name){
+  return String(name || "").replace(/\.timeline$/i, "") || "연대표";
+}
+
+function timelineScratchFileName(number){
+  return number > 1 ? "연대표 " + number + ".timeline" : "연대표.timeline";
+}
+
+async function loadTimelineDoc(file, opts = {}){
+  let model;
+  try { model = timelineDocParse(await file.text()); }
+  catch(_){
+    if (typeof toast === "function") toast(timelineT("연대표 문서(.timeline)를 읽지 못해 텍스트로 열었어요."), 3500);
+    return typeof loadText === "function" ? loadText(file, opts) : null;
+  }
+  if (!model.title) model.title = timelineDefaultTitle(file.name);
+  const doc = makeDoc("timeline", file.name, opts);
+  doc.timelineDoc = model;
+  doc.sourceFile = file;
+  doc.savedText = timelineDocSerialize(model);
+  doc.contentSearchFocus = query => {
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle || typeof doc.timelineSelectEvent !== "function") return false;
+    const found = timelineSortedEvents(doc.timelineDoc && doc.timelineDoc.events).find(row =>
+      [row.event.start, row.event.end, row.event.title, row.event.category, row.event.description]
+        .join(" ").toLowerCase().includes(needle));
+    if (!found) return false;
+    doc.timelineSelectEvent(found.event.id, true);
+    return true;
+  };
+  doc.render = async () => {
+    if (doc._timelineMounted) return;
+    doc.el.innerHTML = "";
+    doc._timelineMounted = true;
+    mountTimelineEditor(doc);
+  };
+  if (typeof refreshChrome === "function") refreshChrome();
+  if (typeof activateIfIdle === "function") activateIfIdle(doc, opts);
+  return doc;
+}
+
+function newTimelineScratch(){
+  _timelineScratchCount++;
+  const name = timelineScratchFileName(_timelineScratchCount);
+  const starter = timelineDocSerialize(timelineDocEmpty(timelineDefaultTitle(name)));
+  if (typeof handleFiles !== "function") return Promise.resolve(null);
+  return Promise.resolve(handleFiles([new File([starter], name, { type:"application/json" })], { isScratch:true }));
+}
+
+function newTimelineScratchInFolder(folder){
+  if (typeof createScratchInFolder !== "function") return false;
+  return createScratchInFolder(folder, timelineScratchFileName,
+    name => timelineDocSerialize(timelineDocEmpty(timelineDefaultTitle(name))),
+    "application/json", "연대표");
+}
+
+async function saveTimelineDoc(doc){
+  if (!doc || !doc.timelineDoc) return false;
+  const json = timelineDocSerialize(doc.timelineDoc);
+  const ok = typeof saveTextDoc === "function" ? await saveTextDoc(json, doc, doc.name) : false;
+  if (!ok) return false;
+  doc.savedText = json;
+  if (doc._timelineHistory && typeof doc._timelineHistory.replaceCurrent === "function"){
+    doc._timelineHistory.replaceCurrent(json);
+  }
+  if (typeof markDocumentSavedSnapshot === "function"){
+    await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json");
+  } else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+  return true;
+}
+
+function timelineButton(label, title, className){
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className || "timeline-btn";
+  button.textContent = label;
+  if (title) button.title = title;
+  return button;
+}
+
+function timelineSafeName(value){
+  return String(value || "연대표").replace(/[\\/:*?"<>|]+/g, "_").trim() || "연대표";
+}
+
+function timelineDownload(name, blob){
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function timelinePreparePhoto(file){
+  if (!file || !/^image\/(?:png|jpeg|webp)$/i.test(String(file.type || ""))) throw new Error("photo-type");
+  if (file.size > 20 * 1024 * 1024) throw new Error("photo-too-large");
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("photo-read"));
+      img.src = url;
+    });
+    const naturalWidth = image.naturalWidth || image.width;
+    const naturalHeight = image.naturalHeight || image.height;
+    const scale = Math.min(1, TIMELINE_PHOTO_MAX_SIDE / Math.max(naturalWidth, naturalHeight));
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff"; context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    let dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+    if (dataUrl.length > TIMELINE_PHOTO_MAX_DATA_CHARS) dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+    if (dataUrl.length > TIMELINE_PHOTO_MAX_DATA_CHARS) dataUrl = canvas.toDataURL("image/jpeg", 0.52);
+    if (dataUrl.length > TIMELINE_PHOTO_MAX_DATA_CHARS) throw new Error("photo-output-too-large");
+    return { name:String(file.name || "사진").slice(0, 120), dataUrl, width, height };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function mountTimelineEditor(doc){
+  const model = doc.timelineDoc;
+  const root = document.createElement("div");
+  root.className = "timeline-doc";
+  doc.el.appendChild(root);
+
+  const bar = document.createElement("div");
+  bar.className = "timeline-bar";
+  const titleInput = document.createElement("input");
+  titleInput.type = "text";
+  titleInput.className = "timeline-title";
+  titleInput.maxLength = 160;
+  titleInput.value = model.title || "";
+  titleInput.placeholder = timelineT("연대표 제목");
+  titleInput.setAttribute("aria-label", timelineT("연대표 제목"));
+
+  const addBtn = timelineButton("＋ 사건", "새 사건 또는 기간 추가", "timeline-btn timeline-add");
+  const undoBtn = timelineButton("↶", "실행 취소 (Ctrl+Z)");
+  const redoBtn = timelineButton("↷", "다시 실행 (Ctrl+Shift+Z)");
+  const modeSelect = document.createElement("select");
+  modeSelect.className = "timeline-select";
+  modeSelect.title = "사건 사이 간격";
+  for (const [value, label] of [["even", "읽기 좋게 균등"], ["scale", "시간 간격대로"]]){
+    const option = document.createElement("option");
+    option.value = value; option.textContent = timelineT(label);
+    if (model.viewMode === value) option.selected = true;
+    modeSelect.appendChild(option);
+  }
+  const zoomOut = timelineButton("−", "연대표 축소");
+  const zoomLabel = timelineButton("100%", "연대표 배율 100%로 초기화", "timeline-btn timeline-zoom-label");
+  const zoomIn = timelineButton("＋", "연대표 확대");
+  const listBtn = timelineButton("☷ 목록", "사건 목록 열기·닫기");
+  const csvInBtn = timelineButton("CSV 들이기", "표에서 사건 가져오기");
+  const csvOutBtn = timelineButton("CSV 내보내기", "사건 목록을 CSV로 저장");
+  const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
+  const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
+  const saveBtn = timelineButton("저장", "연대표 저장 (Ctrl+S)", "timeline-btn run-save timeline-save");
+  bar.append(titleInput, addBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn,
+    listBtn, csvInBtn, csvOutBtn, presentBtn, printBtn, saveBtn);
+
+  const workspace = document.createElement("div");
+  workspace.className = "timeline-workspace";
+  const viewport = document.createElement("div");
+  viewport.className = "timeline-viewport";
+  viewport.tabIndex = 0;
+  viewport.setAttribute("aria-label", "연대표 화면");
+  const stage = document.createElement("div");
+  stage.className = "timeline-stage";
+  viewport.appendChild(stage);
+
+  const listPanel = document.createElement("aside");
+  listPanel.className = "timeline-list-panel";
+  listPanel.hidden = true;
+  const listHead = document.createElement("div");
+  listHead.className = "timeline-list-head";
+  const listTitle = document.createElement("strong");
+  listTitle.textContent = timelineT("사건 목록");
+  const listClose = timelineButton("×", "사건 목록 닫기");
+  listHead.append(listTitle, listClose);
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "timeline-search";
+  searchInput.placeholder = timelineT("제목·분류·설명 검색");
+  const list = document.createElement("div");
+  list.className = "timeline-list";
+  listPanel.append(listHead, searchInput, list);
+  workspace.append(viewport, listPanel);
+
+  const empty = document.createElement("div");
+  empty.className = "timeline-empty";
+  const emptyTitle = document.createElement("strong");
+  emptyTitle.textContent = timelineT("첫 사건을 넣어 연대표를 시작하세요");
+  const emptyText = document.createElement("span");
+  emptyText.textContent = timelineT("연도·날짜와 설명, 사진을 넣을 수 있습니다. 기원전은 ‘기원전 300’처럼 적으세요.");
+  const emptyAdd = timelineButton("＋ 첫 사건 추가", "새 사건 추가", "timeline-btn timeline-add");
+  empty.append(emptyTitle, emptyText, emptyAdd);
+
+  const csvInput = document.createElement("input");
+  csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
+
+  root.append(bar, workspace, csvInput);
+
+  let zoom = 1;
+  let selectedId = "";
+  let history = null;
+  let recoveryTimer = 0;
+  let presentIndex = -1;
+  let presentRows = [];
+
+  const serialize = () => timelineDocSerialize(model);
+  const touch = () => {
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, serialize() !== doc.savedText);
+    scheduleRecovery();
+  };
+  const scheduleRecovery = () => {
+    clearTimeout(recoveryTimer);
+    if (typeof appSettings === "object" && appSettings && appSettings.pdfRecovery === false) return;
+    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); }, TIMELINE_RECOVERY_DELAY);
+  };
+  const flushRecovery = async () => {
+    clearTimeout(recoveryTimer); recoveryTimer = 0;
+    if (!doc.hasUnsavedEdits && !(doc.isScratch && !doc._named)) return true;
+    if (typeof rememberWorkspace !== "function" || typeof recoverySnapshotFile !== "function") return false;
+    try {
+      const file = recoverySnapshotFile(doc, new TextEncoder().encode(serialize()), "application/json");
+      if (!file) return false;
+      doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true });
+      return !!doc.savedInWorkspace;
+    } catch(error){ console.warn("연대표 복구본을 남기지 못했어요:", error); return false; }
+  };
+  doc.flushBackupRecovery = flushRecovery;
+
+  const replaceModel = restored => {
+    model.title = restored.title;
+    model.viewMode = restored.viewMode;
+    model.events = restored.events;
+    titleInput.value = model.title;
+    modeSelect.value = model.viewMode;
+    if (selectedId && !model.events.some(event => event.id === selectedId)) selectedId = "";
+    renderAll(); touch();
+  };
+  const updateHistory = () => {
+    undoBtn.disabled = !(history && history.canUndo());
+    redoBtn.disabled = !(history && history.canRedo());
+  };
+  history = MNEditHistory.create({
+    capture:serialize,
+    isEqual:(a, b) => a === b,
+    apply:value => replaceModel(timelineDocParse(value)),
+    onChange:updateHistory,
+    limit:TIMELINE_HISTORY_LIMIT
+  });
+  doc._timelineHistory = history;
+  history.reset();
+
+  function setZoom(value, anchor){
+    const previousWidth = stage.offsetWidth || 1;
+    const previousLeft = viewport.scrollLeft;
+    zoom = Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, Number(value) || 1));
+    renderTrack();
+    zoomLabel.textContent = Math.round(zoom * 100) + "%";
+    if (anchor !== false){
+      const ratio = (previousLeft + viewport.clientWidth / 2) / previousWidth;
+      viewport.scrollLeft = Math.max(0, ratio * stage.offsetWidth - viewport.clientWidth / 2);
+    }
+  }
+
+  function renderTrack(){
+    stage.innerHTML = "";
+    const layout = timelineLayoutEntries(model.events, model.viewMode, zoom);
+    stage.style.width = Math.ceil(layout.width) + "px";
+    if (!layout.entries.length){
+      stage.appendChild(empty);
+      return;
+    }
+    const axis = document.createElement("div");
+    axis.className = "timeline-axis";
+    stage.appendChild(axis);
+    for (const row of layout.entries){
+      const event = row.event;
+      const color = timelineColorHex(event.color);
+      if (row.endX > row.x + 2){
+        const period = document.createElement("div");
+        period.className = "timeline-period";
+        period.style.left = row.x + "px";
+        period.style.width = Math.max(18, row.endX - row.x) + "px";
+        period.style.setProperty("--timeline-color", color);
+        period.title = timelineFormatDate(event.start) + " ~ " + timelineFormatDate(event.end);
+        stage.appendChild(period);
+      }
+      const tick = document.createElement("button");
+      tick.type = "button";
+      tick.className = "timeline-tick";
+      tick.style.left = row.x + "px";
+      tick.style.setProperty("--timeline-color", color);
+      tick.title = event.title;
+      tick.setAttribute("aria-label", timelineFormatDate(event.start) + " " + event.title);
+      tick.addEventListener("click", () => selectEvent(event.id, true));
+      stage.appendChild(tick);
+
+      const label = document.createElement("div");
+      label.className = "timeline-tick-label";
+      label.style.left = row.x + "px";
+      label.textContent = timelineFormatDate(event.start);
+      stage.appendChild(label);
+
+      const card = document.createElement("article");
+      card.className = "timeline-card timeline-lane-" + row.lane + (event.id === selectedId ? " is-selected" : "");
+      card.dataset.eventId = event.id;
+      card.style.left = row.x + "px";
+      card.style.setProperty("--timeline-color", color);
+      card.tabIndex = 0;
+      if (event.image){
+        const image = document.createElement("img");
+        image.src = event.image.dataUrl; image.alt = event.image.name || event.title;
+        card.appendChild(image);
+      }
+      const meta = document.createElement("div");
+      meta.className = "timeline-card-meta";
+      const date = document.createElement("span");
+      date.textContent = timelineFormatDate(event.start) + (event.end ? " — " + timelineFormatDate(event.end) : "");
+      meta.appendChild(date);
+      if (event.category){
+        const category = document.createElement("b"); category.textContent = event.category; meta.appendChild(category);
+      }
+      const heading = document.createElement("h3"); heading.textContent = event.title || timelineT("제목 없는 사건");
+      const description = document.createElement("p"); description.textContent = event.description || "";
+      card.append(meta, heading);
+      if (event.description) card.appendChild(description);
+      const connector = document.createElement("span"); connector.className = "timeline-connector"; card.appendChild(connector);
+      card.addEventListener("click", () => selectEvent(event.id, false));
+      card.addEventListener("dblclick", () => openEventDialog(event.id));
+      card.addEventListener("keydown", keyEvent => {
+        if (keyEvent.key === "Enter"){ keyEvent.preventDefault(); openEventDialog(event.id); }
+        else if (keyEvent.key === "Delete"){ keyEvent.preventDefault(); removeEvent(event.id); }
+      });
+      stage.appendChild(card);
+    }
+  }
+
+  function renderList(){
+    list.innerHTML = "";
+    const query = searchInput.value.trim().toLowerCase();
+    let visible = 0;
+    for (const row of timelineSortedEvents(model.events)){
+      const event = row.event;
+      const haystack = [event.title, event.start, event.end, event.category, event.description].join(" ").toLowerCase();
+      if (query && !haystack.includes(query)) continue;
+      visible++;
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "timeline-list-item" + (event.id === selectedId ? " is-selected" : "");
+      item.style.setProperty("--timeline-color", timelineColorHex(event.color));
+      const date = document.createElement("small"); date.textContent = timelineFormatDate(event.start);
+      const title = document.createElement("strong"); title.textContent = event.title || timelineT("제목 없는 사건");
+      const category = document.createElement("span"); category.textContent = event.category || "";
+      item.append(date, title, category);
+      item.addEventListener("click", () => selectEvent(event.id, true));
+      item.addEventListener("dblclick", () => openEventDialog(event.id));
+      list.appendChild(item);
+    }
+    if (!visible){
+      const none = document.createElement("div"); none.className = "timeline-list-empty";
+      none.textContent = query ? timelineT("검색 결과가 없습니다.") : timelineT("아직 사건이 없습니다.");
+      list.appendChild(none);
+    }
+  }
+
+  function renderAll(){ renderTrack(); renderList(); updateHistory(); }
+
+  function selectEvent(id, scroll){
+    selectedId = String(id || "");
+    renderTrack(); renderList();
+    if (scroll){
+      const card = [...stage.querySelectorAll("[data-event-id]")].find(item => item.dataset.eventId === selectedId);
+      if (card) card.scrollIntoView({ behavior:"smooth", block:"nearest", inline:"center" });
+    }
+  }
+  doc.timelineSelectEvent = selectEvent;
+
+  async function removeEvent(id){
+    const event = model.events.find(item => item.id === id);
+    if (!event) return;
+    let approved = true;
+    if (typeof confirmDialog === "function"){
+      approved = await confirmDialog("‘" + (event.title || "제목 없는 사건") + "’ 사건을 지울까요?", "지우기", "취소");
+    } else approved = confirm("이 사건을 지울까요?");
+    if (!approved) return;
+    model.events = model.events.filter(item => item.id !== id);
+    if (selectedId === id) selectedId = "";
+    history.commit(); touch(); renderAll();
+  }
+
+  function openEventDialog(id){
+    const existing = id ? model.events.find(item => item.id === id) : null;
+    const modal = document.createElement("div");
+    modal.className = "modal timeline-event-modal";
+    modal.innerHTML = '<div class="timeline-modal-card" role="dialog" aria-modal="true">' +
+      '<header><h2></h2><button type="button" class="timeline-modal-x" aria-label="닫기">×</button></header>' +
+      '<div class="timeline-form-grid">' +
+        '<label class="timeline-field timeline-field-wide"><span>제목</span><input class="timeline-form-title" type="text" maxlength="120"></label>' +
+        '<label class="timeline-field"><span>시작</span><input class="timeline-form-start" type="text" maxlength="40" placeholder="예: 1945-08-15 · 기원전 300"></label>' +
+        '<label class="timeline-field"><span>종료(선택)</span><input class="timeline-form-end" type="text" maxlength="40" placeholder="기간이면 끝 날짜"></label>' +
+        '<label class="timeline-field"><span>분류</span><input class="timeline-form-category" type="text" maxlength="60" placeholder="예: 정치·문화·과학"></label>' +
+        '<label class="timeline-field"><span>색상</span><select class="timeline-form-color"></select></label>' +
+        '<label class="timeline-field timeline-field-wide"><span>설명</span><textarea class="timeline-form-description" maxlength="4000" rows="6"></textarea></label>' +
+        '<div class="timeline-photo-field timeline-field-wide"><span>사진</span><div class="timeline-photo-preview"></div>' +
+          '<div><button type="button" class="timeline-photo-pick">사진 넣기</button><button type="button" class="timeline-photo-remove">사진 지우기</button>' +
+          '<input class="timeline-photo-input" type="file" accept="image/png,image/jpeg,image/webp" hidden></div></div>' +
+      '</div><p class="timeline-form-error" role="alert"></p>' +
+      '<footer><button type="button" class="timeline-form-delete">지우기</button><span></span>' +
+        '<button type="button" class="timeline-form-cancel">취소</button><button type="button" class="timeline-form-save">저장</button></footer>' +
+      '</div>';
+    document.body.appendChild(modal);
+    const card = modal.querySelector(".timeline-modal-card");
+    const heading = modal.querySelector("h2");
+    const title = modal.querySelector(".timeline-form-title");
+    const start = modal.querySelector(".timeline-form-start");
+    const end = modal.querySelector(".timeline-form-end");
+    const category = modal.querySelector(".timeline-form-category");
+    const description = modal.querySelector(".timeline-form-description");
+    const color = modal.querySelector(".timeline-form-color");
+    const error = modal.querySelector(".timeline-form-error");
+    const preview = modal.querySelector(".timeline-photo-preview");
+    const photoInput = modal.querySelector(".timeline-photo-input");
+    const deleteBtn = modal.querySelector(".timeline-form-delete");
+    const removePhotoBtn = modal.querySelector(".timeline-photo-remove");
+    let draftImage = existing && existing.image ? { ...existing.image } : null;
+    heading.textContent = existing ? timelineT("사건 고치기") : timelineT("새 사건 추가");
+    title.value = existing ? existing.title : "";
+    start.value = existing ? existing.start : "";
+    end.value = existing ? existing.end : "";
+    category.value = existing ? existing.category : "";
+    description.value = existing ? existing.description : "";
+    for (const item of TIMELINE_COLORS){
+      const option = document.createElement("option"); option.value = item.id; option.textContent = timelineT(item.label);
+      if ((existing ? existing.color : "blue") === item.id) option.selected = true;
+      color.appendChild(option);
+    }
+    deleteBtn.hidden = !existing;
+
+    const renderPhoto = () => {
+      preview.innerHTML = "";
+      removePhotoBtn.disabled = !draftImage;
+      if (!draftImage){ preview.textContent = timelineT("사진 없음"); return; }
+      const image = document.createElement("img"); image.src = draftImage.dataUrl; image.alt = draftImage.name || "사진";
+      const name = document.createElement("span"); name.textContent = draftImage.name || "사진";
+      preview.append(image, name);
+    };
+    renderPhoto();
+
+    const close = () => { document.removeEventListener("keydown", onKey, true); modal.remove(); };
+    const onKey = event => {
+      if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); close(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    modal.querySelector(".timeline-modal-x").addEventListener("click", close);
+    modal.querySelector(".timeline-form-cancel").addEventListener("click", close);
+    modal.addEventListener("mousedown", event => { if (event.target === modal) close(); });
+    modal.querySelector(".timeline-photo-pick").addEventListener("click", () => photoInput.click());
+    removePhotoBtn.addEventListener("click", () => { draftImage = null; renderPhoto(); });
+    photoInput.addEventListener("change", async () => {
+      const file = photoInput.files && photoInput.files[0]; photoInput.value = "";
+      if (!file) return;
+      error.textContent = timelineT("사진을 준비하는 중…");
+      try {
+        const photo = await timelinePreparePhoto(file);
+        const oldChars = existing && existing.image ? existing.image.dataUrl.length : 0;
+        if (timelinePhotoTotalChars(model.events) - oldChars + photo.dataUrl.length > TIMELINE_PHOTO_TOTAL_MAX_CHARS){
+          throw new Error("photo-total-too-large");
+        }
+        draftImage = photo; error.textContent = ""; renderPhoto();
+      } catch(photoError){
+        error.textContent = photoError && photoError.message === "photo-total-too-large"
+          ? timelineT("이 연대표의 사진 합계가 12MB를 넘습니다. 기존 사진을 줄이거나 지워 주세요.")
+          : timelineT("사진을 넣지 못했어요. PNG·JPG·WebP 파일을 사용해 주세요.");
+      }
+    });
+    modal.querySelector(".timeline-form-save").addEventListener("click", () => {
+      const parsedStart = timelineParseDate(start.value);
+      const parsedEnd = end.value.trim() ? timelineParseDate(end.value) : null;
+      if (!title.value.trim()){ error.textContent = timelineT("제목을 입력하세요."); title.focus(); return; }
+      if (!parsedStart){ error.textContent = timelineT("시작 날짜를 ‘1945’, ‘1945-08-15’, ‘기원전 300’처럼 입력하세요."); start.focus(); return; }
+      if (end.value.trim() && !parsedEnd){ error.textContent = timelineT("종료 날짜 형식을 확인하세요."); end.focus(); return; }
+      if (parsedEnd && parsedEnd.key < parsedStart.key){ error.textContent = timelineT("종료 날짜는 시작 날짜보다 빠를 수 없습니다."); end.focus(); return; }
+      const next = timelineNormalizeEvent({
+        id:existing ? existing.id : timelineEventId(),
+        title:title.value.trim(), start:start.value.trim(), end:end.value.trim(),
+        category:category.value.trim(), description:description.value, color:color.value,
+        image:draftImage, order:existing ? existing.order : model.events.length
+      }, model.events.length);
+      if (existing){
+        const at = model.events.findIndex(item => item.id === existing.id);
+        if (at >= 0) model.events[at] = next;
+      } else model.events.push(next);
+      selectedId = next.id;
+      history.commit(); touch(); renderAll(); close();
+      setTimeout(() => selectEvent(next.id, true), 0);
+    });
+    deleteBtn.addEventListener("click", async () => { close(); await removeEvent(existing.id); });
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(card);
+    setTimeout(() => title.focus(), 0);
+  }
+
+  const present = document.createElement("div");
+  present.className = "timeline-present"; present.hidden = true;
+  present.innerHTML = '<div class="timeline-present-top"><span class="timeline-present-count"></span><button type="button" class="timeline-present-end">끝내기</button></div>' +
+    '<div class="timeline-present-card"><div class="timeline-present-image"></div><div class="timeline-present-copy">' +
+    '<div class="timeline-present-meta"></div><h2></h2><p></p></div></div>' +
+    '<div class="timeline-present-controls"><button type="button" class="timeline-present-prev">← 이전</button>' +
+    '<button type="button" class="timeline-present-next">다음 →</button></div>';
+  root.appendChild(present);
+  const showPresent = index => {
+    if (!presentRows.length) return;
+    presentIndex = Math.max(0, Math.min(presentRows.length - 1, index));
+    const event = presentRows[presentIndex].event;
+    present.querySelector(".timeline-present-count").textContent = (presentIndex + 1) + " / " + presentRows.length;
+    present.querySelector(".timeline-present-meta").textContent = timelineFormatDate(event.start) +
+      (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
+    present.querySelector("h2").textContent = event.title || timelineT("제목 없는 사건");
+    present.querySelector("p").textContent = event.description || "";
+    present.querySelector(".timeline-present-card").style.setProperty("--timeline-color", timelineColorHex(event.color));
+    const imageHost = present.querySelector(".timeline-present-image"); imageHost.innerHTML = "";
+    imageHost.hidden = !event.image;
+    if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; imageHost.appendChild(image); }
+    present.querySelector(".timeline-present-prev").disabled = presentIndex <= 0;
+    present.querySelector(".timeline-present-next").disabled = presentIndex >= presentRows.length - 1;
+  };
+  const stopPresent = () => {
+    if (present.hidden) return;
+    present.hidden = true; root.classList.remove("is-presenting");
+    window.removeEventListener("keydown", onPresentKey);
+    if (presentRows[presentIndex]) selectEvent(presentRows[presentIndex].event.id, true);
+  };
+  const onPresentKey = event => {
+    if (event.key === "Escape"){ event.preventDefault(); stopPresent(); }
+    else if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown"){ event.preventDefault(); showPresent(presentIndex + 1); }
+    else if (event.key === "ArrowLeft" || event.key === "PageUp"){ event.preventDefault(); showPresent(presentIndex - 1); }
+  };
+  const startPresent = () => {
+    presentRows = timelineSortedEvents(model.events);
+    if (!presentRows.length){ if (typeof toast === "function") toast(timelineT("발표할 사건이 없습니다."), 2200); return; }
+    const selectedAt = selectedId ? presentRows.findIndex(row => row.event.id === selectedId) : 0;
+    present.hidden = false; root.classList.add("is-presenting");
+    showPresent(selectedAt >= 0 ? selectedAt : 0);
+    window.addEventListener("keydown", onPresentKey);
+  };
+  present.querySelector(".timeline-present-end").addEventListener("click", stopPresent);
+  present.querySelector(".timeline-present-prev").addEventListener("click", () => showPresent(presentIndex - 1));
+  present.querySelector(".timeline-present-next").addEventListener("click", () => showPresent(presentIndex + 1));
+
+  function printTimeline(){
+    const old = document.getElementById("timelinePrintLayer"); if (old) old.remove();
+    const layer = document.createElement("div"); layer.id = "timelinePrintLayer"; layer.className = "timeline-print";
+    const heading = document.createElement("h1"); heading.textContent = model.title || "연대표"; layer.appendChild(heading);
+    for (const row of timelineSortedEvents(model.events)){
+      const event = row.event;
+      const item = document.createElement("article"); item.style.setProperty("--timeline-color", timelineColorHex(event.color));
+      const meta = document.createElement("div"); meta.textContent = timelineFormatDate(event.start) +
+        (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
+      const title = document.createElement("h2"); title.textContent = event.title || "제목 없는 사건";
+      item.append(meta, title);
+      if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; item.appendChild(image); }
+      if (event.description){ const text = document.createElement("p"); text.textContent = event.description; item.appendChild(text); }
+      layer.appendChild(item);
+    }
+    document.body.appendChild(layer);
+    let done = false;
+    const cleanup = () => { if (done) return; done = true; window.removeEventListener("afterprint", cleanup); document.body.classList.remove("timeline-printing"); layer.remove(); };
+    try { window.addEventListener("afterprint", cleanup); document.body.classList.add("timeline-printing"); window.print(); }
+    finally { cleanup(); }
+  }
+  doc.printTimeline = printTimeline;
+
+  titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); history.commitSoon(TIMELINE_TYPING_DELAY); });
+  titleInput.addEventListener("change", () => history.commit());
+  addBtn.addEventListener("click", () => openEventDialog(null));
+  emptyAdd.addEventListener("click", () => openEventDialog(null));
+  undoBtn.addEventListener("click", () => history.undo());
+  redoBtn.addEventListener("click", () => history.redo());
+  modeSelect.addEventListener("change", () => { model.viewMode = modeSelect.value === "scale" ? "scale" : "even"; history.commit(); touch(); renderAll(); });
+  zoomOut.addEventListener("click", () => setZoom(zoom - TIMELINE_ZOOM_STEP));
+  zoomIn.addEventListener("click", () => setZoom(zoom + TIMELINE_ZOOM_STEP));
+  zoomLabel.addEventListener("click", () => setZoom(1));
+  listBtn.addEventListener("click", () => { listPanel.hidden = !listPanel.hidden; listBtn.classList.toggle("is-on", !listPanel.hidden); if (!listPanel.hidden) searchInput.focus(); });
+  listClose.addEventListener("click", () => { listPanel.hidden = true; listBtn.classList.remove("is-on"); });
+  searchInput.addEventListener("input", renderList);
+  csvInBtn.addEventListener("click", () => csvInput.click());
+  csvInput.addEventListener("change", async () => {
+    const file = csvInput.files && csvInput.files[0]; csvInput.value = ""; if (!file) return;
+    try {
+      const result = timelineEventsFromCsv(await file.text());
+      const room = Math.max(0, TIMELINE_MAX_EVENTS - model.events.length);
+      const added = result.events.slice(0, room);
+      if (!added.length) throw new Error("event-limit");
+      const base = model.events.length;
+      added.forEach((event, index) => { event.order = base + index; model.events.push(event); });
+      history.commit(); touch(); renderAll();
+      if (typeof toast === "function") toast("사건 " + added.length + "개를 가져왔어요." + (result.skipped ? " · 날짜/제목이 잘못된 " + result.skipped + "줄 제외" : ""), 3600);
+    } catch(error){
+      const message = error && error.message === "csv-columns"
+        ? "CSV에 ‘시작’과 ‘제목’ 열이 필요합니다."
+        : error && error.message === "event-limit" ? "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요."
+        : "CSV에서 사건을 읽지 못했어요.";
+      if (typeof toast === "function") toast(timelineT(message), 3200, { type:"error" });
+    }
+  });
+  csvOutBtn.addEventListener("click", () => {
+    const csv = "\uFEFF" + timelineEventsToCsv(model.events);
+    timelineDownload(timelineSafeName(model.title || doc.name) + ".csv", new Blob([csv], { type:"text/csv;charset=utf-8" }));
+  });
+  presentBtn.addEventListener("click", startPresent);
+  printBtn.addEventListener("click", printTimeline);
+  saveBtn.addEventListener("click", () => saveTimelineDoc(doc));
+
+  const editableTarget = target => !!(target && target.closest && target.closest("input,textarea,select,[contenteditable='true']"));
+  const onKeyDown = event => {
+    if (doc.el.hidden || present.hidden === false || editableTarget(event.target)) return;
+    if (event.ctrlKey || event.metaKey){
+      const key = String(event.key || "").toLowerCase();
+      if (key === "z" && !event.shiftKey){ event.preventDefault(); history.undo(); }
+      else if (key === "y" || (key === "z" && event.shiftKey)){ event.preventDefault(); history.redo(); }
+      else if (key === "=" || key === "+"){ event.preventDefault(); setZoom(zoom + TIMELINE_ZOOM_STEP); }
+      else if (key === "-"){ event.preventDefault(); setZoom(zoom - TIMELINE_ZOOM_STEP); }
+      else if (key === "0"){ event.preventDefault(); setZoom(1); }
+    } else if (event.key === "Delete" && selectedId){ event.preventDefault(); removeEvent(selectedId); }
+  };
+  window.addEventListener("keydown", onKeyDown);
+  viewport.addEventListener("wheel", event => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault(); setZoom(zoom + (event.deltaY < 0 ? TIMELINE_ZOOM_STEP : -TIMELINE_ZOOM_STEP));
+  }, { passive:false });
+
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.cleanupFns.push(() => {
+    clearTimeout(recoveryTimer);
+    if (history) history.cancel();
+    stopPresent();
+    window.removeEventListener("keydown", onKeyDown);
+    if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
+    if (doc._timelineHistory === history) delete doc._timelineHistory;
+    if (doc.printTimeline === printTimeline) delete doc.printTimeline;
+    if (doc.timelineSelectEvent === selectEvent) delete doc.timelineSelectEvent;
+  });
+
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(root);
+  renderAll();
+  setZoom(1, false);
+  scheduleRecovery();
+}
+
+if (typeof module !== "undefined" && module.exports){
+  module.exports = {
+    TIMELINE_DOC_TYPE, TIMELINE_DOC_VERSION, TIMELINE_COLORS,
+    timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
+    timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
+    timelineSortedEvents, timelineLayoutEntries, timelineEventsToCsv, timelineEventsFromCsv,
+    timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle
+  };
+}

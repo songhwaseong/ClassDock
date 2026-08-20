@@ -64,6 +64,7 @@
     "board-tools.js",
     "whiteboard.js",
     "map-viewer.js",
+    "timeline.js",
     "lesson-replay.js",
     "diff-viewer.js",
     "batch-replace.js",
@@ -165,7 +166,8 @@
         "board-render.js",
         "board-tools.js",
         "whiteboard.js",
-        "map-viewer.js"
+        "map-viewer.js",
+        "timeline.js"
       ]
     },
     {
@@ -291,6 +293,12 @@
       "lazy.js",
       "documents.js",
       "file-loaders.js",
+      "code-viewer.js"
+    ],
+    "timeline.js": [
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
       "code-viewer.js"
     ],
     "diff-viewer.js": [

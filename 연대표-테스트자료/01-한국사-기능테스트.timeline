@@ -1,0 +1,167 @@
+{
+  "type": "classdock-timeline",
+  "version": 1,
+  "title": "한국사 핵심 연대표 - 기능 테스트",
+  "viewMode": "even",
+  "events": [
+    {
+      "id": "kr-001",
+      "title": "고조선 건국 이야기",
+      "start": "약 기원전 2333",
+      "end": "",
+      "category": "고대",
+      "description": "기원전과 '약' 날짜 표시를 확인하기 위한 사건입니다.",
+      "color": "purple",
+      "image": null,
+      "order": 0
+    },
+    {
+      "id": "kr-002",
+      "title": "고구려 건국",
+      "start": "기원전 37",
+      "end": "",
+      "category": "삼국",
+      "description": "기원전 사건이 서기 사건보다 앞에 정렬되는지 확인합니다.",
+      "color": "rose",
+      "image": null,
+      "order": 1
+    },
+    {
+      "id": "kr-003",
+      "title": "신라 건국",
+      "start": "기원전 57",
+      "end": "",
+      "category": "삼국",
+      "description": "입력 순서와 관계없이 기원전 57년이 기원전 37년보다 먼저 배치되어야 합니다.",
+      "color": "amber",
+      "image": null,
+      "order": 2
+    },
+    {
+      "id": "kr-004",
+      "title": "삼국 시대",
+      "start": "기원전 57",
+      "end": "668",
+      "category": "시대",
+      "description": "시작일과 종료일을 모두 가진 긴 기간 카드입니다.",
+      "color": "slate",
+      "image": null,
+      "order": 3
+    },
+    {
+      "id": "kr-005",
+      "title": "훈민정음 창제",
+      "start": "1443",
+      "end": "",
+      "category": "문화",
+      "description": "세종이 새 문자를 창제했습니다. 연도만 입력한 날짜 표시를 확인합니다.",
+      "color": "green",
+      "image": null,
+      "order": 4
+    },
+    {
+      "id": "kr-006",
+      "title": "훈민정음 반포",
+      "start": "1446-09",
+      "end": "",
+      "category": "문화",
+      "description": "연도와 월까지만 입력한 날짜 표시를 확인합니다.",
+      "color": "green",
+      "image": null,
+      "order": 5
+    },
+    {
+      "id": "kr-007",
+      "title": "임진왜란",
+      "start": "1592-04-13",
+      "end": "1598-12-16",
+      "category": "전쟁",
+      "description": "정확한 시작일과 종료일이 있는 기간입니다.\n카드를 열어 여러 줄 설명이 유지되는지도 확인하세요.",
+      "color": "rose",
+      "image": null,
+      "order": 6
+    },
+    {
+      "id": "kr-008",
+      "title": "대한제국 선포",
+      "start": "1897-10-12",
+      "end": "",
+      "category": "근대",
+      "description": "19세기 말 사건입니다.",
+      "color": "purple",
+      "image": null,
+      "order": 7
+    },
+    {
+      "id": "kr-009",
+      "title": "3·1 운동",
+      "start": "1919-03-01",
+      "end": "",
+      "category": "독립운동",
+      "description": "전국적으로 전개된 독립운동입니다. 제목의 가운데점과 날짜 정렬을 확인합니다.",
+      "color": "green",
+      "image": null,
+      "order": 8
+    },
+    {
+      "id": "kr-010",
+      "title": "대한민국 임시정부 수립",
+      "start": "1919-04-11",
+      "end": "",
+      "category": "독립운동",
+      "description": "검색 목록에서 '임시정부'를 찾아 선택해 보세요.",
+      "color": "blue",
+      "image": null,
+      "order": 9
+    },
+    {
+      "id": "kr-011",
+      "title": "광복",
+      "start": "1945-08-15",
+      "end": "",
+      "category": "현대",
+      "description": "사진 데이터가 포함된 사건입니다. 빨간색 한 픽셀의 테스트용 PNG가 카드에 표시됩니다.",
+      "color": "rose",
+      "image": {
+        "name": "테스트-사진.png",
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl9Zl8AAAAASUVORK5CYII=",
+        "width": 1,
+        "height": 1
+      },
+      "order": 10
+    },
+    {
+      "id": "kr-012",
+      "title": "대한민국 정부 수립",
+      "start": "1948-08-15",
+      "end": "",
+      "category": "현대",
+      "description": "광복과 같은 월·일이지만 다른 연도인 사건입니다.",
+      "color": "blue",
+      "image": null,
+      "order": 11
+    },
+    {
+      "id": "kr-013",
+      "title": "6·25 전쟁 발발",
+      "start": "1950-06-25",
+      "end": "1953-07-27",
+      "category": "전쟁",
+      "description": "기간 표시와 빨간색 분류를 확인합니다.",
+      "color": "rose",
+      "image": null,
+      "order": 12
+    },
+    {
+      "id": "kr-014",
+      "title": "서울 올림픽 개막",
+      "start": "1988-09-17",
+      "end": "1988-10-02",
+      "category": "문화·스포츠",
+      "description": "제목과 분류에 특수문자가 들어간 기간 사건입니다.",
+      "color": "amber",
+      "image": null,
+      "order": 13
+    }
+  ]
+}

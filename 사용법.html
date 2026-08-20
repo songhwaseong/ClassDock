@@ -129,6 +129,7 @@
   <li><strong>블록 문서</strong> — 글·표·이미지를 한 문서에 섞어 쓰는 노션형 문서(<code>.mnote</code>)</li>
   <li><strong>악보</strong> — 두 성부·가사·표현·반복을 넣고 바로 듣는 악보(<code>.msheet</code>), <strong>조옮김</strong>, <strong>MusicXML 가져오기·내보내기</strong>, MIDI 건반 입력·MIDI/WAV 저장과 참고 이미지 나란히 보기</li>
   <li><strong>지도</strong> — 배경지도 위에 표시를 찍어 이름·메모를 붙이는 수업용 지도(<code>.map</code>), 그대로 <strong>칠판으로 보내 판서</strong>하거나 <strong>메모로 보내 나중에 다시 지도로 열기</strong>, 런처에서 실제로 본 지역은 <strong>자동 보관해 다시 오프라인으로</strong></li>
+  <li><strong>연대표</strong> — 사건·기간·설명·사진을 시간순으로 놓고 <strong>기원전부터 현대까지</strong> 발표하는 수업용 연대표(<code>.timeline</code>)</li>
   <li><strong>파일 비교·여러 파일 찾아 바꾸기</strong> — 두 파일의 달라진 곳을 나란히 보고, 열린 파일들(Word 본문 포함)을 한꺼번에 치환</li>
 </ul>
 
@@ -937,6 +938,44 @@ cd myOffice</code></pre>
   <p>배경지도는 <strong>OpenStreetMap</strong>(일반·지형)·<strong>CARTO</strong>(흑백)·<strong>Esri</strong>(위성)에서 받아 옵니다. 장소 이름 검색은 기본적으로 <strong>Nominatim</strong>(OpenStreetMap)을 쓰며, 설정하면 <strong>카카오 로컬 REST API</strong>를 먼저 사용합니다. 만들어진 그림에 출처가 함께 적히는 것은 배경지도의 이용 조건입니다.</p>
 </blockquote>
 
+<h3>⏳ 연대표 (.timeline) — 사건을 시간순으로 만들고 발표하기</h3>
+
+<p>역사·사회·국어·과학사처럼 <strong>사건의 앞뒤 관계가 중요한 수업 자료</strong>를 만듭니다. 인터넷이 없어도 만들고 열 수 있으며, 사진까지 <code>.timeline</code> JSON 파일 하나에 들어갑니다.</p>
+
+<ol>
+  <li>사이드바 <strong>새로 만들기 → 새 연대표(.timeline)</strong> 를 누릅니다. 폴더를 원본 저장으로 열었다면 폴더 우클릭 → <strong>새 연대표</strong>로 그 폴더 안에 바로 만들 수도 있습니다.</li>
+  <li>위쪽 <strong>＋ 사건</strong>을 눌러 제목과 시작 날짜를 적습니다.
+    <ul>
+      <li>연도: <code>1945</code></li>
+      <li>연월: <code>1945-08</code></li>
+      <li>날짜: <code>1945-08-15</code></li>
+      <li>기원전: <code>기원전 300</code>, <code>BC 300</code>, <code>BCE 300</code></li>
+      <li>대략적인 시기: <code>약 1592</code>, <code>경 1592</code>, <code>~1592</code></li>
+    </ul>
+  </li>
+  <li>여러 해에 걸친 사건은 <strong>종료</strong>도 적습니다. 종료는 시작보다 빠를 수 없습니다.</li>
+  <li><strong>분류</strong>에 <code>정치</code>, <code>문화</code>, <code>과학</code>, <code>문학</code>처럼 적고 색을 고르면 카드와 시간축을 갈래별로 구분하기 쉽습니다.</li>
+  <li>설명은 최대 4,000자까지 적을 수 있습니다. <strong>사진 넣기</strong>는 PNG·JPG·WebP를 긴 변 1280px JPEG로 줄여 파일 안에 담습니다. 사진 한 장은 약 660KB, 한 연대표의 사진 합계는 12MB까지입니다. 외부 이미지 주소는 받지 않아 인터넷이 끊겨도 그대로 보입니다.</li>
+  <li>사건 카드를 한 번 누르면 선택하고, <strong>두 번 누르거나 <kbd>Enter</kbd></strong>를 누르면 다시 고칩니다. 선택한 카드는 <kbd>Delete</kbd>로 지울 수 있으며 지우기 전 확인합니다.</li>
+  <li>보기 방식은 두 가지입니다.
+    <ul>
+      <li><strong>읽기 좋게 균등</strong>: 사건 간격을 고르게 벌려 글을 읽기 쉽게 표시합니다.</li>
+      <li><strong>시간 간격대로</strong>: 실제 시간 차이에 비례해 배치합니다. 같은 시기에 몰린 사건은 누를 수 있도록 최소 간격을 둡니다.</li>
+    </ul>
+  </li>
+  <li><code>− / 100% / ＋</code> 또는 <kbd>Ctrl</kbd>+마우스 휠로 확대·축소합니다. 배율은 보기 상태라 문서 내용과 되돌리기에 영향을 주지 않습니다.</li>
+  <li><strong>☷ 목록</strong>에서 제목·분류·설명을 검색하고 사건을 누르면 시간축의 해당 카드로 이동합니다. 사이드바의 파일 내용 검색도 사진 데이터는 빼고 사건 글자만 찾습니다.</li>
+  <li><strong>CSV 들이기</strong>는 <code>시작, 종료, 제목, 분류, 설명, 색상</code> 열을 읽습니다. 최소한 <strong>시작과 제목</strong> 열이 필요하고, 날짜나 제목이 잘못된 줄은 제외한 수를 알려 줍니다. <strong>CSV 내보내기</strong>는 사진을 제외한 같은 열을 Excel에서 열 수 있는 UTF-8 CSV로 저장합니다.</li>
+  <li><strong>▶ 발표</strong>는 사건을 시간순으로 한 장씩 크게 보여 줍니다. <kbd>→</kbd>·<kbd>Space</kbd>로 다음, <kbd>←</kbd>로 이전, <kbd>Esc</kbd>로 끝냅니다. 선택한 사건이 있으면 그 사건부터 시작합니다.</li>
+  <li><strong>🖨 인쇄</strong>는 사건을 세로 목록으로 정리해 인쇄하며, 인쇄 창에서 PDF로 저장할 수 있습니다.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>(<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>)로 사건 추가·수정·삭제, CSV 들이기, 제목과 보기 방식 변경을 되돌립니다.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장합니다. 아직 저장하지 않은 새 연대표와 편집 중인 내용도 잠시 뒤 작업공간에 자동으로 담겨, 갑자기 종료해도 다음 실행에서 복원됩니다.</li>
+</ol>
+
+<blockquote>
+  <p>한 연대표에는 사건을 최대 1,000개까지 넣을 수 있습니다. 시간 비례 보기에서 수천 년 간격과 하루 간격이 함께 있으면 가까운 사건들이 붙을 수 있으므로, 발표 자료는 <strong>균등 보기</strong>가 읽기 편합니다.</p>
+</blockquote>
+
 <h3>파일 비교 (diff) — 뭐가 달라졌는지 보기</h3>
 
 <ol>
@@ -1354,6 +1393,20 @@ cd myOffice</code></pre>
 </tbody>
 </table>
 
+<h3>연대표</h3>
+
+<table>
+<thead><tr><th>단축키</th><th>동작</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td><code>.timeline</code> 저장</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>(<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>)</td><td>사건 편집 되돌리기 / 다시 실행</td></tr>
+<tr><td><kbd>Ctrl</kbd>+<code>+</code> / <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<code>0</code></td><td>연대표 확대 / 축소 / 100%</td></tr>
+<tr><td>선택한 사건에서 <kbd>Enter</kbd></td><td>사건 수정 창 열기</td></tr>
+<tr><td>선택한 사건에서 <kbd>Delete</kbd></td><td>사건 삭제 확인</td></tr>
+<tr><td>발표 중 <kbd>→</kbd>·<kbd>Space</kbd> / <kbd>←</kbd> / <kbd>Esc</kbd></td><td>다음 / 이전 / 발표 끝내기</td></tr>
+</tbody>
+</table>
+
 <h3>메모 · 이미지 메모</h3>
 
 <table>
@@ -1486,7 +1539,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>구형 Word(.doc)</strong></td><td><strong>글자만</strong> 뽑는 간이 미리보기(표·그림·서식 제외). 암호 걸린 <code>.doc</code>은 열 수 없음. 이름만 <code>.doc</code>인 docx·RTF·텍스트는 내용을 보고 알맞은 뷰어로 자동 연결</td></tr>
 <tr><td><strong>PDF 암호</strong></td><td>열 수 없음</td></tr>
 <tr><td><strong>HWPX(신형 한글)</strong></td><td>간이 미리보기(문단·표·그림). DRM·암호 문서 제외</td></tr>
-<tr><td><strong>ZIP</strong></td><td>읽기 전용. 항목당 64MB, 해제 합계 256MB 제한. 앱 전용 문서(<code>.map</code>·<code>.mnote</code>·<code>.msheet</code>)와 악보(<code>.musicxml</code>·압축형 <code>.mxl</code>)도 압축 안에서 제 편집기로 열림</td></tr>
+<tr><td><strong>ZIP</strong></td><td>읽기 전용. 항목당 64MB, 해제 합계 256MB 제한. 앱 전용 문서(<code>.map</code>·<code>.timeline</code>·<code>.mnote</code>·<code>.msheet</code>)와 악보(<code>.musicxml</code>·압축형 <code>.mxl</code>)도 압축 안에서 제 편집기로 열림</td></tr>
 <tr><td><strong>Python 옆 파일 함께 실행</strong></td><td>합계 50MB 초과 시 단독 실행으로 폴백</td></tr>
 <tr><td><strong>Python 실행 시간</strong></td><td>터미널의 로컬 PowerShell 명령은 시간 제한 없음(프로세스 트리 메모리 4GB 제한 유지). 일반 로컬 Python 실행은 30분, Pyodide(브라우저)는 5분 자동 중지</td></tr>
 <tr><td><strong>Python 출력</strong></td><td>표준출력·오류는 각각 앞 4MB까지 보관(진단·채점·단계 실행의 내부 결과는 별도 6MB 제한)</td></tr>
@@ -1504,6 +1557,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>블록 문서(.mnote)</strong></td><td>표 하나는 50행 × 20열, 이미지 한 장 25MB까지. 이미지가 파일 안에 들어가므로 사진이 많으면 파일이 커짐</td></tr>
 <tr><td><strong>악보(.msheet)</strong></td><td>단일 높은음자리표 또는 피아노 대보표, 오선별 성부 2개, 화음·붙임줄·이음줄·가사·코드·셈여림·연주 기호·셋잇단·운지·페달·반복선과 1·2번 괄호·못갖춘마디·중간 박자/조표/빠르기 변경 지원. 장·단조 조표는 ♯·♭ 7개까지, 오른손 음역 G3~C6·왼손 C2~C5. 조옮김은 위아래 한 옥타브까지이며 새 조표는 임시표가 적은 쪽으로 정해짐(다장조 반음 위 = 내림라장조). MusicXML은 첫 파트와 오선별 두 성부까지 사용하며 고급 표기는 단순화할 수 있음. MIDI 건반 입력과 MIDI·WAV 저장, 참고 이미지 나란히 보기를 제공하지만 이미지 자동 악보 인식과 마이크 녹음은 없음. 기본 음색은 내장 피아노 녹음이며 기타·실로폰·하프·플루트·클라리넷 녹음과 합성음도 선택 가능</td></tr>
 <tr><td><strong>지도(.map)</strong></td><td>배경지도에 <strong>인터넷 필요</strong>(표시·메모·저장은 오프라인에서도 동작). 장소 <strong>이름 검색은 인터넷과 ClassDock 런처 필요</strong>. 기본 OpenStreetMap 검색 또는 설정한 개인 카카오 REST API 키로 국내 주소·장소를 찾고, 카카오 검색이 안 되면 기본 검색으로 자동 전환. 좌표 이동은 HTML 직접 실행에서도 가능. 런처는 화면에 실제로 표시된 타일만 자동 보관하고 공개 서버가 금지하는 사전 일괄 다운로드는 하지 않음. 캐시는 이 컴퓨터에 정확히 최대 400MB까지 보관하고 넘치면 오래된 것부터 지우며, 배경지도 종류마다 따로 쌓임. 칠판으로 보낸 지도는 <strong>그림</strong>이라 그 뒤에는 확대·이동이 안 됨</td></tr>
+<tr><td><strong>연대표(.timeline)</strong></td><td>사건 최대 1,000개, 제목 120자·설명 4,000자. 날짜는 연·연월·날짜와 기원전 표기를 지원하지만 <code>조선 후기</code>처럼 숫자 없는 시대 이름만으로는 정렬할 수 없음. 사진은 한 장 약 660KB·전체 12MB까지 파일 안에 포함. CSV에는 사진이 포함되지 않음</td></tr>
 <tr><td><strong>파일 비교(diff)</strong></td><td>텍스트·코드만. 파일 하나가 5MB 또는 5만 줄을 넘으면 비교하지 않음. 비교 화면은 저장·자동 복원 대상이 아님</td></tr>
 <tr><td><strong>여러 파일 찾아 바꾸기</strong></td><td>열려 있는 텍스트·코드 문서와 Word(<code>.docx</code>) 본문·PowerPoint(<code>.pptx</code>) 슬라이드(PDF·Excel·한글·노트북 제외). 빈 문자열에도 일치하는 정규식은 거부</td></tr>
 <tr><td><strong>Word·PowerPoint 찾아 바꾸기</strong></td><td>본문 글자만. 문단 추가·삭제나 글꼴 바꾸기는 안 됨. 머리말·꼬리말·각주·발표자 노트는 설정에서 켤 때만, 메모·차트·도형 안 글자와 슬라이드 마스터·레이아웃·자동 슬라이드 번호는 언제나 제외. 암호·내용 컨트롤 연결·40MB 초과 문서는 제외되고, 변경 이력이 켜진 문서는 기본 제외(설정에서 허용 가능 — 바꾼 내용이 Word 변경 이력에 남지 않음). 탭·줄바꿈을 넘나드는 일치는 건너뜀. <strong>PowerPoint 설치 PC에서 PDF로 변환되어 열린 <code>.pptx</code>는 대상 아님</strong></td></tr>

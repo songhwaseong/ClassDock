@@ -25,7 +25,7 @@ const MNDocumentTypes = (() => {
   const videoExts = typeof VIDEO_EXTS !== "undefined" ? VIDEO_EXTS : [];
   const audioExts = typeof AUDIO_EXTS !== "undefined" ? AUDIO_EXTS : [];
   const TEXT_ENCODING_EXTS = new Set(["csv","md","markdown","mdx","txt","html","htm","xhtml", ...Object.keys(CODE_EXTS), ...subtitleExts]);
-  const ZIP_OPENABLE = ["pdf","docx","doc","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb","map","mnote","msheet","musicxml","mxl",
+  const ZIP_OPENABLE = ["pdf","docx","doc","xlsx","xls","csv","pptx","hwp","hwpx","md","markdown","mdx","txt","html","htm","xhtml","ipynb","map","timeline","mnote","msheet","musicxml","mxl",
     ...SQLITE_EXTS, ...Object.keys(CODE_EXTS), ...BINARY_ASSET_EXTS, "zip", "tar", "gz", "tgz", ...IMG_EXTS,
     ...videoExts, ...audioExts, ...subtitleExts];
   const ZIP_MIME = { svg:"image/svg+xml", png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg",
@@ -56,6 +56,7 @@ const MNDocumentTypes = (() => {
     if (kind === "video") return audioExts.includes(fileExtOf(name)) ? "AUD" : "VID";
     if (kind === "board") return "칠판";
     if (kind === "map") return "지도";
+    if (kind === "timeline") return "연표";
     if (kind === "replay") return "▶";
     if (kind === "diff") return "비교";
     const ext = fileExtOf(name);
@@ -75,6 +76,7 @@ const MNDocumentTypes = (() => {
     if (kind === "binary") return "binary";
     if (kind === "diff") return "code";
     if (kind === "map") return "map";
+    if (kind === "timeline") return "timeline";
     const ext = fileExtOf(name);
     if (ext === "docx" || ext === "doc") return "word";
     if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";

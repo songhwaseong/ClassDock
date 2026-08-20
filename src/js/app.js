@@ -205,7 +205,10 @@ function wire(){
   // 탭 닫기처럼 가로챌 수 없는 경우엔 브라우저 기본 확인창으로 폴백.
   window.addEventListener("beforeunload", (e) => {
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
-    docs.forEach(d => { if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery(); });
+    docs.forEach(d => {
+      if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
+      else if (d.kind === "timeline" && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
+    });
     if (suppressUnloadWarn) return;
     if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
   });
@@ -265,6 +268,7 @@ function wire(){
     if (state && state.kind === "music" && typeof state.printScore === "function"){ state.printScore(); return; }
     // 지도도 같다 — 화면을 그대로 찍으면 도구막대만 나오므로 캡처한 그림 한 장을 찍는다(map-viewer.js).
     if (state && state.kind === "map" && typeof state.printMap === "function"){ state.printMap(); return; }
+    if (state && state.kind === "timeline" && typeof state.printTimeline === "function"){ state.printTimeline(); return; }
     window.print();
   };
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
@@ -387,6 +391,7 @@ function wire(){
   if (byId("sbNewMnote")) byId("sbNewMnote").onclick = () => { if (typeof newMnoteScratch === "function") newMnoteScratch(); };
   if (byId("sbNewMusic")) byId("sbNewMusic").onclick = () => { if (typeof newMusicScratch === "function") newMusicScratch(); };
   if (byId("sbNewMap")) byId("sbNewMap").onclick = () => { if (typeof newMapScratch === "function") newMapScratch(); };
+  if (byId("sbNewTimeline")) byId("sbNewTimeline").onclick = () => { if (typeof newTimelineScratch === "function") newTimelineScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };
