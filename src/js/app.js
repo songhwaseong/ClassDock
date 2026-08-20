@@ -785,6 +785,14 @@ function wire(){
   const mapSearchTest = byId("settingMapSearchTest");
   const mapSearchClear = byId("settingMapSearchClear");
   let mapSearchKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  // 지도 화면은 설정 창과 떨어져 있으므로 키 상태를 복사해 두고 변경 이벤트로 알려 준다.
+  // 실제 키 문자열은 런처에만 남고, 브라우저에는 보유 여부만 전달한다.
+  const publishMapSearchKeyStatus = () => {
+    const detail = { ...mapSearchKeyStatus };
+    window.__classDockMapSearchKeyStatus = detail;
+    window.dispatchEvent(new CustomEvent("classdock-map-search-status-change", { detail }));
+  };
+  publishMapSearchKeyStatus();
   const setMapSearchStatus = (text, kind) => {
     mapSearchStatus.textContent = typeof window.t === "function" ? window.t(text) : text;
     mapSearchStatus.classList.toggle("ok", kind === "ok");
@@ -805,6 +813,7 @@ function wire(){
   };
   const refreshMapSearchKeyStatus = async (message, kind) => {
     mapSearchKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    publishMapSearchKeyStatus();
     try {
       const response = await fetch("/map-search-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
       if (!response.ok) throw new Error("HTTP " + response.status);
@@ -816,6 +825,7 @@ function wire(){
         mapSearchProviderInput.value = status.provider;
         if (appSettings.mapSearchProvider !== status.provider) saveAppSettings({ mapSearchProvider:status.provider });
       }
+      publishMapSearchKeyStatus();
       if (message) setMapSearchStatus(message, kind);
       else if (mapSearchKeyStatus.hasKey) setMapSearchStatus(mapSearchKeyStatus.remembered
         ? "카카오 키가 이 Windows 사용자 계정에 암호화되어 있습니다."
@@ -827,9 +837,10 @@ function wire(){
   const saveMapSearchProviderToLauncher = async (provider) => {
     try {
       const value = provider === "kakao" ? "kakao" : "osm";
-      await fetch("/map-search-provider?value=" + value, {
+      const response = await fetch("/map-search-provider?value=" + value, {
         method:"POST", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store"
       });
+      if (response.ok) publishMapSearchKeyStatus();
     } catch(_){}
   };
   mapSearchProviderInput.addEventListener("change", syncMapSearchFields);

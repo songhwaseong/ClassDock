@@ -204,6 +204,15 @@ function mapNormalizeMarker(raw){
     // 행정구역(시도·시군구)은 '지역 통계'가 채워 넣는다. 옛 .map 에는 없으므로 늘 빈 문자열로 시작한다.
     region: String(value.region == null ? "" : value.region).slice(0, 40),
     district: String(value.district == null ? "" : value.district).slice(0, 40),
+    // 장소 검색에서 받은 표용 정보. 옛 .map 에는 없으므로 빈 값으로 연다.
+    address: String(value.address == null ? "" : value.address).slice(0, 300),
+    phone: String(value.phone == null ? "" : value.phone).slice(0, 80),
+    category: String(value.category == null ? "" : value.category).slice(0, 300),
+    roadAddress: String(value.roadAddress == null ? "" : value.roadAddress).slice(0, 300),
+    lotAddress: String(value.lotAddress == null ? "" : value.lotAddress).slice(0, 300),
+    // 카카오 장소 검색으로 만든 표시는 상세 페이지 주소를 함께 보존한다. 허용된 장소 URL만
+    // 남겨, 손으로 고친 .map 파일이 임의의 사이트를 앱 안에 띄우지 못하게 한다.
+    placeUrl: mapKakaoPlaceUrl(value.placeUrl),
     /* 어디서 한꺼번에 들어온 표시인지(주변 시설 등)와 그때의 묶음 번호. 손으로 찍은 표시는 늘
        빈 값이라, '주변 시설로 넣은 것만 지우기'가 직접 찍은 표시를 건드리지 않는다. */
     source: mapNormalizeSource(value.source),
@@ -485,6 +494,7 @@ function mapMarkersFromCsv(text){
   const noteAt = find(["메모", "설명", "note", "description"]);
   const colorAt = find(["색", "색상", "color"]);
   const addressAt = find(["주소", "도로명주소", "지번주소", "소재지", "address", "addr"]);
+  const phoneAt = find(["전화번호", "전화", "연락처", "phone", "tel"]);
   const regionAt = find(["시도", "광역시도", "region"]);
   const districtAt = find(["시군구", "구", "district"]);
   if ((latAt < 0 || lngAt < 0) && addressAt < 0) throw new Error("csv-columns");
@@ -498,6 +508,8 @@ function mapMarkersFromCsv(text){
       color: colorMatch ? colorMatch.id : "red",
       label: labelAt >= 0 ? String(row[labelAt] || "") : "",
       note: noteAt >= 0 ? String(row[noteAt] || "") : "",
+      address: addressAt >= 0 ? String(row[addressAt] || "").trim() : "",
+      phone: phoneAt >= 0 ? String(row[phoneAt] || "").trim() : "",
       region: regionAt >= 0 ? String(row[regionAt] || "") : "",
       district: districtAt >= 0 ? String(row[districtAt] || "") : ""
     };
@@ -509,10 +521,9 @@ function mapMarkersFromCsv(text){
     const lng = wroteCoords ? Number(row[lngAt]) : NaN;
     const usable = Number.isFinite(lat) && Number.isFinite(lng) && lat >= -85 && lat <= 85 && lng >= -180 && lng <= 180;
     if (usable){ markers.push(mapNormalizeMarker({ ...shared, lat, lng })); continue; }
-    const address = addressAt >= 0 ? String(row[addressAt] || "").trim() : "";
     /* 좌표를 적기는 했는데 쓸 수 없는 값이면(999 같은 오타) 그건 자료 오류다 — 이름을 장소로
        착각해 검색을 부르지 않고 예전처럼 제외한다. 좌표 칸이 아예 비어 있을 때만 찾아 나선다. */
-    const query = address || (wroteCoords ? "" : shared.label.trim());
+    const query = shared.address || (wroteCoords ? "" : shared.label.trim());
     if (query && pending.length < MAP_GEOCODE_BATCH_MAX) pending.push({ ...shared, query });
     else skipped++;
   }
@@ -523,13 +534,25 @@ function mapCsvEscape(value){
   const text = String(value == null ? "" : value);
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
-/* 표시 → 표(머리글 한 줄 + 표시마다 한 줄). CSV 파일과 메모 표가 같은 열을 쓰도록 한 곳에서만
-   만든다 — 열 이름이 갈라지면 CSV 들이기(mapMarkersFromCsv)와의 왕복이 조용히 어긋난다. */
+/* 표시 → CSV 표(머리글 한 줄 + 표시마다 한 줄). 내보낸 장소 정보와 지역 통계 값을 다시 들여와도
+   잃지 않도록 모든 저장 필드를 함께 싣는다. 메모용의 간결한 표는 아래에서 따로 만든다. */
 function mapMarkersToRows(markers){
-  const rows = [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]];
+  const rows = [["이름", "위도", "경도", "메모", "색상", "주소", "전화번호", "시도", "시군구"]];
   for (const marker of Array.isArray(markers) ? markers : []){
     rows.push([marker.label, Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6),
-      marker.note, marker.color, marker.region || "", marker.district || ""]);
+      marker.note, marker.color, marker.address || "", marker.phone || "", marker.region || "", marker.district || ""]);
+  }
+  return rows;
+}
+/* 메모 표는 바로 읽을 장소 정보만 담는다. 지역 통계용 시도·시군구는 CSV에는 보존하되 여기서는
+   빼, 주소·전화번호가 좁은 메모창에서 밀려나지 않게 한다. */
+function mapMarkersToMemoRows(markers){
+  const rows = [["이름", "업종·카테고리", "도로명 주소", "지번 주소", "전화번호",
+    "카카오 장소 상세 링크(place_url)", "위도", "경도"]];
+  for (const marker of Array.isArray(markers) ? markers : []){
+    rows.push([marker.label, marker.category || "", marker.roadAddress || marker.address || "",
+      marker.lotAddress || "", marker.phone || "", mapKakaoPlaceUrl(marker.placeUrl),
+      Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6)]);
   }
   return rows;
 }
@@ -673,8 +696,18 @@ function mapKakaoPlaces(raw){
     if (String(item.y || "").trim() === "" || String(item.x || "").trim() === "") return null;
     const lat = Number(item.y), lng = Number(item.x);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    return { name:placeName && detail ? placeName + " · " + detail : (placeName || detail),
-      lat:mapClampLat(lat), lng:mapClampLng(lng) };
+    return {
+      // name 은 후보 목록용 한 줄, title 이하 값은 고른 뒤 장소 말풍선에 그대로 쓴다.
+      name:placeName && detail ? placeName + " · " + detail : (placeName || detail),
+      title:placeName || detail,
+      category:mapKakaoCategoryTail(item.category_name) || String(item.category_group_name || "").trim(),
+      categoryFull:String(item.category_name || item.category_group_name || "").trim(),
+      road, address,
+      phone:String(item.phone || "").trim(),
+      placeUrl:String(item.place_url || "").trim(),
+      placeId:String(item.id || "").trim(),
+      lat:mapClampLat(lat), lng:mapClampLng(lng)
+    };
   }).filter(place => place && place.name);
 }
 async function mapFetchGeocode(q, provider, spot){
@@ -693,6 +726,24 @@ async function mapFetchGeocode(q, provider, spot){
 async function mapProviderIsKakao(){
   try { if (window.__classDockMapSearchProviderReady) await window.__classDockMapSearchProviderReady; } catch(_){}
   return typeof appSettings === "object" && !!appSettings && appSettings.mapSearchProvider === "kakao";
+}
+/* 주변 시설처럼 카카오만 제공하는 기능은 공급자 선택뿐 아니라 실제 REST 키 보유 여부까지
+   갖춰져야 쓸 수 있다. 키 자체는 런처 밖으로 꺼내지 않고 설정 화면이 공개한 상태값만 읽는다. */
+async function mapKakaoSearchAccess(){
+  const provider = await mapProviderIsKakao();
+  const status = window.__classDockMapSearchKeyStatus && typeof window.__classDockMapSearchKeyStatus === "object"
+    ? window.__classDockMapSearchKeyStatus : {};
+  const available = status.available === true;
+  const hasKey = status.hasKey === true;
+  return { provider, available, hasKey, ready:provider && available && hasKey };
+}
+function mapKakaoSearchGuide(access){
+  if (!access || !access.provider){
+    return "주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.";
+  }
+  if (!access.available) return "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요.";
+  if (!access.hasKey) return "카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.";
+  return "";
 }
 async function mapGeocode(query){
   const q = String(query || "").trim();
@@ -817,14 +868,25 @@ const MAP_KAKAO_CATEGORIES = [
 ];
 const MAP_NEARBY_RADIUS_CHOICES = [500, 1000, 2000, 3000];
 const MAP_NEARBY_MAX_PAGES = 3;      // 한 쪽 15개 — 한 번에 최대 45곳
+const MAP_NEARBY_MAX_PER_KIND = MAP_NEARBY_MAX_PAGES * 15;
 /* 한 번에 고를 수 있는 갈래 수. 다섯에서 끊는 까닭은 요청 수가 아니라 읽힘이다 — 갈래당 15곳이면
    다섯 갈래라도 75곳이라, 이름표를 접는 문턱(MAP_LABEL_MAX_MARKERS)에 닿지 않아 넣은 곳마다
    이름이 그대로 보인다. 표시 색도 여섯 가지뿐이라 다섯까지는 서로 다른 색을 줄 수 있다. */
 const MAP_NEARBY_MAX_KINDS = 5;
-/* 갈래당 몇 곳까지 넣을지. 카카오가 한 쪽에 15개를 가까운 차례로 주므로 상한이 15면 갈래마다
-   검색은 한 번이다(다섯 갈래를 골라도 다섯 번). 5·10 을 골라도 받아 온 것을 앞에서 자르기만 해
-   요청 수는 같고, 가까운 차례라 '가장 가까운 다섯 곳씩'이라는 뜻이 된다. */
-const MAP_NEARBY_PER_KIND_CHOICES = [5, 10, 15];
+/* 사용자는 갈래당 개수보다 지도 전체에 몇 곳을 넣을지를 고른다. 기본 75곳이면 갈래가 하나일 때
+   카카오 노출 상한 45곳까지, 다섯 갈래일 때는 예전과 같은 15곳씩이 된다. */
+const MAP_NEARBY_TOTAL_CHOICES = [30, 45, 75, 100];
+const MAP_NEARBY_DEFAULT_TOTAL = 75;
+
+function mapNearbyKindLimits(kindCount, totalLimit){
+  const count = Math.max(0, Math.min(MAP_NEARBY_MAX_KINDS, Math.floor(Number(kindCount) || 0)));
+  if (!count) return [];
+  const asked = Math.max(1, Math.floor(Number(totalLimit) || MAP_NEARBY_DEFAULT_TOTAL));
+  const usable = Math.min(asked, count * MAP_NEARBY_MAX_PER_KIND);
+  const each = Math.floor(usable / count);
+  const remainder = usable % count;
+  return Array.from({ length:count }, (_, index) => each + (index < remainder ? 1 : 0));
+}
 
 function mapKakaoCategoryPlaces(raw){
   return (raw && Array.isArray(raw.documents) ? raw.documents : []).map((item) => {
@@ -834,9 +896,17 @@ function mapKakaoCategoryPlaces(raw){
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     const name = String(item.place_name || "").trim();
     if (!name) return null;
+    const roadAddress = String(item.road_address_name || "").trim();
+    const lotAddress = String(item.address_name || "").trim();
     return {
       name, lat:mapClampLat(lat), lng:mapClampLng(lng),
-      address: String(item.road_address_name || item.address_name || "").trim(),
+      address: roadAddress || lotAddress,
+      roadAddress, lotAddress,
+      category: mapKakaoCategoryTail(item.category_name) || String(item.category_group_name || "").trim(),
+      categoryFull: String(item.category_name || item.category_group_name || "").trim(),
+      phone: String(item.phone || "").trim(),
+      placeUrl: String(item.place_url || "").trim(),
+      placeId: String(item.id || "").trim(),
       distance: Number(item.distance) || 0
     };
   }).filter(Boolean);
@@ -856,7 +926,7 @@ async function mapNearbyPlaces(target, lat, lng, radius, limit){
   if (!await mapProviderIsKakao()) throw new Error("kakao-required");
   const spot = { x:Number(lng).toFixed(6), y:Number(lat).toFixed(6), radius:String(Math.round(radius)) };
   if (!keyword) spot.category = code;
-  const cap = Number(limit) > 0 ? Math.round(Number(limit)) : 0;
+  const cap = Number(limit) > 0 ? Math.min(MAP_NEARBY_MAX_PER_KIND, Math.round(Number(limit))) : 0;
   const places = [];
   for (let page = 1; page <= MAP_NEARBY_MAX_PAGES; page++){
     const raw = await mapFetchGeocode(keyword, keyword ? "kakao-keyword" : "kakao-category",
@@ -885,18 +955,20 @@ function mapNearbyKindColors(kinds){
   });
 }
 
-/* 고른 갈래를 하나씩 찾아 한 벌로 모은다. 갈래당 15곳까지면 갈래마다 요청이 한 번이라 다섯을
-   골라도 검색은 다섯 번이다 — 차례로 불러도 몇 초면 끝나므로 한꺼번에 몰아 부치지 않는다.
+/* 고른 갈래를 하나씩 찾아 한 벌로 모은다. 전체 상한을 갈래 수로 나누되 한 갈래는 카카오가
+   노출하는 최대 45곳까지만 받는다. 차례로 불러 API 요청을 한꺼번에 몰아 부치지 않는다.
    한 갈래가 넘어져도 나머지는 넣는다. 다섯 중 하나가 실패했다고 이미 찾은 것까지 버리면 수업
    도중에 "아까는 됐는데"가 되기 때문이다. 다만 하나도 못 건졌다면 그것은 통신이 끊긴 것이라
    까닭을 그대로 올려 보낸다(카카오 꺼짐·런처 없음 안내가 살아 있어야 한다).
    돌려주는 값: { places, failed } · places 의 항목마다 어느 갈래에서 왔는지 kind 가 붙는다. */
-async function mapNearbyPlacesByKinds(kinds, lat, lng, radius, perKind){
+async function mapNearbyPlacesByKinds(kinds, lat, lng, radius, totalLimit){
   const places = [], failed = [], seen = new Set();
+  const limits = mapNearbyKindLimits(kinds.length, totalLimit);
   let firstError = null;
-  for (const kind of kinds){
+  for (let index = 0; index < kinds.length; index++){
+    const kind = kinds[index];
     let found = [];
-    try { found = await mapNearbyPlaces({ code:kind.code }, lat, lng, radius, perKind); }
+    try { found = await mapNearbyPlaces({ code:kind.code }, lat, lng, radius, limits[index]); }
     catch(error){ failed.push(kind); if (!firstError) firstError = error; continue; }
     for (const place of found){
       /* 같은 곳이 두 갈래에 걸리는 일은 드물지만(카카오는 장소마다 갈래가 하나다) 겹치면 먼저
@@ -908,7 +980,7 @@ async function mapNearbyPlacesByKinds(kinds, lat, lng, radius, perKind){
     }
   }
   if (!places.length && firstError) throw firstError;
-  return { places, failed };
+  return { places:places.slice(0, Math.max(1, Math.floor(Number(totalLimit) || MAP_NEARBY_DEFAULT_TOTAL))), failed };
 }
 
 /* ===== 누른 자리가 어디인지 =====
@@ -936,6 +1008,86 @@ function mapKakaoCategoryTail(text){
   const parts = String(text || "").split(">").map(part => part.trim()).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "";
 }
+/* Local API 의 place_url 만 상세 창에 넣는다. 임의의 외부 주소가 iframe 으로 들어오지 않도록
+   카카오가 쓰는 숫자 장소 경로 하나만 허용하고, 예전 응답의 http 주소도 https 로 올린다. */
+function mapKakaoPlaceUrl(raw){
+  try {
+    const parsed = new URL(String(raw || "").trim());
+    if (parsed.hostname.toLowerCase() !== "place.map.kakao.com" || !/^\/\d+\/?$/.test(parsed.pathname)) return "";
+    if (parsed.username || parsed.password || parsed.port) return "";
+    return "https://place.map.kakao.com/" + parsed.pathname.match(/\d+/)[0];
+  } catch(_){ return ""; }
+}
+
+/* 카카오 장소 상세 페이지는 카카오 안내에 따라 화면 일부를 덮거나 잘라 내지 않고 iframe 전체로
+   보여 준다. ClassDock 쪽 머리말은 iframe 바깥이라 카카오 페이지 내용과 겹치지 않는다. */
+function openMapKakaoPlaceModal(rawUrl, placeName){
+  const url = mapKakaoPlaceUrl(rawUrl);
+  if (!url){
+    if (typeof toast === "function") toast(mapT("카카오맵 상세 주소를 열 수 없어요."), 3000, { type:"error" });
+    return false;
+  }
+  const modal = document.createElement("div");
+  modal.className = "modal map-place-modal";
+  const card = document.createElement("div");
+  card.className = "modal-card map-place-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  card.setAttribute("aria-label", "카카오맵 상세 보기");
+
+  const head = document.createElement("div");
+  head.className = "map-place-head";
+  const title = document.createElement("h3");
+  title.textContent = String(placeName || "").trim() || "카카오맵 상세 보기";
+  const external = document.createElement("button");
+  external.type = "button"; external.className = "btn map-place-external";
+  external.textContent = "새 창에서 열기";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button"; closeBtn.className = "map-place-close";
+  closeBtn.textContent = "×"; closeBtn.setAttribute("aria-label", "닫기");
+  head.append(title, external, closeBtn);
+
+  const frameWrap = document.createElement("div");
+  frameWrap.className = "map-place-frame-wrap";
+  const loading = document.createElement("p");
+  loading.className = "map-place-loading";
+  loading.textContent = "카카오맵 상세 페이지를 불러오는 중…";
+  const frame = document.createElement("iframe");
+  frame.className = "map-place-frame";
+  frame.title = (String(placeName || "").trim() || "장소") + " 카카오맵 상세 페이지";
+  frame.referrerPolicy = "strict-origin-when-cross-origin";
+  frame.src = url;
+  frameWrap.append(loading, frame);
+  card.append(head, frameWrap);
+  modal.appendChild(card);
+  document.body.appendChild(modal);
+  mapTranslate(modal);
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    window.removeEventListener("keydown", onKey, true);
+    frame.src = "about:blank";
+    modal.remove();
+  };
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    close();
+  };
+  window.addEventListener("keydown", onKey, true);
+  modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
+  closeBtn.addEventListener("click", close);
+  frame.addEventListener("load", () => { loading.hidden = true; });
+  external.addEventListener("click", () => {
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (opened){ try { opened.opener = null; } catch(_){} }
+    else if (typeof toast === "function") toast(mapT("새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요."), 3800);
+  });
+  closeBtn.focus({ preventScroll:true });
+  return true;
+}
 /* 갈래·키워드 검색의 같은 응답에서 말풍선에 쓸 값까지 읽는다. mapKakaoCategoryPlaces 는 표시로
    넣을 최소한만 보는데, 그쪽은 수십 개를 한꺼번에 다루는 길이라 가볍게 두었다. */
 function mapKakaoSpotPlaces(raw){
@@ -949,9 +1101,12 @@ function mapKakaoSpotPlaces(raw){
     return {
       name, lat:mapClampLat(lat), lng:mapClampLng(lng),
       category: mapKakaoCategoryTail(item.category_name) || String(item.category_group_name || "").trim(),
+      categoryFull: String(item.category_name || item.category_group_name || "").trim(),
       address: String(item.road_address_name || "").trim(),
       lot: String(item.address_name || "").trim(),
       phone: String(item.phone || "").trim(),
+      placeUrl: String(item.place_url || "").trim(),
+      placeId: String(item.id || "").trim(),
       distance: Number(item.distance) || 0
     };
   }).filter(Boolean);
@@ -972,7 +1127,7 @@ async function mapSpotAt(lat, lng){
   const info = await mapPlaceInfoAt(lat, lng, "address");
   const spot = {
     title: info && info.building ? info.building : "",
-    category: "", phone: "", distance: 0,
+    category: "", categoryFull:"", phone: "", placeUrl:"", placeId:"", distance: 0,
     road: info ? info.road : "", address: info ? info.address : "",
     lat: mapClampLat(lat), lng: mapClampLng(lng)
   };
@@ -987,7 +1142,10 @@ async function mapSpotAt(lat, lng){
     if (place){
       spot.title = place.name;
       spot.category = place.category;
+      spot.categoryFull = place.categoryFull;
       spot.phone = place.phone;
+      spot.placeUrl = place.placeUrl;
+      spot.placeId = place.placeId;
       spot.distance = place.distance;
       if (!spot.road) spot.road = place.address;
       if (!spot.address) spot.address = place.lot;
@@ -1033,7 +1191,13 @@ async function mapResolvePendingMarkers(pending, onProgress, shouldStop, onMarke
     if (place){
       const marker = mapNormalizeMarker({
         ...row, lat:place.lat, lng:place.lng,
-        label: String(row.label || "").trim() || place.name
+        label: String(row.label || "").trim() || place.name,
+        address: row.address || place.road || place.address || "",
+        phone: row.phone || place.phone || "",
+        category: place.categoryFull || place.category || "",
+        roadAddress: place.road || place.roadAddress || row.address || "",
+        lotAddress: place.address || place.lotAddress || "",
+        placeUrl: place.placeUrl || ""
       });
       markers.push(marker);
       if (onMarker) onMarker(marker);
@@ -1334,7 +1498,8 @@ function mapFormatBytes(bytes){
 /* ===== "장소 이름 또는 좌표" 한 칸 =====
    지도 문서와 지도 고르기 창이 같은 것을 쓴다. 좌표처럼 생기면 곧장 옮기고(고를 후보가 없다),
    아니면 이름으로 찾아 결과를 목록으로 띄운다. setNote 로 진행·오류를 알리고, 목록에서 고른
-   후보(또는 후보가 하나뿐이라 고를 것이 없는 자리)만 onMove(lat, lng, zoom, label) 로 옮겨 보여 준다. */
+   후보(또는 후보가 하나뿐이라 고를 것이 없는 자리)만 onMove(lat, lng, zoom, label, place) 로 옮겨 보여 준다.
+   마지막 place 는 카카오가 준 전화번호·업종·주소를 다시 잃지 않고 장소 말풍선까지 넘기는 값이다. */
 function mapAttachPlaceSearch(input, button, results, onMove, setNote){
   let items = [];
   let searching = false;
@@ -1380,7 +1545,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
     input.value = "";
     // 고르라는 안내는 여기서 걷는다 — onMove 가 곧바로 제 안내(빨간 점 지우는 법)를 쓴다.
     setNote("");
-    onMove(place.lat, place.lng, 15, place.name);
+    onMove(place.lat, place.lng, 15, place.name, place);
   };
   // 곧장 옮겼으면 true — 부르는 쪽이 "고르세요" 안내를 띄울지 판단할 수 있게.
   const showResults = (places) => {
@@ -1772,7 +1937,7 @@ function openMapNearby(center, opts = {}){
         '</div>' +
         '<div class="map-nearby-row">' +
           '<label class="map-nearby-field"><span>반경</span><select class="map-select map-nearby-radius"></select></label>' +
-          '<label class="map-nearby-field"><span>갈래당</span><select class="map-select map-nearby-per"></select></label>' +
+          '<label class="map-nearby-field"><span>전체 최대</span><select class="map-select map-nearby-total"></select></label>' +
           '<label class="map-nearby-check"><input type="checkbox" class="map-nearby-circle" checked><span>반경 원도 그리기</span></label>' +
         '</div>' +
         '<div class="map-nearby-row">' +
@@ -1792,7 +1957,7 @@ function openMapNearby(center, opts = {}){
     const kindGrid = modal.querySelector(".map-nearby-kind-grid");
     const kindCount = modal.querySelector(".map-nearby-kinds-count");
     const radiusSelect = modal.querySelector(".map-nearby-radius");
-    const perSelect = modal.querySelector(".map-nearby-per");
+    const totalSelect = modal.querySelector(".map-nearby-total");
     const keywordInput = modal.querySelector(".map-nearby-keyword");
     const circleCheck = modal.querySelector(".map-nearby-circle");
     const note = modal.querySelector(".map-nearby-note");
@@ -1819,13 +1984,12 @@ function openMapNearby(center, opts = {}){
       radiusSelect.appendChild(option);
     }
     radiusSelect.value = "1000";
-    for (const count of MAP_NEARBY_PER_KIND_CHOICES){
+    for (const count of MAP_NEARBY_TOTAL_CHOICES){
       const option = document.createElement("option");
       option.value = String(count); option.textContent = mapTf("{count}곳", { count });
-      perSelect.appendChild(option);
+      totalSelect.appendChild(option);
     }
-    const perKindMax = MAP_NEARBY_PER_KIND_CHOICES[MAP_NEARBY_PER_KIND_CHOICES.length - 1];
-    perSelect.value = String(perKindMax);
+    totalSelect.value = String(MAP_NEARBY_DEFAULT_TOTAL);
 
     const pickedKinds = () => kindRows.filter(row => row.box.checked).map(row => row.item);
     /* 고른 갈래와 직접 찾기에 맞춰 창을 다시 맞춘다. 색까지 여기서 배정하는 까닭은 고르는 사이에
@@ -1843,14 +2007,18 @@ function openMapNearby(center, opts = {}){
         row.box.disabled = keywordMode || (full && !row.box.checked);
         row.row.classList.toggle("is-off", row.box.disabled);
       }
-      perSelect.disabled = keywordMode;
       // 갈래를 다 풀면 찾을 것이 없다(셀렉트 때는 늘 하나가 골라져 있어 없던 갈래다).
       okBtn.disabled = !keywordMode && !picked.length;
-      kindCount.textContent = keywordMode ? ""
-        : full ? mapTf("최대 {max}갈래까지 고를 수 있어요", { max:MAP_NEARBY_MAX_KINDS })
-        : mapTf("{count}/{max}갈래", { count:picked.length, max:MAP_NEARBY_MAX_KINDS });
+      const totalLimit = Number(totalSelect.value) || MAP_NEARBY_DEFAULT_TOTAL;
+      const limits = mapNearbyKindLimits(keywordMode ? 1 : picked.length, totalLimit);
+      const kindLimit = limits.length ? Math.max(...limits) : 0;
+      kindCount.textContent = keywordMode
+        ? mapTf("직접 찾기 · 최대 {count}곳", { count:kindLimit })
+        : mapTf("{count}/{max}갈래 · 갈래당 약 {limit}곳",
+          { count:picked.length, max:MAP_NEARBY_MAX_KINDS, limit:kindLimit });
     };
     for (const row of kindRows) row.box.addEventListener("change", syncKinds);
+    totalSelect.addEventListener("change", syncKinds);
     keywordInput.addEventListener("input", syncKinds);
     keywordInput.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
@@ -1890,16 +2058,15 @@ function openMapNearby(center, opts = {}){
       busy = true;
       okBtn.disabled = true;
       const radius = Number(radiusSelect.value) || 1000;
-      const perKind = Number(perSelect.value) || perKindMax;
+      const totalLimit = Number(totalSelect.value) || MAP_NEARBY_DEFAULT_TOTAL;
       note.textContent = mapT("찾는 중…");
       try {
-        /* 직접 찾기는 갈래가 하나뿐이라 예전 길(쪽을 이어 받아 최대 45곳) 그대로 두고, 고른
-           갈래들만 갈래당 개수로 자른다 — '갈래당'이라는 칸이 흐려져 있는 쪽의 규칙을 몰래
-           바꾸지 않기 위해서다. */
+        // 직접 찾기도 같은 전체 상한을 쓰되 카카오의 한 갈래 노출 상한(45곳)을 넘기지 않는다.
         const found = keyword
-          ? { places:(await mapNearbyPlaces({ keyword }, center.lat, center.lng, radius))
+          ? { places:(await mapNearbyPlaces({ keyword }, center.lat, center.lng, radius,
+              Math.min(totalLimit, MAP_NEARBY_MAX_PER_KIND)))
               .map(place => ({ ...place, kind:kinds[0] })), failed:[] }
-          : await mapNearbyPlacesByKinds(kinds, center.lat, center.lng, radius, perKind);
+          : await mapNearbyPlacesByKinds(kinds, center.lat, center.lng, radius, totalLimit);
         if (!found.places.length){
           note.textContent = kinds.length === 1
             ? mapTf("반경 {radius} 안에서 {label}을(를) 찾지 못했어요.",
@@ -1912,6 +2079,8 @@ function openMapNearby(center, opts = {}){
       } catch(error){
         note.textContent = mapT(error && error.message === "kakao-required"
           ? "주변 시설 찾기는 카카오 지도 검색을 켰을 때만 쓸 수 있어요(설정 → 지도 검색)."
+          : error && error.message === "kakao-key-required"
+            ? "카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요."
           : error && error.message === "geocode-launcher-required"
             ? "주변 시설 찾기는 ClassDock 런처에서 사용할 수 있어요."
             : "주변 시설을 찾지 못했어요 — 인터넷 연결을 확인해 주세요.");
@@ -2986,8 +3155,11 @@ async function mountMapEditor(doc){
       if (info.region || info.district){
         live.region = info.region || "";
         live.district = info.district || "";
-        touch();
       }
+      live.address = info.road || info.address || live.address || "";
+      live.roadAddress = info.road || live.roadAddress || "";
+      live.lotAddress = info.address || live.lotAddress || "";
+      touch();
       return true;
     } catch(error){
       if (!opts.quiet){
@@ -3077,6 +3249,18 @@ async function mountMapEditor(doc){
       addressFillBtn.disabled = false;
     });
 
+    // 검색 결과를 영구 표시로 바꾼 뒤에도 카카오 장소 상세 페이지를 같은 창에서 볼 수 있다.
+    const detailBtn = document.createElement("button");
+    detailBtn.type = "button";
+    detailBtn.className = "map-popup-address map-popup-detail";
+    detailBtn.textContent = "🗺 카카오맵 상세 보기";
+    detailBtn.title = "카카오맵의 영업시간·메뉴·리뷰 등 상세 페이지 보기";
+    detailBtn.hidden = !mapKakaoPlaceUrl(marker.placeUrl);
+    detailBtn.addEventListener("click", () => {
+      map.closePopup();
+      openMapKakaoPlaceModal(marker.placeUrl, marker.label);
+    });
+
     /* ── 사진 한 장 ──
        답사·관찰 기록은 "여기서 무엇을 보았는가"가 핵심이라 글보다 사진이 먼저다. 지도 파일 안에
        함께 담아(base64) 파일 하나만 건네면 사진까지 따라가게 한다. */
@@ -3155,7 +3339,7 @@ async function mountMapEditor(doc){
     photoBox.append(photoImg, photoAddBtn, photoRemoveBtn, photoInput);
     syncPhoto();
 
-    form.append(labelInput, noteInput, colorRow, photoBox, coordText, addressFillBtn, removeBtn);
+    form.append(labelInput, noteInput, colorRow, photoBox, coordText, addressFillBtn, detailBtn, removeBtn);
     mapTranslate(form);
     return form;
   };
@@ -3906,13 +4090,13 @@ async function mountMapEditor(doc){
   });
 
   /* ── 표로 메모 ──
-     CSV 내보내기와 같은 표를 파일이 아니라 메모창 표 블록으로 보낸다. 메모의 표에는 복사·CSV
+     수업에서 바로 읽을 카카오 장소 정보만 추려 메모창 표 블록으로 보낸다. 메모의 표에는 복사·CSV
      저장·표 편집기·변환이 이미 달려 있어, 파일을 내렸다 다시 여는 걸음이 통째로 빠진다.
      메모 표 한 개에 담기는 줄 수에는 상한이 있으므로(메모창이 정한다) 넘친 줄은 그 수를 알린다. */
   csvMemoBtn.addEventListener("click", () => {
     if (typeof window.addTableToScratchpad !== "function"){ setStatus(mapT("메모창을 열 수 없어요.")); return; }
     if (!model.markers.length){ setStatus(mapT("내보낼 표시가 없습니다.")); return; }
-    const result = window.addTableToScratchpad(mapMarkersToRows(model.markers));
+    const result = window.addTableToScratchpad(mapMarkersToMemoRows(model.markers));
     if (!result) return;                  // 메모창이 이미 구체적인 사유를 알렸다(용량 등)
     const dropped = Math.max(0, Number(result.dropped) || 0);
     const added = Math.max(0, model.markers.length - dropped);
@@ -3967,27 +4151,38 @@ async function mountMapEditor(doc){
      카카오 카테고리 검색에만 있는 길이라(OSM 에 대응물이 없다) 카카오를 껐으면 쓸 수 없다.
      장소 정보와 같은 방식으로 감추지 않고 흐리게 두고, 눌렀을 때 켜는 법을 알려 준다. */
   let nearbyReady = false;
+  let nearbyAccess = { provider:false, available:false, hasKey:false, ready:false };
   // 같은 일을 부르는 자리가 셋이다(도구막대·우클릭 메뉴·자리 안내 말풍선) — 만들 때 여기에 담아
   // 두면 상태가 바뀔 때 한꺼번에 따라온다.
   const nearbyButtons = [nearbyBtn];
-  const setNearbyReady = (ready) => {
-    nearbyReady = !!ready;
+  const setNearbyReady = (access) => {
+    nearbyAccess = access && typeof access === "object"
+      ? access : { provider:!!access, available:!!access, hasKey:!!access, ready:!!access };
+    nearbyReady = nearbyAccess.ready === true;
     for (const button of nearbyButtons) button.classList.toggle("is-unavailable", !nearbyReady);
   };
-  mapProviderIsKakao().then((kakao) => setNearbyReady(kakao)).catch(() => {});
+  const refreshNearbyReady = async () => {
+    try { setNearbyReady(await mapKakaoSearchAccess()); }
+    catch(_){ setNearbyReady({ provider:false, available:false, hasKey:false, ready:false }); }
+  };
+  refreshNearbyReady();
+  // 설정에서 키를 저장·삭제하면 열어 둔 지도 버튼도 곧바로 같은 상태로 바뀐다.
+  const onMapSearchStatusChange = () => { refreshNearbyReady(); };
+  window.addEventListener("classdock-map-search-status-change", onMapSearchStatusChange);
+  doc.cleanupFns.push(() => {
+    window.removeEventListener("classdock-map-search-status-change", onMapSearchStatusChange);
+  });
   /* 도구막대는 화면 가운데를, 우클릭 메뉴는 누른 자리를 기준으로 부른다 — 기준점만 다르고 찾아
      넣는 길은 하나다(꼬리표·되돌리기·토스트가 두 갈래로 갈라지지 않게). */
   const runNearby = async (at, opts = {}) => {
     /* 흐린 채로 눌렀다면 그 사이 설정에서 카카오를 켰을 수도 있으니 한 번 더 확인하고 나서
        안내한다 — 지도를 열 때 본 값만 믿으면 "켰는데도 안 된다"가 된다. */
+    await refreshNearbyReady();
     if (!nearbyReady){
-      try { setNearbyReady(await mapProviderIsKakao()); } catch(_){}
-      if (!nearbyReady){
-        const guide = mapT("주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.");
-        if (typeof toast === "function") toast(guide, 5000);
-        setStatus(guide);
-        return;
-      }
+      const guide = mapT(mapKakaoSearchGuide(nearbyAccess));
+      if (typeof toast === "function") toast(guide, 5000);
+      setStatus(guide);
+      return;
     }
     const center = { lat:mapClampLat(at.lat), lng:mapClampLng(at.lng) };
     const picked = await openMapNearby(center, opts);
@@ -4003,9 +4198,15 @@ async function mountMapEditor(doc){
         /* 주소와 거리는 수업에서 그대로 읽는 값이라 메모에 남긴다. 갈래 이름을 맨 앞에 두는 까닭:
            여러 갈래를 함께 넣으면 색만으로는 어느 갈래인지 되짚기 어렵다(색은 다섯까지만 갈린다).
            직접 찾기로 넣은 것은 갈래가 없으므로(code 가 빈다) 넣지 않는다 — 이름과 같은 말이다. */
-        note:[kind.code ? mapT(kind.label) : "", place.address,
+        note:[kind.code ? mapT(kind.label) : "", place.category, place.address, place.phone ? "☎ " + place.phone : "",
           place.distance ? mapTf("중심에서 {distance}", { distance:mapFormatDistance(place.distance) }) : ""]
           .filter(Boolean).join("\n"),
+        address:place.address,
+        phone:place.phone,
+        category:place.categoryFull || place.category,
+        roadAddress:place.roadAddress,
+        lotAddress:place.lotAddress,
+        placeUrl:place.placeUrl,
         source:"nearby", batch
       });
       model.markers.push(marker);
@@ -4085,7 +4286,13 @@ async function mountMapEditor(doc){
       const marker = mapNormalizeMarker({
         lat:spot.lat, lng:spot.lng, color:"red", label:name,
         // 수업에서 그대로 읽는 값들이라 메모에 담아 둔다(주소 자동 채우기와 같은 자리).
-        note:[spot.category, spot.road, spot.address, spot.phone].filter(Boolean).join("\n")
+        note:[spot.category, spot.road, spot.address, spot.phone].filter(Boolean).join("\n"),
+        address:spot.road || spot.address,
+        phone:spot.phone,
+        category:spot.categoryFull || spot.category,
+        roadAddress:spot.road,
+        lotAddress:spot.address,
+        placeUrl:spot.placeUrl
       });
       model.markers.push(marker);
       addMarkerLayer(marker).openPopup();
@@ -4111,7 +4318,16 @@ async function mountMapEditor(doc){
       map.closePopup();
       runNearby({ lat:spot.lat, lng:spot.lng }, { atPoint:true });
     });
-    actions.append(pinBtn, copyBtn, nearBtn);
+    const detailBtn = document.createElement("button");
+    detailBtn.type = "button"; detailBtn.className = "map-spot-btn map-spot-detail";
+    detailBtn.textContent = "🗺 카카오맵 상세 보기";
+    detailBtn.title = "카카오맵의 영업시간·메뉴·리뷰 등 상세 페이지 보기";
+    detailBtn.hidden = !mapKakaoPlaceUrl(spot.placeUrl);
+    detailBtn.addEventListener("click", () => {
+      map.closePopup();
+      openMapKakaoPlaceModal(spot.placeUrl, spot.title || name);
+    });
+    actions.append(pinBtn, copyBtn, nearBtn, detailBtn);
     box.appendChild(actions);
     mapTranslate(box);
     return box;
@@ -4352,8 +4568,16 @@ async function mountMapEditor(doc){
   mapTranslate(contextMenu);
 
   const moveToSearchLocation = mapSearchLocationMover(map);
-  const placeSearch = mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label) => {
+  const placeSearch = mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label, place) => {
     moveToSearchLocation(lat, lng, zoom, label);
+    /* 검색 응답에는 전화번호가 이미 들어 있다. 좌표를 다시 역검색하면 업체가 아니라 건물 주소만
+       잡히는 경우가 많으므로, 고른 후보의 원래 값을 바로 말풍선에 쓴다. */
+    if (place && (place.phone || place.category || place.road || place.address)){
+      L.popup({ className:"map-spot-popup", minWidth:210, autoPan:false })
+        .setLatLng([lat, lng])
+        .setContent(buildSpotPopup({ ...place, title:place.title || place.name, lat, lng }))
+        .openOn(map);
+    }
     // 이제 표식이 계속 남으므로, 지우는 법을 한 줄로 알려 준다.
     if (label) setStatus(mapT("찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)"));
   }, setStatus);
@@ -4821,12 +5045,13 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = {
     MAP_DOC_TYPE, MAP_DOC_VERSION, MAP_BASEMAPS, MAP_MARKER_COLORS,
     MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX,
-    MAP_NEARBY_MAX_KINDS, MAP_NEARBY_PER_KIND_CHOICES, mapNearbyKindColors,
+    MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL,
+    MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors,
     mapDocEmpty, mapDocParse, mapDocSerialize, mapDocContentKey,
     mapNormalizeMarker, mapNormalizeShape, mapNormalizeBackgroundImage,
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
-    mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows,
+    mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
     mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,

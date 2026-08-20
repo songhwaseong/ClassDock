@@ -260,6 +260,8 @@
     "카카오 키가 이 Windows 사용자 계정에 암호화되어 있습니다.": "The Kakao key is encrypted for this Windows user.",
     "카카오 키를 이번 실행 동안 기억하고 있습니다.": "The Kakao key is remembered for this session.",
     "카카오 REST API 키가 아직 없습니다.": "No Kakao REST API key has been set yet.",
+    "카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.":
+      "Nearby places needs a Kakao REST API key — add one in Settings → Map search.",
     "카카오 키 설정은 ClassDock.exe에서 사용할 수 있습니다.": "Kakao key settings are available in ClassDock.exe.",
     "저장할 카카오 REST API 키를 입력해 주세요.": "Enter the Kakao REST API key to save.",
     "카카오 연결을 시험하는 중…": "Testing the Kakao connection…",
@@ -1652,6 +1654,15 @@
     "이 자리의 주소를 클립보드로 복사": "Copies this spot's address to the clipboard",
     "이 자리를 가운데로 삼아 반경 안의 시설을 찾아요":
       "Finds places within a radius of this spot",
+    "🗺 카카오맵 상세 보기": "🗺 View on Kakao Map",
+    "카카오맵 상세 보기": "Kakao Map details",
+    "카카오맵의 영업시간·메뉴·리뷰 등 상세 페이지 보기":
+      "View details such as hours, menus, and reviews on Kakao Map",
+    "카카오맵 상세 페이지를 불러오는 중…": "Loading the Kakao Map details…",
+    "새 창에서 열기": "Open in a new window",
+    "카카오맵 상세 주소를 열 수 없어요.": "Couldn't open the Kakao Map details address.",
+    "새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요.":
+      "Couldn't open a new window. Check the browser's popup permission.",
     // 주변 시설 찾기(카카오)
     "🏫 주변 시설": "🏫 Nearby places",
     "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시":
@@ -1662,7 +1673,9 @@
     "지도에서 오른쪽 버튼으로 누른 자리를 기준으로 반경 안의 시설을 찾아 표시로 넣습니다.":
       "Finds places within a radius of the spot you right-clicked and adds them as pins.",
     "갈래": "Kinds",
-    "갈래당": "Each kind",
+    "전체 최대": "Total maximum",
+    "{count}/{max}갈래 · 갈래당 약 {limit}곳": "{count}/{max} kinds · about {limit} each",
+    "직접 찾기 · 최대 {count}곳": "Custom search · up to {count}",
     "직접 찾기": "Your own word",
     "예: 로또 · 빵집 — 적으면 갈래 대신 이 말로 찾아요":
       "e.g. lottery · bakery — fill this in to search by your word instead of a kind",

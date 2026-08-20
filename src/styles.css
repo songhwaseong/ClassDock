@@ -1018,6 +1018,26 @@
     padding:4px 7px;font:inherit;font-size:11.5px;cursor:pointer}
   .map-spot-btn:hover{background:var(--panel-hover);border-color:var(--accent)}
   .map-spot-btn[hidden]{display:none}
+  .map-spot-detail{flex:1 1 100%;font-weight:700;color:var(--accent)}
+  /* 카카오 장소 상세 — 카카오 페이지 위를 덮지 않고 iframe 전체를 큰 모달에 그대로 보여 준다. */
+  .modal-card.map-place-card{width:min(1120px,96vw);height:min(88vh,900px);max-height:calc(100vh - 12px);
+    padding:0;overflow:hidden;display:flex;flex-direction:column}
+  .map-place-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;
+    border-bottom:1px solid var(--border);background:var(--panel)}
+  .map-place-head h3{flex:1;min-width:0;margin:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .map-place-external{padding:6px 10px;font-size:12px}
+  .map-place-close{flex:none;width:32px;height:32px;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);color:var(--ink);font:700 20px/1 system-ui,sans-serif;cursor:pointer}
+  .map-place-close:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .map-place-frame-wrap{position:relative;flex:1 1 auto;min-height:0;background:#fff}
+  .map-place-frame{display:block;width:100%;height:100%;border:0;background:#fff}
+  .map-place-loading{position:absolute;inset:0;z-index:1;display:grid;place-items:center;margin:0;
+    background:var(--panel);color:var(--muted);font-size:13px;pointer-events:none}
+  .map-place-loading[hidden]{display:none}
+  @media(max-width:600px),(max-height:520px){
+    .modal-card.map-place-card{width:100%;height:100%;max-height:none;border-radius:12px}
+    .map-place-external{display:none}
+  }
   /* 주변 시설 찾기 창 */
   .map-nearby-modal .modal-card{width:min(560px,96%)}
   .map-nearby-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
@@ -4233,6 +4253,11 @@
   [data-theme="dark"] .task-banner-score.is-fail{color:#fca5a5}
   .task-banner .spacer{flex:1}
   .task-banner-btn{font-size:12px}
+  /* 과제 바도 --panel-2 판이므로 기본 .btn:hover 의 --panel-2 배경은 버튼을 판에 묻히게 한다.
+     시험지 화면과 같은 강조 hover 를 써서 문제 보기·채점 버튼의 경계를 유지한다. */
+  .task-banner .btn:not(.primary):not(:disabled):hover,
+  .task-banner .btn:not(.primary):not(:disabled):focus-visible{
+    background:var(--exam-btn-hover-bg);border-color:var(--accent);color:var(--exam-btn-hover-ink)}
   /* ===== 과제 빌더 모달 ===== */
   .task-builder-modal .modal-card{width:min(760px,96%);max-height:92vh;display:flex;flex-direction:column}
   .task-builder-body{overflow:auto;min-height:120px;padding:1px 4px 3px 1px}

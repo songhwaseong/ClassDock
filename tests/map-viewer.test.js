@@ -23,17 +23,18 @@ function loadMapViewer(){
       mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
       mapFormatBytes, mapParseCoords, mapDistanceMeters, mapLineLengthMeters,
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
-      , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows
+      , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
-      , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
-      , mapKakaoSpotPlaces, mapKakaoCategoryTail, MAP_SPOT_MIN_ZOOM
+      , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
+      , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
       , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom, mapSearchMenuItem
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
-      , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_PER_KIND_CHOICES, mapNearbyKindColors
+      , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
+      , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
   return context.__map;
 }
@@ -44,10 +45,15 @@ function mapCleanupBodies(source){
   return [...source.matchAll(/doc\.cleanupFns\.push\(\(\) => \{([\s\S]*?)\n  \}\);/g)].map(match => match[1]);
 }
 
-test(".map은 같은 모델을 항상 같은 JSON으로 직렬화하고 그대로 되읽는다", () => {
+test(".map은 같은 모델을 항상 같은 JSON으로 직렬화하고 장소 상세 주소까지 그대로 되읽는다", () => {
   const api = loadMapViewer();
   const model = api.mapDocEmpty("우리 동네");
-  model.markers.push(api.mapNormalizeMarker({ lat:37.5665, lng:126.978, label:"학교", color:"blue" }));
+  model.markers.push(api.mapNormalizeMarker({
+    lat:37.5665, lng:126.978, label:"학교", color:"blue",
+    address:"서울 중구 세종대로 110", phone:"02-120", category:"공공기관 > 시청",
+    roadAddress:"서울 중구 세종대로 110", lotAddress:"서울 중구 태평로1가 31",
+    placeUrl:"http://place.map.kakao.com/26338954/"
+  }));
   const first = api.mapDocSerialize(model);
   assert.equal(first, api.mapDocSerialize(model));
   const back = api.mapDocParse(first);
@@ -55,6 +61,12 @@ test(".map은 같은 모델을 항상 같은 JSON으로 직렬화하고 그대�
   assert.equal(back.markers.length, 1);
   assert.equal(back.markers[0].label, "학교");
   assert.equal(back.markers[0].color, "blue");
+  assert.equal(back.markers[0].address, "서울 중구 세종대로 110");
+  assert.equal(back.markers[0].phone, "02-120");
+  assert.equal(back.markers[0].category, "공공기관 > 시청");
+  assert.equal(back.markers[0].roadAddress, "서울 중구 세종대로 110");
+  assert.equal(back.markers[0].lotAddress, "서울 중구 태평로1가 31");
+  assert.equal(back.markers[0].placeUrl, "https://place.map.kakao.com/26338954");
 });
 
 test("지도 문서가 아닌 JSON은 편집 모델로 열지 않는다", () => {
@@ -80,6 +92,7 @@ test("손으로 고친 좌표·확대·색이 들어와도 지도가 깨지지 �
   assert.equal(model.markers[0].lng, 180);
   assert.equal(model.markers[0].color, "red");
   assert.ok(model.markers[0].id, "id 가 없던 표시에도 새 id 를 붙인다");
+  assert.equal(api.mapNormalizeMarker({ placeUrl:"https://evil.example/26338954" }).placeUrl, "");
 });
 
 /* 지도를 움직였다는 이유로 문서가 "고쳐짐(●)"이 되면, 정작 표시를 지웠는지가 묻힌다.
@@ -151,25 +164,36 @@ test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 
   assert.match(source, /mapPrepareBackgroundImage\(file\)/);
   assert.match(source, /mapMarkersFromCsv\(await file\.text\(\)\)/);
   assert.match(source, /mapMarkersToCsv\(model\.markers\)/);
-  assert.match(source, /window\.addTableToScratchpad\(mapMarkersToRows\(model\.markers\)\)/);
+  assert.match(source, /window\.addTableToScratchpad\(mapMarkersToMemoRows\(model\.markers\)\)/);
 });
 
-/* 메모 표와 CSV 파일은 같은 표를 써야 CSV 들이기로 되돌아온다 — 열이 갈라지면 왕복이 조용히 깨진다. */
-test("메모로 보내는 표는 CSV 파일과 같은 열·같은 값이다", () => {
+test("메모 표는 카카오 장소 정보를 요청한 순서로 담고 편집용 열은 제외한다", () => {
   const api = loadMapViewer();
   const marker = api.mapNormalizeMarker({
-    lat:37.5665, lng:126.978, label:"시청", note:"쉼표, 있음", color:"blue", region:"서울특별시", district:"중구"
+    lat:37.5665, lng:126.978, label:"시청", note:"쉼표, 있음", color:"blue",
+    address:"서울 중구 세종대로 110", phone:"02-120", region:"서울특별시", district:"중구",
+    category:"사회,공공기관 > 지방행정기관 > 시청", roadAddress:"서울 중구 세종대로 110",
+    lotAddress:"서울 중구 태평로1가 31", placeUrl:"https://place.map.kakao.com/17866469"
   });
   // vm 안에서 만든 배열이라 그대로는 realm 이 달라 비교되지 않는다 — 값만 떠서 견준다.
   const rows = JSON.parse(JSON.stringify(api.mapMarkersToRows([marker])));
-  assert.deepEqual(rows[0], ["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]);
-  assert.deepEqual(rows[1], ["시청", "37.566500", "126.978000", "쉼표, 있음", "blue", "서울특별시", "중구"]);
+  assert.deepEqual(rows[0], ["이름", "위도", "경도", "메모", "색상", "주소", "전화번호", "시도", "시군구"]);
+  assert.deepEqual(rows[1], ["시청", "37.566500", "126.978000", "쉼표, 있음", "blue",
+    "서울 중구 세종대로 110", "02-120", "서울특별시", "중구"]);
+  const memoRows = JSON.parse(JSON.stringify(api.mapMarkersToMemoRows([marker])));
+  assert.deepEqual(memoRows[0], ["이름", "업종·카테고리", "도로명 주소", "지번 주소", "전화번호",
+    "카카오 장소 상세 링크(place_url)", "위도", "경도"]);
+  assert.deepEqual(memoRows[1], ["시청", "사회,공공기관 > 지방행정기관 > 시청", "서울 중구 세종대로 110",
+    "서울 중구 태평로1가 31", "02-120", "https://place.map.kakao.com/17866469", "37.566500", "126.978000"]);
   // 표 그대로 CSV 로 굳혔다가 다시 들이면 같은 표시로 돌아온다.
   const back = api.mapMarkersFromCsv(api.mapMarkersToCsv([marker]));
   assert.equal(back.markers[0].note, "쉼표, 있음");
+  assert.equal(back.markers[0].address, "서울 중구 세종대로 110");
+  assert.equal(back.markers[0].phone, "02-120");
   assert.equal(back.markers[0].district, "중구");
-  assert.deepEqual(JSON.parse(JSON.stringify(api.mapMarkersToRows([]))),
-    [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(api.mapMarkersToMemoRows([]))),
+    [["이름", "업종·카테고리", "도로명 주소", "지번 주소", "전화번호",
+      "카카오 장소 상세 링크(place_url)", "위도", "경도"]]);
 });
 
 /* 배경지도 호스트는 런처의 /tile-proxy 허용 목록(launcher.cs TileProxyHosts)에 있어야 한다.
@@ -443,6 +467,50 @@ test("카카오 주소·키워드 검색은 런처가 REST 키를 붙이고 실�
   assert.match(source, /"\/geocode\?provider=" \+ encodeURIComponent\(provider\)/);
 });
 
+test("카카오 장소 검색은 전화번호와 업종을 고른 장소 말풍선까지 보존한다", () => {
+  const api = loadMapViewer();
+  const places = api.mapKakaoPlaces({ documents:[{
+    id:"26338954", place_name:"카카오프렌즈 코엑스점", x:"127.059", y:"37.512",
+    category_name:"가정,생활 > 문구,사무용품 > 디자인문구",
+    road_address_name:"서울 강남구 영동대로 513", address_name:"서울 강남구 삼성동 159",
+    phone:"02-6002-1880", place_url:"https://place.map.kakao.com/26338954"
+  }] });
+  assert.equal(places.length, 1);
+  assert.equal(places[0].title, "카카오프렌즈 코엑스점");
+  assert.equal(places[0].category, "디자인문구");
+  assert.equal(places[0].categoryFull, "가정,생활 > 문구,사무용품 > 디자인문구");
+  assert.equal(places[0].phone, "02-6002-1880");
+  assert.equal(places[0].placeId, "26338954");
+
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /onMove\(place\.lat, place\.lng, 15, place\.name, place\)/);
+  assert.match(source, /setContent\(buildSpotPopup\(\{ \.\.\.place, title:place\.title \|\| place\.name, lat, lng \}\)\)/);
+});
+
+test("카카오 상세 창은 Local API의 장소 주소만 iframe으로 연다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapKakaoPlaceUrl("http://place.map.kakao.com/26338954"), "https://place.map.kakao.com/26338954");
+  assert.equal(api.mapKakaoPlaceUrl("https://place.map.kakao.com/26338954/"), "https://place.map.kakao.com/26338954");
+  assert.equal(api.mapKakaoPlaceUrl("https://evil.example/26338954"), "");
+  assert.equal(api.mapKakaoPlaceUrl("https://place.map.kakao.com/not-a-place"), "");
+  assert.equal(api.mapKakaoPlaceUrl("javascript:alert(1)"), "");
+
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const modal = /function openMapKakaoPlaceModal\(([^]*?)\n\}/.exec(source);
+  assert.ok(modal);
+  assert.match(modal[1], /frame\.src = url/);
+  assert.match(modal[1], /frame\.src = "about:blank"/);
+  assert.match(modal[1], /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(spot\.placeUrl\)/);
+  assert.match(source, /openMapKakaoPlaceModal\(spot\.placeUrl, spot\.title \|\| name\)/);
+  assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(marker\.placeUrl\)/);
+  assert.match(source, /openMapKakaoPlaceModal\(marker\.placeUrl, marker\.label\)/);
+
+  const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.match(css, /\.modal-card\.map-place-card\{[^}]*height:min\(88vh,900px\)/);
+  assert.match(css, /\.map-place-frame\{[^}]*width:100%;height:100%;border:0/);
+});
+
 test("카카오 REST 키는 브라우저 설정에 남기지 않고 로컬 런처가 보호한다", () => {
   const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
   const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
@@ -506,7 +574,7 @@ test("주소 검색은 고른 후보로만 옮기고 임시 표식은 지도 캡
   assert.match(shown[1], /if \(items\.length === 1\)\{[\s\S]*?pick\(items\[0\]\);[\s\S]*?return true;/);
   // 여럿일 때는 첫 줄을 짚어 두어, 검색한 Enter 에 이어 Enter 한 번이면 첫 후보로 간다.
   assert.match(shown[1], /if \(items\.length\) setActive\(0\)/);
-  assert.match(search[1], /onMove\(place\.lat, place\.lng, 15, place\.name\)/);
+  assert.match(search[1], /onMove\(place\.lat, place\.lng, 15, place\.name, place\)/);
   assert.equal((search[1].match(/onMove\(/g) || []).length, 2, "좌표 입력과 pick 두 곳뿐이다");
   // 곧장 옮긴 자리에서는 "아래에서 고르세요" 안내가 뜨지 않아야 한다.
   assert.match(search[1], /if \(!showResults\(places\)\) setNote\(/);
@@ -525,14 +593,14 @@ test("주변 시설은 갈래 대신 직접 적은 말로도 반경 안을 찾�
   assert.match(nearby[1], /slice\(0, MAP_NEARBY_KEYWORD_MAX\)/);
   // 직접 적은 말은 갈래가 아니므로 이름표·색을 그 말로 만든다.
   assert.match(source, /\[\{ code:"", label:keyword, color:"purple" \}\]/);
-  assert.match(source, /mapNearbyPlaces\(\{ keyword \}, center\.lat, center\.lng, radius\)/);
+  assert.match(source, /mapNearbyPlaces\(\{ keyword \}, center\.lat, center\.lng, radius,[\s\S]*?Math\.min\(totalLimit, MAP_NEARBY_MAX_PER_KIND\)\)/);
   assert.match(source, /class="map-input map-nearby-keyword"/);
   // 갈래 칸은 직접 찾기를 적는 순간 흐려져 어느 쪽으로 찾는지 보인다.
   assert.match(source, /const keywordMode = !!keywordInput\.value\.trim\(\)/);
   assert.match(source, /row\.box\.disabled = keywordMode \|\| \(full && !row\.box\.checked\)/);
-  assert.match(source, /perSelect\.disabled = keywordMode/);
-  // 직접 찾기는 갈래가 하나뿐이라 예전처럼 쪽을 이어 받는다 — 갈래당 개수로 자르지 않는다.
-  assert.doesNotMatch(source, /mapNearbyPlaces\(\{ keyword \}[^)]*perKind/);
+  assert.match(source, /totalSelect\.addEventListener\("change", syncKinds\)/);
+  // 직접 찾기도 고른 전체 상한을 따르되 카카오 한 갈래 상한인 45곳을 넘지 않는다.
+  assert.match(source, /Math\.min\(totalLimit, MAP_NEARBY_MAX_PER_KIND\)/);
 
   // 두 런처 모두 기준점이 있는 키워드 검색은 갈래 검색과 같은 쪽수(15개·page)로 받아야 한다.
   const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
@@ -600,6 +668,12 @@ test("주변 시설로 넣은 표시·반경 원은 꼬리표를 달고 묶음�
   assert.ok(nearby);
   assert.match(source, /nearbyBtn\.addEventListener\("click", \(\) => runNearby\(map\.getCenter\(\)\)\)/);
   assert.match(nearby[1], /const batch = mapBatchId\(\)/);
+  assert.match(nearby[1], /address:place\.address/);
+  assert.match(nearby[1], /phone:place\.phone/);
+  assert.match(nearby[1], /category:place\.categoryFull \|\| place\.category/);
+  assert.match(nearby[1], /roadAddress:place\.roadAddress/);
+  assert.match(nearby[1], /lotAddress:place\.lotAddress/);
+  assert.match(nearby[1], /placeUrl:place\.placeUrl/);
   assert.equal((nearby[1].match(/source:"nearby", batch/g) || []).length, 2);
   assert.match(nearby[1], /action:\{ label:mapT\("되돌리기"\)/);
   assert.match(nearby[1], /removeTagged\(item => item\.batch === batch\)/);
@@ -1005,13 +1079,21 @@ test("카카오·OSM의 서로 다른 응답을 같은 모양의 자리 정보�
 test("카카오 카테고리 응답에서 좌표가 성한 장소만 표시로 쓴다", () => {
   const api = loadMapViewer();
   const places = api.mapKakaoCategoryPlaces({ documents:[
-    { place_name:"○○초등학교", x:"127.0", y:"37.5", road_address_name:"○○로 1", distance:"320" },
+    { place_name:"○○초등학교", x:"127.0", y:"37.5", road_address_name:"○○로 1", address_name:"○○동 10", distance:"320",
+      category_name:"교육,학문 > 학교 > 초등학교", phone:"02-123-4567" },
     { place_name:"좌표 없음", x:"", y:"" },
     { place_name:"", x:"127.1", y:"37.6" }
   ] });
   assert.equal(places.length, 1);
   assert.equal(places[0].name, "○○초등학교");
+  assert.equal(places[0].category, "초등학교");
+  assert.equal(places[0].categoryFull, "교육,학문 > 학교 > 초등학교");
+  assert.equal(places[0].roadAddress, "○○로 1");
+  assert.equal(places[0].lotAddress, "○○동 10");
+  assert.equal(places[0].phone, "02-123-4567");
   assert.equal(places[0].distance, 320);
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /place\.phone \? "☎ " \+ place\.phone/);
 });
 
 /* 지도 모델에는 원이 없다. 반경을 눈에 보이게 하려고 다각형으로 만드는데, 그 다각형이 실제
@@ -1072,16 +1154,23 @@ test("카카오 갈래 목록은 코드·색이 모두 성하다", () => {
 test("주변 시설은 갈래를 여러 개 골라 한 번에 넣는다", () => {
   const api = loadMapViewer();
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  /* 상한이 서로 맞물려 있다. 갈래당 15곳 × 다섯 갈래 = 75곳이라 이름표를 접는 문턱 아래에
-     머물고, 15 는 카카오 한 쪽(15개)이라 갈래마다 검색이 한 번으로 끝난다. */
+  /* 기본 전체 75곳을 갈래 수에 따라 유동 배분한다. 한 갈래는 카카오 노출 상한 45곳까지 늘고,
+     다섯 갈래는 예전과 같은 15곳씩이다. 사용자가 고르는 최대 100곳도 이름표 문턱 아래다. */
   assert.equal(api.MAP_NEARBY_MAX_KINDS, 5);
-  const perMax = Math.max(...api.MAP_NEARBY_PER_KIND_CHOICES);
-  assert.equal(perMax, 15);
-  assert.ok(perMax * api.MAP_NEARBY_MAX_KINDS < api.MAP_LABEL_MAX_MARKERS,
-    "고를 수 있는 최대치가 이름표를 접는 문턱을 넘으면 안 된다");
-  // 15 이하를 고르면 첫 쪽에서 멈춘다 — 갈래를 다섯 골라도 검색은 다섯 번이다.
+  assert.deepEqual([...api.MAP_NEARBY_TOTAL_CHOICES], [30, 45, 75, 100]);
+  assert.equal(api.MAP_NEARBY_DEFAULT_TOTAL, 75);
+  assert.equal(api.MAP_NEARBY_MAX_PER_KIND, 45);
+  assert.ok(Math.max(...api.MAP_NEARBY_TOTAL_CHOICES) < api.MAP_LABEL_MAX_MARKERS,
+    "고를 수 있는 전체 최대치가 이름표를 접는 문턱을 넘으면 안 된다");
+  assert.deepEqual([...api.mapNearbyKindLimits(1, 75)], [45]);
+  assert.deepEqual([...api.mapNearbyKindLimits(2, 75)], [38, 37]);
+  assert.deepEqual([...api.mapNearbyKindLimits(3, 75)], [25, 25, 25]);
+  assert.deepEqual([...api.mapNearbyKindLimits(4, 75)], [19, 19, 19, 18]);
+  assert.deepEqual([...api.mapNearbyKindLimits(5, 75)], [15, 15, 15, 15, 15]);
+  // 필요한 수만큼 받은 쪽에서 멈추고 한 갈래는 세 쪽(45곳)을 넘지 않는다.
   const nearby = /async function mapNearbyPlaces\(target, lat, lng, radius, limit\)\{([\s\S]*?)\n\}/.exec(source);
   assert.ok(nearby);
+  assert.match(nearby[1], /Math\.min\(MAP_NEARBY_MAX_PER_KIND/);
   assert.match(nearby[1], /if \(cap && places\.length >= cap\) break;/);
   assert.match(nearby[1], /return cap \? places\.slice\(0, cap\) : places;/);
 
@@ -1114,8 +1203,10 @@ test("주변 시설은 갈래를 여러 개 골라 한 번에 넣는다", () => 
 
   /* 한 갈래가 넘어져도 나머지는 넣는다. 다만 하나도 못 건지면 까닭을 그대로 올려야
      카카오 꺼짐·런처 없음 안내가 살아 있다. */
-  const byKinds = /async function mapNearbyPlacesByKinds\(kinds, lat, lng, radius, perKind\)\{([\s\S]*?)\n\}/.exec(source);
+  const byKinds = /async function mapNearbyPlacesByKinds\(kinds, lat, lng, radius, totalLimit\)\{([\s\S]*?)\n\}/.exec(source);
   assert.ok(byKinds);
+  assert.match(byKinds[1], /const limits = mapNearbyKindLimits\(kinds\.length, totalLimit\)/);
+  assert.match(byKinds[1], /limits\[index\]/);
   assert.match(byKinds[1], /catch\(error\)\{ failed\.push\(kind\); if \(!firstError\) firstError = error; continue; \}/);
   assert.match(byKinds[1], /if \(!places\.length && firstError\) throw firstError;/);
   assert.match(byKinds[1], /places\.push\(\{ \.\.\.place, kind \}\)/);
@@ -1208,7 +1299,9 @@ test("좌표로 부르는 요청은 런처가 숫자·코드 꼴만 통과시킨
 test("주변 시설은 카카오를 껐을 때 흐려지고 주소 확인은 OSM으로도 돌아간다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   assert.match(source, /nearbyBtn\.classList\.add\("is-unavailable"\)/);
-  assert.match(source, /mapProviderIsKakao\(\)\.then\(\(kakao\) => setNearbyReady\(kakao\)\)/);
+  assert.match(source, /async function mapKakaoSearchAccess\(\)/);
+  assert.match(source, /refreshNearbyReady\(\)/);
+  assert.match(source, /ready:provider && available && hasKey/);
   const nearby = /async function mapNearbyPlaces\(([\s\S]*?)\n\}/.exec(source);
   assert.ok(nearby);
   assert.match(nearby[1], /throw new Error\("kakao-required"\)/);
@@ -1318,12 +1411,17 @@ test("아직 쓸 수 없는 도구는 감추지 않고 흐리게 두고 누르�
   // 흐린 채로 눌렀을 때 상태를 다시 확인하고 나서 안내한다(그 사이 설정을 켰을 수 있다).
   const nearby = /const runNearby = async \(at, opts = \{\}\) => \{([\s\S]*?)\n    const center =/.exec(source);
   assert.ok(nearby, "runNearby 앞머리의 안내 갈래를 찾지 못했다");
-  assert.match(nearby[1], /setNearbyReady\(await mapProviderIsKakao\(\)\)/);
+  assert.match(nearby[1], /await refreshNearbyReady\(\)/);
   assert.match(nearby[1], /if \(!nearbyReady\)\{[\s\S]*?return;/);
+  assert.match(source, /ready:provider && available && hasKey/);
+  assert.match(source, /window\.addEventListener\("classdock-map-search-status-change", onMapSearchStatusChange\)/);
+  assert.match(source, /window\.removeEventListener\("classdock-map-search-status-change", onMapSearchStatusChange\)/);
+  assert.match(source, /error\.message === "kakao-key-required"[\s\S]*?카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요/);
   assert.match(source, /setSpotReady\(!!await mapTileProxyBase\(\)\)/);
   // 안내 문구는 켜는 자리(설정 · 런처)를 짚어 주고, 영어 사전에도 있어야 한다.
   for (const guide of [
     "주변 시설은 카카오 지도 검색을 켜야 찾을 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.",
+    "카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.",
     "장소 정보는 ClassDock 런처로 열었을 때 쓸 수 있어요 — 브라우저로 연 화면에서는 누른 자리를 되물을 수 없습니다."
   ]){
     assert.ok(source.includes(guide), "안내 문구가 없다: " + guide);
@@ -1335,6 +1433,10 @@ test("아직 쓸 수 없는 도구는 감추지 않고 흐리게 두고 누르�
   assert.match(sync[1], /classList\.toggle\("is-unavailable", mirror\.button\.classList\.contains\("is-unavailable"\)\)/);
   // disabled 가 아니라 클래스다 — disabled 인 단추에는 클릭이 오지 않아 안내할 자리가 없다.
   assert.match(styles, /\.map-btn\.is-unavailable,\.map-spot-btn\.is-unavailable,\.map-context-menu button\.is-unavailable\{opacity/);
+
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  assert.match(app, /window\.__classDockMapSearchKeyStatus = detail/);
+  assert.match(app, /new CustomEvent\("classdock-map-search-status-change", \{ detail \}\)/);
 });
 
 /* ===== 저장 전 안전망 ===== */

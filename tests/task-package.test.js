@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(require.resolve("../src/js/task-package.js"), "utf8");
+const styles = fs.readFileSync(require.resolve("../src/styles.css"), "utf8");
 const sandbox = {
   normalizeAssignmentTests(items){
     return Array.isArray(items) ? items.map(item => ({
@@ -24,6 +25,10 @@ function task(files=[]){
     files, tests: [{ name: "기본", input: "", expected: "1" }]
   };
 }
+
+test("과제 바의 보조 버튼은 panel-2 배경에서도 구분되는 hover 색을 쓴다", () => {
+  assert.match(styles, /\.task-banner \.btn:not\(\.primary\):not\(:disabled\):hover,[\s\S]*?background:var\(--exam-btn-hover-bg\);border-color:var\(--accent\);color:var\(--exam-btn-hover-ink\)/);
+});
 
 test("과제 첨부는 시작 코드 및 다른 첨부와 대소문자 무시 경로 충돌을 허용하지 않는다", () => {
   assert.equal(validateTaskPayload(task([{ path: "MAIN.py", b64: "" }])).ok, false);
