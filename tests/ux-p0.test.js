@@ -24,6 +24,25 @@ test("시작 화면은 명시적인 파일 열기를 기본 행동으로 제공�
   assert.doesNotMatch(app, /byId\("dzInner"\)\.addEventListener\("click"/);
 });
 
+test("시작 화면의 다른 문서 메뉴는 실제 생성 형식을 빠짐없이 묶어 제공한다", () => {
+  assert.match(html, /id="dzNewGeneralLabel">일반 문서<\/span>/);
+  assert.match(html, /id="dzNewClassLabel">수업 자료<\/span>/);
+  assert.match(html, /id="dzNewOpenLabel">파일 열기<\/span>/);
+  ["dzNewNotebook", "dzNewSheet", "dzNewText", "dzNewJs", "dzNewBoard", "dzNewMnote",
+    "dzNewMusic", "dzNewMap", "dzNewTimeline", "dzNewExam", "dzOpenLesson"].forEach(id => {
+    assert.match(html, new RegExp(`id="${id}"[^>]*role="menuitem"`));
+  });
+  assert.match(app, /byId\("dzNewJs"\)[\s\S]*newJsScratch\(\)/);
+  assert.match(app, /byId\("dzNewMnote"\)[\s\S]*newMnoteScratch\(\)/);
+  assert.match(app, /byId\("dzNewMusic"\)[\s\S]*newMusicScratch\(\)/);
+  assert.match(app, /byId\("dzNewMap"\)[\s\S]*newMapScratch\(\)/);
+  assert.match(app, /byId\("dzNewTimeline"\)[\s\S]*newTimelineScratch\(\)/);
+  assert.match(app, /byId\("dzNewExam"\)[\s\S]*newExamPaper\(\)/);
+  assert.match(app, /menu\.querySelectorAll\('\[role="menuitem"\]'\)/);
+  assert.match(styles, /\.dz-new-menu\{[^}]*overflow-y:auto[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(styles, /@media\(max-width:520px\)\{[\s\S]*?\.dz-new-menu\{[^}]*grid-template-columns:1fr/);
+});
+
 test("저장 대상 판단은 원본과 사본의 결과를 편집 전에 설명한다", () => {
   const start = documents.indexOf("function documentSaveTarget");
   const end = documents.indexOf("function updateOriginalSaveBadge", start);

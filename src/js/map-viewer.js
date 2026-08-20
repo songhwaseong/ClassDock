@@ -2495,8 +2495,13 @@ const MAP_SEARCH_MENU_LABEL = "지도에서 검색";
 /* 문단을 통째로 긁어 넘기면 찾을 수 없는 말이 된다. 장소 이름은 짧으므로 줄바꿈을 눕히고
    길이로 걸러, 메뉴에서 미리 흐리게 만들 근거로 쓴다(빈 문자열 = 쓸 수 없는 선택). */
 const MAP_SEARCH_TEXT_MAX = 40;
-function mapSearchTextFrom(raw){
+const MAP_SEARCH_QUERY_MAX = 200;
+function mapSearchQueryFrom(raw){
   const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+  return text && text.length <= MAP_SEARCH_QUERY_MAX ? text : "";
+}
+function mapSearchTextFrom(raw){
+  const text = mapSearchQueryFrom(raw);
   return text && text.length <= MAP_SEARCH_TEXT_MAX ? text : "";
 }
 /* 어느 지도로 보낼지 — 열어 둔 지도 중 가장 최근에 본 것. 한 번도 활성화한 적 없는 탭(파일을
@@ -2512,10 +2517,12 @@ function mapRecentMapDoc(){
   };
   return open.slice().sort((a, b) => rank(a) - rank(b))[0];
 }
-async function searchMapForText(raw){
-  const text = mapSearchTextFrom(raw);
+async function searchMapForText(raw, options){
+  const text = options && options.allowAddress ? mapSearchQueryFrom(raw) : mapSearchTextFrom(raw);
   if (!text){
-    if (typeof toast === "function") toast(mapT("지도에서 찾을 장소 이름을 짧게 골라 주세요."), 2600);
+    if (typeof toast === "function") toast(mapT(options && options.allowAddress
+      ? "지도에서 찾을 장소나 주소를 확인해 주세요."
+      : "지도에서 찾을 장소 이름을 짧게 골라 주세요."), 2600);
     return null;
   }
   const doc = mapRecentMapDoc() || await newMapScratch();
@@ -2531,6 +2538,9 @@ async function searchMapForText(raw){
   }
   return doc;
 }
+/* 연대표처럼 저장된 주소를 넘기는 화면은 문단 선택보다 긴 검색어를 쓸 수 있다. 나머지 이동·후보
+   선택 흐름은 우클릭의 지도 검색과 똑같이 유지한다. */
+function searchMapForPlace(raw){ return searchMapForText(raw, { allowAddress:true }); }
 /* 우클릭 메뉴 한 줄 — 글자를 다루는 메뉴라면 어디서든 같은 꼴로 쓴다(편집기·표 셀·보기 화면).
    고른 것이 없거나 문단째 긁었으면 흐리게 둔다 — 감추면 이런 길이 있다는 것을 알 수 없다. */
 function mapSearchMenuItem(selectedText){
@@ -5155,7 +5165,7 @@ if (typeof module !== "undefined" && module.exports){
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
     mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,
     mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS,
-    MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom,
+    MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom,
     MAP_SEARCH_HISTORY_MAX, MAP_SEARCH_RESULT_MAX,
     MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
   };

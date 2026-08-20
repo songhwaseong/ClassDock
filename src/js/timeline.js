@@ -1,7 +1,7 @@
 "use strict";
 
 /* ===== 연대표 문서(.timeline) =====
-   사건·기간·사진을 JSON 한 파일에 담아, 인터넷 없이 만들고 발표하는 수업용 연대표다.
+   사건·기간·유적지·사진을 JSON 한 파일에 담아, 인터넷 없이 만들고 발표하는 수업용 연대표다.
    날짜는 2026 / 2026-08 / 2026-08-20뿐 아니라 "기원전 300"·"BC 300"도 받는다.
    화면 배치는 보기 상태지만 균등/시간 비례 방식은 자료를 만든 의도라 문서에 함께 저장한다. */
 
@@ -17,6 +17,8 @@ const TIMELINE_HISTORY_LIMIT = 80;
 const TIMELINE_ZOOM_MIN = 0.55;
 const TIMELINE_ZOOM_MAX = 2.2;
 const TIMELINE_ZOOM_STEP = 0.15;
+const TIMELINE_STAGE_HEIGHT = 780;
+const TIMELINE_OVERVIEW_MIN_HEIGHT = 320;
 
 const TIMELINE_COLORS = [
   { id:"rose",   label:"빨강", hex:"#e11d48" },
@@ -123,6 +125,8 @@ function timelineNormalizeEvent(raw, index){
     start:String(value.start == null ? "" : value.start).trim().slice(0, 40),
     end:String(value.end == null ? "" : value.end).trim().slice(0, 40),
     category:String(value.category == null ? "" : value.category).trim().slice(0, 60),
+    placeName:String(value.placeName == null ? "" : value.placeName).trim().slice(0, 120),
+    placeAddress:String(value.placeAddress == null ? "" : value.placeAddress).trim().slice(0, 200),
     description:String(value.description == null ? "" : value.description).slice(0, 4000),
     color,
     image:timelineNormalizePhoto(value.image),
@@ -220,6 +224,24 @@ function timelineLayoutEntries(events, mode, zoom){
   return { entries, width, min, max };
 }
 
+/* 많은 사건을 한 화면에서 훑는 개요 배치. 균등 보기는 모든 사건을 같은 간격으로, 시간 비례는
+   실제 날짜 간격으로 놓는다. 같은 자리에 몰린 점도 누를 수 있도록 다섯 높이로 엇갈린다. */
+function timelineOverviewEntries(events, mode, width){
+  const sorted = timelineSortedEvents(events);
+  const safeWidth = Math.max(320, Number(width) || 0);
+  const left = 54, right = Math.max(left, safeWidth - 54), spanX = Math.max(1, right - left);
+  const dated = sorted.filter(row => row.date);
+  const min = dated.length ? Math.min(...dated.map(row => row.date.key)) : 0;
+  const max = dated.length ? Math.max(...dated.map(row => row.date.key)) : min;
+  const spanDate = Math.max(1, max - min);
+  return sorted.map((row, index) => {
+    let x;
+    if (mode === "scale" && row.date) x = left + ((row.date.key - min) / spanDate) * spanX;
+    else x = sorted.length < 2 ? safeWidth / 2 : left + (index / (sorted.length - 1)) * spanX;
+    return { ...row, x, lane:(index % 5) - 2 };
+  });
+}
+
 function timelinePhotoTotalChars(events){
   return (Array.isArray(events) ? events : []).reduce((sum, event) =>
     sum + (event && event.image && event.image.dataUrl ? event.image.dataUrl.length : 0), 0);
@@ -250,10 +272,11 @@ function timelineCsvCell(value){
 }
 
 function timelineEventsToCsv(events){
-  const lines = [["시작", "종료", "제목", "분류", "설명", "색상"]];
+  const lines = [["시작", "종료", "제목", "분류", "유적지", "유적지 주소", "설명", "색상"]];
   for (const row of timelineSortedEvents(events)){
     const event = row.event;
-    lines.push([event.start, event.end, event.title, event.category, event.description, event.color]);
+    lines.push([event.start, event.end, event.title, event.category, event.placeName, event.placeAddress,
+      event.description, event.color]);
   }
   return lines.map(row => row.map(timelineCsvCell).join(",")).join("\r\n") + "\r\n";
 }
@@ -267,6 +290,8 @@ function timelineEventsFromCsv(text){
   const endAt = find(["종료", "종료일", "끝", "end"]);
   const titleAt = find(["제목", "사건", "이름", "title", "event", "name"]);
   const categoryAt = find(["분류", "갈래", "category", "group"]);
+  const placeNameAt = find(["유적지", "관련 유적지", "유적명", "장소", "place", "place name", "location"]);
+  const placeAddressAt = find(["유적지 주소", "유적지주소", "주소", "소재지", "도로명주소", "place address", "address"]);
   const descAt = find(["설명", "내용", "메모", "description", "note"]);
   const colorAt = find(["색", "색상", "color"]);
   if (startAt < 0 || titleAt < 0) throw new Error("csv-columns");
@@ -286,6 +311,8 @@ function timelineEventsFromCsv(text){
       end,
       title,
       category:categoryAt >= 0 ? row[categoryAt] : "",
+      placeName:placeNameAt >= 0 ? row[placeNameAt] : "",
+      placeAddress:placeAddressAt >= 0 ? row[placeAddressAt] : "",
       description:descAt >= 0 ? row[descAt] : "",
       color:color ? color.id : "blue"
     }, events.length));
@@ -446,13 +473,14 @@ function mountTimelineEditor(doc){
   const zoomOut = timelineButton("−", "연대표 축소");
   const zoomLabel = timelineButton("100%", "연대표 배율 100%로 초기화", "timeline-btn timeline-zoom-label");
   const zoomIn = timelineButton("＋", "연대표 확대");
+  const overviewBtn = timelineButton("▤ 개요", "모든 사건을 한 화면에서 보기");
   const listBtn = timelineButton("☷ 목록", "사건 목록 열기·닫기");
   const csvInBtn = timelineButton("CSV 들이기", "표에서 사건 가져오기");
   const csvOutBtn = timelineButton("CSV 내보내기", "사건 목록을 CSV로 저장");
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
   const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
   const saveBtn = timelineButton("저장", "연대표 저장 (Ctrl+S)", "timeline-btn run-save timeline-save");
-  bar.append(titleInput, addBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn,
+  bar.append(titleInput, addBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn, overviewBtn,
     listBtn, csvInBtn, csvOutBtn, presentBtn, printBtn, saveBtn);
 
   const workspace = document.createElement("div");
@@ -463,6 +491,9 @@ function mountTimelineEditor(doc){
   viewport.setAttribute("aria-label", "연대표 화면");
   const stage = document.createElement("div");
   stage.className = "timeline-stage";
+  const canvas = document.createElement("div");
+  canvas.className = "timeline-canvas";
+  stage.appendChild(canvas);
   viewport.appendChild(stage);
 
   const listPanel = document.createElement("aside");
@@ -477,7 +508,7 @@ function mountTimelineEditor(doc){
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.className = "timeline-search";
-  searchInput.placeholder = timelineT("제목·분류·설명 검색");
+  searchInput.placeholder = timelineT("제목·분류·유적지·설명 검색");
   const list = document.createElement("div");
   list.className = "timeline-list";
   listPanel.append(listHead, searchInput, list);
@@ -498,6 +529,10 @@ function mountTimelineEditor(doc){
   root.append(bar, workspace, csvInput);
 
   let zoom = 1;
+  let overview = false;
+  let trackBaseWidth = 840;
+  let trackBaseHeight = TIMELINE_STAGE_HEIGHT;
+  let detailView = { zoom:1, left:0, top:0 };
   let selectedId = "";
   let history = null;
   let recoveryTimer = 0;
@@ -550,29 +585,152 @@ function mountTimelineEditor(doc){
   doc._timelineHistory = history;
   history.reset();
 
+  function applyTrackScale(){
+    const factor = overview ? 1 : zoom;
+    canvas.style.transform = "scale(" + factor + ")";
+    stage.style.width = Math.max(viewport.clientWidth, Math.ceil(trackBaseWidth * factor)) + "px";
+    stage.style.height = Math.max(overview ? viewport.clientHeight : 0, Math.ceil(trackBaseHeight * factor)) + "px";
+  }
+
   function setZoom(value, anchor){
-    const previousWidth = stage.offsetWidth || 1;
-    const previousLeft = viewport.scrollLeft;
+    if (overview) return;
+    const previousZoom = zoom || 1;
+    const rect = viewport.getBoundingClientRect();
+    const pointerAnchor = anchor && anchor !== false && Number.isFinite(anchor.clientX) && Number.isFinite(anchor.clientY);
+    const anchorX = pointerAnchor ? anchor.clientX - rect.left : viewport.clientWidth / 2;
+    const anchorY = pointerAnchor ? anchor.clientY - rect.top : viewport.clientHeight / 2;
+    const contentX = (viewport.scrollLeft + anchorX) / previousZoom;
+    const contentY = (viewport.scrollTop + anchorY) / previousZoom;
     zoom = Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, Number(value) || 1));
-    renderTrack();
+    /* 빈 화면은 카드가 840px 기본 캔버스의 가운데가 아니라 현재 보이는 작업 영역의 가운데에
+       있어야 한다. 사건이 없을 때만 캔버스 크기도 새 배율에 맞춰 다시 계산한다. */
+    if (!model.events.length) renderTrack();
+    else applyTrackScale();
     zoomLabel.textContent = Math.round(zoom * 100) + "%";
     if (anchor !== false){
-      const ratio = (previousLeft + viewport.clientWidth / 2) / previousWidth;
-      viewport.scrollLeft = Math.max(0, ratio * stage.offsetWidth - viewport.clientWidth / 2);
+      viewport.scrollLeft = Math.max(0, contentX * zoom - anchorX);
+      viewport.scrollTop = Math.max(0, contentY * zoom - anchorY);
     }
   }
 
+  function setOverview(value, options){
+    const next = !!value;
+    if (overview === next) return;
+    if (next){
+      detailView = { zoom, left:viewport.scrollLeft, top:viewport.scrollTop };
+      overview = true;
+    } else {
+      overview = false;
+      zoom = detailView.zoom;
+    }
+    root.classList.toggle("is-overview", overview);
+    overviewBtn.classList.toggle("is-on", overview);
+    overviewBtn.textContent = overview ? timelineT("▤ 상세") : timelineT("▤ 개요");
+    overviewBtn.title = overview ? timelineT("상세 카드 보기로 돌아가기") : timelineT("모든 사건을 한 화면에서 보기");
+    zoomOut.disabled = overview; zoomIn.disabled = overview; zoomLabel.disabled = overview;
+    zoomLabel.textContent = overview ? timelineT("전체") : Math.round(zoom * 100) + "%";
+    renderTrack();
+    if (overview){ viewport.scrollLeft = 0; viewport.scrollTop = 0; }
+    else if (!(options && options.skipRestore)){
+      viewport.scrollLeft = detailView.left; viewport.scrollTop = detailView.top;
+    }
+  }
+
+  const placeText = event => [event && event.placeName, event && event.placeAddress].filter(Boolean).join(" · ");
+  async function searchTimelinePlace(event){
+    const query = String(event && (event.placeAddress || event.placeName) || "").trim();
+    if (!query) return;
+    if (typeof globalThis.searchMapForPlace !== "function"){
+      if (typeof toast === "function") toast(timelineT("지도를 열 수 없어요."), 2400, { type:"error" });
+      return;
+    }
+    try { await globalThis.searchMapForPlace(query); }
+    catch(_){ if (typeof toast === "function") toast(timelineT("지도에서 유적지를 찾지 못했어요."), 2800, { type:"error" }); }
+  }
+
+  function timelinePlaceButton(event, className){
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = "📍 " + placeText(event);
+    button.title = timelineT("지도에서 검색") + ": " + (event.placeAddress || event.placeName);
+    button.addEventListener("click", clickEvent => {
+      clickEvent.preventDefault(); clickEvent.stopPropagation(); searchTimelinePlace(event);
+    });
+    button.addEventListener("dblclick", clickEvent => { clickEvent.preventDefault(); clickEvent.stopPropagation(); });
+    return button;
+  }
+
+  function renderOverviewTrack(){
+    trackBaseWidth = Math.max(320, viewport.clientWidth || 0);
+    trackBaseHeight = Math.max(TIMELINE_OVERVIEW_MIN_HEIGHT, viewport.clientHeight || 0);
+    canvas.style.width = trackBaseWidth + "px";
+    canvas.style.height = trackBaseHeight + "px";
+    applyTrackScale();
+    if (!model.events.length){ canvas.appendChild(empty); return; }
+
+    const axisY = Math.round(trackBaseHeight / 2);
+    const hint = document.createElement("div");
+    hint.className = "timeline-overview-hint";
+    hint.textContent = model.events.length + timelineT("개 사건 · 점을 누르면 상세 카드로 이동합니다");
+    canvas.appendChild(hint);
+    const axis = document.createElement("div");
+    axis.className = "timeline-overview-axis";
+    axis.style.top = axisY + "px";
+    canvas.appendChild(axis);
+
+    const entries = timelineOverviewEntries(model.events, model.viewMode, trackBaseWidth);
+    const labelStep = Math.max(1, Math.ceil(entries.length / 9));
+    entries.forEach((row, index) => {
+      const event = row.event;
+      const marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = "timeline-overview-marker" + (event.id === selectedId ? " is-selected" : "");
+      marker.dataset.eventId = event.id;
+      marker.style.left = row.x + "px";
+      marker.style.top = (axisY + row.lane * 15) + "px";
+      marker.style.setProperty("--timeline-color", timelineColorHex(event.color));
+      marker.title = timelineFormatDate(event.start) + " · " + (event.title || timelineT("제목 없는 사건"));
+      marker.setAttribute("aria-label", marker.title + " · " + timelineT("상세 카드로 이동"));
+      marker.addEventListener("click", () => {
+        selectedId = event.id;
+        setOverview(false, { skipRestore:true });
+        selectEvent(event.id, true);
+      });
+      canvas.appendChild(marker);
+
+      if (index === 0 || index === entries.length - 1 || index % labelStep === 0){
+        const label = document.createElement("div");
+        label.className = "timeline-overview-label";
+        label.style.left = row.x + "px";
+        label.style.top = (axisY + (index % 2 ? 58 : -78)) + "px";
+        label.textContent = timelineFormatDate(event.start) + " · " + (event.title || timelineT("제목 없는 사건"));
+        canvas.appendChild(label);
+      }
+    });
+  }
+
   function renderTrack(){
-    stage.innerHTML = "";
-    const layout = timelineLayoutEntries(model.events, model.viewMode, zoom);
-    stage.style.width = Math.ceil(layout.width) + "px";
-    if (!layout.entries.length){
-      stage.appendChild(empty);
+    canvas.replaceChildren();
+    if (overview){ renderOverviewTrack(); return; }
+    const layout = timelineLayoutEntries(model.events, model.viewMode, 1);
+    const isEmpty = !layout.entries.length;
+    trackBaseWidth = isEmpty
+      ? Math.max(320, Math.ceil((viewport.clientWidth || 840) / (zoom || 1)))
+      : Math.ceil(layout.width);
+    trackBaseHeight = isEmpty
+      ? Math.max(320, Math.ceil((viewport.clientHeight || TIMELINE_STAGE_HEIGHT) / (zoom || 1)))
+      : TIMELINE_STAGE_HEIGHT;
+    canvas.style.width = trackBaseWidth + "px";
+    canvas.style.height = trackBaseHeight + "px";
+    applyTrackScale();
+    if (isEmpty){
+      canvas.appendChild(empty);
       return;
     }
     const axis = document.createElement("div");
     axis.className = "timeline-axis";
-    stage.appendChild(axis);
+    canvas.appendChild(axis);
     for (const row of layout.entries){
       const event = row.event;
       const color = timelineColorHex(event.color);
@@ -583,7 +741,7 @@ function mountTimelineEditor(doc){
         period.style.width = Math.max(18, row.endX - row.x) + "px";
         period.style.setProperty("--timeline-color", color);
         period.title = timelineFormatDate(event.start) + " ~ " + timelineFormatDate(event.end);
-        stage.appendChild(period);
+        canvas.appendChild(period);
       }
       const tick = document.createElement("button");
       tick.type = "button";
@@ -593,13 +751,13 @@ function mountTimelineEditor(doc){
       tick.title = event.title;
       tick.setAttribute("aria-label", timelineFormatDate(event.start) + " " + event.title);
       tick.addEventListener("click", () => selectEvent(event.id, true));
-      stage.appendChild(tick);
+      canvas.appendChild(tick);
 
       const label = document.createElement("div");
       label.className = "timeline-tick-label";
       label.style.left = row.x + "px";
       label.textContent = timelineFormatDate(event.start);
-      stage.appendChild(label);
+      canvas.appendChild(label);
 
       const card = document.createElement("article");
       card.className = "timeline-card timeline-lane-" + row.lane + (event.id === selectedId ? " is-selected" : "");
@@ -624,14 +782,19 @@ function mountTimelineEditor(doc){
       const description = document.createElement("p"); description.textContent = event.description || "";
       card.append(meta, heading);
       if (event.description) card.appendChild(description);
+      if (event.placeName || event.placeAddress){
+        card.classList.add("has-place");
+        card.appendChild(timelinePlaceButton(event, "timeline-place-link"));
+      }
       const connector = document.createElement("span"); connector.className = "timeline-connector"; card.appendChild(connector);
       card.addEventListener("click", () => selectEvent(event.id, false));
       card.addEventListener("dblclick", () => openEventDialog(event.id));
       card.addEventListener("keydown", keyEvent => {
+        if (keyEvent.target !== card) return;
         if (keyEvent.key === "Enter"){ keyEvent.preventDefault(); openEventDialog(event.id); }
         else if (keyEvent.key === "Delete"){ keyEvent.preventDefault(); removeEvent(event.id); }
       });
-      stage.appendChild(card);
+      canvas.appendChild(card);
     }
   }
 
@@ -641,12 +804,14 @@ function mountTimelineEditor(doc){
     let visible = 0;
     for (const row of timelineSortedEvents(model.events)){
       const event = row.event;
-      const haystack = [event.title, event.start, event.end, event.category, event.description].join(" ").toLowerCase();
+      const haystack = [event.title, event.start, event.end, event.category, event.placeName,
+        event.placeAddress, event.description].join(" ").toLowerCase();
       if (query && !haystack.includes(query)) continue;
       visible++;
       const item = document.createElement("button");
       item.type = "button";
       item.className = "timeline-list-item" + (event.id === selectedId ? " is-selected" : "");
+      item.dataset.eventId = event.id;
       item.style.setProperty("--timeline-color", timelineColorHex(event.color));
       const date = document.createElement("small"); date.textContent = timelineFormatDate(event.start);
       const title = document.createElement("strong"); title.textContent = event.title || timelineT("제목 없는 사건");
@@ -665,9 +830,19 @@ function mountTimelineEditor(doc){
 
   function renderAll(){ renderTrack(); renderList(); updateHistory(); }
 
+  function syncSelectedState(){
+    for (const item of stage.querySelectorAll("[data-event-id]")){
+      item.classList.toggle("is-selected", item.dataset.eventId === selectedId);
+    }
+    for (const item of list.querySelectorAll("[data-event-id]")){
+      item.classList.toggle("is-selected", item.dataset.eventId === selectedId);
+    }
+  }
+
   function selectEvent(id, scroll){
     selectedId = String(id || "");
-    renderTrack(); renderList();
+    if (overview && scroll) setOverview(false, { skipRestore:true });
+    syncSelectedState();
     if (scroll){
       const card = [...stage.querySelectorAll("[data-event-id]")].find(item => item.dataset.eventId === selectedId);
       if (card) card.scrollIntoView({ behavior:"smooth", block:"nearest", inline:"center" });
@@ -700,6 +875,8 @@ function mountTimelineEditor(doc){
         '<label class="timeline-field"><span>종료(선택)</span><input class="timeline-form-end" type="text" maxlength="40" placeholder="기간이면 끝 날짜"></label>' +
         '<label class="timeline-field"><span>분류</span><input class="timeline-form-category" type="text" maxlength="60" placeholder="예: 정치·문화·과학"></label>' +
         '<label class="timeline-field"><span>색상</span><select class="timeline-form-color"></select></label>' +
+        '<label class="timeline-field"><span>관련 유적지(선택)</span><input class="timeline-form-place-name" type="text" maxlength="120" placeholder="예: 경복궁"></label>' +
+        '<label class="timeline-field"><span>유적지 주소(선택)</span><input class="timeline-form-place-address" type="text" maxlength="200" placeholder="예: 서울특별시 종로구 사직로 161"></label>' +
         '<label class="timeline-field timeline-field-wide"><span>설명</span><textarea class="timeline-form-description" maxlength="4000" rows="6"></textarea></label>' +
         '<div class="timeline-photo-field timeline-field-wide"><span>사진</span><div class="timeline-photo-preview"></div>' +
           '<div><button type="button" class="timeline-photo-pick">사진 넣기</button><button type="button" class="timeline-photo-remove">사진 지우기</button>' +
@@ -715,6 +892,8 @@ function mountTimelineEditor(doc){
     const start = modal.querySelector(".timeline-form-start");
     const end = modal.querySelector(".timeline-form-end");
     const category = modal.querySelector(".timeline-form-category");
+    const placeName = modal.querySelector(".timeline-form-place-name");
+    const placeAddress = modal.querySelector(".timeline-form-place-address");
     const description = modal.querySelector(".timeline-form-description");
     const color = modal.querySelector(".timeline-form-color");
     const error = modal.querySelector(".timeline-form-error");
@@ -728,6 +907,8 @@ function mountTimelineEditor(doc){
     start.value = existing ? existing.start : "";
     end.value = existing ? existing.end : "";
     category.value = existing ? existing.category : "";
+    placeName.value = existing ? existing.placeName : "";
+    placeAddress.value = existing ? existing.placeAddress : "";
     description.value = existing ? existing.description : "";
     for (const item of TIMELINE_COLORS){
       const option = document.createElement("option"); option.value = item.id; option.textContent = timelineT(item.label);
@@ -783,7 +964,8 @@ function mountTimelineEditor(doc){
       const next = timelineNormalizeEvent({
         id:existing ? existing.id : timelineEventId(),
         title:title.value.trim(), start:start.value.trim(), end:end.value.trim(),
-        category:category.value.trim(), description:description.value, color:color.value,
+        category:category.value.trim(), placeName:placeName.value.trim(), placeAddress:placeAddress.value.trim(),
+        description:description.value, color:color.value,
         image:draftImage, order:existing ? existing.order : model.events.length
       }, model.events.length);
       if (existing){
@@ -801,10 +983,13 @@ function mountTimelineEditor(doc){
 
   const present = document.createElement("div");
   present.className = "timeline-present"; present.hidden = true;
-  present.innerHTML = '<div class="timeline-present-top"><span class="timeline-present-count"></span><button type="button" class="timeline-present-end">끝내기</button></div>' +
+  present.innerHTML = '<div class="timeline-present-top"><div class="timeline-present-status"><span class="timeline-present-count"></span>' +
+    '<span class="timeline-present-progress" role="progressbar" aria-label="발표 진행" aria-valuemin="1"><i></i></span></div>' +
+    '<button type="button" class="timeline-present-end">끝내기</button></div>' +
     '<div class="timeline-present-card"><div class="timeline-present-image"></div><div class="timeline-present-copy">' +
-    '<div class="timeline-present-meta"></div><h2></h2><p></p></div></div>' +
+    '<div class="timeline-present-meta"></div><h2></h2><div class="timeline-present-place"></div><p></p></div></div>' +
     '<div class="timeline-present-controls"><button type="button" class="timeline-present-prev">← 이전</button>' +
+    '<span class="timeline-present-help">← → 키로 이동 · Esc 끝내기</span>' +
     '<button type="button" class="timeline-present-next">다음 →</button></div>';
   root.appendChild(present);
   const showPresent = index => {
@@ -812,13 +997,25 @@ function mountTimelineEditor(doc){
     presentIndex = Math.max(0, Math.min(presentRows.length - 1, index));
     const event = presentRows[presentIndex].event;
     present.querySelector(".timeline-present-count").textContent = (presentIndex + 1) + " / " + presentRows.length;
+    const progress = present.querySelector(".timeline-present-progress");
+    progress.style.setProperty("--timeline-progress", (((presentIndex + 1) / presentRows.length) * 100) + "%");
+    progress.setAttribute("aria-valuenow", String(presentIndex + 1));
+    progress.setAttribute("aria-valuemax", String(presentRows.length));
     present.querySelector(".timeline-present-meta").textContent = timelineFormatDate(event.start) +
       (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
     present.querySelector("h2").textContent = event.title || timelineT("제목 없는 사건");
     present.querySelector("p").textContent = event.description || "";
-    present.querySelector(".timeline-present-card").style.setProperty("--timeline-color", timelineColorHex(event.color));
+    const presentPlace = present.querySelector(".timeline-present-place");
+    presentPlace.replaceChildren();
+    presentPlace.hidden = !(event.placeName || event.placeAddress);
+    if (!presentPlace.hidden) presentPlace.appendChild(timelinePlaceButton(event, "timeline-present-place-link"));
+    const presentCard = present.querySelector(".timeline-present-card");
+    presentCard.style.setProperty("--timeline-color", timelineColorHex(event.color));
+    present.style.setProperty("--timeline-color", timelineColorHex(event.color));
     const imageHost = present.querySelector(".timeline-present-image"); imageHost.innerHTML = "";
     imageHost.hidden = !event.image;
+    presentCard.classList.toggle("is-text-only", !event.image);
+    presentCard.classList.toggle("has-image", !!event.image);
     if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; imageHost.appendChild(image); }
     present.querySelector(".timeline-present-prev").disabled = presentIndex <= 0;
     present.querySelector(".timeline-present-next").disabled = presentIndex >= presentRows.length - 1;
@@ -858,6 +1055,12 @@ function mountTimelineEditor(doc){
       const title = document.createElement("h2"); title.textContent = event.title || "제목 없는 사건";
       item.append(meta, title);
       if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; item.appendChild(image); }
+      if (event.placeName || event.placeAddress){
+        const place = document.createElement("p"); place.className = "timeline-print-place";
+        place.textContent = (event.placeName ? "유적지: " + event.placeName : "") +
+          (event.placeName && event.placeAddress ? "\n" : "") + (event.placeAddress ? "주소: " + event.placeAddress : "");
+        item.appendChild(place);
+      }
       if (event.description){ const text = document.createElement("p"); text.textContent = event.description; item.appendChild(text); }
       layer.appendChild(item);
     }
@@ -879,6 +1082,7 @@ function mountTimelineEditor(doc){
   zoomOut.addEventListener("click", () => setZoom(zoom - TIMELINE_ZOOM_STEP));
   zoomIn.addEventListener("click", () => setZoom(zoom + TIMELINE_ZOOM_STEP));
   zoomLabel.addEventListener("click", () => setZoom(1));
+  overviewBtn.addEventListener("click", () => setOverview(!overview));
   listBtn.addEventListener("click", () => { listPanel.hidden = !listPanel.hidden; listBtn.classList.toggle("is-on", !listPanel.hidden); if (!listPanel.hidden) searchInput.focus(); });
   listClose.addEventListener("click", () => { listPanel.hidden = true; listBtn.classList.remove("is-on"); });
   searchInput.addEventListener("input", renderList);
@@ -925,12 +1129,54 @@ function mountTimelineEditor(doc){
   window.addEventListener("keydown", onKeyDown);
   viewport.addEventListener("wheel", event => {
     if (!(event.ctrlKey || event.metaKey)) return;
-    event.preventDefault(); setZoom(zoom + (event.deltaY < 0 ? TIMELINE_ZOOM_STEP : -TIMELINE_ZOOM_STEP));
+    event.preventDefault();
+    setZoom(zoom + (event.deltaY < 0 ? TIMELINE_ZOOM_STEP : -TIMELINE_ZOOM_STEP), event);
   }, { passive:false });
+
+  let panState = null;
+  const panBackground = target => target === viewport || target === stage || target === canvas;
+  const onPanPointerDown = event => {
+    if (event.button !== 0 || (event.pointerType && event.pointerType !== "mouse") || !panBackground(event.target)) return;
+    event.preventDefault();
+    panState = { id:event.pointerId, x:event.clientX, y:event.clientY, left:viewport.scrollLeft, top:viewport.scrollTop };
+    viewport.classList.add("is-panning");
+    try { viewport.setPointerCapture(event.pointerId); } catch(_){}
+  };
+  const onPanPointerMove = event => {
+    if (!panState || event.pointerId !== panState.id) return;
+    event.preventDefault();
+    viewport.scrollLeft = panState.left - (event.clientX - panState.x);
+    viewport.scrollTop = panState.top - (event.clientY - panState.y);
+  };
+  const finishPan = event => {
+    if (!panState || (event && event.pointerId !== panState.id)) return;
+    const pointerId = panState.id;
+    panState = null; viewport.classList.remove("is-panning");
+    try { if (viewport.hasPointerCapture(pointerId)) viewport.releasePointerCapture(pointerId); } catch(_){}
+  };
+  viewport.addEventListener("pointerdown", onPanPointerDown);
+  viewport.addEventListener("pointermove", onPanPointerMove);
+  viewport.addEventListener("pointerup", finishPan);
+  viewport.addEventListener("pointercancel", finishPan);
+  viewport.addEventListener("lostpointercapture", finishPan);
+
+  let resizeTimer = 0;
+  const trackResizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = 0;
+      if (overview || !model.events.length) renderTrack();
+      else applyTrackScale();
+    }, 40);
+  }) : null;
+  if (trackResizeObserver) trackResizeObserver.observe(viewport);
 
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
+    clearTimeout(resizeTimer);
+    if (trackResizeObserver) trackResizeObserver.disconnect();
+    finishPan();
     if (history) history.cancel();
     stopPresent();
     window.removeEventListener("keydown", onKeyDown);
@@ -951,7 +1197,7 @@ if (typeof module !== "undefined" && module.exports){
     TIMELINE_DOC_TYPE, TIMELINE_DOC_VERSION, TIMELINE_COLORS,
     timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
-    timelineSortedEvents, timelineLayoutEntries, timelineEventsToCsv, timelineEventsFromCsv,
+    timelineSortedEvents, timelineLayoutEntries, timelineOverviewEntries, timelineEventsToCsv, timelineEventsFromCsv,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle
   };
 }

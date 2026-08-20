@@ -73,15 +73,21 @@ function wire(){
   byId("dzNewSheet").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newSpreadsheetScratch === "function") newSpreadsheetScratch(); });
   byId("dzNewBoard").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newWhiteboard === "function") newWhiteboard(); });
   byId("dzNewText").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTextScratch === "function") newTextScratch(); });
+  if (byId("dzNewJs")) byId("dzNewJs").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newJsScratch === "function") newJsScratch(); });
+  if (byId("dzNewMnote")) byId("dzNewMnote").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMnoteScratch === "function") newMnoteScratch(); });
+  if (byId("dzNewMusic")) byId("dzNewMusic").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMusicScratch === "function") newMusicScratch(); });
+  if (byId("dzNewMap")) byId("dzNewMap").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMapScratch === "function") newMapScratch(); });
+  if (byId("dzNewTimeline")) byId("dzNewTimeline").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTimelineScratch === "function") newTimelineScratch(); });
+  if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
   if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
   byId("dzExamples").addEventListener("click", (e) => { e.stopPropagation(); openSnippetGallery(); });
   wireRecentItems();
   wireSidebarSelection();
-  (() => {                                   // 드롭존 '＋ 새로 만들기' 드롭다운(파이썬·노트북·표·화이트보드·텍스트)
+  (() => {                                   // 드롭존 '＋ 다른 문서 만들기' — 사이드바의 실제 생성 형식과 맞춘다
     const btn = byId("dzNew"), menu = byId("dzNewMenu");
     if (!btn || !menu) return;
-    const items = [byId("dzNewNotebook"), byId("dzNewSheet"), byId("dzNewBoard"), byId("dzNewText"), byId("dzOpenLesson")].filter(Boolean);
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
     const setOpen = (open) => { menu.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
     btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
     menu.addEventListener("click", (e) => e.stopPropagation());

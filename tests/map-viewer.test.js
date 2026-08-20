@@ -28,7 +28,7 @@ function loadMapViewer(){
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
-      , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, mapSearchTextFrom, mapSearchMenuItem
+      , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom, mapSearchMenuItem
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
@@ -1535,6 +1535,15 @@ test("지도로 넘길 낱말은 줄바꿈을 눕히고 문단째 긁은 것은 
   assert.equal(api.mapSearchTextFrom("가".repeat(api.MAP_SEARCH_TEXT_MAX + 1)), "");
 });
 
+test("저장된 유적지 주소는 문단 선택보다 긴 지도 검색어로 넘길 수 있다", () => {
+  const api = loadMapViewer();
+  const address = "서울특별시 종로구 사직로 161 경복궁 관리소 앞 역사문화 안내소 ".repeat(2).trim();
+  assert.ok(address.length > api.MAP_SEARCH_TEXT_MAX);
+  assert.equal(api.mapSearchQueryFrom(address), address);
+  assert.equal(api.mapSearchQueryFrom("가".repeat(api.MAP_SEARCH_QUERY_MAX)), "가".repeat(api.MAP_SEARCH_QUERY_MAX));
+  assert.equal(api.mapSearchQueryFrom("가".repeat(api.MAP_SEARCH_QUERY_MAX + 1)), "");
+});
+
 test("우클릭 메뉴 항목은 고른 글자가 쓸 만할 때만 켜진다", () => {
   const api = loadMapViewer();
   const enabled = api.mapSearchMenuItem("경복궁");
@@ -1559,6 +1568,7 @@ test("고른 낱말은 최근에 보던 지도로, 열린 지도가 없으면 �
   assert.match(body[1], /doc\._mapPendingSearch === text && typeof doc\.mapSearchFor === "function"/);
   // 새 지도를 연 쪽이 기다릴 수 있어야 한다 — handleFiles 가 만든 문서를 돌려준다.
   assert.match(source, /return Promise\.resolve\(handleFiles\(\[new File\(\[starter\]/);
+  assert.match(source, /function searchMapForPlace\(raw\)\{ return searchMapForText\(raw, \{ allowAddress:true \}\); \}/);
 });
 
 test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁을 받는다", () => {

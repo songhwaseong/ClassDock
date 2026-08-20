@@ -334,11 +334,26 @@
         <span class="dz-new-wrap">
           <button type="button" id="dzNew" class="dz-secondary-link" aria-haspopup="menu" aria-expanded="false" aria-controls="dzNewMenu">＋ 다른 문서 만들기 ▾</button>
           <span class="dz-new-menu" id="dzNewMenu" role="menu" hidden>
-            <button type="button" id="dzNewNotebook" role="menuitem">새 노트북(.ipynb)</button>
-            <button type="button" id="dzNewSheet" role="menuitem">새 빈 표(엑셀)</button>
-            <button type="button" id="dzNewBoard" role="menuitem">새 화이트보드</button>
-            <button type="button" id="dzNewText" role="menuitem">새 텍스트 파일</button>
-            <button type="button" id="dzOpenLesson" role="menuitem">리플레이 열기(.lesson)</button>
+            <span class="dz-new-group" role="group" aria-labelledby="dzNewGeneralLabel">
+              <span class="dz-new-group-label" id="dzNewGeneralLabel">일반 문서</span>
+              <button type="button" id="dzNewNotebook" role="menuitem">새 노트북(.ipynb)</button>
+              <button type="button" id="dzNewSheet" role="menuitem">새 빈 표(엑셀)</button>
+              <button type="button" id="dzNewText" role="menuitem">새 텍스트 파일</button>
+              <button type="button" id="dzNewJs" role="menuitem">새 자바스크립트 코드</button>
+            </span>
+            <span class="dz-new-group" role="group" aria-labelledby="dzNewClassLabel">
+              <span class="dz-new-group-label" id="dzNewClassLabel">수업 자료</span>
+              <button type="button" id="dzNewBoard" role="menuitem">새 화이트보드</button>
+              <button type="button" id="dzNewMnote" role="menuitem">새 블록 문서(.mnote)</button>
+              <button type="button" id="dzNewMusic" role="menuitem">새 악보(.msheet)</button>
+              <button type="button" id="dzNewMap" role="menuitem">새 지도(.map)</button>
+              <button type="button" id="dzNewTimeline" role="menuitem">새 연대표(.timeline)</button>
+              <button type="button" id="dzNewExam" role="menuitem">새 시험지 만들기(.exam)</button>
+            </span>
+            <span class="dz-new-group dz-new-open-group" role="group" aria-labelledby="dzNewOpenLabel">
+              <span class="dz-new-group-label" id="dzNewOpenLabel">파일 열기</span>
+              <button type="button" id="dzOpenLesson" role="menuitem">리플레이 열기(.lesson)</button>
+            </span>
           </span>
         </span>
         <button type="button" id="dzExamples" class="dz-secondary-link">✨ Python 예제로 시작</button>
