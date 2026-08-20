@@ -1600,6 +1600,11 @@
     "표에서 사건 가져오기": "Import events from a table",
     "사건 목록을 CSV로 저장": "Save the event list as CSV",
     "▶ 발표": "▶ Present",
+    "이미지 폴더": "Image folder",
+    "CSV의 이미지 파일명과 연결할 폴더 선택": "Choose a folder to match CSV image filenames",
+    "이미지 연결 중…": "Linking images…",
+    "연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 CSV를 불러오세요.":
+      "There are no image filenames to link. Import a CSV with an image filename column first.",
     "발표 진행": "Presentation progress",
     "← 이전": "← Previous",
     "다음 →": "Next →",

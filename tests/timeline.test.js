@@ -29,7 +29,7 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   model.events.push(timeline.timelineNormalizeEvent({
     id:"event-1", title:"광복", start:"1945-08-15", end:"1948-08-15", category:"현대",
     placeName:"대한민국역사박물관", placeAddress:"서울특별시 종로구 세종대로 198",
-    description:"해방 이후 정부 수립까지", color:"rose",
+    description:"해방 이후 정부 수립까지", color:"rose", imageFileName:"images/광복.jpg",
     image:{ name:"사진.jpg", dataUrl:"data:image/jpeg;base64,AA==", width:10, height:8 }
   }, 0));
   const again = timeline.timelineDocParse(timeline.timelineDocSerialize(model));
@@ -38,6 +38,7 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   assert.equal(again.events[0].title, "광복");
   assert.equal(again.events[0].placeName, "대한민국역사박물관");
   assert.equal(again.events[0].placeAddress, "서울특별시 종로구 세종대로 198");
+  assert.equal(again.events[0].imageFileName, "images/광복.jpg");
   assert.equal(again.events[0].image.dataUrl, "data:image/jpeg;base64,AA==");
   assert.equal(timeline.timelineDocContentKey(again), timeline.timelineDocContentKey(model));
 
@@ -88,7 +89,8 @@ test("대량 사건 개요는 한 화면 폭 안에 모든 점을 배치하고 �
 test("CSV는 쉼표·줄바꿈 설명을 보존하고 잘못된 날짜 줄만 제외한다", () => {
   const events = [timeline.timelineNormalizeEvent({
     start:"1919-03-01", title:"3·1 운동", category:"독립운동", placeName:"탑골공원",
-    placeAddress:"서울특별시 종로구 종로 99", description:"서울, 평양\n전국으로 확산", color:"green"
+    placeAddress:"서울특별시 종로구 종로 99", imageFileName:"사진/3·1운동.jpg",
+    description:"서울, 평양\n전국으로 확산", color:"green"
   }, 0)];
   const csv = timeline.timelineEventsToCsv(events);
   const parsed = timeline.timelineEventsFromCsv(csv);
@@ -97,11 +99,27 @@ test("CSV는 쉼표·줄바꿈 설명을 보존하고 잘못된 날짜 줄만 �
   assert.equal(parsed.events[0].color, "green");
   assert.equal(parsed.events[0].placeName, "탑골공원");
   assert.equal(parsed.events[0].placeAddress, "서울특별시 종로구 종로 99");
-  assert.match(csv, /^시작,종료,제목,분류,유적지,유적지 주소,설명,색상/m);
+  assert.equal(parsed.events[0].imageFileName, "사진/3·1운동.jpg");
+  assert.match(csv, /^시작,종료,제목,분류,유적지,유적지 주소,이미지 파일명,설명,색상/m);
 
-  const partial = timeline.timelineEventsFromCsv("시작,제목\r\n1945,광복\r\n날짜없음,제외\r\n");
+  const partial = timeline.timelineEventsFromCsv("시작,제목,이미지 파일\r\n1945,광복,광복.jpg\r\n날짜없음,제외,제외.jpg\r\n");
   assert.equal(partial.events.length, 1);
   assert.equal(partial.skipped, 1);
+  assert.equal(partial.events[0].imageFileName, "광복.jpg");
+});
+
+test("CSV 이미지 파일명은 선택한 폴더의 상대경로와 파일명으로 안전하게 연결된다", () => {
+  const rootImage = { name:"광복.JPG", type:"image/jpeg", webkitRelativePath:"사진모음/광복.JPG" };
+  const nestedImage = { name:"유물.png", type:"image/png", webkitRelativePath:"사진모음/삼국/유물.png" };
+  const duplicateA = { name:"중복.jpg", type:"image/jpeg", webkitRelativePath:"사진모음/A/중복.jpg" };
+  const duplicateB = { name:"중복.jpg", type:"image/jpeg", webkitRelativePath:"사진모음/B/중복.jpg" };
+  const ignored = { name:"설명.txt", type:"text/plain", webkitRelativePath:"사진모음/설명.txt" };
+  const lookup = timeline.timelineImageFileLookup([rootImage, nestedImage, duplicateA, duplicateB, ignored]);
+  assert.equal(timeline.timelineFindImageFile("광복.jpg", lookup), rootImage);
+  assert.equal(timeline.timelineFindImageFile("삼국\\유물.PNG", lookup), nestedImage);
+  assert.equal(timeline.timelineFindImageFile("A/중복.jpg", lookup), duplicateA);
+  assert.equal(timeline.timelineFindImageFile("중복.jpg", lookup), null);
+  assert.equal(timeline.timelineFindImageFile("설명.txt", lookup), null);
 });
 
 test("연대표 문서 형식은 파일 열기·새 문서·ZIP·명령 팔레트에 연결된다", () => {
@@ -178,6 +196,16 @@ test("발표 화면은 사진 유무에 따라 집중형과 분할형 레이아�
   assert.match(styles, /\.timeline-present-card\.is-text-only \.timeline-present-copy\{[^}]*text-align:center/);
   assert.match(styles, /\.timeline-present-card\.is-text-only \.timeline-present-copy p\{[^}]*text-align:left/);
   assert.match(styles, /@media\(max-width:900px\)\{[\s\S]*?\.timeline-present-card,[^}]*grid-template-columns:1fr/);
+});
+
+test("연대표 도구막대는 CSV 이미지 파일명과 폴더 사진을 연결한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/timeline.js"), "utf8");
+  assert.match(source, /timelineButton\("이미지 폴더", "CSV의 이미지 파일명과 연결할 폴더 선택"\)/);
+  assert.match(source, /imageFolderInput\.setAttribute\("webkitdirectory", ""\)/);
+  assert.match(source, /model\.events\.filter\(event => !event\.image && event\.imageFileName\)/);
+  assert.match(source, /const file = timelineFindImageFile\(event\.imageFileName, lookup\)/);
+  assert.match(source, /event\.image = \{ \.\.\.photo \}/);
+  assert.match(source, /totalChars \+ photo\.dataUrl\.length > TIMELINE_PHOTO_TOTAL_MAX_CHARS/);
 });
 
 test("유적지 주소는 카드와 발표 화면에서 기존 지도 검색으로 연결된다", () => {

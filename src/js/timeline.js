@@ -129,6 +129,7 @@ function timelineNormalizeEvent(raw, index){
     placeAddress:String(value.placeAddress == null ? "" : value.placeAddress).trim().slice(0, 200),
     description:String(value.description == null ? "" : value.description).slice(0, 4000),
     color,
+    imageFileName:String(value.imageFileName == null ? "" : value.imageFileName).trim().replace(/\\/g, "/").slice(0, 260),
     image:timelineNormalizePhoto(value.image),
     order:Number.isInteger(value.order) ? value.order : (Number(index) || 0)
   };
@@ -271,12 +272,54 @@ function timelineCsvCell(value){
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 
+function timelineImageMatchName(value){
+  return String(value == null ? "" : value).trim().replace(/\\/g, "/").replace(/^\.\/+/, "")
+    .normalize("NFC").toLocaleLowerCase();
+}
+
+function timelineImageFileSupported(file){
+  const type = String(file && file.type || "");
+  const name = String(file && file.name || "");
+  return /^image\/(?:png|jpeg|webp)$/i.test(type) || /\.(?:png|jpe?g|webp)$/i.test(name);
+}
+
+/* 폴더 선택 파일은 webkitRelativePath 맨 앞에 선택한 폴더 이름이 붙는다. 전체 상대경로,
+   그 첫 폴더를 뗀 경로, 파일명 세 가지를 모두 색인해 CSV의 어느 표기와도 연결한다.
+   같은 파일명이 여러 폴더에 있으면 잘못 붙이지 않도록 그 짧은 키는 모호함(null)으로 둔다. */
+function timelineImageFileLookup(files){
+  const lookup = new Map();
+  const add = (rawKey, file) => {
+    const key = timelineImageMatchName(rawKey);
+    if (!key) return;
+    if (!lookup.has(key)) lookup.set(key, file);
+    else if (lookup.get(key) !== file) lookup.set(key, null);
+  };
+  for (const file of Array.from(files || [])){
+    if (!timelineImageFileSupported(file)) continue;
+    const relative = String(file.webkitRelativePath || "").replace(/\\/g, "/");
+    const parts = relative.split("/").filter(Boolean);
+    if (relative) add(relative, file);
+    if (parts.length > 1) add(parts.slice(1).join("/"), file);
+    add(file.name, file);
+  }
+  return lookup;
+}
+
+function timelineFindImageFile(reference, lookup){
+  const key = timelineImageMatchName(reference);
+  if (!key || !(lookup instanceof Map)) return null;
+  const exact = lookup.get(key);
+  if (exact) return exact;
+  const base = key.split("/").pop();
+  return base && lookup.get(base) || null;
+}
+
 function timelineEventsToCsv(events){
-  const lines = [["시작", "종료", "제목", "분류", "유적지", "유적지 주소", "설명", "색상"]];
+  const lines = [["시작", "종료", "제목", "분류", "유적지", "유적지 주소", "이미지 파일명", "설명", "색상"]];
   for (const row of timelineSortedEvents(events)){
     const event = row.event;
     lines.push([event.start, event.end, event.title, event.category, event.placeName, event.placeAddress,
-      event.description, event.color]);
+      event.imageFileName || event.image && event.image.name || "", event.description, event.color]);
   }
   return lines.map(row => row.map(timelineCsvCell).join(",")).join("\r\n") + "\r\n";
 }
@@ -292,6 +335,7 @@ function timelineEventsFromCsv(text){
   const categoryAt = find(["분류", "갈래", "category", "group"]);
   const placeNameAt = find(["유적지", "관련 유적지", "유적명", "장소", "place", "place name", "location"]);
   const placeAddressAt = find(["유적지 주소", "유적지주소", "주소", "소재지", "도로명주소", "place address", "address"]);
+  const imageAt = find(["이미지 파일명", "이미지파일명", "이미지 파일", "이미지", "사진 파일명", "사진파일명", "사진 파일", "사진", "image filename", "image file", "image", "photo filename", "photo file", "photo"]);
   const descAt = find(["설명", "내용", "메모", "description", "note"]);
   const colorAt = find(["색", "색상", "color"]);
   if (startAt < 0 || titleAt < 0) throw new Error("csv-columns");
@@ -313,6 +357,7 @@ function timelineEventsFromCsv(text){
       category:categoryAt >= 0 ? row[categoryAt] : "",
       placeName:placeNameAt >= 0 ? row[placeNameAt] : "",
       placeAddress:placeAddressAt >= 0 ? row[placeAddressAt] : "",
+      imageFileName:imageAt >= 0 ? row[imageAt] : "",
       description:descAt >= 0 ? row[descAt] : "",
       color:color ? color.id : "blue"
     }, events.length));
@@ -476,12 +521,13 @@ function mountTimelineEditor(doc){
   const overviewBtn = timelineButton("▤ 개요", "모든 사건을 한 화면에서 보기");
   const listBtn = timelineButton("☷ 목록", "사건 목록 열기·닫기");
   const csvInBtn = timelineButton("CSV 들이기", "표에서 사건 가져오기");
+  const imageFolderBtn = timelineButton("이미지 폴더", "CSV의 이미지 파일명과 연결할 폴더 선택");
   const csvOutBtn = timelineButton("CSV 내보내기", "사건 목록을 CSV로 저장");
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
   const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
   const saveBtn = timelineButton("저장", "연대표 저장 (Ctrl+S)", "timeline-btn run-save timeline-save");
   bar.append(titleInput, addBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn, overviewBtn,
-    listBtn, csvInBtn, csvOutBtn, presentBtn, printBtn, saveBtn);
+    listBtn, csvInBtn, imageFolderBtn, csvOutBtn, presentBtn, printBtn, saveBtn);
 
   const workspace = document.createElement("div");
   workspace.className = "timeline-workspace";
@@ -525,8 +571,13 @@ function mountTimelineEditor(doc){
 
   const csvInput = document.createElement("input");
   csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
+  const imageFolderInput = document.createElement("input");
+  imageFolderInput.type = "file"; imageFolderInput.accept = "image/png,image/jpeg,image/webp";
+  imageFolderInput.multiple = true; imageFolderInput.hidden = true;
+  imageFolderInput.setAttribute("webkitdirectory", "");
+  imageFolderInput.setAttribute("directory", "");
 
-  root.append(bar, workspace, csvInput);
+  root.append(bar, workspace, csvInput, imageFolderInput);
 
   let zoom = 1;
   let overview = false;
@@ -966,6 +1017,7 @@ function mountTimelineEditor(doc){
         title:title.value.trim(), start:start.value.trim(), end:end.value.trim(),
         category:category.value.trim(), placeName:placeName.value.trim(), placeAddress:placeAddress.value.trim(),
         description:description.value, color:color.value,
+        imageFileName:draftImage ? draftImage.name : (existing && !existing.image ? existing.imageFileName : ""),
         image:draftImage, order:existing ? existing.order : model.events.length
       }, model.events.length);
       if (existing){
@@ -1097,13 +1149,58 @@ function mountTimelineEditor(doc){
       const base = model.events.length;
       added.forEach((event, index) => { event.order = base + index; model.events.push(event); });
       history.commit(); touch(); renderAll();
-      if (typeof toast === "function") toast("사건 " + added.length + "개를 가져왔어요." + (result.skipped ? " · 날짜/제목이 잘못된 " + result.skipped + "줄 제외" : ""), 3600);
+      const imageRefs = added.filter(event => event.imageFileName).length;
+      if (typeof toast === "function") toast("사건 " + added.length + "개를 가져왔어요." +
+        (result.skipped ? " · 날짜/제목이 잘못된 " + result.skipped + "줄 제외" : "") +
+        (imageRefs ? " · 이미지 파일명 " + imageRefs + "개: [이미지 폴더]를 선택하세요." : ""), imageRefs ? 5200 : 3600);
     } catch(error){
       const message = error && error.message === "csv-columns"
         ? "CSV에 ‘시작’과 ‘제목’ 열이 필요합니다."
         : error && error.message === "event-limit" ? "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요."
         : "CSV에서 사건을 읽지 못했어요.";
       if (typeof toast === "function") toast(timelineT(message), 3200, { type:"error" });
+    }
+  });
+  imageFolderBtn.addEventListener("click", () => {
+    const pending = model.events.filter(event => !event.image && event.imageFileName);
+    if (!pending.length){
+      if (typeof toast === "function") toast(timelineT("연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 CSV를 불러오세요."), 3600);
+      return;
+    }
+    imageFolderInput.click();
+  });
+  imageFolderInput.addEventListener("change", async () => {
+    const files = Array.from(imageFolderInput.files || []); imageFolderInput.value = "";
+    if (!files.length) return;
+    const pending = model.events.filter(event => !event.image && event.imageFileName);
+    if (!pending.length) return;
+    const lookup = timelineImageFileLookup(files);
+    const prepared = new Map();
+    let totalChars = timelinePhotoTotalChars(model.events);
+    let attached = 0, missing = 0, failed = 0, overLimit = 0;
+    const oldLabel = imageFolderBtn.textContent;
+    imageFolderBtn.disabled = true; imageFolderBtn.textContent = timelineT("이미지 연결 중…");
+    try {
+      for (const event of pending){
+        const file = timelineFindImageFile(event.imageFileName, lookup);
+        if (!file){ missing++; continue; }
+        try {
+          if (!prepared.has(file)) prepared.set(file, timelinePreparePhoto(file));
+          const photo = await prepared.get(file);
+          if (totalChars + photo.dataUrl.length > TIMELINE_PHOTO_TOTAL_MAX_CHARS){ overLimit++; continue; }
+          event.image = { ...photo };
+          totalChars += photo.dataUrl.length;
+          attached++;
+        } catch(_){ failed++; }
+      }
+      if (attached){ history.commit(); touch(); renderAll(); }
+      const parts = ["사진 " + attached + "장 연결"];
+      if (missing) parts.push("파일 없음 " + missing + "개");
+      if (failed) parts.push("처리 실패 " + failed + "개");
+      if (overLimit) parts.push("전체 12MB 제한으로 제외 " + overLimit + "개");
+      if (typeof toast === "function") toast(parts.join(" · "), 5200, attached ? undefined : { type:"error" });
+    } finally {
+      imageFolderBtn.disabled = false; imageFolderBtn.textContent = oldLabel;
     }
   });
   csvOutBtn.addEventListener("click", () => {
@@ -1198,6 +1295,7 @@ if (typeof module !== "undefined" && module.exports){
     timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
     timelineSortedEvents, timelineLayoutEntries, timelineOverviewEntries, timelineEventsToCsv, timelineEventsFromCsv,
+    timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle
   };
 }
