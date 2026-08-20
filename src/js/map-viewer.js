@@ -1095,15 +1095,14 @@ function openMapKakaoPlaceModal(rawPlaces, startIndex){
   let closed = false;
   let activeUrl = "";
   const showPlace = (nextIndex, direction) => {
-    const bounded = Math.max(0, Math.min(places.length - 1, nextIndex));
-    if (bounded === placeIndex && activeUrl) return;
-    placeIndex = bounded;
+    // 끝에서 다시 처음으로 이어지는 순환 목록. 뒤로 갈 때의 음수 나머지도 양수로 바로잡는다.
+    const wrapped = ((Math.trunc(Number(nextIndex) || 0) % places.length) + places.length) % places.length;
+    if (wrapped === placeIndex && activeUrl) return;
+    placeIndex = wrapped;
     const place = places[placeIndex];
     activeUrl = place.url;
     title.textContent = place.name || mapT("카카오맵 상세 보기");
     position.textContent = (placeIndex + 1) + " / " + places.length;
-    prevBtn.disabled = placeIndex === 0;
-    nextBtn.disabled = placeIndex === places.length - 1;
     loading.hidden = false;
     frame.title = (place.name || mapT("장소")) + " " + mapT("카카오맵 상세 페이지");
     frame.src = activeUrl;
@@ -1124,10 +1123,10 @@ function openMapKakaoPlaceModal(rawPlaces, startIndex){
     if (e.key === "Escape"){
       e.preventDefault(); e.stopImmediatePropagation();
       close();
-    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowLeft" && placeIndex > 0){
+    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowLeft"){
       e.preventDefault(); e.stopImmediatePropagation();
       showPlace(placeIndex - 1, -1);
-    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowRight" && placeIndex < places.length - 1){
+    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowRight"){
       e.preventDefault(); e.stopImmediatePropagation();
       showPlace(placeIndex + 1, 1);
     }
@@ -3799,13 +3798,31 @@ async function mountMapEditor(doc){
   let drawingMode = null;
   let draftPoints = [];
   let draftLayer = null;
+  let draftGuideLayer = null;
   const syncInteractionKeyListener = () => {
     window.removeEventListener("keydown", onInteractionKey);
     if (adding || drawingMode) window.addEventListener("keydown", onInteractionKey);
   };
   const clearDraft = () => {
     if (draftLayer) map.removeLayer(draftLayer);
+    if (draftGuideLayer) map.removeLayer(draftGuideLayer);
     draftLayer = null; draftPoints = [];
+    draftGuideLayer = null;
+  };
+  const clearDraftGuide = () => {
+    if (draftGuideLayer) map.removeLayer(draftGuideLayer);
+    draftGuideLayer = null;
+  };
+  const updateDraftGuide = (latlng) => {
+    if (!drawingMode || !draftPoints.length || !latlng){ clearDraftGuide(); return; }
+    const hover = [mapClampLat(latlng.lat), mapClampLng(latlng.lng)];
+    const points = [draftPoints[draftPoints.length - 1], hover];
+    const options = {
+      color:drawingMode === "area" ? "#16a34a" : "#2563eb",
+      weight:3, opacity:0.78, dashArray:"4 6", smoothFactor:0, interactive:false
+    };
+    if (draftGuideLayer) draftGuideLayer.setLatLngs(points);
+    else draftGuideLayer = L.polyline(points, options).addTo(map);
   };
   const updateDraft = () => {
     if (draftLayer) map.removeLayer(draftLayer);
@@ -3889,6 +3906,9 @@ async function mountMapEditor(doc){
   addBtn.addEventListener("click", () => setAdding(!adding));
   lineBtn.addEventListener("click", () => setDrawing("line"));
   areaBtn.addEventListener("click", () => setDrawing("area"));
+  // 첫 점을 찍은 뒤에는 마지막 점부터 마우스까지 임시 선을 보여 다음 구간을 미리 읽게 한다.
+  map.on("mousemove", (e) => updateDraftGuide(e.latlng));
+  map.on("mouseout", clearDraftGuide);
 
   let autoAddress = mapAutoAddressOn();
   const syncAutoAddressButton = () => {
@@ -3961,6 +3981,7 @@ async function mountMapEditor(doc){
     // 문제 풀이 화면에서는 지도 클릭이 곧 "지금 문제의 답 찍기"다.
     if (quizPlaceAnswer && quizPlaceAnswer(e.latlng)) return;
     if (drawingMode){
+      clearDraftGuide();
       draftPoints.push([mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng)]);
       updateDraft();
       const count = draftPoints.length;
@@ -4601,14 +4622,21 @@ async function mountMapEditor(doc){
   contextMirror(saveBtn);
 
   map.on("contextmenu", (e) => {
+    const origin = e.originalEvent || {};
+    /* 거리선·면적을 그리는 중의 우클릭은 빠른 메뉴 대신 완료다. 점이 모자라 완성하지 못해도
+       브라우저 메뉴는 띄우지 않고 기존의 '점을 더 찍어 달라'는 안내를 그대로 보여 준다. */
+    if (drawingMode){
+      if (typeof origin.preventDefault === "function") origin.preventDefault();
+      clearDraftGuide();
+      finishDrawing(true);
+      return;
+    }
     /* 마커·도형에서 올라온 우클릭은 각자의 메뉴가 붙을 자리라 여기서 가로채지 않는다. */
     if (e.propagatedFrom) return;
     // 문제 풀이 화면에는 편집 메뉴를 내놓지 않는다(표시 추가·정답 적기가 그 길로 열린다).
     if (doc.mapTaskCtx) return;
-    /* 표시를 찍거나 선을 그리는 중에는 왼쪽 클릭이 하던 일이 이어져야 한다 — 메뉴로 끊지 않는다.
-       (그리는 중 우클릭에 완료·마지막 점 취소를 붙이는 것은 다음 단계 몫이다.) */
-    if (adding || drawingMode) return;
-    const origin = e.originalEvent || {};
+    // 표시를 찍는 중에는 왼쪽 클릭이 하던 일이 이어져야 한다 — 메뉴로 끊지 않는다.
+    if (adding) return;
     contextLatLng = L.latLng(mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng));
     contextHead.textContent = contextLatLng.lat.toFixed(5) + ", " + contextLatLng.lng.toFixed(5);
     contextZoomBtn.disabled = map.getZoom() >= maxViewZoom();

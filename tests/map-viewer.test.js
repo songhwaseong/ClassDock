@@ -239,6 +239,13 @@ test("완료하거나 클릭한 면적 영역은 Esc·Delete로 지우고 입력
   for (const key of ["Escape", "Delete", "Backspace"]) assert.ok(handler[1].includes('e.key !== "' + key + '"'));
   assert.match(handler[1], /removeShape\(selectedShape\)/);
   assert.match(source, /window\.removeEventListener\("keydown", onSelectedShapeKey\)/);
+  // 첫 점 뒤에는 다음 점을 찍기 전까지 마지막 점→마우스의 임시 구간이 따라다닌다.
+  assert.match(source, /let draftGuideLayer = null/);
+  assert.match(source, /const points = \[draftPoints\[draftPoints\.length - 1\], hover\]/);
+  assert.match(source, /interactive:false/);
+  assert.match(source, /map\.on\("mousemove", \(e\) => updateDraftGuide\(e\.latlng\)\)/);
+  assert.match(source, /map\.on\("mouseout", clearDraftGuide\)/);
+  assert.match(source, /if \(draftGuideLayer\) map\.removeLayer\(draftGuideLayer\)/);
 });
 
 test("캐시 용량은 사람이 읽는 단위로 보여 준다", () => {
@@ -511,8 +518,9 @@ test("카카오 상세 창은 Local API의 장소 주소만 iframe으로 연다"
   assert.match(modal[1], /frame\.src = "about:blank"/);
   assert.match(modal[1], /window\.open\(activeUrl, "_blank", "noopener,noreferrer"\)/);
   assert.match(modal[1], /position\.textContent = \(placeIndex \+ 1\) \+ " \/ " \+ places\.length/);
-  assert.match(modal[1], /prevBtn\.disabled = placeIndex === 0/);
-  assert.match(modal[1], /nextBtn\.disabled = placeIndex === places\.length - 1/);
+  assert.match(modal[1], /const wrapped = \(\(Math\.trunc\(Number\(nextIndex\) \|\| 0\) % places\.length\) \+ places\.length\) % places\.length/);
+  assert.doesNotMatch(modal[1], /prevBtn\.disabled|nextBtn\.disabled/);
+  assert.doesNotMatch(modal[1], /placeIndex > 0|placeIndex < places\.length - 1/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(spot\.placeUrl\)/);
   assert.match(source, /openMapKakaoPlaceModal\(\[\{ name:spot\.title \|\| name, placeUrl:spot\.placeUrl \}\], 0\)/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(marker\.placeUrl\)/);
@@ -706,9 +714,12 @@ test("지도 우클릭 메뉴는 누른 자리를 기준으로 열리고 도구�
   const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   const open = /map\.on\("contextmenu", \(e\) => \{([\s\S]*?)\n  \}\);/.exec(source);
   assert.ok(open);
-  // 마커·도형에서 올라온 우클릭과 그리는 중의 우클릭은 여기서 가로채지 않는다.
+  // 그리는 중에는 마커 위인지보다 먼저 완료하고, 평소 마커·도형 우클릭은 가로채지 않는다.
+  assert.match(open[1], /if \(drawingMode\)\{[\s\S]*?clearDraftGuide\(\);[\s\S]*?finishDrawing\(true\);[\s\S]*?return;/);
+  assert.ok(open[1].indexOf("if (drawingMode)") < open[1].indexOf("if (e.propagatedFrom) return;"));
   assert.match(open[1], /if \(e\.propagatedFrom\) return;/);
-  assert.match(open[1], /if \(adding \|\| drawingMode\) return;/);
+  assert.match(open[1], /if \(adding\) return;/);
+  assert.match(open[1], /origin\.preventDefault/);
   // 누른 자리는 지구 밖으로 나가지 않게 눌러 두고, 메뉴 머리말에 그대로 보여 준다.
   assert.match(open[1], /contextLatLng = L\.latLng\(mapClampLat\(e\.latlng\.lat\), mapClampLng\(e\.latlng\.lng\)\)/);
   // 카카오 검색을 껐어도 감추지 않는다 — 도구막대와 같은 잣대로 흐려지기만 한다(nearbyButtons).
