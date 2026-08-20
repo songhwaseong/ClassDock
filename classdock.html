@@ -255,8 +255,14 @@
       <button id="fsExit" type="button">전체화면 종료</button>
     </div>
     <div class="study-page-ctl" id="studyPageCtl" title="페이지 번호 입력 후 Enter로 이동">
+      <button id="btnStudyPageMode" type="button" class="page-mode-btn" title="한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다" aria-label="한 장씩 보기" aria-pressed="false">
+        <span class="page-mode-single" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5"></rect><path d="M9 8h6M9 12h6M9 16h3"></path></svg></span>
+        <span class="page-mode-flow" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="9" rx="1.5"></rect><rect x="6" y="13" width="12" height="9" rx="1.5"></rect></svg></span>
+      </button>
+      <button id="studyPagePrev" type="button" class="page-step-btn" title="이전 페이지 (PageUp)" aria-label="이전 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"></path></svg></button>
       <input id="studyPageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
       <span class="page-sep" id="studyPageTotal">/ 1</span>
+      <button id="studyPageNext" type="button" class="page-step-btn" title="다음 페이지 (PageDown)" aria-label="다음 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg></button>
       <button id="btnStudyFind" type="button" class="study-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="참조 PDF에서 찾기" data-shortcut-aria="true" aria-label="참조 PDF에서 찾기">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
       </button>

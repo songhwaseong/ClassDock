@@ -9,8 +9,13 @@ const SCRATCHPAD_ASSET_STORE = "assets";
 const SCRATCHPAD_MAX_NOTES = 30;
 const SCRATCHPAD_MAX_IMAGES = 50;
 const SCRATCHPAD_MAX_NOTEBOOK_CELLS = 200;
-const SCRATCHPAD_MAX_TABLE_ROWS = 50;
+const SCRATCHPAD_MAX_TABLE_ROWS = 200;
 const SCRATCHPAD_MAX_TABLE_COLS = 20;
+/* 행·열 상한을 다 채운 표(200×20)는 셀이 4,000개다. 셀 하나가 리스너 넷 달린 편집 칸이고 구조가
+   바뀔 때마다(＋행·머리글·블록 이동) 메모 전체를 다시 그리므로(renderEditor), 그만한 표는 ＋행 한
+   번이 눈에 띄게 밀린다. 그래서 행·열과 별개로 칸 총수로도 막는다 — 지도 표시 표(7열)는 200행이
+   그대로 들어가고, 손으로 넓혀 가는 표만 여기에 걸린다. */
+const SCRATCHPAD_MAX_TABLE_CELLS = 3000;
 const SCRATCHPAD_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const SCRATCHPAD_MAX_TOTAL_IMAGE_BYTES = 200 * 1024 * 1024;
 const SCRATCHPAD_LAYOUTS = new Set(["top", "left", "right", "bottom"]);
@@ -109,12 +114,36 @@ function scratchpadTextBlock(text=""){
   return { id:scratchpadBlockId("text"), type:"text", text:String(text || ""), locked:false };
 }
 
+// 열이 이만큼일 때 표가 가질 수 있는 행 수(행 상한과 칸 총수 상한 중 먼저 걸리는 쪽).
+function scratchpadMaxTableRows(cols){
+  const c = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_COLS, cols | 0));
+  return Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_ROWS, Math.floor(SCRATCHPAD_MAX_TABLE_CELLS / c)));
+}
+
 // 표 블록: rows = 문자열 셀의 2차원 배열(직사각형), header=첫 행을 머리글로.
 function scratchpadTableBlock(rows=2, cols=2){
-  const r = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_ROWS, rows | 0));
   const c = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_COLS, cols | 0));
+  const r = Math.max(1, Math.min(scratchpadMaxTableRows(c), rows | 0));
   const grid = Array.from({ length:r }, () => Array.from({ length:c }, () => ""));
   return { id:scratchpadBlockId("table"), type:"table", rows:grid, header:true, locked:false };
+}
+
+/* 바깥(지도 표시 목록 등)에서 받은 2차원 배열을 표 블록으로 굳힌다. 상한을 넘는 줄은 잘라 내되
+   몇 줄을 넣고 몇 줄을 버렸는지 함께 돌려준다 — 부르는 쪽이 "여기까지만 담겼어요"를 알릴 수 있도록. */
+function scratchpadTableBlockFromRows(rows){
+  const list = (Array.isArray(rows) ? rows : []).filter(Array.isArray);
+  let cols = 0;
+  for (const row of list) cols = Math.max(cols, row.length);
+  cols = Math.max(1, Math.min(SCRATCHPAD_MAX_TABLE_COLS, cols || 1));
+  const kept = list.slice(0, scratchpadMaxTableRows(cols)).map(row => {
+    const cells = row.slice(0, cols).map(cell => String(cell == null ? "" : cell).slice(0, 5000));
+    while (cells.length < cols) cells.push("");
+    return cells;
+  });
+  if (!kept.length) return null;
+  const block = scratchpadTableBlock(kept.length, cols);
+  block.rows = kept;
+  return { block, kept:kept.length, dropped:list.length - kept.length };
 }
 
 function scratchpadRemoveBlock(blocks, blockId){
@@ -638,6 +667,37 @@ function wireScratchpad(){
     }
     return block;
   };
+  /* 바깥에서 만든 표(지도 표시 목록 등)를 그대로 표 블록으로 넣는다. 저장이 실패하면(용량 등)
+     넣은 블록을 도로 빼고 null 을 돌려준다 — 그림 블록(addBoardBlock)과 같은 규약이다. */
+  const insertRowsTableBlock = (rows) => {
+    const made = scratchpadTableBlockFromRows(rows);
+    if (!made){ showStatus("메모에 넣을 표 내용이 없습니다.", false); return null; }
+    const note = activeNote();
+    const block = made.block;
+    let index = insertionIndex(note);
+    // 빈 메모(빈 글 블록 하나)라면 그 자리를 표로 채운다 — 노트북 셀을 넣을 때와 같은 규칙.
+    let removedEmpty = null;
+    if (note.blocks.length === 1 && note.blocks[0].type === "text" && !note.blocks[0].locked && !String(note.blocks[0].text || "").trim()){
+      removedEmpty = note.blocks.splice(0, 1)[0];
+      index = 0;
+    }
+    index = Math.max(0, Math.min(index, note.blocks.length));
+    const previousActiveBlockId = activeBlockId;
+    const previousUpdatedAt = note.updatedAt;
+    note.blocks.splice(index, 0, block);
+    activeBlockId = block.id;
+    note.updatedAt = Date.now();
+    if (!persist(false)){
+      note.blocks.splice(index, 1);
+      if (removedEmpty) note.blocks.splice(0, 0, removedEmpty);
+      activeBlockId = previousActiveBlockId;
+      note.updatedAt = previousUpdatedAt;
+      renderEditor();
+      return null;
+    }
+    renderEditor();
+    return { blockId:block.id, rows:made.kept, dropped:made.dropped };
+  };
   const addNotebookCells = (snapshots, options={}) => {
     const normalized = (Array.isArray(snapshots) ? snapshots : [])
       .map(scratchpadNormalizeNotebookCell).filter(Boolean);
@@ -1070,7 +1130,14 @@ function wireScratchpad(){
     };
     const addRow = at => {
       if (block.locked) return lockedMsg();
-      if (block.rows.length >= SCRATCHPAD_MAX_TABLE_ROWS){ showStatus("표는 최대 " + SCRATCHPAD_MAX_TABLE_ROWS + "행까지 넣을 수 있습니다.", false); return; }
+      /* 열이 많은 표는 행 상한(200)보다 칸 총수에 먼저 걸린다 — 그때는 까닭이 열에 있다고 알린다. */
+      const rowLimit = scratchpadMaxTableRows(cols());
+      if (block.rows.length >= rowLimit){
+        showStatus(rowLimit < SCRATCHPAD_MAX_TABLE_ROWS
+          ? "열이 " + cols() + "개인 표는 " + rowLimit + "행까지 넣을 수 있습니다."
+          : "표는 최대 " + SCRATCHPAD_MAX_TABLE_ROWS + "행까지 넣을 수 있습니다.", false);
+        return;
+      }
       const idx = Math.max(0, Math.min(block.rows.length, at == null ? block.rows.length : at));
       block.rows.splice(idx, 0, Array.from({ length:cols() }, () => ""));
       commit();
@@ -1078,6 +1145,10 @@ function wireScratchpad(){
     const addCol = at => {
       if (block.locked) return lockedMsg();
       if (cols() >= SCRATCHPAD_MAX_TABLE_COLS){ showStatus("표는 최대 " + SCRATCHPAD_MAX_TABLE_COLS + "열까지 넣을 수 있습니다.", false); return; }
+      if ((cols() + 1) * block.rows.length > SCRATCHPAD_MAX_TABLE_CELLS){
+        showStatus("행이 " + block.rows.length + "개라 열을 더 넣을 수 없습니다 — 표 한 개는 칸 " + SCRATCHPAD_MAX_TABLE_CELLS + "개까지입니다.", false);
+        return;
+      }
       const idx = Math.max(0, Math.min(cols(), at == null ? cols() : at));
       block.rows.forEach(row => row.splice(idx, 0, ""));
       commit();
@@ -2152,6 +2223,13 @@ function wireScratchpad(){
     setOpen(true, false);
     return addBoardBlock(pngBlob, mapData, { ...options, kind:"map" });
   };
+  /* 표(2차원 배열) → 메모 표 블록. 지도 표시 목록처럼 바깥에서 만든 표를 파일을 거치지 않고
+     넣는 길이다 — 메모 표에 달린 복사·CSV 저장·표 편집기·변환이 그대로 이어진다.
+     돌려주는 값 {blockId, rows, dropped} 의 dropped 는 상한에 걸려 빠진 줄 수다. */
+  window.addTableToScratchpad = (rows) => {
+    setOpen(true, false);
+    return insertRowsTableBlock(rows);
+  };
   // 전체 백업 버튼은 0.35초 자동저장 대기 중인 마지막 입력까지 즉시 확정한다.
   window.flushScratchpadBackup = () => persist(false);
   // 텍스트를 글 블록으로 추가(이미지 OCR 결과 등 외부 모듈용) — 메모장을 열고 새 블록에 넣는다.
@@ -2195,6 +2273,12 @@ if (typeof module !== "undefined" && module.exports){
     scratchpadRemoveBlock,
     scratchpadNormalizeBlock,
     scratchpadNormalizeNotebookCell,
+    scratchpadMaxTableRows,
+    scratchpadTableBlock,
+    scratchpadTableBlockFromRows,
+    SCRATCHPAD_MAX_TABLE_ROWS,
+    SCRATCHPAD_MAX_TABLE_COLS,
+    SCRATCHPAD_MAX_TABLE_CELLS,
     scratchpadBoardKindLabel,
     scratchpadPlainText,
     scratchpadPreviewLines,

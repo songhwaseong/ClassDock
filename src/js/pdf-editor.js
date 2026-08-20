@@ -65,14 +65,22 @@ function updateZoomLabel(){
   if (fsLbl) fsLbl.textContent = Math.round(((fsDoc && fsDoc.zoom) || 1) * 100) + "%";
 }
 
+/* 분할 작업의 참고 칸에 떠 있는 PDF (분할이 아니거나 참고가 PDF 가 아니면 null).
+   참고 칸 위에 떠 있는 컨트롤(페이지·찾기·보기 방식)이 모두 이 문서를 조작한다. */
+function studyReferencePdf(){
+  const content = byId("content");
+  if (!content || !content.classList.contains("study-mode")) return null;
+  return docs.find(d => d.id === studyPdfId && d.kind === "pdf") || null;
+}
+/* 문서 위 알약(.view-page-ctl)이 조작할 PDF: 늘 작업 중인 문서다. 분할 작업에서도 이 알약은
+   작업 칸 위에 뜨고, 참고 칸은 제 알약(studyReferencePdf)을 따로 갖는다 — 두 칸이 서로 다른
+   PDF 라도 각자의 줌·페이지·보기 방식을 갖게 하려면 알약마다 보는 문서가 달라야 한다. */
+function viewPdfTarget(){
+  return state && state.kind === "pdf" ? state : null;
+}
 // 전체화면 컨트롤이 조작할 PDF: 학습 화면은 고정된 참조 PDF, 일반 화면은 활성 PDF.
 function fullscreenPdfTarget(){
-  const content = byId("content");
-  if (content && content.classList.contains("study-mode")){
-    const ref = docs.find(d => d.id === studyPdfId && d.kind === "pdf");
-    if (ref) return ref;
-  }
-  return state && state.kind === "pdf" ? state : null;
+  return studyReferencePdf() || viewPdfTarget();
 }
 
 /* ===== 현재 보고 있는 페이지 ===== */

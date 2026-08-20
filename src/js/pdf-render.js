@@ -572,6 +572,19 @@ function togglePdfPageMode(doc){
       : "이어보기 — 페이지를 스크롤해서 봅니다.", 2600);
   }
 }
+/* 알약의 보기 방식 단추가 부르는 문. 방식을 바꾸면 배율이 달라져 스크롤이 밀리므로, 보던 쪽을
+   기억했다가 맞춘 배율에서 다시 그 쪽으로 돌려놓는다. 분할 참고 칸은 칸 크기에 맞추는 제 규칙이
+   따로 있어(fitStudyPdf — 다른 문서에는 아무 일도 하지 않는다) 그것도 한 번 태운다. */
+function switchPdfPageMode(doc){
+  if (!doc || doc.kind !== "pdf") return;
+  const at = typeof currentPageIndex === "function" ? currentPageIndex(doc) : 0;
+  togglePdfPageMode(doc);
+  if (typeof fitStudyPdf === "function") fitStudyPdf(doc);
+  if (typeof goToPdfPage === "function") goToPdfPage(doc, at + 1);
+  if (typeof showStudyControls === "function") showStudyControls();
+  if (typeof showPdfControls === "function") showPdfControls();
+}
+
 /* 새로 연 PDF 는 지난번에 고른 보기 방식으로 시작한다(페이지를 다 만든 뒤에 부른다). */
 function applyStoredPdfPageMode(doc){
   if (!doc || doc.kind !== "pdf" || !doc.pages || !doc.pages.length) return;
@@ -588,26 +601,44 @@ function pdfFitPageIfPending(doc){
   setPdfZoom(fit, doc);
 }
 
+/* 넘기기·보기 방식 단추는 세 벌이 있다 — 문서 위 알약(작업 칸), 전체화면, 분할 참고 칸.
+   저마다 제 칸의 문서를 비춰야 한다: 분할 작업에서 두 칸이 서로 다른 PDF 일 수 있고, 한쪽만
+   한 장씩 보는 것도 당연하다. 한 벌이 남의 칸 문서를 비추면 단추가 거짓말을 하게 된다. */
+function pdfStudyReference(){
+  return typeof studyReferencePdf === "function" ? studyReferencePdf() : null;
+}
+function pdfViewTarget(){
+  return typeof viewPdfTarget === "function" ? viewPdfTarget() : null;
+}
 function updatePdfPageModeButton(doc){
-  const button = typeof byId === "function" ? byId("btnPdfPageMode") : null;
-  if (!button) return;
-  const target = doc || (typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null);
-  const single = pdfIsSinglePage(target);
+  const ref = pdfStudyReference();
+  /* doc 은 아직 화면에 오르지 않은 문서(여러 파일을 한꺼번에 열 때)를 위한 보조 값이다.
+     분할 중에는 어느 칸의 문서인지 알 수 없으므로 쓰지 않는다 — 칸을 잘못 비추느니 비운다. */
+  const fallback = pdfViewTarget() || (ref ? null : (doc || null));
   const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
-  // 아이콘 두 벌은 HTML 에 함께 두고 CSS(.is-on)가 골라 보여 준다 — 여기서는 상태만 적는다.
-  button.classList.toggle("is-on", single);
-  button.setAttribute("aria-pressed", String(single));
-  const title = _t(single ? "이어보기로 — 페이지를 스크롤해서 봅니다" : "한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다");
-  button.title = title;
-  button.setAttribute("aria-label", title);
+  for (const [id, target] of [["btnPdfPageMode", fallback], ["btnStudyPageMode", ref || fallback]]){
+    const button = typeof byId === "function" ? byId(id) : null;
+    if (!button) continue;
+    const single = pdfIsSinglePage(target);
+    // 아이콘 두 벌은 HTML 에 함께 두고 CSS(.is-on)가 골라 보여 준다 — 여기서는 상태만 적는다.
+    button.classList.toggle("is-on", single);
+    button.setAttribute("aria-pressed", String(single));
+    const title = _t(single ? "이어보기로 — 페이지를 스크롤해서 봅니다" : "한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다");
+    button.title = title;
+    button.setAttribute("aria-label", title);
+  }
 }
 // ◀ ▶ 는 한 장씩 볼 때만 내놓고, 양 끝에서는 그쪽만 잠근다.
 function updatePdfPageStepButtons(){
-  const target = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null;
-  const single = pdfIsSinglePage(target);
-  const index = single ? pdfSingleIndex(target) : 0;
-  const last = single ? target.pages.length - 1 : 0;
-  for (const [prevId, nextId] of [["pagePrev", "pageNext"], ["fsPagePrev", "fsPageNext"]]){
+  const fsTarget = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : null;
+  const ref = pdfStudyReference();
+  const view = pdfViewTarget();
+  const pairs = [["pagePrev", "pageNext", view], ["fsPagePrev", "fsPageNext", fsTarget],
+                 ["studyPagePrev", "studyPageNext", ref || view]];
+  for (const [prevId, nextId, target] of pairs){
+    const single = pdfIsSinglePage(target);
+    const index = single ? pdfSingleIndex(target) : 0;
+    const last = single ? target.pages.length - 1 : 0;
     const prev = typeof byId === "function" ? byId(prevId) : null;
     const next = typeof byId === "function" ? byId(nextId) : null;
     if (prev){ prev.hidden = !single; prev.disabled = index <= 0; }

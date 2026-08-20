@@ -36,7 +36,6 @@ const sharedRuntimeGlobals = {
   ,t: "readonly"
   ,setUiIcon: "readonly"
   ,uiIcon: "readonly"
-  ,assignmentGradingErrorText: "readonly"
   ,OfficeDecrypt: "readonly"
   ,Tesseract: "readonly"
   ,loadPyodide: "readonly"

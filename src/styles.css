@@ -1539,6 +1539,8 @@
     border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);border-radius:6px;padding:4px 3px;outline:none}
   .study-page-ctl input:focus{border-color:var(--accent);background:rgba(255,255,255,.18)}
   .study-page-ctl .page-sep{color:rgba(255,255,255,.85)}
+  /* 분할 칸의 보기 방식·넘기기 단추는 알약 안 다른 단추와 같은 크기로(헤더 알약보다 글자가 작다) */
+  .study-page-ctl .page-mode-btn,.study-page-ctl .page-step-btn{font-size:12px}
   .study-find-btn,.study-pen-btn,.study-swap-btn,.page-find-btn{font:inherit;font-size:13px;line-height:1;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);
     color:#fff;border-radius:6px;padding:4px 7px;margin-left:3px;cursor:pointer}
   .study-find-btn svg,.study-pen-btn svg,.page-find-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;
@@ -1548,7 +1550,8 @@
   .study-readonly-badge{display:none;align-items:center;padding:4px 7px;margin-left:3px;border:1px solid rgba(255,255,255,.22);
     border-radius:6px;background:rgba(15,23,42,.48);color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap}
   #content.study-mode.study-reference-locked .study-readonly-badge{display:inline-flex}
-  .study-page-ctl.non-pdf-ref #studyPageNum,.study-page-ctl.non-pdf-ref #studyPageTotal,.study-page-ctl.non-pdf-ref #btnStudyFind{display:none}
+  .study-page-ctl.non-pdf-ref #studyPageNum,.study-page-ctl.non-pdf-ref #studyPageTotal,.study-page-ctl.non-pdf-ref #btnStudyFind,
+  .study-page-ctl.non-pdf-ref #btnStudyPageMode,.study-page-ctl.non-pdf-ref #studyPagePrev,.study-page-ctl.non-pdf-ref #studyPageNext{display:none}
   /* 페이지·찾기·필기를 한 알약으로 묶어 참고(PDF) 칸 오른쪽 위 코너에 배치 */
   #content.study-mode .study-page-ctl{display:inline-flex;right:calc(100% - var(--study-split,50%) + 10px)}
   #content.study-mode.study-swapped .study-page-ctl{right:10px}
@@ -1624,7 +1627,9 @@
   #content:fullscreen .study-divider-close,body.viewer-fullscreen #content .study-divider-close{display:none!important}
   /* 분할화면 바 자동 숨김: 입력이 없으면 흐려졌다가 마우스·키 입력에 다시 나타남(전체화면 fs-controls 와 같은 방식) */
   .study-page-ctl{transition:opacity .18s ease}
-  #content.study-mode.study-idle .study-page-ctl{opacity:0;pointer-events:none}
+  /* 두 칸의 알약은 함께 흐려졌다 함께 돌아온다 — 한쪽만 남으면 어느 칸 것인지 헷갈린다. */
+  #content.study-mode.study-idle .study-page-ctl,
+  #content.study-mode.study-idle .view-page-ctl{opacity:0;pointer-events:none}
   @media (prefers-reduced-motion:reduce){
     .study-page-ctl,#content.study-mode .study-ref-lock,#content.study-mode .study-role-swap,#content.study-mode .study-direction-toggle{transition:none}
   }
@@ -1635,8 +1640,14 @@
   #content.pdf-active .view-page-ctl{display:inline-flex}
   #content.pdf-active.pdf-ctl-idle .view-page-ctl{opacity:0;transform:translateY(-8px);pointer-events:none}  /* 유휴 시 숨김(마우스 움직이면 재노출) */
   #content.study-mode .view-page-ctl{display:none}                      /* 학습 화면은 전용 컨트롤 사용 */
-  #content:fullscreen.pdf-active .view-page-ctl,
-  body.viewer-fullscreen #content.pdf-active .view-page-ctl{display:none}  /* 전체화면은 fs 컨트롤 사용(네이티브·폴백 모두) */
+  /* 다만 작업 칸이 PDF 면 그 칸 위에 이 알약을 띄운다 — 분할 중에도 줌·페이지·보기 방식·찾기를
+     쓸 수 있어야 한다. 참고 칸 알약(.study-page-ctl)과 늘 반대편 모서리에 놓여 겹치지 않는다. */
+  #content.study-mode.pdf-active .view-page-ctl{display:inline-flex;right:10px}
+  #content.study-mode.study-swapped.pdf-active .view-page-ctl{right:calc(100% - var(--study-split,50%) + 10px)}
+  #content.study-mode.study-stacked.pdf-active .view-page-ctl{right:10px;top:calc(var(--study-split,50%) + 10px)}
+  #content.study-mode.study-stacked.study-swapped.pdf-active .view-page-ctl{right:10px;top:10px}
+  #content:fullscreen .view-page-ctl,
+  body.viewer-fullscreen #content .view-page-ctl{display:none!important}  /* 전체화면은 fs 컨트롤 사용(네이티브·폴백 모두) */
   /* 뷰어 컨트롤 클러스터: 줌·전체화면을 페이지 표시줄(pill) 안으로 모음 — 문서에 작용하는 기능을 문서 위에 배치 */
   .view-page-ctl .zoom-ctl{display:inline-flex;align-items:center;gap:2px}
   .view-page-ctl .zoom-ctl button,.view-page-ctl .page-fs-btn{font:inherit;font-size:12.5px;line-height:1;

@@ -11,7 +11,7 @@ const {
   explainPythonError, contentMatchSnippet, suggestRegexPatterns, countRegexMatches,
   officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand, normalizePythonVariables,
-  normalizeAssignmentTests, normalizeGradingOutput, normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport,
+  normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText, normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,

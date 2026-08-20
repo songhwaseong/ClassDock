@@ -1749,6 +1749,9 @@
     "시군구별 표시 수": "Pins by district",
     "CSV 내보내기": "Export CSV",
     "지도 표시를 Excel에서 열 수 있는 CSV로 저장": "Save map pins as a CSV that opens in Excel",
+    "🧾 표로 메모": "🧾 Table to notes",
+    "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다":
+      "Put the same table into Notes instead of a file — from there you can save as CSV, open the table editor, or copy",
     "영역 이름": "Area name",
     "경로 이름": "Route name",
     "도형 색상": "Shape color",
@@ -1898,6 +1901,10 @@
       " · skipped {skipped} invalid coordinates · skipped {truncated} above the limit",
     "내보낼 표시가 없습니다.": "There are no pins to export.",
     "표시 {count}개를 CSV로 내보냈습니다": "Exported {count} pins to CSV",
+    "표시 {count}개를 메모 표로 보냈어요 — 메모에서 CSV로 저장하거나 표 편집기로 열 수 있어요.":
+      "Sent {count} pins to a table in Notes — you can save it as CSV or open it in the table editor there.",
+    "표시 {count}개를 메모 표로 보냈어요 — 메모 표에 담기는 만큼만 넣어 {dropped}개는 빠졌습니다(CSV 내보내기는 모두 담깁니다).":
+      "Sent {count} pins to a table in Notes — {dropped} didn't fit in one note table (Export CSV includes them all).",
     "지도를 칠판으로 옮기는 중…": "Moving the map to the whiteboard…",
     "지도를 칠판으로 옮겼어요 — 그 위에 바로 판서할 수 있어요.": "Moved the map to a whiteboard — you can draw on it right away.",
     "칠판에 지도를 넣지 못했어요.": "Couldn't place the map on the whiteboard.",

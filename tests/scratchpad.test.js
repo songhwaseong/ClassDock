@@ -13,7 +13,13 @@ const {
   scratchpadClipAround,
   scratchpadSearchNotes,
   scratchpadNoteCounts,
-  scratchpadHasLockedBlocks
+  scratchpadHasLockedBlocks,
+  scratchpadMaxTableRows,
+  scratchpadTableBlock,
+  scratchpadTableBlockFromRows,
+  SCRATCHPAD_MAX_TABLE_ROWS,
+  SCRATCHPAD_MAX_TABLE_COLS,
+  SCRATCHPAD_MAX_TABLE_CELLS
 } = require("../src/js/scratchpad.js");
 
 test("기존 단일 메모는 내용 손실 없이 첫 탭으로 이전한다", () => {
@@ -174,6 +180,44 @@ test("표 블록은 직사각형으로 정규화되고 복사 본문에 포함�
   assert.equal(table.header, true);
   assert.equal(table.locked, true);
   assert.equal(scratchpadPlainText({ blocks:[table] }), "이름\t점수\n민수\t");
+});
+
+/* 표 상한은 행(200)과 칸 총수(3,000) 중 먼저 걸리는 쪽이다 — 지도 표시 표(7열)는 200행이 다
+   들어가고, 손으로 넓힌 넓은 표만 칸 총수에 걸려 렌더가 무거워지는 것을 막는다. */
+test("표 상한은 행 수와 칸 총수 중 먼저 걸리는 쪽이다", () => {
+  assert.equal(scratchpadMaxTableRows(7), SCRATCHPAD_MAX_TABLE_ROWS);
+  assert.equal(scratchpadMaxTableRows(SCRATCHPAD_MAX_TABLE_COLS),
+    Math.floor(SCRATCHPAD_MAX_TABLE_CELLS / SCRATCHPAD_MAX_TABLE_COLS));
+  assert.ok(scratchpadMaxTableRows(SCRATCHPAD_MAX_TABLE_COLS) * SCRATCHPAD_MAX_TABLE_COLS <= SCRATCHPAD_MAX_TABLE_CELLS);
+  assert.equal(scratchpadMaxTableRows(0), SCRATCHPAD_MAX_TABLE_ROWS, "열 수를 못 읽어도 한 열로 보고 상한을 준다");
+  // 넓은 표를 그 상한보다 크게 만들려 해도 칸 총수 안으로 눌린다.
+  const wide = scratchpadTableBlock(SCRATCHPAD_MAX_TABLE_ROWS, SCRATCHPAD_MAX_TABLE_COLS);
+  assert.equal(wide.rows.length, scratchpadMaxTableRows(SCRATCHPAD_MAX_TABLE_COLS));
+  assert.equal(wide.rows[0].length, SCRATCHPAD_MAX_TABLE_COLS);
+});
+
+test("바깥에서 받은 표는 직사각형으로 굳고 상한을 넘는 줄은 수와 함께 빠진다", () => {
+  const made = scratchpadTableBlockFromRows([["이름", "위도", "경도"], ["시청", 37.5665, 126.978], ["학교"]]);
+  assert.deepEqual(made.block.rows, [
+    ["이름", "위도", "경도"],
+    ["시청", "37.5665", "126.978"],
+    ["학교", "", ""]
+  ]);
+  assert.equal(made.block.type, "table");
+  assert.equal(made.block.header, true);
+  assert.equal(made.kept, 3);
+  assert.equal(made.dropped, 0);
+
+  // 머리글 한 줄 + 표시 300개(7열) → 200행까지만 담기고 나머지 101줄이 빠진다.
+  const many = [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]];
+  for (let i = 0; i < 300; i++) many.push(["표시" + i, "37", "127", "", "red", "", ""]);
+  const cut = scratchpadTableBlockFromRows(many);
+  assert.equal(cut.kept, SCRATCHPAD_MAX_TABLE_ROWS);
+  assert.equal(cut.dropped, many.length - SCRATCHPAD_MAX_TABLE_ROWS);
+  assert.equal(cut.block.rows[SCRATCHPAD_MAX_TABLE_ROWS - 1][0], "표시" + (SCRATCHPAD_MAX_TABLE_ROWS - 2));
+
+  assert.equal(scratchpadTableBlockFromRows([]), null);
+  assert.equal(scratchpadTableBlockFromRows(null), null);
 });
 
 test("마지막 표 블록도 삭제하면 빈 글 블록으로 돌아간다", () => {

@@ -261,8 +261,11 @@ function studyControlsActive(){
 // 페이지 번호 입력 중·펜 필기 중·찾기창 열림 중에는 숨기지 않는다
 function studyInteractionBusy(){
   const ae = document.activeElement;
-  const ctl = byId("studyPageCtl");
-  if (ctl && ae && ctl.contains(ae)) return true;
+  // 참고 칸 알약과 작업 칸 알약 — 어느 쪽 페이지 번호를 치는 중이든 숨기지 않는다.
+  for (const id of ["studyPageCtl", "pageCtl"]){
+    const ctl = byId(id);
+    if (ctl && ae && ctl.contains(ae)) return true;
+  }
   const pen = byId("btnStudyPen");
   if (pen && pen.classList.contains("active")) return true;
   if (document.querySelector(".pdf-find:not([hidden])")) return true;
@@ -442,7 +445,7 @@ function setActiveDoc(id){
     if (activeMru.length > 50) activeMru.length = 50;
   }
   const d = docs.find(x => x.id === id);
-  byId("content").classList.toggle("pdf-active", !!d && d.kind === "pdf");   // 일반 화면 플로팅 페이지 컨트롤 표시 조건
+  byId("content").classList.toggle("pdf-active", !!d && d.kind === "pdf");   // 문서 위 플로팅 페이지 컨트롤 표시 조건(분할에서는 작업 칸)
   if (d && d.kind === "pdf") showPdfControls(); else stopPdfControlsAutoHide();   // PDF 단독 뷰일 때만 바 유휴 자동 숨김 시작
 
   // 전환은 직전·현재 두 문서만 토글한다(모든 문서를 매번 훑지 않아 파일 많은 묶음에서 클릭이 빨라짐).
@@ -533,8 +536,10 @@ function setStudyStacked(v){
   const zone = content._splitDrop;
   if (zone && !zone.hidden) showSplitDropZone();
   if (typeof showStudyControls === "function") showStudyControls();
-  const ref = docs.find(d => d.id === studyPdfId);
-  if (ref && ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));
+  for (const id of [studyPdfId, activeId]){                                  // 두 칸 모두 크기가 바뀌었다
+    const d = docs.find(x => x.id === id);
+    if (d && d.kind === "pdf") requestAnimationFrame(() => fitStudyPanePdf(d));
+  }
 }
 if (typeof window !== "undefined") window.addEventListener("mni18nchange", () => {
   updateStudyDirectionControls();
@@ -548,8 +553,10 @@ function setStudySwapped(v){
   try { localStorage.setItem("studySwapped", studySwapped ? "1" : "0"); } catch(e){}
   byId("content").classList.toggle("study-swapped", studySwapped);
   if (typeof showStudyControls === "function") showStudyControls();                    // 스왑 결과가 보이도록 바를 다시 표시(유휴 숨김 해제)
-  const ref = docs.find(d => d.id === studyPdfId);
-  if (ref && ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));        // 칸 너비가 바뀌었으니 PDF 다시 맞춤
+  for (const id of [studyPdfId, activeId]){                                            // 칸 너비가 바뀌었으니 두 칸 다시 맞춤
+    const d = docs.find(x => x.id === id);
+    if (d && d.kind === "pdf") requestAnimationFrame(() => fitStudyPanePdf(d));
+  }
 }
 
 // 분할 작업의 참고 PDF는 보기·검색·선택만 허용한다. PDF 편집 모듈도 이 함수를
@@ -884,16 +891,45 @@ function setupStudyDivider(){
   return divider;
 }
 
+/* 한 장씩 보는 PDF 를 '한 장 전체가 칸에 들어오는' 배율로 되맞춘다. 이어보기라면 아무 일도
+   하지 않는다 — 그때의 배율은 사용자가 고른 값이라 칸이 바뀌었다고 덮으면 안 된다. */
+function refitSinglePagePdf(doc){
+  if (typeof pdfIsSinglePage !== "function" || !pdfIsSinglePage(doc)) return;
+  const fit = typeof pdfFitPageZoom === "function" ? pdfFitPageZoom(doc) : null;
+  if (fit && Math.abs(fit - (doc.zoom || 1)) > 0.005) setPdfZoom(fit, doc);
+}
 // 학습 화면에서 PDF를 왼쪽 칸 너비에 맞춰 자동 확대/축소(분할 드래그·창 크기 변화에 함께 반응)
 function fitStudyPdf(doc){
   if (!doc || doc.kind !== "pdf" || !doc.pages || !doc.pages.length) return;
   if (!byId("content").classList.contains("study-mode") || doc.id !== studyPdfId) return;
+  /* 한 장씩 보기는 폭이 아니라 '한 장 전체'에 맞춰야 넘기는 뜻이 산다 — 폭만 맞추면 세로가
+     칸보다 길어 한 장 안에서 또 스크롤하게 된다. */
+  if (typeof pdfIsSinglePage === "function" && pdfIsSinglePage(doc)){
+    refitSinglePagePdf(doc);
+    updateStudyPageIndicator();
+    return;
+  }
   const p = doc.pages[0];
   const avail = doc.el.clientWidth - 40;          // 좌우 여백·스크롤바 여유
   if (avail <= 0 || !p.cssW) return;
   const z = Math.max(0.3, Math.min(4, avail / p.cssW));   // 페이지 폭(cssW=줌1 기준)을 칸에 맞춤
   if (Math.abs(z - (doc.zoom || 1)) > 0.005) setPdfZoom(z, doc);
   updateStudyPageIndicator();
+}
+
+/* 칸 크기가 바뀔 때(분할 드래그·창 크기) 그 칸의 PDF 배율을 다시 맞춘다. 역할은 관찰을 걸 때가
+   아니라 불릴 때 본다 — ⇄ 로 참고와 작업이 뒤바뀌어도 각 칸의 규칙을 그대로 따르도록. */
+function fitStudyPanePdf(doc){
+  if (!doc || doc.kind !== "pdf" || !doc.pages || !doc.pages.length) return;
+  if (!byId("content").classList.contains("study-mode")) return;
+  if (doc.id === studyPdfId){ fitStudyPdf(doc); return; }   // 참고 칸: 늘 칸에 맞춰 둔다
+  if (doc.id === activeId) refitSinglePagePdf(doc);         // 작업 칸: 한 장씩일 때만 손댄다
+}
+function observeStudyPaneFit(doc){
+  if (!doc || doc.kind !== "pdf" || doc._studyRO || typeof ResizeObserver === "undefined") return;
+  let raf = 0;
+  doc._studyRO = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => fitStudyPanePdf(doc)); });
+  doc._studyRO.observe(doc.el);
 }
 
 function applyStudyLayout(){
@@ -908,7 +944,9 @@ function applyStudyLayout(){
   content.classList.toggle("study-stacked", split && studyStacked);   // 저장된 좌우/상하 방향 적용
   content.classList.toggle("study-ref-nonpdf", !!(split && ref && ref.kind !== "pdf"));  // 참고가 PDF가 아니면 PDF 전용 컨트롤(필기·페이지) 숨김
   if (!split) content.classList.remove("study-divider-near");                            // 분할 종료 시 분할바 버튼 표시 상태 정리
-  if (split) showStudyControls(); else stopStudyControlsAutoHide();    // 유휴 자동 숨김 시작/정리
+  // 유휴 자동 숨김 시작/정리. 분할 중에는 두 칸 알약을 study 쪽 타이머 하나가 함께 맡으므로,
+  // 단독 뷰용 타이머는 멈추고 남아 있던 pdf-ctl-idle(투명 상태)도 걷어 낸다.
+  if (split){ showStudyControls(); stopPdfControlsAutoHide(); } else stopStudyControlsAutoHide();
   if (typeof syncPdfFindLayout === "function") syncPdfFindLayout();
   if (split){
     setupStudyDivider();                       // 분할바 준비(저장된 비율 적용)
@@ -921,13 +959,11 @@ function applyStudyLayout(){
     work.el.classList.add("study-work");
     if (studyReferenceLocked && typeof setPenMode === "function" && typeof penMode !== "undefined" && penMode) setPenMode(false);
     if (ref.kind === "pdf" && ref.pages && ref.pages.length) startLazyRender(ref);
-    // 칸 너비가 바뀔 때마다(분할 드래그·창 크기) PDF를 칸에 맞춰 다시 맞춤
-    if (ref.kind === "pdf" && !ref._studyRO && typeof ResizeObserver !== "undefined"){
-      let raf = 0;
-      ref._studyRO = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => fitStudyPdf(ref)); });
-      ref._studyRO.observe(ref.el);
-    }
-    if (ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));    // 진입 시 1회 맞춤
+    // 칸 크기가 바뀔 때마다(분할 드래그·창 크기) 두 칸의 PDF 배율을 다시 맞춘다.
+    observeStudyPaneFit(ref);
+    observeStudyPaneFit(work);
+    if (ref.kind === "pdf") requestAnimationFrame(() => fitStudyPdf(ref));           // 진입 시 1회 맞춤
+    if (work.kind === "pdf") requestAnimationFrame(() => refitSinglePagePdf(work));  // 한 장씩이면 한 장이 칸에 들어오게
   }
   docs.forEach(syncStudyReadonlyForDoc);
   const pageCtl = byId("studyPageCtl");
@@ -951,6 +987,10 @@ function applyStudyLayout(){
   }
   updateStudyTargetHighlight();                // 타깃 칸 표시 갱신(분할 아니면 표시 제거)
   updateStudyPageIndicator();                  // 학습 화면 PDF '현재/총 페이지' 갱신(미진입이면 비움)
+  // 참고 칸이 바뀌면 보기 방식 단추와 ◀ ▶ 도 그 문서 상태로 다시 맞춘다(이미 한 장씩인 PDF 를
+  // 참고로 올렸을 때 넘기기 단추가 숨은 채로 남지 않게).
+  if (typeof updatePdfPageModeButton === "function") updatePdfPageModeButton();
+  if (typeof updatePdfPageStepButtons === "function") updatePdfPageStepButtons();
   updateModeBadges();
 }
 

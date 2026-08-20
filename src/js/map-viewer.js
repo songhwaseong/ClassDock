@@ -523,12 +523,18 @@ function mapCsvEscape(value){
   const text = String(value == null ? "" : value);
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
-function mapMarkersToCsv(markers){
+/* 표시 → 표(머리글 한 줄 + 표시마다 한 줄). CSV 파일과 메모 표가 같은 열을 쓰도록 한 곳에서만
+   만든다 — 열 이름이 갈라지면 CSV 들이기(mapMarkersFromCsv)와의 왕복이 조용히 어긋난다. */
+function mapMarkersToRows(markers){
   const rows = [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]];
   for (const marker of Array.isArray(markers) ? markers : []){
     rows.push([marker.label, Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6),
       marker.note, marker.color, marker.region || "", marker.district || ""]);
   }
+  return rows;
+}
+function mapMarkersToCsv(markers){
+  const rows = mapMarkersToRows(markers);
   return "\uFEFF" + rows.map(row => row.map(mapCsvEscape).join(",")).join("\r\n") + "\r\n";
 }
 function mapDownloadText(text, name, mime){
@@ -2470,6 +2476,10 @@ async function mountMapEditor(doc){
   const csvExportBtn = document.createElement("button");
   csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
+  const csvMemoBtn = document.createElement("button");
+  csvMemoBtn.type = "button"; csvMemoBtn.className = "map-btn map-csv-memo";
+  csvMemoBtn.textContent = "🧾 표로 메모";
+  csvMemoBtn.title = "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다";
   const csvInput = document.createElement("input");
   csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
 
@@ -2564,7 +2574,7 @@ async function mountMapEditor(doc){
 
   bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
   toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, listBtn,
-    presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, clearItemsBtn,
+    presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
     boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
   const stage = document.createElement("div");
@@ -3895,6 +3905,25 @@ async function mountMapEditor(doc){
     if (typeof toast === "function") toast(mapTf("표시 {count}개를 CSV로 내보냈습니다", { count:model.markers.length }), 2800);
   });
 
+  /* ── 표로 메모 ──
+     CSV 내보내기와 같은 표를 파일이 아니라 메모창 표 블록으로 보낸다. 메모의 표에는 복사·CSV
+     저장·표 편집기·변환이 이미 달려 있어, 파일을 내렸다 다시 여는 걸음이 통째로 빠진다.
+     메모 표 한 개에 담기는 줄 수에는 상한이 있으므로(메모창이 정한다) 넘친 줄은 그 수를 알린다. */
+  csvMemoBtn.addEventListener("click", () => {
+    if (typeof window.addTableToScratchpad !== "function"){ setStatus(mapT("메모창을 열 수 없어요.")); return; }
+    if (!model.markers.length){ setStatus(mapT("내보낼 표시가 없습니다.")); return; }
+    const result = window.addTableToScratchpad(mapMarkersToRows(model.markers));
+    if (!result) return;                  // 메모창이 이미 구체적인 사유를 알렸다(용량 등)
+    const dropped = Math.max(0, Number(result.dropped) || 0);
+    const added = Math.max(0, model.markers.length - dropped);
+    if (typeof toast === "function"){
+      toast(dropped
+        ? mapTf("표시 {count}개를 메모 표로 보냈어요 — 메모 표에 담기는 만큼만 넣어 {dropped}개는 빠졌습니다(CSV 내보내기는 모두 담깁니다).", { count:added, dropped })
+        : mapTf("표시 {count}개를 메모 표로 보냈어요 — 메모에서 CSV로 저장하거나 표 편집기로 열 수 있어요.", { count:added }),
+        dropped ? 5200 : 3400);
+    }
+  });
+
   /* ── 한꺼번에 지우기 ──
      '주변 시설'은 표시 수십 개와 반경 원을 한 번에 넣는다. 말풍선을 하나씩 열어 지우는 길밖에
      없으면 사실상 못 지우므로, 꼬리표(source·batch)로 묶음째 무는 길을 둔다. 손으로 찍은 표시는
@@ -4797,7 +4826,7 @@ if (typeof module !== "undefined" && module.exports){
     mapNormalizeMarker, mapNormalizeShape, mapNormalizeBackgroundImage,
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
-    mapMarkersFromCsv, mapMarkersToCsv,
+    mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
     mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,

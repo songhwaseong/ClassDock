@@ -245,8 +245,7 @@ function wire(){
   byId("btnPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   byId("btnStudyPen").onclick = () => { if (typeof togglePenMode === "function") togglePenMode(); };
   // 분할 방향과 위치 교체는 분할 경계의 버튼 및 분할바에서 제어한다.
-  byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
-  byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(); };
+  // 찾기 단추(btnPdfFind·btnStudyFind)는 아래 페이지 컨트롤 묶음에서 칸별로 배선한다.
   byId("btnCodeLink").onclick = createCodeLinkFromActiveEditor;
   byId("btnPages").onclick = () => togglePdfPagePanel();
   byId("btnOutline").onclick = () => togglePdfOutlinePanel();
@@ -311,17 +310,33 @@ function wire(){
   byId("zoomOut").onclick = () => setPdfZoom(((state && state.zoom) || 1) / 1.25);
   byId("zoomLabel").onclick = () => setPdfZoom(1);
   /* 보기 방식(이어보기 ↔ 한 장씩)과 페이지 넘기기. 넘기기 단추는 한 장씩 볼 때만 나오고,
-     전체화면에도 같은 짝을 둔다 — 발표 중에는 그쪽이 손에 닿는 유일한 컨트롤이다. */
-  if (byId("btnPdfPageMode")) byId("btnPdfPageMode").onclick = () => togglePdfPageMode();
+     같은 짝을 세 곳에 둔다 — 문서 위 알약(작업 칸), 전체화면, 분할 작업의 참고 칸. 알약마다
+     제 칸의 PDF 를 조작한다: 분할에서 두 칸이 서로 다른 PDF 일 수 있기 때문이다. */
+  if (byId("btnPdfPageMode")) byId("btnPdfPageMode").onclick = () => switchPdfPageMode(viewPdfTarget());
   for (const [prevId, nextId] of [["pagePrev", "pageNext"], ["fsPagePrev", "fsPageNext"]]){
-    if (byId(prevId)) byId(prevId).onclick = () => { stepPdfSinglePage(fullscreenPdfTarget(), -1); showFullscreenControls(); };
-    if (byId(nextId)) byId(nextId).onclick = () => { stepPdfSinglePage(fullscreenPdfTarget(), 1); showFullscreenControls(); };
+    const pick = prevId === "pagePrev" ? viewPdfTarget : fullscreenPdfTarget;
+    if (byId(prevId)) byId(prevId).onclick = () => { stepPdfSinglePage(pick(), -1); showFullscreenControls(); showStudyControls(); };
+    if (byId(nextId)) byId(nextId).onclick = () => { stepPdfSinglePage(pick(), 1); showFullscreenControls(); showStudyControls(); };
   }
+  // 분할 작업(참고 칸) 짝 — 참고 PDF 는 이 알약으로만 넘길 수 있다.
+  if (byId("btnStudyPageMode")) byId("btnStudyPageMode").onclick = () => switchPdfPageMode(studyReferencePdf());
+  for (const [id, delta] of [["studyPagePrev", -1], ["studyPageNext", 1]]){
+    if (byId(id)) byId(id).onclick = () => { stepPdfSinglePage(studyReferencePdf(), delta); showStudyControls(); };
+  }
+  // 찾기는 그 알약이 얹혀 있는 칸의 PDF 에서 — 분할 중 작업 칸 찾기가 참고 PDF 로 새지 않게.
+  byId("btnPdfFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(viewPdfTarget()); };
+  byId("btnStudyFind").onclick = () => { if (typeof openPdfFind === "function") openPdfFind(studyReferencePdf()); };
   /* 자판으로 넘기기. 한 장씩 볼 때만 가로채고, 글자를 치는 자리에서는 손대지 않는다. 이어보기에서
      PageUp/PageDown 은 브라우저의 스크롤이 그대로 맡는다 — 그 편이 익숙하다. */
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-    const doc = fullscreenPdfTarget();
+    /* 분할 작업에서는 마지막에 누른 칸의 PDF 를 넘긴다 — 두 칸이 서로 다른 PDF 일 수 있고,
+       작업 칸에서 표를 옮기는 동안 화살표가 참고 PDF 를 넘겨 버려서도 안 된다. */
+    const content = byId("content");
+    const inStudy = !!(content && content.classList.contains("study-mode")) && !isViewerFullscreen();
+    const doc = inStudy
+      ? (typeof studyTargetPane !== "undefined" && studyTargetPane === "reference" ? studyReferencePdf() : viewPdfTarget())
+      : fullscreenPdfTarget();
     if (!doc || typeof pdfIsSinglePage !== "function" || !pdfIsSinglePage(doc)) return;
     const target = e.target;
     if (target && typeof target.closest === "function" &&

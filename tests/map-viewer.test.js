@@ -23,7 +23,7 @@ function loadMapViewer(){
       mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
       mapFormatBytes, mapParseCoords, mapDistanceMeters, mapLineLengthMeters,
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
-      , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv
+      , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, MAP_SPOT_MIN_ZOOM
@@ -140,7 +140,7 @@ test("표시 CSV는 쉼표·줄바꿈 메모를 왕복하고 잘못된 좌표를
 
 test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 실제 편집 경로에 연결한다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  for (const token of ["map-image-pick", "map-image-clear", "map-draw-line", "map-draw-area", "map-csv-import", "map-csv-export"]){
+  for (const token of ["map-image-pick", "map-image-clear", "map-draw-line", "map-draw-area", "map-csv-import", "map-csv-export", "map-csv-memo"]){
     assert.ok(source.includes(token), token);
   }
   assert.match(source, /L\.imageOverlay\(model\.backgroundImage\.dataUrl/);
@@ -151,6 +151,25 @@ test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 
   assert.match(source, /mapPrepareBackgroundImage\(file\)/);
   assert.match(source, /mapMarkersFromCsv\(await file\.text\(\)\)/);
   assert.match(source, /mapMarkersToCsv\(model\.markers\)/);
+  assert.match(source, /window\.addTableToScratchpad\(mapMarkersToRows\(model\.markers\)\)/);
+});
+
+/* 메모 표와 CSV 파일은 같은 표를 써야 CSV 들이기로 되돌아온다 — 열이 갈라지면 왕복이 조용히 깨진다. */
+test("메모로 보내는 표는 CSV 파일과 같은 열·같은 값이다", () => {
+  const api = loadMapViewer();
+  const marker = api.mapNormalizeMarker({
+    lat:37.5665, lng:126.978, label:"시청", note:"쉼표, 있음", color:"blue", region:"서울특별시", district:"중구"
+  });
+  // vm 안에서 만든 배열이라 그대로는 realm 이 달라 비교되지 않는다 — 값만 떠서 견준다.
+  const rows = JSON.parse(JSON.stringify(api.mapMarkersToRows([marker])));
+  assert.deepEqual(rows[0], ["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]);
+  assert.deepEqual(rows[1], ["시청", "37.566500", "126.978000", "쉼표, 있음", "blue", "서울특별시", "중구"]);
+  // 표 그대로 CSV 로 굳혔다가 다시 들이면 같은 표시로 돌아온다.
+  const back = api.mapMarkersFromCsv(api.mapMarkersToCsv([marker]));
+  assert.equal(back.markers[0].note, "쉼표, 있음");
+  assert.equal(back.markers[0].district, "중구");
+  assert.deepEqual(JSON.parse(JSON.stringify(api.mapMarkersToRows([]))),
+    [["이름", "위도", "경도", "메모", "색상", "시도", "시군구"]]);
 });
 
 /* 배경지도 호스트는 런처의 /tile-proxy 허용 목록(launcher.cs TileProxyHosts)에 있어야 한다.

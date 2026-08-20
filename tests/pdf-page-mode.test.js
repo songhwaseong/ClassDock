@@ -224,3 +224,71 @@ test("한 장씩 보기에서는 교차 관찰 대신 직접 그릴 쪽을 고�
   for (const label of ["한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다", "이어보기로 — 페이지를 스크롤해서 봅니다", "이전 페이지 (PageUp)"])
     assert.ok(i18n.includes('"' + label + '"'), "사전에 없다: " + label);
 });
+
+/* 분할 작업에서는 두 칸이 저마다 PDF 일 수 있고 한쪽만 한 장씩 볼 수도 있다. 칸마다 제 알약을
+   갖고, 그 알약은 반드시 제 칸의 문서만 조작해야 한다 — 남의 칸을 건드리면 조용히 엉뚱한
+   문서가 넘어간다. 참고 칸은 .study-page-ctl, 작업 칸은 .view-page-ctl 이 맡는다. */
+test("분할 작업은 두 칸 모두 제 알약으로 보기 방식·넘기기를 다룬다", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
+  const docsSrc = fs.readFileSync(path.join(__dirname, "../src/js/documents.js"), "utf8");
+  const editor = fs.readFileSync(path.join(__dirname, "../src/js/pdf-editor.js"), "utf8");
+
+  // 참고 칸 알약에도 같은 단추 세 개가 있어야 한다.
+  const pill = /<div class="study-page-ctl"[\s\S]*?<\/div>/.exec(html);
+  assert.ok(pill, "참고 칸 알약을 찾지 못했다");
+  for (const id of ["btnStudyPageMode", "studyPagePrev", "studyPageNext"])
+    assert.ok(pill[0].includes('id="' + id + '"'), id + " 단추가 참고 칸 알약에 없다");
+  assert.match(styles, /non-pdf-ref #btnStudyPageMode/);   // 참고가 PDF 가 아니면 함께 감춘다
+
+  /* 작업 칸 알약은 분할 중 감춰져 있었다(display:none). 작업 칸이 PDF 면 그 칸 위에 되살리고,
+     참고 칸 알약과 반대편 모서리에 놓아 겹치지 않게 한다(위치 교체·상하 분할까지). */
+  assert.match(styles, /#content\.study-mode \.view-page-ctl\{display:none\}/);
+  assert.match(styles, /#content\.study-mode\.pdf-active \.view-page-ctl\{display:inline-flex;right:10px\}/);
+  assert.match(styles, /#content\.study-mode\.study-swapped\.pdf-active \.view-page-ctl\{right:calc\(100% - var\(--study-split,50%\) \+ 10px\)\}/);
+  assert.match(styles, /#content\.study-mode\.study-stacked\.pdf-active \.view-page-ctl\{right:10px;top:calc\(var\(--study-split,50%\) \+ 10px\)\}/);
+  assert.match(styles, /#content\.study-mode\.study-stacked\.study-swapped\.pdf-active \.view-page-ctl\{right:10px;top:10px\}/);
+  // 전체화면은 여전히 fs 컨트롤만 쓴다 — 위 규칙보다 세므로 !important 로 못 박는다.
+  assert.match(styles, /body\.viewer-fullscreen #content \.view-page-ctl\{display:none!important\}/);
+  // 두 알약은 함께 흐려졌다 함께 돌아온다.
+  assert.match(styles, /study-idle \.view-page-ctl\{opacity:0;pointer-events:none\}/);
+
+  // 알약마다 보는 문서가 다르다: 작업 칸=viewPdfTarget, 참고 칸=studyReferencePdf.
+  assert.match(editor, /function viewPdfTarget\(\)/);
+  assert.match(editor, /function studyReferencePdf\(\)/);
+  assert.match(SOURCE, /\["btnPdfPageMode", fallback\], \["btnStudyPageMode", ref \|\| fallback\]/);
+  assert.match(SOURCE, /\["pagePrev", "pageNext", view\]/);
+  assert.match(SOURCE, /\["studyPagePrev", "studyPageNext", ref \|\| view\]/);
+  // 아직 화면에 오르지 않은 문서(doc 인자)로 분할 칸 단추를 물들이지 않는다.
+  assert.match(SOURCE, /const fallback = pdfViewTarget\(\) \|\| \(ref \? null : \(doc \|\| null\)\)/);
+
+  // 단추 배선도 칸별로.
+  assert.match(app, /byId\("btnPdfPageMode"\)\.onclick = \(\) => switchPdfPageMode\(viewPdfTarget\(\)\)/);
+  assert.match(app, /byId\("btnStudyPageMode"\)\.onclick = \(\) => switchPdfPageMode\(studyReferencePdf\(\)\)/);
+  assert.match(app, /stepPdfSinglePage\(studyReferencePdf\(\), delta\)/);
+  assert.match(app, /const pick = prevId === "pagePrev" \? viewPdfTarget : fullscreenPdfTarget/);
+  // 찾기도 제 칸에서 — 분할 중 작업 칸 찾기가 참고 PDF 로 새면 안 된다.
+  assert.match(app, /openPdfFind\(viewPdfTarget\(\)\)/);
+  assert.match(app, /openPdfFind\(studyReferencePdf\(\)\)/);
+  // 자판은 마지막에 누른 칸을 따라간다.
+  assert.match(app, /studyTargetPane === "reference" \? studyReferencePdf\(\) : viewPdfTarget\(\)/);
+
+  // 참고 칸이 바뀔 때(진입·역할 교체) 단추 상태도 다시 맞춘다.
+  assert.match(docsSrc, /updatePdfPageStepButtons === "function"\) updatePdfPageStepButtons\(\)/);
+  /* 폭 맞춤은 한 장씩 보기를 망친다 — A4 는 폭에 맞추면 세로가 칸보다 길어 한 장 안에서 또
+     스크롤하게 된다. 참고 칸 자동 맞춤도 그 모드에서는 페이지 맞춤을 써야 한다. */
+  const fit = /function fitStudyPdf\(doc\)\{([\s\S]*?)\n\}/.exec(docsSrc);
+  assert.ok(fit);
+  assert.match(fit[1], /pdfIsSinglePage\(doc\)\)\{\s*\n\s*refitSinglePagePdf\(doc\)/);
+  assert.match(docsSrc, /function refitSinglePagePdf\(doc\)\{[\s\S]*?pdfFitPageZoom\(doc\)/);
+  /* 칸 크기가 바뀌면(분할 드래그) 두 칸을 다시 맞춘다. 작업 칸은 한 장씩일 때만 — 이어보기
+     중인 작업 PDF 의 배율은 사용자가 고른 값이라 덮으면 안 된다. */
+  assert.match(docsSrc, /observeStudyPaneFit\(ref\);\s*\n\s*observeStudyPaneFit\(work\);/);
+  const pane = /function fitStudyPanePdf\(doc\)\{([\s\S]*?)\n\}/.exec(docsSrc);
+  assert.ok(pane);
+  assert.match(pane[1], /doc\.id === studyPdfId\)\{ fitStudyPdf\(doc\); return; \}/);
+  assert.match(pane[1], /doc\.id === activeId\) refitSinglePagePdf\(doc\)/);
+  // 분할 진입 시 단독 뷰용 유휴 숨김(pdf-ctl-idle)이 남아 알약이 투명한 채로 굳지 않게 한다.
+  assert.match(docsSrc, /if \(split\)\{ showStudyControls\(\); stopPdfControlsAutoHide\(\); \}/);
+});
