@@ -390,8 +390,14 @@ function timelineEventsToCsv(events){
 }
 
 function timelineEventsFromCsv(text){
-  const rows = timelineCsvRows(text);
-  if (rows.length < 2) throw new Error("csv-empty");
+  return timelineEventsFromRows(timelineCsvRows(text));
+}
+
+/* CSV와 엑셀은 "칸 값이 담긴 2차원 배열"까지 오면 같은 자료다. 열 이름 해석·날짜 검사·건너뛴 줄
+   세기를 한곳에 두어 두 경로가 서로 다르게 동작하지 않게 한다. rowIndexes 는 사건이 시트 몇째
+   줄에서 왔는지를 남긴다 — 엑셀 시트에 떠 있는 사진을 줄 번호로 사건에 붙이는 데 쓴다. */
+function timelineEventsFromRows(rows){
+  if (!Array.isArray(rows) || rows.length < 2) throw new Error("csv-empty");
   const headers = rows[0].map(value => String(value).trim().toLowerCase());
   const find = aliases => headers.findIndex(value => aliases.includes(value));
   const startAt = find(["시작", "시작일", "날짜", "연도", "start", "date", "year"]);
@@ -405,8 +411,10 @@ function timelineEventsFromCsv(text){
   const colorAt = find(["색", "색상", "color"]);
   if (startAt < 0 || titleAt < 0) throw new Error("csv-columns");
   const events = [];
+  const rowIndexes = [];
   let skipped = 0;
-  for (const row of rows.slice(1, TIMELINE_MAX_EVENTS + 1)){
+  for (let rowIndex = 1; rowIndex < rows.length && rowIndex <= TIMELINE_MAX_EVENTS; rowIndex++){
+    const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
     const start = String(row[startAt] || "").trim();
     const title = String(row[titleAt] || "").trim();
     const parsedStart = timelineParseDate(start);
@@ -426,9 +434,83 @@ function timelineEventsFromCsv(text){
       description:descAt >= 0 ? row[descAt] : "",
       color:color ? color.id : "blue"
     }, events.length));
+    rowIndexes.push(rowIndex);
   }
   if (!events.length) throw new Error("csv-no-events");
-  return { events, skipped, truncated:rows.length - 1 > TIMELINE_MAX_EVENTS };
+  return { events, rowIndexes, skipped, truncated:rows.length - 1 > TIMELINE_MAX_EVENTS };
+}
+
+/* ===== 엑셀(.xlsx) 들이기 =====
+   xlsx 는 ZIP 이고 시트에 붙인 사진은 xl/media/ 에 원본 그대로, 어느 칸에 놓였는지는 그림 앵커에
+   남는다. ExcelJS 는 표 편집에서 이미 쓰는 번들이라 새 라이브러리 없이 둘 다 읽을 수 있다.
+   덕분에 CSV + [이미지 폴더] 두 단계가 엑셀 파일 하나로 끝난다. */
+const TIMELINE_SHEET_IMAGE_TYPES = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp" };
+
+function timelineCellText(cell){
+  const value = cell && typeof cell === "object" && "value" in cell ? cell.value : cell;
+  if (value == null) return "";
+  if (value instanceof Date){
+    const pad = number => String(number).padStart(2, "0");
+    return value.getUTCFullYear() + "-" + pad(value.getUTCMonth() + 1) + "-" + pad(value.getUTCDate());
+  }
+  if (typeof value === "object"){
+    if (Array.isArray(value.richText)) return value.richText.map(part => String(part && part.text || "")).join("");
+    if (value.text != null) return String(value.text);                       // 하이퍼링크 칸
+    if (value.result != null) return String(value.result);                   // 수식 결과
+    if (value.formula !== undefined || value.sharedFormula !== undefined) return "";
+    return "";
+  }
+  return String(value);
+}
+
+function timelineSheetRows(sheet){
+  const rows = [];
+  if (!sheet || typeof sheet.eachRow !== "function") return rows;
+  sheet.eachRow({ includeEmpty:true }, (row, rowNumber) => {
+    const values = [];
+    if (row && typeof row.eachCell === "function"){
+      row.eachCell({ includeEmpty:true }, (cell, colNumber) => { values[colNumber - 1] = timelineCellText(cell); });
+    }
+    rows[rowNumber - 1] = values;
+  });
+  for (let index = 0; index < rows.length; index++) if (!rows[index]) rows[index] = [];
+  return rows;
+}
+
+/* 그림 앵커의 nativeRow 는 0부터 센 줄 번호라 timelineSheetRows 의 첨자와 그대로 맞는다.
+   여러 줄에 걸친 그림은 왼쪽 위가 놓인 줄로 보고, 한 줄에 여러 장이면 첫 장만 쓴다(사건당 사진 한 장). */
+function timelineSheetImageRows(workbook, sheet){
+  const found = new Map();
+  const images = sheet && typeof sheet.getImages === "function" ? sheet.getImages() : [];
+  for (const item of (Array.isArray(images) ? images : [])){
+    const anchor = item && item.range ? item.range.tl : null;
+    const row = anchor && Number.isFinite(Number(anchor.nativeRow)) ? Math.round(Number(anchor.nativeRow)) : null;
+    if (row == null || found.has(row)) continue;
+    const media = workbook && typeof workbook.getImage === "function" ? workbook.getImage(Number(item.imageId)) : null;
+    if (!media || !media.buffer) continue;
+    const extension = String(media.extension || "").toLowerCase();
+    const type = TIMELINE_SHEET_IMAGE_TYPES[extension];
+    if (!type) continue;                                                     // emf·wmf·gif 는 사진으로 쓰지 않는다
+    found.set(row, { buffer:media.buffer, type, name:String(media.name || "사진") + "." + extension });
+  }
+  return found;
+}
+
+async function timelineEventsFromXlsx(file){
+  if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("exceljs");
+  if (typeof ExcelJS === "undefined" || !ExcelJS.Workbook) throw new Error("xlsx-runtime");
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const sheet = (workbook.worksheets || []).find(item => item && item.rowCount) || (workbook.worksheets || [])[0];
+  if (!sheet) throw new Error("csv-empty");
+  const result = timelineEventsFromRows(timelineSheetRows(sheet));
+  const media = timelineSheetImageRows(workbook, sheet);
+  const imageFiles = new Map();
+  result.rowIndexes.forEach((rowIndex, index) => {
+    const image = media.get(rowIndex);
+    if (image) imageFiles.set(index, new File([image.buffer], image.name, { type:image.type }));
+  });
+  return { ...result, imageFiles, sheetImages:media.size };
 }
 
 function timelineDefaultTitle(name){
@@ -587,7 +669,7 @@ function mountTimelineEditor(doc){
   const zoomIn = timelineButton("＋", "연대표 확대");
   const overviewBtn = timelineButton("▤ 개요", "모든 사건을 한 화면에서 보기");
   const listBtn = timelineButton("☷ 목록", "사건 목록 열기·닫기");
-  const csvInBtn = timelineButton("CSV 들이기", "표에서 사건 가져오기");
+  const csvInBtn = timelineButton("표 들이기", "CSV·엑셀(.xlsx)에서 사건 가져오기");
   const imageFolderBtn = timelineButton("이미지 폴더", "CSV의 이미지 파일명과 연결할 폴더 선택");
   const csvOutBtn = timelineButton("CSV 내보내기", "사건 목록을 CSV로 저장");
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
@@ -637,7 +719,8 @@ function mountTimelineEditor(doc){
   empty.append(emptyTitle, emptyText, emptyAdd);
 
   const csvInput = document.createElement("input");
-  csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
+  csvInput.type = "file"; csvInput.hidden = true;
+  csvInput.accept = ".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const imageFolderInput = document.createElement("input");
   imageFolderInput.type = "file"; imageFolderInput.accept = "image/png,image/jpeg,image/webp";
   imageFolderInput.multiple = true; imageFolderInput.hidden = true;
@@ -1249,30 +1332,55 @@ function mountTimelineEditor(doc){
   csvInBtn.addEventListener("click", () => csvInput.click());
   csvInput.addEventListener("change", async () => {
     const file = csvInput.files && csvInput.files[0]; csvInput.value = ""; if (!file) return;
+    const isSheet = /\.xlsx$/i.test(String(file.name || ""));
+    const source = isSheet ? timelineT("엑셀 시트") : "CSV";
+    const oldLabel = csvInBtn.textContent;
+    if (isSheet){ csvInBtn.disabled = true; csvInBtn.textContent = timelineT("엑셀 읽는 중…"); }
     try {
-      const result = timelineEventsFromCsv(await file.text());
+      const result = isSheet ? await timelineEventsFromXlsx(file) : timelineEventsFromCsv(await file.text());
       const room = Math.max(0, TIMELINE_MAX_EVENTS - model.events.length);
       const added = result.events.slice(0, room);
       if (!added.length) throw new Error("event-limit");
       const base = model.events.length;
       added.forEach((event, index) => { event.order = base + index; model.events.push(event); });
+      /* 엑셀 시트에 박힌 사진은 여기서 바로 줄인다. 사진 파일명·이미지 폴더를 거치지 않는다. */
+      let attached = 0, failed = 0, overLimit = 0;
+      if (result.imageFiles && result.imageFiles.size){
+        csvInBtn.textContent = timelineT("사진 넣는 중…");
+        let totalChars = timelinePhotoTotalChars(model.events);
+        for (const [index, imageFile] of result.imageFiles){
+          if (index >= added.length) continue;
+          try {
+            const photo = await timelinePreparePhoto(imageFile);
+            if (totalChars + photo.dataUrl.length > TIMELINE_PHOTO_TOTAL_MAX_CHARS){ overLimit++; continue; }
+            added[index].image = photo; totalChars += photo.dataUrl.length; attached++;
+          } catch(_){ failed++; }
+        }
+      }
       history.commit(); touch(); renderAll();
-      const imageRefs = added.filter(event => event.imageFileName).length;
-      if (typeof toast === "function") toast("사건 " + added.length + "개를 가져왔어요." +
-        (result.skipped ? " · 날짜/제목이 잘못된 " + result.skipped + "줄 제외" : "") +
-        (imageRefs ? " · 이미지 파일명 " + imageRefs + "개: [이미지 폴더]를 선택하세요." : ""), imageRefs ? 5200 : 3600);
+      const imageRefs = added.filter(event => !event.image && event.imageFileName).length;
+      const parts = [timelineTf("사건 {count}개를 가져왔어요.", { count:added.length })];
+      if (result.skipped) parts.push(timelineTf("날짜/제목이 잘못된 {count}줄 제외", { count:result.skipped }));
+      if (attached) parts.push(timelineTf("시트 사진 {count}장 연결", { count:attached }));
+      if (failed) parts.push(timelineTf("사진 처리 실패 {count}장", { count:failed }));
+      if (overLimit) parts.push(timelineTf("전체 {limit} 제한으로 제외 {count}개", { limit:TIMELINE_PHOTO_TOTAL_LABEL, count:overLimit }));
+      if (imageRefs) parts.push(timelineTf("이미지 파일명 {count}개: [이미지 폴더]를 선택하세요.", { count:imageRefs }));
+      if (typeof toast === "function") toast(parts.join(" · "), imageRefs || attached ? 5200 : 3600);
     } catch(error){
-      const message = error && error.message === "csv-columns"
-        ? "CSV에 ‘시작’과 ‘제목’ 열이 필요합니다."
-        : error && error.message === "event-limit" ? "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요."
-        : "CSV에서 사건을 읽지 못했어요.";
-      if (typeof toast === "function") toast(timelineT(message), 3200, { type:"error" });
+      const code = error && error.message;
+      const message = code === "csv-columns" ? timelineTf("{source}에 ‘시작’과 ‘제목’ 열이 필요합니다.", { source })
+        : code === "event-limit" ? timelineT("연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.")
+        : code === "xlsx-runtime" ? timelineT("엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.")
+        : timelineTf("{source}에서 사건을 읽지 못했어요.", { source });
+      if (typeof toast === "function") toast(message, 3200, { type:"error" });
+    } finally {
+      csvInBtn.disabled = false; csvInBtn.textContent = oldLabel;
     }
   });
   imageFolderBtn.addEventListener("click", () => {
     const pending = model.events.filter(event => !event.image && event.imageFileName);
     if (!pending.length){
-      if (typeof toast === "function") toast(timelineT("연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 CSV를 불러오세요."), 3600);
+      if (typeof toast === "function") toast(timelineT("연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 표를 불러오세요."), 3600);
       return;
     }
     imageFolderInput.click();
@@ -1403,6 +1511,7 @@ if (typeof module !== "undefined" && module.exports){
     timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
     timelineSnapshot, timelineSnapshotEqual, timelineSnapshotModel,
+    timelineEventsFromRows, timelineCellText, timelineSheetRows, timelineSheetImageRows, timelineEventsFromXlsx,
     timelineSortedEvents, timelineLayoutEntries, timelineOverviewEntries, timelineEventsToCsv, timelineEventsFromCsv,
     timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle

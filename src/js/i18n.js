@@ -1603,7 +1603,7 @@
     "이미지 폴더": "Image folder",
     "CSV의 이미지 파일명과 연결할 폴더 선택": "Choose a folder to match CSV image filenames",
     "이미지 연결 중…": "Linking images…",
-    "연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 CSV를 불러오세요.":
+    "연결할 이미지 파일명이 없습니다. 먼저 이미지 파일명 열이 있는 표를 불러오세요.":
       "There are no image filenames to link. Import a CSV with an image filename column first.",
     "발표 진행": "Presentation progress",
     "← 이전": "← Previous",
@@ -1642,9 +1642,19 @@
     "종료 날짜는 시작 날짜보다 빠를 수 없습니다.": "The end date can't be earlier than the start date.",
     "발표할 사건이 없습니다.": "There are no events to present.",
     "연대표 문서(.timeline)를 읽지 못해 텍스트로 열었어요.": "Couldn't read the timeline document, so it was opened as text.",
-    "CSV에 ‘시작’과 ‘제목’ 열이 필요합니다.": "The CSV needs Start and Title columns.",
+    "{source}에 ‘시작’과 ‘제목’ 열이 필요합니다.": "The {source} needs Start and Title columns.",
     "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.": "A timeline can contain up to 1,000 events.",
-    "CSV에서 사건을 읽지 못했어요.": "Couldn't read events from the CSV.",
+    "{source}에서 사건을 읽지 못했어요.": "Couldn't read events from the {source}.",
+    "엑셀 시트": "Excel sheet",
+    "엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.":
+      "Excel support isn't ready yet. Try again in a moment.",
+    "엑셀 읽는 중…": "Reading the Excel file…",
+    "사진 넣는 중…": "Adding photos…",
+    "사건 {count}개를 가져왔어요.": "Imported {count} events.",
+    "날짜/제목이 잘못된 {count}줄 제외": "{count} rows skipped for a bad date or title",
+    "시트 사진 {count}장 연결": "{count} photos linked from the sheet",
+    "사진 처리 실패 {count}장": "{count} photos couldn't be processed",
+    "이미지 파일명 {count}개: [이미지 폴더]를 선택하세요.": "{count} image filenames — choose [Image folder]",
 
     // 지도(.map)
     "새 지도(.map)": "New map (.map)",
@@ -1683,6 +1693,8 @@
     "▱ 면적 영역": "▱ Area",
     "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
     "CSV 들이기": "Import CSV",
+    "표 들이기": "Import table",
+    "CSV·엑셀(.xlsx)에서 사건 가져오기": "Import events from a CSV or Excel (.xlsx) file",
     "이름·위도·경도 열의 CSV에서 표시 추가 — 좌표 없이 주소 열만 있어도 됩니다":
       "Add pins from a CSV with name, latitude, and longitude columns — an address column alone works too",
     // 주소만 있는 CSV → 좌표 찾기
