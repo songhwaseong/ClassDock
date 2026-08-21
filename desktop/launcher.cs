@@ -1151,9 +1151,11 @@ class ClassDockLauncher
         while (true)
         {
             TcpClient client = listener.AcceptTcpClient();
-            Thread worker = new Thread(delegate() { HandleClient(client); });
-            worker.IsBackground = true;
-            worker.Start();
+            // 브라우저의 상태 폴링마다 전용 Thread를 만들면 종료된 Thread의 OS 핸들이
+            // GC 전까지 누적된다. SSH 폴링처럼 요청이 잦은 기능에서는 수만 개까지
+            // 쌓여 askpass 보조 프로세스조차 시작하지 못하므로 재사용되는 스레드풀로 처리한다.
+            if (!ThreadPool.QueueUserWorkItem(delegate(object state) { HandleClient((TcpClient)state); }, client))
+                client.Close();
         }
     }
 
