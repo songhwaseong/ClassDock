@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const ExcelJS = require("../vendor/exceljs.min.js");
+const JSZip = require("../vendor/jszip.min.js");
+const XLSX = require("../vendor/xlsx.full.min.js");
 const {
   adjustSpreadsheetMergesAfterColumnInsert,
   adjustSpreadsheetMergesAfterColumnDelete,
@@ -12,6 +14,9 @@ const {
   parseClipboardTable,
   pxToExcelColWidth,
   pxToExcelRowHeight,
+  excelColWidthToPx,
+  excelRowHeightToPx,
+  spreadsheetWorksheetDisplayLayout,
   evaluateFormula,
   remapFormulaRefs,
   buildSpreadsheetChartSvg,
@@ -26,8 +31,103 @@ const {
   spreadsheetSelectionDragHitPoint,
   spreadsheetSelectionRangeCovered,
   spreadsheetSelectionRangeKeys,
+  spreadsheetImageFormulaInfo,
+  spreadsheetPackageImageInfo,
+  spreadsheetFormulaImages,
+  spreadsheetFloatingImageDescriptors,
+  spreadsheetIsolateWorksheetBytes,
+  spreadsheetExtendSheetRangeForImages,
   writeStructuredSpreadsheetModel
 } = require("../src/js/spreadsheet-viewer.js");
+
+global.XLSX = XLSX;
+
+test("Excel 365 셀 이미지는 Rich Value 메타데이터·관계와 셀 vm 인덱스로 원본 그림을 찾는다", () => {
+  const zip = new JSZip();
+  zip.file("xl/workbook.xml", '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="사진" sheetId="1" r:id="rId1"/></sheets></workbook>');
+  zip.file("xl/_rels/workbook.xml.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
+  zip.file("xl/worksheets/sheet1.xml", '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="2"><c r="C2" vm="1" t="e"><v>#VALUE!</v></c></row></sheetData></worksheet>');
+  zip.file("xl/metadata.xml", '<?xml version="1.0"?><metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><valueMetadata count="1"><bk><rc t="1" v="0"/></bk></valueMetadata></metadata>');
+  zip.file("xl/richData/rdrichvaluestructure.xml", '<?xml version="1.0"?><rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"><s t="_localImage"><k n="_rvRel:LocalImageIdentifier" t="i"/><k n="CalcOrigin" t="i"/><k n="Text" t="s"/></s></rvStructures>');
+  zip.file("xl/richData/rdrichvalue.xml", '<?xml version="1.0"?><rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"><rv s="0"><v>0</v><v>4</v><v>교실 사진</v></rv></rvData>');
+  zip.file("xl/richData/richValueRel.xml", '<?xml version="1.0"?><richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><rel r:id="rId1"/></richValueRels>');
+  zip.file("xl/richData/_rels/richValueRel.xml.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="image" Target="../media/image1.png"/></Relationships>');
+  zip.file("xl/media/image1.png", new Uint8Array([137, 80, 78, 71]));
+
+  const info = spreadsheetPackageImageInfo(zip.generate({ type:"uint8array", compression:"STORE" }), JSZip);
+  assert.equal(info.hasRichImages, true);
+  const images = info.sheets.get("사진");
+  assert.equal(images.length, 1);
+  assert.deepEqual([images[0].row, images[0].col, images[0].address], [1, 2, "C2"]);
+  assert.equal(images[0].mime, "image/png");
+  assert.equal(images[0].alt, "교실 사진");
+  assert.deepEqual([...images[0].bytes], [137, 80, 78, 71]);
+});
+
+test("IMAGE 수식은 네트워크 접속 없이 출처·대체텍스트·크기 옵션만 해석한다", () => {
+  assert.deepEqual(spreadsheetImageFormulaInfo('=_xlfn.IMAGE("https://example.com/a.png","교실, 사진",3,80,120)'), {
+    kind:"formula", source:"https://example.com/a.png", alt:"교실, 사진", sizing:3, height:80, width:120
+  });
+  assert.deepEqual(spreadsheetImageFormulaInfo('IMAGE(A1,"사진")'), {
+    kind:"formula", source:"A1", alt:"사진", sizing:0, height:0, width:0
+  });
+  assert.equal(spreadsheetImageFormulaInfo("SUM(A1:A3)"), null);
+
+  const workbook = { SheetNames:["Sheet1"], Sheets:{ Sheet1:{ B2:{ f:'_xlfn.IMAGE("https://example.com/a.png","사진")' } } } };
+  const found = spreadsheetFormulaImages(workbook).get("Sheet1");
+  assert.deepEqual([found[0].row, found[0].col, found[0].address], [1, 1, "B2"]);
+});
+
+test("일반 삽입 그림은 ExcelJS 앵커와 바이트를 읽고 시트 표시 범위를 그림 끝까지 넓힌다", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl9Zl8AAAAASUVORK5CYII=", "base64");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Sheet1");
+  sheet.getCell("A1").value = "값";
+  const imageId = workbook.addImage({ buffer:png, extension:"png" });
+  sheet.addImage(imageId, { tl:{ col:2, row:3 }, ext:{ width:80, height:60 } });
+  const reopened = new ExcelJS.Workbook();
+  await reopened.xlsx.load(await workbook.xlsx.writeBuffer());
+  const images = spreadsheetFloatingImageDescriptors(reopened, "Sheet1");
+  assert.equal(images.length, 1);
+  assert.deepEqual([images[0].tl.row, images[0].tl.col, images[0].mime], [3, 2, "image/png"]);
+
+  const ws = { "!ref":"A1" };
+  spreadsheetExtendSheetRangeForImages(ws, images);
+  assert.equal(ws["!ref"], "A1:C4");
+});
+
+test("그림 시트는 원본 열 폭·행 높이·자동 줄바꿈을 화면 픽셀로 복원한다", () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("사진표");
+  sheet.getColumn(8).width = 62;
+  sheet.getColumn(10).width = 22;
+  sheet.getRow(2).height = 81;
+  sheet.getCell("H2").value = "여러 줄로 표시할 긴 설명";
+  sheet.getCell("H2").alignment = { wrapText:true, vertical:"middle" };
+
+  const layout = spreadsheetWorksheetDisplayLayout(workbook, "사진표");
+  assert.equal(layout.columns[7], excelColWidthToPx(62));
+  assert.equal(layout.columns[9], excelColWidthToPx(22));
+  assert.equal(layout.rows[1], excelRowHeightToPx(81));
+  assert.deepEqual(layout.wrapCells, [{ row:1, col:7 }]);
+  assert.equal(layout.rows[1], 108);
+});
+
+test("현재 시트 XLSX 분리는 다른 시트만 제거하고 선택 시트의 그림을 보존한다", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl9Zl8AAAAASUVORK5CYII=", "base64");
+  const workbook = new ExcelJS.Workbook();
+  const keep = workbook.addWorksheet("유지");
+  workbook.addWorksheet("제거").getCell("A1").value = "다른 시트";
+  keep.getCell("A1").value = "그림 시트";
+  const imageId = workbook.addImage({ buffer:png, extension:"png" });
+  keep.addImage(imageId, "B2:C3");
+
+  const isolatedBytes = await spreadsheetIsolateWorksheetBytes(await workbook.xlsx.writeBuffer(), "유지", ExcelJS);
+  const reopened = new ExcelJS.Workbook();
+  await reopened.xlsx.load(isolatedBytes);
+  assert.deepEqual(reopened.worksheets.map(sheet => sheet.name), ["유지"]);
+  assert.equal(reopened.getWorksheet("유지").getImages().length, 1);
+});
 
 test("Ctrl 선택은 떨어진 범위를 추가하고 선택된 범위를 다시 누르면 해제한다", () => {
   const maxCols = 5;

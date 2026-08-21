@@ -2976,7 +2976,7 @@
   /* CSV 페이지 네비 — 선택 바 안에 합쳐져 같은 줄에 표시(구분선으로 선택 컨트롤과 분리) */
   .csv-pagenav{display:inline-flex;align-items:center;gap:8px;padding-right:10px;margin-right:2px;border-right:1px solid var(--border)}
   .csv-pagestatus{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .xlsx-sheet{max-width:1080px;margin:0 auto;background:#fff;border-radius:8px;overflow:auto;
+  .xlsx-sheet{position:relative;max-width:1080px;margin:0 auto;background:#fff;border-radius:8px;overflow:auto;
     max-height:calc(100vh - 160px);box-shadow:0 4px 18px rgba(15,23,42,.12)}
   .xlsx-sheet.xlsx-virtualized{height:calc(100vh - 220px);min-height:320px}
   .xlsx-sheet table{border-collapse:collapse;font-size:13px;width:100%}
@@ -3011,6 +3011,7 @@
   .xlsx-export-label{font-size:12.5px;color:var(--muted)}
   .xlsx-export button{font:inherit;font-size:12px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 11px;cursor:pointer}
   .xlsx-export button:hover{background:var(--panel-hover)}
+  .xlsx-export button:disabled{opacity:.5;cursor:default}
   .xlsx-export-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .xlsx-export-btns[hidden]{display:none}
   .xlsx-export.editing{justify-content:space-between;margin-bottom:8px;padding:0 2px}
@@ -3022,6 +3023,17 @@
   .xlsx-view-options-label{color:var(--muted);font-size:11px;font-weight:700}
   .xlsx-view-options input{margin:0;accent-color:var(--accent)}
   .xlsx-editmode-btn.active{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important}
+  .xlsx-image-layer{position:absolute;left:0;top:0;z-index:1;pointer-events:none;overflow:visible}
+  .xlsx-floating-picture{position:absolute;display:block;object-fit:contain;max-width:none;max-height:none;
+    filter:drop-shadow(0 1px 2px rgba(15,23,42,.16))}
+  .xlsx-floating-picture.is-error{display:none}
+  .xlsx-sheet td.xlsx-in-cell-image{height:64px;min-width:52px;padding:2px!important;text-align:center!important;
+    vertical-align:middle;white-space:normal!important;overflow:hidden}
+  .xlsx-cell-picture{display:block;width:100%;height:100%;min-height:48px;max-height:180px;object-fit:contain;margin:auto}
+  .xlsx-cell-picture.is-error{display:none}
+  .xlsx-image-placeholder{display:flex;align-items:center;justify-content:center;min-height:48px;padding:3px 5px;
+    border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;color:#475569;font-size:11.5px;line-height:1.35}
+  [data-theme="dark"] .xlsx-image-placeholder{background:#1e293b;color:#cbd5e1;border-color:#64748b}
   /* 편집·정렬·필터 도구막대 */
   .xlsx-editbar{display:flex;flex-direction:column;gap:6px;max-width:1080px;margin:0 auto 10px;padding:8px;
     border:1px solid var(--border);border-radius:11px;background:var(--panel);box-shadow:0 3px 12px rgba(15,23,42,.07);
@@ -3211,7 +3223,8 @@
   .xlsx-fmt-italic{font-style:italic;font-family:Georgia,'Times New Roman',serif}
   .xlsx-fmt-underline{text-decoration:underline}
   /* 자동 줄바꿈 켠 셀: 표(table-layout:fixed)에서도 여러 줄 표시 */
-  .xlsx-sheet td.xlsx-wrap{white-space:normal!important;word-break:break-word;text-overflow:clip}
+  .xlsx-sheet td.xlsx-wrap,.xlsx-sheet td.xlsx-source-wrap{
+    white-space:normal!important;word-break:break-word;text-overflow:clip;line-height:1.45}
   /* 편집 모드: 병합 위치 힌트(격자는 평평하게 유지, 읽기 전용에서 실제로 합쳐 그림) */
   .xlsx-sheet td.xlsx-merged-anchor{box-shadow:inset 0 0 0 1px var(--accent),var(--cell-border,0 0 transparent)}
   .xlsx-sheet td.xlsx-merged-cover{background-image:repeating-linear-gradient(135deg,transparent,transparent 5px,rgba(99,102,241,.14) 5px,rgba(99,102,241,.14) 6px)}

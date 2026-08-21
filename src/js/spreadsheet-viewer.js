@@ -37,7 +37,7 @@ function tightenSheetRange(ws){
   for (const k in ws){
     if (k.charCodeAt(0) === 33) continue;                       // "!" 로 시작하는 메타 키 제외
     const c = ws[k];
-    if (c == null || c.v === undefined || c.v === "") continue; // 값이 있는 셀만 집계
+    if (c == null || ((c.v === undefined || c.v === "") && !c.f)) continue; // 값/수식이 있는 셀만 집계
     const a = XLSX.utils.decode_cell(k);
     if (a.r > maxR) maxR = a.r;
     if (a.c > maxC) maxC = a.c;
@@ -49,6 +49,267 @@ function tightenSheetRange(ws){
     if (Array.isArray(ws["!merges"]))
       ws["!merges"] = ws["!merges"].filter(m => m.s.r <= maxR && m.s.c <= maxC);
   }
+}
+
+const SPREADSHEET_IMAGE_MIMES = {
+  png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", gif:"image/gif", webp:"image/webp",
+  bmp:"image/bmp", ico:"image/x-icon", tif:"image/tiff", tiff:"image/tiff"
+};
+
+function spreadsheetImageMime(extension){
+  return SPREADSHEET_IMAGE_MIMES[String(extension || "").replace(/^\./, "").toLowerCase()] || "application/octet-stream";
+}
+
+function spreadsheetDecodeCellAddress(address){
+  const match = String(address || "").toUpperCase().match(/^([A-Z]+)([1-9]\d*)$/);
+  if (!match) return null;
+  let col = 0;
+  for (const ch of match[1]) col = col * 26 + ch.charCodeAt(0) - 64;
+  return { r:Number(match[2]) - 1, c:col - 1 };
+}
+
+function spreadsheetXmlDecode(value){
+  return String(value == null ? "" : value)
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+}
+
+function spreadsheetXmlAttr(tag, name){
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(tag || "").match(new RegExp("(?:^|\\s)" + escaped + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i"));
+  return match ? spreadsheetXmlDecode(match[2]) : "";
+}
+
+function spreadsheetXmlTags(xml, name){
+  const re = new RegExp("<(?:[A-Za-z_][\\w.-]*:)?" + name + "\\b[^>]*\\/?>", "gi");
+  return String(xml || "").match(re) || [];
+}
+
+function spreadsheetXmlBlocks(xml, name){
+  const re = new RegExp("<((?:[A-Za-z_][\\w.-]*:)?" + name + ")\\b([^>]*)>([\\s\\S]*?)<\\/\\1\\s*>", "gi");
+  const blocks = [];
+  let match;
+  while ((match = re.exec(String(xml || "")))) blocks.push({ tag:"<" + match[1] + match[2] + ">", inner:match[3] });
+  return blocks;
+}
+
+function spreadsheetPackagePath(basePart, target){
+  const raw = String(target || "").replace(/\\/g, "/");
+  if (!raw) return "";
+  const pieces = (raw[0] === "/" ? raw.slice(1) : String(basePart || "").replace(/\/[^/]*$/, "/") + raw).split("/");
+  const out = [];
+  pieces.forEach(piece => {
+    if (!piece || piece === ".") return;
+    if (piece === "..") out.pop(); else out.push(piece);
+  });
+  return out.join("/");
+}
+
+function spreadsheetPackageRelsPath(partPath){
+  const path = String(partPath || "").replace(/\\/g, "/");
+  const slash = path.lastIndexOf("/");
+  return path.slice(0, slash + 1) + "_rels/" + path.slice(slash + 1) + ".rels";
+}
+
+function spreadsheetZipText(zip, path){
+  try { const entry = zip && zip.file(path); return entry ? entry.asText() : ""; }
+  catch(_){ return ""; }
+}
+
+function spreadsheetRelationshipMap(zip, partPath){
+  const xml = spreadsheetZipText(zip, spreadsheetPackageRelsPath(partPath));
+  const map = new Map();
+  spreadsheetXmlTags(xml, "Relationship").forEach(tag => {
+    const id = spreadsheetXmlAttr(tag, "Id");
+    if (!id) return;
+    map.set(id, {
+      target:spreadsheetPackagePath(partPath, spreadsheetXmlAttr(tag, "Target")),
+      type:spreadsheetXmlAttr(tag, "Type"), external:/^external$/i.test(spreadsheetXmlAttr(tag, "TargetMode"))
+    });
+  });
+  return map;
+}
+
+function spreadsheetFindPackagePart(zip, folder, rootName){
+  const prefix = String(folder || "").replace(/\\/g, "/").replace(/\/?$/, "/");
+  const root = new RegExp("<\\s*(?:[A-Za-z_][\\w.-]*:)?" + rootName + "\\b", "i");
+  for (const path of Object.keys(zip && zip.files || {})){
+    if (!path.startsWith(prefix) || !/\.xml$/i.test(path) || /\/_rels\//i.test(path)) continue;
+    const text = spreadsheetZipText(zip, path);
+    if (root.test(text)) return { path, text };
+  }
+  return null;
+}
+
+function spreadsheetPackageSheetParts(zip){
+  const workbookPath = "xl/workbook.xml";
+  const workbookXml = spreadsheetZipText(zip, workbookPath);
+  const rels = spreadsheetRelationshipMap(zip, workbookPath);
+  const result = [];
+  spreadsheetXmlTags(workbookXml, "sheet").forEach(tag => {
+    const id = spreadsheetXmlAttr(tag, "r:id") || spreadsheetXmlAttr(tag, "id");
+    const rel = rels.get(id);
+    if (rel && rel.target) result.push({ name:spreadsheetXmlAttr(tag, "name"), path:rel.target });
+  });
+  return result;
+}
+
+/* Excel 365의 '셀에 배치' 그림은 drawing 이 아니라 Rich Value 메타데이터로 저장된다.
+   SheetJS/ExcelJS가 셀 값으로 노출하지 않으므로 OOXML 관계만 좁게 읽어 원본 바이트와 셀 주소를 연결한다. */
+function spreadsheetPackageImageInfo(bytes, ZipCtor){
+  const Empty = () => ({ sheets:new Map(), hasRichImages:false, hasDrawingParts:false, parseError:false });
+  const Ctor = ZipCtor || (typeof JSZip !== "undefined" ? JSZip : null);
+  if (!Ctor) return Empty();
+  let zip;
+  try { zip = new Ctor(bytes); } catch(_){ const out = Empty(); out.parseError = true; return out; }
+  const paths = Object.keys(zip.files || {});
+  const result = Empty();
+  result.hasDrawingParts = paths.some(path => /^xl\/drawings\/drawing\d+\.xml$/i.test(path));
+  const metadataXml = spreadsheetZipText(zip, "xl/metadata.xml");
+  const structuresPart = spreadsheetFindPackagePart(zip, "xl/richData", "rvStructures");
+  const dataPart = spreadsheetFindPackagePart(zip, "xl/richData", "rvData");
+  const relListPart = spreadsheetFindPackagePart(zip, "xl/richData", "richValueRels");
+  if (!metadataXml || !structuresPart || !dataPart || !relListPart) return result;
+
+  const structures = spreadsheetXmlBlocks(structuresPart.text, "s").map(block => ({
+    type:spreadsheetXmlAttr(block.tag, "t"),
+    keys:spreadsheetXmlTags(block.inner, "k").map(tag => spreadsheetXmlAttr(tag, "n"))
+  }));
+  if (!structures.some(structure => /^_localimage$/i.test(structure.type))){
+    result.hasRichImages = structures.some(structure => /^_(?:localimage|webimage)$/i.test(structure.type));
+    return result;
+  }
+  result.hasRichImages = true;
+
+  const richValues = spreadsheetXmlBlocks(dataPart.text, "rv").map(block => ({
+    structure:Number(spreadsheetXmlAttr(block.tag, "s") || 0),
+    values:spreadsheetXmlBlocks(block.inner, "v").map(value => spreadsheetXmlDecode(String(value.inner).replace(/<[^>]*>/g, "")))
+  }));
+  const valueMetadataBlock = spreadsheetXmlBlocks(metadataXml, "valueMetadata")[0];
+  const metadataValues = valueMetadataBlock ? spreadsheetXmlBlocks(valueMetadataBlock.inner, "bk").map(block => {
+    const rc = spreadsheetXmlTags(block.inner, "rc")[0] || "";
+    return Number(spreadsheetXmlAttr(rc, "v"));
+  }) : [];
+  const richRelIds = spreadsheetXmlTags(relListPart.text, "rel").map(tag => spreadsheetXmlAttr(tag, "r:id") || spreadsheetXmlAttr(tag, "id"));
+  const relTargets = spreadsheetRelationshipMap(zip, relListPart.path);
+
+  spreadsheetPackageSheetParts(zip).forEach(sheet => {
+    const sheetXml = spreadsheetZipText(zip, sheet.path);
+    const images = [];
+    spreadsheetXmlTags(sheetXml, "c").forEach(cellTag => {
+      const vm = Number(spreadsheetXmlAttr(cellTag, "vm"));
+      if (!(vm > 0)) return;
+      const richIndex = metadataValues[vm - 1];
+      const rich = richValues[richIndex];
+      const structure = rich && structures[rich.structure];
+      if (!rich || !structure || !/^_localimage$/i.test(structure.type)) return;
+      const relKey = structure.keys.findIndex(key => /^_rvrel:localimageidentifier$/i.test(key));
+      if (relKey < 0) return;
+      const relationId = richRelIds[Number(rich.values[relKey])];
+      const relation = relTargets.get(relationId);
+      const entry = relation && !relation.external && zip.file(relation.target);
+      if (!entry) return;
+      const address = spreadsheetXmlAttr(cellTag, "r");
+      const decoded = spreadsheetDecodeCellAddress(address);
+      if (!decoded) return;
+      const textKey = structure.keys.findIndex(key => /^text$/i.test(key));
+      const extension = String(relation.target || "").match(/\.([^.\/]+)$/);
+      let imageBytes;
+      try { imageBytes = entry.asUint8Array(); } catch(_){ return; }
+      images.push({
+        kind:"cell", row:decoded.r, col:decoded.c, address,
+        bytes:imageBytes, mime:spreadsheetImageMime(extension && extension[1]),
+        alt:textKey >= 0 ? rich.values[textKey] || "셀 이미지" : "셀 이미지"
+      });
+    });
+    if (images.length) result.sheets.set(sheet.name, images);
+  });
+  return result;
+}
+
+function spreadsheetImageFormulaInfo(formula){
+  const source = String(formula == null ? "" : formula).trim().replace(/^=/, "");
+  const match = source.match(/^(?:_xlfn\.)?IMAGE\s*\(([\s\S]*)\)$/i);
+  if (!match) return null;
+  const args = [];
+  let current = "", quoted = false;
+  for (let i = 0; i < match[1].length; i++){
+    const ch = match[1][i];
+    if (ch === '"'){
+      if (quoted && match[1][i + 1] === '"'){ current += '"'; i++; continue; }
+      quoted = !quoted; continue;
+    }
+    if (ch === "," && !quoted){ args.push(current.trim()); current = ""; } else current += ch;
+  }
+  args.push(current.trim());
+  return {
+    kind:"formula", source:args[0] || "", alt:args[1] || "웹 이미지",
+    sizing:args[2] === "" || args[2] == null ? 0 : Number(args[2]),
+    height:Number(args[3]) || 0, width:Number(args[4]) || 0
+  };
+}
+
+function spreadsheetFormulaImages(workbook){
+  const sheets = new Map();
+  if (!workbook || !workbook.SheetNames) return sheets;
+  workbook.SheetNames.forEach(name => {
+    const ws = workbook.Sheets[name], images = [];
+    for (const address in (ws || {})){
+      if (address[0] === "!") continue;
+      const cell = ws[address], info = spreadsheetImageFormulaInfo(cell && cell.f);
+      if (!info) continue;
+      const decoded = XLSX.utils.decode_cell(address);
+      images.push({ ...info, row:decoded.r, col:decoded.c, address });
+    }
+    if (images.length) sheets.set(name, images);
+  });
+  return sheets;
+}
+
+function spreadsheetFloatingImageDescriptors(workbook, sheetName){
+  const sheet = workbook && typeof workbook.getWorksheet === "function" ? workbook.getWorksheet(sheetName) : null;
+  const images = sheet && typeof sheet.getImages === "function" ? sheet.getImages() : [];
+  return (Array.isArray(images) ? images : []).map(item => {
+    const media = workbook && typeof workbook.getImage === "function" ? workbook.getImage(Number(item.imageId)) : null;
+    if (!media || !media.buffer) return null;
+    const anchor = point => point ? {
+      row:Number.isFinite(Number(point.row)) ? Number(point.row) : Number(point.nativeRow) || 0,
+      col:Number.isFinite(Number(point.col)) ? Number(point.col) : Number(point.nativeCol) || 0,
+      nativeRow:Number(point.nativeRow) || 0, nativeCol:Number(point.nativeCol) || 0
+    } : null;
+    return {
+      kind:"floating", bytes:media.buffer, mime:spreadsheetImageMime(media.extension), alt:String(media.name || "시트 그림"),
+      tl:anchor(item.range && item.range.tl), br:anchor(item.range && item.range.br),
+      ext:item.range && item.range.ext ? { width:Number(item.range.ext.width) || 0, height:Number(item.range.ext.height) || 0 } : null
+    };
+  }).filter(Boolean);
+}
+
+async function spreadsheetIsolateWorksheetBytes(bytes, sheetName, ExcelCtor){
+  const Excel = ExcelCtor || (typeof ExcelJS !== "undefined" ? ExcelJS : null);
+  if (!Excel || !bytes) return null;
+  const workbook = new Excel.Workbook();
+  await workbook.xlsx.load(bytes);
+  for (const worksheet of [...workbook.worksheets]){
+    if (worksheet.name !== sheetName) workbook.removeWorksheet(worksheet.id);
+  }
+  if (!workbook.getWorksheet(sheetName)) return null;
+  return workbook.xlsx.writeBuffer();
+}
+
+function spreadsheetExtendSheetRangeForImages(ws, images){
+  if (!ws || !images || !images.length || typeof XLSX === "undefined") return;
+  let range;
+  try { range = XLSX.utils.decode_range(ws["!ref"] || "A1"); } catch(_){ range = { s:{ r:0, c:0 }, e:{ r:0, c:0 } }; }
+  images.forEach(image => {
+    const row = image.kind === "floating" ? Math.ceil((image.br && image.br.row) || (image.tl && image.tl.row) || 0) : image.row;
+    const col = image.kind === "floating" ? Math.ceil((image.br && image.br.col) || (image.tl && image.tl.col) || 0) : image.col;
+    range.e.r = Math.max(range.e.r, Number(row) || 0);
+    range.e.c = Math.max(range.e.c, Number(col) || 0);
+  });
+  ws["!ref"] = XLSX.utils.encode_range(range);
 }
 
 // 텍스트 인코딩 자동 판별(코드페이지 없는 파일용): UTF-16 BOM → 해당 인코딩, 아니면 "엄격 UTF-8"을
@@ -913,6 +1174,28 @@ function setupSheetResize(sheet, table, colRow, rows, label){
 // 화면 픽셀 → 엑셀 단위 변환(열 폭=문자 수, 행 높이=포인트)
 function pxToExcelColWidth(px){ return Math.max(1, Math.round(((Number(px) || 0) - 5) / 7 * 100) / 100); }
 function pxToExcelRowHeight(px){ return Math.max(6, Math.round((Number(px) || 0) * 0.75 * 100) / 100); }
+function excelColWidthToPx(width){ return Math.max(32, Math.round((Number(width) || 0) * 7 + 5)); }
+function excelRowHeightToPx(height){ return Math.max(22, Math.round((Number(height) || 0) / 0.75)); }
+
+// ExcelJS가 읽은 원본 열 폭·행 높이·자동 줄바꿈을 화면 단위로 정규화한다.
+// 일반 삽입 그림(oneCellAnchor)은 픽셀 크기를 그대로 갖기 때문에, 이 레이아웃이 먼저 적용돼야
+// 각 그림이 Excel에서처럼 자기 행과 열에 맞춰 보이고 다음 행의 그림과 겹치지 않는다.
+function spreadsheetWorksheetDisplayLayout(workbook, sheetName){
+  const worksheet = workbook && typeof workbook.getWorksheet === "function" ? workbook.getWorksheet(sheetName) : null;
+  const layout = { columns:{}, rows:{}, wrapCells:[] };
+  if (!worksheet) return layout;
+  (worksheet.columns || []).forEach((column, index) => {
+    if (column && Number(column.width) > 0) layout.columns[index] = excelColWidthToPx(column.width);
+  });
+  if (typeof worksheet.eachRow === "function") worksheet.eachRow({ includeEmpty:true }, (row, rowNumber) => {
+    if (row && Number(row.height) > 0) layout.rows[rowNumber - 1] = excelRowHeightToPx(row.height);
+    if (!row || typeof row.eachCell !== "function") return;
+    row.eachCell({ includeEmpty:false }, (cell, colNumber) => {
+      if (cell && cell.alignment && cell.alignment.wrapText) layout.wrapCells.push({ row:rowNumber - 1, col:colNumber - 1 });
+    });
+  });
+  return layout;
+}
 
 // CSV 첫 줄이 머리글(컬럼명)인지 실제 데이터인지 추정한다.
 // 숫자 위주 열인데 첫 줄만 텍스트면 머리글, 첫 줄도 숫자면 데이터. 애매하면 기존 동작대로 머리글로 본다.
@@ -1404,6 +1687,15 @@ async function renderXlsx(file, host, doc){
   }
   if (!wb || !wb.SheetNames.length){ host.textContent = "시트가 없습니다."; return; }
   if (!csvFastAoa) wb.SheetNames.forEach(n => tightenSheetRange(wb.Sheets[n]));   // 부풀려진 시트 크기 보정(속도)
+  let packageImageInfo = { sheets:new Map(), hasRichImages:false, hasDrawingParts:false, parseError:false };
+  if (!csvFastAoa){
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("jszip");
+    packageImageInfo = spreadsheetPackageImageInfo(bytes);
+  }
+  const formulaImageSheets = spreadsheetFormulaImages(wb);
+  // ExcelJS가 아직 보존하지 못하는 Rich Value/IMAGE 수식을 편집 저장하면 셀 그림이 사라질 수 있다.
+  // 이런 파일은 원본 바이트 다운로드와 읽기 전용 표시만 허용한다.
+  const imageProtectedWorkbook = !!packageImageInfo.hasRichImages || formulaImageSheets.size > 0;
   const tabs = document.createElement("div"); tabs.className = "xlsx-tabs";
   const sheet = document.createElement("div"); sheet.className = "xlsx-sheet";
 
@@ -1414,7 +1706,12 @@ async function renderXlsx(file, host, doc){
   const expLabel = document.createElement("span"); expLabel.className = "xlsx-export-label"; expLabel.textContent = "내보내기:";
   const mkExp = (text, title, fn) => {
     const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.title = title;
-    b.addEventListener("click", () => { try { fn(); } catch(e){ console.error(e); toast("내보내지 못했어요.", 2200); } });
+    b.addEventListener("click", async () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      try { await fn(); } catch(e){ console.error(e); toast("내보내지 못했어요.", 2200); }
+      finally { b.disabled = false; }
+    });
     return b;
   };
   // 편집 모델이 있으면 그 값(수식 계산 결과 포함)으로 내보내기용 시트를 만든다.
@@ -1436,10 +1733,13 @@ async function renderXlsx(file, host, doc){
     downloadSpreadsheetFile(csv, base + "_" + sanitizeFilePart(currentSheet) + ".csv", "text/csv;charset=utf-8");
     toast("현재 시트를 CSV로 저장했어요.", 1800, { type: "success" });
   });
-  const sheetXlsxBtn = mkExp("현재 시트 XLSX", "현재 시트만 새 XLSX 파일로 저장(시트 분리)", () => {
-    const nb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(nb, exportSheetOf(currentSheet), sanitizeFilePart(currentSheet).slice(0, 31) || "Sheet1");
-    const out = XLSX.write(nb, { type: "array", bookType: "xlsx" });
+  const sheetXlsxBtn = mkExp("현재 시트 XLSX", "현재 시트만 새 XLSX 파일로 저장(그림·서식 보존)", async () => {
+    if (imageProtectedWorkbook){
+      toast("셀 이미지가 있는 파일은 손실 방지를 위해 '전체 XLSX'로 원본을 저장해 주세요.", 3600, { type:"warning" });
+      return;
+    }
+    const out = await exportCurrentSheetExBytes(currentSheet);
+    if (!out) throw new Error("xlsx-sheet-export");
     downloadSpreadsheetFile(out, base + "_" + sanitizeFilePart(currentSheet) + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     toast("현재 시트를 XLSX로 저장했어요.", 1800, { type: "success" });
   });
@@ -1447,37 +1747,37 @@ async function renderXlsx(file, host, doc){
   const expBtns = document.createElement("div"); expBtns.className = "xlsx-export-btns";
   const printBtn = mkExp("인쇄·PDF", "현재 시트를 프린터로 인쇄하거나 PDF로 저장", () => printCurrentSheet());
   expBtns.append(expLabel, csvBtn, sheetXlsxBtn, printBtn);
-  if (wb.SheetNames.length > 1){
-    expBtns.append(mkExp("전체 XLSX", "모든 시트를 한 XLSX 파일로 저장", () => {
-      let out;
-      if (Object.keys(exModels).length){                       // 편집한 시트가 있으면 편집 반영본으로 재구성
-        const nb = XLSX.utils.book_new();
-        wb.SheetNames.forEach(n => XLSX.utils.book_append_sheet(nb, exportSheetOf(n), n.slice(0, 31) || "Sheet1"));
-        out = XLSX.write(nb, { type: "array", bookType: "xlsx" });
-      } else {
-        out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-      }
+  if (wb.SheetNames.length > 1 || imageProtectedWorkbook){
+    expBtns.append(mkExp(wb.SheetNames.length > 1 ? "전체 XLSX" : "원본 XLSX",
+      "모든 시트와 그림을 보존해 XLSX 파일로 저장", async () => {
+      // 수정하지 않은 원본은 재직렬화하지 않아 최신 셀 이미지와 알 수 없는 OOXML 확장까지 그대로 보존한다.
+      const out = (!anyDirty && !csvFastAoa) ? bytes : await exportExBytes();
+      if (!out) throw new Error("xlsx-workbook-export");
       downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      toast("전체 시트를 XLSX로 저장했어요.", 1800, { type: "success" });
+      toast(wb.SheetNames.length > 1 ? "전체 시트를 XLSX로 저장했어요." : "원본 XLSX를 저장했어요.", 1800, { type: "success" });
     }));
   }
 
   // ===== 편집·정렬·필터 모드 (ExcelJS 백엔드 — 셀 서식·색·글꼴·번호서식·병합·수식 보존) =====
   // 보기 모드는 SheetJS(sheet_to_html) 유지. 편집은 원본 바이트를 ExcelJS 로 읽어 '편집한 셀만' 되돌려 써서
   // 손대지 않은 셀의 서식·수식·병합을 그대로 보존한다. 정렬/행·열 구조 변경이 일어난 시트만 전체 재작성.
-  let editMode = !!(doc && doc.isScratch);
+  let editMode = !!(doc && doc.isScratch) && !imageProtectedWorkbook;
   let viewOptions = null;
   const editTitle = document.createElement("strong"); editTitle.className = "xlsx-edit-title"; editTitle.textContent = "편집 도구";
   const editToggle = document.createElement("button"); editToggle.type = "button"; editToggle.className = "xlsx-editmode-btn";
   editToggle.title = "셀 편집·정렬·필터 모드 (저장 시 서식 보존)";
   const syncEditToggle = () => {
-    editToggle.textContent = editMode ? "읽기 전용" : "표 편집·정렬";
-    editToggle.title = editMode ? "편집을 마치고 읽기 전용으로 전환" : "셀 편집·정렬·필터 모드로 전환";
+    editToggle.textContent = imageProtectedWorkbook ? "셀 이미지 · 읽기 전용" : (editMode ? "읽기 전용" : "표 편집·정렬");
+    editToggle.title = imageProtectedWorkbook ? "셀 이미지를 손실 없이 보존하기 위해 이 파일은 읽기 전용으로 엽니다."
+      : (editMode ? "편집을 마치고 읽기 전용으로 전환" : "셀 편집·정렬·필터 모드로 전환");
     editToggle.classList.toggle("active", editMode);
     editTitle.hidden = !editMode;
     if (viewOptions) viewOptions.hidden = !editMode;
     exp.classList.toggle("editing", editMode);
   };
+  if (imageProtectedWorkbook){
+    editToggle.disabled = true;
+  }
   syncEditToggle();
   editToggle.addEventListener("click", () => { editMode = !editMode; syncEditToggle(); rerender(); });
   exp.append(editTitle, editToggle, expBtns);
@@ -1509,6 +1809,31 @@ async function renderXlsx(file, host, doc){
     }
     try { exWb = await exLoadPromise; } catch(e){ console.error(e); exWb = null; exLoadPromise = null; }
     return exWb;
+  };
+  const floatingImageSheets = new Map();
+  const sourceLayoutSheets = new Map();
+  let spreadsheetMediaPrepared = false;
+  const ensureSpreadsheetMedia = async () => {
+    if (spreadsheetMediaPrepared) return;
+    spreadsheetMediaPrepared = true;
+    if (packageImageInfo.hasDrawingParts){
+      const workbook = await ensureExWb();
+      if (workbook){
+        wb.SheetNames.forEach(name => {
+          sourceLayoutSheets.set(name, spreadsheetWorksheetDisplayLayout(workbook, name));
+          const images = spreadsheetFloatingImageDescriptors(workbook, name);
+          if (images.length) floatingImageSheets.set(name, images);
+        });
+      }
+    }
+    wb.SheetNames.forEach(name => {
+      const images = [
+        ...(packageImageInfo.sheets.get(name) || []),
+        ...(formulaImageSheets.get(name) || []),
+        ...(floatingImageSheets.get(name) || [])
+      ];
+      spreadsheetExtendSheetRangeForImages(wb.Sheets[name], images);
+    });
   };
 
   // ----- 셀 값/표시 헬퍼 -----
@@ -3426,7 +3751,120 @@ async function renderXlsx(file, host, doc){
   fillHandle.addEventListener("pointerup", endFill);
   fillHandle.addEventListener("pointercancel", endFill);
 
+  let spreadsheetImageUrls = [];
+  let spreadsheetImageRenderToken = 0;
+  const clearSpreadsheetImages = () => {
+    spreadsheetImageRenderToken++;
+    spreadsheetImageUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch(_){} });
+    spreadsheetImageUrls = [];
+    sheet.querySelectorAll(".xlsx-image-layer").forEach(layer => layer.remove());
+  };
+  if (doc){
+    doc.cleanupFns.push(() => clearSpreadsheetImages());
+  }
+  const spreadsheetImageUrl = (image) => {
+    if (!image || !image.bytes || typeof URL === "undefined" || typeof Blob === "undefined") return "";
+    const url = URL.createObjectURL(new Blob([image.bytes], { type:image.mime || "application/octet-stream" }));
+    spreadsheetImageUrls.push(url);
+    return url;
+  };
+  const spreadsheetDomCell = (row, col) => {
+    const modelCell = sheet.querySelector('td[data-mrow="' + row + '"][data-mcol="' + col + '"]');
+    if (modelCell) return modelCell;
+    const table = sheet.querySelector("table");
+    if (!table) return null;
+    const rows = [...table.rows].filter(tr => !tr.classList.contains("sheet-col-row") && !tr.classList.contains("xlsx-virtual-spacer"));
+    const tr = rows[row];
+    if (!tr) return null;
+    let logicalCol = 0;
+    for (const cell of [...tr.cells]){
+      if (cell.classList.contains("sheet-row-head")) continue;
+      const span = Math.max(1, Number(cell.colSpan) || 1);
+      if (col >= logicalCol && col < logicalCol + span) return cell;
+      logicalCol += span;
+    }
+    return null;
+  };
+  const primeSpreadsheetSourceLayout = (name) => {
+    const layout = sourceLayoutSheets.get(name);
+    if (!layout) return;
+    if (!sheet.__sheetSizes) sheet.__sheetSizes = {};
+    const sizes = sheet.__sheetSizes[name] || (sheet.__sheetSizes[name] = { col:{}, row:{} });
+    if (!sizes.col) sizes.col = {};
+    if (!sizes.row) sizes.row = {};
+    Object.keys(layout.columns || {}).forEach(col => {
+      if (sizes.col[col] == null) sizes.col[col] = layout.columns[col];
+    });
+    Object.keys(layout.rows || {}).forEach(row => {
+      if (sizes.row[row] == null) sizes.row[row] = layout.rows[row];
+    });
+  };
+  const decorateSpreadsheetSourceLayout = (name) => {
+    const layout = sourceLayoutSheets.get(name);
+    if (!layout) return;
+    (layout.wrapCells || []).forEach(point => {
+      const cell = spreadsheetDomCell(point.row, point.col);
+      if (cell) cell.classList.add("xlsx-source-wrap");
+    });
+  };
+  const spreadsheetAnchorPoint = (anchor) => {
+    if (!anchor) return null;
+    const row = Math.max(0, Math.floor(Number(anchor.row) || 0));
+    const col = Math.max(0, Math.floor(Number(anchor.col) || 0));
+    const cell = spreadsheetDomCell(row, col);
+    if (!cell) return null;
+    const sheetRect = sheet.getBoundingClientRect(), cellRect = cell.getBoundingClientRect();
+    return {
+      x:cellRect.left - sheetRect.left + sheet.scrollLeft + (Number(anchor.col) - col) * cellRect.width,
+      y:cellRect.top - sheetRect.top + sheet.scrollTop + (Number(anchor.row) - row) * cellRect.height
+    };
+  };
+  const renderSpreadsheetImages = (name) => {
+    clearSpreadsheetImages();
+    const token = spreadsheetImageRenderToken;
+    const occupied = new Set();
+    const localImages = packageImageInfo.sheets.get(name) || [];
+    localImages.forEach(image => {
+      const cell = spreadsheetDomCell(image.row, image.col), url = spreadsheetImageUrl(image);
+      if (!cell || !url) return;
+      occupied.add(image.row + "," + image.col);
+      const picture = document.createElement("img");
+      picture.className = "xlsx-cell-picture"; picture.src = url; picture.alt = image.alt || "셀 이미지"; picture.draggable = false;
+      picture.title = image.alt || "셀 이미지";
+      picture.addEventListener("error", () => { if (token === spreadsheetImageRenderToken) picture.classList.add("is-error"); });
+      cell.classList.add("xlsx-in-cell-image");
+      cell.replaceChildren(picture);
+    });
+    (formulaImageSheets.get(name) || []).forEach(image => {
+      if (occupied.has(image.row + "," + image.col)) return;
+      const cell = spreadsheetDomCell(image.row, image.col);
+      if (!cell) return;
+      const note = document.createElement("span"); note.className = "xlsx-image-placeholder";
+      const label = String(image.alt || "웹 이미지").trim() || "웹 이미지";
+      note.textContent = "🖼 " + label;
+      note.title = "IMAGE() 원격 그림은 오프라인·보안 정책상 자동 접속하지 않습니다. 원본: " + (image.source || "수식 참조");
+      cell.classList.add("xlsx-in-cell-image", "xlsx-formula-image");
+      cell.replaceChildren(note);
+    });
+    const floating = floatingImageSheets.get(name) || [];
+    if (!floating.length) return;
+    const layer = document.createElement("div"); layer.className = "xlsx-image-layer"; layer.setAttribute("aria-hidden", "true");
+    sheet.appendChild(layer);
+    floating.forEach(image => {
+      const start = spreadsheetAnchorPoint(image.tl), end = spreadsheetAnchorPoint(image.br), url = spreadsheetImageUrl(image);
+      if (!start || !url) return;
+      const picture = document.createElement("img");
+      picture.className = "xlsx-floating-picture"; picture.src = url; picture.alt = ""; picture.draggable = false;
+      picture.style.left = Math.max(0, start.x) + "px"; picture.style.top = Math.max(0, start.y) + "px";
+      picture.style.width = Math.max(1, end ? end.x - start.x : (image.ext && image.ext.width) || 96) + "px";
+      picture.style.height = Math.max(1, end ? end.y - start.y : (image.ext && image.ext.height) || 72) + "px";
+      picture.addEventListener("error", () => { if (token === spreadsheetImageRenderToken) picture.classList.add("is-error"); });
+      layer.appendChild(picture);
+    });
+  };
+
   const renderReadonly = (name) => {
+    clearSpreadsheetImages();
     formulaBar.hidden = true;
     clearVirtualEditor();
     if (exModels[name]){                          // 편집한 적 있으면 모델 값으로(편집 반영). 서식 표시는 유지, 색/병합은 보기에선 단순화.
@@ -3437,12 +3875,16 @@ async function renderXlsx(file, host, doc){
       sheet.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[name], { editable: false });
     }
     sheet.scrollTop = 0;
+    primeSpreadsheetSourceLayout(name);
     enhanceSpreadsheetSelection(sheet, name, {
       isCellEmpty:exModels[name] ? modelNavigationCellEmpty(exModels[name]) : undefined
     });
+    decorateSpreadsheetSourceLayout(name);
+    renderSpreadsheetImages(name);
   };
 
   const renderEditable = (name, options={}) => {
+    clearSpreadsheetImages();
     syncSpreadsheetDirtyState(true);
     const model = exModels[name];
     if (!model){ sheet.textContent = "편집 데이터를 불러오는 중…"; return; }
@@ -3455,6 +3897,7 @@ async function renderXlsx(file, host, doc){
     }
     const table = tableFromModel(model, true);
     sheet.replaceChildren(table); sheet.scrollTop = 0;
+    primeSpreadsheetSourceLayout(name);
     enhanceSpreadsheetSelection(sheet, name, {
       editable:true,
       onSelectionChange:onCellSelect,
@@ -3463,6 +3906,8 @@ async function renderXlsx(file, host, doc){
     bindEditableTable(table, name);
     decorateFilterHeads();
     updateFormulaBar();
+    decorateSpreadsheetSourceLayout(name);
+    renderSpreadsheetImages(name);
   };
 
   // 셀에 입력값(리터럴 또는 =수식)을 반영 — 셀 편집·수식 입력줄 공용. 변경되면 true.
@@ -4013,6 +4458,11 @@ async function renderXlsx(file, host, doc){
     });
     return await w.xlsx.writeBuffer();
   };
+  const exportCurrentSheetExBytes = async (name) => {
+    if (imageProtectedWorkbook) return null;
+    const full = await exportExBytes();
+    return spreadsheetIsolateWorksheetBytes(full, name);
+  };
   const flushSpreadsheetBackup = async () => {
     clearTimeout(spreadsheetRecoveryTimer);
     spreadsheetRecoveryTimer = 0;
@@ -4122,7 +4572,7 @@ async function renderXlsx(file, host, doc){
     if (quickSaving) return;
     quickSaving = true;
     try {
-      const out = await exportExBytes();
+      const out = (imageProtectedWorkbook && !anyDirty && !csvFastAoa) ? bytes : await exportExBytes();
       if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
       // 새로 만든 표의 첫 저장 — 아래 두 경로에는 저장 대화상자가 없으므로 파일 이름을 먼저 받는다(.py 저장과 동일).
       if (!(await askSpreadsheetScratchName())) return;
@@ -5120,7 +5570,8 @@ async function renderXlsx(file, host, doc){
     }
   };
 
-  rerender();
+  await ensureSpreadsheetMedia();
+  await rerender();
 }
 
 if (typeof module === "object" && module.exports){
@@ -5133,6 +5584,9 @@ if (typeof module === "object" && module.exports){
     parseClipboardTable,
     pxToExcelColWidth,
     pxToExcelRowHeight,
+    excelColWidthToPx,
+    excelRowHeightToPx,
+    spreadsheetWorksheetDisplayLayout,
     parseFormula,
     evaluateFormula,
     isFormulaError,
@@ -5156,6 +5610,13 @@ if (typeof module === "object" && module.exports){
     spreadsheetSelectionDragHitPoint,
     spreadsheetSelectionRangeCovered,
     spreadsheetSelectionRangeKeys,
+    spreadsheetImageMime,
+    spreadsheetPackageImageInfo,
+    spreadsheetImageFormulaInfo,
+    spreadsheetFormulaImages,
+    spreadsheetFloatingImageDescriptors,
+    spreadsheetIsolateWorksheetBytes,
+    spreadsheetExtendSheetRangeForImages,
     writeStructuredSpreadsheetModel
   };
 }
