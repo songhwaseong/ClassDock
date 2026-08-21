@@ -8,6 +8,10 @@
     "leaflet": {
       "src": "vendor/leaflet.css",
       "file": "leaflet.css"
+    },
+    "xterm": {
+      "src": "vendor/xterm.css",
+      "file": "xterm.css"
     }
   },
   "localScripts": [
@@ -65,6 +69,7 @@
     "whiteboard.js",
     "map-viewer.js",
     "timeline.js",
+    "remote-terminal.js",
     "lesson-replay.js",
     "diff-viewer.js",
     "batch-replace.js",
@@ -173,6 +178,7 @@
     {
       "name": "learning-tools",
       "scripts": [
+        "remote-terminal.js",
         "lesson-replay.js",
         "diff-viewer.js",
         "batch-replace.js",
@@ -385,6 +391,10 @@
     "command-palette.js": [
       "app.js"
     ],
+    "remote-terminal.js": [
+      "lazy.js",
+      "interaction-core.js"
+    ],
     "recent-files.js": [
       "documents.js"
     ]
@@ -554,6 +564,12 @@
     }
   ],
   "vendorScripts": [
+    {
+      "src": "vendor/xterm.js",
+      "file": "xterm.js",
+      "lazy": "xterm",
+      "sha384": "sha384-f/1U6Z9wM4D71a5eRXEZnyOTMOvjqxr2XLwh+Go1OvIl3L3tOcvUrzudnhbECwl4"
+    },
     {
       "src": "vendor/korean-hunspell-worker.js",
       "file": "korean-hunspell-worker.js",

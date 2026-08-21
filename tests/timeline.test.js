@@ -258,6 +258,29 @@ test("유적지 주소는 카드와 발표 화면에서 기존 지도 검색으�
   assert.match(source, /event\.placeAddress \|\| event\.placeName/);
 });
 
+test("연대표 항목 우클릭 메뉴는 수정·같은 시각 순서·지도·삭제를 제공한다", () => {
+  const root = path.join(__dirname, "..");
+  const source = fs.readFileSync(path.join(root, "src/js/timeline.js"), "utf8");
+  const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  const i18n = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
+  assert.match(source, /contextMenu\.className = "timeline-context-menu"/);
+  assert.match(source, /contextMenu\.setAttribute\("role", "menu"\)/);
+  assert.match(source, /workspace\.addEventListener\("contextmenu", onTimelineContextMenu\)/);
+  assert.match(source, /closest\("\.timeline-card,\.timeline-tick,\.timeline-overview-marker,\.timeline-list-item"\)/);
+  assert.match(source, /tick\.dataset\.timelineContextEventId = event\.id/);
+  assert.match(source, /contextEditBtn = timelineContextItem\(id => openEventDialog\(id\)\)/);
+  assert.match(source, /contextEarlierBtn\.disabled = !timelineCanMoveEvent\(model\.events, event\.id, -1\)/);
+  assert.match(source, /contextLaterBtn\.disabled = !timelineCanMoveEvent\(model\.events, event\.id, 1\)/);
+  assert.match(source, /contextMapBtn\.hidden = !\(event\.placeName \|\| event\.placeAddress\)/);
+  assert.match(source, /contextDeleteBtn = timelineContextItem\(id => removeEvent\(id\)\)/);
+  assert.match(source, /workspace\.removeEventListener\("contextmenu", onTimelineContextMenu\)/);
+  assert.match(source, /contextMenu\.remove\(\)/);
+  assert.match(styles, /\.timeline-context-menu\{position:fixed;z-index:1960/);
+  assert.match(styles, /\.timeline-context-menu\[hidden\]\{display:none\}/);
+  assert.match(styles, /\.timeline-context-menu button\.danger/);
+  assert.match(i18n, /"연대표 빠른 메뉴": "Timeline quick menu"/);
+});
+
 test("되돌리기 스냅샷은 사진 바이트를 복사하지 않고 참조로 공유한다", () => {
   const big = "data:image/jpeg;base64," + "A".repeat(200000);
   const model = timeline.timelineDocEmpty("사진 많은 연대표");

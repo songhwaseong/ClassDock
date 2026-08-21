@@ -19,6 +19,7 @@
 const MNLazy = (() => {
   // 묶음 정의 — files 는 "반드시 이 순서로" 실행해야 하는 vendor 파일 목록이다.
   const BUNDLES = {
+    xterm:       { label:"원격 터미널",         files:["xterm.js"] },
     spellcheck:  { label:"한국어 맞춤법 사전", files:["korean-hunspell-worker.js"] },
     jszip:       { label:"압축 읽기(JSZip)",   files:["jszip.min.js", "jszip-utils.min.js"] },
     zip:         { label:"압축 풀기",          files:["zip-full.min.js"] },

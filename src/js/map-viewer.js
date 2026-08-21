@@ -23,6 +23,7 @@ const MAP_PHOTO_MAX_DATA_CHARS = 900 * 1024;          // 한 장(약 660KB 원�
 const MAP_PHOTO_TOTAL_MAX_CHARS = 12 * 1024 * 1024;   // 한 지도의 사진 전체
 const MAP_PHOTO_MAX_SIDE = 1280;
 const MAP_CSV_MAX_MARKERS = 5000;
+const MAP_XLSX_IMPORT_MAX_BYTES = 50 * 1024 * 1024;
 /* 주소만 적힌 CSV 를 좌표로 바꿀 때의 상한. 한 줄에 한 번씩 검색을 부르므로(OSM 은 정책상 1초에
    한 건) 수업 시간 안에 끝나는 만큼만 받는다. */
 const MAP_GEOCODE_BATCH_MAX = 200;
@@ -479,6 +480,54 @@ function mapCsvRows(text){
   if (field || row.length){ row.push(field.replace(/\r$/, "")); rows.push(row); }
   return rows.filter(values => values.some(value => String(value).trim()));
 }
+
+/* 지도 표와 연대표 표는 둘 다 CSV를 쓰지만 첫 줄의 뜻이 다르다. `주소` 열이 있는 연대표를
+   지도 CSV로 먼저 읽으면 좌표는 찾더라도 제목·날짜·설명이 사라질 수 있으므로, 시작+제목 열이
+   함께 있으면 연대표 표로 먼저 판별한다. 실제 날짜 검증과 XLSX 해석은 timeline.js의 공용
+   해석기를 그대로 써서 연대표 화면과 결과가 갈라지지 않게 한다. */
+function mapCsvLooksLikeTimeline(text){
+  const rows = mapCsvRows(text);
+  if (!rows.length) return false;
+  const headers = rows[0].map(value => String(value).trim().toLowerCase());
+  const has = aliases => headers.some(header => aliases.includes(header));
+  return has(["시작", "시작일", "날짜", "연도", "start", "date", "year"])
+    && has(["제목", "사건", "일정", "title", "event"]);
+}
+
+/* 연대표 사건 → 주소를 찾아야 할 지도 표시.
+   - 부르는 쪽에서 timelineSortedEvents로 먼저 정렬해 넘기므로 이 배열 순서가 곧 지도 발표 순서다.
+   - 지도에는 rose 색이 없어 red로 대응하고, 나머지 색 ID는 두 문서가 같다.
+   - 지도 발표 화면도 사건 정보를 읽을 수 있도록 날짜·분류·장소·주소·설명을 메모에 함께 싣는다.
+   좌표 검색은 한 번에 최대 200곳이라는 지도 정책을 그대로 지킨다. */
+function mapTimelineEventsToPending(events){
+  const pending = [];
+  let noPlace = 0;
+  let overLimit = 0;
+  for (const event of (Array.isArray(events) ? events : [])){
+    const placeName = String(event && event.placeName || "").trim();
+    const address = String(event && event.placeAddress || "").trim();
+    const query = address || placeName;
+    if (!query){ noPlace++; continue; }
+    if (pending.length >= MAP_GEOCODE_BATCH_MAX){ overLimit++; continue; }
+    const start = String(event && event.start || "").trim();
+    const end = String(event && event.end || "").trim();
+    const when = start + (end ? " — " + end : "");
+    const title = String(event && event.title || "").trim();
+    const category = String(event && event.category || "").trim();
+    const description = String(event && event.description || "").trim();
+    const color = String(event && event.color || "").toLowerCase();
+    pending.push({
+      query,
+      label:title || placeName,
+      note:[when, category, placeName, address, description].filter(Boolean).join("\n"),
+      color:color === "rose" ? "red" : (MAP_MARKER_COLORS.some(item => item.id === color) ? color : "blue"),
+      address,
+      source:"timeline",
+      photo:event && event.image || null
+    });
+  }
+  return { pending, noPlace, overLimit };
+}
 /* CSV → 표시.
    학교에서 만드는 표는 좌표가 아니라 주소만 있는 쪽이 훨씬 흔하다(답사지 목록·우리 동네 조사).
    그래서 위도·경도가 없어도 주소 열이 있으면 실패로 보지 않고, 찾아야 할 줄(pending)로 돌려준다 —
@@ -584,6 +633,7 @@ function mapSourceLabel(source){
   const key = String(source || "");
   if (!key) return mapT("직접 찍은 표시");
   if (key === "nearby") return mapT("주변 시설");
+  if (key === "timeline") return mapT("연대표 표");
   return key;
 }
 function mapSafeDownloadName(value){
@@ -2712,7 +2762,8 @@ async function mountMapEditor(doc){
 
   const csvImportBtn = document.createElement("button");
   csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import";
-  csvImportBtn.textContent = "CSV 들이기"; csvImportBtn.title = "이름·위도·경도 열의 CSV에서 표시 추가 — 좌표 없이 주소 열만 있어도 됩니다";
+  csvImportBtn.textContent = "표 들이기";
+  csvImportBtn.title = "지도 CSV 또는 연대표 CSV·엑셀(.xlsx)에서 표시 추가 — 좌표 없이 장소·주소만 있어도 됩니다";
   const csvExportBtn = document.createElement("button");
   csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
@@ -2721,7 +2772,9 @@ async function mountMapEditor(doc){
   csvMemoBtn.textContent = "🧾 표로 메모";
   csvMemoBtn.title = "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다";
   const csvInput = document.createElement("input");
-  csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true;
+  csvInput.type = "file";
+  csvInput.accept = ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  csvInput.hidden = true;
 
   const gridBtn = document.createElement("button");
   gridBtn.type = "button"; gridBtn.className = "map-btn map-grid-toggle";
@@ -4115,12 +4168,15 @@ async function mountMapEditor(doc){
   /* 주소만 적힌 줄을 좌표로 바꾼다. 한 줄에 한 번씩 검색을 부르므로 시간이 걸린다 —
      진행률을 상태 줄에 적고, 그동안 'CSV 들이기' 버튼을 '그만두기'로 바꿔 멈출 수 있게 한다. */
   let geocodingStop = false;
-  const runPendingGeocode = async (pending) => {
+  let geocodingActive = false;
+  const runPendingGeocode = async (pending, options = {}) => {
     const ok = typeof confirmDialog !== "function" || await confirmDialog(
-      mapTf("주소만 있는 줄이 {count}개 있습니다. 인터넷 지도 검색으로 좌표를 찾을까요?", { count:pending.length }),
+      options.timeline
+        ? mapTf("연대표에서 장소가 있는 항목 {count}개를 찾았습니다. 인터넷 지도 검색으로 좌표를 찾을까요?", { count:pending.length })
+        : mapTf("주소만 있는 줄이 {count}개 있습니다. 인터넷 지도 검색으로 좌표를 찾을까요?", { count:pending.length }),
       mapT("좌표 찾기"), mapT("건너뛰기"));
     if (!ok) return null;
-    geocodingStop = false;
+    geocodingStop = false; geocodingActive = true;
     bulkDepth++;                       // 줄마다 되돌리기 단계를 만들지 않는다(끝난 뒤 한 단계)
     const previousLabel = csvImportBtn.textContent;
     csvImportBtn.textContent = mapT("그만두기");
@@ -4133,9 +4189,17 @@ async function mountMapEditor(doc){
         () => geocodingStop,
         (marker) => { model.markers.push(marker); addMarkerLayer(marker); touch(); });
       found.push(...result.markers);
-      const parts = [mapTf("주소 {count}개를 지도에 올렸습니다", { count:result.markers.length })];
+      const parts = [options.timeline
+        ? mapTf("연대표 항목 {count}개를 시간순으로 지도에 올렸습니다", { count:result.markers.length })
+        : mapTf("주소 {count}개를 지도에 올렸습니다", { count:result.markers.length })];
       if (result.failed.length) parts.push(mapTf("{count}개는 찾지 못했습니다", { count:result.failed.length }));
       if (result.stopped) parts.push(mapT("중간에 멈췄습니다"));
+      if (options.invalidRows) parts.push(mapTf("날짜/제목이 잘못된 {count}줄 제외", { count:options.invalidRows }));
+      if (options.noPlace) parts.push(mapTf("장소가 없는 {count}개 항목 제외", { count:options.noPlace }));
+      if (options.overLimit) parts.push(mapTf("좌표 검색 상한을 넘은 {count}개 항목 제외", { count:options.overLimit }));
+      if (options.attachedPhotos) parts.push(mapTf("시트 사진 {count}장 연결", { count:options.attachedPhotos }));
+      if (options.failedPhotos) parts.push(mapTf("사진 처리 실패 {count}장", { count:options.failedPhotos }));
+      if (options.overPhotoLimit) parts.push(mapTf("지도 사진 한도를 넘어 {count}장 제외", { count:options.overPhotoLimit }));
       setStatus("");
       if (typeof toast === "function") toast(parts.join(" · "), 4600);
     } catch(error){
@@ -4146,7 +4210,7 @@ async function mountMapEditor(doc){
       csvImportBtn.textContent = previousLabel;
       csvImportBtn.classList.remove("is-on");
       csvInput.disabled = false;
-      geocodingStop = false;
+      geocodingStop = false; geocodingActive = false;
       bulkDepth--;
       recordSoon();
     }
@@ -4154,16 +4218,71 @@ async function mountMapEditor(doc){
   };
 
   csvImportBtn.addEventListener("click", () => {
-    // 좌표를 찾는 동안에는 같은 버튼이 '그만두기'다.
-    if (csvInput.disabled){ geocodingStop = true; return; }
+    // 좌표를 찾는 동안에는 같은 버튼이 '그만두기'다. 엑셀을 읽는 중에는 중복 선택만 막는다.
+    if (geocodingActive){ geocodingStop = true; return; }
+    if (csvInput.disabled) return;
     csvInput.value = ""; csvInput.click();
   });
   csvInput.addEventListener("change", async () => {
-    const file = csvInput.files && csvInput.files[0];
+    const file = csvInput.files && csvInput.files[0]; csvInput.value = "";
     if (!file) return;
+    const isSheet = /\.xlsx$/i.test(String(file.name || ""));
+    const oldLabel = csvImportBtn.textContent;
+    csvInput.disabled = true;
+    csvImportBtn.textContent = mapT(isSheet ? "엑셀 읽는 중…" : "표 읽는 중…");
     try {
-      if (file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
-      const imported = mapMarkersFromCsv(await file.text());
+      if (isSheet && file.size > MAP_XLSX_IMPORT_MAX_BYTES) throw new Error("xlsx-too-large");
+      if (!isSheet && file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
+      let imported;
+      let timelineOptions = null;
+      const csvText = isSheet ? "" : await file.text();
+      const isTimeline = isSheet || mapCsvLooksLikeTimeline(csvText);
+      if (isTimeline){
+        const timelineApi = {
+          fromXlsx:globalThis.timelineEventsFromXlsx,
+          fromCsv:globalThis.timelineEventsFromCsv,
+          sorted:globalThis.timelineSortedEvents,
+          preparePhoto:globalThis.timelinePreparePhoto
+        };
+        if (typeof timelineApi.fromXlsx !== "function" || typeof timelineApi.fromCsv !== "function"
+            || typeof timelineApi.sorted !== "function") throw new Error("timeline-runtime");
+        const result = isSheet ? await timelineApi.fromXlsx(file) : timelineApi.fromCsv(csvText);
+
+        /* XLSX에 붙인 사진은 연대표와 같은 방식으로 JPEG를 준비하되, 지도 문서의 더 작은 12MB
+           전체 한도를 지킨다. CSV의 이미지 파일명은 파일 자체가 없으므로 연대표 화면과 마찬가지로
+           자동 연결하지 않는다. */
+        let attachedPhotos = 0, failedPhotos = 0, overPhotoLimit = 0;
+        if (result.imageFiles && result.imageFiles.size && typeof timelineApi.preparePhoto === "function"){
+          csvImportBtn.textContent = mapT("사진 넣는 중…");
+          let photoChars = mapPhotoTotalChars(model.markers);
+          for (const [index, imageFile] of result.imageFiles){
+            const event = result.events[index];
+            if (!event) continue;
+            try {
+              const photo = await timelineApi.preparePhoto(imageFile);
+              if (photoChars + photo.dataUrl.length > MAP_PHOTO_TOTAL_MAX_CHARS){ overPhotoLimit++; continue; }
+              event.image = photo; photoChars += photo.dataUrl.length; attachedPhotos++;
+            } catch(_){ failedPhotos++; }
+          }
+        }
+
+        const sorted = timelineApi.sorted(result.events).map(row => row.event);
+        const converted = mapTimelineEventsToPending(sorted);
+        if (!converted.pending.length) throw new Error("timeline-no-places");
+        const batch = mapBatchId();
+        converted.pending.forEach(row => { row.batch = batch; });
+        imported = { markers:[], pending:converted.pending, skipped:0, truncated:0 };
+        timelineOptions = {
+          timeline:true,
+          invalidRows:result.skipped || 0,
+          noPlace:converted.noPlace,
+          overLimit:converted.overLimit,
+          attachedPhotos,
+          failedPhotos,
+          overPhotoLimit
+        };
+      } else imported = mapMarkersFromCsv(csvText);
+
       imported.markers.forEach(marker => { model.markers.push(marker); addMarkerLayer(marker); });
       fitToMarkers(imported.markers);
       touch();
@@ -4173,16 +4292,28 @@ async function mountMapEditor(doc){
         if (typeof toast === "function") toast(mapTf("CSV에서 표시 {count}개를 추가했습니다", { count:imported.markers.length }) + extra, 4200);
       }
       if (imported.pending.length){
-        const found = await runPendingGeocode(imported.pending);
+        const found = await runPendingGeocode(imported.pending, timelineOptions || {});
         if (found && found.length && !imported.markers.length) fitToMarkers(found);
       }
     } catch(error){
-      const message = error && error.message === "csv-too-large"
+      const code = error && error.message;
+      const message = code === "csv-too-large"
         ? "CSV 파일은 5MB 이하로 골라 주세요."
-        : error && error.message === "csv-columns"
-        ? "CSV 첫 줄에 위도·경도 열이나 주소 열이 필요합니다."
-        : "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.";
+        : code === "xlsx-too-large"
+        ? "Excel 파일은 50MB 이하로 골라 주세요."
+        : code === "xlsx-runtime" || code === "timeline-runtime"
+        ? "엑셀·연대표 표를 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요."
+        : code === "timeline-no-places"
+        ? "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다."
+        : code === "csv-columns"
+        ? "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다."
+        : "표에서 사용할 수 있는 표시를 찾지 못했습니다.";
       setStatus(mapT(message));
+    } finally {
+      if (!geocodingActive){
+        csvInput.disabled = false;
+        csvImportBtn.textContent = oldLabel;
+      }
     }
   });
   csvExportBtn.addEventListener("click", () => {
@@ -5160,6 +5291,7 @@ if (typeof module !== "undefined" && module.exports){
     mapNormalizeMarker, mapNormalizeShape, mapNormalizeBackgroundImage,
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
+    mapCsvLooksLikeTimeline, mapTimelineEventsToPending,
     mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,

@@ -856,6 +856,7 @@ class ClassDockLauncher
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-", StringComparison.Ordinal)) return true;
             if (path == "/terminal-complete") return true;
+            if (path.StartsWith("/ssh-", StringComparison.Ordinal)) return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
             if (path == "/python-rescan") return true;
             if (path == "/tile-cache-clear") return true;
@@ -882,6 +883,7 @@ class ClassDockLauncher
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
+            if (path == "/ssh-capability" || path.StartsWith("/ssh-session-poll", StringComparison.Ordinal)) return true;
             if (path == "/tile-cache-status" || path == "/can-proxy-tiles") return true;
             if (path == "/map-search-key-status") return true;
             if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
@@ -1010,7 +1012,7 @@ class ClassDockLauncher
         }
     }
 
-    static void Main()
+    public static void Run()
     {
         // 안정적인 origin(포트) 확보용 고정 포트 후보 목록.
         // 브라우저 localStorage(테마·자동복원 설정·탭 순서 등)는 origin(127.0.0.1:포트)별로 갈리므로,
@@ -2285,6 +2287,84 @@ class ClassDockLauncher
                     {
                         WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("terminal-complete-failed: " + FlattenMessage(ex)));
                     }
+                }
+                else if (method == "GET" && path == "/ssh-capability")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.CapabilityJson()));
+                }
+                else if (method == "POST" && path == "/ssh-host-key-scan")
+                {
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.ScanHostKey(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-host-key-scan-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/ssh-host-key-trust")
+                {
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.TrustHostKey(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-host-key-trust-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/ssh-session-open")
+                {
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.Open(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-session-open-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/ssh-session-input", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        ClassDockSshTerminal.Input(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-input-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/ssh-session-poll", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes(ClassDockSshTerminal.Poll(QueryValue(path, "id"), QueryValue(path, "offset"))));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-poll-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/ssh-session-resize", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        ClassDockSshTerminal.Resize(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-resize-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/ssh-session-stop", StringComparison.Ordinal))
+                {
+                    ClassDockSshTerminal.Stop(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
                 else if (method == "GET" && path.StartsWith("/tile-proxy?", StringComparison.Ordinal))
                 {
@@ -5153,6 +5233,8 @@ class ClassDockLauncher
                 if (!session.ShellExited) KillProcessTree(session.Process);
                 try { if (File.Exists(session.ScriptPath)) File.Delete(session.ScriptPath); } catch { }
             }
+
+            ClassDockSshTerminal.ShutdownAll();
 
             List<NpmJob> npmJobs = new List<NpmJob>();
             lock (NpmJobsLock)

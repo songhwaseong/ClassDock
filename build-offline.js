@@ -239,6 +239,11 @@ if (html.includes(leafletCssTag)) {
   html = html.replace(leafletCssTag, () => `<style>\n${read("vendor/" + manifest.styles.leaflet.file)}\n</style>`);
 }
 
+const xtermCssTag = `<link rel="stylesheet" href="${manifest.styles.xterm.src}">`;
+if (html.includes(xtermCssTag)) {
+  html = html.replace(xtermCssTag, () => `<style>\n${read("vendor/" + manifest.styles.xterm.file)}\n</style>`);
+}
+
 html = html.replace(
   "모든 처리는 이 브라우저 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.",
   "인터넷 없이 동작합니다. 모든 처리는 이 브라우저 안에서만 이뤄지며 파일은 외부로 전송되지 않아요."

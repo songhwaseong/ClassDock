@@ -90,7 +90,7 @@
 
 <h1>ClassDock 사용법 — 처음부터 끝까지</h1>
 
-<p class="updated"><strong>최종 업데이트: 2026년 8월 17일</strong></p>
+<p class="updated"><strong>최종 업데이트: 2026년 8월 21일</strong></p>
 
 <p class="lead">이 문서는 <strong>처음 쓰는 분</strong>도 따라할 수 있게 클론부터 실제 사용까지 단계별로 정리한 가이드입니다. 자세한 기능 설명·릴리스 노트는 <a href="README.md">README.md</a>를 참고하세요.</p>
 
@@ -423,6 +423,30 @@ cd myOffice</code></pre>
 <blockquote>
   <p><strong>파이썬 준비 배지</strong> — 브라우저 실행에서는 파이썬 파일·노트북을 여는 순간 런타임을 미리 준비합니다. 헤더에 <strong>파이썬 준비 중… → 준비 완료 ✓</strong> 배지가 떠서 첫 실행 대기가 짧아집니다(로컬 파이썬이 있으면 표시되지 않고 바로 대화형 실행).</p>
 </blockquote>
+
+<h3>원격 터미널 (SSH, EXE 전용)</h3>
+
+<p>PuTTY·MobaXterm처럼 IP 주소와 Linux 계정으로 원격 서버에 접속하는 대화형 터미널입니다.</p>
+
+<ol>
+  <li>왼쪽 사이드바 하단 <strong>더보기(···) → 원격 터미널</strong>을 누릅니다.</li>
+  <li><strong>호스트</strong>에 서버 IP 또는 도메인, <strong>포트</strong>에 SSH 포트(보통 <code>22</code>), <strong>계정·비밀번호</strong>를 입력합니다.</li>
+  <li>처음 접속하는 서버라면 SHA-256 서버 지문이 표시됩니다. 서버 관리자에게 받은 지문과 비교해 일치할 때만 <strong>지문을 신뢰</strong>하세요.</li>
+  <li>접속되면 현재 문서는 한쪽에 그대로 남고 SSH 터미널이 반대쪽 도킹 패널에 표시됩니다. 일반 Linux 터미널처럼 방향키·<kbd>Ctrl</kbd>+<kbd>C</kbd>, <code>vim</code>, <code>top</code> 같은 대화형 프로그램을 사용할 수 있습니다.</li>
+  <li>가운데 분할선을 드래그해 문서와 터미널 너비를 조절합니다. <strong>⇄</strong>는 터미널을 왼쪽·오른쪽으로 옮기고, <strong>접기</strong>는 SSH 연결을 유지한 채 패널만 좁게 접습니다.</li>
+  <li>끝나면 <strong>연결 끊기</strong> 또는 <strong>닫기</strong>를 누릅니다. <strong>닫기</strong>는 패널과 SSH 세션을 함께 종료합니다.</li>
+</ol>
+
+<ul>
+  <li><strong>IP·포트·계정 기억</strong>을 켜면 세 값만 이 PC에 저장합니다. <strong>비밀번호는 저장하지 않습니다.</strong></li>
+  <li>도킹 방향과 패널 너비는 이 PC에 기억합니다. 접었다 다시 펼쳐도 현재 SSH 연결과 터미널 출력은 유지됩니다.</li>
+  <li>연결이 끝나거나 실패하면 터미널 위쪽에 <strong>인증 실패·연결 시간 초과·연결 거부·호스트 오류·네트워크 오류·지문 확인 실패</strong>처럼 원인과 확인할 항목이 표시됩니다.</li>
+  <li><strong>재접속</strong>을 누르면 IP·포트·계정은 그대로 두고 비밀번호만 다시 입력합니다. 상태 확인 요청이 반복해서 실패해도 무한 대기하지 않고 재접속할 수 있는 상태로 전환합니다.</li>
+  <li>서버 지문은 <code>%LOCALAPPDATA%\ClassDock\ssh\known_hosts</code>에 공개키로 보관합니다. 다음 접속에서 키가 달라지면 서버 재설치인지 관리자에게 확인하기 전에는 교체하지 마세요.</li>
+  <li>현재 버전은 비밀번호 로그인과 문서·터미널 좌우 분할을 지원합니다. 개인키·SFTP·포트 포워딩·여러 터미널 탭은 지원하지 않습니다.</li>
+  <li>Windows의 <strong>OpenSSH Client</strong> 선택적 기능이 필요합니다. 기능이 없으면 원격 터미널 창에 설치 안내가 표시됩니다.</li>
+  <li>오프라인/온라인 HTML은 브라우저 보안상 SSH 서버에 직접 TCP 연결할 수 없어 이 기능을 사용할 수 없습니다.</li>
+</ul>
 
 <h3>JavaScript (.js / .mjs)</h3>
 
@@ -861,9 +885,11 @@ cd myOffice</code></pre>
   <li><strong>📏 거리선</strong>은 경로의 점을 차례로 찍고 <kbd>Enter</kbd>·<strong>마우스 오른쪽 버튼</strong>(또는 같은 버튼 다시 누르기)으로 끝내 전체 거리를 표시합니다. <strong>▱ 면적 영역</strong>도 꼭짓점을 3개 이상 찍어 같은 방식으로 끝내면 면적을 표시합니다. 점을 하나 찍고 나면 <strong>마지막 점부터 마우스까지 점선</strong>이 따라와 다음 구간이 어디로 이어질지 미리 보이고(거리선은 파랑, 면적은 초록), 점선은 그리기가 끝나면 사라져 저장되는 도형에는 들어가지 않습니다. 그리는 중의 오른쪽 클릭은 지도 빠른 메뉴 대신 <strong>완료</strong>이며, 점이 모자라면 브라우저 메뉴가 뜨지 않고 <code>점을 2개(면적은 3개) 이상 찍어 주세요</code> 안내만 나옵니다. 선·영역을 누르면 이름·색을 바꾸거나 지울 수 있고 <kbd>Esc</kbd>로 그리기를 취소합니다</li>
   <li><strong>축척 막대와 방위표</strong>는 지도 오른쪽 아래에 늘 붙어 있고, 확대·축소에 따라 <code>500 m</code>·<code>2 km</code>처럼 눈금이 자동으로 바뀝니다. 그림으로 굳혀 칠판·메모로 보내거나 PNG·인쇄로 내보낼 때도 <strong>함께 새겨지므로</strong>, 학습지에 붙인 지도에서도 거리를 가늠할 수 있습니다</li>
   <li><strong>🌐 위경도 격자</strong>를 누르면 위선·경선이 눈금으로 그려지고 가장자리에 <code>37.5°N</code>·<code>127°E</code> 같은 이름표가 붙습니다. 확대할수록 간격이 잘아지고(30°→10°→…→0.001°), <strong>적도(0°)와 본초자오선(0°)은 붉고 굵게</strong> 따로 이름이 붙습니다. 격자를 켠 상태는 <strong>지도 파일에 저장되어</strong> 다음에 열 때도, 나눠 준 지도에서도 그대로 나옵니다(옛 지도는 꺼진 채로 열립니다)</li>
-  <li><strong>CSV 들이기</strong>는 첫 줄에 <code>이름,위도,경도,메모,색상,주소,전화번호,시도,시군구</code> 열이 있는 UTF-8 CSV에서 표시를 한꺼번에 추가합니다(최대 5MB·5,000개. 열 이름은 <code>장소</code>·<code>설명</code>·<code>소재지</code>·<code>연락처</code>나 <code>name</code>·<code>lat</code>·<code>lng</code> 같은 영문도 알아봅니다). <strong>CSV 내보내기</strong>는 현재 표시를 Excel에서 열 수 있는 같은 형식으로 저장하므로, 내보낸 파일을 그대로 다시 들여와도 주소·전화번호·지역이 살아 있습니다. 색상은 <code>red</code>, <code>blue</code>, <code>green</code>, <code>amber</code>, <code>purple</code>, <code>slate</code> 또는 한국어 색 이름을 씁니다
+  <li><strong>표 들이기</strong>는 지도용 CSV와 연대표용 CSV·Excel(<code>.xlsx</code>)을 자동으로 구분해 표시를 한꺼번에 추가합니다.
     <ul>
-      <li><strong>좌표가 없어도 됩니다.</strong> <code>주소</code>(또는 <code>소재지</code>·<code>도로명주소</code>) 열만 있으면 지도 검색으로 좌표를 찾아 표시로 올립니다. 주소도 좌표도 없이 <code>이름</code>만 있는 줄은 이름을 장소로 보고 찾습니다. 한 번에 <strong>최대 200줄</strong>까지 찾고, 찾는 동안 <strong>CSV 들이기</strong> 버튼이 <strong>그만두기</strong>로 바뀌어 언제든 멈출 수 있습니다. 좌표를 적었는데 값이 잘못된 줄(예: 위도 <code>999</code>)은 자료 오류로 보고 검색하지 않고 건너뜁니다</li>
+      <li><strong>지도용 CSV</strong> — 첫 줄에 <code>이름,위도,경도,메모,색상,주소,전화번호,시도,시군구</code> 열을 사용합니다(최대 5MB·5,000개. 열 이름은 <code>장소</code>·<code>설명</code>·<code>소재지</code>·<code>연락처</code>나 <code>name</code>·<code>lat</code>·<code>lng</code> 같은 영문도 알아봅니다). <strong>CSV 내보내기</strong>는 현재 표시를 Excel에서 열 수 있는 같은 형식으로 저장하므로, 내보낸 파일을 그대로 다시 들여와도 주소·전화번호·지역이 살아 있습니다. 색상은 <code>red</code>, <code>blue</code>, <code>green</code>, <code>amber</code>, <code>purple</code>, <code>slate</code> 또는 한국어 색 이름을 씁니다</li>
+      <li><strong>연대표용 CSV·Excel</strong> — <code>시작, 종료, 제목, 분류(또는 유형), 유적지(또는 장소), 유적지 주소(또는 장소 주소), 설명(또는 메모), 색상</code> 열을 읽습니다. 연대표 화면의 <strong>표 내보내기</strong>로 만든 CSV와 Excel을 그대로 고를 수 있습니다. 장소가 있는 항목만 시간순으로 지도에 들어가며, 제목은 표시 이름으로, 날짜·분류·장소·주소·설명은 표시 메모로 옮겨집니다. 연대표의 <code>rose</code> 색은 지도의 <code>red</code>로 바뀌고 나머지 색은 유지됩니다. Excel은 최대 50MB이며 시트에 붙인 사진도 지도의 사진 합계 12MB 안에서 표시 사진으로 연결합니다</li>
+      <li><strong>좌표가 없어도 됩니다.</strong> 지도 표의 <code>주소</code>(또는 <code>소재지</code>·<code>도로명주소</code>)나 연대표 표의 장소·주소로 지도 검색을 실행해 좌표를 찾아 표시로 올립니다. 주소도 좌표도 없이 <code>이름</code>만 있는 지도 표의 줄은 이름을 장소로 보고 찾습니다. 한 번에 <strong>최대 200줄/항목</strong>까지 찾고, 찾는 동안 <strong>표 들이기</strong> 버튼이 <strong>그만두기</strong>로 바뀌어 언제든 멈출 수 있습니다. 좌표를 적었는데 값이 잘못된 지도 표의 줄(예: 위도 <code>999</code>)은 자료 오류로 보고 검색하지 않고 건너뜁니다</li>
       <li>인터넷과 ClassDock 런처가 필요하고, 줄마다 한 번씩 검색하므로 시간이 걸립니다(OpenStreetMap 검색은 제공처 정책상 1초에 한 줄). 카카오 키를 넣어 두면 훨씬 빠르고 국내 주소를 더 정확히 찾습니다</li>
       <li><strong>🧾 표로 메모</strong>는 같은 표를 파일로 내려받는 대신 <strong>메모장에 표 블록으로</strong> 바로 넣습니다. 이때 표는 CSV와 달리 <strong>수업에서 바로 읽을 장소 정보</strong>만 추려 <code>이름 · 업종·카테고리 · 도로명 주소 · 지번 주소 · 전화번호 · 카카오 장소 상세 링크 · 위도 · 경도</code> 여덟 칸으로 나갑니다(지역 통계용 시도·시군구는 좁은 메모창에서 밀리지 않도록 CSV에만 남습니다). 파일을 내렸다 다시 여는 걸음 없이 메모에서 <strong>복사 · ⬇ CSV · 편집기로 · 변환</strong>으로 이어지고, 표 안에서 이름·메모를 고쳐 쓸 수도 있습니다. 메모 표 한 개에 담기는 줄에는 상한이 있어(199개) 표시가 그보다 많으면 <strong>담긴 수와 빠진 수를 알려 줍니다</strong> — 전부 필요하면 <strong>CSV 내보내기</strong>를 쓰세요</li>
     </ul>
@@ -918,7 +944,7 @@ cd myOffice</code></pre>
     </ul>
   </li>
   <li><strong>🧹 지우기</strong>는 한꺼번에 정리하는 길입니다. <strong>주변 시설로 넣은 것만</strong>(직접 찍은 표시는 그대로 두고 주변 시설이 넣은 표시·반경 원만) 또는 <strong>모두 지우기</strong> 중에서 고릅니다. 지운 뒤에는 되돌릴 수 없으니 확인 창에서 개수를 보고 고르세요</li>
-  <li><strong>↶ 되돌리기 · ↷ 다시 실행</strong>(<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>·<kbd>Ctrl</kbd>+<kbd>Y</kbd>)으로 표시 추가·이동·삭제, 거리선·면적, 이름·색·메모·사진 변경, 발표 순서 바꾸기, CSV 들이기, 주변 시설 넣기, 위경도 격자·이름 보이기 켜고 끄기, 🧹 지우기까지 한 단계씩 되돌립니다. 이름 칸이나 편집 풍선 안에서는 <strong>글자 되돌리기</strong>가 먼저이고, 지도를 움직이거나 확대한 것은 단계로 쌓이지 않습니다. 주소를 좌표로 바꾸는 일처럼 여러 줄이 몇 분에 걸쳐 들어오는 작업은 <strong>통째로 한 단계</strong>입니다. 되돌리기 기록은 문서를 닫으면 사라집니다</li>
+  <li><strong>↶ 되돌리기 · ↷ 다시 실행</strong>(<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>·<kbd>Ctrl</kbd>+<kbd>Y</kbd>)으로 표시 추가·이동·삭제, 거리선·면적, 이름·색·메모·사진 변경, 발표 순서 바꾸기, 표 들이기, 주변 시설 넣기, 위경도 격자·이름 보이기 켜고 끄기, 🧹 지우기까지 한 단계씩 되돌립니다. 이름 칸이나 편집 풍선 안에서는 <strong>글자 되돌리기</strong>가 먼저이고, 지도를 움직이거나 확대한 것은 단계로 쌓이지 않습니다. 주소를 좌표로 바꾸는 일처럼 여러 줄이 몇 분에 걸쳐 들어오는 작업은 <strong>통째로 한 단계</strong>입니다. 되돌리기 기록은 문서를 닫으면 사라집니다</li>
   <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역·사진·발표 순서 포함)·거리선·면적 영역·위경도 격자와 이름 보이기 켜짐, 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다
     <ul>
       <li><strong>아직 저장하지 않았어도</strong> 편집 내용은 잠시 뒤 작업공간에 자동으로 담겨, 실수로 새로고침하거나 창을 닫아도 <strong>다음에 열 때 그 지도 탭이 그대로 돌아옵니다.</strong> 표시를 찍기 전의 빈 새 지도도 마찬가지입니다. 설정의 <strong>자동 저장·복원</strong>을 끄면 이 사본도 남기지 않습니다(그때는 새로고침 전에 확인창만 뜹니다)</li>
@@ -964,7 +990,7 @@ cd myOffice</code></pre>
   <li>일반 연대표의 <strong>분류</strong>에는 <code>정치</code>, <code>문화</code>, <code>과학</code>, <code>문학</code>처럼 적습니다. 여행 일정의 <strong>유형</strong>에는 <code>이동</code>, <code>관광</code>, <code>식사</code>, <code>숙박</code>이 입력 후보로 나오며 다른 유형도 자유롭게 적을 수 있습니다. 색을 함께 고르면 카드와 시간축을 갈래별로 구분하기 쉽습니다.</li>
   <li>사건과 관련된 <strong>유적지·유적지 주소</strong> 또는 여행 일정의 <strong>장소·장소 주소</strong>를 적을 수 있습니다. 카드나 발표 화면의 <code>📍 장소 · 주소</code>를 누르면 열어 둔 최근 지도 탭(없으면 새 지도)으로 이동해 주소를 검색합니다. 주소가 없으면 장소명으로 찾습니다. 장소 검색에는 인터넷과 ClassDock 런처가 필요합니다.</li>
   <li>설명 또는 메모는 최대 4,000자까지 적을 수 있습니다. <strong>사진 넣기</strong>는 PNG·JPG·WebP를 긴 변 1280px JPEG로 줄여 파일 안에 담습니다. 사진 한 장은 약 660KB, 한 연대표의 사진 합계는 40MB까지입니다(사진 100장 안팎). 외부 이미지 주소는 받지 않아 인터넷이 끊겨도 그대로 보입니다.</li>
-  <li>사건·일정 카드를 한 번 누르면 선택하고, <strong>두 번 누르거나 <kbd>Enter</kbd></strong>를 누르면 다시 고칩니다. 선택한 카드는 <kbd>Delete</kbd>로 지울 수 있으며 지우기 전 확인합니다. 시작 날짜·시각이 같은 항목이 여러 개라면 도구막대의 <code>↑ / ↓</code> 또는 <kbd>Alt</kbd>+↑ / Alt+<kbd>↓</kbd>로 그 안의 순서를 바꿉니다. 서로 다른 시각의 항목은 실제 시간순을 유지합니다.</li>
+  <li>사건·일정 카드를 한 번 누르면 선택하고, <strong>두 번 누르거나 <kbd>Enter</kbd></strong>를 누르면 다시 고칩니다. 카드·시간축 점·개요 점·오른쪽 목록 항목을 <strong>마우스 오른쪽 버튼으로 누르면</strong> 수정, 같은 날짜·시각 안에서 먼저/나중 표시, 지도에서 장소 찾기, 삭제를 바로 실행할 수 있습니다(장소가 없는 항목에는 지도 메뉴가 나오지 않습니다). 선택한 카드는 <kbd>Delete</kbd>로 지울 수 있으며 지우기 전 확인합니다. 시작 날짜·시각이 같은 항목이 여러 개라면 우클릭 메뉴나 도구막대의 <code>↑ / ↓</code> 또는 <kbd>Alt</kbd>+↑ / Alt+<kbd>↓</kbd>로 그 안의 순서를 바꿉니다. 서로 다른 시각의 항목은 실제 시간순을 유지합니다.</li>
   <li>보기 방식은 두 가지입니다.
     <ul>
       <li><strong>읽기 좋게 균등</strong>: 사건 간격을 고르게 벌려 글을 읽기 쉽게 표시합니다.</li>

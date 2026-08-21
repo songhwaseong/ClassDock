@@ -20,6 +20,7 @@
     "globals": "^17.11.0"
   },
   "dependencies": {
+    "@xterm/xterm": "^6.0.0",
     "hunspell-dict-ko": "0.1.0",
     "hunspell-wasm": "0.3.0"
   }

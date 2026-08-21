@@ -904,7 +904,129 @@ function mountTimelineEditor(doc){
   let presentIndex = -1;
   let presentRows = [];
 
+  const contextMenu = document.createElement("div");
+  contextMenu.className = "timeline-context-menu";
+  contextMenu.hidden = true;
+  contextMenu.setAttribute("role", "menu");
+  contextMenu.setAttribute("aria-label", "연대표 빠른 메뉴");
+  const contextHead = document.createElement("div");
+  contextHead.className = "timeline-context-head";
+  contextMenu.appendChild(contextHead);
+  let contextEventId = "";
+  let contextReturnFocus = null;
+
+  function closeTimelineContextMenu(){
+    if (contextMenu.hidden) return;
+    if (contextMenu.contains(document.activeElement) && contextReturnFocus && document.contains(contextReturnFocus)){
+      try { contextReturnFocus.focus({ preventScroll:true }); } catch(_){}
+    }
+    contextMenu.hidden = true;
+    contextEventId = "";
+    contextReturnFocus = null;
+    document.removeEventListener("pointerdown", onTimelineContextOutside, true);
+    window.removeEventListener("keydown", onTimelineContextKey, true);
+  }
+  function onTimelineContextOutside(pointerEvent){
+    if (!contextMenu.contains(pointerEvent.target)) closeTimelineContextMenu();
+  }
+  function onTimelineContextKey(keyEvent){
+    if (keyEvent.key === "Escape"){
+      keyEvent.preventDefault(); keyEvent.stopImmediatePropagation();
+      closeTimelineContextMenu();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(keyEvent.key)) return;
+    const items = [...contextMenu.querySelectorAll("button")].filter(button => !button.hidden && !button.disabled);
+    if (!items.length) return;
+    keyEvent.preventDefault();
+    const at = items.indexOf(document.activeElement);
+    const next = keyEvent.key === "Home" ? 0
+      : keyEvent.key === "End" ? items.length - 1
+      : (Math.max(0, at) + (keyEvent.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next].focus({ preventScroll:true });
+  }
+  const timelineContextItem = run => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.addEventListener("click", () => {
+      const id = contextEventId;
+      closeTimelineContextMenu();
+      if (id) run(id);
+    });
+    contextMenu.appendChild(button);
+    return button;
+  };
+  const timelineContextSep = () => {
+    const sep = document.createElement("div");
+    sep.className = "timeline-context-sep";
+    sep.setAttribute("role", "separator");
+    contextMenu.appendChild(sep);
+  };
+  const contextEditBtn = timelineContextItem(id => openEventDialog(id));
+  timelineContextSep();
+  const contextEarlierBtn = timelineContextItem(id => {
+    selectedId = id;
+    moveSelected(-1);
+  });
+  const contextLaterBtn = timelineContextItem(id => {
+    selectedId = id;
+    moveSelected(1);
+  });
+  const contextMapBtn = timelineContextItem(id => {
+    const event = model.events.find(item => item.id === id);
+    if (event) searchTimelinePlace(event);
+  });
+  timelineContextSep();
+  const contextDeleteBtn = timelineContextItem(id => removeEvent(id));
+  contextDeleteBtn.classList.add("danger");
+  document.body.appendChild(contextMenu);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(contextMenu);
+
   const tripMode = () => model.purpose === "trip";
+  function openTimelineContextMenu(pointerEvent, id, returnFocus){
+    const event = model.events.find(item => item.id === id);
+    if (!event) return;
+    closeTimelineContextMenu();
+    contextEventId = event.id;
+    contextReturnFocus = returnFocus || null;
+    selectEvent(event.id, false);
+    const trip = tripMode();
+    contextHead.textContent = timelineFormatDate(event.start) + " · " +
+      (event.title || timelineT(trip ? "제목 없는 일정" : "제목 없는 사건"));
+    contextEditBtn.textContent = timelineT(trip ? "일정 수정" : "사건 수정");
+    contextEditBtn.title = timelineT(trip ? "일정 고치기" : "사건 고치기");
+    contextEarlierBtn.textContent = timelineT(trip ? "같은 시작 시각에서 먼저 표시" : "같은 날짜에서 먼저 표시");
+    contextEarlierBtn.title = timelineT(trip ? "같은 시작 시각에서 앞 일정으로 이동" : "같은 날짜에서 앞 사건으로 이동");
+    contextEarlierBtn.disabled = !timelineCanMoveEvent(model.events, event.id, -1);
+    contextLaterBtn.textContent = timelineT(trip ? "같은 시작 시각에서 나중 표시" : "같은 날짜에서 나중 표시");
+    contextLaterBtn.title = timelineT(trip ? "같은 시작 시각에서 뒤 일정으로 이동" : "같은 날짜에서 뒤 사건으로 이동");
+    contextLaterBtn.disabled = !timelineCanMoveEvent(model.events, event.id, 1);
+    contextMapBtn.textContent = timelineT(trip ? "지도에서 장소 찾기" : "지도에서 유적지 찾기");
+    contextMapBtn.hidden = !(event.placeName || event.placeAddress);
+    contextDeleteBtn.textContent = timelineT(trip ? "일정 삭제" : "사건 삭제");
+    contextMenu.hidden = false;
+    const pad = 8;
+    const width = contextMenu.offsetWidth;
+    const height = contextMenu.offsetHeight;
+    contextMenu.style.left = Math.max(pad, Math.min(pointerEvent.clientX, window.innerWidth - width - pad)) + "px";
+    contextMenu.style.top = Math.max(pad, Math.min(pointerEvent.clientY, window.innerHeight - height - pad)) + "px";
+    const first = contextMenu.querySelector("button:not([hidden]):not(:disabled)");
+    if (first) first.focus({ preventScroll:true });
+    document.addEventListener("pointerdown", onTimelineContextOutside, true);
+    window.addEventListener("keydown", onTimelineContextKey, true);
+  }
+  function onTimelineContextMenu(pointerEvent){
+    const target = pointerEvent.target;
+    if (!target || typeof target.closest !== "function") return;
+    const item = target.closest(".timeline-card,.timeline-tick,.timeline-overview-marker,.timeline-list-item");
+    if (!item || !workspace.contains(item)) return;
+    const id = item.dataset.eventId || item.dataset.timelineContextEventId || "";
+    if (!id) return;
+    pointerEvent.preventDefault();
+    pointerEvent.stopPropagation();
+    openTimelineContextMenu(pointerEvent, id, item);
+  }
   function applyPurposeLabels(){
     const trip = tripMode();
     root.classList.toggle("is-trip", trip);
@@ -1175,6 +1297,7 @@ function mountTimelineEditor(doc){
       const tick = document.createElement("button");
       tick.type = "button";
       tick.className = "timeline-tick";
+      tick.dataset.timelineContextEventId = event.id;
       tick.style.left = row.x + "px";
       tick.style.setProperty("--timeline-color", color);
       tick.title = event.title;
@@ -1734,6 +1857,9 @@ function mountTimelineEditor(doc){
   viewport.addEventListener("pointerup", finishPan);
   viewport.addEventListener("pointercancel", finishPan);
   viewport.addEventListener("lostpointercapture", finishPan);
+  workspace.addEventListener("contextmenu", onTimelineContextMenu);
+  root.addEventListener("scroll", closeTimelineContextMenu, true);
+  window.addEventListener("resize", closeTimelineContextMenu);
 
   let resizeTimer = 0;
   const trackResizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
@@ -1754,6 +1880,11 @@ function mountTimelineEditor(doc){
     finishPan();
     if (history) history.cancel();
     stopPresent();
+    closeTimelineContextMenu();
+    workspace.removeEventListener("contextmenu", onTimelineContextMenu);
+    root.removeEventListener("scroll", closeTimelineContextMenu, true);
+    window.removeEventListener("resize", closeTimelineContextMenu);
+    contextMenu.remove();
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("click", closeExportMenu);
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;

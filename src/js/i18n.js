@@ -1598,6 +1598,17 @@
     "같은 시작 시각에서 뒤 일정으로 이동": "Move later among items with the same start time",
     "같은 날짜에서 앞 사건으로 이동": "Move earlier among events on the same date",
     "같은 날짜에서 뒤 사건으로 이동": "Move later among events on the same date",
+    "연대표 빠른 메뉴": "Timeline quick menu",
+    "일정 수정": "Edit itinerary item",
+    "사건 수정": "Edit event",
+    "같은 시작 시각에서 먼저 표시": "Show earlier among items with the same start time",
+    "같은 시작 시각에서 나중 표시": "Show later among items with the same start time",
+    "같은 날짜에서 먼저 표시": "Show earlier among events on the same date",
+    "같은 날짜에서 나중 표시": "Show later among events on the same date",
+    "지도에서 장소 찾기": "Find place on map",
+    "지도에서 유적지 찾기": "Find historic site on map",
+    "일정 삭제": "Delete itinerary item",
+    "사건 삭제": "Delete event",
     "일정 사이 간격": "Itinerary spacing",
     "실제 시간 간격": "Proportional to actual time",
     "일정 목록": "Itinerary list",
@@ -1745,9 +1756,13 @@
     "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
     "CSV 들이기": "Import CSV",
     "표 들이기": "Import table",
+    "연대표 표": "Timeline table",
     "CSV·엑셀(.xlsx)에서 사건 가져오기": "Import events from a CSV or Excel (.xlsx) file",
+    "지도 CSV 또는 연대표 CSV·엑셀(.xlsx)에서 표시 추가 — 좌표 없이 장소·주소만 있어도 됩니다":
+      "Add pins from a map CSV or timeline CSV/Excel (.xlsx) file — place names or addresses work without coordinates",
     "이름·위도·경도 열의 CSV에서 표시 추가 — 좌표 없이 주소 열만 있어도 됩니다":
       "Add pins from a CSV with name, latitude, and longitude columns — an address column alone works too",
+    "표 읽는 중…": "Reading the table…",
     // 주소만 있는 CSV → 좌표 찾기
     "그만두기": "Stop",
     "좌표 찾기": "Find coordinates",
@@ -2045,6 +2060,14 @@
     "이 지도 파일에 넣은 사용자 이미지를 지울까요?": "Remove the custom image embedded in this map file?",
     "CSV 첫 줄에 위도·경도 열이 필요합니다.": "The first CSV row must include latitude and longitude columns.",
     "CSV 파일은 5MB 이하로 골라 주세요.": "Choose a CSV file no larger than 5 MB.",
+    "Excel 파일은 50MB 이하로 골라 주세요.": "Choose an Excel file no larger than 50 MB.",
+    "엑셀·연대표 표를 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.":
+      "Timeline table or Excel support isn't ready yet. Try again in a moment.",
+    "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다.":
+      "No timeline items with a place or address were found.",
+    "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다.":
+      "The first row needs map latitude/longitude or address columns, or timeline Start and Title columns.",
+    "표에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the table.",
     "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the CSV.",
     "CSV에서 표시 {count}개를 추가했습니다": "Added {count} pins from the CSV",
     " · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외":
@@ -2220,8 +2243,14 @@
     "지금 받아 둔 지도: {files}장 · {size} (최대 {max})": "Downloaded so far: {files} tiles · {size} (up to {max})",
     "주소만 있는 줄이 {count}개 있습니다. 인터넷 지도 검색으로 좌표를 찾을까요?":
       "{count} {count|row has|rows have} only an address. Look up their coordinates with online map search?",
+    "연대표에서 장소가 있는 항목 {count}개를 찾았습니다. 인터넷 지도 검색으로 좌표를 찾을까요?":
+      "Found {count} timeline items with places. Look up their coordinates with online map search?",
     "주소를 좌표로 바꾸는 중… {done}/{total} · 찾음 {count}개": "Turning addresses into coordinates… {done}/{total} · found {count}",
     "주소 {count}개를 지도에 올렸습니다": "Placed {count} {count|address|addresses} on the map",
+    "연대표 항목 {count}개를 시간순으로 지도에 올렸습니다": "Placed {count} timeline items on the map in chronological order",
+    "장소가 없는 {count}개 항목 제외": "Skipped {count} items without a place",
+    "좌표 검색 상한을 넘은 {count}개 항목 제외": "Skipped {count} items above the coordinate lookup limit",
+    "지도 사진 한도를 넘어 {count}장 제외": "Skipped {count} photos above the map photo limit",
     "{count}개는 찾지 못했습니다": "Couldn't find {count}",
     "중심에서 {distance}": "{distance} from the center",
     "조금 더 확대하면 누른 자리가 어디인지 볼 수 있어요 — 지금 확대 {zoom}, {need}단계부터":

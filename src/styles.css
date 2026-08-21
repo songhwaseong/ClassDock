@@ -20,7 +20,66 @@
     --ink-cursor-highlighter:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M4 28l2-7L21 4l7 6-15 17z' fill='%23fde047' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M4 28l2-7L21 4l7 6-15 17zM18.5 6.5l7 6M6 21l7 6' fill='none' stroke='%23111827' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M4 28l2-7 7 6z' fill='%23facc15' stroke='%23111827' stroke-width='1.5'/%3E%3C/svg%3E") 4 28,crosshair;
     --ink-cursor-eraser:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M4 25 17 7a4 4 0 0 1 5.6-.8l3.2 2.4a4 4 0 0 1 .8 5.6L15.8 29H7.2z' fill='%23f9a8d4' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M4 25 17 7a4 4 0 0 1 5.6-.8l3.2 2.4a4 4 0 0 1 .8 5.6L15.8 29H7.2zM10 17l9 7' fill='none' stroke='%23111827' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") 7 28,crosshair;
     --name-tint:55%;   /* 파일명 색 강도(사이드바·상단 공용 knob) */
-  }
+}
+
+/* ===== SSH 원격 터미널(EXE) ===== */
+.modal.ssh-confirm-front{z-index:1270}
+.ssh-dock{position:relative;order:2;z-index:20;display:flex;flex:0 0 min(var(--ssh-dock-width,520px),68vw);width:min(var(--ssh-dock-width,520px),68vw);min-width:0;height:100%;overflow:hidden;border-left:1px solid var(--border);background:var(--panel,#fff);box-shadow:-8px 0 24px rgba(15,23,42,.12)}
+.ssh-dock-divider{position:relative;order:1;z-index:21;flex:0 0 8px;width:8px;height:100%;margin:0 -4px;background:transparent;cursor:col-resize;touch-action:none}
+.ssh-dock-divider::before{content:"";position:absolute;inset:0 3px;background:var(--border)}
+.ssh-dock-divider::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:42px;transform:translate(-50%,-50%);border-radius:999px;background:#64748b;box-shadow:0 0 0 3px rgba(15,23,42,.28)}
+.ssh-dock-divider:hover::after,.ssh-dock-divider.dragging::after{background:var(--accent)}
+main.ssh-dock-left .ssh-dock{order:-2;border-left:0;border-right:1px solid var(--border);box-shadow:8px 0 24px rgba(15,23,42,.12)}
+main.ssh-dock-left .ssh-dock-divider{order:-1}
+main.ssh-dock-collapsed .ssh-dock{flex-basis:44px;width:44px}
+main.ssh-dock-collapsed .ssh-dock-divider{display:none}
+.ssh-dock-rail{display:none;width:100%;height:100%;border:0;background:#152033;color:#dbeafe;cursor:pointer;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding:14px 5px;font:inherit}
+.ssh-dock-rail:hover{background:#1e2c43}
+.ssh-dock-rail span{font-size:19px}.ssh-dock-rail strong{font-size:11px;letter-spacing:.08em;writing-mode:vertical-rl}
+main.ssh-dock-collapsed .ssh-dock-rail{display:flex}
+main.ssh-dock-collapsed .ssh-terminal-card{display:none}
+.ssh-terminal-card{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden;background:var(--panel,#fff)}
+.ssh-connect-view{flex:1;min-width:0;overflow:auto;padding:20px 18px 16px}
+.ssh-heading,.ssh-session-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.ssh-heading h3{margin:0 0 5px}
+.ssh-heading .sub{margin:0;color:var(--muted,#64748b)}
+.ssh-heading-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.ssh-heading-actions .btn{padding:6px 9px;white-space:nowrap}
+.ssh-connect-grid{display:grid;grid-template-columns:minmax(180px,2fr) minmax(90px,.65fr);gap:14px 12px;margin-top:20px}
+.ssh-field{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:700;color:var(--muted,#475569)}
+.ssh-field:nth-child(3),.ssh-field:nth-child(4){grid-column:auto}
+.ssh-field input{height:42px;border:1px solid var(--line,#cbd5e1);border-radius:9px;padding:0 11px;background:var(--panel,#fff);color:var(--text,#0f172a);font:inherit;font-weight:500;outline:none}
+.ssh-field input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.ssh-field input:disabled{opacity:.65}
+.ssh-remember{margin-top:16px}
+.ssh-security-note{margin:14px 0 0;padding:11px 13px;border-radius:9px;background:rgba(59,130,246,.08);color:var(--muted,#475569);font-size:12.5px;line-height:1.55}
+.ssh-connect-status{min-height:22px;margin-top:12px;color:#2563eb;font-size:13px;font-weight:700}
+.ssh-connect-status.error{color:#dc2626}
+.ssh-session-view{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;background:#101827}
+.ssh-session-head{align-items:center;padding:10px 12px;border-bottom:1px solid #28374d;background:#152033;color:#e5edf8}
+.ssh-session-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:2px}
+.ssh-session-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 14px/1.3 "Cascadia Mono",Consolas,monospace}
+.ssh-session-status{color:#93a4b8;font-size:11.5px}
+.ssh-session-status.error{color:#fca5a5;font-weight:700}
+.ssh-session-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.ssh-session-actions .btn{min-height:32px;padding:5px 10px;border-color:#40516a;background:#1e2c43;color:#e5edf8}
+.ssh-session-actions .btn:hover{background:#293a55}
+.ssh-session-actions .primary{border-color:#2563eb;background:#2563eb}
+.ssh-xterm-host{flex:1;min-width:0;min-height:0;padding:10px 12px;background:#101827;box-sizing:border-box}
+.ssh-xterm-host .xterm{height:100%}
+.ssh-xterm-host .xterm-viewport{border-radius:4px}
+html[data-theme="dark"] .ssh-terminal-card{background:#111827}
+html[data-theme="dark"] .ssh-field input{background:#0f172a;color:#e5edf8;border-color:#334155}
+html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
+@media(max-width:680px){
+  .ssh-dock{flex-basis:min(var(--ssh-dock-width,360px),70vw);width:min(var(--ssh-dock-width,360px),70vw)}
+  .ssh-connect-view{padding:14px 12px}
+  .ssh-heading{flex-direction:column;gap:10px}.ssh-heading-actions{width:100%;justify-content:flex-end}
+  .ssh-connect-grid{grid-template-columns:1fr}
+  .ssh-field:nth-child(3),.ssh-field:nth-child(4){grid-column:1}
+  .ssh-session-head{align-items:flex-start;flex-direction:column}
+  .ssh-session-actions{width:100%;flex-wrap:wrap}
+}
   [data-theme="dark"]{
     --bg:#0b1120;--panel:#1e293b;--ink:#e8eef7;--muted:#94a3b8;
     --accent:#6366f1;--accent-d:#818cf8;--border:#334155;--danger:#f0556b;
@@ -5644,6 +5703,19 @@
   .timeline-list-item span{max-width:76px;color:var(--timeline-color);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .timeline-list-item:hover,.timeline-list-item.is-selected{border-color:var(--timeline-color);background:color-mix(in srgb,var(--timeline-color) 7%,var(--field))}
   .timeline-list-empty{padding:24px 8px;color:var(--muted);font-size:12px;text-align:center}
+  .timeline-context-menu{position:fixed;z-index:1960;display:flex;flex-direction:column;box-sizing:border-box;
+    min-width:246px;max-width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow-y:auto;padding:5px;
+    border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:0 12px 30px rgba(0,0,0,.32)}
+  .timeline-context-menu[hidden]{display:none}
+  .timeline-context-head{max-width:320px;padding:7px 9px 8px;color:var(--muted);font-size:10.5px;font-weight:700;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .timeline-context-menu button{display:block;width:100%;border:0;border-radius:6px;padding:8px 10px;background:transparent;
+    color:inherit;font:inherit;font-size:12px;text-align:left;white-space:nowrap;cursor:pointer}
+  .timeline-context-menu button:hover:not(:disabled),.timeline-context-menu button:focus-visible{background:var(--panel-hover);color:var(--accent);outline:0}
+  .timeline-context-menu button:disabled{opacity:.4;cursor:default}
+  .timeline-context-menu button.danger{color:var(--danger)}
+  .timeline-context-menu button.danger:hover,.timeline-context-menu button.danger:focus-visible{background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger)}
+  .timeline-context-sep{height:1px;margin:4px;background:var(--border)}
 
   .timeline-event-modal{z-index:1300;background:rgba(2,6,23,.62);display:grid;place-items:center;padding:18px}
   .timeline-modal-card{width:min(720px,96vw);max-height:94vh;overflow:auto;border:1px solid var(--border);border-radius:14px;

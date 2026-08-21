@@ -31,6 +31,7 @@ const sharedRuntimeGlobals = {
   $: "readonly",
   jQuery: "readonly",
   L: "readonly"
+  ,Terminal: "readonly"
   ,ClassDockCore: "readonly"
   ,MNI18N: "readonly"
   ,t: "readonly"

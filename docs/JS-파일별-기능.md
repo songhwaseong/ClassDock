@@ -1,6 +1,6 @@
 # JavaScript 파일별 기능 안내
 
-**최종 업데이트: 2026년 8월 20일**
+**최종 업데이트: 2026년 8월 21일**
 
 이 문서는 ClassDock의 JavaScript 파일이 각각 어떤 기능을 담당하는지 빠르게 찾기 위한 유지보수용 색인입니다. 기능을 추가하거나 파일 책임이 바뀌면 해당 행과 날짜를 함께 갱신합니다.
 
@@ -108,6 +108,7 @@ flowchart LR
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
+| `remote-terminal.js` | EXE 전용 SSH 원격 터미널 화면입니다. 서버 주소·포트·계정·암호 입력, 최초 접속 전 서버 키 지문 확인, xterm.js 터미널 입출력·크기 동기화·연결 종료를 담당합니다. 현재 문서와 좌우 도킹하고 분할선 너비 조절·좌우 교환·연결 유지 접기를 제공하며 방향과 너비를 기억합니다. SSH 종료 출력을 분석해 인증·시간 초과·거부·DNS·네트워크·지문 오류를 구분하고, IP·포트·계정을 유지한 비밀번호 재입력 재접속과 무한 상태 재시도 방지를 제공합니다. 주소·포트·계정만 선택적으로 저장하고 암호는 저장하지 않습니다. | `lazy.js`, `classdock.html`, `desktop/ssh_terminal.cs`, `desktop/launcher.cs`, `tests/remote-terminal.test.js`, `docs/원격터미널-설계.md` |
 | `lesson-replay.js` | `.lesson` 데이터 검증, 화이트보드·PDF·Python 이벤트 녹화, 타임라인 재생·탐색·속도 조절과 파일 저장을 담당합니다. | `board-render.js`, `whiteboard.js`, `code-viewer.js` |
 | `diff-viewer.js` | 파일 비교(diff) 문서: patience diff 자체 구현, 나란히/한 줄 보기, 공백 무시·접기, 두 파일 선택 모달과 저장본 비교, 과제 시작 코드 비교 진입점을 담당합니다. | `documents.js`, `task-package.js`, `command-palette.js`, `tests/diff-viewer.test.js` |
 | `office-replace.js` | Word(.docx)·PowerPoint(.pptx) 찾아 바꾸기와 Word 편집 순수 코어(`MNOfficeReplace`)입니다. 여러 run에 쪼개진 글자 되쓰기, 선택 run 분할 서식, 문단/목록/표/페이지/머리글·바닥글/그림 XML 및 관계·콘텐츠 형식 계획을 담당합니다. 브라우저부는 zip.js로 필요한 파트를 한 번만 풀고, `build`가 바뀐 엔트리를 교체하면서 새 `numbering.xml`·머리글/바닥글·미디어 엔트리도 추가하며 손대지 않은 엔트리는 그대로 복사합니다. | `batch-replace.js`, `docx-editor.js`, `lazy.js`(`zip` 묶음), `office-doc-viewers.js`, `docs/오피스-찾아바꾸기-설계.md`, `tests/office-replace.test.js`, `tests/office-replace-roundtrip.test.js` |

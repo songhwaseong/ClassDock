@@ -23,7 +23,8 @@ function loadMapViewer(){
       mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
       mapFormatBytes, mapParseCoords, mapDistanceMeters, mapLineLengthMeters,
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
-      , mapCsvRows, mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
+      , mapCsvRows, mapCsvLooksLikeTimeline, mapTimelineEventsToPending
+      , mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
@@ -151,6 +152,43 @@ test("표시 CSV는 쉼표·줄바꿈 메모를 왕복하고 잘못된 좌표를
   assert.equal(roundtrip.markers[0].color, "blue");
 });
 
+test("연대표 CSV를 지도 CSV보다 먼저 판별하고 사건 정보를 주소 검색 표시로 바꾼다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapCsvLooksLikeTimeline(
+    "시작,종료,제목,분류,유적지,유적지 주소,설명,색상\r\n1945-08-15,,광복,현대,대한민국역사박물관,서울 종로구 세종대로 198,해방,rose\r\n"), true);
+  assert.equal(api.mapCsvLooksLikeTimeline(
+    "이름,위도,경도,주소\r\n시청,37.5,127,서울시청\r\n"), false);
+
+  const photo = { name:"광복.jpg", dataUrl:"data:image/jpeg;base64,AA==", width:10, height:8 };
+  const converted = api.mapTimelineEventsToPending([
+    { title:"광복", start:"1945-08-15", category:"현대", placeName:"대한민국역사박물관",
+      placeAddress:"서울 종로구 세종대로 198", description:"해방", color:"rose", image:photo },
+    { title:"정부 수립", start:"1948-08-15", placeName:"서울광장", color:"blue" },
+    { title:"장소 없는 사건", start:"1950", description:"지도에서는 제외" }
+  ]);
+  assert.equal(converted.pending.length, 2);
+  assert.equal(converted.noPlace, 1);
+  assert.equal(converted.overLimit, 0);
+  assert.equal(converted.pending[0].query, "서울 종로구 세종대로 198");
+  assert.equal(converted.pending[0].label, "광복");
+  assert.equal(converted.pending[0].color, "red");
+  assert.equal(converted.pending[0].source, "timeline");
+  assert.equal(converted.pending[0].photo, photo);
+  assert.match(converted.pending[0].note, /1945-08-15[\s\S]*현대[\s\S]*대한민국역사박물관[\s\S]*해방/);
+  assert.equal(converted.pending[1].query, "서울광장");
+});
+
+test("지도 표 들이오기는 연대표 CSV와 XLSX 공용 해석기를 연결한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /csvImportBtn\.textContent = "표 들이기"/);
+  assert.match(source, /csvInput\.accept = "\.csv,\.xlsx,/);
+  assert.match(source, /isSheet \|\| mapCsvLooksLikeTimeline\(csvText\)/);
+  assert.match(source, /globalThis\.timelineEventsFromXlsx/);
+  assert.match(source, /globalThis\.timelineEventsFromCsv/);
+  assert.match(source, /timelineApi\.sorted\(result\.events\)/);
+  assert.match(source, /runPendingGeocode\(imported\.pending, timelineOptions \|\| \{\}\)/);
+});
+
 test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 실제 편집 경로에 연결한다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   for (const token of ["map-image-pick", "map-image-clear", "map-draw-line", "map-draw-area", "map-csv-import", "map-csv-export", "map-csv-memo"]){
@@ -162,7 +200,7 @@ test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 
   assert.match(source, /L\.polyline\(shape\.points/);
   assert.match(source, /L\.polygon\(shape\.points/);
   assert.match(source, /mapPrepareBackgroundImage\(file\)/);
-  assert.match(source, /mapMarkersFromCsv\(await file\.text\(\)\)/);
+  assert.match(source, /mapMarkersFromCsv\(csvText\)/);
   assert.match(source, /mapMarkersToCsv\(model\.markers\)/);
   assert.match(source, /window\.addTableToScratchpad\(mapMarkersToMemoRows\(model\.markers\)\)/);
 });
@@ -660,7 +698,7 @@ test("지도 문서는 공용 되돌리기 이력을 쓰고 touch() 한 곳에�
   assert.match(source, /limit: MNEditHistory\.LIMITS\.board/);
   assert.match(source, /maxBytes: 24 \* 1024 \* 1024/);
   // 주소 좌표 찾기는 줄마다가 아니라 통째로 한 단계.
-  const geocode = /const runPendingGeocode = async \(pending\) => \{([\s\S]*?)\n  \};/.exec(source);
+  const geocode = /const runPendingGeocode = async \(pending, options = \{\}\) => \{([\s\S]*?)\n  \};/.exec(source);
   assert.ok(geocode);
   assert.match(geocode[1], /bulkDepth\+\+/);
   assert.match(geocode[1], /bulkDepth--;\s*\n\s*recordSoon\(\);/);
@@ -1723,6 +1761,7 @@ test("표시 목록의 묶음 이름은 꼬리표를 사람 말로 바꾼다", (
   const api = loadMapViewer();
   assert.equal(api.mapSourceLabel(""), "직접 찍은 표시");
   assert.equal(api.mapSourceLabel("nearby"), "주변 시설");
+  assert.equal(api.mapSourceLabel("timeline"), "연대표 표");
   assert.equal(api.mapSourceLabel("unknown"), "unknown");   // 모르는 꼬리표도 묶음은 갈라 준다
 });
 
