@@ -88,6 +88,44 @@ test("실제 xlsx 파일에서 사건과 시트에 붙인 사진을 함께 읽�
   delete global.ExcelJS;
 });
 
+test("XLSX 내보내기는 날짜 원문·표 서식·사건 사진을 보존해 다시 들일 수 있다", async () => {
+  const ExcelJS = require("../vendor/exceljs.min.js");
+  global.ExcelJS = ExcelJS;
+  const photoDataUrl = "data:image/png;base64," + PNG_1X1.toString("base64");
+  const events = [
+    timeline.timelineNormalizeEvent({
+      start:"1945-08-15", title:"광복", description:"해방\n새 출발", color:"green",
+      image:{ name:"광복.png", dataUrl:photoDataUrl, width:1, height:1 }
+    }, 0),
+    timeline.timelineNormalizeEvent({ start:"기원전 300", title:"고대 사건", color:"purple" }, 1)
+  ];
+
+  const exported = await timeline.timelineEventsToXlsx(events, "한국사 연대표");
+  assert.equal(exported.imageCount, 1);
+  assert.equal(exported.skippedImages, 0);
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(exported.bytes);
+  const sheet = workbook.getWorksheet("연대표");
+  assert.deepEqual(sheet.getRow(1).values.slice(1),
+    ["시작", "종료", "제목", "분류", "유적지", "유적지 주소", "이미지 파일명", "설명", "색상", "사진"]);
+  assert.equal(sheet.getRow(2).getCell(1).value, "기원전 300", "엑셀 날짜로 바꾸지 않고 원문을 유지한다");
+  assert.equal(sheet.getRow(3).getCell(1).value, "1945-08-15");
+  assert.equal(sheet.getRow(3).getCell(8).value, "해방\n새 출발");
+  assert.equal(sheet.views[0].state, "frozen");
+  assert.equal(sheet.views[0].ySplit, 1);
+  assert.equal(sheet.autoFilter, "A1:J1");
+  assert.equal(sheet.getImages().length, 1);
+
+  const file = new File([exported.bytes], "다시들이기.xlsx",
+    { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const imported = await timeline.timelineEventsFromXlsx(file);
+  assert.deepEqual(imported.events.map(event => event.title), ["고대 사건", "광복"]);
+  assert.equal(imported.events[0].start, "기원전 300");
+  assert.deepEqual([...imported.imageFiles.keys()], [1], "사진은 광복 사건 행에 다시 연결되어야 한다");
+  delete global.ExcelJS;
+});
+
 test("표 들이기 단추는 CSV와 xlsx를 함께 받고 시트 사진을 바로 줄인다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/timeline.js"), "utf8");
   assert.match(source, /timelineButton\("표 들이기", "CSV·엑셀\(\.xlsx\)에서 사건 가져오기"\)/);
@@ -96,6 +134,8 @@ test("표 들이기 단추는 CSV와 xlsx를 함께 받고 시트 사진을 바�
   assert.match(source, /await timelinePreparePhoto\(imageFile\)/);
   assert.match(source, /totalChars \+ photo\.dataUrl\.length > TIMELINE_PHOTO_TOTAL_MAX_CHARS/);
   assert.match(source, /MNLazy\.tryNeed\("exceljs"\)/);
+  assert.match(source, /timelineButton\("Excel \(\.xlsx\)"/);
+  assert.match(source, /await timelineEventsToXlsx\(model\.events/);
   const lazy = fs.readFileSync(path.join(__dirname, "../src/js/lazy.js"), "utf8");
   assert.match(lazy, /exceljs:\s*\{[^}]*exceljs\.min\.js/);
 });

@@ -2,11 +2,11 @@
 
 /* ===== 연대표 문서(.timeline) =====
    사건·기간·유적지·사진을 JSON 한 파일에 담아, 인터넷 없이 만들고 발표하는 수업용 연대표다.
-   날짜는 2026 / 2026-08 / 2026-08-20뿐 아니라 "기원전 300"·"BC 300"도 받는다.
+   날짜는 2026 / 2026-08 / 2026-08-20 / 2026-08-20 09:30뿐 아니라 "기원전 300"·"BC 300"도 받는다.
    화면 배치는 보기 상태지만 균등/시간 비례 방식은 자료를 만든 의도라 문서에 함께 저장한다. */
 
 const TIMELINE_DOC_TYPE = "classdock-timeline";
-const TIMELINE_DOC_VERSION = 1;
+const TIMELINE_DOC_VERSION = 2;
 const TIMELINE_MAX_EVENTS = 1000;
 const TIMELINE_PHOTO_MAX_DATA_CHARS = 900 * 1024;
 /* 사진은 base64 로 문서 안에 들어간다. 총량 상한은 파일 크기·저장 시간을 감당할 만큼만 둔다.
@@ -66,6 +66,10 @@ function timelineLeapYear(year){
   return value % 4 === 0 && (value % 100 !== 0 || value % 400 === 0);
 }
 
+function timelinePurpose(value){
+  return value === "trip" ? "trip" : "timeline";
+}
+
 /* 입력 날짜를 정렬 가능한 값으로 바꾼다. 역사 연대표에서 자주 쓰는 기원전은 별도 달력
    라이브러리 없이도 정렬되게 천문학적 연도(기원전 1년=0년)로 환산한다. */
 function timelineParseDate(raw){
@@ -88,6 +92,15 @@ function timelineParseDate(raw){
     era = "bce";
     source = source.slice(1);
   }
+  let hour = 0, minute = 0, hasTime = false;
+  const timeMatch = /(?:[T\s]+)(\d{1,2}):(\d{2})$/.exec(source);
+  if (timeMatch){
+    hour = Number(timeMatch[1]);
+    minute = Number(timeMatch[2]);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+    hasTime = true;
+    source = source.slice(0, timeMatch.index).trim();
+  }
   source = source
     .replace(/\s*년\s*/g, "-")
     .replace(/\s*월\s*/g, "-")
@@ -104,18 +117,21 @@ function timelineParseDate(raw){
   if (!Number.isInteger(month) || month < 1 || month > 12) return null;
   const monthDays = [31, timelineLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   if (!Number.isInteger(day) || day < 1 || day > monthDays[month - 1]) return null;
-  const precision = parts.length >= 3 ? "day" : parts.length >= 2 ? "month" : "year";
+  if (hasTime && parts.length < 3) return null;
+  const precision = hasTime ? "minute" : parts.length >= 3 ? "day" : parts.length >= 2 ? "month" : "year";
   const astronomicalYear = era === "bce" ? 1 - year : year;
-  const key = astronomicalYear * 372 + (month - 1) * 31 + (day - 1);
-  return { original, era, year, month, day, precision, approximate, key };
+  const dayKey = astronomicalYear * 372 + (month - 1) * 31 + (day - 1);
+  const key = dayKey * 1440 + hour * 60 + minute;
+  return { original, era, year, month, day, hour, minute, precision, approximate, key };
 }
 
 function timelineFormatDate(raw){
   const parsed = typeof raw === "object" && raw && raw.key != null ? raw : timelineParseDate(raw);
   if (!parsed) return String(raw == null ? "" : raw);
   let value = (parsed.era === "bce" ? "기원전 " : "") + parsed.year + "년";
-  if (parsed.precision === "month" || parsed.precision === "day") value += " " + parsed.month + "월";
-  if (parsed.precision === "day") value += " " + parsed.day + "일";
+  if (["month", "day", "minute"].includes(parsed.precision)) value += " " + parsed.month + "월";
+  if (["day", "minute"].includes(parsed.precision)) value += " " + parsed.day + "일";
+  if (parsed.precision === "minute") value += " " + String(parsed.hour).padStart(2, "0") + ":" + String(parsed.minute).padStart(2, "0");
   return (parsed.approximate ? "약 " : "") + value;
 }
 
@@ -157,6 +173,7 @@ function timelineDocEmpty(title){
     type:TIMELINE_DOC_TYPE,
     version:TIMELINE_DOC_VERSION,
     title:String(title || "연대표").slice(0, 160),
+    purpose:"timeline",
     viewMode:"even",
     events:[]
   };
@@ -169,6 +186,7 @@ function timelineDocParse(text){
     type:TIMELINE_DOC_TYPE,
     version:TIMELINE_DOC_VERSION,
     title:String(raw.title == null ? "" : raw.title).slice(0, 160),
+    purpose:timelinePurpose(raw.purpose),
     viewMode:raw.viewMode === "scale" ? "scale" : "even",
     events:(Array.isArray(raw.events) ? raw.events : []).slice(0, TIMELINE_MAX_EVENTS)
       .map((item, index) => timelineNormalizeEvent(item, index))
@@ -180,6 +198,7 @@ function timelineDocSerialize(model){
     type:TIMELINE_DOC_TYPE,
     version:TIMELINE_DOC_VERSION,
     title:String(model && model.title || "").slice(0, 160),
+    purpose:timelinePurpose(model && model.purpose),
     viewMode:model && model.viewMode === "scale" ? "scale" : "even",
     events:(model && Array.isArray(model.events) ? model.events : []).slice(0, TIMELINE_MAX_EVENTS)
       .map((item, index) => timelineNormalizeEvent(item, index))
@@ -208,6 +227,7 @@ function timelineSnapshot(model){
   return {
     text:JSON.stringify({
       title:String(model && model.title || "").slice(0, 160),
+      purpose:timelinePurpose(model && model.purpose),
       viewMode:model && model.viewMode === "scale" ? "scale" : "even",
       events
     }),
@@ -228,6 +248,7 @@ function timelineSnapshotModel(state){
     type:TIMELINE_DOC_TYPE,
     version:TIMELINE_DOC_VERSION,
     title:String(raw.title == null ? "" : raw.title).slice(0, 160),
+    purpose:timelinePurpose(raw.purpose),
     viewMode:raw.viewMode === "scale" ? "scale" : "even",
     events:(Array.isArray(raw.events) ? raw.events : []).map((item, index) => {
       const slot = item && item.image ? item.image.slot : null;
@@ -252,6 +273,27 @@ function timelineSortedEvents(events){
     const orderB = Number.isInteger(b.event.order) ? b.event.order : b.index;
     return orderA - orderB || a.index - b.index;
   });
+}
+
+/* 날짜·시각이 같은 항목만 수동 순서를 바꾼다. 서로 다른 시각은 실제 시간순을 유지하고,
+   날짜만 적은 사건이나 같은 시작 시각의 일정은 사용자가 의도한 순서로 정리할 수 있다. */
+function timelineCanMoveEvent(events, id, direction){
+  const rows = timelineSortedEvents(events);
+  const at = rows.findIndex(row => row.event.id === id);
+  const step = direction < 0 ? -1 : 1;
+  const other = rows[at + step];
+  return at >= 0 && !!rows[at].date && !!other && !!other.date && rows[at].date.key === other.date.key;
+}
+
+function timelineMoveEvent(events, id, direction){
+  const rows = timelineSortedEvents(events);
+  const at = rows.findIndex(row => row.event.id === id);
+  const step = direction < 0 ? -1 : 1;
+  if (at < 0 || !timelineCanMoveEvent(events, id, step)) return false;
+  const moved = rows.splice(at, 1)[0];
+  rows.splice(at + step, 0, moved);
+  rows.forEach((row, index) => { row.event.order = index; });
+  return true;
 }
 
 /* 렌더러와 단위 테스트가 함께 쓰는 배치 계산. 시간 비례는 실제 간격을 보존하되, 날짜가
@@ -379,14 +421,112 @@ function timelineFindImageFile(reference, lookup){
   return base && lookup.get(base) || null;
 }
 
-function timelineEventsToCsv(events){
-  const lines = [["시작", "종료", "제목", "분류", "유적지", "유적지 주소", "이미지 파일명", "설명", "색상"]];
+function timelineExportHeaders(purpose, includePhoto){
+  const trip = timelinePurpose(purpose) === "trip";
+  const headers = ["시작", "종료", "제목", trip ? "유형" : "분류", trip ? "장소" : "유적지",
+    trip ? "장소 주소" : "유적지 주소", "이미지 파일명", trip ? "메모" : "설명", "색상"];
+  if (includePhoto) headers.push("사진");
+  return headers;
+}
+
+function timelineEventsToCsv(events, purpose){
+  const lines = [timelineExportHeaders(purpose, false)];
   for (const row of timelineSortedEvents(events)){
     const event = row.event;
     lines.push([event.start, event.end, event.title, event.category, event.placeName, event.placeAddress,
       event.imageFileName || event.image && event.image.name || "", event.description, event.color]);
   }
   return lines.map(row => row.map(timelineCsvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+const TIMELINE_EXPORT_HEADERS = timelineExportHeaders("timeline", true);
+
+async function timelineXlsxImageSource(photo){
+  const dataUrl = String(photo && photo.dataUrl || "");
+  const match = /^data:image\/(png|jpe?g|webp);base64,/i.exec(dataUrl);
+  if (!match) return null;
+  const kind = match[1].toLowerCase();
+  if (kind !== "webp") return { base64:dataUrl, extension:kind === "png" ? "png" : "jpeg" };
+  /* ExcelJS가 WebP를 직접 쓰지 못하므로 오래된 .timeline 문서에 WebP가 남아 있으면 JPEG로 바꾼다.
+     새로 넣는 사진은 timelinePreparePhoto 단계에서 이미 JPEG가 되므로 보통은 이 경로를 거치지 않는다. */
+  if (typeof document === "undefined" || typeof Image === "undefined") return null;
+  const image = await new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("xlsx-image"));
+    element.src = dataUrl;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Number(photo.width) || image.naturalWidth || image.width || 1);
+  canvas.height = Math.max(1, Number(photo.height) || image.naturalHeight || image.height || 1);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return { base64:canvas.toDataURL("image/jpeg", 0.86), extension:"jpeg" };
+}
+
+/* CSV와 같은 열을 사람이 읽기 좋은 엑셀 표로 만들고, 사건 사진은 마지막 열의 같은 행에 넣는다.
+   날짜를 Date로 바꾸면 연도만 있는 값·기원전·대략 표기가 손실되므로 모두 원문 문자열로 기록한다. */
+async function timelineEventsToXlsx(events, title, purpose){
+  if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("exceljs");
+  if (typeof ExcelJS === "undefined" || !ExcelJS.Workbook) throw new Error("xlsx-runtime");
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "ClassDock";
+  const trip = timelinePurpose(purpose) === "trip";
+  const sheet = workbook.addWorksheet(trip ? "여행 일정" : "연대표", { views:[{ state:"frozen", ySplit:1, topLeftCell:"A2", activeCell:"A2" }] });
+  sheet.columns = [
+    { key:"start", width:16 }, { key:"end", width:16 }, { key:"title", width:27 },
+    { key:"category", width:15 }, { key:"place", width:21 }, { key:"address", width:32 },
+    { key:"imageName", width:24 }, { key:"description", width:48 }, { key:"color", width:12 },
+    { key:"photo", width:17 }
+  ];
+  sheet.addRow(timelineExportHeaders(purpose, true));
+  const header = sheet.getRow(1);
+  header.height = 24;
+  header.font = { bold:true, color:{ argb:"FFFFFFFF" } };
+  header.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FF2563EB" } };
+  header.alignment = { vertical:"middle", horizontal:"center" };
+  header.eachCell(cell => { cell.border = { bottom:{ style:"thin", color:{ argb:"FF1D4ED8" } } }; });
+
+  let imageCount = 0;
+  let skippedImages = 0;
+  for (const item of timelineSortedEvents(events)){
+    const event = item.event;
+    const row = sheet.addRow([
+      event.start, event.end, event.title, event.category, event.placeName, event.placeAddress,
+      event.imageFileName || event.image && event.image.name || "", event.description, event.color, ""
+    ]);
+    row.alignment = { vertical:"middle" };
+    row.getCell(8).alignment = { vertical:"top", wrapText:true };
+    row.getCell(9).alignment = { vertical:"middle", horizontal:"center" };
+    const color = TIMELINE_COLORS.find(candidate => candidate.id === event.color);
+    if (color){
+      row.getCell(9).fill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FF" + color.hex.slice(1).toUpperCase() } };
+      row.getCell(9).font = { color:{ argb:"FFFFFFFF" }, bold:true };
+    }
+    if (!event.image) continue;
+    try {
+      const source = await timelineXlsxImageSource(event.image);
+      if (!source){ skippedImages++; continue; }
+      const imageId = workbook.addImage(source);
+      const width = Math.max(1, Number(event.image.width) || 4);
+      const height = Math.max(1, Number(event.image.height) || 3);
+      const scale = Math.min(96 / width, 72 / height);
+      const displayWidth = Math.max(18, Math.round(width * scale));
+      const displayHeight = Math.max(18, Math.round(height * scale));
+      row.height = 60;
+      sheet.addImage(imageId, {
+        tl:{ col:9.08, row:row.number - 1 + 0.08 },
+        ext:{ width:displayWidth, height:displayHeight },
+        editAs:"oneCell"
+      });
+      imageCount++;
+    } catch(_){ skippedImages++; }
+  }
+  sheet.autoFilter = { from:"A1", to:"J1" };
+  sheet.pageSetup = { orientation:"landscape", fitToPage:true, fitToWidth:1, fitToHeight:0 };
+  sheet.headerFooter = { oddHeader:"&C" + String(title || "연대표").slice(0, 160) };
+  return { bytes:await workbook.xlsx.writeBuffer(), imageCount, skippedImages };
 }
 
 function timelineEventsFromCsv(text){
@@ -402,10 +542,10 @@ function timelineEventsFromRows(rows){
   const find = aliases => headers.findIndex(value => aliases.includes(value));
   const startAt = find(["시작", "시작일", "날짜", "연도", "start", "date", "year"]);
   const endAt = find(["종료", "종료일", "끝", "end"]);
-  const titleAt = find(["제목", "사건", "이름", "title", "event", "name"]);
-  const categoryAt = find(["분류", "갈래", "category", "group"]);
+  const titleAt = find(["제목", "사건", "일정", "이름", "title", "event", "name"]);
+  const categoryAt = find(["분류", "유형", "갈래", "category", "group", "type"]);
   const placeNameAt = find(["유적지", "관련 유적지", "유적명", "장소", "place", "place name", "location"]);
-  const placeAddressAt = find(["유적지 주소", "유적지주소", "주소", "소재지", "도로명주소", "place address", "address"]);
+  const placeAddressAt = find(["유적지 주소", "유적지주소", "장소 주소", "장소주소", "주소", "소재지", "도로명주소", "place address", "address"]);
   const imageAt = find(["이미지 파일명", "이미지파일명", "이미지 파일", "이미지", "사진 파일명", "사진파일명", "사진 파일", "사진", "image filename", "image file", "image", "photo filename", "photo file", "photo"]);
   const descAt = find(["설명", "내용", "메모", "description", "note"]);
   const colorAt = find(["색", "색상", "color"]);
@@ -538,7 +678,8 @@ async function loadTimelineDoc(file, opts = {}){
     const needle = String(query || "").trim().toLowerCase();
     if (!needle || typeof doc.timelineSelectEvent !== "function") return false;
     const found = timelineSortedEvents(doc.timelineDoc && doc.timelineDoc.events).find(row =>
-      [row.event.start, row.event.end, row.event.title, row.event.category, row.event.description]
+      [row.event.start, row.event.end, row.event.title, row.event.category, row.event.placeName,
+        row.event.placeAddress, row.event.description]
         .join(" ").toLowerCase().includes(needle));
     if (!found) return false;
     doc.timelineSelectEvent(found.event.id, true);
@@ -638,6 +779,7 @@ async function timelinePreparePhoto(file){
 
 function mountTimelineEditor(doc){
   const model = doc.timelineDoc;
+  model.purpose = timelinePurpose(model.purpose);
   const root = document.createElement("div");
   root.className = "timeline-doc";
   doc.el.appendChild(root);
@@ -652,7 +794,18 @@ function mountTimelineEditor(doc){
   titleInput.placeholder = timelineT("연대표 제목");
   titleInput.setAttribute("aria-label", timelineT("연대표 제목"));
 
+  const purposeSelect = document.createElement("select");
+  purposeSelect.className = "timeline-select timeline-purpose-select";
+  purposeSelect.title = timelineT("문서 용도");
+  for (const [value, label] of [["timeline", "일반 연대표"], ["trip", "여행 일정"]]){
+    const option = document.createElement("option");
+    option.value = value; option.textContent = timelineT(label);
+    if (timelinePurpose(model.purpose) === value) option.selected = true;
+    purposeSelect.appendChild(option);
+  }
   const addBtn = timelineButton("＋ 사건", "새 사건 또는 기간 추가", "timeline-btn timeline-add");
+  const moveEarlierBtn = timelineButton("↑", "같은 날짜·시각에서 앞 순서로 이동");
+  const moveLaterBtn = timelineButton("↓", "같은 날짜·시각에서 뒤 순서로 이동");
   const undoBtn = timelineButton("↶", "실행 취소 (Ctrl+Z)");
   const redoBtn = timelineButton("↷", "다시 실행 (Ctrl+Shift+Z)");
   const modeSelect = document.createElement("select");
@@ -671,12 +824,23 @@ function mountTimelineEditor(doc){
   const listBtn = timelineButton("☷ 목록", "사건 목록 열기·닫기");
   const csvInBtn = timelineButton("표 들이기", "CSV·엑셀(.xlsx)에서 사건 가져오기");
   const imageFolderBtn = timelineButton("이미지 폴더", "CSV의 이미지 파일명과 연결할 폴더 선택");
-  const csvOutBtn = timelineButton("CSV 내보내기", "사건 목록을 CSV로 저장");
+  const exportMenu = document.createElement("details");
+  exportMenu.className = "timeline-export-menu";
+  const exportSummary = document.createElement("summary");
+  exportSummary.className = "timeline-btn";
+  exportSummary.textContent = "표 내보내기";
+  exportSummary.title = "사건 목록을 CSV 또는 Excel로 저장";
+  const exportPanel = document.createElement("div");
+  exportPanel.className = "timeline-export-panel";
+  const csvOutBtn = timelineButton("CSV", "사건 목록을 UTF-8 CSV로 저장", "timeline-export-option");
+  const xlsxOutBtn = timelineButton("Excel (.xlsx)", "사진을 포함한 사건 목록을 Excel 파일로 저장", "timeline-export-option");
+  exportPanel.append(csvOutBtn, xlsxOutBtn);
+  exportMenu.append(exportSummary, exportPanel);
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
   const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
   const saveBtn = timelineButton("저장", "연대표 저장 (Ctrl+S)", "timeline-btn run-save timeline-save");
-  bar.append(titleInput, addBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn, overviewBtn,
-    listBtn, csvInBtn, imageFolderBtn, csvOutBtn, presentBtn, printBtn, saveBtn);
+  bar.append(titleInput, purposeSelect, addBtn, moveEarlierBtn, moveLaterBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn, overviewBtn,
+    listBtn, csvInBtn, imageFolderBtn, exportMenu, presentBtn, printBtn, saveBtn);
 
   const workspace = document.createElement("div");
   workspace.className = "timeline-workspace";
@@ -740,6 +904,35 @@ function mountTimelineEditor(doc){
   let presentIndex = -1;
   let presentRows = [];
 
+  const tripMode = () => model.purpose === "trip";
+  function applyPurposeLabels(){
+    const trip = tripMode();
+    root.classList.toggle("is-trip", trip);
+    titleInput.placeholder = timelineT(trip ? "여행 제목" : "연대표 제목");
+    titleInput.setAttribute("aria-label", titleInput.placeholder);
+    addBtn.textContent = timelineT(trip ? "＋ 일정" : "＋ 사건");
+    addBtn.title = timelineT(trip ? "새 여행 일정 추가" : "새 사건 또는 기간 추가");
+    moveEarlierBtn.title = timelineT(trip ? "같은 시작 시각에서 앞 일정으로 이동" : "같은 날짜에서 앞 사건으로 이동");
+    moveLaterBtn.title = timelineT(trip ? "같은 시작 시각에서 뒤 일정으로 이동" : "같은 날짜에서 뒤 사건으로 이동");
+    modeSelect.title = timelineT(trip ? "일정 사이 간격" : "사건 사이 간격");
+    if (modeSelect.options[1]) modeSelect.options[1].textContent = timelineT(trip ? "실제 시간 간격" : "시간 간격대로");
+    overviewBtn.title = timelineT(overview ? "상세 카드 보기로 돌아가기" : trip ? "모든 일정을 한 화면에서 보기" : "모든 사건을 한 화면에서 보기");
+    listTitle.textContent = timelineT(trip ? "일정 목록" : "사건 목록");
+    searchInput.placeholder = timelineT(trip ? "제목·유형·장소·메모 검색" : "제목·분류·유적지·설명 검색");
+    emptyTitle.textContent = timelineT(trip ? "첫 일정을 넣어 여행계획을 시작하세요" : "첫 사건을 넣어 연대표를 시작하세요");
+    emptyText.textContent = timelineT(trip
+      ? "날짜와 시각, 장소, 메모, 사진을 넣을 수 있습니다."
+      : "연도·날짜와 설명, 사진을 넣을 수 있습니다. 기원전은 ‘기원전 300’처럼 적으세요.");
+    emptyAdd.textContent = timelineT(trip ? "＋ 첫 일정 추가" : "＋ 첫 사건 추가");
+    emptyAdd.title = timelineT(trip ? "새 여행 일정 추가" : "새 사건 추가");
+    presentBtn.textContent = timelineT(trip ? "▶ 일정 보기" : "▶ 발표");
+    presentBtn.title = timelineT(trip ? "일정을 시간순으로 하나씩 크게 보여주기" : "사건을 하나씩 크게 보여주기");
+    exportSummary.title = timelineT(trip ? "일정 목록을 CSV 또는 Excel로 저장" : "사건 목록을 CSV 또는 Excel로 저장");
+    csvOutBtn.title = timelineT(trip ? "일정 목록을 UTF-8 CSV로 저장" : "사건 목록을 UTF-8 CSV로 저장");
+    xlsxOutBtn.title = timelineT(trip ? "사진을 포함한 일정 목록을 Excel 파일로 저장" : "사진을 포함한 사건 목록을 Excel 파일로 저장");
+    csvInBtn.title = timelineT(trip ? "CSV·엑셀(.xlsx)에서 일정 가져오기" : "CSV·엑셀(.xlsx)에서 사건 가져오기");
+  }
+
   const serialize = () => timelineDocSerialize(model);
   const snapshot = () => timelineSnapshot(model);
   const touch = () => {
@@ -772,10 +965,13 @@ function mountTimelineEditor(doc){
 
   const replaceModel = restored => {
     model.title = restored.title;
+    model.purpose = timelinePurpose(restored.purpose);
     model.viewMode = restored.viewMode;
     model.events = restored.events;
     titleInput.value = model.title;
+    purposeSelect.value = model.purpose;
     modeSelect.value = model.viewMode;
+    applyPurposeLabels();
     if (selectedId && !model.events.some(event => event.id === selectedId)) selectedId = "";
     renderAll(); touch();
   };
@@ -834,7 +1030,7 @@ function mountTimelineEditor(doc){
     root.classList.toggle("is-overview", overview);
     overviewBtn.classList.toggle("is-on", overview);
     overviewBtn.textContent = overview ? timelineT("▤ 상세") : timelineT("▤ 개요");
-    overviewBtn.title = overview ? timelineT("상세 카드 보기로 돌아가기") : timelineT("모든 사건을 한 화면에서 보기");
+    overviewBtn.title = overview ? timelineT("상세 카드 보기로 돌아가기") : timelineT(tripMode() ? "모든 일정을 한 화면에서 보기" : "모든 사건을 한 화면에서 보기");
     zoomOut.disabled = overview; zoomIn.disabled = overview; zoomLabel.disabled = overview;
     zoomLabel.textContent = overview ? timelineT("전체") : Math.round(zoom * 100) + "%";
     renderTrack();
@@ -853,7 +1049,7 @@ function mountTimelineEditor(doc){
       return;
     }
     try { await globalThis.searchMapForPlace(query); }
-    catch(_){ if (typeof toast === "function") toast(timelineT("지도에서 유적지를 찾지 못했어요."), 2800, { type:"error" }); }
+    catch(_){ if (typeof toast === "function") toast(timelineT(tripMode() ? "지도에서 장소를 찾지 못했어요." : "지도에서 유적지를 찾지 못했어요."), 2800, { type:"error" }); }
   }
 
   function timelinePlaceButton(event, className){
@@ -903,7 +1099,9 @@ function mountTimelineEditor(doc){
     const axisY = Math.round(trackBaseHeight / 2);
     const hint = document.createElement("div");
     hint.className = "timeline-overview-hint";
-    hint.textContent = model.events.length + timelineT("개 사건 · 점을 누르면 상세 카드로 이동합니다");
+    hint.textContent = model.events.length + timelineT(tripMode()
+      ? "개 일정 · 점을 누르면 상세 카드로 이동합니다"
+      : "개 사건 · 점을 누르면 상세 카드로 이동합니다");
     canvas.appendChild(hint);
     const axis = document.createElement("div");
     axis.className = "timeline-overview-axis";
@@ -921,7 +1119,7 @@ function mountTimelineEditor(doc){
       marker.style.left = row.x + "px";
       marker.style.top = (axisY + row.lane * 15) + "px";
       marker.style.setProperty("--timeline-color", timelineColorHex(event.color));
-      marker.title = timelineFormatDate(event.start) + " · " + (event.title || timelineT("제목 없는 사건"));
+      marker.title = timelineFormatDate(event.start) + " · " + (event.title || timelineT(tripMode() ? "제목 없는 일정" : "제목 없는 사건"));
       marker.setAttribute("aria-label", marker.title + " · " + timelineT("상세 카드로 이동"));
       marker.addEventListener("click", () => {
         selectedId = event.id;
@@ -935,7 +1133,7 @@ function mountTimelineEditor(doc){
         label.className = "timeline-overview-label";
         label.style.left = row.x + "px";
         label.style.top = (axisY + (index % 2 ? 58 : -78)) + "px";
-        label.textContent = timelineFormatDate(event.start) + " · " + (event.title || timelineT("제목 없는 사건"));
+        label.textContent = timelineFormatDate(event.start) + " · " + (event.title || timelineT(tripMode() ? "제목 없는 일정" : "제목 없는 사건"));
         canvas.appendChild(label);
       }
     });
@@ -1009,7 +1207,7 @@ function mountTimelineEditor(doc){
       if (event.category){
         const category = document.createElement("b"); category.textContent = event.category; meta.appendChild(category);
       }
-      const heading = document.createElement("h3"); heading.textContent = event.title || timelineT("제목 없는 사건");
+      const heading = document.createElement("h3"); heading.textContent = event.title || timelineT(tripMode() ? "제목 없는 일정" : "제목 없는 사건");
       const description = document.createElement("p"); description.textContent = event.description || "";
       card.append(meta, heading);
       if (event.description) card.appendChild(description);
@@ -1045,7 +1243,7 @@ function mountTimelineEditor(doc){
       item.dataset.eventId = event.id;
       item.style.setProperty("--timeline-color", timelineColorHex(event.color));
       const date = document.createElement("small"); date.textContent = timelineFormatDate(event.start);
-      const title = document.createElement("strong"); title.textContent = event.title || timelineT("제목 없는 사건");
+      const title = document.createElement("strong"); title.textContent = event.title || timelineT(tripMode() ? "제목 없는 일정" : "제목 없는 사건");
       const category = document.createElement("span"); category.textContent = event.category || "";
       item.append(date, title, category);
       item.addEventListener("click", () => selectEvent(event.id, true));
@@ -1054,12 +1252,17 @@ function mountTimelineEditor(doc){
     }
     if (!visible){
       const none = document.createElement("div"); none.className = "timeline-list-empty";
-      none.textContent = query ? timelineT("검색 결과가 없습니다.") : timelineT("아직 사건이 없습니다.");
+      none.textContent = query ? timelineT("검색 결과가 없습니다.") : timelineT(tripMode() ? "아직 일정이 없습니다." : "아직 사건이 없습니다.");
       list.appendChild(none);
     }
   }
 
-  function renderAll(){ renderTrack(); renderList(); updateHistory(); }
+  function updateMoveButtons(){
+    moveEarlierBtn.disabled = !selectedId || !timelineCanMoveEvent(model.events, selectedId, -1);
+    moveLaterBtn.disabled = !selectedId || !timelineCanMoveEvent(model.events, selectedId, 1);
+  }
+
+  function renderAll(){ renderTrack(); renderList(); updateMoveButtons(); updateHistory(); }
 
   function syncSelectedState(){
     for (const item of stage.querySelectorAll("[data-event-id]")){
@@ -1074,10 +1277,17 @@ function mountTimelineEditor(doc){
     selectedId = String(id || "");
     if (overview && scroll) setOverview(false, { skipRestore:true });
     syncSelectedState();
+    updateMoveButtons();
     if (scroll){
       const card = [...stage.querySelectorAll("[data-event-id]")].find(item => item.dataset.eventId === selectedId);
       if (card) card.scrollIntoView({ behavior:"smooth", block:"nearest", inline:"center" });
     }
+  }
+
+  function moveSelected(direction){
+    if (!selectedId || !timelineMoveEvent(model.events, selectedId, direction)) return;
+    history.commit(); touch(); renderAll();
+    setTimeout(() => selectEvent(selectedId, true), 0);
   }
   doc.timelineSelectEvent = selectEvent;
 
@@ -1086,8 +1296,9 @@ function mountTimelineEditor(doc){
     if (!event) return;
     let approved = true;
     if (typeof confirmDialog === "function"){
-      approved = await confirmDialog("‘" + (event.title || "제목 없는 사건") + "’ 사건을 지울까요?", "지우기", "취소");
-    } else approved = confirm("이 사건을 지울까요?");
+      approved = await confirmDialog("‘" + (event.title || (tripMode() ? "제목 없는 일정" : "제목 없는 사건")) + "’ " +
+        (tripMode() ? "일정을 지울까요?" : "사건을 지울까요?"), "지우기", "취소");
+    } else approved = confirm(tripMode() ? "이 일정을 지울까요?" : "이 사건을 지울까요?");
     if (!approved) return;
     model.events = model.events.filter(item => item.id !== id);
     if (selectedId === id) selectedId = "";
@@ -1096,19 +1307,25 @@ function mountTimelineEditor(doc){
 
   function openEventDialog(id){
     const existing = id ? model.events.find(item => item.id === id) : null;
+    const trip = tripMode();
+    const categoryList = trip ? ' list="timeline-trip-types"' : "";
+    const tripTypes = trip ? '<datalist id="timeline-trip-types"><option value="이동"><option value="관광"><option value="식사"><option value="숙박"></datalist>' : "";
     const modal = document.createElement("div");
     modal.className = "modal timeline-event-modal";
     modal.innerHTML = '<div class="timeline-modal-card" role="dialog" aria-modal="true">' +
       '<header><h2></h2><button type="button" class="timeline-modal-x" aria-label="닫기">×</button></header>' +
       '<div class="timeline-form-grid">' +
-        '<label class="timeline-field timeline-field-wide"><span>제목</span><input class="timeline-form-title" type="text" maxlength="120"></label>' +
-        '<label class="timeline-field"><span>시작</span><input class="timeline-form-start" type="text" maxlength="40" placeholder="예: 1945-08-15 · 기원전 300"></label>' +
-        '<label class="timeline-field"><span>종료(선택)</span><input class="timeline-form-end" type="text" maxlength="40" placeholder="기간이면 끝 날짜"></label>' +
-        '<label class="timeline-field"><span>분류</span><input class="timeline-form-category" type="text" maxlength="60" placeholder="예: 정치·문화·과학"></label>' +
+        '<label class="timeline-field timeline-field-wide"><span>' + timelineT("제목") + '</span><input class="timeline-form-title" type="text" maxlength="120"></label>' +
+        '<label class="timeline-field"><span>' + timelineT("시작") + '</span><input class="timeline-form-start" type="text" maxlength="40" placeholder="' +
+          timelineT(trip ? "예: 2026-08-21 09:30" : "예: 1945-08-15 · 기원전 300") + '"></label>' +
+        '<label class="timeline-field"><span>' + timelineT("종료(선택)") + '</span><input class="timeline-form-end" type="text" maxlength="40" placeholder="' +
+          timelineT(trip ? "예: 2026-08-21 11:00" : "기간이면 끝 날짜") + '"></label>' +
+        '<label class="timeline-field"><span>' + timelineT(trip ? "유형" : "분류") + '</span><input class="timeline-form-category" type="text" maxlength="60"' + categoryList + ' placeholder="' +
+          timelineT(trip ? "예: 이동·관광·식사·숙박" : "예: 정치·문화·과학") + '">' + tripTypes + '</label>' +
         '<label class="timeline-field"><span>색상</span><select class="timeline-form-color"></select></label>' +
-        '<label class="timeline-field"><span>관련 유적지(선택)</span><input class="timeline-form-place-name" type="text" maxlength="120" placeholder="예: 경복궁"></label>' +
-        '<label class="timeline-field"><span>유적지 주소(선택)</span><input class="timeline-form-place-address" type="text" maxlength="200" placeholder="예: 서울특별시 종로구 사직로 161"></label>' +
-        '<label class="timeline-field timeline-field-wide"><span>설명</span><textarea class="timeline-form-description" maxlength="4000" rows="6"></textarea></label>' +
+        '<label class="timeline-field"><span>' + timelineT(trip ? "장소(선택)" : "관련 유적지(선택)") + '</span><input class="timeline-form-place-name" type="text" maxlength="120" placeholder="' + timelineT("예: 경복궁") + '"></label>' +
+        '<label class="timeline-field"><span>' + timelineT(trip ? "장소 주소(선택)" : "유적지 주소(선택)") + '</span><input class="timeline-form-place-address" type="text" maxlength="200" placeholder="' + timelineT("예: 서울특별시 종로구 사직로 161") + '"></label>' +
+        '<label class="timeline-field timeline-field-wide"><span>' + timelineT(trip ? "메모" : "설명") + '</span><textarea class="timeline-form-description" maxlength="4000" rows="6"></textarea></label>' +
         '<div class="timeline-photo-field timeline-field-wide"><span>사진</span><div class="timeline-photo-preview"></div>' +
           '<div><button type="button" class="timeline-photo-pick">사진 넣기</button><button type="button" class="timeline-photo-remove">사진 지우기</button>' +
           '<input class="timeline-photo-input" type="file" accept="image/png,image/jpeg,image/webp" hidden></div></div>' +
@@ -1133,7 +1350,9 @@ function mountTimelineEditor(doc){
     const deleteBtn = modal.querySelector(".timeline-form-delete");
     const removePhotoBtn = modal.querySelector(".timeline-photo-remove");
     let draftImage = existing && existing.image ? { ...existing.image } : null;
-    heading.textContent = existing ? timelineT("사건 고치기") : timelineT("새 사건 추가");
+    heading.textContent = existing
+      ? timelineT(trip ? "일정 고치기" : "사건 고치기")
+      : timelineT(trip ? "새 일정 추가" : "새 사건 추가");
     title.value = existing ? existing.title : "";
     start.value = existing ? existing.start : "";
     end.value = existing ? existing.end : "";
@@ -1189,9 +1408,11 @@ function mountTimelineEditor(doc){
       const parsedStart = timelineParseDate(start.value);
       const parsedEnd = end.value.trim() ? timelineParseDate(end.value) : null;
       if (!title.value.trim()){ error.textContent = timelineT("제목을 입력하세요."); title.focus(); return; }
-      if (!parsedStart){ error.textContent = timelineT("시작 날짜를 ‘1945’, ‘1945-08-15’, ‘기원전 300’처럼 입력하세요."); start.focus(); return; }
-      if (end.value.trim() && !parsedEnd){ error.textContent = timelineT("종료 날짜 형식을 확인하세요."); end.focus(); return; }
-      if (parsedEnd && parsedEnd.key < parsedStart.key){ error.textContent = timelineT("종료 날짜는 시작 날짜보다 빠를 수 없습니다."); end.focus(); return; }
+      if (!parsedStart){ error.textContent = timelineT(trip
+        ? "시작을 ‘2026-08-21 09:30’처럼 입력하세요."
+        : "시작 날짜를 ‘1945’, ‘1945-08-15’, ‘기원전 300’처럼 입력하세요."); start.focus(); return; }
+      if (end.value.trim() && !parsedEnd){ error.textContent = timelineT(trip ? "종료 날짜·시각 형식을 확인하세요." : "종료 날짜 형식을 확인하세요."); end.focus(); return; }
+      if (parsedEnd && parsedEnd.key < parsedStart.key){ error.textContent = timelineT(trip ? "종료는 시작보다 빠를 수 없습니다." : "종료 날짜는 시작 날짜보다 빠를 수 없습니다."); end.focus(); return; }
       const next = timelineNormalizeEvent({
         id:existing ? existing.id : timelineEventId(),
         title:title.value.trim(), start:start.value.trim(), end:end.value.trim(),
@@ -1243,7 +1464,7 @@ function mountTimelineEditor(doc){
     progress.setAttribute("aria-valuemax", String(presentRows.length));
     present.querySelector(".timeline-present-meta").textContent = timelineFormatDate(event.start) +
       (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
-    present.querySelector("h2").textContent = event.title || timelineT("제목 없는 사건");
+    present.querySelector("h2").textContent = event.title || timelineT(tripMode() ? "제목 없는 일정" : "제목 없는 사건");
     present.querySelector("p").textContent = event.description || "";
     presentCopyEl.scrollTop = 0;
     const presentPlace = present.querySelector(".timeline-present-place");
@@ -1276,7 +1497,7 @@ function mountTimelineEditor(doc){
   };
   const startPresent = () => {
     presentRows = timelineSortedEvents(model.events);
-    if (!presentRows.length){ if (typeof toast === "function") toast(timelineT("발표할 사건이 없습니다."), 2200); return; }
+    if (!presentRows.length){ if (typeof toast === "function") toast(timelineT(tripMode() ? "보여줄 일정이 없습니다." : "발표할 사건이 없습니다."), 2200); return; }
     const selectedAt = selectedId ? presentRows.findIndex(row => row.event.id === selectedId) : 0;
     present.hidden = false; root.classList.add("is-presenting");
     showPresent(selectedAt >= 0 ? selectedAt : 0);
@@ -1289,18 +1510,18 @@ function mountTimelineEditor(doc){
   function printTimeline(){
     const old = document.getElementById("timelinePrintLayer"); if (old) old.remove();
     const layer = document.createElement("div"); layer.id = "timelinePrintLayer"; layer.className = "timeline-print";
-    const heading = document.createElement("h1"); heading.textContent = model.title || "연대표"; layer.appendChild(heading);
+    const heading = document.createElement("h1"); heading.textContent = model.title || (tripMode() ? "여행 일정" : "연대표"); layer.appendChild(heading);
     for (const row of timelineSortedEvents(model.events)){
       const event = row.event;
       const item = document.createElement("article"); item.style.setProperty("--timeline-color", timelineColorHex(event.color));
       const meta = document.createElement("div"); meta.textContent = timelineFormatDate(event.start) +
         (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
-      const title = document.createElement("h2"); title.textContent = event.title || "제목 없는 사건";
+      const title = document.createElement("h2"); title.textContent = event.title || (tripMode() ? "제목 없는 일정" : "제목 없는 사건");
       item.append(meta, title);
       if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; item.appendChild(image); }
       if (event.placeName || event.placeAddress){
         const place = document.createElement("p"); place.className = "timeline-print-place";
-        place.textContent = (event.placeName ? "유적지: " + event.placeName : "") +
+        place.textContent = (event.placeName ? (tripMode() ? "장소: " : "유적지: ") + event.placeName : "") +
           (event.placeName && event.placeAddress ? "\n" : "") + (event.placeAddress ? "주소: " + event.placeAddress : "");
         item.appendChild(place);
       }
@@ -1317,8 +1538,14 @@ function mountTimelineEditor(doc){
 
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); history.commitSoon(TIMELINE_TYPING_DELAY); });
   titleInput.addEventListener("change", () => history.commit());
+  purposeSelect.addEventListener("change", () => {
+    model.purpose = timelinePurpose(purposeSelect.value);
+    applyPurposeLabels(); history.commit(); touch(); renderAll();
+  });
   addBtn.addEventListener("click", () => openEventDialog(null));
   emptyAdd.addEventListener("click", () => openEventDialog(null));
+  moveEarlierBtn.addEventListener("click", () => moveSelected(-1));
+  moveLaterBtn.addEventListener("click", () => moveSelected(1));
   undoBtn.addEventListener("click", () => history.undo());
   redoBtn.addEventListener("click", () => history.redo());
   modeSelect.addEventListener("change", () => { model.viewMode = modeSelect.value === "scale" ? "scale" : "even"; history.commit(); touch(); renderAll(); });
@@ -1359,7 +1586,7 @@ function mountTimelineEditor(doc){
       }
       history.commit(); touch(); renderAll();
       const imageRefs = added.filter(event => !event.image && event.imageFileName).length;
-      const parts = [timelineTf("사건 {count}개를 가져왔어요.", { count:added.length })];
+      const parts = [timelineTf(tripMode() ? "일정 {count}개를 가져왔어요." : "사건 {count}개를 가져왔어요.", { count:added.length })];
       if (result.skipped) parts.push(timelineTf("날짜/제목이 잘못된 {count}줄 제외", { count:result.skipped }));
       if (attached) parts.push(timelineTf("시트 사진 {count}장 연결", { count:attached }));
       if (failed) parts.push(timelineTf("사진 처리 실패 {count}장", { count:failed }));
@@ -1369,9 +1596,9 @@ function mountTimelineEditor(doc){
     } catch(error){
       const code = error && error.message;
       const message = code === "csv-columns" ? timelineTf("{source}에 ‘시작’과 ‘제목’ 열이 필요합니다.", { source })
-        : code === "event-limit" ? timelineT("연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.")
+        : code === "event-limit" ? timelineT(tripMode() ? "여행 일정에는 항목을 최대 1,000개까지 넣을 수 있어요." : "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.")
         : code === "xlsx-runtime" ? timelineT("엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.")
-        : timelineTf("{source}에서 사건을 읽지 못했어요.", { source });
+        : timelineTf(tripMode() ? "{source}에서 일정을 읽지 못했어요." : "{source}에서 사건을 읽지 못했어요.", { source });
       if (typeof toast === "function") toast(message, 3200, { type:"error" });
     } finally {
       csvInBtn.disabled = false; csvInBtn.textContent = oldLabel;
@@ -1420,9 +1647,42 @@ function mountTimelineEditor(doc){
     }
   });
   csvOutBtn.addEventListener("click", () => {
-    const csv = "\uFEFF" + timelineEventsToCsv(model.events);
+    const csv = "\uFEFF" + timelineEventsToCsv(model.events, model.purpose);
     timelineDownload(timelineSafeName(model.title || doc.name) + ".csv", new Blob([csv], { type:"text/csv;charset=utf-8" }));
+    exportMenu.open = false;
   });
+  xlsxOutBtn.addEventListener("click", async () => {
+    const oldSummary = exportSummary.textContent;
+    exportMenu.dataset.busy = "true";
+    exportSummary.textContent = timelineT("Excel 만드는 중…");
+    csvOutBtn.disabled = true; xlsxOutBtn.disabled = true;
+    try {
+      const result = await timelineEventsToXlsx(model.events, model.title || doc.name, model.purpose);
+      timelineDownload(timelineSafeName(model.title || doc.name) + ".xlsx", new Blob([result.bytes], {
+        type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      }));
+      const message = result.skippedImages
+        ? timelineTf("Excel로 내보냈어요. 사진 {count}장은 넣지 못했습니다.", { count:result.skippedImages })
+        : timelineTf("Excel로 내보냈어요. 사진 {count}장 포함", { count:result.imageCount });
+      if (typeof toast === "function") toast(message, result.skippedImages ? 4400 : 3000,
+        result.skippedImages ? { type:"error" } : undefined);
+      exportMenu.open = false;
+    } catch(error){
+      const message = error && error.message === "xlsx-runtime"
+        ? timelineT("엑셀을 만들 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.")
+        : timelineT("Excel 파일을 만들지 못했어요.");
+      if (typeof toast === "function") toast(message, 3400, { type:"error" });
+    } finally {
+      delete exportMenu.dataset.busy;
+      exportSummary.textContent = oldSummary;
+      csvOutBtn.disabled = false; xlsxOutBtn.disabled = false;
+    }
+  });
+  exportSummary.addEventListener("click", event => { if (exportMenu.dataset.busy) event.preventDefault(); });
+  const closeExportMenu = event => {
+    if (exportMenu.open && event.target instanceof Node && !exportMenu.contains(event.target)) exportMenu.open = false;
+  };
+  document.addEventListener("click", closeExportMenu);
   presentBtn.addEventListener("click", startPresent);
   printBtn.addEventListener("click", printTimeline);
   saveBtn.addEventListener("click", () => saveTimelineDoc(doc));
@@ -1437,7 +1697,9 @@ function mountTimelineEditor(doc){
       else if (key === "=" || key === "+"){ event.preventDefault(); setZoom(zoom + TIMELINE_ZOOM_STEP); }
       else if (key === "-"){ event.preventDefault(); setZoom(zoom - TIMELINE_ZOOM_STEP); }
       else if (key === "0"){ event.preventDefault(); setZoom(1); }
-    } else if (event.key === "Delete" && selectedId){ event.preventDefault(); removeEvent(selectedId); }
+    } else if (event.altKey && event.key === "ArrowUp" && selectedId){ event.preventDefault(); moveSelected(-1); }
+    else if (event.altKey && event.key === "ArrowDown" && selectedId){ event.preventDefault(); moveSelected(1); }
+    else if (event.key === "Delete" && selectedId){ event.preventDefault(); removeEvent(selectedId); }
   };
   window.addEventListener("keydown", onKeyDown);
   viewport.addEventListener("wheel", event => {
@@ -1493,6 +1755,7 @@ function mountTimelineEditor(doc){
     if (history) history.cancel();
     stopPresent();
     window.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("click", closeExportMenu);
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
     if (doc._timelineHistory === history) delete doc._timelineHistory;
     if (doc.printTimeline === printTimeline) delete doc.printTimeline;
@@ -1500,6 +1763,7 @@ function mountTimelineEditor(doc){
   });
 
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(root);
+  applyPurposeLabels();
   renderAll();
   setZoom(1, false);
   scheduleRecovery();
@@ -1512,7 +1776,8 @@ if (typeof module !== "undefined" && module.exports){
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
     timelineSnapshot, timelineSnapshotEqual, timelineSnapshotModel,
     timelineEventsFromRows, timelineCellText, timelineSheetRows, timelineSheetImageRows, timelineEventsFromXlsx,
-    timelineSortedEvents, timelineLayoutEntries, timelineOverviewEntries, timelineEventsToCsv, timelineEventsFromCsv,
+    timelineSortedEvents, timelineCanMoveEvent, timelineMoveEvent, timelineLayoutEntries, timelineOverviewEntries,
+    timelineEventsToCsv, timelineEventsToXlsx, timelineEventsFromCsv,
     timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle
   };

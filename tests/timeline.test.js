@@ -18,13 +18,19 @@ test("연대표 날짜는 연·연월·날짜와 기원전을 같은 축에서 �
   assert.ok(bc1.key < ad1.key);
   assert.equal(timeline.timelineFormatDate("약 1592-04-13"), "약 1592년 4월 13일");
   assert.equal(timeline.timelineFormatDate("BCE 57"), "기원전 57년");
-  for (const invalid of ["", "0", "2026-13", "2026-02-30", "조선 후기"]){
+  const morning = timeline.timelineParseDate("2026-08-21 09:30");
+  const afternoon = timeline.timelineParseDate("2026-08-21T14:05");
+  assert.equal(morning.precision, "minute");
+  assert.ok(morning.key < afternoon.key);
+  assert.equal(timeline.timelineFormatDate(morning), "2026년 8월 21일 09:30");
+  for (const invalid of ["", "0", "2026-13", "2026-02-30", "2026-08 09:30", "2026-08-21 24:00", "조선 후기"]){
     assert.equal(timeline.timelineParseDate(invalid), null);
   }
 });
 
 test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게 왕복한다", () => {
   const model = timeline.timelineDocEmpty("한국사");
+  model.purpose = "trip";
   model.viewMode = "scale";
   model.events.push(timeline.timelineNormalizeEvent({
     id:"event-1", title:"광복", start:"1945-08-15", end:"1948-08-15", category:"현대",
@@ -34,6 +40,7 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   }, 0));
   const again = timeline.timelineDocParse(timeline.timelineDocSerialize(model));
   assert.equal(again.title, "한국사");
+  assert.equal(again.purpose, "trip");
   assert.equal(again.viewMode, "scale");
   assert.equal(again.events[0].title, "광복");
   assert.equal(again.events[0].placeName, "대한민국역사박물관");
@@ -48,6 +55,18 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   }));
   assert.equal(hostile.events[0].image, null);
   assert.equal(hostile.events[0].color, "blue");
+});
+
+test("같은 날짜·시각의 항목은 수동 순서를 바꾸되 다른 시각의 순서는 유지한다", () => {
+  const events = [
+    timeline.timelineNormalizeEvent({ id:"a", title:"아침", start:"2026-08-21 09:00", order:0 }, 0),
+    timeline.timelineNormalizeEvent({ id:"b", title:"관광", start:"2026-08-21 10:00", order:1 }, 1),
+    timeline.timelineNormalizeEvent({ id:"c", title:"점심 후보", start:"2026-08-21 10:00", order:2 }, 2)
+  ];
+  assert.equal(timeline.timelineCanMoveEvent(events, "b", -1), false);
+  assert.equal(timeline.timelineCanMoveEvent(events, "b", 1), true);
+  assert.equal(timeline.timelineMoveEvent(events, "c", -1), true);
+  assert.deepEqual(timeline.timelineSortedEvents(events).map(row => row.event.id), ["a", "c", "b"]);
 });
 
 test("사건은 기원전부터 시간순으로 정렬하고 같은 날짜는 입력 순서를 지킨다", () => {
@@ -101,6 +120,13 @@ test("CSV는 쉼표·줄바꿈 설명을 보존하고 잘못된 날짜 줄만 �
   assert.equal(parsed.events[0].placeAddress, "서울특별시 종로구 종로 99");
   assert.equal(parsed.events[0].imageFileName, "사진/3·1운동.jpg");
   assert.match(csv, /^시작,종료,제목,분류,유적지,유적지 주소,이미지 파일명,설명,색상/m);
+
+  const tripCsv = timeline.timelineEventsToCsv(events, "trip");
+  assert.match(tripCsv, /^시작,종료,제목,유형,장소,장소 주소,이미지 파일명,메모,색상/m);
+  const tripParsed = timeline.timelineEventsFromCsv("시작,종료,일정,유형,장소,장소 주소,메모\r\n2026-08-21 09:30,,경복궁 관람,관광,경복궁,서울 종로구,예약 확인\r\n");
+  assert.equal(tripParsed.events[0].start, "2026-08-21 09:30");
+  assert.equal(tripParsed.events[0].category, "관광");
+  assert.equal(tripParsed.events[0].placeAddress, "서울 종로구");
 
   const partial = timeline.timelineEventsFromCsv("시작,제목,이미지 파일\r\n1945,광복,광복.jpg\r\n날짜없음,제외,제외.jpg\r\n");
   assert.equal(partial.events.length, 1);
