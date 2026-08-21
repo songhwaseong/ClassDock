@@ -9,7 +9,11 @@ const TIMELINE_DOC_TYPE = "classdock-timeline";
 const TIMELINE_DOC_VERSION = 1;
 const TIMELINE_MAX_EVENTS = 1000;
 const TIMELINE_PHOTO_MAX_DATA_CHARS = 900 * 1024;
-const TIMELINE_PHOTO_TOTAL_MAX_CHARS = 12 * 1024 * 1024;
+/* 사진은 base64 로 문서 안에 들어간다. 총량 상한은 파일 크기·저장 시간을 감당할 만큼만 둔다.
+   되돌리기 기록과 수정 여부 판정은 사진 바이트를 복사하지 않으므로(timelineSnapshot) 여기서 막는 건
+   "한 파일에 담을 사진 총량" 하나뿐이다. */
+const TIMELINE_PHOTO_TOTAL_MAX_CHARS = 40 * 1024 * 1024;
+const TIMELINE_PHOTO_TOTAL_LABEL = Math.round(TIMELINE_PHOTO_TOTAL_MAX_CHARS / (1024 * 1024)) + "MB";
 const TIMELINE_PHOTO_MAX_SIDE = 1280;
 const TIMELINE_RECOVERY_DELAY = 900;
 const TIMELINE_TYPING_DELAY = 550;
@@ -31,8 +35,21 @@ const TIMELINE_COLORS = [
 
 let _timelineScratchCount = 0;
 
+const TIMELINE_MAP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+  '<path d="M12 21.2c4.2-4.6 6.3-8.1 6.3-10.7A6.3 6.3 0 0 0 12 4.2a6.3 6.3 0 0 0-6.3 6.3c0 2.6 2.1 6.1 6.3 10.7Z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>' +
+  '<circle cx="12" cy="10.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>';
+
+const TIMELINE_MORE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+  '<path d="m6 9.5 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function timelineT(text){
   return typeof window !== "undefined" && typeof window.t === "function" ? window.t(text) : text;
+}
+
+function timelineTf(template, vars){
+  if (typeof window !== "undefined" && typeof window.tf === "function") return window.tf(template, vars);
+  return String(template).replace(/\{(\w+)\}/g, (whole, key) => (vars && vars[key] != null ? String(vars[key]) : whole));
 }
 
 function timelineEventId(){
@@ -171,6 +188,54 @@ function timelineDocSerialize(model){
 
 function timelineDocContentKey(model){
   try { return timelineDocSerialize(model); } catch(_){ return ""; }
+}
+
+/* ===== 되돌리기·수정 여부용 가벼운 스냅샷 =====
+   사진은 한 장이 최대 900KB(base64)이고 한 문서에 수십 장이 들어간다. 되돌리기 기록 80단계와
+   타자 한 글자마다 도는 수정 여부 판정이 이 바이트를 매번 복사·비교하면 문서 하나로 수백 MB를 쓴다.
+   그래서 스냅샷은 사진을 뺀 값만 문자열로 뜨고, 사진은 객체 참조로만 들고 있는다.
+   사진을 바꾸면 새 객체가 만들어지므로(참조가 달라지므로) 참조 비교로 정확히 잡힌다. */
+function timelineSnapshot(model){
+  const images = [];
+  const events = (model && Array.isArray(model.events) ? model.events : []).slice(0, TIMELINE_MAX_EVENTS)
+    .map((item, index) => {
+      /* 정규화는 사진 객체를 새로 만든다. 그러면 참조 비교가 늘 어긋나므로 사진만 원본 객체를 그대로 든다. */
+      const photo = item && item.image && timelineNormalizePhoto(item.image) ? item.image : null;
+      const event = timelineNormalizeEvent(photo ? { ...item, image:null } : item, index);
+      if (photo){ images.push(photo); event.image = { slot:images.length - 1 }; }
+      return event;
+    });
+  return {
+    text:JSON.stringify({
+      title:String(model && model.title || "").slice(0, 160),
+      viewMode:model && model.viewMode === "scale" ? "scale" : "even",
+      events
+    }),
+    images
+  };
+}
+
+function timelineSnapshotEqual(a, b){
+  if (!a || !b) return a === b;
+  if (a.text !== b.text || a.images.length !== b.images.length) return false;
+  return a.images.every((image, index) => image === b.images[index]);
+}
+
+function timelineSnapshotModel(state){
+  const raw = state && typeof state.text === "string" ? JSON.parse(state.text) : {};
+  const images = state && Array.isArray(state.images) ? state.images : [];
+  return {
+    type:TIMELINE_DOC_TYPE,
+    version:TIMELINE_DOC_VERSION,
+    title:String(raw.title == null ? "" : raw.title).slice(0, 160),
+    viewMode:raw.viewMode === "scale" ? "scale" : "even",
+    events:(Array.isArray(raw.events) ? raw.events : []).map((item, index) => {
+      const slot = item && item.image ? item.image.slot : null;
+      const event = timelineNormalizeEvent({ ...item, image:null }, index);
+      if (Number.isInteger(slot) && images[slot]) event.image = images[slot];
+      return event;
+    })
+  };
 }
 
 function timelineSortedEvents(events){
@@ -386,6 +451,7 @@ async function loadTimelineDoc(file, opts = {}){
   doc.timelineDoc = model;
   doc.sourceFile = file;
   doc.savedText = timelineDocSerialize(model);
+  doc._timelineSavedSnapshot = timelineSnapshot(model);
   doc.contentSearchFocus = query => {
     const needle = String(query || "").trim().toLowerCase();
     if (!needle || typeof doc.timelineSelectEvent !== "function") return false;
@@ -428,8 +494,9 @@ async function saveTimelineDoc(doc){
   const ok = typeof saveTextDoc === "function" ? await saveTextDoc(json, doc, doc.name) : false;
   if (!ok) return false;
   doc.savedText = json;
+  doc._timelineSavedSnapshot = timelineSnapshot(doc.timelineDoc);
   if (doc._timelineHistory && typeof doc._timelineHistory.replaceCurrent === "function"){
-    doc._timelineHistory.replaceCurrent(json);
+    doc._timelineHistory.replaceCurrent(doc._timelineSavedSnapshot);
   }
   if (typeof markDocumentSavedSnapshot === "function"){
     await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json");
@@ -591,14 +658,21 @@ function mountTimelineEditor(doc){
   let presentRows = [];
 
   const serialize = () => timelineDocSerialize(model);
+  const snapshot = () => timelineSnapshot(model);
   const touch = () => {
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, serialize() !== doc.savedText);
+    if (typeof markDocumentDirty === "function"){
+      markDocumentDirty(doc, !timelineSnapshotEqual(snapshot(), doc._timelineSavedSnapshot));
+    }
     scheduleRecovery();
   };
+  /* 복구본은 사진까지 통째로 다시 쓴다. 사진이 많은 문서는 한 번 쓰는 값이 커서
+     타자 도중 자주 밀어 넣으면 버벅인다. 무거운 문서일수록 뜸하게 남긴다. */
   const scheduleRecovery = () => {
     clearTimeout(recoveryTimer);
     if (typeof appSettings === "object" && appSettings && appSettings.pdfRecovery === false) return;
-    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); }, TIMELINE_RECOVERY_DELAY);
+    const heavy = timelinePhotoTotalChars(model.events) > TIMELINE_PHOTO_TOTAL_MAX_CHARS / 4;
+    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); },
+      heavy ? TIMELINE_RECOVERY_DELAY * 3 : TIMELINE_RECOVERY_DELAY);
   };
   const flushRecovery = async () => {
     clearTimeout(recoveryTimer); recoveryTimer = 0;
@@ -627,9 +701,9 @@ function mountTimelineEditor(doc){
     redoBtn.disabled = !(history && history.canRedo());
   };
   history = MNEditHistory.create({
-    capture:serialize,
-    isEqual:(a, b) => a === b,
-    apply:value => replaceModel(timelineDocParse(value)),
+    capture:snapshot,
+    isEqual:timelineSnapshotEqual,
+    apply:state => replaceModel(timelineSnapshotModel(state)),
     onChange:updateHistory,
     limit:TIMELINE_HISTORY_LIMIT
   });
@@ -710,6 +784,29 @@ function mountTimelineEditor(doc){
     });
     button.addEventListener("dblclick", clickEvent => { clickEvent.preventDefault(); clickEvent.stopPropagation(); });
     return button;
+  }
+
+  function timelinePresentPlaceButton(event){
+    const tip = document.createElement("div");
+    tip.className = "timeline-present-place-tip";
+    const name = document.createElement("b");
+    name.textContent = event.placeName || event.placeAddress || "";
+    const address = document.createElement("span");
+    address.textContent = event.placeAddress || "";
+    address.hidden = !(event.placeAddress && event.placeName);
+    tip.append(name, address);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "timeline-present-place-link";
+    button.innerHTML = TIMELINE_MAP_ICON;
+    button.setAttribute("aria-label", timelineT("지도에서 검색") + ": " + placeText(event));
+    button.addEventListener("click", clickEvent => {
+      clickEvent.preventDefault(); clickEvent.stopPropagation(); searchTimelinePlace(event);
+    });
+    button.addEventListener("dblclick", clickEvent => { clickEvent.preventDefault(); clickEvent.stopPropagation(); });
+    const fragment = document.createDocumentFragment();
+    fragment.append(tip, button);
+    return fragment;
   }
 
   function renderOverviewTrack(){
@@ -1001,7 +1098,7 @@ function mountTimelineEditor(doc){
         draftImage = photo; error.textContent = ""; renderPhoto();
       } catch(photoError){
         error.textContent = photoError && photoError.message === "photo-total-too-large"
-          ? timelineT("이 연대표의 사진 합계가 12MB를 넘습니다. 기존 사진을 줄이거나 지워 주세요.")
+          ? timelineTf("이 연대표의 사진 합계가 {limit}를 넘습니다. 기존 사진을 줄이거나 지워 주세요.", { limit:TIMELINE_PHOTO_TOTAL_LABEL })
           : timelineT("사진을 넣지 못했어요. PNG·JPG·WebP 파일을 사용해 주세요.");
       }
     });
@@ -1038,12 +1135,20 @@ function mountTimelineEditor(doc){
   present.innerHTML = '<div class="timeline-present-top"><div class="timeline-present-status"><span class="timeline-present-count"></span>' +
     '<span class="timeline-present-progress" role="progressbar" aria-label="발표 진행" aria-valuemin="1"><i></i></span></div>' +
     '<button type="button" class="timeline-present-end">끝내기</button></div>' +
-    '<div class="timeline-present-card"><div class="timeline-present-image"></div><div class="timeline-present-copy">' +
-    '<div class="timeline-present-meta"></div><h2></h2><div class="timeline-present-place"></div><p></p></div></div>' +
-    '<div class="timeline-present-controls"><button type="button" class="timeline-present-prev">← 이전</button>' +
-    '<span class="timeline-present-help">← → 키로 이동 · Esc 끝내기</span>' +
-    '<button type="button" class="timeline-present-next">다음 →</button></div>';
+    '<div class="timeline-present-card"><div class="timeline-present-meta"></div>' +
+    '<div class="timeline-present-body"><div class="timeline-present-image"></div>' +
+    '<div class="timeline-present-copy"><h2></h2><p></p>' +
+    '<span class="timeline-present-more" aria-hidden="true">' + TIMELINE_MORE_ICON + '</span></div></div>' +
+    '<div class="timeline-present-place"></div></div>' +
+    '<div class="timeline-present-controls"><button type="button" class="timeline-present-prev">이전</button>' +
+    '<button type="button" class="timeline-present-next">다음</button></div>';
   root.appendChild(present);
+  const presentCopyEl = present.querySelector(".timeline-present-copy");
+  const updatePresentMore = () => {
+    const rest = presentCopyEl.scrollHeight - presentCopyEl.clientHeight - presentCopyEl.scrollTop;
+    presentCopyEl.classList.toggle("has-more", rest > 8);
+  };
+  presentCopyEl.addEventListener("scroll", updatePresentMore, { passive:true });
   const showPresent = index => {
     if (!presentRows.length) return;
     presentIndex = Math.max(0, Math.min(presentRows.length - 1, index));
@@ -1057,10 +1162,11 @@ function mountTimelineEditor(doc){
       (event.end ? " — " + timelineFormatDate(event.end) : "") + (event.category ? " · " + event.category : "");
     present.querySelector("h2").textContent = event.title || timelineT("제목 없는 사건");
     present.querySelector("p").textContent = event.description || "";
+    presentCopyEl.scrollTop = 0;
     const presentPlace = present.querySelector(".timeline-present-place");
     presentPlace.replaceChildren();
     presentPlace.hidden = !(event.placeName || event.placeAddress);
-    if (!presentPlace.hidden) presentPlace.appendChild(timelinePlaceButton(event, "timeline-present-place-link"));
+    if (!presentPlace.hidden) presentPlace.appendChild(timelinePresentPlaceButton(event));
     const presentCard = present.querySelector(".timeline-present-card");
     presentCard.style.setProperty("--timeline-color", timelineColorHex(event.color));
     present.style.setProperty("--timeline-color", timelineColorHex(event.color));
@@ -1071,6 +1177,8 @@ function mountTimelineEditor(doc){
     if (event.image){ const image = document.createElement("img"); image.src = event.image.dataUrl; image.alt = event.image.name || event.title; imageHost.appendChild(image); }
     present.querySelector(".timeline-present-prev").disabled = presentIndex <= 0;
     present.querySelector(".timeline-present-next").disabled = presentIndex >= presentRows.length - 1;
+    presentCopyEl.tabIndex = presentCopyEl.scrollHeight - presentCopyEl.clientHeight > 1 ? 0 : -1;
+    updatePresentMore();
   };
   const stopPresent = () => {
     if (present.hidden) return;
@@ -1197,7 +1305,7 @@ function mountTimelineEditor(doc){
       const parts = ["사진 " + attached + "장 연결"];
       if (missing) parts.push("파일 없음 " + missing + "개");
       if (failed) parts.push("처리 실패 " + failed + "개");
-      if (overLimit) parts.push("전체 12MB 제한으로 제외 " + overLimit + "개");
+      if (overLimit) parts.push(timelineTf("전체 {limit} 제한으로 제외 {count}개", { limit:TIMELINE_PHOTO_TOTAL_LABEL, count:overLimit }));
       if (typeof toast === "function") toast(parts.join(" · "), 5200, attached ? undefined : { type:"error" });
     } finally {
       imageFolderBtn.disabled = false; imageFolderBtn.textContent = oldLabel;
@@ -1294,6 +1402,7 @@ if (typeof module !== "undefined" && module.exports){
     TIMELINE_DOC_TYPE, TIMELINE_DOC_VERSION, TIMELINE_COLORS,
     timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
+    timelineSnapshot, timelineSnapshotEqual, timelineSnapshotModel,
     timelineSortedEvents, timelineLayoutEntries, timelineOverviewEntries, timelineEventsToCsv, timelineEventsFromCsv,
     timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle

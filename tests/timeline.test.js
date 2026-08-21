@@ -191,11 +191,25 @@ test("발표 화면은 사진 유무에 따라 집중형과 분할형 레이아�
   assert.match(source, /progress\.style\.setProperty\("--timeline-progress"/);
   assert.match(source, /presentCard\.classList\.toggle\("is-text-only", !event\.image\)/);
   assert.match(source, /presentCard\.classList\.toggle\("has-image", !!event\.image\)/);
-  assert.match(styles, /\.timeline-present-card\{[^}]*grid-template-columns:minmax\(260px,\.82fr\) minmax\(340px,1\.18fr\)/);
-  assert.match(styles, /\.timeline-present-card\.is-text-only\{[^}]*grid-template-columns:1fr/);
+  assert.match(styles, /\.timeline-present-body\{[^}]*grid-template-columns:minmax\(260px,1fr\) minmax\(320px,1\.05fr\)/);
+  assert.match(styles, /\.timeline-present-card\.is-text-only \.timeline-present-body\{[^}]*grid-template-columns:1fr/);
   assert.match(styles, /\.timeline-present-card\.is-text-only \.timeline-present-copy\{[^}]*text-align:center/);
   assert.match(styles, /\.timeline-present-card\.is-text-only \.timeline-present-copy p\{[^}]*text-align:left/);
-  assert.match(styles, /@media\(max-width:900px\)\{[\s\S]*?\.timeline-present-card,[^}]*grid-template-columns:1fr/);
+  assert.match(styles, /@media\(max-width:900px\)\{[\s\S]*?\.timeline-present-body,[^}]*grid-template-columns:1fr/);
+});
+
+test("발표 화면은 연도를 좌상단에, 유적지는 우하단 지도 아이콘 버튼으로 배치한다", () => {
+  const root = path.join(__dirname, "..");
+  const source = fs.readFileSync(path.join(root, "src/js/timeline.js"), "utf8");
+  const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  assert.match(source, /class="timeline-present-card"><div class="timeline-present-meta"><\/div>/);
+  assert.match(source, /presentPlace\.appendChild\(timelinePresentPlaceButton\(event\)\)/);
+  assert.match(source, /button\.innerHTML = TIMELINE_MAP_ICON/);
+  assert.match(source, /button\.setAttribute\("aria-label", timelineT\("지도에서 검색"\)/);
+  assert.match(source, /tip\.className = "timeline-present-place-tip"/);
+  assert.match(styles, /\.timeline-present-meta\{position:absolute;left:[^}]*top:/);
+  assert.match(styles, /\.timeline-present-place\{position:absolute;right:[^}]*bottom:/);
+  assert.match(styles, /\.timeline-present-place:hover \.timeline-present-place-tip,\s*\.timeline-present-place:focus-within \.timeline-present-place-tip\{opacity:1/);
 });
 
 test("연대표 도구막대는 CSV 이미지 파일명과 폴더 사진을 연결한다", () => {
@@ -216,6 +230,44 @@ test("유적지 주소는 카드와 발표 화면에서 기존 지도 검색으�
   assert.match(source, /timeline-form-place-name/);
   assert.match(source, /timeline-form-place-address/);
   assert.match(source, /event\.placeAddress \|\| event\.placeName/);
+});
+
+test("되돌리기 스냅샷은 사진 바이트를 복사하지 않고 참조로 공유한다", () => {
+  const big = "data:image/jpeg;base64," + "A".repeat(200000);
+  const model = timeline.timelineDocEmpty("사진 많은 연대표");
+  model.events.push(timeline.timelineNormalizeEvent({
+    id:"event-1", title:"광복", start:"1945-08-15",
+    image:{ name:"광복.jpg", dataUrl:big, width:1280, height:960 }
+  }, 0));
+  const snapshot = timeline.timelineSnapshot(model);
+  assert.ok(snapshot.text.length < 2000, "스냅샷 문자열에 사진 base64가 들어가면 안 된다");
+  assert.equal(snapshot.images.length, 1);
+  assert.equal(snapshot.images[0], model.events[0].image, "사진은 같은 객체를 참조해야 한다");
+
+  assert.ok(timeline.timelineSnapshotEqual(snapshot, timeline.timelineSnapshot(model)));
+  model.events[0].title = "8·15 광복";
+  assert.equal(timeline.timelineSnapshotEqual(snapshot, timeline.timelineSnapshot(model)), false);
+
+  const restored = timeline.timelineSnapshotModel(snapshot);
+  assert.equal(restored.events[0].title, "광복");
+  assert.equal(restored.events[0].image.dataUrl, big);
+  assert.notEqual(restored.events[0], model.events[0], "되돌린 사건은 새 객체여야 한다");
+
+  model.events[0].image = { name:"다른.jpg", dataUrl:big, width:1280, height:960 };
+  assert.equal(timeline.timelineSnapshotEqual(snapshot, timeline.timelineSnapshot(model)), false,
+    "같은 바이트라도 사진을 바꾸면 다른 상태로 봐야 한다");
+});
+
+test("사진 총량 상한은 40MB이고 안내 문구는 상한값을 따라간다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/timeline.js"), "utf8");
+  assert.match(source, /TIMELINE_PHOTO_TOTAL_MAX_CHARS = 40 \* 1024 \* 1024/);
+  assert.match(source, /TIMELINE_PHOTO_TOTAL_LABEL = Math\.round\(TIMELINE_PHOTO_TOTAL_MAX_CHARS/);
+  assert.match(source, /timelineTf\("이 연대표의 사진 합계가 \{limit\}를 넘습니다[^"]*", \{ limit:TIMELINE_PHOTO_TOTAL_LABEL \}\)/);
+  assert.match(source, /timelineTf\("전체 \{limit\} 제한으로 제외 \{count\}개"/);
+  assert.doesNotMatch(source, /12MB/);
+  const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+  assert.match(i18n, /"이 연대표의 사진 합계가 \{limit\}를 넘습니다/);
+  assert.match(i18n, /"전체 \{limit\} 제한으로 제외 \{count\}개"/);
 });
 
 test("새 연대표 파일 이름은 두 번째부터 번호가 붙는다", () => {

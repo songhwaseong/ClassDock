@@ -1608,7 +1608,6 @@
     "발표 진행": "Presentation progress",
     "← 이전": "← Previous",
     "다음 →": "Next →",
-    "← → 키로 이동 · Esc 끝내기": "Use ← → to navigate · Esc to finish",
     "사건을 하나씩 크게 보여주기": "Show events one at a time",
     "🖨 인쇄": "🖨 Print",
     "세로 목록으로 인쇄하거나 PDF로 저장": "Print as a vertical list or save as PDF",
@@ -1633,8 +1632,9 @@
     "사진 넣기": "Add photo",
     "사진 지우기": "Remove photo",
     "사진을 준비하는 중…": "Preparing photo…",
-    "이 연대표의 사진 합계가 12MB를 넘습니다. 기존 사진을 줄이거나 지워 주세요.":
-      "Timeline photos exceed 12 MB in total. Remove or reduce an existing photo.",
+    "이 연대표의 사진 합계가 {limit}를 넘습니다. 기존 사진을 줄이거나 지워 주세요.":
+      "Timeline photos exceed {limit} in total. Remove or reduce an existing photo.",
+    "전체 {limit} 제한으로 제외 {count}개": "{count} skipped over the {limit} total limit",
     "사진을 넣지 못했어요. PNG·JPG·WebP 파일을 사용해 주세요.": "Couldn't add the photo. Use a PNG, JPG, or WebP file.",
     "시작 날짜를 ‘1945’, ‘1945-08-15’, ‘기원전 300’처럼 입력하세요.":
       "Enter the start as ‘1945’, ‘1945-08-15’, or ‘BC 300’.",
