@@ -2,7 +2,11 @@
 
 /* ===== 영상·오디오 보기 + 자막(SRT/VTT/SMI) =====
  * 수업 영상을 PDF·노트북과 같은 탭으로 열어 본다. 재생은 브라우저 <video> 그대로
- * (탐색·배속·전체화면·PiP 는 기본 컨트롤), 자막만 이 파일에서 처리한다.
+ * (탐색·배속·전체화면은 기본 컨트롤), 자막과 작은 창(PiP)만 이 파일에서 처리한다.
+ *  · ← → 는 10초씩 되감기·건너뛰기(기본 ±5초 대신, 영상을 클릭해 포커스를 주지 않아도 먹게).
+ *  · 재생 속도는 도구바 선택칸과 [ ] 키. 값은 playbackRate 한 곳에만 두고 ratechange 로 칸을 맞춘다.
+ *  · 작은 창(PiP)은 브라우저 기본 컨트롤에도 있지만 도구바 버튼·Alt+P 로도 켠다(교실에서 찾기 쉽게).
+ *    창을 브라우저가 그리므로 ::cue 로 키운 자막 크기는 그 창에 적용되지 않는다.
  *  · 자막은 WebVTT 로 변환해 <track> 에 넣는다 — SRT 는 타임코드 치환, SMI(SAMI)는 간이 파서.
  *  · 인코딩은 smartDecodeText(UTF-8/CP949 자동 판별)를 그대로 써서 한글 자막이 깨지지 않는다.
  *  · 같은 이름 자막(강의1.mp4 ↔ 강의1.srt / 강의1.ko.srt)을 같은 폴더·열린 탭에서 자동 연결.
@@ -309,6 +313,74 @@ function renderVideoPlayer(file, doc){
     if (state.trackUrl) URL.revokeObjectURL(state.trackUrl);
   });
 
+  /* ← → 10초씩 되감기·건너뛰기 / [ ] 재생 속도 한 칸씩(영상·오디오 공통).
+   * 브라우저 기본 화살표는 ±5초인데다 영상을 한 번 클릭해 포커스를 준 뒤에만 먹는다 — 수업 중에는
+   * 그 클릭이 재생/일시정지를 건드려 버린다. 이 탭이 활성이면 클릭 없이 바로 듣게 한다.
+   * capture 로 먼저 받아 preventDefault: 안 그러면 기본 ±5초가 더해져 한 번에 15초씩 튄다
+   * (PDF 페이지 넘기기(app.js)도 defaultPrevented 를 보고 비켜 준다). */
+  const SEEK_STEP = 10;
+  function seekBy(delta){
+    const duration = Number(media.duration);
+    const limit = (Number.isFinite(duration) && duration > 0) ? duration : Infinity;
+    const next = Math.min(limit, Math.max(0, (Number(media.currentTime) || 0) + delta));
+    try { media.currentTime = next; } catch(_){}
+  }
+
+  /* 재생 속도 — 어학 듣기·시범 동작은 느리게, 복습은 빠르게.
+   * 값의 원본은 media.playbackRate 하나로 두고 ratechange 로 도구바 칸을 맞춘다. 그래야 브라우저
+   * 기본 컨트롤(⋮ 재생 속도)로 바꿔도 칸이 따라오고, 두 자리가 서로 다른 값을 말하지 않는다.
+   * 변환본(MP4)으로 갈아탈 때 load() 가 속도를 1× 로 돌려놓으므로 loadedmetadata 에서 되건다. */
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const speedLabel = (rate) => (rate === 1 ? "1×(보통)" : rate + "×");
+  let speedPick = null;                                    // 도구바 선택칸(영상에서만 만든다)
+  let chosenRate = 1;
+  const syncSpeedUI = () => {
+    const rate = String(Number(media.playbackRate) || 1);
+    if (!speedPick) return;
+    if (![...speedPick.options].some(o => o.value === rate)){
+      const extra = document.createElement("option");     // 기본 메뉴로 고른 값(0.25× 등)도 칸에 보이게
+      extra.value = rate; extra.textContent = rate + "×";
+      speedPick.appendChild(extra);
+    }
+    speedPick.value = rate;
+  };
+  function setSpeed(rate, announce){
+    const next = Number(rate);
+    if (!Number.isFinite(next) || next <= 0) return;
+    try { media.playbackRate = next; } catch(_){ return; }
+    if (announce && typeof toast === "function") toast("재생 속도 " + speedLabel(next), 1400);
+  }
+  function stepSpeed(dir){
+    const current = Number(media.playbackRate) || 1;
+    let index = 0;                                         // 목록에 없는 값이면 가장 가까운 칸에서 출발
+    SPEEDS.forEach((v, i) => { if (Math.abs(v - current) < Math.abs(SPEEDS[index] - current)) index = i; });
+    if (Math.abs(SPEEDS[index] - current) < 1e-6) index += dir;
+    else if (dir < 0 && SPEEDS[index] > current) index -= 1;
+    else if (dir > 0 && SPEEDS[index] < current) index += 1;
+    setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, index))], true);
+  }
+  media.addEventListener("ratechange", () => { chosenRate = Number(media.playbackRate) || 1; syncSpeedUI(); });
+  media.addEventListener("loadedmetadata", () => {
+    if (Math.abs((Number(media.playbackRate) || 1) - chosenRate) > 1e-6) media.playbackRate = chosenRate;
+  });
+
+  const onMediaKey = (e) => {
+    if (!media.isConnected){ document.removeEventListener("keydown", onMediaKey, true); return; }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    const seek = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    const speed = (e.code === "BracketLeft" || e.key === "[") ? -1
+      : (e.code === "BracketRight" || e.key === "]") ? 1 : 0;
+    if (!seek && !speed) return;
+    if (activeId !== doc.id) return;                       // 분할·다른 탭에서 누른 키는 그 문서 몫
+    const ae = document.activeElement;
+    if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+    if (seek && media.readyState < 1) return;              // 길이를 모르면 건너뛸 자리도 없다
+    e.preventDefault();
+    if (seek) seekBy(seek * SEEK_STEP); else stepSpeed(speed);
+  };
+  document.addEventListener("keydown", onMediaKey, true);
+  doc.cleanupFns.push(() => document.removeEventListener("keydown", onMediaKey, true));
+
   // 같은 탭에서 재생 원본만 바꾼다(자막·크기 설정 유지) — 변환본(MP4)으로 전환할 때 사용
   function vvPlayFile(newFile){
     const resumeAt = media.currentTime;
@@ -521,6 +593,73 @@ function renderVideoPlayer(file, doc){
       }, "image/png");
     });
 
+    /* 작은 창(PiP): 영상만 떼어 화면 맨 위에 띄우고 교과서·문제지를 함께 본다.
+     * 창은 브라우저가 그리므로 아래 '자막 크기'(::cue)는 이 창에 적용되지 않는다 — 키워 둔 상태면 한 번 알린다.
+     * 미지원 브라우저(파이어폭스 등)에서는 버튼을 감춰 눌러도 안 되는 자리를 만들지 않는다. */
+    const btnPip = document.createElement("button");
+    btnPip.type = "button"; btnPip.textContent = "작은 창";
+    btnPip.title = "영상만 작은 창으로 떼어 화면 위에 띄워요 — 다른 자료를 보면서 재생 (Alt+P)";
+    const pipUsable = () => !!(document.pictureInPictureEnabled && !media.disablePictureInPicture
+      && typeof media.requestPictureInPicture === "function");
+    if (!pipUsable()) btnPip.hidden = true;
+    const syncPipBtn = () => {
+      const on = document.pictureInPictureElement === media;
+      btnPip.textContent = on ? "작은 창 끄기" : "작은 창";
+      btnPip.disabled = !on && media.readyState < 1;      // 메타데이터 전에는 요청 자체가 실패한다
+    };
+    async function togglePip(){
+      if (btnPip.hidden || !pipUsable()) return;
+      try {
+        if (document.pictureInPictureElement === media){ await document.exitPictureInPicture(); return; }
+        if (media.readyState < 1){
+          if (typeof toast === "function") toast("영상을 잠깐 재생한 뒤 작은 창으로 띄워 주세요.", 2600);
+          return;
+        }
+        await media.requestPictureInPicture();
+        const shown = currentTrack();
+        if (state.sizeIndex > 0 && !state.pipCueWarned && shown && shown.mode === "showing"){
+          state.pipCueWarned = true;
+          if (typeof toast === "function") toast("작은 창에서는 자막 크기 설정이 적용되지 않아요.", 3000);
+        }
+      } catch(e){
+        if (typeof toast === "function") toast("작은 창으로 띄우지 못했어요.", 2600, { type: "error" });
+      }
+    }
+    btnPip.addEventListener("click", togglePip);
+    media.addEventListener("loadedmetadata", syncPipBtn);
+    media.addEventListener("enterpictureinpicture", syncPipBtn);
+    media.addEventListener("leavepictureinpicture", syncPipBtn);
+    syncPipBtn();
+
+    // Alt+P — 이 영상 탭이 활성일 때만. 입력칸에 있을 때는 글자 입력이 우선이다.
+    const onPipKey = (e) => {
+      if (!media.isConnected){ document.removeEventListener("keydown", onPipKey, true); return; }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+      if (e.code !== "KeyP" && String(e.key).toLowerCase() !== "p") return;
+      if (activeId !== doc.id) return;
+      const ae = document.activeElement;
+      if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+      e.preventDefault();
+      togglePip();
+    };
+    document.addEventListener("keydown", onPipKey, true);
+    doc.cleanupFns.push(() => {
+      document.removeEventListener("keydown", onPipKey, true);
+      try { if (document.pictureInPictureElement === media) document.exitPictureInPicture(); } catch(_){}
+    });
+
+    speedPick = document.createElement("select");
+    speedPick.className = "vv-speed";
+    speedPick.title = "재생 속도 — 느리게 들려주거나 빠르게 복습해요 ( [ 와 ] 키 )";
+    speedPick.setAttribute("aria-label", "재생 속도");
+    SPEEDS.forEach((rate) => {
+      const option = document.createElement("option");
+      option.value = String(rate); option.textContent = speedLabel(rate);
+      speedPick.appendChild(option);
+    });
+    speedPick.addEventListener("change", () => setSpeed(speedPick.value, false));
+    syncSpeedUI();
+
     const btnOpen = document.createElement("button");
     btnOpen.type = "button"; btnOpen.textContent = "자막 열기";
     btnOpen.title = "SRT · VTT · SMI 자막 파일을 이 영상에 연결 (한글 인코딩 자동 인식)";
@@ -615,7 +754,7 @@ function renderVideoPlayer(file, doc){
       applyCueSize();
     });
 
-    bar.append(btnCapture, btnOpen, btnToggle, btnSize, status, picker);
+    bar.append(btnCapture, btnPip, speedPick, btnOpen, btnToggle, btnSize, status, picker);
     wrap.appendChild(bar);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   }

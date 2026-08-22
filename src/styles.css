@@ -5114,6 +5114,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     border-radius:7px;padding:5px 10px;cursor:pointer}
   .vv-bar button:hover:not(:disabled){background:var(--panel-hover);color:var(--ink);border-color:var(--accent)}
   .vv-bar button:disabled{opacity:.42;cursor:default}
+  .vv-speed{font:inherit;font-size:12.5px;border:1px solid var(--border);background:var(--field);color:var(--muted);
+    border-radius:7px;padding:5px 8px;cursor:pointer}
+  .vv-speed:hover{background:var(--panel-hover);color:var(--ink);border-color:var(--accent)}
   .vv-status{min-width:0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .vv-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
     background:#000;border:1px solid var(--border);border-radius:10px;overflow:hidden}

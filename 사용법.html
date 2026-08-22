@@ -1153,7 +1153,10 @@ cd myOffice</code></pre>
 
 <ul>
   <li>영상(<code>.mp4</code>·<code>.webm</code>·<code>.mov</code>·<code>.mkv</code>·<code>.avi</code> 등)과 오디오(<code>.mp3</code>·<code>.wav</code>·<code>.m4a</code>·<code>.flac</code> 등)를 일반 문서처럼 탭에서 재생합니다. 브라우저 기본 재생 컨트롤로 탐색·배속·전체화면을 사용하세요.</li>
+  <li>영상 도구바의 <strong>속도 칸</strong>(0.5×~2×)으로 재생 속도를 바꿉니다. 어학 듣기·시범 동작은 느리게, 복습은 빠르게 쓰세요. <kbd>[</kbd>/<kbd>]</kbd> 키로도 한 칸씩 옮길 수 있고(오디오에서도 동작), 변환본으로 갈아타도 고른 속도가 유지됩니다.</li>
+  <li><kbd>←</kbd>/<kbd>→</kbd>로 <strong>10초씩 되감기·건너뛰기</strong>를 합니다. 영상을 클릭해 두지 않아도 되고(클릭하면 재생이 멈춥니다), 오디오에서도 똑같이 동작합니다. 브라우저 기본 화살표(±5초)와 겹치지 않게 처리했습니다.</li>
   <li>영상 도구바의 <strong>📷 장면 캡처</strong>는 현재 프레임을 일반 메모에 넣고, 메모를 쓸 수 없으면 PNG 파일로 저장합니다.</li>
+  <li>영상 도구바의 <strong>작은 창</strong>(또는 <kbd>Alt</kbd>+<code>P</code>)은 영상만 떼어 화면 맨 위 작은 창으로 띄웁니다. 다른 자료를 보거나 판서하는 동안 계속 재생됩니다. 크롬·엣지에서만 되고(파이어폭스에서는 버튼이 보이지 않습니다), 이 작은 창에는 아래의 <strong>자막 크기</strong> 설정이 적용되지 않습니다.</li>
   <li><code>.srt</code>·<code>.vtt</code>·<code>.smi</code> 자막은 같은 이름의 영상과 자동 연결됩니다. 영상 탭의 <strong>자막 열기</strong>로 직접 고를 수도 있고, 표시/숨기기와 글자 크기 조절을 지원합니다.</li>
   <li>MP4(H.264)·WebM을 권장합니다. MKV·AVI·WMV·FLV·MOV처럼 재생이 안 되는 영상은 EXE에서 <strong>MP4로 변환</strong>할 수 있으며, 폴더 메뉴의 <strong>영상 일괄 MP4 변환</strong>도 지원합니다. 변환은 500MB 이하만 가능하고 처음에는 ffmpeg 설치를 위해 인터넷이 필요할 수 있습니다.</li>
 </ul>
@@ -1327,6 +1330,21 @@ cd myOffice</code></pre>
 <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd>, <kbd>←</kbd> / <kbd>→</kbd></td><td><strong>한 장씩 보기</strong>에서 앞·뒤 페이지로 넘기기</td><td></td></tr>
 </tbody>
 </table>
+
+<h3>영상·오디오 재생</h3>
+
+<table>
+<thead><tr><th>단축키</th><th>동작</th><th>⚙</th></tr></thead>
+<tbody>
+<tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td><strong>10초 뒤로 / 앞으로</strong> (영상을 클릭하지 않아도 동작)</td><td></td></tr>
+<tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td><strong>재생 속도</strong> 한 칸 느리게 / 빠르게 (0.5×·0.75×·1×·1.25×·1.5×·2×)</td><td></td></tr>
+<tr><td><kbd>Alt</kbd>+<kbd>P</kbd></td><td><strong>작은 창(PiP)</strong> 켜기/끄기 — 도구바의 <code>작은 창</code> 버튼과 같음 (크롬·엣지)</td><td></td></tr>
+</tbody>
+</table>
+
+<blockquote>
+  <p>재생/일시정지·전체화면·볼륨은 브라우저 기본 재생 컨트롤을 그대로 씁니다. 브라우저 기본 메뉴(<code>⋮</code> → 재생 속도)로 속도를 바꿔도 도구바 속도 칸이 같은 값을 가리킵니다.</p>
+</blockquote>
 
 <h3>Python 코드 편집기</h3>
 
