@@ -39,6 +39,8 @@
     C("newMusic","🎵","새 악보 (.msheet)", () => callFn("newMusicScratch"), { kw:"music score sheet 악보 음악 음표 오선 노래 동요 재생 msheet" }),
     C("newMap","🗺️","새 지도 (.map)", () => callFn("newMapScratch"), { kw:"map 지도 위치 좌표 마커 표시 사회 지리 답사 leaflet" }),
     C("newTimeline","⏳","새 연대표 (.timeline)", () => callFn("newTimelineScratch"), { kw:"timeline 연대표 연표 역사 사건 시대 사회 국어 과학사 chronology" }),
+    C("newConcept","🕸️","새 개념 관계도 (.concept)", () => callFn("newConceptScratch"), { kw:"concept map 개념 관계도 마인드맵 원인 결과 포함 비교 연결" }),
+    C("newStudy","🧠","새 암기 카드 (.study)", () => callFn("newStudyScratch"), { kw:"study flashcard 암기 카드 단어장 오답 복습 빈칸" }),
     C("mapToBoard","🖊️","지도를 칠판으로", clickBtn(".map-to-board"),
       { when:hasBtn(".map-to-board"), kw:"map board 지도 칠판 화이트보드 판서 필기 스냅샷 캡처" }),
     C("boardInsertMap","🗺️","칠판에 지도 넣기", clickBtn(".wb-map"),

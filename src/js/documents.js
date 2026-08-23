@@ -1257,6 +1257,8 @@ function unsavedDocumentLabel(doc){
   if (doc.kind === "board") return "화이트보드";
   if (doc.kind === "map") return "지도";
   if (doc.kind === "timeline") return "연대표";
+  if (doc.kind === "concept") return "개념 관계도";
+  if (doc.kind === "study") return "암기 카드";
   if (doc.notebook) return "노트북";
   if (doc.kind === "office" && /\.(xlsx|xls|csv)$/i.test(doc.name || "")) return "스프레드시트";
   if (doc.kind === "office") return "문서";
@@ -1482,6 +1484,8 @@ function modeBadgeText(doc){
   if (doc.kind === "board") return "화이트보드";
   if (doc.kind === "map") return "지도 만들기";
   if (doc.kind === "timeline") return "연대표 만들기";
+  if (doc.kind === "concept") return "개념 관계도 만들기";
+  if (doc.kind === "study") return "암기·오답 복습";
   if (doc.kind === "replay") return "수업 리플레이";
   if (doc.kind === "diff") return "파일 비교";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
@@ -2461,6 +2465,12 @@ function openSidebarGroupMenu(node, x, y){
   add("+Time 새 연대표", () => {
     if (typeof newTimelineScratchInFolder === "function") newTimelineScratchInFolder(node.newPythonContext);
   });
+  add("+Con 새 개념 관계도", () => {
+    if (typeof newConceptScratchInFolder === "function") newConceptScratchInFolder(node.newPythonContext);
+  });
+  add("+Study 새 암기 카드", () => {
+    if (typeof newStudyScratchInFolder === "function") newStudyScratchInFolder(node.newPythonContext);
+  });
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {
       if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
@@ -2742,6 +2752,12 @@ function isMnoteSearchable(doc){
 function isTimelineSearchable(doc){
   return !!(doc && doc.timelineDoc && Array.isArray(doc.timelineDoc.events));
 }
+function isConceptSearchable(doc){
+  return !!(doc && doc.conceptDoc && Array.isArray(doc.conceptDoc.nodes));
+}
+function isStudyCardsSearchable(doc){
+  return !!(doc && doc.studyDoc && Array.isArray(doc.studyDoc.cards));
+}
 function mnoteSearchText(doc){
   if (!isMnoteSearchable(doc)) return null;
   return (typeof mnotePlainText === "function") ? mnotePlainText(doc.mnote) : null;
@@ -2753,6 +2769,12 @@ function timelineSearchText(doc){
     : doc.timelineDoc.events;
   return rows.map(event => [event.start, event.end, event.title, event.category, event.description]
     .map(value => String(value || "")).join(" ")).join("\n");
+}
+function conceptCardsSearchText(doc){
+  return isConceptSearchable(doc) && typeof conceptSearchText === "function" ? conceptSearchText(doc.conceptDoc) : null;
+}
+function studyCardsSearchText(doc){
+  return isStudyCardsSearchable(doc) && typeof studySearchText === "function" ? studySearchText(doc.studyDoc) : null;
 }
 // 검색 본문: 셀 본문을 줄 그대로 이어붙인다(코드·마크다운·raw 모두). 셀 사이엔 개행 하나.
 // savedText 는 ipynb JSON 이라 검색에 쓰면 안 된다(따옴표·\n 이스케이프가 섞인 직렬화본).
@@ -2782,6 +2804,8 @@ function hasLiveDocText(doc){
   if (isNotebookSearchable(doc)) return true;            // 셀 모델이 곧 최신 본문
   if (isMnoteSearchable(doc)) return true;               // 블록 모델이 곧 최신 본문
   if (isTimelineSearchable(doc)) return true;            // 사건 모델이 곧 최신 본문
+  if (isConceptSearchable(doc)) return true;             // 개념 카드·관계 모델
+  if (isStudyCardsSearchable(doc)) return true;          // 암기 카드 모델
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function") return true;
   return typeof doc.savedText === "string";
 }
@@ -2790,6 +2814,8 @@ function liveDocText(doc){
   if (isNotebookSearchable(doc)) return notebookSearchText(doc);   // savedText(=ipynb JSON) 보다 먼저 — 직렬화본을 검색하면 안 된다
   if (isMnoteSearchable(doc)) return mnoteSearchText(doc);         // savedText(=mnote JSON) 대신 블록 본문
   if (isTimelineSearchable(doc)) return timelineSearchText(doc);   // 사진 base64를 빼고 사건 글자만
+  if (isConceptSearchable(doc)) return conceptCardsSearchText(doc);
+  if (isStudyCardsSearchable(doc)) return studyCardsSearchText(doc);
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
     try { return String(doc.codeEditor.getValue()); } catch(e){}
   }
@@ -2829,6 +2855,8 @@ function isTextSearchable(doc){
   if (isNotebookSearchable(doc)) return true;          // 셀 노트북 — sourceFile 이 없어 아래 확장자 판정을 못 탄다
   if (isMnoteSearchable(doc)) return true;             // .mnote — 블록 본문(모델)로 검색, 확장자 판정 우회
   if (isTimelineSearchable(doc)) return true;          // .timeline — 사건 본문(모델)로 검색
+  if (isConceptSearchable(doc)) return true;           // .concept — 카드·연결 글자만
+  if (isStudyCardsSearchable(doc)) return true;        // .study — 질문·정답·태그만
   if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp
   // 본문이 이미 메모리에 있으면 파일을 읽지 않으므로 크기 상한과 무관하게 여기서 바로 검색한다.
   if (hasLiveDocText(doc)) return isTextExtSearchable(doc);

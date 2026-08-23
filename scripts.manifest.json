@@ -69,6 +69,8 @@
     "whiteboard.js",
     "map-viewer.js",
     "timeline.js",
+    "concept-doc.js",
+    "study-doc.js",
     "remote-terminal.js",
     "lesson-replay.js",
     "diff-viewer.js",
@@ -172,7 +174,9 @@
         "board-tools.js",
         "whiteboard.js",
         "map-viewer.js",
-        "timeline.js"
+        "timeline.js",
+        "concept-doc.js",
+        "study-doc.js"
       ]
     },
     {
@@ -302,6 +306,21 @@
       "code-viewer.js"
     ],
     "timeline.js": [
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
+      "code-viewer.js"
+    ],
+    "concept-doc.js": [
+      "timeline.js",
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
+      "code-viewer.js"
+    ],
+    "study-doc.js": [
+      "timeline.js",
+      "concept-doc.js",
       "documents.js",
       "file-loaders.js",
       "history.js",

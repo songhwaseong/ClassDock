@@ -1,0 +1,377 @@
+{
+  "type": "classdock-concept",
+  "version": 1,
+  "title": "가상 한울 가문 · 4대 후손 관계도",
+  "layout": "free",
+  "nodes": [
+    {
+      "id": "founder",
+      "title": "강하늘",
+      "description": "1940년생 · 가문의 시작\n세 갈래의 자손으로 이어지는 중심 인물입니다.",
+      "category": "1대 · 시조",
+      "color": "slate",
+      "x": 70,
+      "y": 500,
+      "image": null
+    },
+    {
+      "id": "child-1",
+      "title": "강민준",
+      "description": "1965년생 · 첫째 자녀\n교육 분야에서 일하며 두 자녀를 두었습니다.",
+      "category": "2대 · 자녀",
+      "color": "purple",
+      "x": 400,
+      "y": 260,
+      "image": null
+    },
+    {
+      "id": "child-2",
+      "title": "강서윤",
+      "description": "1968년생 · 둘째 자녀\n지역 기록을 정리하며 두 자녀를 두었습니다.",
+      "category": "2대 · 자녀",
+      "color": "purple",
+      "x": 400,
+      "y": 530,
+      "image": null
+    },
+    {
+      "id": "child-3",
+      "title": "강도현",
+      "description": "1972년생 · 셋째 자녀\n환경 연구에 참여하며 두 자녀를 두었습니다.",
+      "category": "2대 · 자녀",
+      "color": "purple",
+      "x": 400,
+      "y": 800,
+      "image": null
+    },
+    {
+      "id": "grand-1",
+      "title": "강지우",
+      "description": "1990년생 · 강민준의 첫째\n디자인을 공부했고 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 75,
+      "image": null
+    },
+    {
+      "id": "grand-2",
+      "title": "강현우",
+      "description": "1993년생 · 강민준의 둘째\n소프트웨어 개발자이며 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 253,
+      "image": null
+    },
+    {
+      "id": "grand-3",
+      "title": "강수아",
+      "description": "1992년생 · 강서윤의 첫째\n교사이며 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 431,
+      "image": null
+    },
+    {
+      "id": "grand-4",
+      "title": "강준서",
+      "description": "1996년생 · 강서윤의 둘째\n도시 계획을 공부했고 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 609,
+      "image": null
+    },
+    {
+      "id": "grand-5",
+      "title": "강예린",
+      "description": "1997년생 · 강도현의 첫째\n생명과학 연구자이며 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 787,
+      "image": null
+    },
+    {
+      "id": "grand-6",
+      "title": "강시우",
+      "description": "2000년생 · 강도현의 둘째\n영상 기록가이며 자녀 두 명이 있습니다.",
+      "category": "3대 · 손자녀",
+      "color": "blue",
+      "x": 730,
+      "y": 965,
+      "image": null
+    },
+    {
+      "id": "great-1",
+      "title": "강다온",
+      "description": "2015년생 · 강지우의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 30,
+      "image": null
+    },
+    {
+      "id": "great-2",
+      "title": "강라온",
+      "description": "2018년생 · 강지우의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 172,
+      "image": null
+    },
+    {
+      "id": "great-3",
+      "title": "강하준",
+      "description": "2016년생 · 강현우의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 314,
+      "image": null
+    },
+    {
+      "id": "great-4",
+      "title": "강하윤",
+      "description": "2019년생 · 강현우의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 456,
+      "image": null
+    },
+    {
+      "id": "great-5",
+      "title": "강은우",
+      "description": "2017년생 · 강수아의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 598,
+      "image": null
+    },
+    {
+      "id": "great-6",
+      "title": "강은채",
+      "description": "2020년생 · 강수아의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 740,
+      "image": null
+    },
+    {
+      "id": "great-7",
+      "title": "강서준",
+      "description": "2018년생 · 강준서의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 882,
+      "image": null
+    },
+    {
+      "id": "great-8",
+      "title": "강서아",
+      "description": "2021년생 · 강준서의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 1024,
+      "image": null
+    },
+    {
+      "id": "great-9",
+      "title": "강유진",
+      "description": "2019년생 · 강예린의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 1166,
+      "image": null
+    },
+    {
+      "id": "great-10",
+      "title": "강유나",
+      "description": "2022년생 · 강예린의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 1308,
+      "image": null
+    },
+    {
+      "id": "great-11",
+      "title": "강태오",
+      "description": "2020년생 · 강시우의 첫째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 1450,
+      "image": null
+    },
+    {
+      "id": "great-12",
+      "title": "강태리",
+      "description": "2023년생 · 강시우의 둘째",
+      "category": "4대 · 증손자녀",
+      "color": "green",
+      "x": 1060,
+      "y": 1592,
+      "image": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "family-founder-1",
+      "from": "founder",
+      "to": "child-1",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-founder-2",
+      "from": "founder",
+      "to": "child-2",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-founder-3",
+      "from": "founder",
+      "to": "child-3",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-1-1",
+      "from": "child-1",
+      "to": "grand-1",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-1-2",
+      "from": "child-1",
+      "to": "grand-2",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-2-1",
+      "from": "child-2",
+      "to": "grand-3",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-2-2",
+      "from": "child-2",
+      "to": "grand-4",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-3-1",
+      "from": "child-3",
+      "to": "grand-5",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-child-3-2",
+      "from": "child-3",
+      "to": "grand-6",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-1-1",
+      "from": "grand-1",
+      "to": "great-1",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-1-2",
+      "from": "grand-1",
+      "to": "great-2",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-2-1",
+      "from": "grand-2",
+      "to": "great-3",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-2-2",
+      "from": "grand-2",
+      "to": "great-4",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-3-1",
+      "from": "grand-3",
+      "to": "great-5",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-3-2",
+      "from": "grand-3",
+      "to": "great-6",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-4-1",
+      "from": "grand-4",
+      "to": "great-7",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-4-2",
+      "from": "grand-4",
+      "to": "great-8",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-5-1",
+      "from": "grand-5",
+      "to": "great-9",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-5-2",
+      "from": "grand-5",
+      "to": "great-10",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-6-1",
+      "from": "grand-6",
+      "to": "great-11",
+      "type": "include",
+      "label": "부모 → 자녀"
+    },
+    {
+      "id": "family-grand-6-2",
+      "from": "grand-6",
+      "to": "great-12",
+      "type": "include",
+      "label": "부모 → 자녀"
+    }
+  ]
+}

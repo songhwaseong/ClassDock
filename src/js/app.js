@@ -78,6 +78,8 @@ function wire(){
   if (byId("dzNewMusic")) byId("dzNewMusic").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMusicScratch === "function") newMusicScratch(); });
   if (byId("dzNewMap")) byId("dzNewMap").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMapScratch === "function") newMapScratch(); });
   if (byId("dzNewTimeline")) byId("dzNewTimeline").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTimelineScratch === "function") newTimelineScratch(); });
+  if (byId("dzNewConcept")) byId("dzNewConcept").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newConceptScratch === "function") newConceptScratch(); });
+  if (byId("dzNewStudy")) byId("dzNewStudy").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newStudyScratch === "function") newStudyScratch(); });
   if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
   if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
@@ -213,7 +215,7 @@ function wire(){
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
     docs.forEach(d => {
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
-      else if (d.kind === "timeline" && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
+      else if (["timeline", "concept", "study"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
     });
     if (suppressUnloadWarn) return;
     if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
@@ -398,6 +400,8 @@ function wire(){
   if (byId("sbNewMusic")) byId("sbNewMusic").onclick = () => { if (typeof newMusicScratch === "function") newMusicScratch(); };
   if (byId("sbNewMap")) byId("sbNewMap").onclick = () => { if (typeof newMapScratch === "function") newMapScratch(); };
   if (byId("sbNewTimeline")) byId("sbNewTimeline").onclick = () => { if (typeof newTimelineScratch === "function") newTimelineScratch(); };
+  if (byId("sbNewConcept")) byId("sbNewConcept").onclick = () => { if (typeof newConceptScratch === "function") newConceptScratch(); };
+  if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };
