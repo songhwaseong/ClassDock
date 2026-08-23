@@ -23,15 +23,25 @@ const CONCEPT_PRESENT_ANIMATIONS = Object.freeze([
   { id:"fade", label:"페이드" }, { id:"zoom", label:"확대" }, { id:"slide", label:"슬라이드" },
   { id:"draw", label:"연결선 그리기" }, { id:"none", label:"효과 없음" }
 ]);
+const CONCEPT_LAYOUTS = Object.freeze([
+  { id:"tree", label:"위→아래 가계도", description:"상위 개념에서 자녀·하위 개념이 아래로 펼쳐집니다." },
+  { id:"radial", label:"방사형", description:"선택한 카드를 중심으로 가까운 관계부터 사방으로 펼칩니다." },
+  { id:"circle", label:"원형", description:"모든 카드를 큰 원 둘레에 고르게 놓습니다." },
+  { id:"flow", label:"왼쪽→오른쪽", description:"원인·상위 개념에서 결과·하위 개념 방향으로 흐릅니다." },
+  { id:"grid", label:"격자형", description:"관계 방향과 무관하게 카드를 반듯하게 정돈합니다." }
+]);
+const CONCEPT_LAYOUT_SPACING = Object.freeze({ tight:.78, normal:1, wide:1.35 });
 let _conceptScratchCount = 0;
 
 function conceptId(prefix){ return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
 function conceptClamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
 function conceptClampZoom(value){ return conceptClamp(value, CONCEPT_MIN_ZOOM, CONCEPT_MAX_ZOOM); }
+function conceptFitZoom(canvasWidth, canvasHeight, viewportWidth, viewportHeight){ const width = Math.max(1, Number(canvasWidth) || 1), height = Math.max(1, Number(canvasHeight) || 1), availableWidth = Math.max(1, (Number(viewportWidth) || 1) - 36), availableHeight = Math.max(1, (Number(viewportHeight) || 1) - 36); return conceptClampZoom(Math.min(availableWidth / width, availableHeight / height, 1)); }
 function conceptZoomScroll(scrollLeft, scrollTop, anchorX, anchorY, oldZoom, nextZoom){
   const before = conceptClampZoom(oldZoom), after = conceptClampZoom(nextZoom), x = Math.max(0, Number(anchorX) || 0), y = Math.max(0, Number(anchorY) || 0);
   return { left:Math.max(0, ((Number(scrollLeft) || 0) + x) / before * after - x), top:Math.max(0, ((Number(scrollTop) || 0) + y) / before * after - y) };
 }
+function conceptDragCoordinate(origin, pointerDelta, scrollDelta, zoom){ return conceptClamp((Number(origin) || 0) + ((Number(pointerDelta) || 0) + (Number(scrollDelta) || 0)) / conceptClampZoom(zoom), 20, CONCEPT_MAX_COORD); }
 function conceptCanvasSize(nodes){ return { width:Math.max(CONCEPT_CANVAS_WIDTH, ...(nodes || []).map(node => Number(node.x) + 290)), height:Math.max(CONCEPT_CANVAS_HEIGHT, ...(nodes || []).map(node => Number(node.y) + 210)) }; }
 function conceptSafeText(value, max){ return String(value == null ? "" : value).slice(0, max); }
 function conceptNormalizeImage(raw){
@@ -62,12 +72,12 @@ function conceptNormalizePresentation(raw, nodes){
   const animation = CONCEPT_PRESENT_ANIMATIONS.some(item => item.id === value.animation) ? value.animation : "fade";
   return { order, animation, autoFocus:value.autoFocus !== false };
 }
-function conceptDocEmpty(title){ return { type:CONCEPT_DOC_TYPE, version:CONCEPT_DOC_VERSION, title:conceptSafeText(title || "개념 관계도", 160), layout:"free", nodes:[], edges:[], presentation:conceptNormalizePresentation(null, []) }; }
+function conceptDocEmpty(title){ return { type:CONCEPT_DOC_TYPE, version:CONCEPT_DOC_VERSION, title:conceptSafeText(title || "개념 관계도", 160), layout:"free", layoutStyle:"tree", layoutSpacing:"normal", nodes:[], edges:[], presentation:conceptNormalizePresentation(null, []) }; }
 function conceptDocParse(text){
   const raw = typeof text === "string" ? JSON.parse(text) : text;
   if (!raw || raw.type !== CONCEPT_DOC_TYPE || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) throw new Error("concept-format");
   if (raw.nodes.length > CONCEPT_MAX_NODES || raw.edges.length > CONCEPT_MAX_EDGES) throw new Error("concept-limit");
-  const model = conceptDocEmpty(raw.title); model.layout = raw.layout === "auto" ? "auto" : "free";
+  const model = conceptDocEmpty(raw.title); model.layout = raw.layout === "auto" ? "auto" : "free"; model.layoutStyle = CONCEPT_LAYOUTS.some(item => item.id === raw.layoutStyle) ? raw.layoutStyle : (model.layout === "auto" ? "flow" : "tree"); model.layoutSpacing = Object.prototype.hasOwnProperty.call(CONCEPT_LAYOUT_SPACING, raw.layoutSpacing) ? raw.layoutSpacing : "normal";
   const seen = new Set(); model.nodes = raw.nodes.map(conceptNormalizeNode).filter(node => node.title && !seen.has(node.id) && seen.add(node.id));
   const ids = new Set(model.nodes.map(node => node.id)), edgeSeen = new Set();
   model.edges = raw.edges.map(conceptNormalizeEdge).filter(edge => edge.from !== edge.to && ids.has(edge.from) && ids.has(edge.to) && !edgeSeen.has(edge.id) && edgeSeen.add(edge.id));
@@ -92,24 +102,38 @@ function conceptNodeConnections(model, nodeId){
   }).filter(Boolean);
 }
 
-function conceptAutoLayout(nodes, edges){
-  const list = (nodes || []).map(conceptNormalizeNode), ids = new Set(list.map(node => node.id));
-  const directional = new Set(["cause", "include", "support"]), outgoing = new Map(list.map(node => [node.id, []])), incoming = new Map(list.map(node => [node.id, 0]));
-  for (const edge of edges || []){
-    if (!directional.has(edge.type) || !ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue;
-    outgoing.get(edge.from).push(edge.to); incoming.set(edge.to, incoming.get(edge.to) + 1);
-  }
-  const depth = new Map(), queue = list.filter(node => incoming.get(node.id) === 0).map(node => node.id); queue.forEach(id => depth.set(id, 0));
-  for (let i = 0; i < queue.length; i++){
-    const id = queue[i], nextDepth = (depth.get(id) || 0) + 1;
-    for (const to of outgoing.get(id) || []){ depth.set(to, Math.max(depth.get(to) || 0, nextDepth)); incoming.set(to, incoming.get(to) - 1); if (incoming.get(to) === 0) queue.push(to); }
-  }
+function conceptDirectionalLevels(nodes, edges){
+  const list = nodes || [], ids = new Set(list.map(node => node.id)), directional = new Set(["cause", "include", "support"]), outgoing = new Map(list.map(node => [node.id, []])), parents = new Map(list.map(node => [node.id, []])), incoming = new Map(list.map(node => [node.id, 0]));
+  for (const edge of edges || []){ if (!directional.has(edge.type) || !ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue; outgoing.get(edge.from).push(edge.to); parents.get(edge.to).push(edge.from); incoming.set(edge.to, incoming.get(edge.to) + 1); }
+  const roots = list.filter(node => incoming.get(node.id) === 0).map(node => node.id), depth = new Map(), queue = [...roots]; roots.forEach(id => depth.set(id, 0));
+  for (let i = 0; i < queue.length; i++){ const id = queue[i], nextDepth = (depth.get(id) || 0) + 1; for (const to of outgoing.get(id) || []){ depth.set(to, Math.max(depth.get(to) || 0, nextDepth)); incoming.set(to, incoming.get(to) - 1); if (incoming.get(to) === 0) queue.push(to); } }
   const maxDepth = Math.max(0, ...depth.values()); list.forEach(node => { if (!depth.has(node.id)) depth.set(node.id, maxDepth + 1); });
-  const columns = new Map(); list.forEach(node => { const d = depth.get(node.id); if (!columns.has(d)) columns.set(d, []); columns.get(d).push(node); });
-  const positions = new Map(); [...columns.keys()].sort((a, b) => a - b).forEach(d => {
-    const column = columns.get(d); column.forEach((node, row) => positions.set(node.id, { x:70 + d * 330, y:70 + row * Math.max(170, Math.min(240, 900 / Math.max(1, column.length))) }));
-  });
-  return list.map(node => ({ ...node, ...(positions.get(node.id) || {}) }));
+  const levels = new Map(); list.forEach(node => { const d = depth.get(node.id); if (!levels.has(d)) levels.set(d, []); levels.get(d).push(node); });
+  const prior = new Map(); [...levels.keys()].sort((a, b) => a - b).forEach(d => { const level = levels.get(d); level.sort((a, b) => { const score = node => { const known = (parents.get(node.id) || []).map(id => prior.get(id)).filter(value => value != null); return known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : Number(node.y) / 10000 + Number(node.x) / 100000000; }; return score(a) - score(b) || Number(a.y) - Number(b.y) || Number(a.x) - Number(b.x); }); level.forEach((node, index) => prior.set(node.id, index)); });
+  return { levels, roots };
+}
+function conceptAutoLayout(nodes, edges, options = {}){
+  const list = (nodes || []).map(conceptNormalizeNode); if (!list.length) return list;
+  const mode = CONCEPT_LAYOUTS.some(item => item.id === options.mode) ? options.mode : "flow", spacingKey = Object.prototype.hasOwnProperty.call(CONCEPT_LAYOUT_SPACING, options.spacing) ? options.spacing : "normal", spacing = CONCEPT_LAYOUT_SPACING[spacingKey], positions = new Map();
+  if (mode === "grid"){
+    const columns = Math.max(1, Math.ceil(Math.sqrt(list.length * 1.45))), gapX = 280 * spacing, gapY = 180 * spacing; list.forEach((node, index) => positions.set(node.id, { x:70 + index % columns * gapX, y:70 + Math.floor(index / columns) * gapY }));
+  } else if (mode === "circle"){
+    const radius = Math.min((CONCEPT_MAX_COORD - 400) / 2, Math.max(300 * spacing, list.length * 270 * spacing / (Math.PI * 2))), center = radius + 180; list.forEach((node, index) => { const angle = -Math.PI / 2 + index / list.length * Math.PI * 2; positions.set(node.id, { x:center + Math.cos(angle) * radius - 115, y:center + Math.sin(angle) * radius - 65 }); });
+  } else if (mode === "radial"){
+    const byId = new Map(list.map(node => [node.id, node])), adjacency = new Map(list.map(node => [node.id, []])); for (const edge of edges || []) if (byId.has(edge.from) && byId.has(edge.to) && edge.from !== edge.to){ adjacency.get(edge.from).push(edge.to); adjacency.get(edge.to).push(edge.from); }
+    const directed = conceptDirectionalLevels(list, edges), rootId = byId.has(options.rootId) ? options.rootId : (directed.roots[0] || list[0].id), depth = new Map([[rootId, 0]]), queue = [rootId]; for (let i = 0; i < queue.length; i++){ const id = queue[i]; for (const next of adjacency.get(id) || []) if (!depth.has(next)){ depth.set(next, depth.get(id) + 1); queue.push(next); } }
+    const maxConnectedDepth = Math.max(0, ...depth.values()); list.forEach(node => { if (!depth.has(node.id)) depth.set(node.id, maxConnectedDepth + 1); }); const rings = new Map(); list.forEach(node => { const d = depth.get(node.id); if (!rings.has(d)) rings.set(d, []); rings.get(d).push(node); });
+    let maxRadius = 0; const radii = new Map(); for (const [d, ring] of rings){ const radius = d === 0 ? 0 : Math.max(d * 310 * spacing, ring.length * 270 * spacing / (Math.PI * 2)); radii.set(d, radius); maxRadius = Math.max(maxRadius, radius); } const center = Math.min(CONCEPT_MAX_COORD / 2, maxRadius + 180);
+    for (const [d, ring] of rings){ const radius = radii.get(d); ring.forEach((node, index) => { const angle = -Math.PI / 2 + index / ring.length * Math.PI * 2; positions.set(node.id, { x:center + Math.cos(angle) * radius - 115, y:center + Math.sin(angle) * radius - 65 }); }); }
+  } else {
+    const { levels } = conceptDirectionalLevels(list, edges), keys = [...levels.keys()].sort((a, b) => a - b);
+    if (mode === "tree"){
+      const maxCount = Math.max(1, ...keys.map(key => levels.get(key).length)), gapX = 280 * spacing, gapY = 205 * spacing; keys.forEach(depth => { const level = levels.get(depth), startX = 80 + (maxCount - level.length) * gapX / 2; level.forEach((node, index) => positions.set(node.id, { x:startX + index * gapX, y:70 + depth * gapY })); });
+    } else {
+      const gapX = 340 * spacing, gapY = 180 * spacing; keys.forEach(depth => levels.get(depth).forEach((node, index) => positions.set(node.id, { x:70 + depth * gapX, y:70 + index * gapY })));
+    }
+  }
+  return list.map(node => { const point = positions.get(node.id) || { x:node.x, y:node.y }; return { ...node, x:conceptClamp(point.x, 20, CONCEPT_MAX_COORD), y:conceptClamp(point.y, 20, CONCEPT_MAX_COORD) }; });
 }
 function conceptAutoPresentationOrder(nodes, edges){
   const list = nodes || [], ids = new Set(list.map(node => node.id)), directional = new Set(["cause", "include", "support"]);
@@ -173,7 +197,7 @@ function mountConceptEditor(doc){
   const model = doc.conceptDoc, root = document.createElement("div"); root.className = "concept-doc"; doc.el.appendChild(root);
   const bar = document.createElement("div"); bar.className = "concept-bar";
   const titleInput = document.createElement("input"); titleInput.className = "concept-title"; titleInput.maxLength = 160; titleInput.value = model.title; titleInput.placeholder = "관계도 제목";
-  const addNodeBtn = conceptButton("＋ 개념", "새 개념 카드 추가", "concept-btn concept-primary"), addEdgeBtn = conceptButton("＋ 관계", "두 개념 사이 관계 추가"), autoBtn = conceptButton("자동 정렬", "원인·포함 관계의 흐름에 따라 카드 정렬");
+  const addNodeBtn = conceptButton("＋ 개념", "새 개념 카드 추가", "concept-btn concept-primary"), addEdgeBtn = conceptButton("＋ 관계", "두 개념 사이 관계 추가"), autoBtn = conceptButton("자동 정렬 ▾", "가계도·방사형·원형·흐름형·격자형 중에서 배치 선택");
   const undoBtn = conceptButton("↶", "실행 취소 (Ctrl+Z)"), redoBtn = conceptButton("↷", "다시 실행 (Ctrl+Shift+Z)");
   const search = document.createElement("input"); search.type = "search"; search.className = "concept-search"; search.placeholder = "개념·설명 검색";
   const orderBtn = conceptButton("① 순서", "전개 발표에서 카드가 나올 순서 정하기"), animationSelect = document.createElement("select"); animationSelect.className = "concept-animation"; animationSelect.title = "전개 발표 애니메이션"; animationSelect.setAttribute("aria-label", "전개 발표 애니메이션");
@@ -199,7 +223,7 @@ function mountConceptEditor(doc){
   };
   const touch = () => { if (typeof markDocumentDirty === "function") markDocumentDirty(doc, snapshot() !== doc._conceptSavedSnapshot); clearTimeout(recoveryTimer); recoveryTimer = setTimeout(flushRecovery, CONCEPT_RECOVERY_DELAY); };
   doc.flushBackupRecovery = flushRecovery;
-  const replaceModel = restored => { model.title = restored.title; model.layout = restored.layout; model.nodes = restored.nodes; model.edges = restored.edges; model.presentation = restored.presentation; titleInput.value = model.title; animationSelect.value = model.presentation.animation; if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = ""; render(); touch(); };
+  const replaceModel = restored => { model.title = restored.title; model.layout = restored.layout; model.layoutStyle = restored.layoutStyle; model.layoutSpacing = restored.layoutSpacing; model.nodes = restored.nodes; model.edges = restored.edges; model.presentation = restored.presentation; titleInput.value = model.title; animationSelect.value = model.presentation.animation; if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = ""; render(); touch(); };
   history = MNEditHistory.create({ capture:snapshot, isEqual:(a, b) => a === b, apply:value => replaceModel(conceptSnapshotModel(value)), onChange:() => { undoBtn.disabled = !history.canUndo(); redoBtn.disabled = !history.canRedo(); }, limit:CONCEPT_HISTORY_LIMIT });
   history.reset(); doc._conceptHistory = history;
 
@@ -211,6 +235,7 @@ function mountConceptEditor(doc){
     const next = conceptClampZoom(value); if (Math.abs(next - zoom) < .001) return;
     const rect = viewport.getBoundingClientRect(), anchorX = clientX == null ? rect.width / 2 : clientX - rect.left, anchorY = clientY == null ? rect.height / 2 : clientY - rect.top, scroll = conceptZoomScroll(viewport.scrollLeft, viewport.scrollTop, anchorX, anchorY, zoom, next); zoom = next; syncCanvasSize(); viewport.scrollTo({ left:scroll.left, top:scroll.top, behavior:"auto" });
   };
+  const fitCanvasToViewport = () => { const size = conceptCanvasSize(model.nodes); zoom = conceptFitZoom(size.width, size.height, viewport.clientWidth, viewport.clientHeight); syncCanvasSize(); viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
   const onViewportWheel = event => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1, factor = Math.exp(-event.deltaY * unit * .0014); setZoom(zoom * factor, event.clientX, event.clientY); };
   viewport.addEventListener("wheel", onViewportWheel, { passive:false }); zoomOutBtn.onclick = () => setZoom(zoom / 1.2); zoomResetBtn.onclick = () => setZoom(1); zoomInBtn.onclick = () => setZoom(zoom * 1.2);
   const viewportResizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncCanvasSize) : null; if (viewportResizeObserver) viewportResizeObserver.observe(viewport);
@@ -264,8 +289,8 @@ function mountConceptEditor(doc){
       card.addEventListener("click", () => { if (suppressCardClick){ suppressCardClick = false; return; } selectCard(node.id); clearTimeout(previewTimer); previewTimer = setTimeout(() => { previewTimer = 0; openNodePreview(node.id, card); }, 220); });
       card.addEventListener("dblclick", event => { if (event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; openNodeDialog(node.id); });
       card.addEventListener("keydown", event => { if (event.target !== card || event.key !== "Enter") return; event.preventDefault(); selectCard(node.id); openNodePreview(node.id, card); });
-      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, ox:node.x, oy:node.y, scrollLeft:viewport.scrollLeft, scrollTop:viewport.scrollTop, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
-      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const activeZoom = drag.zoom || 1; node.x = conceptClamp(drag.ox + (event.clientX - drag.x + viewport.scrollLeft - drag.scrollLeft) / activeZoom, 20, CONCEPT_MAX_COORD); node.y = conceptClamp(drag.oy + (event.clientY - drag.y + viewport.scrollTop - drag.scrollTop) / activeZoom, 20, CONCEPT_MAX_COORD); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, dx = event.clientX > rect.right - margin ? speed : event.clientX < rect.left + margin ? -speed : 0, dy = event.clientY > rect.bottom - margin ? speed : event.clientY < rect.top + margin ? -speed : 0; if (dx || dy) viewport.scrollBy({ left:dx, top:dy, behavior:"auto" }); });
+      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, scrollLeft:viewport.scrollLeft, scrollTop:viewport.scrollTop, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
+      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) viewport.scrollBy({ left:dx, top:dy, behavior:"auto" }); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, viewport.scrollLeft - drag.scrollLeft, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, viewport.scrollTop - drag.scrollTop, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); });
       const finish = event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const changed = node.x !== drag.ox || node.y !== drag.oy; drag = null; card.classList.remove("is-dragging"); if (changed){ suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 0); model.layout = "free"; history.commit(); touch(); } };
       card.addEventListener("pointerup", finish); card.addEventListener("pointercancel", finish);
     }
@@ -273,6 +298,17 @@ function mountConceptEditor(doc){
     if (!model.nodes.length){ const empty = conceptButton("＋ 첫 개념을 넣어 관계도를 시작하세요", "첫 개념 추가", "concept-empty"); empty.addEventListener("click", () => openNodeDialog()); cards.appendChild(empty); }
   }
   doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; render(); if (center) viewport.scrollTo({ left:Math.max(0, (node.x + 115) * zoom - viewport.clientWidth / 2), top:Math.max(0, (node.y + 65) * zoom - viewport.clientHeight / 2), behavior:"smooth" }); return true; };
+
+  function openAutoLayoutDialog(){
+    if (!model.nodes.length){ if (typeof toast === "function") toast("정렬할 카드가 없어요.", 2200); return; }
+    const body = document.createElement("div"); body.className = "concept-layout-form"; body.innerHTML = '<fieldset><legend>배치 방식</legend><div class="concept-layout-choices"></div></fieldset><fieldset><legend>카드 간격</legend><div class="concept-layout-spacing"></div></fieldset><label class="concept-layout-fit"><input type="checkbox" checked><span><strong>정렬 뒤 화면에 맞춤</strong><small>관계도 전체가 최대한 보이도록 배율을 자동 조절합니다.</small></span></label><p class="concept-layout-root"></p><footer><button type="button" class="cl-cancel">취소</button><button type="button" class="cl-apply primary">정렬 적용</button></footer>';
+    const ui = conceptModal("자동 정렬", body), choices = body.querySelector(".concept-layout-choices"), spacing = body.querySelector(".concept-layout-spacing");
+    CONCEPT_LAYOUTS.forEach(item => { const label = document.createElement("label"); label.className = "concept-layout-choice"; const input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-mode"; input.value = item.id; input.checked = item.id === model.layoutStyle; const copy = document.createElement("span"), strong = document.createElement("strong"), small = document.createElement("small"); strong.textContent = item.label; small.textContent = item.description; copy.append(strong, small); label.append(input, copy); choices.appendChild(label); });
+    [["tight", "좁게"], ["normal", "보통"], ["wide", "넓게"]].forEach(([value, text]) => { const label = document.createElement("label"), input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-spacing"; input.value = value; input.checked = value === model.layoutSpacing; label.append(input, document.createTextNode(text)); spacing.appendChild(label); });
+    const rootNode = model.nodes.find(node => node.id === selectedId); body.querySelector(".concept-layout-root").textContent = rootNode ? `방사형 중심: 선택한 카드 ‘${rootNode.title}’` : "방사형 중심: 관계의 시작 카드(들어오는 방향 관계가 없는 카드)";
+    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:selectedId }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
+    setTimeout(() => choices.querySelector("input:checked")?.focus(), 0);
+  }
 
   function openPresentationOrderDialog(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("순서를 정할 카드가 없어요.", 2200); return; }
@@ -383,7 +419,7 @@ function mountConceptEditor(doc){
     closeBuildPresentation = close; overlay.querySelector(".concept-build-close").onclick = close; overlay.querySelector(".prev").onclick = () => updateStep(step - 1); overlay.querySelector(".next").onclick = () => updateStep(step + 1); window.addEventListener("keydown", keys); if (resizeObserver) resizeObserver.observe(buildViewport); fitStage(); updateStep(0); overlay.querySelector(".next").focus();
   }
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
-  addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = () => { model.nodes = conceptAutoLayout(model.nodes, model.edges); model.layout = "auto"; history.commit(); touch(); render(); viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
+  addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog;
   undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", render); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
   const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); };
   window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); clearTimeout(previewTimer); if (closeNodePreview) closeNodePreview(); if (closeBuildPresentation) closeBuildPresentation(); if (viewportResizeObserver) viewportResizeObserver.disconnect(); viewport.removeEventListener("wheel", onViewportWheel); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.conceptSelectNode) delete doc.conceptSelectNode; });
@@ -391,6 +427,6 @@ function mountConceptEditor(doc){
 }
 
 if (typeof module !== "undefined" && module.exports){
-  module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
-    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptZoomScroll, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle };
+  module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, CONCEPT_LAYOUTS, CONCEPT_LAYOUT_SPACING, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
+    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomScroll, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle };
 }

@@ -17,6 +17,27 @@ test("자동 정렬은 원인·포함 관계의 방향대로 다음 열에 놓�
   const edges = [concept.conceptNormalizeEdge({ from:"0", to:"1", type:"cause" }), concept.conceptNormalizeEdge({ from:"1", to:"2", type:"cause" })];
   const laid = concept.conceptAutoLayout(nodes, edges); assert.ok(laid[0].x < laid[1].x && laid[1].x < laid[2].x);
 });
+test("가계도·방사형·원형·격자형은 같은 관계를 서로 다른 구조로 배치한다", () => {
+  const nodes = [
+    concept.conceptNormalizeNode({ id:"root", title:"시조" }), concept.conceptNormalizeNode({ id:"a", title:"첫째" }),
+    concept.conceptNormalizeNode({ id:"b", title:"둘째" }), concept.conceptNormalizeNode({ id:"grand", title:"손자녀" })
+  ];
+  const edges = [concept.conceptNormalizeEdge({ from:"root", to:"a", type:"include" }), concept.conceptNormalizeEdge({ from:"root", to:"b", type:"include" }), concept.conceptNormalizeEdge({ from:"a", to:"grand", type:"include" })];
+  const byId = list => new Map(list.map(node => [node.id, node])), tree = byId(concept.conceptAutoLayout(nodes, edges, { mode:"tree" }));
+  assert.ok(tree.get("root").y < tree.get("a").y && tree.get("a").y < tree.get("grand").y); assert.equal(tree.get("a").y, tree.get("b").y); assert.notEqual(tree.get("a").x, tree.get("b").x);
+  const radial = byId(concept.conceptAutoLayout(nodes, edges, { mode:"radial", rootId:"a" })), center = radial.get("a"), distance = node => Math.hypot(node.x - center.x, node.y - center.y);
+  assert.equal(distance(center), 0); assert.ok(distance(radial.get("root")) > 250); assert.ok(distance(radial.get("b")) > distance(radial.get("root")));
+  const circle = concept.conceptAutoLayout(nodes, edges, { mode:"circle" }), centerX = circle.reduce((sum, node) => sum + node.x + 115, 0) / circle.length, centerY = circle.reduce((sum, node) => sum + node.y + 65, 0) / circle.length, radii = circle.map(node => Math.hypot(node.x + 115 - centerX, node.y + 65 - centerY));
+  assert.ok(Math.max(...radii) - Math.min(...radii) < .001);
+  const grid = concept.conceptAutoLayout(nodes, edges, { mode:"grid" }); assert.equal(new Set(grid.map(node => `${node.x},${node.y}`)).size, nodes.length);
+});
+test("자동 정렬 간격과 화면 맞춤 배율은 크기에 맞게 달라진다", () => {
+  const nodes = [concept.conceptNormalizeNode({ id:"root", title:"상위" }), concept.conceptNormalizeNode({ id:"child", title:"하위" })], edges = [concept.conceptNormalizeEdge({ from:"root", to:"child", type:"include" })];
+  const normal = concept.conceptAutoLayout(nodes, edges, { mode:"tree", spacing:"normal" }), wide = concept.conceptAutoLayout(nodes, edges, { mode:"tree", spacing:"wide" });
+  assert.ok(wide[1].y - wide[0].y > normal[1].y - normal[0].y); assert.ok(concept.conceptFitZoom(1800, 1100, 1000, 700) > .5); assert.equal(concept.conceptFitZoom(10000, 10000, 800, 600), .35);
+  const model = { ...concept.conceptDocEmpty("배치 저장"), layout:"auto", layoutStyle:"circle", layoutSpacing:"wide", nodes, edges }, parsed = concept.conceptDocParse(concept.conceptDocSerialize(model)); assert.equal(parsed.layoutStyle, "circle"); assert.equal(parsed.layoutSpacing, "wide");
+  assert.deepEqual(concept.CONCEPT_LAYOUTS.map(item => item.id), ["tree", "radial", "circle", "flow", "grid"]);
+});
 test("발표 순서는 관계 방향의 세대·과정별로 만들고 같은 단계는 화면 위쪽부터 둔다", () => {
   const nodes = [
     concept.conceptNormalizeNode({ id:"root", title:"시조", x:70, y:300 }),
@@ -43,6 +64,12 @@ test("커서 중심 확대는 확대 전후 같은 캔버스 지점을 가리킨
   assert.equal((before.left + anchor.x) / 1, (next.left + anchor.x) / 1.5); assert.equal((before.top + anchor.y) / 1, (next.top + anchor.y) / 1.5);
   assert.equal(concept.conceptClampZoom(.1), .35); assert.equal(concept.conceptClampZoom(4), 2);
 });
+test("가장자리 자동 스크롤은 카드가 마우스 아래에서 한 번 더 밀리지 않게 좌표를 보정한다", () => {
+  const origin = 500, pointerDelta = 100, actualScroll = 22, zoom = .5, next = concept.conceptDragCoordinate(origin, pointerDelta, actualScroll, zoom);
+  const screenBefore = origin * zoom, screenAfter = next * zoom - actualScroll;
+  assert.equal(screenAfter, screenBefore + pointerDelta);
+  assert.equal(concept.conceptDragCoordinate(origin, pointerDelta, 0, zoom), 700);
+});
 test("큰 카드 보기는 선택한 카드의 들어오는·나가는 관계를 읽기 좋게 만든다", () => {
   const model = concept.conceptDocEmpty("가족 관계");
   model.nodes = [concept.conceptNormalizeNode({ id:"parent", title:"부모" }), concept.conceptNormalizeNode({ id:"child", title:"자녀" }), concept.conceptNormalizeNode({ id:"school", title:"학교" })];
@@ -53,8 +80,11 @@ test("큰 카드 보기는 선택한 카드의 들어오는·나가는 관계를
   ]);
 });
 test("개념 관계도 형식은 파일 열기·메뉴·manifest에 연결된다", () => {
-  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8"), loaders = fs.readFileSync(path.join(__dirname, "../src/js/file-loaders.js"), "utf8"), manifest = fs.readFileSync(path.join(__dirname, "../scripts.manifest.json"), "utf8"), source = fs.readFileSync(path.join(__dirname, "../src/js/concept-doc.js"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8"), loaders = fs.readFileSync(path.join(__dirname, "../src/js/file-loaders.js"), "utf8"), manifest = fs.readFileSync(path.join(__dirname, "../scripts.manifest.json"), "utf8"), source = fs.readFileSync(path.join(__dirname, "../src/js/concept-doc.js"), "utf8"), styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(html, /accept="[^"]*\.concept/); assert.match(html, /id="sbNewConcept"/); assert.match(html, /src="src\/js\/concept-doc\.js"/); assert.match(loaders, /ext === "concept"[\s\S]{0,120}loadConceptDoc/); assert.match(manifest, /"concept-doc\.js"/);
   assert.match(source, /concept-build-present/); assert.match(source, /event\.key === " " && !event\.shiftKey/); assert.match(source, /openPresentationOrderDialog/);
   assert.match(source, /viewport\.addEventListener\("wheel"/); assert.match(source, /CONCEPT_MAX_COORD/); assert.match(source, /viewport\.scrollBy/);
+  assert.match(source, /moveY > 0 \? speed/); assert.match(styles, /overflow-anchor:none/);
+  assert.match(styles, /\.concept-edge-label\{fill:var\(--ink\)/); assert.match(styles, /\[data-theme="dark"\] \.concept-edge-label\{fill:#f8fafc;stroke:#0b1120\}/);
+  assert.match(source, /openAutoLayoutDialog/); assert.match(source, /정렬 뒤 화면에 맞춤/); assert.match(styles, /concept-layout-choices/);
 });
