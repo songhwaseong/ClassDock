@@ -862,6 +862,7 @@ class ClassDockLauncher
             if (path == "/tile-cache-clear") return true;
             if (path.StartsWith("/map-search-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/exchange-rate-key", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -887,8 +888,10 @@ class ClassDockLauncher
             if (path == "/tile-cache-status" || path == "/can-proxy-tiles") return true;
             if (path == "/map-search-key-status") return true;
             if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-rates" || path == "/exchange-rate-key-status") return true;
+            if (path.StartsWith("/exchange-rate?", StringComparison.Ordinal)) return true;
         }
-        if (method == "DELETE" && path == "/map-search-key") return true;
+        if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
         return false;
     }
 
@@ -2393,6 +2396,61 @@ class ClassDockLauncher
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
                 }
+                else if (method == "GET" && path == "/can-proxy-rates")
+                {
+                    // 환율 창이 "이 런처가 환율을 대신 받아 주는가" 를 묻는 자리. 타일 프록시와 다른 능력이라
+                    // 프로브를 따로 둔다 — 지도 없이 환율만 쓰는 자리도 있고, 능력마다 따로 물어야 한다.
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/exchange-rate?", StringComparison.Ordinal))
+                {
+                    string queryError;
+                    RateQuery rateQuery = ReadRateQuery(path, out queryError);
+                    if (rateQuery == null)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(queryError));
+                        return;
+                    }
+                    byte[] rateData; bool rateCached; string rateError;
+                    if (TryExchangeRate(rateQuery, out rateData, out rateCached, out rateError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", rateData,
+                            rateCached ? "X-ClassDock-Rate-Cached: 1\r\n" : null);
+                    else
+                        WriteResponse(stream, rateError == "rate-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(rateError));
+                }
+                else if (method == "GET" && path == "/exchange-rate-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ExchangeRateKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/exchange-rate-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string error;
+                    bool saved = TrySetExchangeRateKey(Encoding.UTF8.GetString(body ?? new byte[0]), QueryValue(path, "remember") == "1", out error);
+                    WriteResponse(stream, saved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(saved ? "ok" : error));
+                }
+                else if (method == "DELETE" && path == "/exchange-rate-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool cleared = ClearExchangeRateKey();
+                    WriteResponse(stream, cleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(cleared ? "ok" : "exchange-rate-key-clear-failed"));
+                }
                 else if (method == "GET" && path == "/map-search-key-status")
                 {
                     if (!HasLocalActionHeader(headers))
@@ -2737,10 +2795,17 @@ class ClassDockLauncher
 
     static void WriteResponse(Stream stream, string status, string contentType, byte[] body)
     {
+        WriteResponse(stream, status, contentType, body, null);
+    }
+
+    // extraHeader 는 이미 "이름: 값\r\n" 꼴로 끝난 ASCII 한 줄이어야 한다(환율 저장본 표시 등).
+    static void WriteResponse(Stream stream, string status, string contentType, byte[] body, string extraHeader)
+    {
         string header =
             "HTTP/1.1 " + status + "\r\n" +
             "Content-Type: " + contentType + "\r\n" +
             "Content-Length: " + body.Length + "\r\n" +
+            (extraHeader ?? "") +
             "Cache-Control: no-store\r\n" +
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
@@ -3259,6 +3324,356 @@ class ClassDockLauncher
             GeocodeCache[cacheKey] = data;
         }
         return true;
+    }
+
+    /* ===== 환율 =====
+       지도 타일과 같은 이유로 런처가 대신 받아 온다 — 실행마다 포트(=origin)가 바뀌어 브라우저
+       저장소는 다음 수업까지 남지 않고, 수출입은행은 CORS 를 열어 주지 않아 브라우저에서 직접
+       부를 수도 없다. 인증키도 HTML·작업공간에 두지 않고 여기서만 헤더처럼 붙인다(카카오 키와 같은 규칙).
+
+       런처는 받아 온 JSON 을 **그대로** 돌려준다. 뜻풀이는 src/js/exchange-rate.js 한 곳에만 둔다 —
+       런처가 둘(이 파일·main.go)이라 파싱을 옮겨 오면 같은 규칙을 두 언어로 두 번 틀리게 된다. */
+    const string KoreaEximRateEndpoint = "https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON";
+    const string EcbRateEndpoint = "https://api.frankfurter.dev/v1/";
+    const long RateMaxBytes = 512 * 1024;
+    const long RateCacheMaxBytes = 20L * 1024 * 1024;
+    // 지난 날짜의 환율은 다시 바뀌지 않는다. 오늘 값만 잠깐 뒤에 다시 받아 본다(고시는 오전 11시 무렵).
+    static readonly TimeSpan RateTodayCacheMaxAge = TimeSpan.FromMinutes(20);
+    static readonly object RateCacheLock = new object();
+    static readonly string RateCacheDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "rate-cache");
+    static readonly object ExchangeRateKeyLock = new object();
+    static readonly byte[] ExchangeRateKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.ExchangeRateKey.v1");
+    static readonly string ExchangeRateKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "exchange-rate-key.bin");
+    static bool ExchangeRateKeyLoaded;
+    static string ExchangeRateKey = "";
+
+    static bool ValidExchangeRateKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        if (key.Length < 12 || key.Length > 128) return false;
+        foreach (char ch in key)
+            if (!(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_')) return false;
+        return true;
+    }
+    static string CurrentExchangeRateKey()
+    {
+        lock (ExchangeRateKeyLock)
+        {
+            if (!ExchangeRateKeyLoaded)
+            {
+                ExchangeRateKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(ExchangeRateKeyFile))
+                    {
+                        byte[] encrypted = File.ReadAllBytes(ExchangeRateKeyFile);
+                        byte[] plain = ProtectedData.Unprotect(encrypted, ExchangeRateKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidExchangeRateKey(key)) ExchangeRateKey = key;
+                    }
+                }
+                catch { ExchangeRateKey = ""; }
+            }
+            return ExchangeRateKey;
+        }
+    }
+    static bool ExchangeRateKeyRemembered()
+    {
+        try { return File.Exists(ExchangeRateKeyFile) && CurrentExchangeRateKey().Length > 0; }
+        catch { return false; }
+    }
+    static string ExchangeRateKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentExchangeRateKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (ExchangeRateKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true}";
+    }
+    static bool SaveProtectedExchangeRateKey(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ExchangeRateKeyFile));
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), ExchangeRateKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = ExchangeRateKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(ExchangeRateKeyFile)) File.Delete(ExchangeRateKeyFile);
+            File.Move(temp, ExchangeRateKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    static bool ClearExchangeRateKey()
+    {
+        lock (ExchangeRateKeyLock)
+        {
+            ExchangeRateKeyLoaded = true;
+            ExchangeRateKey = "";
+            try { if (File.Exists(ExchangeRateKeyFile)) File.Delete(ExchangeRateKeyFile); }
+            catch { return false; }
+        }
+        return true;
+    }
+    static bool TrySetExchangeRateKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "rate-key-invalid";
+        if (!ValidExchangeRateKey(key)) return false;
+        /* 시험 조회는 '가장 가까운 지난 영업일' 로 건다. 오늘로 걸면 주말이나 오전 고시 전에는
+           키가 멀쩡해도 빈 배열이 와서 "키가 틀렸다" 고 잘못 알린다. */
+        RateQuery probe = new RateQuery();
+        probe.Source = "koreaexim";
+        probe.Date = LastWeekdayCompact();
+        byte[] body; string fetchError;
+        if (!TryFetchExchangeRate(probe, key, out body, out fetchError)) { error = fetchError; return false; }
+        string text = Encoding.UTF8.GetString(body);
+        if (text.Contains("\"result\":3")) { error = "rate-key-invalid"; return false; }
+        if (text.Contains("\"result\":4")) { error = "rate-limit-reached"; return false; }
+        string previous = CurrentExchangeRateKey();
+        lock (ExchangeRateKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedExchangeRateKey(key)) { ExchangeRateKey = previous; error = "rate-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(ExchangeRateKeyFile)) File.Delete(ExchangeRateKeyFile); }
+                catch { ExchangeRateKey = previous; error = "rate-key-save-failed"; return false; }
+            }
+            ExchangeRateKeyLoaded = true;
+            ExchangeRateKey = key;
+        }
+        error = "";
+        return true;
+    }
+    // 키 시험용 — 오늘부터 거슬러 올라가 처음 만나는 평일(YYYYMMDD). 공휴일까지는 보지 않는다.
+    static string LastWeekdayCompact()
+    {
+        DateTime day = DateTime.Now.Date.AddDays(-1);
+        for (int i = 0; i < 7; i++)
+        {
+            if (day.DayOfWeek != DayOfWeek.Saturday && day.DayOfWeek != DayOfWeek.Sunday) break;
+            day = day.AddDays(-1);
+        }
+        return day.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+    }
+
+    /* 브라우저가 보낸 문자열을 URL 에 그대로 붙이지 않고 여기서 꼴부터 맞춰 본다(지오코딩의 GeocodeSpot 과 같은 규칙). */
+    class RateQuery
+    {
+        public string Source = "";
+        public string Date = "";        // koreaexim: YYYYMMDD · ecb: YYYY-MM-DD
+        public string Start = "";
+        public string End = "";
+        public string Symbols = "";
+        public string CacheKey
+        {
+            get { return Source + "|" + Date + "|" + Start + "|" + End + "|" + Symbols; }
+        }
+        // 캐시를 영구로 둘지 가르는 기준일 — 조회 구간에서 가장 나중 날짜.
+        public string NewestDay
+        {
+            get { return End.Length > 0 ? End : Date; }
+        }
+    }
+    static string RateDate(string value, bool compact)
+    {
+        string text = (value ?? "").Trim();
+        DateTime parsed;
+        if (!DateTime.TryParseExact(text, compact ? "yyyyMMdd" : "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed)) return "";
+        return text;
+    }
+    static string RateSymbols(string value)
+    {
+        string text = (value ?? "").Trim().ToUpperInvariant();
+        if (text.Length == 0 || text.Length > 60) return "";
+        foreach (string part in text.Split(','))
+        {
+            if (part.Length < 3 || part.Length > 4) return "";
+            foreach (char ch in part) if (ch < 'A' || ch > 'Z') return "";
+        }
+        return text;
+    }
+    static readonly string[] RateSources = { "koreaexim", "ecb", "ecb-series" };
+    static RateQuery ReadRateQuery(string path, out string error)
+    {
+        error = "rate-bad-request";
+        RateQuery query = new RateQuery();
+        string source = (QueryValue(path, "source") ?? "").Trim();
+        if (Array.IndexOf(RateSources, source) < 0) return null;
+        query.Source = source;
+        if (source == "ecb-series")
+        {
+            query.Start = RateDate(QueryValue(path, "start"), false);
+            query.End = RateDate(QueryValue(path, "end"), false);
+            query.Symbols = RateSymbols(QueryValue(path, "symbols"));
+            if (query.Start.Length == 0 || query.End.Length == 0 || query.Symbols.Length == 0) return null;
+            if (String.CompareOrdinal(query.Start, query.End) > 0) return null;
+        }
+        else
+        {
+            query.Date = RateDate(QueryValue(path, "date"), source == "koreaexim");
+            if (query.Date.Length == 0) return null;
+        }
+        error = "";
+        return query;
+    }
+
+    static string RateCacheFile(string cacheKey)
+    {
+        return Path.Combine(RateCacheDir, TileCacheKey(cacheKey) + ".json");
+    }
+    /* 지난 날짜의 값은 다시 바뀌지 않으므로 그대로 믿고, 오늘 값만 20분이 지나면 새로 받는다.
+       '오늘' 은 이 PC 의 달력 날짜다 — 수출입은행 고시가 한국 시간 기준이고 교실 PC 도 같은 시간대다. */
+    static bool RateCacheFresh(RateQuery query, DateTime writtenUtc)
+    {
+        string newest = (query.NewestDay ?? "").Replace("-", "");
+        string today = DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        if (newest.Length == 8 && String.CompareOrdinal(newest, today) < 0) return true;
+        return DateTime.UtcNow - writtenUtc <= RateTodayCacheMaxAge;
+    }
+    static bool TryReadCachedRate(RateQuery query, out byte[] data, out bool fresh)
+    {
+        data = null; fresh = false;
+        try
+        {
+            lock (RateCacheLock)
+            {
+                string file = RateCacheFile(query.CacheKey);
+                if (!File.Exists(file)) return false;
+                data = File.ReadAllBytes(file);
+                fresh = RateCacheFresh(query, File.GetLastWriteTimeUtc(file));
+            }
+            return data != null && data.Length > 0;
+        }
+        catch { data = null; fresh = false; return false; }
+    }
+    /* 잘못을 담은 응답은 캐시하지 않는다 — 인증 오류(result 3)나 아직 고시 전인 빈 배열을
+       디스크에 남기면 키를 고치거나 11시가 지난 뒤에도 같은 잘못이 계속 되살아난다. */
+    static bool RateBodyCacheable(byte[] data)
+    {
+        if (data == null || data.Length < 8) return false;
+        string text = Encoding.UTF8.GetString(data);
+        if (text.Trim() == "[]") return false;
+        return !text.Contains("\"result\":2") && !text.Contains("\"result\":3") && !text.Contains("\"result\":4");
+    }
+    static void WriteCachedRate(RateQuery query, byte[] data)
+    {
+        if (!RateBodyCacheable(data)) return;
+        try
+        {
+            lock (RateCacheLock)
+            {
+                Directory.CreateDirectory(RateCacheDir);
+                string file = RateCacheFile(query.CacheKey);
+                string temp = file + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+                File.WriteAllBytes(temp, data);
+                if (File.Exists(file)) File.Delete(file);
+                File.Move(temp, file);
+                SweepRateCache();
+            }
+        }
+        catch { }
+    }
+    // 하루치 JSON 이 10KB 남짓이라 좀처럼 차지 않지만, 기간 조회를 반복하면 늘어난다 — 오래된 것부터 지운다.
+    static void SweepRateCache()
+    {
+        try
+        {
+            if (!Directory.Exists(RateCacheDir)) return;
+            var files = new DirectoryInfo(RateCacheDir).GetFiles("*.json");
+            long total = files.Sum(f => f.Length);
+            if (total <= RateCacheMaxBytes) return;
+            long target = (long)(RateCacheMaxBytes * 0.8);
+            foreach (var file in files.OrderBy(f => f.LastWriteTimeUtc))
+            {
+                if (total <= target) break;
+                long size = file.Length;
+                try { file.Delete(); total -= size; } catch { }
+            }
+        }
+        catch { }
+    }
+
+    static bool TryFetchExchangeRate(RateQuery query, string key, out byte[] data, out string error)
+    {
+        data = null; error = "rate-failed";
+        try
+        {
+            if (!TileTlsReady)
+            {
+                try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+                TileTlsReady = true;
+            }
+            string url;
+            if (query.Source == "koreaexim")
+                url = KoreaEximRateEndpoint + "?authkey=" + Uri.EscapeDataString(key)
+                    + "&searchdate=" + query.Date + "&data=AP01";
+            else if (query.Source == "ecb-series")
+                url = EcbRateEndpoint + query.Start + ".." + query.End + "?symbols=" + query.Symbols;
+            else
+                url = EcbRateEndpoint + query.Date;
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
+            request.Accept = "application/json";
+            request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream())
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[8192];
+                int read; long total = 0;
+                while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    total += read;
+                    if (total > RateMaxBytes) { error = "rate-too-large"; return false; }
+                    buffer.Write(chunk, 0, read);
+                }
+                data = buffer.ToArray();
+            }
+            error = "";
+            return true;
+        }
+        catch (WebException ex)
+        {
+            /* Frankfurter 는 자료가 없는 날짜에 404 로 답한다 — 연결이 끊긴 것과 구분해 알려야
+               "인터넷을 확인하세요" 라는 엉뚱한 안내가 뜨지 않는다. */
+            HttpWebResponse response = ex.Response as HttpWebResponse;
+            if (response != null && response.StatusCode == HttpStatusCode.NotFound) error = "rate-no-data";
+            data = null; return false;
+        }
+        catch { data = null; return false; }
+    }
+
+    /* 캐시 → 없거나 낡았으면 새로 받기 → 받기에 실패하면 낡은 캐시라도 돌려주기(타일 프록시와 같은 순서).
+       cached=true 는 "받아오지 못해 저장해 둔 값을 대신 내준다" 는 뜻이고, 화면은 이걸 보고
+       '○○일 기준 저장본' 이라고 밝힌다. */
+    static bool TryExchangeRate(RateQuery query, out byte[] data, out bool cached, out string error)
+    {
+        data = null; cached = false; error = "rate-failed";
+        string key = "";
+        if (query.Source == "koreaexim")
+        {
+            key = CurrentExchangeRateKey();
+            if (key.Length == 0) { error = "rate-key-required"; return false; }
+        }
+        byte[] stored; bool fresh;
+        bool hasStored = TryReadCachedRate(query, out stored, out fresh);
+        if (hasStored && fresh) { data = stored; error = ""; return true; }
+        byte[] fetched; string fetchError;
+        if (TryFetchExchangeRate(query, key, out fetched, out fetchError))
+        {
+            WriteCachedRate(query, fetched);
+            data = fetched; error = "";
+            return true;
+        }
+        if (hasStored) { data = stored; cached = true; error = ""; return true; }
+        error = fetchError;
+        return false;
     }
 
     static bool TryProxyMapTile(string url, out byte[] data, out string mime)

@@ -65,6 +65,16 @@ const (
 	// 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·C# 런처
 	// (launcher.cs GeocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다.
 	geocodeResultLimit = "8"
+
+	/* ===== 환율 =====
+	   launcher.cs 의 같은 이름 상수와 짝이다. 타일과 같은 이유로 런처가 대신 받는다 —
+	   수출입은행은 CORS 를 열지 않고, 포트가 매번 바뀌어 브라우저 저장소는 다음 수업까지 남지 않는다.
+	   받아 온 JSON 은 그대로 돌려주고 뜻풀이는 src/js/exchange-rate.js 한 곳에만 둔다. */
+	koreaEximRateURL  = "https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON"
+	ecbRateURL        = "https://api.frankfurter.dev/v1/"
+	rateMaxBytes      = 512 * 1024
+	rateCacheMaxBytes = 20 * 1024 * 1024
+	rateTodayCacheAge = 20 * time.Minute // 지난 날짜 값은 안 바뀐다 — 오늘 값만 다시 받아 본다
 )
 
 var (
@@ -77,6 +87,11 @@ var (
 	kakaoMapKey       string
 	mapSearchProvider = "osm"
 	httpClient        = &http.Client{Timeout: 15 * time.Second}
+	rateCacheMu       sync.Mutex
+	rateKeyMu         sync.RWMutex
+	// 이 런처는 DPAPI 가 없는 곳(Windows 밖)에서도 돌아야 해서 인증키를 파일로 남기지 않는다.
+	// 카카오 키와 같은 규칙이며, 상태 응답의 persistentSupported 가 false 인 까닭이다.
+	exchangeRateKey string
 )
 
 // 캐시 자리는 launcher.cs 와 같은 폴더를 쓴다(Windows 에서 %LOCALAPPDATA%\ClassDock\tile-cache).
@@ -538,6 +553,298 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 	return data, ""
 }
 
+/* ===== 환율 ===== */
+
+// 캐시 자리는 launcher.cs 의 RateCacheDir 과 같은 폴더다 — 두 런처를 번갈아 써도 받아 둔 값을 이어 쓴다.
+func rateCacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "ClassDock", "rate-cache")
+}
+
+func validExchangeRateKey(value string) bool {
+	key := strings.TrimSpace(value)
+	if len(key) < 12 || len(key) > 128 {
+		return false
+	}
+	for _, ch := range key {
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func currentExchangeRateKey() string {
+	rateKeyMu.RLock()
+	defer rateKeyMu.RUnlock()
+	return exchangeRateKey
+}
+
+func setExchangeRateKey(value string) {
+	rateKeyMu.Lock()
+	exchangeRateKey = strings.TrimSpace(value)
+	rateKeyMu.Unlock()
+}
+
+type rateQuery struct {
+	source  string
+	date    string // koreaexim: YYYYMMDD · ecb: YYYY-MM-DD
+	start   string
+	end     string
+	symbols string
+}
+
+func (q rateQuery) cacheKey() string {
+	return q.source + "|" + q.date + "|" + q.start + "|" + q.end + "|" + q.symbols
+}
+
+// 캐시를 영구로 둘지 가르는 기준일 — 조회 구간에서 가장 나중 날짜.
+func (q rateQuery) newestDay() string {
+	if q.end != "" {
+		return q.end
+	}
+	return q.date
+}
+
+func rateDate(value string, compact bool) string {
+	text := strings.TrimSpace(value)
+	layout := "2006-01-02"
+	if compact {
+		layout = "20060102"
+	}
+	if _, err := time.Parse(layout, text); err != nil {
+		return ""
+	}
+	return text
+}
+
+func rateSymbols(value string) string {
+	text := strings.ToUpper(strings.TrimSpace(value))
+	if text == "" || len(text) > 60 {
+		return ""
+	}
+	for _, part := range strings.Split(text, ",") {
+		if len(part) < 3 || len(part) > 4 {
+			return ""
+		}
+		for _, ch := range part {
+			if ch < 'A' || ch > 'Z' {
+				return ""
+			}
+		}
+	}
+	return text
+}
+
+// 브라우저가 보낸 문자열을 URL 에 그대로 붙이지 않고 여기서 꼴부터 맞춘다(readGeocodeSpot 과 같은 규칙).
+func readRateQuery(query url.Values) (rateQuery, string) {
+	q := rateQuery{source: strings.TrimSpace(query.Get("source"))}
+	if q.source != "koreaexim" && q.source != "ecb" && q.source != "ecb-series" {
+		return rateQuery{}, "rate-bad-request"
+	}
+	if q.source == "ecb-series" {
+		q.start = rateDate(query.Get("start"), false)
+		q.end = rateDate(query.Get("end"), false)
+		q.symbols = rateSymbols(query.Get("symbols"))
+		if q.start == "" || q.end == "" || q.symbols == "" || q.start > q.end {
+			return rateQuery{}, "rate-bad-request"
+		}
+		return q, ""
+	}
+	q.date = rateDate(query.Get("date"), q.source == "koreaexim")
+	if q.date == "" {
+		return rateQuery{}, "rate-bad-request"
+	}
+	return q, ""
+}
+
+func rateCacheFile(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(rateCacheDir(), hex.EncodeToString(sum[:])+".json")
+}
+
+// 지난 날짜의 값은 다시 바뀌지 않으므로 그대로 믿고, 오늘 값만 20분이 지나면 새로 받는다.
+// '오늘' 은 이 PC 의 달력 날짜다 — 수출입은행 고시가 한국 시간 기준이고 교실 PC 도 같은 시간대다.
+func rateCacheFresh(q rateQuery, writtenAt time.Time) bool {
+	newest := strings.ReplaceAll(q.newestDay(), "-", "")
+	if len(newest) == 8 && newest < time.Now().Format("20060102") {
+		return true
+	}
+	return time.Since(writtenAt) <= rateTodayCacheAge
+}
+
+func readCachedRate(q rateQuery) ([]byte, bool, bool) {
+	rateCacheMu.Lock()
+	defer rateCacheMu.Unlock()
+	path := rateCacheFile(q.cacheKey())
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return nil, false, false
+	}
+	return data, rateCacheFresh(q, info.ModTime()), true
+}
+
+// 잘못을 담은 응답은 캐시하지 않는다 — 인증 오류(result 3)나 아직 고시 전인 빈 배열을 디스크에
+// 남기면 키를 고치거나 11시가 지난 뒤에도 같은 잘못이 계속 되살아난다.
+func rateBodyCacheable(data []byte) bool {
+	if len(data) < 8 {
+		return false
+	}
+	text := string(data)
+	if strings.TrimSpace(text) == "[]" {
+		return false
+	}
+	return !strings.Contains(text, `"result":2`) &&
+		!strings.Contains(text, `"result":3`) &&
+		!strings.Contains(text, `"result":4`)
+}
+
+func writeCachedRate(q rateQuery, data []byte) {
+	if !rateBodyCacheable(data) {
+		return
+	}
+	rateCacheMu.Lock()
+	defer rateCacheMu.Unlock()
+	dir := rateCacheDir()
+	if os.MkdirAll(dir, 0o755) != nil {
+		return
+	}
+	path := rateCacheFile(q.cacheKey())
+	temp := path + ".tmp"
+	if os.WriteFile(temp, data, 0o644) != nil {
+		return
+	}
+	if os.Rename(temp, path) != nil {
+		os.Remove(temp)
+		return
+	}
+	sweepRateCache(dir)
+}
+
+// 하루치 JSON 이 10KB 남짓이라 좀처럼 차지 않지만, 기간 조회를 반복하면 늘어난다 — 오래된 것부터 지운다.
+func sweepRateCache(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type cached struct {
+		path    string
+		size    int64
+		modTime time.Time
+	}
+	files := []cached{}
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, cached{filepath.Join(dir, entry.Name()), info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	if total <= rateCacheMaxBytes {
+		return
+	}
+	sort.Slice(files, func(a, b int) bool { return files[a].modTime.Before(files[b].modTime) })
+	target := int64(float64(rateCacheMaxBytes) * 0.8)
+	for _, file := range files {
+		if total <= target {
+			break
+		}
+		if os.Remove(file.path) == nil {
+			total -= file.size
+		}
+	}
+}
+
+func fetchExchangeRate(q rateQuery, key string) ([]byte, string) {
+	var endpoint string
+	switch q.source {
+	case "koreaexim":
+		endpoint = koreaEximRateURL + "?authkey=" + url.QueryEscape(key) + "&searchdate=" + q.date + "&data=AP01"
+	case "ecb-series":
+		endpoint = ecbRateURL + q.start + ".." + q.end + "?symbols=" + q.symbols
+	default:
+		endpoint = ecbRateURL + q.date
+	}
+	request, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, "rate-failed"
+	}
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "application/json")
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, "rate-failed"
+	}
+	defer response.Body.Close()
+	// Frankfurter 는 자료가 없는 날짜에 404 로 답한다 — 연결이 끊긴 것과 구분해야
+	// "인터넷을 확인하세요" 라는 엉뚱한 안내가 뜨지 않는다.
+	if response.StatusCode == http.StatusNotFound {
+		return nil, "rate-no-data"
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, "rate-failed"
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, rateMaxBytes+1))
+	if err != nil {
+		return nil, "rate-failed"
+	}
+	if len(data) > rateMaxBytes {
+		return nil, "rate-too-large"
+	}
+	return data, ""
+}
+
+// 캐시 → 없거나 낡았으면 새로 받기 → 받기에 실패하면 낡은 캐시라도 돌려주기(타일 프록시와 같은 순서).
+// 두 번째 반환값 true 는 "받아오지 못해 저장해 둔 값을 대신 내준다" 는 뜻이고,
+// 화면은 X-ClassDock-Rate-Cached 헤더를 보고 '저장본' 이라고 밝힌다.
+func exchangeRate(q rateQuery) ([]byte, bool, string) {
+	key := ""
+	if q.source == "koreaexim" {
+		key = currentExchangeRateKey()
+		if key == "" {
+			return nil, false, "rate-key-required"
+		}
+	}
+	stored, fresh, hasStored := readCachedRate(q)
+	if hasStored && fresh {
+		return stored, false, ""
+	}
+	data, code := fetchExchangeRate(q, key)
+	if code == "" {
+		writeCachedRate(q, data)
+		return data, false, ""
+	}
+	if hasStored {
+		return stored, true, ""
+	}
+	return nil, false, code
+}
+
+// 키 시험용 — 어제부터 거슬러 올라가 처음 만나는 평일(YYYYMMDD). 오늘로 걸면 주말이나
+// 오전 고시 전에는 키가 멀쩡해도 빈 배열이 와서 "키가 틀렸다" 고 잘못 알린다.
+func lastWeekdayCompact() string {
+	day := time.Now().AddDate(0, 0, -1)
+	for i := 0; i < 7; i++ {
+		if day.Weekday() != time.Saturday && day.Weekday() != time.Sunday {
+			break
+		}
+		day = day.AddDate(0, 0, -1)
+	}
+	return day.Format("20060102")
+}
+
 // loopback 에만 바인딩하더라도 DNS rebinding 등으로 다른 Host 가 들어오는 요청은 받지 않는다.
 func allowedLocalHost(r *http.Request) bool {
 	host := r.Host
@@ -663,6 +970,95 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(data)
+	})
+
+	// 환율 창이 "이 런처가 환율을 대신 받아 주는가" 를 묻는 자리. 타일 프록시와 다른 능력이라 따로 둔다.
+	mux.HandleFunc("/can-proxy-rates", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) {
+			http.Error(w, "invalid-host", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte("yes"))
+	})
+
+	mux.HandleFunc("/exchange-rate", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) {
+			http.Error(w, "invalid-host", http.StatusForbidden)
+			return
+		}
+		query, code := readRateQuery(r.URL.Query())
+		if code != "" {
+			http.Error(w, code, http.StatusBadRequest)
+			return
+		}
+		data, cached, code := exchangeRate(query)
+		if code != "" {
+			status := http.StatusBadGateway
+			if code == "rate-key-required" {
+				status = http.StatusPreconditionRequired
+			}
+			http.Error(w, code, status)
+			return
+		}
+		if cached {
+			w.Header().Set("X-ClassDock-Rate-Cached", "1")
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(data)
+	})
+
+	mux.HandleFunc("/exchange-rate-key-status", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"hasKey": currentExchangeRateKey() != "", "remembered": false, "persistentSupported": false,
+		})
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(body)
+	})
+
+	mux.HandleFunc("/exchange-rate-key", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			setExchangeRateKey("")
+			w.Write([]byte("ok"))
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+		key := strings.TrimSpace(string(body))
+		if err != nil || len(body) > 1024 || !validExchangeRateKey(key) {
+			http.Error(w, "rate-key-invalid", http.StatusBadRequest)
+			return
+		}
+		probe, code := fetchExchangeRate(rateQuery{source: "koreaexim", date: lastWeekdayCompact()}, key)
+		if code != "" {
+			http.Error(w, code, http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(string(probe), `"result":3`) {
+			http.Error(w, "rate-key-invalid", http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(string(probe), `"result":4`) {
+			http.Error(w, "rate-limit-reached", http.StatusBadRequest)
+			return
+		}
+		setExchangeRateKey(key)
+		w.Write([]byte("ok"))
 	})
 
 	mux.HandleFunc("/map-search-key-status", func(w http.ResponseWriter, r *http.Request) {

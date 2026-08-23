@@ -2309,6 +2309,16 @@ function renderWhiteboard(doc, host){
     catch(error){ console.warn("insertBoardChart failed:", error); return false; }
     return placeBoardGroup(group);
   };
+  /* 바깥에서 만든 표(환율 등)를 이 보드에 넣는다. 도구상자의 값의 표·통계표와 같은 그룹이라
+     넣은 뒤에도 크기 조절·되돌리기·분리가 그대로 먹는다. 다만 tableSpec 은 달지 않는다 —
+     받아 온 값이라 표 편집기로 고칠 것이 아니고, 고치면 출처와 어긋난다. */
+  doc.insertBoardTable = (rows, opts) => {
+    if (!Array.isArray(rows) || !rows.length || typeof MNBoardTools === "undefined") return false;
+    let group;
+    try { group = MNBoardTools.tableGroup(rows, Object.assign({ align:"right", color:boardInkColor() }, opts || {})); }
+    catch(error){ console.warn("insertBoardTable failed:", error); return false; }
+    return placeBoardGroup(group);
+  };
   // 고쳐 넣을 때는 보드에 놓인 자리와 크기를 그대로 두고 내용만 갈아 끼운다.
   const replaceBoardGroup = (existing, group) => {
     const index = wb.items.indexOf(existing);
@@ -2580,6 +2590,12 @@ function renderWhiteboard(doc, host){
     measure: '<path d="M4 15.5h16"/><path d="M4 12.5v3M9 11v4.5M14 11v4.5M20 12.5v3"/><path d="M6 8.5h12M6 6.5v4M18 6.5v4"/>',
     transform: '<path d="M4 20V9l6-5v11z"/><path d="M20 20V9l-6-5v11z" stroke-dasharray="3 2.5"/><path d="M12 3.5v17"/>',
     vectorsum: '<path d="M4 20 14 10M14 10h-4.5M14 10v4.5"/><path d="M4 20 9 7M9 7 7 10.5M9 7l3 2" stroke-dasharray="3 2.5"/><path d="m14 10 5-6M19 4h-4.5M19 4v4.5"/>',
+    /* 지도·환율 버튼은 이모지(🗺️·💱)로 두면 안 된다 — icons.js 가 앱 UI 의 색상 이모지를 걷어내는데
+       대응하는 단색 SVG 가 없으면 글자만 사라져 빈 버튼이 된다. 그래서 여기에 직접 그려 둔다. */
+    map: '<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
+    /* 환율은 동전 안의 ₩ 하나로 그린다. 순환 화살표를 두르면 뜻은 더 맞지만 도구막대 크기(17px)
+       에서 가운데 글자가 뭉개져 무엇인지 알아볼 수 없다 — 후보를 실제 크기로 찍어 보고 고른 모양이다. */
+    exchange: '<circle cx="12" cy="12" r="8"/><path d="m8.4 7.6 1.8 4.2 1.8-3 1.8 3 1.8-4.2"/><path d="M8.6 13.2h6.8M8.6 15.6h6.8"/>',
   };
   const TOOLS = [
     ["select", "select", "선택·이동 (이미지·수식·교육 도형 옮기기·크기조절)"],
@@ -5075,8 +5091,34 @@ function renderWhiteboard(doc, host){
     const placed = await doc.insertBoardImage(png);
     if (!placed && typeof toast === "function") toast("지도를 넣지 못했어요.", 2200);
   };
-  const mapToolBtn = mkBtn("🗺️", "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다", "wb-act wb-map", insertMapFromPicker);
-  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mapToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
+  const mapToolBtn = mkIconBtn("map", "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다", "wb-act wb-map", insertMapFromPicker);
+  /* 환율 넣기 — exchange-rate-ui.js 의 환율 창을 "이 보드에 넣기" 모드로 띄운다.
+     새 칠판을 만드는 팔레트 쪽(Ctrl+K → 환율)과 달리, 여기서는 지금 서 있는 보드에 떨어뜨린다
+     (지도의 openMapPicker 와 같은 짝 구조다 — 방향마다 입구가 다르다).
+     색을 여기서 넣어 주는 까닭: 보드의 펜 색은 이 파일만 알고, 어두운 배경에서 검은 표가
+     안 보이면 안 된다. */
+  const insertExchangeRate = () => {
+    // 환율 창은 IIFE 안에서 window 에 매달리는 모듈이라 전역 이름이 아니다 — window 로 짚는다.
+    if (typeof window.openExchangeRate !== "function"){
+      if (typeof toast === "function") toast("환율을 열 수 없어요.", 2200);
+      return;
+    }
+    window.openExchangeRate({
+      board: {
+        insertTable: (rows, opts) => doc.insertBoardTable(rows, opts),
+        insertChart: (spec) => doc.insertBoardChart(Object.assign({ axisColor:boardInkColor() }, spec))
+      }
+    });
+  };
+  const rateToolBtn = mkIconBtn("exchange", "환율 넣기 — 고시환율 표나 추이 그래프를 이 보드에 넣습니다", "wb-act wb-rate", insertExchangeRate);
+  /* 환율은 런처가 대신 받아 줘야만 되는 기능이다(수출입은행·ECB 모두 브라우저에서 직접 못 부른다).
+     능력이 없으면 버튼을 아예 내놓지 않는다 — 눌러도 늘 "런처로 열어야 해요"만 뜨는 버튼은
+     없느니만 못하다. 프로브가 끝날 때까지는 감춰 두고, 된다고 답할 때만 꺼낸다. */
+  rateToolBtn.hidden = true;
+  if (typeof window.exchangeRatesAvailable === "function"){
+    window.exchangeRatesAvailable().then((ok) => { if (ok) rateToolBtn.hidden = false; }).catch(() => {});
+  }
+  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mapToolBtn, rateToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
 
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);

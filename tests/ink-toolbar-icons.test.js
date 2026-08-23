@@ -22,3 +22,12 @@ test("필기·표시 도구막대는 삭제될 수 있는 이모지 대신 공�
     assert.doesNotMatch(source, /🖱|🖍|🧽|✏️/, file);
   }
 });
+
+test("화이트보드 도구막대도 이모지 라벨 대신 자기 SVG를 쓴다", () => {
+  /* icons.js 는 앱 UI 의 색상 이모지를 걷어내는데, 짝이 되는 단색 SVG 가 없으면 글자만 사라져
+     그림 없는 빈 버튼이 남는다 — 지도(🗺️)·환율(💱) 버튼이 실제로 그렇게 비어 보였다.
+     화이트보드는 공용 icons.js 가 아니라 자기 WB_ICONS 를 쓰므로 여기서 따로 지킨다. */
+  const source = read("whiteboard.js");
+  assert.doesNotMatch(source, /mkBtn\("[^"]*[\u{1F000}-\u{1FAFF}]/u);
+  for (const name of ["map", "exchange"]) assert.match(source, new RegExp("\\n\\s*" + name + ":\\s*'<"), name);
+});

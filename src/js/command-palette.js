@@ -67,6 +67,8 @@
         kw:"replace 바꾸기 치환 찾아 여러 파일 일괄 한꺼번에 replace all find" }),
     C("convertFormat","🔄","형식 변환 (JSON·CSV·표·마크다운)", () => callFn("openDataConvert"),
       { kw:"convert format json csv tsv xml yaml table markdown 변환 형식 포맷 표 바꾸기 데이터" }),
+    C("exchangeRate","💱","환율 (고시환율·환율 계산)", () => callFn("openExchangeRate"),
+      { kw:"exchange rate currency 환율 고시환율 매매기준율 달러 엔 유로 위안 송금 계산 사회 경제" }),
     C("imageMemo","🖼️","이미지 메모", () => clickId("imageMemoOpen"), { kw:"image 이미지 캡처 스크린샷 메모" }),
     C("saveFolder","📁","저장 폴더 열기", () => callFn("__mnOpenLastSavedFolder"),
       { when:() => { const b = $("saveFolderOpen"); return !!(b && !b.hidden && typeof window.__mnOpenLastSavedFolder === "function"); },

@@ -596,6 +596,13 @@
         <label class="settings-check" id="settingMapSearchRememberWrap"><input type="checkbox" id="settingMapSearchRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
         <div class="settings-row"><span id="settingMapSearchStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingMapSearchTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingMapSearchClear" type="button">키 지우기</button></span></div>
       </div>
+      <div class="settings-group-title">환율</div>
+      <p class="settings-hint">환율 창(Ctrl+K → 환율)은 인증키 없이도 ECB 참고환율로 바로 씁니다. 아래 인증키를 넣으면 한국수출입은행 <b>고시환율</b>(매매기준율·송금 보낼 때·받을 때)까지 볼 수 있습니다. 인증키는 한국수출입은행 홈페이지의 오픈 API 안내에서 무료로 발급받습니다.</p>
+      <div class="map-search-settings" id="settingExchangeRateKeyWrap">
+        <label class="settings-row"><span>수출입은행 인증키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다. 하루 조회 한도는 1,000회입니다.</small></span><input type="password" id="settingExchangeRateKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="수출입은행 인증키"></label>
+        <label class="settings-check" id="settingExchangeRateRememberWrap"><input type="checkbox" id="settingExchangeRateRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
+        <div class="settings-row"><span id="settingExchangeRateStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingExchangeRateTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingExchangeRateClear" type="button">키 지우기</button></span></div>
+      </div>
       <div class="settings-save-folder" id="settingSaveFolderWrap">
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath" aria-live="polite">저장 위치 확인 중…</small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>
@@ -916,6 +923,8 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/data-convert.js"></script>
 <script src="src/js/table-export.js"></script>
 <script src="src/js/data-convert-ui.js"></script>
+<script src="src/js/exchange-rate.js"></script>
+<script src="src/js/exchange-rate-ui.js"></script>
 <script src="src/js/scratchpad.js"></script>
 <script src="src/js/mnote.js"></script>
 <script src="src/js/music-model.js"></script>

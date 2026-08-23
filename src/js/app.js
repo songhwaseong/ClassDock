@@ -895,6 +895,91 @@ function wire(){
   });
   // 지도 검색 전에 앱 모드/일반 창이 같은 런처 공급자 설정을 보도록 시작과 함께 동기화한다.
   window.__classDockMapSearchProviderReady = refreshMapSearchKeyStatus();
+
+  /* ── 환율(수출입은행 인증키) ──
+     지도 검색 키와 같은 규칙이다 — 키 문자열은 런처에만 남고 브라우저에는 보유 여부만 전달한다.
+     환율 창은 설정 창과 떨어져 있으므로 상태를 복사해 두고 변경 이벤트로 알려 준다. */
+  const exchangeRateKeyInput = byId("settingExchangeRateKey");
+  const exchangeRateRemember = byId("settingExchangeRateRemember");
+  const exchangeRateRememberWrap = byId("settingExchangeRateRememberWrap");
+  const exchangeRateStatusText = byId("settingExchangeRateStatus");
+  const exchangeRateTest = byId("settingExchangeRateTest");
+  const exchangeRateClear = byId("settingExchangeRateClear");
+  let exchangeRateKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const publishExchangeRateKeyStatus = () => {
+    const detail = { ...exchangeRateKeyStatus };
+    window.__classDockExchangeRateKeyStatus = detail;
+    window.dispatchEvent(new CustomEvent("classdock-exchange-rate-status-change", { detail }));
+  };
+  publishExchangeRateKeyStatus();
+  const setExchangeRateStatus = (text, kind) => {
+    exchangeRateStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    exchangeRateStatusText.classList.toggle("ok", kind === "ok");
+    exchangeRateStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncExchangeRateFields = () => {
+    const available = exchangeRateKeyStatus.available;
+    exchangeRateKeyInput.disabled = !available;
+    exchangeRateTest.disabled = !available;
+    exchangeRateClear.disabled = !available || !exchangeRateKeyStatus.hasKey;
+    exchangeRateRemember.disabled = !available || !exchangeRateKeyStatus.persistentSupported;
+    exchangeRateRememberWrap.hidden = !exchangeRateKeyStatus.persistentSupported;
+    exchangeRateRemember.checked = !!exchangeRateKeyStatus.remembered;
+    exchangeRateKeyInput.placeholder = exchangeRateKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshExchangeRateKeyStatus = async (message, kind) => {
+    exchangeRateKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    publishExchangeRateKeyStatus();
+    try {
+      const response = await fetch("/exchange-rate-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      exchangeRateKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      publishExchangeRateKeyStatus();
+      if (message) setExchangeRateStatus(message, kind);
+      else if (exchangeRateKeyStatus.hasKey) setExchangeRateStatus(exchangeRateKeyStatus.remembered
+        ? "수출입은행 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "수출입은행 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setExchangeRateStatus("인증키가 없어 ECB 참고환율만 볼 수 있습니다.", "");
+    } catch(_){ setExchangeRateStatus("환율 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncExchangeRateFields();
+  };
+  exchangeRateTest.addEventListener("click", async () => {
+    const key = exchangeRateKeyInput.value.trim();
+    if (!key){ setExchangeRateStatus("저장할 수출입은행 인증키를 입력해 주세요.", "bad"); exchangeRateKeyInput.focus(); return; }
+    exchangeRateTest.disabled = true; exchangeRateClear.disabled = true;
+    setExchangeRateStatus("수출입은행 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/exchange-rate-key?remember=" + (exchangeRateRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      exchangeRateKeyInput.value = "";
+      await refreshExchangeRateKeyStatus("수출입은행 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      const reason = error && error.message;
+      // 한도 초과는 키가 멀쩡한데도 실패하는 경우라 "키가 틀렸다"고 말하면 엉뚱한 곳을 고치게 된다.
+      setExchangeRateStatus(reason === "rate-limit-reached"
+        ? "오늘 조회 한도(1,000회)를 다 써서 확인하지 못했습니다. 내일 다시 시도해 주세요."
+        : reason === "rate-key-save-failed"
+          ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+          : "인증키를 확인하지 못했습니다. 수출입은행에서 발급받은 인증키인지 확인해 주세요.", "bad");
+      syncExchangeRateFields();
+    }
+  });
+  exchangeRateClear.addEventListener("click", async () => {
+    exchangeRateClear.disabled = true;
+    try {
+      const response = await fetch("/exchange-rate-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      exchangeRateKeyInput.value = "";
+      await refreshExchangeRateKeyStatus("수출입은행 인증키를 지웠습니다.", "ok");
+    } catch(_){ setExchangeRateStatus("인증키를 지우지 못했습니다.", "bad"); syncExchangeRateFields(); }
+  });
+  // 환율 창은 이 상태값을 보고 기본 출처를 고른다 — 창을 열기 전에 한 번 받아 둔다.
+  window.__classDockExchangeRateKeyReady = refreshExchangeRateKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;

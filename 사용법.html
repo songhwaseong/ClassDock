@@ -559,7 +559,8 @@ cd myOffice</code></pre>
     </ul>
   </li>
   <li><strong>벡터 합성</strong>(도구막대·우클릭 메뉴) — <strong>같은 점에서 그린 화살표 두 개</strong> 중 하나를 고르고 누르면 평행사변형과 <strong>합력 화살표</strong>가 붙고 크기(cm)·각도가 적힙니다. 합성에 쓰인 화살표는 <strong>끝점에 손잡이</strong>가 생겨 끌어 길이·방향을 바꿀 수 있고, 그때마다 합력이 따라 바뀝니다. 원본 화살표를 지우면 합력도 함께 사라지고, 한 번 더 누르면 뗍니다</li>
-  <li><strong>지도 넣기</strong>(도구막대 🗺️) — 지도 고르기 창이 열립니다. 배경지도를 고르고 끌거나 <strong>장소 이름·좌표</strong>를 적은 뒤 <strong>검색</strong>(또는 <kbd>Enter</kbd>)으로 자리를 잡고 <strong>이 화면 넣기</strong>를 누르면 지금 보이는 지도가 <strong>그림으로 보드에 들어옵니다</strong>. 들어온 뒤에는 여느 이미지처럼 옮기고 크기를 바꾸며 그 위에 바로 판서할 수 있습니다. 마지막에 보던 자리를 기억하므로 다음에 열면 거기서 시작합니다. 지도를 계속 고쳐 가며 쓰려면 이 창 대신 <strong>지도 문서(<code>.map</code>)</strong> 를 만들고 그쪽의 <strong>🖊️ 칠판으로</strong>를 쓰세요</li>
+  <li><strong>지도 넣기</strong>(도구막대의 접힌 지도 그림) — 지도 고르기 창이 열립니다. 배경지도를 고르고 끌거나 <strong>장소 이름·좌표</strong>를 적은 뒤 <strong>검색</strong>(또는 <kbd>Enter</kbd>)으로 자리를 잡고 <strong>이 화면 넣기</strong>를 누르면 지금 보이는 지도가 <strong>그림으로 보드에 들어옵니다</strong>. 들어온 뒤에는 여느 이미지처럼 옮기고 크기를 바꾸며 그 위에 바로 판서할 수 있습니다. 마지막에 보던 자리를 기억하므로 다음에 열면 거기서 시작합니다. 지도를 계속 고쳐 가며 쓰려면 이 창 대신 <strong>지도 문서(<code>.map</code>)</strong> 를 만들고 그쪽의 <strong>🖊️ 칠판으로</strong>를 쓰세요</li>
+  <li><strong>환율 넣기</strong>(도구막대의 ₩ 동전 그림) — 고시환율 표나 환율 추이 선그래프를 <strong>이 칠판에</strong> 넣습니다. 자세한 내용은 <a href="#-환율--고시환율-보기환전-계산추이-그래프">💱 환율</a>을 보세요. ClassDock.exe로 열었을 때만 나타나는 버튼입니다</li>
   <li>도구상자 항목은 클릭하면 보드 가운데에, 끌어 놓으면 원하는 위치에 삽입. 교육 도형은 선명한 벡터 그룹으로 한꺼번에 이동·크기 조절하고, 선택 후 <strong>분리</strong>를 누르면 선·원·글자 같은 구성 요소를 개별 수정</li>
   <li><strong>선택·이동</strong> 도구로 이미지·직선·화살표·사각형·원·텍스트를 클릭해 옮기고 <kbd>Delete</kbd>로 삭제</li>
   <li>만든 텍스트는 <strong>선택·이동 도구로 더블클릭</strong>해 내용을 다시 수정</li>
@@ -1102,6 +1103,55 @@ cd myOffice</code></pre>
   <li><strong>PowerPoint가 설치된 PC(EXE)에서는 <code>.pptx</code>가 PDF로 정확 변환되어 열립니다.</strong> 그때 화면에 있는 문서는 PDF라 찾아 바꾸기 대상이 아닙니다. 슬라이드를 바꾸려면 PowerPoint에서 직접 바꾸거나, PowerPoint가 없는 환경(브라우저 등)에서 여세요.</li>
   <li>저장할 위치를 찾지 못하면(브라우저로만 연 파일 등) <strong>아무것도 바꾸지 않고 건너뜁니다.</strong> Word·PowerPoint 문서는 편집기가 없어서, 화면만 바뀌면 "바뀐 줄 알았는데 파일은 그대로"가 되기 때문입니다.</li>
 </ul>
+
+<h3>💱 환율 — 고시환율 보기·환전 계산·추이 그래프</h3>
+
+<p><kbd>Ctrl</kbd>+<kbd>K</kbd> → <strong>"환율"</strong> 로 엽니다. <strong>인증키 없이도 바로 쓸 수 있고</strong>, 인증키를 넣으면 한국수출입은행 <strong>고시환율</strong>까지 볼 수 있습니다.</p>
+
+<table>
+<thead><tr><th>출처</th><th>키</th><th>나오는 값</th></tr></thead>
+<tbody>
+<tr><td><strong>ECB 참고환율</strong> (기본)</td><td>필요 없음</td><td>매매기준율에 해당하는 참고환율</td></tr>
+<tr><td><strong>수출입은행 고시환율</strong></td><td>무료 인증키 필요</td><td>매매기준율 + <strong>송금 보낼 때 / 받을 때</strong></td></tr>
+</tbody>
+</table>
+
+<ol>
+  <li><strong>표</strong> — 통화별 환율이 뜹니다. 위쪽 칸에 <code>달러</code>·<code>USD</code>처럼 치면 그 통화만 남습니다. <strong>표의 줄을 누르면</strong> 그 통화가 아래 계산기와 추이에 함께 걸립니다</li>
+  <li><strong>환전 계산</strong> — 금액을 넣으면 바로 바뀝니다. <strong>⇄</strong> 를 누르면 원 → 외화 방향으로 뒤집히며, 고른 통화 칸이 좌우로 옮겨 가 <strong>어느 쪽에서 어느 쪽으로 가는지</strong> 보입니다</li>
+  <li><strong>추이</strong> — 통화와 기간(7·14·30일)을 고르고 <strong>칠판 그래프로</strong> 를 누르면 새 화이트보드에 선그래프가 그려집니다. 그 위에 바로 판서할 수 있습니다</li>
+  <li><strong>내보내기</strong> — <strong>복사</strong>(엑셀·한글에 바로 붙여넣기) · <strong>CSV로 저장</strong> · <strong>표 편집기로</strong>(새 탭의 xlsx). 넷 다 <strong>화면에 보이는 대로</strong> 나갑니다 — 거르기 칸에 친 대로 걸러진 줄만 나갑니다</li>
+</ol>
+
+<h4>칠판에서 바로 넣기</h4>
+
+<p>화이트보드 도구막대의 <strong>환율 버튼</strong>(₩ 동전 그림, 지도 버튼 바로 옆)을 누르면 같은 창이 뜨지만, <strong>새 칠판을 만들지 않고 지금 보고 있는 칠판에</strong> 넣습니다. 아래 버튼이 <strong>표 넣기</strong>·<strong>그래프 넣기</strong>로 바뀝니다.</p>
+
+<ul>
+  <li>넣은 표와 그래프는 도구상자로 만든 교구와 같은 묶음이라 <strong>크기 조절·좌우 반전·분리·되돌리기</strong>가 그대로 됩니다</li>
+  <li>지금 쓰고 있는 <strong>펜 색</strong>으로 그려지므로 어두운 배경 칠판에서도 보입니다</li>
+  <li>표는 <strong>화면에 보이는 대로</strong> 들어갑니다 — 위 거르기 칸에 <code>달러</code>를 쳐 놓고 넣으면 달러만 들어갑니다(통화 29종을 통째로 올리면 글자가 뭉개져 못 읽습니다). 복사·CSV·표 편집기도 같은 규칙입니다</li>
+</ul>
+
+<blockquote>
+  <p>환율은 런처가 대신 받아 와야만 되는 기능이라, <strong>이 버튼은 ClassDock.exe로 열었을 때만 나타납니다.</strong> 오프라인 HTML이나 일반 브라우저로 연 칠판에는 아예 보이지 않습니다 — 눌러도 안 되는 버튼을 두지 않으려는 것입니다.</p>
+</blockquote>
+
+<blockquote>
+  <p><strong>일본 엔·인도네시아 루피아는 100단위로 고시</strong>됩니다. 표에는 <code>100 JPY = 950.12원</code>처럼 고시된 그대로 나오고, 계산기는 1단위 값으로 계산하므로 어느 쪽으로 넣어도 결과가 맞습니다. 출처를 바꿔도 단위는 그대로라 같은 줄을 같은 뜻으로 읽을 수 있습니다. <strong>고시가 없는 날</strong>(주말·공휴일, 그리고 <strong>오전 11시 무렵의 그날 고시 전</strong>)은 가장 가까운 고시일 값을 보여 주며 "고른 날짜는 고시가 없어…"라고 밝힙니다. 오전에 열어 둔 창은 11시가 지난 뒤 <strong>다시 받기</strong>를 누르면 그날 값으로 갱신됩니다. <strong>인터넷이 끊겨도</strong> 전에 받아 둔 값을 계속 볼 수 있습니다(런처가 이 PC에 저장해 둡니다). 이때는 "저장해 둔 값입니다"라고 함께 표시합니다.</p>
+</blockquote>
+
+<h4>수출입은행 인증키 넣기</h4>
+
+<ol>
+  <li>한국수출입은행 홈페이지의 <strong>오픈 API</strong> 안내에서 인증키를 무료로 발급받습니다</li>
+  <li><strong>설정 → 일반 → 환율</strong> 에서 인증키를 넣고 <strong>키 저장·연결 시험</strong></li>
+  <li><strong>"이 Windows 사용자 계정에 암호화하여 기억"</strong> 을 켜면 다음 실행에도 남고, 끄면 프로그램을 닫을 때 사라집니다</li>
+</ol>
+
+<blockquote>
+  <p>인증키는 <strong>HTML·브라우저 설정·작업공간 어디에도 저장하지 않고</strong> ClassDock 런처에만 전달합니다(지도 검색의 카카오 키와 같은 규칙). 환율 조회 자체도 <strong>ClassDock.exe로 열었을 때만</strong> 됩니다 — 수출입은행 API가 브라우저에서 직접 부르는 것을 허용하지 않기 때문입니다. 수출입은행 API는 <strong>하루 1,000회</strong> 조회 한도가 있습니다. 한 번 받은 값은 이 PC에 저장해 두고 다시 받지 않으므로 수업 중에 한도를 걱정할 일은 거의 없지만, 30일 추이는 하루씩 받아오므로 그만큼 조회가 쌓입니다.</p>
+</blockquote>
 
 <h3>텍스트·이미지·노트북 셀 메모</h3>
 

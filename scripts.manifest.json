@@ -86,6 +86,8 @@
     "data-convert.js",
     "table-export.js",
     "data-convert-ui.js",
+    "exchange-rate.js",
+    "exchange-rate-ui.js",
     "scratchpad.js",
     "mnote.js",
     "music-model.js",
@@ -197,6 +199,8 @@
         "data-convert.js",
         "table-export.js",
         "data-convert-ui.js",
+        "exchange-rate.js",
+        "exchange-rate-ui.js",
         "scratchpad.js",
         "mnote.js",
         "music-model.js",
@@ -416,6 +420,13 @@
     ],
     "recent-files.js": [
       "documents.js"
+    ],
+    "exchange-rate-ui.js": [
+      "exchange-rate.js",
+      "data-convert.js",
+      "table-export.js",
+      "whiteboard.js",
+      "documents.js"
     ]
   },
   "moduleBoundaries": [
@@ -579,6 +590,14 @@
       "publicApi": "MNMusicAudio",
       "consumers": [
         "music-editor.js"
+      ]
+    },
+    {
+      "name": "exchange-rate",
+      "file": "exchange-rate.js",
+      "publicApi": "MNExchangeRate",
+      "consumers": [
+        "exchange-rate-ui.js"
       ]
     }
   ],

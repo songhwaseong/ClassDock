@@ -2327,6 +2327,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-tool:hover,.wb-width:hover,.wb-act:hover{background:var(--panel-hover)}
   .wb-tool.active,.wb-width.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   .wb-act:disabled{opacity:.4;cursor:default}
+  /* display:inline-flex 가 [hidden] 의 기본 display:none 을 이기므로 따로 눌러 준다 —
+     런처 능력이 없어 감춘 버튼(💱 환율)이 그냥 두면 그대로 보인다. */
+  .wb-act[hidden]{display:none}
   .wb-clear{color:var(--danger)}
   .wb-rec{color:var(--danger);font-weight:600;white-space:nowrap}
   .wb-rec.recording{background:var(--danger);color:#fff;border-color:var(--danger);animation:lr-recpulse 1.3s ease-in-out infinite}
@@ -5428,6 +5431,50 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   @media (max-width:760px){
     .data-convert-panes{grid-template-columns:1fr}
     .data-convert-pane{min-height:140px}
+  }
+
+  /* 환율 창 (수출입은행 고시환율 · ECB 참고환율) */
+  .exchange-rate-card{width:min(760px,96%);max-height:92vh;display:flex;flex-direction:column}
+  .exchange-rate-sub{color:var(--muted);font-size:13px;margin:6px 0 12px}
+  .exchange-rate-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .exchange-rate-cap{font-size:12px;color:var(--muted)}
+  .exchange-rate-select,.exchange-rate-date,.exchange-rate-amount,.exchange-rate-filter{font:inherit;font-size:13px;
+    padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--field,var(--panel));color:var(--ink)}
+  .exchange-rate-note{color:var(--muted);font-size:12px;margin:8px 0 0}
+  .exchange-rate-status{font-size:12.5px;color:var(--muted);margin:6px 0 10px;min-height:1.4em}
+  .exchange-rate-status.ok{color:var(--ok,#98c379)}
+  .exchange-rate-status.bad{color:var(--danger,#e06c75)}
+  /* 계산기 — 고른 통화 칸이 왼쪽·오른쪽으로 옮겨 다니며 방향을 나타낸다. */
+  .exchange-rate-calc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:10px;
+    border:1px solid var(--border);border-radius:10px;background:rgba(127,127,127,.06)}
+  .exchange-rate-amount{width:140px;text-align:right;font-variant-numeric:tabular-nums}
+  .exchange-rate-slot{display:inline-flex;align-items:center;gap:6px}
+  .exchange-rate-unit{font-size:13px;color:var(--muted)}
+  .exchange-rate-swap{font:inherit;font-size:14px;line-height:1;padding:5px 9px;cursor:pointer;
+    border:1px solid var(--border);border-radius:8px;background:var(--field,var(--panel));color:var(--ink)}
+  .exchange-rate-out{flex:1;min-width:110px;text-align:right;font-size:16px;font-weight:700;
+    font-variant-numeric:tabular-nums;color:var(--ink)}
+  .exchange-rate-filter{width:100%;margin-bottom:8px}
+  .exchange-rate-table-wrap{flex:1 1 auto;min-height:150px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+  .exchange-rate-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .exchange-rate-table th,.exchange-rate-table td{border-bottom:1px solid var(--border);padding:5px 10px;text-align:left}
+  .exchange-rate-table th{background:var(--field,rgba(127,127,127,.12));font-weight:700;position:sticky;top:0;z-index:1}
+  .exchange-rate-table tbody tr{cursor:pointer}
+  .exchange-rate-table tbody tr:hover,.exchange-rate-table tbody tr:focus-visible{background:rgba(127,127,127,.12);outline:none}
+  /* 통화 이름 칸이 남는 폭을 다 먹고, 숫자 칸은 오른쪽에 붙어 자릿수가 세로로 맞는다. */
+  .exchange-rate-table th:first-child,.exchange-rate-table td:first-child{width:100%}
+  .exchange-rate-name{display:flex;align-items:center;gap:7px}
+  .exchange-rate-name code{font-size:11px;color:var(--muted);background:rgba(127,127,127,.16);border-radius:5px;padding:1px 6px}
+  /* `.exchange-rate-table td` 가 요소까지 짚어 더 세므로 여기서도 표를 함께 짚어야 오른쪽 정렬이 먹는다. */
+  .exchange-rate-table th.exchange-rate-num,.exchange-rate-table td.exchange-rate-num{
+    text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .exchange-rate-table td.strong{font-weight:700}
+  .exchange-rate-empty{padding:14px;color:var(--muted);font-size:12.5px}
+  .exchange-rate-series{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+  .exchange-rate-series-status{font-size:12px;color:var(--muted);flex:1;min-width:0}
+  @media (max-width:640px){
+    .exchange-rate-out{width:100%;flex-basis:100%;text-align:left}
+    .exchange-rate-amount{width:110px}
   }
   /* ===== 시험지 패키지(.examkey/.exam/.examdone) ===== */
   .exam-edit,.exam-take,.exam-grade{max-width:980px;margin:18px auto;padding:0 18px 48px;
