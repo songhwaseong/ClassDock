@@ -926,7 +926,7 @@ function wire(){
   // 새 화이트보드의 기본 배경색. 프리셋 목록(BOARD_BG_PRESETS) 하나로 버튼을 만들어 팔레트를
   // 설정 화면과 보드 도구막대에 이중으로 적어 두지 않는다.
   let boardBgDraft = BOARD_BG_DEFAULT;
-  let boardBgCustom = null;
+  let boardBgCustom = null, boardPatternSelect = null, boardPatternDraft = null;
   const boardBgHost = byId("settingBoardBg");
   const syncBoardBgChoices = () => {
     if (!boardBgHost) return;
@@ -934,6 +934,7 @@ function wire(){
       button.setAttribute("aria-pressed", String(button.dataset.boardBg === boardBgDraft));
     });
     if (boardBgCustom && boardBgCustom.value !== boardBgDraft) boardBgCustom.value = boardBgDraft;
+    if (boardPatternSelect) boardPatternSelect.value = boardPatternDraft ? boardPatternDraft.id : BOARD_PATTERN_NONE;
   };
   const buildBoardBgChoices = () => {
     if (!boardBgHost || boardBgHost.childElementCount) return;
@@ -951,6 +952,21 @@ function wire(){
     boardBgCustom.title = "배경색 직접 고르기"; boardBgCustom.setAttribute("aria-label", "배경색 직접 고르기");
     boardBgCustom.addEventListener("input", () => { boardBgDraft = normalizeBoardBg(boardBgCustom.value); syncBoardBgChoices(); });
     boardBgHost.appendChild(boardBgCustom);
+    // 무늬(모눈·오선 등)는 색과 달리 종류가 많아 목록으로 고른다. 간격·진하기 같은 세부는 보드마다
+    // 다르게 쓰는 값이라 설정에 두지 않고 보드 도구막대의 배경 판에서만 조절한다.
+    boardPatternSelect = document.createElement("select");
+    boardPatternSelect.className = "board-pattern-select";
+    boardPatternSelect.title = "새 보드 기본 무늬"; boardPatternSelect.setAttribute("aria-label", "새 보드 기본 무늬");
+    for (const preset of BOARD_PATTERNS){
+      const option = document.createElement("option");
+      option.value = preset.id; option.textContent = preset.label;
+      boardPatternSelect.appendChild(option);
+    }
+    boardPatternSelect.addEventListener("change", () => {
+      boardPatternDraft = normalizeBoardPattern({ id:boardPatternSelect.value });
+      syncBoardBgChoices();
+    });
+    boardBgHost.appendChild(boardPatternSelect);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(boardBgHost);
   };
   document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
@@ -1179,6 +1195,7 @@ function wire(){
     codeColorDraft = normalizeCodeColors(appSettings.codeColors);
     renderCodeColorSettings();
     boardBgDraft = normalizeBoardBg(appSettings.boardBg);
+    boardPatternDraft = normalizeBoardPattern(appSettings.boardPattern);
     buildBoardBgChoices();
     syncBoardBgChoices();
     syncToolVisibilityChecks();
@@ -1250,6 +1267,7 @@ function wire(){
       toolVisibility: collectToolVisibility(),
       codeColors: codeColorDraft,
       boardBg: boardBgDraft,
+      boardPattern: boardPatternDraft,
       mouseSideButtons: byId("settingMouseSideButtons").checked,
       shortcuts:shortcutDraft
     });

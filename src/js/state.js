@@ -289,6 +289,115 @@ const BOARD_BG_PRESETS = Object.freeze([
   { id:"night",  color:"#111827", label:"검정",      labelEn:"Black" }
 ]);
 function normalizeBoardBg(value){ return normalizeHexColor(value) || BOARD_BG_DEFAULT; }
+// ── 화이트보드 배경 무늬(종이 결) ────────────────────────────────────
+// 배경색 위에 깔리는 모눈·줄·오선 같은 결. 사진이 아니라 그릴 때마다 계산하는 벡터라
+// (1) 스냅샷에는 설정 몇 글자만 남아 자동복원 용량을 먹지 않고, (2) 400%로 키워도 선이 뭉개지지 않으며,
+// (3) 무늬 원점이 보드 좌표 (0,0)이라 창 크기를 바꿔도 판서와 칸이 어긋나지 않는다.
+const BOARD_PATTERN_NONE = "none";
+// 진하기 기본값이 무늬마다 다른 이유: 모눈은 판서를 방해하지 않게 옅어야 하고, 오선·줄은
+// 그 선 자체가 글씨를 앉히는 기준이라 또렷해야 한다.
+const BOARD_PATTERNS = Object.freeze([
+  { id:"none",   size:0,  opacity:0,   label:"없음",     labelEn:"None" },
+  { id:"grid",   size:40, opacity:.3,  label:"모눈종이", labelEn:"Grid" },
+  { id:"dots",   size:40, opacity:.45, label:"점 모눈",  labelEn:"Dot grid" },
+  { id:"graph",  size:40, opacity:.3,  label:"좌표평면", labelEn:"Coordinate plane" },
+  { id:"lines",  size:44, opacity:.45, label:"줄 노트",  labelEn:"Ruled lines" },
+  { id:"staff",  size:15, opacity:.6,  label:"오선지",   labelEn:"Music staff" },
+  { id:"cells",  size:46, opacity:.45, label:"원고지",   labelEn:"Manuscript grid" }
+]);
+const BOARD_PATTERN_SIZE_MIN = 12, BOARD_PATTERN_SIZE_MAX = 160;
+const BOARD_PATTERN_OPACITY_DEFAULT = 0.3;
+function boardPatternPreset(id){
+  for (const preset of BOARD_PATTERNS) if (preset.id === id) return preset;
+  return null;
+}
+// 무늬 설정을 항상 같은 모양으로 맞춘다. 무늬 없음(또는 알 수 없는 이름)은 null 로 — 옛 스냅샷·
+// 손상된 값이 그대로 그리기 코드까지 흘러가지 않게 한다. color:"" 는 "배경색에 맞춰 자동".
+function normalizeBoardPattern(value){
+  const raw = (typeof value === "string") ? { id:value } : (value && typeof value === "object") ? value : null;
+  if (!raw) return null;
+  const preset = boardPatternPreset(raw.id);
+  if (!preset || preset.id === BOARD_PATTERN_NONE) return null;
+  // Number("") 은 0 이다 — 빈 칸을 "간격 0"으로 읽으면 프리셋 기본값 대신 최소 간격으로 눌린다.
+  const num = (value) => (value == null || String(value).trim() === "") ? NaN : Number(value);
+  const size = num(raw.size);
+  const opacity = num(raw.opacity);
+  const out = {
+    id: preset.id,
+    size: Math.round(Math.max(BOARD_PATTERN_SIZE_MIN, Math.min(BOARD_PATTERN_SIZE_MAX, Number.isFinite(size) ? size : preset.size))),
+    color: normalizeHexColor(raw.color) || "",
+    opacity: Math.max(.05, Math.min(1, Number.isFinite(opacity) ? opacity : (preset.opacity || BOARD_PATTERN_OPACITY_DEFAULT)))
+  };
+  // 좌표평면의 축 위치만 보드 좌표로 함께 저장한다(고른 자리에 그대로 머물러야 하므로).
+  if (Number.isFinite(Number(raw.originX)) && Number.isFinite(Number(raw.originY))){
+    out.originX = Number(raw.originX); out.originY = Number(raw.originY);
+  }
+  return out;
+}
+// ── 화이트보드 배경 그림(사진·학습지 스캔) ──────────────────────────
+// 무늬와 달리 픽셀이라 스냅샷에 data URL 이 통째로 실린다 — 자동복원본이 들어가는 localStorage 는
+// 원본(≈5MB)에 맞춰 넣으면 사진 한 장으로 꽉 찬다. 그래서 넣을 때 아래 상한으로 다시 인코딩한다.
+const BOARD_IMAGE_MAX_EDGE = 1600;              // 긴 변 기준 축소 한도(칠판에 띄우기 충분한 해상도)
+const BOARD_IMAGE_MAX_CHARS = 2 * 1000 * 1000;  // data URL 길이 상한(≈1.5MB 바이너리)
+const BOARD_IMAGE_FITS = Object.freeze([
+  { id:"cover",  label:"채움", labelEn:"Fill" },       // 화면을 꽉 채우고 넘치는 부분은 잘라 낸다
+  { id:"contain", label:"맞춤", labelEn:"Fit" },       // 그림 전체가 보이게 화면 안에 맞춘다
+  { id:"actual", label:"원본", labelEn:"Actual size" },// 원래 크기 그대로(학습지 스캔을 읽는 크기로)
+  { id:"tile",   label:"타일", labelEn:"Tile" }        // 무늬 결처럼 보드 전체에 반복해 깐다
+]);
+// 타일은 상자가 아니라 "한 칸 크기"라 따로 조절한다(무늬의 간격에 해당). 원본 대비 백분율.
+const BOARD_IMAGE_TILE_MIN = 10, BOARD_IMAGE_TILE_MAX = 200;
+function boardImageFitLabel(id){
+  for (const fit of BOARD_IMAGE_FITS) if (fit.id === id) return fit.label;
+  return BOARD_IMAGE_FITS[0].label;
+}
+/* 배경 그림 설정을 늘 같은 모양으로 맞춘다.
+   src 는 data URL 만 받는다 — 바깥 주소를 그대로 두면 자동복원 스냅샷이 그 주소에 매여,
+   인터넷이 없는 다음 수업에서 빈 칸으로 되살아난다(이미지 항목과 같은 규칙).
+   x·y·w·h 는 넣을 때 정한 보드 좌표 상자다. 창 크기(W·H)에 맞춰 매번 다시 계산하면
+   창을 줄일 때 그림만 늘었다 줄고 그 위에 쓴 판서는 그대로라 주석이 그림에서 어긋난다. */
+function normalizeBoardImage(value){
+  if (!value || typeof value !== "object") return null;
+  const src = typeof value.src === "string" && /^data:image\//i.test(value.src) ? value.src : "";
+  if (!src) return null;
+  const num = (raw, fallback) => {
+    const n = (raw == null || String(raw).trim() === "") ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const fit = BOARD_IMAGE_FITS.some((f) => f.id === value.fit) ? value.fit : "cover";
+  const out = {
+    src, fit,
+    opacity: Math.max(.05, Math.min(1, num(value.opacity, 1))),
+    x: num(value.x, 0), y: num(value.y, 0),
+    w: Math.max(1, num(value.w, 1)), h: Math.max(1, num(value.h, 1))
+  };
+  // 타일 칸 크기는 상자와 성질이 달라(어디에 놓느냐가 아니라 얼마나 촘촘하냐) 따로 담는다.
+  if (fit === "tile"){
+    out.tile = Math.round(Math.max(BOARD_IMAGE_TILE_MIN, Math.min(BOARD_IMAGE_TILE_MAX, num(value.tile, 50))));
+  }
+  return out;
+}
+// 고른 맞춤 방식과 지금 보이는 화면(area)으로 그림이 놓일 상자를 정한다. "화면에 맞추기"도 이걸 다시 부른다.
+function boardImageBox(fit, area, naturalW, naturalH){
+  const nw = Math.max(1, Number(naturalW) || 1), nh = Math.max(1, Number(naturalH) || 1);
+  const cx = area.x + area.w / 2, cy = area.y + area.h / 2;
+  // 타일은 어디에 놓느냐가 아니라 한 칸이 얼마나 크냐의 문제라 원본 크기를 그대로 들고 간다.
+  if (fit === "actual" || fit === "tile") return { x:Math.round(cx - nw / 2), y:Math.round(cy - nh / 2), w:nw, h:nh };
+  if (fit === "contain"){
+    const scale = Math.min(area.w / nw, area.h / nh);
+    const w = nw * scale, h = nh * scale;
+    return { x:Math.round(cx - w / 2), y:Math.round(cy - h / 2), w:Math.round(w), h:Math.round(h) };
+  }
+  return { x:Math.round(area.x), y:Math.round(area.y), w:Math.round(area.w), h:Math.round(area.h) };
+}
+// 무늬 색 "자동" — 배경색과 대비가 큰 쪽을 고른다(흰 종이엔 짙은 선, 칠판엔 밝은 선).
+function boardPatternAutoColor(bg){
+  const background = normalizeBoardBg(bg);
+  return colorContrastRatio("#ffffff", background) >= colorContrastRatio("#111111", background) ? "#ffffff" : "#1f2937";
+}
+function boardPatternInkColor(pattern, bg){
+  return (pattern && normalizeHexColor(pattern.color)) || boardPatternAutoColor(bg);
+}
 // 어두운 배경으로 바꾸면 검정 펜은 그은 자리가 보이지 않는다. 대비가 너무 낮을 때 바꿔 줄 펜 색을
 // 돌려준다(지금 색으로 충분하면 ""). 기준 2.2 는 코드 색 설정의 대비 경고와 같은 값이다.
 function boardInkForBackground(bg, ink){
@@ -319,6 +428,9 @@ const DEFAULT_APP_SETTINGS = {
   petFocus: { enabled: true, focusMin: 25, breakMin: 5, quietTyping: true },
   toolVisibility: {},   // 도구막대 버튼 노출/숨김({} = 전부 노출) — TOGGLEABLE_TOOLS 참고
   boardBg: BOARD_BG_DEFAULT,   // 새 화이트보드의 기본 배경색 — BOARD_BG_PRESETS 참고(보드별 색은 스냅샷에 따로 저장)
+  boardPattern: null,          // 새 화이트보드의 기본 배경 무늬(BOARD_PATTERNS) — null 이면 무늬 없음
+  // 배경 그림은 설정에 두지 않는다 — 사진 한 장이 설정 파일(localStorage)에 눌러앉으면
+  // 모든 새 보드가 그 사진으로 열리고, 지우기 전까지 용량도 계속 차지한다. 보드마다 따로 고른다.
   codeColors: {},       // 구문 강조 색({} = 기본 팔레트) — { light:{…}, dark:{…} }, CODE_COLOR_DEFS 참고
   mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
   shortcutDefaultsVersion: 2,
@@ -470,7 +582,7 @@ let appSettings = (() => {
     const saved = migrateAppSettings(parsed);
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
-    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), mapSearchProvider:normalizeMapSearchProvider(saved.mapSearchProvider), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), mapSearchProvider:normalizeMapSearchProvider(saved.mapSearchProvider), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), boardPattern:normalizeBoardPattern(saved.boardPattern), shortcuts:normalizeShortcutMap(saved.shortcuts) };
     if (migrationChanged) localStorage.setItem("classDockSettings", JSON.stringify(loaded));
     return loaded;
   }
@@ -478,7 +590,7 @@ let appSettings = (() => {
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), mapSearchProvider:normalizeMapSearchProvider(merged.mapSearchProvider), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), mapSearchProvider:normalizeMapSearchProvider(merged.mapSearchProvider), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), boardPattern:normalizeBoardPattern(merged.boardPattern), shortcuts:normalizeShortcutMap(merged.shortcuts) };
   try { localStorage.setItem("classDockSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }

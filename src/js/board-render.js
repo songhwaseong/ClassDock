@@ -5,15 +5,144 @@
    되감아 보는 재생 화면이 판서할 때와 픽셀 단위로 일치하도록 한다.
    좌표는 모두 CSS px 기준(캔버스 리사이즈와 무관). 새 라이브러리 없이 canvas 2d 만 사용. */
 
-// 항목 종류별 선/색/투명도 상태를 ctx 에 반영. 지우개는 배경색(bg)으로 덮어 그린다.
+/* 항목 종류별 선/색/투명도 상태를 ctx 에 반영.
+   지우개는 예전처럼 배경색으로 덧칠하지 않고 destination-out 으로 진짜 뚫는다 — 배경이 단색이
+   아니라 무늬(모눈·오선)일 수도 있어, 덧칠하면 지운 자리에 단색 얼룩이 남기 때문이다.
+   그 대신 배경은 맨 나중에 paintBackground 로 "밑에 깐다"(그리는 쪽 순서가 중요하다). */
 const MNBoardRenderer = (() => {
-function applyStroke(ctx, it, bg){
+function applyStroke(ctx, it){
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.setLineDash(Array.isArray(it.dash) ? it.dash : []);
   ctx.lineWidth = Number(it.width) || 1; ctx.strokeStyle = it.color || "#111111"; ctx.fillStyle = it.color || "#111111";
   ctx.globalAlpha = (it.type === "highlighter") ? 0.30 : 1;
-  if (it.type === "eraser"){ ctx.strokeStyle = bg; ctx.globalAlpha = 1; }
+  if (it.type === "eraser"){
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.strokeStyle = "#000000"; ctx.fillStyle = "#000000"; ctx.globalAlpha = 1;
+  }
   if (Number.isFinite(it.alpha)) ctx.globalAlpha *= Math.max(0, Math.min(1, it.alpha));
+}
+
+// ----- 배경(색 + 무늬) -----
+// 무늬 설정 정규화는 state.js 가 갖고 있다. 이 파일만 단독으로 불러 쓰는 테스트를 위해 없을 때도 견딘다.
+function normalizePattern(value){
+  if (typeof normalizeBoardPattern === "function") return normalizeBoardPattern(value);
+  return (value && typeof value === "object" && value.id && value.id !== "none") ? value : null;
+}
+function patternInk(pattern, bg){
+  if (typeof boardPatternInkColor === "function") return boardPatternInkColor(pattern, bg);
+  return (pattern && pattern.color) || "#1f2937";
+}
+/* 무늬 한 판. area 는 "지금 화면에 보이는 보드 좌표 사각형"이고, 칸은 언제나 보드 원점(0,0)에
+   맞춰 깔린다 — 창 크기를 바꾸면 보이는 칸 수만 늘고 줄 뿐, 이미 쓴 판서와 칸이 어긋나지 않는다.
+   선은 한 번의 stroke() 로 모아 긋는다. 나눠 그으면 교차점마다 알파가 겹쳐 점이 찍힌 것처럼 보인다. */
+function drawPattern(ctx, pattern, area, bg){
+  const size = Math.max(4, Number(pattern.size) || 40);
+  const x0 = area.x, y0 = area.y, x1 = area.x + area.w, y1 = area.y + area.h;
+  const start = (from, step) => Math.floor(from / step) * step;
+  const hair = Math.max(1, size / 40);   // 간격이 좁은 무늬(오선)도 선이 사라지지 않게 최소 굵기를 둔다
+  ctx.save();
+  ctx.globalAlpha = Math.max(.05, Math.min(1, Number(pattern.opacity) || .3));
+  ctx.strokeStyle = ctx.fillStyle = patternInk(pattern, bg);
+  ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.lineJoin = "miter"; ctx.lineWidth = hair;
+  // 1px 안팎의 가는 선을 정수 좌표에 그으면 두 픽셀에 반씩 걸려 뿌옇게 번진다 — 반 픽셀 밀어 또렷하게.
+  // (칸 위치가 반 픽셀 움직일 뿐이라 그 위에 쓴 판서와의 관계는 그대로다.)
+  const crisp = hair <= 1.2 ? .5 : 0;
+  const columns = (step, top, bottom) => { for (let x = start(x0, step); x <= x1; x += step){ ctx.moveTo(x + crisp, top); ctx.lineTo(x + crisp, bottom); } };
+  const rows = (step, left, right) => { for (let y = start(y0, step); y <= y1; y += step){ ctx.moveTo(left, y + crisp); ctx.lineTo(right, y + crisp); } };
+  if (pattern.id === "grid" || pattern.id === "graph"){
+    ctx.beginPath(); columns(size, y0, y1); rows(size, x0, x1); ctx.stroke();
+    if (pattern.id === "grid"){
+      // 다섯 칸마다 굵은 선 — 눈금을 세지 않고도 길이를 읽을 수 있다.
+      ctx.lineWidth = hair * 1.9; ctx.beginPath(); columns(size * 5, y0, y1); rows(size * 5, x0, x1); ctx.stroke();
+    } else {
+      // 축은 무늬보다 진하게. 같은 농도면 원점이 격자에 묻혀 좌표평면 구실을 못 한다.
+      const ox = Number.isFinite(Number(pattern.originX)) ? Number(pattern.originX) : (x0 + x1) / 2;
+      const oy = Number.isFinite(Number(pattern.originY)) ? Number(pattern.originY) : (y0 + y1) / 2;
+      ctx.globalAlpha = Math.min(1, ctx.globalAlpha * 2.4); ctx.lineWidth = hair * 2.4;
+      ctx.beginPath(); ctx.moveTo(x0, oy); ctx.lineTo(x1, oy); ctx.moveTo(ox, y0); ctx.lineTo(ox, y1); ctx.stroke();
+    }
+  } else if (pattern.id === "dots"){
+    const r = Math.max(.9, size / 20);
+    ctx.beginPath();
+    for (let x = start(x0, size); x <= x1; x += size){
+      for (let y = start(y0, size); y <= y1; y += size){ ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, Math.PI * 2); }
+    }
+    ctx.fill();
+  } else if (pattern.id === "lines"){
+    ctx.beginPath(); rows(size, x0, x1); ctx.stroke();
+  } else if (pattern.id === "staff"){
+    // 다섯 줄이 한 단, 단 사이는 넉넉히 띄운다(가사·화음 적을 자리).
+    const period = size * 9;
+    ctx.beginPath();
+    for (let top = start(y0 - size * 4, period); top <= y1; top += period){
+      for (let i = 0; i < 5; i++){ const y = top + i * size + crisp; if (y >= y0 - size && y <= y1 + size){ ctx.moveTo(x0, y); ctx.lineTo(x1, y); } }
+    }
+    ctx.stroke();
+  } else if (pattern.id === "cells"){
+    // 원고지: 네모 칸 줄이 이어지고 줄과 줄 사이에 손글씨가 삐져나갈 여백을 둔다.
+    const gap = Math.max(6, Math.round(size * .42)), period = size + gap;
+    ctx.beginPath();
+    for (let top = start(y0 - size, period); top <= y1; top += period){
+      const bottom = top + size;
+      if (bottom < y0 || top > y1) continue;
+      ctx.moveTo(x0, top + crisp); ctx.lineTo(x1, top + crisp); ctx.moveTo(x0, bottom + crisp); ctx.lineTo(x1, bottom + crisp);
+      columns(size, top, bottom);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+/* 배경 그림 한 장. 상자(x·y·w·h)는 넣을 때 정해 둔 보드 좌표라 창 크기를 바꿔도 판서와 어긋나지 않는다.
+   "채움"은 상자가 화면 비율이라 그림을 잘라 채우고(원본 비율 유지), "맞춤·원본"은 상자 자체가
+   이미 그림 비율이라 그대로 펼친다. 아직 안 불러온 그림은 건너뛴다 — 다 불러오면 다시 그린다. */
+function drawBackgroundImage(ctx, image, area){
+  const img = image && image.img;
+  if (!img || !img.complete || !img.naturalWidth) return;
+  const x = Number(image.x) || 0, y = Number(image.y) || 0;
+  const w = Math.max(1, Number(image.w) || 1), h = Math.max(1, Number(image.h) || 1);
+  ctx.save();
+  ctx.globalAlpha = Math.max(.05, Math.min(1, Number(image.opacity) || 1));
+  if (image.fit === "tile" && area){
+    // 무늬와 같은 규칙 — 칸은 보드 원점(0,0)에 맞춰 반복된다. createPattern 은 지금 변환을
+    // 그대로 따르므로 확대·이동해도 판서와 함께 움직인다.
+    const tile = Math.max(.1, (Number(image.tile) || 50) / 100);
+    const pattern = ctx.createPattern(img, "repeat");
+    if (pattern){
+      if (tile !== 1 && typeof DOMMatrix === "function" && typeof pattern.setTransform === "function"){
+        try { pattern.setTransform(new DOMMatrix().scaleSelf(tile, tile)); } catch(_){}
+      }
+      ctx.fillStyle = pattern;
+      ctx.fillRect(area.x, area.y, area.w, area.h);
+    }
+  } else if (image.fit === "cover"){
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    const scale = Math.max(w / nw, h / nh);            // 짧은 쪽을 채우는 배율 → 긴 쪽이 넘쳐 잘린다
+    const sw = Math.min(nw, w / scale), sh = Math.min(nh, h / scale);
+    ctx.drawImage(img, (nw - sw) / 2, (nh - sh) / 2, sw, sh, x, y, w, h);
+  } else {
+    ctx.drawImage(img, x, y, w, h);
+  }
+  ctx.restore();
+}
+/* 배경은 "먼저 칠하는 것"이 아니라 "맨 나중에 밑에 까는 것"이다(destination-over).
+   지우개(destination-out)가 판서만 지우고 배경은 남기려면 이 순서여야 한다 — 먼저 칠해 두면
+   지우개가 배경까지 뚫어 내보낸 PNG 에 구멍이 남는다. 호출 시점의 변환(확대·이동)은 보드 좌표계로,
+   area 는 그 좌표계에서 캔버스 전체가 덮이는 사각형이어야 한다. */
+function paintBackground(ctx, area, opts){
+  opts = opts || {};
+  const bg = opts.bg || "#ffffff";
+  const pattern = normalizePattern(opts.pattern);
+  ctx.save();
+  // destination-over 는 "밑에 깔기"라 그리는 차례가 곧 아래로 쌓이는 차례다.
+  // 화면에서 보이는 위아래는 색 → 그림 → 무늬 → 판서 순(무늬는 사진 위에 얹혀야 눈금 구실을 한다).
+  ctx.globalCompositeOperation = "destination-over";
+  if (pattern) drawPattern(ctx, pattern, area, bg);
+  ctx.globalCompositeOperation = "destination-over";
+  if (opts.image) drawBackgroundImage(ctx, opts.image, area);
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.fillStyle = bg;
+  ctx.fillRect(area.x, area.y, area.w, area.h);
+  ctx.restore();
 }
 
 function drawArrowHead(ctx, x1, y1, x2, y2, w){
@@ -27,6 +156,7 @@ function drawArrowHead(ctx, x1, y1, x2, y2, w){
 // 항목 하나를 그린다.
 // limit: 펜/형광펜/지우개 스트로크에서 그릴 점 개수 상한(재생 시 획이 "그려지는" 성장 애니메이션용).
 //        null/undefined 면 전체를 그린다.
+// bg: 지우개가 배경색 덧칠이던 시절의 인자. 지금은 쓰지 않지만 호출부가 자리로 넘기고 있어 그대로 둔다.
 function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false){
   if (!it) return;
   if (it.type === "group"){
@@ -42,7 +172,7 @@ function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false
     }
     ctx.restore(); ctx.globalAlpha = 1; return;
   }
-  applyStroke(ctx, it, bg);
+  applyStroke(ctx, it);
   if (it.type === "pen" || it.type === "highlighter" || it.type === "eraser"){
     const p = it.points; if (!p || !p.length){ ctx.globalAlpha = 1; return; }
     const n = (limit == null) ? p.length : Math.max(1, Math.min(p.length, limit));
@@ -94,6 +224,8 @@ function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false
     }
   }
   ctx.globalAlpha = 1;
+  // 지우개가 켜 둔 destination-out 을 여기서 반드시 되돌린다 — 남으면 다음 항목이 화면을 갉아먹는다.
+  ctx.globalCompositeOperation = "source-over";
 }
 
 // 항목 배열을 순서대로 그린다(재생용). opts.lastLimit 이 있으면 마지막 항목만 부분(획 성장)으로 그린다.
@@ -104,6 +236,7 @@ function drawItems(ctx, items, opts){
     const isLast = (i === items.length - 1);
     drawItem(ctx, items[i], bg, (isLast ? opts.lastLimit : null));
   }
+  ctx.globalCompositeOperation = "source-over";
 }
 
 const SELECTABLE_TYPES = new Set(["image", "line", "arrow", "rect", "ellipse", "polyline", "text", "group"]);
@@ -218,5 +351,5 @@ function ungroupItem(group, measureText){
   return group.items.map(scaleOne);
 }
 
-return Object.freeze({ applyStroke, drawItem, drawItems, isSelectable, itemBounds, hitTestItem, translateItem, ungroupItem });
+return Object.freeze({ applyStroke, drawItem, drawItems, paintBackground, drawPattern, drawBackgroundImage, isSelectable, itemBounds, hitTestItem, translateItem, ungroupItem });
 })();

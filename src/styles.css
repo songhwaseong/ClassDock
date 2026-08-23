@@ -2116,6 +2116,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .board-bg-choice:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .board-bg-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
   .board-bg-custom{width:26px;height:26px}
+  .board-pattern-select{height:28px;max-width:120px;padding:0 6px;border:1px solid var(--border);border-radius:7px;
+    background:var(--panel);color:var(--ink);font-size:12.5px}
+  .board-bg-options{flex-wrap:wrap;justify-content:flex-end}
   .settings-check input{align-self:flex-start;margin-top:2px;flex:0 0 auto}
   /* 지도 검색 API 키 — 공급자 선택만 브라우저 설정에 남고 키 입력은 로컬 런처로 바로 보낸다. */
   .map-search-settings[hidden]{display:none}
@@ -2450,12 +2453,13 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-textinput{position:absolute;z-index:5;min-width:80px;background:var(--wb-textbg,rgba(255,255,255,.9));border:1px dashed var(--accent);
     border-radius:4px;padding:2px 4px;font-family:system-ui,"Malgun Gothic",sans-serif;line-height:1.25;resize:both;outline:none;overflow:hidden}
   .wb-textinput::placeholder{color:currentColor;opacity:.55}
-  /* ── 보드 배경색 고르기 ── */
+  /* ── 보드 배경(색 + 무늬) 고르기 ── */
   .wb-bg-toggle{padding:0 7px}
   .wb-bg-dot{width:15px;height:15px;border-radius:4px;display:block;pointer-events:none;
     box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 32%,transparent)}
   .wb-bg-toggle.active .wb-bg-dot{box-shadow:inset 0 0 0 1px rgba(255,255,255,.7)}
-  .wb-bg-panel{position:absolute;z-index:12;left:12px;top:12px;width:min(250px,calc(100% - 24px));
+  /* 무늬 칸까지 들어가 길어졌다 — 낮은 화면에서는 창 자체가 스크롤해 아래쪽 조절칸까지 닿게 한다 */
+  .wb-bg-panel{position:absolute;z-index:12;left:12px;top:12px;width:min(286px,calc(100% - 24px));max-height:calc(100% - 24px);overflow-y:auto;
     display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:12px;
     background:var(--panel);color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.22)}
   .wb-bg-panel[hidden]{display:none}
@@ -2468,6 +2472,38 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-bg-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
   .wb-bg-custom{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px}
   .wb-bg-hint{margin:0;color:var(--muted);font-size:11.5px;line-height:1.45}
+  .wb-bg-section{color:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.02em;margin-top:2px}
+  .wb-bg-patterns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+  /* 무늬 칩은 축소판 + 이름. 축소판은 보드와 같은 그리기 코드로 그려 골라 본 결과와 어긋나지 않는다. */
+  .wb-bg-pattern{display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;height:auto;
+    border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);font-size:10.5px;line-height:1.2;cursor:pointer}
+  .wb-bg-pattern:hover{transform:translateY(-1px)}
+  .wb-bg-pattern:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wb-bg-pattern[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
+  .wb-bg-pattern-thumb{display:block;border-radius:5px;border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);pointer-events:none}
+  .wb-bg-pattern-details{display:flex;flex-direction:column;gap:7px}
+  .wb-bg-pattern-details[hidden]{display:none}
+  .wb-bg-range{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink)}
+  .wb-bg-range>span{flex:0 0 40px;color:var(--muted);font-size:11.5px}
+  .wb-bg-range input[type="range"]{flex:1 1 auto;min-width:0;accent-color:var(--accent)}
+  .wb-bg-pattern-colors{display:flex;flex-wrap:wrap;gap:6px}
+  .wb-bg-pattern-color{width:26px;height:26px;padding:0;border:1px solid var(--border);border-radius:7px;cursor:pointer;
+    font-size:11px;font-weight:700;color:var(--muted);background:var(--panel)}
+  .wb-bg-pattern-color:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wb-bg-pattern-color[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
+  .wb-bg-image-actions{display:flex;gap:7px}
+  .wb-bg-image-btn{flex:1 1 auto;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:8px;
+    background:var(--panel);color:var(--ink);font-size:12px;cursor:pointer}
+  .wb-bg-image-btn:hover:not(:disabled){border-color:var(--accent)}
+  .wb-bg-image-btn:disabled{opacity:.45;cursor:default}
+  .wb-bg-image-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wb-bg-refit{width:100%}
+  .wb-bg-fits{display:flex;gap:6px}
+  .wb-bg-fit{flex:1 1 0;height:28px;padding:0 6px;border:1px solid var(--border);border-radius:8px;
+    background:var(--panel);color:var(--ink);font-size:12px;cursor:pointer}
+  .wb-bg-fit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wb-bg-fit[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);font-weight:700;
+    box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}
   .wb-edu-toggle{font-size:20px;font-family:Georgia,"Times New Roman",serif;font-weight:700;line-height:1}
   .wb-edu-toggle.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* 창보다 내용이 길어지면(작은 화면·칸이 많은 도구) 창 자체가 스크롤해 아래쪽 단추까지 닿게 한다 */
@@ -5866,6 +5902,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .concept-btn,.study-btn{min-height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--text);padding:5px 10px;font:inherit;cursor:pointer}.concept-btn:hover,.study-btn:hover{border-color:var(--accent);color:var(--accent)}.concept-btn:disabled,.study-btn:disabled{opacity:.38;cursor:default}
   .concept-primary,.study-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:750}.concept-primary:hover,.study-primary:hover{background:var(--accent-d);color:#fff}.concept-animation{min-height:32px;max-width:148px;padding-block:5px}.concept-zoom-tools{display:flex;align-items:center}.concept-zoom-tools .concept-btn{min-width:31px;padding-inline:7px;border-radius:0}.concept-zoom-tools .concept-btn:first-child{border-radius:7px 0 0 7px}.concept-zoom-tools .concept-btn:nth-child(2){min-width:57px;margin-left:-1px;font-size:12px;font-variant-numeric:tabular-nums}.concept-zoom-tools .concept-btn:last-child{margin-left:-1px;border-radius:0 7px 7px 0}.concept-build-start{border-color:#7c3aed;color:#7c3aed;font-weight:750}.concept-build-start:hover{border-color:#6d28d9!important;color:#6d28d9!important}
   .concept-viewport{position:relative;flex:1;min-height:0;overflow:auto;overflow-anchor:none;background-color:var(--bg);background-image:radial-gradient(color-mix(in srgb,var(--muted) 25%,transparent) 1px,transparent 1px);background-size:22px 22px}
+  /* 손바닥 이동: 옮길 여유가 있을 때만 grab, 끄는 중엔 grabbing */
+  .concept-viewport.is-pannable{cursor:grab}
+  .concept-viewport.is-panning,.concept-viewport.is-panning *{cursor:grabbing!important;user-select:none!important}
   .concept-zoom-space{position:relative;min-width:100%;min-height:100%}.concept-stage{position:absolute;left:0;top:0;transform-origin:top left}.concept-lines,.concept-cards{position:absolute;inset:0;width:100%;height:100%}.concept-lines{z-index:1;overflow:visible}.concept-cards{z-index:2;pointer-events:none}
   .concept-edge-path{fill:none;stroke:#64748b;stroke-width:2.5;pointer-events:stroke;cursor:pointer}.concept-edge-path.is-compare,.concept-edge-path.is-related{stroke-dasharray:7 5}.concept-edge-path.is-support{stroke:#0d9488}.concept-edge-label{fill:var(--ink);font-size:13px;font-weight:700;text-anchor:middle;paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round;pointer-events:auto;cursor:pointer}.concept-lines marker path{fill:#64748b}[data-theme="dark"] .concept-edge-label{fill:#f8fafc;stroke:#0b1120}
   .concept-card{--concept-color:#2563eb;position:absolute;width:230px;min-height:130px;max-height:168px;overflow:hidden;padding:10px 12px 12px;border:1px solid color-mix(in srgb,var(--concept-color) 45%,var(--border));border-top:5px solid var(--concept-color);border-radius:14px;background:var(--panel);box-shadow:0 9px 25px #0002;pointer-events:auto;cursor:grab;user-select:none;transition:opacity .16s,border-color .16s,box-shadow .16s}

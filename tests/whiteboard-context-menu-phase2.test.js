@@ -55,7 +55,7 @@ test("빈 공간 메뉴는 삽입·배경·배율·집중 도구·전체 지우�
   assert.match(source, /const contextBoardSection=makeContextSection\("보드 작업"/);
   assert.match(source, /contextAction\("이미지"[\s\S]{0,100}openImageFilePicker/);
   assert.match(source, /contextAction\("수학·과학"[\s\S]{0,120}toggleEducationPanel\(true\)/);
-  assert.match(source, /contextAction\("배경색"[\s\S]{0,100}toggleBackgroundPanel\(true\)/);
+  assert.match(source, /contextAction\("배경"[\s\S]{0,100}toggleBackgroundPanel\(true\)/);
   assert.match(source, /contextAction\("100%"[\s\S]{0,100}resetView/);
   assert.match(source, /contextAction\("집중 도구"[\s\S]{0,120}toggleFocusPanel\(true\)/);
   assert.match(source, /contextAction\("전체 지우기"[\s\S]{0,140}confirmClearAll/);

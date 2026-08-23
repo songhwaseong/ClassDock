@@ -722,6 +722,23 @@ function defaultBoardBg(){
   } catch(_){}
   return "#ffffff";
 }
+// 새 보드를 열 때 쓸 배경 무늬(설정값). 배경색과 마찬가지로 "새 보드"에만 쓰고 기존 보드는 건드리지 않는다.
+function defaultBoardPattern(){
+  try {
+    if (typeof normalizeBoardPattern === "function" && typeof appSettings === "object" && appSettings) return normalizeBoardPattern(appSettings.boardPattern);
+  } catch(_){}
+  return null;
+}
+// 스냅샷에 담긴 배경 무늬. 무늬가 없던 시절의 스냅샷·손상된 값은 모두 "무늬 없음"(null)이다.
+function boardSnapshotPattern(value){
+  if (typeof normalizeBoardPattern === "function") return normalizeBoardPattern(value);
+  return (value && typeof value === "object" && value.id && value.id !== "none") ? { ...value } : null;
+}
+// 스냅샷에 담긴 배경 그림. data URL 이 아닌 값(바깥 주소·손상)은 그림 없음으로 떨어뜨린다.
+function boardSnapshotImage(value){
+  if (typeof normalizeBoardImage === "function") return normalizeBoardImage(value);
+  return (value && typeof value === "object" && /^data:image\//i.test(String(value.src || ""))) ? { ...value } : null;
+}
 // 스냅샷에 담긴 배경색. 배경색이 없던 시절의 스냅샷은 흰 종이에 그린 것이므로 흰색으로 되살린다
 // (지금 설정한 기본색을 씌우면 그때 쓴 검정 펜이 사라져 보인다).
 function boardSnapshotBg(value){
@@ -737,7 +754,7 @@ function validBoardSnapshot(saved){
 function boardStateFromSnapshot(saved){
   const snapshot = validBoardSnapshot(saved);
   if (!snapshot) return null;
-  return { tool:"pen", color:"#111111", width:4, textSize:normalizeWhiteboardTextSize(snapshot.textSize), bg:boardSnapshotBg(snapshot.bg), items:snapshot.items, selected:null };
+  return { tool:"pen", color:"#111111", width:4, textSize:normalizeWhiteboardTextSize(snapshot.textSize), bg:boardSnapshotBg(snapshot.bg), bgPattern:boardSnapshotPattern(snapshot.bgPattern), bgImage:boardSnapshotImage(snapshot.bgImage), items:snapshot.items, selected:null };
 }
 // 메모 에셋과 자동복원본이 모두 있으면 더 최근 스냅샷을 쓴다. 예전 스냅샷처럼 시각이
 // 없거나 같으면 메모에 확정 저장된 supplied 쪽을 우선해 낡은 복구본이 덮어쓰지 않게 한다.
@@ -790,7 +807,7 @@ function renderWhiteboard(doc, host){
   // wb: 보드 상태(전역 active 문서 변수 state 와 헷갈리지 않게 이름 분리)
   // 탭을 다시 그려도 판서 모델을 문서에 붙여 유지한다. 저장 전 변경은 공통
   // 문서 상태에 전달돼 탭 닫기·새로고침 때도 놓치지 않는다.
-  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, textSize:16, items: [], bg: defaultBoardBg(), selected: null });
+  const wb = doc.boardState || (doc.boardState = { tool: "pen", color: "#111111", width: 4, textSize:16, items: [], bg: defaultBoardBg(), bgPattern: defaultBoardPattern(), bgImage: null, selected: null });
   wb.textSize = normalizeWhiteboardTextSize(wb.textSize);
   // 화면 배율과 이동량은 판서 데이터가 아닌 탭별 보기 상태다. 저장·메모·리플레이에는 넣지 않는다.
   const view = doc.boardView || (doc.boardView = { scale:1, x:0, y:0 });
@@ -827,12 +844,15 @@ function renderWhiteboard(doc, host){
   const screenPoint = (e) => { const r = canvas.getBoundingClientRect(); return { x:e.clientX-r.left, y:e.clientY-r.top }; };
   const boardPointFromScreen = (p) => ({ x:(p.x-view.x)/view.scale, y:(p.y-view.y)/view.scale });
   const visibleBoardCenter = () => boardPointFromScreen({ x:W/2, y:H/2 });
-  let boardRecoveryTimer = 0;
+  let boardRecoveryTimer = 0, boardRecoveryWarned = false;
   // 저장·전송 공용 직렬화: <img> 객체는 못 담으므로 data URL(src)만 남긴다.
   const boardSnapshot = () => (syncMeasureItems(), {
     version:1,
     savedAt:Date.now(),
     bg:wb.bg,
+    bgPattern:wb.bgPattern,
+    // 그림은 <img> 객체를 못 담는다 — 항목 이미지와 같이 data URL(src)만 남긴다.
+    bgImage:wb.bgImage ? { ...wb.bgImage, img:undefined } : null,
     textSize:wb.textSize,
     items:wb.items.map(item => {
       const copy = { ...item };
@@ -844,9 +864,17 @@ function renderWhiteboard(doc, host){
     clearTimeout(boardRecoveryTimer); boardRecoveryTimer = 0;
     try {
       localStorage.setItem(boardRecoveryKey(doc.boardRecoveryName || doc.name), JSON.stringify(boardSnapshot()));
+      boardRecoveryWarned = false;
       return true;
     } catch(error){
       console.warn("whiteboard recovery snapshot skipped:", error);
+      /* 여기 걸리는 건 대부분 localStorage 용량(≈5MB)이다 — 배경 사진·붙여넣은 그림이 많으면 넘는다.
+         조용히 넘기면 "탭을 닫았다 열면 판서가 그대로"라는 약속이 소리 없이 깨지므로 한 번은 알린다.
+         한 번만: 획을 그을 때마다 시도하므로 알림이 쌓이면 판서를 못 한다. */
+      if (!boardRecoveryWarned){
+        boardRecoveryWarned = true;
+        if (typeof toast === "function") toast("내용이 커서 자동복원본을 남기지 못했어요. 탭을 닫기 전에 PNG 로 저장해 두세요.", 4200, { type:"error" });
+      }
       return false;
     }
   };
@@ -867,7 +895,7 @@ function renderWhiteboard(doc, host){
     translateItem: translateBoardItem,
     ungroupItem: ungroupBoardItem
   } = MNBoardRenderer;
-  const applyStroke = (it) => applyBoardStroke(ctx, it, wb.bg);
+  const applyStroke = (it) => applyBoardStroke(ctx, it);
   const drawItem = (it) => drawBoardItem(ctx, it, wb.bg);
   const measureBoardText = (line, fontSize) => {
     ctx.save(); ctx.font = fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
@@ -882,7 +910,7 @@ function renderWhiteboard(doc, host){
   const recordCommit = () => {
     syncMeasureItems();
     scheduleBoardRecovery();
-    if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }); } catch(_){} }
+    if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage }); } catch(_){} }
   };
   const HANDLE = 12;                                  // 크기조절 핸들 한 변 크기(클릭 판정에도 사용)
   // 8방향 핸들: hx/hy ∈ {0=왼/위, 0.5=가운데, 1=오른/아래}. 가운데(0.5,0.5) 제외.
@@ -903,12 +931,35 @@ function renderWhiteboard(doc, host){
   // 흰 테두리가 번쩍이고, 텍스트 입력칸이 흰 상자로 남으면 어두운 배경에 흰 글씨를 칠 때 글자가 안 보인다.
   // CSS 변수 하나로 셋을 같이 움직인다.
   wb.bg = boardSnapshotBg(wb.bg);
+  wb.bgPattern = boardSnapshotPattern(wb.bgPattern);
+  wb.bgImage = boardSnapshotImage(wb.bgImage);
   const applyBoardBackground = () => {
     const [r, g, b] = [1, 3, 5].map(i => parseInt(wb.bg.slice(i, i + 2), 16));
     wrap.style.setProperty("--wb-bg", wb.bg);
     wrap.style.setProperty("--wb-textbg", `rgba(${r},${g},${b},.88)`);
   };
   applyBoardBackground();
+  // 지금 화면에 보이는 보드 좌표 사각형 = 무늬를 깔 범위(캔버스 전체). 반올림으로 가장자리 한 줄이
+  // 비지 않도록 조금 넉넉히 잡는다.
+  const visibleBoardArea = () => {
+    const scale = view.scale || 1, pad = 2 / scale;
+    return { x:-view.x / scale - pad, y:-view.y / scale - pad, w:W / scale + pad * 2, h:H / scale + pad * 2 };
+  };
+  /* 배경(색+무늬)은 판서를 다 그린 뒤 "밑에 깐다". 먼저 칠하면 지우개(destination-out)가 배경까지
+     뚫어 내보낸 PNG 에 구멍이 남는다. 캔버스 변환은 보드 좌표계인 상태로 부른다. */
+  const paintBoardBackground = () => {
+    MNBoardRenderer.paintBackground(ctx, visibleBoardArea(), { bg:wb.bg, pattern:wb.bgPattern, image:wb.bgImage });
+  };
+  /* 배경 그림은 스냅샷에 src(data URL)만 있으므로 <img> 로 되살린 뒤에야 그려진다.
+     항목 이미지의 restoreBoardImages 와 같은 방식 — 다 불러오면 한 번 다시 그린다. */
+  const restoreBoardBackgroundImage = () => {
+    const image = wb.bgImage;
+    if (!image || image.img || !image.src) return;
+    const img = new Image();
+    img.onload = () => { if (wb.bgImage === image){ image.img = img; redraw(); } };
+    img.onerror = () => { console.warn("whiteboard background image skipped"); };
+    img.src = image.src;
+  };
 
   /* ----- 교구(자·각도기·컴퍼스) -----
      교구는 판서 내용이 아니라 손에 든 도구다. items 에 넣지 않고 캔버스 위에 겹쳐 그리며,
@@ -1145,7 +1196,7 @@ function renderWhiteboard(doc, host){
 
   const redraw = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1; ctx.fillStyle = wb.bg; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, W, H);
     ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
     for (const it of wb.items){
       if (it === editingTextItem) continue;
@@ -1167,6 +1218,7 @@ function renderWhiteboard(doc, host){
       ctx.restore();
     }
     drawGear();
+    paintBoardBackground();                           // 판서·교구를 다 그린 뒤 맨 밑에 배경을 깐다
     if (groupActionBtn) groupActionBtn.disabled = !(s && s.type === "group");
     const canFlip = whiteboardCanFlipItem(s);
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
@@ -1835,7 +1887,11 @@ function renderWhiteboard(doc, host){
       // 지우개는 자에 붙이지 않는다 — 자 옆을 문지르는데 획이 모서리로 끌려가면 못 지운다.
       const p = cur.type === "eraser" ? raw : gearSnapPoint(raw);
       cur.points.push(p);
-      applyStroke(cur); ctx.beginPath(); ctx.moveTo(lastPt.x, lastPt.y); ctx.lineTo(p.x, p.y); ctx.stroke(); ctx.globalAlpha = 1;
+      applyStroke(cur); ctx.beginPath(); ctx.moveTo(lastPt.x, lastPt.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+      // 지우개는 덧칠이 아니라 뚫기다 — 뚫린 자리에 배경을 바로 다시 깔지 않으면 문지르는 동안
+      // 모눈·오선이 사라졌다가 손을 뗄 때(전체 redraw) 돌아오는 깜빡임이 보인다.
+      if (cur.type === "eraser") paintBoardBackground();
       lastPt = p;
     } else {
       const p = (cur.type === "line" || cur.type === "arrow") ? gearSnapEnd({ x:cur.x1, y:cur.y1 }, raw, e) : gearSnapPoint(raw);
@@ -2005,6 +2061,112 @@ function renderWhiteboard(doc, host){
       placeImage(img);
       return true;
     } catch(_){ return false; }
+  };
+  /* ----- 배경 그림 -----
+     넣을 때 반드시 다시 인코딩한다. 요즘 사진 한 장은 5~10MB 라, 원본을 그대로 스냅샷에 실으면
+     localStorage 자동복원본(≈5MB)이 그 한 장으로 꽉 차 "탭을 닫아도 판서가 그대로"가 깨진다.
+     칠판에 띄우는 용도라 긴 변 1600px 이면 충분하다. */
+  const boardImageMaxEdge = () => (typeof BOARD_IMAGE_MAX_EDGE !== "undefined" ? BOARD_IMAGE_MAX_EDGE : 1600);
+  const boardImageMaxChars = () => (typeof BOARD_IMAGE_MAX_CHARS !== "undefined" ? BOARD_IMAGE_MAX_CHARS : 2000000);
+  // JPEG 는 투명한 자리를 검게 칠한다 — 배경이 뚫린 그림(PNG·GIF·SVG)은 PNG 로 남겨야
+  // 보드 배경색이 비쳐 보인다. 사진(JPEG)은 스캔할 필요 없이 바로 JPEG.
+  const imageHasTransparency = (canvasEl, sourceType) => {
+    if (/^image\/(jpeg|jpg|bmp)$/i.test(String(sourceType || ""))) return false;
+    try {
+      const data = canvasEl.getContext("2d").getImageData(0, 0, canvasEl.width, canvasEl.height).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
+      return false;
+    } catch(_){ return true; }        // 읽지 못하면 안전한 쪽(PNG)으로
+  };
+  const encodeBoardBackgroundImage = (img, sourceType) => {
+    const nw = Math.max(1, img.naturalWidth || 1), nh = Math.max(1, img.naturalHeight || 1);
+    let scale = Math.min(1, boardImageMaxEdge() / Math.max(nw, nh));
+    const canvasEl = document.createElement("canvas");
+    let src = "", transparent = null;
+    // 사진이 크거나 결이 복잡해 한 번에 상한 아래로 안 내려오면 두 단계까지 더 줄인다.
+    for (let attempt = 0; attempt < 3; attempt++){
+      canvasEl.width = Math.max(1, Math.round(nw * scale));
+      canvasEl.height = Math.max(1, Math.round(nh * scale));
+      const c = canvasEl.getContext("2d");
+      c.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      c.drawImage(img, 0, 0, canvasEl.width, canvasEl.height);
+      if (transparent == null) transparent = imageHasTransparency(canvasEl, sourceType);
+      src = transparent ? canvasEl.toDataURL("image/png") : canvasEl.toDataURL("image/jpeg", attempt ? .72 : .82);
+      if (src.length <= boardImageMaxChars()) break;
+      scale *= .72;
+    }
+    return { src, width:canvasEl.width, height:canvasEl.height };
+  };
+  // 고른 맞춤 방식과 지금 보이는 화면으로 상자를 다시 잡는다("화면에 맞추기"도 이 길로 온다).
+  const boardImageBoxFor = (fit, naturalW, naturalH) => {
+    const area = visibleBoardArea();
+    if (typeof boardImageBox === "function") return boardImageBox(fit, area, naturalW, naturalH);
+    return { x:Math.round(area.x), y:Math.round(area.y), w:Math.round(area.w), h:Math.round(area.h) };
+  };
+  const setBackgroundImage = (next) => {
+    wb.bgImage = boardSnapshotImage(next);
+    restoreBoardBackgroundImage();
+    syncBackgroundImageControls();
+    redraw();
+    scheduleBoardRecovery();
+    if (doc.recorder && doc.recorder.active && typeof doc.recorder.setBackground === "function"){
+      doc.recorder.setBackground(wb.bg, { pattern:wb.bgPattern, image:wb.bgImage });
+    }
+  };
+  const applyBackgroundImageBlob = async (blob) => {
+    if (!blob || !/^image\//.test(blob.type || "")){
+      if (typeof toast === "function") toast("그림 파일만 배경으로 쓸 수 있어요.", 2200, { type:"error" });
+      return false;
+    }
+    try {
+      const img = await loadImageBlob(blob);
+      const encoded = encodeBoardBackgroundImage(img, blob.type);
+      if (!encoded.src) throw new Error("board-background-encode-failed");
+      const fit = (wb.bgImage && wb.bgImage.fit) || "cover";
+      const box = boardImageBoxFor(fit, encoded.width, encoded.height);
+      setBackgroundImage({ src:encoded.src, fit, opacity:(wb.bgImage && wb.bgImage.opacity) || 1, ...box });
+      if (typeof toast === "function") toast("배경 그림을 넣었어요. 판서가 잘 보이게 '흐리기'로 연하게 만들 수 있어요.", 3200);
+      return true;
+    } catch(error){
+      console.error(error);
+      if (typeof toast === "function") toast("배경 그림을 넣지 못했어요.", 2200, { type:"error" });
+      return false;
+    }
+  };
+  /* 보드에 올려 둔 그림을 배경으로 옮긴다. 복사가 아니라 옮기기다 — 똑같은 그림이 배경과 항목으로
+     겹쳐 있으면 어느 쪽을 잡고 있는지 알 수 없다. 항목이 사라지는 건 삭제와 같은 편집이라
+     되돌리기 단계로 남기고(배경 자체는 예전부터 되돌리기 대상이 아니다) 놓일 자리는
+     그림이 지금 있던 자리를 그대로 쓴다 — 배경으로 내려가며 위치가 튀지 않는다. */
+  const sendSelectedToBackground = async () => {
+    const item = wb.selected;
+    if (!item || item.type !== "image" || !item.src) return;
+    try {
+      const img = item.img && item.img.complete ? item.img : await loadBoardImageSource(item.src);
+      // 붙여넣은 그림은 원본 그대로라 클 수 있다 — 배경으로 갈 때도 같은 상한을 태운다.
+      const encoded = encodeBoardBackgroundImage(img, "");
+      if (!encoded.src) throw new Error("board-background-encode-failed");
+      wb.items = wb.items.filter((other) => other !== item);
+      wb.selected = null;
+      history.commit();
+      recordCommit();
+      setBackgroundImage({
+        src:encoded.src, fit:"actual", opacity:(wb.bgImage && wb.bgImage.opacity) || 1,
+        x:Math.round(item.x), y:Math.round(item.y), w:Math.round(item.w), h:Math.round(item.h)
+      });
+      if (typeof toast === "function") toast("그림을 배경으로 내렸어요. 이제 판서에 걸리지 않아요.", 2800);
+    } catch(error){
+      console.error(error);
+      if (typeof toast === "function") toast("배경으로 내리지 못했어요.", 2200, { type:"error" });
+    }
+  };
+  const pickBackgroundImage = () => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (file) applyBackgroundImageBlob(file);
+    });
+    input.click();
   };
   const educationCatalog = whiteboardEducationCatalog();
   let formulaLibrary;
@@ -2702,8 +2864,9 @@ function renderWhiteboard(doc, host){
   const contextMeasureBtn=contextAction("측정","선택한 도형의 길이·각도·넓이 붙이기","",toggleMeasureOnSelection);
   const contextVectorBtn=contextAction("합성","같은 점에서 출발한 두 화살표의 합력 붙이기","",toggleVectorSumOnSelection);
   const contextTransformBtn=contextAction("변환","대칭·회전·평행이동·닮음으로 바꾸기","",()=>toggleTransformPanel(true));
+  const contextToBackgroundBtn=contextAction("배경으로","선택한 그림을 보드 배경으로 내리기","",()=>sendSelectedToBackground());
   const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
-  contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextFlipXBtn,contextFlipYBtn,contextMeasureBtn,contextTransformBtn,contextUngroupBtn,contextDeleteBtn);
+  contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextToBackgroundBtn,contextFlipXBtn,contextFlipYBtn,contextMeasureBtn,contextTransformBtn,contextUngroupBtn,contextDeleteBtn);
   contextItemSection.append(contextItemName,contextItemActions);
 
   const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
@@ -2714,7 +2877,7 @@ function renderWhiteboard(doc, host){
   const contextGraphBtn=contextAction("그래프","함수 그래프 만들기 — 식을 치면 곡선을 계산해 넣습니다","",()=>{eduCategory="graph";toggleEducationPanel(true);});
   const contextChartBtn=contextAction("차트","자료 차트 만들기 — 표 숫자로 막대·꺾은선·원그래프를 넣습니다","",()=>{eduCategory="chart";toggleEducationPanel(true);});
   const contextChemBtn=contextAction("주기율표","주기율표와 반응식 균형 맞추기 열기","",()=>{eduCategory="chemistry";toggleEducationPanel(true);});
-  const contextBackgroundBtn=contextAction("배경색","보드 배경색 바꾸기","",()=>toggleBackgroundPanel(true));
+  const contextBackgroundBtn=contextAction("배경","보드 배경(색·무늬) 바꾸기","",()=>toggleBackgroundPanel(true));
   const contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
   const contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
   const contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
@@ -2856,6 +3019,8 @@ function renderWhiteboard(doc, host){
     contextFlipXBtn.classList.toggle("active",flippable&&!!selected.flipX); contextFlipYBtn.classList.toggle("active",flippable&&!!selected.flipY);
     contextFlipXBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipX)); contextFlipYBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipY));
     contextUngroupBtn.hidden=!(selected&&selected.type==="group");
+    // 배경으로 내리기는 그림에만 — 도형·글씨는 배경이 될 수 없다(배경은 그림 한 장이다).
+    contextToBackgroundBtn.hidden=!(selected&&selected.type==="image"&&selected.src);
     const selectedIndex=selected?wb.items.indexOf(selected):-1, lastIndex=wb.items.length-1;
     contextPasteItemBtn.disabled=!hasWhiteboardInternalClipboard(); contextPasteBoardBtn.disabled=!hasWhiteboardInternalClipboard();
     contextForwardBtn.disabled=selectedIndex<0||selectedIndex>=lastIndex; contextFrontBtn.disabled=contextForwardBtn.disabled;
@@ -3693,12 +3858,14 @@ function renderWhiteboard(doc, host){
     canvasEl.width = Math.round(cssWidth * ratio); canvasEl.height = Math.round(cssHeight * ratio);
     const preview = canvasEl.getContext("2d");
     preview.setTransform(ratio, 0, 0, ratio, 0, 0);
-    preview.fillStyle = wb.bg; preview.fillRect(0, 0, cssWidth, cssHeight);
+    preview.clearRect(0, 0, cssWidth, cssHeight);
     const scale = Math.min(cssWidth / group.w, cssHeight / group.h);
     const offsetX = (cssWidth - group.w * scale) / 2, offsetY = (cssHeight - group.h * scale) / 2;
     preview.setTransform(ratio * scale, 0, 0, ratio * scale, ratio * offsetX, ratio * offsetY);
     MNBoardRenderer.drawItems(preview, group.items, { bg:wb.bg });
     preview.setTransform(ratio, 0, 0, ratio, 0, 0);
+    // 그리기와 같은 순서: 배경은 맨 나중에 밑으로. 미리보기엔 무늬 없이 색만 깐다(작은 그림에선 결이 방해된다).
+    MNBoardRenderer.paintBackground(preview, { x:0, y:0, w:cssWidth, h:cssHeight }, { bg:wb.bg });
   }
   const boardInkColor = () => (/^#[0-9a-f]{6}$/i.test(String(wb.color)) ? String(wb.color).toLowerCase() : "#111111");
   function readGraphSpec(size){
@@ -4476,10 +4643,11 @@ function renderWhiteboard(doc, host){
   const bgPanel = document.createElement("div");
   bgPanel.className = "wb-bg-panel"; bgPanel.hidden = true;
   bgPanel.id = "wb-bg-panel-" + doc.id;
-  bgPanel.setAttribute("role", "dialog"); bgPanel.setAttribute("aria-label", "보드 배경색");
+  bgPanel.setAttribute("role", "dialog"); bgPanel.setAttribute("aria-label", "보드 배경");
   const bgHead = document.createElement("div"); bgHead.className = "wb-bg-head";
-  const bgTitle = document.createElement("strong"); bgTitle.textContent = "배경색";
-  bgHead.append(bgTitle, mkBtn("×", "배경색 고르기 닫기 (Esc)", "wb-edu-close", () => toggleBackgroundPanel(false)));
+  const bgTitle = document.createElement("strong"); bgTitle.textContent = "배경";
+  bgHead.append(bgTitle, mkBtn("×", "배경 고르기 닫기 (Esc)", "wb-edu-close", () => toggleBackgroundPanel(false)));
+  const bgColorTitle = document.createElement("div"); bgColorTitle.className = "wb-bg-section"; bgColorTitle.textContent = "색";
   const bgChoices = document.createElement("div"); bgChoices.className = "wb-bg-choices";
   const bgChoiceEls = [];
   for (const preset of (typeof BOARD_BG_PRESETS !== "undefined" ? BOARD_BG_PRESETS : [])){
@@ -4498,7 +4666,118 @@ function renderWhiteboard(doc, host){
   bgCustomRow.append(bgCustomLabel, bgCustom);
   const bgHint = document.createElement("p"); bgHint.className = "wb-bg-hint";
   bgHint.textContent = "이 보드에만 적용돼요. 새 보드의 기본 배경은 설정 › 문서에서 정합니다.";
-  bgPanel.append(bgHead, bgChoices, bgCustomRow, bgHint);
+
+  /* ----- 배경 무늬(모눈·오선 등) -----
+     사진이 아니라 그릴 때마다 계산하는 벡터라, 저장되는 건 이름·간격·색뿐이다(자동복원 용량 0).
+     칸은 보드 원점에 맞춰 깔리므로 확대·이동해도 판서와 칸이 함께 움직인다. */
+  // 색은 무늬를 바꿔도 이어 쓰는 취향이라(파란 모눈 → 파란 오선) 마지막 선택을 들고 있는다.
+  // 간격·진하기는 무늬마다 알맞은 값이 크게 달라 프리셋 기본값에서 다시 시작한다.
+  let patternColorDraft = (wb.bgPattern && wb.bgPattern.color) || "";
+  const patternTitle = document.createElement("div"); patternTitle.className = "wb-bg-section"; patternTitle.textContent = "무늬";
+  const patternChoices = document.createElement("div"); patternChoices.className = "wb-bg-patterns";
+  const patternChipEls = [];
+  const PATTERN_CHIP_CELL = { grid:10, dots:10, graph:10, lines:9, staff:4, cells:11 };
+  // 이름만 늘어놓으면 "원고지"와 "모눈종이"를 골라 보기 전에는 구분하기 어렵다 — 칩마다 실제
+  // 그리기 코드로 축소판을 그려 둔다(같은 함수라 고른 결과와 미리보기가 어긋날 수 없다).
+  const drawPatternChip = (canvasEl, id) => {
+    const box = 34, ratio = window.devicePixelRatio || 1;
+    canvasEl.width = Math.round(box * ratio); canvasEl.height = Math.round(box * ratio);
+    const c = canvasEl.getContext("2d");
+    c.setTransform(ratio, 0, 0, ratio, 0, 0);
+    c.fillStyle = wb.bg; c.fillRect(0, 0, box, box);
+    if (id === "none" || !MNBoardRenderer.drawPattern) return;
+    const cell = PATTERN_CHIP_CELL[id] || 10;
+    MNBoardRenderer.drawPattern(c, { id, size:cell, color:patternColorDraft, opacity:.8 }, { x:0, y:0, w:box, h:box }, wb.bg);
+  };
+  for (const preset of (typeof BOARD_PATTERNS !== "undefined" ? BOARD_PATTERNS : [])){
+    const chip = mkBtn("", preset.label, "wb-bg-pattern", () => setPatternId(preset.id));
+    chip.dataset.boardPattern = preset.id;
+    const thumb = document.createElement("canvas"); thumb.className = "wb-bg-pattern-thumb"; thumb.style.width = "34px"; thumb.style.height = "34px";
+    const caption = document.createElement("span"); caption.textContent = preset.label;
+    chip.append(thumb, caption);
+    chip.__thumb = thumb; chip.__patternId = preset.id;
+    patternChipEls.push(chip); patternChoices.appendChild(chip);
+  }
+  const patternDetails = document.createElement("div"); patternDetails.className = "wb-bg-pattern-details"; patternDetails.hidden = true;
+  const mkPatternRange = (label, min, max, step, onInput) => {
+    const row = document.createElement("label"); row.className = "wb-bg-range";
+    const caption = document.createElement("span"); caption.textContent = label;
+    const input = document.createElement("input");
+    input.type = "range"; input.min = String(min); input.max = String(max); input.step = String(step);
+    input.title = label; input.setAttribute("aria-label", label);
+    input.addEventListener("input", () => onInput(Number(input.value)));
+    row.append(caption, input); patternDetails.appendChild(row);
+    return input;
+  };
+  const patternSizeInput = mkPatternRange("간격",
+    (typeof BOARD_PATTERN_SIZE_MIN !== "undefined" ? BOARD_PATTERN_SIZE_MIN : 12),
+    (typeof BOARD_PATTERN_SIZE_MAX !== "undefined" ? BOARD_PATTERN_SIZE_MAX : 160), 2,
+    (value) => updatePattern({ size:value }));
+  const patternOpacityInput = mkPatternRange("진하기", 5, 100, 5, (value) => updatePattern({ opacity:value / 100 }));
+  const patternColorRow = document.createElement("div"); patternColorRow.className = "wb-bg-pattern-colors";
+  const patternColorEls = [];
+  // "자동"은 배경색과 대비가 큰 쪽(흰 종이엔 짙은 선, 칠판엔 밝은 선)을 그때그때 고른다 —
+  // 배경색을 바꿔도 무늬가 배경에 묻히지 않는다.
+  for (const [value, label] of [["", "자동"], ["#1f2937", "먹색"], ["#2563eb", "파랑"], ["#e11d48", "빨강"], ["#16a34a", "초록"], ["#ffffff", "흰색"]]){
+    const swatch = mkBtn(value ? "" : "자", label + " 무늬", "wb-bg-pattern-color", () => updatePattern({ color:value }));
+    swatch.dataset.patternColor = value;
+    if (value) swatch.style.background = value;
+    patternColorEls.push(swatch); patternColorRow.appendChild(swatch);
+  }
+  patternDetails.appendChild(patternColorRow);
+
+  /* ----- 배경 그림 -----
+     무늬가 "종이 결"이라면 이건 "칠판에 붙인 학습지"다 — 사진·스캔 위에 바로 판서한다.
+     넣을 때 다시 인코딩하므로(encodeBoardBackgroundImage) 자동복원 스냅샷이 사진 한 장에 눌리지 않는다. */
+  const imageTitle = document.createElement("div"); imageTitle.className = "wb-bg-section"; imageTitle.textContent = "배경 그림";
+  const imageActions = document.createElement("div"); imageActions.className = "wb-bg-image-actions";
+  const imagePickBtn = mkBtn("고르기", "배경으로 쓸 그림 파일 고르기", "wb-bg-image-btn", () => pickBackgroundImage());
+  const imageClearBtn = mkBtn("지우기", "배경 그림 지우기", "wb-bg-image-btn", () => {
+    setBackgroundImage(null);
+    if (typeof toast === "function") toast("배경 그림을 지웠어요.", 1800);
+  });
+  imageActions.append(imagePickBtn, imageClearBtn);
+  const imageDetails = document.createElement("div"); imageDetails.className = "wb-bg-pattern-details"; imageDetails.hidden = true;
+  const imageFitRow = document.createElement("div"); imageFitRow.className = "wb-bg-fits";
+  const imageFitEls = [];
+  for (const fit of (typeof BOARD_IMAGE_FITS !== "undefined" ? BOARD_IMAGE_FITS : [])){
+    const chip = mkBtn(fit.label, fit.label + "으로 놓기", "wb-bg-fit", () => setBackgroundImageFit(fit.id));
+    chip.dataset.boardFit = fit.id;
+    imageFitEls.push(chip); imageFitRow.appendChild(chip);
+  }
+  // 확대·이동해서 보던 자리에 그림을 다시 맞춘다. 상자를 창 크기에 자동으로 묶지 않기 때문에
+  // (묶으면 창을 줄일 때 그림만 움직여 판서와 어긋난다) 다시 맞추는 건 이렇게 손으로 부른다.
+  const imageRefitBtn = mkBtn("화면에 맞추기", "지금 보이는 화면에 배경 그림을 다시 맞추기", "wb-bg-image-btn wb-bg-refit", () => {
+    if (!wb.bgImage) return;
+    setBackgroundImageFit(wb.bgImage.fit, { refit:true });
+  });
+  const imageOpacityRow = document.createElement("label"); imageOpacityRow.className = "wb-bg-range";
+  const imageOpacityCaption = document.createElement("span"); imageOpacityCaption.textContent = "흐리기";
+  const imageOpacityInput = document.createElement("input");
+  imageOpacityInput.type = "range"; imageOpacityInput.min = "10"; imageOpacityInput.max = "100"; imageOpacityInput.step = "5";
+  imageOpacityInput.title = "배경 그림 흐리기"; imageOpacityInput.setAttribute("aria-label", imageOpacityInput.title);
+  imageOpacityInput.addEventListener("input", () => {
+    if (!wb.bgImage) return;
+    setBackgroundImage({ ...wb.bgImage, opacity:Number(imageOpacityInput.value) / 100 });
+  });
+  imageOpacityRow.append(imageOpacityCaption, imageOpacityInput);
+  // 타일은 상자를 끌어 조절할 수가 없어(보드 전체에 반복된다) 칸 크기를 따로 준다.
+  const imageTileRow = document.createElement("label"); imageTileRow.className = "wb-bg-range"; imageTileRow.hidden = true;
+  const imageTileCaption = document.createElement("span"); imageTileCaption.textContent = "칸 크기";
+  const imageTileInput = document.createElement("input");
+  imageTileInput.type = "range"; imageTileInput.step = "5";
+  imageTileInput.min = String(typeof BOARD_IMAGE_TILE_MIN !== "undefined" ? BOARD_IMAGE_TILE_MIN : 10);
+  imageTileInput.max = String(typeof BOARD_IMAGE_TILE_MAX !== "undefined" ? BOARD_IMAGE_TILE_MAX : 200);
+  imageTileInput.title = "타일 한 칸 크기"; imageTileInput.setAttribute("aria-label", imageTileInput.title);
+  imageTileInput.addEventListener("input", () => {
+    if (!wb.bgImage) return;
+    setBackgroundImage({ ...wb.bgImage, tile:Number(imageTileInput.value) });
+  });
+  imageTileRow.append(imageTileCaption, imageTileInput);
+  imageDetails.append(imageFitRow, imageTileRow, imageOpacityRow, imageRefitBtn);
+
+  bgPanel.append(bgHead, bgColorTitle, bgChoices, bgCustomRow, patternTitle, patternChoices, patternDetails,
+    imageTitle, imageActions, imageDetails, bgHint);
   stage.appendChild(bgPanel);
 
   // ----- 변환 패널(선택한 도형을 옮기고·돌리고·뒤집고·닮음 복사) -----
@@ -4600,7 +4879,7 @@ function renderWhiteboard(doc, host){
   }
 
   const bgGroup = grp();
-  const bgToggleBtn = mkBtn("", "보드 배경색 바꾸기", "wb-act wb-bg-toggle", () => toggleBackgroundPanel());
+  const bgToggleBtn = mkBtn("", "보드 배경(색·무늬) 바꾸기", "wb-act wb-bg-toggle", () => toggleBackgroundPanel());
   const bgToggleDot = document.createElement("span"); bgToggleDot.className = "wb-bg-dot";
   bgToggleBtn.appendChild(bgToggleDot);
   bgToggleBtn.setAttribute("aria-controls", bgPanel.id); bgToggleBtn.setAttribute("aria-expanded", "false");
@@ -4617,7 +4896,78 @@ function renderWhiteboard(doc, host){
     bgToggleDot.style.background = wb.bg;
     if (bgCustom.value !== wb.bg) bgCustom.value = wb.bg;
     for (const choice of bgChoiceEls) choice.setAttribute("aria-pressed", String(choice.dataset.boardBg === wb.bg));
+    syncPatternControls();
+    syncBackgroundImageControls();
   };
+  function syncPatternControls(){
+    const pattern = wb.bgPattern, activeId = pattern ? pattern.id : "none";
+    for (const chip of patternChipEls){
+      chip.setAttribute("aria-pressed", String(chip.__patternId === activeId));
+      drawPatternChip(chip.__thumb, chip.__patternId);   // 배경색·무늬색을 바꾸면 미리보기도 같이 따라간다
+    }
+    patternDetails.hidden = !pattern;
+    if (!pattern) return;
+    patternSizeInput.value = String(pattern.size);
+    patternOpacityInput.value = String(Math.round(pattern.opacity * 100));
+    for (const swatch of patternColorEls) swatch.setAttribute("aria-pressed", String(swatch.dataset.patternColor === (pattern.color || "")));
+  }
+  function syncBackgroundImageControls(){
+    const image = wb.bgImage;
+    imageClearBtn.disabled = !image;
+    imageDetails.hidden = !image;
+    imagePickBtn.textContent = image ? "바꾸기" : "고르기";
+    if (!image) return;
+    imageOpacityInput.value = String(Math.round(image.opacity * 100));
+    imageTileRow.hidden = image.fit !== "tile";
+    // 타일은 보드 전체에 깔리므로 "화면에 맞추기"가 할 일이 없다.
+    imageRefitBtn.hidden = image.fit === "tile";
+    if (image.fit === "tile") imageTileInput.value = String(image.tile || 50);
+    for (const chip of imageFitEls) chip.setAttribute("aria-pressed", String(chip.dataset.boardFit === image.fit));
+  }
+  // 맞춤 방식을 바꾸면 상자를 다시 잡는다. 그림 원본 크기는 되살린 <img> 에서만 알 수 있으므로
+  // 아직 안 불러왔으면 지금 상자 비율을 원본 비율 대신 쓴다(불러오면 다시 맞추면 된다).
+  function setBackgroundImageFit(fit, options={}){
+    const image = wb.bgImage;
+    if (!image) return;
+    const img = image.img;
+    const naturalW = (img && img.naturalWidth) || image.w, naturalH = (img && img.naturalHeight) || image.h;
+    const next = { ...image, fit };
+    Object.assign(next, boardImageBoxFor(fit, naturalW, naturalH));
+    setBackgroundImage(next);
+    if (options.refit && typeof toast === "function") toast("지금 화면에 맞췄어요.", 1600);
+  }
+  // 무늬도 배경색과 같이 "보드의 성질"이라 되돌리기(Ctrl+Z) 대상이 아니고, 복구 스냅샷에 바로 남는다.
+  const commitPattern = (next) => {
+    wb.bgPattern = boardSnapshotPattern(next);
+    syncPatternControls();
+    redraw();
+    scheduleBoardRecovery();
+    if (doc.recorder && doc.recorder.active && typeof doc.recorder.setBackground === "function"){
+      doc.recorder.setBackground(wb.bg, { pattern:wb.bgPattern, image:wb.bgImage });
+    }
+  };
+  function updatePattern(patch){
+    if (!wb.bgPattern) return;
+    if (patch.color !== undefined) patternColorDraft = patch.color;
+    commitPattern({ ...wb.bgPattern, ...patch });
+  }
+  function setPatternId(id){
+    if (!id || id === "none"){ commitPattern(null); return; }
+    const preset = typeof boardPatternPreset === "function" ? boardPatternPreset(id) : null;
+    const same = wb.bgPattern && wb.bgPattern.id === id;
+    // 간격·진하기는 무늬마다 알맞은 기본값이 다르다(오선 15·진하게, 모눈 40·옅게). 손으로 바꿔 둔
+    // 값은 같은 무늬를 다시 고를 때만 지키고, 다른 무늬로 넘어가면 그 무늬의 기본값에서 시작한다.
+    const next = { id, color:patternColorDraft };
+    if (same){ next.size = wb.bgPattern.size; next.opacity = wb.bgPattern.opacity; }
+    else if (preset){ next.size = preset.size; next.opacity = preset.opacity; }
+    // 좌표평면의 축은 "고른 순간 화면 한가운데"에 놓고 보드 좌표로 붙박는다 — 창 크기를 바꿔도
+    // 원점이 판서와 함께 있다. 이미 좌표평면일 때 다시 누르면 지금 보는 화면 가운데로 옮겨 준다.
+    if (id === "graph"){
+      const center = visibleBoardCenter();
+      next.originX = Math.round(center.x); next.originY = Math.round(center.y);
+    }
+    commitPattern(next);
+  }
   // 배경색은 판서 내용이 아니라 보드의 속성이라 되돌리기(Ctrl+Z) 대상에서 뺐다.
   // 대신 복구 스냅샷에 바로 남겨 탭을 닫았다 다시 열어도 고른 색이 그대로 온다.
   const setBackground = (value, options={}) => {
@@ -4762,13 +5112,13 @@ function renderWhiteboard(doc, host){
   function toggleRecord(){
     if (typeof LessonRecorder !== "function"){ if (typeof toast === "function") toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
     if (doc.recorder && doc.recorder.active){
-      const lesson = doc.recorder.stop(wb.items, wb.bg, { W, H });
+      const lesson = doc.recorder.stop(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
       doc.recorder = null;
       syncRecordButtons();
       if (lesson && lesson.keyframes.length > 1 && typeof finishLessonRecording === "function") finishLessonRecording(lesson, doc.name);
       else if (typeof toast === "function") toast("녹화된 판서가 없어요.", 2000);
     } else {
-      doc.recorder = LessonRecorder(wb.items, wb.bg, { W, H });
+      doc.recorder = LessonRecorder(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
       syncRecordButtons();
       if (typeof toast === "function") toast("녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
     }
@@ -4910,6 +5260,7 @@ function renderWhiteboard(doc, host){
   let ro = null;
   if (typeof ResizeObserver !== "undefined"){ ro = new ResizeObserver(() => resize()); ro.observe(stage); }
   restoreBoardImages();
+  restoreBoardBackgroundImage();
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];

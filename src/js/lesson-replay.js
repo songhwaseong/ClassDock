@@ -6,7 +6,7 @@
    그리기는 board-render.js 공용 함수를 재사용해 재생 화면이 판서 화면과 일치한다.
 
    .lesson = JSON:
-     { format:"classdock-lesson", version:1, kind:"board", createdAt, bg, W, H, duration,
+     { format:"classdock-lesson", version:1, kind:"board", createdAt, bg, bgPattern, bgImage, W, H, duration,
        keyframes:[ {t, s:[...items]} | {t, a:item} ] }
      - s: 그 시점의 전체 항목(초기 상태·지우기·되돌리기·이동처럼 배열이 통째로 바뀔 때)
      - a: 직전 상태에 항목 하나 추가(대부분의 판서). 파일 크기를 줄이고 획 성장 애니메이션의 단서가 된다.
@@ -120,7 +120,8 @@ function lessonSerializeItems(items){
 
 // 녹화기. 커밋(획/도형/텍스트/이미지/지우기/되돌리기)마다 capture() 로 스냅샷을 남긴다.
 // 반환 객체를 doc.recorder 에 붙여 whiteboard.js 가 호출한다.
-function LessonRecorder(items, bg, dim){
+// layers = { pattern, image } — 배경색 밑에 깔리는 무늬·그림. 색과 함께 마지막 상태 하나만 들고 간다.
+function LessonRecorder(items, bg, dim, layers){
   const t0 = performance.now();
   const keyframes = [];
   let last = items.slice();                       // 마지막으로 기록한 항목 배열(참조 비교용)
@@ -142,12 +143,13 @@ function LessonRecorder(items, bg, dim){
   return {
     active: true,
     get bg(){ return bg; },
-    // 녹화 도중 보드 배경색을 바꾸면 재생도 그 배경을 따라야 한다. 키프레임마다 배경을 담지는 않으므로
+    // 녹화 도중 보드 배경색·무늬를 바꾸면 재생도 그 배경을 따라야 한다. 키프레임마다 배경을 담지는 않으므로
     // 마지막으로 고른 배경 하나로 전체를 재생한다(배경은 판서와 달리 도중에 자주 바뀌지 않는다).
-    setBackground(next){ if (next) bg = next; },
-    capture(its, b, d){
+    setBackground(next, nextLayers){ if (next) bg = next; if (nextLayers !== undefined) layers = nextLayers; },
+    capture(its, b, d, l){
       if (!this.active) return;
       if (b) bg = b;
+      if (l !== undefined) layers = l;
       if (d){ maxW = Math.max(maxW, d.W || 0); maxH = Math.max(maxH, d.H || 0); }
       if (isSameAs(last, its)) return;                 // 바뀐 게 없으면 스냅샷 생략(정지 시 중복 방지)
       if (isAppendOf(last, its)){
@@ -157,13 +159,16 @@ function LessonRecorder(items, bg, dim){
       }
       last = its.slice();
     },
-    stop(its, b, d){
-      if (this.active) this.capture(its, b, d);
+    stop(its, b, d, l){
+      if (this.active) this.capture(its, b, d, l);
       this.active = false;
       return {
         format: LESSON_FORMAT, version: LESSON_VERSION, kind: "board",
         createdAt: new Date().toISOString(),
         bg: bg || "#ffffff",
+        bgPattern: (layers && layers.pattern) || null,
+        // 배경 그림은 <img> 객체를 빼고 src 만 싣는다(그대로 두면 JSON 으로 못 만든다).
+        bgImage: (layers && layers.image) ? { ...layers.image, img:undefined } : null,
         W: maxW || 1280, H: maxH || 720,
         duration: keyframes.length ? keyframes[keyframes.length - 1].t : 0,
         keyframes
@@ -457,6 +462,9 @@ function mountReplayPlayer(doc, host, opts){
 function renderReplay(doc, host, lesson){
   const pb = prepareLessonPlayback(lesson);
   const boardBg = lesson.bg || "#ffffff";
+  // 배경 그림도 항목 이미지처럼 src → <img> 로 되살려야 그려진다(다 불러오면 preload 가 다시 그린다).
+  const boardImage = (lesson.bgImage && typeof lesson.bgImage === "object" && /^data:image\//i.test(String(lesson.bgImage.src || "")))
+    ? { ...lesson.bgImage } : null;
   const duration = lesson.duration || pb.times[pb.n - 1] || 0;
   const draw = (ctx, CW, CH, dpr, playT) => {
     const idx = lessonIndexAt(pb.times, playT);
@@ -477,13 +485,20 @@ function renderReplay(doc, host, lesson){
     ctx.save();
     ctx.translate(ox, oy); ctx.scale(scale, scale);
     ctx.beginPath(); ctx.rect(0, 0, lesson.W, lesson.H); ctx.clip();
-    ctx.fillStyle = boardBg; ctx.fillRect(0, 0, lesson.W, lesson.H);
+    // 판서 화면(whiteboard.js redraw)과 같은 순서 — 배경은 맨 나중에 밑으로 깐다.
+    // 지우개가 destination-out 이라, 배경을 먼저 칠하면 지운 자리가 배경까지 뚫린다.
     MNBoardRenderer.drawItems(ctx, baseItems, { bg: boardBg });
     if (grow) MNBoardRenderer.drawItem(ctx, grow, boardBg, growLimit);
+    MNBoardRenderer.paintBackground(ctx, { x:0, y:0, w:lesson.W, h:lesson.H }, { bg:boardBg, pattern:lesson.bgPattern, image:boardImage });
     ctx.restore();
   };
   const player = mountReplayPlayer(doc, host, { duration, draw, onSave: () => saveLessonFile(lesson, doc.name) });
   preloadLessonImages(pb.kfs, player.redraw);
+  if (boardImage){
+    const img = new Image();
+    img.onload = () => { boardImage.img = img; player.redraw(); };
+    img.src = boardImage.src;
+  }
 }
 
 // ----- PDF 위 필기(잉크) 리플레이 -----

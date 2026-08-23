@@ -230,6 +230,7 @@ function mountConceptEditor(doc){
   const syncCanvasSize = () => {
     const size = conceptCanvasSize(model.nodes); stage.style.width = size.width + "px"; stage.style.height = size.height + "px"; stage.style.transform = `scale(${zoom})`; svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
     zoomSpace.style.width = Math.max(viewport.clientWidth, size.width * zoom) + "px"; zoomSpace.style.height = Math.max(viewport.clientHeight, size.height * zoom) + "px"; zoomResetBtn.textContent = Math.round(zoom * 100) + "%"; zoomOutBtn.disabled = zoom <= CONCEPT_MIN_ZOOM; zoomInBtn.disabled = zoom >= CONCEPT_MAX_ZOOM;
+    viewport.classList.toggle("is-pannable", viewport.scrollWidth > viewport.clientWidth + 1 || viewport.scrollHeight > viewport.clientHeight + 1);
   };
   const setZoom = (value, clientX, clientY) => {
     const next = conceptClampZoom(value); if (Math.abs(next - zoom) < .001) return;
@@ -238,6 +239,31 @@ function mountConceptEditor(doc){
   const fitCanvasToViewport = () => { const size = conceptCanvasSize(model.nodes); zoom = conceptFitZoom(size.width, size.height, viewport.clientWidth, viewport.clientHeight); syncCanvasSize(); viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
   const onViewportWheel = event => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1, factor = Math.exp(-event.deltaY * unit * .0014); setZoom(zoom * factor, event.clientX, event.clientY); };
   viewport.addEventListener("wheel", onViewportWheel, { passive:false }); zoomOutBtn.onclick = () => setZoom(zoom / 1.2); zoomResetBtn.onclick = () => setZoom(1); zoomInBtn.onclick = () => setZoom(zoom * 1.2);
+  // 빈 여백을 끌어서 화면을 옮긴다(손바닥). 카드·연결선 위에서는 원래 동작을 그대로 둔다.
+  // 빈 곳의 이벤트 대상은 무대가 아니라 무대를 덮은 svg(.concept-lines)라서 허용 목록에 함께 넣는다.
+  let panState = null;
+  const panBackground = target => target === viewport || target === zoomSpace || target === stage || target === svg || target === cards;
+  const onPanPointerDown = event => {
+    if (event.button !== 0 || (event.pointerType && event.pointerType !== "mouse")) return;
+    if (!panBackground(event.target) || !viewport.classList.contains("is-pannable")) return;
+    event.preventDefault();
+    panState = { id:event.pointerId, x:event.clientX, y:event.clientY, left:viewport.scrollLeft, top:viewport.scrollTop };
+    viewport.classList.add("is-panning");
+    try { viewport.setPointerCapture(event.pointerId); } catch(_){}
+  };
+  const onPanPointerMove = event => {
+    if (!panState || event.pointerId !== panState.id) return;
+    event.preventDefault();
+    viewport.scrollLeft = panState.left - (event.clientX - panState.x);
+    viewport.scrollTop = panState.top - (event.clientY - panState.y);
+  };
+  const finishPan = event => {
+    if (!panState || (event && event.pointerId !== panState.id)) return;
+    const pointerId = panState.id; panState = null; viewport.classList.remove("is-panning");
+    try { if (viewport.hasPointerCapture(pointerId)) viewport.releasePointerCapture(pointerId); } catch(_){}
+  };
+  viewport.addEventListener("pointerdown", onPanPointerDown); viewport.addEventListener("pointermove", onPanPointerMove);
+  viewport.addEventListener("pointerup", finishPan); viewport.addEventListener("pointercancel", finishPan); viewport.addEventListener("lostpointercapture", finishPan);
   const viewportResizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncCanvasSize) : null; if (viewportResizeObserver) viewportResizeObserver.observe(viewport);
 
   const edgePath = (from, to) => { const ax = from.x + 115, ay = from.y + 65, bx = to.x + 115, by = to.y + 65, bend = Math.max(50, Math.abs(bx - ax) * .42); return `M ${ax} ${ay} C ${ax + (bx >= ax ? bend : -bend)} ${ay}, ${bx - (bx >= ax ? bend : -bend)} ${by}, ${bx} ${by}`; };
