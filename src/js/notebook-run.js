@@ -209,11 +209,11 @@ function renderNotebookView(model, host, ownerDoc){
   fontGroup.className = "nbv-font-group";
   const fontDown = document.createElement("button");
   fontDown.type = "button"; fontDown.className = "nbv-font"; fontDown.textContent = "A−";
-  fontDown.title = "코드 셀·결과 글자 작게 (Ctrl+−)";
+  fontDown.title = "노트북 글자 작게 — 코드 셀·마크다운 셀·결과 (Ctrl+−)";
   fontDown.setAttribute("aria-label", fontDown.title);
   const fontUp = document.createElement("button");
   fontUp.type = "button"; fontUp.className = "nbv-font"; fontUp.textContent = "A+";
-  fontUp.title = "코드 셀·결과 글자 크게 (Ctrl++)";
+  fontUp.title = "노트북 글자 크게 — 코드 셀·마크다운 셀·결과 (Ctrl++)";
   fontUp.setAttribute("aria-label", fontUp.title);
   fontDown.addEventListener("click", () => bumpCodeFont(-1));
   fontUp.addEventListener("click", () => bumpCodeFont(1));
@@ -375,6 +375,7 @@ function renderNotebookView(model, host, ownerDoc){
       requestAnimationFrame(() => {
         for (const ctrl of (ownerDoc._nbCtrls || [])){
           if (ctrl.editor) fitEditorHeight(ctrl.editor);
+          else if (typeof ctrl.refitEditor === "function") ctrl.refitEditor();   // 마크다운 셀 원문 textarea
         }
       });
     };

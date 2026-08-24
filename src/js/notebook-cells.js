@@ -624,8 +624,10 @@ function nbMountMarkdown(ctrl, ownerDoc){
     });
     wrap.append(editPane, preview, layer);
     view.replaceWith(wrap); ta.focus(); grow(); updatePreview();
-    editCtx = { ta, draw: drawSpot, clear: clearSpot, commit, spotOwned: false };
+    editCtx = { ta, draw: drawSpot, clear: clearSpot, commit, spotOwned: false, grow };
   };
+  // 글자 크기(A− / A+)가 바뀌면 편집 중인 원문 textarea 높이도 다시 맞춘다(코드 셀의 fitEditorHeight 와 대응).
+  ctrl.refitEditor = () => { if (editCtx) editCtx.grow(); };
   view.addEventListener("dblclick", enterEdit);
   ctrl.cellEl.appendChild(view);
   ctrl.edit = enterEdit;

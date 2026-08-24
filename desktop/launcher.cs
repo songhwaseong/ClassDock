@@ -884,7 +884,8 @@ class ClassDockLauncher
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
-            if (path == "/ssh-capability" || path.StartsWith("/ssh-session-poll", StringComparison.Ordinal)) return true;
+            if (path == "/ssh-capability" || path == "/ssh-key-pick-status"
+                || path.StartsWith("/ssh-session-poll", StringComparison.Ordinal)) return true;
             if (path == "/tile-cache-status" || path == "/can-proxy-tiles") return true;
             if (path == "/map-search-key-status") return true;
             if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
@@ -2296,6 +2297,26 @@ class ClassDockLauncher
                 else if (method == "GET" && path == "/ssh-capability")
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.CapabilityJson()));
+                }
+                else if (method == "POST" && path == "/ssh-key-pick")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool started = ClassDockSshTerminal.StartPrivateKeyPicker();
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(started ? "opened" : "opening"));
+                }
+                else if (method == "GET" && path == "/ssh-key-pick-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(ClassDockSshTerminal.PrivateKeyPickerStatusJson()));
                 }
                 else if (method == "POST" && path == "/ssh-host-key-scan")
                 {

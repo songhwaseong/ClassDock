@@ -67,6 +67,32 @@ test("비밀번호는 저장소·명령행·환경변수가 아닌 일회성 nam
   assert.match(ui, /host:hostInput\.value\.trim\(\), port:portInput\.value\.trim\(\), user:userInput\.value\.trim\(\)/);
 });
 
+test("개인키는 네이티브 선택창의 실행 중 ID로만 전달하고 선택한 키만 사용한다", () => {
+  assert.match(ssh, /GetOpenFileName/);
+  assert.match(ssh, /public IntPtr lpstrFile/);
+  assert.match(ssh, /Marshal\.AllocHGlobal\(capacity \* 2\)/);
+  assert.match(ssh, /Marshal\.PtrToStringUni\(fileBuffer\)/);
+  assert.doesNotMatch(ssh, /StringBuilder lpstrFile/);
+  assert.match(ssh, /PrivateKeyPickerStatusJson/);
+  assert.match(ssh, /PrivateKeyPickerName/);
+  assert.match(ssh, /PrivateKeyPickerId/);
+  assert.doesNotMatch(ssh, /PrivateKeyPickerPath/);
+  assert.match(launcher, /path == "\/ssh-key-pick"/);
+  assert.match(launcher, /path == "\/ssh-key-pick-status"/);
+  assert.match(launcher, /HasLocalActionHeader\(headers\)/);
+  assert.match(ui, /"\/ssh-key-pick"/);
+  assert.match(ui, /"\/ssh-key-pick-status"/);
+  assert.match(ui, /"X-ClassDock-Action":"1"/);
+  assert.match(ui, /body:encodeStrings\(\[authentication, host, port, user, secret, selectedKeyId, currentCols, currentRows\]\)/);
+  assert.match(ssh, /"-o", "IdentityFile=none"/);
+  assert.match(ssh, /"-o", "IdentitiesOnly=yes"/);
+  assert.match(ssh, /"-o", "IdentityAgent=none"/);
+  assert.match(ssh, /"-i", privateKeyPath/);
+  assert.match(ssh, /"-o", "PasswordAuthentication=no"/);
+  assert.match(ssh, /"-o", "KbdInteractiveAuthentication=no"/);
+  assert.doesNotMatch(ui, /localStorage\.setItem\([^\n]*(?:selectedKey|privateKey|keyPath)/i);
+});
+
 test("최초 서버 지문을 확인하고 신뢰된 키만으로 접속한다", () => {
   assert.match(ssh, /ssh-keyscan\.exe/);
   assert.match(ssh, /ProbeHostKeyWithSsh/);
@@ -144,13 +170,17 @@ test("SSH 종료 출력은 인증·시간 초과·거부·DNS·네트워크·지
   assert.equal(classify("Could not resolve hostname lab", 255).status, "호스트 오류");
   assert.equal(classify("No route to host", 255).status, "네트워크 오류");
   assert.equal(classify("REMOTE HOST IDENTIFICATION HAS CHANGED!", 255).status, "지문 확인 실패");
+  assert.equal(classify("Load key id_ed25519: incorrect passphrase supplied to decrypt private key", 255).status, "키 암호 오류");
+  assert.equal(classify("Load key id_rsa: invalid format", 255).status, "개인키 오류");
+  assert.equal(classify("Permission denied (publickey).", 255).message.includes("authorized_keys"), true);
   assert.equal(classify("logout", 0).status, "정상 종료");
 });
 
 test("종료된 터미널은 비밀번호만 비우고 재접속하며 무한 상태 재시도를 막는다", () => {
   assert.match(ui, /retryButton = button\("재접속"/);
-  assert.match(ui, /passwordInput\.value = "";[\s\S]*showForm\(message[^,]*, true\)/);
+  assert.match(ui, /passwordInput\.value = "";[\s\S]*showForm\(message[\s\S]*!privateKey\)/);
   assert.match(ui, /IP·포트·계정은 유지되고 비밀번호만 다시 입력합니다/);
+  assert.match(ui, /접속 정보와 선택한 개인키를 유지합니다/);
   assert.match(ui, /pollFailures >= 12/);
   assert.match(ui, /fetchTimed\("\/ssh-host-key-scan"/);
   assert.match(ui, /pointercancel/);

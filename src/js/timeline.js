@@ -944,6 +944,7 @@ function mountTimelineEditor(doc){
   let selectedId = "";
   let history = null;
   let recoveryTimer = 0;
+  let cardPreviewTimer = 0;
   let presentIndex = -1;
   let presentRows = [];
 
@@ -1382,8 +1383,19 @@ function mountTimelineEditor(doc){
         card.appendChild(timelinePlaceButton(event, "timeline-place-link"));
       }
       const connector = document.createElement("span"); connector.className = "timeline-connector"; card.appendChild(connector);
-      card.addEventListener("click", () => selectEvent(event.id, false));
-      card.addEventListener("dblclick", () => openEventDialog(event.id));
+      card.addEventListener("click", () => {
+        selectEvent(event.id, false);
+        clearTimeout(cardPreviewTimer);
+        cardPreviewTimer = setTimeout(() => {
+          cardPreviewTimer = 0;
+          startPresent(event.id);
+        }, 220);
+      });
+      card.addEventListener("dblclick", () => {
+        clearTimeout(cardPreviewTimer);
+        cardPreviewTimer = 0;
+        openEventDialog(event.id);
+      });
       card.addEventListener("keydown", keyEvent => {
         if (keyEvent.target !== card) return;
         if (keyEvent.key === "Enter"){ keyEvent.preventDefault(); openEventDialog(event.id); }
@@ -1661,10 +1673,11 @@ function mountTimelineEditor(doc){
     else if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown"){ event.preventDefault(); showPresent(presentIndex + 1); }
     else if (event.key === "ArrowLeft" || event.key === "PageUp"){ event.preventDefault(); showPresent(presentIndex - 1); }
   };
-  const startPresent = () => {
+  const startPresent = eventId => {
     presentRows = timelineSortedEvents(model.events);
     if (!presentRows.length){ if (typeof toast === "function") toast(timelineT(tripMode() ? "보여줄 일정이 없습니다." : "발표할 사건이 없습니다."), 2200); return; }
-    const selectedAt = selectedId ? presentRows.findIndex(row => row.event.id === selectedId) : 0;
+    const startId = eventId || selectedId;
+    const selectedAt = startId ? presentRows.findIndex(row => row.event.id === startId) : 0;
     present.hidden = false; root.classList.add("is-presenting");
     showPresent(selectedAt >= 0 ? selectedAt : 0);
     window.addEventListener("keydown", onPresentKey);
@@ -1849,7 +1862,7 @@ function mountTimelineEditor(doc){
     if (exportMenu.open && event.target instanceof Node && !exportMenu.contains(event.target)) exportMenu.open = false;
   };
   document.addEventListener("click", closeExportMenu);
-  presentBtn.addEventListener("click", startPresent);
+  presentBtn.addEventListener("click", () => startPresent());
   printBtn.addEventListener("click", printTimeline);
   saveBtn.addEventListener("click", () => saveTimelineDoc(doc));
 
@@ -1919,6 +1932,7 @@ function mountTimelineEditor(doc){
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
     clearTimeout(resizeTimer);
+    clearTimeout(cardPreviewTimer);
     if (trackResizeObserver) trackResizeObserver.disconnect();
     finishPan();
     if (history) history.cancel();

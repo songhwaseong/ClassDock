@@ -12,7 +12,8 @@ using System.Threading;
 
 // ClassDock EXE 전용 SSH 터미널.
 // Windows OpenSSH를 ConPTY에 붙여 원격 PTY의 ANSI 입출력을 브라우저 xterm.js와 중계한다.
-// 비밀번호는 디스크·명령행·환경변수에 넣지 않고, 난수 이름의 일회성 named pipe로 askpass helper에만 전달한다.
+// 비밀번호·개인키 암호는 디스크·명령행·환경변수에 넣지 않고, 난수 이름의 일회성 named pipe로 askpass helper에만 전달한다.
+// 개인키는 Windows 파일 선택창에서 고른 원본을 사용하며, 브라우저에는 실행 중에만 유효한 난수 ID와 파일명만 돌려준다.
 static class ClassDockSshTerminal
 {
     const int MaxSessionOutputBytes = 16 * 1024 * 1024;
@@ -22,6 +23,10 @@ static class ClassDockSshTerminal
     const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     const uint HANDLE_FLAG_INHERIT = 0x00000001;
+    const int OFN_PATHMUSTEXIST = 0x00000800;
+    const int OFN_FILEMUSTEXIST = 0x00001000;
+    const int OFN_NOCHANGEDIR = 0x00000008;
+    const int OFN_DONTADDTORECENT = 0x02000000;
     static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x00020016;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -71,6 +76,34 @@ static class ClassDockSshTerminal
         public uint dwThreadId;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct OPENFILENAME
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hInstance;
+        public string lpstrFilter;
+        public string lpstrCustomFilter;
+        public int nMaxCustFilter;
+        public int nFilterIndex;
+        public IntPtr lpstrFile;
+        public int nMaxFile;
+        public IntPtr lpstrFileTitle;
+        public int nMaxFileTitle;
+        public string lpstrInitialDir;
+        public string lpstrTitle;
+        public int Flags;
+        public short nFileOffset;
+        public short nFileExtension;
+        public string lpstrDefExt;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public string lpTemplateName;
+        public IntPtr pvReserved;
+        public int dwReserved;
+        public int FlagsEx;
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, IntPtr attributes, uint size);
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -96,6 +129,10 @@ static class ClassDockSshTerminal
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CreateProcessW(string application, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes,
         bool inheritHandles, uint flags, IntPtr environment, string cwd, ref STARTUPINFOEX startup, out PROCESS_INFORMATION process);
+    [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool GetOpenFileName([In, Out] ref OPENFILENAME dialog);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
 
     sealed class RollingBytes
     {
@@ -180,8 +217,22 @@ static class ClassDockSshTerminal
         public string Fingerprint;
     }
 
+    sealed class PrivateKeySelection
+    {
+        public string Id;
+        public string Path;
+        public string Name;
+        public DateTime LastUsed = DateTime.UtcNow;
+    }
+
     static readonly object SessionsLock = new object();
     static readonly Dictionary<string, SshSession> Sessions = new Dictionary<string, SshSession>();
+    static readonly object PrivateKeysLock = new object();
+    static readonly Dictionary<string, PrivateKeySelection> PrivateKeys = new Dictionary<string, PrivateKeySelection>();
+    static readonly object PrivateKeyPickerLock = new object();
+    static string PrivateKeyPickerState = "idle";
+    static string PrivateKeyPickerId = "";
+    static string PrivateKeyPickerName = "";
     static readonly string SshDataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "ssh");
     static readonly string KnownHostsPath = Path.Combine(SshDataDirectory, "known_hosts");
@@ -236,6 +287,165 @@ static class ClassDockSshTerminal
             : "Windows OpenSSH Client가 필요합니다.");
         return "{\"available\":" + (conpty ? "true" : "false")
             + ",\"client\":\"Windows OpenSSH\",\"reason\":" + JsonString(reason) + "}";
+    }
+
+    public static bool StartPrivateKeyPicker()
+    {
+        lock (PrivateKeyPickerLock)
+        {
+            if (PrivateKeyPickerState == "opening") return false;
+            PrivateKeyPickerState = "opening";
+            PrivateKeyPickerId = "";
+            PrivateKeyPickerName = "";
+        }
+        Thread thread = new Thread(delegate()
+        {
+            try
+            {
+                string selected = RunPrivateKeyPicker();
+                lock (PrivateKeyPickerLock)
+                {
+                    if (selected.Length == 0)
+                    {
+                        PrivateKeyPickerState = "cancelled";
+                    }
+                    else
+                    {
+                        PrivateKeySelection key = RegisterPrivateKey(selected);
+                        PrivateKeyPickerId = key.Id;
+                        PrivateKeyPickerName = key.Name;
+                        PrivateKeyPickerState = "selected";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (PrivateKeyPickerLock)
+                {
+                    PrivateKeyPickerState = "error";
+                    PrivateKeyPickerName = ex is InvalidOperationException && ex.Message.StartsWith("ssh-private-key-", StringComparison.Ordinal)
+                        ? ex.Message : "ssh-private-key-read-failed";
+                    PrivateKeyPickerId = "";
+                }
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        return true;
+    }
+
+    public static string PrivateKeyPickerStatusJson()
+    {
+        lock (PrivateKeyPickerLock)
+            return "{\"state\":" + JsonString(PrivateKeyPickerState)
+                + ",\"id\":" + JsonString(PrivateKeyPickerId)
+                + ",\"name\":" + JsonString(PrivateKeyPickerName) + "}";
+    }
+
+    static string RunPrivateKeyPicker()
+    {
+        const int capacity = 32768;
+        IntPtr fileBuffer = IntPtr.Zero;
+        try
+        {
+            // StringBuilder를 구조체 필드로 마샬링하면 일부 .NET Framework/x64 환경에서
+            // 대화상자가 열리기 전에 MarshalDirectiveException이 발생한다. 출력 버퍼를 직접 할당한다.
+            fileBuffer = Marshal.AllocHGlobal(capacity * 2);
+            Marshal.WriteInt16(fileBuffer, 0, 0);
+            OPENFILENAME dialog = new OPENFILENAME();
+            dialog.lStructSize = Marshal.SizeOf(typeof(OPENFILENAME));
+            dialog.hwndOwner = GetForegroundWindow();
+            dialog.lpstrFilter = "OpenSSH/PEM 개인키\0id_*;*.pem;*.key\0모든 파일\0*.*\0\0";
+            dialog.nFilterIndex = 1;
+            dialog.lpstrFile = fileBuffer;
+            dialog.nMaxFile = capacity;
+            dialog.lpstrTitle = "SSH 개인키 파일을 선택하세요";
+            dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
+            return GetOpenFileName(ref dialog) ? (Marshal.PtrToStringUni(fileBuffer) ?? "") : "";
+        }
+        catch { throw new InvalidOperationException("ssh-private-key-picker-failed"); }
+        finally { if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer); }
+    }
+
+    static PrivateKeySelection RegisterPrivateKey(string path)
+    {
+        string fullPath = ValidatePrivateKeyPath(path);
+        PrivateKeySelection selection = new PrivateKeySelection();
+        selection.Id = Guid.NewGuid().ToString("N");
+        selection.Path = fullPath;
+        selection.Name = Path.GetFileName(fullPath);
+        lock (PrivateKeysLock)
+        {
+            DateTime cutoff = DateTime.UtcNow.AddHours(-8);
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, PrivateKeySelection> item in PrivateKeys)
+                if (item.Value.LastUsed < cutoff) stale.Add(item.Key);
+            foreach (string id in stale) PrivateKeys.Remove(id);
+            while (PrivateKeys.Count >= 16)
+            {
+                string oldest = null;
+                DateTime used = DateTime.MaxValue;
+                foreach (KeyValuePair<string, PrivateKeySelection> item in PrivateKeys)
+                    if (item.Value.LastUsed < used) { oldest = item.Key; used = item.Value.LastUsed; }
+                if (oldest == null) break;
+                PrivateKeys.Remove(oldest);
+            }
+            PrivateKeys[selection.Id] = selection;
+        }
+        return selection;
+    }
+
+    static PrivateKeySelection ResolvePrivateKey(string id)
+    {
+        PrivateKeySelection selection;
+        lock (PrivateKeysLock)
+        {
+            PrivateKeys.TryGetValue((id ?? "").Trim(), out selection);
+            if (selection != null) selection.LastUsed = DateTime.UtcNow;
+        }
+        if (selection == null) throw new InvalidOperationException("ssh-private-key-not-selected");
+        ValidatePrivateKeyPath(selection.Path);
+        return selection;
+    }
+
+    static string ValidatePrivateKeyPath(string path)
+    {
+        string fullPath;
+        try { fullPath = Path.GetFullPath(path ?? ""); }
+        catch { throw new InvalidOperationException("ssh-private-key-not-found"); }
+        if (!File.Exists(fullPath)) throw new InvalidOperationException("ssh-private-key-not-found");
+        FileInfo info = new FileInfo(fullPath);
+        if (info.Length <= 0 || info.Length > 1024 * 1024) throw new InvalidOperationException("ssh-private-key-size");
+        byte[] head = new byte[(int)Math.Min(info.Length, 512)];
+        try
+        {
+            using (FileStream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                int offset = 0;
+                while (offset < head.Length)
+                {
+                    int read = stream.Read(head, offset, head.Length - offset);
+                    if (read <= 0) break;
+                    offset += read;
+                }
+            }
+            string text = Encoding.ASCII.GetString(head);
+            if (text.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal))
+                throw new InvalidOperationException("ssh-private-key-putty-format");
+            if (string.Equals(Path.GetExtension(fullPath), ".pub", StringComparison.OrdinalIgnoreCase)
+                || text.StartsWith("ssh-", StringComparison.Ordinal) || text.StartsWith("ecdsa-", StringComparison.Ordinal))
+                throw new InvalidOperationException("ssh-private-key-is-public");
+            if (text.IndexOf("-----BEGIN OPENSSH PRIVATE KEY-----", StringComparison.Ordinal) < 0
+                && text.IndexOf("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal) < 0
+                && text.IndexOf("-----BEGIN DSA PRIVATE KEY-----", StringComparison.Ordinal) < 0
+                && text.IndexOf("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal) < 0
+                && text.IndexOf("-----BEGIN PRIVATE KEY-----", StringComparison.Ordinal) < 0
+                && text.IndexOf("-----BEGIN ENCRYPTED PRIVATE KEY-----", StringComparison.Ordinal) < 0)
+                throw new InvalidOperationException("ssh-private-key-invalid-format");
+        }
+        finally { Array.Clear(head, 0, head.Length); }
+        return fullPath;
     }
 
     static bool HasConPtyApi()
@@ -385,19 +595,23 @@ static class ClassDockSshTerminal
 
     public static string Open(byte[] body)
     {
-        string[] request = ReadBundle(body, 6, 64 * 1024);
-        string host = ValidateHost(request[0]);
-        int port = ValidatePort(request[1]);
-        string user = ValidateUser(request[2]);
-        string password = request[3] ?? "";
-        int cols = ClampNumber(request[4], 20, 300, 100);
-        int rows = ClampNumber(request[5], 5, 120, 30);
-        if (password.Length == 0 || password.Length > 16 * 1024 || password.IndexOf('\0') >= 0)
-            throw new InvalidOperationException("bad-ssh-password");
+        string[] request = ReadBundle(body, 8, 64 * 1024);
+        string authentication = ValidateAuthentication(request[0]);
+        string host = ValidateHost(request[1]);
+        int port = ValidatePort(request[2]);
+        string user = ValidateUser(request[3]);
+        string secret = request[4] ?? "";
+        string privateKeyId = request[5] ?? "";
+        int cols = ClampNumber(request[6], 20, 300, 100);
+        int rows = ClampNumber(request[7], 5, 120, 30);
+        if (secret.Length > 16 * 1024 || secret.IndexOf('\0') >= 0
+            || (authentication == "password" && secret.Length == 0))
+            throw new InvalidOperationException(authentication == "password" ? "bad-ssh-password" : "bad-ssh-key-passphrase");
         if (TrustedFingerprint(KnownHostField(host, port)).Length == 0)
             throw new InvalidOperationException("ssh-host-key-not-trusted");
         string ssh = FindOpenSsh("ssh.exe");
         if (ssh == null) throw new InvalidOperationException("ssh-client-not-found");
+        PrivateKeySelection privateKey = authentication == "private-key" ? ResolvePrivateKey(privateKeyId) : null;
 
         SweepSessions();
         lock (SessionsLock)
@@ -407,11 +621,11 @@ static class ClassDockSshTerminal
             if (active >= MaxSessions) throw new InvalidOperationException("ssh-session-limit");
         }
 
-        byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+        byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
         string pipeName = "classdock_ssh_askpass_" + Guid.NewGuid().ToString("N");
-        StartAskPassServer(pipeName, passwordBytes);
+        StartAskPassServer(pipeName, secretBytes);
 
-        string arguments = BuildSshArguments(host, port, user);
+        string arguments = BuildSshArguments(host, port, user, authentication, privateKey == null ? "" : privateKey.Path);
         Dictionary<string, string> environment = CurrentEnvironment();
         environment["SSH_ASKPASS"] = Process.GetCurrentProcess().MainModule.FileName;
         environment["SSH_ASKPASS_REQUIRE"] = "force";
@@ -512,6 +726,7 @@ static class ClassDockSshTerminal
         List<SshSession> all = new List<SshSession>();
         lock (SessionsLock) { foreach (SshSession session in Sessions.Values) all.Add(session); Sessions.Clear(); }
         foreach (SshSession session in all) CloseSession(session);
+        lock (PrivateKeysLock) PrivateKeys.Clear();
     }
 
     static void StartReaders(SshSession session)
@@ -607,7 +822,7 @@ static class ClassDockSshTerminal
         return session;
     }
 
-    static void StartAskPassServer(string pipeName, byte[] password)
+    static void StartAskPassServer(string pipeName, byte[] secret)
     {
         Thread thread = new Thread(delegate()
         {
@@ -621,15 +836,15 @@ static class ClassDockSshTerminal
                         IAsyncResult wait = pipe.BeginWaitForConnection(null, null);
                         if (!wait.AsyncWaitHandle.WaitOne(until - DateTime.UtcNow)) break;
                         pipe.EndWaitForConnection(wait);
-                        byte[] size = BitConverter.GetBytes(password.Length);
+                        byte[] size = BitConverter.GetBytes(secret.Length);
                         pipe.Write(size, 0, size.Length);
-                        pipe.Write(password, 0, password.Length);
+                        pipe.Write(secret, 0, secret.Length);
                         pipe.Flush();
                     }
                 }
             }
             catch { }
-            finally { Array.Clear(password, 0, password.Length); }
+            finally { Array.Clear(secret, 0, secret.Length); }
         });
         thread.IsBackground = true;
         thread.Start();
@@ -691,17 +906,32 @@ static class ClassDockSshTerminal
         }
     }
 
-    static string BuildSshArguments(string host, int port, string user)
+    static string BuildSshArguments(string host, int port, string user, string authentication, string privateKeyPath)
     {
-        string[] args = new string[] {
+        List<string> args = new List<string>(new string[] {
             "-F", "NUL", "-tt", "-p", port.ToString(), "-l", user,
-            "-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive",
-            "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=3",
             "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
             "-o", "ClearAllForwardings=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", "UserKnownHostsFile=" + KnownHostsPath, "-o", "GlobalKnownHostsFile=NUL", host
-        };
-        return JoinArguments(args);
+            "-o", "UserKnownHostsFile=" + KnownHostsPath, "-o", "GlobalKnownHostsFile=NUL"
+        });
+        if (authentication == "private-key")
+        {
+            args.AddRange(new string[] {
+                "-o", "PreferredAuthentications=publickey", "-o", "PubkeyAuthentication=yes",
+                "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+                "-o", "IdentityFile=none", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+                "-i", privateKeyPath, "-o", "NumberOfPasswordPrompts=3"
+            });
+        }
+        else
+        {
+            args.AddRange(new string[] {
+                "-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=3"
+            });
+        }
+        args.Add(host);
+        return JoinArguments(args.ToArray());
     }
 
     static string JoinArguments(string[] args)
@@ -791,6 +1021,13 @@ static class ClassDockSshTerminal
             if (!(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == ':'))
                 throw new InvalidOperationException("bad-ssh-host");
         return host;
+    }
+
+    static string ValidateAuthentication(string value)
+    {
+        string authentication = (value ?? "").Trim();
+        if (authentication == "password" || authentication == "private-key") return authentication;
+        throw new InvalidOperationException("bad-ssh-authentication");
     }
 
     static string ValidateUser(string value)

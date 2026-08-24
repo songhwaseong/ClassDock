@@ -3731,7 +3731,8 @@ async function saveViaServer(text, ownerDoc, name){
 }
 
 // ===== 에디터 편의: 코드 글자 크기·폰트(모든 에디터 공유·저장) =====
-let _codeFontSize = (() => { const v = Number(localStorage.getItem("pyCodeFontSize")); return (v >= 11 && v <= 30) ? v : 13; })();
+const CODE_FONT_SIZE_BASE = 13;                     // 배율 1.0 의 기준 크기(--code-scale 계산에 씀)
+let _codeFontSize = (() => { const v = Number(localStorage.getItem("pyCodeFontSize")); return (v >= 11 && v <= 30) ? v : CODE_FONT_SIZE_BASE; })();
 // 시스템에 설치된 폰트만 후보로 둔다(웹폰트는 비동기 로드라 첫 렌더에서 겹침이 어긋날 수 있음).
 // value 가 ""이면 기본(Consolas) 사용. 각 stack 끝에 폴백을 두어 미설치 폰트도 안전하게 다음 후보로 넘어간다.
 // 고정폭/가변폭은 실제 설치된 글꼴을 측정해 자동으로 나눈다(isMonospaceFont) → 후보를 추가할 때 따로 표시할 필요 없음.
@@ -3810,6 +3811,8 @@ const _editorHosts = new Set();
 function applyCodeFontMetrics(host){
   host.style.setProperty("--code-fs", _codeFontSize + "px");
   host.style.setProperty("--code-lh", Math.round(_codeFontSize * 1.6) + "px");
+  // 단위 없는 배율 — 마크다운 본문·제목처럼 px 로 고정된 곳을 코드 글자 크기에 비례해 함께 키운다.
+  host.style.setProperty("--code-scale", String(Math.round(_codeFontSize / CODE_FONT_SIZE_BASE * 1000) / 1000));
   const stack = codeFontStack(_codeFontFamily);
   if (stack) host.style.setProperty("--code-ff", stack);
   else host.style.removeProperty("--code-ff");

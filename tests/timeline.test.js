@@ -258,6 +258,15 @@ test("유적지 주소는 카드와 발표 화면에서 기존 지도 검색으�
   assert.match(source, /event\.placeAddress \|\| event\.placeName/);
 });
 
+test("연대표 카드는 한 번 누르면 발표 보기, 두 번 누르면 수정 화면을 연다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/timeline.js"), "utf8");
+  assert.match(source, /card\.addEventListener\("click", \(\) => \{[\s\S]*?cardPreviewTimer = setTimeout\(\(\) => \{[\s\S]*?startPresent\(event\.id\);[\s\S]*?\}, 220\);/);
+  assert.match(source, /card\.addEventListener\("dblclick", \(\) => \{[\s\S]*?clearTimeout\(cardPreviewTimer\);[\s\S]*?openEventDialog\(event\.id\);/);
+  assert.match(source, /const startPresent = eventId => \{[\s\S]*?const startId = eventId \|\| selectedId;/);
+  assert.match(source, /presentBtn\.addEventListener\("click", \(\) => startPresent\(\)\);/);
+  assert.match(source, /clearTimeout\(cardPreviewTimer\);[\s\S]*?if \(trackResizeObserver\) trackResizeObserver\.disconnect\(\);/);
+});
+
 test("연대표 항목 우클릭 메뉴는 수정·같은 시각 순서·지도·삭제를 제공한다", () => {
   const root = path.join(__dirname, "..");
   const source = fs.readFileSync(path.join(root, "src/js/timeline.js"), "utf8");

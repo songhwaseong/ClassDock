@@ -1,7 +1,7 @@
 "use strict";
 
 // EXE 전용 SSH 원격 터미널. Windows OpenSSH + ConPTY의 바이트 스트림을 xterm.js에 연결한다.
-// 저장하는 값은 호스트·포트·계정뿐이며 비밀번호와 서버 키 원문은 브라우저 저장소에 넣지 않는다.
+// 저장하는 값은 호스트·포트·계정·인증 방식뿐이며 비밀번호·키 암호·개인키 경로는 브라우저 저장소에 넣지 않는다.
 const MNRemoteTerminal = (() => {
   const PROFILE_KEY = "classdockSshProfileV1";
   const DOCK_KEY = "classdockSshDockV2";
@@ -15,7 +15,8 @@ const MNRemoteTerminal = (() => {
   };
   const encoder = new TextEncoder();
   let dock = null, divider = null, card = null, rail = null, formView = null, terminalView = null, terminalHost = null;
-  let hostInput = null, portInput = null, userInput = null, passwordInput = null, rememberInput = null;
+  let hostInput = null, portInput = null, userInput = null, authMethodInput = null, passwordInput = null, rememberInput = null;
+  let credentialLabel = null, keyField = null, keyButton = null, keyNameEl = null;
   let statusEl = null, connectButton = null, terminalTitle = null, terminalStatus = null;
   let disconnectButton = null, retryButton = null;
   let fontSelect = null, fontSizeOutput = null, lineHeightButton = null;
@@ -26,6 +27,7 @@ const MNRemoteTerminal = (() => {
   let dockSide = "right", dockWidth = 520, dockCollapsed = false;
   let fontChoice = "cascadia", terminalFontSize = 14, terminalLineHeight = 1.15;
   let diagnosticTail = "", diagnosticDecoder = new TextDecoder(), pollFailures = 0, pollStatusBeforeRetry = "";
+  let selectedKeyId = "", selectedKeyName = "", keyPicking = false, keyPickGeneration = 0;
 
   const encodeStrings = (values) => {
     const chunks = [];
@@ -67,6 +69,14 @@ const MNRemoteTerminal = (() => {
     const text = stripTerminalCodes(output);
     if (stopped) return { status:"연결 끊김", message:"사용자가 SSH 연결을 끊었습니다." };
     if (Number(code) === 0) return { status:"정상 종료", message:"서버 셸이 정상적으로 종료되었습니다." };
+    if (/incorrect passphrase|bad passphrase/i.test(text))
+      return { status:"키 암호 오류", message:"개인키 암호가 올바르지 않습니다. 키 암호를 확인한 뒤 재접속하세요." };
+    if (/UNPROTECTED PRIVATE KEY FILE|permissions .*private key|bad permissions/i.test(text))
+      return { status:"개인키 권한 오류", message:"Windows OpenSSH가 개인키 파일 권한을 안전하지 않다고 판단했습니다. 파일 소유자와 접근 권한을 확인하세요." };
+    if (/Load key .*invalid format|error in libcrypto/i.test(text))
+      return { status:"개인키 오류", message:"Windows OpenSSH가 선택한 개인키 형식을 읽지 못했습니다. OpenSSH 또는 PEM 개인키인지 확인하세요." };
+    if (/Permission denied \(publickey/i.test(text))
+      return { status:"인증 실패", message:"서버가 선택한 개인키를 허용하지 않았습니다. 계정과 서버의 authorized_keys 등록 상태를 확인하세요." };
     if (/Permission denied|Authentication failed|Too many authentication failures/i.test(text))
       return { status:"인증 실패", message:"계정 또는 비밀번호가 올바르지 않습니다. 계정을 확인하고 비밀번호를 다시 입력하세요." };
     if (/Connection timed out|Operation timed out|connect to host .* timed out/i.test(text))
@@ -96,6 +106,16 @@ const MNRemoteTerminal = (() => {
     if (/bad-ssh-host/.test(raw)) return "IP 주소 또는 도메인 형식이 올바르지 않습니다.";
     if (/bad-ssh-port/.test(raw)) return "포트는 1~65535 사이의 숫자로 입력하세요.";
     if (/bad-ssh-user/.test(raw)) return "계정 이름을 확인하세요.";
+    if (/bad-ssh-authentication/.test(raw)) return "SSH 인증 방식을 다시 선택하세요.";
+    if (/ssh-private-key-not-selected/.test(raw)) return "개인키 파일을 다시 선택하세요.";
+    if (/ssh-private-key-not-found/.test(raw)) return "선택한 개인키 파일을 찾을 수 없습니다. 파일을 다시 선택하세요.";
+    if (/ssh-private-key-size/.test(raw)) return "개인키 파일이 비어 있거나 허용 크기(1MB)를 넘습니다.";
+    if (/ssh-private-key-picker-failed/.test(raw)) return "Windows 개인키 선택창을 열지 못했습니다. ClassDock을 다시 실행한 뒤 시도하세요.";
+    if (/ssh-private-key-read-failed/.test(raw)) return "개인키 파일을 읽지 못했습니다. 파일 접근 권한을 확인하세요.";
+    if (/ssh-private-key-is-public/.test(raw)) return "공개키(.pub)가 아닌 개인키 파일을 선택하세요.";
+    if (/ssh-private-key-putty-format/.test(raw)) return "PuTTY .ppk 키는 바로 사용할 수 없습니다. PuTTYgen에서 OpenSSH 개인키로 변환하세요.";
+    if (/ssh-private-key-invalid-format/.test(raw)) return "OpenSSH 또는 PEM 형식의 개인키 파일을 선택하세요.";
+    if (/bad-ssh-key-passphrase/.test(raw)) return "개인키 암호가 너무 길거나 올바르지 않습니다.";
     if (/ssh-host-key-changed/.test(raw)) return "저장된 서버 지문과 새 지문이 다릅니다.";
     if (/ssh-client-not-found|Windows OpenSSH Client/.test(raw)) return "Windows OpenSSH Client가 필요합니다. Windows 선택적 기능에서 OpenSSH 클라이언트를 설치하세요.";
     if (/conpty/.test(raw)) return "이 Windows 환경에서는 대화형 터미널을 시작하지 못했습니다.";
@@ -113,7 +133,8 @@ const MNRemoteTerminal = (() => {
     try {
       if (!rememberInput.checked) { localStorage.removeItem(PROFILE_KEY); return; }
       localStorage.setItem(PROFILE_KEY, JSON.stringify({
-        host:hostInput.value.trim(), port:portInput.value.trim(), user:userInput.value.trim()
+        host:hostInput.value.trim(), port:portInput.value.trim(), user:userInput.value.trim(),
+        authentication:authMethodInput.value === "private-key" ? "private-key" : "password"
       }));
     } catch(_){}
   };
@@ -241,6 +262,51 @@ const MNRemoteTerminal = (() => {
     const el = document.createElement("button"); el.type = "button"; el.className = className; el.textContent = copy; return el;
   };
 
+  const updateAuthenticationUi = () => {
+    if (!authMethodInput || !keyField || !credentialLabel) return;
+    const privateKey = authMethodInput.value === "private-key";
+    keyField.hidden = !privateKey;
+    credentialLabel.textContent = privateKey ? "키 암호 (암호화된 키만)" : "비밀번호";
+    passwordInput.placeholder = privateKey ? "암호가 없는 키는 비워 두세요" : "SSH 비밀번호";
+    passwordInput.required = !privateKey;
+    if (keyNameEl) keyNameEl.textContent = selectedKeyName || "선택된 키 없음";
+  };
+
+  const choosePrivateKey = async () => {
+    if (keyPicking) return;
+    if (location.protocol !== "http:" && location.protocol !== "https:"){
+      statusEl.textContent = "개인키 선택은 ClassDock.exe에서만 사용할 수 있습니다.";
+      statusEl.classList.add("error"); return;
+    }
+    keyPicking = true; keyButton.disabled = true;
+    const pick = ++keyPickGeneration;
+    statusEl.textContent = "Windows 파일 선택창에서 개인키를 선택하세요…";
+    statusEl.classList.remove("error");
+    try {
+      const start = await fetchTimed("/ssh-key-pick", { method:"POST", headers:{ "X-ClassDock-Action":"1" } }, 10000);
+      if (!start.ok) throw new Error(await start.text());
+      for (let attempt = 0; attempt < 1200 && pick === keyPickGeneration; attempt++){
+        const data = await responseData(await fetchTimed("/ssh-key-pick-status", {
+          cache:"no-store", headers:{ "X-ClassDock-Action":"1" }
+        }, 10000));
+        if (data.state === "selected"){
+          selectedKeyId = String(data.id || ""); selectedKeyName = String(data.name || "");
+          keyNameEl.textContent = selectedKeyName || "개인키 선택됨";
+          statusEl.textContent = selectedKeyName + " 개인키를 선택했습니다.";
+          return;
+        }
+        if (data.state === "cancelled") { statusEl.textContent = "개인키 선택을 취소했습니다."; return; }
+        if (data.state === "error") throw new Error(String(data.name || "ssh-private-key-invalid-format"));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (pick === keyPickGeneration) throw new Error("개인키 선택 시간이 초과되었습니다.");
+    } catch(error){
+      statusEl.textContent = friendlyError(error); statusEl.classList.add("error");
+    } finally {
+      if (pick === keyPickGeneration) { keyPicking = false; keyButton.disabled = false; }
+    }
+  };
+
   const ensureUi = () => {
     if (dock) return;
     const main = document.querySelector("main");
@@ -270,13 +336,25 @@ const MNRemoteTerminal = (() => {
     hostInput = document.createElement("input"); hostInput.type = "text"; hostInput.placeholder = "예: 192.168.0.20"; hostInput.autocomplete = "off"; hostInput.spellcheck = false; hostInput.maxLength = 253;
     portInput = document.createElement("input"); portInput.type = "number"; portInput.min = "1"; portInput.max = "65535"; portInput.value = "22"; portInput.inputMode = "numeric";
     userInput = document.createElement("input"); userInput.type = "text"; userInput.placeholder = "예: student"; userInput.autocomplete = "username"; userInput.spellcheck = false; userInput.maxLength = 128;
+    authMethodInput = document.createElement("select"); authMethodInput.setAttribute("aria-label", "SSH 인증 방식");
+    [["password","비밀번호"],["private-key","개인키"]].forEach(([value, label]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = label; authMethodInput.appendChild(option);
+    });
     passwordInput = document.createElement("input"); passwordInput.type = "password"; passwordInput.autocomplete = "off"; passwordInput.setAttribute("data-lpignore", "true"); passwordInput.maxLength = 16384;
+    const passwordWrap = document.createElement("label"); passwordWrap.className = "ssh-field ssh-credential-field";
+    credentialLabel = document.createElement("span"); credentialLabel.textContent = "비밀번호";
+    passwordWrap.append(credentialLabel, passwordInput);
+    const keyPicker = document.createElement("div"); keyPicker.className = "ssh-key-picker";
+    keyButton = button("개인키 선택…", "btn");
+    keyNameEl = document.createElement("span"); keyNameEl.textContent = "선택된 키 없음"; keyNameEl.title = "개인키 경로는 브라우저에 전달하거나 저장하지 않습니다.";
+    keyPicker.append(keyButton, keyNameEl);
+    keyField = field("개인키 파일", keyPicker); keyField.classList.add("ssh-key-field"); keyField.hidden = true;
     const grid = document.createElement("div"); grid.className = "ssh-connect-grid";
-    grid.append(field("호스트", hostInput), field("포트", portInput), field("계정", userInput), field("비밀번호", passwordInput));
+    grid.append(field("호스트", hostInput), field("포트", portInput), field("계정", userInput), field("인증 방식", authMethodInput), keyField, passwordWrap);
 
     const remember = document.createElement("label"); remember.className = "settings-check ssh-remember";
     rememberInput = document.createElement("input"); rememberInput.type = "checkbox"; rememberInput.checked = true;
-    const rememberCopy = document.createElement("span"); rememberCopy.textContent = "IP·포트·계정 기억 (비밀번호는 저장하지 않음)";
+    const rememberCopy = document.createElement("span"); rememberCopy.textContent = "IP·포트·계정·인증 방식 기억 (비밀번호·키 암호·개인키 경로는 저장하지 않음)";
     remember.append(rememberInput, rememberCopy);
     const security = document.createElement("p"); security.className = "ssh-security-note";
     security.textContent = "처음 접속하는 서버는 SHA-256 지문을 확인한 뒤 신뢰해야 합니다. 관리자에게 받은 지문과 비교하세요.";
@@ -327,8 +405,10 @@ const MNRemoteTerminal = (() => {
     divider.addEventListener("pointerdown", beginDockResize);
     divider.addEventListener("dblclick", toggleDockSide);
     disconnectButton.addEventListener("click", async () => { generation++; await disconnectSession(true); });
-    retryButton.addEventListener("click", () => prepareReconnect("비밀번호를 다시 입력한 뒤 재접속하세요."));
-    changeServer.addEventListener("click", () => prepareReconnect("접속 정보를 확인하고 비밀번호를 다시 입력하세요."));
+    retryButton.addEventListener("click", () => prepareReconnect());
+    changeServer.addEventListener("click", () => prepareReconnect("접속 정보를 확인한 뒤 재접속하세요."));
+    authMethodInput.addEventListener("change", () => { passwordInput.value = ""; updateAuthenticationUi(); });
+    keyButton.addEventListener("click", choosePrivateKey);
     fontSelect.addEventListener("change", () => { fontChoice = fontSelect.value; applyFontState(); });
     fontMinus.addEventListener("click", () => changeFontSize(-1));
     fontPlus.addEventListener("click", () => changeFontSize(1));
@@ -345,6 +425,7 @@ const MNRemoteTerminal = (() => {
     window.addEventListener("beforeunload", () => {
       if (sessionId) fetch("/ssh-session-stop?id=" + encodeURIComponent(sessionId), { method:"POST", keepalive:true }).catch(() => {});
     });
+    updateAuthenticationUi();
   };
 
   const showForm = (message="", focusPassword=false) => {
@@ -363,12 +444,16 @@ const MNRemoteTerminal = (() => {
     await disconnectSession(false);
     passwordInput.value = "";
     setDockCollapsed(false);
-    showForm(message || "비밀번호를 다시 입력한 뒤 재접속하세요.", true);
+    const privateKey = authMethodInput.value === "private-key";
+    showForm(message || (privateKey
+      ? "선택한 개인키와 키 암호를 확인한 뒤 재접속하세요."
+      : "비밀번호를 다시 입력한 뒤 재접속하세요."), !privateKey);
   };
 
   const setFormBusy = (busy, copy="") => {
     connectButton.disabled = busy;
-    hostInput.disabled = busy; portInput.disabled = busy; userInput.disabled = busy; passwordInput.disabled = busy; rememberInput.disabled = busy;
+    hostInput.disabled = busy; portInput.disabled = busy; userInput.disabled = busy; authMethodInput.disabled = busy;
+    passwordInput.disabled = busy; rememberInput.disabled = busy; keyButton.disabled = busy || keyPicking;
     connectButton.textContent = busy ? "확인 중…" : "접속";
     statusEl.textContent = copy;
     statusEl.classList.remove("error");
@@ -390,6 +475,8 @@ const MNRemoteTerminal = (() => {
     if (!hostInput.value) hostInput.value = String(profile.host || "");
     if (portInput.value === "22" && profile.port) portInput.value = String(profile.port);
     if (!userInput.value) userInput.value = String(profile.user || "");
+    if (profile.authentication === "private-key" || profile.authentication === "password") authMethodInput.value = profile.authentication;
+    updateAuthenticationUi();
     passwordInput.value = "";
     try {
       if (location.protocol !== "http:" && location.protocol !== "https:") throw new Error("원격 터미널은 ClassDock.exe에서만 사용할 수 있습니다.");
@@ -405,6 +492,7 @@ const MNRemoteTerminal = (() => {
     generation++;
     await disconnectSession(false);
     if (passwordInput) passwordInput.value = "";
+    keyPickGeneration++; keyPicking = false;
     if (dock) dock.hidden = true;
     if (divider) divider.hidden = true;
     notifyLayout();
@@ -492,8 +580,11 @@ const MNRemoteTerminal = (() => {
 
   const connect = async () => {
     const host = hostInput.value.trim(), port = portInput.value.trim(), user = userInput.value.trim();
-    const password = passwordInput.value;
-    if (!host || !port || !user || !password){ statusEl.textContent = "호스트·포트·계정·비밀번호를 모두 입력하세요."; statusEl.classList.add("error"); return; }
+    const authentication = authMethodInput.value === "private-key" ? "private-key" : "password";
+    const secret = passwordInput.value;
+    if (!host || !port || !user){ statusEl.textContent = "호스트·포트·계정을 모두 입력하세요."; statusEl.classList.add("error"); return; }
+    if (authentication === "password" && !secret){ statusEl.textContent = "SSH 비밀번호를 입력하세요."; statusEl.classList.add("error"); return; }
+    if (authentication === "private-key" && !selectedKeyId){ statusEl.textContent = "접속에 사용할 개인키 파일을 선택하세요."; statusEl.classList.add("error"); return; }
     setFormBusy(true, "서버 지문을 확인하고 있습니다…");
     const myGeneration = ++generation;
     try {
@@ -501,7 +592,13 @@ const MNRemoteTerminal = (() => {
         method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:encodeStrings([host, port])
       }, 32000));
       if (myGeneration !== generation) return;
-      if (!(await confirmHostKey(scan))) { passwordInput.value = ""; setFormBusy(false, "접속을 취소했습니다. 비밀번호를 다시 입력하세요."); return; }
+      if (!(await confirmHostKey(scan))) {
+        passwordInput.value = "";
+        setFormBusy(false, authentication === "private-key"
+          ? "접속을 취소했습니다. 개인키를 확인한 뒤 다시 접속하세요."
+          : "접속을 취소했습니다. 비밀번호를 다시 입력하세요.");
+        return;
+      }
       setFormBusy(true, "대화형 SSH 터미널을 시작하고 있습니다…");
       terminalView.hidden = false; formView.hidden = true;
       await initializeXterm();
@@ -511,11 +608,12 @@ const MNRemoteTerminal = (() => {
       terminalStatus.classList.remove("error"); terminalStatus.removeAttribute("title");
       setSessionControls(true);
       terminal.writeln("\x1b[36mClassDock SSH · " + terminalTitle.textContent + "\x1b[0m");
+      if (authentication === "private-key") terminal.writeln("\x1b[90m인증: 개인키 · " + selectedKeyName + "\x1b[0m");
       const opened = await responseData(await fetchTimed("/ssh-session-open", {
         method:"POST", headers:{ "Content-Type":"application/octet-stream" },
-        body:encodeStrings([host, port, user, password, currentCols, currentRows])
+        body:encodeStrings([authentication, host, port, user, secret, selectedKeyId, currentCols, currentRows])
       }, 20000));
-      passwordInput.value = ""; // 서버가 세션을 받은 즉시 화면 메모리에서도 지운다.
+      passwordInput.value = ""; // 서버가 세션을 받은 즉시 비밀번호 또는 키 암호를 화면 메모리에서도 지운다.
       if (myGeneration !== generation){
         fetch("/ssh-session-stop?id=" + encodeURIComponent(opened.id), { method:"POST", keepalive:true }).catch(() => {}); return;
       }
@@ -592,7 +690,9 @@ const MNRemoteTerminal = (() => {
     setSessionControls(false);
     if (terminal){
       terminal.writeln("\r\n\x1b[33m[" + diagnosis.status + "] " + diagnosis.message + "\x1b[0m");
-      terminal.writeln("\x1b[90m상단의 [재접속]을 누르면 IP·포트·계정은 유지되고 비밀번호만 다시 입력합니다.\x1b[0m");
+      terminal.writeln(authMethodInput.value === "private-key"
+        ? "\x1b[90m상단의 [재접속]을 누르면 접속 정보와 선택한 개인키를 유지합니다.\x1b[0m"
+        : "\x1b[90m상단의 [재접속]을 누르면 IP·포트·계정은 유지되고 비밀번호만 다시 입력합니다.\x1b[0m");
     }
   };
 

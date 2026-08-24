@@ -48,9 +48,13 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-connect-grid{display:grid;grid-template-columns:minmax(180px,2fr) minmax(90px,.65fr);gap:14px 12px;margin-top:20px}
 .ssh-field{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:700;color:var(--muted,#475569)}
 .ssh-field:nth-child(3),.ssh-field:nth-child(4){grid-column:auto}
-.ssh-field input{height:42px;border:1px solid var(--line,#cbd5e1);border-radius:9px;padding:0 11px;background:var(--panel,#fff);color:var(--text,#0f172a);font:inherit;font-weight:500;outline:none}
-.ssh-field input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
-.ssh-field input:disabled{opacity:.65}
+.ssh-field input,.ssh-field select{height:42px;border:1px solid var(--line,#cbd5e1);border-radius:9px;padding:0 11px;background:var(--panel,#fff);color:var(--text,#0f172a);font:inherit;font-weight:500;outline:none}
+.ssh-field input:focus,.ssh-field select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.ssh-field input:disabled,.ssh-field select:disabled{opacity:.65}
+.ssh-key-field,.ssh-credential-field{grid-column:1/-1}
+.ssh-key-picker{display:flex;align-items:center;min-width:0;gap:10px}
+.ssh-key-picker .btn{flex:0 0 auto;min-height:38px}
+.ssh-key-picker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text,#0f172a);font-weight:600}
 .ssh-remember{margin-top:16px}
 .ssh-security-note{margin:14px 0 0;padding:11px 13px;border-radius:9px;background:rgba(59,130,246,.08);color:var(--muted,#475569);font-size:12.5px;line-height:1.55}
 .ssh-connect-status{min-height:22px;margin-top:12px;color:#2563eb;font-size:13px;font-weight:700}
@@ -75,7 +79,7 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-xterm-host .xterm{height:100%}
 .ssh-xterm-host .xterm-viewport{border-radius:4px}
 html[data-theme="dark"] .ssh-terminal-card{background:#111827}
-html[data-theme="dark"] .ssh-field input{background:#0f172a;color:#e5edf8;border-color:#334155}
+html[data-theme="dark"] .ssh-field input,html[data-theme="dark"] .ssh-field select{background:#0f172a;color:#e5edf8;border-color:#334155}
 html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 @media(max-width:680px){
   .ssh-dock{flex-basis:min(var(--ssh-dock-width,360px),70vw);width:min(var(--ssh-dock-width,360px),70vw)}
@@ -4088,7 +4092,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .nbv-md{cursor:text}
   .nbv-md-empty{color:var(--muted);font-style:italic}
   .nbv-md-edit{display:block;width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:6px;
-    padding:10px 12px;font-family:Consolas,"Courier New",monospace;font-size:13px;line-height:1.5;resize:none;
+    padding:10px 12px;font-family:var(--code-ff,Consolas,"Courier New",monospace);font-size:var(--code-fs,13px);
+    line-height:var(--code-lh,21px);resize:none;
     background:var(--code-bg);color:var(--code-text);outline:none;overflow:hidden}
   .nbv-md-edit:focus{border-color:#7c3aed}
   /* P3 실행: 셀 실행 버튼·상태 */
@@ -5096,6 +5101,14 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .md-host :not(pre)>code{background:#f1f5f9;color:#be123c;padding:2px 5px;border-radius:5px}
   .md-host a{color:var(--accent);text-decoration:none}.md-host a:hover{text-decoration:underline}
   .md-host hr{border:0;border-top:1px solid var(--border);margin:24px 0}
+  /* 노트북 마크다운 셀: A− / A+ (코드 글자 크기)에 본문·제목을 함께 맞춘다.
+     본문은 배율만 곱하고, px 로 고정된 제목은 같은 배율을 곱해 비율을 그대로 지킨다.
+     .md-host 제목 규칙과 특정도가 같으므로 반드시 그 뒤에 와야 한다. */
+  .nbv-md,.nbv-md-preview{font-size:calc(1em * var(--code-scale,1))}
+  .nbv-md h1,.nbv-md-preview h1{font-size:calc(30px * var(--code-scale,1))}
+  .nbv-md h2,.nbv-md-preview h2{font-size:calc(24px * var(--code-scale,1))}
+  .nbv-md h3,.nbv-md-preview h3{font-size:calc(19px * var(--code-scale,1))}
+  .nbv-md h4,.nbv-md-preview h4{font-size:calc(16px * var(--code-scale,1))}
   .txt-host{max-width:920px;margin:0 auto;background:#fff;border-radius:8px;padding:30px 34px;
     box-shadow:0 4px 18px rgba(15,23,42,.12);color:#1e293b;user-select:text;-webkit-user-select:text;cursor:text}
   .txt-host pre{font-family:Consolas,"Courier New",monospace;font-size:14px;line-height:1.65;
