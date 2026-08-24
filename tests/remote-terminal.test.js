@@ -124,3 +124,27 @@ test("종료된 터미널은 비밀번호만 비우고 재접속하며 무한 �
   assert.match(ui, /fetchTimed\("\/ssh-host-key-scan"/);
   assert.match(ui, /pointercancel/);
 });
+
+test("터미널 글꼴·크기·줄 간격을 즉시 적용하고 안전한 값만 기억한다", () => {
+  assert.match(ui, /const FONT_KEY = "classdockSshFontV1"/);
+  assert.match(ui, /cascadia:[^\n]*Cascadia Mono/);
+  assert.match(ui, /d2coding:[^\n]*D2Coding/);
+  assert.match(ui, /nanum:[^\n]*NanumGothicCoding/);
+  assert.match(ui, /terminalFontSize = Math\.max\(11, Math\.min\(24/);
+  assert.match(ui, /const values = \[1, 1\.15, 1\.3, 1\.5\]/);
+  assert.match(ui, /terminal\.options\.fontFamily = FONT_STACKS\[fontChoice\]/);
+  assert.match(ui, /terminal\.options\.fontSize = terminalFontSize/);
+  assert.match(ui, /terminal\.options\.lineHeight = terminalLineHeight/);
+  assert.match(ui, /localStorage\.setItem\(FONT_KEY/);
+  assert.match(ui, /aria-label", "터미널 글꼴 설정/);
+});
+
+test("실제 xterm 셀 크기와 하단 안전 여백으로 작업 표시줄 위에 마지막 줄을 유지한다", () => {
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(ui, /querySelector\("\.xterm-screen"\)/);
+  assert.match(ui, /screenRect\.height \/ terminal\.rows/);
+  assert.match(ui, /Math\.floor\(innerHeight \/ cellHeight\) - 1/);
+  assert.match(ui, /terminalView\.hidden \|\| dockCollapsed \|\| dock\.hidden/);
+  assert.match(ui, /window\.visualViewport\.addEventListener\("resize", sendResize\)/);
+  assert.match(css, /\.ssh-xterm-host\{[^}]*overflow:hidden[^}]*padding:10px 12px 16px/);
+});

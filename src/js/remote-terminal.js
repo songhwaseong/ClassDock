@@ -5,16 +5,26 @@
 const MNRemoteTerminal = (() => {
   const PROFILE_KEY = "classdockSshProfileV1";
   const DOCK_KEY = "classdockSshDockV2";
+  const FONT_KEY = "classdockSshFontV1";
+  const FONT_STACKS = {
+    cascadia:'"Cascadia Mono","Cascadia Code",Consolas,"NanumGothicCoding",monospace',
+    consolas:'Consolas,"Cascadia Mono","NanumGothicCoding",monospace',
+    d2coding:'D2Coding,"Cascadia Mono",Consolas,"NanumGothicCoding",monospace',
+    nanum:'"NanumGothicCoding","Nanum Gothic Coding","Cascadia Mono",Consolas,monospace',
+    system:'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace'
+  };
   const encoder = new TextEncoder();
   let dock = null, divider = null, card = null, rail = null, formView = null, terminalView = null, terminalHost = null;
   let hostInput = null, portInput = null, userInput = null, passwordInput = null, rememberInput = null;
   let statusEl = null, connectButton = null, terminalTitle = null, terminalStatus = null;
   let disconnectButton = null, retryButton = null;
+  let fontSelect = null, fontSizeOutput = null, lineHeightButton = null;
   let terminal = null, sessionId = "", outputOffset = 0, generation = 0, inputQueue = [];
   let inputTimer = 0, inputChain = Promise.resolve(), resizeObserver = null, resizeTimer = 0;
   let layoutFrame = 0;
   let currentCols = 100, currentRows = 30;
   let dockSide = "right", dockWidth = 520, dockCollapsed = false;
+  let fontChoice = "cascadia", terminalFontSize = 14, terminalLineHeight = 1.15;
   let diagnosticTail = "", diagnosticDecoder = new TextDecoder(), pollFailures = 0;
 
   const encodeStrings = (values) => {
@@ -122,6 +132,49 @@ const MNRemoteTerminal = (() => {
     try { localStorage.setItem(DOCK_KEY, JSON.stringify({ side:dockSide, width:Math.round(dockWidth) })); } catch(_){}
   };
 
+  const loadFontState = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(FONT_KEY) || "null");
+      if (!value || typeof value !== "object") return;
+      if (Object.prototype.hasOwnProperty.call(FONT_STACKS, value.family)) fontChoice = value.family;
+      const size = Number(value.size), lineHeight = Number(value.lineHeight);
+      if (Number.isFinite(size)) terminalFontSize = Math.max(11, Math.min(24, Math.round(size)));
+      if (Number.isFinite(lineHeight)) terminalLineHeight = Math.max(1, Math.min(1.5, Math.round(lineHeight * 100) / 100));
+    } catch(_){}
+  };
+
+  const storeFontState = () => {
+    try { localStorage.setItem(FONT_KEY, JSON.stringify({ family:fontChoice, size:terminalFontSize, lineHeight:terminalLineHeight })); } catch(_){}
+  };
+
+  const applyFontState = (persist=true) => {
+    if (fontSelect) fontSelect.value = fontChoice;
+    if (fontSizeOutput) fontSizeOutput.textContent = terminalFontSize + "px";
+    if (lineHeightButton){
+      lineHeightButton.textContent = "줄 " + terminalLineHeight.toFixed(2).replace(/0$/, "");
+      lineHeightButton.title = "줄 간격 변경 (현재 " + terminalLineHeight.toFixed(2) + ")";
+    }
+    if (terminal){
+      terminal.options.fontFamily = FONT_STACKS[fontChoice] || FONT_STACKS.cascadia;
+      terminal.options.fontSize = terminalFontSize;
+      terminal.options.lineHeight = terminalLineHeight;
+      setTimeout(sendResize, 40);
+    }
+    if (persist) storeFontState();
+  };
+
+  const changeFontSize = (delta) => {
+    terminalFontSize = Math.max(11, Math.min(24, terminalFontSize + delta));
+    applyFontState();
+  };
+
+  const cycleLineHeight = () => {
+    const values = [1, 1.15, 1.3, 1.5];
+    const index = values.findIndex((value) => Math.abs(value - terminalLineHeight) < 0.01);
+    terminalLineHeight = values[(index + 1) % values.length];
+    applyFontState();
+  };
+
   const notifyLayout = () => {
     if (layoutFrame) return;
     layoutFrame = requestAnimationFrame(() => {
@@ -192,7 +245,7 @@ const MNRemoteTerminal = (() => {
     if (dock) return;
     const main = document.querySelector("main");
     if (!main) throw new Error("작업 영역을 찾지 못했습니다.");
-    loadDockState();
+    loadDockState(); loadFontState();
     divider = document.createElement("div"); divider.className = "ssh-dock-divider"; divider.hidden = true;
     divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.title = "드래그: 터미널 너비 조절 · 더블클릭: 좌우 위치 교환";
     dock = document.createElement("aside"); dock.className = "ssh-dock"; dock.hidden = true;
@@ -247,11 +300,22 @@ const MNRemoteTerminal = (() => {
     retryButton = button("재접속", "btn primary ssh-retry"); retryButton.hidden = true;
     const changeServer = button("접속 정보", "btn ssh-reconnect");
     const terminalClose = button("닫기", "btn primary ssh-terminal-close");
-    terminalActions.append(terminalSwap, terminalCollapse, disconnectButton, retryButton, changeServer, terminalClose); terminalHead.append(terminalIdentity, terminalActions);
+    terminalActions.append(terminalSwap, terminalCollapse, disconnectButton, retryButton, changeServer, terminalClose);
+    const fontControls = document.createElement("div"); fontControls.className = "ssh-font-controls"; fontControls.setAttribute("role", "group"); fontControls.setAttribute("aria-label", "터미널 글꼴 설정");
+    fontSelect = document.createElement("select"); fontSelect.className = "ssh-font-select"; fontSelect.setAttribute("aria-label", "터미널 글꼴");
+    [["cascadia","Cascadia Mono"],["consolas","Consolas"],["d2coding","D2Coding"],["nanum","나눔고딕코딩"],["system","시스템 고정폭"]].forEach(([value, label]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = label; fontSelect.appendChild(option);
+    });
+    const fontMinus = button("−", "ssh-font-step"); fontMinus.title = "터미널 글자 작게"; fontMinus.setAttribute("aria-label", "터미널 글자 작게");
+    fontSizeOutput = document.createElement("output"); fontSizeOutput.className = "ssh-font-size"; fontSizeOutput.setAttribute("aria-live", "polite");
+    const fontPlus = button("+", "ssh-font-step"); fontPlus.title = "터미널 글자 크게"; fontPlus.setAttribute("aria-label", "터미널 글자 크게");
+    lineHeightButton = button("줄 1.15", "ssh-line-height");
+    fontControls.append(fontSelect, fontMinus, fontSizeOutput, fontPlus, lineHeightButton);
+    terminalHead.append(terminalIdentity, terminalActions, fontControls);
     terminalHost = document.createElement("div"); terminalHost.className = "ssh-xterm-host";
     terminalView.append(terminalHead, terminalHost);
     card.append(formView, terminalView); dock.append(rail, card); main.append(divider, dock);
-    applyDockState();
+    applyDockState(); applyFontState(false);
 
     formClose.addEventListener("click", close);
     terminalClose.addEventListener("click", close);
@@ -265,12 +329,19 @@ const MNRemoteTerminal = (() => {
     disconnectButton.addEventListener("click", async () => { generation++; await disconnectSession(true); });
     retryButton.addEventListener("click", () => prepareReconnect("비밀번호를 다시 입력한 뒤 재접속하세요."));
     changeServer.addEventListener("click", () => prepareReconnect("접속 정보를 확인하고 비밀번호를 다시 입력하세요."));
+    fontSelect.addEventListener("change", () => { fontChoice = fontSelect.value; applyFontState(); });
+    fontMinus.addEventListener("click", () => changeFontSize(-1));
+    fontPlus.addEventListener("click", () => changeFontSize(1));
+    lineHeightButton.addEventListener("click", cycleLineHeight);
     formView.addEventListener("submit", (event) => { event.preventDefault(); connect(); });
     formView.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
     });
     // xterm의 Esc·Ctrl 조합이 앱 전역 단축키까지 번지지 않게 한다.
     terminalView.addEventListener("keydown", (event) => event.stopPropagation());
+    // 창 크기와 Windows 작업 표시줄의 사용 가능 영역이 바뀌면 실제 셀 크기로 PTY 행·열을 다시 맞춘다.
+    window.addEventListener("resize", sendResize);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", sendResize);
     window.addEventListener("beforeunload", () => {
       if (sessionId) fetch("/ssh-session-stop?id=" + encodeURIComponent(sessionId), { method:"POST", keepalive:true }).catch(() => {});
     });
@@ -362,18 +433,30 @@ const MNRemoteTerminal = (() => {
   };
 
   const terminalDimensions = () => {
-    const rect = terminalHost.getBoundingClientRect();
-    const fontSize = 14, charWidth = fontSize * 0.62, lineHeight = fontSize * 1.32;
+    const style = window.getComputedStyle(terminalHost);
+    const horizontalPadding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const verticalPadding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const innerWidth = Math.max(0, terminalHost.clientWidth - horizontalPadding);
+    const innerHeight = Math.max(0, terminalHost.clientHeight - verticalPadding);
+    const screen = terminalHost.querySelector(".xterm-screen");
+    const screenRect = screen ? screen.getBoundingClientRect() : null;
+    const measuredCharWidth = terminal && terminal.cols > 0 && screenRect && screenRect.width > 0
+      ? screenRect.width / terminal.cols : 0;
+    const measuredCellHeight = terminal && terminal.rows > 0 && screenRect && screenRect.height > 0
+      ? screenRect.height / terminal.rows : 0;
+    const charWidth = measuredCharWidth > 2 ? measuredCharWidth : terminalFontSize * 0.65;
+    const cellHeight = measuredCellHeight > 4 ? measuredCellHeight : terminalFontSize * terminalLineHeight * 1.12;
     return {
-      cols:Math.max(20, Math.min(300, Math.floor((rect.width - 24) / charWidth))),
-      rows:Math.max(5, Math.min(120, Math.floor((rect.height - 20) / lineHeight)))
+      cols:Math.max(20, Math.min(300, Math.floor(innerWidth / charWidth))),
+      // WebView 배율·작업 표시줄 변화로 마지막 줄이 잘리지 않도록 한 줄을 안전 여백으로 둔다.
+      rows:Math.max(5, Math.min(120, Math.floor(innerHeight / cellHeight) - 1))
     };
   };
 
   const sendResize = () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      if (!terminal || !sessionId || terminalView.hidden) return;
+      if (!terminal || !sessionId || terminalView.hidden || dockCollapsed || dock.hidden) return;
       const size = terminalDimensions();
       if (size.cols === currentCols && size.rows === currentRows) return;
       currentCols = size.cols; currentRows = size.rows;
@@ -393,7 +476,7 @@ const MNRemoteTerminal = (() => {
     const dark = document.documentElement.getAttribute("data-theme") === "dark" || document.body.classList.contains("dark");
     terminal = new Terminal({
       cols:100, rows:30, cursorBlink:true, cursorStyle:"block", scrollback:5000,
-      fontFamily:"Cascadia Mono, Consolas, NanumGothic, monospace", fontSize:14, lineHeight:1.15,
+      fontFamily:FONT_STACKS[fontChoice] || FONT_STACKS.cascadia, fontSize:terminalFontSize, lineHeight:terminalLineHeight,
       allowTransparency:false, screenReaderMode:false, convertEol:false,
       theme: dark
         ? { background:"#0b1220", foreground:"#e5edf8", cursor:"#60a5fa", selectionBackground:"#31537a" }

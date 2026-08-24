@@ -56,7 +56,7 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-connect-status{min-height:22px;margin-top:12px;color:#2563eb;font-size:13px;font-weight:700}
 .ssh-connect-status.error{color:#dc2626}
 .ssh-session-view{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;background:#101827}
-.ssh-session-head{align-items:center;padding:10px 12px;border-bottom:1px solid #28374d;background:#152033;color:#e5edf8}
+.ssh-session-head{align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid #28374d;background:#152033;color:#e5edf8}
 .ssh-session-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:2px}
 .ssh-session-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 14px/1.3 "Cascadia Mono",Consolas,monospace}
 .ssh-session-status{color:#93a4b8;font-size:11.5px}
@@ -65,7 +65,13 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-session-actions .btn{min-height:32px;padding:5px 10px;border-color:#40516a;background:#1e2c43;color:#e5edf8}
 .ssh-session-actions .btn:hover{background:#293a55}
 .ssh-session-actions .primary{border-color:#2563eb;background:#2563eb}
-.ssh-xterm-host{flex:1;min-width:0;min-height:0;padding:10px 12px;background:#101827;box-sizing:border-box}
+.ssh-font-controls{display:flex;align-items:center;gap:5px;width:100%;padding-top:8px;border-top:1px solid rgba(148,163,184,.18)}
+.ssh-font-select{min-width:0;max-width:180px;height:30px;padding:0 7px;border:1px solid #40516a;border-radius:7px;background:#1e2c43;color:#e5edf8;font:12px inherit;cursor:pointer}
+.ssh-font-step,.ssh-line-height{height:30px;min-width:30px;padding:3px 8px;border:1px solid #40516a;border-radius:7px;background:#1e2c43;color:#e5edf8;font:12px inherit;cursor:pointer}
+.ssh-font-step{font-size:17px;line-height:1}.ssh-font-step:hover,.ssh-line-height:hover,.ssh-font-select:hover{background:#293a55}
+.ssh-font-size{min-width:40px;color:#cbd5e1;text-align:center;font:11px/1.2 Consolas,monospace}
+.ssh-line-height{margin-left:auto;white-space:nowrap}
+.ssh-xterm-host{flex:1;min-width:0;min-height:0;overflow:hidden;padding:10px 12px 16px;background:#101827;box-sizing:border-box}
 .ssh-xterm-host .xterm{height:100%}
 .ssh-xterm-host .xterm-viewport{border-radius:4px}
 html[data-theme="dark"] .ssh-terminal-card{background:#111827}
