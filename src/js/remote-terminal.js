@@ -25,7 +25,7 @@ const MNRemoteTerminal = (() => {
   let currentCols = 100, currentRows = 30;
   let dockSide = "right", dockWidth = 520, dockCollapsed = false;
   let fontChoice = "cascadia", terminalFontSize = 14, terminalLineHeight = 1.15;
-  let diagnosticTail = "", diagnosticDecoder = new TextDecoder(), pollFailures = 0;
+  let diagnosticTail = "", diagnosticDecoder = new TextDecoder(), pollFailures = 0, pollStatusBeforeRetry = "";
 
   const encodeStrings = (values) => {
     const chunks = [];
@@ -505,7 +505,7 @@ const MNRemoteTerminal = (() => {
       setFormBusy(true, "대화형 SSH 터미널을 시작하고 있습니다…");
       terminalView.hidden = false; formView.hidden = true;
       await initializeXterm();
-      diagnosticTail = ""; diagnosticDecoder = new TextDecoder(); pollFailures = 0;
+      diagnosticTail = ""; diagnosticDecoder = new TextDecoder(); pollFailures = 0; pollStatusBeforeRetry = "";
       terminalTitle.textContent = user + "@" + host + (port === "22" ? "" : ":" + port);
       terminalStatus.textContent = "연결 중";
       terminalStatus.classList.remove("error"); terminalStatus.removeAttribute("title");
@@ -602,7 +602,12 @@ const MNRemoteTerminal = (() => {
       try {
         const data = await responseData(await fetch("/ssh-session-poll?id=" + encodeURIComponent(id) + "&offset=" + outputOffset, { cache:"no-store" }));
         if (id !== sessionId || myGeneration !== generation) return;
+        if (pollFailures > 0){
+          terminalStatus.textContent = pollStatusBeforeRetry || "접속됨";
+          terminalStatus.removeAttribute("title");
+        }
         pollFailures = 0;
+        pollStatusBeforeRetry = "";
         if (data.reset && outputOffset > 0 && terminal){ terminal.reset(); terminal.writeln("\x1b[33m[오래된 터미널 출력이 생략되었습니다.]\x1b[0m"); }
         const bytes = data.data ? decodeBase64(data.data) : null;
         if (bytes){ appendDiagnostic(bytes); await writeTerminal(bytes); }
@@ -614,8 +619,10 @@ const MNRemoteTerminal = (() => {
         }
       } catch(error){
         if (id !== sessionId || myGeneration !== generation) return;
+        if (pollFailures === 0) pollStatusBeforeRetry = terminalStatus.textContent;
         pollFailures++;
         terminalStatus.textContent = "상태 확인 재시도 " + pollFailures + "/12";
+        terminalStatus.title = friendlyError(error);
         if (pollFailures >= 12){
           sessionId = "";
           terminalStatus.textContent = "연결 상태 확인 실패";
@@ -626,16 +633,15 @@ const MNRemoteTerminal = (() => {
           fetch("/ssh-session-stop?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 250 * pollFailures)));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 60 * pollFailures)));
         continue;
       }
-      await new Promise((resolve) => setTimeout(resolve, 55));
     }
   };
 
   const disconnectSession = async (showMessage) => {
     clearTimeout(inputTimer); inputTimer = 0; inputQueue = [];
-    const id = sessionId; sessionId = ""; outputOffset = 0; pollFailures = 0;
+    const id = sessionId; sessionId = ""; outputOffset = 0; pollFailures = 0; pollStatusBeforeRetry = "";
     if (id){
       try { await fetch("/ssh-session-stop?id=" + encodeURIComponent(id), { method:"POST" }); } catch(_){}
     }

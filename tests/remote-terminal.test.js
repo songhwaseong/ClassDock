@@ -106,8 +106,8 @@ test("장시간 SSH 출력은 원형 버퍼와 분리 잠금으로 입력을 막
   assert.match(ssh, /Buffer\.BlockCopy/);
   assert.doesNotMatch(ssh, /data\.RemoveRange/);
   assert.match(ssh, /readonly object BufferSync = new object\(\)/);
-  assert.match(ssh, /lock \(session\.BufferSync\) data = session\.Buffer\.Read/);
-  assert.match(ssh, /lock \(session\.BufferSync\) session\.Buffer\.Append/);
+  assert.match(ssh, /lock \(session\.BufferSync\)[\s\S]*data = session\.Buffer\.Read/);
+  assert.match(ssh, /lock \(session\.BufferSync\)[\s\S]*session\.Buffer\.Append/);
 });
 
 test("SSH 입력과 xterm 출력은 처리 속도보다 요청 대기열이 커지지 않게 조절한다", () => {
@@ -116,6 +116,19 @@ test("SSH 입력과 xterm 출력은 처리 속도보다 요청 대기열이 커�
   assert.doesNotMatch(ui, /inputChain/);
   assert.match(ui, /target\.write\(bytes, resolve\)/);
   assert.match(ui, /await writeTerminal\(bytes\)/);
+});
+
+test("SSH 출력 폴링은 서버에서 기다렸다가 출력 즉시 깨어나 연결 생성을 줄인다", () => {
+  assert.match(ssh, /LongPollWaitMs = 500/);
+  assert.match(ssh, /Monitor\.Wait\(session\.BufferSync, LongPollWaitMs\)/);
+  assert.match(ssh, /session\.Buffer\.Append\(buffer, read\);[\s\S]*Monitor\.PulseAll\(session\.BufferSync\)/);
+  assert.doesNotMatch(ui, /setTimeout\(resolve, 55\)/);
+});
+
+test("SSH 폴링 일시 실패는 빠르게 재시도하고 성공하면 이전 상태를 복원한다", () => {
+  assert.match(ui, /pollStatusBeforeRetry = terminalStatus\.textContent/);
+  assert.match(ui, /terminalStatus\.textContent = pollStatusBeforeRetry \|\| "접속됨"/);
+  assert.match(ui, /Math\.min\(1000, 60 \* pollFailures\)/);
 });
 
 test("사전 기능 검사는 실제 실패 원인을 숨기지 않는다", () => {

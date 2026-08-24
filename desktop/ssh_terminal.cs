@@ -18,6 +18,7 @@ static class ClassDockSshTerminal
     const int MaxSessionOutputBytes = 16 * 1024 * 1024;
     const int MaxInputBytes = 256 * 1024;
     const int MaxSessions = 4;
+    const int LongPollWaitMs = 500;
     const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     const uint HANDLE_FLAG_INHERIT = 0x00000001;
@@ -451,7 +452,20 @@ static class ClassDockSshTerminal
         long next;
         bool reset;
         byte[] data;
-        lock (session.BufferSync) data = session.Buffer.Read(offset, out next, out reset);
+        lock (session.BufferSync)
+        {
+            data = session.Buffer.Read(offset, out next, out reset);
+            if (data.Length == 0)
+            {
+                bool alreadyComplete;
+                lock (session.Sync) alreadyComplete = session.Complete;
+                if (!alreadyComplete)
+                {
+                    Monitor.Wait(session.BufferSync, LongPollWaitMs);
+                    data = session.Buffer.Read(offset, out next, out reset);
+                }
+            }
+        }
         bool complete;
         bool stopped;
         int code;
@@ -509,7 +523,11 @@ static class ClassDockSshTerminal
             {
                 int read;
                 while ((read = session.Output.Read(buffer, 0, buffer.Length)) > 0)
-                    lock (session.BufferSync) session.Buffer.Append(buffer, read);
+                    lock (session.BufferSync)
+                    {
+                        session.Buffer.Append(buffer, read);
+                        Monitor.PulseAll(session.BufferSync);
+                    }
             }
             catch { }
         });
@@ -527,6 +545,7 @@ static class ClassDockSshTerminal
                 session.ExitCode = session.StopRequested ? 130 : code;
                 session.DoneAt = DateTime.UtcNow;
             }
+            lock (session.BufferSync) Monitor.PulseAll(session.BufferSync);
             CloseSessionHandles(session, true);
         });
         watcher.IsBackground = true;
@@ -548,6 +567,7 @@ static class ClassDockSshTerminal
             if (session.ExitCode < 0) session.ExitCode = session.StopRequested ? 130 : -1;
             if (session.DoneAt == DateTime.MaxValue) session.DoneAt = DateTime.UtcNow;
         }
+        lock (session.BufferSync) Monitor.PulseAll(session.BufferSync);
         CloseSessionHandles(session, true);
     }
 
