@@ -1871,7 +1871,7 @@ const MNDocxEditor = (() => {
       /* 고른 글자를 지도·파일 검색으로 잇는 줄. 다른 편집기의 우클릭 메뉴와 같은 함수에서 받아
          같은 문구·같은 판정(너무 길면 흐리게)을 쓴다. */
       const searchItems = typeof selectionSearchMenuItems === "function"
-        ? selectionSearchMenuItems(hasSelection ? commandRange.toString() : "") : [];
+        ? selectionSearchMenuItems(hasSelection ? commandRange.toString() : "", paragraph) : [];
       const editable = paragraph.contentEditable === "true";
       const format = row.index ? officeParagraphTextFormat(state.xml,
         { paragraphIndex: row.index, offset: selected ? selected.start : undefined }) : null;

@@ -111,7 +111,7 @@ test("상단 DOCX 도구는 여섯 갈래 메뉴로 정리하고 실제 컨트�
    (문구·판정이 갈라지지 않게). 지도·파일 쪽 배선은 tests/map-viewer.test.js 가 본다. */
 test("우클릭 메뉴에서 고른 글자를 지도·파일 검색으로 보낸다", () => {
   assert.match(source, /typeof selectionSearchMenuItems === "function"/);
-  assert.match(source, /selectionSearchMenuItems\(hasSelection \? commandRange\.toString\(\) : ""\)/);
+  assert.match(source, /selectionSearchMenuItems\(hasSelection \? commandRange\.toString\(\) : "", paragraph\)/);
   // "문단 전체 선택" 바로 아래, 서식 갈래보다 앞에 둔다.
   assert.match(source, /\{ label: "문단 전체 선택", action: selectAll \},\s*\.\.\.searchItems,/);
 });

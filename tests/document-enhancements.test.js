@@ -108,6 +108,48 @@ test("스프레드시트 편집은 공통 미저장 상태와 작업공간 복�
   assert.match(docs, /function markDocumentSavedSnapshot\(/);
 });
 
+test("선택한 글자는 안전한 Google 검색 주소로 새 창에 열고 시험 응시 화면에서는 숨긴다", () => {
+  const source = read("python-editor.js");
+  const start = source.indexOf('const GOOGLE_SEARCH_MENU_LABEL');
+  const end = source.indexOf('function addSelectionSearchItems', start);
+  assert.ok(start >= 0 && end > start);
+
+  let clicked = 0;
+  const link = { click(){ clicked++; } };
+  const context = {
+    encodeURIComponent,
+    document: { createElement: tag => { assert.equal(tag, "a"); return link; } },
+    window: { t: value => value, getSelection: () => null }
+  };
+  vm.runInNewContext(source.slice(start, end) + `
+    ;globalThis.__google = {
+      GOOGLE_SEARCH_MENU_LABEL, GOOGLE_SEARCH_TEXT_MAX, googleSearchTextFrom,
+      googleSearchUrl, openGoogleSearch, selectionContextInsideExam,
+      googleSearchMenuItem, selectionSearchMenuItems
+    };`, context);
+  const api = context.__google;
+
+  assert.equal(api.googleSearchTextFrom("  뉴턴의\n운동\t법칙  "), "뉴턴의 운동 법칙");
+  assert.equal(api.googleSearchTextFrom("가".repeat(api.GOOGLE_SEARCH_TEXT_MAX + 1)), "");
+  assert.equal(api.googleSearchUrl("뉴턴의 운동 법칙"),
+    "https://www.google.com/search?q=" + encodeURIComponent("뉴턴의 운동 법칙"));
+
+  const normal = { closest: () => null };
+  const exam = { closest: selector => selector === ".exam-take" ? {} : null };
+  assert.equal(api.googleSearchMenuItem("", normal), null);
+  assert.equal(api.googleSearchMenuItem("뉴턴", exam), null);
+  const item = api.googleSearchMenuItem("뉴턴의 운동 법칙", normal);
+  assert.equal(item.label, "Google에서 검색");
+  assert.equal(item.disabled, false);
+  assert.equal(api.selectionSearchMenuItems("뉴턴", exam).length, 0);
+
+  item.action();
+  assert.equal(clicked, 1);
+  assert.equal(link.href, "https://www.google.com/search?q=" + encodeURIComponent("뉴턴의 운동 법칙"));
+  assert.equal(link.target, "_blank");
+  assert.equal(link.rel, "noopener noreferrer");
+});
+
 test("이미지 편집은 공통 미저장 상태를 사용한다", () => {
   const image = read("image-viewer.js");
   assert.match(image, /const markImageDirty/);

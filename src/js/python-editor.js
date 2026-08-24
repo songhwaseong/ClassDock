@@ -7,19 +7,64 @@ function closeTextContextMenu(){
   if (typeof activeTextContextMenu === "function") activeTextContextMenu();
 }
 
-/* 고른 글자로 다른 화면에서 이어 찾는 항목들 — 지도(장소 이름)와 사이드바(파일명·내용).
+const GOOGLE_SEARCH_MENU_LABEL = "Google에서 검색";
+const GOOGLE_SEARCH_TEXT_MAX = 300;
+function googleSearchTextFrom(raw){
+  const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+  return text && text.length <= GOOGLE_SEARCH_TEXT_MAX ? text : "";
+}
+function googleSearchUrl(raw){
+  const text = googleSearchTextFrom(raw);
+  return text ? "https://www.google.com/search?q=" + encodeURIComponent(text) : "";
+}
+function openGoogleSearch(raw){
+  const url = googleSearchUrl(raw);
+  if (!url) return false;
+  // 직접 누른 메뉴 동작에서 <a target=_blank> 를 실행하므로 팝업 차단에 덜 걸린다.
+  // opener 를 끊어 검색 결과가 원래 ClassDock 창을 건드리지 못하게 한다.
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.click();
+  return true;
+}
+function selectionContextInsideExam(contextElement){
+  let node = contextElement || null;
+  if (!node){
+    try {
+      const selection = window.getSelection && window.getSelection();
+      node = selection && selection.anchorNode;
+    } catch(_){ node = null; }
+  }
+  if (node && node.nodeType === 3) node = node.parentElement;
+  return !!(node && typeof node.closest === "function" && node.closest(".exam-take"));
+}
+function googleSearchMenuItem(selectedText, contextElement){
+  const text = googleSearchTextFrom(selectedText);
+  if (!text || selectionContextInsideExam(contextElement)) return null;
+  return {
+    label: (typeof window.t === "function") ? window.t(GOOGLE_SEARCH_MENU_LABEL) : GOOGLE_SEARCH_MENU_LABEL,
+    action: () => openGoogleSearch(text),
+    disabled: false
+  };
+}
+
+/* 고른 글자로 다른 화면에서 이어 찾는 항목들 — Google, 지도(장소 이름), 사이드바(파일명·내용).
    실제 일은 map-viewer.js·documents.js 가 하고, 여기서는 어느 메뉴에서든 같은 줄이 같은 자리에
    오도록 모아 두기만 한다. 그 기능이 없는 화면에서는 그 줄을 얹지 않아, 눌러도 아무 일 없는
    항목이 남지 않게 한다. */
-function selectionSearchMenuItems(selectedText){
+function selectionSearchMenuItems(selectedText, contextElement){
   const text = String(selectedText == null ? "" : selectedText);
   const items = [];
+  const googleItem = googleSearchMenuItem(text, contextElement);
+  if (googleItem) items.push(googleItem);
   if (typeof mapSearchMenuItem === "function") items.push(mapSearchMenuItem(text));
   if (typeof fileSearchMenuItem === "function") items.push(fileSearchMenuItem(text));
   return items;
 }
-function addSelectionSearchItems(addItem, addSeparator, selectedText){
-  const items = selectionSearchMenuItems(selectedText);
+function addSelectionSearchItems(addItem, addSeparator, selectedText, contextElement){
+  const items = selectionSearchMenuItems(selectedText, contextElement);
   if (!items.length) return false;
   addSeparator();
   for (const item of items) addItem(item.label, item.action, item.disabled);
@@ -169,7 +214,7 @@ function attachTextCaseContextMenu(ta, options={}){
     addItem("복사", copy, !hasSelection);
     addItem("잘라내기", cut, !hasSelection);
     addItem("붙여넣기", paste);
-    addSelectionSearchItems(addItem, addSeparator, value.slice(selection.start, selection.end));
+    addSelectionSearchItems(addItem, addSeparator, value.slice(selection.start, selection.end), ta);
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY));
     addSeparator();
@@ -301,7 +346,7 @@ function attachEditableContextMenu(el, options={}){
         if (typeof toast === "function") toast("붙여넣기는 Ctrl+V로 할 수 있어요.", 2200);
       }
     });
-    addSelectionSearchItems(addItem, addSeparator, range ? range.toString() : "");
+    addSelectionSearchItems(addItem, addSeparator, range ? range.toString() : "", el);
     addSeparator();
     addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY, range));
     addSeparator();
@@ -353,7 +398,7 @@ function selectionHitsPoint(range, x, y){
   return rects.some(rect => x >= rect.left - pad && x <= rect.right + pad &&
     y >= rect.top - pad && y <= rect.bottom + pad);
 }
-function openViewSelectionMenu(x, y, text){
+function openViewSelectionMenu(x, y, text, contextElement){
   closeTextContextMenu();
   const menu = document.createElement("div");
   menu.className = "text-context-menu";
@@ -390,7 +435,7 @@ function openViewSelectionMenu(x, y, text){
       else document.execCommand("copy");
     } catch(_){ try { document.execCommand("copy"); } catch(__){} }
   });
-  addSelectionSearchItems(addItem, addSeparator, text);
+  addSelectionSearchItems(addItem, addSeparator, text, contextElement);
 
   document.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();
@@ -420,7 +465,7 @@ function installViewSelectionContextMenu(){
     if (!text) return;
     if (!selectionHitsPoint(selection.getRangeAt(0), event.clientX, event.clientY)) return;
     event.preventDefault();
-    openViewSelectionMenu(event.clientX, event.clientY, text);
+    openViewSelectionMenu(event.clientX, event.clientY, text, target);
   });
   return true;
 }

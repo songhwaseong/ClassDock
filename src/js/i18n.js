@@ -276,6 +276,7 @@
     "카카오 키를 지우지 못했습니다.": "Couldn't clear the Kakao key.",
     /* 최근 검색어 드롭다운(MNSearchHistory) */
     "최근 검색어": "Recent searches",
+    "Google에서 검색": "Search with Google",
     "최근 검색어 (↓)": "Recent searches (↓)",
     "최근": "Recent",
     "이 목록을 모두 지웁니다": "Clears this whole list",
