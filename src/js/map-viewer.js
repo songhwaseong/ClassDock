@@ -15,7 +15,7 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 6;
+const MAP_DOC_VERSION = 7;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 /* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
    빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
@@ -299,6 +299,9 @@ function mapDocEmpty(title){
     grid: false,
     // 표시 이름표도 같은 뜻으로 문서에 담는다 — "이름이 다 보이게 만들어 둔 지도"로 건네진다.
     labels: false,
+    /* 표시를 목록 순서대로 이어 주는 선. 선 자체는 저장하지 않고 켜 두었다는 사실만 담는다 —
+       표시에서 매번 다시 그리므로 표시를 옮기거나 지우면 선이 저절로 따라온다. */
+    route: false,
     backgroundImage: null
   };
 }
@@ -323,6 +326,8 @@ function mapDocParse(text){
     grid: raw.grid === true,
     // 버전 5 이하에는 없던 값이다 — 같은 까닭으로 없으면 끈 것으로 본다.
     labels: raw.labels === true,
+    // 버전 6 이하에는 없던 값이다 — 같은 까닭으로 없으면 끈 것으로 본다.
+    route: raw.route === true,
     backgroundImage
   };
 }
@@ -338,6 +343,7 @@ function mapDocSerialize(model){
     shapes: Array.isArray(model.shapes) ? model.shapes : [],
     grid: !!model.grid,
     labels: !!model.labels,
+    route: !!model.route,
     backgroundImage: model.backgroundImage || null
   }, null, 2) + "\n";
 }
@@ -354,7 +360,7 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(0, 80),
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
-  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels]);
+  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels, !!model.route]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -1050,6 +1056,11 @@ const MAP_LABEL_MIN_ZOOM = 13;
 /* 이름표는 표시마다 DOM 을 하나씩 만든다. CSV 로 수백 개를 들여온 지도에서 한꺼번에 켜면
    지도가 먼저 멎으므로, 그때는 켜지 않고 까닭을 알려 준다. */
 const MAP_LABEL_MAX_MARKERS = 200;
+/* 표시 잇는 선 ─ 선은 폴리라인 하나뿐이라 표시가 아무리 많아도 가볍다. 다만 CSV 로 들여온
+   수백 개를 목록 순서(=파일 줄 순서)대로 이으면 화면이 실뭉치가 되므로, 그때는 켜 주되 왜
+   엉켜 보이는지 함께 알려 준다 — 순서는 표시 목록에서 손으로 바꿀 수 있다. */
+const MAP_ROUTE_TANGLE_MARKERS = 30;
+const MAP_ROUTE_COLOR = "#7c3aed";
 const MAP_SPOT_NAME_RADIUS = 80;      // 건물 이름으로 그 자리를 되찾을 때의 반경
 const MAP_SPOT_STATION_RADIUS = 150;  // 역은 출입구에서 조금 떨어진 곳이 눌리므로 넉넉히 본다
 
@@ -2788,6 +2799,12 @@ async function mountMapEditor(doc){
   labelsBtn.title = "표시 이름을 마우스를 올리지 않아도 늘 보이게 해요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다";
   labelsBtn.setAttribute("aria-pressed", "false");
 
+  const routeBtn = document.createElement("button");
+  routeBtn.type = "button"; routeBtn.className = "map-btn map-route-toggle";
+  routeBtn.textContent = "🧵 표시 잇기";
+  routeBtn.title = "표시를 목록 순서대로 선으로 이어요 — 표시를 옮기거나 순서를 바꾸면 선도 따라갑니다";
+  routeBtn.setAttribute("aria-pressed", "false");
+
   const presentBtn = document.createElement("button");
   presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start";
   presentBtn.textContent = "🎬 발표 모드";
@@ -2866,7 +2883,7 @@ async function mountMapEditor(doc){
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
   bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
-  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, listBtn,
+  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, routeBtn, listBtn,
     presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
     boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
@@ -3036,6 +3053,11 @@ async function mountMapEditor(doc){
   const gridPane = map.createPane("mapGridPane");
   gridPane.style.zIndex = "350";
   gridPane.style.pointerEvents = "none";
+  /* 표시를 잇는 선은 격자 위·손으로 그린 도형(overlayPane 400) 아래에 둔다 — 저절로 그려지는
+     선이 사람이 직접 잰 거리선·영역을 덮으면 안 된다. 표시(markerPane 600)보다도 아래다. */
+  const routePane = map.createPane("mapRoutePane");
+  routePane.style.zIndex = "380";
+  routePane.style.pointerEvents = "none";
 
   /* ── 축척 막대 · 방위표 ──
      지도 칸에 직접 얹는다(컨트롤 칸이 아니라). 캡처는 컨트롤 칸만 감추므로 이 자리에 있어야
@@ -3222,6 +3244,9 @@ async function mountMapEditor(doc){
   /* 표시 목록은 마커 함수가 다 갖춰진 뒤에 만든다(아래) — 내용이 바뀌는 길은 전부 touch 를
      지나므로, 목록 새로 그리기도 거기 한 곳에 걸어 빠뜨리는 길이 없게 한다. */
   let scheduleListRefresh = () => {};
+  /* 표시 잇는 선도 같은 까닭으로 여기 걸어 둔다 — 표시를 넣고 지우고 옮기고 순서를 바꾸는 길이
+     전부 touch 를 지나므로, 선을 다시 그리는 일도 한 곳에만 매달면 빠뜨릴 수 없다. */
+  let redrawRoute = () => {};
   /* 문제 풀이 화면(지도 문제)에서만 채워진다 — 지도 클릭을 답 찍기로 가로챈다. 아래에서 만든다. */
   let quizPlaceAnswer = null;
 
@@ -3233,6 +3258,7 @@ async function mountMapEditor(doc){
     recordSoon();
     scheduleRecovery();
     scheduleListRefresh();
+    redrawRoute();
   };
 
   /* ── 표시(마커) ── */
@@ -3503,6 +3529,15 @@ async function mountMapEditor(doc){
     bindMarkerTooltip(layer, marker);
     const popup = buildPopup(marker, layer);
     layer.bindPopup(popup, { minWidth: 210 });
+    /* 끄는 동안에도 선이 따라붙게 한다 — 놓는 순간에만 다시 그리면 선이 툭 튄다. 여기서는
+       touch 를 부르지 않는다(끌던 한 번을 되돌리기 수십 단계로 쪼개지 않으려고). */
+    layer.on("drag", () => {
+      if (!model.route) return;
+      const position = layer.getLatLng();
+      marker.lat = mapClampLat(position.lat);
+      marker.lng = mapClampLng(position.lng);
+      redrawRoute();
+    });
     layer.on("dragend", () => {
       const position = layer.getLatLng();
       marker.lat = mapClampLat(position.lat);
@@ -3573,7 +3608,51 @@ async function mountMapEditor(doc){
       if (show && !map.hasLayer(layer)) layer.addTo(map);
       else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
     }
+    redrawRoute();               // 감춘 묶음은 선에서도 빠진다 — 없는 표시로 선이 돌아가면 읽을 수 없다
   };
+
+  /* ── 표시 잇는 선 ──
+     격자와 같이 "볼 때마다 다시 그리는" 층이다. 선을 도형으로 굳혀 두지 않는 까닭은 표시가
+     움직이는 것이기 때문이다 — 굳혀 두면 표시를 옮기거나 지운 순간 선이 거짓말이 된다.
+     이을 순서는 표시 목록 순서(= 발표 순서)를 그대로 쓴다. 새 순서를 따로 만들면 목록에서 손으로
+     맞춘 차례와 지도 위의 선이 어긋나 어느 쪽이 맞는지 알 수 없게 된다. */
+  let routeLayer = null;
+  const routePoints = () => model.markers.filter(markerVisible).map(marker => [marker.lat, marker.lng]);
+  redrawRoute = () => {
+    const points = model.route ? routePoints() : [];
+    if (points.length < 2){
+      if (routeLayer){ map.removeLayer(routeLayer); routeLayer = null; }
+      return;
+    }
+    const tooltip = mapTf("표시 {count}개 · 전체 {distance}",
+      { count:points.length, distance:mapFormatDistance(mapLineLengthMeters(points)) });
+    if (!routeLayer){
+      routeLayer = L.polyline(points, {
+        pane: "mapRoutePane",
+        color: MAP_ROUTE_COLOR,
+        weight: 3,
+        opacity: 0.85,
+        dashArray: "7 5",         // 손으로 그린 거리선(실선)과 한눈에 갈라 보이게
+        className: "map-route-line",
+        interactive: false
+      }).addTo(map);
+      /* 이름표는 도형과 같이 기본 tooltipPane 에 둔다 — 선을 표시 아래에 깔았다고 해서 거리
+         글자까지 표시 밑으로 들어가면 정작 읽으려는 숫자가 가려진다. */
+      routeLayer.bindTooltip(tooltip, { permanent:true, direction:"center", className:"map-route-label" });
+    } else {
+      routeLayer.setLatLngs(points);
+      routeLayer.setTooltipContent(tooltip);
+      /* setLatLngs 는 선만 다시 그리고 Leaflet 의 move 이벤트는 내지 않는다. 영구 tooltip 은
+         처음 열릴 때 잡은 자리에 그대로 남으므로, 바뀐 선의 실제 가운데로 이름표도 옮긴다. */
+      const routeTooltip = routeLayer.getTooltip();
+      if (routeTooltip) routeTooltip.setLatLng(routeLayer.getCenter());
+    }
+  };
+  const syncRouteButton = () => {
+    routeBtn.classList.toggle("is-on", !!model.route);
+    routeBtn.setAttribute("aria-pressed", String(!!model.route));
+  };
+
   const focusMarker = (marker) => {
     map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 15));
     const layer = markerLayers.get(marker.id);
@@ -4092,6 +4171,28 @@ async function mountMapEditor(doc){
        (격자는 문서에 저장되는 내용이라 그 표시가 더 중요하다). */
     if (model.grid && typeof toast === "function"){
       toast(mapT("위선·경선을 눈금으로 그렸어요 — 붉은 선이 적도와 본초자오선입니다."), 3000);
+    }
+    touch();
+  });
+
+  syncRouteButton();
+  redrawRoute();
+  routeBtn.addEventListener("click", () => {
+    model.route = !model.route;
+    syncRouteButton();
+    redrawRoute();
+    /* 격자·이름표와 같은 까닭으로 안내는 토스트로 띄운다(상태 줄은 ● 자리다). 표시가 모자라
+       아직 아무 선도 못 그렸다면 그 까닭을 먼저 알린다 — 켰는데 화면이 그대로면 고장으로 보인다. */
+    if (model.route && typeof toast === "function"){
+      const shown = model.markers.filter(markerVisible).length;
+      if (shown < 2){
+        toast(mapT("표시를 잇도록 켰어요 — 표시가 두 개가 되면 선이 나타납니다."), 3200);
+      } else if (shown > MAP_ROUTE_TANGLE_MARKERS){
+        toast(mapTf("표시 {count}개를 목록 순서대로 이었어요 — 선이 엉켜 보이면 표시 목록에서 순서를 바꿔 보세요.",
+          { count:shown }), 4200);
+      } else {
+        toast(mapT("표시를 목록 순서대로 이었어요 — 순서는 표시 목록에서 바꿀 수 있습니다."), 3200);
+      }
     }
     touch();
   });
@@ -4743,6 +4844,9 @@ async function mountMapEditor(doc){
   contextSep();
   contextMirror(lineBtn);
   contextMirror(areaBtn);
+  /* 켜고 끄는 도구지만 결국 지도에 선을 긋는 일이라 거리선·면적과 한 묶음에 둔다. 켜 둔 상태는
+     syncContextMirrors 가 단추의 is-on 을 그대로 옮겨 메뉴에서 체크(✓)로 보인다. */
+  contextMirror(routeBtn);
   contextMirror(addressBtn);
   contextMirror(spotBtn);
 
@@ -4885,6 +4989,21 @@ async function mountMapEditor(doc){
         .map(value => value / shape.points.length);
       const point = map.latLngToContainerPoint(center);
       labels.push({ x:point.x, y:point.y, text:shapeTooltip(shape), offsetY:0 });
+    }
+    /* 잇는 선은 그림에 그대로 찍히지만(도형 층이라 감추지 않는다) 전체 거리는 이름표라 감춰진다
+       — 도형과 같은 방식으로 그림에 직접 새긴다. */
+    if (model.route){
+      const points = routePoints();
+      if (points.length >= 2){
+        const center = points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0,0])
+          .map(value => value / points.length);
+        const point = map.latLngToContainerPoint(center);
+        labels.push({
+          x:point.x, y:point.y, offsetY:0,
+          text: mapTf("표시 {count}개 · 전체 {distance}",
+            { count:points.length, distance:mapFormatDistance(mapLineLengthMeters(points)) })
+        });
+      }
     }
     return mapCaptureDataUrl(stage, mapAttributionText(model), labels);
   };
@@ -5035,7 +5154,7 @@ async function mountMapEditor(doc){
       // CSV 로 표시 수천 개를 들여오면 한 단계가 1MB 를 넘는다. 단계 수와 별개로 총량도 막는다.
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
-      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels]),
+      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels, !!model.route]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
         // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
@@ -5051,6 +5170,7 @@ async function mountMapEditor(doc){
         imageVersion = saved[4];
         model.grid = saved[5] === true;
         model.labels = saved[6] === true;
+        model.route = saved[7] === true;
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();
@@ -5066,7 +5186,11 @@ async function mountMapEditor(doc){
         imageClearBtn.hidden = !model.backgroundImage;
         syncGridButton();
         syncLabelsButton();
+        syncRouteButton();
         drawGrid();
+        /* 레이어를 전부 새로 만들었으므로 파일에는 담기지 않는 '감춘 묶음' 보기 상태도 다시
+           입힌다. 이 함수가 선까지 다시 그려, 보이는 표시와 잇는 선의 대상이 늘 같아진다. */
+        applyMarkerVisibility();
         applyBasemap();
         touch();
       },
@@ -5299,6 +5423,6 @@ if (typeof module !== "undefined" && module.exports){
     mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS,
     MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom,
     MAP_SEARCH_HISTORY_MAX, MAP_SEARCH_RESULT_MAX,
-    MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
+    MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS, MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
   };
 }

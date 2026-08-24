@@ -92,6 +92,68 @@ test("위경도 격자는 켠 채로 저장되고 적도·본초자오선을 따
   expect(errors).toEqual([]);
 });
 
+/* 표시를 목록 순서대로 이어 주는 선. 선을 도형으로 굳혀 두지 않는 것이 요점이라, 표시를
+   지우거나 순서를 바꾸면 선이 그 자리에서 다시 이어져야 한다. */
+test("표시 잇기는 목록 순서대로 잇고 표시가 바뀌면 저절로 다시 이어진다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openApp(page);
+
+  const routeBtn = page.locator(".map-route-toggle");
+  const routeLine = page.locator(".map-route-line");
+  const routeLabel = page.locator(".map-route-label");
+  await expect(routeBtn).toHaveAttribute("aria-pressed", "false");
+
+  // 표시가 하나뿐이면 켜도 그릴 선이 없다 — 켠 것 자체는 문서에 남는다.
+  await dropPin(page, "학교", -80, -50);
+  await routeBtn.click();
+  await expect(routeBtn).toHaveAttribute("aria-pressed", "true");
+  expect((await mapModel(page)).route).toBe(true);
+  await expect(routeLine).toHaveCount(0);
+
+  // 두 번째 표시부터 선이 나타나고, 세 번째를 찍으면 저절로 늘어난다.
+  await dropPin(page, "도서관", 40, -10);
+  await expect(routeLine).toHaveCount(1);
+  await expect(routeLabel).toContainText("표시 2개");
+  await dropPin(page, "공원", 60, 60);
+  await expect(routeLabel).toContainText("표시 3개");
+
+  // 선은 저장하지 않는다 — .map 에 남는 것은 켜 두었다는 사실뿐이다.
+  expect((await mapModel(page)).shapes).toEqual([]);
+
+  // 목록에서 순서를 바꾸면 잇는 차례도 그대로 따라간다.
+  await page.locator(".map-list-toggle").click();
+  const names = () => page.locator(".map-list-name");
+  await expect(names()).toHaveText(["학교", "도서관", "공원"]);
+  await page.locator(".map-list-item").first().getByRole("button", { name:"발표 순서를 뒤로" }).click();
+  await expect(names()).toHaveText(["도서관", "학교", "공원"]);
+  expect((await mapModel(page)).markers.map(m => m.label)).toEqual(["도서관", "학교", "공원"]);
+  await expect(routeLine).toHaveCount(1);
+
+  // 가운데 표시를 지우면 남은 둘이 곧바로 이어진다(선을 손볼 필요가 없다).
+  await page.locator(".map-list-item").nth(1).locator(".map-list-remove").click();
+  await expect(routeLabel).toContainText("표시 2개");
+
+  // 되돌리기는 격자·이름표와 같은 범위다 — 지운 표시가 돌아오면 선도 셋으로 돌아간다.
+  await page.locator(".map-undo").click();
+  await expect(routeLabel).toContainText("표시 3개");
+
+  /* 우클릭 메뉴에도 같은 항목이 있다(도구를 접어 두면 그쪽이 유일한 길이다). 켜 둔 도구는
+     도구막대처럼 is-on 으로 표시돼 메뉴에서 체크(✓)로 보인다. */
+  const stage = page.locator(".map-stage");
+  const box = await stage.boundingBox();
+  await page.mouse.click(box.x + box.width - 20, box.y + box.height - 20, { button:"right" });
+  const menuItem = page.locator(".map-context-menu button", { hasText:"표시 잇기" });
+  await expect(menuItem).toBeVisible();
+  await expect(menuItem).toHaveClass(/is-on/);
+  // 메뉴에서 누르면 도구막대 단추를 그대로 누른 것과 같다 — 꺼지고 선도 걷힌다.
+  await menuItem.click();
+  await expect(routeBtn).toHaveAttribute("aria-pressed", "false");
+  await expect(routeLine).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
+
 test("표시 목록에서 이름으로 찾고, 눌러서 그 자리로 가고, 지울 수 있다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));

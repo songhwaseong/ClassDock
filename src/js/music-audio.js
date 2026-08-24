@@ -106,6 +106,7 @@ const MNMusicAudio = (() => {
   let live = null;         // 재생 중 상태
   let playRequest = 0;     // 샘플 로딩 중 정지를 눌렀을 때 뒤늦게 재생되지 않게 한다
   let previewRequest = 0;
+  let previewNodes = [];   // 음표 미리듣기·음감 테스트에서 지금 울리는 노드
   const sampleBufferPromises = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
   const sampleRegistryCaches = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
 
@@ -331,6 +332,14 @@ const MNMusicAudio = (() => {
     }
   }
 
+  // 미리듣기는 일반 악보 재생(live)과 별도 경로라 stop()에서 직접 걷어야 한다.
+  // 요청 번호도 함께 올려 샘플을 읽는 중이던 Promise가 뒤늦게 소리를 내지 못하게 한다.
+  function cancelPreview(){
+    previewRequest++;
+    if (previewNodes.length && ctx) releaseNodes(previewNodes, ctx.currentTime);
+    previewNodes = [];
+  }
+
   function clearTimers(state){
     if (!state) return;
     if (state.timer){ clearInterval(state.timer); state.timer = 0; }
@@ -459,6 +468,7 @@ const MNMusicAudio = (() => {
   function stop(){
     playRequest++;
     finish(false);
+    cancelPreview();
   }
 
   function playing(){
@@ -466,7 +476,8 @@ const MNMusicAudio = (() => {
   }
 
   // 음표 또는 화음 미리듣기 — 도구상자·음표 클릭에서 쓴다.
-  function previewNote(note, timbre){
+  function previewNote(note, timbre, opts){
+    const options = opts || {};
     const target = ensureContext();
     if (!target) return false;
     const pitches = typeof musicNotePitches === "function" ? musicNotePitches(note) : [note];
@@ -474,22 +485,31 @@ const MNMusicAudio = (() => {
       midi:musicMidiNumber(pitch), frequency:musicNoteFrequency(pitch)
     })).filter((pitch) => pitch.midi !== null && pitch.frequency > 0);
     if (!playable.length) return false;   // 쉼표는 소리내지 않는다
-    const request = ++previewRequest;
+    cancelPreview();
+    const request = previewRequest;
     const type = timbreOf(timbre);
+    const started = (nodes) => {
+      if (request !== previewRequest) return;
+      previewNodes = (nodes || []).filter(Boolean);
+      if (typeof options.onScheduled === "function") options.onScheduled();
+    };
     if (SAMPLE_INSTRUMENTS[type]){
       ensureSampleBuffers(target, type).then((buffers) => {
         if (request !== previewRequest) return;
         const start = target.currentTime + 0.005;
-        for (const pitch of playable) scheduleSampleNote(target, master, pitch.midi, start, PREVIEW_SEC, buffers, type);
+        started(playable.map((pitch) =>
+          scheduleSampleNote(target, master, pitch.midi, start, PREVIEW_SEC, buffers, type)));
       }).catch((error) => {
         if (request !== previewRequest) return;
         console.warn(`${SAMPLE_INSTRUMENTS[type].label} 음원을 읽지 못해 삼각파로 미리듣습니다:`, error);
         const start = target.currentTime + 0.005;
-        for (const pitch of playable) scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, "triangle");
+        started(playable.map((pitch) =>
+          scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, "triangle")));
       });
     } else {
       const start = target.currentTime + 0.005;
-      for (const pitch of playable) scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, type);
+      started(playable.map((pitch) =>
+        scheduleNote(target, master, pitch.frequency, start, PREVIEW_SEC, type)));
     }
     return true;
   }
@@ -568,7 +588,7 @@ const MNMusicAudio = (() => {
   }
 
   return {
-    play, stop, playing, supported, previewNote, renderWav, encodeWav, scheduleInto,
+    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, scheduleInto,
     scheduleMetronomeClick, setVolume, getVolume, setMuted, muted,
     ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
     PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,

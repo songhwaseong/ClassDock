@@ -579,7 +579,7 @@ test("따라치기 중에는 악보를 고칠 수 있는 길을 모두 막는다
   // 연습 상태는 화면 표시일 뿐 sheet 를 건드리지 않는다. 그 대신 편집 입력 경로를 전부 잠근다.
   assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 따라치기 중에는 오선을 눌러도/);
   assert.match(editorSource, /const existing = practice\.active \? null : noteByElement\(target\)/);
-  assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 편집 메뉴는/);
+  assert.match(editorSource, /if \(practice\.active \|\| earTest\.active\(\)\) return;\s+\/\/ 편집 메뉴는/);
   assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 따라치기 중에는 재생하지 않는다/);
   // 되돌리기(Ctrl+Z)처럼 악보를 바꾸는 단축키도 연습 중에는 지나간다 — 보기 배율만 남긴다.
   assert.match(editorSource, /if \(event\.key === "Escape"\)\{ claim\(\); stopPractice\("cancel"\); return; \}/);
@@ -604,4 +604,91 @@ test("분당 음 수는 단계가 아니라 화음의 실제 음 개수를 센�
   assert.match(editorSource, /practice\.notes \+= step \? step\.pcs\.length : 0/);
   assert.match(editorSource, /practice\.notes = Math\.max\(0, practice\.notes - practice\.steps\[at\]\.pcs\.length\)/);
   assert.match(editorSource, /npm:Math\.round\(notes \/ \(ms \/ 60000\)\)/);
+});
+
+
+/* ===== 음감 테스트(듣고 음 맞히기) — 악보를 감추고 소리만으로 맞히는 모드 ===== */
+
+test("음감 테스트는 따로 실린 모듈이고 편집기보다 먼저 로드된다", () => {
+  const scripts = manifest.localScripts;
+  assert.ok(scripts.includes("music-eartest.js"));
+  assert.ok(scripts.indexOf("music-audio.js") < scripts.indexOf("music-eartest.js"));
+  assert.ok(scripts.indexOf("music-eartest.js") < scripts.indexOf("music-editor.js"));
+  assert.ok(html.includes('<script src="src/js/music-eartest.js"></script>'));
+  const boundary = (manifest.moduleBoundaries || []).find((item) => item.file === "music-eartest.js");
+  assert.ok(boundary, "모듈 경계에 등록해야 전역 공개 API 가 검사된다");
+  assert.equal(boundary.publicApi, "MNMusicEarTest");
+  assert.deepEqual(boundary.consumers, ["music-editor.js"]);
+  // 문제를 뽑는 규칙은 모델에 두고 모듈은 소리·화면만 맡는다(node 로 규칙을 검증할 수 있게).
+  assert.deepEqual(manifest.scriptDependencies["music-eartest.js"], ["music-model.js", "music-audio.js"]);
+  assert.match(read("src/js/music-eartest.js"), /musicEarQuestions\(\{ level:setup\.level, count:setup\.count \}\)/);
+});
+
+test("테스트 중에는 악보를 감춘다 — 이 모드의 핵심 규칙", () => {
+  const styles = read("src/styles.css");
+  // 따라치기는 악보를 흐린 교본으로 깔지만(is-practice), 음감 테스트는 아예 지운다.
+  // 악보가 남아 있으면 귀가 아니라 눈으로 고르게 되고, 뒤에 악보에서 문제를 뽑게 되면 정답표가 된다.
+  assert.match(styles, /\.music-doc\.is-eartest \.music-score-workspace\{display:none\}/);
+  assert.ok(styles.includes(".music-doc.is-eartest .music-bar"), "머리말·도구상자도 테스트 중에는 잠근다");
+  assert.match(editorSource, /root\.classList\.toggle\("is-eartest", on\)/);
+  // 감췄던 악보가 돌아올 때는 제 폭으로 다시 조판한다.
+  assert.match(editorSource, /setEarChrome\(false\);\s+scheduleRedraw\(\);/);
+  // 재생과 같은 규칙으로 대기 화면을 막는다(screensaver.js 는 고치지 않는다).
+  assert.match(editorSource, /root\.classList\.toggle\("is-running", on\);\s+for \(const control of \[playAllBtn/);
+});
+
+test("자판·도레미 버튼·MIDI 건반이 모두 한 답 문(earTest.press)으로 들어온다", () => {
+  assert.match(editorSource, /const answerPc = event\.code \? MUSIC_PRACTICE_KEYS\[event\.code\] : undefined/);
+  assert.match(editorSource, /if \(earTest\.active\(\)\)\{ earTest\.press\(MUSIC_STEP_SEMITONES\[step\]\); return; \}/);
+  // MIDI 건반은 옥타브까지 한 번에 답할 수 있어 번호를 함께 넘긴다(4단계).
+  assert.match(editorSource, /if \(earTest\.active\(\)\)\{ earTest\.press\(musicPitchClass\(Number\(data\[1\]\)\), Number\(data\[1\]\)\); return; \}/);
+  // 4단계에서 옥타브를 물을 때만 숫자키의 뜻이 음이름에서 옥타브로 바뀐다.
+  assert.match(editorSource, /const MUSIC_EAR_OCTAVE_KEYS = \{ Digit3:3, Digit4:4, Digit5:5, Digit6:6 \}/);
+  assert.match(editorSource, /if \(earTest\.needsOctave\(\)\)\{/);
+});
+
+test("따라치기·재생과 서로 배타이고, 도구막대를 접어도 우클릭으로 시작할 수 있다", () => {
+  assert.match(editorSource, /if \(earTest\.active\(\)\) return false;\s+\/\/ 음감 테스트와 따라치기는 서로 배타/);
+  assert.match(editorSource, /if \(earTest\.active\(\)\) return;\s+\/\/ 음감 테스트 중에도 같다/);
+  assert.match(editorSource, /earBtn\.disabled = on;/);
+  assert.match(editorSource, /label:"음감 테스트\(듣고 음 맞히기\)"/);
+  assert.match(editorSource, /musicButton\("🎧 음감 테스트"/);
+  // 문서를 닫으면 예약해 둔 다음 문제 타이머까지 걷는다.
+  assert.match(editorSource, /earTest\.destroy\(\);/);
+});
+
+test("절대음감 연습이 되도록 잔상·시행착오를 막는다", () => {
+  const earSource = read("src/js/music-eartest.js");
+  // 다시 듣기를 열어 두면 시행착오 게임이 된다.
+  assert.match(earSource, /const REPLAY_LIMIT = 1;/);
+  assert.match(earSource, /if \(state\.replays >= REPLAY_LIMIT\)\{/);
+  // 문제 사이에 간섭음을 넣어 앞 음과 견주어 맞히지 못하게 한다(그러지 않으면 상대음감 검사가 된다).
+  assert.match(earSource, /playMidis\(musicEarDistractor\(\), \(\) => later\(startAsk, DISTRACTOR_GAP_MS\)\)/);
+  assert.match(earSource, /askCurrent\(true\)/);
+  // 기준음은 껐다 켤 수 있다 — 켜면 상대음감 연습, 끄면 절대음감 연습.
+  assert.match(earSource, /playMidis\(\[MUSIC_EAR_REFERENCE_MIDI\], \(\) => later\(\(\) => askCurrent\(false\), 900\)\)/);
+  // 결과를 "절대음감이다/아니다"로 읽지 않게 못박는다(통제된 검사가 아니다).
+  assert.match(earSource, /절대음감이 있는지를 가리는 검사는 아니에요/);
+  // 틀려도 진도가 나가고 정답을 들려준다 — 따라치기(틀리면 제자리)와 다른 규칙.
+  assert.match(earSource, /playMidis\(\[question\.midi\]\);\s+\/\/ 틀렸든 맞았든 정답 음을 한 번 더 들려준다/);
+});
+
+test("샘플 음색은 실제로 소리가 예약된 뒤에만 답과 반응 시간을 받는다", () => {
+  const earSource = read("src/js/music-eartest.js");
+  const audioSource = read("src/js/music-audio.js");
+  assert.match(earSource, /playMidis\(\[question\.midi\], \(\) => \{/);
+  assert.match(earSource, /state\.askedAt = Date\.now\(\);\s+state\.phase = "ask"/);
+  assert.match(earSource, /playMidis\(\[MUSIC_EAR_REFERENCE_MIDI\], \(\) => later\(\(\) => askCurrent\(false\), 900\)\)/);
+  assert.match(audioSource, /if \(typeof options\.onScheduled === "function"\) options\.onScheduled\(\)/);
+  // 종료는 일반 재생뿐 아니라 로딩 중·재생 중인 previewNote도 함께 취소한다.
+  assert.match(audioSource, /function stop\(\)\{[\s\S]{0,100}cancelPreview\(\)/);
+  assert.match(earSource, /function destroy\(\)\{\s+clearTimers\(\);\s+MNMusicAudio\.cancelPreview\(\)/);
+});
+
+test("단계·문항 수·기준음은 보기 상태라 악보에 저장하지 않는다", () => {
+  // 배율·도구막대와 같은 규칙 — .msheet 와 되돌리기 스냅샷에는 들어가지 않는다.
+  assert.match(editorSource, /const MUSIC_EAR_LEVEL_KEY = "musicEarLevel"/);
+  assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_COUNT_KEY, earCountSelect\.value\)/);
+  assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_REFERENCE_KEY, String\(earReference\)\)/);
+  assert.doesNotMatch(editorSource, /sheet\.earLevel/);
 });

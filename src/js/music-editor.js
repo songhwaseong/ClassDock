@@ -49,8 +49,8 @@ const MUSIC_PRACTICE_KEYS = {
   KeyA:0, KeyW:1, KeyS:2, KeyE:3, KeyD:4, KeyF:5, KeyT:6, KeyG:7, KeyY:8, KeyH:9, KeyU:10, KeyJ:11,
   Digit1:0, Digit2:2, Digit3:4, Digit4:5, Digit5:7, Digit6:9, Digit7:11
 };
-// 음이름(0~11)을 사람이 읽는 계이름으로. 검은건반은 악보 조표와 상관없이 ♯ 쪽 이름으로 안내한다.
-const MUSIC_PRACTICE_PC_LABELS = ["도", "도♯", "레", "레♯", "미", "파", "파♯", "솔", "솔♯", "라", "라♯", "시"];
+// 음감 테스트 4단계에서 옥타브를 받는 숫자키. 이때는 숫자가 음이름이 아니라 옥타브다.
+const MUSIC_EAR_OCTAVE_KEYS = { Digit3:3, Digit4:4, Digit5:5, Digit6:6 };
 const MUSIC_IMAGE_SCALE = 2;        // 메모 그림은 2배로 구워 확대해도 뭉개지지 않게 한다
 const MUSIC_IMAGE_TOP_PAD = 26;     // 화음기호·빠르기 표시는 오선 위에 붙는다 — 단 위쪽 여유
 // 브라우저마다 캔버스 한 변·전체 픽셀 한계가 다르다. 보수적인 공통 범위 안에서만 굽고,
@@ -723,6 +723,69 @@ async function mountMusicEditor(doc){
   practiceInfo.hidden = true;
   practiceInfo.setAttribute("aria-live", "polite");
   practiceWrap.append(practiceBtn, practiceStaffSelect, practiceInfo);
+
+  /* 음감 테스트 — 악보를 감추고 소리만 듣고 음이름을 맞힌다(진행·채점은 music-eartest.js).
+     단계·문항 수·기준음은 배율·도구막대와 같은 보기 상태라 .msheet 에도 되돌리기에도 넣지 않는다. */
+  const MUSIC_EAR_LEVEL_KEY = "musicEarLevel";
+  const MUSIC_EAR_COUNT_KEY = "musicEarCount";
+  const MUSIC_EAR_REFERENCE_KEY = "musicEarReference";
+  const earWrap = document.createElement("span");
+  earWrap.className = "music-ear-controls";
+  const earBtn = musicButton("🎧 음감 테스트",
+    "악보를 감추고 소리만 듣고 음이름 맞히기 — A S D F G H J = 도레미파솔라시 (Space: 다시 듣기, Esc: 그만두기)");
+  const earLevelSelect = document.createElement("select");
+  earLevelSelect.className = "music-timbre music-ear-level";
+  earLevelSelect.title = "음감 테스트 단계";
+  earLevelSelect.setAttribute("aria-label", earLevelSelect.title);
+  for (const level of MNMusicEarTest.LEVELS){
+    const option = document.createElement("option");
+    option.value = String(level.id);
+    option.textContent = level.label;
+    earLevelSelect.appendChild(option);
+  }
+  const earCountSelect = document.createElement("select");
+  earCountSelect.className = "music-timbre music-ear-count";
+  earCountSelect.title = "음감 테스트 문항 수";
+  earCountSelect.setAttribute("aria-label", earCountSelect.title);
+  for (const count of MNMusicEarTest.COUNTS){
+    const option = document.createElement("option");
+    option.value = String(count);
+    option.textContent = `${count}문제`;
+    earCountSelect.appendChild(option);
+  }
+  earCountSelect.value = String(MNMusicEarTest.COUNTS[1] || MNMusicEarTest.COUNTS[0]);
+  const earReferenceBtn = musicButton("🎵 기준음",
+    "시작할 때 가온다(도4)를 들려줍니다 — 기준음이 있으면 상대음감 연습, 없으면 절대음감 연습");
+  earReferenceBtn.setAttribute("aria-pressed", "false");
+  let earReference = false;
+  try {
+    const savedLevel = localStorage.getItem(MUSIC_EAR_LEVEL_KEY);
+    if (savedLevel && MNMusicEarTest.LEVELS.some((level) => String(level.id) === savedLevel)) {
+      earLevelSelect.value = savedLevel;
+    }
+    const savedCount = localStorage.getItem(MUSIC_EAR_COUNT_KEY);
+    if (savedCount && MNMusicEarTest.COUNTS.includes(Number(savedCount))) earCountSelect.value = savedCount;
+    earReference = localStorage.getItem(MUSIC_EAR_REFERENCE_KEY) === "true";
+  } catch(_){}
+  earWrap.append(earBtn, earLevelSelect, earCountSelect, earReferenceBtn);
+
+  const earTest = MNMusicEarTest.create({
+    timbre:() => sheet.timbre,
+    toast:(message, ms) => { if (typeof toast === "function") toast(message, ms); },
+    onStart:() => setEarChrome(true),
+    onFinish:(summary) => {
+      if (typeof petReact === "function") petReact(summary.accuracy >= 80 ? "success" : "error");
+    },
+    onEnd:(summary, reason) => {
+      setEarChrome(false);
+      scheduleRedraw();                            // 감춰 뒀던 악보가 제 폭으로 다시 그려진다
+      if (reason === "cancel" && summary.answered && typeof toast === "function"){
+        toast(`음감 테스트를 그만뒀어요. 여기까지 ${summary.correct}/${summary.answered}`
+          + ` · 정확도 ${summary.accuracy}%`, 3000);
+      }
+    }
+  });
+
   const volumeWrap = document.createElement("span");
   volumeWrap.className = "music-volume";
   const muteBtn = musicButton("🔊", "악보 소리 음소거");
@@ -761,7 +824,7 @@ async function mountMusicEditor(doc){
   status.className = "music-status";
 
   playBar.append(playAllBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, practiceWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
+    countInBtn, metronomeBtn, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 악보 ----- */
@@ -798,7 +861,7 @@ async function mountMusicEditor(doc){
   imageReferenceInput.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp";
   imageReferenceInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
-  root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, imageReferenceInput);
+  root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el, imageReferenceInput);
 
   /* ----- 도구막대 접기 -----
      악보만 넓게 보고 싶을 때 편집 도구·쉬운 입력·재생 세 줄을 접는다. 접어도 우클릭 메뉴에
@@ -1628,7 +1691,8 @@ async function mountMusicEditor(doc){
 
   function insertSolfegeNote(step){
     if (!MUSIC_STEPS.includes(step)) return;
-    // 따라치기 중에는 '쉬운 입력'의 도레미 버튼이 그대로 누르는 건반이 된다(자판을 못 쓰는 학생용).
+    // 따라치기·음감 테스트 중에는 '쉬운 입력'의 도레미 버튼이 그대로 누르는 건반이 된다(자판을 못 쓰는 학생용).
+    if (earTest.active()){ earTest.press(MUSIC_STEP_SEMITONES[step]); return; }
     if (practice.active){ practicePress(MUSIC_STEP_SEMITONES[step]); return; }
     tool.rest = false;
     syncTools();
@@ -2303,6 +2367,7 @@ async function mountMusicEditor(doc){
       // 도구막대를 접어 두고 쓰는 사람을 위해 여기에도 둔다. 그만두기는 Esc 로 — 연습 중에는
       // 우클릭 메뉴 자체가 열리지 않는다(연습 중 편집 메뉴를 여는 길을 막아 둬서).
       { label:"따라치기(자판으로 음 맞추기)", disabled:running, action:() => { practiceBtn.click(); } },
+      { label:"음감 테스트(듣고 음 맞히기)", disabled:running, action:() => { earBtn.click(); } },
       { label:"연습 속도", children:[0.5, 0.75, 1].map((rate) => ({
         label:`${Math.round(rate * 100)}%`, active:Number(speedSelect.value) === rate,
         action:() => { speedSelect.value = String(rate); }
@@ -2439,7 +2504,7 @@ async function mountMusicEditor(doc){
   function onScoreContextMenu(event){
     event.preventDefault();
     event.stopPropagation();
-    if (practice.active) return;                 // 편집 메뉴는 연습이 끝난 뒤에
+    if (practice.active || earTest.active()) return;   // 편집 메뉴는 연습·테스트가 끝난 뒤에
     openScoreContextAt(event.clientX, event.clientY, event.target);
   }
 
@@ -2709,6 +2774,27 @@ async function mountMusicEditor(doc){
 
   function onKeyDown(event){
     if (doc.el.hidden) return;                       // 다른 문서를 보고 있으면 관여하지 않는다
+    /* 음감 테스트 중에도 자판이 통째로 '답을 누르는 건반'이 된다. 악보를 감춰 둔 동안 편집 키가
+       들으면 안 되므로 따라치기와 같이 캡처 단계에서 삼키고 전파까지 끊는다.
+       4단계에서 옥타브를 물을 때만 숫자키의 뜻이 음이름에서 옥타브로 바뀐다. */
+    if (earTest.active()){
+      const claimEar = () => { event.preventDefault(); event.stopPropagation(); };
+      if (event.key === "Escape"){ claimEar(); stopEarTest(); return; }
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (earTest.finished()){
+        if (event.key === "Enter"){ claimEar(); stopEarTest(); }
+        return;
+      }
+      if (earTest.needsOctave()){
+        const octave = event.code ? MUSIC_EAR_OCTAVE_KEYS[event.code] : undefined;
+        if (octave !== undefined){ claimEar(); if (!event.repeat) earTest.answerOctave(octave); }
+        return;
+      }
+      if (event.code === "Space"){ claimEar(); if (!event.repeat) earTest.replay(); return; }
+      const answerPc = event.code ? MUSIC_PRACTICE_KEYS[event.code] : undefined;
+      if (answerPc !== undefined){ claimEar(); if (!event.repeat) earTest.press(answerPc); }
+      return;
+    }
     // 따라치기 중에는 자판이 통째로 '건반'이 된다. 악보를 바꾸는 키(음표 길이·화살표·되돌리기…)는
     // 여기서 전부 막는다 — 교본이 연습 도중 바뀌면 지금 어디를 누르고 있는지가 어긋난다.
     if (practice.active){
@@ -2934,8 +3020,8 @@ async function mountMusicEditor(doc){
     const now = Date.now();
     if (typeof toast === "function" && now - practice.hintAt > 3500){
       practice.hintAt = now;
-      const want = step.pcs.map((value) => MUSIC_PRACTICE_PC_LABELS[value]).join("+");
-      toast(`누른 음: ${MUSIC_PRACTICE_PC_LABELS[pc]} · 이 자리는 ${want}`, 2200);
+      const want = step.pcs.map((value) => MUSIC_PC_LABELS[value]).join("+");
+      toast(`누른 음: ${MUSIC_PC_LABELS[pc]} · 이 자리는 ${want}`, 2200);
     }
   }
 
@@ -2953,6 +3039,79 @@ async function mountMusicEditor(doc){
       control.disabled = on;
     }
     if (!on) syncTools();                            // 오른손·왼손 재생 버튼은 대보표일 때만 다시 켠다
+  }
+
+  /* ----- 음감 테스트(듣고 음 맞히기) -----
+     따라치기와 반대로 **악보를 감춘다**. 소리로 내는 음은 무작위지만, 화면에 악보가 남아 있으면
+     학생이 거기서 음이름을 골라 짚어 보게 되고(나중에 악보에서 문제를 뽑게 되면 아예 정답표가 된다),
+     무엇보다 "귀로만 고르는" 연습이 되지 않는다. 편집·재생 줄은 따라치기와 같은 이유로 잠그되
+     '쉬운 입력'의 도레미 버튼은 살려 둔다 — 자판을 못 쓰는 학생이 답을 누르는 길이다. */
+  function setEarChrome(on){
+    earBtn.classList.toggle("is-on", on);
+    earBtn.textContent = on ? "■ 그만두기" : "🎧 음감 테스트";
+    earLevelSelect.disabled = on;
+    earCountSelect.disabled = on;
+    earReferenceBtn.disabled = on;
+    root.classList.toggle("is-eartest", on);
+    // 테스트 중에는 대기 화면이 덮지 않아야 한다 — 재생과 같은 규칙(.is-running).
+    root.classList.toggle("is-running", on);
+    for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
+                           speedSelect, countInBtn, metronomeBtn, fromInput, toInput, practiceBtn]){
+      control.disabled = on;
+    }
+    if (!on) syncTools();
+  }
+
+  function stopEarTest(){
+    return earTest.stop(earTest.finished() ? "done" : "cancel");
+  }
+
+  function startEarTest(){
+    if (earTest.active()) return false;
+    if (practice.active){
+      if (typeof toast === "function") toast("따라치기를 먼저 그만두고 시작해 주세요.", 2200);
+      return false;
+    }
+    MNMusicAudio.stop();
+    closeMusicContextMenu();
+    hidePitchGuide();
+    noteDrag = null;
+    select(0, null);                                 // 테스트 중에는 편집 대상(선택)이 없다
+    return earTest.start({
+      level:Number(earLevelSelect.value) || 1,
+      count:Number(earCountSelect.value) || 10,
+      reference:earReference
+    });
+  }
+
+  earBtn.addEventListener("click", () => {
+    if (earTest.active()){ stopEarTest(); return; }
+    if (!startEarTest()) return;
+    if (typeof toast === "function"){
+      toast("소리를 듣고 음이름을 눌러 보세요. 자판 A S D F G H J = 도 레 미 파 솔 라 시 · "
+        + "Space 다시 듣기 · Esc 그만두기", 5200);
+    }
+  });
+  earLevelSelect.addEventListener("change", () => {
+    try { localStorage.setItem(MUSIC_EAR_LEVEL_KEY, earLevelSelect.value); } catch(_){}
+  });
+  earCountSelect.addEventListener("change", () => {
+    try { localStorage.setItem(MUSIC_EAR_COUNT_KEY, earCountSelect.value); } catch(_){}
+  });
+  earReferenceBtn.addEventListener("click", () => {
+    earReference = !earReference;
+    syncEarControls();
+    try { localStorage.setItem(MUSIC_EAR_REFERENCE_KEY, String(earReference)); } catch(_){}
+    if (typeof toast === "function"){
+      toast(earReference
+        ? "기준음을 켰어요 — 시작할 때 가온다(도4)를 들려줍니다(상대음감 연습)."
+        : "기준음을 껐어요 — 기준 없이 바로 문제를 냅니다(절대음감 연습).", 2600);
+    }
+  });
+
+  function syncEarControls(){
+    earReferenceBtn.classList.toggle("is-on", earReference);
+    earReferenceBtn.setAttribute("aria-pressed", earReference ? "true" : "false");
   }
 
   /* 연결된 피아노가 있는데 MIDI 입력이 꺼져 있으면, 켜는 단추가 달린 안내를 띄운다.
@@ -2980,6 +3139,7 @@ async function mountMusicEditor(doc){
 
   function startPractice(){
     if (practice.active) return false;
+    if (earTest.active()) return false;          // 음감 테스트와 따라치기는 서로 배타(자판을 함께 쓴다)
     const range = clampRange();
     const staff = practiceStaffSelect.value === "treble" || practiceStaffSelect.value === "bass"
       ? practiceStaffSelect.value : null;
@@ -3071,6 +3231,7 @@ async function mountMusicEditor(doc){
     countInBtn.disabled = on;
     metronomeBtn.disabled = on;
     practiceBtn.disabled = on;                   // 재생 중에는 따라치기를 시작하지 않는다(소리가 겹친다)
+    earBtn.disabled = on;                        // 음감 테스트도 같다 — 반주와 문제 음이 겹친다
     // 재생 중에는 대기 화면이 뜨지 않아야 한다. screensaverBusy() 가 이미 .is-running 을
     // "실행 중"으로 보고 있어서(파이썬·노트북과 같은 규칙) 이 클래스만 붙였다 떼면 된다.
     root.classList.toggle("is-running", on);
@@ -3093,6 +3254,7 @@ async function mountMusicEditor(doc){
 
   async function startPlay(range, playOptions){
     if (practice.active) return;                 // 따라치기 중에는 재생하지 않는다(누른 음과 반주가 겹친다)
+    if (earTest.active()) return;                // 음감 테스트 중에도 같다
     const options = playOptions || {};
     setPlaying(true);
     if (MNMusicAudio.sampledTimbre(sheet.timbre)){
@@ -3240,7 +3402,9 @@ async function mountMusicEditor(doc){
     const data = event.data || [];
     const command = data[0] & 0xf0;
     if (command !== 0x90 || Number(data[2]) <= 0) return;
-    // 따라치기 중이면 건반은 '입력'이 아니라 '채점'으로 간다 — 안 그러면 연습하다 악보가 고쳐진다.
+    // 따라치기·음감 테스트 중이면 건반은 '입력'이 아니라 '채점'으로 간다 — 안 그러면 연습하다 악보가 고쳐진다.
+    // 음감 테스트에는 MIDI 번호를 함께 넘긴다 — 옥타브까지 한 번에 답한 것으로 볼 수 있다(4단계).
+    if (earTest.active()){ earTest.press(musicPitchClass(Number(data[1])), Number(data[1])); return; }
     if (practice.active){ practicePress(musicPitchClass(Number(data[1]))); return; }
     const pitch = pitchFromMidiInput(Number(data[1]));
     if (!musicMidiInRange(Number(data[1]), activeStaff)){
@@ -3543,6 +3707,7 @@ async function mountMusicEditor(doc){
     scorePan = null;
     practice.active = false;                     // 문서를 닫으면 따라치기도 끝난다(악보는 건드린 적이 없다)
     practice.steps = []; practice.state = null;
+    earTest.destroy();                           // 예약해 둔 다음 문제 타이머까지 함께 걷는다
     closeMusicContextMenu();
     scoreHost.removeEventListener("contextmenu", onScoreContextMenu);
     scoreHost.removeEventListener("scroll", closeMusicContextMenu);
@@ -3569,6 +3734,7 @@ async function mountMusicEditor(doc){
   updateHistoryButtons();
   updateZoomControls();
   syncPracticeControls();
+  syncEarControls();
   syncVolumeControls();
 
   scoreHost.textContent = "악보를 준비하는 중…";

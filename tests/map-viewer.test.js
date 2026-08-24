@@ -34,6 +34,7 @@ function loadMapViewer(){
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
+      , MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
       , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
       , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
@@ -804,7 +805,7 @@ test("우클릭 메뉴의 도구 항목은 도구막대 단추를 그대로 비�
   assert.match(sync[1], /classList\.toggle\("is-on", mirror\.button\.classList\.contains\("is-on"\)\)/);
   assert.match(source, /syncContextMirrors\(\);\n\s*contextMenu\.hidden = false;/);
   // 지우기·되돌리기·저장까지 수업 중에 쓰는 도구가 메뉴에 함께 있다.
-  for (const button of ["lineBtn", "areaBtn", "addressBtn", "clearItemsBtn", "regionBtn", "boardBtn", "saveBtn"])
+  for (const button of ["lineBtn", "areaBtn", "routeBtn", "addressBtn", "clearItemsBtn", "regionBtn", "boardBtn", "saveBtn"])
     assert.match(source, new RegExp("contextMirror\\(" + button + "\\)"), button + " 미러 항목이 없다");
   // 화살표뿐인 단추는 메뉴용 이름을 따로 주고, 그 이름도 영어 사전에 있어야 한다.
   for (const label of ["↶ 되돌리기 (Ctrl+Z)", "↷ 다시 실행 (Ctrl+Shift+Z)"])
@@ -1732,6 +1733,66 @@ test("표시 이름표는 .map 에 저장되고 옛 파일은 꺼진 채로 열�
   const again = api.mapDocParse(api.mapDocSerialize(model));
   assert.equal(again.labels, true);
   assert.equal(again.version, api.MAP_DOC_VERSION);
+});
+
+/* 표시 잇는 선도 격자·이름표와 같은 성격이라(= "이어 둔 지도"로 건네진다) .map 에 담는다.
+   담는 것은 켜 두었다는 사실뿐이고 선 자체는 표시에서 매번 다시 그린다 — 굳혀 두면 표시를
+   옮기거나 지운 순간 선이 거짓말이 된다. */
+test("표시 잇는 선은 .map 에 저장되고 옛 파일은 꺼진 채로 열린다", () => {
+  const api = loadMapViewer();
+  const old = api.mapDocParse(JSON.stringify({
+    type:"classdock-map", version:6, title:"옛 지도", basemap:"osm", center:[37,127], zoom:10, markers:[]
+  }));
+  assert.equal(old.route, false);
+
+  const model = api.mapDocEmpty("이어 둔 지도");
+  const before = api.mapDocContentKey(model);
+  model.route = true;
+  assert.notEqual(api.mapDocContentKey(model), before, "선을 켜면 저장 안 됨(●) 이 켜진다");
+  const again = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(again.route, true);
+  assert.equal(again.version, api.MAP_DOC_VERSION);
+  // 선을 저장하지 않는다는 것이 요점이다 — .map 에 폴리라인이 새로 생기면 안 된다.
+  assert.deepEqual(again.shapes, []);
+});
+
+test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 내용이 바뀔 때마다 다시 그린다", () => {
+  const api = loadMapViewer();
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  // 이을 차례는 표시 배열 순서 그대로다(발표 순서·목록의 ↑↓ 와 같은 차례여야 헷갈리지 않는다).
+  assert.match(source,
+    /const routePoints = \(\) => model\.markers\.filter\(markerVisible\)\.map\(marker => \[marker\.lat, marker\.lng\]\);/);
+  // 표시가 둘이 안 되면 선을 걷어 낸다(한 점짜리 선은 그릴 것이 없다).
+  // 미리 선언해 둔 빈 함수(let redrawRoute = () => {};)가 아니라 실제 본문을 잡는다.
+  const draw = /\n  redrawRoute = \(\) => \{\n([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(draw);
+  assert.match(draw[1], /if \(points\.length < 2\)\{/);
+  assert.match(draw[1], /map\.removeLayer\(routeLayer\); routeLayer = null;/);
+  // 이미 그린 선은 다시 만들지 않고 점만 갈아 끼운다 — 켤 때마다 새로 만들면 화면이 깜빡인다.
+  assert.match(draw[1], /routeLayer\.setLatLngs\(points\)/);
+  // setLatLngs 는 영구 tooltip 자리를 옮기지 않으므로 바뀐 선의 가운데로 이름표도 직접 옮긴다.
+  assert.match(draw[1], /routeTooltip\.setLatLng\(routeLayer\.getCenter\(\)\)/);
+  // 내용이 바뀌는 길은 전부 touch 를 지난다 — 다시 그리기를 거기 한 곳에만 매달아 빠뜨리지 않는다.
+  const touch = /const touch = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(touch);
+  assert.match(touch[1], /redrawRoute\(\);/);
+  // 목록에서 감춘 묶음은 선에서도 빠진다(없는 표시로 선이 돌아가면 읽을 수 없다).
+  const visibility = /const applyMarkerVisibility = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
+  assert.ok(visibility);
+  assert.match(visibility[1], /redrawRoute\(\);/);
+  // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
+  assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
+  // 되돌리기 범위도 격자·이름표와 같다.
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route\]\)/);
+  assert.match(source, /model\.route = saved\[7\] === true;/);
+  // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
+  assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);
+  // 선은 도형(overlayPane 400)·표시(markerPane 600) 아래에 깔되 격자(350) 위에 둔다.
+  assert.match(source, /createPane\("mapRoutePane"\)/);
+  assert.match(source, /routePane\.style\.zIndex = "380"/);
+  assert.ok(api.MAP_ROUTE_TANGLE_MARKERS >= 10);
+  assert.match(styles, /\.map-route-label\{/);
 });
 
 test("이름표는 읽을 수 있는 확대에서만 내놓고 표시가 너무 많으면 켜지 않는다", () => {

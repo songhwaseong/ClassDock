@@ -10,11 +10,12 @@ const vm = require("node:vm");
    "무엇을 몇 초에 예약했는가"와 "WAV 바이트가 규격대로인가"를 검증한다.
    예약은 가짜 AudioContext 로 받아 적어 확인한다. */
 
-function loadMusicAudio(){
+function loadMusicAudio(extras){
   const context = {
     console, Math, JSON, Date, Number, Array, Object, String, Error, Promise,
     ArrayBuffer, DataView, Float32Array, Uint8Array,
-    setInterval, clearInterval, setTimeout, clearTimeout
+    setInterval, clearInterval, setTimeout, clearTimeout,
+    ...(extras || {})
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -60,6 +61,21 @@ function fakeContext(){
     return gain;
   };
   return ctx;
+}
+
+function fakeAudioContextClass(){
+  class FakeAudioContext {
+    constructor(){
+      const inner = fakeContext();
+      Object.assign(this, inner);
+      this.destination = {};
+      this.state = "running";
+      FakeAudioContext.instances.push(this);
+    }
+    resume(){ return Promise.resolve(); }
+  }
+  FakeAudioContext.instances = [];
+  return FakeAudioContext;
 }
 
 function fourNotes(api){
@@ -160,6 +176,21 @@ test("악보 음량과 음소거 상태는 안전한 범위에서 바뀐다", ()
   assert.equal(api.MNMusicAudio.setMuted(true), true);
   assert.equal(api.MNMusicAudio.muted(), true);
   assert.equal(api.MNMusicAudio.setMuted(false), false);
+});
+
+test("미리듣기는 실제 예약 시점을 알리고 stop에서 즉시 취소된다", () => {
+  const AudioContext = fakeAudioContextClass();
+  const api = loadMusicAudio({ AudioContext });
+  let scheduled = 0;
+  assert.equal(api.MNMusicAudio.previewNote(api.musicNote("C", 4), "triangle", {
+    onScheduled:() => { scheduled++; }
+  }), true);
+  assert.equal(scheduled, 1);
+  const context = AudioContext.instances[0];
+  assert.equal(context.oscillators.length, 1);
+  const naturalStop = context.oscillators[0].stoppedAt;
+  api.MNMusicAudio.stop();
+  assert.ok(context.oscillators[0].stoppedAt < naturalStop, "미리듣기 노드를 짧게 감쇠해 멈춰야 한다");
 });
 
 test("피아노 음색은 가까운 실제 녹음을 골라 재생 속도로 음높이를 맞춘다", () => {

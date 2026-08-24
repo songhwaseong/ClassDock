@@ -93,6 +93,7 @@
     "music-model.js",
     "music-xml.js",
     "music-audio.js",
+    "music-eartest.js",
     "music-editor.js",
     "image-memo.js",
     "backup.js",
@@ -206,6 +207,7 @@
         "music-model.js",
         "music-xml.js",
         "music-audio.js",
+        "music-eartest.js",
         "music-editor.js",
         "image-memo.js",
         "backup.js",
@@ -377,6 +379,10 @@
     "music-audio.js": [
       "music-model.js"
     ],
+    "music-eartest.js": [
+      "music-model.js",
+      "music-audio.js"
+    ],
     "music-xml.js": [
       "file-loaders.js",
       "lazy.js",
@@ -389,7 +395,8 @@
       "lazy.js",
       "music-model.js",
       "music-xml.js",
-      "music-audio.js"
+      "music-audio.js",
+      "music-eartest.js"
     ],
     "exam-paper.js": [
       "documents.js",
@@ -588,6 +595,15 @@
       "name": "music-audio",
       "file": "music-audio.js",
       "publicApi": "MNMusicAudio",
+      "consumers": [
+        "music-eartest.js",
+        "music-editor.js"
+      ]
+    },
+    {
+      "name": "music-eartest",
+      "file": "music-eartest.js",
+      "publicApi": "MNMusicEarTest",
       "consumers": [
         "music-editor.js"
       ]

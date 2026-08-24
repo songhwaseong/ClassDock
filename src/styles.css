@@ -949,6 +949,13 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:1px 5px;font-size:11.5px;font-weight:600;box-shadow:0 1px 4px rgba(15,23,42,.16);
     pointer-events:none;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .map-pin-label::before{display:none}          /* Leaflet 기본 말꼬리 — 이름표가 촘촘할 때 거슬린다 */
+  /* 표시 잇는 선(🧵 표시 잇기)의 전체 거리 이름표. 저절로 그려지는 층이라 사람이 직접 그린
+     도형 이름표보다 조용하게 둔다 — 선 자체도 점선이라 실선인 거리선과 헷갈리지 않는다. */
+  .map-route-label{border:1px solid color-mix(in srgb,#7c3aed 40%,var(--border));border-radius:5px;
+    background:color-mix(in srgb,var(--panel) 88%,transparent);color:var(--ink);
+    padding:1px 6px;font-size:11.5px;font-weight:600;box-shadow:0 1px 4px rgba(15,23,42,.16);
+    pointer-events:none;white-space:nowrap}
+  .map-route-label::before{display:none}
   .map-save{font-weight:600}
   .map-coord{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .map-status{color:var(--muted);font-size:11px;margin-left:auto}
@@ -1275,6 +1282,34 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-practice-staff[hidden]{display:none}
   .music-practice-info{color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
   .music-practice-info[hidden]{display:none}
+  /* 음감 테스트 — 따라치기와 정반대로 악보를 아예 감춘다(악보가 보이면 귀로 고를 이유가 없다).
+     감출 때 visibility 가 아니라 display 로 지우는 이유: 자리를 비워야 테스트 판이 그 폭을
+     그대로 받고, 끝나고 되돌아올 때 ResizeObserver 가 알아서 다시 조판한다. */
+  .music-ear-controls{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .music-doc.is-eartest .music-score-workspace{display:none}
+  .music-doc.is-eartest .music-bar,.music-doc.is-eartest .music-tools{opacity:.45;pointer-events:none}
+  .music-ear{flex:1;min-height:0;overflow:auto;padding:20px 12px;background:var(--panel);color:var(--ink)}
+  .music-ear-panel{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px;text-align:center}
+  .music-ear-head{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;font-size:13px}
+  .music-ear-progress{color:var(--accent);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .music-ear-mode{color:var(--muted);font-size:12px}
+  .music-ear-stage{display:flex;flex-direction:column;align-items:center;gap:8px;min-height:104px}
+  .music-ear-ask{margin:0;font-size:17px;font-weight:700}
+  .music-ear-feedback{margin:0;min-height:20px;font-size:14px;font-weight:700}
+  .music-ear-feedback.is-ok{color:#166534}
+  .music-ear-feedback.is-bad{color:#dc2626}
+  .music-ear-keys{display:flex;justify-content:center;gap:6px;flex-wrap:wrap}
+  .music-ear-keys .music-ear-key{min-width:54px;min-height:46px;padding:8px 12px;font-size:16px;font-weight:700}
+  .music-ear-black .music-ear-key{min-width:50px;font-size:14px;
+    background:color-mix(in srgb,var(--ink) 8%,var(--field))}
+  .music-ear-octaves{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;font-size:13px}
+  .music-ear-hint{margin:0;color:var(--muted);font-size:11.5px}
+  .music-ear-result{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid var(--border);
+    border-radius:10px;background:var(--field)}
+  .music-ear-score{margin:0;font-size:18px;font-weight:800;color:var(--accent)}
+  .music-ear-detail,.music-ear-confusion{margin:0;font-size:13px}
+  .music-ear-note{margin:0;color:var(--muted);font-size:11.5px}
+  .music-ear-result-buttons{display:flex;justify-content:center;gap:8px}
   /* 도구상자 */
   .music-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}

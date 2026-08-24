@@ -2057,6 +2057,16 @@
       "Name labels appear from zoom {need} — you are at zoom {zoom}, move a little closer.",
     "표시가 {count}개라 이름을 한꺼번에 띄우면 지도가 느려져요 — {max}개까지 켤 수 있습니다.":
       "With {count} pins, showing every name would slow the map down — up to {max} pins can be labelled.",
+    "🧵 표시 잇기": "🧵 Connect pins",
+    "표시를 목록 순서대로 선으로 이어요 — 표시를 옮기거나 순서를 바꾸면 선도 따라갑니다":
+      "Connects pins with a line in list order — the line follows when you move a pin or reorder the list",
+    "표시를 목록 순서대로 이었어요 — 순서는 표시 목록에서 바꿀 수 있습니다.":
+      "Connected the pins in list order — you can change the order in the pin list.",
+    "표시를 잇도록 켰어요 — 표시가 두 개가 되면 선이 나타납니다.":
+      "Pin connecting is on — the line appears once there are two pins.",
+    "표시 {count}개를 목록 순서대로 이었어요 — 선이 엉켜 보이면 표시 목록에서 순서를 바꿔 보세요.":
+      "Connected {count} pins in list order — if the line looks tangled, reorder them in the pin list.",
+    "표시 {count}개 · 전체 {distance}": "{count} pins · {distance} total",
     "🧾 표시 목록": "🧾 Pin list",
     "표시를 옆 목록으로 봐요 — 이름으로 찾고, 묶음별로 감추고, 눌러서 그 자리로 갑니다":
       "Shows pins in a side list — search by name, hide a group, click to fly there",

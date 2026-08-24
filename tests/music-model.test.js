@@ -24,7 +24,9 @@ function loadMusic(){
       musicRetuneForKey, musicPackLines, musicBarWidthHint,
       musicTransposeSheet, musicTransposedKey, musicTransposeSteps, musicTransposePitch, musicPitchFromMidi,
       musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS,
-      musicPracticeSteps, musicPitchClass
+      musicPracticeSteps, musicPitchClass, MUSIC_PC_LABELS,
+      MUSIC_EAR_LEVELS, MUSIC_EAR_COUNTS, musicEarLevel, musicEarPool, musicEarOctaves,
+      musicEarQuestions, musicEarJudge, musicEarSummary, musicEarDistractor, MUSIC_EAR_REFERENCE_MIDI
     };`, context);
   return context.__music;
 }
@@ -711,4 +713,104 @@ test("빈 악보는 따라칠 차례가 없다", () => {
   const built = api.musicPracticeSteps(api.musicEmpty("빈 악보"));
   assert.equal(built.total, 0);
   assert.equal(built.steps.length, 0);
+});
+
+
+/* ===== 음감 테스트 — 소리만 듣고 음이름 맞히기 ===== */
+
+// 예측 가능한 난수. 같은 씨앗이면 같은 문제지가 나와야 규칙을 눈으로 확인할 수 있다.
+function fakeRng(values){
+  let at = 0;
+  return () => values[at++ % values.length];
+}
+
+test("단계마다 나올 수 있는 음이 정해져 있다", () => {
+  const api = loadMusic();
+  const level1 = api.musicEarPool(1);
+  assert.deepEqual(Array.from(level1), [60, 62, 64, 65, 67, 69, 71]);      // 도4~시4 흰건반 일곱
+  assert.equal(api.musicEarPool(2).length, 14);                 // 두 옥타브 흰건반
+  assert.ok(!api.musicEarPool(2).includes(61), "흰건반 단계에 검은건반이 섞이면 안 된다");
+  assert.equal(api.musicEarPool(3).length, 24);                 // 도4~시5 반음 전부
+  assert.ok(api.musicEarPool(3).includes(61));
+  // 앱 음역(G3~C6) 안에 들어야 실제로 소리를 낼 수 있다.
+  for (const level of api.MUSIC_EAR_LEVELS){
+    for (const midi of api.musicEarPool(level.id)) assert.ok(midi >= 55 && midi <= 84);
+  }
+  // 4단계만 옥타브까지 묻고, 고를 옥타브는 4·5 둘뿐이라 문항마다 조건이 같다.
+  assert.deepEqual(Array.from(api.MUSIC_EAR_LEVELS.filter((level) => level.octaveAnswer).map((level) => level.id)), [4]);
+  assert.deepEqual(Array.from(api.musicEarOctaves(4)), [4, 5]);
+  assert.deepEqual(Array.from(api.musicEarOctaves(1)), [4]);
+});
+
+test("문제는 뽑은 단계 안에서만 나오고, 같은 정답이 연달아 나오지 않는다", () => {
+  const api = loadMusic();
+  // 도4 다음 도5를 고르는 난수 — MIDI는 달라도 두 문제의 정답은 모두 '도'다.
+  const built = api.musicEarQuestions({ level:2, count:10, rng:fakeRng([0, 0.5]) });
+  assert.equal(built.questions.length, 10);
+  const pool = api.musicEarPool(2);
+  for (let index = 0; index < built.questions.length; index++){
+    const question = built.questions[index];
+    assert.ok(pool.includes(question.midi));
+    assert.equal(question.pc, api.musicPitchClass(question.midi));
+    assert.equal(question.index, index);
+    if (index) assert.notEqual(question.pc, built.questions[index - 1].pc);
+  }
+  // 잘못된 값이 들어와도 판이 성립해야 한다 — 빈 값은 기본 문항 수, 나머지는 1~50 사이로 자른다.
+  assert.equal(api.musicEarQuestions({ level:1, count:0 }).questions.length, 10);
+  assert.equal(api.musicEarQuestions({ level:1, count:-5 }).questions.length, 1);
+  assert.equal(api.musicEarQuestions({ level:1, count:999 }).questions.length, 50);
+  assert.equal(api.musicEarQuestions({ level:99 }).level.id, 1);   // 없는 단계는 1단계로
+});
+
+test("옥타브는 4단계에서만 채점한다", () => {
+  const api = loadMusic();
+  const question = { midi:67, pc:7, octave:4 };                     // 솔4
+  // 1~3단계 — 음이름만 맞으면 몇 옥타브에서 눌러도 맞은 것으로 본다.
+  assert.equal(api.musicEarJudge(question, { pc:7, octave:5 }, 2).correct, true);
+  assert.equal(api.musicEarJudge(question, { pc:9, octave:4 }, 2).correct, false);
+  // 4단계 — 음이름이 맞아도 옥타브가 틀리면 틀린 답이다.
+  const wrongOctave = api.musicEarJudge(question, { pc:7, octave:5 }, 4);
+  assert.equal(wrongOctave.correct, false);
+  assert.equal(wrongOctave.pcOk, true);
+  assert.equal(wrongOctave.octaveOk, false);
+  assert.equal(api.musicEarJudge(question, { pc:7, octave:4 }, 4).correct, true);
+  assert.equal(api.musicEarJudge(question, { pc:7 }, 2).needsOctave, false);
+  assert.equal(api.musicEarJudge(question, { pc:7 }, 4).needsOctave, true);
+});
+
+test("성적표는 정확도·반응 시간과 함께 헷갈린 음 짝을 센다", () => {
+  const api = loadMusic();
+  const summary = api.musicEarSummary([
+    { pc:0, answerPc:0, correct:true,  ms:900,  replays:0 },
+    { pc:5, answerPc:7, correct:false, ms:2100, replays:1 },
+    { pc:5, answerPc:7, correct:false, ms:1500, replays:0 },
+    { pc:7, answerPc:5, correct:false, ms:1200, replays:0 }
+  ]);
+  assert.equal(summary.answered, 4);
+  assert.equal(summary.correct, 1);
+  assert.equal(summary.wrong, 3);
+  assert.equal(summary.accuracy, 25);
+  assert.equal(summary.avgMs, 1425);
+  assert.equal(summary.bestMs, 900);
+  assert.equal(summary.replays, 1);
+  assert.equal(summary.confusions[0].label, "파→솔");        // 가장 많이 헷갈린 짝이 앞에 온다
+  assert.equal(summary.confusions[0].count, 2);
+  assert.equal(summary.confusions.length, 2);
+  assert.equal(api.musicEarSummary([]).accuracy, 0);
+  // 상위 세 짝까지만 보여 준다(교실에서 읽을 수 있는 분량).
+  const many = api.musicEarSummary([0, 1, 2, 3, 4].map((pc) => ({ pc, answerPc:(pc + 1) % 12, correct:false, ms:1000 })));
+  assert.equal(many.confusions.length, 3);
+});
+
+test("간섭음은 문제 음역과 겹치지 않는다", () => {
+  const api = loadMusic();
+  // 문제 음(도4~시5)과 같은 자리에서 울리면 앞 음의 잔상을 지우기는커녕 답을 헷갈리게 한다.
+  for (const value of [0, 0.5, 0.99]){
+    const cluster = api.musicEarDistractor(() => value);
+    assert.equal(cluster.length, 4);
+    for (const midi of cluster) assert.ok(midi < 60, `간섭음이 문제 음역에 들어왔다: ${midi}`);
+    // 화음이 되지 않게 반음·트라이톤으로만 쌓는다.
+    assert.deepEqual(Array.from(cluster.map((midi) => midi - cluster[0])), [0, 1, 6, 11]);
+  }
+  assert.equal(api.MUSIC_EAR_REFERENCE_MIDI, 60);              // 기준음은 가온다
 });

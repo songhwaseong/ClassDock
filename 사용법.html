@@ -127,7 +127,7 @@
   <li><strong>과제 패키지</strong> — 문제·시작 코드·자동채점을 한 파일(<code>.task</code>)로 배포하고 제출본(<code>.taskdone</code>)을 걷어 <strong>재채점·성적 CSV</strong></li>
   <li><strong>시험지</strong> — 객관식·주관식·이미지 문항을 <code>.exam</code> 한 파일로 배포하고, 학생이 이름·서명해 낸 제출본(<code>.examdone</code>)을 <strong>선생님만 열어 일괄 채점·성적 CSV</strong></li>
   <li><strong>블록 문서</strong> — 글·표·이미지를 한 문서에 섞어 쓰는 노션형 문서(<code>.mnote</code>)</li>
-  <li><strong>악보</strong> — 두 성부·가사·표현·반복을 넣고 바로 듣는 악보(<code>.msheet</code>), <strong>따라치기(자판으로 음 맞추기)</strong>, <strong>조옮김</strong>, <strong>MusicXML 가져오기·내보내기</strong>, MIDI 건반 입력·MIDI/WAV 저장과 참고 이미지 나란히 보기</li>
+  <li><strong>악보</strong> — 두 성부·가사·표현·반복을 넣고 바로 듣는 악보(<code>.msheet</code>), <strong>따라치기(자판으로 음 맞추기)</strong>, <strong>음감 테스트(듣고 음 맞히기)</strong>, <strong>조옮김</strong>, <strong>MusicXML 가져오기·내보내기</strong>, MIDI 건반 입력·MIDI/WAV 저장과 참고 이미지 나란히 보기</li>
   <li><strong>지도</strong> — 배경지도 위에 표시를 찍어 이름·메모를 붙이는 수업용 지도(<code>.map</code>), 그대로 <strong>칠판으로 보내 판서</strong>하거나 <strong>메모로 보내 나중에 다시 지도로 열기</strong>, 런처에서 실제로 본 지역은 <strong>자동 보관해 다시 오프라인으로</strong></li>
   <li><strong>연대표</strong> — 사건·기간·유적지·설명·사진을 시간순으로 놓고 <strong>기원전부터 현대까지</strong> 발표하는 수업용 연대표(<code>.timeline</code>)</li>
   <li><strong>개념 관계도</strong> — 개념 카드를 원인·결과·포함·비교 관계로 연결해 정리하고 발표하는 관계도(<code>.concept</code>)</li>
@@ -846,6 +846,7 @@ cd myOffice</code></pre>
   <li><strong>음표를 누르면 음표 또는 화음 전체가 들립니다.</strong> 일반 상태에서 위아래로 드래그하거나 <kbd>↑</kbd>/<kbd>↓</kbd>를 누르면 오선의 줄·칸에 맞춰 높이가 바뀝니다(<kbd>Shift</kbd>와 함께 누르면 한 옥타브). <kbd>←</kbd>/<kbd>→</kbd>로 이웃 음표로 이동하고 <kbd>Delete</kbd>로 지웁니다. <strong>위치 조정</strong> 또는 <kbd>Alt</kbd>+드래그로 음표를 좌우로 조금 옮길 수 있습니다</li>
   <li><strong>▶ 전체 재생</strong>으로 모든 성부를 함께 듣고, 대보표에서는 <strong>▶ 오른손</strong>·<strong>▶ 왼손</strong>으로 한 손씩 따로 연습합니다. <strong>마디 3 ~ 6</strong>처럼 범위를 적고 <strong>▶ 이 구간만</strong>으로 부분만 들을 수도 있습니다. 반복선과 1·2번 괄호는 전체·구간 재생에 반영됩니다. 연습할 때는 속도 <strong>50%·75%·100%</strong>, <strong>1234 준비</strong>, <strong>♩ 메트로놈</strong>을 쓸 수 있습니다</li>
   <li><strong>🎯 따라치기</strong>를 누르면 악보가 흐려지고, 자판을 건반 삼아 음을 차례로 눌러 봅니다. <strong>A S D F G H J = 도 레 미 파 솔 라 시</strong>, 검은건반은 <strong>W E T Y U</strong>이며 숫자 <strong>1~7</strong>도 같습니다. <strong>옥타브는 달라도 맞은 것으로 봅니다</strong> — 계이름만 맞으면 됩니다. 맞으면 그 음표가 제 색으로 살아나며 악보에 적힌 높이 그대로 소리가 나고, 틀리면 그 자리가 빨개지며 <code>누른 음: 라 · 이 자리는 솔</code>처럼 알려 줍니다(틀린 키로는 진도가 나가지 않습니다). 쉼표는 자동으로 넘어가고, <kbd>Backspace</kbd>로 한 음 되돌아가면 그 자리 빨간 표시가 지워져 정확도가 도로 올라갑니다. <strong>마디 3 ~ 6</strong> 범위와 대보표의 <strong>양손·오른손·왼손</strong> 고르기를 그대로 따르며, 자판 대신 <strong>쉬운 입력</strong>의 도레미 버튼이나 <strong>전자 피아노(MIDI 건반)</strong> 로 눌러도 됩니다 — 재생 바의 <strong>🎹 MIDI 입력</strong>을 켜면 되고, 이미 허락해 둔 건반이 연결돼 있으면 연습을 시작할 때 <strong>🎹 켜기</strong> 단추가 달린 안내가 뜹니다. 옥타브를 통과시키므로 25·32건반짜리 작은 키보드로도 악보 전체를 연습할 수 있습니다. 다 누르면 정확도·걸린 시간·분당 음 수를 알려 주고, <kbd>Esc</kbd>로 언제든 그만둡니다. 연습하는 동안에는 악보가 바뀌지 않도록 편집 도구가 잠깁니다. 악보 우클릭 메뉴의 <strong>재생·연습 → 따라치기(자판으로 음 맞추기)</strong> 로도 시작할 수 있습니다</li>
+  <li><strong>🎧 음감 테스트</strong>는 반대로 <strong>악보를 감추고 소리만</strong> 들려줍니다. 옆에서 <strong>단계</strong>(1단계 흰건반 한 옥타브 → 2단계 흰건반 두 옥타브 → 3단계 검은건반까지 → 4단계 옥타브까지 맞히기)와 <strong>문항 수</strong>(5·10·20문제)를 고르고 누르면 됩니다. 들은 음의 계이름을 따라치기와 같은 자리(<strong>A S D F G H J</strong>, 검은건반 <strong>W E T Y U</strong>)로 누르거나 화면의 계이름 단추, <strong>MIDI 건반</strong>으로 누릅니다. 앞 음과 견주어 맞히지 못하도록 <strong>문제 사이에 낮은 간섭음</strong>이 한 번 지나가고, <strong>다시 듣기는 한 문제에 한 번</strong>(<kbd>Space</kbd>)만 됩니다. 틀려도 정답을 들려주고 다음 문제로 넘어가며(따라치기와 다른 점입니다), 다 풀면 <strong>정확도·평균 반응 시간·자주 헷갈린 음 짝</strong>이 나옵니다 — <strong>↻ 한 번 더</strong>로 새 문제를 바로 뽑고 <strong>닫기</strong>(<kbd>Esc</kbd>)로 악보에 돌아옵니다. <strong>🎵 기준음</strong>을 켜면 시작할 때 가온다(도4)를 들려주어 <strong>상대음감</strong> 연습이 되고, 끄면 기준 없이 <strong>절대음감</strong> 연습이 됩니다. 4단계에서는 계이름을 누른 뒤 옥타브(숫자 <code>4</code>·<code>5</code> 또는 화면 단추)를 한 번 더 누릅니다. 단계·문항 수·기준음은 모든 악보에 함께 적용되어 기억되고, 악보 우클릭 메뉴의 <strong>재생·연습 → 음감 테스트(듣고 음 맞히기)</strong> 로도 시작할 수 있습니다</li>
   <li>위쪽에서 <strong>♩빠르기</strong>(40~208), <strong>박자</strong>(2/4·3/4·4/4·6/8), <strong>조표</strong>(장조·단조 각각 올림/내림표 7개까지), <strong>음색</strong>을 바꿉니다. 새 악보는 실제 녹음을 사용하는 <strong>피아노(추천)</strong> 가 기본이며, <strong>기타(나일론)·실로폰·하프·플루트·클라리넷</strong>과 합성음도 선택할 수 있습니다</li>
   <li>노래가 아이들 목소리에 너무 높거나 낮으면 <strong>조옮김</strong>을 누르고 <code>온음(장2도) 올리기 — 라장조</code>처럼 간격을 고릅니다. 음표와 조표가 함께 움직여 <strong>멜로디는 그대로이고 높이만 바뀝니다</strong>(옆의 <strong>조표</strong>는 반대로 음표를 제자리에 두고 조표만 바꿉니다). 반음~완전5도와 한 옥타브를 위아래로 고를 수 있고, 화음·두 손·두 성부·중간에 바뀌는 조표까지 함께 옮깁니다. 권장 음역(오른손 G3~C6·왼손 C2~C5)을 벗어나는 음이 생기면 먼저 물어보며 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌릴 수 있습니다. 악보 우클릭 메뉴에도 같은 <strong>조옮김</strong>이 있습니다</li>
   <li><strong>🎹 MIDI 입력</strong>(악보 우클릭 메뉴의 <strong>다음 입력 도구 → MIDI 건반으로 입력</strong>도 같습니다)을 켜고 연결된 MIDI 건반을 누르면 현재 손·성부에 입력됩니다. 거의 동시에 누른 음은 화음으로 묶입니다. <strong>⬇ MIDI</strong>는 다른 음악 프로그램과 전자 악기에서 재생할 수 있는 <code>.mid</code> 파일을 만듭니다</li>
@@ -863,6 +864,8 @@ cd myOffice</code></pre>
 <p><strong>자판 단축키</strong> — <code>1</code>~<code>5</code> 음표 길이, <code>R</code> 쉼표, <kbd>.</kbd> 점, <code>H</code> 도구막대 접기·펴기, <code>↑↓←→</code> 이동, <kbd>Delete</kbd> 지우기, <kbd>Esc</kbd> 선택 풀기, <kbd>Ctrl</kbd>+<code>+</code>/<kbd>-</kbd> 확대·축소, <kbd>Ctrl</kbd>+<kbd>0</kbd> 100%</p>
 
 <p><strong>따라치기 자판</strong> — <code>A S D F G H J</code> 도 레 미 파 솔 라 시, <code>W E T Y U</code> 검은건반(도♯ 레♯ 파♯ 솔♯ 라♯), <code>1</code>~<code>7</code> 도 레 미 파 솔 라 시, <kbd>Backspace</kbd> 한 음 뒤로, <kbd>Esc</kbd> 그만두기 (따라치기 중에는 편집 단축키가 잠깁니다)</p>
+
+<p><strong>음감 테스트 자판</strong> — 계이름은 따라치기와 같은 자리(<code>A S D F G H J</code>·<code>W E T Y U</code>·<code>1</code>~<code>7</code>), <kbd>Space</kbd> 다시 듣기(문제마다 한 번), <kbd>Esc</kbd> 그만두기. 4단계에서 옥타브를 물을 때는 숫자 <code>4</code>·<code>5</code>가 옥타브입니다</p>
 
 <blockquote>
   <p>각 오선은 독립 성부 두 개까지 지원합니다. 꾸밈음과 3잇단 이외의 복잡한 잇단음표는 아직 없으며, 붙임줄은 바로 다음의 같은 높이 음에만 연결됩니다. MusicXML은 첫 파트와 각 오선의 성부 두 개까지 가져옵니다. 프로그램마다 표현 방식이 다른 고급 표기는 단순화될 수 있습니다. Finale·Sibelius·MuseScore의 전용 파일은 해당 프로그램에서 먼저 MusicXML로 내보내세요. 조표를 바꾸면 <strong>임시표 없이 적혀 있던 음은 새 조표를 따라갑니다</strong>(다장조 파 → 사장조 파샵). 일부러 ♯·♭를 붙여 둔 음은 그대로 둡니다. 박자를 바꿔서 마디가 넘치면 아래에 경고가 뜹니다 — 음표를 지우거나 <kbd>Ctrl</kbd>+<kbd>Z</kbd>로 되돌리세요.</p>
@@ -895,6 +898,7 @@ cd myOffice</code></pre>
   <li><strong>📍 표시 추가</strong>를 누른 뒤 지도를 클릭하면 그 자리에 핀이 생기고 편집 풍선이 열립니다. <strong>이름</strong>(예: 우리 학교)과 <strong>메모</strong>(수업 설명·관찰 기록)를 적고 <strong>색 여섯 가지</strong> 중에서 고릅니다. 잘못 눌렀으면 <kbd>Esc</kbd>로 추가를 취소합니다
     <ul>
       <li><strong>🏷️ 이름 보이기</strong> — 표시 이름은 평소 마우스를 올려야 보입니다. 이 단추를 켜면 <strong>모든 표시의 이름이 지도 위에 늘 붙어</strong> 있어, 주변 시설을 여러 곳 넣었을 때 어디가 어디인지 한눈에 들어옵니다. 이름표가 서로 포개져 못 읽는 일이 없도록 <strong>확대 13단계보다 멀리서는 잠시 숨겼다가</strong> 다가가면 다시 나타납니다. 켠 상태는 <strong>지도 파일에 저장되어</strong> 나눠 준 지도에서도 그대로 나옵니다(옛 지도는 꺼진 채로 열립니다). 표시가 200개를 넘으면 지도가 느려지므로 켜지지 않고 그 까닭을 알려 줍니다. 칠판·PNG·인쇄로 보낼 때는 이 단추와 상관없이 <strong>언제나 모든 이름이 그림에 새겨집니다</strong></li>
+      <li><strong>🧵 표시 잇기</strong> — 표시가 두 개 이상이면 <strong>표시 목록의 순서대로 점선으로 이어</strong> 전체 거리를 보여 줍니다. 표시를 옮기거나 지우고, 목록의 <code>▲▼</code>로 순서를 바꾸면 선도 곧바로 따라갑니다. 목록에서 감춘 묶음은 선에서도 빠지며, 켠 상태는 지도 파일에 저장됩니다. 표시가 수십 개라 선이 엉켜 보이면 표시 목록에서 발표 순서를 다듬으세요</li>
     </ul>
   </li>
   <li><strong>📏 거리선</strong>은 경로의 점을 차례로 찍고 <kbd>Enter</kbd>·<strong>마우스 오른쪽 버튼</strong>(또는 같은 버튼 다시 누르기)으로 끝내 전체 거리를 표시합니다. <strong>▱ 면적 영역</strong>도 꼭짓점을 3개 이상 찍어 같은 방식으로 끝내면 면적을 표시합니다. 점을 하나 찍고 나면 <strong>마지막 점부터 마우스까지 점선</strong>이 따라와 다음 구간이 어디로 이어질지 미리 보이고(거리선은 파랑, 면적은 초록), 점선은 그리기가 끝나면 사라져 저장되는 도형에는 들어가지 않습니다. 그리는 중의 오른쪽 클릭은 지도 빠른 메뉴 대신 <strong>완료</strong>이며, 점이 모자라면 브라우저 메뉴가 뜨지 않고 <code>점을 2개(면적은 3개) 이상 찍어 주세요</code> 안내만 나옵니다. 선·영역을 누르면 이름·색을 바꾸거나 지울 수 있고 <kbd>Esc</kbd>로 그리기를 취소합니다</li>
@@ -959,8 +963,8 @@ cd myOffice</code></pre>
     </ul>
   </li>
   <li><strong>🧹 지우기</strong>는 한꺼번에 정리하는 길입니다. <strong>주변 시설로 넣은 것만</strong>(직접 찍은 표시는 그대로 두고 주변 시설이 넣은 표시·반경 원만) 또는 <strong>모두 지우기</strong> 중에서 고릅니다. 지운 뒤에는 되돌릴 수 없으니 확인 창에서 개수를 보고 고르세요</li>
-  <li><strong>↶ 되돌리기 · ↷ 다시 실행</strong>(<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>·<kbd>Ctrl</kbd>+<kbd>Y</kbd>)으로 표시 추가·이동·삭제, 거리선·면적, 이름·색·메모·사진 변경, 발표 순서 바꾸기, 표 들이기, 주변 시설 넣기, 위경도 격자·이름 보이기 켜고 끄기, 🧹 지우기까지 한 단계씩 되돌립니다. 이름 칸이나 편집 풍선 안에서는 <strong>글자 되돌리기</strong>가 먼저이고, 지도를 움직이거나 확대한 것은 단계로 쌓이지 않습니다. 주소를 좌표로 바꾸는 일처럼 여러 줄이 몇 분에 걸쳐 들어오는 작업은 <strong>통째로 한 단계</strong>입니다. 되돌리기 기록은 문서를 닫으면 사라집니다</li>
-  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역·사진·발표 순서 포함)·거리선·면적 영역·위경도 격자와 이름 보이기 켜짐, 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다
+  <li><strong>↶ 되돌리기 · ↷ 다시 실행</strong>(<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>·<kbd>Ctrl</kbd>+<kbd>Y</kbd>)으로 표시 추가·이동·삭제, 거리선·면적, 이름·색·메모·사진 변경, 발표 순서 바꾸기, 표 들이기, 주변 시설 넣기, 위경도 격자·이름 보이기·표시 잇기 켜고 끄기, 🧹 지우기까지 한 단계씩 되돌립니다. 이름 칸이나 편집 풍선 안에서는 <strong>글자 되돌리기</strong>가 먼저이고, 지도를 움직이거나 확대한 것은 단계로 쌓이지 않습니다. 주소를 좌표로 바꾸는 일처럼 여러 줄이 몇 분에 걸쳐 들어오는 작업은 <strong>통째로 한 단계</strong>입니다. 되돌리기 기록은 문서를 닫으면 사라집니다</li>
+  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역·사진·발표 순서 포함)·거리선·면적 영역·위경도 격자와 이름 보이기·표시 잇기 켜짐, 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다
     <ul>
       <li><strong>아직 저장하지 않았어도</strong> 편집 내용은 잠시 뒤 작업공간에 자동으로 담겨, 실수로 새로고침하거나 창을 닫아도 <strong>다음에 열 때 그 지도 탭이 그대로 돌아옵니다.</strong> 표시를 찍기 전의 빈 새 지도도 마찬가지입니다. 설정의 <strong>자동 저장·복원</strong>을 끄면 이 사본도 남기지 않습니다(그때는 새로고침 전에 확인창만 뜹니다)</li>
     </ul>
@@ -1476,6 +1480,7 @@ cd myOffice</code></pre>
 <tr><td><kbd>Alt</kbd>+세로 드래그</td><td>열(블록) 동시 편집</td><td></td></tr>
 <tr><td>열 편집 중 <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>사각 선택 복사 / 잘라내기 / 붙여넣기</td><td></td></tr>
 <tr><td>따라치기 중 <kbd>Esc</kbd></td><td>따라치기 그만두기</td><td></td></tr>
+<tr><td>음감 테스트 중 <kbd>Space</kbd> / <kbd>Esc</kbd></td><td>다시 듣기(한 번) / 테스트 그만두기</td><td>악보</td></tr>
 <tr><td>우클릭</td><td>복사·붙여넣기, 대소문자 변경, 선택한 줄 중복 제거, 특수문자</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>(<kbd>Ctrl</kbd>+<kbd>Y</kbd>)</td><td>되돌리기 / 다시 실행 (최대 300단계)</td><td></td></tr>
 <tr><td><kbd>Ctrl</kbd> <code>+</code> / <kbd>Ctrl</kbd> <kbd>-</kbd></td><td>코드와 실행 결과 문자 크게 / 작게</td><td></td></tr>

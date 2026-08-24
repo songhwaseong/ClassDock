@@ -673,6 +673,10 @@ function musicPitchClass(midi){
   return Number.isFinite(value) ? ((value % 12) + 12) % 12 : null;
 }
 
+/* 음이름(0~11)을 사람이 읽는 계이름으로. 검은건반은 악보 조표와 상관없이 ♯ 쪽 이름으로 안내한다.
+   따라치기와 음감 테스트가 같은 이름을 써야 해서(둘 다 "지금 누른 음"을 말로 알려 준다) 모델에 둔다. */
+const MUSIC_PC_LABELS = ["도", "도♯", "레", "레♯", "미", "파", "파♯", "솔", "솔♯", "라", "라♯", "시"];
+
 function musicPracticeSteps(sheet, opts){
   const options = opts || {};
   const timeline = musicTimeline(sheet, {
@@ -706,6 +710,134 @@ function musicPracticeSteps(sheet, opts){
     });
   }
   return { steps, total:steps.reduce((count, step) => count + (step.auto ? 0 : 1), 0) };
+}
+
+/* ===== 음감 테스트 — 소리만 듣고 음이름 맞히기 =====
+   따라치기가 "악보를 보고 누르기"라면 이쪽은 "악보를 보지 않고 듣고 맞히기"다.
+   문제는 악보와 무관한 무작위 음이라 여기까지가 순수 로직이고(화면·소리는 music-eartest.js),
+   rng 를 주입받게 만들어 node 에서 규칙을 그대로 검증한다.
+
+   음역을 도4~시5 두 옥타브로 좁힌 이유: 앱 음역(G3~C6) 안이면서 옥타브가 정확히 둘이라
+   4단계의 "옥타브까지 맞히기"가 4·5 둘 중 하나로 떨어진다. 반옥타브가 끼면 문항마다
+   고를 수 있는 옥타브 수가 달라져 정답률을 비교할 수 없다. */
+const MUSIC_EAR_LEVELS = [
+  { id:1, label:"1단계 · 흰건반 한 옥타브", black:false, low:60, high:71, octaveAnswer:false },
+  { id:2, label:"2단계 · 흰건반 두 옥타브", black:false, low:60, high:83, octaveAnswer:false },
+  { id:3, label:"3단계 · 검은건반까지",      black:true,  low:60, high:83, octaveAnswer:false },
+  { id:4, label:"4단계 · 옥타브까지",        black:true,  low:60, high:83, octaveAnswer:true }
+];
+const MUSIC_EAR_COUNTS = [5, 10, 20];
+const MUSIC_EAR_DEFAULT_COUNT = 10;
+const MUSIC_EAR_MAX_COUNT = 50;
+const MUSIC_EAR_BLACK_PCS = [1, 3, 6, 8, 10];
+
+function musicEarLevel(id){
+  const want = Math.round(Number(id));
+  return MUSIC_EAR_LEVELS.find((level) => level.id === want) || MUSIC_EAR_LEVELS[0];
+}
+
+// 이 단계에서 나올 수 있는 음 전부(MIDI 번호). 문제는 여기서만 뽑는다.
+function musicEarPool(levelId){
+  const level = musicEarLevel(levelId);
+  const pool = [];
+  for (let midi = level.low; midi <= level.high; midi++){
+    if (!level.black && MUSIC_EAR_BLACK_PCS.includes(musicPitchClass(midi))) continue;
+    pool.push(midi);
+  }
+  return pool;
+}
+
+function musicEarOctaves(levelId){
+  const level = musicEarLevel(levelId);
+  const octaves = [];
+  for (let octave = Math.floor(level.low / 12) - 1; octave <= Math.floor(level.high / 12) - 1; octave++){
+    octaves.push(octave);
+  }
+  return octaves;
+}
+
+function musicEarPick(pool, rng){
+  const index = Math.floor(rng() * pool.length);
+  return pool[Math.max(0, Math.min(pool.length - 1, index))];
+}
+
+function musicEarQuestions(opts){
+  const options = opts || {};
+  const level = musicEarLevel(options.level);
+  const count = Math.max(1, Math.min(MUSIC_EAR_MAX_COUNT,
+    Math.round(Number(options.count) || MUSIC_EAR_DEFAULT_COUNT)));
+  const rng = typeof options.rng === "function" ? options.rng : Math.random;
+  const pool = musicEarPool(level.id);
+  const questions = [];
+  let previous = null;
+  for (let index = 0; index < count; index++){
+    let midi = musicEarPick(pool, rng);
+    // 사용자가 내야 하는 답이 연달아 같으면 "직전과 같은지"만 들어도 맞힐 수 있다.
+    // 1~3단계는 음이름(pc), 4단계는 옥타브까지 포함한 MIDI 번호를 기준으로 다시 뽑는다.
+    const repeatsAnswer = previous !== null && (level.octaveAnswer
+      ? midi === previous : musicPitchClass(midi) === musicPitchClass(previous));
+    if (repeatsAnswer && pool.length > 1){
+      const alternatives = pool.filter((value) => level.octaveAnswer
+        ? value !== previous : musicPitchClass(value) !== musicPitchClass(previous));
+      if (alternatives.length) midi = musicEarPick(alternatives, rng);
+    }
+    previous = midi;
+    questions.push({ index, midi, pc:musicPitchClass(midi), octave:Math.floor(midi / 12) - 1 });
+  }
+  return { level, count, questions };
+}
+
+/* 문제 사이에 끼우는 간섭음. 방금 들은 음의 잔상으로 다음 음을 '견주어' 맞히면 절대음감이
+   아니라 상대음감을 재는 셈이라, 조성이 생기지 않는 반음·트라이톤 덩어리를 문제 음역
+   아래에서 짧게 울려 귀를 지운다. */
+function musicEarDistractor(rng){
+  const random = typeof rng === "function" ? rng : Math.random;
+  const base = 43 + Math.floor(random() * 6);      // G2~C3 — 문제 음역(도4~시5)과 겹치지 않는다
+  return [base, base + 1, base + 6, base + 11];
+}
+
+// 기준음(상대음감 모드에서 시작 전에 들려준다). 가온다(C4).
+const MUSIC_EAR_REFERENCE_MIDI = 60;
+
+function musicEarJudge(question, answer, levelId){
+  const level = musicEarLevel(levelId);
+  const want = question || {};
+  const given = answer || {};
+  const pcOk = musicPitchClass(given.pc) === want.pc;
+  const octaveOk = !level.octaveAnswer || Math.round(Number(given.octave)) === want.octave;
+  return { correct:pcOk && octaveOk, pcOk, octaveOk, needsOctave:level.octaveAnswer };
+}
+
+/* 성적표. 정확도·반응 시간과 함께 "무엇을 무엇으로 들었는지"를 센다 —
+   교실에서 제일 쓸모 있는 값이라 상위 세 짝만 추려 돌려준다. */
+function musicEarSummary(records){
+  const list = Array.isArray(records) ? records : [];
+  const answered = list.filter((item) => item && item.answered !== false);
+  const correct = answered.filter((item) => item.correct).length;
+  const times = answered.map((item) => Math.max(0, Math.round(Number(item.ms) || 0)));
+  const confusion = new Map();
+  for (const item of answered){
+    if (item.correct || !Number.isFinite(item.answerPc)) continue;
+    const key = item.pc + ">" + item.answerPc;
+    confusion.set(key, (confusion.get(key) || 0) + 1);
+  }
+  const confusions = [...confusion.entries()]
+    .map(([key, count]) => {
+      const [from, to] = key.split(">").map(Number);
+      return { from, to, count, label:`${MUSIC_PC_LABELS[from]}→${MUSIC_PC_LABELS[to]}` };
+    })
+    .sort((a, b) => b.count - a.count || a.from - b.from || a.to - b.to);
+  return {
+    total:list.length,
+    answered:answered.length,
+    correct,
+    wrong:answered.length - correct,
+    accuracy:answered.length ? Math.round((correct / answered.length) * 100) : 0,
+    avgMs:times.length ? Math.round(times.reduce((sum, value) => sum + value, 0) / times.length) : 0,
+    bestMs:times.length ? Math.min(...times) : 0,
+    replays:answered.reduce((sum, item) => sum + (Math.round(Number(item.replays)) || 0), 0),
+    confusions:confusions.slice(0, 3)
+  };
 }
 
 function musicClampTempo(tempo){
