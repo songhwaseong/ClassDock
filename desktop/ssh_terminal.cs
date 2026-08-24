@@ -15,7 +15,7 @@ using System.Threading;
 // 비밀번호는 디스크·명령행·환경변수에 넣지 않고, 난수 이름의 일회성 named pipe로 askpass helper에만 전달한다.
 static class ClassDockSshTerminal
 {
-    const int MaxSessionOutputBytes = 4 * 1024 * 1024;
+    const int MaxSessionOutputBytes = 16 * 1024 * 1024;
     const int MaxInputBytes = 256 * 1024;
     const int MaxSessions = 4;
     const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
@@ -98,29 +98,55 @@ static class ClassDockSshTerminal
 
     sealed class RollingBytes
     {
-        readonly List<byte> data = new List<byte>();
+        readonly byte[] data = new byte[MaxSessionOutputBytes];
+        int head;
+        int length;
         long startOffset;
 
         public void Append(byte[] buffer, int count)
         {
             if (buffer == null || count <= 0) return;
-            for (int i = 0; i < count; i++) data.Add(buffer[i]);
-            if (data.Count > MaxSessionOutputBytes)
+            int capacity = data.Length;
+            long previousEnd = startOffset + length;
+            if (count >= capacity)
             {
-                int remove = data.Count - MaxSessionOutputBytes;
-                data.RemoveRange(0, remove);
-                startOffset += remove;
+                Buffer.BlockCopy(buffer, count - capacity, data, 0, capacity);
+                head = 0;
+                length = capacity;
+                startOffset = previousEnd + count - capacity;
+                return;
             }
+
+            int overflow = Math.Max(0, length + count - capacity);
+            if (overflow > 0)
+            {
+                head = (head + overflow) % capacity;
+                length -= overflow;
+                startOffset += overflow;
+            }
+
+            int tail = (head + length) % capacity;
+            int first = Math.Min(count, capacity - tail);
+            Buffer.BlockCopy(buffer, 0, data, tail, first);
+            if (first < count) Buffer.BlockCopy(buffer, first, data, 0, count - first);
+            length += count;
         }
 
         public byte[] Read(long requestedOffset, out long nextOffset, out bool reset)
         {
-            reset = requestedOffset < startOffset || requestedOffset > startOffset + data.Count;
+            reset = requestedOffset < startOffset || requestedOffset > startOffset + length;
             if (reset) requestedOffset = startOffset;
             int index = (int)(requestedOffset - startOffset);
-            int count = data.Count - index;
-            byte[] result = count > 0 ? data.GetRange(index, count).ToArray() : new byte[0];
-            nextOffset = startOffset + data.Count;
+            int count = length - index;
+            byte[] result = new byte[count];
+            if (count > 0)
+            {
+                int source = (head + index) % data.Length;
+                int first = Math.Min(count, data.Length - source);
+                Buffer.BlockCopy(data, source, result, 0, first);
+                if (first < count) Buffer.BlockCopy(data, 0, result, first, count - first);
+            }
+            nextOffset = startOffset + length;
             return result;
         }
     }
@@ -136,6 +162,7 @@ static class ClassDockSshTerminal
         public Stream Input;
         public Stream Output;
         public readonly object Sync = new object();
+        public readonly object BufferSync = new object();
         public readonly RollingBytes Buffer = new RollingBytes();
         public bool Complete;
         public bool StopRequested;
@@ -421,19 +448,26 @@ static class ClassDockSshTerminal
         SshSession session = FindSession(id);
         long offset;
         if (!long.TryParse(offsetText, out offset) || offset < 0) offset = 0;
+        long next;
+        bool reset;
+        byte[] data;
+        lock (session.BufferSync) data = session.Buffer.Read(offset, out next, out reset);
+        bool complete;
+        bool stopped;
+        int code;
         lock (session.Sync)
         {
-            long next;
-            bool reset;
-            byte[] data = session.Buffer.Read(offset, out next, out reset);
             session.LastUsed = DateTime.UtcNow;
-            return "{\"alive\":" + (session.Complete ? "false" : "true")
-                + ",\"complete\":" + (session.Complete ? "true" : "false")
-                + ",\"stopped\":" + (session.StopRequested ? "true" : "false")
-                + ",\"code\":" + session.ExitCode + ",\"offset\":" + next
-                + ",\"reset\":" + (reset ? "true" : "false")
-                + ",\"data\":" + JsonString(Convert.ToBase64String(data)) + "}";
+            complete = session.Complete;
+            stopped = session.StopRequested;
+            code = session.ExitCode;
         }
+        return "{\"alive\":" + (complete ? "false" : "true")
+            + ",\"complete\":" + (complete ? "true" : "false")
+            + ",\"stopped\":" + (stopped ? "true" : "false")
+            + ",\"code\":" + code + ",\"offset\":" + next
+            + ",\"reset\":" + (reset ? "true" : "false")
+            + ",\"data\":" + JsonString(Convert.ToBase64String(data)) + "}";
     }
 
     public static void Resize(string id, byte[] body)
@@ -475,7 +509,7 @@ static class ClassDockSshTerminal
             {
                 int read;
                 while ((read = session.Output.Read(buffer, 0, buffer.Length)) > 0)
-                    lock (session.Sync) session.Buffer.Append(buffer, read);
+                    lock (session.BufferSync) session.Buffer.Append(buffer, read);
             }
             catch { }
         });

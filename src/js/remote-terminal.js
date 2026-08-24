@@ -20,7 +20,7 @@ const MNRemoteTerminal = (() => {
   let disconnectButton = null, retryButton = null;
   let fontSelect = null, fontSizeOutput = null, lineHeightButton = null;
   let terminal = null, sessionId = "", outputOffset = 0, generation = 0, inputQueue = [];
-  let inputTimer = 0, inputChain = Promise.resolve(), resizeObserver = null, resizeTimer = 0;
+  let inputTimer = 0, inputSending = false, resizeObserver = null, resizeTimer = 0;
   let layoutFrame = 0;
   let currentCols = 100, currentRows = 30;
   let dockSide = "right", dockWidth = 520, dockCollapsed = false;
@@ -505,7 +505,7 @@ const MNRemoteTerminal = (() => {
       setFormBusy(true, "대화형 SSH 터미널을 시작하고 있습니다…");
       terminalView.hidden = false; formView.hidden = true;
       await initializeXterm();
-      diagnosticTail = ""; diagnosticDecoder = new TextDecoder(); pollFailures = 0; inputChain = Promise.resolve();
+      diagnosticTail = ""; diagnosticDecoder = new TextDecoder(); pollFailures = 0;
       terminalTitle.textContent = user + "@" + host + (port === "22" ? "" : ":" + port);
       terminalStatus.textContent = "연결 중";
       terminalStatus.classList.remove("error"); terminalStatus.removeAttribute("title");
@@ -534,24 +534,29 @@ const MNRemoteTerminal = (() => {
   const queueInput = (data) => {
     if (!sessionId || !data) return;
     inputQueue.push(encoder.encode(data));
-    if (!inputTimer) inputTimer = setTimeout(flushInput, 12);
+    if (!inputTimer && !inputSending) inputTimer = setTimeout(flushInput, 12);
   };
 
-  const flushInput = () => {
+  const flushInput = async () => {
     inputTimer = 0;
-    if (!sessionId || !inputQueue.length) { inputQueue = []; return; }
-    const chunks = inputQueue; inputQueue = [];
-    const total = chunks.reduce((sum, value) => sum + value.length, 0);
-    const body = new Uint8Array(total); let at = 0;
-    chunks.forEach((value) => { body.set(value, at); at += value.length; });
+    if (inputSending || !sessionId || !inputQueue.length) return;
     const id = sessionId;
-    inputChain = inputChain.then(async () => {
-      if (!id || id !== sessionId) return;
-      const response = await fetch("/ssh-session-input?id=" + encodeURIComponent(id), { method:"POST", body });
-      if (!response.ok) throw new Error(await response.text());
-    }).catch((error) => {
+    inputSending = true;
+    try {
+      while (id === sessionId && inputQueue.length){
+        const chunks = inputQueue; inputQueue = [];
+        const total = chunks.reduce((sum, value) => sum + value.length, 0);
+        const body = new Uint8Array(total); let at = 0;
+        chunks.forEach((value) => { body.set(value, at); at += value.length; });
+        const response = await fetch("/ssh-session-input?id=" + encodeURIComponent(id), { method:"POST", body });
+        if (!response.ok) throw new Error(await response.text());
+      }
+    } catch(error){
       if (terminal && id === sessionId) terminal.writeln("\r\n\x1b[31m입력을 보내지 못했습니다: " + friendlyError(error) + "\x1b[0m");
-    });
+    } finally {
+      inputSending = false;
+      if (sessionId && inputQueue.length && !inputTimer) inputTimer = setTimeout(flushInput, 12);
+    }
   };
 
   const decodeBase64 = (value) => {
@@ -569,6 +574,13 @@ const MNRemoteTerminal = (() => {
       && (/Welcome to |Last login:/i.test(plain) || /(?:^|\r?\n)[^\r\n]{0,120}[$#%>] $/.test(plain)))
       terminalStatus.textContent = "접속됨";
   };
+
+  const writeTerminal = (bytes) => new Promise((resolve) => {
+    const target = terminal;
+    if (!target || !bytes || !bytes.length) { resolve(); return; }
+    try { target.write(bytes, resolve); }
+    catch(_){ resolve(); }
+  });
 
   const finishSession = (data) => {
     try { diagnosticTail = (diagnosticTail + diagnosticDecoder.decode()).slice(-16000); } catch(_){}
@@ -593,7 +605,8 @@ const MNRemoteTerminal = (() => {
         pollFailures = 0;
         if (data.reset && outputOffset > 0 && terminal){ terminal.reset(); terminal.writeln("\x1b[33m[오래된 터미널 출력이 생략되었습니다.]\x1b[0m"); }
         const bytes = data.data ? decodeBase64(data.data) : null;
-        if (bytes){ appendDiagnostic(bytes); if (terminal) terminal.write(bytes); }
+        if (bytes){ appendDiagnostic(bytes); await writeTerminal(bytes); }
+        if (id !== sessionId || myGeneration !== generation) return;
         outputOffset = Number(data.offset) || outputOffset;
         if (data.complete || data.alive === false){
           finishSession(data);

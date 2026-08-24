@@ -100,6 +100,24 @@ test("ConPTY 입출력과 크기 변경으로 대화형 원격 PTY를 유지한�
   assert.match(ui, /\/ssh-session-stop/);
 });
 
+test("장시간 SSH 출력은 원형 버퍼와 분리 잠금으로 입력을 막지 않는다", () => {
+  assert.match(ssh, /MaxSessionOutputBytes = 16 \* 1024 \* 1024/);
+  assert.match(ssh, /readonly byte\[\] data = new byte\[MaxSessionOutputBytes\]/);
+  assert.match(ssh, /Buffer\.BlockCopy/);
+  assert.doesNotMatch(ssh, /data\.RemoveRange/);
+  assert.match(ssh, /readonly object BufferSync = new object\(\)/);
+  assert.match(ssh, /lock \(session\.BufferSync\) data = session\.Buffer\.Read/);
+  assert.match(ssh, /lock \(session\.BufferSync\) session\.Buffer\.Append/);
+});
+
+test("SSH 입력과 xterm 출력은 처리 속도보다 요청 대기열이 커지지 않게 조절한다", () => {
+  assert.match(ui, /let inputTimer = 0, inputSending = false/);
+  assert.match(ui, /while \(id === sessionId && inputQueue\.length\)/);
+  assert.doesNotMatch(ui, /inputChain/);
+  assert.match(ui, /target\.write\(bytes, resolve\)/);
+  assert.match(ui, /await writeTerminal\(bytes\)/);
+});
+
 test("사전 기능 검사는 실제 실패 원인을 숨기지 않는다", () => {
   assert.match(ui, /statusEl\.textContent = friendlyError\(error\)/);
   assert.match(ui, /원격 터미널은 ClassDock\.exe에서만 사용할 수 있습니다/);
