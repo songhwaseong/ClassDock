@@ -586,6 +586,40 @@ function timelineEventsFromRows(rows){
    덕분에 CSV + [이미지 폴더] 두 단계가 엑셀 파일 하나로 끝난다. */
 const TIMELINE_SHEET_IMAGE_TYPES = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp" };
 
+/* 일부 OOXML 생성기는 SpreadsheetML 기본 네임스페이스를 <x:workbook>, <x:worksheet>처럼
+   접두사로 쓴다. XML로는 올바르지만 현재 ExcelJS는 이 요소 이름을 못 알아봐 workbook 모델을
+   만들지 못한다. 그 형식으로 확인된 XML만 기본 네임스페이스 형태로 좁게 정규화한다. */
+function timelineNormalizeXlsxNamespaces(bytes, ZipCtor){
+  const Ctor = ZipCtor || (typeof JSZip !== "undefined" ? JSZip : null);
+  if (!Ctor) return bytes;
+  const spreadsheetNamespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  try {
+    const zip = new Ctor(bytes);
+    let changed = false;
+    Object.keys(zip.files || {}).forEach(path => {
+      if (!/\.xml$/i.test(path) || /\/_rels\//i.test(path)) return;
+      const entry = zip.file(path);
+      if (!entry) return;
+      const xml = entry.asText();
+      const root = xml.match(/<([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*\b[^>]*\bxmlns:\1\s*=\s*(["'])http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main\2/i);
+      if (!root) return;
+      const prefix = root[1];
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const declaration = new RegExp("\\s+xmlns:" + escaped + "\\s*=\\s*([\\\"'])" + spreadsheetNamespace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\1", "i");
+      const hasDefaultNamespace = new RegExp("\\s+xmlns\\s*=\\s*([\\\"'])" + spreadsheetNamespace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\1", "i").test(xml);
+      let fixed = xml.replace(new RegExp("(<\\/?)" + escaped + ":", "g"), "$1");
+      fixed = hasDefaultNamespace
+        ? fixed.replace(declaration, "")
+        : fixed.replace(declaration, match => match.replace(new RegExp("xmlns:" + escaped, "i"), "xmlns"));
+      if (fixed !== xml){ zip.file(path, fixed); changed = true; }
+    });
+    return changed ? zip.generate({ type:"uint8array", compression:"STORE" }) : bytes;
+  } catch(error){
+    console.warn("timeline xlsx namespace normalization skipped:", error);
+    return bytes;
+  }
+}
+
 function timelineCellText(cell){
   const value = cell && typeof cell === "object" && "value" in cell ? cell.value : cell;
   if (value == null) return "";
@@ -639,8 +673,17 @@ function timelineSheetImageRows(workbook, sheet){
 async function timelineEventsFromXlsx(file){
   if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("exceljs");
   if (typeof ExcelJS === "undefined" || !ExcelJS.Workbook) throw new Error("xlsx-runtime");
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(await file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(bytes);
+  } catch(originalError){
+    if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("jszip");
+    const fixed = timelineNormalizeXlsxNamespaces(bytes);
+    if (fixed === bytes) throw originalError;
+    workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(fixed);
+  }
   const sheet = (workbook.worksheets || []).find(item => item && item.rowCount) || (workbook.worksheets || [])[0];
   if (!sheet) throw new Error("csv-empty");
   const result = timelineEventsFromRows(timelineSheetRows(sheet));
@@ -1906,7 +1949,7 @@ if (typeof module !== "undefined" && module.exports){
     timelineParseDate, timelineFormatDate, timelineNormalizeEvent,
     timelineDocEmpty, timelineDocParse, timelineDocSerialize, timelineDocContentKey,
     timelineSnapshot, timelineSnapshotEqual, timelineSnapshotModel,
-    timelineEventsFromRows, timelineCellText, timelineSheetRows, timelineSheetImageRows, timelineEventsFromXlsx,
+    timelineEventsFromRows, timelineCellText, timelineSheetRows, timelineSheetImageRows, timelineNormalizeXlsxNamespaces, timelineEventsFromXlsx,
     timelineSortedEvents, timelineCanMoveEvent, timelineMoveEvent, timelineLayoutEntries, timelineOverviewEntries,
     timelineEventsToCsv, timelineEventsToXlsx, timelineEventsFromCsv,
     timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,

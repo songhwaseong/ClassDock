@@ -32,6 +32,8 @@ const {
   spreadsheetSelectionRangeCovered,
   spreadsheetSelectionRangeKeys,
   spreadsheetImageFormulaInfo,
+  spreadsheetNormalizeXlsxNamespaces,
+  spreadsheetLoadExcelWorkbook,
   spreadsheetPackageImageInfo,
   spreadsheetFormulaImages,
   spreadsheetFloatingImageDescriptors,
@@ -94,6 +96,53 @@ test("일반 삽입 그림은 ExcelJS 앵커와 바이트를 읽고 시트 표�
   const ws = { "!ref":"A1" };
   spreadsheetExtendSheetRangeForImages(ws, images);
   assert.equal(ws["!ref"], "A1:C4");
+});
+
+test("삽입 그림은 ExcelJS 환산 좌표 대신 원본 셀과 EMU 오프셋을 사용한다", () => {
+  const sheet = { getImages:() => [{
+    imageId:"0",
+    range:{
+      tl:{ row:2.053, col:9.580, nativeRow:2, nativeCol:9, nativeRowOff:38100, nativeColOff:76200 },
+      ext:{ width:86, height:86 }
+    }
+  }] };
+  const workbook = {
+    getWorksheet:() => sheet,
+    getImage:() => ({ buffer:new Uint8Array([1]), extension:"jpg", name:"인물" })
+  };
+  const image = spreadsheetFloatingImageDescriptors(workbook, "사진")[0];
+  assert.deepEqual(
+    [image.tl.row, image.tl.col, image.tl.rowOffsetPx, image.tl.colOffsetPx],
+    [2, 9, 4, 8]
+  );
+});
+
+test("x: 접두사 SpreadsheetML도 보정해 일반 엑셀 뷰어에서 삽입 그림을 읽는다", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl9Zl8AAAAASUVORK5CYII=", "base64");
+  const source = new ExcelJS.Workbook();
+  const sheet = source.addWorksheet("사진");
+  sheet.getCell("A1").value = "값";
+  const imageId = source.addImage({ buffer:png, extension:"png" });
+  sheet.addImage(imageId, { tl:{ col:1, row:1 }, ext:{ width:80, height:60 } });
+
+  const zip = new JSZip(await source.xlsx.writeBuffer());
+  for (const part of ["xl/workbook.xml", "xl/styles.xml", "xl/sharedStrings.xml", "xl/worksheets/sheet1.xml"]){
+    const entry = zip.file(part);
+    if (!entry) continue;
+    const xml = entry.asText();
+    const prefixed = xml
+      .replace('xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+        'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"')
+      .replace(/<(\/?)(?![A-Za-z_][\w.-]*:)([A-Za-z_][\w.-]*)(?=[\s/>])/g, "<$1x:$2");
+    zip.file(part, prefixed);
+  }
+  const incompatible = zip.generate({ type:"uint8array", compression:"STORE" });
+  const fixed = spreadsheetNormalizeXlsxNamespaces(incompatible, JSZip);
+  assert.notStrictEqual(fixed, incompatible);
+
+  const loaded = await spreadsheetLoadExcelWorkbook(incompatible, ExcelJS, JSZip);
+  assert.equal(loaded.getWorksheet("사진").getCell("A1").value, "값");
+  assert.equal(spreadsheetFloatingImageDescriptors(loaded, "사진").length, 1);
 });
 
 test("그림 시트는 원본 열 폭·행 높이·자동 줄바꿈을 화면 픽셀로 복원한다", () => {

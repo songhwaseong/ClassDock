@@ -29,6 +29,57 @@ function sanitizeHancomSpreadsheet(bytes){
   }
 }
 
+/* 일부 OOXML 생성기는 SpreadsheetML 요소를 <x:workbook>, <x:worksheet>처럼 접두사로 쓴다.
+   XML 규격에는 맞지만 ExcelJS는 이 형식을 읽지 못하므로, 실패한 경우에만 기본 네임스페이스
+   형태로 좁게 정규화한 뒤 다시 연다. 시트 그림도 ExcelJS 모델을 통해 읽으므로 같은 보정이 필요하다. */
+function spreadsheetNormalizeXlsxNamespaces(bytes, ZipCtor){
+  const Ctor = ZipCtor || (typeof JSZip !== "undefined" ? JSZip : null);
+  if (!Ctor) return bytes;
+  const spreadsheetNamespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  try {
+    const zip = new Ctor(bytes);
+    let changed = false;
+    Object.keys(zip.files || {}).forEach(path => {
+      if (!/\.xml$/i.test(path) || /\/_rels\//i.test(path)) return;
+      const entry = zip.file(path);
+      if (!entry) return;
+      const xml = entry.asText();
+      const root = xml.match(/<([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*\b[^>]*\bxmlns:\1\s*=\s*(["'])http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main\2/i);
+      if (!root) return;
+      const prefix = root[1];
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const namespacePattern = spreadsheetNamespace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const declaration = new RegExp("\\s+xmlns:" + escaped + "\\s*=\\s*([\\\"'])" + namespacePattern + "\\1", "i");
+      const hasDefaultNamespace = new RegExp("\\s+xmlns\\s*=\\s*([\\\"'])" + namespacePattern + "\\1", "i").test(xml);
+      let fixed = xml.replace(new RegExp("(<\\/?)" + escaped + ":", "g"), "$1");
+      fixed = hasDefaultNamespace
+        ? fixed.replace(declaration, "")
+        : fixed.replace(declaration, match => match.replace(new RegExp("xmlns:" + escaped, "i"), "xmlns"));
+      if (fixed !== xml){ zip.file(path, fixed); changed = true; }
+    });
+    return changed ? zip.generate({ type:"uint8array", compression:"STORE" }) : bytes;
+  } catch(error){
+    console.warn("xlsx namespace normalization skipped:", error);
+    return bytes;
+  }
+}
+
+async function spreadsheetLoadExcelWorkbook(bytes, ExcelCtor, ZipCtor){
+  const Excel = ExcelCtor || (typeof ExcelJS !== "undefined" ? ExcelJS : null);
+  if (!Excel || !bytes) return null;
+  let workbook = new Excel.Workbook();
+  try {
+    await workbook.xlsx.load(bytes);
+    return workbook;
+  } catch(originalError){
+    const fixed = spreadsheetNormalizeXlsxNamespaces(bytes, ZipCtor);
+    if (fixed === bytes) throw originalError;
+    workbook = new Excel.Workbook();
+    await workbook.xlsx.load(fixed);
+    return workbook;
+  }
+}
+
 /* 한셀 등이 비정상적으로 부풀려 저장한 시트 크기(!ref)를 실제 값이 있는 범위로 줄인다.
    안 그러면 sheet_to_html 이 수십만~수백만 개의 빈 셀을 그리느라 화면이 멈춘다. */
 function tightenSheetRange(ws){
@@ -274,11 +325,19 @@ function spreadsheetFloatingImageDescriptors(workbook, sheetName){
   return (Array.isArray(images) ? images : []).map(item => {
     const media = workbook && typeof workbook.getImage === "function" ? workbook.getImage(Number(item.imageId)) : null;
     if (!media || !media.buffer) return null;
-    const anchor = point => point ? {
-      row:Number.isFinite(Number(point.row)) ? Number(point.row) : Number(point.nativeRow) || 0,
-      col:Number.isFinite(Number(point.col)) ? Number(point.col) : Number(point.nativeCol) || 0,
-      nativeRow:Number(point.nativeRow) || 0, nativeCol:Number(point.nativeCol) || 0
-    } : null;
+    const anchor = point => {
+      if (!point) return null;
+      const nativeRow = Number(point.nativeRow), nativeCol = Number(point.nativeCol);
+      const nativeRowOff = Number(point.nativeRowOff), nativeColOff = Number(point.nativeColOff);
+      return {
+        // ExcelJS의 row/col 환산값은 좁은 열에서 오프셋을 크게 부풀릴 수 있다.
+        // OOXML 원본 칸과 EMU 오프셋을 우선해 Excel과 같은 위치에 놓는다.
+        row:Number.isFinite(nativeRow) ? nativeRow : Number(point.row) || 0,
+        col:Number.isFinite(nativeCol) ? nativeCol : Number(point.col) || 0,
+        rowOffsetPx:Number.isFinite(nativeRowOff) ? nativeRowOff / 9525 : null,
+        colOffsetPx:Number.isFinite(nativeColOff) ? nativeColOff / 9525 : null
+      };
+    };
     return {
       kind:"floating", bytes:media.buffer, mime:spreadsheetImageMime(media.extension), alt:String(media.name || "시트 그림"),
       tl:anchor(item.range && item.range.tl), br:anchor(item.range && item.range.br),
@@ -290,8 +349,7 @@ function spreadsheetFloatingImageDescriptors(workbook, sheetName){
 async function spreadsheetIsolateWorksheetBytes(bytes, sheetName, ExcelCtor){
   const Excel = ExcelCtor || (typeof ExcelJS !== "undefined" ? ExcelJS : null);
   if (!Excel || !bytes) return null;
-  const workbook = new Excel.Workbook();
-  await workbook.xlsx.load(bytes);
+  const workbook = await spreadsheetLoadExcelWorkbook(bytes, Excel);
   for (const worksheet of [...workbook.worksheets]){
     if (worksheet.name !== sheetName) workbook.removeWorksheet(worksheet.id);
   }
@@ -1802,9 +1860,8 @@ async function renderXlsx(file, host, doc){
     if (typeof ExcelJS === "undefined") return null;
     if (!exLoadPromise){
       exLoadPromise = (async () => {
-        const w = new ExcelJS.Workbook();
-        await w.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-        return w;
+        return spreadsheetLoadExcelWorkbook(
+          bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), ExcelJS);
       })();
     }
     try { exWb = await exLoadPromise; } catch(e){ console.error(e); exWb = null; exLoadPromise = null; }
@@ -3814,9 +3871,13 @@ async function renderXlsx(file, host, doc){
     const cell = spreadsheetDomCell(row, col);
     if (!cell) return null;
     const sheetRect = sheet.getBoundingClientRect(), cellRect = cell.getBoundingClientRect();
+    const colOffset = anchor.colOffsetPx != null && Number.isFinite(Number(anchor.colOffsetPx))
+      ? Number(anchor.colOffsetPx) : (Number(anchor.col) - col) * cellRect.width;
+    const rowOffset = anchor.rowOffsetPx != null && Number.isFinite(Number(anchor.rowOffsetPx))
+      ? Number(anchor.rowOffsetPx) : (Number(anchor.row) - row) * cellRect.height;
     return {
-      x:cellRect.left - sheetRect.left + sheet.scrollLeft + (Number(anchor.col) - col) * cellRect.width,
-      y:cellRect.top - sheetRect.top + sheet.scrollTop + (Number(anchor.row) - row) * cellRect.height
+      x:cellRect.left - sheetRect.left + sheet.scrollLeft + colOffset,
+      y:cellRect.top - sheetRect.top + sheet.scrollTop + rowOffset
     };
   };
   const renderSpreadsheetImages = (name) => {
@@ -4395,7 +4456,7 @@ async function renderXlsx(file, host, doc){
         try { ws.views = [{ state: "frozen", ySplit: 1, topLeftCell: "A2", activeCell: "A2" }]; } catch(_){}
       }
     };
-    const w = new ExcelJS.Workbook();
+    let w = new ExcelJS.Workbook();
     if (csvFastAoa){
       for (const name of wb.SheetNames){                 // 탭 순서(드래그로 바꾼 순서)대로 기록
         if (!exModels[name]) continue;
@@ -4406,7 +4467,10 @@ async function renderXlsx(file, host, doc){
       }
       return await w.xlsx.writeBuffer();
     }
-    await w.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const loaded = await spreadsheetLoadExcelWorkbook(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), ExcelJS);
+    if (!loaded) return null;
+    w = loaded;
     // 시트 구조 변경 반영: 삭제 → 이름 변경(임시 이름 2단계로 맞바꿈 충돌 방지) → 새 시트는 아래 루프에서 추가
     removedOrigSheets.forEach(orig => {
       const ws = w.getWorksheet(orig);
@@ -5611,6 +5675,8 @@ if (typeof module === "object" && module.exports){
     spreadsheetSelectionRangeCovered,
     spreadsheetSelectionRangeKeys,
     spreadsheetImageMime,
+    spreadsheetNormalizeXlsxNamespaces,
+    spreadsheetLoadExcelWorkbook,
     spreadsheetPackageImageInfo,
     spreadsheetImageFormulaInfo,
     spreadsheetFormulaImages,

@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const timeline = require("../src/js/timeline.js");
+const JSZip = require("../vendor/jszip.min.js");
 
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl9Zl8AAAAASUVORK5CYII=",
@@ -86,6 +87,35 @@ test("실제 xlsx 파일에서 사건과 시트에 붙인 사진을 함께 읽�
   assert.equal(photo.type, "image/png");
   assert.equal(photo.size, PNG_1X1.length);
   delete global.ExcelJS;
+});
+
+test("x: 접두사를 쓴 SpreadsheetML도 정규화해 ExcelJS로 읽는다", async () => {
+  const ExcelJS = require("../vendor/exceljs.min.js");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("연대표");
+  sheet.addRow(["시작", "제목"]);
+  sheet.addRow(["1901", "Wilhelm Conrad Röntgen"]);
+  const source = await workbook.xlsx.writeBuffer();
+  const zip = new JSZip(source);
+  for (const part of ["xl/workbook.xml", "xl/styles.xml", "xl/sharedStrings.xml", "xl/worksheets/sheet1.xml"]){
+    const entry = zip.file(part);
+    if (!entry) continue;
+    const xml = entry.asText();
+    const prefixed = xml
+      .replace('xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+        'xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"')
+      .replace(/<(\/?)(?![A-Za-z_][\w.-]*:)([A-Za-z_][\w.-]*)(?=[\s/>])/g, "<$1x:$2");
+    zip.file(part, prefixed);
+  }
+  const incompatible = zip.generate({ type:"uint8array", compression:"STORE" });
+  const rejected = new ExcelJS.Workbook();
+  await assert.rejects(() => rejected.xlsx.load(incompatible));
+
+  const repaired = timeline.timelineNormalizeXlsxNamespaces(incompatible, JSZip);
+  assert.notStrictEqual(repaired, incompatible);
+  const loaded = new ExcelJS.Workbook();
+  await loaded.xlsx.load(repaired);
+  assert.equal(loaded.getWorksheet("연대표").getCell("B2").value, "Wilhelm Conrad Röntgen");
 });
 
 test("XLSX 내보내기는 날짜 원문·표 서식·사건 사진을 보존해 다시 들일 수 있다", async () => {
