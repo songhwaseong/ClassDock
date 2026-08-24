@@ -631,6 +631,10 @@ function musicTimeline(sheet, opts){
             let event;
             if (previous && Math.abs((previous.start + previous.duration) - start) < 1e-7){
               previous.duration += fullDuration;
+              // 붙임줄로 이어 붙인 음표들의 id 를 함께 들고 간다 — 소리는 하나지만 화면에는 음표가 여럿이라,
+              // 따라치기가 "한 번 눌렀을 때 어느 음표들을 칠할지" 알아야 한다.
+              if (!previous.tiedIds) previous.tiedIds = [previous.id];
+              if (previous.tiedIds[previous.tiedIds.length - 1] !== note.id) previous.tiedIds.push(note.id);
               event = previous;
             } else {
               event = { id:note.id, noteId:note.id, staff, voice, measure:index + 1, rest:false, midi,
@@ -653,6 +657,55 @@ function musicTimeline(sheet, opts){
     metronome, countInBeats:firstSettings.time.beats,
     countInBeatSeconds:(60 / (firstSettings.tempo * playbackRate)) * (4 / firstSettings.time.beatValue),
     measureOrder:order.map((index) => index + 1) };
+}
+
+/* ----- 따라치기(음 맞추기) 순서 -----
+   재생 타임라인을 "동시에 울리는 음 묶음" 하나씩으로 잘라, 학생이 눌러야 할 차례를 만든다.
+   코드 따라치기(python-editor.js)의 교본 문자열에 해당하는 자리다.
+   - `pcs` 는 옥타브를 뺀 음이름(0=도 … 11=시). 옥타브를 통과시키는 채점은 이 값만 본다.
+   - 쉼표만 있는 자리는 `auto:true` 로 남겨 도달하는 순간 그냥 지나간다
+     — 코드 따라치기가 줄 앞 들여쓰기를 자동으로 넘기는 것과 같은 규칙이다.
+   - 도돌이는 펼치지 않는다(`repeats:false`). 같은 음표가 두 번 나오면 화면의 맞음·틀림 표시가
+     서로를 덮어써 지금 어디를 누르고 있는지 알 수 없게 된다.
+   - 붙임줄로 이어진 음은 타임라인이 이미 하나로 합쳤다(`tiedIds`). 학생은 한 번만 누른다. */
+function musicPitchClass(midi){
+  const value = Math.round(Number(midi));
+  return Number.isFinite(value) ? ((value % 12) + 12) % 12 : null;
+}
+
+function musicPracticeSteps(sheet, opts){
+  const options = opts || {};
+  const timeline = musicTimeline(sheet, {
+    from:options.from, to:options.to, staff:options.staff, repeats:false
+  });
+  const groups = [];
+  let group = null;
+  for (const event of timeline.events){
+    if (!group || Math.abs(event.start - group.start) > 1e-6){
+      group = { start:event.start, measure:event.measure, events:[] };
+      groups.push(group);
+    }
+    group.events.push(event);
+  }
+  const steps = [];
+  for (const item of groups){
+    const sounded = item.events.filter((event) => !event.rest && event.midi !== null);
+    // 같은 자리에 소리 나는 음이 하나라도 있으면 다른 성부의 쉼표는 묻힌다(누를 것이 있는 차례다).
+    const source = sounded.length ? sounded : item.events;
+    const noteIds = [], midis = [], pcs = [];
+    for (const event of source){
+      for (const id of (event.tiedIds || [event.id])) if (!noteIds.includes(id)) noteIds.push(id);
+      if (event.rest || event.midi === null) continue;
+      if (!midis.includes(event.midi)) midis.push(event.midi);
+      const pc = musicPitchClass(event.midi);
+      if (!pcs.includes(pc)) pcs.push(pc);
+    }
+    steps.push({
+      index:steps.length, auto:!sounded.length, start:item.start, measure:item.measure,
+      noteIds, midis:midis.sort((a, b) => a - b), pcs:pcs.sort((a, b) => a - b)
+    });
+  }
+  return { steps, total:steps.reduce((count, step) => count + (step.auto ? 0 : 1), 0) };
 }
 
 function musicClampTempo(tempo){

@@ -1250,6 +1250,31 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-score.is-erasing{cursor:crosshair}
   .music-score.is-erasing .music-note{cursor:crosshair}
   .music-score.is-erasing .music-note:hover path,.music-score.is-erasing .music-note:hover rect{fill:#dc2626;stroke:#dc2626}
+  /* 따라치기(음 맞추기) — 악보 전체를 흐린 교본으로 깔고, 지나온 음표만 제 색으로 되살린다.
+     코드 따라치기의 tp-ghost / tp-ok / tp-bad 와 같은 역할이다. */
+  .music-score.is-practice,.music-score.is-practice .music-note{cursor:default}
+  .music-score.is-practice .music-note:hover{opacity:.22}
+  .music-score.is-practice .music-note,.music-score.is-practice .music-solfege,
+  .music-score.is-practice .music-chord-symbol,.music-score.is-practice .music-notation{opacity:.22}
+  .music-score.is-practice .music-note.mp-ok,.music-score.is-practice .music-note.mp-bad,
+  .music-score.is-practice .music-note.mp-now,.music-score.is-practice .music-note.mp-ok:hover,
+  .music-score.is-practice .music-note.mp-bad:hover,.music-score.is-practice .music-note.mp-now:hover,
+  .music-score.is-practice .music-solfege.mp-ok,.music-score.is-practice .music-solfege.mp-bad,
+  .music-score.is-practice .music-solfege.mp-now{opacity:1}
+  .music-score.is-practice .music-note.mp-now path,.music-score.is-practice .music-note.mp-now rect,
+  .music-score.is-practice .music-note.mp-now text{fill:var(--accent);stroke:var(--accent)}
+  .music-score.is-practice .music-solfege.mp-now{fill:var(--accent)}
+  /* 틀린 표시가 '지금 차례' 색을 이겨야 한다 — 규칙을 뒤에 두어 마지막에 칠해지게 한다. */
+  .music-score.is-practice .music-note.mp-bad path,.music-score.is-practice .music-note.mp-bad rect,
+  .music-score.is-practice .music-note.mp-bad text{fill:#dc2626;stroke:#dc2626}
+  .music-score.is-practice .music-solfege.mp-bad{fill:#dc2626}
+  /* 연습 중에는 머리말·도구상자를 통째로 잠근다. 교본이 바뀌면 진도가 어긋난다.
+     '쉬운 입력'(도레미 버튼)과 재생 바는 살려 둔다 — 거기서 따라치기를 끄고 켠다. */
+  .music-doc.is-practice .music-bar,.music-doc.is-practice .music-tools{opacity:.45;pointer-events:none}
+  .music-practice{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .music-practice-staff[hidden]{display:none}
+  .music-practice-info{color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+  .music-practice-info[hidden]{display:none}
   /* 도구상자 */
   .music-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}

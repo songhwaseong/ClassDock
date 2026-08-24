@@ -38,6 +38,19 @@ const MUSIC_TOOL_VALUES = [
   { value:"16th",    label:"16분" }
 ];
 const MUSIC_SOLFEGE_LABELS = { C:"도", D:"레", E:"미", F:"파", G:"솔", A:"라", B:"시" };
+
+/* 따라치기 자판 — 피아노 건반 배열 그대로다.
+     흰건반  A S D F G H J = 도 레 미 파 솔 라 시
+     검은건반 W E   T Y U  = 도♯ 레♯  파♯ 솔♯ 라♯
+     숫자      1~7         = 도 레 미 파 솔 라 시 (자판 자리를 아직 못 외운 학생용)
+   event.key 가 아니라 event.code 로 읽는다 — 그래야 한글 입력 상태에서도 같은 자리가 같은 음이 된다
+   (코드 따라치기가 한/영 때문에 겪은 문제를 여기서는 아예 만들지 않는다). */
+const MUSIC_PRACTICE_KEYS = {
+  KeyA:0, KeyW:1, KeyS:2, KeyE:3, KeyD:4, KeyF:5, KeyT:6, KeyG:7, KeyY:8, KeyH:9, KeyU:10, KeyJ:11,
+  Digit1:0, Digit2:2, Digit3:4, Digit4:5, Digit5:7, Digit6:9, Digit7:11
+};
+// 음이름(0~11)을 사람이 읽는 계이름으로. 검은건반은 악보 조표와 상관없이 ♯ 쪽 이름으로 안내한다.
+const MUSIC_PRACTICE_PC_LABELS = ["도", "도♯", "레", "레♯", "미", "파", "파♯", "솔", "솔♯", "라", "라♯", "시"];
 const MUSIC_IMAGE_SCALE = 2;        // 메모 그림은 2배로 구워 확대해도 뭉개지지 않게 한다
 const MUSIC_IMAGE_TOP_PAD = 26;     // 화음기호·빠르기 표시는 오선 위에 붙는다 — 단 위쪽 여유
 // 브라우저마다 캔버스 한 변·전체 픽셀 한계가 다르다. 보수적인 공통 범위 안에서만 굽고,
@@ -307,6 +320,14 @@ async function mountMusicEditor(doc){
   let lastMidiNoteAt = 0;
   let lastMidiBaseId = null;
   let imageReferenceUrl = "";
+
+  /* 따라치기(음 맞추기) — 악보를 흐린 교본으로 깔고 자판으로 음을 따라 눌러 보는 모드.
+     핵심 규칙 하나: 연습 내내 `sheet` 를 한 글자도 건드리지 않는다. 채점 상태는 화면 표시일 뿐이라
+     저장·자동저장·되돌리기가 연습 중 값에 오염될 여지가 없다(코드 따라치기가 교본을 지키려고
+     getValue() 로 방어하던 문제 자체가 없어진다). 그 대신 입력 경로를 전부 여기로 돌려야 한다.
+     state[i]: 0=아직 / 1=맞음 / 2=틀렸다가 통과. */
+  const practice = { active:false, steps:[], state:null, total:0, pos:0, done:0, notes:0, wrong:0, bad:0,
+                     hit:new Set(), err:false, startedAt:0, hintAt:0 };
 
   // 도구상자 상태. accidental 은 "다음에 넣을 음표 하나"에만 붙는다(임시표는 일회성이 자연스럽다).
   // null 은 임시표 미선택, 0 은 사용자가 고른 제자리표다. 둘을 나눠야 새 음표가 현재 조표를 따른다.
@@ -682,6 +703,26 @@ async function mountMusicEditor(doc){
   countInBtn.setAttribute("aria-pressed", "false");
   const metronomeBtn = musicButton("♩ 메트로놈", "재생 중 박자를 소리로 들려줍니다");
   metronomeBtn.setAttribute("aria-pressed", "false");
+  const practiceWrap = document.createElement("span");
+  practiceWrap.className = "music-practice";
+  const practiceBtn = musicButton("🎯 따라치기",
+    "악보를 흐리게 두고 자판으로 음을 따라 눌러 보기 — A S D F G H J = 도레미파솔라시, 검은건반은 W E T Y U (Esc: 그만두기)");
+  const practiceStaffSelect = document.createElement("select");
+  practiceStaffSelect.className = "music-timbre music-practice-staff";
+  practiceStaffSelect.title = "따라칠 손 고르기";
+  practiceStaffSelect.setAttribute("aria-label", practiceStaffSelect.title);
+  for (const [value, label] of [["", "양손"], ["treble", "오른손"], ["bass", "왼손"]]){
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    practiceStaffSelect.appendChild(option);
+  }
+  practiceStaffSelect.hidden = !sheet.grandStaff;
+  const practiceInfo = document.createElement("span");
+  practiceInfo.className = "music-practice-info";
+  practiceInfo.hidden = true;
+  practiceInfo.setAttribute("aria-live", "polite");
+  practiceWrap.append(practiceBtn, practiceStaffSelect, practiceInfo);
   const volumeWrap = document.createElement("span");
   volumeWrap.className = "music-volume";
   const muteBtn = musicButton("🔊", "악보 소리 음소거");
@@ -720,7 +761,7 @@ async function mountMusicEditor(doc){
   status.className = "music-status";
 
   playBar.append(playAllBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
+    countInBtn, metronomeBtn, practiceWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 악보 ----- */
@@ -950,6 +991,9 @@ async function mountMusicEditor(doc){
       playRightBtn.disabled = !sheet.grandStaff;
       playLeftBtn.disabled = !sheet.grandStaff;
     }
+    // 손 고르기는 대보표일 때만 뜻이 있다(단일 오선은 늘 오른손 하나뿐).
+    practiceStaffSelect.hidden = !sheet.grandStaff;
+    if (!sheet.grandStaff) practiceStaffSelect.value = "";
     solfegeBtn.classList.toggle("is-on", sheet.showSolfege !== false);
     solfegeBtn.setAttribute("aria-pressed", sheet.showSolfege !== false ? "true" : "false");
     for (const [alter, button] of accidentalButtons) button.classList.toggle("is-on", !selection && tool.accidental === alter);
@@ -1388,6 +1432,7 @@ async function mountMusicEditor(doc){
       vexReady = true;
       applyScoreZoom();
       paintSelection();
+      paintPractice();          // 배율·창 크기가 바뀌어 다시 그려도 따라치기 진도 표시가 살아남는다
     } catch(error){
       console.warn("악보를 그리지 못했습니다:", error);
       scoreHost.textContent = "악보를 그리지 못했어요. 파일이 손상되었을 수 있어요.";
@@ -1583,6 +1628,8 @@ async function mountMusicEditor(doc){
 
   function insertSolfegeNote(step){
     if (!MUSIC_STEPS.includes(step)) return;
+    // 따라치기 중에는 '쉬운 입력'의 도레미 버튼이 그대로 누르는 건반이 된다(자판을 못 쓰는 학생용).
+    if (practice.active){ practicePress(MUSIC_STEP_SEMITONES[step]); return; }
     tool.rest = false;
     syncTools();
     const pitch = { step, octave:Math.round(Number(easyOctaveSelect.value) || 4) };
@@ -2253,6 +2300,9 @@ async function mountMusicEditor(doc){
       }, disabled:running },
       { label:"정지", action:() => MNMusicAudio.stop(), disabled:!running },
       { separator:true },
+      // 도구막대를 접어 두고 쓰는 사람을 위해 여기에도 둔다. 그만두기는 Esc 로 — 연습 중에는
+      // 우클릭 메뉴 자체가 열리지 않는다(연습 중 편집 메뉴를 여는 길을 막아 둬서).
+      { label:"따라치기(자판으로 음 맞추기)", disabled:running, action:() => { practiceBtn.click(); } },
       { label:"연습 속도", children:[0.5, 0.75, 1].map((rate) => ({
         label:`${Math.round(rate * 100)}%`, active:Number(speedSelect.value) === rate,
         action:() => { speedSelect.value = String(rate); }
@@ -2389,6 +2439,7 @@ async function mountMusicEditor(doc){
   function onScoreContextMenu(event){
     event.preventDefault();
     event.stopPropagation();
+    if (practice.active) return;                 // 편집 메뉴는 연습이 끝난 뒤에
     openScoreContextAt(event.clientX, event.clientY, event.target);
   }
 
@@ -2409,7 +2460,8 @@ async function mountMusicEditor(doc){
   scoreHost.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     const target = event.target && event.target.closest ? event.target.closest("[data-note-id]") : null;
-    const existing = noteByElement(target);
+    // 따라치기 중에는 음표를 끌어 옮기지 못하게 한다. 손바닥으로 악보를 끄는 것(scorePan)은 그대로 둔다.
+    const existing = practice.active ? null : noteByElement(target);
     const horizontalDrag = existing && (tool.position || (event.pointerType !== "touch" && event.altKey));
     const pitchDrag = existing && !existing.note.rest && !tool.eraser && !tool.position && !event.altKey
       && event.pointerType !== "touch";
@@ -2607,6 +2659,7 @@ async function mountMusicEditor(doc){
 
   scoreHost.addEventListener("click", (event) => {
     hidePitchGuide();
+    if (practice.active) return;                 // 따라치기 중에는 오선을 눌러도 음표가 들어가지 않는다
     if (suppressScoreClick){
       suppressScoreClick = false;
       event.preventDefault();
@@ -2656,6 +2709,29 @@ async function mountMusicEditor(doc){
 
   function onKeyDown(event){
     if (doc.el.hidden) return;                       // 다른 문서를 보고 있으면 관여하지 않는다
+    // 따라치기 중에는 자판이 통째로 '건반'이 된다. 악보를 바꾸는 키(음표 길이·화살표·되돌리기…)는
+    // 여기서 전부 막는다 — 교본이 연습 도중 바뀌면 지금 어디를 누르고 있는지가 어긋난다.
+    if (practice.active){
+      // 이 핸들러는 document 의 캡처 단계에 있다. 연습 중 삼킨 키는 전파까지 끊어,
+      // 다른 곳에 걸린 한 글자 단축키가 같은 키에 함께 반응하지 않게 한다.
+      const claim = () => { event.preventDefault(); event.stopPropagation(); };
+      if (event.key === "Escape"){ claim(); stopPractice("cancel"); return; }
+      if (event.altKey) return;
+      if (event.ctrlKey || event.metaKey){
+        const key = event.key.toLowerCase();          // 보기 배율만 연습 중에도 그대로 쓸 수 있게 남긴다
+        if (key === "=" || key === "+"){ claim(); stepScoreZoom(1); }
+        else if (key === "-"){ claim(); stepScoreZoom(-1); }
+        else if (key === "0"){ claim(); setScoreZoom(1); }
+        return;
+      }
+      if (event.key === "Backspace"){ claim(); if (!event.repeat) practiceBack(); return; }
+      const pitchClass = event.code ? MUSIC_PRACTICE_KEYS[event.code] : undefined;
+      if (pitchClass !== undefined){
+        claim();
+        if (!event.repeat) practicePress(pitchClass);  // 키를 누르고 있어도 한 번만 친 것으로 센다
+      }
+      return;
+    }
     if (editableTarget(event.target)) return;
     if (contextLayers.length) return;                 // 메뉴가 열려 있으면 버튼 탐색·Esc 닫기를 메뉴에 맡긴다
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")){
@@ -2700,6 +2776,270 @@ async function mountMusicEditor(doc){
     }
   }
 
+  /* ----- 따라치기(음 맞추기) -----
+     채점 규칙 — 코드 따라치기와 같은 결로 맞췄다.
+     · 옥타브는 통과시킨다: 음이름(도·레·미…)만 맞으면 몇 옥타브에서 눌러도 맞은 것으로 본다.
+     · 틀린 키는 진도를 나가지 않는다. 글자와 달리 음은 "틀린 것을 그 자리에 보여 줄" 수 없어,
+       진도까지 나가면 학생이 노래의 어디인지를 잃는다. 대신 지금 차례를 빨갛게 두고 실수로 센다.
+     · 맞게 누르면 진도가 나가되 빨간 표시는 남는다(정확도에 반영).
+     · Backspace 로 한 음 되돌아가면 그 자리 빨간 표시가 지워지고 정확도가 도로 올라간다. */
+  const MUSIC_EASY_HELP = easyHelp.textContent;
+  const MUSIC_PRACTICE_KEY_HELP = "A S D F G H J = 도 레 미 파 솔 라 시 · 검은건반 W E T Y U · 숫자 1~7 도 됩니다";
+  // 연습 중 '쉬운 입력' 도움말 줄 — 무엇으로 누르는지를 모아 두는 자리라 MIDI 건반도 여기서 안내한다.
+  // 건반이 붙어 있는지는 권한 없이 알 수 없으므로(아래 practiceMidiHint 참고) 이 줄이 첫 안내가 된다.
+  const MUSIC_PRACTICE_HELP = MUSIC_PRACTICE_KEY_HELP
+    + (typeof navigator !== "undefined" && navigator.requestMIDIAccess ? " · 피아노는 🎹 MIDI 입력을 켜세요" : "");
+
+  function practiceUseFlats(){
+    return ((MUSIC_KEYS[sheet.key] || {}).vex || "").includes("b");
+  }
+  // 음이름 하나를 소리로 들려준다. 화음이면 note.chord 에 얹어 한 번에 울린다
+  // (previewNote 는 부를 때마다 앞의 미리듣기를 취소해서, 여러 번 나눠 부르면 마지막 하나만 난다).
+  function practicePreviewMidis(midis){
+    const flats = practiceUseFlats();
+    const pitches = (midis || []).map((midi) => musicPitchFromMidi(midi, flats)).filter(Boolean);
+    if (!pitches.length) return;
+    const [first, ...rest] = pitches;
+    MNMusicAudio.previewNote({ rest:false, step:first.step, octave:first.octave, alter:first.alter, chord:rest },
+      sheet.timbre);
+  }
+  // 틀린 키를 눌렀을 때 들려줄 높이 — 지금 차례의 음에서 가장 가까운 옥타브로 잡는다.
+  function practiceNearMidi(pc, baseMidi){
+    const base = Number.isFinite(baseMidi) ? baseMidi : 60;
+    const start = Math.round((base - pc) / 12) * 12 + pc;
+    let best = start;
+    for (const candidate of [start - 12, start, start + 12]){
+      if (Math.abs(candidate - base) < Math.abs(best - base)) best = candidate;
+    }
+    return Math.max(MUSIC_BASS_RANGE_MIN_MIDI, Math.min(MUSIC_RANGE_MAX_MIDI, best));
+  }
+
+  function paintPracticeStep(step, cls){
+    for (const id of step.noteIds){
+      const el = noteEls.get(id);
+      if (el) el.classList.add(cls);
+      const label = solfegeEls.get(id);
+      if (label) label.classList.add(cls);
+    }
+  }
+
+  function paintPractice(){
+    for (const el of noteEls.values()) el.classList.remove("mp-ok", "mp-bad", "mp-now");
+    for (const el of solfegeEls.values()) el.classList.remove("mp-ok", "mp-bad", "mp-now");
+    if (!practice.active) return;
+    for (let index = 0; index < practice.steps.length; index++){
+      const mark = practice.state[index];
+      if (mark) paintPracticeStep(practice.steps[index], mark === 2 ? "mp-bad" : "mp-ok");
+    }
+    const current = practice.steps[practice.pos];
+    if (!current) return;
+    paintPracticeStep(current, "mp-now");
+    if (practice.err) paintPracticeStep(current, "mp-bad");   // 이번 차례에서 틀린 적이 있다
+  }
+
+  function revealPracticeStep(){
+    const current = practice.steps[practice.pos];
+    if (!current) return;
+    for (const id of current.noteIds){
+      const el = noteEls.get(id);
+      if (el && typeof el.scrollIntoView === "function"){ el.scrollIntoView({ block:"nearest", inline:"nearest" }); return; }
+    }
+  }
+
+  function practiceStats(){
+    const ms = Math.max(1, Date.now() - practice.startedAt);
+    const total = practice.total, done = practice.done, notes = practice.notes;
+    return { total, done, notes, wrong:practice.wrong, bad:practice.bad,
+      percent:total ? Math.round((done / total) * 100) : 100,
+      // 정확도는 '지금 남아 있는 빨간 음표' 기준 — 되돌아가 다시 맞게 누르면 도로 올라간다.
+      accuracy:done ? Math.round(((done - practice.bad) / done) * 100) : 100,
+      seconds:Math.max(1, Math.round(ms / 1000)),
+      npm:Math.round(notes / (ms / 60000)) };
+  }
+
+  function updatePracticeInfo(){
+    if (!practice.active){ practiceInfo.textContent = ""; return; }
+    const stats = practiceStats();
+    const step = practice.steps[practice.pos];
+    const measure = step ? ` · ${step.measure}마디` : "";
+    practiceInfo.textContent = `${stats.done}/${stats.total} · 정확도 ${stats.accuracy}%${measure}`;
+  }
+
+  // 쉼표만 있는 자리는 그냥 지나간다(코드 따라치기의 줄 앞 들여쓰기와 같다).
+  function practiceSkipAuto(){
+    while (practice.pos < practice.steps.length && practice.steps[practice.pos].auto){
+      practice.state[practice.pos] = 1;
+      practice.pos++;
+    }
+  }
+
+  function practiceAdvance(){
+    const step = practice.steps[practice.pos];
+    practice.state[practice.pos] = practice.err ? 2 : 1;
+    if (practice.err) practice.bad++;
+    practice.done++;
+    practice.notes += step ? step.pcs.length : 0;
+    practice.pos++;
+    practice.hit = new Set();
+    practice.err = false;
+    practiceSkipAuto();
+    if (practice.pos >= practice.steps.length){ stopPractice("done"); return; }
+    paintPractice();
+    revealPracticeStep();
+    updatePracticeInfo();
+  }
+
+  function practiceBack(){
+    if (!practice.active) return;
+    // 화음을 치다 만 중간이면 그 차례만 처음으로 되돌린다.
+    if (practice.hit.size || practice.err){
+      practice.hit = new Set();
+      practice.err = false;
+      paintPractice();
+      updatePracticeInfo();
+      return;
+    }
+    let at = practice.pos - 1;
+    while (at >= 0 && practice.steps[at].auto) at--;
+    if (at < 0) return;
+    if (practice.state[at] === 2) practice.bad--;
+    practice.done = Math.max(0, practice.done - 1);
+    practice.notes = Math.max(0, practice.notes - practice.steps[at].pcs.length);
+    for (let index = at; index < practice.pos; index++) practice.state[index] = 0;
+    practice.pos = at;
+    paintPractice();
+    revealPracticeStep();
+    updatePracticeInfo();
+  }
+
+  // 자판·도레미 버튼·MIDI 건반이 모두 이 문 하나로 들어온다. pc 는 옥타브를 뺀 음이름(0~11).
+  function practicePress(pc){
+    if (!practice.active || !Number.isFinite(pc)) return;
+    const step = practice.steps[practice.pos];
+    if (!step) return;
+    if (step.pcs.includes(pc)){
+      if (!practice.hit.has(pc)){
+        practice.hit.add(pc);
+        practicePreviewMidis(step.midis.filter((midi) => musicPitchClass(midi) === pc));
+      }
+      if (practice.hit.size >= step.pcs.length) practiceAdvance();
+      else { paintPractice(); updatePracticeInfo(); }   // 화음은 남은 음을 마저 누를 때까지 기다린다
+      return;
+    }
+    practice.wrong++;
+    practice.err = true;
+    practicePreviewMidis([practiceNearMidi(pc, step.midis[0])]);
+    paintPractice();
+    updatePracticeInfo();
+    const now = Date.now();
+    if (typeof toast === "function" && now - practice.hintAt > 3500){
+      practice.hintAt = now;
+      const want = step.pcs.map((value) => MUSIC_PRACTICE_PC_LABELS[value]).join("+");
+      toast(`누른 음: ${MUSIC_PRACTICE_PC_LABELS[pc]} · 이 자리는 ${want}`, 2200);
+    }
+  }
+
+  function setPracticeChrome(on){
+    practiceBtn.classList.toggle("is-on", on);
+    practiceBtn.textContent = on ? "■ 그만두기" : "🎯 따라치기";
+    practiceInfo.hidden = !on;
+    if (!on) practiceInfo.textContent = "";
+    practiceStaffSelect.disabled = on;
+    easyHelp.textContent = on ? MUSIC_PRACTICE_HELP : MUSIC_EASY_HELP;
+    root.classList.toggle("is-practice", on);        // 머리말·도구상자를 통째로 잠근다(CSS)
+    scoreHost.classList.toggle("is-practice", on);   // 악보를 흐린 교본으로 깐다(CSS)
+    for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
+                           speedSelect, countInBtn, metronomeBtn, fromInput, toInput]){
+      control.disabled = on;
+    }
+    if (!on) syncTools();                            // 오른손·왼손 재생 버튼은 대보표일 때만 다시 켠다
+  }
+
+  /* 연결된 피아노가 있는데 MIDI 입력이 꺼져 있으면, 켜는 단추가 달린 안내를 띄운다.
+     아직 권한을 허락하지 않았다면 여기서 묻지 않는다 — 연습을 시작할 때마다 브라우저 권한 창이
+     뜨면 성가시고, 건반이 없는 교실에서는 물어볼 이유조차 없다. 그 경우에는 도움말 줄의
+     "피아노는 🎹 MIDI 입력을 켜세요" 가 대신 남는다. */
+  async function practiceMidiHint(){
+    if (midiInputEnabled || typeof navigator === "undefined" || !navigator.requestMIDIAccess) return;
+    try {
+      if (!midiAccess){
+        if (!navigator.permissions || typeof navigator.permissions.query !== "function") return;
+        const status = await navigator.permissions.query({ name:"midi" });
+        if (!status || status.state !== "granted") return;   // 이미 허락돼 있을 때만 조용히 열어 본다
+        midiAccess = await navigator.requestMIDIAccess();
+      }
+      const inputs = midiAccess.inputs ? [...midiAccess.inputs.values()] : [];
+      if (!inputs.length) return;
+      if (!practice.active || midiInputEnabled) return;      // 기다리는 사이에 상황이 바뀌었다
+      if (typeof toast !== "function") return;
+      const name = String(inputs[0].name || "").trim() || "MIDI 건반";
+      toast(`연결된 건반: ${name} · 자판 대신 건반으로 치려면 MIDI 입력을 켜세요.`, 6000,
+        { action:{ label:"🎹 켜기", onClick:() => { if (!midiInputEnabled) toggleMidiInput(); } } });
+    } catch(_){ /* 권한 조회를 지원하지 않는 실행 환경 — 조용히 넘어간다 */ }
+  }
+
+  function startPractice(){
+    if (practice.active) return false;
+    const range = clampRange();
+    const staff = practiceStaffSelect.value === "treble" || practiceStaffSelect.value === "bass"
+      ? practiceStaffSelect.value : null;
+    const built = musicPracticeSteps(sheet, { from:range.from, to:range.to, staff });
+    if (!built.total){
+      if (typeof toast === "function") toast("따라 칠 음이 없어요. 이 구간에 음표를 먼저 넣어 주세요.", 2600);
+      return false;
+    }
+    MNMusicAudio.stop();
+    closeMusicContextMenu();
+    hidePitchGuide();
+    noteDrag = null;
+    select(0, null);                                 // 연습 중에는 편집 대상(선택)이 없다
+    practice.active = true;
+    practice.steps = built.steps;
+    practice.total = built.total;
+    practice.state = new Uint8Array(built.steps.length);
+    practice.pos = 0; practice.done = 0; practice.notes = 0; practice.wrong = 0; practice.bad = 0;
+    practice.hit = new Set(); practice.err = false;
+    practice.startedAt = Date.now(); practice.hintAt = 0;
+    practiceSkipAuto();
+    setPracticeChrome(true);
+    paintPractice();
+    revealPracticeStep();
+    updatePracticeInfo();
+    scoreHost.focus({ preventScroll:true });
+    practiceMidiHint();                              // 권한 조회를 기다리므로 시작을 붙잡지 않는다
+    return true;
+  }
+
+  // reason: "done"=끝까지 눌렀다 / "cancel"=Esc·버튼으로 그만뒀다. 악보는 내내 그대로였으므로 표시만 되돌린다.
+  function stopPractice(reason = "cancel"){
+    if (!practice.active) return null;
+    const stats = practiceStats();
+    practice.active = false;
+    practice.steps = []; practice.state = null; practice.total = 0;
+    practice.pos = 0; practice.done = 0; practice.notes = 0; practice.hit = new Set(); practice.err = false;
+    setPracticeChrome(false);
+    paintPractice();
+    if (typeof toast === "function"){
+      if (reason === "done"){
+        toast(`다 따라 눌렀어요! 정확도 ${stats.accuracy}% · ${stats.seconds}초 · 분당 ${stats.npm}음`
+          + (stats.wrong ? ` (틀린 횟수 ${stats.wrong}번)` : ""), 5200);
+      } else {
+        toast(`따라치기를 그만뒀어요. 여기까지 ${stats.percent}% · 정확도 ${stats.accuracy}%`, 3000);
+      }
+    }
+    if (reason === "done" && typeof petReact === "function") petReact(stats.accuracy >= 90 ? "success" : "error");
+    return stats;
+  }
+
+  practiceBtn.addEventListener("click", () => {
+    if (practice.active){ stopPractice("cancel"); return; }
+    if (!startPractice()) return;
+    if (typeof toast === "function"){
+      toast("악보를 보고 자판으로 음을 눌러 보세요. " + MUSIC_PRACTICE_KEY_HELP
+        + " · 옥타브는 달라도 맞은 것으로 봐요. (Backspace: 한 음 뒤로 · Esc: 그만두기)", 6000);
+    }
+  });
+
   /* ----- 재생 ----- */
   function highlight(event){
     for (const el of noteEls.values()) el.classList.remove("is-playing");
@@ -2730,6 +3070,7 @@ async function mountMusicEditor(doc){
     speedSelect.disabled = on;
     countInBtn.disabled = on;
     metronomeBtn.disabled = on;
+    practiceBtn.disabled = on;                   // 재생 중에는 따라치기를 시작하지 않는다(소리가 겹친다)
     // 재생 중에는 대기 화면이 뜨지 않아야 한다. screensaverBusy() 가 이미 .is-running 을
     // "실행 중"으로 보고 있어서(파이썬·노트북과 같은 규칙) 이 클래스만 붙였다 떼면 된다.
     root.classList.toggle("is-running", on);
@@ -2750,8 +3091,9 @@ async function mountMusicEditor(doc){
     volumeLabel.textContent = `${Math.round(MNMusicAudio.getVolume() * 100)}%`;
   }
 
-  async function startPlay(range, practice){
-    const options = practice || {};
+  async function startPlay(range, playOptions){
+    if (practice.active) return;                 // 따라치기 중에는 재생하지 않는다(누른 음과 반주가 겹친다)
+    const options = playOptions || {};
     setPlaying(true);
     if (MNMusicAudio.sampledTimbre(sheet.timbre)){
       status.textContent = timbreLabel(sheet.timbre) + " 음원 준비 중…";
@@ -2806,6 +3148,8 @@ async function mountMusicEditor(doc){
     MNMusicAudio.setVolume(Number(volumeInput.value) / 100);
     if (MNMusicAudio.muted()) MNMusicAudio.setMuted(false);
     syncVolumeControls();
+    // 음량 막대는 입력 칸이라 자판을 가져간다 — 따라치기 중이라면 초점을 악보로 되돌린다.
+    if (practice.active) scoreHost.focus({ preventScroll:true });
   });
   muteBtn.addEventListener("click", () => {
     MNMusicAudio.setMuted(!MNMusicAudio.muted());
@@ -2896,6 +3240,8 @@ async function mountMusicEditor(doc){
     const data = event.data || [];
     const command = data[0] & 0xf0;
     if (command !== 0x90 || Number(data[2]) <= 0) return;
+    // 따라치기 중이면 건반은 '입력'이 아니라 '채점'으로 간다 — 안 그러면 연습하다 악보가 고쳐진다.
+    if (practice.active){ practicePress(musicPitchClass(Number(data[1]))); return; }
     const pitch = pitchFromMidiInput(Number(data[1]));
     if (!musicMidiInRange(Number(data[1]), activeStaff)){
       if (typeof toast === "function") toast("현재 오선에서 쓸 수 있는 MIDI 음역을 벗어났어요.", 1800);
@@ -3195,6 +3541,8 @@ async function mountMusicEditor(doc){
     clearTimeout(redrawTimer);
     noteDrag = null;
     scorePan = null;
+    practice.active = false;                     // 문서를 닫으면 따라치기도 끝난다(악보는 건드린 적이 없다)
+    practice.steps = []; practice.state = null;
     closeMusicContextMenu();
     scoreHost.removeEventListener("contextmenu", onScoreContextMenu);
     scoreHost.removeEventListener("scroll", closeMusicContextMenu);

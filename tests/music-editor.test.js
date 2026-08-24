@@ -310,7 +310,7 @@ test("실제 악기 샘플 음색을 선택하며 재생 준비와 WAV 실패를
   for (const timbre of ["xylophone:\"실로폰\"", "harp:\"하프\"", "flute:\"플루트\"", "clarinet:\"클라리넷\""]){
     assert.ok(editorSource.includes(timbre), `${timbre} 선택지가 있어야 한다`);
   }
-  assert.match(editorSource, /async function startPlay\(range, practice\)/);
+  assert.match(editorSource, /async function startPlay\(range, playOptions\)/);
   assert.match(editorSource, /MNMusicAudio\.sampledTimbre\(sheet\.timbre\)/);
   assert.match(editorSource, /timbreLabel\(timbre\)/);
   assert.match(editorSource, /await MNMusicAudio\.play\(sheet/);
@@ -532,4 +532,76 @@ test("저장·편집 중 내용이 자동 복원 사본에도 반영된다", () 
   const documents = read("src/js/documents.js");
   assert.match(documents, /async function markDocumentSavedSnapshot\(doc, bytes, type\)/);
   assert.match(documents, /async function saveDocumentRecoverySnapshot\(doc, bytes, type\)/);
+});
+
+/* ===== 따라치기(음 맞추기) — 코드 따라치기(python-editor.js)를 악보로 옮긴 연습 모드 ===== */
+
+test("따라치기는 자판을 건반으로 쓰고 옥타브는 통과시킨다", () => {
+  // 자판은 event.key 가 아니라 event.code 로 읽는다 — 한글 입력 상태에서도 같은 자리가 같은 음이어야 한다.
+  assert.match(editorSource, /const MUSIC_PRACTICE_KEYS = \{/);
+  assert.match(editorSource, /KeyA:0, KeyW:1, KeyS:2, KeyE:3, KeyD:4, KeyF:5, KeyT:6, KeyG:7, KeyY:8, KeyH:9, KeyU:10, KeyJ:11/);
+  assert.match(editorSource, /Digit1:0, Digit2:2, Digit3:4, Digit4:5, Digit5:7, Digit6:9, Digit7:11/);
+  assert.match(editorSource, /const pitchClass = event\.code \? MUSIC_PRACTICE_KEYS\[event\.code\] : undefined/);
+  // 채점 순서는 모델이 만들고(테스트는 music-model.test.js), 비교는 옥타브를 뺀 음이름만 본다.
+  assert.match(editorSource, /musicPracticeSteps\(sheet, \{ from:range\.from, to:range\.to, staff \}\)/);
+  assert.match(editorSource, /step\.pcs\.includes\(pc\)/);
+  // 마디 범위와 손 고르기는 이미 있는 재생 범위·대보표 설정을 그대로 쓴다.
+  assert.match(editorSource, /practiceStaffSelect\.hidden = !sheet\.grandStaff/);
+});
+
+test("따라치기 자판은 입력 요소에 포커스가 있어도 먼저 처리한다", () => {
+  // 음량 슬라이더나 쉬운 입력의 옥타브 선택을 만진 뒤에도 건반·Backspace·Esc가 계속 동작해야 한다.
+  const practiceBranch = editorSource.indexOf("if (practice.active){", editorSource.indexOf("function onKeyDown(event)"));
+  const editableGuard = editorSource.indexOf("if (editableTarget(event.target)) return;", editorSource.indexOf("function onKeyDown(event)"));
+  assert.ok(practiceBranch >= 0 && editableGuard > practiceBranch,
+    "연습 키 처리는 editableTarget 검사보다 앞에 있어야 한다");
+});
+
+test("자판·도레미 버튼·MIDI 건반이 모두 한 채점 문(practicePress)으로 들어온다", () => {
+  assert.match(editorSource, /if \(practice\.active\)\{ practicePress\(MUSIC_STEP_SEMITONES\[step\]\); return; \}/);
+  // MIDI 를 켠 채 연습하면 건반이 악보를 고쳐 버린다 — 채점으로 돌린다.
+  assert.match(editorSource, /if \(practice\.active\)\{ practicePress\(musicPitchClass\(Number\(data\[1\]\)\)\); return; \}/);
+  // 피아노가 붙어 있는데 MIDI 입력이 꺼져 있으면 켜는 단추가 달린 안내를 띄운다.
+  // 단, 아직 허락하지 않은 권한을 연습 시작 때마다 묻지는 않는다(건반이 없는 교실에서는 물어볼 이유도 없다).
+  assert.match(editorSource, /async function practiceMidiHint\(\)/);
+  assert.match(editorSource, /navigator\.permissions\.query\(\{ name:"midi" \}\)/);
+  assert.match(editorSource, /if \(!status \|\| status\.state !== "granted"\) return;/);
+  assert.match(editorSource, /action:\{ label:"🎹 켜기", onClick:\(\) => \{ if \(!midiInputEnabled\) toggleMidiInput\(\); \} \}/);
+  assert.match(editorSource, /피아노는 🎹 MIDI 입력을 켜세요/);
+  // 틀린 키는 진도를 나가지 않고 실수로만 센다. 맞으면 그 음을 실제 옥타브로 들려준다.
+  assert.match(editorSource, /practice\.wrong\+\+;\s*\n\s*practice\.err = true;/);
+  assert.match(editorSource, /practicePreviewMidis\(step\.midis\.filter\(\(midi\) => musicPitchClass\(midi\) === pc\)\)/);
+  // Backspace 로 되돌아가면 그 자리의 빨간 표시가 지워져 정확도가 도로 올라간다(코드 따라치기와 같은 규칙).
+  assert.match(editorSource, /if \(practice\.state\[at\] === 2\) practice\.bad--/);
+});
+
+test("따라치기 중에는 악보를 고칠 수 있는 길을 모두 막는다", () => {
+  // 연습 상태는 화면 표시일 뿐 sheet 를 건드리지 않는다. 그 대신 편집 입력 경로를 전부 잠근다.
+  assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 따라치기 중에는 오선을 눌러도/);
+  assert.match(editorSource, /const existing = practice\.active \? null : noteByElement\(target\)/);
+  assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 편집 메뉴는/);
+  assert.match(editorSource, /if \(practice\.active\) return;\s+\/\/ 따라치기 중에는 재생하지 않는다/);
+  // 되돌리기(Ctrl+Z)처럼 악보를 바꾸는 단축키도 연습 중에는 지나간다 — 보기 배율만 남긴다.
+  assert.match(editorSource, /if \(event\.key === "Escape"\)\{ claim\(\); stopPractice\("cancel"\); return; \}/);
+  // 삼킨 키는 전파까지 끊는다 — 다른 곳의 한 글자 단축키가 같은 키에 함께 반응하지 않게.
+  assert.match(editorSource, /const claim = \(\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); \}/);
+  const styles = read("src/styles.css");
+  assert.ok(styles.includes(".music-doc.is-practice .music-bar"), "연습 중에는 머리말·도구상자를 CSS 로 잠가야 한다");
+  assert.match(styles, /\.music-score\.is-practice \.music-note,/);
+});
+
+test("따라치기 표시는 다시 그려도 살아남고, 끝나면 결과를 알려 준다", () => {
+  // 배율·창 크기가 바뀌면 VexFlow 가 음표 요소를 새로 만든다 — 진도 표시를 다시 칠해야 한다.
+  assert.match(editorSource, /paintSelection\(\);\s*\n\s*paintPractice\(\);/);
+  assert.match(editorSource, /다 따라 눌렀어요! 정확도 \$\{stats\.accuracy\}%/);
+  assert.match(editorSource, /petReact\(stats\.accuracy >= 90 \? "success" : "error"\)/);
+  assert.match(editorSource, /musicButton\("🎯 따라치기"/);
+  // 도구막대를 접어 두고 쓰는 사람을 위해 악보 우클릭 메뉴(재생·연습)에도 같은 길을 둔다.
+  assert.match(editorSource, /label:"따라치기\(자판으로 음 맞추기\)"/);
+});
+
+test("분당 음 수는 단계가 아니라 화음의 실제 음 개수를 센다", () => {
+  assert.match(editorSource, /practice\.notes \+= step \? step\.pcs\.length : 0/);
+  assert.match(editorSource, /practice\.notes = Math\.max\(0, practice\.notes - practice\.steps\[at\]\.pcs\.length\)/);
+  assert.match(editorSource, /npm:Math\.round\(notes \/ \(ms \/ 60000\)\)/);
 });

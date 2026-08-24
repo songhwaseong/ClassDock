@@ -23,7 +23,8 @@ function loadMusic(){
       musicVoiceNotes, musicEffectiveMeasureSettings, musicMeasureCapacity, musicPlaybackMeasureIndexes,
       musicRetuneForKey, musicPackLines, musicBarWidthHint,
       musicTransposeSheet, musicTransposedKey, musicTransposeSteps, musicTransposePitch, musicPitchFromMidi,
-      musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS
+      musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS,
+      musicPracticeSteps, musicPitchClass
     };`, context);
   return context.__music;
 }
@@ -606,3 +607,108 @@ test("줄 나누기는 화면 폭과 마디의 음표 수에 따라 마디를 �
 function round3(value){
   return Math.round(value * 1000) / 1000;
 }
+
+/* ===== 따라치기(음 맞추기) 순서 ===== */
+
+test("따라치기 순서는 음표 하나를 한 차례로 잘라 준다", () => {
+  const api = loadMusic();
+  const sheet = schoolBell(api);
+  const built = api.musicPracticeSteps(sheet);
+  // 학교종 앞 4마디 = 음표 12개(4·3·4·1) + 마지막 마디의 2분쉼표 한 자리.
+  assert.equal(built.total, 12);
+  assert.equal(built.steps.length, 13);
+  assert.equal(built.steps[12].auto, true);
+  assert.equal(built.steps[0].measure, 1);
+  assert.equal(built.steps[0].noteIds.length, 1);
+  // 차례는 악보에 적힌 시간 순서 그대로다.
+  for (let index = 1; index < built.steps.length; index++){
+    assert.ok(built.steps[index].start > built.steps[index - 1].start);
+    assert.equal(built.steps[index].index, index);
+  }
+});
+
+test("옥타브를 뺀 음이름(pcs)으로 채점한다 — 같은 도는 몇 옥타브든 같은 값", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("옥타브");
+  sheet.measures = [api.musicMeasure([
+    api.musicNote("C", 4), api.musicNote("C", 5), api.musicNote("F", 4, { alter:1 }), api.musicNote("G", 4)
+  ])];
+  const steps = api.musicPracticeSteps(sheet).steps;
+  assert.deepEqual(Array.from(steps[0].pcs), [0]);            // 도4
+  assert.deepEqual(Array.from(steps[1].pcs), [0]);            // 도5 — 옥타브가 달라도 같은 음이름
+  assert.notEqual(steps[0].midis[0], steps[1].midis[0]);   // 들려줄 높이는 실제 옥타브 그대로다
+  assert.deepEqual(Array.from(steps[2].pcs), [6]);            // 파♯
+  assert.deepEqual(Array.from(steps[3].pcs), [7]);            // 솔
+  assert.equal(api.musicPitchClass(60), 0);
+  assert.equal(api.musicPitchClass(72), 0);
+  assert.equal(api.musicPitchClass(71), 11);
+});
+
+test("쉼표 자리는 auto 로 남겨 그냥 지나가고, 채점 수에 넣지 않는다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("쉼표");
+  sheet.measures = [api.musicMeasure([
+    api.musicNote("C", 4), api.musicRest("quarter"), api.musicNote("E", 4), api.musicRest("quarter")
+  ])];
+  const built = api.musicPracticeSteps(sheet);
+  assert.equal(built.steps.length, 4);
+  assert.equal(built.total, 2);                   // 눌러야 할 차례는 음표 둘뿐
+  assert.deepEqual(Array.from(built.steps.map((step) => step.auto)), [false, true, false, true]);
+  assert.deepEqual(Array.from(built.steps[1].pcs), []);
+  // 쉼표에도 음표 id 는 달려 있어야 화면에서 함께 흘러간 것으로 칠할 수 있다.
+  assert.equal(built.steps[1].noteIds.length, 1);
+});
+
+test("화음과 양손은 한 차례로 묶어 '동시에 누를 음'으로 준다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("화음");
+  sheet.grandStaff = true;
+  sheet.measures = [api.musicMeasure(
+    [api.musicNote("C", 4, { value:"whole", chord:[{ step:"E", octave:4 }, { step:"G", octave:4 }] })],
+    { bassNotes:[api.musicNote("C", 3, { value:"whole" })] }
+  )];
+  const both = api.musicPracticeSteps(sheet);
+  assert.equal(both.steps.length, 1);
+  assert.deepEqual(Array.from(both.steps[0].pcs), [0, 4, 7]);          // 도·미·솔 — 낮은 도는 같은 음이름이라 겹치지 않는다
+  assert.equal(both.steps[0].noteIds.length, 2);           // 오른손 화음 한 개 + 왼손 한 개
+  // 손을 고르면 그 오선만 따라친다.
+  const right = api.musicPracticeSteps(sheet, { staff:"treble" });
+  assert.equal(right.steps[0].noteIds.length, 1);
+  const left = api.musicPracticeSteps(sheet, { staff:"bass" });
+  assert.deepEqual(Array.from(left.steps[0].pcs), [0]);
+});
+
+test("붙임줄로 이어진 음은 한 번만 누르되 두 음표를 함께 칠한다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("붙임줄");
+  const first = api.musicNote("G", 4, { value:"half", tieToNext:true });
+  const second = api.musicNote("G", 4, { value:"half" });
+  sheet.measures = [api.musicMeasure([first, second])];
+  const built = api.musicPracticeSteps(sheet);
+  assert.equal(built.total, 1);
+  assert.deepEqual(Array.from(built.steps[0].noteIds), [first.id, second.id]);
+});
+
+test("마디 범위만 따라치고, 도돌이는 펼치지 않는다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("도돌이");
+  sheet.measures = [
+    api.musicMeasure([api.musicNote("C", 4, { value:"whole" })], { repeatStart:true }),
+    api.musicMeasure([api.musicNote("D", 4, { value:"whole" })], { repeatEnd:true }),
+    api.musicMeasure([api.musicNote("E", 4, { value:"whole" })])
+  ];
+  // 도돌이를 펼치면 같은 음표가 두 번 나와 화면의 맞음·틀림 표시가 서로를 덮어쓴다.
+  const all = api.musicPracticeSteps(sheet);
+  assert.equal(all.total, 3);
+  assert.deepEqual(Array.from(all.steps.map((step) => step.pcs[0])), [0, 2, 4]);
+  const part = api.musicPracticeSteps(sheet, { from:2, to:3 });
+  assert.equal(part.total, 2);
+  assert.deepEqual(Array.from(part.steps.map((step) => step.measure)), [2, 3]);
+});
+
+test("빈 악보는 따라칠 차례가 없다", () => {
+  const api = loadMusic();
+  const built = api.musicPracticeSteps(api.musicEmpty("빈 악보"));
+  assert.equal(built.total, 0);
+  assert.equal(built.steps.length, 0);
+});
