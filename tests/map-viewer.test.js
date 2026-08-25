@@ -35,6 +35,8 @@ function loadMapViewer(){
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
       , MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
+      , MAP_DRIVE_MAX_MARKERS, MAP_DRIVE_COLOR, MAP_DRIVE_CACHE_MAX
+      , mapFormatDuration, mapDirectionsSpot, mapDirectionsRoute, mapDriveGuide
       , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
       , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
@@ -1784,7 +1786,7 @@ test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 �
   // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
   assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
   // 되돌리기 범위도 격자·이름표와 같다.
-  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route\]\)/);
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive\]\)/);
   assert.match(source, /model\.route = saved\[7\] === true;/);
   // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
   assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);
@@ -1943,4 +1945,122 @@ test("지도 문제 학생 화면은 편집 도구를 감추고 답을 문서에
   assert.match(source, /typeof mapTaskGrade !== "function"/);
   assert.match(source, /typeof exportMapTaskSubmission !== "function"/);
   assert.match(source, /if \(typeof openMapTaskBuilder === "function"\)/);
+});
+
+/* ── 자동차 길찾기(카카오모빌리티) ──
+   길은 문서에 담지 않고 켤 때마다 다시 묻는다. 그래서 시험이 지키는 것은 두 가지다 — 좌표를
+   카카오가 받는 꼴로 정확히 뒤집어 보내는지, 돌아온 답에서 화면에 그릴 선을 제대로 꺼내는지. */
+test("길찾기 요청은 첫 표시를 출발·마지막을 도착으로 두고 좌표를 경도,위도 차례로 보낸다", () => {
+  const api = loadMapViewer();
+  const spot = api.mapDirectionsSpot([[37.5665, 126.9780], [37.4979, 127.0276], [37.5796, 126.9770]]);
+  assert.equal(spot.x, "126.978000");
+  assert.equal(spot.y, "37.566500");
+  assert.equal(spot.x2, "126.977000");
+  assert.equal(spot.y2, "37.579600");
+  // 사이에 있는 표시만 들르는 곳이 된다(카카오는 x=경도·y=위도 차례).
+  assert.equal(spot.via, "127.027600,37.497900");
+  // 표시가 하나뿐이면 물을 것이 없다 — 런처까지 가지 않고 여기서 끊는다.
+  assert.equal(api.mapDirectionsSpot([[37.5, 127.0]]), null);
+  assert.equal(api.mapDirectionsSpot([]), null);
+});
+
+test("길찾기 답에서 도로 좌표를 하나로 잇고 이음매의 겹친 점은 버린다", () => {
+  const api = loadMapViewer();
+  const result = api.mapDirectionsRoute({
+    routes: [{
+      result_code: 0,
+      result_msg: "길찾기 성공",
+      summary: { distance: 12345, duration: 1500 },
+      sections: [
+        { roads: [{ vertexes: [126.9780, 37.5665, 126.9800, 37.5670] }] },
+        // 들르는 곳이 있으면 구간이 나뉘고 이음매에 같은 점이 한 번 더 온다.
+        { roads: [{ vertexes: [126.9800, 37.5670, 127.0276, 37.4979] }] }
+      ]
+    }]
+  });
+  assert.equal(result.error, "");
+  assert.equal(JSON.stringify(result.points), JSON.stringify([[37.5665, 126.9780], [37.5670, 126.9800], [37.4979, 127.0276]]));
+  assert.equal(result.distance, 12345);
+  assert.equal(result.duration, 1500);
+});
+
+test("길을 못 찾은 답은 HTTP 200 이어도 실패로 가른다", () => {
+  const api = loadMapViewer();
+  // 카카오는 길이 없어도 200 을 주고 result_code 로만 알려 준다(바다 건너편 …).
+  const failed = api.mapDirectionsRoute({ routes: [{ result_code: 104, result_msg: "출발지와 도착지가 5m 이내" }] });
+  assert.equal(failed.error, "directions-failed");
+  assert.equal(failed.points.length, 0);
+  // 도로 좌표가 한 점뿐이면 그릴 선이 없다.
+  const empty = api.mapDirectionsRoute({ routes: [{ result_code: 0, sections: [{ roads: [{ vertexes: [126.9, 37.5] }] }] }] });
+  assert.equal(empty.error, "directions-empty");
+  assert.equal(api.mapDirectionsRoute(null).error, "directions-empty");
+  assert.equal(api.mapDirectionsRoute({ routes: [] }).error, "directions-empty");
+});
+
+test("예상 소요시간은 분으로 읽히고 0분으로 떨어지지 않는다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapFormatDuration(20), "1분");        // 코앞이라도 0분은 길이 없는 것처럼 읽힌다
+  assert.equal(api.mapFormatDuration(1500), "25분");
+  assert.equal(api.mapFormatDuration(3600), "1시간");
+  assert.equal(api.mapFormatDuration(5400), "1시간 30분");
+});
+
+test("자동차 길찾기 켜 둔 사실은 .map 에 남고 길 자체는 담기지 않는다", () => {
+  const api = loadMapViewer();
+  const model = api.mapDocEmpty("소풍 길");
+  assert.equal(model.drive, false);
+  model.drive = true;
+  const text = api.mapDocSerialize(model);
+  assert.match(text, /"drive": true/);
+  // 도로 좌표는 어디에도 담기지 않는다 — 표시를 옮긴 뒤에도 옛 길이 남으면 지도가 거짓말을 한다.
+  assert.doesNotMatch(text, /vertexes|sections/);
+  assert.equal(api.mapDocParse(text).drive, true);
+  // 켜고 끈 것은 저장되는 내용이라 ● 판정에도 들어간다.
+  assert.notEqual(api.mapDocContentKey(model), api.mapDocContentKey(api.mapDocEmpty("소풍 길")));
+  // 이 값이 없던 옛 지도는 꺼진 것으로 읽는다(옛 지도의 화면이 달라지지 않게).
+  const old = JSON.parse(text);
+  delete old.drive;
+  assert.equal(api.mapDocParse(JSON.stringify(old)).drive, false);
+});
+
+test("자동차 길찾기는 표시 7개까지만 한 번에 잇고 그 사실을 이름표에 적는다", () => {
+  const api = loadMapViewer();
+  // 카카오 경유지 상한(5)에 출발·도착을 더한 값이다.
+  assert.equal(api.MAP_DRIVE_MAX_MARKERS, 7);
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /const points = shown\.slice\(0, MAP_DRIVE_MAX_MARKERS\)/);
+  // 말없이 자르지 않는다 — 앞쪽만 이었다는 사실이 선 이름표에 그대로 보인다.
+  assert.match(source, /used < total \? "앞 표시 \{count\}개/);
+  // 표시를 끌어 옮기는 동안에는 묻지 않는다(하루 무료 몫을 드래그 한 번에 다 쓰지 않게).
+  assert.match(source, /driveTimer = setTimeout\(\(\) => \{ runDrive\(\); \}, MAP_DRIVE_DELAY_MS\)/);
+  // 같은 표시 배치로 두 번 묻지 않는다 — 실패한 배치도 '손을 본 것'으로 적어 같은 안내를
+  // 되풀이하지 않는다(제목을 한 글자 칠 때마다 touch 가 들어온다).
+  assert.match(source, /if \(signature === driveKey\) return;/);
+  assert.match(source, /driveFailed\(result\.error, signature\)/);
+  // 표시가 하나 이하로 줄었을 때 진행 중이던 옛 답도 무효화해야 삭제한 경로가 되살아나지 않는다.
+  assert.match(source, /const dropDrive = \(\) => \{[\s\S]*?driveSeq\+\+;[\s\S]*?driveLayer/);
+});
+
+test("카카오 키가 없으면 길찾기는 묻지 않고 무엇이 모자란지 알려 준다", () => {
+  const api = loadMapViewer();
+  assert.match(api.mapDriveGuide({ provider:false }), /카카오 지도 검색을 켜야/);
+  assert.match(api.mapDriveGuide({ provider:true, available:false }), /런처에서 사용할 수 있어요/);
+  assert.match(api.mapDriveGuide({ provider:true, available:true, hasKey:false }), /REST API 키/);
+  assert.equal(api.mapDriveGuide({ provider:true, available:true, hasKey:true }), "");
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  // 켜 둔 채로 저장한 지도를 열 때도, 카카오가 갖춰졌을 때만 묻는다.
+  assert.match(source, /if \(model\.drive\) refreshNearbyReady\(\)\.then\(\(\) => \{ if \(nearbyReady\) scheduleDrive\(\); \}\)/);
+  // 키 없이 '켜진 채' 복원된 버튼을 처음 눌러도 안내를 보여 주면서 토글은 끌 수 있어야 한다.
+  assert.match(source, /if \(model\.drive\)\{[\s\S]*?await refreshNearbyReady\(\);[\s\S]*?guide = mapT\(mapDriveGuide\(nearbyAccess\)\)[\s\S]*?model\.drive = false/);
+});
+
+test("두 런처는 길찾기를 무기한 장소 캐시에서 빼고 상세 경로에 더 큰 응답 상한을 쓴다", () => {
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  for (const launcher of [csharp, go]){
+    assert.match(launcher, /DirectionsMaxBytes|directionsMaxBytes/);
+    assert.match(launcher, /provider != "kakao-directions"/);
+  }
+  assert.match(csharp, /provider == "kakao-directions" \? DirectionsMaxBytes : GeocodeMaxBytes/);
+  assert.match(go, /if provider == "kakao-directions" \{\s*maxBytes = directionsMaxBytes/);
 });

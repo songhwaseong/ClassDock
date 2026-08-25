@@ -509,7 +509,12 @@ function pdfFitPageZoom(doc){
   if (availH <= 0 || availW <= 0) return null;
   const fit = Math.min(availH / p.cssH, availW / p.cssW);
   if (!Number.isFinite(fit) || fit <= 0) return null;
-  return Math.max(0.3, Math.min(4, Math.round(fit * 100) / 100));
+  /* 맞춤 배율을 반올림하면 최대 0.005만큼 커져 계산한 가용 폭·높이를 다시 넘을 수 있다.
+     특히 분할 화면 경계에서는 그 몇 px 때문에 가로 스크롤바가 생기고 clientHeight가 줄어
+     다음 ResizeObserver 맞춤은 더 작은 배율을 고른다. 스크롤바가 사라지면 다시 큰 배율로
+     돌아가는 진동이 생기므로, 맞춤 계산만큼은 1% 단위로 내림해 가용 영역 안쪽에 둔다. */
+  const safeFit = Math.floor((fit + 1e-9) * 100) / 100;
+  return Math.max(0.3, Math.min(4, safeFit));
 }
 
 // 넘길 페이지를 고른다(0부터). 범위를 벗어난 값은 양 끝으로 눌러 담는다.

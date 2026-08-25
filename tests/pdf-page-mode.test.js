@@ -109,15 +109,34 @@ test("페이지 맞춤 배율은 세로·가로 가운데 더 빡빡한 쪽에 �
   // 세로가 모자란 경우: (800-30)/1270 = 0.606…
   const tall = fakePdfDoc(2, { cssW: 900, cssH: 1270 }).doc;
   tall.pageMode = "single";
-  assert.equal(api.pdfFitPageZoom(tall), 0.61);
+  assert.equal(api.pdfFitPageZoom(tall), 0.60);
   // 가로가 더 모자란 경우: (1000-24)/2000 = 0.488 < (800-30)/900
   const wide = fakePdfDoc(2, { cssW: 2000, cssH: 900 }).doc;
   wide.pageMode = "single";
-  assert.equal(api.pdfFitPageZoom(wide), 0.49);
+  assert.equal(api.pdfFitPageZoom(wide), 0.48);
   // 크기를 아직 모르는 문서에서는 손대지 않는다(배율을 0 으로 만들지 않게).
   const empty = fakePdfDoc(1, { cssW: 0, cssH: 0 }).doc;
   empty.pageMode = "single";
   assert.equal(api.pdfFitPageZoom(empty), null);
+});
+
+test("페이지 맞춤은 스크롤바 경계의 두 높이에서 같은 안전 배율로 수렴한다", () => {
+  const { api } = loadPageMode();
+  const doc = fakePdfDoc(1, { cssW: 1200, cssH: 675 }).doc;
+  doc.pageMode = "single";
+  doc.el.clientWidth = 1208;
+
+  // 스크롤바가 없을 때 반올림하면 0.99가 되어 1188px + 좌우 여유 24px가
+  // 1208px을 넘는다. 가로 스크롤바가 생겨 높이가 15px 줄면 0.98로 바뀌고,
+  // 스크롤바가 사라진 뒤 다시 0.99가 되는 것이 실제 흔들림의 피드백 고리였다.
+  doc.el.clientHeight = 709;
+  const withoutScrollbar = api.pdfFitPageZoom(doc);
+  doc.el.clientHeight = 694;
+  const withScrollbar = api.pdfFitPageZoom(doc);
+
+  assert.equal(withoutScrollbar, 0.98);
+  assert.equal(withScrollbar, 0.98);
+  assert.ok(doc.pages[0].cssW * withoutScrollbar + 24 <= doc.el.clientWidth);
 });
 
 test("한 장씩 보기로 들어가면 페이지 맞춤으로 맞추고 나올 때 들어가기 전 배율로 되돌린다", () => {
@@ -130,7 +149,7 @@ test("한 장씩 보기로 들어가면 페이지 맞춤으로 맞추고 나올 
   assert.equal(doc.pageMode, "single");
   assert.equal(doc.singleIndex, 2, "보고 있던 쪽에서 이어서 넘긴다");
   assert.equal(doc.zoomBeforeSingle, 1.25);
-  assert.equal(calls.zoom[0], 0.61, "들어갈 때 한 번 페이지 맞춤");
+  assert.equal(calls.zoom[0], 0.60, "들어갈 때 한 번 페이지 맞춤");
 
   doc.zoom = 2;                        // 한 장씩 보는 동안 사용자가 확대했다
   api.setPdfPageMode(doc, "flow");
@@ -155,7 +174,7 @@ test("배경에서 열려 못 맞춘 페이지 맞춤은 화면에 놓인 뒤에
 
   doc.el.clientHeight = 800; doc.el.clientWidth = 1000;
   api.pdfFitPageIfPending(doc);
-  assert.deepEqual(calls.zoom, [0.61]);
+  assert.deepEqual(calls.zoom, [0.60]);
   assert.equal(doc.needsPageFit, false);
   api.pdfFitPageIfPending(doc);
   assert.equal(calls.zoom.length, 1, "한 번 맞춘 뒤에는 다시 손대지 않는다(사용자 확대를 덮지 않게)");

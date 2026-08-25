@@ -15,7 +15,7 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 7;
+const MAP_DOC_VERSION = 8;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 /* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
    빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
@@ -302,6 +302,9 @@ function mapDocEmpty(title){
     /* 표시를 목록 순서대로 이어 주는 선. 선 자체는 저장하지 않고 켜 두었다는 사실만 담는다 —
        표시에서 매번 다시 그리므로 표시를 옮기거나 지우면 선이 저절로 따라온다. */
     route: false,
+    /* 자동차 길찾기도 같은 뜻으로 켜 둔 사실만 담는다 — 길 자체는 카카오에 다시 물어 그리므로
+       표시를 옮기면 새 길이 오고, 인터넷이 없는 자리에서 열면 선만 없이 열린다. */
+    drive: false,
     backgroundImage: null
   };
 }
@@ -328,6 +331,8 @@ function mapDocParse(text){
     labels: raw.labels === true,
     // 버전 6 이하에는 없던 값이다 — 같은 까닭으로 없으면 끈 것으로 본다.
     route: raw.route === true,
+    // 버전 7 이하에는 없던 값이다 — 같은 까닭으로 없으면 끈 것으로 본다.
+    drive: raw.drive === true,
     backgroundImage
   };
 }
@@ -344,6 +349,7 @@ function mapDocSerialize(model){
     grid: !!model.grid,
     labels: !!model.labels,
     route: !!model.route,
+    drive: !!model.drive,
     backgroundImage: model.backgroundImage || null
   }, null, 2) + "\n";
 }
@@ -360,7 +366,7 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(0, 80),
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
-  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels, !!model.route]);
+  return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels, !!model.route, !!model.drive]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -396,6 +402,14 @@ function mapPolygonAreaSquareMeters(points){
 function mapFormatDistance(meters){
   const value = Math.max(0, Number(meters) || 0);
   return value >= 1000 ? (value / 1000).toFixed(value >= 10000 ? 1 : 2) + " km" : Math.round(value) + " m";
+}
+/* 길찾기가 돌려주는 예상 소요시간. 초 단위로 오지만 수업에서 읽는 값은 분이라 분으로 줄이고,
+   0 분으로 떨어지는 아주 가까운 길은 "1분"으로 올린다(0 분은 길이 없는 것처럼 읽힌다). */
+function mapFormatDuration(seconds){
+  const minutes = Math.round(Math.max(0, Number(seconds) || 0) / 60);
+  if (minutes < 60) return Math.max(1, minutes) + "분";
+  const rest = minutes % 60;
+  return rest ? Math.floor(minutes / 60) + "시간 " + rest + "분" : Math.floor(minutes / 60) + "시간";
 }
 function mapFormatArea(squareMeters){
   const value = Math.max(0, Number(squareMeters) || 0);
@@ -801,6 +815,65 @@ function mapKakaoSearchGuide(access){
   if (!access.hasKey) return "카카오 REST API 키가 없어 주변 시설을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.";
   return "";
 }
+/* 자동차 길찾기도 카카오 키가 있어야 하는 기능이라 안내 문구만 따로 둔다(막히는 까닭은 주변
+   시설과 같다 — 공급자 선택·런처·키). */
+function mapDriveGuide(access){
+  if (!access || !access.provider){
+    return "자동차 길찾기는 카카오 지도 검색을 켜야 쓸 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.";
+  }
+  if (!access.available) return "자동차 길찾기는 ClassDock 런처에서 사용할 수 있어요.";
+  if (!access.hasKey) return "카카오 REST API 키가 없어 길을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.";
+  return "";
+}
+/* 표시 좌표 목록([위도, 경도] …)을 런처가 받는 딸림값으로 바꾼다. 첫 표시가 출발, 마지막이
+   도착, 사이에 있는 것들이 들르는 곳이다 — 카카오는 x=경도·y=위도 차례라 여기서 뒤집는다. */
+function mapDirectionsSpot(points){
+  const list = (Array.isArray(points) ? points : [])
+    .filter(point => Array.isArray(point) && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
+  if (list.length < 2) return null;
+  const pair = (point) => Number(point[1]).toFixed(6) + "," + Number(point[0]).toFixed(6);
+  return {
+    x: Number(list[0][1]).toFixed(6), y: Number(list[0][0]).toFixed(6),
+    x2: Number(list[list.length - 1][1]).toFixed(6), y2: Number(list[list.length - 1][0]).toFixed(6),
+    via: list.slice(1, -1).map(pair).join("|")
+  };
+}
+/* 카카오 길찾기 답에서 화면에 그릴 것만 꺼낸다. 길을 못 찾은 경우에도 HTTP 는 200 이고 답 안의
+   result_code 로만 알려 주므로(바다 건너편·너무 가까운 자리 …) 그 갈래를 여기서 가른다.
+   vertexes 는 [경도, 위도, 경도, 위도 …] 한 줄짜리 배열이고, 들르는 곳이 있으면 구간(sections)이
+   여럿으로 나뉘어 이음매마다 같은 점이 한 번 더 온다 — 겹치는 점은 버려 선을 하나로 잇는다. */
+function mapDirectionsRoute(raw){
+  const route = raw && Array.isArray(raw.routes) ? raw.routes[0] : null;
+  if (!route || typeof route !== "object") return { points:[], distance:0, duration:0, error:"directions-empty" };
+  if (Number(route.result_code) !== 0){
+    return { points:[], distance:0, duration:0, error:"directions-failed", message:String(route.result_msg || "") };
+  }
+  const points = [];
+  for (const section of (Array.isArray(route.sections) ? route.sections : [])){
+    for (const road of (section && Array.isArray(section.roads) ? section.roads : [])){
+      const vertexes = Array.isArray(road.vertexes) ? road.vertexes : [];
+      for (let i = 0; i + 1 < vertexes.length; i += 2){
+        const lng = Number(vertexes[i]), lat = Number(vertexes[i + 1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const last = points[points.length - 1];
+        if (last && last[0] === lat && last[1] === lng) continue;
+        points.push([mapClampLat(lat), mapClampLng(lng)]);
+      }
+    }
+  }
+  const summary = route.summary && typeof route.summary === "object" ? route.summary : {};
+  return {
+    points,
+    distance: Math.max(0, Number(summary.distance) || 0),
+    duration: Math.max(0, Number(summary.duration) || 0),
+    error: points.length < 2 ? "directions-empty" : ""
+  };
+}
+async function mapFetchDirections(points){
+  const spot = mapDirectionsSpot(points);
+  if (!spot) return { points:[], distance:0, duration:0, error:"directions-empty" };
+  return mapDirectionsRoute(await mapFetchGeocode("", "kakao-directions", spot));
+}
 async function mapGeocode(query){
   const q = String(query || "").trim();
   if (!q || q.length > 200) return [];
@@ -1061,6 +1134,13 @@ const MAP_LABEL_MAX_MARKERS = 200;
    엉켜 보이는지 함께 알려 준다 — 순서는 표시 목록에서 손으로 바꿀 수 있다. */
 const MAP_ROUTE_TANGLE_MARKERS = 30;
 const MAP_ROUTE_COLOR = "#7c3aed";
+/* 자동차 길찾기(🚗) ─ 표시를 곧은 선으로 잇는 대신 실제 도로를 따라 잇는다. 카카오모빌리티의
+   경유지 상한이 5 개라 출발·도착을 더해 표시 7 개까지만 한 번에 물을 수 있다. 하루 무료 몫이
+   따로 매겨지는 API 라, 같은 표시 배치로 두 번 묻지 않도록 답을 좌표 서명으로 담아 둔다. */
+const MAP_DRIVE_COLOR = "#0284c7";
+const MAP_DRIVE_MAX_MARKERS = 7;
+const MAP_DRIVE_CACHE_MAX = 20;
+const MAP_DRIVE_DELAY_MS = 500;       // 표시를 끌어 옮기는 동안에는 묻지 않고 손을 뗀 뒤에 한 번만
 const MAP_SPOT_NAME_RADIUS = 80;      // 건물 이름으로 그 자리를 되찾을 때의 반경
 const MAP_SPOT_STATION_RADIUS = 150;  // 역은 출입구에서 조금 떨어진 곳이 눌리므로 넉넉히 본다
 
@@ -2805,6 +2885,12 @@ async function mountMapEditor(doc){
   routeBtn.title = "표시를 목록 순서대로 선으로 이어요 — 표시를 옮기거나 순서를 바꾸면 선도 따라갑니다";
   routeBtn.setAttribute("aria-pressed", "false");
 
+  const driveBtn = document.createElement("button");
+  driveBtn.type = "button"; driveBtn.className = "map-btn map-drive-toggle";
+  driveBtn.textContent = "🚗 자동차 길찾기";
+  driveBtn.title = "표시를 목록 순서대로 실제 도로를 따라 이어요 — 주행 거리와 예상 시간을 함께 보여 줍니다 (카카오 지도 검색 필요, 표시 7개까지)";
+  driveBtn.setAttribute("aria-pressed", "false");
+
   const presentBtn = document.createElement("button");
   presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start";
   presentBtn.textContent = "🎬 발표 모드";
@@ -2883,7 +2969,7 @@ async function mountMapEditor(doc){
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
   bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
-  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, routeBtn, listBtn,
+  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, routeBtn, driveBtn, listBtn,
     presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
     boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
@@ -3247,10 +3333,17 @@ async function mountMapEditor(doc){
   /* 표시 잇는 선도 같은 까닭으로 여기 걸어 둔다 — 표시를 넣고 지우고 옮기고 순서를 바꾸는 길이
      전부 touch 를 지나므로, 선을 다시 그리는 일도 한 곳에만 매달면 빠뜨릴 수 없다. */
   let redrawRoute = () => {};
+  let scheduleDrive = () => {};   // 자동차 길찾기도 같은 까닭으로 이름만 먼저 세워 둔다
   /* 문제 풀이 화면(지도 문제)에서만 채워진다 — 지도 클릭을 답 찍기로 가로챈다. 아래에서 만든다. */
   let quizPlaceAnswer = null;
 
   /* ── 저장 안 됨(●) 표시 ── */
+  /* 상태 줄의 제자리는 "● 저장 안 됨"이다. 길찾기처럼 잠깐 다른 말을 적었던 자리도 일이 끝나면
+     이 자리로 돌려놓아야 한다 — touch 를 다시 부르면 되돌리기 기록·복구본까지 함께 도는 탓에
+     '고친 것 없이 상태만 되돌리는' 길을 따로 둔다. */
+  const restoreStatus = () => {
+    setStatus(mapDocContentKey(model) !== doc.savedContentKey ? "● " + mapT("저장 안 됨") : "");
+  };
   const touch = () => {
     const dirty = mapDocContentKey(model) !== doc.savedContentKey;
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
@@ -3259,6 +3352,7 @@ async function mountMapEditor(doc){
     scheduleRecovery();
     scheduleListRefresh();
     redrawRoute();
+    scheduleDrive();
   };
 
   /* ── 표시(마커) ── */
@@ -3609,6 +3703,7 @@ async function mountMapEditor(doc){
       else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
     }
     redrawRoute();               // 감춘 묶음은 선에서도 빠진다 — 없는 표시로 선이 돌아가면 읽을 수 없다
+    scheduleDrive();             // 보기 상태는 문서에 담기지 않아 touch 를 지나지 않는다 — 여기서 따로 건다
   };
 
   /* ── 표시 잇는 선 ──
@@ -3652,6 +3747,105 @@ async function mountMapEditor(doc){
     routeBtn.classList.toggle("is-on", !!model.route);
     routeBtn.setAttribute("aria-pressed", String(!!model.route));
   };
+
+  /* ── 자동차 길찾기 ──
+     잇는 순서는 표시 잇기와 같지만(목록 순서 = 발표 순서), 곧은 선 대신 카카오가 돌려준 도로를
+     따라 그린다. 곧은 선과 함께 켤 수 있게 둔 것은 그 차이 자체가 볼거리이기 때문이다 —
+     직선으로 5km 인 두 곳이 차로는 8km 인 일이 흔하다.
+     길은 문서에 담지 않고 켤 때마다 다시 묻는다. 담아 두면 표시를 옮긴 뒤에도 옛 길이 남아
+     "지금 보이는 표시"와 어긋나고, 그 어긋남을 화면에서 알아볼 길이 없다. */
+  let driveLayer = null;
+  let driveTimer = 0;
+  let driveSeq = 0;              // 늦게 도착한 옛 답이 새 길을 덮어쓰지 않게 하는 번호표
+  let driveKey = "";             // 이미 손을 본 표시 배치(그렸든 실패했든) — 같은 배치를 두 번 묻지 않는다
+  const driveCache = new Map();
+  const dropDrive = () => {
+    /* 화면에서 길을 걷는 순간에는 진행 중인 응답도 함께 낡은 것으로 만든다. 표시가 하나 이하로
+       줄어든 뒤 옛 응답이 돌아와 이미 지운 표시 사이의 길을 다시 그리는 일을 막는다. */
+    driveSeq++;
+    if (driveLayer){ map.removeLayer(driveLayer); driveLayer = null; }
+    driveKey = "";
+  };
+  /* 실패한 배치도 '손을 본 것'으로 적어 둔다. 그러지 않으면 제목을 한 글자 칠 때마다(= touch)
+     같은 좌표로 다시 물으며 같은 안내를 되풀이한다. 다시 해 보고 싶으면 단추를 껐다 켜면 된다. */
+  const driveFailed = (code, signature) => {
+    dropDrive();
+    driveKey = signature || "";
+    if (code === "kakao-key-required" || code === "geocode-launcher-required"){
+      // 이 지도에서는 다시 눌러도 같은 곳에서 막힌다 — 켜 둔 채로 두면 고장으로 보인다.
+      model.drive = false;
+      syncDriveButton();
+      touch();                   // 문서에 담기는 값이라 끈 사실도 '저장 안 됨'으로 드러나야 한다
+      if (typeof toast === "function") toast(mapT(mapDriveGuide(nearbyAccess)) || mapT("자동차 길찾기를 쓸 수 없어요."), 5000);
+      return;
+    }
+    const message = code === "directions-failed" || code === "directions-empty"
+      ? "그 표시들 사이로는 자동차 길을 찾지 못했어요 — 바다 건너편이거나 도로가 닿지 않는 자리일 수 있어요."
+      : "자동차 길을 받아오지 못했어요 — 인터넷 연결을 확인하고 표시를 다시 옮겨 보세요.";
+    if (typeof toast === "function") toast(mapT(message), 4200);
+  };
+  const drawDrive = (result, used, total) => {
+    const label = mapTf(used < total ? "앞 표시 {count}개 · 차로 {distance} · {duration}" : "표시 {count}개 · 차로 {distance} · {duration}",
+      { count:used, distance:mapFormatDistance(result.distance), duration:mapFormatDuration(result.duration) });
+    if (!driveLayer){
+      driveLayer = L.polyline(result.points, {
+        pane: "mapRoutePane",
+        color: MAP_DRIVE_COLOR,
+        weight: 4,
+        opacity: 0.85,
+        className: "map-drive-line",
+        interactive: false
+      }).addTo(map);
+      driveLayer.bindTooltip(label, { permanent:true, direction:"center", className:"map-drive-label" });
+    } else {
+      driveLayer.setLatLngs(result.points);
+      driveLayer.setTooltipContent(label);
+      // 표시 잇는 선과 같은 까닭 — setLatLngs 는 영구 이름표를 옛 자리에 둔 채로 선만 바꾼다.
+      const driveTooltip = driveLayer.getTooltip();
+      if (driveTooltip) driveTooltip.setLatLng(driveLayer.getCenter());
+    }
+  };
+  const runDrive = async () => {
+    if (!model.drive) return dropDrive();
+    const shown = routePoints();
+    // 카카오 경유지 상한(5)에 출발·도착을 더한 만큼만 한 번에 물을 수 있다 — 넘치면 앞쪽만
+    // 잇고, 그 사실을 선 이름표에 적어 둔다(말없이 자르면 지도가 거짓말을 한다).
+    const points = shown.slice(0, MAP_DRIVE_MAX_MARKERS);
+    if (points.length < 2) return dropDrive();
+    const signature = JSON.stringify(points.map(point => [Number(point[0]).toFixed(6), Number(point[1]).toFixed(6)]));
+    if (signature === driveKey) return;
+    const token = ++driveSeq;
+    let result = driveCache.get(signature);
+    if (!result){
+      setStatus(mapT("자동차 길을 찾는 중…"));
+      try { result = await mapFetchDirections(points); }
+      catch (error){
+        if (token !== driveSeq || !model.drive) return;
+        restoreStatus();
+        driveFailed(String(error && error.message || "geocode-failed"), signature);
+        return;
+      }
+      if (token !== driveSeq || !model.drive) return;
+      restoreStatus();
+      if (driveCache.size >= MAP_DRIVE_CACHE_MAX) driveCache.clear();
+      driveCache.set(signature, result);
+    }
+    if (result.error) return driveFailed(result.error, signature);
+    driveKey = signature;
+    drawDrive(result, points.length, shown.length);
+  };
+  /* 표시를 끌어 옮기는 동안에는 touch 가 연달아 들어온다 — 그때마다 물으면 하루 몫을 몇 번의
+     드래그로 다 쓴다. 손을 뗀 뒤 한 번만 묻도록 미뤄 둔다(복구본 저장과 같은 방식). */
+  scheduleDrive = () => {
+    clearTimeout(driveTimer);
+    if (!model.drive) return dropDrive();
+    driveTimer = setTimeout(() => { runDrive(); }, MAP_DRIVE_DELAY_MS);
+  };
+  const syncDriveButton = () => {
+    driveBtn.classList.toggle("is-on", !!model.drive);
+    driveBtn.setAttribute("aria-pressed", String(!!model.drive));
+  };
+  doc.cleanupFns.push(() => { clearTimeout(driveTimer); driveSeq++; });
 
   const focusMarker = (marker) => {
     map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 15));
@@ -4197,6 +4391,52 @@ async function mountMapEditor(doc){
     touch();
   });
 
+  syncDriveButton();
+  driveBtn.addEventListener("click", async () => {
+    if (model.drive){
+      /* 저장된 켜짐 상태로 열었는데 카카오 설정이 없으면, 첫 클릭도 단순히 끄고 끝내지 말고
+         무엇이 모자란지 알려 준다. 토글 동작은 그대로 수행해 사용자가 이 상태를 끌 수도 있다. */
+      let guide = "";
+      if (!nearbyReady){
+        await refreshNearbyReady();
+        if (!nearbyReady) guide = mapT(mapDriveGuide(nearbyAccess));
+      }
+      model.drive = false;
+      syncDriveButton();
+      dropDrive();
+      touch();
+      if (guide){
+        if (typeof toast === "function") toast(guide, 5000);
+        setStatus(guide);
+      }
+      return;
+    }
+    /* 켜기 전에 카카오 쪽부터 확인한다. 먼저 켜 두고 확인하면 못 쓰는 지도에서 단추가 잠깐
+       켜졌다 꺼지고, 그 사이 걸린 물음까지 따로 실패해 같은 안내가 두 번 뜬다.
+       흐린 채로 눌렀더라도 그 사이 설정에서 켰을 수 있으니 여기서 다시 묻는다 — 지도를 열 때
+       본 값만 믿으면 "켰는데도 안 된다"가 된다(주변 시설과 같은 길). */
+    await refreshNearbyReady();
+    if (!nearbyReady){
+      const guide = mapT(mapDriveGuide(nearbyAccess));
+      if (typeof toast === "function") toast(guide, 5000);
+      setStatus(guide);
+      return;
+    }
+    model.drive = true;
+    syncDriveButton();
+    touch();                     // 여기서 걸린 미룬 물음이 실제로 길을 받아 온다
+    if (typeof toast !== "function") return;
+    const shown = routePoints().length;
+    if (shown < 2){
+      toast(mapT("도로를 따라 잇도록 켰어요 — 표시가 두 개가 되면 길이 나타납니다."), 3200);
+    } else if (shown > MAP_DRIVE_MAX_MARKERS){
+      toast(mapTf("자동차 길찾기는 표시 {max}개까지 한 번에 이어요 — 지금 보이는 {count}개 가운데 앞의 {max}개만 길을 찾았습니다(경유지 상한).",
+        { max:MAP_DRIVE_MAX_MARKERS, count:shown }), 5000);
+    } else {
+      toast(mapT("실제 도로를 따라 이었어요 — 곧은 선(🧵 표시 잇기)과 함께 켜면 직선 거리와 견줘 볼 수 있어요."), 4200);
+    }
+  });
+
   /* ── 나머지 도구 ── */
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
 
@@ -4494,12 +4734,19 @@ async function mountMapEditor(doc){
       ? access : { provider:!!access, available:!!access, hasKey:!!access, ready:!!access };
     nearbyReady = nearbyAccess.ready === true;
     for (const button of nearbyButtons) button.classList.toggle("is-unavailable", !nearbyReady);
+    // 자동차 길찾기도 같은 키를 쓴다 — 다른 일이라 목록에 넣지 않고 여기서 함께 흐리게 한다.
+    driveBtn.classList.toggle("is-unavailable", !nearbyReady);
   };
   const refreshNearbyReady = async () => {
     try { setNearbyReady(await mapKakaoSearchAccess()); }
     catch(_){ setNearbyReady({ provider:false, available:false, hasKey:false, ready:false }); }
   };
   refreshNearbyReady();
+  /* 자동차 길찾기를 켜 둔 채로 저장한 지도를 다시 열었을 때. 카카오 쪽이 갖춰졌을 때만 묻는다 —
+     키 없이 열린 지도에서 곧바로 실패 안내를 띄우면 아무것도 누르지 않았는데 잔소리부터 듣게
+     된다. 그때는 단추만 흐린 채 켜져 있고, 눌러 보면 무엇이 모자란지 알려 준다.
+     (첫 물음을 여기서 거는 까닭: 위 도구막대 자리에서는 refreshNearbyReady 가 아직 없다.) */
+  if (model.drive) refreshNearbyReady().then(() => { if (nearbyReady) scheduleDrive(); });
   // 설정에서 키를 저장·삭제하면 열어 둔 지도 버튼도 곧바로 같은 상태로 바뀐다.
   const onMapSearchStatusChange = () => { refreshNearbyReady(); };
   window.addEventListener("classdock-map-search-status-change", onMapSearchStatusChange);
@@ -4847,6 +5094,7 @@ async function mountMapEditor(doc){
   /* 켜고 끄는 도구지만 결국 지도에 선을 긋는 일이라 거리선·면적과 한 묶음에 둔다. 켜 둔 상태는
      syncContextMirrors 가 단추의 is-on 을 그대로 옮겨 메뉴에서 체크(✓)로 보인다. */
   contextMirror(routeBtn);
+  contextMirror(driveBtn);
   contextMirror(addressBtn);
   contextMirror(spotBtn);
 
@@ -5005,6 +5253,16 @@ async function mountMapEditor(doc){
         });
       }
     }
+    /* 자동차 길은 카카오가 준 것이라 여기서 다시 셈하지 않는다 — 그려 둔 선의 이름표 글자를
+       그대로 옮겨 새긴다(선 자체는 도형 층이라 그림에 이미 찍혀 있다). */
+    if (driveLayer){
+      const driveTooltip = driveLayer.getTooltip();
+      const driveText = driveTooltip ? String(driveTooltip.getContent() || "") : "";
+      if (driveText){
+        const point = map.latLngToContainerPoint(driveLayer.getCenter());
+        labels.push({ x:point.x, y:point.y, offsetY:0, text:driveText });
+      }
+    }
     return mapCaptureDataUrl(stage, mapAttributionText(model), labels);
   };
 
@@ -5154,7 +5412,7 @@ async function mountMapEditor(doc){
       // CSV 로 표시 수천 개를 들여오면 한 단계가 1MB 를 넘는다. 단계 수와 별개로 총량도 막는다.
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
-      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels, !!model.route]),
+      capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels, !!model.route, !!model.drive]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
         // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
@@ -5171,6 +5429,7 @@ async function mountMapEditor(doc){
         model.grid = saved[5] === true;
         model.labels = saved[6] === true;
         model.route = saved[7] === true;
+        model.drive = saved[8] === true;
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();
@@ -5187,6 +5446,7 @@ async function mountMapEditor(doc){
         syncGridButton();
         syncLabelsButton();
         syncRouteButton();
+        syncDriveButton();
         drawGrid();
         /* 레이어를 전부 새로 만들었으므로 파일에는 담기지 않는 '감춘 묶음' 보기 상태도 다시
            입힌다. 이 함수가 선까지 다시 그려, 보이는 표시와 잇는 선의 대상이 늘 같아진다. */

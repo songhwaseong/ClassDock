@@ -61,10 +61,15 @@ const (
 	kakaoCategoryURL     = "https://dapi.kakao.com/v2/local/search/category.json"
 	kakaoCoordAddressURL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 	kakaoCoordRegionURL  = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
-	geocoderEnv          = "CLASSDOCK_GEOCODER_URL"
+	// 자동차 길찾기만 Local API 가 아닌 카카오모빌리티 쪽이다(launcher.cs KakaoDirectionsEndpoint 와 같은 자리).
+	kakaoDirectionsURL = "https://apis-navi.kakaomobility.com/v1/directions"
+	geocoderEnv        = "CLASSDOCK_GEOCODER_URL"
 	// 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·C# 런처
 	// (launcher.cs GeocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다.
 	geocodeResultLimit = "8"
+	geocodeMaxBytes     = 512 * 1024
+	// 길찾기는 roads[].vertexes 전체를 돌려주므로 장거리·경유지의 정상 응답을 위한 전용 상한을 둔다.
+	directionsMaxBytes = 8 * 1024 * 1024
 
 	/* ===== 환율 =====
 	   launcher.cs 의 같은 이름 상수와 짝이다. 타일과 같은 이유로 런처가 대신 받는다 —
@@ -338,11 +343,15 @@ func setMapSearchProvider(value string) {
 */
 type geocodeSpot struct {
 	x, y, radius, category, page string
+	// 길찾기만 점이 둘 이상이다 — 도착점(x2·y2)과 사이에 들르는 곳(via, "x,y|x,y" 꼴).
+	x2, y2, via string
 }
 
 func (s geocodeSpot) hasPoint() bool { return s.x != "" && s.y != "" }
+func (s geocodeSpot) hasEnd() bool   { return s.x2 != "" && s.y2 != "" }
 func (s geocodeSpot) cacheKey() string {
-	return s.x + "|" + s.y + "|" + s.radius + "|" + s.category + "|" + s.page
+	return s.x + "|" + s.y + "|" + s.radius + "|" + s.category + "|" + s.page +
+		"|" + s.x2 + "|" + s.y2 + "|" + s.via
 }
 
 func geocodeNumber(value string, min, max float64) string {
@@ -353,12 +362,39 @@ func geocodeNumber(value string, min, max float64) string {
 	return strconv.FormatFloat(parsed, 'f', -1, 64)
 }
 
+/* 들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를 그대로
+   붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다. */
+const geocodeViaMax = 5
+
+func geocodeVia(raw string) string {
+	points := []string{}
+	for _, piece := range strings.Split(raw, "|") {
+		if len(points) >= geocodeViaMax {
+			break
+		}
+		parts := strings.Split(piece, ",")
+		if len(parts) != 2 {
+			continue
+		}
+		x := geocodeNumber(parts[0], -180, 180)
+		y := geocodeNumber(parts[1], -85, 85)
+		if x == "" || y == "" {
+			continue
+		}
+		points = append(points, x+","+y)
+	}
+	return strings.Join(points, "|")
+}
+
 func readGeocodeSpot(query url.Values) geocodeSpot {
 	spot := geocodeSpot{
 		x:      geocodeNumber(query.Get("x"), -180, 180),
 		y:      geocodeNumber(query.Get("y"), -85, 85),
 		radius: geocodeNumber(query.Get("radius"), 1, 20000), // 카카오 반경 상한
 		page:   geocodeNumber(query.Get("page"), 1, 3),
+		x2:     geocodeNumber(query.Get("x2"), -180, 180),
+		y2:     geocodeNumber(query.Get("y2"), -85, 85),
+		via:    geocodeVia(query.Get("via")),
 	}
 	// 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
 	category := strings.ToUpper(strings.TrimSpace(query.Get("category")))
@@ -390,6 +426,20 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		values.Set("x", spot.x)
 		values.Set("y", spot.y)
 		endpoint += "?" + values.Encode()
+	} else if provider == "kakao-directions" {
+		// 대안 경로·상세 도로는 끈다 — 화면에 그리는 것은 길 하나뿐이라 나머지는 응답만 키운다.
+		values := url.Values{}
+		values.Set("origin", spot.x+","+spot.y)
+		values.Set("destination", spot.x2+","+spot.y2)
+		if spot.via != "" {
+			values.Set("waypoints", spot.via)
+		}
+		values.Set("priority", "RECOMMEND")
+		values.Set("car_fuel", "GASOLINE")
+		values.Set("car_hipass", "false")
+		values.Set("alternatives", "false")
+		values.Set("road_details", "false")
+		endpoint = kakaoDirectionsURL + "?" + values.Encode()
 	} else if provider == "kakao-category" {
 		radius := spot.radius
 		if radius == "" {
@@ -492,8 +542,12 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 	if response.StatusCode != http.StatusOK {
 		return nil, "geocode-failed"
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 512*1024+1))
-	if err != nil || len(data) > 512*1024 {
+	maxBytes := geocodeMaxBytes
+	if provider == "kakao-directions" {
+		maxBytes = directionsMaxBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, int64(maxBytes)+1))
+	if err != nil || len(data) > maxBytes {
 		return nil, "geocode-failed"
 	}
 	return data, ""
@@ -501,7 +555,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 
 var geocodeProviders = []string{
 	"osm", "osm-reverse", "kakao-address", "kakao-keyword",
-	"kakao-category", "kakao-coord2address", "kakao-coord2region",
+	"kakao-category", "kakao-coord2address", "kakao-coord2region", "kakao-directions",
 }
 
 func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, string) {
@@ -515,13 +569,17 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 	}
 	// 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
 	needsPoint := provider == "kakao-category" || provider == "kakao-coord2address" ||
-		provider == "kakao-coord2region" || provider == "osm-reverse"
+		provider == "kakao-coord2region" || provider == "osm-reverse" || provider == "kakao-directions"
 	if needsPoint {
 		if !spot.hasPoint() {
 			return nil, "geocode-bad-point"
 		}
 		if provider == "kakao-category" && spot.category == "" {
 			return nil, "geocode-bad-category"
+		}
+		// 길찾기는 출발점만으로는 뜻이 없다 — 도착점이 빠지면 카카오에 묻지 않고 여기서 끊는다.
+		if provider == "kakao-directions" && !spot.hasEnd() {
+			return nil, "geocode-bad-point"
 		}
 	} else if query == "" || len(query) > 200 {
 		return nil, "geocode-bad-query"
@@ -534,22 +592,28 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 		}
 	}
 	cacheKey := provider + "\n" + query + "\n" + spot.cacheKey()
-	geocodeMu.Lock()
-	if cached, ok := geocodeCache[cacheKey]; ok {
+	// 길찾기는 현재 교통 정보가 바뀌므로 런처의 무기한 장소 검색 캐시에 넣지 않는다.
+	cacheable := provider != "kakao-directions"
+	if cacheable {
+		geocodeMu.Lock()
+		cached, ok := geocodeCache[cacheKey]
 		geocodeMu.Unlock()
-		return cached, ""
+		if ok {
+			return cached, ""
+		}
 	}
-	geocodeMu.Unlock()
 	data, code := fetchGeocode(query, provider, key, spot)
 	if code != "" {
 		return nil, code
 	}
-	geocodeMu.Lock()
-	if len(geocodeCache) > 200 {
-		geocodeCache = map[string][]byte{}
+	if cacheable {
+		geocodeMu.Lock()
+		if len(geocodeCache) > 200 {
+			geocodeCache = map[string][]byte{}
+		}
+		geocodeCache[cacheKey] = data
+		geocodeMu.Unlock()
 	}
-	geocodeCache[cacheKey] = data
-	geocodeMu.Unlock()
 	return data, ""
 }
 

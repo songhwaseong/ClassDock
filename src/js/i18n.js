@@ -2068,6 +2068,29 @@
     "표시 {count}개를 목록 순서대로 이었어요 — 선이 엉켜 보이면 표시 목록에서 순서를 바꿔 보세요.":
       "Connected {count} pins in list order — if the line looks tangled, reorder them in the pin list.",
     "표시 {count}개 · 전체 {distance}": "{count} pins · {distance} total",
+    // 자동차 길찾기(카카오모빌리티) — 곧은 선 대신 실제 도로를 따라 잇는다
+    "🚗 자동차 길찾기": "🚗 Driving route",
+    "표시를 목록 순서대로 실제 도로를 따라 이어요 — 주행 거리와 예상 시간을 함께 보여 줍니다 (카카오 지도 검색 필요, 표시 7개까지)":
+      "Follows real roads between pins in list order — shows driving distance and estimated time (needs Kakao map search, up to 7 pins)",
+    "실제 도로를 따라 이었어요 — 곧은 선(🧵 표시 잇기)과 함께 켜면 직선 거리와 견줘 볼 수 있어요.":
+      "Connected the pins along real roads — turn on 🧵 Connect pins too and compare with the straight-line distance.",
+    "도로를 따라 잇도록 켰어요 — 표시가 두 개가 되면 길이 나타납니다.":
+      "Road routing is on — the route appears once there are two pins.",
+    "자동차 길찾기는 표시 {max}개까지 한 번에 이어요 — 지금 보이는 {count}개 가운데 앞의 {max}개만 길을 찾았습니다(경유지 상한).":
+      "Driving routes cover up to {max} pins at once — of the {count} pins shown, only the first {max} were routed (waypoint limit).",
+    "표시 {count}개 · 차로 {distance} · {duration}": "{count} pins · {distance} by car · {duration}",
+    "앞 표시 {count}개 · 차로 {distance} · {duration}": "First {count} pins · {distance} by car · {duration}",
+    "자동차 길을 찾는 중…": "Finding the driving route…",
+    "그 표시들 사이로는 자동차 길을 찾지 못했어요 — 바다 건너편이거나 도로가 닿지 않는 자리일 수 있어요.":
+      "Couldn't find a driving route between those pins — they may be across water or off the road network.",
+    "자동차 길을 받아오지 못했어요 — 인터넷 연결을 확인하고 표시를 다시 옮겨 보세요.":
+      "Couldn't fetch the driving route — check your internet connection and move a pin to try again.",
+    "자동차 길찾기를 쓸 수 없어요.": "Driving routes aren't available.",
+    "자동차 길찾기는 카카오 지도 검색을 켜야 쓸 수 있어요 — 설정 → 지도 검색에서 카카오를 고르고 REST API 키를 넣어 주세요.":
+      "Driving routes need Kakao map search — pick Kakao under Settings → Map search and enter a REST API key.",
+    "자동차 길찾기는 ClassDock 런처에서 사용할 수 있어요.": "Driving routes are available in the ClassDock launcher.",
+    "카카오 REST API 키가 없어 길을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.":
+      "No Kakao REST API key, so routes can't be found — register a key under Settings → Map search.",
     "🧾 표시 목록": "🧾 Pin list",
     "표시를 옆 목록으로 봐요 — 이름으로 찾고, 묶음별로 감추고, 눌러서 그 자리로 갑니다":
       "Shows pins in a side list — search by name, hide a group, click to fly there",

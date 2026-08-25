@@ -1,4 +1,4 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -3223,10 +3223,19 @@ class ClassDockLauncher
     const string KakaoCategoryEndpoint = "https://dapi.kakao.com/v2/local/search/category.json";
     const string KakaoCoordAddressEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2address.json";
     const string KakaoCoordRegionEndpoint = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json";
+    /* 자동차 길찾기만 Local API 가 아닌 카카오모빌리티 쪽이다(호스트도 다르다). 그래도 키는 Local
+       API 에 쓰던 그 REST 키 하나뿐이고, 콘솔에서 따로 켤 제품 설정은 없다(2026-08-25 실제 키로
+       확인). 다만 하루 무료 몫이 이 API 에 따로 매겨지므로 부르는 자리를 한 곳(표시 잇는 길찾기)
+       으로 좁히고, 같은 표시 배치로는 두 번 묻지 않게 화면에서 답을 담아 둔다. */
+    const string KakaoDirectionsEndpoint = "https://apis-navi.kakaomobility.com/v1/directions";
     /* 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·Go 폴백
        런처(main.go geocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다. */
     const string GeocodeResultLimit = "8";      // 주소 뒤에 그대로 붙이는 값이라 문자열로 둔다
     const int GeocodeMinIntervalMs = 1100;      // 정책상 초당 1건 — 여유를 조금 둔다
+    const int GeocodeMaxBytes = 512 * 1024;
+    /* 길찾기는 roads[].vertexes 전체를 돌려주므로 장소 검색보다 정상 응답이 훨씬 크다. 카카오가
+       허용하는 장거리·경유지 경로도 받을 수 있게 전용 상한을 두되, 무제한으로 읽지는 않는다. */
+    const int DirectionsMaxBytes = 8 * 1024 * 1024;
     static readonly object GeocodeLock = new object();
     static DateTime GeocodeLastCall = DateTime.MinValue;
     static readonly Dictionary<string, byte[]> GeocodeCache = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
@@ -3378,8 +3387,16 @@ class ClassDockLauncher
         public string Radius = "";
         public string Category = "";
         public string Page = "";
+        // 길찾기만 점이 둘 이상이다 — 도착점(X2·Y2)과 사이에 들르는 곳(Via, "x,y|x,y" 꼴).
+        public string X2 = "";
+        public string Y2 = "";
+        public string Via = "";
         public bool HasPoint { get { return X.Length > 0 && Y.Length > 0; } }
-        public string CacheKey { get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page; } }
+        public bool HasEnd { get { return X2.Length > 0 && Y2.Length > 0; } }
+        public string CacheKey
+        {
+            get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page + "|" + X2 + "|" + Y2 + "|" + Via; }
+        }
     }
     static string GeocodeNumber(string value, double min, double max)
     {
@@ -3388,11 +3405,32 @@ class ClassDockLauncher
         if (double.IsNaN(parsed) || double.IsInfinity(parsed) || parsed < min || parsed > max) return "";
         return parsed.ToString("0.######", CultureInfo.InvariantCulture);
     }
+    /* 들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를
+       그대로 붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다. */
+    const int GeocodeViaMax = 5;
+    static string GeocodeVia(string raw)
+    {
+        List<string> points = new List<string>();
+        foreach (string piece in (raw ?? "").Split('|'))
+        {
+            if (points.Count >= GeocodeViaMax) break;
+            string[] parts = piece.Split(',');
+            if (parts.Length != 2) continue;
+            string x = GeocodeNumber(parts[0], -180, 180);
+            string y = GeocodeNumber(parts[1], -85, 85);
+            if (x.Length == 0 || y.Length == 0) continue;
+            points.Add(x + "," + y);
+        }
+        return string.Join("|", points.ToArray());
+    }
     static GeocodeSpot ReadGeocodeSpot(string path)
     {
         GeocodeSpot spot = new GeocodeSpot();
         spot.X = GeocodeNumber(QueryValue(path, "x"), -180, 180);
         spot.Y = GeocodeNumber(QueryValue(path, "y"), -85, 85);
+        spot.X2 = GeocodeNumber(QueryValue(path, "x2"), -180, 180);
+        spot.Y2 = GeocodeNumber(QueryValue(path, "y2"), -85, 85);
+        spot.Via = GeocodeVia(QueryValue(path, "via"));
         spot.Radius = GeocodeNumber(QueryValue(path, "radius"), 1, 20000);      // 카카오 반경 상한
         spot.Page = GeocodeNumber(QueryValue(path, "page"), 1, 3);
         // 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
@@ -3428,6 +3466,15 @@ class ClassDockLauncher
             {
                 string endpoint = provider == "kakao-coord2region" ? KakaoCoordRegionEndpoint : KakaoCoordAddressEndpoint;
                 url = endpoint + "?x=" + spot.X + "&y=" + spot.Y;
+            }
+            else if (provider == "kakao-directions")
+            {
+                /* 대안 경로·상세 도로는 끈다 — 화면에 그리는 것은 길 하나뿐이라 나머지는 응답만
+                   키운다(읽는 양을 512KB 로 자르는 아래 규칙에 그대로 걸린다). */
+                url = KakaoDirectionsEndpoint + "?origin=" + spot.X + "," + spot.Y
+                    + "&destination=" + spot.X2 + "," + spot.Y2
+                    + (spot.Via.Length > 0 ? "&waypoints=" + Uri.EscapeDataString(spot.Via) : "")
+                    + "&priority=RECOMMEND&car_fuel=GASOLINE&car_hipass=false&alternatives=false&road_details=false";
             }
             else if (provider == "kakao-category")
             {
@@ -3473,10 +3520,11 @@ class ClassDockLauncher
             {
                 byte[] chunk = new byte[8192];
                 int read; long total = 0;
+                int maxBytes = provider == "kakao-directions" ? DirectionsMaxBytes : GeocodeMaxBytes;
                 while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
                 {
                     total += read;
-                    if (total > 512 * 1024) { error = "geocode-too-large"; return false; }
+                    if (total > maxBytes) { error = "geocode-too-large"; return false; }
                     buffer.Write(chunk, 0, read);
                 }
                 data = buffer.ToArray();
@@ -3494,7 +3542,7 @@ class ClassDockLauncher
     }
     static readonly string[] GeocodeProviders = {
         "osm", "osm-reverse", "kakao-address", "kakao-keyword",
-        "kakao-category", "kakao-coord2address", "kakao-coord2region"
+        "kakao-category", "kakao-coord2address", "kakao-coord2region", "kakao-directions"
     };
     static bool TryGeocodePlace(string query, string requestedProvider, GeocodeSpot spot, out byte[] data, out string error)
     {
@@ -3504,11 +3552,13 @@ class ClassDockLauncher
         string provider = Array.IndexOf(GeocodeProviders, requestedProvider ?? "") >= 0 ? requestedProvider : "osm";
         // 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
         bool needsPoint = provider == "kakao-category" || provider == "kakao-coord2address"
-            || provider == "kakao-coord2region" || provider == "osm-reverse";
+            || provider == "kakao-coord2region" || provider == "osm-reverse" || provider == "kakao-directions";
         if (needsPoint)
         {
             if (!spot.HasPoint) { error = "geocode-bad-point"; return false; }
             if (provider == "kakao-category" && spot.Category.Length == 0) { error = "geocode-bad-category"; return false; }
+            // 길찾기는 출발점만으로는 뜻이 없다 — 도착점이 빠지면 카카오에 묻지 않고 여기서 끊는다.
+            if (provider == "kakao-directions" && !spot.HasEnd) { error = "geocode-bad-point"; return false; }
         }
         else if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
         string kakaoKey = "";
@@ -3518,9 +3568,13 @@ class ClassDockLauncher
             if (kakaoKey.Length == 0) { error = "kakao-key-required"; return false; }
         }
         string cacheKey = provider + "\n" + q + "\n" + spot.CacheKey;
-        lock (GeocodeLock) if (GeocodeCache.TryGetValue(cacheKey, out data)) return true;
+        /* 길찾기에는 현재 교통 속도·통제 상황이 반영된다. 화면 안의 짧은 중복은 JS가 막으므로,
+           런처의 무기한 장소 검색 캐시에는 넣지 않아 저장 지도를 다시 열면 새 답을 받게 한다. */
+        bool cacheable = provider != "kakao-directions";
+        if (cacheable)
+            lock (GeocodeLock) if (GeocodeCache.TryGetValue(cacheKey, out data)) return true;
         if (!TryFetchGeocode(q, provider, kakaoKey, spot, out data, out error)) return false;
-        lock (GeocodeLock)
+        if (cacheable) lock (GeocodeLock)
         {
             if (GeocodeCache.Count > 200) GeocodeCache.Clear();
             GeocodeCache[cacheKey] = data;
