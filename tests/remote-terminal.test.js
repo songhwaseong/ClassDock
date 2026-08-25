@@ -93,6 +93,23 @@ test("개인키는 네이티브 선택창의 실행 중 ID로만 전달하고 �
   assert.doesNotMatch(ui, /localStorage\.setItem\([^\n]*(?:selectedKey|privateKey|keyPath)/i);
 });
 
+test("개인키는 사용자 전용 ACL 사본으로 접속하고 세션이 끝나면 사본을 지운다", () => {
+  assert.match(ssh, /StagePrivateKey\(privateKey\.Path\)/);
+  assert.match(ssh, /BuildSshArguments\(host, port, user, authentication, stagedKeyPath\)/);
+  assert.match(ssh, /session\.StagedKeyPath = stagedKeyPath;/);
+  assert.match(ssh, /catch \{ WipeStagedPrivateKey\(stagedKeyPath\); throw; \}/);
+  assert.match(ssh, /SetAccessRuleProtection\(true, false\)/);
+  assert.match(ssh, /RemoveAccessRuleSpecific\(existing\)/);
+  assert.match(ssh, /WindowsIdentity\.GetCurrent\(\)\.User/);
+  assert.match(ssh, /new FileSystemAccessRule\(self, FileSystemRights\.FullControl/);
+  assert.match(ssh, /static void WipeStagedPrivateKey\(string path\)/);
+  assert.match(ssh, /static void SweepStagedPrivateKeys\(\)/);
+  assert.match(ssh, /WipeStagedPrivateKey\(stagedKeyPath\);\s*\}\s*$/m);
+  assert.doesNotMatch(ssh, /"-i", privateKey\.Path/);
+  assert.doesNotMatch(ssh, /icacls/);
+  assert.match(ui, /ssh-private-key-secure-copy-failed/);
+});
+
 test("최초 서버 지문을 확인하고 신뢰된 키만으로 접속한다", () => {
   assert.match(ssh, /ssh-keyscan\.exe/);
   assert.match(ssh, /ProbeHostKeyWithSsh/);

@@ -6,14 +6,19 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 
 // ClassDock EXE 전용 SSH 터미널.
 // Windows OpenSSH를 ConPTY에 붙여 원격 PTY의 ANSI 입출력을 브라우저 xterm.js와 중계한다.
 // 비밀번호·개인키 암호는 디스크·명령행·환경변수에 넣지 않고, 난수 이름의 일회성 named pipe로 askpass helper에만 전달한다.
-// 개인키는 Windows 파일 선택창에서 고른 원본을 사용하며, 브라우저에는 실행 중에만 유효한 난수 ID와 파일명만 돌려준다.
+// 개인키는 Windows 파일 선택창에서 고르고, 브라우저에는 실행 중에만 유효한 난수 ID와 파일명만 돌려준다.
+// Windows OpenSSH는 개인키 파일 ACL에 소유자 외 다른 사용자·그룹 권한이 있으면 키를 무시하므로(bad permissions),
+// 접속할 때마다 키를 세션 전용 사본으로 복사해 상속을 끊고 현재 사용자 전용 ACL을 건 뒤 그 사본만 -i로 넘기고,
+// 세션이 끝나면 사본을 덮어써 지운다. 원본 키 파일의 권한은 건드리지 않는다.
 static class ClassDockSshTerminal
 {
     const int MaxSessionOutputBytes = 16 * 1024 * 1024;
@@ -199,6 +204,7 @@ static class ClassDockSshTerminal
         public IntPtr PseudoConsole;
         public Stream Input;
         public Stream Output;
+        public string StagedKeyPath;
         public readonly object Sync = new object();
         public readonly object BufferSync = new object();
         public readonly RollingBytes Buffer = new RollingBytes();
@@ -236,6 +242,7 @@ static class ClassDockSshTerminal
     static readonly string SshDataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "ssh");
     static readonly string KnownHostsPath = Path.Combine(SshDataDirectory, "known_hosts");
+    static readonly string PrivateKeyStageDirectory = Path.Combine(SshDataDirectory, "keys");
 
     public static bool TryRunAskPassHelper()
     {
@@ -448,6 +455,106 @@ static class ClassDockSshTerminal
         return fullPath;
     }
 
+    // 원본 키가 어느 폴더에 있든(다운로드 폴더처럼 다른 사용자·그룹 ACE를 상속하는 곳이어도)
+    // Windows OpenSSH의 개인키 권한 검사를 통과하도록, 현재 사용자만 접근 가능한 일회용 사본을 만든다.
+    static string StagePrivateKey(string sourcePath)
+    {
+        SweepStagedPrivateKeys();
+        Directory.CreateDirectory(PrivateKeyStageDirectory);
+        try { ApplyOwnerOnlyAcl(PrivateKeyStageDirectory, true); } catch { }
+        string staged = Path.Combine(PrivateKeyStageDirectory, Guid.NewGuid().ToString("N") + ".key");
+        byte[] data = null;
+        try
+        {
+            data = File.ReadAllBytes(sourcePath);
+            if (data.Length <= 0 || data.Length > 1024 * 1024) throw new InvalidOperationException("ssh-private-key-size");
+            using (FileStream stream = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                stream.Write(data, 0, data.Length);
+            ApplyOwnerOnlyAcl(staged, false);
+            return staged;
+        }
+        catch (InvalidOperationException) { WipeStagedPrivateKey(staged); throw; }
+        catch { WipeStagedPrivateKey(staged); throw new InvalidOperationException("ssh-private-key-secure-copy-failed"); }
+        finally { if (data != null) Array.Clear(data, 0, data.Length); }
+    }
+
+    // 상속을 끊고 현재 사용자 계정 하나만 남긴다. SYSTEM·Administrators까지 지워도 OpenSSH 검사에는 문제가 없다.
+    static void ApplyOwnerOnlyAcl(string path, bool directory)
+    {
+        SecurityIdentifier self = WindowsIdentity.GetCurrent().User;
+        FileSystemAccessRule rule = new FileSystemAccessRule(self, FileSystemRights.FullControl,
+            directory ? InheritanceFlags.ObjectInherit | InheritanceFlags.ContainerInherit : InheritanceFlags.None,
+            PropagationFlags.None, AccessControlType.Allow);
+        if (directory)
+        {
+            DirectorySecurity security = Directory.GetAccessControl(path, AccessControlSections.Access);
+            security.SetAccessRuleProtection(true, false);
+            foreach (FileSystemAccessRule existing in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+                security.RemoveAccessRuleSpecific(existing);
+            security.AddAccessRule(rule);
+            Directory.SetAccessControl(path, security);
+            return;
+        }
+        FileSecurity fileSecurity = File.GetAccessControl(path, AccessControlSections.Access);
+        fileSecurity.SetAccessRuleProtection(true, false);
+        foreach (FileSystemAccessRule existing in fileSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+            fileSecurity.RemoveAccessRuleSpecific(existing);
+        fileSecurity.AddAccessRule(rule);
+        File.SetAccessControl(path, fileSecurity);
+        try
+        {
+            FileSecurity owner = new FileSecurity();
+            owner.SetOwner(self);
+            File.SetAccessControl(path, owner);
+        }
+        catch { }
+    }
+
+    static void WipeStagedPrivateKey(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            if (!File.Exists(path)) return;
+            long length = new FileInfo(path).Length;
+            if (length > 0 && length <= 1024 * 1024)
+            {
+                byte[] noise = new byte[(int)length];
+                using (RandomNumberGenerator random = RandomNumberGenerator.Create()) random.GetBytes(noise);
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(noise, 0, noise.Length);
+                    stream.Flush();
+                }
+                Array.Clear(noise, 0, noise.Length);
+            }
+            File.Delete(path);
+        }
+        catch { }
+    }
+
+    // 비정상 종료로 남은 사본을 정리한다.
+    static void SweepStagedPrivateKeys()
+    {
+        try
+        {
+            if (!Directory.Exists(PrivateKeyStageDirectory)) return;
+            DateTime cutoff = DateTime.UtcNow.AddHours(-12);
+            List<string> live = new List<string>();
+            lock (SessionsLock)
+                foreach (SshSession session in Sessions.Values)
+                    if (!string.IsNullOrEmpty(session.StagedKeyPath)) live.Add(session.StagedKeyPath);
+            foreach (string file in Directory.GetFiles(PrivateKeyStageDirectory, "*.key"))
+            {
+                if (live.Contains(file)) continue;
+                bool old;
+                try { old = File.GetLastWriteTimeUtc(file) < cutoff; } catch { continue; }
+                if (old) WipeStagedPrivateKey(file);
+            }
+        }
+        catch { }
+    }
+
     static bool HasConPtyApi()
     {
         try
@@ -621,11 +728,13 @@ static class ClassDockSshTerminal
             if (active >= MaxSessions) throw new InvalidOperationException("ssh-session-limit");
         }
 
+        string stagedKeyPath = privateKey == null ? "" : StagePrivateKey(privateKey.Path);
+
         byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
         string pipeName = "classdock_ssh_askpass_" + Guid.NewGuid().ToString("N");
         StartAskPassServer(pipeName, secretBytes);
 
-        string arguments = BuildSshArguments(host, port, user, authentication, privateKey == null ? "" : privateKey.Path);
+        string arguments = BuildSshArguments(host, port, user, authentication, stagedKeyPath);
         Dictionary<string, string> environment = CurrentEnvironment();
         environment["SSH_ASKPASS"] = Process.GetCurrentProcess().MainModule.FileName;
         environment["SSH_ASKPASS_REQUIRE"] = "force";
@@ -638,7 +747,9 @@ static class ClassDockSshTerminal
         session.Host = host;
         session.Port = port;
         session.User = user;
-        StartConPtyProcess(session, ssh, arguments, environment, cols, rows);
+        session.StagedKeyPath = stagedKeyPath;
+        try { StartConPtyProcess(session, ssh, arguments, environment, cols, rows); }
+        catch { WipeStagedPrivateKey(stagedKeyPath); throw; }
         lock (SessionsLock) Sessions[session.Id] = session;
         StartReaders(session);
         return "{\"id\":" + JsonString(session.Id) + ",\"host\":" + JsonString(host)
@@ -727,6 +838,7 @@ static class ClassDockSshTerminal
         lock (SessionsLock) { foreach (SshSession session in Sessions.Values) all.Add(session); Sessions.Clear(); }
         foreach (SshSession session in all) CloseSession(session);
         lock (PrivateKeysLock) PrivateKeys.Clear();
+        SweepStagedPrivateKeys();
     }
 
     static void StartReaders(SshSession session)
@@ -803,6 +915,7 @@ static class ClassDockSshTerminal
 
     static void CloseSessionHandles(SshSession session, bool closeOutput)
     {
+        string stagedKeyPath;
         lock (session.Sync)
         {
             if (closeOutput) { try { if (session.Output != null) session.Output.Dispose(); } catch { } session.Output = null; }
@@ -811,7 +924,10 @@ static class ClassDockSshTerminal
                 try { ClosePseudoConsole(session.PseudoConsole); } catch { }
                 session.PseudoConsole = IntPtr.Zero;
             }
+            stagedKeyPath = session.StagedKeyPath;
+            session.StagedKeyPath = null;
         }
+        WipeStagedPrivateKey(stagedKeyPath);
     }
 
     static SshSession FindSession(string id)
