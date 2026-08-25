@@ -25,6 +25,7 @@ static class ClassDockSshTerminal
     const int MaxInputBytes = 256 * 1024;
     const int MaxSessions = 4;
     const int LongPollWaitMs = 500;
+    const int MaxPollBytes = 256 * 1024;   // 폴 한 번에 실어 보낼 최대 출력량(초과분은 다음 폴에서 이어 받는다)
     const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     const uint HANDLE_FLAG_INHERIT = 0x00000001;
@@ -146,6 +147,9 @@ static class ClassDockSshTerminal
         int length;
         long startOffset;
 
+        // 현재까지 버퍼에 들어온 마지막 오프셋. Read 가 상한에 걸려 잘렸는지 판정하는 데 쓴다.
+        public long End { get { return startOffset + length; } }
+
         public void Append(byte[] buffer, int count)
         {
             if (buffer == null || count <= 0) return;
@@ -175,12 +179,17 @@ static class ClassDockSshTerminal
             length += count;
         }
 
-        public byte[] Read(long requestedOffset, out long nextOffset, out bool reset)
+        // maxBytes 로 한 번에 넘겨줄 양을 제한한다. 상한이 없으면 큰 파일을 cat 하거나
+        // find / 를 돌린 직후 수 MB 가 한 응답에 실려 Base64 인코딩(1.33배) → 브라우저의
+        // atob → xterm 렌더까지 한꺼번에 몰려 몇 초씩 화면이 멈춘다.
+        // 남은 데이터가 있으면 클라이언트 폴 루프가 곧바로 다음 요청을 보내므로 총 전송량은 같다.
+        public byte[] Read(long requestedOffset, int maxBytes, out long nextOffset, out bool reset)
         {
             reset = requestedOffset < startOffset || requestedOffset > startOffset + length;
             if (reset) requestedOffset = startOffset;
             int index = (int)(requestedOffset - startOffset);
             int count = length - index;
+            if (maxBytes > 0 && count > maxBytes) count = maxBytes;
             byte[] result = new byte[count];
             if (count > 0)
             {
@@ -189,7 +198,7 @@ static class ClassDockSshTerminal
                 Buffer.BlockCopy(data, source, result, 0, first);
                 if (first < count) Buffer.BlockCopy(data, 0, result, first, count - first);
             }
-            nextOffset = startOffset + length;
+            nextOffset = requestedOffset + count;
             return result;
         }
     }
@@ -776,10 +785,11 @@ static class ClassDockSshTerminal
         if (!long.TryParse(offsetText, out offset) || offset < 0) offset = 0;
         long next;
         bool reset;
+        bool more;
         byte[] data;
         lock (session.BufferSync)
         {
-            data = session.Buffer.Read(offset, out next, out reset);
+            data = session.Buffer.Read(offset, MaxPollBytes, out next, out reset);
             if (data.Length == 0)
             {
                 bool alreadyComplete;
@@ -787,9 +797,12 @@ static class ClassDockSshTerminal
                 if (!alreadyComplete)
                 {
                     Monitor.Wait(session.BufferSync, LongPollWaitMs);
-                    data = session.Buffer.Read(offset, out next, out reset);
+                    data = session.Buffer.Read(offset, MaxPollBytes, out next, out reset);
                 }
             }
+            // 상한에 걸려 남긴 분량이 있는지. 세션이 끝난 응답이어도 more 가 true 면
+            // 클라이언트는 종료 처리를 미루고 남은 출력을 마저 받아 간다.
+            more = next < session.Buffer.End;
         }
         bool complete;
         bool stopped;
@@ -806,6 +819,7 @@ static class ClassDockSshTerminal
             + ",\"stopped\":" + (stopped ? "true" : "false")
             + ",\"code\":" + code + ",\"offset\":" + next
             + ",\"reset\":" + (reset ? "true" : "false")
+            + ",\"more\":" + (more ? "true" : "false")
             + ",\"data\":" + JsonString(Convert.ToBase64String(data)) + "}";
     }
 

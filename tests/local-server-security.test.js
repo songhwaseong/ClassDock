@@ -209,3 +209,60 @@ test("터미널 중지는 Windows Job과 후손 PID 재검사로 서버 프로�
   assert.match(launcher, /static List<int> ProcessTreeIds\(int rootPid\)/);
   assert.match(launcher, /for \(int attempt = 0; attempt < 3; attempt\+\+\)/);
 });
+
+test("연결을 재사용해도 본문을 다 읽지 않은 요청은 반드시 연결을 끊는다", () => {
+  // 본문이 스트림에 남은 채 연결을 재사용하면 남은 바이트를 다음 요청의 헤더로 읽게 된다.
+  // 본문 수신 전에 빠져나가는 경로는 예외 없이 KeepAlive 를 내려야 한다.
+  const early = [
+    "request-header-too-large",
+    "incomplete-request-header",
+    "invalid-content-length",
+    "invalid-request-line",
+    "invalid-local-host",
+    "invalid-local-origin",
+    "request-body-too-large",
+    "local-token-required"
+  ];
+  for (const marker of early) {
+    const at = launcher.indexOf(marker);
+    assert.notEqual(at, -1, marker + " 응답 경로를 찾지 못했다");
+    const before = launcher.slice(Math.max(0, at - 400), at);
+    assert.match(before, /stream\.KeepAlive = false;/, marker + " 경로가 연결을 끊지 않는다");
+  }
+  // 본문을 끝까지 받지 못한 경우도 마찬가지다.
+  assert.match(launcher, /if \(read != contentLength\) \{ body = new byte\[0\]; stream\.KeepAlive = false; \}/);
+});
+
+test("연결 재사용은 HTTP 버전과 Connection 헤더를 따르고 청크 요청은 제외한다", () => {
+  assert.match(launcher, /connectionHeader\.IndexOf\("close", StringComparison\.OrdinalIgnoreCase\) >= 0\) stream\.KeepAlive = false/);
+  assert.match(launcher, /!rp\[2\]\.StartsWith\("HTTP\/1\.1", StringComparison\.Ordinal\)/);
+  assert.match(launcher, /headers\.ContainsKey\("Transfer-Encoding"\)\) stream\.KeepAlive = false/);
+  // 유휴 연결을 상대가 닫은 경우는 오류 응답 없이 끝낸다.
+  assert.match(launcher, /if \(head\.Count == 0\)\s*\{\s*stream\.KeepAlive = false;\s*return;\s*\}/);
+  // 한 연결이 무한히 재사용되지 않도록 상한을 둔다.
+  assert.match(launcher, /MaxRequestsPerConnection = \d+/);
+  assert.match(launcher, /for \(int served = 0; served < MaxRequestsPerConnection; served\+\+\)/);
+});
+
+test("응답은 Connection 헤더를 연결 상태에 맞추고 헤더와 본문을 한 번에 보낸다", () => {
+  assert.match(launcher, /static string ConnectionHeader\(Stream stream\)/);
+  assert.match(launcher, /connection != null && connection\.KeepAlive\) \? "Connection: keep-alive/);
+  assert.match(launcher, /static void WriteHeaderAndBody\(Stream stream, byte\[\] headerBytes, byte\[\] body\)/);
+  assert.match(launcher, /client\.NoDelay = true/);
+  // 본문 길이를 알 수 없으면 재사용할 수 없으므로 204 응답도 Content-Length 를 명시한다.
+  const preflight = launcher.indexOf("HTTP/1.1 204 No Content");
+  assert.notEqual(preflight, -1, "타일 프록시 프리플라이트 응답을 찾지 못했다");
+  assert.ok(launcher.slice(preflight, preflight + 500).includes("Content-Length: 0"),
+    "204 응답에 Content-Length 가 없으면 연결을 재사용할 수 없다");
+  // 큰 본문까지 복사하지 않도록 합쳐 보내는 것은 작은 응답으로 제한한다.
+  assert.match(launcher, /body\.Length > 0 && body\.Length <= 64 \* 1024/);
+});
+
+test("버퍼링 읽기는 다음 요청의 앞부분을 삼키지 않는다", () => {
+  assert.match(launcher, /sealed class HttpConnectionStream : Stream/);
+  assert.match(launcher, /public override int ReadByte\(\)/);
+  assert.match(launcher, /public override int Read\(byte\[\] target, int offset, int count\)/);
+  // 남은 바이트는 버퍼에 보관했다가 이어서 꺼낸다.
+  assert.match(launcher, /if \(start < end\) return true;/);
+  assert.match(launcher, /int take = Math\.Min\(count, end - start\);/);
+});

@@ -157,8 +157,33 @@ test("SSH 입력과 xterm 출력은 처리 속도보다 요청 대기열이 커�
   assert.match(ui, /let inputTimer = 0, inputSending = false/);
   assert.match(ui, /while \(id === sessionId && inputQueue\.length\)/);
   assert.doesNotMatch(ui, /inputChain/);
-  assert.match(ui, /target\.write\(bytes, resolve\)/);
-  assert.match(ui, /await writeTerminal\(bytes\)/);
+  // 입력은 지연 없이 즉시 보내되 전송 중이면 큐에 모았다가 한 번에 나간다 — 요청 수는 왕복당 하나.
+  assert.match(ui, /if \(inputSending\) return;[\s\S]*flushInput\(\);/);
+  // 출력은 평소엔 렌더를 기다리지 않고(에코 지연 최소화) 밀린 양이 임계치를 넘을 때만 기다린다.
+  assert.match(ui, /target\.write\(bytes, done\)/);
+  assert.match(ui, /pendingWriteBytes > WRITE_BACKPRESSURE_BYTES\) await written/);
+});
+
+test("이전 xterm의 지연 write 콜백은 재접속한 터미널의 백프레셔를 줄이지 않는다", () => {
+  assert.match(ui, /let pendingWriteBytes = 0, lastWrite = null, writeEpoch = 0/);
+  assert.match(ui, /resetWriteBackpressure = \(\) => \{ writeEpoch\+\+; pendingWriteBytes = 0; lastWrite = null; \}/);
+  assert.match(ui, /const size = bytes\.length, epoch = writeEpoch/);
+  assert.match(ui, /if \(epoch === writeEpoch\) pendingWriteBytes = Math\.max\(0, pendingWriteBytes - size\)/);
+  assert.match(ui, /if \(terminal\) terminal\.dispose\(\);\s*resetWriteBackpressure\(\);/);
+});
+
+test("SSH 폴 응답은 크기 상한을 두고 남은 출력은 다음 폴에서 이어 받는다", () => {
+  assert.match(ssh, /MaxPollBytes = 256 \* 1024/);
+  assert.match(ssh, /session\.Buffer\.Read\(offset, MaxPollBytes, out next, out reset\)/);
+  assert.match(ssh, /more = next < session\.Buffer\.End/);
+  assert.match(ssh, /\\"more\\":/);
+  // 상한에 걸려 남은 분량이 있으면 세션이 끝났어도 다 받은 뒤에 종료 처리를 한다.
+  assert.match(ui, /\(data\.complete \|\| data\.alive === false\) && !data\.more/);
+});
+
+test("요청 핸들러가 스레드를 오래 잡아도 다른 요청이 대기하지 않게 스레드풀 최소치를 올린다", () => {
+  assert.match(launcher, /ThreadPool\.GetMinThreads\(out minWorker, out minIo\)/);
+  assert.match(launcher, /ThreadPool\.SetMinThreads\(wantedWorker, minIo\)/);
 });
 
 test("SSH 출력 폴링은 서버에서 기다렸다가 출력 즉시 깨어나 연결 생성을 줄인다", () => {

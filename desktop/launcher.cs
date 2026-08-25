@@ -1152,6 +1152,20 @@ class ClassDockLauncher
             heartbeatWatcher.Start();
         }
 
+        // 요청 핸들러 중에는 스레드를 오래 붙잡는 것이 많다 — SSH 롱폴(최대 500ms 대기),
+        // 타일·지오코딩·환율의 동기 외부 HTTP, 파이썬 등 외부 프로세스 WaitForExit.
+        // 스레드풀 기본 최소치는 코어 수뿐이고 그 위로는 초당 1~2개씩만 늘어나므로,
+        // 지도를 열거나 파이썬을 돌리는 동안 SSH 키 입력 요청이 큐에서 수백ms~수초 대기하게 된다.
+        // 최소치를 넉넉히 올려 둔다(최소치일 뿐 필요할 때만 실제로 생성되므로 평소 비용은 없다).
+        try
+        {
+            int minWorker, minIo;
+            ThreadPool.GetMinThreads(out minWorker, out minIo);
+            int wantedWorker = Math.Max(64, Environment.ProcessorCount * 8);
+            if (minWorker < wantedWorker) ThreadPool.SetMinThreads(wantedWorker, minIo);
+        }
+        catch { /* 최소치 조정 실패는 기능에 영향이 없다 */ }
+
         while (true)
         {
             TcpClient client = listener.AcceptTcpClient();
@@ -1163,15 +1177,89 @@ class ClassDockLauncher
         }
     }
 
+    // 한 TCP 연결로 여러 요청을 처리하기 위한 래퍼.
+    //  - 읽기: 큰 덩어리로 당겨 와 버퍼에서 꺼내 준다. 헤더를 1바이트씩 recv 하던 비용이 사라지고,
+    //          다음 요청의 앞부분을 함께 읽어 와도 버퍼에 남아 있어 잃지 않는다.
+    //  - KeepAlive: 이번 응답 뒤에도 연결을 유지할지. WriteResponse 가 이 값으로 Connection 헤더를 정한다.
+    //    본문을 끝까지 읽지 않고 빠져나가는 경로는 반드시 false 로 두어야 한다. 남은 본문 바이트를
+    //    다음 요청의 헤더로 잘못 읽게 되기 때문이다.
+    sealed class HttpConnectionStream : Stream
+    {
+        readonly Stream inner;
+        readonly byte[] buffer = new byte[8192];
+        int start, end;
+        public bool KeepAlive = true;
+
+        public HttpConnectionStream(Stream stream) { inner = stream; }
+
+        bool Fill()
+        {
+            if (start < end) return true;
+            start = 0;
+            end = inner.Read(buffer, 0, buffer.Length);
+            if (end <= 0) { end = 0; return false; }
+            return true;
+        }
+
+        public override int ReadByte()
+        {
+            if (!Fill()) return -1;
+            return buffer[start++];
+        }
+
+        public override int Read(byte[] target, int offset, int count)
+        {
+            if (count <= 0) return 0;
+            if (!Fill()) return 0;
+            int take = Math.Min(count, end - start);
+            Buffer.BlockCopy(buffer, start, target, offset, take);
+            start += take;
+            return take;
+        }
+
+        public override void Write(byte[] source, int offset, int count) { inner.Write(source, offset, count); }
+        public override void Flush() { inner.Flush(); }
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return true; } }
+        public override long Length { get { throw new NotSupportedException(); } }
+        public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
+        public override long Seek(long offset, SeekOrigin origin) { throw new NotSupportedException(); }
+        public override void SetLength(long value) { throw new NotSupportedException(); }
+    }
+
+    // 응답마다 연결을 끊으면(Connection: close) 먼저 끊은 서버 쪽에 TIME_WAIT 이 120초씩 쌓인다.
+    // 요청이 잦은 SSH 폴링에서는 수백 개까지 누적되어, 브라우저가 다음 연결에 고른 포트가
+    // 그 조합과 겹치면 SYN 이 무시되고 재전송(약 300ms → 600ms → …)으로 넘어간다.
+    // 원격 터미널에서 간헐적으로 타자가 멈추던 원인이 이것이라 연결을 재사용한다.
+    const int MaxRequestsPerConnection = 1000;
+
     static void HandleClient(TcpClient client)
     {
         try
         {
             using (client)
-            using (NetworkStream stream = client.GetStream())
+            using (NetworkStream raw = client.GetStream())
             {
-                client.ReceiveTimeout = 15000;
+                client.ReceiveTimeout = 30000;
                 client.SendTimeout = 15000;
+                client.NoDelay = true;   // 작은 응답이 Nagle 과 지연 ACK 에 걸려 늦게 나가지 않도록
+                HttpConnectionStream stream = new HttpConnectionStream(raw);
+                for (int served = 0; served < MaxRequestsPerConnection; served++)
+                {
+                    stream.KeepAlive = served + 1 < MaxRequestsPerConnection;
+                    HandleRequest(stream);
+                    if (!stream.KeepAlive) break;
+                }
+            }
+        }
+        catch { /* 연결 오류는 무시 */ }
+    }
+
+    static void HandleRequest(HttpConnectionStream stream)
+    {
+        {
+            {
                 // ---- 요청 헤더를 \r\n\r\n 까지 바이트 단위로 읽는다(바디는 바이너리라 StreamReader 금지) ----
                 List<byte> head = new List<byte>(1024);
                 bool headerComplete = false;
@@ -1187,12 +1275,20 @@ class ClassDockLauncher
                     }
                     if (n > MaxHttpHeaderBytes)
                     {
+                        stream.KeepAlive = false;   // 본문을 읽지 않고 끝내므로 연결을 재사용할 수 없다
                         WriteResponse(stream, "431 Request Header Fields Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("request-header-too-large"));
                         return;
                     }
                 }
+                // 재사용 중인 연결을 상대가 조용히 닫은 경우다. 오류가 아니므로 응답 없이 끝낸다.
+                if (head.Count == 0)
+                {
+                    stream.KeepAlive = false;
+                    return;
+                }
                 if (!headerComplete)
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("incomplete-request-header"));
                     return;
                 }
@@ -1215,6 +1311,7 @@ class ClassDockLauncher
                     {
                         if (!int.TryParse(val, out contentLength) || contentLength < 0)
                         {
+                            stream.KeepAlive = false;
                             WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-content-length"));
                             return;
                         }
@@ -1223,11 +1320,22 @@ class ClassDockLauncher
 
                 if (rp.Length < 3 || !rp[2].StartsWith("HTTP/", StringComparison.Ordinal) || !path.StartsWith("/", StringComparison.Ordinal))
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-request-line"));
                     return;
                 }
+                // 연결 재사용 협상. HTTP/1.1 은 기본 유지, 1.0 은 명시할 때만 유지하고,
+                // 어느 쪽이든 상대가 close 를 요구하면 따른다. Transfer-Encoding 은 지원하지 않으므로
+                // 본문 길이를 알 수 없는 요청도 재사용 대상에서 뺀다.
+                string connectionHeader;
+                if (!headers.TryGetValue("Connection", out connectionHeader)) connectionHeader = "";
+                if (connectionHeader.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0) stream.KeepAlive = false;
+                else if (!rp[2].StartsWith("HTTP/1.1", StringComparison.Ordinal)
+                    && connectionHeader.IndexOf("keep-alive", StringComparison.OrdinalIgnoreCase) < 0) stream.KeepAlive = false;
+                if (headers.ContainsKey("Transfer-Encoding")) stream.KeepAlive = false;
                 if (!HasAllowedLocalHost(headers))
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-local-host"));
                     return;
                 }
@@ -1235,17 +1343,21 @@ class ClassDockLauncher
                 // 해당 프록시는 별도 목적지 allowlist로 보호하므로 이 경로만 예외로 둔다.
                 if (!HasAllowedLocalOrigin(headers) && !path.StartsWith("/tile-proxy", StringComparison.Ordinal))
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-local-origin"));
                     return;
                 }
                 if (contentLength > MaxHttpRequestBodyBytes)
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "413 Payload Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("request-body-too-large"));
                     return;
                 }
                 // 인증 실패 요청은 본문을 읽지 않는다. 큰 무단 요청으로 메모리·I/O를 점유하는 것을 막는다.
+                // 본문이 스트림에 남으므로 연결도 재사용하지 않는다.
                 if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers))
                 {
+                    stream.KeepAlive = false;
                     WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("local-token-required"));
                     return;
                 }
@@ -1262,7 +1374,8 @@ class ClassDockLauncher
                         if (got <= 0) break;
                         read += got;
                     }
-                    if (read != contentLength) body = new byte[0];
+                    // 본문을 다 받지 못했으면 스트림 위치를 신뢰할 수 없다. 연결을 재사용하지 않는다.
+                    if (read != contentLength) { body = new byte[0]; stream.KeepAlive = false; }
                 }
 
                 // ---- 라우팅 ----
@@ -1277,7 +1390,8 @@ class ClassDockLauncher
                         "Access-Control-Allow-Headers: *\r\n" +
                         "Access-Control-Allow-Private-Network: true\r\n" +
                         "Access-Control-Max-Age: 600\r\n" +
-                        "Connection: close\r\n" +
+                        "Content-Length: 0\r\n" +
+                        (stream.KeepAlive ? "Connection: keep-alive\r\n" : "Connection: close\r\n") +
                         "\r\n";
                     byte[] preflightBytes = Encoding.ASCII.GetBytes(preflight);
                     stream.Write(preflightBytes, 0, preflightBytes.Length);
@@ -2597,7 +2711,6 @@ class ClassDockLauncher
                 }
             }
         }
-        catch { /* 연결 오류는 무시 */ }
     }
 
     static bool ValidHeartbeatId(string id)
@@ -2831,11 +2944,31 @@ class ClassDockLauncher
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
             "X-App: classdock\r\n" +      // 우리 서버 식별용(중복 실행 시 단일 인스턴스 판별)
-            "Connection: close\r\n" +
+            ConnectionHeader(stream) +
             "\r\n";
-        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
+        WriteHeaderAndBody(stream, Encoding.ASCII.GetBytes(header), body);
+    }
+
+    static string ConnectionHeader(Stream stream)
+    {
+        HttpConnectionStream connection = stream as HttpConnectionStream;
+        return (connection != null && connection.KeepAlive) ? "Connection: keep-alive\r\nKeep-Alive: timeout=30\r\n" : "Connection: close\r\n";
+    }
+
+    // 헤더와 본문을 한 번에 보낸다. 두 번 나눠 쓰면 Nagle 과 상대의 지연 ACK 가 겹쳐 늦어질 수 있다.
+    // 큰 본문(앱 HTML 33MB 등)까지 복사하면 메모리를 두 배로 쓰므로 작은 응답에만 합친다.
+    static void WriteHeaderAndBody(Stream stream, byte[] headerBytes, byte[] body)
+    {
+        if (body.Length > 0 && body.Length <= 64 * 1024)
+        {
+            byte[] packet = new byte[headerBytes.Length + body.Length];
+            Buffer.BlockCopy(headerBytes, 0, packet, 0, headerBytes.Length);
+            Buffer.BlockCopy(body, 0, packet, headerBytes.Length, body.Length);
+            stream.Write(packet, 0, packet.Length);
+            return;
+        }
         stream.Write(headerBytes, 0, headerBytes.Length);
-        stream.Write(body, 0, body.Length);
+        if (body.Length > 0) stream.Write(body, 0, body.Length);
     }
 
     // sandbox(origin null) iframe 의 fetch 가 읽을 수 있도록 CORS 를 허용한 응답 — 지도 타일 프록시 전용
@@ -2850,11 +2983,9 @@ class ClassDockLauncher
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
             "X-App: classdock\r\n" +
-            "Connection: close\r\n" +
+            ConnectionHeader(stream) +
             "\r\n";
-        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
-        stream.Write(headerBytes, 0, headerBytes.Length);
-        stream.Write(body, 0, body.Length);
+        WriteHeaderAndBody(stream, Encoding.ASCII.GetBytes(header), body);
     }
 
     /* ===== 지도 타일 프록시 =====

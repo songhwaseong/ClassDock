@@ -27,6 +27,13 @@ const MNRemoteTerminal = (() => {
   let dockSide = "right", dockWidth = 520, dockCollapsed = false;
   let fontChoice = "cascadia", terminalFontSize = 14, terminalLineHeight = 1.15;
   let diagnosticTail = "", diagnosticDecoder = new TextDecoder(), pollFailures = 0, pollStatusBeforeRetry = "";
+  // xterm 에 넘겼지만 아직 그려지지 않은 양. 이 값이 임계치를 넘을 때만 폴 루프가 렌더를 기다린다.
+  // lastWrite 는 가장 최근 write 의 완료 Promise — xterm 이 FIFO 로 처리하므로 이것만 기다리면 전부 비워진다.
+  let pendingWriteBytes = 0, lastWrite = null, writeEpoch = 0;
+  const WRITE_BACKPRESSURE_BYTES = 512 * 1024;
+  // 이전 xterm 의 write 콜백은 dispose 뒤에도 늦게 실행될 수 있다. 세대를 바꿔
+  // 그 콜백이 새 터미널의 pendingWriteBytes 를 차감하지 못하게 한다.
+  const resetWriteBackpressure = () => { writeEpoch++; pendingWriteBytes = 0; lastWrite = null; };
   let selectedKeyId = "", selectedKeyName = "", keyPicking = false, keyPickGeneration = 0;
 
   const encodeStrings = (values) => {
@@ -561,6 +568,7 @@ const MNRemoteTerminal = (() => {
     if (typeof MNLazy === "undefined" || !(await MNLazy.tryNeed("xterm")) || typeof Terminal !== "function")
       throw new Error("원격 터미널 화면을 불러오지 못했습니다.");
     if (terminal) terminal.dispose();
+    resetWriteBackpressure();
     terminalHost.replaceChildren();
     const dark = document.documentElement.getAttribute("data-theme") === "dark" || document.body.classList.contains("dark");
     terminal = new Terminal({
@@ -633,7 +641,12 @@ const MNRemoteTerminal = (() => {
   const queueInput = (data) => {
     if (!sessionId || !data) return;
     inputQueue.push(encoder.encode(data));
-    if (!inputTimer && !inputSending) inputTimer = setTimeout(flushInput, 12);
+    // 12ms 를 모았다가 보내면 글자마다 그만큼 늦게 나간다. 곧바로 보낸다.
+    // 전송 중이면 큐에 쌓아 두었다가 진행 중인 요청이 끝나는 즉시 flushInput 의
+    // while 이 한 번에 묶어 보내므로, 빨리 쳐도 요청 수는 왕복당 하나로 유지된다.
+    if (inputSending) return;
+    if (inputTimer){ clearTimeout(inputTimer); inputTimer = 0; }
+    flushInput();
   };
 
   const flushInput = async () => {
@@ -654,7 +667,7 @@ const MNRemoteTerminal = (() => {
       if (terminal && id === sessionId) terminal.writeln("\r\n\x1b[31m입력을 보내지 못했습니다: " + friendlyError(error) + "\x1b[0m");
     } finally {
       inputSending = false;
-      if (sessionId && inputQueue.length && !inputTimer) inputTimer = setTimeout(flushInput, 12);
+      if (sessionId && inputQueue.length && !inputTimer) inputTimer = setTimeout(flushInput, 0);
     }
   };
 
@@ -674,12 +687,23 @@ const MNRemoteTerminal = (() => {
       terminalStatus.textContent = "접속됨";
   };
 
-  const writeTerminal = (bytes) => new Promise((resolve) => {
+  // 렌더 완료를 기다릴 수 있는 Promise 를 돌려주되, 기다릴지는 호출부가 정한다.
+  // xterm 은 write 호출 순서를 내부 큐로 지키므로 기다리지 않아도 출력이 뒤섞이지 않는다.
+  const writeTerminal = (bytes) => {
     const target = terminal;
-    if (!target || !bytes || !bytes.length) { resolve(); return; }
-    try { target.write(bytes, resolve); }
-    catch(_){ resolve(); }
-  });
+    if (!target || !bytes || !bytes.length) return null;
+    const size = bytes.length, epoch = writeEpoch;
+    pendingWriteBytes += size;
+    lastWrite = new Promise((resolve) => {
+      const done = () => {
+        if (epoch === writeEpoch) pendingWriteBytes = Math.max(0, pendingWriteBytes - size);
+        resolve();
+      };
+      try { target.write(bytes, done); }
+      catch(_){ done(); }
+    });
+    return lastWrite;
+  };
 
   const finishSession = (data) => {
     try { diagnosticTail = (diagnosticTail + diagnosticDecoder.decode()).slice(-16000); } catch(_){}
@@ -709,12 +733,27 @@ const MNRemoteTerminal = (() => {
         }
         pollFailures = 0;
         pollStatusBeforeRetry = "";
-        if (data.reset && outputOffset > 0 && terminal){ terminal.reset(); terminal.writeln("\x1b[33m[오래된 터미널 출력이 생략되었습니다.]\x1b[0m"); }
+        if (data.reset && outputOffset > 0 && terminal){
+          // reset 은 write 큐를 거치지 않고 즉시 실행된다. 아직 그려지지 않은 앞 출력이
+          // reset 뒤에 나타나 화면이 뒤섞이지 않도록 큐를 먼저 비운다.
+          if (lastWrite) await lastWrite;
+          if (id !== sessionId || myGeneration !== generation) return;
+          terminal.reset(); terminal.writeln("\x1b[33m[오래된 터미널 출력이 생략되었습니다.]\x1b[0m");
+        }
         const bytes = data.data ? decodeBase64(data.data) : null;
-        if (bytes){ appendDiagnostic(bytes); await writeTerminal(bytes); }
+        if (bytes){
+          appendDiagnostic(bytes);
+          const written = writeTerminal(bytes);
+          // 평소(타자 에코)에는 렌더를 기다리지 않고 곧바로 다음 폴을 건다. 기다리면 그 사이
+          // 서버에 대기 중인 폴 요청이 없어, 그때 도착한 에코가 다음 폴까지 서버 버퍼에서 잠든다.
+          // 출력이 쏟아져 렌더가 밀릴 때만 기다려 xterm 쪽에 무한정 쌓이는 것을 막는다.
+          if (written && pendingWriteBytes > WRITE_BACKPRESSURE_BYTES) await written;
+        }
         if (id !== sessionId || myGeneration !== generation) return;
         outputOffset = Number(data.offset) || outputOffset;
-        if (data.complete || data.alive === false){
+        // more 가 true 면 서버가 크기 상한 때문에 남긴 출력이 있다. 종료된 세션이라도
+        // 남은 분량을 마저 받은 뒤에 종료 처리를 한다.
+        if ((data.complete || data.alive === false) && !data.more){
           finishSession(data);
           return;
         }
@@ -742,7 +781,7 @@ const MNRemoteTerminal = (() => {
 
   const disconnectSession = async (showMessage) => {
     clearTimeout(inputTimer); inputTimer = 0; inputQueue = [];
-    const id = sessionId; sessionId = ""; outputOffset = 0; pollFailures = 0; pollStatusBeforeRetry = "";
+    const id = sessionId; sessionId = ""; outputOffset = 0; pollFailures = 0; pollStatusBeforeRetry = ""; resetWriteBackpressure();
     if (id){
       try { await fetch("/ssh-session-stop?id=" + encodeURIComponent(id), { method:"POST" }); } catch(_){}
     }
