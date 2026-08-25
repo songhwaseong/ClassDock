@@ -10,6 +10,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 // ClassDock EXE 전용 SSH 터미널.
@@ -29,10 +30,18 @@ static class ClassDockSshTerminal
     const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     const uint HANDLE_FLAG_INHERIT = 0x00000001;
+    const uint WAIT_OBJECT_0 = 0x00000000;
+    const uint WAIT_INFINITE = 0xFFFFFFFF;
+    const uint STILL_ACTIVE = 259;
     const int OFN_PATHMUSTEXIST = 0x00000800;
     const int OFN_FILEMUSTEXIST = 0x00001000;
     const int OFN_NOCHANGEDIR = 0x00000008;
     const int OFN_DONTADDTORECENT = 0x02000000;
+    const int OFN_ALLOWMULTISELECT = 0x00000200;
+    const int OFN_EXPLORER = 0x00080000;
+    const int MaxUploadFiles = 32;
+    const int MaxUploadCommandPathChars = 20000;
+    const int MaxUploadSessions = 2;
     static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x00020016;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -116,6 +125,10 @@ static class ClassDockSshTerminal
     static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     static extern IntPtr GetModuleHandle(string moduleName);
     [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
@@ -203,16 +216,23 @@ static class ClassDockSshTerminal
         }
     }
 
-    sealed class SshSession
+    class PtyProcessState
+    {
+        public Process Process;
+        public IntPtr NativeProcessHandle;
+        public IntPtr PseudoConsole;
+        public Stream Input;
+        public Stream Output;
+    }
+
+    sealed class SshSession : PtyProcessState
     {
         public string Id;
         public string Host;
         public int Port;
         public string User;
-        public Process Process;
-        public IntPtr PseudoConsole;
-        public Stream Input;
-        public Stream Output;
+        public string Authentication;
+        public string PrivateKeyId;
         public string StagedKeyPath;
         public readonly object Sync = new object();
         public readonly object BufferSync = new object();
@@ -240,6 +260,32 @@ static class ClassDockSshTerminal
         public DateTime LastUsed = DateTime.UtcNow;
     }
 
+    sealed class UploadSelection
+    {
+        public string Id;
+        public readonly List<string> Paths = new List<string>();
+        public readonly List<string> Names = new List<string>();
+        public long TotalBytes;
+        public DateTime LastUsed = DateTime.UtcNow;
+    }
+
+    sealed class UploadSession : PtyProcessState
+    {
+        public string Id;
+        public string StagedKeyPath;
+        public int FileCount;
+        public long TotalBytes;
+        public readonly object Sync = new object();
+        public readonly object BufferSync = new object();
+        public string DiagnosticTail = "";
+        public int Progress = -1;
+        public bool Complete;
+        public bool StopRequested;
+        public int ExitCode = -1;
+        public DateTime LastUsed = DateTime.UtcNow;
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
     static readonly object SessionsLock = new object();
     static readonly Dictionary<string, SshSession> Sessions = new Dictionary<string, SshSession>();
     static readonly object PrivateKeysLock = new object();
@@ -248,6 +294,14 @@ static class ClassDockSshTerminal
     static string PrivateKeyPickerState = "idle";
     static string PrivateKeyPickerId = "";
     static string PrivateKeyPickerName = "";
+    static readonly object UploadSelectionsLock = new object();
+    static readonly Dictionary<string, UploadSelection> UploadSelections = new Dictionary<string, UploadSelection>();
+    static readonly object UploadPickerLock = new object();
+    static string UploadPickerState = "idle";
+    static string UploadPickerId = "";
+    static string UploadPickerError = "";
+    static readonly object UploadSessionsLock = new object();
+    static readonly Dictionary<string, UploadSession> UploadSessions = new Dictionary<string, UploadSession>();
     static readonly string SshDataDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "ssh");
     static readonly string KnownHostsPath = Path.Combine(SshDataDirectory, "known_hosts");
@@ -296,12 +350,14 @@ static class ClassDockSshTerminal
     public static string CapabilityJson()
     {
         string ssh = FindOpenSsh("ssh.exe");
+        string scp = FindOpenSsh("scp.exe");
         bool windowsConPty = HasConPtyApi();
         bool conpty = windowsConPty && ssh != null;
         string reason = conpty ? "" : (!windowsConPty
             ? "Windows 10 1809 이상이 필요합니다."
             : "Windows OpenSSH Client가 필요합니다.");
         return "{\"available\":" + (conpty ? "true" : "false")
+            + ",\"upload\":" + (conpty && scp != null ? "true" : "false")
             + ",\"client\":\"Windows OpenSSH\",\"reason\":" + JsonString(reason) + "}";
     }
 
@@ -357,6 +413,177 @@ static class ClassDockSshTerminal
             return "{\"state\":" + JsonString(PrivateKeyPickerState)
                 + ",\"id\":" + JsonString(PrivateKeyPickerId)
                 + ",\"name\":" + JsonString(PrivateKeyPickerName) + "}";
+    }
+
+    public static bool StartUploadPicker()
+    {
+        lock (UploadPickerLock)
+        {
+            if (UploadPickerState == "opening") return false;
+            UploadPickerState = "opening";
+            UploadPickerId = "";
+            UploadPickerError = "";
+        }
+        Thread thread = new Thread(delegate()
+        {
+            try
+            {
+                List<string> paths = RunUploadPicker();
+                lock (UploadPickerLock)
+                {
+                    if (paths.Count == 0) UploadPickerState = "cancelled";
+                    else
+                    {
+                        UploadSelection selection = RegisterUploadSelection(paths);
+                        UploadPickerId = selection.Id;
+                        UploadPickerState = "selected";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (UploadPickerLock)
+                {
+                    UploadPickerState = "error";
+                    UploadPickerError = ex is InvalidOperationException && ex.Message.StartsWith("ssh-upload-", StringComparison.Ordinal)
+                        ? ex.Message : "ssh-upload-file-read-failed";
+                    UploadPickerId = "";
+                }
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        return true;
+    }
+
+    public static string UploadPickerStatusJson()
+    {
+        lock (UploadPickerLock)
+        {
+            UploadSelection selection = null;
+            if (UploadPickerState == "selected")
+            {
+                lock (UploadSelectionsLock) UploadSelections.TryGetValue(UploadPickerId, out selection);
+            }
+            StringBuilder result = new StringBuilder("{\"state\":").Append(JsonString(UploadPickerState))
+                .Append(",\"id\":").Append(JsonString(UploadPickerId))
+                .Append(",\"error\":").Append(JsonString(UploadPickerError));
+            if (selection != null)
+            {
+                result.Append(",\"count\":").Append(selection.Paths.Count)
+                    .Append(",\"totalBytes\":").Append(selection.TotalBytes)
+                    .Append(",\"files\":[");
+                for (int i = 0; i < selection.Names.Count; i++)
+                {
+                    if (i > 0) result.Append(',');
+                    result.Append(JsonString(selection.Names[i]));
+                }
+                result.Append(']');
+            }
+            return result.Append('}').ToString();
+        }
+    }
+
+    static List<string> RunUploadPicker()
+    {
+        const int capacity = 65536;
+        IntPtr fileBuffer = IntPtr.Zero;
+        try
+        {
+            fileBuffer = Marshal.AllocHGlobal(capacity * 2);
+            for (int i = 0; i < capacity * 2; i += 2) Marshal.WriteInt16(fileBuffer, i, 0);
+            OPENFILENAME dialog = new OPENFILENAME();
+            dialog.lStructSize = Marshal.SizeOf(typeof(OPENFILENAME));
+            dialog.hwndOwner = GetForegroundWindow();
+            dialog.lpstrFilter = "모든 파일\0*.*\0\0";
+            dialog.nFilterIndex = 1;
+            dialog.lpstrFile = fileBuffer;
+            dialog.nMaxFile = capacity;
+            dialog.lpstrTitle = "원격 서버에 업로드할 파일을 선택하세요 (최대 32개)";
+            dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR
+                | OFN_DONTADDTORECENT | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+            if (!GetOpenFileName(ref dialog)) return new List<string>();
+            List<string> parts = ReadNullSeparatedStrings(fileBuffer, capacity);
+            if (parts.Count <= 1) return parts;
+            List<string> paths = new List<string>();
+            for (int i = 1; i < parts.Count; i++) paths.Add(Path.Combine(parts[0], parts[i]));
+            return paths;
+        }
+        catch (InvalidOperationException) { throw; }
+        catch { throw new InvalidOperationException("ssh-upload-picker-failed"); }
+        finally { if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer); }
+    }
+
+    static List<string> ReadNullSeparatedStrings(IntPtr pointer, int capacity)
+    {
+        List<string> result = new List<string>();
+        StringBuilder value = new StringBuilder();
+        for (int i = 0; i < capacity; i++)
+        {
+            char ch = (char)Marshal.ReadInt16(pointer, i * 2);
+            if (ch != '\0') { value.Append(ch); continue; }
+            if (value.Length == 0) break;
+            result.Add(value.ToString());
+            value.Length = 0;
+        }
+        return result;
+    }
+
+    static UploadSelection RegisterUploadSelection(List<string> paths)
+    {
+        if (paths == null || paths.Count == 0) throw new InvalidOperationException("ssh-upload-file-not-selected");
+        if (paths.Count > MaxUploadFiles) throw new InvalidOperationException("ssh-upload-file-count");
+        UploadSelection selection = new UploadSelection();
+        selection.Id = Guid.NewGuid().ToString("N");
+        int pathChars = 0;
+        foreach (string path in paths)
+        {
+            string fullPath;
+            try { fullPath = Path.GetFullPath(path ?? ""); }
+            catch { throw new InvalidOperationException("ssh-upload-file-not-found"); }
+            if (!File.Exists(fullPath)) throw new InvalidOperationException("ssh-upload-file-not-found");
+            FileInfo info;
+            try { info = new FileInfo(fullPath); selection.TotalBytes = checked(selection.TotalBytes + info.Length); }
+            catch (OverflowException) { throw new InvalidOperationException("ssh-upload-file-size"); }
+            catch { throw new InvalidOperationException("ssh-upload-file-read-failed"); }
+            pathChars += fullPath.Length + 3;
+            if (pathChars > MaxUploadCommandPathChars) throw new InvalidOperationException("ssh-upload-file-paths-too-long");
+            selection.Paths.Add(fullPath);
+            selection.Names.Add(info.Name);
+        }
+        lock (UploadSelectionsLock)
+        {
+            DateTime cutoff = DateTime.UtcNow.AddHours(-8);
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, UploadSelection> item in UploadSelections)
+                if (item.Value.LastUsed < cutoff) stale.Add(item.Key);
+            foreach (string id in stale) UploadSelections.Remove(id);
+            while (UploadSelections.Count >= 16)
+            {
+                string oldest = null;
+                DateTime used = DateTime.MaxValue;
+                foreach (KeyValuePair<string, UploadSelection> item in UploadSelections)
+                    if (item.Value.LastUsed < used) { oldest = item.Key; used = item.Value.LastUsed; }
+                if (oldest == null) break;
+                UploadSelections.Remove(oldest);
+            }
+            UploadSelections[selection.Id] = selection;
+        }
+        return selection;
+    }
+
+    static UploadSelection ResolveUploadSelection(string id)
+    {
+        UploadSelection selection;
+        lock (UploadSelectionsLock)
+        {
+            UploadSelections.TryGetValue((id ?? "").Trim(), out selection);
+            if (selection != null) selection.LastUsed = DateTime.UtcNow;
+        }
+        if (selection == null) throw new InvalidOperationException("ssh-upload-file-not-selected");
+        foreach (string path in selection.Paths) if (!File.Exists(path)) throw new InvalidOperationException("ssh-upload-file-not-found");
+        return selection;
     }
 
     static string RunPrivateKeyPicker()
@@ -553,6 +780,9 @@ static class ClassDockSshTerminal
             lock (SessionsLock)
                 foreach (SshSession session in Sessions.Values)
                     if (!string.IsNullOrEmpty(session.StagedKeyPath)) live.Add(session.StagedKeyPath);
+            lock (UploadSessionsLock)
+                foreach (UploadSession upload in UploadSessions.Values)
+                    if (!string.IsNullOrEmpty(upload.StagedKeyPath)) live.Add(upload.StagedKeyPath);
             foreach (string file in Directory.GetFiles(PrivateKeyStageDirectory, "*.key"))
             {
                 if (live.Contains(file)) continue;
@@ -756,6 +986,8 @@ static class ClassDockSshTerminal
         session.Host = host;
         session.Port = port;
         session.User = user;
+        session.Authentication = authentication;
+        session.PrivateKeyId = privateKeyId;
         session.StagedKeyPath = stagedKeyPath;
         try { StartConPtyProcess(session, ssh, arguments, environment, cols, rows); }
         catch { WipeStagedPrivateKey(stagedKeyPath); throw; }
@@ -763,6 +995,114 @@ static class ClassDockSshTerminal
         StartReaders(session);
         return "{\"id\":" + JsonString(session.Id) + ",\"host\":" + JsonString(host)
             + ",\"port\":" + port + ",\"user\":" + JsonString(user) + "}";
+    }
+
+    public static string StartUpload(byte[] body)
+    {
+        string[] request = ReadBundle(body, 4, 64 * 1024);
+        SshSession sshSession = FindSession(request[0]);
+        UploadSelection selection = ResolveUploadSelection(request[1]);
+        string remoteDirectory = ValidateUploadDirectory(request[2]);
+        string secret = request[3] ?? "";
+        string host;
+        int port;
+        string user;
+        string authentication;
+        string privateKeyId;
+        lock (sshSession.Sync)
+        {
+            if (sshSession.Complete) throw new InvalidOperationException("ssh-upload-session-closed");
+            host = sshSession.Host;
+            port = sshSession.Port;
+            user = sshSession.User;
+            authentication = sshSession.Authentication;
+            privateKeyId = sshSession.PrivateKeyId;
+        }
+        if (secret.Length > 16 * 1024 || secret.IndexOf('\0') >= 0
+            || (authentication == "password" && secret.Length == 0))
+            throw new InvalidOperationException(authentication == "password" ? "bad-ssh-password" : "bad-ssh-key-passphrase");
+        if (TrustedFingerprint(KnownHostField(host, port)).Length == 0)
+            throw new InvalidOperationException("ssh-host-key-not-trusted");
+        string scp = FindOpenSsh("scp.exe");
+        if (scp == null) throw new InvalidOperationException("scp-client-not-found");
+        PrivateKeySelection privateKey = authentication == "private-key" ? ResolvePrivateKey(privateKeyId) : null;
+
+        SweepUploadSessions();
+        lock (UploadSessionsLock)
+        {
+            int active = 0;
+            foreach (UploadSession value in UploadSessions.Values) if (!value.Complete) active++;
+            if (active >= MaxUploadSessions) throw new InvalidOperationException("ssh-upload-session-limit");
+        }
+
+        string stagedKeyPath = privateKey == null ? "" : StagePrivateKey(privateKey.Path);
+        byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
+        string pipeName = "classdock_scp_askpass_" + Guid.NewGuid().ToString("N");
+        StartAskPassServer(pipeName, secretBytes);
+        string arguments = BuildScpArguments(host, port, user, authentication, stagedKeyPath, selection.Paths, remoteDirectory);
+        Dictionary<string, string> environment = CurrentEnvironment();
+        environment["SSH_ASKPASS"] = Process.GetCurrentProcess().MainModule.FileName;
+        environment["SSH_ASKPASS_REQUIRE"] = "force";
+        environment["DISPLAY"] = "ClassDock";
+        environment["CLASSDOCK_SSH_ASKPASS_PIPE"] = pipeName;
+        environment["TERM"] = "xterm-256color";
+
+        UploadSession upload = new UploadSession();
+        upload.Id = Guid.NewGuid().ToString("N");
+        upload.StagedKeyPath = stagedKeyPath;
+        upload.FileCount = selection.Paths.Count;
+        upload.TotalBytes = selection.TotalBytes;
+        try { StartConPtyProcess(upload, scp, arguments, environment, 120, 20); }
+        catch { WipeStagedPrivateKey(stagedKeyPath); throw; }
+        lock (UploadSessionsLock) UploadSessions[upload.Id] = upload;
+        StartUploadReaders(upload);
+        return "{\"id\":" + JsonString(upload.Id) + ",\"count\":" + upload.FileCount
+            + ",\"totalBytes\":" + upload.TotalBytes + ",\"directory\":" + JsonString(remoteDirectory) + "}";
+    }
+
+    public static string PollUpload(string id, string offsetText)
+    {
+        UploadSession upload = FindUploadSession(id);
+        int progress;
+        lock (upload.BufferSync)
+        {
+            bool alreadyComplete;
+            lock (upload.Sync) alreadyComplete = upload.Complete;
+            if (!alreadyComplete) Monitor.Wait(upload.BufferSync, LongPollWaitMs);
+            progress = upload.Progress;
+        }
+        bool complete;
+        bool stopped;
+        int code;
+        string failure;
+        lock (upload.Sync)
+        {
+            upload.LastUsed = DateTime.UtcNow;
+            complete = upload.Complete;
+            stopped = upload.StopRequested;
+            code = upload.ExitCode;
+        }
+        lock (upload.BufferSync)
+        {
+            failure = complete && code != 0 ? ClassifyUploadFailure(upload.DiagnosticTail) : "";
+            if (code < 0 && failure == "unknown") failure = "result-unavailable";
+        }
+        return "{\"alive\":" + (complete ? "false" : "true")
+            + ",\"complete\":" + (complete ? "true" : "false")
+            + ",\"stopped\":" + (stopped ? "true" : "false")
+            + ",\"code\":" + code + ",\"offset\":0,\"reset\":false,\"more\":false"
+            + ",\"progress\":" + progress + ",\"failure\":" + JsonString(failure)
+            + ",\"count\":" + upload.FileCount + ",\"totalBytes\":" + upload.TotalBytes
+            + ",\"data\":\"\"}";
+    }
+
+    public static void CancelUpload(string id)
+    {
+        UploadSession upload;
+        lock (UploadSessionsLock) UploadSessions.TryGetValue(id ?? "", out upload);
+        if (upload == null) return;
+        lock (upload.Sync) upload.StopRequested = true;
+        CloseUploadSession(upload);
     }
 
     public static void Input(string id, byte[] body)
@@ -851,8 +1191,140 @@ static class ClassDockSshTerminal
         List<SshSession> all = new List<SshSession>();
         lock (SessionsLock) { foreach (SshSession session in Sessions.Values) all.Add(session); Sessions.Clear(); }
         foreach (SshSession session in all) CloseSession(session);
+        List<UploadSession> uploads = new List<UploadSession>();
+        lock (UploadSessionsLock) { foreach (UploadSession upload in UploadSessions.Values) uploads.Add(upload); UploadSessions.Clear(); }
+        foreach (UploadSession upload in uploads) CloseUploadSession(upload);
         lock (PrivateKeysLock) PrivateKeys.Clear();
+        lock (UploadSelectionsLock) UploadSelections.Clear();
         SweepStagedPrivateKeys();
+    }
+
+    static void StartUploadReaders(UploadSession upload)
+    {
+        Thread reader = new Thread(delegate()
+        {
+            byte[] buffer = new byte[8192];
+            try
+            {
+                int read;
+                while ((read = upload.Output.Read(buffer, 0, buffer.Length)) > 0)
+                    lock (upload.BufferSync)
+                    {
+                        string text = Encoding.UTF8.GetString(buffer, 0, read);
+                        upload.DiagnosticTail = (upload.DiagnosticTail + text);
+                        if (upload.DiagnosticTail.Length > 16000)
+                            upload.DiagnosticTail = upload.DiagnosticTail.Substring(upload.DiagnosticTail.Length - 16000);
+                        MatchCollection matches = Regex.Matches(upload.DiagnosticTail, @"(\d{1,3})%");
+                        if (matches.Count > 0)
+                        {
+                            int value;
+                            if (int.TryParse(matches[matches.Count - 1].Groups[1].Value, out value))
+                                upload.Progress = Math.Max(0, Math.Min(100, value));
+                        }
+                        Monitor.PulseAll(upload.BufferSync);
+                    }
+            }
+            catch { }
+        });
+        reader.IsBackground = true;
+        reader.Start();
+
+        Thread watcher = new Thread(delegate()
+        {
+            int code = -1;
+            WaitForNativeProcessExit(upload, WAIT_INFINITE, out code);
+            try { reader.Join(1500); } catch { }
+            lock (upload.Sync)
+            {
+                upload.Complete = true;
+                upload.ExitCode = upload.StopRequested ? 130 : code;
+                upload.DoneAt = DateTime.UtcNow;
+            }
+            lock (upload.BufferSync) Monitor.PulseAll(upload.BufferSync);
+            CloseUploadHandles(upload, true);
+            CloseNativeProcessHandle(upload);
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+    }
+
+    static void CloseUploadSession(UploadSession upload)
+    {
+        lock (upload.Sync)
+        {
+            try { if (upload.Input != null) upload.Input.Dispose(); } catch { }
+            upload.Input = null;
+            try { if (upload.Process != null && !upload.Process.HasExited) upload.Process.Kill(); } catch { }
+        }
+        try { if (upload.Process != null) upload.Process.WaitForExit(1500); } catch { }
+        lock (upload.Sync)
+        {
+            upload.Complete = true;
+            if (upload.ExitCode < 0) upload.ExitCode = upload.StopRequested ? 130 : -1;
+            if (upload.DoneAt == DateTime.MaxValue) upload.DoneAt = DateTime.UtcNow;
+        }
+        lock (upload.BufferSync) Monitor.PulseAll(upload.BufferSync);
+        CloseUploadHandles(upload, true);
+    }
+
+    static void CloseUploadHandles(UploadSession upload, bool closeOutput)
+    {
+        string stagedKeyPath;
+        lock (upload.Sync)
+        {
+            if (closeOutput) { try { if (upload.Output != null) upload.Output.Dispose(); } catch { } upload.Output = null; }
+            if (upload.PseudoConsole != IntPtr.Zero)
+            {
+                try { ClosePseudoConsole(upload.PseudoConsole); } catch { }
+                upload.PseudoConsole = IntPtr.Zero;
+            }
+            stagedKeyPath = upload.StagedKeyPath;
+            upload.StagedKeyPath = null;
+        }
+        WipeStagedPrivateKey(stagedKeyPath);
+    }
+
+    static UploadSession FindUploadSession(string id)
+    {
+        UploadSession upload;
+        lock (UploadSessionsLock) UploadSessions.TryGetValue(id ?? "", out upload);
+        if (upload == null) throw new InvalidOperationException("ssh-upload-not-found");
+        return upload;
+    }
+
+    static void SweepUploadSessions()
+    {
+        DateTime cutoff = DateTime.UtcNow.AddMinutes(-15);
+        List<string> stale = new List<string>();
+        lock (UploadSessionsLock)
+        {
+            foreach (KeyValuePair<string, UploadSession> item in UploadSessions)
+            {
+                lock (item.Value.Sync)
+                    if (item.Value.Complete && item.Value.DoneAt < cutoff) stale.Add(item.Key);
+            }
+            foreach (string id in stale) UploadSessions.Remove(id);
+        }
+    }
+
+    static string ClassifyUploadFailure(string diagnostic)
+    {
+        string text = diagnostic ?? "";
+        if (Regex.IsMatch(text, "Permission denied, please try again|Authentication failed|Permission denied \\(publickey", RegexOptions.IgnoreCase))
+            return "authentication";
+        if (Regex.IsMatch(text, "dest open .*Permission denied|remote open .*Permission denied", RegexOptions.IgnoreCase))
+            return "write-permission";
+        if (Regex.IsMatch(text, "No such file or directory|realpath .*No such file", RegexOptions.IgnoreCase))
+            return "directory-not-found";
+        if (Regex.IsMatch(text, "subsystem request failed|sftp-server.*not found", RegexOptions.IgnoreCase))
+            return "sftp-unavailable";
+        if (Regex.IsMatch(text, "Connection timed out|Operation timed out", RegexOptions.IgnoreCase)) return "timeout";
+        if (Regex.IsMatch(text, "Connection refused", RegexOptions.IgnoreCase)) return "refused";
+        if (Regex.IsMatch(text, "Could not resolve hostname|No such host", RegexOptions.IgnoreCase)) return "host";
+        if (Regex.IsMatch(text, "No route to host|Network is unreachable", RegexOptions.IgnoreCase)) return "network";
+        if (Regex.IsMatch(text, "Connection closed|Connection reset|Broken pipe", RegexOptions.IgnoreCase)) return "connection-closed";
+        if (Regex.IsMatch(text, "Failure", RegexOptions.IgnoreCase)) return "remote-failure";
+        return "unknown";
     }
 
     static void StartReaders(SshSession session)
@@ -878,7 +1350,7 @@ static class ClassDockSshTerminal
         Thread watcher = new Thread(delegate()
         {
             int code = -1;
-            try { session.Process.WaitForExit(); code = session.Process.ExitCode; } catch { }
+            WaitForNativeProcessExit(session, WAIT_INFINITE, out code);
             try { reader.Join(1500); } catch { }
             lock (session.Sync)
             {
@@ -888,6 +1360,7 @@ static class ClassDockSshTerminal
             }
             lock (session.BufferSync) Monitor.PulseAll(session.BufferSync);
             CloseSessionHandles(session, true);
+            CloseNativeProcessHandle(session);
         });
         watcher.IsBackground = true;
         watcher.Start();
@@ -980,7 +1453,7 @@ static class ClassDockSshTerminal
         thread.Start();
     }
 
-    static void StartConPtyProcess(SshSession session, string executable, string arguments,
+    static void StartConPtyProcess(PtyProcessState session, string executable, string arguments,
         Dictionary<string, string> environment, int cols, int rows)
     {
         IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero, outputRead = IntPtr.Zero, outputWrite = IntPtr.Zero;
@@ -1021,6 +1494,8 @@ static class ClassDockSshTerminal
             session.Output = new FileStream(new SafeFileHandle(outputRead, true), FileAccess.Read, 8192, false);
             outputRead = IntPtr.Zero;
             session.Process = Process.GetProcessById((int)pi.dwProcessId);
+            session.NativeProcessHandle = pi.hProcess;
+            pi.hProcess = IntPtr.Zero;
         }
         finally
         {
@@ -1034,6 +1509,24 @@ static class ClassDockSshTerminal
             if (outputWrite != IntPtr.Zero) CloseHandle(outputWrite);
             if (pseudoConsole != IntPtr.Zero) ClosePseudoConsole(pseudoConsole);
         }
+    }
+
+    static bool WaitForNativeProcessExit(PtyProcessState session, uint milliseconds, out int exitCode)
+    {
+        exitCode = -1;
+        IntPtr handle = session == null ? IntPtr.Zero : session.NativeProcessHandle;
+        if (handle == IntPtr.Zero || WaitForSingleObject(handle, milliseconds) != WAIT_OBJECT_0) return false;
+        uint nativeCode;
+        if (!GetExitCodeProcess(handle, out nativeCode) || nativeCode == STILL_ACTIVE) return false;
+        exitCode = unchecked((int)nativeCode);
+        return true;
+    }
+
+    static void CloseNativeProcessHandle(PtyProcessState session)
+    {
+        if (session == null) return;
+        IntPtr handle = Interlocked.Exchange(ref session.NativeProcessHandle, IntPtr.Zero);
+        if (handle != IntPtr.Zero) CloseHandle(handle);
     }
 
     static string BuildSshArguments(string host, int port, string user, string authentication, string privateKeyPath)
@@ -1061,6 +1554,37 @@ static class ClassDockSshTerminal
             });
         }
         args.Add(host);
+        return JoinArguments(args.ToArray());
+    }
+
+    static string BuildScpArguments(string host, int port, string user, string authentication,
+        string privateKeyPath, List<string> localPaths, string remoteDirectory)
+    {
+        List<string> args = new List<string>(new string[] {
+            "-F", "NUL", "-P", port.ToString(),
+            "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+            "-o", "ClearAllForwardings=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=" + KnownHostsPath, "-o", "GlobalKnownHostsFile=NUL"
+        });
+        if (authentication == "private-key")
+        {
+            args.AddRange(new string[] {
+                "-o", "PreferredAuthentications=publickey", "-o", "PubkeyAuthentication=yes",
+                "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+                "-o", "IdentityFile=none", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+                "-i", privateKeyPath, "-o", "NumberOfPasswordPrompts=3"
+            });
+        }
+        else
+        {
+            args.AddRange(new string[] {
+                "-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=3"
+            });
+        }
+        foreach (string path in localPaths) args.Add(path);
+        string remoteHost = host.IndexOf(':') >= 0 ? "[" + host + "]" : host;
+        args.Add(user + "@" + remoteHost + ":" + remoteDirectory);
         return JoinArguments(args.ToArray());
     }
 
@@ -1167,6 +1691,19 @@ static class ClassDockSshTerminal
         foreach (char c in user)
             if (!(char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-')) throw new InvalidOperationException("bad-ssh-user");
         return user;
+    }
+
+    static string ValidateUploadDirectory(string value)
+    {
+        string directory = (value ?? "").Trim();
+        if (directory.Length == 0) directory = "./";
+        if (directory.Length > 2048 || directory.IndexOf('\0') >= 0
+            || directory.IndexOf('\r') >= 0 || directory.IndexOf('\n') >= 0)
+            throw new InvalidOperationException("bad-ssh-upload-path");
+        foreach (char ch in directory)
+            if (char.IsControl(ch)) throw new InvalidOperationException("bad-ssh-upload-path");
+        if (directory[directory.Length - 1] != '/') directory += "/";
+        return directory;
     }
 
     static string ValidateAlgorithm(string value)

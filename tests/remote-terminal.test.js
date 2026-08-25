@@ -93,6 +93,76 @@ test("개인키는 네이티브 선택창의 실행 중 ID로만 전달하고 �
   assert.doesNotMatch(ui, /localStorage\.setItem\([^\n]*(?:selectedKey|privateKey|keyPath)/i);
 });
 
+test("업로드 파일은 네이티브 다중 선택창에서 고르고 로컬 경로를 브라우저에 노출하지 않는다", () => {
+  assert.match(ssh, /OFN_ALLOWMULTISELECT/);
+  assert.match(ssh, /OFN_EXPLORER/);
+  assert.match(ssh, /MaxUploadFiles = 32/);
+  assert.match(ssh, /RunUploadPicker\(\)/);
+  assert.match(ssh, /ReadNullSeparatedStrings/);
+  assert.match(ssh, /UploadPickerStatusJson/);
+  assert.match(ssh, /\.Append\(",\\\"files\\\":\["\)/);
+  assert.doesNotMatch(ssh, /UploadPickerPath/);
+  assert.doesNotMatch(ui, /webkitRelativePath/);
+  assert.match(launcher, /path == "\/ssh-upload-pick"/);
+  assert.match(launcher, /path == "\/ssh-upload-pick-status"/);
+  assert.match(ui, /"\/ssh-upload-pick"/);
+  assert.match(ui, /"\/ssh-upload-pick-status"/);
+});
+
+test("업로드는 파일 바이트를 HTTP에 싣지 않고 별도 scp 프로세스로 직접 전송한다", () => {
+  assert.match(ssh, /FindOpenSsh\("scp\.exe"\)/);
+  assert.match(ssh, /BuildScpArguments\(host, port, user, authentication, stagedKeyPath, selection\.Paths, remoteDirectory\)/);
+  assert.match(ssh, /foreach \(string path in localPaths\) args\.Add\(path\)/);
+  assert.match(ssh, /StrictHostKeyChecking=yes/);
+  assert.match(ssh, /UserKnownHostsFile=/);
+  assert.match(ssh, /StartAskPassServer\(pipeName, secretBytes\)/);
+  assert.match(ssh, /StartConPtyProcess\(upload, scp/);
+  assert.match(ssh, /session\.NativeProcessHandle = pi\.hProcess/);
+  assert.match(ssh, /WaitForNativeProcessExit\(upload, WAIT_INFINITE, out code\)/);
+  assert.match(ssh, /GetExitCodeProcess\(handle, out nativeCode\)/);
+  assert.match(ssh, /failure = "result-unavailable"/);
+  assert.match(ssh, /ValidateUploadDirectory/);
+  assert.match(ssh, /ClassifyUploadFailure\(upload\.DiagnosticTail\)/);
+  assert.match(ssh, /\\\"data\\\":\\\"\\\"/);
+  assert.doesNotMatch(ui, /readAsArrayBuffer[\s\S]{0,500}ssh-upload/);
+  assert.doesNotMatch(ui, /uploadTail|uploadDecoder/);
+  assert.match(launcher, /ClassDockSshTerminal\.StartUpload\(body\)/);
+});
+
+test("업로드 UI는 복수 파일·대상 디렉터리·재인증·진행률·취소를 제공한다", () => {
+  assert.match(ui, /button\("파일 업로드"/);
+  assert.match(ui, /로컬 파일 \(최대 32개\)/);
+  assert.match(ui, /원격 디렉터리/);
+  assert.match(ui, /같은 이름의 파일은 덮어쓸 수 있습니다/);
+  assert.match(ui, /uploadSecretInput\.type = "password"/);
+  assert.match(ui, /uploadSecretInput\.value = ""/);
+  assert.match(ui, /body:encodeStrings\(\[sessionId, uploadSelectionId, directory, secret\]\)/);
+  assert.match(ui, /ssh-upload-progress/);
+  assert.match(ui, /updateUploadProgress\(data\.progress\)/);
+  assert.match(ui, /파일 전송은 종료되었지만 완료 결과를 확인하지 못했습니다/);
+  assert.match(ui, /!resultUnavailable/);
+  assert.match(ui, /"\/ssh-upload-poll/);
+  assert.match(ui, /"\/ssh-upload-cancel/);
+  assert.match(launcher, /ClassDockSshTerminal\.PollUpload/);
+  assert.match(launcher, /ClassDockSshTerminal\.CancelUpload/);
+});
+
+test("원격 셸의 OSC 7 현재 경로를 우선 쓰고 감지 실패 시 명시적 pwd 요청과 홈 폴백을 제공한다", () => {
+  const api = uiApi();
+  const parsed = api.parseOsc7Location("file://lab-server/home/student/My%20Files");
+  assert.equal(parsed.host, "lab-server");
+  assert.equal(parsed.path, "/home/student/My Files/");
+  assert.equal(api.parseOsc7Location("https://lab-server/home/student"), null);
+  assert.equal(api.parseOsc7Location("file://lab-server/../../tmp\nunsafe"), null);
+  assert.match(ui, /captureOsc7Locations\(diagnosticTail\)/);
+  assert.match(ui, /button\("현재 경로 가져오기"/);
+  assert.match(ui, /file:\/\/classdock-/);
+  assert.ok(ui.includes('\\"$PWD\\"'));
+  assert.match(ui, /currentRemoteDirectory \|\| "\.\/"/);
+  assert.match(ui, /uploadPathInput\.addEventListener\("input", \(\) => \{ uploadPathIsAutomatic = false; \}\)/);
+  assert.match(ui, /uploadPathIsAutomatic \|\| \(probeMatch && pathProbeForcesInput\)/);
+});
+
 test("개인키는 사용자 전용 ACL 사본으로 접속하고 세션이 끝나면 사본을 지운다", () => {
   assert.match(ssh, /StagePrivateKey\(privateKey\.Path\)/);
   assert.match(ssh, /BuildSshArguments\(host, port, user, authentication, stagedKeyPath\)/);

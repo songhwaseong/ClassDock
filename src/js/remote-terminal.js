@@ -18,7 +18,11 @@ const MNRemoteTerminal = (() => {
   let hostInput = null, portInput = null, userInput = null, authMethodInput = null, passwordInput = null, rememberInput = null;
   let credentialLabel = null, keyField = null, keyButton = null, keyNameEl = null;
   let statusEl = null, connectButton = null, terminalTitle = null, terminalStatus = null;
-  let disconnectButton = null, retryButton = null;
+  let disconnectButton = null, retryButton = null, uploadButton = null;
+  let uploadPanel = null, uploadFileButton = null, uploadFileSummary = null, uploadPathInput = null;
+  let uploadPathDetectButton = null, uploadPathHint = null;
+  let uploadSecretInput = null, uploadSecretLabel = null, uploadStartButton = null, uploadCancelButton = null;
+  let uploadCloseButton = null, uploadProgress = null, uploadStatus = null;
   let fontSelect = null, fontSizeOutput = null, lineHeightButton = null;
   let terminal = null, sessionId = "", outputOffset = 0, generation = 0, inputQueue = [];
   let inputTimer = 0, inputSending = false, resizeObserver = null, resizeTimer = 0;
@@ -35,6 +39,11 @@ const MNRemoteTerminal = (() => {
   // 그 콜백이 새 터미널의 pendingWriteBytes 를 차감하지 못하게 한다.
   const resetWriteBackpressure = () => { writeEpoch++; pendingWriteBytes = 0; lastWrite = null; };
   let selectedKeyId = "", selectedKeyName = "", keyPicking = false, keyPickGeneration = 0;
+  let uploadAvailable = true, uploadSelectionId = "", uploadFiles = [], uploadTotalBytes = 0;
+  let uploadPicking = false, uploadPickGeneration = 0, uploadId = "", uploadOffset = 0, uploadGeneration = 0;
+  let uploadPollFailures = 0;
+  let currentRemoteDirectory = "", uploadPathIsAutomatic = true;
+  let pathProbeToken = "", pathProbeTimer = 0, pathProbeForcesInput = false;
 
   const encodeStrings = (values) => {
     const chunks = [];
@@ -123,6 +132,18 @@ const MNRemoteTerminal = (() => {
     if (/ssh-private-key-putty-format/.test(raw)) return "PuTTY .ppk 키는 바로 사용할 수 없습니다. PuTTYgen에서 OpenSSH 개인키로 변환하세요.";
     if (/ssh-private-key-invalid-format/.test(raw)) return "OpenSSH 또는 PEM 형식의 개인키 파일을 선택하세요.";
     if (/ssh-private-key-secure-copy-failed/.test(raw)) return "개인키를 접속용 임시 사본으로 만들지 못했습니다. 디스크 공간과 사용자 폴더 권한을 확인하세요.";
+    if (/ssh-upload-picker-failed/.test(raw)) return "Windows 업로드 파일 선택창을 열지 못했습니다. ClassDock을 다시 실행한 뒤 시도하세요.";
+    if (/ssh-upload-file-not-selected/.test(raw)) return "업로드할 파일을 다시 선택하세요.";
+    if (/ssh-upload-file-count/.test(raw)) return "파일은 한 번에 최대 32개까지 업로드할 수 있습니다.";
+    if (/ssh-upload-file-not-found/.test(raw)) return "선택한 업로드 파일을 찾을 수 없습니다. 파일을 다시 선택하세요.";
+    if (/ssh-upload-file-read-failed/.test(raw)) return "업로드 파일 정보를 읽지 못했습니다. 파일 접근 권한을 확인하세요.";
+    if (/ssh-upload-file-size/.test(raw)) return "선택한 파일의 전체 크기를 처리할 수 없습니다.";
+    if (/ssh-upload-file-paths-too-long/.test(raw)) return "선택한 파일 경로가 너무 깁니다. 파일 수를 줄이거나 짧은 폴더로 옮긴 뒤 시도하세요.";
+    if (/bad-ssh-upload-path/.test(raw)) return "원격 디렉터리 경로를 확인하세요.";
+    if (/ssh-upload-session-closed/.test(raw)) return "SSH 연결이 종료되었습니다. 재접속한 뒤 업로드하세요.";
+    if (/ssh-upload-session-limit/.test(raw)) return "동시에 실행할 수 있는 업로드 수를 넘었습니다. 진행 중인 업로드를 마친 뒤 시도하세요.";
+    if (/scp-client-not-found/.test(raw)) return "Windows OpenSSH의 scp.exe가 필요합니다. OpenSSH Client를 다시 설치하세요.";
+    if (/ssh-upload-not-found/.test(raw)) return "업로드 상태를 찾지 못했습니다. 파일을 다시 선택해 업로드하세요.";
     if (/bad-ssh-key-passphrase/.test(raw)) return "개인키 암호가 너무 길거나 올바르지 않습니다.";
     if (/ssh-host-key-changed/.test(raw)) return "저장된 서버 지문과 새 지문이 다릅니다.";
     if (/ssh-client-not-found|Windows OpenSSH Client/.test(raw)) return "Windows OpenSSH Client가 필요합니다. Windows 선택적 기능에서 OpenSSH 클라이언트를 설치하세요.";
@@ -270,6 +291,69 @@ const MNRemoteTerminal = (() => {
     const el = document.createElement("button"); el.type = "button"; el.className = className; el.textContent = copy; return el;
   };
 
+  const formatBytes = (value) => {
+    const bytes = Math.max(0, Number(value) || 0);
+    if (bytes < 1024) return bytes + " B";
+    const units = ["KB", "MB", "GB", "TB"];
+    let size = bytes / 1024, unit = 0;
+    while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+    return size.toFixed(size >= 100 ? 0 : size >= 10 ? 1 : 2) + " " + units[unit];
+  };
+
+  const updateUploadSelectionSummary = () => {
+    if (!uploadFileSummary) return;
+    if (!uploadSelectionId || !uploadFiles.length){ uploadFileSummary.textContent = "선택된 파일 없음"; return; }
+    const names = uploadFiles.slice(0, 2).join(", ");
+    uploadFileSummary.textContent = names + (uploadFiles.length > 2 ? " 외 " + (uploadFiles.length - 2) + "개" : "")
+      + " · " + formatBytes(uploadTotalBytes);
+  };
+
+  const setUploadBusy = (busy) => {
+    if (!uploadPanel) return;
+    uploadFileButton.disabled = busy || uploadPicking;
+    uploadPathInput.disabled = busy;
+    uploadPathDetectButton.disabled = busy || !!pathProbeToken;
+    uploadSecretInput.disabled = busy;
+    uploadStartButton.disabled = busy || !uploadSelectionId;
+    uploadCancelButton.hidden = !busy;
+    uploadCloseButton.disabled = busy;
+    if (uploadProgress){ uploadProgress.hidden = !busy; if (busy) uploadProgress.removeAttribute("value"); }
+  };
+
+  const chooseUploadFiles = async () => {
+    if (uploadPicking || uploadId) return;
+    uploadPicking = true; uploadFileButton.disabled = true;
+    const pick = ++uploadPickGeneration;
+    uploadStatus.textContent = "Windows 파일 선택창에서 업로드할 파일을 선택하세요…";
+    uploadStatus.classList.remove("error", "success");
+    try {
+      const start = await fetchTimed("/ssh-upload-pick", { method:"POST", headers:{ "X-ClassDock-Action":"1" } }, 10000);
+      if (!start.ok) throw new Error(await start.text());
+      for (let attempt = 0; attempt < 1200 && pick === uploadPickGeneration; attempt++){
+        const data = await responseData(await fetchTimed("/ssh-upload-pick-status", {
+          cache:"no-store", headers:{ "X-ClassDock-Action":"1" }
+        }, 10000));
+        if (data.state === "selected"){
+          uploadSelectionId = String(data.id || "");
+          uploadFiles = Array.isArray(data.files) ? data.files.map(String) : [];
+          uploadTotalBytes = Number(data.totalBytes) || 0;
+          updateUploadSelectionSummary();
+          uploadStatus.textContent = uploadFiles.length + "개 파일(" + formatBytes(uploadTotalBytes) + ")을 선택했습니다.";
+          uploadStartButton.disabled = !uploadSelectionId;
+          return;
+        }
+        if (data.state === "cancelled") { uploadStatus.textContent = "파일 선택을 취소했습니다."; return; }
+        if (data.state === "error") throw new Error(String(data.error || "ssh-upload-picker-failed"));
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (pick === uploadPickGeneration) throw new Error("파일 선택 시간이 초과되었습니다.");
+    } catch(error){
+      uploadStatus.textContent = friendlyError(error); uploadStatus.classList.add("error");
+    } finally {
+      if (pick === uploadPickGeneration){ uploadPicking = false; uploadFileButton.disabled = false; }
+    }
+  };
+
   const updateAuthenticationUi = () => {
     if (!authMethodInput || !keyField || !credentialLabel) return;
     const privateKey = authMethodInput.value === "private-key";
@@ -313,6 +397,209 @@ const MNRemoteTerminal = (() => {
     } finally {
       if (pick === keyPickGeneration) { keyPicking = false; keyButton.disabled = false; }
     }
+  };
+
+  const parseOsc7Location = (payload) => {
+    const text = String(payload || "");
+    if (!/^file:\/\//i.test(text)) return null;
+    const rest = text.slice(7), slash = rest.indexOf("/");
+    if (slash < 0) return null;
+    const host = rest.slice(0, slash).toLowerCase();
+    let path;
+    try { path = decodeURIComponent(rest.slice(slash)); } catch(_){ return null; }
+    if (!path.startsWith("/") || path.length > 2048 || /[\u0000-\u001f\u007f]/.test(path)) return null;
+    if (!path.endsWith("/")) path += "/";
+    return { host, path };
+  };
+
+  const updateUploadPathHint = (message="") => {
+    if (!uploadPathHint) return;
+    uploadPathHint.textContent = message || (currentRemoteDirectory
+      ? "현재 터미널 경로 감지됨: " + currentRemoteDirectory
+      : "경로를 감지하지 못하면 로그인 홈 디렉터리(./)를 사용합니다.");
+  };
+
+  const acceptRemoteDirectory = (location) => {
+    if (!location) return;
+    currentRemoteDirectory = location.path;
+    const probeMatch = !!pathProbeToken && location.host === "classdock-" + pathProbeToken;
+    if (probeMatch){
+      clearTimeout(pathProbeTimer); pathProbeTimer = 0; pathProbeToken = "";
+      if (uploadPathDetectButton) uploadPathDetectButton.disabled = false;
+    }
+    if (uploadPathInput && (uploadPathIsAutomatic || (probeMatch && pathProbeForcesInput))){
+      uploadPathInput.value = currentRemoteDirectory;
+      uploadPathIsAutomatic = true;
+    }
+    if (probeMatch) pathProbeForcesInput = false;
+    updateUploadPathHint();
+  };
+
+  const captureOsc7Locations = (value) => {
+    const pattern = /\x1b\]7;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+    let match;
+    while ((match = pattern.exec(String(value || "")))) acceptRemoteDirectory(parseOsc7Location(match[1]));
+  };
+
+  const requestCurrentRemoteDirectory = () => {
+    if (!sessionId || pathProbeToken) return;
+    const token = (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)).toLowerCase();
+    pathProbeToken = token; pathProbeForcesInput = true;
+    uploadPathDetectButton.disabled = true;
+    updateUploadPathHint("현재 셸에 경로를 요청했습니다. 셸 프롬프트에서만 정상 동작합니다…");
+    // 현재 PTY의 셸에서만 알 수 있는 $PWD를 고유한 OSC 7 표식으로 돌려받는다.
+    // vim·top 같은 프로그램 실행 중에는 그 프로그램의 입력이 되므로 사용자가 버튼으로 명시적으로 요청할 때만 보낸다.
+    queueInput("printf '\\033]7;file://classdock-" + token + "%s\\007\\n' \"$PWD\"\n");
+    clearTimeout(pathProbeTimer);
+    pathProbeTimer = setTimeout(() => {
+      if (pathProbeToken !== token) return;
+      pathProbeToken = ""; pathProbeForcesInput = false;
+      if (uploadPathDetectButton) uploadPathDetectButton.disabled = false;
+      updateUploadPathHint("현재 경로를 확인하지 못했습니다. 셸 프롬프트에서 다시 시도하거나 경로를 직접 입력하세요.");
+    }, 6000);
+  };
+
+  const showUploadPanel = () => {
+    if (!sessionId){
+      if (terminal) terminal.writeln("\r\n\x1b[33m[파일 업로드] SSH 연결이 완료된 뒤 사용할 수 있습니다.\x1b[0m");
+      return;
+    }
+    uploadPanel.hidden = false;
+    const privateKey = authMethodInput.value === "private-key";
+    uploadSecretLabel.textContent = privateKey ? "키 암호 (암호화된 키만)" : "SSH 비밀번호";
+    uploadSecretInput.placeholder = privateKey ? "암호가 없는 키는 비워 두세요" : "업로드 연결에 다시 입력";
+    uploadSecretInput.required = !privateKey;
+    uploadSecretInput.value = "";
+    if (uploadPathIsAutomatic) uploadPathInput.value = currentRemoteDirectory || "./";
+    updateUploadPathHint();
+    uploadStatus.textContent = uploadSelectionId
+      ? "원격 디렉터리와 업로드 인증을 확인하세요."
+      : "업로드할 Windows 파일을 선택하세요.";
+    uploadStatus.classList.remove("error", "success");
+    setUploadBusy(!!uploadId);
+    setTimeout(() => (uploadSelectionId ? uploadPathInput : uploadFileButton).focus(), 0);
+  };
+
+  const classifyUploadFailure = (failure, code, stopped) => {
+    if (stopped || Number(code) === 130) return "사용자가 업로드를 취소했습니다.";
+    if (failure === "authentication")
+      return authMethodInput.value === "private-key"
+        ? "개인키 또는 키 암호가 올바르지 않습니다. 업로드 인증을 다시 확인하세요."
+        : "계정 또는 비밀번호가 올바르지 않습니다. 업로드 비밀번호를 다시 입력하세요.";
+    if (failure === "write-permission" || failure === "remote-failure")
+      return "원격 디렉터리에 파일을 쓸 권한이 없습니다. 경로와 계정 권한을 확인하세요.";
+    if (failure === "directory-not-found")
+      return "원격 디렉터리를 찾을 수 없습니다. 존재하는 디렉터리 경로를 입력하세요.";
+    if (failure === "sftp-unavailable")
+      return "서버에서 SFTP 파일 전송을 시작하지 못했습니다. 서버의 SFTP 설정을 확인하세요.";
+    if (failure === "timeout") return "서버가 제시간에 응답하지 않았습니다. IP·포트와 서버 상태를 확인하세요.";
+    if (failure === "refused") return "서버가 파일 전송 연결을 거부했습니다. SSH 서비스와 포트를 확인하세요.";
+    if (failure === "host") return "서버 주소를 찾지 못했습니다. IP 주소나 도메인을 확인하세요.";
+    if (failure === "network") return "서버까지 연결 경로가 없습니다. 네트워크 상태를 확인하세요.";
+    if (failure === "connection-closed") return "서버 또는 네트워크가 파일 전송 연결을 종료했습니다.";
+    if (failure === "result-unavailable")
+      return "파일 전송은 종료되었지만 완료 결과를 확인하지 못했습니다. 원격 디렉터리에서 파일을 확인하세요.";
+    return "파일 업로드에 실패했습니다(코드 " + code + "). 원격 경로와 서버 상태를 확인하세요.";
+  };
+
+  const updateUploadProgress = (value) => {
+    const percent = Number(value);
+    if (percent >= 0){
+      const safePercent = Math.max(0, Math.min(100, percent));
+      uploadProgress.hidden = false; uploadProgress.value = safePercent;
+      uploadStatus.textContent = "현재 파일 " + safePercent + "% · 전체 " + uploadFiles.length + "개 · " + formatBytes(uploadTotalBytes);
+    } else uploadStatus.textContent = "업로드 연결 및 전송 준비 중…";
+  };
+
+  const finishUpload = (data) => {
+    const succeeded = Number(data.code) === 0 && !data.stopped;
+    const resultUnavailable = !data.stopped && Number(data.code) < 0 && String(data.failure || "") === "result-unavailable";
+    const message = succeeded
+      ? uploadFiles.length + "개 파일(" + formatBytes(uploadTotalBytes) + ") 업로드를 완료했습니다."
+      : classifyUploadFailure(String(data.failure || "unknown"), data.code, !!data.stopped);
+    uploadId = ""; uploadOffset = 0;
+    setUploadBusy(false);
+    uploadProgress.hidden = false;
+    if (succeeded) uploadProgress.value = 100;
+    else if (!resultUnavailable) uploadProgress.removeAttribute("value");
+    uploadStatus.textContent = message;
+    uploadStatus.classList.toggle("success", succeeded);
+    uploadStatus.classList.toggle("error", !succeeded && !data.stopped && !resultUnavailable);
+    if (terminal) terminal.writeln("\r\n" + (succeeded ? "\x1b[32m" : data.stopped || resultUnavailable ? "\x1b[33m" : "\x1b[31m")
+      + "[파일 업로드] " + message + "\x1b[0m");
+  };
+
+  const pollUploadLoop = async (myGeneration) => {
+    while (uploadId && myGeneration === uploadGeneration){
+      const id = uploadId;
+      try {
+        const data = await responseData(await fetch("/ssh-upload-poll?id=" + encodeURIComponent(id) + "&offset=" + uploadOffset, { cache:"no-store" }));
+        if (id !== uploadId || myGeneration !== uploadGeneration) return;
+        uploadPollFailures = 0;
+        updateUploadProgress(data.progress);
+        uploadOffset = Number(data.offset) || uploadOffset;
+        if ((data.complete || data.alive === false) && !data.more){ finishUpload(data); return; }
+      } catch(error){
+        if (id !== uploadId || myGeneration !== uploadGeneration) return;
+        uploadPollFailures++;
+        uploadStatus.textContent = "업로드 상태 확인 재시도 " + uploadPollFailures + "/12";
+        if (uploadPollFailures >= 12){
+          uploadId = ""; setUploadBusy(false);
+          uploadStatus.textContent = "업로드 상태를 확인하지 못했습니다. " + friendlyError(error);
+          uploadStatus.classList.add("error");
+          fetch("/ssh-upload-cancel?id=" + encodeURIComponent(id), { method:"POST", keepalive:true }).catch(() => {});
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 80 * uploadPollFailures)));
+      }
+    }
+  };
+
+  const startUpload = async () => {
+    if (uploadId || !sessionId) return;
+    if (!uploadSelectionId){ uploadStatus.textContent = "업로드할 파일을 먼저 선택하세요."; uploadStatus.classList.add("error"); return; }
+    const secret = uploadSecretInput.value;
+    if (authMethodInput.value !== "private-key" && !secret){
+      uploadStatus.textContent = "업로드 연결에 사용할 SSH 비밀번호를 다시 입력하세요."; uploadStatus.classList.add("error"); return;
+    }
+    const directory = uploadPathInput.value.trim() || "./";
+    uploadOffset = 0; uploadPollFailures = 0;
+    uploadStatus.textContent = "안전한 파일 전송 연결을 시작하고 있습니다…";
+    uploadStatus.classList.remove("error", "success");
+    setUploadBusy(true);
+    const myGeneration = ++uploadGeneration;
+    try {
+      const opened = await responseData(await fetchTimed("/ssh-upload-start", {
+        method:"POST", headers:{ "Content-Type":"application/octet-stream" },
+        body:encodeStrings([sessionId, uploadSelectionId, directory, secret])
+      }, 20000));
+      uploadSecretInput.value = "";
+      if (myGeneration !== uploadGeneration){
+        fetch("/ssh-upload-cancel?id=" + encodeURIComponent(opened.id), { method:"POST", keepalive:true }).catch(() => {}); return;
+      }
+      uploadId = String(opened.id || "");
+      uploadStatus.textContent = "업로드 연결 및 전송 준비 중…";
+      if (terminal) terminal.writeln("\r\n\x1b[36m[파일 업로드] " + uploadFiles.length + "개 · " + formatBytes(uploadTotalBytes)
+        + " → " + String(opened.directory || directory) + "\x1b[0m");
+      pollUploadLoop(myGeneration);
+    } catch(error){
+      uploadSecretInput.value = ""; uploadId = ""; setUploadBusy(false);
+      uploadStatus.textContent = friendlyError(error); uploadStatus.classList.add("error");
+    }
+  };
+
+  const cancelActiveUpload = async (showMessage) => {
+    const id = uploadId;
+    uploadGeneration++; uploadId = ""; uploadOffset = 0; uploadPollFailures = 0;
+    if (id){
+      try { await fetch("/ssh-upload-cancel?id=" + encodeURIComponent(id), { method:"POST" }); } catch(_){}
+    }
+    if (uploadSecretInput) uploadSecretInput.value = "";
+    if (uploadPanel){
+      setUploadBusy(false);
+      if (showMessage){ uploadStatus.textContent = "업로드를 취소했습니다."; uploadStatus.classList.remove("error", "success"); }
+    }
+    if (showMessage && terminal) terminal.writeln("\r\n\x1b[33m[파일 업로드] 사용자가 업로드를 취소했습니다.\x1b[0m");
   };
 
   const ensureUi = () => {
@@ -382,11 +669,12 @@ const MNRemoteTerminal = (() => {
     const terminalActions = document.createElement("div"); terminalActions.className = "ssh-session-actions";
     const terminalSwap = button("⇄", "btn ssh-dock-swap"); terminalSwap.title = "터미널 좌우 위치 교환"; terminalSwap.setAttribute("aria-label", "터미널 좌우 위치 교환");
     const terminalCollapse = button("접기", "btn ssh-dock-collapse"); terminalCollapse.title = "SSH 연결을 유지하고 터미널 접기";
+    uploadButton = button("파일 업로드", "btn ssh-upload-open"); uploadButton.title = "Windows 파일을 원격 서버로 업로드";
     disconnectButton = button("연결 끊기", "btn ssh-disconnect");
     retryButton = button("재접속", "btn primary ssh-retry"); retryButton.hidden = true;
     const changeServer = button("접속 정보", "btn ssh-reconnect");
     const terminalClose = button("닫기", "btn primary ssh-terminal-close");
-    terminalActions.append(terminalSwap, terminalCollapse, disconnectButton, retryButton, changeServer, terminalClose);
+    terminalActions.append(terminalSwap, terminalCollapse, uploadButton, disconnectButton, retryButton, changeServer, terminalClose);
     const fontControls = document.createElement("div"); fontControls.className = "ssh-font-controls"; fontControls.setAttribute("role", "group"); fontControls.setAttribute("aria-label", "터미널 글꼴 설정");
     fontSelect = document.createElement("select"); fontSelect.className = "ssh-font-select"; fontSelect.setAttribute("aria-label", "터미널 글꼴");
     [["cascadia","Cascadia Mono"],["consolas","Consolas"],["d2coding","D2Coding"],["nanum","나눔고딕코딩"],["system","시스템 고정폭"]].forEach(([value, label]) => {
@@ -398,8 +686,43 @@ const MNRemoteTerminal = (() => {
     lineHeightButton = button("줄 1.15", "ssh-line-height");
     fontControls.append(fontSelect, fontMinus, fontSizeOutput, fontPlus, lineHeightButton);
     terminalHead.append(terminalIdentity, terminalActions, fontControls);
+
+    uploadPanel = document.createElement("section"); uploadPanel.className = "ssh-upload-panel"; uploadPanel.hidden = true;
+    const uploadHeading = document.createElement("div"); uploadHeading.className = "ssh-upload-heading";
+    const uploadTitle = document.createElement("strong"); uploadTitle.textContent = "Windows 파일 업로드";
+    uploadCloseButton = button("닫기", "ssh-upload-close"); uploadCloseButton.setAttribute("aria-label", "파일 업로드 닫기");
+    uploadHeading.append(uploadTitle, uploadCloseButton);
+    const uploadGrid = document.createElement("div"); uploadGrid.className = "ssh-upload-grid";
+    const uploadPicker = document.createElement("div"); uploadPicker.className = "ssh-upload-picker";
+    uploadFileButton = button("파일 선택…", "btn");
+    uploadFileSummary = document.createElement("span"); uploadFileSummary.textContent = "선택된 파일 없음";
+    uploadPicker.append(uploadFileButton, uploadFileSummary);
+    uploadPathInput = document.createElement("input"); uploadPathInput.type = "text"; uploadPathInput.value = "./";
+    uploadPathInput.maxLength = 2048; uploadPathInput.spellcheck = false; uploadPathInput.autocomplete = "off";
+    uploadPathInput.placeholder = "예: ./ 또는 /home/student/uploads/";
+    uploadPathDetectButton = button("현재 경로 가져오기", "btn ssh-upload-path-detect");
+    uploadPathDetectButton.title = "현재 터미널이 셸 프롬프트에 있을 때 $PWD를 가져옵니다";
+    const uploadPathPicker = document.createElement("div"); uploadPathPicker.className = "ssh-upload-path-picker";
+    uploadPathHint = document.createElement("small"); uploadPathHint.className = "ssh-upload-path-hint";
+    uploadPathPicker.append(uploadPathInput, uploadPathDetectButton, uploadPathHint);
+    uploadSecretInput = document.createElement("input"); uploadSecretInput.type = "password"; uploadSecretInput.maxLength = 16384;
+    uploadSecretInput.autocomplete = "off"; uploadSecretInput.setAttribute("data-lpignore", "true");
+    const uploadSecretField = field("업로드 인증", uploadSecretInput);
+    uploadSecretLabel = uploadSecretField.firstElementChild;
+    const uploadFileField = field("로컬 파일 (최대 32개)", uploadPicker); uploadFileField.classList.add("ssh-upload-file-field");
+    uploadGrid.append(uploadFileField, field("원격 디렉터리", uploadPathPicker), uploadSecretField);
+    const uploadNote = document.createElement("p"); uploadNote.className = "ssh-upload-note";
+    uploadNote.textContent = "OSC 7을 지원하는 셸은 현재 디렉터리를 자동으로 사용합니다. 직접 입력한 경로는 자동 감지가 덮어쓰지 않습니다. 다른 서버로 다시 SSH 접속했거나 컨테이너 셸에서는 원래 서버 경로를 직접 입력하세요. 같은 이름의 파일은 덮어쓸 수 있습니다.";
+    uploadProgress = document.createElement("progress"); uploadProgress.className = "ssh-upload-progress"; uploadProgress.max = 100; uploadProgress.hidden = true;
+    uploadStatus = document.createElement("div"); uploadStatus.className = "ssh-upload-status"; uploadStatus.setAttribute("role", "status"); uploadStatus.setAttribute("aria-live", "polite");
+    const uploadActions = document.createElement("div"); uploadActions.className = "ssh-upload-actions";
+    uploadCancelButton = button("업로드 취소", "btn danger"); uploadCancelButton.hidden = true;
+    uploadStartButton = button("업로드 시작", "btn primary"); uploadStartButton.disabled = true;
+    uploadActions.append(uploadCancelButton, uploadStartButton);
+    uploadPanel.append(uploadHeading, uploadGrid, uploadNote, uploadProgress, uploadStatus, uploadActions);
+
     terminalHost = document.createElement("div"); terminalHost.className = "ssh-xterm-host";
-    terminalView.append(terminalHead, terminalHost);
+    terminalView.append(terminalHead, uploadPanel, terminalHost);
     card.append(formView, terminalView); dock.append(rail, card); main.append(divider, dock);
     applyDockState(); applyFontState(false);
 
@@ -413,6 +736,13 @@ const MNRemoteTerminal = (() => {
     divider.addEventListener("pointerdown", beginDockResize);
     divider.addEventListener("dblclick", toggleDockSide);
     disconnectButton.addEventListener("click", async () => { generation++; await disconnectSession(true); });
+    uploadButton.addEventListener("click", showUploadPanel);
+    uploadFileButton.addEventListener("click", chooseUploadFiles);
+    uploadPathDetectButton.addEventListener("click", requestCurrentRemoteDirectory);
+    uploadPathInput.addEventListener("input", () => { uploadPathIsAutomatic = false; });
+    uploadStartButton.addEventListener("click", startUpload);
+    uploadCancelButton.addEventListener("click", () => cancelActiveUpload(true));
+    uploadCloseButton.addEventListener("click", () => { if (!uploadId) uploadPanel.hidden = true; });
     retryButton.addEventListener("click", () => prepareReconnect());
     changeServer.addEventListener("click", () => prepareReconnect("접속 정보를 확인한 뒤 재접속하세요."));
     authMethodInput.addEventListener("change", () => { passwordInput.value = ""; updateAuthenticationUi(); });
@@ -432,6 +762,7 @@ const MNRemoteTerminal = (() => {
     if (window.visualViewport) window.visualViewport.addEventListener("resize", sendResize);
     window.addEventListener("beforeunload", () => {
       if (sessionId) fetch("/ssh-session-stop?id=" + encodeURIComponent(sessionId), { method:"POST", keepalive:true }).catch(() => {});
+      if (uploadId) fetch("/ssh-upload-cancel?id=" + encodeURIComponent(uploadId), { method:"POST", keepalive:true }).catch(() => {});
     });
     updateAuthenticationUi();
   };
@@ -445,6 +776,7 @@ const MNRemoteTerminal = (() => {
   const setSessionControls = (active) => {
     if (disconnectButton) disconnectButton.hidden = !active;
     if (retryButton) retryButton.hidden = !!active;
+    if (uploadButton) uploadButton.disabled = !active || !uploadAvailable;
   };
 
   const prepareReconnect = async (message) => {
@@ -490,6 +822,8 @@ const MNRemoteTerminal = (() => {
       if (location.protocol !== "http:" && location.protocol !== "https:") throw new Error("원격 터미널은 ClassDock.exe에서만 사용할 수 있습니다.");
       const info = await responseData(await fetchTimed("/ssh-capability", { cache:"no-store" }, 6000));
       if (!info.available) throw new Error(info.reason || "Windows OpenSSH Client가 필요합니다.");
+      uploadAvailable = info.upload !== false;
+      if (uploadButton) uploadButton.disabled = !sessionId || !uploadAvailable;
     } catch(error){
       statusEl.textContent = friendlyError(error);
       statusEl.classList.add("error"); connectButton.disabled = true;
@@ -611,6 +945,10 @@ const MNRemoteTerminal = (() => {
       setFormBusy(true, "대화형 SSH 터미널을 시작하고 있습니다…");
       terminalView.hidden = false; formView.hidden = true;
       await initializeXterm();
+      clearTimeout(pathProbeTimer); pathProbeTimer = 0; pathProbeToken = ""; pathProbeForcesInput = false;
+      currentRemoteDirectory = ""; uploadPathIsAutomatic = true;
+      if (uploadPathInput) uploadPathInput.value = "./";
+      updateUploadPathHint();
       diagnosticTail = ""; diagnosticDecoder = new TextDecoder(); pollFailures = 0; pollStatusBeforeRetry = "";
       terminalTitle.textContent = user + "@" + host + (port === "22" ? "" : ":" + port);
       terminalStatus.textContent = "연결 중";
@@ -681,6 +1019,7 @@ const MNRemoteTerminal = (() => {
   const appendDiagnostic = (bytes) => {
     if (!bytes || !bytes.length) return;
     diagnosticTail = (diagnosticTail + diagnosticDecoder.decode(bytes, { stream:true })).slice(-16000);
+    captureOsc7Locations(diagnosticTail);
     const plain = stripTerminalCodes(diagnosticTail);
     if (terminalStatus && terminalStatus.textContent === "SSH 인증 중"
       && (/Welcome to |Last login:/i.test(plain) || /(?:^|\r?\n)[^\r\n]{0,120}[$#%>] $/.test(plain)))
@@ -780,6 +1119,11 @@ const MNRemoteTerminal = (() => {
   };
 
   const disconnectSession = async (showMessage) => {
+    await cancelActiveUpload(false);
+    clearTimeout(pathProbeTimer); pathProbeTimer = 0; pathProbeToken = ""; pathProbeForcesInput = false;
+    currentRemoteDirectory = ""; uploadPathIsAutomatic = true;
+    if (uploadPathInput) uploadPathInput.value = "./";
+    updateUploadPathHint();
     clearTimeout(inputTimer); inputTimer = 0; inputQueue = [];
     const id = sessionId; sessionId = ""; outputOffset = 0; pollFailures = 0; pollStatusBeforeRetry = ""; resetWriteBackpressure();
     if (id){
@@ -796,5 +1140,5 @@ const MNRemoteTerminal = (() => {
 
   const trigger = document.getElementById("remoteTerminalOpen");
   if (trigger) trigger.addEventListener("click", open);
-  return { open, close, classifySshFailure };
+  return { open, close, classifySshFailure, parseOsc7Location };
 })();
