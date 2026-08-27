@@ -60,11 +60,33 @@ test("카드는 기존 화면 높이 아래 좌표도 보존하고 캔버스가 
   assert.equal(parsed.nodes[0].x, 4200); assert.equal(parsed.nodes[0].y, 12500); assert.deepEqual(concept.conceptCanvasSize(parsed.nodes), { width:4490, height:12710 });
 });
 test("커서 중심 확대는 확대 전후 같은 캔버스 지점을 가리킨다", () => {
-  const before = { left:360, top:240 }, anchor = { x:180, y:120 }, next = concept.conceptZoomScroll(before.left, before.top, anchor.x, anchor.y, 1, 1.5);
-  assert.equal((before.left + anchor.x) / 1, (next.left + anchor.x) / 1.5); assert.equal((before.top + anchor.y) / 1, (next.top + anchor.y) / 1.5);
+  const before = { x:-360, y:-240 }, anchor = { x:180, y:120 }, next = concept.conceptZoomPan(before.x, before.y, anchor.x, anchor.y, 1, 1.5);
+  assert.equal((anchor.x - before.x) / 1, (anchor.x - next.x) / 1.5); assert.equal((anchor.y - before.y) / 1, (anchor.y - next.y) / 1.5);
   assert.equal(concept.conceptClampZoom(.1), .35); assert.equal(concept.conceptClampZoom(4), 2);
 });
-test("가장자리 자동 스크롤은 카드가 마우스 아래에서 한 번 더 밀리지 않게 좌표를 보정한다", () => {
+test("핀치로 축소해도 두 손가락 가운데 캔버스 지점은 제자리에 남는다", () => {
+  const start = { x:120, y:80 }, center = { x:500, y:300 }, next = concept.conceptZoomPan(start.x, start.y, center.x, center.y, 1, .5);
+  assert.equal((center.x - start.x) / 1, (center.x - next.x) / .5); assert.equal((center.y - start.y) / 1, (center.y - next.y) / .5);
+});
+test("자유 이동은 사방으로 열려 있되 관계도를 화면 밖으로 놓치지는 않는다", () => {
+  const canvas = { width:1800, height:1100 }, view = { width:1000, height:700 };
+  const free = concept.conceptClampPan(-900, -400, canvas.width, canvas.height, view.width, view.height, 1);
+  assert.deepEqual(free, { x:-900, y:-400 });          // 오른쪽·아래로 미는 음수 이동이 그대로 살아 있다
+  const right = concept.conceptClampPan(9000, 0, canvas.width, canvas.height, view.width, view.height, 1);
+  assert.equal(right.x, view.width - 120);              // 왼쪽 가장자리 120px는 화면 안에 남는다
+  const left = concept.conceptClampPan(-9000, 0, canvas.width, canvas.height, view.width, view.height, 1);
+  assert.equal(left.x, 120 - canvas.width);             // 오른쪽 가장자리 120px도 마찬가지
+  const zoomedOut = concept.conceptClampPan(-9000, 0, canvas.width, canvas.height, view.width, view.height, .5);
+  assert.equal(zoomedOut.x, 120 - canvas.width * .5);   // 배율이 줄면 남는 범위도 같이 줄어든다
+});
+test("전개 발표 확대는 가운데 맞춤 여백이 달라져도 포인터 아래 캔버스 지점을 유지한다", () => {
+  const before = { left:20, top:30, offsetLeft:160, offsetTop:90 }, afterOffset = { left:16, top:16 }, anchor = { x:420, y:260 };
+  const next = concept.conceptZoomScrollWithOffset(before.left, before.top, anchor.x, anchor.y, .5, 1, before.offsetLeft, before.offsetTop, afterOffset.left, afterOffset.top);
+  const beforeX = (before.left + anchor.x - before.offsetLeft) / .5, beforeY = (before.top + anchor.y - before.offsetTop) / .5;
+  assert.equal((next.left + anchor.x - afterOffset.left) / 1, beforeX); assert.equal((next.top + anchor.y - afterOffset.top) / 1, beforeY);
+});
+test("가장자리 자동 이동은 카드가 마우스 아래에서 한 번 더 밀리지 않게 좌표를 보정한다", () => {
+  // 화면이 오른쪽으로 22px 옮겨간 것은 pan이 -22px 움직인 것과 같다.
   const origin = 500, pointerDelta = 100, actualScroll = 22, zoom = .5, next = concept.conceptDragCoordinate(origin, pointerDelta, actualScroll, zoom);
   const screenBefore = origin * zoom, screenAfter = next * zoom - actualScroll;
   assert.equal(screenAfter, screenBefore + pointerDelta);
@@ -83,8 +105,13 @@ test("개념 관계도 형식은 파일 열기·메뉴·manifest에 연결된다
   const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8"), loaders = fs.readFileSync(path.join(__dirname, "../src/js/file-loaders.js"), "utf8"), manifest = fs.readFileSync(path.join(__dirname, "../scripts.manifest.json"), "utf8"), source = fs.readFileSync(path.join(__dirname, "../src/js/concept-doc.js"), "utf8"), styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(html, /accept="[^"]*\.concept/); assert.match(html, /id="sbNewConcept"/); assert.match(html, /src="src\/js\/concept-doc\.js"/); assert.match(loaders, /ext === "concept"[\s\S]{0,120}loadConceptDoc/); assert.match(manifest, /"concept-doc\.js"/);
   assert.match(source, /concept-build-present/); assert.match(source, /event\.key === " " && !event\.shiftKey/); assert.match(source, /openPresentationOrderDialog/);
-  assert.match(source, /viewport\.addEventListener\("wheel"/); assert.match(source, /CONCEPT_MAX_COORD/); assert.match(source, /viewport\.scrollBy/);
-  assert.match(source, /moveY > 0 \? speed/); assert.match(styles, /overflow-anchor:none/);
+  assert.match(source, /conceptButton\("전개 발표"/); assert.doesNotMatch(source, /✨ 전개 발표/);
+  assert.match(source, /buildViewport\.addEventListener\("wheel"/); assert.match(source, /concept-build-zoom/); assert.match(source, /setBuildZoom\(1\)/);
+  assert.match(source, /viewport\.addEventListener\("wheel"/); assert.match(source, /CONCEPT_MAX_COORD/); assert.match(source, /setPan\(panX - dx, panY - dy\)/);
+  assert.match(source, /moveY > 0 \? speed/); assert.match(styles, /\.concept-viewport\{[^}]*touch-action:none/); assert.match(styles, /\.concept-viewport\{[^}]*overflow:hidden/);
+  // 자유 이동: 스크롤이 아니라 무대 변환으로 옮기고, 손가락 두 개면 핀치 확대로 넘어간다
+  assert.match(source, /translate\(\$\{panX\}px, \$\{panY\}px\) scale/); assert.match(source, /startPinch/); assert.match(source, /pointerType === "touch"/);
+  assert.doesNotMatch(source, /viewport\.scroll(?:Left|Top|To|By)/); assert.doesNotMatch(styles, /concept-zoom-space/);
   assert.match(styles, /\.concept-edge-label\{fill:var\(--ink\)/); assert.match(styles, /\[data-theme="dark"\] \.concept-edge-label\{fill:#f8fafc;stroke:#0b1120\}/);
   assert.match(source, /openAutoLayoutDialog/); assert.match(source, /정렬 뒤 화면에 맞춤/); assert.match(styles, /concept-layout-choices/);
 });

@@ -14,3 +14,7 @@ node_modules/
 package-lock.json
 test-results/
 playwright-report/
+
+# 로컬 백업 스크립트 (커밋 안 된 변경분 zip 만들기)
+backup-uncommitted.ps1
+backup-uncommitted.bat

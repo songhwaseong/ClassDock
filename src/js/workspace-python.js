@@ -10,9 +10,10 @@ const MNWorkspacePython = (() => {
   async function openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo){
     if (!ownerDoc || !wordInfo || !wordInfo.word || typeof resolvePythonImportedDefinition !== "function") return false;
     const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "").replace(/\\/g, "/").replace(/^\/+/, "");
-    const hit = resolvePythonImportedDefinition(source, wordInfo.word, docPath(ownerDoc), docs.map(docPath));
+    const candidates = docs.filter(doc => typeof workspaceHasDoc !== "function" || workspaceHasDoc(doc));
+    const hit = resolvePythonImportedDefinition(source, wordInfo.word, docPath(ownerDoc), candidates.map(docPath));
     if (!hit) return false;
-    const target = docs.find(doc => docPath(doc) === hit.path);
+    const target = candidates.find(doc => docPath(doc) === hit.path);
     if (!target) return false;
     let targetSource = "";
     try { targetSource = await openDocRunText(target); } catch(_){}
@@ -64,6 +65,7 @@ const MNWorkspacePython = (() => {
     const context = ownerDoc.archiveCtx || null;
     const rows = [];
     for (const doc of docs){
+      if (typeof workspaceHasDoc === "function" && !workspaceHasDoc(doc)) continue;
       if (!doc || doc === ownerDoc || doc.kind === "pdf") continue;
       if (doc.sourceKey && String(doc.sourceKey).startsWith("definition:")) continue;
       if ((doc.archiveCtx || null) !== context) continue;
@@ -235,7 +237,7 @@ const MNWorkspacePython = (() => {
     const docPath = (doc) => String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
       .replace(/\\/g, "/").replace(/^\/+/, "");
     const context = ownerDoc.archiveCtx || null;
-    const scoped = docs.filter(doc => doc && (doc.archiveCtx || null) === context && docPath(doc) === wanted);
+    const scoped = docs.filter(doc => doc && (typeof workspaceHasDoc !== "function" || workspaceHasDoc(doc)) && (doc.archiveCtx || null) === context && docPath(doc) === wanted);
     const target = scoped.find(doc => ownerDoc.parentId != null && doc.parentId === ownerDoc.parentId) || scoped[0];
     if (!target) return false;
     const line = Math.max(1, Number(hit.line) || 1);

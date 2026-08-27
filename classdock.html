@@ -20,8 +20,11 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path class="rail" d="M5 4h4v16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path><rect x="3" y="4" width="18" height="16" rx="2"></rect><path class="divider" d="M9 4v16"></path></svg>
   </button>
   <div class="brand">ClassDock</div>
+  <!-- 작업공간 추가(＋)·목록(▾) 버튼은 헤더에서 빼고, 탭 우클릭 메뉴(openWorkspaceCtxMenu)로 옮겼다. -->
+  <div class="workspace-switcher" id="workspaceSwitcher">
+    <div class="workspace-tabs" id="workspaceTabs" role="tablist" aria-label="작업공간" title="우클릭: 작업공간 목록·추가·이름 변경·삭제"></div>
+  </div>
   <span class="workspace-activity" id="workspaceActivity" hidden><span class="workspace-activity-dot"></span><span id="workspaceActivityText"></span></span>
-  <span class="server-status" id="serverStatus" hidden><span class="server-status-dot"></span><span class="server-status-text" id="serverStatusText"></span></span>
   <span class="py-ready" id="pyReadyStatus" title="브라우저 파이썬(Pyodide) 준비 상태" hidden><span class="py-ready-ico" aria-hidden="true"></span><span class="py-ready-text" id="pyReadyText"></span></span>
   </div>
   <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="originalSaveBadge" class="original-save-badge" hidden>원본 저장</span><span id="activeDocEncoding" class="doc-encoding" hidden></span><span id="activeDocStatus" class="doc-status" hidden></span></div>
@@ -95,7 +98,7 @@
     </div>
   </div>
   <button id="langToggle" class="lang-toggle hdr-tool-lang" type="button" title="Switch to English / 영어로 전환" aria-label="Switch to English / 영어로 전환">EN</button>
-  <button id="settingsOpen" type="button" title="설정" aria-label="설정">⚙</button>
+  <button id="settingsOpen" type="button" title="설정" aria-label="설정"><span aria-hidden="true">⚙</span><span class="server-status" id="serverStatus" hidden aria-hidden="true"><span class="server-status-dot"></span><span class="server-status-text" id="serverStatusText"></span></span></button>
   <button id="helpOpen" class="hdr-tool-help" type="button" title="도움말·단축키" aria-label="도움말">?</button>
   <button id="themeToggle" class="theme-toggle hdr-tool-theme" type="button" title="다크 모드로 전환" aria-label="테마 전환"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
   </div>
@@ -638,11 +641,32 @@
     </div>
 
     <div class="settings-section" data-settings-panel="tools" role="tabpanel" hidden>
-      <p class="settings-hint">체크한 도구만 도구막대에 보입니다. ▶ 실행·저장·설정(⚙) 등 꼭 필요한 버튼은 항상 표시됩니다. (변경은 저장 즉시 적용)</p>
-      <div class="settings-tools-group"><strong>헤더(맨 위 막대) 버튼</strong><div id="settingToolsHeader" class="settings-tools-list"></div></div>
-      <div class="settings-tools-group"><strong>Python 편집기 도구</strong><div id="settingToolsPy" class="settings-tools-list"></div></div>
-      <div class="settings-tools-group"><strong>노트북 도구</strong><div id="settingToolsNb" class="settings-tools-list"></div></div>
-      <div class="settings-tools-group"><strong>이미지 편집 도구</strong><div id="settingToolsImg" class="settings-tools-list"></div></div>
+      <p class="settings-hint">화면을 고른 뒤 필요한 도구를 오른쪽 <strong>노출</strong> 목록으로 옮기세요. 여러 항목은 Ctrl·Shift로 함께 선택할 수 있습니다. (변경은 저장 즉시 적용)</p>
+      <div id="settingToolScopeTabs" class="settings-tool-scope-tabs" role="tablist" aria-label="도구를 설정할 화면">
+        <button class="settings-tool-scope-tab active" type="button" role="tab" aria-selected="true" tabindex="0" data-tool-target="header">헤더 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="py">Python <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="javascript">JavaScript <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="notebook">노트북 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="image">이미지 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="whiteboard">화이트보드 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="map">지도 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="music">악보 <span class="settings-tool-scope-count"></span></button>
+      </div>
+      <div id="settingToolTransfer" class="settings-tool-transfer" role="tabpanel">
+        <div class="settings-tool-list-pane">
+          <div class="settings-tool-list-head"><strong>비노출</strong><span id="settingToolsHiddenCount">0개</span></div>
+          <select id="settingToolsHidden" class="settings-tool-listbox" multiple size="14" aria-label="비노출 도구"></select>
+        </div>
+        <div class="settings-tool-transfer-actions" aria-label="도구 노출 상태 바꾸기">
+          <button class="btn settings-tool-arrow" id="settingToolsShow" type="button" aria-label="선택한 도구 노출" title="선택한 도구 노출">→</button>
+          <button class="btn settings-tool-arrow" id="settingToolsHide" type="button" aria-label="선택한 도구 비노출" title="선택한 도구 비노출">←</button>
+        </div>
+        <div class="settings-tool-list-pane">
+          <div class="settings-tool-list-head"><strong>노출</strong><span id="settingToolsVisibleCount">0개</span></div>
+          <select id="settingToolsVisible" class="settings-tool-listbox" multiple size="14" aria-label="노출 도구"></select>
+        </div>
+      </div>
+      <p class="settings-tool-fixed"><strong>항상 표시:</strong> <span id="settingToolsFixed">설정·저장 등 필수 버튼</span></p>
     </div>
 
     <div class="settings-section" data-settings-panel="pet" role="tabpanel" hidden>
@@ -682,6 +706,11 @@
         <div class="shortcut-settings-head"><div><strong>단축키</strong><small>항목을 누른 뒤 새 조합을 입력하세요.</small></div><button class="btn" id="settingsResetShortcuts" type="button">기본값 복원</button></div>
         <div id="shortcutSettingsList" class="shortcut-settings-list"></div>
         <div id="shortcutSettingsError" class="shortcut-settings-error" role="alert" aria-live="polite"></div>
+      </div>
+      <div class="shortcut-settings music-keyboard-settings">
+        <div class="shortcut-settings-head"><div><strong>악보 자판</strong><small>계이름과 자판 작곡 도구를 원하는 키로 설정합니다. 계이름 키는 따라치기·음감 테스트에도 함께 적용됩니다.</small></div><button class="btn" id="settingsResetMusicKeyboard" type="button">기본값 복원</button></div>
+        <div id="musicKeyboardSettingsList" class="shortcut-settings-list music-keyboard-settings-list"></div>
+        <div id="musicKeyboardSettingsError" class="shortcut-settings-error" role="alert" aria-live="polite"></div>
       </div>
     </div>
 
@@ -860,6 +889,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/core.js"></script>
 <script src="src/js/icons.js"></script>
 <script src="src/js/state.js"></script>
+<script src="src/js/workspaces.js"></script>
 <script src="src/js/history.js"></script>
 <script src="src/js/search-history.js"></script>
 <script src="src/js/special-chars.js"></script>

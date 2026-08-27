@@ -9,6 +9,23 @@ const context = {};
 vm.runInNewContext(source + "\nthis.renderer = MNBoardRenderer;", context);
 const renderer = context.renderer;
 
+test("배경 그림은 저장된 항목 상자 대신 현재 화면 영역에 맞춰진다", () => {
+  const calls = [];
+  const ctx = {
+    globalAlpha:1,
+    save(){}, restore(){},
+    drawImage(...args){ calls.push(args.slice(1)); }
+  };
+  const img = { complete:true, naturalWidth:800, naturalHeight:800 };
+  const area = { x:0, y:0, w:1000, h:500 };
+
+  renderer.drawBackgroundImage(ctx, { img, fit:"cover", opacity:1, x:90, y:80, w:10, h:10 }, area);
+  assert.deepEqual(calls.pop(), [0, 200, 800, 400, 0, 0, 1000, 500]);
+
+  renderer.drawBackgroundImage(ctx, { img, fit:"contain", opacity:1, x:90, y:80, w:10, h:10 }, area);
+  assert.deepEqual(calls.pop(), [250, 0, 500, 500]);
+});
+
 test("화이트보드 선택 판정은 도형·선·텍스트를 구분한다", () => {
   const measure = (line, size) => String(line).length * size * 0.5;
   assert.equal(renderer.hitTestItem({ type:"rect", x1:10, y1:20, x2:110, y2:80, width:2 }, { x:50, y:50 }, measure, 7), true);

@@ -622,12 +622,14 @@ test("앱 모드와 일반 브라우저가 달라도 런처의 지도 검색 공
   assert.match(go, /setMapSearchProvider\("osm"\)/);
 });
 
-test("주소 검색은 고른 후보로만 옮기고 임시 표식은 지도 캡처에서 뺀다", () => {
+test("주소 검색은 고른 후보로만 옮기고 검색 표식은 지도 고르기 캡처에만 넣는다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   const search = /function mapAttachPlaceSearch\(([\s\S]*?)\n\}/.exec(source);
   const mover = /function mapSearchLocationMover\(([\s\S]*?)\n\}/.exec(source);
+  const picker = /async function openMapPicker\(\)([\s\S]*?)\n\}\n\n\/\* ===== 열기/.exec(source);
   assert.ok(search);
   assert.ok(mover);
+  assert.ok(picker);
   /* 후보가 여럿인데 찾자마자 옮기면, 첫 결과가 엉뚱할 때 목록에서 제 후보를 찾는 동안 보던
      자리를 잃는다 — 고른 뒤에 움직인다. 옮기는 길은 pick 하나뿐이라 두 갈래로 갈라지지 않는다. */
   const shown = /const showResults = \(places\) => \{([\s\S]*?)\n  \};/.exec(search[1]);
@@ -643,7 +645,11 @@ test("주소 검색은 고른 후보로만 옮기고 임시 표식은 지도 캡
   assert.match(search[1], /if \(!showResults\(places\)\) setNote\(/);
   assert.match(mover[1], /L\.circleMarker/);
   assert.match(mover[1], /fillColor:"#e11d48"/);
+  // 일반 지도 문서 내보내기는 편집 중인 임시 표식을 빼되, 칠판에서 고른 화면은 보이는 검색
+  // 결과 자체가 자료이므로 빨간 점과 장소명·주소 이름표를 함께 찍는다.
   assert.match(source, /MAP_CAPTURE_HIDDEN_PANES[^\n]*\.map-search-location-pane/);
+  assert.match(source, /options\.includeSearchLocation && selector === "\.map-search-location-pane"/);
+  assert.match(picker[1], /mapCaptureDataUrl\(stage, spec\.attribution, \[\], \{ includeSearchLocation:true \}\)/);
 });
 
 test("주변 시설은 갈래 대신 직접 적은 말로도 반경 안을 찾는다", () => {

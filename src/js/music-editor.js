@@ -39,16 +39,28 @@ const MUSIC_TOOL_VALUES = [
 ];
 const MUSIC_SOLFEGE_LABELS = { C:"도", D:"레", E:"미", F:"파", G:"솔", A:"라", B:"시" };
 
-/* 따라치기 자판 — 피아노 건반 배열 그대로다.
-     흰건반  A S D F G H J = 도 레 미 파 솔 라 시
-     검은건반 W E   T Y U  = 도♯ 레♯  파♯ 솔♯ 라♯
-     숫자      1~7         = 도 레 미 파 솔 라 시 (자판 자리를 아직 못 외운 학생용)
-   event.key 가 아니라 event.code 로 읽는다 — 그래야 한글 입력 상태에서도 같은 자리가 같은 음이 된다
-   (코드 따라치기가 한/영 때문에 겪은 문제를 여기서는 아예 만들지 않는다). */
-const MUSIC_PRACTICE_KEYS = {
-  KeyA:0, KeyW:1, KeyS:2, KeyE:3, KeyD:4, KeyF:5, KeyT:6, KeyG:7, KeyY:8, KeyH:9, KeyU:10, KeyJ:11,
+/* 작곡·따라치기·음감 테스트가 같은 악보 자판 설정을 쓴다. 실제 키 배열은 state.js 의
+   MUSIC_KEYBOARD_DEFINITIONS/appSettings.musicKeyboard 에 있고, 여기서는 음높이로만 바꾼다. */
+const MUSIC_KEYBOARD_PITCH_CLASSES = Object.freeze(Object.fromEntries(
+  MUSIC_KEYBOARD_DEFINITIONS.filter((item) => Number.isFinite(item.pitchClass))
+    .map((item) => [item.id, item.pitchClass])
+));
+const MUSIC_KEYBOARD_NOTE_VALUES = Object.freeze({
+  noteWhole:"whole", noteHalf:"half", noteQuarter:"quarter", noteEighth:"eighth", noteSixteenth:"16th"
+});
+const MUSIC_KEYBOARD_ACCIDENTALS = Object.freeze({
+  accidentalFlat:-1, accidentalNatural:0, accidentalSharp:1
+});
+const MUSIC_KEYBOARD_DURATION_ORDER = Object.freeze(["16th", "eighth", "quarter", "half", "whole"]);
+const MUSIC_PRACTICE_DIGIT_KEYS = Object.freeze({
   Digit1:0, Digit2:2, Digit3:4, Digit4:5, Digit5:7, Digit6:9, Digit7:11
-};
+});
+function musicKeyboardPitchClassForEvent(event){
+  const action = musicKeyboardActionForEvent(event, appSettings.musicKeyboard);
+  const pitchClass = MUSIC_KEYBOARD_PITCH_CLASSES[action];
+  if (Number.isFinite(pitchClass)) return pitchClass;
+  return event && event.code ? MUSIC_PRACTICE_DIGIT_KEYS[event.code] : undefined;
+}
 // 음감 테스트 4단계에서 옥타브를 받는 숫자키. 이때는 숫자가 음이름이 아니라 옥타브다.
 const MUSIC_EAR_OCTAVE_KEYS = { Digit3:3, Digit4:4, Digit5:5, Digit6:6 };
 const MUSIC_IMAGE_SCALE = 2;        // 메모 그림은 2배로 구워 확대해도 뭉개지지 않게 한다
@@ -320,6 +332,7 @@ async function mountMusicEditor(doc){
   let lastMidiNoteAt = 0;
   let lastMidiBaseId = null;
   let imageReferenceUrl = "";
+  let keyboardComposeActive = false; // 보기/입력 모드라 .msheet와 되돌리기에는 넣지 않는다
 
   /* 따라치기(음 맞추기) — 악보를 흐린 교본으로 깔고 자판으로 음을 따라 눌러 보는 모드.
      핵심 규칙 하나: 연습 내내 `sheet` 를 한 글자도 건드리지 않는다. 채점 상태는 화면 표시일 뿐이라
@@ -424,12 +437,64 @@ async function mountMusicEditor(doc){
   }
   timbreSelect.addEventListener("change", () => {
     sheet.timbre = timbreSelect.value;
+    const activePart = musicActivePart(sheet);
+    if (activePart) activePart.timbre = sheet.timbre;
+    syncPartControls();
     touch();
     if (history) history.commit();
     const keyAlter = musicKeyAlterations(sheet.key).C || 0;
     MNMusicAudio.previewNote({ rest:false, step:"C", octave:4, alter:keyAlter }, sheet.timbre);
   });
   timbreWrap.appendChild(timbreSelect);
+
+  const partWrap = document.createElement("span");
+  partWrap.className = "music-field music-parts";
+  partWrap.append("파트");
+  const partSelect = document.createElement("select");
+  partSelect.className = "music-timbre music-part-select";
+  partSelect.setAttribute("aria-label", "편집할 악기 파트");
+  const partNameInput = document.createElement("input");
+  partNameInput.type = "text";
+  partNameInput.className = "music-part-name";
+  partNameInput.maxLength = 80;
+  partNameInput.setAttribute("aria-label", "파트 이름");
+  const addPartBtn = musicButton("＋", "새 악기 파트 추가");
+  const removePartBtn = musicButton("−", "현재 악기 파트 삭제");
+  const partMuteBtn = musicButton("M", "현재 파트 음소거");
+  partMuteBtn.setAttribute("aria-pressed", "false");
+  const partVolumeInput = document.createElement("input");
+  partVolumeInput.type = "range";
+  partVolumeInput.className = "music-part-volume";
+  partVolumeInput.min = "0";
+  partVolumeInput.max = "100";
+  partVolumeInput.step = "5";
+  partVolumeInput.setAttribute("aria-label", "현재 파트 음량");
+  const partVolumeLabel = document.createElement("span");
+  partVolumeLabel.className = "music-part-volume-label";
+  partWrap.append(partSelect, partNameInput, addPartBtn, removePartBtn, partMuteBtn,
+    partVolumeInput, partVolumeLabel);
+
+  partSelect.addEventListener("change", () => selectEditorPart(partSelect.value, true));
+  partNameInput.addEventListener("input", () => {
+    const part = musicActivePart(sheet);
+    if (!part) return;
+    part.name = musicClampText(partNameInput.value, 80) || "악기";
+    syncPartSelectOptions();
+    touch();
+    if (history) history.commitSoon(MUSIC_TYPING_DELAY);
+  });
+  addPartBtn.addEventListener("click", addEditorPart);
+  removePartBtn.addEventListener("click", removeEditorPart);
+  partMuteBtn.addEventListener("click", () => {
+    const part = musicActivePart(sheet);
+    if (!part) return;
+    part.muted = !part.muted;
+    syncPartControls();
+    touch();
+    if (history) history.commit();
+  });
+  partVolumeInput.addEventListener("input", () => setEditorPartVolume(Number(partVolumeInput.value) / 100, false));
+  partVolumeInput.addEventListener("change", () => setEditorPartVolume(Number(partVolumeInput.value) / 100, true));
 
   const exampleWrap = document.createElement("span");
   exampleWrap.className = "music-field music-example";
@@ -461,10 +526,17 @@ async function mountMusicEditor(doc){
   timeSelect.addEventListener("change", () => {
     const [beats, beatValue] = timeSelect.value.split("/").map(Number);
     sheet.time = { beats, beatValue };
+    const previousDrumStyle = musicDrumStyle(sheet.drumStyle);
+    const drumChanged = previousDrumStyle !== "off" && !musicDrumStyleCompatible(previousDrumStyle, sheet.time);
+    if (drumChanged) sheet.drumStyle = "basic";
+    syncDrumControls();
     afterEdit();
     const check = musicValidate(sheet);
     if (!check.ok && typeof toast === "function"){
-      toast(`박자를 ${timeSelect.value} 로 바꿨어요. 박자와 맞지 않는 마디는 아래에 표시했어요.`, 3400);
+      toast(`박자를 ${timeSelect.value} 로 바꿨어요. 박자와 맞지 않는 마디는 아래에 표시했어요.`
+        + (drumChanged ? " 드럼은 기본 드럼으로 바꿨어요." : ""), 3800);
+    } else if (drumChanged && typeof toast === "function"){
+      toast(`${MUSIC_DRUM_STYLE_SPECS[previousDrumStyle].label} 스타일은 ${timeSelect.value}에 맞지 않아 기본 드럼으로 바꿨어요.`, 3600);
     }
   });
   timeWrap.appendChild(timeSelect);
@@ -520,7 +592,15 @@ async function mountMusicEditor(doc){
   saveBtn.textContent = "💾 저장";
   saveBtn.addEventListener("click", () => { saveMusicSheet(doc); });
 
-  bar.append(titleInput, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
+  tempoWrap.classList.add("music-toolvis-tempo");
+  timeWrap.classList.add("music-toolvis-time");
+  keyWrap.classList.add("music-toolvis-key");
+  transposeBtn.classList.add("music-toolvis-transpose");
+  timbreWrap.classList.add("music-toolvis-timbre");
+  partWrap.classList.add("music-toolvis-parts");
+  grandStaffBtn.classList.add("music-toolvis-grandstaff");
+  exampleWrap.classList.add("music-toolvis-example");
+  bar.append(titleInput, partWrap, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
     toolbarToggleBtn, historyWrap, saveBtn);
 
   /* ----- 도구상자 ----- */
@@ -632,6 +712,30 @@ async function mountMusicEditor(doc){
   measureProgress.className = "music-measure-progress";
   measureProgress.setAttribute("aria-live", "polite");
 
+  valueGroup.classList.add("music-toolvis-notevalue");
+  dotBtn.classList.add("music-toolvis-dots");
+  restBtn.classList.add("music-toolvis-rest");
+  accidentalGroup.classList.add("music-toolvis-accidental");
+  staffGroup.classList.add("music-toolvis-staff");
+  voiceGroup.classList.add("music-toolvis-voice");
+  chordBtn.classList.add("music-toolvis-chord"); removeChordBtn.classList.add("music-toolvis-chord");
+  tieBtn.classList.add("music-toolvis-tie");
+  slurBtn.classList.add("music-toolvis-slur");
+  chordSymbolBtn.classList.add("music-toolvis-chordsymbol");
+  lyricBtn.classList.add("music-toolvis-lyric");
+  dynamicBtn.classList.add("music-toolvis-dynamic");
+  articulationBtn.classList.add("music-toolvis-articulation");
+  tripletBtn.classList.add("music-toolvis-triplet");
+  fingeringBtn.classList.add("music-toolvis-fingering");
+  pedalBtn.classList.add("music-toolvis-pedal");
+  repeatStartBtn.classList.add("music-toolvis-repeat"); repeatEndBtn.classList.add("music-toolvis-repeat"); endingBtn.classList.add("music-toolvis-repeat");
+  measureSettingsBtn.classList.add("music-toolvis-measure-settings");
+  solfegeBtn.classList.add("music-toolvis-solfege");
+  eraserBtn.classList.add("music-toolvis-eraser");
+  positionBtn.classList.add("music-toolvis-position");
+  addBarBtn.classList.add("music-toolvis-measures"); removeBarBtn.classList.add("music-toolvis-measures");
+  addStaffBtn.classList.add("music-toolvis-staves"); removeStaffBtn.classList.add("music-toolvis-staves");
+  resetScoreBtn.classList.add("music-toolvis-reset");
   tools.append(valueGroup, dotBtn, restBtn, accidentalGroup, staffGroup, voiceGroup, chordBtn, removeChordBtn,
     tieBtn, slurBtn, chordSymbolBtn, lyricBtn, dynamicBtn, articulationBtn, tripletBtn, fingeringBtn, pedalBtn,
     repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, solfegeBtn, eraserBtn, positionBtn,
@@ -641,6 +745,19 @@ async function mountMusicEditor(doc){
   beginnerTools.className = "music-beginner-tools";
   const beginnerLabel = document.createElement("strong");
   beginnerLabel.textContent = "쉬운 입력";
+  const keyboardComposeBtn = musicButton("⌨ 자판 작곡",
+    "설정한 계이름 키로 음표를 이어서 입력합니다. 마디가 차면 다음 마디를 자동으로 만듭니다 (Esc: 끝내기)");
+  keyboardComposeBtn.classList.add("music-keyboard-compose");
+  keyboardComposeBtn.setAttribute("aria-pressed", "false");
+  keyboardComposeBtn.addEventListener("click", () => setKeyboardCompose(!keyboardComposeActive));
+  const keyboardSettingsBtn = musicButton("⚙ 자판 설정", "설정의 악보 자판에서 계이름마다 원하는 키를 고릅니다");
+  keyboardSettingsBtn.classList.add("music-keyboard-settings-open");
+  keyboardSettingsBtn.addEventListener("click", () => {
+    const open = document.getElementById("settingsOpen");
+    const tab = document.querySelector('#settingsTabs [data-settings-tab="shortcut"]');
+    if (open) open.click();
+    if (tab) tab.click();
+  });
   const easyOctaveSelect = document.createElement("select");
   easyOctaveSelect.className = "music-timbre music-easy-octave";
   easyOctaveSelect.setAttribute("aria-label", "계이름 입력 음역");
@@ -648,6 +765,7 @@ async function mountMusicEditor(doc){
     const option = document.createElement("option");
     option.value = String(octave);
     option.textContent = label;
+    option.selected = octave === 4; // 새 단일 오선은 높은음자리표이므로 C4부터 바로 입력되게 한다
     easyOctaveSelect.appendChild(option);
   }
   const easyNoteGroup = document.createElement("span");
@@ -661,13 +779,15 @@ async function mountMusicEditor(doc){
   const easyHelp = document.createElement("span");
   easyHelp.className = "music-easy-help";
   easyHelp.textContent = "음표 길이를 고른 뒤 계이름을 누르세요";
-  beginnerTools.append(beginnerLabel, easyOctaveSelect, easyNoteGroup, easyHelp);
+  beginnerTools.classList.add("music-toolvis-easy");
+  beginnerTools.append(beginnerLabel, keyboardComposeBtn, keyboardSettingsBtn, easyOctaveSelect, easyNoteGroup, easyHelp);
 
   /* ----- 재생 바 ----- */
   const playBar = document.createElement("div");
   playBar.className = "music-play";
 
   const playAllBtn = musicButton("▶ 전체 재생");
+  const playActivePartBtn = musicButton("▶ 현재 파트", "현재 편집 중인 악기 파트만 재생합니다");
   const playRightBtn = musicButton("▶ 오른손", "높은음자리표만 재생합니다");
   const playLeftBtn = musicButton("▶ 왼손", "낮은음자리표만 재생합니다");
   playRightBtn.disabled = playLeftBtn.disabled = !sheet.grandStaff;
@@ -703,6 +823,53 @@ async function mountMusicEditor(doc){
   countInBtn.setAttribute("aria-pressed", "false");
   const metronomeBtn = musicButton("♩ 메트로놈", "재생 중 박자를 소리로 들려줍니다");
   metronomeBtn.setAttribute("aria-pressed", "false");
+  const drumWrap = document.createElement("label");
+  drumWrap.className = "music-field music-drums";
+  drumWrap.append("🥁 반주");
+  const drumSelect = document.createElement("select");
+  drumSelect.className = "music-timbre music-drum-select";
+  drumSelect.title = "박자표에 맞춘 킥·스네어·하이햇을 재생합니다";
+  for (const value of MUSIC_DRUM_STYLES){
+    const spec = MUSIC_DRUM_STYLE_SPECS[value];
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = spec.label;
+    if (Array.isArray(spec.times)) option.title = `사용 가능: ${spec.times.join("·")}`;
+    drumSelect.appendChild(option);
+  }
+  drumSelect.value = musicDrumStyle(sheet.drumStyle);
+  const accompanimentModeSelect = document.createElement("select");
+  accompanimentModeSelect.className = "music-timbre music-accompaniment-mode";
+  accompanimentModeSelect.title = "코드 기호를 읽어 베이스와 코드 반주를 더합니다";
+  for (const [value, label] of [["drums", "드럼만"], ["bass", "드럼+베이스"], ["full", "전체 반주"]]){
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    accompanimentModeSelect.appendChild(option);
+  }
+  accompanimentModeSelect.value = musicAccompanimentMode(sheet.accompanimentMode);
+  const accompanimentTimbreSelect = document.createElement("select");
+  accompanimentTimbreSelect.className = "music-timbre music-accompaniment-timbre";
+  accompanimentTimbreSelect.title = "코드 반주 악기";
+  for (const [value, label] of [["piano", "피아노"], ["guitar", "기타"]]){
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    accompanimentTimbreSelect.appendChild(option);
+  }
+  accompanimentTimbreSelect.value = musicAccompanimentTimbre(sheet.accompanimentTimbre);
+  const drumVolumeInput = document.createElement("input");
+  drumVolumeInput.type = "range";
+  drumVolumeInput.className = "music-drum-volume";
+  drumVolumeInput.min = "0";
+  drumVolumeInput.max = "100";
+  drumVolumeInput.step = "5";
+  drumVolumeInput.value = String(Math.round(musicClampDrumVolume(sheet.drumVolume) * 100));
+  drumVolumeInput.setAttribute("aria-label", "반주 음량");
+  const drumVolumeLabel = document.createElement("span");
+  drumVolumeLabel.className = "music-drum-volume-label";
+  drumWrap.append(drumSelect, accompanimentModeSelect, accompanimentTimbreSelect,
+    drumVolumeInput, drumVolumeLabel);
   const practiceWrap = document.createElement("span");
   practiceWrap.className = "music-practice";
   const practiceBtn = musicButton("🎯 따라치기",
@@ -823,8 +990,28 @@ async function mountMusicEditor(doc){
   const status = document.createElement("span");
   status.className = "music-status";
 
-  playBar.append(playAllBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
+  playAllBtn.classList.add("music-toolvis-playback"); playActivePartBtn.classList.add("music-toolvis-playback");
+  playRightBtn.classList.add("music-toolvis-playback");
+  playLeftBtn.classList.add("music-toolvis-playback"); stopBtn.classList.add("music-toolvis-playback");
+  rangeWrap.classList.add("music-toolvis-range"); playPartBtn.classList.add("music-toolvis-range");
+  repeatMeasureBtn.classList.add("music-toolvis-repeat-measure");
+  speedWrap.classList.add("music-toolvis-speed");
+  countInBtn.classList.add("music-toolvis-countin");
+  metronomeBtn.classList.add("music-toolvis-metronome");
+  drumWrap.classList.add("music-toolvis-drums");
+  practiceWrap.classList.add("music-toolvis-practice");
+  earWrap.classList.add("music-toolvis-ear");
+  volumeWrap.classList.add("music-toolvis-volume");
+  musicXmlBtn.classList.add("music-toolvis-xml");
+  midiInputBtn.classList.add("music-toolvis-midi-input");
+  midiExportBtn.classList.add("music-toolvis-midi-export");
+  imageReferenceBtn.classList.add("music-toolvis-reference");
+  wavBtn.classList.add("music-toolvis-wav");
+  memoBtn.classList.add("music-toolvis-memo");
+  printBtn.classList.add("music-toolvis-print");
+  zoomWrap.classList.add("music-toolvis-zoom");
+  playBar.append(playAllBtn, playActivePartBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
+    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 악보 ----- */
@@ -928,6 +1115,94 @@ async function mountMusicEditor(doc){
   applyToolbarVisible();
   syncFullscreenState();              // 이미 전체화면인 채로 악보를 열었을 때
 
+  function syncPartSelectOptions(){
+    const active = musicActivePart(sheet);
+    const current = active ? active.id : "";
+    partSelect.replaceChildren();
+    for (const part of musicParts(sheet)){
+      const option = document.createElement("option");
+      option.value = part.id;
+      option.textContent = `${part.muted ? "🔇 " : ""}${part.name}`;
+      partSelect.appendChild(option);
+    }
+    partSelect.value = current;
+  }
+
+  function syncPartControls(){
+    const part = musicActivePart(sheet);
+    syncPartSelectOptions();
+    if (!part) return;
+    if (document.activeElement !== partNameInput) partNameInput.value = part.name;
+    const volume = musicClampPartVolume(part.volume);
+    partVolumeInput.value = String(Math.round(volume * 100));
+    partVolumeLabel.textContent = `${Math.round(volume * 100)}%`;
+    partMuteBtn.classList.toggle("is-on", part.muted === true);
+    partMuteBtn.setAttribute("aria-pressed", part.muted ? "true" : "false");
+    partMuteBtn.textContent = part.muted ? "🔇" : "M";
+    removePartBtn.disabled = musicParts(sheet).length <= 1;
+  }
+
+  function selectEditorPart(partId, commit){
+    MNMusicAudio.stop();
+    const part = musicSelectPart(sheet, partId);
+    if (!part) return;
+    selection = null;
+    activeStaff = "treble";
+    activeVoice = 1;
+    timbreSelect.value = sheet.timbre;
+    grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
+    toInput.value = String(sheet.measures.length);
+    syncPartControls();
+    syncTools();
+    updateStatus();
+    drawScore();
+    touch();
+    if (commit && history) history.commit();
+  }
+
+  function addEditorPart(){
+    const choices = ["piano", "guitar", "xylophone", "harp", "flute", "clarinet"];
+    const count = musicParts(sheet).length;
+    const timbre = choices[count % choices.length];
+    const part = musicAddPart(sheet, { name:timbreLabel(timbre), timbre });
+    if (!part) return;
+    selection = null;
+    activeStaff = "treble";
+    activeVoice = 1;
+    timbreSelect.value = sheet.timbre;
+    grandStaffBtn.textContent = "🎼 단일 오선";
+    syncPartControls();
+    afterEdit();
+    partNameInput.focus();
+    partNameInput.select();
+  }
+
+  async function removeEditorPart(){
+    const part = musicActivePart(sheet);
+    if (!part || musicParts(sheet).length <= 1) return;
+    const hasNotes = part.measures.some((measure) => [measure.notes, measure.voice2Notes,
+      measure.bassNotes, measure.bassVoice2Notes].some((notes) => Array.isArray(notes) && notes.length));
+    if (hasNotes && (typeof confirmDialog !== "function"
+      || !await confirmDialog(`'${part.name}' 파트와 그 음표를 삭제할까요?`, "파트 삭제", "취소"))) return;
+    musicRemovePart(sheet, part.id);
+    selection = null;
+    activeStaff = "treble";
+    activeVoice = 1;
+    timbreSelect.value = sheet.timbre;
+    grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
+    syncPartControls();
+    afterEdit();
+  }
+
+  function setEditorPartVolume(value, commit){
+    const part = musicActivePart(sheet);
+    if (!part) return;
+    part.volume = musicClampPartVolume(value);
+    syncPartControls();
+    touch();
+    if (commit && history) history.commit();
+  }
+
   /* ----- 도구·상태 표시 ----- */
   function setToolValue(value){
     if (MUSIC_TOOL_VALUES.some((item) => item.value === value)) tool.value = value;
@@ -979,13 +1254,13 @@ async function mountMusicEditor(doc){
     syncTools();
   }
 
-  function setGrandStaff(enabled){
+  async function setGrandStaff(enabled){
     const next = !!enabled;
     if (!next){
       const bassCount = sheet.measures.reduce((sum, measure) => sum
         + staffNotes(measure, "bass", 1).length + staffNotes(measure, "bass", 2).length, 0);
-      if (bassCount && typeof confirm === "function" &&
-          !confirm(`왼손 음표와 쉼표 ${bassCount}개를 지우고 단일 오선으로 바꿀까요?`)) return;
+      if (bassCount && (typeof confirmDialog !== "function" ||
+          !await confirmDialog(`왼손 음표와 쉼표 ${bassCount}개를 지우고 단일 오선으로 바꿀까요?`, "바꾸기", "취소"))) return;
       for (const measure of sheet.measures){ measure.bassNotes = []; measure.bassVoice2Notes = []; }
       activeStaff = "treble";
     }
@@ -1074,7 +1349,8 @@ async function mountMusicEditor(doc){
 
   function updateStatus(){
     const total = musicTimeline(sheet).totalSeconds;
-    status.textContent = `${sheet.measures.length}마디 · ${total.toFixed(1)}초`;
+    const part = musicActivePart(sheet);
+    status.textContent = `${musicParts(sheet).length}파트 · ${part ? part.name + " · " : ""}${sheet.measures.length}마디 · ${total.toFixed(1)}초`;
     updateMeasureProgress();
     const check = musicValidate(sheet);
     if (check.ok){
@@ -1198,7 +1474,22 @@ async function mountMusicEditor(doc){
     setScoreZoom(scoreZoom + (direction > 0 ? MUSIC_ZOOM_STEP : -MUSIC_ZOOM_STEP), clientX, clientY);
   }
 
+  // SVG를 다시 그리거나 아래 오선의 음표를 고를 때 문서 전체가 위로 끌려가지 않게,
+  // 악보 스크롤 상자 안에서만 필요한 만큼 움직인다.
+  function revealScoreElement(el){
+    if (!el || typeof el.getBoundingClientRect !== "function") return;
+    const hostRect = scoreHost.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    const pad = 24;
+    if (rect.top < hostRect.top + pad) scoreHost.scrollTop += rect.top - hostRect.top - pad;
+    else if (rect.bottom > hostRect.bottom - pad) scoreHost.scrollTop += rect.bottom - hostRect.bottom + pad;
+    if (rect.left < hostRect.left + pad) scoreHost.scrollLeft += rect.left - hostRect.left - pad;
+    else if (rect.right > hostRect.right - pad) scoreHost.scrollLeft += rect.right - hostRect.right + pad;
+  }
+
   function drawScore(){
+    // replaceChildren()는 스크롤 위치를 0으로 되돌릴 수 있다. 아래 오선을 편집하던 위치를 기억한다.
+    const previousScroll = { left:scoreHost.scrollLeft, top:scoreHost.scrollTop };
     const VF = (typeof window !== "undefined") ? window.VexFlow : null;
     noteEls.clear();
     solfegeEls.clear();
@@ -1494,6 +1785,8 @@ async function mountMusicEditor(doc){
       }
       vexReady = true;
       applyScoreZoom();
+      scoreHost.scrollLeft = previousScroll.left;
+      scoreHost.scrollTop = previousScroll.top;
       paintSelection();
       paintPractice();          // 배율·창 크기가 바뀌어 다시 그려도 따라치기 진도 표시가 살아남는다
     } catch(error){
@@ -1542,7 +1835,7 @@ async function mountMusicEditor(doc){
     updateMeasureProgress();
     if (selection && (!options || options.scroll !== false)){
       const el = noteEls.get(selection.id);
-      if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block:"nearest", inline:"nearest" });
+      revealScoreElement(el);
     }
   }
 
@@ -1565,7 +1858,7 @@ async function mountMusicEditor(doc){
     return `${name} ${semitones > 0 ? "올리기" : "내리기"}`;
   }
 
-  function applyTranspose(semitones){
+  async function applyTranspose(semitones){
     const preview = musicTransposeSheet(sheet, semitones, { apply:false });
     if (preview.blocked > 0){
       if (typeof toast === "function"){
@@ -1575,9 +1868,9 @@ async function mountMusicEditor(doc){
       return;
     }
     if (!preview.changed && preview.key === sheet.key) return;
-    if (preview.outOfRange > 0 && typeof confirm === "function"
-      && !confirm(`${transposeLabel(semitones)}: 음 ${preview.outOfRange}개가 이 오선에서 권장하는 음역`
-        + `(오른손 G3~C6·왼손 C2~C5)을 벗어나요.\n그래도 옮길까요? (Ctrl+Z로 되돌릴 수 있어요)`)) return;
+    if (preview.outOfRange > 0 && (typeof confirmDialog !== "function"
+      || !await confirmDialog(`${transposeLabel(semitones)}: 음 ${preview.outOfRange}개가 이 오선에서 권장하는 음역`
+        + `(오른손 G3~C6·왼손 C2~C5)을 벗어나요.\n그래도 옮길까요? (Ctrl+Z로 되돌릴 수 있어요)`, "옮기기", "취소"))) return;
 
     MNMusicAudio.stop();
     const result = musicTransposeSheet(sheet, semitones);
@@ -1606,7 +1899,7 @@ async function mountMusicEditor(doc){
     ];
   }
 
-  function loadSelectedExample(){
+  async function loadSelectedExample(){
     const example = musicExampleSheet(exampleSelect.value);
     if (!example){
       if (typeof toast === "function") toast("먼저 시작할 예제를 골라 주세요.", 2200);
@@ -1615,24 +1908,35 @@ async function mountMusicEditor(doc){
     const hasNotes = sheet.measures.some((measure) =>
       (measure.notes || []).length > 0 || (measure.voice2Notes || []).length > 0 ||
       (measure.bassNotes || []).length > 0 || (measure.bassVoice2Notes || []).length > 0);
-    if (hasNotes && typeof confirm === "function" && !confirm("현재 악보 내용을 선택한 예제로 바꿀까요?")) return;
+    if (hasNotes && (typeof confirmDialog !== "function"
+      || !await confirmDialog("현재 악보 내용을 선택한 예제로 바꿀까요?", "바꾸기", "취소"))) return;
     MNMusicAudio.stop();
     sheet.title = example.title;
     sheet.tempo = example.tempo;
     sheet.time = example.time;
     sheet.key = example.key;
     sheet.timbre = example.timbre;
+    sheet.drumStyle = example.drumStyle;
+    sheet.drumVolume = example.drumVolume;
+    sheet.accompanimentMode = example.accompanimentMode;
+    sheet.accompanimentTimbre = example.accompanimentTimbre;
     sheet.showSolfege = example.showSolfege;
+    sheet.parts = example.parts;
+    sheet.activePartId = example.activePartId;
     sheet.grandStaff = example.grandStaff === true;
     sheet.measures = example.measures;
+    musicSelectPart(sheet, example.activePartId);
     titleInput.value = sheet.title;
     tempoInput.value = String(sheet.tempo);
     timeSelect.value = `${sheet.time.beats}/${sheet.time.beatValue}`;
     keySelect.value = sheet.key;
     timbreSelect.value = sheet.timbre;
+    syncPartControls();
+    syncDrumControls();
     grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
     activeStaff = "treble";
     activeVoice = 1;
+    easyOctaveSelect.value = "4";
     selection = null;
     exampleSelect.value = "";
     afterEdit();
@@ -1645,10 +1949,11 @@ async function mountMusicEditor(doc){
     return tool.accidental === null ? keyAlter : tool.accidental;
   }
 
-  function toolNote(pitch, measureIndex){
+  function toolNote(pitch, measureIndex, forcedAlter){
     if (tool.rest) return musicRest(tool.value, tool.dots);
     return musicNote(pitch.step, pitch.octave, {
-      alter:toolAlterForPitch(pitch, measureIndex), value:tool.value, dots:tool.dots
+      alter:Number.isFinite(forcedAlter) ? musicClampAlter(forcedAlter) : toolAlterForPitch(pitch, measureIndex),
+      value:tool.value, dots:tool.dots
     });
   }
 
@@ -1667,12 +1972,12 @@ async function mountMusicEditor(doc){
     return `${korean} (${musicNoteName(note)}) · ${musicDurationLabel(note)}`;
   }
 
-  function insertNote(measureIndex, pitch, staff){
+  function insertNote(measureIndex, pitch, staff, forcedAlter){
     const measure = sheet.measures[measureIndex];
     if (!measure) return;
     const targetStaff = staff === "bass" ? "bass" : activeStaff;
     const targetVoice = activeVoice;
-    const note = toolNote(pitch, measureIndex);
+    const note = toolNote(pitch, measureIndex, forcedAlter);
     if (!musicCanFit(sheet, measureIndex, note, targetStaff, targetVoice)){
       if (typeof toast === "function") toast(`${measureIndex + 1}마디가 이미 가득 찼어요. 마디를 더하거나 짧은 음표를 골라 보세요.`, 3000);
       return;
@@ -1689,18 +1994,14 @@ async function mountMusicEditor(doc){
     if (!note.rest) MNMusicAudio.previewNote(note, sheet.timbre);
   }
 
-  function insertSolfegeNote(step){
-    if (!MUSIC_STEPS.includes(step)) return;
+  function insertSequentialPitch(pitch, forcedAlter, keepRest = false){
     // 따라치기·음감 테스트 중에는 '쉬운 입력'의 도레미 버튼이 그대로 누르는 건반이 된다(자판을 못 쓰는 학생용).
-    if (earTest.active()){ earTest.press(MUSIC_STEP_SEMITONES[step]); return; }
-    if (practice.active){ practicePress(MUSIC_STEP_SEMITONES[step]); return; }
-    tool.rest = false;
+    if (!keepRest) tool.rest = false;
     syncTools();
-    const pitch = { step, octave:Math.round(Number(easyOctaveSelect.value) || 4) };
-    const candidate = toolNote(pitch, selection ? selection.measure : 0);
-    if (!musicMidiInRange(musicMidiNumber(candidate), activeStaff)){
+    const candidate = toolNote(pitch, selection ? selection.measure : 0, forcedAlter);
+    if (!candidate.rest && !musicMidiInRange(musicMidiNumber(candidate), activeStaff)){
       if (typeof toast === "function") toast("이 악보에서 쓸 수 있는 음역을 벗어나요.", 2200);
-      return;
+      return false;
     }
     const start = selection ? selection.measure : 0;
     let measureIndex = -1;
@@ -1713,8 +2014,96 @@ async function mountMusicEditor(doc){
       toInput.value = String(sheet.measures.length);
       if (typeof toast === "function") toast("빈 마디를 하나 추가하고 이어서 넣었어요.", 2200);
     }
-    insertNote(measureIndex, pitch, activeStaff);
+    insertNote(measureIndex, pitch, activeStaff, forcedAlter);
+    return true;
   }
+
+  function insertSolfegeNote(step){
+    if (!MUSIC_STEPS.includes(step)) return;
+    // 따라치기·음감 테스트 중에는 '쉬운 입력'의 도레미 버튼이 그대로 누르는 건반이 된다(자판을 못 쓰는 학생용).
+    if (earTest.active()){ earTest.press(MUSIC_STEP_SEMITONES[step]); return; }
+    if (practice.active){ practicePress(MUSIC_STEP_SEMITONES[step]); return; }
+    const pitch = { step, octave:Math.round(Number(easyOctaveSelect.value) || 4) };
+    insertSequentialPitch(pitch);
+  }
+
+  function insertKeyboardPitchClass(pitchClass, forcedOctave){
+    if (!Number.isFinite(pitchClass)) return false;
+    const octave = Number.isFinite(forcedOctave) ? Math.round(forcedOctave) : Math.round(Number(easyOctaveSelect.value) || 4);
+    const whiteStep = Object.keys(MUSIC_STEP_SEMITONES).find((step) => MUSIC_STEP_SEMITONES[step] === pitchClass);
+    if (whiteStep) return insertSequentialPitch({ step:whiteStep, octave }, undefined, true);
+    const settings = musicEffectiveMeasureSettings(sheet, activeMeasureIndex());
+    const useFlats = ((MUSIC_KEYS[settings.key] || {}).vex || "").includes("b");
+    const pitch = musicPitchFromMidi((octave + 1) * 12 + pitchClass, useFlats);
+    return pitch ? insertSequentialPitch(pitch, pitch.alter, true) : false;
+  }
+
+  function musicKeyboardHelpText(){
+    const mapping = normalizeMusicKeyboard(appSettings.musicKeyboard);
+    const white = MUSIC_KEYBOARD_DEFINITIONS.filter((item) => [0, 2, 4, 5, 7, 9, 11].includes(item.pitchClass))
+      .map((item) => `${item.label} ${musicKeyboardCodeLabel(mapping[item.id])}`).join(" · ");
+    const values = ["noteWhole", "noteHalf", "noteQuarter", "noteEighth", "noteSixteenth"]
+      .map((id) => musicKeyboardCodeLabel(mapping[id])).join("/");
+    return `${white} · 옥타브 ${musicKeyboardCodeLabel(mapping.octaveDown)}/${musicKeyboardCodeLabel(mapping.octaveUp)}`
+      + ` · 길이 ${values} · 쉼표 ${musicKeyboardCodeLabel(mapping.toggleRest)}`
+      + ` · 마디/오선 ${musicKeyboardCodeLabel(mapping.addMeasure)}/${musicKeyboardCodeLabel(mapping.addStaff)}`
+      + " · ← 짧게 / → 길게";
+  }
+
+  function changeSelectedKeyboardDuration(direction){
+    const note = selectedNote();
+    if (!note || !selection){
+      if (typeof toast === "function") toast("먼저 계이름 키로 음표나 쉼표를 넣어 주세요.", 1800);
+      return false;
+    }
+    const currentIndex = MUSIC_KEYBOARD_DURATION_ORDER.indexOf(note.value);
+    const from = currentIndex >= 0 ? currentIndex : MUSIC_KEYBOARD_DURATION_ORDER.indexOf("quarter");
+    const nextIndex = Math.max(0, Math.min(MUSIC_KEYBOARD_DURATION_ORDER.length - 1,
+      from + (direction > 0 ? 1 : -1)));
+    if (nextIndex === from){
+      if (typeof toast === "function") toast(direction > 0 ? "이미 가장 긴 온음표예요." : "이미 가장 짧은 16분음표예요.", 1400);
+      return false;
+    }
+    const nextValue = MUSIC_KEYBOARD_DURATION_ORDER[nextIndex];
+    const measure = sheet.measures[selection.measure];
+    const usedWithoutCurrent = musicMeasureUsedTicks(measure, selection.staff, selection.voice) - musicNoteTicks(note);
+    const candidate = { ...note, value:nextValue };
+    if (usedWithoutCurrent + musicNoteTicks(candidate) > musicMeasureCapacity(sheet, selection.measure)){
+      if (typeof toast === "function") toast("이 마디의 남은 박자보다 길어서 늘릴 수 없어요.", 2000);
+      return false;
+    }
+    note.value = nextValue;
+    tool.value = nextValue; // 다음에 넣는 음표도 방금 고른 길이에서 시작한다
+    afterEdit();
+    syncTools();
+    updateMeasureProgress();
+    return true;
+  }
+
+  function setKeyboardCompose(on, announce = true){
+    const next = !!on;
+    if (next && (practice.active || earTest.active() || root.classList.contains("is-running"))){
+      if (announce && typeof toast === "function") toast("재생이나 연습을 끝낸 뒤 자판 작곡을 켜 주세요.", 2400);
+      return false;
+    }
+    keyboardComposeActive = next;
+    keyboardComposeBtn.classList.toggle("is-on", next);
+    keyboardComposeBtn.setAttribute("aria-pressed", next ? "true" : "false");
+    keyboardComposeBtn.textContent = next ? "■ 자판 작곡 끝내기" : "⌨ 자판 작곡";
+    root.classList.toggle("is-keyboard-compose", next);
+    scoreHost.classList.toggle("is-keyboard-compose", next);
+    easyHelp.textContent = next
+      ? `${easyOctaveSelect.value}옥타브 · ${musicKeyboardHelpText()} · Esc 끝내기`
+      : (practice.active ? musicPracticeHelpText() : MUSIC_EASY_HELP);
+    if (next){
+      scoreHost.focus({ preventScroll:true });
+      if (announce && typeof toast === "function") toast("자판 작곡을 시작했어요. " + musicKeyboardHelpText(), 5200);
+    } else if (announce && typeof toast === "function") toast("자판 작곡을 끝냈어요.", 1800);
+    return true;
+  }
+  easyOctaveSelect.addEventListener("change", () => {
+    if (keyboardComposeActive) easyHelp.textContent = `${easyOctaveSelect.value}옥타브 · ${musicKeyboardHelpText()} · Esc 끝내기`;
+  });
 
   function deleteNote(measureIndex, noteId, staff, voice){
     const measure = sheet.measures[measureIndex];
@@ -1807,10 +2196,11 @@ async function mountMusicEditor(doc){
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
   }
 
-  function editSelectedLyric(){
+  async function editSelectedLyric(){
     const note = selectedNote();
-    if (!note || note.rest || typeof prompt !== "function") return;
-    const value = prompt("이 음표 아래에 붙일 가사 한 음절을 입력하세요.\n비워 두면 지워집니다.", note.lyric || "");
+    if (!note || note.rest || typeof askText !== "function") return;
+    const value = await askText({ title:"가사 편집", message:"이 음표 아래에 붙일 가사 한 음절을 입력하세요. 비우면 지워집니다.",
+      value:note.lyric || "", okText:"적용" });
     if (value === null) return;
     const lyric = musicClampText(value, 80);
     if (lyric) note.lyric = lyric;
@@ -1820,10 +2210,11 @@ async function mountMusicEditor(doc){
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
   }
 
-  function editSelectedDynamic(){
+  async function editSelectedDynamic(){
     const note = selectedNote();
-    if (!note || note.rest || typeof prompt !== "function") return;
-    const value = prompt("셈여림표를 입력하세요: pp, p, mp, mf, f, ff\n비워 두면 지워집니다.", note.dynamic || "");
+    if (!note || note.rest || typeof askText !== "function") return;
+    const value = await askText({ title:"셈여림표 편집", message:"pp, p, mp, mf, f, ff 중 하나를 입력하세요. 비우면 지워집니다.",
+      value:note.dynamic || "", placeholder:"pp, p, mp, mf, f, ff", okText:"적용" });
     if (value === null) return;
     const dynamic = String(value).trim().toLowerCase();
     if (dynamic && !["pp", "p", "mp", "mf", "f", "ff"].includes(dynamic)){
@@ -1871,10 +2262,11 @@ async function mountMusicEditor(doc){
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
   }
 
-  function editSelectedFingering(){
+  async function editSelectedFingering(){
     const note = selectedNote();
-    if (!note || note.rest || typeof prompt !== "function") return;
-    const value = prompt("손가락 번호 1~5를 입력하세요.\n비워 두면 지워집니다.", note.fingering || "");
+    if (!note || note.rest || typeof askText !== "function") return;
+    const value = await askText({ title:"손가락 번호 편집", message:"손가락 번호 1~5를 입력하세요. 비우면 지워집니다.",
+      value:note.fingering || "", placeholder:"1~5", okText:"적용" });
     if (value === null) return;
     const fingering = Math.round(Number(value));
     if (String(value).trim() && (fingering < 1 || fingering > 5)){
@@ -1917,30 +2309,30 @@ async function mountMusicEditor(doc){
     afterEdit();
   }
 
-  function editActiveMeasureSettings(measureIndex){
-    if (typeof prompt !== "function") return;
+  async function editActiveMeasureSettings(measureIndex){
+    if (typeof askText !== "function") return;
     const index = Number.isInteger(measureIndex) ? measureIndex : activeMeasureIndex();
     const measure = sheet.measures[index];
     if (!measure) return;
     const effective = musicEffectiveMeasureSettings(sheet, index);
-    const timeValue = prompt(`${index + 1}마디부터 바꿀 박자를 입력하세요. (예: 3/4)\n비워 두면 앞 마디 설정을 따릅니다.`,
-      measure.timeChange ? `${measure.timeChange.beats}/${measure.timeChange.beatValue}` : "");
+    const timeValue = await askText({ title:"마디 박자", message:`${index + 1}마디부터 바꿀 박자를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+      value:measure.timeChange ? `${measure.timeChange.beats}/${measure.timeChange.beatValue}` : "", placeholder:"예: 3/4", okText:"다음" });
     if (timeValue !== null){
       const parsed = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(timeValue);
       if (!String(timeValue).trim()) delete measure.timeChange;
       else if (parsed) measure.timeChange = musicNormalizeTime({ beats:Number(parsed[1]), beatValue:Number(parsed[2]) });
       else if (typeof toast === "function") toast("박자는 3/4처럼 입력해 주세요.", 2200);
     }
-    const keyValue = prompt(`${index + 1}마디부터 바꿀 조표 ID를 입력하세요. (예: C, Bb, F#m)\n비워 두면 앞 마디 설정을 따릅니다.`,
-      measure.keyChange || "");
+    const keyValue = await askText({ title:"마디 조표", message:`${index + 1}마디부터 바꿀 조표 ID를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+      value:measure.keyChange || "", placeholder:"예: C, Bb, F#m", okText:"다음" });
     if (keyValue !== null){
       const key = String(keyValue).trim();
       if (!key) delete measure.keyChange;
       else if (MUSIC_KEYS[key]) measure.keyChange = key;
       else if (typeof toast === "function") toast("상단 조표 목록에 있는 이름을 입력해 주세요.", 2400);
     }
-    const tempoValue = prompt(`${index + 1}마디부터 바꿀 빠르기를 입력하세요.\n비워 두면 앞 마디 설정을 따릅니다.`,
-      measure.tempoChange || "");
+    const tempoValue = await askText({ title:"마디 빠르기", message:`${index + 1}마디부터 바꿀 빠르기를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+      value:measure.tempoChange || "", placeholder:"예: 120", okText:"다음" });
     if (tempoValue !== null){
       if (!String(tempoValue).trim()) delete measure.tempoChange;
       else measure.tempoChange = Math.max(MUSIC_TEMPO_MIN, Math.min(MUSIC_TEMPO_MAX,
@@ -1949,7 +2341,8 @@ async function mountMusicEditor(doc){
     if (index === 0){
       const beatTicks = MUSIC_TICKS_PER_QUARTER * 4 / effective.time.beatValue;
       const currentBeats = measure.pickupTicks ? musicFriendlyNumber(measure.pickupTicks / beatTicks) : "";
-      const pickupValue = prompt("못갖춘마디(여린내기)의 박 수를 입력하세요. (예: 1)\n비워 두거나 0이면 보통 마디입니다.", currentBeats);
+      const pickupValue = await askText({ title:"못갖춘마디", message:"못갖춘마디(여린내기)의 박 수를 입력하세요. 비우거나 0이면 보통 마디입니다.",
+        value:currentBeats, placeholder:"예: 1", okText:"적용" });
       if (pickupValue !== null){
         const beats = Number(pickupValue);
         const fullTicks = effective.time.beats * beatTicks;
@@ -1960,10 +2353,11 @@ async function mountMusicEditor(doc){
     afterEdit();
   }
 
-  function editSelectedChordSymbol(){
+  async function editSelectedChordSymbol(){
     const note = selectedNote();
-    if (!note || note.rest || typeof prompt !== "function") return;
-    const value = prompt("음표 위에 표시할 코드 기호를 입력하세요. (예: Cm7, B♭, E♭/G)\n비워 두면 지워집니다.", note.chordSymbol || "");
+    if (!note || note.rest || typeof askText !== "function") return;
+    const value = await askText({ title:"코드 기호 편집", message:"음표 위에 표시할 코드 기호를 입력하세요. 비우면 지워집니다.",
+      value:note.chordSymbol || "", placeholder:"예: Cm7, B♭, E♭/G", okText:"적용" });
     if (value === null) return;
     const symbol = musicClampChordSymbol(value);
     if (symbol) note.chordSymbol = symbol;
@@ -2050,7 +2444,7 @@ async function mountMusicEditor(doc){
     clampRange();
   }
 
-  function removeStaffLine(){
+  async function removeStaffLine(){
     // ＋오선으로 만든 마지막 줄바꿈부터 끝까지가 마지막으로 추가한 오선 한 단이다.
     let at = -1;
     for (let index = sheet.measures.length - 1; index > 0; index--){
@@ -2064,8 +2458,8 @@ async function mountMusicEditor(doc){
     const noteCount = removed.reduce((sum, measure) => sum + ((measure && measure.notes) || []).length
       + ((measure && measure.voice2Notes) || []).length + ((measure && measure.bassNotes) || []).length
       + ((measure && measure.bassVoice2Notes) || []).length, 0);
-    if (noteCount > 0 && typeof confirm === "function" &&
-        !confirm(`마지막 오선에 음표 또는 쉼표 ${noteCount}개가 있어요. 오선 전체를 지울까요?`)) return;
+    if (noteCount > 0 && (typeof confirmDialog !== "function" ||
+        !await confirmDialog(`마지막 오선에 음표 또는 쉼표 ${noteCount}개가 있어요. 오선 전체를 지울까요?`, "지우기", "취소"))) return;
     sheet.measures.splice(at);
     selection = null;
     afterEdit();
@@ -2091,10 +2485,11 @@ async function mountMusicEditor(doc){
     afterEdit();
   }
 
-  function resetScoreContent(){
-    const itemCount = sheet.measures.reduce((sum, measure) =>
+  async function resetScoreContent(){
+    musicSyncActivePart(sheet);
+    const itemCount = musicParts(sheet).reduce((partSum, part) => partSum + part.measures.reduce((sum, measure) =>
       sum + ((measure && measure.notes) || []).length + ((measure && measure.voice2Notes) || []).length
-      + ((measure && measure.bassNotes) || []).length + ((measure && measure.bassVoice2Notes) || []).length, 0);
+      + ((measure && measure.bassNotes) || []).length + ((measure && measure.bassVoice2Notes) || []).length, 0), 0);
     if (itemCount === 0 && sheet.measures.length === 1){
       if (typeof toast === "function") toast("이미 비어 있는 악보예요.", 2000);
       return;
@@ -2102,10 +2497,12 @@ async function mountMusicEditor(doc){
     const message = itemCount > 0
       ? `음표와 쉼표 ${itemCount}개를 모두 지우고 빈 악보로 초기화할까요?\n제목·빠르기·박자·조표·음색은 그대로 유지됩니다.`
       : "빈 마디와 오선 구성을 지우고 빈 1마디로 초기화할까요?\n제목과 음악 설정은 그대로 유지됩니다.";
-    if (typeof confirm === "function" && !confirm(message)) return;
+    if (typeof confirmDialog !== "function" || !await confirmDialog(message, "초기화", "취소")) return;
     MNMusicAudio.stop();
     selection = null;
-    sheet.measures = [musicMeasure()];
+    for (const part of musicParts(sheet)) part.measures = [musicMeasure()];
+    const active = musicActivePart(sheet);
+    sheet.measures = active ? active.measures : [musicMeasure()];
     fromInput.value = "1";
     toInput.value = "1";
     afterEdit();
@@ -2355,6 +2752,9 @@ async function mountMusicEditor(doc){
     const running = MNMusicAudio.playing();
     return [
       { label:"전체 재생", action:() => startPlay(null), disabled:running },
+      { label:"현재 파트만 재생", action:() => {
+        const part = musicActivePart(sheet); startPlay(null, { partId:part && part.id });
+      }, disabled:running },
       { label:"오른손만 재생", action:() => startPlay(null, { staff:"treble" }), disabled:running || !sheet.grandStaff },
       { label:"왼손만 재생", action:() => startPlay(null, { staff:"bass" }), disabled:running || !sheet.grandStaff },
       { label:"지정 구간 재생", action:() => startPlay(clampRange()), disabled:running },
@@ -2376,6 +2776,30 @@ async function mountMusicEditor(doc){
         action:() => { countInEnabled = !countInEnabled; syncPracticeControls(); } },
       { label:"메트로놈", active:metronomeEnabled,
         action:() => { metronomeEnabled = !metronomeEnabled; syncPracticeControls(); } },
+      { label:"드럼 반주", children:MUSIC_DRUM_STYLES.map((style) => ({
+        label:MUSIC_DRUM_STYLE_SPECS[style].label,
+        active:musicDrumStyle(sheet.drumStyle) === style,
+        disabled:running || !musicDrumStyleCompatible(style, sheet.time),
+        action:() => setDrumStyle(style)
+      })) },
+      { label:"반주 구성", children:[["drums", "드럼만"], ["bass", "드럼+베이스"], ["full", "전체 반주"]]
+        .map(([mode, label]) => ({
+          label, active:musicAccompanimentMode(sheet.accompanimentMode) === mode,
+          disabled:running || musicDrumStyle(sheet.drumStyle) === "off",
+          action:() => setAccompanimentMode(mode)
+        })) },
+      { label:"코드 악기", children:[["piano", "피아노"], ["guitar", "기타"]]
+        .map(([timbre, label]) => ({
+          label, active:musicAccompanimentTimbre(sheet.accompanimentTimbre) === timbre,
+          disabled:running || musicDrumStyle(sheet.drumStyle) === "off"
+            || musicAccompanimentMode(sheet.accompanimentMode) !== "full",
+          action:() => setAccompanimentTimbre(timbre)
+        })) },
+      { label:"반주 음량", children:[0.25, 0.5, 0.75, 1].map((volume) => ({
+        label:`${Math.round(volume * 100)}%`, active:Math.abs(musicClampDrumVolume(sheet.drumVolume) - volume) < 0.01,
+        disabled:running,
+        action:() => setDrumVolume(volume, true)
+      })) },
       { label:"음소거", active:MNMusicAudio.muted(), action:() => {
         MNMusicAudio.setMuted(!MNMusicAudio.muted());
         syncVolumeControls();
@@ -2791,7 +3215,7 @@ async function mountMusicEditor(doc){
         return;
       }
       if (event.code === "Space"){ claimEar(); if (!event.repeat) earTest.replay(); return; }
-      const answerPc = event.code ? MUSIC_PRACTICE_KEYS[event.code] : undefined;
+      const answerPc = musicKeyboardPitchClassForEvent(event);
       if (answerPc !== undefined){ claimEar(); if (!event.repeat) earTest.press(answerPc); }
       return;
     }
@@ -2811,12 +3235,64 @@ async function mountMusicEditor(doc){
         return;
       }
       if (event.key === "Backspace"){ claim(); if (!event.repeat) practiceBack(); return; }
-      const pitchClass = event.code ? MUSIC_PRACTICE_KEYS[event.code] : undefined;
+      const pitchClass = musicKeyboardPitchClassForEvent(event);
       if (pitchClass !== undefined){
         claim();
         if (!event.repeat) practicePress(pitchClass);  // 키를 누르고 있어도 한 번만 친 것으로 센다
       }
       return;
+    }
+    if (keyboardComposeActive && !editableTarget(event.target) && !document.querySelector(".modal:not([hidden])")){
+      const claimCompose = () => { event.preventDefault(); event.stopPropagation(); };
+      if (event.key === "Escape"){ claimCompose(); setKeyboardCompose(false); return; }
+      if (event.code === "ArrowLeft" || event.code === "ArrowRight"){
+        claimCompose();
+        if (!event.repeat) changeSelectedKeyboardDuration(event.code === "ArrowRight" ? 1 : -1);
+        return;
+      }
+      const action = musicKeyboardActionForEvent(event, appSettings.musicKeyboard);
+      if (action){
+        claimCompose();
+        if (event.repeat) return;
+        const pitchClass = MUSIC_KEYBOARD_PITCH_CLASSES[action];
+        if (action === "octaveDown" || action === "octaveUp"){
+          const options = Array.from(easyOctaveSelect.options).map((option) => Number(option.value));
+          const current = Math.round(Number(easyOctaveSelect.value) || 4);
+          const next = Math.max(Math.min(...options), Math.min(Math.max(...options), current + (action === "octaveUp" ? 1 : -1)));
+          easyOctaveSelect.value = String(next);
+          easyHelp.textContent = `${next}옥타브 · ${musicKeyboardHelpText()} · Esc 끝내기`;
+          if (typeof toast === "function") toast(`${next}옥타브로 입력합니다.`, 1300);
+          return;
+        }
+        if (MUSIC_KEYBOARD_NOTE_VALUES[action]){
+          setToolValue(MUSIC_KEYBOARD_NOTE_VALUES[action]);
+          return;
+        }
+        if (action === "toggleRest"){
+          setToolRest(!tool.rest);
+          return;
+        }
+        if (action === "cycleDots"){
+          setToolDots((tool.dots + 1) % (MUSIC_MAX_DOTS + 1));
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(MUSIC_KEYBOARD_ACCIDENTALS, action)){
+          setToolAccidental(MUSIC_KEYBOARD_ACCIDENTALS[action]);
+          return;
+        }
+        if (action === "addMeasure"){
+          addMeasure();
+          if (typeof toast === "function") toast("빈 마디를 추가했어요.", 1400);
+          return;
+        }
+        if (action === "addStaff"){
+          addStaffLine();
+          if (typeof toast === "function") toast("새 오선을 추가했어요.", 1400);
+          return;
+        }
+        if (Number.isFinite(pitchClass)) insertKeyboardPitchClass(pitchClass);
+        return;
+      }
     }
     if (editableTarget(event.target)) return;
     if (contextLayers.length) return;                 // 메뉴가 열려 있으면 버튼 탐색·Esc 닫기를 메뉴에 맡긴다
@@ -2870,11 +3346,17 @@ async function mountMusicEditor(doc){
      · 맞게 누르면 진도가 나가되 빨간 표시는 남는다(정확도에 반영).
      · Backspace 로 한 음 되돌아가면 그 자리 빨간 표시가 지워지고 정확도가 도로 올라간다. */
   const MUSIC_EASY_HELP = easyHelp.textContent;
-  const MUSIC_PRACTICE_KEY_HELP = "A S D F G H J = 도 레 미 파 솔 라 시 · 검은건반 W E T Y U · 숫자 1~7 도 됩니다";
+  function musicPracticeKeyHelp(){
+    const mapping = normalizeMusicKeyboard(appSettings.musicKeyboard);
+    return MUSIC_KEYBOARD_DEFINITIONS.filter((item) => Number.isFinite(item.pitchClass))
+      .map((item) => `${item.label} ${musicKeyboardCodeLabel(mapping[item.id])}`).join(" · ") + " · 숫자 1~7도 도~시";
+  }
   // 연습 중 '쉬운 입력' 도움말 줄 — 무엇으로 누르는지를 모아 두는 자리라 MIDI 건반도 여기서 안내한다.
   // 건반이 붙어 있는지는 권한 없이 알 수 없으므로(아래 practiceMidiHint 참고) 이 줄이 첫 안내가 된다.
-  const MUSIC_PRACTICE_HELP = MUSIC_PRACTICE_KEY_HELP
-    + (typeof navigator !== "undefined" && navigator.requestMIDIAccess ? " · 피아노는 🎹 MIDI 입력을 켜세요" : "");
+  function musicPracticeHelpText(){
+    return musicPracticeKeyHelp()
+      + (typeof navigator !== "undefined" && navigator.requestMIDIAccess ? " · 피아노는 🎹 MIDI 입력을 켜세요" : "");
+  }
 
   function practiceUseFlats(){
     return ((MUSIC_KEYS[sheet.key] || {}).vex || "").includes("b");
@@ -2928,7 +3410,7 @@ async function mountMusicEditor(doc){
     if (!current) return;
     for (const id of current.noteIds){
       const el = noteEls.get(id);
-      if (el && typeof el.scrollIntoView === "function"){ el.scrollIntoView({ block:"nearest", inline:"nearest" }); return; }
+      if (el){ revealScoreElement(el); return; }
     }
   }
 
@@ -3026,12 +3508,15 @@ async function mountMusicEditor(doc){
   }
 
   function setPracticeChrome(on){
+    if (on && keyboardComposeActive) setKeyboardCompose(false, false);
     practiceBtn.classList.toggle("is-on", on);
     practiceBtn.textContent = on ? "■ 그만두기" : "🎯 따라치기";
     practiceInfo.hidden = !on;
     if (!on) practiceInfo.textContent = "";
     practiceStaffSelect.disabled = on;
-    easyHelp.textContent = on ? MUSIC_PRACTICE_HELP : MUSIC_EASY_HELP;
+    keyboardComposeBtn.disabled = on;
+    keyboardSettingsBtn.disabled = on;
+    easyHelp.textContent = on ? musicPracticeHelpText() : MUSIC_EASY_HELP;
     root.classList.toggle("is-practice", on);        // 머리말·도구상자를 통째로 잠근다(CSS)
     scoreHost.classList.toggle("is-practice", on);   // 악보를 흐린 교본으로 깐다(CSS)
     for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
@@ -3047,11 +3532,14 @@ async function mountMusicEditor(doc){
      무엇보다 "귀로만 고르는" 연습이 되지 않는다. 편집·재생 줄은 따라치기와 같은 이유로 잠그되
      '쉬운 입력'의 도레미 버튼은 살려 둔다 — 자판을 못 쓰는 학생이 답을 누르는 길이다. */
   function setEarChrome(on){
+    if (on && keyboardComposeActive) setKeyboardCompose(false, false);
     earBtn.classList.toggle("is-on", on);
     earBtn.textContent = on ? "■ 그만두기" : "🎧 음감 테스트";
     earLevelSelect.disabled = on;
     earCountSelect.disabled = on;
     earReferenceBtn.disabled = on;
+    keyboardComposeBtn.disabled = on;
+    keyboardSettingsBtn.disabled = on;
     root.classList.toggle("is-eartest", on);
     // 테스트 중에는 대기 화면이 덮지 않아야 한다 — 재생과 같은 규칙(.is-running).
     root.classList.toggle("is-running", on);
@@ -3088,7 +3576,7 @@ async function mountMusicEditor(doc){
     if (earTest.active()){ stopEarTest(); return; }
     if (!startEarTest()) return;
     if (typeof toast === "function"){
-      toast("소리를 듣고 음이름을 눌러 보세요. 자판 A S D F G H J = 도 레 미 파 솔 라 시 · "
+      toast("소리를 듣고 음이름을 눌러 보세요. " + musicPracticeKeyHelp() + " · "
         + "Space 다시 듣기 · Esc 그만두기", 5200);
     }
   });
@@ -3143,7 +3631,9 @@ async function mountMusicEditor(doc){
     const range = clampRange();
     const staff = practiceStaffSelect.value === "treble" || practiceStaffSelect.value === "bass"
       ? practiceStaffSelect.value : null;
-    const built = musicPracticeSteps(sheet, { from:range.from, to:range.to, staff });
+    const activePart = musicActivePart(sheet);
+    const built = musicPracticeSteps(sheet, { from:range.from, to:range.to, staff,
+      partId:activePart && activePart.id });
     if (!built.total){
       if (typeof toast === "function") toast("따라 칠 음이 없어요. 이 구간에 음표를 먼저 넣어 주세요.", 2600);
       return false;
@@ -3195,7 +3685,7 @@ async function mountMusicEditor(doc){
     if (practice.active){ stopPractice("cancel"); return; }
     if (!startPractice()) return;
     if (typeof toast === "function"){
-      toast("악보를 보고 자판으로 음을 눌러 보세요. " + MUSIC_PRACTICE_KEY_HELP
+      toast("악보를 보고 자판으로 음을 눌러 보세요. " + musicPracticeKeyHelp()
         + " · 옥타브는 달라도 맞은 것으로 봐요. (Backspace: 한 음 뒤로 · Esc: 그만두기)", 6000);
     }
   });
@@ -3217,12 +3707,14 @@ async function mountMusicEditor(doc){
     if (symbol) symbol.classList.add("is-playing");
     scoreHost.querySelectorAll(`.music-notation[data-note-id="${event.id}"]`)
       .forEach((item) => item.classList.add("is-playing"));
-    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block:"nearest", inline:"nearest" });
+    revealScoreElement(el);
   }
 
   function setPlaying(on){
+    if (on && keyboardComposeActive) setKeyboardCompose(false, false);
     stopBtn.disabled = !on;
     playAllBtn.disabled = on;
+    playActivePartBtn.disabled = on;
     playRightBtn.disabled = on || !sheet.grandStaff;
     playLeftBtn.disabled = on || !sheet.grandStaff;
     playPartBtn.disabled = on;
@@ -3230,8 +3722,21 @@ async function mountMusicEditor(doc){
     speedSelect.disabled = on;
     countInBtn.disabled = on;
     metronomeBtn.disabled = on;
+    drumSelect.disabled = on;
+    accompanimentModeSelect.disabled = on || musicDrumStyle(sheet.drumStyle) === "off";
+    accompanimentTimbreSelect.disabled = on || musicDrumStyle(sheet.drumStyle) === "off"
+      || musicAccompanimentMode(sheet.accompanimentMode) !== "full";
+    drumVolumeInput.disabled = on || musicDrumStyle(sheet.drumStyle) === "off";
+    partSelect.disabled = on;
+    partNameInput.disabled = on;
+    addPartBtn.disabled = on;
+    removePartBtn.disabled = on || musicParts(sheet).length <= 1;
+    partMuteBtn.disabled = on;
+    partVolumeInput.disabled = on;
     practiceBtn.disabled = on;                   // 재생 중에는 따라치기를 시작하지 않는다(소리가 겹친다)
     earBtn.disabled = on;                        // 음감 테스트도 같다 — 반주와 문제 음이 겹친다
+    keyboardComposeBtn.disabled = on;
+    keyboardSettingsBtn.disabled = on;
     // 재생 중에는 대기 화면이 뜨지 않아야 한다. screensaverBusy() 가 이미 .is-running 을
     // "실행 중"으로 보고 있어서(파이썬·노트북과 같은 규칙) 이 클래스만 붙였다 떼면 된다.
     root.classList.toggle("is-running", on);
@@ -3242,6 +3747,59 @@ async function mountMusicEditor(doc){
     countInBtn.setAttribute("aria-pressed", countInEnabled ? "true" : "false");
     metronomeBtn.classList.toggle("is-on", metronomeEnabled);
     metronomeBtn.setAttribute("aria-pressed", metronomeEnabled ? "true" : "false");
+  }
+
+  function syncDrumControls(){
+    const style = musicDrumStyle(sheet.drumStyle);
+    const volume = musicClampDrumVolume(sheet.drumVolume);
+    for (const option of drumSelect.options){
+      option.disabled = !musicDrumStyleCompatible(option.value, sheet.time);
+    }
+    drumSelect.value = style;
+    const mode = musicAccompanimentMode(sheet.accompanimentMode);
+    accompanimentModeSelect.value = mode;
+    accompanimentTimbreSelect.value = musicAccompanimentTimbre(sheet.accompanimentTimbre);
+    accompanimentModeSelect.disabled = MNMusicAudio.playing() || style === "off";
+    accompanimentTimbreSelect.disabled = MNMusicAudio.playing() || style === "off" || mode !== "full";
+    drumVolumeInput.value = String(Math.round(volume * 100));
+    drumVolumeInput.disabled = MNMusicAudio.playing() || style === "off";
+    drumVolumeLabel.textContent = `${Math.round(volume * 100)}%`;
+  }
+
+  function setDrumStyle(style){
+    const requested = musicDrumStyle(style);
+    sheet.drumStyle = musicDrumStyleCompatible(requested, sheet.time) ? requested : "basic";
+    syncDrumControls();
+    touch();
+    if (history) history.commit();
+    if (requested !== sheet.drumStyle && typeof toast === "function"){
+      toast(`${MUSIC_DRUM_STYLE_SPECS[requested].label} 스타일은 ${musicDrumTimeKey(sheet.time)} 박자에서 사용할 수 없어요.`, 3000);
+    }
+  }
+
+  function setDrumVolume(volume, commit){
+    sheet.drumVolume = musicClampDrumVolume(volume);
+    syncDrumControls();
+    touch();
+    if (commit && history) history.commit();
+  }
+
+  function setAccompanimentMode(mode){
+    sheet.accompanimentMode = musicAccompanimentMode(mode);
+    syncDrumControls();
+    touch();
+    if (history) history.commit();
+    if (sheet.accompanimentMode !== "drums" && !musicSheetHasPlayableChords(sheet)
+      && typeof toast === "function"){
+      toast("음표 위에 C, Am, G7 같은 코드 기호를 넣으면 베이스와 코드 반주가 재생돼요.", 3600);
+    }
+  }
+
+  function setAccompanimentTimbre(timbre){
+    sheet.accompanimentTimbre = musicAccompanimentTimbre(timbre);
+    syncDrumControls();
+    touch();
+    if (history) history.commit();
   }
 
   function syncVolumeControls(){
@@ -3257,8 +3815,10 @@ async function mountMusicEditor(doc){
     if (earTest.active()) return;                // 음감 테스트 중에도 같다
     const options = playOptions || {};
     setPlaying(true);
-    if (MNMusicAudio.sampledTimbre(sheet.timbre)){
-      status.textContent = timbreLabel(sheet.timbre) + " 음원 준비 중…";
+    if (musicParts(sheet).some((part) => !part.muted && MNMusicAudio.sampledTimbre(part.timbre))
+      || (musicAccompanimentMode(sheet.accompanimentMode) === "full"
+        && MNMusicAudio.sampledTimbre(sheet.accompanimentTimbre))){
+      status.textContent = "음원 준비 중…";
     }
     try {
       const handle = await MNMusicAudio.play(sheet, Object.assign({
@@ -3267,6 +3827,7 @@ async function mountMusicEditor(doc){
         metronome:metronomeEnabled,
         loop:!!options.loop,
         staff:options.staff,
+        partId:options.partId,
         onNote:highlight,
         onCount:(beat, total) => {
           if (beat) status.textContent = `준비 ${beat} / ${total}`;
@@ -3296,6 +3857,10 @@ async function mountMusicEditor(doc){
   }
 
   playAllBtn.addEventListener("click", () => startPlay(null));
+  playActivePartBtn.addEventListener("click", () => {
+    const part = musicActivePart(sheet);
+    startPlay(null, { partId:part && part.id });
+  });
   playRightBtn.addEventListener("click", () => startPlay(null, { staff:"treble" }));
   playLeftBtn.addEventListener("click", () => startPlay(null, { staff:"bass" }));
   playPartBtn.addEventListener("click", () => startPlay(clampRange()));
@@ -3306,6 +3871,11 @@ async function mountMusicEditor(doc){
   });
   countInBtn.addEventListener("click", () => { countInEnabled = !countInEnabled; syncPracticeControls(); });
   metronomeBtn.addEventListener("click", () => { metronomeEnabled = !metronomeEnabled; syncPracticeControls(); });
+  drumSelect.addEventListener("change", () => setDrumStyle(drumSelect.value));
+  accompanimentModeSelect.addEventListener("change", () => setAccompanimentMode(accompanimentModeSelect.value));
+  accompanimentTimbreSelect.addEventListener("change", () => setAccompanimentTimbre(accompanimentTimbreSelect.value));
+  drumVolumeInput.addEventListener("input", () => setDrumVolume(Number(drumVolumeInput.value) / 100, false));
+  drumVolumeInput.addEventListener("change", () => setDrumVolume(Number(drumVolumeInput.value) / 100, true));
   volumeInput.addEventListener("input", () => {
     MNMusicAudio.setVolume(Number(volumeInput.value) / 100);
     if (MNMusicAudio.muted()) MNMusicAudio.setMuted(false);
@@ -3361,28 +3931,43 @@ async function mountMusicEditor(doc){
       const division = 480;
       const tempo = musicClampTempo(sheet.tempo);
       const micros = Math.round(60000000 / tempo);
-      const timeline = musicTimeline(sheet);
-      const timed = [];
-      for (const event of timeline.events){
-        if (event.rest || event.midi === null) continue;
-        const start = Math.max(0, Math.round(event.start * tempo * division / 60));
-        const end = Math.max(start + 1, Math.round((event.start + event.duration) * tempo * division / 60));
-        const velocity = Math.max(1, Math.min(127, Math.round(82 * (event.gain || 1))));
-        timed.push({ tick:start, order:1, data:[0x90, event.midi & 0x7f, velocity] });
-        timed.push({ tick:end, order:0, data:[0x80, event.midi & 0x7f, 0] });
-      }
-      timed.sort((a, b) => a.tick - b.tick || a.order - b.order);
-      const track = [0, 0xff, 0x51, 3, (micros >>> 16) & 255, (micros >>> 8) & 255, micros & 255];
-      let cursor = 0;
-      for (const event of timed){
-        track.push(...midiVarLength(event.tick - cursor), ...event.data);
-        cursor = event.tick;
-      }
-      track.push(0, 0xff, 0x2f, 0);
-      const header = midiChunk("MThd", [0, 0, 0, 1, (division >>> 8) & 255, division & 255]);
-      const bytes = new Uint8Array([...header, ...midiChunk("MTrk", track)]);
+      const tempoTrack = [0, 0xff, 0x51, 3, (micros >>> 16) & 255, (micros >>> 8) & 255, micros & 255,
+        0, 0xff, 0x2f, 0];
+      const programs = { piano:0, guitar:24, xylophone:13, harp:46, flute:73, clarinet:71,
+        triangle:80, sine:88, square:81 };
+      const partTracks = [];
+      musicParts(sheet).forEach((part, partIndex) => {
+        const rawChannel = partIndex % 15;
+        const channel = rawChannel >= 9 ? rawChannel + 1 : rawChannel; // 10번 채널은 표준 타악기용이라 건너뛴다
+        const nameBytes = Array.from(new TextEncoder().encode(part.name || `악기 ${partIndex + 1}`));
+        const track = [0, 0xff, 0x03, ...midiVarLength(nameBytes.length), ...nameBytes,
+          0, 0xc0 | channel, programs[part.timbre] == null ? 0 : programs[part.timbre],
+          0, 0xb0 | channel, 7, Math.max(0, Math.min(127, Math.round(musicClampPartVolume(part.volume) * 127)))];
+        const timed = [];
+        const timeline = musicTimeline(sheet, { partId:part.id, includeMuted:true });
+        for (const event of timeline.events){
+          if (event.rest || event.midi === null) continue;
+          const start = Math.max(0, Math.round(event.start * tempo * division / 60));
+          const end = Math.max(start + 1, Math.round((event.start + event.duration) * tempo * division / 60));
+          const velocity = Math.max(1, Math.min(127, Math.round(82 * (event.gain || 1))));
+          timed.push({ tick:start, order:1, data:[0x90 | channel, event.midi & 0x7f, velocity] });
+          timed.push({ tick:end, order:0, data:[0x80 | channel, event.midi & 0x7f, 0] });
+        }
+        timed.sort((a, b) => a.tick - b.tick || a.order - b.order);
+        let cursor = 0;
+        for (const event of timed){
+          track.push(...midiVarLength(event.tick - cursor), ...event.data);
+          cursor = event.tick;
+        }
+        track.push(0, 0xff, 0x2f, 0);
+        partTracks.push(midiChunk("MTrk", track));
+      });
+      const trackCount = partTracks.length + 1;
+      const header = midiChunk("MThd", [0, 1, (trackCount >>> 8) & 255, trackCount & 255,
+        (division >>> 8) & 255, division & 255]);
+      const bytes = new Uint8Array([...header, ...midiChunk("MTrk", tempoTrack), ...partTracks.flat()]);
       musicDownloadBlob(musicExportName(doc, "mid"), new Blob([bytes], { type:"audio/midi" }));
-      if (typeof toast === "function") toast("MIDI 파일로 저장했어요.", 2200);
+      if (typeof toast === "function") toast(`${partTracks.length}개 악기 트랙을 MIDI 파일로 저장했어요.`, 2400);
     } catch(error){
       console.error(error);
       if (typeof toast === "function") toast("MIDI 저장에 실패했어요.", 2600, { type:"error" });
@@ -3677,15 +4262,24 @@ async function mountMusicEditor(doc){
       sheet.tempo = restored.tempo;
       sheet.time = restored.time;
       sheet.key = restored.key;
-      sheet.timbre = restored.timbre;
+      sheet.drumStyle = restored.drumStyle;
+      sheet.drumVolume = restored.drumVolume;
+      sheet.accompanimentMode = restored.accompanimentMode;
+      sheet.accompanimentTimbre = restored.accompanimentTimbre;
       sheet.showSolfege = restored.showSolfege;
+      sheet.parts = restored.parts;
+      sheet.activePartId = restored.activePartId;
+      sheet.timbre = restored.timbre;
       sheet.grandStaff = restored.grandStaff;
       sheet.measures = restored.measures;
+      musicSelectPart(sheet, restored.activePartId);
       titleInput.value = sheet.title;
       tempoInput.value = String(sheet.tempo);
       timeSelect.value = `${sheet.time.beats}/${sheet.time.beatValue}`;
       keySelect.value = sheet.key;
       timbreSelect.value = sheet.timbre;
+      syncPartControls();
+      syncDrumControls();
       grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
       if (!sheet.grandStaff) activeStaff = "treble";
       selection = null;
@@ -3729,6 +4323,7 @@ async function mountMusicEditor(doc){
   }
 
   clampRange();
+  syncPartControls();
   updateStatus();
   syncTools();
   updateHistoryButtons();
@@ -3736,6 +4331,7 @@ async function mountMusicEditor(doc){
   syncPracticeControls();
   syncEarControls();
   syncVolumeControls();
+  syncDrumControls();
 
   scoreHost.textContent = "악보를 준비하는 중…";
   const ready = await MNLazy.tryNeed("vexflow");

@@ -15,6 +15,8 @@ const manifest = JSON.parse(read("scripts.manifest.json"));
 const html = read("classdock.html");
 const editorSource = read("src/js/music-editor.js");
 const lazySource = read("src/js/lazy.js");
+const stateSource = read("src/js/state.js");
+const appSource = read("src/js/app.js");
 
 test("확장자 .msheet 는 악보 편집기로 열린다", () => {
   const loaders = read("src/js/file-loaders.js");
@@ -59,6 +61,57 @@ test("재생 중에는 대기 화면(화면보호기)이 뜨지 않는다", () =
   // 대신 이미 "실행 중"으로 취급되는 .is-running 을 재생 동안 붙인다 — screensaver.js 는 고치지 않는다.
   assert.match(editorSource, /classList\.toggle\("is-running", on\)/);
   assert.match(read("src/js/screensaver.js"), /querySelector\("\.is-running"\)/);
+});
+
+test("재생 바에서 박자에 맞는 드럼 스타일과 반주 음량을 고르고 악보 설정으로 저장한다", () => {
+  assert.match(editorSource, /drumWrap\.append\("🥁 반주"\)/);
+  assert.match(editorSource, /for \(const value of MUSIC_DRUM_STYLES\)/);
+  assert.match(editorSource, /option\.textContent = spec\.label/);
+  assert.match(editorSource, /option\.disabled = !musicDrumStyleCompatible\(option\.value, sheet\.time\)/);
+  assert.match(editorSource, /sheet\.drumStyle = "basic"/);
+  assert.match(editorSource, /스타일은 \$\{timeSelect\.value\}에 맞지 않아 기본 드럼으로 바꿨어요/);
+  assert.match(editorSource, /drumVolumeInput\.setAttribute\("aria-label", "반주 음량"\)/);
+  assert.match(editorSource, /const requested = musicDrumStyle\(style\)/);
+  assert.match(editorSource, /sheet\.drumStyle = musicDrumStyleCompatible\(requested, sheet\.time\) \? requested : "basic"/);
+  assert.match(editorSource, /sheet\.drumVolume = musicClampDrumVolume\(volume\)/);
+  assert.match(editorSource, /sheet\.drumStyle = restored\.drumStyle/);
+  assert.match(editorSource, /sheet\.drumVolume = restored\.drumVolume/);
+  assert.match(editorSource, /drumSelect\.disabled = on/);
+  assert.match(editorSource, /music-toolvis-drums/);
+});
+
+test("코드 자동 반주는 드럼만·베이스·전체 구성과 피아노·기타를 고를 수 있다", () => {
+  assert.match(editorSource, /\["drums", "드럼만"\], \["bass", "드럼\+베이스"\], \["full", "전체 반주"\]/);
+  assert.match(editorSource, /\["piano", "피아노"\], \["guitar", "기타"\]/);
+  assert.match(editorSource, /sheet\.accompanimentMode = musicAccompanimentMode\(mode\)/);
+  assert.match(editorSource, /sheet\.accompanimentTimbre = musicAccompanimentTimbre\(timbre\)/);
+  assert.match(editorSource, /sheet\.accompanimentMode = restored\.accompanimentMode/);
+  assert.match(editorSource, /sheet\.accompanimentTimbre = restored\.accompanimentTimbre/);
+  assert.match(editorSource, /musicSheetHasPlayableChords\(sheet\)/);
+  assert.match(editorSource, /음표 위에 C, Am, G7 같은 코드 기호/);
+  assert.match(editorSource, /accompanimentModeSelect\.disabled = on \|\| musicDrumStyle/);
+});
+
+test("다중 악기 파트는 추가·전환·삭제·이름·음량·음소거와 선택 재생을 제공한다", () => {
+  assert.match(editorSource, /partWrap\.append\("파트"\)/);
+  assert.match(editorSource, /musicAddPart\(sheet, \{ name:timbreLabel\(timbre\), timbre \}\)/);
+  assert.match(editorSource, /musicSelectPart\(sheet, partId\)/);
+  assert.match(editorSource, /musicRemovePart\(sheet, part\.id\)/);
+  assert.match(editorSource, /part\.name = musicClampText\(partNameInput\.value, 80\)/);
+  assert.match(editorSource, /part\.muted = !part\.muted/);
+  assert.match(editorSource, /part\.volume = musicClampPartVolume\(value\)/);
+  assert.match(editorSource, /musicButton\("▶ 현재 파트"/);
+  assert.match(editorSource, /partId:options\.partId/);
+  assert.match(editorSource, /sheet\.parts = restored\.parts/);
+  assert.match(editorSource, /syncPartControls\(\)/);
+});
+
+test("MIDI 내보내기는 악기별 프로그램·음량·채널을 가진 형식 1 다중 트랙을 만든다", () => {
+  assert.match(editorSource, /const programs = \{ piano:0, guitar:24/);
+  assert.match(editorSource, /musicParts\(sheet\)\.forEach\(\(part, partIndex\)/);
+  assert.match(editorSource, /musicTimeline\(sheet, \{ partId:part\.id, includeMuted:true \}\)/);
+  assert.match(editorSource, /const trackCount = partTracks\.length \+ 1/);
+  assert.match(editorSource, /midiChunk\("MThd", \[0, 1,/);
 });
 
 test("악보 편집기는 모델·소리 엔진 뒤에 로드된다", () => {
@@ -138,7 +191,7 @@ test("악보 초기화는 확인 뒤 음악 설정을 보존하고 빈 1마디�
   assert.match(editorSource, /resetScoreBtn\.addEventListener\("click", resetScoreContent\)/);
   assert.match(editorSource, /function resetScoreContent\(\)/);
   assert.match(editorSource, /제목·빠르기·박자·조표·음색은 그대로 유지됩니다/);
-  assert.match(editorSource, /sheet\.measures = \[musicMeasure\(\)\]/);
+  assert.match(editorSource, /for \(const part of musicParts\(sheet\)\) part\.measures = \[musicMeasure\(\)\]/);
   assert.match(editorSource, /악보를 비웠어요\. Ctrl\+Z로 되돌릴 수 있어요/);
   assert.match(read("src/styles.css"), /\.music-btn\.music-reset\{color:var\(--danger\)/);
 });
@@ -148,7 +201,7 @@ test("새 음표는 현재 조표를 따르고 제자리표 선택과 미선택�
   assert.match(editorSource, /accidental:null/);
   assert.match(editorSource, /const keyAlter = musicKeyAlterations\(key\)\[pitch\.step\] \|\| 0/);
   assert.match(editorSource, /return tool\.accidental === null \? keyAlter : tool\.accidental/);
-  assert.match(editorSource, /alter:toolAlterForPitch\(pitch, measureIndex\)/);
+  assert.match(editorSource, /Number\.isFinite\(forcedAlter\) \? musicClampAlter\(forcedAlter\) : toolAlterForPitch\(pitch, measureIndex\)/);
   assert.match(editorSource, /tool\.accidental = null;\s*\/\/ 임시표는 한 번 쓰면 풀리고 다시 조표를 따른다/);
 });
 
@@ -311,7 +364,7 @@ test("실제 악기 샘플 음색을 선택하며 재생 준비와 WAV 실패를
     assert.ok(editorSource.includes(timbre), `${timbre} 선택지가 있어야 한다`);
   }
   assert.match(editorSource, /async function startPlay\(range, playOptions\)/);
-  assert.match(editorSource, /MNMusicAudio\.sampledTimbre\(sheet\.timbre\)/);
+  assert.match(editorSource, /musicParts\(sheet\)\.some\(\(part\) => !part\.muted && MNMusicAudio\.sampledTimbre\(part\.timbre\)\)/);
   assert.match(editorSource, /timbreLabel\(timbre\)/);
   assert.match(editorSource, /await MNMusicAudio\.play\(sheet/);
   assert.match(editorSource, /label \+ " 음원을 읽지 못해 삼각파로 재생해요/);
@@ -351,9 +404,51 @@ test("쉬운 입력은 옥타브와 도레미 버튼으로 다음 빈자리에 �
   assert.match(editorSource, /function insertSolfegeNote\(step\)/);
   assert.match(editorSource, /if \(musicCanFit\(sheet, index, candidate, activeStaff, activeVoice\)\)/);
   assert.match(editorSource, /sheet\.measures\.push\(musicMeasure\(\)\)/);
-  assert.match(editorSource, /insertNote\(measureIndex, pitch, activeStaff\)/);
+  assert.match(editorSource, /insertNote\(measureIndex, pitch, activeStaff, forcedAlter\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-easy-notes \.music-btn\{[^}]*min-height:36px/);
+});
+
+test("자판 작곡은 사용자 지정 12음·옥타브 키로 입력하고 마디를 자동 연장한다", () => {
+  assert.ok(html.includes('id="musicKeyboardSettingsList"'));
+  assert.ok(html.includes('id="settingsResetMusicKeyboard"'));
+  assert.match(stateSource, /const MUSIC_KEYBOARD_DEFINITIONS = Object\.freeze\(\[/);
+  assert.match(stateSource, /id:"C"[^\n]+pitchClass:0[^\n]+defaultCode:"KeyA"/);
+  assert.match(stateSource, /id:"B"[^\n]+pitchClass:11[^\n]+defaultCode:"KeyJ"/);
+  assert.match(stateSource, /id:"octaveDown"[^\n]+defaultCode:"KeyZ"/);
+  assert.match(stateSource, /musicKeyboard:normalizeMusicKeyboard\(merged\.musicKeyboard\)/);
+  assert.match(appSource, /musicKeyboardDraft\[musicKeyboardCaptureAction\] = e\.code/);
+  assert.match(appSource, /musicKeyboard:musicKeyboardDraft/);
+  assert.match(editorSource, /musicButton\("⌨ 자판 작곡"/);
+  assert.match(editorSource, /if \(keyboardComposeActive && !editableTarget\(event\.target\)/);
+  assert.match(editorSource, /insertKeyboardPitchClass\(pitchClass\)/);
+  assert.match(editorSource, /sheet\.measures\.push\(musicMeasure\(\)\)/);
+  assert.match(editorSource, /action === "octaveDown" \|\| action === "octaveUp"/);
+  assert.match(stateSource, /id:"noteWhole"[^\n]+defaultCode:"Digit1"/);
+  assert.match(stateSource, /id:"noteSixteenth"[^\n]+defaultCode:"Digit5"/);
+  assert.match(stateSource, /id:"toggleRest"[^\n]+defaultCode:"KeyR"/);
+  assert.match(stateSource, /id:"cycleDots"[^\n]+defaultCode:"Period"/);
+  assert.match(stateSource, /id:"addMeasure"[^\n]+defaultCode:"Equal"/);
+  assert.match(stateSource, /id:"addStaff"[^\n]+defaultCode:"Backquote"/);
+  assert.match(editorSource, /setToolValue\(MUSIC_KEYBOARD_NOTE_VALUES\[action\]\)/);
+  assert.match(editorSource, /setToolRest\(!tool\.rest\)/);
+  assert.match(editorSource, /setToolDots\(\(tool\.dots \+ 1\) % \(MUSIC_MAX_DOTS \+ 1\)\)/);
+  assert.match(editorSource, /addMeasure\(\);\s*if \(typeof toast/);
+  assert.match(editorSource, /addStaffLine\(\);\s*if \(typeof toast/);
+  assert.doesNotMatch(html, /settingMusicDurationInputMode/);
+  assert.match(editorSource, /const MUSIC_KEYBOARD_DURATION_ORDER = Object\.freeze\(\["16th", "eighth", "quarter", "half", "whole"\]\)/);
+  assert.match(editorSource, /function changeSelectedKeyboardDuration\(direction\)/);
+  assert.match(editorSource, /event\.code === "ArrowLeft" \|\| event\.code === "ArrowRight"/);
+  assert.match(editorSource, /changeSelectedKeyboardDuration\(event\.code === "ArrowRight" \? 1 : -1\)/);
+  assert.match(editorSource, /musicMeasureUsedTicks\(measure, selection\.staff, selection\.voice\) - musicNoteTicks\(note\)/);
+  assert.match(editorSource, /musicMeasureCapacity\(sheet, selection\.measure\)/);
+  assert.match(editorSource, /tool\.value = nextValue/);
+  assert.doesNotMatch(editorSource, /timedKeyboardNoteValue|keyboardHeldNote|document\.addEventListener\("keyup", onKeyUp/);
+});
+
+test("새 높은음자리표의 자판 작곡은 가운데 4옥타브에서 시작한다", () => {
+  assert.match(editorSource, /option\.selected = octave === 4/);
+  assert.match(editorSource, /activeStaff = "treble";\s*activeVoice = 1;\s*easyOctaveSelect\.value = "4";/);
 });
 
 test("빈 악보는 학교종·작은별 예제로 시작하고 기존 내용은 확인 뒤 바꾼다", () => {
@@ -361,7 +456,7 @@ test("빈 악보는 학교종·작은별 예제로 시작하고 기존 내용은
   assert.match(editorSource, /\["twinkle", "작은별 4마디"\]/);
   assert.match(editorSource, /exampleBtn\.addEventListener\("click", loadSelectedExample\)/);
   assert.match(editorSource, /const example = musicExampleSheet\(exampleSelect\.value\)/);
-  assert.match(editorSource, /confirm\("현재 악보 내용을 선택한 예제로 바꿀까요\?"\)/);
+  assert.match(editorSource, /confirmDialog\("현재 악보 내용을 선택한 예제로 바꿀까요\?", "바꾸기", "취소"\)/);
   assert.match(editorSource, /sheet\.measures = example\.measures/);
   assert.match(editorSource, /예제로 시작했어요\. 바꾸거나 이어서 만들어 보세요/);
 });
@@ -399,7 +494,7 @@ test("악보 배율은 버튼·Ctrl+휠·자판으로 바꾸고 포인터 위치
   assert.match(editorSource, /scoreHost\.scrollTop \+=/);
   // 다시 그린 SVG에도 현재 배율이 살아 있어야 한다.
   assert.match(editorSource, /svg\.dataset\.musicBaseWidth = String\(width\)/);
-  assert.match(editorSource, /applyScoreZoom\(\);\s*paintSelection\(\)/);
+  assert.match(editorSource, /applyScoreZoom\(\);[\s\S]*?paintSelection\(\)/);
   // 배율은 보기 상태이므로 touch/history 커밋 경로를 타지 않는다.
   assert.doesNotMatch(editorSource.match(/function setScoreZoom[\s\S]*?\n  \}/)[0], /touch\(|history\.commit/);
 });
@@ -416,6 +511,14 @@ test("확대된 악보의 입력 영역 밖은 손바닥 드래그로 상하좌�
   const css = read("src/styles.css");
   assert.match(css, /\.music-score\.is-pan-ready\{cursor:grab\}/);
   assert.match(css, /\.music-score\.is-panning,.music-score\.is-panning \*\{cursor:grabbing!important/);
+});
+
+test("아래 오선을 다시 그리거나 선택해도 악보 포커스가 맨 위로 돌아가지 않는다", () => {
+  assert.match(editorSource, /const previousScroll = \{ left:scoreHost\.scrollLeft, top:scoreHost\.scrollTop \}/);
+  assert.match(editorSource, /scoreHost\.scrollLeft = previousScroll\.left;\s*scoreHost\.scrollTop = previousScroll\.top/);
+  assert.match(editorSource, /function revealScoreElement\(el\)/);
+  assert.match(editorSource, /scoreHost\.scrollTop \+= rect\.bottom - hostRect\.bottom \+ pad/);
+  assert.doesNotMatch(editorSource, /el\.scrollIntoView\(\{ block:"nearest", inline:"nearest" \}\)/);
 });
 
 test("음표 좌우 위치는 위치 조정 도구나 Alt+드래그로 이웃과 마디 안에서 미세 조정된다", () => {
@@ -500,11 +603,11 @@ test("조옮김은 미리 세어 보고 물어본 뒤에 옮긴다", () => {
   // 음역 밖 음이 생기면 먼저 물어보고, 옮긴 뒤에는 조표 선택도 새 조표를 가리킨다.
   assert.match(editorSource, /musicTransposeSheet\(sheet, semitones, \{ apply:false \}\)/);
   assert.match(editorSource, /preview\.blocked > 0/);
-  assert.match(editorSource, /preview\.outOfRange > 0 && typeof confirm === "function"/);
+  assert.match(editorSource, /preview\.outOfRange > 0 && \(typeof confirmDialog !== "function"/);
   assert.match(editorSource, /const result = musicTransposeSheet\(sheet, semitones\);/);
   assert.match(editorSource, /keySelect\.value = sheet\.key;/);
   // 한 단계로 되돌릴 수 있어야 한다(afterEdit 가 history.commit 까지 한다).
-  assert.match(editorSource, /function applyTranspose\(semitones\)\{[\s\S]*?afterEdit\(\);/);
+  assert.match(editorSource, /async function applyTranspose\(semitones\)\{[\s\S]*?afterEdit\(\);/);
 });
 
 test("MIDI 건반 입력은 모델의 음이름 표기를 함께 쓴다", () => {
@@ -538,12 +641,13 @@ test("저장·편집 중 내용이 자동 복원 사본에도 반영된다", () 
 
 test("따라치기는 자판을 건반으로 쓰고 옥타브는 통과시킨다", () => {
   // 자판은 event.key 가 아니라 event.code 로 읽는다 — 한글 입력 상태에서도 같은 자리가 같은 음이어야 한다.
-  assert.match(editorSource, /const MUSIC_PRACTICE_KEYS = \{/);
-  assert.match(editorSource, /KeyA:0, KeyW:1, KeyS:2, KeyE:3, KeyD:4, KeyF:5, KeyT:6, KeyG:7, KeyY:8, KeyH:9, KeyU:10, KeyJ:11/);
+  assert.match(editorSource, /musicKeyboardActionForEvent\(event, appSettings\.musicKeyboard\)/);
+  assert.match(editorSource, /const pitchClass = MUSIC_KEYBOARD_PITCH_CLASSES\[action\]/);
   assert.match(editorSource, /Digit1:0, Digit2:2, Digit3:4, Digit4:5, Digit5:7, Digit6:9, Digit7:11/);
-  assert.match(editorSource, /const pitchClass = event\.code \? MUSIC_PRACTICE_KEYS\[event\.code\] : undefined/);
+  assert.match(editorSource, /const pitchClass = musicKeyboardPitchClassForEvent\(event\)/);
   // 채점 순서는 모델이 만들고(테스트는 music-model.test.js), 비교는 옥타브를 뺀 음이름만 본다.
-  assert.match(editorSource, /musicPracticeSteps\(sheet, \{ from:range\.from, to:range\.to, staff \}\)/);
+  assert.match(editorSource, /musicPracticeSteps\(sheet, \{ from:range\.from, to:range\.to, staff,/);
+  assert.match(editorSource, /partId:activePart && activePart\.id/);
   assert.match(editorSource, /step\.pcs\.includes\(pc\)/);
   // 마디 범위와 손 고르기는 이미 있는 재생 범위·대보표 설정을 그대로 쓴다.
   assert.match(editorSource, /practiceStaffSelect\.hidden = !sheet\.grandStaff/);
@@ -638,7 +742,7 @@ test("테스트 중에는 악보를 감춘다 — 이 모드의 핵심 규칙", 
 });
 
 test("자판·도레미 버튼·MIDI 건반이 모두 한 답 문(earTest.press)으로 들어온다", () => {
-  assert.match(editorSource, /const answerPc = event\.code \? MUSIC_PRACTICE_KEYS\[event\.code\] : undefined/);
+  assert.match(editorSource, /const answerPc = musicKeyboardPitchClassForEvent\(event\)/);
   assert.match(editorSource, /if \(earTest\.active\(\)\)\{ earTest\.press\(MUSIC_STEP_SEMITONES\[step\]\); return; \}/);
   // MIDI 건반은 옥타브까지 한 번에 답할 수 있어 번호를 함께 넘긴다(4단계).
   assert.match(editorSource, /if \(earTest\.active\(\)\)\{ earTest\.press\(musicPitchClass\(Number\(data\[1\]\)\), Number\(data\[1\]\)\); return; \}/);

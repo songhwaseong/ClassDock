@@ -91,7 +91,83 @@ const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"screensaverStart", label:"대기 화면 지금 시작", description:"모니터 전체 화면으로 대기 화면 켜기", defaultValue:"Ctrl+F12" }
 ]);
 const DEFAULT_SHORTCUTS = Object.freeze(Object.fromEntries(SHORTCUT_DEFINITIONS.map((item) => [item.id, item.defaultValue])));
-// 설정에서 노출/숨김을 고를 수 있는 도구막대 버튼들. 이 배열 하나가 설정 체크박스 목록과
+
+// 악보 자판은 일반 단축키와 성격이 다르다. Ctrl 조합이 아니라 자판의 물리적인 한 자리를
+// 음에 연결하므로 event.key 대신 event.code 를 저장한다(한/영 입력 상태가 바뀌어도 같은 자리).
+// 작곡 모드의 음표 길이·쉼표·임시표·악보 구조까지 같은 설정에서 익힐 수 있게 한 묶음으로 둔다.
+const MUSIC_KEYBOARD_DEFINITIONS = Object.freeze([
+  { id:"C", label:"도", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:0, defaultCode:"KeyA" },
+  { id:"Cs", label:"도♯·레♭", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:1, defaultCode:"KeyW" },
+  { id:"D", label:"레", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:2, defaultCode:"KeyS" },
+  { id:"Ds", label:"레♯·미♭", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:3, defaultCode:"KeyE" },
+  { id:"E", label:"미", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:4, defaultCode:"KeyD" },
+  { id:"F", label:"파", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:5, defaultCode:"KeyF" },
+  { id:"Fs", label:"파♯·솔♭", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:6, defaultCode:"KeyT" },
+  { id:"G", label:"솔", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:7, defaultCode:"KeyG" },
+  { id:"Gs", label:"솔♯·라♭", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:8, defaultCode:"KeyY" },
+  { id:"A", label:"라", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:9, defaultCode:"KeyH" },
+  { id:"As", label:"라♯·시♭", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:10, defaultCode:"KeyU" },
+  { id:"B", label:"시", group:"음계 입력", description:"계이름 입력·연습 공통 키", pitchClass:11, defaultCode:"KeyJ" },
+  { id:"octaveDown", label:"옥타브 내림", group:"옥타브", description:"자판 작곡 중 입력 음역 바꾸기", defaultCode:"KeyZ" },
+  { id:"octaveUp", label:"옥타브 올림", group:"옥타브", description:"자판 작곡 중 입력 음역 바꾸기", defaultCode:"KeyX" },
+  { id:"noteWhole", label:"온음표", group:"음표·쉼표", description:"자판 작곡 중 음표 길이 선택", defaultCode:"Digit1" },
+  { id:"noteHalf", label:"2분음표", group:"음표·쉼표", description:"자판 작곡 중 음표 길이 선택", defaultCode:"Digit2" },
+  { id:"noteQuarter", label:"4분음표", group:"음표·쉼표", description:"자판 작곡 중 음표 길이 선택", defaultCode:"Digit3" },
+  { id:"noteEighth", label:"8분음표", group:"음표·쉼표", description:"자판 작곡 중 음표 길이 선택", defaultCode:"Digit4" },
+  { id:"noteSixteenth", label:"16분음표", group:"음표·쉼표", description:"자판 작곡 중 음표 길이 선택", defaultCode:"Digit5" },
+  { id:"toggleRest", label:"음표·쉼표 전환", group:"음표·쉼표", description:"고른 길이의 음표와 쉼표 전환", defaultCode:"KeyR" },
+  { id:"cycleDots", label:"점·겹점 전환", group:"음표·쉼표", description:"점 없음·점·겹점을 차례로 전환", defaultCode:"Period" },
+  { id:"accidentalFlat", label:"내림표(♭)", group:"임시표", description:"다음 음 하나에 임시표 적용", defaultCode:"BracketLeft" },
+  { id:"accidentalNatural", label:"제자리표(♮)", group:"임시표", description:"다음 음 하나에 임시표 적용", defaultCode:"Backslash" },
+  { id:"accidentalSharp", label:"올림표(♯)", group:"임시표", description:"다음 음 하나에 임시표 적용", defaultCode:"BracketRight" },
+  { id:"addMeasure", label:"마디 추가", group:"악보 구조", description:"악보 끝에 빈 마디 추가", defaultCode:"Equal" },
+  { id:"addStaff", label:"오선 추가", group:"악보 구조", description:"악보 끝에 새 오선 한 단 추가", defaultCode:"Backquote" }
+]);
+const MUSIC_KEYBOARD_DEFAULTS = Object.freeze(Object.fromEntries(
+  MUSIC_KEYBOARD_DEFINITIONS.map((item) => [item.id, item.defaultCode])
+));
+const MUSIC_KEYBOARD_BLOCKED_CODES = new Set([
+  "Escape", "Tab", "Enter", "NumpadEnter", "Space", "Backspace", "Delete", "Insert",
+  "Home", "End", "PageUp", "PageDown", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight",
+  "MetaLeft", "MetaRight", "CapsLock", "NumLock", "ScrollLock", "Pause", "PrintScreen"
+]);
+function musicKeyboardCodeAllowed(code){
+  const value = String(code || "");
+  return !!value && !MUSIC_KEYBOARD_BLOCKED_CODES.has(value) && !/^F\d{1,2}$/.test(value);
+}
+function normalizeMusicKeyboard(value){
+  const source = value && typeof value === "object" ? value : {};
+  const used = new Set();
+  const out = {};
+  for (const item of MUSIC_KEYBOARD_DEFINITIONS){
+    let code = musicKeyboardCodeAllowed(source[item.id]) ? String(source[item.id]) : item.defaultCode;
+    if (used.has(code)) code = item.defaultCode;
+    // 손상된 저장값끼리 기본키까지 차지한 경우에도 중복 없이 안전한 기본 배열을 복원한다.
+    if (used.has(code)) code = MUSIC_KEYBOARD_DEFINITIONS.map((entry) => entry.defaultCode).find((candidate) => !used.has(candidate)) || "";
+    out[item.id] = code;
+    if (code) used.add(code);
+  }
+  return out;
+}
+function musicKeyboardCodeLabel(code){
+  const value = String(code || "");
+  if (/^Key[A-Z]$/.test(value)) return value.slice(3);
+  if (/^Digit\d$/.test(value)) return value.slice(5);
+  if (/^Numpad\d$/.test(value)) return "숫자패드 " + value.slice(6);
+  const labels = {
+    Minus:"-", Equal:"=", BracketLeft:"[", BracketRight:"]", Backslash:"\\",
+    Semicolon:";", Quote:"'", Comma:",", Period:".", Slash:"/", Backquote:"`"
+  };
+  return labels[value] || value.replace(/^Numpad/, "숫자패드 ");
+}
+function musicKeyboardActionForEvent(event, value){
+  if (!event || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return "";
+  const code = String(event.code || "");
+  const mapping = normalizeMusicKeyboard(value === undefined ? (appSettings && appSettings.musicKeyboard) : value);
+  return (MUSIC_KEYBOARD_DEFINITIONS.find((item) => mapping[item.id] === code) || {}).id || "";
+}
+// 설정에서 노출/숨김을 고를 수 있는 도구막대 버튼들. 이 배열 하나가 설정의 좌우 이동 목록과
 // CSS 숨김 클래스를 모두 구동한다(라벨·목록 이중 관리 방지). cls 는 각 버튼의 고유 클래스명.
 // ▶ 실행·저장처럼 없으면 안 되는 버튼은 일부러 뺐다. 기본값은 전부 노출(defaultVisible).
 const TOGGLEABLE_TOOLS = Object.freeze([
@@ -113,13 +189,12 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   // Python 실행 바 (code-viewer.js)
   { id:"pyTrace",     label:"단계 실행",       cls:"run-trace",           target:"py" },
   { id:"pyAnalyze",   label:"진단",            cls:"run-analyze",         target:"py" },
-  { id:"pyGrade",     label:"채점",            cls:"run-grade",           target:"py" },
+  { id:"pyGrade",     label:"채점",            cls:"run-py-grade",        target:"py" },
   { id:"pyLink",      label:"PDF에 핀",        cls:"run-link",            target:"py" },
   { id:"pyNbConvert", label:"노트북으로 변환", cls:"run-nbconvert-group", target:"py" },
   { id:"pyInk",       label:"필기",            cls:"run-ink",             target:"py" },
   { id:"pyRec",       label:"녹화",            cls:"run-rec",             target:"py" },
   { id:"pyPkg",       label:"Python 라이브러리",cls:"run-py-pkg",          target:"py" },
-  { id:"jsPkg",       label:"JavaScript 라이브러리",cls:"run-js-library",   target:"py" },
   { id:"pyEnv",       label:"Py Env(실행 환경)",cls:"run-diag",           target:"py" },
   { id:"pyNewPy",     label:"+Py(새 파이썬)",  cls:"run-newpy",           target:"py" },
   { id:"pyRevert",    label:"원본 되돌리기",   cls:"run-py-revert",       target:"py" },
@@ -127,6 +202,9 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"pyPractice",  label:"따라치기(타자 연습)",cls:"run-practice-group", target:"py" },
   { id:"pySpellcheck",label:"맞춤법",          cls:"run-spellcheck",      target:"py" },
   { id:"pyFont",      label:"글자 크기(A− A+)",cls:"run-font-group",      target:"py" },
+  // JavaScript 실행 바(.js/.mjs와 JavaScript 노트북). Python과 같은 버튼 모양을 써도 노출 설정은 분리한다.
+  { id:"jsGrade",     label:"채점",            cls:"run-js-grade",        target:"javascript" },
+  { id:"jsPkg",       label:"JavaScript 라이브러리",cls:"run-js-library", target:"javascript" },
   // 노트북 도구막대 (notebook-run.js)
   { id:"nbInk",       label:"필기",            cls:"nbv-ink-toggle",      target:"notebook" },
   { id:"nbToc",       label:"목차",            cls:"nbv-toc-open",        target:"notebook" },
@@ -147,7 +225,124 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"imgDims",     label:"이미지 크기 표시",cls:"img-tool-dims",       target:"image" },
   { id:"imgReset",    label:"초기화",          cls:"img-tool-reset",      target:"image" },
   { id:"imgAnnotate", label:"표시(펜·화살표·모자이크)",cls:"img-tool-ann",target:"image" },
-  { id:"imgAdjust",   label:"화질 보정·크기 조절",cls:"img-tool-adjust",  target:"image" }
+  { id:"imgAdjust",   label:"화질 보정·크기 조절",cls:"img-tool-adjust",  target:"image" },
+  // 화이트보드 — 되돌리기·다시는 항상 남기고, 우클릭 메뉴를 보조 통로로 유지한다.
+  { id:"wbSelect", label:"선택·이동", cls:"wb-toolvis-select", target:"whiteboard" },
+  { id:"wbPen", label:"펜", cls:"wb-toolvis-pen", target:"whiteboard" },
+  { id:"wbHighlighter", label:"형광펜", cls:"wb-toolvis-highlighter", target:"whiteboard" },
+  { id:"wbEraser", label:"지우개", cls:"wb-toolvis-eraser", target:"whiteboard" },
+  { id:"wbLine", label:"직선", cls:"wb-toolvis-line", target:"whiteboard" },
+  { id:"wbArrow", label:"화살표", cls:"wb-toolvis-arrow", target:"whiteboard" },
+  { id:"wbRect", label:"사각형", cls:"wb-toolvis-rect", target:"whiteboard" },
+  { id:"wbEllipse", label:"원", cls:"wb-toolvis-ellipse", target:"whiteboard" },
+  { id:"wbText", label:"텍스트", cls:"wb-toolvis-text", target:"whiteboard" },
+  { id:"wbColor", label:"필기 색상", cls:"wb-toolvis-color", target:"whiteboard" },
+  { id:"wbBackground", label:"배경", cls:"wb-toolvis-background", target:"whiteboard" },
+  { id:"wbWidth", label:"필기 굵기", cls:"wb-toolvis-width", target:"whiteboard" },
+  { id:"wbTextSize", label:"글자 크기", cls:"wb-toolvis-textsize", target:"whiteboard" },
+  { id:"wbZoom", label:"화면 확대·축소", cls:"wb-toolvis-zoom", target:"whiteboard" },
+  { id:"wbFocus", label:"집중 도구", cls:"wb-toolvis-focus", target:"whiteboard" },
+  { id:"wbRuler", label:"자", cls:"wb-toolvis-ruler", target:"whiteboard" },
+  { id:"wbProtractor", label:"각도기", cls:"wb-toolvis-protractor", target:"whiteboard" },
+  { id:"wbCompass", label:"컴퍼스", cls:"wb-toolvis-compass", target:"whiteboard" },
+  { id:"wbSnap", label:"15° 맞추기", cls:"wb-toolvis-snap", target:"whiteboard" },
+  { id:"wbTidy", label:"손그림 정리", cls:"wb-toolvis-tidy", target:"whiteboard" },
+  { id:"wbMeasure", label:"측정", cls:"wb-toolvis-measure", target:"whiteboard" },
+  { id:"wbVectorSum", label:"벡터 합성", cls:"wb-toolvis-vectorsum", target:"whiteboard" },
+  { id:"wbTransform", label:"도형 변환", cls:"wb-toolvis-transform", target:"whiteboard" },
+  { id:"wbEducation", label:"수학·과학 도구상자", cls:"wb-toolvis-education", target:"whiteboard" },
+  { id:"wbPlot", label:"함수 그래프", cls:"wb-toolvis-plot", target:"whiteboard" },
+  { id:"wbChart", label:"자료 차트", cls:"wb-toolvis-chart", target:"whiteboard" },
+  { id:"wbMap", label:"지도 넣기", cls:"wb-toolvis-map", target:"whiteboard" },
+  { id:"wbRate", label:"환율 넣기", cls:"wb-toolvis-rate", target:"whiteboard" },
+  { id:"wbImage", label:"이미지 넣기", cls:"wb-toolvis-image", target:"whiteboard" },
+  { id:"wbFlipX", label:"선택 항목 좌우 반전", cls:"wb-toolvis-flipx", target:"whiteboard" },
+  { id:"wbFlipY", label:"선택 항목 상하 반전", cls:"wb-toolvis-flipy", target:"whiteboard" },
+  { id:"wbUngroup", label:"그룹 분리", cls:"wb-toolvis-ungroup", target:"whiteboard" },
+  { id:"wbClear", label:"전체 지우기", cls:"wb-toolvis-clear", target:"whiteboard" },
+  { id:"wbPng", label:"PNG 저장", cls:"wb-toolvis-png", target:"whiteboard" },
+  { id:"wbPdf", label:"PDF 저장", cls:"wb-toolvis-pdf", target:"whiteboard" },
+  { id:"wbMemo", label:"메모로 보내기", cls:"wb-toolvis-memo", target:"whiteboard" },
+  { id:"wbRecord", label:"수업 리플레이 녹화", cls:"wb-toolvis-record", target:"whiteboard" },
+  // 지도 — 제목·도구 보이기·되돌리기·저장은 항상 남긴다.
+  { id:"mapSearch", label:"장소·좌표 검색", cls:"map-toolvis-search", target:"map" },
+  { id:"mapBasemap", label:"배경지도 선택", cls:"map-toolvis-basemap", target:"map" },
+  { id:"mapAdd", label:"표시 추가", cls:"map-toolvis-add", target:"map" },
+  { id:"mapAutoAddress", label:"주소 자동", cls:"map-toolvis-auto-address", target:"map" },
+  { id:"mapSpot", label:"장소 정보", cls:"map-toolvis-spot", target:"map" },
+  { id:"mapLine", label:"거리선", cls:"map-toolvis-line", target:"map" },
+  { id:"mapArea", label:"면적 영역", cls:"map-toolvis-area", target:"map" },
+  { id:"mapGrid", label:"위경도 격자", cls:"map-toolvis-grid", target:"map" },
+  { id:"mapLabels", label:"표시 이름 보이기", cls:"map-toolvis-labels", target:"map" },
+  { id:"mapRoute", label:"표시 잇기", cls:"map-toolvis-route", target:"map" },
+  { id:"mapDrive", label:"자동차 길찾기", cls:"map-toolvis-drive", target:"map" },
+  { id:"mapList", label:"표시 목록", cls:"map-toolvis-list", target:"map" },
+  { id:"mapPresent", label:"발표 모드", cls:"map-toolvis-present", target:"map" },
+  { id:"mapNearby", label:"주변 시설", cls:"map-toolvis-nearby", target:"map" },
+  { id:"mapRegion", label:"지역 통계", cls:"map-toolvis-region", target:"map" },
+  { id:"mapImage", label:"내 지도 이미지", cls:"map-toolvis-image", target:"map" },
+  { id:"mapCsvImport", label:"표 들이기", cls:"map-toolvis-csv-import", target:"map" },
+  { id:"mapCsvExport", label:"CSV 내보내기", cls:"map-toolvis-csv-export", target:"map" },
+  { id:"mapCsvMemo", label:"표로 메모", cls:"map-toolvis-csv-memo", target:"map" },
+  { id:"mapClear", label:"지도 내용 지우기", cls:"map-toolvis-clear", target:"map" },
+  { id:"mapBoard", label:"칠판으로 보내기", cls:"map-toolvis-board", target:"map" },
+  { id:"mapMemo", label:"메모로 보내기", cls:"map-toolvis-memo", target:"map" },
+  { id:"mapPng", label:"PNG 저장", cls:"map-toolvis-png", target:"map" },
+  { id:"mapPrint", label:"인쇄", cls:"map-toolvis-print", target:"map" },
+  { id:"mapTask", label:"지도 문제 만들기", cls:"map-toolvis-task", target:"map" },
+  { id:"mapOffline", label:"오프라인 지도 관리", cls:"map-toolvis-offline", target:"map" },
+  // 악보 — 제목·도구 보이기·되돌리기·저장은 항상 남긴다. 여러 버튼이 한 기능이면 한 항목으로 묶는다.
+  { id:"musicTempo", label:"빠르기(템포)", cls:"music-toolvis-tempo", target:"music" },
+  { id:"musicTime", label:"박자", cls:"music-toolvis-time", target:"music" },
+  { id:"musicKey", label:"조표", cls:"music-toolvis-key", target:"music" },
+  { id:"musicTranspose", label:"조옮김", cls:"music-toolvis-transpose", target:"music" },
+  { id:"musicTimbre", label:"음색", cls:"music-toolvis-timbre", target:"music" },
+  { id:"musicParts", label:"악기 파트", cls:"music-toolvis-parts", target:"music" },
+  { id:"musicGrandStaff", label:"단일 오선·피아노 대보표", cls:"music-toolvis-grandstaff", target:"music" },
+  { id:"musicExample", label:"예제로 시작", cls:"music-toolvis-example", target:"music" },
+  { id:"musicNoteValue", label:"음표 길이", cls:"music-toolvis-notevalue", target:"music" },
+  { id:"musicDots", label:"점음표", cls:"music-toolvis-dots", target:"music" },
+  { id:"musicRest", label:"쉼표 입력", cls:"music-toolvis-rest", target:"music" },
+  { id:"musicAccidental", label:"임시표", cls:"music-toolvis-accidental", target:"music" },
+  { id:"musicStaff", label:"오른손·왼손 입력", cls:"music-toolvis-staff", target:"music" },
+  { id:"musicVoice", label:"성부 선택", cls:"music-toolvis-voice", target:"music" },
+  { id:"musicChord", label:"화음 입력", cls:"music-toolvis-chord", target:"music" },
+  { id:"musicTie", label:"붙임줄", cls:"music-toolvis-tie", target:"music" },
+  { id:"musicSlur", label:"이음줄", cls:"music-toolvis-slur", target:"music" },
+  { id:"musicChordSymbol", label:"코드 기호", cls:"music-toolvis-chordsymbol", target:"music" },
+  { id:"musicLyric", label:"가사", cls:"music-toolvis-lyric", target:"music" },
+  { id:"musicDynamic", label:"셈여림", cls:"music-toolvis-dynamic", target:"music" },
+  { id:"musicArticulation", label:"연주 기호", cls:"music-toolvis-articulation", target:"music" },
+  { id:"musicTriplet", label:"셋잇단음표", cls:"music-toolvis-triplet", target:"music" },
+  { id:"musicFingering", label:"운지", cls:"music-toolvis-fingering", target:"music" },
+  { id:"musicPedal", label:"페달", cls:"music-toolvis-pedal", target:"music" },
+  { id:"musicRepeat", label:"반복·엔딩 표시", cls:"music-toolvis-repeat", target:"music" },
+  { id:"musicMeasureSettings", label:"마디 설정", cls:"music-toolvis-measure-settings", target:"music" },
+  { id:"musicSolfege", label:"계이름 표시", cls:"music-toolvis-solfege", target:"music" },
+  { id:"musicEraser", label:"지우개", cls:"music-toolvis-eraser", target:"music" },
+  { id:"musicPosition", label:"음표 위치 조정", cls:"music-toolvis-position", target:"music" },
+  { id:"musicMeasures", label:"마디 추가·삭제", cls:"music-toolvis-measures", target:"music" },
+  { id:"musicStaves", label:"오선 추가·삭제", cls:"music-toolvis-staves", target:"music" },
+  { id:"musicReset", label:"악보 내용 초기화", cls:"music-toolvis-reset", target:"music" },
+  { id:"musicEasyInput", label:"쉬운 계이름 입력", cls:"music-toolvis-easy", target:"music" },
+  { id:"musicPlayback", label:"전체·오른손·왼손 재생", cls:"music-toolvis-playback", target:"music" },
+  { id:"musicRange", label:"구간 재생", cls:"music-toolvis-range", target:"music" },
+  { id:"musicRepeatMeasure", label:"고른 마디 반복", cls:"music-toolvis-repeat-measure", target:"music" },
+  { id:"musicSpeed", label:"연습 속도", cls:"music-toolvis-speed", target:"music" },
+  { id:"musicCountIn", label:"1234 준비", cls:"music-toolvis-countin", target:"music" },
+  { id:"musicMetronome", label:"메트로놈", cls:"music-toolvis-metronome", target:"music" },
+  { id:"musicDrums", label:"드럼 반주", cls:"music-toolvis-drums", target:"music" },
+  { id:"musicPractice", label:"따라치기", cls:"music-toolvis-practice", target:"music" },
+  { id:"musicEar", label:"음감 테스트", cls:"music-toolvis-ear", target:"music" },
+  { id:"musicVolume", label:"음량·음소거", cls:"music-toolvis-volume", target:"music" },
+  { id:"musicXml", label:"MusicXML 내보내기", cls:"music-toolvis-xml", target:"music" },
+  { id:"musicMidiInput", label:"MIDI 건반 입력", cls:"music-toolvis-midi-input", target:"music" },
+  { id:"musicMidiExport", label:"MIDI 내보내기", cls:"music-toolvis-midi-export", target:"music" },
+  { id:"musicReference", label:"악보 이미지 참고", cls:"music-toolvis-reference", target:"music" },
+  { id:"musicWav", label:"WAV 저장", cls:"music-toolvis-wav", target:"music" },
+  { id:"musicMemo", label:"메모로 보내기", cls:"music-toolvis-memo", target:"music" },
+  { id:"musicPrint", label:"인쇄", cls:"music-toolvis-print", target:"music" },
+  { id:"musicZoom", label:"악보 확대·축소", cls:"music-toolvis-zoom", target:"music" }
 ]);
 // { id: boolean } 로 정규화. 레지스트리에 있는 id만 남기고, 지정 안 된 것·잘못된 값은 노출(true).
 function normalizeToolVisibility(value){
@@ -354,8 +549,8 @@ function boardImageFitLabel(id){
 /* 배경 그림 설정을 늘 같은 모양으로 맞춘다.
    src 는 data URL 만 받는다 — 바깥 주소를 그대로 두면 자동복원 스냅샷이 그 주소에 매여,
    인터넷이 없는 다음 수업에서 빈 칸으로 되살아난다(이미지 항목과 같은 규칙).
-   x·y·w·h 는 넣을 때 정한 보드 좌표 상자다. 창 크기(W·H)에 맞춰 매번 다시 계산하면
-   창을 줄일 때 그림만 늘었다 줄고 그 위에 쓴 판서는 그대로라 주석이 그림에서 어긋난다. */
+   x·y·w·h 는 예전 스냅샷·리플레이와의 호환을 위해 남기지만, 실제 화이트보드에서는 배경이
+   현재 화면 자체를 채우므로 렌더러가 화면 크기에 맞춰 다시 계산한다. */
 function normalizeBoardImage(value){
   if (!value || typeof value !== "object") return null;
   const src = typeof value.src === "string" && /^data:image\//i.test(value.src) ? value.src : "";
@@ -434,7 +629,8 @@ const DEFAULT_APP_SETTINGS = {
   codeColors: {},       // 구문 강조 색({} = 기본 팔레트) — { light:{…}, dark:{…} }, CODE_COLOR_DEFS 참고
   mouseSideButtons: true,   // 마우스 4·5번(뒤로/앞으로) 버튼으로 이전/다음 탭 이동
   shortcutDefaultsVersion: 2,
-  shortcuts: DEFAULT_SHORTCUTS
+  shortcuts: DEFAULT_SHORTCUTS,
+  musicKeyboard: MUSIC_KEYBOARD_DEFAULTS
 };
 // 대기 화면 웹 주소 정규화 — 실제로 화면에 띄우는 주소라 http/https 만 통과시킨다.
 // javascript:·data: 같은 스킴은 오버레이 안에서 코드를 실행시킬 수 있어 여기서 잘라낸다.
@@ -575,22 +771,22 @@ let shortcutDefaultsMigrated = false;
 let appSettings = (() => {
   try {
     const raw = localStorage.getItem("classDockSettings");
-    if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() };
+    if (!raw) return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap(), musicKeyboard:normalizeMusicKeyboard() };
     const decoded = JSON.parse(raw);
     const parsed = decoded && typeof decoded === "object" ? decoded : {};
     const migrationChanged = "pythonAutosave" in parsed || (Number(parsed.shortcutDefaultsVersion) || 0) < 2;
     const saved = migrateAppSettings(parsed);
     shortcutDefaultsMigrated = saved._shortcutDefaultsMigrated === true;
     delete saved._shortcutDefaultsMigrated;
-    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), mapSearchProvider:normalizeMapSearchProvider(saved.mapSearchProvider), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), boardPattern:normalizeBoardPattern(saved.boardPattern), shortcuts:normalizeShortcutMap(saved.shortcuts) };
+    const loaded = { ...DEFAULT_APP_SETTINGS, ...saved, screensaver:normalizeScreensaver(saved.screensaver), petFocus:normalizePetFocus(saved.petFocus), mapSearchProvider:normalizeMapSearchProvider(saved.mapSearchProvider), toolVisibility:normalizeToolVisibility(saved.toolVisibility), codeColors:normalizeCodeColors(saved.codeColors), boardBg:normalizeBoardBg(saved.boardBg), boardPattern:normalizeBoardPattern(saved.boardPattern), shortcuts:normalizeShortcutMap(saved.shortcuts), musicKeyboard:normalizeMusicKeyboard(saved.musicKeyboard) };
     if (migrationChanged) localStorage.setItem("classDockSettings", JSON.stringify(loaded));
     return loaded;
   }
-  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap() }; }
+  catch(e){ return { ...DEFAULT_APP_SETTINGS, screensaver:normalizeScreensaver(), petFocus:normalizePetFocus(), toolVisibility:normalizeToolVisibility(), codeColors:normalizeCodeColors(), shortcuts:normalizeShortcutMap(), musicKeyboard:normalizeMusicKeyboard() }; }
 })();
 function saveAppSettings(next){
   const merged = { ...appSettings, ...next };
-  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), mapSearchProvider:normalizeMapSearchProvider(merged.mapSearchProvider), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), boardPattern:normalizeBoardPattern(merged.boardPattern), shortcuts:normalizeShortcutMap(merged.shortcuts) };
+  appSettings = { ...DEFAULT_APP_SETTINGS, ...merged, screensaver:normalizeScreensaver(merged.screensaver), petFocus:normalizePetFocus(merged.petFocus), mapSearchProvider:normalizeMapSearchProvider(merged.mapSearchProvider), toolVisibility:normalizeToolVisibility(merged.toolVisibility), codeColors:normalizeCodeColors(merged.codeColors), boardBg:normalizeBoardBg(merged.boardBg), boardPattern:normalizeBoardPattern(merged.boardPattern), shortcuts:normalizeShortcutMap(merged.shortcuts), musicKeyboard:normalizeMusicKeyboard(merged.musicKeyboard) };
   try { localStorage.setItem("classDockSettings", JSON.stringify(appSettings)); } catch(e){}
 }
 function shortcutValue(action){ return (appSettings.shortcuts && appSettings.shortcuts[action]) || DEFAULT_SHORTCUTS[action] || ""; }

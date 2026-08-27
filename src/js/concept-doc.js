@@ -12,6 +12,8 @@ const CONCEPT_CANVAS_HEIGHT = 1100;
 const CONCEPT_MAX_COORD = 30000;
 const CONCEPT_MIN_ZOOM = .35;
 const CONCEPT_MAX_ZOOM = 2;
+const CONCEPT_PAN_KEEP = 120;   // 손바닥 이동 뒤에도 화면에 남겨 둘 관계도 가장자리(px)
+const CONCEPT_PAN_STEP = 60;    // 방향키 한 번에 옮기는 거리(px)
 const CONCEPT_HISTORY_LIMIT = 35;
 const CONCEPT_RECOVERY_DELAY = 850;
 const CONCEPT_COLORS = Object.freeze({ blue:"#2563eb", green:"#16a34a", amber:"#d97706", rose:"#e11d48", purple:"#7c3aed", slate:"#475569" });
@@ -37,9 +39,24 @@ function conceptId(prefix){ return prefix + "-" + Date.now().toString(36) + "-" 
 function conceptClamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
 function conceptClampZoom(value){ return conceptClamp(value, CONCEPT_MIN_ZOOM, CONCEPT_MAX_ZOOM); }
 function conceptFitZoom(canvasWidth, canvasHeight, viewportWidth, viewportHeight){ const width = Math.max(1, Number(canvasWidth) || 1), height = Math.max(1, Number(canvasHeight) || 1), availableWidth = Math.max(1, (Number(viewportWidth) || 1) - 36), availableHeight = Math.max(1, (Number(viewportHeight) || 1) - 36); return conceptClampZoom(Math.min(availableWidth / width, availableHeight / height, 1)); }
-function conceptZoomScroll(scrollLeft, scrollTop, anchorX, anchorY, oldZoom, nextZoom){
+// 무대는 스크롤이 아니라 translate로 움직인다. 화면 위 점 (x,y)가 가리키는 캔버스 지점은 (x - pan) / zoom 이므로,
+// 배율이 바뀌어도 기준점 아래 지점이 그대로 있으려면 pan을 아래처럼 다시 잡아야 한다.
+function conceptZoomPan(panX, panY, anchorX, anchorY, oldZoom, nextZoom){
+  const before = conceptClampZoom(oldZoom), after = conceptClampZoom(nextZoom), ratio = after / before;
+  const x = Number(anchorX) || 0, y = Number(anchorY) || 0;
+  return { x:x - (x - (Number(panX) || 0)) * ratio, y:y - (y - (Number(panY) || 0)) * ratio };
+}
+// 사방으로 자유롭게 옮기되, 관계도를 화면 밖으로 완전히 놓치지는 않게 가장자리를 조금 남긴다.
+function conceptClampPan(panX, panY, canvasWidth, canvasHeight, viewportWidth, viewportHeight, zoom){
+  const scale = conceptClampZoom(zoom), width = Math.max(1, Number(canvasWidth) || 1) * scale, height = Math.max(1, Number(canvasHeight) || 1) * scale;
+  const viewWidth = Math.max(1, Number(viewportWidth) || 1), viewHeight = Math.max(1, Number(viewportHeight) || 1);
+  const keepX = Math.min(CONCEPT_PAN_KEEP, viewWidth / 2, width), keepY = Math.min(CONCEPT_PAN_KEEP, viewHeight / 2, height);
+  return { x:conceptClamp(panX, keepX - width, viewWidth - keepX), y:conceptClamp(panY, keepY - height, viewHeight - keepY) };
+}
+function conceptZoomScrollWithOffset(scrollLeft, scrollTop, anchorX, anchorY, oldZoom, nextZoom, oldOffsetLeft, oldOffsetTop, nextOffsetLeft, nextOffsetTop){
   const before = conceptClampZoom(oldZoom), after = conceptClampZoom(nextZoom), x = Math.max(0, Number(anchorX) || 0), y = Math.max(0, Number(anchorY) || 0);
-  return { left:Math.max(0, ((Number(scrollLeft) || 0) + x) / before * after - x), top:Math.max(0, ((Number(scrollTop) || 0) + y) / before * after - y) };
+  const contentX = ((Number(scrollLeft) || 0) + x - (Number(oldOffsetLeft) || 0)) / before, contentY = ((Number(scrollTop) || 0) + y - (Number(oldOffsetTop) || 0)) / before;
+  return { left:Math.max(0, (Number(nextOffsetLeft) || 0) + contentX * after - x), top:Math.max(0, (Number(nextOffsetTop) || 0) + contentY * after - y) };
 }
 function conceptDragCoordinate(origin, pointerDelta, scrollDelta, zoom){ return conceptClamp((Number(origin) || 0) + ((Number(pointerDelta) || 0) + (Number(scrollDelta) || 0)) / conceptClampZoom(zoom), 20, CONCEPT_MAX_COORD); }
 function conceptCanvasSize(nodes){ return { width:Math.max(CONCEPT_CANVAS_WIDTH, ...(nodes || []).map(node => Number(node.x) + 290)), height:Math.max(CONCEPT_CANVAS_HEIGHT, ...(nodes || []).map(node => Number(node.y) + 210)) }; }
@@ -202,16 +219,15 @@ function mountConceptEditor(doc){
   const search = document.createElement("input"); search.type = "search"; search.className = "concept-search"; search.placeholder = "개념·설명 검색";
   const orderBtn = conceptButton("① 순서", "전개 발표에서 카드가 나올 순서 정하기"), animationSelect = document.createElement("select"); animationSelect.className = "concept-animation"; animationSelect.title = "전개 발표 애니메이션"; animationSelect.setAttribute("aria-label", "전개 발표 애니메이션");
   CONCEPT_PRESENT_ANIMATIONS.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = "효과: " + item.label; animationSelect.appendChild(option); }); animationSelect.value = model.presentation.animation;
-  const zoomTools = document.createElement("div"); zoomTools.className = "concept-zoom-tools"; const zoomOutBtn = conceptButton("−", "축소 (Ctrl+마우스 휠 아래)"), zoomResetBtn = conceptButton("100%", "배율 100%로 되돌리기"), zoomInBtn = conceptButton("＋", "확대 (Ctrl+마우스 휠 위)"); zoomTools.append(zoomOutBtn, zoomResetBtn, zoomInBtn);
-  const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("✨ 전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
+  const zoomTools = document.createElement("div"); zoomTools.className = "concept-zoom-tools"; const zoomOutBtn = conceptButton("−", "축소 (Ctrl+마우스 휠 아래)"), zoomResetBtn = conceptButton("100%", "배율 100%로 되돌리고 관계도를 화면 가운데로 (Home 키는 화면에 맞춤)"), zoomInBtn = conceptButton("＋", "확대 (Ctrl+마우스 휠 위)"); zoomTools.append(zoomOutBtn, zoomResetBtn, zoomInBtn);
+  const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
   bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, presentBtn, buildPresentBtn, printBtn, saveBtn);
   const viewport = document.createElement("div"); viewport.className = "concept-viewport"; viewport.tabIndex = 0;
-  const zoomSpace = document.createElement("div"); zoomSpace.className = "concept-zoom-space";
   const stage = document.createElement("div"); stage.className = "concept-stage"; stage.style.width = CONCEPT_CANVAS_WIDTH + "px"; stage.style.height = CONCEPT_CANVAS_HEIGHT + "px";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("concept-lines"); svg.setAttribute("viewBox", `0 0 ${CONCEPT_CANVAS_WIDTH} ${CONCEPT_CANVAS_HEIGHT}`);
   svg.innerHTML = '<defs><marker id="conceptArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z"></path></marker></defs>';
-  const cards = document.createElement("div"); cards.className = "concept-cards"; stage.append(svg, cards); zoomSpace.appendChild(stage); viewport.appendChild(zoomSpace); root.append(bar, viewport);
-  let selectedId = "", history = null, recoveryTimer = 0, drag = null, previewTimer = 0, suppressCardClick = false, closeNodePreview = null, closeBuildPresentation = null, zoom = 1;
+  const cards = document.createElement("div"); cards.className = "concept-cards"; stage.append(svg, cards); viewport.appendChild(stage); root.append(bar, viewport);
+  let selectedId = "", history = null, recoveryTimer = 0, drag = null, previewTimer = 0, suppressCardClick = false, closeNodePreview = null, closeBuildPresentation = null, zoom = 1, panX = 0, panY = 0, panReady = false, glideTimer = 0;
 
   const snapshot = () => conceptSnapshot(model);
   const flushRecovery = async () => {
@@ -227,43 +243,99 @@ function mountConceptEditor(doc){
   history = MNEditHistory.create({ capture:snapshot, isEqual:(a, b) => a === b, apply:value => replaceModel(conceptSnapshotModel(value)), onChange:() => { undoBtn.disabled = !history.canUndo(); redoBtn.disabled = !history.canRedo(); }, limit:CONCEPT_HISTORY_LIMIT });
   history.reset(); doc._conceptHistory = history;
 
+  const applyPan = () => { stage.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`; };
+  const setPan = (x, y, glide) => {
+    const size = conceptCanvasSize(model.nodes), next = conceptClampPan(x, y, size.width, size.height, viewport.clientWidth, viewport.clientHeight, zoom);
+    panX = next.x; panY = next.y;
+    if (glide){ stage.classList.add("is-gliding"); clearTimeout(glideTimer); glideTimer = setTimeout(() => stage.classList.remove("is-gliding"), 340); }
+    applyPan();
+  };
+  const centerCanvas = glide => { const size = conceptCanvasSize(model.nodes); setPan((viewport.clientWidth - size.width * zoom) / 2, (viewport.clientHeight - size.height * zoom) / 2, glide); };
   const syncCanvasSize = () => {
-    const size = conceptCanvasSize(model.nodes); stage.style.width = size.width + "px"; stage.style.height = size.height + "px"; stage.style.transform = `scale(${zoom})`; svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
-    zoomSpace.style.width = Math.max(viewport.clientWidth, size.width * zoom) + "px"; zoomSpace.style.height = Math.max(viewport.clientHeight, size.height * zoom) + "px"; zoomResetBtn.textContent = Math.round(zoom * 100) + "%"; zoomOutBtn.disabled = zoom <= CONCEPT_MIN_ZOOM; zoomInBtn.disabled = zoom >= CONCEPT_MAX_ZOOM;
-    viewport.classList.toggle("is-pannable", viewport.scrollWidth > viewport.clientWidth + 1 || viewport.scrollHeight > viewport.clientHeight + 1);
+    const size = conceptCanvasSize(model.nodes); stage.style.width = size.width + "px"; stage.style.height = size.height + "px"; svg.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+    if (!panReady && viewport.clientWidth > 0){ panReady = true; panX = (viewport.clientWidth - size.width * zoom) / 2; panY = (viewport.clientHeight - size.height * zoom) / 2; }
+    setPan(panX, panY); zoomResetBtn.textContent = Math.round(zoom * 100) + "%"; zoomOutBtn.disabled = zoom <= CONCEPT_MIN_ZOOM; zoomInBtn.disabled = zoom >= CONCEPT_MAX_ZOOM;
   };
   const setZoom = (value, clientX, clientY) => {
     const next = conceptClampZoom(value); if (Math.abs(next - zoom) < .001) return;
-    const rect = viewport.getBoundingClientRect(), anchorX = clientX == null ? rect.width / 2 : clientX - rect.left, anchorY = clientY == null ? rect.height / 2 : clientY - rect.top, scroll = conceptZoomScroll(viewport.scrollLeft, viewport.scrollTop, anchorX, anchorY, zoom, next); zoom = next; syncCanvasSize(); viewport.scrollTo({ left:scroll.left, top:scroll.top, behavior:"auto" });
+    const rect = viewport.getBoundingClientRect(), anchorX = clientX == null ? rect.width / 2 : clientX - rect.left, anchorY = clientY == null ? rect.height / 2 : clientY - rect.top;
+    const moved = conceptZoomPan(panX, panY, anchorX, anchorY, zoom, next); zoom = next; panX = moved.x; panY = moved.y; syncCanvasSize();
   };
-  const fitCanvasToViewport = () => { const size = conceptCanvasSize(model.nodes); zoom = conceptFitZoom(size.width, size.height, viewport.clientWidth, viewport.clientHeight); syncCanvasSize(); viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
-  const onViewportWheel = event => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1, factor = Math.exp(-event.deltaY * unit * .0014); setZoom(zoom * factor, event.clientX, event.clientY); };
-  viewport.addEventListener("wheel", onViewportWheel, { passive:false }); zoomOutBtn.onclick = () => setZoom(zoom / 1.2); zoomResetBtn.onclick = () => setZoom(1); zoomInBtn.onclick = () => setZoom(zoom * 1.2);
-  // 빈 여백을 끌어서 화면을 옮긴다(손바닥). 카드·연결선 위에서는 원래 동작을 그대로 둔다.
+  const fitCanvasToViewport = () => { const size = conceptCanvasSize(model.nodes); zoom = conceptFitZoom(size.width, size.height, viewport.clientWidth, viewport.clientHeight); syncCanvasSize(); centerCanvas(true); };
+  const onViewportWheel = event => {
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
+    if (event.ctrlKey || event.metaKey){ event.preventDefault(); setZoom(zoom * Math.exp(-event.deltaY * unit * .0014), event.clientX, event.clientY); return; }
+    // 스크롤 막대가 없는 화면이라 휠도 직접 받아 옮긴다(Shift+휠은 가로).
+    event.preventDefault(); stage.classList.remove("is-gliding");
+    let dx = event.deltaX * unit, dy = event.deltaY * unit;
+    if (event.shiftKey && !event.deltaX){ dx = dy; dy = 0; }
+    setPan(panX - dx, panY - dy);
+  };
+  viewport.addEventListener("wheel", onViewportWheel, { passive:false }); zoomOutBtn.onclick = () => setZoom(zoom / 1.2); zoomResetBtn.onclick = () => { setZoom(1); centerCanvas(true); }; zoomInBtn.onclick = () => setZoom(zoom * 1.2);
+  // 빈 여백을 끌어서 화면을 옮긴다(손바닥). 스크롤이 아니라 무대 변환을 직접 움직이므로 어느 방향으로든 자유롭다.
   // 빈 곳의 이벤트 대상은 무대가 아니라 무대를 덮은 svg(.concept-lines)라서 허용 목록에 함께 넣는다.
-  let panState = null;
-  const panBackground = target => target === viewport || target === zoomSpace || target === stage || target === svg || target === cards;
+  const panBackground = target => target === viewport || target === stage || target === svg || target === cards;
+  const touchPoints = new Map();
+  let panState = null, pinchState = null;
+  const pinchMetrics = () => {
+    const [first, second] = [...touchPoints.values()], rect = viewport.getBoundingClientRect();
+    return { distance:Math.max(1, Math.hypot(first.x - second.x, first.y - second.y)), x:(first.x + second.x) / 2 - rect.left, y:(first.y + second.y) / 2 - rect.top };
+  };
+  const startPinch = () => {
+    // 두 손가락이 닿으면 손바닥 이동을 접고 핀치로 넘어간다.
+    // 끌던 카드가 있으면 반쯤 옮겨진 채 기록도 남지 않으므로, 집었던 자리로 되돌리고 손을 뗀다.
+    if (drag){ const moved = model.nodes.find(node => node.id === drag.id); if (moved){ moved.x = drag.ox; moved.y = drag.oy; } drag = null; render(); }
+    panState = null; viewport.classList.remove("is-panning"); stage.classList.remove("is-gliding");
+    const metrics = pinchMetrics(); pinchState = { distance:metrics.distance, x:metrics.x, y:metrics.y, zoom, panX, panY };
+  };
   const onPanPointerDown = event => {
-    if (event.button !== 0 || (event.pointerType && event.pointerType !== "mouse")) return;
-    if (!panBackground(event.target) || !viewport.classList.contains("is-pannable")) return;
-    event.preventDefault();
-    panState = { id:event.pointerId, x:event.clientX, y:event.clientY, left:viewport.scrollLeft, top:viewport.scrollTop };
+    if (event.pointerType === "touch" || event.pointerType === "pen"){
+      touchPoints.set(event.pointerId, { x:event.clientX, y:event.clientY });
+      if (touchPoints.size === 2){ event.preventDefault(); startPinch(); return; }
+      if (touchPoints.size > 2) return;
+    } else if (event.button !== 0) return;
+    if (pinchState || !panBackground(event.target)) return;
+    event.preventDefault(); stage.classList.remove("is-gliding");
+    panState = { id:event.pointerId, x:event.clientX, y:event.clientY, panX, panY };
     viewport.classList.add("is-panning");
+    try { viewport.focus({ preventScroll:true }); } catch(_){ viewport.focus(); }
     try { viewport.setPointerCapture(event.pointerId); } catch(_){}
   };
   const onPanPointerMove = event => {
+    if (touchPoints.has(event.pointerId)) touchPoints.set(event.pointerId, { x:event.clientX, y:event.clientY });
+    if (pinchState){
+      if (touchPoints.size < 2) return;
+      event.preventDefault();
+      const metrics = pinchMetrics(), next = conceptClampZoom(pinchState.zoom * (metrics.distance / pinchState.distance));
+      const moved = conceptZoomPan(pinchState.panX, pinchState.panY, pinchState.x, pinchState.y, pinchState.zoom, next);
+      zoom = next; setPan(moved.x + (metrics.x - pinchState.x), moved.y + (metrics.y - pinchState.y)); syncCanvasSize();
+      return;
+    }
     if (!panState || event.pointerId !== panState.id) return;
     event.preventDefault();
-    viewport.scrollLeft = panState.left - (event.clientX - panState.x);
-    viewport.scrollTop = panState.top - (event.clientY - panState.y);
+    setPan(panState.panX + (event.clientX - panState.x), panState.panY + (event.clientY - panState.y));
   };
   const finishPan = event => {
+    if (event) touchPoints.delete(event.pointerId);
+    if (pinchState && touchPoints.size < 2) pinchState = null;
     if (!panState || (event && event.pointerId !== panState.id)) return;
     const pointerId = panState.id; panState = null; viewport.classList.remove("is-panning");
     try { if (viewport.hasPointerCapture(pointerId)) viewport.releasePointerCapture(pointerId); } catch(_){}
   };
+  const onViewportKeyDown = event => {
+    if (event.target !== viewport || event.ctrlKey || event.metaKey || event.altKey) return;
+    const step = event.shiftKey ? CONCEPT_PAN_STEP * 3 : CONCEPT_PAN_STEP;
+    if (event.key === "ArrowLeft") setPan(panX + step, panY);
+    else if (event.key === "ArrowRight") setPan(panX - step, panY);
+    else if (event.key === "ArrowUp") setPan(panX, panY + step);
+    else if (event.key === "ArrowDown") setPan(panX, panY - step);
+    else if (event.key === "Home") fitCanvasToViewport();
+    else return;
+    event.preventDefault();
+  };
   viewport.addEventListener("pointerdown", onPanPointerDown); viewport.addEventListener("pointermove", onPanPointerMove);
   viewport.addEventListener("pointerup", finishPan); viewport.addEventListener("pointercancel", finishPan); viewport.addEventListener("lostpointercapture", finishPan);
+  viewport.addEventListener("keydown", onViewportKeyDown);
   const viewportResizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncCanvasSize) : null; if (viewportResizeObserver) viewportResizeObserver.observe(viewport);
 
   const edgePath = (from, to) => { const ax = from.x + 115, ay = from.y + 65, bx = to.x + 115, by = to.y + 65, bend = Math.max(50, Math.abs(bx - ax) * .42); return `M ${ax} ${ay} C ${ax + (bx >= ax ? bend : -bend)} ${ay}, ${bx - (bx >= ax ? bend : -bend)} ${by}, ${bx} ${by}`; };
@@ -315,15 +387,15 @@ function mountConceptEditor(doc){
       card.addEventListener("click", () => { if (suppressCardClick){ suppressCardClick = false; return; } selectCard(node.id); clearTimeout(previewTimer); previewTimer = setTimeout(() => { previewTimer = 0; openNodePreview(node.id, card); }, 220); });
       card.addEventListener("dblclick", event => { if (event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; openNodeDialog(node.id); });
       card.addEventListener("keydown", event => { if (event.target !== card || event.key !== "Enter") return; event.preventDefault(); selectCard(node.id); openNodePreview(node.id, card); });
-      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, scrollLeft:viewport.scrollLeft, scrollTop:viewport.scrollTop, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
-      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) viewport.scrollBy({ left:dx, top:dy, behavior:"auto" }); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, viewport.scrollLeft - drag.scrollLeft, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, viewport.scrollTop - drag.scrollTop, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); });
+      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
+      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) setPan(panX - dx, panY - dy); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); });
       const finish = event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const changed = node.x !== drag.ox || node.y !== drag.oy; drag = null; card.classList.remove("is-dragging"); if (changed){ suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 0); model.layout = "free"; history.commit(); touch(); } };
       card.addEventListener("pointerup", finish); card.addEventListener("pointercancel", finish);
     }
     renderEdges();
     if (!model.nodes.length){ const empty = conceptButton("＋ 첫 개념을 넣어 관계도를 시작하세요", "첫 개념 추가", "concept-empty"); empty.addEventListener("click", () => openNodeDialog()); cards.appendChild(empty); }
   }
-  doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; render(); if (center) viewport.scrollTo({ left:Math.max(0, (node.x + 115) * zoom - viewport.clientWidth / 2), top:Math.max(0, (node.y + 65) * zoom - viewport.clientHeight / 2), behavior:"smooth" }); return true; };
+  doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; render(); if (center) setPan(viewport.clientWidth / 2 - (node.x + 115) * zoom, viewport.clientHeight / 2 - (node.y + 65) * zoom, true); return true; };
 
   function openAutoLayoutDialog(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("정렬할 카드가 없어요.", 2200); return; }
@@ -332,7 +404,7 @@ function mountConceptEditor(doc){
     CONCEPT_LAYOUTS.forEach(item => { const label = document.createElement("label"); label.className = "concept-layout-choice"; const input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-mode"; input.value = item.id; input.checked = item.id === model.layoutStyle; const copy = document.createElement("span"), strong = document.createElement("strong"), small = document.createElement("small"); strong.textContent = item.label; small.textContent = item.description; copy.append(strong, small); label.append(input, copy); choices.appendChild(label); });
     [["tight", "좁게"], ["normal", "보통"], ["wide", "넓게"]].forEach(([value, text]) => { const label = document.createElement("label"), input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-spacing"; input.value = value; input.checked = value === model.layoutSpacing; label.append(input, document.createTextNode(text)); spacing.appendChild(label); });
     const rootNode = model.nodes.find(node => node.id === selectedId); body.querySelector(".concept-layout-root").textContent = rootNode ? `방사형 중심: 선택한 카드 ‘${rootNode.title}’` : "방사형 중심: 관계의 시작 카드(들어오는 방향 관계가 없는 카드)";
-    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:selectedId }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else viewport.scrollTo({ left:0, top:0, behavior:"smooth" }); };
+    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:selectedId }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true); };
     setTimeout(() => choices.querySelector("input:checked")?.focus(), 0);
   }
 
@@ -370,7 +442,7 @@ function mountConceptEditor(doc){
     showPhoto(); body.querySelector(".cn-photo-pick").onclick = () => photoInput.click(); body.querySelector(".cn-photo-remove").onclick = () => { image = null; showPhoto(); };
     photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".concept-form-error").textContent = "사진을 넣지 못했어요. PNG·JPG·WebP를 사용하세요."; } };
     body.querySelector(".cn-cancel").onclick = ui.dispose; const del = body.querySelector(".cn-delete"); del.hidden = !current;
-    del.onclick = () => { if (!confirm("이 개념과 연결된 관계를 함께 삭제할까요?")) return; model.nodes = model.nodes.filter(node => node.id !== current.id); model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id); model.presentation = conceptNormalizePresentation(model.presentation, model.nodes); selectedId = ""; ui.dispose(); history.commit(); touch(); render(); };
+    del.onclick = async () => { if (typeof confirmDialog !== "function" || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return; model.nodes = model.nodes.filter(node => node.id !== current.id); model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id); model.presentation = conceptNormalizePresentation(model.presentation, model.nodes); selectedId = ""; ui.dispose(); history.commit(); touch(); render(); };
     body.querySelector(".cn-save").onclick = () => { if (!title.value.trim()){ body.querySelector(".concept-form-error").textContent = "개념 이름을 입력하세요."; title.focus(); return; }
       if (current) Object.assign(current, { title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image });
       else { if (model.nodes.length >= CONCEPT_MAX_NODES){ body.querySelector(".concept-form-error").textContent = "개념은 최대 300개까지 넣을 수 있어요."; return; } const count = model.nodes.length, node = conceptNormalizeNode({ title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, x:80 + count % 5 * 290, y:80 + Math.floor(count / 5) * 180 }, count); model.nodes.push(node); model.presentation.order.push(node.id); selectedId = node.id; }
@@ -403,8 +475,9 @@ function mountConceptEditor(doc){
     const ordered = model.presentation.order.map(id => model.nodes.find(node => node.id === id)).filter(Boolean), orderIndex = new Map(ordered.map((node, index) => [node.id, index]));
     const stageWidth = Math.max(CONCEPT_CANVAS_WIDTH, ...model.nodes.map(node => node.x + 290)), stageHeight = Math.max(CONCEPT_CANVAS_HEIGHT, ...model.nodes.map(node => node.y + 210));
     const overlay = document.createElement("div"); overlay.className = "concept-build-present"; overlay.dataset.animation = model.presentation.animation; overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", "관계도 전개 발표");
-    overlay.innerHTML = '<div class="concept-build-top"><div><strong class="concept-build-title"></strong><span class="concept-build-count"></span></div><div class="concept-build-progress"><i></i></div><button type="button" class="concept-build-close">끝내기</button></div><div class="concept-build-viewport"><div class="concept-build-fit"><div class="concept-build-stage"><svg class="concept-lines"></svg><div class="concept-cards"></div></div></div><div class="concept-build-hint"><strong>Space</strong><span>키를 눌러 첫 카드를 보여 주세요</span></div></div><div class="concept-build-controls"><button type="button" class="prev">이전</button><span>Space로 다음 · Shift+Space로 이전</span><button type="button" class="next">다음</button></div>';
+    overlay.innerHTML = '<div class="concept-build-top"><div><strong class="concept-build-title"></strong><span class="concept-build-count"></span></div><div class="concept-build-progress"><i></i></div><button type="button" class="concept-build-close">끝내기</button></div><div class="concept-build-viewport"><div class="concept-build-fit"><div class="concept-build-stage"><svg class="concept-lines"></svg><div class="concept-cards"></div></div></div><div class="concept-build-hint"><strong>Space</strong><span>키를 눌러 첫 카드를 보여 주세요</span></div></div><div class="concept-build-controls"><button type="button" class="prev">이전</button><span>Space로 다음 · Shift+Space로 이전</span><div class="concept-build-zoom" aria-label="발표 화면 확대·축소"><button type="button" class="zoom-out" title="축소 (Ctrl+마우스 휠 아래)">−</button><button type="button" class="zoom-reset" title="배율 100%로 되돌리기">100%</button><button type="button" class="zoom-in" title="확대 (Ctrl+마우스 휠 위)">＋</button></div><button type="button" class="next">다음</button></div>';
     root.appendChild(overlay); const buildViewport = overlay.querySelector(".concept-build-viewport"), fit = overlay.querySelector(".concept-build-fit"), buildStage = overlay.querySelector(".concept-build-stage"), buildSvg = overlay.querySelector("svg"), buildCards = overlay.querySelector(".concept-cards"), hint = overlay.querySelector(".concept-build-hint");
+    const buildZoomOut = overlay.querySelector(".zoom-out"), buildZoomReset = overlay.querySelector(".zoom-reset"), buildZoomIn = overlay.querySelector(".zoom-in");
     overlay.querySelector(".concept-build-title").textContent = model.title || "개념 관계도"; buildStage.style.width = stageWidth + "px"; buildStage.style.height = stageHeight + "px"; buildSvg.setAttribute("viewBox", `0 0 ${stageWidth} ${stageHeight}`);
     const markerId = "conceptBuildArrow" + Date.now().toString(36); buildSvg.innerHTML = `<defs><marker id="${markerId}" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z"></path></marker></defs>`;
     const buildCardById = new Map(), edgeElements = [];
@@ -421,9 +494,16 @@ function mountConceptEditor(doc){
       const title = document.createElement("h3"); title.textContent = node.title; const body = document.createElement("div"); body.className = "concept-card-body"; if (node.image){ const img = document.createElement("img"); img.src = node.image.dataUrl; img.alt = ""; body.appendChild(img); } const description = document.createElement("p"); description.textContent = node.description || "설명이 없습니다."; body.appendChild(description); card.append(head, title, body); buildCards.appendChild(card); buildCardById.set(node.id, card);
       card.addEventListener("click", () => openNodePreview(node.id, card)); card.addEventListener("keydown", event => { if (event.key === "Enter"){ event.preventDefault(); openNodePreview(node.id, card); } });
     });
-    let step = 0, fitScale = 1; const animationTimers = new Set(), reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let step = 0, fitScale = 1, buildZoomAdjusted = false; const animationTimers = new Set(), reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const later = (fn, delay) => { const timer = setTimeout(() => { animationTimers.delete(timer); fn(); }, delay); animationTimers.add(timer); };
-    const fitStage = () => { const width = Math.max(320, buildViewport.clientWidth - 34), height = Math.max(260, buildViewport.clientHeight - 34); fitScale = Math.max(.42, Math.min(1, width / stageWidth, height / stageHeight)); const scaledWidth = stageWidth * fitScale, scaledHeight = stageHeight * fitScale, marginX = Math.max(16, (buildViewport.clientWidth - scaledWidth) / 2), marginY = Math.max(16, (buildViewport.clientHeight - scaledHeight) / 2); fit.style.width = scaledWidth + "px"; fit.style.height = scaledHeight + "px"; fit.style.margin = `${marginY}px ${marginX}px`; buildStage.style.transform = `scale(${fitScale})`; };
+    const layoutBuildStage = () => { const scaledWidth = stageWidth * fitScale, scaledHeight = stageHeight * fitScale, marginX = Math.max(16, (buildViewport.clientWidth - scaledWidth) / 2), marginY = Math.max(16, (buildViewport.clientHeight - scaledHeight) / 2); fit.style.width = scaledWidth + "px"; fit.style.height = scaledHeight + "px"; fit.style.margin = `${marginY}px ${marginX}px`; buildStage.style.transform = `scale(${fitScale})`; buildZoomReset.textContent = Math.round(fitScale * 100) + "%"; buildZoomOut.disabled = fitScale <= CONCEPT_MIN_ZOOM; buildZoomIn.disabled = fitScale >= CONCEPT_MAX_ZOOM; };
+    const fitStage = () => { const width = Math.max(320, buildViewport.clientWidth - 34), height = Math.max(260, buildViewport.clientHeight - 34); fitScale = conceptClampZoom(Math.min(1, width / stageWidth, height / stageHeight)); layoutBuildStage(); };
+    const setBuildZoom = (value, clientX, clientY) => {
+      const next = conceptClampZoom(value); if (Math.abs(next - fitScale) < .001) return;
+      const rect = buildViewport.getBoundingClientRect(), anchorX = clientX == null ? rect.width / 2 : clientX - rect.left, anchorY = clientY == null ? rect.height / 2 : clientY - rect.top, oldScale = fitScale, oldOffsetLeft = fit.offsetLeft, oldOffsetTop = fit.offsetTop;
+      fitScale = next; buildZoomAdjusted = true; layoutBuildStage(); const scroll = conceptZoomScrollWithOffset(buildViewport.scrollLeft, buildViewport.scrollTop, anchorX, anchorY, oldScale, next, oldOffsetLeft, oldOffsetTop, fit.offsetLeft, fit.offsetTop); buildViewport.scrollTo({ left:scroll.left, top:scroll.top, behavior:"auto" });
+    };
+    const onBuildWheel = event => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? buildViewport.clientHeight : 1, factor = Math.exp(-event.deltaY * unit * .0014); setBuildZoom(fitScale * factor, event.clientX, event.clientY); };
     const focusNode = node => { if (!node || !model.presentation.autoFocus) return; const left = fit.offsetLeft + (node.x + 115) * fitScale - buildViewport.clientWidth / 2, top = fit.offsetTop + (node.y + 65) * fitScale - buildViewport.clientHeight / 2; buildViewport.scrollTo({ left:Math.max(0, left), top:Math.max(0, top), behavior:reducedMotion ? "auto" : "smooth" }); };
     const revealCard = card => { card.classList.remove("is-build-hidden"); card.setAttribute("aria-hidden", "false"); card.tabIndex = 0; if (overlay.dataset.animation !== "none" && !reducedMotion){ card.classList.remove("is-revealing"); void card.offsetWidth; card.classList.add("is-revealing"); later(() => card.classList.remove("is-revealing"), overlay.dataset.animation === "draw" ? 900 : 620); } };
     const revealEdge = group => {
@@ -439,10 +519,10 @@ function mountConceptEditor(doc){
       }
       overlay.querySelector(".concept-build-count").textContent = `${step} / ${ordered.length}`; overlay.querySelector(".concept-build-progress i").style.width = (ordered.length ? step / ordered.length * 100 : 0) + "%"; overlay.querySelector(".prev").disabled = step === 0; overlay.querySelector(".next").disabled = step === ordered.length; hint.hidden = step !== 0; if (step > 0 && step >= previous) focusNode(ordered[step - 1]);
     };
-    const keys = event => { if (closeNodePreview) return; if (event.key === "Escape"){ event.preventDefault(); close(); } else if ((event.key === " " && !event.shiftKey) || event.key === "ArrowRight"){ event.preventDefault(); updateStep(step + 1); } else if ((event.key === " " && event.shiftKey) || event.key === "ArrowLeft"){ event.preventDefault(); updateStep(step - 1); } else if (event.key === "Home"){ event.preventDefault(); updateStep(0); } else if (event.key === "End"){ event.preventDefault(); updateStep(ordered.length); } };
-    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => fitStage()) : null;
-    const close = () => { window.removeEventListener("keydown", keys); if (resizeObserver) resizeObserver.disconnect(); animationTimers.forEach(clearTimeout); animationTimers.clear(); overlay.remove(); if (closeBuildPresentation === close) closeBuildPresentation = null; if (buildPresentBtn.isConnected) buildPresentBtn.focus(); };
-    closeBuildPresentation = close; overlay.querySelector(".concept-build-close").onclick = close; overlay.querySelector(".prev").onclick = () => updateStep(step - 1); overlay.querySelector(".next").onclick = () => updateStep(step + 1); window.addEventListener("keydown", keys); if (resizeObserver) resizeObserver.observe(buildViewport); fitStage(); updateStep(0); overlay.querySelector(".next").focus();
+    const keys = event => { if (closeNodePreview) return; const key = String(event.key || "").toLowerCase(), zoomKey = event.ctrlKey || event.metaKey; if (zoomKey && (key === "+" || key === "=")){ event.preventDefault(); setBuildZoom(fitScale * 1.2); } else if (zoomKey && key === "-"){ event.preventDefault(); setBuildZoom(fitScale / 1.2); } else if (zoomKey && key === "0"){ event.preventDefault(); setBuildZoom(1); } else if (event.key === "Escape"){ event.preventDefault(); close(); } else if (!zoomKey && ((event.key === " " && !event.shiftKey) || event.key === "ArrowRight")){ event.preventDefault(); updateStep(step + 1); } else if (!zoomKey && ((event.key === " " && event.shiftKey) || event.key === "ArrowLeft")){ event.preventDefault(); updateStep(step - 1); } else if (event.key === "Home"){ event.preventDefault(); updateStep(0); } else if (event.key === "End"){ event.preventDefault(); updateStep(ordered.length); } };
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => buildZoomAdjusted ? layoutBuildStage() : fitStage()) : null;
+    const close = () => { window.removeEventListener("keydown", keys); buildViewport.removeEventListener("wheel", onBuildWheel); if (resizeObserver) resizeObserver.disconnect(); animationTimers.forEach(clearTimeout); animationTimers.clear(); overlay.remove(); if (closeBuildPresentation === close) closeBuildPresentation = null; if (buildPresentBtn.isConnected) buildPresentBtn.focus(); };
+    closeBuildPresentation = close; overlay.querySelector(".concept-build-close").onclick = close; overlay.querySelector(".prev").onclick = () => updateStep(step - 1); overlay.querySelector(".next").onclick = () => updateStep(step + 1); buildZoomOut.onclick = () => setBuildZoom(fitScale / 1.2); buildZoomReset.onclick = () => setBuildZoom(1); buildZoomIn.onclick = () => setBuildZoom(fitScale * 1.2); buildViewport.addEventListener("wheel", onBuildWheel, { passive:false }); window.addEventListener("keydown", keys); if (resizeObserver) resizeObserver.observe(buildViewport); fitStage(); updateStep(0); overlay.querySelector(".next").focus();
   }
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
   addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog;
@@ -454,5 +534,5 @@ function mountConceptEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, CONCEPT_LAYOUTS, CONCEPT_LAYOUT_SPACING, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
-    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomScroll, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle };
+    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle };
 }

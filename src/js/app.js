@@ -3,6 +3,7 @@
 /* ===== 이벤트 연결 ===== */
 function wire(){
   setupSingleTab();          // 같은 앱이 여러 탭/창으로 동시에 떠 자동저장이 충돌하지 않게 — 한 번에 한 창만 활성
+  setupWorkspaceUi();        // 상단 작업공간 전환·생성·관리
   // 보기 전용 화면(PDF·한글·PPT·텍스트 보기)에서 고른 글자의 우클릭 메뉴 — 문서 영역에서 한 번만 받는다.
   if (typeof installViewSelectionContextMenu === "function") installViewSelectionContextMenu();
   wireScratchpad();
@@ -12,18 +13,22 @@ function wire(){
   (() => {
     if (location.protocol !== "http:" || !/^(127\.0\.0\.1|localhost)$/i.test(location.hostname)) return;
     const clientId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2));
-    let closed = false;
+    let closed = false, lastServerOk = null;
     // 서버 생존 표시: 하트비트 응답이 오면 초록(연결됨), 실패하면 빨강(끊김). 서버 모드에서만 보인다.
     const setServerStatus = (ok) => {
-      const wrap = byId("serverStatus"), text = byId("serverStatusText");
-      if (!wrap || !text || closed) return;
+      const wrap = byId("serverStatus"), text = byId("serverStatusText"), settings = byId("settingsOpen");
+      if (!wrap || !text || !settings || closed) return;
+      lastServerOk = !!ok;
       wrap.hidden = false;
       wrap.classList.toggle("ok", ok);
       wrap.classList.toggle("down", !ok);
       text.textContent = ok ? "서버 연결됨" : "서버 끊김";
-      wrap.setAttribute("aria-label", text.textContent);
-      wrap.title = ok ? "로컬 서버와 연결되어 있습니다." : "로컬 서버가 종료되었습니다. ClassDock.exe 를 다시 실행하세요.";
+      const detail = ok ? "로컬 서버와 연결되어 있습니다." : "로컬 서버가 종료되었습니다. ClassDock.exe 를 다시 실행하세요.";
+      const settingsLabel = typeof t === "function" ? t("설정") : "설정", translatedDetail = typeof t === "function" ? t(detail) : detail;
+      settings.title = settingsLabel + " · " + translatedDetail;
+      settings.setAttribute("aria-label", settings.title);
     };
+    const syncServerLanguage = () => { if (lastServerOk !== null) setServerStatus(lastServerOk); };
     const beat = () => {
       if (closed) return;
       fetch("/heartbeat?id=" + encodeURIComponent(clientId), {
@@ -33,8 +38,10 @@ function wire(){
     beat();
     const timer = setInterval(beat, 5000);
     window.addEventListener("focus", beat);
+    window.addEventListener("mni18nchange", syncServerLanguage);
     window.addEventListener("pagehide", () => {
       closed = true; clearInterval(timer);
+      window.removeEventListener("mni18nchange", syncServerLanguage);
       try { fetch("/heartbeat-close?id=" + encodeURIComponent(clientId), { method:"POST", headers:{ "X-ClassDock-Heartbeat":"1" }, keepalive:true }); } catch(e){}
     }, { once: true });
   })();
@@ -217,6 +224,7 @@ function wire(){
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
       else if (["timeline", "concept", "study"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
     });
+    if (typeof persistTabStateNow === "function") persistTabStateNow();
     if (suppressUnloadWarn) return;
     if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
   });
@@ -540,8 +548,12 @@ function wire(){
   })();
   let shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
   let shortcutCaptureAction = "";
+  let musicKeyboardDraft = normalizeMusicKeyboard(appSettings.musicKeyboard);
+  let musicKeyboardCaptureAction = "";
   const shortcutError = byId("shortcutSettingsError");
+  const musicKeyboardError = byId("musicKeyboardSettingsError");
   const setShortcutError = (message="") => { shortcutError.textContent = message; };
+  const setMusicKeyboardError = (message="") => { musicKeyboardError.textContent = message; };
   const renderShortcutSettings = () => {
     const list = byId("shortcutSettingsList");
     const tr = (value) => typeof window.t === "function" ? window.t(value) : value;
@@ -561,6 +573,7 @@ function wire(){
       button.textContent = recording ? tr("다른 단축키를 누르세요") : shortcutDisplay(shortcutDraft[item.id]);
       button.setAttribute("aria-label", tr(item.label) + " " + tr("단축키") + " " + (recording ? tr("입력 중") : shortcutDisplay(shortcutDraft[item.id])));
       button.addEventListener("click", () => {
+        musicKeyboardCaptureAction = "";
         shortcutCaptureAction = item.id;
         setShortcutError("새 단축키를 누르세요. Esc를 누르면 취소됩니다.");
         renderShortcutSettings();
@@ -570,8 +583,45 @@ function wire(){
       row.append(copy, button); list.appendChild(row);
     });
   };
+  const renderMusicKeyboardSettings = () => {
+    const list = byId("musicKeyboardSettingsList");
+    const tr = (value) => typeof window.t === "function" ? window.t(value) : value;
+    list.textContent = "";
+    let currentGroup = "";
+    MUSIC_KEYBOARD_DEFINITIONS.forEach((item) => {
+      if (item.group !== currentGroup){
+        currentGroup = item.group;
+        const heading = document.createElement("strong");
+        heading.className = "music-keyboard-group-title";
+        heading.textContent = tr(currentGroup);
+        list.appendChild(heading);
+      }
+      const row = document.createElement("div"); row.className = "shortcut-setting-row";
+      const copy = document.createElement("div"); copy.className = "shortcut-setting-copy";
+      const label = document.createElement("strong"); label.textContent = tr(item.label);
+      const description = document.createElement("small");
+      description.textContent = tr(item.description || "자판 작곡에서 사용하는 키");
+      copy.append(label, description);
+      const button = document.createElement("button"); button.type = "button"; button.className = "shortcut-capture";
+      button.dataset.musicKeyboardAction = item.id;
+      const recording = musicKeyboardCaptureAction === item.id;
+      button.classList.toggle("recording", recording);
+      button.textContent = recording ? "새 키를 누르세요…" : musicKeyboardCodeLabel(musicKeyboardDraft[item.id]);
+      button.setAttribute("aria-label", `${tr(item.label)} ${tr("자판")} ${recording ? tr("입력 중") : button.textContent}`);
+      button.addEventListener("click", () => {
+        shortcutCaptureAction = "";
+        musicKeyboardCaptureAction = item.id;
+        setShortcutError("");
+        setMusicKeyboardError("원하는 키 하나를 누르세요. Esc를 누르면 취소됩니다.");
+        renderMusicKeyboardSettings();
+        const next = list.querySelector('[data-music-keyboard-action="' + item.id + '"]');
+        if (next) next.focus();
+      });
+      row.append(copy, button); list.appendChild(row);
+    });
+  };
   window.addEventListener("mni18nchange", () => {
-    if (!byId("settingsModal").hidden) renderShortcutSettings();
+    if (!byId("settingsModal").hidden){ renderShortcutSettings(); renderMusicKeyboardSettings(); }
   });
   window.addEventListener("keydown", (e) => {
     if (!shortcutCaptureAction || byId("settingsModal").hidden) return;
@@ -597,11 +647,41 @@ function wire(){
     setShortcutError("");
     renderShortcutSettings();
   }, true);
+  window.addEventListener("keydown", (e) => {
+    if (!musicKeyboardCaptureAction || byId("settingsModal").hidden) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.key === "Escape"){
+      musicKeyboardCaptureAction = "";
+      setMusicKeyboardError("");
+      renderMusicKeyboardSettings();
+      return;
+    }
+    if (e.altKey || e.ctrlKey || e.metaKey || !musicKeyboardCodeAllowed(e.code)){
+      setMusicKeyboardError("문자·숫자·기호 키 하나를 눌러 주세요. 이동·삭제·기능 키는 사용할 수 없어요.");
+      return;
+    }
+    const duplicate = MUSIC_KEYBOARD_DEFINITIONS.find((item) =>
+      item.id !== musicKeyboardCaptureAction && musicKeyboardDraft[item.id] === e.code);
+    if (duplicate){
+      setMusicKeyboardError(`'${duplicate.label}'에서 이미 사용하는 키예요.`);
+      return;
+    }
+    musicKeyboardDraft[musicKeyboardCaptureAction] = e.code;
+    musicKeyboardCaptureAction = "";
+    setMusicKeyboardError("");
+    renderMusicKeyboardSettings();
+  }, true);
   byId("settingsResetShortcuts").onclick = () => {
     shortcutCaptureAction = "";
     shortcutDraft = normalizeShortcutMap(DEFAULT_SHORTCUTS);
     setShortcutError("기본 단축키로 되돌렸습니다. 저장을 눌러 적용하세요.");
     renderShortcutSettings();
+  };
+  byId("settingsResetMusicKeyboard").onclick = () => {
+    musicKeyboardCaptureAction = "";
+    musicKeyboardDraft = normalizeMusicKeyboard(MUSIC_KEYBOARD_DEFAULTS);
+    setMusicKeyboardError("기본 악보 자판으로 되돌렸습니다. 저장을 눌러 적용하세요.");
+    renderMusicKeyboardSettings();
   };
   const saveFolderOpen = byId("saveFolderOpen");
   const imageMemoOpen = byId("imageMemoOpen");
@@ -1080,37 +1160,128 @@ function wire(){
       document.querySelectorAll("header details" + sel + "[open]").forEach((d) => { d.open = false; });
     }
   });
-  // '도구' 탭 체크박스를 레지스트리(TOGGLEABLE_TOOLS)에서 1회 생성한다. id: settingTool-<도구id>.
-  const toolCheckId = (id) => "settingTool-" + id;
-  let toolChecksBuilt = false;
-  const buildToolVisibilityChecks = () => {
-    if (toolChecksBuilt) return;
-    const hosts = { header: byId("settingToolsHeader"), py: byId("settingToolsPy"), notebook: byId("settingToolsNb"), image: byId("settingToolsImg") };
-    if (!hosts.header || !hosts.py || !hosts.notebook || !hosts.image || typeof TOGGLEABLE_TOOLS === "undefined") return;
-    for (const tool of TOGGLEABLE_TOOLS){
-      const host = hosts[tool.target]; if (!host) continue;
-      const label = document.createElement("label"); label.className = "settings-check";
-      const input = document.createElement("input"); input.type = "checkbox"; input.id = toolCheckId(tool.id);
-      const span = document.createElement("span"); span.textContent = tool.label;
-      label.append(input, span); host.appendChild(label);
-    }
-    toolChecksBuilt = true;
+  // '도구' 탭 — 화면별 하위 탭에서 비노출/노출 목록 사이로 옮긴다. 저장 형식은 예전 체크박스와
+  // 같은 { 도구id:boolean } 이라 기존 설정·실제 툴바 숨김 CSS 는 그대로 이어 쓴다.
+  const TOOL_VISIBILITY_TARGETS = Object.freeze([
+    { id:"header", fixed:"설정 · 저장 · 집중 모드 · 분할 작업" },
+    { id:"py", fixed:"실행 · 저장" },
+    { id:"javascript", fixed:"실행 · 저장 · 원본 되돌리기" },
+    { id:"notebook", fixed:"실행 · 저장" },
+    { id:"image", fixed:"저장" },
+    { id:"whiteboard", fixed:"되돌리기 · 다시 실행 · 도구막대 다시 보이기" },
+    { id:"map", fixed:"제목 · 도구 보이기 · 되돌리기 · 다시 실행 · 저장" },
+    { id:"music", fixed:"제목 · 도구 보이기 · 되돌리기 · 다시 실행 · 저장" }
+  ]);
+  let toolTransferBuilt = false;
+  let activeToolTarget = "header";
+  let toolVisibilityDraft = null;
+  const toolsForTarget = (target) => typeof TOGGLEABLE_TOOLS === "undefined"
+    ? [] : TOGGLEABLE_TOOLS.filter((tool) => tool.target === target);
+  const syncToolTransferActions = () => {
+    const hidden = byId("settingToolsHidden"), visible = byId("settingToolsVisible");
+    const show = byId("settingToolsShow"), hide = byId("settingToolsHide");
+    if (show) show.disabled = !hidden || hidden.selectedOptions.length === 0;
+    if (hide) hide.disabled = !visible || visible.selectedOptions.length === 0;
   };
-  const syncToolVisibilityChecks = () => {
-    buildToolVisibilityChecks();
+  const fillToolList = (select, tools, selectedIds) => {
+    if (!select) return;
+    select.replaceChildren();
+    for (const tool of tools){
+      const option = document.createElement("option");
+      option.value = tool.id; option.textContent = tool.label; option.title = tool.label;
+      option.selected = selectedIds.has(tool.id);
+      select.appendChild(option);
+    }
+  };
+  const renderToolVisibilityTransfer = (selectedIds=new Set(), focusSide="") => {
+    if (!toolVisibilityDraft || typeof TOGGLEABLE_TOOLS === "undefined") return;
+    const all = toolsForTarget(activeToolTarget);
+    const hiddenTools = all.filter((tool) => toolVisibilityDraft[tool.id] === false);
+    const visibleTools = all.filter((tool) => toolVisibilityDraft[tool.id] !== false);
+    const hidden = byId("settingToolsHidden"), visible = byId("settingToolsVisible");
+    fillToolList(hidden, hiddenTools, selectedIds);
+    fillToolList(visible, visibleTools, selectedIds);
+    const hiddenCount = byId("settingToolsHiddenCount"), visibleCount = byId("settingToolsVisibleCount");
+    if (hiddenCount) hiddenCount.textContent = hiddenTools.length + "개";
+    if (visibleCount) visibleCount.textContent = visibleTools.length + "개";
+    document.querySelectorAll("#settingToolScopeTabs .settings-tool-scope-tab").forEach((tab) => {
+      const target = tab.dataset.toolTarget;
+      const on = target === activeToolTarget;
+      const targetTools = toolsForTarget(target);
+      const shown = targetTools.filter((tool) => toolVisibilityDraft[tool.id] !== false).length;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      const count = tab.querySelector(".settings-tool-scope-count");
+      if (count) count.textContent = shown + "/" + targetTools.length;
+    });
+    const fixed = TOOL_VISIBILITY_TARGETS.find((item) => item.id === activeToolTarget);
+    if (byId("settingToolsFixed")) byId("settingToolsFixed").textContent = fixed ? fixed.fixed : "필수 버튼";
+    const activeTab = document.querySelector('#settingToolScopeTabs [data-tool-target="' + activeToolTarget + '"]');
+    if (byId("settingToolTransfer") && activeTab) byId("settingToolTransfer").setAttribute("aria-labelledby", activeTab.id);
+    syncToolTransferActions();
+    const focusList = focusSide === "visible" ? visible : focusSide === "hidden" ? hidden : null;
+    if (focusList) focusList.focus();
+  };
+  const setToolVisibilityTarget = (target, focusTab=false) => {
+    if (!TOOL_VISIBILITY_TARGETS.some((item) => item.id === target)) return;
+    activeToolTarget = target;
+    renderToolVisibilityTransfer();
+    if (focusTab){
+      const tab = document.querySelector('#settingToolScopeTabs [data-tool-target="' + target + '"]');
+      if (tab) tab.focus();
+    }
+  };
+  const moveSelectedTools = (makeVisible) => {
+    const source = byId(makeVisible ? "settingToolsHidden" : "settingToolsVisible");
+    if (!source || !toolVisibilityDraft) return;
+    const ids = new Set([...source.selectedOptions].map((option) => option.value));
+    if (!ids.size) return;
+    for (const id of ids) toolVisibilityDraft[id] = !!makeVisible;
+    renderToolVisibilityTransfer(ids, makeVisible ? "visible" : "hidden");
+  };
+  const buildToolVisibilityTransfer = () => {
+    if (toolTransferBuilt || typeof TOGGLEABLE_TOOLS === "undefined") return;
+    const tabs = [...document.querySelectorAll("#settingToolScopeTabs .settings-tool-scope-tab")];
+    const hidden = byId("settingToolsHidden"), visible = byId("settingToolsVisible");
+    if (!tabs.length || !hidden || !visible || !byId("settingToolsShow") || !byId("settingToolsHide")) return;
+    tabs.forEach((tab, index) => {
+      tab.id = "settingToolScope-" + tab.dataset.toolTarget;
+      tab.setAttribute("aria-controls", "settingToolTransfer");
+      tab.addEventListener("click", () => setToolVisibilityTarget(tab.dataset.toolTarget));
+      tab.addEventListener("keydown", (e) => {
+        let next = -1;
+        if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+        else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = tabs.length - 1;
+        if (next < 0) return;
+        e.preventDefault(); setToolVisibilityTarget(tabs[next].dataset.toolTarget, true);
+      });
+    });
+    hidden.addEventListener("change", syncToolTransferActions);
+    visible.addEventListener("change", syncToolTransferActions);
+    hidden.addEventListener("dblclick", () => moveSelectedTools(true));
+    visible.addEventListener("dblclick", () => moveSelectedTools(false));
+    hidden.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); moveSelectedTools(true); } });
+    visible.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); moveSelectedTools(false); } });
+    byId("settingToolsShow").addEventListener("click", () => moveSelectedTools(true));
+    byId("settingToolsHide").addEventListener("click", () => moveSelectedTools(false));
+    toolTransferBuilt = true;
+  };
+  const syncToolVisibilityTransfer = () => {
+    buildToolVisibilityTransfer();
     if (typeof TOGGLEABLE_TOOLS === "undefined") return;
     const vis = appSettings.toolVisibility || {};
-    for (const tool of TOGGLEABLE_TOOLS){
-      const input = byId(toolCheckId(tool.id));
-      if (input) input.checked = vis[tool.id] !== false;
-    }
+    toolVisibilityDraft = {};
+    for (const tool of TOGGLEABLE_TOOLS) toolVisibilityDraft[tool.id] = vis[tool.id] !== false;
+    renderToolVisibilityTransfer();
   };
   const collectToolVisibility = () => {
     const out = {};
     if (typeof TOGGLEABLE_TOOLS === "undefined") return out;
     for (const tool of TOGGLEABLE_TOOLS){
-      const input = byId(toolCheckId(tool.id));
-      out[tool.id] = input ? !!input.checked : true;
+      out[tool.id] = toolVisibilityDraft ? toolVisibilityDraft[tool.id] !== false : (appSettings.toolVisibility || {})[tool.id] !== false;
     }
     return out;
   };
@@ -1283,7 +1454,7 @@ function wire(){
     boardPatternDraft = normalizeBoardPattern(appSettings.boardPattern);
     buildBoardBgChoices();
     syncBoardBgChoices();
-    syncToolVisibilityChecks();
+    syncToolVisibilityTransfer();
     byId("settingPet").checked = !!appSettings.petEnabled;
     byId("settingPetCount").value = String(appSettings.petCount || 1);
     const petFocus = typeof normalizePetFocus === "function" ? normalizePetFocus(appSettings.petFocus) : { enabled:true, focusMin:25, breakMin:5, quietTyping:true };
@@ -1303,14 +1474,19 @@ function wire(){
     byId("settingMouseSideButtons").checked = appSettings.mouseSideButtons !== false;
     shortcutCaptureAction = "";
     shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
+    musicKeyboardCaptureAction = "";
+    musicKeyboardDraft = normalizeMusicKeyboard(appSettings.musicKeyboard);
     setShortcutError("");
+    setMusicKeyboardError("");
     renderShortcutSettings();
+    renderMusicKeyboardSettings();
     refreshSaveFolder();
     refreshAppMode();
     byId("settingsModal").hidden = false;
   };
   byId("settingsCancel").onclick = () => {
     shortcutCaptureAction = "";
+    musicKeyboardCaptureAction = "";
     clearScreensaverPreview();   // 미리보기 프레임을 남겨 두면 설정을 닫아도 계속 돌아간다
     byId("settingsModal").hidden = true;
   };
@@ -1354,7 +1530,8 @@ function wire(){
       boardBg: boardBgDraft,
       boardPattern: boardPatternDraft,
       mouseSideButtons: byId("settingMouseSideButtons").checked,
-      shortcuts:shortcutDraft
+      shortcuts:shortcutDraft,
+      musicKeyboard:musicKeyboardDraft
     });
     saveMapSearchProviderToLauncher(appSettings.mapSearchProvider);
     saveAppMode();   // 런처 파일에 남는 값이라 saveAppSettings(localStorage) 와는 따로 저장한다
@@ -1710,7 +1887,7 @@ function wire(){
     }
     if (shortcutMatches(e, "closeCurrent") && state){
       e.preventDefault();
-      closeDoc(state.id, { forgetWorkspace: true });
+      requestCloseDoc(state.id, { forgetWorkspace: true });
       return;
     }
     if (shortcutMatches(e, "reopenClosed")){
@@ -1738,7 +1915,7 @@ function wire(){
       state.openGotoLine();
       return;
     }
-    if (shortcutMatches(e, "focusSearch") && docs.length){
+    if (shortcutMatches(e, "focusSearch") && workspaceActiveDocs().length){
       e.preventDefault();
       const seed = document.activeElement === sidebarSearch
         ? "" : currentSelectionSeed();                   // focus()·select() 가 선택을 지우기 전에 붙잡는다(검색창 자신은 제외)
@@ -1786,7 +1963,7 @@ function wire(){
     try { const saved = localStorage.getItem("sbWidth"); if (saved) sidebar.style.width = saved; } catch(e){}
     const saveWidth = () => { try { localStorage.setItem("sbWidth", sidebar.style.width); } catch(e){} };
     const fitToLongestName = () => {
-      if (!navNodes.length) return;
+      if (!workspaceActiveNodes().length) return;
       const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
       const sample = sidebar.querySelector(".sb-name");
       const font = sample ? getComputedStyle(sample) : getComputedStyle(sidebar);
@@ -1797,7 +1974,7 @@ function wire(){
         return depth;
       };
       let needed = 150;
-      for (const node of navNodes){
+      for (const node of workspaceActiveNodes()){
         const doc = node.type === "doc" ? docs.find(d => d.id === node.docId) : null;
         const name = node.type === "group" ? node.name : (doc && doc.name);
         if (!name) continue;
@@ -1899,12 +2076,13 @@ function wire(){
    "파일 닫기"는 앱에서만 치우고, "삭제"는 실제 파일을 지운다 — 두 동작을 확실히 갈라 놓는다. */
 function wireSidebarSelection(){
   const closeBtn = byId("sbSelectionClose"), deleteBtn = byId("sbSelectionDelete"), clearBtn = byId("sbSelectionClear");
-  if (closeBtn) closeBtn.addEventListener("click", () => {
+  if (closeBtn) closeBtn.addEventListener("click", async () => {
     const ids = selectedDocIds();
     if (!ids.length) return;
     let closed = 0;
     for (const id of ids){
-      if (closeDoc(id, { forgetWorkspace: true }) === true) closed++;
+      const doc = docs.find(item => item.id === id);
+      if ((doc && workspaceDetachDocFromActive(doc)) || await requestCloseDoc(id, { forgetWorkspace: true }) === true) closed++;
     }
     renderSidebar();
     const cancelled = ids.length - closed;
@@ -2474,7 +2652,11 @@ function setupSingleTab(){
 wire();
 {
   const importedBackup = typeof MNBackup !== "undefined" && MNBackup.hasPendingRestore();
-  Promise.resolve(restoreLastWorkspace(importedBackup)).finally(() => {
+  Promise.resolve(restoreLastWorkspace(importedBackup)).then((restoreResult) => {
+    finalizeWorkspaceRestore(restoreResult);
+    if (importedBackup) MNBackup.finishPendingRestore();
+  }, () => {
+    finalizeWorkspaceRestore({ attempted:true, restored:false, failed:true });
     if (importedBackup) MNBackup.finishPendingRestore();
   });
 }

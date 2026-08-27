@@ -14,9 +14,16 @@ function loadMusic(){
   vm.runInContext(source + `
     ;globalThis.__music = {
       musicEmpty, musicExampleSheet, musicNote, musicRest, musicMeasure, musicParse, musicSerialize,
+      musicPart, musicParts, musicActivePart, musicAddPart, musicRemovePart, musicSelectPart,
+      musicSyncActivePart, musicClampPartVolume,
       musicNoteTicks, musicMeasureTicks, musicMeasureUsedTicks, musicValidate, musicCanFit, musicMeasureProgress,
       musicMidiNumber, musicFrequency, musicNoteFrequency, musicNoteName,
       musicVexNote, musicTimeline, MUSIC_TICKS_PER_QUARTER,
+      musicBasicDrumPattern, musicDrumPattern, musicDrumStyle, musicClampDrumVolume,
+      musicDrumTimeKey, musicDrumStyleCompatible, MUSIC_DRUM_STYLES, MUSIC_DRUM_STYLE_SPECS,
+      musicAccompanimentMode, musicAccompanimentTimbre, musicParseChordSymbol,
+      musicSheetHasPlayableChords, musicChordMeasureStates, musicChordAtTick,
+      musicAccompanimentPattern, MUSIC_ACCOMPANIMENT_MODES, MUSIC_ACCOMPANIMENT_TIMBRES,
       musicDiatonicValue, musicPitchFromDiatonic, musicPitchFromStaveLine,
       musicStaveLineForNote, musicShiftPitch, musicMidiInRange,
       musicNotePitches, musicAddChordPitch, musicRemoveChordPitch, musicPitchKey, musicStaffNotes,
@@ -87,6 +94,98 @@ test("두 성부와 표현 기호는 저장 후에도 독립적으로 유지된�
   assert.equal(api.musicNoteTicks(reopened.measures[0].notes[0]), 320);
 });
 
+test("악기 파트를 추가·전환·삭제해도 각 파트의 음표와 설정이 독립적으로 유지된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("합주");
+  const piano = api.musicActivePart(sheet);
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4)])];
+  const flute = api.musicAddPart(sheet, { name:"플루트", timbre:"flute", volume:0.6 });
+  sheet.measures[0].notes.push(api.musicNote("G", 5));
+  assert.equal(api.musicParts(sheet).length, 2);
+  assert.equal(sheet.timbre, "flute");
+  assert.equal(sheet.measures[0].notes[0].step, "G");
+
+  api.musicSelectPart(sheet, piano.id);
+  assert.equal(sheet.timbre, "piano");
+  assert.equal(sheet.measures[0].notes[0].step, "C");
+  api.musicSelectPart(sheet, flute.id);
+  assert.equal(sheet.measures[0].notes[0].step, "G");
+  assert.equal(api.musicRemovePart(sheet, flute.id).name, "플루트");
+  assert.equal(api.musicParts(sheet).length, 1);
+  assert.equal(sheet.measures[0].notes[0].step, "C");
+  assert.equal(api.musicRemovePart(sheet, piano.id), null, "마지막 파트는 삭제하지 않는다");
+});
+
+test("다중 파트는 이름·음색·음량·음소거·대보표와 함께 저장되고 옛 악보는 첫 파트가 된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("파트 저장");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4)])];
+  const guitar = api.musicAddPart(sheet, { name:"기타 1", timbre:"guitar", volume:0.45, grandStaff:true });
+  guitar.muted = true;
+  sheet.grandStaff = true;
+  sheet.measures[0].bassNotes.push(api.musicNote("C", 3));
+  const saved = api.musicSerialize(sheet);
+  const reopened = api.musicParse(saved);
+  assert.equal(api.musicParts(reopened).length, 2);
+  const restored = api.musicParts(reopened)[1];
+  assert.equal(restored.name, "기타 1");
+  assert.equal(restored.timbre, "guitar");
+  assert.equal(restored.volume, 0.45);
+  assert.equal(restored.muted, true);
+  assert.equal(restored.grandStaff, true);
+  assert.equal(restored.measures[0].bassNotes[0].step, "C");
+
+  const legacy = JSON.parse(saved);
+  legacy.version = 7;
+  delete legacy.parts;
+  delete legacy.activePartId;
+  legacy.timbre = "flute";
+  const old = api.musicParse(JSON.stringify(legacy));
+  assert.equal(api.musicParts(old).length, 1);
+  assert.equal(api.musicActivePart(old).timbre, "flute");
+  assert.equal(api.musicActivePart(old).volume, 1);
+});
+
+test("합주 타임라인은 파트별 음색과 음량을 섞고 음소거·현재 파트 재생을 지킨다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("합주 재생");
+  const piano = api.musicActivePart(sheet);
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4, { value:"whole" })])];
+  const flute = api.musicAddPart(sheet, { name:"플루트", timbre:"flute", volume:0.5 });
+  sheet.measures[0].notes.push(api.musicNote("G", 5, { value:"whole" }));
+  api.musicSelectPart(sheet, piano.id);
+  let timeline = api.musicTimeline(sheet);
+  const sounded = timeline.events.filter((event) => !event.rest);
+  assert.equal(sounded.length, 2);
+  assert.deepEqual(Array.from(new Set(sounded.map((event) => event.timbre))).sort(), ["flute", "piano"]);
+  assert.equal(sounded.find((event) => event.partId === flute.id).gain, 0.5);
+  assert.equal(timeline.parts.length, 2);
+
+  flute.muted = true;
+  timeline = api.musicTimeline(sheet);
+  assert.ok(timeline.events.every((event) => event.partId === piano.id));
+  flute.muted = false;
+  timeline = api.musicTimeline(sheet, { partId:flute.id });
+  assert.ok(timeline.events.length > 0);
+  assert.ok(timeline.events.every((event) => event.partId === flute.id && event.timbre === "flute"));
+});
+
+test("파트를 바꿀 때 마디 수와 반복·박자 구조는 모든 악기에 맞춰진다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("구조 동기화");
+  const first = api.musicActivePart(sheet);
+  const second = api.musicAddPart(sheet, { name:"하프", timbre:"harp" });
+  sheet.measures = [api.musicMeasure([], { repeatStart:true }),
+    api.musicMeasure([], { repeatEnd:true, timeChange:{ beats:3, beatValue:4 } })];
+  api.musicSelectPart(sheet, first.id);
+  assert.equal(sheet.measures.length, 2);
+  assert.equal(sheet.measures[0].repeatStart, true);
+  assert.equal(sheet.measures[1].repeatEnd, true);
+  assert.equal(sheet.measures[1].timeChange.beats, 3);
+  api.musicSelectPart(sheet, second.id);
+  assert.equal(sheet.measures.length, 2);
+});
+
 test("반복선과 1·2번 괄호는 재생 순서를 만든다", () => {
   const api = loadMusic();
   const measures = [
@@ -126,6 +225,194 @@ test("새 악보와 v1 기본 삼각파 악보는 실제 피아노 음색을 기
     legacy.timbre = timbre;
     assert.equal(api.musicParse(JSON.stringify(legacy)).timbre, timbre);
   }
+});
+
+test("드럼 반주 설정은 안전하게 저장되고 옛 악보는 꺼진 상태로 열린다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("드럼 설정");
+  assert.equal(sheet.drumStyle, "off");
+  assert.equal(api.musicTimeline(sheet).drums.length, 0);
+  sheet.drumStyle = "basic";
+  sheet.drumVolume = 0.4;
+  const saved = api.musicSerialize(sheet);
+  const reopened = api.musicParse(saved);
+  assert.equal(reopened.drumStyle, "basic");
+  assert.equal(reopened.drumVolume, 0.4);
+
+  const legacy = JSON.parse(saved);
+  legacy.version = 4;
+  delete legacy.drumStyle;
+  delete legacy.drumVolume;
+  const old = api.musicParse(JSON.stringify(legacy));
+  assert.equal(old.drumStyle, "off");
+  assert.equal(old.drumVolume, 0.65);
+  legacy.drumStyle = "unknown";
+  legacy.drumVolume = 9;
+  assert.equal(api.musicParse(JSON.stringify(legacy)).drumStyle, "off");
+  assert.equal(api.musicParse(JSON.stringify(legacy)).drumVolume, 1);
+
+  for (const style of ["children", "ballad", "march", "waltz", "rock"]){
+    sheet.drumStyle = style;
+    assert.equal(api.musicParse(api.musicSerialize(sheet)).drumStyle, style);
+  }
+});
+
+test("코드 자동 반주 설정은 저장되며 기존 악보는 드럼만으로 열린다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("자동 반주 설정");
+  assert.equal(sheet.accompanimentMode, "drums");
+  assert.equal(sheet.accompanimentTimbre, "piano");
+  sheet.accompanimentMode = "full";
+  sheet.accompanimentTimbre = "guitar";
+  const saved = api.musicSerialize(sheet);
+  const reopened = api.musicParse(saved);
+  assert.equal(reopened.accompanimentMode, "full");
+  assert.equal(reopened.accompanimentTimbre, "guitar");
+
+  const legacy = JSON.parse(saved);
+  legacy.version = 6;
+  delete legacy.accompanimentMode;
+  delete legacy.accompanimentTimbre;
+  const old = api.musicParse(JSON.stringify(legacy));
+  assert.equal(old.accompanimentMode, "drums");
+  assert.equal(old.accompanimentTimbre, "piano");
+  legacy.accompanimentMode = "unknown";
+  legacy.accompanimentTimbre = "flute";
+  assert.equal(api.musicParse(JSON.stringify(legacy)).accompanimentMode, "drums");
+  assert.equal(api.musicParse(JSON.stringify(legacy)).accompanimentTimbre, "piano");
+});
+
+test("흔한 코드 기호와 슬래시 코드를 안전하게 해석한다", () => {
+  const api = loadMusic();
+  const cases = [
+    ["C", 0, 0, [0, 4, 7]], ["Cm", 0, 0, [0, 3, 7]],
+    ["G7", 7, 7, [0, 4, 7, 10]], ["B♭maj7", 10, 10, [0, 4, 7, 11]],
+    ["E♭/G", 3, 7, [0, 4, 7]], ["F#m7b5", 6, 6, [0, 3, 6, 10]],
+    ["Csus4", 0, 0, [0, 5, 7]], ["Dadd9", 2, 2, [0, 4, 7, 14]]
+  ];
+  for (const [symbol, rootPc, bassPc, intervals] of cases){
+    const chord = api.musicParseChordSymbol(symbol);
+    assert.ok(chord, symbol);
+    assert.equal(chord.rootPc, rootPc, symbol);
+    assert.equal(chord.bassPc, bassPc, symbol);
+    assert.deepEqual(Array.from(chord.intervals), intervals, symbol);
+  }
+  assert.equal(api.musicParseChordSymbol("N.C."), null);
+  assert.equal(api.musicParseChordSymbol("그냥연주"), null);
+  assert.equal(api.musicParseChordSymbol("C/아무음"), null);
+});
+
+test("코드는 등장한 위치부터 이어지고 베이스·전체 반주 모드에 맞춰 타임라인을 만든다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("코드 타임라인");
+  sheet.tempo = 120;
+  sheet.drumStyle = "basic";
+  sheet.accompanimentMode = "bass";
+  sheet.measures = [
+    api.musicMeasure([
+      api.musicNote("C", 4),
+      api.musicNote("D", 4, { chordSymbol:"C" }),
+      api.musicNote("E", 4), api.musicNote("F", 4)
+    ]),
+    api.musicMeasure([api.musicNote("G", 4, { value:"whole" })])
+  ];
+  assert.equal(api.musicSheetHasPlayableChords(sheet), true);
+  let timeline = api.musicTimeline(sheet);
+  assert.ok(timeline.bass.length > 0);
+  assert.equal(timeline.chords.length, 0);
+  assert.equal(timeline.bass[0].start, 0.5); // 첫 코드가 적힌 두 번째 박부터
+  assert.ok(timeline.bass.some((event) => event.measure === 2 && event.chordSymbol === "C"));
+
+  sheet.accompanimentMode = "full";
+  timeline = api.musicTimeline(sheet);
+  assert.ok(timeline.chords.length > 0);
+  assert.ok(timeline.chords.every((event) => event.accompaniment === "chord"));
+
+  sheet.drumStyle = "off";
+  timeline = api.musicTimeline(sheet);
+  assert.equal(timeline.bass.length, 0);
+  assert.equal(timeline.chords.length, 0);
+});
+
+test("해석할 수 없는 코드 기호는 이전 화성을 멈추며 반복 점프도 마디 원래 코드를 쓴다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("코드 중지와 반복");
+  sheet.drumStyle = "basic";
+  sheet.accompanimentMode = "bass";
+  sheet.measures = [
+    api.musicMeasure([api.musicNote("C", 4, { value:"whole", chordSymbol:"C" })], { repeatStart:true }),
+    api.musicMeasure([
+      api.musicNote("D", 4), api.musicNote("E", 4, { chordSymbol:"알수없음" }),
+      api.musicNote("F", 4), api.musicNote("G", 4)
+    ], { repeatEnd:true })
+  ];
+  const states = api.musicChordMeasureStates(sheet);
+  assert.equal(api.musicChordAtTick(states[1], 0).symbol, "C");
+  assert.equal(api.musicChordAtTick(states[1], 480), null);
+  const timeline = api.musicTimeline(sheet);
+  assert.deepEqual(Array.from(timeline.measureOrder), [1, 2, 1, 2]);
+  const repeatedFirst = timeline.bass.filter((event) => event.measure === 1);
+  assert.ok(repeatedFirst.length >= 4);
+  assert.ok(repeatedFirst.every((event) => event.chordSymbol === "C"));
+});
+
+test("기본 드럼은 2/4·3/4·4/4·6/8 박자에 맞는 킥·스네어·하이햇을 만든다", () => {
+  const api = loadMusic();
+  const cases = [
+    [{ beats:2, beatValue:4 }, { kick:1, snare:1, hihat:4 }],
+    [{ beats:3, beatValue:4 }, { kick:1, snare:2, hihat:6 }],
+    [{ beats:4, beatValue:4 }, { kick:2, snare:2, hihat:8 }],
+    [{ beats:6, beatValue:8 }, { kick:1, snare:1, hihat:6 }]
+  ];
+  for (const [time, expected] of cases){
+    const sheet = api.musicEmpty(`${time.beats}/${time.beatValue}`);
+    sheet.tempo = 120;
+    sheet.time = time;
+    sheet.drumStyle = "basic";
+    sheet.drumVolume = 0.5;
+    sheet.measures = [api.musicMeasure()];
+    const timeline = api.musicTimeline(sheet);
+    const counts = { kick:0, snare:0, hihat:0 };
+    for (const hit of timeline.drums){
+      counts[hit.kind]++;
+      assert.ok(hit.start >= 0 && hit.start < timeline.totalSeconds);
+      assert.ok(hit.gain > 0 && hit.gain <= 0.5);
+    }
+    assert.deepEqual(counts, expected);
+  }
+});
+
+test("동요·발라드·행진·왈츠·록은 저마다의 박자와 패턴을 사용한다", () => {
+  const api = loadMusic();
+  assert.deepEqual(Array.from(api.MUSIC_DRUM_STYLES),
+    ["off", "basic", "children", "ballad", "march", "waltz", "rock"]);
+  assert.deepEqual(Array.from(api.MUSIC_DRUM_STYLES, (style) => api.MUSIC_DRUM_STYLE_SPECS[style].label),
+    ["끔", "기본 드럼", "동요", "발라드", "행진", "왈츠", "록"]);
+  assert.equal(api.musicDrumStyleCompatible("ballad", { beats:6, beatValue:8 }), true);
+  assert.equal(api.musicDrumStyleCompatible("ballad", { beats:3, beatValue:4 }), false);
+  assert.equal(api.musicDrumStyleCompatible("march", { beats:2, beatValue:4 }), true);
+  assert.equal(api.musicDrumStyleCompatible("waltz", { beats:4, beatValue:4 }), false);
+  assert.equal(api.musicDrumStyleCompatible("rock", { beats:4, beatValue:4 }), true);
+
+  const cases = [
+    ["children", { beats:4, beatValue:4 }, { kick:2, snare:2, hihat:8 }],
+    ["ballad", { beats:6, beatValue:8 }, { kick:2, snare:1, hihat:6 }],
+    ["march", { beats:2, beatValue:4 }, { kick:1, snare:2, hihat:4 }],
+    ["waltz", { beats:3, beatValue:4 }, { kick:1, snare:2, hihat:3 }],
+    ["rock", { beats:4, beatValue:4 }, { kick:4, snare:2, hihat:8 }]
+  ];
+  for (const [style, time, expected] of cases){
+    const capacity = api.MUSIC_TICKS_PER_QUARTER * time.beats * 4 / time.beatValue;
+    const counts = { kick:0, snare:0, hihat:0 };
+    for (const hit of api.musicDrumPattern(style, time, capacity)) counts[hit.kind]++;
+    assert.deepEqual(counts, expected, `${style} 패턴`);
+  }
+
+  // 중간 박자 변경으로 스타일과 맞지 않는 마디만 기본 패턴으로 이어진다.
+  const time = { beats:4, beatValue:4 };
+  const capacity = api.MUSIC_TICKS_PER_QUARTER * 4;
+  assert.equal(JSON.stringify(api.musicDrumPattern("waltz", time, capacity)),
+    JSON.stringify(api.musicBasicDrumPattern(time, capacity)));
 });
 
 test("학생용 예제 악보는 완성된 4마디와 안정된 제목·빠르기를 제공한다", () => {

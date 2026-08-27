@@ -1476,7 +1476,7 @@ function mountTimelineEditor(doc){
     if (typeof confirmDialog === "function"){
       approved = await confirmDialog("‘" + (event.title || (tripMode() ? "제목 없는 일정" : "제목 없는 사건")) + "’ " +
         (tripMode() ? "일정을 지울까요?" : "사건을 지울까요?"), "지우기", "취소");
-    } else approved = confirm(tripMode() ? "이 일정을 지울까요?" : "이 사건을 지울까요?");
+    } else approved = false;
     if (!approved) return;
     model.events = model.events.filter(item => item.id !== id);
     if (selectedId === id) selectedId = "";

@@ -777,6 +777,8 @@ function readBoardRecovery(name){
 function newWhiteboard(options={}){
   _boardCount++;
   const name = String(options.name || "").trim() || (_boardCount > 1 ? ("화이트보드 " + _boardCount) : "화이트보드");
+  const restoredNumber = /^화이트보드(?:\s+(\d+))?$/.exec(name);
+  if (restoredNumber) _boardCount = Math.max(_boardCount, Number(restoredNumber[1]) || 1);
   const doc = makeDoc("board", name, {});
   doc.memoBlockId = String(options.memoBlockId || "") || null;
   // 같은 이름의 일반 보드와 자동복원 칸을 나눠 쓰고, 전체 백업 복원 시 전달된 식별자도 받는다.
@@ -789,7 +791,7 @@ function newWhiteboard(options={}){
   if (restored) doc.boardState = restored;
   doc.render = async () => { const host = doc.el; host.innerHTML = ""; host.scrollTop = 0; renderWhiteboard(doc, host); };
   if (typeof refreshChrome === "function") refreshChrome();
-  activateIfIdle(doc, {});
+  activateIfIdle(doc, options.restoreInBackground ? { bulk:true } : {});
   return doc;
 }
 
@@ -835,7 +837,9 @@ function renderWhiteboard(doc, host){
   // 렌즈가 (0,0), 손잡이가 +x 방향인 손전등. renderFocus 에서 화면 가장자리 여유에 따라 회전한다.
   flashlightBody.innerHTML='<ellipse class="wb-flashlight-lens-glow" cx="0" cy="0" rx="15" ry="18"/><path d="M1-12 14-8v16L1 12Z" fill="#e2e8f0" stroke="#334155" stroke-width="2"/><rect x="12" y="-8" width="44" height="16" rx="7" fill="#475569" stroke="#1e293b" stroke-width="2"/><path d="M18-4h29" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="50" y="-9" width="10" height="18" rx="4" fill="#334155" stroke="#1e293b" stroke-width="2"/><rect x="26" y="-11" width="12" height="5" rx="2.5" fill="#1e293b"/><circle cx="32" cy="-8.5" r="2" fill="#ef4444"/><path d="M2-9v18" stroke="#fef3c7" stroke-width="3" stroke-linecap="round"/>';
   focusVisual.append(focusDefs, focusDim, focusCurtain, flashlightBeam, flashlightBody); stage.appendChild(focusVisual);
-  let zoomLabelBtn = null, positionTextEditor = null, spacePanning = false, lastBoardPointer = null;
+  let zoomLabelBtn = null, zoomOutBtn = null, zoomInBtn = null;
+  let contextZoomOutBtn = null, contextZoomResetBtn = null, contextZoomInBtn = null;
+  let positionTextEditor = null, spacePanning = false, lastBoardPointer = null;
   let renderFocus = () => {}, flashFocusBoundary = () => {};
   const focusAllowsScreenPoint = (p) => whiteboardFocusAllowsPoint(focus, p, W, H);
   const clampView = () => {
@@ -933,6 +937,10 @@ function renderWhiteboard(doc, host){
   wb.bg = boardSnapshotBg(wb.bg);
   wb.bgPattern = boardSnapshotPattern(wb.bgPattern);
   wb.bgImage = boardSnapshotImage(wb.bgImage);
+  // 배경 그림은 현재 화면 자체다. 예전에 저장된 확대·이동 보기 상태가 남아 있어도 그림과 판서가
+  // 어긋나지 않도록 배경을 되살리는 순간부터 100% 원점 보기로 고정한다.
+  const backgroundViewLocked = () => !!wb.bgImage;
+  if (backgroundViewLocked()){ view.scale = 1; view.x = 0; view.y = 0; }
   const applyBoardBackground = () => {
     const [r, g, b] = [1, 3, 5].map(i => parseInt(wb.bg.slice(i, i + 2), 16));
     wrap.style.setProperty("--wb-bg", wb.bg);
@@ -1224,7 +1232,17 @@ function renderWhiteboard(doc, host){
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
     if (flipYBtn){ flipYBtn.disabled = !canFlip; flipYBtn.setAttribute("aria-pressed", canFlip && s.flipY ? "true" : "false"); }
     syncSelectionControls();
-    if (zoomLabelBtn) zoomLabelBtn.textContent = Math.round(view.scale * 100) + "%";
+    const viewLocked = backgroundViewLocked();
+    if (zoomLabelBtn){
+      zoomLabelBtn.textContent = Math.round(view.scale * 100) + "%";
+      zoomLabelBtn.disabled = viewLocked;
+      zoomLabelBtn.title = viewLocked ? "배경 그림을 쓰는 동안 화면 배율은 고정됩니다" : "화이트보드 배율 100%로 초기화";
+    }
+    if (zoomOutBtn) zoomOutBtn.disabled = viewLocked;
+    if (zoomInBtn) zoomInBtn.disabled = viewLocked;
+    if (contextZoomOutBtn) contextZoomOutBtn.disabled = viewLocked;
+    if (contextZoomResetBtn) contextZoomResetBtn.disabled = viewLocked;
+    if (contextZoomInBtn) contextZoomInBtn.disabled = viewLocked;
     if (typeof positionTextEditor === "function") positionTextEditor();
     renderFocus();
   };
@@ -1364,12 +1382,17 @@ function renderWhiteboard(doc, host){
     return null;
   };
   const setViewScale = (nextScale, clientX, clientY) => {
+    if (backgroundViewLocked()){
+      if (view.scale !== 1 || view.x !== 0 || view.y !== 0){ view.scale = 1; view.x = 0; view.y = 0; redraw(); }
+      return;
+    }
     const anchor = Number.isFinite(clientX) && Number.isFinite(clientY) ? screenPoint({ clientX, clientY }) : { x:W/2, y:H/2 };
     Object.assign(view, whiteboardZoomAt(view, nextScale, anchor, W, H)); redraw();
   };
   const resetView = () => { view.scale = 1; view.x = 0; view.y = 0; redraw(); };
   const beginViewPan = (e) => {
     e.preventDefault(); e.stopPropagation();
+    if (backgroundViewLocked()) return;
     try { canvas.setPointerCapture(e.pointerId); } catch(_){}
     canvas.classList.remove("pan-ready"); canvas.classList.add("panning");
     const startX=e.clientX, startY=e.clientY, originX=view.x, originY=view.y;
@@ -1389,6 +1412,7 @@ function renderWhiteboard(doc, host){
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     if (focus.active && focus.controlsVisible){ flashFocusBoundary(); return; }
+    if (backgroundViewLocked()) return;
     setViewScale(view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX, e.clientY);
   }, { passive:false });
   canvas.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
@@ -1865,7 +1889,7 @@ function renderWhiteboard(doc, host){
       // 보드 이동이 필요하면 기존처럼 Space+드래그 또는 가운데 버튼을 사용한다.
       if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ beginSpotlightDrag(e,.5,.5,true); return; }
       // 선택 도구의 빈 공간은 손바닥 이동 영역으로 쓴다. 항목 위에서는 기존처럼 항목을 이동한다.
-      if (!startSelect(e)) beginViewPan(e);
+      if (!startSelect(e) && !backgroundViewLocked()) beginViewPan(e);
       return;
     }
     if (wb.tool === "text"){ e.preventDefault(); startText(pt(e)); return; }
@@ -2097,14 +2121,12 @@ function renderWhiteboard(doc, host){
     }
     return { src, width:canvasEl.width, height:canvasEl.height };
   };
-  // 고른 맞춤 방식과 지금 보이는 화면으로 상자를 다시 잡는다("화면에 맞추기"도 이 길로 온다).
-  const boardImageBoxFor = (fit, naturalW, naturalH) => {
-    const area = visibleBoardArea();
-    if (typeof boardImageBox === "function") return boardImageBox(fit, area, naturalW, naturalH);
-    return { x:Math.round(area.x), y:Math.round(area.y), w:Math.round(area.w), h:Math.round(area.h) };
-  };
   const setBackgroundImage = (next) => {
     wb.bgImage = boardSnapshotImage(next);
+    if (wb.bgImage){
+      view.scale = 1; view.x = 0; view.y = 0;
+      spacePanning = false; canvas.classList.remove("pan-ready", "panning");
+    }
     restoreBoardBackgroundImage();
     syncBackgroundImageControls();
     redraw();
@@ -2123,8 +2145,8 @@ function renderWhiteboard(doc, host){
       const encoded = encodeBoardBackgroundImage(img, blob.type);
       if (!encoded.src) throw new Error("board-background-encode-failed");
       const fit = (wb.bgImage && wb.bgImage.fit) || "cover";
-      const box = boardImageBoxFor(fit, encoded.width, encoded.height);
-      setBackgroundImage({ src:encoded.src, fit, opacity:(wb.bgImage && wb.bgImage.opacity) || 1, ...box });
+      setBackgroundImage({ src:encoded.src, fit, opacity:(wb.bgImage && wb.bgImage.opacity) || 1,
+        x:0, y:0, w:encoded.width, h:encoded.height });
       if (typeof toast === "function") toast("배경 그림을 넣었어요. 판서가 잘 보이게 '흐리기'로 연하게 만들 수 있어요.", 3200);
       return true;
     } catch(error){
@@ -2150,8 +2172,8 @@ function renderWhiteboard(doc, host){
       history.commit();
       recordCommit();
       setBackgroundImage({
-        src:encoded.src, fit:"actual", opacity:(wb.bgImage && wb.bgImage.opacity) || 1,
-        x:Math.round(item.x), y:Math.round(item.y), w:Math.round(item.w), h:Math.round(item.h)
+        src:encoded.src, fit:"cover", opacity:(wb.bgImage && wb.bgImage.opacity) || 1,
+        x:0, y:0, w:encoded.width, h:encoded.height
       });
       if (typeof toast === "function") toast("그림을 배경으로 내렸어요. 이제 판서에 걸리지 않아요.", 2800);
     } catch(error){
@@ -2894,9 +2916,9 @@ function renderWhiteboard(doc, host){
   const contextChartBtn=contextAction("차트","자료 차트 만들기 — 표 숫자로 막대·꺾은선·원그래프를 넣습니다","",()=>{eduCategory="chart";toggleEducationPanel(true);});
   const contextChemBtn=contextAction("주기율표","주기율표와 반응식 균형 맞추기 열기","",()=>{eduCategory="chemistry";toggleEducationPanel(true);});
   const contextBackgroundBtn=contextAction("배경","보드 배경(색·무늬) 바꾸기","",()=>toggleBackgroundPanel(true));
-  const contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
-  const contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
-  const contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
+  contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
+  contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
+  contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
   const contextFocusBtn=contextAction("집중 도구","스포트라이트·화면 가리개 설정 열기","",()=>toggleFocusPanel(true));
   const contextClearBtn=contextAction("전체 지우기","보드 내용 전체 지우기","wb-context-danger wb-context-clear",confirmClearAll);
   contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextEducationBtn,contextGraphBtn,contextChartBtn,contextChemBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
@@ -3050,7 +3072,7 @@ function renderWhiteboard(doc, host){
     }
     contextGearClearBtn.disabled=!(gear.ruler||gear.protractor||gear.compass);
     contextClearBtn.disabled=!wb.items.length;
-    const boardEmpty=!wb.items.length;
+    const boardEmpty=!wb.items.length&&!wb.bgImage;
     contextPngBtn.disabled=boardEmpty; contextPdfBtn.disabled=boardEmpty; contextPrintBtn.disabled=boardEmpty; contextMemoBtn.disabled=boardEmpty;
     syncRecordButtons();
     for(const position in contextPositionBtns){
@@ -4640,9 +4662,9 @@ function renderWhiteboard(doc, host){
   eduSearch.addEventListener("input", renderEducationPanel);
 
   const toolGroup = grp();
-  TOOLS.forEach(([t, icon, title]) => { const b = mkIconBtn(icon, title, "wb-tool", () => setTool(t)); toolBtns[t] = b; toolGroup.appendChild(b); });
+  TOOLS.forEach(([t, icon, title]) => { const b = mkIconBtn(icon, title, "wb-tool wb-toolvis-" + t, () => setTool(t)); toolBtns[t] = b; toolGroup.appendChild(b); });
 
-  const colorGroup = grp();
+  const colorGroup = grp(); colorGroup.classList.add("wb-toolvis-color");
   COLORS.forEach(([c, name]) => {
     const s = document.createElement("button"); s.type = "button"; s.className = "wb-swatch"; s.title = name; s.setAttribute("aria-label", name); s.style.background = c;
     if (c === "#ffffff") s.style.border = "1px solid #cbd5e1";
@@ -4761,12 +4783,6 @@ function renderWhiteboard(doc, host){
     chip.dataset.boardFit = fit.id;
     imageFitEls.push(chip); imageFitRow.appendChild(chip);
   }
-  // 확대·이동해서 보던 자리에 그림을 다시 맞춘다. 상자를 창 크기에 자동으로 묶지 않기 때문에
-  // (묶으면 창을 줄일 때 그림만 움직여 판서와 어긋난다) 다시 맞추는 건 이렇게 손으로 부른다.
-  const imageRefitBtn = mkBtn("화면에 맞추기", "지금 보이는 화면에 배경 그림을 다시 맞추기", "wb-bg-image-btn wb-bg-refit", () => {
-    if (!wb.bgImage) return;
-    setBackgroundImageFit(wb.bgImage.fit, { refit:true });
-  });
   const imageOpacityRow = document.createElement("label"); imageOpacityRow.className = "wb-bg-range";
   const imageOpacityCaption = document.createElement("span"); imageOpacityCaption.textContent = "흐리기";
   const imageOpacityInput = document.createElement("input");
@@ -4790,7 +4806,7 @@ function renderWhiteboard(doc, host){
     setBackgroundImage({ ...wb.bgImage, tile:Number(imageTileInput.value) });
   });
   imageTileRow.append(imageTileCaption, imageTileInput);
-  imageDetails.append(imageFitRow, imageTileRow, imageOpacityRow, imageRefitBtn);
+  imageDetails.append(imageFitRow, imageTileRow, imageOpacityRow);
 
   bgPanel.append(bgHead, bgColorTitle, bgChoices, bgCustomRow, patternTitle, patternChoices, patternDetails,
     imageTitle, imageActions, imageDetails, bgHint);
@@ -4895,6 +4911,7 @@ function renderWhiteboard(doc, host){
   }
 
   const bgGroup = grp();
+  bgGroup.classList.add("wb-toolvis-background");
   const bgToggleBtn = mkBtn("", "보드 배경(색·무늬) 바꾸기", "wb-act wb-bg-toggle", () => toggleBackgroundPanel());
   const bgToggleDot = document.createElement("span"); bgToggleDot.className = "wb-bg-dot";
   bgToggleBtn.appendChild(bgToggleDot);
@@ -4935,22 +4952,14 @@ function renderWhiteboard(doc, host){
     if (!image) return;
     imageOpacityInput.value = String(Math.round(image.opacity * 100));
     imageTileRow.hidden = image.fit !== "tile";
-    // 타일은 보드 전체에 깔리므로 "화면에 맞추기"가 할 일이 없다.
-    imageRefitBtn.hidden = image.fit === "tile";
     if (image.fit === "tile") imageTileInput.value = String(image.tile || 50);
     for (const chip of imageFitEls) chip.setAttribute("aria-pressed", String(chip.dataset.boardFit === image.fit));
   }
-  // 맞춤 방식을 바꾸면 상자를 다시 잡는다. 그림 원본 크기는 되살린 <img> 에서만 알 수 있으므로
-  // 아직 안 불러왔으면 지금 상자 비율을 원본 비율 대신 쓴다(불러오면 다시 맞추면 된다).
-  function setBackgroundImageFit(fit, options={}){
+  // 맞춤 방식은 현재 화면에 매번 적용된다. 배경은 화면 자체이므로 별도 위치 상자는 조절하지 않는다.
+  function setBackgroundImageFit(fit){
     const image = wb.bgImage;
     if (!image) return;
-    const img = image.img;
-    const naturalW = (img && img.naturalWidth) || image.w, naturalH = (img && img.naturalHeight) || image.h;
-    const next = { ...image, fit };
-    Object.assign(next, boardImageBoxFor(fit, naturalW, naturalH));
-    setBackgroundImage(next);
-    if (options.refit && typeof toast === "function") toast("지금 화면에 맞췄어요.", 1600);
+    setBackgroundImage({ ...image, fit });
   }
   // 무늬도 배경색과 같이 "보드의 성질"이라 되돌리기(Ctrl+Z) 대상이 아니고, 복구 스냅샷에 바로 남는다.
   const commitPattern = (next) => {
@@ -5008,10 +5017,10 @@ function renderWhiteboard(doc, host){
     }
   };
 
-  const widthGroup = grp();
+  const widthGroup = grp(); widthGroup.classList.add("wb-toolvis-width");
   [["2", "S", 2], ["4", "M", 4], ["8", "L", 8]].forEach(([k, label, w]) => { const b = mkBtn(label, "굵기 " + label, "wb-width", () => setWidth(w)); widthBtns[k] = b; widthGroup.appendChild(b); });
 
-  const textSizeGroup = grp(); textSizeGroup.classList.add("wb-text-size-group");
+  const textSizeGroup = grp(); textSizeGroup.classList.add("wb-text-size-group", "wb-toolvis-textsize");
   const textSizeLabel = document.createElement("label"); textSizeLabel.className = "wb-text-size-control";
   textSizeCaption = document.createElement("span"); textSizeCaption.textContent = "글자";
   textSizeInput = document.createElement("input"); textSizeInput.type = "number"; textSizeInput.className = "wb-text-size-input";
@@ -5020,41 +5029,41 @@ function renderWhiteboard(doc, host){
   textSizeUnit = document.createElement("span"); textSizeUnit.textContent = "px";
   bindTextSizeInput(textSizeInput); textSizeLabel.append(textSizeCaption, textSizeInput, textSizeUnit); textSizeGroup.appendChild(textSizeLabel);
 
-  const zoomGroup = grp();
-  const zoomOutBtn = mkBtn("−", "화이트보드 화면 축소", "wb-act wb-zoom-step", () => setViewScale(view.scale / 1.25));
+  const zoomGroup = grp(); zoomGroup.classList.add("wb-toolvis-zoom");
+  zoomOutBtn = mkBtn("−", "화이트보드 화면 축소", "wb-act wb-zoom-step", () => setViewScale(view.scale / 1.25));
   zoomLabelBtn = mkBtn(Math.round(view.scale * 100) + "%", "화이트보드 배율 100%로 초기화", "wb-act wb-zoom-label", resetView);
-  const zoomInBtn = mkBtn("+", "화이트보드 화면 확대", "wb-act wb-zoom-step", () => setViewScale(view.scale * 1.25));
+  zoomInBtn = mkBtn("+", "화이트보드 화면 확대", "wb-act wb-zoom-step", () => setViewScale(view.scale * 1.25));
   zoomGroup.append(zoomOutBtn, zoomLabelBtn, zoomInBtn);
 
-  const focusGroup=grp();
+  const focusGroup=grp(); focusGroup.classList.add("wb-toolvis-focus");
   focusToolBtn=mkBtn("◉","집중 도구 — 스포트라이트·화면 가리개","wb-act wb-focus-toggle",()=>toggleFocusPanel());
   focusToolBtn.setAttribute("aria-controls",focusPanel.id); focusToolBtn.setAttribute("aria-expanded","false"); focusToolBtn.setAttribute("aria-pressed",String(focus.active));
   focusGroup.appendChild(focusToolBtn);
 
   // ----- 교구(자·각도기·컴퍼스)와 손그림 정리 -----
   const gearGroup = grp();
-  const rulerBtn = mkIconBtn("ruler", "자 — 대고 그으면 곧게 그려지고 cm 눈금이 보입니다 (길이 2~40cm 조절)", "wb-act wb-gear", () => {
+  const rulerBtn = mkIconBtn("ruler", "자 — 대고 그으면 곧게 그려지고 cm 눈금이 보입니다 (길이 2~40cm 조절)", "wb-act wb-gear wb-toolvis-ruler", () => {
     const on = setGear("ruler");
     if (on && typeof toast === "function") toast("자를 놓았어요. 몸통을 끌어 옮기고, 오른쪽 동그라미로 돌리고, 왼쪽 동그라미를 끌어 길이를 40cm까지 늘립니다.", 3600);
   });
-  const protractorBtn = mkIconBtn("protractor", "각도기 — 가운데에서 시작해 그으면 각도가 1°씩 맞춰집니다 (밑변 4~30cm 조절)", "wb-act wb-gear", () => {
+  const protractorBtn = mkIconBtn("protractor", "각도기 — 가운데에서 시작해 그으면 각도가 1°씩 맞춰집니다 (밑변 4~30cm 조절)", "wb-act wb-gear wb-toolvis-protractor", () => {
     const on = setGear("protractor");
     if (on && typeof toast === "function") toast("각도기를 놓았어요. 가운데 점에서 시작해 그으면 각도가 표시되고, 왼쪽 동그라미를 끌면 크기가 커집니다.", 3600);
   });
-  const compassBtn = mkIconBtn("compass", "컴퍼스 — 연필 손잡이를 돌리면 호와 원이 그려집니다 (반지름 2~30cm 조절)", "wb-act wb-gear", () => {
+  const compassBtn = mkIconBtn("compass", "컴퍼스 — 연필 손잡이를 돌리면 호와 원이 그려집니다 (반지름 2~30cm 조절)", "wb-act wb-gear wb-toolvis-compass", () => {
     const on = setGear("compass");
     if (on && typeof toast === "function") toast("컴퍼스를 놓았어요. 가운데=바늘, 중간 손잡이를 끌면 반지름이 2~30cm로 벌어지고, 끝 손잡이를 돌리면 호가 그려집니다.", 3600);
   });
-  const snapBtn = mkBtn("15°", "각도 맞추기 — 직선·화살표를 15°씩 맞춰 긋습니다 (Shift 를 눌러도 같아요)", "wb-act wb-gear wb-gear-snap", () => {
+  const snapBtn = mkBtn("15°", "각도 맞추기 — 직선·화살표를 15°씩 맞춰 긋습니다 (Shift 를 눌러도 같아요)", "wb-act wb-gear wb-gear-snap wb-toolvis-snap", () => {
     gear.snap = !gear.snap; saveGearPrefs(); syncGearButtons();
   });
-  const tidyBtn = mkIconBtn("tidy", "손그림 정리 — 대충 그린 동그라미·세모·네모를 반듯하게 바꿔 줍니다", "wb-act wb-gear", () => {
+  const tidyBtn = mkIconBtn("tidy", "손그림 정리 — 대충 그린 동그라미·세모·네모를 반듯하게 바꿔 줍니다", "wb-act wb-gear wb-toolvis-tidy", () => {
     gear.tidy = !gear.tidy; saveGearPrefs(); syncGearButtons();
     if (typeof toast === "function") toast(gear.tidy ? "손그림 정리를 켰어요. 크게 그린 도형만 반듯하게 바꿉니다(글씨는 그대로)." : "손그림 정리를 껐어요.", 2600);
   });
-  const measureToolBtn = mkIconBtn("measure", "측정 — 고른 도형의 길이·각도·넓이를 붙입니다(도형을 끌면 값이 따라 바뀜)", "wb-act wb-gear", () => toggleMeasureOnSelection());
-  const vectorSumBtn = mkIconBtn("vectorsum", "벡터 합성 — 같은 점에서 출발한 두 화살표의 합력을 붙입니다(화살표를 끌면 따라 바뀜)", "wb-act wb-gear", () => toggleVectorSumOnSelection());
-  transformToolBtn = mkIconBtn("transform", "변환 — 고른 도형을 대칭·회전·평행이동·닮음으로 바꿉니다", "wb-act wb-gear", () => toggleTransformPanel());
+  const measureToolBtn = mkIconBtn("measure", "측정 — 고른 도형의 길이·각도·넓이를 붙입니다(도형을 끌면 값이 따라 바뀜)", "wb-act wb-gear wb-toolvis-measure", () => toggleMeasureOnSelection());
+  const vectorSumBtn = mkIconBtn("vectorsum", "벡터 합성 — 같은 점에서 출발한 두 화살표의 합력을 붙입니다(화살표를 끌면 따라 바뀜)", "wb-act wb-gear wb-toolvis-vectorsum", () => toggleVectorSumOnSelection());
+  transformToolBtn = mkIconBtn("transform", "변환 — 고른 도형을 대칭·회전·평행이동·닮음으로 바꿉니다", "wb-act wb-gear wb-toolvis-transform", () => toggleTransformPanel());
   transformToolBtn.setAttribute("aria-controls", transformPanel.id); transformToolBtn.setAttribute("aria-expanded", "false");
   gearGroup.append(rulerBtn, protractorBtn, compassBtn, snapBtn, tidyBtn, measureToolBtn, vectorSumBtn, transformToolBtn);
   syncGearButtons = () => {
@@ -5064,10 +5073,10 @@ function renderWhiteboard(doc, host){
   syncGearButtons();
 
   const imgGroup = grp();
-  eduToolBtn = mkBtn("∑", "수학·과학 도구상자", "wb-act wb-edu-toggle", () => toggleEducationPanel());
+  eduToolBtn = mkBtn("∑", "수학·과학 도구상자", "wb-act wb-edu-toggle wb-toolvis-education", () => toggleEducationPanel());
   eduToolBtn.setAttribute("aria-controls", eduPanel.id); eduToolBtn.setAttribute("aria-expanded", "false");
-  const plotToolBtn = mkIconBtn("plot", "함수 그래프 — 식을 치면 실제로 계산한 곡선을 넣습니다", "wb-act", () => { eduCategory = "graph"; toggleEducationPanel(true); });
-  const chartToolBtn = mkIconBtn("chart", "자료 차트 — 표 숫자로 막대·꺾은선·원그래프를 만듭니다", "wb-act", () => { eduCategory = "chart"; toggleEducationPanel(true); });
+  const plotToolBtn = mkIconBtn("plot", "함수 그래프 — 식을 치면 실제로 계산한 곡선을 넣습니다", "wb-act wb-toolvis-plot", () => { eduCategory = "graph"; toggleEducationPanel(true); });
+  const chartToolBtn = mkIconBtn("chart", "자료 차트 — 표 숫자로 막대·꺾은선·원그래프를 만듭니다", "wb-act wb-toolvis-chart", () => { eduCategory = "chart"; toggleEducationPanel(true); });
   const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = ".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif,.ico"; fileInput.hidden = true;
   fileInput.addEventListener("change", () => { const f = fileInput.files && fileInput.files[0]; if (f) insertImageBlob(f); fileInput.value = ""; });
   function openImageFilePicker(){
@@ -5091,7 +5100,7 @@ function renderWhiteboard(doc, host){
     const placed = await doc.insertBoardImage(png);
     if (!placed && typeof toast === "function") toast("지도를 넣지 못했어요.", 2200);
   };
-  const mapToolBtn = mkIconBtn("map", "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다", "wb-act wb-map", insertMapFromPicker);
+  const mapToolBtn = mkIconBtn("map", "지도 넣기 — 자리를 골라 배경지도를 그림으로 넣습니다", "wb-act wb-map wb-toolvis-map", insertMapFromPicker);
   /* 환율 넣기 — exchange-rate-ui.js 의 환율 창을 "이 보드에 넣기" 모드로 띄운다.
      새 칠판을 만드는 팔레트 쪽(Ctrl+K → 환율)과 달리, 여기서는 지금 서 있는 보드에 떨어뜨린다
      (지도의 openMapPicker 와 같은 짝 구조다 — 방향마다 입구가 다르다).
@@ -5110,7 +5119,7 @@ function renderWhiteboard(doc, host){
       }
     });
   };
-  const rateToolBtn = mkIconBtn("exchange", "환율 넣기 — 고시환율 표나 추이 그래프를 이 보드에 넣습니다", "wb-act wb-rate", insertExchangeRate);
+  const rateToolBtn = mkIconBtn("exchange", "환율 넣기 — 고시환율 표나 추이 그래프를 이 보드에 넣습니다", "wb-act wb-rate wb-toolvis-rate", insertExchangeRate);
   /* 환율은 런처가 대신 받아 줘야만 되는 기능이다(수출입은행·ECB 모두 브라우저에서 직접 못 부른다).
      능력이 없으면 버튼을 아예 내놓지 않는다 — 눌러도 늘 "런처로 열어야 해요"만 뜨는 버튼은
      없느니만 못하다. 프로브가 끝날 때까지는 감춰 두고, 된다고 답할 때만 꺼낸다. */
@@ -5118,28 +5127,29 @@ function renderWhiteboard(doc, host){
   if (typeof window.exchangeRatesAvailable === "function"){
     window.exchangeRatesAvailable().then((ok) => { if (ok) rateToolBtn.hidden = false; }).catch(() => {});
   }
-  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mapToolBtn, rateToolBtn, mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act", openImageFilePicker), fileInput);
+  const imageToolBtn = mkIconBtn("image", "이미지 넣기 — 파일 선택 (또는 Ctrl+V 붙여넣기·드래그드롭)", "wb-act wb-toolvis-image", openImageFilePicker);
+  imgGroup.append(eduToolBtn, plotToolBtn, chartToolBtn, mapToolBtn, rateToolBtn, imageToolBtn, fileInput);
 
   const actGroup = grp();
   undoBtn = mkIconBtn("undo", "되돌리기 (Ctrl+Z)", "wb-act", doUndo);
   redoBtn = mkIconBtn("redo", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
-  flipXBtn = mkBtn("↔", "선택한 이미지 또는 교육 도형 좌우 반전", "wb-act wb-flip-x", () => flipSelected("flipX")); flipXBtn.disabled = true;
-  flipYBtn = mkBtn("↕", "선택한 이미지 또는 교육 도형 상하 반전", "wb-act wb-flip-y", () => flipSelected("flipY")); flipYBtn.disabled = true;
-  groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup", ungroupSelected); groupActionBtn.disabled = true;
-  const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear", confirmClearAll);
+  flipXBtn = mkBtn("↔", "선택한 이미지 또는 교육 도형 좌우 반전", "wb-act wb-flip-x wb-toolvis-flipx", () => flipSelected("flipX")); flipXBtn.disabled = true;
+  flipYBtn = mkBtn("↕", "선택한 이미지 또는 교육 도형 상하 반전", "wb-act wb-flip-y wb-toolvis-flipy", () => flipSelected("flipY")); flipYBtn.disabled = true;
+  groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup wb-toolvis-ungroup", ungroupSelected); groupActionBtn.disabled = true;
+  const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear wb-toolvis-clear", confirmClearAll);
   actGroup.append(undoBtn, redoBtn, flipXBtn, flipYBtn, groupActionBtn, clearBtn);
 
   const exportGroup = grp();
   exportGroup.append(
-    mkBtn("PNG", "PNG 이미지로 저장", "wb-act", exportPng),
-    mkBtn("PDF", "PDF로 저장", "wb-act", exportPdf),
-    mkBtn("메모로", "메모창으로 보내기 — 메모에서 '✏️ 화이트보드로'를 누르면 다시 편집할 수 있어요", "wb-act", sendToMemo)
+    mkBtn("PNG", "PNG 이미지로 저장", "wb-act wb-toolvis-png", exportPng),
+    mkBtn("PDF", "PDF로 저장", "wb-act wb-toolvis-pdf", exportPdf),
+    mkBtn("메모로", "메모창으로 보내기 — 메모에서 '✏️ 화이트보드로'를 누르면 다시 편집할 수 있어요", "wb-act wb-toolvis-memo", sendToMemo)
   );
 
   // ----- 수업 리플레이 녹화 -----
   // ● 녹화 → 판서를 시간순으로 기록, ■ 정지 → 리플레이(되감아 보기) 화면을 만든다.
   const recGroup = grp();
-  const recBtn = mkBtn("● 녹화", "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요", "wb-act wb-rec", () => toggleRecord());
+  const recBtn = mkBtn("● 녹화", "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요", "wb-act wb-rec wb-toolvis-record", () => toggleRecord());
   recGroup.appendChild(recBtn);
   function syncRecordButtons(){
     const recording=!!(doc.recorder&&doc.recorder.active);
@@ -5236,7 +5246,7 @@ function renderWhiteboard(doc, host){
     const ae = document.activeElement;
     if (ae && ae.classList && ae.classList.contains("wb-textinput")) return;
     const interactive = ae && (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(ae.tagName) || ae.isContentEditable);
-    if (e.code === "Space" && !interactive && eduPanel.hidden && bgPanel.hidden && focusPanel.hidden && transformPanel.hidden){
+    if (e.code === "Space" && !backgroundViewLocked() && !interactive && eduPanel.hidden && bgPanel.hidden && focusPanel.hidden && transformPanel.hidden){
       e.preventDefault(); e.stopPropagation(); spacePanning = true; canvas.classList.add("pan-ready"); return;
     }
     if (e.key === "Escape" && !bgPanel.hidden){

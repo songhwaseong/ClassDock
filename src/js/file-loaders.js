@@ -45,11 +45,12 @@ async function handleFiles(files, options={}){
     // 폴더·압축 안의 파일(parentId 있음)과 임시 문서는 각각 폴더 항목·대상 아님으로 처리한다.
     if (opts.fsHandle && !opts.fsHandle.__classdockNativeHandle && opts.workspacePath && !options.parentId && !options.transient && !options.isScratch
         && typeof MNRecent !== "undefined") MNRecent.rememberFile(file.name, opts.workspacePath);
-    const duplicate = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
+    const duplicate = await workspaceFindOpenDocument(file, opts);
     if (duplicate){
+      const sharedHere = workspaceAttachExistingDoc(duplicate, opts.parentId || null);
       if (!uiBatchDepth) setActiveDoc(duplicate.id);
       else if (!uiBatchActiveCandidate) uiBatchActiveCandidate = duplicate.id;
-      toast(`이미 열린 파일입니다: ${file.name}`, 1800);
+      toast(sharedHere ? `이미 열려 있는 파일을 이 작업공간에도 공유했습니다: ${file.name}` : `이미 열린 파일입니다: ${file.name}`, sharedHere ? 2800 : 1800);
       if (!firstDoc) firstDoc = duplicate;
       continue;
     }
@@ -342,7 +343,7 @@ async function loadZip(file, options={}){
   }
   hideLoading();
 
-  if (!opened){ closeGroup(zipGroup.nodeId); toast("압축을 풀지 못했어요.", 3000); return; }
+  if (!opened){ await closeGroup(zipGroup.nodeId); toast("압축을 풀지 못했어요.", 3000); return; }
   // 폴더와 같은 규칙 — 압축을 열었다고 안의 첫 파일까지 띄우지는 않는다(자동 복원은 예외).
   if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(zipGroup.nodeId);
   const summary = formatZipOpenSummary({ opened, unsupported, oversized, failed });
@@ -417,7 +418,7 @@ async function extractTar(tarBytes, name, options = {}){
     opened++;
     await yieldToBrowser();
   }
-  if (!opened){ closeGroup(group.nodeId); toast("압축을 풀지 못했어요.", 3000); }
+  if (!opened){ await closeGroup(group.nodeId); toast("압축을 풀지 못했어요.", 3000); }
   else {
     if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(group.nodeId);
     toast(window.tf("{n}개 열기", { n: opened }), 3000);
@@ -535,17 +536,21 @@ function rememberFolderHandle(rootGroup, rootName){
     return;
   }
   if (!rootGroup.originalSaveMode) return;
-  if (typeof restoreNativeSourceFolder === "function"){
-    restoreNativeSourceFolder(rootName).then(handle => {
+  // EXE에서는 서버가 기억한 실제 Windows 경로만 복원한다. 브라우저 핸들을 다시 붙이면
+  // 앱 재실행 뒤 첫 저장 때 Chromium의 "이 사이트에서 파일을 편집" 권한창이 다시 뜬다.
+  (async () => {
+    const native = typeof nativeSourceSupported === "function" && await nativeSourceSupported();
+    if (native){
+      const handle = typeof restoreNativeSourceFolder === "function" ? await restoreNativeSourceFolder(rootName) : null;
       if (handle && !rootGroup.folderHandle){
         rootGroup.folderHandle = handle;
         rootGroup.nativeRootPath = handle.nativePath || "";
       }
-    }).catch(() => {});
-  }
-  loadRememberedFolderHandle(rootName).then(handle => {
+      return;
+    }
+    const handle = await loadRememberedFolderHandle(rootName);
     if (handle && !rootGroup.folderHandle) rootGroup.folderHandle = handle;
-  }).catch(() => {});
+  })().catch(() => {});
 }
 function folderScanLoadingText(progress){
   const row = progress || {};
@@ -927,8 +932,17 @@ async function restoreNativeSourceFolder(rootName){
   } catch(_){ return null; }
 }
 async function chooseFolderHandle(startIn=null){
-  // Chrome의 표준 선택창을 우선한다. EXE 전용 Windows 선택창은 일부 환경에서
-  // 백그라운드에 떠서 버튼이 반응하지 않는 것처럼 보일 수 있다.
+  // EXE에서는 Windows가 돌려준 실제 경로를 우선한다. 이 핸들은 재실행 뒤에도 런처가
+  // 직접 복원하므로 Chromium의 사이트별 폴더 쓰기 권한을 매번 다시 묻지 않는다.
+  try {
+    const native = await chooseNativeSourceFolder();
+    if (native.supported) return native.handle; // 취소도 그대로 끝내 브라우저 권한창으로 넘어가지 않는다
+  } catch(error){
+    console.warn("native source folder picker failed:", error);
+    nativeSourceFolderCapability = false;
+    if (typeof toast === "function")
+      toast("Windows 폴더 선택창을 열지 못해 기본 폴더 선택창으로 전환합니다.", 3600);
+  }
   const supportsBrowserPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
   if (supportsBrowserPicker){
     const options = { mode: "read" };
@@ -945,17 +959,6 @@ async function chooseFolderHandle(startIn=null){
       if (!(e && e.name === "AbortError")) console.warn("directory picker failed:", e);
       return null;
     }
-  }
-  try {
-    const native = await chooseNativeSourceFolder();
-    if (native.supported) return native.handle;
-  } catch(error){
-    // 로컬 선택창이 특정 Windows 환경에서 실패해도 버튼 자체가 무반응처럼 끝나지 않게,
-    // 이번 실행에서는 기존 브라우저 폴더 선택창으로 즉시 폴백한다.
-    console.warn("native source folder picker failed:", error);
-    nativeSourceFolderCapability = false;
-    if (typeof toast === "function")
-      toast("Windows 폴더 선택창을 열지 못해 기본 폴더 선택창으로 전환합니다.", 3600);
   }
   return null;
 }
@@ -977,7 +980,7 @@ async function ensureFolderWriteAccess(handle){
 async function classifyRelatedFolderRoots(handle){
   const result = { same:null, child:null, parents:[] };
   if (!handle || handle.kind !== "directory" || typeof handle.isSameEntry !== "function") return result;
-  const roots = navNodes.filter(n => n.type === "group" && n.folderRefreshRootId === n.nodeId
+  const roots = navNodes.filter(n => workspaceNodeVisible(n) && n.type === "group" && n.folderRefreshRootId === n.nodeId
     && n.folderHandle && n.folderHandle.kind === "directory");
   for (const root of roots){
     try {
@@ -1008,8 +1011,9 @@ function absorbContainedFolderRoots(parents){
 }
 async function pickFolderOrInput(input){
   pendingFolderRefreshId = null;
+  const supportsNativePicker = typeof nativeSourceSupported === "function" && await nativeSourceSupported();
   const supportsPicker = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
-  if (!supportsPicker){
+  if (!supportsNativePicker && !supportsPicker){
     if (input) input.click();
     return;
   }
@@ -1175,7 +1179,7 @@ async function openFolderFiles(fileList, options={}){
     } catch(e){ if (e && e.message === "operation-cancelled") throw e; console.error(e); }
   }
   hideLoading();
-  if (!opened && !folderPaths.length){ closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
+  if (!opened && !folderPaths.length){ await closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
   // 폴더를 열었다고 안의 파일 하나를 멋대로 띄우지 않는다(설정에서 되돌릴 수 있음).
   // 자동 복원은 예외 — 지난번에 보던 문서를 그대로 되살려야 하므로 배치 활성화를 그대로 둔다.
   if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(rootGroup.nodeId);
@@ -1680,7 +1684,7 @@ async function handleEntry(entry, parentId=null){
     const entries = await readAllDirectoryEntries(entry);
     entries.sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
     for (const child of entries) await handleEntry(child, group.nodeId);
-    if (!navNodes.some(n => n.parentId === group.nodeId)) closeGroup(group.nodeId);
+    if (!navNodes.some(n => n.parentId === group.nodeId)) await closeGroup(group.nodeId);
     return;
   }
   if (entry.isFile){

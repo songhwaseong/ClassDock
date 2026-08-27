@@ -308,6 +308,13 @@ test("분할 작업은 두 칸 모두 제 알약으로 보기 방식·넘기기�
   assert.ok(pane);
   assert.match(pane[1], /doc\.id === studyPdfId\)\{ fitStudyPdf\(doc\); return; \}/);
   assert.match(pane[1], /doc\.id === activeId\) refitSinglePagePdf\(doc\)/);
+  /* PDF 배율이 스크롤바를 만들고 그 clientWidth 변화가 다시 자동 맞춤을 부르는 순환을 막는다.
+     좌우 위치와 관계없이 실제 분할 칸의 외곽 크기가 달라질 때만 다시 맞추고, 드래그를 놓으면 1회 적용한다. */
+  assert.match(docsSrc, /getBoundingClientRect\(\)/);
+  assert.match(docsSrc, /Math\.abs\(width - lastBorderWidth\) < 0\.5/);
+  assert.match(docsSrc, /divider\.classList\.contains\("dragging"\)/);
+  assert.match(docsSrc, /observe\(doc\.el, \{ box:"border-box" \}\)/);
+  assert.match(docsSrc, /requestAnimationFrame\(refitVisibleStudyPanes\)/);
   // 분할 진입 시 단독 뷰용 유휴 숨김(pdf-ctl-idle)이 남아 알약이 투명한 채로 굳지 않게 한다.
   assert.match(docsSrc, /if \(split\)\{ showStudyControls\(\); stopPdfControlsAutoHide\(\); \}/);
 });

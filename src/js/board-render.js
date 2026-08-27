@@ -92,14 +92,25 @@ function drawPattern(ctx, pattern, area, bg){
   }
   ctx.restore();
 }
-/* 배경 그림 한 장. 상자(x·y·w·h)는 넣을 때 정해 둔 보드 좌표라 창 크기를 바꿔도 판서와 어긋나지 않는다.
-   "채움"은 상자가 화면 비율이라 그림을 잘라 채우고(원본 비율 유지), "맞춤·원본"은 상자 자체가
-   이미 그림 비율이라 그대로 펼친다. 아직 안 불러온 그림은 건너뛴다 — 다 불러오면 다시 그린다. */
+/* 배경 그림 한 장. 일반 이미지 항목과 달리 현재 보드 화면(area) 자체를 종이처럼 채운다.
+   따라서 저장돼 있던 x·y·w·h나 보기 배율에 끌려다니지 않고, 창 크기가 바뀌면 채움·맞춤을
+   그 화면에 다시 계산한다. 아직 안 불러온 그림은 건너뛴다 — 다 불러오면 다시 그린다. */
 function drawBackgroundImage(ctx, image, area){
   const img = image && image.img;
   if (!img || !img.complete || !img.naturalWidth) return;
-  const x = Number(image.x) || 0, y = Number(image.y) || 0;
-  const w = Math.max(1, Number(image.w) || 1), h = Math.max(1, Number(image.h) || 1);
+  const target = area || {
+    x:Number(image.x) || 0, y:Number(image.y) || 0,
+    w:Math.max(1, Number(image.w) || 1), h:Math.max(1, Number(image.h) || 1)
+  };
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  const cx = target.x + target.w / 2, cy = target.y + target.h / 2;
+  let x = target.x, y = target.y, w = target.w, h = target.h;
+  if (image.fit === "contain"){
+    const scale = Math.min(target.w / nw, target.h / nh);
+    w = nw * scale; h = nh * scale; x = cx - w / 2; y = cy - h / 2;
+  } else if (image.fit === "actual"){
+    w = nw; h = nh; x = cx - w / 2; y = cy - h / 2;
+  }
   ctx.save();
   ctx.globalAlpha = Math.max(.05, Math.min(1, Number(image.opacity) || 1));
   if (image.fit === "tile" && area){
@@ -115,7 +126,6 @@ function drawBackgroundImage(ctx, image, area){
       ctx.fillRect(area.x, area.y, area.w, area.h);
     }
   } else if (image.fit === "cover"){
-    const nw = img.naturalWidth, nh = img.naturalHeight;
     const scale = Math.max(w / nw, h / nh);            // 짧은 쪽을 채우는 배율 → 긴 쪽이 넘쳐 잘린다
     const sw = Math.min(nw, w / scale), sh = Math.min(nh, h / scale);
     ctx.drawImage(img, (nw - sw) / 2, (nh - sh) / 2, sw, sh, x, y, w, h);
@@ -126,8 +136,8 @@ function drawBackgroundImage(ctx, image, area){
 }
 /* 배경은 "먼저 칠하는 것"이 아니라 "맨 나중에 밑에 까는 것"이다(destination-over).
    지우개(destination-out)가 판서만 지우고 배경은 남기려면 이 순서여야 한다 — 먼저 칠해 두면
-   지우개가 배경까지 뚫어 내보낸 PNG 에 구멍이 남는다. 호출 시점의 변환(확대·이동)은 보드 좌표계로,
-   area 는 그 좌표계에서 캔버스 전체가 덮이는 사각형이어야 한다. */
+   지우개가 배경까지 뚫어 내보낸 PNG 에 구멍이 남는다. area 는 현재 화면에서 캔버스 전체가
+   덮이는 사각형이며, 배경 그림은 이 사각형 자체에 맞춰진다. */
 function paintBackground(ctx, area, opts){
   opts = opts || {};
   const bg = opts.bg || "#ffffff";

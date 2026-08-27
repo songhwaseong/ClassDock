@@ -96,7 +96,6 @@ function musicParseXmlText(text, sourceName){
   const warnings = new Set();
   const parts = musicXmlChildren(root, "part");
   if (!parts.length) throw new Error("MusicXML에 연주 파트가 없어요.");
-  if (parts.length > 1) warnings.add("여러 파트 중 첫 번째 파트만 가져왔어요.");
   const part = parts[0];
   const titleNode = musicXmlFirstDescendant(root, "work-title") || musicXmlFirstDescendant(root, "movement-title");
   const sheet = musicEmpty((titleNode && String(titleNode.textContent || "").trim()) || musicXmlSourceTitle(sourceName));
@@ -297,6 +296,47 @@ function musicParseXmlText(text, sourceName){
 
   if (!sheet.measures.length) sheet.measures.push(musicMeasure());
   sheet.measures[0].lineBreakBefore = false;
+  const partId = String(part.getAttribute("id") || "P1");
+  const scorePart = musicXmlChildren(musicXmlFirst(root, "part-list"), "score-part")
+    .find((node) => String(node.getAttribute("id") || "") === partId);
+  const firstName = musicClampText(musicXmlText(scorePart, "part-name"), 80) || "악기 1";
+  const inferTimbre = (name) => {
+    const value = String(name || "").toLowerCase();
+    if (/guitar|기타/.test(value)) return "guitar";
+    if (/xylophone|실로폰|마림바/.test(value)) return "xylophone";
+    if (/harp|하프/.test(value)) return "harp";
+    if (/flute|플루트/.test(value)) return "flute";
+    if (/clarinet|클라리넷/.test(value)) return "clarinet";
+    return "piano";
+  };
+  const firstPart = musicPart(firstName, { id:`xml-${partId}`, timbre:inferTimbre(firstName),
+    volume:1, grandStaff:sheet.grandStaff, measures:sheet.measures });
+  sheet.parts = [firstPart];
+  sheet.activePartId = firstPart.id;
+  sheet.timbre = firstPart.timbre;
+
+  if (parts.length > 1 && typeof XMLSerializer !== "undefined"){
+    const serializer = new XMLSerializer();
+    for (let partIndex = 1; partIndex < parts.length; partIndex++){
+      const isolatedRoot = root.cloneNode(true);
+      const isolatedParts = musicXmlChildren(isolatedRoot, "part");
+      isolatedParts.forEach((node, index) => { if (index !== partIndex) node.parentNode.removeChild(node); });
+      const isolatedList = musicXmlFirst(isolatedRoot, "part-list");
+      const selectedId = String(parts[partIndex].getAttribute("id") || `P${partIndex + 1}`);
+      for (const node of musicXmlChildren(isolatedList, "score-part")){
+        if (String(node.getAttribute("id") || "") !== selectedId) node.parentNode.removeChild(node);
+      }
+      const imported = musicParseXmlText(serializer.serializeToString(isolatedRoot), sourceName);
+      const importedPart = musicActivePart(imported.sheet);
+      if (importedPart){
+        importedPart.id = `xml-${selectedId}`;
+        sheet.parts.push(importedPart);
+      }
+      for (const warning of imported.warnings) warnings.add(warning);
+    }
+  } else if (parts.length > 1){
+    warnings.add("이 환경에서는 추가 악기 파트를 가져오지 못했어요.");
+  }
   sheet.updatedAt = Date.now();
   return { sheet, warnings:Array.from(warnings) };
 }
@@ -307,7 +347,7 @@ function musicXmlEscape(value){
     .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-function musicSerializeXml(sheet){
+function musicSerializeXmlSingle(sheet){
   const model = sheet || musicEmpty();
   const title = musicXmlEscape(model.title || "악보");
   const grandStaff = model.grandStaff === true;
@@ -472,6 +512,33 @@ function musicSerializeXml(sheet){
     lines.push('    </measure>');
   });
   lines.push('  </part>', '</score-partwise>', '');
+  return lines.join("\n");
+}
+
+function musicSerializeXml(sheet){
+  const model = sheet || musicEmpty();
+  musicSyncActivePart(model);
+  const parts = musicParts(model);
+  if (!parts.length) return musicSerializeXmlSingle(model);
+  const bodies = [];
+  parts.forEach((part, index) => {
+    const id = `P${index + 1}`;
+    const single = musicSerializeXmlSingle(musicPartSheet(model, part));
+    const match = single.match(/  <part id="P1">[\s\S]*?  <\/part>/);
+    if (match) bodies.push(match[0].replace('<part id="P1">', `<part id="${id}">`));
+  });
+  const title = musicXmlEscape(model.title || "악보");
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+    '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">',
+    '<score-partwise version="4.0">',
+    `  <work><work-title>${title}</work-title></work>`,
+    '  <part-list>'
+  ];
+  parts.forEach((part, index) => {
+    lines.push(`    <score-part id="P${index + 1}"><part-name>${musicXmlEscape(part.name || `악기 ${index + 1}`)}</part-name></score-part>`);
+  });
+  lines.push('  </part-list>', ...bodies, '</score-partwise>', '');
   return lines.join("\n");
 }
 

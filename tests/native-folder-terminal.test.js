@@ -17,7 +17,11 @@ test("EXE 폴더 열기는 Windows에서 받은 실제 경로를 로컬 핸들�
   assert.match(loaders, /new NativeSourceDirectoryHandle\(status\.id, status\.result\)/);
   assert.match(loaders, /class NativeSourceFileHandle/);
   assert.match(loaders, /class NativeSourceDirectoryHandle/);
-  assert.match(loaders, /chooseFolderHandle\(startIn=null\)\{[\s\S]*if \(native\.supported\) return native\.handle/);
+  const chooseStart = loaders.indexOf("async function chooseFolderHandle");
+  const chooseEnd = loaders.indexOf("\n}", chooseStart);
+  const choose = loaders.slice(chooseStart, chooseEnd);
+  assert.ok(choose.indexOf("chooseNativeSourceFolder()") < choose.indexOf("window.showDirectoryPicker"));
+  assert.match(choose, /if \(native\.supported\) return native\.handle/);
   assert.match(loaders, /native source folder picker failed/);
   assert.match(loaders, /기본 폴더 선택창으로 전환합니다/);
   assert.match(loaders, /nativeSourceFolderCapability = false/);

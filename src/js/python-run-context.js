@@ -352,7 +352,7 @@ function findOpenRunProjectDoc(path, runCtx){
   const wanted = normalizedRunPath(path);
   const owner = runCtx && runCtx.ownerDoc;
   const archiveCtx = runCtx && runCtx.archiveCtx;
-  const candidates = docs.filter(doc => doc && !doc.closed && !doc.isRunProjectPreview);
+  const candidates = docs.filter(doc => doc && !doc.closed && !doc.isRunProjectPreview && (typeof workspaceHasDoc !== "function" || workspaceHasDoc(doc)));
   const docPath = (doc) => normalizedRunPath(doc.relPath || doc.workspacePath || doc.name || "");
   const exact = candidates.filter(doc => docPath(doc) === wanted);
   if (exact.length){

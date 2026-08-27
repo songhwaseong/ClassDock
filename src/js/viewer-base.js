@@ -412,7 +412,8 @@ async function renderSqlite(file, host, dbPath, onDiskPathChange, initialDbFullP
       paintSqlite(data, { error: SQLITE_TX_HINT });
       return;
     }
-    if (looksDestructive(sql) && !confirm("되돌릴 수 없는 변경일 수 있습니다.\n실행 전 .bak 백업이 만들어집니다. 계속할까요?\n\n" + sql.slice(0, 300))) return;
+    if (looksDestructive(sql) && (typeof confirmDialog !== "function"
+        || !await confirmDialog("되돌릴 수 없는 변경일 수 있습니다.\n실행 전 .bak 백업이 만들어집니다. 계속할까요?\n\n" + sql.slice(0, 300), "실행", "취소"))) return;
     sqlText = sql;
     runButton.disabled = true; status.textContent = "실행 중…";
     try {

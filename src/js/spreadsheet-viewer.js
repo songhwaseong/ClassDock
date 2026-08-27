@@ -5479,8 +5479,10 @@ async function renderXlsx(file, host, doc){
     rerender();
     toast(copyFrom ? ("시트를 복제했어요: " + name) : ("새 시트를 추가했어요: " + name), 1800);
   };
-  const renameSheetPrompt = (oldName) => {
-    const input = prompt("시트 이름 바꾸기", oldName);
+  const renameSheetPrompt = async (oldName) => {
+    if (typeof askText !== "function") return;
+    const input = await askText({ title:"시트 이름 바꾸기", message:"새 시트 이름을 입력하세요.",
+      value:oldName, placeholder:"시트 이름", okText:"변경" });
     if (input == null) return;
     const name = validSheetName(input);
     if (!name){ toast("시트 이름은 1~31자, \\ / ? * [ ] : 문자는 쓸 수 없어요.", 2600); return; }
@@ -5523,10 +5525,11 @@ async function renderXlsx(file, host, doc){
     rerender();
     toast("시트 이름을 바꿨어요: " + name, 1600);
   };
-  const deleteCurrentSheet = () => {
+  const deleteCurrentSheet = async () => {
     const name = currentSheet;
     if (wb.SheetNames.length <= 1){ toast("마지막 시트는 삭제할 수 없어요.", 2200); return; }
-    if (!confirm("'" + name + "' 시트를 삭제할까요? 시트 삭제는 되돌리기(Ctrl+Z)가 되지 않아요.")) return;
+    if (typeof confirmDialog !== "function"
+      || !await confirmDialog("'" + name + "' 시트를 삭제할까요? 시트 삭제는 되돌리기(Ctrl+Z)가 되지 않아요.", "삭제", "취소")) return;
     wb.SheetNames.splice(wb.SheetNames.indexOf(name), 1);
     delete wb.Sheets[name];
     [exModels, exMerges, editedCells, styledCells, sheetRevs, colFiltersBySheet].forEach(obj => { delete obj[name]; });

@@ -257,6 +257,61 @@ const MNMusicAudio = (() => {
     return { source:osc, osc, gain, stopAt:start + 0.05 };
   }
 
+  function scheduleDrumOscillator(target, destination, start, spec, level, kind){
+    const duration = Math.max(0.02, Number(spec.duration) || 0.08);
+    const stopAt = start + duration;
+    const osc = target.createOscillator();
+    osc.type = spec.type || "sine";
+    osc.frequency.setValueAtTime(spec.frequency, start);
+    if (spec.endFrequency > 0){
+      if (typeof osc.frequency.exponentialRampToValueAtTime === "function"){
+        osc.frequency.exponentialRampToValueAtTime(spec.endFrequency, stopAt);
+      } else {
+        osc.frequency.setValueAtTime(spec.endFrequency, stopAt);
+      }
+    }
+    const gain = target.createGain();
+    const peak = (Number(spec.peak) || 0.2) * Math.max(0, Math.min(1.3, Number(level) || 0));
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(peak, start + Math.min(0.004, duration / 4));
+    gain.gain.linearRampToValueAtTime(0, stopAt);
+    osc.connect(gain);
+    gain.connect(destination);
+    osc.start(start);
+    osc.stop(stopAt + 0.01);
+    return { source:osc, osc, gain, stopAt, drumKind:kind };
+  }
+
+  /* 드럼 스타일은 별도 음원 파일 없이 Web Audio 로 만든다. 오프라인 HTML·EXE 용량을 늘리지 않고
+     같은 함수가 실시간 재생과 WAV 저장 양쪽에서 똑같이 울린다. */
+  function scheduleDrumHit(target, destination, start, kind, level){
+    const gain = Math.max(0, Math.min(1.3, Number(level) || 0));
+    if (!(gain > 0)) return [];
+    if (kind === "kick"){
+      return [scheduleDrumOscillator(target, destination, start,
+        { type:"sine", frequency:145, endFrequency:48, duration:0.18, peak:0.95 }, gain, kind)];
+    }
+    if (kind === "snare"){
+      return [
+        scheduleDrumOscillator(target, destination, start,
+          { type:"triangle", frequency:185, endFrequency:118, duration:0.12, peak:0.42 }, gain, kind),
+        scheduleDrumOscillator(target, destination, start,
+          { type:"square", frequency:1280, endFrequency:720, duration:0.075, peak:0.18 }, gain, kind)
+      ];
+    }
+    return [scheduleDrumOscillator(target, destination, start,
+      { type:"square", frequency:6200, endFrequency:4100, duration:0.038, peak:0.12 }, gain, "hihat")];
+  }
+
+  function scheduleDrumsInto(target, destination, events, offset){
+    const nodes = [];
+    for (const event of (events || [])){
+      if (!event || !event.kind) continue;
+      nodes.push(...scheduleDrumHit(target, destination, offset + event.start, event.kind, event.gain));
+    }
+    return nodes;
+  }
+
   function nearestSample(midi, buffers){
     let best = null;
     for (const sample of (buffers || [])){
@@ -308,11 +363,14 @@ const MNMusicAudio = (() => {
      offset 은 "타임라인 0초"가 그 컨텍스트의 몇 초에 해당하는지. */
   function scheduleInto(target, destination, events, offset, timbre, sampleBuffers){
     const nodes = [];
-    const type = timbreOf(timbre);
+    const defaultType = timbreOf(timbre);
     for (const event of (events || [])){
       if (!event || event.rest || !(event.frequency > 0)) continue;   // 쉼표는 시간만 흐른다
-      const node = SAMPLE_INSTRUMENTS[type] && sampleBuffers
-        ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, sampleBuffers, type, event.gain)
+      const type = timbreOf(event.timbre || defaultType);
+      const buffers = Array.isArray(sampleBuffers) ? sampleBuffers
+        : sampleBuffers && typeof sampleBuffers === "object" ? sampleBuffers[type] : null;
+      const node = SAMPLE_INSTRUMENTS[type] && buffers
+        ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, buffers, type, event.gain)
         : scheduleNote(target, destination, event.frequency, offset + event.start, event.duration,
             SAMPLE_INSTRUMENTS[type] ? "triangle" : type, event.gain);
       if (node) nodes.push(node);
@@ -367,16 +425,30 @@ const MNMusicAudio = (() => {
     const request = ++playRequest;
 
     const timeline = musicTimeline(sheet, {
-      from:options.from, to:options.to, playbackRate:options.playbackRate, staff:options.staff
+      from:options.from, to:options.to, playbackRate:options.playbackRate, staff:options.staff,
+      partId:options.partId
     });
-    if (!timeline.events.length) return null;
-    let timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
-    let sampleBuffers = null;
-    if (SAMPLE_INSTRUMENTS[timbre]){
-      const failedTimbre = timbre;
-      try { sampleBuffers = await ensureSampleBuffers(target, timbre); }
+    if (!timeline.events.length && !timeline.drums.length && !timeline.bass.length && !timeline.chords.length) return null;
+    const timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
+    const sampleBuffers = Object.create(null);
+    const melodyTimbres = Array.from(new Set(timeline.events.filter((event) => !event.rest)
+      .map((event) => timbreOf(event.timbre || timbre))));
+    for (const eventTimbre of melodyTimbres){
+      if (!SAMPLE_INSTRUMENTS[eventTimbre]) continue;
+      try { sampleBuffers[eventTimbre] = await ensureSampleBuffers(target, eventTimbre); }
       catch(error){
-        timbre = "triangle";
+        sampleBuffers[eventTimbre] = null;
+        if (typeof options.onError === "function") options.onError(error, eventTimbre);
+      }
+    }
+    let accompanimentTimbre = typeof musicAccompanimentTimbre === "function"
+      ? musicAccompanimentTimbre(sheet && sheet.accompanimentTimbre) : "piano";
+    let accompanimentBuffers = null;
+    if (timeline.chords.length && SAMPLE_INSTRUMENTS[accompanimentTimbre]){
+      const failedTimbre = accompanimentTimbre;
+      try { accompanimentBuffers = await ensureSampleBuffers(target, accompanimentTimbre); }
+      catch(error){
+        accompanimentTimbre = "triangle";
         if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
@@ -388,11 +460,12 @@ const MNMusicAudio = (() => {
     const countInSeconds = countInBeats * beatSeconds;
     const countStartAt = target.currentTime + START_DELAY;
     const state = {
-      timeline, timbre, sampleBuffers,
+      timeline, timbre, sampleBuffers, accompanimentTimbre, accompanimentBuffers,
       startAt:countStartAt + countInSeconds,
       countStartAt, countInBeats, countCurrent:null,
       beatsPerMeasure, beatSeconds, metronome:!!options.metronome, loop:!!options.loop,
-      nodes:[], next:0, nextBeat:0, timer:0, raf:0, currentId:null,
+      nodes:[], next:0, nextBeat:0, nextDrum:0, nextBass:0, nextChord:0,
+      timer:0, raf:0, currentId:null,
       onNote:options.onNote, onCount:options.onCount, onEnd:options.onEnd
     };
     live = state;
@@ -419,6 +492,19 @@ const MNMusicAudio = (() => {
         state.nodes.push(scheduleMetronomeClick(target, master,
           state.startAt + beat.start, beat.accented));
       }
+      while (state.nextDrum < timeline.drums.length && timeline.drums[state.nextDrum].start <= horizon){
+        const drum = timeline.drums[state.nextDrum++];
+        state.nodes.push(...scheduleDrumsInto(target, master, [drum], state.startAt));
+      }
+      while (state.nextBass < timeline.bass.length && timeline.bass[state.nextBass].start <= horizon){
+        const bass = timeline.bass[state.nextBass++];
+        state.nodes.push(...scheduleInto(target, master, [bass], state.startAt, "triangle", null));
+      }
+      while (state.nextChord < timeline.chords.length && timeline.chords[state.nextChord].start <= horizon){
+        const chord = timeline.chords[state.nextChord++];
+        state.nodes.push(...scheduleInto(target, master, [chord], state.startAt,
+          state.accompanimentTimbre, state.accompanimentBuffers));
+      }
     };
     pump();
     state.timer = setInterval(pump, TIMER_MS);
@@ -444,6 +530,9 @@ const MNMusicAudio = (() => {
         state.nodes = state.nodes.filter((node) => node && node.stopAt > target.currentTime);
         state.next = 0;
         state.nextBeat = 0;
+        state.nextDrum = 0;
+        state.nextBass = 0;
+        state.nextChord = 0;
         state.currentId = null;
         if (typeof state.onNote === "function") state.onNote(null);
         pump();
@@ -521,24 +610,42 @@ const MNMusicAudio = (() => {
     const Ctor = offlineContextClass();
     if (!Ctor) throw new Error("이 브라우저는 오디오 파일 저장을 지원하지 않습니다.");
     const timeline = musicTimeline(sheet, { from:options.from, to:options.to });
-    if (!timeline.events.length) throw new Error("저장할 음표가 없습니다.");
+    if (!timeline.events.length && !timeline.drums.length && !timeline.bass.length && !timeline.chords.length){
+      throw new Error("저장할 소리가 없습니다.");
+    }
 
     const frames = Math.max(1, Math.ceil((timeline.totalSeconds + TAIL_SEC) * RENDER_SAMPLE_RATE));
     const target = new Ctor(1, frames, RENDER_SAMPLE_RATE);
     const bus = target.createGain();
     bus.gain.value = MASTER_GAIN;
     bus.connect(target.destination);
-    let timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
-    let sampleBuffers = null;
-    if (SAMPLE_INSTRUMENTS[timbre]){
-      const failedTimbre = timbre;
-      try { sampleBuffers = await ensureSampleBuffers(ensureContext() || target, timbre); }
+    const timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
+    const sampleBuffers = Object.create(null);
+    const melodyTimbres = Array.from(new Set(timeline.events.filter((event) => !event.rest)
+      .map((event) => timbreOf(event.timbre || timbre))));
+    for (const eventTimbre of melodyTimbres){
+      if (!SAMPLE_INSTRUMENTS[eventTimbre]) continue;
+      try { sampleBuffers[eventTimbre] = await ensureSampleBuffers(ensureContext() || target, eventTimbre); }
       catch(error){
-        timbre = "triangle";
+        sampleBuffers[eventTimbre] = null;
+        if (typeof options.onError === "function") options.onError(error, eventTimbre);
+      }
+    }
+    let accompanimentTimbre = typeof musicAccompanimentTimbre === "function"
+      ? musicAccompanimentTimbre(sheet && sheet.accompanimentTimbre) : "piano";
+    let accompanimentBuffers = null;
+    if (timeline.chords.length && SAMPLE_INSTRUMENTS[accompanimentTimbre]){
+      const failedTimbre = accompanimentTimbre;
+      try { accompanimentBuffers = await ensureSampleBuffers(ensureContext() || target, accompanimentTimbre); }
+      catch(error){
+        accompanimentTimbre = "triangle";
         if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
     scheduleInto(target, bus, timeline.events, 0, timbre, sampleBuffers);
+    scheduleDrumsInto(target, bus, timeline.drums, 0);
+    scheduleInto(target, bus, timeline.bass, 0, "triangle", null);
+    scheduleInto(target, bus, timeline.chords, 0, accompanimentTimbre, accompanimentBuffers);
 
     const buffer = await target.startRendering();
     const wav = encodeWav([buffer.getChannelData(0)], buffer.sampleRate);
@@ -589,7 +696,7 @@ const MNMusicAudio = (() => {
 
   return {
     play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, scheduleInto,
-    scheduleMetronomeClick, setVolume, getVolume, setMuted, muted,
+    scheduleMetronomeClick, scheduleDrumHit, scheduleDrumsInto, setVolume, getVolume, setMuted, muted,
     ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
     PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,
     FLUTE_SAMPLE_ROOTS, CLARINET_SAMPLE_ROOTS, SAMPLE_INSTRUMENTS,

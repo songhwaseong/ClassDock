@@ -1526,7 +1526,9 @@ const MNDocxEditor = (() => {
       const parts = { ...(state.source.parts || {}), ...(state.packageChanges || {}) };
       const info = officeHeaderFooterInfo(parts, withText, kind);
       const label = kind === "footer" ? "바닥글" : "머리글";
-      const value = window.prompt(label + "에 넣을 글자를 입력하세요. 비우면 글자가 지워집니다.", info.text || "");
+      if (typeof askText !== "function") return;
+      const value = await askText({ title:label + " 편집", message:label + "에 넣을 글자를 입력하세요. 비우면 글자가 지워집니다.",
+        value:info.text || "", okText:"적용" });
       if (value === null) return;
       if (state.history) state.history.commit();
       const result = officeHeaderFooterEdit(parts, withText, kind, value);

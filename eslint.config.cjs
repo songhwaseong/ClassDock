@@ -46,6 +46,16 @@ const sharedRuntimeGlobals = {
 };
 const sourceRules = {
   "no-undef": ["error", { typeof: true }],
+  "no-restricted-globals": ["error",
+    { name:"alert", message:"브라우저 alert 대신 ClassDock toast 또는 내부 모달을 사용하세요." },
+    { name:"confirm", message:"브라우저 confirm 대신 confirmDialog를 사용하세요." },
+    { name:"prompt", message:"브라우저 prompt 대신 askText를 사용하세요." }
+  ],
+  "no-restricted-properties": ["error",
+    { object:"window", property:"alert", message:"브라우저 alert 대신 ClassDock toast 또는 내부 모달을 사용하세요." },
+    { object:"window", property:"confirm", message:"브라우저 confirm 대신 confirmDialog를 사용하세요." },
+    { object:"window", property:"prompt", message:"브라우저 prompt 대신 askText를 사용하세요." }
+  ],
   "no-unused-vars": ["error", {
     vars: "local",
     args: "after-used",

@@ -23,6 +23,7 @@
     "core.js",
     "icons.js",
     "state.js",
+    "workspaces.js",
     "history.js",
     "search-history.js",
     "special-chars.js",
@@ -112,6 +113,7 @@
         "core.js",
         "icons.js",
         "state.js",
+        "workspaces.js",
         "history.js",
         "search-history.js",
         "special-chars.js",
@@ -224,11 +226,15 @@
       "core.js",
       "theme.js"
     ],
+    "workspaces.js": [
+      "state.js"
+    ],
     "document-types.js": [
       "video-viewer.js"
     ],
     "documents.js": [
       "state.js",
+      "workspaces.js",
       "document-types.js"
     ],
     "workspace-store.js": [
@@ -236,7 +242,8 @@
     ],
     "file-loaders.js": [
       "workspace-store.js",
-      "recent-files.js"
+      "recent-files.js",
+      "workspaces.js"
     ],
     "pdf-render.js": [
       "file-loaders.js"
@@ -416,7 +423,8 @@
       "file-loaders.js",
       "notebook-cells.js",
       "whiteboard.js",
-      "backup.js"
+      "backup.js",
+      "workspaces.js"
     ],
     "command-palette.js": [
       "app.js"

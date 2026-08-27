@@ -107,6 +107,23 @@
     if (timer) return;
     timer = setTimeout(push, 500);
   }
+  function flushForPageHide() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    try {
+      var body = JSON.stringify(snapshot());
+      if (window.fetch) {
+        window.fetch("/app-state", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true
+        });
+      } else {
+        var x = new XMLHttpRequest();
+        x.open("POST", "/app-state", false);
+        x.setRequestHeader("Content-Type", "application/json");
+        x.send(body);
+      }
+    } catch (_) {}
+  }
+  window.__mnFlushAppState = flushForPageHide;
 
   try {
     localStorage.setItem = function (key, value) { rawSet(key, value); schedule(); };
@@ -118,19 +135,6 @@
   // sendBeacon 대신 헤더를 붙일 수 있는 keepalive fetch를 우선 사용한다.
   window.addEventListener("pagehide", function () {
     if (!timer) return;
-    clearTimeout(timer); timer = null;
-    try {
-      var body = JSON.stringify(snapshot());
-      if (window.fetch) {
-        window.fetch("/app-state", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true
-        });
-      } else {
-        var x = new XMLHttpRequest();
-        x.open("POST", "/app-state", false);   // 종료 직전 동기 전송(폴백)
-        x.setRequestHeader("Content-Type", "application/json");
-        x.send(body);
-      }
-    } catch (_) {}
+    flushForPageHide();
   });
 })();

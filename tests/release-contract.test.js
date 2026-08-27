@@ -92,7 +92,7 @@ test("저장 위치·영구 삭제·다중 닫기의 회귀 계약을 지킨다"
   assert.match(documentsSource, /viaServer = doc\.kind !== "pdf"/);
   assert.match(documentsSource, /closeDoc\(doc\.id, \{ forgetWorkspace:true, skipConfirm:true \}\)/);
   assert.match(documentsSource, /function closeDoc[\s\S]*return true;/);
-  assert.match(appSource, /if \(closeDoc\(id, \{ forgetWorkspace: true \}\) === true\) closed\+\+/);
+  assert.match(appSource, /workspaceDetachDocFromActive\(doc\)\) \|\| await requestCloseDoc\(id, \{ forgetWorkspace: true \}\) === true/);
   assert.match(appSource, /const cancelled = ids\.length - closed/);
 });
 

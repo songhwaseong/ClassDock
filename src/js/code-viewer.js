@@ -1782,7 +1782,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   traceBtn.title = "코드를 실행하며 줄별 변수 변화를 최대 300단계까지 기록";
   const analyzeBtn = document.createElement("button"); analyzeBtn.className = "run-analyze"; analyzeBtn.type = "button"; analyzeBtn.textContent = "진단";
   analyzeBtn.title = "코드를 실행하지 않고 문법과 자주 생기는 실수를 검사";
-  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade"; gradeBtn.type = "button"; gradeBtn.textContent = "채점";
+  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-py-grade"; gradeBtn.type = "button"; gradeBtn.textContent = "채점";
   gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button"; saveBtn.textContent = ".py 저장";
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "Python 파일 저장";
@@ -3620,6 +3620,33 @@ function originalSaveRootForDoc(ownerDoc){
   return null;
 }
 
+async function prepareNativeOriginalSaveRoot(ownerDoc, allowPicker){
+  if (!ownerDoc || !ownerDoc.originalSaveMode || typeof nativeSourceSupported !== "function"
+      || !(await nativeSourceSupported())) return { supported:false, handle:null, cancelled:false };
+  const root = originalSaveRootForDoc(ownerDoc);
+  if (!root) return { supported:true, handle:null, cancelled:false };
+  let handle = root.folderHandle && root.folderHandle.__classdockNativeHandle ? root.folderHandle : null;
+  if (!handle && typeof restoreNativeSourceFolder === "function") handle = await restoreNativeSourceFolder(root.name);
+  if (!handle && allowPicker && typeof chooseNativeSourceFolder === "function"){
+    toast("브라우저 권한창 없이 원본에 저장하도록 '" + root.name + "' 폴더를 한 번만 다시 선택해 주세요.", 5200);
+    const picked = await chooseNativeSourceFolder();
+    if (!picked.supported || !picked.handle) return { supported:true, handle:null, cancelled:true };
+    if (String(picked.handle.name || "").toLocaleLowerCase() !== String(root.name || "").toLocaleLowerCase()){
+      toast("'" + root.name + "' 폴더를 선택해야 원본 저장을 다시 연결할 수 있어요.", 4800, { type:"error" });
+      return { supported:true, handle:null, cancelled:true };
+    }
+    handle = picked.handle;
+  }
+  if (handle){
+    root.folderHandle = handle;
+    root.nativeRootPath = handle.nativePath || "";
+    // 이전 실행에서 받은 브라우저 핸들은 버린다. 아래에서 네이티브 파일 핸들을 경로로 다시 만든다.
+    if (!(ownerDoc.fsHandle && ownerDoc.fsHandle.__classdockNativeHandle)) ownerDoc.fsHandle = null;
+    if (!(ownerDoc.fsDirHandle && ownerDoc.fsDirHandle.__classdockNativeHandle)) ownerDoc.fsDirHandle = null;
+  }
+  return { supported:true, handle:handle || null, cancelled:false };
+}
+
 async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noPermissionPrompt=false){
   if (!ownerDoc || !ownerDoc.originalSaveMode) return null;
   const root = originalSaveRootForDoc(ownerDoc);
@@ -3649,13 +3676,20 @@ async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noP
   const handle = await dirHandle.getFileHandle(fileName, { create:!existingOnly });
   ownerDoc.fsDirHandle = dirHandle;
   ownerDoc.fsHandle = handle;
-  if (ownerDoc.workspacePath && typeof saveFsHandle === "function") saveFsHandle(ownerDoc.workspacePath, handle);
+  ownerDoc.nativeAbsolutePath = handle.nativePath || ownerDoc.nativeAbsolutePath || null;
+  if (!handle.__classdockNativeHandle && ownerDoc.workspacePath && typeof saveFsHandle === "function")
+    saveFsHandle(ownerDoc.workspacePath, handle);
   return handle;
 }
 
 async function saveViaFileHandle(text, name, ownerDoc, options={}){
   try {
     let handle = ownerDoc && ownerDoc.fsHandle;
+    const nativeRoot = await prepareNativeOriginalSaveRoot(ownerDoc, !options.noPermissionPrompt);
+    if (nativeRoot.supported){
+      if (!nativeRoot.handle) return nativeRoot.cancelled ? "cancelled" : "denied";
+      handle = ownerDoc && ownerDoc.fsHandle; // 브라우저 핸들은 prepareNativeOriginalSaveRoot가 걷어냈다
+    }
     if (handle && handle.queryPermission){              // 보관한 핸들의 쓰기 권한 재확인(회수됐을 수 있음)
       let perm = await handle.queryPermission({ mode: "readwrite" });
       if (perm !== "granted" && options.noPermissionPrompt) return "denied";

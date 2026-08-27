@@ -10,6 +10,14 @@ const pythonRuntime = fs.readFileSync(path.join(__dirname, "../src/js/python-run
 const pythonTerminal = fs.readFileSync(path.join(__dirname, "../src/js/python-terminal.js"), "utf8");
 const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
+
+test("로컬 서버 상태는 작업공간 옆이 아니라 설정 버튼의 접근 가능한 배지로 표시한다", () => {
+  assert.match(html, /<button id="settingsOpen"[\s\S]*?id="serverStatus"[\s\S]*?<\/button>/);
+  assert.match(styles, /#settingsOpen\{position:relative\}/);
+  assert.match(styles, /\.server-status\{position:absolute;top:3px;right:3px/);
+  assert.match(app, /settings\.setAttribute\("aria-label", settings\.title\)/);
+});
 
 test("로컬 API는 헤더 토큰만 인정하고 URL 토큰을 사용하지 않는다", () => {
   assert.match(launcher, /static bool HasLocalAuthToken\(Dictionary<string, string> headers\)/);

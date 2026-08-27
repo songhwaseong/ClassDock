@@ -432,39 +432,50 @@ async function parseWorkspacePayload(buffer){
 }
 
 async function restoreLastWorkspace(force=false){
-  if (!appSettings.autoRestore && !force) return;
-  const useServer = await workspaceBackendAvailable();
-  if (!useServer && !wsIdbSupported()) return;
+  const result = { attempted:false, hadPayload:false, restored:false, failed:false };
+  if (!appSettings.autoRestore && !force) return result;
   const savedTabs = loadSavedTabState();    // 파일을 열기 전에 저장된 탭 구성을 먼저 읽어둔다
+  const useServer = await workspaceBackendAvailable();
+  if (!useServer && !wsIdbSupported()){
+    tabRestoreInProgress = true;
+    try {
+      restoreSavedWorkspaceWhiteboards();
+      restoreSavedWhiteboards(savedTabs);
+      applyTabState(savedTabs);
+    } finally { tabRestoreInProgress = false; }
+    return result;
+  }
+  result.attempted = true;
   tabRestoreInProgress = true;
   showLoading("최근 작업공간 확인 중…");
   try {
     let payload = null;
     if (useServer){
       const res = await fetch("/workspace-load", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok){ result.failed = true; return result; }
       const savedSize = Number(res.headers.get("Content-Length")) || 0;
       if (savedSize > WORKSPACE_CAP){
         await workspaceFetch("/workspace-clear", { method: "POST", headers: { "X-ClassDock-Workspace": "1" } }).catch(() => {});
         toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
-        return;
+        return result;
       }
       payload = await res.arrayBuffer();
     } else {
       payload = await wsIdbGetPayload().catch(() => null);
-      if (!payload) return;
+      if (!payload) return result;
       if (payload.length > WORKSPACE_CAP){
         await wsIdbClearPayload().catch(() => {});
         toast("이전 자동 복원 기록이 너무 커서 안전하게 정리했어요. 원본 파일은 영향받지 않습니다.", 5000);
-        return;
+        return result;
       }
     }
+    result.hadPayload = !!(payload && payload.byteLength);
     const restored = await parseWorkspacePayload(payload);
     const rows = restored.rows;
     const restoredFolderPaths = restored.folderPaths;
     const restoredPendingImageFolderPaths = restored.pendingImageFolderPaths;
     const restoredOriginalSaveFolderPaths = restored.originalSaveFolderPaths;
-    if (!rows.length && !restoredFolderPaths.length) return;
+    if (!rows.length && !restoredFolderPaths.length) return result;
     updateLoading("최근 작업공간 복원 중…");
     beginUiBatch();
     const folderGroups = new Map(), loose = [];
@@ -494,16 +505,20 @@ async function restoreLastWorkspace(force=false){
       if (root) ensureFolderGroup(root).originalSaveMode = true;
     });
     for (const group of folderGroups.values()){
-      const nativeHandle = group.originalSaveMode && typeof restoreNativeSourceFolder === "function"
+      const preferNativeHandle = !!(group.originalSaveMode && typeof nativeSourceSupported === "function"
+        && await nativeSourceSupported());
+      const nativeHandle = preferNativeHandle && typeof restoreNativeSourceFolder === "function"
         ? await restoreNativeSourceFolder(group.rootName)
         : null;
       // 브라우저 폴더 핸들도 자동 복원할 수 있다. 원본 저장 표식만 남고 실제 핸들이
       // 사라진 경우에는 원본 저장 모드를 유지하면 저장할 곳이 없어지므로 사본 저장으로 전환한다.
-      const rememberedHandle = !nativeHandle && group.originalSaveMode && typeof loadRememberedFolderHandle === "function"
+      const rememberedHandle = !nativeHandle && !preferNativeHandle && group.originalSaveMode && typeof loadRememberedFolderHandle === "function"
         ? await loadRememberedFolderHandle(group.rootName)
         : null;
       const restoredHandle = nativeHandle || rememberedHandle;
-      const restoreOriginalSaveMode = !!(group.originalSaveMode && restoredHandle);
+      // EXE에서 예전 브라우저 핸들만 남아 있는 폴더도 원본 저장 표식은 유지한다. 첫 수동 저장 때
+      // Windows 폴더 선택으로 한 번 다시 연결하고, 그 뒤부터는 런처가 실제 경로를 조용히 복원한다.
+      const restoreOriginalSaveMode = !!(group.originalSaveMode && (restoredHandle || preferNativeHandle));
       // 대량 이미지가 자동 복원 저장에서 제외된 폴더는 빈 트리만 먼저 복원한다.
       // 사용자가 그 루트 폴더를 클릭하면 저장해 둔 폴더 핸들로 실제 파일을 다시 읽는다.
       if (restoredHandle){
@@ -512,7 +527,7 @@ async function restoreLastWorkspace(force=false){
           folderHandle:restoredHandle, nativeRootPath:restoredHandle.nativePath });
       } else {
         await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
-          originalSaveMode:false, restoreFromWorkspace:true });
+          originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true });
       }
     }
     if (loose.length){
@@ -523,18 +538,22 @@ async function restoreLastWorkspace(force=false){
       if (siblings.length > 1) opts.archiveCtx = makeFileSiblingCtx(siblings.map(f => ({ file: f, relPath: f.name })), "최근 작업공간");
       await handleFiles(loose, opts);
     }
+    result.restored = true;
     toast("지난 작업공간을 자동으로 복원했어요.", 3000);
-  } catch(e){ console.warn("workspace restore skipped:", e); }
+  } catch(e){ result.failed = true; console.warn("workspace restore skipped:", e); }
   finally {
     // 먼저 기존 로딩을 내린 뒤 배치를 풀면, 활성 문서의 지연 렌더 로딩이 그 다음에 안정적으로 유지된다.
     hideLoading();
     endUiBatch();
+    restoreSavedWorkspaceWhiteboards(); // 모든 작업공간의 파일 없는 화이트보드 문서를 먼저 만든다
+    restoreSavedWhiteboards(savedTabs); // 파일 바이트가 없는 화이트보드 탭과 마지막 판서를 먼저 되살린다
     applyTabState(savedTabs);   // 파일이 모두 열린 뒤 탭 순서·활성 탭 복원
     restoreStudyState(savedTabs); // 참고·작업 문서 짝도 마지막에 다시 구성
     restoreMemoLinks(savedTabs);  // 지도·악보가 돌아갈 메모 블록 고리도 다시 잇는다
     collapseToActiveBranch();   // 복원 완료 후 활성 탭의 폴더 체인만 남기고 나머지는 접는다(배치 대표·활성 탭 이중 펼침 정리)
     tabRestoreInProgress = false;
   }
+  return result;
 }
 
 async function clearRememberedWorkspace(){

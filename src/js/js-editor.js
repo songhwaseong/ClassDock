@@ -362,7 +362,7 @@ function renderJsRunnable(context){
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button";
   saveBtn.textContent = /\.mjs$/i.test(saveName) ? ".mjs 저장" : ".js 저장";
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "자바스크립트 파일 저장";
-  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade"; gradeBtn.type = "button";
+  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-js-grade"; gradeBtn.type = "button";
   gradeBtn.textContent = "채점"; gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const libraryBtn = document.createElement("button"); libraryBtn.className = "run-pkg run-js-library"; libraryBtn.type = "button";
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button";

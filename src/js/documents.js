@@ -10,6 +10,11 @@ const {
   isEnvFile, fileExtOf, isHiddenFolderEntry, iconFor, extCategory
 } = documentTypesApi;
 
+// 문서 단위 테스트처럼 작업공간 모듈을 싣지 않은 환경은 기존 단일 작업공간으로 본다.
+function documentInActiveWorkspace(doc){
+  return typeof workspaceHasDoc !== "function" || workspaceHasDoc(doc);
+}
+
 // 여러 파일을 복원할 때 각 항목마다 사이드바·탭을 다시 그리지 않고 마지막에 한 번만 반영한다.
 let uiBatchDepth = 0;
 let uiBatchSidebarPending = false;
@@ -334,6 +339,7 @@ function makeGroup(kind, name, parentId=null){
   // 새 폴더/압축 그룹은 접힌 채로 시작한다. 폴더를 열면 배치 종료 후 첫 문서가 활성화되고,
   // focusSidebarDoc 가 그 문서의 상위 폴더 체인(루트 포함)만 펼친다 → "열린 탭의 폴더만 펼침".
   const node = { nodeId: "group:" + (++navSeq), type: "group", kind, name, parentId, expanded: false };
+  workspaceRegisterGroup(node);
   navNodes.push(node);
   bumpNavTree();
   renderSidebar();
@@ -422,7 +428,9 @@ function makeDoc(kind, name, options={}){
   }
   docs.push(d);
   if (d.sourceKey && !docsBySourceKey.has(d.sourceKey)) docsBySourceKey.set(d.sourceKey, d);
-  navNodes.push({ nodeId: d.nodeId, type: "doc", docId: id, parentId: d.parentId });
+  const navNode = { nodeId: d.nodeId, type: "doc", docId: id, parentId: d.parentId };
+  workspaceRegisterDoc(d, navNode);
+  navNodes.push(navNode);
   bumpNavTree();
   renderSidebar();                       // 새 항목을 한 번만 그려둔다(이후 전환은 활성표시만 갱신)
   return d;
@@ -435,6 +443,7 @@ function setActiveDoc(id){
   // - PDF 필기는 글로벌 모드라 PDF 가 아닌 활성 문서에선 끔
   // - 코드 필기는 doc 별 상태라 활성 doc 의 상태에 맞춰 바 표시만 동기화(획은 그대로 유지)
   const target = docs.find(x => x.id === id);
+  if (target && !documentInActiveWorkspace(target)) return;
   if (typeof setPenMode === "function" && (!target || target.kind !== "pdf")) setPenMode(false);
   if (typeof syncCodePenBarToActive === "function") syncCodePenBarToActive(target);
   activeId = id;
@@ -867,7 +876,12 @@ function setupStudyDivider(){
     };
     const up = (ev) => {
       if (ev.pointerId !== pointerId) return;
-      if (dragging){ divider.classList.remove("dragging"); save(); }
+      if (dragging){
+        divider.classList.remove("dragging"); save();
+        // 드래그 중에는 PDF 자동 맞춤을 멈춘다. 놓은 뒤 최종 칸 크기에 한 번만 맞춰
+        // 페이지 크기 ↔ 스크롤바 ↔ ResizeObserver가 서로 깨우는 진동을 막는다.
+        requestAnimationFrame(refitVisibleStudyPanes);
+      }
       divider.removeEventListener("pointermove", move); divider.removeEventListener("pointerup", up);
       divider.removeEventListener("pointercancel", up);
       try {
@@ -925,11 +939,38 @@ function fitStudyPanePdf(doc){
   if (doc.id === studyPdfId){ fitStudyPdf(doc); return; }   // 참고 칸: 늘 칸에 맞춰 둔다
   if (doc.id === activeId) refitSinglePagePdf(doc);         // 작업 칸: 한 장씩일 때만 손댄다
 }
+function refitVisibleStudyPanes(){
+  const ids = new Set([studyPdfId, activeId]);
+  ids.forEach(id => {
+    const doc = docs.find(item => item.id === id);
+    if (doc && doc.kind === "pdf") fitStudyPanePdf(doc);
+  });
+}
 function observeStudyPaneFit(doc){
   if (!doc || doc.kind !== "pdf" || doc._studyRO || typeof ResizeObserver === "undefined") return;
-  let raf = 0;
-  doc._studyRO = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => fitStudyPanePdf(doc)); });
-  doc._studyRO.observe(doc.el);
+  let raf = 0, lastBorderWidth = -1, lastBorderHeight = -1;
+  doc._studyRO = new ResizeObserver(() => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      if (doc.closed || !doc.el || !doc.el.isConnected) return;
+      // clientWidth는 스크롤바가 나타날 때 달라져 PDF 배율 변경이 다시 observer를 부를 수 있다.
+      // 분할 칸 자체의 border-box만 비교하면 좌우 어느 칸이든 실제 분할 크기 변화에만 반응한다.
+      const rect = doc.el.getBoundingClientRect();
+      const width = Math.round(rect.width * 2) / 2;
+      const height = Math.round(rect.height * 2) / 2;
+      if (width <= 0 || height <= 0) return;
+      if (Math.abs(width - lastBorderWidth) < 0.5 && Math.abs(height - lastBorderHeight) < 0.5) return;
+      lastBorderWidth = width; lastBorderHeight = height;
+      const content = byId("content"), divider = content && content._studyDivider;
+      if (divider && divider.classList.contains("dragging")) return;
+      fitStudyPanePdf(doc);
+    });
+  });
+  // 지원 브라우저에서는 content-box(스크롤바 영향)가 아니라 border-box 변화만 관찰한다.
+  // 구형 WebView는 옵션을 거부할 수 있어 기본 관찰로 폴백하되 위 외곽 크기 비교가 같은 순환을 차단한다.
+  try { doc._studyRO.observe(doc.el, { box:"border-box" }); }
+  catch(_){ doc._studyRO.observe(doc.el); }
 }
 
 function applyStudyLayout(){
@@ -1121,7 +1162,7 @@ function focusSidebarActive(){ focusSidebarDoc(activeId); }
 //   moveFocus:true  → 실제 키보드 포커스까지 목록으로 옮긴다(키보드로 열었을 때만)
 // 사이드바가 "실제로 화면에 떠 있는" 상태. 목록이 비어 있으면(파일을 하나도 안 열었으면)
 // 접힘 설정과 무관하게 닫힌 것으로 본다 — 버튼 아이콘·문구·클릭 동작이 모두 이 값을 따른다.
-function sidebarIsOpen(){ return navNodes.length > 0 && !sidebarCollapsed; }
+function sidebarIsOpen(){ return workspaceActiveNodes().length > 0 && !sidebarCollapsed; }
 
 function openSidebar(opts){
   const o = opts || {};
@@ -1529,18 +1570,34 @@ function updateModeBadges(){
   }
 }
 
+function documentCloseConfirmMessages(doc){
+  const messages = [];
+  if (doc && doc.hasUnsavedEdits) messages.push(`'${doc.name}'의 저장하지 않은 ${unsavedDocumentLabel(doc)} 수정이 있습니다. 닫을까요?`);
+  if (doc && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(doc)) messages.push(appSettings.pdfRecovery
+    ? `'${doc.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`
+    : `'${doc.name}'의 편집 내용이 사라집니다. 자동 저장·복원이 꺼져 있어 다시 열어도 복원할 수 없어요. 닫을까요?`);
+  return messages;
+}
+async function requestCloseDoc(id, options={}){
+  const doc = docs.find(item => item.id === id);
+  if (!doc || doc.__closeConfirmPending) return false;
+  const messages = options.skipConfirm ? [] : documentCloseConfirmMessages(doc);
+  if (messages.length){
+    if (typeof confirmDialog !== "function") return false;
+    doc.__closeConfirmPending = true;
+    try {
+      for (const message of messages) if (!await confirmDialog(message, "닫기", "취소")) return false;
+    } finally { doc.__closeConfirmPending = false; }
+  }
+  return closeDoc(id, { ...options, skipConfirm:true });
+}
 function closeDoc(id, options={}){
   const i = docs.findIndex(d => d.id === id);
   if (i < 0) return false;
   const d = docs[i];
-  if (!options.skipConfirm && d.hasUnsavedEdits){
-    if (!confirm(`'${d.name}'의 저장하지 않은 ${unsavedDocumentLabel(d)} 수정이 있습니다. 닫을까요?`)) return false;
-  }
-  if (!options.skipConfirm && typeof pdfHasPendingEdits === "function" && pdfHasPendingEdits(d)){
-    const msg = appSettings.pdfRecovery
-      ? `'${d.name}'의 편집 화면을 닫을까요? 편집 내용은 다음에 같은 PDF를 열 때 복원할 수 있습니다.`
-      : `'${d.name}'의 편집 내용이 사라집니다. 자동 저장·복원이 꺼져 있어 다시 열어도 복원할 수 없어요. 닫을까요?`;
-    if (!confirm(msg)) return false;
+  if (!options.skipConfirm && documentCloseConfirmMessages(d).length){
+    requestCloseDoc(id, options);
+    return false;
   }
   if (d.kind === "pdf"){
     clearTimeout(d.recoveryTimer);
@@ -1567,8 +1624,10 @@ function closeDoc(id, options={}){
   }
   d.el.remove();
   docs.splice(i, 1);
-  const ni = navNodes.findIndex(n => n.nodeId === d.nodeId);
-  if (ni >= 0) navNodes.splice(ni, 1);
+  workspaceForgetClosedDoc(d);
+  for (let ni = navNodes.length - 1; ni >= 0; ni--){
+    if (navNodes[ni].type === "doc" && navNodes[ni].docId === d.id) navNodes.splice(ni, 1);
+  }
   const forgottenPaths = d.workspacePath ? [d.workspacePath] : [];
   if (options.forgetWorkspace && !options.skipPrune){
     let parentId = d.parentId;
@@ -1593,10 +1652,11 @@ function closeDoc(id, options={}){
   activeMru = activeMru.filter(x => x !== id);   // 닫힌 문서는 활성화 이력에서도 제거
   if (activeId === id){
     if (options.skipUi){ activeId=0; state=null; viewer=null; }
-    else if (docs.length){
+    else if (workspaceActiveDocs().length){
       // 직전에 보던 문서로 돌아간다(VSCode 패턴). 이력에 살아있는 게 없으면 docs 순서 기준 옆 문서로 폴백.
-      const prevId = activeMru.find(x => docs.some(d => d.id === x));
-      setActiveDoc(prevId != null ? prevId : docs[Math.max(0, Math.min(i, docs.length - 1))].id);
+      const activeDocs = workspaceActiveDocs();
+      const prevId = activeMru.find(x => activeDocs.some(d => d.id === x));
+      setActiveDoc(prevId != null ? prevId : activeDocs[Math.max(0, Math.min(i, activeDocs.length - 1))].id);
     }
     else { activeId=0; state=null; viewer=null; byId("tools").hidden=true; byId("officeTools").hidden=true; }
   }
@@ -1804,9 +1864,9 @@ function tabLimitForWidth(width){
 // 헤더 아래 탭바: tabOrder(선택한 문서 순서) 중 현재 열려있는 것만 표시(1개여도 보인다)
 function renderTabs(){
   if (typeof closeTabMenu === "function") closeTabMenu();          // 다시 그릴 때 떠 있던 우클릭 메뉴 정리
-  tabOrder = tabOrder.filter(id => docs.some(d => d.id === id));   // 닫힌 문서 정리
+  tabOrder = tabOrder.filter(id => docs.some(d => d.id === id && workspaceHasDoc(d)));   // 닫힌 문서·다른 작업공간 정리
   // 화면에 보이는 문서는 반드시 탭에도 있어야 한다. 복원/일괄 열기 중 순서가 꼬여도 여기서 보정한다.
-  if (activeId && docs.some(d => d.id === activeId) && !tabOrder.includes(activeId)) tabOrder.unshift(activeId);
+  if (activeId && docs.some(d => d.id === activeId && workspaceHasDoc(d)) && !tabOrder.includes(activeId)) tabOrder.unshift(activeId);
   persistTabState();                                               // 탭 구성을 저장해 다음 실행 때 복원
   const bar = byId("tabBar");
   if (!bar) return;
@@ -2130,6 +2190,7 @@ async function applyOriginalRename(doc, ctx, newName, newHandle){
   if (typeof setFileRelativePath === "function") setFileRelativePath(fresh, newPath);
 
   if (doc.sourceKey && docsBySourceKey.get(doc.sourceKey) === doc) docsBySourceKey.delete(doc.sourceKey);
+  if (typeof workspaceUnindexDocument === "function") workspaceUnindexDocument(doc);
   doc.name = newName;
   if (Object.prototype.hasOwnProperty.call(doc, "fileName")) doc.fileName = newName;
   doc.workspacePath = doc.workspacePath ? refreshWorkspacePath(doc.workspacePath, newName) : newPath;
@@ -2142,6 +2203,7 @@ async function applyOriginalRename(doc, ctx, newName, newHandle){
   doc.__srcMtime = fresh.lastModified || 0;
   doc.sourceKey = [doc.parentId || "root", doc.workspacePath || doc.relPath || newName, doc.size, doc.__srcMtime].join("|");
   docsBySourceKey.set(doc.sourceKey, doc);
+  if (typeof workspaceIndexDocument === "function") workspaceIndexDocument(doc);
   doc.stableRestoreKey = "";
   doc.stableRestoreKey = docStableKey(doc);
   if (typeof contentCacheDrop === "function") contentCacheDrop(doc.id);
@@ -2315,9 +2377,7 @@ function copyDocumentRelativePath(doc){
 async function deleteUnsavedScratchDoc(doc){
   if (!doc || !doc.isScratch || doc._named) return false;
   const message = "'" + (doc.name || "새 문서") + "'은 아직 저장되지 않았습니다. 이 문서를 삭제할까요?";
-  const ok = typeof confirmDialog === "function"
-    ? await confirmDialog(message, "삭제", "취소")
-    : window.confirm(message);
+  const ok = typeof confirmDialog === "function" && await confirmDialog(message, "삭제", "취소");
   if (!ok) return false;
   const path = String(doc.workspacePath || doc.relPath || doc.name || "");
   if (doc.archiveCtx && typeof doc.archiveCtx.remove === "function") doc.archiveCtx.remove(path);
@@ -2535,41 +2595,83 @@ function docStableKey(doc){
 const TAB_STATE_KEY = "classdock-tabs:v1";
 let tabRestoreInProgress = false;
 let tabStateTimer = 0;
+function persistTabStateNow(){
+  clearTimeout(tabStateTimer); tabStateTimer = 0;
+  if (tabRestoreInProgress) return false;
+  if (window.__tabActive === false) return false;        // 비활성(다른 창이 활성) 탭은 저장하지 않음 — 충돌 방지
+  try {
+    const tabs = tabOrder.map(id => docStableKey(docs.find(d => d.id === id))).filter(Boolean);
+    const active = docStableKey(docs.find(d => d.id === activeId));
+    const reference = docs.find(d => d.id === studyPdfId);
+    const work = docs.find(d => d.id === activeId);
+    // ID is recreated at each launch, so persist stable document paths instead.
+    const study = reference && work && reference.id !== work.id
+      ? {
+          reference: docStableKey(reference),
+          work: docStableKey(work),
+          locked: !!studyReferenceLocked,
+          targetPane: studyTargetPane === "reference" ? "reference" : "work"
+        }
+      : null;
+    /* 메모 그림 블록에서 되살린 문서(지도·악보)는 "돌아갈 블록"도 함께 남긴다. 문서 자체는
+       작업공간이 되살리지만 이 고리가 없으면 다시 실행한 뒤 '메모로'가 그 블록을 바꾸지 않고
+       새 블록을 만들어, 같은 지도가 메모에 두 벌로 남는다. */
+    const memoLinks = docs
+      .filter(d => d && d.memoBlockId && (d.kind === "map" || d.kind === "music"))
+      .map(d => ({ doc: docStableKey(d), block: String(d.memoBlockId) }))
+      .filter(link => link.doc && link.block);
+    // 화이트보드는 파일 바이트가 없으므로 탭을 다시 만들 최소 정보도 탭 상태에 함께 둔다.
+    // 실제 판서는 classdock-board-recovery:* 스냅샷에 계속 저장되므로 여기서 중복하지 않는다.
+    const boards = tabOrder
+      .map(id => docs.find(d => d.id === id))
+      .filter(d => d && d.kind === "board")
+      .map(d => ({
+        key:docStableKey(d),
+        name:String(d.name || "화이트보드"),
+        recoveryName:String(d.boardRecoveryName || d.name || "화이트보드"),
+        memoBlockId:d.memoBlockId ? String(d.memoBlockId) : ""
+      }));
+    localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, memoLinks, boards, savedAt: Date.now() }));
+    if (typeof workspaceSchedulePersist === "function") workspaceSchedulePersist();
+    return true;
+  } catch(e){ return false; }
+}
 function persistTabState(){       // 탭 순서·활성 탭을 디바운스 저장(복원 중에는 건너뜀)
   clearTimeout(tabStateTimer);
-  tabStateTimer = setTimeout(() => {
-    if (tabRestoreInProgress) return;
-    if (window.__tabActive === false) return;        // 비활성(다른 창이 활성) 탭은 저장하지 않음 — 충돌 방지
-    try {
-      const tabs = tabOrder.map(id => docStableKey(docs.find(d => d.id === id))).filter(Boolean);
-      const active = docStableKey(docs.find(d => d.id === activeId));
-      const reference = docs.find(d => d.id === studyPdfId);
-      const work = docs.find(d => d.id === activeId);
-      // ID is recreated at each launch, so persist stable document paths instead.
-      const study = reference && work && reference.id !== work.id
-        ? {
-            reference: docStableKey(reference),
-            work: docStableKey(work),
-            locked: !!studyReferenceLocked,
-            targetPane: studyTargetPane === "reference" ? "reference" : "work"
-          }
-        : null;
-      /* 메모 그림 블록에서 되살린 문서(지도·악보)는 "돌아갈 블록"도 함께 남긴다. 문서 자체는
-         작업공간이 되살리지만 이 고리가 없으면 다시 실행한 뒤 '메모로'가 그 블록을 바꾸지 않고
-         새 블록을 만들어, 같은 지도가 메모에 두 벌로 남는다. 화이트보드는 파일이 아니라 다시
-         실행하면 탭 자체가 없으므로(전체 백업 복원만 되살린다) 여기 대상이 아니다. */
-      const memoLinks = docs
-        .filter(d => d && d.memoBlockId && (d.kind === "map" || d.kind === "music"))
-        .map(d => ({ doc: docStableKey(d), block: String(d.memoBlockId) }))
-        .filter(link => link.doc && link.block);
-      localStorage.setItem(TAB_STATE_KEY, JSON.stringify({ tabs, active, study, memoLinks, savedAt: Date.now() }));
-    } catch(e){}
-  }, 400);
+  tabStateTimer = setTimeout(persistTabStateNow, 400);
 }
 function loadSavedTabState(){
   try { const s = JSON.parse(localStorage.getItem(TAB_STATE_KEY) || "null");
         return (s && Array.isArray(s.tabs)) ? s : null; }
   catch(e){ return null; }
+}
+// 저장된 파일을 읽은 뒤 파일 바이트가 없는 화이트보드 탭을 다시 만든다.
+// boards 필드가 없던 이전 버전은 탭 이름과 같은 복구 스냅샷이 있을 때만 보수적으로 승격한다.
+function restoreSavedWhiteboards(saved){
+  if (!saved || !Array.isArray(saved.tabs) || typeof newWhiteboard !== "function") return 0;
+  const tabKeys = new Set(saved.tabs.map(value => String(value || "")).filter(Boolean));
+  const rows = Array.isArray(saved.boards) ? saved.boards.slice() : [];
+  if (!rows.length && typeof readBoardRecoverySnapshot === "function"){
+    saved.tabs.forEach(value => {
+      const key = String(value || "");
+      if (key && readBoardRecoverySnapshot(key)) rows.push({ key, name:key, recoveryName:key, memoBlockId:"" });
+    });
+  }
+  const existing = new Set(docs.map(docStableKey).filter(Boolean));
+  let restored = 0;
+  rows.forEach(row => {
+    if (!row || typeof row !== "object") return;
+    const name = String(row.name || "").trim().slice(0, 200);
+    const key = String(row.key || name).trim().slice(0, 500);
+    const recoveryName = String(row.recoveryName || name).trim().slice(0, 500);
+    const memoBlockId = String(row.memoBlockId || "").trim().slice(0, 500);
+    if (!name || !key || !recoveryName || !tabKeys.has(key) || existing.has(key)) return;
+    const doc = newWhiteboard({ name, recoveryName, memoBlockId, restoreInBackground:true });
+    if (!doc) return;
+    doc.stableRestoreKey = key;
+    existing.add(key); restored++;
+  });
+  return restored;
 }
 // 복원으로 파일이 모두 열린 뒤, 저장된 탭 순서·활성 탭을 안정 키로 매칭해 되살린다(매칭 안 되는 항목은 무시).
 function applyTabState(saved){
@@ -3146,7 +3248,7 @@ async function runContentSearch(query){
   setContentStatus("검색 중…");
   const result = new Set();
   const snippets = new Map();
-  for (const doc of docs.filter(isTextSearchable)){
+  for (const doc of docs.filter(doc => documentInActiveWorkspace(doc) && isTextSearchable(doc))){
     if (token !== contentSearchToken) return;            // 더 새 검색이 시작됨 → 중단
     // 첫 검색은 파일을 통째로 읽고 디코드·소문자 변환한다(수십~수백 ms). 중간중간 양보해 화면이 얼지 않게 한다.
     if (typeof yieldToBrowserThrottled === "function") await yieldToBrowserThrottled(12);
@@ -3171,7 +3273,7 @@ async function runContentSearch(query){
   if (token !== contentSearchToken) return;
   contentMatchIds = result; contentMatchSnippets = snippets; contentMatchQuery = query;
   // 대형 텍스트는 워커로 넘겨 백그라운드에서 검색(메인 스레드 안 멈춤). 결과는 도착하는 대로 사이드바에 반영된다.
-  const large = docs.filter(isLargeTextSearchable);
+  const large = docs.filter(doc => documentInActiveWorkspace(doc) && isLargeTextSearchable(doc));
   const worker = large.length ? ensureContentSearchWorker() : null;
   if (!worker) contentSearchBusyQuery = "";              // 워커가 뒤이어 돌지 않으면 지금 결과가 최종
   renderSidebar();
@@ -3391,7 +3493,7 @@ function renderSidebar(){
   syncSidebarSearchCollapse(query);            // 검색어·필터가 바뀌면 검색 중 접어 둔 표시를 놓아준다
   const filtering = !!(query || sidebarExtFilter);
   const groupOpen = (node) => sidebarGroupOpen(node, filtering);
-  const childrenOf = (parentId) => navNodes.filter(n => n.parentId === parentId);
+  const childrenOf = (parentId) => navNodes.filter(n => n.parentId === parentId && workspaceNodeVisible(n));
   const nodeName = (node) => {
     if (node.type === "group") return node.name || "";
     const doc = docs.find(d => d.id === node.docId);
@@ -3452,7 +3554,7 @@ function renderSidebar(){
         // 자기 혼자 열려 있을 때 클릭하면 그때 접힌다. Alt+클릭: 형제를 유지한 채 자기만 펴기/접기.
         const open = groupOpen(node);
         const hasOpenSiblings = navNodes.some(n =>
-          n !== node && n.type === "group" && n.parentId === node.parentId && groupOpen(n));
+          workspaceNodeVisible(n) && n !== node && n.type === "group" && n.parentId === node.parentId && groupOpen(n));
         if (!e.altKey && open && hasOpenSiblings){
           collapseSiblingGroups(node, filtering);
         } else {
@@ -3597,10 +3699,10 @@ function renderSidebar(){
     if (node.parentId == null){
       const cl = document.createElement("button"); cl.className = "sb-close"; cl.textContent = "✕";
       cl.title = node.type === "group" ? "묶음 전체 닫기" : "닫기";
-      cl.onclick = (e) => {
+      cl.onclick = async (e) => {
         e.stopPropagation();
-        if (node.type === "group") closeGroup(node.nodeId, { forgetWorkspace: true });
-        else closeDoc(doc.id, { forgetWorkspace: true });
+        if (node.type === "group") await closeGroup(node.nodeId, { forgetWorkspace: true });
+        else if (!workspaceDetachDocFromActive(doc)) await requestCloseDoc(doc.id, { forgetWorkspace: true });
       };
       item.append(cl);
     }
@@ -3788,7 +3890,7 @@ function startMemStat(){
 function updateFileStats(){
   const wrap = byId("fileStatsWrap"); if (!wrap) return;
   const pop = byId("fileStatsPop"), chip = byId("fileStatsSummary"), button = byId("fileStats");
-  const open = docs.filter(d => !d.closed);
+  const open = docs.filter(d => !d.closed && workspaceHasDoc(d));
   wrap.hidden = false;
   if (!open.length){
     sidebarExtFilter = "";
@@ -3845,7 +3947,7 @@ window.addEventListener("mni18nchange", () => {
   renderSidebar();
 });
 
-function closeGroup(nodeId, options={}){
+async function closeGroup(nodeId, options={}){
   const group = navNodes.find(n => n.nodeId === nodeId && n.type === "group");
   if (!group) return;
   const ids = new Set([nodeId]);
@@ -3859,28 +3961,35 @@ function closeGroup(nodeId, options={}){
       }
     });
   }
-  const childDocs = docs.filter(d => ids.has(d.nodeId));
+  const childDocIds = new Set(navNodes.filter(n => ids.has(n.nodeId) && n.type === "doc").map(n => n.docId));
+  const childDocs = docs.filter(d => childDocIds.has(d.id));
   // 문서를 고르지 않은 상태(activeId=0)는 그대로 유지한다. 이 그룹 안의 활성 문서가 실제로
   // 닫힐 때만 남은 문서로 이동해야, 빈 화면에서 그룹 하나를 정리했다고 첫 파일이 멋대로 열리지 않는다.
   const activeWasInGroup = childDocs.some(d => d.id === activeId);
   if (childDocs.some(d => d.kind === "pdf" && d.elements && d.elements.length)){
-    if (!confirm(`'${group.name}' 안에 추가한 서명/텍스트가 있는 PDF가 있습니다. 닫을까요?`)) return;
+    if (typeof confirmDialog !== "function"
+      || !await confirmDialog(`'${group.name}' 안에 추가한 서명/텍스트가 있는 PDF가 있습니다. 닫을까요?`, "닫기", "취소")) return;
   }
-  childDocs.forEach(d => closeDoc(d.id, { skipConfirm: true, skipPrune: true, skipUi: true }));
+  let keptSharedDocument = false;
+  childDocs.forEach(d => {
+    if (d.workspaceIds instanceof Set && d.workspaceIds.size > 1 && d.workspaceIds.has(activeWorkspaceId)){
+      keptSharedDocument = workspaceDetachDocFromActive(d) || keptSharedDocument;
+    } else closeDoc(d.id, { skipConfirm: true, skipPrune: true, skipUi: true });
+  });
   for (let i = navNodes.length - 1; i >= 0; i--){
     if (ids.has(navNodes[i].nodeId)) navNodes.splice(i, 1);
   }
   bumpNavTree();                          // 묶음 삭제 → 인덱스/루트 캐시 무효화
-  if (!docs.length){
+  if (!workspaceActiveDocs().length){
     activeId = 0; state=null; viewer=null; byId("tools").hidden=true; byId("officeTools").hidden=true;
-  } else if (activeWasInGroup && !docs.some(d => d.id === activeId)) setActiveDoc(docs[0].id);
+  } else if (activeWasInGroup && !workspaceActiveDocs().some(d => d.id === activeId)) setActiveDoc(workspaceActiveDocs()[0].id);
   refreshChrome();
   applyStudyLayout();
   renderSidebar();
   const forgottenPaths = [...(group.workspacePaths || [])];
   if (group.folderRefreshRootId === group.nodeId && group.imageSkipWorkspacePath)
     forgottenPaths.push(group.imageSkipWorkspacePath);
-  if (options.forgetWorkspace && forgottenPaths.length)
+  if (options.forgetWorkspace && forgottenPaths.length && !keptSharedDocument)
     forgetWorkspacePaths(forgottenPaths, navNodes.length === 0);
 }
 
@@ -3889,13 +3998,13 @@ function closeGroup(nodeId, options={}){
 function updateDocEmptyState(){
   const el = byId("docEmpty");
   if (!el) return;
-  el.hidden = !(navNodes.length > 0 && !docs.some(d => d.id === activeId));
+  el.hidden = !(workspaceActiveNodes().length > 0 && !workspaceActiveDocs().some(d => d.id === activeId));
 }
 
 function refreshChrome(){
   if (uiBatchDepth > 0){ uiBatchChromePending = true; return; }
-  const has = navNodes.length > 0;
-  if (!docs.length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateOriginalSaveBadge(null); updateModeBadges(); }
+  const has = workspaceActiveNodes().length > 0;
+  if (!workspaceActiveDocs().length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateOriginalSaveBadge(null); updateModeBadges(); }
   renderTabs();
   dropzone.hidden = has;
   updateDocEmptyState();

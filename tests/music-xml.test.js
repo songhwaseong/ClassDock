@@ -70,6 +70,23 @@ test("단선율 msheet를 표준 score-partwise MusicXML로 내보낸다", () =>
   assert.match(xml, /<print new-system="yes"\/>/);
 });
 
+test("다중 악기 악보는 모든 파트 이름과 독립된 part 본문을 MusicXML로 내보낸다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("합주");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4)])];
+  api.musicAddPart(sheet, { name:"플루트", timbre:"flute" });
+  sheet.measures[0].notes.push(api.musicNote("G", 5));
+  const xml = api.musicSerializeXml(sheet);
+  assert.equal((xml.match(/<score-part id="P\d+">/g) || []).length, 2);
+  assert.equal((xml.match(/<part id="P\d+">/g) || []).length, 2);
+  assert.match(xml, /<part-name>피아노<\/part-name>/);
+  assert.match(xml, /<part-name>플루트<\/part-name>/);
+  assert.match(xml, /<step>C<\/step>/);
+  assert.match(xml, /<step>G<\/step>/);
+  assert.doesNotMatch(xmlSource, /여러 파트 중 첫 번째 파트만 가져왔어요/);
+  assert.match(xmlSource, /for \(let partIndex = 1; partIndex < parts\.length; partIndex\+\+\)/);
+});
+
 test("가져오기는 각 오선의 두 성부를 고르고 지원 길이를 정규화한다", () => {
   const api = loadMusicXmlApi();
   const warnings = new Set();

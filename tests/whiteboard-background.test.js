@@ -265,12 +265,18 @@ test("배경 그림은 넣을 때 다시 인코딩해 자동복원 용량을 지
   assert.match(wb, /boardRecoveryWarned = true;[\s\S]{0,220}자동복원본을 남기지 못했어요/);
 });
 
-test("배경 그림 상자는 넣을 때 정해 보드 좌표에 붙박는다", () => {
+test("배경 그림은 현재 화면 자체에 맞고 보기를 100% 원점에 고정한다", () => {
   const wb = read("src/js/whiteboard.js");
-  // 창 크기(W·H)를 따라 매번 다시 계산하면 창을 줄일 때 그림만 움직여 그 위에 쓴 판서와 어긋난다.
-  const redraw = wb.slice(wb.indexOf("const redraw = () => {"), wb.indexOf("const restoreBoardImages"));
-  assert.doesNotMatch(redraw, /boardImageBox/);
-  assert.match(wb, /function setBackgroundImageFit\(fit, options=\{\}\)/);   // 다시 맞추기는 손으로
+  const render = read("src/js/board-render.js");
+  // 저장돼 있던 항목 상자가 아니라 paintBackground 이 넘긴 현재 화면(area)을 배경 상자로 쓴다.
+  assert.match(render, /const target = area \|\| \{/);
+  assert.match(render, /image\.fit === "contain"[\s\S]{0,240}target\.w \/ nw/);
+  assert.match(render, /image\.fit === "actual"[\s\S]{0,120}w = nw; h = nh/);
+  // 배경을 넣거나 복원하면 확대·이동 상태를 없애고, 이후 보기 조작도 막는다.
+  assert.match(wb, /const backgroundViewLocked = \(\) => !!wb\.bgImage/);
+  assert.match(wb, /if \(backgroundViewLocked\(\)\)\{ view\.scale = 1; view\.x = 0; view\.y = 0; \}/);
+  assert.match(wb, /const setViewScale[\s\S]{0,180}if \(backgroundViewLocked\(\)\)/);
+  assert.match(wb, /canvas\.addEventListener\("wheel"[\s\S]{0,220}if \(backgroundViewLocked\(\)\) return/);
   assert.match(wb, /bgImage:wb\.bgImage \? \{ \.\.\.wb\.bgImage, img:undefined \} : null,/);   // <img> 는 빼고 저장
   assert.match(wb, /restoreBoardBackgroundImage\(\)/);                          // 열 때 다시 불러온다
 });
@@ -302,15 +308,16 @@ test("타일 배경은 칸 크기를 따로 담고 보드 원점에 맞춰 반�
   assert.match(render, /typeof DOMMatrix === "function" && typeof pattern\.setTransform === "function"/);
 });
 
-test("선택한 그림을 배경으로 내리면 항목에서 빠지고 그 자리에 그대로 깔린다", () => {
+test("선택한 그림을 배경으로 내리면 항목에서 빠지고 화면을 채우는 배경이 된다", () => {
   const wb = read("src/js/whiteboard.js");
   const body = wb.slice(wb.indexOf("const sendSelectedToBackground"), wb.indexOf("const pickBackgroundImage"));
   // 복사가 아니라 옮기기 — 같은 그림이 배경과 항목으로 겹치면 어느 쪽을 잡는지 알 수 없다.
   assert.match(body, /wb\.items = wb\.items\.filter\(\(other\) => other !== item\)/);
   // 항목이 사라지는 건 삭제와 같은 편집이라 되돌리기 단계로 남긴다.
   assert.match(body, /history\.commit\(\);/);
-  // 놓일 자리는 그림이 있던 자리 그대로 — 배경으로 내려가며 위치가 튀지 않는다.
-  assert.match(body, /x:Math\.round\(item\.x\), y:Math\.round\(item\.y\), w:Math\.round\(item\.w\), h:Math\.round\(item\.h\)/);
+  // 일반 항목의 위치·크기는 버리고 화면 자체를 채우는 배경으로 바꾼다.
+  assert.match(body, /fit:"cover"/);
+  assert.match(body, /x:0, y:0, w:encoded\.width, h:encoded\.height/);
   // 붙여넣은 그림은 원본 그대로라 클 수 있다 — 배경으로 갈 때도 같은 상한을 태운다.
   assert.match(body, /encodeBoardBackgroundImage\(img, ""\)/);
   // 그림에만 보여 준다.

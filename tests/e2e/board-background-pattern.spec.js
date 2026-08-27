@@ -281,7 +281,7 @@ test("보드에 올린 그림을 우클릭으로 배경에 내리면 항목에�
     return { items:doc.boardState.items.length, fit:image && image.fit, src:image && image.src.slice(0, 11) };
   });
   expect(after.items).toBe(0);            // 항목에서 빠지고
-  expect(after.fit).toBe("actual");        // 있던 자리 그대로 배경이 됐다
+  expect(after.fit).toBe("cover");         // 일반 항목 위치를 버리고 화면 자체를 채운다
   expect(after.src).toBe("data:image/");
 
   // 되돌리기는 그림을 항목으로 되살린다(배경은 보드 속성이라 되돌리기 대상이 아니다).

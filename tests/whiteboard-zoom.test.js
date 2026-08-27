@@ -27,12 +27,15 @@ test("화이트보드 휠·화면 이동·원본 내보내기 배선이 함께 �
   const css=fs.readFileSync(path.join(__dirname,"../src/styles.css"),"utf8");
   assert.match(source,/canvas\.addEventListener\("wheel"[\s\S]{0,260}passive:false/);
   assert.match(source,/e\.button === 1 \|\| \(e\.button === 0 && spacePanning\)/);
-  assert.match(source,/if \(!startSelect\(e\)\) beginViewPan\(e\)/);
+  assert.match(source,/if \(!startSelect\(e\) && !backgroundViewLocked\(\)\) beginViewPan\(e\)/);
   assert.match(source,/itemAt\(p\) \? "move" : "grab"/);
   // Space 손바닥 이동은 열려 있는 패널이 하나라도 있으면 양보한다(패널이 늘면 조건도 길어진다).
   assert.match(source,/e\.code === "Space"[\s\S]{0,240}pan-ready/);
   assert.match(source,/withBoardExport[\s\S]{0,260}view\.scale=1; view\.x=0; view\.y=0/);
   assert.match(source,/zoomLabelBtn = mkBtn\([\s\S]{0,220}resetView/);
+  // 배경 그림은 화면 자체이므로 그림과 판서가 어긋나는 확대·이동을 잠근다.
+  assert.match(source,/if \(backgroundViewLocked\(\)\)\{[\s\S]{0,140}view\.scale = 1/);
+  assert.match(source,/e\.code === "Space" && !backgroundViewLocked\(\)/);
   assert.match(css,/\.wb-canvas\.pan-ready\{cursor:grab!important\}/);
   assert.match(css,/\.wb-canvas\.panning\{cursor:grabbing!important\}/);
 });

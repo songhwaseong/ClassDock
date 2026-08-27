@@ -852,7 +852,7 @@ const MNRemoteTerminal = (() => {
       if (confirmModal) confirmModal.classList.add("ssh-confirm-front");
       try { ok = await confirmDialog(message, changed ? "새 지문으로 교체" : "지문을 신뢰", "취소"); }
       finally { if (confirmModal) confirmModal.classList.remove("ssh-confirm-front"); }
-    } else ok = window.confirm(message);
+    } else return false;
     if (!ok) return false;
     const trust = await fetchTimed("/ssh-host-key-trust", {
       method:"POST", headers:{ "Content-Type":"application/octet-stream" },

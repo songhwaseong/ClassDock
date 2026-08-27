@@ -179,7 +179,7 @@ if (typeof window !== "undefined" && window.document) {
     if (typeof docs === "undefined") return [];
     const textCheck = typeof isTextExtSearchable === "function" ? isTextExtSearchable : null;
     const lockCheck = typeof isStudyReferenceLocked === "function" ? isStudyReferenceLocked : null;
-    return docs.filter(d => batchIsTargetDoc(d, textCheck, lockCheck) || !!batchReplaceOfficeKind(d, lockCheck));
+    return docs.filter(d => (typeof workspaceHasDoc !== "function" || workspaceHasDoc(d)) && (batchIsTargetDoc(d, textCheck, lockCheck) || !!batchReplaceOfficeKind(d, lockCheck)));
   }
 
   // 오피스 문서는 원본 바이트를 다시 읽어 zip 을 고쳐 쓰므로 sourceFile 이 없으면 대상이 아니다.

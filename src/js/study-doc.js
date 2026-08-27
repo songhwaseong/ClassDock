@@ -147,14 +147,15 @@ function mountStudyEditor(doc){
     const syncType = () => { body.querySelector(".sc-front-label").textContent = type.value === "cloze" ? "빈칸 문장" : "질문"; body.querySelector(".sc-cloze-hint").hidden = type.value !== "cloze"; }; type.onchange = syncType; syncType();
     const preview = body.querySelector(".sc-photo-preview"), photoInput = body.querySelector("input[type=file]"), showPhoto = () => { preview.innerHTML = ""; if (image){ const img = document.createElement("img"); img.src = image.dataUrl; img.alt = "선택한 사진"; preview.appendChild(img); } else preview.textContent = "사진 없음"; }; showPhoto();
     body.querySelector(".sc-photo-pick").onclick = () => photoInput.click(); body.querySelector(".sc-photo-remove").onclick = () => { image = null; showPhoto(); }; photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".study-form-error").textContent = "사진을 넣지 못했어요."; } };
-    body.querySelector(".sc-cancel").onclick = ui.dispose; const del = body.querySelector(".sc-delete"); del.hidden = !current; del.onclick = () => { if (deleteCard(current.id)) ui.dispose(); };
+    body.querySelector(".sc-cancel").onclick = ui.dispose; const del = body.querySelector(".sc-delete"); del.hidden = !current; del.onclick = async () => { if (await deleteCard(current.id)) ui.dispose(); };
     body.querySelector(".sc-save").onclick = () => { if (!front.value.trim()){ body.querySelector(".study-form-error").textContent = "질문이나 빈칸 문장을 입력하세요."; front.focus(); return; } if (type.value === "cloze" && !studyClozeParts({ front:front.value }).hasCloze){ body.querySelector(".study-form-error").textContent = "가릴 정답을 {{정답}}처럼 하나 이상 표시하세요."; return; }
       if (current) Object.assign(current, { type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image }); else { if (model.cards.length >= STUDY_MAX_CARDS) return; const card = studyNormalizeCard({ type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image }); model.cards.push(card); selectedId = card.id; } ui.dispose(); history.commit(); touch(); render(); };
     setTimeout(() => front.focus(), 0);
   }
 
-  function deleteCard(id){
-    const card = model.cards.find(item => item.id === id); if (!card || !confirm("이 카드를 삭제할까요?")) return false;
+  async function deleteCard(id){
+    const card = model.cards.find(item => item.id === id); if (!card || typeof confirmDialog !== "function"
+      || !await confirmDialog("이 카드를 삭제할까요?", "삭제", "취소")) return false;
     model.cards = model.cards.filter(item => item.id !== id); if (selectedId === id) selectedId = ""; history.commit(); touch(); render();
     if (typeof toast === "function") toast("카드를 삭제했어요. 되돌리려면 Ctrl+Z", 2600); return true;
   }

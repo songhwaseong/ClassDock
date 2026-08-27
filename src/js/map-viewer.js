@@ -1636,11 +1636,14 @@ async function mapStampCapture(pngUrl, attribution, labels){
 const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
-   html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다. */
-async function mapCaptureDataUrl(stage, attribution, labels){
+   html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
+   지도 고르기는 찾은 자리를 그대로 칠판에 넣는 흐름이라 검색 표식을 남길 수 있고, 지도 문서의
+   PNG·칠판 내보내기는 편집 중인 임시 표식을 계속 감춘다. */
+async function mapCaptureDataUrl(stage, attribution, labels, options = {}){
   await MNLazy.need("capture");
   const hidden = [];
   for (const selector of MAP_CAPTURE_HIDDEN_PANES){
+    if (options.includeSearchLocation && selector === ".map-search-location-pane") continue;
     const el = stage.querySelector(selector);
     if (!el) continue;
     hidden.push([el, el.style.display]);
@@ -2429,7 +2432,7 @@ async function openMapPicker(){
         const center = map.getCenter();
         mapPickerRememberView({ center:[center.lat, center.lng], zoom:map.getZoom(), basemap });
         const spec = MAP_BASEMAPS[basemap] || MAP_BASEMAPS.osm;
-        const png = await mapCaptureDataUrl(stage, spec.attribution, []);
+        const png = await mapCaptureDataUrl(stage, spec.attribution, [], { includeSearchLocation:true });
         finish(png);
       } catch(error){
         console.warn("map picker capture failed:", error);
@@ -2762,7 +2765,7 @@ async function mountMapEditor(doc){
   titleInput.setAttribute("aria-label", "지도 제목");
 
   const basemapSelect = document.createElement("select");
-  basemapSelect.className = "map-select";
+  basemapSelect.className = "map-select map-toolvis-basemap";
   basemapSelect.title = "배경지도 바꾸기";
   basemapSelect.setAttribute("aria-label", "배경지도");
   for (const [id, spec] of Object.entries(MAP_BASEMAPS)){
@@ -2779,21 +2782,21 @@ async function mountMapEditor(doc){
 
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "map-btn map-add";
+  addBtn.className = "map-btn map-add map-toolvis-add";
   addBtn.textContent = "📍 표시 추가";
   addBtn.title = "누른 뒤 지도를 클릭하면 그 자리에 표시가 생겨요";
   addBtn.setAttribute("aria-pressed", "false");
 
   const addressBtn = document.createElement("button");
   addressBtn.type = "button";
-  addressBtn.className = "map-btn map-auto-address";
+  addressBtn.className = "map-btn map-auto-address map-toolvis-auto-address";
   addressBtn.textContent = "📮 주소 자동";
   addressBtn.title = "켜 두면 새로 찍은 표시의 이름에 그 자리의 주소를 채워 넣어요";
   addressBtn.setAttribute("aria-pressed", "false");
 
   const spotBtn = document.createElement("button");
   spotBtn.type = "button";
-  spotBtn.className = "map-btn map-spot-info";
+  spotBtn.className = "map-btn map-spot-info map-toolvis-spot";
   spotBtn.textContent = "🔎 장소 정보";
   spotBtn.title = "켜 두면 지도를 클릭한 자리의 건물·시설 이름과 주소를 말풍선으로 보여 줘요";
   spotBtn.setAttribute("aria-pressed", "false");
@@ -2803,63 +2806,63 @@ async function mountMapEditor(doc){
 
   const nearbyBtn = document.createElement("button");
   nearbyBtn.type = "button";
-  nearbyBtn.className = "map-btn map-nearby";
+  nearbyBtn.className = "map-btn map-nearby map-toolvis-nearby";
   nearbyBtn.textContent = "🏫 주변 시설";
   nearbyBtn.title = "지도 가운데를 기준으로 반경 안의 학교·병원 같은 시설을 한 번에 표시";
   nearbyBtn.classList.add("is-unavailable");   // 카카오 검색을 켜야 쓸 수 있다(아래 setNearbyReady)
 
   const regionBtn = document.createElement("button");
   regionBtn.type = "button";
-  regionBtn.className = "map-btn map-region-stats";
+  regionBtn.className = "map-btn map-region-stats map-toolvis-region";
   regionBtn.textContent = "🧭 지역 통계";
   regionBtn.title = "표시마다 시도·시군구를 채우고 지역별 개수를 칠판 차트로 보내요";
 
   const boardBtn = document.createElement("button");
   boardBtn.type = "button";
-  boardBtn.className = "map-btn map-to-board";
+  boardBtn.className = "map-btn map-to-board map-toolvis-board";
   boardBtn.textContent = "🖊️ 칠판으로";
   boardBtn.title = "지금 보이는 지도를 그림으로 굳혀 새 화이트보드에 올려요 — 그 위에 바로 판서할 수 있어요";
 
   const memoBtn = document.createElement("button");
   memoBtn.type = "button";
-  memoBtn.className = "map-btn map-to-memo";
+  memoBtn.className = "map-btn map-to-memo map-toolvis-memo";
   memoBtn.textContent = "📋 메모로";
   memoBtn.title = "지금 보이는 지도를 메모창에 넣어요 — 메모에서 '✏️ 지도로'를 누르면 다시 편집할 수 있어요";
 
   // 자동 캐시 현황은 런처가 디스크에 남겨 주는 기능이라 exe 로 돌 때만 뜻이 있다(아래에서 표시 결정).
   const prepareBtn = document.createElement("button");
   prepareBtn.type = "button";
-  prepareBtn.className = "map-btn map-prepare";
+  prepareBtn.className = "map-btn map-prepare map-toolvis-offline";
   prepareBtn.textContent = "🗂️ 오프라인 지도";
   prepareBtn.title = "실제로 본 지역은 자동으로 보관됩니다 — 현황을 확인하거나 비울 수 있어요";
 
   const imageBtn = document.createElement("button");
-  imageBtn.type = "button"; imageBtn.className = "map-btn map-image-pick";
+  imageBtn.type = "button"; imageBtn.className = "map-btn map-image-pick map-toolvis-image";
   imageBtn.textContent = "🖼️ 내 지도"; imageBtn.title = "학교 배치도·평면도 같은 이미지를 오프라인 지도 배경으로 사용";
   const imageClearBtn = document.createElement("button");
-  imageClearBtn.type = "button"; imageClearBtn.className = "map-btn map-image-clear";
+  imageClearBtn.type = "button"; imageClearBtn.className = "map-btn map-image-clear map-toolvis-image";
   imageClearBtn.textContent = "이미지 지우기"; imageClearBtn.hidden = !model.backgroundImage;
   const imageInput = document.createElement("input");
   imageInput.type = "file"; imageInput.accept = "image/png,image/jpeg,image/webp"; imageInput.hidden = true;
 
   const lineBtn = document.createElement("button");
-  lineBtn.type = "button"; lineBtn.className = "map-btn map-draw-line";
+  lineBtn.type = "button"; lineBtn.className = "map-btn map-draw-line map-toolvis-line";
   lineBtn.textContent = "📏 거리선"; lineBtn.title = "지도에 점을 찍어 경로와 전체 거리를 표시";
   lineBtn.setAttribute("aria-pressed", "false");
   const areaBtn = document.createElement("button");
-  areaBtn.type = "button"; areaBtn.className = "map-btn map-draw-area";
+  areaBtn.type = "button"; areaBtn.className = "map-btn map-draw-area map-toolvis-area";
   areaBtn.textContent = "▱ 면적 영역"; areaBtn.title = "지도에 점을 찍어 영역과 면적을 표시";
   areaBtn.setAttribute("aria-pressed", "false");
 
   const csvImportBtn = document.createElement("button");
-  csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import";
+  csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import map-toolvis-csv-import";
   csvImportBtn.textContent = "표 들이기";
   csvImportBtn.title = "지도 CSV 또는 연대표 CSV·엑셀(.xlsx)에서 표시 추가 — 좌표 없이 장소·주소만 있어도 됩니다";
   const csvExportBtn = document.createElement("button");
-  csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export";
+  csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export map-toolvis-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
   const csvMemoBtn = document.createElement("button");
-  csvMemoBtn.type = "button"; csvMemoBtn.className = "map-btn map-csv-memo";
+  csvMemoBtn.type = "button"; csvMemoBtn.className = "map-btn map-csv-memo map-toolvis-csv-memo";
   csvMemoBtn.textContent = "🧾 표로 메모";
   csvMemoBtn.title = "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다";
   const csvInput = document.createElement("input");
@@ -2868,64 +2871,64 @@ async function mountMapEditor(doc){
   csvInput.hidden = true;
 
   const gridBtn = document.createElement("button");
-  gridBtn.type = "button"; gridBtn.className = "map-btn map-grid-toggle";
+  gridBtn.type = "button"; gridBtn.className = "map-btn map-grid-toggle map-toolvis-grid";
   gridBtn.textContent = "🌐 위경도 격자";
   gridBtn.title = "위선·경선을 눈금으로 그려요 — 적도와 본초자오선은 굵게 표시됩니다";
   gridBtn.setAttribute("aria-pressed", "false");
 
   const labelsBtn = document.createElement("button");
-  labelsBtn.type = "button"; labelsBtn.className = "map-btn map-labels-toggle";
+  labelsBtn.type = "button"; labelsBtn.className = "map-btn map-labels-toggle map-toolvis-labels";
   labelsBtn.textContent = "🏷️ 이름 보이기";
   labelsBtn.title = "표시 이름을 마우스를 올리지 않아도 늘 보이게 해요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다";
   labelsBtn.setAttribute("aria-pressed", "false");
 
   const routeBtn = document.createElement("button");
-  routeBtn.type = "button"; routeBtn.className = "map-btn map-route-toggle";
+  routeBtn.type = "button"; routeBtn.className = "map-btn map-route-toggle map-toolvis-route";
   routeBtn.textContent = "🧵 표시 잇기";
   routeBtn.title = "표시를 목록 순서대로 선으로 이어요 — 표시를 옮기거나 순서를 바꾸면 선도 따라갑니다";
   routeBtn.setAttribute("aria-pressed", "false");
 
   const driveBtn = document.createElement("button");
-  driveBtn.type = "button"; driveBtn.className = "map-btn map-drive-toggle";
+  driveBtn.type = "button"; driveBtn.className = "map-btn map-drive-toggle map-toolvis-drive";
   driveBtn.textContent = "🚗 자동차 길찾기";
   driveBtn.title = "표시를 목록 순서대로 실제 도로를 따라 이어요 — 주행 거리와 예상 시간을 함께 보여 줍니다 (카카오 지도 검색 필요, 표시 7개까지)";
   driveBtn.setAttribute("aria-pressed", "false");
 
   const presentBtn = document.createElement("button");
-  presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start";
+  presentBtn.type = "button"; presentBtn.className = "map-btn map-present-start map-toolvis-present";
   presentBtn.textContent = "🎬 발표 모드";
   presentBtn.title = "표시를 목록 순서대로 하나씩 보여 줘요 — 이름·메모·사진이 큰 카드로 뜹니다 (Esc 로 끝내기)";
 
   // 지도 문제 만들기 — 과제 패키지(task-package.js)가 있어야 뜻이 있는 단추라 그때만 붙인다.
   const taskBtn = document.createElement("button");
-  taskBtn.type = "button"; taskBtn.className = "map-btn map-make-task";
+  taskBtn.type = "button"; taskBtn.className = "map-btn map-make-task map-toolvis-task";
   taskBtn.textContent = "🎯 지도 문제";
   taskBtn.title = "찍어 둔 표시로 '여기가 어디?' 위치 찾기 문제(.task)를 만들어요";
 
   const listBtn = document.createElement("button");
-  listBtn.type = "button"; listBtn.className = "map-btn map-list-toggle";
+  listBtn.type = "button"; listBtn.className = "map-btn map-list-toggle map-toolvis-list";
   listBtn.textContent = "🧾 표시 목록";
   listBtn.title = "표시를 옆 목록으로 봐요 — 이름으로 찾고, 묶음별로 감추고, 눌러서 그 자리로 갑니다";
   listBtn.setAttribute("aria-pressed", "false");
 
   const pngBtn = document.createElement("button");
-  pngBtn.type = "button"; pngBtn.className = "map-btn map-save-png";
+  pngBtn.type = "button"; pngBtn.className = "map-btn map-save-png map-toolvis-png";
   pngBtn.textContent = "📷 PNG 저장";
   pngBtn.title = "지금 보이는 지도를 그림 파일로 저장해요 (학습지·게시물용)";
 
   const printBtn = document.createElement("button");
-  printBtn.type = "button"; printBtn.className = "map-btn map-print-btn";
+  printBtn.type = "button"; printBtn.className = "map-btn map-print-btn map-toolvis-print";
   printBtn.textContent = "🖨️ 인쇄";
   printBtn.title = "지금 보이는 지도를 인쇄해요 (Ctrl+P 와 같은 그림)";
 
   const clearItemsBtn = document.createElement("button");
-  clearItemsBtn.type = "button"; clearItemsBtn.className = "map-btn map-clear-items";
+  clearItemsBtn.type = "button"; clearItemsBtn.className = "map-btn map-clear-items map-toolvis-clear";
   clearItemsBtn.textContent = "🧹 지우기";
   clearItemsBtn.title = "표시·거리선·면적을 한꺼번에 지워요 — 주변 시설로 넣은 것만 골라 지울 수도 있어요";
 
   // 검색칸과 결과 목록은 한 덩어리로 묶는다(목록이 칸 바로 아래에 뜨도록).
   const searchWrap = document.createElement("div");
-  searchWrap.className = "map-search";
+  searchWrap.className = "map-search map-toolvis-search";
   const gotoInput = document.createElement("input");
   gotoInput.className = "map-goto";
   gotoInput.type = "text";

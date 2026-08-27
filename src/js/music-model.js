@@ -9,7 +9,7 @@
    설계: docs/악보-설계.md */
 
 const MUSIC_FORMAT = "classdock-sheet";
-const MUSIC_VERSION = 4;
+const MUSIC_VERSION = 8;
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
@@ -64,9 +64,27 @@ const MUSIC_TIMBRES = [
   "piano", "guitar", "xylophone", "harp", "flute", "clarinet",
   "triangle", "sine", "square"
 ];
+const MUSIC_DRUM_STYLE_SPECS = Object.freeze({
+  off:{ label:"끔", times:null },
+  basic:{ label:"기본 드럼", times:null },
+  children:{ label:"동요", times:null },
+  ballad:{ label:"발라드", times:["4/4", "6/8"] },
+  march:{ label:"행진", times:["2/4", "4/4"] },
+  waltz:{ label:"왈츠", times:["3/4"] },
+  rock:{ label:"록", times:["4/4"] }
+});
+const MUSIC_DRUM_STYLES = Object.freeze(Object.keys(MUSIC_DRUM_STYLE_SPECS));
+const MUSIC_DEFAULT_DRUM_VOLUME = 0.65;
+const MUSIC_ACCOMPANIMENT_MODES = Object.freeze(["drums", "bass", "full"]);
+const MUSIC_ACCOMPANIMENT_TIMBRES = Object.freeze(["piano", "guitar"]);
 const MUSIC_TEMPO_MIN = 40;
 const MUSIC_TEMPO_MAX = 208;
 const MUSIC_DEFAULT_TEMPO = 100;
+const MUSIC_DEFAULT_PART_VOLUME = 1;
+const MUSIC_PART_STRUCTURE_KEYS = Object.freeze([
+  "lineBreakBefore", "repeatStart", "repeatEnd", "ending", "pickupTicks",
+  "timeChange", "keyChange", "tempoChange"
+]);
 
 // 동요 음역: 덧줄 2개 안쪽(높은음자리표 기준 C4~A5)을 기본으로 두되,
 // 파일에서 읽을 때는 조금 넉넉히 받아 준다(다른 곳에서 만든 파일을 거절하지 않으려고).
@@ -216,7 +234,8 @@ function musicMeasure(notes, opts){
 
 function musicEmpty(title){
   const now = Date.now();
-  return {
+  const measures = [musicMeasure(), musicMeasure(), musicMeasure(), musicMeasure()];
+  const sheet = {
     format:MUSIC_FORMAT,
     version:MUSIC_VERSION,
     title:String(title || "악보"),
@@ -228,9 +247,119 @@ function musicEmpty(title){
     clef:"treble",
     grandStaff:false,
     timbre:"piano",
+    drumStyle:"off",
+    drumVolume:MUSIC_DEFAULT_DRUM_VOLUME,
+    accompanimentMode:"drums",
+    accompanimentTimbre:"piano",
     showSolfege:true,
-    measures:[musicMeasure(), musicMeasure(), musicMeasure(), musicMeasure()]
+    measures
   };
+  const part = musicPart("피아노", { timbre:"piano", volume:MUSIC_DEFAULT_PART_VOLUME, measures });
+  sheet.parts = [part];
+  sheet.activePartId = part.id;
+  return sheet;
+}
+
+function musicClampPartVolume(value){
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : MUSIC_DEFAULT_PART_VOLUME;
+}
+
+function musicPart(name, opts){
+  const options = opts || {};
+  return {
+    id:typeof options.id === "string" && options.id ? options.id.slice(0, 80) : musicId("part"),
+    name:musicClampText(name || options.name || "악기", 80) || "악기",
+    timbre:MUSIC_TIMBRES.includes(options.timbre) ? options.timbre : "piano",
+    volume:musicClampPartVolume(options.volume),
+    muted:options.muted === true,
+    grandStaff:options.grandStaff === true,
+    measures:Array.isArray(options.measures) && options.measures.length ? options.measures : [musicMeasure()]
+  };
+}
+
+function musicParts(sheet){
+  return sheet && Array.isArray(sheet.parts) ? sheet.parts.filter((part) => part && typeof part === "object") : [];
+}
+
+function musicActivePart(sheet){
+  const parts = musicParts(sheet);
+  return parts.find((part) => part.id === (sheet && sheet.activePartId)) || parts[0] || null;
+}
+
+function musicCopyMeasureStructure(source, target, index){
+  const output = target || musicMeasure();
+  for (const key of MUSIC_PART_STRUCTURE_KEYS){
+    if (source && Object.prototype.hasOwnProperty.call(source, key)) output[key] = source[key];
+    else delete output[key];
+  }
+  if (index === 0) output.lineBreakBefore = false;
+  return output;
+}
+
+/* 편집 화면은 선택한 파트의 기존 sheet.measures/timbre/grandStaff API를 그대로 쓴다.
+   파트를 바꾸기 직전에 현재 화면 내용을 파트에 되돌리고, 마디 구조는 모든 파트에 맞춘다. */
+function musicSyncActivePart(sheet){
+  const active = musicActivePart(sheet);
+  if (!active) return null;
+  active.timbre = MUSIC_TIMBRES.includes(sheet.timbre) ? sheet.timbre : active.timbre;
+  active.grandStaff = sheet.grandStaff === true;
+  active.measures = Array.isArray(sheet.measures) && sheet.measures.length ? sheet.measures : [musicMeasure()];
+  const sourceMeasures = active.measures;
+  for (const part of musicParts(sheet)){
+    if (part === active) continue;
+    if (!Array.isArray(part.measures)) part.measures = [];
+    while (part.measures.length < sourceMeasures.length) part.measures.push(musicMeasure());
+    if (part.measures.length > sourceMeasures.length) part.measures.length = sourceMeasures.length;
+    sourceMeasures.forEach((measure, index) => musicCopyMeasureStructure(measure, part.measures[index], index));
+  }
+  return active;
+}
+
+function musicSelectPart(sheet, partId){
+  if (!sheet) return null;
+  musicSyncActivePart(sheet);
+  const part = musicParts(sheet).find((item) => item.id === partId);
+  if (!part) return musicActivePart(sheet);
+  sheet.activePartId = part.id;
+  sheet.measures = part.measures;
+  sheet.timbre = part.timbre;
+  sheet.grandStaff = part.grandStaff === true;
+  return part;
+}
+
+function musicAddPart(sheet, opts){
+  if (!sheet) return null;
+  const active = musicSyncActivePart(sheet);
+  const options = opts || {};
+  const existing = musicParts(sheet);
+  const sourceMeasures = active ? active.measures : (sheet.measures || [musicMeasure()]);
+  const measures = sourceMeasures.map((measure, index) => musicCopyMeasureStructure(measure, musicMeasure(), index));
+  const part = musicPart(options.name || `악기 ${existing.length + 1}`, {
+    timbre:options.timbre || "piano", volume:options.volume, muted:false,
+    grandStaff:options.grandStaff === true, measures
+  });
+  if (!Array.isArray(sheet.parts)) sheet.parts = [];
+  sheet.parts.push(part);
+  musicSelectPart(sheet, part.id);
+  return part;
+}
+
+function musicRemovePart(sheet, partId){
+  if (!sheet) return null;
+  musicSyncActivePart(sheet);
+  const parts = musicParts(sheet);
+  if (parts.length <= 1) return null;
+  const index = parts.findIndex((part) => part.id === partId);
+  if (index < 0) return null;
+  const removed = parts.splice(index, 1)[0];
+  sheet.parts = parts;
+  const next = parts[Math.min(index, parts.length - 1)];
+  sheet.activePartId = next.id;
+  sheet.measures = next.measures;
+  sheet.timbre = next.timbre;
+  sheet.grandStaff = next.grandStaff === true;
+  return removed;
 }
 
 function musicExampleSheet(name){
@@ -569,7 +698,314 @@ function musicDynamicGain(dynamic){
   return ({ pp:0.42, p:0.58, mp:0.72, mf:0.86, f:1, ff:1.15 })[dynamic] || 1;
 }
 
-function musicTimeline(sheet, opts){
+function musicDrumStyle(value){
+  return MUSIC_DRUM_STYLES.includes(value) ? value : "off";
+}
+
+function musicClampDrumVolume(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : MUSIC_DEFAULT_DRUM_VOLUME;
+}
+
+function musicDrumTimeKey(time){
+  const beats = Math.max(1, Math.round(Number(time && time.beats) || 4));
+  const beatValue = Math.max(1, Math.round(Number(time && time.beatValue) || 4));
+  return `${beats}/${beatValue}`;
+}
+
+function musicDrumStyleCompatible(style, time){
+  const spec = MUSIC_DRUM_STYLE_SPECS[musicDrumStyle(style)];
+  return !spec || !Array.isArray(spec.times) || spec.times.includes(musicDrumTimeKey(time));
+}
+
+/* 박자표별 드럼 패턴. 음표와 독립된 반주 이벤트라 화면 표기는 건드리지 않는다.
+   tick 은 마디 안의 위치, gain 은 악기별 상대 세기다. 못갖춘마디는 capacity 에서 자연스럽게 잘린다.
+   악보 중간에 박자가 바뀌어 선택 스타일과 맞지 않으면 그 마디만 기본 드럼으로 자연스럽게 이어 간다. */
+function musicDrumPattern(style, time, capacity){
+  const requested = musicDrumStyle(style);
+  if (requested === "off") return [];
+  const effective = musicDrumStyleCompatible(requested, time) ? requested : "basic";
+  const beats = Math.max(1, Math.round(Number(time && time.beats) || 4));
+  const beatValue = Math.max(1, Math.round(Number(time && time.beatValue) || 4));
+  const beatTicks = MUSIC_TICKS_PER_QUARTER * 4 / beatValue;
+  const halfBeat = beatTicks / 2;
+  const events = [];
+  const add = (kind, tick, gain) => {
+    if (tick >= 0 && tick < capacity) events.push({ kind, tick, gain });
+  };
+  const hats = (stepTicks, strong, weak) => {
+    for (let tick = 0, step = 0; tick < capacity; tick += stepTicks, step++){
+      add("hihat", tick, step % Math.max(1, Math.round(beatTicks / stepTicks)) === 0 ? strong : weak);
+    }
+  };
+
+  if (effective === "waltz"){
+    hats(beatTicks, 0.48, 0.48);
+    add("kick", 0, 0.9);
+    add("snare", beatTicks, 0.54);
+    add("snare", beatTicks * 2, 0.64);
+    return events;
+  }
+
+  if (effective === "march"){
+    hats(halfBeat, 0.58, 0.34);
+    for (let beat = 0; beat < beats; beat++){
+      add(beat % 2 === 0 ? "kick" : "snare", beat * beatTicks, beat % 2 === 0 ? 1 : 0.96);
+    }
+    add("snare", capacity - halfBeat, 0.48);
+    return events;
+  }
+
+  if (effective === "rock"){
+    hats(halfBeat, 0.7, 0.5);
+    add("kick", 0, 1.08);
+    add("snare", beatTicks, 1.06);
+    add("kick", beatTicks * 1.5, 0.72);
+    add("kick", beatTicks * 2, 0.96);
+    add("kick", beatTicks * 2.5, 0.62);
+    add("snare", beatTicks * 3, 1.08);
+    return events;
+  }
+
+  if (effective === "ballad"){
+    if (beats === 6 && beatValue === 8){
+      hats(beatTicks, 0.42, 0.42);
+      add("kick", 0, 0.72);
+      add("snare", beatTicks * 3, 0.62);
+      add("kick", beatTicks * 5, 0.42);
+    } else {
+      hats(halfBeat, 0.38, 0.26);
+      add("kick", 0, 0.72);
+      add("snare", beatTicks, 0.58);
+      add("kick", beatTicks * 2.5, 0.5);
+      add("snare", beatTicks * 3, 0.62);
+    }
+    return events;
+  }
+
+  if (effective === "children"){
+    if (beats === 6 && beatValue === 8){
+      hats(beatTicks, 0.56, 0.56);
+      add("kick", 0, 0.86);
+      add("snare", beatTicks * 3, 0.72);
+    } else if (beats === 3){
+      hats(beatTicks, 0.5, 0.5);
+      add("kick", 0, 0.86);
+      add("snare", beatTicks, 0.46);
+      add("snare", beatTicks * 2, 0.58);
+    } else {
+      hats(halfBeat, 0.54, 0.32);
+      for (let beat = 0; beat < beats; beat++){
+        add(beat % 2 === 0 ? "kick" : "snare", beat * beatTicks, beat % 2 === 0 ? 0.86 : 0.72);
+      }
+    }
+    return events;
+  }
+
+  if (beats === 6 && beatValue === 8){
+    // 여섯 개의 8분음표를 들려주되 1·4박을 큰 두 박으로 느끼게 한다.
+    for (let beat = 0; beat < 6; beat++){
+      add("hihat", beat * beatTicks, beat === 0 || beat === 3 ? 0.58 : 0.42);
+    }
+    add("kick", 0, 1);
+    add("snare", 3 * beatTicks, 0.86);
+    return events;
+  }
+
+  // 2/4·3/4·4/4는 8분음표 하이햇을 바탕으로 단순하고 익숙한 박을 만든다.
+  hats(halfBeat, 0.55, 0.38);
+  add("kick", 0, 1);
+  if (beats === 2){
+    add("snare", beatTicks, 0.88);
+  } else if (beats === 3){
+    add("snare", beatTicks, 0.68);
+    add("snare", beatTicks * 2, 0.78);
+  } else if (beats === 4){
+    add("snare", beatTicks, 0.9);
+    add("kick", beatTicks * 2, 0.82);
+    add("snare", beatTicks * 3, 0.9);
+  } else {
+    add("snare", Math.floor(beats / 2) * beatTicks, 0.86);
+  }
+  return events;
+}
+
+function musicBasicDrumPattern(time, capacity){
+  return musicDrumPattern("basic", time, capacity);
+}
+
+function musicAccompanimentMode(value){
+  return MUSIC_ACCOMPANIMENT_MODES.includes(value) ? value : "drums";
+}
+
+function musicAccompanimentTimbre(value){
+  return MUSIC_ACCOMPANIMENT_TIMBRES.includes(value) ? value : "piano";
+}
+
+function musicChordPitchClass(step, accidental){
+  const base = MUSIC_STEP_SEMITONES[String(step || "").toUpperCase()];
+  if (base === undefined) return null;
+  const alteration = accidental === "#" ? 1 : accidental === "b" ? -1 : 0;
+  return (base + alteration + 12) % 12;
+}
+
+/* 코드 기호를 자동 반주에 필요한 음정으로 바꾼다. 화면 표기는 원문을 그대로 유지하고,
+   여기서는 흔히 쓰는 장·단·7·sus·dim·aug·add9 및 슬래시 베이스만 해석한다. */
+function musicParseChordSymbol(raw){
+  const symbol = musicClampChordSymbol(raw);
+  if (!symbol) return null;
+  const compact = symbol.replace(/\s+/g, "").replace(/♯/g, "#").replace(/♭/g, "b");
+  if (/^N\.?C\.?$/i.test(compact)) return null;
+  const parts = compact.split("/");
+  if (parts.length > 2 || !parts[0]) return null;
+  const rootMatch = /^([A-Ga-g])([#b]?)(.*)$/.exec(parts[0]);
+  if (!rootMatch) return null;
+  const rootPc = musicChordPitchClass(rootMatch[1], rootMatch[2]);
+  const bassMatch = parts.length === 2 ? /^([A-Ga-g])([#b]?)$/.exec(parts[1]) : null;
+  if (parts.length === 2 && !bassMatch) return null;
+  const bassPc = bassMatch ? musicChordPitchClass(bassMatch[1], bassMatch[2]) : rootPc;
+  let suffix = rootMatch[3].replace(/[△Δ]/g, "maj").replace(/°/g, "dim").replace(/ø/g, "m7b5");
+  let intervals = null;
+  if (!suffix || suffix === "M" || /^(maj|major)$/i.test(suffix)) intervals = [0, 4, 7];
+  else if (suffix === "M7" || /^(maj7|major7)$/i.test(suffix)) intervals = [0, 4, 7, 11];
+  else if (/^(7|dom7)$/i.test(suffix)) intervals = [0, 4, 7, 10];
+  else if (/^(m|min|minor|-)$/i.test(suffix)) intervals = [0, 3, 7];
+  else if (/^(m7|min7|minor7|-7)$/i.test(suffix)) intervals = [0, 3, 7, 10];
+  else if (/^(m6|min6|minor6|-6)$/i.test(suffix)) intervals = [0, 3, 7, 9];
+  else if (/^(6|maj6)$/i.test(suffix)) intervals = [0, 4, 7, 9];
+  else if (/^(m7b5|min7b5)$/i.test(suffix)) intervals = [0, 3, 6, 10];
+  else if (/^dim7$/i.test(suffix)) intervals = [0, 3, 6, 9];
+  else if (/^dim$/i.test(suffix)) intervals = [0, 3, 6];
+  else if (/^(aug|\+)$/i.test(suffix)) intervals = [0, 4, 8];
+  else if (/^sus2$/i.test(suffix)) intervals = [0, 2, 7];
+  else if (/^(sus|sus4)$/i.test(suffix)) intervals = [0, 5, 7];
+  else if (/^add9$/i.test(suffix)) intervals = [0, 4, 7, 14];
+  else if (/^(madd9|minadd9)$/i.test(suffix)) intervals = [0, 3, 7, 14];
+  else if (/^9$/i.test(suffix)) intervals = [0, 4, 10, 14];
+  else if (/^(m9|min9)$/i.test(suffix)) intervals = [0, 3, 10, 14];
+  else if (/^(maj9|M9)$/i.test(suffix)) intervals = [0, 4, 11, 14];
+  if (!intervals) return null;
+  return { symbol, rootPc, bassPc, intervals };
+}
+
+function musicSheetHasPlayableChords(sheet){
+  for (const measure of ((sheet && sheet.measures) || [])){
+    for (const notes of [measure.notes, measure.voice2Notes, measure.bassNotes, measure.bassVoice2Notes]){
+      for (const note of (Array.isArray(notes) ? notes : [])){
+        if (note && note.chordSymbol && musicParseChordSymbol(note.chordSymbol)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/* 각 마디 시작 시점의 코드를 원래 악보 순서로 미리 계산한다. 반복 재생으로 앞 마디로
+   되돌아가더라도, 점프 직전 코드가 잘못 이어지지 않고 악보에 적힌 화성이 재현된다. */
+function musicChordMeasureStates(sheet){
+  const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
+  const states = [];
+  let current = null;
+  for (let measureIndex = 0; measureIndex < measures.length; measureIndex++){
+    const measure = measures[measureIndex];
+    const capacity = musicMeasureCapacity(sheet, measureIndex);
+    const candidates = [];
+    [
+      musicVoiceNotes(measure, "treble", 1), musicVoiceNotes(measure, "treble", 2),
+      musicVoiceNotes(measure, "bass", 1), musicVoiceNotes(measure, "bass", 2)
+    ].forEach((notes, priority) => {
+      let tick = 0;
+      for (const note of notes){
+        if (note && note.chordSymbol){
+          candidates.push({ tick, priority, symbol:musicClampChordSymbol(note.chordSymbol),
+            chord:musicParseChordSymbol(note.chordSymbol) });
+        }
+        tick += musicNoteTicks(note);
+      }
+    });
+    candidates.sort((a, b) => a.tick - b.tick || a.priority - b.priority);
+    const changes = [];
+    for (const candidate of candidates){
+      if (candidate.tick >= capacity) continue;
+      if (changes.length && changes[changes.length - 1].tick === candidate.tick) continue;
+      changes.push({ tick:candidate.tick, symbol:candidate.symbol, chord:candidate.chord });
+    }
+    states.push({ startChord:current, changes });
+    for (const change of changes) current = change.chord;
+  }
+  return states;
+}
+
+function musicChordAtTick(state, tick){
+  let chord = state ? state.startChord : null;
+  for (const change of ((state && state.changes) || [])){
+    if (change.tick > tick) break;
+    chord = change.chord;
+  }
+  return chord;
+}
+
+function musicMidiForPitchClass(pitchClass, lowest){
+  const floor = Math.round(Number(lowest) || 36);
+  return floor + ((pitchClass - (floor % 12)) + 12) % 12;
+}
+
+function musicChordVoicing(chord){
+  if (!chord) return [];
+  let root = 60 + chord.rootPc;
+  if (root > 67) root -= 12;
+  return chord.intervals.map((interval) => root + interval);
+}
+
+function musicAccompanimentPattern(style, mode, time, capacity, chordState){
+  const result = { bass:[], chords:[] };
+  const selectedMode = musicAccompanimentMode(mode);
+  if (musicDrumStyle(style) === "off" || selectedMode === "drums" || !chordState) return result;
+  const beats = Math.max(1, Math.round(Number(time && time.beats) || 4));
+  const beatValue = Math.max(1, Math.round(Number(time && time.beatValue) || 4));
+  const beatTicks = MUSIC_TICKS_PER_QUARTER * 4 / beatValue;
+  const effective = musicDrumStyleCompatible(style, time) ? musicDrumStyle(style) : "basic";
+  let bassTicks;
+  if (beats === 6 && beatValue === 8) bassTicks = [0, beatTicks * 3];
+  else if (beats === 3) bassTicks = [0, beatTicks, beatTicks * 2];
+  else if (beats >= 4) bassTicks = [0, beatTicks * 2];
+  else bassTicks = [0, beatTicks];
+  let chordTicks = [];
+  let chordLength = beatTicks * 0.72;
+  if (effective === "waltz") chordTicks = [beatTicks, beatTicks * 2];
+  else if (effective === "ballad" && beats === 6 && beatValue === 8){
+    chordTicks = [0, beatTicks * 3]; chordLength = beatTicks * 2.7;
+  } else if (effective === "ballad"){
+    chordTicks = [0, beatTicks * 2]; chordLength = beatTicks * 1.75;
+  } else {
+    for (let tick = 0; tick < capacity; tick += beatTicks) chordTicks.push(tick);
+  }
+  const changeTicks = chordState.changes.map((change) => change.tick);
+  const uniqueTicks = (ticks) => Array.from(new Set(ticks.concat(changeTicks)
+    .filter((tick) => tick >= 0 && tick < capacity))).sort((a, b) => a - b);
+  bassTicks = uniqueTicks(bassTicks);
+  chordTicks = uniqueTicks(chordTicks);
+  bassTicks.forEach((tick, at) => {
+    const chord = musicChordAtTick(chordState, tick);
+    if (!chord) return;
+    const explicitChange = chordState.changes.some((change) => change.tick === tick);
+    const pitchClass = explicitChange || at % 2 === 0 ? chord.bassPc : (chord.rootPc + 7) % 12;
+    const next = bassTicks[at + 1] === undefined ? capacity : bassTicks[at + 1];
+    result.bass.push({ tick, duration:Math.max(1, Math.min(beatTicks * 0.82, next - tick)),
+      midi:musicMidiForPitchClass(pitchClass, 36), gain:0.58, chordSymbol:chord.symbol });
+  });
+  if (selectedMode === "full") chordTicks.forEach((tick, at) => {
+    const chord = musicChordAtTick(chordState, tick);
+    if (!chord) return;
+    const next = chordTicks[at + 1] === undefined ? capacity : chordTicks[at + 1];
+    const duration = Math.max(1, Math.min(chordLength, next - tick));
+    for (const midi of musicChordVoicing(chord)){
+      result.chords.push({ tick, duration, midi, gain:0.3, chordSymbol:chord.symbol });
+    }
+  });
+  return result;
+}
+
+function musicSinglePartTimeline(sheet, opts){
   const options = opts || {};
   const measures = (sheet && Array.isArray(sheet.measures)) ? sheet.measures : [];
   const playbackRate = Math.max(0.25, Math.min(2, Number(options.playbackRate) || 1));
@@ -582,6 +1018,13 @@ function musicTimeline(sheet, opts){
   const order = musicPlaybackMeasureIndexes(measures, first, last, options.repeats !== false);
   const events = [];
   const metronome = [];
+  const drums = [];
+  const bass = [];
+  const chords = [];
+  const drumStyle = options.drums === false ? "off" : musicDrumStyle(sheet && sheet.drumStyle);
+  const drumVolume = musicClampDrumVolume(sheet && sheet.drumVolume);
+  const accompanimentMode = musicAccompanimentMode(sheet && sheet.accompanimentMode);
+  const chordStates = musicChordMeasureStates(sheet);
   const tied = new Map();
   const currentGain = new Map();
   let measureStartSeconds = 0;
@@ -600,6 +1043,26 @@ function musicTimeline(sheet, opts){
     for (let tick = 0; tick < capacity; tick += beatTicks){
       metronome.push({ start:measureStartSeconds + tick * localSecondsPerTick, accented:tick === 0,
         measure:index + 1 });
+    }
+    if (drumStyle !== "off"){
+      for (const hit of musicDrumPattern(drumStyle, settings.time, capacity)){
+        drums.push({ kind:hit.kind, start:measureStartSeconds + hit.tick * localSecondsPerTick,
+          gain:hit.gain * drumVolume, measure:index + 1 });
+      }
+    }
+    const accompaniment = musicAccompanimentPattern(drumStyle, accompanimentMode, settings.time,
+      capacity, chordStates[index]);
+    for (const item of accompaniment.bass){
+      bass.push({ midi:item.midi, frequency:musicFrequency(item.midi), rest:false,
+        start:measureStartSeconds + item.tick * localSecondsPerTick,
+        duration:item.duration * localSecondsPerTick, gain:item.gain * drumVolume,
+        accompaniment:"bass", chordSymbol:item.chordSymbol, measure:index + 1 });
+    }
+    for (const item of accompaniment.chords){
+      chords.push({ midi:item.midi, frequency:musicFrequency(item.midi), rest:false,
+        start:measureStartSeconds + item.tick * localSecondsPerTick,
+        duration:item.duration * localSecondsPerTick, gain:item.gain * drumVolume,
+        accompaniment:"chord", chordSymbol:item.chordSymbol, measure:index + 1 });
     }
     for (const staff of staffs){
       for (const voice of [1, 2]){
@@ -652,11 +1115,60 @@ function musicTimeline(sheet, opts){
     measureStartSeconds += capacity * localSecondsPerTick;
   }
   events.sort((a, b) => a.start - b.start || a.staff.localeCompare(b.staff) || a.voice - b.voice);
+  drums.sort((a, b) => a.start - b.start || a.kind.localeCompare(b.kind));
+  bass.sort((a, b) => a.start - b.start || a.midi - b.midi);
+  chords.sort((a, b) => a.start - b.start || a.midi - b.midi);
   const firstSettings = musicEffectiveMeasureSettings(sheet, order.length ? order[0] : first);
   return { tempo, playbackRate, secondsPerTick, totalSeconds:measureStartSeconds, events,
-    metronome, countInBeats:firstSettings.time.beats,
+    metronome, drums, bass, chords, countInBeats:firstSettings.time.beats,
     countInBeatSeconds:(60 / (firstSettings.tempo * playbackRate)) * (4 / firstSettings.time.beatValue),
     measureOrder:order.map((index) => index + 1) };
+}
+
+function musicPartSheet(sheet, part){
+  return Object.assign({}, sheet, {
+    parts:undefined, activePartId:undefined,
+    measures:part.measures,
+    timbre:part.timbre,
+    grandStaff:part.grandStaff === true
+  });
+}
+
+/* 여러 파트를 같은 0초 축에 펼친 합주 타임라인. 드럼과 코드 자동 반주는 선택 파트에서
+   한 번만 만들고, 각 악기 음표에는 고유 음색·파트·음량 정보를 붙인다. */
+function musicTimeline(sheet, opts){
+  const options = opts || {};
+  const parts = musicParts(sheet);
+  if (!parts.length) return musicSinglePartTimeline(sheet, options);
+  musicSyncActivePart(sheet);
+  const requested = options.partId && parts.find((part) => part.id === options.partId);
+  const anchor = requested || musicActivePart(sheet) || parts[0];
+  const base = musicSinglePartTimeline(musicPartSheet(sheet, anchor), options);
+  const selectedParts = requested ? [requested] : parts;
+  const events = [];
+  let totalSeconds = base.totalSeconds;
+  for (const part of selectedParts){
+    if (part.muted === true && options.includeMuted !== true) continue;
+    const timeline = part === anchor ? base : musicSinglePartTimeline(musicPartSheet(sheet, part),
+      Object.assign({}, options, { drums:false }));
+    totalSeconds = Math.max(totalSeconds, timeline.totalSeconds);
+    const volume = musicClampPartVolume(part.volume);
+    for (const event of timeline.events){
+      events.push(Object.assign({}, event, {
+        gain:event.gain * volume,
+        timbre:part.timbre,
+        partId:part.id,
+        partName:part.name
+      }));
+    }
+  }
+  events.sort((a, b) => a.start - b.start || String(a.partId).localeCompare(String(b.partId))
+    || a.staff.localeCompare(b.staff) || a.voice - b.voice);
+  return Object.assign({}, base, {
+    totalSeconds, events,
+    parts:selectedParts.map((part) => ({ id:part.id, name:part.name, timbre:part.timbre,
+      volume:musicClampPartVolume(part.volume), muted:part.muted === true }))
+  });
 }
 
 /* ----- 따라치기(음 맞추기) 순서 -----
@@ -680,7 +1192,7 @@ const MUSIC_PC_LABELS = ["도", "도♯", "레", "레♯", "미", "파", "파♯
 function musicPracticeSteps(sheet, opts){
   const options = opts || {};
   const timeline = musicTimeline(sheet, {
-    from:options.from, to:options.to, staff:options.staff, repeats:false
+    from:options.from, to:options.to, staff:options.staff, partId:options.partId, repeats:false
   });
   const groups = [];
   let group = null;
@@ -855,7 +1367,10 @@ function musicRetuneForKey(sheet, nextKey){
   const before = musicKeyAlterations(sheet.key);
   const after = musicKeyAlterations(nextKey);
   let changed = 0;
-  for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
+  const partMeasures = musicParts(sheet).length
+    ? (musicSyncActivePart(sheet), musicParts(sheet).map((part) => part.measures))
+    : [Array.isArray(sheet.measures) ? sheet.measures : []];
+  for (const measures of partMeasures) for (const measure of measures){
     for (const note of [
       ...musicVoiceNotes(measure, "treble", 1), ...musicVoiceNotes(measure, "treble", 2),
       ...musicVoiceNotes(measure, "bass", 1), ...musicVoiceNotes(measure, "bass", 2)
@@ -979,7 +1494,10 @@ function musicTransposeSheet(sheet, semitones, opts){
 
   const edits = [];
   let outOfRange = 0, blocked = 0;
-  for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
+  const partMeasures = musicParts(sheet).length
+    ? (musicSyncActivePart(sheet), musicParts(sheet).map((part) => part.measures))
+    : [Array.isArray(sheet.measures) ? sheet.measures : []];
+  for (const measures of partMeasures) for (const measure of measures){
     for (const staff of ["treble", "bass"]){
       for (const voice of [1, 2]){
         for (const note of musicVoiceNotes(measure, staff, voice)){
@@ -1009,7 +1527,7 @@ function musicTransposeSheet(sheet, semitones, opts){
     edit.pitch.alter = musicClampAlter(edit.moved.alter);
   }
   // 중간에 조표가 바뀌는 악보는 그 조표도 같은 간격으로 옮겨야 앞뒤가 맞는다.
-  for (const measure of (Array.isArray(sheet.measures) ? sheet.measures : [])){
+  for (const measures of partMeasures) for (const measure of measures){
     if (!measure || !MUSIC_KEYS[measure.keyChange]) continue;
     const tonic = musicKeyTonic(measure.keyChange);
     const moved = musicTransposePitch({ step:tonic.step, octave:4, alter:tonic.alter }, amount, diatonicSteps);
@@ -1131,6 +1649,22 @@ function musicNormalizeMeasure(raw){
   return measure;
 }
 
+function musicNormalizePart(raw, fallbackName){
+  if (!raw || typeof raw !== "object") return null;
+  const measures = (Array.isArray(raw.measures) ? raw.measures : []).map(musicNormalizeMeasure);
+  if (measures.length) measures[0].lineBreakBefore = false;
+  const grandStaff = raw.grandStaff === true || measures.some((measure) =>
+    measure.bassNotes.length > 0 || measure.bassVoice2Notes.length > 0);
+  return musicPart(musicClampText(raw.name, 80) || fallbackName || "악기", {
+    id:raw.id,
+    timbre:MUSIC_TIMBRES.includes(raw.timbre) ? raw.timbre : "piano",
+    volume:raw.volume,
+    muted:raw.muted === true,
+    grandStaff,
+    measures:measures.length ? measures : [musicMeasure()]
+  });
+}
+
 function musicParse(text){
   let raw;
   try { raw = JSON.parse(String(text || "")); }
@@ -1146,6 +1680,21 @@ function musicParse(text){
     ? Math.round(Number(raw.time.beatValue)) : 4;
   const measures = (Array.isArray(raw.measures) ? raw.measures : []).map(musicNormalizeMeasure);
   if (measures.length) measures[0].lineBreakBefore = false;  // 첫 마디 앞 줄바꿈은 의미가 없다
+  const legacyGrandStaff = raw.grandStaff === true || measures.some((measure) =>
+    measure.bassNotes.length > 0 || measure.bassVoice2Notes.length > 0);
+  const legacyTimbre = (version === 1 && raw.timbre === "triangle")
+    ? "piano" : (MUSIC_TIMBRES.includes(raw.timbre) ? raw.timbre : "piano");
+  let parts = [];
+  if (version >= 8 && Array.isArray(raw.parts)){
+    parts = raw.parts.map((part, index) => musicNormalizePart(part, `악기 ${index + 1}`)).filter(Boolean);
+  }
+  if (!parts.length){
+    parts = [musicPart(legacyTimbre === "piano" ? "피아노" : "악기 1", {
+      timbre:legacyTimbre, volume:1, grandStaff:legacyGrandStaff,
+      measures:measures.length ? measures : [musicMeasure()]
+    })];
+  }
+  const activePart = parts.find((part) => part.id === raw.activePartId) || parts[0];
   return {
     format:MUSIC_FORMAT,
     version:MUSIC_VERSION,
@@ -1156,20 +1705,75 @@ function musicParse(text){
     time:{ beats, beatValue },
     key:MUSIC_KEYS[raw.key] ? raw.key : "C",
     clef:"treble",
-    grandStaff:raw.grandStaff === true || measures.some((measure) =>
-      measure.bassNotes.length > 0 || measure.bassVoice2Notes.length > 0),
+    grandStaff:activePart.grandStaff === true,
     // v1의 triangle 은 당시 새 악보 기본값이었다. v2에서 실제 피아노가 기본이 되었으므로
     // 기존 악보도 별도 설정 없이 개선된 소리를 듣도록 자동 이전한다.
-    timbre:(version === 1 && raw.timbre === "triangle")
-      ? "piano" : (MUSIC_TIMBRES.includes(raw.timbre) ? raw.timbre : "piano"),
+    timbre:activePart.timbre,
+    drumStyle:musicDrumStyle(raw.drumStyle),
+    drumVolume:musicClampDrumVolume(raw.drumVolume),
+    accompanimentMode:musicAccompanimentMode(raw.accompanimentMode),
+    accompanimentTimbre:musicAccompanimentTimbre(raw.accompanimentTimbre),
     showSolfege:raw.showSolfege !== false,
-    measures:measures.length ? measures : [musicMeasure()]
+    measures:activePart.measures,
+    parts,
+    activePartId:activePart.id
   };
+}
+
+function musicSerializePartMeasures(measures, grandStaff){
+  const serializeNote = (note) => {
+    const outNote = note.rest
+      ? { id:String(note.id || musicId("n")), rest:true, value:note.value, dots:musicClampDots(note.dots) }
+      : { id:String(note.id || musicId("n")), rest:false, step:note.step,
+          octave:Math.round(Number(note.octave) || 4), alter:musicClampAlter(note.alter),
+          value:note.value, dots:musicClampDots(note.dots) };
+    const xOffset = musicClampXOffset(note.xOffset);
+    if (xOffset) outNote.xOffset = xOffset;
+    if (!note.rest){
+      const chord = musicNotePitches(note).filter((pitch) => musicPitchKey(pitch) !== musicPitchKey(note));
+      if (chord.length) outNote.chord = chord.map((pitch) => ({
+        step:pitch.step, octave:pitch.octave, alter:musicClampAlter(pitch.alter)
+      }));
+      if (note.tieToNext === true) outNote.tieToNext = true;
+      if (note.slurToNext === true) outNote.slurToNext = true;
+      const chordSymbol = musicClampChordSymbol(note.chordSymbol);
+      if (chordSymbol) outNote.chordSymbol = chordSymbol;
+      const lyric = musicClampText(note.lyric, 80);
+      if (lyric) outNote.lyric = lyric;
+      if (["pp", "p", "mp", "mf", "f", "ff"].includes(note.dynamic)) outNote.dynamic = note.dynamic;
+      if (["staccato", "accent", "tenuto"].includes(note.articulation)) outNote.articulation = note.articulation;
+      const fingering = Math.round(Number(note.fingering) || 0);
+      if (fingering >= 1 && fingering <= 5) outNote.fingering = fingering;
+      if (["start", "stop"].includes(note.pedal)) outNote.pedal = note.pedal;
+    }
+    if (Number(note.tuplet) === 3) outNote.tuplet = 3;
+    return outNote;
+  };
+  return (Array.isArray(measures) ? measures : []).map((measure, index) => {
+    const outMeasure = { id:String(measure && measure.id || musicId("m")) };
+    if (index > 0 && measure && measure.lineBreakBefore === true) outMeasure.lineBreakBefore = true;
+    if (measure && measure.repeatStart === true) outMeasure.repeatStart = true;
+    if (measure && measure.repeatEnd === true) outMeasure.repeatEnd = true;
+    if (measure && (measure.ending === 1 || measure.ending === 2)) outMeasure.ending = measure.ending;
+    if (Math.round(Number(measure && measure.pickupTicks) || 0) > 0) outMeasure.pickupTicks = Math.round(Number(measure.pickupTicks));
+    if (musicNormalizeTime(measure && measure.timeChange)) outMeasure.timeChange = musicNormalizeTime(measure.timeChange);
+    if (measure && MUSIC_KEYS[measure.keyChange]) outMeasure.keyChange = measure.keyChange;
+    if (measure && Number(measure.tempoChange) > 0) outMeasure.tempoChange = musicClampTempo(measure.tempoChange);
+    outMeasure.notes = musicStaffNotes(measure, "treble").map(serializeNote);
+    const voice2Notes = musicVoiceNotes(measure, "treble", 2);
+    if (voice2Notes.length) outMeasure.voice2Notes = voice2Notes.map(serializeNote);
+    const bassNotes = musicStaffNotes(measure, "bass");
+    if (grandStaff === true || bassNotes.length) outMeasure.bassNotes = bassNotes.map(serializeNote);
+    const bassVoice2Notes = musicVoiceNotes(measure, "bass", 2);
+    if (bassVoice2Notes.length) outMeasure.bassVoice2Notes = bassVoice2Notes.map(serializeNote);
+    return outMeasure;
+  });
 }
 
 // 같은 모델은 언제나 같은 바이트로 — 키 순서를 코드로 고정한다(불필요한 파일 변경·diff 방지).
 function musicSerialize(sheet){
   const model = sheet || musicEmpty();
+  musicSyncActivePart(model);
   const out = {
     format:MUSIC_FORMAT,
     version:MUSIC_VERSION,
@@ -1185,6 +1789,10 @@ function musicSerialize(sheet){
     clef:"treble",
     grandStaff:model.grandStaff === true,
     timbre:MUSIC_TIMBRES.includes(model.timbre) ? model.timbre : "piano",
+    drumStyle:musicDrumStyle(model.drumStyle),
+    drumVolume:musicClampDrumVolume(model.drumVolume),
+    accompanimentMode:musicAccompanimentMode(model.accompanimentMode),
+    accompanimentTimbre:musicAccompanimentTimbre(model.accompanimentTimbre),
     showSolfege:model.showSolfege !== false,
     measures:(Array.isArray(model.measures) ? model.measures : []).map((measure, index) => {
       const outMeasure = { id:String(measure && measure.id || musicId("m")) };
@@ -1241,6 +1849,17 @@ function musicSerialize(sheet){
       return outMeasure;
     })
   };
+  const activePart = musicActivePart(model);
+  out.activePartId = activePart ? activePart.id : "";
+  out.parts = musicParts(model).map((part) => ({
+    id:String(part.id || musicId("part")),
+    name:musicClampText(part.name, 80) || "악기",
+    timbre:MUSIC_TIMBRES.includes(part.timbre) ? part.timbre : "piano",
+    volume:musicClampPartVolume(part.volume),
+    muted:part.muted === true,
+    grandStaff:part.grandStaff === true,
+    measures:musicSerializePartMeasures(part.measures, part.grandStaff)
+  }));
   return JSON.stringify(out, null, 2);
 }
 

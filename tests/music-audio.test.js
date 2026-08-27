@@ -23,7 +23,8 @@ function loadMusicAudio(extras){
     vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8"), context, { filename:file });
   }
   vm.runInContext(`
-    ;globalThis.__music = { MNMusicAudio, musicEmpty, musicNote, musicRest, musicMeasure, musicTimeline };`, context);
+    ;globalThis.__music = { MNMusicAudio, musicEmpty, musicNote, musicRest, musicMeasure, musicTimeline,
+      musicAddPart, musicSelectPart, musicActivePart };`, context);
   return context.__music;
 }
 
@@ -165,6 +166,67 @@ test("메트로놈은 첫 박을 더 높고 크게 예약한다", () => {
   assert.ok(ctx.oscillators[0].frequencyAt[0].value > ctx.oscillators[1].frequencyAt[0].value);
   assert.ok(ctx.gains[0].envelope[1].value > ctx.gains[1].envelope[1].value);
   assert.ok(accent.stopAt < plain.stopAt || accent.stopAt === 2.05);
+});
+
+test("기본 드럼은 킥·스네어·하이햇을 오디오 시계에 맞춰 합성한다", () => {
+  const api = loadMusicAudio();
+  const ctx = fakeContext();
+  const events = [
+    { kind:"kick", start:0, gain:0.7 },
+    { kind:"snare", start:0.5, gain:0.6 },
+    { kind:"hihat", start:1, gain:0.4 }
+  ];
+  const nodes = api.MNMusicAudio.scheduleDrumsInto(ctx, {}, events, 2);
+  assert.equal(nodes.length, 4, "스네어는 몸통과 고역 두 소리를 함께 쓴다");
+  assert.deepEqual(Array.from(nodes, (node) => node.drumKind), ["kick", "snare", "snare", "hihat"]);
+  assert.deepEqual(ctx.oscillators.map((osc) => osc.startedAt), [2, 2.5, 2.5, 3]);
+  assert.equal(ctx.oscillators[0].type, "sine");
+  assert.equal(ctx.oscillators.at(-1).type, "square");
+  for (const gain of ctx.gains){
+    assert.equal(gain.envelope[0].value, 0);
+    assert.equal(gain.envelope.at(-1).value, 0);
+  }
+});
+
+test("코드 기반 베이스와 화음도 재생 예약 함수에 함께 태운다", () => {
+  const api = loadMusicAudio();
+  const sheet = api.musicEmpty("자동 반주 예약");
+  sheet.drumStyle = "basic";
+  sheet.accompanimentMode = "full";
+  sheet.measures = [api.musicMeasure([
+    api.musicNote("C", 4, { value:"whole", chordSymbol:"C" })
+  ])];
+  const timeline = api.musicTimeline(sheet);
+  assert.ok(timeline.bass.length > 0);
+  assert.ok(timeline.chords.length > 0);
+  const ctx = fakeContext();
+  const bassNodes = api.MNMusicAudio.scheduleInto(ctx, {}, timeline.bass, 1, "triangle", null);
+  const chordNodes = api.MNMusicAudio.scheduleInto(ctx, {}, timeline.chords, 1, "piano", null);
+  assert.equal(bassNodes.length, timeline.bass.length);
+  assert.equal(chordNodes.length, timeline.chords.length);
+  assert.ok(ctx.oscillators.every((osc) => osc.type === "triangle"));
+  assert.equal(ctx.oscillators[0].startedAt, 1 + timeline.bass[0].start);
+});
+
+test("합주 예약은 이벤트마다 다른 샘플 악기와 파트 음량을 사용한다", () => {
+  const api = loadMusicAudio();
+  const sheet = api.musicEmpty("두 악기");
+  const piano = api.musicActivePart(sheet);
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4)])];
+  const guitar = api.musicAddPart(sheet, { name:"기타", timbre:"guitar", volume:0.5 });
+  sheet.measures[0].notes.push(api.musicNote("E", 4));
+  api.musicSelectPart(sheet, piano.id);
+  const events = api.musicTimeline(sheet).events.filter((event) => !event.rest);
+  assert.deepEqual(Array.from(new Set(events.map((event) => event.timbre))).sort(), ["guitar", "piano"]);
+  const ctx = fakeContext();
+  const buffers = {
+    piano:[{ midi:60, buffer:{ duration:1 } }],
+    guitar:[{ midi:64, buffer:{ duration:1 } }]
+  };
+  const nodes = api.MNMusicAudio.scheduleInto(ctx, {}, events, 0, "piano", buffers);
+  assert.equal(nodes.length, 2);
+  assert.equal(ctx.bufferSources.length, 2);
+  assert.ok(events.find((event) => event.partId === guitar.id).gain < 1);
 });
 
 test("악보 음량과 음소거 상태는 안전한 범위에서 바뀐다", () => {

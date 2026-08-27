@@ -379,10 +379,11 @@ const MNKoreanSpellcheck = (() => {
       const words = readUserDictionary(); words.add(word); writeUserDictionary(words);
       activeController.run(false);
     });
-    reset.addEventListener("click", () => {
+    reset.addEventListener("click", async () => {
       const words = readUserDictionary();
       if (!words.size) return;
-      const ok = typeof confirm === "function" ? confirm(tr("맞춤법 사용자 사전을 모두 비울까요?")) : true;
+      const ok = typeof confirmDialog === "function"
+        && await confirmDialog(tr("맞춤법 사용자 사전을 모두 비울까요?"), tr("지우기"), tr("취소"));
       if (!ok) return;
       writeUserDictionary(new Set());
       if (activeController) activeController.run(false);
