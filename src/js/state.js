@@ -335,7 +335,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"musicPractice", label:"따라치기", cls:"music-toolvis-practice", target:"music" },
   { id:"musicEar", label:"음감 테스트", cls:"music-toolvis-ear", target:"music" },
   { id:"musicVolume", label:"음량·음소거", cls:"music-toolvis-volume", target:"music" },
-  { id:"musicXml", label:"MusicXML 내보내기", cls:"music-toolvis-xml", target:"music" },
+  { id:"musicXml", label:"MusicXML 가져오기·내보내기", cls:"music-toolvis-xml", target:"music" },
   { id:"musicMidiInput", label:"MIDI 건반 입력", cls:"music-toolvis-midi-input", target:"music" },
   { id:"musicMidiExport", label:"MIDI 내보내기", cls:"music-toolvis-midi-export", target:"music" },
   { id:"musicReference", label:"악보 이미지 참고", cls:"music-toolvis-reference", target:"music" },

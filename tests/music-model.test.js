@@ -430,14 +430,14 @@ test("학생용 예제 악보는 완성된 4마디와 안정된 제목·빠르�
   assert.equal(api.musicExampleSheet("unknown"), null);
 });
 
-test("계이름 노출 여부는 새 악보에서 켜지고 .msheet에 저장·복원된다", () => {
+test("계이름은 새 악보에서 꺼지고 사용자가 켜면 .msheet에 저장·복원된다", () => {
   const api = loadMusic();
   const sheet = api.musicEmpty("계이름 학습");
-  assert.equal(sheet.showSolfege, true);
-  sheet.showSolfege = false;
+  assert.equal(sheet.showSolfege, false);
+  sheet.showSolfege = true;
   const saved = api.musicSerialize(sheet);
-  assert.match(saved, /"showSolfege": false/);
-  assert.equal(api.musicParse(saved).showSolfege, false);
+  assert.match(saved, /"showSolfege": true/);
+  assert.equal(api.musicParse(saved).showSolfege, true);
   const legacy = JSON.parse(saved);
   delete legacy.showSolfege;
   assert.equal(api.musicParse(JSON.stringify(legacy)).showSolfege, true);

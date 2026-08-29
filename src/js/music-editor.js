@@ -970,6 +970,8 @@ async function mountMusicEditor(doc){
   volumeWrap.append(muteBtn, volumeInput, volumeLabel);
   const stopBtn = musicButton("■ 정지");
   stopBtn.disabled = true;
+  const musicXmlImportBtn = musicButton("📂 MusicXML",
+    ".musicxml 또는 압축형 .mxl 파일을 새 편집용 악보로 가져옵니다");
   const musicXmlBtn = musicButton("⬇ MusicXML", "다른 악보 프로그램에서 열 수 있는 .musicxml 파일로 저장");
   const midiInputBtn = musicButton("🎹 MIDI 입력", "연결된 MIDI 건반으로 음표와 화음을 입력합니다");
   const midiExportBtn = musicButton("⬇ MIDI", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
@@ -1002,6 +1004,7 @@ async function mountMusicEditor(doc){
   practiceWrap.classList.add("music-toolvis-practice");
   earWrap.classList.add("music-toolvis-ear");
   volumeWrap.classList.add("music-toolvis-volume");
+  musicXmlImportBtn.classList.add("music-toolvis-xml");
   musicXmlBtn.classList.add("music-toolvis-xml");
   midiInputBtn.classList.add("music-toolvis-midi-input");
   midiExportBtn.classList.add("music-toolvis-midi-export");
@@ -1011,7 +1014,7 @@ async function mountMusicEditor(doc){
   printBtn.classList.add("music-toolvis-print");
   zoomWrap.classList.add("music-toolvis-zoom");
   playBar.append(playAllBtn, playActivePartBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
+    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 악보 ----- */
@@ -1047,8 +1050,12 @@ async function mountMusicEditor(doc){
   imageReferenceInput.type = "file";
   imageReferenceInput.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp";
   imageReferenceInput.hidden = true;
+  const musicXmlInput = document.createElement("input");
+  musicXmlInput.type = "file";
+  musicXmlInput.accept = ".musicxml,.mxl";
+  musicXmlInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
-  root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el, imageReferenceInput);
+  root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el, imageReferenceInput, musicXmlInput);
 
   /* ----- 도구막대 접기 -----
      악보만 넓게 보고 싶을 때 편집 도구·쉬운 입력·재생 세 줄을 접는다. 접어도 우클릭 메뉴에
@@ -2923,6 +2930,7 @@ async function mountMusicEditor(doc){
       ] },
       { label:"저장·내보내기", children:[
         { label:"악보 저장 (Ctrl+S)", action:() => saveMusicSheet(doc) },
+        { label:"MusicXML 가져오기…", action:() => musicXmlInput.click() },
         { label:targetLine >= 0 ? `이 단(${musicRangeLabel(scoreLines[targetLine])})을 메모로` : "이 단을 메모로",
           action:() => sendScoreToMemo(targetLine), disabled:targetLine < 0 },
         { label:"악보 전체를 메모로", action:() => sendScoreToMemo(null) },
@@ -3934,6 +3942,19 @@ async function mountMusicEditor(doc){
       if (typeof toast === "function") toast(error && error.message ? error.message : "MusicXML 저장에 실패했어요.", 3000, { type:"error" });
     }
   }
+  musicXmlImportBtn.addEventListener("click", () => musicXmlInput.click());
+  musicXmlInput.addEventListener("change", async () => {
+    const file = musicXmlInput.files && musicXmlInput.files[0];
+    musicXmlInput.value = "";
+    if (!file) return;
+    if (typeof loadMusicXml !== "function"){
+      if (typeof toast === "function") toast("MusicXML 가져오기 기능을 준비하지 못했어요.", 3000, { type:"error" });
+      return;
+    }
+    musicXmlImportBtn.disabled = true;
+    try { await loadMusicXml(file); }
+    finally { musicXmlImportBtn.disabled = false; }
+  });
   musicXmlBtn.addEventListener("click", exportMusicXml);
 
   function midiVarLength(value){

@@ -251,7 +251,7 @@ function musicEmpty(title){
     drumVolume:MUSIC_DEFAULT_DRUM_VOLUME,
     accompanimentMode:"drums",
     accompanimentTimbre:"piano",
-    showSolfege:true,
+    showSolfege:false,
     measures
   };
   const part = musicPart("피아노", { timbre:"piano", volume:MUSIC_DEFAULT_PART_VOLUME, measures });

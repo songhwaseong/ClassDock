@@ -145,11 +145,17 @@ test("피아노 대보표·화음·붙임줄·코드 기호를 MusicXML로 내�
   assert.match(xml, /<backup>[\s\S]*<staff>2<\/staff>/);
 });
 
-test("편집기에서 MusicXML 내려받기 버튼을 제공한다", () => {
+test("편집기에서 MusicXML 가져오기와 내려받기 버튼을 제공한다", () => {
   const editor = read("src/js/music-editor.js");
+  assert.match(editor, /const musicXmlImportBtn = musicButton\("📂 MusicXML"/);
+  assert.match(editor, /musicXmlInput\.accept = "\.musicxml,\.mxl"/);
+  assert.match(editor, /musicXmlImportBtn\.addEventListener\("click", \(\) => musicXmlInput\.click\(\)\)/);
+  assert.match(editor, /await loadMusicXml\(file\)/);
+  assert.match(editor, /label:"MusicXML 가져오기…", action:\(\) => musicXmlInput\.click\(\)/);
   assert.match(editor, /const musicXmlBtn = musicButton\("⬇ MusicXML"/);
   assert.match(editor, /musicSerializeXml\(sheet\)/);
   assert.match(editor, /musicExportName\(doc, "musicxml"\)/);
   assert.match(editor, /application\/vnd\.recordare\.musicxml\+xml/);
   assert.match(editor, /좌우 미세 위치는 다른 프로그램의 자동 조판에 따라 달라질 수 있어요/);
+  assert.match(read("src/js/state.js"), /label:"MusicXML 가져오기·내보내기"/);
 });
