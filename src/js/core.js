@@ -4031,7 +4031,7 @@
   // 분할 작업에서 문서를 골랐을 때 수행할 상태 전이를 DOM과 분리해 결정한다.
   // reference/work 역할과 실제 좌우(또는 상하) 배치는 별개이므로 역할 ID만 사용한다.
   const {
-    studyPaneSelectionAction, studySplitEndKeepId, splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, isInternalDragTransfer, droppedTransferNeedsFolderPicker, captureDroppedFileItems, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, INTERNAL_DRAG_MIME
+    studyPaneSelectionAction, studySplitEndKeepId, splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, isInternalDragTransfer, droppedTransferNeedsFolderPicker, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, INTERNAL_DRAG_MIME
   } = typeof MNInteractionCore !== "undefined"
     ? MNInteractionCore
     : require("./interaction-core.js");
@@ -4052,7 +4052,7 @@
     normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections,
     officeXmlDecodeText, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
     studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,
-    splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
+    splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles,
     INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
   };
 });

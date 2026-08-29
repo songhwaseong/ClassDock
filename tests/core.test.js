@@ -15,7 +15,7 @@ const {
   normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport, latexToMathML, prettyPrintJsonText, jsonTreeNodeInfo,
   orderHwpxSections, officeXmlTextRuns, officeXmlParagraphLines, renderedTextMatchSegments,
   workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, dataTransferHasFileItems, captureDroppedFileItems,
+  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, dataTransferHasFileItems, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles,
   droppedTransferNeedsFolderPicker
 } = require("../src/js/core.js");
 
@@ -1394,6 +1394,28 @@ test("modern folder handles are captured even when a legacy entry is also availa
   assert.equal(handleCalls, 1);
   assert.deepEqual(captured.entries, [legacyDirectory]);
   assert.deepEqual(await Promise.all(captured.handlePromises), [modernDirectory]);
+});
+
+test("folder drops keep only roots when WebView also exposes their descendants", async () => {
+  const legacyRoot = { name:"sample", fullPath:"/sample", isDirectory:true };
+  const legacyFile = { name:"note.md", fullPath:"/sample/note.md", isFile:true };
+  const legacyChild = { name:"child", fullPath:"/sample/child", isDirectory:true };
+  const legacyLoose = { name:"loose.txt", fullPath:"/loose.txt", isFile:true };
+  assert.deepEqual(topLevelDroppedEntries([legacyRoot, legacyFile, legacyChild, legacyLoose]), [legacyRoot, legacyLoose]);
+
+  const nestedFile = { name:"note.md", kind:"file" };
+  const nestedDirectory = { name:"child", kind:"directory" };
+  const looseFile = { name:"loose.txt", kind:"file" };
+  const modernRoot = {
+    name:"sample", kind:"directory",
+    async resolve(handle){
+      if (handle === modernRoot) return [];
+      if (handle === nestedFile) return ["note.md"];
+      if (handle === nestedDirectory) return ["child"];
+      return null;
+    }
+  };
+  assert.deepEqual(await topLevelDroppedHandles([modernRoot, nestedFile, nestedDirectory, looseFile]), [modernRoot, looseFile]);
 });
 
 test("directory placeholders are not opened as zero-byte untitled files", () => {

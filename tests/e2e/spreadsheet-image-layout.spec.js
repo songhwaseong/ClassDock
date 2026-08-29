@@ -8,6 +8,10 @@ const IMAGE_FILES = [
   "054_수원화성.png",
   "075_광주학생항일운동.png"
 ];
+/* 이 검사는 저장소에 담지 않는 사진 자료(연대표-테스트자료)를 써서 진짜 그림이 든 xlsx 를 만든다.
+   자료가 없는 작업 폴더에서는 ENOENT 로 실패해 "그림 배치가 깨졌다"로 잘못 읽히므로, 없으면 건너뛴다. */
+const IMAGE_DIR = path.resolve("연대표-테스트자료", "연대표이미지");
+const imagesReady = IMAGE_FILES.every((name) => fs.existsSync(path.join(IMAGE_DIR, name)));
 
 async function imageLayoutWorkbook(){
   const workbook = new ExcelJS.Workbook();
@@ -28,7 +32,7 @@ async function imageLayoutWorkbook(){
     sheet.getCell(rowNumber, 8).alignment = { wrapText:true, vertical:"middle" };
     sheet.getCell(rowNumber, 9).value = ["purple", "green", "amber"][index];
     const imageId = workbook.addImage({
-      buffer:fs.readFileSync(path.resolve("연대표-테스트자료", "연대표이미지", IMAGE_FILES[index])),
+      buffer:fs.readFileSync(path.join(IMAGE_DIR, IMAGE_FILES[index])),
       extension:"png"
     });
     sheet.addImage(imageId, { tl:{ col:9, row:rowNumber - 1 }, ext:{ width:159, height:108 } });
@@ -37,6 +41,7 @@ async function imageLayoutWorkbook(){
 }
 
 test("삽입 그림 시트는 원본 행·열 크기와 줄바꿈을 복원해 그림이 겹치지 않는다", async ({ page }) => {
+  test.skip(!imagesReady, "사진 자료(연대표-테스트자료/연대표이미지)가 없어 건너뜁니다.");
   await page.setViewportSize({ width:1500, height:900 });
   await page.goto("/");
   await page.waitForTimeout(800);

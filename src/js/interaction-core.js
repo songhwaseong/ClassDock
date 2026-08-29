@@ -112,6 +112,59 @@ const MNInteractionCore = (() => {
     }
     return { files, entries, handlePromises };
   }
+
+  // WebView2/Chromium 조합에 따라 폴더 하나를 드롭해도 DataTransfer.items 에
+  // 루트 폴더와 그 안의 파일·하위 폴더가 함께 나열될 수 있다. 이 항목들을 그대로
+  // 열면 내부 문서가 별도 최상위 항목으로 한 번 더 생기므로, 선택된 디렉터리 아래의
+  // 엔트리는 루트 디렉터리 순회에 맡기고 제거한다.
+  function topLevelDroppedEntries(entries) {
+    const list = [...(entries || [])].filter(Boolean);
+    const pathOf = entry => {
+      const raw = String(entry.fullPath || entry.name || "").replace(/\\/g, "/");
+      return raw.split("/").filter(Boolean).join("/").toLocaleLowerCase();
+    };
+    const directoryPaths = list
+      .filter(entry => entry.isDirectory)
+      .map(pathOf)
+      .filter(Boolean);
+    const seen = new Set();
+    return list.filter(entry => {
+      const path = pathOf(entry);
+      if (!path) return true;
+      if (seen.has(path)) return false;
+      seen.add(path);
+      return !directoryPaths.some(dir => path !== dir && path.startsWith(dir + "/"));
+    });
+  }
+
+  // File System Access 핸들은 fullPath 를 노출하지 않지만 디렉터리의 resolve()로
+  // 포함 관계를 확인할 수 있다. 같은 루트와 그 자식 핸들이 함께 전달된 경우 자식만 뺀다.
+  async function topLevelDroppedHandles(handles) {
+    const list = [...(handles || [])].filter(Boolean);
+    const kept = [];
+    for (let i = 0; i < list.length; i++) {
+      const handle = list[i];
+      let nestedOrDuplicate = false;
+      for (let j = 0; j < list.length; j++) {
+        if (i === j) continue;
+        const candidate = list[j];
+        try {
+          if (j < i && typeof candidate.isSameEntry === "function" && await candidate.isSameEntry(handle)) {
+            nestedOrDuplicate = true;
+            break;
+          }
+          if (candidate.kind !== "directory" || typeof candidate.resolve !== "function") continue;
+          const relative = await candidate.resolve(handle);
+          if (Array.isArray(relative) && (relative.length > 0 || j < i)) {
+            nestedOrDuplicate = true;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (!nestedOrDuplicate) kept.push(handle);
+    }
+    return kept;
+  }
   
   // 참고 잠금 중 포인터 입력은 읽기·선택 표면만 통과시킨다.
   // 표는 한 번 클릭 선택까지만 허용하고, 편집 진입인 더블클릭·메뉴는 차단한다.
@@ -130,7 +183,7 @@ const MNInteractionCore = (() => {
   }
 
   return {
-    studyPaneSelectionAction, studySplitEndKeepId, splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, isInternalDragTransfer, droppedTransferNeedsFolderPicker, captureDroppedFileItems, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, INTERNAL_DRAG_MIME
+    studyPaneSelectionAction, studySplitEndKeepId, splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, isInternalDragTransfer, droppedTransferNeedsFolderPicker, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, INTERNAL_DRAG_MIME
   };
 })();
 

@@ -128,6 +128,19 @@ test("폴더 파일 중복 판정은 전체 문서 순회 대신 경로 인덱�
   assert.doesNotMatch(finder, /docs\.find|for \(const doc of docs\)/);
 });
 
+test("낱개로 열려 있던 파일이 드롭한 폴더에 포함되면 그 폴더 아래로 재배치한다", () => {
+  const workspaces = fs.readFileSync(path.join(root, "src/js/workspaces.js"), "utf8");
+  const loader = fs.readFileSync(path.join(root, "src/js/file-loaders.js"), "utf8");
+  const start = workspaces.indexOf("function workspaceAttachExistingDoc");
+  const end = workspaces.indexOf("\nasync function workspaceFindOpenDocument", start);
+  const attach = workspaces.slice(start, end);
+  assert.match(attach, /const existingNode = workspaceDocNodeIn\(doc, activeWorkspaceId\)/);
+  assert.match(attach, /existingNode\.parentId = parent\.nodeId/);
+  assert.match(attach, /doc\.parentId = parent\.nodeId/);
+  assert.match(attach, /return moved \? "moved" : added/);
+  assert.match(loader, /이미 열려 있던 파일을 폴더 아래로 정리했습니다/);
+});
+
 test("다중 선택 닫기도 공유 문서는 현재 작업공간에서만 분리한다", () => {
   const app = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
   const start = app.indexOf("function wireSidebarSelection");

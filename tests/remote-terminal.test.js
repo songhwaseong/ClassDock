@@ -34,6 +34,13 @@ test("원격 터미널은 사이드바의 독립 기능이며 xterm을 지연 �
   assert.match(ui, /terminal\.onData\(queueInput\)/);
 });
 
+test("vendor xterm CSS가 빠져도 보조 입력창과 캔버스 배치가 무너지지 않는다", () => {
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(css, /\.ssh-xterm-host \.xterm \.xterm-helper-textarea\{[^}]*position:absolute[^}]*left:-9999em[^}]*opacity:0/);
+  assert.match(css, /\.ssh-xterm-host \.xterm \.xterm-viewport\{[^}]*position:absolute[^}]*inset:0[^}]*overflow-y:scroll/);
+  assert.match(css, /\.ssh-xterm-host \.xterm \.xterm-screen canvas\{[^}]*position:absolute[^}]*left:0[^}]*top:0/);
+});
+
 test("원격 터미널은 문서와 좌우 도킹하고 연결을 유지한 채 접을 수 있다", () => {
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
   assert.match(ui, /main\.append\(divider, dock\)/);
@@ -320,4 +327,12 @@ test("실제 xterm 셀 크기와 하단 안전 여백으로 작업 표시줄 위
   assert.match(ui, /terminalView\.hidden \|\| dockCollapsed \|\| dock\.hidden/);
   assert.match(ui, /window\.visualViewport\.addEventListener\("resize", sendResize\)/);
   assert.match(css, /\.ssh-xterm-host\{[^}]*overflow:hidden[^}]*padding:10px 12px 16px/);
+});
+
+test("업로드 파일 선택과 경로 감지 버튼은 공용 hover 색상에 덮이지 않는다", () => {
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(css, /\.ssh-upload-picker \.btn:hover:not\(:disabled\)\{[^}]*background:#293a55[^}]*color:#fff/);
+  assert.match(css, /\.ssh-upload-picker \.btn:focus-visible\{[^}]*background:#293a55[^}]*color:#fff/);
+  assert.match(css, /\.ssh-upload-path-picker \.ssh-upload-path-detect\{[^}]*background:#1e2c43[^}]*color:#e5edf8/);
+  assert.match(css, /\.ssh-upload-path-picker \.ssh-upload-path-detect:hover:not\(:disabled\)\{[^}]*background:#293a55[^}]*color:#fff/);
 });

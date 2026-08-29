@@ -516,9 +516,16 @@ test("확대된 악보의 입력 영역 밖은 손바닥 드래그로 상하좌�
 test("아래 오선을 다시 그리거나 선택해도 악보 포커스가 맨 위로 돌아가지 않는다", () => {
   assert.match(editorSource, /const previousScroll = \{ left:scoreHost\.scrollLeft, top:scoreHost\.scrollTop \}/);
   assert.match(editorSource, /scoreHost\.scrollLeft = previousScroll\.left;\s*scoreHost\.scrollTop = previousScroll\.top/);
-  assert.match(editorSource, /function revealScoreElement\(el\)/);
-  assert.match(editorSource, /scoreHost\.scrollTop \+= rect\.bottom - hostRect\.bottom \+ pad/);
+  assert.match(editorSource, /function revealScoreElement\(el, verticalBounds\)/);
+  assert.match(editorSource, /scoreHost\.scrollTop \+= bottom - hostRect\.bottom \+ pad/);
   assert.doesNotMatch(editorSource, /el\.scrollIntoView\(\{ block:"nearest", inline:"nearest" \}\)/);
+});
+
+test("피아노 대보표 재생 포커스는 같은 단의 아래 오선까지 함께 올려 둔다", () => {
+  assert.match(editorSource, /function playbackGrandStaffBounds\(event\)/);
+  assert.match(editorSource, /const bassBoxes = lineBoxes\.filter\(\(item\) => item\.staff === "bass"\)/);
+  assert.match(editorSource, /const bottomY = Math\.max\(\.\.\.bassBoxes\.map\(\(item\) => item\.hitBottom\)\)/);
+  assert.match(editorSource, /revealScoreElement\(el, playbackGrandStaffBounds\(event\)\)/);
 });
 
 test("음표 좌우 위치는 위치 조정 도구나 Alt+드래그로 이웃과 마디 안에서 미세 조정된다", () => {

@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { collapseSidebar } = require("./helpers");
+const { collapseSidebar, hideToolsInSettings, openToolSettings } = require("./helpers");
 
 /* 이미지 편집 도구 노출 설정: 설정 '도구' 탭에서 끈 버튼이 이미 열려 있는 이미지 편집기에서도
  * 바로 사라져야 한다(<html>.hide-tool-<id> 클래스 토글). 저장 버튼처럼 꼭 필요한 것은 남고,
@@ -22,14 +22,8 @@ async function boot(page){
   await expect(page.locator(".img-tools")).toBeVisible();
 }
 
-// 설정 → 도구 탭에서 주어진 도구 체크를 끄고 저장한다.
-async function hideTools(page, ids){
-  await page.locator("#settingsOpen").click();
-  await page.locator('[data-settings-tab="tools"]').click();
-  for (const id of ids) await page.locator("#settingTool-" + id).uncheck();
-  await page.locator("#settingsSave").click();
-  await expect(page.locator("#settingsModal")).toBeHidden();
-}
+// 이미지 도구는 설정 '도구' 탭의 '이미지' 화면에서 비노출 칸으로 옮긴다.
+const hideTools = (page, ids) => hideToolsInSettings(page, "image", ids);
 
 test("설정에서 끈 이미지 도구는 열려 있는 편집기에서 바로 사라지고 저장 버튼은 남는다", async ({ page }) => {
   await boot(page);
@@ -45,10 +39,12 @@ test("설정에서 끈 이미지 도구는 열려 있는 편집기에서 바로 
   await expect(page.locator(".img-tool-rotate").first()).toBeVisible();
 
   // 설정은 다시 열었을 때도 끈 상태로 보여야 한다(저장·복원 경로).
-  await page.locator("#settingsOpen").click();
-  await page.locator('[data-settings-tab="tools"]').click();
-  await expect(page.locator("#settingTool-imgOcr")).not.toBeChecked();
-  await expect(page.locator("#settingTool-imgMemo")).toBeChecked();
+  await openToolSettings(page, "image");
+  await expect(page.locator('#settingToolsHidden option[value="imgOcr"]')).toHaveCount(1);
+  await expect(page.locator('#settingToolsVisible option[value="imgOcr"]')).toHaveCount(0);
+  await expect(page.locator('#settingToolsVisible option[value="imgMemo"]')).toHaveCount(1);
+  // 다른 화면(헤더)의 도구는 이미지 탭 목록에 섞이지 않는다.
+  await expect(page.locator('#settingToolTransfer option[value="hdrTheme"]')).toHaveCount(0);
 });
 
 test("자르기를 숨기면 '적용'·비율 버튼과 켜 둔 자르기 모드까지 함께 정리된다", async ({ page }) => {

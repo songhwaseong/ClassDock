@@ -141,10 +141,23 @@ function workspaceAttachExistingDoc(doc, parentId=null){
   if (!(doc.workspaceIds instanceof Set)) doc.workspaceIds = new Set([doc.primaryWorkspaceId || activeWorkspaceId]);
   const added = !doc.workspaceIds.has(activeWorkspaceId);
   doc.workspaceIds.add(activeWorkspaceId); workspaceRecord().runtimeDocIds.add(doc.id);
-  workspaceAddAliasNode(doc, activeWorkspaceId, parentId);
+  const existingNode = workspaceDocNodeIn(doc, activeWorkspaceId);
+  const parent = parentId && navNodes.find(node =>
+    node.nodeId === parentId && node.type === "group" && workspaceNodeVisible(node, activeWorkspaceId));
+  let moved = false;
+  // 같은 작업공간에서 낱개로 먼저 연 파일이 나중에 드롭한 폴더 안에서 발견되면,
+  // 기존 최상위 행을 남기지 말고 그 폴더의 자식으로 옮긴다. 문서 모델·편집 내용은 그대로다.
+  if (existingNode && parent && existingNode.parentId !== parent.nodeId){
+    existingNode.parentId = parent.nodeId;
+    if (doc.nodeId === existingNode.nodeId) doc.parentId = parent.nodeId;
+    bumpNavTree();
+    moved = true;
+  } else if (!existingNode){
+    workspaceAddAliasNode(doc, activeWorkspaceId, parent ? parent.nodeId : null);
+  }
   if (!tabOrder.includes(doc.id)) tabOrder.push(doc.id);
-  if (added){ renderWorkspaceUi(); renderSidebar(); workspaceSchedulePersist(); }
-  return added;
+  if (added || moved){ renderWorkspaceUi(); renderSidebar(); workspaceSchedulePersist(); }
+  return moved ? "moved" : added;
 }
 async function workspaceFindOpenDocument(file, options={}){
   const direct = options.sourceKey ? docsBySourceKey.get(options.sourceKey) : null;

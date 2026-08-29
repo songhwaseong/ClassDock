@@ -6131,9 +6131,16 @@ class ClassDockLauncher
             psi.RedirectStandardError = true;
             Process p = Process.Start(psi);
             if (p == null) return false;
+            // ReadToEnd를 먼저 호출하면 응답하지 않는 PATH 후보에서 스트림 EOF를 영원히 기다려
+            // 아래 5초 제한까지 도달하지 못한다. --version 출력은 매우 작으므로 종료를 먼저 기다린다.
+            if (!p.WaitForExit(5000))
+            {
+                try { p.Kill(); } catch { }
+                try { p.WaitForExit(1000); } catch { }
+                return false;
+            }
             string stdout = p.StandardOutput.ReadToEnd();
             string stderr = p.StandardError.ReadToEnd();
-            if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
             if (p.ExitCode != 0) return false;
             return (stdout + stderr).IndexOf("Python 3", StringComparison.OrdinalIgnoreCase) >= 0;
         }

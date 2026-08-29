@@ -1444,6 +1444,7 @@ function wire(){
     refreshMapSearchKeyStatus();
     refreshSearchHistoryCount();
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
+    byId("settingPptxExactByDefault").checked = appSettings.pptxExactByDefault === true;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
     byId("settingOfficeReplaceAttached").checked = appSettings.officeReplaceAttached === true;
@@ -1516,6 +1517,7 @@ function wire(){
       searchHistory: byId("settingSearchHistory").checked,
       mapSearchProvider: mapSearchProviderInput.value === "kakao" ? "kakao" : "osm",
       pdfRecovery: byId("settingPdfRecovery").checked,
+      pptxExactByDefault: byId("settingPptxExactByDefault").checked,
       autoSave: byId("settingAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
       officeReplaceAttached: byId("settingOfficeReplaceAttached").checked,

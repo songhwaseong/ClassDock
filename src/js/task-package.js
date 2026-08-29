@@ -274,7 +274,9 @@ async function openTaskDoc(task, opts){
   if (String(task.problem.md || "").trim()){
     try {
       const mdFile = new File([task.problem.md], safeTitle + " 문제.md", { type: "text/markdown" });
-      mdDoc = await loadOffice(mdFile, "md", {});
+      mdDoc = await loadOffice(mdFile, "md", {
+        parentId:opts.parentId || null, bulk:!!opts.bulk, transient:true
+      });
     } catch(e){ console.warn("task problem open failed:", e); }
   }
 
@@ -308,7 +310,9 @@ function showTaskProblem(ownerDoc){
   if (!md){ toast("이 과제에는 문제 설명이 없어요.", 2400); return; }
   const safeTitle = taskSafeFileToken(ctx.task.meta.title, "과제");
   const mdFile = new File([ctx.task.problem.md], safeTitle + " 문제.md", { type: "text/markdown" });
-  loadOffice(mdFile, "md", {}).then((doc) => {
+  loadOffice(mdFile, "md", {
+    parentId:ownerDoc && ownerDoc.parentId || null, bulk:true, transient:true
+  }).then((doc) => {
     if (!doc) return;
     ctx.mdDocId = doc.id;
     if (typeof startStudyModeWithDoc === "function") startStudyModeWithDoc(doc, { silent: true });

@@ -49,6 +49,7 @@ async function loadPdf(arrayBuffer, name, options={}){
   };
   refreshChrome();
   activateIfIdle(doc, options);          // 단일 열기면 즉시 렌더, 묶음이면 첫 개만
+  return doc;
 }
 
 /* ===== PDF 야간 보기(색 반전) =====

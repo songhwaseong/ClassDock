@@ -50,6 +50,19 @@ test("브라우저 Pyodide 콘솔도 파일 사이에서 상태를 이어 간다
   assert.doesNotMatch(terminal, /browserKernelId = "py-terminal-" \+ Math\.random/);
 });
 
+test("터미널은 Python 탐색을 기다리지 않고 입력 포커스를 준비하며 EXE 서버를 기준으로 모드를 고른다", () => {
+  const showStart = terminal.indexOf("const showTerminal");
+  const showEnd = terminal.indexOf("const focusTerminal", showStart);
+  const show = terminal.slice(showStart, showEnd);
+  assert.match(show, /modal\.hidden = false; setOpenState\(\);[\s\S]{0,360}setTimeout\(\(\) => \{ if \(isOpen\) focusTerminal\(\); \}, 0\)/);
+
+  const backendStart = terminal.indexOf("const ensureBackend");
+  const backendEnd = terminal.indexOf("const encodeStrings", backendStart);
+  const backend = terminal.slice(backendStart, backendEnd);
+  assert.match(backend, /typeof saveFileBackendAvailable === "function" \? saveFileBackendAvailable\(\) : false/);
+  assert.doesNotMatch(backend, /pythonBackendAvailable/);
+});
+
 test("명령이 도는 동안 터미널 버튼에 실행 중 점을 켠다", () => {
   // 터미널을 닫아도 명령은 계속 도므로 버튼의 점이 유일한 실행 중 표시가 된다.
   assert.match(terminal, /button\.classList\.toggle\("running", busy\)/);

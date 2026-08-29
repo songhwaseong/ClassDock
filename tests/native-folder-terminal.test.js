@@ -65,3 +65,13 @@ test("terminal preserves UTF-8 output and falls back to the Windows OEM code pag
   assert.match(reader, /catch \(DecoderFallbackException\)/);
   assert.doesNotMatch(reader, /Standard(?:Output|Error)\.ReadLine\(\)/);
 });
+
+test("Python 후보 탐색은 출력 EOF보다 종료 제한을 먼저 확인한다", () => {
+  const start = launcher.indexOf("static bool IsUsablePython");
+  const end = launcher.indexOf("static List<string> InstalledPythonCandidates", start);
+  const probe = launcher.slice(start, end);
+  const wait = probe.indexOf("p.WaitForExit(5000)");
+  const stdout = probe.indexOf("p.StandardOutput.ReadToEnd()");
+  const stderr = probe.indexOf("p.StandardError.ReadToEnd()");
+  assert.ok(wait >= 0 && stdout > wait && stderr > wait);
+});

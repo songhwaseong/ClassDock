@@ -1476,15 +1476,39 @@ async function mountMusicEditor(doc){
 
   // SVG를 다시 그리거나 아래 오선의 음표를 고를 때 문서 전체가 위로 끌려가지 않게,
   // 악보 스크롤 상자 안에서만 필요한 만큼 움직인다.
-  function revealScoreElement(el){
+  function revealScoreElement(el, verticalBounds){
     if (!el || typeof el.getBoundingClientRect !== "function") return;
     const hostRect = scoreHost.getBoundingClientRect();
     const rect = el.getBoundingClientRect();
     const pad = 24;
-    if (rect.top < hostRect.top + pad) scoreHost.scrollTop += rect.top - hostRect.top - pad;
-    else if (rect.bottom > hostRect.bottom - pad) scoreHost.scrollTop += rect.bottom - hostRect.bottom + pad;
+    const top = verticalBounds && Number.isFinite(verticalBounds.top) ? verticalBounds.top : rect.top;
+    const bottom = verticalBounds && Number.isFinite(verticalBounds.bottom) ? verticalBounds.bottom : rect.bottom;
+    if (top < hostRect.top + pad) scoreHost.scrollTop += top - hostRect.top - pad;
+    else if (bottom > hostRect.bottom - pad) scoreHost.scrollTop += bottom - hostRect.bottom + pad;
     if (rect.left < hostRect.left + pad) scoreHost.scrollLeft += rect.left - hostRect.left - pad;
     else if (rect.right > hostRect.right - pad) scoreHost.scrollLeft += rect.right - hostRect.right + pad;
+  }
+
+  // 피아노 대보표 재생은 현재 음표 하나가 아니라 같은 단의 오른손·왼손 오선 전체를 따른다.
+  // 위 오선 음이 먼저 울릴 때부터 아래 오선까지 올려 두어, 손이 바뀔 때마다 화면이 흔들리지 않게 한다.
+  function playbackGrandStaffBounds(event){
+    if (!sheet.grandStaff || !event) return null;
+    const measureIndex = Math.round(Number(event.measure)) - 1;
+    const activeBox = staveBoxes.find((item) => item.index === measureIndex);
+    if (!activeBox) return null;
+    const lineBoxes = staveBoxes.filter((item) => item.lineIndex === activeBox.lineIndex);
+    const trebleBoxes = lineBoxes.filter((item) => item.staff === "treble");
+    const bassBoxes = lineBoxes.filter((item) => item.staff === "bass");
+    if (!trebleBoxes.length || !bassBoxes.length) return null;
+    const svg = scoreHost.querySelector("svg");
+    if (!svg || typeof svg.getBoundingClientRect !== "function") return null;
+    const svgRect = svg.getBoundingClientRect();
+    const baseHeight = Number(svg.dataset.musicBaseHeight) || 0;
+    if (!(baseHeight > 0) || !(svgRect.height > 0)) return null;
+    const scaleY = svgRect.height / baseHeight;
+    const topY = Math.min(...trebleBoxes.map((item) => item.hitTop));
+    const bottomY = Math.max(...bassBoxes.map((item) => item.hitBottom));
+    return { top:svgRect.top + topY * scaleY, bottom:svgRect.top + bottomY * scaleY };
   }
 
   function drawScore(){
@@ -3707,7 +3731,7 @@ async function mountMusicEditor(doc){
     if (symbol) symbol.classList.add("is-playing");
     scoreHost.querySelectorAll(`.music-notation[data-note-id="${event.id}"]`)
       .forEach((item) => item.classList.add("is-playing"));
-    revealScoreElement(el);
+    revealScoreElement(el, playbackGrandStaffBounds(event));
   }
 
   function setPlaying(on){

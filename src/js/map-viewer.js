@@ -3100,7 +3100,9 @@ async function mountMapEditor(doc){
     if (String(e.key || "").toLowerCase() !== "h") return;
     if (doc.el && doc.el.hidden) return;
     if (root.classList.contains("is-presenting")) return;
-    if (document.querySelector(".modal")) return;
+    // 열려 있는 대화창만 본다 — 앱 셸에는 숨은 .modal 이 늘 열댓 개 들어 있어서
+    // :not([hidden]) 이 없으면 조건이 언제나 참이 되고, H 가 통째로 죽는다.
+    if (document.querySelector(".modal:not([hidden])")) return;
     const target = e.target;
     if (target && typeof target.closest === "function" &&
         target.closest("input,textarea,select,[contenteditable='true']")) return;

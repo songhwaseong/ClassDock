@@ -6,14 +6,35 @@ async function renderPptx(file, host, options={}){
   if (typeof window.jQuery === "undefined" || !window.jQuery.fn || !window.jQuery.fn.pptxToHtml){
     toast("PowerPoint 뷰어 로드 실패"); return;
   }
-  if (options.pptxConvertError) {
+  const sourcePptxBytes = options.pptxBytes || await readPptxBytes(file);
+  const pptxText = (text) => typeof window.t === "function" ? window.t(text) : text;
+  if (options.pptxQuickPreview || options.pptxConvertError) {
     const note = document.createElement("div");
-    note.className = "code-note";
-    note.textContent = "간이 PPTX 미리보기입니다. 도형/그룹이 원본과 다르면 ClassDock.exe로 열고 PowerPoint 변환 상태를 확인하세요. 사유: " + options.pptxConvertError;
+    note.className = "code-note pptx-preview-note";
+    const message = document.createElement("span");
+    message.textContent = options.pptxConvertError
+      ? pptxText("정확 변환에 실패해 간이 PPTX 미리보기로 열었습니다. 사유: ") + options.pptxConvertError
+      : pptxText("빠르게 열기 위해 간이 PPTX 미리보기로 표시합니다. 복잡한 도형·차트·글꼴 배치는 원본과 다를 수 있습니다.");
+    note.appendChild(message);
+    const exact = document.createElement("button");
+    exact.type = "button";
+    exact.className = "pptx-exact-open";
+    exact.textContent = pptxText("정확한 PDF로 열기");
+    exact.onclick = async () => {
+      exact.disabled = true;
+      exact.textContent = pptxText("정확 변환 중…");
+      try {
+        const opened = await openPptxExactPreview(file, sourcePptxBytes, options);
+        exact.textContent = pptxText(opened ? "정확한 PDF 다시 열기" : "정확 변환 다시 시도");
+      } catch(e){
+        console.warn("pptx exact preview failed:", e);
+        exact.textContent = pptxText("정확 변환 다시 시도");
+      } finally { exact.disabled = false; }
+    };
+    note.appendChild(exact);
     host.appendChild(note);
   }
-  let pptxBytes = options.pptxBytes || await readPptxBytes(file);
-  pptxBytes = repairPptxPackageForViewer(pptxBytes);
+  const pptxBytes = repairPptxPackageForViewer(sourcePptxBytes);
   loadPptxEmbeddedFonts(pptxBytes, host).catch(()=>{});   // 내장 글꼴 등록(비동기·실패해도 미리보기는 진행)
   await new Promise((resolve, reject) => {
     const div = document.createElement("div");

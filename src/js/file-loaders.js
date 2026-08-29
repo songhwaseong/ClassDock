@@ -47,10 +47,15 @@ async function handleFiles(files, options={}){
         && typeof MNRecent !== "undefined") MNRecent.rememberFile(file.name, opts.workspacePath);
     const duplicate = await workspaceFindOpenDocument(file, opts);
     if (duplicate){
-      const sharedHere = workspaceAttachExistingDoc(duplicate, opts.parentId || null);
+      const attachment = workspaceAttachExistingDoc(duplicate, opts.parentId || null);
       if (!uiBatchDepth) setActiveDoc(duplicate.id);
       else if (!uiBatchActiveCandidate) uiBatchActiveCandidate = duplicate.id;
-      toast(sharedHere ? `이미 열려 있는 파일을 이 작업공간에도 공유했습니다: ${file.name}` : `이미 열린 파일입니다: ${file.name}`, sharedHere ? 2800 : 1800);
+      toast(attachment === "moved"
+        ? `이미 열려 있던 파일을 폴더 아래로 정리했습니다: ${file.name}`
+        : attachment
+          ? `이미 열려 있는 파일을 이 작업공간에도 공유했습니다: ${file.name}`
+          : `이미 열린 파일입니다: ${file.name}`,
+      attachment ? 2800 : 1800);
       if (!firstDoc) firstDoc = duplicate;
       continue;
     }
@@ -76,11 +81,17 @@ async function handleFiles(files, options={}){
       else if (ext === "gz" || ext === "tgz") await loadGz(file, opts);   // .gz / .tgz / .tar.gz
       else if (ext === "pptx"){
         const pptxBytes = await readPptxBytes(file);
-        const pdfBuf = await tryConvertPptxToPdf(pptxBytes);  // 설치된 PowerPoint 로 정확 변환 시도(exe 백엔드)
-        // PPTX를 PDF로 변환해 보여 주는 경우에는 PDF 저장이 원본 PPTX를 덮어쓰면 안 된다.
-        // 따라서 변환 미리보기에는 파일 핸들과 원본 저장 모드를 넘기지 않는다.
-        if (pdfBuf) await loadPdf(pdfBuf, file.name.replace(/\.pptx$/i, ".pdf"), { ...opts, fsHandle:null, fsDirHandle:null, originalSaveMode:false });
-        else made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxConvertError: _lastPptxConvertError || "알 수 없는 변환 실패" }); // 백엔드 없음/변환 실패 → pptxjs 미리보기로 폴백
+        if (appSettings.pptxExactByDefault === true){
+          const pdfBuf = await tryConvertPptxToPdf(pptxBytes);  // 설정에서 고른 경우에만 자동 정확 변환
+          // PPTX를 PDF로 변환해 보여 주는 경우에는 PDF 저장이 원본 PPTX를 덮어쓰면 안 된다.
+          // 따라서 변환 미리보기에는 파일 핸들과 원본 저장 모드를 넘기지 않는다.
+          if (pdfBuf) await loadPdf(pdfBuf, file.name.replace(/\.pptx$/i, ".pdf"), { ...opts, fsHandle:null, fsDirHandle:null, originalSaveMode:false });
+          else made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxConvertError: _lastPptxConvertError || "알 수 없는 변환 실패" });
+        } else {
+          // PowerPoint 설치 여부를 묻지 않고 곧바로 브라우저 미리보기로 연다. COM 실행 불량이나 첫 실행
+          // 대화상자가 파일 열기 전체를 수십 초 막는 일을 피하고, 정확 변환은 문서 배너의 버튼에 맡긴다.
+          made = await loadOffice(file, "pptx", { ...opts, pptxBytes, pptxQuickPreview:true });
+        }
       }
       else if (SQLITE_EXTS.includes(ext)) made = await loadSqlite(file, opts);
       else if (BINARY_ASSET_EXTS.has(ext)) made = await loadBinaryAsset(file, opts);
@@ -180,27 +191,34 @@ async function pptxBackendAvailable(){
   } catch(e){ _pptxBackend = false; }
   return _pptxBackend;
 }
-async function tryConvertPptxToPdf(pptxBytes){
+async function tryConvertPptxToPdf(pptxBytes, options={}){
   _lastPptxConvertError = "";
+  // 사용자가 '다시 시도'를 눌렀다면 이전 실패 캐시를 버리고 설치 상태부터 새로 확인한다.
+  if (options.forceBackendCheck === true) _pptxBackend = null;
   if (!(await pptxBackendAvailable())) {
-    const msg = (location.protocol === "http:" || location.protocol === "https:")
-      ? "PowerPoint 변환 백엔드를 사용할 수 없어 간이 미리보기로 열어요."
-      : "PPTX 도형을 정확히 보려면 ClassDock.exe로 열어주세요.";
+    const isHttp = location.protocol === "http:" || location.protocol === "https:";
+    const msg = isHttp ? "PowerPoint 변환 백엔드를 사용할 수 없음" : "ClassDock.exe에서만 정확 변환 가능";
     _lastPptxConvertError = msg;
-    toast(msg, 4000);
+    toast(options.inline === true
+      ? (isHttp ? "PowerPoint 변환 백엔드를 사용할 수 없어 현재 간이 미리보기를 유지합니다." : "정확 변환은 ClassDock.exe에서 사용할 수 있습니다. 현재 간이 미리보기를 유지합니다.")
+      : (isHttp ? "PowerPoint 변환 백엔드를 사용할 수 없어 간이 미리보기로 열어요." : "PPTX 도형을 정확히 보려면 ClassDock.exe로 열어주세요."), 4000);
     return null;
   }
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 180000);   // 최대 3분
+  const requestedTimeout = Number(options.timeoutMs) || 180000;
+  const timeoutMs = Math.max(1000, Math.min(requestedTimeout, 180000));
+  const inline = options.inline === true;
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    showLoading("PowerPoint으로 변환 중… (대형 파일은 잠시 걸려요)");
+    if (!inline) showLoading("PowerPoint으로 변환 중… (대형 파일은 잠시 걸려요)");
     const buf = normalizeArrayBuffer(pptxBytes);
     const res = await fetch("/convert-pptx", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: buf, signal: ctrl.signal });
     if (!res.ok) {
       const msg = await res.text().catch(() => "");
       console.warn("pptx pdf conversion failed:", res.status, msg);
       _lastPptxConvertError = msg || ("HTTP " + res.status);
-      toast("PowerPoint 변환에 실패해 간이 미리보기로 열어요.", 3500);
+      if (res.status === 501 || /no-powerpoint|0x80080005|server execution failed|서버 실행이 실패/i.test(msg)) _pptxBackend = false;
+      toast("PowerPoint 변환에 실패해 간이 미리보기를 유지합니다.", 3500);
       return null;                                         // 501(PowerPoint 없음)/500 등 → 폴백
     }
     if (((res.headers.get("Content-Type") || "").toLowerCase()).indexOf("application/pdf") < 0) {
@@ -217,11 +235,36 @@ async function tryConvertPptxToPdf(pptxBytes){
     return null;
   } catch(e){
     console.warn("pptx pdf conversion skipped:", e);
-    _lastPptxConvertError = e && e.message ? e.message : String(e || "unknown");
-    toast("PowerPoint 변환을 사용할 수 없어 간이 미리보기로 열어요.", 3500);
+    const timedOut = !!(e && e.name === "AbortError");
+    _lastPptxConvertError = timedOut
+      ? "PowerPoint가 " + Math.round(timeoutMs / 1000) + "초 동안 응답하지 않음"
+      : (e && e.message ? e.message : String(e || "unknown"));
+    if (timedOut) {
+      // 같은 세션에서 다시 눌렀을 때 또 기다리지 않는다. 앱을 다시 열면 설치 여부를 새로 확인한다.
+      _pptxBackend = false;
+      toast("PowerPoint가 응답하지 않아 간이 미리보기를 유지합니다.", 3500);
+    } else toast("PowerPoint 변환을 사용할 수 없어 간이 미리보기를 유지합니다.", 3500);
     return null;
   }
-  finally { clearTimeout(timer); hideLoading(); }
+  finally { clearTimeout(timer); if (!inline) hideLoading(); }
+}
+
+// 간이 PPTX 위의 "정확한 PDF로 열기" 버튼이 쓰는 명시적 변환 통로.
+// 원본 PPTX 탭은 남겨 슬라이드 찾아 바꾸기를 계속 쓸 수 있게 하고, 변환 결과는 별도 PDF 탭으로 연다.
+async function openPptxExactPreview(file, pptxBytes, options={}){
+  const baseKey = options.sourceKey || ["pptx", file && file.name || "presentation", file && file.size || 0, file && file.lastModified || 0].join("|");
+  const exactSourceKey = baseKey + "|exact-pdf";
+  const existing = typeof docsBySourceKey !== "undefined" ? docsBySourceKey.get(exactSourceKey) : null;
+  if (existing){ setActiveDoc(existing.id); return existing; }
+
+  // 버튼 작업은 문서 화면을 막지 않고, PowerPoint 시작 불량이면 15초 안에 미리보기로 돌아온다.
+  const pdfBuf = await tryConvertPptxToPdf(pptxBytes, { timeoutMs:15000, inline:true, forceBackendCheck:true });
+  if (!pdfBuf) return null;   // 실패해도 현재 간이 미리보기는 그대로 유지한다.
+  const pdfName = (file && file.name || "presentation.pptx").replace(/\.pptx$/i, ".pdf");
+  return loadPdf(pdfBuf, pdfName, {
+    ...options, sourceKey:exactSourceKey, workspacePath:null, transient:true, bulk:false,
+    fsHandle:null, fsDirHandle:null, originalSaveMode:false
+  });
 }
 
 /* ===== 압축(zip) 풀어서 내부 파일을 각각 열기 (zip.js — 무암호 + AES 암호 지원) ===== */
@@ -1182,7 +1225,8 @@ async function openFolderFiles(fileList, options={}){
   if (!opened && !folderPaths.length){ await closeGroup(rootGroup.nodeId); toast("폴더를 열지 못했어요.", 3000); return null; }
   // 폴더를 열었다고 안의 파일 하나를 멋대로 띄우지 않는다(설정에서 되돌릴 수 있음).
   // 자동 복원은 예외 — 지난번에 보던 문서를 그대로 되살려야 하므로 배치 활성화를 그대로 둔다.
-  if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled()) suppressUiBatchAutoOpen(rootGroup.nodeId);
+  if (!options.restoreFromWorkspace && !autoOpenFirstFileEnabled())
+    suppressUiBatchAutoOpen(rootGroup.nodeId, { expand: options.expandRoot !== false });
   // 폴더 핸들이 있을 때만 최근 목록에 남긴다 — 없으면 다시 열어도 되살릴 수 없다.
   if (rootGroup.folderHandle && typeof MNRecent !== "undefined") MNRecent.rememberFolder(rootName);
   if (!options.silent){
@@ -1741,7 +1785,7 @@ async function collectDroppedFiles(entry, prefix, out, folderPaths, onProgress=n
 function queueDroppedItems(dataTransfer){
   const captured = captureDroppedFileItems(dataTransfer);
   const files = captured.files;
-  const entries = captured.entries;
+  const entries = topLevelDroppedEntries(captured.entries);
   const handlePromises = captured.handlePromises;
   // 엔트리는 드롭 이벤트가 끝나기 전에 동기적으로 확보해야 한다(이후 item 무효화).
   // 폴더 드롭이 아니면 신뢰할 수 있는 dataTransfer.files 를 그대로 쓴다.
@@ -1775,7 +1819,8 @@ function queueDroppedItems(dataTransfer){
 
       // 최신 Chromium은 기존 엔트리 대신 File System Access 핸들만 줄 수 있다.
       // 핸들 함수는 드롭 이벤트 안에서 이미 호출했으며 여기서는 결과만 기다린다.
-      const handles = handlePromises.length ? await Promise.all(handlePromises) : [];
+      const resolvedHandles = handlePromises.length ? await Promise.all(handlePromises) : [];
+      const handles = await topLevelDroppedHandles(resolvedHandles);
       const modernHasDir = handles.some(handle => handle && handle.kind === "directory");
       let hasDir = modernHasDir || hasLegacyDir;
       if (!modernHasDir && hasLegacyDir){
@@ -1867,7 +1912,8 @@ function queueDroppedItems(dataTransfer){
       const rootGroup = await openFolderFiles(collected, {
         folderPaths:uniqueFolderPaths,
         folderHandle:directoryHandles.length === 1 ? directoryHandles[0] : null,
-        originalSaveMode: modernHasDir
+        originalSaveMode: modernHasDir,
+        expandRoot:false
       });
       keepOpenedGroupExpanded = !!rootGroup && !autoOpenFirstFileEnabled();
       // 화면과 사이드바를 먼저 표시한 뒤 자동 복원용 바이트 복사를 수행한다.

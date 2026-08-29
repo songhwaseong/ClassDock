@@ -4645,7 +4645,10 @@ async function renderXlsx(file, host, doc){
       if (await saveBytesAsCopy(out)) return;
       downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       await markSpreadsheetSaved(out);
-      toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
+      // 원본에도 자동 저장 폴더에도 못 썼을 때만 여기 온다. "저장했어요" 로 뭉뚱그리면 원본이 바뀐 줄 알고
+      // 다음에 그 파일을 열었을 때 편집이 사라진 것처럼 보인다 — 사본이 어디로 갔는지 분명히 말한다.
+      toast("파일에 바로 쓸 수 없어 다운로드 폴더에 XLSX로 저장했어요. 원본 파일에 바로 저장하려면 '열기 → 폴더 열기'로 여세요.",
+        5200, { type: "warning" });
     } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
     finally { quickSaving = false; }
   };
@@ -5141,25 +5144,33 @@ async function renderXlsx(file, host, doc){
     cfVal.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitCondRule(); } e.stopPropagation(); });
     cfVal2.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitCondRule(); } e.stopPropagation(); });
 
+    /* [XLSX 저장] — Ctrl+S 와 완전히 같은 순서를 지난다(원본 핸들 → 자동 저장 폴더 사본 → 다운로드).
+       예전에는 이 버튼만 다운로드로 바로 갔다. CSV 에서 변환한 표만 핸들 갈래를 거치고, 폴더로 열어
+       원본에 쓸 수 있는 xlsx 조차 사본을 내려받은 뒤 "저장했어요" 라고 알려 탭의 수정 표시까지 지웠다.
+       그래서 다음에 그 파일을 열면 편집이 사라진 것처럼 보였다 — 저장 입구는 quickSave 하나로 모은다.
+       원본을 건드리지 않고 사본만 받고 싶으면 옆의 [복사본 내려받기] 를 쓴다. */
     const xlsxBtn = document.createElement("button"); xlsxBtn.type = "button"; xlsxBtn.textContent = "XLSX 저장";
-    xlsxBtn.title = doc && doc.convertedFromCsv
-      ? "원본 CSV 폴더에 XLSX로 저장(폴더 정보가 없으면 저장 위치 선택)"
-      : "서식(번호서식·색·글꼴·병합)을 유지해 XLSX 다운로드";
+    xlsxBtn.className = "xlsx-save-inplace";   // 저장 메뉴의 기본 동작임을 색으로 드러낸다
+    xlsxBtn.title = "편집 내용을 원본 파일에 저장합니다(서식 유지 · Ctrl+S와 같음). "
+      + "원본에 쓸 수 없으면 자동 저장 폴더에 사본으로, 그것도 안 되면 다운로드로 저장하고 어느 쪽인지 알려 줍니다.";
     xlsxBtn.onclick = async () => {
       xlsxBtn.disabled = true;
+      try { await quickSave(); }
+      finally { xlsxBtn.disabled = false; }
+    };
+    /* [복사본 내려받기] — 원본은 그대로 두고 서식 유지 XLSX 를 내려받는 '내보내기'.
+       원본을 바꾼 게 아니므로 수정 표시(dirty)는 일부러 지우지 않는다. */
+    const xlsxCopyBtn = document.createElement("button"); xlsxCopyBtn.type = "button"; xlsxCopyBtn.textContent = "복사본 내려받기";
+    xlsxCopyBtn.title = "원본 파일은 그대로 두고, 서식(번호서식·색·글꼴·병합)을 유지한 XLSX 사본을 다운로드 폴더로 내려받습니다.";
+    xlsxCopyBtn.onclick = async () => {
+      xlsxCopyBtn.disabled = true;
       try {
         const out = await exportExBytes();
-        if (!out){ toast("저장 준비에 실패했어요.", 2400, { type: "error" }); return; }
-        if (!(await askSpreadsheetScratchName())) return;
-        if (doc && doc.convertedFromCsv){
-          const direct = await saveBytesToDocumentHandle(out);
-          if (await finishDirectSpreadsheetSave(out, direct)) return;
-        }
+        if (!out){ toast("내보내기 준비에 실패했어요.", 2400, { type: "error" }); return; }
         downloadSpreadsheetFile(out, base + ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        await markSpreadsheetSaved(out);
-        toast("서식을 유지해 XLSX로 저장했어요.", 2000, { type: "success" });
-      } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
-      finally { xlsxBtn.disabled = false; }
+        toast("XLSX 사본을 내려받았어요(원본은 그대로예요).", 2400, { type: "success" });
+      } catch(e){ console.error(e); toast("내보내지 못했어요.", 2400, { type: "error" }); }
+      finally { xlsxCopyBtn.disabled = false; }
     };
     const csvBtn2 = document.createElement("button"); csvBtn2.type = "button"; csvBtn2.textContent = "CSV 저장"; csvBtn2.title = "현재 시트를 CSV로 저장(서식 없음)";
     csvBtn2.onclick = () => {
@@ -5262,7 +5273,7 @@ async function renderXlsx(file, host, doc){
     const moreMenu = makeMenu("더보기", "xlsx-tool-menu-more", chartBtn, pivotBtn, selImgBtn, formulaHint);
     const printBtn2 = document.createElement("button"); printBtn2.type = "button"; printBtn2.textContent = "인쇄·PDF"; printBtn2.title = "현재 시트를 프린터로 인쇄하거나 PDF로 저장";
     printBtn2.onclick = () => printCurrentSheet();
-    const saveMenu = makeMenu("저장", "xlsx-tool-menu-save xlsx-editgroup-save", xlsxBtn, csvBtn2, printBtn2);
+    const saveMenu = makeMenu("저장", "xlsx-tool-menu-save xlsx-editgroup-save", xlsxBtn, xlsxCopyBtn, csvBtn2, printBtn2);
     const mkAutoBtn = (label, fn, title) => {
       const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = title;
       b.onclick = () => insertAutoFormula(fn); return b;
@@ -5402,36 +5413,16 @@ async function renderXlsx(file, host, doc){
       ]},
       { label:"저장", children:[
         { label:"XLSX 저장", action:() => xlsxBtn.click() },
+        { label:"복사본 내려받기", action:() => xlsxCopyBtn.click() },
         { label:"CSV 저장", action:() => csvBtn2.click() },
         { label:"인쇄·PDF", action:() => printCurrentSheet() }
       ]}
     ];
     updateUndoButtons();
 
-    /* 파일에 저장(exe 로컬 서버가 있을 때만 내놓는다): 서식 보존 XLSX 바이트를 파일로 쓴다.
-       Ctrl+S(quickSave)와 같은 순서를 지나야 한다 — 예전에는 이 버튼만 핸들 갈래를 건너뛰어,
-       폴더로 열어 원본에 쓸 수 있는 문서까지 사본이 생겼다. 게다가 이름이 "제자리 저장" 이라
-       사본이 생긴 걸 알 방법이 없었다. */
-    saveFileBackendAvailable().then((ok) => {
-      if (!ok || !editMode || editBar.querySelector(".xlsx-save-inplace")) return;
-      const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "xlsx-save-inplace"; saveBtn.textContent = "파일에 저장";
-      saveBtn.title = "편집 내용을 원본 파일에 저장합니다(서식 유지 · Ctrl+S). "
-        + "원본에 쓸 수 없으면 자동 저장 폴더에 사본으로 저장하고 어느 쪽인지 알려 줍니다.";
-      saveBtn.onclick = async () => {
-        saveBtn.disabled = true;
-        try {
-          const out = await exportExBytes();
-          if (!out){ toast("저장 준비 실패(다운로드를 이용하세요).", 2600); return; }
-          if (!(await askSpreadsheetScratchName())) return;   // 새 표의 첫 저장이면 이름을 먼저 정한다
-          const direct = await saveBytesToDocumentHandle(out);   // 원본에 쓸 수 있으면 여기서 끝난다
-          if (await finishDirectSpreadsheetSave(out, direct)) return;
-          if (await saveBytesAsCopy(out)) return;
-          toast("저장하지 못했어요(다운로드를 이용하세요).", 2800);
-        } catch(e){ console.error(e); toast("저장하지 못했어요(다운로드를 이용하세요).", 2600); }
-        finally { saveBtn.disabled = false; }
-      };
-      saveMenu.panel.append(saveBtn);
-    });
+    /* 예전에는 exe 로컬 서버가 있을 때만 [파일에 저장] 버튼을 따로 붙였다. 이제 [XLSX 저장] 자체가
+       같은 순서(원본 핸들 → 자동 저장 폴더 사본 → 다운로드)를 지나므로 버튼을 둘로 두지 않는다 —
+       어느 것이 '진짜 저장'인지 고르게 만드는 것이 이 기능의 원래 함정이었다. */
   };
 
   // ===== 시트 관리(편집 모드): 추가·복제·이름 바꾸기·삭제 =====

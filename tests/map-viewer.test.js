@@ -893,7 +893,10 @@ test("H 접기는 입력칸·발표·대화창·문제 풀이 화면에서는 �
   assert.match(key[1], /if \(e\.ctrlKey \|\| e\.metaKey \|\| e\.altKey\) return/);
   assert.match(key[1], /doc\.el && doc\.el\.hidden/);
   assert.match(key[1], /root\.classList\.contains\("is-presenting"\)/);
-  assert.match(key[1], /document\.querySelector\("\.modal"\)/);
+  /* 열려 있는 대화창만 봐야 한다. 앱 셸에는 숨은 .modal 이 늘 열댓 개 들어 있어서
+     :not([hidden]) 을 빼면 조건이 언제나 참이 되고 H 가 통째로 죽는다(실제로 그랬다). */
+  assert.match(key[1], /document\.querySelector\("\.modal:not\(\[hidden\]\)"\)/);
+  assert.doesNotMatch(key[1], /querySelector\("\.modal"\)/);
   assert.match(key[1], /closest\("input,textarea,select,\[contenteditable='true'\]"\)/);
   // 지도 문제(학생 화면)에서는 두 줄 다 접힌 채로 두고, 우클릭 메뉴에서도 항목이 빠진다.
   assert.match(source, /toolsToggleBtn\.hidden = taskMode/);

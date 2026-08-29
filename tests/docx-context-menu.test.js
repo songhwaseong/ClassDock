@@ -78,7 +78,7 @@ test("DOCX 제자리 편집에서는 손바닥 이동 대신 글자 커서를 �
 });
 
 test("DOCX 편집 도구막대는 긴 문서에서도 상단에 따라오고 문단을 가리지 않는다", () => {
-  assert.match(styles, /\.docx-editor-bar\{position:sticky;top:8px;z-index:24/);
+  assert.match(styles, /\.docx-editor-bar\{position:sticky;top:-24px;z-index:24/);
   assert.match(styles, /scroll-margin-top:var\(--docx-editor-tools-height,120px\)/);
   assert.match(source, /const syncStickyToolHeight = \(\) =>/);
   assert.match(source, /stickyToolObserver = new ResizeObserver\(syncStickyToolHeight\)/);

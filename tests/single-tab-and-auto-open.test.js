@@ -44,18 +44,24 @@ test("폴더·압축 열기는 첫 파일을 자동으로 띄우지 않는다(�
   assert.match(state, /autoOpenFirstFile: false/);
   assert.match(state, /function autoOpenFirstFileEnabled\(\)\{ return appSettings\.autoOpenFirstFile === true; \}/);
   // 폴더·zip·tar·단일 gzip 네 통로 모두 복원 중에는 억제하지 않는다
-  const guards = loaders.match(/!options\.restoreFromWorkspace && !autoOpenFirstFileEnabled\(\)\) suppressUiBatchAutoOpen\(/g) || [];
+  const guards = loaders.match(/!options\.restoreFromWorkspace && !autoOpenFirstFileEnabled\(\)\)\s*suppressUiBatchAutoOpen\(/g) || [];
   assert.equal(guards.length, 4);
   assert.match(loaders, /단일 파일 gzip[\s\S]*await handleFiles\(\[new File\(\[out\], innerName\)\], options\);[\s\S]*suppressUiBatchAutoOpen\(null\)/);
 });
 
-test("자동으로 열지 않은 배치는 연 그룹만 펼치고 빈 화면 안내를 띄운다", () => {
-  assert.match(documents, /function suppressUiBatchAutoOpen\(groupId\)/);
-  assert.match(documents, /node\.parentId == null && !uiBatchOpenedGroupIds\.includes\(groupId\)/);
+test("자동으로 열지 않은 배치는 지정한 그룹 상태와 빈 화면 안내를 유지한다", () => {
+  assert.match(documents, /function suppressUiBatchAutoOpen\(groupId, options=\{\}\)/);
+  assert.match(documents, /if \(!node \|\| node\.parentId != null\) return/);
   assert.match(documents, /if \(noAutoOpen\)\{[\s\S]*node\.expanded = true[\s\S]*updateDocEmptyState\(\);\s*\n\s*return;/);
   assert.match(documents, /el\.hidden = !\(workspaceActiveNodes\(\)\.length > 0 && !workspaceActiveDocs\(\)\.some\(d => d\.id === activeId\)\)/);
   assert.match(shell, /<div class="doc-empty" id="docEmpty" hidden>/);
   assert.match(styles, /\.doc-empty\{position:absolute;inset:0/);
+});
+
+test("드래그한 폴더는 루트 한 줄만 보이도록 접힌 상태로 시작한다", () => {
+  assert.match(documents, /options\.expand === false \? uiBatchCollapsedGroupIds : uiBatchOpenedGroupIds/);
+  assert.match(documents, /collapsedGroupIds\.forEach[\s\S]*node\.expanded = false/);
+  assert.match(loaders, /openFolderFiles\(collected, \{[\s\S]*expandRoot:false/);
 });
 
 test("첫 파일 자동 열기는 설정에서 켤 수 있다", () => {

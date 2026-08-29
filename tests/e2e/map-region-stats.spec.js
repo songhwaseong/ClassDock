@@ -79,21 +79,31 @@ test("지역 통계는 지역별 개수를 세어 칠판 차트로 보낸다", a
   expect(errors).toEqual([]);
 });
 
-/* 카카오에만 있는 기능은 폴백이 없다. 꺼 둔 채로 버튼만 보이면 눌러도 안 되는 단추가 된다. */
-test("주변 시설 버튼은 카카오 검색을 켰을 때만 나온다", async ({ page }) => {
+/* 카카오에만 있는 기능은 폴백이 없다. 그렇다고 감추지는 않는다 — 감추면 이런 기능이 있다는
+   것조차 모르고 지나가기 때문이다. 대신 흐리게(is-unavailable) 두고, 눌러 보면 무엇이 모자란지
+   알려 준다. 갖춰야 할 것은 셋이다: 공급자=카카오 · 런처 · REST 키. */
+test("주변 시설 버튼은 카카오 검색이 갖춰지기 전에는 흐리고, 눌러 보면 까닭을 알려 준다", async ({ page }) => {
   await openApp(page);
   await page.evaluate(() => newMapScratch());
   await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
-  await expect(page.locator(".map-nearby")).toBeHidden();
 
-  // 공급자를 카카오로 바꾸고 지도를 다시 열면 버튼이 붙는다.
+  const nearby = page.locator(".map-nearby");
+  await expect(nearby).toBeVisible();
+  await expect(nearby).toHaveClass(/is-unavailable/);
+
+  // 눌러도 찾기 창은 열리지 않고, 무엇을 갖춰야 하는지 알려 준다.
+  await nearby.click();
+  await expect(page.locator("#toast")).toContainText("카카오");
+  await expect(page.locator(".map-nearby-modal")).toHaveCount(0);
+
+  /* 공급자를 카카오로 바꾸고 런처가 키를 들고 있다고 알리면(설정 창이 쓰는 그 이벤트) 열어 둔
+     지도의 버튼도 그 자리에서 밝아진다 — 지도를 다시 열 필요가 없다. */
   await page.evaluate(() => {
     saveAppSettings({ mapSearchProvider:"kakao" });
-    closeDoc(docs.find(d => d.kind === "map").id);
-    newMapScratch();
+    window.__classDockMapSearchKeyStatus = { available:true, hasKey:true };
+    window.dispatchEvent(new CustomEvent("classdock-map-search-status-change"));
   });
-  await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
-  await expect(page.locator(".map-nearby")).toBeVisible();
+  await expect(nearby).not.toHaveClass(/is-unavailable/);
 });
 
 /* 주소 자동 채우기는 사람마다의 습관이라 .map 파일이 아니라 이 브라우저에 남는다. */

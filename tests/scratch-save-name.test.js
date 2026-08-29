@@ -114,9 +114,10 @@ test("자동 저장·일괄 저장은 이름을 묻지 않고 건너뛴다", () 
 
 test("표는 저장 방식과 관계없이 첫 저장 이름을 먼저 받는다", () => {
   assert.doesNotMatch(spreadsheetSource, /const savesWithoutDialog/);
-  // Ctrl+S 빠른 저장, XLSX 저장, '파일에 저장' 모두 같은 확인을 거친다.
+  // 저장 입구(Ctrl+S · [XLSX 저장] 버튼)는 quickSave 하나로 모였고, 이름 확인은 그 안에서 한 번 한다.
   const calls = spreadsheetSource.match(/await askSpreadsheetScratchName\(\)/g) || [];
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 1);
+  assert.match(spreadsheetSource, /const quickSave = async[\s\S]*?await askSpreadsheetScratchName\(\)/);
   // 이름을 바꾸면 내보내기 파일 이름도 따라가야 한다.
   assert.match(spreadsheetSource, /base = sheetBaseName\(named\)/);
 });
@@ -131,12 +132,25 @@ test("EXE 저장 폴더의 충돌 확인 경로는 인증과 안전한 경로 �
 // 예전엔 '제자리 저장' 버튼만 핸들 갈래를 건너뛰어, 폴더로 열어 원본에 쓸 수 있는 문서까지
 // 사본이 생겼다. 게다가 이름이 "제자리" 라 사본이 생긴 걸 알 방법이 없었다.
 test("표의 파일 저장은 원본 핸들을 먼저 시도한다", () => {
-  // 핸들 저장을 거치는 곳이 셋(Ctrl+S · CSV→XLSX 원본 · 파일에 저장 버튼)이어야 한다.
+  // 핸들 저장은 quickSave 한 곳에서만 부른다 — 저장 갈래가 둘이면 하나가 반드시 뒤처진다.
   const direct = spreadsheetSource.match(/await saveBytesToDocumentHandle\(out\)/g) || [];
-  assert.equal(direct.length, 3);
-  // 버튼도 핸들 → 사본 순서를 지난다.
+  assert.equal(direct.length, 1);
+  // 순서: 원본 핸들 → 자동 저장 폴더 사본 → (마지막) 다운로드.
   assert.match(spreadsheetSource,
-    /xlsx-save-inplace[\s\S]*?await saveBytesToDocumentHandle\(out\)[\s\S]*?await saveBytesAsCopy\(out\)/);
+    /const quickSave = async[\s\S]*?await saveBytesToDocumentHandle\(out\)[\s\S]*?await saveBytesAsCopy\(out\)[\s\S]*?downloadSpreadsheetFile\(out/);
+});
+
+/* [XLSX 저장] 버튼이 바로 다운로드로 새면, 폴더로 연 원본은 그대로인데 탭의 수정 표시만 지워져
+   "저장했는데 다음에 열면 편집이 없다" 가 된다(CSV→XLSX 변환본에서 특히 잘 드러났다). */
+test("표 도구막대의 [XLSX 저장]은 Ctrl+S 와 같은 경로를 쓴다", () => {
+  assert.match(spreadsheetSource,
+    /xlsxBtn\.onclick = async \(\) => \{[\s\S]*?await quickSave\(\);[\s\S]*?\};/);
+  // 다운로드만 하는 갈래는 '복사본 내려받기' 로 따로 두고, 원본을 바꾼 척(markSpreadsheetSaved)하지 않는다.
+  const copyButton = spreadsheetSource.match(/xlsxCopyBtn\.onclick = async[\s\S]*?finally \{ xlsxCopyBtn\.disabled = false; \}/);
+  assert.ok(copyButton, "복사본 내려받기 버튼이 있어야 한다");
+  assert.doesNotMatch(copyButton[0], /markSpreadsheetSaved/);
+  // 저장 버튼이 둘로 갈라져 어느 쪽이 진짜 저장인지 헷갈리던 예전 버튼은 없앴다.
+  assert.doesNotMatch(spreadsheetSource, /textContent = "파일에 저장"/);
 });
 
 test("자동 저장 폴더에 쓰는 함수는 '제자리'라고 부르지 않는다", () => {

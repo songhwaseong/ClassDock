@@ -44,6 +44,15 @@ test(".lesson 입력은 정상 리플레이만 받아들이고 손상된 장면�
   assert.equal(validateLessonPayload(shapeReplay).ok, true);
 });
 
+test("폴더 안 .lesson은 재생 문서에 부모 폴더와 대량 열기 옵션을 전달한다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/lesson-replay.js"), "utf8");
+  assert.match(source, /function openLessonReplay\(lesson, name, options=\{\}\)/);
+  assert.match(source, /makeDoc\("replay", name \|\| "수업 리플레이", options\)/);
+  assert.match(source, /activateIfIdle\(doc, options\)/);
+  assert.match(source, /async function loadLesson\(file, options=\{\}\)/);
+  assert.match(source, /openLessonReplay\(lesson,[\s\S]*options\)/);
+});
+
 test("브라우저 작업공간은 새 경로를 병합하고 닫은 경로만 제거한다", () => {
   const store = loadBrowserScript("workspace-store.js", { WORKSPACE_CAP:256 * 1024 * 1024, decodeWorkspace });
   const before = store.encodeWorkspaceRows([

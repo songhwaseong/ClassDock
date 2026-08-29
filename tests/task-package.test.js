@@ -30,6 +30,11 @@ test("과제 바의 보조 버튼은 panel-2 배경에서도 구분되는 hover 
   assert.match(styles, /\.task-banner \.btn:not\(\.primary\):not\(:disabled\):hover,[\s\S]*?background:var\(--exam-btn-hover-bg\);border-color:var\(--accent\);color:var\(--exam-btn-hover-ink\)/);
 });
 
+test("폴더 안 과제의 문제 설명은 과제와 같은 부모 폴더 아래에 만든다", () => {
+  assert.match(source, /loadOffice\(mdFile, "md", \{\s*parentId:opts\.parentId \|\| null, bulk:!!opts\.bulk, transient:true\s*\}\)/);
+  assert.match(source, /parentId:ownerDoc && ownerDoc\.parentId \|\| null, bulk:true, transient:true/);
+});
+
 test("과제 첨부는 시작 코드 및 다른 첨부와 대소문자 무시 경로 충돌을 허용하지 않는다", () => {
   assert.equal(validateTaskPayload(task([{ path: "MAIN.py", b64: "" }])).ok, false);
   assert.equal(validateTaskPayload(task([

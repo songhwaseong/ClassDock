@@ -239,8 +239,8 @@ const lessonFmtTime = (ms) => {
 };
 
 // ----- 재생 화면(새 문서 종류 "replay") -----
-function openLessonReplay(lesson, name){
-  const doc = makeDoc("replay", name || "수업 리플레이", {});
+function openLessonReplay(lesson, name, options={}){
+  const doc = makeDoc("replay", name || "수업 리플레이", options);
   doc.lesson = lesson;
   doc.render = async () => {
     const host = doc.el; host.innerHTML = ""; host.scrollTop = 0;
@@ -249,7 +249,7 @@ function openLessonReplay(lesson, name){
     else renderReplay(doc, host, lesson);
   };
   if (typeof refreshChrome === "function") refreshChrome();
-  activateIfIdle(doc, {});
+  activateIfIdle(doc, options);
   return doc;
 }
 
@@ -700,7 +700,7 @@ function finishLessonRecording(lesson, name){
 }
 
 // .lesson 파일 열기(파일 오픈 파이프라인 + 메뉴 공용).
-async function loadLesson(file){
+async function loadLesson(file, options={}){
   let lesson = null;
   if (!file || (Number(file.size) > LESSON_MAX_FILE_BYTES)){
     if (typeof toast === "function") toast("리플레이 파일은 128MB 이하만 열 수 있어요.", 3000);
@@ -709,7 +709,7 @@ async function loadLesson(file){
   try { lesson = JSON.parse(await file.text()); } catch(_){}
   const checked = validateLessonPayload(lesson);
   if (!checked.ok){ if (typeof toast === "function") toast("리플레이(.lesson) 파일을 읽지 못했어요: " + checked.message, 3600); return null; }
-  return openLessonReplay(lesson, (file.name || "수업 리플레이").replace(/\.lesson$/i, ""));
+  return openLessonReplay(lesson, (file.name || "수업 리플레이").replace(/\.lesson$/i, ""), options);
 }
 
 // 메뉴 '리플레이 열기' — 숨은 파일 입력으로 .lesson 을 직접 고른다.

@@ -25,12 +25,15 @@ let uiBatchCancelled = false;
 // 대신 여기 모아 둔 그룹만 펼쳐서, 사용자가 사이드바에서 볼 파일을 직접 고르게 한다.
 let uiBatchNoAutoOpen = false;
 let uiBatchOpenedGroupIds = [];
-function suppressUiBatchAutoOpen(groupId){
+let uiBatchCollapsedGroupIds = [];
+function suppressUiBatchAutoOpen(groupId, options={}){
   if (!uiBatchDepth) return;
   uiBatchNoAutoOpen = true;
-  // 펼쳐 둘 곳은 최상위 그룹만 — 폴더 안에 들어 있던 압축까지 열어젖히지는 않는다.
+  // 상태를 정할 곳은 최상위 그룹만 — 폴더 안에 들어 있던 압축까지 열어젖히지는 않는다.
   const node = groupId != null ? navNodeById(groupId) : null;
-  if (node && node.parentId == null && !uiBatchOpenedGroupIds.includes(groupId)) uiBatchOpenedGroupIds.push(groupId);
+  if (!node || node.parentId != null) return;
+  const target = options.expand === false ? uiBatchCollapsedGroupIds : uiBatchOpenedGroupIds;
+  if (!target.includes(groupId)) target.push(groupId);
 }
 function beginUiBatch(){
   if (uiBatchDepth++ === 0){
@@ -38,6 +41,7 @@ function beginUiBatch(){
     uiBatchActiveCandidate = null;
     uiBatchNoAutoOpen = false;
     uiBatchOpenedGroupIds = [];
+    uiBatchCollapsedGroupIds = [];
     const cancel = byId("loadingCancel"); if (cancel) cancel.hidden = false;
   }
 }
@@ -50,12 +54,14 @@ function endUiBatch(){
   const activateId = uiBatchActiveCandidate;
   const noAutoOpen = uiBatchNoAutoOpen;
   const openedGroupIds = uiBatchOpenedGroupIds;
+  const collapsedGroupIds = uiBatchCollapsedGroupIds;
   uiBatchCancelled = false;
   uiBatchSidebarPending = false;
   uiBatchChromePending = false;
   uiBatchActiveCandidate = null;
   uiBatchNoAutoOpen = false;
   uiBatchOpenedGroupIds = [];
+  uiBatchCollapsedGroupIds = [];
   const cancel = byId("loadingCancel"); if (cancel) cancel.hidden = true;
   byId("loading").hidden = true;
   if (refreshHeader) refreshChrome();
@@ -67,7 +73,11 @@ function endUiBatch(){
       const node = navNodeById(nodeId);
       if (node && node.type === "group" && !node.expanded){ node.expanded = true; expanded = true; }
     });
-    if (expanded) renderSidebar();       // 위에서 이미 한 번 그렸으므로 실제로 펼친 게 있을 때만 다시 그린다
+    collapsedGroupIds.forEach(nodeId => {
+      const node = navNodeById(nodeId);
+      if (node && node.type === "group" && node.expanded){ node.expanded = false; expanded = true; }
+    });
+    if (expanded) renderSidebar();       // 위에서 이미 한 번 그렸으므로 실제로 상태가 바뀌었을 때만 다시 그린다
     updateDocEmptyState();
     return;
   }

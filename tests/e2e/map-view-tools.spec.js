@@ -142,7 +142,10 @@ test("표시 잇기는 목록 순서대로 잇고 표시가 바뀌면 저절로 
      도구막대처럼 is-on 으로 표시돼 메뉴에서 체크(✓)로 보인다. */
   const stage = page.locator(".map-stage");
   const box = await stage.boundingBox();
-  await page.mouse.click(box.x + box.width - 20, box.y + box.height - 20, { button:"right" });
+  /* 표시가 몰려 있는 한가운데를 피해 오른쪽 아래쪽에서 부르되, 맨 모서리는 쓰지 않는다 —
+     거기는 Leaflet 저작권 표시 줄이라 우클릭이 지도까지 닿지 않는다(메뉴가 아예 안 열린다). */
+  await page.mouse.click(box.x + box.width - 40, box.y + box.height - 70, { button:"right" });
+  await expect(page.locator(".map-context-menu")).toBeVisible();
   const menuItem = page.locator(".map-context-menu button", { hasText:"표시 잇기" });
   await expect(menuItem).toBeVisible();
   await expect(menuItem).toHaveClass(/is-on/);

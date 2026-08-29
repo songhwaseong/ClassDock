@@ -168,6 +168,9 @@ function sharedPythonTerminal(){
     if (!isOpen){
       opener = document.activeElement;
       isOpen = true; modal.hidden = false; setOpenState();
+      // 백엔드 확인은 로컬 Python 탐색 등으로 늦어질 수 있다. 입력 포커스를 그 응답 뒤에만
+      // 주면 창은 열렸는데 커서가 없고 키 입력도 안 되는 것처럼 보이므로 UI부터 즉시 준비한다.
+      setTimeout(() => { if (isOpen) focusTerminal(); }, 0);
     }
     ensureBackend().then(async (isLocal) => {
       if (isLocal){
@@ -226,7 +229,9 @@ function sharedPythonTerminal(){
   };
   const ensureBackend = () => {
     if (backendReady) return backendReady;
-    backendReady = Promise.resolve(typeof pythonBackendAvailable === "function" ? pythonBackendAvailable() : false).then((available) => {
+    // PowerShell 터미널은 Python 설치 여부가 아니라 C# 로컬 서버가 있는지로 결정한다.
+    // Python 실행 백엔드 확인을 쓰면 Python이 없거나 탐색이 지연될 때 EXE 터미널까지 멈춘다.
+    backendReady = Promise.resolve(typeof saveFileBackendAvailable === "function" ? saveFileBackendAvailable() : false).then((available) => {
       localBackend = !!available;
       mode.textContent = localBackend ? "로컬 PowerShell" : "브라우저 Python · Pyodide";
       intro.textContent = localBackend

@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { collapseSidebar } = require("./helpers");
+const { collapseSidebar, hideToolsInSettings, openToolSettings } = require("./helpers");
 
 /* 헤더(맨 위 막대) 버튼 노출 설정: 설정 '도구' 탭에서 끈 버튼은 문서를 열지 않아도 즉시 사라져야 한다.
  * 설정(⚙)·저장·집중·분할 작업은 대상에서 빠져 있어 어떤 조합으로 꺼도 설정 창으로 돌아올 길이 남는다. */
@@ -13,14 +13,8 @@ async function boot(page){
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
 }
 
-// 설정 → 도구 탭에서 주어진 도구 체크를 끄고 저장한다.
-async function hideTools(page, ids){
-  await page.locator("#settingsOpen").click();
-  await page.locator('[data-settings-tab="tools"]').click();
-  for (const id of ids) await page.locator("#settingTool-" + id).uncheck();
-  await page.locator("#settingsSave").click();
-  await expect(page.locator("#settingsModal")).toBeHidden();
-}
+// 헤더 버튼은 설정 '도구' 탭의 '헤더' 화면에서 비노출 칸으로 옮긴다.
+const hideTools = (page, ids) => hideToolsInSettings(page, "header", ids);
 
 test("설정에서 끈 헤더 버튼은 바로 사라지고 설정(⚙)은 항상 남는다", async ({ page }) => {
   await boot(page);
@@ -38,10 +32,14 @@ test("설정에서 끈 헤더 버튼은 바로 사라지고 설정(⚙)은 항�
   await expect(page.locator("#sidebarToggle")).toBeVisible();
 
   // 설정을 다시 열었을 때도 끈 상태로 보여야 한다(저장·복원 경로).
-  await page.locator("#settingsOpen").click();
-  await page.locator('[data-settings-tab="tools"]').click();
-  await expect(page.locator("#settingTool-hdrTheme")).not.toBeChecked();
-  await expect(page.locator("#settingTool-hdrSidebar")).toBeChecked();
+  await openToolSettings(page, "header");
+  await expect(page.locator('#settingToolsHidden option[value="hdrTheme"]')).toHaveCount(1);
+  await expect(page.locator('#settingToolsVisible option[value="hdrTheme"]')).toHaveCount(0);
+  await expect(page.locator('#settingToolsVisible option[value="hdrSidebar"]')).toHaveCount(1);
+  // 끈 개수는 두 칸의 머리 숫자에도 그대로 나타난다.
+  await expect(page.locator("#settingToolsHiddenCount")).toHaveText("4개");
+  // 노출 대상이 아닌 버튼(설정·저장 등)은 목록에 아예 없고 '항상 표시'로만 알려 준다.
+  await expect(page.locator("#settingToolsFixed")).toContainText("설정");
 });
 
 test("숨긴 헤더 버튼도 명령 팔레트로는 계속 실행된다(되돌릴 길 확보)", async ({ page }) => {

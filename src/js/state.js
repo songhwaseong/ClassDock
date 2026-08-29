@@ -15,7 +15,7 @@ const {
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
   workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,
-  splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems,
+  splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles,
   INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
 } = ClassDockCore;
 
@@ -613,10 +613,12 @@ const DEFAULT_APP_SETTINGS = {
   // officeReplaceAttached: 오피스 찾아 바꾸기가 본문 밖(Word 머리말·꼬리말·각주, PPT 발표자 노트)까지
   //   건드릴지. 기본은 본문만 — 머리말·노트는 본문 화면에서 안 보이는 곳이라, 켜진 줄 모르고 바꾸면
   //   바뀐 사실조차 볼 수 없다. 꺼 두어도 "머리말 3곳은 안 바꿨어요" 로 개수를 알려 준다.
+  // pptxExactByDefault: PPTX를 열자마자 설치된 PowerPoint로 PDF 변환할지. 기본은 빠른 간이 미리보기이며,
+  //   필요한 문서만 미리보기 배너의 버튼으로 정확 변환한다. COM 시작 불량이 파일 열기 전체를 막지 않게 한다.
   // officeReplaceTracked: 변경 내용 추적이 켜진 문서도 바꿀지. 기본은 건너뛴다 —
   //   이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아, 검토 중인 문서라면 이력을 믿을 수 없게 된다.
   uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
-  searchHistory: true, autoOpenFirstFile: false, officeReplaceAttached: false, officeReplaceTracked: false,
+  searchHistory: true, autoOpenFirstFile: false, pptxExactByDefault: false, officeReplaceAttached: false, officeReplaceTracked: false,
   mapSearchProvider: "osm",   // API 키는 여기에 저장하지 않는다. 공급자 선택만 설정에 남긴다.
   screensaver: { enabled: false, idleMin: 5, sound: false, mode: "video", url: "" },
   petEnabled: false, petCount: 1,   // 픽셀 펫(돌아다니는 동물) — 옵션에서 켤 때만·마릿수

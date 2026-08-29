@@ -94,7 +94,6 @@ test("가져오기는 각 오선의 두 성부를 고르고 지원 길이를 정
     JSON.parse(JSON.stringify(api.musicXmlSupportedDuration("quarter", 2, 0, 1, warnings))),
     { value:"quarter", dots:2 }
   );
-  assert.match(xmlSource, /여러 파트 중 첫 번째 파트만 가져왔어요/);
   assert.match(xmlSource, /각 오선의 성부는 두 개까지만 가져왔어요/);
   assert.match(xmlSource, /musicVoiceNotes\(measure, staff, editorVoice\)/);
   assert.match(xmlSource, /musicAddChordPitch\(lastNote\[voiceKey\], pitch\)/);
