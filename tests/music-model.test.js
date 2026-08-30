@@ -34,7 +34,15 @@ function loadMusic(){
       musicClampXOffset, MUSIC_X_OFFSET_MAX, MUSIC_KEYS,
       musicPracticeSteps, musicPitchClass, MUSIC_PC_LABELS,
       MUSIC_EAR_LEVELS, MUSIC_EAR_COUNTS, musicEarLevel, musicEarPool, musicEarOctaves,
-      musicEarQuestions, musicEarJudge, musicEarSummary, musicEarDistractor, MUSIC_EAR_REFERENCE_MIDI
+      musicEarQuestions, musicEarJudge, musicEarSummary, musicEarDistractor, MUSIC_EAR_REFERENCE_MIDI,
+      musicNoteLyrics, musicSetNoteLyric, musicApplyLyrics, musicClampVerseCount, musicCountLyricVerses,
+      musicSplitLyricSyllables, musicLyricTargets, musicApplyLyricLine, musicClearLyricVerse, MUSIC_MAX_LYRIC_VERSES,
+      musicClampMeasureNumbers, musicClampBarsPerLine, musicClampRehearsal, musicHasPickup,
+      musicMeasureNumberAt, musicMeasureIndexForNumber, musicShowsMeasureNumber,
+      musicAutoRehearsalSpots, musicAutoRehearsal, musicClearRehearsal, MUSIC_AUTO_REHEARSAL_EVERY,
+      MUSIC_TRANSPOSING_INSTRUMENTS, musicTranspositionSpec, musicClampTransposition,
+      musicTranspositionSemitones, musicTranspositionLabel, musicSoundingKey,
+      musicTranspositionBySemitones, musicTransposePart, musicPartSheet
     };`, context);
   return context.__music;
 }
@@ -136,7 +144,7 @@ test("신디사이저 프리셋과 사용자 음색은 파트별로 안전하게
   assert.equal(restored.synth.sustain, 1);
   assert.equal(restored.synth.cutoff, 12000);
   assert.equal(reopened.synth.reverb, 0.45);
-  assert.equal(JSON.parse(api.musicSerialize(reopened)).version, 9);
+  assert.equal(JSON.parse(api.musicSerialize(reopened)).version, 12);   // 11 → 이조 악기 파트 12
 
   const pad = api.musicSynthSettings("pad");
   assert.equal(pad.waveform, "triangle");
@@ -1129,4 +1137,205 @@ test("간섭음은 문제 음역과 겹치지 않는다", () => {
     assert.deepEqual(Array.from(cluster.map((midi) => midi - cluster[0])), [0, 1, 6, 11]);
   }
   assert.equal(api.MUSIC_EAR_REFERENCE_MIDI, 60);              // 기준음은 가온다
+});
+
+test("가사 음절 나눔은 한글 한 글자·붙임표 단위이고 붙임줄·쉼표는 건너뛴다", () => {
+  const api = loadMusic();
+  assert.deepEqual([...api.musicSplitLyricSyllables("학교 종이")], ["학", "교", "종", "이"]);
+  assert.deepEqual([...api.musicSplitLyricSyllables("hap-py birth-day happy")], ["hap-", "py", "birth-", "day", "happy"]);
+  const notes = [
+    api.musicNote("G", 4, { value:"quarter" }),
+    api.musicNote("A", 4, { value:"quarter", tieToNext:true }),
+    api.musicNote("A", 4, { value:"quarter" }),
+    api.musicRest("quarter", 0),
+    api.musicNote("B", 4, { value:"quarter" })
+  ];
+  const measures = [api.musicMeasure(notes)];
+  // 붙임줄로 이어받은 음표(3번)와 쉼표는 한 음절을 이어 부르는 자리라 가사를 붙이지 않는다.
+  assert.equal(api.musicLyricTargets(measures).length, 3);
+  const result = api.musicApplyLyricLine(measures, 1, "학 교 종 이");
+  assert.deepEqual({ ...result }, { applied:3, leftover:1, targets:3 });
+  assert.deepEqual([...api.musicNoteLyrics(notes[0])], ["학"]);
+  assert.deepEqual([...api.musicNoteLyrics(notes[2])], []);
+  assert.deepEqual([...api.musicNoteLyrics(notes[4])], ["종"]);
+});
+
+test("가사 절은 1절을 lyric 자리에 둔 채 쌓이고 한 절뿐이면 예전과 같은 바이트가 된다", () => {
+  const api = loadMusic();
+  const note = api.musicNote("C", 4, { value:"quarter" });
+  api.musicSetNoteLyric(note, 1, "도");
+  assert.equal(note.lyric, "도");
+  assert.equal(note.lyrics, undefined);                      // 1절뿐이면 배열을 만들지 않는다
+  api.musicSetNoteLyric(note, 2, "레");
+  assert.deepEqual([...note.lyrics], ["도", "레"]);
+  assert.equal(note.lyric, "도");                            // 예전 판·MusicXML 이 읽는 자리는 그대로
+  api.musicSetNoteLyric(note, 2, "");
+  assert.equal(note.lyrics, undefined);                      // 꼬리의 빈 절은 남기지 않는다
+  const only2 = api.musicNote("D", 4, { value:"quarter" });
+  api.musicSetNoteLyric(only2, 2, "둘");
+  assert.deepEqual([...only2.lyrics], ["", "둘"]);
+  assert.equal(only2.lyric, undefined);
+  assert.equal(api.musicClampVerseCount(9), api.MUSIC_MAX_LYRIC_VERSES);
+
+  const sheet = api.musicEmpty("한 절");
+  sheet.measures[0].notes.push(api.musicNote("C", 4, { value:"quarter", lyric:"도" }));
+  sheet.parts[0].measures = sheet.measures;
+  const text = api.musicSerialize(sheet);
+  assert.doesNotMatch(text, /"lyrics"/);
+  assert.doesNotMatch(text, /lyricVerses/);
+});
+
+test("절 수는 저장값과 실제 가사 중 큰 쪽으로 열리고 절 지우기는 그 줄만 비운다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("학교종");
+  const first = api.musicNote("G", 4, { value:"quarter" });
+  const second = api.musicNote("A", 4, { value:"quarter" });
+  sheet.measures[0].notes.push(first, second);
+  sheet.parts[0].measures = sheet.measures;
+  api.musicApplyLyricLine(sheet.measures, 1, "학 교");
+  api.musicApplyLyricLine(sheet.measures, 3, "봄 여");                       // 2절을 건너뛰고 3절
+  const text = api.musicSerialize(sheet);
+  assert.equal(JSON.parse(text).lyricVerses, 3);
+  const reopened = api.musicParse(text);
+  assert.equal(reopened.lyricVerses, 3);
+  assert.deepEqual([...api.musicNoteLyrics(reopened.measures[0].notes[0])], ["학", "", "봄"]);
+  assert.equal(api.musicSerialize(reopened), text);                          // 같은 모델은 같은 바이트
+  assert.equal(api.musicClearLyricVerse(reopened.measures, 1), 2);
+  assert.deepEqual([...api.musicNoteLyrics(reopened.measures[0].notes[0])], ["", "", "봄"]);
+});
+
+test("한 줄 마디 수를 고정하면 폭과 상관없이 그 개수로 자르고 ＋오선은 여전히 이긴다", () => {
+  const api = loadMusic();
+  const measures = Array.from({ length:9 }, () => api.musicMeasure([]));
+  measures[5].lineBreakBefore = true;
+  const fixed = api.musicPackLines(measures, 1200, { barsPerLine:4 });
+  assert.deepEqual([...fixed.map((line) => line.indexes.length)], [4, 1, 4]);   // 5번째 마디에서 수동 줄바꿈
+  const auto = api.musicPackLines(measures, 1200);
+  assert.notDeepEqual([...auto.map((line) => line.indexes.length)], [4, 1, 4]);
+  // 좁은 화면이라도 고정 개수는 한 줄에 담는다(배율을 1보다 작게 줄여서라도).
+  const narrow = api.musicPackLines(measures, 320, { barsPerLine:4 });
+  assert.equal(narrow[0].indexes.length, 4);
+  assert.ok(narrow[0].widths.reduce((sum, width) => sum + width, 0) <= 320);
+});
+
+test("마디 번호는 못갖춘마디를 0번으로 두고 재생 구간 숫자와 같은 값을 쓴다", () => {
+  const api = loadMusic();
+  const plain = [api.musicMeasure([]), api.musicMeasure([]), api.musicMeasure([])];
+  assert.equal(api.musicMeasureNumberAt(plain, 0), 1);
+  assert.equal(api.musicMeasureNumberAt(plain, 2), 3);
+  assert.equal(api.musicMeasureIndexForNumber(plain, 3), 2);
+  const pickup = [api.musicMeasure([], { pickupTicks:480 }), api.musicMeasure([]), api.musicMeasure([])];
+  assert.equal(api.musicHasPickup(pickup), true);
+  assert.equal(api.musicMeasureNumberAt(pickup, 0), 0);           // 못갖춘마디는 번호를 찍지 않는다
+  assert.equal(api.musicMeasureNumberAt(pickup, 1), 1);
+  assert.equal(api.musicMeasureIndexForNumber(pickup, 1), 1);     // 사람이 적은 1마디 = 배열 두 번째
+  assert.equal(api.musicMeasureIndexForNumber(pickup, 99), 2);    // 범위를 넘으면 마지막으로
+  assert.equal(api.musicMeasureIndexForNumber(pickup, "", 1), 1); // 빈 칸이면 기본값
+  // 표시 규칙
+  assert.equal(api.musicShowsMeasureNumber("line", 3, true), true);
+  assert.equal(api.musicShowsMeasureNumber("line", 3, false), false);
+  assert.equal(api.musicShowsMeasureNumber("every", 3, false), true);
+  assert.equal(api.musicShowsMeasureNumber("off", 3, true), false);
+  assert.equal(api.musicShowsMeasureNumber(5, 10, false), true);
+  assert.equal(api.musicShowsMeasureNumber(5, 11, false), false);
+  assert.equal(api.musicShowsMeasureNumber("every", 0, true), false);  // 못갖춘마디에는 번호가 없다
+  assert.equal(api.musicClampMeasureNumbers("이상한값"), "line");
+  assert.equal(api.musicClampBarsPerLine(99), 8);
+  assert.equal(api.musicClampBarsPerLine(0), 0);
+});
+
+test("연습 기호는 구조가 바뀌는 자리에 매기고 손으로 적은 기호는 건드리지 않는다", () => {
+  const api = loadMusic();
+  const measures = Array.from({ length:6 }, () => api.musicMeasure([]));
+  measures[2].repeatStart = true;
+  measures[4].ending = 1;
+  assert.deepEqual([...api.musicAutoRehearsalSpots(measures)], [2, 4]);
+  measures[2].rehearsal = "A";                                    // 손으로 적어 둔 기호
+  assert.equal(api.musicAutoRehearsal(measures), 1);
+  assert.equal(measures[2].rehearsal, "A");                       // 그대로 둔다
+  assert.equal(measures[4].rehearsal, "B");                       // 이미 쓴 글자는 건너뛴다
+  assert.equal(api.musicClearRehearsal(measures), 2);
+  assert.equal(measures[2].rehearsal, undefined);
+  // 도돌이·괄호·줄바꿈이 하나도 없으면 8마디마다 매긴다
+  const plain = Array.from({ length:20 }, () => api.musicMeasure([]));
+  assert.deepEqual([...api.musicAutoRehearsalSpots(plain)], [8, 16]);
+  assert.equal(api.musicClampRehearsal("  Coda 1234  "), "Coda 1");
+});
+
+test("마디 번호 설정과 연습 기호는 저장·복원되고 기본값이면 파일에 적지 않는다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("조판");
+  sheet.measures[1].rehearsal = "A";
+  sheet.parts[0].measures = sheet.measures;
+  const plainText = api.musicSerialize(sheet);
+  assert.doesNotMatch(plainText, /measureNumbers/);               // 기본값(line)은 적지 않는다
+  assert.doesNotMatch(plainText, /barsPerLine/);
+  assert.match(plainText, /"rehearsal": "A"/);
+  sheet.measureNumbers = "every";
+  sheet.barsPerLine = 4;
+  const text = api.musicSerialize(sheet);
+  const reopened = api.musicParse(text);
+  assert.equal(reopened.measureNumbers, "every");
+  assert.equal(reopened.barsPerLine, 4);
+  assert.equal(reopened.measures[1].rehearsal, "A");
+  assert.equal(api.musicSerialize(reopened), text);               // 같은 모델은 같은 바이트
+});
+
+test("이조 악기 파트는 적힌 음 그대로 두고 소리만 내려 울린다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("합주");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4, { value:"whole" })])];
+  sheet.parts[0].measures = sheet.measures;
+  const clarinet = api.musicAddPart(sheet, { name:"클라리넷", timbre:"clarinet" });
+  sheet.measures[0].notes = [api.musicNote("C", 4, { value:"whole" })];
+  api.musicSyncActivePart(sheet);
+  assert.deepEqual([...api.musicTimeline(sheet, { includeMuted:true }).events.map((event) => event.midi)], [60, 60]);
+  clarinet.transposition = "Bb";
+  // 기보 C4(60) → 실음 B♭3(58). 다른 파트는 그대로다.
+  assert.deepEqual([...api.musicTimeline(sheet, { includeMuted:true }).events.map((event) => event.midi)].sort((a, b) => a - b), [58, 60]);
+  assert.equal(api.musicTimeline(sheet, { partId:clarinet.id, includeMuted:true }).events[0].midi, 58);
+  // 표의 옥타브까지 맞아야 한다 — 테너·바리톤은 -2·-9 가 아니다
+  assert.equal(api.musicTranspositionSemitones("BbT"), -14);
+  assert.equal(api.musicTranspositionSemitones("EbB"), -21);
+  assert.equal(api.musicTranspositionSpec("BbT").chromatic, -2);
+  assert.equal(api.musicTranspositionSpec("BbT").octave, -1);
+  assert.equal(api.musicTranspositionBySemitones(-7).id, "F");
+  assert.equal(api.musicClampTransposition("C"), "");
+  assert.equal(api.musicClampTransposition("없는악기"), "");
+});
+
+test("실음을 지키며 이조 악기로 바꾸면 그 파트만 옮겨 적히고 조표도 함께 간다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("옮겨 적기");
+  sheet.measures = [api.musicMeasure([api.musicNote("C", 4, { value:"whole" })])];
+  sheet.parts[0].measures = sheet.measures;
+  const piano = api.musicActivePart(sheet);
+  const clarinet = api.musicAddPart(sheet, { name:"클라리넷", timbre:"clarinet" });
+  sheet.measures[0].notes = [api.musicNote("C", 4, { value:"whole" })];
+  api.musicSyncActivePart(sheet);
+  // B♭(-2) 로 바꾸면서 소리를 지키려면 기보를 +2 올린다
+  const report = api.musicTransposePart(sheet, clarinet, 2);
+  clarinet.transposition = "Bb";
+  assert.equal(report.changed, 1);
+  assert.equal(clarinet.measures[0].notes[0].step, "D");
+  assert.equal(clarinet.key, "D");
+  assert.equal(sheet.key, "D");                       // 고른 파트를 옮겼으니 화면 조표도 따라간다
+  assert.equal(piano.key, "C");                       // 다른 파트는 그대로
+  assert.equal(api.musicTimeline(sheet, { partId:clarinet.id, includeMuted:true }).events[0].midi, 60);
+  assert.equal(api.musicSoundingKey(clarinet.key, clarinet.transposition), "C");
+  // 파트마다 조표가 다르면 파일에 각자 적히고 다시 열어도 섞이지 않는다
+  const text = api.musicSerialize(sheet);
+  const reopened = api.musicParse(text);
+  const byName = Object.fromEntries(api.musicParts(reopened).map((part) => [part.name, part]));
+  assert.equal(byName["피아노"].key, "C");
+  assert.equal(byName["클라리넷"].key, "D");
+  assert.equal(byName["클라리넷"].transposition, "Bb");
+  assert.deepEqual([...api.musicTimeline(reopened, { includeMuted:true }).events.map((event) => event.midi)], [60, 60]);
+  assert.equal(api.musicSerialize(reopened), text);
+  // 이조 악기가 없는 악보는 예전과 같은 바이트(파트에 key·transposition 을 적지 않는다)
+  const plain = api.musicEmpty("보통");
+  plain.parts[0].measures = plain.measures;
+  const plainText = api.musicSerialize(plain);
+  assert.doesNotMatch(plainText, /"transposition"/);
+  assert.doesNotMatch(plainText, /"key": "C",\n\s*"transposition"/);
 });

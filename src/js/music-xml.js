@@ -107,6 +107,7 @@ function musicParseXmlText(text, sourceName){
   let keySeen = false;
   let clefSeen = false;
   let tempoSeen = false;
+  let transposeSeen = false;
 
   const measures = musicXmlChildren(part, "measure");
   for (let measureIndex = 0; measureIndex < measures.length; measureIndex++){
@@ -140,6 +141,15 @@ function musicParseXmlText(text, sourceName){
         else if (measureIndex > 0) measure.keyChange = nextKey;
       }
 
+      const transposeNode = musicXmlFirst(attributes, "transpose");
+      if (transposeNode && !transposeSeen){
+        const chromatic = Math.round(Number(musicXmlText(transposeNode, "chromatic")) || 0);
+        const octave = Math.round(Number(musicXmlText(transposeNode, "octave-change")) || 0);
+        const spec = musicTranspositionBySemitones(chromatic + octave * 12);
+        transposeSeen = true;
+        if (spec && spec.semitones) sheet.transposition = spec.id;
+        else if (chromatic || octave) warnings.add("이 악보의 이조 악기 설정은 지원 목록에 없어 실음으로 가져왔어요.");
+      }
       const staves = Number(musicXmlText(attributes, "staves"));
       if (staves >= 2) sheet.grandStaff = true;
       for (const clef of musicXmlChildren(attributes, "clef")){
@@ -262,7 +272,14 @@ function musicParseXmlText(text, sourceName){
       }
       const notations = musicXmlFirst(xmlNote, "notations");
       const slurStart = musicXmlDescendants(notations, "slur").some((item) => item.getAttribute("type") === "start");
-      const lyric = musicXmlText(musicXmlFirst(xmlNote, "lyric"), "text");
+      /* 절이 여럿인 가사는 <lyric number="2"> 처럼 번호로 나뉜다. 번호가 없으면 나온 차례대로 센다. */
+      const lyrics = [];
+      musicXmlChildren(xmlNote, "lyric").forEach((node, order) => {
+        const number = Math.round(Number(node.getAttribute("number")) || 0) || (order + 1);
+        if (number < 1 || number > MUSIC_MAX_LYRIC_VERSES) return;
+        lyrics[number - 1] = musicXmlText(node, "text");
+      });
+      const lyric = lyrics[0] || "";
       const dynamicNode = musicXmlFirstDescendant(notations, "dynamics");
       const dynamic = dynamicNode && musicXmlChildren(dynamicNode, "pp").length ? "pp"
         : dynamicNode && musicXmlChildren(dynamicNode, "p").length ? "p"
@@ -276,7 +293,7 @@ function musicParseXmlText(text, sourceName){
         : musicXmlFirst(articulationNode, "tenuto") ? "tenuto" : "";
       const fingering = Number(musicXmlText(musicXmlFirstDescendant(notations, "technical"), "fingering"));
       const note = musicNote(step, octave, { alter, value:length.value, dots:length.dots,
-        tieToNext:tieStart, slurToNext:slurStart, chordSymbol:pendingHarmony[staff], lyric,
+        tieToNext:tieStart, slurToNext:slurStart, chordSymbol:pendingHarmony[staff], lyric, lyrics,
         dynamic:dynamic || pendingDynamic[staff], articulation, fingering, pedal:pendingPedal[staff],
         tuplet:isTriplet ? 3 : undefined });
       pendingHarmony[staff] = "";
@@ -310,7 +327,9 @@ function musicParseXmlText(text, sourceName){
     return "piano";
   };
   const firstPart = musicPart(firstName, { id:`xml-${partId}`, timbre:inferTimbre(firstName),
-    volume:1, grandStaff:sheet.grandStaff, measures:sheet.measures });
+    volume:1, grandStaff:sheet.grandStaff, key:sheet.key,
+    transposition:sheet.transposition, measures:sheet.measures });
+  delete sheet.transposition;                 // 이조량은 파트에만 둔다(화면 sheet 는 파트를 따라간다)
   sheet.parts = [firstPart];
   sheet.activePartId = firstPart.id;
   sheet.timbre = firstPart.timbre;
@@ -377,6 +396,15 @@ function musicSerializeXmlSingle(sheet){
       }
       if (index === 0 || measure.timeChange){
         lines.push(`        <time><beats>${effective.time.beats}</beats><beat-type>${effective.time.beatValue}</beat-type></time>`);
+      }
+      const transposeSpec = index === 0 ? musicTranspositionSpec(sheet && sheet.transposition) : null;
+      if (transposeSpec && transposeSpec.semitones){
+        // 이 값을 빠뜨리면 다른 악보 프로그램에서 반음 어긋난 악보가 된다.
+        lines.push('        <transpose>');
+        lines.push(`          <diatonic>${transposeSpec.diatonic}</diatonic>`);
+        lines.push(`          <chromatic>${transposeSpec.chromatic}</chromatic>`);
+        if (transposeSpec.octave) lines.push(`          <octave-change>${transposeSpec.octave}</octave-change>`);
+        lines.push('        </transpose>');
       }
       if (index === 0 && grandStaff){
         lines.push('        <staves>2</staves>');
@@ -467,8 +495,12 @@ function musicSerializeXmlSingle(sheet){
             }
             lines.push('        </notations>');
           }
-          if (pitchIndex === 0 && note.lyric){
-            lines.push(`        <lyric><text>${musicXmlEscape(note.lyric)}</text></lyric>`);
+          if (pitchIndex === 0){
+            // 절마다 <lyric number="n"> 한 개. 중간 절이 비어 있어도 번호는 절 순서를 그대로 지킨다.
+            musicNoteLyrics(note).forEach((text, index) => {
+              if (!text) return;
+              lines.push(`        <lyric number="${index + 1}"><text>${musicXmlEscape(text)}</text></lyric>`);
+            });
           }
           lines.push('      </note>');
           if (tieStart) nextTies.add(pitchKey);

@@ -17,5 +17,7 @@ test("앱 기능은 브라우저 alert·confirm·prompt 대신 내부 창을 사
     assert.doesNotMatch(source, nativeDialog, `${name}에 브라우저 기본 대화상자가 남아 있습니다`);
   }
   const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
-  assert.match(styles, /#textModal,#confirmModal\{z-index:2200\}/);
+  // 확인·입력창은 자기를 부른 창(관계도·암기 카드 모달 = 2200) 위에 떠야 버튼을 누를 수 있다.
+  assert.match(styles, /#textModal,#confirmModal\{z-index:2300\}/);
+  assert.match(styles, /\.concept-modal,\.study-modal\{[^}]*z-index:2200/);
 });

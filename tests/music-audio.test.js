@@ -446,3 +446,27 @@ function ascii(bytes, offset, length){
 function round3(value){
   return Math.round(value * 1000) / 1000;
 }
+
+test("연습 음원 믹스는 내 파트만 그대로 두고 나머지와 반주를 낮춘다", () => {
+  const api = loadMusicAudio();
+  const events = [
+    { partId:"me", gain:1, midi:60 },
+    { partId:"other", gain:1, midi:64 },
+    { partId:"other", gain:1, rest:true }
+  ];
+  const mixed = api.MNMusicAudio.mixPracticeTrack(events, "me", 0.4, false);
+  assert.equal(mixed.length, 3);
+  assert.equal(mixed[0].gain, 1);
+  assert.ok(Math.abs(mixed[1].gain - 0.4) < 1e-9);
+  assert.equal(mixed[2].rest, true);                       // 쉼표는 소리가 없어 그대로 둔다
+  // 0% 면 내 파트만 남는다(쉼표는 자리를 지킨다)
+  const solo = api.MNMusicAudio.mixPracticeTrack(events, "me", 0, false);
+  assert.deepEqual([...solo.map((event) => event.partId)], ["me", "other"]);
+  assert.equal(solo[1].rest, true);
+  // 반주(드럼·베이스·코드)는 내 파트가 없으므로 전부 낮춘다
+  const drums = api.MNMusicAudio.mixPracticeTrack([{ gain:1, kind:"kick" }], "me", 0.4, true);
+  assert.ok(Math.abs(drums[0].gain - 0.4) < 1e-9);
+  assert.equal(api.MNMusicAudio.mixPracticeTrack([{ gain:1, kind:"kick" }], "me", 0, true).length, 0);
+  // 고른 파트가 없으면(=합주 저장) 손대지 않는다
+  assert.equal(api.MNMusicAudio.mixPracticeTrack(events, "", 0.4, false), events);
+});

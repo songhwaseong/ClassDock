@@ -674,9 +674,13 @@ const MNMusicAudio = (() => {
     const target = ensureContext();
     if (!target) return false;
     const pitches = typeof musicNotePitches === "function" ? musicNotePitches(note) : [note];
-    const playable = pitches.map((pitch) => ({
-      midi:musicMidiNumber(pitch), frequency:musicNoteFrequency(pitch)
-    })).filter((pitch) => pitch.midi !== null && pitch.frequency > 0);
+    // 이조 악기 파트는 적힌 음보다 낮게 울린다(기보음 → 실음).
+    const shift = Math.round(Number(options.transpose) || 0);
+    const playable = pitches.map((pitch) => {
+      const written = musicMidiNumber(pitch);
+      return written === null ? { midi:null, frequency:0 }
+        : { midi:written + shift, frequency:musicFrequency(written + shift) };
+    }).filter((pitch) => pitch.midi !== null && pitch.frequency > 0);
     if (!playable.length) return false;   // 쉼표는 소리내지 않는다
     cancelPreview();
     const request = previewRequest;
@@ -711,16 +715,41 @@ const MNMusicAudio = (() => {
     return true;
   }
 
+  /* 연습 음원 믹스 — 고른 파트는 그대로 두고 나머지 파트와 반주만 otherGain 만큼 낮춘다.
+     0 이면 내 파트만 남는다. 음량만 건드리므로 박자·길이는 합주와 완전히 같아 함께 맞춰 부르기 좋다. */
+  function mixPracticeTrack(list, focusPartId, otherGain, backing){
+    const items = Array.isArray(list) ? list : [];
+    if (!focusPartId) return items;
+    const level = Math.max(0, Math.min(1, Number(otherGain) || 0));
+    return items.map((item) => {
+      const mine = !backing && item.partId === focusPartId;
+      return Object.assign({}, item, { gain:(item.gain || 0) * (mine ? 1 : level) });
+    }).filter((item) => item.rest === true || item.gain > 0.0001);
+  }
+
   /* WAV 저장 — 재생과 같은 scheduleInto 를 오프라인 컨텍스트에 태운다.
      실시간을 기다리지 않아 3분 곡도 1초 안에 끝난다. */
   async function renderWav(sheet, opts){
     const options = opts || {};
     const Ctor = offlineContextClass();
     if (!Ctor) throw new Error("이 브라우저는 오디오 파일 저장을 지원하지 않습니다.");
-    const timeline = musicTimeline(sheet, { from:options.from, to:options.to });
+    const timeline = musicTimeline(sheet, { from:options.from, to:options.to,
+      playbackRate:options.playbackRate, includeMuted:options.includeMuted });
     if (!timeline.events.length && !timeline.drums.length && !timeline.bass.length && !timeline.chords.length){
       throw new Error("저장할 소리가 없습니다.");
     }
+
+    const focusPartId = String(options.focusPartId || "");
+    const otherGain = options.otherGain;
+    const melody = mixPracticeTrack(timeline.events, focusPartId, otherGain, false);
+    const drumTrack = mixPracticeTrack(timeline.drums, focusPartId, otherGain, true);
+    const bassTrack = mixPracticeTrack(timeline.bass, focusPartId, otherGain, true);
+    const chordTrack = mixPracticeTrack(timeline.chords, focusPartId, otherGain, true);
+
+    // 2마디 준비(카운트인)를 넣으면 곡 전체를 그만큼 뒤로 민다.
+    const beatSeconds = Math.max(0.01, Number(timeline.countInBeatSeconds) || (60 / timeline.tempo));
+    const countInBeats = options.countIn ? Math.max(1, Math.round(Number(timeline.countInBeats) || 4)) : 0;
+    const offset = countInBeats * beatSeconds;
 
     const synthTail = timeline.events.reduce((tail, event) => {
       if (timbreOf(event && event.timbre || sheet && sheet.timbre) !== "synth") return tail;
@@ -728,14 +757,14 @@ const MNMusicAudio = (() => {
       return settings ? Math.max(tail, settings.release + Math.max(settings.delay > 0 ? 0.24 : 0,
         settings.reverb * 0.9) + 0.2) : tail;
     }, 0);
-    const frames = Math.max(1, Math.ceil((timeline.totalSeconds + Math.max(TAIL_SEC, synthTail)) * RENDER_SAMPLE_RATE));
+    const frames = Math.max(1, Math.ceil((offset + timeline.totalSeconds + Math.max(TAIL_SEC, synthTail)) * RENDER_SAMPLE_RATE));
     const target = new Ctor(1, frames, RENDER_SAMPLE_RATE);
     const bus = target.createGain();
     bus.gain.value = MASTER_GAIN;
     bus.connect(target.destination);
     const timbre = timbreOf(options.timbre || (sheet && sheet.timbre));
     const sampleBuffers = Object.create(null);
-    const melodyTimbres = Array.from(new Set(timeline.events.filter((event) => !event.rest)
+    const melodyTimbres = Array.from(new Set(melody.filter((event) => !event.rest)
       .map((event) => timbreOf(event.timbre || timbre))));
     for (const eventTimbre of melodyTimbres){
       if (!SAMPLE_INSTRUMENTS[eventTimbre]) continue;
@@ -748,7 +777,7 @@ const MNMusicAudio = (() => {
     let accompanimentTimbre = typeof musicAccompanimentTimbre === "function"
       ? musicAccompanimentTimbre(sheet && sheet.accompanimentTimbre) : "piano";
     let accompanimentBuffers = null;
-    if (timeline.chords.length && SAMPLE_INSTRUMENTS[accompanimentTimbre]){
+    if (chordTrack.length && SAMPLE_INSTRUMENTS[accompanimentTimbre]){
       const failedTimbre = accompanimentTimbre;
       try { accompanimentBuffers = await ensureSampleBuffers(ensureContext() || target, accompanimentTimbre); }
       catch(error){
@@ -756,11 +785,18 @@ const MNMusicAudio = (() => {
         if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
-    scheduleInto(target, bus, timeline.events, 0, timbre, sampleBuffers,
+    scheduleInto(target, bus, melody, offset, timbre, sampleBuffers,
       typeof musicSynthSettings === "function" ? musicSynthSettings(sheet && sheet.synth) : null);
-    scheduleDrumsInto(target, bus, timeline.drums, 0);
-    scheduleInto(target, bus, timeline.bass, 0, "triangle", null);
-    scheduleInto(target, bus, timeline.chords, 0, accompanimentTimbre, accompanimentBuffers);
+    scheduleDrumsInto(target, bus, drumTrack, offset);
+    scheduleInto(target, bus, bassTrack, offset, "triangle", null);
+    scheduleInto(target, bus, chordTrack, offset, accompanimentTimbre, accompanimentBuffers);
+    // 준비 딱딱이와 마디마다의 메트로놈은 재생 때 쓰던 그 소리를 그대로 굽는다.
+    for (let beat = 0; beat < countInBeats; beat++){
+      scheduleMetronomeClick(target, bus, beat * beatSeconds, beat === 0);
+    }
+    if (options.metronome){
+      for (const beat of timeline.metronome) scheduleMetronomeClick(target, bus, offset + beat.start, beat.accented);
+    }
 
     const buffer = await target.startRendering();
     const wav = encodeWav([buffer.getChannelData(0)], buffer.sampleRate);
@@ -810,7 +846,8 @@ const MNMusicAudio = (() => {
   }
 
   return {
-    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, scheduleInto, scheduleSynthNote,
+    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, mixPracticeTrack,
+    scheduleInto, scheduleSynthNote,
     scheduleMetronomeClick, scheduleDrumHit, scheduleDrumsInto, setVolume, getVolume, setMuted, muted,
     ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
     PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,

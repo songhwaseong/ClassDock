@@ -168,7 +168,7 @@ test("화음·피아노 대보표·두 손·붙임줄·코드 기호를 화면�
 });
 
 test("두 성부와 고급 표기·MIDI·참고 이미지 도구를 제공한다", () => {
-  for (const label of ["성부 1", "성부 2", "⌒ 이음줄", "가사", "셈여림", "연주 기호",
+  for (const label of ["성부 1", "성부 2", "⌒ 이음줄", "가사 ▾", "셈여림", "연주 기호",
     "3잇단", "운지", "페달", "|: 반복 시작", ":| 반복 끝", "1·2번 괄호", "마디 설정"]){
     assert.ok(editorSource.includes(`musicButton("${label}"`), `${label} 도구가 있어야 한다`);
   }
@@ -270,7 +270,7 @@ test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 �
   assert.match(editorSource, /label:"이 음표 미리 듣기"/);
   assert.match(editorSource, /label:"이 음표 삭제 \(Delete\)"/);
   assert.match(editorSource, /label:"다음 입력 도구", children:nextInputContextItems\(\)/);
-  assert.match(editorSource, /label:`\$\{targetMeasure \+ 1\}마디 삭제`/);
+  assert.match(editorSource, /label:`\$\{measureNumberLabel\(targetMeasure\)\}마디 삭제`/);
   assert.match(editorSource, /label:"계이름 표시", active:sheet\.showSolfege !== false, action:toggleSolfege/);
   assert.match(editorSource, /label:"입력 오선", children:/);
   assert.match(editorSource, /label:"오른손 · 높은음자리표"/);
@@ -482,7 +482,8 @@ test("파트별 신디사이저는 프리셋·파형·ADSR·필터·이펙트를
   }
   assert.match(editorSource, /settings\.preset = "custom"/);
   assert.match(editorSource, /part\.synth = normalized/);
-  assert.match(editorSource, /MNMusicAudio\.previewNote\(note, timbre, \{ synth:musicSynthSettings\(sheet\.synth\) \}\)/);
+  // 이조 파트에서는 눌러 듣는 소리도 실음이어야 한다
+  assert.match(editorSource, /MNMusicAudio\.previewNote\(note, timbre, \{ synth:musicSynthSettings\(sheet\.synth\),\s*\n?\s*transpose:musicTranspositionSemitones\(part && part\.transposition\) \}\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-synth-controls\{display:grid/);
   assert.match(css, /grid-template-columns:repeat\(auto-fit,minmax\(min\(210px,100%\),1fr\)\)/);
@@ -491,8 +492,11 @@ test("파트별 신디사이저는 프리셋·파형·ADSR·필터·이펙트를
 });
 
 test("줄 나누기는 화면 폭을 따라간다", () => {
-  assert.match(editorSource, /musicPackLines\(sheet\.measures, width - 20\)/);
-  assert.match(editorSource, /const lineHeight = sheet\.grandStaff \? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT/);
+  assert.match(editorSource, /musicPackLines\(sheet\.measures, width - 20, \{ barsPerLine:sheet\.barsPerLine \}\)/);
+  // 단 높이는 가사 절 수만큼 늘어난다. 화면과 '이 단을 그림으로'가 반드시 같은 함수를 써야 한다.
+  assert.match(editorSource, /function musicScoreLineHeight\(sheet\)/);
+  assert.equal(editorSource.split("const lineHeight = musicScoreLineHeight(sheet);").length - 1, 2);
+  assert.doesNotMatch(editorSource, /const lineHeight = sheet\.grandStaff \?/);
   assert.match(editorSource, /const scoreHeight = layout\.length \* lineHeight \+ 30/);
   assert.match(editorSource, /renderer\.resize\(width, scoreHeight\)/);
   // 고정 4마디 배치는 더 쓰지 않는다.
@@ -820,4 +824,83 @@ test("단계·문항 수·기준음은 보기 상태라 악보에 저장하지 �
   assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_COUNT_KEY, earCountSelect\.value\)/);
   assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_REFERENCE_KEY, String\(earReference\)\)/);
   assert.doesNotMatch(editorSource, /sheet\.earLevel/);
+});
+
+test("가사는 절마다 한 줄로 그리고 이어치기 막대로 이어서 넣는다", () => {
+  // 절 고르기·이어치기·붙여넣기는 한 메뉴에서
+  assert.match(editorSource, /function lyricContextItems\(\)/);
+  assert.match(editorSource, /musicButton\("가사 ▾"/);
+  assert.match(editorSource, /openMusicContextMenu\(rect\.left, rect\.bottom \+ 4, lyricContextItems\(\)\)/);
+  // 이어치기: Space·Enter 로 다음 음표, 빈 칸 Backspace 로 앞 음표, Esc 로 끝
+  assert.match(editorSource, /class="music-lyric-bar"|music-lyric-bar/);
+  assert.match(editorSource, /function stepLyricEntry\(delta\)/);
+  assert.match(editorSource, /event\.key === "Backspace" && !lyricInput\.value/);
+  assert.match(editorSource, /function endLyricEntry\(\)/);
+  // 아직 비어 있는 절은 고른 음표와 상관없이 처음부터 넣는다
+  assert.match(editorSource, /function lyricStartIndex\(\)/);
+  assert.ok(editorSource.includes("lyricVerseHasText(lyricVerse) ? lyricTargetIndex() : 0"),
+    "빈 절은 처음부터 넣어야 한다");
+  // 절마다 한 줄씩 내려 그리고, 셈여림·페달은 그만큼 밀어낸다
+  assert.match(editorSource, /musicNoteLyrics\(note\)\.forEach\(\(text, verseIndex\)/);
+  assert.match(editorSource, /verseIndex \* MUSIC_LYRIC_ROW_GAP/);
+  assert.match(editorSource, /place\.bottomY \+ 70 \+ lyricDrop/);
+  // 단 왼쪽 절 번호는 SVG 안에 그린다(그림·인쇄가 같은 SVG 를 쓴다)
+  assert.match(editorSource, /music-lyric-verse/);
+  assert.match(editorSource, /scoreSvg\.appendChild\(label\)/);
+  // 자판이 건반이 되는 두 모드에서는 가사 입력을 먼저 접는다
+  assert.equal(editorSource.split("endLyricEntry();").length - 1 >= 3, true);
+});
+
+test("마디 번호·연습 기호는 SVG 안에 그리고 조판 메뉴에서 켠다", () => {
+  assert.match(editorSource, /musicButton\("조판 ▾"/);
+  assert.match(editorSource, /function layoutContextItems\(measureIndex\)/);
+  assert.match(editorSource, /function setBarsPerLine\(count\)/);
+  assert.match(editorSource, /function autoRehearsalMarks\(\)/);
+  // 우클릭 메뉴에도 같은 갈래가 있다(도구막대를 접고 쓰는 사람)
+  assert.match(editorSource, /label:"마디 번호·연습 기호", children:layoutContextItems\(targetMeasure\)/);
+  // 그림·인쇄가 같은 SVG 를 쓰므로 바깥 요소가 아니라 SVG 안에 그린다
+  assert.match(editorSource, /classList\.add\("music-measure-number"\)/);
+  assert.match(editorSource, /classList\.add\("music-rehearsal-box"\)/);
+  assert.match(editorSource, /scoreSvg\.append\(box, mark\)/);
+  // 위 여백도 화면·그림 두 곳이 같은 함수를 쓴다
+  assert.match(editorSource, /function musicScoreTopPad\(sheet\)/);
+  assert.equal(editorSource.split("musicScoreTopPad(sheet)").length - 1, 3);
+  assert.match(editorSource, /y:topPad \+ lineIndex \* lineHeight/);
+  assert.match(editorSource, /top = Math\.max\(0, topPad \+ lineIndex \* lineHeight - MUSIC_IMAGE_TOP_PAD\)/);
+  // 재생 구간 칸은 화면에 찍히는 마디 번호로 주고받는다(못갖춘마디)
+  assert.match(editorSource, /musicMeasureIndexForNumber\(sheet\.measures, fromInput\.value, 0\)/);
+  assert.match(editorSource, /function measureNumberLabel\(index\)/);
+});
+
+test("이조 악기 파트는 파트 줄에서 고르고 소리를 지킬지 묻는다", () => {
+  assert.match(editorSource, /class="music-part-transpose"|music-part-transpose/);
+  assert.match(editorSource, /async function applyPartTransposition\(nextId\)/);
+  // 갈림길은 '소리 유지'와 '적힌 음 그대로' 둘뿐이다(세 갈래 확인창)
+  assert.match(editorSource, /altText:"적힌 음 그대로"/);
+  assert.match(editorSource, /musicTransposePart\(sheet, part, shift, \{ apply:false \}\)/);
+  assert.match(editorSource, /musicTransposePart\(sheet, part, shift\)/);
+  // 파트를 바꾸면 조표 칸도 그 파트 조표로 간다
+  assert.ok(editorSource.includes("keySelect.value = sheet.key;                 // 이조 파트는 조표가 다르다"));
+  // 상태 줄에 기보·실음 조표를 함께 적는다
+  assert.match(editorSource, /musicSoundingKey\(sheet\.key, transposition\)/);
+});
+
+test("연습 음원은 파트마다·템포마다 한 벌씩 만들어 ZIP 한 장으로 묶는다", () => {
+  assert.match(editorSource, /musicButton\("🎧 연습 음원"/);
+  assert.match(editorSource, /async function buildPracticeAudio\(\)/);
+  // 새 렌더 경로를 만들지 않고 renderWav 에 옵션만 얹는다
+  assert.match(editorSource, /MNMusicAudio\.renderWav\(sheet, \{\s*\n\s*focusPartId:job\.part\.id/);
+  assert.match(editorSource, /playbackRate:job\.rate/);
+  assert.match(editorSource, /countIn:practiceCountInCheck\.checked/);
+  // 파일을 연달아 내려받으면 브라우저가 막는다 — 여러 벌은 ZIP 한 장
+  assert.match(editorSource, /MNLazy\.tryNeed\("jszip"\)/);
+  assert.match(editorSource, /zip\.generateAsync\(\{ type:"blob", compression:"STORE" \}\)/);
+  assert.ok(editorSource.includes(': zip.generate({ type:"blob", compression:"STORE" })'),
+    "vendor JSZip 2.x 의 generate 갈래도 있어야 한다");
+  assert.ok(editorSource.includes("new Uint8Array(await file.blob.arrayBuffer())"),
+    "JSZip 은 Blob 을 그대로 못 받아 바이트로 넣어야 한다");
+  assert.match(editorSource, /files\.length === 1/);
+  // 한 벌이 수 MB 라 개수를 막아 둔다 · 그만두기
+  assert.match(editorSource, /const MUSIC_PRACTICE_AUDIO_MAX = 12;/);
+  assert.match(editorSource, /if \(practiceAudioCancel\) break;/);
 });

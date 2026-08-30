@@ -173,6 +173,217 @@ function conceptAutoPresentationOrder(nodes, edges){
   return ordered;
 }
 
+/* ===== 표·개요 들이기와 내보내기 =====
+   조직도·업무 분장·절차서는 이미 엑셀 표나 개요 글로 적혀 있는 경우가 대부분이라, 카드를 하나씩
+   손으로 만들지 않고 그 표와 글을 그대로 관계도로 바꾼다. 표는 두 모양을 다 받는다 — 한 줄이 관계
+   하나인 '관계 표'(출발·관계·도착)와 한 줄이 개념 하나인 '개념 표'(개념·상위). 어느 쪽인지는 도착
+   열이 있느냐로 가른다. 내보낸 CSV·개요는 같은 규칙으로 다시 읽히므로 엑셀에서 고쳐 와도 된다. */
+const CONCEPT_TABLE_COLUMNS = Object.freeze({
+  from:["출발", "출발개념", "상위", "상위개념", "원인", "부모", "from", "source", "parent"],
+  title:["개념", "이름", "제목", "항목", "카드", "title", "name", "concept", "node"],
+  to:["도착", "도착개념", "하위", "하위개념", "결과", "대상", "자녀", "자식", "to", "target", "child"],
+  type:["관계", "관계종류", "관계유형", "종류", "relation", "type"],
+  label:["연결선", "연결선말", "라벨", "관계설명", "label"],
+  category:["분류", "갈래", "유형", "부서", "팀", "category", "group"],
+  description:["설명", "내용", "메모", "비고", "description", "note"],
+  color:["색", "색상", "color"]
+});
+const CONCEPT_RELATION_WORDS = Object.freeze({
+  cause:["원인", "원인→결과", "결과", "때문에", "cause", "effect"],
+  include:["상위", "상위→하위", "하위", "포함", "소속", "include", "contains", "parent", "child"],
+  compare:["비교", "차이", "compare", "versus"],
+  support:["근거", "뒷받침", "근거·뒷받침", "증거", "support", "evidence"],
+  related:["관련", "연관", "related", "relation"]
+});
+const CONCEPT_COLOR_WORDS = Object.freeze({ 파랑:"blue", 파란색:"blue", 초록:"green", 녹색:"green", 노랑:"amber", 주황:"amber", 빨강:"rose", 분홍:"rose", 보라:"purple", 검정:"slate", 회색:"slate" });
+const CONCEPT_TREE_RELATIONS = Object.freeze(["cause", "include", "support"]);
+const CONCEPT_OUTLINE_SEPARATOR = " | ";
+const CONCEPT_OUTLINE_TAB = 4;   // 개요에서 탭 한 칸을 공백 몇 칸으로 셀지
+
+function conceptHeaderKey(value){ return String(value == null ? "" : value).replace(/^\uFEFF/, "").trim().toLowerCase().replace(/\s+/g, ""); }
+function conceptMatchKey(value){ return String(value == null ? "" : value).trim().normalize("NFC").toLocaleLowerCase("ko"); }
+function conceptRelationId(value, fallback){
+  const key = conceptHeaderKey(value), base = CONCEPT_RELATIONS.some(item => item.id === fallback) ? fallback : "related";
+  if (!key) return base;
+  if (CONCEPT_RELATIONS.some(item => item.id === key)) return key;
+  for (const id of Object.keys(CONCEPT_RELATION_WORDS)) if (CONCEPT_RELATION_WORDS[id].includes(key)) return id;
+  return base;
+}
+function conceptColorId(value){
+  const key = conceptHeaderKey(value);
+  return Object.prototype.hasOwnProperty.call(CONCEPT_COLORS, key) ? key : (CONCEPT_COLOR_WORDS[key] || "blue");
+}
+/* 관계 종류 열이 없는 표는 열 이름만으로 짐작한다 — '상위/하위' 표는 포함, '원인/결과' 표는 인과다. */
+function conceptDefaultRelation(fromHeader, toHeader){
+  const text = conceptHeaderKey(fromHeader) + "/" + conceptHeaderKey(toHeader);
+  if (/원인|결과|cause|effect/.test(text)) return "cause";
+  if (/상위|하위|부모|자녀|자식|소속|parent|child/.test(text)) return "include";
+  return "related";
+}
+/* 엑셀은 지역 설정에 따라 쌍반점(;)으로, 시트에서 복사한 글은 탭으로 나뉜 표를 만든다.
+   머리글 줄에서 가장 많이 쓰인 구분자를 고르되 쉼표를 기본으로 둔다. */
+function conceptCsvDelimiter(text){
+  const line = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] || "", count = ch => line.split(ch).length - 1;
+  const comma = count(","), tab = count("\t"), semicolon = count(";");
+  return tab > comma && tab >= semicolon ? "\t" : semicolon > comma ? ";" : ",";
+}
+function conceptCsvRows(text, delimiter){
+  const source = String(text || "").replace(/^\uFEFF/, ""), separator = delimiter || conceptCsvDelimiter(source), rows = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < source.length; i++){
+    const ch = source[i];
+    if (quoted){
+      if (ch === '"' && source[i + 1] === '"'){ field += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === separator){ row.push(field); field = ""; }
+    else if (ch === "\n"){ row.push(field.replace(/\r$/, "")); rows.push(row); row = []; field = ""; }
+    else field += ch;
+  }
+  if (field || row.length){ row.push(field.replace(/\r$/, "")); rows.push(row); }
+  return rows.filter(values => values.some(value => String(value).trim()));
+}
+function conceptCsvCell(value){ const text = String(value == null ? "" : value); return /[",;\t\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text; }
+
+function conceptGraphFromRows(rows){
+  if (!Array.isArray(rows) || rows.length < 2) throw new Error("concept-table-empty");
+  const headers = (rows[0] || []).map(conceptHeaderKey), find = key => headers.findIndex(value => value && CONCEPT_TABLE_COLUMNS[key].includes(value));
+  const titleAt = find("title"), fromAt = find("from") >= 0 ? find("from") : titleAt, toAt = find("to");
+  const mode = fromAt >= 0 && toAt >= 0 ? "edges" : "nodes";
+  // 개념 표에서는 제목 열이 그 줄의 카드고, 따로 있는 '상위' 열이 그 카드의 부모다.
+  const baseAt = mode === "edges" ? fromAt : titleAt, parentAt = mode === "edges" ? -1 : (fromAt !== titleAt ? fromAt : -1);
+  if (baseAt < 0) throw new Error("concept-table-columns");
+  const typeAt = find("type"), labelAt = find("label"), categoryAt = find("category"), descriptionAt = find("description"), colorAt = find("color");
+  const fallbackRelation = mode === "edges" ? conceptDefaultRelation(rows[0][fromAt], rows[0][toAt]) : "include";
+  const nodes = [], edges = [], byKey = new Map(), edgeKeys = new Set(), cell = (row, index) => index >= 0 ? String(row[index] == null ? "" : row[index]).trim() : "";
+  let skipped = 0, truncated = false;
+  const ensure = (title, row, withDetails) => {
+    const key = conceptMatchKey(title); if (!key) return null;
+    const found = byKey.get(key);
+    if (found){
+      // 같은 개념이 여러 줄에 나오면 비어 있던 칸만 채운다(관계 표에서는 한 카드가 여러 줄에 걸친다).
+      if (withDetails){ if (!found.category) found.category = cell(row, categoryAt); if (!found.description) found.description = cell(row, descriptionAt); }
+      return found;
+    }
+    if (nodes.length >= CONCEPT_MAX_NODES){ truncated = true; return null; }
+    const node = conceptNormalizeNode({ title, category:withDetails ? cell(row, categoryAt) : "", description:withDetails ? cell(row, descriptionAt) : "",
+      color:withDetails && colorAt >= 0 ? conceptColorId(cell(row, colorAt)) : "blue" }, nodes.length);
+    nodes.push(node); byKey.set(key, node); return node;
+  };
+  for (let index = 1; index < rows.length; index++){
+    const row = Array.isArray(rows[index]) ? rows[index] : [], base = ensure(cell(row, baseAt), row, true);
+    if (!base){ skipped++; continue; }
+    const otherTitle = mode === "edges" ? cell(row, toAt) : cell(row, parentAt);
+    if (!otherTitle) continue;                                             // 짝이 비어도 카드는 남긴다(외톨이 개념)
+    const other = ensure(otherTitle, row, false);
+    if (!other || other.id === base.id) continue;
+    const type = typeAt >= 0 ? conceptRelationId(cell(row, typeAt), fallbackRelation) : fallbackRelation;
+    const from = mode === "edges" ? base.id : other.id, to = mode === "edges" ? other.id : base.id, edgeKey = from + "\u0000" + to + "\u0000" + type;
+    if (edgeKeys.has(edgeKey)) continue;
+    if (edges.length >= CONCEPT_MAX_EDGES){ truncated = true; continue; }
+    edges.push(conceptNormalizeEdge({ from, to, type, label:cell(row, labelAt) })); edgeKeys.add(edgeKey);
+  }
+  if (!nodes.length) throw new Error("concept-table-empty");
+  return { nodes, edges, mode, skipped, truncated };
+}
+
+/* 개요는 들여쓰기 한 단계가 상위 → 하위 한 단계다. 글머리 기호와 번호는 떼고, 한 줄은
+   '제목 | 설명 | 분류'로 나눈다. 탭과 공백을 섞어 쓴 글도 탭을 네 칸으로 세어 같은 자로 잰다. */
+function conceptOutlineParse(text){
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n"), nodes = [], edges = [], stack = [];
+  let skipped = 0, truncated = false;
+  for (const line of lines){
+    if (!line.trim()) continue;
+    const indent = (line.match(/^[\t ]*/) || [""])[0].replace(/\t/g, " ".repeat(CONCEPT_OUTLINE_TAB)).length;
+    const parts = line.trim().replace(/^(?:[-*•·—]|\d+[.)]|[가-힣][.)])\s+/, "").split("|").map(part => part.trim());
+    if (!parts[0]){ skipped++; continue; }
+    if (nodes.length >= CONCEPT_MAX_NODES){ truncated = true; break; }
+    const node = conceptNormalizeNode({ title:parts[0], description:parts[1] || "", category:parts[2] || "" }, nodes.length);
+    while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+    const parent = stack[stack.length - 1];
+    if (parent){
+      if (edges.length >= CONCEPT_MAX_EDGES) truncated = true;
+      else edges.push(conceptNormalizeEdge({ from:parent.id, to:node.id, type:"include" }));
+    }
+    stack.push({ indent, id:node.id }); nodes.push(node);
+  }
+  if (!nodes.length) throw new Error("concept-outline-empty");
+  return { nodes, edges, mode:"outline", skipped, truncated };
+}
+
+/* 관계도를 개요 글로 되돌린다. 방향 있는 관계(원인·포함·근거)만 상하 관계로 보고, 카드마다
+   처음 만난 상위 하나만 부모로 삼는다 — 개요는 나무라서 한 카드가 두 자리에 앉을 수 없다.
+   순환에 걸려 뿌리가 없는 무리는 마지막에 왼쪽 끝에서 다시 편다. */
+function conceptGraphToOutline(model){
+  const nodes = (model && model.nodes) || [], ids = new Set(nodes.map(node => node.id));
+  const children = new Map(nodes.map(node => [node.id, []])), parentOf = new Map(), byId = new Map(nodes.map(node => [node.id, node]));
+  for (const edge of (model && model.edges) || []){
+    if (!CONCEPT_TREE_RELATIONS.includes(edge.type) || !ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to || parentOf.has(edge.to)) continue;
+    parentOf.set(edge.to, edge.from); children.get(edge.from).push(edge.to);
+  }
+  const lines = [], visited = new Set();
+  const walk = (id, depth) => {
+    if (visited.has(id)) return; visited.add(id);
+    const node = byId.get(id), description = String(node.description || "").replace(/\s+/g, " ").trim(), parts = [node.title];
+    if (description || node.category) parts.push(description);
+    if (node.category) parts.push(node.category);
+    lines.push("\t".repeat(depth) + parts.join(CONCEPT_OUTLINE_SEPARATOR));
+    children.get(id).forEach(child => walk(child, depth + 1));
+  };
+  nodes.forEach(node => { if (!parentOf.has(node.id)) walk(node.id, 0); });
+  nodes.forEach(node => walk(node.id, 0));
+  return lines.join("\n");
+}
+
+/* 관계 하나가 한 줄인 CSV. 카드의 분류·설명은 출발 카드 줄에 함께 적어 다시 들일 때 살아나고,
+   관계가 하나도 없는 외톨이 카드도 빈 관계 줄로 남겨 빠지지 않게 한다. */
+function conceptGraphToCsv(model){
+  const nodes = (model && model.nodes) || [], byId = new Map(nodes.map(node => [node.id, node]));
+  const rows = [["개념", "분류", "설명", "관계", "대상", "연결선"]], linked = new Set();
+  for (const edge of (model && model.edges) || []){
+    const from = byId.get(edge.from), to = byId.get(edge.to);
+    if (!from || !to) continue;
+    linked.add(from.id);
+    const relation = CONCEPT_RELATIONS.find(item => item.id === edge.type);
+    rows.push([from.title, from.category, from.description, relation ? relation.label : "관련", to.title, edge.label]);
+  }
+  for (const node of nodes) if (!linked.has(node.id)) rows.push([node.title, node.category, node.description, "", "", ""]);
+  return rows.map(row => row.map(conceptCsvCell).join(",")).join("\r\n");
+}
+
+/* 들인 그래프를 지금 관계도에 얹는다. 같은 이름의 카드는 새로 만들지 않고 그대로 쓰므로
+   표를 고쳐 다시 들여도 카드가 두 벌이 되지 않고, 색·사진·설명 같은 손질도 살아남는다. */
+function conceptMergeGraph(model, incoming, options = {}){
+  const replace = !!options.replace;
+  const nodes = replace ? [] : ((model && model.nodes) || []).map(node => ({ ...node }));
+  const edges = replace ? [] : ((model && model.edges) || []).map(edge => ({ ...edge }));
+  const byKey = new Map(nodes.map(node => [conceptMatchKey(node.title), node]));
+  const edgeKeys = new Set(edges.map(edge => edge.from + "\u0000" + edge.to + "\u0000" + edge.type));
+  const idMap = new Map();
+  let added = 0, reused = 0, addedEdges = 0, dropped = 0, droppedEdges = 0;
+  for (const raw of (incoming && incoming.nodes) || []){
+    const node = conceptNormalizeNode(raw, nodes.length), key = conceptMatchKey(node.title);
+    if (!key){ dropped++; continue; }
+    const found = byKey.get(key);
+    if (found){
+      if (!found.category && node.category) found.category = node.category;
+      if (!found.description && node.description) found.description = node.description;
+      idMap.set(raw.id, found.id); reused++; continue;
+    }
+    if (nodes.length >= CONCEPT_MAX_NODES){ dropped++; continue; }
+    nodes.push(node); byKey.set(key, node); idMap.set(raw.id, node.id); added++;
+  }
+  for (const raw of (incoming && incoming.edges) || []){
+    const from = idMap.get(raw.from), to = idMap.get(raw.to);
+    if (!from || !to || from === to){ droppedEdges++; continue; }
+    const type = conceptRelationId(raw.type, "related"), key = from + "\u0000" + to + "\u0000" + type;
+    if (edgeKeys.has(key) || edges.length >= CONCEPT_MAX_EDGES){ droppedEdges++; continue; }
+    edges.push(conceptNormalizeEdge({ from, to, type, label:raw.label })); edgeKeys.add(key); addedEdges++;
+  }
+  return { nodes, edges, added, reused, addedEdges, dropped, droppedEdges };
+}
+
 function conceptDefaultTitle(name){ return String(name || "").replace(/\.concept$/i, "") || "개념 관계도"; }
 function conceptScratchFileName(number){ return number > 1 ? "개념 관계도 " + number + ".concept" : "개념 관계도.concept"; }
 async function loadConceptDoc(file, opts = {}){
@@ -202,6 +413,43 @@ async function saveConceptDoc(doc){
   if (typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json"); else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
   return true;
 }
+/* 한글 엑셀에서 저장한 CSV 는 CP949 인 경우가 많다. 본문 바이트를 보고 인코딩을 고른 뒤 읽어야
+   부서 이름이 깨지지 않는다(판정기는 코어의 것을 그대로 쓴다). */
+async function conceptTableText(file){
+  try {
+    if (typeof detectTextEncoding !== "function") throw new Error("no-detector");
+    const bytes = new Uint8Array(await file.arrayBuffer()), info = detectTextEncoding(bytes);
+    return new TextDecoder((info && info.encoding) || "utf-8").decode(bytes);
+  } catch(_){ return await file.text(); }
+}
+/* 엑셀은 연대표가 쓰는 ExcelJS 묶음과 시트 읽기·네임스페이스 교정을 그대로 빌린다. 사진은 읽지
+   않으므로(카드 사진은 손으로 넣는다) 첫 시트의 글자만 표로 만들어 돌려준다. */
+async function conceptRowsFromFile(file){
+  if (!/\.xlsx$/i.test(String((file && file.name) || ""))) return conceptCsvRows(await conceptTableText(file));
+  if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("exceljs");
+  if (typeof ExcelJS === "undefined" || !ExcelJS.Workbook || typeof timelineSheetRows !== "function") throw new Error("concept-xlsx-runtime");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let workbook = new ExcelJS.Workbook();
+  try { await workbook.xlsx.load(bytes); }
+  catch(error){
+    if (typeof timelineNormalizeXlsxNamespaces !== "function") throw error;
+    if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("jszip");
+    const fixed = timelineNormalizeXlsxNamespaces(bytes);
+    if (fixed === bytes) throw error;
+    workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(fixed);
+  }
+  const sheet = (workbook.worksheets || []).find(item => item && item.rowCount) || (workbook.worksheets || [])[0];
+  if (!sheet) throw new Error("concept-table-empty");
+  return timelineSheetRows(sheet);
+}
+function conceptSafeName(value){ return String(value || "개념 관계도").replace(/[\\/:*?"<>|]+/g, "_").trim() || "개념 관계도"; }
+function conceptDownload(name, blob){
+  const url = URL.createObjectURL(blob), link = document.createElement("a");
+  link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function conceptButton(label, title, className){ const button = document.createElement("button"); button.type = "button"; button.className = className || "concept-btn"; button.textContent = label; if (title) button.title = title; return button; }
 function conceptModal(titleText, body){
   const modal = document.createElement("div"); modal.className = "concept-modal"; const card = document.createElement("div"); card.className = "concept-modal-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
@@ -220,8 +468,9 @@ function mountConceptEditor(doc){
   const orderBtn = conceptButton("① 순서", "전개 발표에서 카드가 나올 순서 정하기"), animationSelect = document.createElement("select"); animationSelect.className = "concept-animation"; animationSelect.title = "전개 발표 애니메이션"; animationSelect.setAttribute("aria-label", "전개 발표 애니메이션");
   CONCEPT_PRESENT_ANIMATIONS.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = "효과: " + item.label; animationSelect.appendChild(option); }); animationSelect.value = model.presentation.animation;
   const zoomTools = document.createElement("div"); zoomTools.className = "concept-zoom-tools"; const zoomOutBtn = conceptButton("−", "축소 (Ctrl+마우스 휠 아래)"), zoomResetBtn = conceptButton("100%", "배율 100%로 되돌리고 관계도를 화면 가운데로 (Home 키는 화면에 맞춤)"), zoomInBtn = conceptButton("＋", "확대 (Ctrl+마우스 휠 위)"); zoomTools.append(zoomOutBtn, zoomResetBtn, zoomInBtn);
+  const tableBtn = conceptButton("표·개요", "엑셀·CSV 표나 개요 글에서 카드 가져오기 · 관계 CSV·개요 내보내기");
   const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
-  bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, presentBtn, buildPresentBtn, printBtn, saveBtn);
+  bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, tableBtn, presentBtn, buildPresentBtn, printBtn, saveBtn);
   const viewport = document.createElement("div"); viewport.className = "concept-viewport"; viewport.tabIndex = 0;
   const stage = document.createElement("div"); stage.className = "concept-stage"; stage.style.width = CONCEPT_CANVAS_WIDTH + "px"; stage.style.height = CONCEPT_CANVAS_HEIGHT + "px";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("concept-lines"); svg.setAttribute("viewBox", `0 0 ${CONCEPT_CANVAS_WIDTH} ${CONCEPT_CANVAS_HEIGHT}`);
@@ -524,8 +773,93 @@ function mountConceptEditor(doc){
     const close = () => { window.removeEventListener("keydown", keys); buildViewport.removeEventListener("wheel", onBuildWheel); if (resizeObserver) resizeObserver.disconnect(); animationTimers.forEach(clearTimeout); animationTimers.clear(); overlay.remove(); if (closeBuildPresentation === close) closeBuildPresentation = null; if (buildPresentBtn.isConnected) buildPresentBtn.focus(); };
     closeBuildPresentation = close; overlay.querySelector(".concept-build-close").onclick = close; overlay.querySelector(".prev").onclick = () => updateStep(step - 1); overlay.querySelector(".next").onclick = () => updateStep(step + 1); buildZoomOut.onclick = () => setBuildZoom(fitScale / 1.2); buildZoomReset.onclick = () => setBuildZoom(1); buildZoomIn.onclick = () => setBuildZoom(fitScale * 1.2); buildViewport.addEventListener("wheel", onBuildWheel, { passive:false }); window.addEventListener("keydown", keys); if (resizeObserver) resizeObserver.observe(buildViewport); fitStage(); updateStep(0); overlay.querySelector(".next").focus();
   }
+  /* 표·개요 창 하나에 들이기와 내보내기를 함께 둔다 — 실무에서는 엑셀이나 개요 글로 이미 적어 둔
+     것을 들여왔다가, 고친 뒤 다시 엑셀·개요로 넘기는 왕복이 한 자리에서 끝나야 한다.
+     이름이 같은 카드는 다시 만들지 않으므로(conceptMergeGraph) 표를 고쳐 몇 번을 들여도 안전하다. */
+  function openTableOutlineDialog(){
+    const body = document.createElement("div"); body.className = "concept-io-form";
+    body.innerHTML = '<section class="concept-io-block"><h3>표에서 가져오기</h3>'
+      + '<p>CSV·엑셀(.xlsx)의 첫 시트를 읽습니다. 첫 줄의 열 이름에서 <b>개념·출발·상위</b>와 <b>대상·도착·하위</b>를 알아보고, 관계·연결선·분류·설명·색 열이 있으면 함께 씁니다. 대상 열이 없는 표는 한 줄이 카드 하나입니다.</p>'
+      + '<div class="concept-io-actions"><button type="button" class="ci-file primary">표 파일 고르기</button><button type="button" class="ci-csv">관계 CSV 저장</button></div></section>'
+      + '<section class="concept-io-block"><h3>개요 글</h3>'
+      + '<p>들여쓰기 한 단계가 <b>상위 → 하위</b> 한 단계입니다. 한 줄은 <code>제목 | 설명 | 분류</code>로 적을 수 있고, 글머리 기호와 번호는 알아서 뗍니다.</p>'
+      + '<textarea class="ci-outline" rows="10" spellcheck="false"></textarea>'
+      + '<div class="concept-io-actions"><button type="button" class="ci-outline-apply primary">이 글로 만들기</button><button type="button" class="ci-copy">복사</button><button type="button" class="ci-txt">.txt 저장</button></div></section>'
+      + '<section class="concept-io-options"><fieldset><legend>넣는 방법</legend><div class="ci-modes"></div></fieldset>'
+      + '<label class="ci-layout-field"><span>넣은 뒤 배치</span><select class="ci-layout"></select></label>'
+      + '<label class="ci-fit"><input type="checkbox" checked><span>정렬 뒤 화면에 맞춤</span></label></section>'
+      + '<p class="concept-io-status" role="status"></p><footer><button type="button" class="ci-close">닫기</button></footer>';
+    const ui = conceptModal("표·개요", body), status = body.querySelector(".concept-io-status"), outline = body.querySelector(".ci-outline"), layoutSelect = body.querySelector(".ci-layout");
+    const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.hidden = true;
+    fileInput.accept = ".csv,text/csv,.tsv,.txt,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    body.appendChild(fileInput);
+    [["merge", "지금 관계도에 더하기"], ["replace", "관계도를 이 내용으로 바꾸기"]].forEach(([value, text], index) => {
+      const label = document.createElement("label"), input = document.createElement("input");
+      input.type = "radio"; input.name = "concept-io-mode"; input.value = value; input.checked = index === 0;
+      label.append(input, document.createTextNode(text)); body.querySelector(".ci-modes").appendChild(label);
+    });
+    CONCEPT_LAYOUTS.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.label; layoutSelect.appendChild(option); });
+    layoutSelect.value = model.layoutStyle; outline.value = conceptGraphToOutline(model);
+    const say = (text, isError) => { status.textContent = text; status.classList.toggle("is-error", !!isError); };
+    const apply = async (incoming, source) => {
+      const replace = body.querySelector('input[name="concept-io-mode"]:checked').value === "replace";
+      if (replace && model.nodes.length && typeof confirmDialog === "function"
+        && !await confirmDialog(`지금 있는 카드 ${model.nodes.length}개를 지우고 ${source}의 내용으로 바꿀까요?`, "바꾸기", "취소")) return;
+      const mode = layoutSelect.value, merged = conceptMergeGraph(model, incoming, { replace });
+      model.edges = merged.edges;
+      model.nodes = conceptAutoLayout(merged.nodes, merged.edges, { mode, spacing:model.layoutSpacing, rootId:selectedId });
+      model.layout = "auto"; model.layoutStyle = mode;
+      model.presentation = conceptNormalizePresentation(model.presentation, model.nodes);
+      if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = "";
+      history.commit(); touch(); render();
+      if (body.querySelector(".ci-fit input").checked) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true);
+      outline.value = conceptGraphToOutline(model);
+      const parts = [`${source}에서 카드 ${merged.added}개·관계 ${merged.addedEdges}개를 넣었어요.`];
+      if (merged.reused) parts.push(`이름이 같은 카드 ${merged.reused}개는 그대로 뒀어요`);
+      if (incoming.skipped) parts.push(`이름이 빈 ${incoming.skipped}줄 제외`);
+      if (merged.dropped || incoming.truncated) parts.push(`카드 ${CONCEPT_MAX_NODES}개 한도를 넘어 일부 제외`);
+      say(parts.join(" · "));
+      if (typeof toast === "function") toast(parts[0], 3200);
+    };
+    body.querySelector(".ci-file").onclick = () => fileInput.click();
+    fileInput.onchange = async () => {
+      const file = fileInput.files && fileInput.files[0]; fileInput.value = ""; if (!file) return;
+      const isSheet = /\.xlsx$/i.test(String(file.name || ""));
+      say(isSheet ? "엑셀 읽는 중…" : "표 읽는 중…");
+      try { await apply(conceptGraphFromRows(await conceptRowsFromFile(file)), isSheet ? "엑셀 시트" : "표"); }
+      catch(error){
+        const code = error && error.message;
+        say(code === "concept-table-columns" ? "‘개념(또는 출발·상위)’ 열을 찾지 못했어요. 첫 줄에 열 이름을 적어 주세요."
+          : code === "concept-xlsx-runtime" ? "엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요."
+          : code === "concept-table-empty" ? "읽을 내용이 없어요. 첫 줄은 열 이름, 둘째 줄부터 내용이어야 해요."
+          : "표를 읽지 못했어요.", true);
+      }
+    };
+    body.querySelector(".ci-outline-apply").onclick = async () => {
+      try { await apply(conceptOutlineParse(outline.value), "개요 글"); }
+      catch(_){ say("개요 글에서 읽을 줄이 없어요.", true); }
+    };
+    body.querySelector(".ci-copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(outline.value); say("개요를 복사했어요."); }
+      catch(_){ outline.focus(); outline.select(); say("복사하지 못했어요. Ctrl+C 로 복사하세요.", true); }
+    };
+    body.querySelector(".ci-txt").onclick = () => {
+      if (!outline.value.trim()){ say("내보낼 개요가 없어요.", true); return; }
+      conceptDownload(conceptSafeName(model.title || doc.name) + " 개요.txt", new Blob([outline.value], { type:"text/plain;charset=utf-8" }));
+      say("개요를 .txt 로 저장했어요.");
+    };
+    body.querySelector(".ci-csv").onclick = () => {
+      if (!model.nodes.length){ say("내보낼 카드가 없어요.", true); return; }
+      // 엑셀이 UTF-8 CSV 를 CP949 로 읽지 않도록 BOM 을 앞에 붙인다.
+      conceptDownload(conceptSafeName(model.title || doc.name) + ".csv", new Blob(["\uFEFF" + conceptGraphToCsv(model)], { type:"text/csv;charset=utf-8" }));
+      say("관계 CSV 를 저장했어요. 엑셀에서 고쳐 그대로 다시 들일 수 있어요.");
+    };
+    body.querySelector(".ci-close").onclick = ui.dispose;
+    setTimeout(() => outline.focus(), 0);
+  }
+
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
-  addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog;
+  addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog; tableBtn.onclick = openTableOutlineDialog;
   undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", render); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
   const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); };
   window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); clearTimeout(previewTimer); if (closeNodePreview) closeNodePreview(); if (closeBuildPresentation) closeBuildPresentation(); if (viewportResizeObserver) viewportResizeObserver.disconnect(); viewport.removeEventListener("wheel", onViewportWheel); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.conceptSelectNode) delete doc.conceptSelectNode; });
@@ -534,5 +868,7 @@ function mountConceptEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, CONCEPT_LAYOUTS, CONCEPT_LAYOUT_SPACING, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
-    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle };
+    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle,
+    CONCEPT_TABLE_COLUMNS, CONCEPT_TREE_RELATIONS, conceptHeaderKey, conceptMatchKey, conceptRelationId, conceptColorId, conceptDefaultRelation, conceptCsvDelimiter, conceptCsvRows, conceptCsvCell,
+    conceptGraphFromRows, conceptOutlineParse, conceptGraphToOutline, conceptGraphToCsv, conceptMergeGraph };
 }

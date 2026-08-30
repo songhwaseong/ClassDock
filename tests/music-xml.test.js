@@ -115,7 +115,7 @@ test("두 성부·표현 기호·반복·중간 설정을 MusicXML로 내보낸�
   assert.match(xml, /<voice>2<\/voice>/);
   assert.match(xml, /<actual-notes>3<\/actual-notes>/);
   assert.match(xml, /<slur type="start"/);
-  assert.match(xml, /<lyric><text>봄<\/text><\/lyric>/);
+  assert.match(xml, /<lyric number="1"><text>봄<\/text><\/lyric>/);
   assert.match(xml, /<dynamics><mf\/><\/dynamics>/);
   assert.match(xml, /<articulations><staccato\/><\/articulations>/);
   assert.match(xml, /<fingering>1<\/fingering>/);
@@ -158,4 +158,32 @@ test("편집기에서 MusicXML 가져오기와 내려받기 버튼을 제공한�
   assert.match(editor, /application\/vnd\.recordare\.musicxml\+xml/);
   assert.match(editor, /좌우 미세 위치는 다른 프로그램의 자동 조판에 따라 달라질 수 있어요/);
   assert.match(read("src/js/state.js"), /label:"MusicXML 가져오기·내보내기"/);
+});
+
+test("가사 여러 절은 <lyric number>로 나가고 그대로 다시 들어온다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("절 왕복");
+  const note = api.musicNote("C", 4, { value:"quarter" });
+  api.musicSetNoteLyric(note, 1, "봄");
+  api.musicSetNoteLyric(note, 2, "여");
+  sheet.measures[0].notes.push(note);
+  sheet.parts[0].measures = sheet.measures;
+  const xml = api.musicSerializeXml(sheet);
+  assert.match(xml, /<lyric number="1"><text>봄<\/text><\/lyric>/);
+  assert.match(xml, /<lyric number="2"><text>여<\/text><\/lyric>/);
+});
+
+test("이조 악기 파트는 <transpose>로 나가고 옥타브까지 적는다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("이조");
+  sheet.measures = [api.musicMeasure([api.musicNote("D", 4, { value:"whole" })])];
+  sheet.parts[0].measures = sheet.measures;
+  api.musicActivePart(sheet).transposition = "Bb";
+  const xml = api.musicSerializeXml(sheet);
+  assert.match(xml, /<transpose>[\s\S]*<diatonic>-1<\/diatonic>[\s\S]*<chromatic>-2<\/chromatic>[\s\S]*<\/transpose>/);
+  assert.doesNotMatch(xml, /octave-change/);
+  // 테너 색소폰은 옥타브가 더 붙는다 — 이 값을 빼먹으면 다른 프로그램에서 한 옥타브 어긋난다
+  api.musicActivePart(sheet).transposition = "BbT";
+  const tenor = api.musicSerializeXml(sheet);
+  assert.match(tenor, /<chromatic>-2<\/chromatic>[\s\S]*<octave-change>-1<\/octave-change>/);
 });

@@ -9,11 +9,18 @@
    설계: docs/악보-설계.md */
 
 const MUSIC_FORMAT = "classdock-sheet";
-const MUSIC_VERSION = 9;
+const MUSIC_VERSION = 12;
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
 const MUSIC_MAX_DOTS = 2;
+const MUSIC_MAX_LYRIC_VERSES = 6;
+const MUSIC_MAX_REHEARSAL = 6;              // 연습 기호 글자 수(A·B·Coda 처럼 짧게)
+const MUSIC_MIN_BARS_PER_LINE = 2;
+const MUSIC_MEASURE_NUMBER_MODES = Object.freeze(["off", "line", "every"]);
+const MUSIC_REHEARSAL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const MUSIC_AUTO_REHEARSAL_EVERY = 8;       // 구조 표시가 없는 악보에서 몇 마디마다 매길지   // 가사 절 수 상한 — 한 단 아래에 읽을 수 있게 쌓이는 한계
+const MUSIC_LYRIC_MAX = 80;         // 음절 한 칸의 글자 수
 const MUSIC_X_OFFSET_MAX = 36;       // 자동 조판 위치에서 허용하는 좌우 미세 조정(조판 좌표)
 
 // value → VexFlow 표기와 틱. 온음표~16분음표(동요 범위).
@@ -96,7 +103,7 @@ const MUSIC_DEFAULT_TEMPO = 100;
 const MUSIC_DEFAULT_PART_VOLUME = 1;
 const MUSIC_PART_STRUCTURE_KEYS = Object.freeze([
   "lineBreakBefore", "repeatStart", "repeatEnd", "ending", "pickupTicks",
-  "timeChange", "keyChange", "tempoChange"
+  "timeChange", "keyChange", "tempoChange", "rehearsal"
 ]);
 
 // 동요 음역: 덧줄 2개 안쪽(높은음자리표 기준 C4~A5)을 기본으로 두되,
@@ -131,8 +138,7 @@ function musicNote(step, octave, opts){
   if (o.slurToNext === true) note.slurToNext = true;
   const chordSymbol = musicClampChordSymbol(o.chordSymbol);
   if (chordSymbol) note.chordSymbol = chordSymbol;
-  const lyric = musicClampText(o.lyric, 80);
-  if (lyric) note.lyric = lyric;
+  musicApplyLyrics(note, musicNormalizeLyrics(o.lyrics, o.lyric));
   if (["pp", "p", "mp", "mf", "f", "ff"].includes(o.dynamic)) note.dynamic = o.dynamic;
   if (["staccato", "accent", "tenuto"].includes(o.articulation)) note.articulation = o.articulation;
   const fingering = Math.round(Number(o.fingering) || 0);
@@ -193,6 +199,133 @@ function musicClampText(value, limit){
   return String(value || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, Math.max(1, Number(limit) || 80));
 }
 
+/* ----- 가사(절) -------------------------------------------------------------
+   가사는 절마다 한 줄이다. 1절은 예전과 같은 `note.lyric` 자리에 그대로 두고 2절부터를
+   `note.lyrics` 배열에 담는다(`lyrics[0] === lyric`). 그래서 옛 `.msheet`·옛 판 앱·MusicXML
+   어느 쪽으로 나가도 **1절은 반드시 살아남는다**. 꼬리의 빈 절은 버려 같은 모델이 늘 같은
+   바이트가 되게 한다(1절뿐인 악보는 예전과 완전히 같은 파일이 나온다). */
+function musicClampVerseCount(value){
+  const number = Math.round(Number(value) || 0);
+  return Math.max(1, Math.min(MUSIC_MAX_LYRIC_VERSES, number || 1));
+}
+
+function musicNormalizeLyrics(rawLyrics, rawLyric){
+  const list = Array.isArray(rawLyrics)
+    ? rawLyrics.slice(0, MUSIC_MAX_LYRIC_VERSES).map((value) => musicClampText(value, MUSIC_LYRIC_MAX))
+    : [];
+  const single = musicClampText(rawLyric, MUSIC_LYRIC_MAX);
+  if (!list.length){ if (single) list.push(single); }
+  else if (!list[0] && single) list[0] = single;
+  while (list.length && !list[list.length - 1]) list.pop();
+  return list;
+}
+
+function musicNoteLyrics(note){
+  return note && note.rest !== true ? musicNormalizeLyrics(note.lyrics, note.lyric) : [];
+}
+
+function musicApplyLyrics(note, list){
+  if (!note || note.rest === true) return [];
+  const lyrics = musicNormalizeLyrics(list, "");
+  if (lyrics[0]) note.lyric = lyrics[0]; else delete note.lyric;
+  if (lyrics.length > 1) note.lyrics = lyrics; else delete note.lyrics;
+  return lyrics;
+}
+
+function musicSetNoteLyric(note, verse, text){
+  if (!note || note.rest === true) return false;
+  const index = musicClampVerseCount(verse) - 1;
+  const list = musicNoteLyrics(note);
+  while (list.length <= index) list.push("");
+  list[index] = musicClampText(text, MUSIC_LYRIC_MAX);
+  musicApplyLyrics(note, list);
+  return true;
+}
+
+const MUSIC_NOTE_LISTS = Object.freeze(["notes", "voice2Notes", "bassNotes", "bassVoice2Notes"]);
+
+function musicEachNote(measures, visit){
+  for (const measure of (Array.isArray(measures) ? measures : [])){
+    if (!measure) continue;
+    for (const key of MUSIC_NOTE_LISTS){
+      for (const note of (Array.isArray(measure[key]) ? measure[key] : [])) visit(note, measure, key);
+    }
+  }
+}
+
+/* 문서가 가진 절 수 — 저장된 값과 음표에 실제로 적힌 절 수 중 큰 쪽으로 연다. 손으로 고친
+   파일이나 다른 프로그램에서 온 3절짜리 가사도 3절로 보인다. */
+function musicCountLyricVerses(parts){
+  let count = 0;
+  for (const part of (Array.isArray(parts) ? parts : [])){
+    musicEachNote(part && part.measures, (note) => { count = Math.max(count, musicNoteLyrics(note).length); });
+  }
+  return count;
+}
+
+/* 한 줄 가사를 음절로 나눈다. 한글은 글자 하나가 음절 하나이고, 붙임표를 쓴 말은 붙임표에서
+   나누되 이어짐을 보여 주는 `-`는 남긴다(hap-py → "hap-", "py"). 붙임표가 없는 로마자 낱말은
+   통째로 한 음표에 붙는다 — 영어 음절 나눔은 사람이 붙임표로 알려 주는 게 정확하다. */
+function musicSplitLyricSyllables(text){
+  const out = [];
+  for (const word of String(text || "").trim().split(/\s+/)){
+    if (!word) continue;
+    if (word.includes("-")){
+      const pieces = word.split("-").filter(Boolean);
+      pieces.forEach((piece, index) => out.push(index < pieces.length - 1 ? piece + "-" : piece));
+      continue;
+    }
+    if (/^[가-힣ㄱ-ㅎㅏ-ㅣ]+$/.test(word)){ for (const ch of word) out.push(ch); continue; }
+    out.push(word);
+  }
+  return out;
+}
+
+/* 가사를 붙일 수 있는 음표를 악보 차례대로 모은다 — 쉼표와 붙임줄로 이어받은 음표는 건너뛴다
+   (이어진 음은 한 음절을 계속 부르는 것이라 관례상 가사를 적지 않는다). */
+function musicLyricTargets(measures, staff, voice){
+  const list = [];
+  let carried = false;
+  for (const measure of (Array.isArray(measures) ? measures : [])){
+    for (const note of musicVoiceNotes(measure, staff === "bass" ? "bass" : "treble", Number(voice) === 2 ? 2 : 1)){
+      const skip = carried;
+      carried = note.rest !== true && note.tieToNext === true;
+      if (note.rest === true || skip) continue;
+      list.push(note);
+    }
+  }
+  return list;
+}
+
+/* 한 줄을 음절로 나눠 startIndex 번째 음표부터 차례로 붙인다. 남거나 모자란 개수를 돌려주어
+   화면이 "음표가 모자라 3음절이 남았어요"처럼 알릴 수 있게 한다. */
+function musicApplyLyricLine(measures, verse, text, options){
+  const opts = options || {};
+  const targets = musicLyricTargets(measures, opts.staff, opts.voice);
+  const start = Math.max(0, Math.min(targets.length, Math.round(Number(opts.startIndex) || 0)));
+  const syllables = musicSplitLyricSyllables(text);
+  let applied = 0;
+  for (const syllable of syllables){
+    if (start + applied >= targets.length) break;
+    musicSetNoteLyric(targets[start + applied], verse, syllable);
+    applied++;
+  }
+  return { applied, leftover:Math.max(0, syllables.length - applied), targets:targets.length };
+}
+
+function musicClearLyricVerse(measures, verse){
+  const index = musicClampVerseCount(verse) - 1;
+  let cleared = 0;
+  musicEachNote(measures, (note) => {
+    const list = musicNoteLyrics(note);
+    if (index >= list.length || !list[index]) return;
+    list[index] = "";
+    musicApplyLyrics(note, list);
+    cleared++;
+  });
+  return cleared;
+}
+
 function musicRest(value, dots, opts){
   const rest = {
     id:musicId("n"),
@@ -221,6 +354,99 @@ function musicClampXOffset(value){
   return Math.max(-MUSIC_X_OFFSET_MAX, Math.min(MUSIC_X_OFFSET_MAX, n));
 }
 
+/* ----- 마디 번호 · 연습 기호 ---------------------------------------------------
+   합주에서 "32마디부터", "B부터"가 되려면 화면·인쇄·파트보가 모두 같은 번호를 보여야 한다.
+   못갖춘마디(여린내기)는 관례상 번호를 매기지 않으므로 그 다음 마디가 1번이 된다 — 이때 배열
+   위치와 한 칸 어긋나므로, 재생 구간처럼 사람이 숫자를 적는 자리는 반드시 이 두 함수를 거친다. */
+function musicClampRehearsal(value){
+  return String(value == null ? "" : value).replace(/[\r\n\t]+/g, " ").trim().slice(0, MUSIC_MAX_REHEARSAL);
+}
+
+function musicClampMeasureNumbers(value){
+  if (MUSIC_MEASURE_NUMBER_MODES.includes(value)) return value;
+  const step = Math.round(Number(value) || 0);
+  return step >= 2 && step <= 99 ? step : "line";
+}
+
+function musicClampBarsPerLine(value){
+  const count = Math.round(Number(value) || 0);
+  if (count <= 0) return 0;                       // 0 = 화면 폭을 따라가는 지금 방식
+  return Math.max(MUSIC_MIN_BARS_PER_LINE, Math.min(MUSIC_MAX_BARS_PER_LINE, count));
+}
+
+function musicHasPickup(measures){
+  const first = Array.isArray(measures) ? measures[0] : null;
+  return !!(first && Math.round(Number(first.pickupTicks) || 0) > 0);
+}
+
+// 배열 위치 → 악보에 찍히는 마디 번호. 못갖춘마디는 0번(번호를 찍지 않는다).
+function musicMeasureNumberAt(measures, index){
+  const at = Math.max(0, Math.round(Number(index) || 0));
+  return musicHasPickup(measures) ? at : at + 1;
+}
+
+// 사람이 적은 마디 번호 → 배열 위치. 범위를 벗어나면 fallbackIndex 로 되돌린다.
+function musicMeasureIndexForNumber(measures, number, fallbackIndex){
+  const list = Array.isArray(measures) ? measures : [];
+  const last = Math.max(0, list.length - 1);
+  const clamp = (value) => Math.max(0, Math.min(last, Math.round(Number(value) || 0)));
+  const text = String(number == null ? "" : number).trim();
+  const raw = text ? Number(text) : NaN;
+  if (!Number.isFinite(raw)) return clamp(fallbackIndex);
+  return clamp(musicHasPickup(list) ? raw : raw - 1);
+}
+
+function musicShowsMeasureNumber(mode, number, lineHead){
+  const setting = musicClampMeasureNumbers(mode);
+  if (setting === "off" || !(Number(number) > 0)) return false;
+  if (setting === "every") return true;
+  if (setting === "line") return !!lineHead;
+  return Number(number) % setting === 0;
+}
+
+/* 연습 기호를 매길 자리 — 도돌이 시작·1번 괄호·수동 줄바꿈처럼 '음악이 새로 시작하는 곳'이다.
+   그런 표시가 하나도 없는 악보(동요 등)는 8마디마다 매긴다(합주 악보 관례). 첫 마디는 빼고
+   센다 — 악보 맨 앞은 A 를 붙이지 않아도 "처음부터"로 통한다. */
+function musicAutoRehearsalSpots(measures){
+  const list = Array.isArray(measures) ? measures : [];
+  const spots = [];
+  for (let index = 1; index < list.length; index++){
+    const measure = list[index];
+    if (!measure) continue;
+    if (measure.repeatStart === true || measure.ending === 1 || measure.lineBreakBefore === true) spots.push(index);
+  }
+  if (spots.length) return spots;
+  for (let index = MUSIC_AUTO_REHEARSAL_EVERY; index < list.length; index += MUSIC_AUTO_REHEARSAL_EVERY) spots.push(index);
+  return spots;
+}
+
+// 손으로 적어 둔 기호는 그대로 두고 그 글자는 건너뛴다(같은 글자가 두 번 나오면 안 된다).
+function musicAutoRehearsal(measures){
+  const list = Array.isArray(measures) ? measures : [];
+  const used = new Set(list.map((measure) => musicClampRehearsal(measure && measure.rehearsal)).filter(Boolean));
+  let cursor = 0;
+  let applied = 0;
+  for (const index of musicAutoRehearsalSpots(list)){
+    const measure = list[index];
+    if (!measure || musicClampRehearsal(measure.rehearsal)) continue;
+    while (cursor < MUSIC_REHEARSAL_LETTERS.length && used.has(MUSIC_REHEARSAL_LETTERS[cursor])) cursor++;
+    if (cursor >= MUSIC_REHEARSAL_LETTERS.length) break;
+    measure.rehearsal = MUSIC_REHEARSAL_LETTERS[cursor];
+    used.add(measure.rehearsal);
+    cursor++;
+    applied++;
+  }
+  return applied;
+}
+
+function musicClearRehearsal(measures){
+  let cleared = 0;
+  for (const measure of (Array.isArray(measures) ? measures : [])){
+    if (measure && measure.rehearsal){ delete measure.rehearsal; cleared++; }
+  }
+  return cleared;
+}
+
 function musicMeasure(notes, opts){
   const o = opts || {};
   const measure = {
@@ -242,6 +468,8 @@ function musicMeasure(notes, opts){
   if (MUSIC_KEYS[o.keyChange]) measure.keyChange = o.keyChange;
   const tempoChange = Number(o.tempoChange);
   if (tempoChange > 0) measure.tempoChange = musicClampTempo(tempoChange);
+  const rehearsal = musicClampRehearsal(o.rehearsal);
+  if (rehearsal) measure.rehearsal = rehearsal;
   return measure;
 }
 
@@ -266,9 +494,12 @@ function musicEmpty(title){
     accompanimentMode:"drums",
     accompanimentTimbre:"piano",
     showSolfege:false,
+    lyricVerses:1,
+    measureNumbers:"line",
+    barsPerLine:0,
     measures
   };
-  const part = musicPart("피아노", { timbre:"piano", volume:MUSIC_DEFAULT_PART_VOLUME, measures });
+  const part = musicPart("피아노", { timbre:"piano", volume:MUSIC_DEFAULT_PART_VOLUME, key:sheet.key, measures });
   sheet.parts = [part];
   sheet.activePartId = part.id;
   return sheet;
@@ -313,6 +544,9 @@ function musicPart(name, opts){
     volume:musicClampPartVolume(options.volume),
     muted:options.muted === true,
     grandStaff:options.grandStaff === true,
+    // 파트마다 조표를 따로 둔다 — 이조 악기는 같은 곡이라도 조표가 다르다(빈 값이면 악보 조표를 따른다).
+    key:MUSIC_KEYS[options.key] ? options.key : "",
+    transposition:musicClampTransposition(options.transposition),
     measures:Array.isArray(options.measures) && options.measures.length ? options.measures : [musicMeasure()]
   };
 }
@@ -344,6 +578,7 @@ function musicSyncActivePart(sheet){
   active.timbre = MUSIC_TIMBRES.includes(sheet.timbre) ? sheet.timbre : active.timbre;
   active.synth = musicSynthSettings(sheet.synth || active.synth);
   active.grandStaff = sheet.grandStaff === true;
+  active.key = MUSIC_KEYS[sheet.key] ? sheet.key : active.key;
   active.measures = Array.isArray(sheet.measures) && sheet.measures.length ? sheet.measures : [musicMeasure()];
   const sourceMeasures = active.measures;
   for (const part of musicParts(sheet)){
@@ -366,6 +601,8 @@ function musicSelectPart(sheet, partId){
   sheet.timbre = part.timbre;
   sheet.synth = musicSynthSettings(part.synth);
   sheet.grandStaff = part.grandStaff === true;
+  // 이조 파트는 조표가 다르다. 파트를 고르면 그 파트의 조표로 화면을 맞춘다.
+  if (MUSIC_KEYS[part.key]) sheet.key = part.key;
   return part;
 }
 
@@ -379,6 +616,8 @@ function musicAddPart(sheet, opts){
   const part = musicPart(options.name || `악기 ${existing.length + 1}`, {
     timbre:options.timbre || "piano", volume:options.volume, muted:false,
     grandStaff:options.grandStaff === true, synth:options.synth,
+    key:MUSIC_KEYS[options.key] ? options.key : sheet.key,
+    transposition:options.transposition,
     measures
   });
   if (!Array.isArray(sheet.parts)) sheet.parts = [];
@@ -402,6 +641,7 @@ function musicRemovePart(sheet, partId){
   sheet.timbre = next.timbre;
   sheet.synth = musicSynthSettings(next.synth);
   sheet.grandStaff = next.grandStaff === true;
+  if (MUSIC_KEYS[next.key]) sheet.key = next.key;
   return removed;
 }
 
@@ -1064,6 +1304,9 @@ function musicSinglePartTimeline(sheet, opts){
   const drums = [];
   const bass = [];
   const chords = [];
+  // 이조 악기 파트는 적힌 음보다 실제 소리가 낮다(B♭ 관은 장2도). 화면·파일은 기보음 그대로 두고
+  // 여기서만 실음으로 옮긴다 — 재생·WAV·MIDI 내보내기가 모두 이 값을 쓴다.
+  const transposeShift = musicTranspositionSemitones(sheet && sheet.transposition);
   const drumStyle = options.drums === false ? "off" : musicDrumStyle(sheet && sheet.drumStyle);
   const drumVolume = musicClampDrumVolume(sheet && sheet.drumVolume);
   const accompanimentMode = musicAccompanimentMode(sheet && sheet.accompanimentMode);
@@ -1096,13 +1339,14 @@ function musicSinglePartTimeline(sheet, opts){
     const accompaniment = musicAccompanimentPattern(drumStyle, accompanimentMode, settings.time,
       capacity, chordStates[index]);
     for (const item of accompaniment.bass){
-      bass.push({ midi:item.midi, frequency:musicFrequency(item.midi), rest:false,
+      // 코드 기호도 그 파트의 기보 기준이라 반주 역시 같은 만큼 옮겨 울려야 화성이 맞는다.
+      bass.push({ midi:item.midi + transposeShift, frequency:musicFrequency(item.midi + transposeShift), rest:false,
         start:measureStartSeconds + item.tick * localSecondsPerTick,
         duration:item.duration * localSecondsPerTick, gain:item.gain * drumVolume,
         accompaniment:"bass", chordSymbol:item.chordSymbol, measure:index + 1 });
     }
     for (const item of accompaniment.chords){
-      chords.push({ midi:item.midi, frequency:musicFrequency(item.midi), rest:false,
+      chords.push({ midi:item.midi + transposeShift, frequency:musicFrequency(item.midi + transposeShift), rest:false,
         start:measureStartSeconds + item.tick * localSecondsPerTick,
         duration:item.duration * localSecondsPerTick, gain:item.gain * drumVolume,
         accompaniment:"chord", chordSymbol:item.chordSymbol, measure:index + 1 });
@@ -1131,8 +1375,9 @@ function musicSinglePartTimeline(sheet, opts){
             : note.articulation === "tenuto" ? 0.96 : 1;
           const noteGain = gain * (note.articulation === "accent" ? 1.18 : 1);
           for (const pitch of musicNotePitches(note)){
-            const midi = musicMidiNumber(pitch);
-            if (midi === null) continue;
+            const written = musicMidiNumber(pitch);
+            if (written === null) continue;
+            const midi = written + transposeShift;
             const previous = tiedPitches.get(midi);
             let event;
             if (previous && Math.abs((previous.start + previous.duration) - start) < 1e-7){
@@ -1174,7 +1419,9 @@ function musicPartSheet(sheet, part){
     measures:part.measures,
     timbre:part.timbre,
     synth:musicSynthSettings(part.synth),
-    grandStaff:part.grandStaff === true
+    grandStaff:part.grandStaff === true,
+    key:MUSIC_KEYS[part.key] ? part.key : sheet.key,
+    transposition:musicClampTransposition(part.transposition)
   });
 }
 
@@ -1583,6 +1830,70 @@ function musicTransposeSheet(sheet, semitones, opts){
   return report;
 }
 
+/* ----- 이조 악기 파트 -----------------------------------------------------------
+   B♭ 클라리넷은 악보의 '도'를 불면 실제로는 '시♭'이 난다. 그래서 밴드 악보는 파트마다 조가
+   다르다. **파일에는 연주자가 보는 기보음을 그대로 담고** 파트에 이조량만 적어 둔다 — 편집기·
+   조옮김·음역 검사는 지금 코드 그대로 두고, 소리로 나가는 한 지점(타임라인의 midi)에서만
+   더한다. semitones 는 '기보음 → 실음' 변화량이라 B♭ 관은 -2 다.
+   테너·바리톤은 옥타브가 더 붙는다(-14·-21) — -2·-9 로 적으면 한 옥타브 어긋난다. */
+const MUSIC_TRANSPOSING_INSTRUMENTS = Object.freeze([
+  { id:"C",   label:"실음(C)",                 short:"",    semitones:0,   chromatic:0,  diatonic:0,  octave:0 },
+  { id:"Bb",  label:"B♭ (클라리넷·트럼펫)",    short:"B♭",  semitones:-2,  chromatic:-2, diatonic:-1, octave:0 },
+  { id:"Eb",  label:"E♭ (알토색소폰)",         short:"E♭",  semitones:-9,  chromatic:-9, diatonic:-5, octave:0 },
+  { id:"F",   label:"F (호른)",                short:"F",   semitones:-7,  chromatic:-7, diatonic:-4, octave:0 },
+  { id:"BbT", label:"B♭ 테너 (테너색소폰)",    short:"B♭↓", semitones:-14, chromatic:-2, diatonic:-1, octave:-1 },
+  { id:"EbB", label:"E♭ 바리톤 (바리톤색소폰)", short:"E♭↓", semitones:-21, chromatic:-9, diatonic:-5, octave:-1 }
+]);
+
+// 반음 수로 표에서 악기를 찾는다(MusicXML <transpose> 를 읽을 때 쓴다).
+function musicTranspositionBySemitones(semitones){
+  const amount = Math.round(Number(semitones) || 0);
+  return MUSIC_TRANSPOSING_INSTRUMENTS.find((item) => item.semitones === amount) || null;
+}
+
+function musicTranspositionSpec(value){
+  const id = typeof value === "string" ? value : (value && value.id);
+  return MUSIC_TRANSPOSING_INSTRUMENTS.find((item) => item.id === id) || null;
+}
+
+// 저장값은 표에 있는 id 하나뿐이다(실음이면 빈 문자열 — 파일에 적지 않는다).
+function musicClampTransposition(value){
+  const spec = musicTranspositionSpec(value);
+  return spec && spec.semitones ? spec.id : "";
+}
+
+function musicTranspositionSemitones(value){
+  const spec = musicTranspositionSpec(value);
+  return spec ? spec.semitones : 0;
+}
+
+function musicTranspositionLabel(value){
+  const spec = musicTranspositionSpec(value);
+  return spec ? spec.short : "";
+}
+
+// 기보 조표 → 실제로 울리는 조표(상태 줄에 함께 적어 준다).
+function musicSoundingKey(key, transposition){
+  const semitones = musicTranspositionSemitones(transposition);
+  if (!semitones) return MUSIC_KEYS[key] ? key : "C";
+  return musicTransposedKey(MUSIC_KEYS[key] ? key : "C", semitones) || key;
+}
+
+/* 파트 하나만 옮겨 적는다. musicPartSheet 는 measures 배열을 그대로 나눠 쓰므로, 그 화면
+   하나에 musicTransposeSheet 를 돌리면 그 파트의 음만 움직인다(바뀐 조표는 파트에 담는다).
+   실음을 지키며 이조 악기를 바꿀 때 쓴다 — 옮길 양은 (지금 이조량 - 새 이조량)이다. */
+function musicTransposePart(sheet, part, semitones, opts){
+  if (!sheet || !part) return { changed:0, outOfRange:0, blocked:0, semitones:0 };
+  const view = musicPartSheet(sheet, part);
+  const report = musicTransposeSheet(view, semitones, opts);
+  const preview = !!(opts && opts.apply === false);
+  if (!preview && report.changed && !report.blocked){
+    part.key = view.key;
+    if (musicActivePart(sheet) === part) sheet.key = view.key;
+  }
+  return report;
+}
+
 /* ----- 줄 나누기(조판 폭 배분) --------------------------------------------------
    마디를 몇 개씩 한 줄에 놓을지 정한다. 화면 폭과 마디마다 든 음표 수로 정하므로
    16분음표가 빽빽한 마디는 넓게, 온음표 한 개짜리 마디는 좁게 간다.
@@ -1602,9 +1913,12 @@ function musicBarWidthHint(measure){
   return Math.max(MUSIC_BAR_MIN_WIDTH, MUSIC_BAR_BASE_WIDTH + count * MUSIC_BAR_NOTE_WIDTH);
 }
 
-function musicPackLines(measures, availableWidth){
+/* barsPerLine 을 주면 폭과 상관없이 그 개수로 자른다 — 인쇄본마다 마디 자리가 달라지지 않아야
+   "32마디부터"가 통한다. 고정일 때만 남는 폭을 줄여서라도 한 줄에 밀어 넣는다(1보다 작은 배율). */
+function musicPackLines(measures, availableWidth, options){
   const list = Array.isArray(measures) ? measures : [];
   const width = Math.max(MUSIC_BAR_MIN_WIDTH + MUSIC_LINE_HEAD_EXTRA, Number(availableWidth) || 0);
+  const fixed = musicClampBarsPerLine(options && options.barsPerLine);
   const lines = [];
   let current = null;
 
@@ -1614,8 +1928,8 @@ function musicPackLines(measures, availableWidth){
     if (current && measure && measure.lineBreakBefore === true) current = null;
     if (current){
       const wouldBe = current.total + hint;
-      const full = current.indexes.length >= MUSIC_MAX_BARS_PER_LINE;
-      if (full || wouldBe > width - MUSIC_LINE_HEAD_EXTRA) current = null;
+      const full = current.indexes.length >= (fixed || MUSIC_MAX_BARS_PER_LINE);
+      if (full || (!fixed && wouldBe > width - MUSIC_LINE_HEAD_EXTRA)) current = null;
     }
     if (!current){
       current = { indexes:[], hints:[], total:0 };
@@ -1629,7 +1943,9 @@ function musicPackLines(measures, availableWidth){
   // 남는 폭은 마디마다 비례로 나눠 줄을 꽉 채운다(줄 끝이 들쭉날쭉하지 않게).
   return lines.map((line) => {
     const room = width - MUSIC_LINE_HEAD_EXTRA;
-    const scale = line.total > 0 ? Math.max(1, room / line.total) : 1;
+    const ratio = line.total > 0 ? room / line.total : 1;
+    // 고정 마디 수는 좁은 화면에서 줄이더라도 한 줄에 담는다(너무 뭉개지지 않게 0.5 까지만).
+    const scale = fixed ? Math.max(0.5, ratio) : Math.max(1, ratio);
     const widths = line.hints.map((hint, at) => hint * scale + (at === 0 ? MUSIC_LINE_HEAD_EXTRA : 0));
     return { indexes:line.indexes, widths };
   });
@@ -1654,7 +1970,7 @@ function musicNormalizeNote(raw){
   const note = musicNote(raw.step, octave, {
     alter:raw.alter, value:raw.value, dots, xOffset:raw.xOffset,
     chord:raw.chord, tieToNext:raw.tieToNext, slurToNext:raw.slurToNext,
-    chordSymbol:raw.chordSymbol, lyric:raw.lyric, dynamic:raw.dynamic,
+    chordSymbol:raw.chordSymbol, lyric:raw.lyric, lyrics:raw.lyrics, dynamic:raw.dynamic,
     articulation:raw.articulation, fingering:raw.fingering, pedal:raw.pedal, tuplet:raw.tuplet
   });
   if (typeof raw.id === "string" && raw.id) note.id = raw.id.slice(0, 80);
@@ -1688,7 +2004,7 @@ function musicNormalizeMeasure(raw){
     repeatStart:raw && raw.repeatStart === true, repeatEnd:raw && raw.repeatEnd === true,
     ending:raw && raw.ending,
     pickupTicks:raw && raw.pickupTicks, timeChange:raw && raw.timeChange,
-    keyChange:raw && raw.keyChange, tempoChange:raw && raw.tempoChange
+    keyChange:raw && raw.keyChange, tempoChange:raw && raw.tempoChange, rehearsal:raw && raw.rehearsal
   });
   if (raw && typeof raw.id === "string" && raw.id) measure.id = raw.id.slice(0, 80);
   return measure;
@@ -1702,6 +2018,8 @@ function musicNormalizePart(raw, fallbackName){
     measure.bassNotes.length > 0 || measure.bassVoice2Notes.length > 0);
   return musicPart(musicClampText(raw.name, 80) || fallbackName || "악기", {
     id:raw.id,
+    key:raw.key,
+    transposition:raw.transposition,
     timbre:MUSIC_TIMBRES.includes(raw.timbre) ? raw.timbre : "piano",
     synth:raw.synth,
     volume:raw.volume,
@@ -1741,6 +2059,8 @@ function musicParse(text){
     })];
   }
   const activePart = parts.find((part) => part.id === raw.activePartId) || parts[0];
+  const documentKey = MUSIC_KEYS[raw.key] ? raw.key : "C";
+  for (const part of parts) if (!MUSIC_KEYS[part.key]) part.key = documentKey;
   return {
     format:MUSIC_FORMAT,
     version:MUSIC_VERSION,
@@ -1749,7 +2069,7 @@ function musicParse(text){
     updatedAt:Number(raw.updatedAt) || now,
     tempo:musicClampTempo(raw.tempo),
     time:{ beats, beatValue },
-    key:MUSIC_KEYS[raw.key] ? raw.key : "C",
+    key:MUSIC_KEYS[activePart.key] ? activePart.key : (MUSIC_KEYS[raw.key] ? raw.key : "C"),
     clef:"treble",
     grandStaff:activePart.grandStaff === true,
     // v1의 triangle 은 당시 새 악보 기본값이었다. v2에서 실제 피아노가 기본이 되었으므로
@@ -1761,6 +2081,9 @@ function musicParse(text){
     accompanimentMode:musicAccompanimentMode(raw.accompanimentMode),
     accompanimentTimbre:musicAccompanimentTimbre(raw.accompanimentTimbre),
     showSolfege:raw.showSolfege !== false,
+    lyricVerses:musicClampVerseCount(Math.max(Math.round(Number(raw.lyricVerses) || 1), musicCountLyricVerses(parts))),
+    measureNumbers:musicClampMeasureNumbers(raw.measureNumbers),
+    barsPerLine:musicClampBarsPerLine(raw.barsPerLine),
     measures:activePart.measures,
     parts,
     activePartId:activePart.id
@@ -1785,8 +2108,9 @@ function musicSerializePartMeasures(measures, grandStaff){
       if (note.slurToNext === true) outNote.slurToNext = true;
       const chordSymbol = musicClampChordSymbol(note.chordSymbol);
       if (chordSymbol) outNote.chordSymbol = chordSymbol;
-      const lyric = musicClampText(note.lyric, 80);
-      if (lyric) outNote.lyric = lyric;
+      const lyrics = musicNoteLyrics(note);
+      if (lyrics[0]) outNote.lyric = lyrics[0];
+      if (lyrics.length > 1) outNote.lyrics = lyrics;
       if (["pp", "p", "mp", "mf", "f", "ff"].includes(note.dynamic)) outNote.dynamic = note.dynamic;
       if (["staccato", "accent", "tenuto"].includes(note.articulation)) outNote.articulation = note.articulation;
       const fingering = Math.round(Number(note.fingering) || 0);
@@ -1806,6 +2130,7 @@ function musicSerializePartMeasures(measures, grandStaff){
     if (musicNormalizeTime(measure && measure.timeChange)) outMeasure.timeChange = musicNormalizeTime(measure.timeChange);
     if (measure && MUSIC_KEYS[measure.keyChange]) outMeasure.keyChange = measure.keyChange;
     if (measure && Number(measure.tempoChange) > 0) outMeasure.tempoChange = musicClampTempo(measure.tempoChange);
+    if (measure && musicClampRehearsal(measure.rehearsal)) outMeasure.rehearsal = musicClampRehearsal(measure.rehearsal);
     outMeasure.notes = musicStaffNotes(measure, "treble").map(serializeNote);
     const voice2Notes = musicVoiceNotes(measure, "treble", 2);
     if (voice2Notes.length) outMeasure.voice2Notes = voice2Notes.map(serializeNote);
@@ -1842,61 +2167,15 @@ function musicSerialize(sheet){
     accompanimentMode:musicAccompanimentMode(model.accompanimentMode),
     accompanimentTimbre:musicAccompanimentTimbre(model.accompanimentTimbre),
     showSolfege:model.showSolfege !== false,
-    measures:(Array.isArray(model.measures) ? model.measures : []).map((measure, index) => {
-      const outMeasure = { id:String(measure && measure.id || musicId("m")) };
-      // 기존 .msheet와 불필요한 diff를 만들지 않도록 수동 줄바꿈이 있을 때만 기록한다.
-      if (index > 0 && measure && measure.lineBreakBefore === true) outMeasure.lineBreakBefore = true;
-      if (measure && measure.repeatStart === true) outMeasure.repeatStart = true;
-      if (measure && measure.repeatEnd === true) outMeasure.repeatEnd = true;
-      if (measure && (measure.ending === 1 || measure.ending === 2)) outMeasure.ending = measure.ending;
-      if (Math.round(Number(measure && measure.pickupTicks) || 0) > 0) outMeasure.pickupTicks = Math.round(Number(measure.pickupTicks));
-      if (musicNormalizeTime(measure && measure.timeChange)) outMeasure.timeChange = musicNormalizeTime(measure.timeChange);
-      if (measure && MUSIC_KEYS[measure.keyChange]) outMeasure.keyChange = measure.keyChange;
-      if (measure && Number(measure.tempoChange) > 0) outMeasure.tempoChange = musicClampTempo(measure.tempoChange);
-      const serializeNote = (note) => {
-        const outNote = note.rest
-          ? { id:String(note.id || musicId("n")), rest:true, value:note.value, dots:musicClampDots(note.dots) }
-          : {
-              id:String(note.id || musicId("n")),
-              rest:false,
-              step:note.step,
-              octave:Math.round(Number(note.octave) || 4),
-              alter:musicClampAlter(note.alter),
-              value:note.value,
-              dots:musicClampDots(note.dots)
-            };
-        const xOffset = musicClampXOffset(note.xOffset);
-        if (xOffset) outNote.xOffset = xOffset;
-        if (!note.rest){
-          const chord = musicNotePitches(note).filter((pitch) => musicPitchKey(pitch) !== musicPitchKey(note));
-          if (chord.length) outNote.chord = chord.map((pitch) => ({
-            step:pitch.step, octave:pitch.octave, alter:musicClampAlter(pitch.alter)
-          }));
-          if (note.tieToNext === true) outNote.tieToNext = true;
-          if (note.slurToNext === true) outNote.slurToNext = true;
-          const chordSymbol = musicClampChordSymbol(note.chordSymbol);
-          if (chordSymbol) outNote.chordSymbol = chordSymbol;
-          const lyric = musicClampText(note.lyric, 80);
-          if (lyric) outNote.lyric = lyric;
-          if (["pp", "p", "mp", "mf", "f", "ff"].includes(note.dynamic)) outNote.dynamic = note.dynamic;
-          if (["staccato", "accent", "tenuto"].includes(note.articulation)) outNote.articulation = note.articulation;
-          const fingering = Math.round(Number(note.fingering) || 0);
-          if (fingering >= 1 && fingering <= 5) outNote.fingering = fingering;
-          if (["start", "stop"].includes(note.pedal)) outNote.pedal = note.pedal;
-        }
-        if (Number(note.tuplet) === 3) outNote.tuplet = 3;
-        return outNote;
-      };
-      outMeasure.notes = musicStaffNotes(measure, "treble").map(serializeNote);
-      const voice2Notes = musicVoiceNotes(measure, "treble", 2);
-      if (voice2Notes.length) outMeasure.voice2Notes = voice2Notes.map(serializeNote);
-      const bassNotes = musicStaffNotes(measure, "bass");
-      if (model.grandStaff === true || bassNotes.length) outMeasure.bassNotes = bassNotes.map(serializeNote);
-      const bassVoice2Notes = musicVoiceNotes(measure, "bass", 2);
-      if (bassVoice2Notes.length) outMeasure.bassVoice2Notes = bassVoice2Notes.map(serializeNote);
-      return outMeasure;
-    })
+    measures:musicSerializePartMeasures(model.measures, model.grandStaff === true)
   };
+  // 1절뿐이면 예전 파일과 완전히 같은 바이트가 나오도록 절 수를 적지 않는다.
+  const lyricVerses = musicClampVerseCount(Math.max(musicClampVerseCount(model.lyricVerses), musicCountLyricVerses(musicParts(model))));
+  if (lyricVerses > 1) out.lyricVerses = lyricVerses;
+  const measureNumbers = musicClampMeasureNumbers(model.measureNumbers);
+  if (measureNumbers !== "line") out.measureNumbers = measureNumbers;
+  const barsPerLine = musicClampBarsPerLine(model.barsPerLine);
+  if (barsPerLine) out.barsPerLine = barsPerLine;
   const activePart = musicActivePart(model);
   out.activePartId = activePart ? activePart.id : "";
   out.parts = musicParts(model).map((part) => ({
@@ -1907,6 +2186,9 @@ function musicSerialize(sheet){
     volume:musicClampPartVolume(part.volume),
     muted:part.muted === true,
     grandStaff:part.grandStaff === true,
+    // 악보 조표를 그대로 따르는 파트(대부분)는 적지 않아 예전 파일과 같은 바이트를 지킨다.
+    ...(MUSIC_KEYS[part.key] && part.key !== (MUSIC_KEYS[model.key] ? model.key : "C") ? { key:part.key } : {}),
+    ...(musicClampTransposition(part.transposition) ? { transposition:musicClampTransposition(part.transposition) } : {}),
     measures:musicSerializePartMeasures(part.measures, part.grandStaff)
   }));
   return JSON.stringify(out, null, 2);

@@ -10,6 +10,26 @@
 
 const MUSIC_LINE_HEIGHT = 205;      // 가사·셈여림·페달 표시가 다음 단과 겹치지 않을 간격
 const MUSIC_GRAND_LINE_HEIGHT = 330;
+const MUSIC_LYRIC_ROW_GAP = 17;     // 가사 한 절이 더 차지하는 높이
+const MUSIC_PRACTICE_AUDIO_MAX = 12;    // 한 번에 만들 연습 음원 벌 수(한 벌이 수 MB 라 메모리를 본다)
+const MUSIC_MEASURE_NUMBER_DROP = 10;   // 오선 첫 줄 위 — 마디 번호
+const MUSIC_REHEARSAL_DROP = 48;        // 그보다 더 위 — 연습 기호(네모 상자). 빠르기 표시(-28)와 겹치지 않는 높이
+
+/* 마디 번호·연습 기호는 오선 **위**에 붙는다. 켜져 있으면 첫 단이 잘리지 않게 위를 더 띄운다.
+   이 값도 화면과 '이 단을 그림으로' 두 곳이 같이 써야 한다(단 높이와 같은 함정). */
+function musicScoreTopPad(sheet){
+  const numbers = musicClampMeasureNumbers(sheet && sheet.measureNumbers) !== "off";
+  const rehearsal = !!(sheet && Array.isArray(sheet.measures)
+    && sheet.measures.some((measure) => measure && measure.rehearsal));
+  return 10 + (rehearsal ? 42 : numbers ? 12 : 0);
+}
+
+/* 한 단의 높이는 가사 절 수만큼 늘어난다. 화면과 '이 단을 그림으로' 두 곳이 같은 값을 써야 한다 —
+   한쪽만 고치면 메모로 보낸 악보에서만 가사가 잘린다. */
+function musicScoreLineHeight(sheet){
+  const base = sheet && sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
+  return base + Math.max(0, musicClampVerseCount(sheet && sheet.lyricVerses) - 1) * MUSIC_LYRIC_ROW_GAP;
+}
 const MUSIC_STAFF_GAP = 92;
 const MUSIC_SCORE_MIN_WIDTH = 480;
 const MUSIC_REDRAW_DELAY = 180;     // 창 크기 변경 뒤 다시 그리기까지(매 픽셀마다 재조판하면 무겁다)
@@ -113,7 +133,11 @@ const MUSIC_IMAGE_CSS = [
   ".music-solfege{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:13px;font-weight:700;fill:#2563eb;stroke:none}",
   ".music-chord-symbol{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:14px;font-weight:700;font-style:italic;fill:#111;stroke:none}",
   ".music-notation,.music-measure-setting{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;fill:#111;stroke:none}",
-  ".music-lyric{font-size:13px}.music-dynamic{font-size:15px;font-weight:700}.music-fingering{font-size:12px;font-weight:700}",
+  ".music-lyric{font-size:13px}.music-lyric-verse{font-size:11px;font-weight:700;fill:#64748b}",
+  ".music-measure-number{font-size:11px;font-weight:700;fill:#64748b}",
+  ".music-rehearsal{font-size:14px;font-weight:800;fill:#111}",
+  ".music-rehearsal-box{fill:none;stroke:#111;stroke-width:1.2}",
+  ".music-dynamic{font-size:15px;font-weight:700}.music-fingering{font-size:12px;font-weight:700}",
   ".music-articulation{font-size:16px;font-weight:800}.music-pedal{font-size:13px}.music-measure-setting{font-size:11px;font-weight:700}",
   ".music-slur{fill:none;stroke:#111;stroke-width:1.4;stroke-linecap:round}"
 ].join("\n");
@@ -274,6 +298,11 @@ function musicExportName(doc, ext){
   return base + "." + ext;
 }
 
+// 파트 이름이 파일 이름에 들어가므로 폴더에 쓸 수 없는 글자를 걸러 낸다.
+function musicSafeFileName(value, fallback){
+  return String(value == null ? "" : value).replace(/[\\/:*?"<>|]+/g, "_").trim() || (fallback || "악보");
+}
+
 function musicDownloadBlob(name, blob){
   try {
     const url = URL.createObjectURL(blob);
@@ -307,6 +336,8 @@ async function mountMusicEditor(doc){
   const noteEls = new Map();        // 음표 id → SVG 요소(강조·클릭용)
   const solfegeEls = new Map();     // 음표 id → 오선 밖 계이름 SVG 글자
   const noteHorizontalLimits = new Map(); // 음표 id → 현재 조판에서 이웃·마디를 넘지 않는 xOffset 범위
+  let lyricVerse = 1;              // 지금 가사를 넣는 절 — 배율처럼 보기 상태라 .msheet 에 담지 않는다
+  let lyricEntry = null;           // 이어치기 중이면 { index } — 가사를 붙일 수 있는 음표 차례
   let staveBoxes = [];              // 마디별 조판 좌표 — 오선 클릭을 마디·음높이로 옮길 때 쓴다
   let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — "이 단을 메모로"가 쓴다
   let selection = null;             // { measure:0부터, staff:"treble"|"bass", voice:1|2, id }
@@ -473,7 +504,18 @@ async function mountMusicEditor(doc){
   partVolumeInput.setAttribute("aria-label", "현재 파트 음량");
   const partVolumeLabel = document.createElement("span");
   partVolumeLabel.className = "music-part-volume-label";
-  partWrap.append(partSelect, partNameInput, addPartBtn, removePartBtn, partMuteBtn,
+  /* 이조 악기(B♭ 클라리넷 등) — 악보에는 연주자가 보는 기보음을 그대로 두고, 소리만 이만큼 옮긴다. */
+  const partTransposeSelect = document.createElement("select");
+  partTransposeSelect.className = "music-timbre music-part-transpose";
+  partTransposeSelect.title = "이 파트가 이조 악기인지 — 적힌 음과 실제 소리의 차이";
+  partTransposeSelect.setAttribute("aria-label", "이 파트의 이조 악기");
+  for (const item of MUSIC_TRANSPOSING_INSTRUMENTS){
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    partTransposeSelect.appendChild(option);
+  }
+  partWrap.append(partSelect, partNameInput, partTransposeSelect, addPartBtn, removePartBtn, partMuteBtn,
     partVolumeInput, partVolumeLabel);
 
   partSelect.addEventListener("change", () => selectEditorPart(partSelect.value, true));
@@ -495,6 +537,7 @@ async function mountMusicEditor(doc){
     touch();
     if (history) history.commit();
   });
+  partTransposeSelect.addEventListener("change", () => applyPartTransposition(partTransposeSelect.value));
   partVolumeInput.addEventListener("input", () => setEditorPartVolume(Number(partVolumeInput.value) / 100, false));
   partVolumeInput.addEventListener("change", () => setEditorPartVolume(Number(partVolumeInput.value) / 100, true));
 
@@ -548,7 +591,7 @@ async function mountMusicEditor(doc){
   keyWrap.className = "music-field";
   keyWrap.append("조표");
   const keySelect = document.createElement("select");
-  keySelect.className = "music-timbre";
+  keySelect.className = "music-timbre music-key";
   // 옆의 조옮김과 헷갈리기 쉬운 자리라 무엇이 다른지 적어 둔다.
   keySelect.title = "음표는 그 자리에 두고 조표만 바꿉니다. 노래 높이를 통째로 올리거나 내리려면 조옮김을 쓰세요.";
   for (const name of Object.keys(MUSIC_KEYS)){
@@ -682,7 +725,10 @@ async function mountMusicEditor(doc){
   synthPanel.append(synthSummary, synthControls);
 
   function previewMusicNote(note, timbre){
-    return MNMusicAudio.previewNote(note, timbre, { synth:musicSynthSettings(sheet.synth) });
+    // 이조 파트에서는 눌러 듣는 소리도 합주에서 울릴 실음이어야 한다.
+    const part = musicActivePart(sheet);
+    return MNMusicAudio.previewNote(note, timbre, { synth:musicSynthSettings(sheet.synth),
+      transpose:musicTranspositionSemitones(part && part.transposition) });
   }
 
   function setSynthSettings(settings, commit, preview){
@@ -793,8 +839,11 @@ async function mountMusicEditor(doc){
   chordSymbolBtn.addEventListener("click", editSelectedChordSymbol);
   const slurBtn = musicButton("⌒ 이음줄", "고른 음표에서 다음 음표까지 프레이즈 이음줄을 표시합니다");
   slurBtn.addEventListener("click", toggleSelectedSlur);
-  const lyricBtn = musicButton("가사", "고른 음표 아래에 한 음절의 가사를 입력합니다");
-  lyricBtn.addEventListener("click", editSelectedLyric);
+  const lyricBtn = musicButton("가사 ▾", "절 고르기 · 이어치기 · 한 줄 붙여넣기");
+  lyricBtn.addEventListener("click", () => {
+    const rect = lyricBtn.getBoundingClientRect();
+    openMusicContextMenu(rect.left, rect.bottom + 4, lyricContextItems());
+  });
   const repeatStartBtn = musicButton("|: 반복 시작", "고른 마디의 시작 반복선을 켜거나 끕니다");
   repeatStartBtn.addEventListener("click", () => toggleMeasureMark("repeatStart"));
   const repeatEndBtn = musicButton(":| 반복 끝", "고른 마디의 끝 반복선을 켜거나 끕니다");
@@ -812,6 +861,11 @@ async function mountMusicEditor(doc){
   const pedalBtn = musicButton("페달", "피아노 페달 시작·끝 표시를 차례로 바꿉니다");
   pedalBtn.addEventListener("click", cycleSelectedPedal);
   const measureSettingsBtn = musicButton("마디 설정", "못갖춘마디 또는 이 마디부터 바뀌는 박자·조표·빠르기를 설정합니다");
+  const layoutBtn = musicButton("조판 ▾", "마디 번호 · 연습 기호 · 한 줄 마디 수");
+  layoutBtn.addEventListener("click", () => {
+    const rect = layoutBtn.getBoundingClientRect();
+    openMusicContextMenu(rect.left, rect.bottom + 4, layoutContextItems());
+  });
   measureSettingsBtn.addEventListener("click", editActiveMeasureSettings);
 
   const addBarBtn = musicButton("＋마디", "마지막에 빈 마디 추가");
@@ -854,6 +908,7 @@ async function mountMusicEditor(doc){
   pedalBtn.classList.add("music-toolvis-pedal");
   repeatStartBtn.classList.add("music-toolvis-repeat"); repeatEndBtn.classList.add("music-toolvis-repeat"); endingBtn.classList.add("music-toolvis-repeat");
   measureSettingsBtn.classList.add("music-toolvis-measure-settings");
+  layoutBtn.classList.add("music-toolvis-layout");
   solfegeBtn.classList.add("music-toolvis-solfege");
   eraserBtn.classList.add("music-toolvis-eraser");
   positionBtn.classList.add("music-toolvis-position");
@@ -862,7 +917,7 @@ async function mountMusicEditor(doc){
   resetScoreBtn.classList.add("music-toolvis-reset");
   tools.append(valueGroup, dotBtn, restBtn, accidentalGroup, staffGroup, voiceGroup, chordBtn, removeChordBtn,
     tieBtn, slurBtn, chordSymbolBtn, lyricBtn, dynamicBtn, articulationBtn, tripletBtn, fingeringBtn, pedalBtn,
-    repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, solfegeBtn, eraserBtn, positionBtn,
+    repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, layoutBtn, solfegeBtn, eraserBtn, positionBtn,
     addBarBtn, removeBarBtn, addStaffBtn, removeStaffBtn, resetScoreBtn, measureProgress, hint);
 
   const beginnerTools = document.createElement("div");
@@ -925,7 +980,7 @@ async function mountMusicEditor(doc){
     input.min = "1";
     input.value = "1";
   }
-  toInput.value = String(sheet.measures.length);
+  toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
   rangeWrap.append("마디 ", fromInput, " ~ ", toInput);
 
   const playPartBtn = musicButton("▶ 이 구간만");
@@ -1100,6 +1155,7 @@ async function mountMusicEditor(doc){
   const midiInputBtn = musicButton("🎹 MIDI 입력", "연결된 MIDI 건반으로 음표와 화음을 입력합니다");
   const midiExportBtn = musicButton("⬇ MIDI", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
   const imageReferenceBtn = musicButton("🖼 악보 이미지 참고", "이미지를 옆에 열어 보며 악보를 옮겨 적습니다");
+  const practiceAudioBtn = musicButton("🎧 연습 음원", "파트마다·템포마다 연습용 음원을 한 번에 만듭니다");
   const wavBtn = musicButton("⬇ WAV 저장");
   const memoBtn = musicButton("📋 메모로",
     "악보를 그림으로 메모창에 보내기 — 메모에서 '✏️ 악보로'를 누르면 다시 편집할 수 있어요 (오선 한 단만 보내려면 그 단에서 오른쪽 버튼)");
@@ -1133,13 +1189,85 @@ async function mountMusicEditor(doc){
   midiInputBtn.classList.add("music-toolvis-midi-input");
   midiExportBtn.classList.add("music-toolvis-midi-export");
   imageReferenceBtn.classList.add("music-toolvis-reference");
+  practiceAudioBtn.classList.add("music-toolvis-practice-audio");
   wavBtn.classList.add("music-toolvis-wav");
   memoBtn.classList.add("music-toolvis-memo");
   printBtn.classList.add("music-toolvis-print");
   zoomWrap.classList.add("music-toolvis-zoom");
   playBar.append(playAllBtn, playActivePartBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
     countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
-    imageReferenceBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
+    imageReferenceBtn, practiceAudioBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
+
+  /* ----- 연습 음원 만들기 -----
+     합창·합주 연습 음원(내 파트는 크게, 나머지는 작게 · 느린 템포)은 파트마다·템포마다 한 벌씩
+     필요해 손으로 만들면 하루가 간다. 렌더는 이미 있는 renderWav 에 옵션만 얹고, 여러 벌은
+     ZIP 한 장으로 묶는다 — 파일을 연달아 내려받으면 브라우저가 막는다. */
+  const practicePanel = document.createElement("div");
+  practicePanel.className = "music-practice-audio";
+  practicePanel.hidden = true;
+  const practiceTargetSelect = document.createElement("select");
+  practiceTargetSelect.className = "music-timbre";
+  practiceTargetSelect.setAttribute("aria-label", "연습 음원을 만들 파트");
+  for (const [value, label] of [["all", "모든 파트마다 한 벌"], ["active", "지금 파트만"]]){
+    const option = document.createElement("option");
+    option.value = value; option.textContent = label;
+    practiceTargetSelect.appendChild(option);
+  }
+  const practiceOtherSelect = document.createElement("select");
+  practiceOtherSelect.className = "music-timbre";
+  practiceOtherSelect.setAttribute("aria-label", "나머지 파트 음량");
+  for (const [value, label] of [["0.4", "나머지 40%"], ["0", "내 파트만"], ["0.2", "나머지 20%"], ["0.6", "나머지 60%"]]){
+    const option = document.createElement("option");
+    option.value = value; option.textContent = label;
+    practiceOtherSelect.appendChild(option);
+  }
+  const practiceRateWrap = document.createElement("span");
+  practiceRateWrap.className = "music-practice-rates";
+  practiceRateWrap.append("템포");
+  const practiceRateInputs = [];
+  for (const [value, label, checked] of [["1", "100%", true], ["0.85", "85%", true], ["0.7", "70%", false]]){
+    const item = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox"; input.value = value; input.checked = checked;
+    item.append(input, document.createTextNode(label));
+    practiceRateWrap.appendChild(item);
+    practiceRateInputs.push(input);
+  }
+  const practiceMetronomeCheck = document.createElement("input");
+  practiceMetronomeCheck.type = "checkbox";
+  practiceMetronomeCheck.checked = true;
+  const practiceMetronomeLabel = document.createElement("label");
+  practiceMetronomeLabel.append(practiceMetronomeCheck, document.createTextNode("메트로놈"));
+  const practiceCountInCheck = document.createElement("input");
+  practiceCountInCheck.type = "checkbox";
+  practiceCountInCheck.checked = true;
+  const practiceCountInLabel = document.createElement("label");
+  practiceCountInLabel.append(practiceCountInCheck, document.createTextNode("한 마디 준비"));
+  const practiceRunBtn = musicButton("만들기", "고른 조합대로 음원을 만듭니다", "music-btn music-primary");
+  const practiceStopBtn = musicButton("그만두기", "만드는 중인 음원을 그만둡니다");
+  const practiceStatus = document.createElement("span");
+  practiceStatus.className = "music-practice-status";
+  practicePanel.append(practiceTargetSelect, practiceOtherSelect, practiceRateWrap,
+    practiceMetronomeLabel, practiceCountInLabel, practiceRunBtn, practiceStopBtn, practiceStatus);
+
+  /* ----- 가사 이어치기 막대 -----
+     음표마다 창을 여는 대신 한 줄에서 계속 친다. Space·Enter 로 다음 음표, 빈 칸에서
+     Backspace 로 앞 음표, Esc 로 끝. 입력이 <input> 안에 있으므로 편집 단축키(onKeyDown)는
+     editableTarget 검사에 걸려 저절로 비켜 준다. */
+  const lyricBar = document.createElement("div");
+  lyricBar.className = "music-lyric-bar";
+  lyricBar.hidden = true;
+  const lyricBarLabel = document.createElement("strong");
+  const lyricInput = document.createElement("input");
+  lyricInput.type = "text";
+  lyricInput.className = "music-lyric-input";
+  lyricInput.maxLength = 80;
+  lyricInput.setAttribute("aria-label", "가사 이어치기 입력");
+  const lyricHint = document.createElement("span");
+  lyricHint.className = "music-lyric-hint";
+  lyricHint.textContent = "Space·Enter = 다음 음표 · 빈 칸에서 Backspace = 앞 음표 · Esc = 끝내기";
+  const lyricDoneBtn = musicButton("끝내기", "가사 이어치기를 끝냅니다");
+  lyricBar.append(lyricBarLabel, lyricInput, lyricHint, lyricDoneBtn);
 
   /* ----- 악보 ----- */
   const scoreHost = document.createElement("div");
@@ -1179,7 +1307,7 @@ async function mountMusicEditor(doc){
   musicXmlInput.accept = ".musicxml,.mxl";
   musicXmlInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
-  root.append(bar, synthPanel, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el,
+  root.append(bar, synthPanel, tools, beginnerTools, playBar, practicePanel, lyricBar, notice, scoreWorkspace, earTest.el,
     imageReferenceInput, musicXmlInput);
 
   /* ----- 도구막대 접기 -----
@@ -1272,6 +1400,8 @@ async function mountMusicEditor(doc){
     partMuteBtn.classList.toggle("is-on", part.muted === true);
     partMuteBtn.setAttribute("aria-pressed", part.muted ? "true" : "false");
     partMuteBtn.textContent = part.muted ? "🔇" : "M";
+    partTransposeSelect.value = musicClampTransposition(part.transposition) || "C";
+    partTransposeSelect.classList.toggle("is-on", !!musicClampTransposition(part.transposition));
     removePartBtn.disabled = musicParts(sheet).length <= 1;
     syncSynthControls();
   }
@@ -1284,9 +1414,10 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    keySelect.value = sheet.key;                 // 이조 파트는 조표가 다르다
     sheet.synth = musicSynthSettings(part.synth);
     grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
-    toInput.value = String(sheet.measures.length);
+    toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
     syncPartControls();
     syncTools();
     updateStatus();
@@ -1305,6 +1436,7 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    keySelect.value = sheet.key;                 // 이조 파트는 조표가 다르다
     sheet.synth = musicSynthSettings(part.synth);
     grandStaffBtn.textContent = "🎼 단일 오선";
     syncPartControls();
@@ -1325,6 +1457,7 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    keySelect.value = sheet.key;
     sheet.synth = musicSynthSettings(musicActivePart(sheet).synth);
     grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
     syncPartControls();
@@ -1447,7 +1580,6 @@ async function mountMusicEditor(doc){
     slurBtn.disabled = !selected || selected.rest;
     slurBtn.classList.toggle("is-on", !!selected && selected.slurToNext === true);
     chordSymbolBtn.disabled = !selected || selected.rest;
-    lyricBtn.disabled = !selected || selected.rest;
     dynamicBtn.disabled = !selected || selected.rest;
     articulationBtn.disabled = !selected || selected.rest;
     tripletBtn.disabled = !selected;
@@ -1487,7 +1619,12 @@ async function mountMusicEditor(doc){
   function updateStatus(){
     const total = musicTimeline(sheet).totalSeconds;
     const part = musicActivePart(sheet);
-    status.textContent = `${musicParts(sheet).length}파트 · ${part ? part.name + " · " : ""}${sheet.measures.length}마디 · ${total.toFixed(1)}초`;
+    const transposition = musicClampTransposition(part && part.transposition);
+    const soundingKey = musicSoundingKey(sheet.key, transposition);
+    const keyNote = transposition
+      ? ` · ${musicTranspositionLabel(transposition)} 기보 ${(MUSIC_KEYS[sheet.key] || {}).label || sheet.key} · 실음 ${(MUSIC_KEYS[soundingKey] || {}).label || soundingKey}`
+      : "";
+    status.textContent = `${musicParts(sheet).length}파트 · ${part ? part.name + " · " : ""}${sheet.measures.length}마디 · ${total.toFixed(1)}초${keyNote}`;
     updateMeasureProgress();
     const check = musicValidate(sheet);
     if (check.ok){
@@ -1544,14 +1681,20 @@ async function mountMusicEditor(doc){
   }
 
   /* ----- VexFlow 조판 ----- */
+  /* 칸에 적는 숫자는 화면·인쇄에 찍히는 마디 번호다. 못갖춘마디가 있으면 배열 위치와 한 칸
+     어긋나므로 여기서만 옮긴다 — 재생·발췌·따라치기가 받는 from·to 는 예전대로 배열 위치다. */
+  function measureNumberLabel(index){ return musicMeasureNumberAt(sheet.measures, index); }
+
   function clampRange(){
     const last = Math.max(1, sheet.measures.length);
-    let from = Math.max(1, Math.min(last, Math.round(Number(fromInput.value) || 1)));
-    let to = Math.max(1, Math.min(last, Math.round(Number(toInput.value) || last)));
-    if (to < from) to = from;
-    fromInput.value = String(from);
-    toInput.value = String(to);
-    fromInput.max = toInput.max = String(last);
+    const fromIndex = musicMeasureIndexForNumber(sheet.measures, fromInput.value, 0);
+    const toIndex = musicMeasureIndexForNumber(sheet.measures, toInput.value, last - 1);
+    const from = Math.min(fromIndex, toIndex) + 1;
+    const to = Math.max(fromIndex, toIndex) + 1;
+    fromInput.value = String(measureNumberLabel(from - 1));
+    toInput.value = String(measureNumberLabel(to - 1));
+    fromInput.min = toInput.min = String(measureNumberLabel(0));
+    fromInput.max = toInput.max = String(measureNumberLabel(last - 1));
     return { from, to };
   }
 
@@ -1666,11 +1809,12 @@ async function mountMusicEditor(doc){
     try {
       const width = Math.max(MUSIC_SCORE_MIN_WIDTH, Math.floor(scoreHost.clientWidth || MUSIC_SCORE_MIN_WIDTH) - 8);
       // 한 줄에 몇 마디를 놓을지는 화면 폭과 마디마다 든 음표 수로 정한다(music-model.js).
-      const layout = musicPackLines(sheet.measures, width - 20);
+      const layout = musicPackLines(sheet.measures, width - 20, { barsPerLine:sheet.barsPerLine });
       scoreLines = layout.map((line) => line.indexes.slice());
-      const lineHeight = sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
+      const lineHeight = musicScoreLineHeight(sheet);
+      const topPad = musicScoreTopPad(sheet);
       const renderer = new VF.Renderer(scoreHost, VF.Renderer.Backends.SVG);
-      const scoreHeight = layout.length * lineHeight + 30;
+      const scoreHeight = layout.length * lineHeight + 30 + (topPad - 10);
       renderer.resize(width, scoreHeight);
       const context = renderer.getContext();
       const scoreSvg = scoreHost.querySelector("svg");
@@ -1682,7 +1826,7 @@ async function mountMusicEditor(doc){
       layout.forEach((line, lineIndex) => {
         let x = 10;
         line.indexes.forEach((index, columnIndex) => {
-          places.push({ index, lineIndex, x, y:10 + lineIndex * lineHeight,
+          places.push({ index, lineIndex, x, y:topPad + lineIndex * lineHeight,
             width:line.widths[columnIndex], head:columnIndex === 0 });
           x += line.widths[columnIndex];
         });
@@ -1762,7 +1906,7 @@ async function mountMusicEditor(doc){
             chordSymbolPlaces.push({ note, index, staff, voice:voiceNumber, x:noteX,
               y:stave.getYForLine(0) - (staff === "treble" ? 18 : 10) });
           }
-          if (scoreSvg && (note.lyric || note.dynamic || note.articulation || note.fingering || note.pedal)){
+          if (scoreSvg && (note.lyric || note.lyrics || note.dynamic || note.articulation || note.fingering || note.pedal)){
             const ys = typeof staveNote.getYs === "function" ? staveNote.getYs() : [];
             notationPlaces.push({ note, index, staff, voice:voiceNumber, x:noteX,
               noteY:Number(ys[0]) || stave.getYForLine(2), topY:stave.getYForLine(0), bottomY });
@@ -1825,11 +1969,42 @@ async function mountMusicEditor(doc){
           marker.setAttribute("y", String(trebleStave.getYForLine(0) - 28));
           scoreSvg.appendChild(marker);
         }
+        /* 마디 번호와 연습 기호. VexFlow 컨트롤이 아니라 SVG 안에 직접 그린다 — 악보는 그림·메모·
+           인쇄로 세 번 나가는데 바깥 요소로 만들면 그 세 곳에서 사라진다. */
+        if (scoreSvg){
+          const number = musicMeasureNumberAt(sheet.measures, index);
+          if (musicShowsMeasureNumber(sheet.measureNumbers, number, head)){
+            const numberLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            numberLabel.classList.add("music-measure-number");
+            numberLabel.textContent = String(number);
+            numberLabel.setAttribute("x", String(trebleStave.getX() + 3));
+            numberLabel.setAttribute("y", String(trebleStave.getYForLine(0) - MUSIC_MEASURE_NUMBER_DROP));
+            scoreSvg.appendChild(numberLabel);
+          }
+          const rehearsal = musicClampRehearsal(measure.rehearsal);
+          if (rehearsal){
+            const markX = trebleStave.getX() + 2;
+            const baseY = trebleStave.getYForLine(0) - MUSIC_REHEARSAL_DROP;
+            const box = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            box.classList.add("music-rehearsal-box");
+            box.setAttribute("x", String(markX));
+            box.setAttribute("y", String(baseY - 13));
+            box.setAttribute("width", String(10 + rehearsal.length * 10));
+            box.setAttribute("height", "18");
+            const mark = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            mark.classList.add("music-rehearsal");
+            mark.textContent = rehearsal;
+            mark.setAttribute("x", String(markX + 5));
+            mark.setAttribute("y", String(baseY));
+            scoreSvg.append(box, mark);
+          }
+        }
 
         for (const entry of [{ staff:"treble", stave:trebleStave }, ...(bassStave ? [{ staff:"bass", stave:bassStave }] : [])]){
           const topY = entry.stave.getYForLine(0);
           const bottomY = entry.stave.getYForLine(4);
           staveBoxes.push({ index, lineIndex, staff:entry.staff, x, width:staveWidth, topY, bottomY,
+            noteStartX:typeof entry.stave.getNoteStartX === "function" ? entry.stave.getNoteStartX() : x,
             spacing:(bottomY - topY) / 4, hitTop:topY - 28, hitBottom:bottomY + 28 });
           drawStaff(measure, index, lineIndex, entry.stave, entry.staff);
         }
@@ -1895,12 +2070,40 @@ async function mountMusicEditor(doc){
           const mark = { staccato:"•", accent:">", tenuto:"—" }[note.articulation] || "";
           appendNotationText(place, mark, "music-articulation", place.noteY + (place.voice === 1 ? -11 : 18));
         }
-        if (note.lyric) appendNotationText(place, note.lyric, "music-lyric",
-          place.bottomY + 54 + (place.voice === 2 ? 16 : 0));
+        musicNoteLyrics(note).forEach((text, verseIndex) => {
+          if (text) appendNotationText(place, text, "music-lyric",
+            place.bottomY + 54 + verseIndex * MUSIC_LYRIC_ROW_GAP + (place.voice === 2 ? 16 : 0));
+        });
+        // 셈여림·페달은 절이 몇이든 가사 아래에 오게 문서의 절 수만큼 한꺼번에 내린다.
+        const lyricDrop = Math.max(0, musicClampVerseCount(sheet.lyricVerses) - 1) * MUSIC_LYRIC_ROW_GAP;
         if (note.dynamic) appendNotationText(place, note.dynamic, "music-dynamic",
-          place.bottomY + 70 + (place.voice === 2 ? 16 : 0), true);
+          place.bottomY + 70 + lyricDrop + (place.voice === 2 ? 16 : 0), true);
         if (note.pedal) appendNotationText(place, note.pedal === "start" ? "Ped." : "✱", "music-pedal",
-          place.bottomY + 86 + (place.voice === 2 ? 16 : 0), true);
+          place.bottomY + 86 + lyricDrop + (place.voice === 2 ? 16 : 0), true);
+      }
+      /* 절이 둘 이상이면 단마다 왼쪽에 절 번호를 적는다 — 어느 줄이 몇 절인지 보이지 않으면
+         가사가 늘어난 악보는 읽을 수 없다. 그림·인쇄도 같은 SVG 를 쓰므로 함께 나간다. */
+      const verseCount = musicClampVerseCount(sheet.lyricVerses);
+      if (scoreSvg && verseCount > 1){
+        const lineSpots = new Map();
+        for (const box of staveBoxes){
+          if (box.staff !== "treble") continue;
+          const found = lineSpots.get(box.lineIndex);
+          // 음자리표·조표 다음, 첫 음절 바로 왼쪽이 절 번호 자리다(악보 관례). 단 왼쪽 끝에 적으면
+          // 오선 시작이 x=10 이라 화면 밖으로 잘린다.
+          if (!found || box.x < found.x) lineSpots.set(box.lineIndex, { x:box.noteStartX, bottomY:box.bottomY });
+        }
+        for (const spot of lineSpots.values()){
+          for (let verse = 1; verse <= verseCount; verse++){
+            const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            label.textContent = verse + ".";
+            label.classList.add("music-notation", "music-lyric-verse");
+            label.setAttribute("x", String(Math.max(14, spot.x - 9)));
+            label.setAttribute("y", String(spot.bottomY + 54 + (verse - 1) * MUSIC_LYRIC_ROW_GAP));
+            label.setAttribute("text-anchor", "end");
+            scoreSvg.appendChild(label);
+          }
+        }
       }
       // VexFlow가 모든 마디를 그린 뒤 붙여야 뒤쪽 오선이 계이름을 덮지 않는다.
       for (const place of solfegePlaces){
@@ -2047,6 +2250,49 @@ async function mountMusicEditor(doc){
     }
   }
 
+  /* 이조 악기를 바꿀 때 갈림길은 하나뿐이다 — **소리를 지킬 것인가, 적힌 음을 지킬 것인가.**
+     C 파트를 클라리넷 파트보로 만드는 흔한 일은 앞쪽(악보를 장2도 올려 적기)이고, 이미 이조된
+     악보를 옮겨 적어 둔 경우는 뒤쪽이다. 그래서 세 갈래 확인창으로 묻는다. */
+  async function applyPartTransposition(nextId){
+    const part = musicActivePart(sheet);
+    if (!part){ syncPartControls(); return; }
+    const from = musicTranspositionSemitones(part.transposition);
+    const to = musicTranspositionSemitones(nextId);
+    if (from === to){ syncPartControls(); return; }
+    const shift = from - to;                     // 실음을 지키려면 기보를 이만큼 옮긴다
+    const spec = musicTranspositionSpec(nextId);
+    const name = spec ? spec.label : "실음(C)";
+    if (typeof confirmDialog !== "function"){ syncPartControls(); return; }
+    const answer = await confirmDialog(
+      `'${part.name}' 파트를 ${name} 악기로 바꿉니다. 지금 소리를 그대로 두려면 악보를 ${transposeLabel(shift)} 옮겨 적어야 해요.`,
+      "소리 유지(옮겨 적기)", "취소", { altText:"적힌 음 그대로" });
+    if (answer !== "ok" && answer !== "alt"){ syncPartControls(); return; }
+    if (answer === "ok"){
+      const preview = musicTransposePart(sheet, part, shift, { apply:false });
+      if (preview.blocked){
+        if (typeof toast === "function") toast(`${preview.blocked}개 음을 옮겨 적을 수 없어 그만뒀어요.`, 3200, { type:"error" });
+        syncPartControls();
+        return;
+      }
+      if (preview.outOfRange && !await confirmDialog(
+        `${transposeLabel(shift)}: 음 ${preview.outOfRange}개가 이 오선에서 권장하는 음역을 벗어나요. 그래도 옮길까요?`,
+        "옮기기", "취소")){
+        syncPartControls();
+        return;
+      }
+      musicTransposePart(sheet, part, shift);
+      keySelect.value = sheet.key;
+    }
+    part.transposition = musicClampTransposition(nextId);
+    syncPartControls();
+    afterEdit();
+    if (typeof toast === "function"){
+      toast(answer === "ok"
+        ? `${name} 파트로 옮겨 적었어요. 소리는 그대로입니다.`
+        : `${name} 파트로 바꿨어요. 적힌 음은 그대로라 소리가 ${transposeLabel(-to)} 달라집니다.`, 3400);
+    }
+  }
+
   function transposeContextItems(){
     const item = (semitones) => {
       const nextKey = musicTransposedKey(sheet.key, semitones);
@@ -2140,7 +2386,7 @@ async function mountMusicEditor(doc){
     const targetVoice = activeVoice;
     const note = toolNote(pitch, measureIndex, forcedAlter);
     if (!musicCanFit(sheet, measureIndex, note, targetStaff, targetVoice)){
-      if (typeof toast === "function") toast(`${measureIndex + 1}마디가 이미 가득 찼어요. 마디를 더하거나 짧은 음표를 골라 보세요.`, 3000);
+      if (typeof toast === "function") toast(`${measureNumberLabel(measureIndex)}마디가 이미 가득 찼어요. 마디를 더하거나 짧은 음표를 골라 보세요.`, 3000);
       return;
     }
     // 고른 음표가 이 마디에 있으면 그 뒤에, 아니면 마디 끝에 넣는다.
@@ -2172,7 +2418,7 @@ async function mountMusicEditor(doc){
     if (measureIndex < 0){
       sheet.measures.push(musicMeasure());
       measureIndex = sheet.measures.length - 1;
-      toInput.value = String(sheet.measures.length);
+      toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
       if (typeof toast === "function") toast("빈 마디를 하나 추가하고 이어서 넣었어요.", 2200);
     }
     insertNote(measureIndex, pitch, activeStaff, forcedAlter);
@@ -2357,15 +2603,205 @@ async function mountMusicEditor(doc){
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
   }
 
+  /* ----- 가사(절) -----
+     절은 문서의 성질(sheet.lyricVerses)이고, 지금 어느 절에 넣는지(lyricVerse)는 배율과 같은
+     보기 상태라 파일에 담지 않는다. 그리기는 늘 모든 절을 함께 그리므로 화면·그림·인쇄가
+     서로 다른 악보를 보여 줄 일이 없다. */
+  function lyricVerseCount(){ return musicClampVerseCount(sheet.lyricVerses); }
+
+  function lyricContextItems(){
+    const verses = lyricVerseCount();
+    const note = selectedNote();
+    const items = [];
+    for (let verse = 1; verse <= verses; verse++){
+      items.push({ label:`${verse}절에 넣기`, active:verse === lyricVerse,
+        action:() => { lyricVerse = verse; syncLyricBar(); } });
+    }
+    items.push({ separator:true },
+      { label:"절 추가", disabled:verses >= MUSIC_MAX_LYRIC_VERSES, action:addLyricVerse },
+      { label:"마지막 절 없애기", disabled:verses <= 1, action:removeLyricVerse },
+      { separator:true },
+      { label:`${lyricVerse}절 이어치기`, disabled:lyricEntry !== null, action:startLyricEntry },
+      { label:`${lyricVerse}절에 한 줄 붙여넣기…`, action:pasteLyricLine },
+      { label:"이 음표 가사 고치기…", disabled:!note || note.rest, action:editSelectedLyric },
+      { label:`${lyricVerse}절 가사 모두 지우기`, action:clearLyricVerse });
+    return items;
+  }
+
+  function setLyricVerses(count){
+    sheet.lyricVerses = musicClampVerseCount(count);
+    if (lyricVerse > sheet.lyricVerses) lyricVerse = sheet.lyricVerses;
+    afterEdit();
+    syncLyricBar();
+  }
+
+  function addLyricVerse(){
+    const verses = lyricVerseCount();
+    if (verses >= MUSIC_MAX_LYRIC_VERSES) return;
+    lyricVerse = verses + 1;
+    setLyricVerses(verses + 1);
+    if (typeof toast === "function") toast(`${lyricVerse}절을 추가했어요. 이제 가사가 이 절로 들어갑니다.`, 2600);
+  }
+
+  function removeLyricVerse(){
+    const verses = lyricVerseCount();
+    if (verses <= 1) return;
+    // 줄만 없애면 가사는 파일에 남아 다시 열 때 절이 되살아난다. 가사도 함께 지운다.
+    for (const part of musicParts(sheet)) musicClearLyricVerse(part.measures, verses);
+    musicClearLyricVerse(sheet.measures, verses);
+    setLyricVerses(verses - 1);
+  }
+
+  function clearLyricVerse(){
+    const verse = lyricVerse;
+    let cleared = 0;
+    for (const part of musicParts(sheet)) cleared += musicClearLyricVerse(part.measures, verse);
+    if (!cleared){
+      if (typeof toast === "function") toast(`${verse}절 가사가 없어요.`, 2000);
+      return;
+    }
+    afterEdit();
+    if (typeof toast === "function") toast(`${verse}절 가사 ${cleared}개를 지웠어요.`, 2600);
+  }
+
+  function lyricTargets(){ return musicLyricTargets(sheet.measures, activeStaff, activeVoice); }
+
+  function lyricTargetIndex(){
+    const note = selectedNote();
+    if (!note) return 0;
+    const at = lyricTargets().indexOf(note);
+    return at >= 0 ? at : 0;
+  }
+
+  function lyricVerseHasText(verse){
+    return lyricTargets().some((note) => !!musicNoteLyrics(note)[musicClampVerseCount(verse) - 1]);
+  }
+
+  /* 아직 한 글자도 없는 절은 고른 음표와 상관없이 처음부터 넣는다 — 1절을 끝낸 자리에서
+     2절이 이어 시작하면 절이 통째로 어긋난다. 이미 가사가 있는 절은 고친다는 뜻이므로
+     고른 음표부터 이어 간다. */
+  function lyricStartIndex(){
+    return lyricVerseHasText(lyricVerse) ? lyricTargetIndex() : 0;
+  }
+
+  function findNoteSpot(note){
+    for (let index = 0; index < sheet.measures.length; index++){
+      for (const staff of ["treble", "bass"]){
+        for (const voice of [1, 2]){
+          if (musicVoiceNotes(sheet.measures[index], staff, voice).includes(note)) return { index, staff, voice };
+        }
+      }
+    }
+    return null;
+  }
+
+  async function pasteLyricLine(){
+    if (typeof askText !== "function") return;
+    const value = await askText({ title:`${lyricVerse}절 가사 붙여넣기`,
+      message:"한 줄을 넣으면 음절 단위로 고른 음표부터 차례로 들어갑니다. 쉼표와 붙임줄로 이어진 음표는 건너뜁니다.",
+      placeholder:"학교 종이 땡땡땡", okText:"넣기" });
+    if (value === null || !String(value).trim()) return;
+    const result = musicApplyLyricLine(sheet.measures, lyricVerse, value,
+      { staff:activeStaff, voice:activeVoice, startIndex:lyricStartIndex() });
+    if (!result.applied){
+      if (typeof toast === "function") toast("가사를 넣을 음표가 없어요.", 2600);
+      return;
+    }
+    if (lyricVerseCount() < lyricVerse) sheet.lyricVerses = lyricVerse;
+    afterEdit();
+    const parts = [`${lyricVerse}절 가사 ${result.applied}개를 넣었어요.`];
+    if (result.leftover) parts.push(`음표가 모자라 ${result.leftover}음절이 남았어요`);
+    if (typeof toast === "function") toast(parts.join(" · "), result.leftover ? 4200 : 2600);
+  }
+
+  function syncLyricBar(){
+    if (!lyricEntry){ lyricBar.hidden = true; return; }
+    const targets = lyricTargets();
+    lyricBar.hidden = false;
+    lyricBarLabel.textContent = `가사 이어치기 · ${lyricVerse}절 (${Math.min(lyricEntry.index + 1, targets.length)}/${targets.length})`;
+  }
+
+  function focusLyricTarget(){
+    if (!lyricEntry) return;
+    const targets = lyricTargets();
+    if (!targets.length){ endLyricEntry(); return; }
+    lyricEntry.index = Math.max(0, Math.min(targets.length - 1, lyricEntry.index));
+    const note = targets[lyricEntry.index];
+    const spot = findNoteSpot(note);
+    if (spot) select(spot.index, note.id, { staff:spot.staff, voice:spot.voice });
+    syncLyricBar();
+    lyricInput.value = musicNoteLyrics(note)[lyricVerse - 1] || "";
+    lyricInput.focus();
+    lyricInput.select();
+  }
+
+  function startLyricEntry(){
+    if (!lyricTargets().length){
+      if (typeof toast === "function") toast("가사를 넣을 음표가 없어요.", 2600);
+      return;
+    }
+    lyricEntry = { index:lyricStartIndex() };
+    focusLyricTarget();
+  }
+
+  function commitLyricInput(){
+    if (!lyricEntry) return false;
+    const note = lyricTargets()[lyricEntry.index];
+    if (!note) return false;
+    const text = musicClampText(lyricInput.value, 80);
+    if (text === (musicNoteLyrics(note)[lyricVerse - 1] || "")) return false;
+    musicSetNoteLyric(note, lyricVerse, text);
+    if (lyricVerseCount() < lyricVerse) sheet.lyricVerses = lyricVerse;
+    afterEdit();
+    return true;
+  }
+
+  function endLyricEntry(){
+    if (!lyricEntry) return;
+    commitLyricInput();                 // 치던 글자를 버리지 않는다
+    lyricEntry = null;
+    lyricBar.hidden = true;
+    scoreHost.focus();
+  }
+
+  function stepLyricEntry(delta){
+    if (!lyricEntry) return;
+    const targets = lyricTargets();
+    const next = lyricEntry.index + delta;
+    if (next >= targets.length){
+      endLyricEntry();
+      if (typeof toast === "function") toast(`${lyricVerse}절 가사를 끝까지 넣었어요.`, 2200);
+      return;
+    }
+    lyricEntry.index = Math.max(0, next);
+    focusLyricTarget();
+  }
+
+  lyricInput.addEventListener("keydown", (event) => {
+    if (!lyricEntry) return;
+    if (event.key === "Escape"){ event.preventDefault(); endLyricEntry(); return; }
+    if (event.key === "Enter" || event.key === " " || event.key === "Tab"){
+      event.preventDefault();
+      commitLyricInput();
+      stepLyricEntry(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === "Backspace" && !lyricInput.value){
+      event.preventDefault();
+      stepLyricEntry(-1);
+    }
+  });
+  lyricDoneBtn.addEventListener("click", endLyricEntry);
+
   async function editSelectedLyric(){
     const note = selectedNote();
     if (!note || note.rest || typeof askText !== "function") return;
-    const value = await askText({ title:"가사 편집", message:"이 음표 아래에 붙일 가사 한 음절을 입력하세요. 비우면 지워집니다.",
-      value:note.lyric || "", okText:"적용" });
+    const value = await askText({ title:`가사 편집 · ${lyricVerse}절`,
+      message:"이 음표 아래에 붙일 가사 한 음절을 입력하세요. 비우면 지워집니다.",
+      value:musicNoteLyrics(note)[lyricVerse - 1] || "", okText:"적용" });
     if (value === null) return;
-    const lyric = musicClampText(value, 80);
-    if (lyric) note.lyric = lyric;
-    else delete note.lyric;
+    musicSetNoteLyric(note, lyricVerse, value);
+    if (lyricVerseCount() < lyricVerse) sheet.lyricVerses = lyricVerse;
     const selected = { ...selection };
     afterEdit();
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
@@ -2470,13 +2906,87 @@ async function mountMusicEditor(doc){
     afterEdit();
   }
 
+  /* ----- 마디 번호 · 연습 기호 · 한 줄 마디 수 -----
+     셋 다 "악보를 남에게 나눠 줄 때" 필요한 설정이라 한 메뉴에 모은다. 연습 기호는 마디의
+     성질(MUSIC_PART_STRUCTURE_KEYS)이라 파트끼리 자동으로 맞춰진다 — 파트보마다 A·B 가
+     어긋나면 합주가 되지 않는다. */
+  function layoutContextItems(measureIndex){
+    const index = Number.isInteger(measureIndex) ? measureIndex : activeMeasureIndex();
+    const mode = musicClampMeasureNumbers(sheet.measureNumbers);
+    const bars = musicClampBarsPerLine(sheet.barsPerLine);
+    const measure = sheet.measures[index];
+    const rehearsal = musicClampRehearsal(measure && measure.rehearsal);
+    const hasRehearsal = sheet.measures.some((item) => item && musicClampRehearsal(item.rehearsal));
+    return [
+      { label:"마디 번호", children:[
+        { label:"끄기", active:mode === "off", action:() => setMeasureNumbers("off") },
+        { label:"단마다(줄 첫 마디)", active:mode === "line", action:() => setMeasureNumbers("line") },
+        { label:"5마디마다", active:mode === 5, action:() => setMeasureNumbers(5) },
+        { label:"모든 마디", active:mode === "every", action:() => setMeasureNumbers("every") }
+      ] },
+      { label:"한 줄 마디 수", children:[
+        { label:"화면 폭에 맞춤", active:!bars, action:() => setBarsPerLine(0) },
+        ...[2, 3, 4, 5, 6, 7, 8].map((count) => ({
+          label:`${count}마디씩`, active:bars === count, action:() => setBarsPerLine(count)
+        }))
+      ] },
+      { separator:true },
+      { label:`${measureNumberLabel(index)}마디 연습 기호…${rehearsal ? ` (${rehearsal})` : ""}`,
+        action:() => editMeasureRehearsal(index) },
+      { label:"연습 기호 자동으로 매기기", action:autoRehearsalMarks },
+      { label:"연습 기호 모두 지우기", action:clearRehearsalMarks, disabled:!hasRehearsal }
+    ];
+  }
+
+  function setMeasureNumbers(mode){
+    sheet.measureNumbers = musicClampMeasureNumbers(mode);
+    afterEdit();
+  }
+
+  function setBarsPerLine(count){
+    sheet.barsPerLine = musicClampBarsPerLine(count);
+    afterEdit();
+  }
+
+  async function editMeasureRehearsal(measureIndex){
+    if (typeof askText !== "function") return;
+    const index = Number.isInteger(measureIndex) ? measureIndex : activeMeasureIndex();
+    const measure = sheet.measures[index];
+    if (!measure) return;
+    const value = await askText({ title:"연습 기호",
+      message:`${measureNumberLabel(index)}마디에 적을 연습 기호를 입력하세요(A·B·Coda 등). 비우면 지웁니다.`,
+      value:musicClampRehearsal(measure.rehearsal), placeholder:"예: A", okText:"적용" });
+    if (value === null) return;
+    const mark = musicClampRehearsal(value);
+    if (mark) measure.rehearsal = mark;
+    else delete measure.rehearsal;
+    afterEdit();
+  }
+
+  function autoRehearsalMarks(){
+    const applied = musicAutoRehearsal(sheet.measures);
+    if (!applied){
+      if (typeof toast === "function") toast("자동으로 매길 자리가 없어요. 도돌이·1번 괄호·＋오선 자리에 매깁니다.", 3400);
+      return;
+    }
+    afterEdit();
+    if (typeof toast === "function") toast(`연습 기호 ${applied}개를 매겼어요.`, 2600);
+  }
+
+  function clearRehearsalMarks(){
+    const cleared = musicClearRehearsal(sheet.measures);
+    if (!cleared) return;
+    afterEdit();
+    if (typeof toast === "function") toast(`연습 기호 ${cleared}개를 지웠어요.`, 2400);
+  }
+
   async function editActiveMeasureSettings(measureIndex){
     if (typeof askText !== "function") return;
     const index = Number.isInteger(measureIndex) ? measureIndex : activeMeasureIndex();
     const measure = sheet.measures[index];
     if (!measure) return;
     const effective = musicEffectiveMeasureSettings(sheet, index);
-    const timeValue = await askText({ title:"마디 박자", message:`${index + 1}마디부터 바꿀 박자를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+    const timeValue = await askText({ title:"마디 박자", message:`${measureNumberLabel(index)}마디부터 바꿀 박자를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
       value:measure.timeChange ? `${measure.timeChange.beats}/${measure.timeChange.beatValue}` : "", placeholder:"예: 3/4", okText:"다음" });
     if (timeValue !== null){
       const parsed = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(timeValue);
@@ -2484,7 +2994,7 @@ async function mountMusicEditor(doc){
       else if (parsed) measure.timeChange = musicNormalizeTime({ beats:Number(parsed[1]), beatValue:Number(parsed[2]) });
       else if (typeof toast === "function") toast("박자는 3/4처럼 입력해 주세요.", 2200);
     }
-    const keyValue = await askText({ title:"마디 조표", message:`${index + 1}마디부터 바꿀 조표 ID를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+    const keyValue = await askText({ title:"마디 조표", message:`${measureNumberLabel(index)}마디부터 바꿀 조표 ID를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
       value:measure.keyChange || "", placeholder:"예: C, Bb, F#m", okText:"다음" });
     if (keyValue !== null){
       const key = String(keyValue).trim();
@@ -2492,7 +3002,7 @@ async function mountMusicEditor(doc){
       else if (MUSIC_KEYS[key]) measure.keyChange = key;
       else if (typeof toast === "function") toast("상단 조표 목록에 있는 이름을 입력해 주세요.", 2400);
     }
-    const tempoValue = await askText({ title:"마디 빠르기", message:`${index + 1}마디부터 바꿀 빠르기를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
+    const tempoValue = await askText({ title:"마디 빠르기", message:`${measureNumberLabel(index)}마디부터 바꿀 빠르기를 입력하세요. 비우면 앞 마디 설정을 따릅니다.`,
       value:measure.tempoChange || "", placeholder:"예: 120", okText:"다음" });
     if (tempoValue !== null){
       if (!String(tempoValue).trim()) delete measure.tempoChange;
@@ -2593,7 +3103,7 @@ async function mountMusicEditor(doc){
   function addMeasure(){
     sheet.measures.push(musicMeasure());
     afterEdit();
-    toInput.value = String(sheet.measures.length);
+    toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
     clampRange();
   }
 
@@ -2601,7 +3111,7 @@ async function mountMusicEditor(doc){
     // 새 단은 줄바꿈 표시를 가진 빈 마디로 시작한다. 뒤의 ＋마디는 이 단에 이어 붙는다.
     sheet.measures.push(musicMeasure([], { lineBreakBefore:true }));
     afterEdit();
-    toInput.value = String(sheet.measures.length);
+    toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
     clampRange();
   }
 
@@ -2624,7 +3134,7 @@ async function mountMusicEditor(doc){
     sheet.measures.splice(at);
     selection = null;
     afterEdit();
-    toInput.value = String(sheet.measures.length);
+    toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
     clampRange();
   }
 
@@ -2664,8 +3174,8 @@ async function mountMusicEditor(doc){
     for (const part of musicParts(sheet)) part.measures = [musicMeasure()];
     const active = musicActivePart(sheet);
     sheet.measures = active ? active.measures : [musicMeasure()];
-    fromInput.value = "1";
-    toInput.value = "1";
+    fromInput.value = String(measureNumberLabel(0));
+    toInput.value = String(measureNumberLabel(0));
     afterEdit();
     if (typeof toast === "function") toast("악보를 비웠어요. Ctrl+Z로 되돌릴 수 있어요.", 2600);
   }
@@ -2919,8 +3429,8 @@ async function mountMusicEditor(doc){
       { label:"오른손만 재생", action:() => startPlay(null, { staff:"treble" }), disabled:running || !sheet.grandStaff },
       { label:"왼손만 재생", action:() => startPlay(null, { staff:"bass" }), disabled:running || !sheet.grandStaff },
       { label:"지정 구간 재생", action:() => startPlay(clampRange()), disabled:running },
-      { label:`${measure}마디 반복`, action:() => {
-        fromInput.value = toInput.value = String(measure);
+      { label:`${measureNumberLabel(targetMeasure)}마디 반복`, action:() => {
+        fromInput.value = toInput.value = String(measureNumberLabel(targetMeasure));
         startPlay({ from:measure, to:measure }, { loop:true });
       }, disabled:running },
       { label:"정지", action:() => MNMusicAudio.stop(), disabled:!running },
@@ -3032,22 +3542,23 @@ async function mountMusicEditor(doc){
         { label:"입력 성부 1", active:activeVoice === 1, action:() => setActiveVoice(1) },
         { label:"입력 성부 2", active:activeVoice === 2, action:() => setActiveVoice(2) },
         { separator:true },
-        { label:`${targetMeasure + 1}마디 반복 시작`, active:sheet.measures[targetMeasure].repeatStart === true,
+        { label:`${measureNumberLabel(targetMeasure)}마디 반복 시작`, active:sheet.measures[targetMeasure].repeatStart === true,
           action:() => toggleMeasureMark("repeatStart", targetMeasure) },
-        { label:`${targetMeasure + 1}마디 반복 끝`, active:sheet.measures[targetMeasure].repeatEnd === true,
+        { label:`${measureNumberLabel(targetMeasure)}마디 반복 끝`, active:sheet.measures[targetMeasure].repeatEnd === true,
           action:() => toggleMeasureMark("repeatEnd", targetMeasure) },
-        { label:`${targetMeasure + 1}마디 1·2번 괄호`, active:!!sheet.measures[targetMeasure].ending,
+        { label:`${measureNumberLabel(targetMeasure)}마디 1·2번 괄호`, active:!!sheet.measures[targetMeasure].ending,
           action:() => cycleMeasureEnding(targetMeasure) },
-        { label:`${targetMeasure + 1}마디 박자·조표·빠르기…`, action:() => editActiveMeasureSettings(targetMeasure) },
+        { label:`${measureNumberLabel(targetMeasure)}마디 박자·조표·빠르기…`, action:() => editActiveMeasureSettings(targetMeasure) },
         { separator:true },
         { label:"마지막에 마디 추가", action:addMeasure },
-        { label:`${targetMeasure + 1}마디 삭제`, action:() => removeMeasure(targetMeasure), disabled:sheet.measures.length <= 1 },
+        { label:`${measureNumberLabel(targetMeasure)}마디 삭제`, action:() => removeMeasure(targetMeasure), disabled:sheet.measures.length <= 1 },
         { separator:true },
         { label:"마지막에 오선 추가", action:addStaffLine },
         { label:"마지막 오선 삭제", action:removeStaffLine, disabled:!canRemoveStaff },
         { separator:true },
         { label:"악보 내용 초기화…", action:resetScoreContent }
       ] },
+      { label:"마디 번호·연습 기호", children:layoutContextItems(targetMeasure) },
       { label:"조옮김", children:transposeContextItems() },
       { separator:true },
       { label:"재생·연습", children:playbackContextItems(targetMeasure) },
@@ -3253,7 +3764,7 @@ async function mountMusicEditor(doc){
     }
     if (!tool.chord && !musicCanFit(sheet, box.index, preview, box.staff, activeVoice)){
       if (!tool.rest) updatePitchGuide(point, box, true);
-      setHoverReadout(`입력 불가: ${box.index + 1}마디가 가득 찼어요`, true);
+      setHoverReadout(`입력 불가: ${measureNumberLabel(box.index)}마디가 가득 찼어요`, true);
       return;
     }
     if (tool.rest) hidePitchGuide();
@@ -3323,8 +3834,10 @@ async function mountMusicEditor(doc){
       const voice = Number(target.dataset.voice) === 2 ? 2 : 1;
       if (tool.eraser){ deleteNote(measureIndex, target.dataset.noteId, staff, voice); return; }
       select(measureIndex, target.dataset.noteId, { scroll:false, staff, voice });
-      fromInput.value = String(measureIndex + 1);
-      if (Number(toInput.value) < measureIndex + 1) toInput.value = String(measureIndex + 1);
+      fromInput.value = String(measureNumberLabel(measureIndex));
+      if (musicMeasureIndexForNumber(sheet.measures, toInput.value, measureIndex) < measureIndex){
+        toInput.value = String(measureNumberLabel(measureIndex));
+      }
       const note = selectedNote();
       if (note && !note.rest) previewMusicNote(note, sheet.timbre);
       return;
@@ -3718,6 +4231,7 @@ async function mountMusicEditor(doc){
 
   function startEarTest(){
     if (earTest.active()) return false;
+    endLyricEntry();               // 자판이 통째로 답 건반이 되므로 가사 입력을 먼저 접는다
     if (practice.active){
       if (typeof toast === "function") toast("따라치기를 먼저 그만두고 시작해 주세요.", 2200);
       return false;
@@ -3789,6 +4303,7 @@ async function mountMusicEditor(doc){
 
   function startPractice(){
     if (practice.active) return false;
+    endLyricEntry();               // 따라치기 중에는 자판이 건반이라 가사 입력과 겹친다
     if (earTest.active()) return false;          // 음감 테스트와 따라치기는 서로 배타(자판을 함께 쓴다)
     const range = clampRange();
     const staff = practiceStaffSelect.value === "treble" || practiceStaffSelect.value === "bass"
@@ -4028,7 +4543,7 @@ async function mountMusicEditor(doc){
   playPartBtn.addEventListener("click", () => startPlay(clampRange()));
   repeatMeasureBtn.addEventListener("click", () => {
     const measure = selection ? selection.measure + 1 : clampRange().from;
-    fromInput.value = toInput.value = String(measure);
+    fromInput.value = toInput.value = String(measureNumberLabel(measure - 1));
     startPlay({ from:measure, to:measure }, { loop:true });
   });
   countInBtn.addEventListener("click", () => { countInEnabled = !countInEnabled; syncPracticeControls(); });
@@ -4235,6 +4750,107 @@ async function mountMusicEditor(doc){
   imageZoom.addEventListener("input", () => { imageReferenceImg.style.width = imageZoom.value + "%"; });
   imageReferenceClose.addEventListener("click", () => { imageReference.hidden = true; });
 
+  let practiceAudioBusy = false;
+  let practiceAudioCancel = false;
+
+  function syncPracticeAudioControls(){
+    practiceRunBtn.disabled = practiceAudioBusy;
+    practiceStopBtn.disabled = !practiceAudioBusy;
+    practiceTargetSelect.disabled = practiceAudioBusy;
+    practiceOtherSelect.disabled = practiceAudioBusy;
+    practiceRateInputs.forEach((input) => { input.disabled = practiceAudioBusy; });
+    practiceAudioBtn.classList.toggle("is-on", !practicePanel.hidden);
+  }
+
+  function togglePracticeAudioPanel(){
+    practicePanel.hidden = !practicePanel.hidden;
+    if (!practicePanel.hidden && !practiceStatus.textContent){
+      practiceStatus.textContent = "내 파트는 그대로, 나머지는 작게 깔아 파트마다 한 벌씩 만듭니다.";
+    }
+    syncPracticeAudioControls();
+  }
+
+  async function buildPracticeAudio(){
+    if (practiceAudioBusy) return;
+    const parts = practiceTargetSelect.value === "active"
+      ? [musicActivePart(sheet)].filter(Boolean)
+      : musicParts(sheet).filter((part) => part.muted !== true);
+    const rates = practiceRateInputs.filter((input) => input.checked).map((input) => Number(input.value));
+    if (!parts.length){ practiceStatus.textContent = "음소거하지 않은 파트가 없어요."; return; }
+    if (!rates.length){ practiceStatus.textContent = "템포를 하나 이상 고르세요."; return; }
+    const jobs = [];
+    for (const part of parts) for (const rate of rates) jobs.push({ part, rate });
+    // 한 벌이 수 MB 라 너무 많이 만들면 브라우저 메모리가 버티지 못한다.
+    if (jobs.length > MUSIC_PRACTICE_AUDIO_MAX){
+      practiceStatus.textContent = `한 번에 ${MUSIC_PRACTICE_AUDIO_MAX}벌까지 만들 수 있어요(지금 ${jobs.length}벌). 파트나 템포를 줄여 주세요.`;
+      return;
+    }
+    MNMusicAudio.stop();
+    practiceAudioBusy = true;
+    practiceAudioCancel = false;
+    syncPracticeAudioControls();
+    const files = [];
+    let bytes = 0;
+    try {
+      for (let index = 0; index < jobs.length; index++){
+        if (practiceAudioCancel) break;
+        const job = jobs[index];
+        const percent = Math.round(job.rate * 100);
+        practiceStatus.textContent = `${index + 1}/${jobs.length} · ${job.part.name} ${percent}% 만드는 중…`;
+        // 진행률을 실제로 그리고 나서 다음 렌더를 시작한다(렌더는 메인 스레드를 오래 잡는다).
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const blob = await MNMusicAudio.renderWav(sheet, {
+          focusPartId:job.part.id,
+          otherGain:Number(practiceOtherSelect.value),
+          playbackRate:job.rate,
+          metronome:practiceMetronomeCheck.checked,
+          countIn:practiceCountInCheck.checked,
+          onError:(error, failedTimbre) => console.warn("연습 음원 음색을 읽지 못했어요:", failedTimbre, error)
+        });
+        bytes += blob.size;
+        files.push({ name:`${musicSafeFileName(doc.name.replace(/\.msheet$/i, ""), "악보")} - ${musicSafeFileName(job.part.name, "파트")} (${percent}%).wav`, blob });
+      }
+      if (!files.length){
+        practiceStatus.textContent = practiceAudioCancel ? "그만뒀어요." : "만든 음원이 없어요.";
+        return;
+      }
+      const megabytes = (bytes / (1024 * 1024)).toFixed(1);
+      if (files.length === 1){
+        musicDownloadBlob(files[0].name, files[0].blob);
+        practiceStatus.textContent = `${files[0].name} (${megabytes}MB) 저장했어요.`;
+        return;
+      }
+      practiceStatus.textContent = `${files.length}벌을 ZIP 으로 묶는 중…`;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("jszip");
+      if (typeof JSZip !== "function") throw new Error("zip-runtime");
+      const zip = new JSZip();
+      for (const file of files) zip.file(file.name, new Uint8Array(await file.blob.arrayBuffer()));
+      // WAV 는 다시 압축해도 거의 줄지 않는다. 묶기만 해서 큰 파일도 금방 끝낸다.
+      const bundle = typeof zip.generateAsync === "function"
+        ? await zip.generateAsync({ type:"blob", compression:"STORE" })
+        : zip.generate({ type:"blob", compression:"STORE" });
+      musicDownloadBlob(`${musicSafeFileName(doc.name.replace(/\.msheet$/i, ""), "악보")} - 연습음원.zip`, bundle);
+      practiceStatus.textContent = `${files.length}벌(${megabytes}MB)을 ZIP 한 장으로 저장했어요.`;
+    } catch(error){
+      console.warn("연습 음원 만들기 실패:", error);
+      practiceStatus.textContent = error && error.message === "zip-runtime"
+        ? "압축 도구를 준비하지 못했어요. 잠시 뒤 다시 시도해 주세요."
+        : `음원을 만들지 못했어요: ${(error && error.message) || error}`;
+    } finally {
+      practiceAudioBusy = false;
+      syncPracticeAudioControls();
+    }
+  }
+
+  practiceAudioBtn.addEventListener("click", togglePracticeAudioPanel);
+  practiceRunBtn.addEventListener("click", buildPracticeAudio);
+  practiceStopBtn.addEventListener("click", () => {
+    practiceAudioCancel = true;
+    practiceStatus.textContent = "그만두는 중…";
+  });
+  syncPracticeAudioControls();
+
   async function exportMusicWav(){
     if (wavBtn.disabled) return;
     const previous = wavBtn.textContent;
@@ -4279,10 +4895,11 @@ async function mountMusicEditor(doc){
     }
     const baseWidth = Number(svg.dataset.musicBaseWidth) || 0;
     const baseHeight = Number(svg.dataset.musicBaseHeight) || 0;
-    const lineHeight = sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
+    const lineHeight = musicScoreLineHeight(sheet);
+    const topPad = musicScoreTopPad(sheet);
     let top = 0, height = baseHeight;
     if (lineIndex != null){
-      top = Math.max(0, 10 + lineIndex * lineHeight - MUSIC_IMAGE_TOP_PAD);
+      top = Math.max(0, topPad + lineIndex * lineHeight - MUSIC_IMAGE_TOP_PAD);
       height = Math.min(baseHeight - top, lineHeight + MUSIC_IMAGE_TOP_PAD);
     }
     if (!(baseWidth > 0) || !(height > 0)) return null;

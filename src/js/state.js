@@ -320,6 +320,8 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"musicPedal", label:"페달", cls:"music-toolvis-pedal", target:"music" },
   { id:"musicRepeat", label:"반복·엔딩 표시", cls:"music-toolvis-repeat", target:"music" },
   { id:"musicMeasureSettings", label:"마디 설정", cls:"music-toolvis-measure-settings", target:"music" },
+  { id:"musicLayout", label:"마디 번호·조판", cls:"music-toolvis-layout", target:"music" },
+  { id:"musicPracticeAudio", label:"연습 음원 만들기", cls:"music-toolvis-practice-audio", target:"music" },
   { id:"musicSolfege", label:"계이름 표시", cls:"music-toolvis-solfege", target:"music" },
   { id:"musicEraser", label:"지우개", cls:"music-toolvis-eraser", target:"music" },
   { id:"musicPosition", label:"음표 위치 조정", cls:"music-toolvis-position", target:"music" },

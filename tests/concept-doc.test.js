@@ -115,3 +115,63 @@ test("개념 관계도 형식은 파일 열기·메뉴·manifest에 연결된다
   assert.match(styles, /\.concept-edge-label\{fill:var\(--ink\)/); assert.match(styles, /\[data-theme="dark"\] \.concept-edge-label\{fill:#f8fafc;stroke:#0b1120\}/);
   assert.match(source, /openAutoLayoutDialog/); assert.match(source, /정렬 뒤 화면에 맞춤/); assert.match(styles, /concept-layout-choices/);
 });
+test("관계 표는 한 줄이 관계 하나, 개념 표는 한 줄이 카드 하나로 읽힌다", () => {
+  const edgeTable = concept.conceptGraphFromRows(concept.conceptCsvRows("출발,관계,도착,연결선\n교장,상위 → 하위,교감,\n교감,상위 → 하위,교무부장,결재\n"));
+  assert.equal(edgeTable.mode, "edges"); assert.deepEqual(edgeTable.nodes.map(node => node.title), ["교장", "교감", "교무부장"]);
+  assert.deepEqual(edgeTable.edges.map(edge => edge.type), ["include", "include"]); assert.equal(edgeTable.edges[1].label, "결재");
+  // 개념 표의 '상위' 열은 그 줄 카드의 부모다 — 화살표는 부모 → 자녀 방향이어야 한다.
+  const nodeTable = concept.conceptGraphFromRows(concept.conceptCsvRows("개념,상위,분류,설명,색\n교장,,관리,학교장,파랑\n교감,교장,관리,,초록\n"));
+  const byId = new Map(nodeTable.nodes.map(node => [node.id, node.title])), byTitle = new Map(nodeTable.nodes.map(node => [node.title, node]));
+  assert.equal(nodeTable.mode, "nodes"); assert.equal(nodeTable.edges.length, 1);
+  assert.equal(byId.get(nodeTable.edges[0].from), "교장"); assert.equal(byId.get(nodeTable.edges[0].to), "교감");
+  assert.equal(byTitle.get("교감").color, "green"); assert.equal(byTitle.get("교장").description, "학교장");
+  // 관계 종류 열이 없으면 열 이름에서 짐작하고, 짝이 비어도 카드는 남는다.
+  assert.equal(concept.conceptGraphFromRows(concept.conceptCsvRows("원인,결과\n예산 삭감,행사 축소\n")).edges[0].type, "cause");
+  assert.equal(concept.conceptGraphFromRows(concept.conceptCsvRows("개념,대상\n외톨이,\n")).nodes.length, 1);
+  assert.throws(() => concept.conceptGraphFromRows([["가", "나"], ["1", "2"]]), /concept-table-columns/);
+  // 엑셀 지역 설정에 따른 쌍반점·시트에서 복사한 탭 표도 같은 길로 읽는다.
+  assert.equal(concept.conceptCsvDelimiter("개념;상위\n가;나"), ";"); assert.equal(concept.conceptCsvDelimiter("개념\t상위\n가\t나"), "\t");
+  assert.equal(concept.conceptGraphFromRows(concept.conceptCsvRows("개념\t상위\n가\t나")).edges.length, 1);
+});
+test("개요 글은 들여쓰기가 상위 → 하위이고 관계도와 왕복한다", () => {
+  const parsed = concept.conceptOutlineParse("학교 업무\n\t교무 | 수업과 평가 | 부서\n\t\t시간표\n- 연구 | 연수 운영\n");
+  assert.deepEqual(parsed.nodes.map(node => node.title), ["학교 업무", "교무", "시간표", "연구"]);
+  assert.equal(parsed.nodes[1].description, "수업과 평가"); assert.equal(parsed.nodes[1].category, "부서");
+  const byId = new Map(parsed.nodes.map(node => [node.id, node.title]));
+  assert.deepEqual(parsed.edges.map(edge => byId.get(edge.from) + "→" + byId.get(edge.to)), ["학교 업무→교무", "교무→시간표"]);
+  assert.ok(parsed.edges.every(edge => edge.type === "include"));
+  const model = { ...concept.conceptDocEmpty("업무"), nodes:parsed.nodes, edges:parsed.edges };
+  const outline = concept.conceptGraphToOutline(model);
+  assert.equal(outline, "학교 업무\n\t교무 | 수업과 평가 | 부서\n\t\t시간표\n연구 | 연수 운영");
+  const again = concept.conceptOutlineParse(outline);
+  assert.deepEqual(again.nodes.map(node => node.title), parsed.nodes.map(node => node.title)); assert.equal(again.edges.length, parsed.edges.length);
+  assert.throws(() => concept.conceptOutlineParse("   \n"), /concept-outline-empty/);
+});
+test("관계 CSV는 외톨이 카드까지 담아 그대로 다시 들여진다", () => {
+  const model = concept.conceptDocEmpty("결재선");
+  model.nodes = [concept.conceptNormalizeNode({ id:"a", title:"기안", category:"절차", description:"담당이 올린다" }), concept.conceptNormalizeNode({ id:"b", title:"결재" }), concept.conceptNormalizeNode({ id:"c", title:"참고, 자료" })];
+  model.edges = [concept.conceptNormalizeEdge({ from:"a", to:"b", type:"cause", label:"올림" })];
+  const csv = concept.conceptGraphToCsv(model);
+  assert.match(csv, /^개념,분류,설명,관계,대상,연결선/); assert.match(csv, /"참고, 자료"/);
+  const back = concept.conceptGraphFromRows(concept.conceptCsvRows(csv));
+  assert.deepEqual(back.nodes.map(node => node.title).sort(), ["결재", "기안", "참고, 자료"]);
+  assert.equal(back.edges.length, 1); assert.equal(back.edges[0].type, "cause"); assert.equal(back.edges[0].label, "올림");
+  assert.equal(back.nodes.find(node => node.title === "기안").category, "절차");
+});
+test("표를 다시 들여도 같은 이름의 카드는 늘어나지 않는다", () => {
+  const model = concept.conceptDocEmpty("업무");
+  const first = concept.conceptMergeGraph(model, concept.conceptOutlineParse("교무\n\t평가 계획\n"), {});
+  assert.equal(first.added, 2); assert.equal(first.addedEdges, 1);
+  const second = concept.conceptMergeGraph(first, concept.conceptOutlineParse("교무 | 수업과 평가\n\t평가 계획\n\t시간표\n"), {});
+  assert.equal(second.reused, 2); assert.equal(second.added, 1); assert.equal(second.droppedEdges, 1);   // 이미 있는 관계는 겹치지 않는다
+  assert.equal(second.nodes.length, 3); assert.equal(second.nodes.find(node => node.title === "교무").description, "수업과 평가");
+  const replaced = concept.conceptMergeGraph(second, concept.conceptOutlineParse("새로 시작\n"), { replace:true });
+  assert.deepEqual(replaced.nodes.map(node => node.title), ["새로 시작"]); assert.equal(replaced.edges.length, 0);
+});
+test("표·개요 창은 도구막대와 화면에 연결된다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/concept-doc.js"), "utf8"), styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.match(source, /conceptButton\("표·개요"/); assert.match(source, /tableBtn\.onclick = openTableOutlineDialog/);
+  assert.match(source, /bar\.append\([^)]*tableBtn/); assert.match(source, /conceptRowsFromFile/); assert.match(source, /MNLazy\.tryNeed\("exceljs"\)/);
+  assert.match(source, /detectTextEncoding/);                     // 한글 엑셀 CSV(CP949)를 깨지 않고 읽는다
+  assert.match(styles, /\.concept-io-form\{/); assert.match(styles, /\.concept-io-status\.is-error/);
+});
