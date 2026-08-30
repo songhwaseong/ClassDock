@@ -98,6 +98,16 @@ function mapRememberListPanel(on){
   try { localStorage.setItem(MAP_LIST_PANEL_KEY, on ? "1" : "0"); } catch(_){}
 }
 
+/* 멀리서 수십 개 핀이 겹치는 것을 화면 칸별 숫자 묶음으로 볼지. 이것도 문서 내용이 아니라
+   보는 사람의 작업 방식이므로 지도 파일에는 넣지 않고 모든 지도에서 이어 쓴다. 기본은 켬. */
+const MAP_CLUSTER_KEY = "mn.mapMarkerClusters";
+function mapClustersOn(){
+  try { return localStorage.getItem(MAP_CLUSTER_KEY) !== "0"; } catch(_){ return true; }
+}
+function mapRememberClusters(on){
+  try { localStorage.setItem(MAP_CLUSTER_KEY, on ? "1" : "0"); } catch(_){}
+}
+
 /* 최근 검색어 — 검색란을 누르면 아래로 펼친다. 같은 사람이 같은 곳을 되찾는 습관이므로 .map 파일이
    아니라 이 브라우저에 남긴다(문서를 나눠 줘도 남의 검색어가 따라가지 않는다). */
 const MAP_SEARCH_HISTORY_KEY = "mn.mapSearchHistory";
@@ -628,6 +638,274 @@ function mapMarkersToMemoRows(markers){
 function mapMarkersToCsv(markers){
   const rows = mapMarkersToRows(markers);
   return "\uFEFF" + rows.map(row => row.map(mapCsvEscape).join(",")).join("\r\n") + "\r\n";
+}
+
+/* ===== 키 없는 지도 자료 교환 =====
+   GeoJSON·GPX·KML은 모두 WGS84 위경도를 담을 수 있으므로 서버나 API 키 없이 브라우저 안에서
+   바로 바꾼다. 가져온 id는 일부러 버린다 — 같은 파일을 두 번 들여와도 기존 표시의 레이어를
+   덮어쓰지 않고 별개의 표시로 남아야 한다. */
+const MAP_GEO_IMPORT_MAX_ITEMS = 5000;
+function mapXmlUnescape(value){
+  return String(value == null ? "" : value)
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, digits) => String.fromCodePoint(parseInt(digits, 10)))
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+function mapXmlEscape(value){
+  return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+function mapXmlTagText(block, tag){
+  const pattern = new RegExp("<(?:[A-Za-z0-9_-]+:)?" + tag + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[A-Za-z0-9_-]+:)?" + tag + "\\s*>", "i");
+  const match = pattern.exec(String(block || ""));
+  return match ? mapXmlUnescape(match[1]).trim() : "";
+}
+function mapXmlAttr(attrs, name){
+  const pattern = new RegExp("(?:^|\\s)" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", "i");
+  const match = pattern.exec(String(attrs || ""));
+  return match ? mapXmlUnescape(match[1] != null ? match[1] : match[2]) : "";
+}
+function mapGeoColor(value, fallback){
+  const text = String(value || "").trim().toLowerCase();
+  const named = MAP_MARKER_COLORS.find(item => item.id === text || item.label === text);
+  if (named) return named.id;
+  if (/^#[0-9a-f]{6}$/i.test(text)){
+    let best = MAP_MARKER_COLORS[0], score = Infinity;
+    const rgb = [1,3,5].map(index => parseInt(text.slice(index, index + 2), 16));
+    for (const color of MAP_MARKER_COLORS){
+      const sample = [1,3,5].map(index => parseInt(color.hex.slice(index, index + 2), 16));
+      const next = sample.reduce((sum, channel, index) => sum + Math.pow(channel - rgb[index], 2), 0);
+      if (next < score){ score = next; best = color; }
+    }
+    return best.id;
+  }
+  return fallback || "red";
+}
+function mapGeoPoint(coords){
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lng = Number(coords[0]), lat = Number(coords[1]);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -85 && lat <= 85 && lng >= -180 && lng <= 180
+    ? [lat, lng] : null;
+}
+function mapGeoJsonImport(text){
+  const raw = JSON.parse(String(text || ""));
+  const markers = [], shapes = [];
+  let skipped = 0, truncated = 0;
+  const addGeometry = (geometry, properties = {}) => {
+    if (!geometry || typeof geometry !== "object") { skipped++; return; }
+    if (markers.length + shapes.length >= MAP_GEO_IMPORT_MAX_ITEMS){ truncated++; return; }
+    const type = String(geometry.type || ""), coords = geometry.coordinates;
+    const label = String(properties.name || properties.title || properties.label || "");
+    const note = String(properties.description || properties.note || properties.desc || "");
+    if (type === "Point"){
+      const point = mapGeoPoint(coords);
+      if (!point){ skipped++; return; }
+      markers.push(mapNormalizeMarker({ lat:point[0], lng:point[1], label, note,
+        color:mapGeoColor(properties.color, "red"), address:properties.address || "",
+        phone:properties.phone || "", region:properties.region || "", district:properties.district || "" }));
+      return;
+    }
+    if (type === "LineString" || type === "Polygon"){
+      const source = type === "Polygon" && Array.isArray(coords) ? coords[0] : coords;
+      const points = (Array.isArray(source) ? source : []).map(mapGeoPoint).filter(Boolean);
+      if (type === "Polygon" && points.length > 1
+          && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1]) points.pop();
+      const minimum = type === "Polygon" ? 3 : 2;
+      if (points.length < minimum){ skipped++; return; }
+      shapes.push(mapNormalizeShape({ type:type === "Polygon" ? "area" : "line", points, label,
+        color:/^#[0-9a-f]{6}$/i.test(String(properties.color || "")) ? properties.color : undefined }));
+      return;
+    }
+    const parts = type === "GeometryCollection" ? geometry.geometries
+      : type === "MultiPoint" ? (coords || []).map(value => ({ type:"Point", coordinates:value }))
+      : type === "MultiLineString" ? (coords || []).map(value => ({ type:"LineString", coordinates:value }))
+      : type === "MultiPolygon" ? (coords || []).map(value => ({ type:"Polygon", coordinates:value })) : null;
+    if (!Array.isArray(parts)){ skipped++; return; }
+    parts.forEach(part => addGeometry(part, properties));
+  };
+  const features = raw && raw.type === "FeatureCollection" ? raw.features
+    : raw && raw.type === "Feature" ? [raw] : [{ type:"Feature", geometry:raw, properties:{} }];
+  if (!Array.isArray(features)) throw new Error("geojson-features");
+  for (let index = 0; index < features.length; index++){
+    if (markers.length + shapes.length >= MAP_GEO_IMPORT_MAX_ITEMS){ truncated += features.length - index; break; }
+    const feature = features[index];
+    addGeometry(feature && feature.geometry, feature && feature.properties || {});
+  }
+  if (!markers.length && !shapes.length) throw new Error("geo-no-items");
+  return { markers, shapes, skipped, truncated };
+}
+function mapGeoJsonExport(markers, shapes){
+  const features = [];
+  for (const marker of Array.isArray(markers) ? markers : []){
+    features.push({ type:"Feature", geometry:{ type:"Point", coordinates:[marker.lng, marker.lat] }, properties:{
+      name:marker.label || "", description:marker.note || "", color:marker.color || "red",
+      address:marker.address || "", phone:marker.phone || "", region:marker.region || "", district:marker.district || ""
+    } });
+  }
+  for (const shape of Array.isArray(shapes) ? shapes : []){
+    const coordinates = shape.points.map(point => [point[1], point[0]]);
+    if (shape.type === "area" && coordinates.length) coordinates.push(coordinates[0].slice());
+    features.push({ type:"Feature", geometry:{ type:shape.type === "area" ? "Polygon" : "LineString",
+      coordinates:shape.type === "area" ? [coordinates] : coordinates }, properties:{ name:shape.label || "", color:shape.color || "" } });
+  }
+  return JSON.stringify({ type:"FeatureCollection", features }, null, 2) + "\n";
+}
+function mapGpxImport(text){
+  const source = String(text || ""), markers = [], shapes = [];
+  let skipped = 0, truncated = 0;
+  const pointFrom = attrs => {
+    const lat = Number(mapXmlAttr(attrs, "lat")), lng = Number(mapXmlAttr(attrs, "lon"));
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -85 && lat <= 85 && lng >= -180 && lng <= 180 ? [lat, lng] : null;
+  };
+  const wptPattern = /<(?:[A-Za-z0-9_-]+:)?wpt\b([^>]*)>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?wpt\s*>/gi;
+  for (const match of source.matchAll(wptPattern)){
+    if (markers.length + shapes.length >= MAP_GEO_IMPORT_MAX_ITEMS){ truncated++; continue; }
+    const point = pointFrom(match[1]);
+    if (!point){ skipped++; continue; }
+    markers.push(mapNormalizeMarker({ lat:point[0], lng:point[1], label:mapXmlTagText(match[2], "name"),
+      note:mapXmlTagText(match[2], "desc") || mapXmlTagText(match[2], "cmt"), color:"red" }));
+  }
+  const addPath = (block, pointTag, label) => {
+    if (markers.length + shapes.length >= MAP_GEO_IMPORT_MAX_ITEMS){ truncated++; return; }
+    const pattern = new RegExp("<(?:[A-Za-z0-9_-]+:)?" + pointTag + "\\b([^>]*)>", "gi");
+    const points = [...String(block || "").matchAll(pattern)].map(match => pointFrom(match[1])).filter(Boolean);
+    if (points.length < 2){ skipped++; return; }
+    shapes.push(mapNormalizeShape({ type:"line", points, label }));
+  };
+  const routePattern = /<(?:[A-Za-z0-9_-]+:)?rte\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?rte\s*>/gi;
+  for (const match of source.matchAll(routePattern)) addPath(match[1], "rtept", mapXmlTagText(match[1], "name"));
+  const trackPattern = /<(?:[A-Za-z0-9_-]+:)?trk\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?trk\s*>/gi;
+  for (const track of source.matchAll(trackPattern)){
+    const label = mapXmlTagText(track[1], "name");
+    const segments = [...track[1].matchAll(/<(?:[A-Za-z0-9_-]+:)?trkseg\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?trkseg\s*>/gi)];
+    if (segments.length) segments.forEach(segment => addPath(segment[1], "trkpt", label));
+    else addPath(track[1], "trkpt", label);
+  }
+  if (!markers.length && !shapes.length) throw new Error("geo-no-items");
+  return { markers, shapes, skipped, truncated };
+}
+function mapGpxExport(markers, shapes, title){
+  const lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="ClassDock" xmlns="http://www.topografix.com/GPX/1/1">',
+    "  <metadata><name>" + mapXmlEscape(title || "지도") + "</name></metadata>"];
+  for (const marker of Array.isArray(markers) ? markers : []) lines.push(
+    '  <wpt lat="' + Number(marker.lat).toFixed(6) + '" lon="' + Number(marker.lng).toFixed(6) + '"><name>'
+      + mapXmlEscape(marker.label || "표시") + "</name>" + (marker.note ? "<desc>" + mapXmlEscape(marker.note) + "</desc>" : "") + "</wpt>");
+  for (const shape of Array.isArray(shapes) ? shapes : []){
+    const points = shape.points.slice();
+    if (shape.type === "area" && points.length) points.push(points[0]);
+    lines.push("  <trk><name>" + mapXmlEscape(shape.label || (shape.type === "area" ? "영역 경계" : "경로")) + "</name><trkseg>");
+    points.forEach(point => lines.push('    <trkpt lat="' + Number(point[0]).toFixed(6) + '" lon="' + Number(point[1]).toFixed(6) + '"></trkpt>'));
+    lines.push("  </trkseg></trk>");
+  }
+  lines.push("</gpx>", "");
+  return lines.join("\n");
+}
+function mapKmlImport(text){
+  const source = String(text || ""), markers = [], shapes = [];
+  let skipped = 0, truncated = 0;
+  const coordinates = block => String(mapXmlTagText(block, "coordinates") || "").trim().split(/\s+/)
+    .map(value => mapGeoPoint(value.split(","))).filter(Boolean);
+  const placemarks = [...source.matchAll(/<(?:[A-Za-z0-9_-]+:)?Placemark\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?Placemark\s*>/gi)];
+  for (const match of placemarks){
+    if (markers.length + shapes.length >= MAP_GEO_IMPORT_MAX_ITEMS){ truncated++; continue; }
+    const block = match[1], label = mapXmlTagText(block, "name"), note = mapXmlTagText(block, "description");
+    const pointBlock = mapXmlTagText(block, "Point");
+    const lineBlock = mapXmlTagText(block, "LineString");
+    const polygonBlock = mapXmlTagText(block, "Polygon");
+    if (pointBlock){
+      const point = coordinates(pointBlock)[0];
+      if (point) markers.push(mapNormalizeMarker({ lat:point[0], lng:point[1], label, note })); else skipped++;
+    } else if (lineBlock || polygonBlock){
+      const area = !!polygonBlock;
+      const points = coordinates(area ? polygonBlock : lineBlock);
+      if (area && points.length > 1 && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1]) points.pop();
+      if (points.length >= (area ? 3 : 2)) shapes.push(mapNormalizeShape({ type:area ? "area" : "line", points, label }));
+      else skipped++;
+    } else skipped++;
+  }
+  if (!markers.length && !shapes.length) throw new Error("geo-no-items");
+  return { markers, shapes, skipped, truncated };
+}
+function mapKmlExport(markers, shapes, title){
+  const lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>' + mapXmlEscape(title || "지도") + "</name>"];
+  for (const marker of Array.isArray(markers) ? markers : []) lines.push("<Placemark><name>" + mapXmlEscape(marker.label || "표시")
+    + "</name>" + (marker.note ? "<description>" + mapXmlEscape(marker.note) + "</description>" : "")
+    + "<Point><coordinates>" + Number(marker.lng).toFixed(6) + "," + Number(marker.lat).toFixed(6) + "</coordinates></Point></Placemark>");
+  for (const shape of Array.isArray(shapes) ? shapes : []){
+    const name = mapXmlEscape(shape.label || (shape.type === "area" ? "영역" : "경로"));
+    const coordinates = shape.points.map(point => Number(point[1]).toFixed(6) + "," + Number(point[0]).toFixed(6));
+    if (shape.type === "area" && coordinates.length) coordinates.push(coordinates[0]);
+    const coords = coordinates.join(" ");
+    lines.push(shape.type === "area"
+      ? "<Placemark><name>" + name + "</name><Polygon><outerBoundaryIs><LinearRing><coordinates>" + coords + "</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>"
+      : "<Placemark><name>" + name + "</name><LineString><coordinates>" + coords + "</coordinates></LineString></Placemark>");
+  }
+  lines.push("</Document></kml>", "");
+  return lines.join("\n");
+}
+
+/* 면적 도형 안의 표시를 고르는 순수 함수. 경계 바로 위의 점은 통계에서 빠지는 것보다
+   포함되는 편이 자연스러워 따로 잡는다. */
+function mapPointInPolygon(point, polygon){
+  if (!Array.isArray(point) || !Array.isArray(polygon) || polygon.length < 3) return false;
+  const y = Number(point[0]), x = Number(point[1]);
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++){
+    const yi = Number(polygon[i][0]), xi = Number(polygon[i][1]);
+    const yj = Number(polygon[j][0]), xj = Number(polygon[j][1]);
+    const cross = (x - xi) * (yj - yi) - (y - yi) * (xj - xi);
+    if (Math.abs(cross) < 1e-10 && x >= Math.min(xi, xj) - 1e-10 && x <= Math.max(xi, xj) + 1e-10
+        && y >= Math.min(yi, yj) - 1e-10 && y <= Math.max(yi, yj) + 1e-10) return true;
+    if (((yi > y) !== (yj > y)) && x < (xj - xi) * (y - yi) / ((yj - yi) || Number.EPSILON) + xi) inside = !inside;
+  }
+  return inside;
+}
+function mapMarkersInArea(markers, shape){
+  if (!shape || shape.type !== "area") return [];
+  return (Array.isArray(markers) ? markers : []).filter(marker => mapPointInPolygon([marker.lat, marker.lng], shape.points));
+}
+function mapClusterPixelGroups(items, cellSize){
+  const size = Math.max(20, Number(cellSize) || 72), buckets = new Map();
+  for (const item of Array.isArray(items) ? items : []){
+    const key = Math.floor(Number(item.x) / size) + ":" + Math.floor(Number(item.y) / size);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  }
+  return [...buckets.values()];
+}
+function mapKakaoRoadviewUrl(lat, lng){
+  const y = Number(lat), x = Number(lng);
+  if (!Number.isFinite(y) || !Number.isFinite(x) || y < -85 || y > 85 || x < -180 || x > 180) return "";
+  return "https://map.kakao.com/link/roadview/" + y.toFixed(6) + "," + x.toFixed(6);
+}
+const MAP_ROADVIEW_WINDOW_NAME = "ClassDockRoadview";
+const MAP_ROADVIEW_WINDOW_FEATURES = "popup=yes,width=1100,height=760,resizable=yes,scrollbars=yes";
+let _mapRoadviewWindow = null;
+function mapOpenKakaoRoadview(lat, lng){
+  const url = mapKakaoRoadviewUrl(lat, lng);
+  if (!url) return false;
+  /* 좌표마다 새 탭을 쌓지 않는다. 이미 연 로드뷰 창은 교사가 지도를 짚을 때마다 그 좌표로
+     갈아 끼우고 앞으로 가져온다. 외부 페이지가 원래 앱 창을 움직이지 못하게 opener도 끊는다. */
+  if (_mapRoadviewWindow){
+    try {
+      if (!_mapRoadviewWindow.closed){
+        _mapRoadviewWindow.location = url;
+        _mapRoadviewWindow.focus();
+        return true;
+      }
+    } catch(_){ /* 창이 다른 브라우저 영역으로 옮겨졌으면 아래에서 새로 연다. */ }
+    _mapRoadviewWindow = null;
+  }
+  const opened = window.open(url, MAP_ROADVIEW_WINDOW_NAME, MAP_ROADVIEW_WINDOW_FEATURES);
+  if (!opened) return false;
+  try { opened.opener = null; } catch(_){}
+  try { opened.focus(); } catch(_){}
+  _mapRoadviewWindow = opened;
+  return true;
 }
 function mapDownloadText(text, name, mime){
   const blob = new Blob([text], { type:mime || "text/plain;charset=utf-8" });
@@ -2113,6 +2391,112 @@ function openMapRegionStats(model, hooks){
   });
 }
 
+/* 이미 그려 둔 면적 영역을 곧바로 선택 범위로 쓴다. 별도의 올가미 모드를 하나 더 만들지 않아도
+   거리·면적 수업에서 만든 도형과 통계 범위가 정확히 같은 자리에 남고, 저장·되돌리기도 기존
+   도형 규칙을 그대로 따른다. 통계를 보는 일 자체는 문서를 고치지 않는다. */
+function openMapAreaStats(shape, markers){
+  const inside = mapMarkersInArea(markers, shape);
+  const modal = document.createElement("div");
+  modal.className = "modal map-area-stats-modal";
+  modal.innerHTML =
+    '<div class="modal-card map-area-stats-card">' +
+      '<h3 class="map-area-stats-title"></h3>' +
+      '<p class="sub map-area-stats-summary"></p>' +
+      '<div class="map-area-stats-breakdown"></div>' +
+      '<div class="map-area-stats-table-wrap"><table class="map-area-stats-table">' +
+        '<thead><tr><th>이름</th><th>업종·카테고리</th><th>지역</th></tr></thead><tbody></tbody>' +
+      '</table></div>' +
+      '<p class="map-area-stats-note"></p>' +
+      '<div class="modal-actions">' +
+        '<button class="btn map-area-stats-csv" type="button">CSV 내보내기</button>' +
+        '<button class="btn map-area-stats-memo" type="button">표로 메모</button>' +
+        '<span class="spacer"></span><button class="btn primary map-area-stats-close" type="button">닫기</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  modal.querySelector(".map-area-stats-title").textContent = (shape.label || mapT("이름 없는 영역")) + " · " + mapT("영역 표시 분석");
+  modal.querySelector(".map-area-stats-summary").textContent = mapTf("면적 {area} 안에 표시 {count}개가 있습니다.",
+    { area:mapFormatArea(mapPolygonAreaSquareMeters(shape.points)), count:inside.length });
+  const breakdown = modal.querySelector(".map-area-stats-breakdown");
+  const counts = new Map();
+  inside.forEach(marker => counts.set(marker.color, (counts.get(marker.color) || 0) + 1));
+  for (const color of MAP_MARKER_COLORS){
+    if (!counts.has(color.id)) continue;
+    const chip = document.createElement("span");
+    chip.className = "map-area-stats-chip";
+    const dot = document.createElement("i"); dot.style.background = color.hex;
+    const label = document.createElement("span"); label.textContent = mapT(color.label) + " " + counts.get(color.id);
+    chip.append(dot, label); breakdown.appendChild(chip);
+  }
+  const body = modal.querySelector("tbody");
+  inside.slice(0, 200).forEach(marker => {
+    const row = document.createElement("tr");
+    for (const value of [marker.label || mapT("이름 없는 표시"), marker.category || "",
+      [marker.region, marker.district].filter(Boolean).join(" ")]){
+      const cell = document.createElement("td"); cell.textContent = value; row.appendChild(cell);
+    }
+    body.appendChild(row);
+  });
+  const note = modal.querySelector(".map-area-stats-note");
+  note.textContent = inside.length > 200 ? mapTf("목록은 앞 {count}개만 보여 줍니다. CSV에는 모두 담깁니다.", { count:200 })
+    : inside.length ? "" : mapT("이 영역 안에는 표시가 없습니다.");
+  const csvBtn = modal.querySelector(".map-area-stats-csv");
+  const memoBtn = modal.querySelector(".map-area-stats-memo");
+  csvBtn.disabled = !inside.length;
+  memoBtn.disabled = !inside.length || typeof window.addTableToScratchpad !== "function";
+  csvBtn.addEventListener("click", () => mapDownloadText(mapMarkersToCsv(inside),
+    mapSafeDownloadName(shape.label || mapT("영역")) + "_표시.csv", "text/csv;charset=utf-8"));
+  memoBtn.addEventListener("click", () => {
+    const result = window.addTableToScratchpad(mapMarkersToMemoRows(inside));
+    if (result && typeof toast === "function") toast(mapTf("영역 안 표시 {count}개를 메모 표로 보냈어요.", { count:inside.length }), 3000);
+  });
+  const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
+  const onKey = (event) => { if (event.key === "Escape"){ event.preventDefault(); event.stopImmediatePropagation(); close(); } };
+  window.addEventListener("keydown", onKey, true);
+  modal.addEventListener("mousedown", event => { if (event.target === modal) close(); });
+  modal.querySelector(".map-area-stats-close").addEventListener("click", close);
+  mapTranslate(modal);
+}
+
+function openMapGeoExport(model){
+  const markers = Array.isArray(model && model.markers) ? model.markers : [];
+  const shapes = Array.isArray(model && model.shapes) ? model.shapes : [];
+  if (!markers.length && !shapes.length) return false;
+  const modal = document.createElement("div");
+  modal.className = "modal map-geo-export-modal";
+  modal.innerHTML =
+    '<div class="modal-card map-geo-export-card">' +
+      '<h3>지도 자료 내보내기</h3>' +
+      '<p class="sub">표시·경로·영역을 다른 지도 프로그램에서 열 수 있는 파일로 저장합니다. 외부 API나 키를 사용하지 않습니다.</p>' +
+      '<div class="map-geo-export-choices">' +
+        '<button class="btn" type="button" data-format="geojson"><strong>GeoJSON</strong><small>표시·경로·영역과 색·메모를 가장 잘 보존</small></button>' +
+        '<button class="btn" type="button" data-format="gpx"><strong>GPX</strong><small>GPS 기기·운동 기록 앱과 경로 교환</small></button>' +
+        '<button class="btn" type="button" data-format="kml"><strong>KML</strong><small>Google Earth 등에서 표시·경로·영역 열기</small></button>' +
+      '</div>' +
+      '<div class="modal-actions"><span class="spacer"></span><button class="btn map-geo-export-close" type="button">취소</button></div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  const base = mapSafeDownloadName(model.title || mapT("지도"));
+  const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
+  const onKey = event => { if (event.key === "Escape"){ event.preventDefault(); event.stopImmediatePropagation(); close(); } };
+  modal.querySelectorAll("[data-format]").forEach(button => button.addEventListener("click", () => {
+    const format = button.dataset.format;
+    const text = format === "gpx" ? mapGpxExport(markers, shapes, model.title)
+      : format === "kml" ? mapKmlExport(markers, shapes, model.title) : mapGeoJsonExport(markers, shapes);
+    const mime = format === "gpx" ? "application/gpx+xml;charset=utf-8"
+      : format === "kml" ? "application/vnd.google-earth.kml+xml;charset=utf-8" : "application/geo+json;charset=utf-8";
+    mapDownloadText(text, base + "." + format, mime);
+    if (typeof toast === "function") toast(mapTf("표시·도형 {count}개를 {format}으로 내보냈습니다",
+      { count:markers.length + shapes.length, format:format.toUpperCase() }), 2800);
+    close();
+  }));
+  window.addEventListener("keydown", onKey, true);
+  modal.addEventListener("mousedown", event => { if (event.target === modal) close(); });
+  modal.querySelector(".map-geo-export-close").addEventListener("click", close);
+  mapTranslate(modal);
+  return true;
+}
+
 /* ===== 주변 시설 찾기 창 =====
    지도 가운데를 기준으로 반경 안의 갈래들을 모아 온다. '우리 동네에 학교와 병원이 몇 곳인가'처럼
    사회과에서 바로 쓰는 물음이라, 찾은 개수를 창 안에서 먼저 보여 주고 넣을지 고르게 한다.
@@ -2856,18 +3240,22 @@ async function mountMapEditor(doc){
 
   const csvImportBtn = document.createElement("button");
   csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import map-toolvis-csv-import";
-  csvImportBtn.textContent = "표 들이기";
-  csvImportBtn.title = "지도 CSV 또는 연대표 CSV·엑셀(.xlsx)에서 표시 추가 — 좌표 없이 장소·주소만 있어도 됩니다";
+  csvImportBtn.textContent = "자료 들이기";
+  csvImportBtn.title = "CSV·Excel·GeoJSON·GPX·KML에서 표시·경로·영역 추가 — 지도 형식은 API 키 없이 읽습니다";
   const csvExportBtn = document.createElement("button");
   csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export map-toolvis-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
+  const geoExportBtn = document.createElement("button");
+  geoExportBtn.type = "button"; geoExportBtn.className = "map-btn map-geo-export map-toolvis-geo-export";
+  geoExportBtn.textContent = "지도 자료 내보내기";
+  geoExportBtn.title = "표시·경로·영역을 GeoJSON·GPX·KML로 저장 — API 키가 필요하지 않습니다";
   const csvMemoBtn = document.createElement("button");
   csvMemoBtn.type = "button"; csvMemoBtn.className = "map-btn map-csv-memo map-toolvis-csv-memo";
   csvMemoBtn.textContent = "🧾 표로 메모";
   csvMemoBtn.title = "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다";
   const csvInput = document.createElement("input");
   csvInput.type = "file";
-  csvInput.accept = ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  csvInput.accept = ".csv,.xlsx,.geojson,.json,.gpx,.kml,text/csv,application/geo+json,application/json,application/gpx+xml,application/vnd.google-earth.kml+xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   csvInput.hidden = true;
 
   const gridBtn = document.createElement("button");
@@ -2881,6 +3269,12 @@ async function mountMapEditor(doc){
   labelsBtn.textContent = "🏷️ 이름 보이기";
   labelsBtn.title = "표시 이름을 마우스를 올리지 않아도 늘 보이게 해요 — 멀리서 볼 때는 겹치지 않게 잠시 숨깁니다";
   labelsBtn.setAttribute("aria-pressed", "false");
+
+  const clusterBtn = document.createElement("button");
+  clusterBtn.type = "button"; clusterBtn.className = "map-btn map-cluster-toggle map-toolvis-cluster";
+  clusterBtn.textContent = "🧩 표시 묶기";
+  clusterBtn.title = "멀리서 겹치는 표시를 숫자 묶음으로 보여 줍니다 — API 키가 필요하지 않습니다";
+  clusterBtn.setAttribute("aria-pressed", "false");
 
   const routeBtn = document.createElement("button");
   routeBtn.type = "button"; routeBtn.className = "map-btn map-route-toggle map-toolvis-route";
@@ -2972,9 +3366,9 @@ async function mountMapEditor(doc){
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
   bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
-  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, routeBtn, driveBtn, listBtn,
+  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
     presentBtn, nearbyBtn, regionBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
-    boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
+    geoExportBtn, boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
@@ -3339,6 +3733,7 @@ async function mountMapEditor(doc){
      전부 touch 를 지나므로, 선을 다시 그리는 일도 한 곳에만 매달면 빠뜨릴 수 없다. */
   let redrawRoute = () => {};
   let scheduleDrive = () => {};   // 자동차 길찾기도 같은 까닭으로 이름만 먼저 세워 둔다
+  let redrawClusters = () => {};  // 표시 추가·삭제 뒤 숫자 묶음도 같은 한 길에서 다시 계산한다
   /* 문제 풀이 화면(지도 문제)에서만 채워진다 — 지도 클릭을 답 찍기로 가로챈다. 아래에서 만든다. */
   let quizPlaceAnswer = null;
 
@@ -3356,6 +3751,7 @@ async function mountMapEditor(doc){
     recordSoon();
     scheduleRecovery();
     scheduleListRefresh();
+    redrawClusters();
     redrawRoute();
     scheduleDrive();
   };
@@ -3519,6 +3915,13 @@ async function mountMapEditor(doc){
       })), startIndex);
     });
 
+    const roadviewBtn = document.createElement("button");
+    roadviewBtn.type = "button";
+    roadviewBtn.className = "map-popup-address map-popup-roadview";
+    roadviewBtn.textContent = "🚶 로드뷰";
+    roadviewBtn.title = "이 좌표의 카카오맵 로드뷰를 새 창에서 열어요 — API 키가 필요하지 않습니다";
+    roadviewBtn.addEventListener("click", () => mapOpenKakaoRoadview(marker.lat, marker.lng));
+
     /* ── 사진 한 장 ──
        답사·관찰 기록은 "여기서 무엇을 보았는가"가 핵심이라 글보다 사진이 먼저다. 지도 파일 안에
        함께 담아(base64) 파일 하나만 건네면 사진까지 따라가게 한다. */
@@ -3597,7 +4000,7 @@ async function mountMapEditor(doc){
     photoBox.append(photoImg, photoAddBtn, photoRemoveBtn, photoInput);
     syncPhoto();
 
-    form.append(labelInput, noteInput, colorRow, photoBox, coordText, addressFillBtn, detailBtn, removeBtn);
+    form.append(labelInput, noteInput, colorRow, photoBox, coordText, addressFillBtn, detailBtn, roadviewBtn, removeBtn);
     mapTranslate(form);
     return form;
   };
@@ -3699,17 +4102,67 @@ async function mountMapEditor(doc){
   const hiddenSources = new Set();
   let listOpen = mapListPanelOn();
   const markerVisible = (marker) => !hiddenSources.has(marker.source || "");
-  const applyMarkerVisibility = () => {
+  let clustersOn = mapClustersOn();
+  const clusterLayer = L.layerGroup().addTo(map);
+  const syncClusterButton = () => {
+    clusterBtn.classList.toggle("is-on", clustersOn);
+    clusterBtn.setAttribute("aria-pressed", String(clustersOn));
+  };
+  redrawClusters = () => {
+    clusterLayer.clearLayers();
+    const visible = model.markers.filter(markerVisible);
+    const useClusters = clustersOn && visible.length >= 20 && map.getZoom() <= 13;
+    const groupedIds = new Set();
+    if (useClusters){
+      const items = visible.map(marker => {
+        const point = map.latLngToContainerPoint([marker.lat, marker.lng]);
+        return { marker, x:point.x, y:point.y };
+      });
+      for (const group of mapClusterPixelGroups(items, 72)){
+        if (group.length < 2) continue;
+        group.forEach(item => groupedIds.add(item.marker.id));
+        const center = group.reduce((sum, item) => [sum[0] + item.marker.lat, sum[1] + item.marker.lng], [0,0])
+          .map(value => value / group.length);
+        const icon = L.divIcon({
+          className:"map-marker-cluster",
+          html:"<span>" + group.length + "</span>",
+          iconSize:[42,42], iconAnchor:[21,21]
+        });
+        const cluster = L.marker(center, { icon, keyboard:true, title:mapTf("표시 {count}개", { count:group.length }) });
+        cluster.on("click", () => {
+          const bounds = L.latLngBounds(group.map(item => [item.marker.lat, item.marker.lng]));
+          if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(center, Math.min(15, map.getZoom() + 2));
+          else map.fitBounds(bounds.pad(0.2), { maxZoom:15, animate:true });
+        });
+        cluster.bindTooltip(mapTf("표시 {count}개 — 눌러서 펼치기", { count:group.length }), { direction:"top" });
+        clusterLayer.addLayer(cluster);
+      }
+    }
     for (const marker of model.markers){
       const layer = markerLayers.get(marker.id);
       if (!layer) continue;
-      const show = markerVisible(marker);
+      const show = markerVisible(marker) && !groupedIds.has(marker.id);
       if (show && !map.hasLayer(layer)) layer.addTo(map);
       else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
     }
+  };
+  const applyMarkerVisibility = () => {
+    redrawClusters();
     redrawRoute();               // 감춘 묶음은 선에서도 빠진다 — 없는 표시로 선이 돌아가면 읽을 수 없다
     scheduleDrive();             // 보기 상태는 문서에 담기지 않아 touch 를 지나지 않는다 — 여기서 따로 건다
   };
+  clusterBtn.addEventListener("click", () => {
+    clustersOn = !clustersOn;
+    mapRememberClusters(clustersOn);
+    syncClusterButton();
+    redrawClusters();
+    if (clustersOn && typeof toast === "function"){
+      toast(mapT("멀리서 겹치는 표시를 숫자 묶음으로 보여 줍니다 — 묶음을 누르면 펼쳐집니다."), 3200);
+    }
+  });
+  map.on("moveend zoomend", redrawClusters);
+  syncClusterButton();
+  redrawClusters();
 
   /* ── 표시 잇는 선 ──
      격자와 같이 "볼 때마다 다시 그리는" 층이다. 선을 도형으로 굳혀 두지 않는 까닭은 표시가
@@ -3854,6 +4307,7 @@ async function mountMapEditor(doc){
 
   const focusMarker = (marker) => {
     map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 15));
+    redrawClusters();
     const layer = markerLayers.get(marker.id);
     if (layer && map.hasLayer(layer)) layer.openPopup();
   };
@@ -4100,6 +4554,11 @@ async function mountMapEditor(doc){
     color.setAttribute("aria-label", "도형 색상");
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "map-popup-remove"; remove.textContent = "도형 지우기";
+    const analyze = document.createElement("button");
+    analyze.type = "button"; analyze.className = "map-popup-address map-area-analyze";
+    analyze.textContent = "▣ 영역 표시 분석";
+    analyze.title = "이 면적 안에 있는 표시를 세고 CSV·메모로 내보냅니다 — API 키가 필요하지 않습니다";
+    analyze.hidden = shape.type !== "area";
     label.addEventListener("input", () => {
       shape.label = label.value.slice(0, 120); layer.setTooltipContent(shapeTooltip(shape)); touch();
     });
@@ -4107,7 +4566,8 @@ async function mountMapEditor(doc){
       shape.color = color.value; layer.setStyle({ color:shape.color, fillColor:shape.color }); touch();
     });
     remove.addEventListener("click", () => { map.closePopup(); removeShape(shape); });
-    form.append(label, measure, color, remove); mapTranslate(form);
+    analyze.addEventListener("click", () => { map.closePopup(); openMapAreaStats(shape, model.markers); });
+    form.append(label, measure, color, analyze, remove); mapTranslate(form);
     return form;
   };
   const addShapeLayer = (shape) => {
@@ -4573,17 +5033,23 @@ async function mountMapEditor(doc){
     const file = csvInput.files && csvInput.files[0]; csvInput.value = "";
     if (!file) return;
     const isSheet = /\.xlsx$/i.test(String(file.name || ""));
+    const extension = String(file.name || "").split(".").pop().toLowerCase();
+    const isGeoFile = ["geojson", "json", "gpx", "kml"].includes(extension);
     const oldLabel = csvImportBtn.textContent;
     csvInput.disabled = true;
-    csvImportBtn.textContent = mapT(isSheet ? "엑셀 읽는 중…" : "표 읽는 중…");
+    csvImportBtn.textContent = mapT(isSheet ? "엑셀 읽는 중…" : isGeoFile ? "지도 자료 읽는 중…" : "표 읽는 중…");
     try {
       if (isSheet && file.size > MAP_XLSX_IMPORT_MAX_BYTES) throw new Error("xlsx-too-large");
       if (!isSheet && file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
       let imported;
       let timelineOptions = null;
       const csvText = isSheet ? "" : await file.text();
-      const isTimeline = isSheet || mapCsvLooksLikeTimeline(csvText);
-      if (isTimeline){
+      const isTimeline = !isGeoFile && (isSheet || mapCsvLooksLikeTimeline(csvText));
+      if (isGeoFile){
+        imported = extension === "gpx" ? mapGpxImport(csvText)
+          : extension === "kml" ? mapKmlImport(csvText) : mapGeoJsonImport(csvText);
+        imported.pending = [];
+      } else if (isTimeline){
         const timelineApi = {
           fromXlsx:globalThis.timelineEventsFromXlsx,
           fromCsv:globalThis.timelineEventsFromCsv,
@@ -4630,9 +5096,17 @@ async function mountMapEditor(doc){
       } else imported = mapMarkersFromCsv(csvText);
 
       imported.markers.forEach(marker => { model.markers.push(marker); addMarkerLayer(marker); });
-      fitToMarkers(imported.markers);
+      (imported.shapes || []).forEach(shape => { model.shapes.push(shape); addShapeLayer(shape); });
+      const importedPoints = imported.markers.concat((imported.shapes || []).flatMap(shape =>
+        shape.points.map(point => ({ lat:point[0], lng:point[1] }))));
+      fitToMarkers(importedPoints);
       touch();
-      if (imported.markers.length){
+      if (isGeoFile){
+        const count = imported.markers.length + (imported.shapes || []).length;
+        const extra = imported.skipped || imported.truncated
+          ? mapTf(" · 읽지 못한 항목 {skipped}개 · 상한 초과 {truncated}개", imported) : "";
+        if (typeof toast === "function") toast(mapTf("지도 자료에서 표시·도형 {count}개를 추가했습니다", { count }) + extra, 4200);
+      } else if (imported.markers.length){
         const extra = imported.skipped || imported.truncated
           ? mapTf(" · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외", imported) : "";
         if (typeof toast === "function") toast(mapTf("CSV에서 표시 {count}개를 추가했습니다", { count:imported.markers.length }) + extra, 4200);
@@ -4644,7 +5118,7 @@ async function mountMapEditor(doc){
     } catch(error){
       const code = error && error.message;
       const message = code === "csv-too-large"
-        ? "CSV 파일은 5MB 이하로 골라 주세요."
+        ? "CSV·GeoJSON·GPX·KML 파일은 5MB 이하로 골라 주세요."
         : code === "xlsx-too-large"
         ? "Excel 파일은 50MB 이하로 골라 주세요."
         : code === "xlsx-runtime" || code === "timeline-runtime"
@@ -4653,6 +5127,8 @@ async function mountMapEditor(doc){
         ? "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다."
         : code === "csv-columns"
         ? "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다."
+        : code === "geo-no-items" || code === "geojson-features" || (error && error.name === "SyntaxError")
+        ? "지도 자료에서 사용할 수 있는 표시·경로·영역을 찾지 못했습니다."
         : "표에서 사용할 수 있는 표시를 찾지 못했습니다.";
       setStatus(mapT(message));
     } finally {
@@ -4666,6 +5142,9 @@ async function mountMapEditor(doc){
     if (!model.markers.length){ setStatus(mapT("내보낼 표시가 없습니다.")); return; }
     mapDownloadText(mapMarkersToCsv(model.markers), mapSafeDownloadName(model.title) + "_표시.csv", "text/csv;charset=utf-8");
     if (typeof toast === "function") toast(mapTf("표시 {count}개를 CSV로 내보냈습니다", { count:model.markers.length }), 2800);
+  });
+  geoExportBtn.addEventListener("click", () => {
+    if (!openMapGeoExport(model)) setStatus(mapT("내보낼 표시·도형이 없습니다."));
   });
 
   /* ── 표로 메모 ──
@@ -4913,7 +5392,12 @@ async function mountMapEditor(doc){
       map.closePopup();
       openMapKakaoPlaceModal([{ name:spot.title || name, placeUrl:spot.placeUrl }], 0);
     });
-    actions.append(pinBtn, copyBtn, nearBtn, detailBtn);
+    const roadviewBtn = document.createElement("button");
+    roadviewBtn.type = "button"; roadviewBtn.className = "map-spot-btn map-spot-roadview";
+    roadviewBtn.textContent = "🚶 로드뷰";
+    roadviewBtn.title = "이 좌표의 카카오맵 로드뷰를 새 창에서 열어요 — API 키가 필요하지 않습니다";
+    roadviewBtn.addEventListener("click", () => mapOpenKakaoRoadview(spot.lat, spot.lng));
+    actions.append(pinBtn, copyBtn, nearBtn, detailBtn, roadviewBtn);
     box.appendChild(actions);
     mapTranslate(box);
     return box;
@@ -5042,6 +5526,8 @@ async function mountMapEditor(doc){
       toast(copied ? mapTf("좌표를 복사했어요 — {text}", { text }) : mapT("좌표를 복사하지 못했어요."), 2600);
     }
   });
+  contextItem("🚶 이 자리 로드뷰", "이 좌표의 카카오맵 로드뷰를 새 창에서 열어요 — API 키가 필요하지 않습니다",
+    (at) => mapOpenKakaoRoadview(at.lat, at.lng));
   contextItem("📮 이 자리 주소 복사", "이 지점의 주소를 찾아 클립보드로 복사", async (at) => {
     setStatus(mapT("주소를 찾는 중…"));
     try {
@@ -5100,6 +5586,7 @@ async function mountMapEditor(doc){
      syncContextMirrors 가 단추의 is-on 을 그대로 옮겨 메뉴에서 체크(✓)로 보인다. */
   contextMirror(routeBtn);
   contextMirror(driveBtn);
+  contextMirror(clusterBtn);
   contextMirror(addressBtn);
   contextMirror(spotBtn);
 
@@ -5232,7 +5719,10 @@ async function mountMapEditor(doc){
     if (drawingMode) finishDrawing(false);
     await waitForTiles(8000);
     // 목록에서 감춘 묶음은 그림에도 없어야 한다 — 화면에 없는 표시의 이름만 떠 있으면 읽을 수 없다.
-    const labels = model.markers.filter(m => m.label && markerVisible(m)).map((m) => {
+    /* 묶여 숫자로 보이는 표시의 이름을 전부 다시 새기면 클러스터의 뜻이 사라진다. 실제로 핀이
+       보이는 표시만 이름을 새기고, 묶음 숫자는 화면의 divIcon 그대로 캡처한다. */
+    const labels = model.markers.filter(m => m.label && markerVisible(m)
+      && markerLayers.get(m.id) && map.hasLayer(markerLayers.get(m.id))).map((m) => {
       const point = map.latLngToContainerPoint([m.lat, m.lng]);
       return { x:point.x, y:point.y, text:m.label };
     });
@@ -5682,6 +6172,9 @@ if (typeof module !== "undefined" && module.exports){
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
     mapCsvLooksLikeTimeline, mapTimelineEventsToPending,
     mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows,
+    mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport,
+    mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl,
+    MAP_GEO_IMPORT_MAX_ITEMS,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,
     mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel,

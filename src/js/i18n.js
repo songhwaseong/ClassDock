@@ -1906,6 +1906,14 @@
     "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
     "CSV 들이기": "Import CSV",
     "표 들이기": "Import table",
+    "자료 들이기": "Import data",
+    "지도 자료 읽는 중…": "Reading map data…",
+    "지도 자료 내보내기": "Export map data",
+    "🧩 표시 묶기": "🧩 Cluster pins",
+    "🚶 로드뷰": "🚶 Roadview",
+    "▣ 영역 표시 분석": "▣ Analyze pins in area",
+    "멀리서 겹치는 표시를 숫자 묶음으로 보여 줍니다 — 묶음을 누르면 펼쳐집니다.":
+      "Shows overlapping pins as numbered clusters when zoomed out — press a cluster to expand it.",
     "연대표 표": "Timeline table",
     "CSV·엑셀(.xlsx)에서 사건 가져오기": "Import events from a CSV or Excel (.xlsx) file",
     "지도 CSV 또는 연대표 CSV·엑셀(.xlsx)에서 표시 추가 — 좌표 없이 장소·주소만 있어도 됩니다":
@@ -2064,10 +2072,19 @@
     "시군구별 표시 수": "Pins by district",
     "CSV 내보내기": "Export CSV",
     "지도 표시를 Excel에서 열 수 있는 CSV로 저장": "Save map pins as a CSV that opens in Excel",
+    "표시·경로·영역을 다른 지도 프로그램에서 열 수 있는 파일로 저장합니다. 외부 API나 키를 사용하지 않습니다.":
+      "Save pins, routes, and areas to a file that other map programs can open. No external API or key is used.",
+    "표시·경로·영역과 색·메모를 가장 잘 보존": "Best preserves pins, routes, areas, colors, and notes",
+    "GPS 기기·운동 기록 앱과 경로 교환": "Exchange routes with GPS devices and activity apps",
+    "Google Earth 등에서 표시·경로·영역 열기": "Open pins, routes, and areas in apps such as Google Earth",
     "🧾 표로 메모": "🧾 Table to notes",
     "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다":
       "Put the same table into Notes instead of a file — from there you can save as CSV, open the table editor, or copy",
     "영역 이름": "Area name",
+    "이름 없는 영역": "Unnamed area",
+    "영역 표시 분석": "Pins in area",
+    "이 영역 안에는 표시가 없습니다.": "There are no pins inside this area.",
+    "영역": "Area",
     "경로 이름": "Route name",
     "도형 색상": "Shape color",
     "도형 지우기": "Delete shape",
@@ -2243,6 +2260,7 @@
     "이 지도 파일에 넣은 사용자 이미지를 지울까요?": "Remove the custom image embedded in this map file?",
     "CSV 첫 줄에 위도·경도 열이 필요합니다.": "The first CSV row must include latitude and longitude columns.",
     "CSV 파일은 5MB 이하로 골라 주세요.": "Choose a CSV file no larger than 5 MB.",
+    "CSV·GeoJSON·GPX·KML 파일은 5MB 이하로 골라 주세요.": "Choose a CSV, GeoJSON, GPX, or KML file no larger than 5 MB.",
     "Excel 파일은 50MB 이하로 골라 주세요.": "Choose an Excel file no larger than 50 MB.",
     "엑셀·연대표 표를 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.":
       "Timeline table or Excel support isn't ready yet. Try again in a moment.",
@@ -2251,11 +2269,22 @@
     "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다.":
       "The first row needs map latitude/longitude or address columns, or timeline Start and Title columns.",
     "표에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the table.",
+    "지도 자료에서 사용할 수 있는 표시·경로·영역을 찾지 못했습니다.": "No usable pins, routes, or areas were found in the map data.",
     "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the CSV.",
     "CSV에서 표시 {count}개를 추가했습니다": "Added {count} pins from the CSV",
     " · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외":
       " · skipped {skipped} invalid coordinates · skipped {truncated} above the limit",
     "내보낼 표시가 없습니다.": "There are no pins to export.",
+    "내보낼 표시·도형이 없습니다.": "There are no pins or shapes to export.",
+    "면적 {area} 안에 표시 {count}개가 있습니다.": "There are {count} pins inside the {area} area.",
+    "목록은 앞 {count}개만 보여 줍니다. CSV에는 모두 담깁니다.": "Only the first {count} are shown. The CSV includes all of them.",
+    "영역 안 표시 {count}개를 메모 표로 보냈어요.": "Sent {count} pins in the area to a table in Notes.",
+    "표시·도형 {count}개를 {format}으로 내보냈습니다": "Exported {count} pins and shapes as {format}",
+    "표시 {count}개": "{count} pins",
+    "표시 {count}개 — 눌러서 펼치기": "{count} pins — press to expand",
+    " · 읽지 못한 항목 {skipped}개 · 상한 초과 {truncated}개":
+      " · {skipped} unreadable items · {truncated} above the limit",
+    "지도 자료에서 표시·도형 {count}개를 추가했습니다": "Added {count} pins and shapes from the map data",
     "표시 {count}개를 CSV로 내보냈습니다": "Exported {count} pins to CSV",
     "표시 {count}개를 메모 표로 보냈어요 — 메모에서 CSV로 저장하거나 표 편집기로 열 수 있어요.":
       "Sent {count} pins to a table in Notes — you can save it as CSV or open it in the table editor there.",

@@ -6,11 +6,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadMapViewer(){
+function loadMapViewer(windowOverrides){
   const context = {
     console, Blob, URL, Map, Set, Date, Math, JSON,
     setTimeout, clearTimeout,
-    document:{}, window:{}, location:{ protocol:"file:" }, navigator:{ onLine:true }
+    document:{}, window:Object.assign({}, windowOverrides || {}), location:{ protocol:"file:" }, navigator:{ onLine:true }
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -25,6 +25,9 @@ function loadMapViewer(){
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
       , mapCsvRows, mapCsvLooksLikeTimeline, mapTimelineEventsToPending
       , mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
+      , mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport
+      , mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl, mapOpenKakaoRoadview
+      , MAP_ROADVIEW_WINDOW_NAME, MAP_ROADVIEW_WINDOW_FEATURES, MAP_GEO_IMPORT_MAX_ITEMS
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
@@ -181,15 +184,18 @@ test("연대표 CSV를 지도 CSV보다 먼저 판별하고 사건 정보를 주
   assert.equal(converted.pending[1].query, "서울광장");
 });
 
-test("지도 표 들이오기는 연대표 CSV와 XLSX 공용 해석기를 연결한다", () => {
+test("지도 자료 들이오기는 표와 키 없는 지도 파일 공용 해석기를 연결한다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  assert.match(source, /csvImportBtn\.textContent = "표 들이기"/);
-  assert.match(source, /csvInput\.accept = "\.csv,\.xlsx,/);
+  assert.match(source, /csvImportBtn\.textContent = "자료 들이기"/);
+  assert.match(source, /csvInput\.accept = "\.csv,\.xlsx,\.geojson,\.json,\.gpx,\.kml,/);
   assert.match(source, /isSheet \|\| mapCsvLooksLikeTimeline\(csvText\)/);
   assert.match(source, /globalThis\.timelineEventsFromXlsx/);
   assert.match(source, /globalThis\.timelineEventsFromCsv/);
   assert.match(source, /timelineApi\.sorted\(result\.events\)/);
   assert.match(source, /runPendingGeocode\(imported\.pending, timelineOptions \|\| \{\}\)/);
+  assert.match(source, /mapGeoJsonImport\(text\)/);
+  assert.match(source, /mapGpxImport\(text\)/);
+  assert.match(source, /mapKmlImport\(text\)/);
 });
 
 test("확장 지도 UI는 사용자 이미지·거리선·면적 영역·CSV를 실제 편집 경로에 연결한다", () => {
@@ -405,6 +411,91 @@ test("지도 문서를 닫으면 Leaflet·옵저버·전역 키 리스너를 함
 
 /* 런처가 둘(C#·Go)이라 목록이 갈라지면 그 배경지도만 한쪽에서 조용히 회색으로 남는다.
    두 파일을 함께 읽어 같은 허용 목록인지 확인한다. */
+test("GeoJSON은 표시·경로·영역을 키 없이 왕복한다", () => {
+  const api = loadMapViewer();
+  const imported = api.mapGeoJsonImport(JSON.stringify({ type:"FeatureCollection", features:[
+    { type:"Feature", properties:{ name:"학교", description:"정문", color:"blue" },
+      geometry:{ type:"Point", coordinates:[127.1, 37.5] } },
+    { type:"Feature", properties:{ name:"답사로" },
+      geometry:{ type:"LineString", coordinates:[[127.1,37.5],[127.2,37.6]] } },
+    { type:"Feature", properties:{ name:"조사 범위", color:"#16a34a" },
+      geometry:{ type:"Polygon", coordinates:[[[127,37],[128,37],[128,38],[127,37]]] } }
+  ] }));
+  assert.equal(imported.markers.length, 1);
+  assert.equal(imported.markers[0].label, "학교");
+  assert.equal(imported.markers[0].color, "blue");
+  assert.equal(imported.shapes.length, 2);
+  assert.equal(imported.shapes[0].type, "line");
+  assert.equal(imported.shapes[1].type, "area");
+  const back = api.mapGeoJsonImport(api.mapGeoJsonExport(imported.markers, imported.shapes));
+  assert.equal(back.markers.length, 1);
+  assert.equal(back.shapes.length, 2);
+  assert.equal(back.shapes[1].label, "조사 범위");
+});
+
+test("GPX·KML은 GPS 경로와 지도 영역을 오프라인으로 왕복한다", () => {
+  const api = loadMapViewer();
+  const gpx = api.mapGpxImport('<?xml version="1.0"?><gpx><wpt lat="37.5" lon="127.1"><name>출발 &amp; 도착</name><desc>메모</desc></wpt><trk><name>답사</name><trkseg><trkpt lat="37.5" lon="127.1"/><trkpt lat="37.6" lon="127.2"/></trkseg></trk></gpx>');
+  assert.equal(gpx.markers[0].label, "출발 & 도착");
+  assert.equal(gpx.markers[0].note, "메모");
+  assert.equal(gpx.shapes[0].label, "답사");
+  assert.equal(api.mapGpxImport(api.mapGpxExport(gpx.markers, gpx.shapes, "우리 지도")).shapes.length, 1);
+
+  const area = api.mapKmlImport('<?xml version="1.0"?><kml><Document><Placemark><name>범위</name><Polygon><outerBoundaryIs><LinearRing><coordinates>127,37 128,37 128,38 127,37</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark></Document></kml>');
+  assert.equal(area.shapes.length, 1);
+  assert.equal(area.shapes[0].type, "area");
+  assert.equal(api.mapKmlImport(api.mapKmlExport([], area.shapes, "범위 지도")).shapes[0].label, "범위");
+});
+
+test("면적 경계 안 표시와 화면 클러스터를 API 없이 계산한다", () => {
+  const api = loadMapViewer();
+  const polygon = [[37,127],[37,128],[38,128],[38,127]];
+  assert.equal(api.mapPointInPolygon([37.5,127.5], polygon), true);
+  assert.equal(api.mapPointInPolygon([37,127.5], polygon), true, "경계 위 점도 포함");
+  assert.equal(api.mapPointInPolygon([39,127.5], polygon), false);
+  const shape = { type:"area", points:polygon };
+  const markers = [{ lat:37.5, lng:127.5 }, { lat:39, lng:127.5 }];
+  assert.equal(api.mapMarkersInArea(markers, shape).length, 1);
+  const groups = api.mapClusterPixelGroups([{ id:"a", x:5, y:5 }, { id:"b", x:20, y:18 }, { id:"c", x:150, y:5 }], 72);
+  assert.deepEqual(Array.from(groups, group => group.length), [2, 1]);
+});
+
+test("로드뷰는 별도 키 없이 좌표 공개 URL을 전용 창 하나에서 재사용한다", () => {
+  let openCount = 0;
+  let focusCount = 0;
+  const roadviewWindow = { closed:false, location:"", opener:{}, focus(){ focusCount += 1; } };
+  const api = loadMapViewer({
+    open(url, name, features){
+      openCount += 1;
+      roadviewWindow.location = url;
+      assert.equal(name, "ClassDockRoadview");
+      assert.match(features, /popup=yes/);
+      return roadviewWindow;
+    }
+  });
+  assert.equal(api.mapKakaoRoadviewUrl(37.5, 127.1), "https://map.kakao.com/link/roadview/37.500000,127.100000");
+  assert.equal(api.mapKakaoRoadviewUrl(999, 127), "");
+  assert.equal(api.mapOpenKakaoRoadview(37.5, 127.1), true);
+  assert.equal(api.mapOpenKakaoRoadview(37.6, 127.2), true);
+  assert.equal(openCount, 1, "두 번째 좌표도 처음 연 전용 창을 써야 한다");
+  assert.equal(roadviewWindow.location, "https://map.kakao.com/link/roadview/37.600000,127.200000");
+  assert.equal(roadviewWindow.opener, null);
+  assert.equal(focusCount, 2);
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /roadviewBtn\.addEventListener\("click", \(\) => mapOpenKakaoRoadview\(marker\.lat, marker\.lng\)\)/);
+  assert.match(source, /mapOpenKakaoRoadview\(spot\.lat, spot\.lng\)/);
+  assert.match(source, /contextItem\("🚶 이 자리 로드뷰"/);
+  assert.match(source, /MAP_ROADVIEW_WINDOW_NAME = "ClassDockRoadview"/);
+  assert.match(source, /if \(!_mapRoadviewWindow\.closed\)/);
+  assert.match(source, /_mapRoadviewWindow\.location = url/);
+  assert.match(source, /_mapRoadviewWindow\.focus\(\)/);
+  assert.match(source, /window\.open\(url, MAP_ROADVIEW_WINDOW_NAME, MAP_ROADVIEW_WINDOW_FEATURES\)/);
+  assert.doesNotMatch(source, /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /mapClusterPixelGroups\(items, 72\)/);
+  assert.match(source, /openMapAreaStats\(shape, model\.markers\)/);
+  assert.match(source, /mapGeoJsonImport\(csvText\)/);
+});
+
 test("두 런처의 타일 허용 목록은 서로 같다", () => {
   const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
   const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
@@ -1856,9 +1947,10 @@ test("목록에서 감춘 묶음은 지도에서도 그림에서도 함께 빠�
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   const visibility = /const applyMarkerVisibility = \(\) => \{([\s\S]*?)\n  \};/.exec(source);
   assert.ok(visibility);
-  assert.match(visibility[1], /map\.hasLayer\(layer\)/);
+  assert.match(visibility[1], /redrawClusters\(\)/);
+  assert.match(source, /redrawClusters = \(\) => \{[\s\S]*?markerVisible\(marker\)[\s\S]*?map\.hasLayer\(layer\)/);
   // 화면에 없는 표시의 이름만 그림에 새겨지면 읽을 수 없다.
-  assert.match(source, /model\.markers\.filter\(m => m\.label && markerVisible\(m\)\)/);
+  assert.match(source, /model\.markers\.filter\(m => m\.label && markerVisible\(m\)[\s\S]*?map\.hasLayer\(markerLayers\.get\(m\.id\)\)\)/);
   // 감춰 둔 묶음에 새 표시를 찍으면 눌러도 아무 일이 없는 것처럼 보인다.
   assert.match(source, /hiddenSources\.delete\(marker\.source \|\| ""\)/);
   // 목록은 내용이 바뀌는 길 한 곳(touch)에서만 다시 그린다 — 빠뜨리는 길이 생기지 않게.
