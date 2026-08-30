@@ -9,7 +9,7 @@
    설계: docs/악보-설계.md */
 
 const MUSIC_FORMAT = "classdock-sheet";
-const MUSIC_VERSION = 8;
+const MUSIC_VERSION = 9;
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
@@ -62,8 +62,21 @@ const MUSIC_KEYS = {
 
 const MUSIC_TIMBRES = [
   "piano", "guitar", "xylophone", "harp", "flute", "clarinet",
-  "triangle", "sine", "square"
+  "synth", "triangle", "sine", "square"
 ];
+const MUSIC_SYNTH_WAVEFORMS = Object.freeze(["sine", "triangle", "square", "sawtooth"]);
+const MUSIC_SYNTH_PRESETS = Object.freeze({
+  lead:Object.freeze({ label:"리드", waveform:"sawtooth", attack:0.02, decay:0.12, sustain:0.72,
+    release:0.18, cutoff:4200, resonance:5, chorus:0.18, delay:0.12, reverb:0.12 }),
+  pad:Object.freeze({ label:"패드", waveform:"triangle", attack:0.45, decay:0.6, sustain:0.78,
+    release:1.2, cutoff:2600, resonance:2, chorus:0.35, delay:0.08, reverb:0.45 }),
+  bass:Object.freeze({ label:"베이스", waveform:"square", attack:0.008, decay:0.18, sustain:0.55,
+    release:0.12, cutoff:700, resonance:8, chorus:0, delay:0, reverb:0.04 }),
+  pluck:Object.freeze({ label:"플럭", waveform:"sawtooth", attack:0.003, decay:0.12, sustain:0.08,
+    release:0.15, cutoff:3200, resonance:4, chorus:0.08, delay:0.18, reverb:0.14 }),
+  organ:Object.freeze({ label:"오르간", waveform:"triangle", attack:0.02, decay:0.08, sustain:0.9,
+    release:0.25, cutoff:5200, resonance:1, chorus:0.25, delay:0, reverb:0.2 })
+});
 const MUSIC_DRUM_STYLE_SPECS = Object.freeze({
   off:{ label:"끔", times:null },
   basic:{ label:"기본 드럼", times:null },
@@ -247,6 +260,7 @@ function musicEmpty(title){
     clef:"treble",
     grandStaff:false,
     timbre:"piano",
+    synth:musicSynthSettings("lead"),
     drumStyle:"off",
     drumVolume:MUSIC_DEFAULT_DRUM_VOLUME,
     accompanimentMode:"drums",
@@ -265,12 +279,37 @@ function musicClampPartVolume(value){
   return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : MUSIC_DEFAULT_PART_VOLUME;
 }
 
+function musicSynthNumber(value, min, max, fallback){
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function musicSynthSettings(value){
+  const raw = typeof value === "string" ? { preset:value } : (value && typeof value === "object" ? value : {});
+  const namedPreset = Object.prototype.hasOwnProperty.call(MUSIC_SYNTH_PRESETS, raw.preset) ? raw.preset : "lead";
+  const base = MUSIC_SYNTH_PRESETS[namedPreset];
+  return {
+    preset:raw.preset === "custom" ? "custom" : namedPreset,
+    waveform:MUSIC_SYNTH_WAVEFORMS.includes(raw.waveform) ? raw.waveform : base.waveform,
+    attack:musicSynthNumber(raw.attack, 0.001, 2, base.attack),
+    decay:musicSynthNumber(raw.decay, 0.001, 2, base.decay),
+    sustain:musicSynthNumber(raw.sustain, 0, 1, base.sustain),
+    release:musicSynthNumber(raw.release, 0.01, 3, base.release),
+    cutoff:musicSynthNumber(raw.cutoff, 100, 12000, base.cutoff),
+    resonance:musicSynthNumber(raw.resonance, 0, 20, base.resonance),
+    chorus:musicSynthNumber(raw.chorus, 0, 1, base.chorus),
+    delay:musicSynthNumber(raw.delay, 0, 1, base.delay),
+    reverb:musicSynthNumber(raw.reverb, 0, 1, base.reverb)
+  };
+}
+
 function musicPart(name, opts){
   const options = opts || {};
   return {
     id:typeof options.id === "string" && options.id ? options.id.slice(0, 80) : musicId("part"),
     name:musicClampText(name || options.name || "악기", 80) || "악기",
     timbre:MUSIC_TIMBRES.includes(options.timbre) ? options.timbre : "piano",
+    synth:musicSynthSettings(options.synth),
     volume:musicClampPartVolume(options.volume),
     muted:options.muted === true,
     grandStaff:options.grandStaff === true,
@@ -303,6 +342,7 @@ function musicSyncActivePart(sheet){
   const active = musicActivePart(sheet);
   if (!active) return null;
   active.timbre = MUSIC_TIMBRES.includes(sheet.timbre) ? sheet.timbre : active.timbre;
+  active.synth = musicSynthSettings(sheet.synth || active.synth);
   active.grandStaff = sheet.grandStaff === true;
   active.measures = Array.isArray(sheet.measures) && sheet.measures.length ? sheet.measures : [musicMeasure()];
   const sourceMeasures = active.measures;
@@ -324,6 +364,7 @@ function musicSelectPart(sheet, partId){
   sheet.activePartId = part.id;
   sheet.measures = part.measures;
   sheet.timbre = part.timbre;
+  sheet.synth = musicSynthSettings(part.synth);
   sheet.grandStaff = part.grandStaff === true;
   return part;
 }
@@ -337,7 +378,8 @@ function musicAddPart(sheet, opts){
   const measures = sourceMeasures.map((measure, index) => musicCopyMeasureStructure(measure, musicMeasure(), index));
   const part = musicPart(options.name || `악기 ${existing.length + 1}`, {
     timbre:options.timbre || "piano", volume:options.volume, muted:false,
-    grandStaff:options.grandStaff === true, measures
+    grandStaff:options.grandStaff === true, synth:options.synth,
+    measures
   });
   if (!Array.isArray(sheet.parts)) sheet.parts = [];
   sheet.parts.push(part);
@@ -358,6 +400,7 @@ function musicRemovePart(sheet, partId){
   sheet.activePartId = next.id;
   sheet.measures = next.measures;
   sheet.timbre = next.timbre;
+  sheet.synth = musicSynthSettings(next.synth);
   sheet.grandStaff = next.grandStaff === true;
   return removed;
 }
@@ -1130,6 +1173,7 @@ function musicPartSheet(sheet, part){
     parts:undefined, activePartId:undefined,
     measures:part.measures,
     timbre:part.timbre,
+    synth:musicSynthSettings(part.synth),
     grandStaff:part.grandStaff === true
   });
 }
@@ -1157,6 +1201,7 @@ function musicTimeline(sheet, opts){
       events.push(Object.assign({}, event, {
         gain:event.gain * volume,
         timbre:part.timbre,
+        synth:musicSynthSettings(part.synth),
         partId:part.id,
         partName:part.name
       }));
@@ -1658,6 +1703,7 @@ function musicNormalizePart(raw, fallbackName){
   return musicPart(musicClampText(raw.name, 80) || fallbackName || "악기", {
     id:raw.id,
     timbre:MUSIC_TIMBRES.includes(raw.timbre) ? raw.timbre : "piano",
+    synth:raw.synth,
     volume:raw.volume,
     muted:raw.muted === true,
     grandStaff,
@@ -1709,6 +1755,7 @@ function musicParse(text){
     // v1의 triangle 은 당시 새 악보 기본값이었다. v2에서 실제 피아노가 기본이 되었으므로
     // 기존 악보도 별도 설정 없이 개선된 소리를 듣도록 자동 이전한다.
     timbre:activePart.timbre,
+    synth:musicSynthSettings(activePart.synth),
     drumStyle:musicDrumStyle(raw.drumStyle),
     drumVolume:musicClampDrumVolume(raw.drumVolume),
     accompanimentMode:musicAccompanimentMode(raw.accompanimentMode),
@@ -1789,6 +1836,7 @@ function musicSerialize(sheet){
     clef:"treble",
     grandStaff:model.grandStaff === true,
     timbre:MUSIC_TIMBRES.includes(model.timbre) ? model.timbre : "piano",
+    synth:musicSynthSettings(model.synth),
     drumStyle:musicDrumStyle(model.drumStyle),
     drumVolume:musicClampDrumVolume(model.drumVolume),
     accompanimentMode:musicAccompanimentMode(model.accompanimentMode),
@@ -1855,6 +1903,7 @@ function musicSerialize(sheet){
     id:String(part.id || musicId("part")),
     name:musicClampText(part.name, 80) || "악기",
     timbre:MUSIC_TIMBRES.includes(part.timbre) ? part.timbre : "piano",
+    synth:musicSynthSettings(part.synth),
     volume:musicClampPartVolume(part.volume),
     muted:part.muted === true,
     grandStaff:part.grandStaff === true,

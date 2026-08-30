@@ -467,9 +467,27 @@ test("악보 음량·음소거를 조절하고 음색을 고르면 바로 미리
   assert.match(editorSource, /MNMusicAudio\.setVolume\(Number\(volumeInput\.value\) \/ 100\)/);
   assert.match(editorSource, /MNMusicAudio\.setMuted\(!MNMusicAudio\.muted\(\)\)/);
   assert.match(editorSource, /muteBtn\.textContent = isMuted \|\| MNMusicAudio\.getVolume\(\) === 0 \? "🔇" : "🔊"/);
-  assert.match(editorSource, /MNMusicAudio\.previewNote\(\{ rest:false, step:"C", octave:4, alter:keyAlter \}, sheet\.timbre\)/);
+  assert.match(editorSource, /previewMusicNote\(\{ rest:false, step:"C", octave:4, alter:keyAlter \}, sheet\.timbre\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-volume-range\{[^}]*accent-color:var\(--accent\)/);
+});
+
+test("파트별 신디사이저는 프리셋·파형·ADSR·필터·이펙트를 접이식 패널에서 조절한다", () => {
+  assert.match(editorSource, /synth:"신디사이저"/);
+  assert.match(editorSource, /synthPanel\.className = "music-synth-panel music-toolvis-timbre"/);
+  assert.match(editorSource, /for \(const \[value, spec\] of Object\.entries\(MUSIC_SYNTH_PRESETS\)\)/);
+  assert.match(editorSource, /for \(const waveform of MUSIC_SYNTH_WAVEFORMS\)/);
+  for (const key of ["attack", "decay", "sustain", "release", "cutoff", "resonance", "chorus", "delay", "reverb"]){
+    assert.ok(editorSource.includes(`makeSynthRange("${key}"`), `${key} 조절기가 있어야 한다`);
+  }
+  assert.match(editorSource, /settings\.preset = "custom"/);
+  assert.match(editorSource, /part\.synth = normalized/);
+  assert.match(editorSource, /MNMusicAudio\.previewNote\(note, timbre, \{ synth:musicSynthSettings\(sheet\.synth\) \}\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-synth-controls\{display:grid/);
+  assert.match(css, /grid-template-columns:repeat\(auto-fit,minmax\(min\(210px,100%\),1fr\)\)/);
+  assert.match(css, /\.music-synth-range\{min-width:0;grid-template-columns:auto minmax\(70px,1fr\) 44px\}/);
+  assert.match(css, /\.music-synth-range input\{[^}]*accent-color:var\(--accent\)/);
 });
 
 test("줄 나누기는 화면 폭을 따라간다", () => {
@@ -558,7 +576,7 @@ test("일반 상태에서 음표를 위아래로 드래그하면 줄·칸 단위
   assert.match(editorSource, /noteDrag\.note\.step = movedPitches\[0\]\.step/);
   assert.match(editorSource, /noteDrag\.note\.octave = movedPitches\[0\]\.octave/);
   assert.match(editorSource, /음높이 이동: /);
-  assert.match(editorSource, /if \(pitchChanged\) MNMusicAudio\.previewNote\(draggedNote, sheet\.timbre\)/);
+  assert.match(editorSource, /if \(pitchChanged\) previewMusicNote\(draggedNote, sheet\.timbre\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-score\.is-note-entry \[data-note-id\]:not\(\.is-rest\)\{cursor:ns-resize\}/);
   assert.match(css, /\.music-score\.is-pitching,.music-score\.is-pitching \*\{cursor:ns-resize!important/);

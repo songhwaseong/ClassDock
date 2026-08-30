@@ -30,7 +30,8 @@ function loadMusicAudio(extras){
 
 // 오실레이터·게인 호출을 그대로 받아 적는 가짜 컨텍스트.
 function fakeContext(){
-  const ctx = { currentTime:0, oscillators:[], bufferSources:[], gains:[] };
+  const ctx = { currentTime:0, sampleRate:44100, oscillators:[], bufferSources:[], gains:[],
+    filters:[], delays:[], convolvers:[] };
   ctx.createOscillator = () => {
     const osc = { type:"", startedAt:null, stoppedAt:null, frequencyAt:[], connected:0 };
     osc.frequency = { setValueAtTime:(value, time) => osc.frequencyAt.push({ value, time }) };
@@ -60,6 +61,30 @@ function fakeContext(){
     gain.connect = () => { gain.connected++; };
     ctx.gains.push(gain);
     return gain;
+  };
+  ctx.createBiquadFilter = () => {
+    const filter = { type:"", connected:0, frequencies:[], resonances:[] };
+    filter.frequency = { setValueAtTime:(value, time) => filter.frequencies.push({ value, time }) };
+    filter.Q = { setValueAtTime:(value, time) => filter.resonances.push({ value, time }) };
+    filter.connect = () => { filter.connected++; };
+    ctx.filters.push(filter);
+    return filter;
+  };
+  ctx.createDelay = () => {
+    const delay = { connected:0, times:[] };
+    delay.delayTime = { setValueAtTime:(value, time) => delay.times.push({ value, time }) };
+    delay.connect = () => { delay.connected++; };
+    ctx.delays.push(delay);
+    return delay;
+  };
+  ctx.createConvolver = () => {
+    const convolver = { buffer:null, connected:0, connect:() => { convolver.connected++; } };
+    ctx.convolvers.push(convolver);
+    return convolver;
+  };
+  ctx.createBuffer = (_channels, length) => {
+    const data = new Float32Array(length);
+    return { getChannelData:() => data };
   };
   return ctx;
 }
@@ -134,6 +159,25 @@ test("엔벨로프는 0에서 시작해 0으로 끝나고, 정지는 여운 뒤�
   // 소리를 끊는 시점은 여운(release)이 끝난 뒤여야 한다.
   const release = api.MNMusicAudio.ADSR.release;
   assert.ok(ctx.oscillators[0].stoppedAt >= 0.6 + release);
+});
+
+test("신디사이저는 파트 설정대로 ADSR·필터·코러스·딜레이·리버브를 예약한다", () => {
+  const api = loadMusicAudio();
+  const ctx = fakeContext();
+  const settings = {
+    preset:"custom", waveform:"sawtooth", attack:0.08, decay:0.2, sustain:0.6,
+    release:0.7, cutoff:1800, resonance:9, chorus:0.4, delay:0.3, reverb:0.5
+  };
+  const node = api.MNMusicAudio.scheduleSynthNote(ctx, {}, 440, 2, 1, settings, 0.8);
+  assert.equal(node.osc.type, "sawtooth");
+  assert.equal(node.osc.frequencyAt[0].value, 440);
+  assert.equal(ctx.filters[0].type, "lowpass");
+  assert.equal(ctx.filters[0].frequencies[0].value, 1800);
+  assert.equal(ctx.filters[0].resonances[0].value, 9);
+  assert.equal(ctx.delays.length, 2, "코러스와 딜레이가 각각 지연 노드를 사용한다");
+  assert.equal(ctx.convolvers.length, 1);
+  assert.equal(ctx.gains[0].envelope.at(-1).time, 3.7);
+  assert.ok(node.stopAt > 3.7, "이펙트 꼬리까지 재생 상태가 유지되어야 한다");
 });
 
 test("아주 짧은 음표에서도 엔벨로프가 음 길이를 넘지 않는다", () => {

@@ -15,7 +15,8 @@ function loadMusic(){
     ;globalThis.__music = {
       musicEmpty, musicExampleSheet, musicNote, musicRest, musicMeasure, musicParse, musicSerialize,
       musicPart, musicParts, musicActivePart, musicAddPart, musicRemovePart, musicSelectPart,
-      musicSyncActivePart, musicClampPartVolume,
+      musicSyncActivePart, musicClampPartVolume, musicSynthSettings,
+      MUSIC_SYNTH_PRESETS, MUSIC_SYNTH_WAVEFORMS,
       musicNoteTicks, musicMeasureTicks, musicMeasureUsedTicks, musicValidate, musicCanFit, musicMeasureProgress,
       musicMidiNumber, musicFrequency, musicNoteFrequency, musicNoteName,
       musicVexNote, musicTimeline, MUSIC_TICKS_PER_QUARTER,
@@ -114,6 +115,34 @@ test("악기 파트를 추가·전환·삭제해도 각 파트의 음표와 설�
   assert.equal(api.musicParts(sheet).length, 1);
   assert.equal(sheet.measures[0].notes[0].step, "C");
   assert.equal(api.musicRemovePart(sheet, piano.id), null, "마지막 파트는 삭제하지 않는다");
+});
+
+test("신디사이저 프리셋과 사용자 음색은 파트별로 안전하게 저장된다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("신디 합주");
+  const synth = api.musicActivePart(sheet);
+  synth.timbre = "synth";
+  sheet.timbre = "synth";
+  sheet.synth = {
+    preset:"custom", waveform:"sawtooth", attack:-1, decay:0.4, sustain:1.4,
+    release:1.1, cutoff:50000, resonance:7.5, chorus:0.3, delay:0.2, reverb:0.45
+  };
+  const reopened = api.musicParse(api.musicSerialize(sheet));
+  const restored = api.musicActivePart(reopened);
+  assert.equal(restored.timbre, "synth");
+  assert.equal(restored.synth.preset, "custom");
+  assert.equal(restored.synth.waveform, "sawtooth");
+  assert.equal(restored.synth.attack, 0.001);
+  assert.equal(restored.synth.sustain, 1);
+  assert.equal(restored.synth.cutoff, 12000);
+  assert.equal(reopened.synth.reverb, 0.45);
+  assert.equal(JSON.parse(api.musicSerialize(reopened)).version, 9);
+
+  const pad = api.musicSynthSettings("pad");
+  assert.equal(pad.waveform, "triangle");
+  assert.ok(pad.attack > api.musicSynthSettings("pluck").attack);
+  assert.deepEqual(Array.from(api.MUSIC_SYNTH_WAVEFORMS), ["sine", "triangle", "square", "sawtooth"]);
+  assert.equal(Object.keys(api.MUSIC_SYNTH_PRESETS).length, 5);
 });
 
 test("다중 파트는 이름·음색·음량·음소거·대보표와 함께 저장되고 옛 악보는 첫 파트가 된다", () => {

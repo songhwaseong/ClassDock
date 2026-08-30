@@ -1267,6 +1267,16 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-parts .music-btn{min-width:29px;padding:5px 7px}
   .music-part-volume{width:64px;accent-color:var(--accent);cursor:pointer}
   .music-part-volume-label{width:34px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .music-synth-panel{border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 5%,var(--panel));color:var(--ink)}
+  .music-synth-panel[hidden]{display:none}
+  .music-synth-panel summary{padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;user-select:none}
+  .music-synth-panel summary::marker{color:var(--accent)}
+  .music-synth-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:7px 12px;padding:4px 12px 10px}
+  .music-synth-field{display:grid;grid-template-columns:auto minmax(70px,1fr);align-items:center;gap:6px;
+    color:var(--muted);font-size:11px;white-space:nowrap}
+  .music-synth-range{min-width:0;grid-template-columns:auto minmax(70px,1fr) 44px}
+  .music-synth-range input{min-width:64px;width:100%;accent-color:var(--accent);cursor:pointer}
+  .music-synth-range output{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
   .music-meta{font-size:12px;color:var(--muted)}
   .music-btn,.music-save{border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
     padding:6px 10px;font:inherit;font-size:12px;cursor:pointer}
@@ -1356,7 +1366,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-score.is-practice .music-solfege.mp-bad{fill:#dc2626}
   /* 연습 중에는 머리말·도구상자를 통째로 잠근다. 교본이 바뀌면 진도가 어긋난다.
      '쉬운 입력'(도레미 버튼)과 재생 바는 살려 둔다 — 거기서 따라치기를 끄고 켠다. */
-  .music-doc.is-practice .music-bar,.music-doc.is-practice .music-tools{opacity:.45;pointer-events:none}
+  .music-doc.is-practice .music-bar,.music-doc.is-practice .music-synth-panel,
+  .music-doc.is-practice .music-tools{opacity:.45;pointer-events:none}
   .music-practice{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .music-practice-staff[hidden]{display:none}
   .music-practice-info{color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -1366,7 +1377,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      그대로 받고, 끝나고 되돌아올 때 ResizeObserver 가 알아서 다시 조판한다. */
   .music-ear-controls{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .music-doc.is-eartest .music-score-workspace{display:none}
-  .music-doc.is-eartest .music-bar,.music-doc.is-eartest .music-tools{opacity:.45;pointer-events:none}
+  .music-doc.is-eartest .music-bar,.music-doc.is-eartest .music-synth-panel,
+  .music-doc.is-eartest .music-tools{opacity:.45;pointer-events:none}
   .music-ear{flex:1;min-height:0;overflow:auto;padding:20px 12px;background:var(--panel);color:var(--ink)}
   .music-ear-panel{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px;text-align:center}
   .music-ear-head{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;font-size:13px}

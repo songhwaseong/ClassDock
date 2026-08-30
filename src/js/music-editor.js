@@ -425,6 +425,7 @@ async function mountMusicEditor(doc){
   const TIMBRE_LABELS = {
     piano:"피아노(추천)", guitar:"기타(나일론)",
     xylophone:"실로폰", harp:"하프", flute:"플루트", clarinet:"클라리넷",
+    synth:"신디사이저",
     triangle:"삼각파", sine:"사인파(부드럽게)", square:"사각파(또렷하게)"
   };
   const timbreLabel = (name) => (TIMBRE_LABELS[name] || name).replace(/\(.+\)$/, "");
@@ -440,10 +441,11 @@ async function mountMusicEditor(doc){
     const activePart = musicActivePart(sheet);
     if (activePart) activePart.timbre = sheet.timbre;
     syncPartControls();
+    syncSynthControls();
     touch();
     if (history) history.commit();
     const keyAlter = musicKeyAlterations(sheet.key).C || 0;
-    MNMusicAudio.previewNote({ rest:false, step:"C", octave:4, alter:keyAlter }, sheet.timbre);
+    previewMusicNote({ rest:false, step:"C", octave:4, alter:keyAlter }, sheet.timbre);
   });
   timbreWrap.appendChild(timbreSelect);
 
@@ -602,6 +604,128 @@ async function mountMusicEditor(doc){
   exampleWrap.classList.add("music-toolvis-example");
   bar.append(titleInput, partWrap, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
     toolbarToggleBtn, historyWrap, saveBtn);
+
+  /* ----- 파트별 신디사이저 ----- */
+  const synthPanel = document.createElement("details");
+  synthPanel.className = "music-synth-panel music-toolvis-timbre";
+  synthPanel.open = true;
+  const synthSummary = document.createElement("summary");
+  synthSummary.textContent = "🎛 신디사이저 음색 만들기";
+  const synthControls = document.createElement("div");
+  synthControls.className = "music-synth-controls";
+
+  const synthPresetLabel = document.createElement("label");
+  synthPresetLabel.className = "music-synth-field";
+  synthPresetLabel.append("프리셋");
+  const synthPresetSelect = document.createElement("select");
+  synthPresetSelect.className = "music-timbre";
+  for (const [value, spec] of Object.entries(MUSIC_SYNTH_PRESETS)){
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = spec.label;
+    synthPresetSelect.appendChild(option);
+  }
+  const customPresetOption = document.createElement("option");
+  customPresetOption.value = "custom";
+  customPresetOption.textContent = "사용자 설정";
+  synthPresetSelect.appendChild(customPresetOption);
+  synthPresetLabel.appendChild(synthPresetSelect);
+
+  const synthWaveLabel = document.createElement("label");
+  synthWaveLabel.className = "music-synth-field";
+  synthWaveLabel.append("파형");
+  const synthWaveSelect = document.createElement("select");
+  synthWaveSelect.className = "music-timbre";
+  const synthWaveLabels = { sine:"사인", triangle:"삼각", square:"사각", sawtooth:"톱니" };
+  for (const waveform of MUSIC_SYNTH_WAVEFORMS){
+    const option = document.createElement("option");
+    option.value = waveform;
+    option.textContent = synthWaveLabels[waveform];
+    synthWaveSelect.appendChild(option);
+  }
+  synthWaveLabel.appendChild(synthWaveSelect);
+
+  const synthRanges = new Map();
+  function makeSynthRange(key, label, min, max, step, format){
+    const wrap = document.createElement("label");
+    wrap.className = "music-synth-field music-synth-range";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.setAttribute("aria-label", `신디사이저 ${label}`);
+    const output = document.createElement("output");
+    wrap.append(name, input, output);
+    synthRanges.set(key, { input, output, format });
+    input.addEventListener("input", () => setSynthField(key, Number(input.value), false));
+    input.addEventListener("change", () => setSynthField(key, Number(input.value), true));
+    return wrap;
+  }
+  const seconds = (value) => `${Number(value).toFixed(2)}초`;
+  const percent = (value) => `${Math.round(Number(value) * 100)}%`;
+  const frequency = (value) => Number(value) >= 1000
+    ? `${(Number(value) / 1000).toFixed(Number(value) >= 10000 ? 0 : 1)}kHz`
+    : `${Math.round(Number(value))}Hz`;
+  synthControls.append(synthPresetLabel, synthWaveLabel,
+    makeSynthRange("attack", "Attack", 0.001, 2, 0.01, seconds),
+    makeSynthRange("decay", "Decay", 0.001, 2, 0.01, seconds),
+    makeSynthRange("sustain", "Sustain", 0, 1, 0.01, percent),
+    makeSynthRange("release", "Release", 0.01, 3, 0.01, seconds),
+    makeSynthRange("cutoff", "Cutoff", 100, 12000, 50, frequency),
+    makeSynthRange("resonance", "Resonance", 0, 20, 0.1, (value) => Number(value).toFixed(1)),
+    makeSynthRange("chorus", "코러스", 0, 1, 0.01, percent),
+    makeSynthRange("delay", "딜레이", 0, 1, 0.01, percent),
+    makeSynthRange("reverb", "리버브", 0, 1, 0.01, percent));
+  synthPanel.append(synthSummary, synthControls);
+
+  function previewMusicNote(note, timbre){
+    return MNMusicAudio.previewNote(note, timbre, { synth:musicSynthSettings(sheet.synth) });
+  }
+
+  function setSynthSettings(settings, commit, preview){
+    const normalized = musicSynthSettings(settings);
+    const part = musicActivePart(sheet);
+    sheet.synth = normalized;
+    if (part) part.synth = normalized;
+    syncSynthControls();
+    touch();
+    if (commit && history) history.commit();
+    if (preview){
+      const keyAlter = musicKeyAlterations(sheet.key).C || 0;
+      previewMusicNote({ rest:false, step:"C", octave:4, alter:keyAlter }, "synth");
+    }
+  }
+
+  function setSynthField(key, value, commit){
+    const settings = musicSynthSettings(sheet.synth);
+    settings.preset = "custom";
+    settings[key] = value;
+    setSynthSettings(settings, commit, commit);
+  }
+
+  function syncSynthControls(){
+    const part = musicActivePart(sheet);
+    const settings = musicSynthSettings(part && part.synth || sheet.synth);
+    sheet.synth = settings;
+    if (part) part.synth = settings;
+    synthPresetSelect.value = settings.preset;
+    synthWaveSelect.value = settings.waveform;
+    for (const [key, control] of synthRanges){
+      control.input.value = String(settings[key]);
+      control.output.value = control.format(settings[key]);
+      control.output.textContent = control.output.value;
+    }
+    synthPanel.hidden = sheet.timbre !== "synth" || !toolbarVisible;
+  }
+
+  synthPresetSelect.addEventListener("change", () => {
+    if (synthPresetSelect.value === "custom") return;
+    setSynthSettings(musicSynthSettings(synthPresetSelect.value), true, true);
+  });
+  synthWaveSelect.addEventListener("change", () => setSynthField("waveform", synthWaveSelect.value, true));
 
   /* ----- 도구상자 ----- */
   const tools = document.createElement("div");
@@ -1055,7 +1179,8 @@ async function mountMusicEditor(doc){
   musicXmlInput.accept = ".musicxml,.mxl";
   musicXmlInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
-  root.append(bar, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el, imageReferenceInput, musicXmlInput);
+  root.append(bar, synthPanel, tools, beginnerTools, playBar, notice, scoreWorkspace, earTest.el,
+    imageReferenceInput, musicXmlInput);
 
   /* ----- 도구막대 접기 -----
      악보만 넓게 보고 싶을 때 편집 도구·쉬운 입력·재생 세 줄을 접는다. 접어도 우클릭 메뉴에
@@ -1073,6 +1198,7 @@ async function mountMusicEditor(doc){
   function applyToolbarVisible(){
     bar.hidden = fullscreenNow && !toolbarVisible;
     for (const row of [tools, beginnerTools, playBar]) row.hidden = !toolbarVisible;
+    syncSynthControls();
     toolbarToggleBtn.textContent = toolbarVisible ? "▤ 도구 숨기기" : "▤ 도구 보이기";
     toolbarToggleBtn.title = toolbarVisible
       ? "편집·쉬운 입력·재생 줄을 접고 악보를 넓게 봅니다 (H)"
@@ -1147,6 +1273,7 @@ async function mountMusicEditor(doc){
     partMuteBtn.setAttribute("aria-pressed", part.muted ? "true" : "false");
     partMuteBtn.textContent = part.muted ? "🔇" : "M";
     removePartBtn.disabled = musicParts(sheet).length <= 1;
+    syncSynthControls();
   }
 
   function selectEditorPart(partId, commit){
@@ -1157,6 +1284,7 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    sheet.synth = musicSynthSettings(part.synth);
     grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
     toInput.value = String(sheet.measures.length);
     syncPartControls();
@@ -1177,6 +1305,7 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    sheet.synth = musicSynthSettings(part.synth);
     grandStaffBtn.textContent = "🎼 단일 오선";
     syncPartControls();
     afterEdit();
@@ -1196,6 +1325,7 @@ async function mountMusicEditor(doc){
     activeStaff = "treble";
     activeVoice = 1;
     timbreSelect.value = sheet.timbre;
+    sheet.synth = musicSynthSettings(musicActivePart(sheet).synth);
     grandStaffBtn.textContent = sheet.grandStaff ? "🎹 피아노 대보표" : "🎼 단일 오선";
     syncPartControls();
     afterEdit();
@@ -2022,7 +2152,7 @@ async function mountMusicEditor(doc){
     tool.accidental = null;                    // 임시표는 한 번 쓰면 풀리고 다시 조표를 따른다
     afterEdit();
     select(measureIndex, note.id, { staff:targetStaff, voice:targetVoice });
-    if (!note.rest) MNMusicAudio.previewNote(note, sheet.timbre);
+    if (!note.rest) previewMusicNote(note, sheet.timbre);
   }
 
   function insertSequentialPitch(pitch, forcedAlter, keepRest = false){
@@ -2171,7 +2301,7 @@ async function mountMusicEditor(doc){
     const selected = { measure:selection.measure, staff:selection.staff, voice:selection.voice, id:selection.id };
     afterEdit();
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
-    MNMusicAudio.previewNote(note, sheet.timbre);
+    previewMusicNote(note, sheet.timbre);
   }
 
   function removeSelectedChordPitch(){
@@ -2180,7 +2310,7 @@ async function mountMusicEditor(doc){
     const selected = { measure:selection.measure, staff:selection.staff, voice:selection.voice, id:selection.id };
     afterEdit();
     select(selected.measure, selected.id, { staff:selected.staff, voice:selected.voice });
-    MNMusicAudio.previewNote(note, sheet.timbre);
+    previewMusicNote(note, sheet.timbre);
   }
 
   function nextStaffNote(measureIndex, staff, voice, note){
@@ -2419,7 +2549,7 @@ async function mountMusicEditor(doc){
     const selected = { measure:selection.measure, staff:selection.staff, voice:selection.voice, id:selection.id };
     afterEdit();
     select(selected.measure, note.id, { staff:selected.staff, voice:selected.voice });
-    MNMusicAudio.previewNote(note, sheet.timbre);
+    previewMusicNote(note, sheet.timbre);
   }
 
   function resetSelectedHorizontalPosition(){
@@ -2438,7 +2568,7 @@ async function mountMusicEditor(doc){
       note.alter = (note.alter === alter) ? 0 : alter;
       afterEdit();
       select(selection.measure, note.id, { staff:selection.staff, voice:selection.voice });
-      MNMusicAudio.previewNote(note, sheet.timbre);
+      previewMusicNote(note, sheet.timbre);
       return;
     }
     tool.accidental = (tool.accidental === alter) ? null : alter;
@@ -2857,7 +2987,7 @@ async function mountMusicEditor(doc){
     const items = [];
     if (note){
       items.push(
-        { label:"이 음표 미리 듣기", action:() => MNMusicAudio.previewNote(note, sheet.timbre), disabled:note.rest },
+        { label:"이 음표 미리 듣기", action:() => previewMusicNote(note, sheet.timbre), disabled:note.rest },
         { label:"임시표", children:[
           { label:"♯ 올림표", active:note.alter === 1, action:() => applyAccidental(1), disabled:note.rest },
           { label:"♭ 내림표", active:note.alter === -1, action:() => applyAccidental(-1), disabled:note.rest },
@@ -3144,7 +3274,7 @@ async function mountMusicEditor(doc){
     }
     if (moved){
       if (history && !history.isApplying()) history.commit();
-      if (pitchChanged) MNMusicAudio.previewNote(draggedNote, sheet.timbre);
+      if (pitchChanged) previewMusicNote(draggedNote, sheet.timbre);
       suppressScoreClick = true;
       setTimeout(() => { suppressScoreClick = false; }, 0);
       event.preventDefault();
@@ -3196,7 +3326,7 @@ async function mountMusicEditor(doc){
       fromInput.value = String(measureIndex + 1);
       if (Number(toInput.value) < measureIndex + 1) toInput.value = String(measureIndex + 1);
       const note = selectedNote();
-      if (note && !note.rest) MNMusicAudio.previewNote(note, sheet.timbre);
+      if (note && !note.rest) previewMusicNote(note, sheet.timbre);
       return;
     }
     if (tool.eraser || tool.position) return;
@@ -3400,7 +3530,7 @@ async function mountMusicEditor(doc){
     const pitches = (midis || []).map((midi) => musicPitchFromMidi(midi, flats)).filter(Boolean);
     if (!pitches.length) return;
     const [first, ...rest] = pitches;
-    MNMusicAudio.previewNote({ rest:false, step:first.step, octave:first.octave, alter:first.alter, chord:rest },
+    previewMusicNote({ rest:false, step:first.step, octave:first.octave, alter:first.alter, chord:rest },
       sheet.timbre);
   }
   // 틀린 키를 눌렀을 때 들려줄 높이 — 지금 차례의 음에서 가장 가까운 옥타브로 잡는다.
@@ -3979,7 +4109,7 @@ async function mountMusicEditor(doc){
       const tempoTrack = [0, 0xff, 0x51, 3, (micros >>> 16) & 255, (micros >>> 8) & 255, micros & 255,
         0, 0xff, 0x2f, 0];
       const programs = { piano:0, guitar:24, xylophone:13, harp:46, flute:73, clarinet:71,
-        triangle:80, sine:88, square:81 };
+        synth:81, triangle:80, sine:88, square:81 };
       const partTracks = [];
       musicParts(sheet).forEach((part, partIndex) => {
         const rawChannel = partIndex % 15;
@@ -4048,7 +4178,7 @@ async function mountMusicEditor(doc){
         const keep = { ...selection };
         afterEdit();
         select(keep.measure, keep.id, { staff:keep.staff, voice:keep.voice });
-        MNMusicAudio.previewNote(selected, sheet.timbre);
+        previewMusicNote(selected, sheet.timbre);
       }
     } else {
       tool.rest = false;

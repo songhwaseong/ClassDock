@@ -16,6 +16,7 @@ const MNMusicAudio = (() => {
   const ADSR = { attack:0.012, decay:0.06, sustain:0.7, release:0.09 };
   // 파형마다 체감 크기가 달라 맞춰 준다(square 는 그냥 두면 훨씬 크다).
   const TIMBRE_GAIN = { sine:0.9, triangle:0.9, square:0.4 };
+  const SYNTH_GAIN = 0.58;
   const MASTER_GAIN = 0.35;          // 단선율이라 이 정도면 충분하고 클리핑도 피한다
   const PIANO_GAIN = 0.82;
   const PIANO_ATTACK = 0.004;
@@ -109,6 +110,7 @@ const MNMusicAudio = (() => {
   let previewNodes = [];   // 음표 미리듣기·음감 테스트에서 지금 울리는 노드
   const sampleBufferPromises = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
   const sampleRegistryCaches = Object.fromEntries(Object.keys(SAMPLE_INSTRUMENTS).map((name) => [name, null]));
+  const synthImpulseBuffers = new WeakMap();
 
   function contextClass(){
     if (typeof AudioContext !== "undefined") return AudioContext;
@@ -158,7 +160,7 @@ const MNMusicAudio = (() => {
   }
 
   function timbreOf(name){
-    return SAMPLE_INSTRUMENTS[name] || TIMBRE_GAIN[name] ? name : "piano";
+    return name === "synth" || SAMPLE_INSTRUMENTS[name] || TIMBRE_GAIN[name] ? name : "piano";
   }
 
   function sampleRegistry(timbre){
@@ -239,6 +241,104 @@ const MNMusicAudio = (() => {
     osc.start(start);
     osc.stop(stopAt + 0.01);
     return { source:osc, osc, gain, stopAt };
+  }
+
+  function synthImpulse(target){
+    if (!target || typeof target.createBuffer !== "function") return null;
+    if (synthImpulseBuffers.has(target)) return synthImpulseBuffers.get(target);
+    const sampleRate = Math.max(8000, Number(target.sampleRate) || RENDER_SAMPLE_RATE);
+    const length = Math.max(1, Math.round(sampleRate * 0.9));
+    const buffer = target.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    let seed = 0x12345678;
+    for (let index = 0; index < length; index++){
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+      const noise = ((seed >>> 0) / 0xffffffff) * 2 - 1;
+      data[index] = noise * Math.pow(1 - index / length, 2.4);
+    }
+    synthImpulseBuffers.set(target, buffer);
+    return buffer;
+  }
+
+  function scheduleSynthNote(target, destination, frequency, start, duration, rawSettings, level){
+    const settings = typeof musicSynthSettings === "function" ? musicSynthSettings(rawSettings) : {
+      waveform:"sawtooth", attack:0.02, decay:0.12, sustain:0.72, release:0.18,
+      cutoff:4200, resonance:5, chorus:0.18, delay:0.12, reverb:0.12
+    };
+    const end = start + Math.max(MIN_NOTE_SEC, duration);
+    const attackEnd = Math.min(start + settings.attack, end);
+    const decayEnd = Math.min(attackEnd + settings.decay, end);
+    const releaseEnd = end + settings.release;
+    const peak = SYNTH_GAIN * Math.max(0.1, Math.min(1.3, Number(level) || 1));
+
+    const osc = target.createOscillator();
+    osc.type = settings.waveform;
+    osc.frequency.setValueAtTime(frequency, start);
+    const gain = target.createGain();
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(peak, attackEnd);
+    gain.gain.linearRampToValueAtTime(peak * settings.sustain, decayEnd);
+    gain.gain.setValueAtTime(peak * settings.sustain, end);
+    gain.gain.linearRampToValueAtTime(0, releaseEnd);
+    osc.connect(gain);
+
+    let voiceOut = gain;
+    let filter = null;
+    if (typeof target.createBiquadFilter === "function"){
+      filter = target.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(settings.cutoff, start);
+      filter.Q.setValueAtTime(settings.resonance, start);
+      gain.connect(filter);
+      voiceOut = filter;
+    }
+    voiceOut.connect(destination);
+
+    let lfo = null;
+    if (settings.chorus > 0 && typeof target.createDelay === "function"){
+      const chorusDelay = target.createDelay(0.05);
+      chorusDelay.delayTime.setValueAtTime(0.018, start);
+      const chorusGain = target.createGain();
+      chorusGain.gain.value = settings.chorus * 0.42;
+      voiceOut.connect(chorusDelay);
+      chorusDelay.connect(chorusGain);
+      chorusGain.connect(destination);
+      lfo = target.createOscillator();
+      const lfoDepth = target.createGain();
+      lfo.type = "sine";
+      lfo.frequency.setValueAtTime(0.8, start);
+      lfoDepth.gain.value = 0.0035 * settings.chorus;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(chorusDelay.delayTime);
+      lfo.start(start);
+    }
+    if (settings.delay > 0 && typeof target.createDelay === "function"){
+      const echo = target.createDelay(0.5);
+      echo.delayTime.setValueAtTime(0.24, start);
+      const echoGain = target.createGain();
+      echoGain.gain.value = settings.delay * 0.48;
+      voiceOut.connect(echo);
+      echo.connect(echoGain);
+      echoGain.connect(destination);
+    }
+    if (settings.reverb > 0 && typeof target.createConvolver === "function"){
+      const impulse = synthImpulse(target);
+      if (impulse){
+        const convolver = target.createConvolver();
+        const reverbGain = target.createGain();
+        convolver.buffer = impulse;
+        reverbGain.gain.value = settings.reverb * 0.55;
+        voiceOut.connect(convolver);
+        convolver.connect(reverbGain);
+        reverbGain.connect(destination);
+      }
+    }
+
+    const stopAt = releaseEnd + Math.max(settings.delay > 0 ? 0.24 : 0, settings.reverb * 0.9);
+    osc.start(start);
+    osc.stop(releaseEnd + 0.01);
+    if (lfo){ lfo.stop(stopAt + 0.01); }
+    return { source:osc, osc, gain, filter, lfo, synth:settings, stopAt };
   }
 
   function scheduleMetronomeClick(target, destination, start, accented){
@@ -361,7 +461,7 @@ const MNMusicAudio = (() => {
   const nearestPianoSample = nearestSample; // 기존 테스트·진단 API 호환
   /* 실시간·오프라인 공용 예약. events 는 musicTimeline 이 만든 목록,
      offset 은 "타임라인 0초"가 그 컨텍스트의 몇 초에 해당하는지. */
-  function scheduleInto(target, destination, events, offset, timbre, sampleBuffers){
+  function scheduleInto(target, destination, events, offset, timbre, sampleBuffers, synthSettings){
     const nodes = [];
     const defaultType = timbreOf(timbre);
     for (const event of (events || [])){
@@ -369,7 +469,10 @@ const MNMusicAudio = (() => {
       const type = timbreOf(event.timbre || defaultType);
       const buffers = Array.isArray(sampleBuffers) ? sampleBuffers
         : sampleBuffers && typeof sampleBuffers === "object" ? sampleBuffers[type] : null;
-      const node = SAMPLE_INSTRUMENTS[type] && buffers
+      const node = type === "synth"
+        ? scheduleSynthNote(target, destination, event.frequency, offset + event.start, event.duration,
+            event.synth || synthSettings, event.gain)
+        : SAMPLE_INSTRUMENTS[type] && buffers
         ? scheduleSampleNote(target, destination, event.midi, offset + event.start, event.duration, buffers, type, event.gain)
         : scheduleNote(target, destination, event.frequency, offset + event.start, event.duration,
             SAMPLE_INSTRUMENTS[type] ? "triangle" : type, event.gain);
@@ -461,6 +564,7 @@ const MNMusicAudio = (() => {
     const countStartAt = target.currentTime + START_DELAY;
     const state = {
       timeline, timbre, sampleBuffers, accompanimentTimbre, accompanimentBuffers,
+      synthSettings:typeof musicSynthSettings === "function" ? musicSynthSettings(sheet && sheet.synth) : null,
       startAt:countStartAt + countInSeconds,
       countStartAt, countInBeats, countCurrent:null,
       beatsPerMeasure, beatSeconds, metronome:!!options.metronome, loop:!!options.loop,
@@ -483,7 +587,7 @@ const MNMusicAudio = (() => {
         const event = timeline.events[state.next++];
         if (!event.rest && event.frequency > 0){
           state.nodes.push(...scheduleInto(target, master, [event], state.startAt,
-            state.timbre, state.sampleBuffers));
+            state.timbre, state.sampleBuffers, state.synthSettings));
         }
       }
       while (state.metronome && state.nextBeat < timeline.metronome.length &&
@@ -582,7 +686,11 @@ const MNMusicAudio = (() => {
       previewNodes = (nodes || []).filter(Boolean);
       if (typeof options.onScheduled === "function") options.onScheduled();
     };
-    if (SAMPLE_INSTRUMENTS[type]){
+    if (type === "synth"){
+      const start = target.currentTime + 0.005;
+      started(playable.map((pitch) => scheduleSynthNote(target, master, pitch.frequency, start,
+        PREVIEW_SEC, options.synth)));
+    } else if (SAMPLE_INSTRUMENTS[type]){
       ensureSampleBuffers(target, type).then((buffers) => {
         if (request !== previewRequest) return;
         const start = target.currentTime + 0.005;
@@ -614,7 +722,13 @@ const MNMusicAudio = (() => {
       throw new Error("저장할 소리가 없습니다.");
     }
 
-    const frames = Math.max(1, Math.ceil((timeline.totalSeconds + TAIL_SEC) * RENDER_SAMPLE_RATE));
+    const synthTail = timeline.events.reduce((tail, event) => {
+      if (timbreOf(event && event.timbre || sheet && sheet.timbre) !== "synth") return tail;
+      const settings = typeof musicSynthSettings === "function" ? musicSynthSettings(event.synth || sheet && sheet.synth) : null;
+      return settings ? Math.max(tail, settings.release + Math.max(settings.delay > 0 ? 0.24 : 0,
+        settings.reverb * 0.9) + 0.2) : tail;
+    }, 0);
+    const frames = Math.max(1, Math.ceil((timeline.totalSeconds + Math.max(TAIL_SEC, synthTail)) * RENDER_SAMPLE_RATE));
     const target = new Ctor(1, frames, RENDER_SAMPLE_RATE);
     const bus = target.createGain();
     bus.gain.value = MASTER_GAIN;
@@ -642,7 +756,8 @@ const MNMusicAudio = (() => {
         if (typeof options.onError === "function") options.onError(error, failedTimbre);
       }
     }
-    scheduleInto(target, bus, timeline.events, 0, timbre, sampleBuffers);
+    scheduleInto(target, bus, timeline.events, 0, timbre, sampleBuffers,
+      typeof musicSynthSettings === "function" ? musicSynthSettings(sheet && sheet.synth) : null);
     scheduleDrumsInto(target, bus, timeline.drums, 0);
     scheduleInto(target, bus, timeline.bass, 0, "triangle", null);
     scheduleInto(target, bus, timeline.chords, 0, accompanimentTimbre, accompanimentBuffers);
@@ -695,11 +810,11 @@ const MNMusicAudio = (() => {
   }
 
   return {
-    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, scheduleInto,
+    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, scheduleInto, scheduleSynthNote,
     scheduleMetronomeClick, scheduleDrumHit, scheduleDrumsInto, setVolume, getVolume, setMuted, muted,
     ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
     PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,
     FLUTE_SAMPLE_ROOTS, CLARINET_SAMPLE_ROOTS, SAMPLE_INSTRUMENTS,
-    ADSR, MASTER_GAIN, PIANO_RELEASE, GUITAR_RELEASE
+    ADSR, MASTER_GAIN, SYNTH_GAIN, PIANO_RELEASE, GUITAR_RELEASE
   };
 })();
