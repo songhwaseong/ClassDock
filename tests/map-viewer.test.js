@@ -39,7 +39,9 @@ function loadMapViewer(windowOverrides){
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
       , MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
       , MAP_DRIVE_MAX_MARKERS, MAP_DRIVE_COLOR, MAP_DRIVE_CACHE_MAX
-      , mapFormatDuration, mapDirectionsSpot, mapDirectionsRoute, mapDriveGuide
+      , MAP_DRIVE_PRIORITIES, MAP_DRIVE_AVOIDS, MAP_DRIVE_FUELS, mapNormalizeDriveOptions
+      , MAP_DRIVE_TRAFFIC, mapDriveTrafficInfo, mapOptimizeDriveOrder, mapDriveOrderedItems, mapSampleRoutePoints
+      , mapFormatDuration, mapDirectionsSpot, mapDirectionsRoute, mapDirectionsRoutes, mapDriveGuide
       , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
       , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
@@ -783,13 +785,14 @@ test("지도 문서는 공용 되돌리기 이력을 쓰고 touch() 한 곳에�
   assert.match(touch[1], /recordSoon\(\)/);
   assert.match(source, /const recordSoon = \(\) => \{ if \(history && !bulkDepth\) history\.commitSoon\(200\); \};/);
   // 스냅샷 범위 = 저장되는 내용. 보고 있는 자리(중심·확대)는 넣지 않는다.
-  const capture = /capture: \(\) => JSON\.stringify\((\[.*imageVersion.*\])\)/.exec(source);
+  const capture = /capture: \(\) => JSON\.stringify\((\[[\s\S]*?imageVersion[\s\S]*?\])\)/.exec(source);
   assert.ok(capture);
   assert.match(capture[1], /model\.title/);
   assert.match(capture[1], /model\.markers/);
   assert.match(capture[1], /model\.shapes/);
   assert.match(capture[1], /imageVersion/);
   assert.match(capture[1], /model\.grid/);          // 격자는 저장되는 내용이므로 되돌리기에도 들어간다
+  assert.match(capture[1], /mapNormalizeDriveOptions\(model\.driveOptions\)/);
   assert.doesNotMatch(capture[1], /model\.center|model\.zoom/);
   // 배경 이미지(dataUrl 수 MB)는 단계마다 복제하지 않고 버전 표에 한 번만 둔다.
   assert.match(source, /const imageVersions = new Map\(\[\[0, model\.backgroundImage \|\| null\]\]\)/);
@@ -1886,7 +1889,7 @@ test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 �
   // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
   assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
   // 되돌리기 범위도 격자·이름표와 같다.
-  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive\]\)/);
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\)\]\)/);
   assert.match(source, /model\.route = saved\[7\] === true;/);
   // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
   assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);
@@ -2053,13 +2056,20 @@ test("지도 문제 학생 화면은 편집 도구를 감추고 답을 문서에
    카카오가 받는 꼴로 정확히 뒤집어 보내는지, 돌아온 답에서 화면에 그릴 선을 제대로 꺼내는지. */
 test("길찾기 요청은 첫 표시를 출발·마지막을 도착으로 두고 좌표를 경도,위도 차례로 보낸다", () => {
   const api = loadMapViewer();
-  const spot = api.mapDirectionsSpot([[37.5665, 126.9780], [37.4979, 127.0276], [37.5796, 126.9770]]);
+  const spot = api.mapDirectionsSpot([[37.5665, 126.9780], [37.4979, 127.0276], [37.5796, 126.9770]], {
+    priority:"TIME", avoid:["toll", "schoolzone", "bogus"], fuel:"DIESEL", hipass:true, alternatives:true
+  });
   assert.equal(spot.x, "126.978000");
   assert.equal(spot.y, "37.566500");
   assert.equal(spot.x2, "126.977000");
   assert.equal(spot.y2, "37.579600");
   // 사이에 있는 표시만 들르는 곳이 된다(카카오는 x=경도·y=위도 차례).
   assert.equal(spot.via, "127.027600,37.497900");
+  assert.equal(spot.priority, "TIME");
+  assert.equal(spot.avoid, "toll|schoolzone");
+  assert.equal(spot.fuel, "DIESEL");
+  assert.equal(spot.hipass, "true");
+  assert.equal(spot.alternatives, "true");
   // 표시가 하나뿐이면 물을 것이 없다 — 런처까지 가지 않고 여기서 끊는다.
   assert.equal(api.mapDirectionsSpot([[37.5, 127.0]]), null);
   assert.equal(api.mapDirectionsSpot([]), null);
@@ -2071,11 +2081,17 @@ test("길찾기 답에서 도로 좌표를 하나로 잇고 이음매의 겹친 
     routes: [{
       result_code: 0,
       result_msg: "길찾기 성공",
-      summary: { distance: 12345, duration: 1500 },
+      summary: { distance: 12345, duration: 1500, priority:"TIME", fare:{ toll:2400, taxi:17800 } },
       sections: [
-        { roads: [{ vertexes: [126.9780, 37.5665, 126.9800, 37.5670] }] },
+        { distance:4000, duration:500,
+          roads: [{ name:"세종대로", distance:4000, duration:500, traffic_speed:14, traffic_state:2,
+            vertexes: [126.9780, 37.5665, 126.9800, 37.5670] }],
+          guides: [{ name:"출발지", guidance:"출발지", x:126.9780, y:37.5665, distance:0, duration:0, type:100 }] },
         // 들르는 곳이 있으면 구간이 나뉘고 이음매에 같은 점이 한 번 더 온다.
-        { roads: [{ vertexes: [126.9800, 37.5670, 127.0276, 37.4979] }] }
+        { distance:8345, duration:1000,
+          roads: [{ name:"강남대로", distance:8345, duration:1000, traffic_speed:31, traffic_state:4,
+            vertexes: [126.9800, 37.5670, 127.0276, 37.4979] }],
+          guides: [{ name:"", guidance:"우회전", x:126.9800, y:37.5670, distance:4000, duration:500, type:2 }] }
       ]
     }]
   });
@@ -2083,6 +2099,56 @@ test("길찾기 답에서 도로 좌표를 하나로 잇고 이음매의 겹친 
   assert.equal(JSON.stringify(result.points), JSON.stringify([[37.5665, 126.9780], [37.5670, 126.9800], [37.4979, 127.0276]]));
   assert.equal(result.distance, 12345);
   assert.equal(result.duration, 1500);
+  assert.equal(result.toll, 2400);
+  assert.equal(result.taxi, 17800);
+  assert.equal(result.priority, "TIME");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.sections.map(section => ({ distance:section.distance, duration:section.duration })))),
+    [{ distance:4000, duration:500 }, { distance:8345, duration:1000 }]);
+  assert.equal(result.roads.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.roads[0])), {
+    name:"세종대로", distance:4000, duration:500, trafficSpeed:14, trafficState:2,
+    points:[[37.5665,126.978],[37.567,126.98]]
+  });
+  assert.equal(result.guides.length, 2);
+  assert.equal(result.guides[1].guidance, "우회전");
+  assert.equal(result.guides[1].type, 2);
+  assert.equal(api.mapDriveTrafficInfo(2).label, "지체");
+  assert.equal(api.mapDriveTrafficInfo(4).color, "#16a34a");
+});
+
+test("길찾기 상세 설정은 허용된 값만 저장하고 예전 지도에는 안전한 기본값을 채운다", () => {
+  const api = loadMapViewer();
+  assert.deepEqual(JSON.parse(JSON.stringify(api.mapNormalizeDriveOptions({
+    priority:"BOGUS", avoid:["uturn", "toll", "uturn", "hack"], fuel:"ELECTRIC",
+    hipass:1, alternatives:true, reverse:true, optimize:true, compare:false
+  }))), {
+    priority:"RECOMMEND", avoid:["toll", "uturn"], fuel:"GASOLINE",
+    hipass:false, alternatives:true, reverse:true, optimize:true, compare:false
+  });
+  const model = api.mapDocEmpty("상세 길찾기");
+  model.driveOptions = api.mapNormalizeDriveOptions({ priority:"DISTANCE", avoid:["motorway"], fuel:"LPG", hipass:true });
+  const back = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(back.driveOptions.priority, "DISTANCE");
+  assert.deepEqual([...back.driveOptions.avoid], ["motorway"]);
+  assert.equal(back.driveOptions.fuel, "LPG");
+  assert.equal(back.driveOptions.hipass, true);
+});
+
+test("경유지 자동 최적화는 출발·도착을 고정하고 가운데 표시의 최단 직선 순서를 정확히 고른다", () => {
+  const api = loadMapViewer();
+  const items = [
+    { label:"출발", lat:0, lng:0 }, { label:"먼저 들어온 먼 곳", lat:0, lng:2 },
+    { label:"가까운 곳", lat:0, lng:1 }, { label:"도착", lat:0, lng:3 }
+  ];
+  assert.equal(JSON.stringify(api.mapOptimizeDriveOrder(items).map(item => item.label)),
+    JSON.stringify(["출발", "가까운 곳", "먼저 들어온 먼 곳", "도착"]));
+  assert.equal(JSON.stringify(api.mapDriveOrderedItems(items, { reverse:true, optimize:true }).map(item => item.label)),
+    JSON.stringify(["도착", "먼저 들어온 먼 곳", "가까운 곳", "출발"]));
+  const many = Array.from({ length:2100 }, (_, index) => [37, 126 + index / 100000]);
+  const sampled = api.mapSampleRoutePoints(many);
+  assert.equal(sampled.length, 2000);
+  assert.equal(JSON.stringify(sampled[0]), JSON.stringify(many[0]));
+  assert.equal(JSON.stringify(sampled.at(-1)), JSON.stringify(many.at(-1)));
 });
 
 test("길을 못 찾은 답은 HTTP 200 이어도 실패로 가른다", () => {
@@ -2124,14 +2190,15 @@ test("자동차 길찾기 켜 둔 사실은 .map 에 남고 길 자체는 담기
   assert.equal(api.mapDocParse(JSON.stringify(old)).drive, false);
 });
 
-test("자동차 길찾기는 표시 7개까지만 한 번에 잇고 그 사실을 이름표에 적는다", () => {
+test("자동차 길찾기는 설정한 순서에서 표시 7개까지만 한 번에 잇는다", () => {
   const api = loadMapViewer();
   // 카카오 경유지 상한(5)에 출발·도착을 더한 값이다.
   assert.equal(api.MAP_DRIVE_MAX_MARKERS, 7);
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  assert.match(source, /const points = shown\.slice\(0, MAP_DRIVE_MAX_MARKERS\)/);
-  // 말없이 자르지 않는다 — 앞쪽만 이었다는 사실이 선 이름표에 그대로 보인다.
-  assert.match(source, /used < total \? "앞 표시 \{count\}개/);
+  assert.match(source, /const points = mapDriveOrderedItems\(allPoints, settings\)/);
+  assert.match(source, /설정한 순서의 \{max\}개만 길을 찾았습니다/);
+  assert.match(source, /driveTrafficLayers[\s\S]*?mapDriveTrafficInfo\(road\.trafficState\)/);
+  assert.match(source, /onSaveRoute:[\s\S]*?mapSampleRoutePoints\(route\.points\)[\s\S]*?addShapeLayer\(shape\)/);
   // 표시를 끌어 옮기는 동안에는 묻지 않는다(하루 무료 몫을 드래그 한 번에 다 쓰지 않게).
   assert.match(source, /driveTimer = setTimeout\(\(\) => \{ runDrive\(\); \}, MAP_DRIVE_DELAY_MS\)/);
   // 같은 표시 배치로 두 번 묻지 않는다 — 실패한 배치도 '손을 본 것'으로 적어 같은 안내를
@@ -2142,7 +2209,7 @@ test("자동차 길찾기는 표시 7개까지만 한 번에 잇고 그 사실�
   assert.match(source, /const dropDrive = \(\) => \{[\s\S]*?driveSeq\+\+;[\s\S]*?driveLayer/);
 });
 
-test("카카오 키가 없으면 길찾기는 묻지 않고 무엇이 모자란지 알려 준다", () => {
+test("카카오 키가 없으면 길찾기 비교 버튼을 실제 비활성화한다", () => {
   const api = loadMapViewer();
   assert.match(api.mapDriveGuide({ provider:false }), /카카오 지도 검색을 켜야/);
   assert.match(api.mapDriveGuide({ provider:true, available:false }), /런처에서 사용할 수 있어요/);
@@ -2151,8 +2218,10 @@ test("카카오 키가 없으면 길찾기는 묻지 않고 무엇이 모자란�
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   // 켜 둔 채로 저장한 지도를 열 때도, 카카오가 갖춰졌을 때만 묻는다.
   assert.match(source, /if \(model\.drive\) refreshNearbyReady\(\)\.then\(\(\) => \{ if \(nearbyReady\) scheduleDrive\(\); \}\)/);
-  // 키 없이 '켜진 채' 복원된 버튼을 처음 눌러도 안내를 보여 주면서 토글은 끌 수 있어야 한다.
-  assert.match(source, /if \(model\.drive\)\{[\s\S]*?await refreshNearbyReady\(\);[\s\S]*?guide = mapT\(mapDriveGuide\(nearbyAccess\)\)[\s\S]*?model\.drive = false/);
+  assert.match(source, /driveBtn\.disabled = true/);
+  assert.match(source, /driveBtn\.disabled = !nearbyReady/);
+  assert.match(source, /driveBtn\.title = nearbyReady[\s\S]*?mapDriveGuide\(nearbyAccess\)/);
+  assert.match(source, /await refreshNearbyReady\(\);[\s\S]*?if \(!nearbyReady\)[\s\S]*?return;[\s\S]*?openMapDriveSettings/);
 });
 
 test("두 런처는 길찾기를 무기한 장소 캐시에서 빼고 상세 경로에 더 큰 응답 상한을 쓴다", () => {
@@ -2164,4 +2233,17 @@ test("두 런처는 길찾기를 무기한 장소 캐시에서 빼고 상세 경
   }
   assert.match(csharp, /provider == "kakao-directions" \? DirectionsMaxBytes : GeocodeMaxBytes/);
   assert.match(go, /if provider == "kakao-directions" \{\s*maxBytes = directionsMaxBytes/);
+});
+
+test("두 런처는 길찾기 상세 옵션을 허용 목록으로 제한해 카카오에 전달한다", () => {
+  const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
+  for (const launcher of [csharp, go]){
+    assert.match(launcher, /RECOMMEND.*TIME.*DISTANCE/s);
+    assert.match(launcher, /GASOLINE.*DIESEL.*LPG/s);
+    assert.match(launcher, /ferries.*toll.*motorway.*schoolzone.*uturn/s);
+    assert.match(launcher, /car_fuel/);
+    assert.match(launcher, /car_hipass/);
+    assert.match(launcher, /alternatives/);
+  }
 });

@@ -3391,11 +3391,17 @@ class ClassDockLauncher
         public string X2 = "";
         public string Y2 = "";
         public string Via = "";
+        public string Priority = "";
+        public string Avoid = "";
+        public string Fuel = "";
+        public string Hipass = "";
+        public string Alternatives = "";
         public bool HasPoint { get { return X.Length > 0 && Y.Length > 0; } }
         public bool HasEnd { get { return X2.Length > 0 && Y2.Length > 0; } }
         public string CacheKey
         {
-            get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page + "|" + X2 + "|" + Y2 + "|" + Via; }
+            get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page + "|" + X2 + "|" + Y2 + "|" + Via
+                + "|" + Priority + "|" + Avoid + "|" + Fuel + "|" + Hipass + "|" + Alternatives; }
         }
     }
     static string GeocodeNumber(string value, double min, double max)
@@ -3423,6 +3429,21 @@ class ClassDockLauncher
         }
         return string.Join("|", points.ToArray());
     }
+    static string DirectionsChoice(string raw, string fallback, params string[] allowed)
+    {
+        string value = (raw ?? "").Trim();
+        foreach (string item in allowed)
+            if (string.Equals(value, item, StringComparison.OrdinalIgnoreCase)) return item;
+        return fallback;
+    }
+    static string DirectionsAvoid(string raw)
+    {
+        string[] allowed = { "ferries", "toll", "motorway", "schoolzone", "uturn" };
+        HashSet<string> requested = new HashSet<string>((raw ?? "").Split('|'), StringComparer.OrdinalIgnoreCase);
+        List<string> clean = new List<string>();
+        foreach (string item in allowed) if (requested.Contains(item)) clean.Add(item);
+        return string.Join("|", clean.ToArray());
+    }
     static GeocodeSpot ReadGeocodeSpot(string path)
     {
         GeocodeSpot spot = new GeocodeSpot();
@@ -3431,6 +3452,11 @@ class ClassDockLauncher
         spot.X2 = GeocodeNumber(QueryValue(path, "x2"), -180, 180);
         spot.Y2 = GeocodeNumber(QueryValue(path, "y2"), -85, 85);
         spot.Via = GeocodeVia(QueryValue(path, "via"));
+        spot.Priority = DirectionsChoice(QueryValue(path, "priority"), "RECOMMEND", "RECOMMEND", "TIME", "DISTANCE");
+        spot.Avoid = DirectionsAvoid(QueryValue(path, "avoid"));
+        spot.Fuel = DirectionsChoice(QueryValue(path, "fuel"), "GASOLINE", "GASOLINE", "DIESEL", "LPG");
+        spot.Hipass = DirectionsChoice(QueryValue(path, "hipass"), "false", "true", "false");
+        spot.Alternatives = DirectionsChoice(QueryValue(path, "alternatives"), "false", "true", "false");
         spot.Radius = GeocodeNumber(QueryValue(path, "radius"), 1, 20000);      // 카카오 반경 상한
         spot.Page = GeocodeNumber(QueryValue(path, "page"), 1, 3);
         // 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
@@ -3469,12 +3495,13 @@ class ClassDockLauncher
             }
             else if (provider == "kakao-directions")
             {
-                /* 대안 경로·상세 도로는 끈다 — 화면에 그리는 것은 길 하나뿐이라 나머지는 응답만
-                   키운다(읽는 양을 512KB 로 자르는 아래 규칙에 그대로 걸린다). */
                 url = KakaoDirectionsEndpoint + "?origin=" + spot.X + "," + spot.Y
                     + "&destination=" + spot.X2 + "," + spot.Y2
                     + (spot.Via.Length > 0 ? "&waypoints=" + Uri.EscapeDataString(spot.Via) : "")
-                    + "&priority=RECOMMEND&car_fuel=GASOLINE&car_hipass=false&alternatives=false&road_details=false";
+                    + "&priority=" + spot.Priority
+                    + (spot.Avoid.Length > 0 ? "&avoid=" + Uri.EscapeDataString(spot.Avoid) : "")
+                    + "&car_fuel=" + spot.Fuel + "&car_hipass=" + spot.Hipass
+                    + "&alternatives=" + spot.Alternatives + "&road_details=false&summary=false";
             }
             else if (provider == "kakao-category")
             {

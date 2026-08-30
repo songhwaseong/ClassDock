@@ -276,7 +276,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"mapLabels", label:"표시 이름 보이기", cls:"map-toolvis-labels", target:"map" },
   { id:"mapCluster", label:"표시 묶기", cls:"map-toolvis-cluster", target:"map" },
   { id:"mapRoute", label:"표시 잇기", cls:"map-toolvis-route", target:"map" },
-  { id:"mapDrive", label:"자동차 길찾기", cls:"map-toolvis-drive", target:"map" },
+  { id:"mapDrive", label:"길찾기 비교·설정", cls:"map-toolvis-drive", target:"map" },
   { id:"mapList", label:"표시 목록", cls:"map-toolvis-list", target:"map" },
   { id:"mapPresent", label:"발표 모드", cls:"map-toolvis-present", target:"map" },
   { id:"mapNearby", label:"주변 시설", cls:"map-toolvis-nearby", target:"map" },

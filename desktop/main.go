@@ -67,7 +67,7 @@ const (
 	// 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·C# 런처
 	// (launcher.cs GeocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다.
 	geocodeResultLimit = "8"
-	geocodeMaxBytes     = 512 * 1024
+	geocodeMaxBytes    = 512 * 1024
 	// 길찾기는 roads[].vertexes 전체를 돌려주므로 장거리·경유지의 정상 응답을 위한 전용 상한을 둔다.
 	directionsMaxBytes = 8 * 1024 * 1024
 
@@ -344,14 +344,17 @@ func setMapSearchProvider(value string) {
 type geocodeSpot struct {
 	x, y, radius, category, page string
 	// 길찾기만 점이 둘 이상이다 — 도착점(x2·y2)과 사이에 들르는 곳(via, "x,y|x,y" 꼴).
-	x2, y2, via string
+	x2, y2, via           string
+	priority, avoid, fuel string
+	hipass, alternatives  string
 }
 
 func (s geocodeSpot) hasPoint() bool { return s.x != "" && s.y != "" }
 func (s geocodeSpot) hasEnd() bool   { return s.x2 != "" && s.y2 != "" }
 func (s geocodeSpot) cacheKey() string {
 	return s.x + "|" + s.y + "|" + s.radius + "|" + s.category + "|" + s.page +
-		"|" + s.x2 + "|" + s.y2 + "|" + s.via
+		"|" + s.x2 + "|" + s.y2 + "|" + s.via + "|" + s.priority + "|" + s.avoid +
+		"|" + s.fuel + "|" + s.hipass + "|" + s.alternatives
 }
 
 func geocodeNumber(value string, min, max float64) string {
@@ -362,8 +365,11 @@ func geocodeNumber(value string, min, max float64) string {
 	return strconv.FormatFloat(parsed, 'f', -1, 64)
 }
 
-/* 들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를 그대로
-   붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다. */
+/*
+들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를 그대로
+
+	붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다.
+*/
 const geocodeViaMax = 5
 
 func geocodeVia(raw string) string {
@@ -386,15 +392,44 @@ func geocodeVia(raw string) string {
 	return strings.Join(points, "|")
 }
 
+func directionsChoice(raw, fallback string, allowed ...string) string {
+	value := strings.TrimSpace(raw)
+	for _, item := range allowed {
+		if strings.EqualFold(value, item) {
+			return item
+		}
+	}
+	return fallback
+}
+
+func directionsAvoid(raw string) string {
+	requested := map[string]bool{}
+	for _, value := range strings.Split(raw, "|") {
+		requested[strings.ToLower(strings.TrimSpace(value))] = true
+	}
+	clean := []string{}
+	for _, item := range []string{"ferries", "toll", "motorway", "schoolzone", "uturn"} {
+		if requested[item] {
+			clean = append(clean, item)
+		}
+	}
+	return strings.Join(clean, "|")
+}
+
 func readGeocodeSpot(query url.Values) geocodeSpot {
 	spot := geocodeSpot{
-		x:      geocodeNumber(query.Get("x"), -180, 180),
-		y:      geocodeNumber(query.Get("y"), -85, 85),
-		radius: geocodeNumber(query.Get("radius"), 1, 20000), // 카카오 반경 상한
-		page:   geocodeNumber(query.Get("page"), 1, 3),
-		x2:     geocodeNumber(query.Get("x2"), -180, 180),
-		y2:     geocodeNumber(query.Get("y2"), -85, 85),
-		via:    geocodeVia(query.Get("via")),
+		x:            geocodeNumber(query.Get("x"), -180, 180),
+		y:            geocodeNumber(query.Get("y"), -85, 85),
+		radius:       geocodeNumber(query.Get("radius"), 1, 20000), // 카카오 반경 상한
+		page:         geocodeNumber(query.Get("page"), 1, 3),
+		x2:           geocodeNumber(query.Get("x2"), -180, 180),
+		y2:           geocodeNumber(query.Get("y2"), -85, 85),
+		via:          geocodeVia(query.Get("via")),
+		priority:     directionsChoice(query.Get("priority"), "RECOMMEND", "RECOMMEND", "TIME", "DISTANCE"),
+		avoid:        directionsAvoid(query.Get("avoid")),
+		fuel:         directionsChoice(query.Get("fuel"), "GASOLINE", "GASOLINE", "DIESEL", "LPG"),
+		hipass:       directionsChoice(query.Get("hipass"), "false", "true", "false"),
+		alternatives: directionsChoice(query.Get("alternatives"), "false", "true", "false"),
 	}
 	// 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
 	category := strings.ToUpper(strings.TrimSpace(query.Get("category")))
@@ -427,18 +462,21 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		values.Set("y", spot.y)
 		endpoint += "?" + values.Encode()
 	} else if provider == "kakao-directions" {
-		// 대안 경로·상세 도로는 끈다 — 화면에 그리는 것은 길 하나뿐이라 나머지는 응답만 키운다.
 		values := url.Values{}
 		values.Set("origin", spot.x+","+spot.y)
 		values.Set("destination", spot.x2+","+spot.y2)
 		if spot.via != "" {
 			values.Set("waypoints", spot.via)
 		}
-		values.Set("priority", "RECOMMEND")
-		values.Set("car_fuel", "GASOLINE")
-		values.Set("car_hipass", "false")
-		values.Set("alternatives", "false")
+		values.Set("priority", spot.priority)
+		if spot.avoid != "" {
+			values.Set("avoid", spot.avoid)
+		}
+		values.Set("car_fuel", spot.fuel)
+		values.Set("car_hipass", spot.hipass)
+		values.Set("alternatives", spot.alternatives)
 		values.Set("road_details", "false")
+		values.Set("summary", "false")
 		endpoint = kakaoDirectionsURL + "?" + values.Encode()
 	} else if provider == "kakao-category" {
 		radius := spot.radius
