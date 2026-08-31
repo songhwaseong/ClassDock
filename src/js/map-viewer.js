@@ -5750,7 +5750,7 @@ async function mountMapEditor(doc){
     roadviewBtn.textContent = "🚶 로드뷰";
     roadviewBtn.title = "이 좌표의 카카오맵 로드뷰를 새 창에서 열어요 — API 키가 필요하지 않습니다";
     roadviewBtn.addEventListener("click", () => mapOpenKakaoRoadview(spot.lat, spot.lng));
-    actions.append(pinBtn, copyBtn, nearBtn, detailBtn, roadviewBtn);
+    actions.append(pinBtn, copyBtn, nearBtn, roadviewBtn, detailBtn);
     box.appendChild(actions);
     mapTranslate(box);
     return box;

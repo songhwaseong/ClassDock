@@ -444,13 +444,16 @@ function wireImageMemo(){
     return added;
   };
 
-  const persistBrowserDrafts = async () => {
+  /* silent: 전체 백업처럼 사용자가 이미지 메모를 만지지 않았는데 대신 흘려보내는 경우.
+     백업 버튼을 눌렀을 뿐인데 이미지 메모 패널에 "자동 저장했어요" 가 뜨면 엉뚱하다.
+     실패 안내는 그대로 둔다 — 그건 사용자가 알아야 하는 일이다. */
+  const persistBrowserDrafts = async ({ silent = false } = {}) => {
     const pending = pendingEntries();
     try {
       await writeImageMemoDraft(imageMemoDraftSnapshot(entries, batchName, nextOrder));
       pending.forEach(entry => { entry.drafted = true; });
       render();
-      setStatus(pending.length
+      if (!silent) setStatus(pending.length
         ? `${pending.length}개를 브라우저 임시복구에 자동 저장했어요.`
         : "브라우저 임시복구를 정리했어요.");
       return true;
@@ -723,6 +726,7 @@ function wireImageMemo(){
     }
   }, true);
   window.addEventListener("beforeunload", (event) => {
+    if (typeof MNBackup !== "undefined" && MNBackup.isRestoring()) return;
     if (!pendingEntries().some(entry => !entry.drafted)) return;
     event.preventDefault();
     event.returnValue = "";
@@ -742,7 +746,7 @@ function wireImageMemo(){
     return added;
   };
   // EXE에서 자동저장을 껐거나 아직 저장 대기 중인 이미지도 전체 백업에 포함한다.
-  window.flushImageMemoBackup = () => persistBrowserDrafts();
+  window.flushImageMemoBackup = () => persistBrowserDrafts({ silent:true });
 
   const restoreBrowserDrafts = async () => {
     let draft = null;

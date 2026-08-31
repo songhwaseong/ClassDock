@@ -40,6 +40,9 @@ const MNLazy = (() => {
     // "3.x 로드 → docx-preview 로드 → 2.6.1 로 되돌리기" 순서였다. 지연 로드에서도 순서가
     // 뒤바뀔 수 있으므로(예: PPT 를 먼저 연 뒤 Word 를 열기), 아래에서 그 되돌리기를 재현한다.
     docx:        { label:"Word 보기", files:["jszip3.min.js", "docx-preview.min.js"], jszipSwap:true },
+    /* 전체 백업 ZIP 은 수백 MB 가 될 수 있어 2.6.1 의 동기 generate 로는 화면이 멈춘다.
+       같은 3.x 소스를 써서 generateAsync·loadAsync 를 쓰고, 전역은 2.6.1 로 되돌려 놓는다. */
+    jszipModern: { label:"압축 만들기(JSZip 3)", files:["jszip3.min.js"], jszipSwap:true },
     // 자바스크립트 연습 실행기는 소스를 부모 화면에서 실행하지 않고 Worker로 전달한다.
     // manifest의 지연 로드 계약에 등록하되, 실제 읽기는 source(file)를 사용한다.
     jsLodash:    { label:"JavaScript Lodash",    files:["lodash.min.js"] },
@@ -51,7 +54,8 @@ const MNLazy = (() => {
   const loadedFiles = new Map();     // 파일명 -> Promise (실행 완료)
   const loadedBundles = new Map();   // 묶음명 -> Promise
   const sourceFiles = new Map();     // 파일명 -> Promise<string> (Worker 전달용 원문)
-  const JSZIP_BUNDLES = new Set(["jszip", "pptx", "docx"]);
+  const JSZIP_BUNDLES = new Set(["jszip", "pptx", "docx", "jszipModern"]);
+  let modernJSZip = null;            // JSZip 3.x 생성자 — 전역과 따로 보관한다
   let jszipBundleQueue = Promise.resolve();
   let inlineMode = null;             // null=미판별, true=단일 파일 모드
 
@@ -120,12 +124,27 @@ const MNLazy = (() => {
     return tracked;
   }
 
+  /* 3.x 소스가 방금 실행됐으면 그 생성자를 따로 보관한다.
+     2.6.1 과는 정적 loadAsync 유무로 가른다(3.x 만 가진다). */
+  function captureModernJSZip(){
+    const candidate = typeof window !== "undefined" ? window.JSZip : undefined;
+    if (!modernJSZip && typeof candidate === "function" && typeof candidate.loadAsync === "function")
+      modernJSZip = candidate;
+    return modernJSZip;
+  }
+
   async function loadBundle(name){
     const bundle = BUNDLES[name];
     if (!bundle) throw new Error("unknown-lazy-bundle:" + name);
     // JSZip 2.6.1 을 쓰는 코드가 이미 있으면 그 전역을 기억해 두었다가 docx-preview 로드 뒤 되돌린다.
     const previousJSZip = bundle.jszipSwap ? (typeof window !== "undefined" ? window.JSZip : undefined) : undefined;
-    for (const file of bundle.files) await loadFile(file);
+    for (const file of bundle.files){
+      await loadFile(file);
+      /* 같은 3.x 소스를 다른 묶음이 이미 실행했으면 여기서는 다시 실행되지 않아 전역이
+         2.6.1 인 채로 남는다. 보관해 둔 생성자로 되살려, 뒤따르는 docx-preview 같은
+         파일이 항상 3.x 를 보게 한다. */
+      if (bundle.jszipSwap && captureModernJSZip()) window.JSZip = modernJSZip;
+    }
     if (bundle.jszipSwap){
       if (previousJSZip) window.JSZip = previousJSZip;   // 원래 쓰던 2.6.1 복원
       else await loadFile("jszip.min.js");               // 아직 없으면 2.6.1 을 새로 싣는다
@@ -160,7 +179,10 @@ const MNLazy = (() => {
   const isLoaded = (name) => loadedBundles.has(name);
   const bundleLabel = (name) => (BUNDLES[name] && BUNDLES[name].label) || name;
 
-  return { need, tryNeed, source, isLoaded, bundleLabel, BUNDLES };
+  /* 전역 JSZip(2.6.1) 을 건드리지 않고 3.x 생성자만 받아 간다. need("jszipModern") 뒤에 부른다. */
+  const modernZip = () => modernJSZip;
+
+  return { need, tryNeed, source, isLoaded, bundleLabel, modernZip, BUNDLES };
 })();
 
 if (typeof module !== "undefined" && module.exports) module.exports = MNLazy;

@@ -498,6 +498,11 @@ test("로드뷰는 별도 키 없이 좌표 공개 URL을 전용 창 하나에�
   assert.match(source, /mapGeoJsonImport\(csvText\)/);
 });
 
+test("장소 정보 버튼은 주변 시설 바로 다음에 로드뷰를 두고 상세 보기는 마지막에 둔다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  assert.match(source, /actions\.append\(pinBtn, copyBtn, nearBtn, roadviewBtn, detailBtn\)/);
+});
+
 test("두 런처의 타일 허용 목록은 서로 같다", () => {
   const csharp = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
   const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");

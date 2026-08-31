@@ -219,6 +219,8 @@ function wire(){
   })();
   // 탭 닫기처럼 가로챌 수 없는 경우엔 브라우저 기본 확인창으로 폴백.
   window.addEventListener("beforeunload", (e) => {
+    // 백업 복원은 교체를 이미 확인했다. 이전 문서 저장과 추가 경고 없이 다시 불러온다.
+    if (typeof MNBackup !== "undefined" && MNBackup.isRestoring()) return;
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
     docs.forEach(d => {
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();

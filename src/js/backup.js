@@ -9,6 +9,20 @@ const MN_BACKUP_VERSION = 2;
 const MN_BACKUP_MAX_FILE = 1024 * 1024 * 1024;
 const MN_BACKUP_ACTIVE_TAB_KEY = "classdock:active-tab";
 const MN_BACKUP_PENDING_RESTORE_KEY = "classdock-backup:pending-restore:v1";
+/* 백업에 넣지도, 복원할 때 건드리지도 않는 "이 창·이 PC 전용" 설정.
+   · active-tab   : 여러 창 중 누가 활성인지 — 다른 PC 의 값을 덮으면 한쪽이 멈춘다.
+   · 화면보호기 영상 이름: 영상 자체(mnScreensaver IndexedDB)는 수백 MB 라 백업하지 않는다.
+     이름만 옮기면 설정에는 목록이 보이는데 재생은 내장 애니메이션으로 떨어져 거짓말이 된다.
+     그래서 양쪽 모두 — 내보낼 때도, 복원할 때도 — 이 PC 의 값을 그대로 둔다. */
+const MN_BACKUP_LOCAL_ONLY_KEYS = [
+  MN_BACKUP_ACTIVE_TAB_KEY,
+  "mnScreensaverVideoNames",
+  "mnScreensaverVideoName"
+];
+
+function mnBackupIsLocalOnlyKey(key){
+  return key === MN_BACKUP_PENDING_RESTORE_KEY || MN_BACKUP_LOCAL_ONLY_KEYS.includes(key);
+}
 
 const MN_BACKUP_IDB = [
   { name:"classdock-recovery", stores:["documents", "signatures"], open:() => openPdfRecoveryDb() },
@@ -70,6 +84,32 @@ function mnBackupOpenBoardDescriptor(raw){
   return recoveryName ? { name:name || "화이트보드", recoveryName, memoBlockId } : name;
 }
 
+/* 열려 있는 화이트보드를 가리키는 이름 — 복구본을 찾는 열쇠와 같다(whiteboard.js 의 recoveryName). */
+function mnBackupBoardIdentity(doc){
+  return String(doc && (doc.boardRecoveryName || doc.name) || "").trim();
+}
+
+/* 매니페스트의 보드 목록에서 "아직 없는 것"만 골라 newWhiteboard 옵션으로 돌려준다.
+   탭 상태(classdock-tabs:v1)와 작업공간 기록에도 화이트보드가 남아, 복원 직후의
+   자동 복원이 이미 보드를 되살린다(restoreSavedWorkspaceWhiteboards·restoreSavedWhiteboards).
+   그것을 모르고 다시 만들면 같은 판서가 두 벌로 열리므로 여기서 걸러낸다.
+   옵션을 안 남기던 예전 백업(이름 문자열만 들어 있는 경우)도 그대로 받는다. */
+function mnBackupMissingBoards(rawBoards, openedNames){
+  const seen = new Set((openedNames || []).map(value => String(value || "").trim()).filter(Boolean));
+  const out = [];
+  for (const raw of (Array.isArray(rawBoards) ? rawBoards : [])){
+    const board = mnBackupOpenBoardDescriptor(raw);
+    const options = typeof board === "string"
+      ? { name:board }
+      : { name:board.name, recoveryName:board.recoveryName, memoBlockId:board.memoBlockId };
+    const key = String(options.recoveryName || options.name || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(options);
+  }
+  return out;
+}
+
 function mnBackupDownload(blob, name){
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -85,16 +125,27 @@ function mnBackupByteLength(text){
   return new TextEncoder().encode(String(text || "")).length;
 }
 
-async function mnBackupNeedZip(){
-  if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("jszip");
+/* 백업 ZIP 은 무압축(STORE)이라 작업공간·메모 그림이 그대로 들어가 수백 MB 가 될 수 있다.
+   JSZip 2.6.1 의 generate 는 동기라 그만한 크기에서 화면이 통째로 멈추고 메모리도 두 배로
+   든다. 백업만 이미 들어 있는 3.x(generateAsync·loadAsync)를 쓰고, 어떤 이유로든 못 실으면
+   예전처럼 2.6.1 로 물러선다(작은 백업은 그것으로도 된다). */
+async function mnBackupZipLib(){
+  if (typeof MNLazy !== "undefined"){
+    if (await MNLazy.tryNeed("jszipModern")){
+      const modern = typeof MNLazy.modernZip === "function" ? MNLazy.modernZip() : null;
+      if (typeof modern === "function") return modern;
+    }
+    await MNLazy.tryNeed("jszip");
+  }
   if (typeof JSZip === "undefined") throw new Error("zip-library-unavailable");
+  return JSZip;
 }
 
 async function mnBackupLoadZip(bytes){
-  await mnBackupNeedZip();
+  const Zip = await mnBackupZipLib();
   try {
-    if (typeof JSZip.loadAsync === "function") return await JSZip.loadAsync(bytes);
-    return new JSZip(bytes);
+    if (typeof Zip.loadAsync === "function") return await Zip.loadAsync(bytes);
+    return new Zip(bytes);
   } catch(_){
     throw new MnBackupFormatError("not-backup");
   }
@@ -122,8 +173,14 @@ async function mnBackupZipBytes(zip, path){
 }
 
 async function mnBackupGenerateZip(zip){
-  if (typeof zip.generateAsync === "function")
-    return zip.generateAsync({ type:"blob", compression:"STORE" });
+  if (typeof zip.generateAsync === "function"){
+    // 3.x 는 조금씩 끊어 만들며 진행률을 알려준다 — 큰 백업에서 "멈췄나" 싶지 않게 로딩에 보인다.
+    return zip.generateAsync({ type:"blob", compression:"STORE" }, metadata => {
+      const percent = Number(metadata && metadata.percent);
+      if (typeof updateLoading === "function" && Number.isFinite(percent))
+        updateLoading("백업 ZIP 만드는 중… " + Math.round(percent) + "%");
+    });
+  }
   return zip.generate({ type:"blob", compression:"STORE" });
 }
 
@@ -271,7 +328,7 @@ function mnBackupLocalStorageSnapshot(){
   const snapshot = {};
   for (let index = 0; index < localStorage.length; index++){
     const key = localStorage.key(index);
-    if (key == null || key === MN_BACKUP_ACTIVE_TAB_KEY || key === MN_BACKUP_PENDING_RESTORE_KEY) continue;
+    if (key == null || mnBackupIsLocalOnlyKey(key)) continue;
     snapshot[key] = localStorage.getItem(key);
   }
   return snapshot;
@@ -375,8 +432,8 @@ async function mnBackupExport(){
   if (typeof showLoading === "function") showLoading("미저장 작업을 백업 준비 중…");
   try {
     await mnBackupFlushUnsaved();
-    await mnBackupNeedZip();
-    const zip = new JSZip();
+    const Zip = await mnBackupZipLib();
+    const zip = new Zip();
     const context = { nextBinary:1, binaryBytes:0 };
     const workspace = await mnBackupGetWorkspace();
     if (workspace.length) zip.file("state/workspace.bin", workspace);
@@ -499,16 +556,67 @@ function mnBackupValidateDbDump(data){
   if (seen.size !== allowed.size) throw new MnBackupFormatError("damaged");
 }
 
-function mnBackupReplaceLocalStorage(snapshot, openBoards){
-  const activeTab = localStorage.getItem(MN_BACKUP_ACTIVE_TAB_KEY);
-  localStorage.clear();
-  for (const key of Object.keys(snapshot)){
-    if (key === MN_BACKUP_ACTIVE_TAB_KEY || key === MN_BACKUP_PENDING_RESTORE_KEY) continue;
-    if (typeof snapshot[key] !== "string") throw new MnBackupFormatError("damaged");
-    localStorage.setItem(key, snapshot[key]);
+/* 복원하는 동안 앱이 스스로 남기는 localStorage 자동 저장을 멈춘다.
+   확인을 누른 뒤 새로고침까지는 짧은 사이지만, 그 동안도 판서 복구본(0.5초)·탭 구성(0.4초)·
+   메모(0.35초) 타이머가 제각기 돌고 있다. 그대로 두면 방금 되돌린 내용을 복원 전 상태가
+   덮어써, 백업에 없던 탭이 다시 살아난다(e2e 로 재현된 실제 증상이다).
+   읽기는 그대로 두고 쓰기만 막으며, 복원 코드 자신은 보관한 원래 함수(write)로 쓴다.
+   성공하면 그대로 새로고침하므로 되돌릴 필요가 없고, 실패하면 resume() 으로 앱을 되돌린다. */
+function mnBackupPauseLocalStorage(){
+  const storage = localStorage;
+  const prototype = Object.getPrototypeOf(storage);
+  const methods = ["setItem", "removeItem", "clear"];
+  const write = Object.fromEntries(methods.map(key => [key, storage[key].bind(storage)]));
+  const replaced = [];
+  const resume = () => {
+    while (replaced.length){
+      const [key, descriptor] = replaced[replaced.length - 1];
+      Object.defineProperty(prototype, key, descriptor);
+      replaced.pop();
+    }
+  };
+  // Storage 인스턴스에 함수를 대입하면 메서드가 아니라 문자열 저장 키가 생긴다.
+  // 프로토타입에서 가로채되 sessionStorage 등 다른 저장소의 호출은 그대로 통과시킨다.
+  try {
+    for (const key of methods){
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
+      if (!descriptor || typeof descriptor.value !== "function") throw new Error("storage-pause-unavailable");
+      const original = descriptor.value;
+      Object.defineProperty(prototype, key, {
+        ...descriptor,
+        value:function(...args){
+          if (this === storage) return;
+          return original.apply(this, args);
+        }
+      });
+      replaced.push([key, descriptor]);
+    }
+  } catch(error){
+    resume();
+    throw error; // 차단에 실패하면 데이터를 교체하기 전에 복원을 중단한다.
   }
-  if (activeTab != null) localStorage.setItem(MN_BACKUP_ACTIVE_TAB_KEY, activeTab);
-  localStorage.setItem(MN_BACKUP_PENDING_RESTORE_KEY, JSON.stringify({
+  return {
+    write,
+    paused:() => replaced.length > 0,
+    resume
+  };
+}
+
+function mnBackupReplaceLocalStorage(snapshot, openBoards, io){
+  // 자동 저장을 멈춰 두었으면 그 때 받아 둔 원래 함수로 쓴다(멈추기 전이면 그냥 localStorage).
+  const write = (io && io.write) || localStorage;
+  // 이 PC 전용 설정은 지우기 전에 따로 떠 두었다가 그대로 되돌려 놓는다.
+  const preserved = MN_BACKUP_LOCAL_ONLY_KEYS
+    .map(key => [key, localStorage.getItem(key)])
+    .filter(([, value]) => value != null);
+  write.clear();
+  for (const key of Object.keys(snapshot)){
+    if (mnBackupIsLocalOnlyKey(key)) continue;
+    if (typeof snapshot[key] !== "string") throw new MnBackupFormatError("damaged");
+    write.setItem(key, snapshot[key]);
+  }
+  for (const [key, value] of preserved) write.setItem(key, value);
+  write.setItem(MN_BACKUP_PENDING_RESTORE_KEY, JSON.stringify({
     restoredAt:Date.now(),
     boards:Array.isArray(openBoards) ? openBoards.map(mnBackupOpenBoardDescriptor).filter(board =>
       typeof board === "string" ? !!board : !!board.recoveryName
@@ -530,7 +638,10 @@ async function mnBackupPushAppState(){
   } catch(_){}
 }
 
+let mnBackupRestoreInProgress = false;
+
 async function mnBackupRestore(file){
+  if (mnBackupRestoreInProgress) return false;
   let parsed;
   if (typeof showLoading === "function") showLoading("백업 ZIP 확인 중…");
   try {
@@ -567,10 +678,14 @@ async function mnBackupRestore(file){
     "이 백업(" + created + ")으로 복원할까요?\n\n현재의 미저장 작업·메모·복구 데이터와 설정이 백업 내용으로 교체됩니다.",
     "복원", "취소"
   );
-  if (!ok) return false;
+  if (!ok || mnBackupRestoreInProgress) return false;
 
   if (typeof showLoading === "function") showLoading("백업 내용 복원 중…");
+  let io;
   try {
+    // 차단을 설치하지 못하면 저장소를 건드리지 않고 아래 실패 처리로 간다.
+    io = mnBackupPauseLocalStorage();
+    mnBackupRestoreInProgress = true;
     await mnBackupEnsureDbs();
     for (const dbDump of parsed.decodedDatabases){
       for (const storeDump of dbDump.stores){
@@ -578,12 +693,14 @@ async function mnBackupRestore(file){
       }
     }
     await mnBackupRestoreWorkspace(parsed.workspace, !!parsed.manifest.workspacePresent);
-    mnBackupReplaceLocalStorage(parsed.localStorageData, parsed.manifest.openBoards);
+    mnBackupReplaceLocalStorage(parsed.localStorageData, parsed.manifest.openBoards, io);
     await mnBackupPushAppState();
     toast("백업을 복원했어요. 프로그램을 다시 불러옵니다.", 2600, { type:"success" });
     setTimeout(() => location.reload(), 700);
     return true;
   } catch(error){
+    if (io) io.resume();
+    mnBackupRestoreInProgress = false;
     console.error("backup restore failed:", error);
     toast(error instanceof MnBackupFormatError ? mnBackupFormatMessage(error)
       : "백업을 복원하지 못했어요. 현재 데이터는 가능한 범위에서 유지됩니다.", 5200, { type:"error" });
@@ -603,27 +720,20 @@ function mnBackupFinishPendingRestore(){
     pending = JSON.parse(localStorage.getItem(MN_BACKUP_PENDING_RESTORE_KEY) || "null");
     localStorage.removeItem(MN_BACKUP_PENDING_RESTORE_KEY);
   } catch(_){}
-  const boards = Array.isArray(pending && pending.boards) ? pending.boards : [];
-  const regularBoards = boards.filter(board => !board || typeof board !== "object");
-  const memoBoards = boards.map(mnBackupOpenBoardDescriptor).filter(board => board && typeof board === "object");
-  let count = regularBoards.length;
-  for (const name of regularBoards){
-    const match = /^화이트보드(?: (\d+))?$/.exec(String(name || ""));
-    if (match) count = Math.max(count, Number(match[1]) || 1);
-  }
-  for (let index = 0; index < count; index++){
-    try { newWhiteboard(); } catch(error){ console.warn("backup board restore skipped:", error); break; }
-  }
-  for (const board of memoBoards){
-    try {
-      newWhiteboard({ name:board.name, recoveryName:board.recoveryName, memoBlockId:board.memoBlockId });
-    } catch(error){ console.warn("backup memo board restore skipped:", error); }
+  if (typeof newWhiteboard !== "function") return;
+  const opened = (typeof docs === "undefined" ? [] : [...docs])
+    .filter(doc => doc && doc.kind === "board")
+    .map(mnBackupBoardIdentity);
+  for (const options of mnBackupMissingBoards(pending && pending.boards, opened)){
+    try { newWhiteboard(options); }
+    catch(error){ console.warn("backup board restore skipped:", error); }
   }
 }
 
 const MNBackup = Object.freeze({
   exportBackup:mnBackupExport,
   restoreBackup:mnBackupRestore,
+  isRestoring:() => mnBackupRestoreInProgress,
   hasPendingRestore:mnBackupHasPendingRestore,
   finishPendingRestore:mnBackupFinishPendingRestore,
   validateManifest:validateMnBackupManifest
@@ -632,6 +742,8 @@ const MNBackup = Object.freeze({
 if (typeof module === "object" && module.exports){
   module.exports = {
     MN_BACKUP_MAGIC, MN_BACKUP_VERSION, MnBackupFormatError, MnBackupPreparationError,
-    validateMnBackupManifest, mnBackupStamp, mnBackupPreparationMessage, mnBackupOpenBoardDescriptor
+    validateMnBackupManifest, mnBackupStamp, mnBackupPreparationMessage, mnBackupOpenBoardDescriptor,
+    mnBackupBoardIdentity, mnBackupMissingBoards,
+    MN_BACKUP_LOCAL_ONLY_KEYS, mnBackupIsLocalOnlyKey
   };
 }
