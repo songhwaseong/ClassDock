@@ -4,7 +4,7 @@
    따라치기(music-editor.js)와 형제지만 규칙이 정반대인 곳이 셋이다.
    · 악보를 보여 주지 않는다  — 따라치기는 악보가 교본이지만 여기서는 악보가 곧 정답표다.
    · 틀려도 진도가 나간다     — 정답을 바로 들려주는 것이 학습 신호다. 악보 위 위치를 잃을 일도 없다.
-   · 다시 듣기를 제한한다     — 몇 번이고 다시 들으면 시행착오 게임이 된다.
+   · 다시 듣기 횟수를 고른다  — 문제마다 1~10회 또는 무제한으로 연습한다.
 
    문제를 만드는 규칙은 music-model.js(musicEarQuestions 등)에 순수 함수로 있고, 여기서는
    그 문제를 소리로 내고 답을 받아 채점만 한다. 입력(자판·MIDI·도레미 버튼)은 편집기가
@@ -12,7 +12,8 @@
 const MNMusicEarTest = (() => {
   const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
   const BLACK_PCS = [1, 3, 6, 8, 10];
-  const REPLAY_LIMIT = 1;              // 문제마다 다시 들을 수 있는 횟수
+  const REPLAY_LIMIT = 1;              // 다시 듣기 기본값(문제마다)
+  const REPLAY_LIMITS = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, "unlimited"]);
   const DISTRACTOR_GAP_MS = 750;       // 간섭음이 끝나고 문제 음이 나오기까지
   const REVEAL_MS = 1200;              // 정답을 보여 주고 다음 문제로 넘어가기까지
   const FIRST_MS = 450;                // 시작 버튼을 누르고 첫 소리까지(패널이 먼저 보이게)
@@ -35,7 +36,7 @@ const MNMusicEarTest = (() => {
 
     const state = {
       active:false, phase:"idle", level:null, questions:[], pos:0, records:[],
-      askedAt:0, replays:0, pendingPc:null, reference:false, timers:[]
+      askedAt:0, replays:0, replayLimit:REPLAY_LIMIT, pendingPc:null, reference:false, timers:[]
     };
 
     /* ----- 화면 ----- */
@@ -164,9 +165,11 @@ const MNMusicEarTest = (() => {
       for (const [pc, button] of keyButtons) button.disabled = !asking || (!level.black && BLACK_PCS.includes(pc));
       octaveRow.hidden = state.phase !== "octave";
       for (const button of octaveButtons.values()) button.disabled = state.phase !== "octave";
-      replayBtn.disabled = !asking || state.replays >= REPLAY_LIMIT;
-      replayBtn.textContent = state.replays >= REPLAY_LIMIT
-        ? "🔊 다시 듣기 (다 썼어요)" : `🔊 다시 듣기 (${REPLAY_LIMIT - state.replays}번 남음)`;
+      replayBtn.disabled = !asking || state.replays >= state.replayLimit;
+      replayBtn.textContent = state.replayLimit === Infinity
+        ? "🔊 다시 듣기 (무제한)"
+        : state.replays >= state.replayLimit
+          ? "🔊 다시 듣기 (다 썼어요)" : `🔊 다시 듣기 (${state.replayLimit - state.replays}번 남음)`;
     }
     function syncProgress(){
       const total = state.questions.length;
@@ -317,7 +320,7 @@ const MNMusicEarTest = (() => {
 
     function replay(){
       if (!state.active || state.phase !== "ask") return;
-      if (state.replays >= REPLAY_LIMIT){
+      if (state.replays >= state.replayLimit){
         say("이 문제는 다시 듣기를 다 썼어요. 들리는 대로 눌러 보세요.", 2000);
         return;
       }
@@ -365,6 +368,8 @@ const MNMusicEarTest = (() => {
       if (!built.questions.length) return false;
       state.active = true;
       state.reference = !!setup.reference;
+      state.replayLimit = setup.replayLimit === "unlimited" ? Infinity
+        : REPLAY_LIMITS.includes(Number(setup.replayLimit)) ? Number(setup.replayLimit) : REPLAY_LIMIT;
       el.hidden = false;
       beginRound(built);
       fire("onStart", built.level);
@@ -418,5 +423,5 @@ const MNMusicEarTest = (() => {
     };
   }
 
-  return { create, LEVELS:MUSIC_EAR_LEVELS, COUNTS:MUSIC_EAR_COUNTS, REPLAY_LIMIT };
+  return { create, LEVELS:MUSIC_EAR_LEVELS, COUNTS:MUSIC_EAR_COUNTS, REPLAY_LIMIT, REPLAY_LIMITS };
 })();

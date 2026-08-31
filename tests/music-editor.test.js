@@ -100,7 +100,8 @@ test("다중 악기 파트는 추가·전환·삭제·이름·음량·음소거�
   assert.match(editorSource, /part\.name = musicClampText\(partNameInput\.value, 80\)/);
   assert.match(editorSource, /part\.muted = !part\.muted/);
   assert.match(editorSource, /part\.volume = musicClampPartVolume\(value\)/);
-  assert.match(editorSource, /musicButton\("▶ 현재 파트"/);
+  assert.match(editorSource, /musicButton\("▶ 선택 파트"/);
+  assert.match(editorSource, /label:"현재 악기 전체 재생"/);
   assert.match(editorSource, /partId:options\.partId/);
   assert.match(editorSource, /sheet\.parts = restored\.parts/);
   assert.match(editorSource, /syncPartControls\(\)/);
@@ -790,11 +791,11 @@ test("따라치기·재생과 서로 배타이고, 도구막대를 접어도 우
   assert.match(editorSource, /earTest\.destroy\(\);/);
 });
 
-test("절대음감 연습이 되도록 잔상·시행착오를 막는다", () => {
+test("음감 연습은 다시 듣기 기본 1회와 간섭음을 제공한다", () => {
   const earSource = read("src/js/music-eartest.js");
-  // 다시 듣기를 열어 두면 시행착오 게임이 된다.
+  // 기본값은 1회이고, 사용자가 선택한 문제별 제한을 따른다.
   assert.match(earSource, /const REPLAY_LIMIT = 1;/);
-  assert.match(earSource, /if \(state\.replays >= REPLAY_LIMIT\)\{/);
+  assert.match(earSource, /if \(state\.replays >= state\.replayLimit\)\{/);
   // 문제 사이에 간섭음을 넣어 앞 음과 견주어 맞히지 못하게 한다(그러지 않으면 상대음감 검사가 된다).
   assert.match(earSource, /playMidis\(musicEarDistractor\(\), \(\) => later\(startAsk, DISTRACTOR_GAP_MS\)\)/);
   assert.match(earSource, /askCurrent\(true\)/);
@@ -818,12 +819,20 @@ test("샘플 음색은 실제로 소리가 예약된 뒤에만 답과 반응 시
   assert.match(earSource, /function destroy\(\)\{\s+clearTimers\(\);\s+MNMusicAudio\.cancelPreview\(\)/);
 });
 
-test("단계·문항 수·기준음은 보기 상태라 악보에 저장하지 않는다", () => {
+test("단계·문항 수·다시 듣기·기준음은 보기 상태라 악보에 저장하지 않는다", () => {
   // 배율·도구막대와 같은 규칙 — .msheet 와 되돌리기 스냅샷에는 들어가지 않는다.
   assert.match(editorSource, /const MUSIC_EAR_LEVEL_KEY = "musicEarLevel"/);
   assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_COUNT_KEY, earCountSelect\.value\)/);
   assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_REFERENCE_KEY, String\(earReference\)\)/);
+  assert.match(editorSource, /const MUSIC_EAR_REPLAY_KEY = "musicEarReplayLimit"/);
+  assert.match(editorSource, /localStorage\.getItem\(MUSIC_EAR_REPLAY_KEY\)/);
+  assert.match(editorSource, /localStorage\.setItem\(MUSIC_EAR_REPLAY_KEY, earReplaySelect\.value\)/);
+  assert.match(editorSource, /for \(const limit of MNMusicEarTest\.REPLAY_LIMITS\)/);
+  assert.match(editorSource, /REPLAY_LIMITS\.some\(\(limit\) => String\(limit\) === savedReplay\)/);
+  assert.match(editorSource, /earReplaySelect\.disabled = on/);
+  assert.match(editorSource, /replayLimit:earReplaySelect\.value/);
   assert.doesNotMatch(editorSource, /sheet\.earLevel/);
+  assert.doesNotMatch(editorSource, /sheet\.earReplay/);
 });
 
 test("가사는 절마다 한 줄로 그리고 이어치기 막대로 이어서 넣는다", () => {

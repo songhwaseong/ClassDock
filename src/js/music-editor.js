@@ -339,7 +339,9 @@ async function mountMusicEditor(doc){
   let lyricVerse = 1;              // 지금 가사를 넣는 절 — 배율처럼 보기 상태라 .msheet 에 담지 않는다
   let lyricEntry = null;           // 이어치기 중이면 { index } — 가사를 붙일 수 있는 음표 차례
   let staveBoxes = [];              // 마디별 조판 좌표 — 오선 클릭을 마디·음높이로 옮길 때 쓴다
-  let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — "이 단을 메모로"가 쓴다
+  let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — 선택 재생·"이 단을 메모로"가 쓴다
+  let playbackMeasure = 0;          // 재생할 줄의 기준 마디(0부터). 줄바꿈·창 폭이 바뀌어도 이 마디를 따른다
+  let playbackPartId = sheet.activePartId;
   let selection = null;             // { measure:0부터, staff:"treble"|"bass", voice:1|2, id }
   let activeStaff = "treble";       // 다음 음을 넣을 손/오선
   let activeVoice = 1;              // 같은 오선 안의 독립 성부
@@ -966,7 +968,12 @@ async function mountMusicEditor(doc){
   playBar.className = "music-play";
 
   const playAllBtn = musicButton("▶ 전체 재생");
-  const playActivePartBtn = musicButton("▶ 현재 파트", "현재 편집 중인 악기 파트만 재생합니다");
+  const playSelectedPartBtn = musicButton("▶ 선택 파트", "옆에서 고른 오선 줄만 현재 악기로 재생합니다");
+  const playbackLineSelect = document.createElement("select");
+  playbackLineSelect.className = "music-timbre music-playback-line music-toolvis-playback";
+  playbackLineSelect.title = "재생할 오선 줄 — 음표를 선택하거나 입력하면 해당 줄을 자동으로 고릅니다";
+  playbackLineSelect.setAttribute("aria-label", "선택 파트로 재생할 오선 줄");
+  playSelectedPartBtn.disabled = playbackLineSelect.disabled = true;
   const playRightBtn = musicButton("▶ 오른손", "높은음자리표만 재생합니다");
   const playLeftBtn = musicButton("▶ 왼손", "낮은음자리표만 재생합니다");
   playRightBtn.disabled = playLeftBtn.disabled = !sheet.grandStaff;
@@ -1071,9 +1078,10 @@ async function mountMusicEditor(doc){
   practiceWrap.append(practiceBtn, practiceStaffSelect, practiceInfo);
 
   /* 음감 테스트 — 악보를 감추고 소리만 듣고 음이름을 맞힌다(진행·채점은 music-eartest.js).
-     단계·문항 수·기준음은 배율·도구막대와 같은 보기 상태라 .msheet 에도 되돌리기에도 넣지 않는다. */
+     단계·문항 수·다시 듣기·기준음은 배율·도구막대와 같은 보기 상태라 .msheet 에도 되돌리기에도 넣지 않는다. */
   const MUSIC_EAR_LEVEL_KEY = "musicEarLevel";
   const MUSIC_EAR_COUNT_KEY = "musicEarCount";
+  const MUSIC_EAR_REPLAY_KEY = "musicEarReplayLimit";
   const MUSIC_EAR_REFERENCE_KEY = "musicEarReference";
   const earWrap = document.createElement("span");
   earWrap.className = "music-ear-controls";
@@ -1100,6 +1108,17 @@ async function mountMusicEditor(doc){
     earCountSelect.appendChild(option);
   }
   earCountSelect.value = String(MNMusicEarTest.COUNTS[1] || MNMusicEarTest.COUNTS[0]);
+  const earReplaySelect = document.createElement("select");
+  earReplaySelect.className = "music-timbre music-ear-replay-limit";
+  earReplaySelect.title = "음감 테스트 문제마다 다시 듣기 횟수 (첫 재생 제외)";
+  earReplaySelect.setAttribute("aria-label", earReplaySelect.title);
+  for (const limit of MNMusicEarTest.REPLAY_LIMITS){
+    const option = document.createElement("option");
+    option.value = String(limit);
+    option.textContent = limit === "unlimited" ? "다시 듣기 무제한" : `다시 듣기 ${limit}회`;
+    earReplaySelect.appendChild(option);
+  }
+  earReplaySelect.value = String(MNMusicEarTest.REPLAY_LIMIT);
   const earReferenceBtn = musicButton("🎵 기준음",
     "시작할 때 가온다(도4)를 들려줍니다 — 기준음이 있으면 상대음감 연습, 없으면 절대음감 연습");
   earReferenceBtn.setAttribute("aria-pressed", "false");
@@ -1111,9 +1130,13 @@ async function mountMusicEditor(doc){
     }
     const savedCount = localStorage.getItem(MUSIC_EAR_COUNT_KEY);
     if (savedCount && MNMusicEarTest.COUNTS.includes(Number(savedCount))) earCountSelect.value = savedCount;
+    const savedReplay = localStorage.getItem(MUSIC_EAR_REPLAY_KEY);
+    if (MNMusicEarTest.REPLAY_LIMITS.some((limit) => String(limit) === savedReplay)) {
+      earReplaySelect.value = savedReplay;
+    }
     earReference = localStorage.getItem(MUSIC_EAR_REFERENCE_KEY) === "true";
   } catch(_){}
-  earWrap.append(earBtn, earLevelSelect, earCountSelect, earReferenceBtn);
+  earWrap.append(earBtn, earLevelSelect, earCountSelect, earReplaySelect, earReferenceBtn);
 
   const earTest = MNMusicEarTest.create({
     timbre:() => sheet.timbre,
@@ -1172,7 +1195,7 @@ async function mountMusicEditor(doc){
   const status = document.createElement("span");
   status.className = "music-status";
 
-  playAllBtn.classList.add("music-toolvis-playback"); playActivePartBtn.classList.add("music-toolvis-playback");
+  playAllBtn.classList.add("music-toolvis-playback"); playSelectedPartBtn.classList.add("music-toolvis-playback");
   playRightBtn.classList.add("music-toolvis-playback");
   playLeftBtn.classList.add("music-toolvis-playback"); stopBtn.classList.add("music-toolvis-playback");
   rangeWrap.classList.add("music-toolvis-range"); playPartBtn.classList.add("music-toolvis-range");
@@ -1194,7 +1217,7 @@ async function mountMusicEditor(doc){
   memoBtn.classList.add("music-toolvis-memo");
   printBtn.classList.add("music-toolvis-print");
   zoomWrap.classList.add("music-toolvis-zoom");
-  playBar.append(playAllBtn, playActivePartBtn, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
+  playBar.append(playAllBtn, playSelectedPartBtn, playbackLineSelect, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
     countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, practiceAudioBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
@@ -1698,6 +1721,45 @@ async function mountMusicEditor(doc){
     return { from, to };
   }
 
+  // 오선 줄은 악기 파트와 다르다. 배열 위치로 범위를 잡고, 화면에만 실제 마디 번호를 표시한다.
+  function syncPlaybackLineControls(rebuild){
+    if (playbackPartId !== sheet.activePartId){
+      playbackPartId = sheet.activePartId;
+      playbackMeasure = 0;
+    }
+    playbackMeasure = Math.max(0, Math.min(sheet.measures.length - 1, playbackMeasure));
+    if (rebuild){
+      playbackLineSelect.replaceChildren();
+      scoreLines.forEach((indexes, lineIndex) => {
+        const option = document.createElement("option");
+        option.value = String(lineIndex);
+        const first = measureNumberLabel(indexes[0]);
+        const last = measureNumberLabel(indexes[indexes.length - 1]);
+        option.textContent = `${lineIndex + 1}번째 오선 (${first === last ? first : `${first}~${last}`}마디)`;
+        playbackLineSelect.appendChild(option);
+      });
+    }
+    const lineIndex = scoreLines.findIndex((indexes) => indexes.includes(playbackMeasure));
+    playbackLineSelect.value = lineIndex < 0 ? "" : String(lineIndex);
+    const locked = root.classList.contains("is-running") || practice.active || earTest.active();
+    playSelectedPartBtn.disabled = playbackLineSelect.disabled = locked || lineIndex < 0;
+  }
+
+  function selectPlaybackLine(lineIndex){
+    const indexes = scoreLines[lineIndex];
+    if (!indexes || !indexes.length) return;
+    playbackMeasure = indexes[0];
+    syncPlaybackLineControls();
+  }
+
+  function startSelectedPart(){
+    syncPlaybackLineControls();
+    const indexes = scoreLines.find((line) => line.includes(playbackMeasure));
+    if (!indexes || !indexes.length) return;
+    const part = musicActivePart(sheet);
+    startPlay({ from:indexes[0] + 1, to:indexes[indexes.length - 1] + 1 }, { partId:part && part.id });
+  }
+
   /* ----- 보기 배율 -----
      SVG의 transform만 바꾸면 스크롤 영역이 원래 크기로 남는다. 실제 표시 너비·높이를 바꿔
      스크롤바와 클릭 좌표를 함께 맞춘다(scorePoint가 화면 좌표를 SVG 좌표로 다시 환산한다). */
@@ -1803,6 +1865,7 @@ async function mountMusicEditor(doc){
     pitchGuideEl = null;
     scoreHost.replaceChildren();
     if (!VF){
+      syncPlaybackLineControls(true);
       scoreHost.textContent = "악보 그리기 라이브러리를 불러오지 못했어요.";
       return;
     }
@@ -2153,8 +2216,11 @@ async function mountMusicEditor(doc){
       scoreHost.scrollTop = previousScroll.top;
       paintSelection();
       paintPractice();          // 배율·창 크기가 바뀌어 다시 그려도 따라치기 진도 표시가 살아남는다
+      syncPlaybackLineControls(true);
     } catch(error){
       console.warn("악보를 그리지 못했습니다:", error);
+      scoreLines = [];
+      syncPlaybackLineControls(true);
       scoreHost.textContent = "악보를 그리지 못했어요. 파일이 손상되었을 수 있어요.";
     }
   }
@@ -2193,7 +2259,12 @@ async function mountMusicEditor(doc){
     const staff = options && options.staff === "bass" ? "bass" : activeStaff;
     const voice = options && Number(options.voice) === 2 ? 2 : activeVoice;
     selection = (noteId == null) ? null : { measure:measureIndex, staff, voice, id:noteId };
-    if (selection){ activeStaff = staff; activeVoice = voice; }
+    if (selection){
+      activeStaff = staff;
+      activeVoice = voice;
+      playbackMeasure = measureIndex;
+      syncPlaybackLineControls();
+    }
     paintSelection();
     syncTools();
     updateMeasureProgress();
@@ -3110,6 +3181,7 @@ async function mountMusicEditor(doc){
   function addStaffLine(){
     // 새 단은 줄바꿈 표시를 가진 빈 마디로 시작한다. 뒤의 ＋마디는 이 단에 이어 붙는다.
     sheet.measures.push(musicMeasure([], { lineBreakBefore:true }));
+    playbackMeasure = sheet.measures.length - 1;
     afterEdit();
     toInput.value = String(musicMeasureNumberAt(sheet.measures, sheet.measures.length - 1));
     clampRange();
@@ -3421,9 +3493,14 @@ async function mountMusicEditor(doc){
   function playbackContextItems(targetMeasure){
     const measure = targetMeasure + 1;
     const running = MNMusicAudio.playing();
+    const targetLine = scoreLines.findIndex((indexes) => indexes.includes(targetMeasure));
     return [
       { label:"전체 재생", action:() => startPlay(null), disabled:running },
-      { label:"현재 파트만 재생", action:() => {
+      { label:"선택 파트 재생 (이 오선 줄)", action:() => {
+        selectPlaybackLine(targetLine);
+        startSelectedPart();
+      }, disabled:running || targetLine < 0 },
+      { label:"현재 악기 전체 재생", action:() => {
         const part = musicActivePart(sheet); startPlay(null, { partId:part && part.id });
       }, disabled:running },
       { label:"오른손만 재생", action:() => startPlay(null, { staff:"treble" }), disabled:running || !sheet.grandStaff },
@@ -4195,10 +4272,12 @@ async function mountMusicEditor(doc){
     root.classList.toggle("is-practice", on);        // 머리말·도구상자를 통째로 잠근다(CSS)
     scoreHost.classList.toggle("is-practice", on);   // 악보를 흐린 교본으로 깐다(CSS)
     for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
+                           playSelectedPartBtn, playbackLineSelect,
                            speedSelect, countInBtn, metronomeBtn, fromInput, toInput]){
       control.disabled = on;
     }
     if (!on) syncTools();                            // 오른손·왼손 재생 버튼은 대보표일 때만 다시 켠다
+    syncPlaybackLineControls();
   }
 
   /* ----- 음감 테스트(듣고 음 맞히기) -----
@@ -4212,6 +4291,7 @@ async function mountMusicEditor(doc){
     earBtn.textContent = on ? "■ 그만두기" : "🎧 음감 테스트";
     earLevelSelect.disabled = on;
     earCountSelect.disabled = on;
+    earReplaySelect.disabled = on;
     earReferenceBtn.disabled = on;
     keyboardComposeBtn.disabled = on;
     keyboardSettingsBtn.disabled = on;
@@ -4219,10 +4299,12 @@ async function mountMusicEditor(doc){
     // 테스트 중에는 대기 화면이 덮지 않아야 한다 — 재생과 같은 규칙(.is-running).
     root.classList.toggle("is-running", on);
     for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
+                           playSelectedPartBtn, playbackLineSelect,
                            speedSelect, countInBtn, metronomeBtn, fromInput, toInput, practiceBtn]){
       control.disabled = on;
     }
     if (!on) syncTools();
+    syncPlaybackLineControls();
   }
 
   function stopEarTest(){
@@ -4244,6 +4326,7 @@ async function mountMusicEditor(doc){
     return earTest.start({
       level:Number(earLevelSelect.value) || 1,
       count:Number(earCountSelect.value) || 10,
+      replayLimit:earReplaySelect.value,
       reference:earReference
     });
   }
@@ -4261,6 +4344,9 @@ async function mountMusicEditor(doc){
   });
   earCountSelect.addEventListener("change", () => {
     try { localStorage.setItem(MUSIC_EAR_COUNT_KEY, earCountSelect.value); } catch(_){}
+  });
+  earReplaySelect.addEventListener("change", () => {
+    try { localStorage.setItem(MUSIC_EAR_REPLAY_KEY, earReplaySelect.value); } catch(_){}
   });
   earReferenceBtn.addEventListener("click", () => {
     earReference = !earReference;
@@ -4391,7 +4477,6 @@ async function mountMusicEditor(doc){
     if (on && keyboardComposeActive) setKeyboardCompose(false, false);
     stopBtn.disabled = !on;
     playAllBtn.disabled = on;
-    playActivePartBtn.disabled = on;
     playRightBtn.disabled = on || !sheet.grandStaff;
     playLeftBtn.disabled = on || !sheet.grandStaff;
     playPartBtn.disabled = on;
@@ -4417,6 +4502,7 @@ async function mountMusicEditor(doc){
     // 재생 중에는 대기 화면이 뜨지 않아야 한다. screensaverBusy() 가 이미 .is-running 을
     // "실행 중"으로 보고 있어서(파이썬·노트북과 같은 규칙) 이 클래스만 붙였다 떼면 된다.
     root.classList.toggle("is-running", on);
+    syncPlaybackLineControls();
   }
 
   function syncPracticeControls(){
@@ -4534,10 +4620,8 @@ async function mountMusicEditor(doc){
   }
 
   playAllBtn.addEventListener("click", () => startPlay(null));
-  playActivePartBtn.addEventListener("click", () => {
-    const part = musicActivePart(sheet);
-    startPlay(null, { partId:part && part.id });
-  });
+  playSelectedPartBtn.addEventListener("click", startSelectedPart);
+  playbackLineSelect.addEventListener("change", () => selectPlaybackLine(Number(playbackLineSelect.value)));
   playRightBtn.addEventListener("click", () => startPlay(null, { staff:"treble" }));
   playLeftBtn.addEventListener("click", () => startPlay(null, { staff:"bass" }));
   playPartBtn.addEventListener("click", () => startPlay(clampRange()));
