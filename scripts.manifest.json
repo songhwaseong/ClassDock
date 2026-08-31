@@ -72,6 +72,8 @@
     "timeline.js",
     "concept-doc.js",
     "study-doc.js",
+    "remote-files.js",
+    "remote-files-ui.js",
     "remote-terminal.js",
     "lesson-replay.js",
     "diff-viewer.js",
@@ -187,6 +189,8 @@
     {
       "name": "learning-tools",
       "scripts": [
+        "remote-files.js",
+        "remote-files-ui.js",
         "remote-terminal.js",
         "lesson-replay.js",
         "diff-viewer.js",
@@ -431,7 +435,12 @@
     ],
     "remote-terminal.js": [
       "lazy.js",
+      "remote-files-ui.js",
       "interaction-core.js"
+    ],
+    "remote-files-ui.js": [
+      "remote-files.js",
+      "state.js"
     ],
     "recent-files.js": [
       "documents.js"

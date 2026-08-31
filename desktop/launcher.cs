@@ -866,6 +866,8 @@ class ClassDockLauncher
         }
         if (method == "GET")
         {
+            if (path.StartsWith("/ssh-file-job?", StringComparison.Ordinal)
+                || path.StartsWith("/ssh-file-content?", StringComparison.Ordinal)) return true;
             if (path == "/workspace-load") return true;
             if (path.StartsWith("/exam-receive-status", StringComparison.Ordinal)) return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
@@ -2526,6 +2528,34 @@ class ClassDockLauncher
                 {
                     ClassDockSshTerminal.Stop(QueryValue(path, "id"));
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/ssh-file-", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes(ClassDockSshTerminal.FileRequest(path.Substring("/ssh-file-".Length), body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        string error = ex.Message.StartsWith("ssh-file-", StringComparison.Ordinal) ? ex.Message : "ssh-file-request";
+                        WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/ssh-file-job?", StringComparison.Ordinal))
+                {
+                    try { WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ClassDockSshTerminal.FileStatus(QueryValue(path, "id")))); }
+                    catch { WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-file-expired")); }
+                }
+                else if (method == "GET" && path.StartsWith("/ssh-file-content?", StringComparison.Ordinal))
+                {
+                    try { WriteResponse(stream, "200 OK", "application/octet-stream", ClassDockSshTerminal.FileContent(QueryValue(path, "id"))); }
+                    catch { WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ssh-file-expired")); }
                 }
                 else if (method == "POST" && path == "/ssh-upload-start")
                 {

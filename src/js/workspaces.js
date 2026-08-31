@@ -400,6 +400,8 @@ function switchWorkspace(id, options={}){
   activeId = 0; state = null; viewer = null;
   if (wanted) setActiveDoc(wanted); else setActiveDoc(0);
   renderSidebar(); refreshChrome(); applyStudyLayout(); renderWorkspaceUi(); workspaceCloseCtxMenu(); workspaceSchedulePersist();
+  // 작업공간에 묶인 패널(원격 터미널 등)이 전환을 따라오게 알린다.
+  try { window.dispatchEvent(new CustomEvent("mnworkspaceswitch", { detail:{ id:target.id } })); } catch(_){}
   if (!options.quiet) toast("'" + target.name + "' 작업공간으로 전환했어요.", 1500); return true;
 }
 
@@ -470,6 +472,8 @@ async function deleteWorkspace(id){
     const board = rec.boards.find(row => row.key === key);
     if (board && !fallback.boards.some(row => row.key === key)) fallback.boards.push(board);
   });
+  // 작업공간에 묶인 패널이 세션과 화면을 정리하도록 지우기 직전에 알린다.
+  try { window.dispatchEvent(new CustomEvent("mnworkspacedelete", { detail:{ id } })); } catch(_){}
   workspaceRegistry.items = workspaceRegistry.items.filter(item => item.id !== id);
   if (activeWorkspaceId === id) activeWorkspaceId = fallback.id;
   const keyToDoc = new Map(docs.map(doc => [workspaceDocKey(doc), doc]));

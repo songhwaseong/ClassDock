@@ -55,6 +55,89 @@ test("원격 터미널은 문서와 좌우 도킹하고 연결을 유지한 채 
   assert.match(css, /main\.ssh-dock-collapsed \.ssh-terminal-card\{display:none\}/);
 });
 
+test("원격 터미널을 닫으면 dock이 레이아웃에서 빠진다", () => {
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // .ssh-dock 은 display:flex 를 직접 선언하므로 hidden 속성만으로는 숨겨지지 않는다.
+  assert.match(css, /\.ssh-dock\[hidden\][^{]*\{[^}]*display:none/);
+  assert.match(ui, /dock\.hidden = true/);
+  assert.match(ui, /divider\.hidden = true/);
+});
+
+test("원격 터미널은 인스턴스 팩터리로 만들고 전역 리스너는 매니저가 한 번만 건다", () => {
+  const factoryStart = ui.indexOf("const createInstance = (workspaceId) => {");
+  const factoryEnd = ui.indexOf("return { open, close, sendResize, stopForUnload, activate, deactivate, destroy };");
+  assert.ok(factoryStart > 0 && factoryEnd > factoryStart);
+  const factory = ui.slice(factoryStart, factoryEnd);
+  // 세션·DOM 상태는 모듈이 아닌 팩터리 클로저에 있어야 인스턴스를 여러 개 띄울 수 있다.
+  assert.match(factory, /let terminal = null, sessionId = ""/);
+  assert.match(factory, /let dock = null, divider = null/);
+  assert.doesNotMatch(ui.slice(0, factoryStart), /let terminal = null|let dock = null/);
+  // 창·언로드 리스너를 인스턴스마다 걸면 인스턴스 수만큼 중복 실행된다.
+  assert.doesNotMatch(factory, /window\.addEventListener\("(?:resize|beforeunload)"/);
+  assert.doesNotMatch(factory, /visualViewport/);
+  assert.match(ui, /const instances = new Map\(\)/);
+  assert.match(ui, /if \(globalListenersBound\) return;/);
+  assert.match(ui, /window\.addEventListener\("beforeunload", \(\) => \{ instances\.forEach\(\(instance\) => instance\.stopForUnload\(\)\); \}\)/);
+  assert.match(ui, /const open = \(\) => instanceFor\(currentWorkspaceId\(\)\)\.open\(\)/);
+  assert.match(ui, /trigger\.addEventListener\("click", open\)/);
+});
+
+test("원격 터미널은 작업공간마다 따로 열리고 전환·삭제를 따라간다", () => {
+  const workspaces = fs.readFileSync(path.join(root, "src", "js", "workspaces.js"), "utf8");
+  // workspaces.js 가 remote-terminal.js 보다 먼저 로드되므로 직접 부르지 않고 이벤트로 알린다.
+  assert.ok(manifest.localScripts.indexOf("workspaces.js") < manifest.localScripts.indexOf("remote-terminal.js"));
+  assert.doesNotMatch(workspaces, /MNRemoteTerminal/);
+  assert.match(workspaces, /dispatchEvent\(new CustomEvent\("mnworkspaceswitch", \{ detail:\{ id:target\.id \} \}\)\)/);
+  assert.match(workspaces, /dispatchEvent\(new CustomEvent\("mnworkspacedelete", \{ detail:\{ id \} \}\)\)/);
+  assert.match(ui, /window\.addEventListener\("mnworkspaceswitch", applyActiveWorkspace\)/);
+  assert.match(ui, /window\.addEventListener\("mnworkspacedelete"/);
+  assert.match(ui, /const createInstance = \(workspaceId\) => \{/);
+  assert.match(ui, /instanceFor\(currentWorkspaceId\(\)\)/);
+  // 전환은 화면만 바꾸고 세션은 살려 둔다. 삭제할 때만 세션·xterm·DOM 을 정리한다.
+  const deactivateBody = ui.slice(ui.indexOf("const deactivate = () => {"), ui.indexOf("const destroy = async () => {"));
+  assert.match(deactivateBody, /dock\.hidden = true; divider\.hidden = true;/);
+  assert.doesNotMatch(deactivateBody, /disconnectSession|dispose|remove\(\)/);
+  assert.match(ui, /const destroy = async \(\) => \{[\s\S]*await disconnectSession\(false\);[\s\S]*terminal\.dispose\(\);[\s\S]*dock\.remove\(\);/);
+  assert.match(ui, /if \(instance\)\{ instances\.delete\(key\); instance\.destroy\(\); \}/);
+});
+
+test("도킹 배치는 작업공간별로 저장하고 세션·접힘 상태는 저장하지 않는다", () => {
+  assert.match(ui, /const DOCK_KEY = "classdockSshDockV3"/);
+  assert.match(ui, /const LEGACY_DOCK_KEY = "classdockSshDockV2"/);
+  assert.match(ui, /readDockStore\(\)\[workspaceId\] \|\| legacyDockState\(\)/);
+  assert.match(ui, /writeDockState\(workspaceId, \{ side:dockSide, width:Math\.round\(dockWidth\) \}\)/);
+  assert.doesNotMatch(ui, /localStorage\.setItem\([^\n]*(?:sessionId|panelOpen|dockCollapsed)/);
+  // 삭제된 작업공간의 배치가 저장소에 쌓이지 않아야 한다.
+  assert.match(ui, /const forgetDockState = \(workspaceId\) => \{/);
+  assert.match(ui, /if \(known\) Object\.keys\(store\)\.forEach/);
+});
+
+test("배경 작업공간의 SSH 폴링은 멈췄다가 돌아올 때 오프셋부터 이어 받는다", () => {
+  assert.match(ui, /let pollPaused = false, resumeWaiters = \[\]/);
+  assert.match(ui, /if \(pollPaused\)\{\s*await new Promise\(\(resolve\) => resumeWaiters\.push\(resolve\)\);\s*continue;\s*\}/);
+  assert.match(ui, /const resumePolling = \(\) => \{[\s\S]*waiters\.forEach\(\(resolve\) => resolve\(\)\);/);
+  // 멈출 때 오프셋이나 세션을 버리면 돌아왔을 때 출력이 어긋나거나 세션이 끊긴다.
+  const deactivateBody = ui.slice(ui.indexOf("const deactivate = () => {"), ui.indexOf("const destroy = async () => {"));
+  assert.match(deactivateBody, /pollPaused = true;/);
+  assert.doesNotMatch(deactivateBody, /outputOffset|sessionId = ""/);
+  // 돌아오거나 작업공간이 지워지면 멈춰 둔 루프를 반드시 깨워야 한다.
+  assert.match(ui, /const activate = \(\) => \{\s*resumePolling\(\);/);
+  assert.match(ui, /const destroy = async \(\) => \{\s*generation\+\+;\s*resumePolling\(\);/);
+  // 업로드는 사용자가 시작해 곧 끝나고 서버가 완료 결과를 15분만 들고 있어 멈추지 않는다.
+  const uploadLoop = ui.slice(ui.indexOf("const pollUploadLoop"), ui.indexOf("const startUpload"));
+  assert.doesNotMatch(uploadLoop, /pollPaused/);
+});
+
+test("동시 SSH 세션 상한을 넘기면 서버 상한과 같은 숫자로 안내한다", () => {
+  const limit = /const int MaxSessions = (\d+);/.exec(ssh);
+  assert.ok(limit);
+  assert.match(ssh, /if \(active >= MaxSessions\) throw new InvalidOperationException\("ssh-session-limit"\)/);
+  // 안내 문구의 숫자가 서버 상한과 어긋나면 사용자가 끊을 세션 수를 잘못 안다.
+  assert.match(ui, /if \(\/ssh-session-limit\/\.test\(raw\)\)/);
+  assert.ok(ui.includes("SSH 세션은 " + limit[1] + "개까지"));
+  assert.match(ui, /다른 작업공간의 터미널에서 연결을 끊은 뒤/);
+});
+
 test("SSH API는 로컬 실행 토큰으로 보호되고 EXE 빌드에 전용 백엔드가 포함된다", () => {
   assert.match(launcher, /path\.StartsWith\("\/ssh-"[\s\S]*return true/);
   assert.match(launcher, /ClassDockSshTerminal\.Open\(body\)/);
@@ -154,25 +237,25 @@ test("업로드 UI는 복수 파일·대상 디렉터리·재인증·진행률·
   assert.match(launcher, /ClassDockSshTerminal\.CancelUpload/);
 });
 
-test("원격 셸의 OSC 7 현재 경로를 우선 쓰고 감지 실패 시 명시적 pwd 요청과 홈 폴백을 제공한다", () => {
+test("OSC 7은 현재 연결의 자동 알림만 받으며 미지원 셸에 조회 명령을 보내지 않는다", () => {
   const api = uiApi();
   const parsed = api.parseOsc7Location("file://lab-server/home/student/My%20Files");
   assert.equal(parsed.host, "lab-server");
   assert.equal(parsed.path, "/home/student/My Files/");
   assert.equal(api.parseOsc7Location("https://lab-server/home/student"), null);
   assert.equal(api.parseOsc7Location("file://lab-server/../../tmp\nunsafe"), null);
-  assert.match(ui, /captureOsc7Locations\(diagnosticTail\)/);
-  assert.match(ui, /button\("현재 경로 가져오기"/);
-  assert.match(ui, /file:\/\/classdock-/);
-  assert.ok(ui.includes('\\"$PWD\\"'));
+  assert.match(ui, /captureOsc7Locations\(decoded\)/);
+  assert.doesNotMatch(ui, /button\("현재 경로 가져오기"/);
+  assert.match(ui, /location\.host !== "classdock-" \+ sessionId/);
+  assert.doesNotMatch(ui, /queueInput\("printf/);
   assert.match(ui, /currentRemoteDirectory \|\| "\.\/"/);
   assert.match(ui, /uploadPathInput\.addEventListener\("input", \(\) => \{ uploadPathIsAutomatic = false; \}\)/);
-  assert.match(ui, /uploadPathIsAutomatic \|\| \(probeMatch && pathProbeForcesInput\)/);
+  assert.match(ui, /uploadPathInput && uploadPathIsAutomatic && !uploadId/);
 });
 
 test("개인키는 사용자 전용 ACL 사본으로 접속하고 세션이 끝나면 사본을 지운다", () => {
   assert.match(ssh, /StagePrivateKey\(privateKey\.Path\)/);
-  assert.match(ssh, /BuildSshArguments\(host, port, user, authentication, stagedKeyPath\)/);
+  assert.match(ssh, /BuildSshArguments\(host, port, user, authentication, stagedKeyPath, sessionId\)/);
   assert.match(ssh, /session\.StagedKeyPath = stagedKeyPath;/);
   assert.match(ssh, /catch \{ WipeStagedPrivateKey\(stagedKeyPath\); throw; \}/);
   assert.match(ssh, /SetAccessRuleProtection\(true, false\)/);
@@ -329,10 +412,8 @@ test("실제 xterm 셀 크기와 하단 안전 여백으로 작업 표시줄 위
   assert.match(css, /\.ssh-xterm-host\{[^}]*overflow:hidden[^}]*padding:10px 12px 16px/);
 });
 
-test("업로드 파일 선택과 경로 감지 버튼은 공용 hover 색상에 덮이지 않는다", () => {
+test("업로드 파일 선택 버튼은 공용 hover 색상에 덮이지 않는다", () => {
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
   assert.match(css, /\.ssh-upload-picker \.btn:hover:not\(:disabled\)\{[^}]*background:#293a55[^}]*color:#fff/);
   assert.match(css, /\.ssh-upload-picker \.btn:focus-visible\{[^}]*background:#293a55[^}]*color:#fff/);
-  assert.match(css, /\.ssh-upload-path-picker \.ssh-upload-path-detect\{[^}]*background:#1e2c43[^}]*color:#e5edf8/);
-  assert.match(css, /\.ssh-upload-path-picker \.ssh-upload-path-detect:hover:not\(:disabled\)\{[^}]*background:#293a55[^}]*color:#fff/);
 });

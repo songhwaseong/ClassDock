@@ -20,7 +20,7 @@ using System.Threading;
 // Windows OpenSSH는 개인키 파일 ACL에 소유자 외 다른 사용자·그룹 권한이 있으면 키를 무시하므로(bad permissions),
 // 접속할 때마다 키를 세션 전용 사본으로 복사해 상속을 끊고 현재 사용자 전용 ACL을 건 뒤 그 사본만 -i로 넘기고,
 // 세션이 끝나면 사본을 덮어써 지운다. 원본 키 파일의 권한은 건드리지 않는다.
-static class ClassDockSshTerminal
+static partial class ClassDockSshTerminal
 {
     const int MaxSessionOutputBytes = 16 * 1024 * 1024;
     const int MaxInputBytes = 256 * 1024;
@@ -357,6 +357,7 @@ static class ClassDockSshTerminal
             ? "Windows 10 1809 이상이 필요합니다."
             : "Windows OpenSSH Client가 필요합니다.");
         return "{\"available\":" + (conpty ? "true" : "false")
+            + ",\"files\":" + (conpty ? "true" : "false")
             + ",\"upload\":" + (conpty && scp != null ? "true" : "false")
             + ",\"client\":\"Windows OpenSSH\",\"reason\":" + JsonString(reason) + "}";
     }
@@ -783,6 +784,9 @@ static class ClassDockSshTerminal
             lock (UploadSessionsLock)
                 foreach (UploadSession upload in UploadSessions.Values)
                     if (!string.IsNullOrEmpty(upload.StagedKeyPath)) live.Add(upload.StagedKeyPath);
+            lock (FileGate)
+                foreach (FilePeer peer in FilePeers.Values)
+                    if (!string.IsNullOrEmpty(peer.KeyPath)) live.Add(peer.KeyPath);
             foreach (string file in Directory.GetFiles(PrivateKeyStageDirectory, "*.key"))
             {
                 if (live.Contains(file)) continue;
@@ -973,7 +977,8 @@ static class ClassDockSshTerminal
         string pipeName = "classdock_ssh_askpass_" + Guid.NewGuid().ToString("N");
         StartAskPassServer(pipeName, secretBytes);
 
-        string arguments = BuildSshArguments(host, port, user, authentication, stagedKeyPath);
+        string sessionId = Guid.NewGuid().ToString("N");
+        string arguments = BuildSshArguments(host, port, user, authentication, stagedKeyPath, sessionId);
         Dictionary<string, string> environment = CurrentEnvironment();
         environment["SSH_ASKPASS"] = Process.GetCurrentProcess().MainModule.FileName;
         environment["SSH_ASKPASS_REQUIRE"] = "force";
@@ -982,7 +987,7 @@ static class ClassDockSshTerminal
         environment["TERM"] = "xterm-256color";
 
         SshSession session = new SshSession();
-        session.Id = Guid.NewGuid().ToString("N");
+        session.Id = sessionId;
         session.Host = host;
         session.Port = port;
         session.User = user;
@@ -1188,6 +1193,7 @@ static class ClassDockSshTerminal
 
     public static void ShutdownAll()
     {
+        ShutdownFiles();
         List<SshSession> all = new List<SshSession>();
         lock (SessionsLock) { foreach (SshSession session in Sessions.Values) all.Add(session); Sessions.Clear(); }
         foreach (SshSession session in all) CloseSession(session);
@@ -1359,6 +1365,7 @@ static class ClassDockSshTerminal
                 session.DoneAt = DateTime.UtcNow;
             }
             lock (session.BufferSync) Monitor.PulseAll(session.BufferSync);
+            StopSessionFiles(session.Id);
             CloseSessionHandles(session, true);
             CloseNativeProcessHandle(session);
         });
@@ -1368,6 +1375,7 @@ static class ClassDockSshTerminal
 
     static void CloseSession(SshSession session)
     {
+        StopSessionFiles(session.Id);
         lock (session.Sync)
         {
             try { if (session.Input != null) session.Input.Dispose(); } catch { }
@@ -1393,8 +1401,10 @@ static class ClassDockSshTerminal
         {
             foreach (KeyValuePair<string, SshSession> item in Sessions)
             {
+                // 배경 작업공간은 폴링을 멈춘다. 최종 출력을 읽기 전에는 종료 후 15분이 지나도 보존한다.
+                // 클라이언트는 출력을 모두 받거나 사용자가 닫기/삭제할 때 Stop을 호출해 회수를 허용한다.
                 lock (item.Value.Sync)
-                    if (item.Value.Complete && item.Value.DoneAt < cutoff) stale.Add(item.Key);
+                    if (item.Value.Complete && item.Value.StopRequested && item.Value.DoneAt < cutoff) stale.Add(item.Key);
             }
             foreach (string id in stale) Sessions.Remove(id);
         }
@@ -1425,6 +1435,36 @@ static class ClassDockSshTerminal
         return session;
     }
 
+    // Do not dispose IAsyncResult.AsyncWaitHandle while an overlapped pipe accept is pending.
+    // .NET's I/O completion callback still calls Set() on that handle, outside our try/catch,
+    // and a premature Dispose terminates the entire launcher with ObjectDisposedException.
+    static bool WaitForAskPassConnection(NamedPipeServerStream pipe, WaitHandle cancelled, TimeSpan timeout)
+    {
+        if (cancelled != null && cancelled.WaitOne(0)) return false;
+        var completion = new System.Threading.Tasks.TaskCompletionSource<bool>();
+        pipe.BeginWaitForConnection(delegate(IAsyncResult result)
+        {
+            bool connected = false;
+            try { pipe.EndWaitForConnection(result); connected = true; }
+            catch (ObjectDisposedException) { }
+            catch (IOException) { }
+            finally { completion.TrySetResult(connected); }
+        }, null);
+        DateTime until = DateTime.UtcNow.Add(timeout);
+        while (!completion.Task.IsCompleted)
+        {
+            if ((cancelled != null && cancelled.WaitOne(0)) || DateTime.UtcNow >= until)
+            {
+                // Closing the pipe cancels its pending accept. The callback owns completion;
+                // it may run after this method returns, without touching any disposed wait handle.
+                pipe.Dispose();
+                return false;
+            }
+            completion.Task.Wait(25);
+        }
+        return completion.Task.Result && (cancelled == null || !cancelled.WaitOne(0));
+    }
+
     static void StartAskPassServer(string pipeName, byte[] secret)
     {
         Thread thread = new Thread(delegate()
@@ -1436,9 +1476,7 @@ static class ClassDockSshTerminal
                 {
                     using (NamedPipeServerStream pipe = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous))
                     {
-                        IAsyncResult wait = pipe.BeginWaitForConnection(null, null);
-                        if (!wait.AsyncWaitHandle.WaitOne(until - DateTime.UtcNow)) break;
-                        pipe.EndWaitForConnection(wait);
+                        if (!WaitForAskPassConnection(pipe, null, until - DateTime.UtcNow)) break;
                         byte[] size = BitConverter.GetBytes(secret.Length);
                         pipe.Write(size, 0, size.Length);
                         pipe.Write(secret, 0, secret.Length);
@@ -1529,7 +1567,31 @@ static class ClassDockSshTerminal
         if (handle != IntPtr.Zero) CloseHandle(handle);
     }
 
-    static string BuildSshArguments(string host, int port, string user, string authentication, string privateKeyPath)
+    static string BuildShellIntegrationCommand(string sessionId)
+    {
+        if (!Regex.IsMatch(sessionId ?? "", "^[a-f0-9]{32}$")) throw new InvalidOperationException("bad-ssh-session-id");
+        string script;
+        using (Stream stream = typeof(ClassDockSshTerminal).Assembly.GetManifestResourceStream("ssh_shell_integration.bash"))
+        {
+            if (stream == null) throw new InvalidOperationException("ssh-shell-integration-missing");
+            using (StreamReader reader = new StreamReader(stream, Encoding.UTF8)) script = reader.ReadToEnd().Replace("\r\n", "\n");
+        }
+        // Pass startup code as SSH's remote command, never as keystrokes in the PTY.
+        // Process substitution supplies a pipe, not a file in the remote user's home directory.
+        string bash = "export CLASSDOCK_CWD_TOKEN=" + QuotePosixArgument(sessionId) + "; "
+            + "export CLASSDOCK_PREVIOUS_ENV_SET=${ENV+x} CLASSDOCK_PREVIOUS_ENV=${ENV-}; "
+            + "ENV=<(builtin printf '%s\\n' " + QuotePosixArgument(script) + ") exec \"$BASH\" --posix -il";
+        string start = "case \"${SHELL:-/bin/sh}\" in */bash|bash) exec \"$SHELL\" -c " + QuotePosixArgument(bash)
+            + " ;; *) exec \"${SHELL:-/bin/sh}\" -l ;; esac";
+        return "exec /bin/sh -c " + QuotePosixArgument(start);
+    }
+
+    static string QuotePosixArgument(string value)
+    {
+        return "'" + value.Replace("'", "'\"'\"'") + "'";
+    }
+
+    static string BuildSshArguments(string host, int port, string user, string authentication, string privateKeyPath, string sessionId = null)
     {
         List<string> args = new List<string>(new string[] {
             "-F", "NUL", "-tt", "-p", port.ToString(), "-l", user,
@@ -1554,6 +1616,7 @@ static class ClassDockSshTerminal
             });
         }
         args.Add(host);
+        if (sessionId != null) args.Add(BuildShellIntegrationCommand(sessionId));
         return JoinArguments(args.ToArray());
     }
 

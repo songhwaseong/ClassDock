@@ -111,6 +111,8 @@ flowchart LR
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
+| `remote-files.js` | 원격 파일 경로와 텍스트 디코딩, 부분 CSV 파싱, 이미지 크기·형식 검사, 미리보기 한도와 오류 안내를 담당하는 순수 모듈입니다. | `remote-files-ui.js`, `tests/remote-files.test.js` |
+| `remote-files-ui.js` | 원격 파일 패널의 별도 SFTP 인증·작업 상태·취소·다운로드와 이미지·텍스트·CSV·PDF 읽기 전용 뷰어를 담당합니다. 기존 문서 저장·복구 기록에 원격 파일을 넣지 않습니다. | `remote-files.js`, `remote-terminal.js`, `desktop/ssh_files.cs`, `tests/remote-files-ui.test.js` |
 | `remote-terminal.js` | EXE 전용 SSH 원격 터미널 화면입니다. 서버 주소·포트·계정·암호 입력, 최초 접속 전 서버 키 지문 확인, xterm.js 터미널 입출력·크기 동기화·연결 종료를 담당합니다. 현재 문서와 좌우 도킹하고 분할선 너비 조절·좌우 교환·연결 유지 접기를 제공하며 방향과 너비를 기억합니다. SSH 종료 출력을 분석해 인증·시간 초과·거부·DNS·네트워크·지문 오류를 구분하고, IP·포트·계정을 유지한 비밀번호 재입력 재접속과 무한 상태 재시도 방지를 제공합니다. Cascadia Mono·Consolas·D2Coding·나눔고딕코딩 등 글꼴과 11~24px 크기·줄 간격을 즉시 적용하고 기억합니다. 주소·포트·계정만 선택적으로 저장하고 암호는 저장하지 않습니다. | `lazy.js`, `classdock.html`, `desktop/ssh_terminal.cs`, `desktop/launcher.cs`, `tests/remote-terminal.test.js`, `docs/원격터미널-설계.md` |
 | `lesson-replay.js` | `.lesson` 데이터 검증, 화이트보드·PDF·Python 이벤트 녹화, 타임라인 재생·탐색·속도 조절과 파일 저장을 담당합니다. | `board-render.js`, `whiteboard.js`, `code-viewer.js` |
 | `diff-viewer.js` | 파일 비교(diff) 문서: patience diff 자체 구현, 나란히/한 줄 보기, 공백 무시·접기, 두 파일 선택 모달과 저장본 비교, 과제 시작 코드 비교 진입점을 담당합니다. | `documents.js`, `task-package.js`, `command-palette.js`, `tests/diff-viewer.test.js` |

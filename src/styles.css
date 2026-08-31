@@ -23,8 +23,26 @@
 }
 
 /* ===== SSH 원격 터미널(EXE) ===== */
+.ssh-file-panel{display:flex;flex:1;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:auto;padding:14px;background:var(--panel);color:var(--ink)}
+.ssh-file-panel[hidden],.ssh-file-panel [hidden],.ssh-files-visible .ssh-xterm-host{display:none!important}
+.ssh-file-heading,.ssh-file-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ssh-file-heading{justify-content:space-between}.ssh-file-heading strong{overflow-wrap:anywhere;font-size:13px}
+.ssh-file-grid{display:grid;gap:8px}.ssh-file-field{display:flex;flex-direction:column;gap:4px;font-size:12px}
+.ssh-file-panel input,.ssh-file-panel select{min-width:0;max-width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit}
+.ssh-file-field input{width:100%}.ssh-file-panel .btn{padding:5px 9px;font-size:12px}
+.ssh-file-path,.ssh-file-meta{overflow-wrap:anywhere;font:12px/1.5 Consolas,monospace;background:var(--panel-2);padding:7px;border-radius:6px}
+.ssh-file-note{color:var(--muted);font-size:12px;line-height:1.55}.ssh-file-status{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.ssh-file-panel progress{width:100%;flex-shrink:0}.ssh-file-preview{min-height:120px;min-width:0;border-top:1px solid var(--border);padding-top:10px}
+.ssh-file-preview>div{display:flex;flex-direction:column;gap:8px;min-width:0}.ssh-file-canvas-area,.ssh-file-text-content{max-height:65vh;overflow:auto;min-width:0;background:var(--panel-2);border:1px solid var(--border);border-radius:6px}
+.ssh-file-canvas-area canvas{display:block;max-width:none;background:#fff}.ssh-file-tools input[type=search]{flex:1;min-width:130px;font-size:12px}
+.ssh-file-pre{font:12px/1.6 Consolas,"Cascadia Mono",monospace;padding:8px;white-space:pre;tab-size:4;background:var(--code-bg);color:var(--code-text);margin:0}
+.ssh-file-line{display:block;min-height:1.6em}.ssh-file-line::before{content:attr(data-line);display:inline-block;width:5em;padding-right:1em;text-align:right;color:var(--code-muted);user-select:none}
+.ssh-file-table{border-collapse:collapse;font:12px/1.5 Consolas,monospace;background:var(--panel)}.ssh-file-table td{border:1px solid var(--border);padding:5px 8px;white-space:pre-wrap;min-width:60px;max-width:500px;overflow-wrap:anywhere}
+.ssh-file-match{background:#fde68a!important;color:#111827!important}
 .modal.ssh-confirm-front{z-index:1270}
 .ssh-dock{position:relative;order:2;z-index:20;display:flex;flex:0 0 min(var(--ssh-dock-width,520px),68vw);width:min(var(--ssh-dock-width,520px),68vw);min-width:0;height:100%;overflow:hidden;border-left:1px solid var(--border);background:var(--panel,#fff);box-shadow:-8px 0 24px rgba(15,23,42,.12)}
+/* .ssh-dock 은 display:flex 를 직접 선언해 UA의 [hidden] 규칙을 이긴다. 닫은 dock 이 빈 패널로 남지 않게 명시한다. */
+.ssh-dock[hidden],.ssh-dock-divider[hidden]{display:none}
 .ssh-dock-divider{position:relative;order:1;z-index:21;flex:0 0 8px;width:8px;height:100%;margin:0 -4px;background:transparent;cursor:col-resize;touch-action:none}
 .ssh-dock-divider::before{content:"";position:absolute;inset:0 3px;background:var(--border)}
 .ssh-dock-divider::after{content:"";position:absolute;left:50%;top:50%;width:6px;height:42px;transform:translate(-50%,-50%);border-radius:999px;background:#64748b;box-shadow:0 0 0 3px rgba(15,23,42,.28)}
@@ -74,7 +92,7 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-upload-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.ssh-upload-heading strong{font-size:13px}.ssh-upload-close{border:0;background:transparent;color:#cbd5e1;cursor:pointer;font:12px inherit}.ssh-upload-close:hover{color:#fff}.ssh-upload-close:disabled{opacity:.4;cursor:not-allowed}
 .ssh-upload-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(160px,1fr);gap:10px 12px}.ssh-upload-grid .ssh-field{color:#cbd5e1}.ssh-upload-grid .ssh-field input{height:36px;border-color:#40516a;background:#101827;color:#f8fafc}.ssh-upload-file-field{grid-column:1/-1}
 .ssh-upload-picker{display:flex;align-items:center;min-width:0;gap:9px}.ssh-upload-picker .btn{flex:0 0 auto;min-height:34px;border-color:#40516a;background:#1e2c43;color:#e5edf8}.ssh-upload-picker .btn:hover:not(:disabled){border-color:#536784;background:#293a55;color:#fff}.ssh-upload-picker .btn:focus-visible{border-color:#60a5fa;background:#293a55;color:#fff;outline:2px solid #60a5fa;outline-offset:1px}.ssh-upload-picker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dbeafe;font-size:12px;font-weight:600}
-.ssh-upload-path-picker{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 7px}.ssh-upload-path-picker input{min-width:0}.ssh-upload-path-picker .ssh-upload-path-detect{min-height:36px;padding:5px 9px;border-color:#40516a;background:#1e2c43;color:#e5edf8;white-space:nowrap}.ssh-upload-path-picker .ssh-upload-path-detect:hover:not(:disabled){border-color:#536784;background:#293a55;color:#fff}.ssh-upload-path-picker .ssh-upload-path-detect:focus-visible{border-color:#60a5fa;background:#293a55;color:#fff;outline:2px solid #60a5fa;outline-offset:1px}.ssh-upload-path-detect:disabled{cursor:wait;opacity:.55}.ssh-upload-path-hint{grid-column:1/-1;overflow:hidden;color:#93c5fd;font-size:10.5px;font-weight:500;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
+.ssh-upload-path-picker{display:grid;grid-template-columns:minmax(0,1fr);gap:6px 7px}.ssh-upload-path-picker input{min-width:0}.ssh-upload-path-hint{overflow:hidden;color:#93c5fd;font-size:10.5px;font-weight:500;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
 .ssh-upload-note{margin:9px 0 7px;color:#93a4b8;font-size:11.5px;line-height:1.45}.ssh-upload-progress{display:block;width:100%;height:8px;margin:7px 0;accent-color:#22c55e}.ssh-upload-progress[hidden]{display:none}
 .ssh-upload-status{min-height:18px;color:#bae6fd;font-size:12px;font-weight:700}.ssh-upload-status.success{color:#86efac}.ssh-upload-status.error{color:#fca5a5}.ssh-upload-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:8px}.ssh-upload-actions .btn{min-height:32px;padding:5px 10px;border-color:#40516a;background:#1e2c43;color:#e5edf8}.ssh-upload-actions .primary{border-color:#2563eb;background:#2563eb}.ssh-upload-actions .danger{border-color:#b91c1c;background:#991b1b}
 .ssh-font-controls{display:flex;align-items:center;gap:5px;width:100%;padding-top:8px;border-top:1px solid rgba(148,163,184,.18)}
