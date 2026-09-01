@@ -940,10 +940,10 @@ test("결과 표는 칸 단위로 고르고 정렬은 화살표 버튼만 받는
   assert.match(source, /clearGridSelection\(\);\s*\/\/ 행이 늘면/);
 });
 
-test("셀 값은 더블클릭으로 여는 창이 보여 준다", () => {
+test("긴 값·여러 줄 값·NULL 은 값 창이 맡는다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  // 클릭은 고르는 일, 더블클릭은 자세히 보는 일로 나눈다.
+  // 클릭은 고르는 일, 더블클릭은 그 칸을 여는 일로 나눈다(고칠 수 있으면 그 자리에서, 아니면 값 창).
   assert.match(source, /table\.addEventListener\("dblclick"/);
   assert.match(source, /point\.kind !== "cell"/);
   // 포인터 캡처를 쓰면 뒤따르는 마우스 이벤트가 캡처 대상(<table>)으로 가 셀을 찾지 못한다.
@@ -963,6 +963,253 @@ test("셀 값은 더블클릭으로 여는 창이 보여 준다", () => {
   // Esc 는 맨 위의 창부터 닫는다 — 아래 창들이 값 창에 양보해야 엉뚱한 창이 닫히지 않는다.
   assert.match(source, /!document\.querySelector\("\.db-table-modal,\.db-value-modal"\)/);
   assert.match(source, /!document\.querySelector\("\.db-value-modal"\)/);
+});
+
+test("고칠 수 있는 결과인지는 열 이름이 아니라 서버가 알려 준 출처로 판정한다", () => {
+  // 열 이름만으로는 별칭·조인·계산식을 가릴 수 없다. 드라이버가 서버에서 받아 둔
+  // 필드 메타데이터(org_table·org_name)를 봐야 어느 테이블 어느 컬럼인지 알 수 있다.
+  assert.match(worker, /def field_sources\(cursor\)/);
+  assert.match(worker, /getattr\(field, "org_table"/);
+  assert.match(worker, /getattr\(field, "org_name"/);
+  // 커서에 다른 질의를 실행하면 이 메타데이터가 덮인다 — 읽는 자리가 execute 직후여야 한다.
+  assert.match(worker, /sources = field_sources\(cursor\)\n\s*# 한 번에 보내는 양/);
+  // 한 베이스 테이블 + 기본키가 결과에 모두 실려 있을 때만 연다.
+  assert.match(worker, /if len\(tables\) > 1:\n\s*return \{"editable": False, "reason": "multi-table"\}/);
+  assert.match(worker, /if not meta\["base"\]:\n\s*return \{"editable": False, "reason": "view"\}/);
+  assert.match(worker, /if not meta\["keys"\]:\n\s*return \{"editable": False, "reason": "no-key"\}/);
+  assert.match(worker, /"reason": "key-missing"/);
+  // 읽기 전용 접속에서는 판정 이전에 잠긴다.
+  assert.match(worker, /if _state\["read_only"\]:\n\s*return \{"editable": False, "reason": "read-only"\}/);
+  // 판정이 실패해도 결과 자체는 그대로 보여 준다(고치지 못할 뿐이다).
+  assert.match(worker, /def safe_edit_plan\(/);
+  assert.match(worker, /"edit": safe_edit_plan\(connection, sources, columns\)/);
+});
+
+test("기본키·계산식·이진·생성 컬럼 칸은 고치지 못하고 그 까닭을 밝힌다", () => {
+  assert.match(worker, /cells\.append\(\{"editable": False, "reason": "key"/);
+  assert.match(worker, /cells\.append\(\{"editable": False, "reason": "binary"/);
+  assert.match(worker, /cells\.append\(\{"editable": False, "reason": "generated"/);
+  assert.match(worker, /cells\.append\(\{"editable": False, "reason": "no-source"/);
+  // 잠긴 이유를 밝히지 않으면 왜 어떤 칸만 되는지 사용자가 추측하게 된다.
+  ["read-only", "no-source", "multi-table", "view", "no-key", "key-missing", "key", "binary", "generated"]
+    .forEach((reason) => {
+      assert.notEqual(client.editBlockNote({ reason }), client.editBlockNote({ reason: "없는이유" }),
+        reason + " 에 해당하는 안내 문구가 있어야 한다");
+    });
+  // 빠진 기본키 컬럼 이름처럼 덧붙은 사실은 문구 뒤에 그대로 붙는다.
+  assert.match(client.editBlockNote({ reason: "key-missing", detail: "id" }), /\(id\)$/);
+});
+
+test("고치기·지우기·넣기 모두 기본키 조건과 자리표시자로만 나간다", () => {
+  // 값을 SQL 에 이어 붙이지 않는다 — 따옴표·줄바꿈·NULL 을 프런트가 떠맡는 순간 무너진다.
+  assert.match(worker, /"UPDATE " \+ target \+ " SET " \+ quote_identifier\(column\)\n\s*\+ " = %s WHERE " \+ where, \[value\] \+ params/);
+  assert.match(worker, /"DELETE FROM " \+ target \+ " WHERE " \+ where, params/);
+  assert.match(worker, /", ".join\(\["%s"\] \* len\(columns\)\)/);
+  assert.match(worker, /clauses\.append\(quote_identifier\(name\) \+ " = %s"\)/);
+  // 조건은 언제나 기본키다. NULL 인 키 값으로는 행을 짚을 수 없으므로 거절한다.
+  assert.match(worker, /raise RuntimeError\("bad-cell-key"\)/);
+  // 읽기 전용 접속은 여기서도 막힌다(쿼리 경로에만 걸어 두면 셀 편집이 뒷문이 된다).
+  assert.match(worker, /def apply_edits\(request\):[\s\S]*?if _state\["read_only"\]:\n\s*return \{"ok": False, "code": "read-only-blocked"/);
+  // 런처는 SQL 을 만들지 않는다. 이름과 값을 JSON 값으로 옮기기만 한다.
+  const helper = launcher.slice(launcher.indexOf("static string DbCellRequest"),
+    launcher.indexOf("static string PollDbQuery"));
+  assert.doesNotMatch(helper, /UPDATE|DELETE|INSERT|SELECT/);
+  assert.match(helper, /else throw new Exception\("db-bad-change-kind"\)/);
+  // 본문은 길이 접두 문자열의 평평한 줄이다. 프런트가 싣는 차례와 런처가 읽는 차례가
+  // 어긋나면 값이 엉뚱한 칸으로 들어간다 — 두 쪽을 같은 순서로 못박아 둔다.
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(source, /parts\.push\(change\.column, change\.isNull \? "" : change\.value, change\.isNull \? "1" : "0"\);\n\s*pushKeys\(parts, change\.keys\);/);
+  assert.match(helper, /string column = ReadBundleString\(body, ref pos\);\n\s*string value = ReadBundleString\(body, ref pos\);\n\s*string valueNull = ReadBundleString\(body, ref pos\);/);
+  assert.match(source, /const parts = \[staged\.target\.database \|\| "", staged\.target\.table, String\(staged\.list\.length\)\]/);
+  assert.match(helper, /string database = ReadBundleString\(body, ref pos\);\n\s*string table = ReadBundleString\(body, ref pos\);/);
+  // 쓰는 길은 하나다. 셀 하나만 따로 쓰는 뒷문을 남기지 않는다.
+  assert.doesNotMatch(worker, /def update_cell\(/);
+  assert.doesNotMatch(launcher, /"cell-update"/);
+});
+
+test("담아 둔 변경은 한 묶음으로 적용되고 실패하면 그 묶음만 되돌아간다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // ⚠ 수동 커밋 모드에서 rollback() 을 부르면 사용자가 앞서 쌓아 둔 변경까지 사라진다.
+  // 세이브포인트로 이 묶음만 되돌린다. 자동 커밋 모드에서는 묶음을 트랜잭션으로 연다.
+  assert.match(worker, /cursor\.execute\("SAVEPOINT classdock_edit"\)/);
+  assert.match(worker, /cursor\.execute\("ROLLBACK TO SAVEPOINT classdock_edit"\)/);
+  assert.match(worker, /cursor\.execute\("RELEASE SAVEPOINT classdock_edit"\)/);
+  assert.match(worker, /else:\n\s*connection\.begin\(\)/);
+  assert.match(worker, /failure\["applied"\] = 0/);
+  // 순서: 고치기 → 지우기 → 넣기. 지운 기본키를 같은 묶음에서 다시 넣을 수 있다.
+  assert.match(worker, /order = \{"update": 0, "delete": 1, "insert": 2\}/);
+  // 절반만 들어갔다고 오해하게 두지 않는다.
+  assert.match(source, /아무것도 반영되지 않았습니다/);
+});
+
+test("미리보기 문장은 사람이 읽는 것이고 이름과 값을 모두 인용한다", () => {
+  const sql = client.cellUpdatePreview({ database: "school", table: "score" }, "점수",
+    [{ name: "id", value: "3" }], "9'5", false);
+  assert.equal(sql, "UPDATE `school`.`score` SET `점수` = '9''5' WHERE `id` = '3'");
+  // NULL 은 따옴표 없이 그대로 적는다 — 빈 문자열과 구분되어야 한다.
+  assert.match(client.cellUpdatePreview({ table: "score" }, "메모", [{ name: "id", value: "3" }], "", true),
+    /SET `메모` = NULL WHERE/);
+  // 데이터베이스 이름이 없으면 테이블 이름만 적는다.
+  assert.match(client.cellUpdatePreview({ table: "score" }, "메모", [{ name: "id", value: "3" }], "x", false),
+    /^UPDATE `score` SET/);
+  // 복합 기본키는 조건을 모두 적는다.
+  assert.match(client.cellUpdatePreview({ table: "t" }, "v",
+    [{ name: "a", value: "1" }, { name: "b", value: "2" }], "x", false), /WHERE `a` = '1' AND `b` = '2'$/);
+});
+
+test("반영 0행은 값이 같은 것과 행이 사라진 것을 가른다", () => {
+  // MySQL 은 값이 이미 같으면 0행 반영이라고 답한다. 그 행이 아직 있는지 물어 둘을 가른다.
+  assert.match(worker, /def row_exists\(cursor, target, where, params\)/);
+  // 사라진 행을 고치라는 요청은 실패로 본다 — 말없이 아무 일도 일어나지 않는 것이 제일 나쁘다.
+  assert.match(worker, /elif row_exists\(cursor, target, where, key_params\):\n\s*counts\["unchanged"\] \+= 1\n\s*else:\n\s*raise RuntimeError\("row-gone"\)/);
+  // 사라진 행을 지우라는 요청은 뜻이 이미 이루어진 것이라 몇 건인지만 알린다.
+  assert.match(worker, /elif kind == "delete":\n\s*counts\["missing"\] \+= 1/);
+  assert.match(client.messageFor({ code: "row-gone" }), /다시 조회/);
+  // 수동 커밋이면 이 변경도 "커밋하지 않은 변경"으로 센다.
+  assert.match(worker, /if manual:\n\s*_state\["pending"\] = True/);
+});
+
+test("잘려 온 값은 그대로 저장하지 않고 원본을 다시 읽는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 표의 값은 500자에서 잘려 있을 수 있다. 그 글자를 저장하면 서버의 값이 잘린 채로 덮인다.
+  assert.match(worker, /def read_cell\(request\)/);
+  assert.match(worker, /text\[:MAX_EDIT_CHARS\], "clipped": len\(text\) > MAX_EDIT_CHARS/);
+  assert.match(source, /if \(!edit\.staged && \(edit\.clipped \|\| isNull\)\)\{/);
+  assert.match(source, /current = await readFullCell\(edit\)/);
+  // 이미 담아 둔 칸은 서버가 아니라 담아 둔 값에서 이어 고친다(서버 값은 아직 옛 값이다).
+  assert.match(source, /let current = edit\.staged/);
+  // 이진 값은 글자로 고칠 수 없다.
+  assert.match(worker, /return \{"ok": False, "code": "binary-cell"/);
+  // 기본키가 잘려 왔으면 그 값으로 행을 짚을 수 없으므로 고치기도 지우기도 열지 않는다.
+  assert.match(source, /node\.classList\.contains\("db-clipped"\)\)\n\s*return \{ error:"기본키 값이 길어/);
+});
+
+test("셀 편집은 값 창 안에서만 열리고 무엇이 실행될지 먼저 보여 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 고치기 버튼은 워커가 "고칠 수 있다"고 판정했을 때만 보인다.
+  assert.match(source, /editButton\.hidden = !\(edit && edit\.editable\)/);
+  // GUI 로 고친 일이 어떤 SQL 이 되는지 보여 준다 — SQL 을 배우는 도구라 감추지 않는다.
+  assert.match(source, /preview\.textContent = cellUpdatePreview\(/);
+  assert.match(source, /이 문장이 실행됩니다/);
+  // NULL 과 빈 문자열은 다른 값이라 입력칸이 아니라 체크로 가른다.
+  assert.match(source, /빈 값\(NULL\)으로 두기/);
+  assert.match(source, /if \(nullBox\.checked && !edit\.nullable\)/);
+  // 여러 줄 값을 다루므로 Enter 는 줄바꿈이고 담기는 Ctrl\+Enter 다.
+  assert.match(source, /\(event\.ctrlKey \|\| event\.metaKey\) && event\.key === "Enter"/);
+  // 고치던 중의 Esc·바깥 클릭은 창이 아니라 고치기를 먼저 접는다.
+  assert.match(source, /if \(editing\) stopEdit\(\);/);
+  assert.match(source, /event\.target === modal && !editing/);
+  assert.match(css, /\.db-value-input\{/);
+  // 값 창은 서버에 쓰지 않는다. 변경 목록에 담고 적용은 한곳에서 한다.
+  assert.match(source, /const kept = stageUpdate\(edit, input\.value, nullBox\.checked\);/);
+  assert.match(css, /\.db-grid td\.db-cell-staged\{/);
+});
+
+test("변경은 담아 두었다가 한 번에 적용하고, 무엇이 나갈지 문장으로 보여 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 담아 둔 변경이 있을 때만 변경 바가 나오고, 적용 전에는 서버에 아무것도 가지 않는다.
+  assert.match(source, /editBar\.hidden = !count/);
+  assert.match(source, /resultPane\.append\(resultBar, resultTabs, editBar, resultHost\)/);
+  assert.match(css, /\.db-edit-bar\{/);
+  // 담은 칸·지울 행은 화면에서 구분된다(지금 화면과 서버가 다르다는 사실을 계속 알린다).
+  assert.match(source, /node\.classList\.add\("db-cell-staged"\)/);
+  assert.match(source, /tr\.classList\.toggle\("db-row-staged", on\)/);
+  assert.match(css, /\.db-grid tbody tr\.db-row-staged td\{/);
+  // 미리보기는 나갈 문장을 그대로 보여 주고 하나씩 뺄 수 있다.
+  assert.match(source, /const openChangesModal = \(\) => \{/);
+  assert.match(source, /remove\.addEventListener\("click", \(\) => \{ unstage\(change\.id\); render\(\); \}\);/);
+  // 다시 그리면 되돌릴 자리가 사라지므로 먼저 묻는다.
+  assert.match(source, /const confirmLosingStaged = async \(\) => \{/);
+  assert.match(source, /if \(!await confirmLosingStaged\(\)\) return false;/);
+  // 적용한 뒤에는 다시 조회해 화면과 서버를 맞춘다.
+  assert.match(source, /const reloadFor = \(entry\) => \{/);
+  assert.match(source, /reload:\(\) => showTable\(name\)/);
+});
+
+test("행 삭제는 고른 행의 기본키로만 걸고, 행 추가는 테이블 정의 전체를 늘어놓는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 고른 칸이 걸친 행을 지운다. 칸 하나는 `행 * 열수 + 열` 정수 하나로 담겨 있다.
+  assert.match(source, /gridSelection\.keys\.forEach\(key => rows\.add\(Math\.floor\(key \/ count\)\)\)/);
+  // 못 짚는 행은 지우지도 고치지도 않는다(엉뚱한 행이 사라지면 되돌릴 수 없다).
+  assert.match(source, /const rowKeyValues = \(row\) => \{/);
+  assert.match(source, /if \(found\.error\)\{ blocked = found\.error; return; \}/);
+  // 지울 행에 담아 둔 값 수정은 뜻이 없으므로 함께 뺀다.
+  assert.match(source, /staged\.list\.filter\(item => item\.kind === "update" && item\.row === row\)/);
+  // 결과에 실린 열만으로는 넣을 수 없다 — 조회하지 않은 컬럼도 채워야 한다.
+  assert.match(source, /"\/db-table\?id=" \+ encodeURIComponent\(sessionId\) \+ "&mode=info"/);
+  // 자동 증가·생성 컬럼은 사람이 채우지 않고, 값이 꼭 필요한 컬럼은 처음부터 `값` 으로 연다.
+  assert.match(source, /extra\.indexOf\("AUTO_INCREMENT"\) >= 0 \|\| extra\.indexOf\("GENERATED"\) >= 0/);
+  assert.match(source, /const required = !column\.nullable && column\.default == null && !auto;/);
+  // 적지 않은 칸은 서버의 기본값에 맡긴다(빈 문자열을 넣어 버리지 않는다).
+  assert.match(source, /fields\.filter\(item => !item\.auto && item\.mode\.value !== "default"\)/);
+  // 컬럼 머리를 누르면 열 전체 = 보이는 행 전부가 대상이 된다. 많은 행은 담기 전에 먼저 묻는다.
+  assert.match(source, /if \(rows\.length >= 10 && typeof confirmDialog === "function"\)/);
+  // 담을 수 있는 상한은 워커가 한 묶음으로 받는 상한과 같아야 한다(담고 나서 거절당하면 안 된다).
+  assert.match(source, /const MAX_STAGED = 500;/);
+  assert.match(worker, /MAX_BATCH_CHANGES = 500/);
+});
+
+test("표 안에서 바로 타자를 쳐 고치고, 방향키로 칸을 옮긴다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 지금 칸(캐럿)을 따로 들고 다녀야 Enter 뒤에 어디로 갈지 알 수 있다.
+  assert.match(source, /let gridCaret = null;/);
+  assert.match(source, /const steps = \{ arrowup:\[-1, 0\], arrowdown:\[1, 0\], arrowleft:\[0, -1\], arrowright:\[0, 1\] \}/);
+  // F2·Enter 로 시작하고 Enter 는 담고 아래로, Tab 은 담고 옆으로, Esc 는 되돌린다.
+  assert.match(source, /key === "f2" \|\| key === "enter"/);
+  assert.match(source, /commitInlineEdit\(\);\n\s*focusGrid\(\);\n\s*moveCaret\(1, 0, false\);/);
+  assert.match(source, /const next = nextEditableCol\(from, event\.shiftKey \? -1 : 1\);/);
+  assert.match(source, /if \(event\.key === "Escape"\)\{ event\.preventDefault\(\); cancelInlineEdit\(\); focusGrid\(\); return; \}/);
+  // 담기는 값 창과 같은 길을 쓴다. 입력하는 자리만 다를 뿐 서버로 가는 때는 하나다.
+  assert.match(source, /stageUpdate\(context, value, false\);/);
+  // 두 번 누르기·F2·타자가 모두 한 길로 모인다 — "어떨 때 무엇이 열리는지"를 하나로 설명할 수 있어야 한다.
+  assert.match(source, /gridCaret = \{ row:point\.row, col:point\.col \};\n\s*openCellAt\(point\.row, point\.col\);/);
+  assert.doesNotMatch(source, /beginInlineEdit/);
+  // 칸 밖으로 나가면 담는다(엑셀과 같다). 다시 들어오지 않게 상태를 먼저 지운다.
+  assert.match(source, /input\.addEventListener\("blur", \(\) => \{ if \(inlineEdit && inlineEdit\.input === input\) commitInlineEdit\(\); \}\);/);
+  assert.match(css, /\.db-cell-input\{/);
+});
+
+test("한 줄 입력칸이 담아내지 못하는 값은 값 창으로 보낸다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // input 은 값에 든 줄바꿈을 조용히 지운다. 그대로 담으면 서버의 줄이 사라진다.
+  assert.match(source, /if \(clipped \|\| \/\[\\r\\n\]\/\.test\(text\)\)\n\s*return \{ note:"여러 줄 값과 잘려 온 값은 값 창에서 고칩니다\.", modal:true \};/);
+  assert.match(source, /if \(!startInlineEdit\(row, col, initial\)\) return;/);
+  // NULL 칸을 빈 채로 지나가면 아무 일도 하지 않는다(빈 문자열은 NULL 과 다른 값이다).
+  assert.match(source, /if \(before\.isNull && value === ""\) return;/);
+});
+
+test("한글 IME 는 첫 글자 조합을 끊지 않고 그 칸에서 시작한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const sheet = fs.readFileSync(path.join(root, "src", "js", "spreadsheet-viewer.js"), "utf8");
+  // ⚠ 한글은 keydown 이 Process(229) 로 온다. preventDefault 하면 첫 글자가 사라진다.
+  assert.match(source, /const ime = event\.key === "Process" \|\| event\.keyCode === 229;/);
+  assert.match(source, /if \(!ime\) event\.preventDefault\(\);/);
+  assert.match(source, /openCellAt\(caret\.row, caret\.col, ime \? "" : event\.key\);/);
+  // 스프레드시트 뷰어가 같은 이유로 같은 방식을 쓴다. 두 도구가 갈라지지 않게 함께 본다.
+  assert.match(sheet, /e\.key === "Process" \|\| e\.keyCode === 229/);
+});
+
+test("삭제·추가 미리보기 문장도 이름과 값을 모두 인용한다", () => {
+  assert.equal(client.rowDeletePreview({ database: "school", table: "score" }, [{ name: "id", value: "3" }]),
+    "DELETE FROM `school`.`score` WHERE `id` = '3'");
+  assert.equal(client.rowInsertPreview({ table: "score" },
+    [{ column: "이름", value: "가'나" }, { column: "점수", value: "", isNull: true }]),
+    "INSERT INTO `score` (`이름`, `점수`) VALUES ('가''나', NULL)");
+  // 값을 하나도 적지 않은 행 = 전부 기본값. MySQL 이 받는 문장이라 그대로 보여 준다.
+  assert.equal(client.rowInsertPreview({ table: "score" }, []), "INSERT INTO `score` () VALUES ()");
+});
+
+test("셀 편집 판정과 UPDATE 조립은 서버 없이도 같은 결과를 낸다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+  // 가짜 커넥션으로 워커를 직접 돌린다. 무엇이 잠기는지와 어떤 문장이 나가는지를
+  // MySQL 없이 못박아 둔다 — 특히 숫자·날짜가 이진 컬레이션(63)으로 온다는 함정을.
+  const run = spawnSync("python", [path.join(root, "tests", "fixtures", "db-cell-edit-probe.py"),
+    path.join(root, "desktop")], { encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /ok/);
 });
 
 test("db-client.js 는 브라우저 전역 없이도 순수 함수만 노출한다", () => {

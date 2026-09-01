@@ -6624,6 +6624,55 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
 .db-value-body.db-value-null{color:var(--muted);font-style:italic}
 .db-value-note{margin:0;color:var(--muted);font-size:11.5px}
+/* 셀 고치기 — 값 창 안에서만 열린다. 보기와 같은 자리를 쓰되 한 번에 하나만 보인다. */
+.db-value-edit{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}
+.db-value-input{flex:1;min-height:120px;resize:vertical}
+.db-value-input:disabled{color:var(--muted);font-style:italic}
+.db-value-sql-note{margin:0;color:var(--muted);font-size:11px}
+.db-value-sql{display:block;max-height:96px;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
+  background:var(--panel-2);color:var(--muted);font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+.db-value-actions{display:flex;align-items:center;gap:8px}
+.db-value-null-toggle{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px;cursor:pointer}
+/* 고칠 수 있는 칸은 마우스를 얹었을 때만 알린다 — 늘 칠해 두면 표가 시끄러워진다. */
+.db-grid td.db-cell-editable:hover{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 70%,transparent)}
+/* 담아 둔 변경 — 아직 서버에 가지 않은 값이라 눈에 띄게 둔다. 적용하면 표를 다시 그리며 사라진다. */
+.db-grid td.db-cell-staged{background:color-mix(in srgb,var(--warn,#d97706) 20%,var(--field));font-weight:700}
+.db-grid tbody tr:nth-child(even) td.db-cell-staged{background:color-mix(in srgb,var(--warn,#d97706) 24%,var(--field))}
+.db-grid tbody tr.db-row-staged td{background:color-mix(in srgb,var(--danger) 14%,var(--field));
+  color:color-mix(in srgb,var(--danger) 70%,var(--ink));text-decoration:line-through}
+.db-grid tbody tr.db-row-staged .db-grid-index{background:color-mix(in srgb,var(--danger) 22%,var(--panel-2));
+  text-decoration:none}
+.db-edit-hint{margin:8px 10px;color:var(--muted);font-size:11.5px}
+/* 표 안에서 바로 고치기 — 칸이 그대로 입력칸이 된다(자리를 옮기지 않아야 눈이 따라간다). */
+.db-grid td.db-cell-editing{padding:0;overflow:visible}
+.db-cell-input{display:block;width:100%;box-sizing:border-box;padding:5px 8px;
+  border:2px solid var(--accent);border-radius:0;background:var(--field);
+  color:var(--db-result-text-color,var(--ink));font:inherit;outline:none}
+/* 변경 바 — 담아 둔 변경이 있을 때만 나온다. */
+.db-edit-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border-radius:8px;
+  border:1px solid color-mix(in srgb,var(--warn,#d97706) 45%,var(--border));
+  background:color-mix(in srgb,var(--warn,#d97706) 10%,var(--panel))}
+.db-edit-count{font-size:12px}
+.db-edit-detail{color:var(--muted);font-size:11.5px;overflow-wrap:anywhere}
+/* 담아 둔 변경 목록 창 */
+.db-changes-card{width:min(820px,94vw);max-height:82vh;display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.db-changes-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.db-change-row{display:flex;align-items:flex-start;gap:8px}
+.db-change-row .db-value-sql{flex:1;max-height:none}
+/* 행 추가 창 — 컬럼 하나가 한 줄이다(이름 · 자료형 · 무엇을 넣을지 · 값). */
+.db-insert-card{width:min(820px,94vw);max-height:86vh;display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.db-insert-grid{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.db-insert-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(90px,1.2fr) 90px minmax(120px,2fr);
+  align-items:center;gap:8px}
+.db-insert-label{font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-insert-type{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-insert-mode,.db-insert-value{padding:4px 6px;border:1px solid var(--border);border-radius:6px;
+  background:var(--field);color:var(--ink);font:inherit;font-size:12px;min-width:0}
+.db-insert-value:disabled{color:var(--muted);background:var(--panel-2)}
+@media(max-width:640px){
+  .db-insert-row{grid-template-columns:1fr 1fr}
+}
 
 /* 스키마 트리 — 테이블을 펼쳐 컬럼을 보고, 이름을 편집기에 바로 넣는다. */
 .db-table-entry{display:flex;flex-direction:column}

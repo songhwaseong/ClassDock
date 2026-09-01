@@ -2531,6 +2531,31 @@ class ClassDockLauncher
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-query-failed: " + FlattenMessage(ex)));
                     }
                 }
+                else if (method == "POST" && path.StartsWith("/db-cell?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        // 고치기 전에 값 전체를 다시 읽는다(표에 실린 값은 500자에서 잘려 있을 수 있다).
+                        string json = DbCellRequest(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-cell-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/db-apply?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = DbApplyRequest(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-apply-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "GET" && path.StartsWith("/db-query-poll", StringComparison.Ordinal))
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollDbQuery(QueryValue(path, "job"))));
@@ -5445,6 +5470,110 @@ class ClassDockLauncher
         worker.IsBackground = true;
         worker.Start();
         return "{\"job\":" + JsonString(job.Id) + ",\"timeoutSeconds\":" + seconds + "}";
+    }
+
+    /* 셀 값 읽기. 값에는 줄바꿈·따옴표가 들어올 수 있어 주소가 아니라 본문으로 받는다.
+       런처는 SQL 을 만들지 않는다 — 이름과 값을 JSON 값으로만 옮기고 문장 조립은 워커가 한다. */
+    static string DbCellRequest(string sessionId, byte[] body)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        if (body == null || body.Length == 0 || body.Length > 64 * 1024) throw new Exception("bad-db-request");
+        int pos = 0;
+        string database = ReadBundleString(body, ref pos);
+        string table = ReadBundleString(body, ref pos);
+        string column = ReadBundleString(body, ref pos);
+        string keys = DbReadKeys(body, ref pos);
+        if (pos != body.Length) throw new Exception("bad-db-request");
+        if (table.Trim().Length == 0 || column.Trim().Length == 0) throw new Exception("db-bad-cell-target");
+
+        string request = "{\"action\":\"cell-read\",\"database\":" + JsonString(database)
+            + ",\"table\":" + JsonString(table) + ",\"column\":" + JsonString(column)
+            + ",\"keys\":[" + keys + "]}";
+        string response = DbExchange(session, request, DbMetadataTimeoutMs);
+        return "{\"ok\":" + (DbResponseOk(response) ? "true" : "false") + ",\"info\":" + DbResponseBody(response) + "}";
+    }
+
+    // 기본키 조건: 개수 + (이름, 값) 짝. 이름도 값도 JSON 값으로만 옮긴다.
+    static string DbReadKeys(byte[] body, ref int pos)
+    {
+        int count;
+        if (!int.TryParse(ReadBundleString(body, ref pos), out count) || count < 1 || count > 64)
+            throw new Exception("db-bad-cell-key");
+        StringBuilder keys = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            string name = ReadBundleString(body, ref pos);
+            string value = ReadBundleString(body, ref pos);
+            if (name.Trim().Length == 0) throw new Exception("db-bad-cell-key");
+            if (keys.Length > 0) keys.Append(',');
+            keys.Append("{\"name\":").Append(JsonString(name)).Append(",\"value\":").Append(JsonString(value)).Append('}');
+        }
+        return keys.ToString();
+    }
+
+    /* 모아 둔 변경을 한 번에 적용한다. 본문은 길이 접두 문자열의 평평한 줄이다 —
+       데이터베이스·테이블·건수에 이어 변경마다 갈래(update/delete/insert)와 그 값이 온다.
+       런처는 갈래 이름만 알아보고 나머지는 JSON 값으로 옮긴다. 문장은 워커가 만든다. */
+    static string DbApplyRequest(string sessionId, byte[] body)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        if (body == null || body.Length == 0 || body.Length > 4 * 1024 * 1024) throw new Exception("bad-db-request");
+        int pos = 0;
+        string database = ReadBundleString(body, ref pos);
+        string table = ReadBundleString(body, ref pos);
+        if (table.Trim().Length == 0) throw new Exception("db-bad-cell-target");
+        int count;
+        if (!int.TryParse(ReadBundleString(body, ref pos), out count) || count < 1 || count > 500)
+            throw new Exception("db-bad-change-count");
+
+        StringBuilder changes = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            string kind = ReadBundleString(body, ref pos);
+            if (changes.Length > 0) changes.Append(',');
+            changes.Append("{\"kind\":").Append(JsonString(kind));
+            if (kind == "update")
+            {
+                string column = ReadBundleString(body, ref pos);
+                string value = ReadBundleString(body, ref pos);
+                string valueNull = ReadBundleString(body, ref pos);
+                if (column.Trim().Length == 0) throw new Exception("db-bad-cell-target");
+                changes.Append(",\"column\":").Append(JsonString(column));
+                changes.Append(",\"value\":").Append(JsonString(value));
+                changes.Append(",\"valueNull\":").Append(valueNull == "1" ? "true" : "false");
+                changes.Append(",\"keys\":[").Append(DbReadKeys(body, ref pos)).Append(']');
+            }
+            else if (kind == "delete")
+            {
+                changes.Append(",\"keys\":[").Append(DbReadKeys(body, ref pos)).Append(']');
+            }
+            else if (kind == "insert")
+            {
+                int values;
+                if (!int.TryParse(ReadBundleString(body, ref pos), out values) || values < 0 || values > 512)
+                    throw new Exception("db-bad-change-count");
+                StringBuilder cells = new StringBuilder();
+                for (int c = 0; c < values; c++)
+                {
+                    string column = ReadBundleString(body, ref pos);
+                    string value = ReadBundleString(body, ref pos);
+                    string isNull = ReadBundleString(body, ref pos);
+                    if (column.Trim().Length == 0) throw new Exception("db-bad-cell-target");
+                    if (cells.Length > 0) cells.Append(',');
+                    cells.Append("{\"column\":").Append(JsonString(column)).Append(",\"value\":").Append(JsonString(value))
+                         .Append(",\"null\":").Append(isNull == "1" ? "true" : "false").Append('}');
+                }
+                changes.Append(",\"values\":[").Append(cells).Append(']');
+            }
+            else throw new Exception("db-bad-change-kind");
+            changes.Append('}');
+        }
+        if (pos != body.Length) throw new Exception("bad-db-request");
+
+        string request = "{\"action\":\"apply-edits\",\"database\":" + JsonString(database)
+            + ",\"table\":" + JsonString(table) + ",\"changes\":[" + changes + "]}";
+        string response = DbExchange(session, request, DbMetadataTimeoutMs);
+        return "{\"ok\":" + (DbResponseOk(response) ? "true" : "false") + ",\"info\":" + DbResponseBody(response) + "}";
     }
 
     static string PollDbQuery(string jobId)

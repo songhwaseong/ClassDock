@@ -33,6 +33,16 @@ MAX_KEPT_SETS = 4          # 동시에 들고 있을 결과 집합 수
 MAX_SCHEMA_COLUMNS = 5000  # 자동완성에 싣는 최대 컬럼 수
 MAX_SCHEMA_OBJECTS = 2000  # 프로시저·함수·이벤트 등 스키마 객체별 상한
 MAX_SCHEMA_RELATIONS = 5000  # ERD 외래키 관계 상한
+MAX_EDIT_CHARS = 100000    # 셀을 고칠 때 다시 읽어 오는 값의 상한(표시용 500자와 다르다)
+MAX_META_CACHE = 200       # 편집 판정에 쓰는 테이블 메타데이터 캐시 항목 수
+MAX_BATCH_CHANGES = 500    # 한 번에 모아 적용할 수 있는 변경 수
+MAX_INSERT_VALUES = 512    # 행 하나에 넣을 수 있는 값의 수
+# 이진 컬레이션 번호. ⚠ 숫자·날짜 컬럼도 이 번호로 오므로 이것만 보고 "이진"이라 하면
+# INT·DATETIME 이 전부 고칠 수 없는 칸이 된다. 반드시 자료형과 함께 봐야 한다.
+BINARY_CHARSET = 63
+# 이진 컬레이션일 때 BLOB·BINARY 가 되는 자료형(VARCHAR·TEXT·BLOB 계열)
+BINARY_STRING_TYPES = (15, 249, 250, 251, 252, 253, 254)
+BINARY_TYPES = (16, 255)   # BIT · GEOMETRY — 언제나 바이트로 온다
 
 # 읽기 전용 접속에서 미리 막아 친절한 메시지를 주는 낱말. 최종 판단은 서버의 READ ONLY 트랜잭션이 한다.
 WRITE_KEYWORDS = ("insert", "update", "delete", "replace", "truncate", "drop", "create", "alter",
@@ -48,7 +58,7 @@ IMPLICIT_COMMIT_KEYWORDS = ("create", "alter", "drop", "rename", "truncate", "gr
 
 _stdout_lock = threading.Lock()
 _state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {},
-          "auto_commit": True, "pending": False}
+          "auto_commit": True, "pending": False, "table_meta": {}}
 
 
 def write_response(payload):
@@ -312,6 +322,7 @@ def connect(request):
     _state["read_only"] = read_only
     _state["auto_commit"] = auto_commit
     _state["pending"] = False
+    _state["table_meta"] = {}
     return {"ok": True, "readOnly": read_only, "autoCommit": auto_commit, "pending": False, **info}
 
 
@@ -365,6 +376,127 @@ def slice_page(kept, offset, limit):
     }
 
 
+def field_sources(cursor):
+    """결과의 각 열이 서버에서 어느 테이블 어느 컬럼으로 왔는지 그대로 읽는다.
+
+    열 이름(cursor.description)만으로는 별칭·조인·계산식을 가릴 수 없다. 드라이버가 서버에서
+    받아 둔 필드 메타데이터를 쓰면 "고칠 수 있는 결과인가"를 프런트가 짐작하지 않아도 된다.
+    커서에 다른 질의를 실행하면 이 메타데이터가 덮이므로 execute 직후에 불러야 한다.
+    """
+    result = getattr(cursor, "_result", None)
+    fields = getattr(result, "fields", None) or []
+    sources = []
+    for field in fields:
+        database = getattr(field, "db", "")
+        if isinstance(database, (bytes, bytearray, memoryview)):
+            database = bytes(database).decode("utf-8", "replace")
+        charset = int(getattr(field, "charsetnr", 0) or 0)
+        type_code = int(getattr(field, "type_code", 0) or 0)
+        sources.append({
+            "database": str(database or ""),
+            "table": str(getattr(field, "org_table", "") or ""),
+            "column": str(getattr(field, "org_name", "") or ""),
+            "binary": (charset == BINARY_CHARSET and type_code in BINARY_STRING_TYPES)
+                      or type_code in BINARY_TYPES,
+        })
+    return sources
+
+
+def table_meta(connection, database, name):
+    """편집 판정에 쓰는 테이블 메타데이터. 결과 표마다 다시 묻지 않도록 접속이 들고 있는다."""
+    key = (database, name)
+    cached = _state["table_meta"].get(key)
+    if cached is not None:
+        return cached
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+            (database, name))
+        row = cursor.fetchone()
+        kind = str(row[0] or "").upper() if row else ""
+        cursor.execute(
+            "SELECT COLUMN_NAME, COLUMN_KEY, EXTRA, IS_NULLABLE, COLUMN_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION", (database, name))
+        columns, keys = {}, []
+        for item in cursor.fetchall():
+            column = str(item[0])
+            extra = str(item[2] or "").upper()
+            columns[column] = {
+                # 생성 컬럼(GENERATED)은 값을 직접 넣을 수 없다. 서버가 거절하기 전에 화면에서 잠근다.
+                "generated": "GENERATED" in extra,
+                "nullable": str(item[3] or "").upper() == "YES",
+                "type": str(item[4] or ""),
+            }
+            if str(item[1] or "").upper() == "PRI":
+                keys.append(column)
+    meta = {"base": kind == "BASE TABLE", "columns": columns, "keys": keys}
+    if len(_state["table_meta"]) < MAX_META_CACHE:
+        _state["table_meta"][key] = meta
+    return meta
+
+
+def edit_plan(connection, sources, columns):
+    """이 결과 표의 칸을 고칠 수 있는지 판정한다.
+
+    기준은 하나다 — 한 행을 정확히 짚을 수 있는가. 한 베이스 테이블에서 온 결과이고
+    그 테이블의 기본키가 결과에 모두 실려 있어야 짚을 수 있다. 하나라도 어긋나면
+    이유를 붙여 잠근다(조인·뷰·집계는 여기서 걸린다).
+
+    기본키 칸 자체는 고치지 않는다. 행을 짚는 근거를 바꾸는 일이라 값 수정과 다른 이야기다.
+    """
+    if _state["read_only"]:
+        return {"editable": False, "reason": "read-only"}
+    if not sources or len(sources) != len(columns):
+        return {"editable": False, "reason": "no-source"}
+    tables = set((item["database"], item["table"]) for item in sources if item["table"])
+    if not tables:
+        return {"editable": False, "reason": "no-source"}
+    if len(tables) > 1:
+        return {"editable": False, "reason": "multi-table"}
+    database, name = tables.pop()
+    if not database:
+        with connection.cursor() as cursor:
+            database = current_schema(cursor, "")
+    meta = table_meta(connection, database, name)
+    if not meta["base"]:
+        return {"editable": False, "reason": "view"}
+    if not meta["keys"]:
+        return {"editable": False, "reason": "no-key"}
+    positions = {}
+    for index, item in enumerate(sources):
+        if item["table"] == name and item["column"] in meta["keys"] and item["column"] not in positions:
+            positions[item["column"]] = index
+    missing = [column for column in meta["keys"] if column not in positions]
+    if missing:
+        return {"editable": False, "reason": "key-missing", "detail": ", ".join(missing)}
+    cells = []
+    for item in sources:
+        column = item["column"]
+        info = meta["columns"].get(column) or {}
+        if item["table"] != name or not column:
+            cells.append({"editable": False, "reason": "no-source"})
+        elif column in meta["keys"]:
+            cells.append({"editable": False, "reason": "key", "column": column})
+        elif item["binary"]:
+            cells.append({"editable": False, "reason": "binary", "column": column})
+        elif info.get("generated"):
+            cells.append({"editable": False, "reason": "generated", "column": column})
+        else:
+            cells.append({"editable": True, "column": column,
+                          "nullable": bool(info.get("nullable")), "type": str(info.get("type") or "")})
+    return {"editable": True, "database": database, "table": name,
+            "keys": [{"name": column, "index": positions[column]} for column in meta["keys"]],
+            "cells": cells}
+
+
+def safe_edit_plan(connection, sources, columns):
+    """편집 판정이 실패해도 결과 자체는 그대로 보여 준다(고치지 못할 뿐이다)."""
+    try:
+        return edit_plan(connection, sources, columns)
+    except Exception:                                         # noqa: BLE001
+        return {"editable": False, "reason": "unknown"}
+
+
 def run_statements(sql, driver):
     connection = require_connection()
     statements = split_statements(sql)
@@ -388,6 +520,8 @@ def run_statements(sql, driver):
             with connection.cursor() as cursor:
                 affected = cursor.execute(statement)
                 if cursor.description:
+                    # 열의 출처는 커서에 다른 질의가 실리기 전에 붙잡아 둔다(편집 판정에 쓴다).
+                    sources = field_sources(cursor)
                     # 한 번에 보내는 양(첫 페이지)과 "더 보기"용으로 들고 있을 양을 따로 둔다.
                     columns, kept_rows, more, clipped = read_rows(cursor, KEEP_ROWS, KEEP_CELLS)
                     width = max(1, len(columns))
@@ -401,7 +535,8 @@ def run_statements(sql, driver):
                     entry.update({"kind": "rows", "columns": columns, "rows": page["rows"],
                                   "truncated": page["hasMore"], "clippedCells": page["clippedCells"],
                                   "loaded": len(kept_rows), "hasMore": page["hasMore"],
-                                  "serverHasMore": more, "set": len(results)})
+                                  "serverHasMore": more, "set": len(results),
+                                  "edit": safe_edit_plan(connection, sources, columns)})
                     # 앞의 결과가 예산을 다 써서 한 줄도 싣지 못한 경우를 "데이터가 없다"와 구분한다.
                     if not page["rows"] and len(kept_rows):
                         entry["budgetExhausted"] = True
@@ -425,6 +560,9 @@ def run_statements(sql, driver):
             failure.update(tx_state())
             return failure
         # 수동 커밋 모드에서만 "커밋하지 않은 변경"을 센다. 암묵적 커밋 문장은 그 표시를 지운다.
+        # 구조가 바뀌었을 수 있으면 편집 판정에 쓰던 메타데이터를 버린다(기본키·생성 컬럼이 달라진다).
+        if keyword in IMPLICIT_COMMIT_KEYWORDS:
+            _state["table_meta"] = {}
         if not _state["auto_commit"]:
             if keyword in IMPLICIT_COMMIT_KEYWORDS:
                 _state["pending"] = False
@@ -774,9 +912,11 @@ def load_table(name, database=""):
         payload["columns"] = column_definitions(cursor, name, current_schema(cursor, database))
         started = time.perf_counter()
         cursor.execute("SELECT * FROM " + target + " LIMIT %s", (PREVIEW_ROWS,))
+        sources = field_sources(cursor)
         columns, rows, more, clipped = read_rows(cursor, PREVIEW_ROWS, MAX_CELLS)
         payload.update({"displayColumns": columns, "rows": rows, "truncated": more, "clippedCells": clipped,
                         "ms": elapsed_ms(started)})
+    payload["edit"] = safe_edit_plan(connection, sources, columns)
     return payload
 
 
@@ -789,6 +929,186 @@ def count_table(name, database=""):
         cursor.execute("SELECT COUNT(*) FROM " + target)
         row = cursor.fetchone()
     return {"ok": True, "name": name, "rowCount": int(row[0]) if row else 0}
+
+
+def key_where(keys):
+    """기본키 조건. 값은 SQL 에 이어 붙이지 않고 자리표시자로만 보낸다."""
+    clauses, params = [], []
+    for item in (keys or []):
+        name = str(item.get("name") or "")
+        if not name or item.get("null"):
+            # 기본키는 NULL 일 수 없다. 그런 값이 왔다면 행을 짚을 근거가 없는 것이다.
+            raise RuntimeError("bad-cell-key")
+        clauses.append(quote_identifier(name) + " = %s")
+        params.append(str(item.get("value") or ""))
+    if not clauses:
+        raise RuntimeError("bad-cell-key")
+    return " AND ".join(clauses), params
+
+
+def table_target(request):
+    """고칠 테이블이 어디인지. 이름은 전부 인용한다(값은 어디서도 SQL 에 붙이지 않는다)."""
+    table = str(request.get("table") or "")
+    if not table:
+        raise RuntimeError("bad-cell-target")
+    target = quote_identifier(table)
+    database = str(request.get("database") or "")
+    if database:
+        target = quote_identifier(database) + "." + target
+    return target
+
+
+def cell_target(request):
+    """고칠 칸이 어디인지(테이블 + 컬럼)."""
+    column = str(request.get("column") or "")
+    if not column:
+        raise RuntimeError("bad-cell-target")
+    return table_target(request), column
+
+
+def read_cell(request):
+    """편집을 시작할 때 값 전체를 다시 읽는다.
+
+    표에 실린 값은 500자에서 잘려 있을 수 있다. 그 글자를 그대로 저장하면 서버의 값이
+    잘린 채로 덮인다. 고치기 전에 원본을 다시 읽는 이유가 이것이다.
+    """
+    connection = require_connection()
+    target, column = cell_target(request)
+    where, params = key_where(request.get("keys"))
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT " + quote_identifier(column) + " FROM " + target
+                       + " WHERE " + where + " LIMIT 1", params)
+        row = cursor.fetchone()
+    if row is None:
+        return {"ok": False, "code": "row-gone", "detail": ""}
+    value = row[0]
+    if value is None:
+        return {"ok": True, "isNull": True, "value": "", "clipped": False}
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"ok": False, "code": "binary-cell", "detail": str(len(bytes(value)))}
+    text = str(value)
+    return {"ok": True, "isNull": False, "value": text[:MAX_EDIT_CHARS], "clipped": len(text) > MAX_EDIT_CHARS}
+
+
+def row_exists(cursor, target, where, params):
+    """그 행이 아직 있는가. 반영 0행이 '값이 같았다'인지 '행이 사라졌다'인지 가르는 데만 쓴다."""
+    cursor.execute("SELECT 1 FROM " + target + " WHERE " + where + " LIMIT 1", params)
+    return cursor.fetchone() is not None
+
+
+def insert_sql(target, values):
+    """행 하나를 넣는 문장. 적지 않은 컬럼은 서버의 기본값이 채운다."""
+    if len(values) > MAX_INSERT_VALUES:
+        raise RuntimeError("too-many-values")
+    columns, params = [], []
+    for item in values:
+        name = str(item.get("column") or "")
+        if not name:
+            raise RuntimeError("bad-cell-target")
+        columns.append(quote_identifier(name))
+        params.append(None if item.get("null") else str(item.get("value") or ""))
+    if not columns:
+        # 값을 하나도 적지 않은 행 = 전부 기본값. MySQL 이 받는 문장이다.
+        return "INSERT INTO " + target + " () VALUES ()", []
+    return ("INSERT INTO " + target + " (" + ", ".join(columns) + ") VALUES ("
+            + ", ".join(["%s"] * len(columns)) + ")", params)
+
+
+def change_plans(target, changes):
+    """모아 온 변경을 실행할 문장으로 옮긴다. 값은 언제나 자리표시자로만 나간다."""
+    plans = []
+    for change in changes:
+        kind = str(change.get("kind") or "")
+        if kind == "update":
+            column = str(change.get("column") or "")
+            if not column:
+                raise RuntimeError("bad-cell-target")
+            where, params = key_where(change.get("keys"))
+            value = None if change.get("valueNull") else str(change.get("value") or "")
+            plans.append(("update", "UPDATE " + target + " SET " + quote_identifier(column)
+                          + " = %s WHERE " + where, [value] + params, where, params))
+        elif kind == "delete":
+            where, params = key_where(change.get("keys"))
+            plans.append(("delete", "DELETE FROM " + target + " WHERE " + where, params, where, params))
+        elif kind == "insert":
+            sql, params = insert_sql(target, change.get("values") or [])
+            plans.append(("insert", sql, params, "", []))
+        else:
+            raise RuntimeError("bad-change-kind")
+    # 고치기 → 지우기 → 넣기 순서로 돌린다. 지운 기본키를 같은 묶음에서 다시 넣을 수 있다.
+    order = {"update": 0, "delete": 1, "insert": 2}
+    plans.sort(key=lambda item: order[item[0]])
+    return plans
+
+
+def apply_edits(request):
+    """모아 둔 변경을 한 번에 적용한다. 하나라도 실패하면 이 묶음만 통째로 되돌린다.
+
+    ⚠ 수동 커밋 모드에서 connection.rollback() 을 부르면 안 된다 — 사용자가 앞서 쌓아 둔
+    커밋하지 않은 변경까지 함께 사라진다. 세이브포인트를 걸어 이 묶음만 되돌린다.
+    자동 커밋 모드에서는 문장마다 확정되므로 세이브포인트가 뜻이 없다. 묶음을 트랜잭션으로 연다.
+
+    사라진 행을 고치라는 요청은 실패로 본다(말없이 아무 일도 일어나지 않는 것이 제일 나쁘다).
+    사라진 행을 지우라는 요청은 뜻이 이미 이루어진 것이므로 몇 건인지만 알린다.
+    """
+    connection = require_connection()
+    if _state["read_only"]:
+        return {"ok": False, "code": "read-only-blocked", "detail": "UPDATE"}
+    changes = request.get("changes") or []
+    if not changes:
+        return {"ok": False, "code": "no-changes", "detail": ""}
+    if len(changes) > MAX_BATCH_CHANGES:
+        return {"ok": False, "code": "too-many-changes", "detail": str(len(changes))}
+    target = table_target(request)
+    plans = change_plans(target, changes)
+
+    manual = not _state["auto_commit"]
+    counts = {"update": 0, "delete": 0, "insert": 0, "unchanged": 0, "missing": 0}
+    insert_ids = []
+    started = time.perf_counter()
+    with connection.cursor() as cursor:
+        if manual:
+            cursor.execute("SAVEPOINT classdock_edit")
+        else:
+            connection.begin()
+        try:
+            for kind, sql, params, where, key_params in plans:
+                affected = int(cursor.execute(sql, params) or 0)
+                if kind == "insert":
+                    counts["insert"] += 1
+                    insert_ids.append(int(getattr(cursor, "lastrowid", 0) or 0))
+                elif affected:
+                    counts[kind] += 1
+                elif kind == "delete":
+                    counts["missing"] += 1
+                elif row_exists(cursor, target, where, key_params):
+                    counts["unchanged"] += 1
+                else:
+                    raise RuntimeError("row-gone")
+        except Exception as exc:                              # noqa: BLE001
+            try:
+                if manual:
+                    cursor.execute("ROLLBACK TO SAVEPOINT classdock_edit")
+                else:
+                    connection.rollback()
+            except Exception:                                 # noqa: BLE001
+                pass
+            if isinstance(exc, RuntimeError):
+                failure = {"ok": False, "code": str(exc), "detail": str(exc)}
+            else:
+                failure = error_payload(exc, import_driver(), "apply")
+            # 되돌렸으므로 반영된 것은 하나도 없다. 절반만 들어갔다고 오해하게 두지 않는다.
+            failure["applied"] = 0
+            failure.update(tx_state())
+            return failure
+        if manual:
+            cursor.execute("RELEASE SAVEPOINT classdock_edit")
+        else:
+            connection.commit()
+    if manual:
+        _state["pending"] = True
+    return {"ok": True, "ms": elapsed_ms(started), "changes": len(plans), "counts": counts,
+            "insertIds": insert_ids, **tx_state()}
 
 
 def tx_state():
@@ -836,6 +1156,7 @@ def use_database(name):
         cursor.execute("USE " + quote_identifier(name))
     credentials = _state.get("credentials") or {}
     credentials["database"] = name
+    _state["table_meta"] = {}
     return {"ok": True, "database": name}
 
 
@@ -900,6 +1221,10 @@ def handle(request):
             return use_database(str(request.get("name") or ""))
         if action == "query":
             return run_statements(str(request.get("sql") or ""), driver)
+        if action == "cell-read":
+            return read_cell(request)
+        if action == "apply-edits":
+            return apply_edits(request)
         if action == "autocommit":
             return set_auto_commit(request)
         if action == "commit":

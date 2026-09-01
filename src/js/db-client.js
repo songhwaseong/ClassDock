@@ -65,6 +65,14 @@ const MNDbClient = (() => {
       case "tx-pending":        return "커밋하지 않은 변경이 있습니다. 먼저 커밋하거나 롤백해 주세요.";
       case "tx-auto-commit":    return "자동 커밋 상태라 확정할 변경이 없습니다.";
       case "job-not-found":     return "실행 기록을 찾지 못했습니다. 다시 실행해 주세요.";
+      case "row-gone":          return "그 행을 찾지 못했습니다. 다른 곳에서 지웠거나 기본키가 바뀐 것 같습니다. 다시 조회해 주세요.";
+      case "binary-cell":       return "이진 데이터라 글자로 고칠 수 없습니다.";
+      case "bad-cell-target":   return "고칠 칸이 어디인지 알아내지 못했습니다. 다시 조회해 주세요.";
+      case "bad-cell-key":      return "행을 짚을 기본키 값을 알아내지 못했습니다. 다시 조회해 주세요.";
+      case "bad-change-kind":   return "알 수 없는 변경입니다. 결과를 다시 조회해 주세요.";
+      case "no-changes":        return "적용할 변경이 없습니다.";
+      case "too-many-changes":  return "한 번에 적용할 수 있는 변경은 500건까지입니다. 나눠서 적용해 주세요.";
+      case "too-many-values":   return "한 행에 넣을 수 있는 값의 수를 넘었습니다.";
       case "sql-error":         return detail || "SQL 오류입니다.";
       default:                  return detail || "알 수 없는 오류입니다.";
     }
@@ -82,6 +90,8 @@ const MNDbClient = (() => {
     if (raw.indexOf("db-missing-host") >= 0) return "호스트를 입력해 주세요.";
     if (raw.indexOf("db-missing-user") >= 0) return "계정을 입력해 주세요.";
     if (raw.indexOf("db-empty-sql") >= 0) return "실행할 SQL 을 입력해 주세요.";
+    if (raw.indexOf("db-bad-cell") >= 0) return "고칠 칸을 알아내지 못했습니다. 결과를 다시 조회해 주세요.";
+    if (raw.indexOf("db-bad-change") >= 0) return "변경 목록을 읽지 못했습니다. 결과를 다시 조회해 주세요.";
     if (raw.indexOf("db-session-stopped") >= 0) return "접속 프로세스가 종료되었습니다. 다시 연결해 주세요.";
     return raw || "요청을 처리하지 못했습니다.";
   };
@@ -388,6 +398,63 @@ const MNDbClient = (() => {
   const ddlIdentifier = (name) => "`" + String(name == null ? "" : name).replace(/`/g, "``") + "`";
   const ddlString = (value) => "'" + String(value == null ? "" : value)
     .replace(/\\/g, "\\\\").replace(/'/g, "''") + "'";
+
+  /* 셀 편집 미리보기 --------------------------------------------------------
+     화면에 보여 줄 UPDATE 문장을 만든다. 실제로 서버에 나가는 것은 이 글자가 아니다 —
+     워커가 같은 모양의 문장을 자리표시자(%s)로 만들고 값은 따로 실어 보낸다. 여기서
+     따옴표를 붙이는 것은 사람이 읽으라고 하는 일이지 SQL 을 조립하는 일이 아니다.
+     조건은 언제나 기본키다. 옛 값을 조건에 섞지 않는다 — 표의 값은 500자에서 잘리거나
+     글자로 옮겨진 것이라(소수점·날짜) 아무도 바꾸지 않았는데 0행이 반영되는 일이 잦다. */
+  const targetName = (target) => (target && target.database ? ddlIdentifier(target.database) + "." : "")
+    + ddlIdentifier((target && target.table) || "");
+
+  const keyWherePreview = (keys) => {
+    const where = (keys || []).map(key => ddlIdentifier(key.name) + " = " + ddlString(key.value)).join(" AND ");
+    return where ? " WHERE " + where : "";
+  };
+
+  const cellUpdatePreview = (target, column, keys, value, isNull) => {
+    if (!target || !target.table || !column) return "";
+    return "UPDATE " + targetName(target) + " SET " + ddlIdentifier(column) + " = "
+      + (isNull ? "NULL" : ddlString(value)) + keyWherePreview(keys);
+  };
+
+  const rowDeletePreview = (target, keys) => {
+    if (!target || !target.table) return "";
+    return "DELETE FROM " + targetName(target) + keyWherePreview(keys);
+  };
+
+  const rowInsertPreview = (target, values) => {
+    if (!target || !target.table) return "";
+    const list = values || [];
+    // 값을 하나도 적지 않은 행 = 전부 기본값. MySQL 이 받는 문장이라 그대로 보여 준다.
+    if (!list.length) return "INSERT INTO " + targetName(target) + " () VALUES ()";
+    return "INSERT INTO " + targetName(target)
+      + " (" + list.map(item => ddlIdentifier(item.column)).join(", ") + ")"
+      + " VALUES (" + list.map(item => item.isNull ? "NULL" : ddlString(item.value)).join(", ") + ")";
+  };
+
+  // 고칠 수 없는 까닭을 그대로 사람 말로 옮긴다. 잠긴 이유를 밝히지 않으면
+  // "왜 어떤 칸은 되고 어떤 칸은 안 되는지" 를 사용자가 추측하게 된다.
+  const EDIT_BLOCK_NOTES = {
+    "read-only":   "읽기 전용 접속입니다. 접속을 끊고 ‘쓰기 허용’을 켜서 다시 연결하면 값을 고칠 수 있습니다.",
+    "no-source":   "계산식·함수로 만든 열이라 고칠 원본 칸이 없습니다.",
+    "multi-table": "여러 테이블을 조인한 결과라 어느 테이블의 행을 고칠지 정할 수 없습니다.",
+    "view":        "뷰라서 값을 고칠 수 없습니다. 원본 테이블을 조회해 주세요.",
+    "no-key":      "이 테이블에는 기본키가 없어 한 행을 정확히 짚을 수 없습니다.",
+    "key-missing": "기본키 컬럼이 결과에 빠져 있어 한 행을 정확히 짚을 수 없습니다",
+    "key":         "기본키 칸은 여기서 고치지 않습니다. 행을 짚는 근거라 값 수정과 다른 이야기입니다.",
+    "binary":      "이진 데이터라 글자로 고칠 수 없습니다.",
+    "generated":   "다른 컬럼에서 자동으로 만들어지는 값이라 직접 고칠 수 없습니다.",
+    "unknown":     "이 결과의 값은 고칠 수 없습니다."
+  };
+
+  const editBlockNote = (plan) => {
+    const reason = String((plan && plan.reason) || "unknown");
+    const note = EDIT_BLOCK_NOTES[reason] || EDIT_BLOCK_NOTES.unknown;
+    const detail = String((plan && plan.detail) || "");
+    return detail ? note + " (" + detail + ")" : note;
+  };
 
   const defaultDraft = (value) => {
     if (value == null) return { mode:"none", value:"" };
@@ -1030,11 +1097,27 @@ const MNDbClient = (() => {
     const resultColorReset = button("↺", "db-result-font-btn db-result-color-reset", "현재 테마의 결과 글자색을 기본값으로 되돌립니다");
     resultFontTools.append(fontDownButton, fontUpButton, fontPick,
       editorColorField, editorColorReset, resultColorField, resultColorReset);
+    const addRowButton = button("행 추가", "db-btn db-btn-quiet", "이 테이블에 넣을 행을 만들어 변경 목록에 담습니다");
+    const deleteRowButton = button("행 삭제", "db-btn db-btn-quiet", "고른 칸이 걸친 행을 지우려고 변경 목록에 담습니다");
     resultBar.append(resultStatus, selectInfo, el("span", "db-result-spacer", null),
-      resultFontTools, memoButton, exportCsvButton, openSheetButton);
+      resultFontTools, addRowButton, deleteRowButton, memoButton, exportCsvButton, openSheetButton);
     memoButton.hidden = true;
     exportCsvButton.hidden = true;
     openSheetButton.hidden = true;
+    addRowButton.hidden = true;
+    deleteRowButton.hidden = true;
+
+    /* 변경 바 — 담아 둔 변경이 있을 때만 나온다. 적용하기 전에는 서버에 아무것도 가지 않으므로
+       "지금 화면과 서버가 다르다"는 사실을 눈에 띄는 자리에서 계속 알린다. */
+    const editBar = el("div", "db-edit-bar");
+    editBar.hidden = true;
+    const editBarCount = el("strong", "db-edit-count", "");
+    const editBarDetail = el("span", "db-edit-detail", "");
+    const previewChangesButton = button("미리보기", "db-btn db-btn-quiet", "적용할 문장을 그대로 봅니다");
+    const applyChangesButton = button("적용", "db-btn db-btn-primary", "담아 둔 변경을 한 번에 서버에 반영합니다");
+    const discardChangesButton = button("모두 취소", "db-btn db-btn-quiet", "담아 둔 변경을 모두 버립니다");
+    editBar.append(editBarCount, editBarDetail, el("span", "db-result-spacer", null),
+      previewChangesButton, applyChangesButton, discardChangesButton);
 
     // 여러 문장을 실행하면 결과 집합도 여러 개가 온다. 예전에는 마지막 것만 그리고 나머지를 버렸다.
     const resultTabs = el("div", "db-result-tabs");
@@ -1065,7 +1148,7 @@ const MNDbClient = (() => {
     const editorPane = el("div", "db-editor-pane");
     editorPane.append(editorWrap);
     const resultPane = el("div", "db-result-pane");
-    resultPane.append(resultBar, resultTabs, resultHost);
+    resultPane.append(resultBar, resultTabs, editBar, resultHost);
     const editorDivider = el("div", "db-query-divider");
     editorDivider.setAttribute("role", "separator");
     editorDivider.tabIndex = 0;
@@ -1411,17 +1494,525 @@ const MNDbClient = (() => {
 
     const closeValuePanel = () => { if (closeValueModal) closeValueModal(); };
 
-    const showCellValue = (columnName, value, clipped) => {
+    /* 셀 값 보기·고치기 ------------------------------------------------------
+       보기는 늘 되고, 고치기는 워커가 "고칠 수 있다"고 판정한 결과에서만 열린다.
+       판정을 프런트가 짐작하지 않는 이유는 하나다 — 열 이름만으로는 별칭·조인·계산식을
+       가릴 수 없다. 어느 테이블 어느 컬럼에서 온 열인지는 서버가 알려 준 것만 믿는다. */
+
+    const showCellValue = (columnName, value, clipped, point) => {
       const text = value === null ? "NULL" : String(value);
       let note;
       if (value === null) note = "빈 값(NULL)입니다.";
       else if (/^<BLOB \d+ bytes>$/.test(text)) note = "이진 데이터라 내용을 표시하지 않습니다. 크기만 가져왔습니다.";
       else if (clipped) note = "서버에서 500자까지만 가져온 값입니다. 전체가 필요하면 그 컬럼만 따로 조회해 주세요.";
       else note = text.length.toLocaleString() + "자";
-      openValueModal(columnName || "값", text, note, value === null);
+      const edit = point ? cellEditContext(point.row, point.col, clipped) : null;
+      openValueModal(columnName || "값", text, note, value === null, edit);
     };
 
-    const openValueModal = (columnName, text, note, isNull) => {
+    /* 이 칸을 고칠 수 있는가. 무엇을 고칠 수 있는지는 워커가 보낸 계획이 정하고,
+       여기서는 그 계획대로 행을 짚을 기본키 값을 표에서 꺼낼 수 있는지만 더 본다. */
+    /* 한 행을 짚을 기본키 값을 표에서 꺼낸다. 꺼내지 못하면 그 까닭을 돌려준다 —
+       못 짚는 행을 고치거나 지우면 엉뚱한 행이 바뀐다. */
+    const rowKeyValues = (row) => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan || !plan.editable) return { error:editBlockNote(plan) };
+      const keys = [];
+      const list = plan.keys || [];
+      for (let index = 0; index < list.length; index++){
+        const node = gridCellAt(row, list[index].index);
+        if (!node || node.classList.contains("db-null"))
+          return { error:"기본키 값을 읽지 못해 이 행을 짚을 수 없습니다." };
+        if (node.classList.contains("db-clipped"))
+          return { error:"기본키 값이 길어 잘려 왔습니다. 그 값으로는 행을 정확히 짚을 수 없습니다." };
+        keys.push({ name:list[index].name, value:node.textContent });
+      }
+      return { keys };
+    };
+
+    const cellEditContext = (row, col, clipped) => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan) return { editable:false, note:EDIT_BLOCK_NOTES.unknown };
+      if (!plan.editable) return { editable:false, note:editBlockNote(plan) };
+      if (stagedDelete(row)) return { editable:false, note:"지우려고 담아 둔 행입니다. 먼저 그 변경을 빼 주세요." };
+      const cellPlan = (plan.cells || [])[col];
+      if (!cellPlan || !cellPlan.editable) return { editable:false, note:editBlockNote(cellPlan) };
+      const found = rowKeyValues(row);
+      if (found.error) return { editable:false, note:found.error };
+      const change = stagedUpdate(row, col);
+      return { editable:true, target:{ database:plan.database, table:plan.table },
+        column:cellPlan.column, nullable:!!cellPlan.nullable, type:String(cellPlan.type || ""),
+        keys:found.keys, row, col, clipped:!!clipped,
+        // 이미 담아 둔 칸이면 서버가 아니라 담아 둔 값에서 이어 고친다.
+        staged:change ? { value:change.value, isNull:change.isNull } : null };
+    };
+
+    /* 변경 모아 적용 --------------------------------------------------------
+       고친 칸·지울 행·넣을 행은 곧바로 서버로 가지 않고 목록에 쌓인다. `적용` 을 누를 때
+       한 묶음으로 나가고, 하나라도 실패하면 그 묶음만 통째로 되돌아온다(절반만 반영되는 일이 없다).
+       무엇이 나갈지는 미리보기에서 문장 그대로 보여 준다 — GUI 로 고친 일이 어떤 SQL 인지 감추지 않는다. */
+
+    let staged = null;              // { target:{database,table}, list:[변경], seq }
+    let applying = false;
+
+    const stagedCount = () => (staged ? staged.list.length : 0);
+    const stagedUpdate = (row, col) => staged
+      ? staged.list.find(item => item.kind === "update" && item.row === row && item.col === col) : null;
+    const stagedDelete = (row) => staged
+      ? staged.list.find(item => item.kind === "delete" && item.row === row) : null;
+
+    const stagedTally = () => {
+      const tally = { update:0, "delete":0, insert:0 };
+      if (staged) staged.list.forEach(change => { tally[change.kind]++; });
+      return tally;
+    };
+
+    const changeSql = (change) => {
+      const target = staged ? staged.target : null;
+      if (change.kind === "update")
+        return cellUpdatePreview(target, change.column, change.keys, change.value, change.isNull);
+      if (change.kind === "delete") return rowDeletePreview(target, change.keys);
+      return rowInsertPreview(target, change.values);
+    };
+
+    const cellSnapshot = (row, col) => {
+      const node = gridCellAt(row, col);
+      if (!node) return { text:"", isNull:false, clipped:false, title:"" };
+      return { text:node.textContent, isNull:node.classList.contains("db-null"),
+        clipped:node.classList.contains("db-clipped"), title:node.title };
+    };
+
+    const paintStagedCell = (change) => {
+      const node = gridCellAt(change.row, change.col);
+      if (!node) return;
+      node.classList.add("db-cell-staged");
+      node.classList.toggle("db-null", !!change.isNull);
+      node.classList.remove("db-clipped");         // 담은 값은 온전한 값이라 잘림 표시가 남으면 안 된다
+      node.textContent = change.isNull ? "NULL" : change.value;
+      node.title = "담아 둔 변경입니다 — 위의 ‘적용’을 눌러야 서버에 반영됩니다";
+    };
+
+    const restoreStagedCell = (change) => {
+      const node = gridCellAt(change.row, change.col);
+      if (!node) return;
+      node.classList.remove("db-cell-staged");
+      node.classList.toggle("db-null", !!change.before.isNull);
+      node.classList.toggle("db-clipped", !!change.before.clipped);
+      node.textContent = change.before.text;
+      node.title = change.before.title;
+    };
+
+    const paintStagedRow = (row, on) => {
+      const tr = currentGrid && currentGrid.body ? currentGrid.body.children[row] : null;
+      if (tr) tr.classList.toggle("db-row-staged", on);
+    };
+
+    // 표를 새로 그릴 때는 되돌릴 자리가 이미 사라졌으므로 칠하지 않고 목록만 버린다.
+    const dropStaged = () => { staged = null; refreshEditBar(); };
+
+    const discardStaged = () => {
+      if (staged) staged.list.forEach((change) => {
+        if (change.kind === "update") restoreStagedCell(change);
+        else if (change.kind === "delete") paintStagedRow(change.row, false);
+      });
+      dropStaged();
+    };
+
+    const ensureStaged = (target) => {
+      if (!staged) staged = { target:{ database:target.database || "", table:target.table }, list:[], seq:0 };
+      return staged;
+    };
+
+    const unstage = (id) => {
+      if (!staged) return;
+      const at = staged.list.findIndex(item => item.id === id);
+      if (at < 0) return;
+      const change = staged.list[at];
+      staged.list.splice(at, 1);
+      if (change.kind === "update") restoreStagedCell(change);
+      else if (change.kind === "delete") paintStagedRow(change.row, false);
+      if (!staged.list.length) staged = null;
+      refreshEditBar();
+    };
+
+    const refreshEditBar = () => {
+      const count = stagedCount();
+      editBar.hidden = !count;
+      applyChangesButton.disabled = applying;
+      discardChangesButton.disabled = applying;
+      previewChangesButton.disabled = applying;
+      if (!count) return;
+      const tally = stagedTally();
+      const parts = [];
+      if (tally.update) parts.push("값 수정 " + tally.update);
+      if (tally["delete"]) parts.push("행 삭제 " + tally["delete"]);
+      if (tally.insert) parts.push("행 추가 " + tally.insert);
+      editBarCount.textContent = "담아 둔 변경 " + count + "건";
+      editBarDetail.textContent = parts.join(" · ") + " · 아직 서버에 반영되지 않았습니다";
+    };
+
+    const stageUpdate = (edit, value, isNull) => {
+      const before = stagedUpdate(edit.row, edit.col)
+        ? stagedUpdate(edit.row, edit.col).before : cellSnapshot(edit.row, edit.col);
+      const text = isNull ? "" : String(value == null ? "" : value);
+      // 원래 값으로 되돌려 놓았으면 담지 않는다. 아무것도 바꾸지 않는 UPDATE 를 보낼 이유가 없다.
+      const same = !before.clipped && (isNull ? before.isNull : (!before.isNull && before.text === text));
+      const previous = stagedUpdate(edit.row, edit.col);
+      if (same){
+        if (previous) unstage(previous.id);
+        return false;
+      }
+      ensureStaged(edit.target);
+      const change = { id:++staged.seq, kind:"update", row:edit.row, col:edit.col, column:edit.column,
+        keys:edit.keys, value:text, isNull:!!isNull, before };
+      const at = staged.list.findIndex(item => item.kind === "update" && item.row === edit.row && item.col === edit.col);
+      if (at >= 0) staged.list[at] = change; else staged.list.push(change);
+      paintStagedCell(change);
+      refreshEditBar();
+      return true;
+    };
+
+    const MAX_STAGED = 500;      // 워커가 한 묶음으로 받는 상한과 같다(담을 때 미리 막는다)
+
+    const stageDeleteRows = async (rows) => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan || !plan.editable){ toast(editBlockNote(plan), 3500); return; }
+      if (stagedCount() + rows.length > MAX_STAGED){
+        toast("한 번에 담을 수 있는 변경은 " + MAX_STAGED + "건까지입니다. 먼저 적용해 주세요.", 3500);
+        return;
+      }
+      // 컬럼 머리를 누르면 그 열 전체가 골라진다 = 보이는 행 전부가 대상이 된다.
+      // 몇 행인지 먼저 말해 주지 않으면 실수로 표 전체를 담게 된다.
+      if (rows.length >= 10 && typeof confirmDialog === "function"){
+        const ok = await confirmDialog(rows.length.toLocaleString()
+          + "행을 지우려고 담습니다.\n(아직 서버에서 지워지지는 않습니다.)", "담기", "취소");
+        if (!ok) return;
+      }
+      let added = 0, blocked = "";
+      rows.forEach((row) => {
+        if (stagedDelete(row)) return;
+        const found = rowKeyValues(row);
+        if (found.error){ blocked = found.error; return; }
+        ensureStaged({ database:plan.database, table:plan.table });
+        // 지울 행에 담아 둔 값 수정이 있으면 뜻이 없다. 함께 뺀다.
+        staged.list.filter(item => item.kind === "update" && item.row === row)
+          .forEach(item => unstage(item.id));
+        ensureStaged({ database:plan.database, table:plan.table });
+        staged.list.push({ id:++staged.seq, kind:"delete", row, keys:found.keys });
+        paintStagedRow(row, true);
+        added++;
+      });
+      refreshEditBar();
+      if (added) toast(added.toLocaleString() + "행을 지우려고 담았어요. ‘적용’을 눌러야 서버에서 지워집니다.", 3000);
+      else if (blocked) toast(blocked, 3500);
+      else toast("이미 담아 둔 행입니다.", 2000);
+    };
+
+    const stageInsert = (values) => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan || !plan.editable) return;
+      if (stagedCount() >= MAX_STAGED){
+        toast("한 번에 담을 수 있는 변경은 " + MAX_STAGED + "건까지입니다. 먼저 적용해 주세요.", 3500);
+        return;
+      }
+      ensureStaged({ database:plan.database, table:plan.table });
+      staged.list.push({ id:++staged.seq, kind:"insert", values });
+      refreshEditBar();
+      toast("넣을 행 하나를 담았어요. ‘적용’을 눌러야 서버에 들어갑니다.", 3000);
+    };
+
+    // 고른 칸이 걸친 행 번호. 칸 하나는 `행 * 열수 + 열` 정수 하나로 눌러 담겨 있다.
+    const selectedRows = () => {
+      const count = gridColumnCount();
+      const rows = new Set();
+      if (gridSelection && count) gridSelection.keys.forEach(key => rows.add(Math.floor(key / count)));
+      return Array.from(rows).sort((left, right) => left - right);
+    };
+
+    /* 적용 요청의 본문. 이름과 값만 순서대로 싣는다 — 문장은 워커가 자리표시자로 만든다. */
+    const pushKeys = (parts, keys) => {
+      parts.push(String(keys.length));
+      keys.forEach(key => parts.push(key.name, key.value));
+    };
+
+    const applyRequestBody = () => {
+      const parts = [staged.target.database || "", staged.target.table, String(staged.list.length)];
+      staged.list.forEach((change) => {
+        parts.push(change.kind);
+        if (change.kind === "update"){
+          parts.push(change.column, change.isNull ? "" : change.value, change.isNull ? "1" : "0");
+          pushKeys(parts, change.keys);
+        } else if (change.kind === "delete"){
+          pushKeys(parts, change.keys);
+        } else {
+          parts.push(String(change.values.length));
+          change.values.forEach(item => parts.push(item.column, item.isNull ? "" : item.value, item.isNull ? "1" : "0"));
+        }
+      });
+      return encodeStrings(parts);
+    };
+
+    const applySummary = (info) => {
+      const counts = (info && info.counts) || {};
+      const parts = [];
+      if (counts.update) parts.push("값 수정 " + counts.update + "건");
+      if (counts["delete"]) parts.push("행 삭제 " + counts["delete"] + "건");
+      if (counts.insert) parts.push("행 추가 " + counts.insert + "건");
+      let text = parts.length ? parts.join(" · ") + " 반영했어요." : "반영할 것이 없었어요.";
+      if (counts.unchanged) text += " " + counts.unchanged + "건은 값이 이미 같았습니다.";
+      if (counts.missing) text += " " + counts.missing + "건은 지울 행이 이미 없었습니다.";
+      if (!info.autoCommit) text += " 커밋해야 확정됩니다.";
+      return text;
+    };
+
+    const applyStaged = async () => {
+      if (!stagedCount() || applying) return;
+      const tally = stagedTally();
+      const lines = [];
+      if (tally.update) lines.push("· 값 수정 " + tally.update + "건");
+      if (tally["delete"]) lines.push("· 행 삭제 " + tally["delete"] + "건");
+      if (tally.insert) lines.push("· 행 추가 " + tally.insert + "건");
+      if (typeof confirmDialog === "function"){
+        const ok = await confirmDialog(
+          "다음 변경을 서버에 반영합니다.\n\n" + lines.join("\n") + "\n\n"
+            + (autoCommit ? "자동 커밋 상태라 적용하면 바로 확정됩니다."
+                          : "수동 커밋 상태입니다 — 적용한 뒤 커밋해야 확정됩니다."),
+          "적용", "취소");
+        if (!ok) return;
+      }
+      applying = true;
+      refreshEditBar();
+      resultStatus.textContent = "변경을 적용하는 중…";
+      try {
+        const response = await jsonOf(await fetch("/db-apply?id=" + encodeURIComponent(sessionId), {
+          method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:applyRequestBody()
+        }));
+        applying = false;
+        if (!response.ok){
+          applyTxState(response.info);
+          refreshEditBar();
+          // 실패하면 묶음 전체가 되돌아간다. 절반만 들어갔다고 오해하게 두지 않는다.
+          resultStatus.textContent = messageFor(response.info) + " — 아무것도 반영되지 않았습니다(변경은 그대로 담겨 있습니다).";
+          resultStatus.classList.add("db-result-failed");
+          return;
+        }
+        const info = response.info;
+        applyTxState(info);
+        const reload = currentGrid && currentGrid.reload;
+        dropStaged();
+        toast(applySummary(info), 3600);
+        // 지운 행·넣은 행까지 화면에 맞추는 가장 정직한 방법은 다시 조회하는 것이다.
+        if (reload) reload();
+        else resultStatus.textContent = applySummary(info) + " 결과를 다시 조회하면 화면에도 반영됩니다.";
+      } catch(error){
+        applying = false;
+        refreshEditBar();
+        resultStatus.textContent = launcherMessage(error);
+        resultStatus.classList.add("db-result-failed");
+      }
+    };
+
+    /* 담아 둔 변경 목록 — 나갈 문장을 그대로 보여 주고 하나씩 뺄 수 있다. */
+    const openChangesModal = () => {
+      if (!stagedCount()) return;
+      const modal = el("div", "modal db-value-modal");
+      const card = el("div", "modal-card db-changes-card");
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-label", "담아 둔 변경");
+      const head = el("div", "db-value-head");
+      const close = button("", "db-table-modal-close", "닫기");
+      close.setAttribute("aria-label", "닫기");
+      close.innerHTML = uiIcon("close");
+      const copyAll = button("전체 복사", "db-btn db-btn-quiet");
+      head.append(el("strong", "db-value-title", "담아 둔 변경"), el("span", "db-result-spacer", null), copyAll, close);
+      const list = el("div", "db-changes-list");
+      const note = el("p", "db-value-note", "");
+      card.append(head, list, note);
+      modal.append(card);
+      document.body.append(modal);
+
+      const forceClose = () => {
+        window.removeEventListener("keydown", onKey, true);
+        modal.remove();
+      };
+      const onKey = (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        forceClose();
+      };
+      const render = () => {
+        list.innerHTML = "";
+        if (!stagedCount()){ forceClose(); return; }
+        staged.list.forEach((change) => {
+          const row = el("div", "db-change-row");
+          row.append(el("code", "db-value-sql", changeSql(change)));
+          const remove = button("빼기", "db-btn db-btn-quiet", "이 변경만 목록에서 뺍니다");
+          remove.addEventListener("click", () => { unstage(change.id); render(); });
+          row.append(remove);
+          list.append(row);
+        });
+        note.textContent = "적용을 누르면 위 문장이 한 묶음으로 실행됩니다. 하나라도 실패하면 전부 되돌아갑니다.";
+      };
+      render();
+      close.addEventListener("click", forceClose);
+      modal.addEventListener("click", event => { if (event.target === modal) forceClose(); });
+      window.addEventListener("keydown", onKey, true);
+      copyAll.addEventListener("click", () => {
+        const text = staged.list.map(change => changeSql(change) + ";").join("\n");
+        if (typeof copyDocumentMenuText === "function") copyDocumentMenuText(text, "변경 문장을 복사했어요.");
+        else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast("변경 문장을 복사했어요.", 1800));
+      });
+    };
+
+    /* 행 추가 — 결과에 실린 열만으로는 넣을 수 없다(조회하지 않은 컬럼도 채워야 한다).
+       그래서 테이블 정의를 읽어 컬럼 전체를 늘어놓고, 적지 않은 칸은 서버의 기본값에 맡긴다. */
+    const openInsertModal = async () => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan || !plan.editable){ toast(editBlockNote(plan), 3500); return; }
+      let info;
+      try {
+        const url = "/db-table?id=" + encodeURIComponent(sessionId) + "&mode=info"
+          + "&name=" + encodeURIComponent(plan.table)
+          + "&database=" + encodeURIComponent(plan.database || "");
+        const response = await jsonOf(await fetch(url, { cache:"no-store" }));
+        if (!response.ok){ toast(messageFor(response.info), 3500); return; }
+        info = response.info;
+      } catch(error){ toast(launcherMessage(error), 3500); return; }
+
+      const modal = el("div", "modal db-value-modal");
+      const card = el("div", "modal-card db-insert-card");
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-label", plan.table + " 행 추가");
+      const head = el("div", "db-value-head");
+      const close = button("", "db-table-modal-close", "닫기");
+      close.setAttribute("aria-label", "닫기");
+      close.innerHTML = uiIcon("close");
+      head.append(el("strong", "db-value-title", "행 추가 — " + plan.table),
+        el("span", "db-result-spacer", null), close);
+      const grid = el("div", "db-insert-grid");
+      const preview = el("code", "db-value-sql", "");
+      const note = el("p", "db-value-note", "적지 않은 칸은 서버의 기본값이 채웁니다.");
+      const actions = el("div", "db-value-actions");
+      const stage = button("담기", "db-btn db-btn-primary", "변경 목록에 담습니다. 적용을 눌러야 서버에 들어갑니다");
+      const cancel = button("취소", "db-btn db-btn-quiet");
+      actions.append(el("span", "db-result-spacer", null), cancel, stage);
+      card.append(head, grid, el("p", "db-value-sql-note", "이 문장이 실행됩니다 — 값은 문장에 붙여 넣지 않고 따로 보냅니다."),
+        preview, actions, note);
+      modal.append(card);
+      document.body.append(modal);
+
+      const fields = [];
+      (info.columns || []).forEach((column) => {
+        const extra = String(column.extra || "").toUpperCase();
+        const auto = extra.indexOf("AUTO_INCREMENT") >= 0 || extra.indexOf("GENERATED") >= 0;
+        const row = el("div", "db-insert-row");
+        const label = el("label", "db-insert-label", column.name);
+        const type = el("span", "db-insert-type",
+          String(column.type || "") + (column.nullable ? "" : " · NOT NULL") + (auto ? " · 자동" : ""));
+        const mode = document.createElement("select");
+        mode.className = "db-insert-mode";
+        [["default", "기본값"], ["value", "값"], ["null", "NULL"]].forEach(([value, text]) => {
+          const option = new Option(text, value);
+          if (value === "null" && !column.nullable) option.disabled = true;
+          mode.append(option);
+        });
+        const field = input("text", "", column.default == null ? "" : String(column.default));
+        field.className = "db-insert-value";
+        // 값을 꼭 적어야 하는 컬럼(NOT NULL · 기본값 없음 · 자동 아님)은 처음부터 `값` 으로 연다.
+        const required = !column.nullable && column.default == null && !auto;
+        mode.value = required ? "value" : "default";
+        if (auto) mode.disabled = true;
+        label.setAttribute("for", "");
+        row.append(label, type, mode, field);
+        grid.append(row);
+        fields.push({ name:column.name, mode, field, auto, required });
+      });
+
+      const collect = () => fields.filter(item => !item.auto && item.mode.value !== "default")
+        .map(item => ({ column:item.name, value:item.field.value, isNull:item.mode.value === "null" }));
+      const refresh = () => {
+        fields.forEach((item) => { item.field.disabled = item.auto || item.mode.value !== "value"; });
+        preview.textContent = rowInsertPreview({ database:plan.database, table:plan.table }, collect());
+      };
+      fields.forEach((item) => {
+        item.mode.addEventListener("change", refresh);
+        item.field.addEventListener("input", refresh);
+      });
+      refresh();
+
+      const forceClose = () => {
+        window.removeEventListener("keydown", onKey, true);
+        modal.remove();
+      };
+      const onKey = (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        forceClose();
+      };
+      close.addEventListener("click", forceClose);
+      cancel.addEventListener("click", forceClose);
+      modal.addEventListener("click", event => { if (event.target === modal) forceClose(); });
+      window.addEventListener("keydown", onKey, true);
+      stage.addEventListener("click", () => {
+        const missing = fields.filter(item => item.required && item.mode.value === "default").map(item => item.name);
+        if (missing.length){
+          note.textContent = "값이 필요한 컬럼이 있습니다 — " + missing.join(", ");
+          return;
+        }
+        stageInsert(collect());
+        forceClose();
+      });
+      const first = fields.find(item => !item.auto);
+      if (first) first.mode.focus({ preventScroll:true });
+    };
+
+    addRowButton.addEventListener("click", openInsertModal);
+    deleteRowButton.addEventListener("click", () => {
+      const rows = selectedRows();
+      if (!rows.length){ toast("지울 행을 먼저 골라 주세요. 왼쪽 번호 칸을 누르면 그 행 전체가 골라집니다.", 3000); return; }
+      stageDeleteRows(rows);
+    });
+    previewChangesButton.addEventListener("click", openChangesModal);
+    applyChangesButton.addEventListener("click", applyStaged);
+    discardChangesButton.addEventListener("click", async () => {
+      if (!stagedCount()) return;
+      if (typeof confirmDialog === "function"){
+        const ok = await confirmDialog("담아 둔 변경 " + stagedCount() + "건을 모두 버립니다.", "버리기", "취소");
+        if (!ok) return;
+      }
+      discardStaged();
+      toast("담아 둔 변경을 모두 버렸어요.", 2000);
+    });
+
+    /* 담아 둔 변경이 있는데 표를 다시 그리면 그 변경은 갈 곳이 없어진다. 먼저 묻는다. */
+    const confirmLosingStaged = async () => {
+      if (!stagedCount()) return true;
+      if (typeof confirmDialog !== "function"){ discardStaged(); return true; }
+      const ok = await confirmDialog(
+        "적용하지 않은 변경 " + stagedCount() + "건이 있습니다.\n다시 조회하면 그 변경은 사라집니다.",
+        "버리고 진행", "취소");
+      if (!ok) return false;
+      discardStaged();
+      return true;
+    };
+
+    // 고치기 전에 값 전체를 서버에서 다시 읽는다. 표의 값은 500자에서 잘려 있을 수 있고,
+    // 그 글자를 그대로 담으면 서버의 값이 잘린 채로 덮인다.
+    const readFullCell = async (edit) => {
+      const parts = [edit.target.database || "", edit.target.table, edit.column];
+      pushKeys(parts, edit.keys);
+      const response = await jsonOf(await fetch("/db-cell?id=" + encodeURIComponent(sessionId), {
+        method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:encodeStrings(parts)
+      }));
+      if (!response.ok) throw new Error(messageFor(response.info));
+      return response.info;
+    };
+
+    const openValueModal = (columnName, text, note, isNull, edit) => {
       if (closeValueModal) closeValueModal();
       const modal = el("div", "modal db-value-modal");
       const card = el("div", "modal-card db-value-card");
@@ -1431,41 +2022,141 @@ const MNDbClient = (() => {
 
       const head = el("div", "db-value-head");
       const title = el("strong", "db-value-title", columnName);
+      const editButton = button("값 고치기", "db-btn db-btn-quiet", "이 칸의 값을 고칩니다");
       const copy = button("값 복사", "db-btn db-btn-quiet");
       const close = button("", "db-table-modal-close", "닫기");
       close.setAttribute("aria-label", "닫기");
       close.innerHTML = uiIcon("close");
       copy.disabled = !!isNull;
-      head.append(title, el("span", "db-result-spacer", null), copy, close);
+      editButton.hidden = !(edit && edit.editable);
+      head.append(title, el("span", "db-result-spacer", null), editButton, copy, close);
 
       const body = el("pre", "db-value-body", text);
       body.tabIndex = 0;
       body.classList.toggle("db-value-null", !!isNull);
-      card.append(head, body, el("p", "db-value-note", note));
+
+      /* 고치는 자리. 만들어만 두고 숨긴다 — `값 고치기`를 누른 뒤에야 보인다. */
+      const editWrap = el("div", "db-value-edit");
+      editWrap.hidden = true;
+      const input = el("textarea", "db-value-body db-value-input");
+      input.setAttribute("aria-label", columnName + " 값 고치기");
+      const nullBox = el("input");
+      nullBox.type = "checkbox";
+      const nullLabel = el("label", "db-value-null-toggle");
+      nullLabel.append(nullBox, el("span", null, "빈 값(NULL)으로 두기"));
+      const preview = el("code", "db-value-sql", "");
+      const actions = el("div", "db-value-actions");
+      const save = button("담기", "db-btn db-btn-primary",
+        "변경 목록에 담습니다. 위의 ‘적용’을 눌러야 서버에 반영됩니다");
+      const cancel = button("취소", "db-btn db-btn-quiet");
+      actions.append(nullLabel, el("span", "db-result-spacer", null), cancel, save);
+      editWrap.append(input,
+        el("p", "db-value-sql-note", "이 문장이 실행됩니다 — 값은 문장에 붙여 넣지 않고 따로 보냅니다."),
+        preview, actions);
+
+      const noteLine = el("p", "db-value-note", note);
+      card.append(head, body, editWrap, noteLine);
       modal.append(card);
       document.body.append(modal);
       if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(modal);
 
+      let editing = false;
       const forceClose = () => {
         window.removeEventListener("keydown", onKey, true);
         modal.remove();
         closeValueModal = null;
       };
+      const stopEdit = () => {
+        editing = false;
+        editWrap.hidden = true;
+        body.hidden = false;
+        editButton.hidden = false;
+        noteLine.textContent = note;
+        body.focus({ preventScroll:true });
+      };
       // 위에 다른 창이 떠 있으면 그 창이 먼저 닫혀야 한다(ERD·테이블 정보 모달과 같은 규칙).
+      // 고치던 중이면 창보다 고치기를 먼저 접는다 — 쓰던 값이 Esc 한 번에 사라지지 않게 한다.
       const onKey = (event) => {
         if (event.key !== "Escape") return;
         event.preventDefault();
         event.stopPropagation();
-        forceClose();
+        if (editing) stopEdit();
+        else forceClose();
       };
       closeValueModal = forceClose;
       close.addEventListener("click", forceClose);
-      modal.addEventListener("click", event => { if (event.target === modal) forceClose(); });
+      modal.addEventListener("click", event => { if (event.target === modal && !editing) forceClose(); });
       window.addEventListener("keydown", onKey, true);
       copy.addEventListener("click", () => {
         if (typeof copyDocumentMenuText === "function") copyDocumentMenuText(text, "셀 값을 복사했어요.");
         else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast("셀 값을 복사했어요.", 1800));
       });
+
+      /* 고치기 ------------------------------------------------------------- */
+
+      const refreshPreview = () => {
+        const value = input.value;
+        // 미리보기는 사람이 읽는 것이라 긴 값은 줄여 보여 준다(저장되는 값은 줄이지 않는다).
+        const shown = value.length > 160 ? value.slice(0, 160) + "…" : value;
+        preview.textContent = cellUpdatePreview(edit.target, edit.column, edit.keys, shown, nullBox.checked);
+      };
+      const startEdit = async () => {
+        editButton.disabled = true;
+        let current = edit.staged
+          ? { value:edit.staged.value, isNull:edit.staged.isNull }
+          : { value:isNull ? "" : text, isNull:!!isNull };
+        if (!edit.staged && (edit.clipped || isNull)){
+          // 잘려 온 값과 NULL 은 표의 글자를 믿을 수 없다. 서버에서 원본을 다시 읽는다.
+          noteLine.textContent = "값을 읽는 중…";
+          try { current = await readFullCell(edit); }
+          catch(error){
+            noteLine.textContent = String((error && error.message) || error);
+            editButton.disabled = false;
+            return;
+          }
+        }
+        editButton.disabled = false;
+        editing = true;
+        input.value = current.isNull ? "" : String(current.value == null ? "" : current.value);
+        nullBox.checked = !!current.isNull;
+        input.disabled = nullBox.checked;
+        body.hidden = true;
+        editButton.hidden = true;
+        editWrap.hidden = false;
+        let hint = edit.column + (edit.type ? " · " + edit.type : "")
+          + (edit.nullable ? " · NULL 허용" : " · NULL 불가");
+        if (current.clipped) hint += " · 값이 너무 길어 앞부분만 읽었습니다(그대로 저장하면 뒷부분이 사라집니다)";
+        noteLine.textContent = hint;
+        refreshPreview();
+        input.focus({ preventScroll:true });
+        input.setSelectionRange(input.value.length, input.value.length);
+      };
+      editButton.addEventListener("click", startEdit);
+      cancel.addEventListener("click", stopEdit);
+      input.addEventListener("input", refreshPreview);
+      nullBox.addEventListener("change", () => {
+        input.disabled = nullBox.checked;
+        refreshPreview();
+      });
+      // 여러 줄 값도 다루므로 Enter 는 줄바꿈이다. 저장은 Ctrl+Enter 로 한다(편집기와 같은 규칙).
+      input.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter"){ event.preventDefault(); save.click(); }
+      });
+      save.addEventListener("click", () => {
+        if (nullBox.checked && !edit.nullable){
+          noteLine.textContent = "이 컬럼은 빈 값(NULL)을 받지 않습니다.";
+          return;
+        }
+        if (!stagedUpdate(edit.row, edit.col) && stagedCount() >= MAX_STAGED){
+          noteLine.textContent = "한 번에 담을 수 있는 변경은 " + MAX_STAGED + "건까지입니다. 먼저 적용해 주세요.";
+          return;
+        }
+        const kept = stageUpdate(edit, input.value, nullBox.checked);
+        forceClose();
+        toast(kept ? "변경 목록에 담았어요. 위의 ‘적용’을 눌러야 서버에 반영됩니다."
+                   : "원래 값과 같아 담지 않았어요.", 2800);
+      });
+
       body.focus({ preventScroll:true });
     };
 
@@ -1482,6 +2173,7 @@ const MNDbClient = (() => {
 
     const grid = typeof MNGridSelection !== "undefined" ? MNGridSelection : null;
     let gridSelection = null;    // { keys:Set<number>, anchor:{row,col} }
+    let gridCaret = null;        // 지금 칸(방향키·타자가 여기서 시작한다). 고른 범위의 끝이다.
     let gridHeadBounds = null;   // 지금 강조해 둔 머리 범위(다시 칠할 자리를 줄이는 데 쓴다)
     let gridDrag = null;
 
@@ -1564,6 +2256,7 @@ const MNDbClient = (() => {
     function clearGridSelection(){
       if (gridSelection) paintGridCells(new Set());
       gridSelection = null;
+      gridCaret = null;
       gridDrag = null;
       if (gridHeadBounds) paintGridHeads(null);
       gridHeadBounds = null;
@@ -1625,10 +2318,147 @@ const MNDbClient = (() => {
     // attachGridSelection 은 표를 그릴 때마다 불리므로 뒷정리는 여기 한 번만 등록한다.
     (doc.cleanupFns = doc.cleanupFns || []).push(() => endDrag(null));
 
+    /* 표 안에서 바로 고치기 --------------------------------------------------
+       칸을 고르고 F2 나 글자를 치면 그 자리가 입력칸이 된다. Enter 는 담고 아래로,
+       Tab 은 담고 다음 고칠 수 있는 칸으로, Esc 는 되돌린다. 담기는 값 창과 같은 길을 쓴다 —
+       입력하는 자리만 다를 뿐 무엇이 담기는지·언제 서버에 가는지는 하나다.
+
+       한 줄짜리 입력칸이라 여러 줄 값과 잘려 온 값은 여기서 고치지 않는다. 값 창으로 보낸다 —
+       input 은 값에 든 줄바꿈을 조용히 지우므로 그대로 담으면 줄이 사라진다. */
+
+    let inlineEdit = null;       // { row, col, node, input, before, context }
+
+    const focusGrid = () => { if (currentGrid) currentGrid.table.focus({ preventScroll:true }); };
+
+    const cancelInlineEdit = () => {
+      if (!inlineEdit) return;
+      const { node, before } = inlineEdit;
+      inlineEdit = null;                       // blur 로 다시 들어오지 않게 먼저 지운다
+      node.classList.remove("db-cell-editing");
+      node.textContent = before.text;
+    };
+
+    const commitInlineEdit = () => {
+      if (!inlineEdit) return;
+      const { node, before, context, input } = inlineEdit;
+      const value = input.value;
+      inlineEdit = null;
+      node.classList.remove("db-cell-editing");
+      node.textContent = before.text;          // 담기가 다시 칠하므로 원래 모습으로 돌려놓고 넘긴다
+      // NULL 칸을 빈 채로 두고 나가면 아무 일도 하지 않는다. 빈 문자열은 NULL 과 다른 값이라
+      // "그냥 지나갔다"를 "빈 문자열로 바꿔라"로 읽으면 안 된다(빈 문자열은 값 창에서 넣는다).
+      if (before.isNull && value === "") return;
+      stageUpdate(context, value, false);
+    };
+
+    const inlineEditableCol = (col) => {
+      const plan = currentGrid && currentGrid.edit;
+      if (!plan || !plan.editable) return false;
+      const cell = (plan.cells || [])[col];
+      return !!(cell && cell.editable);
+    };
+
+    const nextEditableCol = (col, step) => {
+      for (let index = col + step; index >= 0 && index < gridColumnCount(); index += step){
+        if (inlineEditableCol(index)) return index;
+      }
+      return -1;
+    };
+
+    // 돌려주는 값: 시작했으면 null, 못 했으면 그 까닭({ note, modal })
+    const startInlineEdit = (row, col, initial) => {
+      commitInlineEdit();
+      const node = gridCellAt(row, col);
+      if (!node) return { note:"" };
+      const clipped = node.classList.contains("db-clipped");
+      const context = cellEditContext(row, col, clipped);
+      if (!context.editable) return { note:context.note };
+      const isNull = node.classList.contains("db-null");
+      const text = isNull ? "" : node.textContent;
+      if (clipped || /[\r\n]/.test(text))
+        return { note:"여러 줄 값과 잘려 온 값은 값 창에서 고칩니다.", modal:true };
+
+      const before = { text:node.textContent, isNull };
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "db-cell-input";
+      input.value = initial == null ? text : initial;
+      input.setAttribute("aria-label", (currentGrid.columns[col] || "값") + " 고치기");
+      node.textContent = "";
+      node.classList.add("db-cell-editing");
+      node.append(input);
+      inlineEdit = { row, col, node, input, before, context };
+      input.focus({ preventScroll:true });
+      if (initial == null) input.select();
+      else input.setSelectionRange(input.value.length, input.value.length);
+
+      // 입력칸 안의 키·끌기는 표의 단축키와 칸 고르기에 넘기지 않는다.
+      input.addEventListener("pointerdown", event => event.stopPropagation());
+      input.addEventListener("blur", () => { if (inlineEdit && inlineEdit.input === input) commitInlineEdit(); });
+      input.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Escape"){ event.preventDefault(); cancelInlineEdit(); focusGrid(); return; }
+        if (event.key === "Enter"){
+          event.preventDefault();
+          commitInlineEdit();
+          focusGrid();
+          moveCaret(1, 0, false);
+          return;
+        }
+        if (event.key === "Tab"){
+          event.preventDefault();
+          const from = inlineEdit ? inlineEdit.col : col;
+          commitInlineEdit();
+          focusGrid();
+          const next = nextEditableCol(from, event.shiftKey ? -1 : 1);
+          if (next < 0) return;
+          selectCell(row, next);
+          startInlineEdit(row, next);
+        }
+      });
+      return null;
+    };
+
+    const selectCell = (row, col) => {
+      gridCaret = { row, col };
+      applyGridRange("cell", gridCaret, gridCaret, null, "replace");
+      const node = gridCellAt(row, col);
+      if (node && node.scrollIntoView) node.scrollIntoView({ block:"nearest", inline:"nearest" });
+    };
+
+    const moveCaret = (rowStep, colStep, extend) => {
+      const from = gridCaret || (gridSelection && gridSelection.anchor);
+      if (!from || !gridRowCount() || !gridColumnCount()) return;
+      const row = Math.max(0, Math.min(gridRowCount() - 1, from.row + rowStep));
+      const col = Math.max(0, Math.min(gridColumnCount() - 1, from.col + colStep));
+      if (extend && gridSelection && gridSelection.anchor){
+        gridCaret = { row, col };
+        applyGridRange("cell", gridSelection.anchor, gridCaret, null, "replace");
+        const node = gridCellAt(row, col);
+        if (node && node.scrollIntoView) node.scrollIntoView({ block:"nearest", inline:"nearest" });
+        return;
+      }
+      selectCell(row, col);
+    };
+
+    /* 칸을 여는 길은 하나다 — 고칠 수 있으면 그 자리에서 고치고, 아니면 값 창을 연다.
+       값 창은 긴 값·여러 줄 값·NULL 을 다루는 자리이자 고치지 못하는 까닭을 밝히는 자리다.
+       두 번 누르기·F2·타자가 모두 이 길을 타므로 "어떨 때 무엇이 열리는지" 를 하나로 설명할 수 있다. */
+    const openCellAt = (row, col, initial) => {
+      if (!currentGrid) return;
+      if (!startInlineEdit(row, col, initial)) return;        // null = 그 자리에서 열렸다
+      const node = gridCellAt(row, col);
+      if (!node) return;
+      showCellValue(currentGrid.columns[col] || "",
+        node.classList.contains("db-null") ? null : node.textContent,
+        node.classList.contains("db-clipped"), { row, col });
+    };
+
     const attachGridSelection = (table) => {
       table.addEventListener("pointerdown", (event) => {
         if (event.button !== 0 || !grid) return;
         if (event.target.closest(".db-sort-btn")) return;      // 정렬 버튼은 정렬만 한다
+        if (event.target.closest(".db-cell-input")) return;    // 고치는 중인 칸은 글자를 고르는 자리다
         const point = gridPointFrom(event.target);
         if (!point) return;
         // 여기서 preventDefault 를 부르면 뒤따르는 마우스 이벤트(click·dblclick)까지 막힌다.
@@ -1639,6 +2469,7 @@ const MNDbClient = (() => {
         const anchor = extending ? gridSelection.anchor : { row:point.row, col:point.col };
         const base = (additive || extending) && gridSelection ? gridSelection.keys : null;
         const mode = applyGridRange(point.kind, anchor, point, base, extending && !additive ? "replace" : null);
+        if (point.kind === "cell") gridCaret = { row:point.row, col:point.col };
         if (point.kind === "all") return;                      // 모서리는 한 번에 전체를 고르고 끝난다
         /* 끌기는 document 에서 받는다. setPointerCapture 를 쓰면 포인터가 표를 벗어나도 이벤트가
            오지만, 그 대가로 뒤따르는 마우스 이벤트(click·dblclick)까지 캡처 대상(<table>)으로
@@ -1650,23 +2481,24 @@ const MNDbClient = (() => {
         document.addEventListener("pointercancel", endDrag, true);
       });
 
-      /* 클릭은 고르는 일, 더블클릭은 자세히 보는 일 (ERD 의 테이블 카드와 같은 규칙이다).
+      /* 클릭은 고르는 일, 더블클릭은 그 칸을 여는 일 — 고칠 수 있으면 그 자리에서 고치고
+         아니면 값 창이 열린다(F2 와 같은 길이다).
          target 을 믿지 않고 좌표로 셀을 찾는다 — 더블클릭의 target 은 두 번의 누름·뗌이
          공유하는 조상이라 셀이 아니라 <table> 이 될 수 있다. */
       table.addEventListener("dblclick", (event) => {
         if (event.target.closest && event.target.closest(".db-sort-btn")) return;
+        if (event.target.closest && event.target.closest(".db-cell-input")) return;   // 이미 고치는 중이다
         const node = document.elementFromPoint(event.clientX, event.clientY);
         const point = gridPointFrom(node) || gridPointFrom(event.target);
         if (!point || point.kind !== "cell" || !currentGrid) return;
-        const cell = gridCellAt(point.row, point.col);
-        if (!cell) return;
-        showCellValue(currentGrid.columns[point.col] || "",
-          cell.classList.contains("db-null") ? null : cell.textContent,
-          cell.classList.contains("db-clipped"));
+        if (!gridCellAt(point.row, point.col)) return;
+        gridCaret = { row:point.row, col:point.col };
+        openCellAt(point.row, point.col);
       });
 
       table.addEventListener("keydown", (event) => {
         const key = String(event.key || "").toLowerCase();
+        const modified = event.ctrlKey || event.metaKey || event.altKey;
         if ((event.ctrlKey || event.metaKey) && key === "a"){
           event.preventDefault();
           applyGridRange("all", { row:0, col:0 }, { row:0, col:0 }, null, "replace");
@@ -1675,6 +2507,32 @@ const MNDbClient = (() => {
         if ((event.ctrlKey || event.metaKey) && key === "c"){
           event.preventDefault();
           copyGridSelection();
+          return;
+        }
+        const steps = { arrowup:[-1, 0], arrowdown:[1, 0], arrowleft:[0, -1], arrowright:[0, 1] };
+        if (steps[key] && !event.ctrlKey && !event.metaKey){
+          // 방향키가 표 안에서 칸을 옮긴다. 그러지 않으면 결과 영역만 스크롤되고 지금 칸이 어디인지 잃는다.
+          if (!gridCaret && !gridSelection) selectCell(0, 0);
+          else moveCaret(steps[key][0], steps[key][1], event.shiftKey);
+          event.preventDefault();
+          return;
+        }
+        const caret = gridCaret || (gridSelection && gridSelection.anchor);
+        if (caret && !modified && !event.isComposing && (key === "f2" || key === "enter")){
+          event.preventDefault();
+          openCellAt(caret.row, caret.col);
+          return;
+        }
+        /* 글자를 치면 그 글자로 고치기가 시작된다(엑셀·표 편집기와 같은 규칙).
+           ⚠ 한글 IME 는 keydown 이 Process(229) 로 온다. 그때는 preventDefault 하지 않고
+           입력칸만 열어 조합이 그 칸에서 시작되게 한다 — 막으면 첫 글자 조합이 끊긴다.
+           (스프레드시트 뷰어가 같은 이유로 같은 방식을 쓴다.) */
+        const ime = event.key === "Process" || event.keyCode === 229;
+        const printable = String(event.key || "").length === 1;
+        if (caret && !modified && !event.isComposing && (ime || printable)){
+          if (!inlineEditableCol(caret.col)) return;
+          if (!ime) event.preventDefault();
+          openCellAt(caret.row, caret.col, ime ? "" : event.key);
           return;
         }
         if (key === "escape" && gridSelection){
@@ -1762,8 +2620,18 @@ const MNDbClient = (() => {
     });
 
     // 행을 tbody 에 채운다. startIndex 는 화면에 매기는 번호의 시작(더 보기로 이어 붙일 때 쓴다).
+    // 고칠 수 있는 열. 판정은 워커가 하고 화면은 그 결과만 옮긴다(계산식·조인 열은 빠진다).
+    const editableColumns = () => {
+      const plan = currentGrid && currentGrid.edit;
+      const set = new Set();
+      if (!plan || !plan.editable) return set;
+      (plan.cells || []).forEach((cell, index) => { if (cell && cell.editable) set.add(index); });
+      return set;
+    };
+
     const fillRows = (bodyEl, columns, rows, clippedCells, startIndex) => {
       const clipped = new Set((clippedCells || []).map(pair => pair[0] + "," + pair[1]));
+      const editable = editableColumns();
       rows.forEach((row, rowIndex) => {
         const tr = el("tr");
         tr.append(el("td", "db-grid-index", String(startIndex + rowIndex + 1)));
@@ -1773,7 +2641,10 @@ const MNDbClient = (() => {
           if (value === null){ td.classList.add("db-null"); td.textContent = "NULL"; }
           else td.textContent = String(value);
           if (isClipped) td.classList.add("db-clipped");
-          td.title = "누르면 이 칸을 고르고 값 전체를 봅니다";
+          if (editable.has(columnIndex)) td.classList.add("db-cell-editable");
+          td.title = editable.has(columnIndex)
+            ? "두 번 누르거나 F2·타자로 바로 고칩니다 (긴 값·NULL 은 값 창이 열립니다)"
+            : "누르면 이 칸을 고르고, 두 번 누르면 값 전체를 봅니다";
           tr.append(td);
         });
         bodyEl.append(tr);
@@ -1789,8 +2660,11 @@ const MNDbClient = (() => {
       if (lastRows) rows.forEach(row => lastRows.push(row.map(value => value === null ? "" : String(value))));
     };
 
-    const renderRows = (columns, rows, truncated, clippedCells, sortable) => {
+    const renderRows = (columns, rows, truncated, clippedCells, sortable, editInfo) => {
+      cancelInlineEdit();
       clearGridSelection();
+      dropStaged();                  // 새로 그린 표에는 앞의 변경을 되돌릴 자리가 없다
+      const edit = editInfo ? editInfo.plan : null;
       resultHost.innerHTML = "";
       closeValuePanel();
       lastRows = null;
@@ -1803,7 +2677,8 @@ const MNDbClient = (() => {
       }
       const table = el("table", "db-grid");
       table.tabIndex = 0;
-      table.setAttribute("aria-label", "결과 표. 칸을 끌어 고르고 Ctrl+C 로 복사합니다.");
+      table.setAttribute("aria-label",
+        "결과 표. 방향키로 칸을 옮기고 Ctrl+C 로 복사합니다. 고칠 수 있는 결과에서는 F2 나 두 번 누르기로 그 자리에서 고칩니다.");
       const head = el("thead");
       const headRow = el("tr");
       const indexHead = el("th", "db-grid-index", "#");
@@ -1837,11 +2712,23 @@ const MNDbClient = (() => {
       const bodyEl = el("tbody");
       table.append(head, bodyEl);
       resultHost.append(table);
-      currentGrid = { body:bodyEl, columns:columns.slice(), table, headRow, indexHead, headCells };
+      currentGrid = { body:bodyEl, columns:columns.slice(), table, headRow, indexHead, headCells,
+        edit:edit || null, reload:(editInfo && editInfo.reload) || null };
       attachGridSelection(table);
       fillRows(bodyEl, columns, rows, clippedCells, 0);
       if (truncated && !rows.length){
         resultHost.append(el("p", "db-truncated", "표시할 행이 없습니다."));
+      }
+      // 고칠 수 있는 결과는 그렇다고 밝힌다. 두 번 눌러야 열리는 일은 알려 주지 않으면 아무도 찾지 못한다.
+      const editable = !!(currentGrid.edit && currentGrid.edit.editable);
+      addRowButton.hidden = !editable;
+      deleteRowButton.hidden = !editable;
+      if (editable && rows.length){
+        resultHost.append(el("p", "db-edit-hint",
+          "이 결과는 " + currentGrid.edit.table + " 을(를) 고칠 수 있습니다 — 칸을 두 번 누르거나 F2,"
+            + " 또는 바로 타자를 치면 그 자리에서 고칩니다(Enter 아래로 · Tab 옆으로 · Esc 취소)."
+            + " 긴 값·여러 줄 값·NULL 은 값 창이 대신 열립니다. 행을 골라 ‘행 삭제’, 새 행은 ‘행 추가’ 로 담고,"
+            + " 담은 변경은 ‘적용’ 을 눌러야 서버에 갑니다."));
       }
       lastRows = [columns.slice()].concat(rows.map(row => row.map(value => value === null ? "" : String(value))));
       memoButton.hidden = false;
@@ -1851,8 +2738,12 @@ const MNDbClient = (() => {
     };
 
     const clearResult = () => {
+      cancelInlineEdit();
       resultHost.innerHTML = "";
       clearGridSelection();
+      dropStaged();
+      addRowButton.hidden = true;
+      deleteRowButton.hidden = true;
       currentGrid = null;
       resultTabs.innerHTML = "";
       resultTabs.hidden = true;
@@ -1870,7 +2761,8 @@ const MNDbClient = (() => {
         node.classList.toggle("active", position === index));
       if (!entry) return;
       if (entry.kind === "rows"){
-        renderRows(entry.columns, entry.rows, entry.truncated, entry.clippedCells, sortableFor(entry));
+        renderRows(entry.columns, entry.rows, entry.truncated, entry.clippedCells, sortableFor(entry),
+          { plan:entry.edit, reload:reloadFor(entry) });
         // 행이 없는 것과 "앞의 결과가 표시 예산을 다 써서 못 실었다"는 다른 사실이다.
         if (entry.budgetExhausted){
           resultHost.append(el("p", "db-truncated",
@@ -1889,6 +2781,8 @@ const MNDbClient = (() => {
       memoButton.hidden = true;
       exportCsvButton.hidden = true;
       openSheetButton.hidden = true;
+      addRowButton.hidden = true;
+      deleteRowButton.hidden = true;
       const sql = entry.sql ? previewOf(entry.sql, 200) : "";
       if (entry.kind === "error"){
         notice(resultHost, messageFor(entry), sql, "error");
@@ -1898,6 +2792,13 @@ const MNDbClient = (() => {
       const insertId = Number(entry.insertId) || 0;
       notice(resultHost, (entry.keyword || "").toUpperCase() + " — " + affected.toLocaleString() + "행 반영",
         sql + (insertId ? " · 새 자동 증가 값 " + insertId : ""), "");
+    };
+
+    /* 적용한 뒤에는 다시 조회한다. 지운 행·넣은 행까지 화면에 맞추는 가장 정직한 방법이고,
+       문장이 잘려 왔으면(sqlTruncated) 다시 물을 수 없으므로 그때는 사용자에게 맡긴다. */
+    const reloadFor = (entry) => {
+      if (!entry || !entry.sql || entry.sqlTruncated) return null;
+      return () => runQuery({ sql:entry.sql, label:"다시 조회", quiet:true, skipRiskConfirm:true });
     };
 
     /* 헤더 클릭 정렬 — 받아온 행을 다시 늘어놓는 대신 문장의 ORDER BY 를 고쳐 다시 묻는다.
@@ -3188,13 +4089,15 @@ const MNDbClient = (() => {
     };
 
     const showTable = async (name) => {
+      if (!await confirmLosingStaged()) return;
       resultStatus.textContent = name + " 를 읽는 중…";
       try {
         const url = "/db-table?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(name);
         const response = await jsonOf(await fetch(url, { cache:"no-store" }));
         if (!response.ok){ resultStatus.textContent = messageFor(response.info); clearResult(); return; }
         const info = response.info;
-        renderRows(info.displayColumns || [], info.rows || [], info.truncated, info.clippedCells);
+        renderRows(info.displayColumns || [], info.rows || [], info.truncated, info.clippedCells,
+          null, { plan:info.edit, reload:() => showTable(name) });
         const keys = (info.columns || []).filter(column => column.key === "PRI").map(column => column.name);
         resultStatus.textContent = name + " · 컬럼 " + (info.columns || []).length + "개"
           + (keys.length ? " · 기본키 " + keys.join(", ") : "")
@@ -3382,6 +4285,7 @@ const MNDbClient = (() => {
       const chosen = target || runTarget();
       const sql = chosen ? chosen.sql.trim() : "";
       if (!sql){ toast("실행할 SQL 을 입력해 주세요.", 2200); return false; }
+      if (!await confirmLosingStaged()) return false;
 
       // 확인 대상은 편집기 전체가 아니라 실제로 보낼 것만이다. 아래에 적어 둔 DROP 때문에
       // 위의 SELECT 하나에도 확인창이 뜨면 확인창을 아무도 읽지 않게 된다.
@@ -3695,7 +4599,14 @@ const MNDbClient = (() => {
           "연결 끊기", "취소");
         if (!ok) return;
       }
+      // 담아 두기만 하고 적용하지 않은 변경도 연결과 함께 사라진다.
+      if (!silent && stagedCount() && typeof confirmDialog === "function"){
+        const ok = await confirmDialog("적용하지 않은 변경 " + stagedCount()
+          + "건이 있습니다.\n연결을 끊으면 그 변경은 사라집니다. 계속할까요?", "연결 끊기", "취소");
+        if (!ok) return;
+      }
       stopPolling();
+      dropStaged();
       if (closeValueModal) closeValueModal();
       if (closeErdModal) closeErdModal();
       runningJob = "";
@@ -3763,7 +4674,9 @@ const MNDbClient = (() => {
 
   return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
     statementRanges, splitStatements, statementAt, firstKeyword, riskyStatements,
-    identifierFor, ddlIdentifier, ddlString, defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
+    identifierFor, ddlIdentifier, ddlString, editBlockNote,
+    cellUpdatePreview, rowDeletePreview, rowInsertPreview,
+    defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
     erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };
 })();
 
