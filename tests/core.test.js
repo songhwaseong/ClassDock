@@ -454,6 +454,27 @@ test("Python 줄 주석은 들여쓰기와 선택 범위를 유지하며 토글�
   });
 });
 
+test("줄 주석 표시는 언어에 맞춰 넘길 수 있다", () => {
+  // 예전에는 "#" 이 박혀 있어 자바스크립트 편집기가 "# const a = 1;" 처럼
+  // 유효하지 않은 주석을 넣었다. 이제 편집기가 언어에 맞는 표시를 넘긴다.
+  const js = "const a = 1;\nlet b = 2;";
+  const jsOn = transformEditorLines(js, 0, js.length, "toggle-comment", "//");
+  assert.equal(jsOn.value, "// const a = 1;\n// let b = 2;");
+  assert.equal(transformEditorLines(jsOn.value, jsOn.selectionStart, jsOn.selectionEnd, "toggle-comment", "//").value, js);
+
+  const sql = "SELECT 1\nFROM t";
+  const sqlOn = transformEditorLines(sql, 0, sql.length, "toggle-comment", "--");
+  assert.equal(sqlOn.value, "-- SELECT 1\n-- FROM t");
+  assert.equal(transformEditorLines(sqlOn.value, sqlOn.selectionStart, sqlOn.selectionEnd, "toggle-comment", "--").value, sql);
+
+  // 표시를 넘기지 않으면 예전 동작 그대로 "#" 이다.
+  assert.equal(transformEditorLines("x = 1", 0, 5, "toggle-comment").value, "# x = 1");
+  // 다른 언어 표시로 단 주석은 벗기지 않는다("#" 로 단 줄을 "--" 토글이 건드리면 안 된다).
+  assert.equal(transformEditorLines("# x = 1", 0, 7, "toggle-comment", "--").value, "-- # x = 1");
+  // 들여쓰기는 그대로 두고 표시만 그 안쪽에 붙인다.
+  assert.equal(transformEditorLines("  SELECT 1", 0, 10, "toggle-comment", "--").value, "  -- SELECT 1");
+});
+
 test("Python 자동완성은 현재 코드 식별자와 기본 단어를 접두어로 제안한다", () => {
   const suggestions = pythonCompletionCandidates("def process_data():\n    project_name = ''\n    pro", "pro");
   assert.deepEqual(suggestions.slice(0, 3), ["process_data", "project_name", "property"]);

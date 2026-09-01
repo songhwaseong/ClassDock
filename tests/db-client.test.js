@@ -114,10 +114,11 @@ test("되돌릴 수 없는 문장만 확인 대상으로 고른다", () => {
     "UPDATE a SET x = 1;\n" +
     "UPDATE a SET x = 1 WHERE id = 2;\n" +
     "DROP TABLE a;\n" +
-    "TRUNCATE TABLE a;"
+    "TRUNCATE TABLE a;\n" +
+    "ALTER TABLE a ADD COLUMN y int;"
   );
   assert.deepEqual(risky.map(item => client.firstKeyword(item.statement)),
-    ["delete", "update", "drop", "truncate"]);
+    ["delete", "update", "drop", "truncate", "alter"]);
   assert.equal(client.riskyStatements("SELECT 1").length, 0);
 });
 
@@ -150,40 +151,10 @@ test("이름 삽입은 평범한 식별자가 아닐 때만 역따옴표로 감�
   assert.equal(client.identifierFor("we`ird"), "`we``ird`");
 });
 
-test("Ctrl+/ 는 고른 줄을 통째로 주석 처리하고 다시 벗긴다", () => {
-  const sql = "SELECT 1\nFROM t\nWHERE x = 1";
-  const on = client.toggleLineComment(sql, 0, sql.length);
-  assert.equal(on.text, "-- SELECT 1\n-- FROM t\n-- WHERE x = 1");
-  const off = client.toggleLineComment(on.text, on.start, on.end);
-  assert.equal(off.text, sql, "다시 누르면 원래대로 돌아와야 한다");
-});
 
-test("Ctrl+/ 는 일부만 주석이면 전부 주석으로 맞춘다", () => {
-  const sql = "-- SELECT 1\nFROM t";
-  const result = client.toggleLineComment(sql, 0, sql.length);
-  assert.equal(result.text, "-- -- SELECT 1\n-- FROM t");
-});
 
-test("Ctrl+/ 는 들여쓰기를 지키고 빈 줄은 건드리지 않는다", () => {
-  const sql = "  SELECT 1\n\n  FROM t";
-  const result = client.toggleLineComment(sql, 0, sql.length);
-  assert.equal(result.text, "  -- SELECT 1\n\n  -- FROM t");
-  assert.equal(client.toggleLineComment(result.text, 0, result.text.length).text, sql);
-});
 
-test("Ctrl+/ 는 선택이 없으면 커서 줄만 바꾸고 커서를 그 줄에 남긴다", () => {
-  const sql = "SELECT 1\nFROM t";
-  const cursor = sql.indexOf("FROM") + 2;
-  const result = client.toggleLineComment(sql, cursor, cursor);
-  assert.equal(result.text, "SELECT 1\n-- FROM t");
-  assert.equal(result.start, result.end, "선택이 없으면 커서로 남아야 한다");
-  assert.equal(result.text.slice(result.start - 2, result.start), "FR", "커서가 같은 글자 옆에 있어야 한다");
-});
 
-test("Ctrl+/ 는 빈 줄에서 아무것도 바꾸지 않는다", () => {
-  const result = client.toggleLineComment("\n\n", 1, 1);
-  assert.equal(result.text, "\n\n");
-});
 
 test("걸린 시간은 서버가 재고 프런트는 그 값만 쓴다", () => {
   // 프런트에서 재면 폴링 간격(300ms)이 섞여 빠른 쿼리가 느리게 보인다.
@@ -194,32 +165,254 @@ test("걸린 시간은 서버가 재고 프런트는 그 값만 쓴다", () => {
   assert.ok(!/Date\.now\(\) - runStartedAt/.test(source), "프런트가 실행 시간을 재면 안 된다");
 });
 
-test("스키마 트리는 컬럼만 따로 받아오고 DDL 을 볼 수 있다", () => {
+test("스키마 트리는 데이터 행 없이 하위 객체만 따로 받아오고 DDL 을 볼 수 있다", () => {
   assert.match(worker, /def load_columns\(/);
+  assert.match(worker, /def load_table_children\(/);
   assert.match(worker, /def load_ddl\(/);
+  assert.match(worker, /def load_table_info\(/);
   assert.match(worker, /SHOW CREATE TABLE/);
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   // 트리를 펼칠 때 미리보기 200행까지 함께 가져오면 안 된다.
-  assert.match(source, /&mode=columns/);
+  assert.match(source, /&mode=children/);
   assert.match(source, /&mode=ddl/);
   assert.match(source, /&mode=count/);
   // 같은 테이블을 다시 펼치면 서버를 또 부르지 않는다.
-  assert.match(source, /columnCache\.has\(name\)/);
+  assert.match(source, /tableChildrenCache\.has\(name\)/);
+});
+
+test("스키마 트리는 SVG 아이콘으로 주요 객체를 나누고 이름 넣기 버튼을 두지 않는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const icons = fs.readFileSync(path.join(root, "src", "js", "icons.js"), "utf8");
+  assert.match(source, /\{ type:"table", label:"Tables", icon:"table", expandable:true \}/);
+  assert.match(source, /\{ type:"view", label:"Views", icon:"view", expandable:true \}/);
+  assert.match(source, /\{ type:"procedure", label:"Procedures", icon:"procedure" \}/);
+  assert.match(source, /\{ type:"function", label:"Functions", icon:"function" \}/);
+  assert.match(source, /\{ type:"event", label:"Events", icon:"event" \}/);
+  assert.match(source, /schemaIcon\(column\.key === "PRI" \? "key" : "column"/);
+  assert.match(source, /expandedTables = new Set\(\)/);
+  assert.ok(!/db-table-insert/.test(source), "테이블 행에 별도 이름 넣기 버튼이 없어야 한다");
+  assert.ok(!/db-table-kind/.test(source), "테이블 행에 표/뷰 글자 배지가 없어야 한다");
+  ["database", "table", "view", "column", "key", "index", "foreignKey", "procedure", "function", "trigger", "event", "chevronRight", "chevronDown"].forEach((name) =>
+    assert.match(icons, new RegExp("\\b" + name + ":")));
 });
 
 test("런처는 아는 mode 만 워커에 넘긴다", () => {
-  assert.match(launcher, /if \(mode != "columns" && mode != "count" && mode != "ddl"\) mode = "table";/);
+  assert.match(launcher, /if \(mode != "columns" && mode != "children" && mode != "count" && mode != "ddl" && mode != "info"\) mode = "table";/);
 });
 
-test("자동완성 문맥은 커서 앞의 낱말과 한정자를 읽는다", () => {
-  const at = (sql) => client.completionContext(sql, sql.length);
-  assert.deepEqual({ ...at("SELECT na") }, { prefix: "na", start: 7, qualifier: "", after: "select" });
-  assert.equal(at("SELECT * FROM ").after, "from");
-  assert.equal(at("SELECT o.").qualifier, "o");
-  assert.equal(at("SELECT o.na").qualifier, "o");
-  assert.equal(at("SELECT o.na").prefix, "na");
-  assert.equal(at("").prefix, "");
+test("테이블 구조 편집은 변경할 ALTER 문만 만들고 모든 이름을 인용한다", () => {
+  const id = client.columnDraft({ name:"id", type:"bigint", nullable:false, key:"PRI", extra:"auto_increment" }, 0);
+  const name = client.columnDraft({ name:"display name", type:"varchar(80)", nullable:true, default:"guest" }, 1);
+  const base = { database:"school db", name:"members", comment:"학생", columns:[id, name].map(item => ({ originalName:item.originalName })) };
+  const unchanged = client.tableAlterPlan(base, { name:"members", comment:"학생", columns:[id, name] });
+  assert.equal(unchanged.sql, "");
+
+  name.type = "varchar(120)";
+  name.nullable = false;
+  const added = client.columnDraft({ name:"created_at", type:"datetime", nullable:false }, 2);
+  added.originalName = ""; added.original = null; added.isNew = true;
+  const plan = client.tableAlterPlan(base, { name:"students", comment:"재학생", columns:[id, name, added] });
+  assert.deepEqual(plan.errors, []);
+  assert.match(plan.sql, /^ALTER TABLE `school db`\.`members`/);
+  assert.match(plan.sql, /MODIFY COLUMN `display name` varchar\(120\) NOT NULL DEFAULT 'guest'/);
+  assert.match(plan.sql, /ADD COLUMN `created_at` datetime NOT NULL AFTER `display name`/);
+  assert.match(plan.sql, /COMMENT = '재학생'/);
+  assert.match(plan.sql, /RENAME TO `school db`\.`students`/);
 });
+
+test("테이블 구조 편집은 삭제와 위험한 자료형 입력을 구분한다", () => {
+  const id = client.columnDraft({ name:"id", type:"int", nullable:false }, 0);
+  const memo = client.columnDraft({ name:"memo", type:"text", nullable:true }, 1);
+  const base = { database:"school", name:"notes", comment:"", columns:[id, memo].map(item => ({ originalName:item.originalName })) };
+  memo.deleted = true;
+  const dropped = client.tableAlterPlan(base, { name:"notes", comment:"", columns:[id, memo] });
+  assert.equal(dropped.destructive, true);
+  assert.match(dropped.sql, /DROP COLUMN `memo`/);
+  id.type = "int; DROP TABLE notes";
+  const unsafe = client.tableAlterPlan(base, { name:"notes", comment:"", columns:[id, memo] });
+  assert.ok(unsafe.errors.some(message => /자료형/.test(message)));
+  assert.equal(unsafe.sql, "");
+});
+
+test("테이블 정보 모달은 읽기 전용과 외부 구조 변경을 확인한 뒤 기존 쿼리 경로로 적용한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(source, /const openTableInfoModal = async \(name, initialTab\)/);
+  assert.match(source, /editable = !readOnly && info\.type === "table"/);
+  assert.match(source, /url \+ "&mode=info"/);
+  assert.match(source, /String\(latest\.info\.ddl \|\| ""\) !== originalDdl/);
+  assert.match(source, /label:"테이블 구조 변경", quiet:true, skipRiskConfirm:true/);
+  assert.match(source, /onComplete:async \(ok, result\)/);
+  assert.match(source, /await loadSchema\(\)/);
+  assert.match(source, /showTable\(nextName\)/);
+});
+
+test("테이블 정보는 결과 영역이 아니라 스키마 테이블명의 우클릭 메뉴에서 연다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(source, /name\.addEventListener\("contextmenu"/);
+  assert.match(source, /openTableContextMenu\(item, event\.clientX, event\.clientY\)/);
+  assert.match(source, /openTableInfoModal\(item\.name\)/);
+  assert.match(source, /event\.key !== "ContextMenu".*event\.shiftKey.*"F10"/);
+  assert.ok(!/db-table-info-button/.test(source), "결과 영역에 테이블 정보 버튼이 남으면 안 된다");
+  assert.ok(!/db-table-info-button/.test(css), "없어진 결과 버튼 스타일이 남으면 안 된다");
+  assert.match(css, /\.db-table-context-menu\{/);
+});
+
+test("2차 테이블 정보는 인덱스와 외래키 메타데이터를 함께 읽는다", () => {
+  assert.match(worker, /information_schema\.STATISTICS/);
+  assert.match(worker, /information_schema\.REFERENTIAL_CONSTRAINTS/);
+  assert.match(worker, /"indexes": indexes/);
+  assert.match(worker, /"foreignKeys": foreign_keys/);
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(source, /const indexesTab = button\("인덱스 "/);
+  assert.match(source, /const foreignKeysTab = button\("외래키 "/);
+  assert.match(source, /renderIndexEditor\(\);\s*\n\s*renderForeignKeyEditor\(\);/);
+});
+
+test("프로시저·함수·이벤트와 테이블 하위 트리거는 정의문을 결과 영역에서 연다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(worker, /information_schema\.ROUTINES/);
+  assert.match(worker, /information_schema\.EVENTS/);
+  assert.match(worker, /information_schema\.TRIGGERS/);
+  assert.match(worker, /def load_object_ddl\(kind, name, database=""\)/);
+  assert.match(worker, /SHOW CREATE " \+ keywords\[normalized\]/);
+  assert.match(launcher, /path\.StartsWith\("\/db-object\?"/);
+  assert.match(source, /const showSchemaObject = async \(item\)/);
+  assert.match(source, /tableSection\(item, "indexes", "Indexes", "index"/);
+  assert.match(source, /tableSection\(item, "foreignKeys", "Foreign Keys", "foreignKey"/);
+  assert.match(source, /tableSection\(item, "triggers", "Triggers", "trigger"/);
+  assert.match(source, /openTableInfoModal\(item\.name, "indexes"\)/);
+  assert.match(source, /openTableInfoModal\(item\.name, "foreignKeys"\)/);
+  assert.match(source, /db-schema-definition-ddl/);
+});
+
+test("ERD 메타데이터는 테이블별 반복 요청 없이 컬럼과 외래키를 일괄 조회한다", () => {
+  assert.match(worker, /def load_erd\(database=""\)/);
+  assert.match(worker, /TABLE_TYPE = 'BASE TABLE'/);
+  assert.match(worker, /MAX_SCHEMA_RELATIONS/);
+  assert.match(worker, /"relationships": list\(relation_map\.values\(\)\)/);
+  assert.match(worker, /if action == "erd":\s*\n\s*return load_erd/);
+  assert.match(launcher, /schemaMode == "erd" \? "erd" : "schema"/);
+});
+
+test("ERD 자동 배치는 참조 대상 테이블을 왼쪽에 두고 카드가 겹치지 않는다", () => {
+  const columns = Array.from({ length:30 }, (_, index) => ({ name:"c" + index, type:"int" }));
+  const layout = client.erdLayout([
+    { name:"parents", columns:[{ name:"id", type:"int", key:"PRI" }] },
+    { name:"children", columns },
+    { name:"grandchildren", columns:[{ name:"id", type:"int" }] }
+  ], [
+    { sourceTable:"children", targetTable:"parents" },
+    { sourceTable:"grandchildren", targetTable:"children" }
+  ]);
+  const byName = new Map(layout.nodes.map(node => [node.table.name, node]));
+  assert.ok(byName.get("parents").x < byName.get("children").x);
+  assert.ok(byName.get("children").x < byName.get("grandchildren").x);
+  assert.equal(layout.maxColumns, 24);
+  assert.ok(byName.get("children").height < 700, "컬럼이 많은 테이블 카드는 접어서 보여야 한다");
+  assert.ok(layout.width > 0 && layout.height > 0);
+});
+
+test("ERD 화면은 검색·이동·확대·화면 맞춤과 테이블/관계 상세 보기를 제공한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(source, /erdButton\.innerHTML = uiIcon\("graph"\)/);
+  assert.match(source, /&mode=erd/);
+  assert.match(source, /const openErdModal = async \(\)/);
+  assert.match(source, /viewport\.addEventListener\("wheel"/);
+  assert.match(source, /viewport\.addEventListener\("pointercancel", endPan\)/);
+  assert.match(source, /const fitDiagram = \(\)/);
+  assert.match(source, /search\.addEventListener\("input", filterCards\)/);
+  assert.match(source, /cardNode\.addEventListener\("dblclick", openInfo\)/);
+  assert.match(source, /openTableInfoModal\(relationship\.sourceTable, "foreignKeys"\)/);
+  assert.match(css, /\.db-erd-world\{/);
+  assert.match(css, /\.db-erd-edge-hit\{/);
+  assert.match(css, /\.db-erd-relation-detail\{/);
+});
+
+test("인덱스와 외래키 변경은 삭제 후 재생성하는 ALTER 문으로 합쳐진다", () => {
+  const id = client.columnDraft({ name:"id", type:"bigint", nullable:false }, 0);
+  const parent = client.columnDraft({ name:"parent_id", type:"bigint", nullable:true }, 1);
+  const index = client.indexDraft({
+    name:"idx_parent", unique:false, type:"BTREE",
+    columns:[{ name:"parent_id", prefix:null, order:"ASC" }]
+  }, 0);
+  index.name = "uq_parent";
+  index.unique = true;
+  index.columns[0].prefix = "8";
+  index.columns[0].order = "DESC";
+  const foreignKey = client.foreignKeyDraft({
+    name:"fk_nodes_parent", referencedDatabase:"school", referencedTable:"nodes",
+    updateRule:"CASCADE", deleteRule:"SET NULL",
+    columns:[{ local:"parent_id", referenced:"id" }]
+  }, 0);
+  foreignKey.originalName = "";
+  foreignKey.original = null;
+  foreignKey.isNew = true;
+  const base = { database:"school", name:"nodes", comment:"", columns:[id, parent].map(column => ({ originalName:column.originalName })) };
+  const plan = client.tableAlterPlan(base, {
+    name:"nodes", comment:"", columns:[id, parent], indexes:[index], foreignKeys:[foreignKey]
+  });
+  assert.deepEqual(plan.errors, []);
+  assert.match(plan.sql, /DROP INDEX `idx_parent`/);
+  assert.match(plan.sql, /ADD UNIQUE INDEX `uq_parent` \(`parent_id`\(8\) DESC\)/);
+  assert.match(plan.sql, /ADD CONSTRAINT `fk_nodes_parent` FOREIGN KEY \(`parent_id`\) REFERENCES `school`\.`nodes` \(`id`\)/);
+  assert.match(plan.sql, /ON DELETE SET NULL ON UPDATE CASCADE/);
+});
+
+test("활성 제약조건이 참조하는 컬럼은 먼저 정리하지 않으면 삭제할 수 없다", () => {
+  const id = client.columnDraft({ name:"id", type:"int", nullable:false }, 0);
+  const parent = client.columnDraft({ name:"parent_id", type:"int", nullable:true }, 1);
+  parent.deleted = true;
+  const index = client.indexDraft({
+    name:"idx_parent", unique:false, type:"BTREE", columns:[{ name:"parent_id", order:"ASC" }]
+  }, 0);
+  const foreignKey = client.foreignKeyDraft({
+    name:"fk_parent", referencedDatabase:"school", referencedTable:"nodes",
+    updateRule:"RESTRICT", deleteRule:"RESTRICT", columns:[{ local:"parent_id", referenced:"id" }]
+  }, 0);
+  const plan = client.tableAlterPlan(
+    { database:"school", name:"nodes", comment:"", columns:[{ originalName:"id" }, { originalName:"parent_id" }] },
+    { name:"nodes", comment:"", columns:[id, parent], indexes:[index], foreignKeys:[foreignKey] }
+  );
+  assert.ok(plan.errors.some(message => /인덱스의 컬럼/.test(message)));
+  assert.ok(plan.errors.some(message => /외래키의 로컬 컬럼/.test(message)));
+  assert.equal(plan.sql, "");
+});
+
+test("지원하지 않는 함수식 인덱스는 그대로 둔 채 다른 속성만 바꿀 수 있다", () => {
+  const id = client.columnDraft({ name:"id", type:"int", nullable:false }, 0);
+  const functional = client.indexDraft({
+    name:"idx_expression", unique:false, type:"BTREE",
+    columns:[{ name:"", order:"ASC", unsupported:true }]
+  }, 0);
+  const plan = client.tableAlterPlan(
+    { database:"school", name:"nodes", comment:"", columns:[{ originalName:"id" }] },
+    { name:"nodes", comment:"노드", columns:[id], indexes:[functional], foreignKeys:[] }
+  );
+  assert.deepEqual(plan.errors, []);
+  assert.match(plan.sql, /COMMENT = '노드'/);
+});
+
+test("고급 컬럼 속성은 구조 SQL에서 조용히 사라지지 않는다", () => {
+  const normal = client.columnDraft({
+    name:"title", type:"varchar(100)", nullable:false, characterSet:"utf8mb4", collation:"utf8mb4_bin"
+  }, 0);
+  const base = { database:"school", name:"docs", comment:"", columns:[{ originalName:"title" }] };
+  normal.comment = "제목";
+  const preserved = client.tableAlterPlan(base, { name:"docs", comment:"", columns:[normal] });
+  assert.match(preserved.sql, /CHARACTER SET `utf8mb4` COLLATE `utf8mb4_bin`/);
+
+  const advanced = client.columnDraft({ name:"secret", type:"varchar(20)", nullable:true, extra:"INVISIBLE" }, 1);
+  advanced.comment = "숨김";
+  const blocked = client.tableAlterPlan(
+    { database:"school", name:"docs", comment:"", columns:[{ originalName:"secret" }] },
+    { name:"docs", comment:"", columns:[advanced] }
+  );
+  assert.ok(blocked.errors.some(message => /고급 속성/.test(message)));
+  assert.equal(blocked.sql, "");
+});
+
 
 test("별칭은 테이블 이름으로 되돌아간다", () => {
   const map = client.aliasMap("SELECT * FROM orders o JOIN users AS u ON o.uid = u.id");
@@ -230,36 +423,8 @@ test("별칭은 테이블 이름으로 되돌아간다", () => {
   assert.equal(client.aliasMap("SELECT * FROM orders WHERE x = 1").get("where"), undefined);
 });
 
-test("FROM 뒤에서는 테이블만, 한정자 뒤에서는 그 테이블 컬럼만 준다", () => {
-  const schema = {
-    tables: [{ name: "orders", type: "table" }, { name: "users", type: "table" }],
-    columns: [{ table: "orders", name: "order_id", type: "int" }, { table: "users", name: "user_name", type: "text" }],
-    aliases: client.aliasMap("SELECT * FROM orders o")
-  };
-  const fromItems = client.completionCandidates(client.completionContext("SELECT * FROM ", 14), schema);
-  assert.ok(fromItems.every(item => item.kind === "table"), "FROM 뒤에 컬럼·키워드가 섞이면 안 된다");
 
-  const sql = "SELECT o.";
-  const dotted = client.completionCandidates(client.completionContext(sql, sql.length), schema);
-  assert.deepEqual(dotted.map(item => item.label), ["order_id"], "별칭이 가리키는 테이블의 컬럼만 나와야 한다");
-});
 
-test("자동완성은 이미 친 글자로 후보를 좁힌다", () => {
-  const schema = {
-    tables: [{ name: "orders", type: "table" }, { name: "users", type: "table" }],
-    columns: [], aliases: new Map()
-  };
-  const sql = "SELECT * FROM or";
-  const items = client.completionCandidates(client.completionContext(sql, sql.length), schema);
-  assert.deepEqual(items.map(item => item.label), ["orders"]);
-});
-
-test("자동완성 후보 수에는 상한이 있다", () => {
-  const tables = Array.from({ length: 200 }, (_, index) => ({ name: "t" + index, type: "table" }));
-  const items = client.completionCandidates(client.completionContext("SELECT * FROM ", 14),
-    { tables, columns: [], aliases: new Map() });
-  assert.ok(items.length <= 40, "목록이 화면을 넘길 만큼 길면 안 된다");
-});
 
 test("더 보기는 SQL 을 고쳐 쓰지 않고 보관분에서 떼어 온다", () => {
   // 임의의 쿼리에 LIMIT/OFFSET 을 덧붙이면 이미 LIMIT 이 있는 쿼리가 망가진다.
@@ -406,8 +571,10 @@ test("편집기 높이도 분할선이 정하고 기본 resize 손잡이는 끈�
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
   // 두 방식을 함께 두면 컨테이너 높이와 textarea 높이가 서로를 덮어써 화면이 어긋난다.
   assert.match(css, /\.db-editor\{position:relative;flex:none;height:var\(--db-editor-height,180px\)/);
-  assert.match(css, /\.db-editor-input\{[^}]*height:100%;min-height:0;resize:none/);
-  assert.ok(!/\.db-editor-input\{[^}]*resize:vertical/.test(css), "기본 resize 손잡이가 남아 있으면 안 된다");
+  // .db-editor 는 높이만 정하는 그릇이고 안쪽 편집기 위젯이 그 높이를 채운다.
+  assert.match(css, /\.db-editor \.code-host\{[^}]*height:100%/);
+  // 위젯 기본값(가운데 정렬·최대 폭)은 문서 한가운데 띄우는 코드 화면용이라 여기선 꺼야 한다.
+  assert.match(css, /\.db-editor \.code-host\{[^}]*max-width:none/);
 });
 
 test("가로 분할선은 기존 간격을 늘리지 않는다", () => {
@@ -431,6 +598,14 @@ test("가로 분할선도 pointercancel 까지 정리한다", () => {
   assert.match(source, /if \(!rect\.height\) return Infinity;/);
   // 높이도 접속 문서가 아니라 브라우저에 저장한다.
   assert.match(source, /const EDITOR_KEY = "classdockDbEditorHeightV1"/);
+});
+
+test("편집기 위젯은 프로파일에 맞는 줄 주석 표시를 고른다", () => {
+  const editor = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  // 자바스크립트에 "#" 을 넣던 버그의 원인은 주석 표시가 core.js 에 박혀 있었던 것이다.
+  assert.match(editor, /const commentToken = options\.commentToken/);
+  assert.match(editor, /prof === "sql" \? "--" : \(prof === "python" \|\| prof === "hash" \? "#" : "\/\/"\)/);
+  assert.match(editor, /transformEditorLines\(ta\.value, ta\.selectionStart, ta\.selectionEnd, action, commentToken\)/);
 });
 
 test("런처는 워커 응답을 파싱하지 않고 상태 문자로만 판단한다", () => {
@@ -518,7 +693,10 @@ test("워커의 문장 나누기는 프런트와 같은 결과를 낸다", { ski
 
 test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고 재사용한다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
-  assert.match(source, /highlightCodeBase\(editor\.value \+ "\\n", "sql"\)/);
+  // 편집기는 직접 만들지 않고 파이썬·자바스크립트와 같은 위젯을 쓴다.
+  assert.match(source, /buildCodeEditor\(profile\.sql \|\| "", "sql", \{/);
+  assert.match(source, /plain: true/);
+  assert.match(source, /memberCandidates: \(source, receiver, prefix\) => sqlMemberCandidates/);
   assert.match(source, /MNTableExport\.saveCsv/);
   // 부족한 패키지는 그 자리에서 설치할 수 있어야 한다(드라이버·인증 보조 패키지 모두).
   assert.match(source, /offerPackageInstall\(\["pymysql"\]/);
@@ -530,7 +708,11 @@ test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고
   assert.match(source, /const risky = riskyStatements\(sql\);/);
   assert.match(source, /const sql = chosen \? chosen\.sql\.trim\(\) : "";/);
   // Ctrl+Enter 는 대상만, Ctrl+Shift+Enter 는 편집기 전체.
-  assert.match(source, /runQuery\(event\.shiftKey \? allTarget\(\) : runTarget\(\)\)/);
+  // 실행은 앱의 runCode 단축키(기본 Ctrl+Enter)를 따르고, 전체 실행은 Ctrl+Shift+Enter 다.
+  assert.match(source, /shortcutMatches\(event, "runCode"\)/);
+  assert.match(source, /runQuery\(allTarget\(\)\)/);
+  // 자동완성 목록이 떠 있으면 실행 단축키가 가로채지 않는다.
+  assert.match(source, /if \(editor\.isCompletionOpen && editor\.isCompletionOpen\(\)\) return;/);
   // 여러 결과 집합을 버리지 않고 탭으로 낸다.
   assert.match(source, /resultSets = statements\.filter\(item => item && item\.kind === "rows"\)/);
 });

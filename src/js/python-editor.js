@@ -672,6 +672,11 @@ function buildCodeEditor(text, prof, options={}){
   const plainMode = !!options.plain;
   // 일반(plain) 편집은 확장자에 맞는 키워드를 쓰되, 부르는 쪽이 목록을 직접 줄 수도 있다
   // (실행 편집기처럼 "이 실행 환경에서 실제로 되는 것"만 제안해야 하는 경우).
+  /* Ctrl+/ 가 넣을 줄 주석 표시. 언어마다 다른데 예전에는 "#" 이 박혀 있어
+     자바스크립트 편집기에서도 "# const a = 1;" 처럼 유효하지 않은 주석이 들어갔다.
+     options.commentToken 이 없으면 프로파일에서 고른다. */
+  const commentToken = options.commentToken
+    || (prof === "sql" ? "--" : (prof === "python" || prof === "hash" ? "#" : "//"));
   const completionWords = plainMode
     ? (Array.isArray(options.completionWords) ? options.completionWords : completionWordsForProfile(prof, options.fileExt))
     : undefined;
@@ -1509,7 +1514,7 @@ function buildCodeEditor(text, prof, options={}){
     exitCol();
     clearTimeout(coalesceTimer);
     commitNow();
-    const next = transformEditorLines(ta.value, ta.selectionStart, ta.selectionEnd, action);
+    const next = transformEditorLines(ta.value, ta.selectionStart, ta.selectionEnd, action, commentToken);
     // 값과 선택이 모두 그대로일 때만 no-op(예: 첫 줄에서 위로 이동). 줄 복사 직후처럼 위·아래 줄이
     // 똑같으면 자리 바꿔도 텍스트는 같지만 커서는 옮겨가야 하므로 선택까지 비교한다.
     if (next.value === ta.value && next.selectionStart === ta.selectionStart && next.selectionEnd === ta.selectionEnd) return;

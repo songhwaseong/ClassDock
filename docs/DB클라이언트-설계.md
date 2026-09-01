@@ -85,9 +85,14 @@ db_worker.py — 접속 하나당 상주 프로세스 1개
    같은 컬럼을 누를 때마다 오름차순 → 내림차순 → 해제로 돌고, 정렬 클릭은 실행 이력을 채우지 않는다.
    `SELECT` 계열이 아니거나(`SHOW` 는 `ORDER BY` 를 받지 못한다) 문장이 4000자를 넘어 잘려 왔으면 정렬을 걸지 않는다.
    화살표 표시는 실제로 실행된 문장의 `ORDER BY` 에서만 읽는다 — 클릭 기록으로 만들면 사용자가 손으로 고쳤을 때 거짓말을 한다.
-   `Ctrl+/`는 고른 줄(선택이 없으면 커서 줄)의 주석을 토글한다. 모두 주석이면 벗기고 하나라도 아니면 전부 붙인다.
-   `Ctrl+Space`는 자동완성을 연다. `FROM`·`JOIN` 뒤에서는 테이블만, `별칭.` 뒤에서는 그 테이블의 컬럼만 준다.
-   목록은 커서 자리에 뜨는데, 위치는 강조 오버레이 안에서 잰다(편집기와 글꼴·여백·줄바꿈이 같아 별도 mirror 가 필요 없다).
+   편집기는 파이썬·자바스크립트 편집기와 같은 위젯(`buildCodeEditor`)을 쓴다. 되돌리기(Ctrl+Z)·줄 삭제(Ctrl+D)·
+   줄 이동(Alt+↑↓)·줄 복제(Ctrl+Alt+↓)·찾기(Ctrl+F)·줄 이동(Ctrl+G)·사각 선택·괄호 자동 짝·줄 번호를
+   여기서 다시 만들지 않고 그대로 얻는다. `plain:true` 로 파이썬 전용 지능(Jedi 질의·import 추론)은 끈다.
+   `Ctrl+/`는 위젯이 처리하며 SQL 프로파일이라 `--` 를 붙인다.
+   `Ctrl+Space`는 위젯의 자동완성을 연다. 후보는 SQL 키워드 + 현재 데이터베이스의 테이블·컬럼이며,
+   `completionWords` 배열을 위젯이 참조로 붙들고 있어 접속 뒤 스키마가 오면 그 자리에서 채운다.
+   `별칭.` 뒤에서는 `memberCandidates` 훅이 그 별칭이 가리키는 테이블의 컬럼만 준다.
+   편집기가 고정 높이(`overflow:hidden`)라 목록은 `completionPortal` 로 body 에 띄운다(노트북 셀과 같은 이유).
    `실행 계획`은 지금 실행할 문장 앞에 `EXPLAIN` 을 붙여 실행하고 편집기는 그대로 둔다.
 7. 실행이 길어지면 진행 표시와 취소 버튼이 나온다. 취소는 워커가 별도 커넥션으로 `KILL QUERY`(Oracle은 `Connection.cancel()`)를 보내 끊는다.
 8. 결과 표는 CSV·엑셀로 내보내거나 스프레드시트 문서로 열 수 있다. `table-export.js`와 `spreadsheet-viewer.js`를 그대로 쓴다.
@@ -169,7 +174,9 @@ db_worker.py — 접속 하나당 상주 프로세스 1개
 - `src/js/document-types.js` — `dbconn` 종류의 아이콘(`DB`)과 사이드바 분류(`db`).
 - `src/js/file-loaders.js` — `.dbconn` 확장자를 `loadDbConnDoc` 로 넘긴다.
 - `src/js/app.js` · `classdock.html` — `+` 메뉴의 `새 DB 접속(.dbconn)` 항목.
-- SQL 편집기 강조는 `code-viewer.js` 의 `highlightCodeBase(src, "sql")` 을, 결과 내보내기는 `MNTableExport` 를 그대로 쓴다.
+- SQL 편집기는 `python-editor.js` 의 `buildCodeEditor(text, "sql", options)` 를, 결과 내보내기는 `MNTableExport` 를 그대로 쓴다.
+- 줄 주석 표시는 `transformEditorLines(..., commentToken)` 의 인자로 언어마다 갈린다(파이썬 `#`, 자바스크립트 `//`, SQL `--`).
+  예전에는 `#` 이 박혀 있어 자바스크립트 편집기가 유효하지 않은 주석을 넣었다.
 - 새 스타일은 `src/styles.css` 끝의 `.db-*` 블록에 둔다.
 
 ## 미확인 항목

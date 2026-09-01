@@ -457,9 +457,11 @@
       "documents.js"
     ],
     "db-client.js": [
-      "code-viewer.js",
+      "state.js",
       "documents.js",
       "file-loaders.js",
+      "code-viewer.js",
+      "python-editor.js",
       "table-export.js"
     ]
   },

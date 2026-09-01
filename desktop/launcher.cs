@@ -2417,8 +2417,9 @@ class ClassDockLauncher
                 {
                     try
                     {
-                        // mode = tables(기본, 트리) · columns(자동완성용 전체 컬럼)
-                        string schemaAction = QueryValue(path, "mode") == "columns" ? "schema-columns" : "schema";
+                        // mode = tables(기본, 트리) · columns(자동완성용 전체 컬럼) · erd(관계도 일괄 메타데이터)
+                        string schemaMode = QueryValue(path, "mode");
+                        string schemaAction = schemaMode == "columns" ? "schema-columns" : (schemaMode == "erd" ? "erd" : "schema");
                         string json = DbMetadataRequest(QueryValue(path, "id"), "{\"action\":" + JsonString(schemaAction) + "}");
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
                     }
@@ -2431,9 +2432,9 @@ class ClassDockLauncher
                 {
                     try
                     {
-                        // mode = table(기본) · columns(트리 펼치기) · count(전체 행 수) · ddl(SHOW CREATE TABLE)
+                        // mode = table(기본) · columns(컬럼) · children(트리 하위 객체) · count · ddl · info
                         string mode = QueryValue(path, "mode");
-                        if (mode != "columns" && mode != "count" && mode != "ddl") mode = "table";
+                        if (mode != "columns" && mode != "children" && mode != "count" && mode != "ddl" && mode != "info") mode = "table";
                         string request = "{\"action\":" + JsonString(mode)
                             + ",\"name\":" + JsonString(DbCheckField(QueryValue(path, "name"), "table", 128, false))
                             + ",\"database\":" + JsonString(DbCheckField(QueryValue(path, "database"), "database", 64, true)) + "}";
@@ -2443,6 +2444,24 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-table-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/db-object?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string kind = QueryValue(path, "kind").ToLowerInvariant();
+                        if (kind != "procedure" && kind != "function" && kind != "event" && kind != "trigger")
+                            throw new InvalidOperationException("db-bad-object-kind");
+                        string request = "{\"action\":\"object-ddl\",\"kind\":" + JsonString(kind)
+                            + ",\"name\":" + JsonString(DbCheckField(QueryValue(path, "name"), "object", 128, false))
+                            + ",\"database\":" + JsonString(DbCheckField(QueryValue(path, "database"), "database", 64, true)) + "}";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-object-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (method == "POST" && path.StartsWith("/db-use?", StringComparison.Ordinal))

@@ -31,6 +31,8 @@ KEEP_CELLS = 100000        # 같은 목적의 셀 상한(넓은 표에서 행 �
 KEEP_PAGE = 1000           # "더 보기" 한 번에 더 내려보내는 행
 MAX_KEPT_SETS = 4          # 동시에 들고 있을 결과 집합 수
 MAX_SCHEMA_COLUMNS = 5000  # 자동완성에 싣는 최대 컬럼 수
+MAX_SCHEMA_OBJECTS = 2000  # 프로시저·함수·이벤트 등 스키마 객체별 상한
+MAX_SCHEMA_RELATIONS = 5000  # ERD 외래키 관계 상한
 
 # 첫 낱말이 이것이면 결과 집합을 기대한다. 그 밖은 영향 행 수만 보고한다.
 RESULT_KEYWORDS = ("select", "show", "describe", "desc", "explain", "with", "table", "values", "call", "analyze", "check")
@@ -402,7 +404,7 @@ def run_statements(sql, driver):
 
 def load_schema():
     connection = require_connection()
-    payload = {"ok": True, "databases": [], "tables": [], "current": ""}
+    payload = {"ok": True, "databases": [], "tables": [], "routines": [], "events": [], "current": ""}
     with connection.cursor() as cursor:
         cursor.execute("SELECT DATABASE()")
         row = cursor.fetchone()
@@ -426,6 +428,29 @@ def load_schema():
                 "estimatedRows": None if item[2] is None else int(item[2]),
                 "comment": str(item[3] or "")[:200],
             } for item in cursor.fetchall()]
+            cursor.execute(
+                "SELECT ROUTINE_NAME, ROUTINE_TYPE, DATA_TYPE, ROUTINE_COMMENT "
+                "FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = %s "
+                "ORDER BY ROUTINE_TYPE, ROUTINE_NAME LIMIT %s",
+                (payload["current"], MAX_SCHEMA_OBJECTS),
+            )
+            payload["routines"] = [{
+                "name": str(item[0]),
+                "type": "function" if str(item[1] or "").upper() == "FUNCTION" else "procedure",
+                "dataType": str(item[2] or ""),
+                "comment": str(item[3] or "")[:200],
+            } for item in cursor.fetchall()]
+            cursor.execute(
+                "SELECT EVENT_NAME, STATUS, EVENT_TYPE, EXECUTE_AT, INTERVAL_VALUE, INTERVAL_FIELD, EVENT_COMMENT "
+                "FROM information_schema.EVENTS WHERE EVENT_SCHEMA = %s ORDER BY EVENT_NAME LIMIT %s",
+                (payload["current"], MAX_SCHEMA_OBJECTS),
+            )
+            payload["events"] = [{
+                "name": str(item[0]), "type": "event", "status": str(item[1] or ""),
+                "eventType": str(item[2] or ""), "executeAt": str(item[3] or ""),
+                "intervalValue": str(item[4] or ""), "intervalField": str(item[5] or ""),
+                "comment": str(item[6] or "")[:200],
+            } for item in cursor.fetchall()]
     return payload
 
 
@@ -439,14 +464,79 @@ def current_schema(cursor, database=""):
 
 def column_definitions(cursor, name, schema):
     cursor.execute(
-        "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT "
+        "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT, "
+        "CHARACTER_SET_NAME, COLLATION_NAME, GENERATION_EXPRESSION "
         "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION",
         (schema, name),
     )
     return [{
         "name": str(item[0]), "type": str(item[1] or ""), "nullable": str(item[2] or "").upper() == "YES",
         "key": str(item[3] or ""), "default": None if item[4] is None else str(item[4]),
-        "extra": str(item[5] or ""), "comment": str(item[6] or "")[:200],
+        "extra": str(item[5] or ""), "comment": str(item[6] or ""),
+        "characterSet": str(item[7] or ""), "collation": str(item[8] or ""),
+        "generationExpression": str(item[9] or ""),
+    } for item in cursor.fetchall()]
+
+
+def index_definitions(cursor, name, schema):
+    cursor.execute(
+        "SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX, COLUMN_NAME, SUB_PART, COLLATION "
+        "FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+        "ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+        (schema, name),
+    )
+    found = {}
+    for item in cursor.fetchall():
+        index_name = str(item[0] or "")
+        entry = found.setdefault(index_name, {
+            "name": index_name, "unique": not bool(item[1]),
+            "type": str(item[2] or "BTREE").upper(), "columns": [],
+        })
+        entry["columns"].append({
+            "name": str(item[4] or ""),
+            "prefix": None if item[5] is None else int(item[5]),
+            "order": "DESC" if str(item[6] or "").upper() == "D" else "ASC",
+            "unsupported": item[4] is None,
+        })
+    return list(found.values())
+
+
+def foreign_key_definitions(cursor, name, schema):
+    cursor.execute(
+        "SELECT k.CONSTRAINT_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA, "
+        "k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, k.ORDINAL_POSITION, "
+        "r.UPDATE_RULE, r.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE k "
+        "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+        "ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.TABLE_NAME = k.TABLE_NAME "
+        "AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
+        "WHERE k.CONSTRAINT_SCHEMA = %s AND k.TABLE_NAME = %s "
+        "AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+        "ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION",
+        (schema, name),
+    )
+    found = {}
+    for item in cursor.fetchall():
+        constraint_name = str(item[0] or "")
+        entry = found.setdefault(constraint_name, {
+            "name": constraint_name, "referencedDatabase": str(item[2] or schema),
+            "referencedTable": str(item[3] or ""),
+            "updateRule": str(item[6] or "RESTRICT").upper(),
+            "deleteRule": str(item[7] or "RESTRICT").upper(), "columns": [],
+        })
+        entry["columns"].append({"local": str(item[1] or ""), "referenced": str(item[4] or "")})
+    return list(found.values())
+
+
+def trigger_definitions(cursor, name, schema):
+    cursor.execute(
+        "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION "
+        "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = %s AND EVENT_OBJECT_TABLE = %s "
+        "ORDER BY ACTION_TIMING, EVENT_MANIPULATION, TRIGGER_NAME",
+        (schema, name),
+    )
+    return [{
+        "name": str(item[0]), "type": "trigger", "table": name,
+        "timing": str(item[1] or ""), "event": str(item[2] or ""), "orientation": str(item[3] or ""),
     } for item in cursor.fetchall()]
 
 
@@ -456,6 +546,19 @@ def load_columns(name, database=""):
     with connection.cursor() as cursor:
         columns = column_definitions(cursor, name, current_schema(cursor, database))
     return {"ok": True, "name": name, "columns": columns}
+
+
+def load_table_children(name, database=""):
+    """왼쪽 트리용 테이블 하위 객체. 데이터 행과 테이블 통계는 읽지 않는다."""
+    connection = require_connection()
+    with connection.cursor() as cursor:
+        schema = current_schema(cursor, database)
+        columns = column_definitions(cursor, name, schema)
+        indexes = index_definitions(cursor, name, schema)
+        foreign_keys = foreign_key_definitions(cursor, name, schema)
+        triggers = trigger_definitions(cursor, name, schema)
+    return {"ok": True, "name": name, "columns": columns, "indexes": indexes,
+            "foreignKeys": foreign_keys, "triggers": triggers}
 
 
 def schema_columns(database=""):
@@ -482,6 +585,71 @@ def schema_columns(database=""):
     }
 
 
+def load_erd(database=""):
+    """현재 데이터베이스의 ERD용 테이블·컬럼·외래키를 일괄 조회한다."""
+    connection = require_connection()
+    with connection.cursor() as cursor:
+        schema = current_schema(cursor, database)
+        if not schema:
+            return {"ok": True, "database": "", "tables": [], "relationships": [], "truncated": False}
+        cursor.execute(
+            "SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME LIMIT %s",
+            (schema, MAX_TABLES + 1),
+        )
+        table_rows = cursor.fetchall()
+        table_more = len(table_rows) > MAX_TABLES
+        tables = {str(item[0]): {"name": str(item[0]), "comment": str(item[1] or "")[:200], "columns": []}
+                  for item in table_rows[:MAX_TABLES]}
+        cursor.execute(
+            "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY, c.COLUMN_COMMENT "
+            "FROM information_schema.COLUMNS c JOIN information_schema.TABLES t "
+            "ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME "
+            "WHERE c.TABLE_SCHEMA = %s AND t.TABLE_TYPE = 'BASE TABLE' "
+            "ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION LIMIT %s",
+            (schema, MAX_SCHEMA_COLUMNS + 1),
+        )
+        column_rows = cursor.fetchall()
+        column_more = len(column_rows) > MAX_SCHEMA_COLUMNS
+        for item in column_rows[:MAX_SCHEMA_COLUMNS]:
+            table = tables.get(str(item[0]))
+            if table is not None:
+                table["columns"].append({
+                    "name": str(item[1]), "type": str(item[2] or ""),
+                    "nullable": str(item[3] or "").upper() == "YES",
+                    "key": str(item[4] or ""), "comment": str(item[5] or "")[:200],
+                })
+        cursor.execute(
+            "SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_SCHEMA, "
+            "k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, k.ORDINAL_POSITION, "
+            "r.UPDATE_RULE, r.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE k "
+            "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+            "ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.TABLE_NAME = k.TABLE_NAME "
+            "AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
+            "WHERE k.CONSTRAINT_SCHEMA = %s AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+            "ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION LIMIT %s",
+            (schema, MAX_SCHEMA_RELATIONS + 1),
+        )
+        relation_rows = cursor.fetchall()
+        relation_more = len(relation_rows) > MAX_SCHEMA_RELATIONS
+        relation_map = {}
+        for item in relation_rows[:MAX_SCHEMA_RELATIONS]:
+            relation_key = (str(item[1]), str(item[0]))
+            entry = relation_map.setdefault(relation_key, {
+                "name": str(item[0]), "sourceTable": str(item[1]),
+                "targetDatabase": str(item[3] or schema), "targetTable": str(item[4] or ""),
+                "updateRule": str(item[7] or "RESTRICT").upper(),
+                "deleteRule": str(item[8] or "RESTRICT").upper(), "columns": [],
+            })
+            entry["columns"].append({"source": str(item[2] or ""), "target": str(item[5] or "")})
+    return {
+        "ok": True, "database": schema, "tables": list(tables.values()),
+        "relationships": list(relation_map.values()),
+        "truncated": table_more or column_more or relation_more,
+        "truncatedTables": table_more, "truncatedColumns": column_more, "truncatedRelationships": relation_more,
+    }
+
+
 def read_page(index, offset, limit):
     kept = (_state.get("pages") or {}).get(index)
     if kept is None:
@@ -499,6 +667,67 @@ def load_ddl(name, database=""):
         cursor.execute("SHOW CREATE TABLE " + target)
         row = cursor.fetchone()
     return {"ok": True, "name": name, "ddl": str(row[1]) if row and len(row) > 1 else ""}
+
+
+def load_object_ddl(kind, name, database=""):
+    """프로시저·함수·이벤트·트리거의 SHOW CREATE 결과를 열 이름으로 찾는다."""
+    normalized = str(kind or "").lower()
+    keywords = {"procedure": "PROCEDURE", "function": "FUNCTION", "event": "EVENT", "trigger": "TRIGGER"}
+    preferred = {
+        "procedure": "create procedure", "function": "create function",
+        "event": "create event", "trigger": "sql original statement",
+    }
+    if normalized not in keywords:
+        return {"ok": False, "code": "unknown-object-kind", "detail": normalized}
+    connection = require_connection()
+    with connection.cursor() as cursor:
+        schema = current_schema(cursor, database)
+        target = quote_identifier(schema) + "." + quote_identifier(name)
+        cursor.execute("SHOW CREATE " + keywords[normalized] + " " + target)
+        row = cursor.fetchone()
+        labels = [str(item[0] or "").strip().lower() for item in (cursor.description or [])]
+    ddl = ""
+    wanted = preferred[normalized]
+    if row and wanted in labels:
+        ddl = str(row[labels.index(wanted)] or "")
+    elif row:
+        ddl = next((str(value) for value in row if isinstance(value, str)
+                    and value.lstrip().upper().startswith("CREATE ")), "")
+    return {"ok": True, "database": schema, "kind": normalized, "name": name, "ddl": ddl}
+
+
+def load_table_info(name, database=""):
+    """테이블 구조 편집창용 메타데이터. 미리보기 행은 읽지 않는다."""
+    connection = require_connection()
+    with connection.cursor() as cursor:
+        schema = current_schema(cursor, database)
+        cursor.execute(
+            "SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_COLLATION, TABLE_ROWS, TABLE_COMMENT, "
+            "CREATE_TIME, UPDATE_TIME FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+            (schema, name),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"ok": False, "code": "unknown-table", "detail": name}
+        columns = column_definitions(cursor, name, schema)
+        indexes = index_definitions(cursor, name, schema)
+        foreign_keys = foreign_key_definitions(cursor, name, schema)
+    return {
+        "ok": True,
+        "database": schema,
+        "name": str(row[0]),
+        "type": "view" if str(row[1] or "").upper().endswith("VIEW") else "table",
+        "engine": str(row[2] or ""),
+        "collation": str(row[3] or ""),
+        "estimatedRows": None if row[4] is None else int(row[4]),
+        "comment": str(row[5] or ""),
+        "created": str(row[6] or ""),
+        "updated": str(row[7] or ""),
+        "columns": columns,
+        "indexes": indexes,
+        "foreignKeys": foreign_keys,
+    }
 
 
 def load_table(name, database=""):
@@ -578,10 +807,19 @@ def handle(request):
             return count_table(str(request.get("name") or ""), str(request.get("database") or ""))
         if action == "columns":
             return load_columns(str(request.get("name") or ""), str(request.get("database") or ""))
+        if action == "children":
+            return load_table_children(str(request.get("name") or ""), str(request.get("database") or ""))
         if action == "ddl":
             return load_ddl(str(request.get("name") or ""), str(request.get("database") or ""))
+        if action == "info":
+            return load_table_info(str(request.get("name") or ""), str(request.get("database") or ""))
+        if action == "object-ddl":
+            return load_object_ddl(str(request.get("kind") or ""), str(request.get("name") or ""),
+                                   str(request.get("database") or ""))
         if action == "schema-columns":
             return schema_columns(str(request.get("database") or ""))
+        if action == "erd":
+            return load_erd(str(request.get("database") or ""))
         if action == "page":
             return read_page(int(request.get("set") or 0), int(request.get("offset") or 0),
                              int(request.get("limit") or KEEP_PAGE))

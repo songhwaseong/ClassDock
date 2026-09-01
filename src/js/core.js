@@ -2531,8 +2531,14 @@
     })
   };
 
-  function transformEditorLines(value, selectionStart, selectionEnd, action) {
+  // commentToken: 줄 주석 표시. 편집기가 언어에 맞는 값을 넘긴다(파이썬 "#", 자바스크립트 "//", SQL "--").
+  // 넘기지 않으면 예전 동작 그대로 "#" 이다.
+  function transformEditorLines(value, selectionStart, selectionEnd, action, commentToken) {
     const text = String(value || "");
+    const marker = String(commentToken || "#");
+    const markerEscaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const commentedRe = new RegExp("^[ \\t]*" + markerEscaped);
+    const stripRe = new RegExp("^" + markerEscaped + " ?");
     const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
     const end = Math.max(start, Math.min(Number(selectionEnd) || 0, text.length));
     const lines = text.split("\n");
@@ -2580,19 +2586,20 @@
       const edits = new Map();
       const nonBlank = [];
       for (let i = first; i <= last; i++) if (lines[i].trim()) nonBlank.push(i);
-      const uncomment = nonBlank.length > 0 && nonBlank.every((i) => /^[ \t]*#/.test(lines[i]));
+      const uncomment = nonBlank.length > 0 && nonBlank.every((i) => commentedRe.test(lines[i]));
       for (let i = first; i <= last; i++) {
         const line = lines[i];
         if (!line.trim() && (first !== last || uncomment)) continue;
         const indent = (line.match(/^[ \t]*/) || [""])[0].length;
         if (uncomment) {
-          const match = line.slice(indent).match(/^# ?/);
+          const match = line.slice(indent).match(stripRe);
           if (!match) continue;
           lines[i] = line.slice(0, indent) + line.slice(indent + match[0].length);
           edits.set(i, { column: indent, removed: match[0].length, added: 0 });
         } else {
-          lines[i] = line.slice(0, indent) + "# " + line.slice(indent);
-          edits.set(i, { column: indent, removed: 0, added: 2 });
+          const inserted = marker + " ";
+          lines[i] = line.slice(0, indent) + inserted + line.slice(indent);
+          edits.set(i, { column: indent, removed: 0, added: inserted.length });
         }
       }
       const mapPosition = (originalOffset) => {
