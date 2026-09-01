@@ -578,6 +578,9 @@ const MNMusicAudio = (() => {
     if (typeof state.onNote === "function" && state.currentId !== null) state.onNote(null);
     if (typeof state.onCount === "function" && state.countCurrent !== null) state.onCount(null);
     if (typeof state.onEnd === "function") state.onEnd(!!completed);
+    if (typeof MNDiagnostics !== "undefined") MNDiagnostics.info("music_playback_end", "악보 재생이 끝났습니다.", {
+      completed:!!completed, lastMeasure:state.currentMeasure || 0, remainingNodes:nodes.length
+    });
   }
 
   /* 화면 강조가 따라갈 현재 음표를 증분으로 찾는다.
@@ -663,11 +666,16 @@ const MNMusicAudio = (() => {
       beatsPerMeasure, beatSeconds, metronome:!!options.metronome, loop:!!options.loop,
       nodes:[], next:0, nextBeat:0, nextDrum:0, nextBass:0, nextChord:0,
       followNext:0, followActive:[], followElapsed:Number.NEGATIVE_INFINITY,
-      timer:0, raf:0, currentId:null, paused:false, pump:null, follow:null,
+      timer:0, raf:0, currentId:null, currentMeasure:0, paused:false, pump:null, follow:null,
       onNote:options.onNote, onCount:options.onCount, onEnd:options.onEnd,
       onPause:options.onPause, onResume:options.onResume
     };
     live = state;
+    if (typeof MNDiagnostics !== "undefined") MNDiagnostics.info("music_playback_start", "악보 재생을 시작했습니다.", {
+      totalSeconds:Math.round(timeline.totalSeconds * 10) / 10,
+      measures:timeline.measures ? timeline.measures.length : (sheet && sheet.measures ? sheet.measures.length : 0),
+      melodyEvents:timeline.events.length, loop:state.loop, countInBeats
+    });
 
     for (let beat = 0; beat < countInBeats; beat++){
       state.nodes.push(scheduleMetronomeClick(target, master,
@@ -740,6 +748,7 @@ const MNMusicAudio = (() => {
       if (typeof state.onNote === "function"){
         const current = followTimelineAt(state, timeline.events, elapsed);
         const id = current ? current.id : null;
+        state.currentMeasure = current && Number(current.measure) || state.currentMeasure || 0;
         if (id !== state.currentId){ state.currentId = id; state.onNote(current); }
       }
       if (live === state && !state.paused && typeof requestAnimationFrame === "function"){
@@ -768,6 +777,9 @@ const MNMusicAudio = (() => {
     }
     if (live !== state) return false;
     if (typeof state.onPause === "function") state.onPause();
+    if (typeof MNDiagnostics !== "undefined") MNDiagnostics.info("music_playback_pause", "악보 재생을 일시정지했습니다.", {
+      measure:state.currentMeasure || 0, scheduledNodes:state.nodes.length
+    });
     return true;
   }
 
@@ -782,6 +794,9 @@ const MNMusicAudio = (() => {
     state.paused = false;
     startTimers(state);
     if (typeof state.onResume === "function") state.onResume();
+    if (typeof MNDiagnostics !== "undefined") MNDiagnostics.info("music_playback_resume", "악보 재생을 이어서 시작했습니다.", {
+      measure:state.currentMeasure || 0, scheduledNodes:state.nodes.length
+    });
     return true;
   }
 
@@ -797,6 +812,18 @@ const MNMusicAudio = (() => {
 
   function paused(){
     return !!(live && live.paused);
+  }
+
+  function diagnosticState(){
+    if (!live) return { playing:false, previewNodes:previewNodes.length, audioContextState:ctx && ctx.state || "none" };
+    const elapsed = ctx ? Math.max(0, ctx.currentTime - live.startAt) : 0;
+    return {
+      playing:true, paused:!!live.paused, loop:!!live.loop,
+      measure:live.currentMeasure || 0, eventId:live.currentId || "",
+      elapsedSeconds:Math.round(elapsed * 10) / 10,
+      scheduledNodes:live.nodes.length, previewNodes:previewNodes.length,
+      audioContextState:ctx && ctx.state || "none"
+    };
   }
 
   // 음표 또는 화음 미리듣기 — 도구상자·음표 클릭에서 쓴다.
@@ -987,7 +1014,7 @@ const MNMusicAudio = (() => {
   }
 
   return {
-    play, pause, resume, stop, playing, paused, supported, previewNote, cancelPreview, renderWav, encodeWav, mixPracticeTrack,
+    play, pause, resume, stop, playing, paused, diagnosticState, supported, previewNote, cancelPreview, renderWav, encodeWav, mixPracticeTrack,
     scheduleInto, scheduleSynthNote, disconnectNode, cleanupFinishedNodes,
     scheduleMetronomeClick, scheduleDrumHit, scheduleDrumsInto, setVolume, getVolume, setMuted, muted,
     followTimelineAt,
@@ -997,3 +1024,7 @@ const MNMusicAudio = (() => {
     ADSR, MASTER_GAIN, SYNTH_GAIN, PIANO_RELEASE, GUITAR_RELEASE
   };
 })();
+
+if (typeof MNDiagnostics !== "undefined"){
+  MNDiagnostics.registerContext("musicAudio", () => MNMusicAudio.diagnosticState());
+}

@@ -1878,6 +1878,11 @@ static class ClassDockProgram
     static void Main()
     {
         if (ClassDockSshTerminal.TryRunAskPassHelper()) return;
+        AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs args)
+        {
+            Exception error = args.ExceptionObject as Exception;
+            if (error != null) ClassDockLauncher.RecordLauncherFatal(error);
+        };
         ClassDockLauncher.Run();
     }
 }

@@ -139,6 +139,18 @@ class ClassDockLauncher
     static readonly string AppStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ClassDock", "app-state.json");
+    // 브라우저 화면이 멈추거나 비정상 종료된 뒤에도 다음 실행에서 원인을 볼 수 있는 공통 진단 로그.
+    // 문서 본문은 브라우저 로거에서 제외하고, 런처는 크기 제한·순환 보관만 맡는다.
+    static readonly string DiagnosticsDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ClassDock", "logs");
+    static readonly string DiagnosticsLogPath = Path.Combine(DiagnosticsDir, "events.jsonl");
+    static readonly string DiagnosticsSessionPath = Path.Combine(DiagnosticsDir, "session.json");
+    static readonly object DiagnosticsLock = new object();
+    const int DiagnosticsEventMaxBytes = 32 * 1024;
+    const int DiagnosticsSessionMaxBytes = 16 * 1024;
+    const long DiagnosticsLogMaxBytes = 4L * 1024 * 1024;
+    const int DiagnosticsArchiveCount = 2;
     static readonly string NpmPackageCachePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ClassDock", "js-npm-packages");
@@ -836,6 +848,7 @@ class ClassDockLauncher
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
             if (path.StartsWith("/app-state", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/diagnostics/", StringComparison.Ordinal)) return true;
             if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec"
                 || path == "/save-file" || path == "/save-file-exists") return true;
             if (path == "/open-save-folder" || path == "/open-file-folder" || path == "/choose-save-folder") return true;
@@ -869,6 +882,7 @@ class ClassDockLauncher
             if (path.StartsWith("/ssh-file-job?", StringComparison.Ordinal)
                 || path.StartsWith("/ssh-file-content?", StringComparison.Ordinal)) return true;
             if (path == "/workspace-load") return true;
+            if (path.StartsWith("/diagnostics/", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/exam-receive-status", StringComparison.Ordinal)) return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
             if (path == "/launcher-config") return true;
@@ -1487,6 +1501,63 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("state-save-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/diagnostics/events", StringComparison.Ordinal))
+                {
+                    int limit;
+                    if (!int.TryParse(QueryValue(path, "limit"), out limit)) limit = 500;
+                    byte[] json = Encoding.UTF8.GetBytes(LoadDiagnosticEvents(limit));
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", json);
+                }
+                else if (method == "POST" && path == "/diagnostics/events")
+                {
+                    try
+                    {
+                        AppendDiagnosticEvent(body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("diagnostic-event-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path == "/diagnostics/session")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(LoadDiagnosticSession()));
+                }
+                else if (method == "POST" && path == "/diagnostics/session")
+                {
+                    try
+                    {
+                        SaveDiagnosticSession(body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("diagnostic-session-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path == "/diagnostics/clear")
+                {
+                    ClearDiagnosticEvents();
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path == "/diagnostics/open-folder")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    try
+                    {
+                        OpenDiagnosticsFolder();
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(DiagnosticsDir));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("open-diagnostics-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (path == "/ping")
@@ -2857,6 +2928,133 @@ class ClassDockLauncher
             if (File.Exists(AppStatePath)) File.Delete(AppStatePath);
             File.Move(tmp, AppStatePath);
         }
+    }
+
+    static string DiagnosticJsonBody(byte[] body, int maxBytes)
+    {
+        if (body == null || body.Length == 0 || body.Length > maxBytes) throw new InvalidDataException("diagnostic-size");
+        string json = Encoding.UTF8.GetString(body).Trim();
+        if (json.Length < 2 || json[0] != '{' || json[json.Length - 1] != '}')
+            throw new InvalidDataException("diagnostic-json");
+        // JSONL 한 줄 형식을 지킨다. JSON.stringify가 만든 문자열 안 줄바꿈은 이미 \\n 으로 이스케이프된다.
+        if (json.IndexOf('\r') >= 0 || json.IndexOf('\n') >= 0) throw new InvalidDataException("diagnostic-line");
+        return json;
+    }
+
+    static void RotateDiagnosticLogsIfNeeded(int incomingBytes)
+    {
+        long current = File.Exists(DiagnosticsLogPath) ? new FileInfo(DiagnosticsLogPath).Length : 0;
+        if (current + incomingBytes <= DiagnosticsLogMaxBytes) return;
+        string oldest = DiagnosticsLogPath + "." + DiagnosticsArchiveCount;
+        if (File.Exists(oldest)) File.Delete(oldest);
+        for (int index = DiagnosticsArchiveCount - 1; index >= 1; index--)
+        {
+            string from = DiagnosticsLogPath + "." + index;
+            string to = DiagnosticsLogPath + "." + (index + 1);
+            if (File.Exists(from)) File.Move(from, to);
+        }
+        if (File.Exists(DiagnosticsLogPath)) File.Move(DiagnosticsLogPath, DiagnosticsLogPath + ".1");
+    }
+
+    static void AppendDiagnosticEvent(byte[] body)
+    {
+        string json = DiagnosticJsonBody(body, DiagnosticsEventMaxBytes);
+        byte[] line = Encoding.UTF8.GetBytes(json + "\n");
+        lock (DiagnosticsLock)
+        {
+            Directory.CreateDirectory(DiagnosticsDir);
+            RotateDiagnosticLogsIfNeeded(line.Length);
+            using (FileStream stream = new FileStream(DiagnosticsLogPath, FileMode.Append, FileAccess.Write, FileShare.Read))
+                stream.Write(line, 0, line.Length);
+        }
+    }
+
+    static void SaveDiagnosticSession(byte[] body)
+    {
+        string json = DiagnosticJsonBody(body, DiagnosticsSessionMaxBytes);
+        lock (DiagnosticsLock)
+        {
+            Directory.CreateDirectory(DiagnosticsDir);
+            string tmp = DiagnosticsSessionPath + ".tmp";
+            File.WriteAllText(tmp, json, new UTF8Encoding(false));
+            if (File.Exists(DiagnosticsSessionPath)) File.Delete(DiagnosticsSessionPath);
+            File.Move(tmp, DiagnosticsSessionPath);
+        }
+    }
+
+    static string LoadDiagnosticSession()
+    {
+        lock (DiagnosticsLock)
+        {
+            try { return File.Exists(DiagnosticsSessionPath) ? File.ReadAllText(DiagnosticsSessionPath, Encoding.UTF8) : "{}"; }
+            catch { return "{}"; }
+        }
+    }
+
+    static string LoadDiagnosticEvents(int limit)
+    {
+        limit = Math.Max(1, Math.Min(1000, limit));
+        List<string> newest = new List<string>();
+        lock (DiagnosticsLock)
+        {
+            for (int archive = 0; archive <= DiagnosticsArchiveCount && newest.Count < limit; archive++)
+            {
+                string path = archive == 0 ? DiagnosticsLogPath : DiagnosticsLogPath + "." + archive;
+                if (!File.Exists(path)) continue;
+                string[] lines;
+                try { lines = File.ReadAllLines(path, Encoding.UTF8); }
+                catch { continue; }
+                for (int index = lines.Length - 1; index >= 0 && newest.Count < limit; index--)
+                {
+                    string line = (lines[index] ?? "").Trim();
+                    if (line.Length >= 2 && line[0] == '{' && line[line.Length - 1] == '}') newest.Add(line);
+                }
+            }
+        }
+        newest.Reverse();
+        return "[" + string.Join(",", newest.ToArray()) + "]";
+    }
+
+    static void ClearDiagnosticEvents()
+    {
+        lock (DiagnosticsLock)
+        {
+            for (int archive = 0; archive <= DiagnosticsArchiveCount; archive++)
+            {
+                string path = archive == 0 ? DiagnosticsLogPath : DiagnosticsLogPath + "." + archive;
+                try { if (File.Exists(path)) File.Delete(path); } catch { }
+            }
+        }
+    }
+
+    static void OpenDiagnosticsFolder()
+    {
+        Directory.CreateDirectory(DiagnosticsDir);
+        Process.Start(new ProcessStartInfo { FileName = DiagnosticsDir, UseShellExecute = true });
+    }
+
+    public static void RecordLauncherFatal(Exception error)
+    {
+        try
+        {
+            string message = FlattenMessage(error);
+            string[] privateRoots = {
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+            foreach (string value in privateRoots)
+                if (!string.IsNullOrEmpty(value)) message = message.Replace(value, "[경로]");
+            if (message.Length > 1200) message = message.Substring(0, 1200) + "…";
+            string json = "{\"version\":1,\"id\":" + JsonString("launcher-" + DateTime.UtcNow.Ticks)
+                + ",\"sessionId\":\"launcher\",\"at\":" + JsonString(DateTime.UtcNow.ToString("o"))
+                + ",\"level\":\"error\",\"type\":\"launcher_fatal\",\"message\":"
+                + JsonString(string.IsNullOrEmpty(message) ? "ClassDock 런처 오류" : message)
+                + ",\"context\":{\"screen\":\"launcher\"},\"details\":{\"exception\":"
+                + JsonString(error == null ? "Exception" : error.GetType().Name) + "}}";
+            AppendDiagnosticEvent(Encoding.UTF8.GetBytes(json));
+        }
+        catch { }
     }
 
     // 직전 인스턴스가 기록한 포트를 읽는다(없거나 이상하면 0).

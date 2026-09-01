@@ -17,7 +17,9 @@ const MN_BACKUP_PENDING_RESTORE_KEY = "classdock-backup:pending-restore:v1";
 const MN_BACKUP_LOCAL_ONLY_KEYS = [
   MN_BACKUP_ACTIVE_TAB_KEY,
   "mnScreensaverVideoNames",
-  "mnScreensaverVideoName"
+  "mnScreensaverVideoName",
+  "classdock-diagnostics:events:v1",
+  "classdock-diagnostics:session:v1"
 ];
 
 function mnBackupIsLocalOnlyKey(key){

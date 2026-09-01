@@ -475,6 +475,10 @@ function setActiveDoc(id){
   updateDocEmptyState();
   state = d;
   viewer = d.el;
+  if (typeof MNDiagnostics !== "undefined") MNDiagnostics.info("document_active", "활성 화면이 바뀌었습니다.", {
+    kind:d.kind || "document", extension:(String(d.name || d.fileName || "").match(/\.([a-z0-9]{1,12})$/i) || [])[1] || "",
+    dirty:!!d.dirty, openDocuments:docs.length
+  });
   byId("tools").hidden = (d.kind !== "pdf");
   byId("officeTools").hidden = (d.kind === "pdf");
   byId("btnPages").classList.toggle("primary", !!(d.kind === "pdf" && d.pagePanelOpen));

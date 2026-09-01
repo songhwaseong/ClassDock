@@ -16,6 +16,7 @@
   },
   "localScripts": [
     "state-sync.js",
+    "diagnostics.js",
     "theme.js",
     "i18n.js",
     "lazy.js",
@@ -108,6 +109,7 @@
       "name": "bootstrap",
       "scripts": [
         "state-sync.js",
+        "diagnostics.js",
         "theme.js",
         "i18n.js",
         "lazy.js",

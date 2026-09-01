@@ -4,6 +4,17 @@
 function wire(){
   setupSingleTab();          // 같은 앱이 여러 탭/창으로 동시에 떠 자동저장이 충돌하지 않게 — 한 번에 한 창만 활성
   setupWorkspaceUi();        // 상단 작업공간 전환·생성·관리
+  if (typeof MNDiagnostics !== "undefined"){
+    MNDiagnostics.wireSettings();
+    let abnormalShown = false;
+    const showPreviousAbnormal = () => {
+      if (abnormalShown || !MNDiagnostics.previousAbnormal()) return;
+      abnormalShown = true;
+      if (typeof toast === "function") toast("직전 실행이 정상 종료되지 않았습니다. 설정 → 진단에서 마지막 기록을 확인할 수 있어요.", 5200, { type:"warning" });
+    };
+    window.addEventListener("mndiagnosticsabnormal", showPreviousAbnormal);
+    setTimeout(showPreviousAbnormal, 800);
+  }
   // 보기 전용 화면(PDF·한글·PPT·텍스트 보기)에서 고른 글자의 우클릭 메뉴 — 문서 영역에서 한 번만 받는다.
   if (typeof installViewSelectionContextMenu === "function") installViewSelectionContextMenu();
   wireScratchpad();
@@ -18,6 +29,7 @@ function wire(){
     const setServerStatus = (ok) => {
       const wrap = byId("serverStatus"), text = byId("serverStatusText"), settings = byId("settingsOpen");
       if (!wrap || !text || !settings || closed) return;
+      const changed = lastServerOk !== null && lastServerOk !== !!ok;
       lastServerOk = !!ok;
       wrap.hidden = false;
       wrap.classList.toggle("ok", ok);
@@ -27,6 +39,10 @@ function wire(){
       const settingsLabel = typeof t === "function" ? t("설정") : "설정", translatedDetail = typeof t === "function" ? t(detail) : detail;
       settings.title = settingsLabel + " · " + translatedDetail;
       settings.setAttribute("aria-label", settings.title);
+      if (changed && typeof MNDiagnostics !== "undefined"){
+        if (ok) MNDiagnostics.info("local_server_reconnected", "로컬 서버 연결이 복구되었습니다.");
+        else MNDiagnostics.warn("local_server_disconnected", "로컬 서버 연결이 끊겼습니다.");
+      }
     };
     const syncServerLanguage = () => { if (lastServerOk !== null) setServerStatus(lastServerOk); };
     const beat = () => {

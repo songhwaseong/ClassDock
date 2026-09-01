@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ClassDock</title>
 <script src="src/js/state-sync.js"></script>
+<script src="src/js/diagnostics.js"></script>
 <script src="src/js/theme.js"></script>
 <script src="src/js/i18n.js"></script>
 <link rel="stylesheet" href="src/styles.css">
@@ -577,6 +578,7 @@
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="pet">펫</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="screensaver">대기 화면</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="shortcut">단축키</button>
+      <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="diagnostics">진단</button>
     </div>
 
     <div class="settings-section" data-settings-panel="general" role="tabpanel">
@@ -713,6 +715,27 @@
         <div class="shortcut-settings-head"><div><strong>악보 자판</strong><small>계이름과 자판 작곡 도구를 원하는 키로 설정합니다. 계이름 키는 따라치기·음감 테스트에도 함께 적용됩니다.</small></div><button class="btn" id="settingsResetMusicKeyboard" type="button">기본값 복원</button></div>
         <div id="musicKeyboardSettingsList" class="shortcut-settings-list music-keyboard-settings-list"></div>
         <div id="musicKeyboardSettingsError" class="shortcut-settings-error" role="alert" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div class="settings-section diagnostics-settings" data-settings-panel="diagnostics" role="tabpanel" hidden>
+      <p class="settings-hint">오류와 마지막 정상 화면 상태를 이 컴퓨터에만 기록합니다. 문서 본문·코드·API 키·개인 경로는 로그에서 제외됩니다.</p>
+      <div class="diagnostic-abnormal" id="diagnosticAbnormal" role="alert" hidden></div>
+      <div class="diagnostic-toolbar">
+        <select id="diagnosticLevelFilter" class="pw-input" aria-label="진단 로그 수준"><option value="">모든 수준</option><option value="error">오류</option><option value="warn">경고</option><option value="info">정보</option></select>
+        <select id="diagnosticScreenFilter" class="pw-input" aria-label="진단 로그 화면"><option value="">모든 화면</option></select>
+        <input id="diagnosticSearch" class="pw-input diagnostic-search" type="search" placeholder="종류·메시지 검색" aria-label="진단 로그 검색">
+        <button class="btn" id="diagnosticRefresh" type="button">새로고침</button>
+      </div>
+      <div class="diagnostic-status" id="diagnosticStatus" aria-live="polite">진단 로그를 읽는 중…</div>
+      <div class="diagnostic-log-list" id="diagnosticLogList"></div>
+      <p class="diagnostic-empty" id="diagnosticEmpty">조건에 맞는 진단 기록이 없습니다.</p>
+      <div class="diagnostic-actions">
+        <button class="btn" id="diagnosticCopy" type="button">로그 복사</button>
+        <button class="btn" id="diagnosticSave" type="button">파일로 저장</button>
+        <button class="btn" id="diagnosticOpenFolder" type="button">로그 폴더 열기</button>
+        <span class="spacer"></span>
+        <button class="btn danger" id="diagnosticClear" type="button">전체 삭제</button>
       </div>
     </div>
 

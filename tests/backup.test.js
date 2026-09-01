@@ -111,15 +111,17 @@ test("백업 ZIP 은 동기 JSZip 2.6.1 대신 비동기 3.x 를 먼저 쓴다",
   assert.match(backup, /zip\.generateAsync\(\{ type:"blob", compression:"STORE" \}/);
 });
 
-test("화면보호기 영상 이름과 활성 창 표시는 백업에서 빠진다", () => {
+test("화면보호기 영상 이름·활성 창·이 PC 진단 로그는 백업에서 빠진다", () => {
   const screensaver = fs.readFileSync(path.join(__dirname, "..", "src/js/screensaver.js"), "utf8");
   // screensaver.js 의 실제 키 이름과 목록이 갈라지면 조용히 다시 새는 것을 막는다.
   assert.match(screensaver, /SS_NAMES_KEY = "mnScreensaverVideoNames"/);
   assert.match(screensaver, /SS_NAME_KEY = "mnScreensaverVideoName"/);
   assert.deepEqual(MN_BACKUP_LOCAL_ONLY_KEYS,
-    ["classdock:active-tab", "mnScreensaverVideoNames", "mnScreensaverVideoName"]);
+    ["classdock:active-tab", "mnScreensaverVideoNames", "mnScreensaverVideoName",
+      "classdock-diagnostics:events:v1", "classdock-diagnostics:session:v1"]);
   assert.ok(mnBackupIsLocalOnlyKey("mnScreensaverVideoNames"));
   assert.ok(mnBackupIsLocalOnlyKey("classdock-backup:pending-restore:v1"));
+  assert.ok(mnBackupIsLocalOnlyKey("classdock-diagnostics:events:v1"));
   assert.ok(!mnBackupIsLocalOnlyKey("classdock-tabs:v1"));   // 탭 구성은 백업된다
 });
 
