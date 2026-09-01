@@ -42,7 +42,16 @@ test("접속 문서는 비밀번호를 직렬화하지 않는다", () => {
   assert.ok(!/hunter2/.test(text), "저장 내용에 비밀번호가 들어가면 안 된다");
   assert.ok(!/password|passwd/i.test(text), "저장 내용에 비밀번호 필드가 있으면 안 된다");
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(),
-    ["classdock", "color", "database", "driver", "host", "port", "readOnly", "sql", "user", "version"]);
+    ["autoCommit", "classdock", "color", "database", "driver", "host", "port", "readOnly", "sql", "user", "version"]);
+});
+
+test("자동 커밋은 기본으로 켜져 있고 끈 상태만 문서에 남는다", () => {
+  assert.equal(client.parseProfile("{}").autoCommit, true, "자동 커밋이 기본값이어야 한다");
+  assert.equal(client.parseProfile(JSON.stringify({ autoCommit: false })).autoCommit, false);
+  // 아는 값이 아니면 기본값(켜짐)으로 둔다 — 모르는 값 때문에 수동 커밋에 갇히면 안 된다.
+  assert.equal(client.parseProfile(JSON.stringify({ autoCommit: "no" })).autoCommit, true);
+  const manual = client.parseProfile(JSON.stringify({ autoCommit: false }));
+  assert.equal(JSON.parse(client.serializeProfile(manual)).autoCommit, false);
 });
 
 test("잘못된 접속 문서는 기본값으로 안전하게 읽힌다", () => {
@@ -631,6 +640,33 @@ test("읽기 전용은 안내 문구가 아니라 서버가 건다", () => {
   assert.match(worker, /1792: "read-only"/);
 });
 
+test("수동 커밋 모드는 워커가 쥔 커넥션 하나에서만 성립한다", () => {
+  // 자동 커밋 여부는 접속 요청이 정한다(예전처럼 autocommit=True 로 고정하지 않는다).
+  assert.match(worker, /autocommit=auto_commit/);
+  // 읽기 전용 접속에는 확정할 것이 없으므로 언제나 자동 커밋이다.
+  assert.match(worker, /auto_commit = True if read_only else bool\(request\.get\("autoCommit", True\)\)/);
+  assert.match(launcher, /bool autoCommit = readOnly \|\| autoCommitText != "0";/);
+  // 커밋·롤백·자동 커밋 전환은 모두 같은 세션(같은 커넥션)으로 나간다.
+  ["commit", "rollback", "autocommit", "tx"].forEach((action) => {
+    assert.match(worker, new RegExp('if action == "' + action + '":'));
+  });
+  assert.match(launcher, /path\.StartsWith\("\/db-tx\?"/);
+});
+
+test("커밋하지 않은 변경은 화면이 짐작하지 않고 워커가 알려 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 쿼리·커밋·롤백 응답에 실려 오는 상태를 그대로 받는다.
+  assert.match(worker, /def tx_state\(\):/);
+  assert.match(worker, /"autoCommit": bool\(_state\["auto_commit"\]\), "pending": bool\(_state\["pending"\]\)/);
+  // 암묵적 커밋(DDL) 뒤에는 되돌릴 것이 남지 않으므로 미커밋 표시를 지운다.
+  assert.match(worker, /IMPLICIT_COMMIT_KEYWORDS/);
+  assert.match(source, /applyTxState\(response\.info\)/);
+  // 자동 커밋을 켜면 서버가 트랜잭션을 확정한다 — 남은 변경이 있으면 먼저 막는다.
+  assert.match(worker, /"code": "tx-pending"/);
+  // 커밋하지 않고 연결을 끊으면 서버가 롤백하므로 한 번 묻는다.
+  assert.match(source, /연결을 끊으면 모두 사라집니다/);
+});
+
 test("취소는 응답을 만들지 않고 별도 커넥션으로 KILL QUERY 를 보낸다", () => {
   assert.match(worker, /KILL QUERY/);
   // 취소가 응답을 내면 실행 중인 쿼리의 응답과 순서가 뒤섞인다.
@@ -713,8 +749,130 @@ test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고
   assert.match(source, /runQuery\(allTarget\(\)\)/);
   // 자동완성 목록이 떠 있으면 실행 단축키가 가로채지 않는다.
   assert.match(source, /if \(editor\.isCompletionOpen && editor\.isCompletionOpen\(\)\) return;/);
-  // 여러 결과 집합을 버리지 않고 탭으로 낸다.
-  assert.match(source, /resultSets = statements\.filter\(item => item && item\.kind === "rows"\)/);
+  // 여러 결과 집합을 버리지 않고 탭으로 낸다. 표가 없는 문장(INSERT·UPDATE·오류)도 탭 하나를 차지한다.
+  assert.match(source, /resultSets = \(statements \|\| \[\]\)\.filter\(item => item && item\.kind\)/);
+});
+
+test("여러 문장 실행은 중간에 멈춰도 거기까지의 결과를 보여 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 워커는 실패한 문장까지의 결과를 함께 돌려준다 — 앞의 문장은 이미 서버에서 실행됐다.
+  assert.match(worker, /failure\["statements"\] = results/);
+  assert.match(worker, /failure\["failedAt"\] = len\(results\) - 1/);
+  assert.match(worker, /entry\.update\(\{"kind": "error"/);
+  // 화면은 실패해도 결과를 지우지 않고, 멈춘 자리를 먼저 연다.
+  assert.match(source, /const partial = \(response\.info && response\.info\.statements\) \|\| \[\];/);
+  assert.match(source, /showResultSet\(failure && Number\.isInteger\(failure\.failedAt\)/);
+});
+
+test("탭 이름은 어느 문장의 결과인지 밝히고, 예산에 밀린 결과는 그렇다고 적는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 결과 1·결과 2 만으로는 어느 쿼리인지 알 수 없다.
+  assert.match(source, /const tabLabel = \(entry, index\) =>/);
+  assert.match(source, /previewOf\(entry\.sql \|\| "", 34\)/);
+  // 앞의 결과가 셀 예산을 다 써서 못 실은 것과 "데이터가 없다"를 구분한다.
+  assert.match(worker, /if not page\["rows"\] and len\(kept_rows\):/);
+  assert.match(worker, /entry\["budgetExhausted"\] = True/);
+  assert.match(source, /entry\.budgetExhausted/);
+});
+
+test("SQL 파일 가져오기는 서버를 거치지 않고 인코딩을 판정해 읽는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 파일 선택은 브라우저 입력으로 끝난다 — 런처에 파일을 올리는 경로가 생기면 안 된다.
+  assert.match(source, /sqlFileInput\.accept = "\.sql,\.txt,text\/plain";/);
+  assert.doesNotMatch(source, /FormData/);
+  // 한글 주석이 든 CP949 덤프가 깨지지 않게 코어의 판정기를 그대로 쓴다.
+  assert.match(source, /typeof detectTextEncoding === "function" \? detectTextEncoding\(bytes\) : null/);
+  // 쓰던 SQL 을 말없이 덮어쓰지 않는다.
+  assert.match(source, /editor\.getValue\(\)\.trim\(\) && typeof confirmDialog === "function"/);
+  // 큰 파일은 묻고, 더 큰 파일은 받지 않는다.
+  assert.match(source, /file\.size > SQL_IMPORT_MAX/);
+  assert.match(source, /file\.size > SQL_IMPORT_WARN/);
+  // DELIMITER 는 문장 나누기가 다루지 않는다는 것을 불러올 때 알린다.
+  assert.match(source, /DELIMITER/);
+});
+
+test("표 칸 고르기 셈은 스프레드시트와 DB 결과 표가 같은 모듈을 쓴다", () => {
+  const selection = require("../src/js/grid-selection.js");
+  const viewer = fs.readFileSync(path.join(root, "src", "js", "spreadsheet-viewer.js"), "utf8");
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 스프레드시트는 옛 이름을 그대로 쓰되 정의는 공용 모듈에서 받아 온다(부르는 자리를 건드리지 않는다).
+  assert.match(viewer, /gridSelectionRangeKeys: spreadsheetSelectionRangeKeys/);
+  assert.doesNotMatch(viewer, /function spreadsheetSelectionRangeKeys/);
+  assert.match(source, /MNGridSelection/);
+
+  // 4열짜리 표에서 (1,1)~(2,2) 는 네 칸이다.
+  const keys = selection.gridSelectionRangeKeys({ row1:1, row2:2, col1:1, col2:2 }, 4);
+  assert.equal(keys.size, 4);
+  assert.ok(keys.has(1 * 4 + 1) && keys.has(2 * 4 + 2));
+
+  // 이미 다 고른 범위를 Ctrl 로 다시 끌면 빼기가 된다는 판단의 근거.
+  assert.equal(selection.gridSelectionRangeCovered(keys, { row1:1, row2:2, col1:1, col2:2 }, 4), true);
+  assert.equal(selection.gridSelectionRangeCovered(keys, { row1:0, row2:2, col1:1, col2:2 }, 4), false);
+
+  const wider = selection.gridSelectionCombineKeys(keys, { row1:0, row2:0, col1:0, col2:0 }, "add", 4);
+  const bounds = selection.gridSelectionBoundsFromKeys(wider, 4);
+  assert.deepEqual([bounds.row1, bounds.row2, bounds.col1, bounds.col2], [0, 2, 0, 2]);
+  assert.equal(bounds.contiguous, false, "구멍이 있으면 사각형이 아니다");
+  assert.equal(bounds.count, 5);
+
+  // 어느 쪽을 먼저 눌렀든 같은 범위가 나온다.
+  assert.deepEqual(selection.gridSelectionRangeBetween({ row:3, col:1 }, { row:1, col:2 }),
+    { row1:1, row2:3, col1:1, col2:2 });
+});
+
+test("고른 칸은 붙여 넣기 좋은 탭 구분 글자로 옮긴다", () => {
+  const selection = require("../src/js/grid-selection.js");
+  const cells = [["1", "가", "x"], ["2", "나", "y"], ["3", "다", "z"]];
+  const keys = selection.gridSelectionRangeKeys({ row1:0, row2:1, col1:0, col2:1 }, 3);
+  assert.equal(selection.gridSelectionToText(keys, 3, (row, col) => cells[row][col]), "1\t가\n2\t나");
+  // 흩어진 선택은 사각형으로 감싸되 고르지 않은 칸은 빈칸으로 둔다 — 고르지 않은 값을 끼워 넣지 않는다.
+  const scattered = new Set([0, 3 * 1 + 1]);
+  assert.equal(selection.gridSelectionToText(scattered, 3, (row, col) => cells[row][col]), "1\t\n\t나");
+});
+
+test("결과 표는 칸 단위로 고르고 정렬은 화살표 버튼만 받는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 칸 고르기와 글자 긁기가 같은 드래그를 두고 다투지 않게 표의 글자 선택을 끈다.
+  assert.match(css, /\.db-grid\{[^}]*user-select:none/);
+  // 머리 전체가 정렬 버튼이면 열을 고를 자리가 없다 — 정렬은 별도 버튼으로 뺀다.
+  assert.match(source, /const sortButton = button\(/);
+  assert.match(source, /"db-sort-btn"/);
+  assert.match(source, /event\.target\.closest\("\.db-sort-btn"\)\) return;/);
+  assert.doesNotMatch(source, /db-sort-mark/);
+  // 셀마다 리스너를 달지 않는다(1,000행 × 20열이면 리스너가 2만 개가 된다).
+  assert.doesNotMatch(source, /td\.addEventListener/);
+  assert.match(source, /table\.addEventListener\("pointerdown"/);
+  // 왼쪽 번호 칸은 행, 컬럼명은 열, 왼쪽 위 모서리는 표 전체를 고른다.
+  assert.match(source, /return col < 0 \? \{ kind:"row", row, col:0 \} : \{ kind:"cell", row, col \};/);
+  assert.match(source, /kind:"all"/);
+  // 행이 늘면 고른 자리의 뜻이 달라지므로 더 보기는 선택을 정리한다.
+  assert.match(source, /clearGridSelection\(\);\s*\/\/ 행이 늘면/);
+});
+
+test("셀 값은 더블클릭으로 여는 창이 보여 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 클릭은 고르는 일, 더블클릭은 자세히 보는 일로 나눈다.
+  assert.match(source, /table\.addEventListener\("dblclick"/);
+  assert.match(source, /point\.kind !== "cell"/);
+  // 포인터 캡처를 쓰면 뒤따르는 마우스 이벤트가 캡처 대상(<table>)으로 가 셀을 찾지 못한다.
+  // 끌기는 document 리스너로 받고, 더블클릭은 target 대신 좌표로 셀을 찾는다.
+  assert.doesNotMatch(source, /table\.setPointerCapture/);
+  assert.match(source, /document\.addEventListener\("pointermove", onDragMove, true\)/);
+  assert.match(source, /const node = document\.elementFromPoint\(event\.clientX, event\.clientY\);/);
+  // pointerdown 에서 preventDefault 를 부르면 뒤따르는 dblclick 까지 막힌다.
+  // 글자 드래그는 CSS 가 막으므로 부르지 않는다.
+  assert.doesNotMatch(source, /event\.preventDefault\(\);\s*\/\/ 글자 드래그/);
+  assert.match(css, /\.db-grid\{[^}]*user-select:none/);
+  // 결과 아래에 늘 자리를 차지하던 패널은 사라지고 모달 카드가 그 일을 맡는다.
+  assert.doesNotMatch(source, /db-value-panel/);
+  assert.doesNotMatch(css, /\.db-value-panel\{/);
+  assert.match(source, /el\("div", "modal db-value-modal"\)/);
+  assert.match(css, /\.db-value-card\{/);
+  // Esc 는 맨 위의 창부터 닫는다 — 아래 창들이 값 창에 양보해야 엉뚱한 창이 닫히지 않는다.
+  assert.match(source, /!document\.querySelector\("\.db-table-modal,\.db-value-modal"\)/);
+  assert.match(source, /!document\.querySelector\("\.db-value-modal"\)/);
 });
 
 test("db-client.js 는 브라우저 전역 없이도 순수 함수만 노출한다", () => {

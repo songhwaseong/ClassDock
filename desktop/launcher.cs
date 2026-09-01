@@ -2478,6 +2478,27 @@ class ClassDockLauncher
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-use-failed: " + FlattenMessage(ex)));
                     }
                 }
+                else if (method == "POST" && path.StartsWith("/db-tx?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        // op = commit · rollback · autocommit(on=0|1) · state
+                        string op = QueryValue(path, "op");
+                        string request;
+                        if (op == "commit") request = "{\"action\":\"commit\"}";
+                        else if (op == "rollback") request = "{\"action\":\"rollback\"}";
+                        else if (op == "state") request = "{\"action\":\"tx\"}";
+                        else if (op == "autocommit")
+                            request = "{\"action\":\"autocommit\",\"on\":" + (QueryValue(path, "on") == "0" ? "false" : "true") + "}";
+                        else throw new InvalidOperationException("db-bad-tx-op");
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-tx-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "GET" && path.StartsWith("/db-page?", StringComparison.Ordinal))
                 {
                     try
@@ -5313,6 +5334,7 @@ class ClassDockLauncher
         string user = DbCheckField(ReadBundleString(body, ref pos), "user", 128, false);
         string password = ReadBundleString(body, ref pos);
         string readOnlyText = pos < body.Length ? ReadBundleString(body, ref pos) : "1";
+        string autoCommitText = pos < body.Length ? ReadBundleString(body, ref pos) : "1";
         if (pos != body.Length) throw new Exception("bad-db-request");
         if (!DbHostRe.IsMatch(host)) throw new Exception("db-bad-host");
         if (password.Length > 1024) throw new Exception("db-long-password");
@@ -5320,6 +5342,7 @@ class ClassDockLauncher
         if (!int.TryParse(portText.Trim().Length == 0 ? "3306" : portText.Trim(), out port) || port < 1 || port > 65535)
             throw new Exception("db-bad-port");
         bool readOnly = readOnlyText != "0";
+        bool autoCommit = readOnly || autoCommitText != "0";   // 읽기 전용은 확정할 것이 없으므로 늘 자동 커밋
 
         SweepDbSessions();
         lock (DbSessionsLock) if (DbSessions.Count >= MaxDbSessions) throw new Exception("db-too-many-sessions");
@@ -5357,7 +5380,8 @@ class ClassDockLauncher
                 + ",\"database\":" + JsonString(database)
                 + ",\"user\":" + JsonString(user)
                 + ",\"password\":" + JsonString(password)
-                + ",\"readOnly\":" + (readOnly ? "true" : "false") + "}";
+                + ",\"readOnly\":" + (readOnly ? "true" : "false")
+                + ",\"autoCommit\":" + (autoCommit ? "true" : "false") + "}";
             string response = DbExchange(session, connectRequest, DbMetadataTimeoutMs);
             if (!DbResponseOk(response))
             {
@@ -5366,6 +5390,7 @@ class ClassDockLauncher
             }
             lock (DbSessionsLock) DbSessions[id] = session;
             return "{\"ok\":true,\"id\":" + JsonString(id) + ",\"readOnly\":" + (readOnly ? "true" : "false")
+                + ",\"autoCommit\":" + (autoCommit ? "true" : "false")
                 + ",\"label\":" + JsonString(session.Label) + ",\"info\":" + DbResponseBody(response) + "}";
         }
         catch

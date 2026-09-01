@@ -6427,8 +6427,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   font:inherit;font-size:12px;font-weight:700;cursor:pointer}
 .db-btn:hover{border-color:var(--accent);background:var(--panel-hover)}
 .db-btn:disabled{opacity:.55;cursor:default}
-.db-btn-primary{border-color:var(--accent);background:var(--accent);color:#fff}
-.db-btn-primary:hover{filter:brightness(1.05);background:var(--accent)}
+.db-btn.db-btn-primary{border-color:var(--accent);background:var(--accent);color:#fff;font-weight:700}
+.db-btn.db-btn-primary:hover{filter:brightness(1.05);background:var(--accent)}
 .db-btn-quiet{font-weight:500;color:var(--muted)}
 
 /* 스키마 패널 폭은 분할선으로 조절한다. 가운데 12px 열이 예전 gap 자리를 대신하므로
@@ -6492,6 +6492,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-mode-badge.db-mode-write{border-color:color-mix(in srgb,var(--danger) 55%,var(--border));
   background:color-mix(in srgb,var(--danger) 10%,var(--field));color:var(--danger)}
 .db-server-label{flex:1;min-width:0;color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 트랜잭션(자동 커밋 토글·커밋·롤백). 쓰기 허용 접속에서만 보인다. */
+.db-tx-wrap{display:flex;align-items:center;gap:6px;padding-left:8px;border-left:1px solid var(--border)}
+.db-autocommit{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px;cursor:pointer;user-select:none}
+.db-autocommit input{margin:0}
+.db-tx-badge{padding:3px 9px;border:1px solid color-mix(in srgb,#d97706 55%,var(--border));border-radius:999px;
+  background:color-mix(in srgb,#d97706 12%,var(--field));color:#b45309;font-size:11px;font-weight:700}
 
 /* 편집기는 파이썬·자바스크립트와 같은 위젯(buildCodeEditor)을 쓴다.
    .db-editor 는 높이만 정하는 그릇이고, 안쪽 .code-host 는 그 높이를 꽉 채운다.
@@ -6507,10 +6513,15 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-hdivider:hover::after,.db-hdivider.dragging::after{background:var(--accent)}
 .db-result-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .db-result-status{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.db-select-info{flex:none;padding:2px 8px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));
+  border-radius:999px;background:color-mix(in srgb,var(--accent) 10%,var(--field));color:var(--accent);
+  font-size:11px;font-weight:700;white-space:nowrap}
 .db-result-spacer{flex:1}
 .db-result{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
 .db-count-btn{margin:9px 0 0 9px}
-.db-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.db-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px;
+  user-select:none;-webkit-user-select:none}
+.db-grid:focus{outline:none}
 .db-grid th,.db-grid td{max-width:420px;padding:6px 9px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);
   background:var(--field);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .db-grid thead th{position:sticky;top:0;z-index:2;background:var(--panel-2);font-weight:700}
@@ -6558,17 +6569,28 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   color:var(--muted);font:inherit;font-size:11.5px;font-weight:700;cursor:pointer}
 .db-result-tab:hover{background:var(--panel-hover);color:var(--ink)}
 .db-result-tab.active{background:var(--panel);border-bottom-color:var(--panel);color:var(--ink)}
+/* 중간에 멈춘 실행 — 실패한 문장 탭과 요약줄을 눈에 띄게 둔다(앞의 결과는 그대로 볼 수 있다). */
+.db-result-tab-error{border-color:color-mix(in srgb,var(--danger) 55%,var(--border));color:var(--danger)}
+.db-result-tab-error.active{background:color-mix(in srgb,var(--danger) 8%,var(--panel));color:var(--danger)}
+.db-result-status.db-result-failed{color:var(--danger)}
 
 /* 셀 값 보기 — 그리드는 한 줄로 줄여 그리므로 긴 값·여러 줄 값은 여기서만 온전히 읽힌다. */
-.db-grid td{cursor:pointer}
-.db-grid td.selected{outline:2px solid var(--accent);outline-offset:-2px}
+.db-grid td{cursor:cell}
+.db-grid .db-grid-index{cursor:pointer}
+/* 고른 칸. 배경만 얹어 두어 줄무늬·NULL 표시가 그대로 비쳐 보이게 한다. */
+.db-grid td.db-cell-selected{background:color-mix(in srgb,var(--accent) 20%,var(--field))}
+.db-grid tbody tr:nth-child(even) td.db-cell-selected{background:color-mix(in srgb,var(--accent) 24%,var(--field))}
+/* 고른 범위에 걸린 머리(번호 칸·컬럼명) */
+.db-grid .db-head-selected{background:color-mix(in srgb,var(--accent) 26%,var(--panel-2));color:var(--ink)}
+.db-grid tbody tr:nth-child(even) .db-grid-index.db-head-selected{background:color-mix(in srgb,var(--accent) 26%,var(--panel-2))}
 .db-grid td.db-clipped::after{content:"⋯";margin-left:4px;padding:0 3px;border-radius:3px;
   background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);font-size:10px;font-weight:700}
-.db-value-panel{flex:none;max-height:32vh;display:flex;flex-direction:column;gap:6px;padding:10px 12px;
-  border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+/* 셀 값 창 — 표는 값을 한 줄로 줄여 그리므로 긴 값·여러 줄 값은 여기서만 온전히 읽힌다.
+   결과 아래에 늘 자리를 차지하던 패널을 모달로 옮겼다(카드 이동·크기 조절은 app.js 공용 규칙). */
+.db-value-card{width:min(760px,92vw);max-height:82vh;display:flex;flex-direction:column;gap:8px;padding:12px 14px}
 .db-value-head{display:flex;align-items:center;gap:8px}
 .db-value-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
-.db-value-body{flex:1;min-height:0;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
+.db-value-body{flex:1;min-height:120px;margin:0;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:7px;
   background:var(--field);color:var(--ink);font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
 .db-value-body.db-value-null{color:var(--muted);font-style:italic}
@@ -6628,7 +6650,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-erd-tool-btn{width:29px}.db-erd-tool-btn .ui-icon{width:15px;height:15px}.db-erd-zoom-label{width:54px}
 .db-erd-tool-btn:hover,.db-erd-zoom-label:hover{border-color:var(--accent);color:var(--accent)}
 .db-erd-body{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--panel)}
-.db-erd-viewport{position:absolute;inset:0;overflow:hidden;cursor:grab;touch-action:none;background-color:var(--field);
+.db-erd-viewport{position:absolute;inset:0;overflow:hidden;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;background-color:var(--field);
   background-image:radial-gradient(circle,color-mix(in srgb,var(--muted) 24%,transparent) 1px,transparent 1px);background-size:20px 20px}
 .db-erd-viewport:focus{outline:2px solid color-mix(in srgb,var(--accent) 60%,transparent);outline-offset:-2px}.db-erd-viewport.panning{cursor:grabbing}
 .db-erd-loading{position:absolute;left:50%;top:50%;margin:0;transform:translate(-50%,-50%);color:var(--muted);font-size:13px}
@@ -6766,8 +6788,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-more-note{color:var(--muted);font-size:11.5px}
 
 /* 헤더 클릭 정렬 — 클라이언트 정렬이 아니라 ORDER BY 를 고쳐 다시 묻는다. */
-.db-grid th.db-sortable{cursor:pointer;user-select:none}
+.db-grid th{cursor:pointer}
 .db-grid th.db-sortable:hover{background:var(--panel-hover)}
-.db-sort-mark{margin-left:6px;color:var(--muted);font-size:9.5px}
+/* 정렬 버튼 — 머리를 눌러 열을 고르는 동작과 자리를 나눈다. 작으면 못 누르므로 여백을 넉넉히 준다. */
+.db-sort-btn{margin-left:6px;padding:1px 5px;border:1px solid transparent;border-radius:5px;
+  background:transparent;color:var(--muted);font:inherit;font-size:10px;line-height:1.4;cursor:pointer}
+.db-sort-btn:hover{border-color:var(--accent);background:var(--panel);color:var(--accent)}
+.db-sort-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .db-grid th.db-sorted{color:var(--accent)}
-.db-grid th.db-sorted .db-sort-mark{color:var(--accent)}
+.db-grid th.db-sorted .db-sort-btn{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}

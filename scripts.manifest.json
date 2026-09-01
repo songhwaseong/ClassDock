@@ -60,6 +60,7 @@
     "office-doc-viewers.js",
     "office-replace.js",
     "docx-editor.js",
+    "grid-selection.js",
     "spreadsheet-formula.js",
     "spreadsheet-viewer.js",
     "spreadsheet-chart.js",
@@ -174,6 +175,7 @@
         "office-doc-viewers.js",
         "office-replace.js",
         "docx-editor.js",
+        "grid-selection.js",
         "spreadsheet-formula.js",
         "spreadsheet-viewer.js",
         "spreadsheet-chart.js",
@@ -303,6 +305,7 @@
       "js-runtime.js"
     ],
     "spreadsheet-viewer.js": [
+      "grid-selection.js",
       "office-doc-viewers.js",
       "documents.js",
       "code-viewer.js",
@@ -457,6 +460,7 @@
       "documents.js"
     ],
     "db-client.js": [
+      "grid-selection.js",
       "state.js",
       "documents.js",
       "file-loaders.js",
@@ -643,6 +647,15 @@
       "publicApi": "MNExchangeRate",
       "consumers": [
         "exchange-rate-ui.js"
+      ]
+    },
+    {
+      "name": "grid-selection",
+      "file": "grid-selection.js",
+      "publicApi": "MNGridSelection",
+      "consumers": [
+        "spreadsheet-viewer.js",
+        "db-client.js"
       ]
     }
   ],

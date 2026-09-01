@@ -34,14 +34,21 @@ MAX_SCHEMA_COLUMNS = 5000  # 자동완성에 싣는 최대 컬럼 수
 MAX_SCHEMA_OBJECTS = 2000  # 프로시저·함수·이벤트 등 스키마 객체별 상한
 MAX_SCHEMA_RELATIONS = 5000  # ERD 외래키 관계 상한
 
-# 첫 낱말이 이것이면 결과 집합을 기대한다. 그 밖은 영향 행 수만 보고한다.
-RESULT_KEYWORDS = ("select", "show", "describe", "desc", "explain", "with", "table", "values", "call", "analyze", "check")
 # 읽기 전용 접속에서 미리 막아 친절한 메시지를 주는 낱말. 최종 판단은 서버의 READ ONLY 트랜잭션이 한다.
 WRITE_KEYWORDS = ("insert", "update", "delete", "replace", "truncate", "drop", "create", "alter",
                   "rename", "grant", "revoke", "load", "lock", "unlock", "set", "flush", "reset", "import")
+# 수동 커밋 모드에서 "아직 커밋하지 않은 변경"으로 세는 낱말. CALL 은 안에서 무엇을 하는지 알 수 없어
+# 함께 센다(경고를 덜 내는 쪽보다 더 내는 쪽이 안전하다).
+DATA_CHANGE_KEYWORDS = ("insert", "update", "delete", "replace", "call")
+# MySQL 이 실행하는 순간 트랜잭션을 확정해 버리는 낱말(암묵적 커밋). 이 문장 뒤에는 롤백으로
+# 되돌릴 것이 남지 않으므로 "커밋하지 않은 변경" 표시도 함께 지운다.
+IMPLICIT_COMMIT_KEYWORDS = ("create", "alter", "drop", "rename", "truncate", "grant", "revoke",
+                            "flush", "reset", "lock", "unlock", "analyze", "check", "optimize",
+                            "repair", "install", "uninstall", "begin", "start")
 
 _stdout_lock = threading.Lock()
-_state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {}}
+_state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {},
+          "auto_commit": True, "pending": False}
 
 
 def write_response(payload):
@@ -269,12 +276,15 @@ def connect(request):
         "database": str(request.get("database") or "") or None,
     }
     read_only = bool(request.get("readOnly", True))
+    # 자동 커밋을 끄면 쓰기 문장이 트랜잭션에 쌓이고 commit/rollback 으로만 확정된다.
+    # 읽기 전용 접속은 쓸 것이 없으므로 언제나 자동 커밋으로 둔다.
+    auto_commit = True if read_only else bool(request.get("autoCommit", True))
     try:
         connection = driver.connect(
             host=credentials["host"], port=credentials["port"], user=credentials["user"],
             password=credentials["password"], database=credentials["database"],
             charset="utf8mb4", connect_timeout=int(request.get("connectTimeout") or 15),
-            autocommit=True,
+            autocommit=auto_commit,
         )
     except Exception as exc:                                  # noqa: BLE001 - 드라이버 예외 전부를 코드로 옮긴다
         return error_payload(exc, driver, "connect")
@@ -300,7 +310,9 @@ def connect(request):
     _state["connection"] = connection
     _state["credentials"] = credentials
     _state["read_only"] = read_only
-    return {"ok": True, "readOnly": read_only, **info}
+    _state["auto_commit"] = auto_commit
+    _state["pending"] = False
+    return {"ok": True, "readOnly": read_only, "autoCommit": auto_commit, "pending": False, **info}
 
 
 def require_connection():
@@ -357,7 +369,7 @@ def run_statements(sql, driver):
     connection = require_connection()
     statements = split_statements(sql)
     if not statements:
-        return {"ok": True, "statements": [], "ms": 0}
+        return {"ok": True, "statements": [], "ms": 0, **tx_state()}
     if _state["read_only"]:
         for statement in statements:
             keyword = first_keyword(statement)
@@ -372,34 +384,56 @@ def run_statements(sql, driver):
         # 문장이 잘려 왔으면 프런트가 ORDER BY 를 고쳐 쓸 수 없다(헤더 정렬을 끈다).
         entry = {"sql": statement[:4000], "keyword": keyword, "sqlTruncated": len(statement) > 4000}
         started = time.perf_counter()
-        with connection.cursor() as cursor:
-            affected = cursor.execute(statement)
-            if cursor.description:
-                # 한 번에 보내는 양(첫 페이지)과 "더 보기"용으로 들고 있을 양을 따로 둔다.
-                columns, kept_rows, more, clipped = read_rows(cursor, KEEP_ROWS, KEEP_CELLS)
-                width = max(1, len(columns))
-                send = max(0, min(MAX_ROWS, budget // width, len(kept_rows)))
-                budget = max(0, budget - send * width)
-                if len(kept_rows) > send or more:
-                    if len(_state["pages"]) < MAX_KEPT_SETS:
-                        _state["pages"][len(results)] = {
-                            "columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}
-                page = slice_page({"columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}, 0, send)
-                entry.update({"kind": "rows", "columns": columns, "rows": page["rows"],
-                              "truncated": page["hasMore"], "clippedCells": page["clippedCells"],
-                              "loaded": len(kept_rows), "hasMore": page["hasMore"],
-                              "serverHasMore": more, "set": len(results)})
-            else:
-                entry.update({"kind": "affected", "affected": int(affected or 0),
-                              "insertId": int(getattr(cursor, "lastrowid", 0) or 0)})
-            warnings = getattr(cursor, "_warnings", None)
-            if warnings:
-                entry["warnings"] = int(warnings)
+        try:
+            with connection.cursor() as cursor:
+                affected = cursor.execute(statement)
+                if cursor.description:
+                    # 한 번에 보내는 양(첫 페이지)과 "더 보기"용으로 들고 있을 양을 따로 둔다.
+                    columns, kept_rows, more, clipped = read_rows(cursor, KEEP_ROWS, KEEP_CELLS)
+                    width = max(1, len(columns))
+                    send = max(0, min(MAX_ROWS, budget // width, len(kept_rows)))
+                    budget = max(0, budget - send * width)
+                    if len(kept_rows) > send or more:
+                        if len(_state["pages"]) < MAX_KEPT_SETS:
+                            _state["pages"][len(results)] = {
+                                "columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}
+                    page = slice_page({"columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}, 0, send)
+                    entry.update({"kind": "rows", "columns": columns, "rows": page["rows"],
+                                  "truncated": page["hasMore"], "clippedCells": page["clippedCells"],
+                                  "loaded": len(kept_rows), "hasMore": page["hasMore"],
+                                  "serverHasMore": more, "set": len(results)})
+                    # 앞의 결과가 예산을 다 써서 한 줄도 싣지 못한 경우를 "데이터가 없다"와 구분한다.
+                    if not page["rows"] and len(kept_rows):
+                        entry["budgetExhausted"] = True
+                else:
+                    entry.update({"kind": "affected", "affected": int(affected or 0),
+                                  "insertId": int(getattr(cursor, "lastrowid", 0) or 0)})
+                warnings = getattr(cursor, "_warnings", None)
+                if warnings:
+                    entry["warnings"] = int(warnings)
+        except Exception as exc:                              # noqa: BLE001 - 드라이버 예외 전부를 코드로 옮긴다
+            # 여기까지의 문장은 이미 서버에서 실행됐다(자동 커밋이면 확정된 상태다).
+            # 실패했다고 앞의 결과까지 버리면 무엇이 반영되고 무엇이 안 됐는지 알 길이 없어진다.
+            failure = error_payload(exc, driver, "query")
+            entry.update({"kind": "error", "ms": elapsed_ms(started),
+                          "code": str(failure.get("code") or ""),
+                          "detail": str(failure.get("detail") or "")})
+            results.append(entry)
+            failure["statements"] = results
+            failure["failedAt"] = len(results) - 1
+            failure["ms"] = sum(item.get("ms", 0) for item in results)
+            failure.update(tx_state())
+            return failure
+        # 수동 커밋 모드에서만 "커밋하지 않은 변경"을 센다. 암묵적 커밋 문장은 그 표시를 지운다.
+        if not _state["auto_commit"]:
+            if keyword in IMPLICIT_COMMIT_KEYWORDS:
+                _state["pending"] = False
+            elif keyword in DATA_CHANGE_KEYWORDS:
+                _state["pending"] = True
         entry["ms"] = elapsed_ms(started)
         results.append(entry)
-        if keyword in RESULT_KEYWORDS and budget <= 0:
-            entry["budgetExhausted"] = True
-    return {"ok": True, "statements": results, "ms": sum(item.get("ms", 0) for item in results)}
+    return {"ok": True, "statements": results, "ms": sum(item.get("ms", 0) for item in results),
+            **tx_state()}
 
 
 def load_schema():
@@ -757,6 +791,45 @@ def count_table(name, database=""):
     return {"ok": True, "name": name, "rowCount": int(row[0]) if row else 0}
 
 
+def tx_state():
+    """프런트가 커밋·롤백 버튼과 미커밋 배지를 그리는 데 쓰는 상태."""
+    return {"autoCommit": bool(_state["auto_commit"]), "pending": bool(_state["pending"])}
+
+
+def set_auto_commit(request):
+    connection = require_connection()
+    wanted = bool(request.get("on", True))
+    if _state["read_only"] and not wanted:
+        return {"ok": False, "code": "read-only", "detail": "읽기 전용 접속입니다.", **tx_state()}
+    if wanted == _state["auto_commit"]:
+        return {"ok": True, **tx_state()}
+    # 자동 커밋을 켜는 순간 서버는 열려 있던 트랜잭션을 확정한다. 사용자가 모르는 사이에
+    # 커밋되지 않도록, 남은 변경이 있으면 먼저 커밋·롤백을 고르게 한다.
+    if wanted and _state["pending"]:
+        return {"ok": False, "code": "tx-pending",
+                "detail": "커밋하지 않은 변경이 있습니다.", **tx_state()}
+    connection.autocommit(wanted)
+    _state["auto_commit"] = wanted
+    if wanted:
+        _state["pending"] = False
+    return {"ok": True, **tx_state()}
+
+
+def finish_transaction(commit):
+    connection = require_connection()
+    if _state["auto_commit"]:
+        return {"ok": False, "code": "tx-auto-commit",
+                "detail": "자동 커밋 상태입니다.", **tx_state()}
+    started = time.perf_counter()
+    if commit:
+        connection.commit()
+    else:
+        connection.rollback()
+    _state["pending"] = False
+    _state["pages"] = {}
+    return {"ok": True, "committed": bool(commit), "ms": elapsed_ms(started), **tx_state()}
+
+
 def use_database(name):
     connection = require_connection()
     with connection.cursor() as cursor:
@@ -827,6 +900,15 @@ def handle(request):
             return use_database(str(request.get("name") or ""))
         if action == "query":
             return run_statements(str(request.get("sql") or ""), driver)
+        if action == "autocommit":
+            return set_auto_commit(request)
+        if action == "commit":
+            return finish_transaction(True)
+        if action == "rollback":
+            return finish_transaction(False)
+        if action == "tx":
+            require_connection()
+            return {"ok": True, **tx_state()}
         if action == "ping":
             require_connection().ping(reconnect=False)
             return {"ok": True}

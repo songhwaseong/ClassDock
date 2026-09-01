@@ -408,64 +408,17 @@ function spreadsheetModelCellEmpty(cell){
   return cell.v === "" || cell.v === null || cell.v === undefined;
 }
 
-// 행·열 헤더에서 시작한 선택은 포인터가 좁은 헤더 띠를 벗어나도 시작 축을 유지한다.
-// elementFromPoint 에 넘길 좌표를 해당 헤더 축으로 투영해 행 선택은 Y, 열 선택은 X만 따라가게 한다.
-function spreadsheetSelectionDragHitPoint(kind, point, sheetRect, cornerRect, colRect){
-  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  let x = clamp(point.x, sheetRect.left + 2, sheetRect.right - 2);
-  let y = clamp(point.y, sheetRect.top + 2, sheetRect.bottom - 2);
-  if (kind === "row"){
-    x = clamp(cornerRect.left + 2, sheetRect.left + 2, sheetRect.right - 2);
-    y = Math.max(y, Math.min(sheetRect.bottom - 2, colRect.bottom + 2));
-  } else if (kind === "col"){
-    x = Math.max(x, Math.min(sheetRect.right - 2, cornerRect.right + 2));
-    y = clamp(colRect.top + 2, sheetRect.top + 2, sheetRect.bottom - 2);
-  } else if (kind === "cell"){
-    x = Math.max(x, Math.min(sheetRect.right - 2, cornerRect.right + 2));
-    y = Math.max(y, Math.min(sheetRect.bottom - 2, colRect.bottom + 2));
-  }
-  return { x, y };
-}
-
-function spreadsheetSelectionRangeKeys(range, maxCols){
-  const keys = new Set();
-  if (!range || !(maxCols > 0)) return keys;
-  for (let r = range.row1; r <= range.row2; r++)
-    for (let c = range.col1; c <= range.col2; c++) keys.add(r * maxCols + c);
-  return keys;
-}
-
-function spreadsheetSelectionRangeCovered(keys, range, maxCols){
-  if (!keys || !range) return false;
-  for (let r = range.row1; r <= range.row2; r++)
-    for (let c = range.col1; c <= range.col2; c++)
-      if (!keys.has(r * maxCols + c)) return false;
-  return true;
-}
-
-function spreadsheetSelectionCombineKeys(baseKeys, range, mode, maxCols){
-  const result = new Set(mode === "replace" ? [] : (baseKeys || []));
-  const rangeKeys = spreadsheetSelectionRangeKeys(range, maxCols);
-  rangeKeys.forEach(key => {
-    if (mode === "subtract") result.delete(key);
-    else result.add(key);
-  });
-  return result;
-}
-
-function spreadsheetSelectionBoundsFromKeys(keys, maxCols){
-  if (!keys || !keys.size || !(maxCols > 0)) return null;
-  let row1 = Infinity, row2 = -Infinity, col1 = Infinity, col2 = -Infinity;
-  keys.forEach(key => {
-    const row = Math.floor(key / maxCols), col = key % maxCols;
-    if (row < row1) row1 = row;
-    if (row > row2) row2 = row;
-    if (col < col1) col1 = col;
-    if (col > col2) col2 = col;
-  });
-  const area = (row2 - row1 + 1) * (col2 - col1 + 1);
-  return { row1, row2, col1, col2, contiguous:keys.size === area, count:keys.size };
-}
+/* 표 선택 셈은 DB 클라이언트 결과 표와 함께 쓰므로 grid-selection.js 로 옮겼다.
+   이 파일 안의 이름(spreadsheetSelection*)은 그대로 두어 부르는 자리를 건드리지 않는다. */
+const {
+  gridSelectionDragHitPoint: spreadsheetSelectionDragHitPoint,
+  gridSelectionRangeKeys: spreadsheetSelectionRangeKeys,
+  gridSelectionRangeCovered: spreadsheetSelectionRangeCovered,
+  gridSelectionCombineKeys: spreadsheetSelectionCombineKeys,
+  gridSelectionBoundsFromKeys: spreadsheetSelectionBoundsFromKeys
+} = typeof MNGridSelection !== "undefined"
+  ? MNGridSelection
+  : require("./grid-selection.js");
 
 async function copySpreadsheetText(text){
   try { await navigator.clipboard.writeText(text); return true; }
