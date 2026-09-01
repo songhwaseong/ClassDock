@@ -63,6 +63,17 @@ test("재생 중에는 대기 화면(화면보호기)이 뜨지 않는다", () =
   assert.match(read("src/js/screensaver.js"), /querySelector\("\.is-running"\)/);
 });
 
+test("긴 악보 재생 강조는 현재 요소만 바꾸고 전체 SVG를 다시 훑지 않는다", () => {
+  assert.match(editorSource, /const playingVisualEls = new Set\(\)/);
+  assert.match(editorSource, /paintNoteVisualState\(playingVisualEls, event && event\.id, "is-playing"\)/);
+  assert.match(editorSource, /chordSymbolEls\.set\(place\.note\.id, label\)/);
+  assert.match(editorSource, /notationEls\.set\(place\.note\.id, remembered\)/);
+  const highlightBody = editorSource.match(/function highlight\(event, reveal = true\)\{([\s\S]*?)\n  \}/);
+  assert.ok(highlightBody, "재생 강조 함수가 있어야 한다");
+  assert.doesNotMatch(highlightBody[1], /noteEls\.values\(\)|querySelectorAll/,
+    "음이 바뀔 때 악보 전체 음표나 SVG를 검색하면 긴 곡 후반에서 멈춘다");
+});
+
 test("재생 바에서 박자에 맞는 드럼 스타일과 반주 음량을 고르고 악보 설정으로 저장한다", () => {
   assert.match(editorSource, /drumWrap\.append\("🥁 반주"\)/);
   assert.match(editorSource, /for \(const value of MUSIC_DRUM_STYLES\)/);
@@ -256,8 +267,9 @@ test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표
   assert.match(editorSource, /document\.createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "text"\)/);
   assert.match(editorSource, /MUSIC_SOLFEGE_LABELS\[place\.note\.step\]/);
   assert.match(editorSource, /if \(sheet\.showSolfege !== false && !note\.rest && scoreSvg\)/);
-  assert.match(editorSource, /for \(const el of solfegeEls\.values\(\)\) el\.classList\.remove\("is-selected"\)/);
-  assert.match(editorSource, /for \(const el of solfegeEls\.values\(\)\) el\.classList\.remove\("is-playing"\)/);
+  assert.match(editorSource, /solfegeEls\.get\(noteId\)/);
+  assert.match(editorSource, /paintNoteVisualState\(selectedVisualEls, selection && selection\.id, "is-selected"\)/);
+  assert.match(editorSource, /paintNoteVisualState\(playingVisualEls, event && event\.id, "is-playing"\)/);
   assert.match(editorSource, /sheet\.showSolfege = restored\.showSolfege/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-solfege\{[^}]*font-size:13px[^}]*fill:#2563eb/);
@@ -384,6 +396,15 @@ test("학생 연습 재생은 느린 속도·카운트인·메트로놈·고른 
   assert.match(editorSource, /loop:!!options\.loop/);
   assert.match(editorSource, /startPlay\(\{ from:measure, to:measure \}, \{ loop:true \}\)/);
   assert.match(editorSource, /status\.textContent = `준비 \$\{beat\} \/ \$\{total\}`/);
+});
+
+test("악보 재생은 현재 위치에서 일시정지하고 이어서 재생할 수 있다", () => {
+  assert.match(editorSource, /musicButton\("⏸ 일시정지"/);
+  assert.match(editorSource, /wasPaused \? await MNMusicAudio\.resume\(\) : await MNMusicAudio\.pause\(\)/);
+  assert.match(editorSource, /onPause:\(\) => \{ setPlaying\(true, true\); updateStatus\(\); \}/);
+  assert.match(editorSource, /onResume:\(\) => \{ setPlaying\(true, false\); updateStatus\(\); \}/);
+  assert.match(editorSource, /MNMusicAudio\.paused\(\) \? "이어서 재생" : "일시정지"/);
+  assert.match(editorSource, /const playbackNote = MNMusicAudio\.paused\(\) \? "일시정지 · " : ""/);
 });
 
 test("입력 중인 마디는 사용 박자·남은 박자·완성 여부와 해결 방법을 보여준다", () => {
@@ -726,7 +747,7 @@ test("따라치기 중에는 악보를 고칠 수 있는 길을 모두 막는다
 
 test("따라치기 표시는 다시 그려도 살아남고, 끝나면 결과를 알려 준다", () => {
   // 배율·창 크기가 바뀌면 VexFlow 가 음표 요소를 새로 만든다 — 진도 표시를 다시 칠해야 한다.
-  assert.match(editorSource, /paintSelection\(\);\s*\n\s*paintPractice\(\);/);
+  assert.match(editorSource, /paintSelection\(\);\s*\n\s*if \(playingEvent\) highlight\(playingEvent, false\);\s*\n\s*paintPractice\(\);/);
   assert.match(editorSource, /다 따라 눌렀어요! 정확도 \$\{stats\.accuracy\}%/);
   assert.match(editorSource, /petReact\(stats\.accuracy >= 90 \? "success" : "error"\)/);
   assert.match(editorSource, /musicButton\("🎯 따라치기"/);

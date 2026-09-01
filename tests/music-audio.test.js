@@ -33,25 +33,27 @@ function fakeContext(){
   const ctx = { currentTime:0, sampleRate:44100, oscillators:[], bufferSources:[], gains:[],
     filters:[], delays:[], convolvers:[] };
   ctx.createOscillator = () => {
-    const osc = { type:"", startedAt:null, stoppedAt:null, frequencyAt:[], connected:0 };
+    const osc = { type:"", startedAt:null, stoppedAt:null, frequencyAt:[], connected:0, disconnected:0 };
     osc.frequency = { setValueAtTime:(value, time) => osc.frequencyAt.push({ value, time }) };
     osc.connect = () => { osc.connected++; };
+    osc.disconnect = () => { osc.disconnected++; };
     osc.start = (time) => { osc.startedAt = time; };
     osc.stop = (time) => { osc.stoppedAt = time; };
     ctx.oscillators.push(osc);
     return osc;
   };
   ctx.createBufferSource = () => {
-    const source = { buffer:null, startedAt:null, stoppedAt:null, rates:[], connected:0 };
+    const source = { buffer:null, startedAt:null, stoppedAt:null, rates:[], connected:0, disconnected:0 };
     source.playbackRate = { setValueAtTime:(value, time) => source.rates.push({ value, time }) };
     source.connect = () => { source.connected++; };
+    source.disconnect = () => { source.disconnected++; };
     source.start = (time) => { source.startedAt = time; };
     source.stop = (time) => { source.stoppedAt = time; };
     ctx.bufferSources.push(source);
     return source;
   };
   ctx.createGain = () => {
-    const gain = { value:0, envelope:[], connected:0 };
+    const gain = { value:0, envelope:[], connected:0, disconnected:0 };
     gain.gain = {
       value:0,
       setValueAtTime:(value, time) => gain.envelope.push({ kind:"set", value, time }),
@@ -59,26 +61,30 @@ function fakeContext(){
       cancelScheduledValues:() => {}
     };
     gain.connect = () => { gain.connected++; };
+    gain.disconnect = () => { gain.disconnected++; };
     ctx.gains.push(gain);
     return gain;
   };
   ctx.createBiquadFilter = () => {
-    const filter = { type:"", connected:0, frequencies:[], resonances:[] };
+    const filter = { type:"", connected:0, disconnected:0, frequencies:[], resonances:[] };
     filter.frequency = { setValueAtTime:(value, time) => filter.frequencies.push({ value, time }) };
     filter.Q = { setValueAtTime:(value, time) => filter.resonances.push({ value, time }) };
     filter.connect = () => { filter.connected++; };
+    filter.disconnect = () => { filter.disconnected++; };
     ctx.filters.push(filter);
     return filter;
   };
   ctx.createDelay = () => {
-    const delay = { connected:0, times:[] };
+    const delay = { connected:0, disconnected:0, times:[] };
     delay.delayTime = { setValueAtTime:(value, time) => delay.times.push({ value, time }) };
     delay.connect = () => { delay.connected++; };
+    delay.disconnect = () => { delay.disconnected++; };
     ctx.delays.push(delay);
     return delay;
   };
   ctx.createConvolver = () => {
-    const convolver = { buffer:null, connected:0, connect:() => { convolver.connected++; } };
+    const convolver = { buffer:null, connected:0, disconnected:0,
+      connect:() => { convolver.connected++; }, disconnect:() => { convolver.disconnected++; } };
     ctx.convolvers.push(convolver);
     return convolver;
   };
@@ -96,9 +102,12 @@ function fakeAudioContextClass(){
       Object.assign(this, inner);
       this.destination = {};
       this.state = "running";
+      this.resumeCalls = 0;
+      this.suspendCalls = 0;
       FakeAudioContext.instances.push(this);
     }
-    resume(){ return Promise.resolve(); }
+    resume(){ this.resumeCalls++; this.state = "running"; return Promise.resolve(); }
+    suspend(){ this.suspendCalls++; this.state = "suspended"; return Promise.resolve(); }
   }
   FakeAudioContext.instances = [];
   return FakeAudioContext;
@@ -135,6 +144,109 @@ test("예약은 쉼표를 건너뛰고, 시각과 주파수가 타임라인과 �
   assert.equal(round3(first.startedAt), 10);
   assert.equal(round3(second.startedAt), 11.2);
   assert.equal(round3(third.startedAt), 11.8);
+});
+
+test("긴 악보의 화면 강조는 지난 음표를 매 프레임 다시 훑지 않는다", () => {
+  const api = loadMusicAudio();
+  const raw = Array.from({ length:2000 }, (_, index) => ({
+    id:"n" + index, start:index / 1000, duration:0.0005
+  }));
+  let indexedReads = 0;
+  const events = new Proxy(raw, {
+    get(target, key, receiver){
+      if (typeof key === "string" && /^\d+$/.test(key)) indexedReads++;
+      return Reflect.get(target, key, receiver);
+    }
+  });
+  const state = { followNext:0, followActive:[], followElapsed:Number.NEGATIVE_INFINITY };
+
+  api.MNMusicAudio.followTimelineAt(state, events, 1.5);
+  const firstPassReads = indexedReads;
+  api.MNMusicAudio.followTimelineAt(state, events, 1.6);
+  const nextFrameReads = indexedReads - firstPassReads;
+
+  assert.ok(firstPassReads > 1500, "첫 위치까지는 한 번 순서대로 찾아야 한다");
+  assert.ok(nextFrameReads < 150, `다음 프레임이 지난 음표를 다시 읽었다: ${nextFrameReads}개`);
+  assert.ok(state.followNext >= 1600 && state.followNext < 1610);
+});
+
+test("증분 화면 강조는 겹쳐 울리는 음과 반복으로 되감긴 시각을 지킨다", () => {
+  const api = loadMusicAudio();
+  const events = [
+    { id:"long", start:0, duration:2 },
+    { id:"short", start:0.5, duration:0.25 },
+    { id:"next", start:2, duration:1 }
+  ];
+  const state = { followNext:0, followActive:[], followElapsed:Number.NEGATIVE_INFINITY };
+
+  assert.equal(api.MNMusicAudio.followTimelineAt(state, events, 0.6).id, "short");
+  assert.equal(api.MNMusicAudio.followTimelineAt(state, events, 0.8).id, "long");
+  assert.equal(api.MNMusicAudio.followTimelineAt(state, events, 2.2).id, "next");
+  assert.equal(api.MNMusicAudio.followTimelineAt(state, events, 0.1).id, "long",
+    "반복 재생으로 시간이 뒤로 가면 추적 위치도 처음부터 맞춰야 한다");
+});
+
+test("일시정지는 오디오 시계를 멈추고 같은 재생 상태에서 이어 간다", async () => {
+  const AudioContext = fakeAudioContextClass();
+  let nextTimer = 1;
+  const intervals = new Set();
+  const frames = new Set();
+  const api = loadMusicAudio({
+    AudioContext,
+    setInterval:() => { const id = nextTimer++; intervals.add(id); return id; },
+    clearInterval:(id) => intervals.delete(id),
+    requestAnimationFrame:() => { const id = nextTimer++; frames.add(id); return id; },
+    cancelAnimationFrame:(id) => frames.delete(id),
+    setTimeout:(fn) => { fn(); return nextTimer++; },
+    clearTimeout:() => {}
+  });
+  const sheet = fourNotes(api);
+  sheet.timbre = "triangle";
+  api.musicActivePart(sheet).timbre = "triangle";
+  let pausedCalls = 0;
+  let resumedCalls = 0;
+
+  const handle = await api.MNMusicAudio.play(sheet, {
+    onPause:() => pausedCalls++, onResume:() => resumedCalls++
+  });
+  assert.ok(handle);
+  assert.equal(api.MNMusicAudio.playing(), true);
+  assert.equal(api.MNMusicAudio.paused(), false);
+
+  assert.equal(await api.MNMusicAudio.pause(), true);
+  assert.equal(api.MNMusicAudio.paused(), true);
+  assert.equal(AudioContext.instances[0].state, "suspended");
+  assert.equal(intervals.size, 0);
+  assert.equal(frames.size, 0);
+  assert.equal(pausedCalls, 1);
+
+  assert.equal(await api.MNMusicAudio.resume(), true);
+  assert.equal(api.MNMusicAudio.paused(), false);
+  assert.equal(AudioContext.instances[0].state, "running");
+  assert.equal(intervals.size, 1);
+  assert.equal(frames.size, 1);
+  assert.equal(resumedCalls, 1);
+  api.MNMusicAudio.stop();
+});
+
+test("끝난 음표와 신시사이저 이펙트 노드는 배열과 오디오 그래프에서 정리한다", () => {
+  const api = loadMusicAudio();
+  const ctx = fakeContext();
+  const node = api.MNMusicAudio.scheduleSynthNote(ctx, {}, 440, 0, 0.2, {
+    waveform:"sawtooth", attack:0.02, decay:0.05, sustain:0.7, release:0.1,
+    cutoff:4200, resonance:5, chorus:0.3, delay:0.2, reverb:0.2
+  }, 1);
+  const active = { stopAt:10, source:{ disconnected:0, disconnect(){ this.disconnected++; } } };
+  const nodes = [node, active];
+
+  api.MNMusicAudio.cleanupFinishedNodes(nodes, node.stopAt + 1);
+
+  assert.equal(nodes.length, 1);
+  assert.equal(nodes[0], active);
+  assert.ok(node.graphNodes.length >= 8, "코러스·딜레이·리버브 보조 노드도 추적해야 한다");
+  assert.ok(node.graphNodes.every((graphNode) => graphNode.disconnected === 1),
+    "끝난 음표에 연결된 모든 그래프 노드를 끊어야 한다");
+  assert.equal(active.source.disconnected, 0, "아직 울릴 노드는 유지해야 한다");
 });
 
 test("엔벨로프는 0에서 시작해 0으로 끝나고, 정지는 여운 뒤에 온다", () => {

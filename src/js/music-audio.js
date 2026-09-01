@@ -99,6 +99,7 @@ const MNMusicAudio = (() => {
     ...Object.values(SAMPLE_INSTRUMENTS).map((spec) => spec.release)) + 0.4; // 마지막 음의 여운까지 담을 꼬리
   const PREVIEW_SEC = 0.45;          // 음표 하나 눌렀을 때 들려줄 길이
   const MIN_NOTE_SEC = 0.03;
+  const NODE_CLEANUP_GRACE = 0.08;   // stop() 직후 연결을 끊어 마지막 소리가 잘리지 않게 둔다
 
   let ctx = null;          // 실시간 컨텍스트(첫 소리 요청 때 만든다)
   let master = null;
@@ -275,6 +276,7 @@ const MNMusicAudio = (() => {
     osc.type = settings.waveform;
     osc.frequency.setValueAtTime(frequency, start);
     const gain = target.createGain();
+    const graphNodes = [osc, gain];
     gain.gain.setValueAtTime(0, start);
     gain.gain.linearRampToValueAtTime(peak, attackEnd);
     gain.gain.linearRampToValueAtTime(peak * settings.sustain, decayEnd);
@@ -291,6 +293,7 @@ const MNMusicAudio = (() => {
       filter.Q.setValueAtTime(settings.resonance, start);
       gain.connect(filter);
       voiceOut = filter;
+      graphNodes.push(filter);
     }
     voiceOut.connect(destination);
 
@@ -305,6 +308,7 @@ const MNMusicAudio = (() => {
       chorusGain.connect(destination);
       lfo = target.createOscillator();
       const lfoDepth = target.createGain();
+      graphNodes.push(chorusDelay, chorusGain, lfo, lfoDepth);
       lfo.type = "sine";
       lfo.frequency.setValueAtTime(0.8, start);
       lfoDepth.gain.value = 0.0035 * settings.chorus;
@@ -316,6 +320,7 @@ const MNMusicAudio = (() => {
       const echo = target.createDelay(0.5);
       echo.delayTime.setValueAtTime(0.24, start);
       const echoGain = target.createGain();
+      graphNodes.push(echo, echoGain);
       echoGain.gain.value = settings.delay * 0.48;
       voiceOut.connect(echo);
       echo.connect(echoGain);
@@ -326,6 +331,7 @@ const MNMusicAudio = (() => {
       if (impulse){
         const convolver = target.createConvolver();
         const reverbGain = target.createGain();
+        graphNodes.push(convolver, reverbGain);
         convolver.buffer = impulse;
         reverbGain.gain.value = settings.reverb * 0.55;
         voiceOut.connect(convolver);
@@ -338,7 +344,7 @@ const MNMusicAudio = (() => {
     osc.start(start);
     osc.stop(releaseEnd + 0.01);
     if (lfo){ lfo.stop(stopAt + 0.01); }
-    return { source:osc, osc, gain, filter, lfo, synth:settings, stopAt };
+    return { source:osc, osc, gain, filter, lfo, graphNodes, synth:settings, stopAt };
   }
 
   function scheduleMetronomeClick(target, destination, start, accented){
@@ -484,20 +490,62 @@ const MNMusicAudio = (() => {
   function releaseNodes(nodes, at){
     for (const node of (nodes || [])){
       try {
-        node.gain.gain.cancelScheduledValues(at);
-        node.gain.gain.setValueAtTime(node.gain.gain.value, at);
-        node.gain.gain.linearRampToValueAtTime(0, at + 0.03);   // 뚝 끊으면 잡음이 나므로 짧게 내린다
+        if (node.gain && node.gain.gain){
+          node.gain.gain.cancelScheduledValues(at);
+          node.gain.gain.setValueAtTime(node.gain.gain.value, at);
+          node.gain.gain.linearRampToValueAtTime(0, at + 0.03); // 뚝 끊으면 잡음이 나므로 짧게 내린다
+        }
         const source = node.source || node.osc;
         if (source) source.stop(at + 0.04);
       } catch(_){}
     }
   }
 
+  function disconnectNode(node){
+    if (!node) return;
+    const candidates = Array.isArray(node.graphNodes) ? node.graphNodes.slice() : [];
+    candidates.push(node.source, node.osc, node.gain, node.filter, node.lfo);
+    const unique = new Set(candidates.filter(Boolean));
+    for (const graphNode of unique){
+      try { if (typeof graphNode.disconnect === "function") graphNode.disconnect(); }
+      catch(_){}
+    }
+  }
+
+  // 끝난 노드를 재생 상태 배열과 Web Audio 그래프 양쪽에서 걷는다. 배열을 제자리에서 줄여
+  // 긴 곡·반복 재생 중에도 이미 끝난 음표 수만큼 메모리가 계속 늘어나지 않게 한다.
+  function cleanupFinishedNodes(nodes, at, force){
+    if (!Array.isArray(nodes)) return [];
+    const now = Number.isFinite(at) ? at : 0;
+    let kept = 0;
+    for (const node of nodes){
+      const expired = !!force || !node || !Number.isFinite(node.stopAt)
+        || now >= node.stopAt + NODE_CLEANUP_GRACE;
+      if (expired) disconnectNode(node);
+      else nodes[kept++] = node;
+    }
+    nodes.length = kept;
+    return nodes;
+  }
+
+  function disconnectLater(nodes, target, stopped){
+    const list = Array.isArray(nodes) ? nodes.slice() : [];
+    if (!list.length) return;
+    const now = target && Number.isFinite(target.currentTime) ? target.currentTime : 0;
+    const latest = list.reduce((end, node) => Math.max(end,
+      node && Number.isFinite(node.stopAt) ? node.stopAt : now), now);
+    const delay = stopped ? 120 : Math.max(0, (latest - now + NODE_CLEANUP_GRACE) * 1000);
+    setTimeout(() => cleanupFinishedNodes(list, Number.POSITIVE_INFINITY, true), delay);
+  }
+
   // 미리듣기는 일반 악보 재생(live)과 별도 경로라 stop()에서 직접 걷어야 한다.
   // 요청 번호도 함께 올려 샘플을 읽는 중이던 Promise가 뒤늦게 소리를 내지 못하게 한다.
   function cancelPreview(){
     previewRequest++;
-    if (previewNodes.length && ctx) releaseNodes(previewNodes, ctx.currentTime);
+    if (previewNodes.length && ctx){
+      releaseNodes(previewNodes, ctx.currentTime);
+      disconnectLater(previewNodes, ctx, true);
+    }
     previewNodes = [];
   }
 
@@ -507,15 +555,60 @@ const MNMusicAudio = (() => {
     if (state.raf && typeof cancelAnimationFrame === "function"){ cancelAnimationFrame(state.raf); state.raf = 0; }
   }
 
+  function startTimers(state){
+    if (!state || live !== state || state.paused) return;
+    if (typeof state.pump === "function") state.pump();
+    if (!state.timer && typeof state.pump === "function") state.timer = setInterval(state.pump, TIMER_MS);
+    if (!state.raf && typeof state.follow === "function" && typeof requestAnimationFrame === "function"){
+      state.raf = requestAnimationFrame(state.follow);
+    }
+  }
+
   function finish(completed){
     if (!live) return;
     const state = live;
     live = null;
     clearTimers(state);
-    if (!completed && ctx) releaseNodes(state.nodes, ctx.currentTime);
+    state.paused = false;
+    const nodes = state.nodes.splice(0);
+    if (ctx){
+      if (!completed) releaseNodes(nodes, ctx.currentTime);
+      disconnectLater(nodes, ctx, !completed);
+    } else cleanupFinishedNodes(nodes, Number.POSITIVE_INFINITY, true);
     if (typeof state.onNote === "function" && state.currentId !== null) state.onNote(null);
     if (typeof state.onCount === "function" && state.countCurrent !== null) state.onCount(null);
     if (typeof state.onEnd === "function") state.onEnd(!!completed);
+  }
+
+  /* 화면 강조가 따라갈 현재 음표를 증분으로 찾는다.
+     예전에는 requestAnimationFrame 마다 타임라인의 첫 음부터 현재 시각까지 다시 훑어서,
+     긴 악보는 곡 뒤로 갈수록 같은 음표를 수천 번씩 재검사했다. 이제 새로 시작한 음표만
+     followNext 뒤에서 추가하고, 아직 울리는 소수의 음표만 남긴다. 시간이 뒤로 간 경우
+     (마디 반복·테스트에서의 탐색)에는 그때만 처음부터 다시 맞춘다. */
+  function followTimelineAt(state, events, elapsed){
+    const list = Array.isArray(events) ? events : [];
+    const time = Number.isFinite(elapsed) ? elapsed : 0;
+    if (!Number.isFinite(state.followElapsed) || time < state.followElapsed){
+      state.followNext = 0;
+      state.followActive = [];
+    }
+    if (!Array.isArray(state.followActive)) state.followActive = [];
+    if (!Number.isInteger(state.followNext) || state.followNext < 0) state.followNext = 0;
+
+    let kept = 0;
+    for (const event of state.followActive){
+      if (event && time < event.start + event.duration) state.followActive[kept++] = event;
+    }
+    state.followActive.length = kept;
+    while (state.followNext < list.length){
+      const event = list[state.followNext];
+      if (!event){ state.followNext++; continue; }
+      if (event.start > time) break;
+      state.followNext++;
+      if (time < event.start + event.duration) state.followActive.push(event);
+    }
+    state.followElapsed = time;
+    return state.followActive.length ? state.followActive[state.followActive.length - 1] : null;
   }
 
   /* 재생. from·to 는 1부터 세는 마디 번호(생략하면 전체) — 부분 재생이 여기로 들어온다.
@@ -569,8 +662,10 @@ const MNMusicAudio = (() => {
       countStartAt, countInBeats, countCurrent:null,
       beatsPerMeasure, beatSeconds, metronome:!!options.metronome, loop:!!options.loop,
       nodes:[], next:0, nextBeat:0, nextDrum:0, nextBass:0, nextChord:0,
-      timer:0, raf:0, currentId:null,
-      onNote:options.onNote, onCount:options.onCount, onEnd:options.onEnd
+      followNext:0, followActive:[], followElapsed:Number.NEGATIVE_INFINITY,
+      timer:0, raf:0, currentId:null, paused:false, pump:null, follow:null,
+      onNote:options.onNote, onCount:options.onCount, onEnd:options.onEnd,
+      onPause:options.onPause, onResume:options.onResume
     };
     live = state;
 
@@ -581,7 +676,8 @@ const MNMusicAudio = (() => {
 
     // 예약: 지금부터 LOOKAHEAD 안에 시작할 음들만 그때그때 예약한다.
     const pump = () => {
-      if (live !== state) return;
+      if (live !== state || state.paused) return;
+      cleanupFinishedNodes(state.nodes, target.currentTime);
       const horizon = target.currentTime - state.startAt + LOOKAHEAD_SEC;
       while (state.next < timeline.events.length && timeline.events[state.next].start <= horizon){
         const event = timeline.events[state.next++];
@@ -610,12 +706,9 @@ const MNMusicAudio = (() => {
           state.accompanimentTimbre, state.accompanimentBuffers));
       }
     };
-    pump();
-    state.timer = setInterval(pump, TIMER_MS);
-
     // 강조: 오디오 시계를 보고 화면만 갱신한다.
     const follow = () => {
-      if (live !== state) return;
+      if (live !== state || state.paused) return;
       let elapsed = target.currentTime - state.startAt;
       if (elapsed < 0 && state.countInBeats && typeof state.onCount === "function"){
         const beat = Math.max(1, Math.min(state.countInBeats,
@@ -631,31 +724,65 @@ const MNMusicAudio = (() => {
           state.startAt += timeline.totalSeconds;
           elapsed = target.currentTime - state.startAt;
         }
-        state.nodes = state.nodes.filter((node) => node && node.stopAt > target.currentTime);
+        cleanupFinishedNodes(state.nodes, target.currentTime);
         state.next = 0;
         state.nextBeat = 0;
         state.nextDrum = 0;
         state.nextBass = 0;
         state.nextChord = 0;
+        state.followNext = 0;
+        state.followActive = [];
+        state.followElapsed = Number.NEGATIVE_INFINITY;
         state.currentId = null;
         if (typeof state.onNote === "function") state.onNote(null);
         pump();
       }
       if (typeof state.onNote === "function"){
-        let current = null;
-        for (const event of timeline.events){
-          if (event.start > elapsed) break;
-          if (elapsed < event.start + event.duration) current = event;
-        }
+        const current = followTimelineAt(state, timeline.events, elapsed);
         const id = current ? current.id : null;
         if (id !== state.currentId){ state.currentId = id; state.onNote(current); }
       }
-      if (typeof requestAnimationFrame === "function") state.raf = requestAnimationFrame(follow);
+      if (live === state && !state.paused && typeof requestAnimationFrame === "function"){
+        state.raf = requestAnimationFrame(follow);
+      }
       else state.raf = 0;
     };
-    if (typeof requestAnimationFrame === "function") state.raf = requestAnimationFrame(follow);
+    state.pump = pump;
+    state.follow = follow;
+    startTimers(state);
 
-    return { totalSeconds:timeline.totalSeconds, countInSeconds, loop:state.loop, stop };
+    return { totalSeconds:timeline.totalSeconds, countInSeconds, loop:state.loop, stop, pause, resume };
+  }
+
+  async function pause(){
+    const state = live;
+    if (!state) return false;
+    if (state.paused) return true;
+    state.paused = true;
+    clearTimers(state);
+    try {
+      if (ctx && typeof ctx.suspend === "function" && ctx.state !== "suspended") await ctx.suspend();
+    } catch(_){
+      if (live === state){ state.paused = false; startTimers(state); }
+      return false;
+    }
+    if (live !== state) return false;
+    if (typeof state.onPause === "function") state.onPause();
+    return true;
+  }
+
+  async function resume(){
+    const state = live;
+    if (!state) return false;
+    if (!state.paused) return true;
+    try {
+      if (ctx && typeof ctx.resume === "function") await ctx.resume();
+    } catch(_){ return false; }
+    if (live !== state) return false;
+    state.paused = false;
+    startTimers(state);
+    if (typeof state.onResume === "function") state.onResume();
+    return true;
   }
 
   function stop(){
@@ -668,8 +795,14 @@ const MNMusicAudio = (() => {
     return !!live;
   }
 
+  function paused(){
+    return !!(live && live.paused);
+  }
+
   // 음표 또는 화음 미리듣기 — 도구상자·음표 클릭에서 쓴다.
   function previewNote(note, timbre, opts){
+    // 일시정지 중 컨텍스트를 깨우면 예약돼 있던 악보 음이 혼자 진행되므로 미리듣기를 막는다.
+    if (live && live.paused) return false;
     const options = opts || {};
     const target = ensureContext();
     if (!target) return false;
@@ -688,6 +821,14 @@ const MNMusicAudio = (() => {
     const started = (nodes) => {
       if (request !== previewRequest) return;
       previewNodes = (nodes || []).filter(Boolean);
+      const scheduled = previewNodes;
+      const latest = scheduled.reduce((end, node) => Math.max(end,
+        node && Number.isFinite(node.stopAt) ? node.stopAt : target.currentTime), target.currentTime);
+      setTimeout(() => {
+        if (request !== previewRequest || previewNodes !== scheduled) return;
+        cleanupFinishedNodes(scheduled, Number.POSITIVE_INFINITY, true);
+        previewNodes = [];
+      }, Math.max(0, (latest - target.currentTime + NODE_CLEANUP_GRACE) * 1000));
       if (typeof options.onScheduled === "function") options.onScheduled();
     };
     if (type === "synth"){
@@ -846,9 +987,10 @@ const MNMusicAudio = (() => {
   }
 
   return {
-    play, stop, playing, supported, previewNote, cancelPreview, renderWav, encodeWav, mixPracticeTrack,
-    scheduleInto, scheduleSynthNote,
+    play, pause, resume, stop, playing, paused, supported, previewNote, cancelPreview, renderWav, encodeWav, mixPracticeTrack,
+    scheduleInto, scheduleSynthNote, disconnectNode, cleanupFinishedNodes,
     scheduleMetronomeClick, scheduleDrumHit, scheduleDrumsInto, setVolume, getVolume, setMuted, muted,
+    followTimelineAt,
     ensurePianoBuffers, ensureGuitarBuffers, nearestPianoSample, nearestSample, sampledTimbre,
     PIANO_SAMPLE_ROOTS, GUITAR_SAMPLE_ROOTS, XYLOPHONE_SAMPLE_ROOTS, HARP_SAMPLE_ROOTS,
     FLUTE_SAMPLE_ROOTS, CLARINET_SAMPLE_ROOTS, SAMPLE_INSTRUMENTS,

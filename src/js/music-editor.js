@@ -335,6 +335,10 @@ async function mountMusicEditor(doc){
 
   const noteEls = new Map();        // 음표 id → SVG 요소(강조·클릭용)
   const solfegeEls = new Map();     // 음표 id → 오선 밖 계이름 SVG 글자
+  const chordSymbolEls = new Map(); // 음표 id → 코드 기호 SVG 글자
+  const notationEls = new Map();    // 음표 id → 가사·셈여림 등 SVG 글자 배열
+  const selectedVisualEls = new Set(); // 지금 선택 표시가 붙은 요소만 기억해 전체 악보 순회를 피한다
+  const playingVisualEls = new Set();  // 지금 재생 표시가 붙은 요소만 기억한다
   const noteHorizontalLimits = new Map(); // 음표 id → 현재 조판에서 이웃·마디를 넘지 않는 xOffset 범위
   let lyricVerse = 1;              // 지금 가사를 넣는 절 — 배율처럼 보기 상태라 .msheet 에 담지 않는다
   let lyricEntry = null;           // 이어치기 중이면 { index } — 가사를 붙일 수 있는 음표 차례
@@ -342,6 +346,7 @@ async function mountMusicEditor(doc){
   let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — 선택 재생·"이 단을 메모로"가 쓴다
   let playbackMeasure = 0;          // 재생할 줄의 기준 마디(0부터). 줄바꿈·창 폭이 바뀌어도 이 마디를 따른다
   let playbackPartId = sheet.activePartId;
+  let playingEvent = null;          // 다시 조판해도 현재 재생 음표를 같은 요소에 복원한다
   let selection = null;             // { measure:0부터, staff:"treble"|"bass", voice:1|2, id }
   let activeStaff = "treble";       // 다음 음을 넣을 손/오선
   let activeVoice = 1;              // 같은 오선 안의 독립 성부
@@ -1170,6 +1175,8 @@ async function mountMusicEditor(doc){
   const volumeLabel = document.createElement("span");
   volumeLabel.className = "music-volume-label";
   volumeWrap.append(muteBtn, volumeInput, volumeLabel);
+  const pauseBtn = musicButton("⏸ 일시정지", "현재 위치를 기억한 채 멈추거나 이어서 재생합니다");
+  pauseBtn.disabled = true;
   const stopBtn = musicButton("■ 정지");
   stopBtn.disabled = true;
   const musicXmlImportBtn = musicButton("📂 MusicXML",
@@ -1197,7 +1204,8 @@ async function mountMusicEditor(doc){
 
   playAllBtn.classList.add("music-toolvis-playback"); playSelectedPartBtn.classList.add("music-toolvis-playback");
   playRightBtn.classList.add("music-toolvis-playback");
-  playLeftBtn.classList.add("music-toolvis-playback"); stopBtn.classList.add("music-toolvis-playback");
+  playLeftBtn.classList.add("music-toolvis-playback"); pauseBtn.classList.add("music-toolvis-playback");
+  stopBtn.classList.add("music-toolvis-playback");
   rangeWrap.classList.add("music-toolvis-range"); playPartBtn.classList.add("music-toolvis-range");
   repeatMeasureBtn.classList.add("music-toolvis-repeat-measure");
   speedWrap.classList.add("music-toolvis-speed");
@@ -1218,7 +1226,7 @@ async function mountMusicEditor(doc){
   printBtn.classList.add("music-toolvis-print");
   zoomWrap.classList.add("music-toolvis-zoom");
   playBar.append(playAllBtn, playSelectedPartBtn, playbackLineSelect, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
+    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, pauseBtn, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
     imageReferenceBtn, practiceAudioBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
 
   /* ----- 연습 음원 만들기 -----
@@ -1647,7 +1655,8 @@ async function mountMusicEditor(doc){
     const keyNote = transposition
       ? ` · ${musicTranspositionLabel(transposition)} 기보 ${(MUSIC_KEYS[sheet.key] || {}).label || sheet.key} · 실음 ${(MUSIC_KEYS[soundingKey] || {}).label || soundingKey}`
       : "";
-    status.textContent = `${musicParts(sheet).length}파트 · ${part ? part.name + " · " : ""}${sheet.measures.length}마디 · ${total.toFixed(1)}초${keyNote}`;
+    const playbackNote = MNMusicAudio.paused() ? "일시정지 · " : "";
+    status.textContent = `${playbackNote}${musicParts(sheet).length}파트 · ${part ? part.name + " · " : ""}${sheet.measures.length}마디 · ${total.toFixed(1)}초${keyNote}`;
     updateMeasureProgress();
     const check = musicValidate(sheet);
     if (check.ok){
@@ -1859,6 +1868,10 @@ async function mountMusicEditor(doc){
     const VF = (typeof window !== "undefined") ? window.VexFlow : null;
     noteEls.clear();
     solfegeEls.clear();
+    chordSymbolEls.clear();
+    notationEls.clear();
+    selectedVisualEls.clear();
+    playingVisualEls.clear();
     noteHorizontalLimits.clear();
     staveBoxes = [];
     scoreLines = [];
@@ -2124,6 +2137,9 @@ async function mountMusicEditor(doc){
         label.setAttribute("text-anchor", "middle");
         if (italic) label.setAttribute("font-style", "italic");
         scoreSvg.appendChild(label);
+        const remembered = notationEls.get(place.note.id) || [];
+        remembered.push(label);
+        notationEls.set(place.note.id, remembered);
       }
       for (const place of notationPlaces){
         const note = place.note;
@@ -2198,6 +2214,7 @@ async function mountMusicEditor(doc){
         label.setAttribute("y", String(place.y));
         label.setAttribute("text-anchor", "middle");
         scoreSvg.appendChild(label);
+        chordSymbolEls.set(place.note.id, label);
       }
       const svg = scoreHost.querySelector("svg");
       if (svg){
@@ -2215,6 +2232,7 @@ async function mountMusicEditor(doc){
       scoreHost.scrollLeft = previousScroll.left;
       scoreHost.scrollTop = previousScroll.top;
       paintSelection();
+      if (playingEvent) highlight(playingEvent, false);
       paintPractice();          // 배율·창 크기가 바뀌어 다시 그려도 따라치기 진도 표시가 살아남는다
       syncPlaybackLineControls(true);
     } catch(error){
@@ -2238,21 +2256,23 @@ async function mountMusicEditor(doc){
     return staffNotes(measure, selection.staff, selection.voice).find((item) => item.id === selection.id) || null;
   }
 
+  function paintNoteVisualState(active, noteId, className){
+    for (const el of active) el.classList.remove(className);
+    active.clear();
+    if (!noteId) return null;
+    const primary = noteEls.get(noteId) || null;
+    const candidates = [primary, solfegeEls.get(noteId), chordSymbolEls.get(noteId),
+      ...(notationEls.get(noteId) || [])];
+    for (const el of candidates){
+      if (!el || active.has(el)) continue;
+      el.classList.add(className);
+      active.add(el);
+    }
+    return primary;
+  }
+
   function paintSelection(){
-    for (const el of noteEls.values()) el.classList.remove("is-selected");
-    for (const el of solfegeEls.values()) el.classList.remove("is-selected");
-    scoreHost.querySelectorAll(".music-chord-symbol.is-selected,.music-notation.is-selected")
-      .forEach((el) => el.classList.remove("is-selected"));
-    if (!selection) return;
-    const el = noteEls.get(selection.id);
-    if (el) el.classList.add("is-selected");
-    const label = solfegeEls.get(selection.id);
-    if (label) label.classList.add("is-selected");
-    const symbol = Array.from(scoreHost.querySelectorAll(".music-chord-symbol"))
-      .find((el) => el.dataset.noteId === selection.id);
-    if (symbol) symbol.classList.add("is-selected");
-    scoreHost.querySelectorAll(`.music-notation[data-note-id="${selection.id}"]`)
-      .forEach((item) => item.classList.add("is-selected"));
+    paintNoteVisualState(selectedVisualEls, selection && selection.id, "is-selected");
   }
 
   function select(measureIndex, noteId, options){
@@ -3510,6 +3530,8 @@ async function mountMusicEditor(doc){
         fromInput.value = toInput.value = String(measureNumberLabel(targetMeasure));
         startPlay({ from:measure, to:measure }, { loop:true });
       }, disabled:running },
+      { label:MNMusicAudio.paused() ? "이어서 재생" : "일시정지",
+        action:togglePausePlayback, disabled:!running },
       { label:"정지", action:() => MNMusicAudio.stop(), disabled:!running },
       { separator:true },
       // 도구막대를 접어 두고 쓰는 사람을 위해 여기에도 둔다. 그만두기는 Esc 로 — 연습 중에는
@@ -4454,27 +4476,19 @@ async function mountMusicEditor(doc){
   });
 
   /* ----- 재생 ----- */
-  function highlight(event){
-    for (const el of noteEls.values()) el.classList.remove("is-playing");
-    for (const el of solfegeEls.values()) el.classList.remove("is-playing");
-    scoreHost.querySelectorAll(".music-chord-symbol.is-playing,.music-notation.is-playing")
-      .forEach((el) => el.classList.remove("is-playing"));
+  function highlight(event, reveal = true){
+    playingEvent = event || null;
+    const el = paintNoteVisualState(playingVisualEls, event && event.id, "is-playing");
     if (!event) return;
-    const el = noteEls.get(event.id);
     if (!el) return;
-    el.classList.add("is-playing");
-    const label = solfegeEls.get(event.id);
-    if (label) label.classList.add("is-playing");
-    const symbol = Array.from(scoreHost.querySelectorAll(".music-chord-symbol"))
-      .find((item) => item.dataset.noteId === event.id);
-    if (symbol) symbol.classList.add("is-playing");
-    scoreHost.querySelectorAll(`.music-notation[data-note-id="${event.id}"]`)
-      .forEach((item) => item.classList.add("is-playing"));
-    revealScoreElement(el, playbackGrandStaffBounds(event));
+    if (reveal) revealScoreElement(el, playbackGrandStaffBounds(event));
   }
 
-  function setPlaying(on){
+  function setPlaying(on, isPaused = false){
     if (on && keyboardComposeActive) setKeyboardCompose(false, false);
+    pauseBtn.disabled = !on;
+    pauseBtn.textContent = isPaused ? "▶ 이어서" : "⏸ 일시정지";
+    pauseBtn.setAttribute("aria-pressed", isPaused ? "true" : "false");
     stopBtn.disabled = !on;
     playAllBtn.disabled = on;
     playRightBtn.disabled = on || !sheet.grandStaff;
@@ -4503,6 +4517,14 @@ async function mountMusicEditor(doc){
     // "실행 중"으로 보고 있어서(파이썬·노트북과 같은 규칙) 이 클래스만 붙였다 떼면 된다.
     root.classList.toggle("is-running", on);
     syncPlaybackLineControls();
+  }
+
+  async function togglePausePlayback(){
+    if (!MNMusicAudio.playing()) return;
+    pauseBtn.disabled = true;
+    const wasPaused = MNMusicAudio.paused();
+    const changed = wasPaused ? await MNMusicAudio.resume() : await MNMusicAudio.pause();
+    if (!changed) setPlaying(MNMusicAudio.playing(), MNMusicAudio.paused());
   }
 
   function syncPracticeControls(){
@@ -4596,6 +4618,8 @@ async function mountMusicEditor(doc){
           if (beat) status.textContent = `준비 ${beat} / ${total}`;
           else updateStatus();
         },
+        onPause:() => { setPlaying(true, true); updateStatus(); },
+        onResume:() => { setPlaying(true, false); updateStatus(); },
         onEnd:() => { highlight(null); setPlaying(false); updateStatus(); },
         onError:(error, timbre) => {
           const label = timbreLabel(timbre);
@@ -4648,6 +4672,7 @@ async function mountMusicEditor(doc){
     MNMusicAudio.setMuted(!MNMusicAudio.muted());
     syncVolumeControls();
   });
+  pauseBtn.addEventListener("click", togglePausePlayback);
   stopBtn.addEventListener("click", () => MNMusicAudio.stop());
   undoBtn.addEventListener("click", () => history.undo());
   redoBtn.addEventListener("click", () => history.redo());
