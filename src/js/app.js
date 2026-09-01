@@ -2571,7 +2571,7 @@ function makeCardMovable(card){
     ro.observe(card);
   }
   // 드래그 시작을 무시할 대상: 상호작용·텍스트 선택 영역
-  const IGNORE = "button,input,textarea,select,a,canvas,label,dd,[contenteditable],.modal-actions,.py-terminal-log,.leaflet-container,.db-erd-viewport,.db-erd-relation-detail";
+  const IGNORE = "button,input,textarea,select,a,canvas,label,dd,pre,code,[contenteditable],.modal-actions,.py-terminal-log,.leaflet-container,.db-erd-viewport,.db-erd-relation-detail";
   card.addEventListener("mousedown", (e) => {
     if (compactLayout()) return;
     if (e.button !== 0) return;

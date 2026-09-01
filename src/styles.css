@@ -6448,6 +6448,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-database-icon .ui-icon{display:block;width:100%;height:100%}
 .db-database-select{flex:1;min-width:0;padding:1px 20px 1px 0;border:0;background:transparent;color:var(--ink);
   font:inherit;font-size:12.5px;font-weight:700}
+/* Windows WebView의 기본 select 팝업은 다크모드에서도 흰 배경으로 열릴 수 있다.
+   option 색을 명시해 밝은 글자와 흰 배경이 겹치는 문제를 막는다. */
+[data-theme="dark"] .db-database-select{color-scheme:dark}
+[data-theme="dark"] .db-database-select option{background:var(--field);color:var(--ink)}
 .db-database-action{display:flex;align-items:center;justify-content:center;flex:none;width:27px;height:27px;padding:0;border:0;border-radius:6px;
   background:transparent;color:var(--muted);cursor:pointer}.db-database-action:hover:not(:disabled){background:var(--panel-hover);color:var(--accent)}
 .db-database-action:disabled{opacity:.35;cursor:default}.db-database-action .ui-icon{width:16px;height:16px}
@@ -6481,7 +6485,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-item[data-kind="event"] .db-table-object-icon{color:#d97706}
 .db-empty{color:var(--muted);font-size:12px;padding:8px 4px}
 
-.db-main{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
+.db-main{position:relative;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
 .db-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;border:1px solid var(--border);
   border-radius:9px;background:var(--panel)}
 .db-timeout-wrap{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px}
@@ -6499,31 +6503,53 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-tx-badge{padding:3px 9px;border:1px solid color-mix(in srgb,#d97706 55%,var(--border));border-radius:999px;
   background:color-mix(in srgb,#d97706 12%,var(--field));color:#b45309;font-size:11px;font-weight:700}
 
+/* SQL 편집기와 결과는 Side/Below 방향을 바꿀 수 있는 한 쌍이다. 두 방향 모두 같은 분할선을 쓰고,
+   방향별 크기는 따로 저장해 다시 전환해도 이전 크기를 유지한다. */
+.db-query-layout{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
+.db-query-layout.db-layout-below{flex-direction:column}
+.db-query-layout.db-layout-side{flex-direction:row}
+.db-editor-pane,.db-result-pane{display:flex;min-width:0;min-height:0;overflow:hidden}
+.db-editor-pane{flex:0 0 var(--db-editor-height,180px)}
+.db-layout-side .db-editor-pane{flex-basis:var(--db-editor-width,520px)}
+.db-result-pane{flex:1 1 auto;flex-direction:column;gap:10px}
 /* 편집기는 파이썬·자바스크립트와 같은 위젯(buildCodeEditor)을 쓴다.
-   .db-editor 는 높이만 정하는 그릇이고, 안쪽 .code-host 는 그 높이를 꽉 채운다.
    code-host 의 기본값(가운데 정렬·최대 폭·그림자)은 문서 한가운데 띄우는 코드 화면용이라 여기선 끈다. */
-.db-editor{position:relative;flex:none;height:var(--db-editor-height,180px);overflow:hidden}
+.db-editor{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
 .db-editor .code-host{width:100%;max-width:none;height:100%;max-height:none;margin:0;box-shadow:none;
   border:1px solid var(--border);border-radius:9px}
 .db-editor .code-host:focus-within{border-color:var(--accent)}
 
-.db-hdivider{position:relative;height:0;margin:-5px 0;cursor:row-resize;touch-action:none}
-.db-hdivider::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px}
-.db-hdivider::after{content:"";position:absolute;left:0;right:0;top:-1px;height:2px;border-radius:1px;background:transparent}
-.db-hdivider:hover::after,.db-hdivider.dragging::after{background:var(--accent)}
+.db-query-divider{position:relative;z-index:2;flex:0 0 10px;touch-action:none;outline:none}
+.db-layout-below .db-query-divider{cursor:row-resize}
+.db-layout-side .db-query-divider{cursor:col-resize}
+.db-query-divider::before{content:"";position:absolute;background:transparent;border-radius:1px}
+.db-layout-below .db-query-divider::before{left:0;right:0;top:4px;height:2px}
+.db-layout-side .db-query-divider::before{top:0;bottom:0;left:4px;width:2px}
+.db-query-divider:hover::before,.db-query-divider.dragging::before,.db-query-divider:focus-visible::before{background:var(--accent)}
 .db-result-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .db-result-status{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .db-select-info{flex:none;padding:2px 8px;border:1px solid color-mix(in srgb,var(--accent) 45%,var(--border));
   border-radius:999px;background:color-mix(in srgb,var(--accent) 10%,var(--field));color:var(--accent);
   font-size:11px;font-weight:700;white-space:nowrap}
 .db-result-spacer{flex:1}
+.db-result-font-tools{display:inline-flex;align-items:center;gap:3px;flex:none}
+.db-result-font-btn,.db-result-font-pick{height:29px;border:1px solid var(--border);background:var(--field);color:var(--muted);
+  font:inherit;font-size:11.5px}
+.db-result-font-btn{padding:0 8px;cursor:pointer}.db-result-font-btn:first-child{border-radius:7px 0 0 7px}
+.db-result-font-btn+.db-result-font-btn{margin-left:-4px}.db-result-font-btn:hover:not(:disabled){background:var(--panel-hover);color:var(--ink)}
+.db-result-font-btn:disabled{opacity:.45;cursor:default}.db-result-font-pick{max-width:145px;padding:0 6px;border-radius:6px}
+.db-result-color-field{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:11px;font-weight:700;white-space:nowrap}
+.db-result-color{width:29px;height:29px;padding:3px;border:1px solid var(--border);border-radius:6px;background:var(--field);cursor:pointer}
+.db-result-color::-webkit-color-swatch-wrapper{padding:0}.db-result-color::-webkit-color-swatch{border:0;border-radius:3px}
+.db-result-color-reset{width:29px;padding:0;border-radius:6px;font-size:16px;line-height:1}
 .db-result{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
 .db-count-btn{margin:9px 0 0 9px}
-.db-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px;
+.db-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;
+  font-family:var(--code-ff,"Malgun Gothic",system-ui,sans-serif);font-size:var(--code-fs,13px);
   user-select:none;-webkit-user-select:none}
 .db-grid:focus{outline:none}
 .db-grid th,.db-grid td{max-width:420px;padding:6px 9px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);
-  background:var(--field);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+  background:var(--field);color:var(--db-result-text-color,var(--ink));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
 .db-grid thead th{position:sticky;top:0;z-index:2;background:var(--panel-2);font-weight:700}
 .db-grid .db-grid-index{position:sticky;left:0;z-index:1;background:var(--panel-2);color:var(--muted);
   font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
@@ -6542,6 +6568,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .db-divider{display:none}
   .db-sidebar{max-height:30vh}
   .db-connect-grid{grid-template-columns:1fr}
+}
+@media(max-width:900px){
+  .db-layout-btn{display:none}
 }
 
 /* 접속 표시색 — 운영 DB 를 눈에 띄게 해 실수 실행을 막는다. */
@@ -6754,13 +6783,15 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-constraint-part-remove,.db-table-constraint-add-part{padding:5px 8px}
 .db-table-constraint-add-part{align-self:flex-start}
 .db-table-ddl{min-height:220px;padding:11px;border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--code-bg);
-  color:var(--code-text);font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;tab-size:2}
+  color:var(--code-text);font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;tab-size:2;
+  cursor:text;-webkit-user-select:text;user-select:text}
 .db-table-alter-preview{flex:none;max-height:235px;display:flex;flex-direction:column;margin-top:9px;border:1px solid var(--border);border-radius:9px;overflow:hidden}
 .db-table-alter-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:7px 9px;background:var(--panel-2);font-size:11.5px}
 .db-table-alter-note{color:var(--muted);font-size:10.5px}.db-table-alter-issues{max-height:72px;overflow:auto;padding:0 9px}
 .db-table-alter-issues p{margin:5px 0;font-size:10.5px;line-height:1.35}.db-table-alter-issues .warning{color:#b45309}.db-table-alter-issues .error{color:var(--danger);font-weight:700}
 .db-table-alter-sql{min-height:50px;max-height:125px;overflow:auto;padding:8px 9px;background:var(--code-bg);color:var(--code-text);
-  font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;tab-size:2}
+  font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;tab-size:2;
+  cursor:text;-webkit-user-select:text;user-select:text}
 .db-table-alter-status{min-height:18px;margin:6px 1px 0;color:var(--muted);font-size:11.5px}.db-table-alter-status.error{color:var(--danger);font-weight:700}
 .db-table-modal-actions{flex:none;margin-top:2px}
 @media(max-width:760px){

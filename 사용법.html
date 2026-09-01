@@ -90,7 +90,7 @@
 
 <h1>ClassDock 사용법 — 처음부터 끝까지</h1>
 
-<p class="updated"><strong>최종 업데이트: 2026년 8월 28일</strong></p>
+<p class="updated"><strong>최종 업데이트: 2026년 9월 1일</strong></p>
 
 <p class="lead">이 문서는 <strong>처음 쓰는 분</strong>도 따라할 수 있게 클론부터 실제 사용까지 단계별로 정리한 가이드입니다. 자세한 기능 설명·릴리스 노트는 <a href="README.md">README.md</a>를 참고하세요.</p>
 
@@ -496,6 +496,17 @@ cd myOffice</code></pre>
 <blockquote>
   <p>내장 라이브러리는 오프라인 HTML·EXE에 포함되어 인터넷 없이 동작합니다. npm 설치와 <code>import ... from ...</code> 문은 지원하지 않으므로 각 라이브러리의 전역 이름을 사용하세요. 이 실행기는 <code>window</code>·<code>document</code>가 없는 Worker 환경이라 React·DOM 기반 차트처럼 화면을 직접 다루는 라이브러리는 HTML 미리보기에서 사용해야 합니다.</p>
 </blockquote>
+
+<h3>MySQL 접속 문서 (.dbconn, EXE 전용)</h3>
+
+<ol>
+  <li><code>.dbconn</code> 파일을 열어 호스트·포트·데이터베이스·계정·비밀번호를 입력하고 <strong>연결</strong>을 누릅니다. 비밀번호는 파일이나 브라우저 저장소에 남기지 않습니다.</li>
+  <li>SQL 편집기에서 선택한 문장 또는 커서가 있는 문장을 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행합니다. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>는 편집기의 모든 문장을 위에서부터 실행합니다. 현재 데이터베이스의 테이블명이나 <code>orders o</code> 같은 별칭에 <kbd>Ctrl</kbd>+클릭하면 기존 테이블 정보창이 열립니다. 정보창의 <strong>DDL</strong> 탭과 변경 SQL 미리보기에서는 쿼리를 마우스로 드래그해 선택·복사할 수 있습니다.</li>
+  <li>결과 위치는 <strong>Side / Below</strong> 버튼으로 편집기 오른쪽과 아래 사이를 전환합니다. 가운데 분할선을 드래그하면 두 영역의 너비나 높이를 조절하며 방향과 크기는 다음 실행에도 유지됩니다. 좁은 화면에서는 결과가 자동으로 아래에 표시됩니다.</li>
+  <li>결과 표에서 칸을 끌거나 행 번호·컬럼명을 눌러 범위를 고릅니다. <kbd>Ctrl</kbd>은 선택 추가·제거, <kbd>Shift</kbd>는 범위 확장, <kbd>Ctrl</kbd>+<kbd>C</kbd>는 선택한 칸 복사입니다.</li>
+  <li>결과 도구의 <strong>선택 메모로</strong>는 고른 칸을, 선택이 없을 때 보이는 <strong>전체 메모로</strong>는 현재 결과 전체를 컬럼명과 함께 일반 메모의 표 블록으로 보냅니다. 메모 표 한 개의 상한을 넘는 큰 결과는 값이 빠지지 않도록 여러 표 블록으로 나뉩니다.</li>
+  <li><code>A−</code>·<code>A+</code>와 글꼴 목록으로 SQL 편집기와 결과 표의 글꼴·크기를 함께 바꿉니다. <strong>편집</strong> 색은 SQL 편집기의 일반 글자색을 바꾸되 키워드·문자열·주석의 문법 강조색은 유지하며, <strong>결과</strong> 색은 결과 표 글자색을 바꿉니다. 두 색은 라이트·다크 모드별로 따로 저장되고 옆의 <code>↺</code>를 누르면 현재 테마의 기본색으로 돌아갑니다.</li>
+</ol>
 
 <h3>Jupyter 노트북 (.ipynb)</h3>
 

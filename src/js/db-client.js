@@ -140,6 +140,13 @@ const MNDbClient = (() => {
 
   const EDITOR_KEY = "classdockDbEditorHeightV1";
   const EDITOR_MIN = 90, EDITOR_DEFAULT = 180, EDITOR_KEEP_RESULT = 240;
+  const RESULT_LAYOUT_KEY = "classdockDbResultLayoutV1";
+  const EDITOR_WIDTH_KEY = "classdockDbEditorWidthV1";
+  const EDITOR_WIDTH_MIN = 260, EDITOR_WIDTH_DEFAULT = 520, EDITOR_KEEP_RESULT_WIDTH = 320;
+  const EDITOR_COLOR_LIGHT_KEY = "classdockDbEditorTextColorLightV1";
+  const EDITOR_COLOR_DARK_KEY = "classdockDbEditorTextColorDarkV1";
+  const RESULT_COLOR_LIGHT_KEY = "classdockDbResultTextColorLightV1";
+  const RESULT_COLOR_DARK_KEY = "classdockDbResultTextColorDarkV1";
 
   const readEditorHeight = () => {
     try {
@@ -150,6 +157,26 @@ const MNDbClient = (() => {
 
   const storeEditorHeight = (height) => {
     try { localStorage.setItem(EDITOR_KEY, String(Math.round(height))); } catch(_){}
+  };
+
+  const readResultLayout = () => {
+    try { return localStorage.getItem(RESULT_LAYOUT_KEY) === "side" ? "side" : "below"; }
+    catch(_){ return "below"; }
+  };
+
+  const storeResultLayout = (layout) => {
+    try { localStorage.setItem(RESULT_LAYOUT_KEY, layout === "side" ? "side" : "below"); } catch(_){}
+  };
+
+  const readEditorWidth = () => {
+    try {
+      const value = Number(localStorage.getItem(EDITOR_WIDTH_KEY));
+      return Number.isFinite(value) && value >= EDITOR_WIDTH_MIN ? value : 0;
+    } catch(_){ return 0; }
+  };
+
+  const storeEditorWidth = (width) => {
+    try { localStorage.setItem(EDITOR_WIDTH_KEY, String(Math.round(width))); } catch(_){}
   };
 
   /* ── SQL 문장 나누기(확인 창 판단용) ──────────────────────────────────────
@@ -334,6 +361,19 @@ const MNDbClient = (() => {
       if (match[2] && !ALIAS_STOPWORDS.test(match[2])) map.set(match[2].toLowerCase(), match[1]);
     }
     return map;
+  };
+
+  /* SQL 편집기의 Ctrl+클릭 대상. 지금은 현재 DB의 테이블과 별칭을 해석한다.
+     반환값에 kind를 둬 프로시저·함수·트리거·이벤트 처리기를 같은 통로에 추가할 수 있게 한다. */
+  const sqlDefinitionTargetAt = (source, wordInfo, objects) => {
+    if (!wordInfo || !wordInfo.word) return null;
+    const text = String(source || "");
+    const statement = statementAt(text, Number.isFinite(wordInfo.point) ? wordInfo.point : wordInfo.start);
+    const tableName = aliasMap(statement ? statement.text : text).get(String(wordInfo.word).toLowerCase());
+    if (!tableName) return null;
+    const item = (Array.isArray(objects) ? objects : []).find(candidate =>
+      candidate && candidate.type === "table" && String(candidate.name).toLowerCase() === tableName.toLowerCase());
+    return item ? { kind:"table", name:item.name, item } : null;
   };
 
   // 이름을 편집기에 넣을 때 그대로 써도 되는지 본다. 평범한 식별자가 아니면 역따옴표로 감싼다
@@ -889,6 +929,8 @@ const MNDbClient = (() => {
     saveButton.dataset.shortcutAction = "saveCurrent";
     saveButton.dataset.shortcutTitle = "접속 문서 저장";
     const disconnectButton = button("연결 끊기", "db-btn db-btn-quiet");
+    const layoutButton = button("Side", "db-btn db-btn-quiet db-layout-btn",
+      "실행 결과를 SQL 편집기 오른쪽에 표시합니다");
     cancelButton.disabled = true;
 
     /* 트랜잭션 — 자동 커밋을 끄면 커밋·롤백으로 직접 확정한다.
@@ -907,7 +949,7 @@ const MNDbClient = (() => {
     txWrap.hidden = true;
 
     toolbar.append(runButton, runAllButton, cancelButton, explainButton, el("span", "db-timeout-wrap", null),
-      modeBadge, txWrap, serverLabel, historyButton, importButton, saveButton, disconnectButton, sqlFileInput);
+      modeBadge, txWrap, serverLabel, layoutButton, historyButton, importButton, saveButton, disconnectButton, sqlFileInput);
     toolbar.querySelector(".db-timeout-wrap").append(el("span", null, "제한"), timeoutInput, el("span", null, "초"));
 
     /* 편집기는 파이썬·자바스크립트 편집기와 같은 위젯을 쓴다(buildCodeEditor).
@@ -926,7 +968,16 @@ const MNDbClient = (() => {
       completionPortal: true,
       completionWords,
       // `별칭.` 뒤에서는 그 별칭이 가리키는 테이블의 컬럼만 준다.
-      memberCandidates: (source, receiver, prefix) => sqlMemberCandidates(source, receiver, prefix)
+      memberCandidates: (source, receiver, prefix) => sqlMemberCandidates(source, receiver, prefix),
+      // Ctrl+클릭은 공용 편집기의 정의 대상 확장점을 사용한다. 현재는 테이블/별칭을 열고,
+      // 이후 다른 스키마 객체는 sqlDefinitionTargetAt의 kind 처리만 늘리면 된다.
+      definitionTargetAt: ({ source, wordInfo }) => sqlDefinitionTargetAt(source, wordInfo, schemaObjects),
+      openDefinitionTarget: ({ target }) => {
+        if (!target || target.kind !== "table") return false;
+        setSchemaSelection(target.item);
+        openTableInfoModal(target.name);
+        return true;
+      }
     });
     editor.ta.setAttribute("aria-label", "SQL 편집기");
     editorWrap.append(editor.host);
@@ -935,9 +986,53 @@ const MNDbClient = (() => {
     const resultStatus = el("span", "db-result-status", "");
     const selectInfo = el("span", "db-select-info", "");
     selectInfo.hidden = true;
+    const memoButton = button("전체 메모로", "db-btn db-btn-quiet", "현재 결과 표 전체를 메모로 보냅니다");
     const exportCsvButton = button("CSV로 내보내기", "db-btn db-btn-quiet");
     const openSheetButton = button("표 편집기로 열기", "db-btn db-btn-quiet");
-    resultBar.append(resultStatus, selectInfo, el("span", "db-result-spacer", null), exportCsvButton, openSheetButton);
+    const resultFontTools = el("span", "db-result-font-tools");
+    resultFontTools.setAttribute("role", "group");
+    resultFontTools.setAttribute("aria-label", "SQL 편집기와 결과 표 글꼴 및 색 설정");
+    const fontDownButton = button("A−", "db-result-font-btn", "SQL 편집기와 결과 표 글자를 작게");
+    const fontUpButton = button("A+", "db-result-font-btn", "SQL 편집기와 결과 표 글자를 크게");
+    const fontPick = document.createElement("select");
+    fontPick.className = "db-result-font-pick";
+    fontPick.title = "SQL 편집기와 결과 표 글꼴";
+    fontPick.setAttribute("aria-label", fontPick.title);
+    const fontGroups = typeof groupedCodeFontChoices === "function" ? groupedCodeFontChoices() : { mono:[], prop:[] };
+    const installedFonts = [...fontGroups.mono, ...fontGroups.prop];
+    const addFontOptions = (label, list) => {
+      if (!list.length) return;
+      const group = document.createElement("optgroup");
+      group.label = label;
+      list.forEach(choice => {
+        const option = new Option(choice.label, choice.value);
+        if (typeof _codeFontFamily === "string" && choice.value === _codeFontFamily) option.selected = true;
+        group.append(option);
+      });
+      fontPick.append(group);
+    };
+    addFontOptions("고정폭 (코딩용)", fontGroups.mono);
+    addFontOptions("가변폭 (읽기용)", fontGroups.prop);
+    if (installedFonts.length <= 1) fontPick.hidden = true;
+    const editorColor = input("color", "#0f172a");
+    editorColor.className = "db-result-color";
+    editorColor.title = "현재 테마의 SQL 편집기 일반 글자색";
+    editorColor.setAttribute("aria-label", editorColor.title);
+    const editorColorField = el("label", "db-result-color-field");
+    editorColorField.append(el("span", "db-result-color-label", "편집"), editorColor);
+    const editorColorReset = button("↺", "db-result-font-btn db-result-color-reset", "현재 테마의 SQL 편집기 글자색을 기본값으로 되돌립니다");
+    const resultColor = input("color", "#0f172a");
+    resultColor.className = "db-result-color";
+    resultColor.title = "현재 테마의 결과 표 글자색";
+    resultColor.setAttribute("aria-label", resultColor.title);
+    const resultColorField = el("label", "db-result-color-field");
+    resultColorField.append(el("span", "db-result-color-label", "결과"), resultColor);
+    const resultColorReset = button("↺", "db-result-font-btn db-result-color-reset", "현재 테마의 결과 글자색을 기본값으로 되돌립니다");
+    resultFontTools.append(fontDownButton, fontUpButton, fontPick,
+      editorColorField, editorColorReset, resultColorField, resultColorReset);
+    resultBar.append(resultStatus, selectInfo, el("span", "db-result-spacer", null),
+      resultFontTools, memoButton, exportCsvButton, openSheetButton);
+    memoButton.hidden = true;
     exportCsvButton.hidden = true;
     openSheetButton.hidden = true;
 
@@ -946,6 +1041,10 @@ const MNDbClient = (() => {
     resultTabs.hidden = true;
 
     const resultHost = el("div", "db-result");
+    if (typeof registerEditorFont === "function"){
+      registerEditorFont(editor.host);
+      registerEditorFont(resultHost);
+    }
 
     /* 최근 실행 목록 — 클릭하면 편집기 커서 자리에 그 쿼리를 넣는다. */
     const historyPanel = el("aside", "db-history-panel");
@@ -963,17 +1062,50 @@ const MNDbClient = (() => {
     const completionBox = el("div", "db-completion");
     completionBox.hidden = true;
 
-    const editorDivider = el("div", "db-hdivider");
-    editorDivider.title = "드래그: 편집기 높이 조절 · 더블클릭: 기본 높이로";
-    editorDivider.setAttribute("aria-hidden", "true");
+    const editorPane = el("div", "db-editor-pane");
+    editorPane.append(editorWrap);
+    const resultPane = el("div", "db-result-pane");
+    resultPane.append(resultBar, resultTabs, resultHost);
+    const editorDivider = el("div", "db-query-divider");
+    editorDivider.setAttribute("role", "separator");
+    editorDivider.tabIndex = 0;
+    const queryLayout = el("div", "db-query-layout");
+    queryLayout.append(editorPane, editorDivider, resultPane);
 
-    main.append(toolbar, editorWrap, editorDivider, resultBar, resultTabs, resultHost,
-      historyPanel, completionBox);
+    main.append(toolbar, queryLayout, historyPanel, completionBox);
     const divider = el("div", "db-divider");
     divider.title = "드래그: 스키마 패널 너비 조절 · 더블클릭: 기본 너비로";
     divider.setAttribute("aria-hidden", "true");
     workspace.append(sidebar, divider, main);
     root.append(form, workspace);
+
+    /* SQL 편집기와 결과의 배치. 사용자가 고른 방향은 유지하되, 좁은 화면에서는 아래 배치로
+       잠시 바꿔 두 영역이 지나치게 좁아지지 않게 한다. 화면이 다시 넓어지면 저장한 방향으로 돌아간다. */
+    let resultLayout = readResultLayout();
+    const compactQueryLayout = window.matchMedia("(max-width:900px)");
+    const sideLayoutActive = () => resultLayout === "side" && !compactQueryLayout.matches;
+    const applyResultLayout = () => {
+      const side = sideLayoutActive();
+      queryLayout.classList.toggle("db-layout-side", side);
+      queryLayout.classList.toggle("db-layout-below", !side);
+      editorDivider.setAttribute("aria-orientation", side ? "vertical" : "horizontal");
+      editorDivider.title = side
+        ? "드래그: 편집기 너비 조절 · 더블클릭: 기본 너비로"
+        : "드래그: 편집기 높이 조절 · 더블클릭: 기본 높이로";
+      layoutButton.textContent = side ? "Below" : "Side";
+      layoutButton.title = side
+        ? "실행 결과를 SQL 편집기 아래에 표시합니다"
+        : "실행 결과를 SQL 편집기 오른쪽에 표시합니다";
+      layoutButton.setAttribute("aria-pressed", String(side));
+    };
+    layoutButton.addEventListener("click", () => {
+      resultLayout = sideLayoutActive() ? "below" : "side";
+      storeResultLayout(resultLayout);
+      applyResultLayout();
+    });
+    const onCompactQueryLayout = () => applyResultLayout();
+    compactQueryLayout.addEventListener("change", onCompactQueryLayout);
+    applyResultLayout();
 
     /* 스키마 패널 너비 ------------------------------------------------------ */
 
@@ -1019,10 +1151,10 @@ const MNDbClient = (() => {
       setSidebarWidth(SIDEBAR_DEFAULT, true);
     });
 
-    /* 편집기 높이 ----------------------------------------------------------- */
+    /* SQL 편집기 ↔ 결과 분할 크기 ------------------------------------------- */
 
     const maxEditorHeight = () => {
-      const rect = main.getBoundingClientRect();
+      const rect = queryLayout.getBoundingClientRect();
       if (!rect.height) return Infinity;              // 연결 전에는 화면에 없어 높이가 0 이다
       // 결과 자리를 240px 은 남긴다 — 분할선을 끝까지 내려 결과를 없애지 못하게.
       return Math.max(EDITOR_MIN, rect.height - EDITOR_KEEP_RESULT);
@@ -1030,9 +1162,22 @@ const MNDbClient = (() => {
 
     const setEditorHeight = (px, persist) => {
       const height = Math.round(Math.max(EDITOR_MIN, Math.min(maxEditorHeight(), px)));
-      main.style.setProperty("--db-editor-height", height + "px");
+      queryLayout.style.setProperty("--db-editor-height", height + "px");
       if (persist) storeEditorHeight(height);
       return height;
+    };
+
+    const maxEditorWidth = () => {
+      const rect = queryLayout.getBoundingClientRect();
+      if (!rect.width) return Infinity;
+      return Math.max(EDITOR_WIDTH_MIN, rect.width - EDITOR_KEEP_RESULT_WIDTH);
+    };
+
+    const setEditorWidth = (px, persist) => {
+      const width = Math.round(Math.max(EDITOR_WIDTH_MIN, Math.min(maxEditorWidth(), px)));
+      queryLayout.style.setProperty("--db-editor-width", width + "px");
+      if (persist) storeEditorWidth(width);
+      return width;
     };
 
     editorDivider.addEventListener("pointerdown", (event) => {
@@ -1040,16 +1185,22 @@ const MNDbClient = (() => {
       event.preventDefault();
       try { editorDivider.setPointerCapture(event.pointerId); } catch(_){}
       editorDivider.classList.add("dragging");
-      const startY = event.clientY;
-      const startHeight = editorWrap.getBoundingClientRect().height;
-      const move = (moveEvent) => setEditorHeight(startHeight + (moveEvent.clientY - startY), false);
+      const side = sideLayoutActive();
+      const startPoint = side ? event.clientX : event.clientY;
+      const startSize = side ? editorPane.getBoundingClientRect().width : editorPane.getBoundingClientRect().height;
+      const move = (moveEvent) => {
+        const point = side ? moveEvent.clientX : moveEvent.clientY;
+        if (side) setEditorWidth(startSize + point - startPoint, false);
+        else setEditorHeight(startSize + point - startPoint, false);
+      };
       const end = () => {
         editorDivider.classList.remove("dragging");
         editorDivider.removeEventListener("pointermove", move);
         editorDivider.removeEventListener("pointerup", end);
         editorDivider.removeEventListener("pointercancel", end);
         try { editorDivider.releasePointerCapture(event.pointerId); } catch(_){}
-        storeEditorHeight(editorWrap.getBoundingClientRect().height);
+        if (side) storeEditorWidth(editorPane.getBoundingClientRect().width);
+        else storeEditorHeight(editorPane.getBoundingClientRect().height);
       };
       editorDivider.addEventListener("pointermove", move);
       editorDivider.addEventListener("pointerup", end);
@@ -1058,8 +1209,83 @@ const MNDbClient = (() => {
 
     editorDivider.addEventListener("dblclick", (event) => {
       event.preventDefault();
-      setEditorHeight(EDITOR_DEFAULT, true);
+      if (sideLayoutActive()) setEditorWidth(EDITOR_WIDTH_DEFAULT, true);
+      else setEditorHeight(EDITOR_DEFAULT, true);
     });
+    editorDivider.addEventListener("keydown", (event) => {
+      const side = sideLayoutActive();
+      const delta = event.shiftKey ? 40 : 12;
+      if (side && event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (!side && event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      if (side){
+        const direction = event.key === "ArrowLeft" ? -1 : 1;
+        setEditorWidth(editorPane.getBoundingClientRect().width + direction * delta, true);
+      } else {
+        const direction = event.key === "ArrowUp" ? -1 : 1;
+        setEditorHeight(editorPane.getBoundingClientRect().height + direction * delta, true);
+      }
+    });
+
+    /* SQL 편집기와 결과 표의 글꼴·크기·색. 글꼴과 크기는 Python 편집기와 같은 공용 설정을
+       함께 쓰고, 편집기 일반 글자색과 결과 글자색은 라이트·다크 테마별로 따로 기억한다.
+       --code-text 만 편집기 host 에 덮어 문법 강조(키워드·문자열·주석) 색은 그대로 둔다. */
+    const resultTheme = () => document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    const editorColorKey = () => resultTheme() === "dark" ? EDITOR_COLOR_DARK_KEY : EDITOR_COLOR_LIGHT_KEY;
+    const resultColorKey = () => resultTheme() === "dark" ? RESULT_COLOR_DARK_KEY : RESULT_COLOR_LIGHT_KEY;
+    const defaultTextColor = () => resultTheme() === "dark" ? "#e2e8f0" : "#0f172a";
+    const savedTextColor = (key) => {
+      try {
+        const value = String(localStorage.getItem(key) || "");
+        return /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : "";
+      } catch(_){ return ""; }
+    };
+    const applyEditorTextColor = () => {
+      const value = savedTextColor(editorColorKey());
+      if (value) editor.host.style.setProperty("--code-text", value);
+      else editor.host.style.removeProperty("--code-text");
+      editorColor.value = value || defaultTextColor();
+      editorColorReset.disabled = !value;
+    };
+    const applyResultTextColor = () => {
+      const value = savedTextColor(resultColorKey());
+      if (value) root.style.setProperty("--db-result-text-color", value);
+      else root.style.removeProperty("--db-result-text-color");
+      resultColor.value = value || defaultTextColor();
+      resultColorReset.disabled = !value;
+    };
+    const applyTextColors = () => {
+      applyEditorTextColor();
+      applyResultTextColor();
+    };
+    fontDownButton.addEventListener("click", () => {
+      if (typeof bumpCodeFont === "function") bumpCodeFont(-1);
+    });
+    fontUpButton.addEventListener("click", () => {
+      if (typeof bumpCodeFont === "function") bumpCodeFont(1);
+    });
+    fontPick.addEventListener("change", () => {
+      if (typeof setCodeFontFamily === "function") setCodeFontFamily(fontPick.value);
+    });
+    editorColor.addEventListener("input", () => {
+      try { localStorage.setItem(editorColorKey(), editorColor.value); } catch(_){}
+      applyEditorTextColor();
+    });
+    editorColorReset.addEventListener("click", () => {
+      try { localStorage.removeItem(editorColorKey()); } catch(_){}
+      applyEditorTextColor();
+    });
+    resultColor.addEventListener("input", () => {
+      try { localStorage.setItem(resultColorKey(), resultColor.value); } catch(_){}
+      applyResultTextColor();
+    });
+    resultColorReset.addEventListener("click", () => {
+      try { localStorage.removeItem(resultColorKey()); } catch(_){}
+      applyResultTextColor();
+    });
+    const resultThemeObserver = new MutationObserver(applyTextColors);
+    resultThemeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+    applyTextColors();
 
     /* 무엇을 실행할지 ------------------------------------------------------
        선택이 있으면 선택한 글자 그대로, 없으면 커서가 놓인 문장 하나.
@@ -1308,7 +1534,16 @@ const MNDbClient = (() => {
       gridHeadBounds = bounds;
     };
 
+    const refreshMemoButton = (bounds) => {
+      const selected = !!bounds;
+      memoButton.textContent = selected ? "선택 메모로" : "전체 메모로";
+      memoButton.title = selected
+        ? "선택한 결과 칸과 컬럼명을 메모 표로 보냅니다"
+        : "현재 결과 표 전체와 컬럼명을 메모로 보냅니다";
+    };
+
     const refreshSelectInfo = (bounds) => {
+      refreshMemoButton(bounds);
       if (!bounds){ selectInfo.hidden = true; selectInfo.textContent = ""; return; }
       const height = bounds.row2 - bounds.row1 + 1, width = bounds.col2 - bounds.col1 + 1;
       selectInfo.hidden = false;
@@ -1464,6 +1699,68 @@ const MNDbClient = (() => {
       else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast(done, 1800));
     };
 
+    /* 현재 결과를 메모 표 블록으로 옮긴다. 선택이 있으면 선택 경계만 보내고, Ctrl 로 띄엄띄엄
+       고른 영역의 선택하지 않은 칸은 빈칸으로 둔다. 메모 표 상한(20열·3,000칸)을 넘으면
+       행과 열을 나눈 여러 표 블록으로 보내 전체 값이 조용히 잘리지 않게 한다. */
+    const memoRowsFromGrid = () => {
+      if (!currentGrid || !currentGrid.columns.length) return null;
+      const columnCount = gridColumnCount();
+      const bounds = gridSelection && grid
+        ? grid.gridSelectionBoundsFromKeys(gridSelection.keys, columnCount) : null;
+      const row1 = bounds ? bounds.row1 : 0;
+      const row2 = bounds ? bounds.row2 : Math.max(0, gridRowCount() - 1);
+      const col1 = bounds ? bounds.col1 : 0;
+      const col2 = bounds ? bounds.col2 : columnCount - 1;
+      const rows = [currentGrid.columns.slice(col1, col2 + 1)];
+      for (let row = row1; row <= row2; row++){
+        const values = [];
+        for (let col = col1; col <= col2; col++){
+          const selected = !bounds || gridSelection.keys.has(row * columnCount + col);
+          const cell = selected ? gridCellAt(row, col) : null;
+          values.push(cell ? cell.textContent : "");
+        }
+        rows.push(values);
+      }
+      return { rows, selected:!!bounds, cells:bounds ? bounds.count : gridRowCount() * columnCount };
+    };
+
+    const memoTableChunks = (rows) => {
+      if (!Array.isArray(rows) || !rows.length) return [];
+      const header = rows[0], body = rows.slice(1), chunks = [];
+      const maxColumns = 20, maxCells = 3000, maxRows = 200;
+      for (let col = 0; col < header.length; col += maxColumns){
+        const width = Math.min(maxColumns, header.length - col);
+        const dataRowsPerTable = Math.max(1, Math.min(maxRows - 1, Math.floor(maxCells / width) - 1));
+        if (!body.length){ chunks.push([header.slice(col, col + width)]); continue; }
+        for (let row = 0; row < body.length; row += dataRowsPerTable){
+          chunks.push([
+            header.slice(col, col + width),
+            ...body.slice(row, row + dataRowsPerTable).map(values => values.slice(col, col + width))
+          ]);
+        }
+      }
+      return chunks;
+    };
+
+    memoButton.addEventListener("click", () => {
+      if (typeof window.addTableToScratchpad !== "function"){
+        toast("메모 기능을 불러오지 못했습니다.", 2400);
+        return;
+      }
+      const source = memoRowsFromGrid();
+      if (!source || source.rows.length < 2){ toast("메모로 보낼 결과 행이 없습니다.", 2000); return; }
+      const chunks = memoTableChunks(source.rows);
+      let added = 0;
+      for (const rows of chunks){
+        const result = window.addTableToScratchpad(rows);
+        if (!result) break;
+        added++;
+      }
+      if (!added){ toast("결과를 메모로 보내지 못했습니다.", 2400); return; }
+      const subject = source.selected ? "선택한 결과" : "현재 결과 전체";
+      toast(subject + "를 메모 표 " + added.toLocaleString() + "개로 보냈어요.", 3000);
+    });
+
     // 행을 tbody 에 채운다. startIndex 는 화면에 매기는 번호의 시작(더 보기로 이어 붙일 때 쓴다).
     const fillRows = (bodyEl, columns, rows, clippedCells, startIndex) => {
       const clipped = new Set((clippedCells || []).map(pair => pair[0] + "," + pair[1]));
@@ -1493,9 +1790,13 @@ const MNDbClient = (() => {
     };
 
     const renderRows = (columns, rows, truncated, clippedCells, sortable) => {
+      clearGridSelection();
       resultHost.innerHTML = "";
       closeValuePanel();
       lastRows = null;
+      memoButton.hidden = true;
+      exportCsvButton.hidden = true;
+      openSheetButton.hidden = true;
       if (!columns.length){
         notice(resultHost, "결과 열이 없습니다", "", "");
         return;
@@ -1543,6 +1844,8 @@ const MNDbClient = (() => {
         resultHost.append(el("p", "db-truncated", "표시할 행이 없습니다."));
       }
       lastRows = [columns.slice()].concat(rows.map(row => row.map(value => value === null ? "" : String(value))));
+      memoButton.hidden = false;
+      refreshMemoButton(null);
       exportCsvButton.hidden = false;
       openSheetButton.hidden = false;
     };
@@ -1556,6 +1859,7 @@ const MNDbClient = (() => {
       resultSets = [];
       closeValuePanel();
       lastRows = null;
+      memoButton.hidden = true;
       exportCsvButton.hidden = true;
       openSheetButton.hidden = true;
     };
@@ -1582,6 +1886,7 @@ const MNDbClient = (() => {
       closeValuePanel();
       currentGrid = null;
       lastRows = null;
+      memoButton.hidden = true;
       exportCsvButton.hidden = true;
       openSheetButton.hidden = true;
       const sql = entry.sql ? previewOf(entry.sql, 200) : "";
@@ -3282,6 +3587,8 @@ const MNDbClient = (() => {
       if (connected){
         setSidebarWidth(readSidebarWidth() || SIDEBAR_DEFAULT, false);
         setEditorHeight(readEditorHeight() || EDITOR_DEFAULT, false);
+        setEditorWidth(readEditorWidth() || EDITOR_WIDTH_DEFAULT, false);
+        applyResultLayout();
       }
       modeBadge.textContent = readOnly ? "읽기 전용" : "쓰기 허용";
       modeBadge.classList.toggle("db-mode-write", !readOnly);
@@ -3420,7 +3727,15 @@ const MNDbClient = (() => {
     (doc.cleanupFns = doc.cleanupFns || []).push(() => { closed = true; disconnect(true); });
     doc.cleanupFns.push(closeTableContextMenu);
     doc.cleanupFns.push(() => { if (closeErdModal) closeErdModal(); });
-    doc.cleanupFns.push(() => { try { editor.destroy(); } catch(_){} });
+    doc.cleanupFns.push(() => {
+      compactQueryLayout.removeEventListener("change", onCompactQueryLayout);
+      resultThemeObserver.disconnect();
+      if (typeof unregisterEditorFont === "function"){
+        unregisterEditorFont(editor.host);
+        unregisterEditorFont(resultHost);
+      }
+      try { editor.destroy(); } catch(_){}
+    });
     // 앱의 Ctrl+F(문서 안 찾기)·Ctrl+G(줄 이동)를 편집기 것으로 연결한다.
     doc.openDocFind = () => editor.openFind();
     doc.openGotoLine = () => editor.openGoto();
@@ -3449,7 +3764,7 @@ const MNDbClient = (() => {
   return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
     statementRanges, splitStatements, statementAt, firstKeyword, riskyStatements,
     identifierFor, ddlIdentifier, ddlString, defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
-    erdLayout, aliasMap, orderBySpot, applyOrderBy, orderByState, messageFor, mount };
+    erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };
 })();
 
 /* 파일 로더가 부르는 진입점 ------------------------------------------------ */

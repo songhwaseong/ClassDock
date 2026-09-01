@@ -1939,8 +1939,21 @@ function buildCodeEditor(text, prof, options={}){
     while (en < text.length && isWordChar(text[en])) en++;
     return { start: s, end: en, word: text.slice(s, en), point: pos };
   };
-  const openDefinitionAt = async (wordInfo) => {
+  /* 언어별 정의 대상 확장점. SQL 같은 편집기는 클릭한 단어를 자체 스키마 객체로 해석하고,
+     Python은 이 콜백이 없으므로 아래의 기존 로컬/Jedi 정의 이동을 그대로 사용한다. */
+  const externalDefinitionTargetAt = (wordInfo) => {
+    if (typeof options.definitionTargetAt !== "function") return undefined;
+    try { return options.definitionTargetAt({ source:ta.value, wordInfo }) || null; }
+    catch(e){ console.warn("정의 대상 해석 실패:", e); return null; }
+  };
+  const openDefinitionAt = async (wordInfo, externalTarget) => {
     if (!wordInfo || !wordInfo.word) return;
+    if (externalTarget && typeof options.openDefinitionTarget === "function"){
+      try {
+        const opened = await options.openDefinitionTarget({ source:ta.value, wordInfo, target:externalTarget });
+        if (opened !== false) return;
+      } catch(e){ console.warn("정의 대상 열기 실패:", e); }
+    }
     const localDef = findPythonLocalDefinition(ta.value, wordInfo.word, wordInfo.start);
     if (localDef && localDef.line){
       focusLine(localDef.line);
@@ -2059,6 +2072,11 @@ function buildCodeEditor(text, prof, options={}){
     if (col.active){ clearDefinitionHover(); return; }
     const info = wordAtOffset(offsetFromMeasuredPoint(clientX, clientY));
     if (!info){ clearDefinitionHover(); return; }
+    // 외부 해석기를 단 편집기는 실제로 열 수 있는 객체만 링크처럼 표시한다.
+    if (typeof options.definitionTargetAt === "function" && !externalDefinitionTargetAt(info)){
+      clearDefinitionHover();
+      return;
+    }
     if (defHoverInfo && defHoverInfo.start === info.start && defHoverInfo.end === info.end && defHoverInfo.word === info.word) return;
     defHoverInfo = info;
     edit.classList.add("code-def-linking");
@@ -2092,13 +2110,15 @@ function buildCodeEditor(text, prof, options={}){
     if (linkedEdit.active && e.button === 0 && e.detail === 1) exitLinkedEdit();
     if (e.button === 0 && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey){
       const info = wordAtOffset(offsetFromMeasuredPoint(e.clientX, e.clientY));
-      if (info){
+      const externalTarget = info ? externalDefinitionTargetAt(info) : null;
+      const canOpen = typeof options.definitionTargetAt !== "function" || !!externalTarget;
+      if (info && canOpen){
         e.preventDefault();
         ta.focus();
         ta.setSelectionRange(info.start, info.end);
         computeWordHi();
         sync();
-        openDefinitionAt(info);
+        openDefinitionAt(info, externalTarget);
       }
       return;
     }

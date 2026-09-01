@@ -267,6 +267,17 @@ test("테이블 정보는 결과 영역이 아니라 스키마 테이블명의 �
   assert.match(css, /\.db-table-context-menu\{/);
 });
 
+test("테이블 정보의 DDL과 변경 SQL은 창 이동 대신 글자로 선택할 수 있다", () => {
+  const app = fs.readFileSync(path.join(root, "src", "js", "app.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  const ignore = /const IGNORE = "([^"]+)"/.exec(app);
+  assert.ok(ignore, "모달 이동 제외 대상이 있어야 한다");
+  assert.match(ignore[1], /(?:^|,)pre(?:,|$)/);
+  assert.match(ignore[1], /(?:^|,)code(?:,|$)/);
+  assert.match(css, /\.db-table-ddl\{[^}]*cursor:text;[^}]*user-select:text/);
+  assert.match(css, /\.db-table-alter-sql\{[^}]*cursor:text;[^}]*user-select:text/);
+});
+
 test("2차 테이블 정보는 인덱스와 외래키 메타데이터를 함께 읽는다", () => {
   assert.match(worker, /information_schema\.STATISTICS/);
   assert.match(worker, /information_schema\.REFERENTIAL_CONSTRAINTS/);
@@ -432,6 +443,36 @@ test("별칭은 테이블 이름으로 되돌아간다", () => {
   assert.equal(client.aliasMap("SELECT * FROM orders WHERE x = 1").get("where"), undefined);
 });
 
+test("SQL Ctrl+클릭은 현재 문장의 테이블명과 별칭을 테이블 정보 대상으로 해석한다", () => {
+  const sql = "SELECT o.id FROM orders o JOIN users AS u ON o.uid = u.id; SELECT note FROM logs";
+  const objects = [
+    { type:"table", name:"orders" },
+    { type:"table", name:"users" },
+    { type:"table", name:"logs" },
+    { type:"procedure", name:"orders" }
+  ];
+  const aliasPoint = sql.indexOf("o.id");
+  const alias = client.sqlDefinitionTargetAt(sql, { word:"o", start:aliasPoint, point:aliasPoint }, objects);
+  assert.equal(alias.kind, "table");
+  assert.equal(alias.name, "orders");
+  const tablePoint = sql.indexOf("users");
+  assert.equal(client.sqlDefinitionTargetAt(sql,
+    { word:"users", start:tablePoint, point:tablePoint }, objects).name, "users");
+  const columnPoint = sql.indexOf("note");
+  assert.equal(client.sqlDefinitionTargetAt(sql,
+    { word:"note", start:columnPoint, point:columnPoint }, objects), null);
+});
+
+test("공용 편집기는 외부 정의 대상만 Ctrl+클릭 링크로 열 수 있다", () => {
+  const editor = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(editor, /options\.definitionTargetAt\(\{ source:ta\.value, wordInfo \}\)/);
+  assert.match(editor, /options\.openDefinitionTarget\(\{ source:ta\.value, wordInfo, target:externalTarget \}\)/);
+  assert.match(editor, /const canOpen = typeof options\.definitionTargetAt !== "function" \|\| !!externalTarget/);
+  assert.match(db, /definitionTargetAt: \(\{ source, wordInfo \}\) => sqlDefinitionTargetAt\(source, wordInfo, schemaObjects\)/);
+  assert.match(db, /openTableInfoModal\(target\.name\)/);
+});
+
 
 
 
@@ -576,25 +617,40 @@ test("분할선은 편집기를 없앨 만큼 밀리지 않는다", () => {
   assert.match(css, /@media\(max-width:820px\)\{[\s\S]*?\.db-divider\{display:none\}/);
 });
 
-test("편집기 높이도 분할선이 정하고 기본 resize 손잡이는 끈다", () => {
+test("SQL 편집기와 결과는 아래·오른쪽 배치에서 각각 크기를 기억한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  // 두 방식을 함께 두면 컨테이너 높이와 textarea 높이가 서로를 덮어써 화면이 어긋난다.
-  assert.match(css, /\.db-editor\{position:relative;flex:none;height:var\(--db-editor-height,180px\)/);
+  assert.match(source, /const RESULT_LAYOUT_KEY = "classdockDbResultLayoutV1"/);
+  assert.match(source, /const EDITOR_WIDTH_KEY = "classdockDbEditorWidthV1"/);
+  assert.match(source, /localStorage\.setItem\(RESULT_LAYOUT_KEY, layout === "side" \? "side" : "below"\)/);
+  assert.match(source, /compactQueryLayout = window\.matchMedia\("\(max-width:900px\)"\)/);
+  assert.match(css, /\.db-query-layout\.db-layout-below\{flex-direction:column\}/);
+  assert.match(css, /\.db-query-layout\.db-layout-side\{flex-direction:row\}/);
+  assert.match(css, /\.db-editor-pane\{flex:0 0 var\(--db-editor-height,180px\)\}/);
+  assert.match(css, /\.db-layout-side \.db-editor-pane\{flex-basis:var\(--db-editor-width,520px\)\}/);
   // .db-editor 는 높이만 정하는 그릇이고 안쪽 편집기 위젯이 그 높이를 채운다.
   assert.match(css, /\.db-editor \.code-host\{[^}]*height:100%/);
   // 위젯 기본값(가운데 정렬·최대 폭)은 문서 한가운데 띄우는 코드 화면용이라 여기선 꺼야 한다.
   assert.match(css, /\.db-editor \.code-host\{[^}]*max-width:none/);
 });
 
-test("가로 분할선은 기존 간격을 늘리지 않는다", () => {
+test("다크모드 데이터베이스 선택 목록은 항목 배경과 글자가 구분된다", () => {
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  // .db-main 은 gap:10px 이라 분할선을 그냥 넣으면 위아래 gap 이 둘 다 붙어 간격이 두 배가 된다.
-  assert.match(css, /\.db-hdivider\{position:relative;height:0;margin:-5px 0;cursor:row-resize;touch-action:none\}/);
-  // 잡을 수 있는 영역은 pseudo 로 넓힌다(선 자체는 높이가 0 이다).
-  assert.match(css, /\.db-hdivider::before\{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px\}/);
+  // Windows WebView가 펼친 목록을 밝은 기본 배경으로 그려도 밝은 글자만 남지 않게 한다.
+  assert.match(css, /\[data-theme="dark"\] \.db-database-select\{color-scheme:dark\}/);
+  assert.match(css, /\[data-theme="dark"\] \.db-database-select option\{background:var\(--field\);color:var\(--ink\)\}/);
 });
 
-test("가로 분할선도 pointercancel 까지 정리한다", () => {
+test("SQL 결과 분할선은 배치 방향에 맞춰 동작한다", () => {
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(css, /\.db-query-divider\{position:relative;z-index:2;flex:0 0 10px;touch-action:none;outline:none\}/);
+  assert.match(css, /\.db-layout-below \.db-query-divider\{cursor:row-resize\}/);
+  assert.match(css, /\.db-layout-side \.db-query-divider\{cursor:col-resize\}/);
+  assert.match(css, /\.db-layout-below \.db-query-divider::before\{left:0;right:0;top:4px;height:2px\}/);
+  assert.match(css, /\.db-layout-side \.db-query-divider::before\{top:0;bottom:0;left:4px;width:2px\}/);
+});
+
+test("SQL 결과 분할선도 pointercancel 까지 정리한다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const from = source.indexOf('editorDivider.addEventListener("pointerdown"');
   const block = source.slice(from, source.indexOf("\n    });", from));
@@ -607,6 +663,40 @@ test("가로 분할선도 pointercancel 까지 정리한다", () => {
   assert.match(source, /if \(!rect\.height\) return Infinity;/);
   // 높이도 접속 문서가 아니라 브라우저에 저장한다.
   assert.match(source, /const EDITOR_KEY = "classdockDbEditorHeightV1"/);
+  assert.match(source, /const EDITOR_WIDTH_KEY = "classdockDbEditorWidthV1"/);
+});
+
+test("DB 결과 전체나 선택 영역을 메모 표로 보낼 수 있다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(source, /const memoRowsFromGrid = \(\) =>/);
+  assert.match(source, /memoButton\.textContent = selected \? "선택 메모로" : "전체 메모로"/);
+  assert.match(source, /gridSelection\.keys\.has\(row \* columnCount \+ col\)/);
+  assert.match(source, /const memoTableChunks = \(rows\) =>/);
+  assert.match(source, /const maxColumns = 20, maxCells = 3000, maxRows = 200/);
+  assert.match(source, /window\.addTableToScratchpad\(rows\)/);
+});
+
+test("DB 편집기와 결과 표의 글꼴·크기 및 테마별 글자색을 바꿀 수 있다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(source, /registerEditorFont\(editor\.host\)/);
+  assert.match(source, /registerEditorFont\(resultHost\)/);
+  assert.match(source, /groupedCodeFontChoices\(\)/);
+  assert.match(source, /bumpCodeFont\(-1\)/);
+  assert.match(source, /bumpCodeFont\(1\)/);
+  assert.match(source, /setCodeFontFamily\(fontPick\.value\)/);
+  assert.match(source, /classdockDbEditorTextColorLightV1/);
+  assert.match(source, /classdockDbEditorTextColorDarkV1/);
+  assert.match(source, /editor\.host\.style\.setProperty\("--code-text", value\)/);
+  assert.match(source, /editor\.host\.style\.removeProperty\("--code-text"\)/);
+  assert.match(source, /classdockDbResultTextColorLightV1/);
+  assert.match(source, /classdockDbResultTextColorDarkV1/);
+  // 편집기 일반 글자색만 덮어 키워드·문자열·주석의 문법 강조 변수는 유지한다.
+  assert.doesNotMatch(source, /editor\.host\.style\.setProperty\("--code-(?:keyword|string|comment)"/);
+  assert.match(css, /font-family:var\(--code-ff,/);
+  assert.match(css, /font-size:var\(--code-fs,13px\)/);
+  assert.match(css, /color:var\(--db-result-text-color,var\(--ink\)\)/);
+  assert.match(css, /\.db-result-color-field\{display:inline-flex/);
 });
 
 test("편집기 위젯은 프로파일에 맞는 줄 주석 표시를 고른다", () => {
