@@ -6402,3 +6402,206 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-drive-settings-note{min-height:18px;margin:9px 0 0;color:var(--muted);font-size:12px}
 .map-drive-alt-line{filter:drop-shadow(0 1px 1px #fff9)}
 @media(max-width:620px){.map-area-stats-card,.map-geo-export-card,.map-drive-settings-card{width:96vw}.map-area-stats-table th,.map-area-stats-table td{padding:7px}.map-drive-settings-grid{grid-template-columns:1fr}}
+
+/* ── MySQL 접속 문서(.dbconn) ─────────────────────────────────────────────── */
+.db-host{display:flex;flex-direction:column;width:100%;height:calc(100vh - 120px);color:var(--ink)}
+.db-connect{width:min(560px,100%);margin:24px auto;padding:20px 22px;border:1px solid var(--border);border-radius:12px;
+  background:var(--panel);box-shadow:0 4px 18px rgba(15,23,42,.10)}
+.db-connect-title{margin-bottom:14px;font-size:17px}
+.db-connect-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.db-connect-grid .db-field:nth-child(3),.db-connect-grid .db-field:nth-child(5){grid-column:1/-1}
+.db-field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.db-field-label{color:var(--muted);font-size:11.5px;font-weight:700}
+.db-field input{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--field);
+  color:var(--ink);font:inherit;font-size:13px}
+.db-field input:focus{outline:none;border-color:var(--accent)}
+.db-write-toggle{display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:var(--muted);font-size:12px;line-height:1.5;cursor:pointer}
+.db-write-toggle input{margin-top:2px;flex:none}
+.db-connect-actions{display:flex;gap:8px;margin-top:16px}
+.db-connect-status{margin-top:12px;color:var(--danger);font-size:12.5px;line-height:1.6;overflow-wrap:anywhere}
+.db-install{display:flex;flex-direction:column;gap:8px;align-items:flex-start;color:var(--muted)}
+.db-install-log{max-height:180px;width:100%;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
+  background:var(--field);color:var(--ink);font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}
+
+.db-btn{flex:none;padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+  font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.db-btn:hover{border-color:var(--accent);background:var(--panel-hover)}
+.db-btn:disabled{opacity:.55;cursor:default}
+.db-btn-primary{border-color:var(--accent);background:var(--accent);color:#fff}
+.db-btn-primary:hover{filter:brightness(1.05);background:var(--accent)}
+.db-btn-quiet{font-weight:500;color:var(--muted)}
+
+/* 스키마 패널 폭은 분할선으로 조절한다. 가운데 12px 열이 예전 gap 자리를 대신하므로
+   gap 을 함께 두면 간격이 두 번 벌어진다. min(...,60%) 은 창이 줄어도 편집기가 사라지지 않게 하는 상한이다. */
+  .db-workspace{display:grid;grid-template-columns:min(var(--db-sidebar-width,240px),60%) 12px minmax(0,1fr);
+    gap:0;flex:1;min-height:0;padding:12px}
+  .db-divider{position:relative;cursor:col-resize;touch-action:none}
+  .db-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:2px;border-radius:1px;background:transparent}
+  .db-divider:hover::before,.db-divider.dragging::before{background:var(--accent)}
+.db-sidebar{display:flex;flex-direction:column;gap:8px;min-height:0;padding:10px;border:1px solid var(--border);
+  border-radius:10px;background:var(--panel-2)}
+.db-sidebar-head{display:flex;flex-direction:column;gap:4px}
+.db-sidebar-label{color:var(--muted);font-size:11.5px;font-weight:700}
+.db-database-select,.db-table-filter{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:7px;
+  background:var(--field);color:var(--ink);font:inherit;font-size:12.5px}
+.db-database-select:focus,.db-table-filter:focus{outline:none;border-color:var(--accent)}
+.db-table-list{display:flex;flex-direction:column;gap:2px;min-height:0;overflow:auto}
+.db-table-item{display:flex;align-items:center;justify-content:space-between;gap:8px;flex:1;min-width:0;padding:6px 8px;
+  border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font:inherit;font-size:12.5px;
+  text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-table-item:hover{background:var(--panel-hover)}
+.db-table-kind{flex:none;color:var(--muted);font-size:10.5px}
+.db-table-item[data-kind="view"] .db-table-kind{color:var(--accent)}
+.db-empty{color:var(--muted);font-size:12px;padding:8px 4px}
+
+.db-main{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
+.db-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;border:1px solid var(--border);
+  border-radius:9px;background:var(--panel)}
+.db-timeout-wrap{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px}
+.db-timeout{width:62px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--field);
+  color:var(--ink);font:inherit;font-size:12px}
+.db-mode-badge{padding:3px 9px;border:1px solid var(--border);border-radius:999px;background:var(--field);
+  color:var(--muted);font-size:11px;font-weight:700}
+.db-mode-badge.db-mode-write{border-color:color-mix(in srgb,var(--danger) 55%,var(--border));
+  background:color-mix(in srgb,var(--danger) 10%,var(--field));color:var(--danger)}
+.db-server-label{flex:1;min-width:0;color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 강조는 textarea 뒤에 겹쳐 둔다. 두 층의 글꼴·여백·줄바꿈 규칙이 정확히 같아야 글자가 어긋나지 않는다. */
+.db-editor{position:relative;flex:none;height:var(--db-editor-height,180px);
+  border:1px solid var(--border);border-radius:9px;background:var(--field);overflow:hidden}
+.db-editor-highlight,.db-editor-input{margin:0;padding:10px 12px;border:0;tab-size:2;
+  font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.db-editor-highlight{position:absolute;inset:0;overflow:auto;pointer-events:none;background:transparent;color:var(--ink)}
+/* 높이는 분할선이 정한다. 기본 resize 손잡이를 함께 두면 두 방식이 서로를 덮어써 화면이 어긋난다. */
+.db-editor-input{position:relative;display:block;width:100%;height:100%;min-height:0;resize:none;overflow:auto;
+  background:transparent;color:transparent;caret-color:var(--ink);outline:none}
+.db-editor-input::selection{background:color-mix(in srgb,var(--accent) 32%,transparent)}
+.db-editor:focus-within{border-color:var(--accent)}
+
+.db-hdivider{position:relative;height:0;margin:-5px 0;cursor:row-resize;touch-action:none}
+.db-hdivider::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px}
+.db-hdivider::after{content:"";position:absolute;left:0;right:0;top:-1px;height:2px;border-radius:1px;background:transparent}
+.db-hdivider:hover::after,.db-hdivider.dragging::after{background:var(--accent)}
+.db-result-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.db-result-status{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.db-result-spacer{flex:1}
+.db-result{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+.db-count-btn{margin:9px 0 0 9px}
+.db-grid{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.db-grid th,.db-grid td{max-width:420px;padding:6px 9px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+  background:var(--field);color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.db-grid thead th{position:sticky;top:0;z-index:2;background:var(--panel-2);font-weight:700}
+.db-grid .db-grid-index{position:sticky;left:0;z-index:1;background:var(--panel-2);color:var(--muted);
+  font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+.db-grid thead .db-grid-index{z-index:3}
+.db-grid th:last-child,.db-grid td:last-child{border-right:0}
+.db-grid tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--panel-2) 52%,var(--field))}
+.db-grid tbody tr:nth-child(even) .db-grid-index{background:var(--panel-2)}
+.db-grid .db-null{color:var(--muted);font-style:italic}
+.db-truncated{margin:8px 10px;color:var(--muted);font-size:11.5px}
+.db-message{margin:18px auto;padding:16px 18px;border:1px solid var(--border);border-radius:9px;background:var(--panel);
+  color:var(--muted);line-height:1.55;max-width:720px}
+.db-message strong{display:block;margin-bottom:4px;color:var(--ink)}
+.db-message p{margin:0}
+@media(max-width:820px){
+  .db-workspace{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .db-divider{display:none}
+  .db-sidebar{max-height:30vh}
+  .db-connect-grid{grid-template-columns:1fr}
+}
+
+/* 접속 표시색 — 운영 DB 를 눈에 띄게 해 실수 실행을 막는다. */
+.db-host[data-db-color]:not([data-db-color=""]){border-top:4px solid var(--db-accent);border-radius:0}
+.db-host[data-db-color="red"]{--db-accent:#dc2626}
+.db-host[data-db-color="amber"]{--db-accent:#d97706}
+.db-host[data-db-color="green"]{--db-accent:#059669}
+.db-host[data-db-color="blue"]{--db-accent:#2563eb}
+.db-host[data-db-color="violet"]{--db-accent:#7c3aed}
+.db-host[data-db-color]:not([data-db-color=""]) .db-toolbar{border-left:4px solid var(--db-accent)}
+.db-color-row{display:flex;align-items:center;gap:6px;margin-top:12px;flex-wrap:wrap}
+.db-swatch{width:22px;height:22px;padding:0;border-radius:999px;border:1px solid var(--border);background:var(--field);cursor:pointer}
+.db-swatch[data-color="red"]{background:#dc2626}
+.db-swatch[data-color="amber"]{background:#d97706}
+.db-swatch[data-color="green"]{background:#059669}
+.db-swatch[data-color="blue"]{background:#2563eb}
+.db-swatch[data-color="violet"]{background:#7c3aed}
+.db-swatch[data-color=""]{background:repeating-linear-gradient(45deg,var(--field),var(--field) 4px,var(--border) 4px,var(--border) 6px)}
+.db-swatch.active{outline:2px solid var(--ink);outline-offset:2px}
+.db-swatch:hover{border-color:var(--ink)}
+
+/* 결과 집합 탭 — 여러 문장을 실행하면 결과도 여러 개다. */
+.db-result-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.db-result-tab{padding:4px 10px;border:1px solid var(--border);border-radius:7px 7px 0 0;background:var(--panel-2);
+  color:var(--muted);font:inherit;font-size:11.5px;font-weight:700;cursor:pointer}
+.db-result-tab:hover{background:var(--panel-hover);color:var(--ink)}
+.db-result-tab.active{background:var(--panel);border-bottom-color:var(--panel);color:var(--ink)}
+
+/* 셀 값 보기 — 그리드는 한 줄로 줄여 그리므로 긴 값·여러 줄 값은 여기서만 온전히 읽힌다. */
+.db-grid td{cursor:pointer}
+.db-grid td.selected{outline:2px solid var(--accent);outline-offset:-2px}
+.db-grid td.db-clipped::after{content:"⋯";margin-left:4px;padding:0 3px;border-radius:3px;
+  background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent);font-size:10px;font-weight:700}
+.db-value-panel{flex:none;max-height:32vh;display:flex;flex-direction:column;gap:6px;padding:10px 12px;
+  border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+.db-value-head{display:flex;align-items:center;gap:8px}
+.db-value-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.db-value-body{flex:1;min-height:0;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
+  background:var(--field);color:var(--ink);font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+.db-value-body.db-value-null{color:var(--muted);font-style:italic}
+.db-value-note{margin:0;color:var(--muted);font-size:11.5px}
+
+/* 스키마 트리 — 테이블을 펼쳐 컬럼을 보고, 이름을 편집기에 바로 넣는다. */
+.db-table-entry{display:flex;flex-direction:column}
+.db-table-row{display:flex;align-items:center;gap:2px}
+.db-table-toggle,.db-table-insert{flex:none;width:20px;padding:2px 0;border:0;border-radius:5px;background:transparent;
+  color:var(--muted);font:inherit;font-size:11px;line-height:1;cursor:pointer}
+.db-table-toggle:hover,.db-table-insert:hover{background:var(--panel-hover);color:var(--ink)}
+.db-table-insert{opacity:0;font-size:13px}
+.db-table-row:hover .db-table-insert,.db-table-insert:focus-visible{opacity:1}
+.db-column-list{display:flex;flex-direction:column;gap:1px;margin:1px 0 4px 20px;
+  padding-left:7px;border-left:1px solid var(--border)}
+.db-column-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:3px 7px;
+  border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink);font:inherit;font-size:11.5px;
+  text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-column-item:hover{background:var(--panel-hover)}
+.db-column-item.db-column-key{font-weight:700}
+.db-column-type{flex:none;max-width:44%;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:10.5px}
+
+/* 자동완성 목록 — 커서 위치에 띄운다(위치는 강조 오버레이에서 잰다). */
+.db-completion{position:fixed;z-index:60;max-height:240px;min-width:200px;max-width:420px;overflow:auto;
+  padding:4px;border:1px solid var(--border);border-radius:8px;background:var(--panel);
+  box-shadow:0 8px 24px rgba(15,23,42,.18)}
+.db-completion-item{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:4px 8px;border-radius:5px;cursor:pointer;font-size:12.5px}
+.db-completion-item:hover,.db-completion-item.active{background:var(--accent);color:#fff}
+.db-completion-item:hover .db-completion-detail,.db-completion-item.active .db-completion-detail{color:#e0e7ff}
+.db-completion-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.db-completion-item[data-kind="keyword"] .db-completion-label{font-family:inherit;font-weight:700}
+.db-completion-detail{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--muted);font-size:10.5px}
+
+/* 최근 실행 목록 */
+.db-history-panel{flex:none;max-height:34vh;display:flex;flex-direction:column;gap:6px;padding:10px 12px;
+  border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+.db-history-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.db-history-item{display:flex;align-items:baseline;justify-content:space-between;gap:12px;width:100%;
+  padding:5px 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);
+  font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.db-history-item:hover{background:var(--panel-hover)}
+.db-history-item.db-history-failed .db-history-sql{color:var(--muted);text-decoration:line-through}
+.db-history-sql{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.db-history-meta{flex:none;color:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+
+/* 더 보기 */
+.db-more-wrap{display:flex;align-items:center;gap:8px;padding:9px}
+.db-more-note{color:var(--muted);font-size:11.5px}
+
+/* 헤더 클릭 정렬 — 클라이언트 정렬이 아니라 ORDER BY 를 고쳐 다시 묻는다. */
+.db-grid th.db-sortable{cursor:pointer;user-select:none}
+.db-grid th.db-sortable:hover{background:var(--panel-hover)}
+.db-sort-mark{margin-left:6px;color:var(--muted);font-size:9.5px}
+.db-grid th.db-sorted{color:var(--accent)}
+.db-grid th.db-sorted .db-sort-mark{color:var(--accent)}

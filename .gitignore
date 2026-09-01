@@ -18,3 +18,6 @@ playwright-report/
 # 로컬 백업 스크립트 (커밋 안 된 변경분 zip 만들기)
 backup-uncommitted.ps1
 backup-uncommitted.bat
+
+# 테스트가 db_worker.py 를 import 할 때 생기는 바이트코드 캐시
+desktop/__pycache__/

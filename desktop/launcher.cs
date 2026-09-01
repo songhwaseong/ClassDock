@@ -120,6 +120,7 @@ class ClassDockLauncher
     static readonly string LocalAuthToken = CreateLocalAuthToken();
     static readonly byte[] Page = InjectLocalAuthToken(ReadResource("app.html"));
     static readonly byte[] PythonKernelRunner = ReadResource("python_kernel.py");
+    static readonly byte[] DbWorkerRunner = ReadResource("db_worker.py");
     static readonly byte[] NpmPackageRunner = ReadResource("npm_package_runner.js");
     static readonly object ConvLock = new object();   // PowerPoint 변환은 한 번에 하나만
     static readonly object MediaConvLock = new object();   // ffmpeg 영상 변환도 한 번에 하나만
@@ -421,6 +422,45 @@ class ClassDockLauncher
 
     static readonly object PyKernelsLock = new object();
     static readonly Dictionary<string, PythonKernel> PyKernels = new Dictionary<string, PythonKernel>();
+
+    // 원격 MySQL 접속 하나. 워커 프로세스가 커넥션을 물고 있어 트랜잭션·임시 테이블·세션 변수가
+    // 요청 사이에 유지된다. SQLite 미리보기처럼 매번 새로 실행하면 이 셋이 전부 끊긴다.
+    class DbSession
+    {
+        public string Id;
+        public Process Process;
+        public readonly object ExecLock = new object();    // 요청 한 건과 그 응답 한 줄을 직렬화한다
+        public readonly object StdinLock = new object();   // 취소는 쿼리 실행 중에도 stdin 에 써야 한다
+        public readonly LimitedTextBuffer Stderr = new LimitedTextBuffer();
+        public string RunnerPath;
+        public string Label = "";
+        public bool ReadOnly = true;
+        public DateTime LastUsed = DateTime.UtcNow;
+    }
+
+    // 실행 중인 쿼리 한 건. 브라우저가 60초짜리 fetch 에 매달리지 않도록 시작만 하고
+    // 결과는 pip 설치와 같은 방식으로 폴링해 가져간다.
+    class DbQueryJob
+    {
+        public string Id;
+        public string SessionId;
+        public readonly object Sync = new object();
+        public bool Complete;
+        public bool CancelRequested;
+        public string ResultJson = "";
+        public string Error = "";
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
+    static readonly object DbSessionsLock = new object();
+    static readonly Dictionary<string, DbSession> DbSessions = new Dictionary<string, DbSession>();
+    static readonly object DbJobsLock = new object();
+    static readonly Dictionary<string, DbQueryJob> DbJobs = new Dictionary<string, DbQueryJob>();
+    const int MaxDbSessions = 4;                       // 원격 터미널의 동시 세션 상한과 같은 기조
+    const int DbMetadataTimeoutMs = 60 * 1000;         // 접속·스키마·테이블 조회
+    const int DbQueryDefaultSeconds = 60;
+    const int DbQueryMaxSeconds = 600;
+    const int DbIdleMinutes = 30;                      // 유휴 접속은 스스로 정리한다
     static readonly object HeartbeatLock = new object();
     static readonly Dictionary<string, DateTime> HeartbeatClients = new Dictionary<string, DateTime>();
     static bool HeartbeatRequired;
@@ -866,6 +906,7 @@ class ClassDockLauncher
             if (path.StartsWith("/js-npm-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/heartbeat", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/db-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-", StringComparison.Ordinal)) return true;
             if (path == "/terminal-complete") return true;
@@ -896,6 +937,7 @@ class ClassDockLauncher
             if (path.StartsWith("/local-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-kernel-file?", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/pip-install-poll", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/db-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/js-npm-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
@@ -2349,6 +2391,118 @@ class ClassDockLauncher
                 else if (method == "POST" && path.StartsWith("/pip-install-cancel", StringComparison.Ordinal))
                 {
                     CancelPipInstall(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "GET" && path == "/db-capability")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(DbCapability()));
+                }
+                else if (method == "POST" && path == "/db-session-open")
+                {
+                    try
+                    {
+                        string json = StartDbSession(body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (PythonMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-python"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-open-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/db-schema?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        // mode = tables(기본, 트리) · columns(자동완성용 전체 컬럼)
+                        string schemaAction = QueryValue(path, "mode") == "columns" ? "schema-columns" : "schema";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), "{\"action\":" + JsonString(schemaAction) + "}");
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-schema-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/db-table?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        // mode = table(기본) · columns(트리 펼치기) · count(전체 행 수) · ddl(SHOW CREATE TABLE)
+                        string mode = QueryValue(path, "mode");
+                        if (mode != "columns" && mode != "count" && mode != "ddl") mode = "table";
+                        string request = "{\"action\":" + JsonString(mode)
+                            + ",\"name\":" + JsonString(DbCheckField(QueryValue(path, "name"), "table", 128, false))
+                            + ",\"database\":" + JsonString(DbCheckField(QueryValue(path, "database"), "database", 64, true)) + "}";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-table-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/db-use?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string request = "{\"action\":\"use\",\"name\":"
+                            + JsonString(DbCheckField(QueryValue(path, "name"), "database", 64, false)) + "}";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-use-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/db-page?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        int pageSet = 0, pageOffset = 0, pageLimit = 1000;
+                        int.TryParse(QueryValue(path, "set"), out pageSet);
+                        int.TryParse(QueryValue(path, "offset"), out pageOffset);
+                        if (!int.TryParse(QueryValue(path, "limit"), out pageLimit)) pageLimit = 1000;
+                        if (pageSet < 0) pageSet = 0;
+                        if (pageOffset < 0) pageOffset = 0;
+                        string request = "{\"action\":\"page\",\"set\":" + pageSet
+                            + ",\"offset\":" + pageOffset + ",\"limit\":" + pageLimit + "}";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-page-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/db-query?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = StartDbQuery(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-query-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/db-query-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollDbQuery(QueryValue(path, "job"))));
+                }
+                else if (method == "POST" && path.StartsWith("/db-query-cancel", StringComparison.Ordinal))
+                {
+                    CancelDbQuery(QueryValue(path, "job"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/db-session-close", StringComparison.Ordinal))
+                {
+                    StopDbSession(QueryValue(path, "id"));
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
                 else if (method == "POST" && path == "/python-kernel-start-bundle")
@@ -5004,6 +5158,338 @@ class ClassDockLauncher
         foreach (PythonKernel kernel in stale) StopPythonKernel(kernel.Id);
     }
 
+    /* ── 원격 MySQL 접속 ─────────────────────────────────────────────────────────────
+       db_worker.py 를 접속 하나당 하나씩 띄우고 base64(JSON) 한 줄을 주고받는다.
+       런처는 워커 응답의 JSON 을 열어 보지 않는다. 응답 첫 글자('+'/'-')로 성공 여부만 보고
+       본문은 그대로 브라우저에 넘긴다. 비밀번호는 stdin 의 connect 요청에만 실리고
+       명령행·환경변수·로그·디스크 어디에도 남지 않는다. */
+
+    static readonly System.Text.RegularExpressions.Regex DbHostRe =
+        new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9._:\[\]-]{1,255}$");
+
+    // 접속 정보는 SQL 로 조립되지 않고 JSON 값으로만 워커에 건너간다. 여기서 막는 것은
+    // 길이 폭주와 제어문자(로그·프로토콜 줄바꿈을 깨뜨리는 값)다.
+    static string DbCheckField(string value, string name, int max, bool allowEmpty)
+    {
+        string text = (value ?? "").Trim();
+        if (text.Length == 0)
+        {
+            if (allowEmpty) return "";
+            throw new Exception("db-missing-" + name);
+        }
+        if (text.Length > max) throw new Exception("db-long-" + name);
+        foreach (char c in text) if (c < 0x20 || c == 0x7f) throw new Exception("db-bad-" + name);
+        return text;
+    }
+
+    static DbSession RequireDbSession(string id)
+    {
+        DbSession session;
+        lock (DbSessionsLock) if (!DbSessions.TryGetValue(id ?? "", out session)) throw new Exception("db-session-not-found");
+        return session;
+    }
+
+    static void DbWriteLine(DbSession session, string requestJson)
+    {
+        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(requestJson));
+        // 취소는 쿼리가 ExecLock 을 쥐고 있는 동안에도 나가야 하므로 stdin 잠금을 따로 둔다.
+        lock (session.StdinLock)
+        {
+            session.Process.StandardInput.WriteLine(encoded);
+            session.Process.StandardInput.Flush();
+        }
+    }
+
+    // 취소는 응답을 만들지 않는다(fire and forget). 결과는 취소당한 쿼리 자신의 응답으로 드러난다.
+    static void DbSendCancel(DbSession session)
+    {
+        try { DbWriteLine(session, "{\"action\":\"cancel\"}"); } catch { }
+    }
+
+    static string DbExchange(DbSession session, string requestJson, int timeoutMs)
+    {
+        lock (session.ExecLock)
+        {
+            if (session.Process == null || session.Process.HasExited)
+                throw new Exception("db-session-stopped: " + session.Stderr.GetText());
+            session.LastUsed = DateTime.UtcNow;
+            DbWriteLine(session, requestJson);
+
+            string responseLine = null;
+            Exception readError = null;
+            Thread reader = new Thread(delegate()
+            {
+                try { responseLine = session.Process.StandardOutput.ReadLine(); }
+                catch (Exception ex) { readError = ex; }
+            });
+            reader.IsBackground = true;
+            reader.Start();
+            if (!reader.Join(timeoutMs))
+            {
+                // 제한 시간을 넘겼다 = 워커가 서버 응답을 기다리는 중이다. 먼저 취소를 보내 서버 쪽
+                // 쿼리를 끊고, 그래도 돌아오지 않으면 커넥션을 물고 있는 프로세스를 접는다.
+                DbSendCancel(session);
+                if (!reader.Join(5000))
+                {
+                    KillProcessTree(session.Process);
+                    try { reader.Join(2000); } catch { }
+                    throw new Exception("db-timeout");
+                }
+            }
+            if (readError != null) throw readError;
+            if (string.IsNullOrEmpty(responseLine))
+                throw new Exception("db-session-stopped: " + session.Stderr.GetText());
+
+            string line = responseLine.Trim();
+            if (line.Length < 2 || (line[0] != '+' && line[0] != '-')) throw new Exception("bad-db-response");
+            byte[] decoded;
+            try { decoded = Convert.FromBase64String(line.Substring(1)); }
+            catch { throw new Exception("bad-db-response"); }
+            session.LastUsed = DateTime.UtcNow;
+            return line[0] + Encoding.UTF8.GetString(decoded);
+        }
+    }
+
+    static bool DbResponseOk(string response) { return response.Length > 0 && response[0] == '+'; }
+    static string DbResponseBody(string response) { return response.Length > 0 ? response.Substring(1) : "{}"; }
+
+    static string DbCapability()
+    {
+        string interp = FindPython();
+        if (interp == null) return "{\"python\":false,\"driver\":false,\"version\":\"\"}";
+        string version = "";
+        try
+        {
+            string args = (interp == "py" ? "-3 " : "") + "-c \"import pymysql,sys;sys.stdout.write(pymysql.__version__)\"";
+            ProcessStartInfo psi = new ProcessStartInfo(interp, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.StandardOutputEncoding = new UTF8Encoding(false);
+            psi.StandardErrorEncoding = new UTF8Encoding(false);
+            using (Process probe = Process.Start(psi))
+            {
+                string output = probe.StandardOutput.ReadToEnd();
+                probe.StandardError.ReadToEnd();
+                if (!probe.WaitForExit(15000)) KillProcessTree(probe);
+                else if (probe.ExitCode == 0) version = output.Trim();
+            }
+        }
+        catch { }
+        return "{\"python\":true,\"driver\":" + (version.Length > 0 ? "true" : "false")
+            + ",\"version\":" + JsonString(version) + "}";
+    }
+
+    static string StartDbSession(byte[] body)
+    {
+        string interp = FindPython();
+        if (interp == null) throw new PythonMissingException();
+        if (body == null || body.Length == 0 || body.Length > 64 * 1024) throw new Exception("bad-db-request");
+
+        int pos = 0;
+        string host = DbCheckField(ReadBundleString(body, ref pos), "host", 255, false);
+        string portText = ReadBundleString(body, ref pos);
+        string database = DbCheckField(ReadBundleString(body, ref pos), "database", 64, true);
+        string user = DbCheckField(ReadBundleString(body, ref pos), "user", 128, false);
+        string password = ReadBundleString(body, ref pos);
+        string readOnlyText = pos < body.Length ? ReadBundleString(body, ref pos) : "1";
+        if (pos != body.Length) throw new Exception("bad-db-request");
+        if (!DbHostRe.IsMatch(host)) throw new Exception("db-bad-host");
+        if (password.Length > 1024) throw new Exception("db-long-password");
+        int port;
+        if (!int.TryParse(portText.Trim().Length == 0 ? "3306" : portText.Trim(), out port) || port < 1 || port > 65535)
+            throw new Exception("db-bad-port");
+        bool readOnly = readOnlyText != "0";
+
+        SweepDbSessions();
+        lock (DbSessionsLock) if (DbSessions.Count >= MaxDbSessions) throw new Exception("db-too-many-sessions");
+
+        string id = Guid.NewGuid().ToString("N");
+        string runnerPath = Path.Combine(Path.GetTempPath(), "classdock_db_worker_" + id + ".py");
+        File.WriteAllBytes(runnerPath, DbWorkerRunner);
+        DbSession session = new DbSession();
+        session.Id = id;
+        session.RunnerPath = runnerPath;
+        session.ReadOnly = readOnly;
+        session.Label = user + "@" + host + ":" + port + (database.Length > 0 ? "/" + database : "");
+        try
+        {
+            string args = (interp == "py" ? "-3 " : "") + "-u -X utf8 \"" + runnerPath + "\"";
+            ProcessStartInfo psi = new ProcessStartInfo(interp, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardInput = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.StandardOutputEncoding = new UTF8Encoding(false);
+            psi.StandardErrorEncoding = new UTF8Encoding(false);
+            psi.WorkingDirectory = Path.GetTempPath();
+            psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            psi.EnvironmentVariables["PYTHONUNBUFFERED"] = "1";
+
+            session.Process = new Process();
+            session.Process.StartInfo = psi;
+            session.Process.Start();
+            StartLimitedReader(session.Process.StandardError, session.Stderr);
+
+            string connectRequest = "{\"action\":\"connect\",\"host\":" + JsonString(host)
+                + ",\"port\":" + port
+                + ",\"database\":" + JsonString(database)
+                + ",\"user\":" + JsonString(user)
+                + ",\"password\":" + JsonString(password)
+                + ",\"readOnly\":" + (readOnly ? "true" : "false") + "}";
+            string response = DbExchange(session, connectRequest, DbMetadataTimeoutMs);
+            if (!DbResponseOk(response))
+            {
+                StopDbProcess(session);
+                return "{\"ok\":false,\"id\":\"\",\"info\":" + DbResponseBody(response) + "}";
+            }
+            lock (DbSessionsLock) DbSessions[id] = session;
+            return "{\"ok\":true,\"id\":" + JsonString(id) + ",\"readOnly\":" + (readOnly ? "true" : "false")
+                + ",\"label\":" + JsonString(session.Label) + ",\"info\":" + DbResponseBody(response) + "}";
+        }
+        catch
+        {
+            StopDbProcess(session);
+            throw;
+        }
+    }
+
+    // 워커에 보내는 단순 요청(스키마·테이블·행 수·데이터베이스 전환). 결과를 그대로 돌려준다.
+    static string DbMetadataRequest(string sessionId, string requestJson)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        string response = DbExchange(session, requestJson, DbMetadataTimeoutMs);
+        return "{\"ok\":" + (DbResponseOk(response) ? "true" : "false") + ",\"info\":" + DbResponseBody(response) + "}";
+    }
+
+    static string StartDbQuery(string sessionId, byte[] body)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        if (body == null || body.Length == 0 || body.Length > 4 * 1024 * 1024) throw new Exception("bad-db-request");
+        int pos = 0;
+        string sql = ReadBundleString(body, ref pos);
+        string timeoutText = pos < body.Length ? ReadBundleString(body, ref pos) : "";
+        if (pos != body.Length) throw new Exception("bad-db-request");
+        if (sql.Trim().Length == 0) throw new Exception("db-empty-sql");
+        int seconds = DbQueryDefaultSeconds, parsed;
+        if (int.TryParse(timeoutText.Trim(), out parsed) && parsed > 0)
+            seconds = Math.Max(5, Math.Min(DbQueryMaxSeconds, parsed));
+
+        SweepDbJobs();
+        DbQueryJob job = new DbQueryJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.SessionId = session.Id;
+        lock (DbJobsLock) DbJobs[job.Id] = job;
+
+        string request = "{\"action\":\"query\",\"sql\":" + JsonString(sql) + "}";
+        Thread worker = new Thread(delegate()
+        {
+            string response = "", error = "";
+            try { response = DbExchange(session, request, seconds * 1000); }
+            catch (Exception ex) { error = FlattenMessage(ex); }
+            lock (job.Sync)
+            {
+                job.ResultJson = response;
+                job.Error = error;
+                job.DoneAt = DateTime.UtcNow;
+                job.Complete = true;
+            }
+            SweepDbJobs();
+        });
+        worker.IsBackground = true;
+        worker.Start();
+        return "{\"job\":" + JsonString(job.Id) + ",\"timeoutSeconds\":" + seconds + "}";
+    }
+
+    static string PollDbQuery(string jobId)
+    {
+        DbQueryJob job;
+        lock (DbJobsLock) if (!DbJobs.TryGetValue(jobId ?? "", out job))
+            return "{\"done\":true,\"ok\":false,\"info\":{\"ok\":false,\"code\":\"job-not-found\",\"detail\":\"\"}}";
+        lock (job.Sync)
+        {
+            if (!job.Complete) return "{\"done\":false,\"cancelling\":" + (job.CancelRequested ? "true" : "false") + "}";
+            if (job.Error.Length > 0)
+                return "{\"done\":true,\"ok\":false,\"info\":{\"ok\":false,\"code\":"
+                    + JsonString(job.CancelRequested ? "cancelled" : "exec-failed")
+                    + ",\"detail\":" + JsonString(job.Error) + "}}";
+            return "{\"done\":true,\"ok\":" + (DbResponseOk(job.ResultJson) ? "true" : "false")
+                + ",\"cancelled\":" + (job.CancelRequested ? "true" : "false")
+                + ",\"info\":" + DbResponseBody(job.ResultJson) + "}";
+        }
+    }
+
+    static void CancelDbQuery(string jobId)
+    {
+        DbQueryJob job;
+        lock (DbJobsLock) if (!DbJobs.TryGetValue(jobId ?? "", out job)) return;
+        lock (job.Sync)
+        {
+            if (job.Complete || job.CancelRequested) return;
+            job.CancelRequested = true;
+        }
+        DbSession session;
+        lock (DbSessionsLock) if (!DbSessions.TryGetValue(job.SessionId ?? "", out session)) return;
+        DbSendCancel(session);
+    }
+
+    // 프로세스와 임시 러너만 정리한다(세션 목록에서 지우는 일은 호출부가 한다).
+    static void StopDbProcess(DbSession session)
+    {
+        if (session == null) return;
+        if (session.Process != null)
+        {
+            // 워커가 커넥션을 정상적으로 닫을 기회를 먼저 준다. 서버에 유령 커넥션을 남기지 않는다.
+            try { if (!session.Process.HasExited) DbWriteLine(session, "{\"action\":\"close\"}"); } catch { }
+            try { if (!session.Process.WaitForExit(2000)) KillProcessTree(session.Process); }
+            catch { KillProcessTree(session.Process); }
+        }
+        try { if (File.Exists(session.RunnerPath)) File.Delete(session.RunnerPath); } catch { }
+    }
+
+    static void StopDbSession(string id)
+    {
+        DbSession session = null;
+        lock (DbSessionsLock) if (DbSessions.TryGetValue(id ?? "", out session)) DbSessions.Remove(id ?? "");
+        StopDbProcess(session);
+    }
+
+    static void SweepDbSessions()
+    {
+        List<DbSession> stale = new List<DbSession>();
+        lock (DbSessionsLock)
+        {
+            foreach (DbSession session in DbSessions.Values)
+            {
+                bool dead = false;
+                try { dead = session.Process == null || session.Process.HasExited; } catch { dead = true; }
+                if (dead || (DateTime.UtcNow - session.LastUsed).TotalMinutes > DbIdleMinutes) stale.Add(session);
+            }
+            foreach (DbSession session in stale) DbSessions.Remove(session.Id);
+        }
+        foreach (DbSession session in stale) StopDbProcess(session);
+    }
+
+    // 끝난 쿼리는 결과를 잠시 남겨 둔다(폴링이 늦게 와도 결과를 볼 수 있게).
+    static void SweepDbJobs()
+    {
+        lock (DbJobsLock)
+        {
+            List<DbQueryJob> done = new List<DbQueryJob>();
+            foreach (DbQueryJob job in DbJobs.Values) if (job.Complete) done.Add(job);
+            done.Sort(delegate(DbQueryJob a, DbQueryJob b) { return a.DoneAt.CompareTo(b.DoneAt); });
+            DateTime now = DateTime.UtcNow;
+            List<DbQueryJob> remove = new List<DbQueryJob>();
+            foreach (DbQueryJob job in done)
+                if ((now - job.DoneAt).TotalMinutes > 10) remove.Add(job);
+            for (int i = 0; i < done.Count - 16; i++)
+                if (!remove.Contains(done[i])) remove.Add(done[i]);
+            foreach (DbQueryJob job in remove) DbJobs.Remove(job.Id);
+        }
+    }
+
     static List<int> ProcessTreeIds(int rootPid)
     {
         var parent = new Dictionary<int, int>();
@@ -6149,6 +6635,10 @@ class ClassDockLauncher
             List<string> kernelIds = new List<string>();
             lock (PyKernelsLock) foreach (string id in PyKernels.Keys) kernelIds.Add(id);
             foreach (string id in kernelIds) StopPythonKernel(id);   // 프로세스 종료 + 작업폴더 삭제
+
+            List<string> dbIds = new List<string>();
+            lock (DbSessionsLock) foreach (string id in DbSessions.Keys) dbIds.Add(id);
+            foreach (string id in dbIds) StopDbSession(id);          // 서버에 유령 커넥션을 남기지 않는다
 
             List<TerminalSession> terminals = new List<TerminalSession>();
             lock (TerminalSessionsLock)

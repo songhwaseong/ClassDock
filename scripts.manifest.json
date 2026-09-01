@@ -89,6 +89,7 @@
     "pet-focus.js",
     "data-convert.js",
     "table-export.js",
+    "db-client.js",
     "data-convert-ui.js",
     "exchange-rate.js",
     "exchange-rate-ui.js",
@@ -207,6 +208,7 @@
         "pet-focus.js",
         "data-convert.js",
         "table-export.js",
+        "db-client.js",
         "data-convert-ui.js",
         "exchange-rate.js",
         "exchange-rate-ui.js",
@@ -453,6 +455,12 @@
       "table-export.js",
       "whiteboard.js",
       "documents.js"
+    ],
+    "db-client.js": [
+      "code-viewer.js",
+      "documents.js",
+      "file-loaders.js",
+      "table-export.js"
     ]
   },
   "moduleBoundaries": [

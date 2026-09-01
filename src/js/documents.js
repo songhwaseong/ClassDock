@@ -1314,6 +1314,7 @@ function unsavedDocumentLabel(doc){
   if (doc.kind === "timeline") return "연대표";
   if (doc.kind === "concept") return "개념 관계도";
   if (doc.kind === "study") return "암기 카드";
+  if (doc.kind === "dbconn") return "접속 설정";
   if (doc.notebook) return "노트북";
   if (doc.kind === "office" && /\.(xlsx|xls|csv)$/i.test(doc.name || "")) return "스프레드시트";
   if (doc.kind === "office") return "문서";

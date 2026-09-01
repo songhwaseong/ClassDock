@@ -426,6 +426,7 @@ function wire(){
   if (byId("sbNewMusic")) byId("sbNewMusic").onclick = () => { if (typeof newMusicScratch === "function") newMusicScratch(); };
   if (byId("sbNewMap")) byId("sbNewMap").onclick = () => { if (typeof newMapScratch === "function") newMapScratch(); };
   if (byId("sbNewTimeline")) byId("sbNewTimeline").onclick = () => { if (typeof newTimelineScratch === "function") newTimelineScratch(); };
+  if (byId("sbNewDbConn")) byId("sbNewDbConn").onclick = () => { if (typeof newDbConnScratch === "function") newDbConnScratch(); };
   if (byId("sbNewConcept")) byId("sbNewConcept").onclick = () => { if (typeof newConceptScratch === "function") newConceptScratch(); };
   if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };

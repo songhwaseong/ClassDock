@@ -61,6 +61,7 @@ const MNDocumentTypes = (() => {
     if (kind === "study") return "암기";
     if (kind === "replay") return "▶";
     if (kind === "diff") return "비교";
+  if (kind === "dbconn") return "DB";
     const ext = fileExtOf(name);
     if (ext === "md" || ext === "markdown" || ext === "mdx") return "MD";
     if (ext === "docx" || ext === "doc") return "DOC";
@@ -81,6 +82,7 @@ const MNDocumentTypes = (() => {
     if (kind === "timeline") return "timeline";
     if (kind === "concept") return "concept";
     if (kind === "study") return "study";
+    if (kind === "dbconn") return "db";
     const ext = fileExtOf(name);
     if (ext === "docx" || ext === "doc") return "word";
     if (ext === "xlsx" || ext === "xls" || ext === "csv") return "sheet";
