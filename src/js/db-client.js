@@ -434,17 +434,55 @@ const MNDbClient = (() => {
     return map;
   };
 
-  /* SQL 편집기의 Ctrl+클릭 대상. 지금은 현재 DB의 테이블과 별칭을 해석한다.
-     반환값에 kind를 둬 프로시저·함수·트리거·이벤트 처리기를 같은 통로에 추가할 수 있게 한다. */
+  /* 정의 창으로 볼 수 있는 객체. */
+  const DEFINITION_OBJECT_KINDS = { procedure:true, function:true, event:true, trigger:true };
+
+  /* 그중 편집기에서 Ctrl+클릭으로 찾아갈 수 있는 것. 스키마를 읽을 때 목록을 통째로 받는 것만 든다 —
+     테이블을 펼쳐야 알 수 있는 객체를 여기 넣으면 펼친 것만 링크가 되어 동작이 들쭉날쭉해진다. */
+  const LINKABLE_OBJECT_KINDS = { procedure:true, function:true, event:true, trigger:true };
+
+  /* 루틴 이름 앞에 놓이는 키워드. 스키마 한정(`db.이름`)과 역따옴표도 같은 참조로 본다.
+     테이블과 달리 루틴은 FROM·JOIN 같은 단서가 없어, 이름만 같으면 링크로 만들면
+     주석·문자열·컬럼명까지 걸린다. 그래서 실제 참조 형태일 때만 대상으로 삼는다. */
+  const ROUTINE_REFERENCE = {
+    procedure: /\b(?:call|procedure)\s+(?:`?[A-Za-z_$글-힣][\w$글-힣]*`?\s*\.\s*)?`?$/i,
+    function: /\bfunction\s+(?:`?[A-Za-z_$글-힣][\w$글-힣]*`?\s*\.\s*)?`?$/i,
+    event: /\bevent\s+(?:`?[A-Za-z_$글-힣][\w$글-힣]*`?\s*\.\s*)?`?$/i,
+    trigger: /\btrigger\s+(?:`?[A-Za-z_$글-힣][\w$글-힣]*`?\s*\.\s*)?`?$/i
+  };
+
+  // 프로시저·함수는 호출 형태(`이름(`)만으로도 참조로 인정한다. 이벤트·트리거는 호출 문법이 없어
+  // CREATE·ALTER·DROP 뒤의 키워드로만 찾는다.
+  const routineReferenceAt = (text, wordInfo, kind) => {
+    const source = String(text || "");
+    const start = Number(wordInfo.start) || 0;
+    const end = Number.isFinite(wordInfo.end) ? wordInfo.end : start + String(wordInfo.word).length;
+    if (kind === "procedure" || kind === "function"){
+      if (/^\s*\(/.test(source.slice(end))) return true;
+    }
+    const pattern = ROUTINE_REFERENCE[kind];
+    return !!pattern && pattern.test(source.slice(0, start));
+  };
+
+  /* SQL 편집기의 Ctrl+클릭 대상. 현재 DB의 테이블·뷰와 별칭, 그리고 프로시저·함수·이벤트·트리거를 해석한다.
+     이름이 겹치면 테이블이 먼저다 — FROM 뒤에 적힌 이름을 루틴 정의로 열면 안 된다. */
   const sqlDefinitionTargetAt = (source, wordInfo, objects) => {
     if (!wordInfo || !wordInfo.word) return null;
     const text = String(source || "");
+    const list = Array.isArray(objects) ? objects : [];
+    const word = String(wordInfo.word);
     const statement = statementAt(text, Number.isFinite(wordInfo.point) ? wordInfo.point : wordInfo.start);
-    const tableName = aliasMap(statement ? statement.text : text).get(String(wordInfo.word).toLowerCase());
-    if (!tableName) return null;
-    const item = (Array.isArray(objects) ? objects : []).find(candidate =>
-      candidate && candidate.type === "table" && String(candidate.name).toLowerCase() === tableName.toLowerCase());
-    return item ? { kind:"table", name:item.name, item } : null;
+    const tableName = aliasMap(statement ? statement.text : text).get(word.toLowerCase());
+    if (tableName){
+      const item = list.find(candidate => candidate
+        && (candidate.type === "table" || candidate.type === "view")
+        && String(candidate.name).toLowerCase() === tableName.toLowerCase());
+      if (item) return { kind:"table", name:item.name, item };
+    }
+    const routine = list.find(candidate => candidate && LINKABLE_OBJECT_KINDS[candidate.type]
+      && String(candidate.name).toLowerCase() === word.toLowerCase());
+    if (!routine || !routineReferenceAt(text, wordInfo, routine.type)) return null;
+    return { kind:"routine", name:routine.name, item:routine };
   };
 
   // 이름을 편집기에 넣을 때 그대로 써도 되는지 본다. 평범한 식별자가 아니면 역따옴표로 감싼다
@@ -472,6 +510,68 @@ const MNDbClient = (() => {
     const delimiter = chooseScriptDelimiter(body + "\n" + drop);
     return "DELIMITER " + delimiter + "\n\n" + drop + delimiter + "\n\n"
       + body + delimiter + "\n\nDELIMITER ;";
+  };
+
+  /* 정의문에서 매개변수 목록을 뽑는다. 서버에 따로 묻지 않고 이미 받은 CREATE 문만 읽는다.
+     역따옴표 이름 안의 괄호·쉼표와 DECIMAL(10,2) 같은 중첩 괄호를 세지 않도록 깊이를 센다.
+     읽지 못하면 빈 목록을 준다 — 정의 탭은 그대로 보이므로 창이 쓸모없어지지는 않는다.
+     반환형은 여기서 읽지 않는다. 스키마 목록의 dataType 이 이미 정확하다. */
+  const routineParameters = (ddl, kind) => {
+    const text = String(ddl || "");
+    if (kind !== "procedure" && kind !== "function") return [];
+    // 이름이 역따옴표로 감싸여 있으면 그 안의 괄호는 건너뛰고 여는 괄호를 찾는다.
+    let open = -1;
+    for (let index = 0; index < text.length; index++){
+      const char = text[index];
+      if (char === "`"){
+        const stop = text.indexOf("`", index + 1);
+        index = stop < 0 ? text.length : stop;
+        continue;
+      }
+      if (char === "("){ open = index; break; }
+    }
+    if (open < 0) return [];
+    let depth = 0, close = -1;
+    for (let index = open; index < text.length; index++){
+      const char = text[index];
+      if (char === "`"){
+        const stop = text.indexOf("`", index + 1);
+        index = stop < 0 ? text.length : stop;
+        continue;
+      }
+      if (char === "("){ depth++; continue; }
+      if (char === ")" && !--depth){ close = index; break; }
+    }
+    if (close < 0) return [];
+    const inside = text.slice(open + 1, close);
+    const parts = [];
+    let start = 0;
+    depth = 0;
+    for (let index = 0; index < inside.length; index++){
+      const char = inside[index];
+      if (char === "`"){
+        const stop = inside.indexOf("`", index + 1);
+        index = stop < 0 ? inside.length : stop;
+        continue;
+      }
+      if (char === "("){ depth++; continue; }
+      if (char === ")"){ depth--; continue; }
+      if (char === "," && !depth){ parts.push(inside.slice(start, index)); start = index + 1; }
+    }
+    parts.push(inside.slice(start));
+    return parts.map(part => part.trim()).filter(Boolean).map(part => {
+      const direction = /^(in|out|inout)\s+/i.exec(part);
+      const rest = direction ? part.slice(direction[0].length) : part;
+      // 프로시저 매개변수의 기본 방향은 IN 이다(MySQL 이 생략을 그렇게 읽는다).
+      const label = direction ? direction[1].toUpperCase() : "IN";
+      const name = /^`((?:[^`]|``)+)`|^([A-Za-z_$글-힣][\w$글-힣]*)/.exec(rest);
+      if (!name) return { name:rest, direction:label, type:"" };
+      return {
+        name: name[1] ? name[1].replace(/``/g, "`") : name[2],
+        direction: label,
+        type: rest.slice(name[0].length).trim()
+      };
+    });
   };
 
   const schemaObjectLabel = (item) => ({
@@ -1140,14 +1240,22 @@ const MNDbClient = (() => {
       completionWords,
       // `별칭.` 뒤에서는 그 별칭이 가리키는 테이블의 컬럼만 준다.
       memberCandidates: (source, receiver, prefix) => sqlMemberCandidates(source, receiver, prefix),
-      // Ctrl+클릭은 공용 편집기의 정의 대상 확장점을 사용한다. 현재는 테이블/별칭을 열고,
-      // 이후 다른 스키마 객체는 sqlDefinitionTargetAt의 kind 처리만 늘리면 된다.
+      // Ctrl+클릭은 공용 편집기의 정의 대상 확장점을 사용한다. 테이블·뷰는 테이블 정보 창을,
+      // 프로시저·함수·이벤트는 루틴 정보 창을 연다. 트리거는 sqlDefinitionTargetAt 이 걸러 낸다.
       definitionTargetAt: ({ source, wordInfo }) => sqlDefinitionTargetAt(source, wordInfo, schemaObjects),
       openDefinitionTarget: ({ target }) => {
-        if (!target || target.kind !== "table") return false;
-        setSchemaSelection(target.item);
-        openTableInfoModal(target.name);
-        return true;
+        if (!target) return false;
+        if (target.kind === "table"){
+          setSchemaSelection(target.item);
+          openTableInfoModal(target.name);
+          return true;
+        }
+        if (target.kind === "routine"){
+          setSchemaSelection(target.item);
+          openObjectInfoModal(target.item);
+          return true;
+        }
+        return false;
       }
     });
     editor.ta.setAttribute("aria-label", "SQL 편집기");
@@ -3022,7 +3130,8 @@ const MNDbClient = (() => {
       { type:"view", label:"Views", icon:"view", expandable:true },
       { type:"procedure", label:"Procedures", icon:"procedure" },
       { type:"function", label:"Functions", icon:"function" },
-      { type:"event", label:"Events", icon:"event" }
+      { type:"event", label:"Events", icon:"event" },
+      { type:"trigger", label:"Triggers", icon:"trigger" }
     ];
     const expandedSchemaGroups = new Set(["table", "view"]);
     const expandedTables = new Set();
@@ -3161,7 +3270,7 @@ const MNDbClient = (() => {
         closeTableContextMenu();
         setSchemaSelection(item);
         if (tableTarget) openTableInfoModal(item.table || item.name, childTab);
-        else showSchemaObject(item);
+        else openObjectInfoModal(item);
       });
       const label = schemaObjectLabel(item);
       const deleteItem = button("", "db-table-context-item danger", label + " 삭제");
@@ -3215,59 +3324,6 @@ const MNDbClient = (() => {
       event.preventDefault();
       requestSchemaDelete(selectedSchemaItem);
     });
-
-    const showSchemaObject = async (item) => {
-      setSchemaSelection(item);
-      clearResult();
-      resultStatus.textContent = item.name + " 정의를 읽는 중…";
-      try {
-        const url = "/db-object?id=" + encodeURIComponent(sessionId)
-          + "&kind=" + encodeURIComponent(item.type) + "&name=" + encodeURIComponent(item.name)
-          + "&database=" + encodeURIComponent(currentDatabase);
-        const response = await jsonOf(await fetch(url, { cache:"no-store" }));
-        if (!response.ok) throw new Error(messageFor(response.info));
-        const labels = { procedure:"프로시저", function:"함수", event:"이벤트", trigger:"트리거" };
-        const ddl = String(response.info.ddl || "");
-        const card = el("section", "db-schema-definition");
-        const head = el("div", "db-schema-definition-head");
-        const heading = el("div", "db-schema-definition-title");
-        heading.append(schemaIcon(item.type, "db-schema-definition-icon"), el("strong", null, item.name));
-        const copy = button("정의 복사", "db-btn db-btn-quiet");
-        copy.disabled = !ddl;
-        copy.addEventListener("click", async () => {
-          try { await navigator.clipboard.writeText(ddl); toast("정의를 복사했어요.", 1800); }
-          catch(_){ toast("정의를 복사하지 못했습니다.", 2200); }
-        });
-        const editScript = button("교체 스크립트 편집", "db-btn db-btn-quiet",
-          "현재 객체를 DROP한 뒤 편집한 정의로 다시 만드는 DELIMITER 스크립트를 편집기에 넣습니다");
-        editScript.disabled = !ddl || readOnly;
-        editScript.addEventListener("click", async () => {
-          const script = routineEditScript(item, ddl, currentDatabase);
-          if (!script) return;
-          if (editor.getValue().trim() && typeof confirmDialog === "function"){
-            const ok = await confirmDialog(
-              "편집기에 쓰던 SQL 이 있습니다.\n" + item.name + " 교체 스크립트로 바꿀까요?"
-                + "\n\n현재 편집기 내용은 사라집니다(저장하지 않았다면 되돌릴 수 없습니다).",
-              "바꾸기", "취소");
-            if (!ok) return;
-          }
-          editor.setValue(script);
-          const createAt = script.indexOf(ddl.trim());
-          editor.ta.setSelectionRange(Math.max(0, createAt), Math.max(0, createAt));
-          editor.ta.focus();
-          refreshRunLabel();
-          toast("DROP+CREATE 교체 스크립트를 넣었습니다. 실행 전에 정의를 확인해 주세요.", 3400);
-        });
-        head.append(heading, el("span", "spacer", null), editScript, copy);
-        card.append(head, el("pre", "db-schema-definition-ddl", ddl || "정의문이 없습니다."));
-        resultHost.append(card);
-        resultStatus.textContent = (labels[item.type] || "객체") + " · " + item.name
-          + (item.table ? " · 테이블 " + item.table : "");
-      } catch(error){
-        clearResult();
-        resultStatus.textContent = launcherMessage(error);
-      }
-    };
 
     const tableSection = (item, kind, label, icon, values, renderItem) => {
       const section = el("section", "db-table-child-group");
@@ -3340,7 +3396,7 @@ const MNDbClient = (() => {
           const node = button("", "db-column-item", trigger.name + " — " + trigger.timing + " " + trigger.event);
           node.append(schemaIcon("trigger", "db-column-icon"), el("span", "db-column-name", trigger.name),
             el("span", "db-column-type", trigger.timing + " " + trigger.event));
-          bindSchemaObjectNode(node, child, () => showSchemaObject(child));
+          bindSchemaObjectNode(node, child, () => openObjectInfoModal(child));
           return node;
         };
         host.append(tableSection(item, "columns", "Columns", "column", info.columns || [], columnNode));
@@ -3413,9 +3469,10 @@ const MNDbClient = (() => {
             name.append(schemaIcon(group.icon, "db-table-object-icon"), el("span", "db-table-name", item.name));
             if (item.type === "function" && item.dataType) name.append(el("span", "db-table-object-meta", item.dataType));
             if (item.type === "event" && item.status) name.append(el("span", "db-table-object-meta", item.status));
+            if (item.type === "trigger" && item.table) name.append(el("span", "db-table-object-meta", item.table));
             bindSchemaObjectNode(name, item, () => {
               if (item.type === "table" || item.type === "view") showTable(item.name);
-              else showSchemaObject(item);
+              else openObjectInfoModal(item);
             }, row);
 
             row.append(toggle, name);
@@ -3467,7 +3524,8 @@ const MNDbClient = (() => {
       schemaObjects = [
         ...(Array.isArray(info.tables) ? info.tables : []),
         ...(Array.isArray(info.routines) ? info.routines : []),
-        ...(Array.isArray(info.events) ? info.events : [])
+        ...(Array.isArray(info.events) ? info.events : []),
+        ...(Array.isArray(info.triggers) ? info.triggers : [])
       ];
       tableChildrenCache.clear();
       if (previousDatabase !== currentDatabase){
@@ -3780,6 +3838,176 @@ const MNDbClient = (() => {
         viewport.innerHTML = "";
         notice(viewport, "ERD를 만들지 못했습니다", launcherMessage(error), "error");
         summary.textContent = "메타데이터를 읽지 못했습니다.";
+      }
+    };
+
+    /* 객체 정의 창 — 프로시저·함수·이벤트·트리거를 테이블 정보와 같은 모달로 보여 준다.
+       편집기 Ctrl+클릭과 트리의 "정의 보기"가 같은 창을 쓴다. 결과 패널에 그리던 예전 방식과 달리
+       실행 결과를 지우지 않는다 — 둘 다 "잠깐 들여다보기"라서 보던 조회 결과가 사라지면 곤란하다.
+       모달 클래스를 테이블 정보와 공유해 창이 겹쳐 뜨지 않게 한다. */
+    const openObjectInfoModal = async (item) => {
+      const kind = String(item && item.type || "");
+      if (!sessionId || !DEFINITION_OBJECT_KINDS[kind]) return;
+      if (document.querySelector(".db-table-modal")) return;
+      const label = schemaObjectLabel(item);
+      const modal = el("div", "modal db-table-modal db-object-modal");
+      const card = el("div", "modal-card db-table-card");
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.setAttribute("aria-label", item.name + " " + label + " 정보");
+      const head = el("div", "db-table-modal-head");
+      const headIcon = schemaIcon(kind, "db-table-modal-icon");
+      const heading = el("div", "db-table-modal-heading");
+      const title = el("h3", null, item.name);
+      const subtitle = el("p", "sub", label + " 정의를 읽는 중…");
+      heading.append(title, subtitle);
+      const closeButton = button("", "db-table-modal-close", "닫기");
+      closeButton.setAttribute("aria-label", "닫기");
+      closeButton.innerHTML = uiIcon("close");
+      head.append(headIcon, heading, closeButton);
+      const body = el("div", "db-table-modal-body");
+      body.append(el("p", "db-table-modal-loading", label + " 정의를 읽는 중…"));
+      card.append(head, body);
+      modal.append(card);
+      document.body.append(modal);
+      if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(modal);
+
+      const close = () => {
+        window.removeEventListener("keydown", onKey, true);
+        modal.remove();
+      };
+      const onKey = (event) => {
+        if (event.key === "Escape" && !document.querySelector(".db-value-modal")){
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }
+      };
+      window.addEventListener("keydown", onKey, true);
+      closeButton.addEventListener("click", close);
+      modal.addEventListener("click", (event) => { if (event.target === modal) close(); });
+
+      try {
+        const url = "/db-object?id=" + encodeURIComponent(sessionId)
+          + "&kind=" + encodeURIComponent(kind) + "&name=" + encodeURIComponent(item.name)
+          + "&database=" + encodeURIComponent(currentDatabase);
+        const response = await jsonOf(await fetch(url, { cache:"no-store" }));
+        if (!response.ok) throw new Error(messageFor(response.info));
+        const ddl = String(response.info.ddl || "");
+        const parameters = routineParameters(ddl, kind);
+        body.innerHTML = "";
+        const hasParameters = kind === "procedure" || kind === "function";
+        subtitle.textContent = label + " · " + (currentDatabase || "현재 데이터베이스")
+          + (kind === "trigger" && item.table ? " · 테이블 " + item.table : "")
+          + (hasParameters ? " · 매개변수 " + parameters.length + "개" : "")
+          + (kind === "function" && item.dataType ? " · 반환 " + item.dataType : "");
+
+        const tabs = el("div", "db-table-modal-tabs");
+        const overviewTab = button("개요", "db-table-modal-tab active");
+        // 이벤트·트리거는 매개변수를 받지 않으므로 탭 자체를 만들지 않는다.
+        const paramsTab = hasParameters
+          ? button("매개변수 " + parameters.length, "db-table-modal-tab") : null;
+        const ddlTab = button("정의", "db-table-modal-tab");
+        tabs.append(overviewTab, ...(paramsTab ? [paramsTab] : []), ddlTab);
+
+        const panels = el("div", "db-table-modal-panels");
+        const overviewPanel = el("section", "db-table-modal-panel");
+        const paramsPanel = paramsTab ? el("section", "db-table-modal-panel") : null;
+        const ddlPanel = el("section", "db-table-modal-panel");
+        if (paramsPanel) paramsPanel.hidden = true;
+        ddlPanel.hidden = true;
+        panels.append(overviewPanel, ...(paramsPanel ? [paramsPanel] : []), ddlPanel);
+
+        const pairs = [[overviewTab, overviewPanel],
+          ...(paramsTab ? [[paramsTab, paramsPanel]] : []), [ddlTab, ddlPanel]];
+        const switchTab = (tab) => pairs.forEach((pair) => {
+          pair[0].classList.toggle("active", pair[0] === tab);
+          pair[1].hidden = pair[0] !== tab;
+        });
+        pairs.forEach((pair) => pair[0].addEventListener("click", () => switchTab(pair[0])));
+
+        const facts = el("dl", "db-table-facts");
+        const rows = [["종류", label], ["데이터베이스", currentDatabase || "—"]];
+        if (kind === "function") rows.push(["반환 자료형", item.dataType || "—"]);
+        if (hasParameters) rows.push(["매개변수", String(parameters.length) + "개"]);
+        if (kind === "event"){
+          const interval = (item.intervalValue ? item.intervalValue + " " + (item.intervalField || "") : "").trim();
+          rows.push(["상태", item.status || "—"], ["주기", item.eventType || "—"],
+            ["실행 간격", interval || "—"], ["실행 시각", item.executeAt || "—"]);
+        }
+        if (kind === "trigger"){
+          rows.push(["대상 테이블", item.table || "—"], ["시점", item.timing || "—"],
+            ["동작", item.event || "—"], ["적용 단위", item.orientation || "—"]);
+        }
+        // 트리거는 information_schema 에 설명 칸이 없다.
+        if (kind !== "trigger") rows.push(["설명", item.comment || "—"]);
+        rows.forEach((pair) => facts.append(el("dt", null, pair[0]), el("dd", null, pair[1])));
+        overviewPanel.append(facts);
+
+        if (paramsPanel){
+          if (!parameters.length){
+            paramsPanel.append(el("p", "db-empty", ddl
+              ? "매개변수가 없습니다." : "정의문을 읽지 못해 매개변수를 보여 줄 수 없습니다."));
+          } else {
+            const table = el("table", "db-routine-params");
+            const headRow = el("tr", null, null);
+            ["이름", "방향", "자료형"].forEach((text) => headRow.append(el("th", null, text)));
+            const thead = el("thead", null, null);
+            thead.append(headRow);
+            const tbody = el("tbody", null, null);
+            parameters.forEach((parameter) => {
+              const row = el("tr", null, null);
+              // 함수 매개변수에는 IN/OUT 구분이 없다. 프로시저에서만 방향을 보여 준다.
+              row.append(el("td", "db-routine-param-name", parameter.name),
+                el("td", "db-routine-param-dir", kind === "function" ? "—" : parameter.direction),
+                el("td", "db-routine-param-type", parameter.type || "—"));
+              tbody.append(row);
+            });
+            table.append(thead, tbody);
+            paramsPanel.append(table);
+          }
+        }
+
+        const ddlTools = el("div", "db-table-ddl-tools");
+        const copyButton = button("정의 복사", "db-btn db-btn-quiet");
+        copyButton.disabled = !ddl;
+        const editScript = button("교체 스크립트 편집", "db-btn db-btn-quiet",
+          "현재 객체를 DROP한 뒤 편집한 정의로 다시 만드는 DELIMITER 스크립트를 편집기에 넣습니다");
+        editScript.disabled = !ddl || readOnly;
+        if (readOnly) editScript.title = "읽기 전용 접속입니다.";
+        const ddlActions = el("div", "db-table-constraint-toolbar-actions");
+        ddlActions.append(editScript, copyButton);
+        ddlTools.append(el("p", null, "서버가 돌려준 현재 CREATE 문입니다."), ddlActions);
+        ddlPanel.append(ddlTools, el("pre", "db-table-ddl", ddl || "정의문이 없습니다."));
+        copyButton.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(ddl); toast("정의를 복사했어요.", 1800); }
+          catch(_){ toast("정의를 복사하지 못했습니다.", 2200); }
+        });
+        editScript.addEventListener("click", async () => {
+          const script = routineEditScript(item, ddl, currentDatabase);
+          if (!script) return;
+          if (editor.getValue().trim() && typeof confirmDialog === "function"){
+            const ok = await confirmDialog(
+              "편집기에 쓰던 SQL 이 있습니다.\n" + item.name + " 교체 스크립트로 바꿀까요?"
+                + "\n\n현재 편집기 내용은 사라집니다(저장하지 않았다면 되돌릴 수 없습니다).",
+              "바꾸기", "취소");
+            if (!ok) return;
+          }
+          close();
+          editor.setValue(script);
+          const createAt = script.indexOf(ddl.trim());
+          editor.ta.setSelectionRange(Math.max(0, createAt), Math.max(0, createAt));
+          editor.ta.focus();
+          refreshRunLabel();
+          toast("DROP+CREATE 교체 스크립트를 넣었습니다. 실행 전에 정의를 확인해 주세요.", 3400);
+        });
+
+        body.append(tabs, panels);
+        requestAnimationFrame(() => overviewTab.focus());
+      } catch(error){
+        body.innerHTML = "";
+        subtitle.textContent = label;
+        notice(body, label + " 정의를 읽지 못했습니다", launcherMessage(error), "error");
       }
     };
 
@@ -4927,7 +5155,7 @@ const MNDbClient = (() => {
 
   return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
     statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements,
-    identifierFor, ddlIdentifier, ddlString, routineEditScript, schemaObjectLabel, schemaDropSql, editBlockNote,
+    identifierFor, ddlIdentifier, ddlString, routineEditScript, routineParameters, schemaObjectLabel, schemaDropSql, editBlockNote,
     cellUpdatePreview, rowDeletePreview, rowInsertPreview,
     defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
     erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };

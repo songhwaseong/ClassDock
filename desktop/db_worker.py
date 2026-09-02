@@ -651,7 +651,8 @@ def run_statements(sql, driver):
 
 def load_schema():
     connection = require_connection()
-    payload = {"ok": True, "databases": [], "tables": [], "routines": [], "events": [], "current": ""}
+    payload = {"ok": True, "databases": [], "tables": [], "routines": [], "events": [],
+               "triggers": [], "current": ""}
     with connection.cursor() as cursor:
         cursor.execute("SELECT DATABASE()")
         row = cursor.fetchone()
@@ -697,6 +698,17 @@ def load_schema():
                 "eventType": str(item[2] or ""), "executeAt": str(item[3] or ""),
                 "intervalValue": str(item[4] or ""), "intervalField": str(item[5] or ""),
                 "comment": str(item[6] or "")[:200],
+            } for item in cursor.fetchall()]
+            cursor.execute(
+                "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION "
+                "FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = %s "
+                "ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, TRIGGER_NAME LIMIT %s",
+                (payload["current"], MAX_SCHEMA_OBJECTS),
+            )
+            payload["triggers"] = [{
+                "name": str(item[0]), "type": "trigger", "table": str(item[1] or ""),
+                "timing": str(item[2] or ""), "event": str(item[3] or ""),
+                "orientation": str(item[4] or ""),
             } for item in cursor.fetchall()]
     return payload
 

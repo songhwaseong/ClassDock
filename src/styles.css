@@ -6711,13 +6711,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-column-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .db-column-type{flex:none;max-width:44%;margin-left:auto;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:10.5px}
 
-.db-schema-definition{display:flex;flex-direction:column;min-height:100%;background:var(--panel)}
-.db-schema-definition-head{display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--border);background:var(--panel-2)}
-.db-schema-definition-title{display:flex;align-items:center;gap:7px;min-width:0}.db-schema-definition-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.db-schema-definition-icon{display:flex;flex:none;width:17px;height:17px;color:var(--accent)}.db-schema-definition-icon .ui-icon{width:100%;height:100%}
-.db-schema-definition-ddl{flex:1;min-height:180px;margin:0;padding:13px;overflow:auto;background:var(--code-bg);color:var(--code-text);
-  font:12px/1.58 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2}
-
 /* ERD — HTML 테이블 카드와 SVG 관계선을 같은 월드 좌표계에서 이동·확대한다. */
 .db-erd-card{display:flex;flex-direction:column;width:min(1500px,98vw);height:min(930px,95vh);max-width:none;padding:0;overflow:hidden}
 .db-erd-head{display:flex;align-items:center;gap:10px;flex:none;padding:13px 15px 10px;border-bottom:1px solid var(--border)}
@@ -6790,6 +6783,17 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-facts dt,.db-table-facts dd{padding:8px 10px;border-bottom:1px solid var(--border)}
 .db-table-facts dt{background:var(--panel-2);color:var(--muted);font-weight:700}.db-table-facts dd{background:var(--field);overflow-wrap:anywhere}
 .db-table-facts dt:nth-last-child(-n+2),.db-table-facts dd:nth-last-child(-n+2){border-bottom:0}
+/* 객체 정의 창 — 테이블 정보와 같은 껍데기를 쓰되, 보여 줄 것이 적어 창을 좁게 잡는다. */
+.db-object-modal .db-table-card{width:min(760px,95vw);height:min(640px,88vh)}
+.db-routine-params{width:100%;border-collapse:collapse;font-size:12px;
+  border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.db-routine-params th,.db-routine-params td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--border)}
+.db-routine-params th{background:var(--panel-2);color:var(--muted);font-weight:700}
+.db-routine-params td{background:var(--field);overflow-wrap:anywhere}
+.db-routine-params tr:last-child td{border-bottom:0}
+.db-routine-param-name{font-weight:600}
+.db-routine-param-dir{width:88px;color:var(--muted)}
+.db-routine-param-type{width:38%;font-family:var(--code-font,ui-monospace,monospace)}
 .db-table-columns-toolbar,.db-table-ddl-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
 .db-table-columns-toolbar p,.db-table-ddl-tools p{margin:0;color:var(--muted);font-size:11.5px}
 .db-table-constraint-toolbar-actions{display:flex;align-items:center;gap:6px}

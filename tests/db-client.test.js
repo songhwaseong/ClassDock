@@ -371,7 +371,7 @@ test("2차 테이블 정보는 인덱스와 외래키 메타데이터를 함께 
   assert.match(source, /renderIndexEditor\(\);\s*\n\s*renderForeignKeyEditor\(\);/);
 });
 
-test("프로시저·함수·이벤트와 테이블 하위 트리거는 정의문을 결과 영역에서 연다", () => {
+test("프로시저·함수·이벤트와 테이블 하위 트리거는 정의문을 정의 창에서 연다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   assert.match(worker, /information_schema\.ROUTINES/);
   assert.match(worker, /information_schema\.EVENTS/);
@@ -379,13 +379,13 @@ test("프로시저·함수·이벤트와 테이블 하위 트리거는 정의문
   assert.match(worker, /def load_object_ddl\(kind, name, database=""\)/);
   assert.match(worker, /SHOW CREATE " \+ keywords\[normalized\]/);
   assert.match(launcher, /path\.StartsWith\("\/db-object\?"/);
-  assert.match(source, /const showSchemaObject = async \(item\)/);
+  assert.match(source, /const openObjectInfoModal = async \(item\)/);
   assert.match(source, /tableSection\(item, "indexes", "Indexes", "index"/);
   assert.match(source, /tableSection\(item, "foreignKeys", "Foreign Keys", "foreignKey"/);
   assert.match(source, /tableSection\(item, "triggers", "Triggers", "trigger"/);
   assert.match(source, /openTableInfoModal\(item\.name, "indexes"\)/);
   assert.match(source, /openTableInfoModal\(item\.name, "foreignKeys"\)/);
-  assert.match(source, /db-schema-definition-ddl/);
+  assert.match(source, /el\("pre", "db-table-ddl", ddl \|\| "정의문이 없습니다\."\)/);
 });
 
 test("ERD 메타데이터는 테이블별 반복 요청 없이 컬럼과 외래키를 일괄 조회한다", () => {
@@ -545,6 +545,151 @@ test("SQL Ctrl+클릭은 현재 문장의 테이블명과 별칭을 테이블 �
     { word:"note", start:columnPoint, point:columnPoint }, objects), null);
 });
 
+test("SQL Ctrl+클릭은 호출 형태의 프로시저·함수와 EVENT 뒤의 이벤트를 루틴 대상으로 해석한다", () => {
+  const objects = [
+    { type:"table", name:"orders" },
+    { type:"procedure", name:"sp_settle" },
+    { type:"function", name:"fn_total" },
+    { type:"event", name:"ev_nightly" },
+    { type:"trigger", name:"trg_orders", table:"orders" }
+  ];
+  const at = (sql, word, from) => {
+    const start = from == null ? sql.indexOf(word) : sql.indexOf(word, from);
+    return client.sqlDefinitionTargetAt(sql, { word, start, end:start + word.length, point:start }, objects);
+  };
+
+  // CALL 뒤, 그리고 역따옴표·스키마 한정이 붙은 형태.
+  assert.equal(at("CALL sp_settle(1)", "sp_settle").kind, "routine");
+  assert.equal(at("CALL `sp_settle`(1)", "sp_settle").name, "sp_settle");
+  assert.equal(at("CALL shop.sp_settle(1)", "sp_settle").kind, "routine");
+  // 함수는 호출 괄호만으로 충분하다. 여는 괄호 앞 공백도 허용한다.
+  assert.equal(at("SELECT fn_total (id) FROM orders", "fn_total").kind, "routine");
+  // DDL 문장의 키워드 뒤.
+  assert.equal(at("DROP PROCEDURE sp_settle", "sp_settle").kind, "routine");
+  assert.equal(at("ALTER EVENT ev_nightly DISABLE", "ev_nightly").kind, "routine");
+  assert.equal(at("DROP TRIGGER trg_orders", "trg_orders").kind, "routine");
+  assert.equal(at("DROP TRIGGER shop.trg_orders", "trg_orders").item.type, "trigger");
+  // 루틴 대상은 항목 자체를 함께 넘겨야 정보 창이 종류·설명을 그릴 수 있다.
+  assert.equal(at("CALL sp_settle(1)", "sp_settle").item.type, "procedure");
+});
+
+test("SQL Ctrl+클릭은 호출 형태가 아닌 루틴·이벤트·트리거 이름은 대상으로 보지 않는다", () => {
+  const objects = [
+    { type:"table", name:"orders" },
+    { type:"procedure", name:"sp_settle" },
+    { type:"event", name:"ev_nightly" },
+    { type:"trigger", name:"trg_orders", table:"orders" }
+  ];
+  const at = (sql, word) => {
+    const start = sql.indexOf(word);
+    return client.sqlDefinitionTargetAt(sql, { word, end:start + word.length, start, point:start }, objects);
+  };
+  // 주석·문자열 안에서 이름만 같은 낱말은 링크가 되면 안 된다.
+  assert.equal(at("-- sp_settle 을 손보자\nSELECT 1", "sp_settle"), null);
+  assert.equal(at("SELECT 'sp_settle' FROM orders", "sp_settle"), null);
+  // 이벤트는 호출 문법이 없어 EVENT 키워드 없이는 대상이 아니다.
+  assert.equal(at("SELECT ev_nightly FROM orders", "ev_nightly"), null);
+  // 트리거·이벤트는 호출되지 않으므로 괄호가 뒤따라도 그것만으로는 참조가 아니다.
+  assert.equal(at("SELECT trg_orders(1)", "trg_orders"), null);
+  assert.equal(at("SELECT ev_nightly(1)", "ev_nightly"), null);
+});
+
+test("이름이 겹치면 테이블·뷰가 루틴보다 먼저다", () => {
+  const objects = [
+    { type:"view", name:"orders" },
+    { type:"function", name:"orders" }
+  ];
+  const sql = "SELECT * FROM orders";
+  const start = sql.indexOf("orders");
+  const target = client.sqlDefinitionTargetAt(sql,
+    { word:"orders", start, end:start + 6, point:start }, objects);
+  // 뷰도 테이블 정보 창으로 연다 — 예전에는 type==="table" 만 봐서 뷰가 빠져 있었다.
+  assert.equal(target.kind, "table");
+  assert.equal(target.item.type, "view");
+});
+
+test("루틴 매개변수는 정의문에서 읽고 중첩 괄호·역따옴표를 세지 않는다", () => {
+  const ddl = "CREATE DEFINER=`root`@`%` PROCEDURE `sp_settle`("
+    + "IN `from(day)` DATE, OUT total DECIMAL(10,2) UNSIGNED, INOUT note VARCHAR(20)) BEGIN END";
+  const parameters = client.routineParameters(ddl, "procedure");
+  assert.equal(parameters.length, 3);
+  // 역따옴표 이름 안의 괄호를 매개변수 목록의 끝으로 오해하면 안 된다.
+  assert.deepEqual(parameters[0], { name:"from(day)", direction:"IN", type:"DATE" });
+  // DECIMAL(10,2) 의 쉼표는 매개변수 구분자가 아니다.
+  assert.deepEqual(parameters[1], { name:"total", direction:"OUT", type:"DECIMAL(10,2) UNSIGNED" });
+  assert.equal(parameters[2].direction, "INOUT");
+
+  // 함수는 방향 표기가 없고, 생략하면 IN 으로 읽는다.
+  const fn = client.routineParameters("CREATE FUNCTION fn_total(qty INT, price DECIMAL(8,2)) RETURNS DECIMAL(10,2)", "function");
+  assert.deepEqual(fn.map(item => item.name), ["qty", "price"]);
+  assert.equal(fn[0].direction, "IN");
+
+  // 매개변수가 없는 정의, 정의문을 못 읽은 경우, 이벤트는 모두 빈 목록이다.
+  assert.deepEqual(client.routineParameters("CREATE PROCEDURE sp_none() BEGIN END", "procedure"), []);
+  assert.deepEqual(client.routineParameters("", "procedure"), []);
+  assert.deepEqual(client.routineParameters("CREATE EVENT ev_nightly ON SCHEDULE", "event"), []);
+});
+
+test("객체 정의 창은 결과 패널을 지우지 않고 테이블 정보 창과 같은 자리에 뜬다", () => {
+  const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const start = db.indexOf("const openObjectInfoModal");
+  assert.ok(start > 0, "openObjectInfoModal 이 있어야 한다");
+  const bodyEnd = db.indexOf("const openTableInfoModal", start);
+  const body = db.slice(start, bodyEnd);
+  // Ctrl+클릭은 잠깐 들여다보는 동작이라 실행 결과를 건드리면 안 된다.
+  assert.ok(!/clearResult\(\)/.test(body), "객체 정의 창은 결과를 지우지 않는다");
+  // 테이블 정보 창과 클래스를 공유해 두 창이 겹쳐 뜨지 않게 한다.
+  assert.match(body, /db-table-modal db-object-modal/);
+  assert.match(body, /document\.querySelector\("\.db-table-modal"\)/);
+  // 정의는 이미 있는 /db-object 를 그대로 쓴다 — 서버 쪽 변경이 필요 없다.
+  assert.match(body, /\/db-object\?id=/);
+});
+
+test("트리의 정의 보기는 결과 패널이 아니라 Ctrl+클릭과 같은 정의 창을 연다", () => {
+  const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 컨텍스트 메뉴의 테이블/그 밖 객체 분기가 둘 다 모달로 간다.
+  assert.match(db, /if \(tableTarget\) openTableInfoModal\(item\.table \|\| item\.name, childTab\);\s*\n\s*else openObjectInfoModal\(item\);/);
+  // 왼쪽 클릭도 같은 창을 쓴다. 테이블·뷰만 결과 패널에 내용을 편다 — 그건 정의가 아니라 데이터다.
+  assert.match(db, /if \(item\.type === "table" \|\| item\.type === "view"\) showTable\(item\.name\);\s*\n\s*else openObjectInfoModal\(item\);/);
+  // 테이블 아래 트리거도 마찬가지다.
+  assert.match(db, /bindSchemaObjectNode\(node, child, \(\) => openObjectInfoModal\(child\)\)/);
+  // 정의를 결과 패널에 그리던 옛 경로는 남아 있으면 안 된다(두 가지 표현이 다시 갈린다).
+  assert.ok(!db.includes("showSchemaObject"), "showSchemaObject 는 지워져야 한다");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.ok(!css.includes("db-schema-definition"), "쓰지 않는 정의 카드 CSS 도 함께 지운다");
+  assert.match(db, /DEFINITION_OBJECT_KINDS = \{ procedure:true, function:true, event:true, trigger:true \}/);
+  assert.match(db, /LINKABLE_OBJECT_KINDS = \{ procedure:true, function:true, event:true, trigger:true \}/);
+  assert.match(db, /LINKABLE_OBJECT_KINDS\[candidate\.type\]/);
+
+  // 정의 창은 종류별로 다른 개요를 그린다 — 트리거는 어느 테이블에 언제 걸리는지가 핵심이다.
+  const start = db.indexOf("const openObjectInfoModal");
+  const body = db.slice(start, db.indexOf("const openTableInfoModal", start));
+  assert.match(body, /DEFINITION_OBJECT_KINDS\[kind\]/);
+  assert.match(body, /"대상 테이블"/);
+  assert.match(body, /"시점"/);
+  // 매개변수 탭은 프로시저·함수에만 붙는다.
+  assert.match(body, /const hasParameters = kind === "procedure" \|\| kind === "function"/);
+  assert.match(body, /const paramsTab = hasParameters/);
+});
+
+test("트리거는 트리 최상위 그룹으로도 오고 스키마 목록에 실려 Ctrl+클릭까지 닿는다", () => {
+  const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 최상위 그룹. 테이블처럼 펼칠 하위 구조가 없으므로 expandable 을 주지 않는다.
+  assert.match(db, /\{ type:"trigger", label:"Triggers", icon:"trigger" \}/);
+  // 스키마 응답의 triggers 를 목록에 합쳐야 자동완성과 Ctrl+클릭이 트리거를 안다.
+  assert.match(db, /\.\.\.\(Array\.isArray\(info\.triggers\) \? info\.triggers : \[\]\)/);
+  // 이름만으로는 어느 테이블 것인지 모르므로 트리 항목에 테이블을 함께 적는다.
+  assert.match(db, /item\.type === "trigger" && item\.table/);
+
+  // 워커가 스키마를 읽을 때 트리거도 한 번에 가져온다 — 테이블을 펼칠 때까지 기다리지 않는다.
+  assert.match(worker, /"triggers": \[\], "current": ""/);
+  assert.match(worker, /SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, ACTION_TIMING/);
+  assert.match(worker, /FROM information_schema\.TRIGGERS WHERE TRIGGER_SCHEMA = %s "/);
+  assert.match(worker, /"type": "trigger", "table": str\(item\[1\] or ""\)/);
+  // 다른 스키마 객체와 같은 상한을 쓴다.
+  assert.match(worker, /ORDER BY EVENT_OBJECT_TABLE, ACTION_TIMING, TRIGGER_NAME LIMIT %s/);
+});
+
 test("공용 편집기는 외부 정의 대상만 Ctrl+클릭 링크로 열 수 있다", () => {
   const editor = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
   const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
@@ -553,6 +698,7 @@ test("공용 편집기는 외부 정의 대상만 Ctrl+클릭 링크로 열 수 
   assert.match(editor, /const canOpen = typeof options\.definitionTargetAt !== "function" \|\| !!externalTarget/);
   assert.match(db, /definitionTargetAt: \(\{ source, wordInfo \}\) => sqlDefinitionTargetAt\(source, wordInfo, schemaObjects\)/);
   assert.match(db, /openTableInfoModal\(target\.name\)/);
+  assert.match(db, /openObjectInfoModal\(target\.item\)/);
 });
 
 
