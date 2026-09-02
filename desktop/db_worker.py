@@ -15,6 +15,7 @@ stdout 으로 base64(JSON) 한 줄을 돌려준다. 프로세스가 살아 있�
 import base64
 import json
 import queue
+import re
 import sys
 import threading
 import time
@@ -37,6 +38,7 @@ MAX_EDIT_CHARS = 100000    # 셀을 고칠 때 다시 읽어 오는 값의 상�
 MAX_META_CACHE = 200       # 편집 판정에 쓰는 테이블 메타데이터 캐시 항목 수
 MAX_BATCH_CHANGES = 500    # 한 번에 모아 적용할 수 있는 변경 수
 MAX_INSERT_VALUES = 512    # 행 하나에 넣을 수 있는 값의 수
+MAX_RESULT_SETS = 128      # CALL 하나가 결과 집합을 끝없이 내보내 응답을 부풀리지 않게 한다
 # 이진 컬레이션 번호. ⚠ 숫자·날짜 컬럼도 이 번호로 오므로 이것만 보고 "이진"이라 하면
 # INT·DATETIME 이 전부 고칠 수 없는 칸이 된다. 반드시 자료형과 함께 봐야 한다.
 BINARY_CHARSET = 63
@@ -108,69 +110,95 @@ def quote_identifier(name):
     return "`" + str(name).replace("`", "``") + "`"
 
 
-def split_statements(sql):
-    """세미콜론으로 문장을 나눈다. 따옴표·역따옴표·주석 안의 세미콜론은 구분자가 아니다.
+def statement_records(sql):
+    """MySQL CLI의 DELIMITER까지 해석해 실행 문장과 원문 위치를 돌려준다.
 
-    주석은 건너뛰되 버리지 않고 그대로 남긴다. MySQL 의 버전 주석(/*!40101 ... */)은
-    실제로 실행되는 구문이라 지워 버리면 붙여넣은 덤프의 의미가 바뀐다.
+    DELIMITER 줄은 클라이언트 지시어라 서버에 보내지 않는다. 사용자 지정 구분자가 켜진
+    동안에는 BEGIN ... END 안의 세미콜론을 그대로 두므로 저장 루틴 전체가 한 문장이 된다.
     """
-    statements = []
-    buf = []
+    text = str(sql or "")
+    length = len(text)
+    delimiter = ";"
+    bounds = []
+    segment_start = 0
     index = 0
-    length = len(sql)
+    has_code = False
+
     while index < length:
-        char = sql[index]
+        at_line_start = index == 0 or text[index - 1] == "\n"
+        if at_line_start and not has_code:
+            line_end = text.find("\n", index)
+            directive_end = length if line_end < 0 else line_end + 1
+            line = text[index:length if line_end < 0 else line_end].rstrip("\r")
+            match = re.match(r"^\s*DELIMITER[ \t]+(\S+)[ \t]*$", line, re.IGNORECASE)
+            if match:
+                delimiter = match.group(1)
+                segment_start = directive_end
+                index = directive_end
+                has_code = False
+                continue
+
+        char = text[index]
         if char in ("'", '"', "`"):
+            has_code = True
             quote = char
-            buf.append(char)
             index += 1
             while index < length:
-                current = sql[index]
+                current = text[index]
                 if current == "\\" and quote != "`":
-                    buf.append(current)
-                    if index + 1 < length:
-                        buf.append(sql[index + 1])
-                        index += 2
-                    else:
-                        index += 1
+                    index += 2
                     continue
                 if current == quote:
-                    if index + 1 < length and sql[index + 1] == quote:   # '' 나 "" 로 쓴 이스케이프
-                        buf.append(current)
-                        buf.append(current)
+                    if index + 1 < length and text[index + 1] == quote:
                         index += 2
                         continue
-                    buf.append(current)
                     index += 1
                     break
-                buf.append(current)
                 index += 1
             continue
-        if char == "-" and sql.startswith("--", index) and (index + 2 >= length or sql[index + 2] in " \t\r\n"):
-            while index < length and sql[index] != "\n":
-                buf.append(sql[index])
-                index += 1
+        if char == "-" and text.startswith("--", index) and (index + 2 >= length or text[index + 2] in " \t\r\n"):
+            newline = text.find("\n", index)
+            index = length if newline < 0 else newline
             continue
         if char == "#":
-            while index < length and sql[index] != "\n":
-                buf.append(sql[index])
-                index += 1
+            newline = text.find("\n", index)
+            index = length if newline < 0 else newline
             continue
-        if char == "/" and sql.startswith("/*", index):
-            end = sql.find("*/", index + 2)
-            end = length if end < 0 else end + 2
-            buf.append(sql[index:end])
-            index = end
+        if char == "/" and text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = length if end < 0 else end + 2
             continue
-        if char == ";":
-            statements.append("".join(buf))
-            buf = []
-            index += 1
+        if text.startswith(delimiter, index):
+            bounds.append((segment_start, index))
+            index += len(delimiter)
+            segment_start = index
+            has_code = False
             continue
-        buf.append(char)
+        if not char.isspace():
+            has_code = True
         index += 1
-    statements.append("".join(buf))
-    return [item.strip() for item in statements if item.strip()]
+
+    bounds.append((segment_start, length))
+    records = []
+    for start, end in bounds:
+        raw = text[start:end]
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        actual_start = start + raw.find(stripped)
+        actual_end = actual_start + len(stripped)
+        records.append({
+            "text": stripped,
+            "start": actual_start,
+            "end": actual_end,
+            "line": text.count("\n", 0, actual_start) + 1,
+            "endLine": text.count("\n", 0, actual_end) + 1,
+        })
+    return records
+
+
+def split_statements(sql):
+    return [item["text"] for item in statement_records(sql)]
 
 
 def first_keyword(statement):
@@ -244,8 +272,12 @@ def classify_error(exc, driver):
         1049: "unknown-database",
         1142: "denied",
         1143: "denied",
+        1217: "dependency",
         1317: "cancelled",
+        1553: "dependency",       # 외래키에 필요한 인덱스
         1792: "read-only",
+        1828: "dependency",       # 외래키에 필요한 컬럼
+        1833: "dependency",       # 외래키에 쓰이는 컬럼 변경
         2002: "refused",
         2003: "refused",
         2005: "unknown-host",
@@ -254,6 +286,8 @@ def classify_error(exc, driver):
         # 2059 = 서버가 요구한 인증 플러그인을 드라이버가 못 쓴다(Windows GSSAPI, unix_socket 등).
         # 비밀번호 문제가 아니라 계정의 인증 방식 문제라 안내가 달라야 한다.
         2059: "auth-plugin",
+        3730: "dependency",       # 다른 테이블 외래키가 참조 중
+        3752: "dependency",       # 생성 컬럼이 참조 중
     }
     if errno in mapping:
         return mapping[errno], detail, errno
@@ -499,11 +533,12 @@ def safe_edit_plan(connection, sources, columns):
 
 def run_statements(sql, driver):
     connection = require_connection()
-    statements = split_statements(sql)
-    if not statements:
+    records = statement_records(sql)
+    if not records:
         return {"ok": True, "statements": [], "ms": 0, **tx_state()}
     if _state["read_only"]:
-        for statement in statements:
+        for record in records:
+            statement = record["text"]
             keyword = first_keyword(statement)
             if keyword in WRITE_KEYWORDS:
                 return {"ok": False, "code": "read-only-blocked", "detail": keyword.upper()}
@@ -511,51 +546,90 @@ def run_statements(sql, driver):
     _state["pages"] = {}
     results = []
     budget = MAX_CELLS
-    for statement in statements:
+    for statement_index, record in enumerate(records):
+        statement = record["text"]
         keyword = first_keyword(statement)
-        # 문장이 잘려 왔으면 프런트가 ORDER BY 를 고쳐 쓸 수 없다(헤더 정렬을 끈다).
-        entry = {"sql": statement[:4000], "keyword": keyword, "sqlTruncated": len(statement) > 4000}
+        base_entry = {
+            "sql": statement[:4000], "keyword": keyword, "sqlTruncated": len(statement) > 4000,
+            "statement": statement_index, "line": record["line"], "endLine": record["endLine"],
+        }
+        entry = dict(base_entry, resultIndex=0)
+        first_result = len(results)
+        result_index = 0
+        edit_candidates = []
         started = time.perf_counter()
         try:
             with connection.cursor() as cursor:
-                affected = cursor.execute(statement)
-                if cursor.description:
-                    # 열의 출처는 커서에 다른 질의가 실리기 전에 붙잡아 둔다(편집 판정에 쓴다).
-                    sources = field_sources(cursor)
-                    # 한 번에 보내는 양(첫 페이지)과 "더 보기"용으로 들고 있을 양을 따로 둔다.
-                    columns, kept_rows, more, clipped = read_rows(cursor, KEEP_ROWS, KEEP_CELLS)
-                    width = max(1, len(columns))
-                    send = max(0, min(MAX_ROWS, budget // width, len(kept_rows)))
-                    budget = max(0, budget - send * width)
-                    if len(kept_rows) > send or more:
-                        if len(_state["pages"]) < MAX_KEPT_SETS:
-                            _state["pages"][len(results)] = {
-                                "columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}
-                    page = slice_page({"columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}, 0, send)
-                    entry.update({"kind": "rows", "columns": columns, "rows": page["rows"],
-                                  "truncated": page["hasMore"], "clippedCells": page["clippedCells"],
-                                  "loaded": len(kept_rows), "hasMore": page["hasMore"],
-                                  "serverHasMore": more, "set": len(results),
-                                  "edit": safe_edit_plan(connection, sources, columns)})
-                    # 앞의 결과가 예산을 다 써서 한 줄도 싣지 못한 경우를 "데이터가 없다"와 구분한다.
-                    if not page["rows"] and len(kept_rows):
-                        entry["budgetExhausted"] = True
-                else:
-                    entry.update({"kind": "affected", "affected": int(affected or 0),
-                                  "insertId": int(getattr(cursor, "lastrowid", 0) or 0)})
-                warnings = getattr(cursor, "_warnings", None)
-                if warnings:
-                    entry["warnings"] = int(warnings)
+                cursor.execute(statement)
+                while True:
+                    if len(results) >= MAX_RESULT_SETS:
+                        raise RuntimeError("too-many-result-sets")
+                    entry = dict(base_entry, resultIndex=result_index)
+                    if cursor.description:
+                        # 열의 출처는 다음 결과 집합으로 넘어가기 전에 붙잡아 둔다(편집 판정에 쓴다).
+                        sources = field_sources(cursor)
+                        columns, kept_rows, more, clipped = read_rows(cursor, KEEP_ROWS, KEEP_CELLS)
+                        width = max(1, len(columns))
+                        send = max(0, min(MAX_ROWS, budget // width, len(kept_rows)))
+                        budget = max(0, budget - send * width)
+                        result_set = len(results)
+                        if len(kept_rows) > send or more:
+                            if len(_state["pages"]) < MAX_KEPT_SETS:
+                                _state["pages"][result_set] = {
+                                    "columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}
+                        page = slice_page(
+                            {"columns": columns, "rows": kept_rows, "clipped": clipped, "more": more}, 0, send)
+                        entry.update({"kind": "rows", "columns": columns, "rows": page["rows"],
+                                      "truncated": page["hasMore"], "clippedCells": page["clippedCells"],
+                                      "loaded": len(kept_rows), "hasMore": page["hasMore"],
+                                      "serverHasMore": more, "set": result_set,
+                                      "edit": {"editable": False, "reason": "unknown"}})
+                        # CALL의 다음 결과 집합이 남아 있는 동안 같은 커넥션으로 메타데이터를
+                        # 조회하면 드라이버가 남은 결과를 버릴 수 있다. nextset()을 끝까지 읽은
+                        # 뒤에만 편집 가능 여부를 판정한다.
+                        edit_candidates.append((entry, sources, columns))
+                        if not page["rows"] and len(kept_rows):
+                            entry["budgetExhausted"] = True
+                    else:
+                        affected = max(0, int(getattr(cursor, "rowcount", 0) or 0))
+                        entry.update({"kind": "affected", "affected": affected,
+                                      "insertId": int(getattr(cursor, "lastrowid", 0) or 0)})
+                    warnings = getattr(cursor, "_warnings", None)
+                    if warnings:
+                        entry["warnings"] = int(warnings)
+                    next_set = getattr(cursor, "nextset", None)
+                    has_next = bool(callable(next_set) and next_set())
+                    # MySQL/PyMySQL은 CALL의 실제 결과 집합을 모두 보낸 뒤 빈 완료 결과를
+                    # 하나 더 붙인다. 앞에 실제 결과가 있고, 마지막 결과가 경고·반영·삽입
+                    # 정보 없는 0행 상태일 때만 숨긴다. 일반 UPDATE 0행은 그대로 보인다.
+                    trailing_call_status = (
+                        keyword == "call" and result_index > 0 and not has_next
+                        and entry.get("kind") == "affected" and entry.get("affected") == 0
+                        and entry.get("insertId") == 0 and not entry.get("warnings")
+                    )
+                    if not trailing_call_status:
+                        results.append(entry)
+                    if not has_next:
+                        break
+                    result_index += 1
+            for result_entry, sources, columns in edit_candidates:
+                result_entry["edit"] = safe_edit_plan(connection, sources, columns)
         except Exception as exc:                              # noqa: BLE001 - 드라이버 예외 전부를 코드로 옮긴다
             # 여기까지의 문장은 이미 서버에서 실행됐다(자동 커밋이면 확정된 상태다).
             # 실패했다고 앞의 결과까지 버리면 무엇이 반영되고 무엇이 안 됐는지 알 길이 없어진다.
             failure = error_payload(exc, driver, "query")
+            detail = str(failure.get("detail") or "")
+            line_match = re.search(r"\bat line\s+(\d+)\b", detail, re.IGNORECASE)
+            script_line = record["line"] + (max(1, int(line_match.group(1))) - 1 if line_match else 0)
+            entry = dict(base_entry, resultIndex=result_index)
             entry.update({"kind": "error", "ms": elapsed_ms(started),
                           "code": str(failure.get("code") or ""),
-                          "detail": str(failure.get("detail") or "")})
+                          "detail": detail, "scriptLine": script_line})
             results.append(entry)
             failure["statements"] = results
             failure["failedAt"] = len(results) - 1
+            failure["failedStatement"] = statement_index
+            failure["scriptLine"] = script_line
             failure["ms"] = sum(item.get("ms", 0) for item in results)
             failure.update(tx_state())
             return failure
@@ -568,8 +642,9 @@ def run_statements(sql, driver):
                 _state["pending"] = False
             elif keyword in DATA_CHANGE_KEYWORDS:
                 _state["pending"] = True
-        entry["ms"] = elapsed_ms(started)
-        results.append(entry)
+        # CALL의 여러 결과에 같은 시간을 반복해 더하지 않는다. 첫 결과에 문장 전체 시간을 둔다.
+        if first_result < len(results):
+            results[first_result]["ms"] = elapsed_ms(started)
     return {"ok": True, "statements": results, "ms": sum(item.get("ms", 0) for item in results),
             **tx_state()}
 
@@ -866,6 +941,164 @@ def load_object_ddl(kind, name, database=""):
         ddl = next((str(value) for value in row if isinstance(value, str)
                     and value.lstrip().upper().startswith("CREATE ")), "")
     return {"ok": True, "database": schema, "kind": normalized, "name": name, "ddl": ddl}
+
+
+def load_dependencies(kind, name, table="", database=""):
+    """트리 객체 삭제 전에 확인 가능한 의존성을 구조화해 돌려준다.
+
+    외래키와 뷰 사용 관계는 MySQL 데이터 사전이 보장하는 정보만 쓴다. 저장 루틴 본문의
+    동적 SQL처럼 서버도 정적 관계를 갖고 있지 않은 참조는 여기서 추측하지 않고, 실제 DDL
+    실행 오류가 마지막 안전망이 된다.
+    """
+    normalized = str(kind or "").lower()
+    allowed = {"table", "view", "column", "index", "foreignkey",
+               "procedure", "function", "trigger", "event"}
+    if normalized not in allowed:
+        return {"ok": False, "code": "unknown-object-kind", "detail": normalized}
+    if not name:
+        return {"ok": False, "code": "unknown-object", "detail": ""}
+    if normalized in {"column", "index", "foreignkey"} and not table:
+        return {"ok": False, "code": "unknown-table", "detail": ""}
+
+    connection = require_connection()
+    dependencies = []
+    warnings = []
+    seen = set()
+
+    def add_dependency(dep_kind, dep_name, dep_table, detail):
+        key = (dep_kind, dep_name, dep_table, detail)
+        if key in seen:
+            return
+        seen.add(key)
+        dependencies.append({"kind": dep_kind, "name": dep_name,
+                             "table": dep_table, "detail": detail})
+
+    with connection.cursor() as cursor:
+        schema = current_schema(cursor, database)
+
+        # 테이블이나 뷰를 사용하는 다른 뷰를 지우지 않은 채 원본만 없애면 MySQL은
+        # 깨진 뷰를 남길 수 있다. VIEW_TABLE_USAGE로 그 관계를 먼저 차단한다.
+        if normalized in {"table", "view"}:
+            try:
+                cursor.execute(
+                    "SELECT VIEW_SCHEMA, VIEW_NAME FROM information_schema.VIEW_TABLE_USAGE "
+                    "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY VIEW_SCHEMA, VIEW_NAME",
+                    (schema, name),
+                )
+                for row in cursor.fetchall():
+                    view_schema, view_name = str(row[0] or ""), str(row[1] or "")
+                    if view_schema == schema and view_name == name:
+                        continue
+                    add_dependency("view", view_name, view_name if view_schema == schema else "",
+                                   "뷰 " + view_schema + "." + view_name + "에서 사용 중")
+            except Exception:                                 # noqa: BLE001 - 구형 MySQL에는 usage 뷰가 없을 수 있다
+                warnings.append("이 서버에서는 뷰 참조 관계를 미리 확인하지 못했습니다.")
+
+        if normalized == "table":
+            cursor.execute(
+                "SELECT CONSTRAINT_NAME, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, REFERENCED_COLUMN_NAME "
+                "FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA = %s "
+                "AND REFERENCED_TABLE_NAME = %s AND REFERENCED_TABLE_NAME IS NOT NULL "
+                "AND NOT (TABLE_SCHEMA = %s AND TABLE_NAME = %s) "
+                "ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION",
+                (schema, name, schema, name),
+            )
+            for row in cursor.fetchall():
+                constraint, child_schema, child_table = str(row[0]), str(row[1]), str(row[2])
+                detail = ("외래키 " + constraint + " · " + child_schema + "." + child_table
+                          + "." + str(row[3]) + " → " + schema + "." + name + "." + str(row[4]))
+                add_dependency("foreignKey", constraint, child_table if child_schema == schema else "", detail)
+            cursor.execute(
+                "SELECT TRIGGER_NAME FROM information_schema.TRIGGERS "
+                "WHERE TRIGGER_SCHEMA = %s AND EVENT_OBJECT_TABLE = %s ORDER BY TRIGGER_NAME",
+                (schema, name),
+            )
+            trigger_names = [str(row[0]) for row in cursor.fetchall()]
+            if trigger_names:
+                warnings.append("테이블과 함께 트리거도 삭제됩니다: " + ", ".join(trigger_names))
+
+        elif normalized == "column":
+            cursor.execute(
+                "SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = %s "
+                "AND TABLE_NAME = %s AND COLUMN_NAME = %s ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+                (schema, table, name),
+            )
+            for row in cursor.fetchall():
+                index_name = str(row[0])
+                add_dependency("index", index_name, table, "인덱스 " + index_name + "에서 사용 중")
+            cursor.execute(
+                "SELECT CONSTRAINT_NAME, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, "
+                "REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME "
+                "FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL AND "
+                "((TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s) OR "
+                "(REFERENCED_TABLE_SCHEMA = %s AND REFERENCED_TABLE_NAME = %s AND REFERENCED_COLUMN_NAME = %s)) "
+                "ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION",
+                (schema, table, name, schema, table, name),
+            )
+            for row in cursor.fetchall():
+                constraint, child_schema, child_table = str(row[0]), str(row[1]), str(row[2])
+                detail = ("외래키 " + constraint + " · " + child_schema + "." + child_table
+                          + "." + str(row[3]) + " → " + str(row[4]) + "." + str(row[5]) + "." + str(row[6]))
+                add_dependency("foreignKey", constraint, child_table if child_schema == schema else "", detail)
+            cursor.execute(
+                "SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME <> %s "
+                "AND GENERATION_EXPRESSION IS NOT NULL AND GENERATION_EXPRESSION <> ''",
+                (schema, table, name),
+            )
+            quoted = "`" + name.replace("`", "``") + "`"
+            word = re.compile(r"(?<![0-9A-Za-z_$])" + re.escape(name) + r"(?![0-9A-Za-z_$])", re.IGNORECASE)
+            for row in cursor.fetchall():
+                expression = str(row[1] or "")
+                if quoted in expression or word.search(expression):
+                    generated = str(row[0])
+                    add_dependency("column", generated, table,
+                                   "생성 컬럼 " + generated + "의 식에서 사용 중")
+
+        elif normalized == "index":
+            cursor.execute(
+                "SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME IS NOT NULL "
+                "ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+                (schema, table),
+            )
+            indexes = {}
+            for row in cursor.fetchall():
+                indexes.setdefault(str(row[0]), []).append(str(row[1]))
+            selected_columns = indexes.get(name, [])
+            cursor.execute(
+                "SELECT CONSTRAINT_NAME, COLUMN_NAME, ORDINAL_POSITION FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND REFERENCED_TABLE_NAME IS NOT NULL "
+                "ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION",
+                (schema, table),
+            )
+            foreign_columns = {}
+            for row in cursor.fetchall():
+                foreign_columns.setdefault(str(row[0]), []).append(str(row[1]))
+            for constraint, columns in foreign_columns.items():
+                selected_covers = selected_columns[:len(columns)] == columns
+                alternative = any(index_name != name and values[:len(columns)] == columns
+                                  for index_name, values in indexes.items())
+                if selected_covers and not alternative:
+                    add_dependency("foreignKey", constraint, table,
+                                   "외래키 " + constraint + " 유지에 필요한 인덱스")
+
+        elif normalized == "function":
+            try:
+                cursor.execute(
+                    "SELECT TABLE_SCHEMA, TABLE_NAME FROM information_schema.VIEW_ROUTINE_USAGE "
+                    "WHERE SPECIFIC_SCHEMA = %s AND SPECIFIC_NAME = %s ORDER BY TABLE_SCHEMA, TABLE_NAME",
+                    (schema, name),
+                )
+                for row in cursor.fetchall():
+                    view_schema, view_name = str(row[0]), str(row[1])
+                    add_dependency("view", view_name, view_name if view_schema == schema else "",
+                                   "뷰 " + view_schema + "." + view_name + "에서 함수를 사용 중")
+            except Exception:                                 # noqa: BLE001
+                warnings.append("이 서버에서는 뷰의 함수 사용 관계를 미리 확인하지 못했습니다.")
+
+    return {"ok": True, "database": schema, "kind": normalized, "name": name, "table": table,
+            "dependencies": dependencies, "warnings": warnings}
 
 
 def load_table_info(name, database=""):
@@ -1210,6 +1443,9 @@ def handle(request):
         if action == "object-ddl":
             return load_object_ddl(str(request.get("kind") or ""), str(request.get("name") or ""),
                                    str(request.get("database") or ""))
+        if action == "dependencies":
+            return load_dependencies(str(request.get("kind") or ""), str(request.get("name") or ""),
+                                     str(request.get("table") or ""), str(request.get("database") or ""))
         if action == "schema-columns":
             return schema_columns(str(request.get("database") or ""))
         if action == "erd":

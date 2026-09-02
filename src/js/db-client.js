@@ -57,6 +57,7 @@ const MNDbClient = (() => {
       case "timeout":           return "서버가 응답하지 않습니다. 방화벽이나 네트워크를 확인해 주세요.";
       case "unknown-database":  return "그 이름의 데이터베이스가 없습니다.";
       case "denied":            return "이 계정에는 권한이 없습니다.";
+      case "dependency":        return "다른 객체가 사용 중이라 삭제하거나 변경할 수 없습니다. " + detail;
       case "connection-lost":   return "서버와의 연결이 끊어졌습니다. 다시 연결해 주세요.";
       case "cancelled":         return "쿼리를 취소했습니다.";
       case "read-only":         return "읽기 전용 접속이라 쓰기 문장을 실행할 수 없습니다.";
@@ -193,15 +194,37 @@ const MNDbClient = (() => {
      실제 실행 단위는 워커(db_worker.py)가 다시 나눈다. 여기서 나누는 이유는
      되돌릴 수 없는 문장을 보내기 전에 화면에서 먼저 확인받기 위해서다. */
 
+  // MySQL CLI 의 DELIMITER 지시어까지 해석한다. 지시어 자체는 서버로 보내지 않고,
+  // 그 다음 문장을 어디까지 한 덩어리로 볼지만 바꾼다. 그래서 BEGIN ... END 안의
+  // 세미콜론은 그대로 남고 CREATE PROCEDURE 전체가 한 문장이 된다.
+  const delimiterDirectiveAt = (text, index, hasCode) => {
+    if (hasCode || (index > 0 && text[index - 1] !== "\n")) return null;
+    const lineEnd = text.indexOf("\n", index);
+    const end = lineEnd < 0 ? text.length : lineEnd + 1;
+    const line = text.slice(index, lineEnd < 0 ? text.length : lineEnd).replace(/\r$/, "");
+    const match = /^\s*DELIMITER[ \t]+(\S+)[ \t]*$/i.exec(line);
+    return match ? { delimiter:match[1], end } : null;
+  };
+
   // 원문에서의 위치(start·end)까지 함께 돌려준다. 커서가 놓인 문장 하나만 실행하려면
   // 잘라 낸 문자열만으로는 부족하고 어디서 어디까지인지를 알아야 한다.
   const statementRanges = (sql) => {
     const text = String(sql || ""), length = text.length;
-    const bounds = [];                       // 세미콜론으로 끊은 구간 [시작, 끝) — 세미콜론 자신은 뺀다
-    let segmentStart = 0, index = 0;
+    const bounds = [];
+    let delimiter = ";", segmentStart = 0, index = 0, hasCode = false;
     while (index < length){
+      const directive = delimiterDirectiveAt(text, index, hasCode);
+      if (directive){
+        // 지시어 앞의 빈 줄·주석은 실행 문장이 아니다. 다음 실제 문장부터 범위를 잡는다.
+        delimiter = directive.delimiter;
+        segmentStart = directive.end;
+        index = directive.end;
+        hasCode = false;
+        continue;
+      }
       const char = text[index];
       if (char === "'" || char === '"' || char === "`"){
+        hasCode = true;
         const quote = char;
         index++;
         while (index < length){
@@ -227,10 +250,17 @@ const MNDbClient = (() => {
         const stop = text.indexOf("*/", index + 2);
         index = stop < 0 ? length : stop + 2; continue;
       }
-      if (char === ";"){ bounds.push([segmentStart, index]); segmentStart = index + 1; index++; continue; }
+      if (text.startsWith(delimiter, index)){
+        bounds.push([segmentStart, index, delimiter]);
+        index += delimiter.length;
+        segmentStart = index;
+        hasCode = false;
+        continue;
+      }
+      if (!/\s/.test(char)) hasCode = true;
       index++;
     }
-    bounds.push([segmentStart, length]);
+    bounds.push([segmentStart, length, delimiter]);
 
     const ranges = [];
     bounds.forEach((pair) => {
@@ -239,7 +269,12 @@ const MNDbClient = (() => {
       if (!trimmed) return;
       // 앞은 전부 공백이므로 trimmed 의 첫 등장 위치가 곧 문장 시작이다.
       const start = pair[0] + raw.indexOf(trimmed);
-      ranges.push({ start, end:start + trimmed.length, text:trimmed });
+      ranges.push({
+        start, end:start + trimmed.length, text:trimmed,
+        line:text.slice(0, start).split("\n").length,
+        endLine:text.slice(0, start + trimmed.length).split("\n").length,
+        delimiter:pair[2] || ";"
+      });
     });
     return ranges;
   };
@@ -279,6 +314,32 @@ const MNDbClient = (() => {
     }
     const match = /^[A-Za-z_]+/.exec(text.slice(index));
     return match ? match[0].toLowerCase() : "";
+  };
+
+  const chooseScriptDelimiter = (text, preferred) => {
+    const candidates = [preferred, "$$", "//", ";;", "@@", "§§"].filter(Boolean);
+    return candidates.find(token => token !== ";" && !String(text || "").includes(token)) || "§§";
+  };
+
+  const wrapDelimitedStatement = (statement, preferred) => {
+    const body = String(statement || "").trim();
+    if (!body) return "";
+    const delimiter = chooseScriptDelimiter(body, preferred);
+    return "DELIMITER " + delimiter + "\n" + body + delimiter + "\nDELIMITER ;";
+  };
+
+  // 커서 실행은 statementRanges가 DELIMITER 줄을 뺀 본문만 돌려준다. 그 본문을 그대로
+  // 워커에 보내면 다시 세미콜론으로 잘리므로 사용자 지정 구분자를 잠시 복원한다.
+  // 사용자가 CREATE 복합문 본문만 직접 선택한 경우도 같은 방식으로 보호한다.
+  const compoundExecutionScript = (statement, delimiter) => {
+    const text = String(statement || "").trim();
+    if (!text || /^\s*DELIMITER\b/im.test(text)) return text;
+    if (delimiter && delimiter !== ";") return wrapDelimitedStatement(text, delimiter);
+    const withoutLeadingComments = text.replace(
+      /^(?:\s|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/, "");
+    const routine = /^CREATE\s+(?:DEFINER\s*=\s*\S+\s+)?(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b/i
+      .test(withoutLeadingComments);
+    return routine && text.includes(";") ? wrapDelimitedStatement(text) : text;
   };
 
   /* ── ORDER BY 고쳐 쓰기(헤더 클릭 정렬) ──────────────────────────────────
@@ -398,6 +459,49 @@ const MNDbClient = (() => {
   const ddlIdentifier = (name) => "`" + String(name == null ? "" : name).replace(/`/g, "``") + "`";
   const ddlString = (value) => "'" + String(value == null ? "" : value)
     .replace(/\\/g, "\\\\").replace(/'/g, "''") + "'";
+
+  // SHOW CREATE 로 읽은 복합문을 다시 편집·실행할 수 있는 MySQL CLI 스크립트로 감싼다.
+  // MySQL 은 프로시저·함수·트리거·이벤트에 CREATE OR REPLACE가 없으므로 교체는 DROP+CREATE다.
+  const routineEditScript = (item, ddl, database) => {
+    const kind = String(item && item.type || "").toLowerCase();
+    const keywords = { procedure:"PROCEDURE", function:"FUNCTION", trigger:"TRIGGER", event:"EVENT" };
+    if (!keywords[kind] || !item || !item.name || !String(ddl || "").trim()) return "";
+    const body = String(ddl).trim();
+    const target = (database ? ddlIdentifier(database) + "." : "") + ddlIdentifier(item.name);
+    const drop = "DROP " + keywords[kind] + " IF EXISTS " + target;
+    const delimiter = chooseScriptDelimiter(body + "\n" + drop);
+    return "DELIMITER " + delimiter + "\n\n" + drop + delimiter + "\n\n"
+      + body + delimiter + "\n\nDELIMITER ;";
+  };
+
+  const schemaObjectLabel = (item) => ({
+    table:"테이블", view:"뷰", column:"컬럼", index:"인덱스", foreignKey:"외래키",
+    procedure:"프로시저", function:"함수", trigger:"트리거", event:"이벤트"
+  })[String(item && item.type || "")] || "객체";
+
+  // 트리 삭제가 만드는 문장은 화면 확인용이면서 실제 실행문이다. 객체 이름은 서버에서
+  // 읽었더라도 언제나 식별자로 다시 인용한다. 하위 객체는 부모 테이블이 반드시 필요하다.
+  const schemaDropSql = (item, database) => {
+    const type = String(item && item.type || "");
+    const name = String(item && item.name || "");
+    const schema = String(database || item && item.database || "");
+    if (!name || !schema) return "";
+    const target = ddlIdentifier(schema) + "." + ddlIdentifier(name);
+    const table = item && item.table
+      ? ddlIdentifier(schema) + "." + ddlIdentifier(item.table) : "";
+    if (type === "table") return "DROP TABLE " + target + ";";
+    if (type === "view") return "DROP VIEW " + target + ";";
+    if (type === "procedure") return "DROP PROCEDURE " + target + ";";
+    if (type === "function") return "DROP FUNCTION " + target + ";";
+    if (type === "trigger") return "DROP TRIGGER " + target + ";";
+    if (type === "event") return "DROP EVENT " + target + ";";
+    if (!table) return "";
+    if (type === "column") return "ALTER TABLE " + table + " DROP COLUMN " + ddlIdentifier(name) + ";";
+    if (type === "index") return "ALTER TABLE " + table + " "
+      + (name.toUpperCase() === "PRIMARY" ? "DROP PRIMARY KEY" : "DROP INDEX " + ddlIdentifier(name)) + ";";
+    if (type === "foreignKey") return "ALTER TABLE " + table + " DROP FOREIGN KEY " + ddlIdentifier(name) + ";";
+    return "";
+  };
 
   /* 셀 편집 미리보기 --------------------------------------------------------
      화면에 보여 줄 UPDATE 문장을 만든다. 실제로 서버에 나가는 것은 이 글자가 아니다 —
@@ -1380,15 +1484,17 @@ const MNDbClient = (() => {
       const from = editor.ta.selectionStart, to = editor.ta.selectionEnd;
       if (from !== to){
         const picked = value.slice(from, to).trim();
-        if (picked) return { sql:picked, label:"선택 실행" };
+        if (picked) return { sql:compoundExecutionScript(picked), displaySql:picked, label:"선택 실행" };
       }
       const range = statementAt(value, from);
-      return range ? { sql:range.text, label:"현재 문장 실행" } : null;
+      return range ? {
+        sql:compoundExecutionScript(range.text, range.delimiter), displaySql:range.text, label:"현재 문장 실행"
+      } : null;
     };
 
     const allTarget = () => {
       const sql = editor.getValue().trim();
-      return sql ? { sql, label:"전체 실행" } : null;
+      return sql ? { sql:compoundExecutionScript(sql), displaySql:sql, label:"전체 실행" } : null;
     };
 
     const previewOf = (sql, limit) => {
@@ -1403,10 +1509,10 @@ const MNDbClient = (() => {
     const refreshRunLabel = () => {
       if (runningJob) return;
       const target = runTarget();
-      const total = statementRanges(editor.getValue()).length;
+      const total = statementRanges(compoundExecutionScript(editor.getValue())).length;
       runButton.textContent = target ? target.label : "실행";
       runButton.disabled = !target || !sessionId;
-      runButton.title = target ? "Ctrl+Enter — " + previewOf(target.sql) : "실행할 SQL 을 입력해 주세요.";
+      runButton.title = target ? "Ctrl+Enter — " + previewOf(target.displaySql || target.sql) : "실행할 SQL 을 입력해 주세요.";
       runAllButton.hidden = total < 2;
       runAllButton.disabled = !sessionId;
       runAllButton.textContent = "전체 실행 (" + total + ")";
@@ -2785,7 +2891,8 @@ const MNDbClient = (() => {
       deleteRowButton.hidden = true;
       const sql = entry.sql ? previewOf(entry.sql, 200) : "";
       if (entry.kind === "error"){
-        notice(resultHost, messageFor(entry), sql, "error");
+        const where = Number.isInteger(entry.scriptLine) ? "스크립트 " + entry.scriptLine + "행 · " : "";
+        notice(resultHost, where + messageFor(entry), sql, "error");
         return;
       }
       const affected = Number(entry.affected) || 0;
@@ -2863,7 +2970,9 @@ const MNDbClient = (() => {
 
     // 탭 이름만 보고 어느 문장의 결과인지 알 수 있게 문장 앞머리를 함께 적는다.
     const tabLabel = (entry, index) => {
-      const head = (index + 1) + " · " + (previewOf(entry.sql || "", 34) || (entry.keyword || "").toUpperCase());
+      const statement = Number.isInteger(entry.statement) ? entry.statement + 1 : index + 1;
+      const result = Number(entry.resultIndex) > 0 ? "." + (Number(entry.resultIndex) + 1) : "";
+      const head = statement + result + " · " + (previewOf(entry.sql || "", 34) || (entry.keyword || "").toUpperCase());
       if (entry.kind === "rows") return head + " · " + entry.rows.length + "행";
       if (entry.kind === "error") return head + " · 오류";
       return head + " · " + (Number(entry.affected) || 0) + "행 반영";
@@ -2883,7 +2992,10 @@ const MNDbClient = (() => {
       resultSets = (statements || []).filter(item => item && item.kind);
       const summary = resultSets.map(statementSummary).join(" · ");
       const stopped = failure
-        ? (resultSets.length + "번째 문장에서 멈춤 — " + messageFor(failure))
+        ? ((Number.isInteger(failure.failedStatement) ? failure.failedStatement + 1 : resultSets.length)
+            + "번째 문장에서 멈춤"
+            + (Number.isInteger(failure.scriptLine) ? " (스크립트 " + failure.scriptLine + "행)" : "")
+            + " — " + messageFor(failure))
         : "";
       resultStatus.textContent = [label, summary || "실행할 문장이 없습니다.", elapsed, stopped]
         .filter(Boolean).join(" — ");
@@ -2916,7 +3028,9 @@ const MNDbClient = (() => {
     const expandedTables = new Set();
     const expandedTableSections = new Set();
     let selectedSchemaKey = "";
+    let selectedSchemaItem = null;
     let tableContextMenu = null;
+    let schemaDeletePending = false;
     let closeErdModal = null;
 
     const schemaIcon = (kind, className) => {
@@ -2929,8 +3043,9 @@ const MNDbClient = (() => {
 
     const setSchemaSelection = (item) => {
       selectedSchemaKey = item ? schemaKey(item) : "";
-      tableList.querySelectorAll(".db-table-row").forEach((row) =>
-        row.classList.toggle("selected", row.dataset.schemaKey === selectedSchemaKey));
+      selectedSchemaItem = item ? { ...item } : null;
+      tableList.querySelectorAll("[data-schema-key]").forEach((node) =>
+        node.classList.toggle("selected", node.dataset.schemaKey === selectedSchemaKey));
     };
 
     const setTableSelection = (name) => setSchemaSelection({ type:"table", name });
@@ -2956,20 +3071,109 @@ const MNDbClient = (() => {
       }
     };
 
+    const openRelatedDependency = (dependency) => {
+      const tableName = String(dependency && dependency.table || "");
+      if (!tableName) return;
+      const tableItem = schemaObjects.find(item => (item.type === "table" || item.type === "view")
+        && item.name === tableName);
+      if (tableItem) setSchemaSelection(tableItem);
+      const tab = dependency.kind === "foreignKey" ? "foreignKeys"
+        : dependency.kind === "index" ? "indexes" : dependency.kind === "column" ? "columns" : "overview";
+      openTableInfoModal(tableName, tab);
+    };
+
+    const requestSchemaDelete = async (item) => {
+      if (!item || schemaDeletePending) return;
+      if (readOnly){ toast("읽기 전용 접속에서는 스키마 객체를 삭제할 수 없습니다.", 3000); return; }
+      if (runningJob){ toast("실행 중인 쿼리가 끝난 뒤 삭제해 주세요.", 2600); return; }
+      const sql = schemaDropSql(item, currentDatabase);
+      if (!sql){ toast("이 트리 항목은 직접 삭제할 수 없습니다.", 2600); return; }
+      const label = schemaObjectLabel(item);
+      const qualified = currentDatabase + "." + (item.table ? item.table + "." : "") + item.name;
+      schemaDeletePending = true;
+      try {
+        const url = "/db-dependencies?id=" + encodeURIComponent(sessionId)
+          + "&kind=" + encodeURIComponent(item.type)
+          + "&name=" + encodeURIComponent(item.name)
+          + "&table=" + encodeURIComponent(item.table || "")
+          + "&database=" + encodeURIComponent(currentDatabase);
+        const response = await jsonOf(await fetch(url, { cache:"no-store" }));
+        if (!response.ok){ toast(messageFor(response.info), 4000); return; }
+        const info = response.info || {};
+        const dependencies = Array.isArray(info.dependencies) ? info.dependencies : [];
+        if (dependencies.length){
+          const lines = dependencies.slice(0, 8).map(dependency => "· " + (dependency.detail
+            || schemaObjectLabel({ type:dependency.kind }) + " " + dependency.name)).join("\n");
+          const more = dependencies.length > 8 ? "\n· 그 밖 " + (dependencies.length - 8) + "개" : "";
+          const related = dependencies.find(dependency => dependency.table);
+          const message = label + " ‘" + qualified + "’을(를) 삭제할 수 없습니다.\n\n"
+            + lines + more + "\n\n먼저 위 객체의 참조를 변경하거나 삭제해 주세요.";
+          if (typeof confirmDialog === "function"){
+            const open = await confirmDialog(message, related ? "관련 테이블 열기" : "확인", "닫기");
+            if (open && related) openRelatedDependency(related);
+          } else toast("다른 객체가 사용 중이라 삭제할 수 없습니다.", 4200);
+          return;
+        }
+        const warnings = Array.isArray(info.warnings) ? info.warnings : [];
+        const warningText = warnings.length ? "\n\n함께 확인할 내용:\n"
+          + warnings.slice(0, 5).map(message => "· " + message).join("\n") : "";
+        const dataWarning = item.type === "table" || item.type === "column"
+          ? "\n\n저장된 데이터도 사라집니다." : "";
+        const ok = typeof confirmDialog !== "function" || await confirmDialog(
+          label + " ‘" + qualified + "’을(를) 삭제할까요?\n\n실행 SQL:\n" + sql
+            + dataWarning + warningText
+            + "\n\nMySQL 구조 변경은 즉시 확정되며 롤백하기 어렵습니다.",
+          label + " 삭제", "취소");
+        if (!ok) return;
+        await runQuery({
+          sql, label:label + " 삭제", skipRiskConfirm:true,
+          onComplete:(success, failure) => {
+            if (success){
+              setSchemaSelection(null);
+              toast(label + " ‘" + item.name + "’을(를) 삭제했습니다.", 2600);
+              return;
+            }
+            if (failure && failure.code === "dependency" && typeof confirmDialog === "function")
+              confirmDialog("다른 객체가 사용 중이라 삭제할 수 없습니다.\n\n" + String(failure.detail || ""), "확인", "닫기");
+          }
+        });
+      } catch(error){
+        toast(launcherMessage(error), 4000);
+      } finally {
+        schemaDeletePending = false;
+      }
+    };
+
     const openTableContextMenu = (item, x, y) => {
       closeTableContextMenu();
       const menu = el("div", "db-table-context-menu");
       menu.setAttribute("role", "menu");
       menu.setAttribute("aria-label", item.name + " 작업");
-      const infoItem = button("", "db-table-context-item", "테이블 구조와 컬럼 정보를 봅니다");
+      const childTab = item.type === "column" ? "columns"
+        : item.type === "index" ? "indexes" : item.type === "foreignKey" ? "foreignKeys" : "";
+      const tableTarget = item.type === "table" || item.type === "view" || childTab;
+      const infoItem = button("", "db-table-context-item",
+        tableTarget ? "테이블 구조와 컬럼 정보를 봅니다" : "객체 정의를 봅니다");
       infoItem.setAttribute("role", "menuitem");
-      infoItem.append(schemaIcon("info", "db-table-context-icon"), document.createTextNode("테이블 정보"));
+      infoItem.append(schemaIcon("info", "db-table-context-icon"),
+        document.createTextNode(tableTarget ? "테이블 정보" : "정의 보기"));
       infoItem.addEventListener("click", () => {
         closeTableContextMenu();
         setSchemaSelection(item);
-        openTableInfoModal(item.name);
+        if (tableTarget) openTableInfoModal(item.table || item.name, childTab);
+        else showSchemaObject(item);
       });
-      menu.append(infoItem);
+      const label = schemaObjectLabel(item);
+      const deleteItem = button("", "db-table-context-item danger", label + " 삭제");
+      deleteItem.setAttribute("role", "menuitem");
+      deleteItem.append(schemaIcon("delete", "db-table-context-icon"), document.createTextNode(label + " 삭제"));
+      deleteItem.disabled = readOnly;
+      if (readOnly) deleteItem.title = "읽기 전용 접속입니다.";
+      deleteItem.addEventListener("click", () => {
+        closeTableContextMenu();
+        requestSchemaDelete(item);
+      });
+      menu.append(infoItem, deleteItem);
       document.body.append(menu);
       const bounds = menu.getBoundingClientRect();
       menu.style.left = Math.max(6, Math.min(x, window.innerWidth - bounds.width - 6)) + "px";
@@ -2980,6 +3184,37 @@ const MNDbClient = (() => {
       window.addEventListener("resize", closeTableContextMenu);
       requestAnimationFrame(() => infoItem.focus());
     };
+
+    const bindSchemaObjectNode = (node, item, activate, marker) => {
+      const selectedNode = marker || node;
+      selectedNode.dataset.schemaKey = schemaKey(item);
+      selectedNode.classList.toggle("selected", selectedSchemaKey === schemaKey(item));
+      node.setAttribute("aria-haspopup", "menu");
+      node.addEventListener("focus", () => setSchemaSelection(item));
+      node.addEventListener("click", () => {
+        setSchemaSelection(item);
+        if (activate) activate();
+      });
+      node.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        setSchemaSelection(item);
+        openTableContextMenu(item, event.clientX, event.clientY);
+      });
+      node.addEventListener("keydown", (event) => {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const bounds = node.getBoundingClientRect();
+        setSchemaSelection(item);
+        openTableContextMenu(item, bounds.left + 18, bounds.bottom - 2);
+      });
+    };
+
+    tableList.addEventListener("keydown", (event) => {
+      if (event.key !== "Delete" || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!event.target.closest(".db-table-item,.db-column-item") || !selectedSchemaItem) return;
+      event.preventDefault();
+      requestSchemaDelete(selectedSchemaItem);
+    });
 
     const showSchemaObject = async (item) => {
       setSchemaSelection(item);
@@ -3003,7 +3238,27 @@ const MNDbClient = (() => {
           try { await navigator.clipboard.writeText(ddl); toast("정의를 복사했어요.", 1800); }
           catch(_){ toast("정의를 복사하지 못했습니다.", 2200); }
         });
-        head.append(heading, el("span", "spacer", null), copy);
+        const editScript = button("교체 스크립트 편집", "db-btn db-btn-quiet",
+          "현재 객체를 DROP한 뒤 편집한 정의로 다시 만드는 DELIMITER 스크립트를 편집기에 넣습니다");
+        editScript.disabled = !ddl || readOnly;
+        editScript.addEventListener("click", async () => {
+          const script = routineEditScript(item, ddl, currentDatabase);
+          if (!script) return;
+          if (editor.getValue().trim() && typeof confirmDialog === "function"){
+            const ok = await confirmDialog(
+              "편집기에 쓰던 SQL 이 있습니다.\n" + item.name + " 교체 스크립트로 바꿀까요?"
+                + "\n\n현재 편집기 내용은 사라집니다(저장하지 않았다면 되돌릴 수 없습니다).",
+              "바꾸기", "취소");
+            if (!ok) return;
+          }
+          editor.setValue(script);
+          const createAt = script.indexOf(ddl.trim());
+          editor.ta.setSelectionRange(Math.max(0, createAt), Math.max(0, createAt));
+          editor.ta.focus();
+          refreshRunLabel();
+          toast("DROP+CREATE 교체 스크립트를 넣었습니다. 실행 전에 정의를 확인해 주세요.", 3400);
+        });
+        head.append(heading, el("span", "spacer", null), editScript, copy);
         card.append(head, el("pre", "db-schema-definition-ddl", ddl || "정의문이 없습니다."));
         resultHost.append(card);
         resultStatus.textContent = (labels[item.type] || "객체") + " · " + item.name
@@ -3049,39 +3304,43 @@ const MNDbClient = (() => {
         const info = await loadTableChildrenFor(item.name);
         host.innerHTML = "";
         const columnNode = (column) => {
+          const child = { ...column, type:"column", table:item.name };
           const node = button("", "db-column-item",
             column.name + " " + column.type + (column.nullable ? "" : " NOT NULL")
               + (column.comment ? " — " + column.comment : ""));
           if (column.key === "PRI") node.classList.add("db-column-key");
           node.append(schemaIcon(column.key === "PRI" ? "key" : "column", "db-column-icon"),
             el("span", "db-column-name", column.name), el("span", "db-column-type", column.type));
-          node.addEventListener("click", () => insertIntoEditor(identifierFor(column.name)));
+          bindSchemaObjectNode(node, child, () => insertIntoEditor(identifierFor(column.name)));
           return node;
         };
         const indexNode = (index) => {
+          const child = { ...index, type:"index", table:item.name };
           const columns = (index.columns || []).map(column => column.name || "함수식").join(", ");
           const node = button("", "db-column-item", index.name + " — " + columns);
           node.append(schemaIcon(index.name === "PRIMARY" ? "key" : "index", "db-column-icon"),
             el("span", "db-column-name", index.name),
             el("span", "db-column-type", (index.unique ? "UNIQUE · " : "") + index.type + " · " + columns));
-          node.addEventListener("click", () => openTableInfoModal(item.name, "indexes"));
+          bindSchemaObjectNode(node, child, () => openTableInfoModal(item.name, "indexes"));
           return node;
         };
         const foreignKeyNode = (foreignKey) => {
+          const child = { ...foreignKey, type:"foreignKey", table:item.name };
           const local = (foreignKey.columns || []).map(column => column.local).join(", ");
           const referenced = (foreignKey.columns || []).map(column => column.referenced).join(", ");
           const detail = local + " · " + foreignKey.referencedDatabase + "." + foreignKey.referencedTable + "(" + referenced + ")";
           const node = button("", "db-column-item", foreignKey.name + " — " + detail);
           node.append(schemaIcon("foreignKey", "db-column-icon"), el("span", "db-column-name", foreignKey.name),
             el("span", "db-column-type", detail));
-          node.addEventListener("click", () => openTableInfoModal(item.name, "foreignKeys"));
+          bindSchemaObjectNode(node, child, () => openTableInfoModal(item.name, "foreignKeys"));
           return node;
         };
         const triggerNode = (trigger) => {
+          const child = { ...trigger, type:"trigger", table:item.name };
           const node = button("", "db-column-item", trigger.name + " — " + trigger.timing + " " + trigger.event);
           node.append(schemaIcon("trigger", "db-column-icon"), el("span", "db-column-name", trigger.name),
             el("span", "db-column-type", trigger.timing + " " + trigger.event));
-          node.addEventListener("click", () => showSchemaObject(trigger));
+          bindSchemaObjectNode(node, child, () => showSchemaObject(child));
           return node;
         };
         host.append(tableSection(item, "columns", "Columns", "column", info.columns || [], columnNode));
@@ -3154,26 +3413,10 @@ const MNDbClient = (() => {
             name.append(schemaIcon(group.icon, "db-table-object-icon"), el("span", "db-table-name", item.name));
             if (item.type === "function" && item.dataType) name.append(el("span", "db-table-object-meta", item.dataType));
             if (item.type === "event" && item.status) name.append(el("span", "db-table-object-meta", item.status));
-            name.addEventListener("click", () => {
-              setSchemaSelection(item);
+            bindSchemaObjectNode(name, item, () => {
               if (item.type === "table" || item.type === "view") showTable(item.name);
               else showSchemaObject(item);
-            });
-            if (group.expandable){
-              name.setAttribute("aria-haspopup", "menu");
-              name.addEventListener("contextmenu", (event) => {
-                event.preventDefault();
-                setSchemaSelection(item);
-                openTableContextMenu(item, event.clientX, event.clientY);
-              });
-              name.addEventListener("keydown", (event) => {
-                if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
-                event.preventDefault();
-                const bounds = name.getBoundingClientRect();
-                setSchemaSelection(item);
-                openTableContextMenu(item, bounds.left + 18, bounds.bottom - 2);
-              });
-            }
+            }, row);
 
             row.append(toggle, name);
             const childHost = el("div", "db-table-children");
@@ -3229,6 +3472,7 @@ const MNDbClient = (() => {
       tableChildrenCache.clear();
       if (previousDatabase !== currentDatabase){
         selectedSchemaKey = "";
+        selectedSchemaItem = null;
         expandedTables.clear();
         expandedTableSections.clear();
       }
@@ -4239,6 +4483,14 @@ const MNDbClient = (() => {
       return value < 1000 ? value + "ms" : (value / 1000).toFixed(2) + "초";
     };
 
+    const schemaChangingScript = (sql) => splitStatements(sql).some((statement) =>
+      ["create", "alter", "drop", "rename", "truncate"].includes(firstKeyword(statement)));
+
+    const refreshSchemaAfterRun = () => {
+      if (!schemaChangingScript(runningSql)) return;
+      loadSchema().catch(() => { /* 실행 결과는 이미 표시했다. 스키마 새로고침 실패만으로 덮지 않는다. */ });
+    };
+
     const pollQuery = () => {
       pollTimer = setTimeout(async () => {
         if (closed || !runningJob) return;
@@ -4263,6 +4515,7 @@ const MNDbClient = (() => {
             }
             const complete = runningComplete; runningComplete = null;
             if (complete) complete(false, response.info);
+            refreshSchemaAfterRun();
             return;
           }
           if (!runningQuiet) rememberQuery(runningSql, response.info.ms, true);
@@ -4270,6 +4523,7 @@ const MNDbClient = (() => {
           renderStatements(response.info.statements || [], runningLabel, formatMs(response.info.ms));
           const complete = runningComplete; runningComplete = null;
           if (complete) complete(true, response.info);
+          refreshSchemaAfterRun();
         } catch(error){
           runningJob = "";
           setRunning(false);
@@ -4330,7 +4584,8 @@ const MNDbClient = (() => {
       const target = runTarget();
       if (!target){ toast("실행 계획을 볼 문장을 먼저 골라 주세요.", 2200); return; }
       // 이미 EXPLAIN 인 문장에 또 붙이지 않는다. 편집기 내용은 건드리지 않는다.
-      const sql = firstKeyword(target.sql) === "explain" ? target.sql : "EXPLAIN " + target.sql;
+      const base = target.displaySql || target.sql;
+      const sql = firstKeyword(base) === "explain" ? base : "EXPLAIN " + base;
       runQuery({ sql, label:"실행 계획" });
     });
     runAllButton.addEventListener("click", () => runQuery(allTarget()));
@@ -4403,9 +4658,7 @@ const MNDbClient = (() => {
       editor.ta.setSelectionRange(0, 0);
       editor.ta.focus();
       refreshRunLabel();
-      // DELIMITER 는 MySQL 명령행 클라이언트의 지시어지 SQL 문장이 아니다. 워커의 문장 나누기는
-      // 세미콜론만 보므로, 프로시저 덤프를 열었을 때 그대로 실행하면 실패한다는 것을 미리 알린다.
-      const note = /^\s*DELIMITER\b/im.test(text) ? " · DELIMITER 구문은 그대로 실행할 수 없습니다" : "";
+      const note = /^\s*DELIMITER\b/im.test(text) ? " · DELIMITER 복합문을 인식했습니다" : "";
       toast(file.name + " 을 불러왔습니다 — 문장 " + statementRanges(text).length + "개" + note, 3600);
     };
 
@@ -4673,8 +4926,8 @@ const MNDbClient = (() => {
   };
 
   return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
-    statementRanges, splitStatements, statementAt, firstKeyword, riskyStatements,
-    identifierFor, ddlIdentifier, ddlString, editBlockNote,
+    statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements,
+    identifierFor, ddlIdentifier, ddlString, routineEditScript, schemaObjectLabel, schemaDropSql, editBlockNote,
     cellUpdatePreview, rowDeletePreview, rowInsertPreview,
     defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
     erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };

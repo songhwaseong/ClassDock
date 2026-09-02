@@ -502,6 +502,9 @@ cd myOffice</code></pre>
 <ol>
   <li><code>.dbconn</code> 파일을 열어 호스트·포트·데이터베이스·계정·비밀번호를 입력하고 <strong>연결</strong>을 누릅니다. 비밀번호는 파일이나 브라우저 저장소에 남기지 않습니다.</li>
   <li>SQL 편집기에서 선택한 문장 또는 커서가 있는 문장을 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행합니다. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>는 편집기의 모든 문장을 위에서부터 실행합니다. 현재 데이터베이스의 테이블명이나 <code>orders o</code> 같은 별칭에 <kbd>Ctrl</kbd>+클릭하면 기존 테이블 정보창이 열립니다. 정보창의 <strong>DDL</strong> 탭과 변경 SQL 미리보기에서는 쿼리를 마우스로 드래그해 선택·복사할 수 있습니다.</li>
+  <li>프로시저·함수·트리거·이벤트처럼 본문 안에 세미콜론이 있는 복합문은 MySQL CLI와 같은 <code>DELIMITER $$</code>·<code>DELIMITER //</code> 지시어로 감쌉니다. <code>DELIMITER</code> 줄은 서버로 보내지 않고 문장을 나누는 기준만 바꾸므로, <code>.sql</code> 덤프도 그대로 불러와 전체 실행할 수 있습니다.</li>
+  <li>왼쪽 스키마에서 프로시저·함수·트리거·이벤트를 누르면 <code>SHOW CREATE</code> 정의를 봅니다. 쓰기 허용 접속의 <strong>교체 스크립트 편집</strong>은 <code>DROP ... IF EXISTS</code>와 현재 정의를 같은 <code>DELIMITER</code>로 감싸 편집기에 넣습니다. 실행하면 기존 객체를 먼저 삭제하므로 반드시 정의와 대상 데이터베이스를 확인하세요. <code>CALL</code>이 여러 결과 집합을 반환하면 한 문장 아래의 결과를 각각 탭으로 표시합니다.</li>
+  <li>왼쪽 트리의 테이블·뷰·컬럼·인덱스·외래키·프로시저·함수·트리거·이벤트를 선택하고 <kbd>Del</kbd>을 누르거나 마우스 오른쪽 버튼의 <strong>삭제</strong>를 고르면 실제 <code>DROP</code>/<code>ALTER TABLE</code> 문을 확인한 뒤 삭제합니다. 읽기 전용 접속에서는 사용할 수 없습니다. 외래키·인덱스·생성 컬럼·뷰가 해당 객체를 사용 중이면 삭제하지 않고 관계와 객체 이름을 알려 주며, <strong>관련 테이블 열기</strong>로 구조를 먼저 정리할 수 있습니다. 앱이 외래키 검사를 끄거나 <code>CASCADE</code>를 자동 적용하지는 않습니다.</li>
   <li>결과 위치는 <strong>Side / Below</strong> 버튼으로 편집기 오른쪽과 아래 사이를 전환합니다. 가운데 분할선을 드래그하면 두 영역의 너비나 높이를 조절하며 방향과 크기는 다음 실행에도 유지됩니다. 좁은 화면에서는 결과가 자동으로 아래에 표시됩니다.</li>
   <li>결과 표에서 칸을 끌거나 행 번호·컬럼명을 눌러 범위를 고릅니다. <kbd>Ctrl</kbd>은 선택 추가·제거, <kbd>Shift</kbd>는 범위 확장, <kbd>Ctrl</kbd>+<kbd>C</kbd>는 선택한 칸 복사입니다.</li>
   <li>칸을 <strong>두 번 누르거나 <kbd>F2</kbd>, 또는 바로 타자를 치면</strong> 그 자리에서 값을 고칩니다(쓰기 허용 접속에서, 한 테이블을 조회했고 기본키가 결과에 함께 있을 때). <kbd>Enter</kbd>는 담고 아래 칸으로, <kbd>Tab</kbd>은 담고 옆 칸으로 옮겨 이어서 열리며, <kbd>Esc</kbd>는 되돌리고, 칸 밖을 누르면 담깁니다. 방향키로 칸을 옮기고 <kbd>Shift</kbd>+방향키로 범위를 넓힙니다.</li>

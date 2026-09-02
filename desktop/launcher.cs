@@ -2464,6 +2464,27 @@ class ClassDockLauncher
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-object-failed: " + FlattenMessage(ex)));
                     }
                 }
+                else if (method == "GET" && path.StartsWith("/db-dependencies?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string kind = QueryValue(path, "kind").ToLowerInvariant();
+                        if (kind != "table" && kind != "view" && kind != "column" && kind != "index"
+                            && kind != "foreignkey" && kind != "procedure" && kind != "function"
+                            && kind != "event" && kind != "trigger")
+                            throw new InvalidOperationException("db-bad-object-kind");
+                        string request = "{\"action\":\"dependencies\",\"kind\":" + JsonString(kind)
+                            + ",\"name\":" + JsonString(DbCheckField(QueryValue(path, "name"), "object", 128, false))
+                            + ",\"table\":" + JsonString(DbCheckField(QueryValue(path, "table"), "table", 128, true))
+                            + ",\"database\":" + JsonString(DbCheckField(QueryValue(path, "database"), "database", 64, true)) + "}";
+                        string json = DbMetadataRequest(QueryValue(path, "id"), request);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-dependencies-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "POST" && path.StartsWith("/db-use?", StringComparison.Ordinal))
                 {
                     try

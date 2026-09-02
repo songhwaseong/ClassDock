@@ -27,6 +27,10 @@ const SPLIT_CASES = [
   ["-- c; comment\nSELECT 1", ["-- c; comment\nSELECT 1"]],
   ["SELECT 1 /* ; */ ;", ["SELECT 1 /* ; */"]],
   ["/*!40101 SET x=1 */; SELECT 1", ["/*!40101 SET x=1 */", "SELECT 1"]],
+  ["DELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\n  SELECT 2;\nEND$$\nDELIMITER ;\nCALL p();",
+    ["CREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\n  SELECT 2;\nEND", "CALL p()"]],
+  ["  delimiter //\nCREATE FUNCTION f() RETURNS varchar(20)\nBEGIN\n  RETURN '//;still text'; /* // */\nEND//\nDELIMITER ;",
+    ["CREATE FUNCTION f() RETURNS varchar(20)\nBEGIN\n  RETURN '//;still text'; /* // */\nEND"]],
   ["  ;;  ", []]
 ];
 
@@ -107,6 +111,63 @@ test("SQL 문장 나누기는 따옴표·역따옴표·주석 안의 세미콜�
   }
 });
 
+test("DELIMITER 복합문은 지시어를 빼고 CREATE 전체를 한 문장으로 고른다", () => {
+  const sql = "-- routine\nDELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n SELECT 1;\n SELECT 2;\nEND$$\nDELIMITER ;\nSELECT 3;";
+  const ranges = client.statementRanges(sql);
+  assert.equal(ranges.length, 2);
+  assert.match(ranges[0].text, /^CREATE PROCEDURE[\s\S]*SELECT 2;\nEND$/);
+  assert.equal(ranges[0].line, 3);
+  assert.equal(ranges[0].delimiter, "$$");
+  assert.equal((client.statementAt(sql, sql.indexOf("SELECT 2")) || {}).text, ranges[0].text);
+  assert.equal(ranges[1].text, "SELECT 3");
+
+  const wrapped = client.compoundExecutionScript(ranges[0].text, ranges[0].delimiter);
+  assert.match(wrapped, /^DELIMITER \$\$/);
+  assert.deepEqual(client.splitStatements(wrapped), [ranges[0].text],
+    "커서 실행용으로 잘라 낸 루틴도 워커에서 다시 쪼개지면 안 된다");
+});
+
+test("선택한 CREATE 복합문은 DELIMITER가 없어도 자동으로 감싸고 일반 SQL은 건드리지 않는다", () => {
+  const routine = "CREATE FUNCTION answer() RETURNS INT\nBEGIN\n RETURN 42;\nEND";
+  const wrapped = client.compoundExecutionScript(routine);
+  assert.match(wrapped, /^DELIMITER /);
+  assert.deepEqual(client.splitStatements(wrapped), [routine]);
+  assert.equal(client.compoundExecutionScript("SELECT 1; SELECT 2;"), "SELECT 1; SELECT 2;");
+});
+
+test("루틴 교체 스크립트는 DROP과 SHOW CREATE 정의를 같은 DELIMITER로 감싼다", () => {
+  const script = client.routineEditScript({ type:"procedure", name:"find student" },
+    "CREATE DEFINER=`root`@`%` PROCEDURE `find student`()\nBEGIN\n SELECT 1;\nEND", "school");
+  assert.match(script, /^DELIMITER \$\$/);
+  assert.match(script, /DROP PROCEDURE IF EXISTS `school`\.`find student`\$\$/);
+  assert.match(script, /BEGIN\n SELECT 1;\nEND\$\$/);
+  assert.match(script, /DELIMITER ;$/);
+  assert.equal(client.splitStatements(script).length, 2, "DROP과 CREATE 두 문장이어야 한다");
+});
+
+test("스키마 트리 삭제 SQL은 객체 종류별 문법과 식별자 인용을 지킨다", () => {
+  assert.equal(client.schemaDropSql({ type:"table", name:"order" }, "school-db"),
+    "DROP TABLE `school-db`.`order`;");
+  assert.equal(client.schemaDropSql({ type:"view", name:"student view" }, "school"),
+    "DROP VIEW `school`.`student view`;");
+  assert.equal(client.schemaDropSql({ type:"column", table:"student", name:"group" }, "school"),
+    "ALTER TABLE `school`.`student` DROP COLUMN `group`;");
+  assert.equal(client.schemaDropSql({ type:"index", table:"student", name:"PRIMARY" }, "school"),
+    "ALTER TABLE `school`.`student` DROP PRIMARY KEY;");
+  assert.equal(client.schemaDropSql({ type:"index", table:"student", name:"idx age" }, "school"),
+    "ALTER TABLE `school`.`student` DROP INDEX `idx age`;");
+  assert.equal(client.schemaDropSql({ type:"foreignKey", table:"score", name:"fk student" }, "school"),
+    "ALTER TABLE `school`.`score` DROP FOREIGN KEY `fk student`;");
+  assert.equal(client.schemaDropSql({ type:"procedure", name:"get_student" }, "school"),
+    "DROP PROCEDURE `school`.`get_student`;");
+  assert.equal(client.schemaDropSql({ type:"function", name:"student_count" }, "school"),
+    "DROP FUNCTION `school`.`student_count`;");
+  assert.equal(client.schemaDropSql({ type:"trigger", name:"student_before_insert" }, "school"),
+    "DROP TRIGGER `school`.`student_before_insert`;");
+  assert.equal(client.schemaDropSql({ type:"event", name:"nightly_cleanup" }, "school"),
+    "DROP EVENT `school`.`nightly_cleanup`;");
+});
+
 test("첫 낱말은 앞선 주석과 여는 괄호를 건너뛰고 읽는다", () => {
   assert.equal(client.firstKeyword("SELECT 1"), "select");
   assert.equal(client.firstKeyword("  -- 메모\n DELETE FROM t"), "delete");
@@ -168,7 +229,7 @@ test("이름 삽입은 평범한 식별자가 아닐 때만 역따옴표로 감�
 test("걸린 시간은 서버가 재고 프런트는 그 값만 쓴다", () => {
   // 프런트에서 재면 폴링 간격(300ms)이 섞여 빠른 쿼리가 느리게 보인다.
   assert.match(worker, /def elapsed_ms\(started\)/);
-  assert.match(worker, /entry\["ms"\] = elapsed_ms\(started\)/);
+  assert.match(worker, /results\[first_result\]\["ms"\] = elapsed_ms\(started\)/);
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   assert.match(source, /formatMs\(response\.info\.ms\)/);
   assert.ok(!/Date\.now\(\) - runStartedAt/.test(source), "프런트가 실행 시간을 재면 안 된다");
@@ -255,16 +316,37 @@ test("테이블 정보 모달은 읽기 전용과 외부 구조 변경을 확인
   assert.match(source, /showTable\(nextName\)/);
 });
 
-test("테이블 정보는 결과 영역이 아니라 스키마 테이블명의 우클릭 메뉴에서 연다", () => {
+test("스키마 트리는 우클릭과 Delete 키로 객체 삭제를 요청하고 읽기 전용에서는 막는다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  assert.match(source, /name\.addEventListener\("contextmenu"/);
+  assert.match(source, /const bindSchemaObjectNode =/);
+  assert.match(source, /node\.addEventListener\("contextmenu"/);
   assert.match(source, /openTableContextMenu\(item, event\.clientX, event\.clientY\)/);
-  assert.match(source, /openTableInfoModal\(item\.name\)/);
+  assert.match(source, /tableList\.addEventListener\("keydown"/);
+  assert.match(source, /event\.key !== "Delete"/);
+  assert.match(source, /deleteItem\.disabled = readOnly/);
+  assert.match(source, /openTableInfoModal\(item\.table \|\| item\.name, childTab\)/);
   assert.match(source, /event\.key !== "ContextMenu".*event\.shiftKey.*"F10"/);
   assert.ok(!/db-table-info-button/.test(source), "결과 영역에 테이블 정보 버튼이 남으면 안 된다");
   assert.ok(!/db-table-info-button/.test(css), "없어진 결과 버튼 스타일이 남으면 안 된다");
   assert.match(css, /\.db-table-context-menu\{/);
+  assert.match(css, /\.db-table-context-item\.danger/);
+});
+
+test("삭제 전 의존성을 조회하고 발견되면 실행하지 않은 채 관련 객체를 안내한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(launcher, /path\.StartsWith\("\/db-dependencies\?"/);
+  assert.match(launcher, /\{\\"action\\":\\"dependencies\\"/);
+  assert.match(worker, /def load_dependencies\(kind, name, table="", database=""\)/);
+  assert.match(worker, /information_schema\.KEY_COLUMN_USAGE/);
+  assert.match(worker, /information_schema\.VIEW_TABLE_USAGE/);
+  assert.match(worker, /information_schema\.VIEW_ROUTINE_USAGE/);
+  assert.match(source, /fetch\(url, \{ cache:"no-store" \}\)/);
+  assert.match(source, /if \(dependencies\.length\)/);
+  assert.match(source, /먼저 위 객체의 참조를 변경하거나 삭제해 주세요/);
+  assert.match(source, /skipRiskConfirm:true/);
+  assert.match(worker, /1553: "dependency"/);
+  assert.match(worker, /3730: "dependency"/);
 });
 
 test("테이블 정보의 DDL과 변경 SQL은 창 이동 대신 글자로 선택할 수 있다", () => {
@@ -494,7 +576,8 @@ test("보관분이 서버의 전부가 아니면 그렇다고 밝힌다", () => 
 
 test("실행 계획은 편집기를 고치지 않고 EXPLAIN 만 붙인다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
-  assert.match(source, /firstKeyword\(target\.sql\) === "explain" \? target\.sql : "EXPLAIN " \+ target\.sql/);
+  assert.match(source, /const base = target\.displaySql \|\| target\.sql/);
+  assert.match(source, /firstKeyword\(base\) === "explain" \? base : "EXPLAIN " \+ base/);
 });
 
 test("실행 이력은 접속별로 나뉘고 비밀번호를 섞지 않는다", () => {
@@ -799,6 +882,14 @@ test("접속 문서는 새 문서 메뉴와 스크립트 목록에 등록되어 
 
 // 파이썬이 있는 환경에서만 돈다(check-source 의 파이썬 하네스 검사와 같은 기조).
 const python = spawnSync("python", ["--version"], { encoding: "utf8" });
+test("의존성 검사는 외래키·인덱스·생성 컬럼·뷰 사용 관계를 구조화한다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+    const run = spawnSync("python", [path.join(root, "tests", "fixtures", "db-dependency-probe.py"),
+      path.join(root, "desktop")], { encoding:"utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok/);
+  });
+
 test("워커의 문장 나누기는 프런트와 같은 결과를 낸다", { skip: python.status !== 0 && "python 없음" }, () => {
   const probe = [
     "import json, sys",
@@ -843,6 +934,19 @@ test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고
   assert.match(source, /resultSets = \(statements \|\| \[\]\)\.filter\(item => item && item\.kind\)/);
 });
 
+test("CALL의 실제 결과 집합은 모두 전달하고 마지막 빈 완료 결과는 숨긴다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+    const run = spawnSync("python", [path.join(root, "tests", "fixtures", "db-multi-result-probe.py"),
+      path.join(root, "desktop")], { encoding:"utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok/);
+    assert.match(worker, /while True:[\s\S]*getattr\(cursor, "nextset", None\)/);
+    assert.match(worker, /trailing_call_status/);
+    const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+    assert.match(source, /entry\.resultIndex/);
+    assert.match(source, /entry\.statement/);
+  });
+
 test("여러 문장 실행은 중간에 멈춰도 거기까지의 결과를 보여 준다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   // 워커는 실패한 문장까지의 결과를 함께 돌려준다 — 앞의 문장은 이미 서버에서 실행됐다.
@@ -877,8 +981,9 @@ test("SQL 파일 가져오기는 서버를 거치지 않고 인코딩을 판정�
   // 큰 파일은 묻고, 더 큰 파일은 받지 않는다.
   assert.match(source, /file\.size > SQL_IMPORT_MAX/);
   assert.match(source, /file\.size > SQL_IMPORT_WARN/);
-  // DELIMITER 는 문장 나누기가 다루지 않는다는 것을 불러올 때 알린다.
-  assert.match(source, /DELIMITER/);
+  // DELIMITER 복합문은 경고하지 않고 인식한 문장 수를 안내한다.
+  assert.match(source, /DELIMITER 복합문을 인식했습니다/);
+  assert.doesNotMatch(source, /DELIMITER 구문은 그대로 실행할 수 없습니다/);
 });
 
 test("표 칸 고르기 셈은 스프레드시트와 DB 결과 표가 같은 모듈을 쓴다", () => {
@@ -972,7 +1077,7 @@ test("고칠 수 있는 결과인지는 열 이름이 아니라 서버가 알려
   assert.match(worker, /getattr\(field, "org_table"/);
   assert.match(worker, /getattr\(field, "org_name"/);
   // 커서에 다른 질의를 실행하면 이 메타데이터가 덮인다 — 읽는 자리가 execute 직후여야 한다.
-  assert.match(worker, /sources = field_sources\(cursor\)\n\s*# 한 번에 보내는 양/);
+  assert.match(worker, /sources = field_sources\(cursor\)\n\s*columns, kept_rows, more, clipped = read_rows/);
   // 한 베이스 테이블 + 기본키가 결과에 모두 실려 있을 때만 연다.
   assert.match(worker, /if len\(tables\) > 1:\n\s*return \{"editable": False, "reason": "multi-table"\}/);
   assert.match(worker, /if not meta\["base"\]:\n\s*return \{"editable": False, "reason": "view"\}/);
@@ -982,7 +1087,8 @@ test("고칠 수 있는 결과인지는 열 이름이 아니라 서버가 알려
   assert.match(worker, /if _state\["read_only"\]:\n\s*return \{"editable": False, "reason": "read-only"\}/);
   // 판정이 실패해도 결과 자체는 그대로 보여 준다(고치지 못할 뿐이다).
   assert.match(worker, /def safe_edit_plan\(/);
-  assert.match(worker, /"edit": safe_edit_plan\(connection, sources, columns\)/);
+  assert.match(worker, /edit_candidates\.append\(\(entry, sources, columns\)\)/);
+  assert.match(worker, /result_entry\["edit"\] = safe_edit_plan\(connection, sources, columns\)/);
 });
 
 test("기본키·계산식·이진·생성 컬럼 칸은 고치지 못하고 그 까닭을 밝힌다", () => {

@@ -6685,6 +6685,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-context-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:0;border-radius:6px;
   background:transparent;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer}
 .db-table-context-item:hover,.db-table-context-item:focus{outline:none;background:var(--panel-hover);color:var(--accent)}
+.db-table-context-item.danger{color:var(--danger,#c2413b);border-top:1px solid var(--border);border-radius:0 0 6px 6px;margin-top:3px;padding-top:9px}
+.db-table-context-item:disabled{opacity:.48;cursor:not-allowed}.db-table-context-item:disabled:hover{background:transparent;color:var(--danger,#c2413b)}
 .db-table-context-icon{display:flex;flex:none;width:15px;height:15px}.db-table-context-icon .ui-icon{width:100%;height:100%}
 .db-table-toggle{display:flex;align-items:center;justify-content:center;flex:none;width:19px;height:25px;padding:0;border:0;
   border-radius:5px;background:transparent;color:var(--muted);font:inherit;cursor:pointer}
@@ -6702,6 +6704,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink);font:inherit;font-size:11.5px;
   text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap}
 .db-column-item:hover{background:var(--panel-hover)}
+.db-column-item.selected{background:color-mix(in srgb,var(--accent) 14%,var(--panel-2));color:var(--accent);font-weight:700}
 .db-column-item.db-column-key{font-weight:700}
 .db-column-icon{width:13px;height:13px;color:var(--muted)}
 .db-column-key .db-column-icon{color:#d18b00}
