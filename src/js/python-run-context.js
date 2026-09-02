@@ -906,6 +906,14 @@ async function pythonBackendAvailable(){
   return _pyBackend;
 }
 
+/* 런처가 파이썬을 다시 찾은 뒤(/python-rescan) 프런트 캐시도 함께 비운다 — 이걸 하지 않으면
+   런처는 새 파이썬을 알고 있는데 화면만 "브라우저 파이썬"으로 굳은 채 남는다.
+   Py Env 의 '다시 검사' 와 DB 접속 화면의 '다시 검사' 가 같이 쓴다. */
+function resetPythonBackendProbe(){
+  _pyBackend = null;
+  if (typeof resetBackendFormatterProbe === "function"){ try { resetBackendFormatterProbe(); } catch(e){} }
+}
+
 async function pythonEnvironmentDetails(){
   const browserMode = {
     backend: false,
@@ -1820,8 +1828,7 @@ function buildPythonEnvHelp(panel, btn){
         const res = await fetch("/python-rescan", { method:"POST", cache:"no-store" });
         if (res.ok){ const data = await res.json(); found = !!data.ok; }
       } catch(e){}
-      _pyBackend = null;   // 프론트 캐시도 비워야 다음 실행이 로컬 파이썬으로 간다
-      if (typeof resetBackendFormatterProbe === "function"){ try { resetBackendFormatterProbe(); } catch(e){} }
+      resetPythonBackendProbe();   // 프론트 캐시도 비워야 다음 실행이 로컬 파이썬으로 간다
       if (found) refreshOpenNotebookLocalPython();
       if (found){
         toast("로컬 파이썬을 찾았습니다. 이제 내 컴퓨터의 파이썬으로 실행합니다.", 3200);

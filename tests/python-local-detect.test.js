@@ -49,6 +49,8 @@ test("Py Env 는 브라우저 파이썬일 때 원인별 안내와 다시 검사
   assert.match(runContext, /테스트용 브라우저 모드로 고정돼 있습니다/);
   assert.match(runContext, /지금은 로컬 파이썬을 쓸 수 없는 실행 방식입니다/);
   assert.match(runContext, /fetch\("\/python-rescan", \{ method:"POST", cache:"no-store" \}\)/);
-  assert.match(runContext, /_pyBackend = null;\s+\/\/ 프론트 캐시도 비워야/);
+  // 프런트 캐시 비우기는 Py Env 와 DB 접속 화면이 함께 쓰는 함수로 묶여 있다.
+  assert.match(runContext, /function resetPythonBackendProbe\(\)\{[\s\S]*?_pyBackend = null;/);
+  assert.match(runContext, /resetPythonBackendProbe\(\);\s+\/\/ 프론트 캐시도 비워야/);
   assert.match(styles, /\.py-env-help\{/);
 });

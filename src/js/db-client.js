@@ -6050,6 +6050,55 @@ const MNDbClient = (() => {
       statusLine.append(wrap);
     };
 
+    /* 파이썬 자체가 없을 때. 문장 하나로 끝내면 "그래서 뭘 하라는 거냐"에서 막히므로
+       설치 순서와 '다시 검사'를 함께 붙인다(파이썬 실행 화면의 Py Env 안내와 같은 내용·같은 엔드포인트).
+       런처는 "못 찾았다"는 사실까지 캐시하므로(FindPython), 설치한 뒤 이 버튼으로 캐시를 비워 주지 않으면
+       exe 를 껐다 켜기 전까지 같은 안내가 계속 나온다. */
+    const offerPythonHelp = () => {
+      statusLine.innerHTML = "";
+      const wrap = el("div", "db-install db-python-help");
+      wrap.append(el("strong", null, "이 컴퓨터에서 Python 을 찾지 못했습니다"));
+      wrap.append(el("p", null, "데이터베이스 접속은 Python 으로 서버에 연결합니다. 아래 순서대로 하면 됩니다."));
+      const steps = el("ol", "db-help-steps");
+      [
+        "python.org 에서 Python 을 설치합니다. 설치 첫 화면의 'Add python.exe to PATH' 를 체크하면 가장 확실합니다.",
+        "설치가 끝나면 아래 '다시 검사' 를 누릅니다. 앱을 껐다 켤 필요는 없습니다.",
+        "그래도 찾지 못하면 기본 폴더가 아닌 곳에 설치한 경우입니다. 'Add python.exe to PATH' 를 체크해 다시 설치해 주세요."
+      ].forEach((text) => steps.append(el("li", null, text)));
+      wrap.append(steps);
+
+      const rescanButton = button("다시 검사", "db-btn");
+      const note = el("span", "db-help-note");
+      rescanButton.addEventListener("click", async () => {
+        rescanButton.disabled = true;
+        rescanButton.textContent = "검사 중…";
+        note.textContent = "";
+        let found = false, version = "";
+        try {
+          const response = await fetch("/python-rescan", { method:"POST", cache:"no-store" });
+          if (response.ok){
+            const data = await response.json();
+            found = !!data.ok;
+            version = String((data && data.version) || "").trim();
+          }
+        } catch(_){}
+        if (typeof resetPythonBackendProbe === "function") resetPythonBackendProbe();
+        rescanButton.disabled = false;
+        rescanButton.textContent = "다시 검사";
+        if (!found){
+          note.textContent = "아직 찾지 못했습니다. 설치를 마쳤는지, 'Add python.exe to PATH' 를 체크했는지 확인해 주세요.";
+          return;
+        }
+        // 찾았으면 한 번 더 누르게 하지 않는다 — 비밀번호가 아직 칸에 남아 있는 지금이 이어서 연결할 때다.
+        note.textContent = (version ? version + " 을(를) 찾았습니다. " : "Python 을 찾았습니다. ") + "이어서 연결합니다…";
+        connect();
+      });
+      const actions = el("div", "db-help-actions");
+      actions.append(rescanButton, note);
+      wrap.append(actions);
+      statusLine.append(wrap);
+    };
+
     const connect = async () => {
       if (!isExe()){
         statusLine.textContent = "데이터베이스 접속은 ClassDock.exe 에서만 사용할 수 있습니다.";
@@ -6092,7 +6141,9 @@ const MNDbClient = (() => {
         await loadSchema();
         editor.ta.focus();
       } catch(error){
-        statusLine.textContent = launcherMessage(error);
+        // 파이썬이 없는 것만은 한 문장으로 끝내지 않는다 — 설치 순서와 '다시 검사'가 있어야 스스로 푼다.
+        if (String((error && error.message) || error || "").indexOf("no-python") >= 0) offerPythonHelp();
+        else statusLine.textContent = launcherMessage(error);
       } finally {
         connectButton.disabled = false;
         connectButton.textContent = "연결";

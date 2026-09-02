@@ -6428,6 +6428,13 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-install{display:flex;flex-direction:column;gap:8px;align-items:flex-start;color:var(--muted)}
 .db-install-log{max-height:180px;width:100%;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:7px;
   background:var(--field);color:var(--ink);font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}
+/* 파이썬이 없을 때의 안내. 상태줄은 빨간 한 줄용이라, 여러 줄 안내는 제목만 빨갛게 두고 본문은 읽기 쉬운 색으로 돌린다. */
+.db-python-help{gap:6px}
+.db-python-help strong{color:var(--danger)}
+.db-python-help p{margin:0}
+.db-help-steps{margin:2px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.db-help-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.db-help-note{color:var(--muted);font-size:12px}
 
 .db-btn{flex:none;padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
   font:inherit;font-size:12px;font-weight:700;cursor:pointer}

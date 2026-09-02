@@ -2330,3 +2330,19 @@ test("결과 표 우클릭 메뉴는 단축키를 함께 적고 스키마 트리
   }
   assert.match(css, /\.db-context-hint\{/);
 });
+
+test("파이썬이 없을 때는 이유 한 줄로 끝내지 않고 설치 순서와 다시 검사를 함께 낸다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  // 런처가 파이썬을 못 찾으면 접속 요청은 PythonMissingException → "no-python" 으로 끝난다.
+  assert.match(launcher, /string interp = FindPython\(\);\s*\n\s*if \(interp == null\) throw new PythonMissingException\(\);/);
+  assert.match(source, /indexOf\("no-python"\) >= 0\) offerPythonHelp\(\)/);
+  // 초보자가 가장 많이 걸리는 함정을 안내에 적는다(파이썬 실행 화면의 Py Env 안내와 같은 내용).
+  assert.match(source, /Add python\.exe to PATH/);
+  // 런처는 "못 찾았다"까지 캐시한다. 이 버튼이 없으면 설치한 뒤에도 exe 를 껐다 켜야 한다.
+  assert.match(source, /fetch\("\/python-rescan", \{ method:"POST", cache:"no-store" \}\)/);
+  assert.match(source, /if \(typeof resetPythonBackendProbe === "function"\) resetPythonBackendProbe\(\);/);
+  // 찾았으면 사용자가 '연결' 을 다시 누르게 하지 않는다(비밀번호가 아직 칸에 있다).
+  assert.match(source, /연결합니다…";\s*\n\s*connect\(\);/);
+  assert.match(css, /\.db-python-help\{/);
+});
