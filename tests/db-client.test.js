@@ -672,6 +672,34 @@ test("트리의 정의 보기는 결과 패널이 아니라 Ctrl+클릭과 같�
   assert.match(body, /const paramsTab = hasParameters/);
 });
 
+test("스키마 패널은 툴바 버튼으로 접히고, 접힌 상태와 폭을 따로 기억한다", () => {
+  const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+
+  // 접힘은 폭과 다른 칸에 저장한다. 폭 자리에 0 을 넣으면 다시 펼 때 쓰던 폭을 잃는다.
+  assert.match(db, /SIDEBAR_COLLAPSED_KEY = "classdockDbSidebarCollapsedV1"/);
+  assert.notEqual("classdockDbSidebarCollapsedV1", "classdockDbSidebarV1");
+  assert.match(db, /storeSidebarCollapsed\(sidebarCollapsed\)/);
+  // 다시 펼 때 저장해 둔 폭을 상한에 다시 재운다(접힌 사이 창이 줄었을 수 있다).
+  assert.match(db, /if \(!sidebarCollapsed\) setSidebarWidth\(readSidebarWidth\(\) \|\| SIDEBAR_DEFAULT, false\)/);
+  // 접속해서 작업 화면이 올라올 때 저장된 상태를 되살린다.
+  assert.match(db, /if \(connected\)\{\s*\n\s*applySidebarCollapsed\(\);/);
+
+  // 폭만 0 으로 만들면 눈에서만 사라지고 Tab·스크린리더는 그대로 들어간다 → 통째로 감춘다.
+  assert.match(db, /sidebar\.hidden = sidebarCollapsed;/);
+  assert.match(db, /divider\.hidden = sidebarCollapsed;/);
+  assert.match(css, /\.db-sidebar\[hidden\],\.db-divider\[hidden\]\{display:none\}/);
+  // 감추기 전에 포커스를 버튼으로 옮긴다. display:none 뒤에는 body 로 떨어진다.
+  assert.match(db, /if \(sidebarCollapsed && sidebar\.contains\(document\.activeElement\)\) schemaPanelButton\.focus\(\);/);
+
+  // 남은 한 칸을 편집기가 쓰도록 격자를 다시 잡는다. 좁은 화면의 2행 배치도 함께 되돌린다.
+  assert.match(css, /\.db-workspace\.db-sidebar-collapsed\{grid-template-columns:minmax\(0,1fr\);grid-template-rows:minmax\(0,1fr\)\}/);
+
+  // 분할선 더블클릭은 여전히 "기본 너비로"다 — 접기로 바꿔 뜻을 흔들지 않는다.
+  assert.match(db, /divider\.addEventListener\("dblclick", \(event\) => \{\s*\n\s*event\.preventDefault\(\);\s*\n\s*setSidebarWidth\(SIDEBAR_DEFAULT, true\);/);
+  assert.match(db, /더블클릭: 기본 너비로/);
+});
+
 test("트리거는 트리 최상위 그룹으로도 오고 스키마 목록에 실려 Ctrl+클릭까지 닿는다", () => {
   const db = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   // 최상위 그룹. 테이블처럼 펼칠 하위 구조가 없으므로 expandable 을 주지 않는다.

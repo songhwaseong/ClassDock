@@ -149,6 +149,14 @@ const MNDbClient = (() => {
     try { localStorage.setItem(SIDEBAR_KEY, String(Math.round(width))); } catch(_){}
   };
 
+  const SIDEBAR_COLLAPSED_KEY = "classdockDbSidebarCollapsedV1";
+  const readSidebarCollapsed = () => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true"; } catch(_){ return false; }
+  };
+  const storeSidebarCollapsed = (collapsed) => {
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false"); } catch(_){}
+  };
+
   const EDITOR_KEY = "classdockDbEditorHeightV1";
   const EDITOR_MIN = 90, EDITOR_DEFAULT = 180, EDITOR_KEEP_RESULT = 240;
   const RESULT_LAYOUT_KEY = "classdockDbResultLayoutV1";
@@ -1202,6 +1210,8 @@ const MNDbClient = (() => {
     const disconnectButton = button("연결 끊기", "db-btn db-btn-quiet");
     const layoutButton = button("Side", "db-btn db-btn-quiet db-layout-btn",
       "실행 결과를 SQL 편집기 오른쪽에 표시합니다");
+    const schemaPanelButton = button("스키마 숨기기", "db-btn db-btn-quiet db-schema-btn",
+      "왼쪽 스키마 패널을 숨깁니다");
     cancelButton.disabled = true;
 
     /* 트랜잭션 — 자동 커밋을 끄면 커밋·롤백으로 직접 확정한다.
@@ -1220,7 +1230,8 @@ const MNDbClient = (() => {
     txWrap.hidden = true;
 
     toolbar.append(runButton, runAllButton, cancelButton, explainButton, el("span", "db-timeout-wrap", null),
-      modeBadge, txWrap, serverLabel, layoutButton, historyButton, importButton, saveButton, disconnectButton, sqlFileInput);
+      modeBadge, txWrap, serverLabel, schemaPanelButton, layoutButton, historyButton, importButton,
+      saveButton, disconnectButton, sqlFileInput);
     toolbar.querySelector(".db-timeout-wrap").append(el("span", null, "제한"), timeoutInput, el("span", null, "초"));
 
     /* 편집기는 파이썬·자바스크립트 편집기와 같은 위젯을 쓴다(buildCodeEditor).
@@ -1401,6 +1412,33 @@ const MNDbClient = (() => {
     const onCompactQueryLayout = () => applyResultLayout();
     compactQueryLayout.addEventListener("change", onCompactQueryLayout);
     applyResultLayout();
+
+    /* 스키마 패널 접기 ------------------------------------------------------ */
+
+    let sidebarCollapsed = readSidebarCollapsed();
+
+    /* 폭을 0 으로 만들지 않고 통째로 감춘다. 폭만 0 이면 화면에서만 사라지고
+       Tab 순서와 스크린리더는 그대로 안으로 들어간다 — 보이지 않는 곳에 커서가 갇힌다.
+       (원격 터미널 도크·분할선이 쓰는 [hidden] 규칙과 같은 방식이다.) */
+    const applySidebarCollapsed = () => {
+      // 감추기 전에 옮긴다. display:none 이 된 뒤에는 포커스가 body 로 떨어진다.
+      if (sidebarCollapsed && sidebar.contains(document.activeElement)) schemaPanelButton.focus();
+      workspace.classList.toggle("db-sidebar-collapsed", sidebarCollapsed);
+      sidebar.hidden = sidebarCollapsed;
+      divider.hidden = sidebarCollapsed;
+      schemaPanelButton.textContent = sidebarCollapsed ? "스키마 보이기" : "스키마 숨기기";
+      schemaPanelButton.title = sidebarCollapsed
+        ? "왼쪽 스키마 패널을 다시 보입니다" : "왼쪽 스키마 패널을 숨깁니다";
+      schemaPanelButton.setAttribute("aria-pressed", String(!sidebarCollapsed));
+    };
+
+    schemaPanelButton.addEventListener("click", () => {
+      sidebarCollapsed = !sidebarCollapsed;
+      storeSidebarCollapsed(sidebarCollapsed);
+      applySidebarCollapsed();
+      // 접혀 있는 동안 창이 줄었으면 저장해 둔 폭이 상한을 넘을 수 있다. 펼 때 다시 재운다.
+      if (!sidebarCollapsed) setSidebarWidth(readSidebarWidth() || SIDEBAR_DEFAULT, false);
+    });
 
     /* 스키마 패널 너비 ------------------------------------------------------ */
 
@@ -4970,6 +5008,7 @@ const MNDbClient = (() => {
       workspace.hidden = !connected;
       // 화면에 올라온 뒤라야 작업 영역 폭을 잴 수 있다(상한 계산이 그때 유효해진다).
       if (connected){
+        applySidebarCollapsed();
         setSidebarWidth(readSidebarWidth() || SIDEBAR_DEFAULT, false);
         setEditorHeight(readEditorHeight() || EDITOR_DEFAULT, false);
         setEditorWidth(readEditorWidth() || EDITOR_WIDTH_DEFAULT, false);

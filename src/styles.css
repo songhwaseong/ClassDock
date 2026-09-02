@@ -6435,6 +6435,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
    gap 을 함께 두면 간격이 두 번 벌어진다. min(...,60%) 은 창이 줄어도 편집기가 사라지지 않게 하는 상한이다. */
   .db-workspace{display:grid;grid-template-columns:min(var(--db-sidebar-width,240px),60%) 12px minmax(0,1fr);
     gap:0;flex:1;min-height:0;padding:12px}
+  /* 스키마 패널 접기 — 폭을 0 으로 줄이지 않고 감춘다. 남은 한 칸은 편집기가 통째로 쓴다.
+     행까지 다시 잡아 주는 것은 좁은 화면(≤820px)에서 세로 2행으로 바뀌어 있기 때문이다.
+     그대로 두면 혼자 남은 편집기가 auto 행에 들어가 내용 높이로 쪼그라든다. */
+  .db-workspace.db-sidebar-collapsed{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+  .db-sidebar[hidden],.db-divider[hidden]{display:none}
   .db-divider{position:relative;cursor:col-resize;touch-action:none}
   .db-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:2px;border-radius:1px;background:transparent}
   .db-divider:hover::before,.db-divider.dragging::before{background:var(--accent)}
