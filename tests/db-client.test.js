@@ -385,6 +385,38 @@ test("테이블 우클릭은 생성 SQL을 새 탭에 열고 위험한 구조 �
   assert.match(source, /먼저 커밋하거나 롤백해 주세요/);
 });
 
+test("테이블 정보창은 CHECK 제약을 읽어 전용 탭에 보여 준다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 워커가 두 가지 표 모양(MariaDB·MySQL)을 순서대로 시도하고 지원 여부까지 함께 돌려준다.
+  assert.match(worker, /information_schema\.CHECK_CONSTRAINTS/);
+  assert.match(worker, /def check_constraint_definitions\(cursor, name, schema\)/);
+  assert.match(worker, /checks_supported, checks = check_constraint_definitions\(cursor, name, schema\)/);
+  assert.match(worker, /"checkConstraints": checks,/);
+  assert.match(worker, /"checkConstraintsSupported": checks_supported,/);
+  // 지우는 문법과 검사 여부는 서버 갈래를 타므로 워커가 정하고 프런트는 받아 쓴다.
+  assert.match(worker, /def check_constraint_syntax\(\)/);
+  assert.match(worker, /"checkDropKeyword": check_drop_keyword,/);
+  assert.match(worker, /"checkEnforcement": check_enforcement,/);
+  assert.match(source, /checkDropKeyword:String\(info\.checkDropKeyword \|\| "CHECK"\)/);
+  // 제약도 컬럼·인덱스처럼 편집기로 그린다.
+  assert.match(source, /const renderCheckEditor = \(\) => \{/);
+  assert.match(source, /addCheckButton\.addEventListener\("click"/);
+  // 탭은 외래키와 DDL 사이에 들어가고, 처음 열 탭으로도 지정할 수 있어야 한다.
+  assert.match(source, /tabs\.append\(overviewTab, columnsTab, indexesTab, foreignKeysTab, checksTab, ddlTab\)/);
+  assert.match(source, /checks:\[checksTab, checksPanel\]/);
+  // 조건식은 우리가 아니라 서버가 본다 — 그 사실이 화면에 적혀 있어야 한다.
+  assert.match(source, /조건식이 맞는지는 적용할 때 서버가 확인합니다/);
+  assert.match(source, /이 서버는 CHECK 제약을 지원하지 않습니다/);
+  assert.match(source, /이 테이블에는 CHECK 제약이 없습니다/);
+  // CHECK 관련 오류는 "그냥 SQL 오류"로 흘리지 않는다.
+  assert.match(worker, /3819: "check-violated"/);
+  assert.match(worker, /3940: "check-constraint"/);
+  assert.match(worker, /3959: "check-constraint"/);
+  assert.match(worker, /4025: "check-violated"/);
+  assert.match(source, /case "check-violated":/);
+  assert.match(source, /case "check-constraint":/);
+});
+
 test("삭제 전 의존성을 조회하고 발견되면 실행하지 않은 채 관련 객체를 안내한다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   assert.match(launcher, /path\.StartsWith\("\/db-dependencies\?"/);
@@ -569,6 +601,131 @@ test("고급 컬럼 속성은 구조 SQL에서 조용히 사라지지 않는다"
   assert.equal(blocked.sql, "");
 });
 
+
+test("CHECK 제약은 추가·삭제·수정이 한 ALTER 문으로 만들어진다", () => {
+  const age = client.columnDraft({ name:"age", type:"int", nullable:false }, 0);
+  const kept = client.checkDraft({ name:"chk_age", clause:"(`age` >= 0)", enforced:true }, 0);
+  const edited = client.checkDraft({ name:"chk_grade", clause:"`grade` between 1 and 6", enforced:true }, 1);
+  edited.clause = "`grade` between 1 and 3";
+  const removed = client.checkDraft({ name:"chk_old", clause:"(1 = 1)", enforced:true }, 2);
+  removed.deleted = true;
+  const added = client.checkDraft({ name:"chk_new", clause:"`age` < 150", enforced:true }, 3);
+  added.originalName = ""; added.original = null; added.isNew = true;
+  const base = {
+    database:"school", name:"students", comment:"", columns:[{ originalName:"age" }],
+    checkDropKeyword:"CHECK", checkEnforcement:true
+  };
+  const plan = client.tableAlterPlan(base, {
+    name:"students", comment:"", columns:[age], indexes:[], foreignKeys:[],
+    checks:[kept, edited, removed, added]
+  });
+  assert.deepEqual(plan.errors, []);
+  // 손대지 않은 제약은 문장에 나오지 않는다.
+  assert.ok(!/chk_age/.test(plan.sql), plan.sql);
+  assert.match(plan.sql, /DROP CHECK `chk_grade`/);
+  assert.match(plan.sql, /DROP CHECK `chk_old`/);
+  assert.match(plan.sql, /ADD CONSTRAINT `chk_grade` CHECK \(`grade` between 1 and 3\)/);
+  assert.match(plan.sql, /ADD CONSTRAINT `chk_new` CHECK \(`age` < 150\)/);
+  // 떼는 일이 먼저다 — 그래야 그 제약이 쓰던 컬럼을 이어서 고칠 수 있다.
+  assert.ok(plan.sql.indexOf("DROP CHECK") < plan.sql.indexOf("ADD CONSTRAINT"), plan.sql);
+});
+
+test("CHECK 조건식은 이미 싸여 있으면 괄호를 덧대지 않는다", () => {
+  const build = (clause) => {
+    const check = client.checkDraft({ name:"chk", clause:"", enforced:true }, 0);
+    check.originalName = ""; check.original = null; check.isNew = true;
+    check.clause = clause;
+    return client.tableAlterPlan(
+      { database:"school", name:"t", comment:"", columns:[{ originalName:"n" }], checkEnforcement:true },
+      { name:"t", comment:"", columns:[client.columnDraft({ name:"n", type:"int", nullable:true }, 0)],
+        indexes:[], foreignKeys:[], checks:[check] }
+    ).sql;
+  };
+  // MySQL 은 괄호째로 돌려준다 — 고칠 때마다 한 겹씩 늘면 안 된다.
+  assert.match(build("(`n` > 0)"), /CHECK \(`n` > 0\)/);
+  // MariaDB 는 벗겨서 돌려준다.
+  assert.match(build("`n` > 0"), /CHECK \(`n` > 0\)/);
+  // 맨 앞 괄호가 식 중간에서 닫히면 전체를 감싼 괄호가 아니다.
+  assert.match(build("(`n` > 0) OR (`n` IS NULL)"), /CHECK \(\(`n` > 0\) OR \(`n` IS NULL\)\)/);
+});
+
+test("CHECK 문법은 서버 갈래를 따르고 검사 여부만 바뀌면 다시 만들지 않는다", () => {
+  const column = client.columnDraft({ name:"n", type:"int", nullable:true }, 0);
+  const plan = (baseExtra, mutate) => {
+    const check = client.checkDraft({ name:"chk_n", clause:"(`n` > 0)", enforced:true }, 0);
+    mutate(check);
+    return client.tableAlterPlan(
+      { database:"school", name:"t", comment:"", columns:[{ originalName:"n" }], ...baseExtra },
+      { name:"t", comment:"", columns:[column], indexes:[], foreignKeys:[], checks:[check] }
+    );
+  };
+  // MySQL — 검사 여부를 끄는 것은 지웠다 다시 만들 일이 아니다.
+  const toggled = plan({ checkDropKeyword:"CHECK", checkEnforcement:true }, (check) => { check.enforced = false; });
+  assert.match(toggled.sql, /ALTER CHECK `chk_n` NOT ENFORCED/);
+  assert.ok(!/DROP CHECK/.test(toggled.sql), toggled.sql);
+  // MariaDB — DROP CONSTRAINT 를 쓰고 NOT ENFORCED 는 붙이지 않는다.
+  const maria = plan({ checkDropKeyword:"CONSTRAINT", checkEnforcement:false }, (check) => { check.clause = "(`n` > 1)"; });
+  assert.match(maria.sql, /DROP CONSTRAINT `chk_n`/);
+  assert.ok(!/ENFORCED/.test(maria.sql), maria.sql);
+
+  // 검사 여부를 바꿔도 제약은 컬럼을 계속 참조한다. 같은 작업에서 그 컬럼의 이름까지
+  // 바꾸려 하면 기존 제약과 같은 의존성 안내를 보여 줘야 한다.
+  const renamed = client.columnDraft({ name:"n", type:"int", nullable:true }, 0);
+  renamed.name = "renamed_n";
+  const keptByToggle = client.checkDraft({ name:"chk_n", clause:"(`n` > 0)", enforced:true }, 0);
+  keptByToggle.enforced = false;
+  const combined = client.tableAlterPlan(
+    { database:"school", name:"t", comment:"", columns:[{ originalName:"n" }],
+      checkDropKeyword:"CHECK", checkEnforcement:true },
+    { name:"t", comment:"", columns:[renamed], indexes:[], foreignKeys:[], checks:[keptByToggle] }
+  );
+  assert.ok(combined.warnings.some(message => /chk_n.*n.*이름을 바꿀 수 없습니다/.test(message)));
+});
+
+test("CHECK 조건식은 서버에 맡기되 문장을 끊는 글자는 미리 막는다", () => {
+  const column = client.columnDraft({ name:"n", type:"int", nullable:true }, 0);
+  const withClause = (clause) => {
+    const check = client.checkDraft({ name:"chk_n", clause:"", enforced:true }, 0);
+    check.originalName = ""; check.original = null; check.isNew = true;
+    check.clause = clause;
+    return client.tableAlterPlan(
+      { database:"school", name:"t", comment:"", columns:[{ originalName:"n" }] },
+      { name:"t", comment:"", columns:[column], indexes:[], foreignKeys:[], checks:[check] }
+    );
+  };
+  assert.ok(withClause("").errors.some(message => /조건식을 입력해/.test(message)));
+  assert.ok(withClause("`n` > 0; DROP TABLE t").errors.some(message => /세미콜론과 주석/.test(message)));
+  assert.ok(withClause("`n` > 0 -- 뒤를 지운다").errors.some(message => /세미콜론과 주석/.test(message)));
+  assert.ok(withClause("`n` > 0 # 뒤를 지운다").errors.some(message => /세미콜론과 주석/.test(message)));
+  // 문자열 안의 같은 글자는 문장 경계가 아니므로 정상적인 식으로 서버까지 보낸다.
+  assert.deepEqual(withClause("`n` <> '--' AND ';' <> '#'").errors, []);
+  // CHECK 식 길이는 임의로 자르지 않고 서버 제한과 서버 검증에 맡긴다.
+  assert.deepEqual(withClause(Array(300).fill("`n` >= 0").join(" AND ")).errors, []);
+  // 말이 되지 않는 식은 우리가 막지 않는다 — 서버가 볼 몫이다.
+  assert.deepEqual(withClause("이건 SQL 이 아니다").errors, []);
+});
+
+test("그대로 남는 CHECK 이 쓰는 컬럼은 지우기 전에 미리 알려 준다", () => {
+  const id = client.columnDraft({ name:"id", type:"int", nullable:false }, 0);
+  const age = client.columnDraft({ name:"age", type:"int", nullable:true }, 1);
+  age.deleted = true;
+  const base = { database:"school", name:"t", comment:"",
+    columns:[{ originalName:"id" }, { originalName:"age" }], checkEnforcement:true };
+  const plan = (checks) => client.tableAlterPlan(base,
+    { name:"t", comment:"", columns:[id, age], indexes:[], foreignKeys:[], checks });
+
+  const kept = client.checkDraft({ name:"chk_age", clause:"(`age` >= 0)", enforced:true }, 0);
+  assert.ok(plan([kept]).warnings.some(message => /chk_age.*age.*지울 수 없습니다/.test(message)));
+
+  // 함께 지우는 제약은 컬럼보다 먼저 DROP 되므로 경고할 일이 아니다.
+  const alsoDropped = client.checkDraft({ name:"chk_age", clause:"(`age` >= 0)", enforced:true }, 0);
+  alsoDropped.deleted = true;
+  assert.ok(!plan([alsoDropped]).warnings.some(message => /지울 수 없습니다/.test(message)));
+
+  // 이름이 겹쳐 보이는 다른 컬럼(`age_group`)까지 걸고 넘어지면 안 된다.
+  const other = client.checkDraft({ name:"chk_group", clause:"(`age_group` >= 0)", enforced:true }, 0);
+  assert.ok(!plan([other]).warnings.some(message => /지울 수 없습니다/.test(message)));
+});
 
 test("별칭은 테이블 이름으로 되돌아간다", () => {
   const map = client.aliasMap("SELECT * FROM orders o JOIN users AS u ON o.uid = u.id");
@@ -1116,6 +1273,61 @@ test("의존성 검사는 외래키·인덱스·생성 컬럼·뷰 사용 관계
       path.join(root, "desktop")], { encoding:"utf8" });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /ok/);
+  });
+
+test("CHECK 제약 읽기는 서버 모양에 따라 문장을 갈아 끼우고, 없는 서버는 지원 안 함으로 본다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+    const source = [
+      "import json, sys",
+      "sys.path.insert(0, " + JSON.stringify(path.join(root, "desktop")) + ")",
+      "import db_worker",
+      "class Cursor:",
+      "    def __init__(self, ok, rows):",
+      "        self.ok, self.rows, self.tried, self._out = ok, rows, [], []",
+      "    def execute(self, statement, params):",
+      "        self.tried.append(statement)",
+      "        if len(self.tried) - 1 != self.ok: raise Exception(1054, 'Unknown column')",
+      "        self._out = self.rows",
+      "    def fetchall(self): return self._out",
+      "out = []",
+      "for ok, rows in [(0, [('chk_age', '`age` > 0', 'YES')]),",
+      "                 (1, [('chk_n', '(`n` > 0)', 'NO')]), (-1, [])]:",
+      "    cursor = Cursor(ok, rows)",
+      "    supported, items = db_worker.check_constraint_definitions(cursor, 't', 's')",
+      "    out.append({'supported': supported, 'items': items, 'tried': len(cursor.tried)})",
+      "class BrokenCursor:",
+      "    def execute(self, statement, params): raise Exception(2013, 'Lost connection')",
+      "try:",
+      "    db_worker.check_constraint_definitions(BrokenCursor(), 't', 's')",
+      "except Exception as exc:",
+      "    propagated = exc.args[0]",
+      "codes = [db_worker.classify_error(Exception(*args), None)[0] for args in [",
+      "    (3819, \"Check constraint 'c' is violated.\"),",
+      "    (3940, \"Constraint 'c' does not exist.\"),",
+      "    (3959, \"Check constraint 'c' uses column 'x'\"),",
+      "    (4025, 'CONSTRAINT `c` failed for `d`.`t`'),",
+      "    (9999, \"Check constraint 'c' is not found in the table.\")]]",
+      "print(json.dumps({'reads': out, 'propagated': propagated, 'codes': codes}))"
+    ].join("\n");
+    const run = spawnSync("python", ["-c", source], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const result = JSON.parse(run.stdout);
+    // MariaDB — TABLE_NAME 이 있는 첫 문장에서 끝난다.
+    assert.deepEqual(result.reads[0], {
+      supported: true, tried: 1,
+      items: [{ name: "chk_age", clause: "`age` > 0", enforced: true }]
+    });
+    // MySQL — 첫 문장은 TABLE_NAME 이 없어 실패하고 둘째 문장이 통한다. ENFORCED 도 읽는다.
+    assert.deepEqual(result.reads[1], {
+      supported: true, tried: 2,
+      items: [{ name: "chk_n", clause: "(`n` > 0)", enforced: false }]
+    });
+    // MySQL 5.7·MariaDB 10.1 — 두 문장 다 실패하면 "제약이 없다"가 아니라 "지원 안 함"이다.
+    assert.deepEqual(result.reads[2], { supported: false, items: [], tried: 2 });
+    // 연결 오류 같은 실제 장애는 CHECK 미지원으로 숨기지 않는다.
+    assert.equal(result.propagated, 2013);
+    assert.deepEqual(result.codes,
+      ["check-violated", "check-constraint", "check-constraint", "check-violated", "check-constraint"]);
   });
 
 test("SQL 덤프는 구조와 데이터를 순서대로 적고 실패하면 파일을 남기지 않는다",

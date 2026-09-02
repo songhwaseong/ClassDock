@@ -58,6 +58,8 @@ const MNDbClient = (() => {
       case "unknown-database":  return "그 이름의 데이터베이스가 없습니다.";
       case "denied":            return "이 계정에는 권한이 없습니다.";
       case "dependency":        return "다른 객체가 사용 중이라 삭제하거나 변경할 수 없습니다. " + detail;
+      case "check-violated":    return "CHECK 제약에 걸려 저장하지 못했습니다. " + detail;
+      case "check-constraint":  return "CHECK 제약이 걸려 있어 그대로는 바꿀 수 없습니다. 테이블 정보창의 제약 탭에서 확인한 뒤 제약을 먼저 손봐 주세요. " + detail;
       case "connection-lost":   return "서버와의 연결이 끊어졌습니다. 다시 연결해 주세요.";
       case "cancelled":         return "쿼리를 취소했습니다.";
       case "read-only":         return "읽기 전용 접속이라 쓰기 문장을 실행할 수 없습니다.";
@@ -896,6 +898,83 @@ const MNDbClient = (() => {
   const sameForeignKey = (foreignKey) => !foreignKey.isNew
     && JSON.stringify(comparableForeignKey(foreignKey)) === JSON.stringify(foreignKey.original || {});
 
+  /* CHECK 제약 — 조건식은 우리가 뜯어보지 않는다. 말이 되는 식인지는 서버만 알 수 있어
+     이름과 문장을 끊는 글자만 보고 나머지는 그대로 넘긴다. */
+  const comparableCheck = (check) => ({
+    name:String(check.name || ""), clause:String(check.clause || "").trim(), enforced:check.enforced !== false
+  });
+  const sameCheck = (check) => !check.isNew
+    && JSON.stringify(comparableCheck(check)) === JSON.stringify(check.original || {});
+
+  const sameCheckDefinition = (check) => {
+    const original = check.original || {};
+    return !check.isNew && String(check.name) === String(original.name)
+      && String(check.clause || "").trim() === String(original.clause || "");
+  };
+
+  const checkDraft = (check, position) => {
+    const source = check || {};
+    const draft = {
+      id:"check-" + position + "-" + String(source.name || ""),
+      originalName:String(source.name || ""), name:String(source.name || ""),
+      clause:String(source.clause || ""), enforced:source.enforced !== false,
+      deleted:false, isNew:false
+    };
+    // 비교하는 모양 그대로를 원본으로 둔다. 손으로 베껴 쓰면 조건식 다듬기(trim)가 어긋나
+    // 열자마자 "바뀌었다"가 된다.
+    draft.original = comparableCheck(draft);
+    return draft;
+  };
+
+  // 서버가 돌려주는 조건식은 MySQL 이 괄호로 싸서 주고 MariaDB 는 벗겨서 준다. 그대로 다시 싸면
+  // 고칠 때마다 괄호가 한 겹씩 늘어나므로, 식 전체를 감싼 괄호가 이미 있으면 그것을 쓴다.
+  const checkClauseSql = (clause) => {
+    const text = String(clause || "").trim();
+    if (!text.startsWith("(") || !text.endsWith(")")) return "(" + text + ")";
+    let depth = 0;
+    for (let index = 0; index < text.length; index++){
+      if (text[index] === "(") depth++;
+      else if (text[index] === ")"){
+        depth--;
+        // 맨 앞 괄호가 식 중간에서 닫힌다 — 전체를 감싼 괄호가 아니다. 예: (a > 0) OR (b > 0)
+        if (depth === 0 && index < text.length - 1) return "(" + text + ")";
+      }
+    }
+    return text;
+  };
+
+  const addCheckSql = (check, enforcementSupported) => "ADD CONSTRAINT " + ddlIdentifier(check.name)
+    + " CHECK " + checkClauseSql(check.clause)
+    + (enforcementSupported && !check.enforced ? " NOT ENFORCED" : "");
+
+  // 조립한 ALTER 문 밖으로 빠져나갈 수 있는 세미콜론·주석만 찾는다. 문자열과
+  // 역따옴표 안의 같은 글자는 정상적인 CHECK 식이므로 서버 검증까지 그대로 보낸다.
+  const unsafeCheckClause = (clause) => {
+    const text = String(clause || "");
+    let index = 0;
+    while (index < text.length){
+      const char = text[index];
+      if (char === "'" || char === '"' || char === "`"){
+        const quote = char;
+        index++;
+        while (index < text.length){
+          const current = text[index];
+          if (current === "\\" && quote !== "`"){ index += 2; continue; }
+          if (current === quote){
+            if (text[index + 1] === quote){ index += 2; continue; }
+            index++; break;
+          }
+          index++;
+        }
+        continue;
+      }
+      if (char === ";" || char === "#" || text.startsWith("/*", index)
+        || (text.startsWith("--", index) && (index + 2 >= text.length || " \t\r\n".includes(text[index + 2])))) return true;
+      index++;
+    }
+    return false;
+  };
+
   const indexColumnsSql = (index, resolveColumn) => (index.columns || []).map(column => {
     const resolved = resolveColumn(column.name) || column.name;
     const prefix = String(column.prefix || "").trim();
@@ -1011,6 +1090,21 @@ const MNDbClient = (() => {
       });
     });
 
+    const checks = draft.checks || [];
+    const activeChecks = checks.filter(check => !check.deleted);
+    const checkNames = new Set();
+    activeChecks.forEach((check) => {
+      validName(check.name, "CHECK 제약");
+      const folded = String(check.name || "").toLowerCase();
+      if (folded && checkNames.has(folded)) errors.push("CHECK 제약 이름 ‘" + check.name + "’이(가) 겹칩니다.");
+      checkNames.add(folded);
+      const clause = String(check.clause || "").trim();
+      if (!clause) errors.push("‘" + check.name + "’ 제약의 조건식을 입력해 주세요.");
+      // 새로 조립할 식만 문장 경계를 확인한다. 서버에서 읽은 기존 식은 다른 구조 편집을 막지 않는다.
+      else if (!sameCheck(check) && (clause.includes("\u0000") || unsafeCheckClause(clause)))
+        errors.push("‘" + check.name + "’ 제약의 조건식에는 세미콜론과 주석을 쓸 수 없습니다.");
+    });
+
     const originalOrder = (base.columns || []).map(column => column.originalName);
     const survivingOriginalOrder = originalOrder.filter(name => columns.some(column => !column.isNew && column.originalName === name));
     const currentOriginalOrder = columns.filter(column => !column.isNew).map(column => column.originalName);
@@ -1066,13 +1160,58 @@ const MNDbClient = (() => {
       else if (changed) warnings.push("외래키 ‘" + (foreignKey.originalName || foreignKey.name) + "’ 구성을 바꿉니다.");
     });
 
+    const checkDrops = [], checkAdds = [], checkEnforced = [];
+    // 지우는 문법은 서버 갈래를 탄다(MySQL=DROP CHECK, MariaDB=DROP CONSTRAINT). 워커가 알려 준 것을 쓴다.
+    const dropCheckKeyword = String(base.checkDropKeyword || "").toUpperCase() === "CONSTRAINT" ? "CONSTRAINT" : "CHECK";
+    const checkEnforcement = base.checkEnforcement !== false;
+    checks.forEach((check) => {
+      const changed = !check.deleted && !sameCheck(check);
+      // 검사 여부만 달라졌으면 지웠다 다시 넣지 않는다 — 큰 테이블에서 전체 재검사를 피할 수 있다.
+      if (changed && !check.isNew && checkEnforcement && sameCheckDefinition(check)){
+        checkEnforced.push("ALTER CHECK " + ddlIdentifier(check.name) + (check.enforced ? " ENFORCED" : " NOT ENFORCED"));
+        warnings.push("CHECK 제약 ‘" + check.name + "’을(를) " + (check.enforced ? "검사하도록" : "검사하지 않도록") + " 바꿉니다.");
+        return;
+      }
+      if ((check.deleted || changed) && !check.isNew)
+        checkDrops.push("DROP " + dropCheckKeyword + " " + ddlIdentifier(check.originalName));
+      if (changed || (!check.deleted && check.isNew)) checkAdds.push(addCheckSql(check, checkEnforcement));
+      if (check.deleted && !check.isNew) warnings.push("CHECK 제약 ‘" + check.originalName + "’을(를) 삭제합니다.");
+      else if (check.isNew && !check.deleted)
+        warnings.push("CHECK 제약 ‘" + check.name + "’을(를) 추가합니다. 조건을 어기는 행이 이미 있으면 거절됩니다.");
+      else if (changed)
+        warnings.push("CHECK 제약 ‘" + (check.originalName || check.name) + "’을(를) 지웠다 다시 만듭니다. 조건을 어기는 행이 있으면 거절됩니다.");
+    });
+
+    /* CHECK 이 쓰는 컬럼은 지우지도 이름을 바꾸지도 못한다(오류 3959). 그대로 남는 제약만 따진다 —
+       이 창에서 함께 지우거나 고치는 제약은 컬럼 변경보다 먼저 DROP 되므로 걸리지 않는다. */
+    // 검사 여부만 바꾼 제약도 컬럼을 계속 참조한다. 정의가 그대로면 의존성 검사 대상이다.
+    const keptChecks = checks.filter(check => !check.deleted && !check.isNew && sameCheckDefinition(check));
+    if (keptChecks.length){
+      const mentions = (clause, columnName) => {
+        const escaped = String(columnName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp("`" + escaped + "`|\\b" + escaped + "\\b", "i").test(String(clause || ""));
+      };
+      const touched = [
+        ...dropped.map(column => ({ name:column.originalName, action:"지울" })),
+        ...columns.filter(column => !column.isNew && column.name !== column.originalName)
+          .map(column => ({ name:column.originalName, action:"이름을 바꿀" }))
+      ];
+      touched.forEach((column) => keptChecks.forEach((check) => {
+        if (mentions(check.clause, column.name))
+          warnings.push("CHECK 제약 ‘" + check.name + "’이(가) 컬럼 ‘" + column.name
+            + "’을(를) 쓰고 있어 " + column.action + " 수 없습니다. 제약 탭에서 먼저 지우거나 고쳐 주세요.");
+      }));
+    }
+
     const tableChanges = [];
     if (String(draft.comment || "") !== String(base.comment || "")) tableChanges.push("COMMENT = " + ddlString(draft.comment));
     if (String(draft.name || "") !== String(base.name || "")){
       tableChanges.push("RENAME TO " + ddlIdentifier(base.database) + "." + ddlIdentifier(draft.name));
       warnings.push("테이블 이름을 ‘" + draft.name + "’(으)로 바꿉니다. 기존 SQL이 영향을 받을 수 있습니다.");
     }
-    const changes = [...foreignDrops, ...indexDrops, ...columnChanges, ...indexAdds, ...foreignAdds, ...tableChanges];
+    // CHECK 을 먼저 떼야 그 제약이 쓰던 컬럼을 이어서 고칠 수 있고, 새 CHECK 은 컬럼이 다 자리를 잡은 뒤에 건다.
+    const changes = [...checkDrops, ...foreignDrops, ...indexDrops, ...columnChanges,
+      ...indexAdds, ...foreignAdds, ...checkAdds, ...checkEnforced, ...tableChanges];
     const target = ddlIdentifier(base.database) + "." + ddlIdentifier(base.name);
     return {
       errors, warnings, destructive:dropped.length > 0,
@@ -4780,6 +4919,9 @@ const MNDbClient = (() => {
         foreignKeys:draft.foreignKeys.map(foreignKey => ({
           originalName:foreignKey.originalName, deleted:foreignKey.deleted, isNew:foreignKey.isNew,
           ...comparableForeignKey(foreignKey)
+        })),
+        checks:draft.checks.map(check => ({
+          originalName:check.originalName, deleted:check.deleted, isNew:check.isNew, ...comparableCheck(check)
         }))
       }) : "";
       const forceClose = () => {
@@ -4817,16 +4959,22 @@ const MNDbClient = (() => {
         const columns = (info.columns || []).map(columnDraft);
         const indexes = (info.indexes || []).map(indexDraft);
         const foreignKeys = (info.foreignKeys || []).map(foreignKeyDraft);
+        const checks = (info.checkConstraints || []).map(checkDraft);
+        // 표가 없어서 못 읽은 것과 제약이 진짜 없는 것은 다른 말이라 서버가 알려 준 대로 구분한다.
+        const checksSupported = info.checkConstraintsSupported !== false;
         base = {
           database:String(info.database || currentDatabase), name:String(info.name || name),
-          comment:String(info.comment || ""), columns:columns.map(column => ({ originalName:column.originalName }))
+          comment:String(info.comment || ""), columns:columns.map(column => ({ originalName:column.originalName })),
+          // CHECK 문법은 서버 갈래를 탄다. 판단은 워커가 하고 여기서는 받아 쓰기만 한다.
+          checkDropKeyword:String(info.checkDropKeyword || "CHECK"), checkEnforcement:info.checkEnforcement !== false
         };
-        draft = { name:base.name, comment:base.comment, columns, indexes, foreignKeys };
+        draft = { name:base.name, comment:base.comment, columns, indexes, foreignKeys, checks };
         initialSnapshot = snapshot();
         const editable = !readOnly && info.type === "table";
         title.textContent = info.name || name;
         subtitle.textContent = (info.type === "view" ? "뷰" : (info.engine || "테이블"))
           + " · 컬럼 " + columns.length + "개 · 인덱스 " + indexes.length + "개 · 외래키 " + foreignKeys.length + "개"
+          + (checks.length ? " · CHECK " + checks.length + "개" : "")
           + " · " + (editable ? "쓰기 허용" : "읽기 전용");
         headIcon.innerHTML = uiIcon(info.type === "view" ? "view" : "table");
         body.innerHTML = "";
@@ -4836,30 +4984,34 @@ const MNDbClient = (() => {
         const columnsTab = button("컬럼 " + columns.length, "db-table-modal-tab");
         const indexesTab = button("인덱스 " + indexes.length, "db-table-modal-tab");
         const foreignKeysTab = button("외래키 " + foreignKeys.length, "db-table-modal-tab");
+        const checksTab = button("제약 " + checks.length, "db-table-modal-tab");
         const ddlTab = button("DDL", "db-table-modal-tab");
-        tabs.append(overviewTab, columnsTab, indexesTab, foreignKeysTab, ddlTab);
+        tabs.append(overviewTab, columnsTab, indexesTab, foreignKeysTab, checksTab, ddlTab);
         const panels = el("div", "db-table-modal-panels");
         const overviewPanel = el("section", "db-table-modal-panel");
         const columnsPanel = el("section", "db-table-modal-panel");
         const indexesPanel = el("section", "db-table-modal-panel");
         const foreignKeysPanel = el("section", "db-table-modal-panel");
+        const checksPanel = el("section", "db-table-modal-panel");
         const ddlPanel = el("section", "db-table-modal-panel");
         columnsPanel.hidden = true;
         indexesPanel.hidden = true;
         foreignKeysPanel.hidden = true;
+        checksPanel.hidden = true;
         ddlPanel.hidden = true;
-        panels.append(overviewPanel, columnsPanel, indexesPanel, foreignKeysPanel, ddlPanel);
+        panels.append(overviewPanel, columnsPanel, indexesPanel, foreignKeysPanel, checksPanel, ddlPanel);
 
         const switchTab = (tab, panel) => {
-          [overviewTab, columnsTab, indexesTab, foreignKeysTab, ddlTab]
+          [overviewTab, columnsTab, indexesTab, foreignKeysTab, checksTab, ddlTab]
             .forEach(node => node.classList.toggle("active", node === tab));
-          [overviewPanel, columnsPanel, indexesPanel, foreignKeysPanel, ddlPanel]
+          [overviewPanel, columnsPanel, indexesPanel, foreignKeysPanel, checksPanel, ddlPanel]
             .forEach(node => { node.hidden = node !== panel; });
         };
         overviewTab.addEventListener("click", () => switchTab(overviewTab, overviewPanel));
         columnsTab.addEventListener("click", () => switchTab(columnsTab, columnsPanel));
         indexesTab.addEventListener("click", () => switchTab(indexesTab, indexesPanel));
         foreignKeysTab.addEventListener("click", () => switchTab(foreignKeysTab, foreignKeysPanel));
+        checksTab.addEventListener("click", () => switchTab(checksTab, checksPanel));
         ddlTab.addEventListener("click", () => switchTab(ddlTab, ddlPanel));
 
         const tableNameInput = input("text", draft.name, "테이블 이름");
@@ -4905,6 +5057,17 @@ const MNDbClient = (() => {
         foreignToolbar.append(el("p", null, "로컬 컬럼과 참조 테이블 컬럼을 순서대로 연결합니다."), addForeignButton);
         const foreignList = el("div", "db-table-constraint-editor");
         foreignKeysPanel.append(foreignToolbar, foreignList);
+
+        /* CHECK 제약 — 조건식만은 우리가 검사하지 않는다. 세미콜론·주석처럼 문장을 망가뜨리는
+           글자만 막고, 식이 말이 되는지는 서버에 맡긴다. 그래서 오류가 나면 적용 단계에서 나온다. */
+        const checksEditable = editable && checksSupported;
+        const checksToolbar = el("div", "db-table-columns-toolbar");
+        const addCheckButton = button("제약 추가", "db-btn db-btn-quiet");
+        addCheckButton.disabled = !checksEditable;
+        checksToolbar.append(el("p", null,
+          "행이 지켜야 할 조건을 적습니다. 조건식이 맞는지는 적용할 때 서버가 확인합니다."), addCheckButton);
+        const checkList = el("div", "db-table-constraint-editor db-table-check-editor");
+        checksPanel.append(checksToolbar, checkList);
 
         const ddlTools = el("div", "db-table-ddl-tools");
         const copyDdlButton = button("DDL 복사", "db-btn db-btn-quiet");
@@ -5132,6 +5295,62 @@ const MNDbClient = (() => {
           renderForeignKeyEditor(); refreshPreview(); foreignKeysTab.click();
         });
 
+        const renderCheckEditor = () => {
+          checkList.innerHTML = "";
+          if (!checksSupported){
+            checkList.append(el("p", "db-empty",
+              "이 서버는 CHECK 제약을 지원하지 않습니다. MySQL 8.0.16 또는 MariaDB 10.2부터 쓸 수 있습니다."));
+            return;
+          }
+          if (!draft.checks.length) checkList.append(el("p", "db-empty", "이 테이블에는 CHECK 제약이 없습니다."));
+          draft.checks.forEach((check, position) => {
+            const cardNode = el("article", "db-table-constraint-card" + (check.deleted ? " deleted" : ""));
+            const header = el("div", "db-table-constraint-head");
+            const nameInput = input("text", check.name, "제약 이름");
+            nameInput.maxLength = 64;
+            nameInput.disabled = !checksEditable || check.deleted;
+            // MariaDB 에는 검사 여부를 끄는 기능이 없다. 칸은 두되 손대지 못하게 한다.
+            const enforcedInput = input("checkbox", "");
+            enforcedInput.checked = check.enforced;
+            enforcedInput.disabled = !checksEditable || check.deleted || !base.checkEnforcement;
+            const enforcedLabel = el("label", "db-table-constraint-check", "");
+            enforcedLabel.append(enforcedInput, document.createTextNode(" 검사함"));
+            if (!base.checkEnforcement) enforcedLabel.title = "이 서버는 검사 여부를 끌 수 없습니다.";
+            const remove = button(check.deleted ? "복원" : "삭제", "db-btn db-btn-quiet db-table-column-remove");
+            remove.disabled = !checksEditable;
+            header.append(nameInput, enforcedLabel, el("span", "spacer", null), remove);
+            const clauseInput = document.createElement("textarea");
+            clauseInput.className = "db-table-check-clause-input";
+            clauseInput.value = check.clause;
+            clauseInput.placeholder = "예: `age` >= 0 AND `age` < 150";
+            clauseInput.spellcheck = false;
+            clauseInput.disabled = !checksEditable || check.deleted;
+            cardNode.append(header, clauseInput);
+            checkList.append(cardNode);
+            nameInput.addEventListener("input", () => { check.name = nameInput.value; refreshPreview(); });
+            clauseInput.addEventListener("input", () => { check.clause = clauseInput.value; refreshPreview(); });
+            enforcedInput.addEventListener("change", () => { check.enforced = enforcedInput.checked; refreshPreview(); });
+            remove.addEventListener("click", () => {
+              if (check.isNew) draft.checks.splice(position, 1);
+              else check.deleted = !check.deleted;
+              renderCheckEditor(); refreshPreview();
+            });
+          });
+          checksTab.textContent = "제약 " + draft.checks.filter(check => !check.deleted).length;
+        };
+
+        addCheckButton.addEventListener("click", () => {
+          let suffix = 1, candidate = "chk_" + draft.name;
+          const used = new Set(draft.checks.filter(check => !check.deleted).map(check => check.name.toLowerCase()));
+          while (used.has(candidate.toLowerCase())) candidate = "chk_" + draft.name + "_" + (++suffix);
+          const check = checkDraft({ name:candidate, clause:"", enforced:true }, Date.now());
+          check.originalName = ""; check.original = null; check.isNew = true;
+          draft.checks.push(check);
+          renderCheckEditor(); refreshPreview(); checksTab.click();
+          const inputs = checkList.querySelectorAll(".db-table-check-clause-input");
+          if (inputs.length) inputs[inputs.length - 1].focus();
+        });
+
         const renderColumnEditor = () => {
           columnList.innerHTML = "";
           const hasGenerated = draft.columns.some(column => column.generationExpression && !column.deleted);
@@ -5280,11 +5499,13 @@ const MNDbClient = (() => {
         renderColumnEditor();
         renderIndexEditor();
         renderForeignKeyEditor();
+        renderCheckEditor();
         refreshPreview();
         body.append(tabs, panels, preview, status, actions);
         const initial = {
           columns:[columnsTab, columnsPanel], indexes:[indexesTab, indexesPanel],
-          foreignKeys:[foreignKeysTab, foreignKeysPanel], ddl:[ddlTab, ddlPanel]
+          foreignKeys:[foreignKeysTab, foreignKeysPanel], checks:[checksTab, checksPanel],
+          ddl:[ddlTab, ddlPanel]
         }[initialTab] || [overviewTab, overviewPanel];
         switchTab(initial[0], initial[1]);
         requestAnimationFrame(() => (initialFocus === "name" ? tableNameInput : initial[0]).focus());
@@ -5963,7 +6184,7 @@ const MNDbClient = (() => {
     chooseScriptDelimiter, wrapDelimitedStatement,
     identifierFor, ddlIdentifier, ddlString, routineEditScript, routineParameters, schemaObjectLabel, schemaDropSql, editBlockNote,
     cellUpdatePreview, rowDeletePreview, rowInsertPreview, tableSelectTemplate, tableInsertTemplate, tableCloneSql, validTableName,
-    defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
+    defaultDraft, columnDraft, indexDraft, foreignKeyDraft, checkDraft, tableAlterPlan,
     erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };
 })();
 

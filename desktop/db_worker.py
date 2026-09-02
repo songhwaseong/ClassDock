@@ -69,6 +69,22 @@ OBJECT_KEYWORDS = {"procedure": "PROCEDURE", "function": "FUNCTION",
                    "event": "EVENT", "trigger": "TRIGGER"}
 OBJECT_DDL_COLUMNS = {"procedure": "create procedure", "function": "create function",
                       "event": "create event", "trigger": "sql original statement"}
+# CHECK 제약을 읽는 문장. 서버마다 표 모양이 달라 앞에서부터 되는 것을 쓴다.
+# 1) MariaDB 10.2+ — CHECK_CONSTRAINTS 에 TABLE_NAME 이 있다. 제약 이름이 테이블마다 따로
+#    놀 수 있어(스키마 안에서 유일하지 않다) 반드시 TABLE_NAME 까지 걸러야 남의 제약을 끌어오지 않는다.
+# 2) MySQL 8.0.16+ — CHECK_CONSTRAINTS 에 TABLE_NAME 이 없어 TABLE_CONSTRAINTS 로 테이블을 찾는다.
+#    ENFORCED 는 MySQL 에만 있는 칸이라 1) 쪽에서는 물어보지 않는다.
+# 둘 다 실패하면 CHECK 를 모르는 서버(MySQL 5.7·MariaDB 10.1 이하)다 — 지원 안 함으로 본다.
+CHECK_CONSTRAINT_QUERIES = (
+    "SELECT CONSTRAINT_NAME, CHECK_CLAUSE, 'YES' FROM information_schema.CHECK_CONSTRAINTS "
+    "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = %s ORDER BY CONSTRAINT_NAME",
+    "SELECT t.CONSTRAINT_NAME, c.CHECK_CLAUSE, t.ENFORCED "
+    "FROM information_schema.TABLE_CONSTRAINTS t "
+    "JOIN information_schema.CHECK_CONSTRAINTS c "
+    "ON c.CONSTRAINT_SCHEMA = t.CONSTRAINT_SCHEMA AND c.CONSTRAINT_NAME = t.CONSTRAINT_NAME "
+    "WHERE t.TABLE_SCHEMA = %s AND t.TABLE_NAME = %s AND t.CONSTRAINT_TYPE = 'CHECK' "
+    "ORDER BY t.CONSTRAINT_NAME",
+)
 # 이진 컬레이션 번호. ⚠ 숫자·날짜 컬럼도 이 번호로 오므로 이것만 보고 "이진"이라 하면
 # INT·DATETIME 이 전부 고칠 수 없는 칸이 된다. 반드시 자료형과 함께 봐야 한다.
 BINARY_CHARSET = 63
@@ -90,7 +106,8 @@ IMPLICIT_COMMIT_KEYWORDS = ("create", "alter", "drop", "rename", "truncate", "gr
 
 _stdout_lock = threading.Lock()
 _state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {},
-          "auto_commit": True, "pending": False, "table_meta": {}, "dump": None, "import": None}
+          "auto_commit": True, "pending": False, "table_meta": {}, "dump": None, "import": None,
+          "server_version": ""}
 
 
 def write_response(payload):
@@ -399,9 +416,17 @@ def classify_error(exc, driver):
         2059: "auth-plugin",
         3730: "dependency",       # 다른 테이블 외래키가 참조 중
         3752: "dependency",       # 생성 컬럼이 참조 중
+        3819: "check-violated",   # CHECK 제약을 어긴 값(MySQL 8.0.16+)
+        3940: "check-constraint", # 이름으로 지정한 제약을 찾을 수 없다
+        3959: "check-constraint", # CHECK 제약이 쓰는 컬럼이라 지우거나 이름을 바꿀 수 없다
+        4025: "check-violated",   # 같은 뜻의 MariaDB 오류(CONSTRAINT %s failed)
     }
     if errno in mapping:
         return mapping[errno], detail, errno
+    # CHECK 관련 오류 번호는 서버·판올림마다 갈린다(이름 중복·없는 컬럼 참조 등).
+    # 번호로 못 짚은 것은 메시지로 한 번 더 걸러 "그냥 SQL 오류"로 흘려보내지 않는다.
+    if "check constraint" in lowered:
+        return ("check-violated" if "violated" in lowered else "check-constraint"), detail, errno
     if "timed out" in lowered or "timeout" in lowered:
         return "timeout", detail, errno
     if "interrupted" in lowered:
@@ -454,6 +479,8 @@ def connect(request):
             cursor.execute("SELECT CONNECTION_ID(), VERSION(), DATABASE()")
             row = cursor.fetchone() or (None, "", None)
             _state["connection_id"] = row[0]
+            # 버전 문자열은 라벨용만이 아니다. CHECK 제약을 지우는 문법이 갈래마다 달라 여기서 들고 있는다.
+            _state["server_version"] = str(row[1] or "")
             info = {"connectionId": row[0], "serverVersion": str(row[1] or ""), "database": row[2] or ""}
     except Exception as exc:                                  # noqa: BLE001
         try:
@@ -469,6 +496,17 @@ def connect(request):
     _state["pending"] = False
     _state["table_meta"] = {}
     return {"ok": True, "readOnly": read_only, "autoCommit": auto_commit, "pending": False, **info}
+
+
+def check_constraint_syntax():
+    """CHECK 제약을 지우는 문법과 검사 여부(ENFORCED)를 끌 수 있는지.
+
+    MariaDB 는 DROP CONSTRAINT 만 알고 검사 여부를 끄는 기능이 없다.
+    MySQL 8 은 DROP CHECK 를 쓴다(DROP CONSTRAINT 는 8.0.19 부터라 더 좁다).
+    """
+    if "mariadb" in str(_state.get("server_version") or "").lower():
+        return "CONSTRAINT", False
+    return "CHECK", True
 
 
 def require_connection():
@@ -897,6 +935,42 @@ def foreign_key_definitions(cursor, name, schema):
     return list(found.values())
 
 
+def check_constraint_definitions(cursor, name, schema):
+    """CHECK 제약. 돌려주는 값은 (서버가 CHECK 를 아는가, 제약 목록).
+
+    표가 없어서 빈 목록인 것과 제약을 안 건 것을 화면에서 구분해야 해서 지원 여부를 함께 준다.
+    MySQL 은 문장 하나가 실패해도 트랜잭션을 접지 않으므로 다음 문장을 그대로 이어 쓸 수 있다.
+    """
+    rows = None
+    for statement in CHECK_CONSTRAINT_QUERIES:
+        try:
+            cursor.execute(statement, (schema, name))
+            rows = cursor.fetchall()
+            break
+        except Exception as exc:                              # noqa: BLE001 - 서버별 information_schema 차이를 가른다
+            args = getattr(exc, "args", ()) or ()
+            errno = args[0] if args and isinstance(args[0], int) else None
+            # 첫 문장의 TABLE_NAME 이 없거나 CHECK_CONSTRAINTS 표 자체가 없는 경우만
+            # 호환성 차이로 본다. 연결 끊김·권한·시간 초과까지 "미지원"으로 숨기면 안 된다.
+            if errno not in (1054, 1109, 1146):
+                raise
+            continue
+    if rows is None:
+        return False, []
+    found = {}
+    for item in rows:
+        constraint_name = str(item[0] or "")
+        if constraint_name in found:
+            continue
+        found[constraint_name] = {
+            "name": constraint_name,
+            "clause": str(item[1] or ""),
+            # MariaDB 에는 끄는 기능이 없어 언제나 켜진 것으로 본다.
+            "enforced": str(item[2] or "YES").upper() != "NO",
+        }
+    return True, list(found.values())
+
+
 def trigger_definitions(cursor, name, schema):
     cursor.execute(
         "SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION "
@@ -1245,6 +1319,8 @@ def load_table_info(name, database=""):
         columns = column_definitions(cursor, name, schema)
         indexes = index_definitions(cursor, name, schema)
         foreign_keys = foreign_key_definitions(cursor, name, schema)
+        checks_supported, checks = check_constraint_definitions(cursor, name, schema)
+    check_drop_keyword, check_enforcement = check_constraint_syntax()
     return {
         "ok": True,
         "database": schema,
@@ -1259,6 +1335,10 @@ def load_table_info(name, database=""):
         "columns": columns,
         "indexes": indexes,
         "foreignKeys": foreign_keys,
+        "checkConstraints": checks,
+        "checkConstraintsSupported": checks_supported,
+        "checkDropKeyword": check_drop_keyword,
+        "checkEnforcement": check_enforcement,
     }
 
 

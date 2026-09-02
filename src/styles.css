@@ -6947,6 +6947,15 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-reference-arrow .ui-icon{width:15px;height:15px}
 .db-table-constraint-part-remove,.db-table-constraint-add-part{padding:5px 8px}
 .db-table-constraint-add-part{align-self:flex-start}
+/* CHECK 제약 편집 — 카드 껍데기는 인덱스·외래키의 것을 그대로 쓰되, 컬럼 짝을 늘어놓지 않아
+   가로로 넓을 이유가 없다(.db-table-constraint-editor 의 min-width 를 푼다). */
+.db-table-check-editor{min-width:0}
+.db-table-check-editor .db-table-constraint-head input[type=text]{width:260px}
+.db-table-check-clause-input{width:100%;min-height:56px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;
+  resize:vertical;background:var(--code-bg);color:var(--code-text);
+  font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}
+.db-table-check-clause-input:focus{outline:none;border-color:var(--accent)}
+.db-table-check-clause-input:disabled{opacity:.65;cursor:not-allowed}
 .db-table-ddl{min-height:220px;padding:11px;border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--code-bg);
   color:var(--code-text);font:11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;tab-size:2;
   cursor:text;-webkit-user-select:text;user-select:text}
