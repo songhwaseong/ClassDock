@@ -466,6 +466,11 @@ class ClassDockLauncher
     // 덤프는 몇십 분이 걸릴 수 있다. 총 시간이 아니라 "진행 보고가 끊긴 시간"으로 잰다.
     const int DbDumpIdleMs = 120 * 1000;
     const int MaxDbDumpObjects = 500;                  // 워커의 MAX_DUMP_OBJECTS 와 같은 값
+    // CSV·엑셀 적재. 워커의 MAX_IMPORT_ROWS·MAX_IMPORT_CELLS 와 같은 값이고, 본문 크기는
+    // 여기서 한 번 더 막는다(행·셀 수를 세기 전에 거대한 본문을 읽어 들이지 않기 위해서다).
+    const int MaxDbImportRows = 10000;
+    const int MaxDbImportCells = 100000;
+    const int MaxDbImportBytes = 8 * 1024 * 1024;
     const int DbIdleMinutes = 30;                      // 유휴 접속은 스스로 정리한다
     static readonly object HeartbeatLock = new object();
     static readonly Dictionary<string, DateTime> HeartbeatClients = new Dictionary<string, DateTime>();
@@ -2593,6 +2598,19 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-dump-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                // 적재는 덤프와 같은 작업 목록에 들어가고 폴링·취소는 /db-query-* 를 그대로 쓴다.
+                else if (method == "POST" && path.StartsWith("/db-import?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = StartDbImport(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-import-failed: " + FlattenMessage(ex)));
                     }
                 }
                 // 덤프도 쿼리와 같은 작업 목록에 들어간다. 폴링·취소 경로를 함께 쓴다.
@@ -5856,6 +5874,90 @@ class ClassDockLauncher
     }
 
     // 끝난 쿼리는 결과를 잠시 남겨 둔다(폴링이 늦게 와도 결과를 볼 수 있게).
+    /* CSV·엑셀 적재. 덤프와 같은 모양으로 작업을 만들고 폴링·취소는 /db-query-* 를 함께 쓴다.
+       런처는 여기서도 SQL 을 만들지 않는다 — 테이블·컬럼 이름과 값을 JSON 값으로 옮길 뿐이고,
+       INSERT 문장은 워커가 자리표시자로 짓는다. 값이 문장에 붙는 순간 따옴표·NULL 구분이 무너진다.
+       ⚠ 프런트가 싣는 차례(MNDbImport.requestValues)와 여기서 읽는 차례가 어긋나면 값이 옆
+       컬럼으로 들어간다. /db-apply · /db-dump 와 같은 이유로 테스트가 두 쪽을 나란히 놓고 본다. */
+    static string StartDbImport(string sessionId, byte[] body)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        if (body == null || body.Length == 0 || body.Length > MaxDbImportBytes) throw new Exception("bad-db-request");
+        int pos = 0;
+        string database = DbCheckField(ReadBundleString(body, ref pos), "database", 64, true);
+        string table = DbCheckField(ReadBundleString(body, ref pos), "table", 128, false);
+        string mode = ReadBundleString(body, ref pos);
+        if (mode != "insert" && mode != "ignore" && mode != "update") throw new Exception("db-import-bad-mode");
+
+        int columnCount;
+        if (!int.TryParse(ReadBundleString(body, ref pos), out columnCount) || columnCount < 1 || columnCount > 512)
+            throw new Exception("db-import-bad-count");
+        StringBuilder columns = new StringBuilder();
+        for (int i = 0; i < columnCount; i++)
+        {
+            string name = DbCheckField(ReadBundleString(body, ref pos), "column", 128, false);
+            if (columns.Length > 0) columns.Append(',');
+            columns.Append(JsonString(name));
+        }
+
+        int rowCount;
+        if (!int.TryParse(ReadBundleString(body, ref pos), out rowCount) || rowCount < 1 || rowCount > MaxDbImportRows)
+            throw new Exception("db-import-bad-rows");
+        if ((long)rowCount * columnCount > MaxDbImportCells) throw new Exception("db-import-too-many-cells");
+        StringBuilder rows = new StringBuilder();
+        for (int r = 0; r < rowCount; r++)
+        {
+            if (rows.Length > 0) rows.Append(',');
+            rows.Append('[');
+            for (int c = 0; c < columnCount; c++)
+            {
+                string value = ReadBundleString(body, ref pos);
+                string isNull = ReadBundleString(body, ref pos);
+                if (c > 0) rows.Append(',');
+                // NULL 은 JSON null 로 보낸다. 빈 문자열과 확실히 갈라야 두 값이 섞이지 않는다.
+                rows.Append(isNull == "1" ? "null" : JsonString(value));
+            }
+            rows.Append(']');
+        }
+        if (pos != body.Length) throw new Exception("bad-db-request");
+
+        SweepDbJobs();
+        DbQueryJob job = new DbQueryJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.SessionId = session.Id;
+        lock (DbJobsLock) DbJobs[job.Id] = job;
+
+        string request = "{\"action\":\"import-rows\",\"database\":" + JsonString(database)
+            + ",\"table\":" + JsonString(table)
+            + ",\"mode\":" + JsonString(mode)
+            + ",\"columns\":[" + columns + "]"
+            + ",\"rows\":[" + rows + "]}";
+
+        Thread worker = new Thread(delegate()
+        {
+            string response = "", error = "";
+            try
+            {
+                response = DbExchange(session, request, DbDumpIdleMs, delegate(string progress)
+                {
+                    lock (job.Sync) job.Progress = progress;
+                }, job);
+            }
+            catch (Exception ex) { error = FlattenMessage(ex); }
+            lock (job.Sync)
+            {
+                job.ResultJson = response;
+                job.Error = error;
+                job.DoneAt = DateTime.UtcNow;
+                job.Complete = true;
+            }
+            SweepDbJobs();
+        });
+        worker.IsBackground = true;
+        worker.Start();
+        return "{\"job\":" + JsonString(job.Id) + ",\"rows\":" + rowCount + "}";
+    }
+
     static void SweepDbJobs()
     {
         lock (DbJobsLock)

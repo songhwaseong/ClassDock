@@ -1075,8 +1075,14 @@ test("SQL 덤프는 구조와 데이터를 순서대로 적고 실패하면 파�
     // 데이터는 서버사이드 커서로 흘려 읽는다. 기본 커서는 큰 테이블을 통째로 메모리에 올린다.
     assert.match(worker, /connection\.cursor\(driver\.cursors\.SSCursor\)/);
     // 덤프는 사용자 세션이 아니라 전용 커넥션에서 돈다(열어 둔 트랜잭션을 건드리지 않게).
-    assert.match(worker, /START TRANSACTION WITH CONSISTENT SNAPSHOT/);
-    assert.match(worker, /dump_connection, dump_id = open_dump_connection\(driver, options\["consistent"\]\)/);
+    // consistent 옵션은 그 전용 커넥션으로 전달된다. 다만 구조만 뽑을 때는 읽을 데이터가
+    // 없으므로 스냅샷을 열지 않는다(needs_data 로 걸러 넘긴다).
+    assert.match(worker, /needs_data = mode in \("data", "both"\)/);
+    assert.match(worker,
+      /dump_connection, dump_id = open_dump_connection\(driver, needs_data and options\["consistent"\]\)/);
+    // 받은 값이 참일 때만 스냅샷을 연다 — 전달된 옵션이 실제로 스냅샷을 가른다.
+    assert.match(worker,
+      /def open_dump_connection\(driver, consistent\):[\s\S]*?if consistent:[\s\S]{0,200}?cursor\.execute\("START TRANSACTION WITH CONSISTENT SNAPSHOT"\)/);
     assert.match(worker, /finally:[\s\S]{0,80}?close_dump_connection\(dump_connection\)/);
     // 덤프 값은 표시용 cell() 을 거치면 안 된다(500자 절단·BLOB 치환이 그대로 파일에 실린다).
     const dumpSource = worker.slice(worker.indexOf("def choose_script_delimiter("),
@@ -1973,4 +1979,90 @@ test("줄 정리 열한 개는 1단에 늘어놓지 않고 한 층 접는다", (
   for (const label of ["SQL 정렬 (전체)", "찾기·바꾸기", "줄 번호로 이동"]) {
     assert.ok(dbSource.includes(label), "1단 항목 누락: " + label);
   }
+});
+
+/* 결과 표 붙여넣기 --------------------------------------------------------
+   격자를 칸에 맞추는 셈은 DOM 을 모르는 순수 함수라 여기서 직접 돌려 본다.
+   스프레드시트 뷰어와 같은 파서·같은 셈을 쓰므로 한쪽에서 복사한 것이 다른 쪽에서 어긋나지 않는다. */
+const gridSelection = require("../src/js/grid-selection.js");
+
+test("클립보드 파서는 두 표가 함께 쓴다", () => {
+  assert.equal(typeof gridSelection.gridClipboardTable, "function");
+  assert.deepEqual(gridSelection.gridClipboardTable("a\tb\n1\t2"), [["a", "b"], ["1", "2"]]);
+  // 큰따옴표 안의 탭·줄바꿈은 칸을 나누지 않는다(엑셀이 그렇게 내보낸다).
+  assert.deepEqual(gridSelection.gridClipboardTable('"여러\n줄"\t"탭\t포함"'), [["여러\n줄", "탭\t포함"]]);
+  // 이 앱에서 복사한 값은 특수문자가 있어도 같은 한 칸으로 되돌아와야 한다.
+  for (const value of ['He said "hi"', "탭\t포함", "여러\n줄", '따옴표 "와\t탭']){
+    const copied = gridSelection.gridSelectionToText(new Set([0]), 1, () => value);
+    assert.deepEqual(gridSelection.gridClipboardTable(copied), [[value]]);
+  }
+  // 외부 앱이 인용하지 않은 평문 중간의 따옴표도 값 자체다.
+  assert.deepEqual(gridSelection.gridClipboardTable('He said "hi"'), [['He said "hi"']]);
+  // 스프레드시트 뷰어는 이제 자기 파서를 갖지 않고 이 함수를 이름만 바꿔 받는다.
+  const sheet = fs.readFileSync(path.join(root, "src", "js", "spreadsheet-viewer.js"), "utf8");
+  assert.match(sheet, /gridClipboardTable: parseClipboardTable/);
+  assert.ok(!/^function parseClipboardTable\(/m.test(sheet), "파서가 두 곳에 있으면 규칙이 갈라진다");
+});
+
+test("붙여넣기는 표 밖으로 넘친 행·열을 버리고 그 수를 알린다", () => {
+  const grid = [["a", "b", "c"], ["d", "e", "f"], ["g", "h", "i"]];
+  const plan = gridSelection.gridPastePlan(grid, { row: 1, col: 1 }, { rows: 3, cols: 3 }, null);
+  // 3×3 격자를 (1,1) 에 붙이면 2×2 만 들어가고 나머지는 버려진다 — 표는 늘어나지 않는다.
+  assert.deepEqual(plan.cells.map(cell => [cell.row, cell.col, cell.value]),
+    [[1, 1, "a"], [1, 2, "b"], [2, 1, "d"], [2, 2, "e"]]);
+  assert.equal(plan.overflowRows, 1);
+  assert.equal(plan.overflowCols, 1);
+  assert.equal(plan.fill, false);
+});
+
+test("칸 하나를 복사하면 고른 칸 전부를 그 값으로 채운다", () => {
+  const spots = [{ row: 0, col: 0 }, { row: 2, col: 1 }, { row: 9, col: 1 }];
+  const plan = gridSelection.gridPastePlan([["x"]], { row: 0, col: 0 }, { rows: 3, cols: 2 }, spots);
+  assert.equal(plan.fill, true);
+  // 흩어진 선택도 그대로 따르고, 표 밖(9행)은 조용히 빠진다.
+  assert.deepEqual(plan.cells, [{ row: 0, col: 0, value: "x" }, { row: 2, col: 1, value: "x" }]);
+  // 격자가 여러 칸이면 채우기가 아니라 좌상단부터 붙이기다.
+  assert.equal(gridSelection.gridPastePlan([["x", "y"]], { row: 0, col: 0 }, { rows: 3, cols: 2 }, spots).fill, false);
+});
+
+test("붙여넣기는 변경 목록에만 담고 상한을 넘기면 하나도 담지 않는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const body = source.slice(source.indexOf("const pasteGridSelection ="), source.indexOf("const requestPaste ="));
+  // 값은 stageUpdate 로만 간다 — 붙여넣기가 SQL 을 만들면 따옴표·NULL 처리가 두 곳으로 갈린다.
+  assert.match(body, /stageUpdate\(item\.context, item\.value, item\.isNull\)/);
+  assert.ok(!/UPDATE /.test(body), "붙여넣기가 SQL 문장을 만들면 안 된다");
+  // 상한 검사는 담기 전에 하고, 걸리면 return 이다(절반만 담기면 어디까지 들어갔는지 알 수 없다).
+  assert.match(body, /let projected = stagedCount\(\);[\s\S]{0,600}?if \(projected > MAX_STAGED\)\{[\s\S]{0,400}?return;/);
+  // 읽기 전용·조인 결과는 애초에 담기지 않는다.
+  assert.match(body, /if \(!plan \|\| !plan\.editable\)\{ toast\(editBlockNote\(plan\), 3500\); return; \}/);
+  // NOT NULL 컬럼에 NULL 을 담지 않는다(값 창의 규칙과 같다).
+  assert.match(body, /if \(isNull && !context\.nullable\)/);
+  // 빈 칸의 기본은 빈 문자열이고 NULL 은 Ctrl+Shift+V 로만 들어온다.
+  assert.match(body, /const isNull = !!nullOnEmpty && cell\.value === ""/);
+});
+
+test("붙여넣기는 Ctrl+V 의 paste 이벤트로 받고 Ctrl+Shift+V 만 따로 가로챈다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // Ctrl+V 를 keydown 에서 막으면 클립보드를 읽을 권한을 따로 물어야 한다. 이벤트가 실어 온 글자를 쓴다.
+  assert.match(source, /table\.addEventListener\("paste", \(event\) => \{/);
+  assert.match(source, /event\.clipboardData\.getData\("text\/plain"\)/);
+  // 고치는 중인 입력칸의 붙여넣기는 그 칸의 일이다.
+  assert.match(source, /if \(event\.target && event\.target\.closest && event\.target\.closest\("\.db-cell-input"\)\) return;/);
+  // Ctrl+Shift+V 는 막지 않으면 paste 가 뒤따라 와 같은 블록이 두 번 붙는다.
+  assert.match(source, /event\.shiftKey && key === "v"\)\{\s*\n\s*event\.preventDefault\(\);\s*\n\s*requestPaste\(true\);/);
+});
+
+test("결과 표 우클릭 메뉴는 단축키를 함께 적고 스키마 트리 메뉴의 껍데기를 다시 쓴다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(source, /const openGridContextMenu = \(x, y\) =>/);
+  assert.match(source, /table\.addEventListener\("contextmenu"/);
+  // 고른 범위 밖을 누르면 그 칸을 먼저 고른다(범위 안이면 선택을 지키고 메뉴만 연다).
+  assert.match(source, /if \(!gridSelection \|\| !gridSelection\.keys\.has\(key\)\) selectCell\(point\.row, point\.col\)/);
+  // 닫기·바깥 클릭·Escape 규칙은 트리 메뉴의 것을 그대로 쓴다(메뉴가 둘 다 열려 있지 않게).
+  assert.match(source, /openGridContextMenu = [\s\S]{0,200}?closeTableContextMenu\(\)/);
+  for (const label of ["복사", "붙여넣기", "빈 칸을 NULL 로 붙여넣기", "값 보기·고치기", "행 추가", "행 삭제 담기"]) {
+    assert.ok(source.includes('"' + label + '"'), "메뉴 항목 누락: " + label);
+  }
+  assert.match(css, /\.db-context-hint\{/);
 });

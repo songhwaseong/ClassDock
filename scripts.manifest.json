@@ -93,6 +93,7 @@
     "table-export.js",
     "db-client.js",
     "db-dump.js",
+    "db-import.js",
     "data-convert-ui.js",
     "exchange-rate.js",
     "exchange-rate-ui.js",
@@ -215,6 +216,7 @@
         "table-export.js",
         "db-client.js",
         "db-dump.js",
+        "db-import.js",
         "data-convert-ui.js",
         "exchange-rate.js",
         "exchange-rate-ui.js",
@@ -476,6 +478,11 @@
     "db-dump.js": [
       "db-client.js",
       "documents.js"
+    ],
+    "db-import.js": [
+      "db-client.js",
+      "data-convert.js",
+      "lazy.js"
     ]
   },
   "moduleBoundaries": [

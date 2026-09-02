@@ -60,6 +60,8 @@
     ,record: '<circle cx="12" cy="12" r="7" fill="currentColor" stroke="none"/>'
     ,stop: '<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>'
     ,refresh: '<path d="M21.5 4.5v5.2h-5.2"/><path d="M19.6 14.5a8 8 0 1 1-1.9-8.3l3.8 3.5"/>'
+    ,copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>'
+    ,paste: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/>'
   };
   window.uiIcon = function(name){
     const content = paths[name] || paths.code;

@@ -1253,6 +1253,9 @@ const MNDbClient = (() => {
     // 덤프는 읽기만 하므로 읽기 전용 접속에서도 쓸 수 있다(오히려 그때 더 필요하다).
     const dumpButton = button("내보내기", "db-btn db-btn-quiet",
       "고른 테이블·뷰·프로시저를 CREATE·INSERT 문이 든 .sql 파일로 저장합니다");
+    // 내보내기의 짝. 이쪽은 쓰기라 읽기 전용 접속에서는 잠긴다.
+    const importDataButton = button("데이터 적재", "db-btn db-btn-quiet",
+      "CSV·엑셀 파일의 행을 테이블에 넣습니다");
     const formatButton = button("정렬", "db-btn db-btn-quiet",
       "편집기의 SQL 을 줄바꿈·들여쓰기해 보기 좋게 정리합니다 (일부만 고를 때는 우클릭 메뉴)");
     formatButton.dataset.shortcutAction = "formatDocument";
@@ -1291,7 +1294,7 @@ const MNDbClient = (() => {
 
     toolbar.append(runButton, runAllButton, cancelButton, explainButton, el("span", "db-timeout-wrap", null),
       modeBadge, txWrap, serverLabel, schemaPanelButton, layoutButton, historyButton, formatButton, importButton,
-      dumpButton, saveButton, disconnectButton, sqlFileInput);
+      dumpButton, importDataButton, saveButton, disconnectButton, sqlFileInput);
     // 저장·정렬 버튼의 안내에 지금 설정된 단축키를 붙인다(사용자가 키를 바꿔도 따라간다).
     if (typeof syncShortcutHints === "function") syncShortcutHints(toolbar);
     toolbar.querySelector(".db-timeout-wrap").append(el("span", null, "제한"), timeoutInput, el("span", null, "초"));
@@ -2939,6 +2942,22 @@ const MNDbClient = (() => {
           copyGridSelection();
           return;
         }
+        /* Ctrl+V 는 가로채지 않는다 — paste 이벤트가 클립보드 글자를 함께 실어 오므로
+           권한을 따로 묻지 않는 그 길이 낫다. Ctrl+Shift+V 만 여기서 막고 직접 읽는다
+           (막지 않으면 paste 이벤트가 뒤따라 와 같은 블록을 두 번 붙인다). */
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && key === "v"){
+          event.preventDefault();
+          requestPaste(true);
+          return;
+        }
+        if (event.key === "ContextMenu" || (event.shiftKey && key === "f10")){
+          event.preventDefault();
+          const spot = gridCaret || (gridSelection && gridSelection.anchor);
+          const node = (spot && gridCellAt(spot.row, spot.col)) || table;
+          const box = node.getBoundingClientRect();
+          openGridContextMenu(box.left + 12, box.bottom - 2);
+          return;
+        }
         const steps = { arrowup:[-1, 0], arrowdown:[1, 0], arrowleft:[0, -1], arrowright:[0, 1] };
         if (steps[key] && !event.ctrlKey && !event.metaKey){
           // 방향키가 표 안에서 칸을 옮긴다. 그러지 않으면 결과 영역만 스크롤되고 지금 칸이 어디인지 잃는다.
@@ -2970,6 +2989,30 @@ const MNDbClient = (() => {
           clearGridSelection();
         }
       });
+
+      /* 오른쪽 버튼: 누른 칸이 고른 범위 밖이면 그 칸을 먼저 고른다(엑셀·탐색기와 같은 규칙).
+         범위 안을 눌렀다면 고른 범위를 그대로 두어야 "선택한 것에 대한 메뉴"가 된다. */
+      table.addEventListener("contextmenu", (event) => {
+        if (event.target.closest && event.target.closest(".db-cell-input")) return;   // 고치는 중이면 글자 메뉴다
+        event.preventDefault();
+        const point = gridPointFrom(event.target);
+        if (point && point.kind === "cell"){
+          const key = point.row * gridColumnCount() + point.col;
+          if (!gridSelection || !gridSelection.keys.has(key)) selectCell(point.row, point.col);
+          else gridCaret = { row:point.row, col:point.col };
+        }
+        table.focus({ preventScroll:true });
+        openGridContextMenu(event.clientX, event.clientY);
+      });
+
+      // 고치는 중인 칸의 붙여넣기는 그 입력칸의 일이다(글자를 넣는 것이지 칸을 채우는 것이 아니다).
+      table.addEventListener("paste", (event) => {
+        if (event.target && event.target.closest && event.target.closest(".db-cell-input")) return;
+        const text = event.clipboardData ? event.clipboardData.getData("text/plain") : "";
+        if (!text) return;
+        event.preventDefault();
+        pasteGridSelection(text, false);
+      });
     };
 
     /* 고른 칸을 붙여 넣기 좋은 글자로 옮긴다(탭으로 열, 줄바꿈으로 행).
@@ -2985,6 +3028,192 @@ const MNDbClient = (() => {
       const done = gridSelection.keys.size.toLocaleString() + "칸을 복사했어요.";
       if (typeof copyDocumentMenuText === "function") copyDocumentMenuText(text, done);
       else if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast(done, 1800));
+    };
+
+    /* 붙여넣기 --------------------------------------------------------------
+       엑셀·시트에서 복사한 블록을 고른 자리부터 칸에 채워 변경 목록에 담는다. 서버로는
+       아무것도 가지 않는다 — 값 하나를 고칠 때와 똑같이 `적용` 을 눌러야 나간다.
+
+       표는 늘어나지 않는다. 결과 표의 행은 서버의 행이지 시트의 칸이라서, 넘친 만큼 행을
+       만들면 기본키를 프런트가 지어내야 하고 "붙여넣었더니 행이 생겼다"가 된다. 넘친 행·열은
+       버리고 몇이 버려졌는지 밝힌다. 행을 넣는 길은 `행 추가` 다.
+
+       빈 칸은 빈 문자열이다(엑셀의 빈 칸이 그렇다). NULL 로 두려는 붙여넣기는 Ctrl+Shift+V 로
+       따로 받는다 — 복사가 NULL 을 빈칸으로 내보내므로 되돌려 붙이는 길이 하나는 있어야 한다.
+       `NULL` 이라는 글자는 글자 그대로 담는다(값이 NULL 인 칸과 구별해야 한다). */
+
+    // 붙여넣기가 채울 자리. 고른 범위가 있으면 그 좌상단, 없으면 지금 칸에서 시작한다.
+    const pasteAnchor = (bounds) => {
+      if (bounds) return { row:bounds.row1, col:bounds.col1 };
+      const caret = gridCaret || (gridSelection && gridSelection.anchor);
+      return caret ? { row:caret.row, col:caret.col } : null;
+    };
+
+    // 칸 하나만 복사했을 때 그 값으로 채울 자리들(흩어진 선택도 그대로 따른다).
+    const pasteSpots = () => {
+      const count = gridColumnCount();
+      if (!gridSelection || gridSelection.keys.size < 2 || !count) return null;
+      const spots = [];
+      gridSelection.keys.forEach(key => spots.push({ row:Math.floor(key / count), col:key % count }));
+      return spots;
+    };
+
+    const pasteGridSelection = async (text, nullOnEmpty) => {
+      if (!currentGrid || !grid) return;
+      const plan = currentGrid.edit;
+      if (!plan || !plan.editable){ toast(editBlockNote(plan), 3500); return; }
+      const rows = grid.gridClipboardTable(text);
+      if (!rows.length || (rows.length === 1 && rows[0].length === 1 && rows[0][0] === "")){
+        toast("붙여넣을 내용이 없습니다.", 2000);
+        return;
+      }
+      const bounds = gridSelection
+        ? grid.gridSelectionBoundsFromKeys(gridSelection.keys, gridColumnCount()) : null;
+      const anchor = pasteAnchor(bounds);
+      if (!anchor){ toast("붙여넣을 칸을 먼저 골라 주세요.", 2400); return; }
+      const spread = grid.gridPastePlan(rows, anchor,
+        { rows:gridRowCount(), cols:gridColumnCount() }, pasteSpots());
+      if (!spread.cells.length){ toast("표 안에 붙여넣을 자리가 없습니다.", 2400); return; }
+
+      /* 실제로 남을 변경만 센다. 편집할 수 없는 칸·원래 값과 같은 칸까지 세면 서버로는
+         500건도 가지 않을 붙여넣기를 상한 때문에 통째로 막게 된다. 이미 담긴 칸을 원래
+         값으로 되돌리는 경우에는 최종 건수가 하나 줄어드는 것까지 반영한다. */
+      const decisions = spread.cells.map((cell) => {
+        const context = cellEditContext(cell.row, cell.col, false);
+        if (!context.editable) return { cell, context, skip:context.note };
+        const isNull = !!nullOnEmpty && cell.value === "";
+        if (isNull && !context.nullable)
+          return { cell, context, isNull, skip:"이 컬럼은 빈 값(NULL)을 받지 않습니다." };
+        const previous = stagedUpdate(cell.row, cell.col);
+        const before = previous ? previous.before : cellSnapshot(cell.row, cell.col);
+        const value = isNull ? "" : String(cell.value == null ? "" : cell.value);
+        const same = !before.clipped && (isNull ? before.isNull : (!before.isNull && before.text === value));
+        return { cell, context, isNull, value, previous, same };
+      });
+      let projected = stagedCount();
+      decisions.forEach((item) => {
+        if (item.skip) return;
+        if (item.previous && item.same) projected--;
+        else if (!item.previous && !item.same) projected++;
+      });
+      if (projected > MAX_STAGED){
+        // 절반만 담으면 어디까지 들어갔는지 알 수 없다. 하나도 담지 않고 대안을 말한다.
+        toast("한 번에 담을 수 있는 변경은 " + MAX_STAGED + "건까지입니다(붙여넣으려는 칸 "
+          + spread.cells.length.toLocaleString() + "개). 먼저 적용하거나, 새 행을 넣는 것이라면 행 추가를 써 주세요.", 5000);
+        return;
+      }
+      const height = spread.cells.length
+        ? spread.cells[spread.cells.length - 1].row - spread.cells[0].row + 1 : 0;
+      if (height > 100 && typeof confirmDialog === "function"){
+        const ok = await confirmDialog(height.toLocaleString() + "행 " + spread.cells.length.toLocaleString()
+          + "칸을 고치려고 담습니다.\n(아직 서버에 반영되지는 않습니다.)", "담기", "취소");
+        if (!ok) return;
+      }
+
+      let added = 0, same = 0, skipped = 0, blanks = 0, note = "";
+      decisions.forEach((item) => {
+        if (item.skip){ skipped++; if (!note) note = item.skip; return; }
+        if (!item.isNull && item.cell.value === "") blanks++;
+        if (stageUpdate(item.context, item.value, item.isNull)) added++;
+        else same++;                                     // 원래 값과 같아 담지 않은 칸
+      });
+
+      if (!added){
+        toast(skipped ? note : "붙여넣은 값이 원래 값과 같아 담지 않았어요.", 3600);
+        return;
+      }
+      const parts = [added.toLocaleString() + "칸을 담았어요"];
+      if (same) parts.push(same.toLocaleString() + "칸은 값이 같아 그대로");
+      if (skipped) parts.push(skipped.toLocaleString() + "칸 건너뜀(" + note + ")");
+      if (spread.overflowRows) parts.push("표 아래로 넘친 " + spread.overflowRows.toLocaleString() + "행은 버림");
+      if (spread.overflowCols) parts.push("오른쪽으로 넘친 " + spread.overflowCols + "열은 버림");
+      if (blanks) parts.push("빈 칸 " + blanks.toLocaleString() + "개는 빈 문자열(Ctrl+Shift+V 는 NULL)");
+      toast(parts.join(" · ") + " · ‘적용’을 눌러야 서버에 반영됩니다.", 5200);
+    };
+
+    /* 키보드 붙여넣기는 paste 이벤트가 글자를 실어 오지만, 메뉴에서 고른 붙여넣기는 그렇지 않다.
+       그때만 클립보드를 직접 읽는다. 웹뷰가 읽기를 막으면 단축키를 안내한다 — 읽지 못한 것을
+       "붙여넣을 내용이 없다"로 말하면 사용자가 클립보드를 의심하게 된다. */
+    const requestPaste = async (nullOnEmpty) => {
+      if (currentGrid && currentGrid.table) currentGrid.table.focus({ preventScroll:true });
+      let text = "";
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.readText === "function")
+          text = await navigator.clipboard.readText();
+      } catch(_){ text = ""; }
+      if (!text){
+        toast("클립보드를 읽지 못했습니다. 표를 누른 뒤 "
+          + (nullOnEmpty ? "Ctrl+Shift+V" : "Ctrl+V") + " 로 붙여넣어 주세요.", 3600);
+        return;
+      }
+      await pasteGridSelection(text, nullOnEmpty);
+    };
+
+    /* 결과 표 오른쪽 버튼 메뉴 ------------------------------------------------
+       붙여넣기는 단축키로만 두면 아무도 있는 줄 모른다. 표에서 할 수 있는 일을 한자리에
+       모으고 단축키를 나란히 적어, 메뉴가 단축키를 가르치는 자리도 되게 한다.
+       메뉴 껍데기·닫기 규칙은 스키마 트리 메뉴(db-table-context-*)의 것을 그대로 쓴다. */
+    const openGridContextMenu = (x, y) => {
+      closeTableContextMenu();
+      const plan = currentGrid && currentGrid.edit;
+      const editable = !!(plan && plan.editable);
+      const selected = !!(gridSelection && gridSelection.keys.size);
+      const caret = gridCaret || (gridSelection && gridSelection.anchor);
+      const menu = el("div", "db-table-context-menu");
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", "결과 표 작업");
+
+      const item = (icon, label, hint, action, opts) => {
+        const options = opts || {};
+        const node = button("", "db-table-context-item" + (options.className ? " " + options.className : ""),
+          options.title || "");
+        node.setAttribute("role", "menuitem");
+        node.append(schemaIcon(icon, "db-table-context-icon"), el("span", "db-context-label", label));
+        if (hint) node.append(el("span", "db-context-hint", hint));
+        node.disabled = !!options.disabled;
+        node.addEventListener("click", () => {
+          closeTableContextMenu();
+          action();
+        });
+        menu.append(node);
+        return node;
+      };
+
+      item("copy", "복사", "Ctrl+C", copyGridSelection,
+        { disabled:!selected, title:"고른 칸을 탭 구분 글자로 복사합니다" });
+      item("paste", "붙여넣기", "Ctrl+V", () => requestPaste(false),
+        { disabled:!editable, title:editable ? "클립보드의 표를 고른 자리부터 변경 목록에 담습니다" : editBlockNote(plan) });
+      item("paste", "빈 칸을 NULL 로 붙여넣기", "Ctrl+Shift+V", () => requestPaste(true),
+        { disabled:!editable, title:"빈 칸을 빈 문자열이 아니라 NULL 로 담습니다" });
+
+      item("pen", "값 보기·고치기", "F2", () => { if (caret) openCellAt(caret.row, caret.col); },
+        { disabled:!caret, className:"db-context-top", title:"이 칸의 전체 값을 보고 고칩니다" });
+      if (editable){
+        item("table", "행 추가", "", openInsertModal, { title:"이 테이블에 넣을 행을 만들어 변경 목록에 담습니다" });
+        item("delete", "행 삭제 담기", "", () => stageDeleteRows(selectedRows()),
+          { disabled:!selected, title:"고른 칸이 걸친 행을 지우려고 변경 목록에 담습니다" });
+      }
+
+      if (editable && plan.table)
+        item("table", "CSV·엑셀 적재", "", () => openImportModal(plan.table),
+          { title:"CSV·엑셀 파일의 행을 " + plan.table + " 에 넣습니다" });
+
+      item("save", "CSV로 내보내기", "", () => exportCsvButton.click(),
+        { className:"db-context-top", disabled:!lastRows, title:"현재 결과 전체를 CSV 파일로 저장합니다" });
+      item("board", selected ? "선택 메모로" : "전체 메모로", "", () => memoButton.click(),
+        { disabled:memoButton.hidden, title:memoButton.title });
+
+      document.body.append(menu);
+      const bounds = menu.getBoundingClientRect();
+      menu.style.left = Math.max(6, Math.min(x, window.innerWidth - bounds.width - 6)) + "px";
+      menu.style.top = Math.max(6, Math.min(y, window.innerHeight - bounds.height - 6)) + "px";
+      tableContextMenu = menu;
+      window.addEventListener("pointerdown", onTableContextPointerDown, true);
+      window.addEventListener("keydown", onTableContextKey, true);
+      window.addEventListener("resize", closeTableContextMenu);
+      // 첫 항목이 잠겨 있을 수 있으므로(고른 칸이 없을 때의 복사) 쓸 수 있는 첫 항목을 잡는다.
+      const firstEnabled = menu.querySelector(".db-table-context-item:not(:disabled)");
+      if (firstEnabled) requestAnimationFrame(() => firstEnabled.focus());
     };
 
     /* 현재 결과를 메모 표 블록으로 옮긴다. 선택이 있으면 선택 경계만 보내고, Ctrl 로 띄엄띄엄
@@ -3515,6 +3744,24 @@ const MNDbClient = (() => {
           openDumpModal([dumpKind + ":" + dumpName]);
         });
         menu.append(dumpItem);
+      }
+      // 적재는 테이블에만 붙는다. 뷰·프로시저에 행을 넣는 항목이 있으면 메뉴가 거짓말을 한다.
+      const importName = item.type === "table" ? item.name
+        : (childTab && schemaObjects.some(object => object.type === "table" && object.name === item.table)
+          ? item.table : "");
+      if (importName){
+        const importItem = button("", "db-table-context-item",
+          readOnly ? "읽기 전용 접속입니다." : "CSV·엑셀 파일의 행을 이 테이블에 넣습니다");
+        importItem.setAttribute("role", "menuitem");
+        importItem.append(schemaIcon("table", "db-table-context-icon"),
+          document.createTextNode("CSV·엑셀 적재"));
+        importItem.disabled = readOnly;
+        importItem.addEventListener("click", () => {
+          closeTableContextMenu();
+          setSchemaSelection(item);
+          openImportModal(importName);
+        });
+        menu.append(importItem);
       }
       menu.append(deleteItem);
       document.body.append(menu);
@@ -5151,6 +5398,40 @@ const MNDbClient = (() => {
     };
 
     dumpButton.addEventListener("click", () => openDumpModal([]));
+
+    /* CSV·엑셀 적재 ---------------------------------------------------------
+       창은 별도 모듈(MNDbImport)이 그린다. 여기서는 지금 화면이 아는 것 — 세션·데이터베이스·
+       테이블 목록 — 만 넘긴다. 덤프와 달리 쓰기라서 읽기 전용 접속에서는 열지 않는다. */
+    const openImportModal = (target) => {
+      if (!sessionId){ toast("먼저 데이터베이스에 연결해 주세요.", 2600); return; }
+      if (readOnly){
+        toast("읽기 전용 접속입니다. 데이터를 넣으려면 접속을 끊고 ‘쓰기 허용’을 켜서 다시 연결해 주세요.", 4200);
+        return;
+      }
+      if (typeof MNDbImport === "undefined"){ toast("적재 창을 불러오지 못했습니다.", 3000); return; }
+      const tables = schemaObjects.filter(item => item.type === "table").map(item => item.name);
+      if (!tables.length){ toast("넣을 테이블이 없습니다.", 2600); return; }
+      MNDbImport.open({
+        sessionId,
+        database: currentDatabase,
+        tables,
+        table: target && tables.indexOf(target) >= 0 ? target : tables[0],
+        doc,
+        // 넣고 나면 그 테이블을 열어 준다 — 들어갔는지 눈으로 확인하는 가장 짧은 길이다.
+        onImported: (name, info) => {
+          // 수동 커밋에서는 적재가 아직 확정되지 않았다. 배지·연결 종료 경고가 놓치지 않게
+          // 워커가 돌려준 상태를 먼저 반영하고, 그 뒤 들어간 행을 다시 읽는다.
+          applyTxState(info);
+          showTable(name);
+        }
+      });
+    };
+
+    importDataButton.addEventListener("click", () => {
+      const selected = selectedSchemaItem && selectedSchemaItem.type === "table"
+        ? selectedSchemaItem.name : (currentGrid && currentGrid.edit && currentGrid.edit.table) || "";
+      openImportModal(selected);
+    });
 
     importButton.addEventListener("click", () => {
       sqlFileInput.value = "";                  // 같은 파일을 다시 골라도 change 가 나게 한다

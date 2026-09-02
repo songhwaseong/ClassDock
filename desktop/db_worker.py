@@ -42,6 +42,10 @@ MAX_META_CACHE = 200       # 편집 판정에 쓰는 테이블 메타데이터 �
 MAX_BATCH_CHANGES = 500    # 한 번에 모아 적용할 수 있는 변경 수
 MAX_INSERT_VALUES = 512    # 행 하나에 넣을 수 있는 값의 수
 MAX_RESULT_SETS = 128      # CALL 하나가 결과 집합을 끝없이 내보내 응답을 부풀리지 않게 한다
+MAX_IMPORT_ROWS = 10000    # CSV·엑셀 적재 한 번의 행 상한(런처도 같은 값으로 거른다)
+MAX_IMPORT_CELLS = 100000  # 같은 목적의 셀 상한(넓은 표에서 행 수보다 먼저 걸린다)
+IMPORT_CHUNK = 500         # executemany 한 번에 보낼 행. 실패하면 이 범위만 한 행씩 다시 짚는다
+IMPORT_MODES = ("insert", "ignore", "update")
 MAX_DUMP_OBJECTS = 500     # 한 번에 내보낼 스키마 객체 수 상한(런처도 같은 값으로 거른다)
 MAX_DUMP_NAME = 128        # 객체 이름 길이 상한
 DUMP_RULE = "-- " + "-" * 68   # 파일 안에서 객체 사이를 나누는 줄
@@ -86,7 +90,7 @@ IMPLICIT_COMMIT_KEYWORDS = ("create", "alter", "drop", "rename", "truncate", "gr
 
 _stdout_lock = threading.Lock()
 _state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {},
-          "auto_commit": True, "pending": False, "table_meta": {}, "dump": None}
+          "auto_commit": True, "pending": False, "table_meta": {}, "dump": None, "import": None}
 
 
 def write_response(payload):
@@ -1467,6 +1471,158 @@ def apply_edits(request):
             "insertIds": insert_ids, **tx_state()}
 
 
+def import_sql(target, columns, mode):
+    """적재 문장 하나. 값은 언제나 자리표시자로만 나간다(파일의 글자가 SQL 에 붙지 않는다).
+
+    컬럼 이름은 프런트가 고른 것이 아니라 테이블 정의에 있는 이름이고, 여기서 전부 인용한다.
+    `ON DUPLICATE KEY UPDATE c = VALUES(c)` 의 VALUES() 는 MySQL 8.0.20 에서 권장이 바뀌었지만
+    5.7·8.x·MariaDB 가 모두 받는 표기라 그대로 쓴다(새 별칭 문법은 옛 서버가 못 읽는다).
+    """
+    if not columns:
+        raise RuntimeError("import-no-columns")
+    if len(columns) > MAX_INSERT_VALUES:
+        raise RuntimeError("too-many-values")
+    names = [quote_identifier(name) for name in columns]
+    head = "INSERT IGNORE INTO " if mode == "ignore" else "INSERT INTO "
+    sql = (head + target + " (" + ", ".join(names) + ") VALUES ("
+           + ", ".join(["%s"] * len(names)) + ")")
+    if mode == "update":
+        sql += " ON DUPLICATE KEY UPDATE " + ", ".join(n + " = VALUES(" + n + ")" for n in names)
+    return sql
+
+
+def import_params(rows, width):
+    """행 목록을 드라이버에 넘길 튜플 목록으로 옮긴다. null 은 JSON null 로 와서 그대로 None 이 된다."""
+    params = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, list) or len(row) != width:
+            raise RuntimeError("import-bad-row")
+        params.append(tuple(None if value is None else str(value) for value in row))
+    return params
+
+
+def find_failing_row(cursor, sql, chunk, offset):
+    """청크 하나가 실패했을 때 몇 번째 행 때문인지 짚는다.
+
+    한 행씩 다시 넣어 보되 세이브포인트 안에서만 하고 끝나면 되돌린다 — 짚는 동안 넣은 것이
+    남으면 안 된다. 부르기 전에 그 청크가 부분적으로 넣은 것을 이미 되돌려 두어야 첫 행이
+    "중복 키"로 잘못 걸리지 않는다(그래서 청크마다 세이브포인트를 미리 잡는다).
+    """
+    cursor.execute("SAVEPOINT classdock_probe")
+    found = None
+    try:
+        for index, params in enumerate(chunk):
+            try:
+                cursor.execute(sql, params)
+            except Exception as exc:                          # noqa: BLE001
+                found = (offset + index, exc)
+                break
+    finally:
+        try:
+            cursor.execute("ROLLBACK TO SAVEPOINT classdock_probe")
+            cursor.execute("RELEASE SAVEPOINT classdock_probe")
+        except Exception:                                     # noqa: BLE001
+            pass
+    return found
+
+
+def import_rows(request, driver):
+    """CSV·엑셀에서 읽은 행을 한 테이블에 넣는다. 하나라도 실패하면 전부 되돌린다.
+
+    붙여넣기(apply-edits)와 나누어 두는 이유는 규모다. 수천 행을 변경 목록에 담으면 미리보기도
+    되돌리기도 뜻을 잃는다. 여기서는 executemany 로 묶어 보내고 진행만 흘려 보고한다.
+
+    ⚠ 되돌리기 규칙은 apply_edits 와 같아야 한다 — 수동 커밋 모드에서 connection.rollback() 을
+    부르면 사용자가 앞서 쌓아 둔 커밋하지 않은 변경까지 사라진다. 세이브포인트로 이 적재만 되돌린다.
+    """
+    connection = require_connection()
+    if _state["read_only"]:
+        return {"ok": False, "code": "read-only-blocked", "detail": "INSERT"}
+    mode = str(request.get("mode") or "insert")
+    if mode not in IMPORT_MODES:
+        return {"ok": False, "code": "import-bad-mode", "detail": mode}
+    columns = [str(name) for name in (request.get("columns") or [])]
+    rows = request.get("rows") or []
+    if not rows:
+        return {"ok": False, "code": "no-changes", "detail": ""}
+    if len(rows) > MAX_IMPORT_ROWS:
+        return {"ok": False, "code": "import-too-many-rows", "detail": str(len(rows))}
+    if columns and len(rows) * len(columns) > MAX_IMPORT_CELLS:
+        return {"ok": False, "code": "import-too-many-cells", "detail": str(len(rows) * len(columns))}
+    target = table_target(request)
+    sql = import_sql(target, columns, mode)
+    params = import_params(rows, len(columns))
+
+    manual = not _state["auto_commit"]
+    total = len(params)
+    done = 0
+    affected = 0
+    started = time.perf_counter()
+    _state["import"] = {"cancel": False}
+    report = progress_reporter()
+    try:
+        with connection.cursor() as cursor:
+            if manual:
+                cursor.execute("SAVEPOINT classdock_import")
+            else:
+                connection.begin()
+            try:
+                for start in range(0, total, IMPORT_CHUNK):
+                    if import_cancelled():
+                        raise ImportCancelled()
+                    chunk = params[start:start + IMPORT_CHUNK]
+                    # 청크마다 세이브포인트를 잡아 둔다. 실패한 청크가 절반만 넣은 상태로 남으면
+                    # 어느 행이 문제인지 짚을 때 멀쩡한 행까지 중복 키로 걸린다.
+                    cursor.execute("SAVEPOINT classdock_chunk")
+                    try:
+                        affected += int(cursor.executemany(sql, chunk) or 0)
+                    except Exception as exc:                  # noqa: BLE001
+                        cursor.execute("ROLLBACK TO SAVEPOINT classdock_chunk")
+                        # KILL QUERY 로 executemany 가 깨어난 취소를 잘못된 파일 행으로 보고하지 않는다.
+                        if import_cancelled():
+                            raise ImportCancelled()
+                        found = find_failing_row(cursor, sql, chunk, start)
+                        raise ImportRowFailed(found[0] if found else start,
+                                              found[1] if found else exc)
+                    cursor.execute("RELEASE SAVEPOINT classdock_chunk")
+                    done += len(chunk)
+                    report({"done": done, "total": total}, force=done >= total)
+                # 마지막 청크가 끝난 직후 들어온 취소도 COMMIT 전에 한 번 더 잡는다.
+                if import_cancelled():
+                    raise ImportCancelled()
+            except BaseException as exc:                      # noqa: BLE001
+                try:
+                    if manual:
+                        cursor.execute("ROLLBACK TO SAVEPOINT classdock_import")
+                    else:
+                        connection.rollback()
+                except Exception:                             # noqa: BLE001
+                    pass
+                if isinstance(exc, ImportCancelled):
+                    return {"ok": False, "code": "cancelled",
+                            "detail": "적재를 중단했습니다.", "rows": 0, **tx_state()}
+                if isinstance(exc, ImportRowFailed):
+                    failure = error_payload(exc.cause, driver, "import")
+                    # 몇 번째 행인지까지 말해야 사용자가 파일에서 그 줄을 찾을 수 있다.
+                    failure["row"] = exc.row
+                    failure["rows"] = 0
+                    failure.update(tx_state())
+                    return failure
+                if isinstance(exc, RuntimeError):
+                    return {"ok": False, "code": str(exc), "detail": str(exc), "rows": 0, **tx_state()}
+                raise
+            if manual:
+                cursor.execute("RELEASE SAVEPOINT classdock_import")
+            else:
+                connection.commit()
+    finally:
+        _state["import"] = None
+    if manual:
+        _state["pending"] = True
+    return {"ok": True, "rows": total, "affected": affected, "mode": mode,
+            "table": str(request.get("table") or ""), "ms": elapsed_ms(started), **tx_state()}
+
+
 def tx_state():
     """프런트가 커밋·롤백 버튼과 미커밋 배지를 그리는 데 쓰는 상태."""
     return {"autoCommit": bool(_state["auto_commit"]), "pending": bool(_state["pending"])}
@@ -1557,6 +1713,36 @@ def cancel_running_dump():
         return
     dump["cancel"] = True
     kill_query(dump.get("connectionId"))
+
+
+def cancel_running_import():
+    """적재에 멈추라고 표시한다.
+
+    적재는 세션 커넥션에서 도므로 실행 중인 문장은 cancel_running_query() 가 이미 끊는다.
+    여기서는 청크 사이에서 멈출 표시만 남긴다 — 마지막 청크가 막 끝난 순간에 들어온 취소도
+    다음 청크를 시작하기 전에 잡힌다.
+    """
+    running = _state.get("import")
+    if running:
+        running["cancel"] = True
+
+
+def import_cancelled():
+    running = _state.get("import")
+    return bool(running and running.get("cancel"))
+
+
+class ImportCancelled(Exception):
+    """적재를 사용자가 멈췄다. 여기까지 넣은 행은 통째로 되돌린다."""
+
+
+class ImportRowFailed(Exception):
+    """적재 도중 한 행이 서버에 거절당했다. 몇 번째 행인지 함께 들고 올라간다."""
+
+    def __init__(self, row, cause):
+        super(ImportRowFailed, self).__init__(str(cause))
+        self.row = row
+        self.cause = cause
 
 
 def dump_cancelled():
@@ -2091,6 +2277,8 @@ def handle(request):
             return read_cell(request)
         if action == "apply-edits":
             return apply_edits(request)
+        if action == "import-rows":
+            return import_rows(request, driver)
         if action == "autocommit":
             return set_auto_commit(request)
         if action == "commit":
@@ -2140,12 +2328,14 @@ def main():
         if action == "cancel":
             cancel_running_query()                            # 응답 없음 — 결과는 취소당한 쿼리 자신이 보고한다
             cancel_running_dump()                             # 덤프는 전용 커넥션이라 따로 끊는다
+            cancel_running_import()                           # 적재는 청크 사이에서 멈춘다
             continue
         if action == "close":
             # 실행 스레드는 daemon 이라 메인 루프가 바로 끝나면 finally 가 돌기 전에
             # 프로세스가 사라져 .part 파일이 남는다. 먼저 작업을 끊고 정리를 기다린다.
             cancel_running_query()
             cancel_running_dump()
+            cancel_running_import()
             requests.put(None)
             break
         requests.put(request)

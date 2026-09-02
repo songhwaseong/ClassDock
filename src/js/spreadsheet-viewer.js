@@ -415,7 +415,8 @@ const {
   gridSelectionRangeKeys: spreadsheetSelectionRangeKeys,
   gridSelectionRangeCovered: spreadsheetSelectionRangeCovered,
   gridSelectionCombineKeys: spreadsheetSelectionCombineKeys,
-  gridSelectionBoundsFromKeys: spreadsheetSelectionBoundsFromKeys
+  gridSelectionBoundsFromKeys: spreadsheetSelectionBoundsFromKeys,
+  gridClipboardTable: parseClipboardTable
 } = typeof MNGridSelection !== "undefined"
   ? MNGridSelection
   : require("./grid-selection.js");
@@ -1509,34 +1510,8 @@ function spreadsheetRangesOverlap(a, b){
   return a.s.r <= b.e.r && a.e.r >= b.s.r && a.s.c <= b.e.c && a.e.c >= b.s.c;
 }
 
-// 클립보드 텍스트(엑셀/구글시트 복사본)를 2차원 배열로 파싱.
-// 탭=열 구분, 줄바꿈=행 구분. 큰따옴표로 감싼 필드는 내부에 탭·줄바꿈·""(이스케이프)를 허용한다.
-function parseClipboardTable(text){
-  const s = String(text == null ? "" : text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const rows = [];
-  let row = [], field = "", inQuotes = false, i = 0;
-  while (i < s.length){
-    const ch = s[i];
-    if (inQuotes){
-      if (ch === '"'){
-        if (s[i + 1] === '"'){ field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      }
-      field += ch; i++; continue;
-    }
-    if (ch === '"'){ inQuotes = true; i++; continue; }
-    if (ch === '\t'){ row.push(field); field = ""; i++; continue; }
-    if (ch === '\n'){ row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
-    field += ch; i++;
-  }
-  row.push(field); rows.push(row);
-  // 마지막 줄바꿈이 만든 빈 행(단일 빈 칸) 제거
-  if (rows.length > 1){
-    const last = rows[rows.length - 1];
-    if (last.length === 1 && last[0] === "") rows.pop();
-  }
-  return rows;
-}
+// 클립보드 텍스트(엑셀/구글시트 복사본) 파싱은 grid-selection.js 의 gridClipboardTable 이다.
+// DB 클라이언트 결과 표도 같은 파서로 붙여넣으므로 규칙을 한 곳에만 둔다(위쪽에서 이름만 받아 왔다).
 
 /* ===================== 간단 수식 엔진 =====================
    지원: 사칙연산·괄호·거듭제곱(^)·백분율(%)·문자연결(&)·비교(=,<>,<,>,<=,>=),

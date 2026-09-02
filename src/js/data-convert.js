@@ -1057,7 +1057,7 @@ const MNDataConvert = (() => {
 
   return {
     LOSS, HINT, FORMATS,
-    detectFormat, parse, serialize, convert,
+    detectFormat, parse, serialize, convert, parseDelimited,
     flatten, unflatten, fromRows, toRows,
     joinPath, parsePath, inferCell, parseMarkup, decodeEntities,
     setYaml, yamlReady
