@@ -92,6 +92,7 @@
     "data-convert.js",
     "table-export.js",
     "db-client.js",
+    "db-dump.js",
     "data-convert-ui.js",
     "exchange-rate.js",
     "exchange-rate-ui.js",
@@ -213,6 +214,7 @@
         "data-convert.js",
         "table-export.js",
         "db-client.js",
+        "db-dump.js",
         "data-convert-ui.js",
         "exchange-rate.js",
         "exchange-rate-ui.js",
@@ -470,6 +472,10 @@
       "code-viewer.js",
       "python-editor.js",
       "table-export.js"
+    ],
+    "db-dump.js": [
+      "db-client.js",
+      "documents.js"
     ]
   },
   "moduleBoundaries": [

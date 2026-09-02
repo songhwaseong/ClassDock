@@ -377,7 +377,9 @@ test("프로시저·함수·이벤트와 테이블 하위 트리거는 정의문
   assert.match(worker, /information_schema\.EVENTS/);
   assert.match(worker, /information_schema\.TRIGGERS/);
   assert.match(worker, /def load_object_ddl\(kind, name, database=""\)/);
-  assert.match(worker, /SHOW CREATE " \+ keywords\[normalized\]/);
+  // 정의문 조회는 덤프와 같은 헬퍼를 쓴다(SHOW CREATE 문법이 두 벌로 갈라지지 않게).
+  assert.match(worker, /SHOW CREATE " \+ OBJECT_KEYWORDS\[kind\]/);
+  assert.match(worker, /ddl = show_create_object\(cursor, normalized, name, schema\)/);
   assert.match(launcher, /path\.StartsWith\("\/db-object\?"/);
   assert.match(source, /const openObjectInfoModal = async \(item\)/);
   assert.match(source, /tableSection\(item, "indexes", "Indexes", "index"/);
@@ -1062,6 +1064,243 @@ test("의존성 검사는 외래키·인덱스·생성 컬럼·뷰 사용 관계
       path.join(root, "desktop")], { encoding:"utf8" });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /ok/);
+  });
+
+test("SQL 덤프는 구조와 데이터를 순서대로 적고 실패하면 파일을 남기지 않는다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+    const run = spawnSync("python", [path.join(root, "tests", "fixtures", "db-dump-probe.py"),
+      path.join(root, "desktop")], { encoding:"utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok/);
+    // 데이터는 서버사이드 커서로 흘려 읽는다. 기본 커서는 큰 테이블을 통째로 메모리에 올린다.
+    assert.match(worker, /connection\.cursor\(driver\.cursors\.SSCursor\)/);
+    // 덤프는 사용자 세션이 아니라 전용 커넥션에서 돈다(열어 둔 트랜잭션을 건드리지 않게).
+    assert.match(worker, /START TRANSACTION WITH CONSISTENT SNAPSHOT/);
+    assert.match(worker, /dump_connection, dump_id = open_dump_connection\(driver, options\["consistent"\]\)/);
+    assert.match(worker, /finally:[\s\S]{0,80}?close_dump_connection\(dump_connection\)/);
+    // 덤프 값은 표시용 cell() 을 거치면 안 된다(500자 절단·BLOB 치환이 그대로 파일에 실린다).
+    const dumpSource = worker.slice(worker.indexOf("def choose_script_delimiter("),
+      worker.indexOf("def handle(request):"));
+    const literalSource = worker.slice(worker.indexOf("def sql_literal("), worker.indexOf("def elapsed_ms("));
+    assert.ok(dumpSource.length > 0 && literalSource.length > 0, "덤프 코드를 찾지 못했다");
+    // 설명하는 주석·독스트링은 빼고 실제 호출만 본다(규칙을 적어 둔 문장이 걸리지 않게).
+    const code = (dumpSource + literalSource).replace(/"""[\s\S]*?"""/g, "").replace(/#[^\n]*/g, "");
+    assert.ok(!/\bcell\(/.test(code), "덤프 경로가 표시용 cell() 을 부른다");
+    // 저장 위치 정책은 런처가 쥔다 — 워커는 받은 경로에 쓰기만 한다.
+    assert.match(worker, /def dump_schema\(request\):[\s\S]*path = str\(request\.get\("path"\) or ""\)/);
+    assert.ok(!/os\.path\.join\([^)]*SaveRoot/i.test(worker), "워커가 저장 경로를 스스로 만든다");
+  });
+
+test("덤프는 진행 보고를 흘리고 런처가 그것을 폴링 응답에 싣는다", () => {
+  // 워커: 최종 응답('+'/'-')과 진행 보고('*')를 접두 문자로 가른다.
+  assert.match(worker, /sys\.__stdout__\.write\("\*" \+ encoded \+ "\\n"\)/);
+  assert.match(worker, /def progress_reporter\(\):/);
+  // 런처: '*' 줄은 콜백에 넘기고 계속 읽는다(요청 하나에 응답 하나라는 규약은 그대로).
+  assert.match(launcher, /line\[0\] != '\*'/);
+  assert.match(launcher, /if \(line\[0\] == '\*'\)\s*\n\s*\{\s*\n\s*if \(onProgress != null\) onProgress\(body\);/);
+  // 제한 시간은 "줄 하나를 기다리는 시간"이다 — 진행 보고가 오는 동안 다시 잡힌다.
+  assert.match(launcher, /while \(true\)\s*\n\s*\{\s*\n\s*string responseLine = null;/);
+  assert.match(launcher, /const int DbDumpIdleMs = 120 \* 1000;/);
+  // 폴링 응답에 마지막 진행 JSON 을 그대로 싣는다.
+  assert.match(launcher, /public string Progress = "";/);
+  assert.match(launcher, /",\\"progress\\":" \+ job\.Progress/);
+  // 기존 호출부가 그대로 돌도록 콜백 없는 갈래를 남긴다.
+  assert.match(launcher, /static string DbExchange\(DbSession session, string requestJson, int timeoutMs\)/);
+});
+
+// 요청 값의 순서가 한 자리라도 어긋나면 오류 없이 다른 옵션으로 덤프된다.
+// 프런트가 싣는 순서와 런처가 읽는 순서를 나란히 놓고 본다.
+const DUMP_FIELDS = ["fileName", "mode", "dropIfExists", "createIfNotExists",
+  "insertForm", "columnNames", "rowLimit", "consistent", "database"];
+
+test("덤프 요청 값의 순서는 프런트와 런처가 같다", () => {
+  const dump = require("../src/js/db-dump.js");
+  const values = dump.requestValues({
+    name:"shop.sql", mode:"both", database:"shop",
+    dropIfExists:true, createIfNotExists:false, insertForm:"ignore",
+    columnNames:true, rowLimit:"50", consistent:true,
+    objects:[{ kind:"table", name:"orders" }, { kind:"view", name:"v_top" }]
+  });
+  assert.deepEqual(values, ["shop.sql", "both", "1", "0", "ignore", "1", "50", "1", "shop",
+    "2", "table", "orders", "view", "v_top"]);
+
+  // 런처가 ReadBundleString 으로 읽어 가는 순서(대상 수 앞까지).
+  const start = launcher.slice(launcher.indexOf("static string StartDbDump("),
+    launcher.indexOf("int count;", launcher.indexOf("static string StartDbDump(")));
+  const read = [...start.matchAll(/string (\w+) = (?:DbCheckField\()?ReadBundleString\(body, ref pos\)/g)]
+    .map(match => match[1]);
+  assert.deepEqual(read, DUMP_FIELDS);
+
+  // 불리언 자리는 "1"/"0" 으로만 오간다.
+  assert.deepEqual(dump.requestValues({ objects:[] }).slice(2, 4), ["0", "0"]);
+  // 행 수는 음수·빈 값·글자를 0(전체)으로 되돌린다.
+  assert.equal(dump.requestValues({ rowLimit:-5, objects:[] })[6], "0");
+  assert.equal(dump.requestValues({ rowLimit:"abc", objects:[] })[6], "0");
+  // 대상 수와 뒤따르는 짝의 개수가 맞아야 런처가 본문 끝을 정확히 만난다.
+  const many = dump.requestValues({ objects:[{ kind:"table", name:"a" }, { kind:"table", name:"b" }] });
+  assert.equal(many[9], "2");
+  assert.equal(many.length, 10 + 2 * 2);
+});
+
+test("덤프 창은 기존 접속 화면의 것을 다시 쓰고 스스로 경로를 정하지 않는다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-dump.js"), "utf8");
+  // 길이 접두 인코딩은 한 벌만 있어야 한다(런처의 ReadBundleString 과 짝이다).
+  assert.match(source, /MNDbClient\.encodeStrings\(values\)/);
+  assert.ok(!/TextEncoder/.test(source), "덤프 창이 인코딩을 따로 만든다");
+  // 오류 문구도 접속 화면의 것을 그대로 쓴다.
+  assert.match(source, /MNDbClient\.messageFor/);
+  // 저장 위치는 런처가 정한다 — 프런트는 이름만 보내고 경로는 응답으로 받는다.
+  assert.match(source, /lastPath = String\(started\.path \|\| ""\);/);
+  // 주석은 정책을 설명하므로 빼고, 실제 코드에 경로를 짓는 자리가 없는지 본다.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*/gm, "");
+  assert.ok(!/["'][A-Za-z]:[\\/]|SaveRoot/.test(code), "덤프 창이 저장 경로를 스스로 만든다");
+  // 파일 이름에서 경로 문자는 오히려 막는다(폴더를 파고들지 못하게).
+  assert.ok(source.includes('replace(/[\\\\/:*?"<>|]/g, "_")'), "파일 이름의 경로 문자를 막지 않는다");
+  // 덤프도 쿼리와 같은 작업 목록에 있어 취소 경로를 함께 쓴다.
+  assert.match(source, /"\/db-query-cancel\?job=" \+ encodeURIComponent\(job\)/);
+  assert.match(source, /"\/db-dump-poll\?job=" \+ encodeURIComponent\(job\)/);
+  // 건너뛴 객체는 조용히 넘기지 않고 완료 문구에 함께 알린다.
+  assert.match(source, /건너뛴 객체/);
+  // 같은 이름의 파일이 있으면 덮어쓰기 전에 묻는다(덤프는 통째로 덮어쓴다).
+  assert.match(source, /await savedFileExists\(name\)/);
+  assert.match(source, /"\/save-file-exists"/);
+  assert.match(source, /confirmDialog\([^)]*이미 있습니다/);
+
+  // 매니페스트: db-client.js 뒤에 실려야 MNDbClient 를 쓸 수 있다.
+  assert.ok(manifest.localScripts.includes("db-dump.js"));
+  assert.ok(manifest.localScripts.indexOf("db-client.js") < manifest.localScripts.indexOf("db-dump.js"));
+  assert.match(html, /<script src="src\/js\/db-dump\.js"><\/script>/);
+  // 두 모듈은 서로를 부른다(덤프 창은 인코딩·문구를, 접속 화면은 창 열기를). 로드 순서로는
+  // 한쪽만 앞설 수 있으므로 moduleBoundaries 로 묶지 않고, 참조가 모두 함수 안에 있는지 본다.
+  assert.ok(!(manifest.moduleBoundaries || []).some(item => item.file === "db-dump.js"));
+  // 로드 시점에 값을 읽지 않는다(참조는 전부 함수 본문 안이라 순서가 문제되지 않는다).
+  assert.ok(!/^\s*const \w+ = MNDbClient\./m.test(source), "덤프 창이 로드 시점에 MNDbClient 를 읽는다");
+  assert.match(source, /typeof MNDbClient !== "undefined" && MNDbClient\.messageFor/);
+  // 반대 방향도 같다 — 접속 화면은 창을 열 때만 MNDbDump 를 찾는다.
+  const client = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(client, /if \(typeof MNDbDump === "undefined"\)\{/);
+});
+
+test("덤프 창을 여는 자리는 툴바와 트리 우클릭 두 곳이다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  // 툴바 버튼 — 읽기 전용 접속에서도 쓸 수 있어야 한다(덤프는 읽기만 한다).
+  assert.match(source, /const dumpButton = button\("내보내기"/);
+  assert.match(source, /dumpButton\.addEventListener\("click", \(\) => openDumpModal\(\[\]\)\)/);
+  assert.ok(!/dumpButton\.disabled = readOnly/.test(source), "읽기 전용에서 내보내기를 막는다");
+  assert.match(source, /toolbar\.append\([\s\S]*?dumpButton/);
+  // 트리 우클릭 — 컬럼·인덱스·외래키를 눌렀으면 딸린 테이블을 고른 채로 연다.
+  assert.match(source, /openDumpModal\(\[dumpKind \+ ":" \+ dumpName\]\)/);
+  assert.match(source, /const dumpName = childTab \? \(item\.table \|\| item\.name\) : item\.name;/);
+  // 화면이 이미 아는 것만 넘긴다 — 스키마를 서버에 다시 묻지 않는다.
+  assert.match(source, /MNDbDump\.open\(\{\s*\n\s*sessionId,\s*\n\s*database: currentDatabase,\s*\n\s*schemaObjects,/);
+  // 연결 전·객체 없음은 창을 열지 않고 이유를 말한다.
+  assert.match(source, /if \(!sessionId\)\{\s*\n\s*toast\("먼저 데이터베이스에 연결해 주세요\./);
+  assert.match(source, /if \(!schemaObjects\.length\)\{/);
+});
+
+test("덤프 취소는 전용 커넥션을 끊고 반쪽 파일을 남기지 않는다", () => {
+  // 세션 커넥션의 번호를 죽이는 기존 취소로는 덤프가 멈추지 않는다 — 번호를 따로 들고 끊는다.
+  assert.match(worker, /def cancel_running_dump\(\):/);
+  assert.match(worker, /dump\["cancel"\] = True\s*\n\s*kill_query\(dump\.get\("connectionId"\)\)/);
+  assert.match(worker, /cursor\.execute\("SELECT CONNECTION_ID\(\)"\)/);
+  // 취소·종료는 stdin 리더 스레드가 처리한다(덤프 중에는 워커 스레드가 막혀 있다).
+  assert.match(worker, /cancel_running_query\(\)\s*#[^\n]*\n\s*cancel_running_dump\(\)/);
+  // KILL QUERY 의 드라이버 예외도 일반 객체 실패로 삼키지 않고 취소로 올린다.
+  assert.ok((worker.match(/if dump_cancelled\(\):\s*\n\s*raise DumpCancelled\(\) from exc/g) || []).length >= 2);
+  // 마지막 서버 작업 뒤에 들어온 취소도 진짜 파일로 바꾸기 전에 잡는다.
+  assert.match(worker, /if dump_cancelled\(\):\s*\n\s*raise DumpCancelled\(\)\s*\n\s*os\.replace\(temp, path\)/);
+  // 반쪽짜리 임시 파일은 지운다.
+  assert.match(worker, /except DumpCancelled:[\s\S]{0,200}?remove_quietly\(temp\)[\s\S]{0,120}?"code": "cancelled"/);
+  // 덤프가 끝나면 표시를 지운다(남으면 다음 덤프가 시작하자마자 취소된다).
+  assert.match(worker, /finally:\s*\n\s*_state\["dump"\] = None/);
+  // 프런트는 이 코드를 이미 사람 말로 옮길 줄 안다.
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(source, /case "cancelled":/);
+});
+
+test("대기 중인 DB 작업 취소는 같은 세션의 실행 중인 다른 작업으로 새지 않는다", () => {
+  // ExecLock 을 얻기 전에 취소된 작업은 워커에 요청 자체를 보내지 않는다.
+  assert.match(launcher, /public bool Started;/);
+  assert.match(launcher, /if \(job\.CancelRequested\)\s*\n\s*return "-\{\\"ok\\":false,\\"code\\":\\"cancelled\\"/);
+  assert.match(launcher, /job\.Started = true;\s*\n\s*session\.ActiveJobId = job\.Id;/);
+  // 취소는 실제로 시작됐고 지금도 같은 id 가 실행 중일 때만 stdin 으로 보낸다.
+  assert.match(launcher, /if \(!started\) return;/);
+  assert.match(launcher, /if \(session\.ActiveJobId != job\.Id\) return;\s*\n\s*DbSendCancel\(session\);/);
+  // 쿼리와 덤프가 모두 같은 보호 장치를 거친다.
+  assert.match(launcher, /DbExchange\(session, request, seconds \* 1000, null, job\)/);
+  assert.match(launcher, /DbDumpIdleMs,[\s\S]{0,180}?\}, job\);/);
+});
+
+test("덤프는 복원 세션 설정과 TIMESTAMP 시각을 보존한다", () => {
+  assert.match(worker, /SET SESSION TIME_ZONE = '\+00:00'/);
+  assert.match(worker, /SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT;/);
+  assert.match(worker, /SET AUTOCOMMIT=@OLD_AUTOCOMMIT;/);
+  assert.match(worker, /SET @OLD_TIME_ZONE=@@TIME_ZONE, TIME_ZONE='\+00:00';/);
+  assert.match(worker, /SET TIME_ZONE=@OLD_TIME_ZONE;/);
+  // 구조만 덤프해도 EVENT 정의의 시각을 UTC로 읽고 사용자 세션은 건드리지 않는다.
+  assert.match(worker, /dump_connection, dump_id = open_dump_connection\(driver, needs_data and options\["consistent"\]\)/);
+  assert.match(worker, /source = dump_connection/);
+  // 프런트·런처와 마찬가지로 워커도 확장자 대소문자를 구분하지 않는다.
+  assert.match(worker, /if not path\.lower\(\)\.endswith\("\.sql"\):/);
+});
+
+test("DB 세션 종료는 실행 중인 덤프를 취소하고 임시 파일 정리를 기다린다", () => {
+  const main = worker.slice(worker.indexOf("def main():"));
+  assert.match(main, /if action == "close":[\s\S]{0,180}?cancel_running_dump\(\)[\s\S]{0,80}?requests\.put\(None\)/);
+  assert.match(main, /worker\.join\(4\.0\)/);
+  assert.match(main, /remove_quietly\(dump\.get\("temp"\)\)/);
+  assert.match(launcher, /session\.Process\.WaitForExit\(5000\)/);
+});
+
+test("덤프 저장 경로는 런처가 SaveRoot 안에서만 만든다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/db-dump\?"/);
+  assert.match(launcher, /path\.StartsWith\("\/db-dump-poll"/);
+  // 경로 정책: 사용자가 준 이름은 SafeRelPath 로 걸러 SaveRoot 아래로만 풀린다.
+  const start = launcher.slice(launcher.indexOf("static string StartDbDump("),
+    launcher.indexOf("/* 셀 값 읽기."));
+  assert.ok(start.length > 0, "StartDbDump 를 찾지 못했다");
+  assert.match(start, /string safe = SafeRelPath\(fileName\);/);
+  assert.match(start, /if \(!TryResolveSaveRootPath\(safe, out full\)\) throw new Exception\("db-dump-bad-path"\);/);
+  assert.match(start, /if \(!safe\.EndsWith\("\.sql", StringComparison\.OrdinalIgnoreCase\)\) safe \+= "\.sql";/);
+  // 런처는 SQL 을 만들지 않는다 — 이름과 값을 JSON 값으로만 옮긴다.
+  assert.ok(!/SELECT |INSERT |CREATE TABLE/.test(start), "런처가 SQL 을 조립한다");
+  assert.match(start, /objects\.Append\("\{\\"kind\\":"\)\.Append\(JsonString\(kind\)\)/);
+  // 대상 수 상한은 워커와 같은 값이어야 한다.
+  assert.match(launcher, /const int MaxDbDumpObjects = 500;/);
+  assert.match(worker, /MAX_DUMP_OBJECTS = 500/);
+  // 덤프도 쿼리와 같은 작업 목록에 들어가 취소 경로를 함께 쓴다.
+  assert.match(start, /lock \(DbJobsLock\) DbJobs\[job\.Id\] = job;/);
+});
+
+// DELIMITER 감싸기는 프런트(편집기 스크립트)와 워커(덤프 파일) 양쪽에 있다. 두 구현이 갈라지면
+// 편집기에서 보던 복합문과 덤프한 복합문의 모양이 달라진다.
+const DELIMITER_CASES = [
+  ["CREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\nEND", ""],
+  ["CREATE PROCEDURE p()\nBEGIN\n  SELECT '$$';\nEND", ""],
+  ["CREATE PROCEDURE p()\nBEGIN\n  SELECT '$$ // ;; @@';\nEND", ""],
+  ["CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET @n = 1", "//"],
+  ["  ", ""]
+];
+
+test("복합문 DELIMITER 감싸기는 프런트와 워커가 같은 결과를 낸다",
+  { skip: python.status !== 0 && "python 없음" }, () => {
+    const probe = [
+      "import json, sys",
+      "sys.path.insert(0, " + JSON.stringify(path.join(root, "desktop")) + ")",
+      "import db_worker",
+      "cases = json.loads(sys.stdin.read())",
+      "print(json.dumps([db_worker.wrap_delimited_statement(body, preferred) for body, preferred in cases]))"
+    ].join("\n");
+    const run = spawnSync("python", ["-c", probe], {
+      input: JSON.stringify(DELIMITER_CASES), encoding: "utf8"
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const fromWorker = JSON.parse(run.stdout);
+    DELIMITER_CASES.forEach(([body, preferred], index) => {
+      assert.equal(fromWorker[index], client.wrapDelimitedStatement(body, preferred), body);
+    });
+    // 셋째 경우는 흔한 구분자가 본문에 다 들어 있어 마지막 후보까지 밀린다.
+    assert.match(fromWorker[2], /^DELIMITER §§\n/);
   });
 
 test("워커의 문장 나누기는 프런트와 같은 결과를 낸다", { skip: python.status !== 0 && "python 없음" }, () => {

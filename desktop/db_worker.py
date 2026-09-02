@@ -13,7 +13,10 @@ stdout 으로 base64(JSON) 한 줄을 돌려준다. 프로세스가 살아 있�
 """
 
 import base64
+import datetime
+import decimal
 import json
+import os
 import queue
 import re
 import sys
@@ -39,6 +42,29 @@ MAX_META_CACHE = 200       # 편집 판정에 쓰는 테이블 메타데이터 �
 MAX_BATCH_CHANGES = 500    # 한 번에 모아 적용할 수 있는 변경 수
 MAX_INSERT_VALUES = 512    # 행 하나에 넣을 수 있는 값의 수
 MAX_RESULT_SETS = 128      # CALL 하나가 결과 집합을 끝없이 내보내 응답을 부풀리지 않게 한다
+MAX_DUMP_OBJECTS = 500     # 한 번에 내보낼 스키마 객체 수 상한(런처도 같은 값으로 거른다)
+MAX_DUMP_NAME = 128        # 객체 이름 길이 상한
+DUMP_RULE = "-- " + "-" * 68   # 파일 안에서 객체 사이를 나누는 줄
+# 작은따옴표 리터럴 안에서 뜻이 달라지는 글자. mysqldump 와 같은 표기를 쓴다.
+SQL_ESCAPES = {"\\": "\\\\", "'": "\\'", "\0": "\\0", "\n": "\\n", "\r": "\\r", "\x1a": "\\Z"}
+# 덤프에서 객체를 적는 순서. 참조하는 쪽이 뒤에 오게 고정한다(뷰끼리의 순서는 따로 푼다).
+DUMP_KINDS = ("table", "view", "procedure", "function", "trigger", "event")
+DUMP_LABELS = {"table": "테이블", "view": "뷰", "procedure": "프로시저",
+               "function": "함수", "trigger": "트리거", "event": "이벤트"}
+# 본문에 세미콜론이 들어가는 객체. 통째로 한 문장이라 DELIMITER 로 감싸야 복원된다.
+DUMP_COMPOUND = ("procedure", "function", "trigger", "event")
+DUMP_MODES = ("structure", "data", "both")
+DUMP_INSERT_ROWS = 200             # INSERT 한 문장에 담을 최대 행
+# INSERT 한 문장의 최대 길이. 복원하는 서버의 max_allowed_packet 을 넘으면 문장 하나가
+# 통째로 거절된다. 글자 수로 세므로 한글만 든 최악의 경우에도 3MB 안쪽이다(기본값은 4MB 이상).
+DUMP_INSERT_CHARS = 1024 * 1024
+DUMP_INSERT_FORMS = {"insert": "INSERT INTO", "ignore": "INSERT IGNORE INTO", "replace": "REPLACE INTO"}
+DUMP_PROGRESS_SECONDS = 0.5        # 진행 보고 사이의 최소 간격
+# SHOW CREATE 의 문법과, 그 결과에서 정의문이 실려 오는 열 이름.
+OBJECT_KEYWORDS = {"procedure": "PROCEDURE", "function": "FUNCTION",
+                   "event": "EVENT", "trigger": "TRIGGER"}
+OBJECT_DDL_COLUMNS = {"procedure": "create procedure", "function": "create function",
+                      "event": "create event", "trigger": "sql original statement"}
 # 이진 컬레이션 번호. ⚠ 숫자·날짜 컬럼도 이 번호로 오므로 이것만 보고 "이진"이라 하면
 # INT·DATETIME 이 전부 고칠 수 없는 칸이 된다. 반드시 자료형과 함께 봐야 한다.
 BINARY_CHARSET = 63
@@ -60,7 +86,7 @@ IMPLICIT_COMMIT_KEYWORDS = ("create", "alter", "drop", "rename", "truncate", "gr
 
 _stdout_lock = threading.Lock()
 _state = {"connection": None, "credentials": None, "read_only": True, "connection_id": None, "pages": {},
-          "auto_commit": True, "pending": False, "table_meta": {}}
+          "auto_commit": True, "pending": False, "table_meta": {}, "dump": None}
 
 
 def write_response(payload):
@@ -73,6 +99,31 @@ def write_response(payload):
     with _stdout_lock:
         sys.__stdout__.write(("+" if payload.get("ok") else "-") + encoded + "\n")
         sys.__stdout__.flush()
+
+
+def write_progress(payload):
+    """진행 보고 한 줄 = '*' + base64(JSON).
+
+    최종 응답('+' / '-')과 접두 문자로 갈라 둔다. 런처는 '*' 줄을 작업의 진행 상태에
+    반영하고 계속 읽으므로 "요청 하나에 응답 하나"라는 규약은 그대로다. 오래 걸리는
+    작업이 살아 있다는 신호이기도 해서, 런처는 이 줄이 올 때마다 기다리는 시간을 새로 잡는다.
+    """
+    encoded = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    with _stdout_lock:
+        sys.__stdout__.write("*" + encoded + "\n")
+        sys.__stdout__.flush()
+
+
+def progress_reporter():
+    """진행 보고가 너무 잦지 않게 시간으로 눌러 준다(마지막 보고는 force 로 반드시 낸다)."""
+    state = {"at": 0.0}
+    def report(payload, force=False):
+        now = time.monotonic()
+        if not force and now - state["at"] < DUMP_PROGRESS_SECONDS:
+            return
+        state["at"] = now
+        write_progress(payload)
+    return report
 
 
 def import_driver():
@@ -99,6 +150,62 @@ def cell(value):
     if len(text) <= MAX_CELL_CHARS:
         return text, False
     return text[:MAX_CELL_CHARS] + "…", True
+
+
+def escape_sql_text(text):
+    """작은따옴표 리터럴 안에 넣을 수 있게 문자열을 바꾼다.
+
+    백슬래시 표기를 쓰므로 덤프 머리글에서 sql_mode 를 함께 지정한다. 대상 서버가
+    NO_BACKSLASH_ESCAPES 로 돌고 있으면 이 표기가 데이터 자체가 되어 버리기 때문이다.
+    """
+    return "".join(SQL_ESCAPES.get(ch, ch) for ch in text)
+
+
+def time_literal(delta):
+    """TIME 컬럼(드라이버가 timedelta 로 준다)을 MySQL 시간 리터럴로 적는다.
+
+    str(timedelta) 를 그대로 쓰면 24시간을 넘는 값이 '1 day, 2:03:04' 가 되어 복원되지 않는다.
+    MySQL 의 TIME 은 -838:59:59 까지 담을 수 있으므로 시간 자리를 그대로 늘려 적는다.
+    """
+    total = delta.total_seconds()
+    sign = "-" if total < 0 else ""
+    total = abs(total)
+    seconds = int(total)
+    micro = int(round((total - seconds) * 1000000))
+    text = "%s%02d:%02d:%02d" % (sign, seconds // 3600, (seconds % 3600) // 60, seconds % 60)
+    if micro:
+        text += ".%06d" % micro
+    return "'" + text + "'"
+
+
+def sql_literal(value):
+    """값 하나를 덤프 파일에 적을 SQL 리터럴로 바꾼다.
+
+    ⚠ 표시용 cell() 과 섞어 쓰지 않는다. cell() 은 500자에서 자르고 BLOB 을 설명 문구로
+    바꾸므로, 그 값을 덤프에 실으면 복원한 데이터가 말없이 달라진다.
+    """
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):                               # bool 은 int 의 하위형이라 먼저 본다
+        return "1" if value else "0"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        # NaN·무한대는 MySQL 리터럴로 적을 수 없다. 복원이 문법 오류로 멈추는 것보다
+        # NULL 로 적고 요약에 남기는 편이 낫다.
+        if value != value or value in (float("inf"), float("-inf")):
+            return "NULL"
+        return repr(value)
+    if isinstance(value, decimal.Decimal):
+        return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        return "0x" + raw.hex() if raw else "''"
+    if isinstance(value, datetime.timedelta):
+        return time_literal(value)
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return "'" + str(value) + "'"
+    return "'" + escape_sql_text(str(value)) + "'"
 
 
 def elapsed_ms(started):
@@ -916,42 +1023,46 @@ def read_page(index, offset, limit):
     return slice_page(kept, max(0, offset), max(1, min(KEEP_PAGE, limit)))
 
 
-def load_ddl(name, database=""):
+def show_create_table(cursor, name, schema=""):
     """SHOW CREATE TABLE — 뷰에도 그대로 쓸 수 있다(CREATE VIEW 문을 돌려준다)."""
-    connection = require_connection()
     target = quote_identifier(name)
-    if database:
-        target = quote_identifier(database) + "." + target
+    if schema:
+        target = quote_identifier(schema) + "." + target
+    cursor.execute("SHOW CREATE TABLE " + target)
+    row = cursor.fetchone()
+    return str(row[1]) if row and len(row) > 1 else ""
+
+
+def show_create_object(cursor, kind, name, schema):
+    """프로시저·함수·이벤트·트리거의 SHOW CREATE 결과에서 정의문만 골라낸다."""
+    target = quote_identifier(schema) + "." + quote_identifier(name)
+    cursor.execute("SHOW CREATE " + OBJECT_KEYWORDS[kind] + " " + target)
+    row = cursor.fetchone()
+    labels = [str(item[0] or "").strip().lower() for item in (cursor.description or [])]
+    wanted = OBJECT_DDL_COLUMNS[kind]
+    if row and wanted in labels:
+        return str(row[labels.index(wanted)] or "")
+    if row:
+        return next((str(value) for value in row if isinstance(value, str)
+                     and value.lstrip().upper().startswith("CREATE ")), "")
+    return ""
+
+
+def load_ddl(name, database=""):
+    connection = require_connection()
     with connection.cursor() as cursor:
-        cursor.execute("SHOW CREATE TABLE " + target)
-        row = cursor.fetchone()
-    return {"ok": True, "name": name, "ddl": str(row[1]) if row and len(row) > 1 else ""}
+        ddl = show_create_table(cursor, name, database)
+    return {"ok": True, "name": name, "ddl": ddl}
 
 
 def load_object_ddl(kind, name, database=""):
-    """프로시저·함수·이벤트·트리거의 SHOW CREATE 결과를 열 이름으로 찾는다."""
     normalized = str(kind or "").lower()
-    keywords = {"procedure": "PROCEDURE", "function": "FUNCTION", "event": "EVENT", "trigger": "TRIGGER"}
-    preferred = {
-        "procedure": "create procedure", "function": "create function",
-        "event": "create event", "trigger": "sql original statement",
-    }
-    if normalized not in keywords:
+    if normalized not in OBJECT_KEYWORDS:
         return {"ok": False, "code": "unknown-object-kind", "detail": normalized}
     connection = require_connection()
     with connection.cursor() as cursor:
         schema = current_schema(cursor, database)
-        target = quote_identifier(schema) + "." + quote_identifier(name)
-        cursor.execute("SHOW CREATE " + keywords[normalized] + " " + target)
-        row = cursor.fetchone()
-        labels = [str(item[0] or "").strip().lower() for item in (cursor.description or [])]
-    ddl = ""
-    wanted = preferred[normalized]
-    if row and wanted in labels:
-        ddl = str(row[labels.index(wanted)] or "")
-    elif row:
-        ddl = next((str(value) for value in row if isinstance(value, str)
-                    and value.lstrip().upper().startswith("CREATE ")), "")
+        ddl = show_create_object(cursor, normalized, name, schema)
     return {"ok": True, "database": schema, "kind": normalized, "name": name, "ddl": ddl}
 
 
@@ -1405,12 +1516,11 @@ def use_database(name):
     return {"ok": True, "database": name}
 
 
-def cancel_running_query():
-    """실행 중인 쿼리를 끊는다. 그 커넥션은 응답을 기다리는 중이라 명령을 받을 수 없으므로
-    같은 자격으로 새 커넥션을 열어 KILL QUERY 를 보낸다."""
+def kill_query(connection_id):
+    """그 커넥션에서 도는 문장을 끊는다. 실행 중인 커넥션은 응답을 기다리느라 명령을 받을 수
+    없으므로 같은 자격으로 새 커넥션을 열어 KILL QUERY 를 보낸다."""
     driver = import_driver()
     credentials = _state.get("credentials")
-    connection_id = _state.get("connection_id")
     if driver is None or not credentials or not connection_id:
         return
     try:
@@ -1430,6 +1540,512 @@ def cancel_running_query():
             killer.close()
         except Exception:                                     # noqa: BLE001
             pass
+
+
+def cancel_running_query():
+    kill_query(_state.get("connection_id"))
+
+
+def cancel_running_dump():
+    """덤프에 멈추라고 표시하고, 서버에서 돌고 있는 SELECT 도 끊는다.
+
+    cancel_running_query() 로는 덤프가 멈추지 않는다. 그쪽은 세션 커넥션의 번호를 죽이는데
+    덤프는 전용 커넥션에서 돌기 때문이다. 그 번호를 따로 들고 있다가 함께 끊는다.
+    """
+    dump = _state.get("dump")
+    if not dump:
+        return
+    dump["cancel"] = True
+    kill_query(dump.get("connectionId"))
+
+
+def dump_cancelled():
+    dump = _state.get("dump")
+    return bool(dump and dump.get("cancel"))
+
+
+class DumpCancelled(Exception):
+    """덤프를 사용자가 멈췄다. 여기까지 적은 임시 파일은 지운다."""
+
+
+def choose_script_delimiter(text, preferred=""):
+    """본문에 없는 구분자를 고른다. 프런트의 chooseScriptDelimiter 와 같은 규칙이어야
+    편집기에서 보던 스크립트와 덤프 파일이 같은 모양이 된다."""
+    for token in [preferred, "$$", "//", ";;", "@@", "§§"]:
+        if token and token != ";" and token not in text:
+            return token
+    return "§§"
+
+
+def wrap_delimited_statement(statement, preferred=""):
+    """세미콜론이 든 복합문을 DELIMITER 로 감싼다(프런트 wrapDelimitedStatement 와 같은 규칙)."""
+    body = str(statement or "").strip()
+    if not body:
+        return ""
+    delimiter = choose_script_delimiter(body, preferred)
+    return "DELIMITER " + delimiter + "\n" + body + delimiter + "\nDELIMITER ;"
+
+
+def remove_quietly(path):
+    try:
+        os.remove(path)
+    except OSError:                                           # noqa: BLE001 - 지울 것이 없으면 그만이다
+        pass
+
+
+def dump_comment(text):
+    """주석 한 줄에 넣을 값. 줄바꿈을 지워 뒤 내용이 주석 밖으로 새지 않게 한다."""
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def order_views(views):
+    """뷰가 다른 뷰를 쓰면 쓰이는 쪽을 먼저 적는다.
+
+    정의문에 상대 이름이 백틱째 나오는지로만 판단한다(뷰 정의를 파싱하지 않는다).
+    서로 물고 도는 관계가 남으면 이름순으로 이어 붙이고 그 목록을 함께 돌려준다 —
+    복원이 한 번에 끝나지 않을 수 있어 파일과 요약에 사실대로 남겨야 한다.
+    """
+    names = set(item["name"] for item in views)
+    ordered, placed, remaining = [], set(), list(views)
+    while remaining:
+        movable = [item for item in remaining
+                   if not set(other for other in names
+                              if other != item["name"] and ("`" + other + "`") in item["ddl"]) - placed]
+        if not movable:
+            break
+        for item in movable:
+            ordered.append(item)
+            placed.add(item["name"])
+            remaining.remove(item)
+    cyclic = sorted(item["name"] for item in remaining)
+    ordered.extend(sorted(remaining, key=lambda item: item["name"]))
+    return ordered, cyclic
+
+
+class DumpWriter(object):
+    """파일에 적으면서 얼마나 적었는지 세는 얇은 껍데기.
+
+    텍스트 파일의 tell() 은 부를 때마다 버퍼 상태를 인코딩해 값이 비싸다. 진행 보고에 쓸
+    대략의 크기는 적은 글자 수로 충분하다(최종 크기는 다 쓴 파일에서 다시 잰다).
+    """
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.chars = 0
+
+    def write(self, text):
+        self.stream.write(text)
+        self.chars += len(text)
+
+
+def insert_chunks(prefix, literals, max_rows=DUMP_INSERT_ROWS, max_chars=DUMP_INSERT_CHARS):
+    """행 리터럴을 INSERT 문장 여러 개로 나눈다.
+
+    행 수와 길이 두 가지로 끊는다. 길이를 함께 보는 이유는 복원하는 서버의
+    max_allowed_packet 을 넘긴 문장은 통째로 거절되기 때문이다. 한 행이 그것만으로
+    상한을 넘으면 그 행만 담은 문장을 만든다 — 행은 더 쪼갤 수 없다.
+
+    literals 를 흘려 받아 문장 단위로 내보낸다. 큰 테이블을 통째로 메모리에 올리지 않는다.
+    """
+    batch, size = [], 0
+    for value in literals:
+        if batch and (len(batch) >= max_rows or size + len(value) + 2 > max_chars):
+            yield prefix + ",\n".join(batch) + ";\n"
+            batch, size = [], 0
+        batch.append(value)
+        size += len(value) + 2
+    if batch:
+        yield prefix + ",\n".join(batch) + ";\n"
+
+
+def dump_data_columns(cursor, name, schema):
+    """데이터로 옮길 컬럼을 고른다. → (옮길 컬럼 이름, 테이블 전체 컬럼 수)
+
+    생성 컬럼(GENERATED)은 뺀다. 값을 직접 넣으면 서버가 거절한다 — 구조 덤프의
+    CREATE TABLE 이 식을 이미 담고 있어 복원할 때 다시 계산된다.
+
+    전체 개수를 함께 돌려주는 이유는 부르는 쪽이 "컬럼을 뺐는지" 알아야 하기 때문이다.
+    컬럼 목록 없는 INSERT 는 모든 컬럼의 값을 요구한다.
+    """
+    columns = column_definitions(cursor, name, schema)
+    movable = [column["name"] for column in columns
+               if not column["generationExpression"] and "GENERATED" not in column["extra"].upper()]
+    return movable, len(columns)
+
+
+def dump_counts_text(counts):
+    return " · ".join("%s %d" % (DUMP_LABELS[kind], counts[kind]) for kind in DUMP_KINDS if counts[kind])
+
+
+def dump_header(credentials, schema, counts, cyclic, mode="structure"):
+    """복원할 때 걸리는 것들을 미리 풀어 둔다.
+
+    · sql_mode 를 통째로 지정하는 이유는 NO_BACKSLASH_ESCAPES 를 확실히 끄기 위해서다.
+      값에 쓴 백슬래시 표기가 그 모드에서는 데이터 자체가 되어 버린다.
+    · 외래키 검사를 끄면 테이블 순서를 위상 정렬하지 않아도 복원된다.
+
+    데이터 쪽 SET(UNIQUE_CHECKS·AUTOCOMMIT)은 여기 두지 않는다. DDL 은 실행하는 순간
+    커밋되므로 트랜잭션은 데이터 구간 바로 앞에서 열어야 뜻이 있다.
+    """
+    host = dump_comment("%s:%s" % (credentials.get("host", ""), credentials.get("port", "")))
+    titles = {"structure": "구조", "data": "데이터", "both": "구조 + 데이터"}
+    lines = [
+        "-- ClassDock SQL 덤프 (%s)" % titles.get(mode, mode),
+        "-- 서버: %s · 데이터베이스: %s" % (host, dump_comment(schema)),
+        "-- 만든 시각: %s" % time.strftime("%Y-%m-%d %H:%M:%S"),
+        "-- 대상: %s" % (dump_counts_text(counts) or "없음"),
+        "-- 복원하기 전에 넣을 데이터베이스를 먼저 고르세요. 이 파일에는 USE 문이 없습니다.",
+    ]
+    if cyclic:
+        lines.append("-- ⚠ 서로를 참조하는 뷰가 있어 순서를 정하지 못했습니다: "
+                     + dump_comment(", ".join(cyclic)))
+    lines += [
+        "",
+        "/*!40101 SET NAMES utf8mb4 */;",
+        "SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO';",
+        "SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0;",
+        "SET @OLD_TIME_ZONE=@@TIME_ZONE, TIME_ZONE='+00:00';",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def dump_footer(counts, rows=0):
+    tail = dump_counts_text(counts) or "없음"
+    if rows:
+        tail += " · %s행" % format(rows, ",")
+    return "\n".join([
+        "",
+        "SET TIME_ZONE=@OLD_TIME_ZONE;",
+        "SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;",
+        "SET SQL_MODE=@OLD_SQL_MODE;",
+        "",
+        "-- 끝 · %s" % tail,
+        "",
+    ])
+
+
+def dump_object_block(kind, item, drop_first, if_not_exists):
+    name = item["name"]
+    ddl = str(item["ddl"]).strip()
+    if kind == "table" and if_not_exists:
+        ddl = re.sub(r"^CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", ddl)
+    lines = ["", DUMP_RULE, "-- %s `%s`" % (DUMP_LABELS[kind], dump_comment(name)), DUMP_RULE, ""]
+    if drop_first:
+        lines.append("DROP %s IF EXISTS %s;" % (OBJECT_KEYWORDS.get(kind, kind.upper()),
+                                                quote_identifier(name)))
+    lines.append(wrap_delimited_statement(ddl) if kind in DUMP_COMPOUND else ddl + ";")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def open_dump_connection(driver, consistent):
+    """덤프 전용 커넥션을 연다. 세션 커넥션을 쓰지 않는 이유가 셋 있다.
+
+    · 사용자가 열어 둔 트랜잭션(pending)을 덤프가 건드리면 안 된다.
+    · 서버사이드 커서는 다 읽을 때까지 그 커넥션으로 다른 질의를 낼 수 없다.
+    · 여러 테이블을 한 시점으로 뽑으려면 덤프만의 트랜잭션이 있어야 한다.
+
+    자격은 접속할 때 받아 둔 것을 그대로 쓴다(취소용 커넥션과 같은 방식).
+    """
+    credentials = _state.get("credentials") or {}
+    connection = driver.connect(
+        host=credentials.get("host", "127.0.0.1"), port=int(credentials.get("port") or 3306),
+        user=credentials.get("user", ""), password=credentials.get("password", ""),
+        charset="utf8mb4", connect_timeout=15, autocommit=True,
+    )
+    connection_id = None
+    try:
+        with connection.cursor() as cursor:
+            # 덤프는 읽기만 한다. 서버가 걸어 주면 실수로 쓰는 일이 없다.
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
+            # TIMESTAMP 는 세션 시간대로 변환되어 오므로 UTC 로 읽어야 다른 시간대에서
+            # 복원해도 같은 순간을 가리킨다. 복원 파일의 데이터 구간도 UTC 로 맞춘다.
+            cursor.execute("SET SESSION TIME_ZONE = '+00:00'")
+            if consistent:
+                # InnoDB 에서 이 시점의 스냅샷을 잡는다. 테이블마다 시점이 어긋나지 않는다.
+                cursor.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+            # 취소가 이 커넥션의 SELECT 를 끊을 수 있어야 한다(세션 커넥션과 번호가 다르다).
+            cursor.execute("SELECT CONNECTION_ID()")
+            row = cursor.fetchone()
+            connection_id = row[0] if row else None
+    except Exception:                                         # noqa: BLE001 - 커넥션을 흘리지 않는다
+        try:
+            connection.close()
+        except Exception:                                     # noqa: BLE001
+            pass
+        raise
+    return connection, connection_id
+
+
+def close_dump_connection(connection):
+    if connection is None:
+        return
+    try:
+        connection.rollback()                                 # 읽기 전용 스냅샷을 닫는다
+    except Exception:                                         # noqa: BLE001
+        pass
+    try:
+        connection.close()
+    except Exception:                                         # noqa: BLE001
+        pass
+
+
+def write_table_data(out, connection, driver, schema, name, options, report=None, seen=None):
+    """테이블 하나의 데이터를 INSERT 문으로 적는다.
+
+    서버사이드 커서(SSCursor)로 흘려 읽는다. 기본 커서는 결과를 전부 메모리에 올려
+    큰 테이블에서 워커가 죽는다. 대신 다 읽을 때까지 이 커넥션으로 다른 질의를 낼 수 없어,
+    컬럼 목록 같은 메타데이터는 먼저 받아 둔다.
+    """
+    with connection.cursor() as meta:
+        columns, total = dump_data_columns(meta, name, schema)
+    if not columns:
+        return 0, "no-columns"
+
+    target = quote_identifier(schema) + "." + quote_identifier(name) if schema else quote_identifier(name)
+    column_sql = ",".join(quote_identifier(column) for column in columns)
+    form = DUMP_INSERT_FORMS[options["insertForm"]]
+    # 생성 컬럼을 뺐다면 컬럼 목록을 반드시 적는다. 목록이 없는 INSERT 는 테이블의 모든
+    # 컬럼에 값을 요구하므로 개수가 어긋나 복원이 통째로 실패한다.
+    if options["columnNames"] or len(columns) != total:
+        prefix = "%s %s (%s) VALUES\n" % (form, quote_identifier(name), column_sql)
+    else:
+        prefix = "%s %s VALUES\n" % (form, quote_identifier(name))
+    select = "SELECT " + column_sql + " FROM " + target
+    if options["rowLimit"]:
+        select += " LIMIT %d" % options["rowLimit"]
+
+    counter = {"rows": 0}
+
+    def literals(rows):
+        for row in rows:
+            counter["rows"] += 1
+            yield "(" + ",".join(sql_literal(value) for value in row) + ")"
+
+    with connection.cursor(driver.cursors.SSCursor) as cursor:
+        cursor.execute(select)
+        for statement in insert_chunks(prefix, literals(cursor)):
+            # 문장 하나가 200행이라 반응은 충분히 빠르다. 서버에서 도는 SELECT 는
+            # cancel_running_dump() 의 KILL 이 따로 끊는다.
+            if dump_cancelled():
+                raise DumpCancelled()
+            out.write(statement)
+            if report:
+                # 문장 하나마다 부르되, 실제로 나가는 빈도는 reporter 가 시간으로 누른다.
+                report({"phase": "data", "object": name, "done": (seen or {}).get("done", 0),
+                        "total": (seen or {}).get("total", 0),
+                        "rows": (seen or {}).get("rows", 0) + counter["rows"],
+                        "bytes": getattr(out, "chars", 0)})
+    return counter["rows"], ""
+
+
+def write_all_table_data(out, connection, driver, schema, tables, options, skipped, report=None):
+    """테이블 데이터 구간. 구조를 모두 적은 뒤에 온다."""
+    if not tables:
+        return 0
+    out.write("\n" + DUMP_RULE + "\n-- 데이터\n" + DUMP_RULE + "\n")
+    # DDL 은 실행하는 순간 커밋되므로 트랜잭션은 데이터 바로 앞에서 연다.
+    out.write("\nSET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0;\n"
+              "SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT;\n"
+              "SET AUTOCOMMIT=0;\nSTART TRANSACTION;\n")
+    total = 0
+    seen = {"done": 0, "total": len(tables), "rows": 0}
+    for item in tables:
+        if dump_cancelled():
+            raise DumpCancelled()
+        name = item["name"]
+        out.write("\n-- %s 데이터\n" % quote_identifier(name))
+        if report:
+            report({"phase": "data", "object": name, "done": seen["done"], "total": seen["total"],
+                    "rows": seen["rows"], "bytes": getattr(out, "chars", 0)}, True)
+        # 서버사이드 커서는 이미 쓴 INSERT 뒤에서 실패할 수 있다. 이 오류를 한 테이블의
+        # 건너뜀으로 삼으면 일부 행만 든 파일이 성공 덤프가 되므로 전체를 실패시킨다.
+        try:
+            rows, reason = write_table_data(out, connection, driver, schema, name, options, report, seen)
+        except Exception as exc:                              # noqa: BLE001
+            if dump_cancelled():
+                raise DumpCancelled() from exc
+            raise
+        if reason:
+            out.write("-- ⚠ 옮길 수 있는 컬럼이 없어 건너뛰었습니다 (%s).\n" % reason)
+            skipped.append({"kind": "data", "name": name, "reason": reason})
+            continue
+        out.write("-- (비어 있음)\n" if not rows else "-- (%s행)\n" % format(rows, ","))
+        total += rows
+        seen["done"] += 1
+        seen["rows"] = total
+    out.write("\nCOMMIT;\nSET AUTOCOMMIT=@OLD_AUTOCOMMIT;\n"
+              "SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS;\n")
+    return total
+
+
+def read_dump_definitions(cursor, schema, targets):
+    """적기 전에 정의문을 모두 읽어 둔다.
+
+    뷰 순서를 풀려면 모든 뷰의 정의가 있어야 하고, 뒤에 붙을 데이터 덤프는 서버사이드 커서가
+    커넥션을 잡고 있는 동안 다른 질의를 낼 수 없어 메타데이터를 미리 받아 두어야 한다.
+    """
+    loaded = dict((kind, []) for kind in DUMP_KINDS)
+    skipped = []
+    for target in targets:
+        if dump_cancelled():
+            raise DumpCancelled()
+        kind, name = target["kind"], target["name"]
+        try:
+            ddl = (show_create_table(cursor, name, schema) if kind in ("table", "view")
+                   else show_create_object(cursor, kind, name, schema))
+        except Exception as exc:                              # noqa: BLE001 - 한 객체 때문에 덤프 전체를 접지 않는다
+            # KILL QUERY 가 만든 드라이버 예외를 권한 오류처럼 건너뛰면 마지막 객체의
+            # 취소가 성공 덤프로 바뀐다.
+            if dump_cancelled():
+                raise DumpCancelled() from exc
+            # 드라이버 메시지에는 접속 정보가 섞여 나오는 경우가 있어 분류한 코드만 남긴다.
+            skipped.append({"kind": kind, "name": name, "reason": classify_error(exc, None)[0]})
+            continue
+        if not str(ddl or "").strip():
+            # 본문을 볼 권한이 없으면 SHOW CREATE 가 빈 값을 준다(오류가 아니다).
+            skipped.append({"kind": kind, "name": name, "reason": "no-definition"})
+            continue
+        loaded[kind].append({"name": name, "ddl": str(ddl)})
+    return loaded, skipped
+
+
+def write_schema_dump(out, cursor, schema, targets, options, mode="structure", data_source=None,
+                      driver=None, report=None):
+    if report:
+        report({"phase": "schema", "object": "", "done": 0, "total": len(targets),
+                "rows": 0, "bytes": 0}, True)
+    loaded, skipped = read_dump_definitions(cursor, schema, targets)
+    if mode == "data":
+        # 데이터만 뽑는 요청에 테이블 아닌 것이 섞였다. 조용히 빼지 않고 요약에 남긴다.
+        for kind in DUMP_KINDS:
+            if kind == "table":
+                continue
+            skipped.extend({"kind": kind, "name": item["name"], "reason": "data-only"}
+                           for item in loaded[kind])
+            loaded[kind] = []
+    loaded["view"], cyclic = order_views(loaded["view"])
+    counts = dict((kind, len(loaded[kind])) for kind in DUMP_KINDS)
+    out.write(dump_header(_state.get("credentials") or {}, schema, counts, cyclic, mode))
+    rows = 0
+    for kind in DUMP_KINDS:
+        if mode != "data":
+            for item in loaded[kind]:
+                out.write(dump_object_block(kind, item, options["dropIfExists"], options["createIfNotExists"]))
+        # 구조를 모두 적은 뒤에 데이터가 온다(뷰·루틴은 데이터 뒤로 밀린다).
+        if kind == "table" and data_source is not None:
+            rows = write_all_table_data(out, data_source, driver, schema, loaded["table"], options,
+                                        skipped, report)
+    if skipped:
+        out.write("\n-- ⚠ 아래 객체는 정의를 가져오지 못해 이 파일에 들어 있지 않습니다.\n")
+        for item in skipped:
+            out.write("--    %s `%s` (%s)\n"
+                      % (DUMP_LABELS.get(item["kind"], item["kind"]), dump_comment(item["name"]),
+                         item["reason"]))
+    out.write(dump_footer(counts, rows))
+    return {"counts": counts, "skipped": skipped, "cyclicViews": cyclic, "rows": rows}
+
+
+def dump_targets(objects):
+    """요청의 대상 목록을 검사해 (종류, 이름) 으로만 남긴다."""
+    if not isinstance(objects, list) or not objects:
+        return None, {"ok": False, "code": "dump-no-objects", "detail": "내보낼 객체가 없습니다."}
+    if len(objects) > MAX_DUMP_OBJECTS:
+        return None, {"ok": False, "code": "dump-too-many", "detail": str(len(objects))}
+    targets = []
+    for item in objects:
+        kind = str((item or {}).get("kind") or "").lower()
+        name = str((item or {}).get("name") or "")
+        if kind not in DUMP_KINDS or not name or len(name) > MAX_DUMP_NAME:
+            return None, {"ok": False, "code": "dump-bad-object", "detail": kind + ":" + name[:MAX_DUMP_NAME]}
+        targets.append({"kind": kind, "name": name})
+    return targets, None
+
+
+def dump_options(raw):
+    """요청 옵션에 기본값을 채운다. 모르는 값이 오면 가장 안전한 쪽으로 되돌린다."""
+    raw = raw or {}
+    form = str(raw.get("insertForm") or "insert").lower()
+    if form not in DUMP_INSERT_FORMS:
+        form = "insert"
+    try:
+        limit = max(0, int(raw.get("rowLimit") or 0))         # 0 = 전체
+    except (TypeError, ValueError):
+        limit = 0
+    return {
+        "dropIfExists": bool(raw.get("dropIfExists", True)),
+        "createIfNotExists": bool(raw.get("createIfNotExists", False)),
+        "insertForm": form,
+        "columnNames": bool(raw.get("columnNames", True)),
+        "rowLimit": limit,
+        "consistent": bool(raw.get("consistent", True)),
+    }
+
+
+def dump_schema(request):
+    """고른 스키마 객체를 SQL 파일 하나로 적는다.
+
+    파일 경로는 런처가 정해서 넘긴다. 워커는 받은 경로에 쓰기만 한다 — 저장 위치 정책
+    (SaveRoot 아래로 제한)은 런처가 쥐고 있어야 하고, 여기서 경로를 만들면 그 정책이 뚫린다.
+
+    읽기 전용 접속에서도 할 수 있다. SELECT 와 SHOW 만 쓰기 때문이다.
+    """
+    connection = require_connection()
+    path = str(request.get("path") or "")
+    if not path.lower().endswith(".sql"):
+        return {"ok": False, "code": "dump-bad-path", "detail": "덤프 파일 이름이 .sql 이 아닙니다."}
+    mode = str(request.get("mode") or "structure")
+    if mode not in DUMP_MODES:
+        return {"ok": False, "code": "dump-mode-unsupported", "detail": mode}
+    targets, failure = dump_targets(request.get("objects"))
+    if failure:
+        return failure
+    options = dump_options(request.get("options"))
+    needs_data = mode in ("data", "both")
+    driver = import_driver()
+    if driver is None:
+        return {"ok": False, "code": "driver-missing", "detail": "pymysql 이 설치되어 있지 않습니다."}
+
+    started = time.perf_counter()
+    temp = path + ".part"
+    dump_connection = None
+    # 취소 요청은 stdin 리더 스레드가 처리한다(덤프 중에는 이 스레드가 막혀 있다).
+    # 여기에 표시를 남겨야 그쪽에서 "지금 덤프가 돌고 있다"는 것을 알 수 있다.
+    _state["dump"] = {"cancel": False, "connectionId": None, "temp": temp}
+    try:
+        # 구조만 뽑아도 전용 UTC 커넥션을 쓴다. TIMESTAMP 데이터뿐 아니라 EVENT 정의의
+        # 시각도 같은 기준으로 읽고, 사용자가 열어 둔 세션 상태는 전혀 바꾸지 않는다.
+        dump_connection, dump_id = open_dump_connection(driver, needs_data and options["consistent"])
+        _state["dump"]["connectionId"] = dump_id
+        source = dump_connection
+        # 다 적은 뒤에만 진짜 이름으로 바꾼다. 중간에 끊겨도 반쪽짜리 파일이 정상 덤프처럼 남지 않는다.
+        report = progress_reporter()
+        with open(temp, "w", encoding="utf-8", newline="\n") as raw:
+            out = DumpWriter(raw)
+            with source.cursor() as cursor:
+                schema = current_schema(cursor, str(request.get("database") or ""))
+                summary = write_schema_dump(out, cursor, schema, targets, options, mode,
+                                            dump_connection if needs_data else None, driver, report)
+        # 마지막 서버 작업이 끝난 직후 들어온 취소도 정상 파일로 바꾸기 전에 한 번 더 잡는다.
+        if dump_cancelled():
+            raise DumpCancelled()
+        os.replace(temp, path)
+    except DumpCancelled:
+        # 여기까지 적은 것은 반쪽짜리다. 파일을 남기지 않아야 "받다 만 백업"이 생기지 않는다.
+        remove_quietly(temp)
+        return {"ok": False, "code": "cancelled", "detail": "덤프를 취소했습니다.", "path": path}
+    except OSError as exc:
+        remove_quietly(temp)
+        return {"ok": False, "code": "dump-write-failed", "detail": str(exc)}
+    except BaseException:
+        remove_quietly(temp)
+        raise
+    finally:
+        _state["dump"] = None
+        close_dump_connection(dump_connection)
+    return {"ok": True, "path": path, "database": schema, "mode": mode,
+            "bytes": os.path.getsize(path), "ms": elapsed_ms(started), **summary}
 
 
 def handle(request):
@@ -1460,6 +2076,8 @@ def handle(request):
                                      str(request.get("table") or ""), str(request.get("database") or ""))
         if action == "schema-columns":
             return schema_columns(str(request.get("database") or ""))
+        if action == "dump":
+            return dump_schema(request)
         if action == "erd":
             return load_erd(str(request.get("database") or ""))
         if action == "page":
@@ -1521,8 +2139,14 @@ def main():
         # 취소와 종료는 큐를 거치지 않는다. 쿼리가 실행 중이면 워커 스레드가 막혀 있기 때문이다.
         if action == "cancel":
             cancel_running_query()                            # 응답 없음 — 결과는 취소당한 쿼리 자신이 보고한다
+            cancel_running_dump()                             # 덤프는 전용 커넥션이라 따로 끊는다
             continue
         if action == "close":
+            # 실행 스레드는 daemon 이라 메인 루프가 바로 끝나면 finally 가 돌기 전에
+            # 프로세스가 사라져 .part 파일이 남는다. 먼저 작업을 끊고 정리를 기다린다.
+            cancel_running_query()
+            cancel_running_dump()
+            requests.put(None)
             break
         requests.put(request)
     connection = _state.get("connection")
@@ -1531,6 +2155,10 @@ def main():
             connection.close()
         except Exception:                                     # noqa: BLE001
             pass
+    worker.join(4.0)
+    dump = _state.get("dump")
+    if dump and dump.get("temp"):
+        remove_quietly(dump.get("temp"))
 
 
 if __name__ == "__main__":

@@ -494,6 +494,9 @@ const MNDbClient = (() => {
 
   /* 정의 창으로 볼 수 있는 객체. */
   const DEFINITION_OBJECT_KINDS = { procedure:true, function:true, event:true, trigger:true };
+  // 스키마 트리의 종류 중 덤프가 그대로 받는 것. 컬럼·인덱스·외래키는 딸린 테이블로 바꿔 넘긴다.
+  const DUMP_KINDS_FROM_TREE = { table:"table", view:"view", procedure:"procedure",
+    function:"function", trigger:"trigger", event:"event" };
 
   /* 그중 편집기에서 Ctrl+클릭으로 찾아갈 수 있는 것. 스키마를 읽을 때 목록을 통째로 받는 것만 든다 —
      테이블을 펼쳐야 알 수 있는 객체를 여기 넣으면 펼친 것만 링크가 되어 동작이 들쭉날쭉해진다. */
@@ -1247,6 +1250,9 @@ const MNDbClient = (() => {
     // 워커·런처를 거치지 않으므로 서버에 파일이 올라가지 않는다.
     const importButton = button("SQL 열기", "db-btn db-btn-quiet",
       ".sql 파일을 읽어 편집기에 넣습니다 (실행하지는 않습니다)");
+    // 덤프는 읽기만 하므로 읽기 전용 접속에서도 쓸 수 있다(오히려 그때 더 필요하다).
+    const dumpButton = button("내보내기", "db-btn db-btn-quiet",
+      "고른 테이블·뷰·프로시저를 CREATE·INSERT 문이 든 .sql 파일로 저장합니다");
     const formatButton = button("정렬", "db-btn db-btn-quiet",
       "편집기의 SQL 을 줄바꿈·들여쓰기해 보기 좋게 정리합니다 (일부만 고를 때는 우클릭 메뉴)");
     formatButton.dataset.shortcutAction = "formatDocument";
@@ -1285,7 +1291,7 @@ const MNDbClient = (() => {
 
     toolbar.append(runButton, runAllButton, cancelButton, explainButton, el("span", "db-timeout-wrap", null),
       modeBadge, txWrap, serverLabel, schemaPanelButton, layoutButton, historyButton, formatButton, importButton,
-      saveButton, disconnectButton, sqlFileInput);
+      dumpButton, saveButton, disconnectButton, sqlFileInput);
     // 저장·정렬 버튼의 안내에 지금 설정된 단축키를 붙인다(사용자가 키를 바꿔도 따라간다).
     if (typeof syncShortcutHints === "function") syncShortcutHints(toolbar);
     toolbar.querySelector(".db-timeout-wrap").append(el("span", null, "제한"), timeoutInput, el("span", null, "초"));
@@ -3492,7 +3498,25 @@ const MNDbClient = (() => {
         closeTableContextMenu();
         requestSchemaDelete(item);
       });
-      menu.append(infoItem, deleteItem);
+      menu.append(infoItem);
+      // 덤프는 객체 자체를 대상으로 삼는다. 컬럼·인덱스·외래키처럼 테이블에 딸린 것을
+      // 눌렀다면 그 테이블을 고른 채로 연다.
+      const dumpKind = DUMP_KINDS_FROM_TREE[item.type] || (childTab ? "table" : "");
+      const dumpName = childTab ? (item.table || item.name) : item.name;
+      if (dumpKind && dumpName){
+        const dumpItem = button("", "db-table-context-item",
+          "이 객체를 CREATE·INSERT 문이 든 .sql 파일로 내보냅니다");
+        dumpItem.setAttribute("role", "menuitem");
+        dumpItem.append(schemaIcon("save", "db-table-context-icon"),
+          document.createTextNode("SQL로 내보내기"));
+        dumpItem.addEventListener("click", () => {
+          closeTableContextMenu();
+          setSchemaSelection(item);
+          openDumpModal([dumpKind + ":" + dumpName]);
+        });
+        menu.append(dumpItem);
+      }
+      menu.append(deleteItem);
       document.body.append(menu);
       const bounds = menu.getBoundingClientRect();
       menu.style.left = Math.max(6, Math.min(x, window.innerWidth - bounds.width - 6)) + "px";
@@ -5100,6 +5124,34 @@ const MNDbClient = (() => {
       toast(file.name + " 을 불러왔습니다 — 문장 " + statementRanges(text).length + "개" + note, 3600);
     };
 
+    /* SQL 덤프 -------------------------------------------------------------
+       창은 별도 모듈(MNDbDump)이 그린다. 여기서는 지금 화면이 알고 있는 것 —
+       세션·데이터베이스·트리에 그려진 객체 목록 — 만 넘긴다. 목록을 그대로 넘기므로
+       덤프 창이 스키마를 서버에 다시 묻지 않는다. */
+    const openDumpModal = (preselect) => {
+      if (!sessionId){
+        toast("먼저 데이터베이스에 연결해 주세요.", 2600);
+        return;
+      }
+      if (typeof MNDbDump === "undefined"){
+        toast("내보내기 창을 불러오지 못했습니다.", 3000);
+        return;
+      }
+      if (!schemaObjects.length){
+        toast("내보낼 스키마 객체가 없습니다.", 2600);
+        return;
+      }
+      MNDbDump.open({
+        sessionId,
+        database: currentDatabase,
+        schemaObjects,
+        preselect: preselect || [],
+        doc
+      });
+    };
+
+    dumpButton.addEventListener("click", () => openDumpModal([]));
+
     importButton.addEventListener("click", () => {
       sqlFileInput.value = "";                  // 같은 파일을 다시 골라도 change 가 나게 한다
       sqlFileInput.click();
@@ -5364,8 +5416,9 @@ const MNDbClient = (() => {
     }
   };
 
-  return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
+  return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile, encodeStrings,
     statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements, formatSqlText,
+    chooseScriptDelimiter, wrapDelimitedStatement,
     identifierFor, ddlIdentifier, ddlString, routineEditScript, routineParameters, schemaObjectLabel, schemaDropSql, editBlockNote,
     cellUpdatePreview, rowDeletePreview, rowInsertPreview,
     defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,

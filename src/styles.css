@@ -6794,6 +6794,47 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-table-facts dt,.db-table-facts dd{padding:8px 10px;border-bottom:1px solid var(--border)}
 .db-table-facts dt{background:var(--panel-2);color:var(--muted);font-weight:700}.db-table-facts dd{background:var(--field);overflow-wrap:anywhere}
 .db-table-facts dt:nth-last-child(-n+2),.db-table-facts dd:nth-last-child(-n+2){border-bottom:0}
+/* SQL 덤프 창 — 왼쪽에서 대상을 고르고 오른쪽에서 방식을 정한다. 좁은 화면에서는 위아래로 쌓는다. */
+.db-dump-modal .db-table-card{width:min(900px,95vw);height:min(720px,90vh)}
+.db-dump-body{padding-top:13px}
+.db-dump-columns{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;flex:1;min-height:0}
+.db-dump-pane{display:flex;flex-direction:column;min-height:0}
+.db-dump-heading{margin:0 0 7px;color:var(--muted);font-size:11.5px;font-weight:700}
+.db-dump-settings{overflow:auto;padding-right:2px}
+.db-dump-settings .db-dump-heading:not(:first-child){margin-top:15px}
+.db-dump-pick-head{display:flex;gap:6px;flex:none;margin-bottom:7px}
+.db-dump-pick-head input{flex:1;min-width:0;padding:6px 9px;border:1px solid var(--border);border-radius:7px;
+  background:var(--field);color:var(--ink);font:inherit;font-size:12.5px}
+.db-dump-pick-head input:focus{outline:none;border-color:var(--accent)}
+.db-dump-list{flex:1;min-height:120px;overflow:auto;border:1px solid var(--border);border-radius:9px;padding:6px}
+.db-dump-group+.db-dump-group{margin-top:9px}
+.db-dump-group-head{position:sticky;top:-6px;z-index:1;background:var(--panel);padding:3px 0}
+.db-dump-group-label{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;cursor:pointer}
+.db-dump-count{margin-left:auto;color:var(--muted);font-weight:400}
+.db-dump-group-items{display:flex;flex-direction:column;gap:1px;padding:2px 0 0 6px}
+.db-dump-item{display:flex;align-items:center;gap:7px;padding:3px 5px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.db-dump-item:hover{background:var(--panel-hover)}
+.db-dump-item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-dump-modes{display:flex;flex-wrap:wrap;gap:12px}
+.db-dump-mode,.db-dump-option{display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer}
+.db-dump-options{display:flex;flex-direction:column;gap:6px}
+.db-dump-data-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:11px}
+.db-dump-data-options.disabled{opacity:.5}
+.db-dump-field select,.db-dump-field input{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:7px;
+  background:var(--field);color:var(--ink);font:inherit;font-size:12.5px}
+.db-dump-field select:focus,.db-dump-field input:focus{outline:none;border-color:var(--accent)}
+.db-dump-foot{display:flex;align-items:center;gap:12px;flex:none;padding:11px 17px;border-top:1px solid var(--border)}
+.db-dump-status{min-width:0;flex:1}
+.db-dump-summary,.db-dump-progress{margin:0;font-size:12px;overflow-wrap:anywhere}
+.db-dump-summary{color:var(--muted)}
+.db-dump-progress{margin-top:3px;color:var(--ink)}
+.db-dump-actions{display:flex;gap:6px;flex:none}
+@media (max-width:760px){
+  .db-dump-columns{grid-template-columns:1fr;overflow:auto}
+  .db-dump-list{min-height:150px}
+  .db-dump-settings{overflow:visible}
+}
+
 /* 객체 정의 창 — 테이블 정보와 같은 껍데기를 쓰되, 보여 줄 것이 적어 창을 좁게 잡는다. */
 .db-object-modal .db-table-card{width:min(760px,95vw);height:min(640px,88vh)}
 .db-routine-params{width:100%;border-collapse:collapse;font-size:12px;

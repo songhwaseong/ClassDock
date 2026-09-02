@@ -435,6 +435,7 @@ class ClassDockLauncher
         public string RunnerPath;
         public string Label = "";
         public bool ReadOnly = true;
+        public string ActiveJobId = "";                    // 취소가 같은 세션의 다른 작업을 죽이지 않게 한다
         public DateTime LastUsed = DateTime.UtcNow;
     }
 
@@ -447,8 +448,10 @@ class ClassDockLauncher
         public readonly object Sync = new object();
         public bool Complete;
         public bool CancelRequested;
+        public bool Started;                                // ExecLock 을 얻고 워커에 요청까지 보냈는지
         public string ResultJson = "";
         public string Error = "";
+        public string Progress = "";                   // 워커가 보낸 마지막 진행 JSON(덤프처럼 오래 걸리는 작업)
         public DateTime DoneAt = DateTime.MaxValue;
     }
 
@@ -460,6 +463,9 @@ class ClassDockLauncher
     const int DbMetadataTimeoutMs = 60 * 1000;         // 접속·스키마·테이블 조회
     const int DbQueryDefaultSeconds = 60;
     const int DbQueryMaxSeconds = 600;
+    // 덤프는 몇십 분이 걸릴 수 있다. 총 시간이 아니라 "진행 보고가 끊긴 시간"으로 잰다.
+    const int DbDumpIdleMs = 120 * 1000;
+    const int MaxDbDumpObjects = 500;                  // 워커의 MAX_DUMP_OBJECTS 와 같은 값
     const int DbIdleMinutes = 30;                      // 유휴 접속은 스스로 정리한다
     static readonly object HeartbeatLock = new object();
     static readonly Dictionary<string, DateTime> HeartbeatClients = new Dictionary<string, DateTime>();
@@ -2576,6 +2582,23 @@ class ClassDockLauncher
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-apply-failed: " + FlattenMessage(ex)));
                     }
+                }
+                else if (method == "POST" && path.StartsWith("/db-dump?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string json = StartDbDump(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("db-dump-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                // 덤프도 쿼리와 같은 작업 목록에 들어간다. 폴링·취소 경로를 함께 쓴다.
+                else if (method == "GET" && path.StartsWith("/db-dump-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollDbQuery(QueryValue(path, "job"))));
                 }
                 else if (method == "GET" && path.StartsWith("/db-query-poll", StringComparison.Ordinal))
                 {
@@ -5292,47 +5315,102 @@ class ClassDockLauncher
         try { DbWriteLine(session, "{\"action\":\"cancel\"}"); } catch { }
     }
 
+    /* 요청 하나를 보내고 응답 한 줄을 받는다. 워커가 '*' 로 시작하는 진행 보고를 흘릴 수 있어
+       최종 응답('+' / '-')이 올 때까지 읽는다. onProgress 는 그 진행 JSON 을 그대로 받는다.
+       제한 시간은 "줄 하나를 기다리는 시간"이다 — 진행 보고가 오는 동안에는 다시 잡힌다.
+       덤프처럼 몇십 분 걸리는 작업도 살아 있는 한 끊기지 않고, 조용히 멈추면 제때 끊긴다. */
     static string DbExchange(DbSession session, string requestJson, int timeoutMs)
+    {
+        return DbExchange(session, requestJson, timeoutMs, null, null);
+    }
+
+    static string DbExchange(DbSession session, string requestJson, int timeoutMs, Action<string> onProgress)
+    {
+        return DbExchange(session, requestJson, timeoutMs, onProgress, null);
+    }
+
+    /* job 이 있으면 요청을 실제로 보내는 순간을 기록한다. 취소가 먼저 들어온 대기 작업은
+       워커에 보내지 않고 여기서 끝낸다. Started 와 ActiveJobId 를 나눠 두는 이유는 같은
+       세션에서 앞 작업이 끝나는 찰나의 취소가 다음 작업을 죽이지 않게 하기 위해서다. */
+    static string DbExchange(DbSession session, string requestJson, int timeoutMs,
+                             Action<string> onProgress, DbQueryJob job)
     {
         lock (session.ExecLock)
         {
             if (session.Process == null || session.Process.HasExited)
                 throw new Exception("db-session-stopped: " + session.Stderr.GetText());
             session.LastUsed = DateTime.UtcNow;
-            DbWriteLine(session, requestJson);
-
-            string responseLine = null;
-            Exception readError = null;
-            Thread reader = new Thread(delegate()
+            if (job != null)
             {
-                try { responseLine = session.Process.StandardOutput.ReadLine(); }
-                catch (Exception ex) { readError = ex; }
-            });
-            reader.IsBackground = true;
-            reader.Start();
-            if (!reader.Join(timeoutMs))
-            {
-                // 제한 시간을 넘겼다 = 워커가 서버 응답을 기다리는 중이다. 먼저 취소를 보내 서버 쪽
-                // 쿼리를 끊고, 그래도 돌아오지 않으면 커넥션을 물고 있는 프로세스를 접는다.
-                DbSendCancel(session);
-                if (!reader.Join(5000))
+                lock (job.Sync)
                 {
-                    KillProcessTree(session.Process);
-                    try { reader.Join(2000); } catch { }
-                    throw new Exception("db-timeout");
+                    if (job.CancelRequested)
+                        return "-{\"ok\":false,\"code\":\"cancelled\",\"detail\":\"작업을 시작하기 전에 취소했습니다.\"}";
+                    // 요청 쓰기와 활성 작업 표시는 같은 stdin 잠금 안에서 바뀐다. 취소 쪽도
+                    // 이 잠금을 잡고 id 를 다시 보므로 다음 작업으로 새는 틈이 없다.
+                    lock (session.StdinLock)
+                    {
+                        job.Started = true;
+                        session.ActiveJobId = job.Id;
+                        DbWriteLine(session, requestJson);
+                    }
                 }
             }
-            if (readError != null) throw readError;
-            if (string.IsNullOrEmpty(responseLine))
-                throw new Exception("db-session-stopped: " + session.Stderr.GetText());
+            else DbWriteLine(session, requestJson);
 
-            string line = responseLine.Trim();
-            if (line.Length < 2 || (line[0] != '+' && line[0] != '-')) throw new Exception("bad-db-response");
-            byte[] decoded;
-            try { decoded = Convert.FromBase64String(line.Substring(1)); }
-            catch { throw new Exception("bad-db-response"); }
-            session.LastUsed = DateTime.UtcNow;
-            return line[0] + Encoding.UTF8.GetString(decoded);
+            try
+            {
+                while (true)
+                {
+                    string responseLine = null;
+                    Exception readError = null;
+                    Thread reader = new Thread(delegate()
+                    {
+                        try { responseLine = session.Process.StandardOutput.ReadLine(); }
+                        catch (Exception ex) { readError = ex; }
+                    });
+                    reader.IsBackground = true;
+                    reader.Start();
+                    if (!reader.Join(timeoutMs))
+                    {
+                        // 제한 시간을 넘겼다 = 워커가 서버 응답을 기다리는 중이다. 먼저 취소를 보내 서버 쪽
+                        // 쿼리를 끊고, 그래도 돌아오지 않으면 커넥션을 물고 있는 프로세스를 접는다.
+                        DbSendCancel(session);
+                        if (!reader.Join(5000))
+                        {
+                            KillProcessTree(session.Process);
+                            try { reader.Join(2000); } catch { }
+                            throw new Exception("db-timeout");
+                        }
+                    }
+                    if (readError != null) throw readError;
+                    if (string.IsNullOrEmpty(responseLine))
+                        throw new Exception("db-session-stopped: " + session.Stderr.GetText());
+
+                    string line = responseLine.Trim();
+                    if (line.Length < 2 || (line[0] != '+' && line[0] != '-' && line[0] != '*'))
+                        throw new Exception("bad-db-response");
+                    byte[] decoded;
+                    try { decoded = Convert.FromBase64String(line.Substring(1)); }
+                    catch { throw new Exception("bad-db-response"); }
+                    session.LastUsed = DateTime.UtcNow;
+                    string body = Encoding.UTF8.GetString(decoded);
+                    if (line[0] == '*')
+                    {
+                        if (onProgress != null) onProgress(body);
+                        continue;                       // 아직 하는 중이다. 다음 줄을 기다린다.
+                    }
+                    return line[0] + body;
+                }
+            }
+            finally
+            {
+                if (job != null)
+                {
+                    lock (session.StdinLock)
+                        if (session.ActiveJobId == job.Id) session.ActiveJobId = "";
+                }
+            }
         }
     }
 
@@ -5477,7 +5555,7 @@ class ClassDockLauncher
         Thread worker = new Thread(delegate()
         {
             string response = "", error = "";
-            try { response = DbExchange(session, request, seconds * 1000); }
+            try { response = DbExchange(session, request, seconds * 1000, null, job); }
             catch (Exception ex) { error = FlattenMessage(ex); }
             lock (job.Sync)
             {
@@ -5491,6 +5569,101 @@ class ClassDockLauncher
         worker.IsBackground = true;
         worker.Start();
         return "{\"job\":" + JsonString(job.Id) + ",\"timeoutSeconds\":" + seconds + "}";
+    }
+
+    /* SQL 덤프를 시작한다. 본문은 길이 접두 문자열의 평평한 줄이다 —
+       파일 이름 · 모드 · 옵션 여섯 개 · 데이터베이스 · 대상 수에 이어 (종류, 이름) 이 온다.
+
+       파일 경로는 여기서만 만든다. 워커에는 다 만들어진 절대 경로를 넘긴다 —
+       저장 위치를 SaveRoot 아래로 묶는 정책은 런처가 쥐고 있어야 뚫리지 않는다.
+       SQL 문장은 만들지 않는다. 이름과 값을 JSON 값으로만 옮기고 조립은 워커가 한다. */
+    static string StartDbDump(string sessionId, byte[] body)
+    {
+        DbSession session = RequireDbSession(sessionId);
+        if (body == null || body.Length == 0 || body.Length > 1024 * 1024) throw new Exception("bad-db-request");
+        int pos = 0;
+        string fileName = ReadBundleString(body, ref pos);
+        string mode = ReadBundleString(body, ref pos);
+        string dropIfExists = ReadBundleString(body, ref pos);
+        string createIfNotExists = ReadBundleString(body, ref pos);
+        string insertForm = ReadBundleString(body, ref pos);
+        string columnNames = ReadBundleString(body, ref pos);
+        string rowLimit = ReadBundleString(body, ref pos);
+        string consistent = ReadBundleString(body, ref pos);
+        string database = DbCheckField(ReadBundleString(body, ref pos), "database", 64, true);
+        int count;
+        if (!int.TryParse(ReadBundleString(body, ref pos), out count) || count < 1 || count > MaxDbDumpObjects)
+            throw new Exception("db-dump-bad-count");
+
+        if (mode != "structure" && mode != "data" && mode != "both") throw new Exception("db-dump-bad-mode");
+        if (insertForm != "insert" && insertForm != "ignore" && insertForm != "replace") insertForm = "insert";
+        int limitValue;
+        if (!int.TryParse(rowLimit, out limitValue) || limitValue < 0) limitValue = 0;
+
+        StringBuilder objects = new StringBuilder();
+        for (int i = 0; i < count; i++)
+        {
+            string kind = ReadBundleString(body, ref pos);
+            string name = DbCheckField(ReadBundleString(body, ref pos), "object", 128, false);
+            if (kind != "table" && kind != "view" && kind != "procedure"
+                && kind != "function" && kind != "trigger" && kind != "event")
+                throw new Exception("db-dump-bad-kind");
+            if (objects.Length > 0) objects.Append(',');
+            objects.Append("{\"kind\":").Append(JsonString(kind))
+                   .Append(",\"name\":").Append(JsonString(name)).Append('}');
+        }
+        if (pos != body.Length) throw new Exception("bad-db-request");
+
+        // 이름은 사용자가 준다. 확장자는 여기서 못 박는다 — 워커도 .sql 이 아니면 거절한다.
+        string safe = SafeRelPath(fileName);
+        if (safe == null) throw new Exception("db-dump-bad-path");
+        if (!safe.EndsWith(".sql", StringComparison.OrdinalIgnoreCase)) safe += ".sql";
+        string full;
+        if (!TryResolveSaveRootPath(safe, out full)) throw new Exception("db-dump-bad-path");
+        string folder = Path.GetDirectoryName(full);
+        if (!string.IsNullOrEmpty(folder)) Directory.CreateDirectory(folder);
+
+        SweepDbJobs();
+        DbQueryJob job = new DbQueryJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.SessionId = session.Id;
+        lock (DbJobsLock) DbJobs[job.Id] = job;
+
+        string request = "{\"action\":\"dump\",\"path\":" + JsonString(full)
+            + ",\"mode\":" + JsonString(mode)
+            + ",\"database\":" + JsonString(database)
+            + ",\"options\":{\"dropIfExists\":" + (dropIfExists == "1" ? "true" : "false")
+            + ",\"createIfNotExists\":" + (createIfNotExists == "1" ? "true" : "false")
+            + ",\"insertForm\":" + JsonString(insertForm)
+            + ",\"columnNames\":" + (columnNames == "1" ? "true" : "false")
+            + ",\"rowLimit\":" + limitValue
+            + ",\"consistent\":" + (consistent == "1" ? "true" : "false") + "}"
+            + ",\"objects\":[" + objects + "]}";
+
+        Thread worker = new Thread(delegate()
+        {
+            string response = "", error = "";
+            try
+            {
+                response = DbExchange(session, request, DbDumpIdleMs, delegate(string progress)
+                {
+                    lock (job.Sync) job.Progress = progress;
+                }, job);
+            }
+            catch (Exception ex) { error = FlattenMessage(ex); }
+            lock (job.Sync)
+            {
+                job.ResultJson = response;
+                job.Error = error;
+                job.DoneAt = DateTime.UtcNow;
+                job.Complete = true;
+            }
+            SweepDbJobs();
+        });
+        worker.IsBackground = true;
+        worker.Start();
+        return "{\"job\":" + JsonString(job.Id) + ",\"path\":" + JsonString(full)
+            + ",\"name\":" + JsonString(Path.GetFileName(full)) + "}";
     }
 
     /* 셀 값 읽기. 값에는 줄바꿈·따옴표가 들어올 수 있어 주소가 아니라 본문으로 받는다.
@@ -5604,7 +5777,11 @@ class ClassDockLauncher
             return "{\"done\":true,\"ok\":false,\"info\":{\"ok\":false,\"code\":\"job-not-found\",\"detail\":\"\"}}";
         lock (job.Sync)
         {
-            if (!job.Complete) return "{\"done\":false,\"cancelling\":" + (job.CancelRequested ? "true" : "false") + "}";
+            // 진행 보고는 워커가 보낸 JSON 그대로다(덤프처럼 오래 걸리는 작업만 보낸다).
+            string progress = job.Progress.Length > 0 ? ",\"progress\":" + job.Progress : "";
+            if (!job.Complete)
+                return "{\"done\":false,\"cancelling\":" + (job.CancelRequested ? "true" : "false")
+                    + progress + "}";
             if (job.Error.Length > 0)
                 return "{\"done\":true,\"ok\":false,\"info\":{\"ok\":false,\"code\":"
                     + JsonString(job.CancelRequested ? "cancelled" : "exec-failed")
@@ -5619,14 +5796,24 @@ class ClassDockLauncher
     {
         DbQueryJob job;
         lock (DbJobsLock) if (!DbJobs.TryGetValue(jobId ?? "", out job)) return;
+        bool started;
         lock (job.Sync)
         {
             if (job.Complete || job.CancelRequested) return;
             job.CancelRequested = true;
+            started = job.Started;
         }
+        // ExecLock 앞에서 기다리는 작업은 DbExchange 가 CancelRequested 를 보고 보내지 않는다.
+        // 여기서 cancel 을 보내면 현재 실행 중인 '다른' 작업을 죽이므로 반드시 멈춘다.
+        if (!started) return;
         DbSession session;
         lock (DbSessionsLock) if (!DbSessions.TryGetValue(job.SessionId ?? "", out session)) return;
-        DbSendCancel(session);
+        lock (session.StdinLock)
+        {
+            // 작업이 막 끝난 경우 다음 요청으로 취소가 넘어가지 않게 id 를 다시 확인한다.
+            if (session.ActiveJobId != job.Id) return;
+            DbSendCancel(session);
+        }
     }
 
     // 프로세스와 임시 러너만 정리한다(세션 목록에서 지우는 일은 호출부가 한다).
@@ -5637,7 +5824,9 @@ class ClassDockLauncher
         {
             // 워커가 커넥션을 정상적으로 닫을 기회를 먼저 준다. 서버에 유령 커넥션을 남기지 않는다.
             try { if (!session.Process.HasExited) DbWriteLine(session, "{\"action\":\"close\"}"); } catch { }
-            try { if (!session.Process.WaitForExit(2000)) KillProcessTree(session.Process); }
+            // 덤프는 cancel 뒤 임시 파일을 닫고 지울 시간이 필요하다. 평소에는 즉시 끝나며,
+            // 실행 중인 작업이 있을 때만 최대 5초까지 정상 종료를 기다린다.
+            try { if (!session.Process.WaitForExit(5000)) KillProcessTree(session.Process); }
             catch { KillProcessTree(session.Process); }
         }
         try { if (File.Exists(session.RunnerPath)) File.Delete(session.RunnerPath); } catch { }
