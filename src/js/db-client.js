@@ -103,10 +103,36 @@ const MNDbClient = (() => {
   const COLORS = ["", "red", "amber", "green", "blue", "violet"];
   const COLOR_LABELS = { "":"없음", red:"빨강", amber:"주황", green:"초록", blue:"파랑", violet:"보라" };
 
-  const emptyProfile = () => ({
-    classdock:"dbconn", version:1, driver:"mysql",
-    host:"127.0.0.1", port:3306, database:"", user:"", readOnly:true, autoCommit:true, color:"", sql:""
-  });
+  const MAX_SQL_TABS = 12;
+  const DEFAULT_SELECT_LIMIT = 200;
+  let sqlTabSequence = 0;
+  const nextSqlTabId = () => "sql-" + Date.now().toString(36) + "-" + (++sqlTabSequence).toString(36);
+  const sqlTabTitle = (value, fallback) => {
+    const title = String(value || "").trim().replace(/[\r\n\t]+/g, " ");
+    return (title || fallback || "SQL").slice(0, 40);
+  };
+  const normalizeSqlTabs = (value, legacySql) => {
+    const rows = Array.isArray(value) ? value.slice(0, MAX_SQL_TABS) : [];
+    const ids = new Set();
+    const tabs = rows.map((item, index) => {
+      const source = item && typeof item === "object" ? item : {};
+      let id = typeof source.id === "string" && source.id.trim() ? source.id.trim().slice(0, 80) : nextSqlTabId();
+      if (ids.has(id)) id = nextSqlTabId();
+      ids.add(id);
+      return { id, title:sqlTabTitle(source.title, "SQL " + (index + 1)), sql:typeof source.sql === "string" ? source.sql : "" };
+    });
+    if (!tabs.length) tabs.push({ id:nextSqlTabId(), title:"SQL 1", sql:typeof legacySql === "string" ? legacySql : "" });
+    return tabs;
+  };
+
+  const emptyProfile = () => {
+    const sqlTabs = normalizeSqlTabs([], "");
+    return {
+      classdock:"dbconn", version:2, driver:"mysql",
+      host:"127.0.0.1", port:3306, database:"", user:"", readOnly:true, autoCommit:true, color:"",
+      sqlTabs, activeSqlTabId:sqlTabs[0].id
+    };
+  };
 
   const parseProfile = (text) => {
     const raw = JSON.parse(String(text || "").trim() || "{}");
@@ -119,17 +145,21 @@ const MNDbClient = (() => {
       if (raw.readOnly === false) profile.readOnly = false;
       if (raw.autoCommit === false) profile.autoCommit = false;
       if (COLORS.includes(raw.color)) profile.color = raw.color;
-      if (typeof raw.sql === "string") profile.sql = raw.sql;
+      profile.sqlTabs = normalizeSqlTabs(raw.sqlTabs, raw.sql);
+      const wanted = typeof raw.activeSqlTabId === "string" ? raw.activeSqlTabId : "";
+      profile.activeSqlTabId = profile.sqlTabs.some(tab => tab.id === wanted) ? wanted : profile.sqlTabs[0].id;
     }
     return profile;
   };
 
   // 비밀번호는 어떤 경로로도 이 직렬화에 들어오지 않는다(입력값을 프로필에 담지 않는다).
   const serializeProfile = (profile) => JSON.stringify({
-    classdock:"dbconn", version:1, driver:"mysql",
+    classdock:"dbconn", version:2, driver:"mysql",
     host:profile.host, port:profile.port, database:profile.database,
     user:profile.user, readOnly:!!profile.readOnly, autoCommit:profile.autoCommit !== false,
-    color:profile.color || "", sql:profile.sql || ""
+    color:profile.color || "",
+    sqlTabs:normalizeSqlTabs(profile.sqlTabs, "").map(tab => ({ id:tab.id, title:tab.title, sql:tab.sql })),
+    activeSqlTabId:profile.activeSqlTabId || ""
   }, null, 2);
 
   /* 스키마 패널 너비. 화면 설정이라 .dbconn 파일이 아니라 브라우저에 둔다 —
@@ -673,6 +703,37 @@ const MNDbClient = (() => {
   const targetName = (target) => (target && target.database ? ddlIdentifier(target.database) + "." : "")
     + ddlIdentifier((target && target.table) || "");
 
+  const tableSelectTemplate = (target, columns, limit) => {
+    const names = (columns || []).map(column => String(column && column.name || "")).filter(Boolean);
+    const projection = names.length ? names.map(name => "  " + ddlIdentifier(name)).join(",\n") : "  *";
+    const rowLimit = Math.max(1, Math.min(10000, Number(limit) || 200));
+    return "SELECT\n" + projection + "\nFROM " + targetName(target) + "\nLIMIT " + rowLimit + ";";
+  };
+
+  const tableInsertTemplate = (target, columns) => {
+    const names = (columns || []).filter(column => {
+      const extra = String(column && column.extra || "");
+      return column && column.name && !column.generationExpression
+        && !/\b(?:auto_increment|generated)\b/i.test(extra);
+    }).map(column => String(column.name));
+    if (!names.length) return "INSERT INTO " + targetName(target) + " () VALUES ();";
+    return "INSERT INTO " + targetName(target) + " (\n"
+      + names.map(name => "  " + ddlIdentifier(name)).join(",\n")
+      + "\n) VALUES (\n" + names.map(() => "  ?").join(",\n") + "\n);";
+  };
+
+  const tableCloneSql = (source, newName) => "CREATE TABLE "
+    + targetName({ database:source && source.database, table:newName })
+    + " LIKE " + targetName(source) + ";";
+
+  const validTableName = (name) => {
+    const text = String(name || "").trim();
+    if (!text) return "새 테이블 이름을 입력해 주세요.";
+    if (Array.from(text).length > 64) return "테이블 이름은 64자까지 사용할 수 있습니다.";
+    if (/[\u0000-\u001f]/.test(text)) return "테이블 이름에는 제어 문자를 사용할 수 없습니다.";
+    return "";
+  };
+
   const keyWherePreview = (keys) => {
     const where = (keys || []).map(key => ddlIdentifier(key.name) + " = " + ddlString(key.value)).join(" AND ");
     return where ? " WHERE " + where : "";
@@ -1083,6 +1144,14 @@ const MNDbClient = (() => {
     return null;
   }).filter(Boolean);
 
+  // MySQL 이 실행 직전에 열린 트랜잭션을 확정하는 문장. 워커의 목록과 같은 범위를 유지한다.
+  const IMPLICIT_COMMIT_KEYWORDS = new Set([
+    "create", "alter", "drop", "rename", "truncate", "grant", "revoke", "flush", "reset",
+    "lock", "unlock", "analyze", "check", "optimize", "repair", "install", "uninstall", "begin", "start"
+  ]);
+  const implicitCommitStatements = (sql) => splitStatements(sql)
+    .filter(statement => IMPLICIT_COMMIT_KEYWORDS.has(firstKeyword(statement)));
+
   /* ── 작은 DOM 도우미 ─────────────────────────────────────────────────────── */
 
   const el = (tag, className, text) => {
@@ -1140,7 +1209,7 @@ const MNDbClient = (() => {
     let schemaObjects = [];
     const tableChildrenCache = new Map();   // 테이블 이름 -> 컬럼·인덱스·외래키·트리거
     let schemaColumns = [];                 // 현재 DB 의 전체 컬럼(자동완성 후보)
-    let runningJob = "", runningLabel = "", runningSql = "", runningQuiet = false, runningComplete = null;
+    let runningJob = "", runningLabel = "", runningSql = "", runningSqlTabId = "", runningQuiet = false, runningComplete = null;
     let pollTimer = 0;
     let closed = false;
 
@@ -1338,8 +1407,8 @@ const MNDbClient = (() => {
 
     // 툴바 버튼·우클릭 메뉴가 함께 쓰는 실행부. 알림 문구는 정렬기가 정해 주므로
     // 단축키(Shift+Alt+F) 경로와 같은 말이 나온다.
-    const runEditorFormat = (opts) => {
-      editor.formatDocument(opts || {}).then((result) => {
+    const runEditorFormat = (targetEditor, opts) => {
+      targetEditor.formatDocument(opts || {}).then((result) => {
         if (!result || typeof toast !== "function") return;
         if (result.message) toast(result.message, 2400);
         else if (!result.changed && !result.stale) toast("이미 정렬돼 있어요.", 1400);
@@ -1349,8 +1418,8 @@ const MNDbClient = (() => {
     /* 줄 정리 — 텍스트 편집기의 '줄 정리' 메뉴(LINE_TIDY_ITEMS)를 그대로 가져다 쓴다.
        목록을 베껴 두면 한쪽에 도구가 늘 때 다른 쪽만 뒤처지므로 원본을 참조한다.
        대상 범위 규칙도 그쪽과 같다 — 고른 줄이 있으면 그 범위만, 없으면 편집기 전체. */
-    const runLineTidy = (item) => {
-      const result = editor.applyLineTidy(item.action);
+    const runLineTidy = (targetEditor, item) => {
+      const result = targetEditor.applyLineTidy(item.action);
       if (typeof toast !== "function") return;
       if (!result) toast("따라치기 중에는 줄 정리를 쓸 수 없어요.", 2200);
       else if (!result.changed) toast("바뀐 줄이 없어요.", 1600);
@@ -1359,94 +1428,222 @@ const MNDbClient = (() => {
 
     /* 줄바꿈 — 이 편집기 안에서만 켜고 끈다. 텍스트 편집기는 앱 전역 설정(textWrapEnabled)을
        쓰지만, SQL 은 결과 표와 폭을 나눠 쓰는 화면이라 문서를 옮길 때마다 따라오면 성가시다. */
-    let sqlWrapOn = false;
-    const setSqlWrap = (on) => {
-      sqlWrapOn = !!on;
-      if (typeof editor.setWrap === "function") editor.setWrap(sqlWrapOn);
-      if (typeof toast === "function") toast(sqlWrapOn ? "긴 줄을 접어서 보여 줄게요." : "줄바꿈을 껐어요.", 1400);
+    const setSqlWrap = (tab, on) => {
+      tab.wrap = !!on;
+      if (tab.editor && typeof tab.editor.setWrap === "function") tab.editor.setWrap(tab.wrap);
+      if (typeof toast === "function") toast(tab.wrap ? "긴 줄을 접어서 보여 줄게요." : "줄바꿈을 껐어요.", 1400);
     };
 
     /* 편집기는 파이썬·자바스크립트 편집기와 같은 위젯을 쓴다(buildCodeEditor).
        되돌리기·줄 이동·찾기·사각 선택·줄 번호 같은 편집 기능을 여기서 다시 만들지 않기 위해서다.
        plain:true 로 파이썬 전용 지능(Jedi 질의·import 추론)을 끄고, SQL 후보만 따로 넣는다. */
     const editorWrap = el("div", "db-editor");
+    const sqlTabBar = el("div", "db-sql-tabs");
+    sqlTabBar.setAttribute("role", "tablist");
+    sqlTabBar.setAttribute("aria-label", "SQL 편집기 탭");
+    const sqlTabAdd = button("+", "db-sql-tab-add", "새 SQL 탭");
+    sqlTabAdd.setAttribute("aria-label", "새 SQL 탭");
+    let sqlTabs = normalizeSqlTabs(profile.sqlTabs, "");
+    profile.sqlTabs = sqlTabs;
+    let activeSqlTab = sqlTabs.find(tab => tab.id === profile.activeSqlTabId) || sqlTabs[0];
+    profile.activeSqlTabId = activeSqlTab.id;
+    let editor = null;
     // 위젯이 이 배열의 참조를 붙들고 자동완성 때마다 읽는다 → 접속 뒤 스키마가 오면 여기에 채워 넣는다.
     const completionWords = (typeof completionWordsForProfile === "function"
       ? completionWordsForProfile("sql", "sql") : []).slice();
 
-    const editor = buildCodeEditor(profile.sql || "", "sql", {
-      plain: true,
-      fileExt: "sql",
-      // 공용 편집기의 정렬(Shift+Alt+F) 확장점. 파이썬 전용 경로를 타지 않게 이 자리로 넘긴다.
-      formatSource: formatEditorSql,
-      /* 우클릭 메뉴 — 이 편집기에는 도구막대가 없으니(툴바 자리는 실행·접속용이다) 텍스트
-         편집기의 '줄 정리'·찾기·줄바꿈을 여기로 모은다. 복사·붙여넣기·대소문자 변환·특수문자는
-         공용 메뉴가 이미 아래에 붙여 준다. 메뉴가 열릴 때 불리므로 지금 선택을 여기서 읽어
-         닫아 두고, 항목을 누를 때 그 범위를 다시 세운다 — 메뉴가 닫히며 포커스가 흔들려도
-         처음 고른 자리에 그대로 걸리게 하려는 것이다. */
-      contextMenuActions: () => {
-        const area = editor.ta;
-        const from = Math.min(area.selectionStart, area.selectionEnd);
-        const to = Math.max(area.selectionStart, area.selectionEnd);
-        const picked = to > from;
-        const onPicked = (run) => () => {
-          area.focus({ preventScroll:true });
-          try { area.setSelectionRange(from, to); } catch(_){}
-          run();
-        };
-        const items = [
-          { label: picked ? "선택 영역 SQL 정렬" : "SQL 정렬 (전체)",
-            title: picked ? "고른 부분에 걸친 문장만 정렬합니다 (문장 한가운데를 골라도 그 문장 전체)"
-                          : "편집기의 SQL 전체를 정렬합니다 (Shift+Alt+F)",
-            action: onPicked(() => runEditorFormat(picked ? { scope:"selection" } : {})) }
-        ];
-        /* 줄 정리 열한 개를 1단에 늘어놓으면 메뉴가 화면보다 길어진다. 한 층 접어 둔다 —
-           한 번 고르면 끝나는 도구라 두 번 누르는 값이 크지 않다. */
-        if (typeof LINE_TIDY_ITEMS !== "undefined" && Array.isArray(LINE_TIDY_ITEMS)){
-          const children = LINE_TIDY_ITEMS.map((tidy) => (tidy.separator ? { separator:true } : {
-            label:tidy.label, title:tidy.title, action:onPicked(() => runLineTidy(tidy))
-          }));
-          items.push({ label:"줄 정리", children,
-            title:"정렬·중복 삭제·번호 매기기 — 고른 줄이 있으면 그 부분만, 없으면 편집기 전체" });
+    const buildSqlTabEditor = (tab) => {
+      let instance = null;
+      instance = buildCodeEditor(tab.sql || "", "sql", {
+        plain: true,
+        fileExt: "sql",
+        formatSource: formatEditorSql,
+        contextMenuActions: () => {
+          const area = instance.ta;
+          const from = Math.min(area.selectionStart, area.selectionEnd);
+          const to = Math.max(area.selectionStart, area.selectionEnd);
+          const picked = to > from;
+          const onPicked = (run) => () => {
+            area.focus({ preventScroll:true });
+            try { area.setSelectionRange(from, to); } catch(_){}
+            run();
+          };
+          const items = [
+            { label: picked ? "선택 영역 SQL 정렬" : "SQL 정렬 (전체)",
+              title: picked ? "고른 부분에 걸친 문장만 정렬합니다 (문장 한가운데를 골라도 그 문장 전체)"
+                            : "편집기의 SQL 전체를 정렬합니다 (Shift+Alt+F)",
+              action: onPicked(() => runEditorFormat(instance, picked ? { scope:"selection" } : {})) }
+          ];
+          if (typeof LINE_TIDY_ITEMS !== "undefined" && Array.isArray(LINE_TIDY_ITEMS)){
+            const children = LINE_TIDY_ITEMS.map((tidy) => (tidy.separator ? { separator:true } : {
+              label:tidy.label, title:tidy.title, action:onPicked(() => runLineTidy(instance, tidy))
+            }));
+            items.push({ label:"줄 정리", children,
+              title:"정렬·중복 삭제·번호 매기기 — 고른 줄이 있으면 그 부분만, 없으면 편집기 전체" });
+          }
+          items.push(
+            { separator:true },
+            { label:"찾기·바꾸기", title:"이 편집기 안에서 찾고 바꿉니다 (Ctrl+F)",
+              action: onPicked(() => instance.openFind()) },
+            { label:"줄 번호로 이동", title:"줄 번호를 입력해 그 줄로 갑니다 (Ctrl+G)",
+              action: onPicked(() => instance.openGoto()) },
+            { label: tab.wrap ? "줄바꿈 끄기" : "줄바꿈 켜기",
+              title:"긴 줄을 편집기 너비에 맞춰 접어서 보여 줍니다 (내용은 바뀌지 않아요)",
+              action: onPicked(() => setSqlWrap(tab, !tab.wrap)) }
+          );
+          return items;
+        },
+        completionPortal: true,
+        completionWords,
+        memberCandidates: (source, receiver, prefix) => sqlMemberCandidates(source, receiver, prefix),
+        definitionTargetAt: ({ source, wordInfo }) => sqlDefinitionTargetAt(source, wordInfo, schemaObjects),
+        openDefinitionTarget: ({ target }) => {
+          if (!target) return false;
+          if (target.kind === "table"){
+            setSchemaSelection(target.item);
+            openTableInfoModal(target.name);
+            return true;
+          }
+          if (target.kind === "routine"){
+            setSchemaSelection(target.item);
+            openObjectInfoModal(target.item);
+            return true;
+          }
+          return false;
         }
-        items.push(
-          { separator:true },
-          { label:"찾기·바꾸기", title:"이 편집기 안에서 찾고 바꿉니다 (Ctrl+F)",
-            action: onPicked(() => editor.openFind()) },
-          { label:"줄 번호로 이동", title:"줄 번호를 입력해 그 줄로 갑니다 (Ctrl+G)",
-            action: onPicked(() => editor.openGoto()) },
-          { label: sqlWrapOn ? "줄바꿈 끄기" : "줄바꿈 켜기",
-            title:"긴 줄을 편집기 너비에 맞춰 접어서 보여 줍니다 (내용은 바뀌지 않아요)",
-            action: onPicked(() => setSqlWrap(!sqlWrapOn)) }
-        );
-        return items;
-      },
-      // 편집기가 고정 높이(overflow:hidden)라 자동완성 목록을 안쪽에 두면 잘린다.
-      // 노트북 셀과 같은 이유로 body 로 빼서 띄운다.
-      completionPortal: true,
-      completionWords,
-      // `별칭.` 뒤에서는 그 별칭이 가리키는 테이블의 컬럼만 준다.
-      memberCandidates: (source, receiver, prefix) => sqlMemberCandidates(source, receiver, prefix),
-      // Ctrl+클릭은 공용 편집기의 정의 대상 확장점을 사용한다. 테이블·뷰는 테이블 정보 창을,
-      // 프로시저·함수·이벤트는 루틴 정보 창을 연다. 트리거는 sqlDefinitionTargetAt 이 걸러 낸다.
-      definitionTargetAt: ({ source, wordInfo }) => sqlDefinitionTargetAt(source, wordInfo, schemaObjects),
-      openDefinitionTarget: ({ target }) => {
-        if (!target) return false;
-        if (target.kind === "table"){
-          setSchemaSelection(target.item);
-          openTableInfoModal(target.name);
-          return true;
+      });
+      tab.editor = instance;
+      tab.wrap = false;
+      instance.ta.setAttribute("aria-label", tab.title + " SQL 편집기");
+      instance.host.dataset.sqlTabId = tab.id;
+      instance.host.hidden = tab.id !== activeSqlTab.id;
+      editorWrap.append(instance.host);
+      if (typeof registerEditorFont === "function") registerEditorFont(instance.host);
+      instance.ta.addEventListener("input", () => {
+        tab.sql = instance.getValue();
+        if (tab === activeSqlTab) refreshRunLabel();
+        markDirty();
+      });
+      ["keyup", "mouseup", "select", "focus", "blur"].forEach((name) =>
+        instance.ta.addEventListener(name, () => { if (tab === activeSqlTab) refreshRunLabel(); }));
+      instance.ta.addEventListener("keydown", (event) => {
+        if (instance.isCompletionOpen && instance.isCompletionOpen()) return;
+        if (shortcutMatches(event, "runCode")){
+          event.preventDefault();
+          if (tab === activeSqlTab) runQuery(runTarget());
+          return;
         }
-        if (target.kind === "routine"){
-          setSchemaSelection(target.item);
-          openObjectInfoModal(target.item);
-          return true;
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "Enter"){
+          event.preventDefault();
+          if (tab === activeSqlTab) runQuery(allTarget());
         }
-        return false;
+      });
+      return instance;
+    };
+
+    const renderSqlTabs = () => {
+      sqlTabBar.innerHTML = "";
+      sqlTabs.forEach(tab => {
+        const wrap = el("span", "db-sql-tab" + (tab === activeSqlTab ? " active" : ""));
+        const pick = button(tab.title, "db-sql-tab-pick", tab.title);
+        pick.setAttribute("role", "tab");
+        pick.setAttribute("aria-selected", String(tab === activeSqlTab));
+        pick.tabIndex = tab === activeSqlTab ? 0 : -1;
+        pick.addEventListener("click", () => activateSqlTab(tab.id, true));
+        pick.addEventListener("dblclick", async () => {
+          const next = typeof askText === "function" ? await askText({
+            title:"SQL 탭 이름", message:"탭에 표시할 이름을 입력하세요.", value:tab.title, okText:"이름 바꾸기"
+          }) : null;
+          if (next == null || !String(next).trim()) return;
+          tab.title = sqlTabTitle(next, tab.title);
+          tab.editor.ta.setAttribute("aria-label", tab.title + " SQL 편집기");
+          renderSqlTabs();
+          markDirty();
+        });
+        const close = button("×", "db-sql-tab-close", tab.title + " 닫기");
+        close.setAttribute("aria-label", tab.title + " 닫기");
+        close.addEventListener("click", async () => { await closeSqlTab(tab); });
+        wrap.append(pick, close);
+        sqlTabBar.append(wrap);
+      });
+      sqlTabBar.append(sqlTabAdd);
+      sqlTabAdd.disabled = sqlTabs.length >= MAX_SQL_TABS;
+      sqlTabAdd.title = sqlTabAdd.disabled ? "SQL 탭은 " + MAX_SQL_TABS + "개까지 열 수 있습니다" : "새 SQL 탭";
+    };
+
+    const activateSqlTab = (id, focus) => {
+      const next = sqlTabs.find(tab => tab.id === id);
+      if (!next || next === activeSqlTab){ if (focus && editor) editor.ta.focus(); return; }
+      if (editor){
+        activeSqlTab.cursor = editor.ta.selectionStart;
+        activeSqlTab.scrollTop = editor.ta.scrollTop;
+        activeSqlTab.scrollLeft = editor.ta.scrollLeft;
+        editor.host.hidden = true;
       }
-    });
-    editor.ta.setAttribute("aria-label", "SQL 편집기");
-    editorWrap.append(editor.host);
+      activeSqlTab = next;
+      profile.activeSqlTabId = next.id;
+      editor = next.editor;
+      editor.host.hidden = false;
+      renderSqlTabs();
+      refreshRunLabel();
+      if (typeof applyEditorTextColor === "function") applyEditorTextColor();
+      if (focus){
+        requestAnimationFrame(() => {
+          const point = Math.max(0, Math.min(Number(next.cursor) || 0, editor.getValue().length));
+          try { editor.ta.setSelectionRange(point, point); } catch(_){}
+          editor.ta.scrollTop = Number(next.scrollTop) || 0;
+          editor.ta.scrollLeft = Number(next.scrollLeft) || 0;
+          editor.ta.focus({ preventScroll:true });
+        });
+      }
+    };
+
+    const createSqlTab = (sql, title, focus) => {
+      if (sqlTabs.length >= MAX_SQL_TABS){ toast("SQL 탭은 " + MAX_SQL_TABS + "개까지 열 수 있습니다.", 2600); return null; }
+      const tab = { id:nextSqlTabId(), title:sqlTabTitle(title, "SQL " + (sqlTabs.length + 1)), sql:String(sql || "") };
+      sqlTabs.push(tab);
+      profile.sqlTabs = sqlTabs;
+      buildSqlTabEditor(tab);
+      renderSqlTabs();
+      markDirty();
+      if (focus !== false) activateSqlTab(tab.id, true);
+      return tab;
+    };
+
+    const closeSqlTab = async (tab) => {
+      if (!tab || !sqlTabs.includes(tab)) return;
+      if (runningJob && runningSqlTabId === tab.id){ toast("실행 중인 SQL 탭은 닫을 수 없습니다.", 2400); return; }
+      if (tab.sql.trim() && typeof confirmDialog === "function"){
+        const ok = await confirmDialog("‘" + tab.title + "’ SQL 탭을 닫을까요?\n\n이 탭의 SQL은 문서에서 삭제됩니다.", "탭 닫기", "취소");
+        if (!ok) return;
+      }
+      const at = sqlTabs.indexOf(tab);
+      if (typeof unregisterEditorFont === "function") unregisterEditorFont(tab.editor.host);
+      try { tab.editor.destroy(); } catch(_){}
+      tab.editor.host.remove();
+      sqlTabs.splice(at, 1);
+      if (!sqlTabs.length){
+        const replacement = { id:nextSqlTabId(), title:"SQL 1", sql:"" };
+        sqlTabs.push(replacement);
+        buildSqlTabEditor(replacement);
+      }
+      if (tab === activeSqlTab){
+        activeSqlTab = sqlTabs[Math.min(at, sqlTabs.length - 1)];
+        editor = activeSqlTab.editor;
+        editor.host.hidden = false;
+        profile.activeSqlTabId = activeSqlTab.id;
+      }
+      profile.sqlTabs = sqlTabs;
+      renderSqlTabs();
+      refreshRunLabel();
+      markDirty();
+      editor.ta.focus({ preventScroll:true });
+    };
+
+    sqlTabs.forEach(tab => buildSqlTabEditor(tab));
+    editor = activeSqlTab.editor;
+    renderSqlTabs();
+    sqlTabAdd.addEventListener("click", () => createSqlTab("", "SQL " + (sqlTabs.length + 1), true));
 
     const resultBar = el("div", "db-result-bar");
     const resultStatus = el("span", "db-result-status", "");
@@ -1523,10 +1720,7 @@ const MNDbClient = (() => {
     resultTabs.hidden = true;
 
     const resultHost = el("div", "db-result");
-    if (typeof registerEditorFont === "function"){
-      registerEditorFont(editor.host);
-      registerEditorFont(resultHost);
-    }
+    if (typeof registerEditorFont === "function") registerEditorFont(resultHost);
 
     /* 최근 실행 목록 — 클릭하면 편집기 커서 자리에 그 쿼리를 넣는다. */
     const historyPanel = el("aside", "db-history-panel");
@@ -1545,7 +1739,7 @@ const MNDbClient = (() => {
     completionBox.hidden = true;
 
     const editorPane = el("div", "db-editor-pane");
-    editorPane.append(editorWrap);
+    editorPane.append(sqlTabBar, editorWrap);
     const resultPane = el("div", "db-result-pane");
     resultPane.append(resultBar, resultTabs, editBar, resultHost);
     const editorDivider = el("div", "db-query-divider");
@@ -1840,32 +2034,8 @@ const MNDbClient = (() => {
       runAllButton.textContent = "전체 실행 (" + total + ")";
     };
 
-    // 위젯이 값을 바꿀 때마다(입력·되돌리기·줄 이동·자동완성 수락) input 이벤트를 낸다.
-    editor.ta.addEventListener("input", () => {
-      profile.sql = editor.getValue();
-      refreshRunLabel();
-      markDirty();
-    });
-    ["keyup", "mouseup", "select", "focus", "blur"].forEach((name) =>
-      editor.ta.addEventListener(name, refreshRunLabel));
-
-    /* 실행 단축키만 위젯 위에 얹는다. 편집 단축키(Ctrl+Z·Ctrl+D·Ctrl+/·Ctrl+Space·
-       Alt+↑↓·Ctrl+F·Ctrl+G 등)는 위젯이 이미 갖고 있다. */
-    editor.ta.addEventListener("keydown", (event) => {
-      if (editor.isCompletionOpen && editor.isCompletionOpen()) return;   // 자동완성 목록이 먼저다
-      if (shortcutMatches(event, "runCode")){
-        event.preventDefault();
-        runQuery(runTarget());
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "Enter"){
-        event.preventDefault();
-        runQuery(allTarget());
-      }
-    });
-
     formatButton.addEventListener("click", () => {
-      runEditorFormat();
+      runEditorFormat(editor);
       editor.ta.focus();
     });
 
@@ -3728,6 +3898,89 @@ const MNDbClient = (() => {
         requestSchemaDelete(item);
       });
       menu.append(infoItem);
+      if (item.type === "table" || item.type === "view"){
+        const makeSqlItem = (text, icon, title, action) => {
+          const node = button("", "db-table-context-item", title);
+          node.setAttribute("role", "menuitem");
+          node.append(schemaIcon(icon, "db-table-context-icon"), document.createTextNode(text));
+          node.addEventListener("click", () => { closeTableContextMenu(); action(); });
+          menu.append(node);
+          return node;
+        };
+        makeSqlItem("SELECT 문 생성", "code", "컬럼을 나열한 SELECT 문을 새 SQL 탭에 만듭니다", async () => {
+          try {
+            const info = await loadTableChildrenFor(item.name);
+            createSqlTab(tableSelectTemplate({ database:currentDatabase, table:item.name }, info.columns || [], DEFAULT_SELECT_LIMIT),
+              item.name + " 조회", true);
+          } catch(error){ toast(launcherMessage(error), 3600); }
+        });
+        if (item.type === "table"){
+          const insertItem = makeSqlItem("INSERT 템플릿", "table", "생성·자동 증가 컬럼을 뺀 INSERT 템플릿을 새 SQL 탭에 만듭니다", async () => {
+            try {
+              const info = await loadTableChildrenFor(item.name);
+              createSqlTab(tableInsertTemplate({ database:currentDatabase, table:item.name }, info.columns || []),
+                item.name + " 입력", true);
+            } catch(error){ toast(launcherMessage(error), 3600); }
+          });
+          insertItem.disabled = readOnly;
+          if (readOnly) insertItem.title = "읽기 전용 접속입니다.";
+
+          const truncateItem = makeSqlItem("비우기 (TRUNCATE)", "delete", "이 테이블의 모든 행을 즉시 삭제합니다", async () => {
+            if (pendingTx){
+              toast("커밋하지 않은 변경이 있습니다. 먼저 커밋하거나 롤백해 주세요.", 3800);
+              return;
+            }
+            const target = targetName({ database:currentDatabase, table:item.name });
+            const sql = "TRUNCATE TABLE " + target + ";";
+            const ok = typeof confirmDialog !== "function" || await confirmDialog(
+              "테이블 ‘" + target + "’의 모든 행을 삭제할까요?\n\n실행 SQL:\n" + sql
+                + "\n\nTRUNCATE는 즉시 확정되며 롤백할 수 없습니다.", "테이블 비우기", "취소");
+            if (!ok) return;
+            await runQuery({ sql, label:item.name + " 비우기", quiet:true, skipRiskConfirm:true,
+              onComplete:(success) => { if (success) showTable(item.name); } });
+          });
+          truncateItem.classList.add("danger");
+          truncateItem.disabled = readOnly;
+          if (readOnly) truncateItem.title = "읽기 전용 접속입니다.";
+
+          const renameItem = makeSqlItem("이름 바꾸기", "pen", "테이블 정보 창의 이름 입력칸을 엽니다", () => {
+            setSchemaSelection(item);
+            openTableInfoModal(item.name, "overview", "name");
+          });
+          renameItem.disabled = readOnly;
+          if (readOnly) renameItem.title = "읽기 전용 접속입니다.";
+
+          const cloneItem = makeSqlItem("구조만 복사", "copy", "데이터와 외래키를 빼고 같은 구조의 빈 테이블을 만듭니다", async () => {
+            if (pendingTx){
+              toast("커밋하지 않은 변경이 있습니다. 먼저 커밋하거나 롤백해 주세요.", 3800);
+              return;
+            }
+            const suggested = item.name + "_copy";
+            const entered = typeof askText === "function" ? await askText({
+              title:"구조만 복사", message:"새 빈 테이블의 이름을 입력하세요.", value:suggested, okText:"다음"
+            }) : null;
+            if (entered == null) return;
+            const nextName = String(entered).trim();
+            const invalid = validTableName(nextName);
+            if (invalid){ toast(invalid, 3200); return; }
+            const sql = tableCloneSql({ database:currentDatabase, table:item.name }, nextName);
+            const ok = typeof confirmDialog !== "function" || await confirmDialog(
+              "‘" + item.name + "’의 구조로 빈 테이블 ‘" + nextName + "’을(를) 만들까요?\n\n실행 SQL:\n" + sql
+                + "\n\n컬럼·인덱스·CHECK는 복사되지만 데이터와 외래키는 복사되지 않습니다.",
+              "구조 복사", "취소");
+            if (!ok) return;
+            await runQuery({ sql, label:nextName + " 구조 복사", quiet:true, skipRiskConfirm:true,
+              onComplete:async (success) => {
+                if (!success) return;
+                selectedSchemaKey = schemaKey({ type:"table", name:nextName });
+                await loadSchema();
+                setTableSelection(nextName);
+              } });
+          });
+          cloneItem.disabled = readOnly;
+          if (readOnly) cloneItem.title = "읽기 전용 접속입니다.";
+        }
+      }
       // 덤프는 객체 자체를 대상으로 삼는다. 컬럼·인덱스·외래키처럼 테이블에 딸린 것을
       // 눌렀다면 그 테이블을 고른 채로 연다.
       const dumpKind = DUMP_KINDS_FROM_TREE[item.type] || (childTab ? "table" : "");
@@ -4492,7 +4745,7 @@ const MNDbClient = (() => {
       }
     };
 
-    const openTableInfoModal = async (name, initialTab) => {
+    const openTableInfoModal = async (name, initialTab, initialFocus) => {
       if (!sessionId || document.querySelector(".db-table-modal")) return;
       const modal = el("div", "modal db-table-modal");
       const card = el("div", "modal-card db-table-card");
@@ -5015,7 +5268,7 @@ const MNDbClient = (() => {
                 }
               }
             });
-            if (!started){ applying = false; status.textContent = "다른 쿼리가 실행 중입니다."; refreshPreview(); }
+            if (!started){ applying = false; status.textContent = "구조 변경을 시작하지 않았습니다."; refreshPreview(); }
           } catch(error){
             applying = false;
             status.classList.add("error");
@@ -5034,7 +5287,7 @@ const MNDbClient = (() => {
           foreignKeys:[foreignKeysTab, foreignKeysPanel], ddl:[ddlTab, ddlPanel]
         }[initialTab] || [overviewTab, overviewPanel];
         switchTab(initial[0], initial[1]);
-        requestAnimationFrame(() => initial[0].focus());
+        requestAnimationFrame(() => (initialFocus === "name" ? tableNameInput : initial[0]).focus());
       } catch(error){
         body.innerHTML = "";
         notice(body, "테이블 정보를 읽지 못했습니다", launcherMessage(error), "error");
@@ -5206,7 +5459,7 @@ const MNDbClient = (() => {
         try {
           const response = await jsonOf(await fetch("/db-query-poll?job=" + encodeURIComponent(runningJob), { cache:"no-store" }));
           if (!response.done){
-            if (response.cancelling) resultStatus.textContent = "취소하는 중…";
+            if (response.cancelling) resultStatus.textContent = runningLabel + " — 취소하는 중…";
             pollQuery();
             return;
           }
@@ -5220,10 +5473,11 @@ const MNDbClient = (() => {
               renderStatements(partial, runningLabel, formatMs(response.info.ms), response.info);
             } else {
               clearResult();
-              resultStatus.textContent = messageFor(response.info);
+              resultStatus.textContent = runningLabel + " — " + messageFor(response.info);
             }
             const complete = runningComplete; runningComplete = null;
             if (complete) complete(false, response.info);
+            runningSqlTabId = "";
             refreshSchemaAfterRun();
             return;
           }
@@ -5232,13 +5486,15 @@ const MNDbClient = (() => {
           renderStatements(response.info.statements || [], runningLabel, formatMs(response.info.ms));
           const complete = runningComplete; runningComplete = null;
           if (complete) complete(true, response.info);
+          runningSqlTabId = "";
           refreshSchemaAfterRun();
         } catch(error){
           runningJob = "";
           setRunning(false);
-          resultStatus.textContent = launcherMessage(error);
+          resultStatus.textContent = runningLabel + " — " + launcherMessage(error);
           const complete = runningComplete; runningComplete = null;
           if (complete) complete(false, { detail:launcherMessage(error) });
+          runningSqlTabId = "";
         }
       }, POLL_MS);
     };
@@ -5248,6 +5504,12 @@ const MNDbClient = (() => {
       const chosen = target || runTarget();
       const sql = chosen ? chosen.sql.trim() : "";
       if (!sql){ toast("실행할 SQL 을 입력해 주세요.", 2200); return false; }
+      const implicit = implicitCommitStatements(sql);
+      if (pendingTx && implicit.length){
+        toast("커밋하지 않은 변경이 있어 DDL을 실행하지 않았습니다. 먼저 커밋하거나 롤백해 주세요.", 4200);
+        txBadge.hidden = false;
+        return false;
+      }
       if (!await confirmLosingStaged()) return false;
 
       // 확인 대상은 편집기 전체가 아니라 실제로 보낼 것만이다. 아래에 적어 둔 DROP 때문에
@@ -5263,14 +5525,15 @@ const MNDbClient = (() => {
         if (!ok) return false;
       }
 
-      runningLabel = chosen.label;
+      runningLabel = activeSqlTab.title + " · " + chosen.label;
       runningSql = sql;
+      runningSqlTabId = activeSqlTab.id;
       runningQuiet = !!chosen.quiet;
       runningComplete = typeof chosen.onComplete === "function" ? chosen.onComplete : null;
       setRunning(true);
       clearResult();
       resultStatus.classList.remove("db-result-failed");
-      resultStatus.textContent = chosen.label + " — 실행 중…";
+      resultStatus.textContent = runningLabel + " — 실행 중…";
       try {
         const response = await jsonOf(await fetch("/db-query?id=" + encodeURIComponent(sessionId), {
           method:"POST", headers:{ "Content-Type":"application/octet-stream" },
@@ -5281,9 +5544,10 @@ const MNDbClient = (() => {
         return true;
       } catch(error){
         setRunning(false);
-        resultStatus.textContent = launcherMessage(error);
+        resultStatus.textContent = runningLabel + " — " + launcherMessage(error);
         const complete = runningComplete; runningComplete = null;
         if (complete) complete(false, { detail:launcherMessage(error) });
+        runningSqlTabId = "";
         return false;
       }
     };
@@ -5356,14 +5620,11 @@ const MNDbClient = (() => {
       try { text = await readSqlText(file); }
       catch(_){ toast("파일을 읽지 못했습니다.", 3000); return; }
       text = String(text || "").replace(/^\uFEFF/, "");
-      // 쓰던 SQL 을 말없이 지우지 않는다. 편집기가 비어 있을 때만 바로 채운다.
-      if (editor.getValue().trim() && typeof confirmDialog === "function"){
-        const ok = await confirmDialog("편집기에 쓰던 SQL 이 있습니다.\n"
-          + file.name + " 의 내용으로 바꿀까요?\n\n지금 내용은 사라집니다(저장하지 않았다면 되돌릴 수 없습니다).",
-          "바꾸기", "취소");
-        if (!ok) return;
-      }
-      editor.setValue(text);      // input 이벤트가 나가 profile.sql·실행 버튼이 함께 갱신된다
+      // 현재 탭이 비어 있으면 채우고, 쓰던 SQL 이 있으면 별도 탭으로 열어 어느 쪽도 잃지 않는다.
+      if (editor.getValue().trim()){
+        const made = createSqlTab(text, file.name.replace(/\.(?:sql|txt)$/i, ""), true);
+        if (!made) return;
+      } else editor.setValue(text);
       editor.ta.setSelectionRange(0, 0);
       editor.ta.focus();
       refreshRunLabel();
@@ -5667,10 +5928,10 @@ const MNDbClient = (() => {
       compactQueryLayout.removeEventListener("change", onCompactQueryLayout);
       resultThemeObserver.disconnect();
       if (typeof unregisterEditorFont === "function"){
-        unregisterEditorFont(editor.host);
+        sqlTabs.forEach(tab => { if (tab.editor) unregisterEditorFont(tab.editor.host); });
         unregisterEditorFont(resultHost);
       }
-      try { editor.destroy(); } catch(_){}
+      sqlTabs.forEach(tab => { try { if (tab.editor) tab.editor.destroy(); } catch(_){} });
     });
     // 앱의 Ctrl+F(문서 안 찾기)·Ctrl+G(줄 이동)를 편집기 것으로 연결한다.
     doc.openDocFind = () => editor.openFind();
@@ -5697,11 +5958,11 @@ const MNDbClient = (() => {
     }
   };
 
-  return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile, encodeStrings,
-    statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements, formatSqlText,
+  return { COLORS, COLOR_LABELS, MAX_SQL_TABS, emptyProfile, parseProfile, serializeProfile, normalizeSqlTabs, encodeStrings,
+    statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements, implicitCommitStatements, formatSqlText,
     chooseScriptDelimiter, wrapDelimitedStatement,
     identifierFor, ddlIdentifier, ddlString, routineEditScript, routineParameters, schemaObjectLabel, schemaDropSql, editBlockNote,
-    cellUpdatePreview, rowDeletePreview, rowInsertPreview,
+    cellUpdatePreview, rowDeletePreview, rowInsertPreview, tableSelectTemplate, tableInsertTemplate, tableCloneSql, validTableName,
     defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,
     erdLayout, aliasMap, sqlDefinitionTargetAt, orderBySpot, applyOrderBy, orderByState, messageFor, mount };
 })();

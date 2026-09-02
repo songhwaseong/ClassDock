@@ -46,7 +46,9 @@ test("접속 문서는 비밀번호를 직렬화하지 않는다", () => {
   assert.ok(!/hunter2/.test(text), "저장 내용에 비밀번호가 들어가면 안 된다");
   assert.ok(!/password|passwd/i.test(text), "저장 내용에 비밀번호 필드가 있으면 안 된다");
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(),
-    ["autoCommit", "classdock", "color", "database", "driver", "host", "port", "readOnly", "sql", "user", "version"]);
+    ["activeSqlTabId", "autoCommit", "classdock", "color", "database", "driver", "host", "port", "readOnly", "sqlTabs", "user", "version"]);
+  assert.equal(profile.sqlTabs[0].sql, "SELECT 1", "이전 형식의 sql이 첫 SQL 탭으로 옮겨져야 한다");
+  assert.equal(JSON.parse(text).version, 2);
 });
 
 test("자동 커밋은 기본으로 켜져 있고 끈 상태만 문서에 남는다", () => {
@@ -56,6 +58,43 @@ test("자동 커밋은 기본으로 켜져 있고 끈 상태만 문서에 남는
   assert.equal(client.parseProfile(JSON.stringify({ autoCommit: "no" })).autoCommit, true);
   const manual = client.parseProfile(JSON.stringify({ autoCommit: false }));
   assert.equal(JSON.parse(client.serializeProfile(manual)).autoCommit, false);
+});
+
+test("SQL 탭은 문서에 함께 저장되고 활성 탭과 이전 단일 SQL 형식을 보존한다", () => {
+  const legacy = client.parseProfile(JSON.stringify({ sql:"SELECT 1" }));
+  assert.equal(legacy.sqlTabs.length, 1);
+  assert.equal(legacy.sqlTabs[0].sql, "SELECT 1");
+  legacy.sqlTabs.push({ id:"second", title:"잠금 확인", sql:"SHOW PROCESSLIST" });
+  legacy.activeSqlTabId = "second";
+  const restored = client.parseProfile(client.serializeProfile(legacy));
+  assert.deepEqual(restored.sqlTabs.map(tab => [tab.title, tab.sql]),
+    [["SQL 1", "SELECT 1"], ["잠금 확인", "SHOW PROCESSLIST"]]);
+  assert.equal(restored.activeSqlTabId, "second");
+  assert.equal(client.normalizeSqlTabs(new Array(20).fill(null), "").length, client.MAX_SQL_TABS);
+});
+
+test("테이블 SQL 템플릿은 모든 이름을 인용하고 생성·자동 증가 컬럼을 INSERT에서 뺀다", () => {
+  const target = { database:"학교 DB", table:"order" };
+  const columns = [
+    { name:"id", extra:"auto_increment" },
+    { name:"이름", extra:"" },
+    { name:"합계", extra:"VIRTUAL GENERATED", generationExpression:"`점수` * 2" },
+    { name:"점수", extra:"" }
+  ];
+  assert.equal(client.tableSelectTemplate(target, columns, 200),
+    "SELECT\n  `id`,\n  `이름`,\n  `합계`,\n  `점수`\nFROM `학교 DB`.`order`\nLIMIT 200;");
+  const insert = client.tableInsertTemplate(target, columns);
+  assert.match(insert, /INSERT INTO `학교 DB`\.`order`/);
+  assert.match(insert, /`이름`[\s\S]*`점수`/);
+  assert.doesNotMatch(insert, /`id`|`합계`/);
+  assert.equal(client.tableCloneSql(target, "order_copy"),
+    "CREATE TABLE `학교 DB`.`order_copy` LIKE `학교 DB`.`order`;");
+});
+
+test("암묵적 커밋 문장은 미커밋 보호 대상으로 분리한다", () => {
+  assert.deepEqual(client.implicitCommitStatements("SELECT 1; TRUNCATE TABLE t; ALTER TABLE t ADD x INT"),
+    ["TRUNCATE TABLE t", "ALTER TABLE t ADD x INT"]);
+  assert.deepEqual(client.implicitCommitStatements("UPDATE t SET x=1"), []);
 });
 
 test("잘못된 접속 문서는 기본값으로 안전하게 읽힌다", () => {
@@ -306,7 +345,7 @@ test("테이블 구조 편집은 삭제와 위험한 자료형 입력을 구분�
 
 test("테이블 정보 모달은 읽기 전용과 외부 구조 변경을 확인한 뒤 기존 쿼리 경로로 적용한다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
-  assert.match(source, /const openTableInfoModal = async \(name, initialTab\)/);
+  assert.match(source, /const openTableInfoModal = async \(name, initialTab, initialFocus\)/);
   assert.match(source, /editable = !readOnly && info\.type === "table"/);
   assert.match(source, /url \+ "&mode=info"/);
   assert.match(source, /String\(latest\.info\.ddl \|\| ""\) !== originalDdl/);
@@ -331,6 +370,19 @@ test("스키마 트리는 우클릭과 Delete 키로 객체 삭제를 요청하�
   assert.ok(!/db-table-info-button/.test(css), "없어진 결과 버튼 스타일이 남으면 안 된다");
   assert.match(css, /\.db-table-context-menu\{/);
   assert.match(css, /\.db-table-context-item\.danger/);
+});
+
+test("테이블 우클릭은 생성 SQL을 새 탭에 열고 위험한 구조 작업은 쓰기·미커밋 상태를 확인한다", () => {
+  const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  for (const label of ["SELECT 문 생성", "INSERT 템플릿", "비우기 (TRUNCATE)", "이름 바꾸기", "구조만 복사"])
+    assert.match(source, new RegExp(label.replace(/[()]/g, "\\$&")));
+  assert.match(source, /createSqlTab\(tableSelectTemplate/);
+  assert.match(source, /createSqlTab\(tableInsertTemplate/);
+  assert.match(source, /openTableInfoModal\(item\.name, "overview", "name"\)/);
+  assert.match(source, /TRUNCATE TABLE/);
+  assert.match(source, /컬럼·인덱스·CHECK는 복사되지만 데이터와 외래키는 복사되지 않습니다/);
+  assert.match(source, /if \(pendingTx && implicit\.length\)/);
+  assert.match(source, /먼저 커밋하거나 롤백해 주세요/);
 });
 
 test("삭제 전 의존성을 조회하고 발견되면 실행하지 않은 채 관련 객체를 안내한다", () => {
@@ -885,7 +937,7 @@ test("SQL 편집기와 결과는 아래·오른쪽 배치에서 각각 크기를
   assert.match(source, /compactQueryLayout = window\.matchMedia\("\(max-width:900px\)"\)/);
   assert.match(css, /\.db-query-layout\.db-layout-below\{flex-direction:column\}/);
   assert.match(css, /\.db-query-layout\.db-layout-side\{flex-direction:row\}/);
-  assert.match(css, /\.db-editor-pane\{flex:0 0 var\(--db-editor-height,180px\)\}/);
+  assert.match(css, /\.db-editor-pane\{flex:0 0 var\(--db-editor-height,180px\);flex-direction:column\}/);
   assert.match(css, /\.db-layout-side \.db-editor-pane\{flex-basis:var\(--db-editor-width,520px\)\}/);
   // .db-editor 는 높이만 정하는 그릇이고 안쪽 편집기 위젯이 그 높이를 채운다.
   assert.match(css, /\.db-editor \.code-host\{[^}]*height:100%/);
@@ -938,7 +990,7 @@ test("DB 결과 전체나 선택 영역을 메모 표로 보낼 수 있다", () 
 test("DB 편집기와 결과 표의 글꼴·크기 및 테마별 글자색을 바꿀 수 있다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  assert.match(source, /registerEditorFont\(editor\.host\)/);
+  assert.match(source, /registerEditorFont\(instance\.host\)/);
   assert.match(source, /registerEditorFont\(resultHost\)/);
   assert.match(source, /groupedCodeFontChoices\(\)/);
   assert.match(source, /bumpCodeFont\(-1\)/);
@@ -1330,7 +1382,7 @@ test("워커의 문장 나누기는 프런트와 같은 결과를 낸다", { ski
 test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고 재사용한다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   // 편집기는 직접 만들지 않고 파이썬·자바스크립트와 같은 위젯을 쓴다.
-  assert.match(source, /buildCodeEditor\(profile\.sql \|\| "", "sql", \{/);
+  assert.match(source, /buildCodeEditor\(tab\.sql \|\| "", "sql", \{/);
   assert.match(source, /plain: true/);
   assert.match(source, /memberCandidates: \(source, receiver, prefix\) => sqlMemberCandidates/);
   assert.match(source, /MNTableExport\.saveCsv/);
@@ -1348,7 +1400,7 @@ test("문서 뷰어는 SQL 강조와 표 내보내기를 새로 만들지 않고
   assert.match(source, /shortcutMatches\(event, "runCode"\)/);
   assert.match(source, /runQuery\(allTarget\(\)\)/);
   // 자동완성 목록이 떠 있으면 실행 단축키가 가로채지 않는다.
-  assert.match(source, /if \(editor\.isCompletionOpen && editor\.isCompletionOpen\(\)\) return;/);
+  assert.match(source, /if \(instance\.isCompletionOpen && instance\.isCompletionOpen\(\)\) return;/);
   // 여러 결과 집합을 버리지 않고 탭으로 낸다. 표가 없는 문장(INSERT·UPDATE·오류)도 탭 하나를 차지한다.
   assert.match(source, /resultSets = \(statements \|\| \[\]\)\.filter\(item => item && item\.kind\)/);
 });
@@ -1878,7 +1930,7 @@ test("우클릭 메뉴 항목은 메뉴가 열릴 때의 선택 범위를 다시
   // 메뉴가 닫히며 포커스가 흔들려도 처음 고른 범위에 그대로 걸리게 한다.
   assert.match(dbSource, /const onPicked = \(run\) => \(\) => \{/);
   assert.match(dbSource, /area\.setSelectionRange\(from, to\);/);
-  assert.match(dbSource, /action: onPicked\(\(\) => runEditorFormat\(picked \?/);
+  assert.match(dbSource, /action: onPicked\(\(\) => runEditorFormat\(instance, picked \?/);
   // 위젯은 선택 범위를 정렬기에 넘겨준다.
   assert.match(editorSource, /scope: opts\.scope === "selection" \? "selection" : "document"/);
   assert.match(editorSource, /from: selectFrom, to: selectTo/);
@@ -1890,7 +1942,7 @@ test("우클릭 메뉴는 텍스트 편집기의 줄 정리 목록을 베끼지 
   // 목록이 전역이라야 두 화면이 같은 도구를 쓴다. 함수 안으로 들어가면 DB 메뉴가 조용히 빈다.
   assert.match(viewerSource, /^const LINE_TIDY_ITEMS = \[/m);
   assert.match(dbSource, /typeof LINE_TIDY_ITEMS !== "undefined"/);
-  assert.match(dbSource, /runLineTidy\(tidy\)/);
+  assert.match(dbSource, /runLineTidy\(instance, tidy\)/);
   // 목록을 베껴 두면 한쪽에 도구가 늘 때 다른 쪽만 뒤처진다.
   assert.doesNotMatch(dbSource, /가나다순 정렬|줄 번호 매기기|탭 → 공백/);
   const tools = [...viewerSource.matchAll(/\{ action:"[a-z-]+", label:"([^"]+)"/g)].map((m) => m[1]);
