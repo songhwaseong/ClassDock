@@ -1501,3 +1501,237 @@ test("db-client.js 는 브라우저 전역 없이도 순수 함수만 노출한�
   assert.equal(typeof context.__dbClientApi.mount, "function");
   assert.equal(typeof context.__dbClientApi.emptyProfile().host, "string");
 });
+
+/* ── SQL 정렬 ────────────────────────────────────────────────────────────
+   정렬기는 vendor 라이브러리지만, "무엇을 라이브러리에 맡기고 무엇을 손대지 않는지"는
+   우리 규칙이다. 가짜 정렬기로 그 규칙을 먼저 못박고, 마지막에 진짜 vendor 로 확인한다. */
+
+// 문장을 대문자 한 줄로 바꾸는 가짜 정렬기. "정렬됐다"를 눈으로 구분하기 쉬우라고 단순하게 둔다.
+const fakeFormat = (text) => {
+  if (/^\s*BOOM/i.test(text)) throw new Error("parse error");   // 못 읽는 문장 흉내
+  return text.replace(/\s+/g, " ").trim().toUpperCase();
+};
+
+test("SQL 정렬은 문장마다 따로 하고 원문 위치를 지킨다", () => {
+  const sql = "select 1 from a;\nselect 2 from b;";
+  const result = client.formatSqlText(sql, fakeFormat);
+  assert.equal(result.text, "SELECT 1 FROM A;\nSELECT 2 FROM B;");
+  assert.equal(result.formatted, 2);
+  assert.equal(result.skipped, 0);
+  // 문장 사이의 원문(세미콜론·줄바꿈)은 정렬기가 만지지 않는다.
+  assert.deepEqual(client.splitStatements(result.text), ["SELECT 1 FROM A", "SELECT 2 FROM B"]);
+});
+
+test("SQL 정렬은 DELIMITER 로 감싼 프로시저 본문을 건드리지 않는다", () => {
+  const sql = "DELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\nEND$$\nDELIMITER ;\nselect 2 from b;";
+  const result = client.formatSqlText(sql, fakeFormat);
+  assert.match(result.text, /CREATE PROCEDURE p\(\)\nBEGIN\n {2}SELECT 1;\nEND\$\$/,
+    "본문을 한 줄로 접으면 DELIMITER 되돌리기가 깨진다");
+  assert.match(result.text, /SELECT 2 FROM B;$/, "나머지 문장은 정렬한다");
+  assert.equal(result.formatted, 1);
+  assert.equal(result.skipped, 1);
+  // 정렬 뒤에도 실행 단위가 그대로여야 한다 — 이게 깨지면 엉뚱한 문장이 서버로 나간다.
+  assert.equal(client.splitStatements(result.text).length, client.splitStatements(sql).length);
+});
+
+test("SQL 부분 정렬은 선택에 걸친 문장만 손대고 나머지는 글자 그대로 둔다", () => {
+  const sql = "select 1 from a;\nselect 2 from b;\nselect 3 from c;";
+  const second = sql.indexOf("select 2");
+  // 두 번째 문장 한가운데만 골라도 그 문장은 통째로 정렬한다(절반만 다시 쓰면 어긋난다).
+  const result = client.formatSqlText(sql, fakeFormat, { from: second + 3, to: second + 6 });
+  assert.equal(result.text, "select 1 from a;\nSELECT 2 FROM B;\nselect 3 from c;");
+  assert.equal(result.formatted, 1);
+  assert.equal(result.skipped, 0, "범위 밖 문장은 '건너뛴 문장'으로 세지 않는다");
+});
+
+test("SQL 부분 정렬에서 선택이 문장 사이 빈 곳뿐이면 아무것도 바꾸지 않는다", () => {
+  const sql = "select 1 from a;\n\n\nselect 2 from b;";
+  const gap = sql.indexOf(";") + 1;
+  const result = client.formatSqlText(sql, fakeFormat, { from: gap, to: gap + 2 });
+  assert.equal(result.text, sql);
+  assert.equal(result.formatted, 0);
+  assert.equal(result.skipped, 0);
+});
+
+test("SQL 부분 정렬도 프로시저 본문은 건너뛴다", () => {
+  const sql = "DELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\nEND$$\nDELIMITER ;\nselect 2 from b;";
+  const result = client.formatSqlText(sql, fakeFormat, { from: 0, to: sql.length });   // 전체 선택
+  assert.match(result.text, /BEGIN\n {2}SELECT 1;\nEND\$\$/);
+  assert.equal(result.skipped, 1);
+});
+
+test("SQL 정렬은 못 읽는 문장을 원문 그대로 남긴다", () => {
+  const sql = "select 1 from a;\nboom 'not closed;";
+  const result = client.formatSqlText(sql, fakeFormat);
+  assert.equal(result.text, "SELECT 1 FROM A;\nboom 'not closed;");
+  assert.equal(result.skipped, 1);
+});
+
+test("SQL 정렬은 DELIMITER 없는 프로시저 정의가 있으면 아무것도 하지 않는다", () => {
+  // 본문이 세미콜론마다 조각나 들어오므로, 조각을 따로 정렬하면 한 덩어리였다는 사실이 지워진다.
+  const sql = "CREATE PROCEDURE p()\nBEGIN\n  select 1;\n  select 2;\nEND";
+  const result = client.formatSqlText(sql, fakeFormat);
+  assert.equal(result.text, sql);
+  assert.equal(result.reason, "routine");
+  assert.equal(result.formatted, 0);
+});
+
+test("SQL 정렬이 문장 나누기를 바꾸면 통째로 되돌린다", () => {
+  // 정렬기가 세미콜론을 만들어 내면 실행 단위가 늘어난다. 보기 좋은 것보다 실행이 먼저다.
+  const sql = "select 1 from a";
+  const result = client.formatSqlText(sql, () => "select 1; select 2");
+  assert.equal(result.text, sql);
+  assert.equal(result.reason, "unsafe");
+});
+
+test("SQL 정렬은 빈 편집기나 정렬기 없음에서 조용히 원문을 돌려준다", () => {
+  assert.equal(client.formatSqlText("   ", fakeFormat).text, "   ");
+  assert.equal(client.formatSqlText("select 1", null).text, "select 1");
+});
+
+test("vendor sql-formatter 는 MySQL 문법을 읽고 우리 규칙 안에서만 동작한다", () => {
+  const context = { console, setTimeout, clearTimeout };
+  context.globalThis = context;
+  // UMD 는 module/exports 가 없으면 전역에 sqlFormatter 를 붙인다(브라우저에서와 같은 경로).
+  vm.runInNewContext(fs.readFileSync(path.join(root, "vendor", "sql-formatter.min.js"), "utf8"), context);
+  const format = context.sqlFormatter.format;
+  assert.equal(typeof format, "function");
+
+  const sql = "DELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\nEND$$\nDELIMITER ;\n"
+    + "select a.id, b.cnt from `학생` a join 성적 b on b.sid = a.id where a.age > 10;";
+  const result = client.formatSqlText(sql, format);
+  // 라이브러리는 DELIMITER 를 모른다. 통째로 넘겼다면 끝이 "END $$ DELIMITER;" 로 붙어
+  // 구분자 되돌리기가 사라지고, 뒤 문장이 앞 문장에 먹혀 실행 단위가 깨진다.
+  const before = client.splitStatements(sql), after = client.splitStatements(result.text);
+  assert.equal(after.length, before.length, "정렬이 실행 단위 개수를 바꾸면 안 된다");
+  assert.equal(after[0], before[0], "프로시저 본문은 한 글자도 바뀌면 안 된다");
+  assert.doesNotMatch(result.text, /DELIMITER;/, "DELIMITER 되돌리기가 앞 줄에 붙으면 안 된다");
+  assert.match(result.text, /SELECT\n/, "일반 문장은 절 단위로 줄을 나눈다");
+  assert.match(result.text, /`학생`/, "역따옴표·한글 식별자를 보존한다");
+  assert.equal(result.skipped, 1);
+});
+
+test("DB 편집기는 공용 위젯의 정렬 확장점(formatSource)으로 연결된다", () => {
+  // 이 연결이 끊기면 정렬 버튼이 조용히 아무 일도 하지 않는다(파이썬 전용 경로로 빠진다).
+  const dbSource = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const editorSource = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  assert.match(dbSource, /formatSource: formatEditorSql/);
+  assert.match(editorSource, /const externalFormatter = typeof options\.formatSource === "function"/);
+  assert.match(editorSource, /if \(!externalFormatter && \(plainMode \|\| prof !== "python"\)\) return/);
+  // 정렬기는 처음 쓸 때만 읽는다(시작 비용 0).
+  assert.match(dbSource, /MNLazy\.tryNeed\("sqlFormat"\)/);
+  const vendor = manifest.vendorScripts.find((item) => item.file === "sql-formatter.min.js");
+  assert.ok(vendor && vendor.lazy === "sqlFormat", "vendor 등록이 지연 로드여야 한다");
+});
+
+test("우클릭 메뉴 항목은 메뉴가 열릴 때의 선택 범위를 다시 세우고 실행한다", () => {
+  const dbSource = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const editorSource = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  // 메뉴는 공용 위젯의 contextMenuActions 확장점으로 얹는다(위젯에 DB 전용 코드를 넣지 않는다).
+  assert.match(dbSource, /contextMenuActions: \(\) => \{/);
+  assert.match(dbSource, /선택 영역 SQL 정렬/);
+  // 메뉴가 닫히며 포커스가 흔들려도 처음 고른 범위에 그대로 걸리게 한다.
+  assert.match(dbSource, /const onPicked = \(run\) => \(\) => \{/);
+  assert.match(dbSource, /area\.setSelectionRange\(from, to\);/);
+  assert.match(dbSource, /action: onPicked\(\(\) => runEditorFormat\(picked \?/);
+  // 위젯은 선택 범위를 정렬기에 넘겨준다.
+  assert.match(editorSource, /scope: opts\.scope === "selection" \? "selection" : "document"/);
+  assert.match(editorSource, /from: selectFrom, to: selectTo/);
+});
+
+test("우클릭 메뉴는 텍스트 편집기의 줄 정리 목록을 베끼지 않고 그대로 가져다 쓴다", () => {
+  const dbSource = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  const viewerSource = fs.readFileSync(path.join(root, "src", "js", "code-viewer.js"), "utf8");
+  // 목록이 전역이라야 두 화면이 같은 도구를 쓴다. 함수 안으로 들어가면 DB 메뉴가 조용히 빈다.
+  assert.match(viewerSource, /^const LINE_TIDY_ITEMS = \[/m);
+  assert.match(dbSource, /typeof LINE_TIDY_ITEMS !== "undefined"/);
+  assert.match(dbSource, /runLineTidy\(tidy\)/);
+  // 목록을 베껴 두면 한쪽에 도구가 늘 때 다른 쪽만 뒤처진다.
+  assert.doesNotMatch(dbSource, /가나다순 정렬|줄 번호 매기기|탭 → 공백/);
+  const tools = [...viewerSource.matchAll(/\{ action:"[a-z-]+", label:"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(tools.length >= 11, "줄 정리 도구가 " + tools.length + "개뿐이다");
+  // 순서가 뒤집히면 db-client 가 읽을 때 목록이 아직 없다.
+  const order = manifest.localScripts;
+  assert.ok(order.indexOf("code-viewer.js") < order.indexOf("db-client.js"));
+  assert.ok((manifest.scriptDependencies["db-client.js"] || []).includes("code-viewer.js"));
+});
+
+test("우클릭 메뉴에 찾기·줄 이동·줄바꿈을 함께 올린다", () => {
+  const dbSource = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  for (const label of ["찾기·바꾸기", "줄 번호로 이동", "줄바꿈 끄기", "줄바꿈 켜기"]) {
+    assert.ok(dbSource.includes(label), "메뉴 항목 누락: " + label);
+  }
+  assert.match(dbSource, /editor\.openFind\(\)/);
+  assert.match(dbSource, /editor\.openGoto\(\)/);
+  // 대소문자 변환·특수문자·복사는 공용 메뉴가 이미 붙여 준다 — DB 쪽에서 또 만들지 않는다.
+  const editorSource = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  for (const label of ["대문자로 변경", "소문자로 변경", "특수문자… (Ctrl+F10)"]) {
+    assert.ok(editorSource.includes(label), "공용 메뉴 항목 누락: " + label);
+  }
+  assert.doesNotMatch(dbSource, /대문자로 변경|특수문자…/);
+});
+
+test("우클릭 메뉴는 검색만 한 층 접고 특수문자는 1단에 남긴다", () => {
+  const context = { console };
+  context.globalThis = context;
+  vm.runInNewContext(fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8")
+    + "\nglobalThis.__textContextMenuItems = textContextMenuItems;", context);
+  const noop = () => {};
+  const base = { copy:noop, cut:noop, paste:noop, specialChars:noop, upper:noop, lower:noop, dedupe:noop, selectAll:noop };
+  const items = context.__textContextMenuItems(Object.assign({}, base, {
+    hasSelection: true,
+    search: [{ label:"Google에서 검색", action:noop }, { label:"지도에서 찾기", action:noop }, { label:"파일 찾기", action:noop }],
+    extra: [{ label:"SQL 정렬", action:noop }]
+  }));
+  const labels = items.filter((item) => !item.separator).map((item) => item.label);
+  assert.equal(labels[0], "SQL 정렬", "부르는 쪽이 준 항목이 맨 위에 온다");
+  // 문자표는 브라우저 위 편집기에서 특수문자를 넣는 주된 통로라 한 층 더 들어가게 두지 않는다.
+  assert.ok(labels.includes("특수문자… (Ctrl+F10)"), "문자표는 1단에 남는다");
+  const search = items.find((item) => item.label === "선택한 낱말로 검색");
+  assert.equal(search.children.length, 3, "검색 셋만 접는다");
+  assert.ok(!labels.includes("Google에서 검색"), "검색 항목을 1단에 늘어놓지 않는다");
+  assert.equal(items.find((item) => item.label === "대문자로 변경").disabled, false);
+
+  const noSelection = context.__textContextMenuItems(Object.assign({}, base, {
+    hasSelection: false, search: [], extra: []
+  }));
+  const idle = noSelection.filter((item) => !item.separator).map((item) => item.label);
+  assert.equal(noSelection.find((item) => item.label === "대문자로 변경").disabled, true);
+  assert.ok(!idle.includes("선택한 낱말로 검색"), "고른 글자가 없으면 검색 층 자체가 생기지 않는다");
+  assert.ok(idle.includes("특수문자… (Ctrl+F10)"), "문자표는 선택이 없어도 쓸 수 있다");
+});
+
+test("계층 메뉴는 공용 모듈(MNContextMenu)이 그리고 겉모습은 부르는 쪽 CSS 를 쓴다", () => {
+  const menu = require("../src/js/context-menu.js");
+  assert.equal(typeof menu.open, "function");
+  assert.equal(typeof menu.close, "function");
+  const source = fs.readFileSync(path.join(root, "src", "js", "context-menu.js"), "utf8");
+  // 터치·펜에는 pointerenter 가 오지 않는다 — 부모 항목은 click 으로도 열려야 한다.
+  assert.match(source, /button\.addEventListener\("click", openChildren\)/);
+  // Escape 는 열린 서브메뉴만 닫는다(한 번에 전부 닫히면 실수로 메뉴를 놓친다).
+  assert.match(source, /if \(layers\.length > 1\) closeFrom\(layers\.length - 1\)/);
+  // 오른쪽 공간이 없으면 왼쪽으로 뒤집는다 — 화면 밖으로 나간 층은 누를 수 없다.
+  assert.match(source, /if \(left \+ width > window\.innerWidth - MARGIN\) left = anchor\.left - width \+ 4/);
+  // 눌러도 편집기 선택을 뺏지 않는다.
+  assert.match(source, /button\.addEventListener\("pointerdown", \(event\) => event\.preventDefault\(\)\)/);
+
+  const editorSource = fs.readFileSync(path.join(root, "src", "js", "python-editor.js"), "utf8");
+  assert.match(editorSource, /MNContextMenu\.open\(event\.clientX, event\.clientY, items, \{/);
+  assert.match(editorSource, /base: "text-context"/);
+  // 닫히면 단일 창 계약(activeTextContextMenu)도 함께 풀려야 한다.
+  assert.match(editorSource, /onClose: \(\) => \{ activeTextContextMenu = null; \}/);
+
+  const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+  assert.match(css, /\.text-context-sub\{/);
+  assert.match(css, /\.text-context-parent::after\{content:"▸"/);
+  assert.match(css, /\.text-context-menu\{[\s\S]{0,200}?max-height:calc\(100vh - 20px\);overflow-y:auto/);
+});
+
+test("줄 정리 열한 개는 1단에 늘어놓지 않고 한 층 접는다", () => {
+  const dbSource = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
+  assert.match(dbSource, /items\.push\(\{ label:"줄 정리", children/);
+  // 자주 쓰는 정렬·찾기·줄바꿈은 1단에 남는다.
+  for (const label of ["SQL 정렬 (전체)", "찾기·바꾸기", "줄 번호로 이동"]) {
+    assert.ok(dbSource.includes(label), "1단 항목 누락: " + label);
+  }
+});

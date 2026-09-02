@@ -3444,12 +3444,18 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .xlsx-context-menu button.xlsx-context-parent.is-open{background:var(--panel-hover);color:var(--accent)}
   .xlsx-context-swatch{flex:0 0 auto;width:13px;height:13px;border-radius:3px;border:1px solid var(--border)}
   .text-context-menu{position:fixed;z-index:1950;display:flex;flex-direction:column;min-width:170px;padding:5px;
+    max-height:calc(100vh - 20px);overflow-y:auto;overflow-x:hidden;
     border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:0 14px 38px rgba(15,23,42,.3);color:var(--ink)}
   .text-context-menu button{display:block;width:100%;border:0;border-radius:6px;padding:7px 10px;background:transparent;
     color:inherit;font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
   .text-context-menu button:hover:not(:disabled){background:var(--panel-hover);color:var(--accent)}
   .text-context-menu button:disabled{opacity:.45;cursor:default}
   .text-context-sep{height:1px;margin:4px 3px;background:var(--border)}
+  /* 2단 메뉴 — 항목이 스무 개를 넘으면 한 줄로 못 담는다(DOCX·악보 메뉴와 같은 모양). */
+  .text-context-sub{z-index:1951;min-width:190px}
+  .text-context-menu button.text-context-parent{display:flex;align-items:center;gap:8px}
+  .text-context-menu button.text-context-parent::after{content:"▸";margin-left:auto;padding-left:14px;opacity:.5;font-size:11px}
+  .text-context-menu button.text-context-parent.is-open{background:var(--panel-hover);color:var(--accent)}
   /* DOCX 편집 우클릭 메뉴 — 표 메뉴처럼 여러 층을 body에 따로 띄워 미리보기 overflow에 잘리지 않는다. */
   .docx-context-menu{position:fixed;z-index:1950;display:flex;flex-direction:column;min-width:220px;padding:5px;
     max-height:calc(100vh - 20px);overflow-y:auto;overflow-x:hidden;border:1px solid var(--border);border-radius:10px;

@@ -31,6 +31,8 @@ const MNLazy = (() => {
     vexflow:     { label:"악보 그리기",        files:["vexflow-bravura.min.js"] },
     // 지도 렌더러(Leaflet). 라이브러리 자체는 오프라인이고, 배경 타일만 인터넷에서 받는다.
     leaflet:     { label:"지도 그리기",        files:["leaflet.min.js"] },
+    // SQL 정렬기(sql-formatter). DB 클라이언트 편집기에서 정렬을 누를 때만 읽는다.
+    sqlFormat:   { label:"SQL 정렬",           files:["sql-formatter.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },
     capture:     { label:"화면 캡처",          files:["html2canvas.min.js", "html-to-image.js"] },
     pptx:        { label:"PowerPoint 보기",

@@ -21,6 +21,7 @@
     "i18n.js",
     "lazy.js",
     "interaction-core.js",
+    "context-menu.js",
     "core.js",
     "icons.js",
     "state.js",
@@ -116,6 +117,7 @@
         "i18n.js",
         "lazy.js",
         "interaction-core.js",
+        "context-menu.js",
         "core.js",
         "icons.js",
         "state.js",
@@ -271,6 +273,7 @@
       "workspace-python.js"
     ],
     "python-editor.js": [
+      "context-menu.js",
       "code-viewer.js",
       "python-snippets.js"
     ],
@@ -487,6 +490,14 @@
       ]
     },
     {
+      "name": "context-menu",
+      "file": "context-menu.js",
+      "publicApi": "MNContextMenu",
+      "consumers": [
+        "python-editor.js"
+      ]
+    },
+    {
       "name": "interaction-core",
       "file": "interaction-core.js",
       "publicApi": "MNInteractionCore",
@@ -520,7 +531,8 @@
         "python-run-context.js",
         "music-xml.js",
         "music-editor.js",
-        "map-viewer.js"
+        "map-viewer.js",
+        "db-client.js"
       ]
     },
     {
@@ -814,6 +826,12 @@
       "file": "leaflet.min.js",
       "lazy": "leaflet",
       "sha384": "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+    },
+    {
+      "src": "vendor/sql-formatter.min.js",
+      "file": "sql-formatter.min.js",
+      "lazy": "sqlFormat",
+      "sha384": "sha384-M4Y1FeHiXNfKnf7Nj7z4EXq72oEV7GQFSCbn42CPBg3T+pfOgaFUubqubsAvnvt/"
     }
   ]
 }

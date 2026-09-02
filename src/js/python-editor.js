@@ -71,6 +71,41 @@ function addSelectionSearchItems(addItem, addSeparator, selectedText, contextEle
   return true;
 }
 
+/* 텍스트 우클릭 메뉴의 구성 — 무엇이 1단에 있고 무엇을 한 층 접는지 여기만 보면 된다.
+   DOM 을 만들지 않고 항목 트리만 돌려주므로, 구성이 바뀌었는지 테스트로 붙잡을 수 있다.
+   handlers 의 함수가 그대로 항목의 action 이 된다. */
+function textContextMenuItems(handlers){
+  const on = handlers || {};
+  const picked = !!on.hasSelection;
+  const extra = Array.isArray(on.extra) ? on.extra.filter(Boolean) : [];
+  const items = extra.length ? extra.concat([{ separator:true }]) : [];
+  items.push(
+    { label:"복사", action:on.copy, disabled:!picked },
+    { label:"잘라내기", action:on.cut, disabled:!picked },
+    { label:"붙여넣기", action:on.paste }
+  );
+  /* 검색(구글·지도·파일)은 고르면 화면이 통째로 바뀌는 항목이라 자주 쓰지 않는다.
+     셋을 1단에 늘어놓는 대신 한 층 접어 둔다. */
+  const search = Array.isArray(on.search) ? on.search.filter(Boolean) : [];
+  if (search.length){
+    items.push({ label:"선택한 낱말로 검색", title:"고른 낱말을 다른 도구에서 찾아봅니다",
+      children: search.map((item) => ({ label:item.label, action:item.action, disabled:item.disabled })) });
+  }
+  /* 문자표는 접지 않는다. 브라우저 위에서 도는 편집기라 "ㅁ + 한자키"가 오지 않아,
+     이 메뉴가 특수문자를 넣는 주된 통로다. 한 번 더 들어가게 하면 그 길이 멀어진다. */
+  items.push(
+    { separator:true },
+    { label:"특수문자… (Ctrl+F10)", action:on.specialChars },
+    { separator:true },
+    { label:"대문자로 변경", action:on.upper, disabled:!picked },
+    { label:"소문자로 변경", action:on.lower, disabled:!picked },
+    { label:"선택한 줄 중복 제거", action:on.dedupe, disabled:!picked },
+    { separator:true },
+    { label:"모두 선택", action:on.selectAll }
+  );
+  return items;
+}
+
 function attachTextCaseContextMenu(ta, options={}){
   // 특수문자 문자표 — 브라우저 위에서 도는 편집기라 "ㅁ + 한자키" 가 오지 않는다.
   // 대신 우클릭 메뉴와 Ctrl+F10(한글·워드의 문자표 단축키)으로 연다.
@@ -121,9 +156,6 @@ function attachTextCaseContextMenu(ta, options={}){
     };
     if (selection.end < selection.start) [selection.start, selection.end] = [selection.end, selection.start];
     const hasSelection = selection.start !== selection.end;
-    const menu = document.createElement("div");
-    menu.className = "text-context-menu";
-    menu.setAttribute("role", "menu");
 
     const restoreSelection = () => {
       ta.focus({ preventScroll:true });
@@ -169,72 +201,29 @@ function attachTextCaseContextMenu(ta, options={}){
         toast(removed ? (removed + "개의 중복 줄을 제거했어요.") : "선택한 줄에 중복이 없어요.", 1800);
       }
     };
-    const addItem = (label, action, disabled=false) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = label;
-      button.disabled = !!disabled;
-      button.setAttribute("role", "menuitem");
-      button.addEventListener("pointerdown", (e) => e.preventDefault());
-      button.addEventListener("click", () => { close(); if (!button.disabled) action(); });
-      menu.appendChild(button);
-    };
-    const addSeparator = () => {
-      const separator = document.createElement("div");
-      separator.className = "text-context-sep";
-      separator.setAttribute("role", "separator");
-      menu.appendChild(separator);
-    };
-    const close = () => {
-      if (!menu.isConnected) return;
-      menu.remove();
-      document.removeEventListener("pointerdown", onOutside, true);
-      document.removeEventListener("keydown", onKeydown, true);
-      window.removeEventListener("resize", close);
-      if (activeTextContextMenu === close) activeTextContextMenu = null;
-    };
-    const onOutside = (e) => { if (!menu.contains(e.target)) close(); };
-    const onKeydown = (e) => { if (e.key === "Escape") close(); };
-
     let contextActions = [];
     try {
       contextActions = typeof options.contextMenuActions === "function"
         ? options.contextMenuActions()
         : (Array.isArray(options.contextMenuActions) ? options.contextMenuActions : []);
     } catch(_){ contextActions = []; }
-    if (contextActions.length){
-      for (const item of contextActions){
-        if (!item) continue;
-        if (item.separator){ addSeparator(); continue; }
-        if (typeof item.action !== "function") continue;
-        addItem(String(item.label || ""), item.action, !!item.disabled);
-      }
-      addSeparator();
-    }
-    addItem("복사", copy, !hasSelection);
-    addItem("잘라내기", cut, !hasSelection);
-    addItem("붙여넣기", paste);
-    addSelectionSearchItems(addItem, addSeparator, value.slice(selection.start, selection.end), ta);
-    addSeparator();
-    addItem("특수문자… (Ctrl+F10)", () => openSpecialChars(event.clientX, event.clientY));
-    addSeparator();
-    addItem("대문자로 변경", () => changeCase("upper"), !hasSelection);
-    addItem("소문자로 변경", () => changeCase("lower"), !hasSelection);
-    addItem("선택한 줄 중복 제거", dedupeSelectedLines, !hasSelection);
-    addSeparator();
-    addItem("모두 선택", () => { ta.focus({ preventScroll:true }); ta.select(); });
 
-    document.body.appendChild(menu);
-    const rect = menu.getBoundingClientRect();
-    menu.style.left = Math.max(6, Math.min(window.innerWidth - rect.width - 6, event.clientX)) + "px";
-    menu.style.top = Math.max(6, Math.min(window.innerHeight - rect.height - 6, event.clientY)) + "px";
-    activeTextContextMenu = close;
-    setTimeout(() => {
-      if (!menu.isConnected) return;
-      document.addEventListener("pointerdown", onOutside, true);
-      document.addEventListener("keydown", onKeydown, true);
-      window.addEventListener("resize", close);
-    }, 0);
+    const items = textContextMenuItems({
+      hasSelection,
+      extra: contextActions,
+      search: typeof selectionSearchMenuItems === "function"
+        ? selectionSearchMenuItems(value.slice(selection.start, selection.end), ta) : [],
+      copy, cut, paste,
+      specialChars: () => openSpecialChars(event.clientX, event.clientY),
+      upper: () => changeCase("upper"),
+      lower: () => changeCase("lower"),
+      dedupe: dedupeSelectedLines,
+      selectAll: () => { ta.focus({ preventScroll:true }); ta.select(); }
+    });
+    activeTextContextMenu = MNContextMenu.open(event.clientX, event.clientY, items, {
+      base: "text-context",
+      onClose: () => { activeTextContextMenu = null; }
+    });
   };
   ta.addEventListener("contextmenu", onContextMenu);
   const detach = () => {
@@ -670,6 +659,13 @@ function buildCodeEditor(text, prof, options={}){
   // 파이썬 import 제안)을 끄고, 프로파일에 맞는 버퍼 단어 완성만 쓴다. 로컬 파이썬이 떠 있어도(jediReady=true)
   // JS·JSON 소스를 파이썬으로 보내지 않도록 이 플래그로 함께 막는다.
   const plainMode = !!options.plain;
+  /* 부르는 쪽이 자기 언어의 정렬기를 끼우는 자리. "소스 → 소스"(문자열 또는
+     {text, engine, message}, Promise 가능) 함수 하나만 받는다. 두 번째 인자로
+     {scope:"document"|"selection", from, to} 를 주므로 선택 영역만 손보는 것도 된다
+     (formatDocument({scope:"selection"}) 로 부른다). 이 자리를 뚫어 두면
+     undo 한 단계로 묶기·커서 되돌리기·비동기 도중 편집 폐기처럼 틀리기 쉬운 부분을
+     언어마다 다시 만들지 않아도 된다(DB 클라이언트의 SQL 정렬이 이걸 쓴다). */
+  const externalFormatter = typeof options.formatSource === "function" ? options.formatSource : null;
   // 일반(plain) 편집은 확장자에 맞는 키워드를 쓰되, 부르는 쪽이 목록을 직접 줄 수도 있다
   // (실행 편집기처럼 "이 실행 환경에서 실제로 되는 것"만 제안해야 하는 경우).
   /* Ctrl+/ 가 넣을 줄 주석 표시. 언어마다 다른데 예전에는 "#" 이 박혀 있어
@@ -1532,22 +1528,38 @@ function buildCodeEditor(text, prof, options={}){
   // undo 는 정렬 전/후를 한 단계로 묶고, 커서는 같은 줄·같은 칸(가능한 범위)으로 되돌린다.
   const formatDocumentNow = async (opts) => {
     opts = opts || {};
-    if (plainMode || prof !== "python") return { changed: false };
+    if (!externalFormatter && (plainMode || prof !== "python")) return { changed: false };
     const before = ta.value;
     if (!before.trim()) return { changed: false };
     hideCompletion(); exitCol();
     const caret = ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd;
+    // 부분 정렬용 — 지금 잡혀 있는 선택 범위. 정렬기가 "이 안의 문장만" 손볼 수 있게 함께 넘긴다.
+    const selectFrom = Math.min(ta.selectionStart, ta.selectionEnd);
+    const selectTo = Math.max(ta.selectionStart, ta.selectionEnd);
     let line = 0, col = 0;
     for (let i = 0; i < caret && i < before.length; i++){ if (before.charCodeAt(i) === 10){ line++; col = 0; } else col++; }
     let result;
     try {
-      result = (typeof mnFormatPythonSource === "function")
-        ? await mnFormatPythonSource(before, { backend: opts.backend !== false })
-        : { text: (typeof lightReindentPython === "function" ? lightReindentPython(before) : before), engine: "light" };
+      if (externalFormatter){
+        // 문자열만 돌려줘도 되고, 알릴 말이 있으면 {text, engine, message} 로 줘도 된다.
+        const external = await externalFormatter(before, {
+          scope: opts.scope === "selection" ? "selection" : "document",
+          from: selectFrom, to: selectTo
+        });
+        result = (external && typeof external === "object" && typeof external.text === "string")
+          ? external
+          : { text: (typeof external === "string" ? external : before) };
+      } else {
+        result = (typeof mnFormatPythonSource === "function")
+          ? await mnFormatPythonSource(before, { backend: opts.backend !== false })
+          : { text: (typeof lightReindentPython === "function" ? lightReindentPython(before) : before), engine: "light" };
+      }
     } catch(_){ result = { text: before, engine: "light" }; }
     const after = (result && typeof result.text === "string") ? result.text : before;
     if (ta.value !== before) return { changed: false, stale: true };   // 비동기 도중 사용자가 편집 → 폐기
-    if (after === before) return { changed: false, engine: result && result.engine, reason: result && result.reason };
+    if (after === before) {
+      return { changed: false, engine: result && result.engine, reason: result && result.reason, message: result && result.message };
+    }
     clearTimeout(coalesceTimer); commitNow();                          // 정렬 직전 상태를 undo 한 단계로
     ta.value = after;
     const nlines = after.split("\n");
@@ -1558,7 +1570,7 @@ function buildCodeEditor(text, prof, options={}){
     emitInput();
     clearTimeout(coalesceTimer); commitNow();
     scrollCaretIntoView();
-    return { changed: true, engine: result && result.engine, reason: result && result.reason };
+    return { changed: true, engine: result && result.engine, reason: result && result.reason, message: result && result.message };
   };
 
   /* ===== 셀 나누기: 거터(줄번호)를 클릭하면 그 줄에 # %% 경계를 넣거나 뺀다 =====
@@ -2672,7 +2684,9 @@ function buildCodeEditor(text, prof, options={}){
       e.preventDefault(); e.stopPropagation();
       formatDocumentNow({ backend: true }).then((r) => {
         if (!r || typeof toast !== "function") return;
-        if (r.reason === "syntax") toast("구문 오류가 있어 완전 정렬은 못 하고 공백만 정리했어요.", 2800);
+        // 정렬기가 직접 할 말을 준 경우(예: SQL 은 건너뛴 문장 수를 알린다)에는 그 말이 우선이다.
+        if (r.message) toast(r.message, 2400);
+        else if (r.reason === "syntax") toast("구문 오류가 있어 완전 정렬은 못 하고 공백만 정리했어요.", 2800);
         else if (r.changed) {
           const engine = r.engine === "light"
             ? (typeof window.t === "function" ? window.t("경량 정렬") : "경량 정렬")
@@ -3133,7 +3147,7 @@ function buildCodeEditor(text, prof, options={}){
     refreshPins: buildPinMarks,
     formatDocument: formatDocumentNow,
     dedupeSelectedLines, applyLineTidy,
-    canFormat: () => !plainMode && prof === "python",
+    canFormat: () => !!externalFormatter || (!plainMode && prof === "python"),
     startPractice, stopPractice, isPracticeActive: () => practice.active,
     destroy: () => {
       if (practice.active) stopPractice("cancel");

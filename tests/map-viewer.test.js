@@ -1734,8 +1734,10 @@ test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁�
    메모·스프레드시트 셀이 함께 따라온다. 부르는 쪽마다 옵션을 넘기지 않는다. */
 test("글자를 다루는 공용 우클릭 메뉴에는 지도·파일 검색이 내장된다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
-  // textarea 편집기(코드·텍스트·노트북 셀·메모 글 블록)
-  assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, value\.slice\(selection\.start, selection\.end\), ta\)/);
+  // textarea 편집기(코드·텍스트·노트북 셀·메모 글 블록) — 항목이 많아 '선택한 낱말로 검색' 아래로 접었다.
+  assert.match(source, /search: typeof selectionSearchMenuItems === "function"/);
+  assert.match(source, /selectionSearchMenuItems\(value\.slice\(selection\.start, selection\.end\), ta\)/);
+  assert.match(source, /label:"선택한 낱말로 검색"[\s\S]{0,140}children: search\.map/);
   // contenteditable(메모·스프레드시트 표 셀)
   assert.match(source, /addSelectionSearchItems\(addItem, addSeparator, range \? range\.toString\(\) : "", el\)/);
   // 그 기능이 없는 화면에서는 눌러도 아무 일 없는 항목을 남기지 않는다.

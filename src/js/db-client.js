@@ -336,6 +336,12 @@ const MNDbClient = (() => {
     return "DELIMITER " + delimiter + "\n" + body + delimiter + "\nDELIMITER ;";
   };
 
+  // CREATE PROCEDURE/FUNCTION/TRIGGER/EVENT 의 머리. 본문에 세미콜론이 들어 있어
+  // 문장 나누기·정렬 양쪽에서 "통째로 다뤄야 하는 덩어리" 판정에 쓴다.
+  const ROUTINE_HEAD = /^CREATE\s+(?:DEFINER\s*=\s*\S+\s+)?(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b/i;
+  const stripLeadingComments = (text) => String(text || "").replace(
+    /^(?:\s|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/, "");
+
   // 커서 실행은 statementRanges가 DELIMITER 줄을 뺀 본문만 돌려준다. 그 본문을 그대로
   // 워커에 보내면 다시 세미콜론으로 잘리므로 사용자 지정 구분자를 잠시 복원한다.
   // 사용자가 CREATE 복합문 본문만 직접 선택한 경우도 같은 방식으로 보호한다.
@@ -343,11 +349,55 @@ const MNDbClient = (() => {
     const text = String(statement || "").trim();
     if (!text || /^\s*DELIMITER\b/im.test(text)) return text;
     if (delimiter && delimiter !== ";") return wrapDelimitedStatement(text, delimiter);
-    const withoutLeadingComments = text.replace(
-      /^(?:\s|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/, "");
-    const routine = /^CREATE\s+(?:DEFINER\s*=\s*\S+\s+)?(?:PROCEDURE|FUNCTION|TRIGGER|EVENT)\b/i
-      .test(withoutLeadingComments);
+    const routine = ROUTINE_HEAD.test(stripLeadingComments(text));
     return routine && text.includes(";") ? wrapDelimitedStatement(text) : text;
+  };
+
+  /* ── SQL 정렬(sql-formatter) ────────────────────────────────────────────
+     라이브러리는 DELIMITER 지시어를 모른다. 편집기 내용을 통째로 넘기면 끝을
+     "END $$ DELIMITER;" 처럼 한 줄로 붙여 놓는데, delimiterDirectiveAt 은 줄 단독
+     DELIMITER 만 인정하므로 구분자 되돌리기가 사라지고 뒤 문장이 앞 문장에 먹혀
+     서버로 잘못 나간다. 그래서 라이브러리에는 문장 하나씩만 물리고, 아래는 손대지 않는다.
+       · 구분자가 ; 가 아닌 문장 — DELIMITER 로 감싼 프로시저·함수 본문
+       · 라이브러리가 읽지 못한 문장 — 따옴표를 안 닫은 채 타이핑 중인 경우 등
+     마지막으로 정렬 뒤 문장 나누기 결과가 달라지면 통째로 원문을 돌려준다.
+     보기 좋은 것보다 "실행되는 문장이 그대로인 것"이 먼저다. */
+  const SQL_FORMAT_OPTIONS = { language:"mysql", keywordCase:"upper" };
+
+  /* format 은 sql-formatter 의 format(text, options). 라이브러리를 직접 붙잡지 않고
+     인자로 받는 이유는 지연 로드(MNLazy)와 테스트가 같은 함수를 쓰게 하기 위해서다.
+     limit({from,to}) 를 주면 그 범위에 걸친 문장만 손본다(우클릭 메뉴의 선택 영역 정렬).
+     → { text, formatted, skipped, reason } */
+  const formatSqlText = (sql, format, limit) => {
+    const text = String(sql || "");
+    const asIs = (reason) => ({ text, formatted:0, skipped:0, reason: reason || "" });
+    if (!text.trim() || typeof format !== "function") return asIs("empty");
+    const ranges = statementRanges(text);
+    if (!ranges.length) return asIs("empty");
+    /* DELIMITER 없이 쓴 프로시저는 본문이 세미콜론마다 조각나 들어온다. 조각을 따로
+       정렬하면 한 덩어리였다는 사실이 지워지므로 이때는 아무것도 하지 않는다
+       (커서 실행은 compoundExecutionScript 가 같은 판정으로 다시 감싸 준다). */
+    if (ranges.some(range => range.delimiter === ";" && ROUTINE_HEAD.test(stripLeadingComments(range.text)))){
+      return asIs("routine");
+    }
+    /* 선택 영역이 있으면 거기에 걸친 문장만 정렬한다. 문장 한가운데만 골랐어도 그 문장은
+       통째로 정렬한다 — 절반만 다시 쓰면 남은 절반과 들여쓰기가 어긋난다. */
+    const from = limit ? Number(limit.from) : NaN, to = limit ? Number(limit.to) : NaN;
+    const limited = Number.isFinite(from) && Number.isFinite(to) && to > from;
+    let out = text, formatted = 0, skipped = 0;
+    for (let index = ranges.length - 1; index >= 0; index--){   // 뒤에서부터 갈아 끼워야 앞 문장의 위치가 살아 있다
+      const range = ranges[index];
+      if (limited && (range.end <= from || range.start >= to)) continue;   // 선택과 겹치지 않는 문장
+      if (range.delimiter !== ";"){ skipped++; continue; }
+      let next;
+      try { next = String(format(range.text, SQL_FORMAT_OPTIONS) || "").trim(); }
+      catch(_){ skipped++; continue; }                          // 못 읽는 문장은 원문 그대로
+      if (!next){ skipped++; continue; }
+      out = out.slice(0, range.start) + next + out.slice(range.end);
+      formatted++;
+    }
+    if (splitStatements(out).length !== ranges.length) return asIs("unsafe");
+    return { text: out, formatted, skipped, reason:"" };
   };
 
   /* ── ORDER BY 고쳐 쓰기(헤더 클릭 정렬) ──────────────────────────────────
@@ -1197,6 +1247,10 @@ const MNDbClient = (() => {
     // 워커·런처를 거치지 않으므로 서버에 파일이 올라가지 않는다.
     const importButton = button("SQL 열기", "db-btn db-btn-quiet",
       ".sql 파일을 읽어 편집기에 넣습니다 (실행하지는 않습니다)");
+    const formatButton = button("정렬", "db-btn db-btn-quiet",
+      "편집기의 SQL 을 줄바꿈·들여쓰기해 보기 좋게 정리합니다 (일부만 고를 때는 우클릭 메뉴)");
+    formatButton.dataset.shortcutAction = "formatDocument";
+    formatButton.dataset.shortcutTitle = "SQL 정렬 — 프로시저 본문은 그대로 둡니다";
     const sqlFileInput = input("file", "");
     sqlFileInput.accept = ".sql,.txt,text/plain";
     sqlFileInput.hidden = true;
@@ -1230,9 +1284,78 @@ const MNDbClient = (() => {
     txWrap.hidden = true;
 
     toolbar.append(runButton, runAllButton, cancelButton, explainButton, el("span", "db-timeout-wrap", null),
-      modeBadge, txWrap, serverLabel, schemaPanelButton, layoutButton, historyButton, importButton,
+      modeBadge, txWrap, serverLabel, schemaPanelButton, layoutButton, historyButton, formatButton, importButton,
       saveButton, disconnectButton, sqlFileInput);
+    // 저장·정렬 버튼의 안내에 지금 설정된 단축키를 붙인다(사용자가 키를 바꿔도 따라간다).
+    if (typeof syncShortcutHints === "function") syncShortcutHints(toolbar);
     toolbar.querySelector(".db-timeout-wrap").append(el("span", null, "제한"), timeoutInput, el("span", null, "초"));
+
+    /* SQL 정렬 — 라이브러리(sql-formatter)는 처음 정렬할 때만 읽는다(312KB).
+       공용 편집기 위젯의 formatSource 자리에 끼워 되돌리기 한 단계 묶기·커서 되돌리기·
+       비동기 도중 편집 폐기를 그대로 물려받는다. 실패해도 편집기 내용은 건드리지 않는다. */
+    const loadSqlFormatter = async () => {
+      const current = () => (typeof window !== "undefined" && window.sqlFormatter
+        && typeof window.sqlFormatter.format === "function") ? window.sqlFormatter.format : null;
+      const ready = current();
+      if (ready) return ready;
+      if (typeof MNLazy !== "undefined" && typeof MNLazy.tryNeed === "function") await MNLazy.tryNeed("sqlFormat");
+      return current();
+    };
+
+    const formatEditorSql = async (source, context) => {
+      context = context || {};
+      const onlySelection = context.scope === "selection";
+      const format = await loadSqlFormatter();
+      if (!format) return { text:source, message:"SQL 정렬기를 불러오지 못했어요." };
+      const result = formatSqlText(source, format,
+        onlySelection ? { from:context.from, to:context.to } : null);
+      const what = onlySelection ? "선택한 문장을" : "SQL 을";
+      let message = "";
+      if (result.reason === "routine"){
+        message = "프로시저·함수 정의가 있어 정렬하지 않았어요. DELIMITER 로 감싸면 나머지 문장을 정렬합니다.";
+      } else if (result.reason === "unsafe"){
+        message = "정렬 결과가 문장 나누기를 바꿔서 원래대로 두었어요.";
+      } else if (onlySelection && !result.formatted && !result.skipped){
+        message = "선택 영역에 정렬할 문장이 없어요.";
+      } else if (result.text !== source){
+        message = result.skipped
+          ? what + " 정렬했어요. 문장 " + result.skipped + "개는 그대로 뒀어요."
+          : what + " 정렬했어요.";
+      } else if (!result.formatted && result.skipped){
+        message = "정렬할 수 있는 문장이 없어요. 프로시저 본문은 그대로 둡니다.";
+      }
+      return { text:result.text, engine:"sql-formatter", message };
+    };
+
+    // 툴바 버튼·우클릭 메뉴가 함께 쓰는 실행부. 알림 문구는 정렬기가 정해 주므로
+    // 단축키(Shift+Alt+F) 경로와 같은 말이 나온다.
+    const runEditorFormat = (opts) => {
+      editor.formatDocument(opts || {}).then((result) => {
+        if (!result || typeof toast !== "function") return;
+        if (result.message) toast(result.message, 2400);
+        else if (!result.changed && !result.stale) toast("이미 정렬돼 있어요.", 1400);
+      }).catch(() => {});
+    };
+
+    /* 줄 정리 — 텍스트 편집기의 '줄 정리' 메뉴(LINE_TIDY_ITEMS)를 그대로 가져다 쓴다.
+       목록을 베껴 두면 한쪽에 도구가 늘 때 다른 쪽만 뒤처지므로 원본을 참조한다.
+       대상 범위 규칙도 그쪽과 같다 — 고른 줄이 있으면 그 범위만, 없으면 편집기 전체. */
+    const runLineTidy = (item) => {
+      const result = editor.applyLineTidy(item.action);
+      if (typeof toast !== "function") return;
+      if (!result) toast("따라치기 중에는 줄 정리를 쓸 수 없어요.", 2200);
+      else if (!result.changed) toast("바뀐 줄이 없어요.", 1600);
+      else toast(item.done + (result.lineDelta > 0 ? " (" + result.lineDelta + "줄 줄었어요)" : ""), 1900);
+    };
+
+    /* 줄바꿈 — 이 편집기 안에서만 켜고 끈다. 텍스트 편집기는 앱 전역 설정(textWrapEnabled)을
+       쓰지만, SQL 은 결과 표와 폭을 나눠 쓰는 화면이라 문서를 옮길 때마다 따라오면 성가시다. */
+    let sqlWrapOn = false;
+    const setSqlWrap = (on) => {
+      sqlWrapOn = !!on;
+      if (typeof editor.setWrap === "function") editor.setWrap(sqlWrapOn);
+      if (typeof toast === "function") toast(sqlWrapOn ? "긴 줄을 접어서 보여 줄게요." : "줄바꿈을 껐어요.", 1400);
+    };
 
     /* 편집기는 파이썬·자바스크립트 편집기와 같은 위젯을 쓴다(buildCodeEditor).
        되돌리기·줄 이동·찾기·사각 선택·줄 번호 같은 편집 기능을 여기서 다시 만들지 않기 위해서다.
@@ -1245,6 +1368,50 @@ const MNDbClient = (() => {
     const editor = buildCodeEditor(profile.sql || "", "sql", {
       plain: true,
       fileExt: "sql",
+      // 공용 편집기의 정렬(Shift+Alt+F) 확장점. 파이썬 전용 경로를 타지 않게 이 자리로 넘긴다.
+      formatSource: formatEditorSql,
+      /* 우클릭 메뉴 — 이 편집기에는 도구막대가 없으니(툴바 자리는 실행·접속용이다) 텍스트
+         편집기의 '줄 정리'·찾기·줄바꿈을 여기로 모은다. 복사·붙여넣기·대소문자 변환·특수문자는
+         공용 메뉴가 이미 아래에 붙여 준다. 메뉴가 열릴 때 불리므로 지금 선택을 여기서 읽어
+         닫아 두고, 항목을 누를 때 그 범위를 다시 세운다 — 메뉴가 닫히며 포커스가 흔들려도
+         처음 고른 자리에 그대로 걸리게 하려는 것이다. */
+      contextMenuActions: () => {
+        const area = editor.ta;
+        const from = Math.min(area.selectionStart, area.selectionEnd);
+        const to = Math.max(area.selectionStart, area.selectionEnd);
+        const picked = to > from;
+        const onPicked = (run) => () => {
+          area.focus({ preventScroll:true });
+          try { area.setSelectionRange(from, to); } catch(_){}
+          run();
+        };
+        const items = [
+          { label: picked ? "선택 영역 SQL 정렬" : "SQL 정렬 (전체)",
+            title: picked ? "고른 부분에 걸친 문장만 정렬합니다 (문장 한가운데를 골라도 그 문장 전체)"
+                          : "편집기의 SQL 전체를 정렬합니다 (Shift+Alt+F)",
+            action: onPicked(() => runEditorFormat(picked ? { scope:"selection" } : {})) }
+        ];
+        /* 줄 정리 열한 개를 1단에 늘어놓으면 메뉴가 화면보다 길어진다. 한 층 접어 둔다 —
+           한 번 고르면 끝나는 도구라 두 번 누르는 값이 크지 않다. */
+        if (typeof LINE_TIDY_ITEMS !== "undefined" && Array.isArray(LINE_TIDY_ITEMS)){
+          const children = LINE_TIDY_ITEMS.map((tidy) => (tidy.separator ? { separator:true } : {
+            label:tidy.label, title:tidy.title, action:onPicked(() => runLineTidy(tidy))
+          }));
+          items.push({ label:"줄 정리", children,
+            title:"정렬·중복 삭제·번호 매기기 — 고른 줄이 있으면 그 부분만, 없으면 편집기 전체" });
+        }
+        items.push(
+          { separator:true },
+          { label:"찾기·바꾸기", title:"이 편집기 안에서 찾고 바꿉니다 (Ctrl+F)",
+            action: onPicked(() => editor.openFind()) },
+          { label:"줄 번호로 이동", title:"줄 번호를 입력해 그 줄로 갑니다 (Ctrl+G)",
+            action: onPicked(() => editor.openGoto()) },
+          { label: sqlWrapOn ? "줄바꿈 끄기" : "줄바꿈 켜기",
+            title:"긴 줄을 편집기 너비에 맞춰 접어서 보여 줍니다 (내용은 바뀌지 않아요)",
+            action: onPicked(() => setSqlWrap(!sqlWrapOn)) }
+        );
+        return items;
+      },
       // 편집기가 고정 높이(overflow:hidden)라 자동완성 목록을 안쪽에 두면 잘린다.
       // 노트북 셀과 같은 이유로 body 로 빼서 띄운다.
       completionPortal: true,
@@ -1686,6 +1853,11 @@ const MNDbClient = (() => {
         event.preventDefault();
         runQuery(allTarget());
       }
+    });
+
+    formatButton.addEventListener("click", () => {
+      runEditorFormat();
+      editor.ta.focus();
     });
 
     // 편집기 커서 자리에 이름을 넣는다. 위젯이 값 변화를 알아채도록 input 이벤트를 함께 낸다.
@@ -5193,7 +5365,7 @@ const MNDbClient = (() => {
   };
 
   return { COLORS, COLOR_LABELS, emptyProfile, parseProfile, serializeProfile,
-    statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements,
+    statementRanges, splitStatements, statementAt, firstKeyword, compoundExecutionScript, riskyStatements, formatSqlText,
     identifierFor, ddlIdentifier, ddlString, routineEditScript, routineParameters, schemaObjectLabel, schemaDropSql, editBlockNote,
     cellUpdatePreview, rowDeletePreview, rowInsertPreview,
     defaultDraft, columnDraft, indexDraft, foreignKeyDraft, tableAlterPlan,

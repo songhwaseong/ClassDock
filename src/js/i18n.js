@@ -327,7 +327,7 @@
     // 코드 색 미리보기 예제 안의 문구(코드 자체는 언어와 무관하게 그대로 둔다)
     "원의 넓이를 구해요": "Work out the area of a circle",
     "반지름은 0보다 커야 해요": "radius must be greater than 0",
-    "Python 코드 들여쓰기·공백 정렬(로컬 파이썬이면 black)": "Clean up Python indentation and spacing (uses black with local Python)",
+    "Python·SQL 코드 들여쓰기·공백 정렬(로컬 파이썬이면 black)": "Clean up Python and SQL indentation and spacing (uses black with local Python)",
     "구문 오류가 있어 완전 정렬은 못 하고 공백만 정리했어요.": "The code has a syntax error, so only safe whitespace cleanup was applied.",
     "코드를 정렬했어요 ({engine}).": "Formatted the code ({engine}).",
     "경량 정렬": "lightweight formatter",
