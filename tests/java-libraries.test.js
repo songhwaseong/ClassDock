@@ -68,8 +68,8 @@ test("실행·채점 모두 같은 라이브러리 목록으로 돈다", () => {
   assert.match(editorSource, /libs: libraryPicker\.getQuery\(\)/);
   assert.match(editorSource, /gradeTests:tests, libs:libraryPicker\.getQuery\(\)/);
   assert.match(runtimeSource, /runJavaGrading\(source, gradeTests, \{[\s\S]{0,120}libs,/);
-  assert.match(runtimeSource, /startJavaSession\(source, stdinText, true, options\.libs\)/);
-  assert.match(runtimeSource, /startJavaSession\(source, "", false, hooks\.libs\)/);
+  assert.match(runtimeSource, /startJavaSession\(source, stdinText, true, options\.libs, options\.extras\)/);
+  assert.match(runtimeSource, /startJavaSession\(source, "", false, hooks\.libs, hooks\.extras\)/);
 });
 
 test("라이브러리 이름은 쿼리로만 보내고 경로는 만들지 않는다", () => {

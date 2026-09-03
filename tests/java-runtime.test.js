@@ -106,7 +106,7 @@ test("채점 한 줄은 오류가 없을 때만 통과로 본다", () => {
 
 test("채점은 에코가 섞이지 않는 파이프 입력 경로를 쓴다", () => {
   // /java-session-input 은 터미널처럼 보이려고 stdout 에 에코를 남긴다 — 채점 비교에 섞이면 안 된다.
-  assert.match(runtimeSource, /runJavaHeadless[\s\S]{0,200}startJavaSession\(source, stdinText, true, options\.libs\)/);
+  assert.match(runtimeSource, /runJavaHeadless[\s\S]{0,200}startJavaSession\(source, stdinText, true, options\.libs, options\.extras\)/);
   assert.match(runtimeSource, /if \(piped\) query\.push\("piped=1"\);/);
   assert.match(launcher, /StartJavaSession\(body, QueryValue\(path, "piped"\) == "1", QueryValue\(path, "libs"\)\)/);
   assert.match(launcher, /if \(pipedStdin != null\)/);
@@ -653,4 +653,125 @@ test("직접 받은 jar 의 동명 클래스는 현재 import 로 가른다", ()
   assert.deepEqual(names(members(beta, "doc", "", libraries)), ["betaOnly"]);
   assert.deepEqual(names(members("Document doc = null;", "doc", "", libraries)), []);
   assert.deepEqual(names(members("alpha.model.Document doc = null;", "doc", "", libraries)), ["alphaOnly"]);
+});
+
+
+test("javac 진단을 줄·칸·심각도·힌트로 나눈다", () => {
+  const javacDiagnostics = get("javacDiagnostics");
+  const stderr = [
+    "C:\Users\me\AppData\Local\Temp\moidajava_session_abc123\Main.java:3: error: incompatible types: int cannot be converted to String",
+    "        String s = 3;",
+    "                   ^",
+    "C:\Users\me\AppData\Local\Temp\moidajava_session_abc123\Main.java:4: error: cannot find symbol",
+    "        undefinedCall();",
+    "        ^",
+    "  symbol:   method undefinedCall()",
+    "  location: class Main",
+    "2 errors"
+  ].join("\n");
+  const items = javacDiagnostics(stderr);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].line, 3);
+  assert.equal(items[0].severity, "error");
+  assert.equal(items[0].column, 19);
+  assert.equal(items[0].message, "incompatible types: int cannot be converted to String");
+  assert.equal(items[0].hint, "");
+  assert.equal(items[1].line, 4);
+  assert.equal(items[1].hint, "symbol:   method undefinedCall() · location: class Main");
+});
+
+test("경고·참고는 오류와 다른 심각도로 나오고 개수 요약은 목록에 들어가지 않는다", () => {
+  const javacDiagnostics = get("javacDiagnostics");
+  const stderr = [
+    "Main.java:5: warning: [deprecation] Thread.stop() is deprecated",
+    "        t.stop();",
+    "         ^",
+    "1 warning"
+  ].join("\n");
+  const items = javacDiagnostics(stderr);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].severity, "warning");
+  assert.equal(items[0].line, 5);
+});
+
+test("컴파일이 성공하면 뽑을 진단이 없다", () => {
+  const javacDiagnostics = get("javacDiagnostics");
+  // vm 컨텍스트가 만든 배열이라 deepEqual([]) 은 realm 이 달라 실패한다 — 길이로 본다.
+  assert.equal(javacDiagnostics("").length, 0);
+  assert.equal(javacDiagnostics("Note: Main.java uses unchecked or unsafe operations.").length, 0);
+});
+
+test("저장 검사는 실행과 같은 컴파일 경로를 쓰고 세션을 남기지 않는다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/java-check", StringComparison\.Ordinal\)/);
+  const start = launcher.indexOf("static string RunJavaCheck");
+  assert.ok(start > 0, "RunJavaCheck 가 있어야 한다");
+  const body = launcher.slice(start, launcher.indexOf("/* piped=false", start));
+  assert.match(body, /CompileJavaSource\(javac, scriptPath, tempRoot, probe/);
+  // 검사 세션은 JavaSessions 에 등록하지 않는다 — 폴링·중지 대상이 되면 실행 세션과 섞인다.
+  assert.ok(!/JavaSessions\[/.test(body), "검사는 세션 목록에 등록하지 않는다");
+  assert.match(body, /Directory\.Delete\(tempRoot, true\)/);
+});
+
+test("저장 검사는 수동 저장에서만 돌고 자동 저장에는 붙지 않는다", () => {
+  assert.match(editorSource, /runSaveCheck\(writtenValue\);/);
+  const autosave = editorSource.slice(editorSource.indexOf("const runAutosave = async"),
+    editorSource.indexOf("const scheduleAutosave"));
+  assert.ok(!/runSaveCheck|checkJavaSource/.test(autosave), "자동 저장 경로에는 검사가 없어야 한다");
+  // 오류 여러 개를 설명까지 살려 넘기는 통로
+  assert.match(editorSource, /setDiagnosticItems: \(items\) => editor\.setDiagnosticItems\(items\)/);
+  assert.match(editorSource, /focusLine: \(line\) => editor\.focusLine\(line\)/);
+});
+
+test("형제 파일의 진단은 편집기 줄 표시에서 빠지고 목록에는 파일 이름과 함께 남는다", () => {
+  const javacDiagnostics = get("javacDiagnostics");
+  const stderr = [
+    "C:\\Users\\me\\AppData\\Local\\Temp\\moidajava_session_abc\\Dog.java:2: error: incompatible types: String cannot be converted to int",
+    "    void bark() { int x = \"no\"; }",
+    "                          ^",
+    "C:\\Users\\me\\AppData\\Local\\Temp\\moidajava_session_abc\\Main.java:9: error: cannot find symbol",
+    "        oops();",
+    "        ^",
+    "2 errors"
+  ].join("\n");
+  const items = javacDiagnostics(stderr, "Main.java");
+  assert.equal(items.length, 2);
+  // 지금 편집 중인 파일이 먼저 온다.
+  assert.equal(items[0].file, "Main.java");
+  assert.equal(items[0].own, true);
+  assert.equal(items[1].file, "Dog.java");
+  assert.equal(items[1].own, false);
+  assert.equal(items[1].line, 2);
+  // 파일 이름을 안 주면 전부 내 파일로 본다(형제를 안 보내는 예전 동작).
+  assert.equal(javacDiagnostics(stderr).filter(item => item.own).length, 2);
+});
+
+test("형제 .java 는 실행·채점·저장 검사 세 길에 같은 목록으로 들어간다", () => {
+  // 실행 봉투 뒤에 [개수]([길이][소스])* 를 잇는다. 형제가 없으면 바이트가 예전과 같아야 한다.
+  assert.match(runtimeSource, /function buildJavaRunPayload\(source, stdinText, extras\)/);
+  assert.match(runtimeSource, /if \(!rows\.length\) return base;/);
+  assert.match(runtimeSource, /body:buildJavaRunPayload\(source, "", options\.extras\)/);
+  // 실행·채점은 runJavaSource 가 한 번 모은 목록을 나눠 쓴다.
+  assert.match(runtimeSource, /extras = \(await ui\.siblingSources\(\)\) \|\| \[\]/);
+  assert.match(runtimeSource, /runJavaGrading\(source, gradeTests, \{[\s\S]{0,120}libs, extras,/);
+  assert.match(runtimeSource, /runJavaInteractive\(source, ui, \{[\s\S]{0,160}libs, extras/);
+  // 같은 폴더·같은 폴더문맥의 .java 만 모은다.
+  assert.match(editorSource, /if \(!\/\\\.java\$\/i\.test\(path\) \|\| javaDocDir\(path\) !== dir\) continue;/);
+  assert.match(editorSource, /if \(\(doc\.archiveCtx \|\| null\) !== context\) continue;/);
+});
+
+test("런처는 형제 소스를 package 경로에 풀고 -sourcepath 로 찾게 한다", () => {
+  assert.match(launcher, /static void WriteJavaExtraSources\(string tempRoot, List<string> extras\)/);
+  // 클래스 이름은 그 파일이 실제로 선언한 타입에서만 얻는다(JavaMainClassName 은 "Main" 으로 떨어진다).
+  assert.match(launcher, /static string JavaDeclaredFileClassName\(string source\)/);
+  const start = launcher.indexOf("static void WriteJavaExtraSources");
+  const body = launcher.slice(start, launcher.indexOf("static string JavaDeclaredFileClassName", start));
+  assert.match(body, /JavaDeclaredFileClassName\(extra\)/);
+  assert.match(body, /JavaIdentifierRe\.IsMatch\(part\)/);       // 경로 구분자·.. 가 섞인 package 는 버린다
+  assert.match(body, /if \(File\.Exists\(path\)\) continue;/);   // 주 파일을 형제가 덮어쓰지 못한다
+  assert.match(launcher, /-sourcepath \\"" \+ tempRoot/);
+  // 실행·검사 두 길 모두에서 형제를 푼다.
+  assert.equal((launcher.match(/WriteJavaExtraSources\(tempRoot, extraSources\)/g) || []).length, 2);
+  // 개수·크기 상한이 있어야 거대한 폴더가 그대로 들어오지 않는다.
+  assert.match(launcher, /count > JavaExtraSourceMax/);
+  assert.match(launcher, /len > JavaExtraSourceBytes/);
 });

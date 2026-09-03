@@ -1843,6 +1843,22 @@ class ClassDockLauncher
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("java-session-start-failed: " + FlattenMessage(ex)));
                     }
                 }
+                else if (method == "POST" && path.StartsWith("/java-check", StringComparison.Ordinal))
+                {
+                    // 저장 직후의 문법 검사. 실행과 같은 페이로드·라이브러리 목록을 받는다.
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(RunJavaCheck(body, QueryValue(path, "libs"))));
+                    }
+                    catch (JavaMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-java"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("java-check-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "GET" && path.StartsWith("/java-session-poll", StringComparison.Ordinal))
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollJavaSession(QueryValue(path, "id"), QueryValue(path, "so"), QueryValue(path, "se"))));
@@ -9308,6 +9324,9 @@ class ClassDockLauncher
         new System.Text.RegularExpressions.Regex(
             "(?=[^;{}]*\\bpublic\\b)(?=[^;{}]*\\bstatic\\b)[^;{}]*\\bvoid\\s+main\\s*\\(\\s*(?:final\\s+)?(?:java\\s*\\.\\s*lang\\s*\\.\\s*)?String\\s*(?:(?:\\[\\s*\\]|\\.\\.\\.)|"
             + JavaIdStart + JavaIdPart + "*\\s*\\[\\s*\\])");
+    // 형제 소스를 둘 폴더·파일 이름이 진짜 자바 식별자인지 본다 — .. 나 경로 구분자가 섞여 들어오지 못하게.
+    static readonly System.Text.RegularExpressions.Regex JavaIdentifierRe =
+        new System.Text.RegularExpressions.Regex("^" + JavaIdStart + JavaIdPart + "*$");
     static readonly System.Text.RegularExpressions.Regex JavaPackageRe =
         new System.Text.RegularExpressions.Regex(
             "(?:^|[;\\s])package\\s+(" + JavaIdStart + JavaIdPart + "*(?:\\s*\\.\\s*" + JavaIdStart + JavaIdPart + "*)*)\\s*;");
@@ -9333,6 +9352,50 @@ class ClassDockLauncher
         return session.Id;
     }
 
+
+    /* 저장할 때 도는 문법 검사(/java-check). javac 만 돌리고 결과를 그 자리에서 돌려준다 —
+       실행 세션과 달리 남는 프로세스가 없으므로 폴링·중지·세션 보관이 필요 없고, 임시 폴더도 바로 지운다.
+       컴파일은 실행 경로와 같은 CompileJavaSource 를 쓴다. 여기서 통과한 코드는 실행에서도 컴파일을 지난다. */
+    static string RunJavaCheck(byte[] body, string libs)
+    {
+        string java = FindJava();
+        if (java == null) throw new JavaMissingException();
+        string bin = Path.GetDirectoryName(java);
+        string javac = string.IsNullOrEmpty(bin) ? null : Path.Combine(bin, "javac.exe");
+        if (string.IsNullOrEmpty(javac) || !File.Exists(javac)) throw new JavaMissingException();
+
+        // 라이브러리가 없으면 검사 자체를 건너뛴다. 없는 jar 때문에 나는 import 오류를
+        // 학생 코드의 잘못으로 표시하면 고칠 수 없는 빨간 줄이 남는다.
+        List<string> missingLibraries;
+        List<string> libraryJars = ResolveJavaLibraryJars(libs, out missingLibraries);
+        if (missingLibraries.Count > 0)
+            return "{\"ok\":true,\"skipped\":\"libs\",\"output\":\"\",\"mainClass\":\"\"}";
+
+        string source, stdinText;
+        List<string> extraSources;
+        DecodeRunPayload(body, out source, out stdinText, out extraSources);
+        string fileClassName = JavaMainClassName(source);
+        string tempRoot = Path.Combine(Path.GetTempPath(), "moidajava_session_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            string scriptPath = Path.Combine(tempRoot, fileClassName + ".java");
+            File.WriteAllText(scriptPath, source, new UTF8Encoding(false));
+            WriteJavaExtraSources(tempRoot, extraSources);   // 같은 폴더의 형제 .java 도 함께 (실행과 같은 묶음)
+            // 출력을 담기만 하는 임시 세션. JavaSessions 에 넣지 않으므로 폴링 대상이 되지 않는다.
+            JavaSession probe = new JavaSession();
+            bool ok = CompileJavaSource(javac, scriptPath, tempRoot, probe, JavaClassPath(tempRoot, libraryJars));
+            string output = probe.Stderr.GetText();
+            if (output.Length == 0) output = probe.Stdout.GetText();
+            return "{\"ok\":" + (ok ? "true" : "false") + ",\"output\":" + JsonString(output)
+                + ",\"mainClass\":" + JsonString(fileClassName) + "}";
+        }
+        finally
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
+        }
+    }
+
     /* piped=false: 대화형 실행. 표준입력을 열어 두고 /java-session-input 으로 한 줄씩 받는다.
        piped=true : 채점처럼 입력을 미리 다 아는 실행. 페이로드의 표준입력을 한 번에 흘려보내고 닫는다.
        두 길을 나누는 이유는 /java-session-input 이 터미널처럼 보이려고 stdout 에 에코를 남기기 때문이다 —
@@ -9353,7 +9416,8 @@ class ClassDockLauncher
                 + "]\n라이브러리 목록에서 다시 설치하거나, 선택을 해제한 뒤 실행해 주세요.");
 
         string source, stdinText;
-        DecodeRunPayload(body, out source, out stdinText);
+        List<string> extraSources;
+        DecodeRunPayload(body, out source, out stdinText, out extraSources);
         string fileClassName = JavaMainClassName(source);
         string launchClassName = JavaLaunchClassName(source);
         string packageName = JavaPackageName(source);
@@ -9364,6 +9428,8 @@ class ClassDockLauncher
         {
             string scriptPath = Path.Combine(tempRoot, fileClassName + ".java");
             File.WriteAllText(scriptPath, source, new UTF8Encoding(false));
+            // 검사와 실행이 같은 파일 묶음을 봐야 한다 — 저장 검사만 형제를 알면 "검사는 통과했는데 실행이 안 되는" 짝이 생긴다.
+            WriteJavaExtraSources(tempRoot, extraSources);
             return StartJavaSessionProcess(java, scriptPath, fileClassName, qualifiedClassName, tempRoot,
                 piped ? (stdinText ?? "") : null, JavaClassPath(tempRoot, libraryJars));
         }
@@ -9375,13 +9441,20 @@ class ClassDockLauncher
     }
 
     /* 프런트는 파이썬 실행과 같은 페이로드([길이][소스][길이][표준입력])를 보낸다.
-       봉투 모양이 아니면 본문 전체를 소스로 보고 표준입력은 비운다. */
-    static void DecodeRunPayload(byte[] body, out string source, out string stdinText)
+       그 뒤에 [개수]([길이][소스])* 가 더 붙으면 같은 폴더의 형제 .java 본문이다(없으면 옛 모양 그대로).
+       경로는 받지 않는다 — 어느 폴더에 둘지는 소스가 스스로 적은 package 와 public 클래스로 정한다.
+       프런트가 준 경로를 그대로 쓰면 임시 폴더 밖으로 파일을 쓰는 길이 열린다.
+       봉투 모양이 아니면 본문 전체를 소스로 보고 나머지는 비운다. */
+    const int JavaExtraSourceMax = 60;              // 함께 받을 형제 파일 개수 상한
+    const int JavaExtraSourceBytes = 512 * 1024;    // 형제 파일 하나의 크기 상한
+
+    static void DecodeRunPayload(byte[] body, out string source, out string stdinText, out List<string> extras)
     {
         byte[] raw = body ?? new byte[0];
         var utf8 = new UTF8Encoding(false);
         source = utf8.GetString(raw);
         stdinText = "";
+        extras = new List<string>();
         try
         {
             int pos = 0;
@@ -9390,11 +9463,74 @@ class ClassDockLauncher
             int sourceAt = pos;
             pos += sourceLen;
             int stdinLen = ReadBundleInt(raw, ref pos);
-            if (stdinLen < 0 || pos + stdinLen != raw.Length) return;
+            if (stdinLen < 0 || pos + stdinLen > raw.Length) return;
+            int stdinAt = pos;
+            pos += stdinLen;
+            List<string> found = new List<string>();
+            if (pos != raw.Length)
+            {
+                int count = ReadBundleInt(raw, ref pos);
+                if (count < 0 || count > JavaExtraSourceMax) return;
+                for (int i = 0; i < count; i++)
+                {
+                    int len = ReadBundleInt(raw, ref pos);
+                    if (len < 0 || len > JavaExtraSourceBytes || pos + len > raw.Length) return;
+                    found.Add(utf8.GetString(raw, pos, len));
+                    pos += len;
+                }
+                if (pos != raw.Length) return;
+            }
             source = utf8.GetString(raw, sourceAt, sourceLen);
-            stdinText = utf8.GetString(raw, pos, stdinLen);
+            stdinText = utf8.GetString(raw, stdinAt, stdinLen);
+            extras = found;
         }
         catch { }
+    }
+
+    /* 형제 .java 를 실행 임시 폴더에 함께 풀어 둔다. javac 는 -sourcepath 에서 '클래스 이름 = 파일 이름'
+       규칙으로 찾으므로, package 를 선언한 파일은 그 package 경로에 놓여야 찾아진다(zoo.Dog → <root>/zoo/Dog.java).
+       주 파일을 먼저 쓴 뒤에 부르므로 이미 있는 자리는 건너뛴다 — 형제가 주 파일을 덮어쓸 수 없다.
+       참조되지 않는 파일은 javac 가 열어 보지도 않는다. 그래서 한 폴더를 통째로 줘도 값이 싸다. */
+    static void WriteJavaExtraSources(string tempRoot, List<string> extras)
+    {
+        if (extras == null || extras.Count == 0) return;
+        var utf8 = new UTF8Encoding(false);
+        foreach (string extra in extras)
+        {
+            if (string.IsNullOrEmpty(extra)) continue;
+            string className = JavaDeclaredFileClassName(extra);
+            if (className == null || !JavaIdentifierRe.IsMatch(className)) continue;
+            string dir = tempRoot;
+            string packageName = JavaPackageName(extra);
+            if (!string.IsNullOrEmpty(packageName))
+            {
+                bool bad = false;
+                foreach (string part in packageName.Split('.'))
+                {
+                    if (!JavaIdentifierRe.IsMatch(part)) { bad = true; break; }
+                    dir = Path.Combine(dir, part);
+                }
+                if (bad) continue;
+            }
+            string path = Path.Combine(dir, className + ".java");
+            if (File.Exists(path)) continue;
+            try
+            {
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(path, extra, utf8);
+            }
+            catch { }
+        }
+    }
+
+    /* 형제 파일의 이름은 그 파일이 실제로 선언한 타입에서만 얻는다.
+       JavaMainClassName 은 타입을 못 찾으면 "Main" 으로 떨어지는데(실행할 파일에는 맞는 기본값),
+       그대로 쓰면 문법이 깨진 형제가 엉뚱한 이름을 차지한다. */
+    static string JavaDeclaredFileClassName(string source)
+    {
+        List<JavaTypeCandidate> types = JavaTopLevelTypes(source);
+        foreach (JavaTypeCandidate type in types) if (type.IsPublic) return type.Name;
+        return types.Count > 0 ? types[0].Name : null;
     }
 
     /* javac 의 파일 이름 규칙을 맞추기 위해 public 최상위 타입을 파일 이름으로 쓴다.
@@ -9619,8 +9755,10 @@ class ClassDockLauncher
         string classPath)
     {
         // 컴파일에도 같은 classpath 를 준다 — 실행에만 주면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
-        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\" -d \"" + tempRoot
-            + "\" \"" + scriptPath + "\"";
+        // -sourcepath 는 임시 폴더 자신이다. 함께 풀어 둔 형제 .java 를 '참조된 것만' 알아서 같이 컴파일한다
+        // (파일 목록으로 다 넘기면 쓰지도 않는 파일의 오류까지 학생 화면에 올라온다).
+        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\" -sourcepath \"" + tempRoot
+            + "\" -d \"" + tempRoot + "\" \"" + scriptPath + "\"";
         ProcessStartInfo psi = new ProcessStartInfo(javac, args);
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;

@@ -61,6 +61,63 @@ function javaErrorLine(stderr, mainClass){
   return fallback;
 }
 
+/* javac 진단 한 덩어리를 편집기 표시용으로 옮긴다. 임시 경로를 지운 뒤라 파일 이름으로 시작한다.
+     Main.java:4: error: cannot find symbol
+             undefinedCall();
+             ^
+       symbol:   method undefinedCall()
+   첫 줄에서 줄 번호·심각도·설명을, ^ 자리에서 칸을, 그 뒤 들여쓴 줄에서 힌트를 얻는다.
+   JDK 에는 한국어 메시지 자원이 없어 한글 Windows 에서도 영어로 나오지만, 번역본이 깔린
+   환경까지 함께 받아 둔다(심각도 낱말이 로케일을 타는 유일한 자리다). */
+const JAVAC_DIAG_HEAD_RE = /^(\S*)\.java:(\d+):\s*([A-Za-z가-힣]+)\s*:\s*(.*)$/;
+// "3 errors" 같은 마무리 줄 — 진단이 아니라 개수 요약이라 목록에서 뺀다.
+const JAVAC_SUMMARY_RE = /^\d+\s*(?:errors?|warnings?|(?:오류|경고)\s*\d*개?)\s*$/;
+const JAVAC_SEVERITY = { error:"error", warning:"warning", note:"info", "오류":"error", "경고":"warning", "참고":"info" };
+
+function javacDiagnostics(stderr, ownFile){
+  const text = cleanJavaStderr(stderr);
+  if (!text) return [];
+  // 형제 .java 를 함께 컴파일하므로 진단이 남의 파일에서도 온다. 지금 편집 중인 파일 이름을
+  // 알려 주면 own 으로 갈라, 편집기 줄 표시는 이 파일 것만 받게 한다.
+  const own = String(ownFile || "");
+  const items = [];
+  let current = null;
+  const flush = () => {
+    if (!current) return;
+    // 캐럿(^) 줄이 칸을, 그 뒤 줄들이 힌트(symbol:·location:)를 준다.
+    // 캐럿 앞 한 줄은 소스를 그대로 되비춘 것이라 편집기에 다시 보여 줄 이유가 없다.
+    const caretAt = current.body.findIndex(line => /^\s*\^\s*$/.test(line));
+    if (caretAt >= 0){
+      current.column = current.body[caretAt].indexOf("^");
+      current.hint = current.body.slice(caretAt + 1).map(line => line.trim()).filter(Boolean).join(" · ");
+    }
+    items.push({ line:current.line, column:current.column, severity:current.severity,
+      message:current.message, hint:current.hint.slice(0, 300),
+      file:current.file, own:!own || current.file === own });
+    current = null;
+  };
+  for (const raw of text.split(/\r?\n/)){
+    const head = JAVAC_DIAG_HEAD_RE.exec(raw);
+    if (head){
+      flush();
+      const word = head[3];
+      current = { file:head[1] + ".java", line:Number(head[2]) || 1, column:0, hint:"", body:[],
+        severity:JAVAC_SEVERITY[word.toLowerCase()] || JAVAC_SEVERITY[word] || "error",
+        message:head[4].trim() };
+      continue;
+    }
+    if (!current) continue;
+    if (JAVAC_SUMMARY_RE.test(raw.trim())){ flush(); continue; }
+    current.body.push(raw);
+  }
+  flush();
+  // 지금 편집 중인 파일을 먼저, 형제 파일은 그 뒤로. javac 는 참조를 따라가며 섞어 뱉는다.
+  return items.filter(item => item.message).slice(0, 100).sort((a, b) =>
+    (a.own === b.own ? 0 : a.own ? -1 : 1)
+    || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0)
+    || a.line - b.line || a.column - b.column);
+}
+
 /* ── 자동완성: 자바 표준 라이브러리 ────────────────────────────────────────
    키워드(core.js JAVA_COMPLETION_WORDS)만으로는 수업에서 쓰는 이름이 거의 안 나온다.
    여기서는 두 가지를 더한다.
@@ -481,9 +538,31 @@ function javaImportCandidates(source, prefix, libraries){
 }
 
 // ── 세션 호출 ──────────────────────────────────────────────────────────────
-async function startJavaSession(source, stdinText, piped, libs){
-  // 페이로드 봉투는 파이썬 실행과 같은 것을 쓴다([길이][소스][길이][표준입력]).
-  const body = buildRunPayload(String(source == null ? "" : source), stdinText || "");
+/* 실행 봉투([길이][소스][길이][표준입력]) 뒤에 같은 폴더의 형제 .java 본문을 [개수]([길이][소스])* 로 잇는다.
+   경로는 보내지 않는다 — 어디에 둘지는 소스가 스스로 적은 package·public 클래스로 런처가 정한다.
+   형제가 없으면 바이트가 예전과 완전히 같다(옛 런처와 섞여도 실행이 깨지지 않는다). */
+function buildJavaRunPayload(source, stdinText, extras){
+  const base = buildRunPayload(String(source == null ? "" : source), stdinText || "");
+  const rows = (Array.isArray(extras) ? extras : []).filter(text => typeof text === "string" && text.trim());
+  if (!rows.length) return base;
+  const enc = new TextEncoder();
+  const bodies = rows.map(text => enc.encode(text));
+  let size = base.length + 4;
+  for (const body of bodies) size += 4 + body.length;
+  const out = new Uint8Array(size), view = new DataView(out.buffer);
+  out.set(base, 0);
+  let at = base.length;
+  view.setUint32(at, bodies.length, true); at += 4;
+  for (const body of bodies){
+    view.setUint32(at, body.length, true); at += 4;
+    out.set(body, at); at += body.length;
+  }
+  return out;
+}
+
+async function startJavaSession(source, stdinText, piped, libs, extras){
+  // 페이로드 봉투는 파이썬 실행과 같은 것을 쓴다([길이][소스][길이][표준입력]) + 형제 .java.
+  const body = buildJavaRunPayload(source, stdinText, extras);
   // 라이브러리는 '이름'만 보낸다 — 어느 jar 를 어디서 찾을지는 런처가 자기 카탈로그로 정한다.
   const query = [];
   if (piped) query.push("piped=1");
@@ -538,7 +617,7 @@ async function pollJavaSessionToEnd(id, options){
 // 채점용 1회 실행 — 입력을 파이프로 한 번에 넣고(에코 없음) 끝까지 기다린다.
 async function runJavaHeadless(source, stdinText, options){
   options = options || {};
-  const id = await startJavaSession(source, stdinText, true, options.libs);
+  const id = await startJavaSession(source, stdinText, true, options.libs, options.extras);
   try { return await pollJavaSessionToEnd(id, options); }
   finally { await stopJavaSession(id); }
 }
@@ -685,7 +764,7 @@ function renderJavaInstallGuide(outPanel, onReady){
 async function runJavaInteractive(source, ui, hooks){
   hooks = hooks || {};
   const { outPanel } = ui;
-  const sessionId = await startJavaSession(source, "", false, hooks.libs);
+  const sessionId = await startJavaSession(source, "", false, hooks.libs, hooks.extras);
   if (typeof hooks.isCancelled === "function" && hooks.isCancelled()){
     await stopJavaSession(sessionId);
     return { code:-1, stdout:"", stderr:"", mainClass:"", cancelled:true, sessionId };
@@ -854,7 +933,8 @@ async function runJavaGrading(source, tests, hooks){
       // 채점도 실행과 같은 라이브러리로 돌려야 한다 — 여기서 빠지면 편집기에서만 되는 코드가 된다.
       raw = await runJavaHeadless(source, javaGradingStdin(cases[index].input), {
         isCancelled: hooks.isCancelled,
-        libs: hooks.libs
+        libs: hooks.libs,
+        extras: hooks.extras
       });
     } catch(error){
       raw = { stdout:"", stderr:String((error && error.message) || error), code:-1 };
@@ -902,6 +982,9 @@ async function runJavaSource(src, ui, options){
   const gradeTests = normalizeAssignmentTests(options.gradeTests);
   const grading = gradeTests.length > 0;
   const libs = String(options.libs || "");   // 실행·채점 두 길에 같은 목록이 들어간다
+  // 같은 폴더의 형제 .java. 저장 검사와 같은 묶음을 줘야 "검사는 통과했는데 실행은 안 되는" 짝이 안 생긴다.
+  // 모으는 데 파일 읽기가 낄 수 있어 실행 표시(■·"실행 중…")를 세운 뒤에 채운다.
+  let extras = [];
   ui.running = true;
   let cancelled = false, cancelSession = null;
   const idleTitle = btn.title;
@@ -921,6 +1004,8 @@ async function runJavaSource(src, ui, options){
   if (ui.gradeBtn) ui.gradeBtn.disabled = true;
   split.classList.add("show-out");
   if (ui.clearError) ui.clearError();
+  // 저장 검사 목록 자리를 실행 결과가 넘겨받는다 — 표시를 지워 두지 않으면 다음 검사가 남의 화면을 고친다.
+  if (outPanel) delete outPanel.dataset.javaCheck;
   setStatus(grading ? "채점 중…" : "실행 중…");
   try {
     if (!(await javaBackendAvailable())){
@@ -932,12 +1017,15 @@ async function runJavaSource(src, ui, options){
       setStatus("자바(JDK) 설치 필요");
       return;
     }
+    if (typeof ui.siblingSources === "function"){
+      try { extras = (await ui.siblingSources()) || []; } catch(_){ extras = []; }
+    }
     if (grading){
       outPanel.innerHTML = '<div class="out-head">' + javaT("과제 자동채점")
         + '</div><pre class="out-pre out-muted">' + javaT("테스트 실행 중…") + '</pre>';
       const report = await runJavaGrading(source, gradeTests, {
         isCancelled: () => cancelled,
-        libs,
+        libs, extras,
         onProgress: (index, total) => { if (status) status.textContent = javaTf("채점 중… {index}/{total}", { index:index + 1, total }); }
       });
       renderAssignmentGradingResult(outPanel, report, assignmentGradingErrorText(report, gradeTests), gradeTests);
@@ -946,7 +1034,7 @@ async function runJavaSource(src, ui, options){
     const result = await runJavaInteractive(source, ui, {
       bindCancel: (fn) => { cancelSession = fn; },
       isCancelled: () => cancelled,
-      libs
+      libs, extras
     });
     const line = javaErrorLine(result.stderr, result.mainClass);
     if (line && ui.markError) ui.markError(line);
@@ -978,4 +1066,115 @@ async function runJavaSource(src, ui, options){
       ui.editorTa.focus({ preventScroll:true });
     }
   }
+}
+/* ── 저장 검사 ──────────────────────────────────────────────────────────────
+   실행하지 않고 javac 만 돌려 오류를 미리 짚는다. 부르는 자리는 '수동 저장'(.java 저장·Ctrl+S)
+   하나뿐이다 — 자동 저장(입력이 멈추고 3초)에 걸면 문장을 치는 도중의 코드가 계속 컴파일되고,
+   javac 는 문법 오류에서 첫 하나만 뱉으므로 "';' expected" 한 줄이 3초마다 깜빡이게 된다.
+   실패해도 저장을 되돌리거나 알림을 띄우지 않는다. 검사는 덤이지 저장의 조건이 아니다. */
+
+// 오류 목록. 파이썬 '코드 진단'과 같은 모양·같은 CSS(py-diagnostic-*)를 쓴다.
+// 목록이 따로 필요한 이유는 편집기 줄 표시가 글자 하나만 고쳐도 지워지기 때문이다 —
+// 오류 셋을 보고 첫 줄을 고치는 순간 나머지 둘의 표시까지 사라지면 다시 저장해야 알 수 있다.
+function renderJavaCheckResult(panel, diagnostics, ui, rawOutput){
+  if (!panel) return;
+  panel.innerHTML = "";
+  panel.dataset.javaCheck = "1";        // 이 칸이 지금 검사 결과를 들고 있다는 표시(다음 검사가 갱신 여부를 판단한다)
+  const head = document.createElement("div"); head.className = "out-head";
+  head.textContent = javaT("저장 검사");
+  panel.appendChild(head);
+  const errors = diagnostics.filter(item => item.severity === "error").length;
+  const warnings = diagnostics.filter(item => item.severity === "warning").length;
+  const summary = document.createElement("div");
+  summary.className = "py-diagnostic-summary " + (errors ? "is-error" : warnings ? "is-warning" : "is-ok");
+  if (!diagnostics.length){
+    // 컴파일은 실패했는데 줄 번호가 없는 경우(시간 초과·메모리 제한 등) — 받은 말을 그대로 보여 준다.
+    const failed = String(rawOutput || "").trim();
+    summary.className = "py-diagnostic-summary " + (failed ? "is-error" : "is-ok");
+    summary.textContent = failed ? javaT("컴파일하지 못했습니다.") : javaT("문법 오류가 없습니다.");
+    panel.appendChild(summary);
+    if (failed){
+      const pre = document.createElement("pre"); pre.className = "out-pre out-err"; pre.textContent = failed;
+      panel.appendChild(pre);
+    }
+    return;
+  }
+  summary.textContent = javaTf("오류 {errors}개 · 경고 {warnings}개 · 참고 {notes}개",
+    { errors, warnings, notes:diagnostics.length - errors - warnings });
+  panel.appendChild(summary);
+  const list = document.createElement("div"); list.className = "py-diagnostic-list";
+  const severityLabel = { error:javaT("오류"), warning:javaT("경고"), info:javaT("참고") };
+  diagnostics.forEach((item) => {
+    const row = document.createElement("button"); row.type = "button";
+    row.className = "py-diagnostic-item is-" + item.severity;
+    const mark = document.createElement("span"); mark.className = "py-diagnostic-mark";
+    mark.textContent = severityLabel[item.severity] || item.severity;
+    const where = document.createElement("code");
+    // 형제 파일의 오류에는 파일 이름을 붙인다 — 줄 번호만 있으면 지금 파일의 그 줄로 오해한다.
+    where.textContent = (item.own ? "" : item.file + " ")
+      + javaTf("{line}줄", { line:item.line }) + (item.column ? " " + (item.column + 1) + javaT("칸") : "");
+    const body = document.createElement("span"); body.className = "py-diagnostic-body";
+    const message = document.createElement("strong"); message.textContent = item.message;
+    body.appendChild(message);
+    if (item.hint){ const hint = document.createElement("small"); hint.textContent = item.hint; body.appendChild(hint); }
+    row.append(mark, where, body);
+    row.addEventListener("click", () => {
+      if (!ui) return;
+      if (item.own){ if (typeof ui.focusLine === "function") ui.focusLine(item.line); }
+      else if (typeof ui.openSiblingLine === "function") ui.openSiblingLine(item.file, item.line);
+    });
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+}
+
+/* 저장한 내용 그대로 javac 를 돌린다. 돌려주는 값은 저장 쪽이 상태 줄에 쓸 요약이고,
+   백엔드가 없거나(브라우저) JDK 가 없으면 null 을 돌려 조용히 넘어간다 — 저장할 때마다
+   "자바를 설치하세요"가 뜨면 자바 없이 코드만 적어 두는 수업을 막게 된다. */
+async function checkJavaSource(src, ui, options){
+  options = options || {};
+  const source = String(src == null ? "" : src);
+  const outPanel = ui && ui.outPanel;
+  if (!source.trim()){
+    if (ui && ui.clearError) ui.clearError();
+    return null;
+  }
+  if (!(await javaBackendAvailable())) return null;
+  let data = null;
+  try {
+    const query = options.libs ? "?libs=" + encodeURIComponent(String(options.libs)) : "";
+    const res = await fetch("/java-check" + query, {
+      method:"POST", headers:{ "Content-Type":"application/octet-stream" },
+      // 실행과 같은 봉투·같은 형제 목록을 보낸다 — 여기서만 형제를 알면 검사와 실행의 답이 갈린다.
+      body:buildJavaRunPayload(source, "", options.extras)
+    });
+    if (!res.ok) return null;
+    data = await res.json();
+  } catch(_){ return null; }
+  // 기다리는 동안 실행이 시작됐거나 화면이 닫혔으면 결과 칸을 건드리지 않는다.
+  if (!ui || ui.running || (ui.isDisposed && ui.isDisposed())) return null;
+  if (data.skipped === "libs") return null;      // 고른 라이브러리를 못 찾은 경우 — 검사 자체를 건너뛴다
+  const output = String(data.output || "");
+  // 런처가 이 소스를 어떤 파일 이름으로 저장했는지 알려 준다 — 형제 파일의 진단과 가르는 기준이다.
+  const diagnostics = javacDiagnostics(output, data.mainClass ? data.mainClass + ".java" : "");
+  const failed = data.ok === false;
+  if (!diagnostics.length && !failed){
+    if (ui.clearError) ui.clearError();
+    // 지난 검사 목록이 남아 있으면 '이제 깨끗하다'로 바꿔 준다. 그 밖에는 실행 결과를 덮지 않는다.
+    if (outPanel && outPanel.dataset.javaCheck === "1") renderJavaCheckResult(outPanel, [], ui, "");
+    return { errors:0, warnings:0, total:0, ok:true };
+  }
+  // 편집기 줄 표시는 이 파일 것만 받는다. 형제 파일의 5줄을 여기 5줄에 칠하면 없는 오류를 만든다.
+  const mine = diagnostics.filter(item => item.own);
+  if (mine.length){
+    if (ui.setDiagnosticItems) ui.setDiagnosticItems(mine);
+    else if (ui.markError) ui.markError(mine[0].line);
+  } else if (ui.clearError) ui.clearError();
+  renderJavaCheckResult(outPanel, diagnostics, ui, failed ? output : "");
+  if (ui.split) ui.split.classList.add("show-out");
+  return {
+    errors:diagnostics.filter(item => item.severity === "error").length,
+    warnings:diagnostics.filter(item => item.severity === "warning").length,
+    total:diagnostics.length, ok:!failed
+  };
 }

@@ -20,6 +20,82 @@ const JAVA_STARTER_SOURCE = [
   ""
 ].join("\n");
 
+const JAVA_SIBLING_MAX = 60;                       // 함께 컴파일할 형제 .java 개수 상한(런처 상한과 같은 값)
+const JAVA_SIBLING_MAX_BYTES = 2 * 1024 * 1024;    // 형제 본문 합계 상한
+
+// 작업공간 안에서의 문서 경로·그 폴더. 파이썬 쪽 workspacePythonImportTargets 와 같은 사다리를 쓴다.
+function javaDocPath(doc){
+  return String((doc && (doc.workspacePath || doc.relPath || doc.name)) || "")
+    .replace(/\\/g, "/").replace(/^\/+/, "");
+}
+function javaDocDir(path){
+  const at = String(path || "").lastIndexOf("/");
+  return at < 0 ? "" : String(path).slice(0, at);
+}
+
+/* 같은 폴더에 함께 열려 있는 .java 문서들의 본문. 자바 수업은 Dog.java·Main.java 처럼 클래스마다
+   파일을 나누는데, 실행기는 파일 하나만 컴파일해서 지금까지 그런 코드는 아예 돌지 않았다.
+   여기서 모은 본문을 실행·채점·저장 검사에 함께 보내면 javac 가 -sourcepath 로 찾아 쓴다.
+   폴더가 다르면(다른 archiveCtx·다른 하위 폴더) 넣지 않는다 — 이름이 겹치는 남의 과제 파일을
+   끌어오면 없던 오류가 생긴다. 파일 이름은 보내지 않는다(런처가 소스의 package·public 클래스로 정한다). */
+async function javaSiblingSources(ownerDoc){
+  if (!ownerDoc || typeof docs === "undefined" || !Array.isArray(docs)) return [];
+  const context = ownerDoc.archiveCtx || null;
+  const dir = javaDocDir(javaDocPath(ownerDoc));
+  const rows = [];
+  for (const doc of docs){
+    if (!doc || doc === ownerDoc) continue;
+    if (typeof workspaceHasDoc === "function" && !workspaceHasDoc(doc)) continue;
+    if ((doc.archiveCtx || null) !== context) continue;
+    if (String(doc.sourceKey || "").startsWith("definition:")) continue;
+    const path = javaDocPath(doc);
+    if (!/\.java$/i.test(path) || javaDocDir(path) !== dir) continue;
+    rows.push(doc);
+    if (rows.length >= JAVA_SIBLING_MAX) break;
+  }
+  const out = [];
+  let total = 0;
+  for (const doc of rows){
+    // 살아있는 편집기 > 저장된 텍스트 > 디스크 순(내용 검색·자동완성이 쓰는 것과 같은 사다리).
+    let text = null;
+    if (typeof hasLiveDocText === "function" && typeof liveDocText === "function" && hasLiveDocText(doc)){
+      const live = liveDocText(doc);
+      if (typeof live === "string") text = live;
+    }
+    if (text == null && typeof doc.savedText === "string") text = doc.savedText;
+    if (text == null && typeof openDocRunText === "function"){
+      try { text = await openDocRunText(doc); } catch(_){ text = null; }
+    }
+    if (typeof text !== "string" || !text.trim()) continue;
+    total += text.length;
+    if (total > JAVA_SIBLING_MAX_BYTES) break;
+    out.push(text);
+  }
+  return out;
+}
+
+/* 형제 파일의 오류 줄을 눌렀을 때 그 문서로 옮겨 간다.
+   런처는 파일 이름을 소스의 public 클래스로 정하므로 문서 이름과 다를 수 있다 — 못 찾으면 알려만 준다. */
+function openJavaSiblingLine(ownerDoc, fileName, line){
+  const want = String(fileName || "").toLowerCase();
+  const context = ownerDoc ? (ownerDoc.archiveCtx || null) : null;
+  const dir = javaDocDir(javaDocPath(ownerDoc));
+  const pool = (typeof docs !== "undefined" && Array.isArray(docs)) ? docs : [];
+  const target = pool.find((doc) => {
+    if (!doc || doc === ownerDoc || (doc.archiveCtx || null) !== context) return false;
+    const path = javaDocPath(doc);
+    return javaDocDir(path) === dir && path.split("/").pop().toLowerCase() === want;
+  });
+  if (!target){
+    if (typeof toast === "function") toast(javaTf("{file} 을(를) 이 작업공간에서 찾지 못했어요.", { file:fileName }), 2600);
+    return;
+  }
+  target.pendingFocusLine = line;
+  if (typeof setActiveDoc === "function") setActiveDoc(target.id);
+  const navigator = target.codeEditor || target.codeViewer;
+  if (navigator && typeof navigator.focusLine === "function") navigator.focusLine(line);
+}
+
 /* 실행에 함께 넣을 라이브러리(jar) 고르기. 자바스크립트 쪽 라이브러리 팝오버(buildJsLibraryPicker)와
    같은 자리·같은 조작이라 화면 모양(run-pkg-wrap·js-library-*)도 그대로 쓴다.
    다른 점은 목록의 출처다 — 카탈로그와 설치 여부를 모두 런처가 알려 주므로 여기서는 그리기만 한다. */
@@ -648,6 +724,13 @@ function renderJavaRunnable(context){
     btn: runBtn, gradeBtn, status, outPanel, split, editorTa: editor.ta,
     fileBase: saveName,
     markError: (line) => editor.markError(line),
+    // 저장 검사는 오류를 여러 개 한꺼번에 준다 — 줄 번호만 넘기면 설명·심각도·칸이 버려지므로
+    // 파이썬 진단과 같은 통로(setDiagnosticItems)로 넘겨 호버 설명까지 살린다.
+    setDiagnosticItems: (items) => editor.setDiagnosticItems(items),
+    focusLine: (line) => editor.focusLine(line),
+    // 실행·채점·저장 검사가 같은 형제 목록을 본다 — 한 곳만 알면 서로 다른 답을 낸다.
+    siblingSources: () => javaSiblingSources(ownerDoc),
+    openSiblingLine: (fileName, line) => openJavaSiblingLine(ownerDoc, fileName, line),
     clearError: () => editor.clearError()
   };
   const libraryPicker = buildJavaLibraryPicker(bar, libBtn, javaLibraryStorageKey(draftKey), {
@@ -783,6 +866,34 @@ function renderJavaRunnable(context){
   });
   observer.observe(split, { attributes:true, attributeFilter:["class"] });
 
+  /* 저장 검사 — 저장이 끝난 뒤 그 내용 그대로 javac 를 돌려 오류 줄을 표시한다.
+     수동 저장에만 건다(자동 저장은 입력이 멈추고 3초마다 도므로 치는 도중의 코드를 계속 컴파일하게 된다).
+     저장을 붙들지 않고 뒤따라 돌며, 실패해도 저장 결과에는 손대지 않는다. */
+  let checkSeq = 0, checkClearTimer = 0;
+  const runSaveCheck = async (value) => {
+    if (disposed || ui.running) return;
+    const seq = ++checkSeq;
+    clearTimeout(checkClearTimer);
+    status.textContent = javaT("검사 중…");
+    let report = null;
+    try {
+      report = await checkJavaSource(value, ui, {
+        libs:libraryPicker.getQuery(),
+        extras:await javaSiblingSources(ownerDoc)   // 같은 폴더의 형제 .java 도 함께 컴파일한다
+      });
+    }
+    catch(error){ console.warn("java save check failed:", error); }
+    if (disposed || seq !== checkSeq || ui.running) return;
+    if (!report){ refreshEditState(); return; }   // 자바 없음·검사 실패 → 원래 상태 표시로 되돌린다
+    status.textContent = report.total
+      ? javaTf("오류 {errors}개 · 경고 {warnings}개", { errors:report.errors, warnings:report.warnings })
+      : javaT("검사 통과");
+    if (!report.total){
+      // 통과 메시지는 잠깐만 둔다 — 저장 뒤의 빈 상태 줄이 이 화면의 기본 모습이다.
+      checkClearTimer = setTimeout(() => { if (!disposed && seq === checkSeq && !ui.running) refreshEditState(); }, 1800);
+    }
+  };
+
   saveBtn.addEventListener("click", async () => {
     saveBtn.disabled = true;
     try {
@@ -801,6 +912,7 @@ function renderJavaRunnable(context){
         await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(writtenValue), "text/plain;charset=utf-8");
       }
       refreshEditState();
+      runSaveCheck(writtenValue);
     } finally { saveBtn.disabled = false; }
   });
   revertBtn.addEventListener("click", async () => {
@@ -839,6 +951,7 @@ function renderJavaRunnable(context){
       disposed = true;
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
+      checkSeq++; clearTimeout(checkClearTimer);
       observer.disconnect();
       outputChromeObserver.disconnect();
       libraryPicker.destroy();
