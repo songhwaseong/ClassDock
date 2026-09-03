@@ -12,7 +12,11 @@ const ssh = fs.readFileSync(path.join(root, "desktop", "ssh_terminal.cs"), "utf8
 const ui = fs.readFileSync(path.join(root, "src", "js", "remote-terminal.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
 const build = fs.readFileSync(path.join(root, "desktop", "build.bat"), "utf8");
+const buildDotnet = fs.readFileSync(path.join(root, "desktop", "build-dotnet.bat"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "scripts.manifest.json"), "utf8"));
+
+const embeddedResources = (source) => [...source.matchAll(/\/resource:("[^"]+"|[^\s]+)/gi)]
+  .map((match) => match[1].replace(/^"|"$/g, ""));
 
 const uiApi = () => {
   const context = {
@@ -143,6 +147,12 @@ test("SSH API는 로컬 실행 토큰으로 보호되고 EXE 빌드에 전용 �
   assert.match(launcher, /ClassDockSshTerminal\.Open\(body\)/);
   assert.match(launcher, /ClassDockSshTerminal\.ShutdownAll\(\)/);
   assert.match(build, /"launcher\.cs" "ssh_terminal\.cs"/);
+});
+
+test("C# 빌드 경로는 SSH 셸 통합을 포함한 같은 리소스를 EXE에 내장한다", () => {
+  const resources = embeddedResources(build);
+  assert.ok(resources.includes("ssh_shell_integration.bash,ssh_shell_integration.bash"));
+  assert.deepEqual(embeddedResources(buildDotnet), resources);
 });
 
 test("비밀번호는 저장소·명령행·환경변수가 아닌 일회성 named pipe로 전달한다", () => {

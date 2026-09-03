@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo [2/3] Building exe...
-"%CSC%" /nologo /target:winexe /r:System.IO.Compression.dll /r:System.Security.dll /out:"..\ClassDock.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py /resource:db_worker.py,db_worker.py /resource:npm_package_runner.js,npm_package_runner.js "launcher.cs" "ssh_terminal.cs" "ssh_files.cs"
+"%CSC%" /nologo /target:winexe /r:System.IO.Compression.dll /r:System.Security.dll /out:"..\ClassDock.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py /resource:db_worker.py,db_worker.py /resource:npm_package_runner.js,npm_package_runner.js /resource:ssh_shell_integration.bash,ssh_shell_integration.bash "launcher.cs" "ssh_terminal.cs" "ssh_files.cs"
 if errorlevel 1 (
   echo ^>^> Build failed.
   exit /b 1
