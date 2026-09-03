@@ -2125,6 +2125,19 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
     results.innerHTML = ""; options.length = 0; active = -1; items = [];
   };
   const closeResults = () => { resetList(); results.hidden = true; };
+  /* 도구막대가 여러 줄로 접히거나 창이 낮아도 목록이 화면 밖으로 잘리지 않게 한다. 아래 공간이
+     모자라고 위가 더 넓으면 위로 펼치며, 어느 쪽이든 실제 남은 높이까지만 스크롤한다. */
+  const fitResultsToViewport = () => {
+    const wrapRect = results.parentElement.getBoundingClientRect();
+    const gap = 8;
+    const below = Math.max(0, window.innerHeight - wrapRect.bottom - 4 - gap);
+    const above = Math.max(0, wrapRect.top - 4 - gap);
+    const wanted = Math.min(240, results.scrollHeight);
+    const openUp = below < wanted && above > below;
+    results.style.top = openUp ? "auto" : "";
+    results.style.bottom = openUp ? "calc(100% + 4px)" : "";
+    results.style.maxHeight = Math.min(240, openUp ? above : below) + "px";
+  };
   const setActive = (index) => {
     active = index;
     options.forEach((option, i) => option.classList.toggle("is-current", i === index));
@@ -2164,6 +2177,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       results.appendChild(addOption(place.name, "map-result", () => pick(place)));
     }
     results.hidden = !items.length;
+    if (!results.hidden) fitResultsToViewport();
     /* 여럿일 때는 찾자마자 옮기지 않는다 — 첫 결과가 엉뚱하면 지도가 먼저 튀어, 목록에서 제
        후보를 찾는 동안 보던 자리를 잃기 때문이다. 대신 첫 줄을 짚어 둔다: 검색한 Enter 에 이어
        Enter 를 한 번 더 누르면 첫 후보로 옮겨 간다. */
@@ -2207,6 +2221,7 @@ function mapAttachPlaceSearch(input, button, results, onMove, setNote){
       input.focus();
     }));
     results.hidden = false;
+    fitResultsToViewport();
   };
 
   const search = async () => {

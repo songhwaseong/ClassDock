@@ -1071,6 +1071,13 @@ test("검색란을 누르면 최근 검색어를 펼치고 화살표·Enter 로 
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(css, /\.map-result\.is-current\{background:var\(--panel-hover\)\}|\.map-result:hover,\.map-result\.is-current\{background:var\(--panel-hover\)\}/);
   assert.match(css, /\.map-result-row\{display:flex/);
+  // 기록 8줄 뒤에 붙는 전체 지우기는 스크롤 아래로 사라지지 않는 고정 꼬리말이어야 한다.
+  assert.match(css, /\.map-result\.is-clear\{[^}]*position:sticky;[^}]*bottom:0/);
+  // 창이 낮거나 도구막대가 접혀도 남은 화면 높이에 맞추고, 위쪽이 더 넓으면 위로 펼친다.
+  assert.match(attach[1], /const fitResultsToViewport = \(\) =>/);
+  assert.match(attach[1], /window\.innerHeight - wrapRect\.bottom/);
+  assert.match(attach[1], /const openUp = below < wanted && above > below/);
+  assert.match(attach[1], /results\.style\.maxHeight = Math\.min\(240, openUp \? above : below\) \+ "px"/);
 });
 
 test("검색 표식은 지도를 눌러도 남고 Esc 로만 지운다", () => {
