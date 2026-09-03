@@ -18,7 +18,7 @@ test("이름 변경은 원본 폴더 권한이 있는 문서에만 노출하고 
   const sidebarMenu = source.slice(source.indexOf("function openSidebarDocMenu"), source.indexOf("// 업로드한 일반 폴더 우클릭 메뉴"));
   assert.match(sidebarMenu, /if \(canRenameOriginalDoc\(doc\)\) add\("이름 바꾸기"/);
   assert.doesNotMatch(sidebarMenu, /if \(!canRenameOriginalDoc\(doc\)\) return;/);
-  assert.match(rename, /moveOriginalFile\(ctx, name\)/);
+  assert.match(rename, /moveOriginalFile\(ctx, name, javaReplacement\)/);
   assert.match(source, /await ctx\.dirHandle\.removeEntry\(ctx\.oldName\)/);
   assert.match(source, /doc\.workspacePath = doc\.workspacePath \? refreshWorkspacePath/);
   assert.match(source, /doc\.stableRestoreKey = docStableKey\(doc\)/);

@@ -11,6 +11,9 @@ const read = (file) => fs.readFileSync(path.join(__dirname, "../src/js", file), 
 const pythonViewerSource = ["code-viewer.js", "python-snippets.js", "python-editor.js", "python-run-context.js", "python-runtime.js"]
   .map(read).join("\n");
 const spreadsheetSource = read("spreadsheet-viewer.js");
+const textModalSource = read("office-doc-viewers.js");
+const documentsSource = read("documents.js");
+const stylesSource = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
 const launcherSource = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
 
 const context = vm.createContext({
@@ -161,4 +164,17 @@ test("자동 저장 폴더에 쓰는 함수는 '제자리'라고 부르지 않�
 
 test("사본으로 저장하면 원본을 고치는 방법까지 알린다", () => {
   assert.match(spreadsheetSource, /사본으로 저장했어요[\s\S]{0,120}폴더 열기/);
+});
+
+test("자바 파일 이름 입력 중에는 규칙을 안내하고 저장 버튼을 비활성화한다", () => {
+  const askStart = textModalSource.indexOf("function askText(opts)");
+  const askEnd = textModalSource.indexOf("function confirmDialog", askStart);
+  const askSource = textModalSource.slice(askStart, askEnd);
+  assert.match(askSource, /typeof opts\.validate === "function"/);
+  assert.match(askSource, /okButton\.disabled = !!error/);
+  assert.match(askSource, /input\.addEventListener\("input", refreshValidation\)/);
+  assert.match(askSource, /if \(!refreshValidation\(\)\) return/);
+  assert.match(pythonViewerSource, /askScratchSaveName[\s\S]*?javaFileNameValidationMessage[\s\S]*?okText: "저장", validate/);
+  assert.match(documentsSource, /title: "이름 바꾸기"[\s\S]*?validate: oldExt === "java"/);
+  assert.match(stylesSource, /\.modal-card \.sub\.is-error\{color:var\(--danger\)\}/);
 });

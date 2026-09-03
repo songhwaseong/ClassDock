@@ -1787,6 +1787,12 @@ class ClassDockLauncher
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaLibraryListJson()));
                 }
+                else if (method == "GET" && path.StartsWith("/java-lib-members", StringComparison.Ordinal))
+                {
+                    // 직접 좌표로 받은 jar 의 멤버 표. 처음 한 번만 javap 를 돌리고 그 뒤로는 캐시에서 답한다.
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(JavaLibraryMembersJson(QueryValue(path, "spec"))));
+                }
                 else if (method == "POST" && path == "/java-lib-install-start")
                 {
                     string libConfirmed;
@@ -8629,6 +8635,355 @@ class ClassDockLauncher
         return seen.Count;
     }
 
+    /* 카탈로그에 없는 jar(직접 좌표로 받은 것)는 알려 줄 클래스 이름이 없어 자동완성이 통째로 비었다.
+       jar 안의 최상위 클래스 이름만 읽어 채운다 — 압축을 풀지 않고 엔트리 이름만 훑으므로
+       0.6MB jar 기준 40ms 남짓이고, 같은 파일은 아래 캐시가 한 번만 읽게 한다.
+       메서드까지는 뽑지 않는다(javap 를 여러 번 돌려야 하고 큰 jar 는 표가 수백 KB 가 된다). */
+    const int JavaJarWordLimit = 400;        // 이보다 많으면 자동완성 목록에서 키워드가 묻힌다
+    static readonly Dictionary<string, string> JavaJarWordCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, string> JavaJarClassCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    static readonly object JavaJarWordLock = new object();
+
+    static string JavaLibraryJarWords(string jarPath)
+    {
+        if (string.IsNullOrEmpty(jarPath)) return "";
+        string key;
+        try
+        {
+            FileInfo info = new FileInfo(jarPath);
+            if (!info.Exists) return "";
+            // 같은 자리에 다른 jar 가 오면(재설치) 다시 읽도록 크기·수정시각을 열쇠에 넣는다.
+            key = jarPath + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks;
+        }
+        catch { return ""; }
+        lock (JavaJarWordLock)
+        {
+            string hit;
+            if (JavaJarWordCache.TryGetValue(key, out hit)) return hit;
+        }
+        string words = ScanJavaJarWords(jarPath);
+        lock (JavaJarWordLock)
+        {
+            if (JavaJarWordCache.Count > 64) JavaJarWordCache.Clear();   // 오래 켜 둬도 무한정 쌓이지 않게
+            JavaJarWordCache[key] = words;
+        }
+        return words;
+    }
+
+    // 자동 import 에는 단순 이름뿐 아니라 패키지 전체 이름도 필요하다. ZIP 목록에서 읽고 같은 방식으로 캐시한다.
+    static string JavaLibraryJarClasses(string jarPath)
+    {
+        if (string.IsNullOrEmpty(jarPath)) return "";
+        string key;
+        try
+        {
+            FileInfo info = new FileInfo(jarPath);
+            if (!info.Exists) return "";
+            key = jarPath + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks;
+        }
+        catch { return ""; }
+        lock (JavaJarWordLock)
+        {
+            string hit;
+            if (JavaJarClassCache.TryGetValue(key, out hit)) return hit;
+        }
+        List<string> classes = EnumerateJavaJarClasses(jarPath, JavaJarWordLimit);
+        classes.Sort(StringComparer.Ordinal);
+        string names = string.Join(" ", classes.ToArray());
+        lock (JavaJarWordLock)
+        {
+            if (JavaJarClassCache.Count > 64) JavaJarClassCache.Clear();
+            JavaJarClassCache[key] = names;
+        }
+        return names;
+    }
+
+    static bool IsHiddenJavaPackagePath(string path)
+    {
+        string lowered = "/" + (path ?? "").Replace('\\', '/').ToLowerInvariant();
+        // 라이브러리가 "쓰라고 낸" 것이 아닌 자리 — 제안하면 컴파일은 되어도 다음 판올림에 깨진다.
+        return lowered.Contains("/internal/") || lowered.Contains("/impl/") || lowered.Contains("/shaded/");
+    }
+
+    /* jar 안의 최상위 클래스(패키지까지 붙은 이름). 이름 목록과 javap 멤버 추출이 같은 규칙을 쓴다. */
+    static List<string> EnumerateJavaJarClasses(string jarPath, int limit)
+    {
+        List<string> classes = new List<string>();
+        try
+        {
+            using (FileStream stream = File.OpenRead(jarPath))
+            using (ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read))
+            {
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    string full = entry.FullName ?? "";
+                    if (!full.EndsWith(".class", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (full.IndexOf('$') >= 0) continue;                                          // 내부·익명 클래스
+                    if (full.StartsWith("META-INF/", StringComparison.OrdinalIgnoreCase)) continue; // 멀티릴리스 사본
+                    if (IsHiddenJavaPackagePath(full)) continue;
+                    string name = entry.Name ?? "";
+                    if (name.Length <= 6) continue;
+                    name = name.Substring(0, name.Length - 6);                                      // ".class" 를 뗀다
+                    // 자바 클래스는 대문자로 시작한다 — package-info 처럼 관례 밖 이름은 제안하지 않는다.
+                    if (name.Length == 0 || !char.IsUpper(name[0])) continue;
+                    classes.Add(full.Substring(0, full.Length - 6).Replace('/', '.'));
+                    if (classes.Count >= limit) break;
+                }
+            }
+        }
+        catch { return new List<string>(); }   // 깨진 jar 라도 목록 그리기는 계속되어야 한다
+        return classes;
+    }
+
+    static string JavaSimpleName(string qualified)
+    {
+        string value = qualified ?? "";
+        int at = value.LastIndexOf('.');
+        return at < 0 ? value : value.Substring(at + 1);
+    }
+
+    static string ScanJavaJarWords(string jarPath)
+    {
+        List<string> names = new List<string>();
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string qualified in EnumerateJavaJarClasses(jarPath, JavaJarWordLimit))
+        {
+            string simple = JavaSimpleName(qualified);
+            if (simple.Length == 0 || !seen.Add(simple)) continue;
+            names.Add(simple);
+        }
+        names.Sort(StringComparer.Ordinal);
+        return string.Join(" ", names.ToArray());
+    }
+
+    /* 이름 다음은 멤버다. 직접 좌표로 받은 jar 는 무엇이 들어 있는지 적어 둔 표가 없으므로 javap 로 뽑는다.
+       javap 는 클래스를 읽기만 하고 실행하지 않으므로 남의 jar 에 돌려도 안전하다.
+       주의할 점 셋:
+         · javap 는 javac 와 달리 @argfile 을 못 읽는다(파일 이름을 클래스 이름으로 오해한다) —
+           그래서 한 번에 다 넘기면 Windows 명령줄 32KB 한도에 걸린다. 400개씩 끊어 부른다.
+         · 인자 '이름' 은 클래스 파일에 남지 않는다(-parameters 로 컴파일한 jar 만 예외).
+           그래서 이름만 모으고 서명은 만들지 않는다 — 손으로 적어 둔 기본 목록보다 안내가 얕은 이유다.
+         · 큰 jar 는 표가 수백 KB 가 된다. 클래스·용량 상한을 두고, 넘으면 거기서 끊는다.
+       뽑은 표는 jar 옆에 <파일>.members.json 으로 남겨 다음부터는 곧바로 돌려준다. */
+    const int JavaJarMemberClassLimit = 800;      // javap 로 훑을 최상위 클래스 수
+    const int JavaJarMemberBatch = 400;           // 한 번의 javap 호출에 넘길 클래스 수(명령줄 길이 한도)
+    const int JavaJarMemberJsonLimit = 200 * 1024;
+    const int JavaJarMemberTimeoutMs = 30000;     // 한 번의 javap 호출이 이보다 걸리면 포기한다
+    static readonly object JavaJarMemberLock = new object();
+
+    // 좌표 하나의 멤버 표(JSON). 기본 목록에 있는 것은 프런트가 손으로 적어 둔 표를 쓰므로 여기서 뽑지 않는다.
+    static string JavaLibraryMembersJson(string spec)
+    {
+        JavaLibraryTarget target = ParseJavaLibraryTarget(spec);
+        if (target == null || !string.IsNullOrEmpty(target.Id)) return "{}";
+        string file = FindJavaLibraryFile(target.Relative);
+        if (file == null) return "{}";
+        lock (JavaJarMemberLock)
+        {
+            string cached = ReadJavaJarMemberCache(file);
+            if (cached != null) return cached;
+            string json = ExtractJavaJarMembersJson(file);
+            if (json == null) return "{}";
+            WriteJavaJarMemberCache(file, json);
+            return json;
+        }
+    }
+
+    static string JavaJarMemberCachePath(string jarPath) { return jarPath + ".members.json"; }
+
+    // jar 보다 새 캐시만 쓴다 — 같은 좌표를 지웠다 다시 받으면 표도 다시 뽑아야 한다.
+    static string ReadJavaJarMemberCache(string jarPath)
+    {
+        try
+        {
+            string cache = JavaJarMemberCachePath(jarPath);
+            if (!File.Exists(cache)) return null;
+            if (File.GetLastWriteTimeUtc(cache) < File.GetLastWriteTimeUtc(jarPath)) return null;
+            if (new FileInfo(cache).Length > JavaJarMemberJsonLimit * 2) return null;
+            string json = File.ReadAllText(cache, Encoding.UTF8);
+            // v1 은 단순 클래스 이름과 멤버 이름만 저장해 동명 클래스·static 구분을 잃었다.
+            // 새 형식 표식이 없는 캐시는 다시 뽑아 잘못된 자동완성이 계속 남지 않게 한다.
+            return json.IndexOf("\"$schema\":2", StringComparison.Ordinal) >= 0 ? json : null;
+        }
+        catch { return null; }
+    }
+
+    // 쓰지 못해도(읽기 전용 폴더 등) 이번 답은 그대로 나간다 — 다음에 다시 뽑을 뿐이다.
+    static void WriteJavaJarMemberCache(string jarPath, string json)
+    {
+        try { File.WriteAllText(JavaJarMemberCachePath(jarPath), json ?? "{}", new UTF8Encoding(false)); }
+        catch { }
+    }
+
+    static string ExtractJavaJarMembersJson(string jarPath)
+    {
+        string java = FindJava();
+        if (java == null) return null;
+        string bin = Path.GetDirectoryName(java);
+        string javap = string.IsNullOrEmpty(bin) ? null : Path.Combine(bin, "javap.exe");
+        if (javap == null || !File.Exists(javap)) return null;
+        List<string> classes = EnumerateJavaJarClasses(jarPath, JavaJarMemberClassLimit);
+        if (classes.Count == 0) return "{\"$schema\":2}";
+        Dictionary<string, List<string>> table = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        List<string> order = new List<string>();
+        for (int i = 0; i < classes.Count; i += JavaJarMemberBatch)
+        {
+            int take = Math.Min(JavaJarMemberBatch, classes.Count - i);
+            string text = RunJavap(javap, jarPath, classes.GetRange(i, take));
+            // 시간 초과·실패한 결과를 빈/부분 캐시로 굳히지 않는다. 다음 요청에서 다시 시도할 수 있어야 한다.
+            if (text == null) return null;
+            ParseJavapOutput(text, table, order);
+        }
+        return JavaMemberTableJson(table, order);
+    }
+
+    static string RunJavap(string javap, string jarPath, List<string> classes)
+    {
+        StringBuilder args = new StringBuilder();
+        args.Append("-public -classpath \"").Append(jarPath).Append('"');
+        foreach (string name in classes) args.Append(' ').Append(name);
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(javap, args.ToString());
+            psi.UseShellExecute = false; psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+            psi.StandardOutputEncoding = Encoding.UTF8;
+            using (Process proc = Process.Start(psi))
+            {
+                /* 두 스트림을 먼저 동시에 비운다. 한쪽을 ReadToEnd 로 다 읽은 뒤 다른 쪽을 읽으면
+                   자식이 반대쪽 파이프 버퍼에서 막혀 WaitForExit(제한 시간)까지 도달하지 못할 수 있다. */
+                string output = "";
+                Thread outReader = new Thread(delegate()
+                {
+                    try { output = proc.StandardOutput.ReadToEnd(); } catch { }
+                });
+                Thread errReader = new Thread(delegate()
+                {
+                    try { proc.StandardError.ReadToEnd(); } catch { }
+                });
+                outReader.IsBackground = true; errReader.IsBackground = true;
+                outReader.Start(); errReader.Start();
+                bool exited = proc.WaitForExit(JavaJarMemberTimeoutMs);
+                if (!exited)
+                {
+                    try { proc.Kill(); } catch { }
+                    try { proc.WaitForExit(2000); } catch { }
+                    try { outReader.Join(2000); errReader.Join(2000); } catch { }
+                    return null;
+                }
+                try { outReader.Join(2000); errReader.Join(2000); } catch { }
+                return output;
+            }
+        }
+        catch { return null; }
+    }
+
+    /* javap 출력은 "클래스 한 줄 + 들여쓴 멤버 여러 줄" 이 되풀이된다.
+         public final class org.apache.commons.lang3.StringUtils {
+           public static boolean isBlank(java.lang.CharSequence);
+           public static final java.lang.String EMPTY;
+         }
+       멤버 앞에는 S:/I:로 static/instance를, 메서드 뒤에는 ()를 붙여 프런트가 안전하게 가른다. */
+    static void ParseJavapOutput(string text, Dictionary<string, List<string>> table, List<string> order)
+    {
+        string current = null;
+        foreach (string raw in (text ?? "").Replace("\r\n", "\n").Split('\n'))
+        {
+            string line = raw.TrimEnd();
+            if (line.Length == 0) continue;
+            if (line[0] != ' ' && line[0] != '\t')
+            {
+                current = JavapTypeName(line);
+                if (current != null && !table.ContainsKey(current)) { table[current] = new List<string>(); order.Add(current); }
+                continue;
+            }
+            if (current == null) continue;
+            string member = JavapMemberName(line);
+            if (member == null) continue;
+            List<string> list = table[current];
+            if (!list.Contains(member)) list.Add(member);
+        }
+    }
+
+    // "public final class a.b.C<T> {" → "a.b.C". 패키지까지 보존해야 서로 다른 C의 멤버가 섞이지 않는다.
+    static string JavapTypeName(string line)
+    {
+        string[] keywords = new string[] { " class ", " interface ", " enum ", " record " };
+        int at = -1, skip = 0;
+        foreach (string keyword in keywords)
+        {
+            int found = line.IndexOf(keyword, StringComparison.Ordinal);
+            if (found >= 0 && (at < 0 || found < at)) { at = found; skip = keyword.Length; }
+        }
+        if (at < 0) return null;
+        string rest = line.Substring(at + skip).TrimStart();
+        int end = rest.Length;
+        for (int i = 0; i < rest.Length; i++)
+        {
+            char c = rest[i];
+            if (c == '<' || c == ' ' || c == '{' || c == '\t') { end = i; break; }
+        }
+        string qualified = rest.Substring(0, end);
+        string simple = JavaSimpleName(qualified);
+        if (simple.Length == 0 || !char.IsUpper(simple[0])) return null;
+        foreach (string part in qualified.Split('.'))
+        {
+            if (part.Length == 0 || (!char.IsLetter(part[0]) && part[0] != '_' && part[0] != '$')) return null;
+            foreach (char c in part) if (!IsJavaIdentifierPart(c)) return null;
+        }
+        return qualified;
+    }
+
+    /* 들여쓴 한 줄에서 멤버 이름. S:/I: 뒤에 메서드는 "이름()", 필드는 "이름".
+       생성자(반환형이 없고 이름이 클래스와 같다)는 자동완성에 쓸모가 없지만, 여기서는 이름만 보고
+       가릴 수 없으므로 부르는 쪽(JavaMemberTableJson)에서 클래스 이름과 같은 것을 뺀다. */
+    static string JavapMemberName(string line)
+    {
+        string text = line.Trim();
+        if (!text.StartsWith("public", StringComparison.Ordinal)) return null;
+        if (text.EndsWith("{", StringComparison.Ordinal)) return null;
+        int paren = text.IndexOf('(');
+        string head = paren >= 0 ? text.Substring(0, paren) : text.TrimEnd(';');
+        int end = head.Length;
+        while (end > 0 && !IsJavaIdentifierPart(head[end - 1])) end--;
+        int start = end;
+        while (start > 0 && IsJavaIdentifierPart(head[start - 1])) start--;
+        if (end <= start) return null;
+        string name = head.Substring(start, end - start);
+        if (name.Length == 0 || char.IsDigit(name[0])) return null;
+        // 클래스 수신자와 인스턴스 수신자에서 잘못된 항목을 섞지 않도록 static 여부도 함께 싣는다.
+        bool isStatic = text.IndexOf(" static ", StringComparison.Ordinal) >= 0;
+        return (isStatic ? "S:" : "I:") + name + (paren >= 0 ? "()" : "");
+    }
+
+    static bool IsJavaIdentifierPart(char c) { return char.IsLetterOrDigit(c) || c == '_' || c == '$'; }
+
+    static string JavaMemberTableJson(Dictionary<string, List<string>> table, List<string> order)
+    {
+        StringBuilder sb = new StringBuilder("{\"$schema\":2");
+        foreach (string cls in order)
+        {
+            List<string> list = table[cls];
+            List<string> kept = new List<string>();
+            foreach (string member in list)
+            {
+                // 생성자는 제안해도 쓸 데가 없다(점 뒤에 나오지 않는다).
+                string bare = member.StartsWith("S:", StringComparison.Ordinal) || member.StartsWith("I:", StringComparison.Ordinal)
+                    ? member.Substring(2) : member;
+                string simple = JavaSimpleName(cls);
+                if (bare == simple || bare == simple + "()") continue;
+                kept.Add(member);
+            }
+            if (kept.Count == 0) continue;
+            StringBuilder entry = new StringBuilder();
+            if (sb.Length > 1) entry.Append(',');
+            entry.Append(JsonString(cls)).Append(':').Append(JsonString(string.Join(" ", kept.ToArray())));
+            if (sb.Length + entry.Length > JavaJarMemberJsonLimit) break;   // 상한을 넘으면 거기까지만
+            sb.Append(entry);
+        }
+        return sb.Append('}').ToString();
+    }
+
     static string JavaLibraryRowJson(JavaLibraryTarget target, JavaLibrary catalogItem)
     {
         string file = FindJavaLibraryFile(target.Relative);
@@ -8646,6 +9001,12 @@ class ClassDockLauncher
         if (catalogItem != null)
             sb.Append(",\"words\":").Append(JsonString(catalogItem.Words ?? ""))
               .Append(",\"sample\":").Append(JsonString(catalogItem.Sample ?? ""));
+        else if (file != null)
+        {
+            // 카탈로그에 없는 jar 는 손으로 적어 둔 목록이 없다 — jar 안에서 클래스 이름을 읽어 채운다.
+            sb.Append(",\"words\":").Append(JsonString(JavaLibraryJarWords(file)))
+              .Append(",\"classes\":").Append(JsonString(JavaLibraryJarClasses(file)));
+        }
         return sb.Append('}').ToString();
     }
 

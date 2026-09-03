@@ -61,6 +61,425 @@ function javaErrorLine(stderr, mainClass){
   return fallback;
 }
 
+/* ── 자동완성: 자바 표준 라이브러리 ────────────────────────────────────────
+   키워드(core.js JAVA_COMPLETION_WORDS)만으로는 수업에서 쓰는 이름이 거의 안 나온다.
+   여기서는 두 가지를 더한다.
+     · 클래스 이름 목록(JAVA_TYPE_WORDS) — List·Scanner 처럼 첫 글자만 쳐도 나오게
+     · 점 뒤 멤버(javaMemberCompletionCandidates) — sc.nextInt(), list.add() …
+   자바는 변수를 선언할 때 타입을 적으므로, 자바스크립트처럼 값을 거슬러 추론할 필요 없이
+   선언문 한 줄만 찾으면 된다(javaDeclaredType). 그래서 후보가 헛나올 일이 적다. */
+
+/* 편집기 단어 후보에 얹는 표준 클래스 이름 — import 없이 바로 쓰는 java.lang 것들이다.
+   java.util.List 처럼 import 가 필요한 이름은 여기 넣지 않는다. 그쪽은 import 를 함께 넣어 주는
+   후보(javaImportCandidates)로 나오며, 두 곳에 다 있으면 목록에 같은 이름이 두 줄로 뜬다. */
+const JAVA_TYPE_WORDS = (
+  "String System Math Object Integer Double Long Float Short Byte Boolean Character Number " +
+  "StringBuilder StringBuffer Exception RuntimeException IllegalArgumentException Thread Runnable Comparable Iterable " +
+  "args main println print printf length size"
+).split(/\s+/);
+
+/* 멤버 목록을 짧게 적기 위한 도구.
+   "이름(인자)" 로 적으면 메서드(수락하면 괄호가 붙는다), 이름만 적으면 필드다.
+   적은 순서를 지킨다 — println 처럼 압도적으로 많이 쓰는 것이 맨 위에 와야 한다. */
+function javaMembers(spec){
+  const items = [];
+  for (const raw of String(spec || "").split("|")){
+    const token = raw.trim();
+    if (!token) continue;
+    const at = token.indexOf("(");
+    if (at < 0){ items.push({ name:token, type:"property", signature:"" }); continue; }
+    items.push({ name:token.slice(0, at), type:"function", signature:token });
+  }
+  return items;
+}
+
+// 클래스 이름으로 바로 부르는 것(정적 멤버·상수). System.out, Math.abs …
+const JAVA_STATIC_MEMBERS = {
+  System: javaMembers("out|err|in|currentTimeMillis()|nanoTime()|exit(status)|lineSeparator()|getProperty(key)"),
+  Math: javaMembers("abs(x)|max(a, b)|min(a, b)|pow(a, b)|sqrt(x)|round(x)|floor(x)|ceil(x)|random()|PI|E"),
+  Integer: javaMembers("parseInt(s)|valueOf(s)|toString(i)|toBinaryString(i)|compare(a, b)|MAX_VALUE|MIN_VALUE"),
+  Double: javaMembers("parseDouble(s)|valueOf(s)|compare(a, b)|MAX_VALUE|MIN_VALUE"),
+  Long: javaMembers("parseLong(s)|valueOf(s)|MAX_VALUE|MIN_VALUE"),
+  Boolean: javaMembers("parseBoolean(s)|valueOf(s)|TRUE|FALSE"),
+  Character: javaMembers("isDigit(c)|isLetter(c)|isLetterOrDigit(c)|isWhitespace(c)|isUpperCase(c)|isLowerCase(c)|toUpperCase(c)|toLowerCase(c)"),
+  String: javaMembers("valueOf(value)|format(format, args)|join(sep, elements)"),
+  Arrays: javaMembers("toString(a)|sort(a)|asList(a)|fill(a, value)|copyOf(a, length)|equals(a, b)|deepToString(a)|stream(a)|binarySearch(a, key)"),
+  Collections: javaMembers("sort(list)|reverse(list)|shuffle(list)|max(coll)|min(coll)|swap(list, i, j)|emptyList()|unmodifiableList(list)"),
+  Objects: javaMembers("equals(a, b)|hash(values)|toString(o)|requireNonNull(o)|isNull(o)|nonNull(o)"),
+  List: javaMembers("of(elements)|copyOf(coll)"),
+  Set: javaMembers("of(elements)|copyOf(coll)"),
+  Map: javaMembers("of(k, v)|entry(k, v)|copyOf(map)"),
+  Thread: javaMembers("sleep(millis)|currentThread()"),
+  Optional: javaMembers("of(value)|ofNullable(value)|empty()"),
+  LocalDate: javaMembers("now()|of(year, month, day)|parse(text)"),
+  LocalDateTime: javaMembers("now()|parse(text)")
+};
+
+// 변수 뒤에 오는 것(인스턴스 멤버). 타입 갈래 → 멤버 목록.
+const JAVA_INSTANCE_MEMBERS = {
+  string: javaMembers("length()|charAt(index)|substring(begin, end)|indexOf(str)|lastIndexOf(str)|contains(s)|equals(other)|equalsIgnoreCase(other)"
+    + "|compareTo(other)|toUpperCase()|toLowerCase()|trim()|strip()|split(regex)|replace(target, replacement)|replaceAll(regex, replacement)"
+    + "|startsWith(prefix)|endsWith(suffix)|isEmpty()|isBlank()|toCharArray()|repeat(count)|concat(str)|matches(regex)"),
+  list: javaMembers("add(item)|get(index)|set(index, item)|remove(index)|size()|isEmpty()|contains(item)|indexOf(item)|clear()"
+    + "|addAll(coll)|sort(comparator)|forEach(action)|stream()|iterator()|toArray()|subList(from, to)"),
+  map: javaMembers("put(key, value)|get(key)|getOrDefault(key, other)|containsKey(key)|containsValue(value)|remove(key)|size()|isEmpty()"
+    + "|keySet()|values()|entrySet()|clear()|putIfAbsent(key, value)|forEach(action)|merge(key, value, fn)|computeIfAbsent(key, fn)"),
+  set: javaMembers("add(item)|remove(item)|contains(item)|size()|isEmpty()|clear()|addAll(coll)|forEach(action)|stream()|iterator()"),
+  scanner: javaMembers("nextInt()|nextLine()|next()|nextDouble()|nextLong()|nextBoolean()|hasNext()|hasNextInt()|hasNextLine()|close()"),
+  builder: javaMembers("append(value)|toString()|length()|insert(offset, value)|delete(start, end)|deleteCharAt(index)|reverse()|charAt(index)|setCharAt(index, ch)|indexOf(str)"),
+  printStream: javaMembers("println(value)|print(value)|printf(format, args)|format(format, args)|flush()"),
+  random: javaMembers("nextInt(bound)|nextDouble()|nextBoolean()|nextLong()"),
+  optional: javaMembers("get()|isPresent()|isEmpty()|orElse(other)|orElseGet(supplier)|ifPresent(action)|map(fn)|filter(predicate)"),
+  iterator: javaMembers("hasNext()|next()|remove()"),
+  // 배열은 메서드가 없고 길이 '필드' 하나뿐이다 — 이것만 알려 줘도 length() 오타가 줄어든다.
+  array: javaMembers("length")
+};
+
+/* 고른 라이브러리의 멤버. 클래스 이름은 런처 카탈로그(JavaLibrary.Words)가 알려 주지만
+   그 안에 무엇이 있는지는 알려 주지 않아, 이름만 나오고 점을 찍으면 아무것도 안 나왔다.
+   기본 목록 다섯 개는 수업에서 쓰는 범위가 좁아 여기에 적어 둔다(자바스크립트 쪽 JS_LIBRARY_MEMBERS 와 같은 방식).
+   직접 좌표로 받은 라이브러리는 알 길이 없으므로 클래스 이름만 제안한다 — 없는 메서드를 권하느니 비우는 쪽이다. */
+const JAVA_LIBRARY_MEMBERS = {
+  // Gson
+  Gson: javaMembers("toJson(src)|fromJson(json, type)|toJsonTree(src)|newBuilder()"),
+  GsonBuilder: javaMembers("setPrettyPrinting()|serializeNulls()|disableHtmlEscaping()|setDateFormat(pattern)|create()"),
+  JsonObject: javaMembers("get(name)|addProperty(name, value)|add(name, element)|has(name)|remove(name)|keySet()|entrySet()"
+    + "|getAsString()|getAsInt()|getAsJsonObject(name)|getAsJsonArray(name)"),
+  JsonArray: javaMembers("get(index)|add(value)|size()|remove(index)|isEmpty()"),
+  JsonElement: javaMembers("getAsString()|getAsInt()|getAsDouble()|getAsBoolean()|getAsJsonObject()|getAsJsonArray()|isJsonNull()"),
+  JsonParser: javaMembers("parseString(json)|parseReader(reader)"),
+  // Apache Commons Lang
+  StringUtils: javaMembers("isEmpty(cs)|isNotEmpty(cs)|isBlank(cs)|isNotBlank(cs)|trim(str)|strip(str)|capitalize(str)|uncapitalize(str)"
+    + "|join(array, separator)|split(str, separator)|substringBefore(str, separator)|substringAfter(str, separator)|repeat(str, count)"
+    + "|reverse(str)|leftPad(str, size, pad)|rightPad(str, size, pad)|equalsIgnoreCase(a, b)|contains(seq, search)|countMatches(str, sub)"
+    + "|defaultIfEmpty(str, other)"),
+  NumberUtils: javaMembers("toInt(str)|toDouble(str)|toLong(str)|isDigits(str)|isCreatable(str)|max(array)|min(array)"),
+  ArrayUtils: javaMembers("toString(array)|contains(array, value)|indexOf(array, value)|isEmpty(array)|add(array, element)|reverse(array)|subarray(array, start, end)"),
+  RandomStringUtils: javaMembers("randomAlphabetic(count)|randomNumeric(count)|randomAlphanumeric(count)|random(count)"),
+  // Apache Commons CSV
+  CSVFormat: javaMembers("DEFAULT|EXCEL|RFC4180|TDF|parse(reader)|print(out)|withFirstRecordAsHeader()|withHeader(headers)|withDelimiter(delimiter)"),
+  CSVParser: javaMembers("getRecords()|iterator()|getHeaderMap()|getHeaderNames()|close()"),
+  CSVPrinter: javaMembers("printRecord(values)|printRecords(values)|flush()|close()"),
+  CSVRecord: javaMembers("get(name)|size()|isSet(name)|toMap()|getRecordNumber()"),
+  // jsoup
+  Jsoup: javaMembers("connect(url)|parse(html)|clean(html, safelist)"),
+  Document: javaMembers("title()|body()|select(query)|getElementById(id)|getElementsByClass(name)|text()|html()|outerHtml()"),
+  Element: javaMembers("text()|html()|attr(key)|select(query)|children()|parent()|id()|className()|tagName()|ownText()|append(html)"),
+  Elements: javaMembers("first()|last()|get(index)|size()|text()|attr(key)|select(query)|eachText()|isEmpty()"),
+  // JUnit 5
+  Assertions: javaMembers("assertEquals(expected, actual)|assertTrue(condition)|assertFalse(condition)|assertNull(actual)|assertNotNull(actual)"
+    + "|assertArrayEquals(expected, actual)|assertThrows(type, executable)|fail(message)")
+};
+
+// 타입 이름 → 어떤 멤버 목록을 쓸지.
+const JAVA_TYPE_MEMBER_KEY = (() => {
+  const map = {};
+  const put = (key, names) => { for (const name of names.split(/\s+/)) map[name] = key; };
+  put("string", "String CharSequence");
+  put("list", "List ArrayList LinkedList Collection Queue Deque ArrayDeque Stack Vector");
+  put("map", "Map HashMap TreeMap LinkedHashMap Hashtable");
+  put("set", "Set HashSet TreeSet LinkedHashSet");
+  put("scanner", "Scanner");
+  put("builder", "StringBuilder StringBuffer");
+  put("printStream", "PrintStream PrintWriter");
+  put("random", "Random");
+  put("optional", "Optional");
+  put("iterator", "Iterator ListIterator");
+  return map;
+})();
+
+// 선언문 앞자리에 올 수 있지만 타입이 아닌 낱말 — 이것들이 잡히면 엉뚱한 후보가 나온다.
+const JAVA_NOT_A_TYPE = ["return", "new", "case", "else", "throw", "yield", "assert"];
+
+/* 변수가 어떤 타입으로 선언됐는지 찾는다(마지막 선언이 최신).
+   맞히려는 모양: "Type name =", "Type name;", "Type name)", "Type name,", "for (Type name :"
+   제네릭(<...>)은 건너뛰고 바탕 타입만, 배열([])이면 isArray 로 알린다. */
+function javaDeclaredType(source, name){
+  if (!/^[A-Za-z_$][\w$]*$/.test(String(name || ""))) return null;
+  const text = String(source || "");
+  const pattern = new RegExp(
+    "(?:^|[\\n;{}(,])\\s*(?:final\\s+)?([A-Za-z_$][\\w$.]*)\\s*(?:<[^<>;{}=]*>)?\\s*((?:\\[\\s*\\]\\s*)*)"
+    + name + "\\s*(?==[^=]|;|\\)|,|:)", "g");
+  let found = null, match;
+  while ((match = pattern.exec(text))){
+    const qualified = String(match[1]);
+    const type = qualified.split(".").pop();
+    if (JAVA_NOT_A_TYPE.indexOf(type) >= 0) continue;
+    found = { type, qualified, isArray: !!String(match[2] || "").trim() };
+  }
+  if (!found) return null;
+  // var 는 오른쪽을 봐야 안다 — new Xxx() 와 문자열 리터럴만 짚는다(그 외는 후보를 내지 않는다).
+  if (found.type === "var"){
+    const tail = new RegExp("\\bvar\\s+" + name + "\\s*=\\s*([^;\\n]*)", "g");
+    let last = null, hit;
+    while ((hit = tail.exec(text))) last = hit[1];
+    if (!last) return null;
+    const created = /^\s*new\s+([A-Za-z_$][\w$.]*)/.exec(last);
+    if (created) return { type:String(created[1]).split(".").pop(), qualified:String(created[1]), isArray:false };
+    if (/^\s*"/.test(last)) return { type:"String", qualified:"String", isArray:false };
+    return null;
+  }
+  return found;
+}
+
+/* javap 표에서 지금 코드가 뜻하는 클래스 하나를 고른다.
+   서버는 패키지 전체 이름을 키로 보낸다. 명시 import → 현재 package → wildcard import →
+   유일한 단순 이름 순서로 좁히며, 같은 단순 이름이 둘 이상인데 근거가 없으면 아무것도 권하지 않는다. */
+function javaExtractedMemberSpec(source, declared, typeName, extracted){
+  if (!extracted || typeof extracted !== "object") return "";
+  const text = String(source || "");
+  const simple = String(typeName || "");
+  const keys = Object.keys(extracted).filter((key) => typeof extracted[key] === "string"
+    && (key === simple || key.endsWith("." + simple)));
+  if (!keys.length) return "";
+  const qualified = declared && String(declared.qualified || "");
+  if (qualified && typeof extracted[qualified] === "string") return extracted[qualified];
+
+  const imports = [];
+  const importRe = /^\s*import\s+(?!static\b)([\w.$*]+)\s*;/gm;
+  let match;
+  while ((match = importRe.exec(text))) imports.push(match[1]);
+  for (const path of imports){
+    if (!path.endsWith(".*") && path.endsWith("." + simple) && typeof extracted[path] === "string") return extracted[path];
+  }
+
+  const packageMatch = /^\s*package\s+([\w.$]+)\s*;/m.exec(text);
+  if (packageMatch){
+    const local = packageMatch[1] + "." + simple;
+    if (typeof extracted[local] === "string") return extracted[local];
+  }
+  for (const path of imports){
+    if (!path.endsWith(".*")) continue;
+    const wanted = path.slice(0, -1) + simple;
+    if (typeof extracted[wanted] === "string") return extracted[wanted];
+  }
+
+  // 이전 캐시 형식과 기본 패키지 클래스는 단순 이름 키 하나로 올 수 있다.
+  if (typeof extracted[simple] === "string") return extracted[simple];
+  return keys.length === 1 ? extracted[keys[0]] : "";
+}
+
+// v2 표의 S:/I: 표식을 보고 클래스 접근에는 static, 변수 접근에는 instance 멤버만 남긴다.
+// 표식 없는 값은 이전 캐시와의 호환을 위해 양쪽에서 쓴다.
+function javaExtractedMembers(spec, staticReceiver){
+  const kept = [];
+  for (const raw of String(spec || "").trim().split(/\s+/)){
+    if (!raw) continue;
+    const marked = /^([SI]):(.+)$/.exec(raw);
+    if (!marked){ kept.push(raw); continue; }
+    if ((staticReceiver && marked[1] === "S") || (!staticReceiver && marked[1] === "I")) kept.push(marked[2]);
+  }
+  return javaMembers(kept.join("|"));
+}
+
+/* 편집기가 'name.' 뒤에서 부른다. 후보가 없으면 빈 배열 — 그러면 버퍼 단어 완성으로 넘어간다.
+   선언한 타입을 먼저 보고(같은 이름의 변수가 있으면 그것이 맞다), 없으면 클래스 이름으로 본다. */
+function javaMemberCompletionCandidates(source, receiver, prefix, libraries){
+  const name = String(receiver || "");
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return [];
+  const query = String(prefix || "");
+  let items = null;
+  const declared = javaDeclaredType(source, name);
+  if (declared){
+    items = declared.isArray
+      ? JAVA_INSTANCE_MEMBERS.array
+      : (JAVA_INSTANCE_MEMBERS[JAVA_TYPE_MEMBER_KEY[declared.type]] || null);
+  }
+  /* 고른 라이브러리의 클래스 — Gson gson = new Gson() 처럼 변수로 쓰기도 하고(선언 타입),
+     Jsoup.connect() 처럼 클래스 이름으로 바로 쓰기도 한다(받는 이름 그대로). 둘 다 본다.
+     libraries.words 는 손으로 적어 둔 기본 목록에서 온 이름, libraries.members 는 서버가 jar 에서
+     javap 로 뽑아 온 표다. 적어 둔 쪽이 인자 안내까지 있어 먼저다.
+     고르지 않은 라이브러리는 어느 쪽에도 들어오지 않는다 — 컴파일되지 않을 코드를 권하지 않기 위해서다. */
+  if (!items && libraries){
+    const allowed = Array.isArray(libraries.words) ? libraries.words : [];
+    const extracted = libraries.members && typeof libraries.members === "object" ? libraries.members : null;
+    const typeName = declared ? declared.type : name;
+    if (allowed.indexOf(typeName) >= 0) items = JAVA_LIBRARY_MEMBERS[typeName] || null;
+    if (!items && extracted){
+      const spec = javaExtractedMemberSpec(source, declared, typeName, extracted);
+      if (spec) items = javaExtractedMembers(spec, !declared);
+    }
+  }
+  // System.out / System.err — 편집기는 점 바로 앞 낱말만 주므로 'out' 을 그대로 알아본다.
+  if (!items && (name === "out" || name === "err")) items = JAVA_INSTANCE_MEMBERS.printStream;
+  if (!items) items = JAVA_STATIC_MEMBERS[name] || null;
+  if (!items || !items.length) return [];
+  return items
+    // 이미 다 친 이름은 뺀다. 단 메서드는 남겨 수락하면 "()" 가 붙는 편의를 유지한다.
+    .filter((item) => (item.name !== query || item.type === "function") && (!query || item.name.startsWith(query)))
+    .map((item) => ({ ...item }));
+}
+
+/* ── 자동완성으로 import 까지 ───────────────────────────────────────────────
+   List 를 고르면 java.util.List 를 위에 적어 주는 자리. 자바 수업에서 첫 벽이 "import 를 안 적어서"
+   나는 오류라, 이름을 아는 김에 import 도 같이 넣는다.
+   파이썬 쪽에 이미 같은 장치가 있고(core.js completionApplicationPlan) 넣을 자리를 정하는 규칙만
+   언어마다 다르므로, 자바 규칙을 여기서 주고 그 장치를 그대로 빌려 쓴다. */
+
+// 이름 → 패키지. java.lang(String·System·Math…)은 import 가 필요 없어 넣지 않는다.
+const JAVA_IMPORT_PACKAGES = {
+  "java.util": "List ArrayList LinkedList Map HashMap TreeMap LinkedHashMap Set HashSet TreeSet LinkedHashSet"
+    + " Collection Collections Arrays Objects Queue Deque ArrayDeque Stack Vector Iterator Comparator Optional Random Scanner",
+  "java.util.stream": "Stream IntStream Collectors",
+  "java.util.function": "Function Supplier Consumer Predicate BiFunction",
+  "java.time": "LocalDate LocalDateTime LocalTime Duration Period",
+  "java.time.format": "DateTimeFormatter",
+  "java.math": "BigDecimal BigInteger",
+  "java.text": "SimpleDateFormat DecimalFormat",
+  "java.io": "IOException File FileReader FileWriter BufferedReader BufferedWriter InputStreamReader PrintWriter",
+  "java.nio.file": "Files Paths Path",
+  "java.util.regex": "Pattern Matcher",
+  // 기본 라이브러리 다섯 개 — 고른 것만 제안한다(아래 javaImportCandidates 의 allowed 검사).
+  "com.google.gson": "Gson GsonBuilder JsonObject JsonArray JsonElement JsonParser",
+  "org.apache.commons.lang3": "StringUtils ArrayUtils RandomStringUtils",
+  "org.apache.commons.lang3.math": "NumberUtils",
+  "org.apache.commons.csv": "CSVFormat CSVParser CSVPrinter CSVRecord",
+  "org.jsoup": "Jsoup",
+  "org.jsoup.nodes": "Document Element",
+  "org.jsoup.select": "Elements",
+  "org.junit.jupiter.api": "Assertions Test BeforeEach DisplayName"
+};
+
+// 클래스 이름 → "import 패키지.이름;" 한 줄. 라이브러리에서 온 이름은 고른 뒤에만 쓴다.
+const JAVA_IMPORTS = (() => {
+  const map = {};
+  for (const pkg of Object.keys(JAVA_IMPORT_PACKAGES)){
+    const fromLibrary = pkg.indexOf("java.") !== 0;
+    for (const name of JAVA_IMPORT_PACKAGES[pkg].split(/\s+/)){
+      if (!name || map[name]) continue;     // 먼저 적은 쪽이 이긴다(표준 라이브러리를 위에 적어 둔 이유)
+      map[name] = { text:"import " + pkg + "." + name + ";", library:fromLibrary };
+    }
+  }
+  return map;
+})();
+
+// 이미 적혀 있는 import 인가. 같은 줄이 있거나, 그 패키지를 * 로 받아 왔으면 다시 적지 않는다.
+function javaImportPath(line){
+  const text = String(line || "").replace(/\/\/.*$/, "").trim().replace(/\s+/g, " ");
+  // "import  java.util.List ;" 처럼 띄어쓰기가 제각각이어도 같은 것으로 본다.
+  const match = /^import (static )?([\w.$*]+) ?;$/.exec(text);
+  return match ? (match[1] ? "static " : "") + match[2] : null;
+}
+function javaHasImport(source, importText){
+  const target = javaImportPath(importText);
+  if (!target) return true;                       // 알아볼 수 없는 모양이면 건드리지 않는다
+  for (const raw of String(source || "").split("\n")){
+    const line = javaImportPath(raw);
+    if (!line) continue;
+    if (line === target) return true;
+    if (!line.endsWith(".*")) continue;
+    // java.util.* 는 java.util.List 를 덮지만 java.util.stream.Stream 은 덮지 않는다(한 칸만).
+    const pkg = line.slice(0, -2);
+    if (target.indexOf(pkg + ".") === 0 && target.lastIndexOf(".") === pkg.length) return true;
+  }
+  return false;
+}
+
+/* 직접 받은 jar 목록과 javap 표가 가진 패키지 전체 클래스 이름을 import 후보로 바꾼다.
+   따라서 손으로 적어 둔 JAVA_IMPORTS 에 없는 클래스도
+   선택 시 import 문까지 함께 들어가게 한다. 같은 단순 이름이 여러 패키지에 있으면
+   후보를 모두 보여 주고 import 문으로 구분한다 — 근거 없이 하나를 고르는 것보다 안전하다. */
+function javaJarImportCandidates(source, prefix, classes, extracted){
+  const qualifiedNames = [];
+  for (const qualified of Array.isArray(classes) ? classes : []){
+    if (typeof qualified === "string" && qualifiedNames.indexOf(qualified) < 0) qualifiedNames.push(qualified);
+  }
+  if (extracted && typeof extracted === "object"){
+    for (const qualified of Object.keys(extracted)){
+      if (typeof extracted[qualified] === "string" && qualifiedNames.indexOf(qualified) < 0) qualifiedNames.push(qualified);
+    }
+  }
+  if (!qualifiedNames.length) return [];
+  const text = String(source || "");
+  const query = String(prefix || "");
+  const packageMatch = /^\s*package\s+([\w.$]+)\s*;/m.exec(text);
+  const currentPackage = packageMatch ? packageMatch[1] : "";
+  const rows = [];
+  for (const qualified of qualifiedNames){
+    if (qualified.indexOf(".") < 0) continue;
+    const parts = qualified.split(".");
+    if (!parts.every((part) => /^[A-Za-z_$][\w$]*$/.test(part))) continue;
+    const name = parts[parts.length - 1];
+    if (!name.startsWith(query)) continue;
+    const pkg = parts.slice(0, -1).join(".");
+    if (pkg === currentPackage) continue;
+    const importText = "import " + qualified + ";";
+    if (javaHasImport(text, importText)) continue;
+    rows.push({ name, type:"class", importText });
+  }
+  return rows;
+}
+
+/* 새 import 를 넣을 자리(문자 위치).
+   이미 import 가 있으면 마지막 import 다음 줄, 없으면 package 선언 다음(빈 줄 한 줄을 띄워),
+   둘 다 없으면 맨 위 주석 묶음 다음이다. 클래스 선언 아래로는 절대 내려가지 않는다. */
+function javaImportInsertOffset(source){
+  const text = String(source || "");
+  const lines = text.split("\n");
+  const offsetOfLine = (index) => {
+    let at = 0;
+    for (let i = 0; i < index && i < lines.length; i++) at += lines[i].length + 1;
+    return Math.min(at, text.length);
+  };
+  let lastImport = -1, packageLine = -1, firstCode = -1, inBlockComment = false;
+  for (let i = 0; i < lines.length; i++){
+    let line = lines[i].trim();
+    if (inBlockComment){
+      if (line.indexOf("*/") >= 0){ inBlockComment = false; line = line.slice(line.indexOf("*/") + 2).trim(); }
+      else continue;
+    }
+    if (line.indexOf("/*") >= 0 && line.indexOf("*/") < 0){ inBlockComment = true; continue; }
+    if (!line || line.indexOf("//") === 0) continue;
+    if (/^package\b/.test(line)){ packageLine = i; continue; }
+    if (/^import\b/.test(line)){ lastImport = i; continue; }
+    if (firstCode < 0) firstCode = i;
+  }
+  if (lastImport >= 0) return offsetOfLine(lastImport + 1);
+  if (packageLine >= 0) return offsetOfLine(packageLine + 1);
+  if (firstCode >= 0) return offsetOfLine(firstCode);
+  return text.length;
+}
+
+// 파이썬 자리에 끼워 쓰는 규칙 묶음(core.js completionApplicationPlan 이 받는 모양).
+const JAVA_IMPORT_PLANNER = {
+  has: javaHasImport,
+  offset: javaImportInsertOffset,
+  // import 줄을 치는 중이면 본문만 채운다(파이썬은 from/import, 자바는 import 뿐이다).
+  linePrefix: /^\s*import\b/
+};
+
+/* 지금 친 글자로 시작하는 클래스 중 아직 import 하지 않은 것.
+   이미 적어 둔 것은 뺀다 — 그때부터는 버퍼에 이름이 있어 평범한 단어 완성으로 나온다.
+   라이브러리 클래스는 그 라이브러리를 골랐을 때만(allowed) 낸다. */
+function javaImportCandidates(source, prefix, libraries){
+  const query = String(prefix || "");
+  if (!query) return [];
+  const allowed = libraries && Array.isArray(libraries.words) ? libraries.words : [];
+  const text = String(source || "");
+  const rows = [];
+  const seen = new Set();
+  const add = (row) => {
+    const key = row.name + "\n" + row.importText;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+  for (const name of Object.keys(JAVA_IMPORTS)){
+    if (!name.startsWith(query)) continue;
+    const entry = JAVA_IMPORTS[name];
+    if (entry.library && allowed.indexOf(name) < 0) continue;
+    if (javaHasImport(text, entry.text)) continue;
+    add({ name, type:"class", importText:entry.text });
+  }
+  const classes = libraries && Array.isArray(libraries.classes) ? libraries.classes : [];
+  const extracted = libraries && libraries.members && typeof libraries.members === "object"
+    ? libraries.members : null;
+  for (const row of javaJarImportCandidates(text, query, classes, extracted)) add(row);
+  rows.sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name)
+    || a.importText.localeCompare(b.importText));
+  return rows;
+}
+
 // ── 세션 호출 ──────────────────────────────────────────────────────────────
 async function startJavaSession(source, stdinText, piped, libs){
   // 페이로드 봉투는 파이썬 실행과 같은 것을 쓴다([길이][소스][길이][표준입력]).

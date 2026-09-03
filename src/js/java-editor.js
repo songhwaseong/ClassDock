@@ -284,6 +284,213 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
   };
 }
 
+// ── 새 자바 파일 만들기 ─────────────────────────────────────────────────────
+// 파이썬·자바스크립트 스크래치와 같은 길을 쓴다(createScratchInFolder·handleFiles) — 폴더 문맥·
+// 이름 충돌 회피·사이드바에서 바로 이름 고치기까지 그대로 따라온다.
+// 다른 점은 이름 규칙 하나다. 자바는 파일 이름이 곧 public 클래스 이름이라 "새 코드 2.java" 처럼
+// 공백이 든 이름을 쓸 수 없다(식별자로 유효하지 않다). 그래서 Main·Main2 를 쓰고, 시작 코드의
+// 클래스 이름도 그 파일 이름에 맞춰 찍는다 — 다른 IDE 나 javac 로 그대로 열어도 깨지지 않게.
+function javaScratchFileName(number = 1){
+  return "Main" + (number > 1 ? number : "") + ".java";
+}
+function javaScratchStarter(name){
+  const cls = String(name || "").replace(/\.java$/i, "") || "Main";
+  const prompt = typeof t === "function" ? t("여기에 자바 코드를 작성하고 ▶ 실행") : "여기에 자바 코드를 작성하고 ▶ 실행";
+  return "// " + prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")\n"
+    + "public class " + cls + " {\n"
+    + "    public static void main(String[] args) {\n"
+    + "        System.out.println(\"Hello, Java!\");\n"
+    + "    }\n"
+    + "}\n";
+}
+
+// 저장된 .java 파일은 수업에서 쓰는 클래스 이름 규칙(영문 대문자로 시작)을 지키고,
+// 최상위 public 타입의 이름은 파일 이름과 같아야 한다. 실행기는 소스에 맞춘 임시 파일을 만들어
+// 이 불일치를 가려 주므로, 실제 파일 이름을 정하는 모든 경로에서 먼저 검사한다.
+const JAVA_FILE_ID_START_RE = /^[A-Z]$/;
+const JAVA_FILE_ID_PART_RE = /^[\p{L}\p{Nl}\p{Sc}\p{Pc}\p{Mn}\p{Mc}\p{Nd}\p{Cf}]$/u;
+const JAVA_SOURCE_ID_START = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]";
+const JAVA_SOURCE_ID_PART = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}\\p{Cf}]";
+
+function javaClassNameFromFile(name){
+  const base = String(name || "").replace(/\\/g, "/").split("/").pop() || "";
+  return base.replace(/\.java$/i, "");
+}
+
+function javaFileNameValidationMessage(name){
+  const base = String(name || "").replace(/\\/g, "/").split("/").pop() || "";
+  if (!/\.java$/i.test(base)) return "자바 파일은 .java 확장자로 저장해야 해요.";
+  const cls = javaClassNameFromFile(base);
+  if (!cls || !JAVA_FILE_ID_START_RE.test(cls.charAt(0)))
+    return "자바 파일 이름(클래스 이름)은 영문 대문자로 시작해야 해요. 예: Student.java";
+  for (const ch of cls){
+    if (!JAVA_FILE_ID_PART_RE.test(ch))
+      return "자바 파일 이름에는 클래스 이름으로 쓸 수 있는 문자만 사용할 수 있어요. 예: Student01.java";
+  }
+  return "";
+}
+
+// 주석·문자열을 같은 길이의 공백으로 가려 선언 위치를 그대로 보존한다. 이름처럼 보이는 주석이나
+// 문자열, 내부 클래스는 건드리지 않고 깊이 0의 public class/interface/enum/record 하나만 고른다.
+function javaSourceCodeMask(source){
+  const src = String(source == null ? "" : source);
+  let out = "", i = 0;
+  const blank = (ch) => (ch === "\n" || ch === "\r") ? ch : " ";
+  while (i < src.length){
+    if (src[i] === "/" && src[i + 1] === "/"){
+      while (i < src.length && src[i] !== "\n" && src[i] !== "\r") out += blank(src[i++]);
+      continue;
+    }
+    if (src[i] === "/" && src[i + 1] === "*"){
+      out += "  "; i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) out += blank(src[i++]);
+      if (i < src.length){ out += "  "; i += 2; }
+      continue;
+    }
+    if (src.slice(i, i + 3) === "\"\"\""){
+      out += "   "; i += 3;
+      while (i < src.length && src.slice(i, i + 3) !== "\"\"\"") out += blank(src[i++]);
+      if (i < src.length){ out += "   "; i += 3; }
+      continue;
+    }
+    if (src[i] === "\"" || src[i] === "'"){
+      const quote = src[i]; out += " "; i++;
+      while (i < src.length){
+        if (src[i] === "\\" && i + 1 < src.length){ out += "  "; i += 2; continue; }
+        const ch = src[i]; out += blank(ch); i++;
+        if (ch === quote) break;
+      }
+      continue;
+    }
+    out += src[i++];
+  }
+  return out;
+}
+
+function javaTopLevelPublicType(source){
+  const masked = javaSourceCodeMask(source);
+  const re = new RegExp("(?:^|[;}{\\s])public\\s+(?:(?:final|abstract|sealed|non-sealed|strictfp)\\s+)*(?:class|interface|enum|record)\\s+(" + JAVA_SOURCE_ID_START + JAVA_SOURCE_ID_PART + "*)", "gu");
+  let scan = 0, depth = 0, match;
+  while ((match = re.exec(masked))){
+    // 정규식이 선언 앞의 구분 문자(특히 이전 타입의 닫는 중괄호)까지 포함하므로 public 위치까지
+    // 깊이를 계산해야 `class Helper {} public class Main {}` 같은 정상 소스도 놓치지 않는다.
+    const declarationAt = match.index + match[0].indexOf("public");
+    while (scan < declarationAt){
+      if (masked[scan] === "{") depth++;
+      else if (masked[scan] === "}") depth = Math.max(0, depth - 1);
+      scan++;
+    }
+    if (depth !== 0) continue;
+    const relative = match[0].lastIndexOf(match[1]);
+    return { name:match[1], start:match.index + relative, end:match.index + relative + match[1].length };
+  }
+  return null;
+}
+
+function javaCodePointBefore(text, index){
+  if (index <= 0) return "";
+  let start = index - 1;
+  const code = text.charCodeAt(start);
+  if (code >= 0xDC00 && code <= 0xDFFF && start > 0) start--;
+  return text.slice(start, index);
+}
+
+function javaCodePointAt(text, index){
+  if (index >= text.length) return "";
+  const code = text.codePointAt(index);
+  return String.fromCodePoint(code);
+}
+
+function javaRenameIdentifierInCode(source, oldName, newName){
+  const value = String(source == null ? "" : source);
+  const masked = javaSourceCodeMask(value);
+  const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(escaped, "gu");
+  let out = "", cursor = 0, match;
+  while ((match = re.exec(masked))){
+    const before = javaCodePointBefore(masked, match.index);
+    const after = javaCodePointAt(masked, match.index + oldName.length);
+    if ((before && JAVA_FILE_ID_PART_RE.test(before)) || (after && JAVA_FILE_ID_PART_RE.test(after))) continue;
+    out += value.slice(cursor, match.index) + newName;
+    cursor = match.index + oldName.length;
+  }
+  return cursor ? out + value.slice(cursor) : value;
+}
+
+function javaRenamePublicTypeForFile(source, fileName){
+  const value = String(source == null ? "" : source);
+  const error = javaFileNameValidationMessage(fileName);
+  if (error) return { ok:false, error, value, changed:false, found:false };
+  const nextName = javaClassNameFromFile(fileName);
+  const type = javaTopLevelPublicType(value);
+  if (!type) return { ok:true, error:"", value, changed:false, found:false, className:"" };
+  if (type.name === nextName) return { ok:true, error:"", value, changed:false, found:true, className:type.name };
+  // 선언뿐 아니라 생성자·new 표현식·정적 멤버 접근처럼 같은 타입 이름을 쓰는 코드 토큰도 바꾼다.
+  // 주석과 문자열은 mask에서 공백이므로 예제 설명이나 출력 문구는 그대로 남는다.
+  return { ok:true, error:"", value:javaRenameIdentifierInCode(value, type.name, nextName),
+    changed:true, found:true, className:nextName, previousClassName:type.name };
+}
+
+async function javaPrepareDocumentFileRename(doc, fileName, fallbackSource){
+  const error = javaFileNameValidationMessage(fileName);
+  if (error) return { ok:false, error, value:String(fallbackSource == null ? "" : fallbackSource), changed:false };
+  let source = fallbackSource;
+  if (source == null && doc && doc.codeEditor && typeof doc.codeEditor.getValue === "function") source = doc.codeEditor.getValue();
+  if (source == null && doc && typeof doc.savedText === "string") source = doc.savedText;
+  if (source == null && doc && doc.sourceFile && typeof doc.sourceFile.text === "function") source = await doc.sourceFile.text();
+  // 편집기 값과 같은 LF·BOM 없는 모양으로 맞춘 뒤 이름만 바꾼다. 디스크 저장 직전에 원래 개행·BOM을 복원한다.
+  source = String(source == null ? "" : source).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  return javaRenamePublicTypeForFile(source, fileName);
+}
+
+function javaApplyPreparedFileRename(doc, prepared, options={}){
+  if (!doc || !prepared || !prepared.ok) return;
+  if (prepared.changed && doc.codeEditor && typeof doc.codeEditor.setValue === "function")
+    doc.codeEditor.setValue(prepared.value);
+  if (options.saved){
+    doc.savedText = prepared.value;
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+  } else if (prepared.changed && typeof markDocumentDirty === "function"){
+    if (typeof File !== "undefined"){
+      const oldFile = doc.sourceFile;
+      let fresh = new File([prepared.value], doc.name || "Main.java", {
+        type:(oldFile && oldFile.type) || "text/x-java-source",
+        lastModified:Date.now()
+      });
+      if (doc.fsHandle && typeof withFileHandle === "function") fresh = withFileHandle(fresh, doc.fsHandle);
+      if (doc.fsDirHandle && typeof withDirHandle === "function") fresh = withDirHandle(fresh, doc.fsDirHandle);
+      const rel = String(doc.workspacePath || doc.relPath || "");
+      if (rel && rel !== fresh.name){
+        try { Object.defineProperty(fresh, "webkitRelativePath", { value:rel, configurable:true }); } catch(_){}
+      }
+      doc.sourceFile = fresh;
+      doc.size = fresh.size;
+    }
+    markDocumentDirty(doc, true);
+  }
+}
+function createJavaScratchInFolder(folder){
+  return createScratchInFolder(folder, javaScratchFileName, javaScratchStarter,
+    "text/x-java-source", "새 자바 파일을");
+}
+// 폴더 우클릭 → 이 폴더 안에 만들기
+function newJavaScratchInFolder(folder){
+  _scratchCount++;                     // 이름 번호는 파이썬·자바스크립트·표와 한 통으로 센다(code-viewer.js)
+  createJavaScratchInFolder(folder);
+}
+// 사이드바 + 메뉴 → 지금 보고 있는 파일의 폴더가 있으면 그 안에, 없으면 그냥 새 문서로
+function newJavaScratch(){
+  _scratchCount++;
+  const folder = activeFolderContextForNewFile();
+  if (folder && createJavaScratchInFolder(folder)) return;
+  const name = javaScratchFileName(_scratchCount);
+  // 파일 열기와 작업공간 저장을 한 큐에서 처리한다(자바스크립트 쪽과 같은 이유) — handleFiles만 직접
+  // 부르면 편집 초안은 남아도 그 초안을 붙일 바탕 문서가 없어 미저장 새 .java 가 자동복원에서 사라진다.
+  const file = new File([javaScratchStarter(name)], name, { type:"text/x-java-source" });
+  if (typeof queueFiles === "function") queueFiles([file], { isScratch:true });
+  else handleFiles([file], { isScratch:true });
+}
+
 function renderJavaRunnable(context){
   const { outer, host, text, prof, ext, file, ownerDoc, runCtx, sourceBytes } = context;
   const saveName = (ownerDoc && ownerDoc.name) || (file && file.name) || "Main.java";
@@ -296,12 +503,48 @@ function renderJavaRunnable(context){
   /* 자동완성 단어 = 자바 키워드 + 고른 라이브러리의 클래스 이름. 배열 자체를 편집기에 넘겨 두고
      내용만 갈아 끼운다 — 편집기는 제안을 만들 때마다 이 배열을 읽으므로 다시 만들지 않아도 따라온다. */
   const baseWords = (typeof completionWordsForProfile === "function" ? completionWordsForProfile(prof, ext) : []).slice();
+  // 키워드만으로는 List·Scanner 같은 이름이 안 나온다 — 표준 클래스 이름을 함께 올린다(java-runtime.js).
+  for (const word of (typeof JAVA_TYPE_WORDS !== "undefined" ? JAVA_TYPE_WORDS : [])){
+    if (baseWords.indexOf(word) < 0) baseWords.push(word);
+  }
   const completionWords = baseWords.slice();
+  /* 지금 고른 라이브러리가 자동완성에 주는 것을 역할별로 나눠 둔다.
+     · 단어 후보(extra) — 직접 받은 jar 에서 서버가 읽어 온 이름까지 전부
+     · libraries.words — 손으로 적어 둔 멤버 표를 열어 줄 기본 목록의 이름만
+     · libraries.classes — 직접 받은 jar 의 패키지 전체 이름(자동 import 용)
+     · libraries.members — 직접 받은 jar 에서 서버가 javap 로 뽑아 온 멤버 표(늦게 도착한다) */
+  const libraries = { words:[], classes:[], members:{} };
+  let libraryMemberSeq = 0;
   const applyLibraryWords = (libState, libRows) => {
     const extra = javaLibraryCompletionWords(libState, libRows);
+    libraries.words = javaLibraryMemberWords(libState, libRows);
+    libraries.classes = javaLibraryCompletionClasses(libState, libRows);
     completionWords.length = 0;
     for (const word of baseWords) completionWords.push(word);
     for (const word of extra) completionWords.push(word);
+    loadLibraryMembers(libState, libRows);
+  };
+  /* 기본 목록에 없는(= 손으로 적어 둔 표가 없는) 것만 서버에 묻는다. 처음 한 번은 javap 를 돌리느라
+     한동안 걸리므로 기다리지 않고, 도착하면 그때부터 후보에 낀다. 그 사이 고른 것이 바뀌었으면 버린다. */
+  const loadLibraryMembers = async (libState, libRows) => {
+    const seq = ++libraryMemberSeq;
+    const rows = Array.isArray(libRows) ? libRows : [];
+    const selected = javaLibraryState(libState).ids;
+    const specs = [];
+    for (const row of rows){
+      if (!row || row.id || !row.installed) continue;
+      const spec = row.spec || row.coordinate;
+      if (!spec || specs.indexOf(spec) >= 0) continue;
+      if (selected.indexOf(row.spec) < 0 && selected.indexOf(row.coordinate) < 0) continue;
+      specs.push(spec);
+    }
+    const next = {};
+    for (const spec of specs){
+      const table = await javaLibraryMembers(spec);
+      if (seq !== libraryMemberSeq) return;
+      for (const name of Object.keys(table)) next[name] = table[name];
+    }
+    libraries.members = next;
   };
 
   const editor = buildCodeEditor(initial, prof, {
@@ -310,6 +553,13 @@ function renderJavaRunnable(context){
     plain: true,
     fileExt: ext,
     completionWords,
+    // 점 뒤 후보 — sc.nextInt(), list.add() … 선언한 타입을 보고 고른다(java-runtime.js).
+    // 고른 라이브러리의 클래스(gson.toJson() 등)까지 같은 길에서 답한다.
+    memberCandidates: (source, receiver, prefix) => javaMemberCompletionCandidates(source, receiver, prefix, libraries),
+    /* List 를 고르면 java.util.List 를 위에 적어 준다 — 자바 수업의 첫 벽이 "import 를 안 적어서" 나는
+       오류다. 넣을 자리를 정하는 규칙(importPlanner)만 자바 것을 주고 장치는 파이썬 쪽 것을 그대로 쓴다. */
+    importCandidates: (source, prefix) => javaImportCandidates(source, prefix, libraries),
+    importPlanner: JAVA_IMPORT_PLANNER,
     contextMenuActions: () => (typeof ui !== "undefined" && typeof ui.cancelRun === "function"
       ? [{ label:"■ 실행 중지", action:() => ui.cancelRun() }]
       : [{ label:"▶ 실행", action:() => run(true) }])
@@ -333,10 +583,10 @@ function renderJavaRunnable(context){
   envBtn.textContent = "Java"; envBtn.title = "이 컴퓨터에서 쓰는 자바(JDK) 확인";
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button";
   revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
-  const hideOutBtn = document.createElement("button"); hideOutBtn.className = "run-revert"; hideOutBtn.type = "button";
-  hideOutBtn.textContent = "결과 숨기기"; hideOutBtn.title = "실행 결과 칸을 접고 편집기를 넓게 쓰기"; hideOutBtn.hidden = true;
+  // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
+  const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   const status = document.createElement("span"); status.className = "run-status";
-  bar.append(runBtn, gradeBtn, libBtn, envBtn, saveBtn, revertBtn, hideOutBtn, status);
+  bar.append(runBtn, gradeBtn, libBtn, envBtn, saveBtn, revertBtn, layoutBtn, status);
   if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
 
   // ── 좌(편집기) · 우(실행 결과) 분할 ──
@@ -345,8 +595,50 @@ function renderJavaRunnable(context){
   divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
   const outPanel = document.createElement("div"); outPanel.className = "code-output";
   outPanel.tabIndex = 0; outPanel.setAttribute("aria-label", "실행 결과");
+
+  /* 결과 숨기기는 실행 바가 아니라 결과 칸 오른쪽 위에 둔다(파이썬 실행 화면과 같은 자리·같은 모양).
+     자바 결과 렌더러들은 outPanel.innerHTML 을 통째로 갈아끼우므로, 붙여 둔 버튼도 함께 지워진다.
+     그래서 out-chrome 표시를 달아 두고 childList 를 지켜보다가 새 헤더에 다시 붙인다. */
+  const outHideBtn = document.createElement("button"); outHideBtn.className = "out-hide"; outHideBtn.type = "button";
+  const outHeadActions = document.createElement("span"); outHeadActions.className = "out-head-actions out-chrome";
+  outHeadActions.append(outHideBtn);
+  const syncOutputHideButton = (stacked) => {
+    const label = javaT("실행 결과 숨기기");
+    outHideBtn.title = label; outHideBtn.setAttribute("aria-label", label);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    // 접히는 방향을 그대로 가리킨다 — 아래에 쌓였으면 ∨, 오른쪽에 있으면 >
+    path.setAttribute("d", stacked ? "M7 9l5 5 5-5" : "M9 7l5 5-5 5");
+    svg.appendChild(path); outHideBtn.replaceChildren(svg);
+  };
+  const attachOutputChrome = () => {
+    const head = outPanel.querySelector(".out-head");
+    if (head){
+      if (outHeadActions.parentNode !== head) head.appendChild(outHeadActions);
+    } else if (outHeadActions.parentNode !== outPanel){
+      outPanel.insertBefore(outHeadActions, outPanel.firstChild);
+    }
+  };
+  const outputChromeObserver = new MutationObserver(attachOutputChrome);
+  outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
+  outPanel.appendChild(outHeadActions);
+
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
+
+  // 결과를 편집기 옆(가로) ↔ 아래(세로)로. 고른 방향은 다음에 열 때도 유지한다(파이썬과 키는 따로 둔다).
+  let outputStacked = false;
+  try { outputStacked = localStorage.getItem("javaSplitDir") === "col"; } catch(_){}
+  const applyOutputLayout = () => {
+    split.classList.toggle("stack-v", outputStacked);
+    divider.setAttribute("aria-orientation", outputStacked ? "horizontal" : "vertical");
+    layoutBtn.textContent = outputStacked ? "Side" : "Below";
+    layoutBtn.title = javaT(outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로");
+    layoutBtn.setAttribute("aria-label", layoutBtn.title);
+    syncOutputHideButton(outputStacked);
+  };
+  applyOutputLayout();
 
   outer.append(bar, split);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
@@ -413,10 +705,15 @@ function renderJavaRunnable(context){
     outPanel.append(head, list);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(outPanel);
   });
-  hideOutBtn.addEventListener("click", () => {
+  outHideBtn.addEventListener("click", () => {
     split.classList.remove("show-out");
-    hideOutBtn.hidden = true;
     editor.ta.focus({ preventScroll:true });
+  });
+  layoutBtn.addEventListener("click", () => {
+    outputStacked = !outputStacked;
+    try { localStorage.setItem("javaSplitDir", outputStacked ? "col" : "row"); } catch(_){}
+    applyOutputLayout();
+    split.classList.add("show-out");        // 위치를 고르는 순간 결과 칸을 다시 보여 준다
   });
 
   // ── 편집 상태(초안·더러움 표시·되돌리기 버튼) ──
@@ -480,8 +777,10 @@ function renderJavaRunnable(context){
     if (autosaveBusy) autosaveAgain = true;
     scheduleAutosave();
   });
-  // 결과가 보이는 동안에만 '결과 숨기기'를 노출한다.
-  const observer = new MutationObserver(() => { hideOutBtn.hidden = !split.classList.contains("show-out"); });
+  // 결과가 한 번 보이면 위치 토글을 꺼내 둔다 — 숨긴 뒤에도 다음 실행 위치를 미리 고를 수 있게 남긴다.
+  const observer = new MutationObserver(() => {
+    if (split.classList.contains("show-out")) layoutBtn.hidden = false;
+  });
   observer.observe(split, { attributes:true, attributeFilter:["class"] });
 
   saveBtn.addEventListener("click", async () => {
@@ -490,13 +789,16 @@ function renderJavaRunnable(context){
       const value = editor.getValue();
       const ok = await saveTextDoc(value, ownerDoc, (ownerDoc && ownerDoc.name) || saveName);
       if (ok !== true) return;
-      savedValue = value;
+      // 저장창에서 파일명을 바꾸면 saveTextDoc이 public 클래스명도 고쳐 쓴다. 그 최종 값을
+      // 저장 기준과 복구 스냅샷에 써야 방금 저장한 문서가 다시 '저장 안 됨'으로 보이지 않는다.
+      const writtenValue = ownerDoc && typeof ownerDoc.savedText === "string" ? ownerDoc.savedText : editor.getValue();
+      savedValue = writtenValue;
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
       clearPythonDraft(draftKey);
       // saveTextDoc 은 디스크에만 쓰므로 자동 복원용 작업공간 사본을 저장한 내용으로 맞춘다.
       if (ownerDoc && typeof markDocumentSavedSnapshot === "function"){
-        await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(value), "text/plain;charset=utf-8");
+        await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(writtenValue), "text/plain;charset=utf-8");
       }
       refreshEditState();
     } finally { saveBtn.disabled = false; }
@@ -538,6 +840,7 @@ function renderJavaRunnable(context){
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
       observer.disconnect();
+      outputChromeObserver.disconnect();
       libraryPicker.destroy();
       if (typeof ui.disposeInstallGuide === "function") ui.disposeInstallGuide();
       ui.disposeInstallGuide = null;

@@ -1356,7 +1356,13 @@ function buildCodeEditor(text, prof, options={}){
   // 소음은 카탈로그 쪽이 대부분이고, 옆 파일의 클래스·함수는 지금 쓰려는 이름일 확률이 높다.
   // 멤버 접근(obj.) 문맥은 제외한다 — 거기서 필요한 건 속성이지 import 가 아니다.
   const importCandidatesFor = (source, prefix, manual, dotContext) => {
-    if (plainMode || dotContext) return [];                // 일반 텍스트 편집·멤버 접근에서는 import 제안 없음
+    if (dotContext) return [];                             // 멤버 접근(obj.)에서 필요한 건 속성이지 import 가 아니다
+    // 부르는 쪽이 자기 언어의 후보를 주면 그것을 쓴다(자바 실행 편집기). plainMode 여도 연다.
+    if (typeof options.importCandidates === "function"){
+      try { return options.importCandidates(source, prefix, manual) || []; }
+      catch(e){ return []; }
+    }
+    if (plainMode) return [];                              // 일반 텍스트 편집에서는 import 제안 없음
     const indexed = manual && typeof pythonIndexedImportCandidates === "function" ? pythonIndexedImportCandidates(prefix) : [];
     let workspace = [];
     if (typeof options.workspaceImportCandidates === "function") {
@@ -1486,7 +1492,7 @@ function buildCodeEditor(text, prof, options={}){
       : { name: String(selected || ""), type: "", signature: "" };
     const range = completionReplacementRange(ta.value, ta.selectionStart, ta.selectionEnd, completion.start, completion.end, info.name);
     const application = (typeof completionApplicationPlan === "function")
-      ? completionApplicationPlan(ta.value, range, info)
+      ? completionApplicationPlan(ta.value, range, info, options.importPlanner)
       : (() => {
           const insertion = completionInsertionPlan(ta.value, range, info);
           return { value:ta.value.slice(0, range.start) + insertion.text + ta.value.slice(range.end), caret:insertion.caret };

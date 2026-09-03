@@ -806,3 +806,26 @@ test("code-viewer 는 언어 판별로 실행 바를 붙이고 js 는 전용 화
   // 파이썬은 이 규칙에서 빼 둔다 — 기존 동작을 바꾸지 않는다.
   assert.doesNotMatch(codeViewer, /extRunLang === "python" && \(heavy/);
 });
+
+test("자바스크립트 실행 결과 칸도 파이썬·자바와 같은 숨기기·위치 토글을 쓴다", () => {
+  const editorSource = fs.readFileSync(path.join(root, "src/js/js-editor.js"), "utf8");
+  const i18nSource = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
+
+  // 숨기기는 실행 바가 아니라 결과 칸 오른쪽 위 — CSS(.out-hide·.out-head-actions)는 이미 있는 것을 쓴다.
+  assert.match(editorSource, /outHideBtn\.className = "out-hide"/);
+  assert.match(editorSource, /outHeadActions\.className = "out-head-actions out-chrome"/);
+  assert.ok(!/hideOutBtn/.test(editorSource), "실행 바의 '결과 숨기기' 버튼은 남아 있으면 안 된다");
+  // beginJsOutput 이 outPanel 을 갈아끼워도 새 헤더에 다시 붙는다.
+  assert.match(editorSource, /new MutationObserver\(attachOutputChrome\)/);
+  assert.match(editorSource, /outputChromeObserver\.observe\(outPanel, \{ childList:true, subtree:true \}\)/);
+  assert.match(editorSource, /outputChromeObserver\.disconnect\(\)/);
+
+  // 결과 위치 토글 — 저장 키는 파이썬·자바와 따로 둔다.
+  assert.match(editorSource, /layoutBtn\.className = "run-layout"/);
+  assert.match(editorSource, /split\.classList\.toggle\("stack-v", outputStacked\)/);
+  assert.match(editorSource, /localStorage\.getItem\("jsSplitDir"\)/);
+  assert.match(editorSource, /localStorage\.setItem\("jsSplitDir", outputStacked \? "col" : "row"\)/);
+  assert.match(editorSource, /divider\.setAttribute\("aria-orientation", outputStacked \? "horizontal" : "vertical"\)/);
+  ["실행 결과 숨기기", "실행 결과를 편집기 오른쪽 옆으로", "실행 결과를 편집기 아래로"]
+    .forEach((label) => assert.ok(i18nSource.includes(JSON.stringify(label)), `번역 키 누락: ${label}`));
+});

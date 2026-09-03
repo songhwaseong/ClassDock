@@ -1879,26 +1879,33 @@
     return offset;
   }
 
-  function completionApplicationPlan(value, range, item) {
+  /* planner 로 언어별 규칙을 갈아 끼운다(없으면 파이썬 규칙). 자바 실행 편집기가 자기 규칙을 준다 —
+     "이미 적혀 있는가"(has)·"어디에 넣는가"(offset)·"import 줄을 치는 중인가"(linePrefix)만 다르고
+     나머지(본문 채우기·커서 밀기)는 언어와 무관하다. */
+  function completionApplicationPlan(value, range, item, planner) {
     const text = String(value || "");
     const insertion = completionInsertionPlan(text, range, item);
     const start = Math.max(0, Math.min(Number(range && range.start) || 0, text.length));
     const end = Math.max(start, Math.min(Number(range && range.end) || start, text.length));
     let next = text.slice(0, start) + insertion.text + text.slice(end);
     let caret = insertion.caret;
+    const hasImport = planner && typeof planner.has === "function" ? planner.has : hasPythonImport;
+    const importOffsetOf = planner && typeof planner.offset === "function" ? planner.offset : pythonImportInsertOffset;
+    const importLineRe = planner && planner.linePrefix ? planner.linePrefix : /^\s*(?:from|import)\b/;
     const importText = item && typeof item === "object" ? normalizePythonImport(item.importText) : "";
     const lineStart = text.lastIndexOf("\n", start - 1) + 1;
     const linePrefix = text.slice(lineStart, start);
     // import 문을 작성하는 도중이거나 이미 import된 경우에는 본문만 완성한다.
-    if (!importText || /^\s*(?:from|import)\b/.test(linePrefix) || hasPythonImport(next, importText)) return { value:next, caret };
-    const mergedImport = mergePythonFromImport(next, importText);
+    if (!importText || importLineRe.test(linePrefix) || hasImport(next, importText)) return { value:next, caret };
+    // 파이썬의 "from X import A, B" 합치기는 자바에 없다 — planner 가 있으면 건너뛴다.
+    const mergedImport = planner ? { merged:false } : mergePythonFromImport(next, importText);
     if (mergedImport.merged) {
       if (mergedImport.start + mergedImport.oldLength <= caret) {
         caret += mergedImport.newLength - mergedImport.oldLength;
       }
       return { value:mergedImport.value, caret };
     }
-    const offset = pythonImportInsertOffset(next);
+    const offset = importOffsetOf(next);
     const prefix = offset > 0 && next.charAt(offset - 1) !== "\n" ? "\n" : "";
     const suffix = offset < next.length ? "\n" : "";
     const added = prefix + importText + suffix;

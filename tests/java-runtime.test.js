@@ -257,3 +257,400 @@ test("한글 클래스 이름도 파일·실행 후보와 오류 줄에서 그�
   assert.equal(javaErrorLine("\tat 인사.main(인사.java:5)", "인사"), 5);
   assert.equal(javaErrorLine("인사.java:3: error: bad", "인사"), 3);
 });
+
+test("새 자바 파일은 사이드바 + 메뉴·시작 화면·폴더 우클릭 세 곳에서 만들 수 있다", () => {
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
+  const appSource = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
+  const documentsSource = fs.readFileSync(path.join(root, "src/js/documents.js"), "utf8");
+
+  // 사이드바 + 메뉴: 항목이 있고, 눌렀을 때 동작하고, 키보드 이동 목록에도 들어간다.
+  assert.match(html, /id="sbNewJava"[^>]*role="menuitem"/);
+  assert.match(html, /<span>새 자바 코드\(\.java\)<\/span>/);
+  assert.match(appSource, /byId\("sbNewJava"\)\.onclick = \(\) => \{ if \(typeof newJavaScratch === "function"\) newJavaScratch\(\); \}/);
+  assert.match(appSource, /byId\("sbNewJs"\), byId\("sbNewJava"\)/);
+
+  // 시작 화면 '다른 문서 만들기' + 폴더 우클릭
+  assert.match(html, /id="dzNewJava"[^>]*role="menuitem"/);
+  assert.match(documentsSource, /add\("\+Java {2}새 자바 코드"[\s\S]{0,140}newJavaScratchInFolder\(node\.newPythonContext\)/);
+
+  // 만드는 길은 파이썬·자바스크립트 스크래치와 같은 공용 함수를 쓴다.
+  assert.match(editorSource, /createScratchInFolder\(folder, javaScratchFileName, javaScratchStarter,\s*\n?\s*"text\/x-java-source"/);
+  assert.match(editorSource, /function newJavaScratch\(\)\{[\s\S]{0,320}activeFolderContextForNewFile\(\)/);
+  // 미저장 새 파일도 자동복원 바탕 문서를 남기도록 queueFiles 경로를 쓴다.
+  assert.match(editorSource,
+    /function newJavaScratch\(\)\{[\s\S]{0,600}typeof queueFiles === "function"[\s\S]{0,120}queueFiles\(\[file\], \{ isScratch:true \}\)/);
+
+  // 메뉴 라벨은 한/EN 사전에도 있어야 영어 UI 에서 한글로 남지 않는다.
+  assert.match(i18nSource, /"새 자바 코드\(\.java\)": "New Java file \(\.java\)"/);
+  assert.match(i18nSource, /"\+Java {2}새 자바 코드": "\+Java {2}New Java code"/);
+});
+
+/* 자바만의 이름 규칙 — 파일 이름이 곧 public 클래스 이름이다.
+   파이썬·자바스크립트처럼 "새 코드 2.py" 를 쓰면 javac 가 받지 못하는 파일이 디스크에 남는다. */
+test("새 자바 파일 이름은 식별자로 유효하고, 시작 코드의 클래스 이름과 같다", () => {
+  const context = vm.createContext({ t:(s) => s, shortcutDisplay:() => "F5", shortcutValue:() => "F5" });
+  const pick = /function javaScratchFileName[\s\S]*?\n\}\n[\s\S]*?function javaScratchStarter[\s\S]*?\n\}\n/.exec(editorSource);
+  assert.ok(pick, "이름·시작코드 함수를 찾을 수 있어야 한다");
+  const api = vm.runInContext(pick[0] + "\n({ name:javaScratchFileName, starter:javaScratchStarter })", context);
+
+  assert.equal(api.name(1), "Main.java");
+  assert.equal(api.name(3), "Main3.java");
+  for (const n of [1, 2, 7]){
+    const file = api.name(n);
+    const cls = file.replace(/\.java$/, "");
+    assert.match(cls, /^[A-Za-z_$][A-Za-z0-9_$]*$/, "클래스 이름으로 쓸 수 있어야 한다: " + file);
+    // 시작 코드의 public 클래스 이름이 파일 이름과 어긋나면 javac 가 거절한다.
+    assert.match(api.starter(file), new RegExp("public class " + cls + " \{"));
+    assert.match(api.starter(file), /public static void main\(String\[\] args\)/);
+  }
+});
+
+test("자바 저장 파일명은 영문 대문자로 시작하는 클래스 이름만 허용한다", () => {
+  const context = vm.createContext({ console });
+  const start = editorSource.indexOf("const JAVA_FILE_ID_START_RE");
+  const end = editorSource.indexOf("function createJavaScratchInFolder", start);
+  assert.ok(start >= 0 && end > start, "자바 파일 이름 검사 함수를 찾을 수 있어야 한다");
+  const source = editorSource.slice(start, end);
+  const api = vm.runInContext(source + "\n;({ validate:javaFileNameValidationMessage, rename:javaRenamePublicTypeForFile })", context);
+
+  assert.equal(api.validate("Student.java"), "");
+  assert.match(api.validate("student.java"), /대문자/);
+  assert.match(api.validate("1Student.java"), /대문자/);
+  assert.match(api.validate("My Student.java"), /클래스 이름으로 쓸 수 있는 문자/);
+  assert.match(api.validate("Student.txt"), /\.java 확장자/);
+});
+
+test("자바 파일명을 바꾸면 최상위 public 타입만 같은 이름으로 바꾼다", () => {
+  const context = vm.createContext({ console });
+  const start = editorSource.indexOf("const JAVA_FILE_ID_START_RE");
+  const end = editorSource.indexOf("function createJavaScratchInFolder", start);
+  const source = editorSource.slice(start, end);
+  const rename = vm.runInContext(source + "\n;javaRenamePublicTypeForFile", context);
+  const before = [
+    "// public class CommentOnly {}",
+    "class Helper {}",
+    "public class Main {",
+    "    String sample = \"public class StringOnly {}\";",
+    "    public Main() {}",
+    "    Main copy = new Main();",
+    "    public class Inner {}",
+    "}"
+  ].join("\n");
+  const result = rename(before, "Student.java");
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  assert.match(result.value, /public class Student \{/);
+  assert.match(result.value, /public class CommentOnly/);
+  assert.match(result.value, /public class StringOnly/);
+  assert.match(result.value, /public class Inner/);
+  assert.match(result.value, /class Helper \{\}/);
+  assert.match(result.value, /public Student\(\) \{\}/);
+  assert.match(result.value, /Student copy = new Student\(\)/);
+  assert.match(result.value, /String sample = "public class StringOnly \{\}"/);
+  assert.doesNotMatch(result.value, /public class Main \{/);
+});
+
+test("자바 이름 규칙과 클래스명 동기화는 모든 파일명 변경 저장 경로에 연결된다", () => {
+  const codeViewer = fs.readFileSync(path.join(root, "src/js/code-viewer.js"), "utf8");
+  const documents = fs.readFileSync(path.join(root, "src/js/documents.js"), "utf8");
+  assert.match(codeViewer, /applyScratchDocName[\s\S]*?javaPrepareDocumentFileRename\(ownerDoc, fname\)/);
+  assert.match(codeViewer, /prepareWrite:[\s\S]*?javaPrepareDocumentFileRename\(ownerDoc, actualName, value\)/);
+  assert.match(documents, /oldExt === "java"[\s\S]*?javaPrepareDocumentFileRename\(doc, name\)/);
+  assert.match(documents, /moveOriginalFile\(ctx, name, javaReplacement\)/);
+});
+
+test("실행 결과 숨기기는 실행 바가 아니라 결과 칸 오른쪽 위에 있다", () => {
+  // 파이썬 실행 화면과 같은 자리·같은 클래스를 쓴다 — CSS(.out-hide·.out-head-actions)를 새로 만들지 않는다.
+  assert.match(editorSource, /outHideBtn\.className = "out-hide"/);
+  assert.match(editorSource, /outHeadActions\.className = "out-head-actions out-chrome"/);
+  assert.ok(!/hideOutBtn/.test(editorSource), "실행 바의 '결과 숨기기' 버튼은 남아 있으면 안 된다");
+  // 결과 렌더러들이 outPanel.innerHTML 을 갈아끼워도 새 헤더에 다시 붙는다.
+  assert.match(editorSource, /new MutationObserver\(attachOutputChrome\)/);
+  assert.match(editorSource, /outputChromeObserver\.observe\(outPanel, \{ childList:true, subtree:true \}\)/);
+  assert.match(editorSource, /outputChromeObserver\.disconnect\(\)/);
+});
+
+test("결과 칸은 편집기 옆 ↔ 아래로 옮길 수 있고 그 선택이 남는다", () => {
+  assert.match(editorSource, /layoutBtn\.className = "run-layout"/);
+  assert.match(editorSource, /split\.classList\.toggle\("stack-v", outputStacked\)/);
+  assert.match(editorSource, /localStorage\.getItem\("javaSplitDir"\)/);
+  assert.match(editorSource, /localStorage\.setItem\("javaSplitDir", outputStacked \? "col" : "row"\)/);
+  // 세로 배치에서는 분할선도 가로로 잡아야 한다(attachRunSplitter 가 stack-v 를 보고 끌 축을 정한다).
+  assert.match(editorSource, /divider\.setAttribute\("aria-orientation", outputStacked \? "horizontal" : "vertical"\)/);
+  ["실행 결과 숨기기", "실행 결과를 편집기 오른쪽 옆으로", "실행 결과를 편집기 아래로"]
+    .forEach((label) => assert.ok(i18nSource.includes(JSON.stringify(label)), `번역 키 누락: ${label}`));
+});
+
+// ── 자동완성 ───────────────────────────────────────────────────────────────
+
+// vm 컨텍스트가 만든 배열은 프로토타입이 달라 deepEqual 이 어긋난다 — 이쪽 realm 배열로 옮겨 담는다.
+const names = (items) => Array.from(items, (item) => item.name);
+
+test("표준 클래스 이름이 단어 후보에 올라간다(키워드만으로는 String 도 안 나온다)", () => {
+  const words = get("JAVA_TYPE_WORDS");
+  // import 없이 바로 쓰는 java.lang 이름은 단어 후보로 올린다.
+  ["String", "Math", "Integer", "StringBuilder", "Object", "Exception"]
+    .forEach((word) => assert.ok(words.includes(word), `없는 이름: ${word}`));
+  // import 가 필요한 이름은 여기 없다 — 있으면 import 후보와 겹쳐 같은 이름이 두 줄로 뜬다.
+  const imports = get("JAVA_IMPORTS");
+  ["List", "ArrayList", "Map", "HashMap", "Set", "Scanner"].forEach((word) => {
+    assert.ok(!words.includes(word), `단어 후보에 남아 있다: ${word}`);
+    assert.ok(imports[word], `import 후보에 없다: ${word}`);
+  });
+  // 편집기가 실제로 이 목록을 기본 후보에 얹는지 — 배선이 빠지면 자동완성은 그대로 키워드뿐이다.
+  assert.match(editorSource, /JAVA_TYPE_WORDS/);
+  assert.match(editorSource, /memberCandidates: \(source, receiver, prefix\) => javaMemberCompletionCandidates\(source, receiver, prefix, libraries\)/);
+});
+
+test("선언한 타입을 보고 점 뒤 후보를 고른다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const source = [
+    "import java.util.*;",
+    "public class Main {",
+    "    public static void main(String[] args) {",
+    "        Scanner sc = new Scanner(System.in);",
+    "        List<String> names = new ArrayList<>();",
+    "        Map<String, Integer> counts = new HashMap<>();",
+    "        String line = sc.nextLine();",
+    "        StringBuilder sb = new StringBuilder();",
+    "        int[] scores = new int[10];",
+    "    }",
+    "}"
+  ].join("\n");
+
+  assert.ok(names(members(source, "sc", "")).includes("nextInt"));
+  assert.ok(names(members(source, "names", "")).includes("add"));
+  assert.ok(names(members(source, "counts", "")).includes("put"));
+  assert.ok(names(members(source, "line", "")).includes("substring"));
+  assert.ok(names(members(source, "sb", "")).includes("append"));
+  // 배열은 메서드가 없고 length 필드뿐 — size()/length() 오타를 막는 자리다.
+  assert.deepEqual(names(members(source, "scores", "")), ["length"]);
+  assert.equal(members(source, "scores", "")[0].type, "property");
+  // 선언한 적 없는 이름은 후보를 내지 않는다(버퍼 단어 완성으로 넘어간다).
+  assert.equal(members(source, "nobody", "").length, 0);
+});
+
+test("클래스 이름으로 부르는 정적 멤버도 나온다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  assert.ok(names(members("", "Math", "")).includes("random"));
+  assert.ok(names(members("", "Integer", "")).includes("parseInt"));
+  assert.ok(names(members("", "Arrays", "")).includes("sort"));
+  // System. 다음은 out·err 부터. 편집기는 점 바로 앞 낱말만 주므로 out 도 그대로 알아본다.
+  assert.equal(names(members("", "System", ""))[0], "out");
+  assert.ok(names(members("", "out", "")).includes("println"));
+});
+
+test("친 글자로 후보를 걸러내고, 메서드는 괄호가 붙도록 표시한다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const source = "List<String> names = new ArrayList<>();";
+  const picked = members(source, "names", "add");
+  assert.deepEqual(names(picked), ["add", "addAll"]);
+  assert.equal(picked[0].type, "function");
+  assert.equal(picked[0].signature, "add(item)");
+  // 이미 다 친 필드는 목록에서 뺀다(메서드는 () 편의를 위해 남긴다).
+  assert.deepEqual(names(members("", "Math", "PI")), []);
+});
+
+test("같은 이름을 다시 선언하면 마지막 선언을 따르고, 타입이 아닌 낱말에는 속지 않는다", () => {
+  const declared = get("javaDeclaredType");
+  assert.equal(declared("String value = \"a\";\nScanner value = new Scanner(System.in);", "value").type, "Scanner");
+  // return·new 처럼 앞에 오는 낱말을 타입으로 오해하면 엉뚱한 후보가 나온다.
+  assert.equal(declared("return total;", "total"), null);
+  // var 는 오른쪽을 봐야 안다.
+  assert.equal(declared("var sc = new Scanner(System.in);", "sc").type, "Scanner");
+  assert.equal(declared("var name = \"홍길동\";", "name").type, "String");
+  assert.equal(declared("var mystery = compute();", "mystery"), null);
+  // for-each 와 메서드 매개변수의 선언도 읽는다.
+  assert.equal(declared("for (String word : words) {", "word").type, "String");
+  assert.equal(declared("static void greet(String name) {", "name").type, "String");
+});
+
+test("고른 라이브러리의 클래스는 점 뒤 멤버까지 나온다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const source = [
+    "import com.google.gson.Gson;",
+    "public class Main {",
+    "    public static void main(String[] args) {",
+    "        Gson gson = new Gson();",
+    "    }",
+    "}"
+  ].join("\n");
+  const picked = names(members(source, "gson", "", { words:["Gson", "GsonBuilder", "JsonObject"] }));
+  assert.ok(picked.includes("toJson"), "변수로 쓴 라이브러리 클래스도 선언 타입으로 찾는다");
+  assert.ok(picked.includes("fromJson"));
+  // 클래스 이름으로 바로 부르는 것(정적)도 같은 길에서 답한다.
+  assert.ok(names(members("", "Jsoup", "", { words:["Jsoup", "Document"] })).includes("connect"));
+  assert.ok(names(members("", "StringUtils", "", { words:["StringUtils"] })).includes("isBlank"));
+  assert.ok(names(members("", "Assertions", "", { words:["Assertions"] })).includes("assertEquals"));
+});
+
+test("고르지 않은 라이브러리의 멤버는 제안하지 않는다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  // 목록에 없으면 = 실행에 안 들어간다. 컴파일되지 않을 코드를 권하면 안 된다.
+  assert.equal(members("Gson gson = new Gson();", "gson", "", { words:[] }).length, 0);
+  assert.equal(members("", "Jsoup", "", { words:["StringUtils"] }).length, 0);
+  // 라이브러리 정보를 아예 넘기지 않아도(브라우저 편집 등) 조용히 비운다.
+  assert.equal(members("", "Jsoup", "").length, 0);
+});
+
+test("라이브러리 멤버도 표준 라이브러리와 같은 모양으로 답한다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const picked = members("", "StringUtils", "isB", { words:["StringUtils"] });
+  assert.deepEqual(names(picked), ["isBlank"]);
+  assert.equal(picked[0].type, "function");
+  assert.equal(picked[0].signature, "isBlank(cs)");
+  // 상수는 필드로 — CSVFormat.DEFAULT 뒤에 괄호가 붙으면 안 된다.
+  const constants = members("", "CSVFormat", "DEF", { words:["CSVFormat"] });
+  assert.deepEqual(names(constants), ["DEFAULT"]);
+  assert.equal(constants[0].type, "property");
+});
+
+test("표준 라이브러리 이름이 라이브러리 표에 가려지지 않는다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  // jsoup 을 골랐어도 String 변수는 String 멤버가 나와야 한다(표준이 먼저다).
+  const picked = names(members("String line = \"a\";", "line", "", { words:["Document", "Element"] }));
+  assert.ok(picked.includes("substring"));
+  assert.ok(!picked.includes("select"));
+});
+
+test("직접 받은 jar 는 서버가 뽑아 온 멤버 표를 쓴다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  // 서버가 주는 모양: 메서드는 이름 뒤에 (), 필드는 이름만. 인자 이름은 클래스 파일에 없어 못 싣는다.
+  const libraries = { words:[], members:{ FileUtils:"readFileToString() writeStringToFile() copyFile() EMPTY_FILE_ARRAY" } };
+  const picked = members("FileUtils utils = null;", "utils", "", libraries);
+  assert.deepEqual(names(picked), ["readFileToString", "writeStringToFile", "copyFile", "EMPTY_FILE_ARRAY"]);
+  assert.equal(picked[0].type, "function");
+  assert.equal(picked[0].signature, "readFileToString()");
+  assert.equal(picked[3].type, "property");     // 상수는 괄호가 붙으면 안 된다
+  // 클래스 이름으로 바로 부르는 것도 같은 표에서 답한다.
+  assert.ok(names(members("", "FileUtils", "", libraries)).includes("copyFile"));
+  // 친 글자로 거르는 규칙은 표준 라이브러리와 같다.
+  assert.deepEqual(names(members("", "FileUtils", "write", libraries)), ["writeStringToFile"]);
+});
+
+test("손으로 적어 둔 표가 뽑아 온 표보다 먼저다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  // 같은 클래스가 양쪽에 있으면 인자 안내가 있는 쪽(기본 목록)을 쓴다.
+  const libraries = { words:["Jsoup"], members:{ Jsoup:"onlyFromJar()" } };
+  const picked = names(members("", "Jsoup", "", libraries));
+  assert.ok(picked.includes("connect"));
+  assert.ok(!picked.includes("onlyFromJar"));
+});
+
+test("라이브러리 정보가 없거나 모양이 깨져도 조용히 넘어간다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  assert.equal(members("", "FileUtils", "").length, 0);
+  assert.equal(members("", "FileUtils", "", null).length, 0);
+  assert.equal(members("", "FileUtils", "", { words:null, members:null }).length, 0);
+  assert.equal(members("", "FileUtils", "", { members:{ FileUtils:123 } }).length, 0);
+});
+
+// ── 자동완성이 import 까지 ─────────────────────────────────────────────────
+
+test("친 글자로 import 후보를 내고, 이미 적어 둔 것은 빼놓는다", () => {
+  const candidates = get("javaImportCandidates");
+  const rows = candidates("public class Main {}", "Lis", null);
+  assert.deepEqual(names(rows), ["List"]);
+  assert.equal(rows[0].importText, "import java.util.List;");
+  // 이미 적혀 있으면 후보에서 뺀다 — 그때부터는 버퍼에 이름이 있어 평범한 단어 완성으로 나온다.
+  assert.equal(candidates("import java.util.List;\npublic class Main {}", "Lis", null).length, 0);
+  // 패키지를 * 로 받아 왔어도 다시 적지 않는다.
+  assert.equal(candidates("import java.util.*;\npublic class Main {}", "Arr", null).length, 0);
+  // 아무 글자도 치지 않았으면 목록 전체를 쏟지 않는다.
+  assert.equal(candidates("", "", null).length, 0);
+});
+
+test("라이브러리 클래스는 그 라이브러리를 골랐을 때만 import 후보가 된다", () => {
+  const candidates = get("javaImportCandidates");
+  assert.equal(candidates("", "Gso", null).length, 0);
+  const picked = candidates("", "Gso", { words:["Gson", "GsonBuilder"] });
+  assert.deepEqual(names(picked), ["Gson", "GsonBuilder"]);
+  assert.equal(picked[0].importText, "import com.google.gson.Gson;");
+});
+
+test("직접 받은 jar 클래스도 패키지 전체 이름으로 import 후보가 된다", () => {
+  const candidates = get("javaImportCandidates");
+  // 패키지 전체 이름은 jar 목록에서 곧바로 오므로, 느린 javap 멤버 추출을 기다리지 않아도 된다.
+  const libraries = { words:[], classes:[
+    "org.apache.commons.io.FileUtils",
+    "org.apache.commons.io.IOUtils"
+  ], members:{} };
+  const rows = candidates("public class Main {}", "FileU", libraries);
+  assert.deepEqual(names(rows), ["FileUtils"]);
+  assert.equal(rows[0].importText, "import org.apache.commons.io.FileUtils;");
+
+  assert.equal(candidates("import org.apache.commons.io.FileUtils;\nclass Main {}", "FileU", libraries).length, 0);
+  assert.equal(candidates("import org.apache.commons.io.*;\nclass Main {}", "FileU", libraries).length, 0);
+  assert.equal(candidates("package org.apache.commons.io;\nclass Main {}", "FileU", libraries).length, 0);
+});
+
+test("직접 받은 jar 의 동명 클래스는 import 문이 다른 후보로 모두 보여 준다", () => {
+  const candidates = get("javaImportCandidates");
+  const libraries = { words:[], classes:[
+    "alpha.model.Document",
+    "beta.model.Document"
+  ], members:{} };
+  const rows = candidates("class Main {}", "Doc", libraries);
+  assert.deepEqual(Array.from(rows, (row) => row.importText), [
+    "import alpha.model.Document;",
+    "import beta.model.Document;"
+  ]);
+});
+
+test("import 는 package 아래·기존 import 다음·클래스 위에 들어간다", () => {
+  const offsetOf = get("javaImportInsertOffset");
+  const at = (source) => source.slice(0, offsetOf(source)) + "<<>>" + source.slice(offsetOf(source));
+
+  // 아무것도 없으면 첫 코드 줄 앞
+  assert.equal(at("public class Main {\n}\n"), "<<>>public class Main {\n}\n");
+  // package 가 있으면 그 다음 줄
+  assert.equal(at("package school;\n\npublic class Main {\n}\n"),
+    "package school;\n<<>>\npublic class Main {\n}\n");
+  // 이미 import 가 있으면 마지막 것 다음 줄
+  assert.equal(at("package school;\n\nimport java.util.List;\nimport java.util.Map;\n\npublic class Main {\n}\n"),
+    "package school;\n\nimport java.util.List;\nimport java.util.Map;\n<<>>\npublic class Main {\n}\n");
+  // 맨 위 주석은 건너뛴다(저작권 머리글이 흔하다)
+  assert.equal(at("// 3학년 2반 홍길동\npublic class Main {\n}\n"),
+    "// 3학년 2반 홍길동\n<<>>public class Main {\n}\n");
+  assert.equal(at("/*\n * 과제 1\n */\npublic class Main {\n}\n"),
+    "/*\n * 과제 1\n */\n<<>>public class Main {\n}\n");
+});
+
+test("이미 적혀 있는 import 인지 가린다", () => {
+  const has = get("javaHasImport");
+  assert.ok(has("import java.util.List;", "import java.util.List;"));
+  assert.ok(has("import  java.util.List ;", "import java.util.List;"));      // 띄어쓰기가 달라도 같은 것
+  assert.ok(has("import java.util.*;", "import java.util.List;"));           // 패키지를 통째로 받아 왔다
+  assert.ok(!has("import java.util.*;", "import java.io.File;"));            // 다른 패키지는 아니다
+  assert.ok(!has("import java.util.stream.*;", "import java.util.List;"));   // 하위 패키지 * 는 상위를 덮지 않는다
+  assert.ok(!has("// import java.util.List;", "import java.util.List;"));    // 주석 처리한 것은 없는 것
+  assert.ok(!has("public class Main {}", "import java.util.List;"));
+});
+
+
+test("직접 받은 jar 멤버는 static 과 instance 를 수신자에 맞춰 가른다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const libraries = { words:[], members:{
+    "org.apache.commons.io.FileUtils":"S:readFileToString() S:copyFile() S:EMPTY_FILE_ARRAY I:toString()"
+  } };
+  const java = "import org.apache.commons.io.FileUtils;\nFileUtils utils = null;";
+  const instance = members(java, "utils", "", libraries);
+  assert.deepEqual(names(instance), ["toString"]);
+  const statics = members(java, "FileUtils", "", libraries);
+  assert.deepEqual(names(statics), ["readFileToString", "copyFile", "EMPTY_FILE_ARRAY"]);
+  assert.equal(statics[2].type, "property");
+});
+
+test("직접 받은 jar 의 동명 클래스는 현재 import 로 가른다", () => {
+  const members = get("javaMemberCompletionCandidates");
+  const libraries = { words:[], members:{
+    "alpha.model.Document":"I:alphaOnly()",
+    "beta.model.Document":"I:betaOnly()"
+  } };
+  const alpha = "import alpha.model.Document;\nDocument doc = null;";
+  assert.deepEqual(names(members(alpha, "doc", "", libraries)), ["alphaOnly"]);
+  const beta = "import beta.model.*;\nDocument doc = null;";
+  assert.deepEqual(names(members(beta, "doc", "", libraries)), ["betaOnly"]);
+  assert.deepEqual(names(members("Document doc = null;", "doc", "", libraries)), []);
+  assert.deepEqual(names(members("alpha.model.Document doc = null;", "doc", "", libraries)), ["alphaOnly"]);
+});

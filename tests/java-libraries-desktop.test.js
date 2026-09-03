@@ -112,3 +112,73 @@ test("카탈로그의 모든 항목은 대조할 SHA-256 을 갖고 있다", () 
   assert.equal(hashes.length, ids.length, "항목 수와 검증값 수가 같아야 한다");
   assert.ok(!catalog.includes('Sha256 = ""'), "검증값이 빈 항목이 남아 있다");
 });
+
+test("직접 좌표로 받은 jar 도 클래스 이름을 알려 준다", () => {
+  // 카탈로그 항목은 손으로 적어 둔 Words 를, 그 밖의 jar 는 단순 이름과 패키지 전체 이름을 싣는다.
+  assert.match(launcher, /else if \(file != null\)[\s\S]{0,300}JsonString\(JavaLibraryJarWords\(file\)\)[\s\S]{0,150}JsonString\(JavaLibraryJarClasses\(file\)\)/);
+  assert.match(launcher, /static string JavaLibraryJarWords\(string jarPath\)/);
+  assert.match(launcher, /static string JavaLibraryJarClasses\(string jarPath\)/);
+  // 압축을 풀지 않고 엔트리 이름만 훑는다(ZipFile 이 아니라 ZipArchive — 참조 어셈블리가 늘지 않는다).
+  assert.match(launcher, /new ZipArchive\(stream, ZipArchiveMode\.Read\)/);
+  assert.ok(!/ZipFile\.OpenRead/.test(launcher), "ZipFile 은 별도 어셈블리 참조가 필요하다");
+});
+
+test("jar 에서 읽은 이름은 걸러 내고 상한을 둔다", () => {
+  // 내부·익명 클래스와 라이브러리 내부 패키지는 제안하지 않는다.
+  assert.match(launcher, /full\.IndexOf\('\$'\) >= 0\) continue/);
+  assert.match(launcher, /full\.StartsWith\("META-INF\/", StringComparison\.OrdinalIgnoreCase\)\) continue/);
+  assert.match(launcher, /lowered\.Contains\("\/internal\/"\) \|\| lowered\.Contains\("\/impl\/"\) \|\| lowered\.Contains\("\/shaded\/"\)/);
+  assert.match(launcher, /!char\.IsUpper\(name\[0\]\)\) continue/);
+  // 상한이 없으면 큰 jar 하나가 키워드·표준 이름을 목록에서 밀어낸다.
+  assert.match(launcher, /const int JavaJarWordLimit = \d+/);
+  assert.match(launcher, /classes\.Count >= limit\) break/);
+  // 깨진 jar 는 목록 전체를 망가뜨리지 않고 빈 문자열로 넘어간다.
+  assert.match(launcher, /catch \{ return ""; \}/);
+});
+
+test("같은 jar 를 되풀이해 읽지 않는다(크기·수정시각을 열쇠로)", () => {
+  assert.match(launcher, /jarPath \+ "\|" \+ info\.Length \+ "\|" \+ info\.LastWriteTimeUtc\.Ticks/);
+  assert.match(launcher, /JavaJarWordCache\.TryGetValue\(key, out hit\)\) return hit/);
+  assert.match(launcher, /JavaJarWordCache\.Count > 64\) JavaJarWordCache\.Clear\(\)/);
+  assert.match(launcher, /JavaJarClassCache\.TryGetValue\(key, out hit\)\) return hit/);
+});
+
+test("직접 받은 jar 의 멤버는 javap 로 뽑아 캐시에서 답한다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/java-lib-members", StringComparison\.Ordinal\)/);
+  assert.match(launcher, /JavaLibraryMembersJson\(QueryValue\(path, "spec"\)\)/);
+  // 기본 목록은 프런트가 손으로 적어 둔 표를 쓴다 — 서버는 카탈로그 항목에 javap 를 돌리지 않는다.
+  assert.match(launcher, /if \(target == null \|\| !string\.IsNullOrEmpty\(target\.Id\)\) return "\{\}"/);
+  // jar 옆에 남기고, jar 보다 오래된 캐시는 버린다(같은 좌표를 다시 받으면 다시 뽑아야 한다).
+  assert.match(launcher, /jarPath \+ "\.members\.json"/);
+  assert.match(launcher, /File\.GetLastWriteTimeUtc\(cache\) < File\.GetLastWriteTimeUtc\(jarPath\)\) return null/);
+});
+
+test("javap 호출은 명령줄 한도와 멈춤을 함께 막는다", () => {
+  // javap 는 javac 와 달리 @argfile 을 못 읽는다 → 한 번에 다 넘기면 명령줄 길이 한도에 걸린다.
+  assert.match(launcher, /const int JavaJarMemberBatch = \d+/);
+  assert.match(launcher, /for \(int i = 0; i < classes\.Count; i \+= JavaJarMemberBatch\)/);
+  assert.match(launcher, /proc\.WaitForExit\(JavaJarMemberTimeoutMs\)/);
+  assert.match(launcher, /try \{ proc\.Kill\(\); \} catch \{ \}/);
+  // stdout 을 먼저 끝까지 읽는 동안 stderr 파이프가 차면 제한 시간까지 도달하지 못한다.
+  // 두 스트림을 별도 리더로 동시에 비운 뒤에 종료를 기다려야 한다.
+  assert.match(launcher, /Thread outReader = new Thread/);
+  assert.match(launcher, /Thread errReader = new Thread/);
+  assert.match(launcher, /outReader\.Start\(\); errReader\.Start\(\);[\s\S]{0,120}proc\.WaitForExit\(JavaJarMemberTimeoutMs\)/);
+  // 클래스 수·표 크기 상한이 없으면 큰 jar 하나가 화면과 응답을 붙잡는다.
+  assert.match(launcher, /const int JavaJarMemberClassLimit = \d+/);
+  assert.match(launcher, /sb\.Length \+ entry\.Length > JavaJarMemberJsonLimit\) break/);
+});
+
+test("뽑은 표는 메서드와 필드를 갈라 담고 생성자를 뺀다", () => {
+  // 패키지 전체 이름과 static/instance 표식을 보존해야 동명 클래스·잘못된 수신자 후보가 섞이지 않는다.
+  assert.match(launcher, /return qualified;/);
+  assert.match(launcher, /return \(isStatic \? "S:" : "I:"\) \+ name/);
+  assert.match(launcher, /string simple = JavaSimpleName\(cls\)/);
+  // 예전 단순 이름·무표식 캐시는 새 형식으로 다시 뽑는다.
+  assert.match(launcher, /json\.IndexOf\("\\"\$schema\\":2"/);
+  assert.match(launcher, /new StringBuilder\("\{\\"\$schema\\":2"\)/);
+  // 이름 목록과 멤버 추출이 같은 클래스 열거를 쓴다(거르는 규칙이 갈리지 않게).
+  assert.match(launcher, /static List<string> EnumerateJavaJarClasses\(string jarPath, int limit\)/);
+  assert.match(launcher, /EnumerateJavaJarClasses\(jarPath, JavaJarWordLimit\)/);
+  assert.match(launcher, /EnumerateJavaJarClasses\(jarPath, JavaJarMemberClassLimit\)/);
+});

@@ -28,11 +28,12 @@ test("시작 화면의 다른 문서 메뉴는 실제 생성 형식을 빠짐없
   assert.match(html, /id="dzNewGeneralLabel">일반 문서<\/span>/);
   assert.match(html, /id="dzNewClassLabel">수업 자료<\/span>/);
   assert.match(html, /id="dzNewOpenLabel">파일 열기<\/span>/);
-  ["dzNewNotebook", "dzNewSheet", "dzNewText", "dzNewJs", "dzNewBoard", "dzNewMnote",
+  ["dzNewNotebook", "dzNewSheet", "dzNewText", "dzNewJs", "dzNewJava", "dzNewBoard", "dzNewMnote",
     "dzNewMusic", "dzNewMap", "dzNewTimeline", "dzNewExam", "dzOpenLesson"].forEach(id => {
     assert.match(html, new RegExp(`id="${id}"[^>]*role="menuitem"`));
   });
   assert.match(app, /byId\("dzNewJs"\)[\s\S]*newJsScratch\(\)/);
+  assert.match(app, /byId\("dzNewJava"\)[\s\S]*newJavaScratch\(\)/);
   assert.match(app, /byId\("dzNewMnote"\)[\s\S]*newMnoteScratch\(\)/);
   assert.match(app, /byId\("dzNewMusic"\)[\s\S]*newMusicScratch\(\)/);
   assert.match(app, /byId\("dzNewMap"\)[\s\S]*newMapScratch\(\)/);

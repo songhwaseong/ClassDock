@@ -139,7 +139,7 @@
   <p>기능이 어디 있는지 모를 땐 <strong><kbd>Ctrl</kbd>+<kbd>K</kbd>(명령 팔레트)</strong> 에 하고 싶은 일을 한국어로 적어 보세요. 지금 화면에서 쓸 수 있는 기능만 추려 보여 주고 바로 실행합니다.</p>
 </blockquote>
 
-<p>아무 파일도 열지 않은 시작 화면에서는 <strong>＋ 다른 문서 만들기</strong>를 누르면 일반 문서(노트북·빈 표·텍스트·자바스크립트), 수업 자료(화이트보드·블록 문서·악보·지도·연대표·시험지), 파일 열기(수업 리플레이)로 나누어 바로 시작할 수 있습니다. Python은 위쪽의 <strong>Python 실습</strong> 버튼으로 바로 만듭니다.</p>
+<p>아무 파일도 열지 않은 시작 화면에서는 <strong>＋ 다른 문서 만들기</strong>를 누르면 일반 문서(노트북·빈 표·텍스트·자바스크립트·자바), 수업 자료(화이트보드·블록 문서·악보·지도·연대표·시험지), 파일 열기(수업 리플레이)로 나누어 바로 시작할 수 있습니다. Python은 위쪽의 <strong>Python 실습</strong> 버튼으로 바로 만듭니다.</p>
 
 <p>파일은 외부 서버로 올라가지 않습니다. 내 PC 안에서만 처리합니다.</p>
 
@@ -491,6 +491,7 @@ cd myOffice</code></pre>
   <li><strong>라이브러리</strong> 버튼에서 Lodash(<code>_</code>)·Day.js(<code>dayjs</code>)·Papa Parse(<code>Papa</code>)·Math.js(<code>math</code>)를 선택합니다. 선택은 현재 문서에만 저장되고 실행·채점에 함께 적용됩니다.</li>
   <li><strong>+ .js 파일</strong>로 직접 받은 라이브러리를 추가할 수도 있습니다. 해당 코드는 실행할 때마다 실행되므로 출처를 신뢰하는 파일만 추가하세요(한 파일 512KB, 문서당 최대 8개·합계 1MB).</li>
   <li><strong>⚙ 설정 → 도구 → JavaScript 탭</strong>에서 채점과 JavaScript 라이브러리 버튼의 노출 여부를 따로 정합니다. Python 탭의 채점·Python 라이브러리 설정과는 서로 영향을 주지 않습니다.</li>
+  <li>결과 위치는 파이썬 실습 화면과 같습니다. <strong>Side / Below</strong> 버튼으로 편집기 오른쪽과 아래 사이를 전환하고, 결과 오른쪽 위의 접기 아이콘으로 내용은 그대로 둔 채 결과 칸만 숨깁니다(Side/Below를 누르면 다시 나옵니다). 가운데 분할선을 끌면 너비·높이를 조절하며, 고른 방향은 다음에 열 때도 유지됩니다.</li>
 </ol>
 
 <blockquote>
@@ -500,13 +501,16 @@ cd myOffice</code></pre>
 <h3>Java (.java, EXE 전용)</h3>
 
 <ol>
-  <li><code>.java</code> 파일을 열고 <strong>▶</strong> 또는 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행합니다. 빈 파일로 시작하면 <code>public class Main</code>과 <code>main</code> 껍데기가 미리 들어가 있어 바로 본문만 쓰면 됩니다.</li>
+  <li><code>.java</code> 파일을 열거나 사이드바 <strong>새로 만들기 → 새 자바 코드(.java)</strong>를 선택하고, <strong>▶</strong> 또는 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>로 실행합니다. 새로 만든 파일은 <code>Main.java</code> 라는 이름에 <code>public class Main</code>과 <code>main</code> 껍데기가 들어간 채로 시작하므로 바로 본문만 쓰면 됩니다.</li>
   <li><strong>클래스 이름을 자유롭게 바꿔도 됩니다.</strong> 자바는 원래 <code>public class</code> 이름과 파일 이름이 같아야 하지만, 실행할 때 소스에서 이름을 찾아 맞춰 주므로 파일 이름을 따로 고칠 필요가 없습니다.</li>
   <li><code>Scanner</code>로 입력을 받는 코드는 결과 칸이 <strong>대화형 터미널</strong>로 바뀝니다. 값을 치고 <kbd>Enter</kbd>를 누르면 이어서 진행되고, 입력한 값은 다른 색으로 표시됩니다. <code>hasNextLine()</code>처럼 끝까지 읽는 코드는 <strong>입력 끝</strong> 버튼으로 마칩니다.</li>
   <li>오류가 나면 컴파일 오류든 실행 중 예외든 <strong>문제가 난 줄을 편집기에 표시</strong>합니다.</li>
   <li><strong>채점</strong> 버튼은 파이썬·자바스크립트와 같은 방식으로, 입력값과 기대 출력을 적어 두면 자동으로 비교합니다.</li>
   <li><strong>Java</strong> 버튼을 누르면 지금 어떤 자바가 쓰이는지(버전·경로·어디서 찾았는지) 보여 줍니다. 교실에서 "이 PC만 다르게 동작한다" 싶을 때 먼저 볼 곳입니다.</li>
-  <li><strong>라이브러리</strong> 버튼으로 JSON·CSV·HTML 파싱이나 단위 테스트에 쓰는 jar 를 골라 넣을 수 있습니다. 아직 없는 항목을 누르면 확인 뒤 내려받아 이 컴퓨터에 보관하고, 고른 목록은 <strong>실행과 채점에 똑같이</strong> 들어갑니다. 고른 라이브러리의 클래스 이름은 편집기 자동완성에도 나옵니다.</li>
+  <li><strong>라이브러리</strong> 버튼으로 JSON·CSV·HTML 파싱이나 단위 테스트에 쓰는 jar 를 골라 넣을 수 있습니다. 아직 없는 항목을 누르면 확인 뒤 내려받아 이 컴퓨터에 보관하고, 고른 목록은 <strong>실행과 채점에 똑같이</strong> 들어갑니다. 고른 라이브러리는 클래스 이름과 함께 <strong>점 뒤 멤버까지 자동완성</strong>됩니다(<code>gson.</code> → <code>toJson()</code>·<code>fromJson()</code>, <code>StringUtils.</code> → <code>isBlank()</code>). 좌표로 직접 받은 라이브러리도 jar 안을 읽어 클래스와 멤버를 찾아 주는데, 기본 목록과 달리 <strong>인자 안내는 없습니다</strong>(인자 이름이 jar 에 남아 있지 않기 때문입니다). 처음 고를 때 한 번만 훑고 그 결과를 jar 옆에 남겨 두므로 다음부터는 곧바로 나옵니다. 고르지 않은 라이브러리는 제안하지 않습니다.</li>
+  <li>결과 위치는 파이썬 실습 화면과 같습니다. <strong>Side / Below</strong> 버튼으로 편집기 오른쪽과 아래 사이를 전환하고, 결과 오른쪽 위의 접기 아이콘으로 내용은 그대로 둔 채 결과 칸만 숨깁니다(Side/Below를 누르면 다시 나옵니다). 가운데 분할선을 끌면 너비·높이를 조절하며, 고른 방향은 다음에 열 때도 유지됩니다.</li>
+  <li>자동완성은 자바 키워드와 함께 <strong><code>List</code>·<code>Scanner</code>·<code>HashMap</code> 같은 표준 클래스 이름</strong>을 제안하고, 점을 찍으면 <strong>그 변수의 선언 타입에 맞는 멤버</strong>를 인자 안내와 함께 보여 줍니다(<code>sc.</code> → <code>nextInt()</code>·<code>nextLine()</code>, <code>System.out.</code> → <code>println()</code>). 배열 변수 뒤에는 <code>length</code> 필드만 나오므로 <code>length()</code>로 잘못 쓰는 일을 줄입니다. <kbd>Ctrl</kbd>+<kbd>Space</kbd>로 직접 열 수도 있습니다.</li>
+  <li><strong>import 가 필요한 이름을 고르면 import 문도 함께 적어 줍니다.</strong> <code>List</code>를 고르면 <code>import java.util.List;</code>가 <code>package</code> 아래·클래스 위에 들어가고, 후보 목록에는 어떤 import 가 붙는지 미리 보여 줍니다. 이미 적어 두었거나 <code>import java.util.*;</code>로 받아 온 이름은 다시 적지 않습니다. 고른 라이브러리의 클래스(<code>Gson</code>·<code>StringUtils</code> 등)도 같은 방식으로 import 가 붙습니다.</li>
 </ol>
 
 <blockquote>

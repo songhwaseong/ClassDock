@@ -676,21 +676,43 @@ function askText(opts){
   opts = opts || {};
   return new Promise((resolve) => {
     const modal = byId("textModal"), input = byId("textInput");
+    const sub = byId("textSub"), okButton = byId("textOk");
+    const baseMessage = opts.message || "";
     byId("textTitle").textContent = opts.title || "이름 입력";
-    byId("textSub").textContent = opts.message || "";
-    byId("textOk").textContent = opts.okText || "확인";
+    sub.textContent = baseMessage;
+    okButton.textContent = opts.okText || "확인";
     input.placeholder = opts.placeholder || "";
     input.value = opts.value || "";
+    const refreshValidation = () => {
+      let error = "";
+      if (typeof opts.validate === "function"){
+        try { error = String(opts.validate(input.value) || ""); } catch(_){ error = "입력한 값을 확인해 주세요."; }
+      }
+      okButton.disabled = !!error;
+      sub.textContent = error || baseMessage;
+      sub.classList.toggle("is-error", !!error);
+      input.setAttribute("aria-invalid", error ? "true" : "false");
+      return !error;
+    };
+    input.addEventListener("input", refreshValidation);
+    refreshValidation();
     modal.hidden = false;
     setTimeout(() => {
       input.focus();
       const dot = input.value.lastIndexOf(".");          // 확장자 앞부분만 선택 → 바로 고쳐쓰기 편하게
       if (dot > 0) input.setSelectionRange(0, dot); else input.select();
     }, 40);
-    const cleanup = () => { modal.hidden = true; byId("textOk").onclick = null; byId("textCancel").onclick = null; input.onkeydown = null; };
-    const ok = () => { const v = input.value; cleanup(); resolve(v); };
+    const cleanup = () => {
+      modal.hidden = true;
+      okButton.onclick = null; byId("textCancel").onclick = null; input.onkeydown = null;
+      input.removeEventListener("input", refreshValidation);
+      input.removeAttribute("aria-invalid");
+      okButton.disabled = false;
+      sub.classList.remove("is-error");
+    };
+    const ok = () => { if (!refreshValidation()) return; const v = input.value; cleanup(); resolve(v); };
     const cancel = () => { cleanup(); resolve(null); };
-    byId("textOk").onclick = ok;
+    okButton.onclick = ok;
     byId("textCancel").onclick = cancel;
     input.onkeydown = (e) => {
       if (e.key === "Enter"){ e.preventDefault(); ok(); }

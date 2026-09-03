@@ -2147,17 +2147,30 @@ async function originalRenameTargetExists(ctx, newName){
   }
 }
 
-async function moveOriginalFile(ctx, newName){
+async function moveOriginalFile(ctx, newName, replacementText=null){
   const targetState = await originalRenameTargetExists(ctx, newName);
   if (targetState === "other") throw new Error("rename-target-exists");
 
-  // Chromium이 실제 파일 시스템 move를 제공하면 원자적인 이름 변경을 우선한다.
-  if (typeof ctx.fileHandle.move === "function"){
+  // 내용까지 바뀌는 자바 이름 변경은 새 파일을 완전히 쓴 뒤 옛 파일을 지운다. 단, 대소문자만
+  // 바꾸는 이름은 같은 항목이므로 move 후 내용을 쓰고 실패하면 이전 이름으로 되돌린다.
+  // 내용이 그대로인 일반 이름 변경은 Chromium의 원자적인 move를 우선한다.
+  if (typeof ctx.fileHandle.move === "function" && (replacementText === null || targetState === "same")){
     let moved = false;
+    let movedHandle = ctx.fileHandle;
     try {
       await ctx.fileHandle.move(newName);
       moved = true;
+      try { movedHandle = await ctx.dirHandle.getFileHandle(newName); } catch(_){ }
+      if (replacementText !== null){
+        const writable = await movedHandle.createWritable();
+        try { await writable.write(replacementText); await writable.close(); }
+        catch(error){ try { await writable.abort(); } catch(_){ } throw error; }
+      }
     } catch(error){
+      if (moved && replacementText !== null && movedHandle && typeof movedHandle.move === "function"){
+        try { await movedHandle.move(ctx.oldName); } catch(_){ }
+        throw error;
+      }
       // 대소문자만 다른 이름은 복사 폴백으로 안전하게 처리할 수 없다.
       if (targetState === "same") throw error;
     }
@@ -2170,7 +2183,8 @@ async function moveOriginalFile(ctx, newName){
   }
 
   // move 미지원 환경: 새 파일을 완전히 쓴 것을 확인한 뒤에만 옛 항목을 지운다.
-  const source = await ctx.fileHandle.getFile();
+  const source = replacementText === null ? await ctx.fileHandle.getFile()
+    : new Blob([replacementText], { type:"text/plain;charset=utf-8" });
   let targetHandle = null;
   let created = false;
   try {
@@ -2244,24 +2258,46 @@ async function renameDoc(id){
   try { ctx = await originalRenameContext(doc); }
   catch(error){ console.warn(error); toast("원본 폴더에 접근하지 못했어요.", 3000); return; }
   if (!ctx){ toast("원본 파일 이름을 바꿀 권한이 없어요.", 3000); return; }
+  const oldName = String(ctx.oldName);
+  const oldExt = fileExtOf(oldName.toLowerCase());
+  const hasOldExt = oldExt && oldExt !== oldName.toLowerCase();
   const input = await askText({
     title: "이름 바꾸기",
     message: "디스크에 있는 원본 파일 이름이 실제로 바뀝니다.",
-    value: ctx.oldName, okText: "바꾸기"
+    value: ctx.oldName, okText: "바꾸기",
+    validate: oldExt === "java" && typeof javaFileNameValidationMessage === "function"
+      ? (value) => {
+          let candidate = String(value).replace(/[\\/:*?"<>|]/g, "").trim().replace(/[. ]+$/, "");
+          if (hasOldExt && candidate && !candidate.toLowerCase().endsWith("." + oldExt))
+            candidate = candidate.replace(/\.+$/, "") + "." + oldExt;
+          const error = javaFileNameValidationMessage(candidate);
+          return error && typeof t === "function" ? t(error) : error;
+        }
+      : null
   });
   if (input === null) return;
   let name = String(input).replace(/[\\/:*?"<>|]/g, "").trim().replace(/[. ]+$/, "");
   if (!name || name === "." || name === ".." || name === ctx.oldName) return;
-  const oldName = String(ctx.oldName);
-  const oldExt = fileExtOf(oldName.toLowerCase());
-  const hasOldExt = oldExt && oldExt !== oldName.toLowerCase();
   if (hasOldExt && !name.toLowerCase().endsWith("." + oldExt)){
     name = name.replace(/\.+$/, "") + "." + oldExt;        // 확장자 유지(빼거나 바꿔 적어도 원래 확장자로)
   }
   if (!name || name === oldName) return;
+  let javaPrepared = null, javaReplacement = null;
+  if (oldExt === "java" && typeof javaPrepareDocumentFileRename === "function"){
+    try { javaPrepared = await javaPrepareDocumentFileRename(doc, name); }
+    catch(error){ console.warn(error); toast("자바 소스의 클래스 이름을 확인하지 못했어요.", 3600, { type:"error" }); return; }
+    if (!javaPrepared.ok){
+      toast(typeof t === "function" ? t(javaPrepared.error) : javaPrepared.error, 4200, { type:"error" });
+      return;
+    }
+    if (javaPrepared.changed) javaReplacement = typeof applyDocEncodingOnSave === "function"
+      ? applyDocEncodingOnSave(javaPrepared.value, doc) : javaPrepared.value;
+  }
   try {
-    const newHandle = await moveOriginalFile(ctx, name);
+    const newHandle = await moveOriginalFile(ctx, name, javaReplacement);
     await applyOriginalRename(doc, ctx, name, newHandle);
+    if (javaPrepared && javaPrepared.changed && typeof javaApplyPreparedFileRename === "function")
+      javaApplyPreparedFileRename(doc, javaPrepared, { saved:true });
   } catch(error){
     console.warn("original file rename failed:", error);
     const code = String(error && error.message || "");
@@ -2518,6 +2554,9 @@ function openSidebarGroupMenu(node, x, y){
   });
   add("+Js  새 자바스크립트 코드", () => {
     if (typeof newJsScratchInFolder === "function") newJsScratchInFolder(node.newPythonContext);
+  });
+  add("+Java  새 자바 코드", () => {
+    if (typeof newJavaScratchInFolder === "function") newJavaScratchInFolder(node.newPythonContext);
   });
   add("+Nb  새 노트북", () => {
     if (typeof newNotebookScratchInFolder === "function") newNotebookScratchInFolder(node.newPythonContext);

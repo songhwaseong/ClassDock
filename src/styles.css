@@ -2148,6 +2148,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .modal-card h3{font-size:18px;margin-bottom:4px}
   /* pre-line: 확인 문구가 줄바꿈을 쓸 수 있게(예: 삭제 대상 목록과 경고를 줄로 나눠 보여 주기) */
   .modal-card .sub{color:var(--muted);font-size:13px;margin-bottom:14px;white-space:pre-line}
+  .modal-card .sub.is-error{color:var(--danger)}
   .lastsig{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 12px;
     background:var(--panel-2);border-radius:10px;font-size:13px;color:var(--muted)}
   .lastsig img{max-height:46px;max-width:200px;background:#fff;border:1px solid var(--border);

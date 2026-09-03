@@ -367,10 +367,10 @@ function renderJsRunnable(context){
   const libraryBtn = document.createElement("button"); libraryBtn.className = "run-pkg run-js-library"; libraryBtn.type = "button";
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button";
   revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
-  const hideOutBtn = document.createElement("button"); hideOutBtn.className = "run-revert"; hideOutBtn.type = "button";
-  hideOutBtn.textContent = "결과 숨기기"; hideOutBtn.title = "실행 결과 칸을 접고 편집기를 넓게 쓰기"; hideOutBtn.hidden = true;
+  // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬·자바 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
+  const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   const status = document.createElement("span"); status.className = "run-status";
-  bar.append(runBtn, gradeBtn, libraryBtn, saveBtn, revertBtn, hideOutBtn, status);
+  bar.append(runBtn, gradeBtn, libraryBtn, saveBtn, revertBtn, layoutBtn, status);
   const libraryPicker = buildJsLibraryPicker(bar, libraryBtn, libraryKey, {
     onChange:(next) => {
       activeLibraries = next;
@@ -396,8 +396,51 @@ function renderJsRunnable(context){
   divider.setAttribute("role", "separator"); divider.setAttribute("aria-orientation", "vertical"); divider.tabIndex = 0;
   const outPanel = document.createElement("div"); outPanel.className = "code-output";
   outPanel.tabIndex = 0; outPanel.setAttribute("aria-label", "실행 결과");
+
+  /* 결과 숨기기는 실행 바가 아니라 결과 칸 오른쪽 위에 둔다(파이썬·자바 실행 화면과 같은 자리·같은 모양).
+     결과 렌더러(beginJsOutput·채점)는 outPanel.innerHTML 을 통째로 갈아끼우므로 붙여 둔 버튼도 함께
+     지워진다. out-chrome 표시를 달아 두고 childList 를 지켜보다가 새 헤더에 다시 붙인다. */
+  const jsT = (text) => (typeof t === "function" ? t(text) : text);
+  const outHideBtn = document.createElement("button"); outHideBtn.className = "out-hide"; outHideBtn.type = "button";
+  const outHeadActions = document.createElement("span"); outHeadActions.className = "out-head-actions out-chrome";
+  outHeadActions.append(outHideBtn);
+  const syncOutputHideButton = (stacked) => {
+    const label = jsT("실행 결과 숨기기");
+    outHideBtn.title = label; outHideBtn.setAttribute("aria-label", label);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    // 접히는 방향을 그대로 가리킨다 — 아래에 쌓였으면 ∨, 오른쪽에 있으면 >
+    path.setAttribute("d", stacked ? "M7 9l5 5 5-5" : "M9 7l5 5-5 5");
+    svg.appendChild(path); outHideBtn.replaceChildren(svg);
+  };
+  const attachOutputChrome = () => {
+    const head = outPanel.querySelector(".out-head");
+    if (head){
+      if (outHeadActions.parentNode !== head) head.appendChild(outHeadActions);
+    } else if (outHeadActions.parentNode !== outPanel){
+      outPanel.insertBefore(outHeadActions, outPanel.firstChild);
+    }
+  };
+  const outputChromeObserver = new MutationObserver(attachOutputChrome);
+  outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
+  outPanel.appendChild(outHeadActions);
+
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
+
+  // 결과를 편집기 옆(가로) ↔ 아래(세로)로. 고른 방향은 다음에 열 때도 유지한다(파이썬·자바와 키는 따로 둔다).
+  let outputStacked = false;
+  try { outputStacked = localStorage.getItem("jsSplitDir") === "col"; } catch(_){}
+  const applyOutputLayout = () => {
+    split.classList.toggle("stack-v", outputStacked);
+    divider.setAttribute("aria-orientation", outputStacked ? "horizontal" : "vertical");
+    layoutBtn.textContent = outputStacked ? "Side" : "Below";
+    layoutBtn.title = jsT(outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로");
+    layoutBtn.setAttribute("aria-label", layoutBtn.title);
+    syncOutputHideButton(outputStacked);
+  };
+  applyOutputLayout();
 
   outer.append(bar, inputWrap, split);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){
@@ -427,10 +470,15 @@ function renderJsRunnable(context){
       onRun: (tests) => runJsSource(editor.getValue(), ui, { gradeTests:tests })
     });
   });
-  hideOutBtn.addEventListener("click", () => {
+  outHideBtn.addEventListener("click", () => {
     split.classList.remove("show-out");
-    hideOutBtn.hidden = true;
     editor.ta.focus({ preventScroll:true });
+  });
+  layoutBtn.addEventListener("click", () => {
+    outputStacked = !outputStacked;
+    try { localStorage.setItem("jsSplitDir", outputStacked ? "col" : "row"); } catch(_){}
+    applyOutputLayout();
+    split.classList.add("show-out");        // 위치를 고르는 순간 결과 칸을 다시 보여 준다
   });
 
   // ── 편집 상태(초안·더러움 표시·되돌리기 버튼) ──
@@ -493,8 +541,10 @@ function renderJsRunnable(context){
     if (autosaveBusy) autosaveAgain = true;
     scheduleAutosave();
   });
-  // 결과가 보이는 동안에만 '결과 숨기기'를 노출한다.
-  const observer = new MutationObserver(() => { hideOutBtn.hidden = !split.classList.contains("show-out"); });
+  // 결과가 한 번 보이면 위치 토글을 꺼내 둔다 — 숨긴 뒤에도 다음 실행 위치를 미리 고를 수 있게 남긴다.
+  const observer = new MutationObserver(() => {
+    if (split.classList.contains("show-out")) layoutBtn.hidden = false;
+  });
   observer.observe(split, { attributes:true, attributeFilter:["class"] });
 
   saveBtn.addEventListener("click", async () => {
@@ -552,6 +602,7 @@ function renderJsRunnable(context){
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
       observer.disconnect();
+      outputChromeObserver.disconnect();
       libraryPicker.destroy();
       if (typeof ui.cancelRun === "function") ui.cancelRun();
       if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey);

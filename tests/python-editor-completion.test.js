@@ -26,7 +26,9 @@ test("작업공간 자동 import 는 자동 팝업에도 나오고, 설치 패�
   assert.match(editor, /if \(typeof options\.workspaceImportCandidates === "function"\) \{\s*try \{ workspace = options\.workspaceImportCandidates\(\)/);
   assert.match(editor, /pythonImportCompletionCandidates\(source, prefix, extra, \{ catalog: manual \}\)/);
   // 멤버 접근(obj.)·일반 텍스트 편집에서는 import 제안을 아예 만들지 않는다.
-  assert.match(editor, /if \(plainMode \|\| dotContext\) return \[\];/);
+  // (자바처럼 자기 후보를 주는 편집기만 plainMode 에서도 연다 — options.importCandidates)
+  assert.match(editor, /if \(dotContext\) return \[\];/);
+  assert.match(editor, /if \(plainMode\) return \[\];/);
   // 두 경로(로컬 즉시 표시·Jedi 응답 보강) 모두 같은 후보 생성기를 쓴다.
   assert.match(editor, /const imports = importCtx \? \[\] : importCandidatesFor\(source, word\.prefix, manual, ctx\.dotContext\);/);
   assert.match(editor, /const imports = importCtx \? \[\] : importCandidatesFor\(source, word\.prefix, manual, dotContext\);/);

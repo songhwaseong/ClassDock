@@ -60,12 +60,16 @@ function javaLibraryQuery(value){
 }
 
 /* 고른 라이브러리가 알려 주는 클래스 이름 — 편집기 자동완성에 얹는다.
-   rows 는 /java-lib-catalog 가 준 그대로(words 는 공백으로 나뉜 한 줄). */
-function javaLibraryCompletionWords(value, rows){
+   rows 는 /java-lib-catalog 가 준 그대로(words 는 공백으로 나뉜 한 줄).
+   기본 목록은 서버가 손으로 적어 둔 이름을, 직접 좌표로 받은 jar 는 서버가 jar 안에서 읽은 이름을 준다.
+   curatedOnly:true 면 기본 목록(카탈로그 id 가 있는 행)에서 온 이름만 돌려준다 — 아래 주석 참고. */
+function javaLibraryCompletionWords(value, rows, options){
+  const curatedOnly = !!(options && options.curatedOnly);
   const selected = javaLibraryState(value).ids;
   const words = [];
   for (const row of Array.isArray(rows) ? rows : []){
     if (!row || !row.words) continue;
+    if (curatedOnly && !row.id) continue;
     if (selected.indexOf(row.id) < 0 && selected.indexOf(row.spec) < 0
       && selected.indexOf(row.coordinate) < 0) continue;
     for (const word of String(row.words).split(/\s+/)){
@@ -73,6 +77,28 @@ function javaLibraryCompletionWords(value, rows){
     }
   }
   return words;
+}
+
+// 직접 받은 jar 가 알려 주는 패키지 전체 클래스 이름 — 클래스 선택 시 자동 import 에 쓴다.
+function javaLibraryCompletionClasses(value, rows){
+  const selected = javaLibraryState(value).ids;
+  const classes = [];
+  for (const row of Array.isArray(rows) ? rows : []){
+    if (!row || !row.classes) continue;
+    if (selected.indexOf(row.id) < 0 && selected.indexOf(row.spec) < 0
+      && selected.indexOf(row.coordinate) < 0) continue;
+    for (const qualified of String(row.classes).split(/\s+/)){
+      if (qualified && classes.indexOf(qualified) < 0) classes.push(qualified);
+    }
+  }
+  return classes;
+}
+
+/* 점 뒤 멤버까지 아는 클래스 = 기본 목록에서 온 이름만.
+   직접 받은 jar 에도 Document·Element 처럼 흔한 이름이 있어서, 이름이 같다는 이유로
+   jsoup 의 멤버를 권하면 컴파일되지 않는 코드를 쓰게 된다. 이름 목록과 멤버 목록의 문을 따로 둔다. */
+function javaLibraryMemberWords(value, rows){
+  return javaLibraryCompletionWords(value, rows, { curatedOnly:true });
 }
 
 function javaLibraryErrorText(raw){
@@ -102,6 +128,7 @@ function javaLibraryRow(raw){
     bundled: !!row.bundled,
     size: Math.max(0, Number(row.size) || 0),
     words: String(row.words || ""),
+    classes: String(row.classes || ""),
     sample: String(row.sample || "")
   };
 }
@@ -130,6 +157,30 @@ function javaLibraryCatalog(){
 // 이 컴퓨터에 실제로 있는 것 전부 — 카탈로그에 없는 직접 좌표도 여기에 나온다.
 function javaLibraryInstalled(){
   return javaLibraryFetchRows("/java-lib-list");
+}
+
+/* 직접 좌표로 받은 jar 의 멤버 표({클래스: "이름() 이름"}). 기본 목록은 프런트가 손으로 적어 둔 표를
+   쓰므로 서버가 빈 표로 답한다. 서버는 처음 한 번만 javap 를 돌리고 그 뒤로는 jar 옆 캐시에서 답하지만,
+   같은 좌표를 되풀이해 묻지 않도록 이 화면에서도 한 번 받은 것은 들고 있는다. */
+const _javaLibraryMemberCache = new Map();
+function javaLibraryMembers(spec){
+  const key = String(spec || "");
+  if (!javaLibraryValidSpec(key)) return Promise.resolve({});
+  if (_javaLibraryMemberCache.has(key)) return _javaLibraryMemberCache.get(key);
+  const task = (async () => {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return {};
+    const response = await fetch("/java-lib-members?spec=" + encodeURIComponent(key), { cache:"no-store" });
+    if (!response.ok) return {};
+    const table = await response.json();
+    if (!table || typeof table !== "object" || Array.isArray(table)) return {};
+    const out = {};
+    for (const name of Object.keys(table)){
+      if (typeof table[name] === "string" && table[name]) out[name] = table[name];
+    }
+    return out;
+  })().catch(() => ({}));      // 멤버는 있으면 좋은 것이라, 못 받아도 편집을 막지 않는다
+  _javaLibraryMemberCache.set(key, task);
+  return task;
 }
 
 /* 설치 1건. 시작 요청이 작업 번호를 주고, 로그는 증분 폴링으로 받아 hooks.onLog 로 흘린다.
@@ -197,6 +248,9 @@ if (typeof module !== "undefined" && module.exports){
     javaLibrarySelectionSignature,
     javaLibraryQuery,
     javaLibraryCompletionWords,
+    javaLibraryCompletionClasses,
+    javaLibraryMemberWords,
+    javaLibraryMembers,
     javaLibraryErrorText,
     javaLibraryRow
   };

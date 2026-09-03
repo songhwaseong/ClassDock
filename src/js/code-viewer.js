@@ -3381,6 +3381,14 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
   const base = current.replace(/\.[^.\\/]+$/, "");
   let fname = String(typed).trim().replace(/[\\/:*?"<>|]/g, "").trim() || base || "새 파일";
   if (!/\.[A-Za-z0-9]+$/.test(fname)) fname += ext;
+  let javaPrepared = null;
+  if (/\.java$/i.test(current) && typeof javaPrepareDocumentFileRename === "function"){
+    javaPrepared = await javaPrepareDocumentFileRename(ownerDoc, fname);
+    if (!javaPrepared.ok){
+      if (typeof toast === "function") toast(typeof t === "function" ? t(javaPrepared.error) : javaPrepared.error, 4200, { type:"error" });
+      return null;
+    }
+  }
   // 폴더 안에서 만든 문서는 그 폴더 경로를 유지한 채 파일명만 바꾼다.
   const currentDir = runPathDir(normalizedRunPath((ownerDoc && (ownerDoc.workspacePath || ownerDoc.relPath)) || ""));
   const nextPath = currentDir ? currentDir + "/" + fname : fname;
@@ -3394,6 +3402,8 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
     ownerDoc.name = fname;
     ownerDoc.workspacePath = nextPath;
     if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
+    if (javaPrepared && typeof javaApplyPreparedFileRename === "function")
+      javaApplyPreparedFileRename(ownerDoc, javaPrepared, { saved:false });
     // 폴더 묶음에는 createScratchInFolder 시점의 임시 이름이 들어 있으므로 첫 저장 이름도 함께 반영한다.
     // 실제 저장 성공 전에는 _named 를 확정하지 않아, 쓰기 실패 뒤 동기화가 이 문서를 삭제하지 않게 한다.
     if (ownerDoc.archiveCtx && typeof ownerDoc.archiveCtx.rename === "function"){
@@ -3422,8 +3432,18 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
 async function askScratchSaveName(ownerDoc, name, options={}){
   const current = String((ownerDoc && ownerDoc.name) || name || "");
   const base = current.replace(/\.[^.\\/]+$/, "");
+  const extMatch = current.match(/\.[^.\\/]+$/);
+  const ext = extMatch ? extMatch[0] : (options.fallbackExt || ".txt");
+  const validate = /\.java$/i.test(current) && typeof javaFileNameValidationMessage === "function"
+    ? (value) => {
+        let candidate = String(value).trim().replace(/[\\/:*?"<>|]/g, "").trim() || base || "새 파일";
+        if (!/\.[A-Za-z0-9]+$/.test(candidate)) candidate += ext;
+        const error = javaFileNameValidationMessage(candidate);
+        return error && typeof t === "function" ? t(error) : error;
+      }
+    : null;
   const typed = await askText({ title: "새 파일 저장", message: "저장할 파일 이름을 정하세요.",
-    placeholder: options.placeholder || "예: 연습", value: base, okText: "저장" });
+    placeholder: options.placeholder || "예: 연습", value: base, okText: "저장", validate });
   if (typed === null) return null;
   return applyScratchDocName(ownerDoc, typed, name, options);
 }
@@ -3438,7 +3458,6 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
   const silent = !!options.silent, existingOnly = !!options.existingOnly;
   // 화면·편집은 LF·UTF-8 로 다루지만, 디스크에는 원본 개행·BOM 을 되살려 쓴다(문자 인코딩은 UTF-8).
   // savedText·dirty 비교는 편집기와 같은 LF 값(value)을 그대로 쓴다.
-  const outValue = applyDocEncodingOnSave(value, ownerDoc);
   try {
     // 폴더로 연 파일이 원본 파일 핸들을 들고 있으면 서버 사본이 아닌 원본 파일에 되쓴다(.py 저장과 동일 원칙).
     const wantOriginal = !!(ownerDoc && ownerDoc.originalSaveMode);
@@ -3454,6 +3473,13 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       if (named === null) return false;
       name = named;
     }
+    // 자바 첫 저장에서 이름을 정하며 public 클래스명이 바뀌었으면, 저장 버튼이 이름 대화상자 전에
+    // 읽어 둔 예전 값 대신 방금 고친 편집기 값을 쓴다.
+    if (/\.java$/i.test(String((ownerDoc && ownerDoc.name) || name || ""))
+        && ownerDoc && ownerDoc.codeEditor && typeof ownerDoc.codeEditor.getValue === "function"){
+      value = ownerDoc.codeEditor.getValue();
+    }
+    let outValue = applyDocEncodingOnSave(value, ownerDoc);
     if (wantOriginal || fromFolderOriginal){
       const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
@@ -3506,16 +3532,38 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     const extMatch = String(name).match(/\.[A-Za-z0-9]+$/);
     const ext = extMatch ? extMatch[0].toLowerCase() : "";
     const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
+    let pickerJavaPrepared = null;
     const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
       existingOnly,
       noPermissionPrompt: silent && existingOnly,
       mime: mime + ";charset=utf-8",
       pickerTypes: ext ? [{ description: ext === ".ipynb" ? "Jupyter Notebook" : ext.slice(1).toUpperCase() + " 파일",
         accept: { [mime]: [ext] } }] : null
+      ,prepareWrite: async (handle, currentText) => {
+        const actualName = String(handle && handle.name || name || "");
+        const priorName = String((ownerDoc && ownerDoc.name) || name || "");
+        if (!/\.java$/i.test(priorName) || actualName === priorName) return { ok:true, text:currentText };
+        const prepared = typeof javaPrepareDocumentFileRename === "function"
+          ? await javaPrepareDocumentFileRename(ownerDoc, actualName, value) : null;
+        if (!prepared || !prepared.ok){
+          const message = prepared && prepared.error ? prepared.error : "자바 파일 이름을 확인해 주세요.";
+          if (!silent && typeof toast === "function") toast(typeof t === "function" ? t(message) : message, 4200, { type:"error" });
+          return { ok:false };
+        }
+        pickerJavaPrepared = prepared;
+        return { ok:true, text:applyDocEncodingOnSave(prepared.value, ownerDoc) };
+      }
     });
     if (wrote === "cancelled") return false;                 // 사용자가 위치 선택을 닫음 → 저장 안 함(다운로드도 없음)
+    if (wrote === "rejected") return false;                  // 자바 이름 규칙 위반 → 잘못된 이름으로 쓰거나 다운로드하지 않음
     if (existingOnly && wrote !== "saved") return hadHandle ? false : "skipped";
     if (wrote === "saved"){
+      if (pickerJavaPrepared){
+        value = pickerJavaPrepared.value;
+        outValue = applyDocEncodingOnSave(value, ownerDoc);
+        if (typeof javaApplyPreparedFileRename === "function")
+          javaApplyPreparedFileRename(ownerDoc, pickerJavaPrepared, { saved:true });
+      }
       if (ownerDoc){
         const oldPath = String(ownerDoc.workspacePath || ownerDoc.name || name).replace(/\\/g, "/").replace(/^\/+/, "");
         // 파일 선택 창에서 다른 이름을 골랐으면 탭·사이드바·헤더 이름을 새 이름으로 맞춘다(.py 저장과 동일)
@@ -3691,7 +3739,9 @@ async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noP
 
 async function saveViaFileHandle(text, name, ownerDoc, options={}){
   try {
-    let handle = ownerDoc && ownerDoc.fsHandle;
+    const originalHandle = ownerDoc && ownerDoc.fsHandle;
+    let handle = originalHandle;
+    let pickedNewHandle = false;
     const nativeRoot = await prepareNativeOriginalSaveRoot(ownerDoc, !options.noPermissionPrompt);
     if (nativeRoot.supported){
       if (!nativeRoot.handle) return nativeRoot.cancelled ? "cancelled" : "denied";
@@ -3731,7 +3781,17 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
         suggestedName: /\.[A-Za-z0-9]+$/.test(name) ? name : name + ".py",
         types: options.pickerTypes || [{ description: "Python", accept: { "text/x-python": [".py", ".pyw"] } }]
       });
+      pickedNewHandle = true;
       if (ownerDoc) ownerDoc.fsHandle = handle;
+    }
+    if (typeof options.prepareWrite === "function"){
+      const prepared = await options.prepareWrite(handle, text);
+      if (!prepared || prepared.ok === false){
+        // 이름 검사에서 거절된 저장창 선택을 남겨 두면 다음 저장도 같은 잘못된 핸들만 반복한다.
+        if (pickedNewHandle && ownerDoc) ownerDoc.fsHandle = originalHandle || null;
+        return "rejected";
+      }
+      if (Object.prototype.hasOwnProperty.call(prepared, "text")) text = prepared.text;
     }
     const writable = await handle.createWritable();
     await writable.write(new Blob([text], { type: options.mime || "text/x-python;charset=utf-8" }));
