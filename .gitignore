@@ -9,6 +9,10 @@ desktop/app.html
 # 배포용 테스트 패키지 (pack.bat 로 재생성)
 dist/
 
+# exe 가 실행 중에 만드는 폴더 — 소스가 아니다(자동 설치한 JDK, 받아 둔 자바 라이브러리 jar)
+jdk/
+java-libs/
+
 # 개발/테스트 의존성·산출물 (npm install · playwright)
 node_modules/
 package-lock.json

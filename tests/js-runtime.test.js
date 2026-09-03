@@ -801,8 +801,8 @@ test("code-viewer 는 언어 판별로 실행 바를 붙이고 js 는 전용 화
   assert.match(codeViewer, /const extRunLang = definitionSource \? null : runLangForExt\(ext\);/);
   assert.match(codeViewer, /const runnable = !!runLang;/);
   assert.match(codeViewer, /if \(runLang === "js"\)\{\s*\n\s*renderJsRunnable\(/);
-  // 압축된 라이브러리(.min.js)는 실행 화면이 아니라 기존 코드 보기로 흘려보낸다.
-  assert.match(codeViewer, /const runLang = \(extRunLang === "js" && \(heavy \|\| lightEdit\)\) \? null : extRunLang;/);
+  // 압축된 라이브러리(.min.js)나 아주 큰 .java 는 실행 화면이 아니라 기존 코드 보기로 흘려보낸다.
+  assert.match(codeViewer, /const runLang = \(\(extRunLang === "js" \|\| extRunLang === "java"\) && \(heavy \|\| lightEdit\)\)/);
   // 파이썬은 이 규칙에서 빼 둔다 — 기존 동작을 바꾸지 않는다.
   assert.doesNotMatch(codeViewer, /extRunLang === "python" && \(heavy/);
 });

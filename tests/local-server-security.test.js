@@ -56,6 +56,17 @@ test("자동완성용 작업공간 미러는 토큰이 있어야 쓰고, 미러 
   assert.match(launcher, /ClearPythonProjectMirror\(\);\s+\/\/ 자동완성용 작업공간 미러/);
 });
 
+test("자바 계열 POST 는 전부 토큰을 요구한다", () => {
+  // /java-rescan 은 탐색 캐시를 비워 다음 실행이 쓸 JDK 를 바꾸므로 인증 대상이다.
+  // prefix 로 걸어 두면 나중에 붙는 실행·설치 엔드포인트가 인증에서 빠질 일이 없다.
+  assert.match(launcher, /if \(path\.StartsWith\("\/java-", StringComparison\.Ordinal\)\) return true;/);
+  const post = launcher.indexOf('if (method == "POST")');
+  const get = launcher.indexOf('if (method == "GET")', post);
+  const javaRule = launcher.indexOf('path.StartsWith("/java-", StringComparison.Ordinal)');
+  assert.ok(post >= 0 && get > post, "POST·GET 허용 블록을 찾지 못했다");
+  assert.ok(javaRule > post && javaRule < get, "자바 규칙은 POST 블록 안에 있어야 한다");
+});
+
 test("저장 루트 경로는 공통 검증과 재분석 지점 차단을 거친다", () => {
   assert.match(launcher, /static bool TryResolveSaveRootPath/);
   assert.match(launcher, /static bool HasReparsePointBelowRoot/);

@@ -4,11 +4,14 @@
 const RUN_EXTS = new Set(["py"]);
 // 브라우저 워커에서 그대로 실행하는 자바스크립트 연습 파일(별도 런타임 없이 실행된다)
 const JS_RUN_EXTS = new Set(["js", "mjs"]);
-// 확장자 → 실행 언어("python" | "js" | null). 실행 바를 붙일지, 어느 실행기를 쓸지 한 곳에서 정한다.
+// EXE + 로컬 JDK 로만 실행하는 자바 연습 파일. 브라우저에는 자바 런타임이 없어 HTML 모드에서는 안내만 한다.
+const JAVA_RUN_EXTS = new Set(["java"]);
+// 확장자 → 실행 언어("python" | "js" | "java" | null). 실행 바를 붙일지, 어느 실행기를 쓸지 한 곳에서 정한다.
 function runLangForExt(ext){
   const key = String(ext || "").toLowerCase();
   if (RUN_EXTS.has(key)) return "python";
   if (JS_RUN_EXTS.has(key)) return "js";
+  if (JAVA_RUN_EXTS.has(key)) return "java";
   return null;
 }
 let _pyBackend = null;          // null=미확인, true/false=캐시(로컬 python 백엔드 가용 여부)
@@ -912,6 +915,59 @@ async function pythonBackendAvailable(){
 function resetPythonBackendProbe(){
   _pyBackend = null;
   if (typeof resetBackendFormatterProbe === "function"){ try { resetBackendFormatterProbe(); } catch(e){} }
+}
+
+let _javaBackend = null;   // null=미확인, true/false=캐시(로컬 JDK 가용 여부)
+
+/* exe 런처에서 자바 실행이 가능한지 — pythonBackendAvailable 과 같은 패턴.
+   파이썬과 달리 브라우저 대체 런타임이 없어서, false 면 실행이 아니라 설치 안내로 간다. */
+async function javaBackendAvailable(){
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;   // file:// → 백엔드 없음
+  if (_javaBackend !== null) return _javaBackend;
+  try {
+    const res = await fetch("/can-run-java", { method: "GET" });
+    _javaBackend = res.ok && (await res.text()).trim().toLowerCase().startsWith("yes");
+  } catch(e){ _javaBackend = false; }
+  return _javaBackend;
+}
+
+// 런처가 JDK 를 다시 찾은 뒤(/java-rescan, 자동 설치 완료) 프런트 캐시도 함께 비운다 —
+// 이걸 하지 않으면 런처는 새 JDK 를 알고 있는데 화면만 "설치 필요"로 굳은 채 남는다.
+function resetJavaBackendProbe(){
+  _javaBackend = null;
+}
+
+// /java-diagnostics 를 읽어 화면에 보여줄 형태로 정리한다. 못 찾았을 때도 '설치하면 어디로 가는지'를 알려준다.
+async function javaEnvironmentDetails(){
+  const missing = { ok:false, path:"", version:"", major:0, source:"", minimum:11, installRoot:"" };
+  if (location.protocol !== "http:" && location.protocol !== "https:") return missing;
+  try {
+    const res = await fetch("/java-diagnostics", { method: "GET", cache: "no-store" });
+    if (!res.ok) return missing;
+    const info = await res.json();
+    return {
+      ok: !!info.ok,
+      path: String(info.path || ""),
+      version: String(info.version || ""),
+      major: Number(info.major) || 0,
+      source: String(info.source || ""),
+      minimum: Number(info.minimum) || 11,
+      installRoot: String(info.installRoot || "")
+    };
+  } catch(e){ return missing; }
+}
+
+// 런처가 알려준 탐지 위치를 사람이 읽는 말로. 문제 상황에서 "어느 자바가 잡혔는지"를 바로 알 수 있다.
+function javaSourceLabel(source){
+  const labels = {
+    "app-portable": "앱 폴더에 설치된 JDK",
+    "app-local": "앱 전용 폴더에 설치된 JDK",
+    "java-home": "JAVA_HOME 설정",
+    "path": "PATH 환경변수",
+    "registry": "설치 정보(레지스트리)",
+    "well-known": "기본 설치 폴더"
+  };
+  return labels[String(source || "")] || "";
 }
 
 async function pythonEnvironmentDetails(){

@@ -347,6 +347,26 @@ class ClassDockLauncher
     static readonly object PySessionsLock = new object();
     static readonly Dictionary<string, PythonSession> PySessions = new Dictionary<string, PythonSession>();
 
+    /* 자바 실행 1건. 흐름(출력 버퍼·입력 에코·완료 감시)은 파이썬 세션과 같지만 파이썬 전용 필드
+       (그림·변수·출력 파일)는 자바에 해당이 없어 따로 둔다 — 억지로 공유하면 죽은 필드만 남는다. */
+    class JavaSession
+    {
+        public string Id;
+        public Process Process;
+        public readonly object Sync = new object();
+        public readonly LimitedTextBuffer Stdout = new LimitedTextBuffer();
+        public readonly LimitedTextBuffer Stderr = new LimitedTextBuffer();
+        public bool Complete;
+        public int ExitCode = -1;
+        public string TempRoot;
+        public string MainClass = "";                             // 실제로 저장·실행한 클래스 이름(오류 줄 매칭에 프런트가 쓴다)
+        public DateTime DoneAt = DateTime.MaxValue;
+        public readonly List<int[]> Echoes = new List<int[]>();    // stdout 속 입력 에코 구간 [시작,길이]
+    }
+
+    static readonly object JavaSessionsLock = new object();
+    static readonly Dictionary<string, JavaSession> JavaSessions = new Dictionary<string, JavaSession>();
+
     // pip 설치 1건. 로그를 프로세스가 끝날 때까지 붙들고 있으면 화면이 멈춘 것처럼 보이므로,
     // 파이썬 세션과 같은 방식으로 버퍼에 흘려 담고 프런트가 /pip-install-poll 로 증분만 받아간다.
     class PipJob
@@ -924,6 +944,9 @@ class ClassDockLauncher
             if (path.StartsWith("/ssh-", StringComparison.Ordinal)) return true;
             if (path == "/run-python" || path == "/run-python-bundle") return true;
             if (path == "/python-rescan") return true;
+            // 자바 실행·설치 계열. 탐지 캐시를 비우는 /java-rescan 은 다음 실행 동작을 바꾸므로 토큰이 필요하다
+            // (읽기만 하는 /can-run-java·/java-diagnostics 는 파이썬 쪽과 같이 Origin 검사만 거친다).
+            if (path.StartsWith("/java-", StringComparison.Ordinal)) return true;
             if (path == "/tile-cache-clear") return true;
             if (path.StartsWith("/map-search-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
@@ -952,6 +975,9 @@ class ClassDockLauncher
             if (path.StartsWith("/js-npm-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-poll", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/python-session-file", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/java-session-poll", StringComparison.Ordinal)) return true;
+            // 라이브러리 목록·카탈로그·설치 로그도 토큰 대상이다(설치·삭제 자체는 위 POST 규칙이 잡는다).
+            if (path.StartsWith("/java-lib-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/terminal-session-poll", StringComparison.Ordinal)) return true;
             if (path == "/ssh-capability" || path == "/ssh-key-pick-status" || path == "/ssh-upload-pick-status"
                 || path.StartsWith("/ssh-session-poll", StringComparison.Ordinal)
@@ -1700,6 +1726,135 @@ class ClassDockLauncher
                         + ",\"total\":" + Interlocked.Read(ref _ffInstallTotal)
                         + ",\"error\":" + JsonString(_ffInstallError) + "}";
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                }
+                else if (path == "/can-run-java")
+                {
+                    // 로컬에 JDK 가 설치돼 있는지 알려준다(앱이 실행 화면과 설치 안내를 나눌 때 쓴다)
+                    bool ok = FindJava() != null;
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(ok ? "yes" : "no"));
+                }
+                else if (path == "/java-diagnostics")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaDiagnostics()));
+                }
+                else if (method == "POST" && path == "/java-rescan")
+                {
+                    // 사용자가 직접 JDK 를 설치한 뒤 exe 를 껐다 켜지 않아도 되도록 캐시를 비우고 다시 찾는다.
+                    ResetJavaProbe();
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaDiagnostics()));
+                }
+                else if (method == "POST" && path == "/java-install")
+                {
+                    // 이미 있으면 200MB 를 다시 받지 않는다(직접 설치하고 이 버튼을 누른 경우).
+                    if (FindJava() != null)
+                    {
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("already"));
+                    }
+                    else
+                    {
+                        lock (JdkInstallLock)
+                        {
+                            if (!JdkInstallRunning())
+                            {
+                                _jdkInstallState = "metadata";
+                                _jdkInstallReceived = 0; _jdkInstallTotal = 0;
+                                _jdkExtractDone = 0; _jdkExtractTotal = 0;
+                                _jdkInstallError = ""; _jdkInstallVersion = "";
+                                Thread th = new Thread(InstallJdkWorker);
+                                th.IsBackground = true;
+                                th.Start();
+                            }
+                        }
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("started"));
+                    }
+                }
+                else if (path == "/java-install-status")
+                {
+                    string json = "{\"state\":" + JsonString(_jdkInstallState)
+                        + ",\"received\":" + Interlocked.Read(ref _jdkInstallReceived)
+                        + ",\"total\":" + Interlocked.Read(ref _jdkInstallTotal)
+                        + ",\"extracted\":" + Interlocked.Read(ref _jdkExtractDone)
+                        + ",\"entries\":" + Interlocked.Read(ref _jdkExtractTotal)
+                        + ",\"version\":" + JsonString(_jdkInstallVersion)
+                        + ",\"error\":" + JsonString(_jdkInstallError) + "}";
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                }
+                else if (method == "GET" && path == "/java-lib-catalog")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaLibraryCatalogJson()));
+                }
+                else if (method == "GET" && path == "/java-lib-list")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaLibraryListJson()));
+                }
+                else if (method == "POST" && path == "/java-lib-install-start")
+                {
+                    string libConfirmed;
+                    if (!headers.TryGetValue("x-classdock-javalib-confirm", out libConfirmed) || libConfirmed != "1")
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("javalib-confirmation-required"));
+                        return;
+                    }
+                    // 인터넷에서 실행될 코드를 받는 동작이라 확인 헤더를 요구한다(pip·npm 설치와 같은 규칙).
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(StartJavaLibraryInstall(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("javalib-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/java-lib-install-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollJavaLibraryInstall(QueryValue(path, "id"), QueryValue(path, "from"))));
+                }
+                else if (method == "POST" && path.StartsWith("/java-lib-install-cancel", StringComparison.Ordinal))
+                {
+                    CancelJavaLibraryInstall(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/java-lib-delete", StringComparison.Ordinal))
+                {
+                    string deleted = DeleteJavaLibrary(QueryValue(path, "id"));
+                    WriteResponse(stream, deleted == "ok" ? "200 OK" : "404 Not Found", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(deleted));
+                }
+                else if (method == "POST" && path.StartsWith("/java-session-start", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        // ?piped=1 이면 페이로드의 표준입력을 한 번에 넣고 닫는다(채점용). 없으면 대화형.
+                        string id = StartJavaSession(body, QueryValue(path, "piped") == "1", QueryValue(path, "libs"));
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"id\":" + JsonString(id) + "}"));
+                    }
+                    catch (JavaMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-java"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("java-session-start-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/java-session-poll", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(PollJavaSession(QueryValue(path, "id"), QueryValue(path, "so"), QueryValue(path, "se"))));
+                }
+                else if (method == "POST" && path.StartsWith("/java-session-input", StringComparison.Ordinal))
+                {
+                    SendJavaSessionInput(QueryValue(path, "id"), Encoding.UTF8.GetString(body));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/java-session-eof", StringComparison.Ordinal))
+                {
+                    CloseJavaSessionInput(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "POST" && path.StartsWith("/java-session-stop", StringComparison.Ordinal))
+                {
+                    StopJavaSession(QueryValue(path, "id"));
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
                 }
                 else if (path == "/can-run-python")
                 {
@@ -7117,6 +7272,18 @@ class ClassDockLauncher
                 CleanupPythonSessionFiles(session);
             }
 
+            List<JavaSession> javaSessions = new List<JavaSession>();
+            lock (JavaSessionsLock)
+            {
+                foreach (JavaSession session in JavaSessions.Values) javaSessions.Add(session);
+                JavaSessions.Clear();
+            }
+            foreach (JavaSession session in javaSessions)
+            {
+                if (!session.Complete) KillProcessTree(session.Process);
+                CleanupJavaSessionFiles(session);
+            }
+
             List<string> kernelIds = new List<string>();
             lock (PyKernelsLock) foreach (string id in PyKernels.Keys) kernelIds.Add(id);
             foreach (string id in kernelIds) StopPythonKernel(id);   // 프로세스 종료 + 작업폴더 삭제
@@ -7497,6 +7664,1743 @@ class ClassDockLauncher
             if (!string.IsNullOrEmpty(programData)) list.Add(Path.Combine(programData, name + "\\python.exe"));
         }
         return list;
+    }
+
+    /* ===== 자바(.java) 실행 — 설치된 JDK 찾기 =====
+       JDK 11+ 는 `java Foo.java` 한 줄로 컴파일과 실행을 함께 처리한다(JEP 330). 그래서 javac 를 따로
+       부르지 않지만, 그 기능은 JDK 에만 있다 — JRE 만 깔린 PC 를 걸러내려고 같은 bin 의 javac.exe 까지 확인한다.
+       탐색은 '앱이 설치한 것' 을 가장 앞에 둔다. 학생 PC 에 남아 있는 낡은 자바(8 등)가 PATH 를 잡고 있어도
+       앱이 받아 둔 JDK 로 실행되게 하기 위해서다. */
+    static string _javaCmd = null;      // 캐시: java.exe 전체 경로(없으면 null)
+    static string _javaSource = "";     // 어디서 찾았는지 — 진단에서 "왜 이 PC만 다른가"를 한 번에 알려 준다
+    static bool _javaProbed = false;
+    static readonly object JavaProbeLock = new object();
+    const int JavaMinimumFeatureVersion = 11;   // 단일 파일 소스 실행이 들어온 버전
+    // `java -version` 첫 줄: openjdk version "21.0.5" 2024-10-15 / java version "1.8.0_402"
+    static readonly System.Text.RegularExpressions.Regex JavaVersionRe =
+        new System.Text.RegularExpressions.Regex("version\\s+\"([0-9][0-9._]*)");
+    // 따옴표 없이 적는 배포판 대비: openjdk 21 2023-09-19
+    static readonly System.Text.RegularExpressions.Regex JavaBareVersionRe =
+        new System.Text.RegularExpressions.Regex("\\b(?:openjdk|java)\\s+([0-9]+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    // 폴더 이름에서 버전을 뽑아 최신 우선 정렬에 쓴다: jdk-21.0.5+11 / jdk1.8.0_402 / zulu17.50.19
+    static readonly System.Text.RegularExpressions.Regex JavaDirVersionRe =
+        new System.Text.RegularExpressions.Regex("(\\d+)(?:\\.(\\d+))?");
+
+    static string FindJava()
+    {
+        lock (JavaProbeLock)
+        {
+            if (_javaProbed) return _javaCmd;
+            _javaProbed = true;
+            _javaCmd = ProbeJava(out _javaSource);
+            return _javaCmd;
+        }
+    }
+
+    // JDK 를 새로 설치한 뒤 exe 재시작 없이 다시 찾도록 캐시를 비운다(자동 설치 직후·'다시 검사').
+    static void ResetJavaProbe()
+    {
+        lock (JavaProbeLock) { _javaProbed = false; _javaCmd = null; _javaSource = ""; }
+    }
+
+    static string JavaProbeSource()
+    {
+        lock (JavaProbeLock) { return _javaSource; }
+    }
+
+    static string ProbeJava(out string source)
+    {
+        foreach (KeyValuePair<string, string> candidate in JavaCandidates())
+        {
+            if (IsUsableJdk(candidate.Key)) { source = candidate.Value; return candidate.Key; }
+        }
+        source = "";
+        return null;
+    }
+
+    // 후보를 '어디서 왔는지' 와 함께 우선순위 순서로 모은다. 실제 검증(IsUsableJdk)은 이 순서대로 한 번씩만 한다.
+    static List<KeyValuePair<string, string>> JavaCandidates()
+    {
+        var list = new List<KeyValuePair<string, string>>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 1) 앱이 설치한 JDK — exe 옆이 먼저, 거기에 쓸 수 없었던 PC 는 LocalAppData
+        foreach (string exe in AppJdkJavaPaths(JdkPortableRoot())) AddJavaCandidate(list, seen, exe, "app-portable");
+        foreach (string exe in AppJdkJavaPaths(JdkLocalAppDataRoot())) AddJavaCandidate(list, seen, exe, "app-local");
+        // 2) JAVA_HOME — 교실 PC 에 관리자가 지정해 둔 경우
+        string javaHome = null;
+        try { javaHome = Environment.GetEnvironmentVariable("JAVA_HOME"); } catch { }
+        if (!string.IsNullOrEmpty(javaHome))
+        {
+            try { AddJavaCandidate(list, seen, Path.Combine(javaHome.Trim().Trim('"'), "bin\\java.exe"), "java-home"); }
+            catch { }
+        }
+        // 3) PATH
+        foreach (string exe in PathJavaPaths()) AddJavaCandidate(list, seen, exe, "path");
+        // 4) 레지스트리와 표준 설치 폴더 — 여러 버전이 함께 나오므로 최신부터 검사한다
+        var pool = new List<KeyValuePair<string, string>>();
+        foreach (string exe in RegistryJavaPaths()) pool.Add(new KeyValuePair<string, string>(exe, "registry"));
+        foreach (string exe in WellKnownJavaPaths()) pool.Add(new KeyValuePair<string, string>(exe, "well-known"));
+        pool.Sort(delegate(KeyValuePair<string, string> a, KeyValuePair<string, string> b)
+        {
+            return JavaVersionRank(b.Key).CompareTo(JavaVersionRank(a.Key));
+        });
+        foreach (KeyValuePair<string, string> item in pool) AddJavaCandidate(list, seen, item.Key, item.Value);
+        return list;
+    }
+
+    static void AddJavaCandidate(List<KeyValuePair<string, string>> list, HashSet<string> seen, string exe, string source)
+    {
+        if (string.IsNullOrEmpty(exe)) return;
+        string full;
+        try { full = Path.GetFullPath(exe); } catch { return; }   // 잘못된 문자가 섞인 PATH·레지스트리 값
+        if (!seen.Add(full)) return;
+        list.Add(new KeyValuePair<string, string>(full, source));
+    }
+
+    // 자동 설치가 JDK 를 푸는 곳. exe 옆이 1순위 — USB 에 담아 다니면 다른 PC 에서도 그대로 쓴다.
+    static string JdkPortableRoot()
+    {
+        try { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "jdk"); }
+        catch { return null; }
+    }
+
+    // exe 가 Program Files 나 읽기 전용 USB 에 있어 옆에 쓸 수 없을 때의 대체 위치.
+    static string JdkLocalAppDataRoot()
+    {
+        try
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ClassDock", "jdk");
+        }
+        catch { return null; }
+    }
+
+    /* 자동 설치가 실제로 쓸 위치를 정한다. exe 옆에 임시 파일을 만들어 보고 판단한다 —
+       속성만 봐서는 Program Files 가상화나 읽기 전용 USB 를 걸러낼 수 없다. */
+    static string JdkInstallRoot()
+    {
+        string portable = JdkPortableRoot();
+        if (!string.IsNullOrEmpty(portable))
+        {
+            string parent = null;
+            try { parent = Path.GetDirectoryName(portable); } catch { }
+            if (CanWriteInto(parent)) return portable;
+        }
+        return JdkLocalAppDataRoot();
+    }
+
+    static bool CanWriteInto(string dir)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+            string probe = Path.Combine(dir, ".classdock-write-" + Guid.NewGuid().ToString("N") + ".tmp");
+            using (FileStream fs = new FileStream(probe, FileMode.CreateNew, FileAccess.Write)) { fs.WriteByte(0); }
+            try { File.Delete(probe); } catch { }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /* 앱이 받아 둔 JDK 폴더에서 java.exe 를 찾는다. 배포 zip 은 안에 'jdk-21.0.5+11\' 한 겹을 더 갖고 있어
+       루트 바로 아래와 한 단계 아래를 모두 본다(전개 방식이 바뀌거나 사용자가 직접 풀어 넣어도 계속 찾도록). */
+    static List<string> AppJdkJavaPaths(string root)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrEmpty(root)) return list;
+        try
+        {
+            if (!Directory.Exists(root)) return list;
+            list.Add(Path.Combine(root, "bin\\java.exe"));
+            foreach (string dir in Directory.GetDirectories(root)) list.Add(Path.Combine(dir, "bin\\java.exe"));
+        }
+        catch { }   // 접근 불가 폴더 → 후보 없음
+        return list;
+    }
+
+    /* PATH 를 직접 훑는다. 'java' 라는 이름만으로 실행하면 어느 폴더에서 왔는지 알 수 없어
+       같은 bin 의 javac.exe(=JDK 인지) 를 확인할 수 없다. */
+    static List<string> PathJavaPaths()
+    {
+        var list = new List<string>();
+        string path = null;
+        try { path = Environment.GetEnvironmentVariable("PATH"); } catch { }
+        if (string.IsNullOrEmpty(path)) return list;
+        foreach (string part in path.Split(';'))
+        {
+            string dir = part.Trim().Trim('"');
+            if (dir.Length == 0) continue;
+            try { list.Add(Path.Combine(dir, "java.exe")); }
+            catch { }   // 잘못된 문자가 섞인 PATH 조각은 건너뜀
+        }
+        return list;
+    }
+
+    /* 레지스트리에 남는 JDK 설치 위치. 벤더마다 키 모양이 달라(JavaSoft 는 <버전>\JavaHome,
+       Adoptium 은 <버전>\hotspot\MSI\Path) 각 루트 아래를 제한된 깊이로 훑으며 값을 모은다. */
+    static List<string> RegistryJavaPaths()
+    {
+        var list = new List<string>();
+        string[] roots = {
+            "SOFTWARE\\JavaSoft\\JDK",
+            "SOFTWARE\\JavaSoft\\Java Development Kit",
+            "SOFTWARE\\Eclipse Adoptium\\JDK",
+            "SOFTWARE\\Eclipse Foundation\\JDK",
+            "SOFTWARE\\Microsoft\\JDK",
+            "SOFTWARE\\Azul Systems\\Zulu",
+            "SOFTWARE\\BellSoft\\Liberica",
+            "SOFTWARE\\Amazon Corretto"
+        };
+        var views = new KeyValuePair<RegistryHive, RegistryView>[] {
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.LocalMachine, RegistryView.Registry64),
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.LocalMachine, RegistryView.Registry32),
+            new KeyValuePair<RegistryHive, RegistryView>(RegistryHive.CurrentUser, RegistryView.Registry64)
+        };
+        foreach (KeyValuePair<RegistryHive, RegistryView> view in views)
+        {
+            RegistryKey baseKey = null;
+            try
+            {
+                baseKey = RegistryKey.OpenBaseKey(view.Key, view.Value);
+                if (baseKey == null) continue;
+                foreach (string rootPath in roots)
+                {
+                    using (RegistryKey root = baseKey.OpenSubKey(rootPath))
+                    {
+                        if (root != null) CollectJavaHomes(root, 2, list);
+                    }
+                }
+            }
+            catch { /* 권한 없음·키 없음 → 다음 뷰 */ }
+            finally { if (baseKey != null) { try { baseKey.Close(); } catch { } } }
+        }
+        return list;
+    }
+
+    // 설치 폴더를 가리키는 값을 찾을 때까지 하위 키를 제한된 깊이로 훑는다.
+    static void CollectJavaHomes(RegistryKey key, int depth, List<string> into)
+    {
+        if (key == null) return;
+        string[] valueNames = { "JavaHome", "Path", "InstallationPath" };
+        foreach (string name in valueNames)
+        {
+            string home = null;
+            try { home = key.GetValue(name) as string; } catch { }
+            if (string.IsNullOrEmpty(home)) continue;
+            try { into.Add(Path.Combine(home.Trim().Trim('"'), "bin\\java.exe")); }
+            catch { }
+        }
+        if (depth <= 0) return;
+        string[] subs;
+        try { subs = key.GetSubKeyNames(); } catch { return; }
+        foreach (string sub in subs)
+        {
+            try { using (RegistryKey child = key.OpenSubKey(sub)) CollectJavaHomes(child, depth - 1, into); }
+            catch { }
+        }
+    }
+
+    // 레지스트리에 없더라도 대부분 아래 폴더에 설치된다(Program Files\Java\jdk-21 등).
+    static List<string> WellKnownJavaPaths()
+    {
+        var list = new List<string>();
+        var roots = new List<string>();
+        roots.Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
+        roots.Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrEmpty(local)) roots.Add(Path.Combine(local, "Programs"));
+        string[] vendors = { "Java", "Eclipse Adoptium", "Eclipse Foundation", "Microsoft", "Zulu",
+            "BellSoft", "Amazon Corretto", "Semeru", "AdoptOpenJDK" };
+        foreach (string root in roots)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            foreach (string vendor in vendors)
+            {
+                string dir;
+                try { dir = Path.Combine(root, vendor); }
+                catch { continue; }
+                try
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    foreach (string home in Directory.GetDirectories(dir)) list.Add(Path.Combine(home, "bin\\java.exe"));
+                }
+                catch { /* 접근 불가 폴더 → 건너뜀 */ }
+            }
+        }
+        return list;
+    }
+
+    // 폴더 이름의 'jdk-21.0.5' / 'jdk1.8.0_402' 에서 버전을 뽑아 최신 우선 정렬에 쓴다(모르면 0 → 마지막).
+    static int JavaVersionRank(string exePath)
+    {
+        try
+        {
+            string bin = Path.GetDirectoryName(exePath);              // ...\jdk-21.0.5+11\bin
+            string home = bin == null ? null : Path.GetDirectoryName(bin);
+            string dir = home == null ? "" : Path.GetFileName(home);
+            System.Text.RegularExpressions.Match m = JavaDirVersionRe.Match(dir);
+            if (!m.Success) return 0;
+            int major, minor = 0;
+            if (!int.TryParse(m.Groups[1].Value, out major)) return 0;
+            if (m.Groups[2].Success) int.TryParse(m.Groups[2].Value, out minor);
+            if (major == 1) { major = minor; minor = 0; }             // jdk1.8.0 → 8
+            return Math.Min(major, 999) * 1000 + Math.Min(minor, 999);
+        }
+        catch { return 0; }
+    }
+
+    /* JDK 로 인정하는 조건 세 가지.
+       1) 같은 bin 에 javac.exe 가 있을 것 — JRE 만 있으면 `java Foo.java` 가 실행되지 않는다.
+       2) `-version` 이 정상 종료할 것 — 파이썬의 Microsoft Store 안내용 가짜 exe 같은 것을 여기서 거른다.
+       3) 주 버전이 11 이상일 것 — 그 아래는 단일 파일 소스 실행을 못 한다. */
+    static bool IsUsableJdk(string exePath)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath)) return false;
+            string bin = Path.GetDirectoryName(exePath);
+            if (string.IsNullOrEmpty(bin) || !File.Exists(Path.Combine(bin, "javac.exe"))) return false;
+            return JavaFeatureVersion(exePath) >= JavaMinimumFeatureVersion;
+        }
+        catch { return false; }
+    }
+
+    // 주 버전만 돌려준다. 21.0.5 → 21, 1.8.0_402 → 8(9 이전은 1.x 로 적는다). 못 읽으면 0.
+    static int JavaFeatureVersion(string exePath)
+    {
+        string text = RunJavaOutput(exePath, "-version", 5000);
+        if (text.Length == 0) return 0;
+        System.Text.RegularExpressions.Match m = JavaVersionRe.Match(text);
+        string raw = m.Success ? m.Groups[1].Value : "";
+        if (raw.Length == 0)
+        {
+            m = JavaBareVersionRe.Match(text);
+            raw = m.Success ? m.Groups[1].Value : "";
+        }
+        if (raw.Length == 0) return 0;
+        string[] parts = raw.Split('.');
+        int first;
+        if (!int.TryParse(parts[0], out first)) return 0;
+        if (first != 1) return first;
+        int second;
+        return (parts.Length > 1 && int.TryParse(parts[1], out second)) ? second : 0;
+    }
+
+    /* -version 처럼 출력이 짧은 명령 전용. 파이썬 탐지(IsUsablePython)와 같은 이유로 스트림을 읽기 전에
+       종료를 먼저 기다린다 — 응답하지 않는 PATH 후보에서 ReadToEnd 가 EOF 를 영원히 기다리는 것을 막는다.
+       자바는 -version 을 표준오류로 내므로 두 스트림을 합쳐 돌려준다. */
+    static string RunJavaOutput(string exePath, string args, int timeoutMs)
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(exePath, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            Process p = Process.Start(psi);
+            if (p == null) return "";
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(); } catch { }
+                try { p.WaitForExit(1000); } catch { }
+                return "";
+            }
+            string stdout = p.StandardOutput.ReadToEnd();
+            string stderr = p.StandardError.ReadToEnd();
+            if (p.ExitCode != 0) return "";
+            return (stdout + "\n" + stderr).Trim();
+        }
+        catch { return ""; }
+    }
+
+    static string JavaDiagnostics()
+    {
+        string exe = FindJava();
+        string installRoot = JdkInstallRoot();
+        if (exe == null)
+        {
+            return "{\"ok\":false,\"path\":\"\",\"version\":\"\",\"major\":0,\"source\":\"\""
+                 + ",\"minimum\":" + JavaMinimumFeatureVersion
+                 + ",\"installRoot\":" + JsonString(installRoot ?? "") + "}";
+        }
+        string version = RunJavaOutput(exe, "-version", 5000);
+        int newline = version.IndexOf('\n');
+        if (newline >= 0) version = version.Substring(0, newline);
+        return "{\"ok\":true"
+             + ",\"path\":" + JsonString(exe)
+             + ",\"version\":" + JsonString(version.Trim())
+             + ",\"major\":" + JavaFeatureVersion(exe)
+             + ",\"source\":" + JsonString(JavaProbeSource())
+             + ",\"minimum\":" + JavaMinimumFeatureVersion
+             + ",\"installRoot\":" + JsonString(installRoot ?? "")
+             + "}";
+    }
+
+    /* ===== JDK 원클릭 설치 (Eclipse Adoptium Temurin, LTS 고정) =====
+       ffmpeg 원클릭 설치와 같은 구조다 — 백그라운드 스레드가 내려받아 풀고, 프런트는 상태만 폴링한다.
+       다른 점 세 가지:
+         (1) 파일 하나가 아니라 폴더 전체를 푼다 → 압축 경로가 대상 폴더 밖을 가리키는지(zip-slip) 검사한다.
+         (2) 200MB 를 실행 파일로 쓰는 것이라 배포처가 함께 주는 SHA-256 을 대조한다.
+         (3) 받기 전에 디스크 여유 공간을 확인한다 — USB 에서 다 받고 실패하면 시간만 버린다. */
+    static readonly object JdkInstallLock = new object();
+    static volatile string _jdkInstallState = "idle";   // idle | metadata | downloading | verifying | extracting | done | error
+    static long _jdkInstallReceived = 0;                // 내려받은 바이트(진행률 표시용)
+    static long _jdkInstallTotal = 0;
+    static long _jdkExtractDone = 0;                    // 푼 항목 수 — 전개도 수십 초 걸려 진행이 보여야 한다
+    static long _jdkExtractTotal = 0;
+    static volatile string _jdkInstallError = "";
+    static volatile string _jdkInstallVersion = "";
+    // 교실에서 학생마다 버전이 갈리지 않도록 한 판으로 고정한다(문법·교재 차이를 만들지 않기 위해).
+    const int JdkFeatureVersion = 21;
+    const long JdkMinimumFreeBytes = 700L * 1024 * 1024;   // zip(약 200MB) + 전개본(약 340MB) + 여유
+    static readonly System.Text.RegularExpressions.Regex Sha256HexRe =
+        new System.Text.RegularExpressions.Regex("^[0-9a-fA-F]{64}$");
+
+    static bool JdkInstallRunning()
+    {
+        string state = _jdkInstallState;
+        return state == "metadata" || state == "downloading" || state == "verifying" || state == "extracting";
+    }
+
+    static void InstallJdkWorker()
+    {
+        string tmpZip = Path.Combine(Path.GetTempPath(), "classdock_jdk_" + Guid.NewGuid().ToString("N") + ".zip");
+        string staging = null;
+        try
+        {
+            string root = JdkInstallRoot();
+            if (string.IsNullOrEmpty(root)) throw new Exception("설치할 위치를 찾지 못했습니다.");
+            try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }   // TLS 1.2
+
+            _jdkInstallState = "metadata";
+            string link, checksum, releaseName;
+            long declaredSize;
+            FetchJdkAsset(out link, out checksum, out releaseName, out declaredSize);
+            _jdkInstallVersion = releaseName ?? "";
+            EnsureJdkFreeSpace(root, tmpZip, Math.Max(JdkMinimumFreeBytes, declaredSize * 3));
+
+            _jdkInstallState = "downloading";
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(link);
+            req.Timeout = 30000;
+            req.ReadWriteTimeout = 120000;
+            req.UserAgent = "ClassDock";
+            using (WebResponse resp = req.GetResponse())
+            using (Stream rs = resp.GetResponseStream())
+            using (FileStream fs = new FileStream(tmpZip, FileMode.Create, FileAccess.Write))
+            {
+                Interlocked.Exchange(ref _jdkInstallTotal, resp.ContentLength > 0 ? resp.ContentLength : declaredSize);
+                byte[] buf = new byte[81920];
+                int n;
+                while ((n = rs.Read(buf, 0, buf.Length)) > 0)
+                {
+                    fs.Write(buf, 0, n);
+                    Interlocked.Add(ref _jdkInstallReceived, n);
+                }
+            }
+
+            _jdkInstallState = "verifying";
+            if (!string.Equals(Sha256File(tmpZip), checksum, StringComparison.OrdinalIgnoreCase))
+                throw new Exception("내려받은 파일이 배포처가 알려준 것과 다릅니다. 네트워크 문제일 수 있으니 다시 시도해 주세요.");
+
+            _jdkInstallState = "extracting";
+            // 옆의 임시 폴더에 먼저 풀고 다 되면 제자리로 옮긴다 — 중간에 실패해도 반쯤 풀린 jdk 폴더가 남지 않는다.
+            staging = root + ".part-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            ExtractZipToDirectory(tmpZip, staging);
+            ReplaceDirectory(staging, root);
+            staging = null;
+
+            ResetJavaProbe();
+            if (FindJava() == null) throw new Exception("설치는 끝났지만 자바를 찾지 못했습니다.");
+            _jdkInstallState = "done";
+        }
+        catch (Exception ex)
+        {
+            _jdkInstallError = FlattenMessage(ex);
+            _jdkInstallState = "error";
+        }
+        finally
+        {
+            try { if (File.Exists(tmpZip)) File.Delete(tmpZip); } catch { }
+            try { if (staging != null && Directory.Exists(staging)) Directory.Delete(staging, true); } catch { }
+        }
+    }
+
+    /* 배포처 메타데이터에서 내려받을 주소와 SHA-256 을 가져온다. 고정 리다이렉트 주소로 바로 받을 수도 있지만
+       그러면 무엇을 받았는지 확인할 방법이 없다 — 체크섬을 얻으려고 이 한 번을 더 거친다. */
+    static void FetchJdkAsset(out string link, out string checksum, out string releaseName, out long size)
+    {
+        string url = "https://api.adoptium.net/v3/assets/latest/" + JdkFeatureVersion
+            + "/hotspot?os=windows&architecture=x64&image_type=jdk&vendor=eclipse";
+        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+        req.Timeout = 30000;
+        req.ReadWriteTimeout = 60000;
+        req.UserAgent = "ClassDock";
+        string json;
+        using (WebResponse resp = req.GetResponse())
+        using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+            json = reader.ReadToEnd();
+
+        // 응답에는 설치 프로그램 등 다른 블록도 올 수 있어, "package" 뒤에서부터 찾아 그 안의 값만 읽는다.
+        int at = json.IndexOf("\"package\"", StringComparison.Ordinal);
+        if (at < 0) throw new Exception("배포처 응답을 이해하지 못했습니다.");
+        string tail = json.Substring(at);
+        link = JsonStringField(tail, "link");
+        checksum = JsonStringField(tail, "checksum");
+        releaseName = JsonStringField(json, "release_name");
+        size = 0;
+        long.TryParse(JsonNumberField(tail, "size"), out size);
+        if (string.IsNullOrEmpty(link) || !link.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || !link.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            throw new Exception("배포처가 알려준 주소가 올바르지 않습니다.");
+        if (string.IsNullOrEmpty(checksum) || !Sha256HexRe.IsMatch(checksum))
+            throw new Exception("배포처가 알려준 검증값이 올바르지 않습니다.");
+    }
+
+    // 아주 작은 JSON 값 추출기 — 이 응답에서 필요한 몇 개만 읽는다(런처에 JSON 파서를 들이지 않기 위해).
+    static string JsonStringField(string json, string name)
+    {
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
+            json, "\"" + System.Text.RegularExpressions.Regex.Escape(name) + "\"\\s*:\\s*\"([^\"\\\\]*)\"");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    static string JsonNumberField(string json, string name)
+    {
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
+            json, "\"" + System.Text.RegularExpressions.Regex.Escape(name) + "\"\\s*:\\s*(\\d+)");
+        return m.Success ? m.Groups[1].Value : "";
+    }
+
+    static string Sha256File(string path)
+    {
+        using (FileStream fs = File.OpenRead(path))
+        using (SHA256 sha = SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+    }
+
+    // 설치 위치와 임시 파일이 서로 다른 드라이브일 수 있어 둘 다 본다.
+    static void EnsureJdkFreeSpace(string installRoot, string tempFile, long needed)
+    {
+        CheckDriveFreeSpace(installRoot, needed);
+        CheckDriveFreeSpace(tempFile, needed);
+    }
+
+    static void CheckDriveFreeSpace(string anyPathOnDrive, long needed)
+    {
+        long available;
+        try
+        {
+            string rootPath = Path.GetPathRoot(Path.GetFullPath(anyPathOnDrive));
+            if (string.IsNullOrEmpty(rootPath)) return;
+            DriveInfo drive = new DriveInfo(rootPath);
+            // 드라이브 정보를 못 읽는 경우(네트워크 경로 등)는 막지 않는다 — 실제 쓰기에서 판정된다.
+            if (!drive.IsReady) return;
+            available = drive.AvailableFreeSpace;
+        }
+        catch { return; }
+        if (available < needed)
+            throw new Exception("디스크 여유 공간이 부족합니다(약 "
+                + (needed / (1024 * 1024)) + "MB 필요, 현재 " + (available / (1024 * 1024)) + "MB).");
+    }
+
+    /* zip 전체를 폴더로 푼다. 압축 안의 상대경로가 대상 폴더 밖을 가리키면(zip-slip) 건너뛴다 —
+       ffmpeg 설치는 파일 하나만 꺼내 이 검사가 필요 없었지만, 폴더째 푸는 여기서는 필수다. */
+    static void ExtractZipToDirectory(string zipPath, string destRoot)
+    {
+        Directory.CreateDirectory(destRoot);
+        string rootFull = Path.GetFullPath(destRoot);
+        if (!rootFull.EndsWith("\\", StringComparison.Ordinal)) rootFull += "\\";
+        using (FileStream zipStream = File.OpenRead(zipPath))
+        using (ZipArchive archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
+        {
+            Interlocked.Exchange(ref _jdkExtractTotal, archive.Entries.Count);
+            Interlocked.Exchange(ref _jdkExtractDone, 0);
+            foreach (ZipArchiveEntry entry in archive.Entries)
+            {
+                Interlocked.Increment(ref _jdkExtractDone);
+                string rel = (entry.FullName ?? "").Replace('/', '\\');
+                if (rel.Length == 0) continue;
+                string full;
+                try { full = Path.GetFullPath(Path.Combine(rootFull, rel)); }
+                catch { continue; }
+                if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) continue;   // zip-slip → 버린다
+                if (rel.EndsWith("\\", StringComparison.Ordinal) || string.IsNullOrEmpty(entry.Name))
+                {
+                    Directory.CreateDirectory(full);
+                    continue;
+                }
+                string dir = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                using (Stream es = entry.Open())
+                using (FileStream os = new FileStream(full, FileMode.Create, FileAccess.Write))
+                {
+                    byte[] buf = new byte[81920];
+                    int n;
+                    while ((n = es.Read(buf, 0, buf.Length)) > 0) os.Write(buf, 0, n);
+                }
+            }
+        }
+    }
+
+    // 다 푼 폴더를 제자리로 옮긴다. 이미 있으면 옆으로 밀어 두었다가 성공한 뒤에 지운다.
+    static void ReplaceDirectory(string staging, string dest)
+    {
+        string parent = Path.GetDirectoryName(dest);
+        if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+        string old = null;
+        if (Directory.Exists(dest))
+        {
+            old = dest + ".old-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            Directory.Move(dest, old);
+        }
+        try { Directory.Move(staging, dest); }
+        catch
+        {
+            if (old != null && !Directory.Exists(dest)) { try { Directory.Move(old, dest); } catch { } }
+            throw;
+        }
+        if (old != null) { try { Directory.Delete(old, true); } catch { } }
+    }
+
+    /* ===== 자바 실습용 라이브러리(jar) =====
+       표준 라이브러리만으로는 JSON·CSV·단위테스트 예제를 만들 수 없다. 마븐 같은 빌드 도구를 들이는 대신
+       검증한 jar 를 캐시에 두고 실행 클래스패스에 얹는다(js 쪽 npm 패키지 캐시와 같은 발상).
+       빌드 도구를 어설프게 흉내 내지 않으려고 두 가지를 스스로 지킨다.
+         (1) id → 좌표 표는 서버가 가진다. 프런트가 보내는 것은 id(또는 좌표) 뿐이고 경로·URL 은 받지 않는다.
+         (2) 전이 의존성은 해결하지 않는다 → 단일 jar 로 끝나는 라이브러리만 카탈로그에 올린다.
+       여기는 '이미 있는 jar 를 찾아 -cp 에 얹는' 데까지다. 내려받기·검증(SHA-256)은 설치 API 에서 붙인다. */
+    class JavaLibrary
+    {
+        public string Id;
+        public string Label;
+        public string Group;
+        public string Artifact;
+        public string Version;
+        // 배포처에서 받은 파일과 대조할 값. 비워 두면 설치할 때 배포처의 .sha1 로만 확인하고 실제 SHA-256 을
+        // 설치 로그에 남긴다 — 그 값을 여기 옮겨 적으면 다음부터는 변조까지 걸러진다.
+        public string Sha256;
+        public string Words;      // 편집기 자동완성에 얹을 클래스 이름
+        public string Sample;     // 라이브러리 목록에 보여줄 예시 import 한 줄
+    }
+
+    /* 교실에서 쓸 만하면서 '한 파일로 끝나는' 것만 골랐다 — 의존성이 딸린 라이브러리를 하나라도 넣는 순간
+       버전 충돌·스코프까지 다뤄야 해서 마븐 없이는 감당할 수 없다. JUnit 은 그래서 필요한 것을 모두 담은
+       console-standalone 한 개를 쓴다. 학생마다 문법이 갈리지 않도록 버전은 JDK 와 같이 한 판으로 고정한다. */
+    static readonly JavaLibrary[] JavaLibraryCatalog = new JavaLibrary[]
+    {
+        new JavaLibrary {
+            Id = "gson", Label = "Gson", Group = "com.google.code.gson", Artifact = "gson", Version = "2.11.0",
+            Sha256 = "57928d6e5a6edeb2abd3770a8f95ba44dce45f3b23b7a9dc2b309c581552a78b",
+            Words = "Gson GsonBuilder JsonObject JsonArray JsonElement JsonParser",
+            Sample = "import com.google.gson.Gson;" },
+        new JavaLibrary {
+            Id = "commons-lang3", Label = "Apache Commons Lang", Group = "org.apache.commons",
+            Artifact = "commons-lang3", Version = "3.17.0",
+            Sha256 = "6ee731df5c8e5a2976a1ca023b6bb320ea8d3539fbe64c8a1d5cb765127c33b4",
+            Words = "StringUtils NumberUtils ArrayUtils RandomStringUtils",
+            Sample = "import org.apache.commons.lang3.StringUtils;" },
+        new JavaLibrary {
+            Id = "commons-csv", Label = "Apache Commons CSV", Group = "org.apache.commons",
+            Artifact = "commons-csv", Version = "1.10.0",
+            Sha256 = "2d06e6a07a636baf777ad8e659256f2119109dde23551c9b80c5422d424b808c",
+            Words = "CSVFormat CSVParser CSVPrinter CSVRecord",
+            Sample = "import org.apache.commons.csv.CSVFormat;" },
+        new JavaLibrary {
+            Id = "jsoup", Label = "jsoup", Group = "org.jsoup", Artifact = "jsoup", Version = "1.18.3",
+            Sha256 = "5be1ccd3228ae5fd6eed1bd6d827bac2bc65b91c20e9957d16ea65f739f15302",
+            Words = "Jsoup Document Element Elements",
+            Sample = "import org.jsoup.Jsoup;" },
+        new JavaLibrary {
+            Id = "junit", Label = "JUnit 5 (console standalone)", Group = "org.junit.platform",
+            Artifact = "junit-platform-console-standalone", Version = "1.11.4",
+            Sha256 = "b016ef6b1c3454d6d7c2c88ce081dabf289699686af6622d6e4e2e1b54b4a2fc",
+            Words = "Test Assertions assertEquals assertTrue assertThrows BeforeEach DisplayName",
+            Sample = "import org.junit.jupiter.api.Test;" }
+    };
+
+    static JavaLibrary FindJavaLibraryCatalogItem(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        foreach (JavaLibrary item in JavaLibraryCatalog)
+            if (string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase)) return item;
+        return null;
+    }
+
+    static JavaLibrary FindJavaLibraryCatalogCoordinate(string group, string artifact, string version)
+    {
+        foreach (JavaLibrary item in JavaLibraryCatalog)
+            if (string.Equals(item.Group, group, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Artifact, artifact, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Version, version, StringComparison.OrdinalIgnoreCase)) return item;
+        return null;
+    }
+
+    // 캐시 위치는 JDK 와 같은 규칙 — exe 옆이 1순위다(USB 에 담아 다니면 라이브러리도 함께 따라간다).
+    static string JavaLibraryPortableRoot()
+    {
+        try { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "java-libs"); }
+        catch { return null; }
+    }
+
+    // exe 옆에 쓸 수 없을 때(Program Files·읽기 전용 USB)의 대체 위치.
+    static string JavaLibraryLocalAppDataRoot()
+    {
+        try
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ClassDock", "java-libs");
+        }
+        catch { return null; }
+    }
+
+    // 배포본에 미리 담아 보내는 jar. 인터넷이 막힌 교실에서도 내려받기 없이 쓰게 한다(vendor\wheels 와 같은 역할).
+    static string JavaLibraryVendorRoot()
+    {
+        try { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vendor", "java-libs"); }
+        catch { return null; }
+    }
+
+    /* 찾을 때는 세 곳을 모두 본다 — 쓰기는 한 곳에 하더라도, PC 를 옮겨 다니면 예전에 받아 둔 캐시가
+       다른 쪽에 남아 있을 수 있다. 클래스패스는 ; 로 항목을 나누므로 ; 나 " 가 든 경로는 아예 뺀다. */
+    static List<string> JavaLibraryLookupRoots()
+    {
+        List<string> roots = new List<string>();
+        string[] candidates = new string[] {
+            JavaLibraryPortableRoot(), JavaLibraryLocalAppDataRoot(), JavaLibraryVendorRoot() };
+        foreach (string root in candidates)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            if (root.IndexOf(';') >= 0 || root.IndexOf('"') >= 0) continue;
+            if (!roots.Contains(root)) roots.Add(root);
+        }
+        return roots;
+    }
+
+    /* 프런트가 보내는 목록의 각 항목은 카탈로그 id 이거나 group:artifact:version 좌표다.
+       두 가지 모두 그대로 폴더·파일 이름이 되므로 여기서 좁게 검사한다 — 특히 .. 를 막아
+       캐시 폴더 밖의 파일이 클래스패스에 얹히는 일이 없게 한다. */
+    static readonly System.Text.RegularExpressions.Regex JavaLibraryIdRe =
+        new System.Text.RegularExpressions.Regex("^[a-z0-9][a-z0-9-]{0,31}$");
+    static readonly System.Text.RegularExpressions.Regex JavaLibrarySegmentRe =
+        new System.Text.RegularExpressions.Regex("^[A-Za-z0-9][A-Za-z0-9_.+-]{0,99}$");
+    const int JavaLibraryMaxPerRun = 20;
+
+    static bool JavaLibrarySafeSegment(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        if (value.IndexOf("..", StringComparison.Ordinal) >= 0) return false;
+        return JavaLibrarySegmentRe.IsMatch(value);
+    }
+
+    // "com.google.code.gson:gson:2.11.0" → "com\google\code\gson\gson\2.11.0\gson-2.11.0.jar" (마븐 저장소와 같은 모양).
+    static string JavaLibraryRelativePath(string group, string artifact, string version)
+    {
+        if (string.IsNullOrEmpty(group)) return null;
+        if (!JavaLibrarySafeSegment(artifact) || !JavaLibrarySafeSegment(version)) return null;
+        StringBuilder sb = new StringBuilder();
+        foreach (string part in group.Split('.'))
+        {
+            if (!JavaLibrarySafeSegment(part)) return null;
+            sb.Append(part).Append('\\');
+        }
+        sb.Append(artifact).Append('\\').Append(version).Append('\\')
+          .Append(artifact).Append('-').Append(version).Append(".jar");
+        return sb.ToString();
+    }
+
+    /* 루트 하나 아래의 절대 경로. 조립 결과가 그 루트 밖을 가리키면 null 이다(zip 전개와 같은 검사) —
+       읽기·쓰기·삭제가 모두 이 함수를 거치므로 캐시 폴더 밖으로 나갈 길이 한 곳으로 모인다. */
+    static string JavaLibraryFileUnder(string root, string relative)
+    {
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(relative)) return null;
+        string rootFull, full;
+        try
+        {
+            rootFull = Path.GetFullPath(root);
+            if (!rootFull.EndsWith("\\", StringComparison.Ordinal)) rootFull += "\\";
+            full = Path.GetFullPath(Path.Combine(rootFull, relative));
+        }
+        catch { return null; }
+        if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) return null;
+        return full;
+    }
+
+    // 상대 경로를 조회 루트들에서 찾는다. 먼저 찾은 것이 이긴다(exe 옆 → LocalAppData → 배포 동봉).
+    static string FindJavaLibraryFile(string relative)
+    {
+        foreach (string root in JavaLibraryLookupRoots())
+        {
+            string full = JavaLibraryFileUnder(root, relative);
+            if (full == null) continue;
+            try { if (File.Exists(full)) return full; }
+            catch { }
+        }
+        return null;
+    }
+
+    /* 항목 하나(카탈로그 id 또는 좌표)를 '무엇을 어디에 두는가' 로 풀어 놓은 것. 실행·설치·삭제·목록이
+       모두 여기를 거치게 해서 좌표 검사와 경로 조립 규칙이 갈라지지 않게 한다. */
+    class JavaLibraryTarget
+    {
+        public string Spec;        // 사용자가 적은 그대로(안내 문구에 쓴다)
+        public string Id;          // 카탈로그에 있으면 그 id, 아니면 빈 문자열
+        public string Label;
+        public string Group;
+        public string Artifact;
+        public string Version;
+        public string Sha256;      // 카탈로그에 박아 둔 검증값(없으면 빈 문자열)
+        public string Relative;    // 캐시 안의 경로
+    }
+
+    static JavaLibraryTarget ParseJavaLibraryTarget(string spec)
+    {
+        string value = (spec ?? "").Trim();
+        if (value.Length == 0) return null;
+        JavaLibrary item = null;
+        string group, artifact, version;
+        if (JavaLibraryIdRe.IsMatch(value))
+        {
+            item = FindJavaLibraryCatalogItem(value);
+            if (item == null) return null;
+            group = item.Group; artifact = item.Artifact; version = item.Version;
+        }
+        else
+        {
+            string[] parts = value.Split(':');
+            if (parts.Length != 3) return null;
+            group = parts[0]; artifact = parts[1]; version = parts[2];
+            // 좌표로 적었어도 카탈로그와 같은 것이면 카탈로그가 아는 이름·검증값을 쓴다.
+            item = FindJavaLibraryCatalogCoordinate(group, artifact, version);
+        }
+        string relative = JavaLibraryRelativePath(group, artifact, version);
+        if (relative == null) return null;
+        JavaLibraryTarget target = new JavaLibraryTarget();
+        target.Spec = value;
+        target.Id = item != null ? item.Id : "";
+        target.Label = item != null ? item.Label : artifact + " " + version;
+        target.Group = group;
+        target.Artifact = artifact;
+        target.Version = version;
+        target.Sha256 = item != null ? (item.Sha256 ?? "") : "";
+        target.Relative = relative;
+        return target;
+    }
+
+    // 항목 하나를 실제 jar 경로로. 캐시에 없으면 null.
+    static string ResolveJavaLibrarySpec(string spec)
+    {
+        JavaLibraryTarget target = ParseJavaLibraryTarget(spec);
+        return target == null ? null : FindJavaLibraryFile(target.Relative);
+    }
+
+    /* 실행 요청의 libs= 목록(쉼표·공백 구분) → jar 경로들. 못 찾은 이름은 missing 으로 돌려준다.
+       조용히 빼고 실행하면 학생은 원인을 알 수 없는 NoClassDefFoundError 만 보게 된다. */
+    static List<string> ResolveJavaLibraryJars(string libs, out List<string> missing)
+    {
+        List<string> jars = new List<string>();
+        missing = new List<string>();
+        string[] raw = (libs ?? "").Split(new char[] { ',', ' ', '\t', '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries);
+        foreach (string spec in raw)
+        {
+            if (jars.Count + missing.Count >= JavaLibraryMaxPerRun) break;
+            string jar = ResolveJavaLibrarySpec(spec);
+            if (jar == null)
+            {
+                if (!missing.Contains(spec)) missing.Add(spec);
+                continue;
+            }
+            if (!jars.Contains(jar)) jars.Add(jar);
+        }
+        return jars;
+    }
+
+    /* -cp 에 넘길 한 줄. 첫 항목은 컴파일 결과가 놓이는 실행 폴더이고 그 뒤에 선택한 jar 가 붙는다.
+       라이브러리를 하나도 고르지 않았을 때도 같은 경로를 쓴다(따로 분기하면 한쪽만 고치는 실수가 난다).
+       jar 이름은 위에서 걸러 ; 나 " 가 있을 수 없지만, 임시 폴더 경로는 우리 손 밖이라 여기서 확인한다. */
+    static string JavaClassPath(string tempRoot, List<string> jars)
+    {
+        if (tempRoot == null || tempRoot.IndexOf(';') >= 0 || tempRoot.IndexOf('"') >= 0)
+            throw new Exception("실행 임시 폴더 경로에 ; 또는 \" 가 있어 클래스패스를 만들 수 없습니다.");
+        StringBuilder sb = new StringBuilder(tempRoot);
+        if (jars != null) foreach (string jar in jars) sb.Append(';').Append(jar);
+        return sb.ToString();
+    }
+
+    /* ===== 라이브러리 원클릭 설치 (Maven Central 고정) =====
+       마븐을 설치하지 않고 jar 파일 하나만 받아 캐시에 둔다. 지키는 것 세 가지.
+         (1) 주소는 서버가 검증한 좌표로만 조립한다 — 프런트가 준 URL 은 쓰지 않는다.
+         (2) 받은 파일은 반드시 대조한다. 카탈로그에 박아 둔 SHA-256 이 있으면 그것과 맞춰 변조까지 걸러내고,
+             없으면 배포처가 함께 두는 .sha1 과 맞춘다(같은 곳에서 온 값이라 '깨진 파일' 검출까지가 한계다).
+         (3) 검증을 통과하기 전에는 .part 이름으로만 존재한다 — 반쯤 받은 jar 가 클래스패스에 얹히지 않게.
+       진행 로그·폴링·취소 규약은 pip·npm 설치와 같다(프런트가 같은 모양으로 그린다). */
+    class JavaLibJob
+    {
+        public string Id;
+        public readonly object Sync = new object();
+        public readonly LimitedTextBuffer Log = new LimitedTextBuffer();
+        public bool Complete;
+        public bool CancelRequested;
+        public int ExitCode = -1;
+        public DateTime DoneAt = DateTime.MaxValue;
+    }
+
+    static readonly object JavaLibJobsLock = new object();
+    static readonly Dictionary<string, JavaLibJob> JavaLibJobs = new Dictionary<string, JavaLibJob>();
+    const string JavaLibraryRepository = "https://repo1.maven.org/maven2/";
+    const long JavaLibraryMaxJarBytes = 30L * 1024 * 1024;    // 수업용 라이브러리는 이 안에 다 들어온다
+    const int JavaLibraryMaxInstalled = 20;
+    static readonly System.Text.RegularExpressions.Regex Sha1HexRe =
+        new System.Text.RegularExpressions.Regex("[0-9a-fA-F]{40}");
+
+    // 내려받은 jar 를 실제로 두는 곳. JdkInstallRoot 와 같은 판단 — exe 옆에 쓸 수 있으면 옆에 둔다.
+    static string JavaLibraryInstallRoot()
+    {
+        string portable = JavaLibraryPortableRoot();
+        if (!string.IsNullOrEmpty(portable) && portable.IndexOf(';') < 0 && portable.IndexOf('"') < 0)
+        {
+            string parent = null;
+            try { parent = Path.GetDirectoryName(portable); } catch { }
+            if (CanWriteInto(parent)) return portable;
+        }
+        string local = JavaLibraryLocalAppDataRoot();
+        if (string.IsNullOrEmpty(local) || local.IndexOf(';') >= 0 || local.IndexOf('"') >= 0) return null;
+        return local;
+    }
+
+    // 배포본에 담겨 온 파일인지 — 이런 항목은 지우지 않는다(지워도 다음 실행에 다시 나타나 혼란만 준다).
+    static bool IsBundledJavaLibrary(string relative)
+    {
+        string full = JavaLibraryFileUnder(JavaLibraryVendorRoot(), relative);
+        try { return full != null && File.Exists(full); }
+        catch { return false; }
+    }
+
+    /* 캐시 폴더를 훑어 좌표를 되살린다. 경로 모양이 <group…>\<artifact>\<version>\<artifact>-<version>.jar 일 때만
+       목록에 넣는다 — 사용자가 아무 jar 나 던져 둔 경우를 그대로 라이브러리로 보여 주지 않기 위해서다. */
+    static List<JavaLibraryTarget> EnumerateJavaLibraryJars(string root)
+    {
+        List<JavaLibraryTarget> found = new List<JavaLibraryTarget>();
+        if (string.IsNullOrEmpty(root)) return found;
+        string rootFull;
+        string[] files;
+        try
+        {
+            if (!Directory.Exists(root)) return found;
+            rootFull = Path.GetFullPath(root);
+            if (!rootFull.EndsWith("\\", StringComparison.Ordinal)) rootFull += "\\";
+            files = Directory.GetFiles(root, "*.jar", SearchOption.AllDirectories);
+        }
+        catch { return found; }
+        foreach (string file in files)
+        {
+            string full;
+            try { full = Path.GetFullPath(file); }
+            catch { continue; }
+            if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) continue;
+            string[] parts = full.Substring(rootFull.Length).Split('\\');
+            if (parts.Length < 4) continue;
+            string version = parts[parts.Length - 2];
+            string artifact = parts[parts.Length - 3];
+            if (!string.Equals(parts[parts.Length - 1], artifact + "-" + version + ".jar",
+                StringComparison.OrdinalIgnoreCase)) continue;
+            StringBuilder group = new StringBuilder();
+            for (int i = 0; i < parts.Length - 3; i++)
+            {
+                if (group.Length > 0) group.Append('.');
+                group.Append(parts[i]);
+            }
+            JavaLibraryTarget target = ParseJavaLibraryTarget(group + ":" + artifact + ":" + version);
+            if (target != null) found.Add(target);
+        }
+        return found;
+    }
+
+    // 캐시에 있는 jar 수. 배포 동봉본은 세지 않는다 — 사용자가 지울 수 없어 한도만 잡아먹는다.
+    static int InstalledJavaLibraryCount()
+    {
+        List<string> seen = new List<string>();
+        string[] roots = new string[] { JavaLibraryPortableRoot(), JavaLibraryLocalAppDataRoot() };
+        foreach (string root in roots)
+            foreach (JavaLibraryTarget target in EnumerateJavaLibraryJars(root))
+                if (!seen.Contains(target.Relative)) seen.Add(target.Relative);
+        return seen.Count;
+    }
+
+    static string JavaLibraryRowJson(JavaLibraryTarget target, JavaLibrary catalogItem)
+    {
+        string file = FindJavaLibraryFile(target.Relative);
+        long size = 0;
+        try { if (file != null) size = new FileInfo(file).Length; }
+        catch { }
+        StringBuilder sb = new StringBuilder();
+        sb.Append("{\"spec\":").Append(JsonString(target.Spec))
+          .Append(",\"id\":").Append(JsonString(target.Id ?? ""))
+          .Append(",\"label\":").Append(JsonString(target.Label ?? ""))
+          .Append(",\"coordinate\":").Append(JsonString(target.Group + ":" + target.Artifact + ":" + target.Version))
+          .Append(",\"installed\":").Append(file != null ? "true" : "false")
+          .Append(",\"bundled\":").Append(IsBundledJavaLibrary(target.Relative) ? "true" : "false")
+          .Append(",\"size\":").Append(size);
+        if (catalogItem != null)
+            sb.Append(",\"words\":").Append(JsonString(catalogItem.Words ?? ""))
+              .Append(",\"sample\":").Append(JsonString(catalogItem.Sample ?? ""));
+        return sb.Append('}').ToString();
+    }
+
+    // 고를 수 있는 목록 = 카탈로그. 설치 여부·크기를 함께 실어 프런트가 한 번의 요청으로 화면을 그리게 한다.
+    static string JavaLibraryCatalogJson()
+    {
+        StringBuilder sb = new StringBuilder("[");
+        foreach (JavaLibrary item in JavaLibraryCatalog)
+        {
+            JavaLibraryTarget target = ParseJavaLibraryTarget(item.Id);
+            if (target == null) continue;
+            if (sb.Length > 1) sb.Append(',');
+            sb.Append(JavaLibraryRowJson(target, item));
+        }
+        return sb.Append(']').ToString();
+    }
+
+    // 캐시에 실제로 있는 것 전부(카탈로그에 없는 직접 좌표 포함). 세 곳을 합쳐 좌표 기준으로 한 번씩만 싣는다.
+    static string JavaLibraryListJson()
+    {
+        List<string> seen = new List<string>();
+        StringBuilder sb = new StringBuilder("[");
+        string[] roots = new string[] {
+            JavaLibraryPortableRoot(), JavaLibraryLocalAppDataRoot(), JavaLibraryVendorRoot() };
+        foreach (string root in roots)
+            foreach (JavaLibraryTarget target in EnumerateJavaLibraryJars(root))
+            {
+                if (seen.Contains(target.Relative)) continue;
+                seen.Add(target.Relative);
+                if (sb.Length > 1) sb.Append(',');
+                sb.Append(JavaLibraryRowJson(target, FindJavaLibraryCatalogItem(target.Id)));
+            }
+        return sb.Append(']').ToString();
+    }
+
+    /* 설치 시작. 실제 작업은 배경 스레드가 하고 여기서는 작업 번호만 돌려준다 —
+       200MB 를 받는 JDK 설치와 달리 몇 초로 끝나는 일이지만, 교실 인터넷에서는 그 몇 초가 몇 분이 된다. */
+    static string StartJavaLibraryInstall(byte[] body)
+    {
+        string spec = Encoding.UTF8.GetString(body ?? new byte[0]).Trim();
+        JavaLibraryTarget target = ParseJavaLibraryTarget(spec);
+        if (target == null) throw new InvalidOperationException("invalid-library-spec");
+        lock (JavaLibJobsLock)
+            foreach (JavaLibJob active in JavaLibJobs.Values)
+                if (!active.Complete) throw new InvalidOperationException("java-lib-busy");
+        SweepJavaLibJobs();
+        if (FindJavaLibraryFile(target.Relative) != null) throw new InvalidOperationException("java-lib-exists");
+        if (InstalledJavaLibraryCount() >= JavaLibraryMaxInstalled) throw new InvalidOperationException("java-lib-limit");
+        string root = JavaLibraryInstallRoot();
+        if (string.IsNullOrEmpty(root)) throw new InvalidOperationException("no-install-root");
+
+        JavaLibJob job = new JavaLibJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.Log.AppendLine(target.Label + " · " + target.Group + ":" + target.Artifact + ":" + target.Version);
+        lock (JavaLibJobsLock) JavaLibJobs[job.Id] = job;
+
+        JavaLibJob captured = job;
+        JavaLibraryTarget capturedTarget = target;
+        string capturedRoot = root;
+        Thread worker = new Thread(delegate() { RunJavaLibraryInstall(captured, capturedTarget, capturedRoot); });
+        worker.IsBackground = true;
+        worker.Start();
+        return "{\"id\":" + JsonString(job.Id) + "}";
+    }
+
+    static void RunJavaLibraryInstall(JavaLibJob job, JavaLibraryTarget target, string root)
+    {
+        string dest = JavaLibraryFileUnder(root, target.Relative);
+        string temp = null;
+        try
+        {
+            if (dest == null) throw new Exception("설치 경로를 만들지 못했습니다.");
+            Directory.CreateDirectory(Path.GetDirectoryName(dest));
+            temp = dest + ".part-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+            /* 배포본(vendor\java-libs)에 담아 보낸 jar 는 여기로 오지 않는다 — 조회 루트라 이미 쓸 수 있고,
+               StartJavaLibraryInstall 이 '이미 있음'으로 돌려보낸다. 인터넷 없는 교실은 그것으로 끝난다. */
+            DownloadJavaLibrary(job, target, temp);
+            VerifyJavaLibrary(job, target, temp);
+            if (File.Exists(dest)) File.Delete(dest);
+            File.Move(temp, dest);
+            temp = null;
+            job.Log.AppendLine("설치를 마쳤습니다: " + dest);
+            FinishJavaLibJob(job, 0);
+        }
+        catch (Exception ex)
+        {
+            bool cancelled;
+            lock (job.Sync) cancelled = job.CancelRequested;
+            job.Log.AppendLine(cancelled
+                ? "[설치를 취소했습니다. 받던 파일은 지웠습니다.]"
+                : "[설치 실패: " + FlattenMessage(ex) + "]");
+            FinishJavaLibJob(job, -1);
+        }
+        finally
+        {
+            try { if (temp != null && File.Exists(temp)) File.Delete(temp); }
+            catch { }
+            SweepJavaLibJobs();
+        }
+    }
+
+    static void DownloadJavaLibrary(JavaLibJob job, JavaLibraryTarget target, string temp)
+    {
+        string url = JavaLibraryRepository + target.Relative.Replace('\\', '/');
+        job.Log.AppendLine("내려받는 중: " + url);
+        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }   // TLS 1.2
+        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+        req.Timeout = 30000;
+        req.ReadWriteTimeout = 120000;
+        req.UserAgent = "ClassDock";
+        long received = 0, total = 0, nextMark = 0;
+        using (WebResponse resp = req.GetResponse())
+        using (Stream rs = resp.GetResponseStream())
+        using (FileStream fs = new FileStream(temp, FileMode.Create, FileAccess.Write))
+        {
+            total = resp.ContentLength;
+            if (total > JavaLibraryMaxJarBytes)
+                throw new Exception("파일이 " + (JavaLibraryMaxJarBytes / (1024 * 1024)) + "MB 제한보다 큽니다.");
+            byte[] buf = new byte[81920];
+            int n;
+            while ((n = rs.Read(buf, 0, buf.Length)) > 0)
+            {
+                lock (job.Sync) if (job.CancelRequested) throw new Exception("취소했습니다.");
+                received += n;
+                // 길이를 알려 주지 않는 응답도 있어 받는 도중에도 상한을 본다.
+                if (received > JavaLibraryMaxJarBytes)
+                    throw new Exception("파일이 " + (JavaLibraryMaxJarBytes / (1024 * 1024)) + "MB 제한을 넘었습니다.");
+                fs.Write(buf, 0, n);
+                if (total > 0 && received >= nextMark)
+                {
+                    job.Log.AppendLine("내려받는 중… " + (received * 100 / total) + "%");
+                    nextMark = received + Math.Max(total / 5, 1);
+                }
+            }
+        }
+        job.Log.AppendLine("내려받기 완료 (" + (received / 1024) + "KB).");
+    }
+
+    /* 받은 파일 대조. 카탈로그에 박아 둔 SHA-256 이 있으면 그것이 기준이고, 없으면 배포처의 .sha1 을 받아 맞춘다.
+       기준을 하나도 얻지 못하면 설치를 접는다 — 검증하지 못한 파일을 클래스패스에 올리지 않는다.
+       어느 쪽이든 실제 SHA-256 을 로그에 남긴다 — 카탈로그에 박아 둘 값을 여기서 얻는다. */
+    static void VerifyJavaLibrary(JavaLibJob job, JavaLibraryTarget target, string file)
+    {
+        string actual = Sha256File(file);
+        if (!string.IsNullOrEmpty(target.Sha256))
+        {
+            if (!string.Equals(actual, target.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new Exception("받은 파일이 카탈로그에 적힌 검증값과 다릅니다.");
+            job.Log.AppendLine("검증 완료 — 카탈로그 SHA-256 과 일치합니다.");
+            return;
+        }
+        string expected = FetchJavaLibraryChecksum(target);
+        if (string.IsNullOrEmpty(expected)) throw new Exception("배포처에서 검증값을 얻지 못했습니다.");
+        if (!string.Equals(Sha1File(file), expected, StringComparison.OrdinalIgnoreCase))
+            throw new Exception("받은 파일이 배포처가 알려준 검증값과 다릅니다.");
+        job.Log.AppendLine("검증 완료 — 배포처 SHA-1 과 일치합니다.");
+        job.Log.AppendLine("SHA-256: " + actual);
+        job.Log.AppendLine("(이 값을 카탈로그에 적어 두면 다음부터는 변조까지 걸러집니다.)");
+    }
+
+    static string FetchJavaLibraryChecksum(JavaLibraryTarget target)
+    {
+        string url = JavaLibraryRepository + target.Relative.Replace('\\', '/') + ".sha1";
+        try
+        {
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+            req.Timeout = 30000;
+            req.ReadWriteTimeout = 60000;
+            req.UserAgent = "ClassDock";
+            string text;
+            using (WebResponse resp = req.GetResponse())
+            using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.ASCII))
+                text = reader.ReadToEnd();
+            System.Text.RegularExpressions.Match m = Sha1HexRe.Match(text ?? "");
+            return m.Success ? m.Value : "";
+        }
+        catch { return ""; }
+    }
+
+    static string Sha1File(string path)
+    {
+        using (FileStream fs = File.OpenRead(path))
+        using (SHA1 sha = SHA1.Create())
+            return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+    }
+
+    static void FinishJavaLibJob(JavaLibJob job, int code)
+    {
+        lock (job.Sync)
+        {
+            if (job.Complete) return;
+            job.ExitCode = job.CancelRequested ? -1 : code;
+            job.DoneAt = DateTime.UtcNow;
+            job.Complete = true;
+        }
+    }
+
+    // 증분 폴링 — pip·npm 설치와 같은 규약(from 이 현재 길이와 같고 진행 중이면 본문 없이 짧게 답한다).
+    static string PollJavaLibraryInstall(string id, string knownLen)
+    {
+        JavaLibJob job;
+        lock (JavaLibJobsLock) if (!JavaLibJobs.TryGetValue(id ?? "", out job))
+            return "{\"complete\":true,\"code\":-1,\"cancelled\":false,\"log\":"
+                 + JsonString("설치 작업을 찾지 못했습니다.") + "}";
+        lock (job.Sync)
+        {
+            int from = 0;
+            bool known = int.TryParse(knownLen ?? "", out from) && from >= 0 && from <= job.Log.TextLength;
+            if (known && !job.Complete && from == job.Log.TextLength) return "{\"complete\":false,\"unchanged\":true}";
+            string head = "{\"complete\":" + (job.Complete ? "true" : "false")
+                + ",\"code\":" + job.ExitCode + ",\"cancelled\":" + (job.CancelRequested ? "true" : "false");
+            if (known) return head + ",\"logDelta\":" + JsonString(job.Log.GetTextFrom(from)) + "}";
+            return head + ",\"log\":" + JsonString(job.Log.GetText()) + "}";
+        }
+    }
+
+    // 취소는 표시만 한다 — 내려받기 반복문이 다음 조각에서 이 값을 보고 스스로 멈추고 .part 를 지운다.
+    static void CancelJavaLibraryInstall(string id)
+    {
+        JavaLibJob job;
+        lock (JavaLibJobsLock) if (!JavaLibJobs.TryGetValue(id ?? "", out job)) return;
+        lock (job.Sync)
+        {
+            if (job.Complete || job.CancelRequested) return;
+            job.CancelRequested = true;
+        }
+    }
+
+    static void SweepJavaLibJobs()
+    {
+        lock (JavaLibJobsLock)
+        {
+            List<string> remove = new List<string>();
+            DateTime now = DateTime.UtcNow;
+            foreach (KeyValuePair<string, JavaLibJob> kv in JavaLibJobs)
+                if (kv.Value.Complete && (now - kv.Value.DoneAt).TotalMinutes > 10) remove.Add(kv.Key);
+            foreach (string id in remove) JavaLibJobs.Remove(id);
+        }
+    }
+
+    /* 캐시에서 하나 지운다. 배포본에 담겨 온 것은 지우지 않는다(지워도 다음 실행에 다시 나타난다).
+       빈 폴더는 캐시 루트 아래에서만 위로 훑어 정리한다 — com\google\… 껍데기만 남지 않게. */
+    static string DeleteJavaLibrary(string spec)
+    {
+        JavaLibraryTarget target = ParseJavaLibraryTarget(spec);
+        if (target == null) return "invalid-library-spec";
+        bool removed = false;
+        string[] roots = new string[] { JavaLibraryPortableRoot(), JavaLibraryLocalAppDataRoot() };
+        foreach (string root in roots)
+        {
+            string file = JavaLibraryFileUnder(root, target.Relative);
+            if (file == null) continue;
+            try
+            {
+                if (!File.Exists(file)) continue;
+                File.Delete(file);
+                removed = true;
+                PruneEmptyJavaLibraryDirectories(Path.GetDirectoryName(file), root);
+            }
+            catch { }
+        }
+        if (removed) return "ok";
+        return IsBundledJavaLibrary(target.Relative) ? "java-lib-bundled" : "java-lib-not-found";
+    }
+
+    static void PruneEmptyJavaLibraryDirectories(string dir, string root)
+    {
+        try
+        {
+            string boundary = Path.GetFullPath(root);
+            if (!boundary.EndsWith("\\", StringComparison.Ordinal)) boundary += "\\";
+            while (!string.IsNullOrEmpty(dir))
+            {
+                string full = Path.GetFullPath(dir);
+                if (!full.StartsWith(boundary, StringComparison.OrdinalIgnoreCase)) return;
+                if (Directory.GetFileSystemEntries(full).Length > 0) return;
+                Directory.Delete(full);
+                dir = Path.GetDirectoryName(full);
+            }
+        }
+        catch { }
+    }
+
+    // ===== 자바(.java) 실행 세션 — 단일 파일 소스 실행 + 대화형 표준입력 =====
+    // 자바 실행도 파이썬과 같은 상한을 쓴다. 수업용 코드는 이 안에서 충분하고, 폭주한 코드가 PC 를 멈추는 것만 막는다.
+    const long JavaProcessMemoryLimitBytes = PythonProcessMemoryLimitBytes;
+    const int JavaSessionTimeoutMs = 30 * 60 * 1000;
+    const int JavaCompileTimeoutMs = 30 * 1000;
+    // 파일 이름은 public 최상위 타입에 맞추고, 실행 대상은 실제 main 메서드를 가진 최상위 타입으로 고른다.
+    // source-file mode(`java Foo.java`)는 무조건 첫 타입을 실행하므로 보조 타입을 앞에 둔 정상 코드가 실패한다.
+    const string JavaIdStart = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}]";
+    const string JavaIdPart = "[\\p{L}\\p{Nl}\\p{Sc}\\p{Pc}\\p{Mn}\\p{Mc}\\p{Nd}\\p{Cf}]";
+    static readonly System.Text.RegularExpressions.Regex JavaTypeRe =
+        new System.Text.RegularExpressions.Regex(
+            "(?:^|[;}{\\s])(?:(public)\\s+)?(?:(?:final|abstract|sealed|non-sealed|strictfp)\\s+)*(?:class|interface|enum|record)\\s+("
+            + JavaIdStart + JavaIdPart + "*)");
+    static readonly System.Text.RegularExpressions.Regex JavaMainMethodRe =
+        new System.Text.RegularExpressions.Regex(
+            "(?=[^;{}]*\\bpublic\\b)(?=[^;{}]*\\bstatic\\b)[^;{}]*\\bvoid\\s+main\\s*\\(\\s*(?:final\\s+)?(?:java\\s*\\.\\s*lang\\s*\\.\\s*)?String\\s*(?:(?:\\[\\s*\\]|\\.\\.\\.)|"
+            + JavaIdStart + JavaIdPart + "*\\s*\\[\\s*\\])");
+    static readonly System.Text.RegularExpressions.Regex JavaPackageRe =
+        new System.Text.RegularExpressions.Regex(
+            "(?:^|[;\\s])package\\s+(" + JavaIdStart + JavaIdPart + "*(?:\\s*\\.\\s*" + JavaIdStart + JavaIdPart + "*)*)\\s*;");
+
+    class JavaTypeCandidate
+    {
+        public string Name;
+        public bool IsPublic;
+        public bool HasMain;
+    }
+
+    /* 실행을 시작하기도 전에 끝난 세션. 컴파일 실패와 같은 모양(프로세스 없는 완료 세션)으로 만들어
+       프런트가 평소의 출력 칸에서 붉은 글씨로 보여 주게 한다 — '실행 실패' 화면보다 원인이 눈에 잘 띈다. */
+    static string StartJavaMessageSession(string message)
+    {
+        JavaSession session = new JavaSession();
+        session.Id = Guid.NewGuid().ToString("N");
+        session.Stderr.AppendLine(message);
+        session.ExitCode = -1;
+        session.DoneAt = DateTime.UtcNow;
+        session.Complete = true;
+        lock (JavaSessionsLock) JavaSessions[session.Id] = session;
+        return session.Id;
+    }
+
+    /* piped=false: 대화형 실행. 표준입력을 열어 두고 /java-session-input 으로 한 줄씩 받는다.
+       piped=true : 채점처럼 입력을 미리 다 아는 실행. 페이로드의 표준입력을 한 번에 흘려보내고 닫는다.
+       두 길을 나누는 이유는 /java-session-input 이 터미널처럼 보이려고 stdout 에 에코를 남기기 때문이다 —
+       그 에코가 섞이면 채점의 출력 비교가 어긋난다. */
+    static string StartJavaSession(byte[] body, bool piped, string libs)
+    {
+        string java = FindJava();
+        if (java == null) throw new JavaMissingException();
+
+        SweepJavaSessions();   // 새 실행 시작 시 오래된 보존 세션의 작업폴더 정리
+
+        // 고른 라이브러리를 먼저 찾는다. 하나라도 없으면 실행하지 않고 그 사실을 출력 칸에 보여 준다.
+        List<string> missingLibraries;
+        List<string> libraryJars = ResolveJavaLibraryJars(libs, out missingLibraries);
+        if (missingLibraries.Count > 0)
+            return StartJavaMessageSession("[라이브러리를 찾지 못했습니다: "
+                + string.Join(", ", missingLibraries.ToArray())
+                + "]\n라이브러리 목록에서 다시 설치하거나, 선택을 해제한 뒤 실행해 주세요.");
+
+        string source, stdinText;
+        DecodeRunPayload(body, out source, out stdinText);
+        string fileClassName = JavaMainClassName(source);
+        string launchClassName = JavaLaunchClassName(source);
+        string packageName = JavaPackageName(source);
+        string qualifiedClassName = string.IsNullOrEmpty(packageName) ? launchClassName : packageName + "." + launchClassName;
+        string tempRoot = Path.Combine(Path.GetTempPath(), "moidajava_session_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            string scriptPath = Path.Combine(tempRoot, fileClassName + ".java");
+            File.WriteAllText(scriptPath, source, new UTF8Encoding(false));
+            return StartJavaSessionProcess(java, scriptPath, fileClassName, qualifiedClassName, tempRoot,
+                piped ? (stdinText ?? "") : null, JavaClassPath(tempRoot, libraryJars));
+        }
+        catch
+        {
+            try { Directory.Delete(tempRoot, true); } catch { }
+            throw;
+        }
+    }
+
+    /* 프런트는 파이썬 실행과 같은 페이로드([길이][소스][길이][표준입력])를 보낸다.
+       봉투 모양이 아니면 본문 전체를 소스로 보고 표준입력은 비운다. */
+    static void DecodeRunPayload(byte[] body, out string source, out string stdinText)
+    {
+        byte[] raw = body ?? new byte[0];
+        var utf8 = new UTF8Encoding(false);
+        source = utf8.GetString(raw);
+        stdinText = "";
+        try
+        {
+            int pos = 0;
+            int sourceLen = ReadBundleInt(raw, ref pos);
+            if (sourceLen < 0 || pos + sourceLen + 4 > raw.Length) return;
+            int sourceAt = pos;
+            pos += sourceLen;
+            int stdinLen = ReadBundleInt(raw, ref pos);
+            if (stdinLen < 0 || pos + stdinLen != raw.Length) return;
+            source = utf8.GetString(raw, sourceAt, sourceLen);
+            stdinText = utf8.GetString(raw, pos, stdinLen);
+        }
+        catch { }
+    }
+
+    /* javac 의 파일 이름 규칙을 맞추기 위해 public 최상위 타입을 파일 이름으로 쓴다.
+       public 타입이 없으면 main 보유 타입, 첫 최상위 타입 순으로 고른다. */
+    static string JavaMainClassName(string source)
+    {
+        List<JavaTypeCandidate> types = JavaTopLevelTypes(source);
+        foreach (JavaTypeCandidate type in types) if (type.IsPublic) return type.Name;
+        foreach (JavaTypeCandidate type in types) if (type.HasMain) return type.Name;
+        return types.Count > 0 ? types[0].Name : "Main";
+    }
+
+    // 실제 실행할 클래스. 보조 클래스를 파일 앞에 선언해도 main 이 든 타입을 명시적으로 실행한다.
+    static string JavaLaunchClassName(string source)
+    {
+        List<JavaTypeCandidate> types = JavaTopLevelTypes(source);
+        foreach (JavaTypeCandidate type in types) if (type.HasMain) return type.Name;
+        foreach (JavaTypeCandidate type in types) if (type.IsPublic) return type.Name;
+        return types.Count > 0 ? types[0].Name : "Main";
+    }
+
+    static string JavaPackageName(string source)
+    {
+        string scrubbed = StripJavaCommentsAndStrings(source ?? "");
+        System.Text.RegularExpressions.Match m = JavaPackageRe.Match(scrubbed);
+        return m.Success ? System.Text.RegularExpressions.Regex.Replace(m.Groups[1].Value, "\\s+", "") : "";
+    }
+
+    static List<JavaTypeCandidate> JavaTopLevelTypes(string source)
+    {
+        string scrubbed = StripJavaCommentsAndStrings(source ?? "");
+        var found = new List<JavaTypeCandidate>();
+        int scan = 0, depth = 0;
+        foreach (System.Text.RegularExpressions.Match m in JavaTypeRe.Matches(scrubbed))
+        {
+            while (scan < m.Index)
+            {
+                if (scrubbed[scan] == '{') depth++;
+                else if (scrubbed[scan] == '}') depth = Math.Max(0, depth - 1);
+                scan++;
+            }
+            if (depth != 0) continue;
+            int open = scrubbed.IndexOf('{', m.Index + m.Length);
+            if (open < 0) continue;
+            int close = JavaMatchingBrace(scrubbed, open);
+            if (close < 0) close = scrubbed.Length;
+            found.Add(new JavaTypeCandidate {
+                Name = m.Groups[2].Value,
+                IsPublic = m.Groups[1].Success,
+                HasMain = JavaTypeHasMain(scrubbed, open, close)
+            });
+        }
+        return found;
+    }
+
+    static int JavaMatchingBrace(string source, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    static bool JavaTypeHasMain(string source, int open, int close)
+    {
+        foreach (System.Text.RegularExpressions.Match m in JavaMainMethodRe.Matches(source, open + 1))
+        {
+            if (m.Index >= close) break;
+            int depth = 1;
+            for (int i = open + 1; i < m.Index; i++)
+            {
+                if (source[i] == '{') depth++;
+                else if (source[i] == '}') depth--;
+            }
+            if (depth == 1) return true;
+        }
+        return false;
+    }
+
+    // 주석과 문자열 리터럴을 지운다 — 안내문에 적힌 "class Foo" 같은 글자에 속아 엉뚱한 이름을 고르지 않도록.
+    static string StripJavaCommentsAndStrings(string source)
+    {
+        var sb = new StringBuilder(source.Length);
+        int i = 0, n = source.Length;
+        while (i < n)
+        {
+            char c = source[i];
+            if (c == '/' && i + 1 < n && source[i + 1] == '/')
+            {
+                while (i < n && source[i] != '\n') i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < n && source[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < n && !(source[i] == '*' && source[i + 1] == '/')) i++;
+                i = Math.Min(n, i + 2);
+                sb.Append(' ');
+                continue;
+            }
+            if (c == '"' && i + 2 < n && source[i + 1] == '"' && source[i + 2] == '"')
+            {
+                i += 3;                                            // 텍스트 블록 """…"""
+                while (i + 2 < n && !(source[i] == '"' && source[i + 1] == '"' && source[i + 2] == '"')) i++;
+                i = Math.Min(n, i + 3);
+                sb.Append(' ');
+                continue;
+            }
+            if (c == '"' || c == '\'')
+            {
+                char quote = c;
+                i++;
+                while (i < n && source[i] != quote)
+                {
+                    if (source[i] == '\\') i++;
+                    i++;
+                }
+                i = Math.Min(n, i + 1);
+                sb.Append(' ');
+                continue;
+            }
+            sb.Append(c);
+            i++;
+        }
+        return sb.ToString();
+    }
+
+    // 먼저 javac 로 컴파일한 뒤 main 보유 클래스를 명시 실행한다. 보조 타입의 선언 순서에 영향을 받지 않는다.
+    static string StartJavaSessionProcess(string java, string scriptPath, string sourceFileClassName,
+        string qualifiedClassName, string tempRoot, string pipedStdin, string classPath)
+    {
+        JavaSession session = new JavaSession();
+        session.Id = Guid.NewGuid().ToString("N");
+        session.TempRoot = tempRoot;
+        session.MainClass = sourceFileClassName;
+
+        string bin = Path.GetDirectoryName(java);
+        string javac = string.IsNullOrEmpty(bin) ? null : Path.Combine(bin, "javac.exe");
+        if (string.IsNullOrEmpty(javac) || !File.Exists(javac)) throw new JavaMissingException();
+        if (!CompileJavaSource(javac, scriptPath, tempRoot, session, classPath))
+        {
+            lock (JavaSessionsLock) JavaSessions[session.Id] = session;
+            return session.Id;
+        }
+
+        /* 컴파일 결과 디렉터리와 고른 라이브러리 jar 를 classpath 로 주고 탐지한 main 타입을 직접 실행한다.
+           file/stdout/stderr 인코딩을 모두 UTF-8로 맞춰 한글 입력·출력이 Windows 코드페이지에 좌우되지 않게 한다. */
+        string args = "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -cp \""
+            + classPath + "\" " + qualifiedClassName;
+        ProcessStartInfo psi = new ProcessStartInfo(java, args);
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.RedirectStandardInput = true;
+        psi.StandardOutputEncoding = new UTF8Encoding(false);
+        psi.StandardErrorEncoding = new UTF8Encoding(false);
+        psi.WorkingDirectory = tempRoot;
+
+        session.Process = new Process();
+        session.Process.StartInfo = psi;
+        session.Process.Start();
+        Thread outReader = StartLimitedReader(session.Process.StandardOutput, session.Stdout);
+        Thread errReader = StartLimitedReader(session.Process.StandardError, session.Stderr);
+        lock (JavaSessionsLock) JavaSessions[session.Id] = session;
+        Thread watcher = new Thread(delegate()
+        {
+            bool exited = false;
+            bool memoryLimit = false;
+            Stopwatch watch = Stopwatch.StartNew();
+            while (!exited && watch.ElapsedMilliseconds < JavaSessionTimeoutMs)
+            {
+                try { exited = session.Process.WaitForExit(500); } catch { break; }
+                if (!exited && ProcessTreeWorkingSetBytes(session.Process.Id) > JavaProcessMemoryLimitBytes)
+                {
+                    memoryLimit = true;
+                    break;
+                }
+            }
+            if (!exited)
+            {
+                session.Stderr.AppendLine(memoryLimit
+                    ? "\n[메모리 제한: 실행이 4GB를 넘어 종료했습니다.]"
+                    : "\n[시간 초과: 실행을 30분 후 종료했습니다.]");
+                KillProcessTree(session.Process);
+                try { session.Process.WaitForExit(2000); } catch { }
+            }
+            try { outReader.Join(2000); errReader.Join(2000); } catch { }
+            try { session.ExitCode = session.Process.ExitCode; } catch { session.ExitCode = -1; }
+            lock (session.Sync) { session.DoneAt = DateTime.UtcNow; session.Complete = true; }
+            SweepJavaSessions();
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+
+        if (pipedStdin != null)
+        {
+            // 리더·제한 감시를 먼저 시작하고 별도 스레드에서 입력한다. 큰 입력과 큰 출력이 서로의
+            // 파이프를 기다리는 교착이 생겨도 프런트의 중지 요청과 서버 제한 시간이 계속 작동한다.
+            Thread inputWriter = new Thread(delegate()
+            {
+                try
+                {
+                    byte[] inputBytes = Encoding.UTF8.GetBytes(pipedStdin);
+                    if (inputBytes.Length > 0) session.Process.StandardInput.BaseStream.Write(inputBytes, 0, inputBytes.Length);
+                    session.Process.StandardInput.BaseStream.Flush();
+                }
+                catch { }
+                try { session.Process.StandardInput.Close(); } catch { }
+            });
+            inputWriter.IsBackground = true;
+            inputWriter.Start();
+        }
+        return session.Id;
+    }
+
+    // 컴파일 출력도 같은 세션 버퍼에 담는다. 실패한 세션은 곧바로 poll 가능한 완료 상태로 돌려준다.
+    static bool CompileJavaSource(string javac, string scriptPath, string tempRoot, JavaSession session,
+        string classPath)
+    {
+        // 컴파일에도 같은 classpath 를 준다 — 실행에만 주면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
+        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\" -d \"" + tempRoot
+            + "\" \"" + scriptPath + "\"";
+        ProcessStartInfo psi = new ProcessStartInfo(javac, args);
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = new UTF8Encoding(false);
+        psi.StandardErrorEncoding = new UTF8Encoding(false);
+        psi.WorkingDirectory = tempRoot;
+
+        Process compiler = new Process();
+        compiler.StartInfo = psi;
+        compiler.Start();
+        Thread outReader = StartLimitedReader(compiler.StandardOutput, session.Stdout);
+        Thread errReader = StartLimitedReader(compiler.StandardError, session.Stderr);
+        bool exited = false, memoryLimit = false;
+        Stopwatch watch = Stopwatch.StartNew();
+        while (!exited && watch.ElapsedMilliseconds < JavaCompileTimeoutMs)
+        {
+            try { exited = compiler.WaitForExit(250); } catch { break; }
+            if (!exited && ProcessTreeWorkingSetBytes(compiler.Id) > JavaProcessMemoryLimitBytes)
+            {
+                memoryLimit = true;
+                break;
+            }
+        }
+        if (!exited)
+        {
+            session.Stderr.AppendLine(memoryLimit
+                ? "\n[메모리 제한: 컴파일이 4GB를 넘어 종료했습니다.]"
+                : "\n[시간 초과: 컴파일을 30초 후 종료했습니다.]");
+            KillProcessTree(compiler);
+            try { compiler.WaitForExit(2000); } catch { }
+        }
+        try { outReader.Join(2000); errReader.Join(2000); } catch { }
+        int code;
+        try { code = compiler.ExitCode; } catch { code = -1; }
+        if (exited && code == 0) return true;
+        lock (session.Sync)
+        {
+            session.ExitCode = code;
+            session.DoneAt = DateTime.UtcNow;
+            session.Complete = true;
+        }
+        return false;
+    }
+
+    // 증분 폴링 — 파이썬 세션과 같은 계약(so/se 오프셋을 보내면 변화 없을 때 짧게, 자랐으면 새 내용만).
+    static string PollJavaSession(string id, string knownOut, string knownErr)
+    {
+        JavaSession session;
+        lock (JavaSessionsLock) if (!JavaSessions.TryGetValue(id ?? "", out session))
+            return "{\"complete\":true,\"code\":-1,\"stdout\":\"\",\"stderr\":\"세션을 찾지 못했습니다.\",\"echoes\":[]}";
+        lock (session.Sync)
+        {
+            int so = 0, se = 0;
+            bool known = int.TryParse(knownOut ?? "", out so) && int.TryParse(knownErr ?? "", out se)
+                && so >= 0 && se >= 0
+                && so <= session.Stdout.TextLength && se <= session.Stderr.TextLength;
+            if (known && !session.Complete
+                && so == session.Stdout.TextLength && se == session.Stderr.TextLength)
+                return "{\"complete\":false,\"unchanged\":true}";
+            if (known)
+                return "{\"complete\":" + (session.Complete ? "true" : "false")
+                     + ",\"code\":" + session.ExitCode
+                     + ",\"stdoutDelta\":" + JsonString(session.Stdout.GetTextFrom(so))
+                     + ",\"stderrDelta\":" + JsonString(session.Stderr.GetTextFrom(se))
+                     + ",\"echoes\":" + BuildEchoesJson(session.Echoes)
+                     + ",\"mainClass\":" + JsonString(session.MainClass) + "}";
+            return "{\"complete\":" + (session.Complete ? "true" : "false")
+                 + ",\"code\":" + session.ExitCode
+                 + ",\"stdout\":" + JsonString(session.Stdout.GetText())
+                 + ",\"stderr\":" + JsonString(session.Stderr.GetText())
+                 + ",\"echoes\":" + BuildEchoesJson(session.Echoes)
+                 + ",\"mainClass\":" + JsonString(session.MainClass) + "}";
+        }
+    }
+
+    static void SendJavaSessionInput(string id, string input)
+    {
+        JavaSession session;
+        lock (JavaSessionsLock) if (!JavaSessions.TryGetValue(id ?? "", out session)) throw new Exception("session-not-found");
+        lock (session.Sync)
+        {
+            if (session.Complete) throw new Exception("session-complete");
+            byte[] bytes = Encoding.UTF8.GetBytes((input ?? "") + "\n");
+            // 파이프 stdin 은 에코되지 않으므로 터미널처럼 직접 표시한다. 파이썬 쪽과 같은 이유로
+            // 반드시 stdin 에 쓰기 "전에" 에코를 넣는다 — 먼저 쓰면 자바가 곧바로 다음 출력을 내보내
+            // 리더 스레드가 그것을 에코보다 먼저 담아 순서가 뒤섞인다.
+            int echoStart = session.Stdout.TextLength;
+            session.Stdout.AppendLine(input ?? "");
+            int echoLen = (input ?? "").Length;
+            if (echoLen > 0 && session.Stdout.TextLength == echoStart + echoLen + Environment.NewLine.Length)
+                session.Echoes.Add(new int[] { echoStart, echoLen });
+            session.Process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length);
+            session.Process.StandardInput.BaseStream.Flush();
+        }
+    }
+
+    // 표준입력을 닫아 Scanner 의 hasNext() 루프를 정상 종료시킨다(중지와 달리 코드가 스스로 끝날 기회를 준다).
+    static void CloseJavaSessionInput(string id)
+    {
+        JavaSession session;
+        lock (JavaSessionsLock) if (!JavaSessions.TryGetValue(id ?? "", out session)) return;
+        lock (session.Sync)
+        {
+            if (session.Complete) return;
+            try { session.Process.StandardInput.Close(); } catch { }
+        }
+    }
+
+    static void StopJavaSession(string id)
+    {
+        JavaSession session = null;
+        lock (JavaSessionsLock) JavaSessions.TryGetValue(id ?? "", out session);
+        if (session == null) return;
+        KillProcessTree(session.Process);
+        // 프로세스를 죽이면 watcher 가 곧 완료 처리한다. 맵·작업폴더 정리는 SweepJavaSessions 가 맡는다.
+    }
+
+    // 끝난 세션은 잠깐 남겨 두고(마지막 폴이 결과를 받아갈 수 있게) 오래된 것부터 지운다.
+    static void SweepJavaSessions()
+    {
+        List<JavaSession> toDelete = new List<JavaSession>();
+        lock (JavaSessionsLock)
+        {
+            List<JavaSession> done = new List<JavaSession>();
+            foreach (KeyValuePair<string, JavaSession> kv in JavaSessions) if (kv.Value.Complete) done.Add(kv.Value);
+            DateTime now = DateTime.UtcNow;
+            foreach (JavaSession s in done) if ((now - s.DoneAt).TotalMinutes > 30) toDelete.Add(s);
+            done.Sort(delegate(JavaSession a, JavaSession b) { return a.DoneAt.CompareTo(b.DoneAt); });
+            for (int i = 0; i < done.Count - 6; i++) if (!toDelete.Contains(done[i])) toDelete.Add(done[i]);
+            foreach (JavaSession s in toDelete) JavaSessions.Remove(s.Id);
+        }
+        foreach (JavaSession s in toDelete) CleanupJavaSessionFiles(s);
+    }
+
+    static void CleanupJavaSessionFiles(JavaSession session)
+    {
+        if (session == null) return;
+        try { if (!string.IsNullOrEmpty(session.TempRoot) && Directory.Exists(session.TempRoot)) Directory.Delete(session.TempRoot, true); }
+        catch { }
     }
 
     // pip 패키지 이름 검증(명령 주입 방지): 이름 + 선택적 버전 지정자만 허용
@@ -9849,5 +11753,6 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
 
 class PowerPointMissingException : Exception { }
 class PythonMissingException : Exception { }
+class JavaMissingException : Exception { }
 class FfmpegMissingException : Exception { }
 class DbMismatchException : Exception { }

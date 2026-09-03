@@ -92,6 +92,7 @@ const MNDocumentTypes = (() => {
     if (ext === "md" || ext === "markdown" || ext === "mdx") return "md";
     if (ext === "html" || ext === "htm" || ext === "xhtml") return "html";
     if (ext === "py") return "py";
+    if (ext === "java") return "java";
     if (["zip", "tar", "gz", "tgz"].includes(ext)) return "zip";
     if (IMG_EXTS.includes(ext)) return "img";
     if (ext in CODE_EXTS) return "code";

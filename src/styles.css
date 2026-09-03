@@ -515,6 +515,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   [data-cat="md"]{--ic:#0ea5e9}
   [data-cat="html"]{--ic:#ec4899}
   [data-cat="py"]{--ic:#caa019}
+  [data-cat="java"]{--ic:#d2603a}
   [data-cat="db"]{--ic:#0f9f8f}
   [data-cat="zip"]{--ic:#a16f2c}
   [data-cat="dir"]{--ic:#94a3b8}
@@ -5039,6 +5040,28 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .terminal-stop:disabled{opacity:.45;cursor:default}
   .terminal-rerun{border:1px solid #166534;background:#052e16;color:#bbf7d0;border-radius:6px;padding:4px 9px;cursor:pointer}
   .terminal-rerun:disabled{opacity:.5;cursor:default}
+  /* 표준입력 닫기(EOF) — 중지와 달리 코드가 스스로 끝날 기회를 주므로 경고색을 쓰지 않는다. */
+  .terminal-eof{border:1px solid var(--code-border);background:transparent;color:var(--code-muted);
+    border-radius:6px;padding:4px 9px;cursor:pointer}
+  .terminal-eof:hover:not(:disabled){color:var(--code-text)}
+  .terminal-eof:disabled{opacity:.45;cursor:default}
+  /* 자바(JDK)를 찾지 못했을 때의 안내와, 어느 자바가 잡혔는지 보여 주는 목록. */
+  .java-install-help{display:flex;flex-direction:column;gap:6px;padding:12px 14px;color:var(--code-text)}
+  .java-install-help strong{color:#f87171}
+  .java-install-help p{margin:0;color:var(--code-muted)}
+  .java-help-steps{margin:2px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:4px;color:var(--code-muted)}
+  .java-help-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .java-help-note{color:var(--code-muted);font-size:12px}
+  .java-help-btn{flex:none;padding:5px 12px;border:1px solid var(--code-border);border-radius:7px;
+    background:transparent;color:var(--code-text);font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+  .java-help-btn:hover:not(:disabled){border-color:var(--accent)}
+  .java-help-btn:disabled{opacity:.55;cursor:default}
+  .java-help-btn.is-primary{border-color:#166534;background:#052e16;color:#bbf7d0}
+  .java-help-btn.is-primary:hover:not(:disabled){border-color:#22c55e}
+  .java-env-list{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;padding:12px 14px;
+    color:var(--code-text);font-size:12.5px}
+  .java-env-list dt{color:var(--code-muted)}
+  .java-env-list dd{margin:0;overflow-wrap:anywhere}
   /* 확인·입력 같은 일반 모달(z-index:200)은 터미널 위에서 반드시 조작할 수 있어야 한다. */
   .py-terminal-modal{z-index:190}
   .py-terminal-modal .py-terminal-card{width:min(900px,96vw);height:min(680px,calc(100vh - 24px));max-height:calc(100vh - 12px);padding:0;overflow:hidden;display:flex;flex-direction:column}

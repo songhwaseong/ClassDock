@@ -58,6 +58,9 @@
     "js-libraries.js",
     "js-runtime.js",
     "js-editor.js",
+    "java-libraries.js",
+    "java-runtime.js",
+    "java-editor.js",
     "office-doc-viewers.js",
     "office-replace.js",
     "docx-editor.js",
@@ -171,6 +174,14 @@
         "js-libraries.js",
         "js-runtime.js",
         "js-editor.js"
+      ]
+    },
+    {
+      "name": "java",
+      "scripts": [
+        "java-libraries.js",
+        "java-runtime.js",
+        "java-editor.js"
       ]
     },
     {
@@ -310,6 +321,16 @@
       "python-editor.js",
       "js-libraries.js",
       "js-runtime.js"
+    ],
+    "java-runtime.js": [
+      "python-run-context.js",
+      "python-runtime.js"
+    ],
+    "java-editor.js": [
+      "code-viewer.js",
+      "python-editor.js",
+      "java-libraries.js",
+      "java-runtime.js"
     ],
     "spreadsheet-viewer.js": [
       "grid-selection.js",
