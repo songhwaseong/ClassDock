@@ -33,8 +33,15 @@ const MNBoardTools = (() => {
     floor:{ arity:1, fn:Math.floor }, ceil:{ arity:1, fn:Math.ceil }, round:{ arity:1, fn:Math.round }, sign:{ arity:1, fn:Math.sign },
     pow:{ arity:2, fn:Math.pow }, atan2:{ arity:2, fn:Math.atan2 },
     mod:{ arity:2, fn:(a, b) => (b ? a - b * Math.floor(a / b) : NaN) },
-    min:{ arity:-1, fn:(...args) => Math.min(...args) }, max:{ arity:-1, fn:(...args) => Math.max(...args) }
+    min:{ arity:-1, fn:(...args) => Math.min(...args) }, max:{ arity:-1, fn:(...args) => Math.max(...args) },
+    /* 조각적 정의 함수 — if(조건, 참일 때, 거짓일 때). 두 갈래를 모두 계산한 뒤 고르므로
+       고르지 않은 쪽이 NaN 이어도(√ 안이 음수인 경우 등) 결과는 멀쩡하다. */
+    if:{ arity:3, fn:(condition, yes, no) => (condition ? yes : no) },
+    and:{ arity:-1, fn:(...args) => (args.every((value) => value) ? 1 : 0) },
+    or:{ arity:-1, fn:(...args) => (args.some((value) => value) ? 1 : 0) },
+    not:{ arity:1, fn:(value) => (value ? 0 : 1) }
   };
+  const COMPARISONS = ["<", ">", "<=", ">="];
 
   function tokenizeExpression(source){
     const text = String(source == null ? "" : source)
@@ -50,6 +57,7 @@ const MNBoardTools = (() => {
       // 독립 이름 토큰으로 만들면 바로 뒤의 값과 암시적 곱셈·함수 적용 규칙이 작동한다.
       if (ch === "π"){ tokens.push({ type:"name", value:"pi" }); i++; continue; }
       if (ch === "√"){ tokens.push({ type:"name", value:"sqrt" }); i++; continue; }
+      if (ch === "θ"){ tokens.push({ type:"name", value:"theta" }); i++; continue; }
       if (/[0-9.]/.test(ch)){
         let j = i;
         while (j < text.length && /[0-9.]/.test(text[j])) j++;
@@ -62,6 +70,13 @@ const MNBoardTools = (() => {
         while (j < text.length && /[a-zA-Z0-9_]/.test(text[j])) j++;
         tokens.push({ type:"name", value:text.slice(i, j) }); i = j; continue;
       }
+      // 부등호 — 조각적 정의 함수(if)의 조건에 쓴다. ≤·≥ 는 수식 사전에서 넣은 기호도 받는다.
+      if (ch === "<" || ch === ">"){
+        if (text[i + 1] === "="){ tokens.push({ type:ch + "=" }); i += 2; continue; }
+        tokens.push({ type:ch }); i++; continue;
+      }
+      if (ch === "≤"){ tokens.push({ type:"<=" }); i++; continue; }
+      if (ch === "≥"){ tokens.push({ type:">=" }); i++; continue; }
       if ("+-*/^%(),".includes(ch)){ tokens.push({ type:ch }); i++; continue; }
       throw toolError(`이해할 수 없는 문자예요: ${ch}`);
     }
@@ -89,6 +104,22 @@ const MNBoardTools = (() => {
       return !!token && (token.type === "num" || token.type === "name" || token.type === "(");
     };
 
+    /* 부등호는 가장 낮은 우선순위다. 0 ≤ x < 3 처럼 이어 쓰면 "둘 다 참"으로 읽는다 —
+       왼쪽부터 차례로 계산하면 (0≤x) 의 결과 0·1 을 3 과 견주게 되어 늘 참이 된다. */
+    function parseCompare(){
+      const parts = [parseExpr()], ops = [];
+      for (;;){
+        const token = peek();
+        if (!token || !COMPARISONS.includes(token.type)) break;
+        pos++; ops.push(token.type); parts.push(parseExpr());
+      }
+      if (!ops.length) return parts[0];
+      let node = { op:ops[0], left:parts[0], right:parts[1] };
+      for (let i = 1; i < ops.length; i++){
+        node = { op:"and", left:node, right:{ op:ops[i], left:parts[i], right:parts[i + 1] } };
+      }
+      return node;
+    }
     function parseExpr(){
       let node = parseTerm();
       for (;;){
@@ -123,7 +154,7 @@ const MNBoardTools = (() => {
       if (token.type === "num"){ pos++; return { op:"num", value:token.value }; }
       if (token.type === "("){
         pos++;
-        const inner = parseExpr();
+        const inner = parseCompare();
         if (!eat(")")) throw toolError("괄호가 닫히지 않았어요.");
         return inner;
       }
@@ -135,8 +166,8 @@ const MNBoardTools = (() => {
           const args = [];
           if (eat("(")){
             if (!eat(")")){
-              args.push(parseExpr());
-              while (eat(",")) args.push(parseExpr());
+              args.push(parseCompare());
+              while (eat(",")) args.push(parseCompare());
               if (!eat(")")) throw toolError("괄호가 닫히지 않았어요.");
             }
           } else args.push(parsePower());                 // sin x 처럼 괄호를 생략한 표기
@@ -151,7 +182,7 @@ const MNBoardTools = (() => {
       throw toolError("수식을 이해하지 못했어요.");
     }
 
-    const ast = parseExpr();
+    const ast = parseCompare();
     if (pos < tokens.length) throw toolError("수식에 남는 부분이 있어요. 괄호와 연산자를 확인하세요.");
 
     const variables = [];
@@ -178,6 +209,11 @@ const MNBoardTools = (() => {
           case "/": return run(node.left) / run(node.right);
           case "%": return run(node.left) % run(node.right);
           case "^": return Math.pow(run(node.left), run(node.right));
+          case "<": return run(node.left) < run(node.right) ? 1 : 0;
+          case ">": return run(node.left) > run(node.right) ? 1 : 0;
+          case "<=": return run(node.left) <= run(node.right) ? 1 : 0;
+          case ">=": return run(node.left) >= run(node.right) ? 1 : 0;
+          case "and": return run(node.left) && run(node.right) ? 1 : 0;
           case "call": return FUNCTIONS[node.name].fn(...node.args.map(run));
           default: return NaN;
         }
@@ -228,34 +264,176 @@ const MNBoardTools = (() => {
 
   // 관계 기호 — y = f(x) 는 곡선, 나머지는 그쪽 반평면을 옅게 칠한 부등식 영역이 된다.
   const RELATION_SIGNS = { eq:"=", gt:">", lt:"<", ge:"≥", le:"≤" };
-  function normalizeCurves(spec){
+  function normalizeCurves(spec, mode){
+    // 매개변수 곡선만 식을 두 개(x(t)·y(t)) 받는다. 나머지는 예전과 같은 한 줄짜리다.
+    const kind = mode || "function";
     const raw = Array.isArray(spec.curves) ? spec.curves : [];
     const curves = [];
     raw.forEach((entry, index) => {
-      const source = String((entry && typeof entry === "object" ? entry.source : entry) || "").trim();
+      const item = entry && typeof entry === "object" ? entry : { source:entry };
+      const color = /^#[0-9a-f]{6}$/i.test(String(item.color || ""))
+        ? String(item.color).toLowerCase() : CURVE_COLORS[curves.length % CURVE_COLORS.length];
+      if (kind === "implicit"){
+        // "x^2 + y^2 = 9" 처럼 양변이 있는 식. 등호가 없으면 그 식이 0 이 되는 자리를 그린다.
+        const source = String(item.source == null ? "" : item.source).trim();
+        if (!source) return;
+        const at = source.search(/(?<![<>=!])=(?!=)/);
+        const left = at >= 0 ? source.slice(0, at) : source;
+        const right = at >= 0 ? source.slice(at + 1) : "0";
+        if (!left.trim() || !right.trim()) throw toolError("등호 양쪽에 식을 적어야 해요. 예: x^2 + y^2 = 9");
+        curves.push({ source, color, relation:"eq", parsedLeft:parseExpression(left), parsedRight:parseExpression(right), index });
+        return;
+      }
+      if (kind === "parametric"){
+        const sourceX = String(item.x == null ? "" : item.x).trim(), sourceY = String(item.y == null ? "" : item.y).trim();
+        if (!sourceX && !sourceY) return;
+        if (!sourceX || !sourceY) throw toolError("매개변수 곡선은 x(t)와 y(t)를 모두 적어야 해요.");
+        curves.push({ sourceX, sourceY, color, relation:"eq", parsedX:parseExpression(sourceX), parsedY:parseExpression(sourceY), index });
+        return;
+      }
+      const source = String(item.source == null ? "" : item.source).trim();
       if (!source) return;
-      const color = entry && typeof entry === "object" && /^#[0-9a-f]{6}$/i.test(String(entry.color || ""))
-        ? String(entry.color).toLowerCase() : CURVE_COLORS[curves.length % CURVE_COLORS.length];
-      const relation = entry && typeof entry === "object" && RELATION_SIGNS[entry.relation] ? entry.relation : "eq";
+      // 부등호로 반평면을 칠하는 건 y = f(x) 에서만 뜻이 통한다.
+      const relation = kind === "function" && RELATION_SIGNS[item.relation] ? item.relation : "eq";
       curves.push({ source, color, relation, parsed:parseExpression(source), index });
     });
-    if (!curves.length) throw toolError("그래프로 그릴 식을 입력하세요.");
+    if (!curves.length) throw toolError(kind === "parametric" ? "x(t)와 y(t)를 입력하세요." : "그래프로 그릴 식을 입력하세요.");
     return curves;
   }
 
-  /* spec = { curves:[{source,color}], xMin,xMax, yMin,yMax(없으면 자동), params:{a:1},
-             width,height, axisColor, showGrid, title, variable:"x", showSliders } */
+  /* 음함수 f(x, y) = 0 — 격자를 훑어 자취를 찾는다(marching squares). 한 칸의 네 꼭짓점
+     부호가 다르면 그 사이 어딘가를 지난다는 뜻이라, 변 위의 자리를 선형보간으로 잡아 짧은
+     선분을 만들고 끝점끼리 이어 붙여 긴 자취로 만든다(선분 하나씩 넣으면 항목이 수백 개가
+     되어 저장본이 무거워진다). y = f(x) 로는 못 그리는 원·타원·쌍곡선이 이 방법으로 나온다. */
+  function implicitPaths(valueAt, rect, cells){
+    const cols = Math.round(clamp(cells.x, 20, 220)), rows = Math.round(clamp(cells.y, 20, 220));
+    const dx = (rect.xMax - rect.xMin) / cols, dy = (rect.yMax - rect.yMin) / rows;
+    const grid = new Float64Array((cols + 1) * (rows + 1));
+    for (let j = 0; j <= rows; j++){
+      for (let i = 0; i <= cols; i++) grid[j * (cols + 1) + i] = valueAt(rect.xMin + dx * i, rect.yMin + dy * j);
+    }
+    const at = (i, j) => grid[j * (cols + 1) + i];
+    const between = (a, b, va, vb) => {
+      const t = va / (va - vb);
+      return { x:a.x + (b.x - a.x) * t, y:a.y + (b.y - a.y) * t };
+    };
+    const segments = [];
+    for (let j = 0; j < rows; j++){
+      for (let i = 0; i < cols; i++){
+        const values = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+        if (values.some((value) => !Number.isFinite(value))) continue;      // 정의역 밖 칸은 건너뛴다
+        const x0 = rect.xMin + dx * i, x1 = x0 + dx, y0 = rect.yMin + dy * j, y1 = y0 + dy;
+        const corners = [{ x:x0, y:y0 }, { x:x1, y:y0 }, { x:x1, y:y1 }, { x:x0, y:y1 }];
+        const crossings = [];
+        for (let edge = 0; edge < 4; edge++){
+          const a = edge, b = (edge + 1) % 4;
+          if ((values[a] < 0) === (values[b] < 0) || values[a] === values[b]) continue;
+          crossings.push(between(corners[a], corners[b], values[a], values[b]));
+        }
+        if (crossings.length === 2) segments.push([crossings[0], crossings[1]]);
+        else if (crossings.length === 4){
+          // 안장(saddle) — 네 변을 모두 지날 때는 가운데 값의 부호로 어느 짝끼리 잇는지 정한다.
+          const middle = valueAt((x0 + x1) / 2, (y0 + y1) / 2);
+          if (Number.isFinite(middle) && (middle < 0) !== (values[0] < 0)){
+            segments.push([crossings[0], crossings[1]], [crossings[2], crossings[3]]);
+          } else {
+            segments.push([crossings[1], crossings[2]], [crossings[3], crossings[0]]);
+          }
+        }
+      }
+    }
+    // 끝점이 같은 선분끼리 이어 붙인다. 이웃 칸이 같은 변에서 구한 자리라 값이 사실상 같으므로
+    // 칸 크기의 100만분의 1로 자리를 반올림해 짝을 찾는다.
+    const grain = Math.min(Math.abs(dx), Math.abs(dy)) * 1e-6 || 1e-9;
+    const key = (point) => Math.round(point.x / grain) + "," + Math.round(point.y / grain);
+    const ends = new Map();
+    segments.forEach((segment, index) => {
+      for (const point of segment){
+        const id = key(point);
+        if (!ends.has(id)) ends.set(id, []);
+        ends.get(id).push(index);
+      }
+    });
+    const used = new Array(segments.length).fill(false);
+    const nextAt = (id) => {
+      for (const index of ends.get(id) || []) if (!used[index]) return index;
+      return -1;
+    };
+    const paths = [];
+    for (let start = 0; start < segments.length; start++){
+      if (used[start]) continue;
+      used[start] = true;
+      const path = [segments[start][0], segments[start][1]];
+      for (let guard = 0; guard < segments.length; guard++){
+        const index = nextAt(key(path[path.length - 1]));
+        if (index < 0) break;
+        used[index] = true;
+        const [a, b] = segments[index];
+        path.push(key(a) === key(path[path.length - 1]) ? b : a);
+      }
+      for (let guard = 0; guard < segments.length; guard++){
+        const index = nextAt(key(path[0]));
+        if (index < 0) break;
+        used[index] = true;
+        const [a, b] = segments[index];
+        path.unshift(key(a) === key(path[0]) ? b : a);
+      }
+      paths.push(path);
+    }
+    return paths;
+  }
+
+  /* 매개변수·극좌표 곡선이 다 들어오는 보기 창을 자료에서 잡는다. 가로세로 눈금 크기를 같게
+     맞춰야 원이 원으로, 정삼각형이 정삼각형으로 보인다(좁은 쪽을 넓힌다 — 줄이면 잘린다). */
+  function fitPointsView(sampleSets, area){
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    for (const values of sampleSets){
+      for (const point of values){
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+        if (point.x < xMin) xMin = point.x;
+        if (point.x > xMax) xMax = point.x;
+        if (point.y < yMin) yMin = point.y;
+        if (point.y > yMax) yMax = point.y;
+      }
+    }
+    if (!Number.isFinite(xMin) || !Number.isFinite(yMin)) throw toolError("이 범위에서는 값이 없어요. 매개변수 범위를 바꿔 보세요.");
+    if (xMax - xMin < 1e-9){ xMin -= 1; xMax += 1; }
+    if (yMax - yMin < 1e-9){ yMin -= 1; yMax += 1; }
+    const padX = (xMax - xMin) * 0.08, padY = (yMax - yMin) * 0.08;
+    xMin -= padX; xMax += padX; yMin -= padY; yMax += padY;
+    const want = area.w / area.h, have = (xMax - xMin) / (yMax - yMin);
+    if (have < want){
+      const grow = ((yMax - yMin) * want - (xMax - xMin)) / 2;
+      xMin -= grow; xMax += grow;
+    } else if (have > want){
+      const grow = ((xMax - xMin) / want - (yMax - yMin)) / 2;
+      yMin -= grow; yMax += grow;
+    }
+    return { xMin, xMax, yMin, yMax };
+  }
+
+  /* spec = { mode:"function"|"parametric"|"polar", curves:[{source,color} 또는 {x,y,color}],
+             xMin,xMax, yMin,yMax(없으면 자동), tMin,tMax(매개변수·극좌표), params:{a:1},
+             width,height, axisColor, showGrid, title, variable:"x", showSliders,
+             showDerivative, derivativeCurve } */
   function plotGroup(spec){
     const options = spec || {};
     const width = Math.round(clamp(num(options.width, 560), 220, 2400));
     const height = Math.round(clamp(num(options.height, 400), 180, 2400));
-    const variable = String(options.variable || "x");
+    const mode = ["function", "parametric", "polar", "implicit", "sequence"].includes(options.mode) ? options.mode : "function";
+    // 훑는 변수는 방법마다 정해져 있다(θ 는 파서가 theta 로 읽는다).
+    const variable = mode === "parametric" ? "t" : mode === "polar" ? "theta"
+      : mode === "sequence" ? "n" : mode === "implicit" ? "x" : String(options.variable || "x");
+    // 보기 창을 곡선이 스스로 정하는 방법 — 여기서는 x 범위도 자료에서 잡는다.
+    const fitted = mode === "parametric" || mode === "polar";
     const params = options.params && typeof options.params === "object" ? options.params : {};
-    const curves = normalizeCurves(options);
+    const curves = normalizeCurves(options, mode);
     const axisColor = /^#[0-9a-f]{6}$/i.test(String(options.axisColor || "")) ? String(options.axisColor).toLowerCase() : "#111111";
     // 식에 x 말고 다른 문자가 있으면 그 값을 보드에서 바로 끌어 바꿀 수 있게 슬라이더 띠를 함께 그린다.
+    // 훑는 변수는 슬라이더가 아니다. 극좌표는 θ 대신 t 라고 쳐도 받으므로 둘 다 뺀다.
+    const reserved = mode === "polar" ? [variable, "t"] : mode === "implicit" ? ["x", "y"] : [variable];
     const sliderNames = options.showSliders === false ? []
-      : Object.keys(params).filter((name) => name !== variable && Number.isFinite(Number(params[name]))).slice(0, 3);
+      : Object.keys(params).filter((name) => !reserved.includes(name) && Number.isFinite(Number(params[name]))).slice(0, 3);
     const sliderBand = sliderNames.length ? sliderNames.length * PLOT_SLIDER.row + 10 : 0;
 
     let xMin = num(options.xMin, -10), xMax = num(options.xMax, 10);
@@ -264,29 +442,75 @@ const MNBoardTools = (() => {
     const area = { x:margin.left, y:margin.top, w:width - margin.left - margin.right, h:height - margin.top - margin.bottom };
     if (area.w < 40 || area.h < 40) throw toolError("그래프를 그리기에 크기가 너무 작아요.");
 
-    // 표본 추출 — 화면 가로 픽셀당 한 점이면 충분하고, 값이 없는 구간(정의역 밖)은 그대로 비운다.
-    const sampleCount = Math.max(160, Math.min(1200, Math.round(area.w * 1.5)));
-    const dx = (xMax - xMin) / sampleCount;
+    /* 표본 추출 — 함수는 x 를, 매개변수·극좌표는 t(θ)를 훑는다. 어느 쪽이든 결과는 (x, y)
+       한 가지 모양이라 뒤쪽 자르기·그리기는 그대로 쓴다. 값이 없는 구간은 비워 둔다. */
+    const sampleCount = mode === "function" ? Math.max(160, Math.min(1200, Math.round(area.w * 1.5))) : 720;
     const scope = Object.assign({}, params);
-    const samples = curves.map((curve) => {
-      const values = [];
-      for (let i = 0; i <= sampleCount; i++){
-        const x = xMin + dx * i;
-        scope[variable] = x;
+    const setParam = (value) => {
+      scope[variable] = value;
+      if (mode === "polar") scope.t = value;                // θ 대신 t 라고 쳐도 같은 뜻으로 받는다
+    };
+    let samples;
+    const terms = [];                                        // 수열에서 그릴 항의 번호
+    if (mode === "implicit"){
+      samples = curves.map(() => []);                        // 자취는 아래에서 격자로 따로 찾는다
+    } else if (mode === "sequence"){
+      const from = Math.ceil(num(options.tMin, 1) - 1e-9), to = Math.floor(num(options.tMax, 10) + 1e-9);
+      if (!(to >= from)) throw toolError("항의 번호는 끝이 시작보다 커야 해요.");
+      if (to - from + 1 > 200) throw toolError("항이 너무 많아요. 끝 번호를 줄여 주세요(200개까지).");
+      for (let n = from; n <= to; n++) terms.push(n);
+      samples = curves.map((curve) => terms.map((n) => {
+        setParam(n);
         let y;
         try { y = Number(curve.parsed.evaluate(scope)); } catch(_){ y = NaN; }
-        values.push({ x, y:Number.isFinite(y) ? y : NaN });
-      }
-      return values;
-    });
+        return { x:n, y:Number.isFinite(y) ? y : NaN };
+      }));
+    } else if (mode === "function"){
+      const dx = (xMax - xMin) / sampleCount;
+      samples = curves.map((curve) => {
+        const values = [];
+        for (let i = 0; i <= sampleCount; i++){
+          const x = xMin + dx * i;
+          setParam(x);
+          let y;
+          try { y = Number(curve.parsed.evaluate(scope)); } catch(_){ y = NaN; }
+          values.push({ x, y:Number.isFinite(y) ? y : NaN });
+        }
+        return values;
+      });
+    } else {
+      const tMin = num(options.tMin, 0), tMax = num(options.tMax, Math.PI * 2);
+      if (!(tMax > tMin)) throw toolError("매개변수 범위는 끝이 시작보다 커야 해요.");
+      const dt = (tMax - tMin) / sampleCount;
+      samples = curves.map((curve) => {
+        const values = [];
+        for (let i = 0; i <= sampleCount; i++){
+          const t = tMin + dt * i;
+          setParam(t);
+          let x = NaN, y = NaN;
+          try {
+            if (mode === "polar"){
+              const r = Number(curve.parsed.evaluate(scope));
+              if (Number.isFinite(r)){ x = r * Math.cos(t); y = r * Math.sin(t); }
+            } else {
+              x = Number(curve.parsedX.evaluate(scope));
+              y = Number(curve.parsedY.evaluate(scope));
+            }
+          } catch(_){ x = NaN; y = NaN; }
+          values.push({ t, x:Number.isFinite(x) ? x : NaN, y:Number.isFinite(y) ? y : NaN });
+        }
+        return values;
+      });
+    }
 
     let yMin = Number(options.yMin), yMax = Number(options.yMax);
     const manualY = Number.isFinite(yMin) && Number.isFinite(yMax) && yMax > yMin;
-    if (!manualY){
+    // 표본의 y 값으로 세로 범위를 잡는다(함수·수열 공용).
+    const autoRangeY = () => {
       // 점근선 하나에 세로 범위를 통째로 빼앗기지 않도록 가운데 96% 구간만 본다.
       const finite = [];
       for (const values of samples) for (const point of values) if (Number.isFinite(point.y)) finite.push(point.y);
-      if (!finite.length) throw toolError("이 범위에서는 값이 없어요. x 범위를 바꿔 보세요.");
+      if (!finite.length) throw toolError("이 범위에서는 값이 없어요. 범위를 바꿔 보세요.");
       finite.sort((a, b) => a - b);
       const at = (ratio) => finite[clamp(Math.round((finite.length - 1) * ratio), 0, finite.length - 1)];
       let low = at(0.02), high = at(0.98);
@@ -296,6 +520,27 @@ const MNBoardTools = (() => {
       if (low > 0 && low < (high - low) * 0.6) low = 0;                 // 0 이 가까우면 축을 보이게 붙인다
       if (high < 0 && -high < (high - low) * 0.6) high = 0;
       yMin = low; yMax = high;
+    };
+    /* 매개변수·극좌표는 x 범위도 곡선이 정한다. 다만 슬라이더가 있으면 못박은 창을 다시 쓴다 —
+       손잡이를 끄는 동안 창이 곡선을 따라 커지면 무엇이 변했는지 보이지 않는다. */
+    if (fitted){
+      const lockedX = Number(options.xMin), lockedY = Number(options.xMax);
+      const locked = options.viewLocked && manualY && Number.isFinite(lockedX) && Number.isFinite(lockedY) && lockedY > lockedX;
+      if (locked){ xMin = lockedX; xMax = lockedY; }
+      else {
+        const view = fitPointsView(samples, area);
+        xMin = view.xMin; xMax = view.xMax; yMin = view.yMin; yMax = view.yMax;
+      }
+    } else if (mode === "sequence"){
+      // 가로축은 항의 번호다 — 첫 항 왼쪽과 끝 항 오른쪽에 반 칸씩 여유를 준다.
+      xMin = terms[0] - 0.5; xMax = terms[terms.length - 1] + 0.5;
+      if (!manualY) autoRangeY();
+    } else if (mode === "implicit" && !manualY){
+      // y 범위를 안 정하면 x 와 눈금 크기가 같아지도록 잡는다 — 그래야 원이 원으로 보인다.
+      const span = (xMax - xMin) * area.h / area.w;
+      yMin = -span / 2; yMax = span / 2;
+    } else if (!manualY){
+      autoRangeY();
     }
     if (!(yMax > yMin)){ yMin -= 1; yMax += 1; }
 
@@ -331,7 +576,9 @@ const MNBoardTools = (() => {
     const axisX = clamp(sx(0), area.x, area.x + area.w);
     items.push(Object.assign({ type:"arrow", x1:area.x, y1:axisY, x2:area.x + area.w + 6, y2:axisY, color:axisColor, width:1.8 }));
     items.push(Object.assign({ type:"arrow", x1:axisX, y1:area.y + area.h, x2:axisX, y2:area.y - 6, color:axisColor, width:1.8 }));
-    items.push(label(area.x + area.w - 2, axisY + 7, variable, 13));
+    // 가로축 이름 — 매개변수·극좌표에서 훑는 변수(t·θ)는 축이 아니므로 x 라고 적는다.
+    const axisName = mode === "sequence" ? "n" : mode === "function" ? variable : "x";
+    items.push(label(area.x + area.w - 2, axisY + 7, axisName, 13));
     items.push(label(axisX + 7, area.y - 4, "y", 13));
 
     for (const x of xTicks){
@@ -380,7 +627,7 @@ const MNBoardTools = (() => {
     // 구간 넓이 — a~b 를 칠하고 값을 적는다. 직사각형 개수를 주면 리만 합(가운데 높이)으로 보여 준다.
     const areaCurve = curves[clamp(Math.round(num(options.areaCurve, 0)), 0, curves.length - 1)];
     const areaFrom = Math.max(maybeNumber(options.areaFrom), xMin), areaTo = Math.min(maybeNumber(options.areaTo), xMax);
-    if (areaCurve && Number.isFinite(areaFrom) && Number.isFinite(areaTo) && areaTo > areaFrom){
+    if (mode === "function" && areaCurve && Number.isFinite(areaFrom) && Number.isFinite(areaTo) && areaTo > areaFrom){
       const bars = Math.round(clamp(num(options.areaBars, 0), 0, 60));
       const baseY = clampY(sy(0));
       if (bars > 0){
@@ -417,7 +664,7 @@ const MNBoardTools = (() => {
     // 접선 — 한 점에서의 기울기(순간변화율)를 중앙차분으로 재어 그린다.
     const tangentCurve = curves[clamp(Math.round(num(options.tangentCurve, 0)), 0, curves.length - 1)];
     const tangentX = maybeNumber(options.tangentX);
-    if (tangentCurve && Number.isFinite(tangentX) && tangentX >= xMin && tangentX <= xMax){
+    if (mode === "function" && tangentCurve && Number.isFinite(tangentX) && tangentX >= xMin && tangentX <= xMax){
       const step = (xMax - xMin) / 4000;
       const y0 = valueAtX(tangentCurve, tangentX);
       const slope = (valueAtX(tangentCurve, tangentX + step) - valueAtX(tangentCurve, tangentX - step)) / (2 * step);
@@ -434,7 +681,7 @@ const MNBoardTools = (() => {
     }
 
     // 교점 — 두 곡선의 차가 부호를 바꾸는 자리를 이분법으로 좁혀 찍는다.
-    if (options.showIntersections && curves.length > 1){
+    if (mode === "function" && options.showIntersections && curves.length > 1){
       const found = [];
       for (let i = 0; i < curves.length && found.length < 12; i++){
         for (let j = i + 1; j < curves.length && found.length < 12; j++){
@@ -465,23 +712,22 @@ const MNBoardTools = (() => {
     }
 
     // 곡선 — 그림 영역 밖으로 나가는 부분은 잘라 내고, 값이 끊기거나 점근선을 만나면 획을 나눈다.
-    curves.forEach((curve, index) => {
-      const values = samples[index];
-      const points = values.map((point) => (Number.isFinite(point.y)
+    // 표본 목록만 받으므로 도함수처럼 나중에 만든 곡선도 같은 길로 그린다.
+    const strokeSamples = (values, color, dash) => {
+      const points = values.map((point) => (Number.isFinite(point.x) && Number.isFinite(point.y)
         ? { ok:true, x:sx(point.x), y:sy(point.y), value:point.y }
         : { ok:false }));
-      // 등호가 없는 부등식(>, <)은 경계선을 포함하지 않는다 — 점선으로 그어 그 뜻을 보인다.
-      const dash = (curve.relation === "gt" || curve.relation === "lt") ? [9, 6] : null;
       let run = [];
       const flush = () => {
-        if (run.length > 1) items.push(Object.assign({ type:"polyline", points:run, color:curve.color, width:2.4 }, dash ? { dash } : null));
+        if (run.length > 1) items.push(Object.assign({ type:"polyline", points:run, color, width:2.4 }, dash ? { dash } : null));
         run = [];
       };
       for (let i = 0; i < points.length - 1; i++){
         const a = points[i], b = points[i + 1];
         if (!a.ok || !b.ok){ flush(); continue; }
-        // tan 처럼 부호가 뒤집히며 폭발하는 자리는 이어 그리지 않는다.
-        if (Math.abs(a.value - b.value) > ySpan * 4 && (a.value - b.value) * (a.value - b.value) > 0 && Math.sign(a.value) !== Math.sign(b.value)){ flush(); continue; }
+        // tan 처럼 부호가 뒤집히며 폭발하는 자리는 이어 그리지 않는다(매개변수 곡선은 제자리로
+        // 돌아오는 게 정상이라 이 잣대를 대지 않는다).
+        if (mode === "function" && Math.abs(a.value - b.value) > ySpan * 4 && Math.sign(a.value) !== Math.sign(b.value)){ flush(); continue; }
         const clipped = clipSegment(a, b, area);
         if (!clipped){ flush(); continue; }
         const last = run.length ? run[run.length - 1] : null;
@@ -490,14 +736,70 @@ const MNBoardTools = (() => {
         if (clipped.endClipped) flush();
       }
       flush();
+    };
+    const legendText = (curve) => {
+      if (mode === "parametric") return `x = ${curve.parsedX.body},  y = ${curve.parsedY.body}`;
+      if (mode === "polar") return `r = ${curve.parsed.body}`;
+      if (mode === "implicit") return curve.source;
+      if (mode === "sequence") return "a\u2099 = " + curve.parsed.body;
+      return `y ${RELATION_SIGNS[curve.relation]} ` + curve.parsed.body;
+    };
+    curves.forEach((curve, index) => {
+      // 등호가 없는 부등식(>, <)은 경계선을 포함하지 않는다 — 점선으로 그어 그 뜻을 보인다.
+      const dash = (curve.relation === "gt" || curve.relation === "lt") ? [9, 6] : null;
+      if (mode === "implicit"){
+        // 격자로 찾은 자취는 여러 조각(원 두 쪽·쌍곡선 두 가지)으로 나온다.
+        const valueAt = (x, y) => {
+          scope.x = x; scope.y = y;
+          let left, right;
+          try { left = Number(curve.parsedLeft.evaluate(scope)); right = Number(curve.parsedRight.evaluate(scope)); }
+          catch(_){ return NaN; }
+          const gap = left - right;
+          return Number.isFinite(gap) ? gap : NaN;
+        };
+        for (const path of implicitPaths(valueAt, { xMin, xMax, yMin, yMax }, { x:area.w / 3.5, y:area.h / 3.5 })){
+          strokeSamples(path, curve.color, dash);
+        }
+      } else if (mode === "sequence"){
+        // 수열은 이어진 곡선이 아니라 떨어진 점이다 — 점을 찍고 축까지 옅은 선을 내린다.
+        const baseY = clampY(sy(0));
+        for (const point of samples[index]){
+          if (!Number.isFinite(point.y)) continue;
+          const px = sx(point.x), py = sy(point.y);
+          if (py < area.y - 1 || py > area.y + area.h + 1) continue;
+          items.push({ type:"line", x1:px, y1:baseY, x2:px, y2:py, color:curve.color, width:1.2, alpha:0.35 });
+          items.push({ type:"ellipse", x1:px - 4.5, y1:py - 4.5, x2:px + 4.5, y2:py + 4.5, color:curve.color, width:1.6, fill:true });
+        }
+      } else strokeSamples(samples[index], curve.color, dash);
       const legendY = area.y + 6 + index * 17;
       items.push(Object.assign({ type:"line", x1:area.x + 8, y1:legendY + 7, x2:area.x + 28, y2:legendY + 7, color:curve.color, width:2.4 }, dash ? { dash } : null));
-      items.push(label(area.x + 33, legendY, `y ${RELATION_SIGNS[curve.relation]} ` + curve.parsed.body, 13, { color:curve.color }));
+      items.push(label(area.x + 33, legendY, legendText(curve), 13, { color:curve.color }));
     });
+
+    /* 도함수 — 표본 사이 기울기를 중앙차분으로 재어 같은 색 점선으로 겹쳐 그린다.
+       식을 손으로 미분하지 않고도 "원래 함수가 오르면 도함수는 0 위"를 바로 보여 준다. */
+    let legendRows = curves.length;
+    const derivativeIndex = mode === "function" && options.showDerivative
+      ? Math.round(clamp(num(options.derivativeCurve, 0), 0, curves.length - 1)) : -1;
+    if (derivativeIndex >= 0){
+      const source = samples[derivativeIndex], curve = curves[derivativeIndex];
+      const slopes = source.map((point, index) => {
+        const prev = source[index - 1] || point, next = source[index + 1] || point;
+        const gap = next.x - prev.x;
+        const value = gap ? (next.y - prev.y) / gap : NaN;
+        return { x:point.x, y:Number.isFinite(value) ? value : NaN };
+      });
+      strokeSamples(slopes, curve.color, [7, 5]);
+      const legendY = area.y + 6 + legendRows * 17;
+      items.push({ type:"line", x1:area.x + 8, y1:legendY + 7, x2:area.x + 28, y2:legendY + 7, color:curve.color, width:2.4, dash:[7, 5] });
+      items.push(label(area.x + 33, legendY, `y′ = ${curve.parsed.body} 의 도함수`, 13, { color:curve.color }));
+      legendRows++;
+    }
+
     // 교점·접선은 곡선보다 위에, 설명은 범례 아래 한 줄씩 쌓는다.
     for (const item of overlay) items.push(item);
     notes.forEach((note, index) => {
-      items.push(label(area.x + 8, area.y + 8 + (curves.length + index) * 17, note.text, 13, { color:note.color || axisColor }));
+      items.push(label(area.x + 8, area.y + 8 + (legendRows + index) * 17, note.text, 13, { color:note.color || axisColor }));
     });
 
     if (options.title) items.push(label(margin.left, 6, String(options.title), 15));
@@ -518,14 +820,27 @@ const MNBoardTools = (() => {
       });
     }
 
-    // 슬라이더를 끄는 동안 세로 눈금이 따라 움직이면 무엇이 변했는지 보이지 않는다 — 그때는 범위를 붙잡아 둔다.
+    // 슬라이더를 끄는 동안 눈금이 따라 움직이면 무엇이 변했는지 보이지 않는다 — 그때는 범위를 붙잡아 둔다.
     const keepY = manualY || !!sliderNames.length;
+    const viewLocked = mode !== "function" && !!sliderNames.length;
+    const PLOT_LABELS = { parametric:"매개변수 곡선", polar:"극좌표 그래프", implicit:"음함수 그래프", sequence:"수열 그래프" };
+    const label2 = PLOT_LABELS[mode] || "함수 그래프";
     return {
       type:"group", role:"education-plot", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height,
-      items, educationLabel:"함수 그래프", educationColor:axisColor, sliders,
+      items, educationLabel:label2, educationColor:axisColor, sliders,
       plotSpec:{
-        curves:curves.map((curve) => ({ source:curve.source, color:curve.color, relation:curve.relation })),
-        xMin, xMax, yMin:keepY ? yMin : null, yMax:keepY ? yMax : null,
+        mode,
+        curves:curves.map((curve) => (mode === "parametric"
+          ? { x:curve.sourceX, y:curve.sourceY, color:curve.color }
+          : { source:curve.source, color:curve.color, relation:curve.relation })),
+        // 매개변수·극좌표의 보기 창은 곡선이 정하므로, 못박아 둘 때만 적어 남긴다.
+        // 나머지 방법은 사람이 정한 x 범위를 그대로 다시 써야 한다(안 적으면 기본 −10~10 이 된다).
+        xMin:fitted && !viewLocked ? null : xMin,
+        xMax:fitted && !viewLocked ? null : xMax,
+        yMin:keepY ? yMin : null, yMax:keepY ? yMax : null, viewLocked,
+        tMin:num(options.tMin, 0), tMax:num(options.tMax, Math.PI * 2),
+        showDerivative:derivativeIndex >= 0,
+        derivativeCurve:Math.round(clamp(num(options.derivativeCurve, 0), 0, curves.length - 1)),
         params:Object.assign({}, params), variable, showGrid, showSliders:options.showSliders !== false,
         showIntersections:!!options.showIntersections,
         tangentX:Number.isFinite(maybeNumber(options.tangentX)) ? num(options.tangentX) : null,
@@ -647,7 +962,11 @@ const MNBoardTools = (() => {
       if (index < 0) index = 0;
       bins[index].count++;
     }
-    return bins.map((bin) => ({ label:`${formatNumber(bin.from, step)}~${formatNumber(bin.to, step)}`, value:bin.count }));
+    // 계급의 양 끝과 계급값(가운데)까지 함께 돌려준다 — 도수분포다각형이 점을 찍을 자리다.
+    return bins.map((bin) => ({
+      label:`${formatNumber(bin.from, step)}~${formatNumber(bin.to, step)}`, value:bin.count,
+      from:bin.from, to:bin.to, mid:(bin.from + bin.to) / 2
+    }));
   }
 
   /* 자료 요약 — 평균·중앙값·최빈값·사분위수·표준편차.
@@ -704,10 +1023,16 @@ const MNBoardTools = (() => {
     return points;
   }
 
-  /* spec = { type:"bar"|"line"|"pie"|"histogram"|"scatter"|"box", data:"…"(또는 rows), title, width,height, axisColor, palette, bins, trend } */
+  /* spec = { type:"bar"|"line"|"pie"|"histogram"|"scatter"|"box"|"stacked"|"band"|"freqpoly",
+             data:"…"(또는 rows), title, width,height, axisColor, palette, bins, trend, cumulative } */
   function chartGroup(spec){
     const options = spec || {};
-    const type = ["bar", "line", "pie", "histogram", "scatter", "box"].includes(options.type) ? options.type : "bar";
+    const type = ["bar", "line", "pie", "histogram", "scatter", "box", "stacked", "band", "freqpoly", "barh", "bubble"]
+      .includes(options.type) ? options.type : "bar";
+    // 가로 막대만 값축과 항목축이 맞바뀐다 — 아래 자리 계산이 이 한 값을 보고 갈린다.
+    const horizontal = type === "barh";
+    // 도수분포다각형에서만 켜지는 곁가지 — 켜면 누적도수분포곡선(오지브)이 된다.
+    const cumulative = type === "freqpoly" && !!options.cumulative;
     const width = Math.round(clamp(num(options.width, 560), 220, 2400));
     const height = Math.round(clamp(num(options.height, 400), 180, 2400));
     const axisColor = /^#[0-9a-f]{6}$/i.test(String(options.axisColor || "")) ? String(options.axisColor).toLowerCase() : "#111111";
@@ -721,8 +1046,10 @@ const MNBoardTools = (() => {
       : parseChartTable(options.data);
     const rows = table.rows;
     const title = String(options.title || "").trim();
-    // 원그래프·히스토그램은 한 묶음만 그린다(부채꼴을 겹칠 수 없고, 도수분포는 값 목록 자체가 자료다).
-    const seriesCount = type === "pie" || type === "histogram"
+    // 원그래프·히스토그램·도수분포다각형은 한 묶음만 그린다
+    // (부채꼴을 겹칠 수 없고, 도수분포는 값 목록 자체가 자료다).
+    // 버블은 둘째 값이 크기라 묶음이 여럿인 게 아니다(첫 값만 y 로 쓴다).
+    const seriesCount = type === "pie" || type === "histogram" || type === "freqpoly" || type === "bubble"
       ? 1
       : Math.max(1, rows.reduce((most, row) => Math.max(most, row.values.length), 1));
     const seriesName = (index) => String(table.series[index] || `자료 ${index + 1}`);
@@ -737,7 +1064,7 @@ const MNBoardTools = (() => {
     // 다시 고칠 때 쓰는 재료 — 어떤 종류로 그렸든 같은 내용을 들고 있어야 한다.
     const chartSpecOf = () => ({
       type, rows, series:table.series, palette, title, width, height,
-      bins:Math.round(num(options.bins, 0)) || null, trend:!!options.trend
+      bins:Math.round(num(options.bins, 0)) || null, trend:!!options.trend, cumulative:!!options.cumulative
     });
     if (title) items.push(label(16, 8, title, 16));
     const top = title ? 34 : 16;
@@ -763,12 +1090,110 @@ const MNBoardTools = (() => {
       return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"원그래프", educationColor:axisColor, chartSpec:chartSpecOf() };
     }
 
-    const plotRows = type === "histogram"
-      ? histogramBins(rows.map((row) => num(valueAt(row, 0))), options.bins).map((bin) => ({ label:bin.label, values:[bin.value] }))
+    if (type === "band"){
+      /* 띠그래프 — 띠 하나가 100%다. 값을 여러 열 적으면 열마다 띠가 한 줄씩 쌓여
+         해마다·반마다 같은 항목의 비율을 위아래로 견줄 수 있다(초등 ‘비율 그래프’). */
+      const bands = [];
+      for (let series = 0; series < seriesCount; series++){
+        const counts = rows.map((row) => Math.max(0, num(valueAt(row, series))));
+        const total = counts.reduce((sum, value) => sum + value, 0);
+        if (total > 0) bands.push({ name:seriesCount > 1 ? seriesName(series) : "", counts, total });
+      }
+      if (!bands.length) throw toolError("띠그래프는 0보다 큰 값이 필요해요.");
+      // 반올림한 백분율의 합이 100이 되도록 남은 몫을 소수 부분이 큰 항목부터 하나씩 나눠 준다.
+      const percentsOf = (counts, total) => {
+        const exact = counts.map((value) => value / total * 100);
+        const whole = exact.map((value) => Math.floor(value));
+        let left = 100 - whole.reduce((sum, value) => sum + value, 0);
+        const order = exact.map((_, index) => index).sort((a, b) => (exact[b] - whole[b]) - (exact[a] - whole[a]));
+        for (let i = 0; i < order.length && left > 0; i++, left--) whole[order[i]]++;
+        return whole;
+      };
+      const nameWidth = bands.some((band) => band.name)
+        ? Math.min(120, Math.max(...bands.map((band) => estimateTextWidth(band.name, 12))) + 10) : 0;
+      const bandX = 16 + nameWidth, bandW = width - bandX - 20;
+      if (bandW < 80) throw toolError("차트를 그리기에 크기가 너무 작아요.");
+      // 눈금은 10%마다, 숫자는 20%마다 — 띠 위에 한 줄로 깐다.
+      const scaleY = top + 16;
+      for (let percent = 0; percent <= 100; percent += 10){
+        const px = bandX + bandW * percent / 100;
+        items.push(line(px, scaleY, px, scaleY + (percent % 20 ? 4 : 7), { width:1, alpha:0.5 }));
+        if (percent % 20 === 0){
+          const text = String(percent);
+          items.push(label(px - estimateTextWidth(text, 11) / 2, scaleY - 14, text, 11, { alpha:0.75 }));
+        }
+      }
+      // 범례 줄 수를 먼저 세어 두고, 남는 높이를 띠가 나눠 갖는다.
+      const chips = rows.map((row, index) => ({ text:String(row.label || index + 1), color:palette[index % palette.length] }));
+      const chipWidth = (chip) => 16 + 5 + estimateTextWidth(chip.text, 12) + 14;
+      const legendLines = [];
+      for (const chip of chips){
+        const last = legendLines[legendLines.length - 1];
+        if (last && last.width + chipWidth(chip) <= width - 32){ last.chips.push(chip); last.width += chipWidth(chip); }
+        else legendLines.push({ chips:[chip], width:chipWidth(chip) });
+      }
+      const legendH = legendLines.length * 20 + 6;
+      const bandTop = scaleY + 12;
+      const bandHeight = clamp((height - bandTop - 10 - legendH) / bands.length - 10, 14, 46);
+      if (bandHeight <= 14) throw toolError("차트를 그리기에 크기가 너무 작아요.");
+      bands.forEach((band, index) => {
+        const y = bandTop + index * (bandHeight + 10);
+        let x = bandX;
+        percentsOf(band.counts, band.total).forEach((percent, item) => {
+          const segment = bandW * percent / 100;
+          if (segment <= 0) return;
+          const color = palette[item % palette.length];
+          items.push({ type:"rect", x1:x, y1:y, x2:x + segment, y2:y + bandHeight, color, width:1, fill:true, alpha:0.78 });
+          items.push({ type:"rect", x1:x, y1:y, x2:x + segment, y2:y + bandHeight, color:axisColor, width:1.2 });
+          // 칸이 좁으면 이름을 빼고, 더 좁으면 숫자까지 뺀다(이름은 아래 범례에 남아 있다).
+          const both = String(rows[item].label || item + 1) + " " + percent + "%", figure = percent + "%";
+          const text = estimateTextWidth(both, 11) + 8 <= segment ? both
+            : estimateTextWidth(figure, 11) + 6 <= segment ? figure : "";
+          if (text) items.push(label(x + segment / 2 - estimateTextWidth(text, 11) / 2, y + bandHeight / 2 - 7, text, 11));
+          x += segment;
+        });
+        if (band.name) items.push(label(16, y + bandHeight / 2 - 8, band.name, 12));
+      });
+      let legendY = bandTop + bands.length * (bandHeight + 10) + 4;
+      for (const row of legendLines){
+        let x = 16;
+        for (const chip of row.chips){
+          items.push({ type:"rect", x1:x, y1:legendY, x2:x + 14, y2:legendY + 12, color:chip.color, width:1, fill:true, alpha:0.78 });
+          items.push(label(x + 19, legendY - 1, chip.text, 12));
+          x += chipWidth(chip);
+        }
+        legendY += 20;
+      }
+      /* 띠는 필요한 만큼만 높으면 된다 — 부탁받은 높이를 그대로 쓰면 띠 아래가 통째로
+         빈칸인 상자가 보드에 놓인다(고른 뒤 끌어 옮기기도 어려워진다). */
+      const usedHeight = Math.min(height, Math.round(legendY + 2));
+      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:usedHeight, sourceW:width, sourceH:usedHeight, items, educationLabel:"띠그래프", educationColor:axisColor, chartSpec:chartSpecOf() };
+    }
+
+    // 히스토그램·도수분포다각형은 값 목록을 계급으로 묶어 도수를 센다(첫 열만 자료다).
+    const binList = type === "histogram" || type === "freqpoly"
+      ? histogramBins(rows.map((row) => num(valueAt(row, 0))), options.bins)
+      : null;
+    const binWidth = binList && binList.length ? (binList[0].to - binList[0].from) || 1 : 1;
+    const plotRows = binList
+      ? binList.map((bin) => ({
+        // 히스토그램은 계급을 ‘62~71’ 로, 도수분포다각형은 점을 찍는 계급값으로 적는다.
+        label:type === "freqpoly" ? formatNumber(bin.mid, binWidth / 10) : bin.label,
+        values:[bin.value],
+        from:formatNumber(bin.from, binWidth / 10), to:formatNumber(bin.to, binWidth / 10)
+      }))
       : rows;
     // 계열이 여럿이면 맨 아래 한 줄을 범례 자리로 비워 둔다(가로축 이름과 겹치지 않게).
     const legendHeight = seriesCount > 1 ? 24 : 0;
-    const area = { x:52, y:top + 8, w:width - 52 - 20, h:height - top - 8 - 44 - legendHeight };
+    /* 가로 막대는 항목 이름이 왼쪽에 서므로 이름 길이만큼 왼쪽을 비우고, 막대 끝에 적는
+       숫자 자리를 오른쪽에 둔다. 세로 막대는 예전 그대로(눈금 숫자 자리 52). */
+    const nameRoom = horizontal
+      ? Math.round(clamp(Math.max(...plotRows.map((row) => estimateTextWidth(String(row.label || ""), 12))) + 14, 44, width * 0.4))
+      : 52;
+    const area = {
+      x:nameRoom, y:top + 8,
+      w:width - nameRoom - (horizontal ? 40 : 20), h:height - top - 8 - 44 - legendHeight
+    };
     if (area.w < 40 || area.h < 40) throw toolError("차트를 그리기에 크기가 너무 작아요.");
 
     // 범례는 가로축 이름 아래 한 줄로 깐다. 어느 색이 어느 묶음인지 보여 준다.
@@ -785,39 +1210,99 @@ const MNBoardTools = (() => {
       }
     };
 
+    /* 축 끝을 정할 값 — 누적 막대는 쌓아 올린 합이, 누적도수분포곡선은 누적한 도수가
+       가장 큰 값이다. 낱값만 보면 축이 짧아 막대가 그림 밖으로 넘친다. */
     const values = [];
-    for (const row of plotRows){
-      for (let index = 0; index < seriesCount; index++){
-        const value = valueAt(row, index);
-        if (value !== null) values.push(value);
+    if (type === "stacked"){
+      for (const row of plotRows){
+        let up = 0, down = 0;
+        for (let index = 0; index < seriesCount; index++){
+          const value = valueAt(row, index);
+          if (value === null) continue;
+          if (value >= 0) up += value; else down += value;
+        }
+        values.push(up, down);
+      }
+    } else if (cumulative){
+      let running = 0;
+      for (const row of plotRows){ running += num(valueAt(row, 0)); values.push(running); }
+    } else {
+      for (const row of plotRows){
+        for (let index = 0; index < seriesCount; index++){
+          const value = valueAt(row, index);
+          if (value !== null) values.push(value);
+        }
       }
     }
     let maxValue = Math.max(...values, 0), minValue = Math.min(...values, 0);
     if (maxValue === minValue) maxValue = minValue + 1;
-    const step = niceStep(maxValue - minValue, Math.max(3, Math.round(area.h / 46)));
+    // 눈금 간격은 값이 놓이는 쪽 길이로 정한다 — 가로 막대는 그 쪽이 가로다.
+    const valueRoom = horizontal ? area.w : area.h;
+    const step = niceStep(maxValue - minValue, Math.max(3, Math.round(valueRoom / (horizontal ? 74 : 46))));
     const axisTop = Math.ceil(maxValue / step) * step, axisBottom = Math.floor(minValue / step) * step;
-    const vy = (value) => area.y + area.h - (value - axisBottom) / (axisTop - axisBottom || 1) * area.h;
+    const ratioOf = (value) => (value - axisBottom) / (axisTop - axisBottom || 1);
+    /* 값이 놓이는 자리(vy)와 항목이 놓이는 자리(slotAt) — 가로 막대는 이 둘이 맞바뀐다.
+       세로로만 그리는 종류(산점도·상자그림·도수분포다각형)는 예전과 똑같은 값을 받는다. */
+    const vy = (value) => (horizontal ? area.x + ratioOf(value) * area.w : area.y + area.h - ratioOf(value) * area.h);
+    const slot = (horizontal ? area.h : area.w) / plotRows.length;
+    const slotAt = (index) => (horizontal ? area.y : area.x) + slot * (index + 0.5);
+    // 값 하나를 항목축 위 어느 자리에 놓을지 — 막대·꺾은선이 이 한 곳만 보고 그린다.
+    const spot = (value, index) => (horizontal
+      ? { x:vy(value), y:slotAt(index) }
+      : { x:slotAt(index), y:vy(value) });
+    // 두께가 있는 막대 한 칸(값축으로 from~to, 항목축으로 thickness).
+    const barBox = (center, thickness, from, to) => (horizontal
+      ? { x1:Math.min(from, to), y1:center - thickness / 2, x2:Math.max(from, to), y2:center + thickness / 2 }
+      : { x1:center - thickness / 2, y1:Math.min(from, to), x2:center + thickness / 2, y2:Math.max(from, to) });
 
+    // 값 눈금 — 값축과 직각으로 긋고 숫자는 그림 바깥에 적는다.
     for (let value = axisBottom; value <= axisTop + step * 0.001; value += step){
-      const py = vy(value);
-      items.push(line(area.x, py, area.x + area.w, py, { width:1, alpha:0.16 }));
-      items.push(label(6, py - 6, formatNumber(value, step), 11));
+      const at = vy(value), text = formatNumber(value, step);
+      if (horizontal){
+        items.push(line(at, area.y, at, area.y + area.h, { width:1, alpha:0.16 }));
+        items.push(label(at - estimateTextWidth(text, 11) / 2, area.y + area.h + 8, text, 11));
+      } else {
+        items.push(line(area.x, at, area.x + area.w, at, { width:1, alpha:0.16 }));
+        items.push(label(6, at - 6, text, 11));
+      }
     }
-    items.push(line(area.x, area.y, area.x, area.y + area.h, { width:1.8 }));
-    items.push(line(area.x, vy(0), area.x + area.w, vy(0), { width:1.8 }));
+    // 항목축(막대가 서는 바닥)과 값 0 이 지나는 축.
+    if (horizontal){
+      items.push(line(area.x, area.y + area.h, area.x + area.w, area.y + area.h, { width:1.8 }));
+      items.push(line(vy(0), area.y, vy(0), area.y + area.h, { width:1.8 }));
+    } else {
+      items.push(line(area.x, area.y, area.x, area.y + area.h, { width:1.8 }));
+      items.push(line(area.x, vy(0), area.x + area.w, vy(0), { width:1.8 }));
+    }
 
-    if (type === "scatter"){
-      // 산점도만 가로축도 숫자다("3, 5" 처럼 두 값을 적은 자료).
+    if (type === "scatter" || type === "bubble"){
+      // 산점도·버블만 가로축도 숫자다("3, 5" 처럼 두 값을 적은 자료).
       const xs = plotRows.map((row) => { const value = Number(String(row.label).replace(/,/g, "")); return Number.isFinite(value) ? value : NaN; });
       const usable = xs.every((value) => Number.isFinite(value)) ? xs : plotRows.map((_, index) => index + 1);
       let xMin = Math.min(...usable), xMax = Math.max(...usable);
       if (xMax === xMin){ xMin -= 1; xMax += 1; }
+      /* 산점도의 가로 범위는 자료의 양 끝 그대로라, 원이 큰 버블은 가장자리 점이 축에
+         반쯤 걸린다. 가장 큰 원 하나가 들어갈 만큼(반지름 25px + 여유) 양옆을 넓힌다. */
+      if (type === "bubble"){
+        const pad = (xMax - xMin) * 31 / Math.max(40, area.w);
+        xMin -= pad; xMax += pad;
+      }
       const xStep = niceStep(xMax - xMin, Math.max(3, Math.round(area.w / 74)));
       const px = (value) => area.x + (value - xMin) / (xMax - xMin) * area.w;
       for (let value = Math.ceil(xMin / xStep) * xStep; value <= xMax + xStep * 0.001; value += xStep){
         items.push(line(px(value), area.y + area.h, px(value), area.y + area.h + 4, { width:1.4 }));
         items.push(label(px(value) - 10, area.y + area.h + 8, formatNumber(value, xStep), 11));
       }
+      /* 버블은 셋째 칸("1, 60, 30")이 점의 크기다. 반지름을 값에 그대로 비례시키면 큰 값이
+         실제보다 훨씬 커 보이므로 제곱근으로 잡아 넓이가 값에 거의 비례하게 한다(작은 값도
+         보이도록 바닥 크기를 둔다). 셋째 칸이 없으면 크기를 못 정하니 산점도처럼 그린다. */
+      const sizes = type === "bubble" ? plotRows.map((row) => valueAt(row, 1)) : [];
+      const maxSize = Math.max(...sizes.filter((value) => value !== null && value > 0), 0);
+      const radiusAt = (index) => {
+        if (!maxSize) return 4.5;
+        const size = sizes[index];
+        return size === null || size <= 0 ? 3 : 5 + 20 * Math.sqrt(size / maxSize);
+      };
       for (let series = 0; series < seriesCount; series++){
         const color = palette[series % palette.length];
         const points = [];
@@ -825,8 +1310,10 @@ const MNBoardTools = (() => {
           const value = valueAt(plotRows[index], series);
           if (value === null) return;
           points.push({ x, y:value });
-          const cx = px(x), cy = vy(value), r = 4.5;
+          const cx = px(x), cy = vy(value), r = radiusAt(index);
           items.push({ type:"ellipse", x1:cx - r, y1:cy - r, x2:cx + r, y2:cy + r, color, width:1.6, fill:true, alpha:0.85 });
+          // 큰 원끼리 겹치면 경계가 사라진다 — 버블에만 테두리를 두른다(작은 점에는 군더더기다).
+          if (type === "bubble") items.push({ type:"ellipse", x1:cx - r, y1:cy - r, x2:cx + r, y2:cy + r, color:axisColor, width:1.2, alpha:0.5 });
         });
         // 추세선 — 최소제곱 직선과 상관계수 r. 자료가 어느 쪽으로 기우는지 한 줄로 보여 준다.
         if (options.trend){
@@ -843,7 +1330,8 @@ const MNBoardTools = (() => {
         }
       }
       drawSeriesLegend();
-      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"산점도", educationColor:axisColor, chartSpec:chartSpecOf() };
+      return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items,
+        educationLabel:type === "bubble" ? "버블 차트" : "산점도", educationColor:axisColor, chartSpec:chartSpecOf() };
     }
 
     if (type === "box"){
@@ -887,49 +1375,145 @@ const MNBoardTools = (() => {
       return { type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items, educationLabel:"상자그림", educationColor:axisColor, chartSpec:chartSpecOf() };
     }
 
-    const slot = area.w / plotRows.length;
+    if (type === "freqpoly"){
+      /* 도수분포다각형 — 계급값마다 점을 찍어 잇고, 양 끝은 도수가 0인 계급까지 내려 닫는다.
+         ‘누적’을 켜면 계급의 오른쪽 끝값에 누적도수를 찍는 누적도수분포곡선이 된다.
+         가로 자리를 계급 수보다 한 칸 넓게 잡아야 양 끝 점이 그림 안에 들어온다. */
+      const color = palette[0];
+      const gap = area.w / (plotRows.length + 1);
+      const px = (index) => area.x + gap * (index + 1);
+      const points = [];
+      if (cumulative){
+        let running = 0;
+        points.push({ x:px(0) - gap / 2, y:vy(0) });
+        plotRows.forEach((row, index) => {
+          running += num(valueAt(row, 0));
+          points.push({ x:px(index) + gap / 2, y:vy(running) });
+        });
+      } else {
+        // 기둥을 옅게 깔아 두면 계급의 폭과 도수를 다각형과 함께 읽을 수 있다.
+        plotRows.forEach((row, index) => {
+          const value = num(valueAt(row, 0));
+          const box = { type:"rect", x1:px(index) - gap / 2, y1:vy(0), x2:px(index) + gap / 2, y2:vy(value), color, width:1 };
+          items.push(Object.assign({}, box, { fill:true, alpha:0.14 }));
+          items.push(Object.assign({}, box, { alpha:0.4 }));
+        });
+        points.push({ x:px(-1), y:vy(0) });
+        plotRows.forEach((row, index) => points.push({ x:px(index), y:vy(num(valueAt(row, 0))) }));
+        points.push({ x:px(plotRows.length), y:vy(0) });
+      }
+      items.push({ type:"polyline", points, color, width:2.6 });
+      for (const point of points){
+        items.push({ type:"ellipse", x1:point.x - 4, y1:point.y - 4, x2:point.x + 4, y2:point.y + 4, color, width:1.5, fill:true });
+      }
+      // 가로축 눈금 — 다각형은 계급값을, 누적곡선은 계급의 경계값을 적는다.
+      const marks = [];
+      plotRows.forEach((row, index) => {
+        if (!cumulative){ marks.push({ x:px(index), text:row.label }); return; }
+        if (index === 0) marks.push({ x:px(0) - gap / 2, text:row.from });
+        marks.push({ x:px(index) + gap / 2, text:row.to });
+      });
+      const stride = marks.length > 11 ? 2 : 1;
+      marks.forEach((mark, index) => {
+        if (index % stride) return;
+        const text = String(mark.text == null ? "" : mark.text);
+        items.push(line(mark.x, area.y + area.h, mark.x, area.y + area.h + 4, { width:1.4 }));
+        items.push(label(mark.x - estimateTextWidth(text, 11) / 2, area.y + area.h + 8, text, 11));
+      });
+      return {
+        type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items,
+        educationLabel:cumulative ? "누적도수분포곡선" : "도수분포다각형", educationColor:axisColor, chartSpec:chartSpecOf()
+      };
+    }
+
     if (type === "line"){
       for (let series = 0; series < seriesCount; series++){
         const color = palette[series % palette.length];
         const points = [];
         plotRows.forEach((row, index) => {
           const value = valueAt(row, series);
-          if (value !== null) points.push({ x:area.x + slot * (index + 0.5), y:vy(value) });
+          if (value !== null) points.push(spot(value, index));
         });
         if (points.length > 1) items.push({ type:"polyline", points, color, width:2.6 });
         points.forEach((point) => {
           items.push({ type:"ellipse", x1:point.x - 4, y1:point.y - 4, x2:point.x + 4, y2:point.y + 4, color, width:1.5, fill:true });
         });
       }
+    } else if (type === "stacked"){
+      // 누적 막대 — 한 칸에 막대 하나를 세우고 묶음을 위로 쌓는다(음수는 0 아래로 쌓는다).
+      const barWidth = Math.min(slot * 0.62, 96);
+      const showTotals = plotRows.length <= 12;
+      plotRows.forEach((row, index) => {
+        const center = slotAt(index);
+        let up = 0, down = 0;
+        for (let series = 0; series < seriesCount; series++){
+          const value = valueAt(row, series);
+          if (value === null || value === 0) continue;
+          const from = value > 0 ? up : down, to = from + value;
+          if (value > 0) up = to; else down = to;
+          const color = palette[series % palette.length];
+          const v1 = vy(from), v2 = vy(to);
+          const box = Object.assign({ type:"rect" }, barBox(center, barWidth, v1, v2));
+          items.push(Object.assign({}, box, { color, width:1.4, fill:true, alpha:0.78 }));
+          items.push(Object.assign({}, box, { color:axisColor, width:1.2 }));
+          // 칸의 값은 칸이 충분히 클 때만 안에 적는다(겹쳐 읽히면 없느니만 못하다).
+          const text = formatNumber(value, step), room = Math.abs(v2 - v1);
+          if (horizontal){
+            if (room >= estimateTextWidth(text, 11) + 8){
+              items.push(label((v1 + v2) / 2 - estimateTextWidth(text, 11) / 2, center - 7, text, 11));
+            }
+          } else if (room >= 17){
+            items.push(label(center - estimateTextWidth(text, 11) / 2, (v1 + v2) / 2 - 7, text, 11));
+          }
+        }
+        // 합계는 쌓아 올린 끝에 — 누적 막대에서 학생이 가장 먼저 찾는 숫자다.
+        if (showTotals && (up || down)){
+          const text = formatNumber(up + down, step);
+          items.push(horizontal
+            ? label(Math.max(vy(up), vy(0)) + 6, center - 7, text, 12)
+            : label(center - estimateTextWidth(text, 12) / 2, Math.min(vy(up), vy(0)) - 17, text, 12));
+        }
+      });
     } else {
       // 계열이 여럿이면 한 칸 안에 묶음 막대로 나란히 세운다.
       const groupWidth = slot * (type === "histogram" ? 0.94 : 0.62);
       const barWidth = Math.max(seriesCount > 1 ? 3 : 6, groupWidth / seriesCount);
       const showValues = plotRows.length * seriesCount <= 12;
       plotRows.forEach((row, index) => {
-        const center = area.x + slot * (index + 0.5);
+        const center = slotAt(index);
         for (let series = 0; series < seriesCount; series++){
           const value = valueAt(row, series);
           if (value === null) continue;
-          // 한 묶음(막대 하나면 예전과 같은 자리)의 왼쪽 끝에서 계열 순서만큼 옮겨 세운다.
+          // 한 묶음(막대 하나면 예전과 같은 자리)의 처음에서 계열 순서만큼 옮겨 세운다.
           const barCenter = center - groupWidth / 2 + barWidth * (series + 0.5);
           const color = type === "histogram" ? palette[0]
             : seriesCount > 1 ? palette[series % palette.length] : palette[index % palette.length];
-          const y1 = vy(0), y2 = vy(value);
-          items.push({ type:"rect", x1:barCenter - barWidth / 2, y1:Math.min(y1, y2), x2:barCenter + barWidth / 2, y2:Math.max(y1, y2), color, width:1.4, fill:true, alpha:0.78 });
-          items.push({ type:"rect", x1:barCenter - barWidth / 2, y1:Math.min(y1, y2), x2:barCenter + barWidth / 2, y2:Math.max(y1, y2), color:axisColor, width:1.2 });
-          if (showValues) items.push(label(barCenter - String(formatNumber(value, step)).length * 3.2, Math.min(y1, y2) - 15, formatNumber(value, step), 12));
+          const v1 = vy(0), v2 = vy(value);
+          const box = Object.assign({ type:"rect" }, barBox(barCenter, barWidth, v1, v2));
+          items.push(Object.assign({}, box, { color, width:1.4, fill:true, alpha:0.78 }));
+          items.push(Object.assign({}, box, { color:axisColor, width:1.2 }));
+          if (!showValues) continue;
+          // 숫자는 막대가 뻗어 나간 쪽 끝 바깥에 적는다(가로면 그 끝 옆, 세로면 위).
+          const text = formatNumber(value, step), textRoom = estimateTextWidth(text, 12);
+          items.push(horizontal
+            ? label(value < 0 ? Math.min(v1, v2) - textRoom - 6 : Math.max(v1, v2) + 6, barCenter - 7, text, 12)
+            : label(barCenter - textRoom / 2, Math.min(v1, v2) - 15, text, 12));
         }
       });
     }
+    // 항목 이름 — 가로 막대는 왼쪽에 오른쪽 맞춤으로 적어 이름이 길어도 서로 겹치지 않는다.
     plotRows.forEach((row, index) => {
-      const center = area.x + slot * (index + 0.5);
-      const text = String(row.label || "");
-      items.push(label(center - Math.min(text.length * 3.4, slot / 2), area.y + area.h + 8, text, plotRows.length > 9 ? 10 : 12));
+      const center = slotAt(index), text = String(row.label || "");
+      items.push(horizontal
+        ? label(area.x - 8 - estimateTextWidth(text, 12), center - 7, text, 12)
+        : label(center - Math.min(text.length * 3.4, slot / 2), area.y + area.h + 8, text, plotRows.length > 9 ? 10 : 12));
     });
     drawSeriesLegend();
 
-    const labels = { bar:"막대그래프", line:"꺾은선그래프", histogram:"히스토그램" };
+    const labels = {
+      bar:"막대그래프", line:"꺾은선그래프", histogram:"히스토그램",
+      stacked:"누적 막대그래프", barh:"가로 막대그래프"
+    };
     return {
       type:"group", role:"education-chart", x:0, y:0, w:width, h:height, sourceW:width, sourceH:height, items,
       educationLabel:labels[type] || "차트", educationColor:axisColor,

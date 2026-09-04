@@ -2940,6 +2940,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   /* 관계 기호(y = · y > …) — 자리는 그대로 두고 고를 수 있게만 바꾼 캡션 */
   .wb-graph-relation{flex:none;height:24px;padding:0 2px;border:1px solid transparent;border-radius:5px;background:none;color:var(--muted);font-family:Cambria Math,"Times New Roman",serif;font-size:12.5px;cursor:pointer}
   .wb-graph-relation:hover,.wb-graph-relation:focus{border-color:var(--border);background:var(--panel);color:var(--ink);outline:none}
+  /* 매개변수 곡선은 한 줄에 x(t)·y(t) 두 칸이 나란히 선다 */
+  .wb-graph-pair{display:flex;align-items:center;gap:4px;flex:1;min-width:0}
+  .wb-graph-pair .wb-graph-caption{font-size:12.5px}
+  /* 그리는 방법(함수·매개변수·극좌표)에 따라 안 쓰는 칸은 통째로 감춘다 — 위 규칙들이 display 를
+     정하고 있어서 브라우저 기본 [hidden] 만으로는 안 사라진다 */
+  .wb-graph-rows[hidden],.wb-graph-range[hidden],.wb-graph-field[hidden],.wb-graph-check[hidden],.wb-graph-relation[hidden],.wb-graph-caption[hidden]{display:none}
   .wb-graph-range{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px}
   /* 해석 도구 줄은 앞선 줄과 갈라 보이게 옅은 구분선을 둔다 */
   .wb-graph-analysis{margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)}

@@ -2345,7 +2345,16 @@ function renderWhiteboard(doc, host){
   const replaceBoardGroup = (existing, group) => {
     const index = wb.items.indexOf(existing);
     if (index < 0 || !group) return false;
-    const next = Object.assign({}, group, { x:existing.x, y:existing.y, w:existing.w, h:existing.h, flipX:existing.flipX, flipY:existing.flipY });
+    /* 자리와 확대 비율은 그대로 두되 상자 크기는 새 그림에 맞춘다 — 내용에 따라 높이가
+       달라지는 종류(띠그래프)를 예전 상자에 밀어 넣으면 눌리거나 늘어난다.
+       크기가 그대로인 종류에서는 예전과 똑같은 값이 나온다. */
+    const scaleX = (Number(existing.w) || 1) / (Number(existing.sourceW) || Number(existing.w) || 1);
+    const scaleY = (Number(existing.h) || 1) / (Number(existing.sourceH) || Number(existing.h) || 1);
+    const next = Object.assign({}, group, {
+      x:existing.x, y:existing.y,
+      w:Math.round((Number(group.w) || 1) * scaleX), h:Math.round((Number(group.h) || 1) * scaleY),
+      flipX:existing.flipX, flipY:existing.flipY
+    });
     wb.items[index] = next; wb.selected = next; redraw(); history.commit(); recordCommit();
     return true;
   };
@@ -3309,7 +3318,7 @@ function renderWhiteboard(doc, host){
   const graphRows = document.createElement("div"); graphRows.className = "wb-graph-rows";
   // 관계 기호를 = 아닌 것으로 바꾸면 곡선 대신 그쪽 반평면을 칠한 부등식 영역이 된다.
   const GRAPH_RELATIONS = [["eq", "y ="], ["gt", "y >"], ["ge", "y ≥"], ["lt", "y <"], ["le", "y ≤"]];
-  const graphRelations = [];
+  const graphRelations = [], graphRowCaptions = [];
   const graphInputs = MNBoardTools.CURVE_COLORS.map((color, index) => {
     const row = document.createElement("label"); row.className = "wb-graph-row";
     const dot = document.createElement("span"); dot.className = "wb-graph-dot"; dot.style.background = color;
@@ -3322,9 +3331,29 @@ function renderWhiteboard(doc, host){
     const input = document.createElement("input"); input.type = "text"; input.className = "wb-graph-input";
     input.placeholder = index === 0 ? "예: x^2 - 3x + 1" : "식을 더 넣으면 함께 그려요";
     input.setAttribute("aria-label", `${index + 1}번째 함수식`);
-    row.append(dot, relation, input); graphRows.appendChild(row);
-    graphRelations.push(relation);
+    // 극좌표·수열에서는 관계 기호 자리에 'r =' · 'aₙ =' 를 대신 세운다(고를 것이 없으므로 글자로).
+    const caption = document.createElement("span"); caption.className = "wb-graph-caption"; caption.hidden = true;
+    row.append(dot, relation, caption, input); graphRows.appendChild(row);
+    graphRelations.push(relation); graphRowCaptions.push(caption);
     return input;
+  });
+  /* 매개변수 곡선은 한 곡선에 식이 둘(x(t)·y(t))이라 칸을 따로 둔다. 같은 줄에 억지로
+     끼우면 어느 식이 x 인지 y 인지 알 수 없다. */
+  const graphPairRows = document.createElement("div"); graphPairRows.className = "wb-graph-rows"; graphPairRows.hidden = true;
+  const graphPairInputs = MNBoardTools.CURVE_COLORS.map((color, index) => {
+    const row = document.createElement("div"); row.className = "wb-graph-row";
+    const dot = document.createElement("span"); dot.className = "wb-graph-dot"; dot.style.background = color;
+    const makePart = (caption, placeholder, aria) => {
+      const wrap = document.createElement("label"); wrap.className = "wb-graph-pair";
+      const name = document.createElement("span"); name.className = "wb-graph-caption"; name.textContent = caption;
+      const input = document.createElement("input"); input.type = "text"; input.className = "wb-graph-input";
+      input.placeholder = placeholder; input.setAttribute("aria-label", aria);
+      wrap.append(name, input); return { wrap, input };
+    };
+    const x = makePart("x =", index === 0 ? "예: 3 cos(t)" : "", `${index + 1}번째 곡선의 x(t)`);
+    const y = makePart("y =", index === 0 ? "예: 3 sin(t)" : "", `${index + 1}번째 곡선의 y(t)`);
+    row.append(dot, x.wrap, y.wrap); graphPairRows.appendChild(row);
+    return { x:x.input, y:y.input };
   });
   // 예시 식은 "커서가 있던 칸"에 들어간다. 예시 카드를 누르면 초점이 카드로 옮겨가므로 마지막 칸을 기억해 둔다.
   let graphFocusIndex = 0;
@@ -3333,13 +3362,17 @@ function renderWhiteboard(doc, host){
     const name = document.createElement("span"); name.textContent = caption;
     const input = document.createElement("input"); input.type = "number"; input.step = "any"; input.value = String(value);
     input.className = className || "wb-graph-number"; input.title = title; input.setAttribute("aria-label", title);
-    wrap.append(name, input); return { wrap, input };
+    // caption 은 이름표 자체다 — 같은 칸을 방법마다 다른 뜻으로 쓸 때 글자만 갈아 단다.
+    wrap.append(name, input); return { wrap, input, caption:name };
   };
   const graphRange = document.createElement("div"); graphRange.className = "wb-graph-range";
   const graphXMin = makeGearNumber("x", -10, "x 최솟값");
   const graphXMax = makeGearNumber("~", 10, "x 최댓값");
   const graphYMin = makeGearNumber("y", -10, "y 최솟값");
   const graphYMax = makeGearNumber("~", 10, "y 최댓값");
+  // 매개변수·극좌표에서 훑는 값의 범위. 한 바퀴(0~2π≈6.28)를 기본으로 둔다.
+  const graphTMin = makeGearNumber("t", 0, "t(θ) 시작 값");
+  const graphTMax = makeGearNumber("~", 6.28, "t(θ) 끝 값");
   const graphAutoWrap = document.createElement("label"); graphAutoWrap.className = "wb-graph-check";
   const graphAuto = document.createElement("input"); graphAuto.type = "checkbox"; graphAuto.checked = true;
   graphAutoWrap.append(graphAuto, document.createTextNode("y 자동"));
@@ -3351,7 +3384,7 @@ function renderWhiteboard(doc, host){
   graphSliderWrap.title = "a·b 값을 보드 위에서 끌어 바꿀 수 있는 슬라이더를 그래프에 함께 넣습니다.";
   const graphSlider = document.createElement("input"); graphSlider.type = "checkbox"; graphSlider.checked = true;
   graphSliderWrap.append(graphSlider, document.createTextNode("보드 슬라이더"));
-  graphRange.append(graphXMin.wrap, graphXMax.wrap, graphAutoWrap, graphYMin.wrap, graphYMax.wrap, graphGridWrap, graphSliderWrap);
+  graphRange.append(graphXMin.wrap, graphXMax.wrap, graphTMin.wrap, graphTMax.wrap, graphAutoWrap, graphYMin.wrap, graphYMax.wrap, graphGridWrap, graphSliderWrap);
   // ----- 그래프 해석(교점·접선·구간 넓이) -----
   const makeGraphCheck = (text, title) => {
     const wrap = document.createElement("label"); wrap.className = "wb-graph-check"; wrap.title = title;
@@ -3365,6 +3398,7 @@ function renderWhiteboard(doc, host){
   const graphTangent = makeGraphCheck("접선", "고른 x 자리의 접선과 기울기(순간변화율)를 그립니다.");
   const graphTangentX = makeGearNumber("x", 1, "접선을 그을 x 값");
   const graphArea = makeGraphCheck("넓이", "구간과 x축 사이를 칠하고 넓이를 적습니다.");
+  const graphDerivative = makeGraphCheck("도함수", "곡선의 기울기(순간변화율)를 이은 도함수 곡선을 같은 색 점선으로 겹쳐 그립니다.");
   const graphAreaFrom = makeGearNumber("", 0, "넓이를 구할 구간의 시작");
   const graphAreaTo = makeGearNumber("~", 2, "넓이를 구할 구간의 끝");
   const graphAreaBars = makeGearNumber("직사각형", 0, "직사각형 개수 — 0이면 매끄럽게 칠하고 정적분 값을 적습니다");
@@ -3378,7 +3412,7 @@ function renderWhiteboard(doc, host){
     graphTarget.appendChild(option);
   });
   graphTargetWrap.appendChild(graphTarget); graphTargetWrap.hidden = true;
-  graphAnalysis.append(graphCross.wrap, graphTangent.wrap, graphTangentX.wrap, graphArea.wrap, graphAreaFrom.wrap, graphAreaTo.wrap, graphAreaBars.wrap, graphTargetWrap);
+  graphAnalysis.append(graphCross.wrap, graphTangent.wrap, graphTangentX.wrap, graphArea.wrap, graphAreaFrom.wrap, graphAreaTo.wrap, graphAreaBars.wrap, graphDerivative.wrap, graphTargetWrap);
   // ----- 식 ↔ 값의 표 -----
   // 같은 식에서 x·y 대응표를 만든다. 그래프와 짝을 이뤄 "표로 보고 그래프로 보기"를 한 화면에서 한다.
   const graphTableRow = document.createElement("div"); graphTableRow.className = "wb-graph-range wb-graph-table-row";
@@ -3398,7 +3432,29 @@ function renderWhiteboard(doc, host){
   const graphCancel = mkBtn("취소", "그래프 편집 취소", "wb-formula-cancel", resetGraphEditor); graphCancel.hidden = true;
   const graphInsert = mkBtn("그래프 넣기", "계산한 그래프를 화이트보드에 넣기", "wb-formula-insert", submitGraph);
   graphActions.append(graphClear, graphCancel, graphInsert);
-  graphBuilder.append(graphRows, graphRange, graphAnalysis, graphTableRow, graphParams, graphPreview, graphMessage, graphActions);
+  /* 그리는 방법 — y=f(x) 말고도 매개변수(x(t), y(t))와 극좌표(r=f(θ))로 그릴 수 있다.
+     방법마다 쓰는 칸이 달라서 맨 위에 두고 아래 칸을 갈아 끼운다. */
+  const GRAPH_MODES = [
+    ["function", "함수 y=f(x)"], ["parametric", "매개변수 x(t), y(t)"], ["polar", "극좌표 r=f(θ)"],
+    ["implicit", "음함수 f(x,y)=0"], ["sequence", "수열 aₙ"]
+  ];
+  let graphMode = "function";
+  const graphModeRow = document.createElement("div"); graphModeRow.className = "wb-chip-grid wb-graph-modes";
+  graphModeRow.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
+  graphModeRow.setAttribute("aria-label", "그래프 그리는 방법");
+  const graphModeChips = GRAPH_MODES.map(([id, text]) => {
+    const chip = mkBtn(text, text + " 로 그리기", "wb-formula-group", () => {
+      if (graphMode === id) return;
+      /* 같은 칸이 방법마다 다른 뜻이다(도는 각 t·θ ↔ 항의 번호 n). 저쪽 기본값이 그대로
+         남아 있을 때만 이쪽 기본값으로 바꿔, 손수 정한 범위는 지키면서 뜻은 맞춘다. */
+      const from = graphTMin.input.value.trim(), to = graphTMax.input.value.trim();
+      if (id === "sequence" && from === "0" && to === "6.28"){ graphTMin.input.value = "1"; graphTMax.input.value = "10"; }
+      if (id !== "sequence" && from === "1" && to === "10"){ graphTMin.input.value = "0"; graphTMax.input.value = "6.28"; }
+      graphMode = id; graphParamKey = "__reset__"; refreshGraphPreview();
+    });
+    chip.dataset.graphMode = id; graphModeRow.appendChild(chip); return chip;
+  });
+  graphBuilder.append(graphModeRow, graphRows, graphPairRows, graphRange, graphAnalysis, graphTableRow, graphParams, graphPreview, graphMessage, graphActions);
 
   /* 만들기 화면 안의 구획 — 이름표를 단 묶음. 무엇이 무엇인지 보이고 줄이 뒤섞이지 않는다.
      (칩 줄은 가로로 흐르는 띠라 항목이 많으면 잘려 보이므로, 구획 안에서는 격자로 깐다.) */
@@ -3420,7 +3476,13 @@ function renderWhiteboard(doc, host){
 
   // ----- 자료 차트 만들기 -----
   const chartBuilder = document.createElement("div"); chartBuilder.className = "wb-formula-builder wb-chart-builder"; chartBuilder.hidden = true;
-  const CHART_TYPES = [["bar", "막대"], ["line", "꺾은선"], ["pie", "원"], ["histogram", "히스토그램"], ["scatter", "산점도"], ["box", "상자그림"]];
+  // 비슷한 종류끼리 붙여 둔다 — 막대 갈래 → 변화 → 비율 → 분포 → 관계 순서.
+  const CHART_TYPES = [
+    ["bar", "막대"], ["barh", "가로 막대"], ["stacked", "누적 막대"],
+    ["line", "꺾은선"], ["pie", "원"], ["band", "띠그래프"],
+    ["histogram", "히스토그램"], ["freqpoly", "도수분포다각형"], ["box", "상자그림"],
+    ["scatter", "산점도"], ["bubble", "버블"]
+  ];
   const chartTypeSection = makeToolSection("차트 종류", "wb-chart-type-section");
   const chartTypeBar = makeChipGrid(3); chartTypeBar.classList.add("wb-chart-types");
   chartTypeSection.appendChild(chartTypeBar);
@@ -3441,8 +3503,13 @@ function renderWhiteboard(doc, host){
   chartTrendWrap.title = "산점도에 최소제곱 추세선과 상관계수 r 을 함께 그립니다.";
   const chartTrend = document.createElement("input"); chartTrend.type = "checkbox";
   chartTrendWrap.append(chartTrend, document.createTextNode("추세선"));
-  const chartBins = makeGearNumber("계급 수", 0, "히스토그램·도수분포표의 계급 수 (0이면 자동)");
-  chartExtraFields.append(chartTrendWrap, chartBins.wrap);
+  const chartBins = makeGearNumber("계급 수", 0, "히스토그램·도수분포다각형·도수분포표의 계급 수 (0이면 자동)");
+  // 도수분포다각형에서만 켜지는 곁가지 — 켜면 누적도수분포곡선이 된다.
+  const chartCumulativeWrap = document.createElement("label"); chartCumulativeWrap.className = "wb-graph-check";
+  chartCumulativeWrap.title = "도수분포다각형을 계급의 끝값마다 누적도수를 찍는 누적도수분포곡선으로 그립니다.";
+  const chartCumulative = document.createElement("input"); chartCumulative.type = "checkbox";
+  chartCumulativeWrap.append(chartCumulative, document.createTextNode("누적"));
+  chartExtraFields.append(chartTrendWrap, chartCumulativeWrap, chartBins.wrap);
   const chartExtraButtons = document.createElement("div"); chartExtraButtons.className = "wb-button-row";
   const chartStatsBtn = mkBtn("요약 카드", "평균·중앙값·최빈값·사분위수·표준편차를 표로 넣기", "wb-formula-save wb-chart-stats", insertStatsCard);
   const chartFreqBtn = mkBtn("도수분포표", "계급·도수·상대도수·누적도수 표로 넣기", "wb-formula-save wb-chart-frequency", insertFrequencyTable);
@@ -3771,7 +3838,28 @@ function renderWhiteboard(doc, host){
     { label:"접선과 기울기", curves:["x^2"], xMin:-4, xMax:4, tangent:1.5 },
     { label:"구간 넓이(정적분)", curves:["x^2"], xMin:-1, xMax:3, area:[0, 2] },
     { label:"리만 직사각형", curves:["x^2"], xMin:-1, xMax:3, area:[0, 2], bars:8 },
-    { label:"부등식 영역", curves:["x + 1"], xMin:-5, xMax:5, relations:["gt"] }
+    { label:"부등식 영역", curves:["x + 1"], xMin:-5, xMax:5, relations:["gt"] },
+    { label:"도함수 겹쳐 보기", curves:["x^3 - 3x"], xMin:-3, xMax:3, derivative:true },
+    // 매개변수·극좌표 — y = f(x) 로는 그릴 수 없는 곡선들(원·리사주·사이클로이드·장미·심장형).
+    { label:"원(매개변수)", mode:"parametric", pairs:[["3 cos(t)", "3 sin(t)"]], tMin:0, tMax:6.28 },
+    { label:"타원(매개변수)", mode:"parametric", pairs:[["4 cos(t)", "2 sin(t)"]], tMin:0, tMax:6.28 },
+    { label:"리사주 곡선", mode:"parametric", pairs:[["sin(3t)", "sin(4t)"]], tMin:0, tMax:6.28 },
+    { label:"사이클로이드", mode:"parametric", pairs:[["t - sin(t)", "1 - cos(t)"]], tMin:0, tMax:12.57 },
+    { label:"장미 곡선", mode:"polar", curves:["4 cos(2θ)"], tMin:0, tMax:6.28 },
+    { label:"심장형(카디오이드)", mode:"polar", curves:["2 + 2cos(θ)"], tMin:0, tMax:6.28 },
+    { label:"나선(아르키메데스)", mode:"polar", curves:["θ"], tMin:0, tMax:18.85 },
+    // 음함수 — 한 x 에 y 가 둘인 이차곡선. y = f(x) 로 쪼개 적지 않아도 된다.
+    { label:"원(음함수)", mode:"implicit", curves:["x^2 + y^2 = 9"], xMin:-6, xMax:6 },
+    { label:"타원", mode:"implicit", curves:["x^2/9 + y^2/4 = 1"], xMin:-5, xMax:5 },
+    { label:"쌍곡선", mode:"implicit", curves:["x^2 - y^2 = 4"], xMin:-8, xMax:8 },
+    { label:"렘니스케이트", mode:"implicit", curves:["(x^2+y^2)^2 = 8(x^2-y^2)"], xMin:-4, xMax:4 },
+    // 조각적 정의 함수 — if(조건, 참일 때, 거짓일 때) 로 구간마다 다른 식을 쓴다.
+    { label:"조각적 정의 함수", curves:["if(x < 0, -x, x^2)"], xMin:-4, xMax:4 },
+    { label:"계단 함수", curves:["if(x < 1, 1, if(x < 2, 2, 3))"], xMin:-1, xMax:4 },
+    // 수열 — 이어진 곡선이 아니라 항마다 찍은 점.
+    { label:"등차수열", mode:"sequence", curves:["2n + 1"], tMin:1, tMax:10 },
+    { label:"등비수열", mode:"sequence", curves:["2^n"], tMin:1, tMax:8 },
+    { label:"조화수열", mode:"sequence", curves:["1/n"], tMin:1, tMax:12 }
   ];
   const CHART_PRESETS = [
     { label:"막대그래프", type:"bar", title:"좋아하는 과목", data:"국어, 7\n수학, 12\n영어, 5\n과학, 9" },
@@ -3783,7 +3871,16 @@ function renderWhiteboard(doc, host){
     { label:"두 해 비교(꺾은선)", type:"line", title:"월별 기온(℃)", data:"월, 작년, 올해\n3월, 8, 9\n4월, 14, 16\n5월, 19, 21\n6월, 23, 26\n7월, 26, 29" },
     { label:"상자그림", type:"box", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77" },
     { label:"두 반 비교(상자그림)", type:"box", title:"반별 수학 점수", data:"번호, 1반, 2반\n1, 62, 71\n2, 75, 68\n3, 88, 79\n4, 91, 84\n5, 70, 95\n6, 83, 77" },
-    { label:"추세선이 있는 산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88", trend:true }
+    { label:"추세선이 있는 산점도", type:"scatter", title:"공부 시간과 점수", data:"1, 60\n2, 68\n3, 74\n4, 79\n5, 88", trend:true },
+    { label:"띠그래프", type:"band", title:"좋아하는 과목", data:"국어, 7\n수학, 12\n영어, 5\n과학, 9" },
+    { label:"해마다 비교(띠그래프)", type:"band", title:"쉬는 시간에 하는 일", data:"활동, 작년, 올해\n독서, 5, 8\n운동, 9, 7\n이야기, 12, 10\n기타, 4, 5" },
+    { label:"누적 막대", type:"stacked", title:"반별 좋아하는 과목", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8\n영어, 5, 11\n과학, 9, 6" },
+    { label:"도수분포다각형", type:"freqpoly", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77", bins:5 },
+    { label:"누적도수분포곡선", type:"freqpoly", title:"수학 점수", data:"62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77", bins:5, cumulative:true },
+    // 가로 막대는 항목 이름이 길 때 — 세로 막대에서는 이름이 서로 겹친다.
+    { label:"가로 막대그래프", type:"barh", title:"우리 반이 좋아하는 활동", data:"책 읽기, 7\n운동하기, 12\n이야기 나누기, 5\n그림 그리기, 9" },
+    { label:"반별 비교(가로 막대)", type:"barh", title:"반별 좋아하는 활동", data:"활동, 1반, 2반\n책 읽기, 7, 9\n운동하기, 12, 8\n이야기 나누기, 5, 11" },
+    { label:"버블 차트", type:"bubble", title:"공부 시간·점수·모둠 인원", data:"1, 60, 5\n2, 68, 12\n3, 74, 30\n4, 79, 18\n5, 88, 40" }
   ];
   let formulaStops = [], formulaStopIndex = -1, formulaInputBefore = null;
   const educationMatches = (entry, term) => {
@@ -3909,18 +4006,27 @@ function renderWhiteboard(doc, host){
   function readGraphSpec(size){
     const manualY = !graphAuto.checked;
     const filled = graphInputs.map((input, index) => index).filter((index) => graphInputs[index].value.trim());
-    // 접선·넓이는 "몇 번 칸"이 아니라 "실제로 그린 몇 번째 곡선"에 붙는다(빈 칸을 건너뛰기 때문이다).
+    // 접선·넓이·도함수는 "몇 번 칸"이 아니라 "실제로 그린 몇 번째 곡선"에 붙는다(빈 칸을 건너뛰기 때문이다).
     const target = Math.max(0, filled.indexOf(Number(graphTarget.value)));
+    // 매개변수만 식이 둘인 칸을 쓰고, 부등호는 y = f(x) 에서만 뜻이 통한다.
+    const curves = graphMode === "parametric"
+      ? graphPairInputs.map((pair, index) => ({
+        x:pair.x.value.trim(), y:pair.y.value.trim(), color:MNBoardTools.CURVE_COLORS[index]
+      })).filter((curve) => curve.x || curve.y)
+      : graphInputs.map((input, index) => ({
+        source:input.value.trim(), color:MNBoardTools.CURVE_COLORS[index],
+        relation:graphMode === "function" ? graphRelations[index].value : "eq"
+      })).filter((curve) => curve.source);
     return {
-      curves:graphInputs.map((input, index) => ({
-        source:input.value.trim(), color:MNBoardTools.CURVE_COLORS[index], relation:graphRelations[index].value
-      })).filter((curve) => curve.source),
+      mode:graphMode, curves,
       xMin:Number(graphXMin.input.value), xMax:Number(graphXMax.input.value),
       yMin:manualY ? Number(graphYMin.input.value) : undefined,
       yMax:manualY ? Number(graphYMax.input.value) : undefined,
+      tMin:Number(graphTMin.input.value), tMax:Number(graphTMax.input.value),
       params:Object.assign({}, graphParamValues),
       showGrid:graphGrid.checked, showSliders:graphSlider.checked, axisColor:boardInkColor(),
       showIntersections:graphCross.box.checked,
+      showDerivative:graphDerivative.box.checked, derivativeCurve:target,
       tangentX:graphTangent.box.checked ? Number(graphTangentX.input.value) : null, tangentCurve:target,
       areaFrom:graphArea.box.checked ? Number(graphAreaFrom.input.value) : null,
       areaTo:graphArea.box.checked ? Number(graphAreaTo.input.value) : null,
@@ -3939,14 +4045,60 @@ function renderWhiteboard(doc, host){
     graphTargetWrap.hidden = filled < 2 || !(graphTangent.box.checked || graphArea.box.checked);
     graphCross.wrap.classList.toggle("is-off", filled < 2);
   }
-  // 식에 x 말고 다른 문자가 있으면 그 문자를 슬라이더로 만들어 "a를 키우면?"을 바로 보여 준다.
+  /* 그리는 방법에 따라 쓸 칸만 남긴다 — 함수는 x 범위와 해석 도구를, 매개변수·극좌표는
+     t(θ) 범위를 쓴다(보이는 창은 곡선이 스스로 정하므로 x·y 범위 칸이 없다). */
+  const GRAPH_EMPTY_HINTS = {
+    function:"식을 입력하면 미리보기가 나타나요. 예) x^2 - 3x + 1, sin(x), 2^x",
+    parametric:"x(t)와 y(t)를 함께 입력하면 미리보기가 나타나요. 예) 3 cos(t) 와 3 sin(t)",
+    polar:"θ 로 쓴 식을 입력하면 미리보기가 나타나요. 예) 4 cos(2θ), 2 + 2cos(θ)",
+    implicit:"등호가 있는 식을 입력하면 그 자리를 찾아 그려요. 예) x^2 + y^2 = 9, x^2 - y^2 = 4",
+    sequence:"n 으로 쓴 식을 입력하면 항마다 점을 찍어요. 예) 2n + 1, 2^n, 1/n"
+  };
+  const GRAPH_ROW_CAPTIONS = { polar:"r =", sequence:"aₙ =" };
+  const GRAPH_PLACEHOLDERS = {
+    function:"예: x^2 - 3x + 1", polar:"예: 2 + 2cos(θ)",
+    implicit:"예: x^2 + y^2 = 9", sequence:"예: 2n + 1"
+  };
+  function syncGraphMode(){
+    const curved = graphMode !== "function", parametric = graphMode === "parametric";
+    // 보기 창을 곡선이 스스로 잡는 방법(t·θ 를 도는 것)과, 사람이 x 범위를 정하는 방법을 가른다.
+    const fitted = parametric || graphMode === "polar";
+    const usesT = fitted || graphMode === "sequence";
+    const usesX = graphMode === "function" || graphMode === "implicit";
+    for (const chip of graphModeChips){
+      const active = chip.dataset.graphMode === graphMode;
+      chip.classList.toggle("active", active); chip.setAttribute("aria-pressed", String(active));
+    }
+    graphRows.hidden = parametric; graphPairRows.hidden = !parametric;
+    for (const relation of graphRelations) relation.hidden = curved;
+    for (const caption of graphRowCaptions){
+      caption.textContent = GRAPH_ROW_CAPTIONS[graphMode] || "";
+      caption.hidden = !GRAPH_ROW_CAPTIONS[graphMode];
+    }
+    graphInputs[0].placeholder = GRAPH_PLACEHOLDERS[graphMode] || GRAPH_PLACEHOLDERS.function;
+    for (const field of [graphXMin, graphXMax]) field.wrap.hidden = !usesX;
+    for (const field of [graphYMin, graphYMax]) field.wrap.hidden = fitted;
+    graphAutoWrap.hidden = fitted;
+    // 같은 칸을 t(θ)와 항의 번호 n 이 나눠 쓴다 — 이름표만 바꿔 단다.
+    graphTMin.wrap.hidden = !usesT; graphTMax.wrap.hidden = !usesT;
+    graphTMin.caption.textContent = graphMode === "sequence" ? "n" : "t";
+    // 교점·접선·넓이·도함수와 값의 표는 모두 y = f(x) 를 전제로 한다.
+    graphAnalysis.hidden = curved; graphTableRow.hidden = curved;
+  }
+  // 식에 훑는 변수 말고 다른 문자가 있으면 그 문자를 슬라이더로 만들어 "a를 키우면?"을 바로 보여 준다.
   function refreshGraphParams(){
     const names = [];
-    for (const input of graphInputs){
-      const source = input.value.trim(); if (!source) continue;
+    const sources = [];
+    if (graphMode === "parametric") for (const pair of graphPairInputs) sources.push(pair.x.value.trim(), pair.y.value.trim());
+    else for (const input of graphInputs) sources.push(input.value.trim());
+    // 훑는 변수는 슬라이더가 아니다. 극좌표는 θ 대신 t 라고 쳐도 받으므로 둘 다 뺀다.
+    const reserved = graphMode === "parametric" ? ["t"] : graphMode === "polar" ? ["theta", "t"]
+      : graphMode === "implicit" ? ["x", "y"] : graphMode === "sequence" ? ["n"] : ["x"];
+    for (const source of sources){
+      if (!source) continue;
       try {
         for (const name of MNBoardTools.parseExpression(source).variables){
-          if (name !== "x" && !names.includes(name)) names.push(name);
+          if (!reserved.includes(name) && !names.includes(name)) names.push(name);
         }
       } catch(_){}
     }
@@ -3970,10 +4122,10 @@ function renderWhiteboard(doc, host){
     }
   }
   function refreshGraphPreview(){
-    refreshGraphParams(); syncGraphAnalysisFields();
+    syncGraphMode(); refreshGraphParams(); syncGraphAnalysisFields();
     const spec = readGraphSpec({ width:560, height:400 });
     if (!spec.curves.length){
-      graphMessage.textContent = "식을 입력하면 미리보기가 나타나요. 예) x^2 - 3x + 1, sin(x), 2^x";
+      graphMessage.textContent = GRAPH_EMPTY_HINTS[graphMode] || GRAPH_EMPTY_HINTS.function;
       graphMessage.classList.remove("is-error");
       graphPreview.hidden = true; graphInsert.disabled = true; return;
     }
@@ -3982,7 +4134,7 @@ function renderWhiteboard(doc, host){
       graphPreview.hidden = false; drawToolPreview(graphPreview, group);
       graphMessage.textContent = group.sliders && group.sliders.length
         ? "보드에 넣은 뒤에도 그래프 아래 손잡이를 끌면 그 자리에서 곡선이 다시 그려집니다."
-        : "×· ÷ 없이 2x, sin x 처럼 써도 되고 sqrt·abs·log·ln 을 쓸 수 있어요.";
+        : "×· ÷ 없이 2x, sin x 처럼 써도 되고 sqrt·abs·log·ln 과 if(x < 0, -x, x) 같은 조각적 정의도 됩니다.";
       graphMessage.classList.remove("is-error"); graphInsert.disabled = false;
     } catch(error){
       graphPreview.hidden = true; graphInsert.disabled = true;
@@ -3992,14 +4144,34 @@ function renderWhiteboard(doc, host){
   }
   function clearGraphInputs(){
     graphInputs.forEach((input) => { input.value = ""; });
+    graphPairInputs.forEach((pair) => { pair.x.value = ""; pair.y.value = ""; });
     graphRelations.forEach((relation) => { relation.value = "eq"; });
     graphCross.box.checked = false; graphTangent.box.checked = false; graphArea.box.checked = false;
-    graphParamKey = "__reset__"; refreshGraphPreview(); graphInputs[0].focus({ preventScroll:true });
+    graphDerivative.box.checked = false;
+    graphParamKey = "__reset__"; refreshGraphPreview();
+    (graphMode === "parametric" ? graphPairInputs[0].x : graphInputs[0]).focus({ preventScroll:true });
   }
   function resetGraphEditor(){
     editingPlotItem = null; graphInsert.textContent = "그래프 넣기"; graphCancel.hidden = true; refreshGraphPreview();
   }
   function applyGraphPreset(preset){
+    // 그리는 방법이 정해진 예시는 방법부터 바꿔 놓는다 — 채워 넣을 칸 자체가 다르다.
+    const wanted = GRAPH_MODES.some(([id]) => id === preset.mode) ? preset.mode : "function";
+    if (wanted !== graphMode){ graphMode = wanted; syncGraphMode(); }
+    if (Number.isFinite(preset.tMin)) graphTMin.input.value = String(preset.tMin);
+    if (Number.isFinite(preset.tMax)) graphTMax.input.value = String(preset.tMax);
+    if (graphMode === "parametric"){
+      // 매개변수 예시는 x(t)·y(t) 가 한 짝이라 커서 자리와 상관없이 첫 줄부터 채운다.
+      (Array.isArray(preset.pairs) ? preset.pairs : []).forEach((pair, index) => {
+        const row = graphPairInputs[index];
+        if (row){ row.x.value = String(pair[0] || ""); row.y.value = String(pair[1] || ""); }
+      });
+      if (preset.params) Object.assign(graphParamValues, preset.params);
+      graphParamKey = "__reset__"; refreshGraphPreview();
+      graphPairInputs[0].x.focus({ preventScroll:true });
+      return;
+    }
+    if (preset.derivative != null) graphDerivative.box.checked = !!preset.derivative;
     // 커서가 있던 칸부터 채운다. 나머지 칸은 건드리지 않아야 식 여러 개를 골라 담을 수 있다.
     const curves = Array.isArray(preset.curves) ? preset.curves : [];
     const start = Math.max(0, Math.min(graphFocusIndex, graphInputs.length - curves.length));
@@ -4026,7 +4198,7 @@ function renderWhiteboard(doc, host){
       graphAreaFrom.input.value = String(preset.area[0]); graphAreaTo.input.value = String(preset.area[1]);
       graphAreaBars.input.value = String(preset.bars || 0);
     }
-    if (preset.cross || Number.isFinite(preset.tangent) || Array.isArray(preset.area) || Array.isArray(preset.relations)) graphTarget.value = String(start);
+    if (preset.cross || preset.derivative || Number.isFinite(preset.tangent) || Array.isArray(preset.area) || Array.isArray(preset.relations)) graphTarget.value = String(start);
     graphParamKey = "__reset__"; refreshGraphPreview();
   }
   function submitGraph(){
@@ -4127,11 +4299,22 @@ function renderWhiteboard(doc, host){
     editingPlotItem = item; eduCategory = "graph";
     if (spec){
       const curves = Array.isArray(spec.curves) ? spec.curves : [];
-      graphInputs.forEach((input, index) => { input.value = curves[index] ? String(curves[index].source || "") : ""; });
-      graphRelations.forEach((relation, index) => {
-        const wanted = curves[index] ? String(curves[index].relation || "eq") : "eq";
-        relation.value = GRAPH_RELATIONS.some(([id]) => id === wanted) ? wanted : "eq";
-      });
+      graphMode = GRAPH_MODES.some(([id]) => id === spec.mode) ? spec.mode : "function";
+      if (graphMode === "parametric"){
+        graphPairInputs.forEach((pair, index) => {
+          pair.x.value = curves[index] ? String(curves[index].x || "") : "";
+          pair.y.value = curves[index] ? String(curves[index].y || "") : "";
+        });
+      } else {
+        graphInputs.forEach((input, index) => { input.value = curves[index] ? String(curves[index].source || "") : ""; });
+        graphRelations.forEach((relation, index) => {
+          const wanted = curves[index] ? String(curves[index].relation || "eq") : "eq";
+          relation.value = GRAPH_RELATIONS.some(([id]) => id === wanted) ? wanted : "eq";
+        });
+      }
+      if (Number.isFinite(Number(spec.tMin))) graphTMin.input.value = String(spec.tMin);
+      if (Number.isFinite(Number(spec.tMax))) graphTMax.input.value = String(spec.tMax);
+      graphDerivative.box.checked = !!spec.showDerivative;
       graphCross.box.checked = !!spec.showIntersections;
       graphTangent.box.checked = Number.isFinite(Number(spec.tangentX)) && spec.tangentX !== null;
       if (graphTangent.box.checked) graphTangentX.input.value = String(spec.tangentX);
@@ -4142,14 +4325,15 @@ function renderWhiteboard(doc, host){
         graphAreaBars.input.value = String(Number(spec.areaBars) || 0);
       }
       // 저장된 대상은 "그린 곡선의 순서"인데, 여기서는 그 순서대로 빈칸 없이 다시 채우므로 그대로 쓴다.
-      const target = Number(graphTangent.box.checked ? spec.tangentCurve : spec.areaCurve) || 0;
+      const target = Number(graphTangent.box.checked ? spec.tangentCurve
+        : graphArea.box.checked ? spec.areaCurve : spec.derivativeCurve) || 0;
       graphTarget.value = String(Math.min(graphInputs.length - 1, Math.max(0, target)));
       if (Number.isFinite(Number(spec.xMin))) graphXMin.input.value = String(spec.xMin);
       if (Number.isFinite(Number(spec.xMax))) graphXMax.input.value = String(spec.xMax);
       const manualY = whiteboardGraphUsesManualY(spec);
       graphAuto.checked = !manualY;
       if (manualY){ graphYMin.input.value = String(spec.yMin); graphYMax.input.value = String(spec.yMax); }
-      syncGraphAutoFields();
+      syncGraphAutoFields(); syncGraphMode();
       graphGrid.checked = spec.showGrid !== false;
       graphSlider.checked = spec.showSliders !== false;
       if (spec.params) Object.assign(graphParamValues, spec.params);
@@ -4168,8 +4352,16 @@ function renderWhiteboard(doc, host){
     const rows = table.rows;
     const seriesCount = Math.max(1, rows.reduce((most, row) => Math.max(most, row.values.length), 1));
     if (chartType === "histogram") return ["기둥"];
+    if (chartType === "freqpoly") return ["다각형"];
     if (chartType === "box" && seriesCount < 2) return ["상자"];
-    if (seriesCount > 1 && chartType !== "pie"){
+    // 버블은 둘째 값이 크기라 묶음이 아니다 — 색은 하나만 고른다.
+    if (chartType === "bubble") return ["점"];
+    // 누적 막대는 쌓은 칸(묶음)마다 색이 다르다 — 묶음이 하나뿐이어도 첫 색만 쓴다.
+    if (chartType === "stacked"){
+      return Array.from({ length:Math.min(seriesCount, CHART_COLOR_LIMIT) }, (_, index) => table.series[index] || `자료 ${index + 1}`);
+    }
+    // 띠그래프는 묶음이 여럿이어도 색은 띠를 나눠 가진 항목의 것이다(띠마다 같은 색 차례).
+    if (seriesCount > 1 && chartType !== "pie" && chartType !== "band"){
       return Array.from({ length:Math.min(seriesCount, CHART_COLOR_LIMIT) }, (_, index) => table.series[index] || `자료 ${index + 1}`);
     }
     if (chartType === "line") return ["꺾은선"];
@@ -4223,7 +4415,7 @@ function renderWhiteboard(doc, host){
   function readChartSpec(size){
     return {
       type:chartType, data:chartData.value, title:chartTitle.value.trim(),
-      bins:Number(chartBins.input.value) || null, trend:chartTrend.checked,
+      bins:Number(chartBins.input.value) || null, trend:chartTrend.checked, cumulative:chartCumulative.checked,
       axisColor:boardInkColor(), palette:chartPaletteFor(chartColorSlots().length),
       width:(size && size.width) || 560, height:(size && size.height) || 400
     };
@@ -4360,10 +4552,13 @@ function renderWhiteboard(doc, host){
       chartColorRow.hidden = true; chartColorRow.textContent = ""; chartColorKey = "";
       chartPreview.hidden = true; chartInsert.disabled = true; return;
     }
-    // 추세선은 산점도에서만, 계급 수는 히스토그램에서만 쓴다(도수분포표 단추는 늘 계급 수를 본다).
+    // 추세선은 산점도에서만, 계급 수는 계급으로 묶는 종류에서만, 누적은 도수분포다각형에서만
+    // 쓴다(도수분포표 단추는 종류와 상관없이 늘 계급 수를 본다).
     chartTrendWrap.classList.toggle("is-off", chartType !== "scatter");
     chartTrend.disabled = chartType !== "scatter";
-    chartBins.wrap.classList.toggle("is-off", chartType !== "histogram");
+    chartCumulativeWrap.classList.toggle("is-off", chartType !== "freqpoly");
+    chartCumulative.disabled = chartType !== "freqpoly";
+    chartBins.wrap.classList.toggle("is-off", chartType !== "histogram" && chartType !== "freqpoly");
     renderChartColors(chartColorSlots());
     try {
       const group = MNBoardTools.chartGroup(readChartSpec({ width:560, height:400 }));
@@ -4382,7 +4577,8 @@ function renderWhiteboard(doc, host){
   function applyChartPreset(preset){
     chartType = preset.type; chartTitle.value = preset.title || ""; chartData.value = preset.data || "";
     chartPalette = [];                      // 자료가 통째로 바뀌므로 색도 기본으로 되돌린다
-    chartTrend.checked = !!preset.trend;
+    chartTrend.checked = !!preset.trend; chartCumulative.checked = !!preset.cumulative;
+    chartBins.input.value = String(Number(preset.bins) || 0);
     refreshChartPreview();
   }
   function submitChart(){
@@ -4410,7 +4606,7 @@ function renderWhiteboard(doc, host){
       chartData.value = lines.join("\n");
       chartPalette = Array.isArray(spec.palette) ? spec.palette.slice() : [];
       chartBins.input.value = String(Number(spec.bins) || 0);
-      chartTrend.checked = !!spec.trend;
+      chartTrend.checked = !!spec.trend; chartCumulative.checked = !!spec.cumulative;
     }
     chartInsert.textContent = "차트 바꾸기"; chartCancel.hidden = false;
     toggleEducationPanel(true);
@@ -4424,10 +4620,16 @@ function renderWhiteboard(doc, host){
     input.addEventListener("focus", () => { graphFocusIndex = index; });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitGraph(); } e.stopPropagation(); });
   });
-  for (const field of [graphXMin, graphXMax, graphYMin, graphYMax, graphTangentX, graphAreaFrom, graphAreaTo, graphAreaBars]){
+  for (const pair of graphPairInputs){
+    for (const input of [pair.x, pair.y]){
+      input.addEventListener("input", refreshGraphPreview);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); submitGraph(); } e.stopPropagation(); });
+    }
+  }
+  for (const field of [graphXMin, graphXMax, graphYMin, graphYMax, graphTMin, graphTMax, graphTangentX, graphAreaFrom, graphAreaTo, graphAreaBars]){
     field.input.addEventListener("change", refreshGraphPreview);
   }
-  for (const box of [graphCross.box, graphTangent.box, graphArea.box]) box.addEventListener("change", refreshGraphPreview);
+  for (const box of [graphCross.box, graphTangent.box, graphArea.box, graphDerivative.box]) box.addEventListener("change", refreshGraphPreview);
   for (const relation of graphRelations) relation.addEventListener("change", refreshGraphPreview);
   graphTarget.addEventListener("change", refreshGraphPreview);
   function syncGraphAutoFields(){
@@ -4442,6 +4644,7 @@ function renderWhiteboard(doc, host){
   graphGrid.addEventListener("change", refreshGraphPreview);
   graphSlider.addEventListener("change", refreshGraphPreview);
   chartTrend.addEventListener("change", () => refreshChartPreview());
+  chartCumulative.addEventListener("change", () => refreshChartPreview());
   chartBins.input.addEventListener("change", () => refreshChartPreview());
   chartData.addEventListener("input", () => refreshChartPreview());
   chartTitle.addEventListener("input", () => refreshChartPreview());
@@ -4494,7 +4697,12 @@ function renderWhiteboard(doc, host){
       card.title = preset.label + (eduCategory === "graph" ? " — 눌러서 커서가 있는 식 칸 채우기" : " — 눌러서 입력칸 채우기");
       const visual = document.createElement("span"); visual.className = "wb-edu-visual";
       const relation = GRAPH_RELATIONS.find(([id]) => id === ((preset.relations || [])[0] || "eq"));
-      visual.textContent = eduCategory === "graph" ? `${relation[1]} ${preset.curves[0]}` : preset.title;
+      // 그리는 방법마다 예시 카드에 보일 식의 모양이 다르다.
+      const shown = { polar:"r = ", sequence:"aₙ = ", implicit:"" };
+      visual.textContent = eduCategory !== "graph" ? preset.title
+        : preset.mode === "parametric" ? `x=${preset.pairs[0][0]}, y=${preset.pairs[0][1]}`
+          : preset.mode ? shown[preset.mode] + preset.curves[0]
+            : `${relation[1]} ${preset.curves[0]}`;
       const label = document.createElement("span"); label.className = "wb-edu-label"; label.textContent = preset.label;
       card.append(visual, label);
       card.addEventListener("click", () => (eduCategory === "graph" ? applyGraphPreset(preset) : applyChartPreset(preset)));

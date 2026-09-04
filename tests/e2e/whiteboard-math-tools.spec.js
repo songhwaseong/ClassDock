@@ -62,6 +62,73 @@ test("식을 치면 계산한 곡선이 그룹으로 들어가고, 두 번 누�
   expect(errors).toEqual([]);
 });
 
+test("그리는 방법 다섯 가지를 골라 그리고 도함수를 겹쳐 넣는다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  await page.getByRole("button", { name:/함수 그래프/ }).last().click();
+  const builder = page.locator(".wb-edu-panel").last().locator(".wb-graph-builder");
+
+  // ① 함수 + 도함수 겹쳐 그리기
+  await builder.locator(".wb-graph-rows").first().locator(".wb-graph-input").first().fill("x^3 - 3x");
+  await builder.locator(".wb-graph-analysis label", { hasText:"도함수" }).locator("input").check();
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  // ② 매개변수 — 식 칸이 x(t)·y(t) 두 개짜리로 바뀌고, 해석 도구 줄은 사라진다
+  await builder.locator(".wb-graph-modes button", { hasText:"매개변수" }).click();
+  await expect(builder.locator(".wb-graph-rows").first()).toBeHidden();
+  await expect(builder.locator(".wb-graph-analysis")).toBeHidden();
+  const pair = builder.locator(".wb-graph-rows").last().locator(".wb-graph-row").first();
+  await pair.locator("input").nth(0).fill("3 cos(t)");
+  await pair.locator("input").nth(1).fill("3 sin(t)");
+  await expect(builder.locator(".wb-tool-preview")).toBeVisible();
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  // ③ 극좌표 — 다시 한 줄짜리 식 칸을 쓰고 θ 를 그대로 받는다
+  await builder.locator(".wb-graph-modes button", { hasText:"극좌표" }).click();
+  await expect(builder.locator(".wb-graph-rows").first()).toBeVisible();
+  await builder.locator(".wb-graph-rows").first().locator(".wb-graph-input").first().fill("4 cos(2θ)");
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  // ④ 음함수 — 등호가 있는 식을 그대로 받고, 다시 x 범위 칸을 쓴다
+  await builder.locator(".wb-graph-modes button", { hasText:"음함수" }).click();
+  await expect(builder.locator(".wb-graph-range").first()).toBeVisible();
+  await builder.locator(".wb-graph-rows").first().locator(".wb-graph-input").first().fill("x^2 + y^2 = 9");
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  // ⑤ 수열 — 같은 칸이 t(θ) 대신 항의 번호 n 이 된다
+  await builder.locator(".wb-graph-modes button", { hasText:"수열" }).click();
+  await builder.locator(".wb-graph-rows").first().locator(".wb-graph-input").first().fill("2n + 1");
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  const items = await boardItems(page);
+  expect(items.map((item) => item.label)).toEqual([
+    "함수 그래프", "매개변수 곡선", "극좌표 그래프", "음함수 그래프", "수열 그래프"
+  ]);
+  expect(items.every((item) => item.role === "education-plot")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("조각적 정의 함수는 if 와 부등호로 구간마다 다른 식을 그린다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  await page.getByRole("button", { name:/함수 그래프/ }).last().click();
+  const builder = page.locator(".wb-edu-panel").last().locator(".wb-graph-builder");
+  await builder.locator(".wb-graph-rows").first().locator(".wb-graph-input").first().fill("if(0 <= x < 2, x^2, 4)");
+  await expect(builder.locator(".wb-tool-preview")).toBeVisible();
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+  const items = await boardItems(page);
+  expect(items.map((item) => item.label)).toEqual(["함수 그래프"]);
+  expect(errors).toEqual([]);
+});
+
 test("보드에 놓인 그래프의 슬라이더를 끌면 그 자리에서 곡선이 다시 그려진다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -272,6 +339,58 @@ test("자료를 붙여넣으면 막대·원그래프가 벡터로 들어간다",
 
   const items = await boardItems(page);
   expect(items.map((item) => item.label)).toEqual(["막대그래프", "원그래프"]);
+  expect(items.every((item) => item.role === "education-chart")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("띠그래프·누적 막대·도수분포다각형을 같은 자료 칸에서 만든다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  await page.getByRole("button", { name:/자료 차트/ }).last().click();
+  const builder = page.locator(".wb-edu-panel").last().locator(".wb-chart-builder");
+  await builder.locator("textarea").fill("과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8\n영어, 5, 11");
+  await builder.locator(".wb-chart-types button", { hasText:"띠그래프" }).click();
+  await expect(builder.locator(".wb-tool-preview")).toBeVisible();
+  await builder.locator(".wb-formula-insert").click();
+  await builder.locator(".wb-chart-types button", { hasText:"누적 막대" }).click();
+  await builder.locator(".wb-formula-insert").click();
+
+  // 도수분포다각형은 값 목록으로 그린다. ‘누적’ 칸은 이 종류에서만 켜진다.
+  await builder.locator("textarea").fill("62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77");
+  await builder.locator(".wb-chart-types button", { hasText:"도수분포다각형" }).click();
+  await builder.locator(".wb-formula-insert").click();
+  await builder.locator(".wb-chart-extras > summary").click();          // 통계 구획 펴기
+  await builder.locator(".wb-chart-extras").getByRole("checkbox", { name:"누적" }).check();
+  await builder.locator(".wb-formula-insert").click();
+
+  const items = await boardItems(page);
+  expect(items.map((item) => item.label)).toEqual(["띠그래프", "누적 막대그래프", "도수분포다각형", "누적도수분포곡선"]);
+  expect(items.every((item) => item.role === "education-chart")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("가로 막대와 버블을 같은 자료 칸에서 만든다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openBoard(page);
+  await page.getByRole("button", { name:/자료 차트/ }).last().click();
+  const builder = page.locator(".wb-edu-panel").last().locator(".wb-chart-builder");
+
+  // 이름이 긴 항목은 가로 막대로 — 세로 막대에서는 이름이 서로 겹친다
+  await builder.locator("textarea").fill("책 읽기, 7\n운동하기, 12\n이야기 나누기, 5\n그림 그리기, 9");
+  await builder.locator(".wb-chart-types button", { hasText:"가로 막대" }).click();
+  await expect(builder.locator(".wb-tool-preview")).toBeVisible();
+  await builder.locator(".wb-formula-insert").click();
+
+  // 버블은 셋째 값이 점의 크기다
+  await builder.locator("textarea").fill("1, 60, 5\n2, 68, 20\n3, 74, 45");
+  await builder.locator(".wb-chart-types button", { hasText:"버블" }).click();
+  await expect(builder.locator(".wb-tool-message.is-error")).toHaveCount(0);
+  await builder.locator(".wb-formula-insert").click();
+
+  const items = await boardItems(page);
+  expect(items.map((item) => item.label)).toEqual(["가로 막대그래프", "버블 차트"]);
   expect(items.every((item) => item.role === "education-chart")).toBe(true);
   expect(errors).toEqual([]);
 });

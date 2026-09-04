@@ -183,12 +183,147 @@ test("값의 표는 식에서 x·y 대응표를 만들고 칸이 너무 많으�
   assert.throws(() => MNBoardTools.valueTableGroup({ curves:[{ source:"x" }], from:5, to:1, step:1 }), (error) => error.boardTool === true);
 });
 
+test("도함수는 표본 사이 기울기를 재어 같은 색 점선으로 겹쳐 그린다", () => {
+  const plain = MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-3, xMax:3 });
+  const withSlope = MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-3, xMax:3, showDerivative:true });
+  const curves = (group) => group.items.filter((item) => item.type === "polyline");
+  assert.equal(curves(plain).length, 1);
+  assert.equal(curves(withSlope).length, 2);
+  const slope = curves(withSlope).find((item) => item.dash);
+  assert.ok(slope, "도함수는 점선이다");
+  assert.equal(slope.color, curves(withSlope)[0].color, "원래 곡선과 같은 색");
+  // y = x^2 의 도함수는 y = 2x — 화면 좌표로 옮겨도 곧은 선이라 가운데 점이 양 끝의 한가운데다.
+  const first = slope.points[0], last = slope.points[slope.points.length - 1];
+  const middle = slope.points[Math.floor(slope.points.length / 2)];
+  assert.ok(Math.abs((first.y + last.y) / 2 - middle.y) < 1.5, "도함수가 직선으로 나온다");
+  assert.ok(withSlope.items.some((item) => item.type === "text" && /도함수/.test(item.text)));
+  // 다시 고칠 재료에 남아 그대로 되살아난다.
+  assert.equal(withSlope.plotSpec.showDerivative, true);
+  assert.equal(MNBoardTools.plotGroup(withSlope.plotSpec).items.length, withSlope.items.length);
+});
+
+test("매개변수 곡선은 t 를 훑어 x·y 를 함께 얻고 가로세로 눈금을 같게 맞춘다", () => {
+  const circle = MNBoardTools.plotGroup({
+    mode:"parametric", curves:[{ x:"3 cos(t)", y:"3 sin(t)" }], tMin:0, tMax:6.2832, width:560, height:400
+  });
+  assert.equal(circle.educationLabel, "매개변수 곡선");
+  const path = circle.items.find((item) => item.type === "polyline");
+  assert.ok(path && path.points.length > 100);
+  // 눈금 크기가 같아야 원이 원으로 보인다 — 그린 자취의 가로세로가 같은지로 본다.
+  const xs = path.points.map((point) => point.x), ys = path.points.map((point) => point.y);
+  const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
+  assert.ok(Math.abs(spanX / spanY - 1) < 0.02, `원이 찌그러졌다 ${spanX} × ${spanY}`);
+  assert.ok(circle.items.some((item) => item.type === "text" && /x = 3 cos\(t\)/.test(item.text)));
+  // 가로축 이름은 언제나 x 다(훑는 변수 t 는 축이 아니다).
+  assert.ok(circle.items.some((item) => item.type === "text" && item.text === "x"));
+  assert.ok(!circle.items.some((item) => item.type === "text" && item.text === "t"));
+  assert.equal(MNBoardTools.plotGroup(circle.plotSpec).items.length, circle.items.length);
+  // 한쪽만 적으면 무엇이 빠졌는지 알려 준다.
+  assert.throws(() => MNBoardTools.plotGroup({ mode:"parametric", curves:[{ x:"cos(t)" }] }), (error) => error.boardTool === true);
+  assert.throws(() => MNBoardTools.plotGroup({ mode:"parametric", curves:[{ x:"cos(t)", y:"sin(t)" }], tMin:2, tMax:1 }),
+    (error) => error.boardTool === true);
+});
+
+test("극좌표는 θ 를 훑어 r 를 좌표로 바꾸고, θ 대신 t 라고 써도 받는다", () => {
+  assert.ok(MNBoardTools.parseExpression("2θ + 1").variables.includes("theta"), "θ 는 theta 로 읽는다");
+  const ring = MNBoardTools.plotGroup({ mode:"polar", curves:[{ source:"3" }], tMin:0, tMax:6.2832, width:560, height:400 });
+  assert.equal(ring.educationLabel, "극좌표 그래프");
+  const path = ring.items.find((item) => item.type === "polyline");
+  const xs = path.points.map((point) => point.x), ys = path.points.map((point) => point.y);
+  assert.ok(Math.abs((Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys)) - 1) < 0.02, "r 가 일정하면 원이다");
+  const withTheta = MNBoardTools.plotGroup({ mode:"polar", curves:[{ source:"4 cos(2θ)" }], tMin:0, tMax:6.2832 });
+  const withT = MNBoardTools.plotGroup({ mode:"polar", curves:[{ source:"4 cos(2t)" }], tMin:0, tMax:6.2832 });
+  assert.equal(withTheta.items.length, withT.items.length);
+  assert.ok(withTheta.items.some((item) => item.type === "text" && /r = 4 cos\(2θ\)/.test(item.text)));
+  // 교점·접선·넓이·도함수는 y = f(x) 를 전제로 해서 여기서는 무시한다.
+  const asked = MNBoardTools.plotGroup({ mode:"polar", curves:[{ source:"3" }], showIntersections:true, tangentX:1, areaFrom:0, areaTo:1, showDerivative:true });
+  assert.equal(asked.items.length, ring.items.length);
+});
+
+test("매개변수 곡선에 슬라이더가 있으면 보기 창을 못박아 크기 변화가 보이게 한다", () => {
+  const small = MNBoardTools.plotGroup({
+    mode:"parametric", curves:[{ x:"a cos(t)", y:"a sin(t)" }], params:{ a:2 }, tMin:0, tMax:6.2832
+  });
+  assert.deepEqual(small.sliders.map((slider) => slider.name), ["a"], "훑는 변수 t 는 슬라이더가 아니다");
+  assert.equal(small.plotSpec.viewLocked, true);
+  assert.ok(Number.isFinite(small.plotSpec.xMin) && Number.isFinite(small.plotSpec.yMin));
+  const bigger = MNBoardTools.plotGroup(Object.assign({}, small.plotSpec, { params:{ a:3 } }));
+  assert.equal(bigger.plotSpec.xMin, small.plotSpec.xMin, "창이 따라 커지면 무엇이 변했는지 안 보인다");
+  // 창 밖으로 나간 부분은 잘려 자취가 여러 조각이 되므로 조각을 모두 모아 폭을 잰다.
+  const width = (group) => {
+    const xs = [];
+    for (const item of group.items) if (item.type === "polyline") for (const point of item.points) xs.push(point.x);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  assert.ok(width(bigger) > width(small) * 1.3, "a 를 키우면 원이 실제로 커진다");
+  // 슬라이더가 없으면 곡선에 맞춰 매번 새로 잡는다.
+  assert.equal(MNBoardTools.plotGroup({ mode:"parametric", curves:[{ x:"cos(t)", y:"sin(t)" }] }).plotSpec.viewLocked, false);
+});
+
+test("음함수는 격자를 훑어 f(x, y) = 0 인 자리를 찾아 이어 붙인다", () => {
+  const circle = MNBoardTools.plotGroup({
+    mode:"implicit", curves:[{ source:"x^2 + y^2 = 9" }], xMin:-6, xMax:6, width:560, height:400
+  });
+  assert.equal(circle.educationLabel, "음함수 그래프");
+  const paths = circle.items.filter((item) => item.type === "polyline");
+  // 닫힌 원은 끝점끼리 이어져 자취 하나로 나온다(선분을 하나씩 넣으면 항목이 수백 개가 된다).
+  assert.equal(paths.length, 1);
+  assert.ok(paths[0].points.length > 100, `점 ${paths[0].points.length}개`);
+  const xs = paths[0].points.map((point) => point.x), ys = paths[0].points.map((point) => point.y);
+  const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
+  assert.ok(Math.abs(spanX / spanY - 1) < 0.03, `원이 찌그러졌다 ${spanX} × ${spanY}`);
+  // 쌍곡선은 두 가지로 갈라진다.
+  assert.equal(MNBoardTools.plotGroup({ mode:"implicit", curves:[{ source:"x^2 - y^2 = 4" }], xMin:-8, xMax:8 })
+    .items.filter((item) => item.type === "polyline").length, 2);
+  // 등호를 빼고 적으면 그 식이 0 이 되는 자리로 읽는다.
+  assert.ok(MNBoardTools.plotGroup({ mode:"implicit", curves:[{ source:"x^2 + y^2 - 4" }], xMin:-4, xMax:4 })
+    .items.some((item) => item.type === "polyline"));
+  assert.throws(() => MNBoardTools.plotGroup({ mode:"implicit", curves:[{ source:"= 9" }] }), (error) => error.boardTool === true);
+  // x·y 는 좌표라 슬라이더가 아니다 — 나머지 문자만 손잡이가 된다.
+  const withParam = MNBoardTools.plotGroup({ mode:"implicit", curves:[{ source:"x^2 + y^2 = a" }], params:{ a:9 }, xMin:-6, xMax:6 });
+  assert.deepEqual(withParam.sliders.map((slider) => slider.name), ["a"]);
+  // 사람이 정한 x 범위는 다시 고칠 재료에 그대로 남아야 한다(안 남기면 기본 −10~10 으로 되돌아간다).
+  assert.equal(circle.plotSpec.xMin, -6);
+  assert.equal(MNBoardTools.plotGroup(circle.plotSpec).items.length, circle.items.length);
+});
+
+test("수열은 이어진 곡선이 아니라 항마다 찍은 점으로 그린다", () => {
+  const line = MNBoardTools.plotGroup({ mode:"sequence", curves:[{ source:"2n + 1" }], tMin:1, tMax:10 });
+  assert.equal(line.educationLabel, "수열 그래프");
+  assert.equal(line.items.filter((item) => item.type === "ellipse").length, 10, "항마다 점 하나");
+  assert.equal(line.items.filter((item) => item.type === "polyline").length, 0, "점을 잇지 않는다");
+  // 점마다 축까지 옅은 선을 내려 몇 번째 항인지 읽기 쉽게 한다.
+  assert.equal(line.items.filter((item) => item.type === "line" && item.alpha === 0.35).length, 10);
+  // 가로축은 항의 번호다.
+  assert.ok(line.items.some((item) => item.type === "text" && item.text === "n"));
+  assert.ok(line.items.some((item) => item.type === "text" && /a\u2099 = 2n \+ 1/.test(item.text)));
+  assert.throws(() => MNBoardTools.plotGroup({ mode:"sequence", curves:[{ source:"n" }], tMin:1, tMax:900 }),
+    (error) => error.boardTool === true);
+  assert.equal(MNBoardTools.plotGroup(line.plotSpec).items.length, line.items.length);
+});
+
+test("부등호와 if 로 구간마다 다른 식을 쓰는 조각적 정의 함수를 계산한다", () => {
+  const absolute = MNBoardTools.parseExpression("if(x < 0, -x, x)");
+  assert.deepEqual([-2, -1, 0, 1, 2].map((x) => absolute.evaluate({ x })), [2, 1, 0, 1, 2]);
+  // 0 ≤ x < 3 처럼 이어 쓴 부등호는 "둘 다 참"이다((0≤x) 를 3 과 견주면 늘 참이 되어 버린다).
+  const inside = MNBoardTools.parseExpression("if(0 <= x < 3, 1, 2)");
+  assert.deepEqual([-1, 0, 1, 3, 4].map((x) => inside.evaluate({ x })), [2, 1, 1, 2, 2]);
+  assert.equal(MNBoardTools.parseExpression("if(x ≤ 1, 5, 6)").evaluate({ x:1 }), 5);
+  assert.equal(MNBoardTools.parseExpression("if(and(x > 0, x < 5), 1, 0)").evaluate({ x:3 }), 1);
+  // 고르지 않은 갈래가 NaN 이어도(√ 안이 음수) 결과는 멀쩡하다.
+  assert.equal(MNBoardTools.parseExpression("if(x < 0, sqrt(-x), sqrt(x))").evaluate({ x:4 }), 2);
+  assert.ok(MNBoardTools.parseExpression("if(x < a, 1, 0)").variables.includes("a"), "조건 안의 문자도 슬라이더가 된다");
+  // 그리기도 평소와 같은 길로 간다 — 구간이 갈리는 자리에서 획이 끊기지 않는다.
+  const drawn = MNBoardTools.plotGroup({ curves:[{ source:"if(x < 0, -x, x^2)" }], xMin:-4, xMax:4 });
+  assert.equal(drawn.items.filter((item) => item.type === "polyline").length, 1);
+});
+
 test("자료 차트는 쉼표·탭·띄어쓰기로 적은 표를 읽어 종류별 벡터로 만든다", () => {
   assert.deepEqual(MNBoardTools.parseChartData("국어, 7\n수학\t12\n영어 5"), [
     { label:"국어", value:7 }, { label:"수학", value:12 }, { label:"영어", value:5 }
   ]);
   assert.deepEqual(MNBoardTools.parseChartData("3\n5\n8").map((row) => row.label), ["1", "2", "3"]);
-  for (const type of ["bar", "line", "pie", "histogram", "scatter"]){
+  for (const type of ["bar", "line", "pie", "histogram", "scatter", "stacked", "band", "freqpoly"]){
     const group = MNBoardTools.chartGroup({ type, data:"1, 3\n2, 5\n3, 8\n4, 2", title:"자료" });
     assert.equal(group.role, "education-chart");
     assert.equal(group.chartSpec.type, type);
@@ -225,6 +360,125 @@ test("자료를 여러 열 적으면 묶음(계열)이 여러 개인 차트가 �
   // 원그래프·히스토그램은 첫 묶음만 쓴다(부채꼴은 겹칠 수 없다).
   const pie = MNBoardTools.chartGroup({ type:"pie", data:"과목, 1반, 2반\n국어, 7, 9\n수학, 12, 8" });
   assert.equal(pie.items.filter((item) => item.type === "polyline" && item.fill).length, 2);
+});
+
+test("가로 막대는 값축과 항목축을 맞바꿔 긴 이름도 겹치지 않게 적는다", () => {
+  const data = "책 읽기, 7\n운동하기, 12\n이야기 나누기, 5\n그림 그리기, 9";
+  const across = MNBoardTools.chartGroup({ type:"barh", data, width:560, height:400 });
+  assert.equal(across.educationLabel, "가로 막대그래프");
+  const bars = (group) => group.items.filter((item) => item.type === "rect" && item.fill);
+  assert.equal(bars(across).length, 4);
+  // 막대가 가로로 눕는다 — 길이는 저마다 다르고 두께(세로)는 모두 같다.
+  const widths = bars(across).map((item) => Math.abs(item.x2 - item.x1));
+  const thicks = bars(across).map((item) => Math.abs(item.y2 - item.y1));
+  assert.ok(new Set(widths.map((value) => Math.round(value))).size > 1, "값에 따라 길이가 달라야 한다");
+  assert.equal(new Set(thicks.map((value) => Math.round(value))).size, 1, "두께는 모두 같아야 한다");
+  // 세로 막대와 정확히 반대다(그쪽은 높이가 값, 폭이 일정).
+  const down = MNBoardTools.chartGroup({ type:"bar", data, width:560, height:400 });
+  assert.equal(new Set(bars(down).map((item) => Math.round(Math.abs(item.x2 - item.x1)))).size, 1);
+  // 항목 이름은 왼쪽에 오른쪽 맞춤으로 서므로 서로 겹치지 않는다(세로 자리가 다 다르다).
+  const names = across.items.filter((item) => item.type === "text" && /읽기|운동|이야기|그림/.test(item.text));
+  assert.equal(names.length, 4);
+  assert.equal(new Set(names.map((item) => Math.round(item.y))).size, 4);
+  assert.ok(names.every((item) => item.x < bars(across)[0].x1), "이름은 막대 왼쪽 바깥에 적는다");
+  // 묶음이 여럿이면 한 칸 안에 나란히 눕고, 범례도 그대로 붙는다.
+  const grouped = MNBoardTools.chartGroup({ type:"barh", data:"활동, 1반, 2반\n책 읽기, 7, 9\n운동하기, 12, 8" });
+  assert.equal(bars(grouped).length, 4 + 2);
+  assert.equal(MNBoardTools.chartGroup(across.chartSpec).items.length, across.items.length);
+});
+
+test("버블은 셋째 값을 점의 크기로 삼되 넓이가 값을 따라가게 한다", () => {
+  const bubble = MNBoardTools.chartGroup({ type:"bubble", data:"1, 60, 5\n2, 68, 20\n3, 74, 45" });
+  assert.equal(bubble.educationLabel, "버블 차트");
+  const dots = bubble.items.filter((item) => item.type === "ellipse" && item.fill);
+  assert.equal(dots.length, 3);
+  const radius = dots.map((item) => (item.x2 - item.x1) / 2);
+  assert.ok(radius[0] < radius[1] && radius[1] < radius[2], "값이 클수록 큰 원");
+  // 값이 4배면 반지름은 2배 쪽으로 벌어진다(반지름을 값에 그대로 비례시키면 4배로 부풀어 보인다).
+  const pair = MNBoardTools.chartGroup({ type:"bubble", data:"1, 1, 1\n2, 1, 4" }).items
+    .filter((item) => item.type === "ellipse" && item.fill).map((item) => (item.x2 - item.x1) / 2);
+  assert.ok(pair[1] / pair[0] < 2.2, `반지름이 값을 그대로 따라갔다 ${pair.join(" / ")}`);
+  // 셋째 칸이 없으면 크기를 정할 수 없으니 산점도와 같은 점으로 그린다.
+  const flat = MNBoardTools.chartGroup({ type:"bubble", data:"1, 60\n2, 68" }).items
+    .filter((item) => item.type === "ellipse" && item.fill).map((item) => item.x2 - item.x1);
+  assert.equal(new Set(flat).size, 1);
+  // 둘째 값은 크기지 묶음이 아니다 — 범례가 붙으면 안 된다.
+  assert.ok(!bubble.items.some((item) => item.type === "text" && /^자료 \d$/.test(item.text)));
+});
+
+test("띠그래프는 띠 하나를 100%로 나누고 반올림한 백분율의 합을 100으로 맞춘다", () => {
+  const band = MNBoardTools.chartGroup({ type:"band", data:"국어, 7\n수학, 12\n영어, 5\n과학, 9" });
+  assert.equal(band.educationLabel, "띠그래프");
+  const percents = band.items.filter((item) => item.type === "text" && /%$/.test(item.text))
+    .map((item) => Number(item.text.replace(/[^0-9]/g, "")));
+  assert.equal(percents.length, 4);
+  assert.equal(percents.reduce((sum, value) => sum + value, 0), 100);
+  // 3등분처럼 딱 나눠지지 않는 자료도 33+33+34 로 100을 채운다.
+  const thirds = MNBoardTools.chartGroup({ type:"band", data:"가, 1\n나, 1\n다, 1" }).items
+    .filter((item) => item.type === "text" && /%$/.test(item.text))
+    .map((item) => Number(item.text.replace(/[^0-9]/g, "")));
+  assert.equal(thirds.reduce((sum, value) => sum + value, 0), 100);
+  // 값을 여러 열 적으면 열마다 띠가 한 줄씩 쌓이고 띠 이름이 왼쪽에 붙는다.
+  const two = MNBoardTools.chartGroup({ type:"band", data:"활동, 작년, 올해\n독서, 5, 8\n운동, 9, 7\n기타, 4, 5" });
+  for (const name of ["작년", "올해"]) assert.ok(two.items.some((item) => item.type === "text" && item.text === name), name);
+  // 항목 이름은 아래 범례에 한 번씩만 남는다(좁은 칸에서는 띠 안 글자가 빠진다).
+  for (const name of ["독서", "운동", "기타"]) assert.ok(two.items.some((item) => item.type === "text" && item.text === name), name);
+  // 띠는 필요한 높이만 차지한다 — 부탁받은 높이(400)만큼 빈 상자를 만들지 않는다.
+  assert.ok(band.h > 60 && band.h < 200, `띠그래프 높이 ${band.h}`);
+  assert.equal(band.h, band.sourceH);
+  assert.ok(two.h > band.h, "띠가 늘면 상자도 그만큼 높아진다");
+  assert.throws(() => MNBoardTools.chartGroup({ type:"band", data:"가, 0\n나, 0" }), (error) => error.boardTool === true);
+});
+
+test("누적 막대는 쌓은 합까지 축을 늘리고 합계를 막대 위에 적는다", () => {
+  const stacked = MNBoardTools.chartGroup({ type:"stacked", data:"묶음, 앞, 뒤\n가, 5, 6" });
+  assert.equal(stacked.educationLabel, "누적 막대그래프");
+  const texts = stacked.items.filter((item) => item.type === "text").map((item) => item.text);
+  // 낱값만 보면 축이 6에서 끝나 막대가 그림 밖으로 넘친다 — 합계 11까지 눈금이 있어야 한다.
+  assert.ok(texts.includes("12"), "축 끝이 쌓은 합을 담는다");
+  assert.ok(!MNBoardTools.chartGroup({ type:"bar", data:"묶음, 앞, 뒤\n가, 5, 6" }).items
+    .some((item) => item.type === "text" && item.text === "12"), "묶음 막대는 낱값까지만 본다");
+  assert.ok(texts.includes("11"), "합계를 막대 위에 적는다");
+  // 한 칸에 막대는 하나뿐이고 묶음마다 칸이 하나씩 세로로 이어 붙는다(범례 색칩은 뺀다).
+  const boxes = stacked.items.filter((item) => item.type === "rect" && item.fill && Math.abs(item.x2 - item.x1) > 20);
+  assert.equal(boxes.length, 2);
+  assert.equal(boxes[0].x1, boxes[1].x1, "같은 칸에 쌓이므로 가로 자리가 같다");
+  // 음수는 0 아래로 쌓아 위아래가 섞이지 않는다.
+  const signed = MNBoardTools.chartGroup({ type:"stacked", data:"가, 5, -3" });
+  // 0 을 지나는 가로축(굵은 선)을 기준으로 양수 칸은 위, 음수 칸은 아래에 놓인다.
+  const zero = signed.items.find((item) => item.type === "line" && item.width === 1.8 && item.y1 === item.y2);
+  assert.ok(signed.items.some((item) => item.type === "rect" && item.fill && item.y1 >= zero.y1), "음수 칸은 0 아래");
+  assert.ok(signed.items.some((item) => item.type === "rect" && item.fill && item.y2 <= zero.y1), "양수 칸은 0 위");
+});
+
+test("도수분포다각형은 계급값을 이어 양 끝을 0으로 닫고, 누적을 켜면 누적도수분포곡선이 된다", () => {
+  const scores = "62\n71\n75\n78\n80\n83\n85\n88\n91\n95\n72\n77";
+  const polygon = MNBoardTools.chartGroup({ type:"freqpoly", data:scores, bins:4 });
+  assert.equal(polygon.educationLabel, "도수분포다각형");
+  const lines = polygon.items.filter((item) => item.type === "polyline");
+  assert.equal(lines.length, 1);
+  // 계급 4개 + 도수 0인 양 끝 2개.
+  assert.equal(lines[0].points.length, 6);
+  assert.equal(lines[0].points[0].y, lines[0].points[5].y, "양 끝은 같은 높이(도수 0)로 닫는다");
+  // 계급의 폭과 도수를 함께 읽도록 기둥을 옅게 깔아 둔다.
+  assert.equal(polygon.items.filter((item) => item.type === "rect" && item.fill).length, 4);
+
+  const ogive = MNBoardTools.chartGroup({ type:"freqpoly", data:scores, bins:4, cumulative:true });
+  assert.equal(ogive.educationLabel, "누적도수분포곡선");
+  const curve = ogive.items.find((item) => item.type === "polyline");
+  // 첫 계급의 왼쪽 끝에서 0으로 출발해 계급마다 오른쪽 끝값에 누적도수를 찍는다.
+  assert.equal(curve.points.length, 5);
+  for (let i = 1; i < curve.points.length; i++){
+    assert.ok(curve.points[i].y <= curve.points[i - 1].y, "누적도수는 줄지 않는다");
+  }
+  assert.ok(!ogive.items.some((item) => item.type === "rect" && item.fill), "누적곡선에는 기둥을 깔지 않는다");
+  // 가로축에는 계급값 대신 계급의 경계값을 적는다.
+  const marks = ogive.items.filter((item) => item.type === "text").map((item) => item.text);
+  assert.ok(marks.includes("62") && marks.includes("95"), "경계값이 축에 적힌다");
+  // 다시 고칠 때 쓰는 재료에 ‘누적’과 계급 수가 함께 남는다.
+  assert.equal(ogive.chartSpec.cumulative, true);
+  assert.equal(ogive.chartSpec.bins, 4);
+  assert.equal(MNBoardTools.chartGroup(ogive.chartSpec).items.length, ogive.items.length);
 });
 
 test("묶음 색을 골라 넘기면 그 색으로 그리고 차트에 함께 저장한다", () => {
@@ -459,6 +713,18 @@ test("차트·그래프 항목은 공용 렌더러가 그릴 수 있는 종류�
     MNBoardTools.chartGroup({ type:"bar", data:"가, 3\n나, 6" }),
     MNBoardTools.chartGroup({ type:"pie", data:"가, 3\n나, 6" }),
     MNBoardTools.chartGroup({ type:"box", data:"3\n6\n9\n12" }),
+    MNBoardTools.chartGroup({ type:"band", data:"가, 3\n나, 6" }),
+    MNBoardTools.chartGroup({ type:"barh", data:"가, 3\n나, 6" }),
+    MNBoardTools.chartGroup({ type:"bubble", data:"1, 3, 2\n2, 6, 5" }),
+    MNBoardTools.chartGroup({ type:"stacked", data:"묶음, 앞, 뒤\n가, 3, 6\n나, 5, 1" }),
+    MNBoardTools.chartGroup({ type:"freqpoly", data:"3\n6\n9\n12" }),
+    MNBoardTools.chartGroup({ type:"freqpoly", data:"3\n6\n9\n12", cumulative:true }),
+    MNBoardTools.plotGroup({ curves:[{ source:"x^2" }], xMin:-3, xMax:3, showDerivative:true }),
+    MNBoardTools.plotGroup({ mode:"parametric", curves:[{ x:"cos(t)", y:"sin(t)" }] }),
+    MNBoardTools.plotGroup({ mode:"polar", curves:[{ source:"2 + 2cos(θ)" }] }),
+    MNBoardTools.plotGroup({ mode:"implicit", curves:[{ source:"x^2 + y^2 = 9" }], xMin:-6, xMax:6 }),
+    MNBoardTools.plotGroup({ mode:"sequence", curves:[{ source:"2n + 1" }], tMin:1, tMax:8 }),
+    MNBoardTools.plotGroup({ curves:[{ source:"if(x < 0, -x, x^2)" }], xMin:-4, xMax:4 }),
     MNBoardTools.valueTableGroup({ curves:[{ source:"x^2" }], from:-2, to:2, step:1 }),
     MNBoardTools.statsSummaryGroup({ data:"3\n6\n9" }),
     MNBoardTools.frequencyTableGroup({ data:"3\n6\n9\n12" }),
@@ -696,6 +962,31 @@ test("화이트보드는 새 도구를 교구·그래프·차트 접점에 배�
   assert.match(whiteboardSource, /\["graph", "그래프"\], \["chart", "차트"\]/);
   assert.match(whiteboardSource, /MNBoardTools\.plotGroup\(spec\)/);
   assert.match(whiteboardSource, /MNBoardTools\.chartGroup\(readChartSpec/);
+  // 새 차트 종류는 칩 목록·색 자리·곁가지 토글 세 곳에 함께 배선해야 한다.
+  /* 칩 목록은 보기 좋은 차례로 다시 늘어놓을 수 있다 — 순서가 아니라 "있는지"만 본다
+     (예전엔 늘어놓은 차례를 통째로 박아 두어 종류를 하나 더 넣을 때마다 깨졌다). */
+  for (const chip of ['["stacked", "누적 막대"]', '["band", "띠그래프"]', '["freqpoly", "도수분포다각형"]',
+    '["barh", "가로 막대"]', '["bubble", "버블"]']){
+    assert.ok(whiteboardSource.includes(chip), `차트 종류 칩에 ${chip} 가 있어야 한다`);
+  }
+  assert.match(whiteboardSource, /cumulative:chartCumulative\.checked/);
+  assert.match(whiteboardSource, /chartType !== "histogram" && chartType !== "freqpoly"/);
+  assert.match(whiteboardSource, /chartType !== "pie" && chartType !== "band"/);
+  // 다시 그린 차트는 확대 비율만 물려받는다(높이가 달라지는 종류가 예전 상자에 눌리지 않게).
+  assert.match(whiteboardSource, /w:Math\.round\(\(Number\(group\.w\) \|\| 1\) \* scaleX\), h:Math\.round\(\(Number\(group\.h\) \|\| 1\) \* scaleY\)/);
+  // 그리는 방법(함수·매개변수·극좌표)은 칩·칸 감추기·슬라이더 감지 세 곳이 함께 움직여야 한다.
+  for (const chip of ['["parametric", "매개변수 x(t), y(t)"]', '["polar", "극좌표 r=f(θ)"]']){
+    assert.ok(whiteboardSource.includes(chip), `그리는 방법 칩에 ${chip} 가 있어야 한다`);
+  }
+  assert.match(whiteboardSource, /graphRows\.hidden = parametric; graphPairRows\.hidden = !parametric;/);
+  assert.match(whiteboardSource, /graphAnalysis\.hidden = curved; graphTableRow\.hidden = curved;/);
+  assert.match(whiteboardSource, /graphMode === "implicit" \? \["x", "y"\] : graphMode === "sequence" \? \["n"\] : \["x"\]/);
+  // 같은 칸을 t(θ)와 항의 번호 n 이 나눠 쓰므로 이름표도 함께 갈아 달아야 한다.
+  assert.match(whiteboardSource, /graphTMin\.caption\.textContent = graphMode === "sequence" \? "n" : "t"/);
+  for (const chip of ['["implicit", "음함수 f(x,y)=0"]', '["sequence", "수열 aₙ"]']){
+    assert.ok(whiteboardSource.includes(chip), `그리는 방법 칩에 ${chip} 가 있어야 한다`);
+  }
+  assert.match(whiteboardSource, /showDerivative:graphDerivative\.box\.checked, derivativeCurve:target/);
   // 측정 라벨은 그릴 때마다 다시 재고, 저장·녹화 직전에 모델에도 같은 값을 적는다.
   assert.match(whiteboardSource, /drawItem\(isMeasureItem\(it\) \? \(liveMeasureItem\(it\) \|\| it\) : isVectorSumItem\(it\) \? \(liveVectorSumItem\(it\) \|\| it\) : it\)/);
   assert.match(whiteboardSource, /const recordCommit = \(\) => \{\s*\n\s*syncMeasureItems\(\);/);
