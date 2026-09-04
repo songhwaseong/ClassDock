@@ -624,8 +624,178 @@ function applyDocEncodingOnSave(value, ownerDoc){
   return out;
 }
 
-// 구조화 파일(JSON·XML·YAML) 편집 중 유효성 진단. 편집기 상단에 "✓ 유효" 또는 오류 위치를 보여준다.
-// 반환: { level:"ok"|"warn"|"error", text } 또는 null(진단 대상 아님).
+/* ===== 구조화 파일(JSON·XML·YAML) 편집 중 유효성 진단 =====
+   파서가 주는 원문은 길이를 예측할 수 없어서(크롬 XML 오류는 영어로 두세 줄이다) 도구막대에 그대로 넣으면
+   버튼들이 다음 줄로 접힌다. 그래서 배지에는 "⚠ XML 오류 · 11번째 줄"처럼 짧은 요약만 두고, 자세한 설명은
+   편집기 바로 위 진단 띠(.text-edit-diagbar)로 내린다.
+   반환: { level:"ok"|"warn"|"error", text(배지), detail(띠 설명), raw(파서 원문), line, column } 또는 null. */
+
+// 파서 원문에서 뜻을 알아본 것만 교실에서 읽히는 한국어로 옮긴다. 못 알아본 문구는 원문 그대로 보여준다.
+function diagnosticHint(table, reason){
+  for (const [re, make] of table){ const m = String(reason || "").match(re); if (m) return make(m); }
+  return "";
+}
+
+const XML_ERROR_HINTS = [
+  [/Opening and ending tag mismatch:\s*([\w:.-]+)\s+line\s+(\d+)\s+and\s+([\w:.-]+)/i,
+    (m) => "여는 태그 <" + m[1] + "> (" + m[2] + "번째 줄)와 닫는 태그 </" + m[3] + "> 가 서로 안 맞아요."],
+  [/Premature end of data in tag ([\w:.-]+) line (\d+)/i,
+    (m) => "<" + m[1] + "> (" + m[2] + "번째 줄)를 닫지 않은 채 문서가 끝났어요."],
+  [/Extra content at the end of the document/i,
+    () => "가장 바깥 태그가 닫힌 뒤에 내용이 더 있어요 — XML 은 전체를 감싸는 태그가 하나여야 해요."],
+  [/Couldn't find end of Start Tag ([\w:.-]+)/i,
+    (m) => "시작 태그 <" + m[1] + " 가 > 로 닫히지 않았어요."],
+  [/Start tag expected/i, () => "여는 태그(<...>)가 있어야 할 자리예요."],
+  [/error parsing attribute name/i,
+    () => "속성 이름을 읽을 수 없어요 — 태그 이름과 속성 사이에 빈칸이 있는지, 속성 이름에 =·따옴표가 잘못 들어가지 않았는지 보세요."],
+  [/xmlParseEntityRef|EntityRef/i, () => "& 를 그대로 쓸 수 없어요 — &amp; 로 적어 주세요."],
+  [/Specification mandates value for attribute ([\w:.-]+)/i,
+    (m) => "속성 " + m[1] + " 에 값이 없어요 — " + m[1] + "=\"값\" 처럼 적어야 해요."],
+  [/AttValue|attributes construct error|Unescaped '<' not allowed in attributes values/i,
+    () => "속성을 적는 방식이 잘못됐어요 — 값을 큰따옴표로 감쌌는지 보세요."],
+  [/Namespace prefix ([\w:.-]+) on ([\w:.-]+) is not defined/i,
+    (m) => "이름공간 접두사 " + m[1] + ": 를 선언하지 않았어요 (xmlns:" + m[1] + "=\"...\" 가 필요해요)."],
+  [/Opening and ending tag mismatch/i, () => "여는 태그와 닫는 태그가 서로 안 맞아요."]
+];
+
+const JSON_ERROR_HINTS = [
+  [/Unexpected end of (?:JSON )?input|end of data/i, () => "괄호나 따옴표를 닫지 않은 채 파일이 끝났어요."],
+  [/Expected double-quoted property name|expected property name/i,
+    () => "속성 이름은 큰따옴표로 감싸야 해요 — 마지막 항목 뒤에 쉼표가 남아 있지 않은지도 보세요."],
+  [/Expected ',' or|expected ',' or/i, () => "값과 값 사이에 쉼표가 빠졌거나, 괄호를 덜 닫았어요."],
+  [/Unexpected non-whitespace character after/i,
+    () => "JSON 값이 끝난 뒤에 내용이 더 있어요 — 전체를 { } 하나로 감싸야 해요."],
+  [/Bad control character|Bad escaped character|Bad Unicode escape|control character in string/i,
+    () => "문자열 안에 그대로 쓸 수 없는 문자가 있어요 — 줄바꿈은 \\n, 따옴표는 \\\" 로 적어 주세요."],
+  [/single quote|Single quote/i, () => "JSON 은 작은따옴표를 쓸 수 없어요 — 큰따옴표로 바꿔 주세요."],
+  [/Unexpected token '?(\S)'?/i, (m) => "여기에 " + m[1] + " 가 올 수 없어요 — 쉼표·괄호·따옴표를 살펴보세요."]
+];
+
+// XML 파서 원문에서 줄·칸과 까닭을 뽑는다(크롬은 영어 한 줄, 파이어폭스는 번역문 — 둘 다 받아 준다).
+function parseXmlParserError(raw){
+  const s = String(raw || "").replace(/\s+/g, " ").trim()
+    .replace(/^This page contains the following errors:\s*/i, "")
+    .replace(/\s*Below is a rendering of the page up to the first error\.?\s*$/i, "");
+  const m = s.match(/error on line (\d+) at column (\d+):\s*(.*)$/i);
+  if (m) return { line: +m[1], column: +m[2], reason: m[3].trim() };
+  const lm = s.match(/(?:줄|line)\s*(\d+)/i), cm = s.match(/(?:열|칸|column)\s*(\d+)/i);
+  return { line: lm ? +lm[1] : 0, column: cm ? +cm[1] : 0,
+    reason: s.replace(/^XML\s*(?:구문 분석 오류|Parsing Error)\s*:?\s*/i, "").trim() };
+}
+
+/* ===== HTML 태그 짝 검사 =====
+   HTML 은 XML 이 아니다. <meta>·<br> 은 닫지 않는 게 정상이고 <li>·<td>·<p> 는 끝 태그를 생략해도 된다.
+   그래서 XML 파서로 재면 멀쩡한 문서가 전부 오류가 되고, 그런 경보는 곧 무시당한다. 여기서는 표준이
+   정한 두 가지 예외(빈 요소·끝 태그 생략 가능 요소)를 알고서 '확실히 틀린 것'만 짚는다:
+     1) 열린 적 없는 닫는 태그   2) 안쪽 태그를 안 닫고 바깥을 닫음   3) 끝까지 안 닫힌 태그
+   <script>·<style> 안은 markup 이 아니므로 통째로 건너뛴다 — 안 그러면 if (a < b) 가 태그로 읽힌다. */
+const HTML_VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+  "param", "source", "track", "wbr", "basefont", "frame", "keygen"]);
+const HTML_RAW_TEXT_TAGS = new Set(["script", "style", "textarea", "title"]);
+/* 그 안쪽 끝을 찾을 때 쓰는, 대소문자를 가리지 않는 정규식. toLowerCase() 사본을 만들어 그 인덱스를
+   원본에 쓰면 안 된다 — 'İ'(U+0130)처럼 소문자가 두 글자가 되는 문자가 하나만 있어도 그 뒤 위치가
+   통째로 밀려, <script> 의 끝을 영영 못 찾는다(34MB 오프라인 빌드에서 실제로 겪었다). */
+const HTML_RAW_TEXT_CLOSE_RE = {
+  script: /<\/script/gi, style: /<\/style/gi, textarea: /<\/textarea/gi, title: /<\/title/gi
+};
+const HTML_OPTIONAL_END_TAGS = new Set(["html", "head", "body", "p", "li", "dt", "dd", "rt", "rp",
+  "optgroup", "option", "colgroup", "caption", "thead", "tbody", "tfoot", "tr", "td", "th"]);
+
+// 태그 안의 따옴표를 지키며 '>' 를 찾는다 — <div title="a > b"> 를 반으로 자르지 않기 위해서.
+function findHtmlTagEnd(src, from){
+  let quote = "";
+  for (let i = from; i < src.length; i++){
+    const c = src[i];
+    if (quote){ if (c === quote) quote = ""; continue; }
+    if (c === '"' || c === "'"){ quote = c; continue; }
+    if (c === ">") return i;
+  }
+  return -1;
+}
+
+// 태그 안(따옴표 밖)의 '<' — HTML 은 속성값 밖에 '<' 를 허용하지 않으므로, 앞 태그의 '>' 를 빠뜨린 표시다.
+function hasUnquotedLt(s){
+  let quote = "";
+  for (let i = 0; i < s.length; i++){
+    const c = s[i];
+    if (quote){ if (c === quote) quote = ""; continue; }
+    if (c === '"' || c === "'"){ quote = c; continue; }
+    if (c === "<") return true;
+  }
+  return false;
+}
+
+function posToLineColumn(src, index){
+  const head = src.slice(0, Math.max(0, Math.min(index, src.length)));
+  return { line: (head.match(/\n/g) || []).length + 1, column: head.length - head.lastIndexOf("\n") };
+}
+
+function htmlTagPairDiagnostic(src){
+  // 템플릿 문법({% if %} … {% endif %})은 태그를 조건부로 여닫으므로 짝이 안 맞는 게 정상이다 — 검사하지 않는다.
+  if (/\{%[\s\S]{0,400}?%\}/.test(src)) return null;
+  const fail = (index, detail) => {
+    const at = posToLineColumn(src, index);
+    return { level:"error", text:"⚠ HTML 오류 · " + at.line + "번째 줄", detail, raw:"", line: at.line, column: at.column };
+  };
+  const stack = [];                      // 아직 안 닫힌 여는 태그들 { name, index }
+  let i = 0;
+  while (i < src.length){
+    const lt = src.indexOf("<", i);
+    if (lt < 0) break;
+    const next = src[lt + 1];
+    if (next === "!"){                   // 주석·DOCTYPE·CDATA
+      if (src.startsWith("<!--", lt)){ const end = src.indexOf("-->", lt + 4); i = end < 0 ? src.length : end + 3; }
+      else { const end = findHtmlTagEnd(src, lt + 2); i = end < 0 ? src.length : end + 1; }
+      continue;
+    }
+    if (next === "?"){ const end = src.indexOf(">", lt + 2); i = end < 0 ? src.length : end + 1; continue; }
+    const closing = next === "/";
+    const nameStart = lt + (closing ? 2 : 1);
+    const named = /^[a-zA-Z][^\s/>]*/.exec(src.slice(nameStart, nameStart + 100));
+    if (!named){ i = lt + 1; continue; } // '<' 뒤에 이름이 없으면 그냥 글자다(a < b 처럼)
+    const name = named[0].toLowerCase();
+    const tagEnd = findHtmlTagEnd(src, nameStart + named[0].length);
+    if (tagEnd < 0) return fail(lt, (closing ? "닫는 태그 </" : "시작 태그 <") + name + " 가 > 로 닫히지 않았어요.");
+    if (hasUnquotedLt(src.slice(nameStart, tagEnd)))
+      return fail(lt, (closing ? "닫는 태그 </" : "시작 태그 <") + name + " 에 > 가 빠졌어요 — 다음 태그가 그 안으로 빨려 들어갔어요.");
+    if (closing){
+      // </br> 처럼 빈 요소를 닫는 건 브라우저도 그냥 넘긴다 — 구조가 틀어지지 않으므로 짚지 않는다.
+      if (HTML_VOID_TAGS.has(name)){ i = tagEnd + 1; continue; }
+      let at = -1;
+      for (let k = stack.length - 1; k >= 0; k--) if (stack[k].name === name){ at = k; break; }
+      if (at < 0) return fail(lt, "닫는 태그 </" + name + "> 와 짝이 되는 <" + name + "> 가 앞에 없어요.");
+      // 사이에 낀 것이 '끝 태그를 생략해도 되는' 요소면 정상(<ul><li>a<li>b</ul>), 아니면 안 닫은 것이다.
+      for (let k = stack.length - 1; k > at; k--){
+        if (HTML_OPTIONAL_END_TAGS.has(stack[k].name)) continue;
+        // 여는 태그의 줄은 배지에 이미 나오므로 여기서는 되풀이하지 않고, 마주친 닫는 태그 자리만 알려 준다.
+        const closeAt = posToLineColumn(src, lt);
+        return fail(stack[k].index, "<" + stack[k].name + "> 이 닫히지 않았어요 — "
+          + closeAt.line + "번째 줄 </" + name + "> 보다 먼저 </" + stack[k].name + "> 가 있어야 해요.");
+      }
+      stack.length = at;
+      i = tagEnd + 1; continue;
+    }
+    const selfClosed = src[tagEnd - 1] === "/";
+    if (!selfClosed && !HTML_VOID_TAGS.has(name)) stack.push({ name, index: lt });
+    i = tagEnd + 1;
+    // <script>·<style>·<textarea>·<title> 안은 글자일 뿐이다 — 닫는 태그 앞까지 통째로 건너뛴다.
+    if (!selfClosed && HTML_RAW_TEXT_TAGS.has(name)){
+      const closeRe = HTML_RAW_TEXT_CLOSE_RE[name];
+      closeRe.lastIndex = i;
+      const found = closeRe.exec(src);
+      i = found ? found.index : src.length;
+    }
+  }
+  const leftover = stack.filter((entry) => !HTML_OPTIONAL_END_TAGS.has(entry.name));
+  if (leftover.length){
+    const last = leftover[leftover.length - 1];     // 가장 안쪽 — 대개 여기가 빠뜨린 자리다
+    const more = leftover.length > 1 ? " (닫히지 않은 태그가 " + (leftover.length - 1) + "개 더 있어요)" : "";
+    return fail(last.index, "<" + last.name + "> 가 닫히지 않은 채 문서가 끝났어요 — </" + last.name + "> 를 넣어 주세요." + more);
+  }
+  return { level:"ok", text:"✓ 태그 짝이 맞는 HTML",
+    detail:"여는 태그와 닫는 태그의 짝만 확인했어요 — 전체 문법을 검사한 건 아니에요." };
+}
+
 function structuredEditDiagnostic(ext, prof, text){
   const src = String(text == null ? "" : text);
   const lineAt = (pos) => { const p = Math.max(0, Math.min(pos, src.length)); return (src.slice(0, p).match(/\n/g) || []).length + 1; };
@@ -633,12 +803,20 @@ function structuredEditDiagnostic(ext, prof, text){
     if (!src.trim()) return { level:"warn", text:"빈 파일" };
     try { JSON.parse(src); return { level:"ok", text:"✓ 유효한 JSON" }; }
     catch(e){
-      const msg = String((e && e.message) || e);
-      const m = msg.match(/position (\d+)/i);
-      const lm = msg.match(/line (\d+)/i);
-      const where = lm ? ("" + lm[1] + "번째 줄") : (m ? (lineAt(+m[1]) + "번째 줄") : "");
-      return { level:"error", text:"⚠ JSON 오류" + (where ? " · " + where : "") + " · " + msg.replace(/^JSON\.parse:\s*/i, "").replace(/ in JSON at position \d+/i, "") };
+      const msg = String((e && e.message) || e).replace(/^JSON\.parse:\s*/i, "");
+      const lm = msg.match(/line (\d+)/i), cm = msg.match(/column (\d+)/i), pm = msg.match(/position (\d+)/i);
+      const line = lm ? +lm[1] : (pm ? lineAt(+pm[1]) : 0);
+      const reason = msg.replace(/\s*in JSON at position \d+(?:\s*\(line \d+ column \d+\))?/i, "")
+        .replace(/\s*at line \d+ column \d+ of the JSON data\.?/i, "").trim();
+      return { level:"error", text:"⚠ JSON 오류" + (line ? " · " + line + "번째 줄" : ""),
+        detail: diagnosticHint(JSON_ERROR_HINTS, msg) || reason, raw: reason, line, column: cm ? +cm[1] : 0 };
     }
+  }
+  // .html/.htm 은 강조 프로파일만 xml 을 빌려 쓴다 — XML 잣대로 재면 멀쩡한 문서가 전부 오류가 되므로
+  // HTML 규칙을 아는 태그 짝 검사로 따로 본다(.xhtml 은 진짜 XML 이라 아래 XML 검사에 남는다).
+  if (ext === "html" || ext === "htm"){
+    if (!src.trim()) return { level:"warn", text:"빈 파일" };
+    return htmlTagPairDiagnostic(src);
   }
   if (prof === "xml"){
     if (!src.trim()) return { level:"warn", text:"빈 파일" };
@@ -646,18 +824,26 @@ function structuredEditDiagnostic(ext, prof, text){
       const doc = new DOMParser().parseFromString(src, "application/xml");
       const err = doc.querySelector("parsererror");
       if (!err) return { level:"ok", text:"✓ 잘 짜인 XML" };
-      const detail = (err.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160);
-      return { level:"error", text:"⚠ XML 오류 · " + detail };
-    } catch(e){ return { level:"error", text:"⚠ XML 오류 · " + String((e && e.message) || e) }; }
+      const info = parseXmlParserError(err.textContent);
+      return { level:"error", text:"⚠ XML 오류" + (info.line ? " · " + info.line + "번째 줄" : ""),
+        detail: diagnosticHint(XML_ERROR_HINTS, info.reason) || info.reason, raw: info.reason,
+        line: info.line, column: info.column };
+    } catch(e){
+      const reason = String((e && e.message) || e);
+      return { level:"error", text:"⚠ XML 오류", detail: reason, raw: reason, line:0, column:0 };
+    }
   }
   if (ext === "yaml" || ext === "yml"){
     // YAML 정식 파서는 번들하지 않았다. 확실히 판단할 수 있는 들여쓰기 탭만 오류로 표시하고,
     // 나머지는 성공(초록색)으로 오인되지 않도록 간이 검사 경고로 분리한다.
     const lines = src.split("\n");
     for (let i = 0; i < lines.length; i++){
-      if (/^ *\t/.test(lines[i])) return { level:"error", text:"⚠ YAML: " + (i + 1) + "번째 줄 들여쓰기에 탭 문자 — 공백으로 바꾸세요" };
+      if (/^ *\t/.test(lines[i])) return { level:"error", text:"⚠ YAML 오류 · " + (i + 1) + "번째 줄",
+        detail:"들여쓰기에 탭 문자가 있어요 — YAML 은 탭으로 들여쓸 수 없으니 공백으로 바꿔 주세요.",
+        raw:"", line: i + 1, column: 0 };
     }
-    return { level:"warn", text:"YAML 간이 검사 · 탭 들여쓰기 없음(전체 문법 검증 아님)" };
+    return { level:"warn", text:"YAML 간이 검사 통과",
+      detail:"들여쓰기에 탭 문자가 없다는 것만 확인했어요 — 전체 문법을 검증한 건 아니에요." };
   }
   return null;
 }
@@ -1505,9 +1691,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       if (editor.setWrap) editor.setWrap(textWrapEnabled());
       fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
       const status = document.createElement("span"); status.className = "run-status";
-      const diag = document.createElement("span"); diag.className = "text-edit-diag"; diag.hidden = true;   // JSON·XML·YAML 유효성
-      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status, diag);
-      attachTextStats(editor, bar, diag);      // 상태 문구 다음, 구조 진단 배지 앞
+      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status);
+      attachTextStats(editor, bar, null);      // 상태 문구 다음 — 왼쪽 묶음(저장 상태·문서 정보)의 끝
       attachSpellcheck(editor, bar, saveName);
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
       if (lightEdit){
@@ -1524,15 +1709,37 @@ async function renderCode(file, host, ext, profile, runCtx){
         encNote.title = "이 파일은 " + enc0.label + " 인코딩이에요. 저장하면 UTF-8 로 바뀝니다(개행 문자는 원본 유지).";
         bar.appendChild(encNote);
       }
-      host.appendChild(bar); host.appendChild(editor.host);
+      /* 구조 진단 띠(JSON·XML·YAML) — 도구막대가 아니라 편집기 바로 위, 편집기와 같은 폭으로 놓는다.
+         도구막대에 두면 문구 길이에 따라 버튼이 다음 줄로 접히고(.run-bar 는 flex-wrap 이라 축소보다
+         줄바꿈이 먼저다), 도구막대에 짧은 배지를 따로 두면 이 띠와 같은 말을 두 번 하게 된다.
+         그래서 통과·경고·오류를 이 띠 하나가 다 맡는다 — 구조 파일이면 늘 한 자리를 지켜서
+         오류가 났다 사라져도 편집기가 위아래로 튀지 않는다. 줄 번호를 알면 그 줄로 가는 버튼도 단다. */
+      const diagBar = document.createElement("div"); diagBar.className = "text-edit-diagbar"; diagBar.hidden = true;
+      diagBar.setAttribute("role", "status");
+      const diagText = document.createElement("span"); diagText.className = "text-edit-diagbar-body";
+      const diagGo = document.createElement("button"); diagGo.type = "button"; diagGo.className = "text-edit-diagbar-go"; diagGo.hidden = true;
+      let diagLine = 0;
+      diagGo.addEventListener("click", () => {
+        if (!diagLine || typeof editor.focusLine !== "function") return;
+        editor.focusLine(diagLine);
+      });
+      diagBar.append(diagText, diagGo);
+      host.appendChild(bar); host.appendChild(diagBar); host.appendChild(editor.host);
       if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
       registerEditorFont(editor.host);
       let diagTimer = 0;
       const runDiagnostic = () => {
         const d = structuredEditDiagnostic(ext, prof, editor.getValue());
-        if (!d){ diag.hidden = true; return; }
-        diag.hidden = false; diag.textContent = d.text; diag.dataset.level = d.level;
-        diag.title = d.level === "ok" ? "구조 검사를 통과했어요." : d.text;
+        if (!d){ diagBar.hidden = true; diagLine = 0; return; }
+        diagBar.hidden = false; diagBar.dataset.level = d.level;
+        const text = d.text + (d.column ? " " + d.column + "칸" : "") + (d.detail ? " · " + d.detail : "");
+        // 같은 문구면 다시 쓰지 않는다 — icons.js 의 관찰자가 ⚠·✓ 를 SVG 로 바꾸느라 타이핑 내내 헛도는 걸 막는다.
+        if (diagText.dataset.text !== text){ diagText.dataset.text = text; diagText.textContent = text; }
+        // 파서 원문(영어 두세 줄)은 늘어놓지 않는다 — 우리 풀이가 모자랄 때만 마우스를 올려 확인한다.
+        diagBar.title = d.raw || "";
+        diagLine = (d.level === "error" && typeof editor.focusLine === "function") ? (d.line || 0) : 0;
+        diagGo.hidden = !diagLine;
+        if (diagLine) diagGo.textContent = diagLine + "번째 줄로";
       };
       const scheduleDiagnostic = () => { clearTimeout(diagTimer); diagTimer = setTimeout(runDiagnostic, 300); };
 

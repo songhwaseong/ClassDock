@@ -57,7 +57,7 @@ test("줄 정리 메뉴는 도구막대에 접혀 들어가고 모든 항목이 
 
   // 도구막대에는 버튼 하나(줄 정리)로만 나오고, 예전 '중복 줄 삭제' 단독 버튼은 그 안으로 들어갔다.
   assert.match(viewer, /const tidyMenu = buildLineTidyMenu\(\(\) => editor\);/);
-  assert.match(viewer, /bar\.append\(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status, diag\);/);
+  assert.match(viewer, /bar\.append\(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status\);/);
   assert.ok(!/dedupeBtn/.test(viewer.slice(viewer.indexOf("const showEdit"), viewer.indexOf("const showPreview"))),
     "편집 도구막대에 중복 줄 삭제 단독 버튼이 남아 있으면 안 된다");
 
@@ -105,5 +105,6 @@ test("문서 정보는 document 리스너를 남기지 않는다", () => {
   // selectionchange 는 document 에만 오므로, 쓰면 편집기를 닫아도 남아 샌다. textarea 위 이벤트로 대신한다.
   assert.ok(!/document\.addEventListener/.test(block));
   assert.match(block, /for \(const type of \["input", "keyup", "mouseup", "focus", "select"\]\) ta\.addEventListener/);
-  assert.match(viewer, /attachTextStats\(editor, bar, diag\);/);
+  // 편집 도구막대 왼쪽 묶음(저장 상태 다음)에 붙는다 — 구조 진단은 도구막대를 떠나 편집기 위 띠로 갔다.
+  assert.match(viewer, /attachTextStats\(editor, bar, null\);/);
 });
