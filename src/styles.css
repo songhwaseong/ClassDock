@@ -3709,6 +3709,32 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     .xlsx-tool-menu-panel{position:fixed;top:20%;left:12px!important;right:12px!important;width:auto;max-width:none}
   }
   /* 편집 가능 셀: 숫자 우측정렬, 편집 중엔 텍스트 선택·캐럿 허용(셀렉트 user-select:none 무시) */
+
+  /* 엑셀 작업 공간: 도구는 고정하고 표만 스크롤한다. */
+  .office.xlsx-workspace{padding:8px;box-sizing:border-box;overflow:hidden;flex-direction:column;gap:6px;min-width:0;min-height:0}
+  .office.xlsx-workspace:not([hidden]),
+  #content.study-mode .xlsx-workspace.study-reference,
+  #content.study-mode .xlsx-workspace.study-work{display:flex!important}
+  .xlsx-workspace>.xlsx-export,.xlsx-workspace>.xlsx-editbar,.xlsx-workspace>.xlsx-formulabar,
+  .xlsx-workspace>.sheet-selectbar,.xlsx-workspace>.xlsx-tabs{
+    flex:0 0 auto;width:100%;max-width:none;min-width:0;box-sizing:border-box;margin:0}
+  .xlsx-workspace>.xlsx-export{order:0;justify-content:flex-start}
+  .xlsx-workspace>.xlsx-editbar{order:1}
+  .xlsx-workspace>.xlsx-formulabar{order:2}
+  .xlsx-workspace>.sheet-selectbar{order:3;justify-content:flex-start}
+  .xlsx-workspace>.xlsx-sheet,.xlsx-workspace>.xlsx-sheet.xlsx-virtualized{
+    order:4;flex:1 1 0;width:100%;max-width:none;min-width:0;height:auto;min-height:0;max-height:none;
+    margin:0;border:1px solid var(--border);border-radius:3px;box-sizing:border-box;box-shadow:none;overscroll-behavior:contain}
+  .xlsx-workspace>.xlsx-tabs{order:5;flex-wrap:nowrap;overflow-x:auto;padding-top:2px}
+  .xlsx-workspace>.xlsx-tabs>.xlsx-tab{flex:none;white-space:nowrap;border-radius:0 0 6px 6px}
+  .xlsx-workspace>[hidden]{display:none!important}
+  @media print{
+    .office.xlsx-workspace:not([hidden]){display:block!important;overflow:visible;padding:0}
+    .xlsx-workspace>.xlsx-sheet{height:auto;overflow:visible}
+    .xlsx-workspace>.xlsx-export,.xlsx-workspace>.xlsx-editbar,.xlsx-workspace>.xlsx-formulabar,
+    .xlsx-workspace>.sheet-selectbar,.xlsx-workspace>.xlsx-tabs{display:none!important}
+  }
+
   .xlsx-sheet td.num{text-align:right;font-variant-numeric:tabular-nums}
   .selectable-sheet td.editing{user-select:text!important;cursor:text;background:#fffbeb;outline:2px solid var(--accent);outline-offset:-2px}
   [data-theme="dark"] .selectable-sheet td.editing{background:#1e293b}

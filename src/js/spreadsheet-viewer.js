@@ -1113,8 +1113,9 @@ function setupSheetResize(sheet, table, colRow, rows, label){
   if (!colHeads.length) return;
 
   // 자동 레이아웃 상태에서 현재 렌더된 폭을 먼저 측정 → 고정 레이아웃으로 바꿔도 반사(리플로우)가 없다.
-  const rowHeadW = Math.max(MIN_W, Math.round((corner && corner.getBoundingClientRect().width) || 46));
-  const measured = colHeads.map(th => Math.max(MIN_W, Math.round(th.getBoundingClientRect().width) || 80));
+  const rowHeadW = sheet.closest(".xlsx-workspace") ? 46 : Math.max(MIN_W, Math.round((corner && corner.getBoundingClientRect().width) || 46));
+  const workspace = !!sheet.closest(".xlsx-workspace");
+  const measured = colHeads.map(th => workspace ? 80 : Math.max(MIN_W, Math.round(th.getBoundingClientRect().width) || 80));
 
   const colgroup = document.createElement("colgroup");
   const headCol = document.createElement("col");
@@ -1611,7 +1612,46 @@ function spreadsheetVirtualWindow(totalRows, scrollTop, viewportHeight, rowHeigh
   };
 }
 
+// 화면용 빈 셀은 데이터 범위에서 제외한다. 입력·수식·서식이 생기면 실제 셀로 취급한다.
+function spreadsheetWorkspaceBounds(model){
+  let rows = 1, cols = 1;
+  (model || []).forEach((row, r) => (row || []).forEach((cell, c) => {
+    if (!cell) return;
+    if (cell.workspaceBlank && (cell.v == null || cell.v === "") && cell.xv == null
+      && !cell.f && !cell.nf && !cell.dv && !Object.keys(cell.style || {}).length) return;
+    rows = Math.max(rows, r + 1); cols = Math.max(cols, c + 1);
+  }));
+  return { rows, cols };
+}
+
+function spreadsheetDataModel(model){
+  const { rows, cols } = spreadsheetWorkspaceBounds(model);
+  return (model || []).slice(0, rows).map(row => row.slice(0, cols));
+}
+
+function spreadsheetEnsureWorkspace(model, viewportWidth=0){
+  if (!model || !model.length) return false;
+  const bounds = spreadsheetWorkspaceBounds(model);
+  const oldRows = model.length, oldCols = model[0].length;
+  // 큰 파일에 빈 칸을 곱해서 붙이지 않도록 한 번에 추가하는 셀 수를 제한한다.
+  const budget = 12000;
+  const wantCols = Math.min(16384, Math.max(26, Math.ceil(viewportWidth / 80) + 4, bounds.cols + 8));
+  const cols = oldCols + Math.max(0, Math.min(wantCols - oldCols, Math.floor(budget / oldRows)));
+  const remaining = budget - (cols - oldCols) * oldRows;
+  const wantRows = Math.min(1048576, Math.max(40, bounds.rows + 16));
+  const rows = oldRows + Math.max(0, Math.min(wantRows - oldRows, Math.floor(remaining / Math.max(1, cols))));
+  if (rows === oldRows && cols === oldCols) return false;
+  const blank = () => ({ v:"", xv:null, nf:null, style:{}, f:null, workspaceBlank:true });
+  // 행 배열 교체로 CSV의 copy-on-write 되돌리기 기록도 보존한다.
+  if (cols > oldCols) model.forEach((row, r) => {
+    model[r] = row.concat(Array.from({ length:cols - row.length }, blank));
+  });
+  while (model.length < rows) model.push(Array.from({ length:cols }, blank));
+  return true;
+}
+
 function writeStructuredSpreadsheetModel(ws, model, merges){
+  model = spreadsheetDataModel(model);
   const existingMerges = (ws && ws.model && Array.isArray(ws.model.merges)) ? ws.model.merges.slice() : [];
   existingMerges.forEach(range => { try { ws.unMergeCells(range); } catch(_){} });
   if (ws.rowCount > model.length) ws.spliceRows(model.length + 1, ws.rowCount - model.length);
@@ -1653,6 +1693,7 @@ async function renderXlsx(file, host, doc){
     renderCsvPreview(smartDecodeText(bytes), host, file.name, doc);
     return;
   }
+  host.classList.add("xlsx-workspace");
   let wb;
   if (csvFastAoa){
     const rows = Math.max(1, csvFastAoa.length);
@@ -1706,7 +1747,7 @@ async function renderXlsx(file, host, doc){
     const model = exModels[name];
     if (!model) return wb.Sheets[name];
     try { maybeRecalc(name); } catch(_){}
-    const aoa = model.map(row => row.map(cell => {
+    const aoa = spreadsheetDataModel(model).map(row => row.map(cell => {
       const val = cell ? cell.v : null;
       if (val == null || val === "") return null;
       if (typeof val === "object" && !(val instanceof Date)) return dispCell(cell);   // 리치텍스트 등은 표시 문자열로
@@ -1801,7 +1842,7 @@ async function renderXlsx(file, host, doc){
   const ensureSpreadsheetMedia = async () => {
     if (spreadsheetMediaPrepared) return;
     spreadsheetMediaPrepared = true;
-    if (packageImageInfo.hasDrawingParts){
+    if (!csvFastAoa && /\.xlsx$/i.test(file.name)){
       const workbook = await ensureExWb();
       if (workbook){
         wb.SheetNames.forEach(name => {
@@ -1868,7 +1909,7 @@ async function renderXlsx(file, host, doc){
   if (doc) doc.sheetRows = () => {
     const model = exModels[currentSheet];
     if (!model) return null;
-    return model.map(row => {
+    return spreadsheetDataModel(model).map(row => {
       const cells = row || [];
       const out = [];
       for (let c = 0; c < cells.length; c++) out.push(cells[c] ? dispCell(cells[c]) : "");
@@ -1986,6 +2027,7 @@ async function renderXlsx(file, host, doc){
     editedCells[name] = new Map();
     styledCells[name] = new Map();
     exModels[name] = ws ? buildExModel(ws, name) : [[blankCell()]];
+    if (ws) sourceLayoutSheets.set(name, spreadsheetWorksheetDisplayLayout(w, ws.name));
     if (sheetsWithFormula.size) recalcAll();   // 로드 직후 결과를 한 번 새로 계산(시트 간 참조 포함)
     return exModels[name];
   };
@@ -3083,6 +3125,7 @@ async function renderXlsx(file, host, doc){
         f: s.f || null
       };
       if (s.dv) out.dv = cloneSpreadsheetValue(s.dv);
+      if (s.workspaceBlank) out.workspaceBlank = true;
       return out;
     }));
   };
@@ -3345,7 +3388,8 @@ async function renderXlsx(file, host, doc){
     // 고유값 수집(표시 텍스트 기준, 500개 상한) — 첫 행 머리글은 값 목록에서 제외
     const counts = new Map();
     let truncated = false;
-    for (let r = head; r < model.length; r++){
+    const dataRows = spreadsheetWorkspaceBounds(model).rows;
+    for (let r = head; r < dataRows; r++){
       const s = model[r] && model[r][c];
       const key = s ? dispCell(s) : "";
       if (!counts.has(key) && counts.size >= 500){ truncated = true; continue; }
@@ -3527,7 +3571,7 @@ async function renderXlsx(file, host, doc){
     });
   };
   const renderVirtualModel = (name, editable) => {
-    const model = exModels[name];
+    const model = editable ? exModels[name] : spreadsheetDataModel(exModels[name]);
     const rowIndexes = matchingModelRows(model, editable);
     const rowHeight = 29, overscan = 14;
     let lastStart = -1, frame = 0, disposed = false;
@@ -3557,9 +3601,12 @@ async function renderXlsx(file, host, doc){
       if (!frame) frame = requestAnimationFrame(() => draw(false));
     };
     sheet.addEventListener("scroll", onScroll);
+    const resize = typeof ResizeObserver === "function" ? new ResizeObserver(() => draw(true)) : null;
+    if (resize) resize.observe(sheet);
     sheet._xlsxVirtualCleanup = () => {
       disposed = true;
       sheet.removeEventListener("scroll", onScroll);
+      if (resize) resize.disconnect();
       if (frame) cancelAnimationFrame(frame);
       delete sheet._xlsxVirtualCleanup;
     };
@@ -3887,7 +3934,7 @@ async function renderXlsx(file, host, doc){
     if (exModels[name]){                          // 편집한 적 있으면 모델 값으로(편집 반영). 서식 표시는 유지, 색/병합은 보기에선 단순화.
       maybeRecalc(name);
       if (virtualCsvEditor){ renderVirtualModel(name, false); return; }
-      sheet.replaceChildren(tableFromModel(exModels[name], false));
+      sheet.replaceChildren(tableFromModel(spreadsheetDataModel(exModels[name]), false));
     } else {
       sheet.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[name], { editable: false });
     }
@@ -3905,6 +3952,7 @@ async function renderXlsx(file, host, doc){
     syncSpreadsheetDirtyState(true);
     const model = exModels[name];
     if (!model){ sheet.textContent = "편집 데이터를 불러오는 중…"; return; }
+    spreadsheetEnsureWorkspace(model, sheet.clientWidth);
     if (!options.skipRecalc) maybeRecalc(name);
     clearVirtualEditor();
     if (virtualCsvEditor){
@@ -3913,7 +3961,8 @@ async function renderXlsx(file, host, doc){
       return;
     }
     const table = tableFromModel(model, true);
-    sheet.replaceChildren(table); sheet.scrollTop = 0;
+    const scrollTop = sheet.scrollTop, scrollLeft = sheet.scrollLeft;
+    sheet.replaceChildren(table); sheet.scrollTop = options.preserveScroll ? scrollTop : 0;
     primeSpreadsheetSourceLayout(name);
     enhanceSpreadsheetSelection(sheet, name, {
       editable:true,
@@ -3925,7 +3974,42 @@ async function renderXlsx(file, host, doc){
     updateFormulaBar();
     decorateSpreadsheetSourceLayout(name);
     renderSpreadsheetImages(name);
+    if (options.preserveScroll){ sheet.scrollTop = scrollTop; sheet.scrollLeft = scrollLeft; }
   };
+
+  // 입력 확정과 Enter/Tab 이동이 끝난 뒤 빈 영역을 늘리고 선택·스크롤을 복원한다.
+  let workspaceFrame = 0;
+  const scheduleWorkspaceGrowth = () => {
+    if (workspaceFrame) return;
+    workspaceFrame = requestAnimationFrame(() => {
+      workspaceFrame = 0;
+      if (!editMode || !host.isConnected || !sheet.clientWidth || sheet.querySelector("td.editing")) return;
+      if (sheet.querySelectorAll("td.sheet-selected").length > 1) return;
+      const model = exModels[currentSheet];
+      if (!spreadsheetEnsureWorkspace(model, sheet.clientWidth)) return;
+      const anchor = sheet.querySelector("td.sheet-anchor[data-mrow]");
+      const position = anchor ? { r:Number(anchor.dataset.mrow), c:Number(anchor.dataset.mcol) } : null;
+      renderEditable(currentSheet, { preserveScroll:true, skipRecalc:true });
+      if (position && sheet._selectSpreadsheetElement){
+        const cell = modelCellTd(position.r, position.c);
+        if (cell) sheet._selectSpreadsheetElement(cell);
+      }
+    });
+  };
+  let workspaceWidth = 0;
+  const workspaceResize = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
+    if (sheet.clientWidth === workspaceWidth) return;
+    workspaceWidth = sheet.clientWidth;
+    scheduleWorkspaceGrowth();
+  }) : null;
+  if (workspaceResize) workspaceResize.observe(sheet);
+  if (doc){
+    doc.cleanupFns = doc.cleanupFns || [];
+    doc.cleanupFns.push(() => {
+      if (workspaceFrame) cancelAnimationFrame(workspaceFrame);
+      if (workspaceResize) workspaceResize.disconnect();
+    });
+  }
 
   // 셀에 입력값(리터럴 또는 =수식)을 반영 — 셀 편집·수식 입력줄 공용. 변경되면 true.
   const applyCellInput = (name, r, c, text) => {
@@ -3951,6 +4035,7 @@ async function renderXlsx(file, host, doc){
     const td2 = modelCellTd(r, c);
     if (td2){ td2.textContent = dispCell(model[r][c]); td2.classList.toggle("num", typeof model[r][c].v === "number"); }
     refreshCondFormat();   // 값이 바뀌면 조건부 서식 라이브 갱신
+    scheduleWorkspaceGrowth();
     return true;
   };
 
@@ -4389,7 +4474,7 @@ async function renderXlsx(file, host, doc){
     else v = String(v);
     return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   };
-  const modelToCsv = (model) => model.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const modelToCsv = (model) => spreadsheetDataModel(model).map(row => row.map(csvCell).join(",")).join("\r\n");
 
   // ----- 편집 반영해 ExcelJS 바이트 생성(저장용). 손 안 댄 셀의 서식·수식·병합 보존 -----
   const exportExBytes = async () => {
@@ -4400,8 +4485,11 @@ async function renderXlsx(file, host, doc){
     // 화면에서 조절한 열 폭·행 높이(모델 인덱스 기준)와 머리글 고정을 워크시트에 반영한다.
     const applyViewSizes = (ws, name) => {
       const sizes = sheet.__sheetSizes && sheet.__sheetSizes[name];
+      const sourceLayout = sourceLayoutSheets.get(name);
       if (sizes){
         Object.keys(sizes.col || {}).forEach(c => {
+          // 원본 폭을 픽셀로 표시한 값은 저장 시 역환산하지 않아 원본 정밀도를 보존한다.
+          if (sourceLayout && sourceLayout.columns[c] === sizes.col[c]) return;
           try { ws.getColumn(Number(c) + 1).width = pxToExcelColWidth(sizes.col[c]); } catch(_){}
         });
         Object.keys(sizes.rowModel || {}).forEach(r => {
@@ -4614,7 +4702,7 @@ async function renderXlsx(file, host, doc){
     let tableEl = null;
     if (exModels[currentSheet]){
       maybeRecalc(currentSheet);
-      tableEl = tableFromModel(exModels[currentSheet], false);   // 병합·인라인 서식 포함 읽기 전용 표
+      tableEl = tableFromModel(spreadsheetDataModel(exModels[currentSheet]), false);   // 병합·인라인 서식 포함 읽기 전용 표
     } else if (wb.Sheets[currentSheet]){
       const tmp = document.createElement("div");
       tmp.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[currentSheet], { editable: false });
@@ -4870,12 +4958,13 @@ async function renderXlsx(file, host, doc){
         return dispCell(a).localeCompare(dispCell(b), undefined, { numeric: true });
       };
       // 원래 모델 행 index 를 함께 들고 정렬 → 정렬 후 old→new 매핑으로 수식 상대참조를 따라가게 한다.
-      const tagged = model.slice(head).map((row, i) => ({ row, old: head + i }));
+      const dataRows = spreadsheetWorkspaceBounds(model).rows;
+      const tagged = model.slice(head, dataRows).map((row, i) => ({ row, old: head + i }));
       tagged.sort((a, b) => cmp(a.row[col], b.row[col]) * dir);
       const oldToNew = new Map();
       tagged.forEach((t, i) => oldToNew.set(t.old, head + i));
-      model.splice(head, model.length - head, ...tagged.map(t => t.row));
-      const lastRow = model.length - 1;
+      model.splice(head, dataRows - head, ...tagged.map(t => t.row));
+      const lastRow = dataRows - 1;
       remapModelFormulas(currentSheet, (c, r, abs) =>
         (!abs.rowAbs && r >= head && r <= lastRow && oldToNew.has(r)) ? { c, r: oldToNew.get(r) } : { c, r });
       structChanged.add(currentSheet); anyDirty = true;
@@ -5404,6 +5493,9 @@ async function renderXlsx(file, host, doc){
     const entry = histories.get(oldName);
     if (entry){ entry.ref.name = name; histories.delete(oldName); histories.set(name, entry); }
     if (structChanged.delete(oldName)) structChanged.add(name);
+    if (sourceLayoutSheets.has(oldName)){
+      sourceLayoutSheets.set(name, sourceLayoutSheets.get(oldName)); sourceLayoutSheets.delete(oldName);
+    }
     if (sheetsWithFormula.delete(oldName)) sheetsWithFormula.add(name);
   };
   const addNewSheet = async (copyFrom = null) => {
@@ -5577,6 +5669,7 @@ async function renderXlsx(file, host, doc){
       if (!editMode){ editBar.hidden = true; renderReadonly(currentSheet); return; }
       // 시트 간 참조(Sheet2!A1) 해석을 위해 다중 시트 워크북은 모든 모델을 미리 만든다(첫 편집 1회).
       if ((wb.SheetNames || []).length > 1){ await ensureAllModelsBuilt(); if (!editMode) return; }
+      spreadsheetEnsureWorkspace(model, sheet.clientWidth);
       buildEditBar();
       renderEditable(currentSheet);
     } else {
@@ -5633,6 +5726,9 @@ if (typeof module === "object" && module.exports){
     spreadsheetFloatingImageDescriptors,
     spreadsheetIsolateWorksheetBytes,
     spreadsheetExtendSheetRangeForImages,
+    spreadsheetWorkspaceBounds,
+    spreadsheetDataModel,
+    spreadsheetEnsureWorkspace,
     writeStructuredSpreadsheetModel
   };
 }
