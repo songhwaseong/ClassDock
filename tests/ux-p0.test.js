@@ -78,7 +78,7 @@ test("저장 안내는 처음 또는 방식 변경 때만 잠시 표시되고 �
   assert.match(documents, /doc\._saveTargetNoticeKey !== noticeKey/);
   assert.match(documents, /saveTargetNoticeTimer = setTimeout\([\s\S]*SAVE_TARGET_NOTICE_MS/);
   assert.match(documents, /barLabel\.textContent = _t\(target\.label\)/);
-  assert.match(documents, /pdfSave\.textContent = actionLabel/);
+  assert.match(documents, /const headerSave = byId\("btnDownload"\)[\s\S]*headerSave\.title = headerLabel/);
   assert.match(documents, /querySelectorAll\("\.run-save"\)[\s\S]*button\.textContent = actionLabel/);
   assert.match(notebook, /const saveLabel = target && target\.mode \? target\.label : "저장"/);
 });

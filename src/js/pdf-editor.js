@@ -60,6 +60,8 @@ function updateZoomLabel(){
   const z = (state && state.kind === "pdf") ? (state.zoom || 1) : 1;
   const lbl = byId("zoomLabel");
   if (lbl) lbl.textContent = Math.round(z * 100) + "%";
+  const headerLbl = byId("headerZoomLabel");
+  if (headerLbl) headerLbl.textContent = Math.round(z * 100) + "%";
   const fsLbl = byId("fsZoomLabel");
   const fsDoc = fullscreenPdfTarget();
   if (fsLbl) fsLbl.textContent = Math.round(((fsDoc && fsDoc.zoom) || 1) * 100) + "%";
@@ -1000,6 +1002,7 @@ async function exportPdf(){
   } finally {
     pdfExportActive = false;
     if (downloadButton){ downloadButton.disabled = false; downloadButton.removeAttribute("aria-busy"); }
+    if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock();
   }
 }
 

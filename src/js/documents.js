@@ -236,9 +236,10 @@ function syncFullscreenButtons(){
   // PDF 전체화면은 페이지 표시줄(pill) 안의 아이콘 버튼 — 라벨을 덮어쓰지 않고 툴팁·상태만 갱신
   const pdfFs = byId("btnFullscreen");
   if (pdfFs){ pdfFs.title = title; pdfFs.setAttribute("aria-label", title); pdfFs.classList.toggle("active", on); }
-  // 오피스 전체화면은 헤더의 텍스트 버튼
+  // 아이콘형 헤더 버튼은 그림을 유지하고 툴팁·상태만 갱신한다.
   const offFs = byId("btnOfficeFullscreen");
-  if (offFs){ offFs.textContent = _t(on ? "⛶ 나가기" : "⛶ 전체화면"); offFs.title = title; }
+  if (offFs){ offFs.title = title; offFs.setAttribute("aria-label", title); offFs.classList.toggle("active", on); }
+  if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock();
   const group = byId("fsZoomGroup");
   const pdf = typeof fullscreenPdfTarget === "function" ? fullscreenPdfTarget() : (state && state.kind === "pdf" ? state : null);
   if (group) group.hidden = !pdf;
@@ -471,7 +472,7 @@ function setActiveDoc(id){
   // 학습 화면의 고정 PDF는 이 함수 끝의 applyStudyLayout 이 다시 표시한다.
   if (prev && prev !== d) prev.el.hidden = true;
   if (d) d.el.hidden = false;
-  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; byId("activeDocStatus").hidden=true; updateOriginalSaveBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); return; }
+  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; byId("activeDocStatus").hidden=true; updateOriginalSaveBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); return; }
   updateDocEmptyState();
   state = d;
   viewer = d.el;
@@ -494,6 +495,7 @@ function setActiveDoc(id){
   if (!tabOrder.includes(id)) tabOrder.push(id);         // 처음 선택한 문서면 탭바에 추가(이미 있으면 순서 유지)
   renderTabs();
   updateZoomLabel();
+  if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock();
   updatePdfPageIndicator(d);                             // 헤더 '현재/총 페이지' 갱신
   if (typeof pdfFitPageIfPending === "function") pdfFitPageIfPending(d);           // 배경에서 열려 못 맞춘 페이지 맞춤
   if (typeof updatePdfPageModeButton === "function") updatePdfPageModeButton(d);   // 보기 방식은 문서마다 다르다
@@ -508,7 +510,7 @@ function setActiveDoc(id){
   // 저장 버튼(=저장 동선)은 렌더가 끝나야 생기므로, 저장 위치 배지는 렌더 완료 뒤 다시 판단한다.
   const rendered = ensureRendered(d);                     // 아직 안 그렸으면 이때 처음 렌더(지연 렌더)
   if (rendered && typeof rendered.then === "function"){
-    rendered.then(() => { if (activeId === d.id) updateOriginalSaveBadge(d); }).catch(() => {});
+    rendered.then(() => { if (activeId === d.id){ updateOriginalSaveBadge(d); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); } }).catch(() => {});
   }
   applyStudyLayout();
   updateSidebarActive();                                  // 전체 재생성 대신 활성 표시만 갱신(클릭 반응 향상)
@@ -1497,13 +1499,12 @@ function updateOriginalSaveBadge(doc){
   }
   if (!doc) return;
   const actionLabel = target.mode ? _t(target.label) : _t("저장");
-  if (doc.kind === "pdf"){
-    const pdfSave = byId("btnDownload");
-    if (pdfSave){
-      pdfSave.textContent = actionLabel;
-      pdfSave.title = target.mode ? _t(target.title) : "";
-      pdfSave.dataset.shortcutTitle = target.mode ? "PDF " + actionLabel : _t("PDF 저장");
-    }
+  const headerSave = byId("btnDownload");
+  if (headerSave){
+    const headerLabel = target.mode ? actionLabel + " · " + _t(target.title) : _t("현재 파일 저장");
+    headerSave.title = headerLabel;
+    headerSave.setAttribute("aria-label", headerLabel);
+    headerSave.dataset.shortcutTitle = doc.kind === "pdf" && target.mode ? "PDF " + actionLabel : _t("현재 파일 저장");
   }
   if (doc.el){
     doc.el.querySelectorAll(".run-save").forEach(button => {

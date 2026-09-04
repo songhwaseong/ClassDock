@@ -284,12 +284,17 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .doc-status{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.12);color:#cbd5e1;font-size:10px;font-weight:500}
   .doc-status.dirty{background:rgba(245,158,11,.2);color:#fcd34d}.doc-status.saved{color:#a7f3d0}
   .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
-  .tool-menu{position:relative}.tool-menu summary{list-style:none;font-size:13px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;padding:7px 12px;border-radius:8px;cursor:pointer}
+  .tool-menu{position:relative}.tool-menu summary{list-style:none;display:grid;place-items:center;width:36px;height:36px;box-sizing:border-box;font-size:13px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.055);color:#dbeafe;padding:0;border-radius:9px;cursor:pointer}
+  .tool-menu summary svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .header-action-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .tool-menu summary::-webkit-details-marker{display:none}.tool-menu[open] summary{background:rgba(255,255,255,.18)}
   .tool-menu-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:80;display:grid;gap:5px;min-width:150px;padding:7px;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.28)}
   .tool-menu-pop button{color:var(--ink);background:var(--field);border-color:var(--border);text-align:left}.tool-menu-pop button:hover:not(:disabled){background:var(--panel-2)}
   .tool-menu-pop button:disabled{opacity:.45;cursor:default}
-  .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+  .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:2px;min-width:0;padding:4px;
+    border:1px solid rgba(148,163,184,.12);border-radius:12px;
+    background:linear-gradient(180deg,rgba(15,23,42,.7),rgba(2,6,23,.5));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 4px 14px rgba(0,0,0,.12)}
   .pet-focus-wrap{position:relative;flex:0 0 auto}
   .pet-focus-wrap[hidden]{display:none}
   .pet-focus-open{display:inline-flex;align-items:center;gap:5px}
@@ -316,8 +321,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   header .pet-focus-controls .btn{padding:7px 11px;border:1px solid var(--border);background:var(--panel-2);color:var(--ink);font-size:12px}
   header .pet-focus-controls .btn.primary{border-color:var(--accent);background:var(--accent);color:#fff}
   .pet-focus-stats{display:block;margin-top:9px;color:var(--muted);font-size:10.5px;text-align:center}
-  header .scratchpad-open{display:inline-flex;align-items:center;gap:6px}
-  header .scratchpad-open svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  header .scratchpad-open{display:grid;place-items:center;width:36px;height:36px;padding:0;gap:0}
+  header .scratchpad-open>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  header .scratchpad-open svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   header .image-memo-open{display:inline-flex;align-items:center;gap:6px}
   header .image-memo-open svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   @media (max-width:1040px){header .image-memo-open span{display:none}header .image-memo-open{padding:7px 9px}}
@@ -334,7 +340,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .sidebar-toggle .rail{fill:currentColor;stroke:none}
   .sidebar-toggle[aria-expanded="false"] .rail{fill:none}
   .sidebar-toggle[aria-expanded="false"] .divider{opacity:.45;stroke-dasharray:2.5 2.5}
-  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:6px 9px}
+  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:0}
   .light-background-setting{align-items:center}
   .light-background-options{display:inline-flex;align-items:center;gap:7px}
   .light-background-choice{width:24px;height:24px;padding:0;border:1px solid var(--border);border-radius:50%;cursor:pointer;transition:transform .1s,box-shadow .1s}
@@ -347,15 +353,69 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .light-background-choice[data-light-background="sky"]{background:#edf6fb}
   .light-background-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
   /* 상시 유틸리티(검색·분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
-  .header-util{display:inline-flex;align-items:center;gap:6px;padding-left:10px;margin-left:2px;
-    border-left:1px solid rgba(255,255,255,.14)}
+  .header-util{display:inline-flex;align-items:center;gap:2px;min-width:0;padding-left:7px;margin-left:2px;
+    border-left:1px solid rgba(148,163,184,.25)}
+  .header-actions>.tools[hidden]+.tools[hidden]+.header-util{padding-left:0;margin-left:0;border-left:0}
   @media (max-width:720px){.header-util{padding-left:0;margin-left:0;border-left:0}}
   /* 명령 팔레트 상시 진입점 — 검색창처럼 보이는 버튼으로 발견성을 높인다 */
-  header .cmdk-trigger{display:inline-flex;align-items:center;gap:7px;padding-right:8px}
-  header .cmdk-trigger svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+  header .cmdk-trigger{display:grid;place-items:center;width:36px;height:36px;padding:0}
+  header .cmdk-trigger>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  header .cmdk-trigger svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
   header .cmdk-trigger kbd{font:11px Consolas,"Courier New",monospace;padding:2px 6px;border-radius:5px;
     background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.16);color:#e5e7eb;white-space:nowrap}
-  @media (max-width:1080px){header .cmdk-trigger span,header .cmdk-trigger kbd{display:none}header .cmdk-trigger{padding:7px 9px}}
+  @media (max-width:1080px){header .cmdk-trigger kbd{display:none}}
+  /* 참고 이미지의 미니멀 아이콘 바: 기능군은 구분선으로 나누고 상태색은 의미가 있는 버튼에만 쓴다. */
+  .header-command-dock{display:inline-flex;align-items:center;flex:0 1 auto;min-width:0;margin-left:2px;padding:0 0 0 7px;
+    border:0;border-left:1px solid rgba(148,163,184,.25);border-radius:0;background:transparent;box-shadow:none}
+  .header-dock-group{display:inline-flex;align-items:center;gap:2px;padding:0 4px}
+  .header-dock-group:first-child{padding-left:0}
+  .header-dock-group:last-child{padding-right:0}
+  .header-dock-group+.header-dock-group{margin-left:2px;padding-left:7px;border-left:1px solid rgba(148,163,184,.25)}
+  header .header-icon-button{display:grid;place-items:center;width:36px;height:36px;box-sizing:border-box;padding:0;border:1px solid transparent;
+    border-radius:8px;background:transparent;color:#dbe7f5;box-shadow:none;line-height:1}
+  header .header-actions .tool-menu summary,
+  header .header-actions .tools>button,
+  header .header-actions .cmdk-trigger,
+  header .header-actions .header-more-btn,
+  header .header-actions .pet-focus-open,
+  header .header-actions .lang-toggle{border:1px solid transparent;border-radius:8px;background:transparent;color:#dbe7f5;box-shadow:none}
+  header .header-actions .tool-menu summary:hover,
+  header .header-actions .tools>button:hover,
+  header .header-actions .cmdk-trigger:hover,
+  header .header-actions .header-more-btn:hover,
+  header .header-actions .pet-focus-open:hover,
+  header .header-actions .lang-toggle:hover{border-color:rgba(148,163,184,.18);background:rgba(148,163,184,.13);color:#fff}
+  header .header-actions .tool-menu[open] summary{border-color:rgba(96,165,250,.35);background:rgba(59,130,246,.18);color:#dbeafe}
+  header .header-actions .pet-focus-open.active{border-color:rgba(129,140,248,.75);background:rgba(79,70,229,.36);color:#e0e7ff}
+  header .header-actions .pet-focus-open.break{border-color:rgba(52,211,153,.65);background:rgba(5,150,105,.28);color:#a7f3d0}
+  header .header-actions .pet-focus-open.paused{border-color:rgba(251,191,36,.65);background:rgba(180,83,9,.25);color:#fde68a}
+  header .header-icon-button svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  header .header-icon-button:hover:not(:disabled){border-color:rgba(148,163,184,.18);background:rgba(148,163,184,.13);color:#fff}
+  header .header-icon-button:focus-visible,.tool-menu summary:focus-visible{outline:2px solid #93c5fd;outline-offset:1px}
+  header .header-icon-button:disabled,header .header-zoom-value:disabled{opacity:.3;cursor:default;filter:saturate(.35)}
+  header .header-icon-button[hidden],header .header-zoom-value[hidden]{display:none}
+  .header-dock-group:not(:has(>button:not([hidden]))){display:none}
+  html.hide-tool-hdrPrint .header-dock-print{display:none}
+  header .header-icon-button.active{border-color:rgba(96,165,250,.42);background:rgba(59,130,246,.2);color:#bfdbfe}
+  header .header-open-files{color:#60a5fa}
+  header .header-open-folder{color:#fbbf24}
+  header .header-save{color:#c084fc}
+  header .header-run{color:#22d86f}
+  header .header-run svg{fill:currentColor;stroke:currentColor}
+  header .header-run.is-running{border-color:rgba(34,216,111,.4);background:rgba(34,197,94,.16)}
+  header .header-terminal{color:#dbeafe}
+  header #settingsOpen{color:#bfdbfe}
+  header .header-zoom-value{width:58px;height:34px;box-sizing:border-box;padding:0 7px;border:1px solid rgba(148,163,184,.3);border-radius:8px;
+    background:rgba(15,23,42,.58);color:#eef2ff;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;box-shadow:none}
+  header .header-zoom-value:hover:not(:disabled){border-color:rgba(148,163,184,.5);background:rgba(51,65,85,.72)}
+  .header-more-btn,.pet-focus-open,.lang-toggle{width:36px;height:36px;box-sizing:border-box;padding:0;justify-content:center}
+  .pet-focus-open svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .pet-focus-open #petFocusOpenText{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .sidebar-toggle{color:#60a5fa}
+  @media (max-width:720px){
+    .header-util{width:100%;flex-wrap:wrap}
+    .header-command-dock{order:5;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin}
+  }
   .save-folder-open{display:inline-flex;align-items:center;gap:6px}
   .save-folder-open[hidden]{display:none}
   .save-folder-open svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -366,8 +426,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     .header-left{grid-area:left}
     .workspace-switcher{max-width:min(60vw,720px)}
     .header-file-title{grid-area:title;padding:0;text-align:right}
-    .header-actions{grid-area:actions;width:100%;justify-content:flex-end;gap:7px}
-    .tools{flex-wrap:nowrap;gap:6px}
+    .header-actions{grid-area:actions;width:100%;justify-content:flex-end;gap:2px}
+    .tools{flex-wrap:nowrap;gap:2px}
     header .scratchpad-open span,header .image-memo-open span,.save-folder-open span{display:none}
     header .scratchpad-open,header .image-memo-open,.save-folder-open{padding:7px 9px}
   }

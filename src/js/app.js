@@ -1,5 +1,58 @@
 "use strict";
 
+/* ===== 아이콘형 헤더 빠른 도구 ===== */
+function activeDocumentControl(selector){
+  return state && state.el ? state.el.querySelector(selector) : null;
+}
+function headerCanSave(doc){
+  if (!doc) return false;
+  if (doc.notebookModel || doc.kind === "pdf" || doc.examEdit) return true;
+  if (doc.kind === "board" && typeof doc.saveBoardPng === "function") return true;
+  const save = doc.el && doc.el.querySelector(".run-save");
+  return !!(save && !save.disabled);
+}
+function updateHeaderCommandDock(){
+  const doc = state || null;
+  const pdf = !!(doc && doc.kind === "pdf");
+  const save = byId("btnDownload"), canSave = headerCanSave(doc);
+  if (save){
+    save.hidden = !canSave;
+    if (save.getAttribute("aria-busy") !== "true") save.disabled = !canSave;
+  }
+  const print = byId("btnPrint"), canPrint = !!doc && !pdf;
+  if (print){ print.hidden = !canPrint; print.disabled = !canPrint; }
+  for (const id of ["headerZoomOut", "headerZoomLabel", "headerZoomIn"]){
+    const button = byId(id); if (button){ button.hidden = !pdf; button.disabled = !pdf; }
+  }
+  const zoomLabel = byId("headerZoomLabel");
+  if (zoomLabel) zoomLabel.textContent = Math.round(((pdf && doc.zoom) || 1) * 100) + "%";
+  const fullscreen = byId("btnOfficeFullscreen"), canFullscreen = !!doc;
+  if (fullscreen){ fullscreen.hidden = !canFullscreen; fullscreen.disabled = !canFullscreen; }
+  const runControl = activeDocumentControl(".run-go");
+  const run = byId("headerRun");
+  if (run){
+    run.hidden = !runControl;
+    run.disabled = !runControl || !!runControl.disabled;
+    run.classList.toggle("is-running", !!(runControl && (runControl.classList.contains("running") || /중지|취소|stop/i.test(runControl.textContent || ""))));
+  }
+  const terminalControl = activeDocumentControl(".run-output-tab");
+  const terminal = byId("headerTerminal");
+  if (terminal){
+    terminal.hidden = !terminalControl;
+    terminal.disabled = !terminalControl || !!terminalControl.disabled;
+    terminal.classList.toggle("active", !!(terminalControl && terminalControl.classList.contains("active")));
+  }
+}
+function saveFromHeader(){
+  if (!state) return;
+  if (state.notebookModel && typeof saveNotebook === "function"){ saveNotebook(state); return; }
+  if (state.kind === "pdf"){ exportPdf(); return; }
+  if (state.kind === "board" && typeof state.saveBoardPng === "function"){ state.saveBoardPng(); return; }
+  if (state.examEdit){ if (typeof examSaveMaster === "function") examSaveMaster(state); return; }
+  const save = activeDocumentControl(".run-save");
+  if (save && !save.disabled) save.click();
+}
+
 /* ===== 이벤트 연결 ===== */
 function wire(){
   setupSingleTab();          // 같은 앱이 여러 탭/창으로 동시에 떠 자동저장이 충돌하지 않게 — 한 번에 한 창만 활성
@@ -76,10 +129,12 @@ function wire(){
 
   // 드롭존
   const fileInput = byId("fileInput");
+  byId("headerOpenFiles").addEventListener("click", () => pickFilesOrInput(fileInput));
   byId("dzFileBtn").addEventListener("click", (e) => { e.stopPropagation(); pickFilesOrInput(fileInput); });
   fileInput.addEventListener("change", (e) => { const fs = e.target.files; if (fs.length){ queueFiles(fs); e.target.value = ""; } });
   // 폴더 열기(webkitdirectory) — 드래그가 막히는 file:// 에서도 폴더를 통째로 연다
   const folderInput = byId("folderInput");
+  byId("headerOpenFolder").addEventListener("click", () => pickFolderOrInput(folderInput));
   folderInput.addEventListener("change", async (e) => {
     const fs = [...e.target.files];
     const entries = [...(e.target.webkitEntries || [])];
@@ -294,7 +349,7 @@ function wire(){
     const files = [...e.target.files]; e.target.value = "";
     if (files.length && state && state.kind === "pdf") mergePdfFiles(state, files);
   });
-  byId("btnDownload").onclick = exportPdf;
+  byId("btnDownload").onclick = saveFromHeader;
   // 화이트보드는 판서가 <canvas> 라 화면 인쇄로는 도구막대만 찍히고 그림이 빠진다 —
   // 보드 그림 한 장을 만들어 그것만 인쇄한다(whiteboard.js 의 printBoard).
   byId("btnPrint").onclick = () => {
@@ -308,6 +363,23 @@ function wire(){
   };
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
+  byId("headerZoomOut").onclick = () => { if (state && state.kind === "pdf") setPdfZoom((state.zoom || 1) / 1.25); };
+  byId("headerZoomLabel").onclick = () => { if (state && state.kind === "pdf") setPdfZoom(1); };
+  byId("headerZoomIn").onclick = () => { if (state && state.kind === "pdf") setPdfZoom((state.zoom || 1) * 1.25); };
+  byId("headerRun").onclick = () => {
+    const button = activeDocumentControl(".run-go");
+    if (button && !button.disabled) button.click();
+    setTimeout(updateHeaderCommandDock, 0);
+  };
+  byId("headerTerminal").onclick = () => {
+    const button = activeDocumentControl(".run-output-tab");
+    if (button && !button.disabled) button.click();
+    setTimeout(updateHeaderCommandDock, 0);
+  };
+  updateHeaderCommandDock();
+  document.addEventListener("click", (event) => {
+    if (event.target && event.target.closest && event.target.closest(".run-go,.run-save,.run-output-tab")) setTimeout(updateHeaderCommandDock, 0);
+  });
   byId("studyToggle").onclick = toggleStudyMode;
   if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우/위아래 위치 바꾸기
     if (typeof setStudySwapped === "function") setStudySwapped(!studySwapped);
