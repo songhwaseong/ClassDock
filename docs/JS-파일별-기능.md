@@ -68,7 +68,7 @@ flowchart LR
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
-| `python-snippets.js` | Python 예제 갤러리, 난이도·검색 필터, 예제 열기, 로컬 Python import 색인과 자동완성 후보 준비를 담당합니다. | `python-editor.js`, `desktop/launcher.cs` |
+| `python-snippets.js` | 파이썬 예제 목록(`PY_SNIPPETS`)과 난이도·설명·개념 메타데이터, 자바 예제와 이어 줄 `id`(64개), 그리고 로컬 Python import 색인·Jedi 자동완성 후보 준비를 담당합니다. 갤러리를 그리는 일은 `snippet-gallery.js` 로 옮겼습니다. | `snippet-gallery.js`, `python-editor.js`, `desktop/launcher.cs` |
 | `python-editor.js` | 자체 코드 편집기 UI를 만듭니다. 줄번호, 구문 강조, 자동 들여쓰기, 찾기·바꾸기, 자동완성, 다중 캐럿, 셀 경계, 오류 줄과 정의 이동을 관리합니다. 또한 **열 편집**(`Alt`+세로 드래그)의 사각 선택 오버레이와 그 전용 클립보드(복사·잘라내기·붙여넣기), **코드 따라치기** 엔진(교본 대조·오타 표시·진행률), **줄 번호로 이동 미니 창**, 우클릭 상황 메뉴(복사·대소문자 변환·선택한 줄 중복 제거·특수문자 `Ctrl+F10`)와 `contenteditable` 자리용 `attachEditableContextMenu`를 담당합니다. | `code-viewer.js`, `python-snippets.js`, `special-chars.js`, `tests/python-editor-word-select.test.js` |
 | `python-run-context.js` | 함께 연 프로젝트 파일을 실행 번들로 구성하고 Python의 작업폴더·프로젝트 루트·상대경로·import·출력 파일 경로를 계산합니다. | `file-loaders.js`, `python-runtime.js`, `tests/python-path-helper.test.js` |
 | `python-runtime.js` | Python 실행의 총괄입니다. EXE 로컬 Python과 브라우저 Pyodide를 선택하고 패키지 준비, 입력, 스트리밍 출력, 중지, 진단·단계 실행, 결과 파일 수집을 처리합니다. | `python-run-context.js`, `desktop/launcher.cs`, `korean-font.js` |
@@ -92,9 +92,11 @@ flowchart LR
 
 | 파일 | 담당 기능 | 주로 함께 확인할 파일 |
 |---|---|---|
+| `java-snippets.js` | 자바 예제 목록(`JAVA_SNIPPETS`)만 두는 데이터 파일입니다. 파일 이름이 곧 public 클래스 이름이어야 하고(`java-editor.js` 의 파일명 검사), 학생 PC 에 남은 구버전 JDK 로도 컴파일되도록 **Java 11 문법까지만** 씁니다. 난이도·설명·개념은 병렬 배열이 아니라 각 예제 안에 바로 적습니다. | `snippet-gallery.js`, `docs/자바-예제갤러리-설계.md` |
 | `java-libraries.js` | 실행에 함께 넣을 **라이브러리(jar)** 의 선택 상태와 런처 API 호출을 맡습니다. 카탈로그(id → 좌표)는 EXE 런처가 갖고 있고 이 파일은 `/java-lib-catalog`·`/java-lib-list` 로 받아 그리기만 합니다 — 프런트가 경로나 주소를 만들지 않으므로 클래스패스에 얹히는 것은 언제나 서버가 아는 목록뿐입니다. 선택은 문서마다 `classdock-java-libraries:` 에 저장하고, 실행 요청에는 이름만 쉼표로 이어 `libs=` 로 보냅니다. 설치는 확인 헤더를 붙인 `/java-lib-install-start` → 증분 로그 폴링 → 취소·삭제로 이어지며(js 쪽 npm 패키지와 같은 규약), 고른 항목이 알려 주는 클래스 이름은 편집기 자동완성에 얹습니다. | `java-editor.js`, `js-libraries.js`, `desktop/launcher.cs`, `tests/java-libraries.test.js` |
 | `java-runtime.js` | `.java` 실행의 총괄입니다. 브라우저에는 쓸 만한 자바 런타임이 없어 **EXE 런처의 로컬 JDK**로만 실행하고, JDK가 없으면 실행 대신 설치 안내(`renderJavaInstallGuide`)를 띄운 뒤 '다시 검사'가 성공하면 방금 누른 실행을 그대로 이어 줍니다. 실행은 파이썬 대화형 실행과 같은 계약(세션 시작 → 증분 폴링 → 표준입력 → 중지)을 쓰고, 출력 표시·입력 에코 색칠도 파이썬 쪽 함수(`renderPythonStdoutSegs`)를 재사용합니다. 오류는 두 가지 모양을 모두 다룹니다 — javac 진단(`Foo.java:3: error:`)과 실행 스택(`at Foo.main(Foo.java:5)`)에서 편집기 줄 번호를 뽑고, 메시지 앞에 붙는 실행 임시 폴더 경로는 지웁니다. **과제 자동채점**(`runJavaGrading`)은 입력을 파이프로 한 번에 넣는 `?piped=1` 경로를 써서 터미널 에코가 비교 대상에 섞이지 않게 합니다. JDK가 없을 때의 **원클릭 설치**(`/java-install` 시작 → `/java-install-status` 폴링)도 여기서 몰고, 진행 상황은 내려받기(MB)와 압축 풀기(%)를 나누어 보여 준 뒤 끝나면 학생이 방금 누른 실행을 그대로 이어 줍니다. | `java-editor.js`, `python-run-context.js`, `python-runtime.js`, `desktop/launcher.cs`, `tests/java-runtime.test.js` |
 | `java-editor.js` | `.java` 편집·실행 화면을 만듭니다. 파이썬·자바스크립트와 같은 실행 바·좌우 분할·출력 패널 뼈대를 쓰되 입력값 칸 대신 **대화형 터미널**로 값을 받습니다(Scanner로 한 줄씩 주고받는 수업 예제에 맞춘 선택). 빈 파일로 시작하면 클래스·`main` 골격을 넣어 주고, 실제 클래스 이름은 런처가 소스에서 찾아 파일 이름을 맞춥니다. `Java` 버튼은 지금 어느 JDK가 잡혔는지(버전·경로·찾은 곳)를 보여 줍니다. 채점 테스트 저장 자리는 `classdock-java-grade:` 로 다른 언어와 분리합니다. `라이브러리` 버튼은 실행·채점 클래스패스에 넣을 jar 를 고르는 팝오버(`buildJavaLibraryPicker`)를 열고, 고른 목록은 실행·채점 두 경로에 같은 값으로 들어갑니다. | `java-runtime.js`, `java-libraries.js`, `code-viewer.js`, `python-editor.js` |
+| `snippet-gallery.js` | 예제 갤러리 모달을 그립니다. 언어 탭(파이썬·자바)·난이도 칩·검색을 언어에 상관없이 같은 코드로 다루고, 카테고리는 예제 데이터에서 뽑습니다. 언어를 더하려면 `SNIPPET_LANGS` 에 한 줄만 늘리면 됩니다. 예제를 여는 방법은 언어마다 다릅니다 — 파이썬은 `handleFiles`, 자바는 `queueFiles({isScratch:true})`(미저장 새 `.java` 가 자동복원에서 사라지지 않게). 예제가 없는 언어는 탭에서 빠집니다. 같은 문제를 두 언어로 푼 예제 64쌍은 카드 아래 **"○○ 버전 보기"** 링크로 이어집니다 — 파이썬 쪽 id 와 자바 쪽 pair 로 맺으며, 파이썬 목록은 제목·파일 이름에 중복이 있어 이름으로는 짝을 찾을 수 없기 때문입니다. 링크로 건너갈 때는 검색어·난이도 필터를 풀고 그 카드로 옮겨 표시합니다. | `python-snippets.js`, `java-snippets.js`, `app.js`, `command-palette.js` |
 
 ## 5. document-editors — Office, 표, 이미지와 화이트보드
 

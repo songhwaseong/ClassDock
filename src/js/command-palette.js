@@ -52,7 +52,8 @@
     C("taskBatch","🗂️","제출본 일괄 검수 (.taskdone)", () => callFn("openTaskBatchReview"), { kw:"taskdone submission 제출 검수 재채점 성적 채점 일괄 csv" }),
     C("newExam","📝","새 시험지 만들기 (.exam)", () => callFn("newExamPaper"), { kw:"exam test quiz 시험 시험지 문제지 객관식 주관식 출제 배포" }),
     C("examGrade","✅","시험 채점 (.examdone)", () => callFn("openExamGrading"), { kw:"examdone grading 시험 채점 성적 점수 제출 답안 csv" }),
-    C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery"), { kw:"example gallery 예제 갤러리 샘플 연습" }),
+    C("examples","✨","파이썬 예제 갤러리", () => callFn("openSnippetGallery", "py"), { kw:"example gallery 예제 갤러리 샘플 연습 python 파이썬" }),
+    C("javaExamples","✨","자바 예제 갤러리", () => callFn("openSnippetGallery", "java"), { kw:"example gallery 예제 갤러리 샘플 연습 java 자바" }),
     // 도구 · 보기
     C("scratchpad","🗒️","임시 메모 열기", () => callFn("openScratchpadForNotebookDrop"), { sc:"scratchpad", kw:"memo note 메모 임시 스크래치 노트" }),
     C("scratchpadOverview","🔎","메모 목록·검색", () => callFn("openScratchpadOverview"), { kw:"memo note search 메모 목록 검색 찾기 훑어보기 갤러리 카드" }),

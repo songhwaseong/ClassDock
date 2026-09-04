@@ -214,6 +214,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"javaFormat",  label:"Java 코드 정렬",     cls:"run-java-format",        target:"java" },
   { id:"javaImports", label:"Java import 정리",   cls:"run-java-imports",       target:"java" },
   { id:"javaNew",     label:"+Java(새 자바)",     cls:"run-newjava",             target:"java" },
+  { id:"javaExamples",label:"예제 갤러리",       cls:"run-java-examples",       target:"java" },
   { id:"javaRevert",  label:"원본 되돌리기",      cls:"run-java-revert",         target:"java" },
   { id:"javaPractice",label:"따라치기(타자 연습)",cls:"run-java-practice-group", target:"java" },
   { id:"javaFont",    label:"글자 크기(A− A+)",  cls:"run-java-font-group",     target:"java" },

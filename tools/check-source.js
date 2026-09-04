@@ -105,6 +105,39 @@ for (const relative of scripts) {
 // 최상위(들여쓰기 없는 열 0) function/class/var/let/const 선언만 본다 — 이 코드베이스의 스타일상
 // 중첩 선언은 항상 들여쓰기돼 있어 열 0 기준이면 실제 전역만 정확히 걸러진다.
 const topDeclRe = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|^class\s+([A-Za-z_$][\w$]*)|^(?:var|let|const)\s+([A-Za-z_$][\w$]*)/;
+// 예제 갤러리(python-snippets.js·java-snippets.js)는 템플릿 리터럴 안에 파이썬·자바 코드를 통째로
+// 담고 있고, 그 코드의 class 선언은 들여쓰기 없이 열 0 에서 시작한다. 그대로 훑으면 남의 언어 선언을
+// JS 전역으로 오해한다(자바 class Cat ↔ 파이썬 class Cat). 그래서 문자열·주석·템플릿 안은 비우고 본다.
+// 상태를 끝까지 닫지 못하면(백틱을 문장 부호로 쓴 파일 등) 예전처럼 원문을 그대로 본다.
+function codeLinesOutsideTemplates(text){
+  const lines = text.split("\n");
+  const kept = [];
+  let inTemplate = 0, inBlock = false;
+  for (const line of lines){
+    kept.push(inTemplate === 0 && !inBlock ? line : "");
+    for (let i = 0; i < line.length; i++){
+      const ch = line[i], next = line[i + 1];
+      if (inBlock){ if (ch === "*" && next === "/"){ inBlock = false; i++; } continue; }
+      if (inTemplate > 0){
+        if (ch === "\\"){ i++; continue; }
+        if (ch === "`") inTemplate--;
+        continue;
+      }
+      if (ch === "/" && next === "/") break;                  // 줄 주석
+      if (ch === "/" && next === "*"){ inBlock = true; i++; continue; }
+      if (ch === "\"" || ch === "'"){                         // 따옴표 문자열은 통째로 건너뛴다
+        const quote = ch;
+        for (i++; i < line.length; i++){
+          if (line[i] === "\\"){ i++; continue; }
+          if (line[i] === quote) break;
+        }
+        continue;
+      }
+      if (ch === "`") inTemplate++;
+    }
+  }
+  return (inTemplate === 0 && !inBlock) ? kept : lines;
+}
 const topWindowAssignRe = /^(?:window|globalThis)\.([A-Za-z_$][\w$]*)\s*=/;
 const globalDecls = new Map();   // 이름 -> 선언한 파일 목록
 function recordGlobal(name, relative){
@@ -113,7 +146,7 @@ function recordGlobal(name, relative){
   globalDecls.get(name).push(relative);
 }
 for (const relative of scripts) {
-  const lines = fs.readFileSync(path.join(root, relative), "utf8").split("\n");
+  const lines = codeLinesOutsideTemplates(fs.readFileSync(path.join(root, relative), "utf8"));
   for (const line of lines) {
     const match = topDeclRe.exec(line);
     if (match) recordGlobal(match[1] || match[2] || match[3], relative);

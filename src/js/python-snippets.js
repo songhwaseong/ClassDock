@@ -5,16 +5,16 @@
 // 코드 문자열은 들여쓰기 보존을 위해 템플릿 리터럴의 각 줄을 0칸에서 시작한다.
 const PY_SNIPPETS = [
   // ── 기초 / 출력 ──
-  { cat:"기초·출력", title:"Hello, Python", emoji:"👋", name:"hello.py", code:
+  { id:"hello", cat:"기초·출력", title:"Hello, Python", emoji:"👋", name:"hello.py", code:
 `name = "파이썬"
 print("Hello,", name)
 print("환영합니다!")
 ` },
-  { cat:"기초·출력", title:"이름 인사 (입력)", emoji:"🙋", name:"인사.py", code:
+  { id:"greeting", cat:"기초·출력", title:"이름 인사 (입력)", emoji:"🙋", name:"인사.py", code:
 `name = input("이름이 뭐예요? ")
 print(f"반가워요, {name}님!")
 ` },
-  { cat:"기초·출력", title:"사칙연산", emoji:"➗", name:"사칙연산.py", code:
+  { id:"arithmetic", cat:"기초·출력", title:"사칙연산", emoji:"➗", name:"사칙연산.py", code:
 `a, b = 17, 5
 print("합:", a + b)
 print("차:", a - b)
@@ -22,13 +22,13 @@ print("곱:", a * b)
 print("몫:", a // b, "나머지:", a % b)
 print("나눗셈:", a / b)
 ` },
-  { cat:"기초·출력", title:"두 변수 교환", emoji:"🔁", name:"변수교환.py", code:
+  { id:"swap", cat:"기초·출력", title:"두 변수 교환", emoji:"🔁", name:"변수교환.py", code:
 `a, b = 1, 2
 print("전:", a, b)
 a, b = b, a
 print("후:", a, b)
 ` },
-  { cat:"기초·출력", title:"형변환", emoji:"🔣", name:"형변환.py", code:
+  { id:"typecast", cat:"기초·출력", title:"형변환", emoji:"🔣", name:"형변환.py", code:
 `s = "123"
 n = int(s)
 print(n + 1, type(n))
@@ -37,32 +37,32 @@ print("나이: " + str(20))
 ` },
 
   // ── 반복 / 패턴 ──
-  { cat:"반복·패턴", title:"구구단", emoji:"✖️", name:"구구단.py", code:
+  { id:"gugudan", cat:"반복·패턴", title:"구구단", emoji:"✖️", name:"구구단.py", code:
 `for dan in range(2, 10):
     print(f"--- {dan}단 ---")
     for i in range(1, 10):
         print(f"{dan} x {i} = {dan*i}")
 ` },
-  { cat:"반복·패턴", title:"별 피라미드", emoji:"⭐", name:"별피라미드.py", code:
+  { id:"star-pyramid", cat:"반복·패턴", title:"별 피라미드", emoji:"⭐", name:"별피라미드.py", code:
 `n = 5
 for i in range(1, n + 1):
     print(" " * (n - i) + "*" * (2*i - 1))
 ` },
-  { cat:"반복·패턴", title:"역삼각형 별", emoji:"🔻", name:"역삼각형.py", code:
+  { id:"star-reverse", cat:"반복·패턴", title:"역삼각형 별", emoji:"🔻", name:"역삼각형.py", code:
 `n = 5
 for i in range(n, 0, -1):
     print("*" * i)
 ` },
-  { cat:"반복·패턴", title:"다이아몬드 별", emoji:"💎", name:"다이아몬드.py", code:
+  { id:"star-diamond", cat:"반복·패턴", title:"다이아몬드 별", emoji:"💎", name:"다이아몬드.py", code:
 `n = 4
 for i in list(range(1, n + 1)) + list(range(n - 1, 0, -1)):
     print(" " * (n - i) + "*" * (2*i - 1))
 ` },
-  { cat:"반복·패턴", title:"1~100 합계", emoji:"➕", name:"합계.py", code:
+  { id:"sum-100", cat:"반복·패턴", title:"1~100 합계", emoji:"➕", name:"합계.py", code:
 `total = sum(range(1, 101))
 print("1부터 100까지 합:", total)
 ` },
-  { cat:"반복·패턴", title:"짝수/홀수 나누기", emoji:"⚖️", name:"짝수홀수.py", code:
+  { id:"even-odd", cat:"반복·패턴", title:"짝수/홀수 나누기", emoji:"⚖️", name:"짝수홀수.py", code:
 `evens = [n for n in range(1, 21) if n % 2 == 0]
 odds  = [n for n in range(1, 21) if n % 2 == 1]
 print("짝수:", evens)
@@ -70,7 +70,7 @@ print("홀수:", odds)
 ` },
 
   // ── 수학 / 숫자 ──
-  { cat:"수학·숫자", title:"소수 찾기", emoji:"🔢", name:"소수.py", code:
+  { id:"prime", cat:"수학·숫자", title:"소수 찾기", emoji:"🔢", name:"소수.py", code:
 `def is_prime(n):
     if n < 2:
         return False
@@ -81,7 +81,7 @@ print("홀수:", odds)
 
 print([n for n in range(2, 51) if is_prime(n)])
 ` },
-  { cat:"수학·숫자", title:"팩토리얼", emoji:"❗", name:"팩토리얼.py", code:
+  { id:"factorial", cat:"수학·숫자", title:"팩토리얼", emoji:"❗", name:"팩토리얼.py", code:
 `import math
 for n in range(1, 8):
     print(f"{n}! = {math.factorial(n)}")
@@ -104,7 +104,7 @@ print("2진수:", bin(n))
 print("8진수:", oct(n))
 print("16진수:", hex(n))
 ` },
-  { cat:"수학·숫자", title:"원주율 근사", emoji:"🥧", name:"원주율.py", code:
+  { id:"pi", cat:"수학·숫자", title:"원주율 근사", emoji:"🥧", name:"원주율.py", code:
 `# 라이프니츠 공식으로 파이 근사
 pi = 0
 for k in range(100000):
@@ -113,7 +113,7 @@ print("근사값:", pi * 4)
 ` },
 
   // ── 문자열 ──
-  { cat:"문자열", title:"문자열 뒤집기", emoji:"↩️", name:"뒤집기.py", code:
+  { id:"reverse-string", cat:"문자열", title:"문자열 뒤집기", emoji:"↩️", name:"뒤집기.py", code:
 `s = "안녕하세요 파이썬"
 print(s[::-1])
 ` },
@@ -130,7 +130,7 @@ for w in ["level", "python", "기러기"]:
 count = sum(1 for c in s.lower() if c in "aeiou")
 print("모음 개수:", count)
 ` },
-  { cat:"문자열", title:"대소문자 변환", emoji:"🔠", name:"대소문자.py", code:
+  { id:"change-case", cat:"문자열", title:"대소문자 변환", emoji:"🔠", name:"대소문자.py", code:
 `s = "Hello World"
 print(s.upper())
 print(s.lower())
@@ -142,14 +142,14 @@ print(s.title())
 text = "사과 바나나 사과 포도 바나나 사과"
 print(Counter(text.split()))
 ` },
-  { cat:"문자열", title:"아스키 코드표", emoji:"🔡", name:"아스키.py", code:
+  { id:"char-code", cat:"문자열", title:"아스키 코드표", emoji:"🔡", name:"아스키.py", code:
 `for c in "ABCabc":
     print(c, "->", ord(c))
 print("65 ->", chr(65))
 ` },
 
   // ── 리스트 / 자료구조 ──
-  { cat:"리스트·자료구조", title:"리스트 정렬", emoji:"📋", name:"정렬.py", code:
+  { id:"list-sort", cat:"리스트·자료구조", title:"리스트 정렬", emoji:"📋", name:"정렬.py", code:
 `nums = [5, 2, 8, 1, 9, 3]
 print("오름차순:", sorted(nums))
 print("내림차순:", sorted(nums, reverse=True))
@@ -164,7 +164,7 @@ print("평균:", sum(scores) / len(scores))
 `data = [1, 2, 2, 3, 3, 3, 4]
 print("중복 제거:", sorted(set(data)))
 ` },
-  { cat:"리스트·자료구조", title:"딕셔너리 사용", emoji:"📖", name:"딕셔너리.py", code:
+  { id:"dict-phone", cat:"리스트·자료구조", title:"딕셔너리 사용", emoji:"📖", name:"딕셔너리.py", code:
 `phone = {"홍길동": "010-1111", "김철수": "010-2222"}
 phone["이영희"] = "010-3333"
 for name, number in phone.items():
@@ -181,23 +181,23 @@ for row in zip(*matrix):
 ` },
 
   // ── random / 게임 ──
-  { cat:"random·게임", title:"로또 번호", emoji:"🎰", name:"로또.py", code:
+  { id:"lotto", cat:"random·게임", title:"로또 번호", emoji:"🎰", name:"로또.py", code:
 `import random
 nums = sorted(random.sample(range(1, 46), 6))
 print("이번 주 행운의 번호:", nums)
 ` },
-  { cat:"random·게임", title:"주사위 굴리기", emoji:"🎲", name:"주사위.py", code:
+  { id:"dice", cat:"random·게임", title:"주사위 굴리기", emoji:"🎲", name:"주사위.py", code:
 `import random
 for _ in range(5):
     print(random.randint(1, 6))
 ` },
-  { cat:"random·게임", title:"가위바위보", emoji:"✊", name:"가위바위보.py", code:
+  { id:"rps", cat:"random·게임", title:"가위바위보", emoji:"✊", name:"가위바위보.py", code:
 `import random
 hands = ["가위", "바위", "보"]
 me, com = random.choice(hands), random.choice(hands)
 print("나:", me, "/ 컴퓨터:", com)
 ` },
-  { cat:"random·게임", title:"숫자 맞히기 (입력)", emoji:"🎯", name:"숫자맞히기.py", code:
+  { id:"guess", cat:"random·게임", title:"숫자 맞히기 (입력)", emoji:"🎯", name:"숫자맞히기.py", code:
 `import random
 answer = random.randint(1, 100)
 print("1~100 사이 숫자를 맞혀보세요!")
@@ -211,7 +211,7 @@ while True:
         print("정답!")
         break
 ` },
-  { cat:"random·게임", title:"동전 던지기 통계", emoji:"🪙", name:"동전.py", code:
+  { id:"coin", cat:"random·게임", title:"동전 던지기 통계", emoji:"🪙", name:"동전.py", code:
 `import random
 flips = [random.choice(["앞", "뒤"]) for _ in range(1000)]
 print("앞:", flips.count("앞"), "/ 뒤:", flips.count("뒤"))
@@ -224,29 +224,29 @@ print("생성된 비밀번호:", pw)
 ` },
 
   // ── 날짜 / 시간 ──
-  { cat:"날짜·시간", title:"오늘 날짜·시간", emoji:"🕒", name:"오늘.py", code:
+  { id:"today", cat:"날짜·시간", title:"오늘 날짜·시간", emoji:"🕒", name:"오늘.py", code:
 `import datetime
 now = datetime.datetime.now()
 print("지금:", now.strftime("%Y-%m-%d %H:%M:%S"))
 ` },
-  { cat:"날짜·시간", title:"이번 달 달력", emoji:"📅", name:"달력.py", code:
+  { id:"calendar", cat:"날짜·시간", title:"이번 달 달력", emoji:"📅", name:"달력.py", code:
 `import calendar, datetime
 today = datetime.date.today()
 print(calendar.month(today.year, today.month))
 ` },
-  { cat:"날짜·시간", title:"요일 구하기", emoji:"📆", name:"요일.py", code:
+  { id:"weekday", cat:"날짜·시간", title:"요일 구하기", emoji:"📆", name:"요일.py", code:
 `import datetime
 days = ["월", "화", "수", "목", "금", "토", "일"]
 today = datetime.date.today()
 print("오늘은", days[today.weekday()], "요일")
 ` },
-  { cat:"날짜·시간", title:"D-day 계산", emoji:"⏳", name:"dday.py", code:
+  { id:"dday", cat:"날짜·시간", title:"D-day 계산", emoji:"⏳", name:"dday.py", code:
 `import datetime
 target = datetime.date(2026, 12, 25)
 left = (target - datetime.date.today()).days
 print(f"크리스마스까지 D-{left}")
 ` },
-  { cat:"날짜·시간", title:"만 나이 계산", emoji:"🎂", name:"만나이.py", code:
+  { id:"age", cat:"날짜·시간", title:"만 나이 계산", emoji:"🎂", name:"만나이.py", code:
 `import datetime
 birth = datetime.date(2000, 5, 10)
 today = datetime.date.today()
@@ -386,7 +386,7 @@ print(line)
 ` },
 
   // ── 함수·재귀 ──
-  { cat:"함수·재귀", title:"함수 기본", emoji:"🧩", name:"함수기본.py", code:
+  { id:"function-basics", cat:"함수·재귀", title:"함수 기본", emoji:"🧩", name:"함수기본.py", code:
 `def add(a, b):
     return a + b
 
@@ -397,7 +397,7 @@ print(add(3, 4))
 print(greet())
 print(greet("민수"))
 ` },
-  { cat:"함수·재귀", title:"가변 인자", emoji:"🎁", name:"가변인자.py", code:
+  { id:"varargs", cat:"함수·재귀", title:"가변 인자", emoji:"🎁", name:"가변인자.py", code:
 `def total(*nums):
     return sum(nums)
 
@@ -408,7 +408,7 @@ def info(**kw):
 print("합:", total(1, 2, 3, 4))
 info(name="민수", age=14)
 ` },
-  { cat:"함수·재귀", title:"재귀 팩토리얼", emoji:"❗", name:"팩토리얼.py", code:
+  { id:"rec-factorial", cat:"함수·재귀", title:"재귀 팩토리얼", emoji:"❗", name:"팩토리얼.py", code:
 `def factorial(n):
     if n <= 1:
         return 1
@@ -417,7 +417,7 @@ info(name="민수", age=14)
 for i in range(1, 8):
     print(i, "! =", factorial(i))
 ` },
-  { cat:"함수·재귀", title:"재귀 피보나치", emoji:"🐚", name:"피보나치.py", code:
+  { id:"rec-fibonacci", cat:"함수·재귀", title:"재귀 피보나치", emoji:"🐚", name:"피보나치.py", code:
 `def fib(n):
     if n < 2:
         return n
@@ -425,7 +425,7 @@ for i in range(1, 8):
 
 print([fib(i) for i in range(15)])
 ` },
-  { cat:"함수·재귀", title:"하노이탑", emoji:"🗼", name:"하노이탑.py", code:
+  { id:"hanoi", cat:"함수·재귀", title:"하노이탑", emoji:"🗼", name:"하노이탑.py", code:
 `def hanoi(n, src, dst, via):
     if n == 1:
         print(f"원반 1: {src} -> {dst}")
@@ -436,7 +436,7 @@ print([fib(i) for i in range(15)])
 
 hanoi(3, "A", "C", "B")
 ` },
-  { cat:"함수·재귀", title:"lambda·map·filter", emoji:"🎭", name:"람다.py", code:
+  { id:"lambda", cat:"함수·재귀", title:"lambda·map·filter", emoji:"🎭", name:"람다.py", code:
 `nums = [1, 2, 3, 4, 5, 6]
 squares = list(map(lambda x: x * x, nums))
 evens = list(filter(lambda x: x % 2 == 0, nums))
@@ -445,14 +445,14 @@ print("짝수:", evens)
 ` },
 
   // ── 딕셔너리·집합 ──
-  { cat:"딕셔너리·집합", title:"딕셔너리 기본", emoji:"📖", name:"딕셔너리.py", code:
+  { id:"dict-scores", cat:"딕셔너리·집합", title:"딕셔너리 기본", emoji:"📖", name:"딕셔너리.py", code:
 `scores = {"국어": 90, "수학": 85, "영어": 95}
 scores["과학"] = 88
 for subject, score in scores.items():
     print(f"{subject}: {score}")
 print("평균:", sum(scores.values()) / len(scores))
 ` },
-  { cat:"딕셔너리·집합", title:"단어 빈도수", emoji:"🔠", name:"단어빈도.py", code:
+  { id:"word-count", cat:"딕셔너리·집합", title:"단어 빈도수", emoji:"🔠", name:"단어빈도.py", code:
 `from collections import Counter
 text = "apple banana apple cherry banana apple"
 count = Counter(text.split())
@@ -491,7 +491,7 @@ print(freq)
 ` },
 
   // ── 예외·입력검증 ──
-  { cat:"예외·입력검증", title:"try / except", emoji:"🛡️", name:"예외처리.py", code:
+  { id:"try-except", cat:"예외·입력검증", title:"try / except", emoji:"🛡️", name:"예외처리.py", code:
 `values = ["10", "abc", "3.5", "7"]
 for v in values:
     try:
@@ -499,7 +499,7 @@ for v in values:
     except ValueError:
         print(v, "-> 정수가 아니에요")
 ` },
-  { cat:"예외·입력검증", title:"0으로 나누기", emoji:"🚫", name:"0나누기.py", code:
+  { id:"div-zero", cat:"예외·입력검증", title:"0으로 나누기", emoji:"🚫", name:"0나누기.py", code:
 `pairs = [(10, 2), (5, 0), (9, 3)]
 for a, b in pairs:
     try:
@@ -507,7 +507,7 @@ for a, b in pairs:
     except ZeroDivisionError:
         print(f"{a} / {b} -> 0으로 나눌 수 없어요")
 ` },
-  { cat:"예외·입력검증", title:"숫자 검증 함수", emoji:"✅", name:"숫자검증.py", code:
+  { id:"validate", cat:"예외·입력검증", title:"숫자 검증 함수", emoji:"✅", name:"숫자검증.py", code:
 `def to_int(s):
     try:
         return int(s)
@@ -518,7 +518,7 @@ for s in ["42", "-3", "삼", "100"]:
     n = to_int(s)
     print(s, "->", "유효" if n is not None else "무효", n)
 ` },
-  { cat:"예외·입력검증", title:"여러 예외", emoji:"🚦", name:"여러예외.py", code:
+  { id:"multi-except", cat:"예외·입력검증", title:"여러 예외", emoji:"🚦", name:"여러예외.py", code:
 `data = ["5", "0", "x"]
 for s in data:
     try:
@@ -540,7 +540,7 @@ for i in [0, 5, 2]:
 ` },
 
   // ── 클래스·객체 ──
-  { cat:"클래스·객체", title:"클래스 기본", emoji:"🐶", name:"클래스기본.py", code:
+  { id:"class-basics", cat:"클래스·객체", title:"클래스 기본", emoji:"🐶", name:"클래스기본.py", code:
 `class Dog:
     def __init__(self, name):
         self.name = name
@@ -550,7 +550,7 @@ for i in [0, 5, 2]:
 d = Dog("바둑이")
 print(d.bark())
 ` },
-  { cat:"클래스·객체", title:"은행 계좌", emoji:"🏦", name:"계좌.py", code:
+  { id:"bank-account", cat:"클래스·객체", title:"은행 계좌", emoji:"🏦", name:"계좌.py", code:
 `class Account:
     def __init__(self, balance=0):
         self.balance = balance
@@ -564,7 +564,7 @@ a.deposit(5000)
 a.deposit(3000)
 print(a)
 ` },
-  { cat:"클래스·객체", title:"상속", emoji:"🐾", name:"상속.py", code:
+  { id:"inherit", cat:"클래스·객체", title:"상속", emoji:"🐾", name:"상속.py", code:
 `class Animal:
     def __init__(self, name):
         self.name = name
@@ -582,7 +582,7 @@ class Cow(Animal):
 for a in [Cat("나비"), Cow("얼룩이")]:
     print(a.name, ":", a.speak())
 ` },
-  { cat:"클래스·객체", title:"좌표 거리", emoji:"📐", name:"좌표.py", code:
+  { id:"point", cat:"클래스·객체", title:"좌표 거리", emoji:"📐", name:"좌표.py", code:
 `class Point:
     def __init__(self, x, y):
         self.x = x
@@ -610,7 +610,7 @@ print("총액:", sum(b.price for b in books))
 ` },
 
   // ── 정렬·탐색 ──
-  { cat:"정렬·탐색", title:"버블 정렬", emoji:"🫧", name:"버블정렬.py", code:
+  { id:"bubble", cat:"정렬·탐색", title:"버블 정렬", emoji:"🫧", name:"버블정렬.py", code:
 `nums = [5, 2, 9, 1, 7, 3]
 for i in range(len(nums)):
     for j in range(len(nums) - 1 - i):
@@ -618,7 +618,7 @@ for i in range(len(nums)):
             nums[j], nums[j + 1] = nums[j + 1], nums[j]
 print(nums)
 ` },
-  { cat:"정렬·탐색", title:"선택 정렬", emoji:"👉", name:"선택정렬.py", code:
+  { id:"selection", cat:"정렬·탐색", title:"선택 정렬", emoji:"👉", name:"선택정렬.py", code:
 `nums = [64, 25, 12, 22, 11]
 for i in range(len(nums)):
     m = i
@@ -628,7 +628,7 @@ for i in range(len(nums)):
     nums[i], nums[m] = nums[m], nums[i]
 print(nums)
 ` },
-  { cat:"정렬·탐색", title:"이진 탐색", emoji:"🔎", name:"이진탐색.py", code:
+  { id:"binary-search", cat:"정렬·탐색", title:"이진 탐색", emoji:"🔎", name:"이진탐색.py", code:
 `data = [1, 3, 5, 7, 9, 11, 13]
 target = 9
 lo, hi = 0, len(data) - 1
@@ -642,13 +642,13 @@ while lo <= hi:
     else:
         hi = mid - 1
 ` },
-  { cat:"정렬·탐색", title:"다중 기준 정렬", emoji:"🗃️", name:"다중정렬.py", code:
+  { id:"multi-sort", cat:"정렬·탐색", title:"다중 기준 정렬", emoji:"🗃️", name:"다중정렬.py", code:
 `people = [("민수", 14), ("지은", 13), ("현우", 14)]
 by_age = sorted(people, key=lambda p: (p[1], p[0]))
 for name, age in by_age:
     print(age, name)
 ` },
-  { cat:"정렬·탐색", title:"최대·최소 찾기", emoji:"📏", name:"최대최소.py", code:
+  { id:"min-max", cat:"정렬·탐색", title:"최대·최소 찾기", emoji:"📏", name:"최대최소.py", code:
 `nums = [3, 8, 1, 9, 4, 7]
 biggest = smallest = nums[0]
 for n in nums:
@@ -783,18 +783,18 @@ plt.show()
 ` },
 
   // ── 문자열 (추가) ──
-  { cat:"문자열", title:"회문 검사", emoji:"🔄", name:"회문.py", code:
+  { id:"palindrome", cat:"문자열", title:"회문 검사", emoji:"🔄", name:"회문.py", code:
 `words = ["기러기", "토마토", "파이썬", "level"]
 for w in words:
     print(w, "->", "회문!" if w == w[::-1] else "아니에요")
 ` },
-  { cat:"문자열", title:"모음 세기", emoji:"🅰️", name:"모음세기.py", code:
+  { id:"count-vowels", cat:"문자열", title:"모음 세기", emoji:"🅰️", name:"모음세기.py", code:
 `text = "Hello Python World"
 vowels = "aeiouAEIOU"
 count = sum(1 for ch in text if ch in vowels)
 print("모음 개수:", count)
 ` },
-  { cat:"문자열", title:"시저 암호", emoji:"🔐", name:"시저암호.py", code:
+  { id:"caesar", cat:"문자열", title:"시저 암호", emoji:"🔐", name:"시저암호.py", code:
 `def caesar(text, shift):
     out = ""
     for ch in text:
@@ -824,7 +824,7 @@ print(f"대문자 {upper}, 소문자 {lower}, 숫자 {digit}")
 ` },
 
   // ── 수학·숫자 (추가) ──
-  { cat:"수학·숫자", title:"소수 찾기(에라토스테네스)", emoji:"🧮", name:"소수.py", code:
+  { id:"sieve", cat:"수학·숫자", title:"소수 찾기(에라토스테네스)", emoji:"🧮", name:"소수.py", code:
 `n = 50
 sieve = [True] * (n + 1)
 sieve[0] = sieve[1] = False
@@ -834,27 +834,27 @@ for i in range(2, int(n ** 0.5) + 1):
             sieve[j] = False
 print([i for i in range(n + 1) if sieve[i]])
 ` },
-  { cat:"수학·숫자", title:"약수 구하기", emoji:"🔻", name:"약수.py", code:
+  { id:"divisors", cat:"수학·숫자", title:"약수 구하기", emoji:"🔻", name:"약수.py", code:
 `n = 36
 divisors = [i for i in range(1, n + 1) if n % i == 0]
 print(f"{n}의 약수:", divisors)
 print("개수:", len(divisors))
 ` },
-  { cat:"수학·숫자", title:"최대공약수·최소공배수", emoji:"🔗", name:"gcd_lcm.py", code:
+  { id:"gcd-lcm", cat:"수학·숫자", title:"최대공약수·최소공배수", emoji:"🔗", name:"gcd_lcm.py", code:
 `import math
 a, b = 24, 36
 g = math.gcd(a, b)
 print("최대공약수:", g)
 print("최소공배수:", a * b // g)
 ` },
-  { cat:"수학·숫자", title:"진법 변환", emoji:"🔢", name:"진법변환.py", code:
+  { id:"radix", cat:"수학·숫자", title:"진법 변환", emoji:"🔢", name:"진법변환.py", code:
 `n = 156
 print("2진수:", bin(n))
 print("8진수:", oct(n))
 print("16진수:", hex(n))
 print("2진수 -> 10진수:", int("10011100", 2))
 ` },
-  { cat:"수학·숫자", title:"완전수 찾기", emoji:"💯", name:"완전수.py", code:
+  { id:"perfect", cat:"수학·숫자", title:"완전수 찾기", emoji:"💯", name:"완전수.py", code:
 `for n in range(2, 1001):
     if sum(i for i in range(1, n) if n % i == 0) == n:
         print(n, "은 완전수")
@@ -869,13 +869,13 @@ print(squares)
 print(evens)
 print(pairs)
 ` },
-  { cat:"리스트·자료구조", title:"2차원 리스트(행렬)", emoji:"🔲", name:"행렬.py", code:
+  { id:"matrix", cat:"리스트·자료구조", title:"2차원 리스트(행렬)", emoji:"🔲", name:"행렬.py", code:
 `matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 for row in matrix:
     print(row)
 print("대각합:", sum(matrix[i][i] for i in range(3)))
 ` },
-  { cat:"리스트·자료구조", title:"스택과 큐", emoji:"📚", name:"스택큐.py", code:
+  { id:"stack-queue", cat:"리스트·자료구조", title:"스택과 큐", emoji:"📚", name:"스택큐.py", code:
 `from collections import deque
 stack = []
 for x in [1, 2, 3]:
@@ -891,7 +891,7 @@ flat = [x for row in nested for x in row]
 print(flat)
 print("합:", sum(flat))
 ` },
-  { cat:"리스트·자료구조", title:"중복 제거·정렬", emoji:"🧹", name:"중복제거.py", code:
+  { id:"dedup", cat:"리스트·자료구조", title:"중복 제거·정렬", emoji:"🧹", name:"중복제거.py", code:
 `nums = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
 unique = sorted(set(nums))
 print("원본:", nums)
@@ -928,7 +928,7 @@ start = "A"
 for node, d in dijkstra(start).items():
     print(f"{start} -> {node} : 최단거리 {d}")
 ` },
-  { cat:"응용·도전", title:"배낭 문제 (DP)", emoji:"🎒", name:"배낭문제.py", code:
+  { id:"knapsack", cat:"응용·도전", title:"배낭 문제 (DP)", emoji:"🎒", name:"배낭문제.py", code:
 `weights = [2, 3, 4, 5, 9]
 values  = [3, 4, 5, 8, 10]
 capacity = 10
@@ -977,7 +977,7 @@ print("A:", a)
 print("B:", b)
 print("최장 공통 부분수열:", "".join(reversed(lcs)), "(길이", dp[m][n], ")")
 ` },
-  { cat:"응용·도전", title:"N-퀸 퍼즐", emoji:"♛", name:"N퀸.py", code:
+  { id:"nqueens", cat:"응용·도전", title:"N-퀸 퍼즐", emoji:"♛", name:"N퀸.py", code:
 `N = 8
 solutions = 0
 cols, diag1, diag2, board = set(), set(), set(), []
@@ -1001,7 +1001,7 @@ print(f"{N}-퀸 첫 번째 해:")
 place(0)
 print(f"\\n{N}-퀸 해의 개수: {solutions}")
 ` },
-  { cat:"응용·도전", title:"생명 게임", emoji:"🦠", name:"생명게임.py", code:
+  { id:"life", cat:"응용·도전", title:"생명 게임", emoji:"🦠", name:"생명게임.py", code:
 `seed = [
     "........",
     "..#.....",
@@ -1200,20 +1200,6 @@ print(" ".join(sentence))
 ` },
 ];
 
-function snippetIcon(snippet) {
-  const category = String(snippet.cat || "");
-  if (category.includes("그래프")) return "graph";
-  if (category.includes("random") || category.includes("시뮬레이션")) return "dice";
-  if (category.includes("수학") || category.includes("알고리즘") || category.includes("정렬")) return "math";
-  if (category.includes("문자열")) return "text";
-  if (category.includes("리스트") || category.includes("딕셔너리")) return "list";
-  if (category.includes("날짜")) return "clock";
-  if (category.includes("함수") || category.includes("클래스")) return "function";
-  if (category.includes("예외")) return "warning";
-  if (category.includes("응용")) return "puzzle";
-  return "code";
-}
-
 // ===== 예제 학습 메타데이터 =====
 // 각 예제에 난이도(level 1~5)·한 줄 설명(desc)·배우는 개념(learn)을 더한다.
 // 코드 블록을 건드리지 않도록 PY_SNIPPETS 와 "같은 순서"의 병렬 배열로 두고 아래에서 병합한다.
@@ -1347,109 +1333,6 @@ PY_SNIPPETS.forEach((s, i) => {
   if (s.desc === undefined) s.desc = m.d;
   if (s.learn === undefined) s.learn = m.t;
 });
-
-const SNIPPET_LEVELS = { 1: { label: "입문", star: "⭐" }, 2: { label: "기본", star: "⭐⭐" }, 3: { label: "심화", star: "⭐⭐⭐" }, 4: { label: "응용", star: "⭐⭐⭐⭐" }, 5: { label: "도전", star: "⭐⭐⭐⭐⭐" } };
-
-function openPythonSnippet(snip){
-  handleFiles([new File([snip.code], snip.name, { type: "text/x-python" })]);
-}
-
-function openSnippetGallery(){
-  if (document.querySelector(".snippet-modal")) return;          // 중복 열림 방지
-  const modal = document.createElement("div"); modal.className = "modal snippet-modal";
-  const card = document.createElement("div"); card.className = "modal-card";
-  const h = document.createElement("h3"); h.textContent = "파이썬 예제 갤러리";
-  const sub = document.createElement("div"); sub.className = "sub";
-  sub.textContent = "예제 " + PY_SNIPPETS.length + "개 · 난이도로 고르고 클릭하면 새 코드로 열려요. ▶ 실행(" + shortcutDisplay(shortcutValue("runCode")) + ")으로 바로 돌려보세요.";
-  const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
-  const onKey = (e) => { if (e.key === "Escape"){ e.preventDefault(); close(); } };
-
-  // 검색창: 제목·카테고리·설명·개념·파일명으로 빠르게 거르기(예제가 많아짐)
-  const search = document.createElement("input"); search.type = "search"; search.className = "snippet-search";
-  search.placeholder = "예제 검색 (제목·설명·개념)"; search.setAttribute("aria-label", "예제 검색");
-
-  // 난이도 필터 칩: 전체 / ⭐ 입문 / ⭐⭐ 기본 / ⭐⭐⭐ 심화 / ⭐⭐⭐⭐ 응용 / ⭐⭐⭐⭐⭐ 도전
-  let levelFilter = 0;   // 0 = 전체
-  const filterBar = document.createElement("div"); filterBar.className = "snippet-filter"; filterBar.setAttribute("role", "group"); filterBar.setAttribute("aria-label", "난이도 필터");
-  const countFor = (lv) => PY_SNIPPETS.filter(s => !lv || s.level === lv).length;
-  const chipDefs = [{ lv: 0, text: "전체 " + countFor(0) }].concat(
-    [1, 2, 3, 4, 5].map(lv => ({ lv, text: SNIPPET_LEVELS[lv].star + " " + SNIPPET_LEVELS[lv].label + " " + countFor(lv) }))
-  );
-  const chips = chipDefs.map(def => {
-    const chip = document.createElement("button"); chip.type = "button"; chip.className = "snippet-chip"; chip.textContent = def.text;
-    chip.setAttribute("aria-pressed", def.lv === 0 ? "true" : "false");
-    if (def.lv === 0) chip.classList.add("active");
-    chip.addEventListener("click", () => {
-      levelFilter = def.lv;
-      chips.forEach(c => { const on = (c === chip); c.classList.toggle("active", on); c.setAttribute("aria-pressed", on ? "true" : "false"); });
-      applyFilter();
-    });
-    filterBar.appendChild(chip);
-    return chip;
-  });
-
-  // 카테고리별로 묶어 헤더 + 카드 그리드로 렌더(긴 목록은 본문 스크롤)
-  const body = document.createElement("div"); body.className = "snippet-body";
-  const sections = [];
-  const cats = [], byCat = new Map();
-  PY_SNIPPETS.forEach(s => { const c = s.cat || "기타"; if (!byCat.has(c)){ byCat.set(c, []); cats.push(c); } byCat.get(c).push(s); });
-  cats.forEach(c => {
-    const head = document.createElement("div"); head.className = "snippet-cat"; head.textContent = c;
-    const grid = document.createElement("div"); grid.className = "snippet-grid";
-    const cards = [];
-    byCat.get(c).forEach(s => {
-      const lvInfo = SNIPPET_LEVELS[s.level] || null;
-      const b = document.createElement("button"); b.type = "button"; b.className = "snippet-card"; b.title = s.name;
-      if (lvInfo){ b.classList.add("lv" + s.level); b.setAttribute("aria-label", s.title + " · " + lvInfo.label + " · " + (s.desc || "")); }
-      const top = document.createElement("span"); top.className = "snippet-top";
-      const em = document.createElement("span"); em.className = "snippet-emoji"; em.innerHTML = uiIcon(snippetIcon(s));
-      top.appendChild(em);
-      if (lvInfo){ const lv = document.createElement("span"); lv.className = "snippet-level"; lv.textContent = lvInfo.star; lv.title = lvInfo.label; top.appendChild(lv); }
-      const t = document.createElement("span"); t.className = "snippet-title"; t.textContent = s.title;
-      b.append(top, t);
-      if (s.desc){ const d = document.createElement("span"); d.className = "snippet-desc"; d.textContent = s.desc; b.appendChild(d); }
-      if (Array.isArray(s.learn) && s.learn.length){
-        const tags = document.createElement("span"); tags.className = "snippet-tags";
-        s.learn.slice(0, 3).forEach(name => { const tag = document.createElement("span"); tag.className = "snippet-tag"; tag.textContent = name; tags.appendChild(tag); });
-        b.appendChild(tags);
-      }
-      b.addEventListener("click", () => { close(); openPythonSnippet(s); });
-      grid.appendChild(b);
-      cards.push({ el: b, level: s.level || 0, hay: (s.title + " " + c + " " + (s.desc || "") + " " + (Array.isArray(s.learn) ? s.learn.join(" ") : "") + " " + (s.name || "")).toLocaleLowerCase() });
-    });
-    body.append(head, grid);
-    sections.push({ head, grid, cards });
-  });
-  const emptyMsg = document.createElement("div"); emptyMsg.className = "snippet-empty"; emptyMsg.textContent = "조건에 맞는 예제가 없어요."; emptyMsg.hidden = true;
-  body.appendChild(emptyMsg);
-  const applyFilter = () => {
-    const q = search.value.trim().toLocaleLowerCase();
-    let any = false;
-    sections.forEach(sec => {
-      let shown = 0;
-      sec.cards.forEach(c => {
-        const ok = (!q || c.hay.includes(q)) && (!levelFilter || c.level === levelFilter);
-        c.el.hidden = !ok; if (ok) shown++;
-      });
-      sec.head.hidden = sec.grid.hidden = (shown === 0);
-      if (shown) any = true;
-    });
-    emptyMsg.hidden = any;
-  };
-  search.addEventListener("input", applyFilter);
-
-  const actions = document.createElement("div"); actions.className = "modal-actions";
-  const spacer = document.createElement("div"); spacer.className = "spacer";
-  const cancel = document.createElement("button"); cancel.className = "btn"; cancel.type = "button"; cancel.textContent = "닫기";
-  cancel.addEventListener("click", close);
-  actions.append(spacer, cancel);
-  card.append(h, sub, search, filterBar, body, actions);
-  modal.appendChild(card);
-  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });   // 바깥 클릭 닫기
-  document.body.appendChild(modal);
-  setTimeout(() => { try { search.focus(); } catch(e){} }, 0);   // 열면 바로 검색 가능
-  window.addEventListener("keydown", onKey, true);
-}
 
 // 편집 가능한 코드 에디터: 투명 textarea(실제 입력) 아래에 구문강조 pre(표시)를 겹쳐, 색을 유지하며 편집.
 // 줄번호·스크롤 동기화, Tab=공백 4칸. getValue()로 현재 내용을 읽는다(저장 기능은 없음 — 실시간 편집+실행).

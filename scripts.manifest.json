@@ -58,9 +58,11 @@
     "js-libraries.js",
     "js-runtime.js",
     "js-editor.js",
+    "java-snippets.js",
     "java-libraries.js",
     "java-runtime.js",
     "java-editor.js",
+    "snippet-gallery.js",
     "office-doc-viewers.js",
     "office-replace.js",
     "docx-editor.js",
@@ -179,9 +181,16 @@
     {
       "name": "java",
       "scripts": [
+        "java-snippets.js",
         "java-libraries.js",
         "java-runtime.js",
         "java-editor.js"
+      ]
+    },
+    {
+      "name": "snippet-gallery",
+      "scripts": [
+        "snippet-gallery.js"
       ]
     },
     {
@@ -331,6 +340,10 @@
       "python-editor.js",
       "java-libraries.js",
       "java-runtime.js"
+    ],
+    "snippet-gallery.js": [
+      "python-snippets.js",
+      "java-snippets.js"
     ],
     "spreadsheet-viewer.js": [
       "grid-selection.js",

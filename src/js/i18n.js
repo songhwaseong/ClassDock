@@ -58,7 +58,7 @@
     "과제 제출 검수": "Review submissions",
     ".taskdone 일괄 확인": "Review .taskdone files in bulk",
     "＋ 다른 문서 만들기 ▾": "＋ Create another document ▾",
-    "✨ Python 예제로 시작": "✨ Start with a Python example",
+    "✨ 예제로 시작": "✨ Start with an example",
     "저장하면 이 파일의 원본이 바로 바뀝니다. (열어 둔 폴더·파일에 직접 씁니다)":
       "Saving overwrites this file's original directly (in the folder or file you opened).",
     "원본은 그대로 두고 '설정 → 일반 → 자동 저장 폴더'에 사본으로 저장합니다. 원본에 바로 저장하려면 '열기 → 폴더 열기'로 폴더를 여세요.":
@@ -147,7 +147,7 @@
     "새 화이트보드": "New whiteboard",
     "새 텍스트 파일": "New text file",
     "리플레이 열기(.lesson)": "Open replay (.lesson)",
-    "파이썬 예제 갤러리": "Python examples gallery",
+    "예제 갤러리 (파이썬·자바)": "Examples gallery (Python/Java)",
     "현재 파일 새로고침": "Refresh current file",
     "전체 백업 ZIP 내보내기": "Export full backup ZIP",
     "백업 ZIP에서 복원": "Restore from backup ZIP",
@@ -193,7 +193,8 @@
     // 시작 화면(드롭존)
     "파일을 여기로 끌어다 놓으세요": "Drag and drop your files here",
     "＋ 새로 만들기 ▾": "＋ New ▾",
-    "✨ 파이썬 예제 갤러리": "✨ Python examples gallery",
+    "✨ 예제 갤러리": "✨ Examples gallery",
+    "✨ 자바 예제 갤러리": "✨ Java examples gallery",
 
     // 서명 모달
     "서명 추가": "Add signature",
@@ -460,7 +461,6 @@
 
     // 환영 / 도움말
     "ClassDock에 오신 걸 환영해요 👋": "Welcome to ClassDock 👋",
-    "✨ 파이썬 예제로 시작": "✨ Start with Python examples",
     "시작하기": "Get started",
     "기능 둘러보기": "Feature tour",
     "명령 팔레트 — 기능 검색·실행": "Command palette — search & run",

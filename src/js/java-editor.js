@@ -1321,6 +1321,10 @@ function renderJavaRunnable(context){
   const newJavaBtn = document.createElement("button"); newJavaBtn.className = "run-newjava"; newJavaBtn.type = "button";
   newJavaBtn.textContent = "+Java"; newJavaBtn.title = "새 자바 코드";
   newJavaBtn.addEventListener("click", () => { if (typeof newJavaScratch === "function") newJavaScratch(); });
+  // 예제 갤러리를 자바 탭으로 연다 — 고치다가 다른 예제를 꺼내 보는 흐름이 잦다(+Java 옆).
+  const examplesBtn = document.createElement("button"); examplesBtn.className = "run-java-examples"; examplesBtn.type = "button";
+  examplesBtn.textContent = "예제"; examplesBtn.title = "자바 예제 갤러리";
+  examplesBtn.addEventListener("click", () => { if (typeof openSnippetGallery === "function") openSnippetGallery("java"); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   const status = document.createElement("span"); status.className = "run-status";
@@ -1329,7 +1333,7 @@ function renderJavaRunnable(context){
   const moreBtn = document.createElement("button"); moreBtn.className = "java-run-more-toggle"; moreBtn.type = "button";
   moreBtn.textContent = "⋯"; moreBtn.title = "자바 보조 도구"; moreBtn.setAttribute("aria-haspopup", "menu"); moreBtn.setAttribute("aria-expanded", "false");
   const moreMenu = document.createElement("span"); moreMenu.className = "java-run-more-menu"; moreMenu.setAttribute("role", "menu");
-  moreMenu.append(configBtn, junitBtn, formatBtn, importsBtn, revertBtn, fontGroup, practiceGroup, newJavaBtn, layoutBtn);
+  moreMenu.append(configBtn, junitBtn, formatBtn, importsBtn, revertBtn, fontGroup, practiceGroup, newJavaBtn, examplesBtn, layoutBtn);
   moreGroup.append(moreBtn, moreMenu);
   bar.append(runBtn, gradeBtn, libBtn, envBtn, saveBtn, moreGroup, status);
   const closeMore = () => { moreGroup.classList.remove("is-open"); moreBtn.setAttribute("aria-expanded", "false"); };
