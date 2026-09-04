@@ -1326,7 +1326,13 @@ function buildCodeEditor(text, prof, options={}){
       item.setAttribute("role", "option"); item.setAttribute("aria-selected", String(index === completion.index));
       const name = document.createElement("span"); name.className = "code-complete-name"; name.textContent = info.name;
       item.appendChild(name);
-      const detail = info.signature || info.importText;
+      let detail = info.signature || info.importText;
+      // 공용 편집기를 쓰는 언어가 단순 단어 후보에도 패키지·출처 설명을 붙일 수 있는 훅.
+      // 선택·입력은 기존 후보 값을 그대로 쓰고, 화면에 보이는 둘째 줄만 보강한다.
+      if (!detail && typeof options.completionDetail === "function"){
+        try { detail = String(options.completionDetail(info, ta.value) || ""); }
+        catch(_){ detail = ""; }
+      }
       if (detail){
         const signature = document.createElement("span");
         signature.className = "code-complete-signature";

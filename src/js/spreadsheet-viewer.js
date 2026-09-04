@@ -2612,7 +2612,14 @@ async function renderXlsx(file, host, doc){
   const rangeA1 = (rg) => encodeSpreadsheetCell(rg.s.r, rg.s.c) + ":" + encodeSpreadsheetCell(rg.e.r, rg.e.c);
   // 규칙 관리 모달: 현재 시트 규칙 목록 + 개별 삭제
   let condModal = null;
-  const closeCondModal = () => { if (condModal){ condModal.remove(); condModal = null; } };
+  let condModalKeydown = null;
+  const closeCondModal = () => {
+    if (condModal){ condModal.remove(); condModal = null; }
+    if (condModalKeydown){
+      document.removeEventListener("keydown", condModalKeydown, true);
+      condModalKeydown = null;
+    }
+  };
   const CONDOP_LABEL = { ge:"≥", gt:">", le:"≤", lt:"<", eq:"=", ne:"≠", between:"사이", contains:"포함", notcontains:"미포함" };
   const openCondManager = () => {
     closeCondModal();
@@ -2634,6 +2641,13 @@ async function renderXlsx(file, host, doc){
       '<div class="xlsx-cond-list">' + rowsHtml + '</div>' +
       '<div class="xlsx-cond-foot"><button data-a="clear">전체 삭제</button><button data-a="close2">닫기</button></div>';
     document.body.appendChild(modal); condModal = modal;
+    condModalKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeCondModal();
+    };
+    document.addEventListener("keydown", condModalKeydown, true);
     modal.querySelector('[data-a="close"]').onclick = closeCondModal;
     modal.querySelector('[data-a="close2"]').onclick = closeCondModal;
     modal.querySelector('[data-a="clear"]').onclick = () => { clearCondRules(); closeCondModal(); };
@@ -2979,7 +2993,14 @@ async function renderXlsx(file, host, doc){
   };
 
   let pivotModal = null;
-  const closePivotModal = () => { if (pivotModal){ pivotModal.remove(); pivotModal = null; } };
+  let pivotModalKeydown = null;
+  const closePivotModal = () => {
+    if (pivotModal){ pivotModal.remove(); pivotModal = null; }
+    if (pivotModalKeydown){
+      document.removeEventListener("keydown", pivotModalKeydown, true);
+      pivotModalKeydown = null;
+    }
+  };
   const openPivotModal = () => {
     const grid = extractSelectionGrid();
     if (!grid || grid.length < 2 || !grid[0] || !grid[0].length){
@@ -3003,6 +3024,13 @@ async function renderXlsx(file, host, doc){
       '<div class="xlsx-pivot-actions"><button data-a="make" class="primary">새 시트로 만들기</button><button data-a="close2">닫기</button></div>';
     document.body.appendChild(modal);
     pivotModal = modal;
+    pivotModalKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closePivotModal();
+    };
+    document.addEventListener("keydown", pivotModalKeydown, true);
     const groupSel = modal.querySelector('[data-k="group"]');
     const valueSel = modal.querySelector('[data-k="value"]');
     const aggSel = modal.querySelector('[data-k="agg"]');

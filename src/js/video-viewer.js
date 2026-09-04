@@ -193,12 +193,21 @@ function vvCreateBatchProgress(){
   document.body.appendChild(overlay);
   let cancelled = false;
   let ctrl = null;
-  cancel.addEventListener("click", () => {
+  const requestCancel = () => {
+    if (cancelled) return;
     cancelled = true;
     cancel.disabled = true;
     cancel.textContent = "중지 요청됨";
     if (ctrl) { try { ctrl.abort(); } catch(_){} }
-  });
+  };
+  cancel.addEventListener("click", requestCancel);
+  const onKeydown = (event) => {
+    if (event.key !== "Escape" || cancelled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestCancel();
+  };
+  document.addEventListener("keydown", onKeydown, true);
   return {
     update(done, total, name){
       meter.max = Math.max(1, total);
@@ -207,7 +216,10 @@ function vvCreateBatchProgress(){
     },
     signal(){ ctrl = new AbortController(); return ctrl.signal; },
     isCancelled(){ return cancelled; },
-    close(){ overlay.remove(); }
+    close(){
+      document.removeEventListener("keydown", onKeydown, true);
+      overlay.remove();
+    }
   };
 }
 

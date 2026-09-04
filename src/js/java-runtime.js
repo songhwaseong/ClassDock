@@ -194,7 +194,7 @@ const JAVA_INSTANCE_MEMBERS = {
 
 /* 고른 라이브러리의 멤버. 클래스 이름은 런처 카탈로그(JavaLibrary.Words)가 알려 주지만
    그 안에 무엇이 있는지는 알려 주지 않아, 이름만 나오고 점을 찍으면 아무것도 안 나왔다.
-   기본 목록 다섯 개는 수업에서 쓰는 범위가 좁아 여기에 적어 둔다(자바스크립트 쪽 JS_LIBRARY_MEMBERS 와 같은 방식).
+   기본 목록은 수업에서 쓰는 범위가 좁아 여기에 적어 둔다(자바스크립트 쪽 JS_LIBRARY_MEMBERS 와 같은 방식).
    직접 좌표로 받은 라이브러리는 알 길이 없으므로 클래스 이름만 제안한다 — 없는 메서드를 권하느니 비우는 쪽이다. */
 const JAVA_LIBRARY_MEMBERS = {
   // Gson
@@ -386,7 +386,7 @@ const JAVA_IMPORT_PACKAGES = {
   "java.io": "IOException File FileReader FileWriter BufferedReader BufferedWriter InputStreamReader PrintWriter",
   "java.nio.file": "Files Paths Path",
   "java.util.regex": "Pattern Matcher",
-  // 기본 라이브러리 다섯 개 — 고른 것만 제안한다(아래 javaImportCandidates 의 allowed 검사).
+  // 기본 라이브러리 — 고른 것만 제안한다(아래 javaImportCandidates 의 allowed 검사).
   "com.google.gson": "Gson GsonBuilder JsonObject JsonArray JsonElement JsonParser",
   "org.apache.commons.lang3": "StringUtils ArrayUtils RandomStringUtils",
   "org.apache.commons.lang3.math": "NumberUtils",
@@ -394,7 +394,8 @@ const JAVA_IMPORT_PACKAGES = {
   "org.jsoup": "Jsoup",
   "org.jsoup.nodes": "Document Element",
   "org.jsoup.select": "Elements",
-  "org.junit.jupiter.api": "Assertions Test BeforeEach DisplayName"
+  "org.junit.jupiter.api": "Assertions Test BeforeEach DisplayName",
+  "lombok": "Data Getter Setter Builder Value NonNull ToString EqualsAndHashCode NoArgsConstructor AllArgsConstructor RequiredArgsConstructor"
 };
 
 // 클래스 이름 → "import 패키지.이름;" 한 줄. 라이브러리에서 온 이름은 고른 뒤에만 쓴다.
@@ -409,6 +410,154 @@ const JAVA_IMPORTS = (() => {
   }
   return map;
 })();
+
+/* ── Ctrl+클릭 정의 이동 ────────────────────────────────────────────────
+   공용 편집기의 definitionTargetAt 훅에 맞춘 자바 전용 해석기.
+   · 현재 파일의 class/interface/enum/record·메서드는 바로 줄을 돌려준다.
+   · JDK 타입은 완전 이름으로 바꿔 런처의 src.zip 조회로 보낸다. */
+const JAVA_DEFINITION_KEYWORDS = new Set((
+  "if else for while switch catch try do synchronized return throw new case default assert break continue " +
+  "class interface enum record package import extends implements this super"
+).split(/\s+/));
+
+function javaDefinitionLine(source, offset){
+  return String(source || "").slice(0, Math.max(0, Number(offset) || 0)).split("\n").length;
+}
+
+// 주석·문자열 안의 "class Foo" 같은 글자를 정의로 오인하지 않도록 길이와 개행을 보존해 가린다.
+function javaDefinitionMask(source){
+  const text = String(source || "");
+  let out = "", state = "code", escaped = false;
+  for (let i = 0; i < text.length; i++){
+    const ch = text[i], next = text[i + 1] || "";
+    if (state === "line"){
+      if (ch === "\n"){ out += "\n"; state = "code"; } else out += " ";
+      continue;
+    }
+    if (state === "block"){
+      if (ch === "*" && next === "/"){ out += "  "; i++; state = "code"; }
+      else out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+    if (state === "string" || state === "char"){
+      if (ch === "\n"){ out += "\n"; escaped = false; continue; }
+      out += " ";
+      if (escaped){ escaped = false; continue; }
+      if (ch === "\\"){ escaped = true; continue; }
+      if ((state === "string" && ch === '"') || (state === "char" && ch === "'")) state = "code";
+      continue;
+    }
+    if (ch === "/" && next === "/"){ out += "  "; i++; state = "line"; continue; }
+    if (ch === "/" && next === "*"){ out += "  "; i++; state = "block"; continue; }
+    if (ch === '"'){ out += " "; state = "string"; continue; }
+    if (ch === "'"){ out += " "; state = "char"; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+function javaLocalDefinition(source, name, referenceOffset){
+  const word = String(name || "");
+  if (!/^[A-Za-z_$][\w$]*$/.test(word) || JAVA_DEFINITION_KEYWORDS.has(word)) return null;
+  const masked = javaDefinitionMask(source);
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rows = [];
+  const addMatches = (re, kind) => {
+    let match;
+    while ((match = re.exec(masked))){
+      const within = match[0].lastIndexOf(word);
+      const at = match.index + Math.max(0, within);
+      rows.push({ kind, name:word, line:javaDefinitionLine(masked, at),
+        column:at - (masked.lastIndexOf("\n", at - 1) + 1), offset:at });
+      if (match[0].length === 0) re.lastIndex++;
+    }
+  };
+  addMatches(new RegExp("\\b(class|interface|enum|record)\\s+" + escaped + "\\b", "g"), "type");
+  // 세미콜론으로 끝나는 호출식은 제외하고 생성자를 포함한 한 줄 메서드 선언을 찾는다.
+  const methodHead = "^[\\t ]*(?:(?:(?:@[A-Za-z_$][\\w$.]*(?:\\([^\\n]*\\))?)|(?:public|protected|private|static|final|abstract|synchronized|native|strictfp|default))\\s+)*";
+  const methodType = "(?:<[^>\\n]+>\\s*)?(?:[A-Za-z_$][\\w$.]*(?:\\s*<[^;{}\\n]+>)?(?:\\s*\\[\\s*\\])?\\s+)?";
+  addMatches(new RegExp(methodHead + methodType + escaped + "\\s*\\([^;{}\\n]*\\)\\s*(?:throws\\s+[^\\n{]+)?\\{", "gm"), "method");
+  if (!rows.length) return null;
+  rows.sort((a, b) => a.offset - b.offset);
+  const before = rows.filter(row => row.offset <= (Number(referenceOffset) || 0));
+  const chosen = before.length ? before[before.length - 1] : rows[0];
+  delete chosen.offset;
+  return chosen;
+}
+
+function javaQualifiedDefinitionType(source, name, start){
+  const text = String(source || ""), word = String(name || "");
+  if (!/^[A-Z_$][\w$]*$/.test(word)) return "";
+  const lineStart = text.lastIndexOf("\n", Math.max(0, Number(start) || 0) - 1) + 1;
+  const prefix = text.slice(lineStart, Math.max(lineStart, Number(start) || 0));
+  const qualifiedPrefix = /((?:[a-z_$][\w$]*\.)+)$/.exec(prefix);
+  if (qualifiedPrefix) return qualifiedPrefix[1] + word;
+  const direct = new RegExp("^\\s*import\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*\\." + word + ")\\s*;", "m").exec(text);
+  if (direct) return direct[1];
+  const known = JAVA_IMPORTS[word];
+  if (known && !known.library) return javaImportPath(known.text) || "";
+  if (JAVA_TYPE_WORDS.indexOf(word) >= 0) return "java.lang." + word;
+  const wildcard = /^\s*import\s+(java(?:\.[A-Za-z_$][\w$]*)+)\.\*\s*;/gm;
+  const packages = [];
+  let match;
+  while ((match = wildcard.exec(text))) packages.push(match[1]);
+  return packages.length === 1 ? packages[0] + "." + word : "";
+}
+
+function javaDefinitionTargetAt(source, wordInfo){
+  if (!wordInfo || !wordInfo.word) return null;
+  const local = javaLocalDefinition(source, wordInfo.word, wordInfo.start);
+  if (local) return { scope:"local", ...local };
+  const qualified = javaQualifiedDefinitionType(source, wordInfo.word, wordInfo.start);
+  return qualified ? { kind:"jdk", name:String(wordInfo.word), qualified } : null;
+}
+
+/* 자동완성 후보 둘째 줄에 보여 줄 패키지.
+   import 없이 쓰는 java.lang, 명시적 import, 현재 고른 jar 목록 순으로 풀고,
+   현재 파일이 같은 이름의 타입을 선언했으면 표준 클래스로 오인하지 않는다. */
+function javaCompletionTypePackage(source, name, libraries){
+  const text = String(source || ""), word = String(name || "");
+  if (!/^[A-Z_$][\w$]*$/.test(word)) return "";
+  const local = javaLocalDefinition(text, word, text.length);
+  if (local && local.kind === "type") return "";
+  const packageOf = (qualified) => {
+    const value = String(qualified || "");
+    const at = value.lastIndexOf(".");
+    return at > 0 ? value.slice(0, at) : "";
+  };
+  const direct = new RegExp("^\\s*import\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*\\." + word + ")\\s*;", "m").exec(text);
+  if (direct) return packageOf(direct[1]);
+  const known = JAVA_IMPORTS[word];
+  if (known) return packageOf(javaImportPath(known.text));
+  if (JAVA_TYPE_WORDS.indexOf(word) >= 0) return "java.lang";
+
+  const qualified = [];
+  const add = (value) => {
+    const full = String(value || "");
+    if (full.endsWith("." + word) && qualified.indexOf(full) < 0) qualified.push(full);
+  };
+  const classes = libraries && Array.isArray(libraries.classes) ? libraries.classes : [];
+  for (const value of classes) add(value);
+  const extracted = libraries && libraries.members && typeof libraries.members === "object" ? libraries.members : null;
+  if (extracted) for (const value of Object.keys(extracted)) add(value);
+  if (qualified.length === 1) return packageOf(qualified[0]);
+
+  const wildcard = /^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\.\*\s*;/gm;
+  const packages = [];
+  let match;
+  while ((match = wildcard.exec(text))) if (packages.indexOf(match[1]) < 0) packages.push(match[1]);
+  return packages.length === 1 ? packages[0] : "";
+}
+
+async function requestJavaDefinitionSource(qualified){
+  try {
+    const res = await fetch("/java-definition", { method:"POST", headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ qualified:String(qualified || "") }) });
+    if (!res.ok) return { ok:false, reason:res.status === 501 ? "no-jdk" : "request-failed" };
+    const data = await res.json();
+    return data && typeof data === "object" ? data : { ok:false, reason:"bad-response" };
+  } catch(_){ return { ok:false, reason:"no-backend" }; }
+}
 
 // 이미 적혀 있는 import 인가. 같은 줄이 있거나, 그 패키지를 * 로 받아 왔으면 다시 적지 않는다.
 function javaImportPath(line){
@@ -537,6 +686,101 @@ function javaImportCandidates(source, prefix, libraries){
   return rows;
 }
 
+// Java 코드 정렬은 문자열·주석의 내용은 건드리지 않고 들여쓰기와 줄 끝 공백만 정돈한다.
+// text block은 안쪽 공백 자체가 값이므로 보수적으로 원문을 그대로 둔다.
+function javaFormatSource(source){
+  const text = String(source == null ? "" : source);
+  if (text.indexOf('"""') >= 0) return text;
+  const newline = text.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+  const masks = javaDefinitionMask(normalized).split("\n");
+  let depth = 0;
+  const out = lines.map((raw, index) => {
+    const trimmedRight = raw.replace(/[\t ]+$/g, "");
+    const trimmed = trimmedRight.trimStart();
+    const mask = String(masks[index] || "").trimStart();
+    if (!trimmed) return "";
+    const closing = /^}/.test(mask) ? 1 : 0;
+    const caseLabel = /^(?:case\b|default\s*:)/.test(mask) ? 1 : 0;
+    const indent = Math.max(0, depth - closing - caseLabel);
+    let opens = 0, closes = 0;
+    for (const ch of String(masks[index] || "")){
+      if (ch === "{") opens++;
+      else if (ch === "}") closes++;
+    }
+    depth = Math.max(0, depth + opens - closes);
+    return "    ".repeat(indent) + trimmed;
+  });
+  return out.join(newline);
+}
+
+function javaOrganizeImports(source, libraries){
+  const text = String(source == null ? "" : source);
+  const newline = text.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
+  const hadFinalNewline = /\r?\n$/.test(text);
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const imports = [];
+  const bodyLines = [];
+  for (const line of lines){
+    const path = javaImportPath(line);
+    if (path) imports.push(path);
+    else bodyLines.push(line);
+  }
+  const body = bodyLines.join("\n");
+  const masked = javaDefinitionMask(body);
+  const used = (name) => new RegExp("\\b" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "u").test(masked);
+  const localTypes = new Set();
+  const localTypeRe = /\b(?:class|interface|enum|record)\s+([\p{L}_$][\p{L}\p{N}_$]*)/gu;
+  let localMatch;
+  while ((localMatch = localTypeRe.exec(masked))) localTypes.add(localMatch[1]);
+  const selectedWords = libraries && Array.isArray(libraries.words) ? libraries.words : [];
+  const keep = new Set();
+  for (const path of imports){
+    if (path.startsWith("static ") || path.endsWith(".*")){ keep.add(path); continue; }
+    const name = path.slice(path.lastIndexOf(".") + 1);
+    if (used(name)) keep.add(path);
+  }
+  for (const name of Object.keys(JAVA_IMPORTS)){
+    const entry = JAVA_IMPORTS[name];
+    if (!used(name) || localTypes.has(name) || (entry.library && selectedWords.indexOf(name) < 0)) continue;
+    keep.add(javaImportPath(entry.text));
+  }
+  // 설치 jar의 클래스도 단순 이름이 한 패키지로만 결정될 때는 누락 import를 채운다.
+  const jarNames = new Map();
+  for (const qualified of (libraries && Array.isArray(libraries.classes) ? libraries.classes : [])){
+    const name = String(qualified || "").split(".").pop();
+    if (!name) continue;
+    const list = jarNames.get(name) || [];
+    if (list.indexOf(qualified) < 0) list.push(qualified);
+    jarNames.set(name, list);
+  }
+  for (const [name, qualified] of jarNames){
+    if (qualified.length === 1 && used(name) && !localTypes.has(name)) keep.add(String(qualified[0]));
+  }
+  const sorted = Array.from(keep).filter(Boolean).sort((a, b) => {
+    const sa = a.startsWith("static "), sb = b.startsWith("static ");
+    return Number(sa) - Number(sb) || a.localeCompare(b);
+  }).map(path => "import " + path + ";");
+
+  // 기존 import 줄을 걷은 본문에서 package 선언 바로 뒤(없으면 첫 코드 앞)에 정리한 블록을 넣는다.
+  let insertAt = 0;
+  const packageAt = bodyLines.findIndex(line => /^\s*package\b/.test(line));
+  if (packageAt >= 0) insertAt = packageAt + 1;
+  else {
+    while (insertAt < bodyLines.length && (!bodyLines[insertAt].trim() || /^\s*(?:\/\/|\/\*|\*)/.test(bodyLines[insertAt]))) insertAt++;
+  }
+  while (insertAt < bodyLines.length && !bodyLines[insertAt].trim()) bodyLines.splice(insertAt, 1);
+  if (sorted.length){
+    const block = (insertAt > 0 && bodyLines[insertAt - 1].trim() ? [""] : []).concat(sorted, [""]);
+    bodyLines.splice(insertAt, 0, ...block);
+  }
+  let result = bodyLines.join("\n").replace(/\n{3,}/g, "\n\n");
+  if (hadFinalNewline && !result.endsWith("\n")) result += "\n";
+  if (!hadFinalNewline) result = result.replace(/\n+$/g, "");
+  return newline === "\n" ? result : result.replace(/\n/g, newline);
+}
+
 // ── 세션 호출 ──────────────────────────────────────────────────────────────
 /* 실행 봉투([길이][소스][길이][표준입력]) 뒤에 같은 폴더의 형제 .java 본문을 [개수]([길이][소스])* 로 잇는다.
    경로는 보내지 않는다 — 어디에 둘지는 소스가 스스로 적은 package·public 클래스로 런처가 정한다.
@@ -560,13 +804,16 @@ function buildJavaRunPayload(source, stdinText, extras){
   return out;
 }
 
-async function startJavaSession(source, stdinText, piped, libs, extras){
+async function startJavaSession(source, stdinText, piped, libs, extras, lint, mainClass, junit){
   // 페이로드 봉투는 파이썬 실행과 같은 것을 쓴다([길이][소스][길이][표준입력]) + 형제 .java.
   const body = buildJavaRunPayload(source, stdinText, extras);
   // 라이브러리는 '이름'만 보낸다 — 어느 jar 를 어디서 찾을지는 런처가 자기 카탈로그로 정한다.
   const query = [];
   if (piped) query.push("piped=1");
   if (libs) query.push("libs=" + encodeURIComponent(String(libs)));
+  if (lint) query.push("lint=1");
+  if (mainClass) query.push("main=" + encodeURIComponent(String(mainClass)));
+  if (junit) query.push("junit=1");
   const res = await fetch("/java-session-start" + (query.length ? "?" + query.join("&") : ""), {
     method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body
   });
@@ -617,7 +864,8 @@ async function pollJavaSessionToEnd(id, options){
 // 채점용 1회 실행 — 입력을 파이프로 한 번에 넣고(에코 없음) 끝까지 기다린다.
 async function runJavaHeadless(source, stdinText, options){
   options = options || {};
-  const id = await startJavaSession(source, stdinText, true, options.libs, options.extras);
+  const id = await startJavaSession(source, stdinText, true, options.libs, options.extras, options.lint,
+    options.mainClass, options.junit);
   try { return await pollJavaSessionToEnd(id, options); }
   finally { await stopJavaSession(id); }
 }
@@ -761,10 +1009,34 @@ function renderJavaInstallGuide(outPanel, onReady){
 }
 
 // ── 대화형 실행 화면 ───────────────────────────────────────────────────────
+function javaRunOutcome(result){
+  result = result || {};
+  const stderr = cleanJavaStderr(result.stderr);
+  const diagnostics = javacDiagnostics(stderr, result.mainClass ? result.mainClass + ".java" : "");
+  const compileFailed = diagnostics.some(item => item.severity === "error")
+    || (Number(result.code) !== 0 && /(?:\.java:\d+:\s*)?error:/iu.test(stderr));
+  if (result.cancelled) return { kind:"cancelled", label:javaT("실행 중지") };
+  if (compileFailed) return { kind:"compile-error", label:javaT("컴파일 실패") };
+  if (result.junit && Number(result.code) === 0) return { kind:"junit-success", label:javaT("JUnit 테스트 통과") };
+  if (result.junit) return { kind:"junit-failure", label:javaT("JUnit 테스트 실패") };
+  if (Number(result.code) === 0) return { kind:"success", label:javaTf("정상 종료 · 종료 코드 {code}", { code:0 }) };
+  return { kind:"runtime-error", label:javaTf("실행 중 오류 · 종료 코드 {code}", { code:Number(result.code) }) };
+}
+
+function javaJunitSummary(result){
+  const text = String((result && result.stdout) || "") + "\n" + cleanJavaStderr(result && result.stderr);
+  const count = (label) => {
+    const match = new RegExp("(\\d+)\\s+tests?\\s+" + label, "i").exec(text);
+    return match ? Number(match[1]) : 0;
+  };
+  return { found:count("found"), successful:count("successful"), failed:count("failed"), skipped:count("skipped") };
+}
+
 async function runJavaInteractive(source, ui, hooks){
   hooks = hooks || {};
   const { outPanel } = ui;
-  const sessionId = await startJavaSession(source, "", false, hooks.libs, hooks.extras);
+  const sessionId = await startJavaSession(source, "", false, hooks.libs, hooks.extras, hooks.lint,
+    hooks.mainClass, hooks.junit);
   if (typeof hooks.isCancelled === "function" && hooks.isCancelled()){
     await stopJavaSession(sessionId);
     return { code:-1, stdout:"", stderr:"", mainClass:"", cancelled:true, sessionId };
@@ -772,7 +1044,7 @@ async function runJavaInteractive(source, ui, hooks){
 
   outPanel.innerHTML = "";
   const head = document.createElement("div"); head.className = "out-head";
-  const headLabel = document.createElement("span"); headLabel.textContent = "실행 결과 · 대화형 터미널";
+  const headLabel = document.createElement("span"); headLabel.textContent = hooks.junit ? "JUnit 테스트 · 실행 중" : "실행 결과 · 대화형 터미널";
   head.appendChild(headLabel);
   const pre = document.createElement("pre"); pre.className = "out-pre";
   const stdoutEl = document.createElement("span");
@@ -788,6 +1060,7 @@ async function runJavaInteractive(source, ui, hooks){
   const rerun = document.createElement("button"); rerun.className = "terminal-rerun"; rerun.type = "button";
   rerun.textContent = "↻ 재실행"; rerun.title = "이 코드를 다시 실행";
   row.append(mark, input, eof, stop, rerun);
+  if (hooks.junit){ mark.hidden = true; input.hidden = true; eof.hidden = true; row.classList.add("is-junit"); }
   outPanel.append(head, pre, row);
   if (typeof window !== "undefined" && window.MNI18N && typeof window.MNI18N.translateTree === "function"){
     window.MNI18N.translateTree(outPanel);
@@ -837,10 +1110,10 @@ async function runJavaInteractive(source, ui, hooks){
     }
   });
   // 입력을 읽는 코드는 바로 값을 칠 수 있게 터미널로, 아니면 편집을 이어가게 편집기로 포커스를 둔다.
-  const needsInput = javaUsesInput(source);
+  const needsInput = !hooks.junit && javaUsesInput(source);
   setTimeout(() => {
     if (ui.keepEditorFocus && ui.editorTa && !needsInput) ui.editorTa.focus();
-    else input.focus();
+    else if (!hooks.junit) input.focus();
   }, 0);
 
   // 표시 텍스트는 상한까지만 자른다. seg.src 는 조각이 원본 어디서 왔는지(음수면 생략 안내 문구) —
@@ -893,8 +1166,9 @@ async function runJavaInteractive(source, ui, hooks){
             else stdoutEl.textContent = nextOut;
           }
           if (nextErr !== shownErr){ shownErr = nextErr; stderrEl.textContent = nextErr; }
-          // 자바는 stderr 에 경고를 흘리는 일이 드물다 — 내용이 있으면 오류로 보고 붉게 표시한다.
-          stderrEl.className = shownStderr ? "out-err" : "";
+          const liveDiagnostics = shownStderr ? javacDiagnostics(shownStderr, mainClass ? mainClass + ".java" : "") : [];
+          const warningsOnly = liveDiagnostics.length && liveDiagnostics.every(item => item.severity !== "error");
+          stderrEl.className = shownStderr ? (warningsOnly ? "out-warn" : "out-err") : "";
           if (nearBottom) outPanel.scrollTop = outPanel.scrollHeight;
         }
         if (data.complete){
@@ -915,7 +1189,18 @@ async function runJavaInteractive(source, ui, hooks){
     pre.classList.add("out-muted");
     pre.textContent = javaT("(출력 없음)");
   }
-  headLabel.textContent = javaTf("실행 결과 · 종료 코드 {code}", { code:result.code });
+  result.cancelled = typeof hooks.isCancelled === "function" && hooks.isCancelled();
+  result.junit = hooks.junit === true;
+  const outcome = javaRunOutcome(result);
+  headLabel.textContent = outcome.label;
+  outPanel.dataset.javaOutcome = outcome.kind;
+  if (hooks.junit){
+    const counts = javaJunitSummary(result);
+    const summary = document.createElement("div");
+    summary.className = "java-junit-summary " + (outcome.kind === "junit-success" ? "is-ok" : "is-error");
+    summary.textContent = javaTf("JUnit · 전체 {found}개 · 성공 {successful}개 · 실패 {failed}개 · 건너뜀 {skipped}개", counts);
+    head.insertAdjacentElement("afterend", summary);
+  }
   result.sessionId = sessionId;
   return result;
 }
@@ -934,7 +1219,9 @@ async function runJavaGrading(source, tests, hooks){
       raw = await runJavaHeadless(source, javaGradingStdin(cases[index].input), {
         isCancelled: hooks.isCancelled,
         libs: hooks.libs,
-        extras: hooks.extras
+        extras: hooks.extras,
+        lint: hooks.lint,
+        mainClass: hooks.mainClass
       });
     } catch(error){
       raw = { stdout:"", stderr:String((error && error.message) || error), code:-1 };
@@ -956,11 +1243,18 @@ function javaGradingRow(test, index, raw){
   raw = raw || {};
   const actual = String(raw.stdout || "");
   const stderr = cleanJavaStderr(raw.stderr);
+  // -Xlint 경고는 stderr 로 오지만 프로그램 실패가 아니다. javac 경고 요약으로 끝나는 경우만
+  // 컴파일 경고로 인정하고, 그 뒤 프로그램이 System.err 에 쓴 내용은 예전처럼 채점 오류로 남긴다.
+  const warningDiagnostics = stderr ? javacDiagnostics(stderr, raw.mainClass ? raw.mainClass + ".java" : "") : [];
+  const compilerWarningsOnly = Number(raw.code) === 0
+    && warningDiagnostics.length > 0
+    && warningDiagnostics.every(item => item.severity !== "error")
+    && /(?:^|\n)\d+\s+warnings?\s*$/iu.test(stderr.trim());
   let error = "";
   if (raw.timedOut) error = javaTf("⏱ {seconds}초가 넘도록 끝나지 않았어요. 끝나지 않는 반복이 없는지 확인해 주세요.",
     { seconds:Math.round(JAVA_GRADE_TIMEOUT_MS / 1000) });
   else if (raw.cancelled) error = javaT("채점을 중지했습니다.");
-  else if (stderr) error = stderr;
+  else if (stderr && !compilerWarningsOnly) error = stderr;
   else if (Number(raw.code) !== 0) error = javaTf("프로그램이 비정상 종료되었습니다 (종료 코드 {code}).", { code:Number(raw.code) });
   const expected = String(test.expected || "");
   return {
@@ -982,6 +1276,9 @@ async function runJavaSource(src, ui, options){
   const gradeTests = normalizeAssignmentTests(options.gradeTests);
   const grading = gradeTests.length > 0;
   const libs = String(options.libs || "");   // 실행·채점 두 길에 같은 목록이 들어간다
+  const lint = options.lint === true;
+  const mainClass = String(options.mainClass || "");
+  const junit = options.junit === true;
   // 같은 폴더의 형제 .java. 저장 검사와 같은 묶음을 줘야 "검사는 통과했는데 실행은 안 되는" 짝이 안 생긴다.
   // 모으는 데 파일 읽기가 낄 수 있어 실행 표시(■·"실행 중…")를 세운 뒤에 채운다.
   let extras = [];
@@ -1002,11 +1299,12 @@ async function runJavaSource(src, ui, options){
   btn.setAttribute("aria-label", btn.title);
   btn.classList.add("is-running");
   if (ui.gradeBtn) ui.gradeBtn.disabled = true;
+  if (ui.junitBtn) ui.junitBtn.disabled = true;
   split.classList.add("show-out");
   if (ui.clearError) ui.clearError();
   // 저장 검사 목록 자리를 실행 결과가 넘겨받는다 — 표시를 지워 두지 않으면 다음 검사가 남의 화면을 고친다.
   if (outPanel) delete outPanel.dataset.javaCheck;
-  setStatus(grading ? "채점 중…" : "실행 중…");
+  setStatus(grading ? "채점 중…" : junit ? "JUnit 테스트 중…" : "실행 중…");
   try {
     if (!(await javaBackendAvailable())){
       // 여기서 끝내지 않고, 안내 화면의 '다시 검사'가 성공하면 방금 누른 실행을 그대로 이어 준다.
@@ -1025,7 +1323,7 @@ async function runJavaSource(src, ui, options){
         + '</div><pre class="out-pre out-muted">' + javaT("테스트 실행 중…") + '</pre>';
       const report = await runJavaGrading(source, gradeTests, {
         isCancelled: () => cancelled,
-        libs, extras,
+        libs, extras, lint, mainClass,
         onProgress: (index, total) => { if (status) status.textContent = javaTf("채점 중… {index}/{total}", { index:index + 1, total }); }
       });
       renderAssignmentGradingResult(outPanel, report, assignmentGradingErrorText(report, gradeTests), gradeTests);
@@ -1034,7 +1332,7 @@ async function runJavaSource(src, ui, options){
     const result = await runJavaInteractive(source, ui, {
       bindCancel: (fn) => { cancelSession = fn; },
       isCancelled: () => cancelled,
-      libs, extras
+      libs, extras, lint, mainClass, junit
     });
     const line = javaErrorLine(result.stderr, result.mainClass);
     if (line && ui.markError) ui.markError(line);
@@ -1061,6 +1359,7 @@ async function runJavaSource(src, ui, options){
     btn.setAttribute("aria-label", idleTitle);
     btn.classList.remove("is-running");
     if (ui.gradeBtn) ui.gradeBtn.disabled = false;
+    if (ui.junitBtn) ui.junitBtn.disabled = false;
     setStatus("");
     if (options.keepEditorFocus === true && ui.editorTa && !javaUsesInput(source)){
       ui.editorTa.focus({ preventScroll:true });
@@ -1142,8 +1441,10 @@ async function checkJavaSource(src, ui, options){
   if (!(await javaBackendAvailable())) return null;
   let data = null;
   try {
-    const query = options.libs ? "?libs=" + encodeURIComponent(String(options.libs)) : "";
-    const res = await fetch("/java-check" + query, {
+    const query = [];
+    if (options.libs) query.push("libs=" + encodeURIComponent(String(options.libs)));
+    if (options.lint) query.push("lint=1");
+    const res = await fetch("/java-check" + (query.length ? "?" + query.join("&") : ""), {
       method:"POST", headers:{ "Content-Type":"application/octet-stream" },
       // 실행과 같은 봉투·같은 형제 목록을 보낸다 — 여기서만 형제를 알면 검사와 실행의 답이 갈린다.
       body:buildJavaRunPayload(source, "", options.extras)

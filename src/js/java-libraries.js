@@ -10,6 +10,7 @@ const JAVA_LIBRARY_MAX_SELECTED = 20;      // 런처가 한 번의 실행에서 
 // 런처의 검사(JavaLibraryIdRe·JavaLibrarySegmentRe)와 같은 모양. 여기서 먼저 걸러 헛된 요청을 줄인다.
 const JAVA_LIBRARY_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const JAVA_LIBRARY_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9_.+-]{0,99}$/;
+const JAVA_LIBRARY_SEARCH_RE = /^[\p{L}\p{N}][\p{L}\p{N}_.+\- ]{1,79}$/u;
 
 // 카탈로그 id 또는 group:artifact:version 인지. .. 는 폴더를 거슬러 오르므로 어느 자리에서도 막는다.
 function javaLibraryValidSpec(value){
@@ -18,6 +19,12 @@ function javaLibraryValidSpec(value){
   if (JAVA_LIBRARY_ID_RE.test(spec)) return true;
   const parts = spec.split(":");
   return parts.length === 3 && parts.every((part) => JAVA_LIBRARY_SEGMENT_RE.test(part));
+}
+
+// Maven Central 검색어. 주소나 Solr 문법을 받지 않고 수업에서 쓰는 이름 글자만 허용한다.
+function javaLibraryValidSearch(value){
+  const query = String(value == null ? "" : value).trim();
+  return JAVA_LIBRARY_SEARCH_RE.test(query) && query.indexOf("  ") < 0;
 }
 
 // 저장된 값이 무엇이든 {version, ids} 로 만든다(손상된 localStorage 로 실행이 막히지 않게).
@@ -133,6 +140,57 @@ function javaLibraryRow(raw){
   };
 }
 
+function javaLibrarySearchRow(raw){
+  const row = raw && typeof raw === "object" ? raw : {};
+  return {
+    group: String(row.group || ""),
+    artifact: String(row.artifact || ""),
+    version: String(row.version || ""),
+    packaging: String(row.packaging || ""),
+    label: String(row.label || row.artifact || ""),
+    exact: !!row.exact,
+    curated: !!row.curated,
+    versionCount: Math.max(0, Number(row.versionCount) || 0),
+    resolved: !!row.resolved,
+    dependencyKnown: !!row.dependencyKnown,
+    dependencyCount: Math.max(0, Number(row.dependencyCount) || 0)
+  };
+}
+
+// 검증된 기본 목록은 외부 검색 서버를 기다리지 않고 즉시 보여 준다.
+// Maven Central 결과가 나중에 도착하면 같은 group:artifact 는 이 행을 유지해 고정 검증값과 이름을 보존한다.
+function javaLibraryLocalSearch(query, rows){
+  const needle = String(query || "").trim().toLowerCase();
+  if (!javaLibraryValidSearch(needle)) return [];
+  const result = [];
+  for (const raw of Array.isArray(rows) ? rows : []){
+    const row = javaLibraryRow(raw);
+    if (!row.id) continue;
+    const parts = row.coordinate.split(":");
+    if (parts.length !== 3) continue;
+    const group = parts[0], artifact = parts[1], version = parts[2];
+    const text = [row.id, row.label, group, artifact].join(" ").toLowerCase();
+    if (text.indexOf(needle) < 0) continue;
+    result.push(javaLibrarySearchRow({
+      group, artifact, version, packaging:"jar", label:row.label,
+      exact:artifact.toLowerCase() === needle || row.id.toLowerCase() === needle,
+      curated:true, resolved:true, dependencyKnown:true, dependencyCount:0
+    }));
+  }
+  return result;
+}
+
+function javaLibraryMergeSearchRows(first, second){
+  const result = [], seen = new Set();
+  for (const raw of (Array.isArray(first) ? first : []).concat(Array.isArray(second) ? second : [])){
+    const row = javaLibrarySearchRow(raw);
+    const key = (row.group + ":" + row.artifact).toLowerCase();
+    if (!row.group || !row.artifact || seen.has(key)) continue;
+    seen.add(key); result.push(row);
+  }
+  return result;
+}
+
 async function javaLibraryFetchRows(path){
   if (location.protocol !== "http:" && location.protocol !== "https:") return { available:false, reason:"not-exe", rows:[] };
   try {
@@ -157,6 +215,34 @@ function javaLibraryCatalog(){
 // 이 컴퓨터에 실제로 있는 것 전부 — 카탈로그에 없는 직접 좌표도 여기에 나온다.
 function javaLibraryInstalled(){
   return javaLibraryFetchRows("/java-lib-list");
+}
+
+// 검색과 최신 버전 확인은 외부 주소를 직접 열지 않고, 허용된 Maven Central만 보는 런처를 거친다.
+async function javaLibrarySearch(query){
+  const value = String(query || "").trim();
+  if (!javaLibraryValidSearch(value)) throw new Error("검색어는 영문 이름 2~80자로 적어 주세요.");
+  if (location.protocol !== "http:" && location.protocol !== "https:") return { available:false, reason:"not-exe", rows:[] };
+  const response = await fetch("/java-lib-search?q=" + encodeURIComponent(value), { cache:"no-store" });
+  if (!response.ok) throw new Error(javaLibraryErrorText(await response.text()));
+  const list = await response.json();
+  return { available:true, reason:"", rows:(Array.isArray(list) ? list : []).map(javaLibrarySearchRow) };
+}
+
+async function javaLibraryResolve(group, artifact){
+  const g = String(group || "").trim(), a = String(artifact || "").trim();
+  if (!g || !a) throw new Error("라이브러리 좌표를 확인해 주세요.");
+  if (location.protocol !== "http:" && location.protocol !== "https:") throw new Error("라이브러리 검색은 ClassDock EXE에서만 사용할 수 있어요.");
+  const response = await fetch("/java-lib-resolve?group=" + encodeURIComponent(g) + "&artifact=" + encodeURIComponent(a), { cache:"no-store" });
+  if (!response.ok) throw new Error(javaLibraryErrorText(await response.text()));
+  const raw = await response.json();
+  const coordinate = String(raw && raw.coordinate || "");
+  if (!javaLibraryValidSpec(coordinate)) throw new Error("Maven Central에서 사용할 버전을 찾지 못했어요.");
+  return {
+    coordinate,
+    version:String(raw.version || ""),
+    dependencyKnown:!!raw.dependencyKnown,
+    dependencyCount:Math.max(0, Number(raw.dependencyCount) || 0)
+  };
 }
 
 /* 직접 좌표로 받은 jar 의 멤버 표({클래스: "이름() 이름"}). 기본 목록은 프런트가 손으로 적어 둔 표를
@@ -243,6 +329,7 @@ if (typeof module !== "undefined" && module.exports){
     JAVA_LIBRARY_STORAGE_PREFIX,
     JAVA_LIBRARY_MAX_SELECTED,
     javaLibraryValidSpec,
+    javaLibraryValidSearch,
     javaLibraryState,
     javaLibraryStorageKey,
     javaLibrarySelectionSignature,
@@ -252,6 +339,9 @@ if (typeof module !== "undefined" && module.exports){
     javaLibraryMemberWords,
     javaLibraryMembers,
     javaLibraryErrorText,
-    javaLibraryRow
+    javaLibraryRow,
+    javaLibrarySearchRow,
+    javaLibraryLocalSearch,
+    javaLibraryMergeSearchRows
   };
 }

@@ -3852,7 +3852,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .doc-open-native:disabled{opacity:.6;cursor:default}
   .doc-host .doc-p{margin:0 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}
   /* 코드 실행(.py): 실행 바 + 좌(코드)·우(출력) 분할 */
-  .run-wrap{max-width:1180px;margin:0 auto}
+  .run-wrap{max-width:1180px;margin:0 auto;container-type:inline-size}
   .run-wrap .code-note{max-width:none;margin:0 0 8px}
   /* Keep Python tools visible; the editor/output panes handle scrolling. */
   @media (min-width:901px){
@@ -3890,6 +3890,17 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-pyPkg .run-py-pkg,
   html.hide-tool-jsGrade .run-js-grade,
   html.hide-tool-jsPkg .run-js-library,
+  html.hide-tool-javaGrade .run-java-grade,
+  html.hide-tool-javaPkg .run-java-library,
+  html.hide-tool-javaEnv .run-java-env,
+  html.hide-tool-javaConfig .run-java-config,
+  html.hide-tool-javaJunit .run-java-junit,
+  html.hide-tool-javaFormat .run-java-format,
+  html.hide-tool-javaImports .run-java-imports,
+  html.hide-tool-javaRevert .run-java-revert,
+  html.hide-tool-javaNew .run-newjava,
+  html.hide-tool-javaPractice .run-java-practice-group,
+  html.hide-tool-javaFont .run-java-font-group,
   html.hide-tool-pyEnv .run-diag,
   html.hide-tool-pyNewPy .run-newpy,
   html.hide-tool-pyRevert .run-py-revert,
@@ -4068,9 +4079,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   [data-theme="dark"] .run-trace{background:rgba(37,99,235,.12);border-color:#60a5fa;color:#bfdbfe}
   [data-theme="dark"] .run-analyze{background:rgba(124,58,237,.12);border-color:#a78bfa;color:#ddd6fe}
   /* 보조 버튼(저장·라이브러리·되돌리기·글자크기)은 한 가지 톤으로 — ▶ 실행만 도드라지게 */
-  .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-layout,.run-diag,.run-rec,.run-dedupe{font:inherit;font-size:12.5px;border:1px solid var(--border);
+  .run-pkg,.run-save,.run-revert,.run-link,.run-nbconvert,.run-font,.run-newpy,.run-newjava,.run-layout,.run-diag,.run-rec,.run-dedupe{font:inherit;font-size:12.5px;border:1px solid var(--border);
     background:var(--field);color:var(--muted);border-radius:8px;padding:6px 11px;cursor:pointer}
-  .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover,.run-dedupe:hover{background:var(--panel-hover);color:var(--ink)}
+  .run-pkg:hover,.run-save:hover,.run-revert:hover,.run-link:hover,.run-nbconvert:hover,.run-font:hover,.run-newpy:hover,.run-newjava:hover,.run-layout:hover,.run-diag:hover,.run-rec:hover,.run-dedupe:hover{background:var(--panel-hover);color:var(--ink)}
   .run-pkg.has-selection{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));color:var(--accent);font-weight:700;
     background:color-mix(in srgb,var(--accent) 8%,var(--field))}
   /* Python 도구막대에서는 맞춤법도 일반 보조 버튼과 같은 크기·색으로 맞춘다. */
@@ -4084,8 +4095,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .run-font{padding:6px 9px;min-width:32px;font-weight:600}
   .run-fontpick{min-width:0;width:auto;max-width:160px;padding:6px 8px;font-weight:500;cursor:pointer;
     appearance:auto;-webkit-appearance:auto}
-  .run-newpy{padding:6px 9px;min-width:42px;font-weight:700;text-align:center}
-  .run-practice-group{display:inline-flex;align-items:center;gap:6px}
+  .run-newpy,.run-newjava{padding:6px 9px;min-width:42px;font-weight:700;text-align:center}
+  .run-practice-group,.run-java-practice-group{display:inline-flex;align-items:center;gap:6px}
   .run-practice{font:inherit;font-size:12.5px;border:1px solid var(--border);background:var(--field);color:var(--muted);
     border-radius:8px;padding:6px 11px;cursor:pointer}
   .run-practice:hover{background:var(--panel-hover);color:var(--ink)}
@@ -4116,7 +4127,25 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .run-output-tab.running::before{content:"";position:absolute;left:2px;top:50%;margin-top:-2.5px;width:5px;height:5px;
     border-radius:50%;background:#22c55e;animation:srv-pulse 1.4s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){ .run-output-tab.running::before{animation:none} }
-  .run-font-group{display:inline-flex;gap:4px}
+  .run-font-group,.run-java-font-group{display:inline-flex;gap:4px}
+  /* Java 보조 도구는 보통 실행 바에 그대로 놓고, 편집기 폭이 좁을 때만 ⋯ 메뉴로 접는다. */
+  .java-run-more,.java-run-more-menu{display:contents}
+  .java-run-more-toggle{display:none;height:30px;min-width:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);color:var(--muted);font:inherit;font-size:16px;font-weight:700;line-height:1;cursor:pointer}
+  @container (max-width:760px){
+    .java-run-more{position:relative;display:inline-flex}
+    .java-run-more-toggle{display:inline-flex;align-items:center;justify-content:center}
+    .java-run-more-toggle:hover,.java-run-more.is-open .java-run-more-toggle{background:var(--panel-hover);color:var(--ink)}
+    .java-run-more-menu{position:absolute;top:calc(100% + 5px);right:0;z-index:28;display:none;min-width:245px;max-width:min(330px,80vw);
+      flex-direction:column;align-items:stretch;gap:5px;padding:7px;border:1px solid var(--border);border-radius:9px;
+      background:var(--panel);box-shadow:0 10px 28px rgba(15,23,42,.22)}
+    .java-run-more.is-open .java-run-more-menu{display:flex}
+    .java-run-more-menu>button{width:100%;text-align:left}
+    .java-run-more-menu>.run-java-font-group,.java-run-more-menu>.run-java-practice-group{display:flex;align-items:center;gap:5px}
+    .java-run-more-menu>.run-java-font-group .run-fontpick{min-width:0;flex:1}
+    .java-run-more-menu>.run-java-practice-group{flex-wrap:wrap}
+    .java-run-more-menu>.run-layout[hidden]{display:none}
+  }
   .run-nbconvert-group{position:relative;display:inline-flex;align-items:stretch}
   .run-nbconvert-group>.run-nbconvert,.run-nbconvert-more{height:32px;box-sizing:border-box;
     display:inline-flex;align-items:center;justify-content:center}
@@ -4639,7 +4668,31 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .pkg-set:disabled,.pkg-go:disabled,.pkg-custom:disabled{opacity:.45;cursor:not-allowed}
   .pkg-set:disabled{background:var(--field);color:var(--muted)}
   .run-pkg:disabled{opacity:.55;cursor:progress}
-  .js-library-picker{display:block;max-height:min(68vh,430px);width:min(720px,100%);padding:14px}
+  .js-library-picker{display:block;max-height:min(76vh,620px);width:min(760px,100%);padding:14px;overflow:auto}
+  .java-run-config{display:block;width:min(720px,100%);max-height:min(68vh,430px);padding:14px}
+  .java-run-config-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .java-run-config-head strong{font-size:13.5px;color:var(--ink)}
+  .java-run-config-head span{font-size:11.5px;color:var(--muted)}
+  .java-run-config-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:7px 13px;margin:0;padding:10px;
+    border:1px solid var(--border);border-radius:9px;background:var(--field)}
+  .java-run-config-grid dt{font-size:11.5px;font-weight:700;color:var(--muted)}
+  .java-run-config-grid dd{min-width:0;margin:0;overflow-wrap:anywhere;color:var(--ink);font:11.5px/1.45 Consolas,"Courier New",monospace}
+  .java-run-config-grid dd.is-warn{color:#b45309}
+  .java-config-main-select{width:100%;min-width:150px;border:1px solid var(--border);border-radius:6px;padding:4px 7px;
+    background:var(--panel);color:var(--ink);font:inherit;outline:none}
+  .java-config-main-select:focus{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}
+  [data-theme="dark"] .java-run-config-grid dd.is-warn{color:#fbbf24}
+  .java-run-config-lint{display:flex;align-items:center;gap:7px;margin-top:10px;padding:8px 10px;border:1px solid var(--border);
+    border-radius:8px;background:var(--panel);color:var(--ink);font-size:12px;cursor:pointer}
+  .java-run-config-lint input{margin:0;accent-color:var(--accent)}
+  .java-run-config-note{margin:8px 1px 0;color:var(--muted);font-size:11px;line-height:1.45}
+  .java-junit-summary{margin:8px 10px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);font-size:12px;font-weight:700}
+  .java-junit-summary.is-ok{border-color:rgba(22,163,74,.38);color:#15803d;background:rgba(22,163,74,.08)}
+  .java-junit-summary.is-error{border-color:rgba(220,38,38,.38);color:#b91c1c;background:rgba(220,38,38,.08)}
+  [data-theme="dark"] .java-junit-summary.is-ok{color:#86efac}
+  [data-theme="dark"] .java-junit-summary.is-error{color:#fca5a5}
+  .terminal-input-row.is-junit{justify-content:flex-end}
   .js-library-intro{display:flex;align-items:baseline;gap:9px;margin-bottom:10px}
   .js-library-intro strong{font-size:13.5px;color:var(--ink)}
   .js-library-intro span{font-size:11.5px;color:var(--muted)}
@@ -4676,12 +4729,17 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .js-npm-select.active{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--field))}
   .js-npm-select strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}
   .js-npm-select small{flex:none;font-size:10.5px;color:var(--muted)}
+  .java-library-search-form{grid-template-columns:minmax(0,1fr) auto;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+  .java-library-search-status{margin-top:6px}
+  .java-library-search-results{max-height:190px;overflow:auto;padding-right:2px}
+  .java-library-search-row .js-npm-select{align-items:flex-start;flex-direction:column;gap:2px}
+  .java-library-search-row .js-npm-select small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .js-npm-delete{flex:none;border:1px solid var(--border);border-radius:7px;padding:0 8px;background:var(--field);color:var(--muted);font:11px/1 inherit;cursor:pointer}
   .js-npm-delete:hover{border-color:#ef4444;color:#b91c1c;background:rgba(239,68,68,.08)}
   .js-npm-progress{margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--field)}
   .js-npm-progress-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--ink)}
   .js-npm-log{max-height:115px;overflow:auto;margin:0;padding:8px;white-space:pre-wrap;word-break:break-word;color:var(--muted);font:10.5px/1.45 Consolas,"Courier New",monospace}
-  @media (max-width:620px){.js-library-choices{grid-template-columns:1fr}.js-library-intro{align-items:flex-start;flex-direction:column;gap:3px}.js-npm-form{grid-template-columns:1fr auto}.js-npm-form input:nth-child(2){grid-column:1/-1;grid-row:2}.js-npm-form button{grid-column:2;grid-row:1}}
+  @media (max-width:620px){.js-library-choices{grid-template-columns:1fr}.js-library-intro{align-items:flex-start;flex-direction:column;gap:3px}.js-npm-form{grid-template-columns:1fr auto}.js-npm-form input:nth-child(2){grid-column:1/-1;grid-row:2}.js-npm-form button{grid-column:2;grid-row:1}.java-library-search-form{grid-template-columns:minmax(0,1fr) auto}.java-library-search-form input{grid-column:1;grid-row:1}.java-library-search-form button{grid-column:2;grid-row:1}}
   .run-input-wrap{margin:0 0 10px;padding:9px 11px;background:var(--panel);border:1px solid var(--border);
     border-radius:8px;display:flex;flex-direction:column;gap:7px}
   .run-input-label{font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap}

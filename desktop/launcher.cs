@@ -13,6 +13,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using System.Xml;
 
 class ClassDockLauncher
 {
@@ -1737,6 +1738,20 @@ class ClassDockLauncher
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaDiagnostics()));
                 }
+                else if (method == "POST" && path == "/java-definition")
+                {
+                    // 설치된 JDK의 src.zip에서 표준 클래스 원문을 읽어 Java Ctrl+클릭에 제공한다.
+                    try
+                    {
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes(JavaDefinitionSource(body)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8",
+                            Encoding.UTF8.GetBytes("java-definition-failed: " + FlattenMessage(ex)));
+                    }
+                }
                 else if (method == "POST" && path == "/java-rescan")
                 {
                     // 사용자가 직접 JDK 를 설치한 뒤 exe 를 껐다 켜지 않아도 되도록 캐시를 비우고 다시 찾는다.
@@ -1787,6 +1802,16 @@ class ClassDockLauncher
                 {
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JavaLibraryListJson()));
                 }
+                else if (method == "GET" && path.StartsWith("/java-lib-search", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(JavaLibrarySearchJson(QueryValue(path, "q"))));
+                }
+                else if (method == "GET" && path.StartsWith("/java-lib-resolve", StringComparison.Ordinal))
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(JavaLibraryResolveJson(QueryValue(path, "group"), QueryValue(path, "artifact"))));
+                }
                 else if (method == "GET" && path.StartsWith("/java-lib-members", StringComparison.Ordinal))
                 {
                     // 직접 좌표로 받은 jar 의 멤버 표. 처음 한 번만 javap 를 돌리고 그 뒤로는 캐시에서 답한다.
@@ -1831,7 +1856,8 @@ class ClassDockLauncher
                     try
                     {
                         // ?piped=1 이면 페이로드의 표준입력을 한 번에 넣고 닫는다(채점용). 없으면 대화형.
-                        string id = StartJavaSession(body, QueryValue(path, "piped") == "1", QueryValue(path, "libs"));
+                        string id = StartJavaSession(body, QueryValue(path, "piped") == "1", QueryValue(path, "libs"),
+                            QueryValue(path, "lint") == "1", QueryValue(path, "main"), QueryValue(path, "junit") == "1");
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"id\":" + JsonString(id) + "}"));
                     }
                     catch (JavaMissingException)
@@ -1848,7 +1874,8 @@ class ClassDockLauncher
                     // 저장 직후의 문법 검사. 실행과 같은 페이로드·라이브러리 목록을 받는다.
                     try
                     {
-                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(RunJavaCheck(body, QueryValue(path, "libs"))));
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(
+                            RunJavaCheck(body, QueryValue(path, "libs"), QueryValue(path, "lint") == "1")));
                     }
                     catch (JavaMissingException)
                     {
@@ -8060,6 +8087,80 @@ class ClassDockLauncher
              + "}";
     }
 
+    /* JDK 9+의 src.zip은 "java.base/java/lang/String.java" 같이 모듈 폴더를 한 겹 두고,
+       일부 배포판은 "java/lang/String.java"로 넣는다. 둘 다 받아들이되 요청값은
+       Java 완전 이름만 허용해 zip의 다른 파일을 임의로 읽을 수 없게 한다. */
+    static string JavaDefinitionSource(byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > 16 * 1024)
+            return "{\"ok\":false,\"reason\":\"bad-request\"}";
+        string json = Encoding.UTF8.GetString(body);
+        string qualified = JsonStringField(json, "qualified") ?? "";
+        if (!System.Text.RegularExpressions.Regex.IsMatch(qualified,
+            "^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)+$"))
+            return "{\"ok\":false,\"reason\":\"bad-request\"}";
+
+        // 내부 클래스 Foo.Bar가 Foo$Bar로 오는 경우에는 바깥 Foo.java를 연다.
+        int dollar = qualified.IndexOf('$');
+        if (dollar >= 0) qualified = qualified.Substring(0, dollar);
+        string java = FindJava();
+        if (java == null) return "{\"ok\":false,\"reason\":\"no-jdk\"}";
+        string bin = Path.GetDirectoryName(java);
+        string home = string.IsNullOrEmpty(bin) ? null : Path.GetDirectoryName(bin);
+        string zipPath = null;
+        if (!string.IsNullOrEmpty(home))
+        {
+            string inLib = Path.Combine(home, "lib", "src.zip");
+            string inHome = Path.Combine(home, "src.zip");
+            if (File.Exists(inLib)) zipPath = inLib;
+            else if (File.Exists(inHome)) zipPath = inHome;
+        }
+        if (zipPath == null) return "{\"ok\":false,\"reason\":\"no-source\"}";
+
+        string relative = qualified.Replace('.', '/') + ".java";
+        ZipArchiveEntry selected = null;
+        string source;
+        using (FileStream fs = File.OpenRead(zipPath))
+        using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Read, false))
+        {
+            selected = archive.GetEntry("java.base/" + relative) ?? archive.GetEntry(relative);
+            if (selected == null)
+            {
+                string suffix = "/" + relative;
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    if (entry.FullName.EndsWith(suffix, StringComparison.Ordinal)) { selected = entry; break; }
+                }
+            }
+            if (selected == null) return "{\"ok\":false,\"reason\":\"not-found\"}";
+            if (selected.Length <= 0 || selected.Length > 5 * 1024 * 1024)
+                return "{\"ok\":false,\"reason\":\"source-too-large\"}";
+            using (Stream entryStream = selected.Open())
+            using (StreamReader reader = new StreamReader(entryStream, Encoding.UTF8, true))
+                source = reader.ReadToEnd().Replace("\r\n", "\n").Replace("\r", "\n");
+        }
+
+        string name = qualified.Substring(qualified.LastIndexOf('.') + 1);
+        System.Text.RegularExpressions.Match declaration = System.Text.RegularExpressions.Regex.Match(source,
+            "(?m)^\\s*(?:(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\\s+)*(?:class|interface|enum|record)\\s+"
+            + System.Text.RegularExpressions.Regex.Escape(name) + "\\b");
+        int nameAt = declaration.Success
+            ? declaration.Index + declaration.Value.LastIndexOf(name, StringComparison.Ordinal)
+            : 0;
+        int line = 1, column = 0;
+        for (int i = 0; i < nameAt && i < source.Length; i++)
+        {
+            if (source[i] == '\n') { line++; column = 0; }
+            else column++;
+        }
+        return "{\"ok\":true,\"qualified\":" + JsonString(qualified)
+             + ",\"name\":" + JsonString(name)
+             + ",\"fileName\":" + JsonString(name + ".java")
+             + ",\"entry\":" + JsonString(selected.FullName)
+             + ",\"line\":" + line + ",\"column\":" + column
+             + ",\"source\":" + JsonString(source) + "}";
+    }
+
     /* ===== JDK 원클릭 설치 (Eclipse Adoptium Temurin, LTS 고정) =====
        ffmpeg 원클릭 설치와 같은 구조다 — 백그라운드 스레드가 내려받아 풀고, 프런트는 상태만 폴링한다.
        다른 점 세 가지:
@@ -8339,7 +8440,12 @@ class ClassDockLauncher
             Artifact = "junit-platform-console-standalone", Version = "1.11.4",
             Sha256 = "b016ef6b1c3454d6d7c2c88ce081dabf289699686af6622d6e4e2e1b54b4a2fc",
             Words = "Test Assertions assertEquals assertTrue assertThrows BeforeEach DisplayName",
-            Sample = "import org.junit.jupiter.api.Test;" }
+            Sample = "import org.junit.jupiter.api.Test;" },
+        new JavaLibrary {
+            Id = "lombok", Label = "Lombok", Group = "org.projectlombok", Artifact = "lombok", Version = "1.18.48",
+            Sha256 = "85477a4655ebb2c074a9099cfb749be454449fee564d4282610df1b85f7c508b",
+            Words = "Data Getter Setter Builder Value NonNull ToString EqualsAndHashCode NoArgsConstructor AllArgsConstructor RequiredArgsConstructor",
+            Sample = "import lombok.Data;" }
     };
 
     static JavaLibrary FindJavaLibraryCatalogItem(string id)
@@ -8549,6 +8655,18 @@ class ClassDockLauncher
         StringBuilder sb = new StringBuilder(tempRoot);
         if (jars != null) foreach (string jar in jars) sb.Append(';').Append(jar);
         return sb.ToString();
+    }
+
+    // JDK 24+는 processor 관련 옵션이 없으면 annotation processor를 자동 실행하지 않는다.
+    // 선택한 jar 부분만 processor path로 명시하면 Lombok 같은 라이브러리는 계속 동작하면서,
+    // 학생 소스 출력 폴더를 processor 검색 대상으로 삼지 않는다.
+    static string JavaAnnotationProcessorArgs(string classPath)
+    {
+        string value = classPath ?? "";
+        int separator = value.IndexOf(';');
+        if (separator < 0 || separator + 1 >= value.Length) return "";
+        string jars = value.Substring(separator + 1);
+        return string.IsNullOrEmpty(jars) ? "" : " -processorpath \"" + jars + "\"";
     }
 
     /* ===== 라이브러리 원클릭 설치 (Maven Central 고정) =====
@@ -9058,6 +9176,253 @@ class ClassDockLauncher
         return sb.Append(']').ToString();
     }
 
+    /* Maven Central 이름 검색. 프런트에는 외부 URL을 주지 않고, 런처가 고정된 HTTPS 검색 API만 조회한다.
+       검색 인덱스의 latestVersion 은 늦을 수 있으므로 후보를 고른 뒤 JavaLibraryResolveJson 이
+       저장소의 maven-metadata.xml 을 다시 읽어 실제 설치 버전을 확정한다. */
+    class JavaLibrarySearchItem
+    {
+        public string Group;
+        public string Artifact;
+        public string Version;
+        public string Packaging;
+        public string Label;
+        public int VersionCount;
+        public int Score;
+        public int Order;
+        public bool Exact;
+        public bool Curated;
+    }
+
+    class JavaLibrarySearchCacheEntry
+    {
+        public string Json;
+        public DateTime ExpiresAt;
+    }
+
+    static readonly object JavaLibrarySearchCacheLock = new object();
+    static readonly Dictionary<string, JavaLibrarySearchCacheEntry> JavaLibrarySearchCache =
+        new Dictionary<string, JavaLibrarySearchCacheEntry>(StringComparer.OrdinalIgnoreCase);
+
+    static bool JavaLibrarySafeGroup(string group)
+    {
+        string value = (group ?? "").Trim();
+        if (value.Length == 0 || value.Length > 300 || value.IndexOf("..", StringComparison.Ordinal) >= 0) return false;
+        foreach (string part in value.Split('.')) if (!JavaLibrarySafeSegment(part)) return false;
+        return true;
+    }
+
+    static bool JavaLibrarySafeSearchQuery(string query)
+    {
+        string value = (query ?? "").Trim();
+        if (value.Length < 2 || value.Length > 80) return false;
+        bool previousSpace = false;
+        foreach (char c in value)
+        {
+            bool space = c == ' ';
+            if (!char.IsLetterOrDigit(c) && !space && c != '_' && c != '-' && c != '.' && c != '+') return false;
+            if (space && previousSpace) return false;
+            previousSpace = space;
+        }
+        return true;
+    }
+
+    static JavaLibrary FindJavaLibraryCatalogArtifact(string group, string artifact)
+    {
+        foreach (JavaLibrary item in JavaLibraryCatalog)
+            if (string.Equals(item.Group, group, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Artifact, artifact, StringComparison.OrdinalIgnoreCase)) return item;
+        return null;
+    }
+
+    static string FetchJavaLibraryText(string url, int maxChars)
+    {
+        return FetchJavaLibraryText(url, maxChars, 15000);
+    }
+
+    static string FetchJavaLibraryText(string url, int maxChars, int timeoutMs)
+    {
+        if (string.IsNullOrEmpty(url) || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("java-lib-search-address");
+        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }
+        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+        req.Timeout = Math.Max(1000, timeoutMs);
+        req.ReadWriteTimeout = Math.Max(5000, timeoutMs);
+        req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+        req.UserAgent = "ClassDock/1.0 (Java library search)";
+        using (WebResponse resp = req.GetResponse())
+        using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+        {
+            if (resp.ContentLength > maxChars * 4L) throw new InvalidOperationException("java-lib-search-response-too-large");
+            StringBuilder sb = new StringBuilder(Math.Min(maxChars, 32768));
+            char[] buffer = new char[8192];
+            int read;
+            while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (sb.Length + read > maxChars) throw new InvalidOperationException("java-lib-search-response-too-large");
+                sb.Append(buffer, 0, read);
+            }
+            return sb.ToString();
+        }
+    }
+
+    static XmlDocument ParseJavaLibraryXml(string text)
+    {
+        XmlReaderSettings settings = new XmlReaderSettings();
+        settings.DtdProcessing = DtdProcessing.Prohibit;
+        settings.XmlResolver = null;
+        XmlDocument doc = new XmlDocument();
+        doc.XmlResolver = null;
+        using (StringReader input = new StringReader(text ?? ""))
+        using (XmlReader reader = XmlReader.Create(input, settings)) doc.Load(reader);
+        return doc;
+    }
+
+    static string JavaLibraryXmlField(XmlNode node, string tag, string name)
+    {
+        if (node == null) return "";
+        foreach (XmlNode child in node.ChildNodes)
+        {
+            if (child.LocalName != tag || child.Attributes == null) continue;
+            XmlAttribute attr = child.Attributes["name"];
+            if (attr != null && attr.Value == name) return child.InnerText ?? "";
+        }
+        return "";
+    }
+
+    static string JavaLibrarySearchJson(string rawQuery)
+    {
+        string query = (rawQuery ?? "").Trim();
+        if (!JavaLibrarySafeSearchQuery(query)) throw new InvalidOperationException("invalid-library-search");
+        string cacheKey = query.ToLowerInvariant();
+        lock (JavaLibrarySearchCacheLock)
+        {
+            JavaLibrarySearchCacheEntry cached;
+            if (JavaLibrarySearchCache.TryGetValue(cacheKey, out cached) && cached.ExpiresAt > DateTime.UtcNow)
+                return cached.Json;
+            if (cached != null) JavaLibrarySearchCache.Remove(cacheKey);
+        }
+        string url = "https://search.maven.org/solrsearch/select?q=" + Uri.EscapeDataString(query) + "&rows=12&wt=xml";
+        // 추천 항목은 화면에서 먼저 보이므로 추가 후보 조회가 교실 네트워크를 오래 붙잡지 않게 제한한다.
+        XmlDocument xml = ParseJavaLibraryXml(FetchJavaLibraryText(url, 1024 * 1024, 8000));
+        XmlNodeList docs = xml.SelectNodes("/response/result[@name='response']/doc");
+        List<JavaLibrarySearchItem> found = new List<JavaLibrarySearchItem>();
+        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int order = 0;
+        foreach (XmlNode doc in docs)
+        {
+            string group = JavaLibraryXmlField(doc, "str", "g");
+            string artifact = JavaLibraryXmlField(doc, "str", "a");
+            string version = JavaLibraryXmlField(doc, "str", "latestVersion");
+            string packaging = JavaLibraryXmlField(doc, "str", "p");
+            if (!string.Equals(packaging, "jar", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!JavaLibrarySafeGroup(group) || !JavaLibrarySafeSegment(artifact) || !JavaLibrarySafeSegment(version)) continue;
+            string key = group + ":" + artifact;
+            if (!seen.Add(key)) continue;
+            JavaLibrary catalog = FindJavaLibraryCatalogArtifact(group, artifact);
+            JavaLibrarySearchItem item = new JavaLibrarySearchItem();
+            item.Group = group; item.Artifact = artifact; item.Version = version; item.Packaging = "jar";
+            item.Label = catalog != null ? catalog.Label : artifact;
+            item.Exact = string.Equals(artifact, query, StringComparison.OrdinalIgnoreCase);
+            item.Curated = catalog != null;
+            item.Order = order++;
+            int.TryParse(JavaLibraryXmlField(doc, "int", "versionCount"), out item.VersionCount);
+            item.Score = (item.Curated ? 10000 : 0) + (item.Exact ? 1000 : 0)
+                + (artifact.StartsWith(query, StringComparison.OrdinalIgnoreCase) ? 250 : 0);
+            found.Add(item);
+        }
+        found.Sort(delegate(JavaLibrarySearchItem a, JavaLibrarySearchItem b)
+        {
+            int score = b.Score.CompareTo(a.Score);
+            return score != 0 ? score : a.Order.CompareTo(b.Order);
+        });
+        StringBuilder json = new StringBuilder("[");
+        foreach (JavaLibrarySearchItem item in found)
+        {
+            if (json.Length > 1) json.Append(',');
+            json.Append("{\"group\":").Append(JsonString(item.Group))
+                .Append(",\"artifact\":").Append(JsonString(item.Artifact))
+                .Append(",\"version\":").Append(JsonString(item.Version))
+                .Append(",\"packaging\":\"jar\",\"label\":").Append(JsonString(item.Label))
+                .Append(",\"versionCount\":").Append(item.VersionCount)
+                .Append(",\"exact\":").Append(item.Exact ? "true" : "false")
+                .Append(",\"curated\":").Append(item.Curated ? "true" : "false").Append('}');
+        }
+        string result = json.Append(']').ToString();
+        lock (JavaLibrarySearchCacheLock)
+        {
+            if (JavaLibrarySearchCache.Count >= 40) JavaLibrarySearchCache.Clear();
+            JavaLibrarySearchCache[cacheKey] = new JavaLibrarySearchCacheEntry {
+                Json = result, ExpiresAt = DateTime.UtcNow.AddMinutes(15) };
+        }
+        return result;
+    }
+
+    static string JavaLibraryMetadataVersion(string group, string artifact)
+    {
+        string baseUrl = JavaLibraryRepository + group.Replace('.', '/') + "/" + artifact + "/";
+        XmlDocument xml = ParseJavaLibraryXml(FetchJavaLibraryText(baseUrl + "maven-metadata.xml", 512 * 1024));
+        string[] preferred = new string[] {
+            xml.SelectSingleNode("/metadata/versioning/release") == null ? "" : xml.SelectSingleNode("/metadata/versioning/release").InnerText,
+            xml.SelectSingleNode("/metadata/versioning/latest") == null ? "" : xml.SelectSingleNode("/metadata/versioning/latest").InnerText };
+        foreach (string raw in preferred)
+        {
+            string version = (raw ?? "").Trim();
+            if (JavaLibrarySafeSegment(version) && !version.EndsWith("-SNAPSHOT", StringComparison.OrdinalIgnoreCase)) return version;
+        }
+        XmlNodeList versions = xml.SelectNodes("/metadata/versioning/versions/version");
+        for (int i = versions.Count - 1; i >= 0; i--)
+        {
+            string version = (versions[i].InnerText ?? "").Trim();
+            if (JavaLibrarySafeSegment(version) && !version.EndsWith("-SNAPSHOT", StringComparison.OrdinalIgnoreCase)) return version;
+        }
+        return "";
+    }
+
+    static string JavaLibraryPomChild(XmlNode node, string name)
+    {
+        if (node == null) return "";
+        foreach (XmlNode child in node.ChildNodes) if (child.LocalName == name) return (child.InnerText ?? "").Trim();
+        return "";
+    }
+
+    static void JavaLibraryDependencyInfo(string group, string artifact, string version, out bool known, out int count)
+    {
+        known = false; count = 0;
+        try
+        {
+            string url = JavaLibraryRepository + group.Replace('.', '/') + "/" + artifact + "/" + version + "/" + artifact + "-" + version + ".pom";
+            XmlDocument xml = ParseJavaLibraryXml(FetchJavaLibraryText(url, 1024 * 1024));
+            foreach (XmlNode dependency in xml.GetElementsByTagName("dependency"))
+            {
+                bool managed = false;
+                for (XmlNode parent = dependency.ParentNode; parent != null; parent = parent.ParentNode)
+                    if (parent.LocalName == "dependencyManagement" || parent.LocalName == "plugin") { managed = true; break; }
+                if (managed) continue;
+                string scope = JavaLibraryPomChild(dependency, "scope").ToLowerInvariant();
+                string optional = JavaLibraryPomChild(dependency, "optional").ToLowerInvariant();
+                if (optional == "true" || scope == "test" || scope == "provided" || scope == "system") continue;
+                count++;
+            }
+            known = true;
+        }
+        catch { known = false; count = 0; }
+    }
+
+    static string JavaLibraryResolveJson(string rawGroup, string rawArtifact)
+    {
+        string group = (rawGroup ?? "").Trim(), artifact = (rawArtifact ?? "").Trim();
+        if (!JavaLibrarySafeGroup(group) || !JavaLibrarySafeSegment(artifact))
+            throw new InvalidOperationException("invalid-library-spec");
+        string version = JavaLibraryMetadataVersion(group, artifact);
+        if (!JavaLibrarySafeSegment(version)) throw new InvalidOperationException("java-lib-version-not-found");
+        bool dependencyKnown; int dependencyCount;
+        JavaLibraryDependencyInfo(group, artifact, version, out dependencyKnown, out dependencyCount);
+        return "{\"coordinate\":" + JsonString(group + ":" + artifact + ":" + version)
+            + ",\"version\":" + JsonString(version)
+            + ",\"dependencyKnown\":" + (dependencyKnown ? "true" : "false")
+            + ",\"dependencyCount\":" + dependencyCount + "}";
+    }
+
     /* 설치 시작. 실제 작업은 배경 스레드가 하고 여기서는 작업 번호만 돌려준다 —
        200MB 를 받는 JDK 설치와 달리 몇 초로 끝나는 일이지만, 교실 인터넷에서는 그 몇 초가 몇 분이 된다. */
     static string StartJavaLibraryInstall(byte[] body)
@@ -9356,7 +9721,7 @@ class ClassDockLauncher
     /* 저장할 때 도는 문법 검사(/java-check). javac 만 돌리고 결과를 그 자리에서 돌려준다 —
        실행 세션과 달리 남는 프로세스가 없으므로 폴링·중지·세션 보관이 필요 없고, 임시 폴더도 바로 지운다.
        컴파일은 실행 경로와 같은 CompileJavaSource 를 쓴다. 여기서 통과한 코드는 실행에서도 컴파일을 지난다. */
-    static string RunJavaCheck(byte[] body, string libs)
+    static string RunJavaCheck(byte[] body, string libs, bool lint)
     {
         string java = FindJava();
         if (java == null) throw new JavaMissingException();
@@ -9384,7 +9749,7 @@ class ClassDockLauncher
             WriteJavaExtraSources(tempRoot, extraSources);   // 같은 폴더의 형제 .java 도 함께 (실행과 같은 묶음)
             // 출력을 담기만 하는 임시 세션. JavaSessions 에 넣지 않으므로 폴링 대상이 되지 않는다.
             JavaSession probe = new JavaSession();
-            bool ok = CompileJavaSource(javac, scriptPath, tempRoot, probe, JavaClassPath(tempRoot, libraryJars));
+            bool ok = CompileJavaSource(javac, scriptPath, tempRoot, probe, JavaClassPath(tempRoot, libraryJars), lint);
             string output = probe.Stderr.GetText();
             if (output.Length == 0) output = probe.Stdout.GetText();
             return "{\"ok\":" + (ok ? "true" : "false") + ",\"output\":" + JsonString(output)
@@ -9400,7 +9765,7 @@ class ClassDockLauncher
        piped=true : 채점처럼 입력을 미리 다 아는 실행. 페이로드의 표준입력을 한 번에 흘려보내고 닫는다.
        두 길을 나누는 이유는 /java-session-input 이 터미널처럼 보이려고 stdout 에 에코를 남기기 때문이다 —
        그 에코가 섞이면 채점의 출력 비교가 어긋난다. */
-    static string StartJavaSession(byte[] body, bool piped, string libs)
+    static string StartJavaSession(byte[] body, bool piped, string libs, bool lint, string requestedMain, bool junit)
     {
         string java = FindJava();
         if (java == null) throw new JavaMissingException();
@@ -9419,9 +9784,20 @@ class ClassDockLauncher
         List<string> extraSources;
         DecodeRunPayload(body, out source, out stdinText, out extraSources);
         string fileClassName = JavaMainClassName(source);
-        string launchClassName = JavaLaunchClassName(source);
+        string launchClassName = JavaLaunchClassName(source, requestedMain);
         string packageName = JavaPackageName(source);
         string qualifiedClassName = string.IsNullOrEmpty(packageName) ? launchClassName : packageName + "." + launchClassName;
+        string junitJar = null;
+        if (junit)
+        {
+            foreach (string jar in libraryJars)
+            {
+                if (Path.GetFileName(jar).StartsWith("junit-platform-console-standalone-", StringComparison.OrdinalIgnoreCase))
+                { junitJar = jar; break; }
+            }
+            if (junitJar == null)
+                return StartJavaMessageSession("[JUnit 5 라이브러리가 선택되지 않았습니다.]\n라이브러리에서 JUnit 5를 선택한 뒤 다시 실행해 주세요.");
+        }
         string tempRoot = Path.Combine(Path.GetTempPath(), "moidajava_session_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
         try
@@ -9431,7 +9807,7 @@ class ClassDockLauncher
             // 검사와 실행이 같은 파일 묶음을 봐야 한다 — 저장 검사만 형제를 알면 "검사는 통과했는데 실행이 안 되는" 짝이 생긴다.
             WriteJavaExtraSources(tempRoot, extraSources);
             return StartJavaSessionProcess(java, scriptPath, fileClassName, qualifiedClassName, tempRoot,
-                piped ? (stdinText ?? "") : null, JavaClassPath(tempRoot, libraryJars));
+                piped ? (stdinText ?? "") : null, JavaClassPath(tempRoot, libraryJars), lint, junitJar);
         }
         catch
         {
@@ -9544,9 +9920,12 @@ class ClassDockLauncher
     }
 
     // 실제 실행할 클래스. 보조 클래스를 파일 앞에 선언해도 main 이 든 타입을 명시적으로 실행한다.
-    static string JavaLaunchClassName(string source)
+    static string JavaLaunchClassName(string source, string requestedMain)
     {
         List<JavaTypeCandidate> types = JavaTopLevelTypes(source);
+        if (!string.IsNullOrEmpty(requestedMain))
+            foreach (JavaTypeCandidate type in types)
+                if (type.HasMain && string.Equals(type.Name, requestedMain, StringComparison.Ordinal)) return type.Name;
         foreach (JavaTypeCandidate type in types) if (type.HasMain) return type.Name;
         foreach (JavaTypeCandidate type in types) if (type.IsPublic) return type.Name;
         return types.Count > 0 ? types[0].Name : "Main";
@@ -9663,7 +10042,7 @@ class ClassDockLauncher
 
     // 먼저 javac 로 컴파일한 뒤 main 보유 클래스를 명시 실행한다. 보조 타입의 선언 순서에 영향을 받지 않는다.
     static string StartJavaSessionProcess(string java, string scriptPath, string sourceFileClassName,
-        string qualifiedClassName, string tempRoot, string pipedStdin, string classPath)
+        string qualifiedClassName, string tempRoot, string pipedStdin, string classPath, bool lint, string junitJar)
     {
         JavaSession session = new JavaSession();
         session.Id = Guid.NewGuid().ToString("N");
@@ -9673,7 +10052,7 @@ class ClassDockLauncher
         string bin = Path.GetDirectoryName(java);
         string javac = string.IsNullOrEmpty(bin) ? null : Path.Combine(bin, "javac.exe");
         if (string.IsNullOrEmpty(javac) || !File.Exists(javac)) throw new JavaMissingException();
-        if (!CompileJavaSource(javac, scriptPath, tempRoot, session, classPath))
+        if (!CompileJavaSource(javac, scriptPath, tempRoot, session, classPath, lint))
         {
             lock (JavaSessionsLock) JavaSessions[session.Id] = session;
             return session.Id;
@@ -9681,8 +10060,12 @@ class ClassDockLauncher
 
         /* 컴파일 결과 디렉터리와 고른 라이브러리 jar 를 classpath 로 주고 탐지한 main 타입을 직접 실행한다.
            file/stdout/stderr 인코딩을 모두 UTF-8로 맞춰 한글 입력·출력이 Windows 코드페이지에 좌우되지 않게 한다. */
-        string args = "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -cp \""
-            + classPath + "\" " + qualifiedClassName;
+        string args = "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 ";
+        if (string.IsNullOrEmpty(junitJar))
+            args += "-cp \"" + classPath + "\" " + qualifiedClassName;
+        else
+            args += "-jar \"" + junitJar + "\" execute --class-path \"" + classPath
+                + "\" --scan-class-path --disable-banner --disable-ansi-colors --details=tree";
         ProcessStartInfo psi = new ProcessStartInfo(java, args);
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
@@ -9752,13 +10135,14 @@ class ClassDockLauncher
 
     // 컴파일 출력도 같은 세션 버퍼에 담는다. 실패한 세션은 곧바로 poll 가능한 완료 상태로 돌려준다.
     static bool CompileJavaSource(string javac, string scriptPath, string tempRoot, JavaSession session,
-        string classPath)
+        string classPath, bool lint)
     {
         // 컴파일에도 같은 classpath 를 준다 — 실행에만 주면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
         // -sourcepath 는 임시 폴더 자신이다. 함께 풀어 둔 형제 .java 를 '참조된 것만' 알아서 같이 컴파일한다
         // (파일 목록으로 다 넘기면 쓰지도 않는 파일의 오류까지 학생 화면에 올라온다).
-        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\" -sourcepath \"" + tempRoot
-            + "\" -d \"" + tempRoot + "\" \"" + scriptPath + "\"";
+        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\"" + JavaAnnotationProcessorArgs(classPath)
+            + " -sourcepath \"" + tempRoot
+            + "\" -d \"" + tempRoot + "\"" + (lint ? " -Xlint:all" : "") + " \"" + scriptPath + "\"";
         ProcessStartInfo psi = new ProcessStartInfo(javac, args);
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;

@@ -8,6 +8,8 @@
 const JAVA_DRAFT_DELAY = 700;      // 편집이 멈춘 뒤 초안(localStorage) 저장까지 기다리는 시간
 const JAVA_AUTOSAVE_DELAY = 3000;  // 편집이 멈춘 뒤 파일 자동 저장까지(텍스트 편집기와 같은 간격)
 const JAVA_GRADE_PREFIX = "classdock-java-grade:";   // 파일마다 채점 테스트를 저장하는 키(다른 언어와 분리)
+const JAVA_LINT_PREFIX = "classdock-java-lint:";     // 실행 구성의 -Xlint 선택도 파일마다 따로 기억
+const JAVA_MAIN_PREFIX = "classdock-java-main:";     // main 이 여러 개인 파일에서 고른 실행 대상
 
 // 빈 파일에서 시작할 때 넣어 주는 최소 골격. 자바는 클래스·main 껍데기가 없으면 아무것도 실행되지 않아서,
 // 첫 수업에서 이 열 줄을 받아 적는 데 시간을 다 쓰게 된다. 클래스 이름은 서버가 소스에서 찾아 맞춘다.
@@ -74,6 +76,25 @@ async function javaSiblingSources(ownerDoc){
   return out;
 }
 
+// 실행 구성에는 본문 전체가 아니라 함께 컴파일될 파일 이름만 보여 준다.
+function javaSiblingFileNames(ownerDoc){
+  if (!ownerDoc || typeof docs === "undefined" || !Array.isArray(docs)) return [];
+  const context = ownerDoc.archiveCtx || null;
+  const dir = javaDocDir(javaDocPath(ownerDoc));
+  const names = [];
+  for (const doc of docs){
+    if (!doc || doc === ownerDoc) continue;
+    if (typeof workspaceHasDoc === "function" && !workspaceHasDoc(doc)) continue;
+    if ((doc.archiveCtx || null) !== context) continue;
+    if (String(doc.sourceKey || "").startsWith("definition:")) continue;
+    const path = javaDocPath(doc);
+    if (!/\.java$/i.test(path) || javaDocDir(path) !== dir) continue;
+    names.push(path.split("/").pop());
+    if (names.length >= JAVA_SIBLING_MAX) break;
+  }
+  return names;
+}
+
 /* 형제 파일의 오류 줄을 눌렀을 때 그 문서로 옮겨 간다.
    런처는 파일 이름을 소스의 public 클래스로 정하므로 문서 이름과 다를 수 있다 — 못 찾으면 알려만 준다. */
 function openJavaSiblingLine(ownerDoc, fileName, line){
@@ -96,6 +117,272 @@ function openJavaSiblingLine(ownerDoc, fileName, line){
   if (navigator && typeof navigator.focusLine === "function") navigator.focusLine(line);
 }
 
+// Python의 Py Env와 같은 작은 모달. 실행 결과는 프로그램 출력만 맡고,
+// JDK 확인·설치는 이 창 안에서 끝낸다.
+function openJavaEnvModal(btn){
+  const modal = document.createElement("div"); modal.className = "modal py-env-modal java-env-modal";
+  const card = document.createElement("div"); card.className = "modal-card";
+  const panel = document.createElement("div"); panel.className = "py-env-panel";
+  const actions = document.createElement("div"); actions.className = "modal-actions";
+  const spacer = document.createElement("div"); spacer.className = "spacer";
+  const cancel = document.createElement("button"); cancel.className = "btn"; cancel.type = "button"; cancel.textContent = "닫기";
+  let closed = false, guide = null, refreshSeq = 0;
+
+  const disposeGuide = () => {
+    if (guide && typeof guide.dispose === "function") guide.dispose();
+    guide = null;
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true; refreshSeq++; disposeGuide();
+    window.removeEventListener("keydown", onKey, true);
+    modal.remove();
+    if (btn && document.contains(btn)) setTimeout(() => {
+      try { btn.focus({ preventScroll:true }); } catch(_){ btn.focus(); }
+    }, 0);
+  };
+  const onKey = (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault(); event.stopPropagation(); close();
+  };
+  const refresh = async () => {
+    const seq = ++refreshSeq;
+    disposeGuide();
+    panel.innerHTML = '<div class="py-env-head"><span>자바 실행 환경</span><span class="py-env-muted">확인 중…</span></div>';
+    const info = await javaEnvironmentDetails();
+    if (closed || seq !== refreshSeq) return;
+    panel.replaceChildren();
+    if (!info.ok){
+      guide = renderJavaInstallGuide(panel, () => { if (!closed) refresh(); });
+      return;
+    }
+    const head = document.createElement("div"); head.className = "py-env-head";
+    const title = document.createElement("span"); title.textContent = "자바 실행 환경";
+    const state = document.createElement("span"); state.className = "py-env-ok"; state.textContent = "JDK 사용 가능";
+    head.append(title, state);
+    const list = document.createElement("dl"); list.className = "py-env-grid";
+    const rows = [
+      ["버전", info.version || (info.major ? "Java " + info.major : "-")],
+      ["경로", info.path || "-"],
+      ["찾은 곳", javaSourceLabel(info.source) || info.source || "-"],
+      ["최소 버전", "JDK " + (info.minimum || 11) + "+"]
+    ];
+    rows.forEach(([label, value]) => {
+      const dt = document.createElement("dt"); dt.textContent = label;
+      const dd = document.createElement("dd"); dd.textContent = value;
+      list.append(dt, dd);
+    });
+    panel.append(head, list);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
+  };
+
+  cancel.addEventListener("click", close);
+  actions.append(spacer, cancel); card.append(panel, actions); modal.appendChild(card);
+  modal.addEventListener("click", (event) => { if (event.target === modal) close(); });
+  document.body.appendChild(modal);
+  window.addEventListener("keydown", onKey, true);
+  if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(actions);
+  refresh();
+  setTimeout(() => { if (!closed) cancel.focus(); }, 0);
+}
+
+// Python 실행 결과와 같은 찾기 UI. 결과 렌더러가 내용을 갈아끼워도 헤더·검색바를 다시 붙인다.
+function attachJavaOutputFind(options){
+  const { outPanel, outHeadActions, attachOutputChrome } = options;
+  const findBtn = document.createElement("button"); findBtn.className = "out-find-open"; findBtn.type = "button";
+  findBtn.setAttribute("aria-haspopup", "true"); findBtn.setAttribute("aria-expanded", "false");
+  findBtn.dataset.shortcutAction = "findInDocument";
+  findBtn.dataset.shortcutTitle = "실행 결과에서 찾기";
+  findBtn.dataset.shortcutAria = "true";
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", "10.5"); circle.setAttribute("cy", "10.5"); circle.setAttribute("r", "6");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", "m15 15 5 5");
+  icon.append(circle, path); findBtn.appendChild(icon); outHeadActions.prepend(findBtn);
+
+  const bar = document.createElement("div"); bar.className = "out-find-bar out-chrome"; bar.hidden = true;
+  const input = document.createElement("input"); input.className = "out-find-input"; input.type = "search";
+  input.autocomplete = "off"; input.spellcheck = false;
+  const count = document.createElement("span"); count.className = "out-find-count";
+  const prev = document.createElement("button"); prev.className = "out-find-nav"; prev.type = "button"; prev.textContent = "↑";
+  const next = document.createElement("button"); next.className = "out-find-nav"; next.type = "button"; next.textContent = "↓";
+  const closeBtn = document.createElement("button"); closeBtn.className = "out-find-close"; closeBtn.type = "button"; closeBtn.textContent = "✕";
+  bar.append(input, count, prev, next, closeBtn);
+  const layer = document.createElement("div"); layer.className = "out-find-layer out-chrome"; layer.setAttribute("aria-hidden", "true");
+
+  let open = false, matches = [], index = -1, truncated = false, timer = 0, raf = 0;
+  const LIMIT = 2000;
+  const label = javaT("실행 결과에서 찾기");
+  input.placeholder = label; input.setAttribute("aria-label", label);
+  prev.title = javaT("이전 결과") + " (Shift+Enter)"; next.title = javaT("다음 결과") + " (Enter)";
+  closeBtn.title = javaT("닫기 (Esc)");
+  if (typeof syncShortcutHints === "function") syncShortcutHints(outHeadActions);
+  else { findBtn.title = label + " (Ctrl+F)"; findBtn.setAttribute("aria-label", findBtn.title); }
+
+  const isChrome = (node) => {
+    const element = node && (node.nodeType === 1 ? node : node.parentElement);
+    return !!(element && (element.classList.contains("out-chrome") || element.closest(".out-chrome")));
+  };
+  const attach = () => {
+    attachOutputChrome();
+    const head = outPanel.querySelector(".out-head");
+    if (head){
+      const parent = head.parentNode || outPanel;
+      if (bar.parentNode !== parent || bar.previousElementSibling !== head) head.insertAdjacentElement("afterend", bar);
+    } else if (bar.parentNode !== outPanel){
+      outPanel.insertBefore(bar, outHeadActions.nextSibling);
+    }
+    if (layer.parentNode !== outPanel) outPanel.appendChild(layer);
+  };
+  const clearHighlights = () => layer.replaceChildren();
+  const renderHighlights = () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      raf = 0; clearHighlights();
+      if (!open || !matches.length) return;
+      const panelRect = outPanel.getBoundingClientRect();
+      const head = outPanel.querySelector(".out-head");
+      const visibleTop = Math.max(panelRect.top, !bar.hidden ? bar.getBoundingClientRect().bottom
+        : (head ? head.getBoundingClientRect().bottom : panelRect.top));
+      const frag = document.createDocumentFragment();
+      matches.forEach((match, matchIndex) => {
+        Array.from(match.range.getClientRects()).forEach((rect) => {
+          if (!rect.width || !rect.height || rect.bottom <= visibleTop || rect.top >= panelRect.bottom ||
+              rect.right <= panelRect.left || rect.left >= panelRect.right) return;
+          const box = document.createElement("span");
+          box.className = "out-find-hit" + (matchIndex === index ? " active" : "");
+          const left = Math.max(rect.left, panelRect.left), right = Math.min(rect.right, panelRect.right);
+          const top = Math.max(rect.top, visibleTop), bottom = Math.min(rect.bottom, panelRect.bottom);
+          box.style.left = (left - panelRect.left + outPanel.scrollLeft) + "px";
+          box.style.top = (top - panelRect.top + outPanel.scrollTop) + "px";
+          box.style.width = (right - left) + "px"; box.style.height = (bottom - top) + "px";
+          frag.appendChild(box);
+        });
+      });
+      layer.appendChild(frag);
+    });
+  };
+  const allowed = (node) => {
+    const element = node && node.parentElement;
+    if (!element || isChrome(element)) return false;
+    if (element.closest(".out-head,.out-vars,.code-pen-overlay,button,input,textarea,select,script,style,svg,[hidden]")) return false;
+    const closed = element.closest("details:not([open])");
+    if (closed && !element.closest("summary")) return false;
+    return !!element.getClientRects().length;
+  };
+  const updateCount = () => {
+    count.textContent = !input.value ? "" : (!matches.length ? "0/0" : (index + 1) + "/" + matches.length + (truncated ? "+" : ""));
+  };
+  const recompute = (reset) => {
+    clearTimeout(timer); timer = 0; matches = []; truncated = false;
+    const query = input.value;
+    if (open && query){
+      const needle = query.toLocaleLowerCase();
+      const walker = document.createTreeWalker(outPanel, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => allowed(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      });
+      let node;
+      outer: while ((node = walker.nextNode())){
+        const text = String(node.nodeValue || "").toLocaleLowerCase();
+        let from = 0, at;
+        while ((at = text.indexOf(needle, from)) !== -1){
+          const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + query.length);
+          matches.push({ range });
+          if (matches.length >= LIMIT){ truncated = true; break outer; }
+          from = at + Math.max(1, query.length);
+        }
+      }
+    }
+    index = matches.length ? (reset ? 0 : Math.max(0, Math.min(index, matches.length - 1))) : -1;
+    updateCount(); renderHighlights();
+  };
+  const schedule = (reset, delay=90) => {
+    clearTimeout(timer); timer = setTimeout(() => recompute(reset), delay);
+  };
+  const scrollToMatch = () => {
+    const match = matches[index]; if (!match) return;
+    const rect = match.range.getBoundingClientRect(), panelRect = outPanel.getBoundingClientRect();
+    const head = outPanel.querySelector(".out-head");
+    const chromeBottom = !bar.hidden ? bar.getBoundingClientRect().bottom
+      : (head ? head.getBoundingClientRect().bottom : panelRect.top);
+    if (rect.top < chromeBottom + 6 || rect.bottom > panelRect.bottom - 8){
+      const height = Math.max(0, panelRect.bottom - chromeBottom);
+      outPanel.scrollTop += rect.top - (chromeBottom + Math.max(8, (height - rect.height) * .4));
+    }
+  };
+  const move = (delta) => {
+    if (!matches.length){ updateCount(); return; }
+    index = (index + delta + matches.length) % matches.length;
+    updateCount(); renderHighlights(); requestAnimationFrame(scrollToMatch);
+  };
+  const selectionSeed = () => {
+    try {
+      const selection = window.getSelection && window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount ||
+          !outPanel.contains(selection.anchorNode) || !outPanel.contains(selection.focusNode)) return "";
+      const value = String(selection).trim();
+      return value && !value.includes("\n") && value.length <= 200 ? value : "";
+    } catch(_){ return ""; }
+  };
+  const history = (typeof MNSearchHistory === "object" && MNSearchHistory)
+    ? MNSearchHistory.attach(input, { scope:"text", mount:bar, className:"search-history-row", onPick:() => schedule(true, 0) })
+    : null;
+  const remember = () => { if (history) history.remember(input.value); };
+  const openFind = (seed) => {
+    attach(); open = true; bar.hidden = false; findBtn.setAttribute("aria-expanded", "true");
+    const selected = typeof seed === "string" ? seed : selectionSeed();
+    if (selected && selected !== input.value) input.value = selected;
+    else if (!input.value && history) input.value = MNSearchHistory.last("text");
+    recompute(true); input.focus(); input.select();
+  };
+  const closeFind = (restoreFocus=true) => {
+    open = false; bar.hidden = true; findBtn.setAttribute("aria-expanded", "false");
+    matches = []; index = -1; truncated = false; clearHighlights(); updateCount();
+    if (restoreFocus) findBtn.focus({ preventScroll:true });
+  };
+  const observer = new MutationObserver((records) => {
+    attach();
+    if (!open) return;
+    const changed = records.some((record) => {
+      if (isChrome(record.target)) return false;
+      const nodes = Array.from(record.addedNodes).concat(Array.from(record.removedNodes));
+      return !nodes.length || !nodes.every(isChrome);
+    });
+    if (changed) schedule(false, 120);
+  });
+  const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => { if (open) renderHighlights(); }) : null;
+  const onScroll = () => { if (open) renderHighlights(); };
+  const onToggle = (event) => { if (open && event.target && event.target.matches("details")) schedule(false, 0); };
+  outPanel.addEventListener("scroll", onScroll, { passive:true });
+  outPanel.addEventListener("toggle", onToggle, true);
+  outPanel.append(bar, layer); observer.observe(outPanel, { childList:true, subtree:true });
+  if (resizeObserver) resizeObserver.observe(outPanel);
+  findBtn.addEventListener("click", () => open ? closeFind(false) : openFind());
+  input.addEventListener("input", (event) => { if (!event.isComposing) schedule(true); });
+  input.addEventListener("compositionend", () => schedule(true, 0));
+  input.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Enter"){ event.preventDefault(); remember(); move(event.shiftKey ? -1 : 1); }
+    else if (event.key === "Escape"){ event.preventDefault(); closeFind(); }
+  });
+  prev.addEventListener("click", () => { remember(); move(-1); input.focus(); });
+  next.addEventListener("click", () => { remember(); move(1); input.focus(); });
+  closeBtn.addEventListener("click", () => closeFind());
+  attach();
+  return {
+    open:openFind, close:closeFind, selectionSeed,
+    refresh:() => { if (open) renderHighlights(); },
+    destroy:() => {
+      clearTimeout(timer); cancelAnimationFrame(raf); observer.disconnect();
+      if (resizeObserver) resizeObserver.disconnect();
+      outPanel.removeEventListener("scroll", onScroll);
+      outPanel.removeEventListener("toggle", onToggle, true);
+      if (history) history.destroy();
+    }
+  };
+}
+
 /* 실행에 함께 넣을 라이브러리(jar) 고르기. 자바스크립트 쪽 라이브러리 팝오버(buildJsLibraryPicker)와
    같은 자리·같은 조작이라 화면 모양(run-pkg-wrap·js-library-*)도 그대로 쓴다.
    다른 점은 목록의 출처다 — 카탈로그와 설치 여부를 모두 런처가 알려 주므로 여기서는 그리기만 한다. */
@@ -103,7 +390,9 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
   options = options || {};
   let state = loadJavaLibraryState(storageKey);
   let rows = [];                 // 카탈로그 + 카탈로그에 없는 설치본
-  let loaded = false, busy = false, destroyed = false;
+  let searchRows = [];
+  let searchRequestId = 0;
+  let loaded = false, busy = false, searching = false, confirming = false, destroyed = false;
   let outsideClose = null, cancelAction = null;
 
   const panel = document.createElement("section");
@@ -118,6 +407,16 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
   const status = document.createElement("div"); status.className = "js-npm-status";
   status.textContent = "라이브러리 목록을 확인할 수 있어요.";
   const list = document.createElement("div"); list.className = "js-npm-list";
+
+  const searchForm = document.createElement("div"); searchForm.className = "js-npm-form java-library-search-form";
+  const searchInput = document.createElement("input"); searchInput.type = "search";
+  searchInput.placeholder = "라이브러리 검색 (예: lombok)";
+  searchInput.autocomplete = "off"; searchInput.spellcheck = false;
+  const searchBtn = document.createElement("button"); searchBtn.type = "button"; searchBtn.className = "pkg-set"; searchBtn.textContent = "검색";
+  searchForm.append(searchInput, searchBtn);
+  const searchStatus = document.createElement("div"); searchStatus.className = "js-npm-status java-library-search-status";
+  searchStatus.textContent = "영문 라이브러리 이름으로 Maven Central을 검색할 수 있어요.";
+  const searchList = document.createElement("div"); searchList.className = "js-npm-list java-library-search-results"; searchList.hidden = true;
 
   const form = document.createElement("div"); form.className = "js-npm-form";
   const specInput = document.createElement("input"); specInput.type = "text";
@@ -138,7 +437,7 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
 
   const note = document.createElement("p"); note.className = "js-library-note";
   note.textContent = "코드 맨 위에 import 를 적어야 쓸 수 있어요. 항목을 누르면 예시 import 를 보여 줍니다.";
-  panel.append(intro, status, list, form, warning, progress, note);
+  panel.append(intro, status, list, searchForm, searchStatus, searchList, form, warning, progress, note);
   bar.appendChild(panel);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
 
@@ -147,7 +446,12 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
     document.removeEventListener("pointerdown", outsideClose, true);
     outsideClose = null;
   };
-  const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); detachOutside(); };
+  // 확인 모달을 누르는 순간은 panel 바깥 pointerdown 이지만 설치 흐름의 일부다. 그때나 설치 중에는
+  // 팝오버를 닫지 않아 진행 기록과 성공·실패 결과가 사라지지 않게 한다.
+  const close = (force) => {
+    if (!force && (confirming || busy)) return false;
+    panel.hidden = true; button.setAttribute("aria-expanded", "false"); detachOutside(); return true;
+  };
   const formatBytes = (value) => {
     const bytes = Math.max(0, Number(value) || 0);
     return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + "MB" : Math.max(1, Math.round(bytes / 1024)) + "KB";
@@ -206,7 +510,7 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
       meta.textContent = row.installed ? formatBytes(row.size) : javaT("아직 받지 않음");
       select.append(name, meta);
       select.title = row.coordinate + (row.sample ? "\n" + row.sample : "");
-      select.disabled = busy;
+      select.disabled = busy || searching;
       select.addEventListener("click", () => {
         if (busy) return;
         if (!row.installed){ install(spec, row.label || row.coordinate); return; }
@@ -219,11 +523,30 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "js-npm-delete";
         remove.textContent = javaT("삭제");
         remove.title = javaTf("{name} 를 이 컴퓨터에서 지우기", { name:row.coordinate });
-        remove.disabled = busy;
+        remove.disabled = busy || searching;
         remove.addEventListener("click", () => remove.disabled ? null : erase(row));
         line.appendChild(remove);
       }
       list.appendChild(line);
+    }
+    renderSearch();
+  };
+
+  const renderSearch = () => {
+    searchList.replaceChildren();
+    searchList.hidden = !searchRows.length;
+    for (const row of searchRows){
+      const line = document.createElement("div"); line.className = "js-npm-row java-library-search-row";
+      const select = document.createElement("button"); select.type = "button"; select.className = "js-npm-select";
+      const name = document.createElement("strong");
+      name.textContent = (row.curated ? "★ " : row.exact ? "✓ " : "") + (row.label || row.artifact);
+      const meta = document.createElement("small");
+      meta.textContent = row.group + " · " + (row.version || javaT("버전 확인 필요"));
+      select.append(name, meta);
+      select.title = row.group + ":" + row.artifact + ":" + row.version;
+      select.disabled = busy;
+      select.addEventListener("click", () => { if (!select.disabled) installSearchResult(row); });
+      line.appendChild(select); searchList.appendChild(line);
     }
   };
 
@@ -256,13 +579,21 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
     if (typeof options.onChange === "function") options.onChange(javaLibraryState(state), rows);
   };
 
-  const install = async (spec, label) => {
+  const install = async (spec, label, dependencyInfo) => {
     if (busy) return;
-    const allow = typeof confirmDialog === "function"
-      ? await confirmDialog(
-        javaTf("Maven Central에서 ‘{name}’ 라이브러리(jar)를 내려받아 이 컴퓨터에 보관합니다.\n\n받은 파일은 배포처가 알려준 검증값과 대조합니다. 이 코드는 실행할 때 함께 동작하니 믿을 수 있는 것만 받으세요.",
-          { name:label }), javaT("받기"), javaT("취소"))
-      : true;
+    confirming = true;
+    let allow = true;
+    try {
+      let confirmation = javaTf("Maven Central에서 ‘{name}’ 라이브러리(jar)를 내려받아 이 컴퓨터에 보관합니다.\n\n받은 파일은 배포처가 알려준 검증값과 대조합니다. 이 코드는 실행할 때 함께 동작하니 믿을 수 있는 것만 받으세요.",
+        { name:label });
+      if (dependencyInfo && dependencyInfo.dependencyKnown && dependencyInfo.dependencyCount > 0){
+        confirmation += "\n\n" + javaTf("직접 의존성 {count}개가 있습니다. 이 화면은 딸린 라이브러리를 자동으로 받지 않으므로 추가 설치가 필요할 수 있어요.",
+          { count:dependencyInfo.dependencyCount });
+      }
+      allow = typeof confirmDialog === "function"
+        ? await confirmDialog(confirmation, javaT("받기"), javaT("취소"))
+        : true;
+    } finally { confirming = false; }
     if (!allow) return;
     busy = true; render();
     addBtn.disabled = true; specInput.disabled = true;
@@ -280,7 +611,9 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
       if (destroyed) return;
       progressLabel.textContent = javaT("완료");
       // 받자마자 고른 상태로 만든다 — 받는 이유가 곧 쓰려는 것이다.
-      if (state.ids.indexOf(spec) < 0) commit(state.ids.concat([spec]));
+      const installedRow = rows.find((row) => row.coordinate === spec || row.id === spec);
+      const selectedSpec = installedRow ? specOf(installedRow) : spec;
+      if (state.ids.indexOf(selectedSpec) < 0) commit(state.ids.concat([selectedSpec]));
       if (typeof toast === "function") toast(javaTf("{name} 를 받아 이 문서에 적용했어요.", { name:label }), 3000);
     } catch(error){
       if (destroyed) return;
@@ -291,6 +624,42 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
     } finally {
       busy = false; cancelAction = null; cancelBtn.hidden = true;
       addBtn.disabled = false; specInput.disabled = false;
+      if (!destroyed) render();
+    }
+  };
+
+  const installSearchResult = async (row) => {
+    if (busy) return;
+    // 즉시 표시한 추천 항목을 누르면 뒤에서 진행 중인 외부 검색 결과는 더 이상 화면을 바꾸지 않는다.
+    if (searching){ searchRequestId++; searching = false; searchBtn.disabled = false; searchInput.disabled = false; }
+    searching = true; searchBtn.disabled = true; searchInput.disabled = true; render();
+    searchStatus.textContent = javaT("최신 안정 버전과 의존성을 확인하는 중…");
+    try {
+      const resolved = row.resolved ? {
+        coordinate:row.group + ":" + row.artifact + ":" + row.version,
+        version:row.version,
+        dependencyKnown:row.dependencyKnown,
+        dependencyCount:row.dependencyCount
+      } : await javaLibraryResolve(row.group, row.artifact);
+      if (destroyed) return;
+      const existing = rows.find((item) => item.coordinate === resolved.coordinate);
+      if (existing && existing.installed){
+        const selectedSpec = specOf(existing);
+        if (state.ids.indexOf(selectedSpec) < 0) commit(state.ids.concat([selectedSpec]));
+        if (typeof toast === "function") toast(javaTf("{name} 를 이 문서에 적용했어요.", { name:existing.label || resolved.coordinate }), 2600);
+        searchStatus.textContent = javaT("이미 받은 라이브러리를 이 문서에 적용했어요.");
+        return;
+      }
+      searchStatus.textContent = resolved.dependencyKnown
+        ? javaTf("최신 {version} · 직접 의존성 {count}개", { version:resolved.version, count:resolved.dependencyCount })
+        : javaTf("최신 {version} · 의존성 정보는 확인하지 못했어요.", { version:resolved.version });
+      await install(resolved.coordinate, (row.label || row.artifact) + " " + resolved.version, resolved);
+    } catch(error){
+      if (destroyed) return;
+      searchStatus.textContent = javaTf("검색 결과를 준비하지 못했어요: {message}", { message:(error && error.message) || error });
+      if (typeof toast === "function") toast((error && error.message) || String(error), 4200, { type:"error" });
+    } finally {
+      searching = false; searchBtn.disabled = false; searchInput.disabled = false;
       if (!destroyed) render();
     }
   };
@@ -323,6 +692,42 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
   specInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.isComposing){ e.preventDefault(); addBtn.click(); }
   });
+  searchBtn.addEventListener("click", async () => {
+    const query = searchInput.value.trim();
+    if (!javaLibraryValidSearch(query)){
+      if (typeof toast === "function") toast(javaT("검색어는 영문 이름 2~80자로 적어 주세요."), 3000);
+      searchInput.focus(); return;
+    }
+    const requestId = ++searchRequestId;
+    const localRows = javaLibraryLocalSearch(query, rows);
+    searchRows = localRows;
+    searching = true; searchBtn.disabled = true; searchInput.disabled = true; render();
+    searchStatus.textContent = localRows.length
+      ? javaTf("추천 항목 {count}개를 먼저 표시했어요. Maven Central에서 추가 결과를 찾는 중…", { count:localRows.length })
+      : javaT("Maven Central을 검색하는 중…");
+    try {
+      const result = await javaLibrarySearch(query);
+      if (destroyed || requestId !== searchRequestId) return;
+      searchRows = javaLibraryMergeSearchRows(localRows, result.rows);
+      searchStatus.textContent = searchRows.length
+        ? javaTf("검색 결과 {count}개 · ★는 ClassDock 추천 항목입니다.", { count:searchRows.length })
+        : javaT("검색 결과가 없어요. 다른 이름으로 검색해 보세요.");
+    } catch(error){
+      if (destroyed || requestId !== searchRequestId) return;
+      searchRows = localRows;
+      searchStatus.textContent = localRows.length
+        ? javaT("추천 항목만 표시했어요. Maven Central 추가 검색은 응답이 늦거나 연결되지 않았습니다.")
+        : javaTf("검색하지 못했어요: {message}", { message:(error && error.message) || error });
+    } finally {
+      if (requestId === searchRequestId){
+        searching = false; searchBtn.disabled = false; searchInput.disabled = false;
+        if (!destroyed) render();
+      }
+    }
+  });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing){ e.preventDefault(); searchBtn.click(); }
+  });
   cancelBtn.addEventListener("click", () => {
     if (typeof cancelAction !== "function") return;
     cancelBtn.disabled = true; cancelBtn.textContent = javaT("취소하는 중…"); cancelAction();
@@ -338,12 +743,13 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
     outsideClose = (event) => {
       if (destroyed || panel.hidden){ detachOutside(); return; }
       if (panel.contains(event.target) || button.contains(event.target)) return;
+      if (confirming || busy) return;
       close();
     };
     document.addEventListener("pointerdown", outsideClose, true);
   });
   const onKey = (event) => {
-    if (event.key !== "Escape" || panel.hidden) return;
+    if (event.key !== "Escape" || panel.hidden || confirming || busy) return;
     const hadFocus = panel.contains(document.activeElement);
     event.preventDefault(); event.stopPropagation(); close();
     if (hadFocus) button.focus({ preventScroll:true });
@@ -356,7 +762,156 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
     getQuery: () => javaLibraryQuery(state),
     getRows: () => rows.slice(),
     close,
-    destroy(){ destroyed = true; close(); bar.removeEventListener("keydown", onKey); panel.remove(); }
+    destroy(){ destroyed = true; close(true); bar.removeEventListener("keydown", onKey); panel.remove(); }
+  };
+}
+
+function javaRunSourceInfo(source, fallbackName){
+  const masked = javaSourceCodeMask(source);
+  const packageMatch = masked.match(/^\s*package\s+([\p{L}_$][\p{L}\p{N}_$]*(?:\s*\.\s*[\p{L}_$][\p{L}\p{N}_$]*)*)\s*;/mu);
+  const packageName = packageMatch ? packageMatch[1].replace(/\s+/g, "") : "(기본 패키지)";
+  const fallback = String(fallbackName || "Main.java").replace(/\.java$/i, "") || "Main";
+  const mainRe = /\bstatic\s+void\s+main\s*\(\s*(?:java\s*\.\s*lang\s*\.\s*)?String\s*(?:\[\s*\]|\.\.\.)/u;
+  const typeRe = new RegExp("(?:^|[;}{\\s])((?:public\\s+)?(?:(?:final|abstract|sealed|non-sealed|strictfp)\\s+)*(?:class|interface|enum|record)\\s+(" + JAVA_SOURCE_ID_START + JAVA_SOURCE_ID_PART + "*))", "gu");
+  const types = [];
+  let scan = 0, depth = 0, match;
+  while ((match = typeRe.exec(masked))){
+    const declarationAt = match.index + match[0].indexOf(match[1]);
+    while (scan < declarationAt){
+      if (masked[scan] === "{") depth++;
+      else if (masked[scan] === "}") depth = Math.max(0, depth - 1);
+      scan++;
+    }
+    if (depth !== 0) continue;
+    const open = masked.indexOf("{", typeRe.lastIndex);
+    if (open < 0) continue;
+    let end = open + 1, bodyDepth = 1;
+    while (end < masked.length && bodyDepth){
+      if (masked[end] === "{") bodyDepth++;
+      else if (masked[end] === "}") bodyDepth--;
+      end++;
+    }
+    types.push({ name:match[2], isPublic:/\bpublic\b/u.test(match[1]), hasMain:mainRe.test(masked.slice(open + 1, end - 1)) });
+  }
+  const launchType = types.find(type => type.hasMain) || types.find(type => type.isPublic) || types[0] || { name:fallback, hasMain:false };
+  const typeName = launchType.name;
+  const hasMain = !!launchType.hasMain;
+  return {
+    packageName,
+    mainClass:hasMain ? (packageMatch ? packageName + "." : "") + typeName : "찾지 못함",
+    typeName,
+    hasMain,
+    mainTypes:types.filter(type => type.hasMain).map(type => type.name)
+  };
+}
+
+// 현재 실행이 무엇을 묶어 javac/java 에 넘기는지 한눈에 보여 주는 작은 팝오버.
+function buildJavaRunConfigPopover(bar, button, storageKey, options){
+  options = options || {};
+  const lintKey = JAVA_LINT_PREFIX + storageKey;
+  const mainKey = JAVA_MAIN_PREFIX + storageKey;
+  let lint = false, destroyed = false, outsideClose = null, refreshSeq = 0;
+  let selectedMain = "";
+  try { lint = localStorage.getItem(lintKey) === "1"; } catch(_){}
+  try { selectedMain = localStorage.getItem(mainKey) || ""; } catch(_){}
+
+  const panel = document.createElement("section"); panel.className = "run-pkg-wrap java-run-config"; panel.hidden = true;
+  panel.setAttribute("aria-label", "자바 실행 구성");
+  const head = document.createElement("div"); head.className = "java-run-config-head";
+  const title = document.createElement("strong"); title.textContent = "실행 구성";
+  const hint = document.createElement("span"); hint.textContent = "현재 문서 기준";
+  head.append(title, hint);
+  const grid = document.createElement("dl"); grid.className = "java-run-config-grid";
+  const addRow = (label, className) => {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.className = className || "";
+    grid.append(dt, dd); return dd;
+  };
+  const mainValue = addRow("main 클래스", "java-config-main");
+  const packageValue = addRow("패키지", "java-config-package");
+  const siblingValue = addRow("함께 컴파일", "java-config-siblings");
+  const libraryValue = addRow("라이브러리", "java-config-libraries");
+  const jdkValue = addRow("JDK", "java-config-jdk");
+  const tempValue = addRow("실행 폴더", "java-config-temp");
+  tempValue.textContent = "ClassDock 임시 폴더 · 실행 후 자동 정리";
+  const lintLabel = document.createElement("label"); lintLabel.className = "java-run-config-lint";
+  const lintInput = document.createElement("input"); lintInput.type = "checkbox"; lintInput.checked = lint;
+  const lintText = document.createElement("span"); lintText.textContent = "상세 컴파일 경고 사용 (-Xlint:all)";
+  lintLabel.append(lintInput, lintText);
+  const note = document.createElement("p"); note.className = "java-run-config-note";
+  note.textContent = "저장 검사·실행·채점에 같은 설정을 적용합니다.";
+  panel.append(head, grid, lintLabel, note); bar.appendChild(panel);
+  button.setAttribute("aria-haspopup", "dialog"); button.setAttribute("aria-expanded", "false");
+
+  const textList = (node, values, empty) => {
+    node.textContent = values.length ? values.join(", ") : empty;
+    node.title = node.textContent;
+  };
+  const refresh = async () => {
+    const seq = ++refreshSeq;
+    const source = typeof options.source === "function" ? options.source() : "";
+    const fileName = typeof options.fileName === "function" ? options.fileName() : "Main.java";
+    const info = javaRunSourceInfo(source, fileName);
+    const mains = info.mainTypes;
+    if (mains.length > 1){
+      if (mains.indexOf(selectedMain) < 0) selectedMain = mains[0];
+      const select = document.createElement("select"); select.className = "java-config-main-select";
+      for (const name of mains){
+        const option = document.createElement("option"); option.value = name;
+        option.textContent = (info.packageName === "(기본 패키지)" ? "" : info.packageName + ".") + name;
+        option.selected = name === selectedMain; select.appendChild(option);
+      }
+      select.addEventListener("change", () => {
+        selectedMain = select.value;
+        try { localStorage.setItem(mainKey, selectedMain); } catch(_){}
+      });
+      mainValue.replaceChildren(select);
+    } else {
+      selectedMain = mains[0] || "";
+      mainValue.textContent = info.mainClass;
+    }
+    mainValue.classList.toggle("is-warn", !info.hasMain);
+    packageValue.textContent = info.packageName;
+    textList(siblingValue, typeof options.siblings === "function" ? options.siblings() : [], "현재 파일만");
+    const libs = typeof options.libraries === "function" ? String(options.libraries() || "").split(",").filter(Boolean) : [];
+    textList(libraryValue, libs, "선택 없음");
+    jdkValue.textContent = "확인 중…";
+    const env = await javaEnvironmentDetails();
+    if (destroyed || seq !== refreshSeq) return;
+    jdkValue.textContent = env.ok ? ((env.version || ("Java " + (env.major || ""))) + (env.path ? " · " + env.path : "")) : "JDK를 찾지 못함";
+    jdkValue.classList.toggle("is-warn", !env.ok);
+    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(panel);
+  };
+  const close = () => {
+    if (panel.hidden) return;
+    panel.hidden = true; button.setAttribute("aria-expanded", "false");
+    if (outsideClose){ document.removeEventListener("pointerdown", outsideClose, true); outsideClose = null; }
+  };
+  button.addEventListener("click", () => {
+    if (!panel.hidden){ close(); return; }
+    panel.hidden = false; button.setAttribute("aria-expanded", "true"); refresh();
+    outsideClose = (event) => { if (!panel.contains(event.target) && event.target !== button) close(); };
+    document.addEventListener("pointerdown", outsideClose, true);
+  });
+  lintInput.addEventListener("change", () => {
+    lint = lintInput.checked;
+    try { localStorage.setItem(lintKey, lint ? "1" : "0"); } catch(_){}
+  });
+  const onKey = (event) => {
+    if (event.key !== "Escape" || panel.hidden) return;
+    event.preventDefault(); event.stopPropagation(); close(); button.focus({ preventScroll:true });
+  };
+  bar.addEventListener("keydown", onKey);
+  return {
+    getLint:() => lint,
+    getMainClass:() => {
+      const info = javaRunSourceInfo(typeof options.source === "function" ? options.source() : "",
+        typeof options.fileName === "function" ? options.fileName() : "Main.java");
+      return info.mainTypes.indexOf(selectedMain) >= 0 ? selectedMain : (info.mainTypes[0] || "");
+    },
+    refresh:() => { if (!panel.hidden) refresh(); },
+    close,
+    destroy(){ destroyed = true; refreshSeq++; close(); bar.removeEventListener("keydown", onKey); panel.remove(); }
   };
 }
 
@@ -623,7 +1178,8 @@ function renderJavaRunnable(context){
     libraries.members = next;
   };
 
-  const editor = buildCodeEditor(initial, prof, {
+  let editor = null;
+  editor = buildCodeEditor(initial, prof, {
     // 파이썬 전용 지능(Jedi 질의·import 문맥)을 끄고 확장자에 맞는 키워드를 쓴다.
     // fileExt 만 넘기면 공용 목록에서 자바 키워드를 골라 준다(core.js 의 completionWordsForProfile).
     plain: true,
@@ -632,10 +1188,42 @@ function renderJavaRunnable(context){
     // 점 뒤 후보 — sc.nextInt(), list.add() … 선언한 타입을 보고 고른다(java-runtime.js).
     // 고른 라이브러리의 클래스(gson.toJson() 등)까지 같은 길에서 답한다.
     memberCandidates: (source, receiver, prefix) => javaMemberCompletionCandidates(source, receiver, prefix, libraries),
+    completionDetail: (item, source) => javaCompletionTypePackage(source, item && item.name, libraries),
     /* List 를 고르면 java.util.List 를 위에 적어 준다 — 자바 수업의 첫 벽이 "import 를 안 적어서" 나는
        오류다. 넣을 자리를 정하는 규칙(importPlanner)만 자바 것을 주고 장치는 파이썬 쪽 것을 그대로 쓴다. */
     importCandidates: (source, prefix) => javaImportCandidates(source, prefix, libraries),
     importPlanner: JAVA_IMPORT_PLANNER,
+    // Java 편집기가 공용 편집기의 Python/Jedi 폴백으로 빠지 않고,
+    // 현재 파일의 정의나 JDK src.zip 원문을 열도록 자바 전용 훅을 연결한다.
+    definitionTargetAt: ({ source, wordInfo }) => javaDefinitionTargetAt(source, wordInfo),
+    openDefinitionTarget: async ({ wordInfo, target }) => {
+      if (target.scope === "local"){
+        editor.focusLine(target.line, { column:target.column || 0, length:Math.max(1, String(target.name || wordInfo.word).length) });
+        toast(target.kind === "method" ? "현재 파일의 메서드 정의로 이동했습니다." : "현재 파일의 타입 정의로 이동했습니다.", 1500);
+        return true;
+      }
+      const data = await requestJavaDefinitionSource(target.qualified);
+      if (!data || !data.ok){
+        const reason = data && data.reason;
+        if (reason === "no-backend") toast("JDK 소스 이동은 ClassDock.exe에서 사용할 수 있어요.", 2800);
+        else if (reason === "no-jdk") toast("JDK를 찾지 못해 정의 소스를 열 수 없어요.", 2800);
+        else if (reason === "no-source") toast("JDK에 src.zip 소스가 없어 정의를 열 수 없어요.", 2800);
+        else toast("열 수 있는 Java 소스를 찾지 못했습니다.", 2400);
+        return true;
+      }
+      const base = String(data.fileName || target.name || wordInfo.word || "definition") + (String(data.fileName || "").endsWith(".java") ? "" : ".java");
+      const sourceKey = "definition:jdk:" + String(data.entry || target.qualified).replace(/\\/g, "/");
+      const opened = await handleFiles([new File([String(data.source || "")], base, { type:"text/x-java-source" })], { sourceKey });
+      if (opened){
+        const line = Math.max(1, Number(data.line) || 1);
+        const focus = { column:Math.max(0, Number(data.column) || 0), length:Math.max(1, String(data.name || target.name || wordInfo.word).length) };
+        const navigator = opened.codeEditor || opened.codeViewer;
+        if (navigator && navigator.focusLine) navigator.focusLine(line, focus);
+        else { opened.pendingFocusLine = line; opened.pendingFocusOptions = focus; }
+      }
+      toast("JDK 정의 소스를 열었습니다.", 1500);
+      return true;
+    },
     contextMenuActions: () => (typeof ui !== "undefined" && typeof ui.cancelRun === "function"
       ? [{ label:"■ 실행 중지", action:() => ui.cancelRun() }]
       : [{ label:"▶ 실행", action:() => run(true) }])
@@ -644,7 +1232,7 @@ function renderJavaRunnable(context){
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;
 
   // ── 실행 바 ──
-  const bar = document.createElement("div"); bar.className = "run-bar";
+  const bar = document.createElement("div"); bar.className = "run-bar java-run-bar";
   const runBtn = document.createElement("button"); runBtn.className = "run-go"; runBtn.type = "button"; runBtn.textContent = "▶";
   runBtn.title = "실행";
   runBtn.dataset.shortcutAction = "runCode"; runBtn.dataset.shortcutTitle = "실행"; runBtn.dataset.shortcutAria = "true";
@@ -656,13 +1244,105 @@ function renderJavaRunnable(context){
   const libBtn = document.createElement("button"); libBtn.className = "run-pkg run-java-library"; libBtn.type = "button";
   libBtn.textContent = "라이브러리";
   const envBtn = document.createElement("button"); envBtn.className = "run-pkg run-java-env"; envBtn.type = "button";
-  envBtn.textContent = "Java"; envBtn.title = "이 컴퓨터에서 쓰는 자바(JDK) 확인";
-  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button";
+  envBtn.textContent = "Java Env"; envBtn.title = "이 컴퓨터에서 쓰는 자바(JDK) 확인";
+  const configBtn = document.createElement("button"); configBtn.className = "run-pkg run-java-config"; configBtn.type = "button";
+  configBtn.textContent = "실행 구성"; configBtn.title = "main 클래스·패키지·함께 컴파일할 파일과 옵션 확인";
+  const junitBtn = document.createElement("button"); junitBtn.className = "run-pkg run-java-junit"; junitBtn.type = "button";
+  junitBtn.textContent = "JUnit"; junitBtn.title = "JUnit 5 테스트를 찾아 별도 결과로 실행";
+  const formatBtn = document.createElement("button"); formatBtn.className = "run-pkg run-java-format"; formatBtn.type = "button";
+  formatBtn.textContent = "코드 정렬"; formatBtn.title = "문자열과 주석을 보존하며 Java 들여쓰기 정리";
+  const importsBtn = document.createElement("button"); importsBtn.className = "run-pkg run-java-imports"; importsBtn.type = "button";
+  importsBtn.textContent = "import 정리"; importsBtn.title = "중복·사용하지 않는 import를 지우고 명확한 누락 import 추가";
+  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-java-revert"; revertBtn.type = "button";
   revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  const fontGroup = document.createElement("span"); fontGroup.className = "run-java-font-group";
+  const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button";
+  fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
+  const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button";
+  fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
+  fontDown.addEventListener("click", () => bumpCodeFont(-1));
+  fontUp.addEventListener("click", () => bumpCodeFont(1));
+  const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
+  fontPick.title = "코드 글꼴 (시스템에 설치된 글꼴만 · 고정폭/가변폭으로 나눠 표시)";
+  fontPick.setAttribute("aria-label", fontPick.title);
+  const fontGroups = groupedCodeFontChoices();
+  const installedFonts = [...fontGroups.mono, ...fontGroups.prop];
+  if (_codeFontFamily && !installedFonts.some(choice => choice.value === _codeFontFamily)) setCodeFontFamily("");
+  const addFontGroup = (label, choices) => {
+    if (!choices.length) return;
+    const group = document.createElement("optgroup"); group.label = label;
+    choices.forEach((choice) => {
+      const option = document.createElement("option"); option.value = choice.value; option.textContent = choice.label;
+      if (choice.value === _codeFontFamily) option.selected = true;
+      group.appendChild(option);
+    });
+    fontPick.appendChild(group);
+  };
+  addFontGroup("고정폭 (코딩용)", fontGroups.mono);
+  addFontGroup("가변폭 (읽기용)", fontGroups.prop);
+  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
+  if (installedFonts.length <= 1) fontPick.hidden = true;
+  fontGroup.append(fontDown, fontUp, fontPick);
+
+  const practiceGroup = document.createElement("span"); practiceGroup.className = "run-java-practice-group";
+  const practiceBtn = document.createElement("button"); practiceBtn.className = "run-practice"; practiceBtn.type = "button";
+  practiceBtn.textContent = "따라치기";
+  practiceBtn.title = "이 코드를 흐리게 두고 그 위에 똑같이 따라 쳐 보기 — 맞으면 제 색, 틀리면 빨강 (Esc: 그만두기)";
+  const practiceInfo = document.createElement("span"); practiceInfo.className = "run-practice-info"; practiceInfo.hidden = true;
+  practiceInfo.setAttribute("aria-live", "polite");
+  practiceGroup.append(practiceBtn, practiceInfo);
+  const setPracticeChrome = (on) => {
+    practiceBtn.classList.toggle("is-on", on);
+    practiceBtn.textContent = on ? "그만두기" : "따라치기";
+    practiceInfo.hidden = !on;
+    if (!on) practiceInfo.textContent = "";
+  };
+  practiceBtn.addEventListener("click", () => {
+    if (editor.isPracticeActive()){ editor.stopPractice("cancel"); return; }
+    const started = editor.startPractice({
+      onProgress: (state) => { practiceInfo.textContent = state.percent + "% · 정확도 " + state.accuracy + "%"; },
+      onDone: (reason, state) => {
+        setPracticeChrome(false); refreshEditState();
+        if (reason !== "done"){
+          toast("따라치기를 그만뒀어요. 여기까지 " + state.percent + "% · 정확도 " + state.accuracy + "%", 3000);
+          return;
+        }
+        toast("다 따라 썼어요! 정확도 " + state.accuracy + "% · " + state.seconds + "초 · 분당 " + state.cpm + "타"
+          + (state.wrong ? " (고친 실수 " + state.wrong + "번)" : ""), 5200);
+        if (typeof petReact === "function") petReact(state.accuracy >= 90 ? "success" : "error");
+      }
+    });
+    if (!started){ toast("따라 칠 코드가 없어요.", 2000); return; }
+    setPracticeChrome(true);
+    toast("줄 앞 들여쓰기는 자동으로 넘어가요. 틀리면 빨갛게 표시되니 지우고 다시 치면 돼요. (Esc: 그만두기)", 4600);
+  });
+  const newJavaBtn = document.createElement("button"); newJavaBtn.className = "run-newjava"; newJavaBtn.type = "button";
+  newJavaBtn.textContent = "+Java"; newJavaBtn.title = "새 자바 코드";
+  newJavaBtn.addEventListener("click", () => { if (typeof newJavaScratch === "function") newJavaScratch(); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   const status = document.createElement("span"); status.className = "run-status";
-  bar.append(runBtn, gradeBtn, libBtn, envBtn, saveBtn, revertBtn, layoutBtn, status);
+  // 넓을 때는 보조 도구를 그대로 펼치고, 편집기 폭이 좁으면 같은 노드를 ⋯ 메뉴로 접는다(CSS container query).
+  const moreGroup = document.createElement("span"); moreGroup.className = "java-run-more";
+  const moreBtn = document.createElement("button"); moreBtn.className = "java-run-more-toggle"; moreBtn.type = "button";
+  moreBtn.textContent = "⋯"; moreBtn.title = "자바 보조 도구"; moreBtn.setAttribute("aria-haspopup", "menu"); moreBtn.setAttribute("aria-expanded", "false");
+  const moreMenu = document.createElement("span"); moreMenu.className = "java-run-more-menu"; moreMenu.setAttribute("role", "menu");
+  moreMenu.append(configBtn, junitBtn, formatBtn, importsBtn, revertBtn, fontGroup, practiceGroup, newJavaBtn, layoutBtn);
+  moreGroup.append(moreBtn, moreMenu);
+  bar.append(runBtn, gradeBtn, libBtn, envBtn, saveBtn, moreGroup, status);
+  const closeMore = () => { moreGroup.classList.remove("is-open"); moreBtn.setAttribute("aria-expanded", "false"); };
+  const onMoreOutside = (event) => { if (!moreGroup.contains(event.target)) closeMore(); };
+  const onMoreKey = (event) => {
+    if (event.key !== "Escape" || !moreGroup.classList.contains("is-open")) return;
+    event.preventDefault(); event.stopPropagation(); closeMore(); moreBtn.focus({ preventScroll:true });
+  };
+  moreBtn.addEventListener("click", () => {
+    const open = !moreGroup.classList.contains("is-open");
+    closeMore();
+    if (open){ moreGroup.classList.add("is-open"); moreBtn.setAttribute("aria-expanded", "true"); }
+  });
+  document.addEventListener("pointerdown", onMoreOutside, true);
+  bar.addEventListener("keydown", onMoreKey);
   if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
 
   // ── 좌(편집기) · 우(실행 결과) 분할 ──
@@ -696,12 +1376,11 @@ function renderJavaRunnable(context){
       outPanel.insertBefore(outHeadActions, outPanel.firstChild);
     }
   };
-  const outputChromeObserver = new MutationObserver(attachOutputChrome);
-  outputChromeObserver.observe(outPanel, { childList:true, subtree:true });
   outPanel.appendChild(outHeadActions);
 
   split.append(editor.host, divider, outPanel);
   attachRunSplitter(split, divider);
+  const outputFinder = attachJavaOutputFind({ outPanel, outHeadActions, attachOutputChrome });
 
   // 결과를 편집기 옆(가로) ↔ 아래(세로)로. 고른 방향은 다음에 열 때도 유지한다(파이썬과 키는 따로 둔다).
   let outputStacked = false;
@@ -721,7 +1400,7 @@ function renderJavaRunnable(context){
   host.appendChild(outer);
 
   const ui = {
-    btn: runBtn, gradeBtn, status, outPanel, split, editorTa: editor.ta,
+    btn: runBtn, gradeBtn, junitBtn, status, outPanel, split, editorTa: editor.ta,
     fileBase: saveName,
     markError: (line) => editor.markError(line),
     // 저장 검사는 오류를 여러 개 한꺼번에 준다 — 줄 번호만 넘기면 설명·심각도·칸이 버려지므로
@@ -736,9 +1415,17 @@ function renderJavaRunnable(context){
   const libraryPicker = buildJavaLibraryPicker(bar, libBtn, javaLibraryStorageKey(draftKey), {
     onChange: applyLibraryWords
   });
+  const runConfig = buildJavaRunConfigPopover(bar, configBtn, draftKey, {
+    source:() => editor.getValue(),
+    fileName:() => (ownerDoc && ownerDoc.name) || saveName,
+    siblings:() => javaSiblingFileNames(ownerDoc),
+    libraries:() => libraryPicker.getQuery()
+  });
   const run = (keepEditorFocus) => runJavaSource(editor.getValue(), ui, {
     keepEditorFocus: keepEditorFocus === true,
-    libs: libraryPicker.getQuery()
+    libs: libraryPicker.getQuery(),
+    lint: runConfig.getLint(),
+    mainClass:runConfig.getMainClass()
   });
   ui.rerun = () => run(false);
 
@@ -755,40 +1442,26 @@ function renderJavaRunnable(context){
     openAssignmentGradingModal({
       storageKey: JAVA_GRADE_PREFIX + draftKey.slice(draftKey.indexOf(":") + 1),
       // 채점도 같은 라이브러리로 돌린다 — 실행에서만 되는 코드가 채점에서 떨어지면 안 된다.
-      onRun: (tests) => runJavaSource(editor.getValue(), ui, { gradeTests:tests, libs:libraryPicker.getQuery() })
+      onRun: (tests) => runJavaSource(editor.getValue(), ui, {
+        gradeTests:tests, libs:libraryPicker.getQuery(), lint:runConfig.getLint(), mainClass:runConfig.getMainClass()
+      })
     });
   });
-  // 어느 자바가 잡혔는지 — 교실에서 "왜 이 PC만 다르지"를 물을 때 가장 먼저 볼 곳이다.
-  envBtn.addEventListener("click", async () => {
-    if (disposed) return;
-    if (typeof ui.disposeInstallGuide === "function") ui.disposeInstallGuide();
-    ui.disposeInstallGuide = null;
-    split.classList.add("show-out");
-    const info = await javaEnvironmentDetails();
-    if (disposed) return;
-    if (!info.ok){
-      const guide = renderJavaInstallGuide(outPanel, () => { if (!disposed) run(false); });
-      ui.disposeInstallGuide = () => guide.dispose();
-      return;
+  junitBtn.addEventListener("click", () => {
+    if (ui.running){ if (typeof toast === "function") toast(javaT("실행 중인 작업을 먼저 중지해 주세요."), 2200); return; }
+    const libs = libraryPicker.getQuery();
+    if (!String(libs).split(",").some(value => value === "junit" || value.indexOf("junit-platform-console-standalone") >= 0)){
+      if (typeof toast === "function") toast(javaT("라이브러리에서 JUnit 5를 먼저 선택해 주세요."), 3000);
+      libBtn.click(); return;
     }
-    outPanel.innerHTML = "";
-    const head = document.createElement("div"); head.className = "out-head"; head.textContent = "자바 실행 환경";
-    const list = document.createElement("dl"); list.className = "java-env-list";
-    const rows = [
-      ["버전", info.version || ("Java " + info.major)],
-      ["경로", info.path],
-      ["찾은 곳", javaSourceLabel(info.source) || info.source]
-    ];
-    rows.forEach(([label, value]) => {
-      if (!value) return;
-      const dt = document.createElement("dt"); dt.textContent = label;
-      const dd = document.createElement("dd"); dd.textContent = value;
-      list.append(dt, dd);
+    runJavaSource(editor.getValue(), ui, {
+      libs, lint:runConfig.getLint(), mainClass:runConfig.getMainClass(), junit:true
     });
-    outPanel.append(head, list);
-    if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(outPanel);
   });
+  // 어느 자바가 잡혔는지는 실행 결과를 덮지 않고 Python의 Py Env와 같은 작은 모달에서 확인한다.
+  envBtn.addEventListener("click", () => { if (!disposed) openJavaEnvModal(envBtn); });
   outHideBtn.addEventListener("click", () => {
+    outputFinder.close(false);
     split.classList.remove("show-out");
     editor.ta.focus({ preventScroll:true });
   });
@@ -855,11 +1528,23 @@ function renderJavaRunnable(context){
 
   editor.ta.addEventListener("input", () => {
     refreshEditState();
+    runConfig.refresh();
     clearTimeout(draftTimer);
     draftTimer = setTimeout(persistDraft, JAVA_DRAFT_DELAY);
     if (autosaveBusy) autosaveAgain = true;
     scheduleAutosave();
   });
+  const applyJavaTransform = (transform, doneMessage, unchangedMessage) => {
+    const before = editor.getValue();
+    const after = transform(before);
+    if (after === before){ if (typeof toast === "function") toast(javaT(unchangedMessage), 2000); return; }
+    editor.setValue(after);
+    if (typeof toast === "function") toast(javaT(doneMessage), 1800);
+  };
+  formatBtn.addEventListener("click", () => applyJavaTransform(javaFormatSource,
+    "Java 코드 들여쓰기를 정리했습니다.", "정리할 들여쓰기 변화가 없습니다."));
+  importsBtn.addEventListener("click", () => applyJavaTransform(
+    value => javaOrganizeImports(value, libraries), "import를 정리했습니다.", "정리할 import가 없습니다."));
   // 결과가 한 번 보이면 위치 토글을 꺼내 둔다 — 숨긴 뒤에도 다음 실행 위치를 미리 고를 수 있게 남긴다.
   const observer = new MutationObserver(() => {
     if (split.classList.contains("show-out")) layoutBtn.hidden = false;
@@ -879,6 +1564,7 @@ function renderJavaRunnable(context){
     try {
       report = await checkJavaSource(value, ui, {
         libs:libraryPicker.getQuery(),
+        lint:runConfig.getLint(),
         extras:await javaSiblingSources(ownerDoc)   // 같은 폴더의 형제 .java 도 함께 컴파일한다
       });
     }
@@ -937,12 +1623,17 @@ function renderJavaRunnable(context){
   });
 
   registerEditorFont(editor.host);
+  outPanel.__refreshFontMetrics = () => outputFinder.refresh();
   registerEditorFont(outPanel);
 
   if (ownerDoc){
+    const openJavaDocFind = () => {
+      if (outPanel.contains(document.activeElement) || outputFinder.selectionSeed()) outputFinder.open();
+      else editor.openFind();
+    };
     ownerDoc.codeEditor = editor;
     ownerDoc.codeEditorFileBase = saveName;
-    ownerDoc.openDocFind = () => editor.openFind();
+    ownerDoc.openDocFind = openJavaDocFind;
     ownerDoc.openGotoLine = () => editor.openGoto();
     if (!Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns = [];
     ownerDoc.cleanupFns.push(() => {
@@ -953,18 +1644,22 @@ function renderJavaRunnable(context){
       clearTimeout(autosaveTimer); autosaveTimer = 0;
       checkSeq++; clearTimeout(checkClearTimer);
       observer.disconnect();
-      outputChromeObserver.disconnect();
+      outputFinder.destroy();
       libraryPicker.destroy();
+      runConfig.destroy();
+      document.removeEventListener("pointerdown", onMoreOutside, true);
+      bar.removeEventListener("keydown", onMoreKey);
       if (typeof ui.disposeInstallGuide === "function") ui.disposeInstallGuide();
       ui.disposeInstallGuide = null;
       if (typeof ui.cancelRun === "function") ui.cancelRun();
       if (ownerDoc.isScratch && !ownerDoc._named) clearPythonDraft(draftKey);
       if (ownerDoc.codeEditor === editor) ownerDoc.codeEditor = null;
-      delete ownerDoc.openDocFind;
+      if (ownerDoc.openDocFind === openJavaDocFind) delete ownerDoc.openDocFind;
       delete ownerDoc.openGotoLine;
       editor.destroy();
       unregisterEditorFont(editor.host);
       unregisterEditorFont(outPanel);
+      delete outPanel.__refreshFontMetrics;
     });
     if (ownerDoc.pendingFocusLine){                  // 정의 이동·코드 링크가 렌더 전에 예약해 둔 줄로 이동
       const line = ownerDoc.pendingFocusLine, opts = ownerDoc.pendingFocusOptions;

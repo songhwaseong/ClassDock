@@ -23,6 +23,46 @@ test("보낼 수 있는 이름은 카탈로그 id 또는 좌표뿐이다", () =>
   assert.ok(!libraries.javaLibraryValidSpec(""));
 });
 
+test("Maven Central 검색어는 이름 글자만 받고 주소와 검색 문법은 막는다", () => {
+  assert.ok(libraries.javaLibraryValidSearch("lombok"));
+  assert.ok(libraries.javaLibraryValidSearch("commons io"));
+  assert.ok(libraries.javaLibraryValidSearch("jackson-databind"));
+  assert.ok(!libraries.javaLibraryValidSearch("a"));
+  assert.ok(!libraries.javaLibraryValidSearch("g:lombok"));
+  assert.ok(!libraries.javaLibraryValidSearch("https://example.com"));
+  assert.ok(!libraries.javaLibraryValidSearch("lombok OR *:*"));
+});
+
+test("검색 결과는 화면에 필요한 안전한 필드만 정규화한다", () => {
+  assert.deepEqual(libraries.javaLibrarySearchRow({
+    group:"org.projectlombok", artifact:"lombok", version:"1.18.48", packaging:"jar",
+    curated:1, exact:true, versionCount:"60"
+  }), {
+    group:"org.projectlombok", artifact:"lombok", version:"1.18.48", packaging:"jar",
+    label:"lombok", curated:true, exact:true, versionCount:60,
+    resolved:false, dependencyKnown:false, dependencyCount:0
+  });
+});
+
+test("기본 추천 라이브러리는 외부 검색을 기다리지 않고 먼저 찾는다", () => {
+  const rows = [
+    { id:"lombok", label:"Lombok", coordinate:"org.projectlombok:lombok:1.18.48" },
+    { id:"gson", label:"Gson", coordinate:"com.google.code.gson:gson:2.11.0" },
+    { id:"", label:"직접 설치", coordinate:"example:direct-lombok:1.0" }
+  ];
+  const local = libraries.javaLibraryLocalSearch("lombok", rows);
+  assert.equal(local.length, 1);
+  assert.equal(local[0].group, "org.projectlombok");
+  assert.equal(local[0].resolved, true);
+  assert.equal(local[0].dependencyKnown, true);
+  const merged = libraries.javaLibraryMergeSearchRows(local, [
+    { group:"org.projectlombok", artifact:"lombok", version:"old" },
+    { group:"example", artifact:"lombok-helper", version:"1.0" }
+  ]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].version, "1.18.48");
+});
+
 test("저장된 선택이 깨져 있어도 실행이 막히지 않는다", () => {
   const state = libraries.javaLibraryState({ ids:["gson", "gson", "../evil", "", null, "BAD/ID", "jsoup"] });
   assert.deepEqual(state.ids, ["gson", "jsoup"]);   // 중복·잘못된 값은 버린다
@@ -68,8 +108,8 @@ test("실행·채점 모두 같은 라이브러리 목록으로 돈다", () => {
   assert.match(editorSource, /libs: libraryPicker\.getQuery\(\)/);
   assert.match(editorSource, /gradeTests:tests, libs:libraryPicker\.getQuery\(\)/);
   assert.match(runtimeSource, /runJavaGrading\(source, gradeTests, \{[\s\S]{0,120}libs,/);
-  assert.match(runtimeSource, /startJavaSession\(source, stdinText, true, options\.libs, options\.extras\)/);
-  assert.match(runtimeSource, /startJavaSession\(source, "", false, hooks\.libs, hooks\.extras\)/);
+  assert.match(runtimeSource, /startJavaSession\(source, stdinText, true, options\.libs, options\.extras, options\.lint,/);
+  assert.match(runtimeSource, /startJavaSession\(source, "", false, hooks\.libs, hooks\.extras, hooks\.lint,/);
 });
 
 test("라이브러리 이름은 쿼리로만 보내고 경로는 만들지 않는다", () => {
@@ -135,4 +175,24 @@ test("멤버 표는 좌표가 올바를 때만 묻고, 실패해도 편집을 �
   // 서버에 보내기 전에 좌표를 검사한다(경로를 거스르는 값이 그대로 나가면 안 된다).
   assert.deepEqual(await libraries.javaLibraryMembers("../evil"), {});
   assert.deepEqual(await libraries.javaLibraryMembers(""), {});
+});
+
+test("라이브러리 받기 확인·진행 중에는 팝오버를 닫지 않고 결과 기록을 남긴다", () => {
+  assert.match(editorSource, /let loaded = false, busy = false, searching = false, confirming = false/);
+  assert.match(editorSource, /if \(!force && \(confirming \|\| busy\)\) return false/);
+  assert.match(editorSource, /confirming = true;[\s\S]{0,1400}finally \{ confirming = false; \}/);
+  assert.match(editorSource, /if \(confirming \|\| busy\) return;\s*\n\s*close\(\)/);
+  assert.match(editorSource, /progressLabel\.textContent = javaT\("완료"\)/);
+  assert.match(editorSource, /progressLabel\.textContent = javaT\("실패"\)/);
+  assert.match(editorSource, /destroy\(\)\{ destroyed = true; close\(true\)/);
+});
+
+test("검색 결과는 최신 버전과 의존성을 확인한 뒤 기존 설치 흐름으로 들어간다", () => {
+  assert.match(editorSource, /await javaLibrarySearch\(query\)/);
+  assert.match(editorSource, /row\.resolved \? \{/);
+  assert.match(editorSource, /await javaLibraryResolve\(row\.group, row\.artifact\)/);
+  assert.match(editorSource, /javaLibraryLocalSearch\(query, rows\)/);
+  assert.match(editorSource, /javaLibraryMergeSearchRows\(localRows, result\.rows\)/);
+  assert.match(editorSource, /await install\(resolved\.coordinate/);
+  assert.match(editorSource, /직접 의존성 \{count\}개가 있습니다/);
 });

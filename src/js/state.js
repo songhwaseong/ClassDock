@@ -205,6 +205,18 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   // JavaScript 실행 바(.js/.mjs와 JavaScript 노트북). Python과 같은 버튼 모양을 써도 노출 설정은 분리한다.
   { id:"jsGrade",     label:"채점",            cls:"run-js-grade",        target:"javascript" },
   { id:"jsPkg",       label:"JavaScript 라이브러리",cls:"run-js-library", target:"javascript" },
+  // Java 실행 바. Python과 같은 모양을 쓰더라도 각 언어의 노출 설정은 서로 건드리지 않는다.
+  { id:"javaGrade",   label:"채점",              cls:"run-java-grade",          target:"java" },
+  { id:"javaPkg",     label:"Java 라이브러리",   cls:"run-java-library",        target:"java" },
+  { id:"javaEnv",     label:"Java Env(실행 환경)",cls:"run-java-env",           target:"java" },
+  { id:"javaConfig",  label:"실행 구성",          cls:"run-java-config",        target:"java" },
+  { id:"javaJunit",   label:"JUnit 테스트",       cls:"run-java-junit",         target:"java" },
+  { id:"javaFormat",  label:"Java 코드 정렬",     cls:"run-java-format",        target:"java" },
+  { id:"javaImports", label:"Java import 정리",   cls:"run-java-imports",       target:"java" },
+  { id:"javaNew",     label:"+Java(새 자바)",     cls:"run-newjava",             target:"java" },
+  { id:"javaRevert",  label:"원본 되돌리기",      cls:"run-java-revert",         target:"java" },
+  { id:"javaPractice",label:"따라치기(타자 연습)",cls:"run-java-practice-group", target:"java" },
+  { id:"javaFont",    label:"글자 크기(A− A+)",  cls:"run-java-font-group",     target:"java" },
   // 노트북 도구막대 (notebook-run.js)
   { id:"nbInk",       label:"필기",            cls:"nbv-ink-toggle",      target:"notebook" },
   { id:"nbToc",       label:"목차",            cls:"nbv-toc-open",        target:"notebook" },

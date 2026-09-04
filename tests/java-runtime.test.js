@@ -9,6 +9,7 @@ const vm = require("node:vm");
 const root = path.join(__dirname, "..");
 const runtimeSource = fs.readFileSync(path.join(root, "src/js/java-runtime.js"), "utf8");
 const editorSource = fs.readFileSync(path.join(root, "src/js/java-editor.js"), "utf8");
+const pythonEditorSource = fs.readFileSync(path.join(root, "src/js/python-editor.js"), "utf8");
 const i18nSource = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
 const launcher = fs.readFileSync(path.join(root, "desktop/launcher.cs"), "utf8");
 
@@ -26,6 +27,68 @@ function loadRuntime(){
 }
 
 const get = loadRuntime();
+
+test("Java Ctrl+클릭은 java.lang 표준 타입을 JDK 소스 대상으로 해석한다", () => {
+  const targetAt = get("javaDefinitionTargetAt");
+  const source = "public class Demo {\n  StringBuffer value = new StringBuffer();\n}";
+  const start = source.lastIndexOf("StringBuffer");
+  const target = targetAt(source, { word:"StringBuffer", start });
+  assert.equal(target.kind, "jdk");
+  assert.equal(target.name, "StringBuffer");
+  assert.equal(target.qualified, "java.lang.StringBuffer");
+});
+
+test("Java Ctrl+클릭은 import된 JDK 타입의 완전 이름을 찾는다", () => {
+  const targetAt = get("javaDefinitionTargetAt");
+  const source = "import java.util.ArrayList;\nclass Demo { ArrayList<String> rows; }";
+  const start = source.lastIndexOf("ArrayList");
+  assert.equal(targetAt(source, { word:"ArrayList", start }).qualified, "java.util.ArrayList");
+});
+
+test("Java Ctrl+클릭은 현재 파일의 타입·메서드로 이동하고 주석 속 가짜 정의는 무시한다", () => {
+  const targetAt = get("javaDefinitionTargetAt");
+  const source = [
+    "// class Ghost {}",
+    "public class Demo {",
+    "  void helper() { }",
+    "  void run() { helper(); }",
+    "}"
+  ].join("\n");
+  assert.equal(targetAt(source, { word:"Demo", start:source.indexOf("Demo") }).line, 2);
+  const helper = targetAt(source, { word:"helper", start:source.lastIndexOf("helper") });
+  assert.equal(helper.scope, "local");
+  assert.equal(helper.kind, "method");
+  assert.equal(helper.line, 3);
+  assert.equal(targetAt(source, { word:"Ghost", start:source.indexOf("Ghost") }), null);
+});
+
+test("Java 편집기와 EXE 런처가 JDK src.zip 정의 이동 경로를 연결한다", () => {
+  assert.match(editorSource, /definitionTargetAt:\s*\(\{ source, wordInfo \}\)\s*=>\s*javaDefinitionTargetAt/);
+  assert.match(editorSource, /requestJavaDefinitionSource\(target\.qualified\)/);
+  assert.match(launcher, /path == "\/java-definition"/);
+  assert.match(launcher, /static string JavaDefinitionSource\(byte\[\] body\)/);
+  assert.match(launcher, /Path\.Combine\(home, "lib", "src\.zip"\)/);
+});
+
+test("Java 자동완성은 StringBuffer와 import된 타입의 패키지를 알려 준다", () => {
+  const detail = get("javaCompletionTypePackage");
+  assert.equal(detail("class Demo {}", "StringBuffer"), "java.lang");
+  assert.equal(detail("import java.util.ArrayList;\nclass Demo {}", "ArrayList"), "java.util");
+  assert.equal(detail("class Demo {}", "HashMap"), "java.util");
+});
+
+test("현재 파일의 동명 타입과 애매한 외부 타입에는 잘못된 패키지를 표시하지 않는다", () => {
+  const detail = get("javaCompletionTypePackage");
+  assert.equal(detail("class StringBuffer {}", "StringBuffer"), "");
+  assert.equal(detail("class Demo {}", "Widget", { classes:["a.Widget", "b.Widget"], members:{} }), "");
+  assert.equal(detail("class Demo {}", "Widget", { classes:["com.example.Widget"], members:{} }), "com.example");
+});
+
+test("공용 자동완성 보조 설명 훅을 Java 편집기가 패키지 계산에 사용한다", () => {
+  assert.match(pythonEditorSource, /typeof options\.completionDetail === "function"/);
+  assert.match(pythonEditorSource, /options\.completionDetail\(info, ta\.value\)/);
+  assert.match(editorSource, /completionDetail:\s*\(item, source\)\s*=>\s*javaCompletionTypePackage/);
+});
 
 test("컴파일 오류에서 편집기 줄 번호를 뽑는다", () => {
   const javaErrorLine = get("javaErrorLine");
@@ -65,6 +128,77 @@ test("오류가 없으면 줄 번호도 없다", () => {
   assert.equal(javaErrorLine("경고: 무언가", "Main"), 0);
 });
 
+test("Java 실행 결과는 컴파일 실패·실행 오류·정상 종료를 구분한다", () => {
+  const outcome = get("javaRunOutcome");
+  const compile = outcome({ code:1, mainClass:"Broken", stderr:"Broken.java:3: error: ';' expected\n1 error" });
+  const runtime = outcome({ code:1, mainClass:"Main", stderr:"Exception in thread \"main\" java.lang.ArithmeticException" });
+  const success = outcome({ code:0, mainClass:"Main", stderr:"" });
+  assert.equal(compile.kind, "compile-error");
+  assert.equal(runtime.kind, "runtime-error");
+  assert.equal(success.kind, "success");
+  assert.match(compile.label, /컴파일 실패/);
+  assert.match(runtime.label, /실행 중 오류/);
+  assert.match(success.label, /정상 종료/);
+});
+
+test("실행 구성의 상세 경고는 저장 검사·실행·채점과 javac까지 이어진다", () => {
+  assert.match(editorSource, /buildJavaRunConfigPopover\(/);
+  assert.match(editorSource, /상세 컴파일 경고 사용 \(-Xlint:all\)/);
+  assert.match(editorSource, /runConfig\.getLint\(\)/);
+  assert.match(runtimeSource, /if \(lint\) query\.push\("lint=1"\)/);
+  assert.match(runtimeSource, /if \(options\.lint\) query\.push\("lint=1"\)/);
+  assert.match(launcher, /QueryValue\(path, "lint"\) == "1"/);
+  assert.match(launcher, /\(lint \? " -Xlint:all" : ""\)/);
+});
+
+test("Java 실행 구성은 main·패키지·형제 파일·라이브러리·JDK·임시 폴더를 보여 준다", () => {
+  assert.match(editorSource, /function javaRunSourceInfo\(/);
+  assert.match(editorSource, /main 클래스/);
+  assert.match(editorSource, /함께 컴파일/);
+  assert.match(editorSource, /javaSiblingFileNames\(ownerDoc\)/);
+  assert.match(editorSource, /libraries:\(\) => libraryPicker\.getQuery\(\)/);
+  assert.match(editorSource, /javaEnvironmentDetails\(\)/);
+  assert.match(editorSource, /ClassDock 임시 폴더 · 실행 후 자동 정리/);
+  assert.match(editorSource, /java-run-more-toggle/);
+});
+
+test("Java 코드 정렬은 블록 들여쓰기를 맞추고 text block은 보존한다", () => {
+  const format = get("javaFormatSource");
+  assert.equal(format("class Main {\npublic static void main(String[] args) {\nSystem.out.println(1);\n}\n}\n"),
+    "class Main {\n    public static void main(String[] args) {\n        System.out.println(1);\n    }\n}\n");
+  const textBlock = "class Main {\nString s = \"\"\"\n  그대로\n\"\"\";\n}";
+  assert.equal(format(textBlock), textBlock);
+});
+
+test("Java import 정리는 중복·미사용을 제거하고 명확한 표준 import를 추가한다", () => {
+  const organize = get("javaOrganizeImports");
+  const source = [
+    "package demo;", "", "import java.util.List;", "import java.util.List;", "import java.util.HashMap;", "",
+    "class Main {", "    List<String> rows = new ArrayList<>();", "}", ""
+  ].join("\n");
+  const result = organize(source, { words:[], classes:[] });
+  assert.equal((result.match(/import java\.util\.List;/g) || []).length, 1);
+  assert.match(result, /import java\.util\.ArrayList;/);
+  assert.doesNotMatch(result, /HashMap/);
+});
+
+test("여러 main 선택과 JUnit 실행은 검증된 런처 경로와 별도 요약을 쓴다", () => {
+  const summary = get("javaJunitSummary")({ stdout:"[ 3 tests found ]\n[ 2 tests successful ]\n[ 1 tests failed ]\n[ 0 tests skipped ]", stderr:"" });
+  assert.equal(summary.found, 3);
+  assert.equal(summary.successful, 2);
+  assert.equal(summary.failed, 1);
+  assert.match(editorSource, /getMainClass:\(\) =>/);
+  assert.match(editorSource, /mainClass:runConfig\.getMainClass\(\)/);
+  assert.match(runtimeSource, /query\.push\("main="/);
+  assert.match(runtimeSource, /query\.push\("junit=1"\)/);
+  assert.match(launcher, /type\.HasMain && string\.Equals\(type\.Name, requestedMain/);
+  assert.match(launcher, /junit-platform-console-standalone-/);
+  assert.match(launcher, /--scan-class-path --disable-banner --disable-ansi-colors --details=tree/);
+  assert.match(editorSource, /run-java-junit/);
+  assert.match(editorSource, /run-java-format/);
+  assert.match(editorSource, /run-java-imports/);
+});
+
 test("오류 메시지에서 실행 임시 폴더 경로를 지운다", () => {
   const cleanJavaStderr = get("cleanJavaStderr");
   const raw = "C:\\Users\\me\\AppData\\Local\\Temp\\moidajava_session_deadbeef01\\Broken.java:3: error: bad\n1 error\nerror: compilation failed";
@@ -102,13 +236,16 @@ test("채점 한 줄은 오류가 없을 때만 통과로 본다", () => {
   // stderr 없이 System.exit(1) 한 코드도 정상 제출로 보면 안 된다.
   assert.equal(call({ expected:"6" }, { stdout:"6\n", stderr:"", code:1 }).passed, false);
   assert.equal(call({ expected:"6" }, { stdout:"", stderr:"", timedOut:true }).passed, false);
+  const lintWarning = "Main.java:3: warning: [deprecation] old() in Legacy has been deprecated\n    old();\n    ^\n1 warning";
+  assert.equal(call({ expected:"6" }, { stdout:"6\n", stderr:lintWarning, code:0, mainClass:"Main" }).passed, true);
+  assert.equal(call({ expected:"6" }, { stdout:"6\n", stderr:lintWarning + "\n프로그램 경고", code:0, mainClass:"Main" }).passed, false);
 });
 
 test("채점은 에코가 섞이지 않는 파이프 입력 경로를 쓴다", () => {
   // /java-session-input 은 터미널처럼 보이려고 stdout 에 에코를 남긴다 — 채점 비교에 섞이면 안 된다.
-  assert.match(runtimeSource, /runJavaHeadless[\s\S]{0,200}startJavaSession\(source, stdinText, true, options\.libs, options\.extras\)/);
+  assert.match(runtimeSource, /runJavaHeadless[\s\S]{0,280}startJavaSession\(source, stdinText, true, options\.libs, options\.extras, options\.lint,/);
   assert.match(runtimeSource, /if \(piped\) query\.push\("piped=1"\);/);
-  assert.match(launcher, /StartJavaSession\(body, QueryValue\(path, "piped"\) == "1", QueryValue\(path, "libs"\)\)/);
+  assert.match(launcher, /StartJavaSession\(body, QueryValue\(path, "piped"\) == "1", QueryValue\(path, "libs"\),\s*\n\s*QueryValue\(path, "lint"\) == "1", QueryValue\(path, "main"\), QueryValue\(path, "junit"\) == "1"\)/);
   assert.match(launcher, /if \(pipedStdin != null\)/);
   assert.match(launcher, /session\.Process\.StandardInput\.Close\(\); \} catch \{ \}/);
   const start = launcher.indexOf("static string StartJavaSessionProcess");
@@ -119,7 +256,7 @@ test("채점은 에코가 섞이지 않는 파이프 입력 경로를 쓴다", (
 
 test("파일 이름과 실제 main 클래스를 따로 찾아 컴파일·실행한다", () => {
   assert.match(launcher, /static string JavaMainClassName\(string source\)/);
-  assert.match(launcher, /static string JavaLaunchClassName\(string source\)/);
+  assert.match(launcher, /static string JavaLaunchClassName\(string source, string requestedMain\)/);
   assert.match(launcher, /string scriptPath = Path\.Combine\(tempRoot, fileClassName \+ "\.java"\);/);
   assert.match(launcher, /foreach \(JavaTypeCandidate type in types\) if \(type\.HasMain\) return type\.Name;/);
   assert.match(launcher, /static bool CompileJavaSource\(string javac/);
@@ -365,9 +502,22 @@ test("실행 결과 숨기기는 실행 바가 아니라 결과 칸 오른쪽 �
   assert.match(editorSource, /outHeadActions\.className = "out-head-actions out-chrome"/);
   assert.ok(!/hideOutBtn/.test(editorSource), "실행 바의 '결과 숨기기' 버튼은 남아 있으면 안 된다");
   // 결과 렌더러들이 outPanel.innerHTML 을 갈아끼워도 새 헤더에 다시 붙는다.
-  assert.match(editorSource, /new MutationObserver\(attachOutputChrome\)/);
-  assert.match(editorSource, /outputChromeObserver\.observe\(outPanel, \{ childList:true, subtree:true \}\)/);
-  assert.match(editorSource, /outputChromeObserver\.disconnect\(\)/);
+  assert.match(editorSource, /function attachJavaOutputFind\(options\)/);
+  assert.match(editorSource, /const observer = new MutationObserver/);
+  assert.match(editorSource, /observer\.observe\(outPanel, \{ childList:true, subtree:true \}\)/);
+  assert.match(editorSource, /outputFinder\.destroy\(\)/);
+});
+
+test("Java 실행 환경과 공용 편집 도구는 Python과 같은 진입 방식을 쓴다", () => {
+  assert.match(editorSource, /function openJavaEnvModal\(btn\)/);
+  assert.match(editorSource, /modal\.className = "modal py-env-modal java-env-modal"/);
+  assert.match(editorSource, /envBtn\.textContent = "Java Env"/);
+  assert.match(editorSource, /openJavaEnvModal\(envBtn\)/);
+  assert.doesNotMatch(editorSource, /envBtn\.addEventListener\("click", async/);
+  assert.match(editorSource, /fontGroup\.className = "run-java-font-group"/);
+  assert.match(editorSource, /practiceGroup\.className = "run-java-practice-group"/);
+  assert.match(editorSource, /newJavaBtn\.className = "run-newjava"/);
+  assert.match(editorSource, /outputFinder = attachJavaOutputFind/);
 });
 
 test("결과 칸은 편집기 옆 ↔ 아래로 옮길 수 있고 그 선택이 남는다", () => {

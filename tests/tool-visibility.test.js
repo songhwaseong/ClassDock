@@ -9,6 +9,7 @@ const stateSource = fs.readFileSync(path.join(__dirname, "../src/js/state.js"), 
 const appSource = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
 const codeViewerSource = fs.readFileSync(path.join(__dirname, "../src/js/code-viewer.js"), "utf8");
 const jsEditorSource = fs.readFileSync(path.join(__dirname, "../src/js/js-editor.js"), "utf8");
+const javaEditorSource = fs.readFileSync(path.join(__dirname, "../src/js/java-editor.js"), "utf8");
 const notebookSource = fs.readFileSync(path.join(__dirname, "../src/js/notebook-run.js"), "utf8");
 const imageSource = fs.readFileSync(path.join(__dirname, "../src/js/image-viewer.js"), "utf8");
 const whiteboardSource = fs.readFileSync(path.join(__dirname, "../src/js/whiteboard.js"), "utf8");
@@ -30,21 +31,24 @@ test("도구 레지스트리는 전체 화면의 선택 도구를 담고 필수 
   assert.ok(ids.includes("imgCrop") && ids.includes("imgOcr") && ids.includes("imgAnnotate") && ids.includes("imgAdjust"));
   assert.ok(ids.includes("hdrSidebar") && ids.includes("hdrPrint") && ids.includes("hdrPalette") && ids.includes("hdrTheme") && ids.includes("hdrLang"));
   assert.ok(ids.includes("jsGrade") && ids.includes("jsPkg"));
+  assert.ok(ids.includes("javaGrade") && ids.includes("javaPkg") && ids.includes("javaEnv") && ids.includes("javaConfig")
+    && ids.includes("javaJunit") && ids.includes("javaFormat") && ids.includes("javaImports")
+    && ids.includes("javaPractice") && ids.includes("javaFont"));
   assert.ok(ids.includes("wbPen") && ids.includes("wbBackground") && ids.includes("wbPng"));
   assert.ok(ids.includes("mapSearch") && ids.includes("mapRoute") && ids.includes("mapOffline")
     && ids.includes("mapGeoExport") && ids.includes("mapCluster"));
   assert.ok(ids.includes("musicNoteValue") && ids.includes("musicPlayback") && ids.includes("musicDrums")
     && ids.includes("musicParts") && ids.includes("musicXml"));
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
-  assert.equal(TOGGLEABLE_TOOLS.length, 166);
+  assert.equal(TOGGLEABLE_TOOLS.length, 177);
   assert.deepEqual(
-    Object.fromEntries(["header", "py", "javascript", "notebook", "image", "whiteboard", "map", "music"]
+    Object.fromEntries(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]
       .map(target => [target, TOGGLEABLE_TOOLS.filter(tool => tool.target === target).length])),
-    { header:12, py:15, javascript:2, notebook:7, image:12, whiteboard:37, map:28, music:53 }
+    { header:12, py:15, javascript:2, java:11, notebook:7, image:12, whiteboard:37, map:28, music:53 }
   );
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");
-    assert.ok(["header", "py", "javascript", "notebook", "image", "whiteboard", "map", "music"].includes(tool.target));
+    assert.ok(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"].includes(tool.target));
   }
   // 필수 버튼은 노출 설정 대상이 아니어야 한다.
   assert.ok(!TOGGLEABLE_TOOLS.some(t => t.cls === "run-go" || t.cls === "run-save"));
@@ -86,7 +90,7 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   // 설정 UI: 화면별 하위 탭 + 비노출/노출 좌우 이동 목록 + 저장·부팅 적용
   assert.match(htmlSource, /data-settings-tab="tools"/);
   assert.match(htmlSource, /id="settingToolScopeTabs"/);
-  for (const target of ["header", "py", "javascript", "notebook", "image", "whiteboard", "map", "music"]){
+  for (const target of ["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]){
     assert.match(htmlSource, new RegExp('data-tool-target="' + target + '"'));
   }
   assert.match(htmlSource, /id="settingToolsHidden"[^>]*multiple/);
@@ -115,14 +119,20 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   assert.match(stateSource, /id:"pyGrade"[\s\S]*?cls:"run-py-grade"[\s\S]*?target:"py"/);
   assert.match(stateSource, /id:"jsGrade"[\s\S]*?cls:"run-js-grade"[\s\S]*?target:"javascript"/);
   assert.match(stateSource, /id:"jsPkg"[\s\S]*?cls:"run-js-library"[\s\S]*?target:"javascript"/);
+  assert.match(stateSource, /id:"javaEnv"[\s\S]*?cls:"run-java-env"[\s\S]*?target:"java"/);
+  assert.match(stateSource, /id:"javaConfig"[\s\S]*?cls:"run-java-config"[\s\S]*?target:"java"/);
+  assert.match(stateSource, /id:"javaPractice"[\s\S]*?cls:"run-java-practice-group"[\s\S]*?target:"java"/);
   assert.match(stateSource, /id:"pyDedupe"[\s\S]*?cls:"run-dedupe"/);
   assert.match(stateSource, /id:"pySpellcheck"[\s\S]*?cls:"run-spellcheck"/);
   assert.match(stateSource, /id:"nbDedupe"[\s\S]*?cls:"nbv-dedupe"/);
   assert.match(codeViewerSource, /run-revert run-py-revert/);
   assert.match(codeViewerSource, /run-grade run-py-grade/);
   assert.match(jsEditorSource, /run-grade run-js-grade/);
+  assert.match(javaEditorSource, /run-grade run-java-grade/);
+  assert.match(javaEditorSource, /run-revert run-java-revert/);
   assert.match(cssSource, /hide-tool-pyGrade\s+\.run-py-grade/);
   assert.match(cssSource, /hide-tool-jsGrade\s+\.run-js-grade/);
+  assert.match(cssSource, /hide-tool-javaGrade\s+\.run-java-grade/);
   assert.doesNotMatch(cssSource, /hide-tool-pyGrade\s+\.run-grade[\s,\{]/);
   assert.match(codeViewerSource, /className = "run-dedupe"/);
   assert.match(codeViewerSource, /buttonClass:runnable \? "run-spellcheck" : ""/);
@@ -137,8 +147,8 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   assert.match(stateSource, /applyToolVisibility\(\);/);   // 부팅 시 1회 적용
 });
 
-test("JavaScript·화이트보드·지도·악보: 등록한 숨김 클래스가 실제 동적 도구막대에 연결된다", () => {
-  const sources = { javascript:jsEditorSource, whiteboard:whiteboardSource, map:mapSource, music:musicSource };
+test("JavaScript·Java·화이트보드·지도·악보: 등록한 숨김 클래스가 실제 동적 도구막대에 연결된다", () => {
+  const sources = { javascript:jsEditorSource, java:javaEditorSource, whiteboard:whiteboardSource, map:mapSource, music:musicSource };
   const generatedWhiteboardTools = new Set(["select", "pen", "highlighter", "eraser", "line", "arrow", "rect", "ellipse", "text"]);
   assert.match(whiteboardSource, /"wb-tool wb-toolvis-" \+ t/);
   for (const tool of TOGGLEABLE_TOOLS.filter(tool => sources[tool.target])){

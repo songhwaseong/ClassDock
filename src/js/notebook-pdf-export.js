@@ -275,13 +275,21 @@ function nbCreatePdfProgress(){
       : phase + (total ? " · " + completed + "/" + total + "쪽" : "") + " · 경과 " + seconds + "초";
   };
   const timer = setInterval(render, 1000);
-  cancel.addEventListener("click", () => {
+  const requestCancel = () => {
     if (cancelled) return;
     cancelled = true;
     cancel.disabled = true;
     cancel.textContent = "취소 요청됨";
     render();
-  });
+  };
+  cancel.addEventListener("click", requestCancel);
+  const onKeydown = (event) => {
+    if (event.key !== "Escape" || cancelled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestCancel();
+  };
+  document.addEventListener("keydown", onKeydown, true);
   render();
   return {
     update(done, count, message){
@@ -291,7 +299,11 @@ function nbCreatePdfProgress(){
       render();
     },
     isCancelled(){ return cancelled; },
-    close(){ clearInterval(timer); overlay.remove(); }
+    close(){
+      clearInterval(timer);
+      document.removeEventListener("keydown", onKeydown, true);
+      overlay.remove();
+    }
   };
 }
 
@@ -485,4 +497,3 @@ async function nbExportImagePdf(ownerDoc){
     progress.close();
   }
 }
-

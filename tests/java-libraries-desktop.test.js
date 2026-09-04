@@ -9,16 +9,35 @@ const root = path.join(__dirname, "..");
 const launcher = fs.readFileSync(path.join(root, "desktop", "launcher.cs"), "utf8");
 
 test("자바 라이브러리 카탈로그는 서버가 갖고, 단일 jar 로 끝나는 것만 올린다", () => {
-  for (const id of ["\"gson\"", "\"commons-lang3\"", "\"commons-csv\"", "\"jsoup\"", "\"junit\""]) {
+  for (const id of ["\"gson\"", "\"commons-lang3\"", "\"commons-csv\"", "\"jsoup\"", "\"junit\"", "\"lombok\""]) {
     assert.ok(launcher.includes("Id = " + id), id);
   }
   // JUnit 은 의존성이 딸리지 않는 console-standalone(모든 것을 담은 한 개 jar)이어야 한다.
   assert.match(launcher, /Artifact = "junit-platform-console-standalone"/);
 });
 
+test("검색은 런처가 고정 Maven Central 주소만 조회하고 jar 후보만 돌려준다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/java-lib-search"/);
+  assert.match(launcher, /https:\/\/search\.maven\.org\/solrsearch\/select\?q=/);
+  assert.match(launcher, /Uri\.EscapeDataString\(query\)/);
+  assert.match(launcher, /string\.Equals\(packaging, "jar"/);
+  assert.match(launcher, /DtdProcessing = DtdProcessing\.Prohibit/);
+  assert.match(launcher, /JavaLibrarySafeSearchQuery\(query\)/);
+  assert.match(launcher, /FetchJavaLibraryText\(url, 1024 \* 1024, 8000\)/);
+  assert.match(launcher, /DateTime\.UtcNow\.AddMinutes\(15\)/);
+});
+
+test("검색 후보를 고르면 저장소 메타데이터와 POM으로 최신 버전·의존성을 확인한다", () => {
+  assert.match(launcher, /path\.StartsWith\("\/java-lib-resolve"/);
+  assert.match(launcher, /maven-metadata\.xml/);
+  assert.match(launcher, /versioning\/release/);
+  assert.match(launcher, /artifact \+ "-" \+ version \+ "\.pom"/);
+  assert.match(launcher, /dependencyCount/);
+});
+
 test("실행 요청의 libs 는 id·좌표만 받고 경로는 서버가 조립한다", () => {
   assert.match(launcher, /QueryValue\(path, "libs"\)/);
-  assert.match(launcher, /StartJavaSession\(byte\[\] body, bool piped, string libs\)/);
+  assert.match(launcher, /StartJavaSession\(byte\[\] body, bool piped, string libs, bool lint, string requestedMain, bool junit\)/);
   assert.match(launcher, /ResolveJavaLibraryJars\(libs, out missingLibraries\)/);
 });
 
@@ -30,14 +49,20 @@ test("좌표는 폴더 이름이 되므로 .. 와 캐시 루트 밖을 막는다
 
 test("클래스패스는 컴파일과 실행 양쪽에 같은 값으로 들어간다", () => {
   // javac: -cp 가 없으면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
-  assert.match(launcher, /CompileJavaSource\(string javac, string scriptPath, string tempRoot, JavaSession session,\s*\n\s*string classPath\)/);
+  assert.match(launcher, /CompileJavaSource\(string javac, string scriptPath, string tempRoot, JavaSession session,\s*\n\s*string classPath, bool lint\)/);
   assert.match(launcher, /-encoding UTF-8 -cp \\"" \+ classPath/);
   // java: 임시 폴더만 주던 자리를 classPath 로 바꿨는지.
-  assert.match(launcher, /-Dstderr\.encoding=UTF-8 -cp \\""\s*\n\s*\+ classPath/);
+  assert.match(launcher, /args \+= "-cp \\"" \+ classPath \+ "\\" " \+ qualifiedClassName/);
   assert.ok(!launcher.includes('+ tempRoot + "\\" " + qualifiedClassName'),
     "실행 인자가 임시 폴더만 주던 예전 모양으로 되돌아갔다");
   assert.ok(!launcher.includes('-encoding UTF-8 -d \\"'),
     "컴파일 인자가 classpath 없이 -d 만 주던 예전 모양으로 되돌아갔다");
+});
+
+test("선택한 jar 는 annotation processor 경로에도 넣어 JDK 24+와 Lombok을 지원한다", () => {
+  assert.match(launcher, /static string JavaAnnotationProcessorArgs\(string classPath\)/);
+  assert.match(launcher, /-processorpath \\"/);
+  assert.match(launcher, /JavaAnnotationProcessorArgs\(classPath\)/);
 });
 
 test("캐시 전체를 얹는 와일드카드 대신 고른 jar 만 붙인다", () => {

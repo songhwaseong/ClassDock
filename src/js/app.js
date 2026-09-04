@@ -1187,6 +1187,7 @@ function wire(){
     { id:"header", fixed:"설정 · 저장 · 집중 모드 · 분할 작업" },
     { id:"py", fixed:"실행 · 저장" },
     { id:"javascript", fixed:"실행 · 저장 · 원본 되돌리기" },
+    { id:"java", fixed:"실행 · 저장" },
     { id:"notebook", fixed:"실행 · 저장" },
     { id:"image", fixed:"저장" },
     { id:"whiteboard", fixed:"되돌리기 · 다시 실행 · 도구막대 다시 보이기" },
