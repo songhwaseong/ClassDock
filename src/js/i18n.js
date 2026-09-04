@@ -683,6 +683,8 @@
     "자바 파일 이름(클래스 이름)은 영문 대문자로 시작해야 해요. 예: Student.java": "A Java file name (class name) must start with an uppercase English letter, for example Student.java.",
     "자바 파일 이름에는 클래스 이름으로 쓸 수 있는 문자만 사용할 수 있어요. 예: Student01.java": "A Java file name may contain only characters valid in a class name, for example Student01.java.",
     "자바 소스의 클래스 이름을 확인하지 못했어요.": "Could not inspect the class name in the Java source.",
+    "Java 자동 저장 후 컴파일 검사": "Compile-check Java after auto-save",
+    "EXE와 JDK가 있을 때 저장된 코드를 검사해 오류 줄을 표시합니다. 자동 검사만으로 결과 창을 강제로 열지는 않습니다.": "When the EXE and a JDK are available, checks the saved code and marks error lines. An automatic check does not force the output pane open.",
     "■ 실행 중지": "■ Stop run",
     "▶ 실행": "▶ Run",
     "결과 숨기기": "Hide output",

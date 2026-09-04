@@ -892,6 +892,10 @@ function wire(){
     byId("settingPetQuietTyping").disabled = !enabled;
   };
   byId("settingPetFocus").addEventListener("change", syncPetFocusSettingFields);
+  const syncJavaAutoCheckSetting = () => {
+    byId("settingJavaCheckOnAutoSave").disabled = !byId("settingAutoSave").checked;
+  };
+  byId("settingAutoSave").addEventListener("change", syncJavaAutoCheckSetting);
   const mapSearchProviderInput = byId("settingMapSearchProvider");
   const mapSearchKeyWrap = byId("settingMapSearchKeyWrap");
   const mapSearchKeyInput = byId("settingMapSearchKey");
@@ -1468,6 +1472,8 @@ function wire(){
     byId("settingPdfRecovery").checked = !!appSettings.pdfRecovery;
     byId("settingPptxExactByDefault").checked = appSettings.pptxExactByDefault === true;
     byId("settingAutoSave").checked = !!appSettings.autoSave;
+    byId("settingJavaCheckOnAutoSave").checked = appSettings.javaCheckOnAutoSave === true;
+    syncJavaAutoCheckSetting();
     byId("settingPyFormatOnSave").checked = appSettings.pyFormatOnSave !== false;
     byId("settingOfficeReplaceAttached").checked = appSettings.officeReplaceAttached === true;
     byId("settingOfficeReplaceTracked").checked = appSettings.officeReplaceTracked === true;
@@ -1541,6 +1547,7 @@ function wire(){
       pdfRecovery: byId("settingPdfRecovery").checked,
       pptxExactByDefault: byId("settingPptxExactByDefault").checked,
       autoSave: byId("settingAutoSave").checked,
+      javaCheckOnAutoSave: byId("settingJavaCheckOnAutoSave").checked,
       pyFormatOnSave: byId("settingPyFormatOnSave").checked,
       officeReplaceAttached: byId("settingOfficeReplaceAttached").checked,
       officeReplaceTracked: byId("settingOfficeReplaceTracked").checked,

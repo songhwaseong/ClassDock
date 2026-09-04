@@ -901,7 +901,9 @@ function buildJavaRunConfigPopover(bar, button, storageKey, options){
     if (event.key !== "Escape" || panel.hidden) return;
     event.preventDefault(); event.stopPropagation(); close(); button.focus({ preventScroll:true });
   };
-  bar.addEventListener("keydown", onKey);
+  // 팝오버를 마우스·터치로 열면 포커스가 실행 바 밖(편집기 등)에 남을 수 있다.
+  // 창 전체의 캡처 단계에서 받아야 포커스 위치와 관계없이 Esc가 항상 닫힌다.
+  window.addEventListener("keydown", onKey, true);
   return {
     getLint:() => lint,
     getMainClass:() => {
@@ -911,7 +913,7 @@ function buildJavaRunConfigPopover(bar, button, storageKey, options){
     },
     refresh:() => { if (!panel.hidden) refresh(); },
     close,
-    destroy(){ destroyed = true; refreshSeq++; close(); bar.removeEventListener("keydown", onKey); panel.remove(); }
+    destroy(){ destroyed = true; refreshSeq++; close(); window.removeEventListener("keydown", onKey, true); panel.remove(); }
   };
 }
 
@@ -1504,6 +1506,7 @@ function renderJavaRunnable(context){
         }
         refreshEditState();
         ownerDoc._javaAutosaveFailureNotified = false;
+        if (appSettings.javaCheckOnAutoSave === true) requestSaveCheck(value, { reveal:false });
       } else if (ok !== "skipped" && !ownerDoc._javaAutosaveFailureNotified){
         // 저장 위치가 아직 없는 문서("skipped")는 수동 저장을 기다린다 — 알림을 띄우지 않는다.
         ownerDoc._javaAutosaveFailureNotified = true;
@@ -1527,6 +1530,7 @@ function renderJavaRunnable(context){
   };
 
   editor.ta.addEventListener("input", () => {
+    checkSeq++;                         // 진행 중 검사는 이제 이전 소스이므로 결과를 표시하지 않는다
     refreshEditState();
     runConfig.refresh();
     clearTimeout(draftTimer);
@@ -1552,20 +1556,24 @@ function renderJavaRunnable(context){
   observer.observe(split, { attributes:true, attributeFilter:["class"] });
 
   /* 저장 검사 — 저장이 끝난 뒤 그 내용 그대로 javac 를 돌려 오류 줄을 표시한다.
-     수동 저장에만 건다(자동 저장은 입력이 멈추고 3초마다 도므로 치는 도중의 코드를 계속 컴파일하게 된다).
-     저장을 붙들지 않고 뒤따라 돌며, 실패해도 저장 결과에는 손대지 않는다. */
-  let checkSeq = 0, checkClearTimer = 0;
-  const runSaveCheck = async (value) => {
-    if (disposed || ui.running) return;
-    const seq = ++checkSeq;
+     수동 저장은 항상 검사하고, 자동 저장은 설정을 켰을 때만 검사한다. javac 가 오래 걸려도
+     겹쳐 띄우지 않고 마지막 요청 하나만 남기며, 다시 입력한 뒤 도착한 옛 결과는 버린다. */
+  let checkSeq = 0, checkClearTimer = 0, checkBusy = false, pendingCheck = null;
+  const runSaveCheck = async (request) => {
+    const value = request.value, seq = request.seq;
+    if (disposed || ui.running || seq !== checkSeq) return;
     clearTimeout(checkClearTimer);
     status.textContent = javaT("검사 중…");
     let report = null;
     try {
+      const extras = await javaSiblingSources(ownerDoc);   // 같은 폴더의 형제 .java 도 함께 컴파일한다
+      if (disposed || ui.running || seq !== checkSeq || editor.getValue() !== value) return;
       report = await checkJavaSource(value, ui, {
         libs:libraryPicker.getQuery(),
         lint:runConfig.getLint(),
-        extras:await javaSiblingSources(ownerDoc)   // 같은 폴더의 형제 .java 도 함께 컴파일한다
+        extras,
+        reveal:request.reveal,
+        isCurrent:() => !disposed && !ui.running && seq === checkSeq && editor.getValue() === value
       });
     }
     catch(error){ console.warn("java save check failed:", error); }
@@ -1578,6 +1586,25 @@ function renderJavaRunnable(context){
       // 통과 메시지는 잠깐만 둔다 — 저장 뒤의 빈 상태 줄이 이 화면의 기본 모습이다.
       checkClearTimer = setTimeout(() => { if (!disposed && seq === checkSeq && !ui.running) refreshEditState(); }, 1800);
     }
+  };
+  const drainSaveChecks = async () => {
+    if (checkBusy) return;
+    checkBusy = true;
+    try {
+      while (!disposed && pendingCheck){
+        const request = pendingCheck;
+        pendingCheck = null;
+        await runSaveCheck(request);
+      }
+    } finally { checkBusy = false; }
+  };
+  const requestSaveCheck = (value, options={}) => {
+    if (disposed || ui.running) return;
+    const request = { value:String(value == null ? "" : value), reveal:options.reveal !== false, seq:++checkSeq };
+    // 실행 중이면 아직 시작하지 않은 요청을 최신 저장본으로 교체한다. 수동 요청은 결과 창 표시 의도를 유지한다.
+    if (pendingCheck && pendingCheck.reveal) request.reveal = true;
+    pendingCheck = request;
+    drainSaveChecks();
   };
 
   saveBtn.addEventListener("click", async () => {
@@ -1598,7 +1625,7 @@ function renderJavaRunnable(context){
         await markDocumentSavedSnapshot(ownerDoc, new TextEncoder().encode(writtenValue), "text/plain;charset=utf-8");
       }
       refreshEditState();
-      runSaveCheck(writtenValue);
+      requestSaveCheck(writtenValue);
     } finally { saveBtn.disabled = false; }
   });
   revertBtn.addEventListener("click", async () => {
@@ -1642,7 +1669,7 @@ function renderJavaRunnable(context){
       disposed = true;
       clearTimeout(draftTimer);
       clearTimeout(autosaveTimer); autosaveTimer = 0;
-      checkSeq++; clearTimeout(checkClearTimer);
+      checkSeq++; pendingCheck = null; clearTimeout(checkClearTimer);
       observer.disconnect();
       outputFinder.destroy();
       libraryPicker.destroy();

@@ -12,6 +12,10 @@ const editorSource = fs.readFileSync(path.join(root, "src/js/java-editor.js"), "
 const pythonEditorSource = fs.readFileSync(path.join(root, "src/js/python-editor.js"), "utf8");
 const i18nSource = fs.readFileSync(path.join(root, "src/js/i18n.js"), "utf8");
 const launcher = fs.readFileSync(path.join(root, "desktop/launcher.cs"), "utf8");
+const stateSource = fs.readFileSync(path.join(root, "src/js/state.js"), "utf8");
+const appSource = fs.readFileSync(path.join(root, "src/js/app.js"), "utf8");
+const htmlSource = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
+const manualSource = fs.readFileSync(path.join(root, "사용법.md"), "utf8");
 
 // java-runtime.js 는 로드 시점에 브라우저 전역을 건드리지 않으므로 vm 컨텍스트에 그대로 올릴 수 있다.
 // 다른 파일에 있는 공용 함수(normalizeGradingOutput 등)만 최소한으로 채워 넣는다.
@@ -160,6 +164,15 @@ test("Java 실행 구성은 main·패키지·형제 파일·라이브러리·JDK
   assert.match(editorSource, /javaEnvironmentDetails\(\)/);
   assert.match(editorSource, /ClassDock 임시 폴더 · 실행 후 자동 정리/);
   assert.match(editorSource, /java-run-more-toggle/);
+});
+
+test("Java 실행 구성은 포커스 위치와 관계없이 Esc로 닫히고 문서 종료 때 키 리스너를 해제한다", () => {
+  const start = editorSource.indexOf("function buildJavaRunConfigPopover");
+  const end = editorSource.indexOf("// ── 새 자바 파일 만들기", start);
+  const block = editorSource.slice(start, end);
+  assert.match(block, /window\.addEventListener\("keydown", onKey, true\)/);
+  assert.match(block, /window\.removeEventListener\("keydown", onKey, true\)/);
+  assert.doesNotMatch(block, /bar\.addEventListener\("keydown", onKey\)/);
 });
 
 test("Java 코드 정렬은 블록 들여쓰기를 맞추고 text block은 보존한다", () => {
@@ -862,14 +875,31 @@ test("저장 검사는 실행과 같은 컴파일 경로를 쓰고 세션을 남
   assert.match(body, /Directory\.Delete\(tempRoot, true\)/);
 });
 
-test("저장 검사는 수동 저장에서만 돌고 자동 저장에는 붙지 않는다", () => {
-  assert.match(editorSource, /runSaveCheck\(writtenValue\);/);
+test("자동 저장 컴파일 검사는 별도 설정에 따르고 수동 저장 검사는 항상 실행한다", () => {
+  assert.match(stateSource, /javaCheckOnAutoSave:\s*false/);
+  assert.match(htmlSource, /id="settingJavaCheckOnAutoSave"/);
+  assert.match(appSource, /settingJavaCheckOnAutoSave"\)\.checked = appSettings\.javaCheckOnAutoSave === true/);
+  assert.match(appSource, /javaCheckOnAutoSave: byId\("settingJavaCheckOnAutoSave"\)\.checked/);
+  assert.match(editorSource, /requestSaveCheck\(writtenValue\);/);
   const autosave = editorSource.slice(editorSource.indexOf("const runAutosave = async"),
     editorSource.indexOf("const scheduleAutosave"));
-  assert.ok(!/runSaveCheck|checkJavaSource/.test(autosave), "자동 저장 경로에는 검사가 없어야 한다");
+  assert.match(autosave, /appSettings\.javaCheckOnAutoSave === true/);
+  assert.match(autosave, /requestSaveCheck\(value, \{ reveal:false \}\)/);
+  assert.match(manualSource, /Java 자동 저장 후 컴파일 검사/);
+  assert.match(i18nSource, /"Java 자동 저장 후 컴파일 검사"/);
   // 오류 여러 개를 설명까지 살려 넘기는 통로
   assert.match(editorSource, /setDiagnosticItems: \(items\) => editor\.setDiagnosticItems\(items\)/);
   assert.match(editorSource, /focusLine: \(line\) => editor\.focusLine\(line\)/);
+});
+
+test("자동 컴파일은 겹치지 않고 오래된 결과를 버리며 결과 창을 강제로 열지 않는다", () => {
+  assert.match(editorSource, /checkBusy = false, pendingCheck = null/);
+  assert.match(editorSource, /while \(!disposed && pendingCheck\)/);
+  assert.match(editorSource, /pendingCheck = request/);
+  assert.match(editorSource, /isCurrent:\(\) => [^\n]*seq === checkSeq[^\n]*editor\.getValue\(\) === value/);
+  assert.match(editorSource, /checkSeq\+\+;\s*\/\/ 진행 중 검사는/);
+  assert.match(runtimeSource, /typeof options\.isCurrent === "function" && !options\.isCurrent\(\)/);
+  assert.match(runtimeSource, /ui\.split && options\.reveal !== false/);
 });
 
 test("형제 파일의 진단은 편집기 줄 표시에서 빠지고 목록에는 파일 이름과 함께 남는다", () => {

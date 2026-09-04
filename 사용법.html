@@ -512,6 +512,7 @@ cd myOffice</code></pre>
   <li>자동완성은 자바 키워드와 함께 <strong><code>List</code>·<code>Scanner</code>·<code>HashMap</code> 같은 표준 클래스 이름</strong>을 제안합니다. 타입 후보 아래에는 <code>StringBuffer</code> → <code>java.lang</code>, <code>ArrayList</code> → <code>java.util</code>처럼 해당 패키지를 함께 보여 줍니다. 점을 찍으면 <strong>그 변수의 선언 타입에 맞는 멤버</strong>를 인자 안내와 함께 보여 줍니다(<code>sc.</code> → <code>nextInt()</code>·<code>nextLine()</code>, <code>System.out.</code> → <code>println()</code>). 배열 변수 뒤에는 <code>length</code> 필드만 나오므로 <code>length()</code>로 잘못 쓰는 일을 줄입니다. <kbd>Ctrl</kbd>+<kbd>Space</kbd>로 직접 열 수도 있습니다.</li>
   <li><strong>import 가 필요한 이름을 고르면 import 문도 함께 적어 줍니다.</strong> <code>List</code>를 고르면 <code>import java.util.List;</code>가 <code>package</code> 아래·클래스 위에 들어가고, 후보 목록에는 어떤 import 가 붙는지 미리 보여 줍니다. 이미 적어 두었거나 <code>import java.util.*;</code>로 받아 온 이름은 다시 적지 않습니다. 고른 라이브러리의 클래스(<code>Gson</code>·<code>StringUtils</code> 등)도 같은 방식으로 import 가 붙습니다.</li>
   <li>클래스·메서드 이름에서 <strong><kbd>Ctrl</kbd>+클릭</strong>하면 현재 파일의 정의로 이동합니다. EXE에서 <code>StringBuffer</code>·<code>ArrayList</code> 같은 JDK 표준 클래스를 누르면 설치된 JDK의 <code>src.zip</code> 원문을 읽기 전용 탭으로 열고 클래스 선언 줄을 보여 줍니다. JDK에 <code>src.zip</code>이 포함되지 않은 경우에는 원문을 열 수 없습니다.</li>
+  <li><strong>설정 → 문서 → Java 자동 저장 후 컴파일 검사</strong>를 켜면 자동 저장이 성공할 때마다 저장된 코드를 <code>javac</code>로 검사해 오류 줄과 개수를 표시합니다. 입력 중 검사가 겹치면 가장 최근 저장본 하나만 이어서 검사하고 이전 결과는 버립니다. 자동 검사만으로 접어 둔 결과 창을 강제로 열지는 않으며, EXE와 JDK가 있을 때만 동작합니다.</li>
 </ol>
 
 <blockquote>

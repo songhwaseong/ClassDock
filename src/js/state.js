@@ -619,8 +619,9 @@ function boardInkForBackground(bg, ink){
 }
 
 const DEFAULT_APP_SETTINGS = {
-  // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·텍스트·마크다운 공통).
+  // autoSave: 편집한 파일을 입력이 멈춘 뒤 원본에 자동으로 되쓴다(Python·Java·텍스트·마크다운 공통).
   //   예전 이름은 pythonAutosave 였고 Python 에만 적용됐다 — 아래 migrateAppSettings 가 값을 옮긴다.
+  // javaCheckOnAutoSave: Java 자동 저장이 성공한 뒤 javac 검사도 이어서 실행한다. 비용이 있어 별도 선택으로 둔다.
   // pdfRecovery: 파일에 쓰지 않고 브라우저 안에 복구본만 남긴다(꺼짐 대비 안전망) — 성격이 달라 따로 둔다.
   // searchHistory: 찾기·검색창에 지난 검색어를 기억해 보여준다(MNSearchHistory).
   //   공용 컴퓨터에서는 앞사람 검색어가 보일 수 있어 끌 수 있게 두었다.
@@ -633,7 +634,8 @@ const DEFAULT_APP_SETTINGS = {
   //   필요한 문서만 미리보기 배너의 버튼으로 정확 변환한다. COM 시작 불량이 파일 열기 전체를 막지 않게 한다.
   // officeReplaceTracked: 변경 내용 추적이 켜진 문서도 바꿀지. 기본은 건너뛴다 —
   //   이 프로그램이 바꾼 내용은 Word 의 변경 이력에 남지 않아, 검토 중인 문서라면 이력을 믿을 수 없게 된다.
-  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false, pyFormatOnSave: true,
+  uiScale: 1, pdfZoom: 1.25, performance: "memory", autoRestore: true, pdfRecovery: true, autoSave: false,
+  javaCheckOnAutoSave: false, pyFormatOnSave: true,
   searchHistory: true, autoOpenFirstFile: false, pptxExactByDefault: false, officeReplaceAttached: false, officeReplaceTracked: false,
   mapSearchProvider: "osm",   // API 키는 여기에 저장하지 않는다. 공급자 선택만 설정에 남긴다.
   screensaver: { enabled: false, idleMin: 5, sound: false, mode: "video", url: "" },

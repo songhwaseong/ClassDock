@@ -1452,6 +1452,9 @@ async function checkJavaSource(src, ui, options){
     if (!res.ok) return null;
     data = await res.json();
   } catch(_){ return null; }
+  // 자동 저장 검사 도중 다시 입력했다면 이 응답은 예전 소스의 결과다. 호출자가 넘긴
+  // 최신성 검사로 UI를 건드리기 전에 버린다(백엔드 javac 자체는 안전하게 끝나 정리된다).
+  if (typeof options.isCurrent === "function" && !options.isCurrent()) return null;
   // 기다리는 동안 실행이 시작됐거나 화면이 닫혔으면 결과 칸을 건드리지 않는다.
   if (!ui || ui.running || (ui.isDisposed && ui.isDisposed())) return null;
   if (data.skipped === "libs") return null;      // 고른 라이브러리를 못 찾은 경우 — 검사 자체를 건너뛴다
@@ -1472,7 +1475,8 @@ async function checkJavaSource(src, ui, options){
     else if (ui.markError) ui.markError(mine[0].line);
   } else if (ui.clearError) ui.clearError();
   renderJavaCheckResult(outPanel, diagnostics, ui, failed ? output : "");
-  if (ui.split) ui.split.classList.add("show-out");
+  // 자동 저장 검사는 오류 밑줄·상태만 조용히 갱신하고 사용자가 접어 둔 결과 칸은 열지 않는다.
+  if (ui.split && options.reveal !== false) ui.split.classList.add("show-out");
   return {
     errors:diagnostics.filter(item => item.severity === "error").length,
     warnings:diagnostics.filter(item => item.severity === "warning").length,
