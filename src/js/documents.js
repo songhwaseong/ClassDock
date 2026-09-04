@@ -1869,6 +1869,10 @@ function moveTab(draggedId, targetId, after){
   renderTabs();
 }
 let tabLayoutLimit = 0;
+// 탭바에 보이는 구간의 시작 위치(tabOrder 인덱스). 활성 탭을 가운데로 다시 맞추면 이미 보이던 탭을
+// 눌렀을 때도 탭바가 통째로 밀려 "누른 자리"가 아닌 곳에서 켜진 것처럼 보인다. 그래서 창 위치를 기억해 두고
+// 활성 탭이 창 밖으로 나갔을 때만 최소한으로 민다(크롬·VS Code 와 같은 동작).
+let tabScrollStart = 0;
 let tabBarResizeObserver = null;
 function tabLimitForWidth(width){
   // 오른쪽 끝에 항상 붙는 칠판 버튼(새 화이트보드, 32px)과 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
@@ -1899,7 +1903,11 @@ function renderTabs(){
   }
   const visibleCount = Math.min(tabLayoutLimit, tabOrder.length);
   const activeIndex = Math.max(0, tabOrder.indexOf(activeId));
-  const start = Math.max(0, Math.min(tabOrder.length - visibleCount, activeIndex - Math.floor(visibleCount / 2)));
+  // 탭이 줄거나 창이 좁아지면 오른쪽에 빈 자리가 생기지 않도록 창을 왼쪽으로 당긴다.
+  let start = Math.min(tabScrollStart, tabOrder.length - visibleCount);
+  if (activeIndex < start) start = activeIndex;                                          // 왼쪽 밖 → 딱 그만큼만
+  else if (activeIndex >= start + visibleCount) start = activeIndex - visibleCount + 1;  // 오른쪽 밖 → 딱 그만큼만
+  start = tabScrollStart = Math.max(0, start);
   const visibleIds = tabOrder.slice(start, start + visibleCount);
   const visibleSet = new Set(visibleIds);
   const hiddenIds = tabOrder.filter(id => !visibleSet.has(id));
