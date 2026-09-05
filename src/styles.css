@@ -7228,3 +7228,22 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .db-sort-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .db-grid th.db-sorted{color:var(--accent)}
 .db-grid th.db-sorted .db-sort-btn{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+
+/* Spreadsheet view settings */
+.xlsx-sheet [hidden]{display:none!important}
+.xlsx-data-header td{background:#f1f5f9;font-weight:600}
+[data-theme="dark"] .xlsx-sheet{--xlsx-frozen-bg:#1e293b}
+[data-theme="dark"] .xlsx-data-header td{background:#1e293b}
+.xlsx-tool-menu-multisort label{display:flex;align-items:center;gap:6px}
+.xlsx-fb-compat{font-size:11px;color:#9a6700;max-width:350px}
+
+/* 사용자 정의 함수 관리 */
+.xlsx-function-overlay{position:fixed;inset:0;z-index:12000;background:#0006;display:grid;place-items:center;padding:20px}
+.xlsx-function-dialog{width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--panel,#fff);color:var(--text,#172033);border:1px solid var(--border,#ccd4df);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 15px 60px #0005}
+.xlsx-function-dialog label{display:flex;flex-direction:column;gap:5px;font-size:13px}
+.xlsx-function-dialog input,.xlsx-function-dialog textarea,.xlsx-function-dialog select{width:100%;box-sizing:border-box;font:inherit;color:inherit;background:var(--bg,#fff);border:1px solid var(--border,#ccd4df);border-radius:5px;padding:7px}
+.xlsx-function-dialog input[readonly]{opacity:.7}
+.xlsx-function-dialog p{margin:0;font-size:12px;line-height:1.5}
+.xlsx-function-dialog [data-f="error"]{color:#dc3545;min-height:1em}
+.xlsx-function-dialog output,.xlsx-function-usage{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+.xlsx-function-dialog button{cursor:pointer;padding:6px 10px}

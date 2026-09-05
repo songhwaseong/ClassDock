@@ -21,6 +21,12 @@ const MNSpreadsheetFormula = (() => {
   }
   // 간단 숫자/날짜 서식(TEXT 함수용) — 자주 쓰는 패턴만 지원
   function spreadsheetFormatByPattern(value, pattern){
+    // 셀 표시와 TEXT가 같은 Excel 서식 엔진을 사용한다.
+    const ssf = typeof XLSX !== "undefined" ? XLSX.SSF
+      : (typeof module === "object" && module.exports ? require("../../vendor/xlsx.full.min.js").SSF : null);
+    if (ssf){
+      try { return ssf.format(String(pattern), value); } catch(_){ return FORMULA_ERR("#VALUE!"); }
+    }
     const p = String(pattern);
     if (/[ymdhs]/i.test(p) && !/[#0]/.test(p)){          // 날짜 서식
       const n = Number(value); if (!isFinite(n)) return String(value);
@@ -54,9 +60,10 @@ const MNSpreadsheetFormula = (() => {
       ["num", /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/],
       ["str", /^"(?:[^"]|"")*"/],
       ["sheetq", /^'(?:[^']|'')*'/],                       // 따옴표로 감싼 시트 이름: 'My Sheet'
-      ["err", /^#(?:REF!|DIV\/0!|NAME\?|VALUE!|NUM!|N\/A|NULL!|CYCLE!|ERROR!)/i],
+      ["err", /^#(?:REF!|DIV\/0!|NAME\?|VALUE!|NUM!|N\/A|NULL!|CALC!|CYCLE!|ERROR!)/i],
       ["op", /^(?:<=|>=|<>|[-+*/^&<>=(),:%!])/],
-      ["ref", /^\$?[A-Za-z]{1,3}\$?\d+/],
+      ["colrange", /^\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}(?![A-Za-z0-9_])/],
+      ["ref", /^\$?[A-Za-z]{1,3}\$?\d+(?![A-Za-z0-9_.ㄱ-ㆎ가-힣])/],
       ["name", /^[A-Za-z_ㄱ-ㆎ가-힣][A-Za-z0-9_.ㄱ-ㆎ가-힣]*/]
     ];
     const toks = []; let s = String(input);
@@ -112,7 +119,15 @@ const MNSpreadsheetFormula = (() => {
     }
     function parsePostfix(){
       let node = parsePrimary();
-      while (peek() && peek().text === "%"){ next(); node = { t:"unary", op:"%", x:node }; }
+      while(peek() && ["%","("].includes(peek().text)){
+        if(peek().text==="%"){next();node={t:"unary",op:"%",x:node};continue;}
+        next();const args=[];
+        if(peek()?.text!==")"){
+          const argument=()=>peek() && [",",")"].includes(peek().text)?{t:"missing"}:parseExpr();
+          args.push(argument());while(peek()?.text===","){next();args.push(argument());}
+        }
+        expect(")");node={t:"invoke",x:node,args};
+      }
       return node;
     }
     function parsePrimary(){
@@ -125,6 +140,10 @@ const MNSpreadsheetFormula = (() => {
       // sheetName!Ref / 'sheet name'!Ref (시트 간 참조)
       const refWithSheet = (sheet) => {
         const rt = next();
+        if (rt && rt.type === "colrange"){
+          const [a,b] = rt.text.replace(/\$/g,"").split(":");
+          return {t:"columns",c1:formulaColumnIndex(a),c2:formulaColumnIndex(b),sheet};
+        }
         if (!rt || rt.type !== "ref") throw new Error("시트 참조 뒤에 셀이 와야 함");
         const a = parseA1Ref(rt.text); if (!a) throw new Error("셀 참조 오류");
         if (peek() && peek().text === ":" && toks[i + 1] && toks[i + 1].type === "ref"){
@@ -137,7 +156,12 @@ const MNSpreadsheetFormula = (() => {
         next(); expect("!");
         return refWithSheet(tk.text.slice(1, -1).replace(/''/g, "'"));
       }
+      if (tk.type === "colrange"){
+        const [a,b] = next().text.replace(/\$/g,"").split(":");
+        return {t:"columns",c1:formulaColumnIndex(a),c2:formulaColumnIndex(b)};
+      }
       if (tk.type === "ref"){
+        if (toks[i+1] && toks[i+1].text === "!"){ next(); next(); return refWithSheet(tk.text); }
         next(); const a = parseA1Ref(tk.text); if (!a) throw new Error("셀 참조 오류");
         if (peek() && peek().text === ":" && toks[i + 1] && toks[i + 1].type === "ref"){
           next(); const b = parseA1Ref(next().text);
@@ -150,13 +174,17 @@ const MNSpreadsheetFormula = (() => {
         if (peek() && peek().text === "!") { next(); return refWithSheet(tk.text); }   // Sheet1!A1
         if (peek() && peek().text === "("){
           next(); const args = [];
-          if (peek() && peek().text !== ")"){ args.push(parseExpr()); while (peek() && peek().text === ","){ next(); args.push(parseExpr()); } }
+          if (peek() && peek().text !== ")"){
+            const argument = () => peek() && [",",")"].includes(peek().text) ? {t:"missing"} : parseExpr();
+            args.push(argument());
+            while (peek() && peek().text === ","){ next(); args.push(argument()); }
+          }
           expect(")");
-          return { t:"call", name:up, args };
+          return { t:"call", name:up.replace(/^_XLFN\.(?:_XLWS\.)?/, "").replace(/^_XLPM\./, ""), args };
         }
         if (up === "TRUE") return { t:"bool", v:true };
         if (up === "FALSE") return { t:"bool", v:false };
-        return { t:"nameref", name:up };
+        return { t:"nameref", name:up.replace(/^_XLPM\./, "") };
       }
       throw new Error("예상치 못한 토큰: " + tk.text);
     }
@@ -187,6 +215,114 @@ const MNSpreadsheetFormula = (() => {
     if (typeof v === "string"){ if (/^true$/i.test(v)) return true; if (/^false$/i.test(v)) return false; return v !== ""; }
     return !!v;
   }
+
+  function formulaIdentifier(name, parameter=false){
+    const value=String(name || "");
+    return value.length>0 && value.length<=255
+      && (parameter?/^[A-Za-z_ㄱ-ㆎ가-힣][A-Za-z0-9_ㄱ-ㆎ가-힣]*$/:/^[A-Za-z_ㄱ-ㆎ가-힣][A-Za-z0-9_.ㄱ-ㆎ가-힣]*$/).test(value)
+      && !/^(?:TRUE|FALSE|R|C|R\d+C\d+)$/i.test(value) && !parseA1Ref(value) && !/^_xl(?:fn|pm|nm)\./i.test(value);
+  }
+  function lambdaParameters(node){
+    if(node?.t!=="call" || node.name!=="LAMBDA" || !node.args.length || node.args.length>254)return null;
+    const params=node.args.slice(0,-1);
+    if(params.some(p=>p.t!=="nameref" || !formulaIdentifier(p.name,true)))return null;
+    const names=params.map(p=>p.name);
+    return new Set(names).size===names.length?names:null;
+  }
+  function formulaIsSupported(ast, lookup=()=>null, locals=new Set(), visiting=new Set()){
+    if(!ast)return false;
+    const check=(node,scope=locals)=>formulaIsSupported(node,lookup,scope,visiting);
+    const named=name=>{
+      if(locals.has(name))return true;
+      const definition=lookup(name);
+      if(!definition)return false;
+      if(visiting.has(name))return true;
+      const next=new Set(visiting);next.add(name);
+      return formulaIsSupported(definition,lookup,new Set(),next);
+    };
+    if(ast.t==="nameref")return named(ast.name);
+    if(ast.t==="call"){
+      if(ast.name==="LAMBDA"){
+        const params=lambdaParameters(ast);if(!params)return false;
+        return check(ast.args.at(-1),new Set([...locals,...params]));
+      }
+      if(ast.name==="LET"){
+        if(ast.args.length<3 || ast.args.length%2===0 || ast.args.length>253)return false;
+        const scope=new Set(locals);
+        for(let i=0;i<ast.args.length-1;i+=2){
+          const key=ast.args[i];
+          if(key.t!=="nameref" || !formulaIdentifier(key.name) || !check(ast.args[i+1],scope))return false;
+          scope.add(key.name);
+        }
+        return check(ast.args.at(-1),scope);
+      }
+      if(!SPREADSHEET_FN_HELP.some(fn=>fn[0]===ast.name) && ast.name!=="AVG" && !named(ast.name))return false;
+    }
+    return (!ast.args || ast.args.every(node=>check(node))) && (!ast.a || check(ast.a))
+      && (!ast.b || check(ast.b)) && (!ast.x || check(ast.x));
+  }
+  // Excel 파일의 접두사를 화면 표기로 바꾸며 문자열 상수는 유지한다.
+  function displayFormula(text){
+    return String(text).replace(/^=/,"").split(/("(?:[^"]|"")*")/).map((part,i)=>i%2?part:
+      part.replace(/\b_xlfn\.(?:_xlws\.)?/gi,"").replace(/\b_xlpm\./gi,"")).join("");
+  }
+  function lambdaDetails(text){
+    const formula=displayFormula(text);
+    let ast,tokens;try{ast=parseFormula(formula);tokens=tokenizeFormula(formula);}catch(_){return null;}
+    if(!lambdaParameters(ast))return null;
+    const args=[""];let depth=0;
+    for(const token of tokens.slice(2,-1)){
+      if(token.text==="," && depth===0){args.push("");continue;}
+      if(token.text==="(")depth++;if(token.text===")")depth--;
+      args[args.length-1]+=token.text;
+    }
+    return {parameters:args.slice(0,-1),body:args.at(-1)};
+  }
+  // 원래 $ 참조를 보존하고 LAMBDA 매개 변수의 범위에만 _xlpm.을 붙인다.
+  function excelFormula(text){
+    let tokens;try{tokens=tokenizeFormula(String(text).replace(/^=/,""));}catch(_){return text;}
+    const render=(start,end,scope)=>{
+      let out="";
+      for(let i=start;i<end;i++){
+        const token=tokens[i],name=token.text.replace(/^_xlfn\.(?:_xlws\.)?/i,"").replace(/^_xlpm\./i,"");
+        if(token.type==="name" && tokens[i+1]?.text==="("){
+          let depth=0,close=i+2,from=i+2;const spans=[];
+          for(;close<end;close++){
+            const value=tokens[close].text;
+            if(value===")" && depth===0){if(close>from || spans.length)spans.push([from,close]);break;}
+            if(value==="," && depth===0){spans.push([from,close]);from=close+1;}
+            else if(value==="(")depth++;else if(value===")")depth--;
+          }
+          if(close===end)return tokens.slice(start,end).map(t=>t.text).join("");
+          const up=name.toUpperCase(),inner=new Map(scope);
+          if(up==="LAMBDA"){
+            for(const [a,b] of spans.slice(0,-1))if(b===a+1)inner.set(tokens[a].text.replace(/^_xlpm\./i,"").toUpperCase(),true);
+            out+="_xlfn.LAMBDA("+spans.map(([a,b])=>render(a,b,inner)).join(",")+")";
+          }else if(up==="LET"){
+            const parts=[];
+            spans.forEach(([a,b],index)=>{
+              if(index<spans.length-1 && index%2===0){
+                const key=tokens[a].text.replace(/^_xlpm\./i,"");
+                parts.push(key); // LET 변수는 대응하는 값의 계산 후부터 유효하다.
+              }else{
+                parts.push(render(a,b,inner));
+                if(index%2===1){const [ka]=spans[index-1];inner.set(tokens[ka].text.replace(/^_xlpm\./i,"").toUpperCase(),false);}
+              }
+            });
+            out+="_xlfn.LET("+parts.join(",")+")";
+          }else {
+            const future=["XLOOKUP","IFS","CONCAT","TEXTJOIN","STDEV.S","STDEV.P","RANK.EQ"].includes(up);
+            out+=(scope.get(up)?"_xlpm."+name:future?"_xlfn."+name:token.text)+"("+spans.map(([a,b])=>render(a,b,scope)).join(",")+")";
+          }
+          i=close;continue;
+        }
+        out+=token.type==="name" && tokens[i+1]?.text!=="!" && scope.get(name.toUpperCase())?"_xlpm."+name:token.text;
+      }
+      return out;
+    };
+    return render(0,tokens.length,new Map());
+  }
+
   function evaluateAst(ast, resolver){
     const res = resolver || (() => "");
     const scal = (v) => Array.isArray(v) ? (v.length ? v[0] : "") : v;
@@ -220,14 +356,45 @@ const MNSpreadsheetFormula = (() => {
         return false;
       };
     };
+
+    let scope=new Map(),steps=0,depth=0;
+    const resolvingNames=new Set();
+    const withScope=(next,run)=>{const previous=scope;scope=next;try{return run();}finally{scope=previous;}};
+    const namedValue=name=>{
+      if(scope.has(name))return scope.get(name);
+      if(typeof res.resolveName!=="function")return FORMULA_ERR("#NAME?");
+      if(resolvingNames.has(name))return FORMULA_ERR("#CYCLE!");
+      const definition=res.resolveName(name);if(!definition)return FORMULA_ERR("#NAME?");
+      resolvingNames.add(name);
+      try{return withScope(new Map(),()=>ev(definition));}finally{resolvingNames.delete(name);}
+    };
+    const invoke=(fn,args)=>{
+      if(isFormulaError(fn))return fn;
+      if(!fn || !fn.__lambda || args.length!==fn.params.length)return FORMULA_ERR("#VALUE!");
+      if(depth>=128)return FORMULA_ERR("#NUM!");
+      const local=new Map(fn.scope);fn.params.forEach((name,i)=>local.set(name,args[i]));
+      depth++;
+      try{return withScope(local,()=>ev(fn.body));}finally{depth--;}
+    };
+
     const ev = (node) => {
+      if(++steps>50000)return FORMULA_ERR("#NUM!");
+      if(!node)return FORMULA_ERR("#VALUE!");
       switch (node.t){
+        case "missing": return undefined;
         case "num": return node.v;
         case "str": return node.v;
         case "bool": return node.v;
         case "errlit": return FORMULA_ERR(node.code);
-        case "nameref": return FORMULA_ERR("#NAME?");
+        case "nameref": return namedValue(node.name);
+        case "invoke": return invoke(ev(node.x),node.args.map(ev));
         case "ref": return res(node.c, node.r, node.sheet);
+        case "columns": {
+          const bounds = res.bounds ? res.bounds(node.sheet) : null;
+          if (!bounds) return FORMULA_ERR("#REF!");
+          if (!bounds.rows) return [];
+          return ev({t:"range",r1:0,r2:bounds.rows-1,c1:node.c1,c2:node.c2,sheet:node.sheet});
+        }
         case "range": {
           const out = []; const r1 = Math.min(node.r1, node.r2), r2 = Math.max(node.r1, node.r2), c1 = Math.min(node.c1, node.c2), c2 = Math.max(node.c1, node.c2);
           for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) out.push(res(c, r, node.sheet));
@@ -262,9 +429,62 @@ const MNSpreadsheetFormula = (() => {
       return FORMULA_ERR("#ERROR!");
     };
     const evCall = (node) => {
+      if(node.name==="LAMBDA"){
+        const params=lambdaParameters(node);
+        return params?{__lambda:true,params,body:node.args.at(-1),scope:new Map(scope)}:FORMULA_ERR("#VALUE!");
+      }
+      if(node.name==="LET"){
+        if(node.args.length<3 || node.args.length%2===0 || node.args.length>253)return FORMULA_ERR("#VALUE!");
+        return withScope(new Map(scope),()=>{
+          for(let i=0;i<node.args.length-1;i+=2){
+            const name=node.args[i];if(name.t!=="nameref" || !formulaIdentifier(name.name))return FORMULA_ERR("#VALUE!");
+            const value=ev(node.args[i+1]);if(isFormulaError(value))return value;
+            scope.set(name.name,value);
+          }
+          return ev(node.args.at(-1));
+        });
+      }
+
+      if(scope.has(node.name))return invoke(scope.get(node.name),node.args.map(ev));
       const A = () => node.args.map(ev);
       const num1 = (args, k, dflt) => formulaToNumber(scal(args[k] !== undefined ? args[k] : dflt));
       switch (node.name){
+        case "SUBTOTAL": {
+          const code = formulaToNumber(ev(node.args[0]));
+          const kind = code > 100 ? code-100 : code;
+          if (!Number.isInteger(code) || kind<1 || kind>11 || (code>11 && code<101)) return FORMULA_ERR("#VALUE!");
+          const values = [];
+          for (const arg of node.args.slice(1)){
+            let rg = arg;
+            if (arg.t === "columns"){
+              const bounds = res.bounds ? res.bounds(arg.sheet) : null;
+              if (!bounds) return FORMULA_ERR("#REF!");
+              rg = {...arg,t:"range",r1:0,r2:bounds.rows-1};
+            } else if (arg.t === "ref") rg={...arg,t:"range",r1:arg.r,r2:arg.r,c1:arg.c,c2:arg.c};
+            if (rg.t !== "range") return FORMULA_ERR("#VALUE!");
+            for(let r=Math.min(rg.r1,rg.r2);r<=Math.max(rg.r1,rg.r2);r++){
+              if(res.excludeRow && res.excludeRow(r,rg.sheet,code>100)) continue;
+              for(let c=Math.min(rg.c1,rg.c2);c<=Math.max(rg.c1,rg.c2);c++){
+                if(res.isSubtotal && res.isSubtotal(c,r,rg.sheet)) continue;
+                values.push(res(c,r,rg.sheet));
+              }
+            }
+          }
+          if(kind===3) return values.filter(v=>v!=="" && v!=null).length;
+          if(kind===2) return values.filter(v=>typeof v==="number").length;
+          const error=values.find(isFormulaError); if(error) return error;
+          const nums=values.filter(v=>typeof v==="number"), n=nums.length;
+          const sum=nums.reduce((a,b)=>a+b,0);
+          if(kind===9) return sum;
+          if(kind===1) return n?sum/n:FORMULA_ERR("#DIV/0!");
+          if(kind===4) return n?Math.max(...nums):0;
+          if(kind===5) return n?Math.min(...nums):0;
+          if(kind===6) return n?nums.reduce((a,b)=>a*b,1):0;
+          const divisor=n-([7,10].includes(kind)?1:0);
+          if(divisor<=0) return FORMULA_ERR("#DIV/0!");
+          const variance=nums.reduce((a,b)=>a+Math.pow(b-sum/n,2),0)/divisor;
+          return kind===7 || kind===8 ? Math.sqrt(variance):variance;
+        }
         case "SUM": { const { ns, err } = collectNumbers(A()); return err || ns.reduce((s, n) => s + n, 0); }
         case "PRODUCT": { const { ns, err } = collectNumbers(A()); return err || ns.reduce((s, n) => s * n, 1); }
         case "AVERAGE": case "AVG": { const { ns, err } = collectNumbers(A()); return err || (ns.length ? ns.reduce((s, n) => s + n, 0) / ns.length : FORMULA_ERR("#DIV/0!")); }
@@ -273,12 +493,19 @@ const MNSpreadsheetFormula = (() => {
         case "COUNT": { const { ns, err } = collectNumbers(A()); return err || ns.length; }
         case "COUNTA": { let err = null, n = 0; flat(A()).forEach(v => { if (isFormulaError(v)){ if (!err) err = v; } else if (!(v === "" || v == null)) n++; }); return err || n; }
         case "COUNTBLANK": { let n = 0; flat(A()).forEach(v => { if (v === "" || v == null) n++; }); return n; }
-        case "IF": { const args = A(); const c = formulaToBool(scal(args[0])); if (isFormulaError(c)) return c; return c ? scal(args[1] !== undefined ? args[1] : true) : (args.length > 2 ? scal(args[2]) : false); }
+        case "IF": { const c=formulaToBool(scal(ev(node.args[0])));if(isFormulaError(c))return c;const branch=node.args[c?1:2];return branch?scal(ev(branch)):!!c; }
         case "IFERROR": { const v = ev(node.args[0]); return isFormulaError(v) ? (node.args[1] !== undefined ? scal(ev(node.args[1])) : "") : scal(v); }
         case "AND": { let err = null, r = true; flat(A()).forEach(v => { if (isFormulaError(v)){ if (!err) err = v; } else if (!formulaToBool(v)) r = false; }); return err || r; }
         case "OR": { let err = null, r = false; flat(A()).forEach(v => { if (isFormulaError(v)){ if (!err) err = v; } else if (formulaToBool(v)) r = true; }); return err || r; }
         case "NOT": { const v = formulaToBool(scal(A()[0])); return isFormulaError(v) ? v : !v; }
-        case "ROUND": { const args = A(); const x = num1(args, 0); if (isFormulaError(x)) return x; const d = num1(args, 1, 0); if (isFormulaError(d)) return d; const f = Math.pow(10, d); return Math.round(x * f) / f; }
+        case "ROUND": {
+          const args = A(), x = num1(args, 0), d = num1(args, 1, 0);
+          if (isFormulaError(x)) return x; if (isFormulaError(d)) return d;
+          const shift = (n, k) => { const [m, e = "0"] = String(n).split("e"); return Number(m + "e" + (Number(e) + k)); };
+          const digits = Math.trunc(d), scaled = shift(Math.abs(x), digits);
+          if (!isFinite(scaled)) return x;
+          return Math.sign(x) * shift(Math.round(scaled), -digits);
+        }
         case "ROUNDUP": { const args = A(); const x = num1(args, 0); if (isFormulaError(x)) return x; const d = num1(args, 1, 0); const f = Math.pow(10, d); return (x < 0 ? -1 : 1) * Math.ceil(Math.abs(x) * f) / f; }
         case "ROUNDDOWN": { const args = A(); const x = num1(args, 0); if (isFormulaError(x)) return x; const d = num1(args, 1, 0); const f = Math.pow(10, d); return (x < 0 ? -1 : 1) * Math.floor(Math.abs(x) * f) / f; }
         case "ABS": { const x = num1(A(), 0); return isFormulaError(x) ? x : Math.abs(x); }
@@ -349,7 +576,13 @@ const MNSpreadsheetFormula = (() => {
         case "MINUTE": { const x = num1(A(), 0); return isFormulaError(x) ? x : spreadsheetSerialToParts(x).mm; }
         case "SECOND": { const x = num1(A(), 0); return isFormulaError(x) ? x : spreadsheetSerialToParts(x).ss; }
         case "WEEKDAY": { const a = A(); const x = num1(a, 0); if (isFormulaError(x)) return x; const type = a[1] !== undefined ? num1(a, 1) : 1; const wd = spreadsheetSerialToParts(x).wd; return type === 2 ? (wd === 0 ? 7 : wd) : (type === 3 ? (wd + 6) % 7 : wd + 1); }
-        case "EDATE": { const a = A(); const x = num1(a, 0); if (isFormulaError(x)) return x; const mo = num1(a, 1); if (isFormulaError(mo)) return mo; const t = spreadsheetSerialToParts(x); return spreadsheetDateToSerial(t.y, t.mo + mo, t.d, t.hh, t.mm, t.ss); }
+        case "EDATE": {
+          const a = A(), x = num1(a, 0), mo = num1(a, 1);
+          if (isFormulaError(x)) return x; if (isFormulaError(mo)) return mo;
+          const t = spreadsheetSerialToParts(x), month = t.mo + Math.trunc(mo);
+          const last = new Date(Date.UTC(t.y, month, 0)).getUTCDate();
+          return spreadsheetDateToSerial(t.y, month, Math.min(t.d, last));
+        }
         case "DATEDIF": { const a = A(); const s1 = num1(a, 0), s2 = num1(a, 1); if (isFormulaError(s1)) return s1; if (isFormulaError(s2)) return s2; const p1 = spreadsheetSerialToParts(s1), p2 = spreadsheetSerialToParts(s2); const unit = formulaToString(scal(a[2])).toUpperCase(); if (unit === "D") return Math.floor(s2 - s1); if (unit === "M") return (p2.y - p1.y) * 12 + (p2.mo - p1.mo) - (p2.d < p1.d ? 1 : 0); if (unit === "Y") { let yr = p2.y - p1.y; if (p2.mo < p1.mo || (p2.mo === p1.mo && p2.d < p1.d)) yr--; return yr; } return FORMULA_ERR("#NUM!"); }
         // ----- 텍스트 -----
         case "TEXT": { const a = A(); const v = scal(a[0]); if (isFormulaError(v)) return v; return spreadsheetFormatByPattern(v, formulaToString(scal(a[1]))); }
@@ -420,17 +653,42 @@ const MNSpreadsheetFormula = (() => {
           const key = scal(ev(a[0])); if (isFormulaError(key)) return key;
           const la = flat([ev(a[1])]), ra = flat([ev(a[2])]);
           if (!la.length || ra.length !== la.length) return FORMULA_ERR("#VALUE!");
-          for (let i = 0; i < la.length; i++){ if (!isFormulaError(la[i]) && lookupEqual(la[i], key)) return ra[i]; }
+          const mode = a[4] && a[4].t !== "missing" ? formulaToNumber(scal(ev(a[4]))) : 0;
+          const search = a[5] && a[5].t !== "missing" ? formulaToNumber(scal(ev(a[5]))) : 1;
+          if (![0, -1, 1, 2].includes(mode) || ![1, -1, 2, -2].includes(search)) return FORMULA_ERR("#VALUE!");
+          let wildcard = null;
+          if (mode === 2){
+            const text = String(key); let pattern = "";
+            const literal = ch => "\\^$.*+?()[]{}|".includes(ch) ? "\\" + ch : ch;
+            for (let k = 0; k < text.length; k++){
+              const ch = text[k];
+              if (ch === "~" && k + 1 < text.length) pattern += literal(text[++k]);
+              else pattern += ch === "*" ? ".*" : ch === "?" ? "." : literal(ch);
+            }
+            wildcard = new RegExp("^" + pattern + "$", "i");
+          }
+          let nearest = -1;
+          for (let k = 0; k < la.length; k++){
+            const i = search < 0 ? la.length - 1 - k : k;
+            if (isFormulaError(la[i])) continue;
+            if (wildcard ? wildcard.test(String(la[i])) : lookupEqual(la[i], key)) return ra[i];
+            const cmp = lookupCompare(la[i], key);
+            if ((mode === -1 && cmp < 0) || (mode === 1 && cmp > 0)){
+              if (nearest < 0 || lookupCompare(la[i], la[nearest]) * mode < 0) nearest = i;
+            }
+          }
+          if (nearest >= 0) return ra[nearest];
           return a[3] !== undefined ? scal(ev(a[3])) : FORMULA_ERR("#N/A");
         }
         case "ISBLANK": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return !isFormulaError(v) && (v === "" || v == null); }
         case "ISNUMBER": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return typeof v === "number"; }
         case "ISTEXT": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); const v = scal(ev(node.args[0])); return typeof v === "string" && v !== ""; }
         case "ISERROR": { if (!node.args.length) return FORMULA_ERR("#VALUE!"); return isFormulaError(ev(node.args[0])); }
-        default: return FORMULA_ERR("#NAME?");
+        default: return invoke(namedValue(node.name),node.args.map(ev));
       }
     };
     const out = ev(ast);
+    if(out?.__lambda)return FORMULA_ERR("#CALC!");
     return Array.isArray(out) ? (out.length ? out[0] : "") : out;
   }
   // 편의용(테스트/단발 평가): 오류는 "#..." 문자열, 불리언은 TRUE/FALSE 문자열로 반환
@@ -448,7 +706,24 @@ const MNSpreadsheetFormula = (() => {
     let toks;
     try { toks = tokenizeFormula(formula); } catch(_){ return formula; }
     let out = "", prev = "";
-    for (const tk of toks){
+    for(let i=0;i<toks.length;i++){
+      const tk=toks[i];
+      // 시트 이름이 A1처럼 보여도 셀 주소로 바꾸지 않는다.
+      if(toks[i+1]?.text==="!"){
+        out+=tk.text+"!";i++;
+        if(!options.includeSheetRefs){
+          if(toks[i+1])out+=toks[++i].text;
+          if(toks[i+1]?.text===":" && toks[i+2]){out+=":"+toks[i+2].text;i+=2;}
+        }
+        prev="!";continue;
+      }
+      if(tk.type==="colrange"){
+        const mapped=tk.text.split(":").map(part=>{
+          const colAbs=part.startsWith("$"),res=transform(formulaColumnIndex(part.replace("$","")),0,{colAbs,rowAbs:true});
+          return !res || res.c<0?null:(colAbs?"$":"")+spreadsheetColumnName(res.c);
+        });
+        out+=mapped.includes(null)?"#REF!":mapped.join(":");prev=tk.text;continue;
+      }
       if (tk.type === "ref" && (prev !== "!" || options.includeSheetRefs)){
         const m = /^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/.exec(tk.text);
         if (m){
@@ -470,7 +745,7 @@ const MNSpreadsheetFormula = (() => {
   function spreadsheetFormulaSheetName(token){
     if (!token) return "";
     if (token.type === "sheetq") return token.text.slice(1, -1).replace(/''/g, "'");
-    return token.type === "name" ? token.text : "";
+    return ["name","ref"].includes(token.type) ? token.text : "";
   }
   
   function spreadsheetFormulaSheetToken(name){
@@ -495,7 +770,7 @@ const MNSpreadsheetFormula = (() => {
     let out = "";
     for (let i = 0; i < toks.length; i++){
       const tk = toks[i], bang = toks[i + 1], ref = toks[i + 2];
-      if ((tk.type === "name" || tk.type === "sheetq") && bang && bang.text === "!" && ref && ref.type === "ref"){
+      if ((["name","sheetq","ref"].includes(tk.type)) && bang && bang.text === "!" && ref && ref.type === "ref"){
         const shifted = sameSheet(spreadsheetFormulaSheetName(tk), sourceSheet) ? movedRef(ref) : null;
         if (shifted){
           out += spreadsheetFormulaSheetToken(destinationSheet) + "!" + shifted;
@@ -525,7 +800,7 @@ const MNSpreadsheetFormula = (() => {
     let out = "";
     for (let i = 0; i < toks.length; i++){
       const tk = toks[i], nx = toks[i + 1];
-      if (nx && nx.text === "!" && (tk.type === "name" || tk.type === "sheetq")){
+      if (nx && nx.text === "!" && (["name","sheetq","ref"].includes(tk.type))){
         const nm = tk.type === "sheetq" ? tk.text.slice(1, -1).replace(/''/g, "'") : tk.text;
         if (nm.toLowerCase() === target){ out += replacement; continue; }
       }
@@ -592,7 +867,10 @@ const MNSpreadsheetFormula = (() => {
   
   // 수식 자동완성용 함수 목록: [이름, 시그니처, 설명] — 수식 엔진(evCall)이 지원하는 함수만.
   const SPREADSHEET_FN_HELP = [
+    ["LAMBDA","LAMBDA(입력값, …, 계산식)","재사용할 사용자 정의 함수"],
+    ["LET","LET(이름, 값, …, 계산식)","중간 계산에 이름 지정"],
     ["SUM", "SUM(범위)", "합계"],
+    ["SUBTOTAL", "SUBTOTAL(번호, 범위)", "필터로 숨긴 행을 제외한 집계(9=합계, 1=평균)"],
     ["AVERAGE", "AVERAGE(범위)", "평균"],
     ["COUNT", "COUNT(범위)", "숫자 개수"],
     ["COUNTA", "COUNTA(범위)", "빈칸 아닌 개수"],
@@ -620,7 +898,7 @@ const MNSpreadsheetFormula = (() => {
     ["AVERAGEIFS", "AVERAGEIFS(평균범위, 범위1, 조건1, …)", "여러 조건 평균"],
     ["VLOOKUP", "VLOOKUP(찾을값, 표범위, 열번호, [유사일치])", "세로 방향 찾기"],
     ["HLOOKUP", "HLOOKUP(찾을값, 표범위, 행번호, [유사일치])", "가로 방향 찾기"],
-    ["XLOOKUP", "XLOOKUP(찾을값, 찾을범위, 반환범위, [없을때])", "찾아서 짝 반환"],
+    ["XLOOKUP", "XLOOKUP(찾을값, 찾을범위, 반환범위, [없을때], [일치방식], [검색방식])", "정확·근사·와일드카드·역방향 조회"],
     ["INDEX", "INDEX(범위, 행, [열])", "위치의 값"],
     ["MATCH", "MATCH(찾을값, 범위, [0=정확])", "위치 번호"],
     ["CHOOSE", "CHOOSE(번호, 값1, 값2, …)", "번호에 해당하는 값"],
@@ -676,8 +954,8 @@ const MNSpreadsheetFormula = (() => {
     const s = String(text == null ? "" : text);
     if (s[0] !== "=") return null;
     const upto = s.slice(0, Math.max(0, Math.min(caret, s.length)));
-    const m = /[A-Za-z][A-Za-z.]*$/.exec(upto);
-    if (m && m.index > 0){
+    const m = /[A-Za-z_ㄱ-ㆎ가-힣][A-Za-z0-9_.ㄱ-ㆎ가-힣]*$/.exec(upto);
+    if (m && m.index > 0 && !parseA1Ref(m[0])){
       const before = upto[m.index - 1];
       if ("=+-*/^&<>,(%".includes(before)) return { type: "name", partial: m[0], start: m.index };
     }
@@ -688,7 +966,7 @@ const MNSpreadsheetFormula = (() => {
       if (ch === ")") depth++;
       else if (ch === "("){
         if (depth > 0){ depth--; continue; }
-        const head = /[A-Za-z][A-Za-z.]*$/.exec(upto.slice(0, i));
+        const head = /[A-Za-z_ㄱ-ㆎ가-힣][A-Za-z0-9_.ㄱ-ㆎ가-힣]*$/.exec(upto.slice(0, i));
         if (head) return { type: "args", name: head[0].toUpperCase() };
         return null;
       }
@@ -732,7 +1010,7 @@ const MNSpreadsheetFormula = (() => {
   // 선택 데이터로 간단 차트(막대·선·원)를 SVG 문자열로 생성. 오프라인·무의존.
 
   return {
-    spreadsheetColumnName, FORMULA_ERR, isFormulaError, spreadsheetDateSerial, spreadsheetDateToSerial, spreadsheetSerialToParts, spreadsheetFormatByPattern, formulaColumnIndex, parseA1Ref, tokenizeFormula, parseFormula, formulaToNumber, formulaToString, formulaToBool, evaluateAst, evaluateFormula, remapFormulaRefs, spreadsheetFormulaSheetName, spreadsheetFormulaSheetToken, remapMovedFormulaRefs, remapFormulaSheetName, SPREADSHEET_FILL_CYCLES, spreadsheetTextSeries, SPREADSHEET_FN_HELP, formulaTypingContext, spreadsheetAutoFormulaJobs
+    formulaIdentifier,lambdaParameters,formulaIsSupported,displayFormula,lambdaDetails,excelFormula,spreadsheetColumnName, FORMULA_ERR, isFormulaError, spreadsheetDateSerial, spreadsheetDateToSerial, spreadsheetSerialToParts, spreadsheetFormatByPattern, formulaColumnIndex, parseA1Ref, tokenizeFormula, parseFormula, formulaToNumber, formulaToString, formulaToBool, evaluateAst, evaluateFormula, remapFormulaRefs, spreadsheetFormulaSheetName, spreadsheetFormulaSheetToken, remapMovedFormulaRefs, remapFormulaSheetName, SPREADSHEET_FILL_CYCLES, spreadsheetTextSeries, SPREADSHEET_FN_HELP, formulaTypingContext, spreadsheetAutoFormulaJobs
   };
 })();
 

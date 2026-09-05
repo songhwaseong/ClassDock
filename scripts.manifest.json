@@ -68,6 +68,7 @@
     "docx-editor.js",
     "grid-selection.js",
     "spreadsheet-formula.js",
+    "spreadsheet-tools.js",
     "spreadsheet-viewer.js",
     "spreadsheet-chart.js",
     "pptx-viewer.js",
@@ -201,6 +202,7 @@
         "docx-editor.js",
         "grid-selection.js",
         "spreadsheet-formula.js",
+        "spreadsheet-tools.js",
         "spreadsheet-viewer.js",
         "spreadsheet-chart.js",
         "pptx-viewer.js",
@@ -351,7 +353,8 @@
       "documents.js",
       "code-viewer.js",
       "python-editor.js",
-      "spreadsheet-formula.js"
+      "spreadsheet-formula.js",
+      "spreadsheet-tools.js"
     ],
     "spreadsheet-chart.js": [
       "spreadsheet-viewer.js"
@@ -517,6 +520,9 @@
       "db-client.js",
       "data-convert.js",
       "lazy.js"
+    ],
+    "spreadsheet-tools.js": [
+      "spreadsheet-formula.js"
     ]
   },
   "moduleBoundaries": [
