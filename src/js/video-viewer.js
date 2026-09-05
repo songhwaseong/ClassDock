@@ -112,6 +112,139 @@ async function vvMediaBackendAvailable(){
   return _vvMediaBackend;
 }
 
+/* ---- 런처가 아는 파일(경로 방식) ----
+ * 원본이 exe 로 연 폴더 안에 있으면 앱은 바이트 대신 (폴더 ID + 상대 경로)만 들고 있다.
+ * 재생도 변환도 그 경로로 처리하므로 파일 크기에 제한이 없다 — 끌어다 놓아 연 파일은
+ * 경로를 알 수 없어 예전처럼 본문으로 주고받는다(1GB 제한은 그쪽에만 남는다). */
+
+function vvNativeRefOf(file){
+  const ref = file && file.__nativeSource;
+  return ref && ref.rootId && ref.relPath ? ref : null;
+}
+
+// 같은 자리에 놓을 변환본(.mp4)의 상대 경로 — 하위 폴더에 있던 영상은 그 자리에 그대로 만든다.
+function vvNativeOutputRel(ref, forceVideo = false){
+  const input = String(ref.relPath);
+  const suffix = forceVideo || /\.mp4$/i.test(input) ? ".호환.mp4" : ".mp4";
+  return input.replace(/\.[^./]+$/, "") + suffix;
+}
+
+// 이름만 있는 재생용 파일. 변환본으로 갈아탈 때처럼 바이트 없이 경로만 아는 경우에 쓴다.
+function vvNativeMediaFile(name, ref){
+  const file = new File([], name);
+  try { Object.defineProperty(file, "__nativeSource", { value: ref, configurable: true }); } catch(_){}
+  return file;
+}
+
+// <video> 요청에는 X-ClassDock-Token 헤더를 붙일 수 없다 → 파일 하나에만 쓰는 표를 먼저 받아
+// 주소에 담는다. 런처는 그 표로 Range 스트리밍을 열어 준다.
+async function vvMediaStreamUrl(ref){
+  if (!ref || (location.protocol !== "http:" && location.protocol !== "https:")) return "";
+  try {
+    const res = await fetch("/media-ticket?id=" + encodeURIComponent(ref.rootId)
+      + "&path=" + encodeURIComponent(ref.relPath), { method: "POST" });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return data && data.ticket ? "/media-stream?t=" + encodeURIComponent(data.ticket) : "";
+  } catch(_){ return ""; }
+}
+
+// 경로 방식 변환 시작 → 작업 번호. ffmpeg 가 디스크에서 직접 읽고 쓴다.
+async function vvStartConvertJob(ref, forceVideo = false){
+  const res = await fetch("/convert-media-path?id=" + encodeURIComponent(ref.rootId)
+    + "&in=" + encodeURIComponent(ref.relPath)
+    + "&out=" + encodeURIComponent(vvNativeOutputRel(ref, forceVideo))
+    + "&reencode=" + (forceVideo ? "1" : "0"), { method: "POST" });
+  if (!res.ok) throw new Error((await res.text()) || ("HTTP " + res.status));
+  const data = await res.json();
+  if (!data || !data.job) throw new Error("no-job-id");
+  return data.job;
+}
+
+async function vvCancelConvertJob(job){
+  if (!job) return;
+  try { await fetch("/convert-media-cancel?job=" + encodeURIComponent(job), { method: "POST" }); } catch(_){}
+}
+
+/* 남은 시간 어림. ffmpeg 가 알려 주는 배속(원본 1초를 몇 초 만에 처리하는지)을 우선 쓴다 —
+ * ffmpeg 자신의 ETA 와 같은 누적 평균이라 숫자가 잘 안 흔들린다. 아직 배속이 안 왔으면
+ * 이 단계에서 실제로 흐른 시간으로 같은 계산을 한다. 알 수 없으면 -1. */
+function vvConvertRemainingSec(info){
+  const duration = Number(info && info.durationUs) || 0;
+  const done = Number(info && info.doneUs) || 0;
+  if (duration <= 0 || done <= 0 || done >= duration) return -1;
+  const leftSec = (duration - done) / 1000000;
+  const speed = (Number(info.speedMilli) || 0) / 1000;
+  if (speed > 0) return leftSec / speed;
+  const elapsedSec = (Number(info.elapsedMs) || 0) / 1000;
+  if (elapsedSec <= 0) return -1;
+  return leftSec / ((done / 1000000) / elapsedSec);
+}
+
+// "1시간 5분" · "3분 20초" · "40초". 시간 단위가 붙으면 초는 버린다(의미 없는 자리가 계속 튄다).
+function vvFormatDuration(sec){
+  const total = Math.max(0, Math.round(Number(sec) || 0));
+  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return hours + "시간 " + minutes + "분";
+  if (minutes > 0) return total % 60 ? minutes + "분 " + (total % 60) + "초" : minutes + "분";
+  return total + "초";
+}
+
+function vvMissingVideoFrames(media){
+  if (!media || media.paused || media.seeking || media.readyState < 2 || media.currentTime < 3) return false;
+  if (!media.videoWidth || !media.videoHeight) return true;
+  if (typeof media.getVideoPlaybackQuality === "function"){
+    try { return media.getVideoPlaybackQuality().totalVideoFrames === 0; } catch(_){}
+  }
+  return typeof media.webkitDecodedFrameCount === "number" && media.webkitDecodedFrameCount === 0;
+}
+
+function vvConvertProgressText(info){
+  // 변환은 한 번에 하나만 돈다 — 다른 영상이 먼저 잡고 있으면 그 사실을 알린다(멈춘 게 아니다).
+  if (info && info.state === "queued") return "앞선 변환이 끝나기를 기다리는 중…";
+  // 복사·소리 변환·GPU·CPU 단계를 구분한다.
+  const labels = { remux:"영상·소리 그대로 MP4로 옮기는 중", copy:"소리만 변환 중",
+    hardware:"GPU로 영상 변환 중", encode:"영상까지 다시 인코딩 중" };
+  const stage = (info && labels[info.stage]) || "MP4로 변환 중";
+  const percent = info ? Number(info.percent) : NaN;   // Number(null) 은 0 이라 정보가 없을 때 0% 로 보인다
+  const head = stage + (Number.isFinite(percent) && percent >= 0 ? " " + percent + "%" : "…");
+  const remaining = vvConvertRemainingSec(info);
+  if (remaining >= 0) return head + " · 약 " + vvFormatDuration(remaining) + " 남음";
+  // 남은 시간을 아직 못 재는 동안(원본 길이를 모르거나 막 시작했을 때)에는 흐른 시간이라도 보여 준다.
+  const elapsed = Number(info && info.elapsedMs) || 0;
+  return elapsed >= 3000 ? head + " · " + vvFormatDuration(elapsed / 1000) + " 지남" : head;
+}
+
+// 끝날 때까지 진행률을 물어본다. 잠깐의 통신 오류로 변환을 포기하지는 않되,
+// 런처가 사라진 경우까지 무한정 기다리지 않도록 연속 실패에는 한계를 둔다.
+async function vvWaitConvertJob(job, onProgress){
+  const POLL_MS = 700, MAX_MISSES = 60;
+  for (let misses = 0; ; ){
+    await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    let info = null;
+    try {
+      const res = await fetch("/convert-media-job?job=" + encodeURIComponent(job));
+      if (res.ok) info = await res.json();
+    } catch(_){}
+    if (!info){
+      if (++misses >= MAX_MISSES) throw new Error("변환 상태를 확인할 수 없어요");
+      continue;
+    }
+    misses = 0;
+    if (info.state === "done" || info.state === "error" || info.state === "cancelled") return info;
+    if (typeof onProgress === "function") onProgress(info);
+  }
+}
+
+// 같은 폴더에 그 이름의 파일이 이미 있는지 — 일괄 변환에서 두 번 돌리지 않기 위해.
+async function vvNativeFileExists(ref, rel){
+  try {
+    const res = await fetch("/source-folder-entry?id=" + encodeURIComponent(ref.rootId)
+      + "&path=" + encodeURIComponent(rel), { cache: "no-store" });
+    return res.ok;
+  } catch(_){ return false; }
+}
+
 function vvDownloadFile(file){
   const url = URL.createObjectURL(file);
   const anchor = document.createElement("a");
@@ -209,10 +342,12 @@ function vvCreateBatchProgress(){
   };
   document.addEventListener("keydown", onKeydown, true);
   return {
+    // done 에는 진행 중인 파일의 몫을 소수로 담을 수 있다(막대가 파일마다 뚝뚝 뛰지 않게).
+    // 개수 표시는 그와 상관없이 정수로 센다.
     update(done, total, name){
       meter.max = Math.max(1, total);
       meter.value = Math.min(done, total);
-      detail.textContent = name + " (" + Math.min(done + 1, total) + "/" + total + ")";
+      detail.textContent = name + " (" + Math.min(Math.floor(done) + 1, total) + "/" + total + ")";
     },
     signal(){ ctrl = new AbortController(); return ctrl.signal; },
     isCancelled(){ return cancelled; },
@@ -234,16 +369,23 @@ async function vvBatchConvertFolder(rootId){
     if (typeof toast === "function") toast("무료 변환 도구(ffmpeg)가 아직 없어요. 영상을 하나 열어 안내 바의 설치 버튼을 먼저 눌러주세요.", 5000);
     return;
   }
-  // 변환본 저장 위치: 원본 폴더(쓰기 권한 요청) → 안 되면(드래그로 연 폴더 등) 사용자가 폴더 선택
-  let outDir = root && root.folderHandle ? root.folderHandle : null;
-  if (outDir && !(await vvEnsureWritable(outDir))) outDir = null;
-  if (!outDir){
-    if (typeof window.showDirectoryPicker !== "function"){
-      if (typeof toast === "function") toast("이 브라우저에서는 저장 폴더를 고를 수 없어요. 영상을 하나씩 변환해 주세요.", 4000);
-      return;
+  // 런처가 경로를 아는 영상(exe 의 '폴더 열기')은 결과를 원본 옆 제자리에 바로 만든다.
+  // 파일을 주고받지 않으므로 저장 폴더를 고를 필요도, 크기 제한도 없다.
+  const byPath = targets.some(target => vvNativeRefOf(target.sourceFile));
+  // 변환본 저장 위치: 원본 폴더(쓰기 권한 요청) → 안 되면(드래그로 연 폴더 등) 사용자가 폴더 선택.
+  // 경로를 모르는 영상이 하나라도 있을 때만 물어본다.
+  let outDir = null;
+  if (targets.some(target => !vvNativeRefOf(target.sourceFile))){
+    outDir = root && root.folderHandle ? root.folderHandle : null;
+    if (outDir && !(await vvEnsureWritable(outDir))) outDir = null;
+    if (!outDir){
+      if (typeof window.showDirectoryPicker !== "function"){
+        if (typeof toast === "function") toast("이 브라우저에서는 저장 폴더를 고를 수 없어요. 영상을 하나씩 변환해 주세요.", 4000);
+        return;
+      }
+      try { outDir = await window.showDirectoryPicker({ mode: "readwrite" }); }
+      catch(_){ return; }   // 폴더 선택 취소
     }
-    try { outDir = await window.showDirectoryPicker({ mode: "readwrite" }); }
-    catch(_){ return; }   // 폴더 선택 취소
   }
   const progress = vvCreateBatchProgress();
   let processed = 0, converted = 0, existed = 0, oversized = 0, failed = 0;
@@ -254,6 +396,22 @@ async function vvBatchConvertFolder(rootId){
       progress.update(processed, targets.length, target.name + " 변환 중…");
       processed++;
       try {
+        const nativeRef = vvNativeRefOf(target.sourceFile);
+        if (nativeRef){
+          const outRel = vvNativeOutputRel(nativeRef);
+          if (await vvNativeFileExists(nativeRef, outRel)){ existed++; continue; }   // 이전에 변환해 둔 것
+          const job = await vvStartConvertJob(nativeRef);
+          const info = await vvWaitConvertJob(job, p => {
+            if (progress.isCancelled()){ vvCancelConvertJob(job); return; }
+            const share = Math.max(0, Math.min(100, Number(p.percent) || 0)) / 100;
+            progress.update(processed - 1 + share, targets.length,
+              target.name + " — " + vvConvertProgressText(p));
+          });
+          if (info.state === "cancelled") break;
+          if (info.state !== "done") throw new Error(info.error || "변환 실패");
+          converted++;
+          continue;
+        }
         let already = false;
         try { await outDir.getFileHandle(outName); already = true; } catch(_){}
         if (already){ existed++; continue; }                     // 이전에 변환해 둔 것 — 재변환 안 함
@@ -287,7 +445,7 @@ async function vvBatchConvertFolder(rootId){
     toast((progress.isCancelled() ? "일괄 변환 중지 — " : "일괄 변환 완료 — ") + (parts.join(" · ") || "대상 없음"), 6000);
   }
   // 새 mp4 가 폴더 목록에 보이도록 새로고침(원본 폴더에 저장했을 때)
-  if (converted && root && root.folderRefreshRootId && root.folderHandle === outDir
+  if (converted && root && root.folderRefreshRootId && (byPath || root.folderHandle === outDir)
     && typeof requestFolderRefresh === "function") requestFolderRefresh(root.folderRefreshRootId);
 }
 
@@ -313,8 +471,27 @@ function renderVideoPlayer(file, doc){
   const stage = document.createElement("div"); stage.className = "vv-stage";
   const media = document.createElement("video");
   media.className = "vv-media"; media.controls = true; media.preload = "metadata"; media.playsInline = true;
-  let srcUrl = URL.createObjectURL(file);
-  media.src = srcUrl;
+  // 재생 원본을 건다. 런처가 아는 파일(수 GB 수업 영상)은 바이트가 없으므로 스트림 주소로 튼다
+  // — 표를 받아오는 동안만 잠깐 src 가 비어 있고, 표를 못 받으면 재생 실패로 처리해 안내가 뜬다.
+  let srcUrl = "", currentFile = file;
+  function setMediaSource(target){
+    currentFile = target;
+    doc.sourceFile = target;
+    if (srcUrl){ try { URL.revokeObjectURL(srcUrl); } catch(_){} srcUrl = ""; }
+    const ref = vvNativeRefOf(target);
+    if (!ref){
+      srcUrl = URL.createObjectURL(target);
+      media.src = srcUrl;
+      return;
+    }
+    media.removeAttribute("src");
+    vvMediaStreamUrl(ref).then(url => {
+      if (!media.isConnected) return;
+      if (url) media.src = url;
+      else media.dispatchEvent(new Event("error"));
+    });
+  }
+  setMediaSource(file);
   stage.appendChild(media);
 
   const state = { trackEl: null, trackUrl: null, sizeIndex: 0, failed: false };
@@ -395,30 +572,46 @@ function renderVideoPlayer(file, doc){
 
   // 같은 탭에서 재생 원본만 바꾼다(자막·크기 설정 유지) — 변환본(MP4)으로 전환할 때 사용
   function vvPlayFile(newFile){
+    state.noticeClosed = false;
+    state.videoWarningShown = false;
+    state.failed = false;
+    state.forceVideo = false;
+    state.converted = null;
+    state.playSibling = null;
+    if (noticeEl) noticeEl.remove();
+    noticeEl = null;
+    stage.querySelectorAll(".vv-error").forEach(el => el.remove());
     const resumeAt = media.currentTime;
     const wasPlaying = !media.paused && !media.ended;
-    try { URL.revokeObjectURL(srcUrl); } catch(_){}
-    srcUrl = URL.createObjectURL(newFile);
     const seekOnce = () => {
       media.removeEventListener("loadedmetadata", seekOnce);
       try { if (resumeAt > 0 && resumeAt < (media.duration || Infinity)) media.currentTime = resumeAt; } catch(_){}
       if (wasPlaying){ const p = media.play(); if (p && p.catch) p.catch(() => {}); }
     };
     media.addEventListener("loadedmetadata", seekOnce);
-    media.src = srcUrl;
+    setMediaSource(newFile);
   }
 
   // ---- 재생 불가·무음 안내 + ffmpeg(있을 때만) MP4 변환 ----
-  let noticeEl = null, noticeText = null, noticeBtn = null;
+  let noticeEl = null, noticeText = null, noticeBtn = null, noticeMeter = null;
   const setNotice = (message) => { if (noticeText) noticeText.textContent = message; };
+  // 변환 진행 막대. 퍼센트를 모르는 동안(원본 길이 미상)에는 값을 비워 불확정 막대로 둔다.
+  const setNoticeMeter = (percent) => {
+    if (!noticeMeter) return;
+    noticeMeter.hidden = percent == null;
+    if (percent == null) return;
+    if (percent >= 0) noticeMeter.value = Math.min(100, Math.max(0, percent));
+    else noticeMeter.removeAttribute("value");
+  };
   function showConvertNotice(message){
     if (state.noticeClosed) return;
-    if (!noticeEl){
+    if (!noticeEl || !noticeEl.isConnected){
       noticeEl = document.createElement("div"); noticeEl.className = "vv-notice";
       noticeText = document.createElement("span"); noticeText.className = "vv-notice-text";
       noticeBtn = document.createElement("button"); noticeBtn.type = "button"; noticeBtn.textContent = "MP4로 변환";
-      noticeBtn.title = "영상은 그대로 두고 브라우저가 지원하는 코덱으로 바꿔 새 탭에서 열어요";
+      noticeBtn.title = "필요한 영상·소리만 호환 형식으로 변환해요";
       noticeBtn.addEventListener("click", () => {
+        if (state.converting) return;                    // 변환 중에는 이 버튼이 '중지'로 바뀐다(따로 처리)
         if (state.converted) vvDownloadFile(state.converted);
         else if (state.playSibling){
           const sibling = state.playSibling;
@@ -434,7 +627,9 @@ function renderVideoPlayer(file, doc){
       const close = document.createElement("button"); close.type = "button"; close.className = "vv-notice-close";
       close.textContent = "×"; close.title = "닫기";
       close.addEventListener("click", () => { state.noticeClosed = true; noticeEl.remove(); });
-      noticeEl.append(noticeText, noticeBtn);
+      noticeMeter = document.createElement("progress"); noticeMeter.className = "vv-notice-meter";
+      noticeMeter.max = 100; noticeMeter.value = 0; noticeMeter.hidden = true;
+      noticeEl.append(noticeText, noticeMeter, noticeBtn);
       // 폴더로 열었고 변환 대상 영상이 더 있으면 일괄 변환도 바로 제안
       const rootNode = vvDocFolderRoot(doc);
       if (rootNode && vvFolderVideoTargets(rootNode.nodeId).length > 1){
@@ -473,7 +668,7 @@ function renderVideoPlayer(file, doc){
       state.installMode = false;
       noticeBtn.disabled = false;
       noticeBtn.textContent = "MP4로 변환";
-      noticeBtn.title = "영상은 그대로 두고 브라우저가 지원하는 코덱으로 바꿔 새 탭에서 열어요";
+      noticeBtn.title = "필요한 영상·소리만 호환 형식으로 변환해요";
       setNotice("설치 완료! 이어서 변환을 시작해요.");
       startConvert();                        // 설치 직후 바로 변환까지
     } catch(e){
@@ -482,11 +677,53 @@ function renderVideoPlayer(file, doc){
     }
   }
 
-  async function startConvert(){
-    if (file.size > 1024 * 1024 * 1024){
-      setNotice("이 파일은 1GB가 넘어 앱 안에서는 변환할 수 없어요. 샤나인코더·팟인코더 등으로 MP4(H.264+AAC) 변환 후 열어주세요.");
-      return;
+  /* 경로 방식 변환. 원본도 결과도 디스크에 그대로 두고 ffmpeg 만 돌리므로 크기 제한이 없다.
+   * 변환 중에는 안내 바의 버튼이 '변환 중지'가 되고, 끝나면 이 탭이 바로 변환본으로 갈아탄다. */
+  async function startConvertByPath(ref){
+    const outRel = vvNativeOutputRel(ref, !!state.forceVideo);
+    const outName = outRel.split("/").pop();
+    let job = "";
+    const onCancel = () => { noticeBtn.disabled = true; noticeBtn.textContent = "중지하는 중…"; vvCancelConvertJob(job); };
+    state.converting = true;
+    noticeBtn.textContent = "변환 중지";
+    noticeBtn.title = "변환을 멈춰요. 만들다 만 파일은 남기지 않아요";
+    noticeBtn.addEventListener("click", onCancel);
+    setNotice("MP4로 변환 준비 중…");
+    setNoticeMeter(-1);
+    try {
+      job = await vvStartConvertJob(ref, !!state.forceVideo);
+      const info = await vvWaitConvertJob(job, progress => {
+        setNotice(vvConvertProgressText(progress) + " — 이 탭을 닫지 마세요. 다 되면 자동으로 바뀌어요.");
+        setNoticeMeter(Number(progress.percent));
+      });
+      if (info.state === "cancelled"){ setNotice("변환을 중지했어요."); return; }
+      if (info.state !== "done") throw new Error(info.error || "변환 실패");
+      state.noticeClosed = true;
+      if (noticeEl) noticeEl.remove();
+      vvPlayFile(vvNativeMediaFile(outName, { rootId: ref.rootId, relPath: outRel }));
+      if (typeof toast === "function")
+        toast("변환 완료 — '" + outName + "' 를 원본 옆에 저장했어요. 다음부터는 이 파일을 열면 돼요.", 5200);
+      // 새로 생긴 mp4 가 폴더 목록에도 보이게 한다.
+      const root = vvDocFolderRoot(doc);
+      if (root && root.folderRefreshRootId && typeof requestFolderRefresh === "function")
+        requestFolderRefresh(root.folderRefreshRootId);
+    } catch(e){
+      const msg = String((e && e.message) || e);
+      setNotice(msg.indexOf("no-ffmpeg") >= 0
+        ? "ffmpeg를 찾지 못했어요. ffmpeg.exe 를 ClassDock.exe 옆에 놓고 다시 시도해 주세요."
+        : "변환에 실패했어요: " + msg);
+    } finally {
+      state.converting = false;
+      setNoticeMeter(null);
+      noticeBtn.removeEventListener("click", onCancel);
+      noticeBtn.disabled = false;
+      noticeBtn.textContent = "MP4로 변환";
+      noticeBtn.title = "필요한 영상·소리만 호환 형식으로 변환해요";
     }
+  }
+
+  async function startConvert(){
+    const file = currentFile;
     if (location.protocol !== "http:" && location.protocol !== "https:"){
       setNotice("영상 변환은 ClassDock.exe 로 실행할 때만 쓸 수 있어요.");
       return;
@@ -499,15 +736,25 @@ function renderVideoPlayer(file, doc){
       setNotice("변환에는 무료 변환 도구(ffmpeg)가 필요해요. 버튼을 누르면 인터넷에서 약 90MB를 한 번만 내려받아 자동 설치됩니다.");
       return;
     }
+    // 런처가 경로를 아는 파일이면 크기와 상관없이 경로 방식으로 처리한다.
+    const nativeRef = vvNativeRefOf(doc.sourceFile || file);
+    if (nativeRef) return startConvertByPath(nativeRef);
+    // 끌어다 놓아 연 파일은 경로를 알 수 없어 본문으로 주고받는다 — 그쪽만 크기 제한이 남는다.
+    if (file.size > 1024 * 1024 * 1024){
+      setNotice("이 파일은 1GB가 넘어요. 폴더째 열면(파일 → 폴더 열기) 크기 제한 없이 변환할 수 있어요."
+        + " 끌어다 놓은 파일은 앱이 원본 위치를 알 수 없어 통째로 주고받아야 하거든요.");
+      return;
+    }
     noticeBtn.disabled = true;
+    state.converting = true;
     setNotice("MP4로 변환 중… 영상 길이에 따라 몇 분 걸릴 수 있어요. 이 탭을 닫지 마세요.");
     try {
       const res = await fetch("/convert-media", {
-        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file
+        method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Media-Reencode": state.forceVideo ? "1" : "0" }, body: file
       });
       if (!res.ok) throw new Error((await res.text()) || ("HTTP " + res.status));
       const blob = await res.blob();
-      const mp4Name = file.name.replace(/\.[^.]+$/, "") + ".mp4";
+      const mp4Name = vvNativeOutputRel({ relPath:file.name }, !!state.forceVideo);
       state.converted = new File([blob], mp4Name, { type: "video/mp4" });
       if (typeof handleFiles === "function") await handleFiles([state.converted], { transient: true });
       noticeBtn.textContent = "변환본 저장"; noticeBtn.disabled = false;
@@ -519,6 +766,21 @@ function renderVideoPlayer(file, doc){
       setNotice(msg.indexOf("no-ffmpeg") >= 0
         ? "ffmpeg를 찾지 못했어요. ffmpeg.exe 를 ClassDock.exe 옆에 놓고 다시 시도해 주세요."
         : "변환에 실패했어요: " + msg);
+    } finally {
+      state.converting = false;
+    }
+  }
+
+  function offerVideoReencode(message){
+    if (state.converting) return;
+    state.noticeClosed = false;
+    state.forceVideo = true;
+    state.playSibling = null;
+    state.converted = null;
+    showConvertNotice(message);
+    if (noticeBtn){
+      noticeBtn.textContent = "영상 다시 인코딩";
+      noticeBtn.title = "영상을 H.264 호환 형식으로 다시 인코딩해 별도 파일로 저장해요";
     }
   }
 
@@ -530,17 +792,24 @@ function renderVideoPlayer(file, doc){
       + (["avi","wmv","flv"].includes(ext) ? " AVI·WMV·FLV 형식은 대부분 지원되지 않아요." : " 파일 안의 코덱에 따라 재생이 안 될 수 있어요.")
       + " MP4(H.264)·WebM 변환을 권장합니다.";
     stage.appendChild(box);
-    if (doc.media !== "audio") showConvertNotice("재생할 수 없는 형식이에요. MP4로 변환하면 열 수 있어요.");
+    if (doc.media !== "audio") offerVideoReencode("재생할 수 없는 형식이에요. 영상을 호환 형식으로 다시 인코딩할 수 있어요.");
   });
 
   // 소리 코덱 미지원(MKV 의 AC-3/DTS 등) 감지: 몇 초 재생했는데 오디오 디코딩량이 0이면 안내.
   // webkitAudioDecodedByteCount 는 Chromium 계열 전용 — 없으면 감지를 건너뛴다(안내만 못 할 뿐 재생은 정상).
   if (doc.media !== "audio"){
+    const missingVideoCheck = () => {
+      if (state.converting || state.noticeClosed || state.videoWarningShown || !vvMissingVideoFrames(media)) return;
+      state.videoWarningShown = true;
+      offerVideoReencode("재생은 진행되지만 영상 화면이 감지되지 않아요. 영상이 있는 파일이라면 다시 인코딩해 보세요.");
+    };
+    media.addEventListener("timeupdate", missingVideoCheck);
+    doc.cleanupFns.push(() => media.removeEventListener("timeupdate", missingVideoCheck));
     const silentCheck = () => {
       if (typeof media.webkitAudioDecodedByteCount !== "number"){ media.removeEventListener("timeupdate", silentCheck); return; }
       if (media.currentTime < 3) return;
       media.removeEventListener("timeupdate", silentCheck);
-      if (media.webkitAudioDecodedByteCount === 0 && !media.muted && media.volume > 0 && !state.playSibling){
+      if (!state.forceVideo && media.webkitAudioDecodedByteCount === 0 && !media.muted && media.volume > 0 && !state.playSibling){
         showConvertNotice("영상은 나오지만 소리 코덱(AC-3·DTS 등)을 브라우저가 지원하지 않아 소리가 안 나요. MP4로 변환하면 소리가 복구됩니다.");
       }
     };
@@ -551,7 +820,7 @@ function renderVideoPlayer(file, doc){
   // 한 클릭으로 소리 나는 변환본으로 넘어가게 한다. ① 같은 폴더 그룹의 열린 문서 ② 같은 폴더(핸들) 순.
   if (doc.media !== "audio" && VV_BATCH_EXTS.includes(ext)){
     (async () => {
-      const mp4Name = file.name.replace(/\.[^.]+$/, "") + ".mp4";
+      const mp4Name = vvNativeOutputRel({ relPath:file.name }, !!state.forceVideo);
       let sibling = null;
       if (typeof docs !== "undefined"){
         const open = docs.find(d => d !== doc && d.kind === "video" && d.parentId === doc.parentId
@@ -564,7 +833,7 @@ function renderVideoPlayer(file, doc){
           try { sibling = await (await dir.getFileHandle(mp4Name)).getFile(); } catch(_){}
         }
       }
-      if (!sibling || state.noticeClosed || state.converted) return;
+      if (!sibling || state.noticeClosed || state.converted || state.forceVideo) return;
       state.playSibling = sibling;
       showConvertNotice("이 영상의 변환본(" + mp4Name + ")이 이미 있어요 — 소리까지 정상인 변환본으로 재생하세요.");
       if (noticeBtn){ noticeBtn.textContent = "변환본으로 재생"; noticeBtn.title = "같은 장면부터 변환본(MP4)으로 이어서 재생해요"; }
@@ -766,7 +1035,11 @@ function renderVideoPlayer(file, doc){
       applyCueSize();
     });
 
-    bar.append(btnCapture, btnPip, speedPick, btnOpen, btnToggle, btnSize, status, picker);
+    const btnReencode = document.createElement("button");
+    btnReencode.type = "button"; btnReencode.textContent = "영상 다시 변환";
+    btnReencode.title = "화면이 안 나오거나 깨질 때 호환 형식으로 다시 인코딩";
+    btnReencode.addEventListener("click", () => offerVideoReencode("영상을 H.264 호환 형식으로 다시 인코딩해 별도 파일로 저장해요. 영상 길이에 따라 시간이 걸릴 수 있어요."));
+    bar.append(btnCapture, btnPip, speedPick, btnReencode, btnOpen, btnToggle, btnSize, status, picker);
     wrap.appendChild(bar);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
   }
@@ -783,6 +1056,12 @@ if (typeof module !== "undefined" && module.exports){
     subtitleToVtt,
     subtitleMatchesMedia,
     msToVttTime,
-    isMediaFileName
+    isMediaFileName,
+    vvNativeRefOf,
+    vvNativeOutputRel,
+    vvMissingVideoFrames,
+    vvConvertProgressText,
+    vvConvertRemainingSec,
+    vvFormatDuration
   };
 }

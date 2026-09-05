@@ -835,9 +835,24 @@ class NativeSourceFileHandle {
   async isSameEntry(other){
     return !!(other && other.kind === "file" && String(other.nativePath || "").toLowerCase() === this.nativePath.toLowerCase());
   }
+  // 영상·오디오는 바이트를 받아오지 않는다. 수업 영상은 수 GB 짜리도 있어 통째로 옮기면 런처와
+  // 브라우저가 각각 그만큼 메모리를 쓰고, 2GB 를 넘으면 런처의 byte[] 상한에 걸려 아예 열리지 않는다.
+  // 대신 "런처가 아는 파일"이라는 표식만 들려 보낸다 — 재생은 /media-stream 이 Range 로 흘려보내고,
+  // MP4 변환도 경로만 넘겨 처리한다(video-viewer.js).
+  nativeMediaFile(meta){
+    const file = new File([], this.name, { lastModified:Number(meta && meta.lastModified) || Date.now() });
+    const define = (key, value) => {
+      try { Object.defineProperty(file, key, { value, configurable:true }); } catch(_){}
+    };
+    define("size", Number(meta && meta.size) || 0);
+    define("__nativeAbsolutePath", this.nativePath);
+    define("__nativeSource", { rootId:this.rootId, relPath:this.relPath });
+    return typeof withFileHandle === "function" ? withFileHandle(file, this) : file;
+  }
   async getFile(){
     let meta = this.meta;
     if (!meta) meta = await nativeSourceEntry(this.rootId, this.relPath);
+    if (typeof isMediaFileName === "function" && isMediaFileName(this.name)) return this.nativeMediaFile(meta);
     const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, this.relPath));
     const blob = await response.blob();
     let file = new File([blob], this.name, {

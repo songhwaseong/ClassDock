@@ -25,11 +25,19 @@ function loadWorkspaceRetentionHelpers(){
 
 test("서버는 다른 프로세스가 쓰기로 잡은 파일도 공유 모드로 읽는다", () => {
   // File.ReadAllBytes 는 FileShare.Read 라 실행 중인 파이썬의 로그 파일에서 공유 위반이 났다.
-  assert.match(launcher, /static byte\[\] ReadAllBytesShared\(string path\)/);
-  assert.match(launcher, /FileShare\.ReadWrite \| FileShare\.Delete/);
-  const body = launcher.slice(launcher.indexOf("static byte[] ReadSourceFolderFile"));
-  assert.match(body.slice(0, 500), /return ReadAllBytesShared\(full\);/);
-  assert.doesNotMatch(body.slice(0, 500), /File\.ReadAllBytes\(full\)/);
+  const body = launcher.slice(launcher.indexOf("static void WriteFileStreamResponse"));
+  assert.match(body.slice(0, 3000), /FileShare\.ReadWrite \| FileShare\.Delete/);
+  assert.doesNotMatch(body.slice(0, 3000), /File\.ReadAllBytes\(full\)/);
+});
+
+test("원본 폴더의 파일은 통째로 읽지 않고 흘려보낸다", () => {
+  // byte[] 로 한 번에 읽으면 .NET 배열 상한(2GB)에 걸려 큰 영상은 열리지도 않는다.
+  const handler = launcher.slice(launcher.indexOf('path.StartsWith("/source-folder-file?"'));
+  assert.match(handler.slice(0, 800), /WriteFileStreamResponse\(stream, full, "application\/octet-stream", headers\)/);
+  assert.doesNotMatch(launcher, /ReadAllBytesShared/);
+  // <video> 의 탐색을 위해 Range 응답(206)까지 지원해야 한다.
+  assert.match(launcher, /static bool TryParseByteRange\(/);
+  assert.match(launcher, /206 Partial Content/);
 });
 
 test("파일 하나를 읽지 못해도 폴더 스캔 전체를 버리지 않는다", () => {

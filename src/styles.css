@@ -5780,6 +5780,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .vv-notice-text{flex:1;min-width:0}
   .vv-notice button{flex:0 0 auto;font:inherit;font-size:12.5px;border:1px solid var(--border);border-radius:7px;
     padding:5px 10px;background:var(--field);color:var(--ink);font-weight:650;cursor:pointer}
+  /* 변환 진행 막대 — 남은 시간 문구와 함께 "얼마나 남았나"를 한눈에 보여 준다.
+     value 를 지우면 브라우저가 불확정(왔다갔다) 막대로 그린다(원본 길이를 모를 때). */
+  .vv-notice-meter{flex:0 0 132px;height:8px;accent-color:var(--accent)}
   .vv-notice button:hover:not(:disabled){border-color:var(--accent);background:var(--panel-hover)}
   .vv-notice button:disabled{opacity:.55;cursor:default}
   .vv-notice .vv-notice-close{border:0;background:transparent;color:var(--muted);font-size:16px;font-weight:400;padding:2px 6px}

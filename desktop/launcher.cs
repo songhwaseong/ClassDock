@@ -1,4 +1,4 @@
-﻿using Microsoft.Win32;
+using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -125,6 +125,17 @@ class ClassDockLauncher
     static readonly byte[] NpmPackageRunner = ReadResource("npm_package_runner.js");
     static readonly object ConvLock = new object();   // PowerPoint 변환은 한 번에 하나만
     static readonly object MediaConvLock = new object();   // ffmpeg 영상 변환도 한 번에 하나만
+    // 경로 방식 변환 작업표. 파일을 통째로 주고받는 /convert-media 와 달리 한 요청 안에서
+    // 끝내지 않고(몇 십 분짜리 변환도 있다) 진행률을 폴링으로 보여 준다.
+    static readonly object MediaJobLock = new object();
+    static readonly Dictionary<string, MediaConvertJob> MediaJobs = new Dictionary<string, MediaConvertJob>(StringComparer.Ordinal);
+    const int MediaJobMax = 64;
+    // <video src> 는 fetch 가 아니라 X-ClassDock-Token 헤더를 붙일 수 없다. 그래서 앱이 먼저
+    // 토큰으로 표(ticket)를 받아 그 표를 주소에 담아 재생한다. 표 하나는 파일 하나에만 쓴다.
+    static readonly object MediaTicketLock = new object();
+    static readonly Dictionary<string, MediaTicket> MediaTickets = new Dictionary<string, MediaTicket>(StringComparer.Ordinal);
+    const int MediaTicketMax = 512;
+    static readonly TimeSpan MediaTicketLifetime = TimeSpan.FromHours(12);
     static readonly object FfmpegProbeLock = new object();
     static string _ffmpegCmd = null;                   // 찾은 ffmpeg 경로 캐시(없으면 매번 재탐색 — 나중에 놓아도 인식)
     static readonly object FfmpegInstallLock = new object();
@@ -919,6 +930,11 @@ class ClassDockLauncher
             if (path.StartsWith("/workspace-save", StringComparison.Ordinal)) return true;
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
+            // 경로 방식 변환은 디스크의 파일을 읽고 쓴다 → 토큰 대상. 재생 표 발급도 같다
+            // (표를 확인해 파일을 흘려보내는 GET /media-stream 만 예외 — <video> 는 헤더를 못 붙인다).
+            if (path.StartsWith("/convert-media-path", StringComparison.Ordinal)
+                || path.StartsWith("/convert-media-cancel", StringComparison.Ordinal)
+                || path.StartsWith("/media-ticket", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/app-state", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/diagnostics/", StringComparison.Ordinal)) return true;
             if (path == "/sqlite-preview" || path == "/sqlite-disk-preview" || path == "/sqlite-exec"
@@ -967,6 +983,7 @@ class ClassDockLauncher
                 || path.StartsWith("/source-folder-list", StringComparison.Ordinal)
                 || path.StartsWith("/source-folder-file", StringComparison.Ordinal)) return true;
             if (path == "/image-memo-list" || path.StartsWith("/image-memo-file?", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/convert-media-job", StringComparison.Ordinal)) return true;
             if (path == "/can-complete") return true;
             if (path == "/python-import-index") return true;
             if (path.StartsWith("/local-file?", StringComparison.Ordinal)) return true;
@@ -1316,6 +1333,10 @@ class ClassDockLauncher
 
         public override void Write(byte[] source, int offset, int count) { inner.Write(source, offset, count); }
         public override void Flush() { inner.Flush(); }
+        // 영상 스트리밍은 상대가 버퍼를 다 채우면 몇 분씩 읽지 않는다. 그동안 Write 가 막히므로
+        // 그 응답에서만 보내기 제한 시간을 늘릴 수 있게 열어 둔다(끝나면 원래 값으로 되돌린다).
+        public override bool CanTimeout { get { return inner.CanTimeout; } }
+        public override int WriteTimeout { get { return inner.WriteTimeout; } set { inner.WriteTimeout = value; } }
         public override bool CanRead { get { return true; } }
         public override bool CanSeek { get { return false; } }
         public override bool CanWrite { get { return true; } }
@@ -1686,7 +1707,7 @@ class ClassDockLauncher
                     try
                     {
                         byte[] mp4;
-                        lock (MediaConvLock) { mp4 = ConvertMediaToMp4(body); }
+                        lock (MediaConvLock) { mp4 = ConvertMediaToMp4(body, headers.ContainsKey("X-Media-Reencode") && headers["X-Media-Reencode"] == "1"); }
                         WriteResponse(stream, "200 OK", "video/mp4", mp4);
                     }
                     catch (FfmpegMissingException)
@@ -1696,6 +1717,72 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("convert-media-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                // 큰 영상은 본문으로 주고받지 않는다 — 앱이 경로만 넘기고 ffmpeg 가 디스크에서 직접 처리한다.
+                else if (method == "POST" && path.StartsWith("/convert-media-path?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string jobId = StartMediaConvertJob(QueryValue(path, "id"), QueryValue(path, "in"), QueryValue(path, "out"), QueryValue(path, "reencode") == "1");
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes("{\"job\":" + JsonString(jobId) + "}"));
+                    }
+                    catch (FfmpegMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-ffmpeg"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("convert-media-path-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path.StartsWith("/convert-media-job?", StringComparison.Ordinal))
+                {
+                    string json = MediaConvertJobJson(QueryValue(path, "job"));
+                    if (json == null) WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("job-not-found"));
+                    else WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(json));
+                }
+                else if (method == "POST" && path.StartsWith("/convert-media-cancel?", StringComparison.Ordinal))
+                {
+                    bool found = CancelMediaConvertJob(QueryValue(path, "job"));
+                    WriteResponse(stream, found ? "200 OK" : "404 Not Found", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(found ? "ok" : "job-not-found"));
+                }
+                else if (method == "POST" && path.StartsWith("/media-ticket?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string ticket = CreateMediaTicket(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes("{\"ticket\":" + JsonString(ticket) + "}"));
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                    }
+                }
+                // 표를 확인해 파일을 흘려보낸다. <video> 는 헤더를 못 붙이므로 여기만 토큰 대신 표로 연다.
+                else if (method == "GET" && path.StartsWith("/media-stream?", StringComparison.Ordinal))
+                {
+                    string full = ResolveMediaTicketPath(QueryValue(path, "t"));
+                    if (full == null)
+                    {
+                        stream.KeepAlive = false;
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("media-ticket-invalid"));
+                    }
+                    else
+                    {
+                        try { WriteFileStreamResponse(stream, full, MediaContentType(full), headers); }
+                        catch (Exception ex)
+                        {
+                            stream.KeepAlive = false;
+                            WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(FlattenMessage(ex)));
+                        }
                     }
                 }
                 else if (method == "POST" && path == "/install-ffmpeg")
@@ -2223,8 +2310,10 @@ class ClassDockLauncher
                 {
                     try
                     {
-                        byte[] bytes = ReadSourceFolderFile(QueryValue(path, "id"), QueryValue(path, "path"));
-                        WriteResponse(stream, "200 OK", "application/octet-stream", bytes);
+                        // 큰 파일(영상 등)도 열 수 있도록 디스크에서 그대로 흘려보낸다 — byte[] 로 한 번에
+                        // 읽으면 .NET 배열 상한(2GB)에 걸리고, 그 아래에서도 파일 크기만큼 메모리를 쓴다.
+                        string full = ResolveSourceFolderFilePath(QueryValue(path, "id"), QueryValue(path, "path"));
+                        WriteFileStreamResponse(stream, full, "application/octet-stream", headers);
                     }
                     catch (FileNotFoundException ex)
                     {
@@ -3734,6 +3823,107 @@ class ClassDockLauncher
         if (body.Length > 0) stream.Write(body, 0, body.Length);
     }
 
+    // Range 헤더 한 구간(bytes=시작-끝 / bytes=-뒤에서N)만 해석한다. 여러 구간 요청은 다루지 않는다
+    // — 브라우저의 영상 재생은 항상 한 구간만 요청한다.
+    static bool TryParseByteRange(string headerValue, long total, out long start, out long end)
+    {
+        start = 0;
+        end = total - 1;
+        string value = (headerValue ?? "").Trim();
+        if (total <= 0 || !value.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return false;
+        value = value.Substring(6).Trim();
+        if (value.IndexOf(',') >= 0) return false;
+        int dash = value.IndexOf('-');
+        if (dash < 0) return false;
+        string left = value.Substring(0, dash).Trim();
+        string right = value.Substring(dash + 1).Trim();
+        if (left.Length == 0)
+        {
+            long suffix;
+            if (!long.TryParse(right, NumberStyles.None, CultureInfo.InvariantCulture, out suffix) || suffix <= 0) return false;
+            start = suffix >= total ? 0 : total - suffix;
+            end = total - 1;
+            return true;
+        }
+        if (!long.TryParse(left, NumberStyles.None, CultureInfo.InvariantCulture, out start) || start < 0 || start >= total) return false;
+        if (right.Length == 0) end = total - 1;
+        else if (!long.TryParse(right, NumberStyles.None, CultureInfo.InvariantCulture, out end) || end < start) return false;
+        if (end >= total) end = total - 1;
+        return true;
+    }
+
+    // 디스크에서 소켓으로 바로 흘려보낸다. byte[] 로 한 번에 읽으면 .NET 배열 상한(2GB) 때문에
+    // 큰 영상은 아예 열 수 없고, 그보다 작아도 파일 크기만큼 메모리를 통째로 쓴다.
+    // Range 를 지원해야 <video> 의 탐색(시킹)과 재생 중 이어받기가 동작한다.
+    // 쓰기·삭제 공유를 허용해서 연다 — 기본값(FileShare.Read)은 다른 프로세스가 쓰기로 잡고 있는
+    // 파일(실행 중인 파이썬의 로그 등)을 공유 위반으로 거부해, 폴더 동기화 전체를 막아 버린다.
+    static void WriteFileStreamResponse(Stream stream, string full, string contentType, Dictionary<string, string> headers)
+    {
+        long total;
+        using (FileStream probe = new FileStream(full, FileMode.Open, FileAccess.Read,
+                                                 FileShare.ReadWrite | FileShare.Delete))
+        {
+            total = probe.Length;
+        }
+        long start = 0, end = total - 1;
+        string rangeHeader = null;
+        bool partial = headers != null && headers.TryGetValue("Range", out rangeHeader)
+            && TryParseByteRange(rangeHeader, total, out start, out end);
+        long length = total <= 0 ? 0 : end - start + 1;
+        string header =
+            "HTTP/1.1 " + (partial ? "206 Partial Content" : "200 OK") + "\r\n" +
+            "Content-Type: " + contentType + "\r\n" +
+            "Content-Length: " + length + "\r\n" +
+            "Accept-Ranges: bytes\r\n" +
+            (partial ? "Content-Range: bytes " + start + "-" + end + "/" + total + "\r\n" : "") +
+            "Cache-Control: no-store\r\n" +
+            "X-Content-Type-Options: nosniff\r\n" +
+            "Referrer-Policy: no-referrer\r\n" +
+            "X-App: classdock\r\n" +
+            ConnectionHeader(stream) +
+            "\r\n";
+        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
+        stream.Write(headerBytes, 0, headerBytes.Length);
+        if (length <= 0) return;
+        // 상대가 버퍼를 다 채우면 몇 분씩 읽지 않는다(재생을 멈춰 둔 영상). 그동안 Write 가 막히므로
+        // 이 응답에서만 보내기 제한을 늘리고, 끝나면 원래 값으로 되돌린다.
+        int savedTimeout = 0;
+        bool timeoutChanged = false;
+        try { savedTimeout = stream.WriteTimeout; stream.WriteTimeout = 10 * 60 * 1000; timeoutChanged = true; }
+        catch { timeoutChanged = false; }
+        long left = length;
+        try
+        {
+            using (FileStream fs = new FileStream(full, FileMode.Open, FileAccess.Read,
+                                                  FileShare.ReadWrite | FileShare.Delete, 1024 * 1024))
+            {
+                fs.Seek(start, SeekOrigin.Begin);
+                byte[] buffer = new byte[1024 * 1024];
+                while (left > 0)
+                {
+                    int want = (int)Math.Min(buffer.Length, left);
+                    int got = fs.Read(buffer, 0, want);
+                    if (got <= 0) break;
+                    stream.Write(buffer, 0, got);
+                    left -= got;
+                }
+            }
+        }
+        // 머리말을 이미 보낸 뒤라 오류 응답으로 바꿔 쓸 수 없다(읽던 파일이 사라지거나 상대가 끊은 경우).
+        catch { }
+        finally
+        {
+            if (timeoutChanged) try { stream.WriteTimeout = savedTimeout; } catch { }
+            // 약속한 Content-Length 를 채우지 못했으면 0 으로 메우는 대신 연결을 닫아
+            // 상대가 잘린 응답임을 알게 한다.
+            if (left > 0)
+            {
+                HttpConnectionStream truncated = stream as HttpConnectionStream;
+                if (truncated != null) truncated.KeepAlive = false;
+            }
+        }
+    }
+
     // sandbox(origin null) iframe 의 fetch 가 읽을 수 있도록 CORS 를 허용한 응답 — 지도 타일 프록시 전용
     static void WriteCorsResponse(Stream stream, string status, string contentType, byte[] body)
     {
@@ -5195,34 +5385,6 @@ class ClassDockLauncher
                 .Append('}');
         }
         return json.Append("]}").ToString();
-    }
-
-    // File.ReadAllBytes 는 FileShare.Read 로 열어, 다른 프로세스가 쓰기로 잡고 있는 파일(실행 중인
-    // 파이썬의 로그 등)을 공유 위반으로 거부한다. 폴더 동기화는 그런 파일도 읽어야 하므로 쓰기·삭제
-    // 공유를 허용해서 연다. 쓰는 중인 파일은 중간 상태를 읽을 수 있지만, 못 읽어 동기화 전체가
-    // 실패하는 것보다 낫다.
-    static byte[] ReadAllBytesShared(string path)
-    {
-        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read,
-                                              FileShare.ReadWrite | FileShare.Delete))
-        {
-            using (MemoryStream buffer = new MemoryStream())
-            {
-                byte[] chunk = new byte[1024 * 1024];
-                int read;
-                while ((read = fs.Read(chunk, 0, chunk.Length)) > 0) buffer.Write(chunk, 0, read);
-                return buffer.ToArray();
-            }
-        }
-    }
-
-    static byte[] ReadSourceFolderFile(string id, string relativePath)
-    {
-        string root, full;
-        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
-            throw new UnauthorizedAccessException("bad-source-folder-path");
-        if (!File.Exists(full)) throw new FileNotFoundException("source-file-not-found");
-        return ReadAllBytesShared(full);
     }
 
     static void WriteSourceFolderFile(string id, string relativePath, byte[] body)
@@ -7481,6 +7643,14 @@ class ClassDockLauncher
 
     static bool RunFfmpeg(string cmd, string args, int timeoutMs)
     {
+        string ignored;
+        return ReadFfmpegInfo(cmd, args, timeoutMs, out ignored);
+    }
+
+    // 두 파이프를 동시에 비워야 타임아웃과 GPU 초기화 실패가 실제로 처리된다.
+    static bool ReadFfmpegInfo(string cmd, string args, int timeoutMs, out string info)
+    {
+        info = "";
         try
         {
             ProcessStartInfo psi = new ProcessStartInfo(cmd, args);
@@ -7488,18 +7658,29 @@ class ClassDockLauncher
             psi.CreateNoWindow = true;
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
-            Process p = Process.Start(psi);
-            if (p == null) return false;
-            // -loglevel error 라 출력이 거의 없다(파이프 교착 없음 — RunPyOutput 과 같은 방식)
-            p.StandardOutput.ReadToEnd();
-            p.StandardError.ReadToEnd();
-            if (!p.WaitForExit(timeoutMs)) { try { p.Kill(); } catch { } return false; }
-            return p.ExitCode == 0;
+            using (Process p = Process.Start(psi))
+            {
+                if (p == null) return false;
+                StringBuilder errors = new StringBuilder();
+                Thread stdout = new Thread(delegate() { try { while (p.StandardOutput.ReadLine() != null) { } } catch { } });
+                Thread stderr = new Thread(delegate() {
+                    try { string line; while ((line = p.StandardError.ReadLine()) != null)
+                        lock (errors) { if (errors.Length < 131072) errors.AppendLine(line); }
+                    } catch { }
+                });
+                stdout.IsBackground = stderr.IsBackground = true;
+                stdout.Start(); stderr.Start();
+                bool exited = p.WaitForExit(timeoutMs);
+                if (!exited) { try { p.Kill(); } catch { } }
+                stdout.Join(1000); stderr.Join(1000);
+                lock (errors) { info = errors.ToString(); }
+                return exited && p.ExitCode == 0;
+            }
         }
         catch { return false; }
     }
 
-    static byte[] ConvertMediaToMp4(byte[] media)
+    static byte[] ConvertMediaToMp4(byte[] media, bool forceVideo = false)
     {
         string ffmpeg = FindFfmpeg();
         if (ffmpeg == null) throw new FfmpegMissingException();
@@ -7510,19 +7691,7 @@ class ClassDockLauncher
         try
         {
             File.WriteAllBytes(inPath, media);
-            // 1차: 영상 스트림은 복사하고 소리만 AAC 로 재인코딩 — MKV 의 AC-3/DTS 소리 문제를 몇 분 안에 해결
-            string fast = "-y -hide_banner -loglevel error -i \"" + inPath + "\""
-                + " -map 0:v:0? -map 0:a:0? -c:v copy -c:a aac -b:a 192k -movflags +faststart \"" + outPath + "\"";
-            bool ok = RunFfmpeg(ffmpeg, fast, 600000) && File.Exists(outPath) && new FileInfo(outPath).Length > 0;
-            if (!ok)
-            {
-                // 2차: 영상 코덱 자체가 MP4 와 안 맞으면(H.264 아님 등) 전체 재인코딩(느리지만 확실)
-                try { if (File.Exists(outPath)) File.Delete(outPath); } catch { }
-                string full = "-y -hide_banner -loglevel error -i \"" + inPath + "\""
-                    + " -map 0:v:0? -map 0:a:0? -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p"
-                    + " -c:a aac -b:a 192k -movflags +faststart \"" + outPath + "\"";
-                ok = RunFfmpeg(ffmpeg, full, 1800000) && File.Exists(outPath) && new FileInfo(outPath).Length > 0;
-            }
+            bool ok = ConvertMediaFile(ffmpeg, inPath, outPath, null, forceVideo);
             if (!ok) throw new Exception("ffmpeg-failed");
             return File.ReadAllBytes(outPath);
         }
@@ -7530,6 +7699,431 @@ class ClassDockLauncher
         {
             try { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); } catch { }
         }
+    }
+
+    /* ===== 경로 방식 영상 변환 =====
+     * /convert-media 는 원본을 HTTP 본문으로 통째로 받아 byte[] 로 들고 있다가 임시 파일에 쓴다.
+     * 그 방식은 .NET 배열 상한(2GB)에 걸리고, 걸리기 전에도 원본 크기만큼 메모리를 먹는다.
+     * 여기서는 앱이 파일 경로(원본 폴더 ID + 상대 경로)만 넘기고 ffmpeg 가 디스크에서 직접
+     * 읽고 쓴다 — 크기 제한이 사라지고, 진행률도 ffmpeg 가 알려 주는 실제 값으로 보여 준다. */
+
+    static string ResolveSourceFolderFilePath(string id, string relativePath)
+    {
+        string root, full;
+        if (!TryResolveSourceFolderPath(id, relativePath, false, out root, out full))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        if (!File.Exists(full)) throw new FileNotFoundException("source-file-not-found");
+        return full;
+    }
+
+    static string MediaContentType(string path)
+    {
+        switch (Path.GetExtension(path ?? "").ToLowerInvariant())
+        {
+            case ".mp4": case ".m4v": return "video/mp4";
+            case ".webm": return "video/webm";
+            case ".ogv": return "video/ogg";
+            case ".mov": return "video/quicktime";
+            case ".mkv": return "video/x-matroska";
+            case ".avi": return "video/x-msvideo";
+            case ".wmv": return "video/x-ms-wmv";
+            case ".flv": return "video/x-flv";
+            case ".mp3": return "audio/mpeg";
+            case ".m4a": case ".aac": return "audio/mp4";
+            case ".wav": return "audio/wav";
+            case ".ogg": case ".oga": return "audio/ogg";
+            case ".flac": return "audio/flac";
+            case ".weba": return "audio/webm";
+            default: return "application/octet-stream";
+        }
+    }
+
+    // <video src> 로 흘려보낼 파일 하나에만 쓰는 표를 발급한다. 미디어 요소의 요청에는
+    // X-ClassDock-Token 헤더를 붙일 수 없어, 표 자체가 그 한 파일의 열쇠 역할을 한다.
+    static string CreateMediaTicket(string id, string relativePath)
+    {
+        ResolveSourceFolderFilePath(id, relativePath);   // 표를 주기 전에 실제로 열리는 파일인지 확인
+        string ticket = CreateLocalAuthToken();
+        DateTime now = DateTime.UtcNow;
+        lock (MediaTicketLock)
+        {
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, MediaTicket> item in MediaTickets)
+                if (item.Value.ExpiresUtc <= now) stale.Add(item.Key);
+            foreach (string key in stale) MediaTickets.Remove(key);
+            while (MediaTickets.Count >= MediaTicketMax)
+            {
+                string oldest = null;
+                foreach (KeyValuePair<string, MediaTicket> item in MediaTickets)
+                    if (oldest == null || item.Value.ExpiresUtc < MediaTickets[oldest].ExpiresUtc) oldest = item.Key;
+                if (oldest == null) break;
+                MediaTickets.Remove(oldest);
+            }
+            MediaTicket entry = new MediaTicket();
+            entry.RootId = id;
+            entry.RelPath = relativePath;
+            entry.ExpiresUtc = now + MediaTicketLifetime;
+            MediaTickets[ticket] = entry;
+        }
+        return ticket;
+    }
+
+    static string ResolveMediaTicketPath(string ticket)
+    {
+        MediaTicket found;
+        lock (MediaTicketLock)
+        {
+            if (string.IsNullOrEmpty(ticket) || !MediaTickets.TryGetValue(ticket, out found)) return null;
+            if (found.ExpiresUtc <= DateTime.UtcNow) { MediaTickets.Remove(ticket); return null; }
+        }
+        try { return ResolveSourceFolderFilePath(found.RootId, found.RelPath); }
+        catch { return null; }
+    }
+
+    // "00:12:34.56" 또는 "00:12:34.56, start: 0.000000" 의 앞부분을 마이크로초로.
+    static long ParseTimecodeUs(string text)
+    {
+        string value = (text ?? "").Trim();
+        int cut = value.IndexOfAny(new char[] { ',', ' ' });
+        if (cut > 0) value = value.Substring(0, cut);
+        string[] parts = value.Split(':');
+        if (parts.Length != 3) return 0;
+        int hours, minutes;
+        double seconds;
+        if (!int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out hours)) return 0;
+        if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out minutes)) return 0;
+        if (!double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out seconds)) return 0;
+        double total = hours * 3600.0 + minutes * 60.0 + seconds;
+        return total > 0 ? (long)(total * 1000000.0) : 0;
+    }
+
+    internal sealed class MediaInputInfo
+    {
+        public long DurationUs;
+        public bool CopyVideo;
+        public bool CopyAudio;
+    }
+
+    // ffprobe를 별도로 설치하지 않아도 입력의 첫 영상·소리 정보를 얻는다.
+    // MP4에 담을 수 있는 HEVC/MPEG-4나 H.264 10-bit/4:4:4도 브라우저 호환을 위해 변환한다.
+    internal static MediaInputInfo ParseMediaInputInfo(string text)
+    {
+        MediaInputInfo info = new MediaInputInfo();
+        bool videoSeen = false, audioSeen = false;
+        foreach (string line in (text ?? "").Split('\n'))
+        {
+            string value = line.Trim();
+            if (value.StartsWith("Duration:", StringComparison.Ordinal))
+                info.DurationUs = ParseTimecodeUs(value.Substring(9));
+            if (!value.StartsWith("Stream #0:", StringComparison.Ordinal)) continue;
+            var video = System.Text.RegularExpressions.Regex.Match(value, @"^Stream #0:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?: Video: (.*)$");
+            var audio = System.Text.RegularExpressions.Regex.Match(value, @"^Stream #0:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?: Audio: (.*)$");
+            if (!videoSeen && video.Success)
+            {
+                videoSeen = true;
+                string format = video.Groups[1].Value;
+                info.CopyVideo = System.Text.RegularExpressions.Regex.IsMatch(format,
+                    @"^h264 \((?:Constrained Baseline|Baseline|Main|High)\)(?:,| )")
+                    && System.Text.RegularExpressions.Regex.IsMatch(format, @", yuv420p(?:\(|,| )")
+                    && format.IndexOf("attached pic", StringComparison.Ordinal) < 0;
+            }
+            if (!audioSeen && audio.Success)
+            {
+                audioSeen = true;
+                info.CopyAudio = audio.Groups[1].Value.StartsWith("aac (LC)", StringComparison.Ordinal);
+            }
+        }
+        return info;
+    }
+
+    static MediaInputInfo ProbeMediaInput(string ffmpeg, string inPath)
+    {
+        string info;
+        // 출력이 없어서 exit code는 1이다. 입력 정보만 파싱하고 미확인 코덱은 복사하지 않는다.
+        ReadFfmpegInfo(ffmpeg, "-hide_banner -nostdin -i \"" + inPath + "\"", 30000, out info);
+        return ParseMediaInputInfo(info);
+    }
+
+    internal sealed class MediaConvertAttempt
+    {
+        public string Encoder;
+        public bool CopyAudio;
+        public string Stage {
+            get { return Encoder == "copy" ? (CopyAudio ? "remux" : "copy")
+                : Encoder == "libx264" ? "encode" : "hardware"; }
+        }
+    }
+
+    internal static List<MediaConvertAttempt> MediaConvertPlan(MediaInputInfo info)
+    {
+        List<MediaConvertAttempt> plan = new List<MediaConvertAttempt>();
+        string[] encoders = info.CopyVideo
+            ? new string[] { "copy", "h264_nvenc", "h264_qsv", "h264_amf", "libx264" }
+            : new string[] { "h264_nvenc", "h264_qsv", "h264_amf", "libx264" };
+        foreach (string encoder in encoders)
+        {
+            plan.Add(new MediaConvertAttempt { Encoder = encoder, CopyAudio = info.CopyAudio });
+            // AAC 복사가 실패해도 영상까지 불필요하게 재인코딩하지 않는다.
+            if (info.CopyAudio) plan.Add(new MediaConvertAttempt { Encoder = encoder, CopyAudio = false });
+        }
+        return plan;
+    }
+
+    static string MediaVideoArgs(string encoder)
+    {
+        if (encoder == "copy") return " -c:v copy";
+        string options;
+        switch (encoder)
+        {
+            case "h264_nvenc": options = " -preset p4 -rc vbr -cq 23 -b:v 0"; break;
+            case "h264_qsv": options = " -preset veryfast -global_quality 23"; break;
+            case "h264_amf": options = " -usage transcoding -quality speed -rc cqp -qp_i 23 -qp_p 23 -qp_b 23"; break;
+            default: options = " -preset veryfast -crf 23"; break;
+        }
+        return " -c:v " + encoder + options
+            + " -vf \"scale=ceil(iw/2)*2:ceil(ih/2)*2\" -pix_fmt yuv420p";
+    }
+
+    // 임시 출력은 확장자가 .part 라 ffmpeg 가 컨테이너를 짐작할 수 없다 → -f mp4 로 못박는다.
+    internal static string MediaConvertArgs(string inPath, string outPath, MediaConvertAttempt attempt)
+    {
+        string head = "-y -hide_banner -loglevel error -nostdin -progress pipe:1 -nostats"
+            + " -i \"" + inPath + "\" -map 0:v:0? -map 0:a:0?";
+        string audio = attempt.CopyAudio ? " -c:a copy" : " -c:a aac -b:a 192k";
+        return head + MediaVideoArgs(attempt.Encoder) + audio + " -movflags +faststart -f mp4 \"" + outPath + "\"";
+    }
+
+    // MediaConvLock 아래에서만 접근. 인코더 목록에 있어도 드라이버가 안 맞을 수 있어 실제로 시험한다.
+    static readonly Dictionary<string, bool> MediaHardwareSupport = new Dictionary<string, bool>();
+    static bool CanEncodeMediaHardware(string ffmpeg, string encoder)
+    {
+        string key = ffmpeg + "|" + encoder;
+        try { key += "|" + File.GetLastWriteTimeUtc(ffmpeg).Ticks; } catch { }
+        bool supported;
+        if (MediaHardwareSupport.TryGetValue(key, out supported)) return supported;
+        supported = RunFfmpeg(ffmpeg, "-hide_banner -loglevel error -nostdin -f lavfi"
+            + " -i color=c=black:s=128x128:r=1 -frames:v 1 -an" + MediaVideoArgs(encoder) + " -f null -", 10000);
+        MediaHardwareSupport[key] = supported;
+        return supported;
+    }
+
+    // 파일 경로 방식과 끌어다 놓기 방식이 같은 선택·재시도 정책을 사용한다.
+    internal static bool ExecuteMediaPlan(MediaInputInfo info, Func<string, bool> supportsHardware,
+        Func<MediaConvertAttempt, bool> run, Func<bool> cancelled)
+    {
+        foreach (MediaConvertAttempt attempt in MediaConvertPlan(info))
+        {
+            if (cancelled()) return false;
+            if (attempt.Stage == "hardware" && !supportsHardware(attempt.Encoder)) continue;
+            if (cancelled()) return false;
+            if (run(attempt)) return !cancelled();
+        }
+        return false;
+    }
+
+    internal static bool ConvertMediaFile(string ffmpeg, string inPath, string outPath, MediaConvertJob job, bool forceVideo = false)
+    {
+        MediaInputInfo info = ProbeMediaInput(ffmpeg, inPath);
+        if (forceVideo) info.CopyVideo = false; // 재생 실패 시 H.264라도 복사하지 않고 다시 인코딩
+        if (job != null) Interlocked.Exchange(ref job.DurationUs, info.DurationUs);
+        return ExecuteMediaPlan(info,
+            delegate(string encoder) { return CanEncodeMediaHardware(ffmpeg, encoder); },
+            delegate(MediaConvertAttempt attempt) {
+                if (File.Exists(outPath)) File.Delete(outPath);
+                if (job != null) { job.Stage = attempt.Stage; MediaJobStageReset(job); }
+                string args = MediaConvertArgs(inPath, outPath, attempt);
+                bool ok = job == null ? RunFfmpeg(ffmpeg, args, 1800000) : RunFfmpegTracked(ffmpeg, args, job);
+                return ok && File.Exists(outPath) && new FileInfo(outPath).Length > 0;
+            },
+            delegate() { return job != null && job.Cancelled; });
+    }
+
+    // RunFfmpeg 과 달리 진행률을 읽으면서 기다리고, 중지 요청이 오면 프로세스를 끊는다.
+    static bool RunFfmpegTracked(string cmd, string args, MediaConvertJob job)
+    {
+        Process p = null;
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(cmd, args);
+            psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            p = Process.Start(psi);
+            if (p == null) return false;
+            lock (MediaJobLock) { job.Proc = p; }
+            if (job.Cancelled) { try { p.Kill(); } catch { } }
+            Process running = p;
+            // stderr 을 비우지 않으면 파이프가 차서 ffmpeg 가 멈춘다(-loglevel error 라도 경고는 나온다).
+            Thread drain = new Thread(delegate() { try { running.StandardError.ReadToEnd(); } catch { } });
+            drain.IsBackground = true;
+            drain.Start();
+            string line;
+            while ((line = p.StandardOutput.ReadLine()) != null)
+            {
+                long us = -1;
+                if (line.StartsWith("out_time_us=", StringComparison.Ordinal))
+                {
+                    long parsed;
+                    if (long.TryParse(line.Substring(12).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out parsed)) us = parsed;
+                }
+                else if (line.StartsWith("out_time=", StringComparison.Ordinal))
+                {
+                    us = ParseTimecodeUs(line.Substring(9));
+                }
+                else if (line.StartsWith("speed=", StringComparison.Ordinal))
+                {
+                    // "speed=12.5x" · 아직 모를 때는 "speed=N/A" 로 온다.
+                    double rate;
+                    if (double.TryParse(line.Substring(6).Trim().TrimEnd('x', 'X'),
+                            NumberStyles.Float, CultureInfo.InvariantCulture, out rate) && rate > 0)
+                        Interlocked.Exchange(ref job.SpeedMilli, (long)Math.Round(rate * 1000.0));
+                }
+                if (us >= 0) Interlocked.Exchange(ref job.DoneUs, us);
+            }
+            p.WaitForExit();
+            try { drain.Join(3000); } catch { }
+            return !job.Cancelled && p.ExitCode == 0;
+        }
+        catch { return false; }
+        finally
+        {
+            lock (MediaJobLock) { job.Proc = null; }
+            if (p != null) { try { p.Dispose(); } catch { } }
+        }
+    }
+
+    // 단계가 바뀌면 진행률·배속·경과 시간을 함께 0 부터 다시 센다. 2차 재인코딩은 1차와
+    // 속도가 전혀 달라, 앞 단계의 값을 물려받으면 남은 시간이 엉뚱하게 나온다.
+    static void MediaJobStageReset(MediaConvertJob job)
+    {
+        Interlocked.Exchange(ref job.DoneUs, 0);
+        Interlocked.Exchange(ref job.SpeedMilli, 0);
+        Interlocked.Exchange(ref job.StageStartedTicks, DateTime.UtcNow.Ticks);
+    }
+
+    static void RunMediaConvertJob(object state)
+    {
+        MediaConvertJob job = (MediaConvertJob)state;
+        string outTemp = job.OutPath + ".part";
+        try
+        {
+            string ffmpeg = FindFfmpeg();
+            if (ffmpeg == null) throw new FfmpegMissingException();
+            // 변환은 CPU 를 다 쓰므로 예전 방식과 마찬가지로 한 번에 하나만 돌린다.
+            lock (MediaConvLock)
+            {
+                if (job.Cancelled) { job.State = "cancelled"; return; }
+                job.State = "running";
+                bool ok = ConvertMediaFile(ffmpeg, job.InPath, outTemp, job, job.ForceVideoEncode);
+                if (job.Cancelled) { job.State = "cancelled"; return; }
+                if (!ok) throw new Exception("ffmpeg-failed");
+                try { if (File.Exists(job.OutPath)) File.Delete(job.OutPath); } catch { }
+                File.Move(outTemp, job.OutPath);
+                Interlocked.Exchange(ref job.DoneUs, Interlocked.Read(ref job.DurationUs));
+                job.State = "done";
+            }
+        }
+        catch (FfmpegMissingException)
+        {
+            job.Error = "no-ffmpeg";
+            job.State = "error";
+        }
+        catch (Exception ex)
+        {
+            job.Error = FlattenMessage(ex);
+            job.State = "error";
+        }
+        finally
+        {
+            // 끝내 완성하지 못한 조각은 남기지 않는다 — 다음에 열 때 깨진 mp4 로 보이면 안 된다.
+            if (job.State != "done") { try { if (File.Exists(outTemp)) File.Delete(outTemp); } catch { } }
+        }
+    }
+
+    static string StartMediaConvertJob(string id, string inRel, string outRel, bool forceVideo = false)
+    {
+        if (FindFfmpeg() == null) throw new FfmpegMissingException();
+        string root, inFull, outFull;
+        if (!TryResolveSourceFolderPath(id, inRel, false, out root, out inFull) || !File.Exists(inFull))
+            throw new FileNotFoundException("source-file-not-found");
+        if (!TryResolveSourceFolderPath(id, outRel, false, out root, out outFull))
+            throw new UnauthorizedAccessException("bad-source-folder-path");
+        // 결과는 언제나 MP4 다. 확장자를 못박아 두면 실수로 원본 폴더의 다른 파일을 덮어쓰는 일도 막힌다.
+        if (!Path.GetExtension(outFull).Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("output-must-be-mp4");
+        if (string.Equals(inFull, outFull, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("output-same-as-input");
+        string outDir = Path.GetDirectoryName(outFull);
+        if (string.IsNullOrEmpty(outDir) || !Directory.Exists(outDir))
+            throw new DirectoryNotFoundException("output-folder-not-found");
+
+        MediaConvertJob job = new MediaConvertJob();
+        job.Id = Guid.NewGuid().ToString("N");
+        job.InPath = inFull;
+        job.OutPath = outFull;
+        job.OutName = Path.GetFileName(outFull);
+        job.ForceVideoEncode = forceVideo;
+        job.State = "queued";
+        job.Stage = "";
+        job.Error = "";
+        job.StartedUtc = DateTime.UtcNow;
+        lock (MediaJobLock)
+        {
+            // 끝난 지 오래된 작업표는 치운다. 앱이 결과를 확인하기 전에 지워지지 않게 여유를 둔다.
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, MediaConvertJob> item in MediaJobs)
+            {
+                string finished = item.Value.State;
+                if (finished != "queued" && finished != "running"
+                    && (DateTime.UtcNow - item.Value.StartedUtc) > TimeSpan.FromHours(6)) stale.Add(item.Key);
+            }
+            foreach (string key in stale) MediaJobs.Remove(key);
+            if (MediaJobs.Count >= MediaJobMax) throw new Exception("too-many-convert-jobs");
+            MediaJobs[job.Id] = job;
+        }
+        Thread worker = new Thread(RunMediaConvertJob);
+        worker.IsBackground = true;
+        worker.Start(job);
+        return job.Id;
+    }
+
+    static string MediaConvertJobJson(string jobId)
+    {
+        MediaConvertJob job;
+        lock (MediaJobLock) { if (!MediaJobs.TryGetValue(jobId ?? "", out job)) return null; }
+        long duration = Interlocked.Read(ref job.DurationUs);
+        long done = Interlocked.Read(ref job.DoneUs);
+        // 길이를 못 알아낸 원본에서는 -1 을 보내 화면이 퍼센트 대신 "변환 중"만 보이게 한다.
+        int percent = duration > 0 ? (int)Math.Min(100, Math.Max(0, done * 100 / duration)) : -1;
+        if (job.State == "done") percent = 100;
+        // 남은 시간은 화면에서 계산한다. 여기서는 그 재료(원본 길이·처리한 길이·배속·경과)만 보낸다.
+        long stageTicks = Interlocked.Read(ref job.StageStartedTicks);
+        long elapsedMs = stageTicks > 0
+            ? (long)(DateTime.UtcNow - new DateTime(stageTicks, DateTimeKind.Utc)).TotalMilliseconds : 0;
+        return "{\"state\":" + JsonString(job.State)
+            + ",\"stage\":" + JsonString(job.Stage ?? "")
+            + ",\"percent\":" + percent
+            + ",\"durationUs\":" + duration
+            + ",\"doneUs\":" + done
+            + ",\"speedMilli\":" + Interlocked.Read(ref job.SpeedMilli)
+            + ",\"elapsedMs\":" + (elapsedMs > 0 ? elapsedMs : 0)
+            + ",\"name\":" + JsonString(job.OutName ?? "")
+            + ",\"error\":" + JsonString(job.Error ?? "") + "}";
+    }
+
+    static bool CancelMediaConvertJob(string jobId)
+    {
+        MediaConvertJob job;
+        Process running;
+        lock (MediaJobLock)
+        {
+            if (!MediaJobs.TryGetValue(jobId ?? "", out job)) return false;
+            job.Cancelled = true;
+            running = job.Proc;
+        }
+        if (running != null) { try { running.Kill(); } catch { } }
+        return true;
     }
 
     static string FindPython()
@@ -12637,5 +13231,38 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
 class PowerPointMissingException : Exception { }
 class PythonMissingException : Exception { }
 class JavaMissingException : Exception { }
+// <video src> 하나에만 쓰는 재생 표. 실제 경로가 아니라 원본 폴더 ID + 상대 경로를 들고 있어,
+// 표가 새어 나가도 그 폴더 밖은 열 수 없다.
+sealed class MediaTicket
+{
+    public string RootId;
+    public string RelPath;
+    public DateTime ExpiresUtc;
+}
+
+// 경로 방식 MP4 변환 한 건. 상태·진행률은 HTTP 스레드가 폴링으로 읽는다.
+sealed class MediaConvertJob
+{
+    public string Id;
+    public string InPath;
+    public string OutPath;
+    public string OutName;
+    public bool ForceVideoEncode;
+    public volatile string State;    // queued | running | done | error | cancelled
+    public volatile string Stage;    // remux(모두 복사) | copy(소리 변환) | hardware(GPU) | encode(CPU)
+    public volatile string Error;
+    public volatile bool Cancelled;
+    public Process Proc;             // MediaJobLock 아래에서만 읽고 쓴다
+    public long DurationUs;          // Interlocked 로만 다룬다
+    public long DoneUs;
+    // ffmpeg 가 알려 주는 배속(원본 1초를 몇 초 만에 처리하는지) × 1000. 0 이면 아직 모른다.
+    // 남은 시간은 이 값으로 어림한다 — ffmpeg 자신이 쓰는 것과 같은 누적 평균이라 잘 안 흔들린다.
+    public long SpeedMilli;
+    // 현재 단계가 시작된 시각(UTC ticks). 2차 재인코딩으로 넘어가면 진행률이 0 부터 다시 가므로
+    // 경과 시간도 단계별로 다시 센다.
+    public long StageStartedTicks;
+    public DateTime StartedUtc;
+}
+
 class FfmpegMissingException : Exception { }
 class DbMismatchException : Exception { }
