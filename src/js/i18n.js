@@ -620,6 +620,7 @@
     "명령 검색": "Search commands",
     "일치하는 기능이 없어요": "No matching features",
     "실행하지 못했어요.": "Couldn't run that.",
+    "새 자바 코드 (.java)": "New Java file (.java)",
     "새 노트북 (.ipynb)": "New notebook (.ipynb)",
     "새 빈 표 (엑셀)": "New spreadsheet (Excel)",
     "수업 리플레이 열기 (.lesson)": "Open lesson replay (.lesson)",

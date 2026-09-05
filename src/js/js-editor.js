@@ -298,9 +298,13 @@ function buildJsLibraryPicker(bar, button, storageKey, options){
 // ── 새 자바스크립트 파일 만들기 ─────────────────────────────────────────────
 // 파이썬 스크래치와 같은 길을 쓴다(createScratchInFolder·handleFiles) — 폴더 문맥·이름 충돌 회피·
 // 사이드바에서 바로 이름 고치기까지 그대로 따라온다.
+// 첫 줄을 비워 두고 안내는 편집기 층으로 얹는다 — 이유는 pythonScratchStarter(code-viewer.js) 주석 참고.
 function jsScratchStarter(){
+  return "\nconsole.log(\"Hello, JavaScript!\");\n";
+}
+function jsScratchHint(){
   const prompt = typeof t === "function" ? t("여기에 자바스크립트 코드를 작성하고 ▶ 실행") : "여기에 자바스크립트 코드를 작성하고 ▶ 실행";
-  return "// " + prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")\nconsole.log(\"Hello, JavaScript!\");\n";
+  return prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")";
 }
 function jsScratchFileName(number = 1){
   const base = typeof window.t === "function" ? window.t("새 코드") : "새 코드";
@@ -337,7 +341,10 @@ function renderJsRunnable(context){
   const fingerprint = fingerprintBytes((file && file.name) || "code.js", sourceBytes);
   const restoredDraft = loadPythonDraft(draftKey, fingerprint);
 
-  const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
+  const jsInitial = restoredDraft === null ? text : restoredDraft;
+  const editor = buildCodeEditor(jsInitial, prof, {
+    // 아직 한 글자도 안 친 새 파일일 때만 안내를 얹는다(code-viewer.js 파이썬 쪽과 같은 판정).
+    hint: jsInitial === jsScratchStarter() ? jsScratchHint() : "",
     // 파이썬 전용 지능(Jedi 질의·import 문맥·멤버 추론)을 끄고 확장자에 맞는 키워드를 쓴다.
     // 이걸 넘기지 않으면 .js 편집기가 파이썬 키워드로 완성하고, 로컬 Python 이 있으면
     // 파이썬 분석기(Jedi)에 자바스크립트 코드를 물어보게 된다.

@@ -31,6 +31,7 @@
     C("openFiles","📂","파일 열기", () => { if (typeof window.pickFilesOrInput === "function") window.pickFilesOrInput($("fileInput")); else clickId("sbOpenFiles"); }, { sc:"openFiles", kw:"open file 파일 열기 불러오기 추가" }),
     C("openFolder","🗂️","폴더 열기", () => { if (typeof window.pickFolderOrInput === "function") window.pickFolderOrInput($("folderInput")); else clickId("sbOpenFolder"); }, { sc:"openFolder", kw:"folder 폴더 열기" }),
     C("newPython","🐍","새 파이썬 코드", () => callFn("newPythonScratch"), { sc:"newPython", kw:"python 파이썬 코드 새 만들기 new" }),
+    C("newJava","☕","새 자바 코드 (.java)", () => callFn("newJavaScratch"), { kw:"java 자바 코드 새 만들기 new class 클래스 jdk" }),
     C("newNotebook","📓","새 노트북 (.ipynb)", () => callFn("newNotebookScratch"), { kw:"jupyter notebook 노트북 ipynb 커널 셀" }),
     C("newSheet","📊","새 빈 표 (엑셀)", () => callFn("newSpreadsheetScratch"), { kw:"excel sheet 엑셀 표 스프레드시트 xlsx" }),
     C("newBoard","🖊️","새 화이트보드", () => callFn("newWhiteboard"), { sc:"newBoard", kw:"whiteboard 화이트보드 칠판 판서 필기" }),

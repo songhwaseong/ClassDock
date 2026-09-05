@@ -470,14 +470,19 @@ function mountConceptEditor(doc){
   const zoomTools = document.createElement("div"); zoomTools.className = "concept-zoom-tools"; const zoomOutBtn = conceptButton("−", "축소 (Ctrl+마우스 휠 아래)"), zoomResetBtn = conceptButton("100%", "배율 100%로 되돌리고 관계도를 화면 가운데로 (Home 키는 화면에 맞춤)"), zoomInBtn = conceptButton("＋", "확대 (Ctrl+마우스 휠 위)"); zoomTools.append(zoomOutBtn, zoomResetBtn, zoomInBtn);
   const tableBtn = conceptButton("표·개요", "엑셀·CSV 표나 개요 글에서 카드 가져오기 · 관계 CSV·개요 내보내기");
   const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
-  bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, tableBtn, presentBtn, buildPresentBtn, printBtn, saveBtn);
+  const edgePicked = document.createElement("div"); edgePicked.className = "concept-edge-picked"; edgePicked.hidden = true; edgePicked.setAttribute("aria-live", "polite");
+  const edgePickedCount = document.createElement("span"), edgePickedClear = conceptButton("선택 해제", "고른 관계선을 모두 놓기 (Esc)", "concept-edge-picked-clear");
+  edgePicked.append(edgePickedCount, edgePickedClear);
+  // 알림은 도구막대 맨 끝에 둔다(나타났다 사라져도 다른 버튼이 밀리지 않는다).
+  bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, tableBtn, presentBtn, buildPresentBtn, printBtn, saveBtn, edgePicked);
   const viewport = document.createElement("div"); viewport.className = "concept-viewport"; viewport.tabIndex = 0;
   const stage = document.createElement("div"); stage.className = "concept-stage"; stage.style.width = CONCEPT_CANVAS_WIDTH + "px"; stage.style.height = CONCEPT_CANVAS_HEIGHT + "px";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("concept-lines"); svg.setAttribute("viewBox", `0 0 ${CONCEPT_CANVAS_WIDTH} ${CONCEPT_CANVAS_HEIGHT}`);
   svg.innerHTML = '<defs><marker id="conceptArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z"></path></marker></defs>';
   const cards = document.createElement("div"); cards.className = "concept-cards"; stage.append(svg, cards); viewport.appendChild(stage); root.append(bar, viewport);
-  let selectedId = "", history = null, recoveryTimer = 0, drag = null, previewTimer = 0, suppressCardClick = false, closeNodePreview = null, closeBuildPresentation = null, zoom = 1, panX = 0, panY = 0, panReady = false, glideTimer = 0;
+  let selectedId = "", hoverEdgeId = "", lastPick = "", history = null, recoveryTimer = 0, drag = null, previewTimer = 0, suppressCardClick = false, closeNodePreview = null, closeBuildPresentation = null, zoom = 1, panX = 0, panY = 0, panReady = false, glideTimer = 0;
 
+  const selectedEdgeIds = new Set();   // Ctrl(⌘)+클릭으로 관계선을 여러 개 골라 둘 수 있다(고르기까지만 하고 한꺼번에 지우지는 않는다)
   const snapshot = () => conceptSnapshot(model);
   const flushRecovery = async () => {
     clearTimeout(recoveryTimer); recoveryTimer = 0;
@@ -590,18 +595,60 @@ function mountConceptEditor(doc){
   const edgePath = (from, to) => { const ax = from.x + 115, ay = from.y + 65, bx = to.x + 115, by = to.y + 65, bend = Math.max(50, Math.abs(bx - ax) * .42); return `M ${ax} ${ay} C ${ax + (bx >= ax ? bend : -bend)} ${ay}, ${bx - (bx >= ax ? bend : -bend)} ${by}, ${bx} ${by}`; };
   function renderEdges(){
     [...svg.querySelectorAll(".concept-edge")].forEach(node => node.remove()); const byNode = new Map(model.nodes.map(node => [node.id, node]));
+    if (selectedEdgeIds.size){ const live = new Set(model.edges.map(edge => edge.id)); selectedEdgeIds.forEach(id => { if (!live.has(id)) selectedEdgeIds.delete(id); }); }
     for (const edge of model.edges){
       const from = byNode.get(edge.from), to = byNode.get(edge.to); if (!from || !to) continue;
-      const group = document.createElementNS(svg.namespaceURI, "g"); group.classList.add("concept-edge"); group.dataset.edgeId = edge.id;
-      const path = document.createElementNS(svg.namespaceURI, "path"); path.setAttribute("d", edgePath(from, to)); path.setAttribute("marker-end", "url(#conceptArrow)"); path.classList.add("concept-edge-path", "is-" + edge.type);
+      const group = document.createElementNS(svg.namespaceURI, "g"); group.classList.add("concept-edge"); if (selectedEdgeIds.has(edge.id)) group.classList.add("is-selected"); group.dataset.edgeId = edge.id;
+      const shape = edgePath(from, to);
+      // 보이는 선은 2.5px뿐이라 마우스로 잡기 어렵다. 투명한 굵은 선(판정선)을 밑에 깔아 hover·선택 판정을 넓힌다.
+      // 후광은 판정선과 따로 둔다. 한 장으로 겸하면 후광을 굵게 하는 만큼 누르는 자리도 넓어져 화면 끌기를 잡아먹는다.
+      const hit = document.createElementNS(svg.namespaceURI, "path"); hit.setAttribute("d", shape); hit.classList.add("concept-edge-hit");
+      const halo = document.createElementNS(svg.namespaceURI, "path"); halo.setAttribute("d", shape); halo.classList.add("concept-edge-halo");
+      const tip = document.createElementNS(svg.namespaceURI, "title"); tip.textContent = "클릭: 관계선 고르기 · 두 번 클릭: 수정";
+      const path = document.createElementNS(svg.namespaceURI, "path"); path.setAttribute("d", shape); path.setAttribute("marker-end", "url(#conceptArrow)"); path.classList.add("concept-edge-path", "is-" + edge.type);
       const label = document.createElementNS(svg.namespaceURI, "text"); label.classList.add("concept-edge-label"); label.setAttribute("x", String((from.x + to.x) / 2 + 115)); label.setAttribute("y", String((from.y + to.y) / 2 + 55)); label.textContent = edge.label || (CONCEPT_RELATIONS.find(item => item.id === edge.type) || {}).label || "관련";
-      group.append(path, label); group.addEventListener("dblclick", () => openEdgeDialog(edge.id)); svg.appendChild(group);
+      group.append(tip, hit, halo, path, label); group.addEventListener("click", event => selectEdge(edge.id, event.ctrlKey || event.metaKey)); group.addEventListener("dblclick", () => openEdgeDialog(edge.id));
+      group.addEventListener("pointerenter", () => { hoverEdgeId = edge.id; refreshLinkedCards(); });
+      group.addEventListener("pointerleave", () => { if (hoverEdgeId !== edge.id) return; hoverEdgeId = ""; refreshLinkedCards(); });
+      svg.appendChild(group);
     }
+    if (hoverEdgeId && !model.edges.some(edge => edge.id === hoverEdgeId)) hoverEdgeId = "";
+    refreshLinkedCards(); refreshEdgePicked(); syncEdgeEmphasis();
   }
-  const selectCard = id => {
-    selectedId = id;
-    cards.querySelectorAll(".concept-card").forEach(card => card.classList.toggle("is-selected", card.dataset.nodeId === id));
+  // 고른 선은 맨 뒤로 다시 붙여 다른 선에 깔리지 않게 하고(SVG 는 나중에 그린 것이 위), 하나라도 고르면 나머지 선은 한 발 물러선다.
+  const syncEdgeEmphasis = () => {
+    svg.classList.toggle("has-picked", selectedEdgeIds.size > 0);
+    svg.querySelectorAll(".concept-edge.is-selected").forEach(group => svg.appendChild(group));
   };
+  const refreshEdgePicked = () => {
+    edgePicked.hidden = !selectedEdgeIds.size;
+    edgePickedCount.innerHTML = ""; const strong = document.createElement("b"); strong.textContent = String(selectedEdgeIds.size);
+    edgePickedCount.append("관계선 ", strong, "개 선택");
+  };
+  // 관계선에 손을 올리거나 고르면 그 선이 잇는 두 카드도 함께 밝힌다(무엇과 무엇을 잇는 선인지 바로 읽히게).
+  // 손을 올린 쪽이 우선이라, 고른 선이 있어도 다른 선을 훑어보는 동안에는 그 선의 양 끝이 밝아진다.
+  const refreshLinkedCards = () => {
+    const shown = hoverEdgeId ? model.edges.filter(edge => edge.id === hoverEdgeId) : model.edges.filter(edge => selectedEdgeIds.has(edge.id));
+    const ends = new Set(); shown.forEach(edge => { ends.add(edge.from); ends.add(edge.to); });
+    cards.querySelectorAll(".concept-card").forEach(card => card.classList.toggle("is-linked", ends.has(card.dataset.nodeId)));
+  };
+  // 한번 고른 관계선은 마우스로 다른 곳을 만져도 풀리지 않는다. 놓는 길은 Esc 와 도구막대의 '선택 해제' 둘뿐이다.
+  const selectCard = id => {
+    selectedId = id; lastPick = "card";
+    cards.querySelectorAll(".concept-card").forEach(card => card.classList.toggle("is-selected", card.dataset.nodeId === id));
+    refreshLinkedCards();
+  };
+  // 그냥 클릭은 하나만, Ctrl(⌘)+클릭은 이미 고른 것에 더하거나 뺀다. id 가 비면(Esc·선택 해제 버튼) 모두 놓는다.
+  const selectEdge = (id, additive) => {
+    if (!id) selectedEdgeIds.clear();
+    else if (!additive){ selectedEdgeIds.clear(); selectedEdgeIds.add(id); }
+    else if (selectedEdgeIds.has(id)) selectedEdgeIds.delete(id);
+    else selectedEdgeIds.add(id);
+    if (id) lastPick = "edge";
+    svg.querySelectorAll(".concept-edge").forEach(group => group.classList.toggle("is-selected", selectedEdgeIds.has(group.dataset.edgeId)));
+    syncEdgeEmphasis(); refreshLinkedCards(); refreshEdgePicked();
+  };
+  edgePickedClear.onclick = () => { selectEdge(""); viewport.focus(); };
   const showLargeNode = (overlay, node, status) => {
     const color = CONCEPT_COLORS[node.color]; overlay.style.setProperty("--concept-color", color); overlay.querySelector("article").style.setProperty("--concept-color", color); overlay.querySelector(".concept-present-top span").textContent = status;
     overlay.querySelector("small").textContent = node.category || "개념"; overlay.querySelector("h2").textContent = node.title; overlay.querySelector("p").textContent = node.description || "설명이 없습니다.";
@@ -644,7 +691,7 @@ function mountConceptEditor(doc){
     renderEdges();
     if (!model.nodes.length){ const empty = conceptButton("＋ 첫 개념을 넣어 관계도를 시작하세요", "첫 개념 추가", "concept-empty"); empty.addEventListener("click", () => openNodeDialog()); cards.appendChild(empty); }
   }
-  doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; render(); if (center) setPan(viewport.clientWidth / 2 - (node.x + 115) * zoom, viewport.clientHeight / 2 - (node.y + 65) * zoom, true); return true; };
+  doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; lastPick = "card"; render(); if (center) setPan(viewport.clientWidth / 2 - (node.x + 115) * zoom, viewport.clientHeight / 2 - (node.y + 65) * zoom, true); return true; };
 
   function openAutoLayoutDialog(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("정렬할 카드가 없어요.", 2200); return; }
@@ -756,7 +803,7 @@ function mountConceptEditor(doc){
     const focusNode = node => { if (!node || !model.presentation.autoFocus) return; const left = fit.offsetLeft + (node.x + 115) * fitScale - buildViewport.clientWidth / 2, top = fit.offsetTop + (node.y + 65) * fitScale - buildViewport.clientHeight / 2; buildViewport.scrollTo({ left:Math.max(0, left), top:Math.max(0, top), behavior:reducedMotion ? "auto" : "smooth" }); };
     const revealCard = card => { card.classList.remove("is-build-hidden"); card.setAttribute("aria-hidden", "false"); card.tabIndex = 0; if (overlay.dataset.animation !== "none" && !reducedMotion){ card.classList.remove("is-revealing"); void card.offsetWidth; card.classList.add("is-revealing"); later(() => card.classList.remove("is-revealing"), overlay.dataset.animation === "draw" ? 900 : 620); } };
     const revealEdge = group => {
-      group.classList.remove("is-build-hidden"); if (overlay.dataset.animation === "none" || reducedMotion) return; group.classList.add("is-revealing"); const path = group.querySelector("path"), length = Math.max(1, path.getTotalLength()), duration = overlay.dataset.animation === "draw" ? 900 : 480; path.style.transition = "none"; path.style.strokeDasharray = `${length} ${length}`; path.style.strokeDashoffset = String(length); void path.getBoundingClientRect(); path.style.transition = `stroke-dashoffset ${duration}ms ease`; path.style.strokeDashoffset = "0";
+      group.classList.remove("is-build-hidden"); if (overlay.dataset.animation === "none" || reducedMotion) return; group.classList.add("is-revealing"); const path = group.querySelector(".concept-edge-path"), length = Math.max(1, path.getTotalLength()), duration = overlay.dataset.animation === "draw" ? 900 : 480; path.style.transition = "none"; path.style.strokeDasharray = `${length} ${length}`; path.style.strokeDashoffset = String(length); void path.getBoundingClientRect(); path.style.transition = `stroke-dashoffset ${duration}ms ease`; path.style.strokeDashoffset = "0";
       later(() => { group.classList.remove("is-revealing"); path.style.transition = ""; path.style.strokeDasharray = ""; path.style.strokeDashoffset = ""; }, duration + 40);
     };
     const updateStep = next => {
@@ -861,7 +908,7 @@ function mountConceptEditor(doc){
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
   addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog; tableBtn.onclick = openTableOutlineDialog;
   undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", render); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
-  const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); };
+  const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && lastPick === "edge"){ if (selectedEdgeIds.size === 1) openEdgeDialog([...selectedEdgeIds][0]); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); else if (event.key === "Escape" && selectedEdgeIds.size) selectEdge(""); };
   window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); clearTimeout(previewTimer); if (closeNodePreview) closeNodePreview(); if (closeBuildPresentation) closeBuildPresentation(); if (viewportResizeObserver) viewportResizeObserver.disconnect(); viewport.removeEventListener("wheel", onViewportWheel); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.conceptSelectNode) delete doc.conceptSelectNode; });
   render(); touch();
 }

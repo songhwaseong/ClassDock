@@ -114,6 +114,35 @@ test("개념 관계도 형식은 파일 열기·메뉴·manifest에 연결된다
   assert.doesNotMatch(source, /viewport\.scroll(?:Left|Top|To|By)/); assert.doesNotMatch(styles, /concept-zoom-space/);
   assert.match(styles, /\.concept-edge-label\{fill:var\(--ink\)/); assert.match(styles, /\[data-theme="dark"\] \.concept-edge-label\{fill:#f8fafc;stroke:#0b1120\}/);
   assert.match(source, /openAutoLayoutDialog/); assert.match(source, /정렬 뒤 화면에 맞춤/); assert.match(styles, /concept-layout-choices/);
+  // 관계선은 얇아서 마우스로 잡기 어렵다: 투명한 굵은 판정선을 깔고, 손을 올리면 굵어지고 고르면 후광이 남는다
+  assert.match(source, /hit\.classList\.add\("concept-edge-hit"\)/); assert.match(source, /group\.append\(tip, hit, halo, path, label\)/);
+  assert.match(source, /group\.addEventListener\("click", event => selectEdge\(edge\.id, event\.ctrlKey \|\| event\.metaKey\)\)/);
+  assert.match(source, /const selectEdge = \(id, additive\) =>/); assert.match(source, /selectedId = id; lastPick = "card"/);
+  assert.match(source, /event\.key === "Delete" && lastPick === "edge"/);
+  // 고른 관계선은 마우스로 다른 곳을 만져도 남는다: 놓는 길은 Esc 와 '선택 해제' 버튼뿐
+  assert.match(source, /event\.key === "Escape" && selectedEdgeIds\.size\) selectEdge\(""\)/);
+  assert.doesNotMatch(source, /is-gliding"\); selectEdge\(""\)/); assert.doesNotMatch(source, /selectedId = id; selectedEdgeIds\.clear/);
+  // Ctrl(⌘)+클릭은 더하고 빼기, 그냥 클릭은 하나만. 고른 개수는 도구막대 끝에서 알려 주고 [hidden] 은 CSS 로 눌러 둔다.
+  assert.match(source, /const selectedEdgeIds = new Set\(\)/); assert.match(source, /else if \(selectedEdgeIds\.has\(id\)\) selectedEdgeIds\.delete\(id\)/);
+  assert.match(source, /const refreshEdgePicked = \(\) =>/); assert.match(source, /edgePickedCount\.append\("관계선 ", strong, "개 선택"\)/);
+  assert.match(styles, /\.concept-edge-picked\[hidden\]\{display:none\}/);
+  assert.match(styles, /\.concept-edge-hit\{[^}]*stroke:transparent;stroke-width:12/); assert.match(source, /halo\.classList\.add\("concept-edge-halo"\)/);
+  // 누르는 자리(판정선)와 후광은 따로다: 후광만 굵게 해야 화면 끌기를 잡아먹지 않는다
+  assert.doesNotMatch(styles, /\.concept-edge-hit\{[^}]*transition/); assert.doesNotMatch(styles, /\.concept-edge[.:][^{]*\.concept-edge-hit\{stroke:color-mix/);
+  assert.match(styles, /\.concept-edge-halo\{[^}]*stroke-width:16/); assert.match(styles, /\.concept-edge\.is-selected \.concept-edge-halo\{stroke:color-mix/);
+  // 고른 선은 accent 색으로 굵어지고, 손만 올린 선은 오히려 한 단계 얌전하다
+  assert.match(styles, /\.concept-edge\.is-selected \.concept-edge-path\{stroke:var\(--accent\);stroke-width:5\}/); assert.match(styles, /\.concept-edge:hover \.concept-edge-path\{stroke-width:3\}/);
+  // 하나라도 고르면 나머지 선은 물러나고, 고른 선은 맨 위로 올라간다
+  assert.match(styles, /\.concept-lines\.has-picked \.concept-edge:not\(\.is-selected\)\{opacity:\.3\}/);
+  assert.match(source, /svg\.classList\.toggle\("has-picked"/); assert.match(source, /querySelectorAll\("\.concept-edge\.is-selected"\)\.forEach\(group => svg\.appendChild\(group\)\)/);
+  // 인쇄에는 고르기 흔적을 남기지 않는다
+  assert.match(styles, /body\.concept-printing \.concept-edge\{opacity:1!important\}/); assert.match(styles, /body\.concept-printing \.concept-edge\.is-selected \.concept-edge-path\{stroke:#64748b/);
+  // 손을 올린 선의 양 끝 카드도 함께 밝힌다(고른 선이 있어도 손을 올린 쪽이 우선)
+  assert.match(source, /const refreshLinkedCards = \(\) =>/); assert.match(source, /hoverEdgeId \? model\.edges\.filter/);
+  assert.match(source, /group\.addEventListener\("pointerenter"/); assert.match(source, /group\.addEventListener\("pointerleave"/);
+  assert.match(styles, /\.concept-card\.is-linked\{border-color:color-mix\(in srgb,var\(--accent\)/);
+  // 전개 발표의 선 그리기는 판정선이 아니라 보이는 선을 잡아야 한다
+  assert.match(source, /group\.querySelector\("\.concept-edge-path"\)/); assert.doesNotMatch(source, /group\.querySelector\("path"\)/);
 });
 test("관계 표는 한 줄이 관계 하나, 개념 표는 한 줄이 카드 하나로 읽힌다", () => {
   const edgeTable = concept.conceptGraphFromRows(concept.conceptCsvRows("출발,관계,도착,연결선\n교장,상위 → 하위,교감,\n교감,상위 → 하위,교무부장,결재\n"));

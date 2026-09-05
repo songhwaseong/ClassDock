@@ -121,8 +121,22 @@ test("종류별 폴더 생성 함수는 모두 공통 헬퍼를 거친다", () =
   assert.match(spreadsheetSource, /async function newSpreadsheetScratchInFolder\(folder\)\{[\s\S]*?return createScratchInFolder\(/);
 });
 
+/* 소스에 그 문장이 있는지가 아니라 갈래가 실제로 어떻게 갈리는지를 본다.
+   문장으로 묶어 두면 갈래를 합치기만 해도(행동은 그대로인데) 깨진다 — 실제로 한 번 그렇게 깨졌다. */
 test("폴더에서 만든 빈 표는 저장 위치를 다시 묻지 않고 그 폴더에 파일을 만든다", () => {
-  assert.match(spreadsheetSource, /if \(doc\.isScratch && doc\.originalSaveMode\) return "create"/);
+  const pick = /function spreadsheetDirectSaveKind\(doc\)\{[\s\S]*?\n\}/.exec(spreadsheetSource);
+  assert.ok(pick, "저장 갈래 함수를 찾을 수 있어야 한다");
+  const kind = vm.runInNewContext(pick[0] + "\nspreadsheetDirectSaveKind");
+
+  // 폴더 우클릭으로 만든 새 표 — 파일 핸들이 아직 없어도 그 폴더에 새로 만든다(위치를 다시 묻지 않는다).
+  assert.equal(kind({ isScratch:true, originalSaveMode:true }), "create");
+  // 이미 디스크에 있던 원본 문서는 새로 만들지 않고 그 파일에 덮어쓴다.
+  assert.equal(kind({ isScratch:false, originalSaveMode:true }), "existing");
+  // 메모·블록 문서의 표처럼 저장할 폴더 핸들을 받은 새 표도 그 폴더에 만든다.
+  assert.equal(kind({ isScratch:true, fsDirHandle:{ getFileHandle(){} } }), "create");
+  // 아무 문맥도 없으면 빈 값 — 저장 위치를 물어야 한다.
+  assert.equal(kind({ isScratch:true }), "");
+  assert.equal(kind(null), "");
 });
 
 // 폴더를 연 시점의 파일 목록으로 고정되는 archiveCtx 에 새 문서가 등록되지 않으면,

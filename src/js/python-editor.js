@@ -602,6 +602,10 @@ function buildCodeEditor(text, prof, options={}){
   const cellDivLayer = document.createElement("div"); cellDivLayer.className = "cell-div-layer"; cellDivLayer.setAttribute("aria-hidden", "true");   // # %% 셀 경계 구분선(스크롤 따라 이동)
   const caretLine = document.createElement("div"); caretLine.className = "code-caret-line"; caretLine.setAttribute("aria-hidden", "true");
   const indentLayer = document.createElement("div"); indentLayer.className = "code-indent-layer"; indentLayer.setAttribute("aria-hidden", "true");
+  /* 새로 만든 코드 파일의 비워 둔 첫 줄에 회색으로 얹는 안내(입력칸 placeholder 와 같은 성격).
+     본문에는 없는 글자라 저장·실행·되돌리기 어디에도 남지 않는다 — 본문에서 주석을 지우는 방식으로
+     만들면 그 지움이 undo 이력에 섞여 학생이 Ctrl+Z 를 눌렀을 때 안내 문구가 되살아난다. */
+  const ghostHint = document.createElement("div"); ghostHint.className = "code-ghost-hint"; ghostHint.hidden = true; ghostHint.setAttribute("aria-hidden", "true");
   const complete = document.createElement("div"); complete.className = "code-complete"; complete.hidden = true;
   complete.setAttribute("role", "listbox"); complete.setAttribute("aria-label", "Python 자동완성");
   const completionPortal = !!options.completionPortal;
@@ -640,7 +644,7 @@ function buildCodeEditor(text, prof, options={}){
   };
   pre.appendChild(code);
   // caretLine 은 맨 앞에 둬서 강조 pre·textarea 보다 뒤(아래)에 깔린다 — 글자 위에 색이 덧칠되지 않게.
-  edit.appendChild(cellBand); edit.appendChild(caretLine); edit.appendChild(indentLayer); edit.appendChild(wordHi); edit.appendChild(findHi); edit.appendChild(spotlightHi); edit.appendChild(defHover); edit.appendChild(pre); edit.appendChild(ta); edit.appendChild(cellDivLayer); edit.appendChild(errBands); edit.appendChild(traceBand); edit.appendChild(jumpBand); edit.appendChild(overlay);
+  edit.appendChild(cellBand); edit.appendChild(caretLine); edit.appendChild(indentLayer); edit.appendChild(wordHi); edit.appendChild(findHi); edit.appendChild(spotlightHi); edit.appendChild(defHover); edit.appendChild(ghostHint); edit.appendChild(pre); edit.appendChild(ta); edit.appendChild(cellDivLayer); edit.appendChild(errBands); edit.appendChild(traceBand); edit.appendChild(jumpBand); edit.appendChild(overlay);
   if (completionPortal){
     complete.classList.add("code-complete-portal");
     document.body.appendChild(complete);
@@ -827,6 +831,22 @@ function buildCodeEditor(text, prof, options={}){
     caretLine.style.top = (pt + lineNo * lh - ta.scrollTop) + "px";
     caretLine.style.height = lh + "px";
     caretLine.hidden = false;
+  };
+  /* 안내 문구(options.hint)를 비워 둔 첫 줄 자리에 얹는다. 그 줄은 본문에도 실제로 빈 줄로 있으므로
+     줄 번호·캐럿·자동완성 위치는 안내가 있든 없든 똑같다 — 층은 보여 주기만 한다. */
+  const positionGhostHint = () => {
+    if (ghostHint.hidden) return;
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || 20;
+    const pt = parseFloat(cs.paddingTop) || 0, pl = parseFloat(cs.paddingLeft) || 0;
+    ghostHint.style.top = (pt - ta.scrollTop) + "px";
+    ghostHint.style.left = (pl - ta.scrollLeft) + "px";
+    ghostHint.style.height = lh + "px";
+  };
+  // 첫 입력에서 사라진다. 포커스만으로 지우면 읽어 보려고 클릭한 학생에게서 안내가 먼저 없어진다.
+  const clearGhostHint = () => {
+    if (ghostHint.hidden) return;
+    ghostHint.hidden = true; ghostHint.textContent = "";
   };
   // 코드로 값을 바꾸면(엔터 자동들여쓰기·Tab·줄 이동 등) 브라우저가 캐럿으로 자동 스크롤하지 않는다 →
   // 캐럿 줄이 화면 밖이면 최소한으로 스크롤해 따라가게 한다(맨 아래에서 엔터 연타 시 화면이 같이 내려감).
@@ -1103,7 +1123,7 @@ function buildCodeEditor(text, prof, options={}){
   });
 
   let syncRaf = 0;
-  const syncNow = () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; gutter.scrollTop = ta.scrollTop; positionErr(); positionTrace(); positionJump(); positionCellBand(); positionCaretLine(); positionPins(); positionJumpDown(); renderWordHi(); renderDefinitionHover(); renderFindHi(); renderSpotlight(); renderIndentGuides(); renderCellDividers(); };
+  const syncNow = () => { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; gutter.scrollTop = ta.scrollTop; positionErr(); positionTrace(); positionJump(); positionCellBand(); positionCaretLine(); positionGhostHint(); positionPins(); positionJumpDown(); renderWordHi(); renderDefinitionHover(); renderFindHi(); renderSpotlight(); renderIndentGuides(); renderCellDividers(); };
   const sync = () => {
     syncNow();
     cancelAnimationFrame(syncRaf);
@@ -2655,6 +2675,7 @@ function buildCodeEditor(text, prof, options={}){
     syncNow();
   };
   ta.addEventListener("input", clearSpotlight);          // 셀을 편집하면 위치가 어긋나므로 강조를 지운다
+  ta.addEventListener("input", clearGhostHint);          // 한 글자라도 치면 안내 문구는 제 몫을 다했다
   findInput.addEventListener("input", () => recomputeFind(true));
   findInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter"){ e.preventDefault(); rememberFindTerm(); selectMatch(findIndex + (e.shiftKey ? -1 : 1)); }
@@ -3203,6 +3224,12 @@ function buildCodeEditor(text, prof, options={}){
   };
 
   refresh();
+  // 안내 문구는 편집기가 붙은 뒤에 켠다 — 줄 높이·안쪽 여백을 실제로 재야 자리가 맞는다.
+  if (typeof options.hint === "string" && options.hint){
+    ghostHint.textContent = options.hint;
+    ghostHint.hidden = false;
+    positionGhostHint();
+  }
   return { host, ta,
     // 따라치기 중에는 '교본(원본)'을 돌려준다 — 저장·자동저장·실행·초안이 치다 만 글자를 파일에 덮어쓰지 않게 하는 핵심 방어선.
     getValue: () => practice.active ? practice.target : ta.value,

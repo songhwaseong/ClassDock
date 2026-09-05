@@ -926,15 +926,19 @@ function buildJavaRunConfigPopover(bar, button, storageKey, options){
 function javaScratchFileName(number = 1){
   return "Main" + (number > 1 ? number : "") + ".java";
 }
+// 첫 줄을 비워 두고 안내는 편집기 층으로 얹는다 — 이유는 pythonScratchStarter(code-viewer.js) 주석 참고.
 function javaScratchStarter(name){
   const cls = String(name || "").replace(/\.java$/i, "") || "Main";
-  const prompt = typeof t === "function" ? t("여기에 자바 코드를 작성하고 ▶ 실행") : "여기에 자바 코드를 작성하고 ▶ 실행";
-  return "// " + prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")\n"
+  return "\n"
     + "public class " + cls + " {\n"
     + "    public static void main(String[] args) {\n"
     + "        System.out.println(\"Hello, Java!\");\n"
     + "    }\n"
     + "}\n";
+}
+function javaScratchHint(){
+  const prompt = typeof t === "function" ? t("여기에 자바 코드를 작성하고 ▶ 실행") : "여기에 자바 코드를 작성하고 ▶ 실행";
+  return prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")";
 }
 
 // 저장된 .java 파일은 수업에서 쓰는 클래스 이름 규칙(영문 대문자로 시작)을 지키고,
@@ -1182,6 +1186,8 @@ function renderJavaRunnable(context){
 
   let editor = null;
   editor = buildCodeEditor(initial, prof, {
+    // 아직 한 글자도 안 친 새 파일일 때만 안내를 얹는다(code-viewer.js 파이썬 쪽과 같은 판정).
+    hint: initial === javaScratchStarter(saveName) ? javaScratchHint() : "",
     // 파이썬 전용 지능(Jedi 질의·import 문맥)을 끄고 확장자에 맞는 키워드를 쓴다.
     // fileExt 만 넘기면 공용 목록에서 자바 키워드를 골라 준다(core.js 의 completionWordsForProfile).
     plain: true,

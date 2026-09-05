@@ -2059,7 +2059,10 @@ async function renderCode(file, host, ext, profile, runCtx){
   const sourceFingerprint = fingerprintBytes((file && file.name) || "code.py", sourceBytes);
   const restoredDraft = loadPythonDraft(draftKey, sourceFingerprint);
   scheduleWorkspacePythonPrewarm(ownerDoc);   // 옆 파일 본문을 미리 읽어 둔다 — 첫 자동완성부터 후보가 나오게
-  const editor = buildCodeEditor(restoredDraft === null ? text : restoredDraft, prof, {
+  const pyInitial = restoredDraft === null ? text : restoredDraft;
+  const editor = buildCodeEditor(pyInitial, prof, {
+    // 아직 한 글자도 안 친 새 파일일 때만 안내를 얹는다 — 본문이 시작값과 한 바이트라도 다르면 학생 코드다.
+    hint: pyInitial === pythonScratchStarter() ? pythonScratchHint() : "",
     resolveWorkspaceDefinition: ({ source, wordInfo }) => openWorkspacePythonImportDefinition(ownerDoc, source, wordInfo),
     workspaceImportCandidates: () => workspacePythonImportCandidates(ownerDoc),
     workspaceModuleCandidates: (context) => workspacePythonModuleCandidates(ownerDoc, context),
@@ -4256,9 +4259,15 @@ function activeFolderContextForNewFile(){
   if (!dir) return null;                          // 묶음 루트 직속 파일이면 폴더 없음
   return { parentId: cur.parentId, dir, archiveCtx: cur.archiveCtx };
 }
+/* 첫 줄은 일부러 비워 둔다 — 편집기가 그 자리에 안내를 회색으로 얹는다(입력칸 placeholder 와 같은 성격).
+   안내를 주석으로 본문에 박으면 학생이 저장한 파일에 한국어 주석이 그대로 남고, 단축키를 바꿔도 만들 때
+   찍힌 표기가 굳어 버린다. 층으로 빼면 둘 다 화면에서 따라온다. 짝: pythonScratchHint. */
 function pythonScratchStarter(){
+  return "\nprint(\"Hello, Python!\")\n";
+}
+function pythonScratchHint(){
   const prompt = typeof t === "function" ? t("여기에 파이썬 코드를 작성하고 ▶ 실행") : "여기에 파이썬 코드를 작성하고 ▶ 실행";
-  return "# " + prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")\nprint(\"Hello, Python!\")\n";
+  return prompt + " (" + shortcutDisplay(shortcutValue("runCode")) + ")";
 }
 function pythonScratchFileName(number=1){
   const base = typeof window.t === "function" ? window.t("새 코드") : "새 코드";
