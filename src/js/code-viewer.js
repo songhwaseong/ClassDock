@@ -19,6 +19,87 @@ const {
   ? MNWorkspacePython
   : (typeof require === "function" ? require("./workspace-python.js") : {});
 
+/* ── CSS 자동완성이 참고할 옆 .html 의 class·id ─────────────────────────────────
+   같은 작업공간(같은 압축 묶음)의 HTML 문서가 실제로 쓰는 이름을 선택자 후보로 준다 —
+   .card 를 만들어 놓고 .crad 라고 쓰는 실수를 줄인다.
+   후보 팝업은 동기라 그 자리에서 디스크를 읽을 수 없다. 열려 있는 문서로 먼저 답하고, 아직
+   못 읽은 파일은 백그라운드로 한 번 읽어 캐시에 채운다(다음 타이핑부터 후보에 들어온다).
+   파일이 바뀌면 stamp(크기·수정시각)가 달라져 저절로 다시 읽는다 — 파이썬 인덱스와 같은 방식. */
+const cssHtmlSelectorCache = new Map();          // 문서 id → { stamp, classes, ids }
+const CSS_HTML_MAX_BYTES = 512 * 1024;           // 이보다 큰 HTML 은 훑지 않는다(대개 생성물)
+const CSS_HTML_MAX_FILES = 40;
+let cssHtmlSelectorReadBusy = false;
+
+function cssHtmlSelectorDocs(ownerDoc){
+  const context = (ownerDoc && ownerDoc.archiveCtx) || null;
+  const rows = [];
+  for (const doc of docs){
+    if (!doc || doc === ownerDoc) continue;
+    if (typeof workspaceHasDoc === "function" && !workspaceHasDoc(doc)) continue;
+    if ((doc.archiveCtx || null) !== context) continue;
+    const path = String(doc.workspacePath || doc.relPath || doc.name || "").replace(/\\/g, "/");
+    if (!/\.(?:html?|xhtml)$/i.test(path)) continue;
+    rows.push({ doc, name: path.split("/").pop() });
+    if (rows.length >= CSS_HTML_MAX_FILES) break;
+  }
+  return rows;
+}
+// 지금 보이는 본문 — 살아있는 편집기 > 저장된 텍스트(파이썬 인덱스의 사다리와 같다).
+function cssHtmlLiveText(doc){
+  if (typeof hasLiveDocText === "function" && typeof liveDocText === "function" && hasLiveDocText(doc)){
+    const live = liveDocText(doc);
+    if (typeof live === "string") return live;
+  }
+  return doc && typeof doc.savedText === "string" ? doc.savedText : null;
+}
+async function readCssHtmlSelectors(rows, onReady){
+  if (cssHtmlSelectorReadBusy) return;
+  cssHtmlSelectorReadBusy = true;
+  let read = 0;
+  try {
+    for (const row of rows){
+      const stamp = workspacePyStamp(row.doc);
+      const cached = cssHtmlSelectorCache.get(row.doc.id);
+      if (cached && cached.stamp === stamp) continue;
+      const file = row.doc.sourceFile;
+      let text = null;
+      if (file && (file.size || 0) <= CSS_HTML_MAX_BYTES && typeof openDocRunText === "function"){
+        try { text = await openDocRunText(row.doc); } catch(_){ text = null; }
+      }
+      // 못 읽은 파일도 빈 목록으로 넣어 둔다 — 타이핑할 때마다 다시 시도하지 않도록.
+      const names = typeof text === "string" ? htmlSelectorNames(text) : { classes:[], ids:[] };
+      cssHtmlSelectorCache.set(row.doc.id, { stamp, classes:names.classes, ids:names.ids });
+      read++;
+      await new Promise(resolve => setTimeout(resolve, 0));   // 한 파일마다 양보 — 타이핑을 막지 않는다
+    }
+    const alive = new Set(docs.map(doc => doc && doc.id));
+    for (const id of [...cssHtmlSelectorCache.keys()]) if (!alive.has(id)) cssHtmlSelectorCache.delete(id);
+  } finally { cssHtmlSelectorReadBusy = false; }
+  // 다 읽었으면 열려 있는 후보 목록을 다시 만든다 — 한 글자 더 치지 않아도 채워지도록.
+  if (read && typeof onReady === "function") onReady();
+}
+function cssWorkspaceSelectorRows(ownerDoc, onReady){
+  if (typeof htmlSelectorNames !== "function") return [];
+  const rows = cssHtmlSelectorDocs(ownerDoc);
+  const out = [];
+  let missing = false;
+  for (const row of rows){
+    const live = cssHtmlLiveText(row.doc);
+    let names = null;
+    if (typeof live === "string") names = htmlSelectorNames(live);
+    else {
+      const cached = cssHtmlSelectorCache.get(row.doc.id);
+      if (cached && cached.stamp === workspacePyStamp(row.doc)) names = cached;
+      else missing = true;
+    }
+    if (!names) continue;
+    for (const name of names.classes) out.push({ name, from:row.name, kind:"class" });
+    for (const name of names.ids) out.push({ name, from:row.name, kind:"id" });
+  }
+  if (missing) readCssHtmlSelectors(rows, onReady);
+  return out;
+}
+
 // 문자열 토큰이 f-string 인가? (접두사에 f/F 포함) — 바깥 정규식이 이미 잘라낸 토큰만 검사.
 function isFStringToken(token){
   const q = token.search(/["'`]/);
@@ -1670,6 +1751,25 @@ async function renderCode(file, host, ext, profile, runCtx){
       const startedForFind = findOnlyEdit; findOnlyEdit = false;
       // 찾기(Ctrl+F)만 하러 들어온 편집 모드면, 찾기를 닫을 때 아직 수정 전이면 보기로 되돌린다.
       const editorOpts = { plain: true, fileExt: ext };      // 일반 텍스트/코드: 파이썬 전용 지능 없이 확장자별 버퍼 단어 완성만
+      /* CSS 계열(.css/.scss/.less)만 한 걸음 더 — 커서가 속성 자리인지 값 자리인지 선택자인지 보고
+         후보를 고른다(core.js). 속성을 고르면 ": " 까지 들어가고 값 후보가 이어서 열린다. */
+      if (typeof completionWordPatternFor === "function" && completionWordPatternFor(prof, ext).cssLike
+          && typeof cssCompletionCandidates === "function"){
+        // 옆 파일을 다 읽은 뒤 목록을 다시 만든다(그때 살아 있는 편집기에게 부탁한다).
+        const refreshCssCompletion = () => {
+          if (activeEditor && typeof activeEditor.refreshCompletion === "function") activeEditor.refreshCompletion();
+        };
+        editorOpts.contextCandidates = ({ source, caret, prefix }) => {
+          // 옆 .html 훑기는 선택자 자리에서만 — 값·속성을 칠 때까지 매 글자마다 할 일은 아니다.
+          const atSelector = cssCompletionContextAt(source, caret).kind === "selector";
+          return cssCompletionCandidates(source, caret, prefix, ext,
+            atSelector ? cssWorkspaceSelectorRows(ownerDoc, refreshCssCompletion) : null);
+        };
+        editorOpts.contextOpensEmpty = ({ source, caret }) => cssCompletionOpensEmpty(source, caret);
+        editorOpts.completionLimit = 20;                     // 값 목록이 길어 기본 12개보다 넉넉히
+        // 아직 열지 않은 옆 .html 을 미리 읽어 둔다 — 첫 선택자부터 후보가 나오도록(파이썬 프리워밍과 같은 뜻).
+        readCssHtmlSelectors(cssHtmlSelectorDocs(ownerDoc));
+      }
       if (startedForFind) editorOpts.onFindClose = () => {
         if (ownerDoc && ownerDoc.hasUnsavedEdits) return;   // 편집을 시작했으면 그대로 편집 유지
         currentText = editor.getValue(); captureEditAnchor(); showView();   // 찾아 간 자리 그대로 보기 화면으로

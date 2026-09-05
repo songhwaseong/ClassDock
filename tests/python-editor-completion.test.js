@@ -8,7 +8,9 @@ const path = require("node:path");
 const editor = fs.readFileSync(path.join(__dirname, "../src/js/python-editor.js"), "utf8");
 
 test("Python 자동완성은 목록 바깥을 클릭하면 닫히고 진행 중인 응답을 무효화한다", () => {
-  assert.match(editor, /const dismissCompletion = \(\) => \{\s*completionSeq\+\+;\s*hideCompletion\(\);/);
+  // 직접 닫은 뒤에는 늦게 도착한 후보(refreshCompletion)가 목록을 다시 열지 않는다.
+  assert.match(editor, /const dismissCompletion = \(\) => \{\s*completionSeq\+\+;\s*completionSuppressed = true;\s*hideCompletion\(\);/);
+  assert.match(editor, /if \(completionSuppressed \|\| document\.activeElement !== ta\) return;/);
   assert.match(editor, /if \(complete\.hidden \|\| complete\.contains\(event\.target\)\) return;/);
   assert.match(editor, /document\.addEventListener\("pointerdown", closeCompletionOnOutsidePointer, true\)/);
   assert.match(editor, /document\.removeEventListener\("pointerdown", closeCompletionOnOutsidePointer, true\)/);
@@ -39,12 +41,13 @@ test("import 문을 치는 중에는 작업공간 모듈·이름 후보를 먼�
   assert.match(editor, /const importCtx = !plainMode && typeof pythonImportContextAt === "function"\s*\?\s*pythonImportContextAt\(ta\.value, ta\.selectionStart\) : null;/);
   assert.match(editor, /options\.workspaceModuleCandidates\(importCtx\)/);
   // 아직 한 글자도 안 쳤어도 팝업을 연다(from 모듈 import ⟨여기⟩).
-  assert.match(editor, /if \(!manual && !dotContext && !importCtx && word\.prefix\.length < 1\)\{ hideCompletion\(\); return; \}/);
+  // (emptyOpen 은 CSS 처럼 "값 자리"에서도 빈 접두어로 여는 언어를 위한 같은 성격의 예외다)
+  assert.match(editor, /if \(!manual && !dotContext && !importCtx && !emptyOpen && word\.prefix\.length < 1\)\{ hideCompletion\(\); return; \}/);
   // 모듈 후보가 목록 맨 앞(Jedi 후보보다 먼저) — Jedi 는 작업공간 모듈을 모른다.
   assert.match(editor, /mergeCompletionItems\(\[\.\.\.modules, \.\.\.members, \.\.\.local\]/);
   assert.match(editor, /mergeCompletionItems\(\[\.\.\.modules, \.\.\.fallbackMembers, \.\.\.pruned\]/);
   // import 줄에서 아직 아무것도 안 쳤으면 버퍼 단어는 넣지 않는다(목록 소음 방지).
-  assert.match(editor, /const local = importCtx && !word\.prefix \? \[\] : pythonCompletionCandidates\(/);
+  assert.match(editor, /local = importCtx && !word\.prefix \? \[\] : pythonCompletionCandidates\(/);
 });
 
 test("앞 후보가 목록을 다 채워도 자동 import 자리는 남겨 둔다", () => {

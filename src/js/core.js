@@ -604,9 +604,428 @@
   const SQL_COMPLETION_WORDS = (
     "SELECT FROM WHERE INSERT INTO UPDATE DELETE CREATE ALTER DROP TABLE VIEW INDEX JOIN INNER LEFT RIGHT OUTER FULL ON GROUP ORDER BY ASC DESC HAVING UNION ALL VALUES SET PRIMARY KEY FOREIGN REFERENCES NOT NULL DEFAULT DISTINCT AS AND OR LIKE BETWEEN IN EXISTS CASE WHEN THEN ELSE END COUNT SUM AVG MIN MAX LIMIT OFFSET BEGIN COMMIT ROLLBACK"
   ).split(/\s+/);
-  const CSS_COMPLETION_WORDS = (
-    "color background background-color border margin padding width height display position top left right bottom flex grid gap font font-size font-weight line-height text-align justify-content align-items float overflow opacity transform transition animation z-index box-shadow border-radius cursor content visibility inherit initial none auto absolute relative fixed sticky block inline flex grid"
+  /* CSS 는 이름에 하이픈이 들어가므로(background-color) 단어 하나를 잡는 규칙부터 다르다.
+     completionWordPatternFor 가 그 규칙을 정하고, 여기 목록은 "속성 이름 → 값 → @규칙" 순으로 둔다.
+     값과 속성을 한 배열에 섞어 두는 건 아직 문맥(속성 자리/값 자리)을 안 보기 때문이다. */
+  const CSS_PROPERTY_WORDS = (
+    "accent-color align-content align-items align-self all animation animation-delay animation-direction animation-duration animation-fill-mode animation-iteration-count animation-name animation-play-state animation-timing-function appearance aspect-ratio " +
+    "backdrop-filter backface-visibility background background-attachment background-blend-mode background-clip background-color background-image background-origin background-position background-repeat background-size block-size " +
+    "border border-block border-bottom border-bottom-color border-bottom-left-radius border-bottom-right-radius border-bottom-style border-bottom-width border-collapse border-color border-image border-inline border-left border-left-color border-left-style border-left-width " +
+    "border-radius border-right border-right-color border-right-style border-right-width border-spacing border-style border-top border-top-color border-top-left-radius border-top-right-radius border-top-style border-top-width border-width bottom box-decoration-break box-shadow box-sizing break-after break-before break-inside " +
+    "caption-side caret-color clear clip-path color color-scheme column-count column-gap column-rule column-span column-width columns contain container container-name container-type content counter-increment counter-reset cursor " +
+    "direction display empty-cells filter flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap float font font-family font-feature-settings font-kerning font-size font-size-adjust font-stretch font-style font-variant font-variant-numeric font-weight " +
+    "gap grid grid-area grid-auto-columns grid-auto-flow grid-auto-rows grid-column grid-column-end grid-column-start grid-row grid-row-end grid-row-start grid-template grid-template-areas grid-template-columns grid-template-rows " +
+    "height hyphens image-rendering inline-size inset inset-block inset-inline isolation justify-content justify-items justify-self left letter-spacing line-break line-height list-style list-style-image list-style-position list-style-type " +
+    "margin margin-block margin-bottom margin-inline margin-left margin-right margin-top mask mask-image max-block-size max-height max-inline-size max-width min-block-size min-height min-inline-size min-width mix-blend-mode " +
+    "object-fit object-position offset opacity order outline outline-color outline-offset outline-style outline-width overflow overflow-wrap overflow-x overflow-y overscroll-behavior " +
+    "padding padding-block padding-bottom padding-inline padding-left padding-right padding-top page-break-after page-break-before page-break-inside perspective perspective-origin place-content place-items place-self pointer-events position " +
+    "quotes resize right rotate row-gap scale scroll-behavior scroll-margin scroll-padding scroll-snap-align scroll-snap-type scrollbar-color scrollbar-gutter scrollbar-width shape-outside " +
+    "tab-size table-layout text-align text-align-last text-decoration text-decoration-color text-decoration-line text-decoration-style text-decoration-thickness text-indent text-justify text-orientation text-overflow text-rendering text-shadow text-transform text-underline-offset text-wrap " +
+    "top touch-action transform transform-box transform-origin transform-style transition transition-delay transition-duration transition-property transition-timing-function translate " +
+    "unicode-bidi user-select vertical-align visibility white-space widows width will-change word-break word-spacing word-wrap writing-mode z-index zoom"
   ).split(/\s+/);
+  const CSS_VALUE_WORDS = (
+    "absolute auto avoid baseline block blur bold bolder border-box both break-word capitalize center clip column column-reverse contain content-box contents cover currentColor " +
+    "dashed dotted double ellipsis fit-content flex flex-end flex-start grid groove hidden inherit initial inline inline-block inline-flex inline-grid inset italic justify " +
+    "left line-through list-item lowercase ltr manual max-content min-content monospace no-repeat none normal nowrap oblique outset overline pointer pre pre-line pre-wrap " +
+    "relative repeat repeat-x repeat-y revert ridge right round row row-reverse rtl sans-serif screen scroll separate serif solid space-around space-between space-evenly static sticky stretch " +
+    "sub super table text-bottom text-top thick thin transparent underline unset uppercase visible wrap wrap-reverse " +
+    "calc clamp cubic-bezier hsl hsla linear-gradient min max radial-gradient rgb rgba steps translate translateX translateY url var " +
+    "alternate backwards ease ease-in ease-in-out ease-out forwards infinite linear " +
+    "landscape orientation portrait prefers-color-scheme prefers-reduced-motion print min-width max-width dark light"
+  ).split(/\s+/);
+  const CSS_AT_RULE_WORDS = "@charset @container @font-face @import @keyframes @layer @media @namespace @page @property @supports".split(/\s+/);
+  const CSS_COMPLETION_WORDS = [...CSS_PROPERTY_WORDS, ...CSS_VALUE_WORDS, ...CSS_AT_RULE_WORDS];
+  // Sass/Less 는 CSS 위에 자기 규칙을 얹은 언어다 — CSS 목록을 그대로 물려받고 전처리기 지시어만 더한다.
+  const SCSS_AT_RULE_WORDS = "@use @forward @mixin @include @extend @function @return @if @else @each @for @while @content @debug @warn @error".split(/\s+/);
+  const SCSS_COMPLETION_WORDS = CSS_COMPLETION_WORDS
+    .concat(SCSS_AT_RULE_WORDS)
+    .concat("!default !global true false null and or not".split(/\s+/));
+
+  /* ── CSS 자동완성 2단계: 속성 자리와 값 자리를 가려서 후보를 준다 ──────────────────────
+     [설명, 값 목록] 표. 값을 적어 둔 속성은 display: 뒤에서 그 속성이 실제로 받는 값만 나오고,
+     표에 없는 속성은 이름만 제안한 뒤 값 자리에서는 공통 값·함수·이 파일의 변수를 준다.
+     속성 이름의 원본은 CSS_PROPERTY_WORDS 이고 여기는 설명·값을 덧붙이는 표다. */
+  const CSS_PROPERTY_INFO = {
+    "align-content": ["여러 줄일 때 줄 전체를 교차축에서 정렬", "normal center start end flex-start flex-end space-between space-around space-evenly stretch baseline"],
+    "align-items": ["교차축(가로 배치면 세로) 정렬", "normal stretch center start end flex-start flex-end baseline self-start self-end"],
+    "align-self": ["이 항목만 교차축 정렬을 다르게", "auto normal stretch center start end flex-start flex-end baseline"],
+    "animation": ["애니메이션 한 줄 지정(이름 시간 곡선 반복…)", "none infinite alternate alternate-reverse forwards backwards both paused running linear ease ease-in ease-out ease-in-out steps"],
+    "animation-direction": ["재생 방향", "normal reverse alternate alternate-reverse"],
+    "animation-duration": ["한 번 재생에 걸리는 시간", "0s"],
+    "animation-fill-mode": ["재생 전후에 어떤 상태로 남을지", "none forwards backwards both"],
+    "animation-iteration-count": ["반복 횟수", "infinite"],
+    "animation-name": ["@keyframes 로 만든 이름", "none"],
+    "animation-play-state": ["재생·정지", "running paused"],
+    "animation-timing-function": ["시간에 따른 변화 곡선", "linear ease ease-in ease-out ease-in-out step-start step-end steps cubic-bezier"],
+    "appearance": ["브라우저 기본 모양 쓰기/끄기", "none auto"],
+    "aspect-ratio": ["가로세로 비율", "auto"],
+    "backdrop-filter": ["뒤 배경에 거는 효과", "none blur brightness contrast grayscale invert opacity saturate sepia"],
+    "backface-visibility": ["뒤집혔을 때 뒷면을 보일지", "visible hidden"],
+    "background": ["배경 한 줄 지정(색 이미지 위치 반복…)", "none no-repeat repeat repeat-x repeat-y cover contain center top bottom left right fixed scroll local border-box padding-box content-box"],
+    "background-attachment": ["스크롤할 때 배경이 따라갈지", "scroll fixed local"],
+    "background-clip": ["배경을 어디까지 칠할지", "border-box padding-box content-box text"],
+    "background-image": ["배경 그림", "none url linear-gradient radial-gradient conic-gradient repeating-linear-gradient"],
+    "background-origin": ["배경 시작 기준 상자", "border-box padding-box content-box"],
+    "background-position": ["배경 위치", "center top bottom left right"],
+    "background-repeat": ["배경 반복", "repeat repeat-x repeat-y no-repeat space round"],
+    "background-size": ["배경 크기", "auto cover contain"],
+    "border": ["테두리 한 줄 지정(굵기 모양 색)", "none hidden solid dashed dotted double groove ridge inset outset thin medium thick"],
+    "border-collapse": ["표 테두리를 겹칠지", "separate collapse"],
+    "border-radius": ["모서리 둥글기", "0"],
+    "border-style": ["테두리 모양", "none hidden solid dashed dotted double groove ridge inset outset"],
+    "border-width": ["테두리 굵기", "thin medium thick"],
+    "box-shadow": ["그림자(x y 번짐 색)", "none inset"],
+    "box-sizing": ["너비·높이에 테두리를 포함할지", "content-box border-box"],
+    "break-inside": ["인쇄·단 나눔에서 안이 쪼개질지", "auto avoid avoid-page avoid-column"],
+    "caption-side": ["표 제목 위치", "top bottom"],
+    "clear": ["float 아래로 내릴지", "none left right both inline-start inline-end"],
+    "clip-path": ["보일 영역 오려내기", "none circle ellipse inset polygon path url"],
+    "color": ["글자 색", ""],
+    "color-scheme": ["밝은/어두운 테마 알림", "normal light dark"],
+    "column-count": ["단 개수", "auto"],
+    "column-gap": ["단·격자 열 사이 간격", "normal"],
+    "content": ["::before·::after 가 넣을 내용", "none normal counter attr url open-quote close-quote"],
+    "cursor": ["마우스 포인터 모양", "auto default pointer text move not-allowed grab grabbing crosshair help wait progress zoom-in zoom-out col-resize row-resize ew-resize ns-resize none"],
+    "direction": ["글 방향", "ltr rtl"],
+    "display": ["요소를 어떤 상자로 놓을지", "block inline inline-block flex inline-flex grid inline-grid flow-root list-item table table-row table-cell contents none"],
+    "filter": ["요소에 거는 효과", "none blur brightness contrast drop-shadow grayscale hue-rotate invert opacity saturate sepia"],
+    "flex": ["늘고 줄고 기본크기 한 줄 지정", "none auto initial"],
+    "flex-basis": ["나누기 전 기본 크기", "auto content max-content min-content fit-content"],
+    "flex-direction": ["주축 방향", "row row-reverse column column-reverse"],
+    "flex-flow": ["방향과 줄바꿈 한 줄 지정", "row row-reverse column column-reverse nowrap wrap wrap-reverse"],
+    "flex-wrap": ["넘칠 때 줄바꿈", "nowrap wrap wrap-reverse"],
+    "float": ["좌우로 띄우기(옛 배치)", "none left right inline-start inline-end"],
+    "font": ["글꼴 한 줄 지정(굵기 크기/줄높이 이름)", "caption icon menu message-box small-caption status-bar"],
+    "font-family": ["글꼴 이름", "sans-serif serif monospace cursive fantasy system-ui ui-monospace"],
+    "font-size": ["글자 크기", "xx-small x-small small medium large x-large xx-large larger smaller"],
+    "font-style": ["기울임", "normal italic oblique"],
+    "font-variant": ["작은 대문자 등 변형", "normal small-caps all-small-caps"],
+    "font-weight": ["글자 굵기", "normal bold bolder lighter 100 200 300 400 500 600 700 800 900"],
+    "gap": ["격자·플렉스 사이 간격", "normal"],
+    "grid-auto-flow": ["자동 배치 방향", "row column dense"],
+    "grid-template-columns": ["열 크기 목록", "none auto min-content max-content repeat minmax fit-content subgrid"],
+    "grid-template-rows": ["행 크기 목록", "none auto min-content max-content repeat minmax fit-content subgrid"],
+    "height": ["높이", "auto min-content max-content fit-content stretch"],
+    "hyphens": ["자동 하이픈", "none manual auto"],
+    "image-rendering": ["확대할 때 그림 보간", "auto smooth crisp-edges pixelated"],
+    "isolation": ["혼합 모드 격리", "auto isolate"],
+    "justify-content": ["주축(가로 배치면 가로) 정렬", "normal center start end flex-start flex-end space-between space-around space-evenly stretch left right"],
+    "justify-items": ["격자 칸 안 가로 정렬", "normal stretch center start end legacy"],
+    "justify-self": ["이 항목만 가로 정렬을 다르게", "auto normal stretch center start end"],
+    "letter-spacing": ["자간", "normal"],
+    "line-height": ["줄 높이", "normal"],
+    "list-style-position": ["목록 기호 위치", "inside outside"],
+    "list-style-type": ["목록 기호 모양", "disc circle square decimal decimal-leading-zero lower-alpha upper-alpha lower-roman upper-roman korean-hangul-formal none"],
+    "margin": ["바깥 여백", "auto"],
+    "max-height": ["최대 높이", "none max-content min-content fit-content"],
+    "max-width": ["최대 너비", "none max-content min-content fit-content"],
+    "min-height": ["최소 높이", "auto max-content min-content fit-content"],
+    "min-width": ["최소 너비", "auto max-content min-content fit-content"],
+    "mix-blend-mode": ["아래 요소와 섞는 방식", "normal multiply screen overlay darken lighten color-dodge color-burn hard-light soft-light difference exclusion hue saturation color luminosity"],
+    "object-fit": ["img·video 를 상자에 맞추는 방식", "fill contain cover none scale-down"],
+    "object-position": ["맞춘 그림의 위치", "center top bottom left right"],
+    "opacity": ["불투명도(0~1)", "0 1"],
+    "outline": ["외곽선 한 줄 지정(자리를 차지하지 않음)", "none solid dashed dotted double auto thin medium thick"],
+    "outline-style": ["외곽선 모양", "none auto solid dashed dotted double groove ridge inset outset"],
+    "overflow": ["넘칠 때 처리", "visible hidden clip scroll auto"],
+    "overflow-wrap": ["긴 낱말 강제 줄바꿈", "normal break-word anywhere"],
+    "overflow-x": ["가로로 넘칠 때", "visible hidden clip scroll auto"],
+    "overflow-y": ["세로로 넘칠 때", "visible hidden clip scroll auto"],
+    "overscroll-behavior": ["끝까지 스크롤했을 때 바깥으로 넘길지", "auto contain none"],
+    "padding": ["안쪽 여백", "0"],
+    "place-content": ["align-content·justify-content 한 줄", "center start end space-between space-around space-evenly stretch"],
+    "place-items": ["align-items·justify-items 한 줄", "center start end stretch baseline"],
+    "pointer-events": ["마우스 이벤트를 받을지", "auto none"],
+    "position": ["배치 기준", "static relative absolute fixed sticky"],
+    "resize": ["사용자가 크기를 바꿀 수 있는지", "none both horizontal vertical"],
+    "scroll-behavior": ["스크롤 이동을 부드럽게", "auto smooth"],
+    "scroll-snap-align": ["스냅 기준 위치", "none start end center"],
+    "scroll-snap-type": ["스크롤 스냅 방향", "none x y block inline both mandatory proximity"],
+    "scrollbar-width": ["스크롤 막대 굵기", "auto thin none"],
+    "table-layout": ["표 열 너비 계산 방식", "auto fixed"],
+    "text-align": ["가로 정렬", "left right center justify start end"],
+    "text-decoration": ["밑줄·취소선 한 줄 지정", "none underline overline line-through solid double dotted dashed wavy"],
+    "text-decoration-line": ["줄의 종류", "none underline overline line-through blink"],
+    "text-decoration-style": ["줄의 모양", "solid double dotted dashed wavy"],
+    "text-overflow": ["넘친 글자 처리", "clip ellipsis"],
+    "text-shadow": ["글자 그림자(x y 번짐 색)", "none"],
+    "text-transform": ["대소문자 변환", "none capitalize uppercase lowercase full-width"],
+    "text-wrap": ["줄바꿈 방식", "wrap nowrap balance pretty stable"],
+    "touch-action": ["터치 제스처 허용 범위", "auto none pan-x pan-y pinch-zoom manipulation"],
+    "transform": ["이동·회전·확대", "none translate translateX translateY translate3d rotate rotateX rotateY scale scaleX scaleY skew skewX skewY matrix perspective"],
+    "transform-origin": ["변형의 기준점", "center top bottom left right"],
+    "transform-style": ["자식을 3D 로 둘지", "flat preserve-3d"],
+    "transition": ["바뀔 때 부드럽게(속성 시간 곡선 지연)", "none all linear ease ease-in ease-out ease-in-out step-start step-end steps cubic-bezier"],
+    "transition-property": ["부드럽게 할 속성", "none all"],
+    "transition-timing-function": ["변화 곡선", "linear ease ease-in ease-out ease-in-out step-start step-end steps cubic-bezier"],
+    "user-select": ["글자를 끌어 선택할 수 있는지", "auto text none contain all"],
+    "vertical-align": ["줄 안에서 세로 정렬", "baseline sub super text-top text-bottom middle top bottom"],
+    "visibility": ["자리는 두고 보이기/숨기기", "visible hidden collapse"],
+    "white-space": ["공백·줄바꿈 처리", "normal nowrap pre pre-wrap pre-line break-spaces"],
+    "width": ["너비", "auto min-content max-content fit-content stretch"],
+    "will-change": ["미리 최적화할 속성 알림", "auto scroll-position contents transform opacity"],
+    "word-break": ["낱말 안에서 줄바꿈", "normal break-all keep-all break-word"],
+    "writing-mode": ["글 흐름 방향", "horizontal-tb vertical-rl vertical-lr"],
+    "z-index": ["겹칠 때 앞뒤 순서", "auto 0 1 10 100"]
+  };
+  const CSS_GLOBAL_VALUES = "inherit initial revert unset".split(/\s+/);
+  const CSS_VALUE_FUNCTIONS = "var calc clamp min max".split(/\s+/);
+  const CSS_COLOR_FUNCTIONS = "rgb rgba hsl hsla color-mix".split(/\s+/);
+  const CSS_COLOR_VALUES = "transparent currentColor black white red orange yellow green blue navy teal purple pink brown gray lightgray darkgray silver gold".split(/\s+/);
+  // 색을 받는 속성(-color 로 끝나거나 배경·테두리·그림자 계열)에는 색 이름과 색 함수를 더 준다.
+  const CSS_COLOR_PROPERTY_RE = /(?:^|-)color$|^background$|^border(?:-(?:top|right|bottom|left|block|inline))?$|^outline$|^box-shadow$|^text-shadow$|^fill$|^stroke$/;
+  const CSS_PSEUDO_CLASSES = "hover focus focus-within focus-visible active visited link any-link target root empty checked disabled enabled required optional valid invalid read-only placeholder-shown default indeterminate first-child last-child only-child first-of-type last-of-type only-of-type".split(/\s+/);
+  const CSS_PSEUDO_FUNCTIONS = "nth-child nth-last-child nth-of-type nth-last-of-type not is where has lang".split(/\s+/);
+  const CSS_PSEUDO_ELEMENTS = "before after first-line first-letter selection placeholder marker backdrop file-selector-button".split(/\s+/);
+  const CSS_TAG_WORDS = ("a abbr article aside audio b blockquote body br button canvas caption code col colgroup dd details div dl dt em fieldset figcaption figure footer form " +
+    "h1 h2 h3 h4 h5 h6 header hr html i iframe img input label legend li main mark nav ol option p picture pre progress q section select small source span strong sub summary sup " +
+    "table tbody td textarea tfoot th thead time tr u ul video").split(/\s+/);
+  const CSS_MEDIA_FEATURE_WORDS = "min-width max-width min-height max-height width height orientation aspect-ratio prefers-color-scheme prefers-reduced-motion prefers-contrast hover pointer any-hover display-mode resolution".split(/\s+/);
+  const CSS_MEDIA_VALUE_WORDS = "all screen print speech only and not landscape portrait dark light reduce no-preference none fine coarse".split(/\s+/);
+
+  /* 커서가 CSS 문서의 어디에 있는지 — 속성 자리인지, 어떤 속성의 값 자리인지, 선택자인지, @규칙인지.
+     중괄호 깊이를 세면서 주석·따옴표를 건너뛰고, 마지막 구분자({ } ;) 뒤 조각을 현재 조각으로 본다.
+     kind: "property" | "value" | "selector" | "atrule" | "comment" */
+  const CSS_PROPERTY_NAME_RE = /^(?:--)?[A-Za-z][A-Za-z0-9-]*$/;
+  const CSS_NESTING_AT_RULE_RE = /^@(?:media|supports|layer|container|scope|document|keyframes)\b/i;
+  function cssCompletionContextAt(source, caret) {
+    const text = String(source == null ? "" : source).slice(0, Math.max(0, Number(caret) || 0));
+    /* 블록마다 무엇을 담는 블록인지 쌓아 둔다. @media { .card { … } } 안쪽은 선언이 아니라
+       선택자 자리라서, 중괄호 깊이만 세면 .card 를 치는데 속성 후보가 나온다. */
+    const blocks = [];
+    let cut = -1, quote = "", i = 0;
+    while (i < text.length) {
+      const ch = text[i];
+      if (quote) {
+        if (ch === "\\") { i += 2; continue; }
+        if (ch === quote) quote = "";
+        i++; continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; i++; continue; }
+      if (ch === "/" && text[i + 1] === "*") {
+        const close = text.indexOf("*/", i + 2);
+        if (close < 0) return { kind: "comment", property: "", segment: "", valueText: "" };
+        i = close + 2; continue;
+      }
+      if (ch === "{") {
+        const head = text.slice(cut + 1, i).trim();
+        blocks.push(CSS_NESTING_AT_RULE_RE.test(head) ? "atblock" : "rule");
+        cut = i; i++; continue;
+      }
+      if (ch === "}") { blocks.pop(); cut = i; i++; continue; }
+      if (ch === ";") { cut = i; i++; continue; }
+      i++;
+    }
+    const inDeclarations = blocks[blocks.length - 1] === "rule";
+    const segment = text.slice(cut + 1);
+    const trimmed = segment.trim();
+    if (trimmed.charAt(0) === "@") return { kind: "atrule", property: "", segment, valueText: "" };
+    const colon = segment.indexOf(":");
+    if (inDeclarations && colon >= 0) {
+      const property = segment.slice(0, colon).trim().toLowerCase();
+      // a:hover 처럼 선택자를 중첩해 쓰는 중(&:hover)이면 속성 이름 모양이 아니다 — 값 자리로 보지 않는다.
+      if (CSS_PROPERTY_NAME_RE.test(property)) {
+        return { kind: "value", property, segment, valueText: segment.slice(colon + 1) };
+      }
+      return { kind: "selector", property: "", segment, valueText: "" };
+    }
+    if (inDeclarations) return { kind: "property", property: "", segment, valueText: "" };
+    return { kind: "selector", property: "", segment, valueText: "" };
+  }
+
+  // 이 속성이 받는 값 목록(표에 있는 것 + 색 계열이면 색 이름).
+  function cssPropertyValueWords(property) {
+    const key = String(property || "").toLowerCase();
+    const info = CSS_PROPERTY_INFO[key];
+    const rows = info && info[1] ? info[1].split(/\s+/) : [];
+    return CSS_COLOR_PROPERTY_RE.test(key) ? rows.concat(CSS_COLOR_VALUES) : rows;
+  }
+  function cssPropertyDescription(property) {
+    const info = CSS_PROPERTY_INFO[String(property || "").toLowerCase()];
+    return info ? info[0] : "";
+  }
+
+  /* 값이 색인지 — 후보 옆에 색 미리보기 칩을 붙일지 정할 때 쓴다.
+     #hex · rgb()/hsl() 계열 · 이름 있는 색만 색으로 본다(그 밖은 칩 없이 글자만). */
+  const CSS_COLOR_VALUE_SET = new Set(CSS_COLOR_VALUES.map(name => name.toLowerCase()));
+  function cssValueLooksLikeColor(value) {
+    const text = String(value == null ? "" : value).trim().replace(/;+$/, "").trim();
+    if (!text) return "";
+    if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(text)) return text;
+    if (/^(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\([^()]*\)$/i.test(text)) return text;
+    return CSS_COLOR_VALUE_SET.has(text.toLowerCase()) ? text : "";
+  }
+  /* 이 파일이 선언한 CSS 변수 — --brand-color: #3366ff 를 이름과 값으로 뽑는다.
+     값 자리에서 후보로 올리고, 색이면 칩까지 붙인다. */
+  function cssDeclaredVariables(source) {
+    const text = String(source == null ? "" : source);
+    const rows = [];
+    const seen = new Set();
+    const re = /(--[A-Za-z0-9_-]+)\s*:\s*([^;{}\n]*)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const name = m[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      rows.push({ name, value: String(m[2] || "").trim() });
+    }
+    // 선언 없이 var(--x) 로만 쓰인 이름도 후보로 남긴다(다른 파일에서 선언했을 수 있다).
+    const used = /var\(\s*(--[A-Za-z0-9_-]+)/g;
+    while ((m = used.exec(text))) {
+      if (seen.has(m[1])) continue;
+      seen.add(m[1]);
+      rows.push({ name: m[1], value: "" });
+    }
+    return rows;
+  }
+
+  /* HTML 문서에 실제로 쓰인 class·id — 옆 .html 을 읽어 선택자 후보로 올릴 때 쓴다.
+     태그를 제대로 파싱하지 않고 속성만 훑는다(자동완성 후보라 이 정도면 충분하고 빠르다). */
+  function htmlSelectorNames(html) {
+    const text = String(html == null ? "" : html);
+    const classes = [], ids = [];
+    const push = (list, raw) => {
+      for (const name of String(raw || "").split(/\s+/)) {
+        if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) continue;
+        if (!list.includes(name)) list.push(name);
+      }
+    };
+    const attr = /\b(class|id)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+    let m;
+    while ((m = attr.exec(text))) {
+      const value = m[2] != null ? m[2] : (m[3] != null ? m[3] : m[4]);
+      push(m[1].toLowerCase() === "class" ? classes : ids, value);
+    }
+    return { classes, ids };
+  }
+
+  /* 스니펫 — 고르면 여러 줄이 한 번에 들어간다. $0 자리에 커서가 선다.
+     줄바꿈은 지금 줄의 들여쓰기를 따라간다(completionInsertionPlan). */
+  const CSS_AT_RULE_SNIPPETS = {
+    "@media": "@media (min-width: 768px) {\n  $0\n}",
+    "@keyframes": "@keyframes $0 {\n  from {  }\n  to {  }\n}",
+    "@font-face": "@font-face {\n  font-family: \"$0\";\n  src: url();\n}",
+    "@supports": "@supports ($0) {\n  \n}"
+  };
+  const CSS_PROPERTY_SNIPPETS = [
+    { name: "flex-center", detail: "가로·세로 가운데 정렬 3줄", snippet: "display: flex;\nalign-items: center;\njustify-content: center;$0" },
+    { name: "grid-center", detail: "격자로 가운데 정렬 2줄", snippet: "display: grid;\nplace-items: center;$0" }
+  ];
+
+  /* 커서 자리에 맞는 CSS 후보. 편집기(buildCodeEditor)의 options.contextCandidates 로 꽂아 쓴다.
+     반환 항목은 {name, type, detail, suffix, swatch, snippet} —
+       suffix  : 수락할 때 이름 뒤에 함께 넣을 글자(속성을 고르면 ": " 까지)
+       swatch  : 후보 옆에 그릴 색 칩
+       snippet : 여러 줄을 한 번에 넣는 본문($0 자리에 커서)
+     type "function" 은 기존 규칙대로 괄호가 붙는다.
+     selectors 는 옆 .html 에서 모은 [{name, from, kind}] — 선택자 자리에서만 쓴다. */
+  function cssCompletionCandidates(source, caret, prefix, ext, selectors) {
+    const text = String(source == null ? "" : source);
+    const ctx = cssCompletionContextAt(text, caret);
+    if (ctx.kind === "comment") return [];
+    // .scss/.less 는 @mixin·@include 같은 전처리기 지시어도 @규칙 자리에서 함께 제안한다.
+    const extension = String(ext || "").toLowerCase().replace(/^\./, "");
+    const atRules = ["scss", "sass", "less", "styl", "stylus"].includes(extension)
+      ? CSS_AT_RULE_WORDS.concat(SCSS_AT_RULE_WORDS)
+      : CSS_AT_RULE_WORDS;
+    const query = String(prefix || "").toLowerCase();
+    const seen = new Set();
+    const groups = [];
+    const group = (names, opts = {}) => {
+      const rows = [];
+      for (const raw of names) {
+        const name = String(raw || "");
+        const lower = name.toLowerCase();
+        if (!name || seen.has(lower)) continue;
+        if (query && !lower.startsWith(query)) continue;
+        if (lower === query && opts.type !== "function" && !opts.suffix && !opts.snippet) continue;   // 다 친 단어는 뺀다
+        seen.add(lower);
+        const item = { name, type: opts.type || "", detail: opts.detail || "" };
+        if (opts.suffix) item.suffix = opts.suffix;
+        if (opts.describe) item.detail = opts.describe(name) || item.detail;
+        if (opts.swatch) { const color = opts.swatch(name); if (color) item.swatch = color; }
+        if (opts.snippet) { const body = opts.snippet(name); if (body) { item.snippet = body; item.type = "snippet"; } }
+        rows.push(item);
+      }
+      rows.sort((a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name));
+      groups.push(rows);
+    };
+    // 미리 만들어 둔 항목(이름 말고도 붙일 게 많은 스니펫 등)을 그대로 넣는 자리.
+    const groupRows = (items) => {
+      const rows = [];
+      for (const row of items) {
+        const lower = String(row.name || "").toLowerCase();
+        if (!lower || seen.has(lower)) continue;
+        if (query && !lower.startsWith(query)) continue;
+        seen.add(lower);
+        rows.push(row);
+      }
+      groups.push(rows);
+    };
+    // 이 파일이 이미 쓰고 있는 CSS 변수 — 색이면 값에서 색 칩을 만든다.
+    const variables = cssDeclaredVariables(text);
+    const variableColor = (name) => {
+      const row = variables.find(item => item.name === name);
+      return row ? cssValueLooksLikeColor(row.value) : "";
+    };
+    if (ctx.kind === "value") {
+      const label = ctx.property + " 값";
+      group(cssPropertyValueWords(ctx.property), { detail: label, swatch: cssValueLooksLikeColor });
+      group(variables.map(row => row.name), { detail: "이 파일의 변수", swatch: variableColor });
+      const functions = CSS_COLOR_PROPERTY_RE.test(ctx.property)
+        ? CSS_VALUE_FUNCTIONS.concat(CSS_COLOR_FUNCTIONS)
+        : CSS_VALUE_FUNCTIONS;
+      group(functions, { type: "function", detail: "함수" });
+      group(CSS_GLOBAL_VALUES, { detail: "모든 속성 공통 값" });
+      return groups.flat();
+    }
+    if (ctx.kind === "atrule") {
+      group(atRules, { detail: "@규칙", snippet: (name) => CSS_AT_RULE_SNIPPETS[name] || "" });
+      group(CSS_MEDIA_FEATURE_WORDS, { suffix: ": ", detail: "미디어 조건" });
+      group(CSS_MEDIA_VALUE_WORDS, { detail: "미디어 값" });
+      return groups.flat();
+    }
+    if (ctx.kind === "selector") {
+      // 선택자 자리에서 : 이나 :: 바로 뒤면 가상 클래스·가상 요소를 준다.
+      const head = text.slice(0, Math.max(0, (Number(caret) || 0) - String(prefix || "").length));
+      if (/::$/.test(head)) { group(CSS_PSEUDO_ELEMENTS, { detail: "가상 요소" }); return groups.flat(); }
+      if (/:$/.test(head)) {
+        group(CSS_PSEUDO_CLASSES, { detail: "가상 클래스" });
+        group(CSS_PSEUDO_FUNCTIONS, { type: "function", detail: "가상 클래스" });
+        group(CSS_PSEUDO_ELEMENTS, { detail: "가상 요소" });
+        return groups.flat();
+      }
+      const own = [];
+      const re = /[.#][A-Za-z_][A-Za-z0-9_-]*/g;
+      let m; while ((m = re.exec(text))) { const name = m[0].slice(1); if (!own.includes(name)) own.push(name); }
+      group(own, { detail: "이 파일의 선택자" });
+      // 옆 .html 이 실제로 쓰는 class·id — 없는 선택자에 스타일을 쓰는 실수를 줄인다.
+      groupRows((Array.isArray(selectors) ? selectors : []).map(row => ({
+        name: String(row && row.name || ""),
+        type: "",
+        detail: (row && row.from ? row.from + " 의 " : "") + (row && row.kind === "id" ? "id" : "class")
+      })).filter(row => row.name));
+      group(CSS_TAG_WORDS, { detail: "HTML 태그" });
+      group(atRules, { detail: "@규칙", snippet: (name) => CSS_AT_RULE_SNIPPETS[name] || "" });
+      return groups.flat();
+    }
+    // 속성 자리 — 고르면 ": " 까지 넣어 값 자리로 바로 넘어간다.
+    group(CSS_PROPERTY_WORDS, { suffix: ": ", describe: cssPropertyDescription });
+    group(variables.map(row => row.name), { suffix: ": ", detail: "이 파일의 변수", swatch: variableColor });
+    groupRows(CSS_PROPERTY_SNIPPETS.map(row => ({ name: row.name, type: "snippet", detail: row.detail, snippet: row.snippet })));
+    group(atRules, { detail: "@규칙", snippet: (name) => CSS_AT_RULE_SNIPPETS[name] || "" });
+    return groups.flat();
+  }
+
+  /* 아직 한 글자도 안 쳤어도 후보를 열어야 하는 자리 — color: ⟨여기⟩ 처럼 값만 남은 자리와
+     .box:⟨여기⟩ 처럼 가상 클래스를 기다리는 자리. url(http:// 는 값이 이미 시작됐으므로 열지 않는다. */
+  function cssCompletionOpensEmpty(source, caret) {
+    const ctx = cssCompletionContextAt(source, caret);
+    if (ctx.kind === "value") return ctx.valueText.trim() === "";
+    if (ctx.kind === "selector") return /::?$/.test(String(source == null ? "" : source).slice(0, Math.max(0, Number(caret) || 0)));
+    return false;
+  }
   // 확장자별 완성 키워드. 구문강조 프로파일은 여러 언어를 함께 쓰므로, 편집기에서는 확장자를
   // 우선해 JS 키워드가 JSON에, Python 키워드가 YAML·PowerShell에 섞이지 않게 한다.
   // ext를 생략한 기존 호출은 프로파일 기본값을 유지한다.
@@ -625,6 +1044,10 @@
       if (["sh", "bash", "zsh"].includes(extension)) return SHELL_COMPLETION_WORDS;
       if (extension === "ps1") return POWERSHELL_COMPLETION_WORDS;
       if (extension === "rb") return RUBY_COMPLETION_WORDS;
+      // .scss/.less 는 구문강조 프로파일이 "c"(중괄호 계열)라 확장자로 걸러 주지 않으면
+      // 자바스크립트 키워드(function·const)가 스타일시트에서 뜬다.
+      if (["scss", "sass", "less", "styl", "stylus"].includes(extension)) return SCSS_COMPLETION_WORDS;
+      if (extension === "css") return CSS_COMPLETION_WORDS;
       // JSON/YAML/XML·설정 파일은 언어 키워드 대신 현재 버퍼의 단어만 제안한다.
       if (["json", "json5", "jsonc", "yaml", "yml", "xml", "xsl", "xslt", "xsd", "rss", "atom", "plist", "wsdl", "dbk", "docbook", "toml", "ini", "env", "properties", "conf"].includes(extension)) return [];
     }
@@ -636,6 +1059,35 @@
       case "hash": return PYTHON_COMPLETION_WORDS;
       default: return [];                             // xml/text 등: 버퍼 단어만
     }
+  }
+
+  /* 편집기가 "지금 치고 있는 단어"를 잡는 규칙. 언어마다 이름에 쓸 수 있는 글자가 다른데
+     기본 규칙(영문·숫자·밑줄)만 쓰면 CSS 에서 background-c 까지 쳤을 때 접두어가 "c" 로
+     리셋돼 엉뚱한 후보가 뜨고, 내 파일에 이미 쓴 --brand-color 같은 변수는 후보가 되지 못한다.
+     tail 은 커서 앞을 잘라 볼 때, scan 은 버퍼 전체에서 단어를 긁을 때 쓴다.
+     정규식 객체는 lastIndex 가 남아 서로 간섭하므로 부를 때마다 새로 만들어 돌려준다. */
+  const CSS_LIKE_EXTS = ["css", "scss", "sass", "less", "styl", "stylus"];
+  function completionWordPatternFor(profile, ext="") {
+    const extension = String(ext || "").toLowerCase().replace(/^\./, "");
+    const cssLike = extension
+      ? CSS_LIKE_EXTS.includes(extension)
+      : String(profile || "") === "css";
+    if (cssLike) {
+      // @media·--brand-color·background-color 를 한 단어로 본다. 하이픈만 친 상태(background-)도 유지한다.
+      return { tail: /(?:@|--)?[A-Za-z_][A-Za-z0-9_-]*$|@$|--$/, scan: /(?:@|--)?[A-Za-z_][A-Za-z0-9_-]*/g, cssLike:true };
+    }
+    return { tail: /[A-Za-z_][A-Za-z0-9_]*$/, scan: /\b[A-Za-z_][A-Za-z0-9_]*\b/g, cssLike:false };
+  }
+  // 위 규칙에서 "버퍼 훑기"용 정규식만 꺼낸다. RegExp 를 직접 넘겨도 받아 준다.
+  function completionScanPattern(wordPattern) {
+    const raw = wordPattern && wordPattern.scan ? wordPattern.scan : wordPattern;
+    if (!(raw instanceof RegExp)) return /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+    return new RegExp(raw.source, raw.flags.includes("g") ? raw.flags : raw.flags + "g");
+  }
+  // 같은 규칙에서 "커서 앞 단어"용 정규식만 꺼낸다.
+  function completionTailPattern(wordPattern) {
+    const raw = wordPattern && wordPattern.tail ? wordPattern.tail : wordPattern;
+    return raw instanceof RegExp && !raw.flags.includes("g") ? raw : /[A-Za-z_][A-Za-z0-9_]*$/;
   }
 
   // Jedi cannot always infer the concrete type returned by inherited class loaders
@@ -1107,10 +1559,11 @@
     , ["NodeInterrupt", "class", "from langgraph.errors import NodeInterrupt"]
   ].map(([name, type, importText]) => ({ name, type, importText }));
 
-  function pythonCompletionCandidates(source, prefix, keywords) {
+  function pythonCompletionCandidates(source, prefix, keywords, wordPattern) {
     const query = String(prefix || "");
     const ranked = new Map();
-    const identifier = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+    // 단어 규칙은 언어마다 다르다(completionWordPatternFor). 안 넘기면 기존 영문·숫자·밑줄 규칙.
+    const identifier = completionScanPattern(wordPattern);
     let match;
     while ((match = identifier.exec(String(source || "")))) {
       const word = match[0];
@@ -2342,14 +2795,14 @@
     return frames.length ? frames[frames.length - 1] : null;
   }
 
-  function completionReplacementRange(value, selectionStart, selectionEnd, completionStart, completionEnd, item) {
+  function completionReplacementRange(value, selectionStart, selectionEnd, completionStart, completionEnd, item, wordPattern) {
     const text = String(value || "");
     const fallbackStart = Math.max(0, Math.min(Number(completionStart) || 0, text.length));
     const fallbackEnd = Math.max(fallbackStart, Math.min(Number(completionEnd) || fallbackStart, text.length));
     const start = Math.max(0, Math.min(Number(selectionStart) || 0, text.length));
     const end = Math.max(start, Math.min(Number(selectionEnd) || 0, text.length));
     if (start === end) {
-      const match = text.slice(0, start).match(/[A-Za-z_][A-Za-z0-9_]*$/);
+      const match = text.slice(0, start).match(completionTailPattern(wordPattern));
       const prefix = match ? match[0] : "";
       if (prefix && String(item || "").startsWith(prefix)) {
         return { start: start - prefix.length, end };
@@ -2370,11 +2823,26 @@
     // import 줄에서는 함수형 후보라도 이름만 넣는다 — from math import sqrt() 는 문법 오류다.
     const lineStart = text.lastIndexOf("\n", start - 1) + 1;
     const importLine = /^\s*(?:from|import)\b/.test(text.slice(lineStart, start));
+    /* 스니펫 후보는 여러 줄을 한 번에 넣는다. 새 줄은 지금 줄의 들여쓰기를 따라가고,
+       $0 를 적어 둔 자리에 커서가 선다($0 가 없으면 넣은 글자 끝). */
+    if (info.snippet) {
+      const indent = (text.slice(lineStart, start).match(/^[ \t]*/) || [""])[0];
+      const body = String(info.snippet).replace(/\n/g, "\n" + indent);
+      const spot = body.indexOf("$0");
+      const filled = spot >= 0 ? body.slice(0, spot) + body.slice(spot + 2) : body;
+      return { text: filled, caret: start + (spot >= 0 ? spot : filled.length) };
+    }
     const callable = String(info.type || "").toLowerCase() === "function" && !importLine;
     const hasOpenParenthesis = callable && text.charAt(end) === "(";
+    /* 후보가 뒤에 함께 넣을 글자를 지정할 수 있다(CSS 속성을 고르면 ": " 까지). 이미 그 글자가
+       적혀 있으면(color: 를 다시 고른 경우) 겹쳐 넣지 않는다 — 함수의 여는 괄호와 같은 규칙. */
+    const suffix = !callable ? String(info.suffix || "") : "";
+    const suffixHead = suffix.trim().charAt(0);
+    const alreadyThere = suffixHead && text.charAt(end) === suffixHead;
+    const tail = alreadyThere ? "" : suffix;
     return {
-      text: name + (callable && !hasOpenParenthesis ? "()" : ""),
-      caret: start + name.length + (callable ? 1 : 0)
+      text: name + tail + (callable && !hasOpenParenthesis ? "()" : ""),
+      caret: start + name.length + tail.length + (callable ? 1 : 0)
     };
   }
 
@@ -2542,7 +3010,12 @@
   // 넘기지 않으면 예전 동작 그대로 "#" 이다.
   function transformEditorLines(value, selectionStart, selectionEnd, action, commentToken) {
     const text = String(value || "");
-    const marker = String(commentToken || "#");
+    // 주석 표시는 줄 앞에 붙이는 한 뭉치(#·//·--)가 기본이지만, CSS 처럼 줄 주석이 아예 없는
+    // 언어는 {open, close} 짝(여는 표시·닫는 표시)을 받아 줄을 통째로 감싼다.
+    const block = commentToken && typeof commentToken === "object" && commentToken.open
+      ? { open: String(commentToken.open), close: String(commentToken.close || "") }
+      : null;
+    const marker = block ? "" : String(commentToken || "#");
     const markerEscaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const commentedRe = new RegExp("^[ \\t]*" + markerEscaped);
     const stripRe = new RegExp("^" + markerEscaped + " ?");
@@ -2593,11 +3066,40 @@
       const edits = new Map();
       const nonBlank = [];
       for (let i = first; i <= last; i++) if (lines[i].trim()) nonBlank.push(i);
-      const uncomment = nonBlank.length > 0 && nonBlank.every((i) => commentedRe.test(lines[i]));
+      // 줄 전체가 하나의 블록 주석인가? 여는 표시로 시작하고, 처음 나오는 닫는 표시가 줄 끝이어야 한다.
+      // 끝만 보면 "주석 뒤에 코드가 더 있는 줄"까지 주석으로 잘못 보고 가운데를 지운다.
+      const blockCommented = (line) => {
+        if (!block) return false;
+        const t = line.trim();
+        if (t.length < block.open.length + block.close.length) return false;
+        if (!t.startsWith(block.open) || !t.endsWith(block.close)) return false;
+        return t.indexOf(block.close, block.open.length) === t.length - block.close.length;
+      };
+      const uncomment = nonBlank.length > 0
+        && nonBlank.every((i) => (block ? blockCommented(lines[i]) : commentedRe.test(lines[i])));
       for (let i = first; i <= last; i++) {
         const line = lines[i];
         if (!line.trim() && (first !== last || uncomment)) continue;
         const indent = (line.match(/^[ \t]*/) || [""])[0].length;
+        if (block) {
+          const body = line.slice(indent).replace(/[ \t]+$/, "");
+          if (uncomment) {
+            let inner = body.slice(block.open.length, body.length - block.close.length);
+            // 넣을 때 붙인 공백 한 칸만 되돌린다. 뒤쪽은 커서 자리에 영향이 없어(maxColumn 이 잡는다) 길이를 세지 않는다.
+            let head = block.open.length;
+            if (inner.startsWith(" ")) { inner = inner.slice(1); head++; }
+            if (inner.endsWith(" ")) inner = inner.slice(0, -1);
+            lines[i] = line.slice(0, indent) + inner;
+            edits.set(i, { column: indent, removed: head, added: 0, maxColumn: indent + inner.length });
+          } else {
+            // 이미 닫는 표시가 있는 줄을 감싸면 주석이 중간에서 끝나 파일이 깨진다 — 그 줄은 건드리지 않는다.
+            if (body.includes(block.close)) continue;
+            const opened = block.open + " ";
+            lines[i] = line.slice(0, indent) + opened + body + " " + block.close;
+            edits.set(i, { column: indent, removed: 0, added: opened.length, maxColumn: indent + opened.length + body.length });
+          }
+          continue;
+        }
         if (uncomment) {
           const match = line.slice(indent).match(stripRe);
           if (!match) continue;
@@ -2618,6 +3120,8 @@
           if (column <= edit.column + edit.removed) column = edit.column + edit.added;
           else column += edit.added - edit.removed;
         }
+        // 블록 주석은 줄 끝에도 닫는 표시를 붙인다 — 커서가 그 뒤로 밀려나지 않게 본문 끝에서 멈춘다.
+        if (edit && edit.maxColumn != null) column = Math.min(column, edit.maxColumn);
         return lineOffset(lines, line) + Math.min(column, lines[line].length);
       };
       return { value: lines.join("\n"), selectionStart: mapPosition(start), selectionEnd: mapPosition(end) };
@@ -4058,7 +4562,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
-    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonModuleBindings, pythonImportStatements, pythonWorkspaceImportAnalysis, pythonWorkspaceImportProblems, pythonImportCheckTargets, pythonJediImportProblems, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+    transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, completionWordPatternFor, htmlSelectorNames, cssDeclaredVariables, cssValueLooksLikeColor, cssCompletionContextAt, cssCompletionCandidates, cssCompletionOpensEmpty, cssPropertyValueWords, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonModuleBindings, pythonImportStatements, pythonWorkspaceImportAnalysis, pythonWorkspaceImportProblems, pythonImportCheckTargets, pythonJediImportProblems, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,
     suggestRegexPatterns, countRegexMatches, normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand,

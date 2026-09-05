@@ -672,10 +672,23 @@ function buildCodeEditor(text, prof, options={}){
      자바스크립트 편집기에서도 "# const a = 1;" 처럼 유효하지 않은 주석이 들어갔다.
      options.commentToken 이 없으면 프로파일에서 고른다. */
   const commentToken = options.commentToken
-    || (prof === "sql" ? "--" : (prof === "python" || prof === "hash" ? "#" : "//"));
+    || (prof === "css" ? { open:"/*", close:"*/" }              // CSS 는 줄 주석이 없다 — 줄을 통째로 감싼다
+      : (prof === "sql" ? "--" : (prof === "python" || prof === "hash" ? "#" : "//")));
   const completionWords = plainMode
     ? (Array.isArray(options.completionWords) ? options.completionWords : completionWordsForProfile(prof, options.fileExt))
     : undefined;
+  /* 자동완성이 "지금 치는 단어"를 잡는 규칙. 기본은 영문·숫자·밑줄이지만 CSS 는 하이픈까지
+     한 단어다(background-color·--brand-color·@media). 부르는 쪽이 options.wordPattern 으로
+     직접 줄 수도 있다. 이 규칙은 후보 고르기·버퍼 훑기·수락 시 바꿔치기 세 곳이 함께 써야
+     접두어와 지워질 범위가 어긋나지 않는다. */
+  const completionPattern = (options.wordPattern && typeof options.wordPattern === "object")
+    ? options.wordPattern
+    : (typeof completionWordPatternFor === "function" ? completionWordPatternFor(prof, options.fileExt) : null);
+  const completionTailRe = (completionPattern && completionPattern.tail) || /[A-Za-z_][A-Za-z0-9_]*$/;
+  // CSS 계열에서는 점(.)이 멤버 접근이 아니라 클래스 선택자다 — .box 를 칠 때 후보 창을 열지 않는다.
+  const cssLikeSource = !!(completionPattern && completionPattern.cssLike);
+  // 자동완성 목록 길이. 문맥으로 후보를 좁히는 언어(CSS)는 값 목록이 길어 조금 더 보여 준다.
+  const completionListLimit = Math.max(1, Number(options.completionLimit) || 12);
   const jediUsable = () => !plainMode && typeof jediReady === "function" && jediReady();
   // 서버 미러 안에서 이 파일이 놓인 상대경로 — Jedi 가 "지금 이 파일이 프로젝트의 어디인지"를
   // 알아야 같은 패키지의 형제 모듈(from .state import State 같은 상대 import)까지 풀 수 있다.
@@ -1267,13 +1280,29 @@ function buildCodeEditor(text, prof, options={}){
   const completionWord = () => {
     if (ta.selectionStart !== ta.selectionEnd) return null;
     const end = ta.selectionStart;
-    const match = ta.value.slice(0, end).match(/[A-Za-z_][A-Za-z0-9_]*$/);
+    const match = ta.value.slice(0, end).match(completionTailRe);
     return { prefix: match ? match[0] : "", start: end - (match ? match[0].length : 0), end };
+  };
+  /* 아직 한 글자도 안 쳤는데도 후보를 열어야 하는 자리(CSS 의 color: ⟨여기⟩ · .box:⟨여기⟩).
+     파이썬의 import 문과 같은 예외를 언어별로 열어 주는 훅이다. */
+  const contextOpensEmpty = (caret) => {
+    if (typeof options.contextOpensEmpty !== "function") return false;
+    try { return !!options.contextOpensEmpty({ source: ta.value, caret }); }
+    catch(e){ return false; }
   };
   // 커서가 파이썬 주석(#) 안에 있으면 자동완성을 띄우지 않는다. 현재 줄만 훑되
   // 따옴표 안의 #(문자열 리터럴)은 주석으로 보지 않는다.
   const caretInComment = (caret) => {
-    if (prof !== "python") return false;                  // Python 코드에서만 대상
+    // CSS 계열은 /* */ 블록 주석. 커서 앞에서 마지막으로 연 자리가 닫은 자리보다 뒤면 주석 안이다.
+    if (cssLikeSource){
+      const head = ta.value.slice(0, caret);
+      if (head.lastIndexOf("/*") > head.lastIndexOf("*/")) return true;
+      // Sass/Less 의 // 한 줄 주석 — url(http://…) 를 주석으로 보지 않도록 앞 글자가 : 이면 넘긴다.
+      const line = head.slice(head.lastIndexOf("\n") + 1);
+      const slash = line.indexOf("//");
+      return slash >= 0 && line.charAt(slash - 1) !== ":";
+    }
+    if (prof !== "python") return false;                  // 나머지는 Python 코드에서만 대상
     const before = ta.value.slice(0, caret);
     const line = before.slice(before.lastIndexOf("\n") + 1);
     let quote = "";
@@ -1325,8 +1354,18 @@ function buildCodeEditor(text, prof, options={}){
       const item = document.createElement("button"); item.type = "button"; item.className = "code-complete-item";
       item.setAttribute("role", "option"); item.setAttribute("aria-selected", String(index === completion.index));
       const name = document.createElement("span"); name.className = "code-complete-name"; name.textContent = info.name;
+      /* 색 값 후보 앞의 색 칩(CSS). 이름 줄 안에 넣어야 설명 줄과 세로로 겹치지 않는다.
+         값은 브라우저의 style 파서에 그대로 맡긴다 — 알아보지 못하는 값은 조용히 무시돼
+         칩만 비고, 문서에는 아무 영향도 주지 않는다. */
+      if (info.swatch){
+        const chip = document.createElement("span");
+        chip.className = "code-complete-swatch";
+        chip.setAttribute("aria-hidden", "true");
+        try { chip.style.backgroundColor = String(info.swatch); } catch(e){}
+        name.insertBefore(chip, name.firstChild);
+      }
       item.appendChild(name);
-      let detail = info.signature || info.importText;
+      let detail = info.signature || info.detail || info.importText;
       // 공용 편집기를 쓰는 언어가 단순 단어 후보에도 패키지·출처 설명을 붙일 수 있는 훅.
       // 선택·입력은 기존 후보 값을 그대로 쓰고, 화면에 보이는 둘째 줄만 보강한다.
       if (!detail && typeof options.completionDetail === "function"){
@@ -1348,8 +1387,12 @@ function buildCodeEditor(text, prof, options={}){
     const active = complete.children[completion.index]; if (active) active.scrollIntoView({ block: "nearest" });
   };
   let completionSeq = 0;                                   // 비동기 Jedi 응답 경합 방지(최신 요청만 반영)
+  /* 사용자가 직접 닫은(Esc·바깥 클릭·포커스 이동) 뒤에는 늦게 도착한 후보가 목록을 다시 열지 않는다.
+     다음 입력에서 풀린다 — refreshCompletion 이 이 표시를 본다. */
+  let completionSuppressed = false;
   const dismissCompletion = () => {
     completionSeq++;
+    completionSuppressed = true;
     hideCompletion();
   };
   const closeCompletionOnOutsidePointer = (event) => {
@@ -1414,7 +1457,16 @@ function buildCodeEditor(text, prof, options={}){
     const memberReceiver = ctx.memberReceiver || "", importCtx = ctx.importCtx || null;
     const source = typeof contextSource === "string" ? contextSource : completionContextFor().source;
     // import 줄에서 아직 아무 글자도 안 쳤으면 버퍼 단어는 빼고 모듈 후보만 보여 준다(목록 소음 방지).
-    const local = importCtx && !word.prefix ? [] : pythonCompletionCandidates(source, word.prefix, completionWords);
+    /* 언어가 "커서 자리"를 보고 후보를 직접 고를 수 있는 자리(CSS: 속성 자리/값 자리/선택자).
+       배열을 돌려주면 키워드·버퍼 단어 목록 대신 그것을 쓴다 — 값 자리에 속성 이름이 섞이지 않게. */
+    let local = null;
+    if (typeof options.contextCandidates === "function"){
+      try { local = options.contextCandidates({ source, prefix:word.prefix, caret:word.end, manual }); }
+      catch(e){ local = null; }
+    }
+    if (!Array.isArray(local)){
+      local = importCtx && !word.prefix ? [] : pythonCompletionCandidates(source, word.prefix, completionWords, completionPattern);
+    }
     // 멤버 후보는 부르는 쪽이 준 함수를 먼저 쓴다(자바스크립트 실행 편집기 등 파이썬이 아닌 언어).
     // 없으면 기존대로 파이썬 추론을 쓴다 — 일반 텍스트 편집(plainMode)에서는 둘 다 쓰지 않는다.
     let members = [];
@@ -1428,7 +1480,7 @@ function buildCodeEditor(text, prof, options={}){
     }
     const modules = moduleCandidatesFor(importCtx, word.prefix, manual);
     const imports = importCtx ? [] : importCandidatesFor(source, word.prefix, manual, ctx.dotContext);
-    const items = mergeCompletionItems([...modules, ...members, ...local], imports, memberReceiver ? 240 : 12);
+    const items = mergeCompletionItems([...modules, ...members, ...local], imports, memberReceiver ? 240 : completionListLimit);
     if (!items.length){ hideCompletion(); return false; }
     completion.items = items; completion.index = 0; completion.start = word.start; completion.end = word.end;
     renderCompletion();
@@ -1451,14 +1503,16 @@ function buildCodeEditor(text, prof, options={}){
     const word = completionWord();
     if (!word){ hideCompletion(); return; }
     if (caretInComment(word.end)){ hideCompletion(); return; }   // 주석 안에서는 자동완성하지 않음
-    const dotContext = word.start > 0 && ta.value[word.start - 1] === ".";   // obj. 처럼 멤버 접근 문맥
+    // obj. 처럼 멤버 접근 문맥. CSS 의 .box 는 선택자라 멤버가 아니다.
+    const dotContext = !cssLikeSource && word.start > 0 && ta.value[word.start - 1] === ".";
     const receiverMatch = dotContext ? ta.value.slice(0, word.start - 1).match(/([A-Za-z_]\w*)$/) : null;
     const memberReceiver = receiverMatch ? receiverMatch[1] : "";
     // import 문 안이면 아직 한 글자도 안 쳤어도 후보를 연다(from 모듈 import ⟨여기⟩ 처럼).
     const importCtx = !plainMode && typeof pythonImportContextAt === "function"
       ? pythonImportContextAt(ta.value, ta.selectionStart) : null;
     const completionCtx = { memberReceiver, dotContext, importCtx };
-    if (!manual && !dotContext && !importCtx && word.prefix.length < 1){ hideCompletion(); return; }
+    const emptyOpen = !word.prefix.length && contextOpensEmpty(word.end);
+    if (!manual && !dotContext && !importCtx && !emptyOpen && word.prefix.length < 1){ hideCompletion(); return; }
     completion.manual = manual;
     // 로컬 후보는 즉시 보여 주고, 더 정확한 Jedi 결과가 오면 같은 팝업을 비동기로 보강한다.
     // 네트워크 왕복과 서버의 Python 프로세스 시작을 기다리는 동안 팝업이 비어 있지 않아 체감 지연이 줄어든다.
@@ -1476,7 +1530,7 @@ function buildCodeEditor(text, prof, options={}){
         const modules = moduleCandidatesFor(importCtx, word.prefix, manual);   // 작업공간 모듈은 Jedi 가 모르는 영역이라 앞에 둔다
         const fallbackMembers = memberReceiver && typeof pythonMemberCompletionCandidates === "function"
           ? pythonMemberCompletionCandidates(source, memberReceiver, word.prefix) : [];
-        const combined = mergeCompletionItems([...modules, ...fallbackMembers, ...pruned], imports, memberReceiver ? 240 : 12);
+        const combined = mergeCompletionItems([...modules, ...fallbackMembers, ...pruned], imports, memberReceiver ? 240 : completionListLimit);
         if (combined.length){
           completion.items = combined; completion.index = 0;
           completion.start = word.start; completion.end = word.end;
@@ -1496,7 +1550,7 @@ function buildCodeEditor(text, prof, options={}){
     const info = selected && typeof selected === "object"
       ? selected
       : { name: String(selected || ""), type: "", signature: "" };
-    const range = completionReplacementRange(ta.value, ta.selectionStart, ta.selectionEnd, completion.start, completion.end, info.name);
+    const range = completionReplacementRange(ta.value, ta.selectionStart, ta.selectionEnd, completion.start, completion.end, info.name, completionPattern);
     const application = (typeof completionApplicationPlan === "function")
       ? completionApplicationPlan(ta.value, range, info, options.importPlanner)
       : (() => {
@@ -1509,6 +1563,8 @@ function buildCodeEditor(text, prof, options={}){
     const caret = application.caret;
     pendingAutoParen = (ta.value[caret - 1] === "(" && ta.value[caret] === ")") ? caret : -1;
     hideCompletion(); emitInput(); scrollCaretIntoView();
+    // 속성을 고르면 ": " 까지 들어가 값 자리가 된다 — 곧바로 값 후보를 이어서 보여 준다.
+    if (contextOpensEmpty(ta.selectionStart)) scheduleCompletion();
   }
   const insertPair = (open, close) => {
     const start = ta.selectionStart, end = ta.selectionEnd, selected = ta.value.slice(start, end);
@@ -2269,9 +2325,10 @@ function buildCodeEditor(text, prof, options={}){
     // 입력·삭제·붙여넣기 때 자동완성 갱신. 프로그램이 발생시킨 input은 제외한다.
     if (!linkedEdit.active && typeof InputEvent !== "undefined" && e instanceof InputEvent && e.isTrusted &&
         /^(?:insertText|insertCompositionText|insertFromPaste|deleteContentBackward|deleteContentForward)$/.test(e.inputType || "")){
+      completionSuppressed = false;                        // 다시 치기 시작하면 자동 표시를 되살린다
       const word = completionWord();
-      const dotContext = word && word.start > 0 && ta.value[word.start - 1] === ".";
-      if (word && (word.prefix.length > 0 || dotContext)) scheduleCompletion();
+      const dotContext = !cssLikeSource && word && word.start > 0 && ta.value[word.start - 1] === ".";
+      if (word && (word.prefix.length > 0 || dotContext || contextOpensEmpty(word.end))) scheduleCompletion();
       else hideCompletion();
     } else if (!linkedEdit.active && !complete.hidden) hideCompletion();
   });
@@ -3160,6 +3217,13 @@ function buildCodeEditor(text, prof, options={}){
     formatDocument: formatDocumentNow,
     dedupeSelectedLines, applyLineTidy,
     canFormat: () => !!externalFormatter || (!plainMode && prof === "python"),
+    /* 후보 목록을 지금 문맥으로 다시 만든다. 후보가 늦게 도착하는 쪽(옆 .html 을 백그라운드로 읽는
+       CSS 선택자)이 다 읽은 뒤 부르면 한 글자 더 치지 않아도 목록이 채워진다. 목록이 비어 있어
+       닫혀 있던 경우까지 살리되, 사용자가 직접 닫았거나(Esc) 편집기를 떠났으면 열지 않는다. */
+    refreshCompletion: () => {
+      if (completionSuppressed || document.activeElement !== ta) return;
+      showCompletion(!complete.hidden && completion.manual);
+    },
     startPractice, stopPractice, isPracticeActive: () => practice.active,
     destroy: () => {
       if (practice.active) stopPractice("cancel");

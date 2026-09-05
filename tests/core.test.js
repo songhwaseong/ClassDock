@@ -6,7 +6,7 @@ const {
   indexWorkspacePathsByFolder,
   pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
   windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
-  transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceModuleRowsFromIndex, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
+  transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, completionWordPatternFor, htmlSelectorNames, cssDeclaredVariables, cssValueLooksLikeColor, cssCompletionContextAt, cssCompletionCandidates, cssCompletionOpensEmpty, cssPropertyValueWords, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceModuleRowsFromIndex, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
   diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
   lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation,
   detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord, explainPythonError, contentMatchSnippet,
@@ -475,6 +475,39 @@ test("줄 주석 표시는 언어에 맞춰 넘길 수 있다", () => {
   assert.equal(transformEditorLines("  SELECT 1", 0, 10, "toggle-comment", "--").value, "  -- SELECT 1");
 });
 
+test("CSS 주석 토글은 줄 주석이 없는 언어라 줄을 통째로 감싼다", () => {
+  const css = { open: "/*", close: "*/" };
+  const one = "  color: red;";
+  const on = transformEditorLines(one, 2, 2, "toggle-comment", css);
+  assert.equal(on.value, "  /* color: red; */");
+  // 커서는 감싼 뒤에도 같은 글자 앞에 남는다(여는 표시만큼 밀린다)
+  assert.equal(on.selectionStart, 5);
+  // 다시 누르면 벗겨져 원래대로 — 넣을 때 붙인 공백 한 칸만 되돌린다
+  const off = transformEditorLines(on.value, on.selectionStart, on.selectionEnd, "toggle-comment", css);
+  assert.equal(off.value, one);
+  assert.equal(off.selectionStart, 2);
+
+  // 여러 줄: 빈 줄은 건너뛰고, 전부 주석이어야 벗긴다
+  const many = ".box{\n\n  color: red;\n}";
+  const manyOn = transformEditorLines(many, 0, many.length, "toggle-comment", css);
+  assert.equal(manyOn.value, "/* .box{ */\n\n  /* color: red; */\n/* } */");
+  assert.equal(transformEditorLines(manyOn.value, 0, manyOn.value.length, "toggle-comment", css).value, many);
+
+  // 이미 닫는 표시가 있는 줄을 감싸면 주석이 중간에서 끝나 파일이 깨진다 — 그 줄은 그대로 둔다.
+  const tail = "  color: red; /* 빨강 */";
+  assert.equal(transformEditorLines(tail, 0, tail.length, "toggle-comment", css).value, tail);
+
+  // 주석 뒤에 코드가 더 있는 줄은 '통째로 주석'이 아니다 — 가운데를 지우지 말아야 한다
+  // (감싸지도 못하는 줄이라 그대로 둔다).
+  const partial = "/* a */ b";
+  assert.equal(transformEditorLines(partial, 0, partial.length, "toggle-comment", css).value, partial);
+
+  // 줄 끝에 커서를 두고 감싸면 닫는 표시 뒤가 아니라 본문 끝에 남는다.
+  const caretEnd = transformEditorLines("a{}", 3, 3, "toggle-comment", css);
+  assert.equal(caretEnd.value, "/* a{} */");
+  assert.equal(caretEnd.selectionStart, 6);
+});
+
 test("Python 자동완성은 현재 코드 식별자와 기본 단어를 접두어로 제안한다", () => {
   const suggestions = pythonCompletionCandidates("def process_data():\n    project_name = ''\n    pro", "pro");
   assert.deepEqual(suggestions.slice(0, 3), ["process_data", "project_name", "property"]);
@@ -499,6 +532,196 @@ test("언어별 자동완성: 프로파일 키워드로 바꾸면 파이썬 키�
   assert.ok(!completionWordsForProfile("hash", "yaml").includes("def"));
   assert.ok(!completionWordsForProfile("c", "json").includes("function"));
   assert.ok(completionWordsForProfile("hash", "ps1").includes("foreach"));
+});
+
+test("CSS 자동완성: 하이픈 속성·CSS 변수·@규칙을 한 단어로 잡는다", () => {
+  const css = completionWordPatternFor("css", "css");
+  assert.equal(css.cssLike, true);
+  // 하이픈 뒤에서 접두어가 리셋되면 background-color 를 영영 못 고른다
+  assert.equal("  background-c".match(css.tail)[0], "background-c");
+  assert.equal("  background-".match(css.tail)[0], "background-");
+  assert.equal("color: var(--bra".match(css.tail)[0], "--bra");
+  assert.equal("@med".match(css.tail)[0], "@med");
+  assert.equal("@".match(css.tail)[0], "@");
+  // 클래스 선택자는 단어에 점을 포함하지 않는다(멤버 접근이 아니다)
+  assert.equal(".my-box".match(css.tail)[0], "my-box");
+  // 다른 언어는 기존 규칙 그대로 — 하이픈은 단어 구분자다
+  const py = completionWordPatternFor("python", "py");
+  assert.equal(py.cssLike, false);
+  assert.equal("a-b".match(py.tail)[0], "b");
+});
+
+test("CSS 자동완성: 키워드와 버퍼 단어가 하이픈째로 제안된다", () => {
+  const words = completionWordsForProfile("css", "css");
+  assert.ok(words.includes("background-color"));
+  assert.ok(words.includes("@media"));
+  const pattern = completionWordPatternFor("css", "css");
+  const source = ":root{ --brand-color: #f00; }\n.box{ background-color: red; }";
+  // 내 파일에 이미 쓴 CSS 변수도 후보가 된다
+  assert.ok(pythonCompletionCandidates(source, "--bra", words, pattern).includes("--brand-color"));
+  assert.ok(pythonCompletionCandidates(source, "background-c", words, pattern).includes("background-color"));
+  // 규칙을 안 넘기면(다른 언어) 하이픈 단어는 잡히지 않는다 — 기존 동작 보존
+  assert.ok(!pythonCompletionCandidates(source, "--bra", []).includes("--brand-color"));
+  // .scss/.less 는 CSS 목록을 물려받고 전처리기 지시어를 더한다(자바스크립트 키워드가 아니다)
+  const scss = completionWordsForProfile("c", "scss");
+  assert.ok(scss.includes("background-color"));
+  assert.ok(scss.includes("@mixin"));
+  assert.ok(!scss.includes("function"));
+});
+
+test("CSS 문맥 판별: 속성 자리·값 자리·선택자·@규칙·주석을 가른다", () => {
+  const at = (src) => cssCompletionContextAt(src, src.length);
+  assert.equal(at(".box{ ").kind, "property");
+  assert.equal(at(".box{ disp").kind, "property");
+  const value = at(".box{ display: fl");
+  assert.equal(value.kind, "value");
+  assert.equal(value.property, "display");
+  // 앞 선언이 끝나면 다시 속성 자리
+  assert.equal(at(".box{ color: red; ba").kind, "property");
+  // 블록을 닫으면 선택자 자리
+  assert.equal(at(".box{ color: red; }\n.next").kind, "selector");
+  assert.equal(at("a:ho").kind, "selector");
+  assert.equal(at("@media (min-w").kind, "atrule");
+  assert.equal(at("/* back").kind, "comment");
+  assert.equal(at("/* 끝난 주석 */\n.box{ colo").kind, "property");
+  // SCSS 중첩 선택자(&:hover)는 값 자리가 아니다
+  assert.equal(at(".box{ &:ho").kind, "selector");
+  /* @media { ⟨여기⟩ } 안은 선언이 아니라 선택자 자리다 — 중괄호 깊이만 세면 .card 를 치는데
+     속성 후보가 나온다. 그 안의 규칙으로 한 겹 더 들어가면 다시 선언 자리다. */
+  assert.equal(at("@media (min-width: 768px) {\n  .ca").kind, "selector");
+  assert.equal(at("@media (min-width: 768px) {\n  .card{ colo").kind, "property");
+  assert.equal(at("@media (min-width: 768px) {\n  .card{ color: r").kind, "value");
+  assert.equal(at("@keyframes spin {\n  fr").kind, "selector");
+  assert.equal(at("@keyframes spin {\n  from { transf").kind, "property");
+});
+
+test("CSS 값 후보는 그 속성이 받는 값만 준다", () => {
+  const src = ":root{ --brand-color: #f00; }\n.box{ display: ";
+  const items = cssCompletionCandidates(src, src.length, "").map(it => it.name);
+  assert.ok(items.includes("flex"));
+  assert.ok(items.includes("inline-block"));
+  assert.ok(!items.includes("background-color"));   // 값 자리에 속성 이름이 섞이지 않는다
+  assert.ok(items.includes("var"));                 // var()·calc() 는 어디서나
+  // 색을 받는 속성에는 색 이름과 색 함수를 더 준다
+  const colorSrc = ".box{ color: ";
+  const colors = cssCompletionCandidates(colorSrc, colorSrc.length, "").map(it => it.name);
+  assert.ok(colors.includes("transparent"));
+  assert.ok(colors.includes("rgb"));
+  // 이 파일에 선언한 변수도 값 후보다
+  const varSrc = ":root{ --brand-color: #f00; }\n.box{ color: --b";
+  assert.ok(cssCompletionCandidates(varSrc, varSrc.length, "--b").map(it => it.name).includes("--brand-color"));
+  assert.equal(cssPropertyValueWords("display").includes("grid"), true);
+});
+
+test("CSS 속성 후보는 설명과 함께 나오고 고르면 콜론까지 들어간다", () => {
+  const src = ".box{ disp";
+  const rows = cssCompletionCandidates(src, src.length, "disp");
+  const display = rows.find(it => it.name === "display");
+  assert.ok(display);
+  assert.equal(display.suffix, ": ");
+  assert.match(display.detail, /상자/);
+  // 수락하면 이름 + ": " 가 들어가고 커서는 값 자리에 선다
+  const range = { start: src.length - 4, end: src.length };
+  const insertion = completionInsertionPlan(src, range, display);
+  assert.equal(insertion.text, "display: ");
+  assert.equal(src.slice(0, range.start) + insertion.text, ".box{ display: ");
+  assert.equal(insertion.caret, range.start + "display: ".length);
+  // 이미 콜론이 적혀 있으면 겹쳐 넣지 않는다
+  const typed = ".box{ display: red";
+  const same = completionInsertionPlan(typed, { start: 6, end: 13 }, display);
+  assert.equal(same.text, "display");
+});
+
+test("CSS @규칙 후보는 확장자에 따라 전처리기 지시어를 더한다", () => {
+  const src = ".box{ @mi";
+  assert.ok(!cssCompletionCandidates(src, src.length, "@mi").map(it => it.name).includes("@mixin"));
+  assert.ok(cssCompletionCandidates(src, src.length, "@mi", "scss").map(it => it.name).includes("@mixin"));
+  const media = "@med";
+  assert.ok(cssCompletionCandidates(media, media.length, "@med").map(it => it.name).includes("@media"));
+});
+
+test("CSS 선택자 자리: 콜론 뒤에는 가상 클래스, 그 밖에는 태그·이 파일의 선택자", () => {
+  const src = ".card{ color: red; }\n.card:";
+  const pseudo = cssCompletionCandidates(src, src.length, "").map(it => it.name);
+  assert.ok(pseudo.includes("hover"));
+  assert.ok(!pseudo.includes("div"));
+  const el = ".card::";
+  assert.ok(cssCompletionCandidates(el, el.length, "").map(it => it.name).includes("before"));
+  const tag = ".card{ color: red; }\nse";
+  const rows = cssCompletionCandidates(tag, tag.length, "se");
+  assert.ok(rows.map(it => it.name).includes("section"));
+  const known = ".card{ color: red; }\n.ca";
+  assert.ok(cssCompletionCandidates(known, known.length, "ca").map(it => it.name).includes("card"));
+});
+
+test("CSS 후보 창은 값만 남은 자리에서 저절로 열리고 URL 안에서는 열리지 않는다", () => {
+  const value = ".box{ color:";
+  assert.equal(cssCompletionOpensEmpty(value, value.length), true);
+  const spaced = ".box{ color: ";
+  assert.equal(cssCompletionOpensEmpty(spaced, spaced.length), true);
+  const url = ".box{ background: url(http:";
+  assert.equal(cssCompletionOpensEmpty(url, url.length), false);
+  const pseudoSpot = ".box:";
+  assert.equal(cssCompletionOpensEmpty(pseudoSpot, pseudoSpot.length), true);
+  const plain = ".box{ colo";
+  assert.equal(cssCompletionOpensEmpty(plain, plain.length), false);
+});
+
+test("HTML 에서 class·id 이름을 뽑아 선택자 후보로 쓴다", () => {
+  const html = '<div class="card big" id="main">\n<p class=\'note card\'>x</p>\n<span class=plain data-x="no">y</span>';
+  const names = htmlSelectorNames(html);
+  assert.deepEqual(names.classes, ["card", "big", "note", "plain"]);   // 따옴표 세 모양 모두, 중복 없이
+  assert.deepEqual(names.ids, ["main"]);
+  // 옆 파일 후보는 어느 파일의 무엇인지까지 알려 준다
+  const src = ".ca";
+  const rows = cssCompletionCandidates(src, src.length, "ca", "css", [
+    { name: "card", from: "index.html", kind: "class" },
+    { name: "cart", from: "index.html", kind: "id" }
+  ]);
+  const card = rows.find(it => it.name === "card");
+  assert.ok(card);
+  assert.equal(card.detail, "index.html 의 class");
+  assert.equal(rows.find(it => it.name === "cart").detail, "index.html 의 id");
+  // 속성 자리에서는 HTML 선택자를 주지 않는다
+  const inRule = ".box{ ca";
+  assert.ok(!cssCompletionCandidates(inRule, inRule.length, "ca", "css", [{ name: "card", from: "index.html", kind: "class" }])
+    .some(it => it.name === "card"));
+});
+
+test("CSS 색 후보에는 색 칩 값이 함께 온다", () => {
+  const src = ":root{ --brand-color: #3366ff; --gap: 8px; }\n.box{ color: ";
+  const rows = cssCompletionCandidates(src, src.length, "");
+  assert.equal(rows.find(it => it.name === "red").swatch, "red");
+  // 이 파일의 변수는 선언된 값으로 칩을 만든다 — 색이 아닌 변수에는 칩이 없다
+  assert.equal(rows.find(it => it.name === "--brand-color").swatch, "#3366ff");
+  assert.equal(rows.find(it => it.name === "--gap").swatch, undefined);
+  assert.equal(cssValueLooksLikeColor("12px"), "");
+  assert.equal(cssValueLooksLikeColor(" #3366ff; "), "#3366ff");
+  assert.deepEqual(cssDeclaredVariables(":root{ --a: red; }").map(row => row.name), ["--a"]);
+});
+
+test("CSS 스니펫은 여러 줄을 지금 줄 들여쓰기에 맞춰 넣는다", () => {
+  const src = "@med";
+  const media = cssCompletionCandidates(src, src.length, "@med").find(it => it.name === "@media");
+  assert.ok(media.snippet);
+  const plan = completionInsertionPlan(src, { start: 0, end: src.length }, media);
+  assert.equal(plan.text, "@media (min-width: 768px) {\n  \n}");
+  assert.equal(plan.caret, "@media (min-width: 768px) {\n  ".length);   // $0 자리에 커서
+  // 들여쓰기가 있는 줄에서는 새 줄도 그만큼 밀어 준다
+  const nested = ".box{\n  flex-cent";
+  const snippet = cssCompletionCandidates(nested, nested.length, "flex-cent").find(it => it.name === "flex-center");
+  assert.ok(snippet);
+  const indented = completionInsertionPlan(nested, { start: nested.length - "flex-cent".length, end: nested.length }, snippet);
+  assert.equal(indented.text, "display: flex;\n  align-items: center;\n  justify-content: center;");
+});
+
+test("CSS 자동완성 수락은 하이픈 앞부터 통째로 바꿔 쓴다", () => {
+  const source = ".box{ background-c";
+  const pattern = completionWordPatternFor("css", "css");
+  const start = source.length - "background-c".length;
+  const range = completionReplacementRange(source, source.length, source.length, start, source.length, "background-color", pattern);
+  assert.deepEqual(range, { start, end: source.length });
+  assert.equal(source.slice(0, range.start) + "background-color" + source.slice(range.end), ".box{ background-color");
 });
 
 test("DataFrame fallback completion exposes the pandas member catalog without Jedi", () => {

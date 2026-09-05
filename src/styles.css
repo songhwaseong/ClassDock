@@ -5421,6 +5421,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     color:var(--ink);font:12.5px/1.25 Consolas,"Courier New",monospace;text-align:left;cursor:pointer;
     box-shadow:inset 3px 0 transparent;transition:background .12s,color .12s,box-shadow .12s}
   .code-complete-name{display:block;font-weight:600}
+  /* CSS 색 값 후보 앞의 색 칩 — 배경색은 후보마다 다르므로 JS 가 style 로 직접 넣는다.
+     transparent 처럼 칠이 없는 값은 테두리만 남아 그대로 '비어 있음'으로 읽힌다. */
+  .code-complete-swatch{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:2px;
+    border:1px solid rgba(15,23,42,.28);vertical-align:-1px}
+  [data-theme="dark"] .code-complete-swatch{border-color:rgba(226,232,240,.35)}
   .code-complete-signature{display:block;max-width:100%;overflow:hidden;color:var(--muted);font-size:10.5px;
     font-weight:400;text-overflow:ellipsis;white-space:nowrap}
   .code-complete-item:hover,.code-complete-item[aria-selected="true"]{
