@@ -2083,8 +2083,17 @@ async function renderXlsx(file, host, doc){
 
   // ----- 수식 재계산 -----
   const astCache = new Map();
+  /* 시트별 표(테이블) 목록. getAst 가 표 참조([@열] 같은 것)를 펼칠 때마다 필요하다.
+     예전에는 부를 때마다 새로 만들었고, 그것도 astCache 를 보기 '전에' 만들어서 캐시가 맞는
+     경우에도 이 비용은 매번 냈다. recalcAll 은 수식 셀 하나마다 getAst 를 부르므로 수식이
+     1만 개면 이 객체를 1만 번 만든다(시트 수만큼의 배열·객체 할당 × 1만).
+     recalcAll 은 도는 동안 await 가 없어 worksheetViews 가 바뀔 수 없다. 그래서 재계산 한 번에
+     한 번만 만들어 쓰고 끝나면 버린다. 그 밖에서는 예전처럼 그때그때 만들므로, 표가 바뀔 때
+     무효화를 어디선가 빠뜨려 낡은 표로 계산하는 일이 생기지 않는다(무효화 지점이 없다). */
+  const sheetTablesSnapshot = () => Object.fromEntries(Object.entries(worksheetViews).map(([name,v])=>[name,v.tables || []]));
+  let recalcTables = null;
   const getAst = (f,home=currentSheet,row=0,col=null) => {
-    const tables=Object.fromEntries(Object.entries(worksheetViews).map(([name,v])=>[name,v.tables || []]));
+    const tables=recalcTables || sheetTablesSnapshot();
     f=spreadsheetTools.expandReferences(f,home,row,tables,[],col);
     if (astCache.has(f)) return astCache.get(f);
     let ast = null; try { ast = parseFormula(f); } catch(_){ ast = null; }
@@ -2157,20 +2166,25 @@ async function renderXlsx(file, host, doc){
       return res;
     };
     const updatedBySheet = {};
-    Object.keys(exModels).forEach(nm => {
-      if (!sheetsWithFormula.has(nm)) return;
-      const model = exModels[nm]; const upd = [];
-      for (let r = 0; r < model.length; r++){
-        if (!model[r]) continue;
-        for (let c = 0; c < model[r].length; c++){
-          const s = model[r][c]; if (!s.f) continue;
-          const res = resolve(c, r, nm, nm);
-          s.v = isFormulaError(res) ? res.__err : (typeof res === "boolean" ? (res ? "TRUE" : "FALSE") : res);
-          upd.push({ r, c });
+    // 이 한 번의 재계산 동안 표 목록을 고정한다. 중간에 await 가 없어 바뀔 수 없고,
+    // 도중에 오류가 나도 반드시 놓아 준다(놓지 않으면 다음 계산이 낡은 표를 쓴다).
+    recalcTables = sheetTablesSnapshot();
+    try {
+      Object.keys(exModels).forEach(nm => {
+        if (!sheetsWithFormula.has(nm)) return;
+        const model = exModels[nm]; const upd = [];
+        for (let r = 0; r < model.length; r++){
+          if (!model[r]) continue;
+          for (let c = 0; c < model[r].length; c++){
+            const s = model[r][c]; if (!s.f) continue;
+            const res = resolve(c, r, nm, nm);
+            s.v = isFormulaError(res) ? res.__err : (typeof res === "boolean" ? (res ? "TRUE" : "FALSE") : res);
+            upd.push({ r, c });
+          }
         }
-      }
-      updatedBySheet[nm] = upd;
-    });
+        updatedBySheet[nm] = upd;
+      });
+    } finally { recalcTables = null; }
     return updatedBySheet;
   };
   const maybeRecalc = () => { syncTableHeaders();recalcAll(); };
