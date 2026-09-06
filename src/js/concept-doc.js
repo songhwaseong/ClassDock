@@ -674,7 +674,7 @@ function mountConceptEditor(doc){
   const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
   const edgePicked = document.createElement("div"); edgePicked.className = "concept-edge-picked"; edgePicked.hidden = true; edgePicked.setAttribute("aria-live", "polite");
   const edgePickedCount = document.createElement("span"), edgePickedClear = conceptButton("선택 해제", "고른 관계선을 모두 놓기 (Esc)", "concept-edge-picked-clear");
-  const edgeWeightBtn = conceptButton("강도 설정", "선택한 관계선의 강도를 한꺼번에 변경", "concept-edge-picked-clear");
+  const edgeWeightBtn = conceptButton("강도 설정", "선택한 관계선의 강도를 한꺼번에 변경", "concept-edge-picked-weight");
   edgeWeightBtn.onclick = () => openEdgeWeightDialog();
   edgePicked.append(edgePickedCount, edgeWeightBtn, edgePickedClear);
   // 알림은 도구막대 맨 끝에 둔다(나타났다 사라져도 다른 버튼이 밀리지 않는다).
