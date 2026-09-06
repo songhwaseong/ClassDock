@@ -2590,7 +2590,24 @@
       "Deletes every downloaded base map. Without internet, maps will appear blank.",
     "비우기": "Clear",
     "받아 둔 지도를 비웠어요.": "Cleared the downloaded maps.",
-    "비우지 못했어요.": "Couldn't clear them."
+    "비우지 못했어요.": "Couldn't clear them.",
+    // 실시간 열차
+    "🚇 실시간 열차": "🚇 Live trains",
+    "지금 운행 중인 열차를 지도 위에 보여 줍니다 — 역 사이는 이어서 그립니다":
+      "Shows trains running right now on the map — positions between stations are interpolated",
+    "실시간으로 볼 노선": "Line to follow live",
+    "실시간 열차 노선": "Live train line",
+    "{line} {no}호": "{line} train {no}",
+    "급행": "Express",
+    "막차": "Last train",
+    "{terminal} 방면": "toward {terminal}",
+    "{line} · 열차 {count}대": "{line} · {count} trains",
+    "열차 정보를 받는 중…": "Loading train positions…",
+    "지금은 운행 중인 열차가 없어요.": "No trains are running right now.",
+    "열차 정보를 받지 못했어요 — 다시 시도하는 중이에요.":
+      "Couldn't load train positions — retrying.",
+    "지하철 인증키가 없어요 — 설정 → 지하철 실시간에서 넣어 주세요.":
+      "No subway API key — add one in Settings → Live subway."
   };
 
   /* ── 리치 블록 사전(data-i18n="key" → English HTML). 한국어 원문은 스캔 때 기억. ── */

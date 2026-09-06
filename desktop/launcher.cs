@@ -966,6 +966,7 @@ class ClassDockLauncher
             if (path.StartsWith("/map-search-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/exchange-rate-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/subway-key", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -1003,8 +1004,11 @@ class ClassDockLauncher
             if (path.StartsWith("/geocode?", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-rates" || path == "/exchange-rate-key-status") return true;
             if (path.StartsWith("/exchange-rate?", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
+            if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
         }
         if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
+        if (method == "DELETE" && path == "/subway-key") return true;
         return false;
     }
 
@@ -3254,6 +3258,61 @@ class ClassDockLauncher
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
                 }
+                else if (method == "GET" && path == "/can-proxy-subway")
+                {
+                    // 환율의 /can-proxy-rates 와 같은 자리 — 능력마다 프로브를 따로 둔다.
+                    // 런처 없이 연 브라우저는 이 주소에서 404 를 받고 화면이 이유를 밝힌다.
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/subway-position?", StringComparison.Ordinal))
+                {
+                    string line = (QueryValue(path, "line") ?? "").Trim();
+                    if (!ValidSubwayLine(line))
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("subway-bad-request"));
+                        return;
+                    }
+                    byte[] subwayData; bool subwayCached; string subwayError;
+                    if (TrySubwayPosition(line, out subwayData, out subwayCached, out subwayError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", subwayData,
+                            subwayCached ? "X-ClassDock-Subway-Cached: 1\r\n" : null);
+                    else
+                        WriteResponse(stream, subwayError == "subway-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(subwayError));
+                }
+                else if (method == "GET" && path == "/subway-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(SubwayKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/subway-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string subwayKeyError;
+                    bool subwayKeySaved = TrySetSubwayKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out subwayKeyError);
+                    WriteResponse(stream, subwayKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(subwayKeySaved ? "ok" : subwayKeyError));
+                }
+                else if (method == "DELETE" && path == "/subway-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool subwayKeyCleared = ClearSubwayKey();
+                    WriteResponse(stream, subwayKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(subwayKeyCleared ? "ok" : "subway-key-clear-failed"));
+                }
                 else if (method == "GET" && path == "/can-proxy-rates")
                 {
                     // 환율 창이 "이 런처가 환율을 대신 받아 주는가" 를 묻는 자리. 타일 프록시와 다른 능력이라
@@ -4856,6 +4915,223 @@ class ClassDockLauncher
             return true;
         }
         if (hasStored) { data = stored; cached = true; error = ""; return true; }
+        error = fetchError;
+        return false;
+    }
+
+    /* ===== 지하철 실시간 열차 위치 =====
+       main.go 의 같은 이름 상수·목록과 짝이다. 런처가 대신 받는 까닭이 환율과 조금 다르다 —
+       이 API 는 CORS 를 열어 두었지만 https 를 아예 안 받는다. 브라우저에서 직접 부르면
+       https 로 연 화면에서 막히고, 무엇보다 인증키가 화면 코드에 그대로 드러난다.
+       (키가 URL 로 평문 전송되는 것은 제공처 사정이라 이쪽에서 어쩔 수 없다. 읽기 전용·무료 키다.) */
+    const string SubwayPositionEndpoint = "http://swopenapi.seoul.go.kr/api/subway/";
+    const int SubwayRowLimit = 400;             // 가장 붐비는 노선의 열차 수보다 넉넉히(상한은 1000)
+    const long SubwayMaxBytes = 512 * 1024;
+    // 하루 1,000회 제한이 빡빡해 캐시가 절약이 아니라 필수다. 한 교실에서 화면 여럿이 같은 노선을
+    // 봐도 상류 호출은 이 간격에 한 번으로 묶인다. 열차 보고 간격이 30초 안팎이라 화면은 안 끊긴다.
+    static readonly TimeSpan SubwayCacheMaxAge = TimeSpan.FromSeconds(12);
+    static readonly TimeSpan SubwayStaleMaxAge = TimeSpan.FromMinutes(1);
+
+    /* 노선 이름이 그대로 URL 경로에 들어가므로 목록에 있는 것만 통과시킨다.
+       src/js/subway-stations.js 의 SUBWAY_LINES 키, main.go 의 subwayLines 와 같은 목록이어야 한다
+       (tests/subway-stations.test.js 가 세 곳을 함께 본다). 김포골드라인은 이 API 가 다루지 않는다. */
+    static readonly string[] SubwayLines = {
+        "1호선", "2호선", "3호선", "4호선", "5호선", "6호선", "7호선", "8호선", "9호선",
+        "수인분당선", "신분당선", "경의중앙선", "공항철도", "우이신설선", "경춘선", "서해선"
+    };
+
+    class SubwayCacheEntry
+    {
+        public byte[] Data;
+        public DateTime AtUtc;
+        public SubwayCacheEntry(byte[] data, DateTime atUtc) { Data = data; AtUtc = atUtc; }
+    }
+    static readonly object SubwayCacheLock = new object();
+    // 노선마다 한 칸뿐이라(16개) 따로 비울 일이 없다.
+    static readonly Dictionary<string, SubwayCacheEntry> SubwayCache = new Dictionary<string, SubwayCacheEntry>();
+
+    static readonly object SubwayKeyLock = new object();
+    static readonly byte[] SubwayKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.SubwayKey.v1");
+    static readonly string SubwayKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "subway-key.bin");
+    static bool SubwayKeyLoaded;
+    static string SubwayKey = "";
+
+    static bool ValidSubwayLine(string name)
+    {
+        return Array.IndexOf(SubwayLines, (name ?? "").Trim()) >= 0;
+    }
+    static bool ValidSubwayKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        if (key.Length < 12 || key.Length > 128) return false;
+        foreach (char ch in key)
+            if (!(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch == '-' || ch == '_'))
+                return false;
+        return true;
+    }
+    static string CurrentSubwayKey()
+    {
+        lock (SubwayKeyLock)
+        {
+            if (!SubwayKeyLoaded)
+            {
+                SubwayKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(SubwayKeyFile))
+                    {
+                        byte[] encrypted = File.ReadAllBytes(SubwayKeyFile);
+                        byte[] plain = ProtectedData.Unprotect(encrypted, SubwayKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidSubwayKey(key)) SubwayKey = key;
+                    }
+                }
+                catch { SubwayKey = ""; }
+            }
+            return SubwayKey;
+        }
+    }
+    static bool SubwayKeyRemembered()
+    {
+        try { return File.Exists(SubwayKeyFile) && CurrentSubwayKey().Length > 0; }
+        catch { return false; }
+    }
+    static string SubwayKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentSubwayKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (SubwayKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true}";
+    }
+    static bool SaveProtectedSubwayKey(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SubwayKeyFile));
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), SubwayKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = SubwayKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(SubwayKeyFile)) File.Delete(SubwayKeyFile);
+            File.Move(temp, SubwayKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    static bool ClearSubwayKey()
+    {
+        lock (SubwayKeyLock)
+        {
+            SubwayKeyLoaded = true;
+            SubwayKey = "";
+            try { if (File.Exists(SubwayKeyFile)) File.Delete(SubwayKeyFile); }
+            catch { return false; }
+        }
+        lock (SubwayCacheLock) SubwayCache.Clear();   // 키를 지우면 그 키로 받아 둔 것도 남기지 않는다
+        return true;
+    }
+    static bool TrySetSubwayKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "subway-key-invalid";
+        if (!ValidSubwayKey(key)) return false;
+        /* 시험 조회는 늘 열차가 있는 2호선으로 건다. 심야에는 INFO-200(자료 없음)이 올 수 있는데
+           그것도 '키는 멀쩡하다' 는 뜻이라 TryFetchSubwayPosition 이 정상으로 돌려준다. */
+        byte[] probe; string fetchError;
+        if (!TryFetchSubwayPosition("2호선", key, out probe, out fetchError)) { error = fetchError; return false; }
+        string previous = CurrentSubwayKey();
+        lock (SubwayKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedSubwayKey(key)) { SubwayKey = previous; error = "subway-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(SubwayKeyFile)) File.Delete(SubwayKeyFile); }
+                catch { SubwayKey = previous; error = "subway-key-save-failed"; return false; }
+            }
+            SubwayKeyLoaded = true;
+            SubwayKey = key;
+        }
+        error = "";
+        return true;
+    }
+
+    /* 이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
+       INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선).
+       정상일 때는 code 가 errorMessage 안에 있고 오류일 때는 맨 바깥에 있는데, 어느 쪽이든
+       본문에 그 문자열이 한 번만 나오므로 찾아보기만 해도 가른다(작은 JSON 이라 파서를 두지 않는다). */
+    static string SubwayResultCode(byte[] data)
+    {
+        string text = Encoding.UTF8.GetString(data ?? new byte[0]);
+        if (text.Contains("\"INFO-100\"")) return "INFO-100";
+        if (text.Contains("\"INFO-200\"")) return "INFO-200";
+        if (text.Contains("\"INFO-000\"")) return "INFO-000";
+        return "";
+    }
+
+    static bool TryFetchSubwayPosition(string line, string key, out byte[] data, out string error)
+    {
+        data = null; error = "subway-failed";
+        try
+        {
+            string url = SubwayPositionEndpoint + Uri.EscapeDataString(key) + "/json/realtimePosition/0/"
+                + SubwayRowLimit.ToString(CultureInfo.InvariantCulture) + "/" + Uri.EscapeDataString(line);
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
+            request.Accept = "application/json";
+            request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream())
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[8192];
+                int read; long total = 0;
+                while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    total += read;
+                    if (total > SubwayMaxBytes) { error = "subway-too-large"; return false; }
+                    buffer.Write(chunk, 0, read);
+                }
+                data = buffer.ToArray();
+            }
+            string code = SubwayResultCode(data);
+            // INFO-200 은 '지금 이 노선에 열차가 없다' 는 정상 답이라 그대로 내보낸다.
+            if (code == "INFO-000" || code == "INFO-200") { error = ""; return true; }
+            data = null;
+            error = code == "INFO-100" ? "subway-key-invalid" : "subway-failed";
+            return false;
+        }
+        catch { data = null; return false; }
+    }
+
+    /* 캐시 → 낡았으면 새로 받기 → 받기에 실패하면 1분 안쪽 캐시라도 내주기.
+       오래된 값을 오래 붙들지는 않는다 — 낡은 열차 위치는 없는 것보다 나쁘다. */
+    static bool TrySubwayPosition(string line, out byte[] data, out bool cached, out string error)
+    {
+        data = null; cached = false; error = "subway-failed";
+        string key = CurrentSubwayKey();
+        if (key.Length == 0) { error = "subway-key-required"; return false; }
+        SubwayCacheEntry stored = null;
+        lock (SubwayCacheLock) SubwayCache.TryGetValue(line, out stored);
+        if (stored != null && DateTime.UtcNow - stored.AtUtc < SubwayCacheMaxAge)
+        {
+            data = stored.Data; error = "";
+            return true;
+        }
+        byte[] fetched; string fetchError;
+        if (TryFetchSubwayPosition(line, key, out fetched, out fetchError))
+        {
+            lock (SubwayCacheLock) SubwayCache[line] = new SubwayCacheEntry(fetched, DateTime.UtcNow);
+            data = fetched; error = "";
+            return true;
+        }
+        if (stored != null && DateTime.UtcNow - stored.AtUtc < SubwayStaleMaxAge)
+        {
+            data = stored.Data; cached = true; error = "";
+            return true;
+        }
         error = fetchError;
         return false;
     }

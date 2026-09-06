@@ -198,6 +198,8 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
   let captured=null, fail=false;
   Object.assign(context,{
     setAdding(){},drawingMode:null,waitForTiles:async()=>{},driveLayer:null,
+    // 캡처는 실시간 열차 층이 걸어 두는 역 이름 훅도 부른다(꺼져 있으면 빈 배열).
+    subwayCaptureLabels:()=>[],
     mapCaptureDataUrl:async()=>{
       const summary=vm.runInContext("radiusExport",context);
       captured={hidden:summary.hidden,text:summary.textContent};

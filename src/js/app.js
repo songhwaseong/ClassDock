@@ -1157,6 +1157,80 @@ function wire(){
   });
   // 환율 창은 이 상태값을 보고 기본 출처를 고른다 — 창을 열기 전에 한 번 받아 둔다.
   window.__classDockExchangeRateKeyReady = refreshExchangeRateKeyStatus();
+
+  /* ── 지하철 실시간(서울 열린데이터광장 인증키) ──
+     환율 키와 같은 규칙이다 — 키 문자열은 런처에만 남고 브라우저에는 보유 여부만 온다.
+     지도 문서는 이 상태를 따로 묻지 않는다. 켤 때 428(키 필요)이 오면 그때 안내하면 되고,
+     지도를 열 때마다 상태를 확인하면 쓰지도 않을 조회를 한 번씩 쓰게 된다. */
+  const subwayKeyInput = byId("settingSubwayKey");
+  const subwayRemember = byId("settingSubwayRemember");
+  const subwayRememberWrap = byId("settingSubwayRememberWrap");
+  const subwayStatusText = byId("settingSubwayStatus");
+  const subwayTest = byId("settingSubwayTest");
+  const subwayClear = byId("settingSubwayClear");
+  let subwayKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setSubwayStatus = (text, kind) => {
+    subwayStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    subwayStatusText.classList.toggle("ok", kind === "ok");
+    subwayStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncSubwayFields = () => {
+    const available = subwayKeyStatus.available;
+    subwayKeyInput.disabled = !available;
+    subwayTest.disabled = !available;
+    subwayClear.disabled = !available || !subwayKeyStatus.hasKey;
+    subwayRemember.disabled = !available || !subwayKeyStatus.persistentSupported;
+    subwayRememberWrap.hidden = !subwayKeyStatus.persistentSupported;
+    subwayRemember.checked = !!subwayKeyStatus.remembered;
+    subwayKeyInput.placeholder = subwayKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshSubwayKeyStatus = async (message, kind) => {
+    subwayKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/subway-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      subwayKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setSubwayStatus(message, kind);
+      else if (subwayKeyStatus.hasKey) setSubwayStatus(subwayKeyStatus.remembered
+        ? "지하철 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "지하철 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setSubwayStatus("인증키가 없어 지도의 '실시간 열차'를 쓸 수 없습니다.", "");
+    } catch(_){ setSubwayStatus("지하철 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncSubwayFields();
+  };
+  subwayTest.addEventListener("click", async () => {
+    const key = subwayKeyInput.value.trim();
+    if (!key){ setSubwayStatus("저장할 서울 열린데이터광장 인증키를 입력해 주세요.", "bad"); subwayKeyInput.focus(); return; }
+    subwayTest.disabled = true; subwayClear.disabled = true;
+    setSubwayStatus("서울 열린데이터광장 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/subway-key?remember=" + (subwayRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      subwayKeyInput.value = "";
+      await refreshSubwayKeyStatus("서울 열린데이터광장 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      const reason = error && error.message;
+      setSubwayStatus(reason === "subway-key-save-failed"
+        ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : "인증키를 확인하지 못했습니다. 서울 열린데이터광장에서 발급받은 지하철 인증키인지 확인해 주세요.", "bad");
+      syncSubwayFields();
+    }
+  });
+  subwayClear.addEventListener("click", async () => {
+    subwayClear.disabled = true;
+    try {
+      const response = await fetch("/subway-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      subwayKeyInput.value = "";
+      await refreshSubwayKeyStatus("지하철 인증키를 지웠습니다.", "ok");
+    } catch(_){ setSubwayStatus("인증키를 지우지 못했습니다.", "bad"); syncSubwayFields(); }
+  });
+  refreshSubwayKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;

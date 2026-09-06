@@ -1203,6 +1203,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      타일이 아직 안 온 칸은 배경색으로 남겨, 어두운 화면에서 흰 판이 번쩍이지 않게 한다. */
   .map-stage.leaflet-container{background:var(--panel);font:inherit}
   .map-stage.is-adding{cursor:crosshair}
+  /* 지하철 역 이름표 — 한 화면에 수십 개가 뜨므로 말풍선 상자를 벗기고 글자만 남긴다.
+     어떤 배경지도 위에서도 읽히도록 흰 테두리를 두른다(캡처에 새기는 글자와 같은 모양). */
+  .leaflet-tooltip.map-subway-label{background:none;border:0;box-shadow:none;padding:0;
+    color:#1f2937;font:600 11px/1.2 inherit;white-space:nowrap;pointer-events:none;
+    text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 3px #fff}
+  .leaflet-tooltip.map-subway-label::before{display:none}   /* 말풍선 꼬리 */
   .map-fallback{padding:24px;color:var(--muted);font-size:13px}
   .map-pin{background:none;border:0}
   .map-popup{display:flex;flex-direction:column;gap:6px;min-width:196px}
@@ -4128,6 +4134,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapPrint .map-toolvis-print,
   html.hide-tool-mapTask .map-toolvis-task,
   html.hide-tool-mapOffline .map-toolvis-offline,
+  html.hide-tool-mapSubway .map-toolvis-subway,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,

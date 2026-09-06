@@ -80,6 +80,19 @@ const (
 	rateMaxBytes      = 512 * 1024
 	rateCacheMaxBytes = 20 * 1024 * 1024
 	rateTodayCacheAge = 20 * time.Minute // 지난 날짜 값은 안 바뀐다 — 오늘 값만 다시 받아 본다
+
+	/* ===== 지하철 실시간 열차 위치 =====
+	   launcher.cs 의 같은 이름 상수와 짝이다. 런처가 대신 받는 까닭이 환율과 조금 다르다 —
+	   이 API 는 CORS 를 열어 두었지만 https 를 아예 안 받는다. 그래서 브라우저에서 직접 부르면
+	   https 로 연 화면에서는 막히고, 무엇보다 인증키가 화면 코드에 그대로 드러난다.
+	   (키가 URL 로 평문 전송되는 것은 제공처 사정이라 이쪽에서 어쩔 수 없다. 읽기 전용·무료 키다.)
+
+	   하루 1,000회 제한이 빡빡해서 캐시가 '절약' 이 아니라 '필수' 다. 한 교실에서 화면 여럿이
+	   같은 노선을 보면 상류 호출은 subwayCacheAge 에 한 번으로 묶인다. */
+	subwayPositionURL = "http://swopenapi.seoul.go.kr/api/subway/%s/json/realtimePosition/0/%d/%s"
+	subwayRowLimit    = 400              // 가장 붐비는 노선의 열차 수보다 넉넉히(상한은 1000)
+	subwayMaxBytes    = 512 * 1024
+	subwayCacheAge    = 12 * time.Second // 열차 보고 간격이 30초 안팎이라 이 정도면 화면이 안 끊긴다
 )
 
 var (
@@ -947,6 +960,142 @@ func lastWeekdayCompact() string {
 	return day.Format("20060102")
 }
 
+/* ===== 지하철 실시간 열차 위치 ===== */
+
+/* 노선 이름이 그대로 URL 경로에 들어가므로 목록에 있는 것만 통과시킨다.
+   src/js/subway-stations.js 의 SUBWAY_LINES 키, launcher.cs 의 SubwayLines 와 같은 목록이어야 한다
+   (tests/subway-stations.test.js 가 세 곳을 함께 본다). 김포골드라인은 이 API 가 다루지 않는다. */
+var subwayLines = []string{
+	"1호선", "2호선", "3호선", "4호선", "5호선", "6호선", "7호선", "8호선", "9호선",
+	"수인분당선", "신분당선", "경의중앙선", "공항철도", "우이신설선", "경춘선", "서해선",
+}
+
+type subwayEntry struct {
+	data []byte
+	at   time.Time
+}
+
+var (
+	subwayKeyMu   sync.RWMutex
+	subwayKey     string // 환율 키와 같은 이유로 파일에 남기지 않는다(DPAPI 가 없는 곳에서도 돌아야 한다)
+	subwayCacheMu sync.Mutex
+	subwayCache   = map[string]subwayEntry{} // 노선마다 한 칸뿐이라 따로 비울 일이 없다
+)
+
+func validSubwayLine(name string) bool {
+	for _, line := range subwayLines {
+		if line == name {
+			return true
+		}
+	}
+	return false
+}
+
+func validSubwayKey(value string) bool {
+	key := strings.TrimSpace(value)
+	if len(key) < 12 || len(key) > 128 {
+		return false
+	}
+	for _, ch := range key {
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func currentSubwayKey() string {
+	subwayKeyMu.RLock()
+	defer subwayKeyMu.RUnlock()
+	return subwayKey
+}
+
+func setSubwayKey(value string) {
+	subwayKeyMu.Lock()
+	subwayKey = strings.TrimSpace(value)
+	subwayKeyMu.Unlock()
+}
+
+/* 이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
+   INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선).
+   정상일 때는 code 가 errorMessage 안에 있고, 오류일 때는 맨 바깥에 있다. */
+func subwayResultCode(data []byte) string {
+	var parsed struct {
+		Code         string `json:"code"`
+		ErrorMessage struct {
+			Code string `json:"code"`
+		} `json:"errorMessage"`
+	}
+	if json.Unmarshal(data, &parsed) != nil {
+		return ""
+	}
+	if parsed.ErrorMessage.Code != "" {
+		return parsed.ErrorMessage.Code
+	}
+	return parsed.Code
+}
+
+func fetchSubwayPosition(line, key string) ([]byte, string) {
+	endpoint := fmt.Sprintf(subwayPositionURL, url.PathEscape(key), subwayRowLimit, url.PathEscape(line))
+	request, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, "subway-failed"
+	}
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "application/json")
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, "subway-failed"
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, "subway-failed"
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, subwayMaxBytes+1))
+	if err != nil {
+		return nil, "subway-failed"
+	}
+	if len(data) > subwayMaxBytes {
+		return nil, "subway-too-large"
+	}
+	switch subwayResultCode(data) {
+	case "INFO-000", "INFO-200":
+		return data, "" // INFO-200 은 '지금 이 노선에 열차가 없다' 는 정상 답이다
+	case "INFO-100":
+		return nil, "subway-key-invalid"
+	default:
+		return nil, "subway-failed"
+	}
+}
+
+/* 캐시 → 낡았으면 새로 받기 → 받기에 실패하면 1분 안쪽 캐시라도 내주기.
+   하루 1,000회 제한이 있어 캐시가 절약이 아니라 필수다 — 한 교실에서 화면 여럿이
+   같은 노선을 봐도 상류 호출은 subwayCacheAge 에 한 번으로 묶인다.
+   오래된 값을 오래 붙들지는 않는다. 낡은 열차 위치는 없는 것보다 나쁘다. */
+func subwayPosition(line string) ([]byte, bool, string) {
+	key := currentSubwayKey()
+	if key == "" {
+		return nil, false, "subway-key-required"
+	}
+	subwayCacheMu.Lock()
+	stored, hasStored := subwayCache[line]
+	subwayCacheMu.Unlock()
+	if hasStored && time.Since(stored.at) < subwayCacheAge {
+		return stored.data, false, ""
+	}
+	data, code := fetchSubwayPosition(line, key)
+	if code == "" {
+		subwayCacheMu.Lock()
+		subwayCache[line] = subwayEntry{data: data, at: time.Now()}
+		subwayCacheMu.Unlock()
+		return data, false, ""
+	}
+	if hasStored && time.Since(stored.at) < time.Minute {
+		return stored.data, true, ""
+	}
+	return nil, false, code
+}
+
 // loopback 에만 바인딩하더라도 DNS rebinding 등으로 다른 Host 가 들어오는 요청은 받지 않는다.
 func allowedLocalHost(r *http.Request) bool {
 	host := r.Host
@@ -1160,6 +1309,92 @@ func main() {
 			return
 		}
 		setExchangeRateKey(key)
+		w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/can-proxy-subway", func(w http.ResponseWriter, r *http.Request) {
+		// 환율의 /can-proxy-rates 와 같은 자리 — 능력마다 프로브를 따로 둔다.
+		// 지하철만 쓰는 화면도 있고, 런처 없이 연 브라우저는 이 주소에서 404 를 받는다.
+		if !allowedLocalHost(r) {
+			http.Error(w, "invalid-host", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write([]byte("yes"))
+	})
+
+	mux.HandleFunc("/subway-position", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) {
+			http.Error(w, "invalid-host", http.StatusForbidden)
+			return
+		}
+		line := strings.TrimSpace(r.URL.Query().Get("line"))
+		if !validSubwayLine(line) {
+			http.Error(w, "subway-bad-request", http.StatusBadRequest)
+			return
+		}
+		data, cached, code := subwayPosition(line)
+		if code != "" {
+			status := http.StatusBadGateway
+			if code == "subway-key-required" {
+				status = http.StatusPreconditionRequired
+			}
+			http.Error(w, code, status)
+			return
+		}
+		if cached {
+			w.Header().Set("X-ClassDock-Subway-Cached", "1")
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(data)
+	})
+
+	mux.HandleFunc("/subway-key-status", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := json.Marshal(map[string]interface{}{
+			"hasKey": currentSubwayKey() != "", "remembered": false, "persistentSupported": false,
+		})
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(body)
+	})
+
+	mux.HandleFunc("/subway-key", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
+			http.Error(w, "action-header-required", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			setSubwayKey("")
+			subwayCacheMu.Lock()
+			subwayCache = map[string]subwayEntry{} // 키를 지우면 그 키로 받아 둔 것도 남기지 않는다
+			subwayCacheMu.Unlock()
+			w.Write([]byte("ok"))
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method-not-allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+		key := strings.TrimSpace(string(body))
+		if err != nil || len(body) > 1024 || !validSubwayKey(key) {
+			http.Error(w, "subway-key-invalid", http.StatusBadRequest)
+			return
+		}
+		// 시험 조회는 늘 열차가 있는 2호선으로 건다. 심야에는 INFO-200(자료 없음)이 올 수 있는데
+		// 그것도 '키는 멀쩡하다' 는 뜻이라 fetchSubwayPosition 이 정상으로 돌려준다.
+		if _, code := fetchSubwayPosition("2호선", key); code != "" {
+			http.Error(w, code, http.StatusBadRequest)
+			return
+		}
+		setSubwayKey(key)
 		w.Write([]byte("ok"))
 	})
 

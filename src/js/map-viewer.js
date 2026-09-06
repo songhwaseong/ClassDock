@@ -1132,6 +1132,36 @@ async function mapTileProxyBase(){
   return (await _mapProxyProbe) ? location.origin + "/tile-proxy?u=" : "";
 }
 
+/* ===== 실시간 열차 위치 =====
+   런처가 서울시 실시간 API 를 대신 받아 주는지 확인한다. 타일·환율과 다른 능력이라 프로브를
+   따로 둔다 — Go 폴백 런처도 이것은 하지만, 브라우저로 그냥 연 경우에는 없다.
+   이 API 는 https 를 아예 안 받아서 브라우저에서 직접 부를 수도 없다(그래서 프록시가 필수다). */
+let _mapSubwayProbe = null;
+async function mapSubwayProxyReady(){
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+  if (_mapSubwayProbe === null){
+    _mapSubwayProbe = (async () => {
+      try {
+        const response = await fetch("/can-proxy-subway", { cache:"no-store" });
+        return response.ok && (await response.text()).trim().toLowerCase() === "yes";
+      } catch(_){ return false; }
+    })();
+  }
+  return !!(await _mapSubwayProbe);
+}
+
+/* 노선 색은 실제 노선색을 따른다 — 여러 노선을 한 화면에 놓지 않더라도, 아이들이 아는 색이라야
+   "지금 보는 게 무슨 선인지" 를 묻지 않는다. */
+const MAP_SUBWAY_COLORS = {
+  "1호선":"#0d3692", "2호선":"#33a23d", "3호선":"#fe5d10", "4호선":"#00a5de", "5호선":"#996cac",
+  "6호선":"#cd7c2f", "7호선":"#747f00", "8호선":"#e6186c", "9호선":"#bb8336",
+  "수인분당선":"#f5a200", "신분당선":"#d4003b", "경의중앙선":"#77c4a3", "공항철도":"#0090d2",
+  "우이신설선":"#b7c452", "경춘선":"#0c8e72", "서해선":"#8fc740"
+};
+/* 런처가 12초 캐시를 두므로 그보다 조금 길게 묻는다. 하루 1,000회 제한이라 이 값이 곧 예산이다 —
+   15초면 한 노선을 4시간 넘게 볼 수 있고, 그보다 자주 물어도 런처 캐시에 막혀 새 값이 오지 않는다. */
+const MAP_SUBWAY_POLL_MS = 15000;
+
 /* ===== 장소 이름 검색 =====
    이름 검색은 런처의 /geocode 만 쓴다. 카카오를 고르면 주소 → 장소명 순서로 찾고, 키가 없거나
    결과가 없으면 OSM 으로 자동 재검색한다. API 키는 appSettings/localStorage 에 두지 않고 런처가
@@ -1567,6 +1597,9 @@ const MAP_SPOT_MIN_ZOOM = 15;         // 이보다 멀리서 누른 자리는 �
    겹침을 정리해 주는 길이 없어서 축소할수록 글자가 서로 포개져 오히려 못 읽는다 — 읽을 수 있는
    확대에서만 내놓는 편이 낫다. 13 단계면 동네 하나가 화면에 들어오는 정도다. */
 const MAP_LABEL_MIN_ZOOM = 13;
+/* 지하철 역 이름은 표시 이름표보다 한 단계 늦게 편다. 역은 사람이 찍는 표시보다 훨씬 촘촘해서
+   (을지로입구–을지로3가는 500m다) 13단계에서는 글자가 서로 겹쳐 못 읽는다. */
+const MAP_SUBWAY_LABEL_MIN_ZOOM = 14;
 /* 이름표는 표시마다 DOM 을 하나씩 만든다. CSV 로 수백 개를 들여온 지도에서 한꺼번에 켜면
    지도가 먼저 멎으므로, 그때는 켜지 않고 까닭을 알려 준다. */
 const MAP_LABEL_MAX_MARKERS = 200;
@@ -3612,6 +3645,24 @@ async function mountMapEditor(doc){
   prepareBtn.textContent = "🗂️ 오프라인 지도";
   prepareBtn.title = "실제로 본 지역은 자동으로 보관됩니다 — 현황을 확인하거나 비울 수 있어요";
 
+  /* 실시간 열차도 런처가 대신 받아 줄 때만 뜻이 있다(아래에서 표시를 결정한다).
+     노선을 고르는 칸과 켜고 끄는 단추가 한 벌이다 — 하루 조회 한도가 있어 한 번에 한 노선만 본다. */
+  const subwayLineSelect = document.createElement("select");
+  subwayLineSelect.className = "map-select map-subway-line map-toolvis-subway";
+  subwayLineSelect.title = "실시간으로 볼 노선";
+  subwayLineSelect.setAttribute("aria-label", "실시간 열차 노선");
+  for (const line of Object.keys(typeof SUBWAY_LINES !== "undefined" ? SUBWAY_LINES : {})){
+    const option = document.createElement("option");
+    option.value = line; option.textContent = line;
+    subwayLineSelect.appendChild(option);
+  }
+  const subwayBtn = document.createElement("button");
+  subwayBtn.type = "button";
+  subwayBtn.className = "map-btn map-subway map-toolvis-subway";
+  subwayBtn.textContent = "🚇 실시간 열차";
+  subwayBtn.title = "지금 운행 중인 열차를 지도 위에 보여 줍니다 — 역 사이는 이어서 그립니다";
+  subwayBtn.setAttribute("aria-pressed", "false");
+
   const imageBtn = document.createElement("button");
   imageBtn.type = "button"; imageBtn.className = "map-btn map-image-pick map-toolvis-image";
   imageBtn.textContent = "🖼️ 내 지도"; imageBtn.title = "학교 배치도·평면도 같은 이미지를 오프라인 지도 배경으로 사용";
@@ -4069,6 +4120,256 @@ async function mountMapEditor(doc){
     cleanupNetworkNotice.refresh();
   };
   applyBasemap();
+
+  /* 캡처(칠판·PNG·인쇄)가 그림에 새길 역 이름. 실시간 층은 아래 if 블록 안에 있어 여기서
+     보이지 않으므로, 그 블록이 이 자리에 함수를 걸어 준다(꺼져 있으면 빈 배열). */
+  let subwayCaptureLabels = () => [];
+
+  /* ── 실시간 열차 위치 ──
+     지도 문서(.map)에는 아무것도 남기지 않는다. 열차는 지금 이 순간의 값이라, 파일에 담으면
+     다음에 열 때 어제 열차가 되살아난다. 켜 둔 사실조차 문서가 아니라 이 브라우저에 남긴다 —
+     지도를 남에게 건넸을 때 그 사람에게는 인증키가 없어 켜진 채로 열리면 오류만 보인다.
+     그래서 표시(marker) 목록·CSV·GPX·발표 모드에도 이 층은 아예 닿지 않는다.
+
+     캡처(칠판·PNG·인쇄)에는 일부러 남긴다. 정지 그림이라도 '이 순간 열차가 여기 있었다' 는
+     수업 자료가 되기 때문이다. 이름표(tooltip)는 캡처에서 통째로 감춰지므로 점만 찍힌다. */
+  if (typeof MNSubwayLive !== "undefined" && await mapSubwayProxyReady()){
+    const SUBWAY_LINE_KEY = "mapSubwayLine";
+    // 열차 점은 표시(markerPane 600)보다 위, 말풍선(popupPane 700)보다 아래에 둔다.
+    const subwayPane = map.createPane("mapSubwayPane");
+    subwayPane.style.zIndex = "640";
+
+    /* 노선(역과 역 사이 선)은 사람이 그린 것보다 아래에 깔린다 — 배경 참고물이라
+       표시·거리선·영역을 덮으면 안 된다(표시 잇는 선 380 보다도 아래). */
+    const subwayRoutePane = map.createPane("mapSubwayRoutePane");
+    subwayRoutePane.style.zIndex = "370";
+
+    let subwayOn = false;
+    let subwayShown = -1;                    // 마지막으로 알린 열차 수(상태줄을 매 프레임 덮지 않게)
+    let subwayTimer = 0;
+    let subwayFrame = 0;
+    let subwayFetching = false;
+    const subwayTrains = new Map();          // 열차 → 최근 이벤트(방향·되돌림 판정에 쓴다)
+    const subwayMarkers = new Map();
+    const subwayLayer = L.layerGroup([], { pane:"mapSubwayPane" });
+    const subwayRouteLayer = L.layerGroup([], { pane:"mapSubwayRoutePane" });
+
+    try {
+      const saved = localStorage.getItem(SUBWAY_LINE_KEY);
+      if (saved && subwayLineSelect.querySelector(`option[value="${CSS.escape(saved)}"]`)) subwayLineSelect.value = saved;
+    } catch(_){}
+
+    const subwayColor = () => MAP_SUBWAY_COLORS[subwayLineSelect.value] || "#c0392b";
+
+    /* 고른 노선의 역과 역 사이 선을 깔아 준다. 열차 점만 띄우면 허공에 뜬 것처럼 보이고,
+       무엇보다 이 선이 곧 열차가 이어져 그려지는 그 경로라 눈으로 확인할 수 있다.
+       실제 선로 곡선이 아니라 역과 역을 곧게 이은 것이라는 점은 그대로다.
+       실시간을 끄면 함께 사라진다 — 문서에 남지 않는 것도 열차와 같다. */
+    /* 역 이름표. 가까이 다가가면 늘 보이고, 멀어지면 접는다 — 51개가 한꺼번에 뜨면 글자가
+       서로 겹쳐 아무것도 못 읽는다(표시 이름표와 같은 규칙, 문턱만 한 단계 높다).
+       Leaflet 은 bindTooltip 뒤에 permanent 를 바꿀 수 없어 다시 매다는 수밖에 없고,
+       그래서 실제로 상태가 뒤집힐 때만 부른다 — 확대할 때마다 수십 개를 다시 매달지 않게. */
+    const subwayStationDots = [];            // [{ dot, name }]
+    let subwayLabelsShown = false;
+    const subwayLabelsWanted = () => subwayOn && map.getZoom() >= MAP_SUBWAY_LABEL_MIN_ZOOM;
+    const subwayBindLabel = (dot, name) => {
+      dot.unbindTooltip();
+      dot.bindTooltip(name, subwayLabelsShown
+        ? { permanent:true, direction:"top", offset:[0, -6], className:"map-subway-label" }
+        : { direction:"top", offset:[0, -6] });
+    };
+    const subwaySyncLabels = () => {
+      const wanted = subwayLabelsWanted();
+      if (wanted === subwayLabelsShown) return;
+      subwayLabelsShown = wanted;
+      for (const entry of subwayStationDots) subwayBindLabel(entry.dot, entry.name);
+    };
+
+    const subwayDrawRoute = () => {
+      subwayRouteLayer.clearLayers();
+      subwayStationDots.length = 0;
+      const line = subwayLineSelect.value;
+      const stations = MNSubwayLive.stationsOf(line);
+      if (!stations) return;
+      const color = subwayColor();
+      const drawn = new Set();
+      for (const name of Object.keys(stations)){
+        for (const other of MNSubwayLive.neighbours(line, name)){
+          const key = name < other ? name + " " + other : other + " " + name;
+          if (drawn.has(key)) continue;      // 이웃은 양쪽에 적혀 있어 그대로 두면 두 번 그린다
+          drawn.add(key);
+          subwayRouteLayer.addLayer(L.polyline([stations[name], stations[other]], {
+            pane:"mapSubwayRoutePane", color:color, weight:4, opacity:0.45, interactive:false
+          }));
+        }
+      }
+      subwayLabelsShown = subwayLabelsWanted();
+      for (const [name, at] of Object.entries(stations)){
+        const dot = L.circleMarker(at, { pane:"mapSubwayRoutePane", radius:4, weight:2,
+          color:color, fillColor:"#ffffff", fillOpacity:1, className:"map-subway-station" });
+        subwayBindLabel(dot, name);
+        subwayRouteLayer.addLayer(dot);
+        subwayStationDots.push({ dot:dot, name:name });
+      }
+    };
+
+    /* 캡처는 이름표 칸을 통째로 감추므로(닫은 말풍선이 남는 문제 때문에) 화면에 보이는 역 이름은
+       그림에 직접 새겨야 남는다 — 표시 이름·도형 이름과 같은 길이다. 화면에서 접혀 있으면
+       그림에도 넣지 않는다(보이는 대로 찍는다). */
+    subwayCaptureLabels = () => {
+      if (!subwayOn || !subwayLabelsShown) return [];
+      const bounds = map.getBounds();
+      return subwayStationDots.filter((entry) => bounds.contains(entry.dot.getLatLng())).map((entry) => {
+        const point = map.latLngToContainerPoint(entry.dot.getLatLng());
+        return { x:point.x, y:point.y, text:entry.name, offsetY:14 };
+      });
+    };
+
+    const subwayTooltip = (train, place) => {
+      const parts = [mapTf("{line} {no}호", { line:train.line, no:train.no }),
+        `${place.from} → ${place.to} · ${Math.round(place.progress * 100)}%`];
+      if (train.terminal) parts.push(mapTf("{terminal} 방면", { terminal:train.terminal }));
+      if (train.express) parts.push(mapT("급행"));
+      if (train.lastTrain) parts.push(mapT("막차"));
+      return parts.join(" · ");
+    };
+
+    /* 매 프레임 열차를 옮긴다. 새 값은 15초에 한 번뿐이라, 그 사이를 이어 주는 것이 이 함수다. */
+    const subwayRender = () => {
+      subwayFrame = 0;
+      if (!subwayOn) return;
+      const now = Date.now();
+      let shown = 0;
+      for (const [key, train] of subwayTrains){
+        const place = MNSubwayLive.positionOf(train.events, now);
+        const at = place && MNSubwayLive.coordsOf(train.line, place);
+        let marker = subwayMarkers.get(key);
+        if (!at){                                  // 소식이 끊긴 열차는 지운다
+          if (marker){ subwayLayer.removeLayer(marker); subwayMarkers.delete(key); }
+          continue;
+        }
+        shown++;
+        if (!marker){
+          marker = L.circleMarker(at, { pane:"mapSubwayPane", radius:6, weight:2,
+            color:"#ffffff", fillColor:subwayColor(), fillOpacity:1, className:"map-subway-train" });
+          marker.bindTooltip("", { direction:"top", offset:[0, -8], className:"map-subway-train-tip" });
+          subwayLayer.addLayer(marker);
+          subwayMarkers.set(key, marker);
+        } else {
+          marker.setLatLng(at);
+        }
+        marker.setTooltipContent(subwayTooltip(train, place));
+      }
+      /* 상태줄은 여럿이 함께 쓰는 칸이라 프레임마다 쓰면 다른 기능의 안내를 지운다.
+         숫자가 바뀔 때만 알린다. */
+      if (shown !== subwayShown){ subwayShown = shown; subwayStatus(shown); }
+      if (subwayOn) subwayFrame = requestAnimationFrame(subwayRender);
+    };
+
+    let subwayNote = "";
+    const subwayStatus = (shown) => {
+      if (!subwayOn) return;
+      setStatus(subwayNote || mapTf("{line} · 열차 {count}대", { line:subwayLineSelect.value, count:shown }));
+    };
+    /* 안내 문구는 열차 수와 따로 움직인다 — '열차가 없다' 처럼 수가 0 그대로인 채 말만 바뀌는
+       경우가 있어서, 문구를 바꿀 때는 다음 프레임을 기다리지 않고 그 자리에서 고쳐 쓴다. */
+    const subwaySay = (note) => {
+      subwayNote = note;
+      subwayStatus(Math.max(0, subwayShown));
+    };
+
+    const subwayFail = (reason) => {
+      if (reason === "subway-key-required"){
+        subwayNote = mapT("지하철 인증키가 없어요 — 설정 → 지하철 실시간에서 넣어 주세요.");
+        subwayStop();                              // 키가 없으면 더 물어도 소용없다
+        setStatus(subwayNote);
+        return;
+      }
+      // 한 번 실패했다고 끄지는 않는다. 교실 인터넷은 자주 끊겼다 돌아온다.
+      subwaySay(mapT("열차 정보를 받지 못했어요 — 다시 시도하는 중이에요."));
+    };
+
+    const subwayPoll = async () => {
+      if (!subwayOn || subwayFetching) return;
+      // 다른 탭을 보고 있으면 묻지 않는다 — 하루 조회 한도를 눈에 보이지도 않는 화면에 쓰지 않는다.
+      if (document.hidden || !stage.offsetParent) return;
+      subwayFetching = true;
+      const line = subwayLineSelect.value;
+      try {
+        const response = await fetch("/subway-position?line=" + encodeURIComponent(line), { cache:"no-store" });
+        if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
+        const body = await response.json();
+        if (!subwayOn || subwayLineSelect.value !== line) return;   // 그 사이 끄거나 노선을 바꿨다
+        const rows = Array.isArray(body.realtimePositionList) ? body.realtimePositionList : [];
+        const alive = MNSubwayLive.ingest(subwayTrains, rows, line);
+        for (const key of [...subwayTrains.keys()]) if (!alive.has(key)) subwayTrains.delete(key);
+        subwaySay(rows.length ? "" : mapT("지금은 운행 중인 열차가 없어요."));
+      } catch(error){
+        if (subwayOn) subwayFail(error && error.message);
+      } finally {
+        subwayFetching = false;
+      }
+    };
+
+    const subwayStop = () => {
+      subwayOn = false;
+      clearInterval(subwayTimer); subwayTimer = 0;
+      cancelAnimationFrame(subwayFrame); subwayFrame = 0;
+      subwayTrains.clear();
+      subwayMarkers.clear();
+      subwayLayer.clearLayers();
+      subwayShown = -1;
+      map.off("zoomend", subwaySyncLabels);
+      subwayLabelsShown = false;
+      subwayStationDots.length = 0;
+      subwayRouteLayer.clearLayers();
+      map.removeLayer(subwayRouteLayer);
+      map.removeLayer(subwayLayer);
+      subwayBtn.classList.remove("is-on");
+      subwayBtn.setAttribute("aria-pressed", "false");
+    };
+
+    const subwayStart = () => {
+      subwayOn = true;
+      subwayShown = -1;
+      subwayNote = mapT("열차 정보를 받는 중…");
+      setStatus(subwayNote);
+      subwayDrawRoute();
+      subwayRouteLayer.addTo(map);
+      subwayLayer.addTo(map);
+      map.on("zoomend", subwaySyncLabels);
+      subwayBtn.classList.add("is-on");
+      subwayBtn.setAttribute("aria-pressed", "true");
+      subwayPoll();
+      subwayTimer = setInterval(subwayPoll, MAP_SUBWAY_POLL_MS);
+      subwayFrame = requestAnimationFrame(subwayRender);
+    };
+
+    subwayBtn.addEventListener("click", () => {
+      if (subwayOn){ subwayStop(); setStatus(""); }
+      else subwayStart();
+    });
+    subwayLineSelect.addEventListener("change", () => {
+      try { localStorage.setItem(SUBWAY_LINE_KEY, subwayLineSelect.value); } catch(_){}
+      if (!subwayOn) return;
+      // 노선을 바꾸면 앞 노선의 열차와 이력은 버린다 — 남겨 두면 없는 선 위에 점이 떠 있게 된다.
+      subwayTrains.clear();
+      subwayMarkers.clear();
+      subwayLayer.clearLayers();
+      subwayShown = -1;
+      subwayDrawRoute();                     // 새 노선의 역·선으로 갈아 끼운다
+      subwayNote = mapT("열차 정보를 받는 중…");
+      setStatus(subwayNote);
+      subwayPoll();
+    });
+
+    toolRow.appendChild(subwayLineSelect);
+    toolRow.appendChild(subwayBtn);
+    mapTranslate(toolRow);
+
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); });
+  }
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -6455,6 +6756,8 @@ async function mountMapEditor(doc){
       const point = map.latLngToContainerPoint([m.lat, m.lng]);
       return { x:point.x, y:point.y, text:m.label };
     });
+    // 실시간 열차를 켠 채로 보내면 화면에 떠 있던 역 이름도 그림에 남긴다.
+    labels.push(...subwayCaptureLabels());
     for (const shape of model.shapes){
       if (!shape.points.length) continue;
       const center = shape.points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0,0])
