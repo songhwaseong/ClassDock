@@ -441,10 +441,7 @@ async function copySpreadsheetText(text){
 // 표 내보내기 공용: 바이트/문자열을 파일로 저장.
 function downloadSpreadsheetFile(data, name, mime){
   const blob = data instanceof Blob ? data : new Blob([data], { type: mime || "application/octet-stream" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveBlob(blob, name);
 }
 function sheetBaseName(name){ return String(name || "sheet").replace(/\.[^.]+$/, "") || "sheet"; }
 function sanitizeFilePart(s){ return String(s || "").replace(/[\\/:*?"<>|]/g, "").trim() || "sheet"; }

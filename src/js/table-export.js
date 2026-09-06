@@ -91,12 +91,7 @@ const MNTableExport = (() => {
 
   function download(text, name, mime){
     try {
-      const url = URL.createObjectURL(new Blob([text], { type:mime }));
-      const a = document.createElement("a");
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return true;
+      return MNDownload.saveText(text, name, mime);
     } catch(e){ console.warn("table export download failed:", e); return false; }
   }
 

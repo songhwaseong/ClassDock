@@ -783,13 +783,7 @@ function timelineSafeName(value){
   return String(value || "연대표").replace(/[\\/:*?"<>|]+/g, "_").trim() || "연대표";
 }
 
-function timelineDownload(name, blob){
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url; link.download = name;
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+function timelineDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
 async function timelinePreparePhoto(file){
   if (!file || !/^image\/(?:png|jpeg|webp)$/i.test(String(file.type || ""))) throw new Error("photo-type");

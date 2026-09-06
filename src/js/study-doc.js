@@ -101,7 +101,7 @@ function studyModal(titleText, body){
   const head = document.createElement("header"), h = document.createElement("h2"), close = studyButton("×", "닫기", "study-modal-x"); h.textContent = titleText; head.append(h, close); card.append(head, body); modal.appendChild(card); document.body.appendChild(modal);
   const dispose = () => modal.remove(); close.onclick = dispose; modal.addEventListener("pointerdown", event => { if (event.target === modal) dispose(); }); modal.addEventListener("keydown", event => { if (event.key === "Escape"){ event.preventDefault(); dispose(); } }); return { modal, dispose };
 }
-function studyDownload(name, blob){ const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function studyDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
 function mountStudyEditor(doc){
   const model = doc.studyDoc, root = document.createElement("div"); root.className = "study-doc"; doc.el.appendChild(root);

@@ -645,12 +645,7 @@ async function conceptRowsFromFile(file){
   return timelineSheetRows(sheet);
 }
 function conceptSafeName(value){ return String(value || "개념 관계도").replace(/[\\/:*?"<>|]+/g, "_").trim() || "개념 관계도"; }
-function conceptDownload(name, blob){
-  const url = URL.createObjectURL(blob), link = document.createElement("a");
-  link.href = url; link.download = name;
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+function conceptDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
 function conceptButton(label, title, className){ const button = document.createElement("button"); button.type = "button"; button.className = className || "concept-btn"; button.textContent = label; if (title) button.title = title; return button; }
 function conceptModal(titleText, body){
