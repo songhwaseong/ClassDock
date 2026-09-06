@@ -479,12 +479,7 @@ async function saveTaskJsonUnified(text, outName, label, mime){
       }
     }
   } catch(_){ /* 서버 저장 실패 → 다운로드 폴백 */ }
-  const blob = new Blob([text], { type: mime || "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = outName;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveText(text, outName, mime || "application/json");
   toast(label + " 파일을 내려받았어요: " + outName, 3000, { type: "success" });
 }
 

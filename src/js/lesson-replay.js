@@ -685,10 +685,7 @@ function renderPdfInkReplay(doc, host, lesson){
 // ----- 저장/열기 -----
 function saveLessonFile(lesson, name){
   try {
-    const blob = new Blob([JSON.stringify(lesson)], { type: "application/json" });
-    const u = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = u; a.download = (name || "수업").replace(/\.lesson$/i, "") + ".lesson";
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
+    MNDownload.saveText(JSON.stringify(lesson), (name || "수업").replace(/\.lesson$/i, "") + ".lesson", "application/json");
   } catch(e){ if (typeof toast === "function") toast("리플레이를 저장하지 못했어요.", 2400, { type: "error" }); }
 }
 

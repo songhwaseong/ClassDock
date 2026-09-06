@@ -113,14 +113,8 @@ function mnBackupMissingBoards(rawBoards, openedNames){
 }
 
 function mnBackupDownload(blob, name){
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  // 전체 백업 ZIP 은 수백 MB 가 될 수 있어 해제까지의 틈을 기본값보다 길게 준다.
+  MNDownload.saveBlob(blob, name, { revokeAfterMs:1500 });
 }
 
 function mnBackupByteLength(text){

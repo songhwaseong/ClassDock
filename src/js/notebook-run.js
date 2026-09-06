@@ -831,8 +831,12 @@ function renderRunResult(ctrl, result){
       const size = document.createElement("span"); size.className = "of-size"; size.textContent = humanSize(Number(output.size) || 0);
       row.append(name, size);
       if (output.bytes){                                 // 실행 시점에 채워진 파일 바이트(브라우저·로컬 커널 공통)
-        const dl = document.createElement("a"); dl.className = "of-btn"; dl.textContent = "⬇ 저장";
-        dl.setAttribute("download", base); dl.href = URL.createObjectURL(new Blob([output.bytes]));
+        /* 예전에는 <a href="blob:…"> 를 미리 만들어 두었다. 그 주소는 출력 칸이 살아 있는 동안
+           (사실상 다시 실행할 때까지) 놓이지 않아서, 파일을 만드는 셀을 돌릴 때마다 해제되지 않은
+           주소가 쌓였다. 누를 때 만들어 공용이 곧 놓게 한다. 생김새는 .of-btn 이 <button> 에도
+           같으므로 옆의 '열기' 와 나란히 그대로다. */
+        const dl = document.createElement("button"); dl.type = "button"; dl.className = "of-btn"; dl.textContent = "⬇ 저장";
+        dl.addEventListener("click", () => MNDownload.saveBlob(new Blob([output.bytes]), base));
         const open = document.createElement("button"); open.type = "button"; open.className = "of-btn"; open.textContent = "열기";
         open.addEventListener("click", () => handleFiles([new File([output.bytes], base)]));   // 앱 뷰어로 열기
         row.append(dl, open);

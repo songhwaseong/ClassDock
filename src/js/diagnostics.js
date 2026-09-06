@@ -379,13 +379,8 @@ const MNDiagnostics = (() => {
   }
 
   function downloadText(text){
-    const blob = new Blob([text], { type:"application/json;charset=utf-8" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    link.download = `ClassDock-진단로그-${stamp}.json`;
-    document.body.appendChild(link); link.click(); link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    MNDownload.saveText(text, `ClassDock-진단로그-${stamp}.json`, "application/json;charset=utf-8");
   }
 
   function wireSettings(){

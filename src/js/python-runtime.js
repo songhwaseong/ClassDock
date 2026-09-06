@@ -612,26 +612,25 @@ function appendOutputFiles(panel, outputs, sessionId){
     const name = document.createElement("span"); name.className = "of-name"; name.textContent = f.name;
     const size = document.createElement("span"); size.className = "of-size"; size.textContent = humanSize(f.size);
     const base = f.name.split("/").pop() || "file";
-    const dl = document.createElement("a"); dl.className = "of-btn"; dl.textContent = "⬇ 저장"; dl.setAttribute("download", base);
+    /* 두 갈래(브라우저 메모리 / 로컬 세션) 모두 누를 때 받아 곧 놓는다.
+       예전에는 브라우저 갈래만 <a href="blob:…"> 를 미리 만들어, 그 주소가 출력 칸이 살아 있는
+       동안 놓이지 않고 쌓였다. 서버 갈래는 어차피 토큰 헤더 때문에 <a href> 로는 못 받아
+       click 으로 처리하고 있었으므로, 이제 둘의 생김새와 동작이 같다. */
+    const dl = document.createElement("button"); dl.type = "button"; dl.className = "of-btn"; dl.textContent = "⬇ 저장";
     const open = document.createElement("button"); open.className = "of-btn"; open.type = "button"; open.textContent = "열기";
     if (f.bytes){                                   // 브라우저(Pyodide): 메모리 바이트
-      dl.href = URL.createObjectURL(new Blob([f.bytes]));
+      dl.addEventListener("click", () => MNDownload.saveBlob(new Blob([f.bytes]), base));
       open.addEventListener("click", () => handleFiles([new File([f.bytes], base)]));
     } else {                                        // 로컬 세션: 서버에서 받기
-      // <a href> 직접 다운로드는 X-ClassDock-Token 헤더를 못 붙여 서버가 403으로 거절한다
+      // 직접 다운로드는 X-ClassDock-Token 헤더를 못 붙여 서버가 403으로 거절한다
       // → fetch(래퍼가 토큰 자동 첨부)로 받아 Blob 으로 저장
       const url = "/python-session-file?id=" + encodeURIComponent(sessionId) + "&name=" + encodeURIComponent(f.name);
-      dl.href = "#";
       open.addEventListener("click", () => openSessionFile(sessionId, f.name));   // 서버에서 받아 앱 뷰어로 열기
-      dl.addEventListener("click", async (e) => {
-        e.preventDefault();
+      dl.addEventListener("click", async () => {
         try {
           const res = await fetch(url, { cache: "no-store" });
           if (!res.ok) throw new Error(res.status === 404 ? "실행 결과가 만료되었어요 — 다시 실행해 주세요." : ("HTTP " + res.status));
-          const blobUrl = URL.createObjectURL(await res.blob());
-          const a = document.createElement("a"); a.href = blobUrl; a.download = base;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+          MNDownload.saveBlob(await res.blob(), base, { revokeAfterMs:4000 });
         } catch(err){ toast("파일을 저장하지 못했어요: " + ((err && err.message) || err), 3000); }
       });
     }

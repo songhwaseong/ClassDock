@@ -305,12 +305,7 @@ function musicSafeFileName(value, fallback){
 
 function musicDownloadBlob(name, blob){
   try {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return true;
+    return MNDownload.saveBlob(blob, name);
   } catch(_){
     if (typeof toast === "function") toast("저장에 실패했어요.", 2400, { type:"error" });
     return false;

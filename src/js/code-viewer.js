@@ -3624,12 +3624,7 @@ function attachRunSplitter(split, divider){
 }
 
 function downloadTextFile(text, name){
-  const blob = new Blob([text], { type: "text/x-python;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = /\.py$/i.test(name) ? name : name + ".py";
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveText(text, /\.py$/i.test(name) ? name : name + ".py", "text/x-python;charset=utf-8");
 }
 
 // 새로 만든 문서의 첫 저장에 파일 이름을 받는다 — 원본 폴더·EXE 서버 저장에는 OS 저장 대화상자가
@@ -3902,9 +3897,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       return true;
     }
     const blob = new Blob([outValue], { type: "text/plain;charset=utf-8" });   // 미지원 브라우저/file:// → 다운로드(확장자 유지)
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    MNDownload.saveBlob(blob, name);
     if (ownerDoc){
       ownerDoc.size = blob.size;
       ownerDoc.savedText = value;
