@@ -316,6 +316,59 @@ test("학생 화면의 그림은 눌러 크게 볼 수 있고, 보기 그림을 
   await page.keyboard.press("Escape");
 });
 
+test("보기를 그림만으로 낸 문항 — 글칸 없이 그림이 번호 옆에 붙고, 지문 그림과 따로 센다", async ({ page }) => {
+  await boot(page);
+
+  // 지문 그림 1장 + 그림만인 보기 5개 = 6장. 예전 상한(문항당 4장 합산)이면 저장이 막히던 조합이다.
+  const check = await page.evaluate(async () => {
+    const draw = (bg) => {
+      const c = document.createElement("canvas"); c.width = 200; c.height = 140;
+      const g = c.getContext("2d"); g.fillStyle = bg; g.fillRect(0, 0, 200, 140);
+      return c.toDataURL("image/png");
+    };
+    const colors = ["#bfdbfe", "#bbf7d0", "#fecaca", "#ddd6fe", "#fde68a"];
+    const item = {
+      ...examNewItem("choice"), id: "q1", stem: "그림으로 답하시오.",
+      images: [draw("#e2e8f0")],
+      choices: colors.map(color => ({ text: "", image: draw(color) })),
+      answerIndex: 2
+    };
+    window.__examImageOnly = item;
+    return examValidateForSave({ meta: { title: "그림 보기 시험" }, items: [item] });
+  });
+  expect(check.ok).toBe(true);           // 글 없는 보기 + 그림 6장이어도 저장 검증을 통과한다
+
+  const paper = await page.evaluate(async () => {
+    const keys = await examGenerateKeyPair();
+    const items = [window.__examImageOnly];
+    const stripped = examStripAnswers(items);
+    return JSON.stringify({
+      format: "classdock-exam", version: 1, id: "exam-image-only",
+      meta: { title: "그림 보기 시험", author: "", createdAt: new Date().toISOString(), count: items.length },
+      itemsHash: await examSha256Hex(examCanonicalStringify(stripped)),
+      publicJwk: keys.publicJwk, locked: false, items: stripped
+    });
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "그림 보기 시험.exam", mimeType: "application/json", buffer: Buffer.from(paper, "utf8")
+  });
+  await expect(page.locator(".exam-take")).toBeVisible();
+
+  const rows = page.locator(".exam-take-choice");
+  await expect(rows).toHaveCount(5);
+  await expect(page.locator(".exam-take-choice-text")).toHaveCount(0);          // 빈 글칸을 만들지 않는다
+  await expect(page.locator(".exam-take-choice.is-image-only")).toHaveCount(5);
+
+  // 빈 글칸(flex:1)이 있으면 그림이 줄 오른쪽 끝까지 밀린다 — 번호 바로 옆에 붙어야 한다.
+  const mark = await rows.first().locator(".exam-choice-mark").boundingBox();
+  const image = await rows.first().locator(".exam-take-choice-image").boundingBox();
+  expect(image.x - (mark.x + mark.width)).toBeLessThan(40);
+
+  // 그림만인 보기도 골라진다(라디오는 그림 왼쪽에 그대로 있다)
+  await rows.nth(1).locator('input[type="radio"]').check();
+  expect(await page.evaluate(() => docs.find(d => d.examTake).examTake.answers.q1)).toBe(2);
+});
+
 test("서명하려고 끌어도 시험지 화면이 스크롤되지 않는다", async ({ page }) => {
   await boot(page);
 

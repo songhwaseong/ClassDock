@@ -30,9 +30,12 @@ const EXAM_MAX_STEM_CHARS = 4000;
 const EXAM_MAX_CHOICE_CHARS = 600;
 const EXAM_MAX_ANSWER_CHARS = 2000;
 const EXAM_MAX_SHORT_CHARS = 4000;              // 학생이 주관식에 적을 수 있는 길이
-const EXAM_MAX_IMAGES_PER_ITEM = 4;
+// 지문 그림 상한. 보기 그림은 보기마다 1장이라 이 수에 넣지 않는다 —
+// 보기를 전부 그림으로 내는 문항이 있어서, 지문과 한 통에 세면 5지선다가 아예 막힌다.
+const EXAM_MAX_STEM_IMAGES = 4;
 const EXAM_MAX_IMAGE_TOTAL = 12 * 1024 * 1024;  // 시험지 전체 이미지(데이터 URL 기준) 합계
 const EXAM_IMAGE_MAX_DIM = 1200;
+const EXAM_CHOICE_IMAGE_MAX_DIM = 800;          // 보기 그림은 작게 보이니 더 줄인다(이미지 합계 상한 절약)
 const EXAM_PBKDF2_ITER = 210000;
 const EXAM_MIN_PASSWORD = 8;
 const EXAM_CHOICE_MARKS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
@@ -365,7 +368,7 @@ function examNormalizeItems(list, withAnswers){
       stem: String(raw.stem || "").slice(0, EXAM_MAX_STEM_CHARS),
       images: (Array.isArray(raw.images) ? raw.images : [])
         .filter(src => typeof src === "string" && src.startsWith("data:image/"))
-        .slice(0, EXAM_MAX_IMAGES_PER_ITEM),
+        .slice(0, EXAM_MAX_STEM_IMAGES),
       choices: [],
       answerIndex: 0,
       answerText: "",
@@ -410,12 +413,9 @@ function examImageBytesTotal(items){
   return Math.floor(total * 3 / 4);
 }
 
-function examItemImageCount(item){
-  return (item.images || []).length + (item.choices || []).reduce((sum, choice) => sum + (choice.image ? 1 : 0), 0);
-}
-
 // 이미지를 긴 변 기준으로 줄여 데이터 URL 로 만든다(큰 사진 그대로 넣으면 시험지 파일이 순식간에 커진다).
-function examImageToDataUrl(file){
+// maxDim 을 주면 그 크기로 줄인다 — 보기 그림은 지문보다 작게 보이므로 더 줄여 담는다.
+function examImageToDataUrl(file, maxDim){
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onerror = () => resolve(null);
@@ -426,7 +426,7 @@ function examImageToDataUrl(file){
       img.onload = () => {
         let w = img.naturalWidth, h = img.naturalHeight;
         if (!w || !h){ resolve(null); return; }
-        const scale = Math.min(1, EXAM_IMAGE_MAX_DIM / Math.max(w, h));
+        const scale = Math.min(1, (maxDim || EXAM_IMAGE_MAX_DIM) / Math.max(w, h));
         if (scale >= 1 && source.length <= 400 * 1024){ resolve(source); return; }   // 작은 원본은 그대로(투명 배경 보존)
         w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
         const canvas = document.createElement("canvas");
@@ -612,8 +612,8 @@ function examValidateForSave(state){
   for (let i = 0; i < state.items.length; i++){
     const item = state.items[i];
     const no = i + 1;
-    if (examItemImageCount(item) > EXAM_MAX_IMAGES_PER_ITEM)
-      return { ok: false, message: no + "번 문항의 이미지는 지문과 보기를 합쳐 " + EXAM_MAX_IMAGES_PER_ITEM + "장까지 넣을 수 있어요." };
+    if ((item.images || []).length > EXAM_MAX_STEM_IMAGES)
+      return { ok: false, message: no + "번 문항의 지문 이미지는 " + EXAM_MAX_STEM_IMAGES + "장까지 넣을 수 있어요(보기 그림은 따로 셉니다)." };
     if (!String(item.stem || "").trim() && !item.images.length) return { ok: false, message: no + "번 문항의 지문이 비어 있어요." };
     if (item.type === "choice"){
       const filled = item.choices.filter(choice => String(choice.text || "").trim() || choice.image);
@@ -953,11 +953,11 @@ function examRenderEditorItem(doc, item, index, rerender, addItem){
   const addImageBtn = document.createElement("button"); addImageBtn.type = "button"; addImageBtn.className = "btn exam-add-image";
   addImageBtn.textContent = "🖼 이미지 추가";
   addImageBtn.addEventListener("click", async () => {
-    if (examItemImageCount(item) >= EXAM_MAX_IMAGES_PER_ITEM){ toast("문항 하나의 이미지는 지문과 보기를 합쳐 " + EXAM_MAX_IMAGES_PER_ITEM + "장까지예요.", 2600); return; }
+    if (item.images.length >= EXAM_MAX_STEM_IMAGES){ toast("지문 이미지는 문항마다 " + EXAM_MAX_STEM_IMAGES + "장까지예요(보기 그림은 따로 셉니다).", 2600); return; }
     const files = await examPickFile("image/*", true);
     if (!files.length) return;
     for (const file of files){
-      if (examItemImageCount(item) >= EXAM_MAX_IMAGES_PER_ITEM) break;
+      if (item.images.length >= EXAM_MAX_STEM_IMAGES) break;
       const dataUrl = await examImageToDataUrl(file);
       if (!dataUrl){ toast("이미지를 읽지 못했어요: " + file.name, 2800); continue; }
       item.images.push(dataUrl);
@@ -984,19 +984,18 @@ function examRenderEditorItem(doc, item, index, rerender, addItem){
       const mark = document.createElement("span"); mark.className = "exam-choice-mark";
       mark.textContent = EXAM_CHOICE_MARKS[choiceIndex] || String(choiceIndex + 1);
       const text = document.createElement("input"); text.type = "text"; text.className = "exam-choice-input";
-      text.maxLength = EXAM_MAX_CHOICE_CHARS; text.placeholder = "보기 " + (choiceIndex + 1);
+      // 그림만 있는 보기도 정상 — 글칸은 비워 두면 학생 화면에 그림만 나온다.
+      text.maxLength = EXAM_MAX_CHOICE_CHARS;
+      text.placeholder = "보기 " + (choiceIndex + 1) + " (그림만 쓰려면 비워 두기)";
       text.value = choice.text;
       text.addEventListener("input", () => { choice.text = text.value; examMarkEditorDirty(doc); });
       const imageBtn = document.createElement("button"); imageBtn.type = "button"; imageBtn.className = "btn exam-item-tool";
       imageBtn.textContent = choice.image ? "이미지 ✓" : "이미지";
-      imageBtn.title = choice.image ? "이 보기의 이미지 바꾸기 · 오른쪽 × 로 빼기" : "이 보기에 이미지 넣기";
+      imageBtn.title = choice.image ? "이 보기의 이미지 바꾸기 · 아래 [그림 빼기]로 뺍니다" : "이 보기에 이미지 넣기";
       imageBtn.addEventListener("click", async () => {
-        if (!choice.image && examItemImageCount(item) >= EXAM_MAX_IMAGES_PER_ITEM){
-          toast("문항 하나의 이미지는 지문과 보기를 합쳐 " + EXAM_MAX_IMAGES_PER_ITEM + "장까지예요.", 2800); return;
-        }
         const files = await examPickFile("image/*", false);
         if (!files.length) return;
-        const dataUrl = await examImageToDataUrl(files[0]);
+        const dataUrl = await examImageToDataUrl(files[0], EXAM_CHOICE_IMAGE_MAX_DIM);
         if (!dataUrl){ toast("이미지를 읽지 못했어요.", 2600); return; }
         const before = choice.image;
         choice.image = dataUrl;
@@ -1021,7 +1020,12 @@ function examRenderEditorItem(doc, item, index, rerender, addItem){
       if (choice.image){
         const preview = document.createElement("div"); preview.className = "exam-choice-image";
         const img = document.createElement("img"); img.src = choice.image; img.alt = "보기 이미지";
-        preview.appendChild(img);
+        // 보기 줄의 × 는 보기 자체를 지운다 — 그림만 빼려면 따로 필요하다(글 없는 보기는 × 로 지우면 보기가 사라진다).
+        const dropImage = document.createElement("button"); dropImage.type = "button";
+        dropImage.className = "btn exam-item-tool exam-choice-image-drop";
+        dropImage.textContent = "그림 빼기"; dropImage.title = "이 보기에서 그림만 빼기";
+        dropImage.addEventListener("click", () => { choice.image = ""; examMarkEditorDirty(doc); rerender(); });
+        preview.append(img, dropImage);
         choiceBox.appendChild(preview);
       }
     });
@@ -1554,9 +1558,12 @@ function examRenderTake(doc){
     itemHead.append(no, kind);
     card.appendChild(itemHead);
 
-    const stem = document.createElement("div"); stem.className = "exam-stem";
-    stem.textContent = item.stem;
-    card.appendChild(stem);
+    // 그림만으로 낸 지문은 글이 비어 있다 — 빈 칸을 만들면 그림 위에 빈 줄만 남는다.
+    if (String(item.stem || "").trim()){
+      const stem = document.createElement("div"); stem.className = "exam-stem";
+      stem.textContent = item.stem;
+      card.appendChild(stem);
+    }
 
     if (item.images.length){
       const images = document.createElement("div"); images.className = "exam-image-box";
@@ -1590,12 +1597,20 @@ function examRenderTake(doc){
         });
         const mark = document.createElement("span"); mark.className = "exam-choice-mark";
         mark.textContent = EXAM_CHOICE_MARKS[choiceIndex] || String(choiceIndex + 1);
-        const text = document.createElement("span"); text.className = "exam-take-choice-text";
-        text.textContent = choice.text;
-        row.append(pick, mark, text);
+        row.append(pick, mark);
+        // 글이 빈 보기(그림만인 보기)는 글칸 자체를 만들지 않는다 —
+        // .exam-take-choice-text 는 flex:1 이라, 빈 칸을 두면 그림이 줄 오른쪽 끝까지 밀려난다.
+        if (String(choice.text || "").trim()){
+          const text = document.createElement("span"); text.className = "exam-take-choice-text";
+          text.textContent = choice.text;
+          row.appendChild(text);
+        } else if (choice.image){
+          row.classList.add("is-image-only");
+        }
         if (choice.image){
           const img = document.createElement("img"); img.className = "exam-take-choice-image mn-zoomable mn-zoom-noexport";
-          img.src = choice.image; img.alt = "보기 이미지";
+          img.src = choice.image;
+          img.alt = (EXAM_CHOICE_MARKS[choiceIndex] || String(choiceIndex + 1)) + "번 보기 이미지";
           img.title = "클릭하면 크게 보기"; img.tabIndex = 0;
           // 보기 줄은 <label> 이라 그림을 눌러도 그 보기가 골라진다 — 크게 보려다 답이 찍히면 안 된다.
           img.addEventListener("click", (e) => { e.preventDefault(); });
@@ -2435,24 +2450,43 @@ function examOpenAnswerSheet(doc, row){
     head.append(no, kind, headSpacer, toggle);
     line.appendChild(head);
 
-    const stem = document.createElement("div"); stem.className = "exam-sheet-stem"; stem.textContent = item.stem;
+    const stem = document.createElement("div"); stem.className = "exam-sheet-stem";
+    stem.textContent = String(item.stem || "").trim() || "(그림 문항)";
     line.appendChild(stem);
+    if (!String(item.stem || "").trim() && (item.images || []).length){
+      const stemImg = document.createElement("img"); stemImg.className = "exam-sheet-choice-image";
+      stemImg.src = item.images[0]; stemImg.alt = "문항 이미지";
+      line.appendChild(stemImg);
+    }
 
     const given = row.payload.answers[item.id];
     const grid = document.createElement("div"); grid.className = "exam-sheet-grid";
-    const cell = (caption, value, extraClass) => {
+    const cell = (caption, value, extraClass, imageSrc) => {
       const box = document.createElement("div"); box.className = "exam-sheet-cell " + (extraClass || "");
       const cap = document.createElement("b"); cap.textContent = caption;
       const text = document.createElement("span"); text.textContent = value;
-      box.append(cap, text); grid.appendChild(box);
+      box.append(cap, text);
+      // 그림으로 낸 보기는 글이 없다 — 번호만 적으면 무엇을 골랐는지 안 보이니 그림도 같이 건다.
+      if (imageSrc){
+        const img = document.createElement("img"); img.className = "exam-sheet-choice-image";
+        img.src = imageSrc; img.alt = value;
+        box.appendChild(img);
+      }
+      grid.appendChild(box);
     };
     if (item.type === "choice"){
       const pickIndex = Number(given) || 0;
-      const label = (index2) => index2 > 0
-        ? ((EXAM_CHOICE_MARKS[index2 - 1] || index2) + " " + String((item.choices[index2 - 1] || {}).text || "").slice(0, 80))
-        : "(무응답)";
-      cell("학생 답", label(pickIndex));
-      cell("정답", label(item.answerIndex));
+      const choiceAt = (index2) => (index2 > 0 ? (item.choices[index2 - 1] || {}) : null);
+      const label = (index2) => {
+        const choice = choiceAt(index2);
+        if (!choice) return "(무응답)";
+        const mark = EXAM_CHOICE_MARKS[index2 - 1] || index2;
+        const text = String(choice.text || "").trim().slice(0, 80);
+        if (text) return mark + " " + text;
+        return mark + (choice.image ? " (그림 보기)" : "");
+      };
+      cell("학생 답", label(pickIndex), "", (choiceAt(pickIndex) || {}).image || "");
+      cell("정답", label(item.answerIndex), "", (choiceAt(item.answerIndex) || {}).image || "");
     } else {
       cell("학생 답", String(given || "").trim() || "(무응답)");
       cell("정답", examShortAnswerList(item).join(" / ") || "(정답 없음)");
