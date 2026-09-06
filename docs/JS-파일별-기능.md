@@ -30,6 +30,7 @@ flowchart LR
 |---|---|---|
 | `state-sync.js` | EXE의 포트가 바뀌어도 설정이 유지되도록 로컬 서버와 `localStorage`를 동기화합니다. 같은 출처 요청에 실행별 인증 토큰을 붙이고 종료 직전 상태도 전송합니다. | `desktop/launcher.cs`, `state.js` |
 | `diagnostics.js` | 앱 전체 공통 진단 로거(`MNDiagnostics`)입니다. JavaScript 오류·처리되지 않은 비동기 오류·화면 응답 공백·직전 비정상 종료를 포착하고, 활성 문서 종류·메모리·실행 상태와 화면별 제공 상태를 문서 본문 없이 기록합니다. EXE에서는 `%LOCALAPPDATA%\\ClassDock\\logs`의 순환 JSONL에 저장하고 서버가 없으면 작은 브라우저 임시 기록으로 대체하며, 설정의 진단 탭에서 필터·상세 확인·복사·파일 저장·삭제·로그 폴더 열기를 제공합니다. | `state-sync.js`, `app.js`, `documents.js`, `desktop/launcher.cs`, `tests/diagnostics.test.js` |
+| `download.js` | 파일 하나를 사용자에게 내려 주는 공용(`MNDownload`)입니다. Blob·글자를 받아 `<a download>` 로 넘기고 Object URL 해제까지 맡습니다. 20여 개 파일이 저마다 되풀이하던 여섯 줄을 모은 것이며, 큰 파일은 `revokeAfterMs` 로 해제까지의 틈을 늘립니다. 화면에 계속 걸어 두는 주소(pdf.js 워커)는 대상이 아닙니다. | 내보내기·저장이 있는 모든 화면, `tests/download-helper.test.js` |
 | `theme.js` | 문서가 그려지기 전에 저장된 다크·라이트 테마를 적용해 초기 화면 깜빡임을 막습니다. | `state.js`, `src/styles.css` |
 | `i18n.js` | 한국어·영어 사전, 매개변수 번역, DOM 텍스트·title·aria 자동 번역과 언어 전환을 담당합니다. 사용자에게 보이는 새 문구를 추가하면 이 파일의 영문 사전도 확인합니다. | 모든 UI 파일, `app.js` |
 | `lazy.js` | 무거운 vendor 라이브러리를 시작할 때가 아니라 그 형식을 열 때 처음 불러오는 지연 로더(`MNLazy`)입니다. 엑셀·한글·PPT·Word·압축·캡처·맞춤법 사전 묶음과 로드 순서(JSZip 2.6.1 ↔ 3.x 교체)를 정의하며, 단일 파일 빌드에서는 `text/plain` 블록을, 서버 서빙에서는 `vendor/` 스크립트를 씁니다. 새 vendor 를 추가하면 `scripts.manifest.json`의 `lazy` 값과 이 파일의 묶음을 함께 맞춥니다. | `scripts.manifest.json`, `build-offline.js`, `spreadsheet-viewer.js`, `office-doc-viewers.js`, `tests/release-contract.test.js` |

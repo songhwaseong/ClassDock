@@ -17,6 +17,7 @@
   "localScripts": [
     "state-sync.js",
     "diagnostics.js",
+    "download.js",
     "theme.js",
     "i18n.js",
     "lazy.js",
@@ -122,6 +123,7 @@
       "scripts": [
         "state-sync.js",
         "diagnostics.js",
+        "download.js",
         "theme.js",
         "i18n.js",
         "lazy.js",
