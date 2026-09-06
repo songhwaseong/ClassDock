@@ -240,7 +240,9 @@ test("연결을 재사용해도 본문을 다 읽지 않은 요청은 반드시 
     "invalid-local-host",
     "invalid-local-origin",
     "request-body-too-large",
-    "local-token-required"
+    "local-token-required",
+    "unsupported-transfer-encoding",
+    "incomplete-request-body"
   ];
   for (const marker of early) {
     const at = launcher.indexOf(marker);
@@ -248,14 +250,13 @@ test("연결을 재사용해도 본문을 다 읽지 않은 요청은 반드시 
     const before = launcher.slice(Math.max(0, at - 400), at);
     assert.match(before, /stream\.KeepAlive = false;/, marker + " 경로가 연결을 끊지 않는다");
   }
-  // 본문을 끝까지 받지 못한 경우도 마찬가지다.
-  assert.match(launcher, /if \(read != contentLength\) \{ body = new byte\[0\]; stream\.KeepAlive = false; \}/);
+  // 불완전 본문이 저장 라우팅에 도달하지 않는지는 local-file-save.test.js에서 검증한다.
 });
 
 test("연결 재사용은 HTTP 버전과 Connection 헤더를 따르고 청크 요청은 제외한다", () => {
   assert.match(launcher, /connectionHeader\.IndexOf\("close", StringComparison\.OrdinalIgnoreCase\) >= 0\) stream\.KeepAlive = false/);
   assert.match(launcher, /!rp\[2\]\.StartsWith\("HTTP\/1\.1", StringComparison\.Ordinal\)/);
-  assert.match(launcher, /headers\.ContainsKey\("Transfer-Encoding"\)\) stream\.KeepAlive = false/);
+  assert.match(launcher, /headers\.ContainsKey\("Transfer-Encoding"\)\)\s*\{\s*stream\.KeepAlive = false;/);
   // 유휴 연결을 상대가 닫은 경우는 오류 응답 없이 끝낸다.
   assert.match(launcher, /if \(head\.Count == 0\)\s*\{\s*stream\.KeepAlive = false;\s*return;\s*\}/);
   // 한 연결이 무한히 재사용되지 않도록 상한을 둔다.

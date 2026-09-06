@@ -1419,6 +1419,7 @@ class ClassDockLauncher
                 string path = rp.Length > 1 ? rp[1] : "/";
 
                 int contentLength = 0;
+                bool hasContentLength = false;
                 Dictionary<string, string> headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 1; i < lines.Length; i++)
                 {
@@ -1429,12 +1430,16 @@ class ClassDockLauncher
                     headers[key] = val;
                     if (key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!int.TryParse(val, out contentLength) || contentLength < 0)
+                        int parsedLength;
+                        if (!int.TryParse(val, out parsedLength) || parsedLength < 0
+                            || (hasContentLength && parsedLength != contentLength))
                         {
                             stream.KeepAlive = false;
                             WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-content-length"));
                             return;
                         }
+                        contentLength = parsedLength;
+                        hasContentLength = true;
                     }
                 }
 
@@ -1445,14 +1450,19 @@ class ClassDockLauncher
                     return;
                 }
                 // 연결 재사용 협상. HTTP/1.1 은 기본 유지, 1.0 은 명시할 때만 유지하고,
-                // 어느 쪽이든 상대가 close 를 요구하면 따른다. Transfer-Encoding 은 지원하지 않으므로
-                // 본문 길이를 알 수 없는 요청도 재사용 대상에서 뺀다.
+                // 어느 쪽이든 상대가 close 를 요구하면 따른다.
                 string connectionHeader;
                 if (!headers.TryGetValue("Connection", out connectionHeader)) connectionHeader = "";
                 if (connectionHeader.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0) stream.KeepAlive = false;
                 else if (!rp[2].StartsWith("HTTP/1.1", StringComparison.Ordinal)
                     && connectionHeader.IndexOf("keep-alive", StringComparison.OrdinalIgnoreCase) < 0) stream.KeepAlive = false;
-                if (headers.ContainsKey("Transfer-Encoding")) stream.KeepAlive = false;
+                // 청크 전송을 빈 본문으로 저장하지 않도록, 지원하지 않는 전송 형식은 라우팅 전에 거부한다.
+                if (headers.ContainsKey("Transfer-Encoding"))
+                {
+                    stream.KeepAlive = false;
+                    WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("unsupported-transfer-encoding"));
+                    return;
+                }
                 if (!HasAllowedLocalHost(headers))
                 {
                     stream.KeepAlive = false;
@@ -1494,8 +1504,13 @@ class ClassDockLauncher
                         if (got <= 0) break;
                         read += got;
                     }
-                    // 본문을 다 받지 못했으면 스트림 위치를 신뢰할 수 없다. 연결을 재사용하지 않는다.
-                    if (read != contentLength) { body = new byte[0]; stream.KeepAlive = false; }
+                    // 연결 종료로 덜 받은 본문을 정상적인 빈 파일 저장으로 처리하면 원본이 지워진다.
+                    if (read != contentLength)
+                    {
+                        stream.KeepAlive = false;
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("incomplete-request-body"));
+                        return;
+                    }
                 }
 
                 // ---- 라우팅 ----
@@ -2467,7 +2482,7 @@ class ClassDockLauncher
                         }
                         string dir = Path.GetDirectoryName(full);
                         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                        File.WriteAllBytes(full, body);
+                        WriteFileAtomically(full, body);
                         WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(full));
                     }
                     catch (Exception ex)
@@ -5776,6 +5791,34 @@ class ClassDockLauncher
         return json.Append("]}").ToString();
     }
 
+    // 같은 디렉터리에서 기록을 마친 파일만 교체한다. 교체를 지원하지 않거나 실패하면
+    // 원본 삭제/직접 덮어쓰기로 우회하지 않아야 저장 실패 때 기존 내용을 보존할 수 있다.
+    static void WriteFileAtomically(string full, byte[] body)
+    {
+        if (body == null) throw new ArgumentNullException("body");
+        string temp = Path.Combine(Path.GetDirectoryName(full), ".classdock-save-" + Guid.NewGuid().ToString("N") + ".tmp");
+        bool created = false;
+        try
+        {
+            using (FileStream output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                created = true;
+                output.Write(body, 0, body.Length);
+                output.Flush(true);
+            }
+            if (File.Exists(full)) File.Replace(temp, full, null);
+            else File.Move(temp, full);
+        }
+        finally
+        {
+            if (created)
+            {
+                try { File.Delete(temp); }
+                catch (Exception ex) { Debug.WriteLine("save-temp-cleanup-failed: " + ex.Message); }
+            }
+        }
+    }
+
     static void WriteSourceFolderFile(string id, string relativePath, byte[] body)
     {
         string root, full;
@@ -5785,7 +5828,7 @@ class ClassDockLauncher
         if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
             throw new DirectoryNotFoundException("source-parent-not-found");
         if (Directory.Exists(full)) throw new IOException("source-entry-is-directory");
-        File.WriteAllBytes(full, body ?? new byte[0]);
+        WriteFileAtomically(full, body);
     }
 
     static void CreateSourceFolderDirectory(string id, string relativePath)
