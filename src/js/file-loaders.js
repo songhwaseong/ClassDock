@@ -24,6 +24,59 @@ function isUnknownTextArchiveCandidate(ext, size){
   return !ZIP_OPENABLE.includes(ext) && (Number(size) || 0) <= UNKNOWN_TEXT_ARCHIVE_PROBE_CAP;
 }
 
+/* ===== 큰 파일은 열기 전에 한 번 묻는다 =====
+   file.size 는 지금껏 "이미 열린 파일인가"를 가리는 키로만 쓰였고 경계로는 쓰이지 않았다.
+   영상(1GB)과 백업에만 상한이 있고 PDF·표·압축은 통째로 ArrayBuffer 에 올린다. 큰 파일 하나를
+   잘못 열면 화면이 죽는데, 그때 사라지는 건 그 파일이 아니라 열려 있던 '다른 탭의 저장하지 않은
+   편집'이다. 자동복원이 받쳐 주지만 마지막 저장 이후는 잃는다.
+
+   막지 않고 묻기만 한다 — 실제로 어디서 죽는지는 기기 메모리에 따라 다르고, 교실 PC 에서 큰
+   자료를 여는 것 자체는 정당한 일이다. 판단에 필요한 것(파일 크기·무슨 일이 생길 수 있는지)을
+   주고 고르게 한다.
+
+   상한은 "파일 크기가 메모리에서 몇 배로 부푸는가"로 나눴다.
+     · 표    : 셀 하나가 JS 객체가 되어 가장 크게 부푼다 → 가장 낮게
+     · 압축  : 풀면서 커지고, 그 안의 파일을 다시 연다
+     · PDF   : 원본 버퍼는 들고 있지만 페이지는 보이는 것만 그리고 벗어나면 캔버스를 비운다 → 가장 여유롭게
+   영상·오디오는 <video> 가 스트리밍으로 읽고 이미 1GB 상한이 있어 빼고,
+   sqlite 는 런처가 디스크에서 직접 읽으므로 뺀다. */
+const OPEN_CONFIRM_LIMITS = {
+  xlsx:40, xlsm:40, xlsb:40, xls:40, ods:40,
+  zip:250, tar:250, gz:250, tgz:250,
+  pdf:400
+};
+const OPEN_CONFIRM_DEFAULT_MB = 150;
+
+function openConfirmLimitBytes(ext){
+  if (VIDEO_EXTS.includes(ext) || AUDIO_EXTS.includes(ext) || SQLITE_EXTS.includes(ext)) return 0;   // 0 = 묻지 않는다
+  return (OPEN_CONFIRM_LIMITS[ext] || OPEN_CONFIRM_DEFAULT_MB) * 1024 * 1024;
+}
+function openSizeText(bytes){
+  const mb = (Number(bytes) || 0) / (1024 * 1024);
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + "GB" : Math.round(mb) + "MB";
+}
+/* 사용자가 직접 연 파일에만 묻는다.
+   복원은 사용자가 그 자리에 없고, 폴더·압축 안의 파일은 파일마다 창을 띄우면 진행이 막힌다
+   (그 경로는 지금도 상한이 없다 — 폴더 안의 아주 큰 파일은 여전히 화면을 죽일 수 있다). */
+async function confirmLargeFileOpen(file, ext, options){
+  if (options.restoreFromWorkspace || options.isScratch || options.transient) return true;
+  if (options.parentId || options.archiveCtx) return true;
+  const limit = openConfirmLimitBytes(ext);
+  const size = Number(file && file.size) || 0;
+  if (!limit || size <= limit) return true;
+  if (typeof confirmDialog !== "function") return true;   // 확인 창을 쓸 수 없으면 예전처럼 그냥 연다
+  // confirmDialog 는 넘겨받은 글을 그대로 DOM 에 쓰므로(정적 셸이 아니라 번역 스캔을 거치지 않는다)
+  // 여기서 번역해서 넘긴다.
+  const i18n = (typeof MNI18N === "object" && MNI18N) || null;
+  const ask = (template, vars) => (i18n && typeof i18n.tf === "function")
+    ? i18n.tf(template, vars) : template.replace(/\{(\w+)\}/g, (m, key) => vars[key] != null ? String(vars[key]) : m);
+  const label = (ko) => (i18n && typeof i18n.t === "function") ? i18n.t(ko) : ko;
+  return await confirmDialog(
+    ask("'{name}'은(는) {size}로 큽니다. 여는 동안 화면이 한동안 멈출 수 있고, 메모리가 모자라면 열려 있는 다른 탭의 저장하지 않은 내용까지 사라질 수 있어요. 먼저 저장한 뒤 열기를 권합니다.",
+      { name:file.name, size:openSizeText(size) }),
+    label("그래도 열기"), label("열지 않기"));
+}
+
 /* ===== 파일 로딩 ===== */
 async function handleFiles(files, options={}){
   const arr = [...files];
@@ -59,6 +112,8 @@ async function handleFiles(files, options={}){
       if (!firstDoc) firstDoc = duplicate;
       continue;
     }
+    // 이미 열린 파일을 가려낸 다음에 묻는다 — 다시 누른 것뿐인데 경고를 볼 이유가 없다.
+    if (!await confirmLargeFileOpen(file, ext, opts)) continue;
     if (opts.archiveCtx && !opts.relPath) opts.relPath = file.name;   // 여러 파일 동시 업로드(평면)의 옆파일 경로
     try {
       let made = null;

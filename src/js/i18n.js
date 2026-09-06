@@ -1929,6 +1929,8 @@
     "편집 중인 텍스트·코드 문서에서만 사용할 수 있어요.": "Available only for a text/code document being edited.",
     "아직 저장된 적이 없는 새 문서라 비교할 저장본이 없어요.": "This new document has never been saved, so there is no saved copy to compare.",
     "파일이 너무 커서 비교할 수 없어요 (5MB 초과).": "The file is too large to compare (over 5MB).",
+    "그래도 열기": "Open anyway",
+    "열지 않기": "Don't open",
     "줄이 너무 많아 비교할 수 없어요 (파일당 50,000줄 초과).": "The file has too many lines to compare (over 50,000 lines per file).",
     "파일 끝 개행 있음": "Final newline present",
     "파일 끝 개행 없음": "No final newline",
@@ -2657,6 +2659,8 @@
    * 값이 끼는 조합 메시지는 영어 어순이 달라 t() 로는 안 되므로 tf() 로 처리한다.
    * 플레이스홀더: {name}=치환, {n|단수|복수}=vars.n 이 1이면 단수/아니면 복수.  */
   var PARAMS = {
+    "'{name}'은(는) {size}로 큽니다. 여는 동안 화면이 한동안 멈출 수 있고, 메모리가 모자라면 열려 있는 다른 탭의 저장하지 않은 내용까지 사라질 수 있어요. 먼저 저장한 뒤 열기를 권합니다.":
+      "'{name}' is large ({size}). Opening it may freeze the screen for a while, and if memory runs out you could lose unsaved work in your other tabs. Save those first.",
     "{n}개 열기": "Opened {n} {n|file|files}",
     "{n}개 형식 미지원": "{n} unsupported {n|format|formats}",
     "{n}개 열기 실패": "{n} failed to open",
