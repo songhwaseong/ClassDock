@@ -39,3 +39,36 @@ test("화이트보드 휠·화면 이동·원본 내보내기 배선이 함께 �
   assert.match(css,/\.wb-canvas\.pan-ready\{cursor:grab!important\}/);
   assert.match(css,/\.wb-canvas\.panning\{cursor:grabbing!important\}/);
 });
+
+// 끄는 동안에는 캔버스만 다시 그린다.
+// 예전에는 redraw 하나가 캔버스와 도구막대를 함께 맡아, 도형을 끄는 매 pointermove 마다
+// 버튼 disabled·색 스와치·배율 라벨까지 다시 썼다(값은 하나도 안 바뀌는데 레이아웃만 다시 쟀다).
+// 되돌아가기 쉬운 종류라 — "왜 이 줄만 paint 지?" 하고 redraw 로 고쳐 놓으면 조용히 느려진다 — 계약으로 박아 둔다.
+test("끌기는 캔버스만 다시 그리고 도구막대는 손대지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname,"../src/js/whiteboard.js"),"utf8");
+  const between = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
+
+  // redraw 는 두 가지를 다 하는 합성 함수로 남는다 — 기존 호출부 60여 곳이 그대로 쓴다.
+  assert.match(source, /const redraw = \(\) => \{ paint\(\); syncControls\(\); \};/);
+
+  const paint = between("const paint = () => {", "const syncControls");
+  const syncControls = between("const syncControls = () => {", "const redraw = () =>");
+
+  // paint 는 화면 좌표와 항목에만 기댄다. 도구막대·집중 겹침은 여기 들어오면 안 된다.
+  for (const forbidden of ["syncSelectionControls", "renderFocus", "zoomLabelBtn", "flipXBtn", "groupActionBtn"]){
+    assert.ok(!paint.includes(forbidden), `paint 는 도구막대를 건드리지 않아야 한다: ${forbidden}`);
+  }
+  // 반대로 syncControls 는 캔버스를 그리지 않는다.
+  assert.ok(!/\bctx\./.test(syncControls), "syncControls 는 캔버스에 그리지 않아야 한다");
+  assert.match(syncControls, /syncSelectionControls\(\);[\s\S]*renderFocus\(\);/);
+
+  // 잦은 끌기 네 갈래는 paint 만 부른다.
+  assert.match(source, /clampView\(\); paint\(\);/);                                  // 화면 이동
+  assert.match(source, /if \(mode === "move"\) paint\(\); else redraw\(\);/);          // 항목 옮기기(크기조절은 '크기 %'가 살아 움직여야 해서 redraw)
+  assert.match(source, /Math\.abs\(sweep\) \* 180 \/ Math\.PI[\s\S]{0,140}\n\s*paint\(\);/); // 자·각도기·컴퍼스
+  assert.match(source, /cur\.x2 = p\.x; cur\.y2 = p\.y; paint\(\); drawItem\(cur\);/); // 도형 그리는 중
+
+  // 손을 떼면 반드시 전체를 맞춘다 — 끄는 동안 미뤄 둔 도구막대 상태가 여기서 따라잡는다.
+  assert.match(source, /const up = \(\) => \{[\s\S]{0,220}redraw\(\); if \(cloned\)/);
+  assert.match(source, /wb\.items\.push\(finished\); cur = null; redraw\(\);/);
+});

@@ -181,11 +181,12 @@ test("배경은 판서를 다 그린 뒤 맨 밑에 깐다", () => {
   const render = read("src/js/board-render.js");
   assert.match(render, /function paintBackground\(ctx, area, opts\)\{[\s\S]{0,400}globalCompositeOperation = "destination-over"/);
 
+  // 그리는 순서는 redraw 가 아니라 그 안의 paint 가 쥐고 있다(도구막대 맞추기는 syncControls 로 갈라져 있다).
   const wb = read("src/js/whiteboard.js");
-  const redraw = wb.slice(wb.indexOf("const redraw = () => {"), wb.indexOf("const restoreBoardImages"));
-  assert.match(redraw, /clearRect\(0, 0, W, H\)/);
-  assert.doesNotMatch(redraw, /fillStyle = wb\.bg/);
-  assert.ok(redraw.indexOf("paintBoardBackground()") > redraw.indexOf("drawGear()"), "배경은 판서·교구보다 나중에 깔려야 한다");
+  const paint = wb.slice(wb.indexOf("const paint = () => {"), wb.indexOf("const syncControls"));
+  assert.match(paint, /clearRect\(0, 0, W, H\)/);
+  assert.doesNotMatch(paint, /fillStyle = wb\.bg/);
+  assert.ok(paint.indexOf("paintBoardBackground()") > paint.indexOf("drawGear()"), "배경은 판서·교구보다 나중에 깔려야 한다");
 
   // 재생 화면도 같은 순서여야 판서 화면과 픽셀이 맞는다.
   const replay = read("src/js/lesson-replay.js");

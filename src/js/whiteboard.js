@@ -1202,7 +1202,12 @@ function renderWhiteboard(doc, host){
     ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
   };
 
-  const redraw = () => {
+  /* 그리기(paint)와 도구막대 맞추기(syncControls)를 가른다.
+     둘을 한 덩어리로 두면 도형을 끄는 매 pointermove 마다 버튼 disabled·textContent·색 스와치까지
+     다시 쓰게 되는데, 끄는 동안에는 그 값이 하나도 바뀌지 않는다(레이아웃만 매 프레임 다시 잰다).
+     paint 는 화면 좌표(view)와 항목에만 의존하고, syncControls 는 선택·도구·색·배율에만 의존한다.
+     기존 호출부(60여 곳)는 그대로 두 가지를 다 하는 redraw 를 쓴다 — 끌기 경로만 paint 로 바꾼다. */
+  const paint = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, W, H);
     ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
@@ -1227,6 +1232,12 @@ function renderWhiteboard(doc, host){
     }
     drawGear();
     paintBoardBackground();                           // 판서·교구를 다 그린 뒤 맨 밑에 배경을 깐다
+    // 글자 입력창은 캔버스 위에 겹쳐 둔 textarea 라 화면 이동·확대를 따라와야 한다(=paint 쪽).
+    if (typeof positionTextEditor === "function") positionTextEditor();
+  };
+
+  const syncControls = () => {
+    const s = wb.selected;
     if (groupActionBtn) groupActionBtn.disabled = !(s && s.type === "group");
     const canFlip = whiteboardCanFlipItem(s);
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
@@ -1243,9 +1254,11 @@ function renderWhiteboard(doc, host){
     if (contextZoomOutBtn) contextZoomOutBtn.disabled = viewLocked;
     if (contextZoomResetBtn) contextZoomResetBtn.disabled = viewLocked;
     if (contextZoomInBtn) contextZoomInBtn.disabled = viewLocked;
-    if (typeof positionTextEditor === "function") positionTextEditor();
+    // 집중 도구 겹침은 화면 좌표(W·H)에만 기대고 화면 이동·확대를 따르지 않는다 — 끌기마다 다시 그릴 필요가 없다.
     renderFocus();
   };
+
+  const redraw = () => { paint(); syncControls(); };
   const restoreBoardImages = () => {
     for (const item of wb.items){
       if (!item || item.type !== "image" || item.img || !item.src) continue;
@@ -1399,7 +1412,7 @@ function renderWhiteboard(doc, host){
     const pointerId=e.pointerId;
     const move = (ev) => {
       if (ev.pointerId !== pointerId) return;
-      view.x=originX+ev.clientX-startX; view.y=originY+ev.clientY-startY; clampView(); redraw();
+      view.x=originX+ev.clientX-startX; view.y=originY+ev.clientY-startY; clampView(); paint();   // 화면만 움직인다 — 도구막대 값은 그대로
     };
     const up = (ev) => {
       if (ev.pointerId !== pointerId) return;
@@ -1435,7 +1448,9 @@ function renderWhiteboard(doc, host){
         if (handle.hy === 0){ const ny = Math.min(q.y, o.bottom - 16); live.y = ny; live.h = o.bottom - ny; }
         else if (handle.hy === 1){ live.y = o.top; live.h = Math.max(16, q.y - o.top); }
       }
-      redraw();
+      // 옮기기는 크기·종류가 그대로라 도구막대가 바뀔 일이 없다.
+      // 크기조절은 다르다 — 수식·도형의 '크기 %' 입력이 끄는 동안 같이 움직여야 해서 전부 맞춘다.
+      if (mode === "move") paint(); else redraw();
     };
     const up = () => {
       canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
@@ -1576,7 +1591,7 @@ function renderWhiteboard(doc, host){
         gear.compass.to = gear.compass.from + sweep;
         showMeasure(`반지름 ${formatCm(gear.compass.radius)} · ${Math.round(Math.abs(sweep) * 180 / Math.PI)}°`, screen);
       }
-      redraw();
+      paint();                                        // 교구는 판서가 아니라 손에 든 도구 — 도구막대와 무관하다
     };
     const up = () => {
       canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
@@ -1919,7 +1934,7 @@ function renderWhiteboard(doc, host){
       lastPt = p;
     } else {
       const p = (cur.type === "line" || cur.type === "arrow") ? gearSnapEnd({ x:cur.x1, y:cur.y1 }, raw, e) : gearSnapPoint(raw);
-      cur.x2 = p.x; cur.y2 = p.y; redraw(); drawItem(cur);
+      cur.x2 = p.x; cur.y2 = p.y; paint(); drawItem(cur);   // 그리는 중 — 선택도 도구도 그대로다
       measureDrawing(cur, screenPoint(e));
     }
   });
