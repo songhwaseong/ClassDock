@@ -12,6 +12,9 @@
   const WORKSPACE_FOLDER_MARKER = ".classdock-folder-keep-9f4d2a7b";
   const WORKSPACE_IMAGE_SKIP_MARKER = ".classdock-images-skipped-4e72c1b9";
   const WORKSPACE_ORIGINAL_SAVE_MARKER = ".classdock-original-save-6c87f41e";
+  // 원본 폴더가 너무 커서 파일 내용은 담지 않고 폴더 위치만 기억했다는 표식.
+  // 다음 실행에서 폴더 핸들로 디스크를 다시 읽으므로 내용이 사라지는 것은 아니다.
+  const WORKSPACE_SOURCE_SKIP_MARKER = ".classdock-source-bytes-skipped-2b91d4e6";
   function workspaceFolderMarkerPath(value) {
     const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
     return path ? path + "/" + WORKSPACE_FOLDER_MARKER : "";
@@ -37,6 +40,15 @@
   function workspaceOriginalSaveFolderPath(value) {
     const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
     const suffix = "/" + WORKSPACE_ORIGINAL_SAVE_MARKER;
+    return path.endsWith(suffix) ? path.slice(0, -suffix.length) : "";
+  }
+  function workspaceSourceSkipMarkerPath(value) {
+    const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
+    return path ? path + "/" + WORKSPACE_SOURCE_SKIP_MARKER : "";
+  }
+  function workspaceSourceSkipFolderPath(value) {
+    const path = normalizeWorkspacePath(value).replace(/\/+$/, "");
+    const suffix = "/" + WORKSPACE_SOURCE_SKIP_MARKER;
     return path.endsWith(suffix) ? path.slice(0, -suffix.length) : "";
   }
 
@@ -4562,6 +4574,7 @@
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,
     workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
     workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
+    workspaceSourceSkipMarkerPath, workspaceSourceSkipFolderPath,
     transformEditorLines, transformSelectedTextCase, pythonCompletionCandidates, pythonMemberCompletionCandidates, completionWordsForProfile, completionWordPatternFor, htmlSelectorNames, cssDeclaredVariables, cssValueLooksLikeColor, cssCompletionContextAt, cssCompletionCandidates, cssCompletionOpensEmpty, cssPropertyValueWords, pythonImportCompletionCandidates, pythonWorkspaceImportCompletionCandidates, pythonWorkspaceModuleIndex, pythonWorkspaceImportRowsFromIndex, pythonWorkspaceModuleRowsFromIndex, pythonModuleBindings, pythonImportStatements, pythonWorkspaceImportAnalysis, pythonWorkspaceImportProblems, pythonImportCheckTargets, pythonJediImportProblems, pythonImportContextAt, pythonCompletionInferenceSource, normalizeIdentifierSelection, pythonBracketContentSelection, findNextIdentifierOccurrence, identifierOccurrences,
     diffTextEdit, remapTextRangesAfterEdit, editorHistoryCaretState, applyLinkedIdentifierEdit, pythonLineOpensBlock, lightReindentPython, pythonOpenClosePlan, completionReplacementRange, completionInsertionPlan, completionApplicationPlan, closingBracketTabPlan,
     lineNumberAtOffset, lineStartOffset, findPythonLocalDefinition, resolvePythonImportedDefinition, parsePythonTracebackLocations, parsePythonTracebackLocation, classifyPythonStderr, pythonStderrDisplayKind, pythonStderrShouldBuffer, explainPythonError, contentMatchSnippet,

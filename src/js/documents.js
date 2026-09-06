@@ -1302,6 +1302,7 @@ function markDocumentDirty(doc, dirty=true){
   const next = !!dirty;
   if (doc.hasUnsavedEdits === next) return;
   doc.hasUnsavedEdits = next;
+  if (!next) doc.workspaceRecovery = false;   // 디스크에 저장됐으니 폴더 동기화가 다시 읽어도 된다
   if (doc.id === activeId) updateDocumentStatus(doc);
   if (typeof renderSidebar === "function") renderSidebar();
   if (typeof renderTabs === "function") renderTabs();   // 탭의 점(●) 표시도 함께 켜고 끈다
@@ -3714,13 +3715,14 @@ function renderSidebar(){
     // 디스크와 트리가 어긋난 게 확실한 루트에만 동기화 버튼을 단다 — 대량 사진이 자동 복원에서
     // 빠졌거나, 코드 실행이 이 폴더 안에 파일을 만들었을 때. 버튼을 눌러야만 디스크를 다시 읽는다.
     if (node.type === "group" && node.folderRefreshRootId === node.nodeId &&
-        (node.restorePendingImages || node.runOutputsPending)){
+        (node.restorePendingImages || node.restorePendingSource || node.runOutputsPending)){
       label.classList.add("has-image-restore");
       const restore = document.createElement("button");
       const translate = (text) => (typeof window.t === "function" ? window.t(text) : text);
       restore.className = "sb-image-restore"; restore.type = "button"; restore.innerHTML = window.uiIcon("refresh");
       const reasons = [];
       if (node.restorePendingImages) reasons.push("용량이 커서 자동 복원에서 빠진 사진");
+      if (node.restorePendingSource) reasons.push("용량이 커서 폴더 위치만 기억한 파일");
       if (node.runOutputsPending) reasons.push("코드 실행이 만든 파일");
       restore.title = translate(reasons.join("과 ") + "을 디스크에서 다시 불러옵니다.");
       restore.setAttribute("aria-label", translate("폴더 동기화"));

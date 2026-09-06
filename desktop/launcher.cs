@@ -222,13 +222,11 @@ class ClassDockLauncher
     static string SourceFolderPickerId = "";
     // 오프라인 실행용으로 번들된 Pyodide 코어 폴더(exe 옆 vendor/pyodide/). tools/download-pyodide.js 로 채운다.
     static readonly string PyodideDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "vendor", "pyodide");
-    const int WorkspaceMaxBytes = 500 * 1024 * 1024;
-
-    class WorkspaceFile
-    {
-        public string Path;
-        public byte[] Data;
-    }
+    // 브라우저의 WORKSPACE_CAP(state.js)과 반드시 같은 값이어야 한다. 저장은 병합(replace=0)이라
+    // 한 번의 요청이 작아도 누적 파일은 커질 수 있는데, 복원 쪽이 이 상한을 넘는 기록은 통째로
+    // 지워 버리기 때문이다. 여기서 막으면 저장 시점에 "너무 큼" 안내가 뜬다.
+    // 이 크기를 감당할 수 있는 것은 병합·삭제가 RewriteWorkspace 로 흘려 쓰기 때문이다.
+    const int WorkspaceMaxBytes = 512 * 1024 * 1024;
 
     // 학생 코드의 무한 print가 서버 메모리와 폴링 응답을 계속 키우지 않도록 앞 4MB까지만 보관한다.
     // 진단·채점·단계 실행은 stdout 끝의 전용 마커 뒤 JSON을 사용하므로 그 구간만 별도 6MB까지 보존한다.
@@ -4969,14 +4967,23 @@ class ClassDockLauncher
     }
 
     // ===== 최근 작업공간 — 사용자가 고른 원본 파일과 상대경로를 앱 전용 저장소에 보관 =====
-    static List<WorkspaceFile> ParseWorkspace(byte[] body)
+    // 저장 본문 안의 레코드 위치 — 파일 데이터는 복사하지 않고 경로와 구간만 기억해 둔다.
+    class WorkspaceBodyRecord
     {
-        if (body == null || body.Length == 0) return new List<WorkspaceFile>();
+        public string Path;
+        public int Offset;      // body 안에서 이 파일의 데이터가 시작하는 위치
+        public int Length;
+    }
+
+    // 본문을 끝까지 검증하면서 레코드 목록만 만든다(데이터 복사 없음).
+    static List<WorkspaceBodyRecord> IndexWorkspaceBody(byte[] body)
+    {
+        List<WorkspaceBodyRecord> records = new List<WorkspaceBodyRecord>();
+        if (body == null || body.Length == 0) return records;
         if (body.Length > WorkspaceMaxBytes) throw new Exception("workspace-too-large");
         int pos = 0;
         int count = ReadBundleInt(body, ref pos);
         if (count < 0 || count > 10000) throw new Exception("bad-workspace");
-        List<WorkspaceFile> files = new List<WorkspaceFile>(count);
         for (int i = 0; i < count; i++)
         {
             string rel = ReadBundleString(body, ref pos);
@@ -4984,32 +4991,154 @@ class ClassDockLauncher
             if (len < 0 || pos + len > body.Length) throw new Exception("bad-workspace");
             string safe = SafeRelPath(rel);
             if (safe == null) throw new Exception("bad-workspace-path");
-            byte[] data = new byte[len];
-            Buffer.BlockCopy(body, pos, data, 0, len);
+            WorkspaceBodyRecord record = new WorkspaceBodyRecord();
+            record.Path = safe.Replace('\\', '/');
+            record.Offset = pos;
+            record.Length = len;
+            records.Add(record);
             pos += len;
-            files.Add(new WorkspaceFile { Path = safe.Replace('\\', '/'), Data = data });
         }
         if (pos != body.Length) throw new Exception("bad-workspace");
-        return files;
+        return records;
     }
 
-    static byte[] SerializeWorkspace(IEnumerable<WorkspaceFile> files)
+    // 같은 경로가 두 번 오면 마지막 것이 이긴다(예전 Dictionary 병합과 같은 규칙).
+    static List<WorkspaceBodyRecord> DedupeWorkspaceRecords(List<WorkspaceBodyRecord> records)
     {
-        List<WorkspaceFile> list = new List<WorkspaceFile>(files);
-        using (MemoryStream ms = new MemoryStream())
-        using (BinaryWriter bw = new BinaryWriter(ms, new UTF8Encoding(false)))
+        Dictionary<string, WorkspaceBodyRecord> byPath = new Dictionary<string, WorkspaceBodyRecord>(StringComparer.OrdinalIgnoreCase);
+        List<string> order = new List<string>();
+        foreach (WorkspaceBodyRecord record in records)
         {
-            bw.Write(list.Count);
-            foreach (WorkspaceFile file in list)
-            {
-                byte[] path = Encoding.UTF8.GetBytes(file.Path);
-                bw.Write(path.Length); bw.Write(path);
-                bw.Write(file.Data.Length); bw.Write(file.Data);
-                if (ms.Length > WorkspaceMaxBytes) throw new Exception("workspace-too-large");
-            }
-            bw.Flush();
-            return ms.ToArray();
+            if (!byPath.ContainsKey(record.Path)) order.Add(record.Path);
+            byPath[record.Path] = record;
         }
+        List<WorkspaceBodyRecord> unique = new List<WorkspaceBodyRecord>(order.Count);
+        foreach (string path in order) unique.Add(byPath[path]);
+        return unique;
+    }
+
+    static void WriteWorkspaceInt(Stream stream, int value)
+    {
+        stream.WriteByte((byte)(value & 0xFF));
+        stream.WriteByte((byte)((value >> 8) & 0xFF));
+        stream.WriteByte((byte)((value >> 16) & 0xFF));
+        stream.WriteByte((byte)((value >> 24) & 0xFF));
+    }
+
+    static int ReadWorkspaceInt(Stream stream)
+    {
+        int b0 = stream.ReadByte(), b1 = stream.ReadByte(), b2 = stream.ReadByte(), b3 = stream.ReadByte();
+        if ((b0 | b1 | b2 | b3) < 0) throw new Exception("bad-workspace");
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    static byte[] ReadWorkspaceExact(Stream stream, int length)
+    {
+        byte[] buffer = new byte[length];
+        int read = 0;
+        while (read < length)
+        {
+            int n = stream.Read(buffer, read, length - read);
+            if (n <= 0) throw new Exception("bad-workspace");
+            read += n;
+        }
+        return buffer;
+    }
+
+    static void CopyWorkspaceBytes(Stream from, Stream to, int length, byte[] buffer)
+    {
+        int left = length;
+        while (left > 0)
+        {
+            int want = left < buffer.Length ? left : buffer.Length;
+            int n = from.Read(buffer, 0, want);
+            if (n <= 0) throw new Exception("bad-workspace");
+            to.Write(buffer, 0, n);
+            left -= n;
+        }
+    }
+
+    // 기존 workspace.bin 을 레코드 단위로 흘려 읽어 임시 파일에 다시 쓴다.
+    // drop 에 있는 경로는 건너뛰고, appendRecords 가 있으면(병합 저장) 그 뒤에 이어 붙인다.
+    // 예전 방식(전체 읽기 → 항목별 파싱 → 직렬화 → ToArray)은 최종 크기의 4~5배를 한꺼번에
+    // 잡아서 상한을 올릴 수 없었다. 여기서는 1MB 버퍼만 쓰므로 파일 크기와 무관하다.
+    static int RewriteWorkspace(bool keepExisting, HashSet<string> drop, byte[] appendBody, List<WorkspaceBodyRecord> appendRecords)
+    {
+        string dir = Path.GetDirectoryName(WorkspacePath);
+        Directory.CreateDirectory(dir);
+        string temp = WorkspacePath + ".tmp";
+        int count = 0;
+        long total = 4;
+        try
+        {
+            using (FileStream outStream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
+            {
+                WriteWorkspaceInt(outStream, 0);          // 개수는 다 쓴 뒤 되돌아와 채운다
+                byte[] buffer = new byte[1 << 20];
+                if (keepExisting && File.Exists(WorkspacePath))
+                {
+                    using (FileStream inStream = new FileStream(WorkspacePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16))
+                    {
+                        int oldCount = ReadWorkspaceInt(inStream);
+                        if (oldCount < 0 || oldCount > 10000) throw new Exception("bad-workspace");
+                        for (int i = 0; i < oldCount; i++)
+                        {
+                            int pathLength = ReadWorkspaceInt(inStream);
+                            if (pathLength < 0 || pathLength > 65535) throw new Exception("bad-workspace");
+                            byte[] pathBytes = ReadWorkspaceExact(inStream, pathLength);
+                            int dataLength = ReadWorkspaceInt(inStream);
+                            if (dataLength < 0) throw new Exception("bad-workspace");
+                            string path = Encoding.UTF8.GetString(pathBytes).Replace('\\', '/');
+                            if (drop != null && drop.Contains(path))
+                            {
+                                inStream.Seek(dataLength, SeekOrigin.Current);
+                                continue;
+                            }
+                            count++;
+                            total += 8 + pathLength + dataLength;
+                            if (count > 10000) throw new Exception("bad-workspace");
+                            if (total > WorkspaceMaxBytes) throw new Exception("workspace-too-large");
+                            WriteWorkspaceInt(outStream, pathLength);
+                            outStream.Write(pathBytes, 0, pathLength);
+                            WriteWorkspaceInt(outStream, dataLength);
+                            CopyWorkspaceBytes(inStream, outStream, dataLength, buffer);
+                        }
+                    }
+                }
+                if (appendRecords != null)
+                {
+                    foreach (WorkspaceBodyRecord record in appendRecords)
+                    {
+                        byte[] pathBytes = Encoding.UTF8.GetBytes(record.Path);
+                        count++;
+                        total += 8 + pathBytes.Length + record.Length;
+                        if (count > 10000) throw new Exception("bad-workspace");
+                        if (total > WorkspaceMaxBytes) throw new Exception("workspace-too-large");
+                        WriteWorkspaceInt(outStream, pathBytes.Length);
+                        outStream.Write(pathBytes, 0, pathBytes.Length);
+                        WriteWorkspaceInt(outStream, record.Length);
+                        outStream.Write(appendBody, record.Offset, record.Length);
+                    }
+                }
+                outStream.Flush();
+                outStream.Seek(0, SeekOrigin.Begin);
+                WriteWorkspaceInt(outStream, count);
+            }
+        }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            throw;
+        }
+        if (count == 0)      // 남은 항목이 없으면 빈 묶음을 남기지 않는다(닫은 파일 정리와 같은 규칙)
+        {
+            try { File.Delete(temp); } catch { }
+            try { if (File.Exists(WorkspacePath)) File.Delete(WorkspacePath); } catch { }
+            return 0;
+        }
+        if (File.Exists(WorkspacePath)) File.Delete(WorkspacePath);
+        File.Move(temp, WorkspacePath);
+        return count;
     }
 
     // 교체 저장은 브라우저가 보낸 작업공간 바이너리 자체가 최종 저장 형식과 같다.
@@ -5055,7 +5184,7 @@ class ClassDockLauncher
     {
         int directCount = 0;
         bool direct = replace && CanSaveWorkspaceDirectly(body, out directCount);
-        List<WorkspaceFile> incoming = direct ? null : ParseWorkspace(body);
+        List<WorkspaceBodyRecord> incoming = direct ? null : DedupeWorkspaceRecords(IndexWorkspaceBody(body));
         lock (WorkspaceLock)
         {
             if (direct)
@@ -5063,15 +5192,11 @@ class ClassDockLauncher
                 WriteWorkspaceAtomically(body);
                 return directCount;
             }
-            Dictionary<string, WorkspaceFile> merged = new Dictionary<string, WorkspaceFile>(StringComparer.OrdinalIgnoreCase);
-            if (!replace && File.Exists(WorkspacePath))
-            {
-                foreach (WorkspaceFile file in ParseWorkspace(File.ReadAllBytes(WorkspacePath))) merged[file.Path] = file;
-            }
-            foreach (WorkspaceFile file in incoming) merged[file.Path] = file;
-            byte[] saved = SerializeWorkspace(merged.Values);
-            WriteWorkspaceAtomically(saved);
-            return merged.Count;
+            // 병합 저장은 같은 경로의 예전 내용만 걷어내고 나머지는 그대로 흘려 보낸다.
+            // 교체 저장인데 직접 쓰기 조건(중복·비정규 경로)에 안 맞으면 기존 내용은 버린다.
+            HashSet<string> drop = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (WorkspaceBodyRecord record in incoming) drop.Add(record.Path);
+            return RewriteWorkspace(!replace, drop, body, incoming);
         }
     }
 
@@ -5108,19 +5233,7 @@ class ClassDockLauncher
         lock (WorkspaceLock)
         {
             if (!File.Exists(WorkspacePath)) return 0;
-            List<WorkspaceFile> kept = ParseWorkspace(File.ReadAllBytes(WorkspacePath));
-            kept.RemoveAll(delegate(WorkspaceFile file) { return remove.Contains(file.Path); });
-            if (kept.Count == 0)
-            {
-                try { File.Delete(WorkspacePath); } catch { }
-                return 0;
-            }
-            byte[] saved = SerializeWorkspace(kept);
-            string temp = WorkspacePath + ".tmp";
-            File.WriteAllBytes(temp, saved);
-            File.Delete(WorkspacePath);
-            File.Move(temp, WorkspacePath);
-            return kept.Count;
+            return RewriteWorkspace(true, remove, null, null);
         }
     }
 

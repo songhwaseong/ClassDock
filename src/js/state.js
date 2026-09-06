@@ -13,7 +13,7 @@ const {
   normalizeShortcut, shortcutFromEventLike, shortcutMatchesEvent, documentEdgeShortcutCommand, pythonOutputShortcutCommand, normalizePythonVariables,
   normalizeAssignmentTests, normalizeGradingOutput, assignmentGradingErrorText, normalizePythonDiagnostics, normalizePythonUnusedRanges, normalizePythonTraceReport,
   prettyPrintJsonText, jsonTreeNodeInfo, orderHwpxSections, workspaceFolderMarkerPath, workspaceFolderPathFromMarker, workspaceImageSkipMarkerPath, workspaceImageSkipFolderPath,
-  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath,
+  workspaceOriginalSaveMarkerPath, workspaceOriginalSaveFolderPath, workspaceSourceSkipMarkerPath, workspaceSourceSkipFolderPath,
   studyPaneSelectionAction, studyReadonlyPointerAllowed, studyReadonlyKeyAllowed, studySplitEndKeepId,
   splitDropRoleForSide, splitDropSideAtPoint, tabDropSplitAction, dataTransferHasFileItems, captureDroppedFileItems, topLevelDroppedEntries, topLevelDroppedHandles,
   INTERNAL_DRAG_MIME, isInternalDragTransfer, droppedTransferNeedsFolderPicker
@@ -65,7 +65,7 @@ let lastSig = null;      // 최근 서명(문서 공통, 재사용)
 let fileQueue = Promise.resolve();
 // 자동 복원 직렬화는 브라우저와 로컬 서버에 복사본을 만들므로 보수적으로 제한한다.
 // 원본 파일을 여는 크기에는 영향을 주지 않는다.
-const WORKSPACE_CAP = 256 * 1024 * 1024;
+const WORKSPACE_CAP = 512 * 1024 * 1024;   // 런처 launcher.cs WorkspaceMaxBytes 와 같은 값이어야 한다
 const SHORTCUT_DEFINITIONS = Object.freeze([
   { id:"commandPalette", label:"명령 팔레트", description:"기능을 검색해 바로 실행하는 창 열기", defaultValue:"Ctrl+K" },
   { id:"openFiles", label:"파일 열기", description:"파일 선택 창 열기", defaultValue:"Ctrl+O" },

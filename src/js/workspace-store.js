@@ -202,7 +202,7 @@ async function flushWorkspaceRemovals(){
   }
 }
 
-async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPaths=[], originalSaveFolderPaths=[]){
+async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPaths=[], originalSaveFolderPaths=[], sourceSkipFolderPaths=[]){
   const enc = new TextEncoder(), rows = [];
   let total = 4;
   for (const file of [...files]){
@@ -246,6 +246,17 @@ async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPa
     if (total > WORKSPACE_CAP) throw new Error("workspace-too-large");
     rows.push({ file:null, pathBytes, size:0 });
   }
+  const seenSourceSkipFolders = new Set();
+  for (const value of sourceSkipFolderPaths || []){
+    const folder = normalizedRunPath(value).replace(/\/+$/, "");
+    if (!folder || seenSourceSkipFolders.has(folder)) continue;
+    seenSourceSkipFolders.add(folder);
+    const marker = workspaceSourceSkipMarkerPath(folder);
+    const pathBytes = enc.encode(marker);
+    total += 8 + pathBytes.length;
+    if (total > WORKSPACE_CAP) throw new Error("workspace-too-large");
+    rows.push({ file:null, pathBytes, size:0 });
+  }
   if (rows.length > 10000) throw new Error("workspace-too-many");
   const out = new Uint8Array(total), view = new DataView(out.buffer);
   let pos = 0; view.setUint32(pos, rows.length, true); pos += 4;
@@ -272,6 +283,22 @@ async function buildWorkspacePayload(files, folderPaths=[], pendingImageFolderPa
 // 복원 후 '폴더 새로고침' 한 번(권한 1클릭)이면 디스크에서 그대로 다시 불러온다.
 const WS_IMAGE_SKIP_COUNT = 200;
 const WS_IMAGE_SKIP_BYTES = 48 * 1024 * 1024;
+// 원본 저장 폴더(디스크 원본과 이어진 폴더)가 이 크기를 넘으면 파일 내용은 자동 복원 묶음에 담지 않는다.
+// 다음 실행에서 폴더 핸들로 디스크를 그대로 다시 읽으므로 내용이 사라지지 않고,
+// 폴더 하나가 WORKSPACE_CAP 을 밀어 올려 자동 복원 기록 전체가 버려지는 것도 막는다.
+const WS_SOURCE_SKIP_BYTES = 64 * 1024 * 1024;
+
+// 저장하지 않은 편집본은 디스크에 없다 — 폴더를 다시 읽어도 살아나지 않으므로 바이트를 남겨야 한다.
+function unsavedWorkspacePaths(){
+  const out = new Set();
+  if (typeof docs === "undefined" || !Array.isArray(docs)) return out;
+  docs.forEach(doc => {
+    if (!doc || (!doc.hasUnsavedEdits && !doc.workspaceRecovery && !doc.isScratch)) return;
+    const path = normalizedRunPath(doc.workspacePath || doc.relPath || doc.name || "");
+    if (path) out.add(path);
+  });
+  return out;
+}
 function isBulkSkippedImageName(name){
   const ext = String(name || "").toLowerCase().split(".").pop() || "";
   return typeof IMG_EXTS !== "undefined" && IMG_EXTS.includes(ext);
@@ -297,7 +324,7 @@ async function rememberWorkspace(files, replace, options={}){
   // 영상·오디오 원본은 자동 복원 묶음에서 제외 — 수백 MB 파일 하나가 전체 저장(256MB 제한)을 막지 않게.
   // 다음 실행에 자동 복원되지 않을 뿐, 폴더 열기나 드래그로 다시 열면 된다.
   const selection = selectWorkspaceBackupFiles(files);
-  const rows = selection.rows;
+  let rows = selection.rows;
   const imageRows = selection.imageRows;
   let skippedImages = 0;
   let skippedImagePaths = [];
@@ -314,14 +341,46 @@ async function rememberWorkspace(files, replace, options={}){
   const originalSaveFolderPaths = [...new Set((options.originalSaveFolderPaths || [])
     .map(path => normalizedRunPath(path).replace(/\/+$/, ""))
     .filter(path => path && folderRoots.has(path.split("/")[0])))];
+  const originalSaveRoots = new Set(originalSaveFolderPaths.map(path => path.split("/")[0]));
+  // 큰 원본 폴더는 파일 내용 대신 폴더 위치만 기억한다(WS_SOURCE_SKIP_BYTES 참고).
+  // 다음 실행에서 권한창 없이 디스크를 다시 읽을 수 있을 때만 — 즉 런처가 실제 경로를 아는
+  // EXE 에서만 — 뺀다. 브라우저 폴더 핸들은 시작할 때 권한을 물을 수 없어 트리가 비어 버린다.
+  const canRereadFromDisk = typeof nativeSourceSupported === "function"
+    ? await nativeSourceSupported().catch(() => false)
+    : false;
+  const dirtyWorkspacePaths = unsavedWorkspacePaths();
+  const sourceSkipRoots = new Set();
+  if (canRereadFromDisk && originalSaveRoots.size){
+    const bytesByRoot = new Map();
+    rows.forEach(file => {
+      const root = normalizedRunPath(file && (file.webkitRelativePath || file.name)).split("/")[0];
+      if (!root || !originalSaveRoots.has(root)) return;
+      bytesByRoot.set(root, (bytesByRoot.get(root) || 0) + (Number(file && file.size) || 0));
+    });
+    bytesByRoot.forEach((bytes, root) => { if (bytes > WS_SOURCE_SKIP_BYTES) sourceSkipRoots.add(root); });
+  }
+  let skippedSourcePaths = [];
+  if (sourceSkipRoots.size){
+    const keep = [];
+    rows.forEach(file => {
+      const path = normalizedRunPath(file && (file.webkitRelativePath || file.name));
+      if (!path || !sourceSkipRoots.has(path.split("/")[0]) || dirtyWorkspacePaths.has(path)) keep.push(file);
+      else skippedSourcePaths.push(path);   // 예전 저장에 남아 있던 바이트도 함께 지운다(merge 저장이므로)
+    });
+    rows = keep;
+  }
+  const sourceSkipFolderPaths = [...sourceSkipRoots];
   const pendingImageFolderPaths = [...new Set(skippedImagePaths
     .map(path => normalizedRunPath(path).split("/")[0])
-    .filter(path => path && folderRoots.has(path)))];
+    .filter(path => path && folderRoots.has(path) && !sourceSkipRoots.has(path)))];
   const staleImageMarkerPaths = [...folderRoots]
     .filter(path => !pendingImageFolderPaths.includes(path))
     .map(workspaceImageSkipMarkerPath)
     .filter(Boolean);
-  const originalSaveRoots = new Set(originalSaveFolderPaths.map(path => path.split("/")[0]));
+  const staleSourceSkipMarkerPaths = [...folderRoots]
+    .filter(path => !sourceSkipRoots.has(path))
+    .map(workspaceSourceSkipMarkerPath)
+    .filter(Boolean);
   const staleOriginalSaveMarkerPaths = [...folderRoots]
     .filter(path => !originalSaveRoots.has(path))
     .map(workspaceOriginalSaveMarkerPath)
@@ -330,11 +389,17 @@ async function rememberWorkspace(files, replace, options={}){
     if (!skippedImages) return;
     toast("사진 " + skippedImages.toLocaleString() + "장은 용량이 커서 자동 복원 저장에서 제외했어요. 다음 실행 때는 '동기화'로 다시 불러올 수 있어요.", 4200);
   };
+  const notifySkippedSource = () => {
+    if (!sourceSkipFolderPaths.length) return;
+    toast("'" + sourceSkipFolderPaths.join("', '") + "' 폴더는 용량이 커서 파일 내용 대신 폴더 위치만 기억해요. 다음 실행 때 디스크에서 그대로 다시 읽어요.", 5000);
+  };
   if (!rows.length && !folderPaths.length){
     // 파일 선택으로 연 사진만 있는 경우에는 새 작업공간 본문을 만들지 않는다.
     // 그래도 과거 자동 복원 기록에 같은 사진이 남아 있으면 다음 실행이 다시 느려지므로 정리한다.
     if (skippedImagePaths.length) forgetWorkspacePaths(skippedImagePaths);
+    if (skippedSourcePaths.length) forgetWorkspacePaths(skippedSourcePaths);
     notifySkippedImages();
+    notifySkippedSource();
     return false;
   }
   const silent = !!options.silent;
@@ -353,7 +418,7 @@ async function rememberWorkspace(files, replace, options={}){
     await flushWorkspaceRemovals();
     if (silent) setWorkspaceActivity("작업공간 저장 중…");
     else updateLoading("다음 실행을 위해 작업공간 기억하는 중…");
-    const body = await buildWorkspacePayload(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths);
+    const body = await buildWorkspacePayload(rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths, sourceSkipFolderPaths);
     if (useServer){
       const res = await queueWorkspaceMutation(() => workspaceFetch("/workspace-save?replace=" + (replace ? "1" : "0"), {
         method: "POST", headers: { "Content-Type": "application/octet-stream", "X-ClassDock-Workspace": "1" }, body
@@ -371,9 +436,12 @@ async function rememberWorkspace(files, replace, options={}){
     // 이전 버전에서 자동 복원 묶음에 들어간 사진은 이번 저장에서 빠졌다고 해서
     // merge 저장만으로 사라지지 않는다. 성공적으로 폴더 표식을 저장한 뒤 경로별로 정리한다.
     if (skippedImagePaths.length) forgetWorkspacePaths(skippedImagePaths);
+    if (skippedSourcePaths.length) forgetWorkspacePaths(skippedSourcePaths);
     if (staleImageMarkerPaths.length) forgetWorkspacePaths(staleImageMarkerPaths);
+    if (staleSourceSkipMarkerPaths.length) forgetWorkspacePaths(staleSourceSkipMarkerPaths);
     if (staleOriginalSaveMarkerPaths.length) forgetWorkspacePaths(staleOriginalSaveMarkerPaths);
     notifySkippedImages();
+    notifySkippedSource();
     return true;
   } catch(e){
     const msg = String(e && e.message || e);
@@ -412,10 +480,15 @@ async function parseWorkspacePayload(buffer){
   const originalSaveFolderPaths = [...new Set(decoded
     .map(row => workspaceOriginalSaveFolderPath(row.path))
     .filter(Boolean))];
+  const sourceSkipFolderPaths = [...new Set(decoded
+    .map(row => workspaceSourceSkipFolderPath(row.path))
+    .filter(Boolean))];
   pendingImageFolderPaths.forEach(path => { if (!folderPaths.includes(path)) folderPaths.push(path); });
   originalSaveFolderPaths.forEach(path => { if (!folderPaths.includes(path)) folderPaths.push(path); });
+  sourceSkipFolderPaths.forEach(path => { if (!folderPaths.includes(path)) folderPaths.push(path); });
   const fileRows = decoded.filter(row => !workspaceFolderPathFromMarker(row.path) &&
-    !workspaceImageSkipFolderPath(row.path) && !workspaceOriginalSaveFolderPath(row.path));
+    !workspaceImageSkipFolderPath(row.path) && !workspaceOriginalSaveFolderPath(row.path)
+    && !workspaceSourceSkipFolderPath(row.path));
   // 저장 폴더의 최신 파일 확인은 결과 순서를 유지한 채 제한적으로 병렬화한다.
   const rows = await mapWithConcurrency(fileRows, 6, async (row) => {
     const diskBytes = await readRestoredLocalFile(row.path);
@@ -428,7 +501,7 @@ async function parseWorkspacePayload(buffer){
       Object.defineProperty(file, "__sqliteDiskPath", { value:path });
     return { path, file, syncedFromDisk: !!diskBytes };
   });
-  return { rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths };
+  return { rows, folderPaths, pendingImageFolderPaths, originalSaveFolderPaths, sourceSkipFolderPaths };
 }
 
 async function restoreLastWorkspace(force=false){
@@ -475,20 +548,28 @@ async function restoreLastWorkspace(force=false){
     const restoredFolderPaths = restored.folderPaths;
     const restoredPendingImageFolderPaths = restored.pendingImageFolderPaths;
     const restoredOriginalSaveFolderPaths = restored.originalSaveFolderPaths;
+    const restoredSourceSkipFolderPaths = restored.sourceSkipFolderPaths || [];
     if (!rows.length && !restoredFolderPaths.length) return result;
     updateLoading("최근 작업공간 복원 중…");
     beginUiBatch();
     const folderGroups = new Map(), loose = [];
     const ensureFolderGroup = (root) => {
       if (!folderGroups.has(root)) folderGroups.set(root, {
-        rootName:root, files:[], folderPaths:[], pendingImageFolderPaths:[], originalSaveMode:false
+        rootName:root, files:[], folderPaths:[], pendingImageFolderPaths:[], sourceSkipFolderPaths:[],
+        originalSaveMode:false
       });
       return folderGroups.get(root);
     };
+    const sourceSkipRootSet = new Set(restoredSourceSkipFolderPaths.map(path => path.split("/")[0]));
     rows.forEach(row => {
       if (row.path.indexOf("/") < 0) loose.push(row.file);
       else {
         const root = row.path.split("/")[0];
+        // 파일 내용을 안 담은 폴더인데 바이트가 남아 있다면 그것은 저장하지 않은 편집본이다.
+        // 곧이어 디스크를 다시 읽을 때 이 문서만은 덮어쓰지 않도록 표시해 둔다.
+        if (sourceSkipRootSet.has(root) && !row.syncedFromDisk){
+          try { Object.defineProperty(row.file, "__workspaceRecovery", { value:true }); } catch(_){}
+        }
         ensureFolderGroup(root).files.push(row.file);
       }
     });
@@ -503,6 +584,10 @@ async function restoreLastWorkspace(force=false){
     restoredOriginalSaveFolderPaths.forEach(path => {
       const root = path.split("/")[0];
       if (root) ensureFolderGroup(root).originalSaveMode = true;
+    });
+    restoredSourceSkipFolderPaths.forEach(path => {
+      const root = path.split("/")[0];
+      if (root) ensureFolderGroup(root).sourceSkipFolderPaths.push(path);
     });
     for (const group of folderGroups.values()){
       const preferNativeHandle = !!(group.originalSaveMode && typeof nativeSourceSupported === "function"
@@ -521,12 +606,42 @@ async function restoreLastWorkspace(force=false){
       const restoreOriginalSaveMode = !!(group.originalSaveMode && (restoredHandle || preferNativeHandle));
       // 대량 이미지가 자동 복원 저장에서 제외된 폴더는 빈 트리만 먼저 복원한다.
       // 사용자가 그 루트 폴더를 클릭하면 저장해 둔 폴더 핸들로 실제 파일을 다시 읽는다.
+      // 파일 내용 대신 위치만 기억한 원본 폴더는 여기서 디스크를 읽어 채운다.
+      // 문서가 만들어진 다음이라야 아래 applyTabState 가 지난번 탭을 그대로 되살린다
+      // (나중에 따로 동기화하면 탭 구성이 이미 지나가 버려 복원되지 않는다).
+      let groupFiles = group.files;
+      let groupFolderPaths = group.folderPaths;
+      let groupSourceSkipFolderPaths = group.sourceSkipFolderPaths;
+      if (groupSourceSkipFolderPaths.length && restoredHandle
+          && typeof collectDirectoryHandleFiles === "function"
+          && typeof folderHandleReadyForSilentRefresh === "function"
+          && await folderHandleReadyForSilentRefresh(restoredHandle)){
+        try {
+          const snapshot = await collectDirectoryHandleFiles(restoredHandle, {
+            onProgress:(progress) => updateLoading(folderScanLoadingText(progress))
+          });
+          // 작업공간에 바이트가 남아 있는 파일은 저장하지 않은 편집본이다 — 디스크본보다 우선한다.
+          const recovered = new Set(group.files.map(file =>
+            normalizedRunPath(file.webkitRelativePath || file.name)));
+          groupFiles = group.files.concat(snapshot.files.filter(file =>
+            !recovered.has(normalizedRunPath(file.webkitRelativePath || file.name))));
+          groupFiles.sort((a, b) => normalizedRunPath(a.webkitRelativePath || a.name)
+            .localeCompare(normalizedRunPath(b.webkitRelativePath || b.name)));
+          groupFolderPaths = [...new Set(group.folderPaths.concat(snapshot.folderPaths))];
+          groupSourceSkipFolderPaths = [];   // 다 채웠으니 '동기화' 배지는 달지 않는다
+          updateLoading("최근 작업공간 복원 중…");
+        } catch(error){
+          console.warn("원본 폴더를 디스크에서 읽지 못했어요:", error);
+        }
+      }
       if (restoredHandle){
-        await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+        await openFolderFiles(groupFiles, { folderPaths:groupFolderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+          sourceSkipFolderPaths:groupSourceSkipFolderPaths,
           originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true,
           folderHandle:restoredHandle, nativeRootPath:restoredHandle.nativePath });
       } else {
-        await openFolderFiles(group.files, { folderPaths:group.folderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+        await openFolderFiles(groupFiles, { folderPaths:groupFolderPaths, pendingImageFolderPaths:group.pendingImageFolderPaths,
+          sourceSkipFolderPaths:groupSourceSkipFolderPaths,
           originalSaveMode:restoreOriginalSaveMode, restoreFromWorkspace:true });
       }
     }

@@ -149,6 +149,8 @@ async function handleFiles(files, options={}){
       if (opened){
         // 폴더 새로고침의 변경 판별(경로+크기+수정시각)용 — 원본 파일 수정시각을 문서에 새겨 둔다.
         opened.__srcMtime = file.lastModified || 0;
+        // 디스크에 없는 편집본을 자동 복원 스냅샷으로 되살린 문서 — 폴더 동기화가 덮어쓰지 않게 표시한다.
+        if (file && file.__workspaceRecovery) opened.workspaceRecovery = true;
         // 닫은 탭 복원용: 최상위 실제 파일로 연 문서엔 원본 File과 열기 옵션을 보관해 둔다(아카이브 내부·임시 문서 제외).
         if (!opts.parentId && !opts.archiveCtx && !options.transient && file instanceof File){
           opened.__reopen = { file, name: opened.name,
@@ -1163,6 +1165,7 @@ async function openFolderFiles(fileList, options={}){
   const folderPaths = [...new Set((options.folderPaths || []).map(normalizedRunPath).filter(Boolean))]
     .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
   const pendingImageFolderPaths = [...new Set((options.pendingImageFolderPaths || []).map(normalizedRunPath).filter(Boolean))];
+  const sourceSkipFolderPaths = [...new Set((options.sourceSkipFolderPaths || []).map(normalizedRunPath).filter(Boolean))];
   if (!openable.length && !folderPaths.length){ toast("폴더 안에 열 수 있는 파일이나 폴더가 없어요.", 3000); return; }
 
   const rootName = ((openable[0] && openable[0].webkitRelativePath || folderPaths[0] || "").split("/")[0]) || "폴더";
@@ -1176,11 +1179,14 @@ async function openFolderFiles(fileList, options={}){
   // 대량 사진이 자동 복원에서 생략됐다는 표식이 있으면, 다른 문서가 함께 복원됐어도 실제 폴더를 다시 읽을 수 있게 한다.
   rootGroup.restorePendingImages = !!options.restoreFromWorkspace && pendingImageFolderPaths.some(path => path === rootName);
   rootGroup.imageSkipWorkspacePath = workspaceImageSkipMarkerPath(rootName);
+  // 용량이 커서 파일 내용 없이 폴더 위치만 기억한 원본 폴더 — 복원 직후 디스크에서 다시 읽어 채운다.
+  rootGroup.restorePendingSource = !!options.restoreFromWorkspace && sourceSkipFolderPaths.some(path => path === rootName);
   rootGroup.folderPaths = folderPaths.length ? folderPaths : [rootName];
   rootGroup.workspacePaths = [
     ...[...fileList].map(f => f.webkitRelativePath || (rootName + "/" + f.name)),
     ...rootGroup.folderPaths.map(workspaceFolderMarkerPath),
-    ...(rootGroup.originalSaveMode ? [workspaceOriginalSaveMarkerPath(rootName)] : [])
+    ...(rootGroup.originalSaveMode
+      ? [workspaceOriginalSaveMarkerPath(rootName), workspaceSourceSkipMarkerPath(rootName)] : [])
   ];
   const workspacePathsByFolder = indexWorkspacePathsByFolder(rootGroup.workspacePaths);
   // 폴더 전체(데이터 파일 포함, 숨김 경로 제외)를 옆 파일로 묶는다 — .py 실행 시 import/파일읽기 지원
@@ -1401,6 +1407,17 @@ async function createFolderOnDisk(node){
   return true;
 }
 
+// 권한창을 띄우지 않고 바로 다시 읽을 수 있는 폴더 핸들인지 — 시작 직후 자동 동기화에만 쓴다.
+async function folderHandleReadyForSilentRefresh(handle){
+  if (!handle || handle.kind !== "directory") return false;
+  if (handle.__classdockNativeHandle) return true;      // 런처가 실제 경로로 읽으므로 권한창이 없다
+  try {
+    return typeof handle.queryPermission === "function"
+      ? await handle.queryPermission({ mode:"read" }) === "granted"
+      : true;
+  } catch(_){ return false; }
+}
+
 async function requestFolderRefresh(rootId){
   const root = navNodes.find(node => node.nodeId === rootId && node.type === "group" && node.folderRefreshRootId === node.nodeId);
   if (!root) return;
@@ -1510,6 +1527,8 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     // 아직 저장하지 않은 새 문서(폴더 우클릭 '새로 만들기')는 디스크에 없는 게 정상이다.
     // 삭제된 파일로 오인해 닫으면 새 폴더를 만드는 것만으로 작성 중이던 내용이 사라진다.
     if (!file && doc.isScratch && !doc._named){ keptDocs.push(doc); continue; }
+    // 자동 복원 스냅샷으로 되살린 편집본은 디스크보다 새롭다 — 동기화가 디스크 내용으로 되돌리지 않는다.
+    if (doc.workspaceRecovery){ keptDocs.push(doc); nextByKey.delete(key); continue; }
     if (!file && unreadable(key)){ keptDocs.push(doc); continue; }
     const unchanged = !!file && doc.__srcMtime != null &&
       (Number(doc.size) || 0) === (Number(file.size) || 0) && doc.__srcMtime === (file.lastModified || 0);
@@ -1634,13 +1653,15 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     (root.folderHandle && root.folderHandle.__classdockNativeHandle && root.folderHandle.nativePath) || "");
   rememberFolderHandle(root, selectedRootName);
   root.restorePendingImages = false;
+  root.restorePendingSource = false;
   root.runOutputsPending = false;
   root.folderPaths = folderPaths.length ? folderPaths : [selectedRootName];
   root.workspacePaths = [
     ...files.map(f => f.webkitRelativePath || (selectedRootName + "/" + f.name)),
     ...retainedWorkspacePaths,              // 이번에 못 읽었을 뿐 이전 작업공간에 있던 파일·폴더 마커
     ...root.folderPaths.map(workspaceFolderMarkerPath),
-    ...(root.originalSaveMode ? [workspaceOriginalSaveMarkerPath(selectedRootName)] : [])
+    ...(root.originalSaveMode
+      ? [workspaceOriginalSaveMarkerPath(selectedRootName), workspaceSourceSkipMarkerPath(selectedRootName)] : [])
   ];
   const workspacePathsByFolder = indexWorkspacePathsByFolder(root.workspacePaths);
   root.newPythonContext = { parentId: root.nodeId, dir: selectedRootName, archiveCtx: folderCtx, label: selectedRootName };
@@ -1707,7 +1728,10 @@ async function refreshFolderGroup(rootId, fileList, options={}){
   const nextPathSet = new Set(files.map(file => normalizedRunPath(file.webkitRelativePath || (selectedRootName + "/" + file.name))));
   retainedWorkspacePaths.forEach(path => nextPathSet.add(path));
   folderPaths.forEach(path => nextPathSet.add(workspaceFolderMarkerPath(path)));
-  if (root.originalSaveMode) nextPathSet.add(workspaceOriginalSaveMarkerPath(selectedRootName));
+  if (root.originalSaveMode){
+    nextPathSet.add(workspaceOriginalSaveMarkerPath(selectedRootName));
+    nextPathSet.add(workspaceSourceSkipMarkerPath(selectedRootName));   // 표식 유지는 rememberWorkspace 가 정한다
+  }
   const deleted = oldPaths.filter(path => path && !nextPathSet.has(path));
   if (deleted.length) forgetWorkspacePaths(deleted);
   const changeSummary = [];
