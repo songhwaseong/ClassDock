@@ -133,16 +133,17 @@ function removeWorkspacePayloadPaths(previous, paths){
 }
 
 // 브라우저 저장: replace=0 이면 서버와 같은 병합 규칙(같은 경로는 새 내용 우선)을 적용한다.
+// 읽기 실패는 빈 저장소가 아니다. 저장·정리는 오류를 호출자에게 전달하고 기존 데이터를 보존한다.
 async function browserWorkspaceSave(body, replace){
   if (!replace){
-    const prev = await wsIdbGetPayload().catch(() => null);
+    const prev = await wsIdbGetPayload();
     if (prev && prev.length) body = mergeWorkspacePayloads(prev, body);
   }
   await wsIdbSetPayload(body);
 }
 async function browserWorkspaceRemove(paths, clearAll){
   if (clearAll){ await wsIdbClearPayload(); return; }
-  const prev = await wsIdbGetPayload().catch(() => null);
+  const prev = await wsIdbGetPayload();
   if (!prev || !prev.length) return;
   const next = removeWorkspacePayloadPaths(prev, paths);
   if (!next){ await wsIdbClearPayload(); return; }

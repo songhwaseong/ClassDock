@@ -180,6 +180,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   header .workspace-tab.active{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3);
     box-shadow:inset 0 -2px 0 var(--accent),0 1px 3px rgba(0,0,0,.18)}
   header .workspace-tab:focus-visible{outline:2px solid #93c5fd;outline-offset:1px}
+  /* 순서 바꾸기 드래그 — 크롬은 버튼에 draggable 만으로는 드래그를 시작하지 않아 -webkit-user-drag 가 필요하다. */
+  header .workspace-tab[draggable="true"]{cursor:grab;-webkit-user-drag:element}
+  header .workspace-tab.dragging{opacity:.5;cursor:grabbing}
+  header .workspace-tab.drop-before{box-shadow:inset 3px 0 var(--accent)}
+  header .workspace-tab.drop-after{box-shadow:inset -3px 0 var(--accent)}
   .workspace-tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* 작업공간은 세로 색상 막대, 서버 연결 상태는 원형 점으로 구분한다. */
   .workspace-color{display:inline-block;flex:0 0 auto;width:3px;height:14px;border-radius:2px;background:#5b8def;box-shadow:none}

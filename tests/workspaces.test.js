@@ -8,7 +8,7 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const {
   workspaceNormalizeSaved, workspaceNormalizeBoardRows, workspaceCleanName,
-  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds
+  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds, workspaceMoveOrder
 } = require(path.join(root, "src/js/workspaces.js"));
 
 test("작업공간 저장값을 안전한 기본 구조로 정규화한다", () => {
@@ -179,4 +179,45 @@ test("Python 정의 이동 후보는 현재 작업공간 문서로 제한한다"
   assert.match(definition, /const candidates = docs\.filter\(doc => typeof workspaceHasDoc !== "function" \|\| workspaceHasDoc\(doc\)\)/);
   assert.match(definition, /candidates\.map\(docPath\)/);
   assert.match(definition, /candidates\.find\(doc => docPath\(doc\) === hit\.path\)/);
+});
+
+test("작업공간 순서 바꾸기는 items 배열만 옮기고 제자리 드롭은 걸러낸다", () => {
+  const ids = () => items.map(rec => rec.id).join(",");
+  let items = [{ id:"a" }, { id:"b" }, { id:"c" }];
+  assert.equal(workspaceMoveOrder(items, "a", "c", true), true);
+  assert.equal(ids(), "b,c,a");
+
+  items = [{ id:"a" }, { id:"b" }, { id:"c" }];
+  assert.equal(workspaceMoveOrder(items, "c", "a", false), true);
+  assert.equal(ids(), "c,a,b");
+
+  // 바로 뒤 탭의 왼쪽에 떨구면 자리가 그대로다 → 다시 그리기·저장을 건너뛰도록 false.
+  items = [{ id:"a" }, { id:"b" }, { id:"c" }];
+  assert.equal(workspaceMoveOrder(items, "a", "b", false), false);
+  assert.equal(ids(), "a,b,c");
+  assert.equal(workspaceMoveOrder(items, "a", "a", true), false);
+  assert.equal(workspaceMoveOrder(items, "a", "없는탭", true), false);
+  assert.equal(workspaceMoveOrder(items, "없는탭", "a", true), false);
+  assert.equal(ids(), "a,b,c");
+});
+
+test("작업공간 탭은 드래그로 순서를 바꾸고 좁은 창에서는 우클릭 메뉴로 옮긴다", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/workspaces.js"), "utf8");
+  const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  // 하나뿐인 작업공간은 옮길 자리가 없다.
+  assert.match(source, /const canDragWorkspace = workspaceRegistry\.items\.length > 1/);
+  assert.match(source, /tab\.draggable = canDragWorkspace/);
+  // 문서 탭 드래그·바깥 파일이 넘어와도 작업공간 순서는 건드리지 않는다.
+  assert.match(source, /tab\.addEventListener\("dragover"[\s\S]*?if \(draggedWorkspaceId === null \|\| draggedWorkspaceId === rec\.id\) return/);
+  assert.match(source, /tab\.addEventListener\("drop"[\s\S]*?if \(draggedWorkspaceId === null \|\| draggedWorkspaceId === rec\.id\) return/);
+  // 내부 드래그 표시가 없으면 자기 창 드롭이 파일 열기로 새어 나간다.
+  assert.match(source, /setData\(INTERNAL_DRAG_MIME, "workspace"\)/);
+  assert.match(source, /tab\.addEventListener\("dragend", workspaceResetDragState\)/);
+  assert.match(source, /renderWorkspaceUi\(\{ reveal:false \}\); workspacePersistNow\(\)/);
+  assert.match(source, /function moveWorkspaceOrder\(id, delta\)/);
+  assert.match(source, /add\("‹ 왼쪽으로 옮기기", \(\) => moveWorkspaceOrder\(anchor\.id, -1\), \{ disabled:anchorIndex <= 0 \}\)/);
+  assert.match(source, /add\("› 오른쪽으로 옮기기", \(\) => moveWorkspaceOrder\(anchor\.id, 1\)/);
+  assert.match(styles, /header \.workspace-tab\[draggable="true"\]\{cursor:grab;-webkit-user-drag:element\}/);
+  assert.match(styles, /header \.workspace-tab\.drop-before\{box-shadow:inset 3px 0 var\(--accent\)\}/);
+  assert.match(styles, /header \.workspace-tab\.drop-after\{box-shadow:inset -3px 0 var\(--accent\)\}/);
 });
