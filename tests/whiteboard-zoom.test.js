@@ -72,3 +72,32 @@ test("끌기는 캔버스만 다시 그리고 도구막대는 손대지 않는�
   assert.match(source, /const up = \(\) => \{[\s\S]{0,220}redraw\(\); if \(cloned\)/);
   assert.match(source, /wb\.items\.push\(finished\); cur = null; redraw\(\);/);
 });
+
+// 커서 모양 판정도 프레임에 묶는다.
+// 판정 한 번은 항목 목록을 최대 네 번 훑고(교구 손잡이·슬라이더·화살촉·항목), 좌표를 구하는 pt()
+// 는 그때마다 getBoundingClientRect 로 레이아웃을 읽는다. 포인터 이벤트는 초당 100번 넘게 온다.
+// 이 구조는 화면상 티가 안 나서 "왜 굳이 프레임을 거치지?" 하고 되돌리기 쉬우므로 계약으로 박아 둔다.
+test("커서 모양은 마우스 이벤트마다가 아니라 프레임마다 한 번만 정한다", () => {
+  const source = fs.readFileSync(path.join(__dirname,"../src/js/whiteboard.js"),"utf8");
+  const handlerAt = source.indexOf("const updateHoverCursor = () => {");
+  assert.ok(handlerAt > 0, "커서 판정은 updateHoverCursor 한 곳에 모여 있어야 한다");
+  const listenerAt = source.indexOf('canvas.addEventListener("pointermove"', handlerAt);
+  assert.ok(listenerAt > handlerAt, "판정 함수 바로 뒤에 그 좌표를 남기는 pointermove 가 있어야 한다");
+  const handler = source.slice(handlerAt, listenerAt);
+  const listener = source.slice(listenerAt, source.indexOf("});", listenerAt));
+
+  // 듣는 쪽은 좌표만 남기고 프레임을 예약한다 — 여기서 판정하면 안 된다.
+  assert.match(listener, /hoverAt = \{ clientX:e\.clientX, clientY:e\.clientY \};/);
+  assert.match(listener, /if \(!hoverFrame\) hoverFrame = requestAnimationFrame\(updateHoverCursor\);/);
+  for (const hitTest of ["gearHandleAt", "plotSliderHitAt", "arrowTipAt", "itemAt", "handleAt"]){
+    assert.ok(!listener.includes(hitTest), `pointermove 안에서 판정하면 안 된다: ${hitTest}`);
+  }
+
+  // 판정하는 쪽은 좌표를 한 번만 구한다(예전에는 판정마다 pt(e) 를 다시 불러 레이아웃을 다섯 번 읽었다).
+  assert.equal((handler.match(/pt\(e\)/g) || []).length, 1);
+  assert.match(handler, /const p = pt\(e\);\s*\n\s*const gearHover = gearHandleAt\(p\);/);
+  assert.match(handler, /if \(!e \|\| drawing\) return;/);          // 프레임을 기다리는 사이 그리기가 시작되면 버린다
+
+  // 문서를 닫을 때 예약해 둔 프레임도 함께 거둔다.
+  assert.match(source, /if \(hoverFrame\) cancelAnimationFrame\(hoverFrame\);/);
+});

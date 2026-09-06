@@ -1950,22 +1950,35 @@ function renderWhiteboard(doc, host){
   };
   canvas.addEventListener("pointerup", finishStroke);
   canvas.addEventListener("pointercancel", finishStroke);
-  // 가린 곳은 입력 불가, 드러난 곳의 선택 도구는 항목 위=이동, 이미지 핸들=크기조절.
-  canvas.addEventListener("pointermove", (e) => {
-    if (drawing) return;
+  /* 가린 곳은 입력 불가, 드러난 곳의 선택 도구는 항목 위=이동, 이미지 핸들=크기조절.
+     이 판정은 항목 목록을 최대 네 번 훑고(교구 손잡이·슬라이더·화살촉·항목), 좌표를 구하는 pt() 는
+     그때마다 getBoundingClientRect 로 레이아웃을 읽는다. 포인터 이벤트는 초당 100번 넘게 오지만
+     커서는 한 프레임에 한 번만 정하면 충분하므로, 마지막 좌표만 남겨 두고 프레임에서 한 번 판정한다.
+     좌표도 한 번만 구한다 — 예전에는 한 번 움직일 때마다 레이아웃을 최대 다섯 번 읽었다. */
+  let hoverAt = null, hoverFrame = 0;
+  const updateHoverCursor = () => {
+    hoverFrame = 0;
+    const e = hoverAt; hoverAt = null;
+    if (!e || drawing) return;                        // 프레임을 기다리는 사이에 그리기가 시작됐으면 버린다
     if (focus.active && focus.controlsVisible){ canvas.style.cursor = "not-allowed"; return; }
     if (spacePanning){ canvas.style.cursor = ""; return; }
     if (!focusAllowsScreenPoint(screenPoint(e))){ canvas.style.cursor = "not-allowed"; return; }
     canvas.style.cursor = "";
-    const gearHover = gearHandleAt(pt(e));
+    const p = pt(e);
+    const gearHover = gearHandleAt(p);
     if (gearHover){ canvas.style.cursor = gearHover.cursor; return; }
-    if (plotSliderHitAt(pt(e))){ canvas.style.cursor = "ew-resize"; return; }
-    if (arrowTipAt(pt(e))){ canvas.style.cursor = "grab"; return; }
+    if (plotSliderHitAt(p)){ canvas.style.cursor = "ew-resize"; return; }
+    if (arrowTipAt(p)){ canvas.style.cursor = "grab"; return; }
     if (wb.tool !== "select") return;
     if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ canvas.style.cursor = "move"; return; }
-    const p = pt(e);
     const h = wb.selected && handleAt(wb.selected, p);
     canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "grab");
+  };
+  canvas.addEventListener("pointermove", (e) => {
+    if (drawing) return;
+    // 이벤트 객체는 들고 있지 않는다 — 좌표만 남기면 되고, 프레임까지 살려 둘 이유가 없다.
+    hoverAt = { clientX:e.clientX, clientY:e.clientY };
+    if (!hoverFrame) hoverFrame = requestAnimationFrame(updateHoverCursor);
   });
   canvas.addEventListener("dblclick", (e) => {
     if (focus.active && focus.controlsVisible){ e.preventDefault(); e.stopPropagation(); flashFocusBoundary(); return; }
@@ -5539,7 +5552,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
