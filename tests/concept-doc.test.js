@@ -36,7 +36,7 @@ test("자동 정렬 간격과 화면 맞춤 배율은 크기에 맞게 달라진
   const normal = concept.conceptAutoLayout(nodes, edges, { mode:"tree", spacing:"normal" }), wide = concept.conceptAutoLayout(nodes, edges, { mode:"tree", spacing:"wide" });
   assert.ok(wide[1].y - wide[0].y > normal[1].y - normal[0].y); assert.ok(concept.conceptFitZoom(1800, 1100, 1000, 700) > .5); assert.equal(concept.conceptFitZoom(10000, 10000, 800, 600), .35);
   const model = { ...concept.conceptDocEmpty("배치 저장"), layout:"auto", layoutStyle:"circle", layoutSpacing:"wide", nodes, edges }, parsed = concept.conceptDocParse(concept.conceptDocSerialize(model)); assert.equal(parsed.layoutStyle, "circle"); assert.equal(parsed.layoutSpacing, "wide");
-  assert.deepEqual(concept.CONCEPT_LAYOUTS.map(item => item.id), ["tree", "radial", "circle", "flow", "grid"]);
+  assert.deepEqual(concept.CONCEPT_LAYOUTS.map(item => item.id), ["cluster", "weighted", "focus", "tree", "radial", "circle", "flow", "grid"]);
 });
 test("발표 순서는 관계 방향의 세대·과정별로 만들고 같은 단계는 화면 위쪽부터 둔다", () => {
   const nodes = [

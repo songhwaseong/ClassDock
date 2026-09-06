@@ -26,6 +26,9 @@ const CONCEPT_PRESENT_ANIMATIONS = Object.freeze([
   { id:"draw", label:"연결선 그리기" }, { id:"none", label:"효과 없음" }
 ]);
 const CONCEPT_LAYOUTS = Object.freeze([
+  { id:"cluster", label:"군집형", description:"강한 연결이 촘촘한 카드들을 묶고 묶음 사이에 여백을 둡니다." },
+  { id:"weighted", label:"관계 강도형", description:"강하게 연결된 개념끼리 가까이 모으고 카드 간격을 확보합니다." },
+  { id:"focus", label:"중심 집중형", description:"중심 카드와 강한 관계로 이어질수록 가까이 배치합니다." },
   { id:"tree", label:"위→아래 가계도", description:"상위 개념에서 자녀·하위 개념이 아래로 펼쳐집니다." },
   { id:"radial", label:"방사형", description:"선택한 카드를 중심으로 가까운 관계부터 사방으로 펼칩니다." },
   { id:"circle", label:"원형", description:"모든 카드를 큰 원 둘레에 고르게 놓습니다." },
@@ -33,6 +36,11 @@ const CONCEPT_LAYOUTS = Object.freeze([
   { id:"grid", label:"격자형", description:"관계 방향과 무관하게 카드를 반듯하게 정돈합니다." }
 ]);
 const CONCEPT_LAYOUT_SPACING = Object.freeze({ tight:.78, normal:1, wide:1.35 });
+const CONCEPT_WEIGHT_INFLUENCE = Object.freeze({ weak:.3, normal:.65, strong:1 });
+function conceptNormalizeWeight(value){ return value == null || String(value).trim() === "" || !Number.isFinite(Number(value)) ? 3 : Math.round(conceptClamp(value, 1, 5)); }
+function conceptLayoutSettings(raw = {}){
+  return { layoutWeighted:raw.layoutWeighted !== false, layoutInfluence:Object.hasOwn(CONCEPT_WEIGHT_INFLUENCE, raw.layoutInfluence) ? raw.layoutInfluence : "normal", showWeights:raw.showWeights === true, layoutRootId:conceptSafeText(raw.layoutRootId, 80) };
+}
 let _conceptScratchCount = 0;
 
 function conceptId(prefix){ return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
@@ -74,13 +82,13 @@ function conceptNormalizeNode(raw, index){
     description:conceptSafeText(value.description, 3000), category:conceptSafeText(value.category, 60).trim(), color,
     x:conceptClamp(value.x == null ? 70 + (Number(index) || 0) % 5 * 290 : value.x, 20, CONCEPT_MAX_COORD),
     y:conceptClamp(value.y == null ? 70 + Math.floor((Number(index) || 0) / 5) * 190 : value.y, 20, CONCEPT_MAX_COORD),
-    image:conceptNormalizeImage(value.image) };
+    image:conceptNormalizeImage(value.image), pinned:value.pinned === true };
 }
 function conceptNormalizeEdge(raw){
   const value = raw && typeof raw === "object" ? raw : {};
   const type = CONCEPT_RELATIONS.some(item => item.id === value.type) ? value.type : "related";
   return { id:conceptSafeText(value.id, 80) || conceptId("ce"), from:conceptSafeText(value.from, 80), to:conceptSafeText(value.to, 80),
-    label:conceptSafeText(value.label, 80).trim(), type };
+    label:conceptSafeText(value.label, 80).trim(), type, weight:conceptNormalizeWeight(value.weight) };
 }
 function conceptNormalizePresentation(raw, nodes){
   const value = raw && typeof raw === "object" ? raw : {}, ids = new Set((nodes || []).map(node => node.id)), seen = new Set(), order = [];
@@ -89,7 +97,7 @@ function conceptNormalizePresentation(raw, nodes){
   const animation = CONCEPT_PRESENT_ANIMATIONS.some(item => item.id === value.animation) ? value.animation : "fade";
   return { order, animation, autoFocus:value.autoFocus !== false };
 }
-function conceptDocEmpty(title){ return { type:CONCEPT_DOC_TYPE, version:CONCEPT_DOC_VERSION, title:conceptSafeText(title || "개념 관계도", 160), layout:"free", layoutStyle:"tree", layoutSpacing:"normal", nodes:[], edges:[], presentation:conceptNormalizePresentation(null, []) }; }
+function conceptDocEmpty(title){ return { type:CONCEPT_DOC_TYPE, version:CONCEPT_DOC_VERSION, title:conceptSafeText(title || "개념 관계도", 160), layout:"free", layoutStyle:"tree", layoutSpacing:"normal", ...conceptLayoutSettings(), nodes:[], edges:[], presentation:conceptNormalizePresentation(null, []) }; }
 function conceptDocParse(text){
   const raw = typeof text === "string" ? JSON.parse(text) : text;
   if (!raw || raw.type !== CONCEPT_DOC_TYPE || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) throw new Error("concept-format");
@@ -99,6 +107,8 @@ function conceptDocParse(text){
   const ids = new Set(model.nodes.map(node => node.id)), edgeSeen = new Set();
   model.edges = raw.edges.map(conceptNormalizeEdge).filter(edge => edge.from !== edge.to && ids.has(edge.from) && ids.has(edge.to) && !edgeSeen.has(edge.id) && edgeSeen.add(edge.id));
   model.presentation = conceptNormalizePresentation(raw.presentation, model.nodes);
+  Object.assign(model, conceptLayoutSettings(raw));
+  if (!ids.has(model.layoutRootId)) model.layoutRootId = "";
   return model;
 }
 function conceptDocSerialize(model){ return JSON.stringify(conceptDocParse({ ...model, type:CONCEPT_DOC_TYPE, version:CONCEPT_DOC_VERSION }), null, 2); }
@@ -129,10 +139,94 @@ function conceptDirectionalLevels(nodes, edges){
   const prior = new Map(); [...levels.keys()].sort((a, b) => a - b).forEach(d => { const level = levels.get(d); level.sort((a, b) => { const score = node => { const known = (parents.get(node.id) || []).map(id => prior.get(id)).filter(value => value != null); return known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : Number(node.y) / 10000 + Number(node.x) / 100000000; }; return score(a) - score(b) || Number(a.y) - Number(b.y) || Number(a.x) - Number(b.x); }); level.forEach((node, index) => prior.set(node.id, index)); });
   return { levels, roots };
 }
+// 가중 모듈성 증가량이 양수인 묶음만 합친다. 약한 다리 하나로 전체가 한 묶음이 되는 것을 줄인다.
+function conceptClusterGroups(nodes, edges, options = {}){
+  const list = [...nodes].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0), byId = new Map(list.map((node, i) => [node.id, i]));
+  const influence = options.weighted === false ? 0 : (CONCEPT_WEIGHT_INFLUENCE[options.influence] || CONCEPT_WEIGHT_INFLUENCE.normal);
+  const links = list.map(() => new Map()), degree = list.map(() => 0), groups = new Map(list.map((node, i) => [i, [node]]));
+  for (const edge of edges || []){
+    const a = byId.get(edge.from), b = byId.get(edge.to); if (a == null || b == null || a === b) continue;
+    const weight = Math.pow(conceptNormalizeWeight(edge.weight), influence);
+    if (!links[a].has(b) || links[a].get(b) < weight){ links[a].set(b, weight); links[b].set(a, weight); }
+  }
+  let total = 0;
+  for (let a = 0; a < list.length; a++) for (const b of [...links[a].keys()].sort((x, y) => x - y)){ degree[a] += links[a].get(b); if (a < b) total += links[a].get(b); }
+  if (!total) return [...groups.values()];
+  while (groups.size > 1){
+    let bestA = -1, bestB = -1, bestGain = 1e-10;
+    for (const a of groups.keys()) for (const [b, weight] of links[a]){
+      if (a >= b || !groups.has(b)) continue;
+      const gain = weight / total - degree[a] * degree[b] / (2 * total * total);
+      if (gain > bestGain + 1e-12 || (bestA >= 0 && Math.abs(gain - bestGain) <= 1e-12 && (a < bestA || (a === bestA && b < bestB)))){ bestGain = gain; bestA = a; bestB = b; }
+    }
+    if (bestA < 0) break;
+    groups.get(bestA).push(...groups.get(bestB)); groups.delete(bestB); degree[bestA] += degree[bestB];
+    for (const [other, weight] of links[bestB]){
+      if (other === bestA || !groups.has(other)) continue;
+      const merged = (links[bestA].get(other) || 0) + weight; links[bestA].set(other, merged); links[other].set(bestA, merged); links[other].delete(bestB);
+    }
+    links[bestA].delete(bestB); links[bestB].clear();
+  }
+  return [...groups.values()].map(group => group.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+function conceptClusterLayout(nodes, edges, options){
+  const spacing = CONCEPT_LAYOUT_SPACING[options.spacing], gap = 180 * spacing;
+  const boxes = conceptClusterGroups(nodes, edges, options).map(group => {
+    const ids = new Set(group.map(node => node.id));
+    const laid = conceptWeightedLayout(group, (edges || []).filter(edge => ids.has(edge.from) && ids.has(edge.to)), { ...options, mode:"weighted", rootId:"" });
+    const left = Math.min(...laid.map(node => node.x)), top = Math.min(...laid.map(node => node.y));
+    return { nodes:laid.map(node => ({ ...node, x:node.x - left, y:node.y - top })), width:Math.max(...laid.map(node => node.x)) - left + 250, height:Math.max(...laid.map(node => node.y)) - top + 188 };
+  });
+  // 큰 묶음부터 놓고 같은 크기는 안정적인 카드 ID 순서를 유지한다.
+  boxes.sort((a, b) => b.nodes.length - a.nodes.length || (a.nodes[0].id < b.nodes[0].id ? -1 : 1));
+  const targetWidth = Math.max(...boxes.map(box => box.width), Math.sqrt(boxes.reduce((sum, box) => sum + (box.width + gap) * (box.height + gap), 0)) * 1.4);
+  const positions = new Map(); let x = 70, y = 70, rowHeight = 0;
+  for (const box of boxes){
+    if (x > 70 && x + box.width > targetWidth + 70){ x = 70; y += rowHeight + gap; rowHeight = 0; }
+    for (const node of box.nodes) positions.set(node.id, { x:x + node.x, y:y + node.y });
+    x += box.width + gap; rowHeight = Math.max(rowHeight, box.height);
+  }
+  return nodes.map(node => ({ ...node, ...positions.get(node.id) }));
+}
 function conceptAutoLayout(nodes, edges, options = {}){
+  const list = (nodes || []).map(conceptNormalizeNode), pinned = list.filter(node => node.pinned).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  if (!list.length || pinned.length === list.length) return list;
+  const laid = conceptComputeLayout(list, edges, options); if (!pinned.length) return laid;
+  const planned = new Map(laid.map(node => [node.id, node])), actual = new Map(list.map(node => [node.id, node]));
+  const spacing = CONCEPT_LAYOUT_SPACING[options.spacing] || 1, gapX = 250 * Math.max(1, spacing), gapY = 188 * Math.max(1, spacing);
+  const offsets = pins => ({ x:pins.reduce((sum, node) => sum + node.x - planned.get(node.id).x, 0) / pins.length, y:pins.reduce((sum, node) => sum + node.y - planned.get(node.id).y, 0) / pins.length });
+  const globalOffset = offsets(pinned), shifts = new Map();
+  // 군집 안에 고정 카드가 있으면 그 카드 주변으로 묶음을 옮긴다.
+  if (options.mode === "cluster") for (const group of conceptClusterGroups(list, edges, options)){
+    const pins = group.filter(node => node.pinned), offset = pins.length ? offsets(pins) : globalOffset;
+    group.forEach(node => shifts.set(node.id, offset));
+  }
+  const placed = pinned.map(node => ({ ...node })), result = new Map(placed.map(node => [node.id, node]));
+  const free = (x, y) => x >= 20 && y >= 20 && x <= CONCEPT_MAX_COORD && y <= CONCEPT_MAX_COORD && placed.every(other => Math.abs(x - other.x) >= gapX - 1e-7 || Math.abs(y - other.y) >= gapY - 1e-7);
+  for (const node of [...laid].filter(node => !node.pinned).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)){
+    const offset = shifts.get(node.id) || globalOffset;
+    let x = conceptClamp(node.x + offset.x, 20, CONCEPT_MAX_COORD), y = conceptClamp(node.y + offset.y, 20, CONCEPT_MAX_COORD);
+    if (!free(x, y)){
+      const originX = x, originY = y;
+      search: for (let ring = 1; ring <= list.length; ring++){
+        const candidates = [];
+        for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) candidates.push({ x:originX + dx * gapX, y:originY + dy * gapY, cost:dx * dx * gapX * gapX + dy * dy * gapY * gapY });
+        candidates.sort((a, b) => a.cost - b.cost || a.y - b.y || a.x - b.x);
+        for (const point of candidates) if (free(point.x, point.y)){ x = point.x; y = point.y; break search; }
+      }
+    }
+    const placedNode = { ...actual.get(node.id), x, y }; placed.push(placedNode); result.set(node.id, placedNode);
+  }
+  return list.map(node => result.get(node.id));
+}
+function conceptComputeLayout(nodes, edges, options = {}){
   const list = (nodes || []).map(conceptNormalizeNode); if (!list.length) return list;
   const mode = CONCEPT_LAYOUTS.some(item => item.id === options.mode) ? options.mode : "flow", spacingKey = Object.prototype.hasOwnProperty.call(CONCEPT_LAYOUT_SPACING, options.spacing) ? options.spacing : "normal", spacing = CONCEPT_LAYOUT_SPACING[spacingKey], positions = new Map();
-  if (mode === "grid"){
+  if (mode === "cluster"){
+    return conceptClusterLayout(list, edges, { ...options, spacing:spacingKey });
+  } else if (mode === "weighted" || mode === "focus"){
+    return conceptWeightedLayout(list, edges, { ...options, mode, spacing:spacingKey });
+  } else if (mode === "grid"){
     const columns = Math.max(1, Math.ceil(Math.sqrt(list.length * 1.45))), gapX = 280 * spacing, gapY = 180 * spacing; list.forEach((node, index) => positions.set(node.id, { x:70 + index % columns * gapX, y:70 + Math.floor(index / columns) * gapY }));
   } else if (mode === "circle"){
     const radius = Math.min((CONCEPT_MAX_COORD - 400) / 2, Math.max(300 * spacing, list.length * 270 * spacing / (Math.PI * 2))), center = radius + 180; list.forEach((node, index) => { const angle = -Math.PI / 2 + index / list.length * Math.PI * 2; positions.set(node.id, { x:center + Math.cos(angle) * radius - 115, y:center + Math.sin(angle) * radius - 65 }); });
@@ -152,6 +246,103 @@ function conceptAutoLayout(nodes, edges, options = {}){
   }
   return list.map(node => { const point = positions.get(node.id) || { x:node.x, y:node.y }; return { ...node, x:conceptClamp(point.x, 20, CONCEPT_MAX_COORD), y:conceptClamp(point.y, 20, CONCEPT_MAX_COORD) }; });
 }
+// 새 배치는 이전 좌표나 난수를 초기값으로 쓰지 않는다. 관계 방향은 보존하고 거리 계산은 양방향이다.
+function conceptWeightedLayout(nodes, edges, options){
+  const list = [...nodes].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0), byId = new Map(list.map((node, i) => [node.id, i]));
+  const spacing = CONCEPT_LAYOUT_SPACING[options.spacing], influence = options.weighted === false ? 0 : (CONCEPT_WEIGHT_INFLUENCE[options.influence] || CONCEPT_WEIGHT_INFLUENCE.normal);
+  const gapX = 250 * Math.max(1, spacing), gapY = 188 * Math.max(1, spacing), adjacency = list.map(() => new Map());
+  for (const edge of edges || []){
+    const a = byId.get(edge.from), b = byId.get(edge.to); if (a == null || b == null || a === b) continue;
+    const distance = Math.max(270, 360 * spacing * Math.pow(3 / conceptNormalizeWeight(edge.weight), influence));
+    // 같은 두 카드의 복수 관계는 가장 강한 연결을 사용한다.
+    if (!adjacency[a].has(b) || distance < adjacency[a].get(b)){ adjacency[a].set(b, distance); adjacency[b].set(a, distance); }
+  }
+  const defaultRoot = conceptDirectionalLevels(list, edges).roots.sort()[0], rootIndex = byId.has(options.rootId) ? byId.get(options.rootId) : (byId.get(defaultRoot) ?? 0), seen = new Set(), components = [];
+  for (const start of [rootIndex, ...list.map((_, i) => i)]){
+    if (seen.has(start)) continue;
+    const component = [start]; seen.add(start);
+    for (let i = 0; i < component.length; i++) for (const next of [...adjacency[component[i]].keys()].sort((a, b) => a - b)) if (!seen.has(next)){ seen.add(next); component.push(next); }
+    components.push(component);
+  }
+  const boxes = components.map(component => {
+    const n = component.length, local = new Map(component.map((id, i) => [id, i])), links = [];
+    for (const a of component) for (const [b, distance] of adjacency[a]) if (a < b) links.push({ a:local.get(a), b:local.get(b), distance });
+    links.sort((a, b) => a.a - b.a || a.b - b.b);
+    const points = component.map((id, i) => { const angle = i * Math.PI * 2 / n - Math.PI / 2, radius = Math.max(320, Math.sqrt(n) * 170) * spacing; return { id, x:Math.cos(angle) * radius, y:Math.sin(angle) * radius }; });
+    if (options.mode === "focus"){
+      // Dijkstra: 강한 관계일수록 짧은 경로. 간접 연결에도 강도가 반영된다.
+      const distances = Array(n).fill(Infinity), visited = new Set(); distances[0] = 0;
+      for (let step = 0; step < n; step++){
+        let current = -1;
+        for (let i = 0; i < n; i++) if (!visited.has(i) && (current < 0 || distances[i] < distances[current])) current = i;
+        visited.add(current);
+        for (const [id, cost] of adjacency[component[current]]){ const next = local.get(id); distances[next] = Math.min(distances[next], distances[current] + cost); }
+      }
+      points[0].x = 0; points[0].y = 0;
+      const order = points.slice(1).sort((a, b) => distances[local.get(a.id)] - distances[local.get(b.id)] || a.id - b.id);
+      order.forEach((point, i) => { const angle = -Math.PI / 2 + i * Math.PI * 2 / Math.max(1, n - 1), radius = distances[local.get(point.id)]; point.x = Math.cos(angle) * radius; point.y = Math.sin(angle) * radius; });
+    } else {
+      for (let step = 0; step < 240; step++){
+        const forces = points.map(() => ({ x:0, y:0 }));
+        for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++){
+          const dx = points[b].x - points[a].x, dy = points[b].y - points[a].y, distance = Math.max(1, Math.hypot(dx, dy)), push = 180000 * spacing * spacing / (distance * distance);
+          forces[a].x -= dx / distance * push; forces[a].y -= dy / distance * push; forces[b].x += dx / distance * push; forces[b].y += dy / distance * push;
+        }
+        for (const { a, b, distance:target } of links){
+          const dx = points[b].x - points[a].x, dy = points[b].y - points[a].y, distance = Math.max(1, Math.hypot(dx, dy)), pull = (distance - target) * .16;
+          forces[a].x += dx / distance * pull; forces[a].y += dy / distance * pull; forces[b].x -= dx / distance * pull; forces[b].y -= dy / distance * pull;
+        }
+        const limit = 28 * (1 - step / 240) + .3;
+        points.forEach((point, i) => { const force = forces[i], length = Math.max(1, Math.hypot(force.x, force.y)), scale = Math.min(.75, limit / length); point.x += force.x * scale; point.y += force.y * scale; });
+      }
+    }
+    // 실제 카드 최대 크기(230×168)에 여백을 더한다. 충돌한 카드만 가까운 빈 자리로 옮긴다.
+    const placed = [], order = options.mode === "focus" ? [...points].sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y) || a.id - b.id) : points;
+    const free = (x, y) => placed.every(other => Math.abs(x - other.x) >= gapX || Math.abs(y - other.y) >= gapY);
+    let priorRadius = 0;
+    for (const point of order){
+      if (options.mode === "focus" && placed.length){
+        // 가까운 순서를 지키면서 같은 반지름의 빈 각도를 먼저 찾는다.
+        let radius = Math.max(priorRadius, Math.hypot(point.x, point.y));
+        const angle = Math.atan2(point.y, point.x);
+        polar: for (let ring = 0; ring <= n; ring++, radius += gapY / 2){
+          const samples = Math.max(24, Math.ceil(Math.PI * 4 * radius / gapY));
+          for (let step = 0; step < samples; step++){
+            const offset = Math.ceil(step / 2) * (step % 2 ? 1 : -1) * Math.PI * 2 / samples, x = Math.cos(angle + offset) * radius, y = Math.sin(angle + offset) * radius;
+            if (free(x, y)){ point.x = x; point.y = y; priorRadius = radius; break polar; }
+          }
+        }
+      }
+      if (!free(point.x, point.y)){
+        const originX = point.x, originY = point.y;
+        search: for (let ring = 1; ring <= n; ring++){
+          const candidates = [];
+          for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) if (Math.max(Math.abs(dx), Math.abs(dy)) === ring) candidates.push({ x:originX + dx * gapX, y:originY + dy * gapY, cost:dx * dx * gapX * gapX + dy * dy * gapY * gapY });
+          candidates.sort((a, b) => a.cost - b.cost || a.y - b.y || a.x - b.x);
+          for (const candidate of candidates) if (free(candidate.x, candidate.y)){ point.x = candidate.x; point.y = candidate.y; break search; }
+        }
+      }
+      placed.push(point);
+    }
+    const minX = Math.min(...points.map(p => p.x)), minY = Math.min(...points.map(p => p.y));
+    points.forEach(point => { point.x -= minX; point.y -= minY; });
+    return { points, width:Math.max(...points.map(p => p.x)) + gapX, height:Math.max(...points.map(p => p.y)) + gapY };
+  });
+  // 서로 연결되지 않은 묶음을 여백을 두고 정돈한다. 고립된 카드도 포함한다.
+  const rowWidth = Math.max(...boxes.map(box => box.width), Math.sqrt(boxes.reduce((sum, box) => sum + box.width * box.height, 0)) * 1.4), positions = new Map();
+  let x = 70, y = 70, rowHeight = 0;
+  for (const box of boxes){
+    if (x > 70 && x + box.width > rowWidth + 70){ x = 70; y += rowHeight + 80; rowHeight = 0; }
+    for (const point of box.points) positions.set(list[point.id].id, { x:x + point.x, y:y + point.y });
+    x += box.width + 80; rowHeight = Math.max(rowHeight, box.height);
+  }
+  // 극단적으로 긴 사슬이 좌표 상한을 넘으면 겹치도록 잘라내지 않고 안전한 격자로 배치한다.
+  if ([...positions.values()].some(point => point.x > CONCEPT_MAX_COORD || point.y > CONCEPT_MAX_COORD)){
+    const columns = Math.ceil(Math.sqrt(list.length)); list.forEach((node, i) => positions.set(node.id, { x:70 + i % columns * gapX, y:70 + Math.floor(i / columns) * gapY }));
+  }
+  return nodes.map(node => ({ ...node, ...positions.get(node.id) }));
+}
+
 function conceptAutoPresentationOrder(nodes, edges){
   const list = nodes || [], ids = new Set(list.map(node => node.id)), directional = new Set(["cause", "include", "support"]);
   const outgoing = new Map(list.map(node => [node.id, []])), incoming = new Map(list.map(node => [node.id, 0]));
@@ -186,7 +377,8 @@ const CONCEPT_TABLE_COLUMNS = Object.freeze({
   label:["연결선", "연결선말", "라벨", "관계설명", "label"],
   category:["분류", "갈래", "유형", "부서", "팀", "category", "group"],
   description:["설명", "내용", "메모", "비고", "description", "note"],
-  color:["색", "색상", "color"]
+  color:["색", "색상", "color"],
+  weight:["강도", "관계강도", "가중치", "weight", "strength"]
 });
 const CONCEPT_RELATION_WORDS = Object.freeze({
   cause:["원인", "원인→결과", "결과", "때문에", "cause", "effect"],
@@ -254,6 +446,7 @@ function conceptGraphFromRows(rows){
   // 개념 표에서는 제목 열이 그 줄의 카드고, 따로 있는 '상위' 열이 그 카드의 부모다.
   const baseAt = mode === "edges" ? fromAt : titleAt, parentAt = mode === "edges" ? -1 : (fromAt !== titleAt ? fromAt : -1);
   if (baseAt < 0) throw new Error("concept-table-columns");
+  const weightAt = find("weight"), weightEdgeIds = [];
   const typeAt = find("type"), labelAt = find("label"), categoryAt = find("category"), descriptionAt = find("description"), colorAt = find("color");
   const fallbackRelation = mode === "edges" ? conceptDefaultRelation(rows[0][fromAt], rows[0][toAt]) : "include";
   const nodes = [], edges = [], byKey = new Map(), edgeKeys = new Set(), cell = (row, index) => index >= 0 ? String(row[index] == null ? "" : row[index]).trim() : "";
@@ -282,10 +475,11 @@ function conceptGraphFromRows(rows){
     const from = mode === "edges" ? base.id : other.id, to = mode === "edges" ? other.id : base.id, edgeKey = from + "\u0000" + to + "\u0000" + type;
     if (edgeKeys.has(edgeKey)) continue;
     if (edges.length >= CONCEPT_MAX_EDGES){ truncated = true; continue; }
-    edges.push(conceptNormalizeEdge({ from, to, type, label:cell(row, labelAt) })); edgeKeys.add(edgeKey);
+    const weightText = cell(row, weightAt), edge = conceptNormalizeEdge({ from, to, type, label:cell(row, labelAt), weight:weightText });
+    edges.push(edge); if (weightText && Number.isFinite(Number(weightText))) weightEdgeIds.push(edge.id); edgeKeys.add(edgeKey);
   }
   if (!nodes.length) throw new Error("concept-table-empty");
-  return { nodes, edges, mode, skipped, truncated };
+  return { nodes, edges, mode, skipped, truncated, weightEdgeIds };
 }
 
 /* 개요는 들여쓰기 한 단계가 상위 → 하위 한 단계다. 글머리 기호와 번호는 떼고, 한 줄은
@@ -309,7 +503,7 @@ function conceptOutlineParse(text){
     stack.push({ indent, id:node.id }); nodes.push(node);
   }
   if (!nodes.length) throw new Error("concept-outline-empty");
-  return { nodes, edges, mode:"outline", skipped, truncated };
+  return { nodes, edges, mode:"outline", skipped, truncated, weightEdgeIds:[] };
 }
 
 /* 관계도를 개요 글로 되돌린다. 방향 있는 관계(원인·포함·근거)만 상하 관계로 보고, 카드마다
@@ -340,15 +534,15 @@ function conceptGraphToOutline(model){
    관계가 하나도 없는 외톨이 카드도 빈 관계 줄로 남겨 빠지지 않게 한다. */
 function conceptGraphToCsv(model){
   const nodes = (model && model.nodes) || [], byId = new Map(nodes.map(node => [node.id, node]));
-  const rows = [["개념", "분류", "설명", "관계", "대상", "연결선"]], linked = new Set();
+  const rows = [["개념", "분류", "설명", "관계", "대상", "연결선", "강도"]], linked = new Set();
   for (const edge of (model && model.edges) || []){
     const from = byId.get(edge.from), to = byId.get(edge.to);
     if (!from || !to) continue;
     linked.add(from.id);
     const relation = CONCEPT_RELATIONS.find(item => item.id === edge.type);
-    rows.push([from.title, from.category, from.description, relation ? relation.label : "관련", to.title, edge.label]);
+    rows.push([from.title, from.category, from.description, relation ? relation.label : "관련", to.title, edge.label, conceptNormalizeWeight(edge.weight)]);
   }
-  for (const node of nodes) if (!linked.has(node.id)) rows.push([node.title, node.category, node.description, "", "", ""]);
+  for (const node of nodes) if (!linked.has(node.id)) rows.push([node.title, node.category, node.description, "", "", "", ""]);
   return rows.map(row => row.map(conceptCsvCell).join(",")).join("\r\n");
 }
 
@@ -361,7 +555,8 @@ function conceptMergeGraph(model, incoming, options = {}){
   const byKey = new Map(nodes.map(node => [conceptMatchKey(node.title), node]));
   const edgeKeys = new Set(edges.map(edge => edge.from + "\u0000" + edge.to + "\u0000" + edge.type));
   const idMap = new Map();
-  let added = 0, reused = 0, addedEdges = 0, dropped = 0, droppedEdges = 0;
+  let added = 0, reused = 0, addedEdges = 0, dropped = 0, droppedEdges = 0, updatedEdges = 0;
+  const explicitWeights = Array.isArray(incoming && incoming.weightEdgeIds) ? new Set(incoming.weightEdgeIds) : null;
   for (const raw of (incoming && incoming.nodes) || []){
     const node = conceptNormalizeNode(raw, nodes.length), key = conceptMatchKey(node.title);
     if (!key){ dropped++; continue; }
@@ -378,10 +573,17 @@ function conceptMergeGraph(model, incoming, options = {}){
     const from = idMap.get(raw.from), to = idMap.get(raw.to);
     if (!from || !to || from === to){ droppedEdges++; continue; }
     const type = conceptRelationId(raw.type, "related"), key = from + "\u0000" + to + "\u0000" + type;
-    if (edgeKeys.has(key) || edges.length >= CONCEPT_MAX_EDGES){ droppedEdges++; continue; }
-    edges.push(conceptNormalizeEdge({ from, to, type, label:raw.label })); edgeKeys.add(key); addedEdges++;
+    if (edgeKeys.has(key)){
+      if (explicitWeights ? explicitWeights.has(raw.id) : raw.weight != null){
+        const weight = conceptNormalizeWeight(raw.weight);
+        edges.filter(edge => edge.from === from && edge.to === to && edge.type === type).forEach(edge => { if (edge.weight !== weight){ edge.weight = weight; updatedEdges++; } });
+      }
+      droppedEdges++; continue;
+    }
+    if (edges.length >= CONCEPT_MAX_EDGES){ droppedEdges++; continue; }
+    edges.push(conceptNormalizeEdge({ from, to, type, label:raw.label, weight:raw.weight })); edgeKeys.add(key); addedEdges++;
   }
-  return { nodes, edges, added, reused, addedEdges, dropped, droppedEdges };
+  return { nodes, edges, added, reused, addedEdges, dropped, droppedEdges, updatedEdges };
 }
 
 function conceptDefaultTitle(name){ return String(name || "").replace(/\.concept$/i, "") || "개념 관계도"; }
@@ -462,7 +664,7 @@ function mountConceptEditor(doc){
   const model = doc.conceptDoc, root = document.createElement("div"); root.className = "concept-doc"; doc.el.appendChild(root);
   const bar = document.createElement("div"); bar.className = "concept-bar";
   const titleInput = document.createElement("input"); titleInput.className = "concept-title"; titleInput.maxLength = 160; titleInput.value = model.title; titleInput.placeholder = "관계도 제목";
-  const addNodeBtn = conceptButton("＋ 개념", "새 개념 카드 추가", "concept-btn concept-primary"), addEdgeBtn = conceptButton("＋ 관계", "두 개념 사이 관계 추가"), autoBtn = conceptButton("자동 정렬 ▾", "가계도·방사형·원형·흐름형·격자형 중에서 배치 선택");
+  const addNodeBtn = conceptButton("＋ 개념", "새 개념 카드 추가", "concept-btn concept-primary"), addEdgeBtn = conceptButton("＋ 관계", "두 개념 사이 관계 추가"), autoBtn = conceptButton("자동 정렬 ▾", "군집형·관계 강도형·중심 집중형·가계도·방사형·원형·흐름형·격자형 중에서 배치 선택");
   const undoBtn = conceptButton("↶", "실행 취소 (Ctrl+Z)"), redoBtn = conceptButton("↷", "다시 실행 (Ctrl+Shift+Z)");
   const search = document.createElement("input"); search.type = "search"; search.className = "concept-search"; search.placeholder = "개념·설명 검색";
   const orderBtn = conceptButton("① 순서", "전개 발표에서 카드가 나올 순서 정하기"), animationSelect = document.createElement("select"); animationSelect.className = "concept-animation"; animationSelect.title = "전개 발표 애니메이션"; animationSelect.setAttribute("aria-label", "전개 발표 애니메이션");
@@ -472,7 +674,9 @@ function mountConceptEditor(doc){
   const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
   const edgePicked = document.createElement("div"); edgePicked.className = "concept-edge-picked"; edgePicked.hidden = true; edgePicked.setAttribute("aria-live", "polite");
   const edgePickedCount = document.createElement("span"), edgePickedClear = conceptButton("선택 해제", "고른 관계선을 모두 놓기 (Esc)", "concept-edge-picked-clear");
-  edgePicked.append(edgePickedCount, edgePickedClear);
+  const edgeWeightBtn = conceptButton("강도 설정", "선택한 관계선의 강도를 한꺼번에 변경", "concept-edge-picked-clear");
+  edgeWeightBtn.onclick = () => openEdgeWeightDialog();
+  edgePicked.append(edgePickedCount, edgeWeightBtn, edgePickedClear);
   // 알림은 도구막대 맨 끝에 둔다(나타났다 사라져도 다른 버튼이 밀리지 않는다).
   bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, tableBtn, presentBtn, buildPresentBtn, printBtn, saveBtn, edgePicked);
   const viewport = document.createElement("div"); viewport.className = "concept-viewport"; viewport.tabIndex = 0;
@@ -493,7 +697,7 @@ function mountConceptEditor(doc){
   };
   const touch = () => { if (typeof markDocumentDirty === "function") markDocumentDirty(doc, snapshot() !== doc._conceptSavedSnapshot); clearTimeout(recoveryTimer); recoveryTimer = setTimeout(flushRecovery, CONCEPT_RECOVERY_DELAY); };
   doc.flushBackupRecovery = flushRecovery;
-  const replaceModel = restored => { model.title = restored.title; model.layout = restored.layout; model.layoutStyle = restored.layoutStyle; model.layoutSpacing = restored.layoutSpacing; model.nodes = restored.nodes; model.edges = restored.edges; model.presentation = restored.presentation; titleInput.value = model.title; animationSelect.value = model.presentation.animation; if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = ""; render(); touch(); };
+  const replaceModel = restored => { model.title = restored.title; model.layout = restored.layout; model.layoutStyle = restored.layoutStyle; model.layoutSpacing = restored.layoutSpacing; Object.assign(model, conceptLayoutSettings(restored)); model.nodes = restored.nodes; model.edges = restored.edges; model.presentation = restored.presentation; titleInput.value = model.title; animationSelect.value = model.presentation.animation; if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = ""; render(); touch(); };
   history = MNEditHistory.create({ capture:snapshot, isEqual:(a, b) => a === b, apply:value => replaceModel(conceptSnapshotModel(value)), onChange:() => { undoBtn.disabled = !history.canUndo(); redoBtn.disabled = !history.canRedo(); }, limit:CONCEPT_HISTORY_LIMIT });
   history.reset(); doc._conceptHistory = history;
 
@@ -604,8 +808,9 @@ function mountConceptEditor(doc){
       // 후광은 판정선과 따로 둔다. 한 장으로 겸하면 후광을 굵게 하는 만큼 누르는 자리도 넓어져 화면 끌기를 잡아먹는다.
       const hit = document.createElementNS(svg.namespaceURI, "path"); hit.setAttribute("d", shape); hit.classList.add("concept-edge-hit");
       const halo = document.createElementNS(svg.namespaceURI, "path"); halo.setAttribute("d", shape); halo.classList.add("concept-edge-halo");
-      const tip = document.createElementNS(svg.namespaceURI, "title"); tip.textContent = "클릭: 관계선 고르기 · 두 번 클릭: 수정";
+      const tip = document.createElementNS(svg.namespaceURI, "title"); tip.textContent = `관계 강도: ${conceptNormalizeWeight(edge.weight)}/5 · 클릭: 관계선 고르기 · 두 번 클릭: 수정`;
       const path = document.createElementNS(svg.namespaceURI, "path"); path.setAttribute("d", shape); path.setAttribute("marker-end", "url(#conceptArrow)"); path.classList.add("concept-edge-path", "is-" + edge.type);
+      if (model.showWeights) path.style.setProperty("--concept-edge-width", String(1 + conceptNormalizeWeight(edge.weight) * .5));
       const label = document.createElementNS(svg.namespaceURI, "text"); label.classList.add("concept-edge-label"); label.setAttribute("x", String((from.x + to.x) / 2 + 115)); label.setAttribute("y", String((from.y + to.y) / 2 + 55)); label.textContent = edge.label || (CONCEPT_RELATIONS.find(item => item.id === edge.type) || {}).label || "관련";
       group.append(tip, hit, halo, path, label); group.addEventListener("click", event => selectEdge(edge.id, event.ctrlKey || event.metaKey)); group.addEventListener("dblclick", () => openEdgeDialog(edge.id));
       group.addEventListener("pointerenter", () => { hoverEdgeId = edge.id; refreshLinkedCards(); });
@@ -672,10 +877,12 @@ function mountConceptEditor(doc){
     syncCanvasSize();
     cards.innerHTML = ""; const query = search.value.trim().toLowerCase(), orderById = new Map(model.presentation.order.map((id, index) => [id, index + 1]));
     for (const node of model.nodes){
-      const card = document.createElement("article"); card.className = "concept-card" + (node.id === selectedId ? " is-selected" : ""); card.dataset.nodeId = node.id; card.style.left = node.x + "px"; card.style.top = node.y + "px"; card.style.setProperty("--concept-color", CONCEPT_COLORS[node.color]);
-      card.tabIndex = 0; card.title = "클릭: 크게 보기 · 끌기: 이동 · 두 번 클릭: 수정"; card.setAttribute("aria-label", node.title + " 카드. Enter 키로 크게 보기");
+      const card = document.createElement("article"); card.className = "concept-card" + (node.id === selectedId ? " is-selected" : "") + (node.pinned ? " is-pinned" : ""); card.dataset.nodeId = node.id; card.style.left = node.x + "px"; card.style.top = node.y + "px"; card.style.setProperty("--concept-color", CONCEPT_COLORS[node.color]);
+      card.tabIndex = 0; card.title = node.pinned ? "위치 고정됨 · 이동하려면 고정 해제 · 클릭: 크게 보기 · 두 번 클릭: 수정" : "클릭: 크게 보기 · 끌기: 이동 · 두 번 클릭: 수정"; card.setAttribute("aria-label", node.title + (node.pinned ? " 위치 고정 카드." : " 카드.") + " Enter 키로 크게 보기");
       if (query && ![node.title, node.category, node.description].join(" ").toLowerCase().includes(query)) card.classList.add("is-muted");
-      const head = document.createElement("div"); head.className = "concept-card-head"; const headLabel = document.createElement("div"), order = document.createElement("span"), category = document.createElement("small"); headLabel.className = "concept-card-label"; order.className = "concept-order-badge"; order.textContent = String(orderById.get(node.id) || "–"); order.title = "발표 순서"; category.textContent = node.category || "개념"; headLabel.append(order, category); const edit = conceptButton("⋯", "개념 수정", "concept-card-edit"); head.append(headLabel, edit);
+      const head = document.createElement("div"); head.className = "concept-card-head"; const headLabel = document.createElement("div"), order = document.createElement("span"), category = document.createElement("small"); headLabel.className = "concept-card-label"; order.className = "concept-order-badge"; order.textContent = String(orderById.get(node.id) || "–"); order.title = "발표 순서"; category.textContent = node.category || "개념"; headLabel.append(order, category); const edit = conceptButton("⋯", "개념 수정", "concept-card-edit"); const actions = document.createElement("div"); actions.className = "concept-card-actions";
+      const pin = conceptButton(node.pinned ? "고정됨" : "고정", node.pinned ? "위치 고정 해제" : "위치 고정 · 자동정렬과 끌기에서 제자리 유지", "concept-card-pin"); pin.setAttribute("aria-pressed", String(node.pinned)); actions.append(pin, edit); head.append(headLabel, actions);
+      pin.addEventListener("click", event => { event.stopPropagation(); clearTimeout(previewTimer); previewTimer = 0; node.pinned = !node.pinned; history.commit(); touch(); render(); Array.from(cards.children).find(item => item.dataset.nodeId === node.id)?.querySelector(".concept-card-pin")?.focus(); });
       const title = document.createElement("h3"); title.textContent = node.title; const body = document.createElement("div"); body.className = "concept-card-body";
       if (node.image){ const img = document.createElement("img"); img.src = node.image.dataUrl; img.alt = ""; body.appendChild(img); }
       const description = document.createElement("p"); description.textContent = node.description || "설명을 입력하세요."; body.appendChild(description); card.append(head, title, body); cards.appendChild(card);
@@ -683,7 +890,7 @@ function mountConceptEditor(doc){
       card.addEventListener("click", () => { if (suppressCardClick){ suppressCardClick = false; return; } selectCard(node.id); clearTimeout(previewTimer); previewTimer = setTimeout(() => { previewTimer = 0; openNodePreview(node.id, card); }, 220); });
       card.addEventListener("dblclick", event => { if (event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; openNodeDialog(node.id); });
       card.addEventListener("keydown", event => { if (event.target !== card || event.key !== "Enter") return; event.preventDefault(); selectCard(node.id); openNodePreview(node.id, card); });
-      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
+      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); if (node.pinned) return; drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
       card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) setPan(panX - dx, panY - dy); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); });
       const finish = event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const changed = node.x !== drag.ox || node.y !== drag.oy; drag = null; card.classList.remove("is-dragging"); if (changed){ suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 0); model.layout = "free"; history.commit(); touch(); } };
       card.addEventListener("pointerup", finish); card.addEventListener("pointercancel", finish);
@@ -693,14 +900,39 @@ function mountConceptEditor(doc){
   }
   doc.conceptSelectNode = (id, center) => { const node = model.nodes.find(item => item.id === id); if (!node) return false; selectedId = id; lastPick = "card"; render(); if (center) setPan(viewport.clientWidth / 2 - (node.x + 115) * zoom, viewport.clientHeight / 2 - (node.y + 65) * zoom, true); return true; };
 
+  function weightSelect(value){
+    const select = document.createElement("select");
+    [[1,"1 · 매우 약함"], [2,"2 · 약함"], [3,"3 · 보통"], [4,"4 · 강함"], [5,"5 · 매우 강함"]].forEach(([number, text]) => { const option = document.createElement("option"); option.value = String(number); option.textContent = text; select.appendChild(option); });
+    select.value = String(conceptNormalizeWeight(value)); return select;
+  }
+  function openEdgeWeightDialog(){
+    const ids = new Set(selectedEdgeIds), chosen = model.edges.filter(edge => ids.has(edge.id)); if (!chosen.length) return;
+    const body = document.createElement("div"); body.className = "concept-form";
+    body.innerHTML = '<label class="wide cw-field"><span>관계 강도</span></label><p class="wide cw-note"></p><footer class="wide"><button type="button" class="cw-cancel">취소</button><button type="button" class="cw-save primary">강도 적용</button></footer>';
+    const ui = conceptModal(`관계선 ${chosen.length}개 강도 설정`, body), select = weightSelect(chosen[0].weight);
+    if (new Set(chosen.map(edge => conceptNormalizeWeight(edge.weight))).size > 1){ const mixed = document.createElement("option"); mixed.value = ""; mixed.textContent = "서로 다름 · 적용할 강도를 고르세요"; mixed.disabled = true; select.prepend(mixed); select.value = ""; }
+    body.querySelector(".cw-field").appendChild(select);
+    body.querySelector(".cw-note").textContent = "강도를 저장한 뒤 자동 정렬을 적용하면 배치에 반영됩니다.";
+    const save = body.querySelector(".cw-save"); save.disabled = !select.value; select.onchange = () => { save.disabled = !select.value; };
+    body.querySelector(".cw-cancel").onclick = ui.dispose;
+    save.onclick = () => { if (!select.value) return; model.edges.forEach(edge => { if (ids.has(edge.id)) edge.weight = conceptNormalizeWeight(select.value); }); ui.dispose(); history.commit(); touch(); render(); };
+  }
   function openAutoLayoutDialog(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("정렬할 카드가 없어요.", 2200); return; }
-    const body = document.createElement("div"); body.className = "concept-layout-form"; body.innerHTML = '<fieldset><legend>배치 방식</legend><div class="concept-layout-choices"></div></fieldset><fieldset><legend>카드 간격</legend><div class="concept-layout-spacing"></div></fieldset><label class="concept-layout-fit"><input type="checkbox" checked><span><strong>정렬 뒤 화면에 맞춤</strong><small>관계도 전체가 최대한 보이도록 배율을 자동 조절합니다.</small></span></label><p class="concept-layout-root"></p><footer><button type="button" class="cl-cancel">취소</button><button type="button" class="cl-apply primary">정렬 적용</button></footer>';
+    const body = document.createElement("div"); body.className = "concept-layout-form"; body.innerHTML = '<fieldset><legend>배치 방식</legend><div class="concept-layout-choices"></div></fieldset><fieldset><legend>카드 간격</legend><div class="concept-layout-spacing"></div></fieldset><label class="concept-layout-fit"><input type="checkbox" checked><span><strong>정렬 뒤 화면에 맞춤</strong><small>관계도 전체가 최대한 보이도록 배율을 자동 조절합니다.</small></span></label><p class="concept-layout-root"></p><p class="concept-layout-pinned"></p><fieldset class="cl-weight-settings"><legend>관계 강도 반영</legend><label><input type="checkbox" class="cl-weighted"> 강도에 따라 거리·묶음 조절</label><label>영향도 <select class="cl-influence"><option value="weak">약하게</option><option value="normal">보통</option><option value="strong">강하게</option></select></label><small>군집형·관계 강도형·중심 집중형에 적용됩니다. 카드가 겹치면 간격을 우선 확보합니다.</small></fieldset><label class="cl-root-field">중심 카드 <select class="cl-root"></select></label><label><input type="checkbox" class="cl-show-weights"> 관계 강도를 선 굵기로 표시</label><footer><button type="button" class="cl-cancel">취소</button><button type="button" class="cl-apply primary">정렬 적용</button></footer>';
     const ui = conceptModal("자동 정렬", body), choices = body.querySelector(".concept-layout-choices"), spacing = body.querySelector(".concept-layout-spacing");
     CONCEPT_LAYOUTS.forEach(item => { const label = document.createElement("label"); label.className = "concept-layout-choice"; const input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-mode"; input.value = item.id; input.checked = item.id === model.layoutStyle; const copy = document.createElement("span"), strong = document.createElement("strong"), small = document.createElement("small"); strong.textContent = item.label; small.textContent = item.description; copy.append(strong, small); label.append(input, copy); choices.appendChild(label); });
     [["tight", "좁게"], ["normal", "보통"], ["wide", "넓게"]].forEach(([value, text]) => { const label = document.createElement("label"), input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-spacing"; input.value = value; input.checked = value === model.layoutSpacing; label.append(input, document.createTextNode(text)); spacing.appendChild(label); });
-    const rootNode = model.nodes.find(node => node.id === selectedId); body.querySelector(".concept-layout-root").textContent = rootNode ? `방사형 중심: 선택한 카드 ‘${rootNode.title}’` : "방사형 중심: 관계의 시작 카드(들어오는 방향 관계가 없는 카드)";
-    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:selectedId }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true); };
+    const weighted = body.querySelector(".cl-weighted"), influence = body.querySelector(".cl-influence"), showWeights = body.querySelector(".cl-show-weights"), rootSelect = body.querySelector(".cl-root");
+    weighted.checked = model.layoutWeighted; influence.value = model.layoutInfluence; showWeights.checked = model.showWeights;
+    const automatic = document.createElement("option"); automatic.value = ""; automatic.textContent = "자동 · 관계의 시작 카드"; rootSelect.appendChild(automatic);
+    model.nodes.forEach(node => { const option = document.createElement("option"); option.value = node.id; option.textContent = node.title; rootSelect.appendChild(option); });
+    rootSelect.value = selectedId || model.layoutRootId || "";
+    const pinnedCount = model.nodes.filter(node => node.pinned).length; body.querySelector(".concept-layout-pinned").textContent = pinnedCount ? `위치 고정 카드 ${pinnedCount}개는 제자리에 두고 나머지를 정렬합니다. 고정 위치를 우선하므로 묶음 모양과 관계 방향이 달라질 수 있습니다.` : "카드의 ‘고정’을 누르면 모든 자동정렬에서 그 위치를 유지합니다.";
+    const syncSettings = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, usesWeights = mode === "cluster" || mode === "weighted" || mode === "focus"; body.querySelector(".cl-weight-settings").disabled = !usesWeights; influence.disabled = !usesWeights || !weighted.checked; rootSelect.disabled = mode !== "radial" && mode !== "focus"; };
+    choices.onchange = syncSettings; weighted.onchange = syncSettings; syncSettings();
+    body.querySelector(".concept-layout-root").textContent = "중심 카드는 방사형·중심 집중형에 적용됩니다. 중심 집중형은 연결되지 않은 묶음을 따로 정돈합니다.";
+    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.layoutWeighted = weighted.checked; model.layoutInfluence = influence.value; model.showWeights = showWeights.checked; model.layoutRootId = rootSelect.value; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:rootSelect.value, weighted:weighted.checked, influence:influence.value }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true); };
     setTimeout(() => choices.querySelector("input:checked")?.focus(), 0);
   }
 
@@ -731,8 +963,8 @@ function mountConceptEditor(doc){
 
   function openNodeDialog(id){
     const current = model.nodes.find(node => node.id === id) || null, body = document.createElement("div"); body.className = "concept-form";
-    body.innerHTML = '<label><span>개념 이름</span><input class="cn-title" maxlength="120"></label><label><span>분류</span><input class="cn-category" maxlength="60" placeholder="예: 원인·인물·공식"></label><label><span>색상</span><select class="cn-color"><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">빨강</option><option value="purple">보라</option><option value="slate">검정</option></select></label><label class="wide"><span>설명</span><textarea class="cn-description" rows="6" maxlength="3000"></textarea></label><div class="concept-photo wide"><span>사진</span><div class="cn-photo-preview"></div><button type="button" class="cn-photo-pick">사진 넣기</button><button type="button" class="cn-photo-remove">지우기</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="concept-form-error wide" role="alert"></p><footer class="wide"><button type="button" class="cn-delete danger">삭제</button><span></span><button type="button" class="cn-cancel">취소</button><button type="button" class="cn-save primary">저장</button></footer>';
-    const ui = conceptModal(current ? "개념 수정" : "새 개념", body), title = body.querySelector(".cn-title"), category = body.querySelector(".cn-category"), color = body.querySelector(".cn-color"), description = body.querySelector(".cn-description"); let image = current && current.image ? current.image : null;
+    body.innerHTML = '<label><span>개념 이름</span><input class="cn-title" maxlength="120"></label><label><span>분류</span><input class="cn-category" maxlength="60" placeholder="예: 원인·인물·공식"></label><label><span>색상</span><select class="cn-color"><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">빨강</option><option value="purple">보라</option><option value="slate">검정</option></select></label><label class="wide"><span>설명</span><textarea class="cn-description" rows="6" maxlength="3000"></textarea></label><label class="wide concept-pin-field"><input type="checkbox" class="cn-pinned"><span>카드 위치 고정 · 자동정렬과 끌기에서 제자리 유지</span></label><div class="concept-photo wide"><span>사진</span><div class="cn-photo-preview"></div><button type="button" class="cn-photo-pick">사진 넣기</button><button type="button" class="cn-photo-remove">지우기</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="concept-form-error wide" role="alert"></p><footer class="wide"><button type="button" class="cn-delete danger">삭제</button><span></span><button type="button" class="cn-cancel">취소</button><button type="button" class="cn-save primary">저장</button></footer>';
+    const ui = conceptModal(current ? "개념 수정" : "새 개념", body), title = body.querySelector(".cn-title"), category = body.querySelector(".cn-category"), color = body.querySelector(".cn-color"), description = body.querySelector(".cn-description"), pinned = body.querySelector(".cn-pinned"); pinned.checked = !!(current && current.pinned); let image = current && current.image ? current.image : null;
     title.value = current ? current.title : ""; category.value = current ? current.category : ""; color.value = current ? current.color : "blue"; description.value = current ? current.description : "";
     const preview = body.querySelector(".cn-photo-preview"), photoInput = body.querySelector("input[type=file]"); const showPhoto = () => { preview.innerHTML = ""; if (image){ const img = document.createElement("img"); img.src = image.dataUrl; img.alt = "선택한 사진"; preview.appendChild(img); } else preview.textContent = "사진 없음"; };
     showPhoto(); body.querySelector(".cn-photo-pick").onclick = () => photoInput.click(); body.querySelector(".cn-photo-remove").onclick = () => { image = null; showPhoto(); };
@@ -740,8 +972,8 @@ function mountConceptEditor(doc){
     body.querySelector(".cn-cancel").onclick = ui.dispose; const del = body.querySelector(".cn-delete"); del.hidden = !current;
     del.onclick = async () => { if (typeof confirmDialog !== "function" || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return; model.nodes = model.nodes.filter(node => node.id !== current.id); model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id); model.presentation = conceptNormalizePresentation(model.presentation, model.nodes); selectedId = ""; ui.dispose(); history.commit(); touch(); render(); };
     body.querySelector(".cn-save").onclick = () => { if (!title.value.trim()){ body.querySelector(".concept-form-error").textContent = "개념 이름을 입력하세요."; title.focus(); return; }
-      if (current) Object.assign(current, { title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image });
-      else { if (model.nodes.length >= CONCEPT_MAX_NODES){ body.querySelector(".concept-form-error").textContent = "개념은 최대 300개까지 넣을 수 있어요."; return; } const count = model.nodes.length, node = conceptNormalizeNode({ title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, x:80 + count % 5 * 290, y:80 + Math.floor(count / 5) * 180 }, count); model.nodes.push(node); model.presentation.order.push(node.id); selectedId = node.id; }
+      if (current) Object.assign(current, { title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked });
+      else { if (model.nodes.length >= CONCEPT_MAX_NODES){ body.querySelector(".concept-form-error").textContent = "개념은 최대 300개까지 넣을 수 있어요."; return; } const count = model.nodes.length, node = conceptNormalizeNode({ title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked, x:80 + count % 5 * 290, y:80 + Math.floor(count / 5) * 180 }, count); model.nodes.push(node); model.presentation.order.push(node.id); selectedId = node.id; }
       ui.dispose(); history.commit(); touch(); render(); };
     setTimeout(() => title.focus(), 0);
   }
@@ -749,12 +981,13 @@ function mountConceptEditor(doc){
   function openEdgeDialog(id){
     if (model.nodes.length < 2){ if (typeof toast === "function") toast("관계를 만들려면 개념이 두 개 이상 필요해요.", 2800); return; }
     const current = model.edges.find(edge => edge.id === id) || null, body = document.createElement("div"); body.className = "concept-form";
-    body.innerHTML = '<label><span>시작 개념</span><select class="ce-from"></select></label><label><span>관계 종류</span><select class="ce-type"></select></label><label><span>도착 개념</span><select class="ce-to"></select></label><label class="wide"><span>연결선에 표시할 말</span><input class="ce-label" maxlength="80" placeholder="예: 때문에·포함한다·공통점"></label><p class="concept-form-error wide" role="alert"></p><footer class="wide"><button type="button" class="ce-delete danger">삭제</button><span></span><button type="button" class="ce-cancel">취소</button><button type="button" class="ce-save primary">저장</button></footer>';
+    body.innerHTML = '<label><span>시작 개념</span><select class="ce-from"></select></label><label><span>관계 종류</span><select class="ce-type"></select></label><label><span>도착 개념</span><select class="ce-to"></select></label><label class="wide"><span>연결선에 표시할 말</span><input class="ce-label" maxlength="80" placeholder="예: 때문에·포함한다·공통점"></label><label class="wide ce-weight-field"><span>관계 강도</span></label><p class="wide">강도가 높을수록 새 자동정렬에서 가까워집니다. 저장 후 정렬을 적용하세요.</p><p class="concept-form-error wide" role="alert"></p><footer class="wide"><button type="button" class="ce-delete danger">삭제</button><span></span><button type="button" class="ce-cancel">취소</button><button type="button" class="ce-save primary">저장</button></footer>';
+    const weight = weightSelect(current ? current.weight : 3); body.querySelector(".ce-weight-field").appendChild(weight);
     const ui = conceptModal(current ? "관계 수정" : "새 관계", body), from = body.querySelector(".ce-from"), to = body.querySelector(".ce-to"), type = body.querySelector(".ce-type"), label = body.querySelector(".ce-label");
     model.nodes.forEach(node => { [from, to].forEach(select => { const option = document.createElement("option"); option.value = node.id; option.textContent = node.title; select.appendChild(option); }); }); CONCEPT_RELATIONS.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.label; type.appendChild(option); });
     from.value = current ? current.from : (selectedId || model.nodes[0].id); to.value = current ? current.to : model.nodes.find(node => node.id !== from.value).id; type.value = current ? current.type : "cause"; label.value = current ? current.label : "";
     body.querySelector(".ce-cancel").onclick = ui.dispose; const del = body.querySelector(".ce-delete"); del.hidden = !current; del.onclick = () => { model.edges = model.edges.filter(edge => edge.id !== current.id); ui.dispose(); history.commit(); touch(); render(); };
-    body.querySelector(".ce-save").onclick = () => { if (from.value === to.value){ body.querySelector(".concept-form-error").textContent = "서로 다른 개념을 고르세요."; return; } if (current) Object.assign(current, { from:from.value, to:to.value, type:type.value, label:label.value.trim() }); else if (model.edges.length < CONCEPT_MAX_EDGES) model.edges.push(conceptNormalizeEdge({ from:from.value, to:to.value, type:type.value, label:label.value.trim() })); ui.dispose(); history.commit(); touch(); render(); };
+    body.querySelector(".ce-save").onclick = () => { if (from.value === to.value){ body.querySelector(".concept-form-error").textContent = "서로 다른 개념을 고르세요."; return; } if (current) Object.assign(current, { from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) }); else if (model.edges.length < CONCEPT_MAX_EDGES) model.edges.push(conceptNormalizeEdge({ from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) })); ui.dispose(); history.commit(); touch(); render(); };
   }
 
   function startPresentation(){
@@ -781,6 +1014,7 @@ function mountConceptEditor(doc){
       const from = model.nodes.find(node => node.id === edge.from), to = model.nodes.find(node => node.id === edge.to), fromIndex = orderIndex.get(edge.from), toIndex = orderIndex.get(edge.to); if (!from || !to || fromIndex == null || toIndex == null) continue;
       const group = document.createElementNS(buildSvg.namespaceURI, "g"); group.classList.add("concept-edge", "concept-build-edge", "is-build-hidden"); group.dataset.revealStep = String(Math.max(fromIndex, toIndex) + 1);
       const path = document.createElementNS(buildSvg.namespaceURI, "path"); path.setAttribute("d", edgePath(from, to)); path.setAttribute("marker-end", `url(#${markerId})`); path.classList.add("concept-edge-path", "is-" + edge.type);
+      if (model.showWeights) path.style.setProperty("--concept-edge-width", String(1 + conceptNormalizeWeight(edge.weight) * .5));
       const label = document.createElementNS(buildSvg.namespaceURI, "text"); label.classList.add("concept-edge-label"); label.setAttribute("x", String((from.x + to.x) / 2 + 115)); label.setAttribute("y", String((from.y + to.y) / 2 + 55)); label.textContent = edge.label || (CONCEPT_RELATIONS.find(item => item.id === edge.type) || {}).label || "관련";
       group.append(path, label); buildSvg.appendChild(group); edgeElements.push(group);
     }
@@ -854,7 +1088,7 @@ function mountConceptEditor(doc){
         && !await confirmDialog(`지금 있는 카드 ${model.nodes.length}개를 지우고 ${source}의 내용으로 바꿀까요?`, "바꾸기", "취소")) return;
       const mode = layoutSelect.value, merged = conceptMergeGraph(model, incoming, { replace });
       model.edges = merged.edges;
-      model.nodes = conceptAutoLayout(merged.nodes, merged.edges, { mode, spacing:model.layoutSpacing, rootId:selectedId });
+      model.nodes = conceptAutoLayout(merged.nodes, merged.edges, { mode, spacing:model.layoutSpacing, rootId:selectedId || model.layoutRootId, weighted:model.layoutWeighted, influence:model.layoutInfluence });
       model.layout = "auto"; model.layoutStyle = mode;
       model.presentation = conceptNormalizePresentation(model.presentation, model.nodes);
       if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = "";
@@ -862,6 +1096,7 @@ function mountConceptEditor(doc){
       if (body.querySelector(".ci-fit input").checked) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true);
       outline.value = conceptGraphToOutline(model);
       const parts = [`${source}에서 카드 ${merged.added}개·관계 ${merged.addedEdges}개를 넣었어요.`];
+      if (merged.updatedEdges) parts.push(`기존 관계 ${merged.updatedEdges}개 강도 갱신`);
       if (merged.reused) parts.push(`이름이 같은 카드 ${merged.reused}개는 그대로 뒀어요`);
       if (incoming.skipped) parts.push(`이름이 빈 ${incoming.skipped}줄 제외`);
       if (merged.dropped || incoming.truncated) parts.push(`카드 ${CONCEPT_MAX_NODES}개 한도를 넘어 일부 제외`);
@@ -915,7 +1150,7 @@ function mountConceptEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, CONCEPT_LAYOUTS, CONCEPT_LAYOUT_SPACING, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
-    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle,
+    conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptClusterGroups, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle,
     CONCEPT_TABLE_COLUMNS, CONCEPT_TREE_RELATIONS, conceptHeaderKey, conceptMatchKey, conceptRelationId, conceptColorId, conceptDefaultRelation, conceptCsvDelimiter, conceptCsvRows, conceptCsvCell,
     conceptGraphFromRows, conceptOutlineParse, conceptGraphToOutline, conceptGraphToCsv, conceptMergeGraph };
 }
