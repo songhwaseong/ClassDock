@@ -273,11 +273,20 @@ function workspaceSerializableRegistry(){
     activeKey:rec.activeKey, mruKeys:rec.mruKeys, study:rec.study, boards:rec.boards, sidebarCollapsed:rec.sidebarCollapsed,
     sidebarSearch:rec.sidebarSearch, splitStacked:rec.splitStacked, splitSwapped:rec.splitSwapped })) };
 }
+// 자동 복원이 끝나기 전에는 저장하지 않는다.
+// 복원 중 만들어지는 문서는 makeDoc → workspaceRegisterDoc 으로 전부 "활성 작업공간 소속"이 되므로,
+// 이때 저장하면 다른 작업공간의 파일까지 활성 작업공간 docKeys 에 섞여 영구히 남는다.
+// (파일이 많으면 복원 중 350ms 틈이 생겨 예약된 저장이 실제로 먼저 터진다.)
+// 진짜 소속은 finalizeWorkspaceRestore 가 저장된 docKeys 로 다시 정하고, 그 뒤부터 저장이 열린다.
 function workspacePersistNow(){
   clearTimeout(workspacePersistTimer); workspacePersistTimer = 0;
+  if (!workspaceSystemReady) return;
   try { localStorage.setItem(CLASSDOCK_WORKSPACES_KEY, JSON.stringify(workspaceSerializableRegistry())); } catch(_){ }
 }
-function workspaceSchedulePersist(){ clearTimeout(workspacePersistTimer); workspacePersistTimer = setTimeout(workspacePersistNow, 350); }
+function workspaceSchedulePersist(){
+  if (!workspaceSystemReady) return;
+  clearTimeout(workspacePersistTimer); workspacePersistTimer = setTimeout(workspacePersistNow, 350);
+}
 
 function workspaceHydrateRuntime(rec, keyToDoc){
   rec.runtimeDocIds = new Set(rec.docKeys.map(key => keyToDoc.get(key)).filter(Boolean).map(doc => doc.id));
