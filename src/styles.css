@@ -7267,3 +7267,41 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 
 .concept-card-actions{display:flex;align-items:center;gap:3px;flex:none}.concept-card-label small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.concept-card-pin{border:1px solid var(--border);border-radius:5px;background:var(--field);color:var(--muted);padding:2px 4px;font:inherit;font-size:10px;white-space:nowrap;cursor:pointer}.concept-card-pin[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 13%,var(--field));border-color:var(--accent);color:var(--accent)}.concept-card-pin:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.concept-card.is-pinned{cursor:default}.concept-form .concept-pin-field{display:flex;align-items:center;gap:8px}.concept-form .concept-pin-field input{width:auto}.concept-layout-pinned{margin:0;font-size:12px;color:var(--muted);line-height:1.5}
 @media print{body.concept-printing .concept-card-actions{display:none!important}}
+
+/* 움직이는 반경 보기: 지도 칸에만 얹고 출력에서는 편집 패널 대신 요약을 담는다. */
+.map-radius-panel{position:absolute;left:10px;bottom:48px;z-index:850;width:310px;max-width:calc(100% - 20px);max-height:calc(100% - 70px);overflow:auto;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:0 3px 14px #0f172a33;font:12px/1.5 system-ui,"Malgun Gothic",sans-serif;cursor:default}
+.map-radius-panel[hidden],.map-radius-panel [hidden],.map-radius-export[hidden],.map-radius-list-reset[hidden]{display:none!important}
+.map-radius-head,.map-radius-presets,.map-radius-actions,.map-radius-form{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.map-radius-head{justify-content:space-between}
+.map-radius-presets{margin-top:8px}
+.map-radius-form{margin-top:7px}
+.map-radius-form label{display:flex;align-items:center;flex-wrap:wrap;gap:5px}
+.map-radius-input{width:84px;min-width:0;border:1px solid var(--border);border-radius:5px;padding:4px 6px;background:var(--field);color:var(--ink);font:inherit}
+.map-radius-panel .map-btn.is-on{background:var(--accent);color:#fff}
+.map-radius-summary{font-weight:700;margin:9px 0 3px}
+.map-radius-counts{margin:0 0 9px;overflow-wrap:anywhere}
+.map-radius-note{color:var(--muted);font-size:11px;margin:8px 0 0}
+.map-radius-panel.is-collapsed{width:auto;padding:6px}
+.map-radius-panel.is-collapsed strong{display:none}
+.map-radius-center{display:grid!important;place-items:center;background:#fff;border:2px solid #0e7490;border-radius:50%;box-sizing:border-box;color:#0e7490;font:700 24px/1 system-ui;box-shadow:0 1px 7px #0f172a55}
+.map-radius-match{outline:3px solid #0891b2;outline-offset:3px;border-radius:8px}
+.map-radius-list-reset{margin:8px 8px 0;align-self:flex-start}
+.map-radius-export{position:absolute;left:10px;bottom:58px;z-index:850;max-width:calc(100% - 30px);box-sizing:border-box;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.94);color:#164e63;font:600 12px/1.6 system-ui,"Malgun Gothic",sans-serif;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}
+.map-doc.is-presenting .map-radius-panel{display:none}
+
+/* A는 고정한 주황 점선, B는 움직이는 청록 실선. 겹친 장소의 테두리는 보라. */
+.map-radius-compare-actions{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0}
+.map-radius-comparison{margin-bottom:10px}
+.map-radius-compare-guide,.map-radius-shared{margin:5px 0 8px;font-size:11px;color:var(--muted)}
+.map-radius-compare-table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
+.map-radius-compare-table caption{text-align:left;font-weight:700;margin-bottom:5px}
+.map-radius-compare-table th,.map-radius-compare-table td{padding:5px 3px;border-bottom:1px solid var(--border);text-align:right;overflow-wrap:anywhere}
+.map-radius-compare-table th:first-child{width:32%;text-align:left}
+.map-radius-compare-table tbody tr:first-child{font-weight:700;background:var(--field)}
+.map-radius-compare-table .map-radius-a{color:#b45309}
+.map-radius-compare-table .map-radius-b{color:#0e7490}
+[data-theme="dark"] .map-radius-compare-table .map-radius-a{color:#fbbf24}
+[data-theme="dark"] .map-radius-compare-table .map-radius-b{color:#67e8f9}
+.map-radius-fixed-center{border-color:#b45309;color:#b45309;pointer-events:none}
+.map-radius-a-match{outline:3px solid #b45309;outline-offset:3px;border-radius:8px}
+.map-radius-a-match.map-radius-match{outline-color:#7c3aed}

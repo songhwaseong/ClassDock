@@ -1903,7 +1903,7 @@ test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 �
   // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
   assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
   // 되돌리기 범위도 격자·이름표와 같다.
-  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\)\]\)/);
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\), mapNormalizeRadius\(model\.radius\)\]\)/);
   assert.match(source, /model\.route = saved\[7\] === true;/);
   // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
   assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);

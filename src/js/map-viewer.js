@@ -15,7 +15,7 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 10;
+const MAP_DOC_VERSION = 12;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 /* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
    빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
@@ -219,6 +219,7 @@ function mapNormalizeMarker(raw){
     address: String(value.address == null ? "" : value.address).slice(0, 300),
     phone: String(value.phone == null ? "" : value.phone).slice(0, 80),
     category: String(value.category == null ? "" : value.category).slice(0, 300),
+    categoryCode: MAP_KAKAO_CATEGORIES.some(kind => kind.code === value.categoryCode) ? value.categoryCode : "",
     roadAddress: String(value.roadAddress == null ? "" : value.roadAddress).slice(0, 300),
     lotAddress: String(value.lotAddress == null ? "" : value.lotAddress).slice(0, 300),
     // 카카오 장소 검색으로 만든 표시는 상세 페이지 주소를 함께 보존한다. 허용된 장소 URL만
@@ -314,6 +315,19 @@ function mapNormalizeDriveOptions(raw){
     compare:value.compare !== false
   };
 }
+// 중심·미터만 저장한다. 잘못된 파일 값은 비활성으로 읽는다.
+function mapNormalizeRadius(raw){
+  if (!raw || !Array.isArray(raw.center) || raw.center.length !== 2) return null;
+  if (!raw.center.every(n => typeof n === "number" && Number.isFinite(n))
+    || Math.abs(raw.center[0]) > 85 || Math.abs(raw.center[1]) > 180
+    || typeof raw.meters !== "number" || !Number.isFinite(raw.meters)
+    || raw.meters < 100 || raw.meters > 50000) return null;
+  const radius = { center:[raw.center[0], raw.center[1]], meters:raw.meters };
+  // 옛 반경은 그대로 연다. 잘못된 A 좌표는 비교만 끄고 B 반경은 보존한다.
+  const fixed = raw.compareCenter && mapNormalizeRadius({ center:raw.compareCenter, meters:raw.meters });
+  if (fixed) radius.compareCenter = fixed.center;
+  return radius;
+}
 function mapDocEmpty(title){
   return {
     type: MAP_DOC_TYPE,
@@ -324,6 +338,7 @@ function mapDocEmpty(title){
     zoom: MAP_DEFAULT_ZOOM,
     markers: [],
     shapes: [],
+    radius: null,
     // 위경도 격자는 문서에 딸린 성질로 둔다 — 수업용 지도는 "격자를 보이게 만들어 둔 지도"로
     // 건네지기 때문이다(다음에 열 사람이 다시 켜야 한다면 만들어 둔 뜻이 사라진다).
     grid: false,
@@ -355,6 +370,7 @@ function mapDocParse(text){
     center,
     zoom: Number.isFinite(zoomRaw) ? Math.min(19, Math.max(1, Math.round(zoomRaw))) : MAP_DEFAULT_ZOOM,
     markers: Array.isArray(raw.markers) ? raw.markers.map(mapNormalizeMarker) : [],
+    radius: mapNormalizeRadius(raw.radius),
     shapes: Array.isArray(raw.shapes) ? raw.shapes.map(mapNormalizeShape).filter(shape => shape.points.length >= (shape.type === "area" ? 3 : 2)) : [],
     // 버전 3 이하에는 없던 값이다 — 없으면 끈 것으로 본다(옛 지도의 화면이 달라지지 않게).
     grid: raw.grid === true,
@@ -378,6 +394,7 @@ function mapDocSerialize(model){
     center: [Number(model.center[0].toFixed(6)), Number(model.center[1].toFixed(6))],
     zoom: model.zoom,
     markers: model.markers,
+    radius: mapNormalizeRadius(model.radius),
     shapes: Array.isArray(model.shapes) ? model.shapes : [],
     grid: !!model.grid,
     labels: !!model.labels,
@@ -401,7 +418,7 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
   return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels, !!model.route, !!model.drive,
-    mapNormalizeDriveOptions(model.driveOptions)]);
+    mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius)]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -433,6 +450,73 @@ function mapPolygonAreaSquareMeters(points){
     sum += dLng * (2 + Math.sin(a[0] * rad) + Math.sin(b[0] * rad));
   }
   return Math.abs(sum) * MAP_EARTH_RADIUS_M * MAP_EARTH_RADIUS_M / 2;
+}
+function mapRadiusCategory(marker){
+  const kind = MAP_KAKAO_CATEGORIES.find(item => item.code === marker.categoryCode);
+  if (kind) return mapT(kind.label);
+  // 옛 지도는 분류 경로의 완전한 토큰만 쓴다. 이름·메모로 업종을 추측하지 않는다.
+  const parts = String(marker.category || "").split(">").map(part => part.trim());
+  for (const label of ["학교", "학원", "병원", "약국", "공원", "카페", "은행", "편의점", "음식점", "주차장", "지하철역"]){
+    if (parts.includes(label)) return mapT(label);
+  }
+  return mapT(marker.category ? "기타" : "미분류");
+}
+function mapRadiusResults(markers, radius){
+  const valid = mapNormalizeRadius(radius);
+  if (!valid) return [];
+  return markers.map(marker => ({ marker, distance:mapDistanceMeters(valid.center, [marker.lat, marker.lng]) }))
+    .filter(item => Number.isFinite(item.distance) && item.distance <= valid.meters + 1e-6)
+    .sort((a, b) => a.distance - b.distance);
+}
+function mapRadiusCounts(results){
+  const counts = new Map();
+  for (const { marker } of results){
+    const label = mapRadiusCategory(marker);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function mapRadiusMemoRows(results, radius){
+  const title = mapTf("반경 {distance} · 중심 {center}", {
+    distance:mapFormatDistance(radius.meters), center:radius.center.map(n => n.toFixed(6)).join(", ")
+  });
+  // 메모 표 API에는 제목 필드가 없어 첫 열 머리글에 범위를 보관한다.
+  return [[mapT("장소명") + " — " + title, mapT("분류"), mapT("중심에서 거리 (m)"), mapT("주소")],
+    ...results.map(({ marker, distance }) => [marker.label || mapT("이름 없는 표시"),
+      mapRadiusCategory(marker), String(Math.round(distance)), marker.roadAddress || marker.address || ""])];
+}
+function mapRadiusComparison(markers, radius){
+  const value = mapNormalizeRadius(radius);
+  if (!value || !value.compareCenter) return null;
+  const a = mapRadiusResults(markers, { center:value.compareCenter, meters:value.meters });
+  const b = mapRadiusResults(markers, value);
+  const aCounts = new Map(mapRadiusCounts(a)), bCounts = new Map(mapRadiusCounts(b));
+  const labels = new Set([...aCounts.keys(), ...bCounts.keys()]);
+  const rows = [...labels].map(label => {
+    const aCount = aCounts.get(label) || 0, bCount = bCounts.get(label) || 0;
+    return { label, a:aCount, b:bCount, delta:bCount - aCount };
+  }).sort((left, right) => (right.a + right.b) - (left.a + left.b) || left.label.localeCompare(right.label));
+  const aIds = new Set(a.map(item => item.marker.id));
+  return { a, b, rows, aTotal:a.length, bTotal:b.length, shared:b.filter(item => aIds.has(item.marker.id)).length };
+}
+function mapRadiusCompareTitle(radius){
+  return mapTf("반경 비교 · {distance} · 등록 표시(직선)", { distance:mapFormatDistance(radius.meters) });
+}
+function mapRadiusCompareMemoRows(comparison, radius){
+  const position = center => center.map(n => n.toFixed(6)).join(", ");
+  return [[mapT("분류") + " — " + mapRadiusCompareTitle(radius) + "\n"
+      + mapTf("겹친 표시 {count}곳은 양쪽에 포함", { count:comparison.shared }),
+    "A · " + position(radius.compareCenter), "B · " + position(radius.center), mapT("차이 (B−A)")],
+    [mapT("전체"), String(comparison.aTotal), String(comparison.bTotal), String(comparison.bTotal - comparison.aTotal)],
+    ...comparison.rows.map(row => [row.label, String(row.a), String(row.b), String(row.delta)])];
+}
+function mapRadiusCompareChart(comparison, radius){
+  const position = center => center.map(n => n.toFixed(4)).join(", ");
+  return { type:"bar", title:mapRadiusCompareTitle(radius),
+    series:["A (" + position(radius.compareCenter) + ")", "B (" + position(radius.center) + ")"],
+    palette:["#b45309", "#0e7490"],
+    rows:comparison.rows.length ? comparison.rows.map(row => ({ label:row.label, values:[row.a, row.b] }))
+      : [{ label:mapT("전체"), values:[0,0] }] };
 }
 function mapFormatDistance(meters){
   const value = Math.max(0, Number(meters) || 0);
@@ -2037,7 +2121,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -4042,6 +4126,7 @@ async function mountMapEditor(doc){
      전부 touch 를 지나므로, 선을 다시 그리는 일도 한 곳에만 매달면 빠뜨릴 수 없다. */
   let redrawRoute = () => {};
   let scheduleDrive = () => {};   // 자동차 길찾기도 같은 까닭으로 이름만 먼저 세워 둔다
+  let syncRadius = () => {};
   let redrawClusters = () => {};  // 표시 추가·삭제 뒤 숫자 묶음도 같은 한 길에서 다시 계산한다
   /* 문제 풀이 화면(지도 문제)에서만 채워진다 — 지도 클릭을 답 찍기로 가로챈다. 아래에서 만든다. */
   let quizPlaceAnswer = null;
@@ -4060,6 +4145,7 @@ async function mountMapEditor(doc){
     recordSoon();
     scheduleRecovery();
     scheduleListRefresh();
+    syncRadius();
     redrawClusters();
     redrawRoute();
     scheduleDrive();
@@ -4411,6 +4497,10 @@ async function mountMapEditor(doc){
   const hiddenSources = new Set();
   let listOpen = mapListPanelOn();
   const markerVisible = (marker) => !hiddenSources.has(marker.source || "");
+  const radiusActive = () => !!model.radius && model.basemap !== "custom" && !taskMode;
+  let radiusFiltered = false;
+  let radiusMatches = new Set();
+  let radiusAMatches = new Set();
   let clustersOn = mapClustersOn();
   const clusterLayer = L.layerGroup().addTo(map);
   const syncClusterButton = () => {
@@ -4420,7 +4510,7 @@ async function mountMapEditor(doc){
   redrawClusters = () => {
     clusterLayer.clearLayers();
     const visible = model.markers.filter(markerVisible);
-    const useClusters = clustersOn && visible.length >= 20 && map.getZoom() <= 13;
+    const useClusters = clustersOn && !radiusActive() && visible.length >= 20 && map.getZoom() <= 13;
     const groupedIds = new Set();
     if (useClusters){
       const items = visible.map(marker => {
@@ -4453,9 +4543,15 @@ async function mountMapEditor(doc){
       const show = markerVisible(marker) && !groupedIds.has(marker.id);
       if (show && !map.hasLayer(layer)) layer.addTo(map);
       else if (!show && map.hasLayer(layer)) map.removeLayer(layer);
+      const icon = layer.getElement();
+      if (icon){
+        icon.classList.toggle("map-radius-match", radiusActive() && radiusMatches.has(marker.id));
+        icon.classList.toggle("map-radius-a-match", radiusActive() && radiusAMatches.has(marker.id));
+      }
     }
   };
   const applyMarkerVisibility = () => {
+    syncRadius();
     redrawClusters();
     redrawRoute();               // 감춘 묶음은 선에서도 빠진다 — 없는 표시로 선이 돌아가면 읽을 수 없다
     scheduleDrive();             // 보기 상태는 문서에 담기지 않아 touch 를 지나지 않는다 — 여기서 따로 건다
@@ -4465,7 +4561,9 @@ async function mountMapEditor(doc){
     mapRememberClusters(clustersOn);
     syncClusterButton();
     redrawClusters();
-    if (clustersOn && typeof toast === "function"){
+    if (clustersOn && radiusActive() && typeof toast === "function"){
+      toast(mapT("반경 보기 중에는 개별 장소를 보여 줍니다. 반경을 지우면 표시 묶기가 돌아옵니다."), 3200);
+    } else if (clustersOn && typeof toast === "function"){
       toast(mapT("멀리서 겹치는 표시를 숫자 묶음으로 보여 줍니다 — 묶음을 누르면 펼쳐집니다."), 3200);
     }
   });
@@ -4658,6 +4756,12 @@ async function mountMapEditor(doc){
   };
   doc.cleanupFns.push(() => { clearTimeout(driveTimer); driveSeq++; });
 
+  let radiusResults = [];
+  const radiusListReset = document.createElement("button");
+  radiusListReset.type = "button"; radiusListReset.className = "map-btn map-radius-list-reset";
+  radiusListReset.textContent = mapT("반경 필터 해제"); radiusListReset.hidden = true;
+  radiusListReset.addEventListener("click", () => { radiusFiltered = false; renderMarkerList(); });
+  listPanel.insertBefore(radiusListReset, listFilter);
   const focusMarker = (marker) => {
     map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), 15));
     redrawClusters();
@@ -4692,10 +4796,16 @@ async function mountMapEditor(doc){
     const query = listFilter.value.trim().toLowerCase();
     const matched = model.markers.filter((marker) => {
       if (!markerVisible(marker)) return false;
+      if (radiusFiltered && !radiusMatches.has(marker.id)) return false;
       if (!query) return true;
       return [marker.label, marker.note, marker.region, marker.district]
         .join(" ").toLowerCase().includes(query);
     });
+    if (radiusFiltered && radiusActive()){
+      const distances = new Map(radiusResults.map(item => [item.marker.id, item.distance]));
+      matched.sort((a, b) => distances.get(a.id) - distances.get(b.id));
+    }
+    radiusListReset.hidden = !radiusFiltered;
     listItems.textContent = "";
     for (const marker of matched.slice(0, MAP_LIST_MAX_ROWS)){
       const row = document.createElement("li");
@@ -4711,6 +4821,10 @@ async function mountMapEditor(doc){
       sub.className = "map-list-sub";
       sub.textContent = [marker.region, marker.district].filter(Boolean).join(" ")
         || (marker.lat.toFixed(4) + ", " + marker.lng.toFixed(4));
+      if (radiusFiltered && radiusActive()){
+        const found = radiusResults.find(item => item.marker.id === marker.id);
+        sub.textContent = found ? mapFormatDistance(found.distance) : "";
+      }
       go.append(dot, name, sub);
       go.addEventListener("click", () => focusMarker(marker));
       /* 목록 순서 = 발표 순서다. 옮기기는 "지금 보이는 줄"의 앞뒤와 자리를 바꾸는 것으로 정의한다
@@ -4745,6 +4859,7 @@ async function mountMapEditor(doc){
       remove.title = mapT("이 표시 지우기");
       remove.setAttribute("aria-label", mapT("이 표시 지우기"));
       remove.addEventListener("click", () => { map.closePopup(); removeMarker(marker); });
+      up.hidden = down.hidden = radiusFiltered; // 거리순에서는 발표 순서 이동을 숨긴다.
       row.append(go, up, down, remove);
       listItems.appendChild(row);
     }
@@ -4774,6 +4889,250 @@ async function mountMapEditor(doc){
   });
   mapTranslate(listPanel);        // 목록의 붙박이 글자만 — 줄 내용은 사람이 적은 이름이라 손대지 않는다
   syncListPanel();
+
+  /* ── 움직이는 반경 보기 ── */
+  const radiusPanel = document.createElement("section");
+  radiusPanel.className = "map-radius-panel";
+  radiusPanel.setAttribute("aria-label", mapT("반경 보기"));
+  radiusPanel.hidden = true;
+  radiusPanel.innerHTML =
+    '<div class="map-radius-head"><strong>◎ 반경 보기</strong><button type="button" class="map-btn map-radius-fold" aria-expanded="true">접기</button></div>' +
+    '<div class="map-radius-content">' +
+      '<div class="map-radius-presets"><button type="button" class="map-btn" data-meters="500">500m</button>' +
+      '<button type="button" class="map-btn" data-meters="1000">1km</button><button type="button" class="map-btn" data-meters="2000">2km</button></div>' +
+      '<form class="map-radius-form"><label>직접 입력 (m) <input class="map-radius-input" type="number" min="100" max="50000" step="1" required aria-label="반경 미터 (100~50000)"></label><button type="submit" class="map-btn">적용</button></form>' +
+      '<p class="map-radius-summary" role="status" aria-live="polite"></p><p class="map-radius-counts"></p>' +
+      '<div class="map-radius-compare-actions"><button type="button" class="map-btn map-radius-fix">A로 고정하고 비교</button><button type="button" class="map-btn map-radius-unfix" hidden>비교 끝내기</button></div>' +
+      '<div class="map-radius-comparison" hidden><p class="map-radius-compare-guide">A는 고정, B는 끌거나 다른 곳을 우클릭해 이동합니다.</p>' +
+        '<table class="map-radius-compare-table"><caption>시설별 비교 · 같은 반경</caption><thead><tr><th scope="col">분류</th><th scope="col" class="map-radius-a">A</th><th scope="col" class="map-radius-b">B</th><th scope="col">차이 (B−A)</th></tr></thead><tbody></tbody></table>' +
+        '<p class="map-radius-shared"></p><div class="map-radius-actions"><button type="button" class="map-btn map-radius-compare-memo">비교표로 메모</button><button type="button" class="map-btn map-radius-compare-chart">비교 차트로 칠판</button></div></div>' +
+      '<div class="map-radius-actions"><button type="button" class="map-btn map-radius-list">목록 보기</button><button type="button" class="map-btn map-radius-memo">표로 메모</button><button type="button" class="map-btn map-radius-remove">반경 지우기</button></div>' +
+      '<p class="map-radius-note">지도에 넣은 표시 기준 · 직선 반경</p>' +
+    '</div>';
+  const radiusExport = document.createElement("div");
+  radiusExport.className = "map-radius-export"; radiusExport.hidden = true;
+  stage.append(radiusPanel, radiusExport);
+  L.DomEvent.disableClickPropagation(radiusPanel);
+  L.DomEvent.disableScrollPropagation(radiusPanel);
+  radiusPanel.addEventListener("keydown", event => event.stopPropagation());
+  mapTranslate(radiusPanel);
+  const radiusFold = radiusPanel.querySelector(".map-radius-fold");
+  const radiusContent = radiusPanel.querySelector(".map-radius-content");
+  const radiusInput = radiusPanel.querySelector(".map-radius-input");
+  const radiusSummary = radiusPanel.querySelector(".map-radius-summary");
+  const radiusCounts = radiusPanel.querySelector(".map-radius-counts");
+  const radiusList = radiusPanel.querySelector(".map-radius-list");
+  const radiusMemo = radiusPanel.querySelector(".map-radius-memo");
+  const radiusFix = radiusPanel.querySelector(".map-radius-fix");
+  const radiusUnfix = radiusPanel.querySelector(".map-radius-unfix");
+  const radiusComparePanel = radiusPanel.querySelector(".map-radius-comparison");
+  const radiusCompareBody = radiusPanel.querySelector("tbody");
+  const radiusShared = radiusPanel.querySelector(".map-radius-shared");
+  const radiusCompareMemo = radiusPanel.querySelector(".map-radius-compare-memo");
+  const radiusCompareChart = radiusPanel.querySelector(".map-radius-compare-chart");
+  const radiusPresets = [...radiusPanel.querySelectorAll("[data-meters]")];
+  let radiusFixedCircle = null, radiusFixedCenter = null, radiusComparison = null;
+  let radiusMarkerComparing = null, radiusChartBusy = false;
+  let radiusCircle = null, radiusCenter = null, radiusDraft = null, radiusTimer = 0;
+  let radiusCollapsed = false;
+  const radiusValue = () => radiusDraft || model.radius;
+  const radiusCommit = (value) => {
+    if (history) history.flush();
+    radiusDraft = null;
+    model.radius = mapNormalizeRadius(value);
+    touch();
+    if (history) history.commit();
+  };
+  const radiusClearFixed = () => {
+    if (radiusFixedCircle) map.removeLayer(radiusFixedCircle);
+    if (radiusFixedCenter) map.removeLayer(radiusFixedCenter);
+    radiusFixedCircle = radiusFixedCenter = null;
+  };
+  const radiusClearLayers = () => {
+    radiusClearFixed();
+    if (radiusCircle) map.removeLayer(radiusCircle);
+    if (radiusCenter) map.removeLayer(radiusCenter);
+    radiusCircle = radiusCenter = null; radiusMarkerComparing = null;
+  };
+  syncRadius = () => {
+    const active = radiusActive();
+    radiusPanel.hidden = !model.radius || taskMode;
+    const visible = active ? model.markers.filter(markerVisible) : [];
+    radiusComparison = active ? mapRadiusComparison(visible, radiusValue()) : null;
+    radiusResults = radiusComparison ? radiusComparison.b : active ? mapRadiusResults(visible, radiusValue()) : [];
+    radiusAMatches = new Set(radiusComparison ? radiusComparison.a.map(item => item.marker.id) : []);
+    radiusMatches = new Set(radiusResults.map(item => item.marker.id));
+    if (!active){ radiusFiltered = false; radiusClearLayers(); }
+    radiusListReset.hidden = !radiusFiltered;
+    for (const [id, layer] of markerLayers){
+      const icon = layer.getElement();
+      if (icon){
+        icon.classList.toggle("map-radius-match", radiusMatches.has(id));
+        icon.classList.toggle("map-radius-a-match", radiusAMatches.has(id));
+      }
+    }
+    if (!model.radius || taskMode) return;
+    const value = radiusValue();
+    const comparing = !!value.compareCenter;
+    radiusFold.textContent = radiusCollapsed
+      ? (active ? mapTf("◎ {distance} · {count}곳 · 펼치기", { distance:mapFormatDistance(value.meters), count:radiusResults.length }) : mapT("반경 보기 일시 중지 · 펼치기"))
+      : mapT("접기");
+    if (radiusCollapsed && radiusComparison) radiusFold.textContent = mapTf("◎ {distance} · A {a} / B {b}곳 · 펼치기", {
+      distance:mapFormatDistance(value.meters), a:radiusComparison.aTotal, b:radiusComparison.bTotal
+    });
+    radiusFold.setAttribute("aria-expanded", String(!radiusCollapsed));
+    radiusContent.hidden = radiusCollapsed;
+    radiusPanel.classList.toggle("is-collapsed", radiusCollapsed);
+    if (document.activeElement !== radiusInput) radiusInput.value = String(value.meters);
+    radiusInput.disabled = !active;
+    radiusPanel.querySelector('[type="submit"]').disabled = !active;
+    for (const button of radiusPresets){
+      button.disabled = !active;
+      const selected = Number(button.dataset.meters) === value.meters;
+      button.classList.toggle("is-on", selected); button.setAttribute("aria-pressed", String(selected));
+    }
+    radiusSummary.textContent = !active ? mapT("이미지 배경은 축척을 알 수 없어 반경 보기를 잠시 쉽니다.")
+      : radiusResults.length ? mapTf("반경 안 표시 {count}곳", { count:radiusResults.length })
+        : mapT("반경 안에 등록된 표시가 없어요.");
+    radiusCounts.textContent = mapRadiusCounts(radiusResults).map(([label, count]) => label + " " + count).join(" · ");
+    radiusSummary.hidden = radiusCounts.hidden = active && comparing;
+    radiusFix.hidden = comparing; radiusFix.disabled = !active;
+    radiusUnfix.hidden = !comparing;
+    radiusComparePanel.hidden = !active || !comparing;
+    radiusList.textContent = mapT(comparing ? "B 목록 보기" : "목록 보기");
+    radiusMemo.textContent = mapT(comparing ? "B 장소를 메모로" : "표로 메모");
+    radiusCompareMemo.disabled = !radiusComparison || typeof window.addTableToScratchpad !== "function";
+    radiusCompareChart.disabled = !radiusComparison || radiusChartBusy || typeof newWhiteboard !== "function";
+    radiusCompareBody.textContent = "";
+    if (radiusComparison){
+      const rows = [{ label:mapT("전체"), a:radiusComparison.aTotal, b:radiusComparison.bTotal,
+        delta:radiusComparison.bTotal - radiusComparison.aTotal }, ...radiusComparison.rows];
+      for (const row of rows){
+        const tr = document.createElement("tr");
+        const name = document.createElement("th"); name.setAttribute("scope", "row"); name.textContent = row.label;
+        tr.appendChild(name);
+        for (const [index, number] of [row.a, row.b, row.delta].entries()){
+          const td = document.createElement("td"); td.textContent = (index === 2 && number > 0 ? "+" : "") + number; tr.appendChild(td);
+        }
+        radiusCompareBody.appendChild(tr);
+      }
+      radiusShared.textContent = mapTf("겹친 표시 {count}곳은 양쪽에 포함", { count:radiusComparison.shared })
+        + " · " + mapT("A 주황 · B 청록 · 겹침 보라");
+    }
+    radiusList.disabled = !active;
+    radiusMemo.disabled = !radiusResults.length || typeof window.addTableToScratchpad !== "function";
+    if (!active) return;
+    if (comparing){
+      if (!radiusFixedCircle){
+        radiusFixedCircle = L.circle(value.compareCenter, { radius:value.meters, color:"#b45309", weight:2,
+          fillColor:"#f59e0b", fillOpacity:0.06, dashArray:"6 4", interactive:false, pane:"mapRoutePane" }).addTo(map);
+        radiusFixedCenter = L.marker(value.compareCenter, { interactive:false, keyboard:false, zIndexOffset:900,
+          title:mapT("A 고정 중심"), alt:mapT("A 고정 중심"),
+          icon:L.divIcon({ className:"map-radius-center map-radius-fixed-center", html:'<span aria-hidden="true">A</span>', iconSize:[28,28], iconAnchor:[14,14] }) }).addTo(map);
+      }
+      radiusFixedCircle.setLatLng(value.compareCenter).setRadius(value.meters);
+      radiusFixedCenter.setLatLng(value.compareCenter);
+    } else radiusClearFixed();
+    if (!radiusCircle){
+      radiusCircle = L.circle(value.center, { radius:value.meters, color:"#0e7490", weight:2,
+        fillColor:"#06b6d4", fillOpacity:0.08, interactive:false, pane:"mapRoutePane" }).addTo(map);
+      radiusCenter = L.marker(value.center, { draggable:true, autoPan:false, zIndexOffset:1000,
+        title:mapT("끌어서 중심 이동"), alt:mapT("반경 중심"),
+        icon:L.divIcon({ className:"map-radius-center", html:'<span aria-hidden="true">⊕</span>', iconSize:[28,28], iconAnchor:[14,14] }) }).addTo(map);
+      radiusCenter.bindTooltip(mapT("끌어서 중심 이동"), { direction:"top" });
+      radiusCenter.on("dragstart", () => { if (history) history.flush(); });
+      radiusCenter.on("drag", () => {
+        const at = radiusCenter.getLatLng().wrap();
+        radiusDraft = { ...model.radius, center:[mapClampLat(at.lat), at.lng] };
+        radiusCircle.setLatLng(radiusDraft.center);
+        if (!radiusTimer) radiusTimer = setTimeout(() => {
+          radiusTimer = 0; syncRadius(); scheduleListRefresh();
+        }, 60);
+      });
+      radiusCenter.on("dragend", () => {
+        clearTimeout(radiusTimer); radiusTimer = 0;
+        const at = radiusCenter.getLatLng().wrap();
+        radiusCommit({ ...model.radius, center:[mapClampLat(at.lat), at.lng] });
+      });
+    }
+    if (radiusMarkerComparing !== comparing){
+      radiusMarkerComparing = comparing;
+      radiusCenter.setIcon(L.divIcon({ className:"map-radius-center", html:comparing ? '<span aria-hidden="true">B</span>' : '<span aria-hidden="true">⊕</span>', iconSize:[28,28], iconAnchor:[14,14] }));
+      const icon = radiusCenter.getElement();
+      if (icon){ icon.dataset.radiusMode = comparing ? "compare" : "single"; icon.title = mapT(comparing ? "B 중심을 끌어서 이동" : "끌어서 중심 이동"); }
+      radiusCenter.bindTooltip(mapT(comparing ? "B 중심을 끌어서 이동" : "끌어서 중심 이동"), { direction:"top" });
+    }
+    radiusCircle.setLatLng(value.center).setRadius(value.meters);
+    if (!radiusDraft) radiusCenter.setLatLng(value.center);
+  };
+  radiusFix.addEventListener("click", () => {
+    if (radiusActive() && !model.radius.compareCenter) radiusCommit({ ...model.radius, compareCenter:[...model.radius.center] });
+  });
+  radiusUnfix.addEventListener("click", () => {
+    if (!model.radius) return;
+    const value = { ...model.radius }; delete value.compareCenter;
+    radiusCommit(value);
+  });
+  radiusCompareMemo.addEventListener("click", () => {
+    if (!radiusActive() || typeof window.addTableToScratchpad !== "function") return;
+    syncRadius();
+    if (!radiusComparison) return;
+    const result = window.addTableToScratchpad(mapRadiusCompareMemoRows(radiusComparison, radiusValue()));
+    if (result && typeof toast === "function") toast(result.dropped
+      ? mapTf("비교표를 메모로 보냈어요. 표의 한도로 {count}행은 빠졌습니다.", { count:result.dropped })
+      : mapT("A·B 비교표를 메모로 보냈어요."), 3500);
+  });
+  radiusCompareChart.addEventListener("click", async () => {
+    if (!radiusActive() || radiusChartBusy || typeof newWhiteboard !== "function") return;
+    syncRadius();
+    if (!radiusComparison) return;
+    // 새 칠판을 기다리는 동안 중심이 달라져도 누른 시점의 비교 결과를 보낸다.
+    const spec = mapRadiusCompareChart(radiusComparison, radiusValue());
+    radiusChartBusy = true; radiusCompareChart.disabled = true;
+    try {
+      const board = await createMapBoard(mapBoardName(model, mapT("반경 비교")));
+      if (!board || typeof board.insertBoardChart !== "function" || !board.insertBoardChart(spec)) throw new Error("radius-chart-unavailable");
+    } catch(error){
+      console.warn("map radius comparison chart failed:", error);
+      if (typeof toast === "function") toast(mapT("비교 차트를 칠판에 넣지 못했어요."), 3500);
+    } finally { radiusChartBusy = false; syncRadius(); }
+  });
+  radiusFold.addEventListener("click", () => { radiusCollapsed = !radiusCollapsed; syncRadius(); });
+  radiusPresets.forEach(button => button.addEventListener("click", () => {
+    if (radiusActive()) radiusCommit({ ...model.radius, meters:Number(button.dataset.meters) });
+  }));
+  radiusPanel.querySelector("form").addEventListener("submit", event => {
+    event.preventDefault();
+    if (!radiusActive() || !radiusInput.reportValidity()) return;
+    radiusCommit({ ...model.radius, meters:Number(radiusInput.value) });
+  });
+  radiusPanel.querySelector(".map-radius-remove").addEventListener("click", () => {
+    radiusCommit(null); map.getContainer().focus({ preventScroll:true });
+  });
+  radiusList.addEventListener("click", () => {
+    radiusFiltered = true; listFilter.value = ""; listOpen = true;
+    syncListPanel(); listFilter.focus({ preventScroll:true });
+  });
+  radiusMemo.addEventListener("click", () => {
+    if (!radiusActive()) return;
+    syncRadius();
+    const result = window.addTableToScratchpad(mapRadiusMemoRows(radiusResults, radiusValue()));
+    if (result && typeof toast === "function") toast(result.dropped
+      ? mapTf("반경 표를 메모로 보냈어요. 표의 한도로 {count}곳은 빠졌습니다.", { count:result.dropped })
+      : mapTf("반경 안 표시 {count}곳을 메모 표로 보냈어요.", { count:radiusResults.length }), 3500);
+  });
+  const startRadius = (at) => {
+    if (taskMode) return;
+    if (model.basemap === "custom"){
+      if (typeof toast === "function") toast(mapT("이미지 배경은 축척을 알 수 없어 반경 보기를 사용할 수 없습니다."), 3500);
+      return;
+    }
+    radiusCollapsed = false;
+    const center = L.latLng(at.lat, at.lng).wrap();
+    radiusCommit({ ...model.radius, center:[mapClampLat(center.lat), center.lng], meters:model.radius ? model.radius.meters : 1000 });
+  };
+  syncRadius(); redrawClusters();
+  doc.cleanupFns.push(() => { clearTimeout(radiusTimer); radiusClearLayers(); radiusPanel.remove(); radiusExport.remove(); });
 
   /* ── 발표 모드 ──
      찍어 둔 표시를 목록 순서대로 하나씩 보여 준다(역사 진격로·답사 코스·실크로드처럼 "순서가
@@ -5637,6 +5996,7 @@ async function mountMapEditor(doc){
         address:place.address,
         phone:place.phone,
         category:place.categoryFull || place.category,
+        categoryCode:kind.code || "",
         roadAddress:place.roadAddress,
         lotAddress:place.lotAddress,
         placeUrl:place.placeUrl,
@@ -5871,6 +6231,7 @@ async function mountMapEditor(doc){
     contextMenu.appendChild(sep);
   };
 
+  contextItem("◎ 여기서 반경 보기", "이 지점을 중심으로 반경 안의 표시를 비교합니다", startRadius);
   contextItem("📍 여기에 표시 추가", "누른 자리에 표시를 바로 만들어요", (at) => {
     const marker = mapNormalizeMarker({ lat:at.lat, lng:at.lng, label:"", color:"red" });
     model.markers.push(marker);
@@ -6126,7 +6487,25 @@ async function mountMapEditor(doc){
         labels.push({ x:point.x, y:point.y, offsetY:0, text:driveText });
       }
     }
-    return mapCaptureDataUrl(stage, mapAttributionText(model), labels);
+    syncRadius();
+    if (radiusActive()){
+      radiusExport.textContent = mapTf("반경 {distance} · 중심 {center}", {
+        distance:mapFormatDistance(model.radius.meters), center:model.radius.center.map(n => n.toFixed(5)).join(", ")
+      }) + "\n" + radiusSummary.textContent + (radiusCounts.textContent ? "\n" + radiusCounts.textContent : "")
+        + "\n" + mapT("지도에 넣은 표시 기준 · 직선 반경");
+      if (radiusComparison){
+        const position = point => point.map(n => n.toFixed(5)).join(", ");
+        radiusExport.textContent = mapRadiusCompareTitle(model.radius) + "\nA: " + position(model.radius.compareCenter)
+          + " · B: " + position(model.radius.center) + "\n"
+          + mapTf("전체 A {a}곳 / B {b}곳", { a:radiusComparison.aTotal, b:radiusComparison.bTotal }) + "\n"
+          + radiusComparison.rows.map(row => row.label + " A " + row.a + " / B " + row.b + " (" + (row.delta > 0 ? "+" : "") + row.delta + ")").join(" · ")
+          + "\n" + mapTf("겹친 표시 {count}곳은 양쪽에 포함", { count:radiusComparison.shared })
+          + "\n" + mapT("지도에 넣은 표시 기준 · 직선 반경");
+      }
+      radiusExport.hidden = false;
+    }
+    try { return await mapCaptureDataUrl(stage, mapAttributionText(model), labels); }
+    finally { radiusExport.hidden = true; }
   };
 
   /* ── 지역 통계 ── */
@@ -6276,7 +6655,7 @@ async function mountMapEditor(doc){
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
       capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels, !!model.route, !!model.drive,
-        mapNormalizeDriveOptions(model.driveOptions)]),
+        mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius)]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
         // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
@@ -6295,6 +6674,8 @@ async function mountMapEditor(doc){
         model.route = saved[7] === true;
         model.drive = saved[8] === true;
         model.driveOptions = mapNormalizeDriveOptions(saved[9]);
+        radiusDraft = null;
+        model.radius = mapNormalizeRadius(saved[10]);
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();
