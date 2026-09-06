@@ -250,12 +250,7 @@
     const base = String(items[index] && items[index].alt || "그림").replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 40) || "그림";
     return base.replace(/\s+/g, "_") + "." + ext;
   }
-  function downloadBlob(blob, name){
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+  function downloadBlob(blob, name){ MNDownload.saveBlob(blob, name); }
   async function saveCurrent(){
     const blob = await currentBlob();
     if (!blob){ if (typeof toast === "function") toast("이 그림은 저장하지 못했어요.", 2400, { type:"error" }); return; }

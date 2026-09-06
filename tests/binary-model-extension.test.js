@@ -18,8 +18,8 @@ test("ML model binaries and NumPy sidecar files use the safe binary-asset path",
   assert.match(documentTypes, /\.\.\.BINARY_ASSET_EXTS/);
   assert.match(loaders, /BINARY_ASSET_EXTS\.has\(ext\)\) made = await loadBinaryAsset\(file, opts\)/);
   assert.match(viewer, /async function loadBinaryAsset\(file, options=\{\}\)/);
-  assert.match(viewer, /URL\.createObjectURL\(source\)/);
-  assert.match(viewer, /link\.download = doc\.name \|\| file\.name/);
+  // 원본 파일을 제 이름 그대로 내려받을 수 있어야 한다(내려받기 자체는 MNDownload 공용이 맡는다).
+  assert.match(viewer, /MNDownload\.saveBlob\(source, doc\.name \|\| file\.name\)/);
 });
 
 test("Word2Vec text exports are registered as searchable text documents", () => {

@@ -1,11 +1,8 @@
 "use strict";
 
 function downloadPdfBytes(bytes, name){
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-  const a = document.createElement("a");
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  // 쪽이 많은 PDF 는 수십 MB 가 되므로 해제까지의 틈을 기본값보다 길게 준다.
+  MNDownload.saveBlob(new Blob([bytes], { type:"application/pdf" }), name, { revokeAfterMs:4000 });
 }
 
 // 편집 중인 책갈피 트리를 저장 가능한 최소 데이터로 복사한다.

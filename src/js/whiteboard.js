@@ -2539,9 +2539,7 @@ function renderWhiteboard(doc, host){
   const exportPng = (options={}) => {
     withBoardExport(() => canvas.toBlob((b) => {
       if (!b){ if (typeof toast === "function") toast("이미지를 저장하지 못했어요.", 2000, { type: "error" }); return; }
-      const u = URL.createObjectURL(b); const a = document.createElement("a");
-      a.href = u; a.download = (doc.name || "화이트보드") + ".png";
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000);
+      MNDownload.saveBlob(b, (doc.name || "화이트보드") + ".png");
       if (options.notify && typeof toast === "function") toast("PNG 이미지로 저장했어요.", 2200);
     }, "image/png"));
   };

@@ -29,14 +29,7 @@ function imageMemoExtension(blob){
 }
 
 function imageMemoDownload(blob, name){
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1200);
+  MNDownload.saveBlob(blob, name);
 }
 
 function imageMemoDraftSnapshot(entries, batchName, nextOrder){

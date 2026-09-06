@@ -1017,21 +1017,14 @@ function mapOpenKakaoRoadview(lat, lng){
   return true;
 }
 function mapDownloadText(text, name, mime){
-  const blob = new Blob([text], { type:mime || "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveText(text, name, mime);
 }
 /* 캡처한 그림을 파일로 떨군다. data URL 을 그대로 href 에 넣어도 되지만, 2배로 찍은 지도는
    수 MB 라 주소 줄에 통째로 실린다 — Blob 으로 바꿔 넘긴다(CSV 내보내기와 같은 길). */
 async function mapDownloadPng(dataUrl, name){
   const blob = await mapDataUrlToBlob(dataUrl);
   if (!blob) return false;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveBlob(blob, name);
   return true;
 }
 /* 표시 목록에서 묶음을 가르는 이름. source 는 '어디서 한꺼번에 들어왔는가'를 적어 둔 꼬리표라

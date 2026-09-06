@@ -380,11 +380,7 @@ async function loadBinaryAsset(file, options={}){
     download.textContent = "원본 다운로드";
     download.addEventListener("click", () => {
       const source = doc.sourceFile || file;
-      const url = URL.createObjectURL(source);
-      const link = document.createElement("a");
-      link.href = url; link.download = doc.name || file.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      MNDownload.saveBlob(source, doc.name || file.name);
     });
     panel.append(icon, title, detail, help, download);
     host.appendChild(panel);
@@ -1360,11 +1356,7 @@ async function saveImageBlobUnified(blob, file, outName, ownerDoc=null, options=
       }
     }
   } catch(_){ /* 서버 저장 실패 → 다운로드 폴백 */ }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = outName;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  MNDownload.saveBlob(blob, outName);
   if (ownerDoc && typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(ownerDoc, blob, blob.type || "image/png");
   toast("파일을 내려받았어요.", 1800, { type: "success" });
   return true;

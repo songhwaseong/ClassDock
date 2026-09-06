@@ -1377,10 +1377,7 @@ function wireScratchpad(){
       const blob = await blockBlob(); if (!blob) return;
       const name = reuseBase() + "." + reuseExt(blob);
       if (typeof saveImageBlobUnified === "function"){ await saveImageBlobUnified(blob, null, name); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      MNDownload.saveBlob(blob, name);
     }, "scratchpad-reuse");
     const editBtn = makeButton("✏️ 편집기로", "이미지를 새 편집 탭으로 열기 — 자르기·표시·모자이크 후 '📷 메모로'로 다시 넣기", async () => {
       const blob = await blockBlob(); if (!blob) return;

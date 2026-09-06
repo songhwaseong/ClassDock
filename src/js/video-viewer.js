@@ -246,11 +246,8 @@ async function vvNativeFileExists(ref, rel){
 }
 
 function vvDownloadFile(file){
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url; anchor.download = file.name;
-  document.body.appendChild(anchor); anchor.click(); anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  // 영상은 크다 - 브라우저가 다 읽기 전에 주소가 사라지지 않도록 해제까지 넉넉히 기다린다.
+  MNDownload.saveBlob(file, file.name, { revokeAfterMs:60000 });
 }
 
 /* ---- 폴더 영상 일괄 변환 ----
