@@ -797,21 +797,50 @@ function mountConceptEditor(doc){
   const viewportResizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncCanvasSize) : null; if (viewportResizeObserver) viewportResizeObserver.observe(viewport);
 
   const edgePath = (from, to) => { const ax = from.x + 115, ay = from.y + 65, bx = to.x + 115, by = to.y + 65, bend = Math.max(50, Math.abs(bx - ax) * .42); return `M ${ax} ${ay} C ${ax + (bx >= ax ? bend : -bend)} ${ay}, ${bx - (bx >= ax ? bend : -bend)} ${by}, ${bx} ${by}`; };
+  /* 선 하나의 좌표를 제자리에서 고친다 — 만들지 않는다.
+     세 겹(판정선·후광·본선)은 같은 d 를 쓰고, 이름표는 두 카드의 한가운데에 둔다(115·55 는 카드 230×130 의 절반). */
+  const edgeShapes = new Map();          // 관계선 id → { paths:[판정선, 후광, 본선], label }
+  const placeEdge = (parts, from, to) => {
+    const shape = edgePath(from, to);
+    for (const path of parts.paths) path.setAttribute("d", shape);
+    parts.label.setAttribute("x", String((from.x + to.x) / 2 + 115));
+    parts.label.setAttribute("y", String((from.y + to.y) / 2 + 55));
+  };
+  /* 카드를 끄는 동안에는 그 카드에 닿은 선만 좌표를 고친다.
+     예전에는 매 pointermove 마다 renderEdges 로 전체를 헐고 다시 지었다 — 선 하나에 SVG 5개와
+     리스너 4개씩이라, 선 300개면 마우스가 1px 움직일 때마다 노드 1,800개를 만들고 리스너를
+     1,200개 달았다. 끌기 중에는 구조가 그대로고 좌표만 바뀌므로 만들 이유가 없다.
+     끌기가 시작될 때 대상을 한 번만 추려 두고(그 뒤로는 O(닿은 선)), 카드 위치는 제자리에서
+     고쳐지므로 node 객체를 그대로 들고 있어도 값이 따라온다. */
+  const edgesTouchingNode = (nodeId) => {
+    const byNode = new Map(model.nodes.map(node => [node.id, node]));
+    const moving = [];
+    for (const edge of model.edges){
+      if (edge.from !== nodeId && edge.to !== nodeId) continue;
+      const parts = edgeShapes.get(edge.id), from = byNode.get(edge.from), to = byNode.get(edge.to);
+      if (parts && from && to) moving.push({ parts, from, to });
+    }
+    return moving;
+  };
+  const moveEdges = (moving) => { for (const item of moving) placeEdge(item.parts, item.from, item.to); };
+
   function renderEdges(){
-    [...svg.querySelectorAll(".concept-edge")].forEach(node => node.remove()); const byNode = new Map(model.nodes.map(node => [node.id, node]));
+    [...svg.querySelectorAll(".concept-edge")].forEach(node => node.remove()); edgeShapes.clear();
+    const byNode = new Map(model.nodes.map(node => [node.id, node]));
     if (selectedEdgeIds.size){ const live = new Set(model.edges.map(edge => edge.id)); selectedEdgeIds.forEach(id => { if (!live.has(id)) selectedEdgeIds.delete(id); }); }
     for (const edge of model.edges){
       const from = byNode.get(edge.from), to = byNode.get(edge.to); if (!from || !to) continue;
       const group = document.createElementNS(svg.namespaceURI, "g"); group.classList.add("concept-edge"); if (selectedEdgeIds.has(edge.id)) group.classList.add("is-selected"); group.dataset.edgeId = edge.id;
-      const shape = edgePath(from, to);
       // 보이는 선은 2.5px뿐이라 마우스로 잡기 어렵다. 투명한 굵은 선(판정선)을 밑에 깔아 hover·선택 판정을 넓힌다.
       // 후광은 판정선과 따로 둔다. 한 장으로 겸하면 후광을 굵게 하는 만큼 누르는 자리도 넓어져 화면 끌기를 잡아먹는다.
-      const hit = document.createElementNS(svg.namespaceURI, "path"); hit.setAttribute("d", shape); hit.classList.add("concept-edge-hit");
-      const halo = document.createElementNS(svg.namespaceURI, "path"); halo.setAttribute("d", shape); halo.classList.add("concept-edge-halo");
+      const hit = document.createElementNS(svg.namespaceURI, "path"); hit.classList.add("concept-edge-hit");
+      const halo = document.createElementNS(svg.namespaceURI, "path"); halo.classList.add("concept-edge-halo");
       const tip = document.createElementNS(svg.namespaceURI, "title"); tip.textContent = `관계 강도: ${conceptNormalizeWeight(edge.weight)}/5 · 클릭: 관계선 고르기 · 두 번 클릭: 수정`;
-      const path = document.createElementNS(svg.namespaceURI, "path"); path.setAttribute("d", shape); path.setAttribute("marker-end", "url(#conceptArrow)"); path.classList.add("concept-edge-path", "is-" + edge.type);
+      const path = document.createElementNS(svg.namespaceURI, "path"); path.setAttribute("marker-end", "url(#conceptArrow)"); path.classList.add("concept-edge-path", "is-" + edge.type);
       if (model.showWeights) path.style.setProperty("--concept-edge-width", String(1 + conceptNormalizeWeight(edge.weight) * .5));
-      const label = document.createElementNS(svg.namespaceURI, "text"); label.classList.add("concept-edge-label"); label.setAttribute("x", String((from.x + to.x) / 2 + 115)); label.setAttribute("y", String((from.y + to.y) / 2 + 55)); label.textContent = edge.label || (CONCEPT_RELATIONS.find(item => item.id === edge.type) || {}).label || "관련";
+      const label = document.createElementNS(svg.namespaceURI, "text"); label.classList.add("concept-edge-label"); label.textContent = edge.label || (CONCEPT_RELATIONS.find(item => item.id === edge.type) || {}).label || "관련";
+      // 좌표는 만들 때도 끌 때도 placeEdge 한 곳에서만 정한다(두 벌이 되면 끄는 동안만 어긋난다).
+      const parts = { paths:[hit, halo, path], label }; placeEdge(parts, from, to); edgeShapes.set(edge.id, parts);
       group.append(tip, hit, halo, path, label); group.addEventListener("click", event => selectEdge(edge.id, event.ctrlKey || event.metaKey)); group.addEventListener("dblclick", () => openEdgeDialog(edge.id));
       group.addEventListener("pointerenter", () => { hoverEdgeId = edge.id; refreshLinkedCards(); });
       group.addEventListener("pointerleave", () => { if (hoverEdgeId !== edge.id) return; hoverEdgeId = ""; refreshLinkedCards(); });
@@ -904,8 +933,8 @@ function mountConceptEditor(doc){
       card.addEventListener("click", () => { if (suppressCardClick){ suppressCardClick = false; return; } selectCard(node.id); clearTimeout(previewTimer); previewTimer = setTimeout(() => { previewTimer = 0; openNodePreview(node.id, card); }, 220); });
       card.addEventListener("dblclick", event => { if (event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; openNodeDialog(node.id); });
       card.addEventListener("keydown", event => { if (event.target !== card || event.key !== "Enter") return; event.preventDefault(); selectCard(node.id); openNodePreview(node.id, card); });
-      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); if (node.pinned) return; drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
-      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) setPan(panX - dx, panY - dy); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); renderEdges(); });
+      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); if (node.pinned) return; drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom, edges:edgesTouchingNode(node.id) }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
+      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) setPan(panX - dx, panY - dy); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); moveEdges(drag.edges); });
       const finish = event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const changed = node.x !== drag.ox || node.y !== drag.oy; drag = null; card.classList.remove("is-dragging"); if (changed){ suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 0); model.layout = "free"; history.commit(); touch(); } };
       card.addEventListener("pointerup", finish); card.addEventListener("pointercancel", finish);
     }
