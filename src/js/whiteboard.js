@@ -412,6 +412,9 @@ function whiteboardVectorGroupSvg(group, color="#111111"){
   if (!group || !Array.isArray(group.items)) return "";
   const rawColor = String(color || "");
   const c = rawColor === "currentColor" || /^#[0-9a-f]{6}$/i.test(rawColor) ? rawColor : "#111111";
+  // 공용 escapeHtml 과 같은 일을 하지만 일부러 여기 둔다 - 이 함수는 앱 전역 없이 혼자 도는
+  // 순수 함수라 테스트가 whiteboard.js 만 require 해서 부른다(whiteboard-education-toolbox).
+  // 전역으로 바꾸면 그 테스트가 ReferenceError 로 죽는다.
   const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g,(ch)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const attrs = (item, fill=false) => {
     const stroke = esc(item.color || c), width = Math.max(.5, Number(item.width) || 3);

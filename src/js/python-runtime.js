@@ -981,12 +981,6 @@ async function runPipList(ui){
 // 번들에 포매터 휠이 없으므로 항상 경량 정렬만 쓴다.
 let _pyBackendFormatter = null;   // null=미확인, false=포매터 없음(세션 내 재시도 안 함), "black"|"autopep8"=사용 가능
 function resetBackendFormatterProbe(){ _pyBackendFormatter = null; }   // pip 설치 후 재확인용
-function _utf8ToBase64(str){
-  const bytes = new TextEncoder().encode(String(str == null ? "" : str));
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
 function _pyFormatDriver(b64){
   // stdout 앞에 import 경고 등이 섞여도 안전하게 파싱하도록 결과를 <<<MNFMT>>> 뒤 JSON 한 줄로 낸다.
   return [
@@ -1022,7 +1016,7 @@ async function mnFormatPythonSource(source, opts){
   try { backendUp = await pythonBackendAvailable(); } catch(_){ backendUp = false; }
   if (!backendUp) return lightResult();
   try {
-    const r = await runPythonViaBackend(_pyFormatDriver(_utf8ToBase64(src)), "");
+    const r = await runPythonViaBackend(_pyFormatDriver(utf8ToBase64(src)), "");
     const out = String((r && r.stdout) || "");
     const marker = out.lastIndexOf("<<<MNFMT>>>");
     if (marker >= 0){

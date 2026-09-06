@@ -1538,7 +1538,14 @@ const {
 const spreadsheetFormulaFunctions = typeof MNSpreadsheetFormula !== "undefined" ? MNSpreadsheetFormula : require("./spreadsheet-formula.js");
 const spreadsheetTools = typeof MNSpreadsheetTools !== "undefined" ? MNSpreadsheetTools : require("./spreadsheet-tools.js");
 const SPREADSHEET_CHART_COLORS = ["#4f46e5","#10b981","#f59e0b","#ef4444","#0ea5e9","#8b5cf6","#ec4899","#14b8a6","#f97316","#64748b"];
-function escapeChartText(s){ return String(s == null ? "" : s).replace(/[<>&]/g, ch => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;" }[ch])); }
+/* 공용 escapeHtml 과 같은 일을 하지만 여기 둔다 - buildSpreadsheetChartSvg 가 export 되어
+   테스트가 spreadsheet-viewer.js 만 require 해서 부른다. 전역으로 바꾸면 거기서 죽는다.
+   대신 막는 글자는 공용과 같게 맞춘다 - 지금 쓰이는 자리는 모두 요소 본문이라 셋으로도
+   새지 않지만, 이름만 보고 속성값에 쓰면 조용히 뚫린다. */
+function escapeChartText(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g,
+    ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+}
 function buildSpreadsheetChartSvg(type, labels, values, opts){
   opts = opts || {};
   const W = opts.width || 640, H = opts.height || 380;
@@ -5317,10 +5324,9 @@ async function renderXlsx(file, host, doc){
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
     document.body.appendChild(iframe);
-    const esc = (s) => String(s).replace(/[<>&]/g, ch => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;" }[ch]));
     const idoc = iframe.contentDocument;
     idoc.open();
-    idoc.write("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + esc(base + " - " + currentSheet) + "</title><style>"
+    idoc.write("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + escapeHtml(base + " - " + currentSheet) + "</title><style>"
       + "body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;color:#111;margin:0}"
       + "h1{font-size:13pt;margin:0 0 5mm}"
       + "table{border-collapse:collapse;font-size:10pt}"
