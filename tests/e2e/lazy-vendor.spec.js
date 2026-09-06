@@ -19,7 +19,9 @@ const PAGES = [
 ];
 
 // 시작할 때는 없어야 하는 전역들 — 각각 지연 로드 묶음의 대표 전역이다.
-const DEFERRED_GLOBALS = ["XLSX", "ExcelJS", "JSZip", "docx", "hwpjs", "zip", "jsyaml"];
+// __MN_KFONT_GZ_B64 는 한글 글꼴(0.9MB)이다. 라이브러리가 아니라 우리 생성물이지만,
+// 파이썬 그래프에만 쓰이면서 앱 코드 중 가장 컸던 파일이라 같은 규율을 건다.
+const DEFERRED_GLOBALS = ["XLSX", "ExcelJS", "JSZip", "docx", "hwpjs", "zip", "jsyaml", "__MN_KFONT_GZ_B64"];
 
 async function boot(page, url){
   await page.addInitScript(() => {
@@ -61,6 +63,31 @@ for (const target of PAGES){
     await page.keyboard.press("Enter");
     await expect.poll(() => cell.innerText()).toBe("지연로드");
     expect(errors).toEqual([]);
+  });
+
+  /* 한글 글꼴은 파이썬을 처음 돌릴 때 koreanFontGzB64() 안에서 실린다.
+     Pyodide 를 통째로 띄우면 몇십 MB 를 받아야 하므로, 그 앞단인 koreanFontGzB64() 를 직접 부른다
+     — 파이썬이 실제로 쓰는 함수 그대로다. 묶음을 부르는지, 진짜 gzip 글꼴이 오는지, 두 번째
+     호출이 같은 값을 그대로 주는지(같은 파일을 다시 실행하지 않는지)까지 한 번에 본다. */
+  test(`${target.name}: 한글 글꼴은 파이썬이 부를 때 실리고 풀 수 있는 글꼴이다`, async ({ page }) => {
+    await boot(page, target.url);
+    expect(await page.evaluate(() => typeof window.__MN_KFONT_GZ_B64)).toBe("undefined");
+
+    const font = await page.evaluate(async () => {
+      const b64 = await koreanFontGzB64();                     // 파이썬 초기화가 부르는 바로 그 함수
+      const head = Uint8Array.from(atob(b64.slice(0, 4)), (ch) => ch.charCodeAt(0));
+      const again = await koreanFontGzB64();
+      return {
+        length:b64.length,
+        gzipMagic:head[0] === 0x1f && head[1] === 0x8b,
+        stable:again === b64,
+        scripts:document.querySelectorAll('[data-mn-lazy-loaded="korean-font.js"]').length
+      };
+    });
+    expect(font.gzipMagic).toBe(true);          // gzip 머리표 1f 8b — 진짜 압축된 글꼴이 실렸다
+    expect(font.length).toBeGreaterThan(900000);
+    expect(font.stable).toBe(true);
+    expect(font.scripts).toBe(1);               // 두 번 불러도 파일은 한 번만 실행된다
   });
 
   test(`${target.name}: 같은 묶음을 다시 요청해도 한 번만 싣는다`, async ({ page }) => {

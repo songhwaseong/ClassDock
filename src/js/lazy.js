@@ -31,6 +31,11 @@ const MNLazy = (() => {
     vexflow:     { label:"악보 그리기",        files:["vexflow-bravura.min.js"] },
     // 지도 렌더러(Leaflet). 라이브러리 자체는 오프라인이고, 배경 타일만 인터넷에서 받는다.
     leaflet:     { label:"지도 그리기",        files:["leaflet.min.js"] },
+    /* 한글 글꼴(NanumGothic 을 gzip+base64 로 담은 생성물, 약 0.9MB).
+       Pyodide 의 matplotlib 에는 한글 글꼴이 없어 한글 라벨이 깨지므로 번들하지만,
+       쓰는 곳은 파이썬을 처음 돌릴 때 한 번뿐이다. 앱 코드 중 가장 큰 파일이라
+       시작할 때 파싱하면 .txt 하나를 열어도 0.9MB 를 읽는다. */
+    kfont:       { label:"한글 글꼴(파이썬 그래프)", files:["korean-font.js"] },
     // SQL 정렬기(sql-formatter). DB 클라이언트 편집기에서 정렬을 누를 때만 읽는다.
     sqlFormat:   { label:"SQL 정렬",           files:["sql-formatter.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },

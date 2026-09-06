@@ -1090,7 +1090,7 @@ async function ensurePyodide(onMsg){
     try { py.runPython("import os; os.environ['MPLBACKEND']='Agg'"); } catch(_){}
     // 번들된 한글 폰트를 풀어 쓰고 등록 헬퍼(__mn_setup_kfont)를 정의한다.
     try {
-      py.globals.set("__MN_KFONT_GZ", koreanFontGzB64());
+      py.globals.set("__MN_KFONT_GZ", await koreanFontGzB64());
       py.runPython(KFONT_INIT_PY);
       py.globals.delete("__MN_KFONT_GZ");
     } catch(_){}
@@ -1372,10 +1372,16 @@ function pyWorkerError(message, code){
   return err;
 }
 
-// 번들된 한글 폰트(NanumGothic, gzip+base64)를 꺼낸다. korean-font.js 가 globalThis 에 심어둔다.
-function koreanFontGzB64(){
-  try { return (typeof globalThis !== "undefined" && globalThis.__MN_KFONT_GZ_B64) || ""; }
-  catch(_){ return ""; }
+/* 번들된 한글 폰트(NanumGothic, gzip+base64)를 꺼낸다. vendor/korean-font.js 가 globalThis 에 심어둔다.
+   그 파일 하나가 0.9MB 라, 예전처럼 시작할 때 싣으면 .txt 를 열어도 함께 파싱했다. 파이썬을 처음
+   돌리는 이 순간에만 부른다(같은 파일은 MNLazy 가 두 번 실행하지 않는다).
+   못 실었더라도 파이썬 자체는 그대로 돌아가야 하므로 — matplotlib 한글 라벨만 깨진다 —
+   실패는 빈 문자열로 넘긴다. 부르는 쪽의 try/catch 도 그대로 남겨 둔다. */
+async function koreanFontGzB64(){
+  try {
+    if (!globalThis.__MN_KFONT_GZ_B64 && typeof MNLazy !== "undefined") await MNLazy.tryNeed("kfont");
+    return globalThis.__MN_KFONT_GZ_B64 || "";
+  } catch(_){ return ""; }
 }
 // Pyodide 초기화 때 1회: 전역 __MN_KFONT_GZ(gzip+base64)를 풀어 /fonts 에 쓰고,
 // matplotlib 에 폰트와 한글 폰트 별칭(맑은 고딕 등)을 등록하는 헬퍼 __mn_setup_kfont 를 builtins 에 정의한다.
@@ -2245,7 +2251,7 @@ async function ensurePyodideWorker(onMsg){
     const selected = await resolvePyodideBase();
     const absoluteBase = new URL(selected.base, location.href).href;
     const cdnBase = "https://cdn.jsdelivr.net/pyodide/v" + PYODIDE_VER + "/full/";
-    worker.postMessage({ type:"init", base:absoluteBase, cdnBase, kfontGz:koreanFontGzB64(), kfontInitPy:KFONT_INIT_PY, kfontCall:KFONT_SETUP_CALL });
+    worker.postMessage({ type:"init", base:absoluteBase, cdnBase, kfontGz:await koreanFontGzB64(), kfontInitPy:KFONT_INIT_PY, kfontCall:KFONT_SETUP_CALL });
   } catch(error){
     disposePyodideWorker(pyWorkerError("Python 런타임 위치를 확인하지 못했습니다.", "worker-init"));
   }

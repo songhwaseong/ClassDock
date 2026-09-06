@@ -42,7 +42,6 @@
     "pdf-editor.js",
     "pdf-pages.js",
     "viewer-base.js",
-    "korean-font.js",
     "workspace-python.js",
     "code-viewer.js",
     "python-snippets.js",
@@ -153,7 +152,6 @@
         "pdf-editor.js",
         "pdf-pages.js",
         "viewer-base.js",
-        "korean-font.js",
         "workspace-python.js",
         "code-viewer.js"
       ]
@@ -311,6 +309,7 @@
       "python-editor.js"
     ],
     "python-runtime.js": [
+      "lazy.js",
       "python-run-context.js"
     ],
     "python-terminal.js": [
@@ -883,6 +882,12 @@
       "file": "leaflet.min.js",
       "lazy": "leaflet",
       "sha384": "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+    },
+    {
+      "src": "vendor/korean-font.js",
+      "file": "korean-font.js",
+      "lazy": "kfont",
+      "sha384": "sha384-7EOLoaF3oBIUqNHSPBSgCdzmCPiErkdaWkTreGfakKrql72h05iaySH2NtxEjGPY"
     },
     {
       "src": "vendor/sql-formatter.min.js",
