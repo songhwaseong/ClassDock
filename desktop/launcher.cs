@@ -9692,7 +9692,7 @@ class ClassDockLauncher
         int separator = value.IndexOf(';');
         if (separator < 0 || separator + 1 >= value.Length) return "";
         string jars = value.Substring(separator + 1);
-        return string.IsNullOrEmpty(jars) ? "" : " -processorpath \"" + jars + "\"";
+        return string.IsNullOrEmpty(jars) ? "" : " -processorpath " + QuoteProcessArgument(jars);
     }
 
     /* ===== 라이브러리 원클릭 설치 (Maven Central 고정) =====
@@ -11086,12 +11086,17 @@ class ClassDockLauncher
 
         /* 컴파일 결과 디렉터리와 고른 라이브러리 jar 를 classpath 로 주고 탐지한 main 타입을 직접 실행한다.
            file/stdout/stderr 인코딩을 모두 UTF-8로 맞춰 한글 입력·출력이 Windows 코드페이지에 좌우되지 않게 한다. */
+        /* 인자는 손으로 따옴표를 붙이지 않고 QuoteProcessArgument 로 감싼다.
+           지금까지 새지 않은 이유는 Windows 경로에 따옴표를 못 쓰고, 클래스·패키지 이름은 정규식으로
+           뽑은 자바 식별자라 공백이 못 들어가기 때문이다 — 코드 어디에도 적혀 있지 않은 약속이었다.
+           (qualifiedClassName 은 아예 따옴표가 없었다.) 파서를 조금만 느슨하게 고치면 그 약속이
+           깨지므로, 값이 무엇이든 한 인자로 넘어가도록 인용을 한 곳으로 모은다. */
         string args = "-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 ";
         if (string.IsNullOrEmpty(junitJar))
-            args += "-cp \"" + classPath + "\" " + qualifiedClassName;
+            args += "-cp " + QuoteProcessArgument(classPath) + " " + QuoteProcessArgument(qualifiedClassName);
         else
-            args += "-jar \"" + junitJar + "\" execute --class-path \"" + classPath
-                + "\" --scan-class-path --disable-banner --disable-ansi-colors --details=tree";
+            args += "-jar " + QuoteProcessArgument(junitJar) + " execute --class-path " + QuoteProcessArgument(classPath)
+                + " --scan-class-path --disable-banner --disable-ansi-colors --details=tree";
         ProcessStartInfo psi = new ProcessStartInfo(java, args);
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
@@ -11166,9 +11171,9 @@ class ClassDockLauncher
         // 컴파일에도 같은 classpath 를 준다 — 실행에만 주면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
         // -sourcepath 는 임시 폴더 자신이다. 함께 풀어 둔 형제 .java 를 '참조된 것만' 알아서 같이 컴파일한다
         // (파일 목록으로 다 넘기면 쓰지도 않는 파일의 오류까지 학생 화면에 올라온다).
-        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp \"" + classPath + "\"" + JavaAnnotationProcessorArgs(classPath)
-            + " -sourcepath \"" + tempRoot
-            + "\" -d \"" + tempRoot + "\"" + (lint ? " -Xlint:all" : "") + " \"" + scriptPath + "\"";
+        string args = "-J-Dfile.encoding=UTF-8 -encoding UTF-8 -cp " + QuoteProcessArgument(classPath) + JavaAnnotationProcessorArgs(classPath)
+            + " -sourcepath " + QuoteProcessArgument(tempRoot)
+            + " -d " + QuoteProcessArgument(tempRoot) + (lint ? " -Xlint:all" : "") + " " + QuoteProcessArgument(scriptPath);
         ProcessStartInfo psi = new ProcessStartInfo(javac, args);
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
@@ -12661,7 +12666,9 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
     {
         try
         {
-            string args = (interp == "py" ? "-3 " : "") + "-c \"" + code + "\"";
+            // 여기 오는 code 는 경로가 아니라 파이썬 소스다("import jedi" 등). 지금은 호출부가 모두
+            // 고정 문자열이지만, 변수를 넘기는 순간 따옴표 하나로 인자가 갈라진다.
+            string args = (interp == "py" ? "-3 " : "") + "-c " + QuoteProcessArgument(code);
             ProcessStartInfo psi = new ProcessStartInfo(interp, args);
             psi.UseShellExecute = false; psi.CreateNoWindow = true;
             psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;

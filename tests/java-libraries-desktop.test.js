@@ -50,9 +50,9 @@ test("좌표는 폴더 이름이 되므로 .. 와 캐시 루트 밖을 막는다
 test("클래스패스는 컴파일과 실행 양쪽에 같은 값으로 들어간다", () => {
   // javac: -cp 가 없으면 라이브러리를 쓰는 import 부터 컴파일이 실패한다.
   assert.match(launcher, /CompileJavaSource\(string javac, string scriptPath, string tempRoot, JavaSession session,\s*\n\s*string classPath, bool lint\)/);
-  assert.match(launcher, /-encoding UTF-8 -cp \\"" \+ classPath/);
+  assert.match(launcher, /-encoding UTF-8 -cp " \+ QuoteProcessArgument\(classPath\)/);
   // java: 임시 폴더만 주던 자리를 classPath 로 바꿨는지.
-  assert.match(launcher, /args \+= "-cp \\"" \+ classPath \+ "\\" " \+ qualifiedClassName/);
+  assert.match(launcher, /args \+= "-cp " \+ QuoteProcessArgument\(classPath\) \+ " " \+ QuoteProcessArgument\(qualifiedClassName\)/);
   assert.ok(!launcher.includes('+ tempRoot + "\\" " + qualifiedClassName'),
     "실행 인자가 임시 폴더만 주던 예전 모양으로 되돌아갔다");
   assert.ok(!launcher.includes('-encoding UTF-8 -d \\"'),
@@ -61,7 +61,7 @@ test("클래스패스는 컴파일과 실행 양쪽에 같은 값으로 들어�
 
 test("선택한 jar 는 annotation processor 경로에도 넣어 JDK 24+와 Lombok을 지원한다", () => {
   assert.match(launcher, /static string JavaAnnotationProcessorArgs\(string classPath\)/);
-  assert.match(launcher, /-processorpath \\"/);
+  assert.match(launcher, /-processorpath " \+ QuoteProcessArgument\(jars\)/);
   assert.match(launcher, /JavaAnnotationProcessorArgs\(classPath\)/);
 });
 

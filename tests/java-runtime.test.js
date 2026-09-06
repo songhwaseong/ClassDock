@@ -274,7 +274,7 @@ test("파일 이름과 실제 main 클래스를 따로 찾아 컴파일·실행�
   assert.match(launcher, /foreach \(JavaTypeCandidate type in types\) if \(type\.HasMain\) return type\.Name;/);
   assert.match(launcher, /static bool CompileJavaSource\(string javac/);
   // 클래스패스는 실행 임시 폴더 + 고른 라이브러리 jar 를 담은 한 줄(JavaClassPath)이다.
-  assert.match(launcher, /-cp \\\""\s*\+ classPath \+ "\\\" " \+ qualifiedClassName/);
+  assert.match(launcher, /-cp " \+ QuoteProcessArgument\(classPath\) \+ " " \+ QuoteProcessArgument\(qualifiedClassName\)/);
   // 주석·문자열에 적힌 class 이름에 속지 않도록 먼저 지운다.
   assert.match(launcher, /static string StripJavaCommentsAndStrings\(string source\)/);
   assert.match(launcher, /JavaMainClassName\(source\)[\s\S]{0,80}StripJavaCommentsAndStrings|StripJavaCommentsAndStrings\(source \?\? ""\)/);
@@ -948,7 +948,7 @@ test("런처는 형제 소스를 package 경로에 풀고 -sourcepath 로 찾게
   assert.match(body, /JavaDeclaredFileClassName\(extra\)/);
   assert.match(body, /JavaIdentifierRe\.IsMatch\(part\)/);       // 경로 구분자·.. 가 섞인 package 는 버린다
   assert.match(body, /if \(File\.Exists\(path\)\) continue;/);   // 주 파일을 형제가 덮어쓰지 못한다
-  assert.match(launcher, /-sourcepath \\"" \+ tempRoot/);
+  assert.match(launcher, /-sourcepath " \+ QuoteProcessArgument\(tempRoot\)/);
   // 실행·검사 두 길 모두에서 형제를 푼다.
   assert.equal((launcher.match(/WriteJavaExtraSources\(tempRoot, extraSources\)/g) || []).length, 2);
   // 개수·크기 상한이 있어야 거대한 폴더가 그대로 들어오지 않는다.
