@@ -873,13 +873,27 @@ function mountConceptEditor(doc){
     closeNodePreview = close; overlay.querySelector(".concept-present-top button").onclick = close; overlay.addEventListener("pointerdown", event => { if (event.target === overlay) close(); }); window.addEventListener("keydown", keys);
     showLargeNode(overlay, node, "카드 크게 보기"); overlay.querySelector(".concept-present-top button").focus();
   }
+  /* 검색은 카드를 지우는 게 아니라 흐리게(is-muted) 할 뿐이라, 타자마다 다시 만들 이유가 없다.
+     예전에는 input 이 곧장 render 였다 — 한 글자에 카드 DOM 전체(요소 12개·리스너 7개씩)를 새로
+     짓고, 카드 사진은 base64 data URL 이라 <img> 를 다시 만드는 순간 브라우저가 이미지를 통째로
+     다시 디코딩했다(사진 30장이면 타자 한 번에 30장). 판정식은 render 와 이 함수가 함께 쓴다. */
+  const nodeMatchesQuery = (node, query) =>
+    !query || [node.title, node.category, node.description].join(" ").toLowerCase().includes(query);
+  const applySearchFilter = () => {
+    const query = search.value.trim().toLowerCase();
+    const byId = new Map(model.nodes.map(node => [node.id, node]));
+    for (const card of cards.children){
+      const node = byId.get(card.dataset.nodeId);   // 카드가 아닌 자식(빈 관계도 안내 버튼)은 건너뛴다
+      if (node) card.classList.toggle("is-muted", !nodeMatchesQuery(node, query));
+    }
+  };
   function render(){
     syncCanvasSize();
     cards.innerHTML = ""; const query = search.value.trim().toLowerCase(), orderById = new Map(model.presentation.order.map((id, index) => [id, index + 1]));
     for (const node of model.nodes){
       const card = document.createElement("article"); card.className = "concept-card" + (node.id === selectedId ? " is-selected" : "") + (node.pinned ? " is-pinned" : ""); card.dataset.nodeId = node.id; card.style.left = node.x + "px"; card.style.top = node.y + "px"; card.style.setProperty("--concept-color", CONCEPT_COLORS[node.color]);
       card.tabIndex = 0; card.title = node.pinned ? "위치 고정됨 · 이동하려면 고정 해제 · 클릭: 크게 보기 · 두 번 클릭: 수정" : "클릭: 크게 보기 · 끌기: 이동 · 두 번 클릭: 수정"; card.setAttribute("aria-label", node.title + (node.pinned ? " 위치 고정 카드." : " 카드.") + " Enter 키로 크게 보기");
-      if (query && ![node.title, node.category, node.description].join(" ").toLowerCase().includes(query)) card.classList.add("is-muted");
+      if (!nodeMatchesQuery(node, query)) card.classList.add("is-muted");
       const head = document.createElement("div"); head.className = "concept-card-head"; const headLabel = document.createElement("div"), order = document.createElement("span"), category = document.createElement("small"); headLabel.className = "concept-card-label"; order.className = "concept-order-badge"; order.textContent = String(orderById.get(node.id) || "–"); order.title = "발표 순서"; category.textContent = node.category || "개념"; headLabel.append(order, category); const edit = conceptButton("⋯", "개념 수정", "concept-card-edit"); const actions = document.createElement("div"); actions.className = "concept-card-actions";
       const pin = conceptButton(node.pinned ? "고정됨" : "고정", node.pinned ? "위치 고정 해제" : "위치 고정 · 자동정렬과 끌기에서 제자리 유지", "concept-card-pin"); pin.setAttribute("aria-pressed", String(node.pinned)); actions.append(pin, edit); head.append(headLabel, actions);
       pin.addEventListener("click", event => { event.stopPropagation(); clearTimeout(previewTimer); previewTimer = 0; node.pinned = !node.pinned; history.commit(); touch(); render(); Array.from(cards.children).find(item => item.dataset.nodeId === node.id)?.querySelector(".concept-card-pin")?.focus(); });
@@ -1142,7 +1156,7 @@ function mountConceptEditor(doc){
 
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
   addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog; tableBtn.onclick = openTableOutlineDialog;
-  undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", render); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
+  undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", applySearchFilter); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
   const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && lastPick === "edge"){ if (selectedEdgeIds.size === 1) openEdgeDialog([...selectedEdgeIds][0]); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); else if (event.key === "Escape" && selectedEdgeIds.size) selectEdge(""); };
   window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); clearTimeout(previewTimer); if (closeNodePreview) closeNodePreview(); if (closeBuildPresentation) closeBuildPresentation(); if (viewportResizeObserver) viewportResizeObserver.disconnect(); viewport.removeEventListener("wheel", onViewportWheel); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.conceptSelectNode) delete doc.conceptSelectNode; });
   render(); touch();
