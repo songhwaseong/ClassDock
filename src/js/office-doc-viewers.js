@@ -119,8 +119,17 @@ async function renderHwpx(file, host){
     if (!entry) return null;
     const img = document.createElement("img");
     img.className = "hwpx-img"; img.alt = "문서 그림";
+    // 그림 한 장마다 Object URL 이 하나씩 생긴다. 예전에는 놓지 않아서 문서를 여는 동안
+    // 그림 수만큼 쌓였다. 브라우저가 다 읽고 나면(onload) 더 들고 있을 이유가 없다 —
+    // 이미 디코딩된 그림은 주소를 놓아도 계속 보인다.
     entry.getData(new zip.BlobWriter(item && item.type ? item.type : "image/png"))
-      .then((blob) => { img.src = URL.createObjectURL(blob); })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const release = () => { try { URL.revokeObjectURL(url); } catch(_){} };
+        img.addEventListener("load", release, { once:true });
+        img.addEventListener("error", release, { once:true });
+        img.src = url;
+      })
       .catch(() => { img.remove(); });
     return img;
   };
