@@ -128,8 +128,22 @@ test("원본 폴더에서 만든 새 Python 파일은 원본 저장 모드와 �
   assert.match(codeSource, /originalSaveMode:!!\(originalRoot && originalRoot\.originalSaveMode\)/);
   assert.match(codeSource, /const initialDocPath = ownerDoc && \(ownerDoc\.workspacePath \|\| ownerDoc\.relPath\)/);
   assert.match(codeSource, /setSavedPath\(initialDocPath, \{ original:true, pending:!!\(ownerDoc\.isScratch && !ownerDoc\._named\) \}\)/);
-  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.isScratch && ownerDoc\.originalSaveMode\)/);
+  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.originalSaveMode\s+&& \(ownerDoc\.isScratch \|\| options\.createIfMissing\)\)/);
   assert.match(codeSource, /!!options\.existingOnly && !createInOriginalFolder/);
+});
+
+/* 폴더 안의 .mxl 을 편집용 .msheet 로 바꿔 열면 그 이름의 파일은 아직 디스크에 없다.
+   자동 복원을 거치면 isScratch 표식도 사라져, 예전에는 "만들 수도 덮어쓸 수도 없는" 문서가 되어
+   Ctrl+S 가 '원본 파일 쓰기 권한이 없어…' 만 띄우고 저장이 통째로 막혔다. */
+test("원본 폴더에 아직 없는 파일도 사람이 누른 저장이면 만들어 쓴다", () => {
+  assert.match(codeSource, /createIfMissing: !silent && !existingOnly/);
+  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.originalSaveMode/);
+});
+
+/* 저장 실패 토스트의 '사본으로 내려받기'가 확장자를 .py 로 갈아 끼우면
+   악보.msheet 가 악보.msheet.py 로 떨어져 앱에서 다시 열 수 없는 사본이 된다. */
+test("사본 내려받기는 문서의 확장자를 그대로 지킨다", () => {
+  assert.match(codeSource, /const outName = \/\\.\[A-Za-z0-9\]\+\$\/\.test\(value\) \? value : value \+ "\.py"/);
 });
 
 test("쓰기 가능한 실제 폴더의 우클릭 메뉴에서 디스크에 빈 폴더를 만들고 트리를 갱신한다", () => {

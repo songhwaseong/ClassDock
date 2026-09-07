@@ -3623,8 +3623,14 @@ function attachRunSplitter(split, divider){
   });
 }
 
+// 저장에 실패했을 때 주는 마지막 길 — 내용은 그대로, 이름도 그대로 내려받는다.
+// 확장자가 없을 때만 .py 를 붙인다. 예전에는 무조건 붙여서 .msheet·.mnote 같은 문서가
+// "악보.msheet.py" 로 떨어졌고, 그 사본은 앱에서 다시 열리지 않았다.
 function downloadTextFile(text, name){
-  MNDownload.saveText(text, /\.py$/i.test(name) ? name : name + ".py", "text/x-python;charset=utf-8");
+  const value = String(name || "").trim() || "practice.py";
+  const outName = /\.[A-Za-z0-9]+$/.test(value) ? value : value + ".py";
+  MNDownload.saveText(text, outName,
+    (/\.pyw?$/i.test(outName) ? "text/x-python" : "text/plain") + ";charset=utf-8");
 }
 
 // 새로 만든 문서의 첫 저장에 파일 이름을 받는다 — 원본 폴더·EXE 서버 저장에는 OS 저장 대화상자가
@@ -3788,6 +3794,9 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     if (wantOriginal || fromFolderOriginal){
       const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
+        // 사람이 직접 누른 저장이면 원본 폴더에 그 이름의 파일이 없을 때 만들어 준다
+        // (폴더의 .mxl 을 .msheet 로 바꿔 연 문서 등 — 조용한 자동·일괄 저장은 제외).
+        createIfMissing: !silent && !existingOnly,
         noPermissionPrompt: silent && existingOnly,
         mime: "text/plain;charset=utf-8"
       });
@@ -4073,8 +4082,13 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
       }
     }
     // 원본 저장 폴더에서 만든 새 문서는 아직 파일이 없으므로 create:true 로 연다.
-    // 기존 원본 파일은 기존대로 create:false 를 유지해 잘못된 위치에 새 파일이 생기지 않게 한다.
-    const createInOriginalFolder = !!(ownerDoc && ownerDoc.isScratch && ownerDoc.originalSaveMode);
+    // 폴더 안의 .mxl 을 편집용 .msheet 로 바꿔 연 문서처럼, 원본 폴더에 속하지만 그 이름의 파일이
+    // 아직 없는 문서도 마찬가지다 — isScratch 표식은 자동 복원을 거치면 남지 않으므로 그것만
+    // 보면 "만들 수도, 덮어쓸 수도 없는" 문서가 되어 저장이 통째로 막힌다(사본 내려받기만 남는다).
+    // 사람이 직접 누른 저장에서만 만든다(createIfMissing) — 조용한 자동·일괄 저장은 예전대로,
+    // 이미 있는 파일만 덮어써 잘못된 위치에 새 파일이 생기지 않게 한다.
+    const createInOriginalFolder = !!(ownerDoc && ownerDoc.originalSaveMode
+      && (ownerDoc.isScratch || options.createIfMissing));
     if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name,
       !!options.existingOnly && !createInOriginalFolder, !!options.noPermissionPrompt);
     if (!handle){
