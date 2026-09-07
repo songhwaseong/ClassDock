@@ -1509,7 +1509,10 @@ function updateOriginalSaveBadge(doc){
   }
   if (doc.el){
     doc.el.querySelectorAll(".run-save").forEach(button => {
-      button.textContent = actionLabel;
+      // 아이콘이 붙은 저장 버튼은 글자 칸만 갈아 끼운다 — textContent 로 통째로 쓰면 아이콘 SVG 까지 함께 지워진다.
+      const labelSlot = button.querySelector(".run-save-label");
+      if (labelSlot) labelSlot.textContent = actionLabel;
+      else button.textContent = actionLabel;
       button.title = target.mode ? _t(target.title) : "";
       button.dataset.shortcutTitle = target.mode ? actionLabel : _t("파일 저장");
     });

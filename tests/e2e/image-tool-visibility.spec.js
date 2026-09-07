@@ -27,11 +27,16 @@ const hideTools = (page, ids) => hideToolsInSettings(page, "image", ids);
 
 test("설정에서 끈 이미지 도구는 열려 있는 편집기에서 바로 사라지고 저장 버튼은 남는다", async ({ page }) => {
   await boot(page);
+  // 글자 추출은 ⋯ 메뉴 안에 있다 — 메뉴 안에서도 설정 숨김이 똑같이 걸려야 한다.
+  const moreOpen = page.locator(".img-more > button");
+  await moreOpen.click();
   await expect(page.locator(".img-tool-ocr")).toBeVisible();
   await expect(page.locator(".img-tool-pdf")).toBeVisible();
 
   await hideTools(page, ["imgOcr", "imgPdf", "imgAdjust"]);
 
+  await moreOpen.click();                                             // 숨김 알림이 메뉴를 닫으므로 다시 연다
+  await expect(page.locator(".img-more-menu")).toBeVisible();
   await expect(page.locator(".img-tool-ocr")).toBeHidden();
   await expect(page.locator(".img-tool-pdf")).toBeHidden();
   await expect(page.locator(".img-tool-adjust")).toBeHidden();
@@ -75,4 +80,20 @@ test("표시(주석)를 숨기면 열려 있던 표시 패널과 선택된 펜 �
     const panel = document.querySelector(".img-annotate");
     return panel ? panel.hidden : null;                               // CSS 뿐 아니라 상태도 닫혀 있어야 한다
   })).toBe(true);
+});
+
+test("⋯ 안의 도구를 모두 끄면 ⋯ 버튼과 구분선도 함께 사라진다", async ({ page }) => {
+  /* 버튼만 감추면 아무것도 없는 ⋯ 와 허공에 뜬 세로 구분선이 남는다. */
+  await boot(page);
+  await expect(page.locator(".img-more")).toBeVisible();
+
+  await hideTools(page, ["imgAltFormat", "imgMemo", "imgOcr", "imgReset"]);
+  await expect(page.locator(".img-more")).toBeHidden();
+
+  // 회전·뒤집기를 다 끄면 그 앞 구분선도 사라진다(남은 구분선은 그대로).
+  const seps = page.locator(".img-tools .img-sep");
+  const before = await seps.evaluateAll((els) => els.filter((el) => !el.hidden).length);
+  await hideTools(page, ["imgRotate", "imgFlip"]);
+  const after = await seps.evaluateAll((els) => els.filter((el) => !el.hidden).length);
+  expect(after).toBe(before - 1);
 });

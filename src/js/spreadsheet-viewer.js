@@ -5029,6 +5029,10 @@ async function renderXlsx(file, host, doc){
     // 캐시된 편집 기준 워크북을 직접 바꾸면 "저장 → 되돌리기 → 다시 저장"에서 이전 변경이 남는다.
     // 매 저장마다 원본 바이트를 새 워크북에 로드한 뒤 현재 모델만 반영한다.
     if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("exceljs");   // 저장 시점에도 준비 보장
+    // 통합문서 마무리(writeDefinedNames·writeSettings)가 JSZip 으로 xlsx 안을 고쳐 쓴다.
+    // 표를 열 때 JSZip 을 싣는 곳은 원본 xlsx 를 푸는 갈래뿐이라, CSV→XLSX 변환본처럼
+    // 그 갈래를 지나지 않은 표는 저장하려는 순간에야 JSZip 이 없어 통째로 실패했다.
+    if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("jszip");
     if (typeof ExcelJS === "undefined") return null;
     // 화면에서 조절한 열 폭·행 높이(모델 인덱스 기준)와 머리글 고정을 워크시트에 반영한다.
     const applyViewSizes = (ws, name) => {

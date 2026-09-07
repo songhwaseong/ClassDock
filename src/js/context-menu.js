@@ -11,7 +11,8 @@
  * .text-context-menu / -sub / -parent / -sep 를 붙이므로, 이미 있는 메뉴를
  * 이 모듈로 옮겨도 보이는 모습은 한 픽셀도 바뀌지 않는다.
  *
- * 항목 = { label, title, action, disabled, children, active, separator }
+ * 항목 = { label, title, action, disabled, children, active, separator, icon }
+ *   · icon 은 icons.js 이름이다. 주면 글자 앞에 단색 SVG 가 붙는다(없으면 글자만).
  *   · children 이 있으면 부모 항목이 되고 action 은 무시한다(층을 여는 일이 곧 동작이다).
  *   · 터치·펜에는 pointerenter 가 오지 않으므로 부모는 click 으로도 열린다.
  */
@@ -77,7 +78,13 @@ const MNContextMenu = (() => {
       if (!children.length && typeof item.action !== "function") continue;
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = String(item.label == null ? "" : item.label);
+      const label = String(item.label == null ? "" : item.label);
+      // icon 을 준 항목은 공용 SVG 를 앞에 붙인다. 글자는 그대로 남겨 검색·번역이 계속 걸린다.
+      if (item.icon && typeof window.uiIcon === "function"){
+        button.innerHTML = window.uiIcon(item.icon);
+        button.append(document.createTextNode(" " + label));
+        button.classList.add(base + "-iconed");
+      } else button.textContent = label;
       button.disabled = typeof item.disabled === "function" ? !!item.disabled() : !!item.disabled;
       if (item.title) button.title = String(item.title);
       if (item.active === undefined) button.setAttribute("role", "menuitem");

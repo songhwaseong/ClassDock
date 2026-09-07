@@ -468,13 +468,68 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   }
 
   // 도구막대 버튼에는 설정 '도구' 탭(state.js TOGGLEABLE_TOOLS)이 숨김에 쓰는 img-tool-* 클래스를 단다.
-  const zoomLabel = document.createElement("span"); zoomLabel.className = "img-zoom-label img-tool-zoom";
   const mkBtn = (text, title, fn, cls) => {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = text; b.title = title; b.setAttribute("aria-label", title);
     if (cls) b.className = cls;
     b.addEventListener("click", fn);
     return b;
+  };
+  // 아이콘 버튼. 글자는 반드시 따로 span 에 담는다 — 저장 버튼은 documents.js 가 원본/사본 배지에 맞춰
+  // 글자를 갈아 끼우는데, textContent 로 통째로 쓰면 아이콘 SVG 까지 지워지기 때문이다(.run-save-label 칸만 바뀐다).
+  const setBtnIcon = (b, icon, text, labelCls) => {
+    const hasIcon = typeof window.uiIcon === "function";
+    if (hasIcon) b.innerHTML = window.uiIcon(icon);
+    if (text || !hasIcon){                                 // 아이콘을 못 그리면 글자만이라도 남긴다
+      const s = document.createElement("span");
+      if (labelCls) s.className = labelCls;
+      s.textContent = text || b.title;
+      b.append(s);
+    }
+    if (hasIcon && !text) b.classList.add("img-ico");       // 아이콘만 있는 버튼은 정사각형으로
+    return b;
+  };
+  const mkIconBtn = (icon, text, title, fn, cls) => setBtnIcon(mkBtn("", title, fn, cls), icon, text);
+  // 구분선. 딸린 도구가 설정에서 모두 꺼지면 선만 남지 않게 groupWatch 로 함께 감춘다.
+  const groupWatch = [];
+  const mkSep = (...toolIds) => {
+    const s = document.createElement("span"); s.className = "img-sep";
+    if (toolIds.length) groupWatch.push({ el: s, ids: toolIds });
+    return s;
+  };
+  const syncGroups = () => {
+    const hidden = (id) => document.documentElement.classList.contains("hide-tool-" + id);
+    groupWatch.forEach(g => { g.el.hidden = g.ids.every(hidden); });
+  };
+  // 확대 비율 — '맞춤'(state.zoom === null)과 배율을 한 칸에 모은다. 눈금에 없는 배율은 마지막 칸에 그때그때 넣는다.
+  const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 4];
+  const zoomSel = document.createElement("select");
+  zoomSel.className = "img-zoom-sel img-tool-zoom";
+  zoomSel.title = "확대 비율"; zoomSel.setAttribute("aria-label", "확대 비율");
+  const zoomFitOpt = document.createElement("option"); zoomFitOpt.value = "fit"; zoomFitOpt.textContent = "맞춤";
+  zoomSel.append(zoomFitOpt);
+  ZOOM_STEPS.forEach(v => {
+    const o = document.createElement("option"); o.value = String(v); o.textContent = Math.round(v * 100) + "%";
+    zoomSel.append(o);
+  });
+  const zoomCustomOpt = document.createElement("option"); zoomCustomOpt.hidden = true; zoomSel.append(zoomCustomOpt);
+  zoomSel.addEventListener("change", () => {
+    state.zoom = zoomSel.value === "fit" ? null : Number(zoomSel.value);
+    redraw();
+  });
+  const syncZoomSelect = () => {
+    if (state.zoom === null){ zoomCustomOpt.hidden = true; zoomSel.value = "fit"; return; }
+    const v = Math.round(state.zoom * 100) / 100;
+    if (ZOOM_STEPS.indexOf(v) < 0){
+      zoomCustomOpt.hidden = false; zoomCustomOpt.value = String(v); zoomCustomOpt.textContent = Math.round(v * 100) + "%";
+    } else zoomCustomOpt.hidden = true;
+    zoomSel.value = String(v);
+  };
+  // 0.25씩 더하고 빼면 0.30000000000000004 같은 값이 나와 눈금과 안 맞는다 — 소수 둘째 자리에서 끊는다.
+  const stepZoom = (delta) => {
+    const next = (state.zoom === null ? 1 : state.zoom) + delta;
+    state.zoom = Math.round(Math.min(8, Math.max(0.1, next)) * 100) / 100;
+    redraw();
   };
   const cloneShapes = (shapes) => JSON.parse(JSON.stringify(shapes || []));
   const snapshot = () => ({ img: state.img, rotation: state.rotation, flipX: state.flipX, flipY: state.flipY, adjust: { ...state.adjust }, shapes: cloneShapes(state.shapes) });
@@ -529,13 +584,15 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   });
   // 편집을 마친 뒤 호출한다. 실제로 달라졌을 때만 한 단계로 기록된다.
   const recordEdit = () => { if (history.commit()) markImageDirty(); };
-  const undoBtn = mkBtn("되돌리기", "이미지 편집 되돌리기", () => { if (history.undo()) markImageDirty(); });
-  const redoBtn = mkBtn("다시", "이미지 편집 다시 실행", () => { if (history.redo()) markImageDirty(); });
+  const undoBtn = mkIconBtn("undo", "", "이미지 편집 되돌리기", () => { if (history.undo()) markImageDirty(); });
+  const redoBtn = mkIconBtn("redo", "", "이미지 편집 다시 실행", () => { if (history.redo()) markImageDirty(); });
   const updateHistoryButtons = () => {
     undoBtn.disabled = !history.canUndo();
     redoBtn.disabled = !history.canRedo();
   };
   const syncCropUi = () => {
+    // '적용'과 비율 프리셋은 자르기 모드일 때만 쓸모가 있다 — 평소에는 접어 두고 자리를 아낀다.
+    applyCropBtn.hidden = !state.cropMode;
     cropRatioWrap.hidden = !state.cropMode;
     cropBox.classList.toggle("ratio-locked", !!state.cropRatio);
   };
@@ -547,7 +604,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     for (const k in annToolBtns) annToolBtns[k].classList.remove("active");
     if (hadSelection) redraw();                            // 남아 있는 선택 점선 제거
   };
-  const cropBtn = mkBtn("자르기", "자르기 영역 선택", () => {   // '적용'·비율 버튼과 한 세트로 숨겨진다(styles.css)
+  const cropBtn = mkIconBtn("crop", "자르기", "자르기 영역 선택", () => {   // '적용'·비율 버튼과 한 세트로 숨겨진다(styles.css)
     state.cropMode = !state.cropMode;
     if (state.cropMode) setAnnToolOff();             // 자르기와 표시 도구는 동시에 켜지 않음
     cropBtn.classList.toggle("active", state.cropMode);
@@ -600,37 +657,64 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   const saveFormat = (origExt === "jpg" || origExt === "jpeg") ? "jpeg" : "png";
   const altFormat = saveFormat === "jpeg" ? "png" : "jpeg";
   const fmtLabel = (f) => (f === "jpeg" ? "JPG" : "PNG");
-  const saveBtn = mkBtn("저장", "현재 이미지를 " + fmtLabel(saveFormat) + "로 저장",
-    () => downloadEditedImage(state, file, saveFormat, ownerDoc), "run-save");
-  const altFormatBtn = mkBtn(fmtLabel(altFormat), "현재 이미지를 " + fmtLabel(altFormat) + "로 저장",
+  // 글자는 .run-save-label 칸에 담는다 — documents.js 가 이 칸만 갈아 끼워야 아이콘이 살아남는다.
+  const saveBtn = setBtnIcon(mkBtn("", "현재 이미지를 " + fmtLabel(saveFormat) + "로 저장",
+    () => downloadEditedImage(state, file, saveFormat, ownerDoc), "run-save"), "save", "저장", "run-save-label");
+  const altFormatBtn = mkIconBtn("save", fmtLabel(altFormat) + "로 저장", "현재 이미지를 " + fmtLabel(altFormat) + "로 저장",
     () => downloadEditedImage(state, file, altFormat, ownerDoc), "img-tool-altfmt");
+  const memoBtn = mkIconBtn("camera", "메모로 보내기", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만",
+    () => sendImageToMemo(state, file), "img-tool-memo");
+  const ocrBtn = mkIconBtn("ocr", "글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만",
+    () => extractImageText(state), "img-tool-ocr");
+  const resetBtn = mkIconBtn("reset", "초기화", "회전·뒤집기·자르기·표시·보정 모두 초기화", () => {
+    state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null; state.cropMode = false; state.zoom = null;
+    state.adjust = { brightness:100, contrast:100, saturate:100, sharpen:0, denoise:0 };
+    state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null;
+    state.img = img;
+    cropBtn.classList.remove("active"); stage.classList.remove("crop-mode"); syncCropUi(); syncAdjustUI(); redraw(); recordEdit();
+  }, "img-tool-reset");
+  // 자주 쓰지 않는 넷은 ⋯ 안으로 접는다. 항목이 img-tool-* 클래스를 그대로 달고 있어 설정 숨김도 메뉴 안에서 똑같이 걸린다.
+  const moreWrap = document.createElement("span"); moreWrap.className = "img-more";
+  const moreMenu = document.createElement("div"); moreMenu.className = "img-more-menu"; moreMenu.hidden = true;
+  let moreBtn = null;
+  const setMoreOpen = (open) => {
+    moreMenu.hidden = !open;
+    if (moreBtn) moreBtn.classList.toggle("active", open);
+    if (open) placeMoreMenu();                             // 보이게 한 뒤라야 폭을 잴 수 있다
+  };
+  // 화면 기준(position:fixed)이라 열 때마다 버튼 아래로 자리를 잡아 준다. 오른쪽 끝에서 잘리지 않게 가둔다.
+  const placeMoreMenu = () => {
+    const r = moreBtn.getBoundingClientRect();
+    const w = moreMenu.offsetWidth;
+    moreMenu.style.top = (r.bottom + 6) + "px";
+    moreMenu.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + "px";
+  };
+  moreBtn = mkIconBtn("more", "", "더 보기 — 다른 형식 저장·메모로·글자 추출·초기화", () => setMoreOpen(moreMenu.hidden));
+  moreMenu.append(altFormatBtn, memoBtn, ocrBtn, resetBtn);
+  moreMenu.addEventListener("click", () => setMoreOpen(false));   // 항목을 고르면 닫는다
+  moreWrap.append(moreBtn, moreMenu);
+  groupWatch.push({ el: moreWrap, ids: ["imgAltFormat", "imgMemo", "imgOcr", "imgReset"] });
   bar.append(
     undoBtn,
     redoBtn,
-    mkBtn("↶", "왼쪽으로 90도 회전", () => { transformShapesGeo("ccw"); state.rotation = (state.rotation + 270) % 360; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-rotate"),
-    mkBtn("↷", "오른쪽으로 90도 회전", () => { transformShapesGeo("cw"); state.rotation = (state.rotation + 90) % 360; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-rotate"),
-    mkBtn("좌우", "좌우 뒤집기", () => { transformShapesGeo("fx"); state.flipX = !state.flipX; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-flip"),
-    mkBtn("상하", "상하 뒤집기", () => { transformShapesGeo("fy"); state.flipY = !state.flipY; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-flip"),
+    mkSep("imgRotate", "imgFlip"),
+    mkIconBtn("rotateLeft", "", "왼쪽으로 90도 회전", () => { transformShapesGeo("ccw"); state.rotation = (state.rotation + 270) % 360; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-rotate"),
+    mkIconBtn("rotateRight", "", "오른쪽으로 90도 회전", () => { transformShapesGeo("cw"); state.rotation = (state.rotation + 90) % 360; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-rotate"),
+    mkIconBtn("flipH", "", "좌우 뒤집기", () => { transformShapesGeo("fx"); state.flipX = !state.flipX; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-flip"),
+    mkIconBtn("flipV", "", "상하 뒤집기", () => { transformShapesGeo("fy"); state.flipY = !state.flipY; state.cropRect = null; redraw(); recordEdit(); }, "img-tool-flip"),
+    mkSep("imgCrop"),
     cropBtn,
     applyCropBtn,
     cropRatioWrap,
+    mkSep(),
     saveBtn,
-    altFormatBtn,
-    mkBtn("PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file), "img-tool-pdf"),
-    mkBtn("📷 메모로", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만", () => sendImageToMemo(state, file), "img-tool-memo"),
-    mkBtn("🔠 글자 추출", "이미지 속 글자를 인식(OCR)해 복사·메모로 — 자르기 영역이 있으면 그 부분만", () => extractImageText(state), "img-tool-ocr"),
-    mkBtn("-", "축소", () => { state.zoom = Math.max(0.1, (state.zoom === null ? 1 : state.zoom) - 0.25); redraw(); }, "img-tool-compact img-tool-zoom"),
-    zoomLabel,
-    mkBtn("+", "확대", () => { state.zoom = Math.min(8, (state.zoom === null ? 1 : state.zoom) + 0.25); redraw(); }, "img-tool-compact img-tool-zoom"),
-    mkBtn("맞춤", "화면에 맞추기", () => { state.zoom = null; redraw(); }, "img-tool-zoom"),
+    mkIconBtn("pdf", "PDF", "현재 이미지를 PDF로 저장", () => downloadImagePdf(state, file), "img-tool-pdf"),
+    mkSep("imgZoom", "imgDims"),
+    mkIconBtn("zoomOut", "", "축소", () => stepZoom(-0.25), "img-tool-zoom"),
+    zoomSel,
+    mkIconBtn("zoomIn", "", "확대", () => stepZoom(0.25), "img-tool-zoom"),
     dimsLabel,
-    mkBtn("초기화", "회전·뒤집기·자르기·표시·보정 모두 초기화", () => {
-      state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null; state.cropMode = false; state.zoom = null;
-      state.adjust = { brightness:100, contrast:100, saturate:100, sharpen:0, denoise:0 };
-      state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null;
-      state.img = img;
-      cropBtn.classList.remove("active"); stage.classList.remove("crop-mode"); syncCropUi(); syncAdjustUI(); redraw(); recordEdit();
-    }, "img-tool-reset")
+    mkSep("imgAnnotate", "imgAdjust", "imgAltFormat", "imgMemo", "imgOcr", "imgReset")
   );
   // 보통은 setActiveDoc 이 저장 버튼 글자를 맞춰 주지만, 이미 활성인 문서에서 편집기를 다시 만들면
   // 그 기회가 없다 — 그때만 직접 한 번 부른다(다른 문서가 활성이면 그 문서 배지를 건드리지 않는다).
@@ -739,7 +823,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     qWrap,
     resetAdjBtn
   );
-  const adjustToggle = mkBtn("보정", "화질 보정·크기 조절 패널 열기/닫기", () => {
+  const adjustToggle = mkIconBtn("sliders", "보정", "화질 보정·크기 조절 패널 열기/닫기", () => {
     adjustPanel.hidden = !adjustPanel.hidden;
     adjustToggle.classList.toggle("active", !adjustPanel.hidden);
   }, "img-tool-adjust");
@@ -807,7 +891,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     else if (!state.annTool) setAnnTool("pen");            // 패널을 열면 펜부터 바로 사용
     applyCursor();
   }, "img-tool-ann"), "pen", "표시");
-  bar.append(annToggle, adjustToggle);
+  bar.append(annToggle, adjustToggle, moreWrap);
   // 설정에서 '자르기·표시·보정'을 숨기면 버튼만 사라지고 모드·패널은 켜진 채 남는다 — 그때 함께 정리한다.
   const onToolVisibility = (ev) => {
     if (!wrap.isConnected){ document.removeEventListener("mn-tool-visibility", onToolVisibility); return; }
@@ -824,9 +908,37 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     if (vis.imgAdjust === false && !adjustPanel.hidden){
       adjustPanel.hidden = true; adjustToggle.classList.remove("active");
     }
+    setMoreOpen(false);
+    syncGroups();                                          // 구분선·⋯ 도 남은 도구에 맞춰 다시 셈한다
   };
   document.addEventListener("mn-tool-visibility", onToolVisibility);
-  if (ownerDoc && Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns.push(() => document.removeEventListener("mn-tool-visibility", onToolVisibility));
+  // ⋯ 메뉴는 바깥을 누르거나 Esc 로 닫는다(문서 층에서 받아야 캔버스 위 클릭도 잡힌다).
+  const onDocPointerDown = (ev) => {
+    if (!wrap.isConnected){ document.removeEventListener("pointerdown", onDocPointerDown); return; }
+    if (!moreMenu.hidden && !moreWrap.contains(ev.target)) setMoreOpen(false);
+  };
+  const onDocKeyDown = (ev) => {
+    if (!wrap.isConnected){ document.removeEventListener("keydown", onDocKeyDown); return; }
+    if (ev.key === "Escape" && !moreMenu.hidden){ setMoreOpen(false); moreBtn.focus(); }
+  };
+  // 스크롤·창 크기가 바뀌면 화면 기준 좌표가 어긋난다 — 열려 있으면 닫는다.
+  const onDocScroll = () => {
+    if (!wrap.isConnected){ document.removeEventListener("scroll", onDocScroll, true); window.removeEventListener("resize", onDocScroll); return; }
+    if (!moreMenu.hidden) setMoreOpen(false);
+  };
+  document.addEventListener("pointerdown", onDocPointerDown);
+  document.addEventListener("keydown", onDocKeyDown);
+  document.addEventListener("scroll", onDocScroll, true);
+  window.addEventListener("resize", onDocScroll);
+  syncGroups();
+  syncCropUi();                                            // '적용'·비율은 자르기 모드 전까지 접어 둔다
+  if (ownerDoc && Array.isArray(ownerDoc.cleanupFns)) ownerDoc.cleanupFns.push(() => {
+    document.removeEventListener("mn-tool-visibility", onToolVisibility);
+    document.removeEventListener("pointerdown", onDocPointerDown);
+    document.removeEventListener("keydown", onDocKeyDown);
+    document.removeEventListener("scroll", onDocScroll, true);
+    window.removeEventListener("resize", onDocScroll);
+  });
   wrap.insertBefore(adjustPanel, stage);
   wrap.insertBefore(annPanel, stage);
   // 편집기 툴바·보정/표시 패널을 현재 UI 언어로 번역(이미지 본문 stage 는 텍스트가 없어 무해).
@@ -1082,11 +1194,10 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     }
     if (state.zoom === null){
       canvas.style.width = ""; canvas.style.maxWidth = "100%"; canvas.style.maxHeight = "calc(100vh - 190px)";
-      zoomLabel.textContent = "맞춤";
     } else {
       canvas.style.maxWidth = "none"; canvas.style.maxHeight = "none"; canvas.style.width = (out.width * state.zoom) + "px";
-      zoomLabel.textContent = Math.round(state.zoom * 100) + "%";
     }
+    syncZoomSelect();
     dimsLabel.textContent = out.width + "×" + out.height;
     applyCursor();
     updateCropBox();

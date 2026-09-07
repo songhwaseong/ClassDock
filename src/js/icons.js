@@ -61,6 +61,23 @@
     ,stop: '<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>'
     ,refresh: '<path d="M21.5 4.5v5.2h-5.2"/><path d="M19.6 14.5a8 8 0 1 1-1.9-8.3l3.8 3.5"/>'
     ,copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>'
+    // 이미지 편집 도구막대 — 회전·뒤집기는 방향이 한눈에 보여야 해서 서로 좌우 대칭으로 그린다.
+    ,rotateLeft: '<path d="M3.5 5v5h5"/><path d="M4.6 13.2A7.5 7.5 0 1 0 6 7.4L3.5 10"/>'
+    ,rotateRight: '<path d="M20.5 5v5h-5"/><path d="M19.4 13.2A7.5 7.5 0 1 1 18 7.4l2.5 2.6"/>'
+    // 뒤집기는 16px 에서 좌우·상하가 구별돼야 한다 — 날개를 넓게 잡고 한쪽만 채워 '거울에 비친' 모양으로.
+    ,flipH: '<path d="M12 2.5v19" stroke-dasharray="2.5 2.7"/><path d="M9.5 6.5 2.5 12l7 5.5z" fill="currentColor" stroke="none"/><path d="M14.5 6.5 21.5 12l-7 5.5z"/>'
+    ,flipV: '<path d="M2.5 12h19" stroke-dasharray="2.5 2.7"/><path d="M6.5 9.5 12 2.5l5.5 7z" fill="currentColor" stroke="none"/><path d="M6.5 14.5 12 21.5l5.5-7z"/>'
+    ,crop: '<path d="M6.5 2v15.5H22"/><path d="M2 6.5h15.5V22"/>'
+    ,fit: '<path d="M4 9.5V4h5.5M20 9.5V4h-5.5M4 14.5V20h5.5M20 14.5V20h-5.5"/>'
+    ,pdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M12 11.5v5.5M9.6 14.6 12 17l2.4-2.4"/>'
+    ,camera: '<path d="M4 8h3.2l1.4-2.5h6.8L16.8 8H20a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.3"/>'
+    ,ocr: '<path d="M3 8V5h3M21 8V5h-3M3 16v3h3M21 16v3h-3"/><path d="m8.6 16 3.4-8 3.4 8M9.9 13.2h4.2"/>'
+    ,sliders: '<path d="M5 5v14M12 5v14M19 5v14"/><circle cx="5" cy="9" r="2.1"/><circle cx="12" cy="15" r="2.1"/><circle cx="19" cy="8" r="2.1"/>'
+    // 초기화는 왼쪽 회전과 16px 에서 헷갈리지 않게 시곗바늘을 넣어 '되돌려 놓기'로 읽히게 한다.
+    ,reset: '<path d="M3.5 5v5h5"/><path d="M4.6 13.2A7.5 7.5 0 1 0 6 7.4L3.5 10"/><path d="M12.5 9v3.7l2.6 1.6"/>'
+    ,more: '<circle cx="5" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.35" fill="currentColor" stroke="none"/>'
+    ,plus: '<path d="M12 5v14M5 12h14"/>'
+    ,shuffle: '<path d="M3 7h3.5l4 10H15M3 17h3.5l4-10H15"/><path d="m17 4 4 3-4 3M17 14l4 3-4 3"/>'
     ,paste: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/>'
   };
   window.uiIcon = function(name){
