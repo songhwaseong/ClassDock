@@ -79,6 +79,19 @@
     ,plus: '<path d="M12 5v14M5 12h14"/>'
     ,shuffle: '<path d="M3 7h3.5l4 10H15M3 17h3.5l4-10H15"/><path d="m17 4 4 3-4 3M17 14l4 3-4 3"/>'
     ,paste: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/>'
+    // 악보 도구 탭 — 16px 에서도 '음표'와 '연장통'으로 갈라 보여야 해서 채운 머리·손잡이를 크게 잡는다.
+    ,musicNote: '<path d="M9 17.5V4.5l11-2v13"/><ellipse cx="6" cy="17.5" rx="3" ry="2.6" fill="currentColor" stroke="none"/><ellipse cx="17" cy="15.5" rx="3" ry="2.6" fill="currentColor" stroke="none"/>'
+    ,toolbox: '<rect x="2.5" y="8" width="19" height="12" rx="2"/><path d="M8.5 8V6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v2"/><path d="M2.5 13h19"/><path d="M10 11.5h4v3h-4z"/>'
+    // 재생 이동 단추 — 채운 삼각형이라야 작게 줄여도 방향이 보인다(play·stop 과 같은 규칙).
+    ,pause: '<rect x="7" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.4" y="5" width="3.6" height="14" rx="1" fill="currentColor" stroke="none"/>'
+    ,skipStart: '<rect x="4.5" y="5" width="2.4" height="14" rx="1" fill="currentColor" stroke="none"/><path d="M19.5 5v14L9 12z" fill="currentColor" stroke="none"/>'
+    ,skipEnd: '<rect x="17.1" y="5" width="2.4" height="14" rx="1" fill="currentColor" stroke="none"/><path d="M4.5 5v14L15 12z" fill="currentColor" stroke="none"/>'
+    ,stepBack: '<path d="M11.5 6v12L3.5 12z" fill="currentColor" stroke="none"/><path d="M20.5 6v12l-8-6z" fill="currentColor" stroke="none"/>'
+    ,stepForward: '<path d="M12.5 6v12l8-6z" fill="currentColor" stroke="none"/><path d="M3.5 6v12l8-6z" fill="currentColor" stroke="none"/>'
+    /* 음량·음소거 — 스피커는 채워서 작아져도 덩어리로 보이게 하고, 켬/끔은 물결과 ×로 갈라 놓는다.
+       (이모지 🔊/🔇 는 UI 정리가 지우기만 하고 대신 그릴 그림이 없어 빈 단추가 됐다.) */
+    ,volume: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="M15.4 9.5a3.6 3.6 0 0 1 0 5"/><path d="M18.1 6.9a7.4 7.4 0 0 1 0 10.2"/>'
+    ,mute: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'
   };
   window.uiIcon = function(name){
     const content = paths[name] || paths.code;

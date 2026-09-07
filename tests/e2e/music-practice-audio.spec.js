@@ -37,8 +37,15 @@ const DUET = `(() => {
   return sheet;
 })()`;
 
+// 도구가 탭으로 나뉘어 있어 버튼을 누르기 전에 그 갈래를 먼저 연다.
+const openMusicTab = async (page, label) => {
+  const tab = page.locator(".music-tab", { hasText:label }).last();   // 문서가 여러 개 열려 있을 수 있다
+  await tab.click();
+  await expect(tab).toHaveClass(/is-on/);
+};
 const openPanel = async (page) => {
-  await page.locator(".music-play button", { hasText:"연습 음원" }).click();
+  await openMusicTab(page, "음색/효과");
+  await page.locator(".music-tone-tools button", { hasText:"연습 음원" }).click();
   await expect(page.locator(".music-practice-audio")).toBeVisible();
 };
 

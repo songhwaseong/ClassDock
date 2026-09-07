@@ -9,7 +9,7 @@
    설계: docs/악보-설계.md */
 
 const MUSIC_FORMAT = "classdock-sheet";
-const MUSIC_VERSION = 12;
+const MUSIC_VERSION = 13;   // v13: 계이름을 붙일 오선 고르기(solfegeStaff)
 
 // 4분음표 = 480틱. 정수로만 다뤄 부동소수 오차를 없앤다(점음표까지 나눠떨어진다).
 const MUSIC_TICKS_PER_QUARTER = 480;
@@ -18,6 +18,9 @@ const MUSIC_MAX_LYRIC_VERSES = 6;
 const MUSIC_MAX_REHEARSAL = 6;              // 연습 기호 글자 수(A·B·Coda 처럼 짧게)
 const MUSIC_MIN_BARS_PER_LINE = 2;
 const MUSIC_MEASURE_NUMBER_MODES = Object.freeze(["off", "line", "every"]);
+// 계이름을 어느 오선에 붙일지. 대보표에서만 뜻이 있다 — 멜로디만 읽는 수업이 대부분이라
+// 윗줄만 켜면 아랫줄 계이름 한 줄이 통째로 빠져 악보가 훨씬 가벼워진다.
+const MUSIC_SOLFEGE_STAVES = Object.freeze(["both", "treble", "bass"]);
 const MUSIC_REHEARSAL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const MUSIC_AUTO_REHEARSAL_EVERY = 8;       // 구조 표시가 없는 악보에서 몇 마디마다 매길지   // 가사 절 수 상한 — 한 단 아래에 읽을 수 있게 쌓이는 한계
 const MUSIC_LYRIC_MAX = 80;         // 음절 한 칸의 글자 수
@@ -362,6 +365,10 @@ function musicClampRehearsal(value){
   return String(value == null ? "" : value).replace(/[\r\n\t]+/g, " ").trim().slice(0, MUSIC_MAX_REHEARSAL);
 }
 
+function musicClampSolfegeStaff(value){
+  return MUSIC_SOLFEGE_STAVES.includes(value) ? value : "both";
+}
+
 function musicClampMeasureNumbers(value){
   if (MUSIC_MEASURE_NUMBER_MODES.includes(value)) return value;
   const step = Math.round(Number(value) || 0);
@@ -494,6 +501,7 @@ function musicEmpty(title){
     accompanimentMode:"drums",
     accompanimentTimbre:"piano",
     showSolfege:false,
+    solfegeStaff:"both",
     lyricVerses:1,
     measureNumbers:"line",
     barsPerLine:0,
@@ -1901,16 +1909,21 @@ function musicTransposePart(sheet, part, semitones, opts){
 
 const MUSIC_BAR_BASE_WIDTH = 74;     // 음표가 없어도 필요한 폭
 const MUSIC_BAR_NOTE_WIDTH = 26;     // 음표 하나가 더 요구하는 폭
+/* 계이름은 조판이 끝난 뒤 SVG 글자로 얹으므로 VexFlow 는 그 폭을 모른다. "시♭" 같은 두 글자가
+   음표 간격보다 넓으면 이웃 계이름끼리 파고들기 때문에, 계이름을 켠 동안은 음표마다 그만큼
+   더 요구해 둔다(줄당 마디 수가 줄고 악보는 길어지는 대신 계이름이 읽힌다). */
+const MUSIC_BAR_SOLFEGE_WIDTH = 8;
 const MUSIC_BAR_MIN_WIDTH = 96;
 const MUSIC_LINE_HEAD_EXTRA = 80;    // 줄 첫 마디의 음자리표·조표 자리
 const MUSIC_MAX_BARS_PER_LINE = 8;
 
-function musicBarWidthHint(measure){
+function musicBarWidthHint(measure, solfege){
   const count = Math.max(
     musicVoiceNotes(measure, "treble", 1).length, musicVoiceNotes(measure, "treble", 2).length,
     musicVoiceNotes(measure, "bass", 1).length, musicVoiceNotes(measure, "bass", 2).length
   );
-  return Math.max(MUSIC_BAR_MIN_WIDTH, MUSIC_BAR_BASE_WIDTH + count * MUSIC_BAR_NOTE_WIDTH);
+  const per = MUSIC_BAR_NOTE_WIDTH + (solfege ? MUSIC_BAR_SOLFEGE_WIDTH : 0);
+  return Math.max(MUSIC_BAR_MIN_WIDTH, MUSIC_BAR_BASE_WIDTH + count * per);
 }
 
 /* barsPerLine 을 주면 폭과 상관없이 그 개수로 자른다 — 인쇄본마다 마디 자리가 달라지지 않아야
@@ -1919,11 +1932,12 @@ function musicPackLines(measures, availableWidth, options){
   const list = Array.isArray(measures) ? measures : [];
   const width = Math.max(MUSIC_BAR_MIN_WIDTH + MUSIC_LINE_HEAD_EXTRA, Number(availableWidth) || 0);
   const fixed = musicClampBarsPerLine(options && options.barsPerLine);
+  const solfege = !!(options && options.solfege);
   const lines = [];
   let current = null;
 
   list.forEach((measure, index) => {
-    const hint = musicBarWidthHint(measure);
+    const hint = musicBarWidthHint(measure, solfege);
     // ＋오선으로 지정한 마디는 폭이 남아 있어도 새 단의 첫 마디가 된다.
     if (current && measure && measure.lineBreakBefore === true) current = null;
     if (current){
@@ -2081,6 +2095,7 @@ function musicParse(text){
     accompanimentMode:musicAccompanimentMode(raw.accompanimentMode),
     accompanimentTimbre:musicAccompanimentTimbre(raw.accompanimentTimbre),
     showSolfege:raw.showSolfege !== false,
+    solfegeStaff:musicClampSolfegeStaff(raw.solfegeStaff),
     lyricVerses:musicClampVerseCount(Math.max(Math.round(Number(raw.lyricVerses) || 1), musicCountLyricVerses(parts))),
     measureNumbers:musicClampMeasureNumbers(raw.measureNumbers),
     barsPerLine:musicClampBarsPerLine(raw.barsPerLine),
@@ -2172,6 +2187,8 @@ function musicSerialize(sheet){
   // 1절뿐이면 예전 파일과 완전히 같은 바이트가 나오도록 절 수를 적지 않는다.
   const lyricVerses = musicClampVerseCount(Math.max(musicClampVerseCount(model.lyricVerses), musicCountLyricVerses(musicParts(model))));
   if (lyricVerses > 1) out.lyricVerses = lyricVerses;
+  const solfegeStaff = musicClampSolfegeStaff(model.solfegeStaff);
+  if (solfegeStaff !== "both") out.solfegeStaff = solfegeStaff;
   const measureNumbers = musicClampMeasureNumbers(model.measureNumbers);
   if (measureNumbers !== "line") out.measureNumbers = measureNumbers;
   const barsPerLine = musicClampBarsPerLine(model.barsPerLine);

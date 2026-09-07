@@ -65,6 +65,18 @@ const MNMusicEarTest = (() => {
     const replayBtn = document.createElement("button");
     replayBtn.type = "button";
     replayBtn.className = "music-btn music-ear-replay";
+    /* 스피커 그림과 글자를 각각 다른 칸에 담는다 — 남은 다시 듣기 횟수가 계속 바뀌는데
+       textContent 로 통째로 갈아 끼우면 SVG 가 지워진다(음소거 단추와 같은 함정).
+       이모지를 쓰면 icons.js 의 UI 정리가 지우기만 해서 앞 공백만 남는다. */
+    const replayIcon = document.createElement("i");
+    replayIcon.className = "music-ear-replay-icon";
+    // 이 모듈은 브라우저 없이(vm 테스트) 그대로 도는 게 규칙이라 window 부터 확인하고 짚는다.
+    if (typeof window !== "undefined" && typeof window.uiIcon === "function"){
+      replayIcon.innerHTML = window.uiIcon("volume");
+    }
+    const replayLabel = document.createElement("span");
+    replayLabel.className = "music-ear-replay-label";
+    replayBtn.append(replayIcon, replayLabel);
     const feedbackEl = document.createElement("p");
     feedbackEl.className = "music-ear-feedback";
     feedbackEl.setAttribute("aria-live", "polite");
@@ -166,10 +178,10 @@ const MNMusicEarTest = (() => {
       octaveRow.hidden = state.phase !== "octave";
       for (const button of octaveButtons.values()) button.disabled = state.phase !== "octave";
       replayBtn.disabled = !asking || state.replays >= state.replayLimit;
-      replayBtn.textContent = state.replayLimit === Infinity
-        ? "🔊 다시 듣기 (무제한)"
+      replayLabel.textContent = state.replayLimit === Infinity
+        ? "다시 듣기 (무제한)"
         : state.replays >= state.replayLimit
-          ? "🔊 다시 듣기 (다 썼어요)" : `🔊 다시 듣기 (${state.replayLimit - state.replays}번 남음)`;
+          ? "다시 듣기 (다 썼어요)" : `다시 듣기 (${state.replayLimit - state.replays}번 남음)`;
     }
     function syncProgress(){
       const total = state.questions.length;

@@ -1343,8 +1343,64 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-prepare-status{margin:0 0 4px;font-size:12.5px;color:var(--muted);min-height:17px}
   /* ===== .msheet 악보 문서 ===== */
   .music-doc{display:flex;flex-direction:column;height:100%;min-height:0}
-  .music-bar,.music-play{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
+  .music-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}
+  /* 도구 탭 — 예전 네 줄(편집·쉬운 입력·재생·음색)을 다섯 칸으로 나눠 한 번에 한 칸만 보여준다.
+     안 보이는 칸은 display:none 이 아니라 hidden 이라 요소·설정값이 그대로 살아 있다. */
+  .music-toolbox{border-bottom:1px solid var(--border);background:var(--panel)}
+  .music-toolbox[hidden]{display:none}
+  .music-tabs{display:flex;align-items:flex-end;gap:4px;flex-wrap:wrap;padding:6px 10px 0;
+    border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 6%,var(--panel))}
+  .music-tab{display:inline-flex;align-items:center;gap:5px;margin-bottom:-1px;
+    border:1px solid var(--border);border-bottom:0;border-radius:9px 9px 0 0;
+    background:var(--field);color:var(--ink);padding:7px 13px;font:600 12.5px/1.2 inherit;
+    white-space:nowrap;cursor:pointer}
+  .music-tab[hidden]{display:none}
+  .music-tab:hover{background:var(--panel-hover);border-color:var(--accent)}
+  .music-tab.is-on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .music-tab .ui-icon{width:15px;height:15px}
+  .music-pane{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 12px;background:var(--panel)}
+  .music-pane[hidden]{display:none}
+  /* 마디 막대 — 참고 편집기의 파형 자리. 악보에는 소리 파일이 없어 '몇 번째 마디인가'로 그린다.
+     눈금은 요소가 아니라 그라디언트라 마디가 수백 개여도 DOM 이 늘지 않는다. */
+  .music-timeline{flex:1 0 100%;display:flex;flex-direction:column;gap:5px;
+    padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--field)}
+  .music-timeline[hidden]{display:none}
+  .music-timeline-track{position:relative;height:34px;border:1px solid var(--border);border-radius:7px;
+    overflow:hidden;cursor:pointer;background:color-mix(in srgb,var(--ink) 5%,var(--field));
+    background-image:linear-gradient(to right,color-mix(in srgb,var(--ink) 26%,transparent) 0 1px,transparent 1px);
+    background-size:var(--music-measure-width,25%) 100%}
+  .music-timeline-track.is-dense{background-image:linear-gradient(to right,color-mix(in srgb,var(--ink) 14%,transparent) 0 1px,transparent 1px)}
+  .music-timeline-track:hover:not(.is-locked){border-color:var(--accent)}
+  .music-timeline-track:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .music-timeline-track.is-locked{cursor:default}
+  .music-timeline-done{position:absolute;top:0;bottom:0;left:0;width:0;
+    background:color-mix(in srgb,var(--accent) 13%,transparent);pointer-events:none}
+  /* 재생 머리는 '한 마디' 폭의 덩어리다 — 지나온 자리(옅은 칠)와 또렷이 갈려야 어디서 시작할지 보인다. */
+  .music-timeline-head{position:absolute;top:0;bottom:0;left:0;min-width:3px;pointer-events:none;
+    background:color-mix(in srgb,var(--accent) 62%,transparent);
+    box-shadow:inset 0 0 0 1px var(--accent-d,var(--accent))}
+  .music-timeline-track.is-playing .music-timeline-head{background:var(--accent)}
+  .music-timeline-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    font-size:11.5px;color:var(--muted)}
+  .music-timeline-where{color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums}
+  /* 재생 이동 단추 — 아이콘 위, 이름 아래(참고 이미지와 같은 배치). */
+  .music-transport{flex:1 0 100%;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;
+    padding:2px 0 4px}
+  .music-transport[hidden]{display:none}
+  .music-tbtn{display:flex;flex-direction:column;align-items:center;gap:4px;
+    border:0;padding:0;background:none;color:var(--ink);font:inherit;font-size:11px;cursor:pointer}
+  .music-tbtn-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;
+    border:1px solid var(--border);background:var(--field);font-style:normal}
+  .music-tbtn-icon .ui-icon{width:18px;height:18px}
+  .music-tbtn:hover:not(:disabled) .music-tbtn-icon{border-color:var(--accent);background:var(--panel-hover)}
+  .music-tbtn:focus-visible{outline:0}
+  .music-tbtn:focus-visible .music-tbtn-icon{outline:2px solid var(--accent);outline-offset:2px}
+  .music-tbtn:disabled{opacity:.38;cursor:not-allowed}
+  .music-tbtn.is-primary .music-tbtn-icon{width:54px;height:54px;
+    background:var(--accent);border-color:var(--accent);color:#fff}
+  .music-tbtn.is-primary .music-tbtn-icon .ui-icon{width:22px;height:22px}
+  .music-tbtn.is-primary:hover:not(:disabled) .music-tbtn-icon{background:var(--accent-d,var(--accent))}
   .music-title{flex:1 1 200px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
     padding:6px 10px;font:600 15px/1.3 inherit}
   .music-field{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
@@ -1364,6 +1420,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-part-transpose.is-on{border-color:var(--accent);color:var(--accent);font-weight:700}
   .music-synth-panel{border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 5%,var(--panel));color:var(--ink)}
   .music-synth-panel[hidden]{display:none}
+  /* 음색/효과 탭 안에서는 칸 한 줄을 통째로 쓰고, 칸의 아래 테두리를 대신 쓴다. */
+  .music-tone-tools>.music-synth-panel{flex:1 0 100%;margin:2px -12px -8px;
+    border-top:1px solid var(--border);border-bottom:0}
   .music-synth-panel summary{padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;user-select:none}
   .music-synth-panel summary::marker{color:var(--accent)}
   .music-synth-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:7px 12px;padding:4px 12px 10px}
@@ -1384,6 +1443,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-status{font-size:12px;color:var(--muted);margin-left:auto}
   .music-volume{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .music-volume .music-btn{min-width:34px;padding:6px}
+  /* 음소거 단추는 글자가 없고 SVG 만 있다 — 1em(12px)을 따라가면 너무 작아서 칸에 맞춰 키운다. */
+  .music-volume .music-btn,.music-btn.music-part-mute{display:inline-flex;align-items:center;justify-content:center}
+  .music-volume .music-btn .ui-icon,.music-btn.music-part-mute .ui-icon{width:16px;height:16px;vertical-align:0}
   .music-volume-range{width:86px;accent-color:var(--accent);cursor:pointer}
   .music-volume-label{width:34px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
   .music-drums{gap:5px}
@@ -1432,8 +1494,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-pitch-guide{stroke:var(--accent);stroke-width:1.25;stroke-dasharray:4 5;opacity:.32;
     pointer-events:none;vector-effect:non-scaling-stroke}
   .music-pitch-guide.is-invalid{stroke:#dc2626;opacity:.4}
+  /* 계이름은 음표·덧줄 위를 지날 수밖에 없으므로 흰 후광을 두르고 글자를 그 위에 얹는다
+     (paint-order). 후광이 없으면 오선과 겹치는 순간 글자가 읽히지 않는다. */
   .music-solfege{font-family:"Noto Sans KR","Malgun Gothic",sans-serif;font-size:13px;font-weight:700;
-    fill:#2563eb;stroke:none;cursor:pointer;user-select:none}
+    fill:#2563eb;stroke:#fff;stroke-width:3px;stroke-linejoin:round;paint-order:stroke;
+    cursor:pointer;user-select:none}
+  .music-solfege-mark{font-size:9px}
   .music-solfege.is-playing{fill:var(--accent)}
   .music-solfege.is-selected{fill:#c2410c}
   .music-chord-symbol{font-family:"Noto Sans KR","Malgun Gothic",sans-serif;font-size:14px;font-weight:700;
@@ -1477,7 +1543,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   /* 연습 중에는 머리말·도구상자를 통째로 잠근다. 교본이 바뀌면 진도가 어긋난다.
      '쉬운 입력'(도레미 버튼)과 재생 바는 살려 둔다 — 거기서 따라치기를 끄고 켠다. */
   .music-doc.is-practice .music-bar,.music-doc.is-practice .music-synth-panel,
-  .music-doc.is-practice .music-tools{opacity:.45;pointer-events:none}
+  .music-doc.is-practice .music-score-tools,.music-doc.is-practice .music-tone-tools,
+  .music-doc.is-practice .music-tools>*:not(.music-beginner-tools){opacity:.45;pointer-events:none}
   .music-practice{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .music-practice-staff[hidden]{display:none}
   .music-practice-info{color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -1488,7 +1555,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-ear-controls{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
   .music-doc.is-eartest .music-score-workspace{display:none}
   .music-doc.is-eartest .music-bar,.music-doc.is-eartest .music-synth-panel,
-  .music-doc.is-eartest .music-tools{opacity:.45;pointer-events:none}
+  .music-doc.is-eartest .music-score-tools,.music-doc.is-eartest .music-tone-tools,
+  .music-doc.is-eartest .music-tools>*:not(.music-beginner-tools){opacity:.45;pointer-events:none}
   .music-ear{flex:1;min-height:0;overflow:auto;padding:20px 12px;background:var(--panel);color:var(--ink)}
   .music-ear-panel{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px;text-align:center}
   .music-ear-head{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;font-size:13px}
@@ -1499,6 +1567,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-ear-feedback{margin:0;min-height:20px;font-size:14px;font-weight:700}
   .music-ear-feedback.is-ok{color:#166534}
   .music-ear-feedback.is-bad{color:#dc2626}
+  /* 다시 듣기 — 스피커 그림과 글자가 다른 칸이라 한 줄로 세우고 그림만 따로 키운다. */
+  .music-ear-replay{display:inline-flex;align-items:center;gap:6px}
+  .music-ear-replay-icon{display:inline-flex}
+  .music-ear-replay-icon .ui-icon{width:15px;height:15px;vertical-align:0}
   .music-ear-keys{display:flex;justify-content:center;gap:6px;flex-wrap:wrap}
   .music-ear-keys .music-ear-key{min-width:54px;min-height:46px;padding:8px 12px;font-size:16px;font-weight:700}
   .music-ear-black .music-ear-key{min-width:50px;font-size:14px;
@@ -1512,10 +1584,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-ear-note{margin:0;color:var(--muted);font-size:11.5px}
   .music-ear-result-buttons{display:flex;justify-content:center;gap:8px}
   /* 도구상자 */
-  .music-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 12px;
-    border-bottom:1px solid var(--border);background:var(--panel)}
   .music-beginner-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 12px;
-    border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--accent) 5%,var(--panel));font-size:12px}
+    background:color-mix(in srgb,var(--accent) 5%,var(--panel));font-size:12px}
+  /* '쉬운 입력'은 편집 탭 안에서 한 줄을 통째로 쓴다 — 칸 여백을 넘어 좌우 끝까지 붙인다. */
+  .music-tools>.music-beginner-tools{flex:1 0 100%;margin:2px -12px -8px;border-top:1px solid var(--border)}
   .music-beginner-tools>strong{color:var(--accent);white-space:nowrap}
   .music-doc.is-keyboard-compose .music-beginner-tools{background:color-mix(in srgb,var(--accent) 13%,var(--panel))}
   .music-easy-notes .music-btn{min-width:42px;min-height:36px;padding:7px 12px;font-size:14px;font-weight:700}

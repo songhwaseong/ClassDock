@@ -42,6 +42,13 @@ const memoImageInk = (page) => page.evaluate(async () => {
   return { width:canvas.width, height:canvas.height, ink };
 });
 
+// 도구가 탭으로 나뉘어 있어 버튼을 누르기 전에 그 갈래를 먼저 연다.
+const openMusicTab = async (page, label) => {
+  const tab = page.locator(".music-tab", { hasText:label }).last();   // 문서가 여러 개 열려 있을 수 있다
+  await tab.click();
+  await expect(tab).toHaveClass(/is-on/);
+};
+
 async function openScore(page, build){
   await page.evaluate((source) => {
     const sheet = (0, eval)(source);
@@ -65,6 +72,7 @@ test("악보를 메모로 보내고, 메모에서 다시 열어 고치면 같은
   expect(fontCss).toContain("data:font/woff2");
 
   // ① 메모로 보내기 → 이미지 블록 한 개, 그리고 "✏️ 악보로"가 붙는다
+  await openMusicTab(page, "도구");
   await page.locator(".music-btn", { hasText:"메모로" }).last().click();
   const imageBlocks = page.locator("#scratchpad [data-block-id] .scratchpad-image-tools");
   await expect(imageBlocks).toHaveCount(1);
@@ -98,6 +106,7 @@ test("악보를 메모로 보내고, 메모에서 다시 열어 고치면 같은
 
   // ⑤ 되열린 악보에서 다시 메모로 → 새 블록이 아니라 같은 블록이 갱신된다
   await expect(page.locator(".music-score svg").last()).toBeVisible({ timeout:15_000 });
+  await openMusicTab(page, "도구");
   await page.locator(".music-btn", { hasText:"메모로" }).last().click();
   await expect(imageBlocks).toHaveCount(1);
 

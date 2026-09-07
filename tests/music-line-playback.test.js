@@ -21,6 +21,7 @@ function loadPlayback(){
     musicSyncActivePart(sheet);
     let scoreLines = [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9]];
     let playbackMeasure = 0;
+    let timelinePlayMeasure = -1;
     let playbackPartId = sheet.activePartId;
     let selection = null, activeStaff = "treble", activeVoice = 1;
     const flags = new Set();
@@ -35,6 +36,21 @@ function loadPlayback(){
       replaceChildren(){ this.options = []; },
       appendChild(option){ this.options.push(option); }
     };
+    // 마디 막대·재생 이동 단추 — 화면 값만 받아 두면 계산은 그대로 돌릴 수 있다.
+    const styleStub = () => ({ width:"", left:"", setProperty(name, value){ this[name] = value; } });
+    const classListStub = () => ({ names:new Set(),
+      toggle(name, on){ if (on) this.names.add(name); else this.names.delete(name); },
+      contains(name){ return this.names.has(name); } });
+    const timelineTrack = { style:styleStub(), classList:classListStub(), attrs:{},
+      setAttribute(name, value){ this.attrs[name] = value; }, focus(){} };
+    const timelineDone = { style:styleStub() };
+    const timelineHead = { style:styleStub() };
+    const timelineWhere = { textContent:"" };
+    const toStartBtn = { disabled:false };
+    const prevLineBtn = { disabled:false };
+    const nextLineBtn = { disabled:false };
+    const toEndBtn = { disabled:false };
+    const playHereBtn = { disabled:false };
     const plays = [];
     function startPlay(range, options){ plays.push({ range, options }); }
     const noteEls = new Map();
@@ -43,7 +59,8 @@ function loadPlayback(){
     function updateMeasureProgress(){}
     function revealScoreElement(){}
   `, context);
-  for (const name of ["measureNumberLabel", "syncPlaybackLineControls", "selectPlaybackLine", "startSelectedPart", "select"]){
+  for (const name of ["measureNumberLabel", "syncPlaybackLineControls", "lastLineStartMeasure", "syncTimeline",
+    "movePlayhead", "movePlayheadByLine", "playFromPlayhead", "selectPlaybackLine", "startSelectedPart", "select"]){
     const pattern = new RegExp(`^  function ${name}\\([^\\n]*\\)\\{[^]*?^  \\}`, "m");
     const source = editorSource.match(pattern);
     assert.ok(source, `${name} 함수를 읽을 수 있어야 한다`);
@@ -165,4 +182,71 @@ test("그릴 오선이 없으면 전체 재생으로 대체하지 않는다", ()
   h.run("scoreLines = []; syncPlaybackLineControls(true); startSelectedPart()");
   assert.equal(h.run("playSelectedPartBtn.disabled && playbackLineSelect.disabled"), true);
   assert.equal(h.run("plays.length"), 0);
+});
+
+/* ===== 2단계 — 재생 머리(마디 막대)와 이동 단추 ===== */
+
+test("재생 머리는 단 단위로 옮기고, 첫 마디·마지막 단 끝에서는 단추가 잠긴다", () => {
+  const h = loadPlayback();
+  assert.equal(h.run("playbackMeasure"), 0);
+  assert.equal(h.run("toStartBtn.disabled"), true);      // 이미 첫 마디
+  assert.equal(h.run("prevLineBtn.disabled"), true);
+
+  h.run("movePlayheadByLine(1)");
+  assert.equal(h.run("playbackMeasure"), 4);             // 2번째 단의 첫 마디
+  assert.equal(h.run("playbackLineSelect.value"), "1");
+  assert.equal(h.run("toStartBtn.disabled || prevLineBtn.disabled || nextLineBtn.disabled"), false);
+
+  h.run("movePlayheadByLine(1)");
+  assert.equal(h.run("playbackMeasure"), 8);             // 마지막 단
+  assert.equal(h.run("nextLineBtn.disabled"), true);
+  assert.equal(h.run("toEndBtn.disabled"), true);
+
+  h.run("movePlayheadByLine(-1)");
+  assert.equal(h.run("playbackMeasure"), 4);
+  h.run("movePlayhead(0)");
+  assert.equal(h.run("playbackMeasure"), 0);
+  // 악보 밖으로는 나가지 않는다
+  h.run("movePlayhead(-5)");
+  assert.equal(h.run("playbackMeasure"), 0);
+  h.run("movePlayhead(999)");
+  assert.equal(h.run("playbackMeasure"), 9);
+});
+
+test("머리가 첫 마디면 전체 재생, 아니면 그 마디부터 끝까지 재생한다", () => {
+  const h = loadPlayback();
+  h.run("playFromPlayhead()");
+  assert.equal(h.run("plays[0].range"), null);           // 반복·엔딩이 그대로 살아야 해서 구간 없이
+  h.run("movePlayhead(4); playFromPlayhead()");
+  assert.deepEqual(h.read("plays[1].range"), { from:5, to:10 });
+});
+
+test("마디 막대는 재생 중이면 소리 나는 마디를, 아니면 재생 머리를 가리킨다", () => {
+  const h = loadPlayback();
+  h.run("movePlayhead(4)");
+  assert.equal(h.run("timelineHead.style.left"), "40%");        // 10마디 중 5번째
+  assert.equal(h.run("timelineDone.style.width"), "40%");
+  assert.match(h.run("timelineWhere.textContent"), /재생 머리 · 5마디/);
+  assert.equal(h.run("timelineTrack.attrs['aria-valuenow']"), "5");
+
+  h.run("timelinePlayMeasure = 6; syncTimeline()");
+  assert.equal(h.run("timelineHead.style.left"), "60%");
+  assert.equal(h.run("timelineDone.style.width"), "70%");       // 소리 나는 마디까지 채운다
+  assert.match(h.run("timelineWhere.textContent"), /재생 중 · 7마디/);
+  assert.equal(h.run("timelineTrack.classList.contains('is-playing')"), true);
+
+  // 눈금은 요소가 아니라 그라디언트 폭으로 그린다(마디가 많아도 DOM 이 늘지 않는다).
+  assert.equal(h.run("timelineTrack.style['--music-measure-width']"), "10%");
+});
+
+test("재생·연습 중에는 재생 머리를 옮기지 못한다", () => {
+  const h = loadPlayback();
+  h.run("movePlayhead(4); flags.add('is-running'); syncPlaybackLineControls()");
+  for (const name of ["toStartBtn", "prevLineBtn", "nextLineBtn", "toEndBtn", "playHereBtn"]){
+    assert.equal(h.run(`${name}.disabled`), true, name + " 은 재생 중 잠겨야 한다");
+  }
+  assert.equal(h.run("timelineTrack.classList.contains('is-locked')"), true);
+  h.run("flags.clear(); syncPlaybackLineControls()");
+  assert.equal(h.run("playHereBtn.disabled"), false);
+  assert.equal(h.run("timelineTrack.classList.contains('is-locked')"), false);
 });

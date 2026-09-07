@@ -24,13 +24,35 @@ function musicScoreTopPad(sheet){
   return 10 + (rehearsal ? 42 : numbers ? 12 : 0);
 }
 
+/* 대보표에서 윗줄 계이름은 두 오선 사이에 놓인다. 92 로는 아랫줄 덧줄 음이 쓰는 자리와 같아
+   계이름이 음표에 얹히므로, 계이름을 켠 동안만 사이를 그만큼 벌려 계이름 몫의 칸을 만든다. */
+function musicShowsSolfege(sheet){
+  return !!sheet && sheet.showSolfege !== false;
+}
+function musicSolfegeShowsStaff(sheet, staff){
+  if (!musicShowsSolfege(sheet)) return false;
+  if (!sheet.grandStaff) return true;                 // 단일 오선은 고를 것이 없다
+  const pick = musicClampSolfegeStaff(sheet.solfegeStaff);
+  return pick === "both" || pick === staff;
+}
+/* 자리를 비우는 것은 두 오선 사이에 놓이는 윗줄 계이름뿐이다. 아랫줄만 켰으면 그 줄은
+   대보표 아래에 붙으므로 사이를 벌릴 까닭이 없다. */
+function musicSolfegeGapExtra(sheet){
+  return sheet && sheet.grandStaff && musicSolfegeShowsStaff(sheet, "treble") ? MUSIC_SOLFEGE_GAP_EXTRA : 0;
+}
+function musicStaffGap(sheet){
+  return MUSIC_STAFF_GAP + musicSolfegeGapExtra(sheet);
+}
+
 /* 한 단의 높이는 가사 절 수만큼 늘어난다. 화면과 '이 단을 그림으로' 두 곳이 같은 값을 써야 한다 —
-   한쪽만 고치면 메모로 보낸 악보에서만 가사가 잘린다. */
+   한쪽만 고치면 메모로 보낸 악보에서만 가사가 잘린다. 오선 사이를 벌린 만큼도 함께 커져야 한다. */
 function musicScoreLineHeight(sheet){
   const base = sheet && sheet.grandStaff ? MUSIC_GRAND_LINE_HEIGHT : MUSIC_LINE_HEIGHT;
-  return base + Math.max(0, musicClampVerseCount(sheet && sheet.lyricVerses) - 1) * MUSIC_LYRIC_ROW_GAP;
+  return base + musicSolfegeGapExtra(sheet)
+    + Math.max(0, musicClampVerseCount(sheet && sheet.lyricVerses) - 1) * MUSIC_LYRIC_ROW_GAP;
 }
 const MUSIC_STAFF_GAP = 92;
+const MUSIC_SOLFEGE_GAP_EXTRA = 26;   // 계이름을 켰을 때 두 오선 사이에 더 두는 칸
 const MUSIC_SCORE_MIN_WIDTH = 480;
 const MUSIC_REDRAW_DELAY = 180;     // 창 크기 변경 뒤 다시 그리기까지(매 픽셀마다 재조판하면 무겁다)
 const MUSIC_RECOVERY_DELAY = 1500;  // 편집이 멈춘 뒤 복구본을 남기기까지(.mnote 와 같은 간격)
@@ -130,7 +152,9 @@ function musicEmbeddedFontCss(){
 /* 계이름·가사 같은 덧글자는 styles.css 의 클래스에서 색과 크기를 받는다. SVG 를 문서 밖으로
    떼어내면 그 규칙이 사라지므로 그림에 필요한 것만 함께 심는다(커서·선택 색은 뺀다). */
 const MUSIC_IMAGE_CSS = [
-  ".music-solfege{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:13px;font-weight:700;fill:#2563eb;stroke:none}",
+  ".music-solfege{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:13px;font-weight:700;"
+    + "fill:#2563eb;stroke:#fff;stroke-width:3px;stroke-linejoin:round;paint-order:stroke}",
+  ".music-solfege-mark{font-size:9px}",
   ".music-chord-symbol{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;font-size:14px;font-weight:700;font-style:italic;fill:#111;stroke:none}",
   ".music-notation,.music-measure-setting{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;fill:#111;stroke:none}",
   ".music-lyric{font-size:13px}.music-lyric-verse{font-size:11px;font-weight:700;fill:#64748b}",
@@ -321,6 +345,44 @@ function musicButton(label, title, className){
   return button;
 }
 
+/* 재생 이동 단추 — 아이콘 위, 이름 아래. 아이콘과 글자를 각각 다른 칸에 담는 이유는 일시정지가
+   재생 중에 '이어서'로 얼굴을 바꾸기 때문이다. textContent 로 통째로 갈아 끼우면 SVG 가 지워진다
+   (저장 단추의 .run-save-label 과 같은 함정). */
+function musicTransportButton(icon, label, title){
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "music-tbtn";
+  const iconBox = document.createElement("i");
+  iconBox.className = "music-tbtn-icon";
+  const labelBox = document.createElement("span");
+  labelBox.className = "music-tbtn-label";
+  button.append(iconBox, labelBox);
+  button._musicIconBox = iconBox;
+  button._musicLabelBox = labelBox;
+  musicSetTransportFace(button, icon, label);
+  if (title) button.title = title;
+  return button;
+}
+function musicSetTransportFace(button, icon, label){
+  if (!button) return button;
+  if (button._musicIconBox && typeof window.uiIcon === "function"){
+    button._musicIconBox.innerHTML = window.uiIcon(icon);
+  }
+  if (button._musicLabelBox) button._musicLabelBox.textContent = label;
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+/* 음량·음소거 단추의 얼굴 — 이모지(🔊/🔇)를 쓰면 icons.js 의 UI 정리가 지우기만 하고 대신 그릴
+   그림이 없어 빈 단추가 된다. 그래서 SVG 아이콘(volume/mute)을 직접 그린다. innerHTML 로 갈아
+   끼우므로 이 단추는 textContent 로 얼굴을 바꾸면 안 된다(재생 이동 단추와 같은 함정). */
+function musicSetSpeakerFace(button, muted){
+  if (!button) return button;
+  if (typeof window.uiIcon === "function") button.innerHTML = window.uiIcon(muted ? "mute" : "volume");
+  else button.textContent = muted ? "음소거" : "소리";
+  return button;
+}
+
 /* ===== 편집기 ===== */
 async function mountMusicEditor(doc){
   const sheet = doc.sheet;
@@ -339,7 +401,8 @@ async function mountMusicEditor(doc){
   let lyricEntry = null;           // 이어치기 중이면 { index } — 가사를 붙일 수 있는 음표 차례
   let staveBoxes = [];              // 마디별 조판 좌표 — 오선 클릭을 마디·음높이로 옮길 때 쓴다
   let scoreLines = [];              // 단(오선지 한 줄)마다 담긴 마디 번호 — 선택 재생·"이 단을 메모로"가 쓴다
-  let playbackMeasure = 0;          // 재생할 줄의 기준 마디(0부터). 줄바꿈·창 폭이 바뀌어도 이 마디를 따른다
+  let playbackMeasure = 0;          // 재생할 줄의 기준 마디(0부터) = 재생 머리. 줄바꿈·창 폭이 바뀌어도 이 마디를 따른다
+  let timelinePlayMeasure = -1;     // 지금 소리 나는 마디(0부터). 재생 중이 아니면 -1 — 마디 막대만 쓴다
   let playbackPartId = sheet.activePartId;
   let playingEvent = null;          // 다시 조판해도 현재 재생 음표를 같은 요소에 복원한다
   let selection = null;             // { measure:0부터, staff:"treble"|"bass", voice:1|2, id }
@@ -495,7 +558,8 @@ async function mountMusicEditor(doc){
   partNameInput.setAttribute("aria-label", "파트 이름");
   const addPartBtn = musicButton("＋", "새 악기 파트 추가");
   const removePartBtn = musicButton("−", "현재 악기 파트 삭제");
-  const partMuteBtn = musicButton("M", "현재 파트 음소거");
+  const partMuteBtn = musicButton("", "현재 파트 음소거", "music-btn music-part-mute");
+  musicSetSpeakerFace(partMuteBtn, false);
   partMuteBtn.setAttribute("aria-pressed", "false");
   const partVolumeInput = document.createElement("input");
   partVolumeInput.type = "range";
@@ -647,8 +711,9 @@ async function mountMusicEditor(doc){
   partWrap.classList.add("music-toolvis-parts");
   grandStaffBtn.classList.add("music-toolvis-grandstaff");
   exampleWrap.classList.add("music-toolvis-example");
-  bar.append(titleInput, partWrap, tempoWrap, timeWrap, keyWrap, transposeBtn, timbreWrap, grandStaffBtn, exampleWrap,
-    toolbarToggleBtn, historyWrap, saveBtn);
+  // 머리말에는 늘 보여야 하는 것만 남긴다 — 제목과 악보의 뼈대(빠르기·박자·조표), 그리고
+  // 되돌리기·저장·도구 접기. 나머지 도구는 아래 탭(음색/효과·악보/가사·도구)으로 내려간다.
+  bar.append(titleInput, tempoWrap, timeWrap, keyWrap, toolbarToggleBtn, historyWrap, saveBtn);
 
   /* ----- 파트별 신디사이저 ----- */
   const synthPanel = document.createElement("details");
@@ -766,7 +831,8 @@ async function mountMusicEditor(doc){
       control.output.value = control.format(settings[key]);
       control.output.textContent = control.output.value;
     }
-    synthPanel.hidden = sheet.timbre !== "synth" || !toolbarVisible;
+    // 접기는 이제 도구 탭 상자(toolbox)가 통째로 맡으므로 여기서는 음색만 본다.
+    synthPanel.hidden = sheet.timbre !== "synth";
   }
 
   synthPresetSelect.addEventListener("change", () => {
@@ -811,7 +877,8 @@ async function mountMusicEditor(doc){
   const positionBtn = musicButton("위치 조정", "켜고 음표를 좌우로 드래그합니다 (Alt+드래그도 가능)");
   positionBtn.addEventListener("click", () => setPositionTool(!tool.position));
 
-  const solfegeBtn = musicButton("계이름", "음표 아래 계이름 표시 켜기/끄기");
+  const solfegeBtn = musicButton("계이름",
+    "음표 아래 계이름 표시 켜기/끄기 (대보표에서 어느 오선에 붙일지는 조판 ▾ 에서 고릅니다)");
   solfegeBtn.setAttribute("aria-pressed", sheet.showSolfege !== false ? "true" : "false");
   solfegeBtn.addEventListener("click", toggleSolfege);
 
@@ -917,9 +984,10 @@ async function mountMusicEditor(doc){
   addBarBtn.classList.add("music-toolvis-measures"); removeBarBtn.classList.add("music-toolvis-measures");
   addStaffBtn.classList.add("music-toolvis-staves"); removeStaffBtn.classList.add("music-toolvis-staves");
   resetScoreBtn.classList.add("music-toolvis-reset");
+  // '편집' 탭 — 음을 넣고 지우고 마디를 늘리는 것만 둔다. 악보에 붙이는 표시(가사·셈여림·반복)는
+  // '악보/가사' 탭으로 옮겼다(아래 musicTabs 참고).
   tools.append(valueGroup, dotBtn, restBtn, accidentalGroup, staffGroup, voiceGroup, chordBtn, removeChordBtn,
-    tieBtn, slurBtn, chordSymbolBtn, lyricBtn, dynamicBtn, articulationBtn, tripletBtn, fingeringBtn, pedalBtn,
-    repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, layoutBtn, solfegeBtn, eraserBtn, positionBtn,
+    tieBtn, slurBtn, tripletBtn, eraserBtn, positionBtn,
     addBarBtn, removeBarBtn, addStaffBtn, removeStaffBtn, resetScoreBtn, measureProgress, hint);
 
   const beginnerTools = document.createElement("div");
@@ -1157,7 +1225,8 @@ async function mountMusicEditor(doc){
 
   const volumeWrap = document.createElement("span");
   volumeWrap.className = "music-volume";
-  const muteBtn = musicButton("🔊", "악보 소리 음소거");
+  const muteBtn = musicButton("", "악보 소리 음소거");
+  musicSetSpeakerFace(muteBtn, MNMusicAudio.muted());
   muteBtn.setAttribute("aria-pressed", MNMusicAudio.muted() ? "true" : "false");
   const volumeInput = document.createElement("input");
   volumeInput.type = "range";
@@ -1170,18 +1239,58 @@ async function mountMusicEditor(doc){
   const volumeLabel = document.createElement("span");
   volumeLabel.className = "music-volume-label";
   volumeWrap.append(muteBtn, volumeInput, volumeLabel);
-  const pauseBtn = musicButton("⏸ 일시정지", "현재 위치를 기억한 채 멈추거나 이어서 재생합니다");
+  /* ----- 재생 머리(마디 막대)와 이동 단추 -----
+     참고한 편집기에는 오디오 파형이 깔려 있지만 악보 문서에는 소리 파일이 없다(그리려면 곡 전체를
+     매번 렌더해야 한다). 그 자리에 **마디 막대**를 둔다 — 어차피 악보에서 위치는 초가 아니라
+     마디로 세고, 여기 없던 값도 쓰지 않는다(재생 머리는 원래 있던 playbackMeasure 그대로다).
+     진행 표시도 초가 아니라 마디로 옮긴다: 구간 재생이면 소리의 start 는 0부터 다시 세지만
+     event.measure 는 늘 악보 전체 기준이라 어긋나지 않는다. */
+  const timeline = document.createElement("div");
+  timeline.className = "music-timeline music-toolvis-playback";
+  const timelineTrack = document.createElement("div");
+  timelineTrack.className = "music-timeline-track";
+  timelineTrack.tabIndex = 0;
+  timelineTrack.setAttribute("role", "slider");
+  timelineTrack.setAttribute("aria-label", "재생 머리 — 재생을 시작할 마디");
+  const timelineBars = document.createElement("div");
+  timelineBars.className = "music-timeline-bars";
+  const timelineDone = document.createElement("div");
+  timelineDone.className = "music-timeline-done";
+  const timelineHead = document.createElement("div");
+  timelineHead.className = "music-timeline-head";
+  timelineTrack.append(timelineBars, timelineDone, timelineHead);
+  const timelineFoot = document.createElement("div");
+  timelineFoot.className = "music-timeline-foot";
+  const timelineWhere = document.createElement("span");
+  timelineWhere.className = "music-timeline-where";
+  const timelineHint = document.createElement("span");
+  timelineHint.className = "music-timeline-hint";
+  // 화살표 기호는 icons.js 가 SVG 로 바꿔 괄호 안에서 어색해진다 — 글자로 적는다.
+  timelineHint.textContent = "막대를 누르면 그 마디부터 재생할 준비를 해요 · 화살표 키로 한 마디씩";
+  timelineFoot.append(timelineWhere, timelineHint);
+  timeline.append(timelineTrack, timelineFoot);
+
+  const transport = document.createElement("div");
+  transport.className = "music-transport music-toolvis-playback";
+  const toStartBtn = musicTransportButton("skipStart", "처음", "재생 머리를 첫 마디로 옮깁니다");
+  const prevLineBtn = musicTransportButton("stepBack", "이전 단", "재생 머리를 앞 오선 줄로 옮깁니다");
+  const playHereBtn = musicTransportButton("play", "재생", "재생 머리가 있는 마디부터 끝까지 재생합니다");
+  playHereBtn.classList.add("is-primary");
+  const pauseBtn = musicTransportButton("pause", "일시정지", "현재 위치를 기억한 채 멈추거나 이어서 재생합니다");
   pauseBtn.disabled = true;
-  const stopBtn = musicButton("■ 정지");
+  const stopBtn = musicTransportButton("stop", "정지");
   stopBtn.disabled = true;
-  const musicXmlImportBtn = musicButton("📂 MusicXML",
+  const nextLineBtn = musicTransportButton("stepForward", "다음 단", "재생 머리를 다음 오선 줄로 옮깁니다");
+  const toEndBtn = musicTransportButton("skipEnd", "마지막", "재생 머리를 마지막 오선 줄로 옮깁니다");
+  transport.append(toStartBtn, prevLineBtn, playHereBtn, pauseBtn, stopBtn, nextLineBtn, toEndBtn);
+  const musicXmlImportBtn = musicButton("MusicXML 열기",
     ".musicxml 또는 압축형 .mxl 파일을 새 편집용 악보로 가져옵니다");
-  const musicXmlBtn = musicButton("⬇ MusicXML", "다른 악보 프로그램에서 열 수 있는 .musicxml 파일로 저장");
+  const musicXmlBtn = musicButton("MusicXML 저장", "다른 악보 프로그램에서 열 수 있는 .musicxml 파일로 저장");
   const midiInputBtn = musicButton("🎹 MIDI 입력", "연결된 MIDI 건반으로 음표와 화음을 입력합니다");
-  const midiExportBtn = musicButton("⬇ MIDI", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
+  const midiExportBtn = musicButton("MIDI 저장", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
   const imageReferenceBtn = musicButton("🖼 악보 이미지 참고", "이미지를 옆에 열어 보며 악보를 옮겨 적습니다");
   const practiceAudioBtn = musicButton("🎧 연습 음원", "파트마다·템포마다 연습용 음원을 한 번에 만듭니다");
-  const wavBtn = musicButton("⬇ WAV 저장");
+  const wavBtn = musicButton("WAV 저장");
   const memoBtn = musicButton("📋 메모로",
     "악보를 그림으로 메모창에 보내기 — 메모에서 '✏️ 악보로'를 누르면 다시 편집할 수 있어요 (오선 한 단만 보내려면 그 단에서 오른쪽 버튼)");
   const printBtn = musicButton("🖨 인쇄", "인쇄 대화상자에서 'PDF로 저장'을 고르면 PDF가 됩니다");
@@ -1220,9 +1329,15 @@ async function mountMusicEditor(doc){
   memoBtn.classList.add("music-toolvis-memo");
   printBtn.classList.add("music-toolvis-print");
   zoomWrap.classList.add("music-toolvis-zoom");
-  playBar.append(playAllBtn, playSelectedPartBtn, playbackLineSelect, playRightBtn, playLeftBtn, rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap,
-    countInBtn, metronomeBtn, drumWrap, practiceWrap, earWrap, volumeWrap, pauseBtn, stopBtn, musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn,
-    imageReferenceBtn, practiceAudioBtn, wavBtn, memoBtn, printBtn, zoomWrap, status);
+  // 줄 고르기는 옆의 ▶ 단추들과 한 몸이라 재생을 숨기면 같이 사라져야 한다.
+  playbackLineSelect.classList.add("music-toolvis-playback");
+  timeline.classList.add("music-toolvis-playback");
+  transport.classList.add("music-toolvis-playback");
+  // '파일/재생' 탭 — 듣는 데 쓰는 것만. 파일 내보내기·연습 모드는 '도구' 탭이다.
+  // 마디 막대와 이동 단추가 맨 위에 서고, 세부 설정은 그 아래 한 줄로 이어진다.
+  playBar.append(timeline, transport,
+    playAllBtn, playSelectedPartBtn, playbackLineSelect, playRightBtn, playLeftBtn,
+    rangeWrap, playPartBtn, repeatMeasureBtn, speedWrap, countInBtn, metronomeBtn, drumWrap, volumeWrap, zoomWrap, status);
 
   /* ----- 연습 음원 만들기 -----
      합창·합주 연습 음원(내 파트는 크게, 나머지는 작게 · 느린 템포)은 파트마다·템포마다 한 벌씩
@@ -1333,7 +1448,111 @@ async function mountMusicEditor(doc){
   musicXmlInput.accept = ".musicxml,.mxl";
   musicXmlInput.hidden = true;
   scoreWorkspace.append(imageReference, scoreHost);
-  root.append(bar, synthPanel, tools, beginnerTools, playBar, practicePanel, lyricBar, notice, scoreWorkspace, earTest.el,
+
+  /* ----- 도구 탭 -----
+     도구가 60개를 넘어 네 줄을 채우고 있었다. 요소는 그대로 두고 담는 칸만 다섯 칸으로 나눈다
+     — 버튼·핸들러·저장 형식은 하나도 바뀌지 않으므로 우클릭 메뉴·단축키도 그대로다.
+     탭 하나는 예전 도구막대 한 줄과 같은 flex 상자라, 안 보이는 탭도 요소가 살아 있어(hidden 만
+     걸린다) 메뉴가 읽는 값(속도·음역·구간 등)이 사라지지 않는다. */
+  const tonePane = document.createElement("div");
+  tonePane.className = "music-pane music-tone-tools";
+  tonePane.append(partWrap, timbreWrap, synthPanel, practiceAudioBtn);
+
+  const scorePane = document.createElement("div");
+  scorePane.className = "music-pane music-score-tools";
+  scorePane.append(transposeBtn, grandStaffBtn, solfegeBtn, lyricBtn, chordSymbolBtn, dynamicBtn, articulationBtn,
+    fingeringBtn, pedalBtn, repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, layoutBtn, exampleWrap);
+
+  const extraPane = document.createElement("div");
+  extraPane.className = "music-pane music-extra-tools";
+  extraPane.append(musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn, imageReferenceBtn,
+    wavBtn, memoBtn, printBtn, practiceWrap, earWrap);
+
+  tools.classList.add("music-pane");
+  playBar.classList.add("music-pane");
+  tools.append(beginnerTools);            // '쉬운 입력'은 편집 탭 안에서 한 줄을 통째로 쓴다
+
+  const toolbox = document.createElement("div");
+  toolbox.className = "music-toolbox";
+  const tabStrip = document.createElement("div");
+  tabStrip.className = "music-tabs";
+  tabStrip.setAttribute("role", "tablist");
+  tabStrip.setAttribute("aria-label", "악보 도구 갈래");
+
+  const musicTabs = [
+    { id:"play",  label:"파일/재생",  icon:"play",      pane:playBar },
+    { id:"edit",  label:"편집",       icon:"pen",       pane:tools },
+    { id:"tone",  label:"음색/효과",  icon:"sliders",   pane:tonePane },
+    { id:"score", label:"악보/가사",  icon:"musicNote", pane:scorePane },
+    { id:"extra", label:"도구",       icon:"toolbox",   pane:extraPane }
+  ];
+  for (const tab of musicTabs){
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "music-tab";
+    button.dataset.musicTab = tab.id;
+    button.setAttribute("role", "tab");
+    // 이모지가 아니라 앱 공용 SVG 아이콘을 쓴다(icons.js 가 이모지는 UI 에서 지운다).
+    if (typeof window.setUiIconLabel === "function") window.setUiIconLabel(button, tab.icon, tab.label);
+    else button.textContent = tab.label;
+    button.addEventListener("click", () => setActiveToolTab(tab.id));
+    tab.button = button;
+    tabStrip.appendChild(button);
+  }
+  toolbox.append(tabStrip, playBar, tools, tonePane, scorePane, extraPane);
+
+  /* 설정 '도구' 탭에서 그 갈래의 도구를 모두 끄면 탭 자체를 감춘다 — 눌러도 빈 칸만 나오는 탭이
+     남으면 설정을 껐다는 사실이 오히려 헷갈린다. 숨김은 <html>.hide-tool-<id> 클래스로만
+     이뤄지므로(state.js applyToolVisibility) 요소를 재지 않고 그 클래스를 읽어 판단한다. */
+  // 안내 글·마디 진행·상태 글은 '도구'가 아니다 — 세면 도구를 다 꺼도 탭이 남는다.
+  for (const note of [hint, measureProgress, status]) note.classList.add("music-pane-note");
+
+  const musicToolIdByClass = new Map();
+  if (typeof TOGGLEABLE_TOOLS !== "undefined"){
+    for (const tool of TOGGLEABLE_TOOLS) if (tool.target === "music") musicToolIdByClass.set(tool.cls, tool.id);
+  }
+  function paneHasVisibleTool(pane){
+    for (const child of pane.children){
+      if (child.classList.contains("music-pane-note")) continue;   // 안내 글·상태 글은 도구로 세지 않는다
+      let toolId = "";
+      for (const name of child.classList){
+        if (musicToolIdByClass.has(name)){ toolId = musicToolIdByClass.get(name); break; }
+      }
+      if (!toolId) return true;
+      if (!document.documentElement.classList.contains("hide-tool-" + toolId)) return true;
+    }
+    return false;
+  }
+
+  const MUSIC_TAB_KEY = "musicToolbarTab";
+  let activeToolTab = "play";
+  try {
+    const saved = localStorage.getItem(MUSIC_TAB_KEY);
+    if (musicTabs.some((tab) => tab.id === saved)) activeToolTab = saved;
+  } catch(_){}
+
+  function setActiveToolTab(id, remember){
+    const wanted = musicTabs.find((tab) => tab.id === id && !tab.button.hidden)
+      || musicTabs.find((tab) => !tab.button.hidden) || musicTabs[0];
+    activeToolTab = wanted.id;
+    for (const tab of musicTabs){
+      const on = tab === wanted && !tab.button.hidden;
+      tab.button.classList.toggle("is-on", on);
+      tab.button.setAttribute("aria-selected", on ? "true" : "false");
+      tab.pane.hidden = !on;
+    }
+    if (remember === false) return;
+    try { localStorage.setItem(MUSIC_TAB_KEY, activeToolTab); } catch(_){}
+  }
+  function syncToolTabs(){
+    for (const tab of musicTabs) tab.button.hidden = !paneHasVisibleTool(tab.pane);
+    setActiveToolTab(activeToolTab, false);
+  }
+  document.addEventListener("mn-tool-visibility", syncToolTabs);
+  doc.cleanupFns.push(() => document.removeEventListener("mn-tool-visibility", syncToolTabs));
+  syncToolTabs();
+
+  root.append(bar, toolbox, practicePanel, lyricBar, notice, scoreWorkspace, earTest.el,
     imageReferenceInput, musicXmlInput);
 
   /* ----- 도구막대 접기 -----
@@ -1351,7 +1570,7 @@ async function mountMusicEditor(doc){
   let toolbarBeforeFullscreen = null;   // 전체화면이 임시로 접었을 때만 담는다(나가면 되돌린다)
   function applyToolbarVisible(){
     bar.hidden = fullscreenNow && !toolbarVisible;
-    for (const row of [tools, beginnerTools, playBar]) row.hidden = !toolbarVisible;
+    toolbox.hidden = !toolbarVisible;      // 탭 줄까지 한 덩어리로 접는다(요소는 살아 있다)
     syncSynthControls();
     toolbarToggleBtn.textContent = toolbarVisible ? "▤ 도구 숨기기" : "▤ 도구 보이기";
     toolbarToggleBtn.title = toolbarVisible
@@ -1409,7 +1628,7 @@ async function mountMusicEditor(doc){
     for (const part of musicParts(sheet)){
       const option = document.createElement("option");
       option.value = part.id;
-      option.textContent = `${part.muted ? "🔇 " : ""}${part.name}`;
+      option.textContent = `${part.muted ? "(음소거) " : ""}${part.name}`;
       partSelect.appendChild(option);
     }
     partSelect.value = current;
@@ -1425,7 +1644,7 @@ async function mountMusicEditor(doc){
     partVolumeLabel.textContent = `${Math.round(volume * 100)}%`;
     partMuteBtn.classList.toggle("is-on", part.muted === true);
     partMuteBtn.setAttribute("aria-pressed", part.muted ? "true" : "false");
-    partMuteBtn.textContent = part.muted ? "🔇" : "M";
+    musicSetSpeakerFace(partMuteBtn, part.muted === true);
     partTransposeSelect.value = musicClampTransposition(part.transposition) || "C";
     partTransposeSelect.classList.toggle("is-on", !!musicClampTransposition(part.transposition));
     removePartBtn.disabled = musicParts(sheet).length <= 1;
@@ -1571,6 +1790,28 @@ async function mountMusicEditor(doc){
     sheet.showSolfege = sheet.showSolfege === false;
     syncTools();
     afterEdit();
+  }
+
+  // 오선을 고르면 계이름은 켜진 것으로 본다 — 꺼 둔 채 "윗줄만"을 고르면 아무 일도 안 일어난다.
+  function setSolfegeStaff(pick){
+    sheet.solfegeStaff = musicClampSolfegeStaff(pick);
+    sheet.showSolfege = true;
+    syncTools();
+    afterEdit();
+  }
+
+  function solfegeContextItems(){
+    const pick = musicClampSolfegeStaff(sheet.solfegeStaff);
+    const on = musicShowsSolfege(sheet);
+    return [
+      { label:"끄기", active:!on, action:() => { if (on) toggleSolfege(); } },
+      { separator:true },
+      { label:"둘 다", active:on && (pick === "both" || !sheet.grandStaff), action:() => setSolfegeStaff("both") },
+      { label:"윗줄(오른손)만", active:on && sheet.grandStaff && pick === "treble",
+        action:() => setSolfegeStaff("treble"), disabled:!sheet.grandStaff },
+      { label:"아랫줄(왼손)만", active:on && sheet.grandStaff && pick === "bass",
+        action:() => setSolfegeStaff("bass"), disabled:!sheet.grandStaff }
+    ];
   }
 
   function resetHoverReadout(){
@@ -1747,6 +1988,70 @@ async function mountMusicEditor(doc){
     playbackLineSelect.value = lineIndex < 0 ? "" : String(lineIndex);
     const locked = root.classList.contains("is-running") || practice.active || earTest.active();
     playSelectedPartBtn.disabled = playbackLineSelect.disabled = locked || lineIndex < 0;
+    // 재생 머리 이동 단추 — 재생·연습 중에는 머리를 옮기지 않는다(소리와 표시가 어긋난다).
+    const hasLines = scoreLines.length > 0;
+    const lastLineStart = lastLineStartMeasure();
+    toStartBtn.disabled = locked || playbackMeasure <= 0;
+    prevLineBtn.disabled = locked || !hasLines || lineIndex <= 0;
+    nextLineBtn.disabled = locked || !hasLines || lineIndex < 0 || lineIndex >= scoreLines.length - 1;
+    toEndBtn.disabled = locked || playbackMeasure >= lastLineStart;
+    playHereBtn.disabled = locked;
+    timelineTrack.classList.toggle("is-locked", locked);
+    syncTimeline();
+  }
+
+  function lastLineStartMeasure(){
+    if (scoreLines.length) return scoreLines[scoreLines.length - 1][0];
+    return Math.max(0, sheet.measures.length - 1);
+  }
+
+  /* 마디 막대 — 눈금은 마디마다 하나씩 CSS 그라디언트로 그린다(마디가 300개여도 요소가 늘지 않는다).
+     채움과 머리는 '몇 번째 마디인가'로만 계산한다: 구간 재생이면 소리의 start 는 0부터 다시 세지만
+     event.measure 는 늘 악보 전체 기준이라 어긋나지 않는다. */
+  function syncTimeline(){
+    const count = Math.max(1, sheet.measures.length);
+    const cell = 100 / count;
+    timelineTrack.style.setProperty("--music-measure-width", cell + "%");
+    timelineTrack.classList.toggle("is-dense", count > 64);   // 눈금이 붙으면 굵은 4마디 줄을 뺀다
+    const playing = timelinePlayMeasure >= 0;
+    const at = playing ? timelinePlayMeasure : playbackMeasure;
+    timelineDone.style.width = ((playing ? at + 1 : at) * cell) + "%";
+    timelineHead.style.left = (at * cell) + "%";
+    timelineHead.style.width = cell + "%";
+    timelineTrack.classList.toggle("is-playing", playing);
+    timelineTrack.setAttribute("aria-valuemin", String(measureNumberLabel(0)));
+    timelineTrack.setAttribute("aria-valuemax", String(measureNumberLabel(count - 1)));
+    timelineTrack.setAttribute("aria-valuenow", String(measureNumberLabel(playbackMeasure)));
+    timelineTrack.setAttribute("aria-valuetext", measureNumberLabel(playbackMeasure) + "마디");
+    timelineWhere.textContent = playing
+      ? `재생 중 · ${measureNumberLabel(at)}마디`
+      : `재생 머리 · ${measureNumberLabel(playbackMeasure)}마디`;
+  }
+
+  function movePlayhead(measureIndex){
+    const last = Math.max(0, sheet.measures.length - 1);
+    const next = Math.max(0, Math.min(last, Number(measureIndex) || 0));
+    if (next === playbackMeasure) return;
+    playbackMeasure = next;
+    syncPlaybackLineControls();
+  }
+  function movePlayheadByLine(step){
+    const at = scoreLines.findIndex((indexes) => indexes.includes(playbackMeasure));
+    const line = scoreLines[at + step];
+    movePlayhead(line && line.length ? line[0] : (step > 0 ? lastLineStartMeasure() : 0));
+  }
+  function measureAtTimelinePoint(event){
+    const rect = timelineTrack.getBoundingClientRect();
+    if (!(rect.width > 0)) return playbackMeasure;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    return Math.floor(ratio * Math.max(1, sheet.measures.length));
+  }
+  function playFromPlayhead(){
+    const count = sheet.measures.length;
+    if (!count) return;
+    // 머리가 첫 마디면 '전체 재생'과 같은 길로 보낸다(구간 없이 재생해야 반복·엔딩이 그대로 산다).
+    if (playbackMeasure <= 0) return startPlay(null);
+    startPlay({ from:playbackMeasure + 1, to:count });
   }
 
   function selectPlaybackLine(lineIndex){
@@ -1880,7 +2185,8 @@ async function mountMusicEditor(doc){
     try {
       const width = Math.max(MUSIC_SCORE_MIN_WIDTH, Math.floor(scoreHost.clientWidth || MUSIC_SCORE_MIN_WIDTH) - 8);
       // 한 줄에 몇 마디를 놓을지는 화면 폭과 마디마다 든 음표 수로 정한다(music-model.js).
-      const layout = musicPackLines(sheet.measures, width - 20, { barsPerLine:sheet.barsPerLine });
+      const layout = musicPackLines(sheet.measures, width - 20,
+        { barsPerLine:sheet.barsPerLine, solfege:musicShowsSolfege(sheet) });
       scoreLines = layout.map((line) => line.indexes.slice());
       const lineHeight = musicScoreLineHeight(sheet);
       const topPad = musicScoreTopPad(sheet);
@@ -1969,7 +2275,7 @@ async function mountMusicEditor(doc){
             noteEls.set(note.id, el);
           }
           const noteX = staveNote.getAbsoluteX() + staveNote.getXShift();
-          if (sheet.showSolfege !== false && !note.rest && scoreSvg){
+          if (musicSolfegeShowsStaff(sheet, staff) && !note.rest && scoreSvg){
             solfegePlaces.push({ note, index, staff, voice:voiceNumber, x:noteX,
               y:bottomY + 38 + (voiceNumber === 2 ? 15 : 0) });
           }
@@ -1992,7 +2298,7 @@ async function mountMusicEditor(doc){
         const effective = musicEffectiveMeasureSettings(sheet, index);
         const effectiveKeySpec = (MUSIC_KEYS[effective.key] || MUSIC_KEYS.C).vex;
         const trebleStave = new VF.Stave(x, y, staveWidth);
-        const bassStave = sheet.grandStaff ? new VF.Stave(x, y + MUSIC_STAFF_GAP, staveWidth) : null;
+        const bassStave = sheet.grandStaff ? new VF.Stave(x, y + musicStaffGap(sheet), staveWidth) : null;
         // 음자리표·조표는 줄마다 다시 그린다(악보 관례). 박자표는 맨 처음 한 번만.
         if (head){
           trebleStave.addClef("treble");
@@ -2184,7 +2490,17 @@ async function mountMusicEditor(doc){
         const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
         const alter = musicClampAlter(place.note.alter);
         const mark = alter > 0 ? "♯".repeat(alter) : alter < 0 ? "♭".repeat(-alter) : "";
-        label.textContent = (MUSIC_SOLFEGE_LABELS[place.note.step] || place.note.step) + mark;
+        const name = MUSIC_SOLFEGE_LABELS[place.note.step] || place.note.step;
+        label.textContent = name;
+        /* 임시표는 작은 윗첨자로 붙인다 — 같은 크기로 쓰면 계이름 한 칸이 두 배 가까이 넓어져
+           16분음표 구간에서 이웃 계이름끼리 겹치고, 오선에 그려진 임시표와도 헷갈린다. */
+        if (mark){
+          const markEl = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+          markEl.classList.add("music-solfege-mark");
+          markEl.textContent = mark;
+          markEl.setAttribute("dy", "-3");
+          label.appendChild(markEl);
+        }
         label.classList.add("music-solfege");
         label.dataset.noteId = place.note.id;
         label.dataset.measure = String(place.index + 1);
@@ -3004,6 +3320,7 @@ async function mountMusicEditor(doc){
     const rehearsal = musicClampRehearsal(measure && measure.rehearsal);
     const hasRehearsal = sheet.measures.some((item) => item && musicClampRehearsal(item.rehearsal));
     return [
+      { label:"계이름", children:solfegeContextItems() },
       { label:"마디 번호", children:[
         { label:"끄기", active:mode === "off", action:() => setMeasureNumbers("off") },
         { label:"단마다(줄 첫 마디)", active:mode === "line", action:() => setMeasureNumbers("line") },
@@ -3656,7 +3973,7 @@ async function mountMusicEditor(doc){
       { label:"조옮김", children:transposeContextItems() },
       { separator:true },
       { label:"재생·연습", children:playbackContextItems(targetMeasure) },
-      { label:"계이름 표시", active:sheet.showSolfege !== false, action:toggleSolfege },
+      { label:"계이름 표시", children:solfegeContextItems() },
       { label:toolbarVisible ? "편집 도구막대 숨기기 (H)" : "편집 도구막대 보이기 (H)", action:toggleToolbarVisibility },
       { label:"보기 배율", children:[
         { label:"확대 (Ctrl++)", action:() => stepScoreZoom(1), disabled:scoreZoom >= MUSIC_ZOOM_MAX - 0.001 },
@@ -3961,6 +4278,9 @@ async function mountMusicEditor(doc){
   /* ----- 자판 ----- */
   function editableTarget(target){
     if (!target || !target.tagName) return false;
+    // 마디 막대는 ←·→·Home·End·Enter 를 스스로 쓴다(재생 머리 옮기기·재생). 편집 단축키는 캡처
+    // 단계에서 먼저 도는 이 핸들러가 잡아가므로, 입력칸과 같이 취급해 자판을 통째로 비켜 준다.
+    if (target.classList && target.classList.contains("music-timeline-track")) return true;
     const tag = target.tagName.toLowerCase();
     return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
   }
@@ -4473,6 +4793,9 @@ async function mountMusicEditor(doc){
   /* ----- 재생 ----- */
   function highlight(event, reveal = true){
     playingEvent = event || null;
+    // 마디 막대는 음표마다가 아니라 마디가 바뀔 때만 다시 그린다(음표마다 그리면 긴 곡에서 무겁다).
+    const measure = event && Number.isFinite(event.measure) ? event.measure - 1 : -1;
+    if (measure !== timelinePlayMeasure){ timelinePlayMeasure = measure; syncTimeline(); }
     const el = paintNoteVisualState(playingVisualEls, event && event.id, "is-playing");
     if (!event) return;
     if (!el) return;
@@ -4482,7 +4805,8 @@ async function mountMusicEditor(doc){
   function setPlaying(on, isPaused = false){
     if (on && keyboardComposeActive) setKeyboardCompose(false, false);
     pauseBtn.disabled = !on;
-    pauseBtn.textContent = isPaused ? "▶ 이어서" : "⏸ 일시정지";
+    // 아이콘 단추라 글자만 갈아 끼운다 — textContent 로 쓰면 SVG 가 지워진다.
+    musicSetTransportFace(pauseBtn, isPaused ? "play" : "pause", isPaused ? "이어서" : "일시정지");
     pauseBtn.setAttribute("aria-pressed", isPaused ? "true" : "false");
     stopBtn.disabled = !on;
     playAllBtn.disabled = on;
@@ -4584,7 +4908,7 @@ async function mountMusicEditor(doc){
 
   function syncVolumeControls(){
     const isMuted = MNMusicAudio.muted();
-    muteBtn.textContent = isMuted || MNMusicAudio.getVolume() === 0 ? "🔇" : "🔊";
+    musicSetSpeakerFace(muteBtn, isMuted || MNMusicAudio.getVolume() === 0);
     muteBtn.classList.toggle("is-on", isMuted);
     muteBtn.setAttribute("aria-pressed", isMuted ? "true" : "false");
     volumeLabel.textContent = `${Math.round(MNMusicAudio.getVolume() * 100)}%`;
@@ -4669,6 +4993,28 @@ async function mountMusicEditor(doc){
   });
   pauseBtn.addEventListener("click", togglePausePlayback);
   stopBtn.addEventListener("click", () => MNMusicAudio.stop());
+  playHereBtn.addEventListener("click", playFromPlayhead);
+  toStartBtn.addEventListener("click", () => movePlayhead(0));
+  toEndBtn.addEventListener("click", () => movePlayhead(lastLineStartMeasure()));
+  prevLineBtn.addEventListener("click", () => movePlayheadByLine(-1));
+  nextLineBtn.addEventListener("click", () => movePlayheadByLine(1));
+  timelineTrack.addEventListener("click", (event) => {
+    if (timelineTrack.classList.contains("is-locked")) return;
+    movePlayhead(measureAtTimelinePoint(event));
+    timelineTrack.focus();
+  });
+  timelineTrack.addEventListener("keydown", (event) => {
+    if (timelineTrack.classList.contains("is-locked")) return;
+    if (event.key === "ArrowLeft") movePlayhead(playbackMeasure - 1);
+    else if (event.key === "ArrowRight") movePlayhead(playbackMeasure + 1);
+    else if (event.key === "Home") movePlayhead(0);
+    else if (event.key === "End") movePlayhead(sheet.measures.length - 1);
+    else if (event.key === "Enter" || event.key === " ") playFromPlayhead();
+    else return;
+    // 삼킨 키는 전파까지 끊는다 — 악보의 한 글자 단축키가 같은 키에 함께 반응하지 않게.
+    event.preventDefault();
+    event.stopPropagation();
+  });
   undoBtn.addEventListener("click", () => history.undo());
   redoBtn.addEventListener("click", () => history.redo());
   zoomOutBtn.addEventListener("click", () => stepScoreZoom(-1));
@@ -5163,6 +5509,7 @@ async function mountMusicEditor(doc){
       sheet.accompanimentMode = restored.accompanimentMode;
       sheet.accompanimentTimbre = restored.accompanimentTimbre;
       sheet.showSolfege = restored.showSolfege;
+      sheet.solfegeStaff = restored.solfegeStaff;
       sheet.parts = restored.parts;
       sheet.activePartId = restored.activePartId;
       sheet.timbre = restored.timbre;

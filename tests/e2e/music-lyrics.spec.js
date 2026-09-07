@@ -25,8 +25,15 @@ async function openScore(page, source){
 const lyricTexts = (page) => page.locator(".music-score svg .music-lyric").allTextContents();
 const scoreHeight = (page) => page.locator(".music-score svg").last()
   .evaluate((svg) => Number(svg.getAttribute("height")) || svg.getBoundingClientRect().height);
+// 도구가 탭으로 나뉘어 있어 버튼을 누르기 전에 그 갈래를 먼저 연다.
+const openMusicTab = async (page, label) => {
+  const tab = page.locator(".music-tab", { hasText:label }).last();   // 문서가 여러 개 열려 있을 수 있다
+  await tab.click();
+  await expect(tab).toHaveClass(/is-on/);
+};
 const openLyricMenu = async (page) => {
-  await page.locator(".music-tools button", { hasText:"가사 ▾" }).click();
+  await openMusicTab(page, "악보/가사");
+  await page.locator(".music-score-tools button", { hasText:"가사 ▾" }).click();
   await expect(page.locator(".music-context-menu")).toBeVisible();
 };
 const clickMenu = async (page, label) => {

@@ -266,7 +266,7 @@ test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표
   assert.match(editorSource, /x:noteX,[\s\S]*y:bottomY \+ 38/);
   assert.match(editorSource, /document\.createElementNS\("http:\/\/www\.w3\.org\/2000\/svg", "text"\)/);
   assert.match(editorSource, /MUSIC_SOLFEGE_LABELS\[place\.note\.step\]/);
-  assert.match(editorSource, /if \(sheet\.showSolfege !== false && !note\.rest && scoreSvg\)/);
+  assert.match(editorSource, /if \(musicSolfegeShowsStaff\(sheet, staff\) && !note\.rest && scoreSvg\)/);
   assert.match(editorSource, /solfegeEls\.get\(noteId\)/);
   assert.match(editorSource, /paintNoteVisualState\(selectedVisualEls, selection && selection\.id, "is-selected"\)/);
   assert.match(editorSource, /paintNoteVisualState\(playingVisualEls, event && event\.id, "is-playing"\)/);
@@ -274,6 +274,42 @@ test("계이름 토글은 음표 아래 전용 줄에 고정도법 이름을 표
   const css = read("src/styles.css");
   assert.match(css, /\.music-solfege\{[^}]*font-size:13px[^}]*fill:#2563eb/);
   assert.match(css, /\.music-print \.music-solfege\{fill:#111\}/);
+});
+
+test("계이름은 겹쳐도 읽히게 흰 후광을 두르고 임시표는 작은 윗첨자로 붙인다", () => {
+  const css = read("src/styles.css");
+  // 후광은 글자 뒤에 깔려야 한다(paint-order 없이 stroke 만 주면 획이 글자를 파먹는다).
+  assert.match(css, /\.music-solfege\{[^}]*stroke:#fff;stroke-width:3px;stroke-linejoin:round;paint-order:stroke/);
+  assert.match(css, /\.music-solfege-mark\{font-size:9px\}/);
+  // 그림·메모로 내보낸 SVG 는 styles.css 를 잃으므로 같은 규칙이 심어져 나가야 한다.
+  assert.match(editorSource, /"\.music-solfege\{[^"]*"\s*\+ "fill:#2563eb;stroke:#fff;stroke-width:3px;stroke-linejoin:round;paint-order:stroke\}"/);
+  assert.match(editorSource, /"\.music-solfege-mark\{font-size:9px\}"/);
+  assert.match(editorSource, /markEl\.classList\.add\("music-solfege-mark"\)/);
+  assert.match(editorSource, /markEl\.setAttribute\("dy", "-3"\)/);
+});
+
+test("대보표는 계이름을 켠 동안 두 오선 사이를 그 몫만큼 벌린다", () => {
+  assert.match(editorSource, /const MUSIC_SOLFEGE_GAP_EXTRA = 26/);
+  // 사이를 벌릴 까닭이 있는 것은 두 오선 사이에 놓이는 윗줄 계이름뿐이다.
+  assert.match(editorSource, /function musicSolfegeGapExtra\(sheet\)\{[\s\S]*sheet\.grandStaff && musicSolfegeShowsStaff\(sheet, "treble"\) \? MUSIC_SOLFEGE_GAP_EXTRA : 0/);
+  assert.match(editorSource, /new VF\.Stave\(x, y \+ musicStaffGap\(sheet\), staveWidth\)/);
+  // 벌린 만큼 단 높이도 커져야 그림·메모로 보낸 악보에서 아랫줄이 잘리지 않는다.
+  assert.match(editorSource, /function musicScoreLineHeight\(sheet\)\{[\s\S]*base \+ musicSolfegeGapExtra\(sheet\)/);
+});
+
+test("계이름은 붙일 오선을 골라 대보표 한 줄만 남길 수 있다", () => {
+  assert.match(editorSource, /function musicSolfegeShowsStaff\(sheet, staff\)/);
+  // 단일 오선은 고를 것이 없으므로 설정과 상관없이 그린다.
+  assert.match(editorSource, /if \(!sheet\.grandStaff\) return true;/);
+  assert.match(editorSource, /pick === "both" \|\| pick === staff/);
+  // 오선을 고르면 켜진 것으로 본다 — 꺼 둔 채 고르면 아무 일도 안 일어난다.
+  assert.match(editorSource, /function setSolfegeStaff\(pick\)\{[\s\S]*sheet\.showSolfege = true/);
+  assert.match(editorSource, /label:"윗줄\(오른손\)만"[\s\S]*disabled:!sheet\.grandStaff/);
+  assert.match(editorSource, /label:"아랫줄\(왼손\)만"[\s\S]*disabled:!sheet\.grandStaff/);
+  // 도구막대 조판 ▾ 와 오선 우클릭이 같은 목록을 쓴다.
+  assert.equal(editorSource.split("children:solfegeContextItems()").length - 1, 2);
+  // 되돌리기가 계이름만 되살리고 오선 선택을 남겨 두면 둘이 어긋난다.
+  assert.match(editorSource, /sheet\.solfegeStaff = restored\.solfegeStaff/);
 });
 
 test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 같은 동작 경로로 제공한다", () => {
@@ -284,7 +320,7 @@ test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 �
   assert.match(editorSource, /label:"이 음표 삭제 \(Delete\)"/);
   assert.match(editorSource, /label:"다음 입력 도구", children:nextInputContextItems\(\)/);
   assert.match(editorSource, /label:`\$\{measureNumberLabel\(targetMeasure\)\}마디 삭제`/);
-  assert.match(editorSource, /label:"계이름 표시", active:sheet\.showSolfege !== false, action:toggleSolfege/);
+  assert.match(editorSource, /label:"계이름 표시", children:solfegeContextItems\(\)/);
   assert.match(editorSource, /label:"입력 오선", children:/);
   assert.match(editorSource, /label:"오른손 · 높은음자리표"/);
   assert.match(editorSource, /label:"왼손 · 낮은음자리표"/);
@@ -309,7 +345,8 @@ test("악보 우클릭 메뉴는 음표·빈 오선에 맞는 편집 도구를 �
 
 test("도구막대는 접어서 악보만 넓게 볼 수 있고, 우클릭 메뉴·자판으로 다시 편다", () => {
   // 요소를 지우지 않고 hidden 으로만 감춘다 — 우클릭 메뉴가 읽는 값(속도·음역·구간·음량)이 살아 있어야 한다.
-  assert.match(editorSource, /for \(const row of \[tools, beginnerTools, playBar\]\) row\.hidden = !toolbarVisible;/);
+  // 도구가 탭으로 나뉜 뒤로는 탭 줄까지 담은 상자 하나를 접는다.
+  assert.match(editorSource, /toolbox\.hidden = !toolbarVisible;/);
   // 접어도 상단 바는 남아서 다시 펴는 단추가 늘 보인다(우클릭 메뉴만이 유일한 길이 아니다).
   assert.match(editorSource, /toolbarToggleBtn, historyWrap, saveBtn\);/);
   assert.match(editorSource, /label:toolbarVisible \? "편집 도구막대 숨기기 \(H\)" : "편집 도구막대 보이기 \(H\)"/);
@@ -399,7 +436,9 @@ test("학생 연습 재생은 느린 속도·카운트인·메트로놈·고른 
 });
 
 test("악보 재생은 현재 위치에서 일시정지하고 이어서 재생할 수 있다", () => {
-  assert.match(editorSource, /musicButton\("⏸ 일시정지"/);
+  // 아이콘 단추라 얼굴(아이콘+글자)만 갈아 끼운다 — textContent 로 쓰면 SVG 가 지워진다.
+  assert.match(editorSource, /const pauseBtn = musicTransportButton\("pause", "일시정지"/);
+  assert.match(editorSource, /musicSetTransportFace\(pauseBtn, isPaused \? "play" : "pause", isPaused \? "이어서" : "일시정지"\)/);
   assert.match(editorSource, /wasPaused \? await MNMusicAudio\.resume\(\) : await MNMusicAudio\.pause\(\)/);
   assert.match(editorSource, /onPause:\(\) => \{ setPlaying\(true, true\); updateStatus\(\); \}/);
   assert.match(editorSource, /onResume:\(\) => \{ setPlaying\(true, false\); updateStatus\(\); \}/);
@@ -416,6 +455,91 @@ test("입력 중인 마디는 사용 박자·남은 박자·완성 여부와 해
   const css = read("src/styles.css");
   assert.match(css, /\.music-measure-progress\.is-complete/);
   assert.match(css, /\.music-measure-progress\.is-over/);
+});
+
+/* ===== 도구 탭(1단계) — 예전 네 줄을 다섯 갈래로 접는다 ===== */
+
+test("도구막대는 다섯 갈래 탭으로 나뉘고, 기능은 그대로 옮겨 담긴다", () => {
+  // 탭 정의: 갈래마다 이름·SVG 아이콘·담는 칸이 한 줄에 함께 적혀 있어야 한다.
+  for (const [id, label, icon] of [["play", "파일/재생", "play"], ["edit", "편집", "pen"],
+    ["tone", "음색/효과", "sliders"], ["score", "악보/가사", "musicNote"], ["extra", "도구", "toolbox"]]){
+    assert.match(editorSource, new RegExp(`id:"${id}",\\s+label:"${label}",\\s+icon:"${icon}"`),
+      id + " 탭이 정의돼야 한다");
+  }
+  // 이모지가 아니라 공용 SVG 아이콘을 쓴다 — icons.js 에 실제로 그 이름이 있어야 한다.
+  const icons = read("src/js/icons.js");
+  assert.match(icons, /,musicNote: '<path/);
+  assert.match(icons, /,toolbox: '<rect/);
+  assert.match(editorSource, /setUiIconLabel\(button, tab\.icon, tab\.label\)/);
+
+  // 머리말에는 늘 필요한 것만 남기고(제목·빠르기·박자·조표·되돌리기·저장·접기) 나머지는 탭으로.
+  assert.match(editorSource, /bar\.append\(titleInput, tempoWrap, timeWrap, keyWrap, toolbarToggleBtn, historyWrap, saveBtn\)/);
+  assert.match(editorSource, /tonePane\.append\(partWrap, timbreWrap, synthPanel, practiceAudioBtn\)/);
+  assert.match(editorSource, /scorePane\.append\(transposeBtn, grandStaffBtn, solfegeBtn, lyricBtn/);
+  assert.match(editorSource, /extraPane\.append\(musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn/);
+  // '쉬운 입력'은 편집 탭 안으로 들어가되 제 줄을 그대로 쓴다.
+  assert.match(editorSource, /tools\.append\(beginnerTools\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-tools>\.music-beginner-tools\{flex:1 0 100%/);
+  assert.match(css, /\.music-pane\[hidden\]\{display:none\}/);
+});
+
+test("탭은 마지막에 고른 갈래를 기억하고, 도구를 다 끄면 탭 자체가 사라진다", () => {
+  assert.match(editorSource, /const MUSIC_TAB_KEY = "musicToolbarTab"/);
+  assert.match(editorSource, /localStorage\.setItem\(MUSIC_TAB_KEY, activeToolTab\)/);
+  // 숨김은 <html>.hide-tool-<id> 로만 이뤄지므로 그 클래스를 읽어 빈 탭을 가려낸다.
+  assert.match(editorSource, /document\.documentElement\.classList\.contains\("hide-tool-" \+ toolId\)/);
+  assert.match(editorSource, /tab\.button\.hidden = !paneHasVisibleTool\(tab\.pane\)/);
+  // 설정을 바꾸면 즉시 다시 센다(문서를 닫을 때 구독도 푼다).
+  assert.match(editorSource, /document\.addEventListener\("mn-tool-visibility", syncToolTabs\)/);
+  assert.match(editorSource, /removeEventListener\("mn-tool-visibility", syncToolTabs\)/);
+  // 안내 글·상태 글은 '도구'로 세지 않는다 — 세면 빈 탭이 영영 남는다.
+  assert.match(editorSource, /child\.classList\.contains\("music-pane-note"\)/);
+  assert.match(editorSource, /for \(const note of \[hint, measureProgress, status\]\) note\.classList\.add\("music-pane-note"\)/);
+  // 줄 고르개는 옆의 ▶ 단추와 한 몸이라 재생을 숨기면 함께 사라진다.
+  assert.match(editorSource, /playbackLineSelect\.classList\.add\("music-toolvis-playback"\)/);
+});
+
+test("파일/재생 탭 맨 위에는 마디 막대와 재생 이동 단추가 선다", () => {
+  // 참고 이미지의 파형 자리 — 악보에는 소리 파일이 없어 마디 막대로 대신한다.
+  assert.match(editorSource, /timeline\.className = "music-timeline music-toolvis-playback"/);
+  assert.match(editorSource, /playBar\.append\(timeline, transport,/);
+  assert.match(editorSource, /transport\.append\(toStartBtn, prevLineBtn, playHereBtn, pauseBtn, stopBtn, nextLineBtn, toEndBtn\)/);
+  // 이동 단추는 이모지가 아니라 icons.js 의 SVG 를 쓴다.
+  const icons = read("src/js/icons.js");
+  for (const name of ["pause", "skipStart", "skipEnd", "stepBack", "stepForward"]){
+    assert.match(icons, new RegExp(`,${name}: '<`), name + " 아이콘이 있어야 한다");
+  }
+  assert.match(editorSource, /function musicTransportButton\(icon, label, title\)/);
+  assert.match(editorSource, /window\.uiIcon\(icon\)/);
+  // 마디가 수백 개여도 요소가 늘지 않게 눈금은 그라디언트 폭으로만 그린다.
+  assert.match(editorSource, /timelineTrack\.style\.setProperty\("--music-measure-width", cell \+ "%"\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /background-size:var\(--music-measure-width,25%\) 100%/);
+  assert.match(css, /\.music-tbtn\.is-primary \.music-tbtn-icon\{width:54px/);
+});
+
+test("마디 막대는 눌러서·화살표로 재생 머리를 옮기고, 마디가 바뀔 때만 다시 그린다", () => {
+  assert.match(editorSource, /timelineTrack\.addEventListener\("click"/);
+  assert.match(editorSource, /movePlayhead\(measureAtTimelinePoint\(event\)\)/);
+  assert.match(editorSource, /if \(event\.key === "ArrowLeft"\) movePlayhead\(playbackMeasure - 1\)/);
+  // 삼킨 키는 전파까지 끊는다 — 악보의 한 글자 단축키가 함께 반응하지 않게.
+  assert.match(editorSource, /event\.preventDefault\(\);\s+event\.stopPropagation\(\);/);
+  // 음표마다가 아니라 마디가 바뀔 때만 그린다(긴 곡에서 무겁다).
+  assert.match(editorSource, /if \(measure !== timelinePlayMeasure\)\{ timelinePlayMeasure = measure; syncTimeline\(\); \}/);
+  // 재생 머리는 새 상태가 아니라 원래 있던 playbackMeasure 그대로다(.msheet 는 그대로).
+  assert.doesNotMatch(editorSource, /sheet\.playhead|sheet\.timeline/);
+});
+
+test("도구막대 접기는 탭 상자를 통째로 접는다", () => {
+  assert.match(editorSource, /toolbox\.hidden = !toolbarVisible/);
+  // 신디 패널은 이제 접기와 무관하게 음색만 따진다(접기는 상자가 맡는다).
+  assert.match(editorSource, /synthPanel\.hidden = sheet\.timbre !== "synth";/);
+  const css = read("src/styles.css");
+  assert.match(css, /\.music-toolbox\[hidden\]\{display:none\}/);
+  // 따라치기·음감 테스트 중에도 '쉬운 입력'과 재생·도구 탭은 살아 있어야 모드를 끌 수 있다.
+  assert.match(css, /\.music-doc\.is-practice \.music-tools>\*:not\(\.music-beginner-tools\)/);
+  assert.match(css, /\.music-doc\.is-eartest \.music-tools>\*:not\(\.music-beginner-tools\)/);
 });
 
 test("쉬운 입력은 옥타브와 도레미 버튼으로 다음 빈자리에 음표를 넣는다", () => {
@@ -488,7 +612,13 @@ test("악보 음량·음소거를 조절하고 음색을 고르면 바로 미리
   assert.match(editorSource, /volumeInput\.setAttribute\("aria-label", "악보 음량"\)/);
   assert.match(editorSource, /MNMusicAudio\.setVolume\(Number\(volumeInput\.value\) \/ 100\)/);
   assert.match(editorSource, /MNMusicAudio\.setMuted\(!MNMusicAudio\.muted\(\)\)/);
-  assert.match(editorSource, /muteBtn\.textContent = isMuted \|\| MNMusicAudio\.getVolume\(\) === 0 \? "🔇" : "🔊"/);
+  // 이모지 얼굴은 UI 정리가 지워 빈 단추가 된다 — 음소거 단추는 SVG 아이콘으로 그린다.
+  assert.match(editorSource, /musicSetSpeakerFace\(muteBtn, isMuted \|\| MNMusicAudio\.getVolume\(\) === 0\)/);
+  assert.match(editorSource, /musicSetSpeakerFace\(partMuteBtn, part\.muted === true\)/);
+  assert.match(editorSource, /window\.uiIcon\(muted \? "mute" : "volume"\)/);
+  const iconsSource = read("src/js/icons.js");
+  for (const name of ["volume", "mute"]) assert.match(iconsSource, new RegExp(`,${name}: '<path`));
+  assert.match(read("src/styles.css"), /\.music-btn\.music-part-mute \.ui-icon\{[^}]*width:16px/);
   assert.match(editorSource, /previewMusicNote\(\{ rest:false, step:"C", octave:4, alter:keyAlter \}, sheet\.timbre\)/);
   const css = read("src/styles.css");
   assert.match(css, /\.music-volume-range\{[^}]*accent-color:var\(--accent\)/);
@@ -514,7 +644,7 @@ test("파트별 신디사이저는 프리셋·파형·ADSR·필터·이펙트를
 });
 
 test("줄 나누기는 화면 폭을 따라간다", () => {
-  assert.match(editorSource, /musicPackLines\(sheet\.measures, width - 20, \{ barsPerLine:sheet\.barsPerLine \}\)/);
+  assert.match(editorSource, /musicPackLines\(sheet\.measures, width - 20,\s*\{ barsPerLine:sheet\.barsPerLine, solfege:musicShowsSolfege\(sheet\) \}\)/);
   // 단 높이는 가사 절 수만큼 늘어난다. 화면과 '이 단을 그림으로'가 반드시 같은 함수를 써야 한다.
   assert.match(editorSource, /function musicScoreLineHeight\(sheet\)/);
   assert.equal(editorSource.split("const lineHeight = musicScoreLineHeight(sheet);").length - 1, 2);
@@ -816,6 +946,10 @@ test("음감 연습은 다시 듣기 기본 1회와 간섭음을 제공한다", 
   const earSource = read("src/js/music-eartest.js");
   // 기본값은 1회이고, 사용자가 선택한 문제별 제한을 따른다.
   assert.match(earSource, /const REPLAY_LIMIT = 1;/);
+  // 스피커는 SVG 아이콘이고 글자는 따로 담는다 — 이모지는 UI 정리가 지워 앞 공백만 남았다.
+  assert.match(earSource, /replayIcon\.innerHTML = window\.uiIcon\("volume"\)/);
+  assert.match(earSource, /replayLabel\.className = "music-ear-replay-label"/);
+  assert.match(earSource, /replayLabel\.textContent = state\.replayLimit === Infinity/);
   assert.match(earSource, /if \(state\.replays >= state\.replayLimit\)\{/);
   // 문제 사이에 간섭음을 넣어 앞 음과 견주어 맞히지 못하게 한다(그러지 않으면 상대음감 검사가 된다).
   assert.match(earSource, /playMidis\(musicEarDistractor\(\), \(\) => later\(startAsk, DISTRACTOR_GAP_MS\)\)/);

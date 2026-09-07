@@ -38,6 +38,7 @@ function loadMusic(){
       musicNoteLyrics, musicSetNoteLyric, musicApplyLyrics, musicClampVerseCount, musicCountLyricVerses,
       musicSplitLyricSyllables, musicLyricTargets, musicApplyLyricLine, musicClearLyricVerse, MUSIC_MAX_LYRIC_VERSES,
       musicClampMeasureNumbers, musicClampBarsPerLine, musicClampRehearsal, musicHasPickup,
+      musicClampSolfegeStaff,
       musicMeasureNumberAt, musicMeasureIndexForNumber, musicShowsMeasureNumber,
       musicAutoRehearsalSpots, musicAutoRehearsal, musicClearRehearsal, MUSIC_AUTO_REHEARSAL_EVERY,
       MUSIC_TRANSPOSING_INSTRUMENTS, musicTranspositionSpec, musicClampTransposition,
@@ -144,7 +145,7 @@ test("신디사이저 프리셋과 사용자 음색은 파트별로 안전하게
   assert.equal(restored.synth.sustain, 1);
   assert.equal(restored.synth.cutoff, 12000);
   assert.equal(reopened.synth.reverb, 0.45);
-  assert.equal(JSON.parse(api.musicSerialize(reopened)).version, 12);   // 11 → 이조 악기 파트 12
+  assert.equal(JSON.parse(api.musicSerialize(reopened)).version, 13);   // 12 → 계이름 오선 고르기 13
 
   const pad = api.musicSynthSettings("pad");
   assert.equal(pad.waveform, "triangle");
@@ -928,6 +929,41 @@ test("줄 나누기는 화면 폭과 마디의 음표 수에 따라 마디를 �
   assert.equal(forced.length, 2);
   assert.equal(forced[0].indexes.join(","), "0,1");
   assert.equal(forced[1].indexes.join(","), "2,3");
+
+  /* 계이름을 켜면 음표마다 글자 폭을 더 요구한다 — 조판은 계이름을 모른 채 끝나므로
+     여기서 미리 벌려 두지 않으면 16분음표 구간에서 이웃 계이름끼리 파고든다. */
+  assert.ok(api.musicBarWidthHint(busy, true) > api.musicBarWidthHint(busy),
+    "계이름을 켜면 같은 마디가 더 넓어야 한다");
+  assert.equal(api.musicBarWidthHint(api.musicMeasure([]), true), api.musicBarWidthHint(api.musicMeasure([])),
+    "빈 마디는 최소 폭이라 계이름을 켜도 그대로다");
+  const busyBars = Array.from({ length:8 }, () => busy);
+  const plain = api.musicPackLines(busyBars, 1400);
+  const spaced = api.musicPackLines(busyBars, 1400, { solfege:true });
+  assert.ok(spaced[0].indexes.length < plain[0].indexes.length, "한 줄에 담기는 마디가 줄어든다");
+  assert.equal(spaced.flatMap((line) => line.indexes).length, busyBars.length);
+  // 한 줄 마디 수를 못 박아 두었으면 계이름과 상관없이 그 개수를 지킨다(인쇄본 마디 자리가 살아야 한다).
+  assert.equal(api.musicPackLines(busyBars, 1400, { barsPerLine:4, solfege:true })[0].indexes.length, 4);
+});
+
+test("계이름을 붙일 오선은 대보표에서 고르고 기본값은 저장하지 않는다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("계이름 자리");
+  assert.equal(sheet.solfegeStaff, "both");
+  assert.equal(api.musicClampSolfegeStaff("treble"), "treble");
+  assert.equal(api.musicClampSolfegeStaff("bass"), "bass");
+  assert.equal(api.musicClampSolfegeStaff("모름"), "both", "모르는 값은 둘 다로 돌린다");
+  assert.equal(api.musicClampSolfegeStaff(undefined), "both");
+
+  // 기본값이면 파일에 적지 않는다 — 예전 악보와 같은 바이트가 나와야 한다(가사 절 수와 같은 규칙).
+  assert.equal(JSON.parse(api.musicSerialize(sheet)).solfegeStaff, undefined);
+  sheet.solfegeStaff = "treble";
+  assert.equal(JSON.parse(api.musicSerialize(sheet)).solfegeStaff, "treble");
+  assert.equal(api.musicParse(api.musicSerialize(sheet)).solfegeStaff, "treble");
+
+  // 옛 악보는 둘 다로 열린다.
+  const old = JSON.parse(api.musicSerialize(sheet));
+  delete old.solfegeStaff;
+  assert.equal(api.musicParse(JSON.stringify(old)).solfegeStaff, "both");
 });
 
 function round3(value){

@@ -47,6 +47,8 @@ function loadEarTest(){
   return {
     api, ear, played, summaries,
     replayButton:elements.find(el => el.className === "music-btn music-ear-replay"),
+    // 다시 듣기 단추는 스피커 SVG 와 글자를 다른 칸에 담는다 — 글자는 라벨 칸에서 읽는다.
+    replayLabel:elements.find(el => el.className === "music-ear-replay-label"),
     againButton:elements.find(el => el.textContent === "↻ 한 번 더"),
     nextTimer(){
       const next = timers.entries().next().value;
@@ -74,13 +76,13 @@ for (let limit = 1; limit <= 10; limit++){
     assert.equal(h.played.length, 1, "첫 소리는 다시 듣기 횟수에 포함하지 않는다");
     for (let used = 0; used < limit; used++){
       assert.equal(h.replayButton.disabled, false);
-      assert.match(h.replayButton.textContent, new RegExp(`${limit - used}번 남음`));
+      assert.match(h.replayLabel.textContent, new RegExp(`${limit - used}번 남음`));
       if (used % 2) h.ear.replay();
       else h.replayButton.click();
     }
     assert.equal(h.played.length, limit + 1);
     assert.equal(h.replayButton.disabled, true);
-    assert.match(h.replayButton.textContent, /다 썼어요/);
+    assert.match(h.replayLabel.textContent, /다 썼어요/);
     h.ear.replay();
     h.replayButton.click();
     assert.equal(h.played.length, limit + 1);
@@ -92,7 +94,7 @@ for (let limit = 1; limit <= 10; limit++){
     h.nextTimer();
     assert.equal(h.ear.phase(), "ask");
     assert.equal(h.replayButton.disabled, false);
-    assert.match(h.replayButton.textContent, new RegExp(`${limit}번 남음`));
+    assert.match(h.replayLabel.textContent, new RegExp(`${limit}번 남음`));
     h.ear.stop();
   });
 }
@@ -104,7 +106,7 @@ test("무제한은 여러 번 들어도 잠기지 않고 사용 횟수는 결과
   for (let i = 0; i < 100; i++) h.replayButton.click();
   assert.equal(h.played.length, 101);
   assert.equal(h.replayButton.disabled, false);
-  assert.match(h.replayButton.textContent, /무제한/);
+  assert.match(h.replayLabel.textContent, /무제한/);
   h.ear.press(0);
   const summary = h.ear.stop();
   assert.equal(summary.replays, 100);
@@ -128,7 +130,7 @@ for (const limit of [3, "unlimited"]){
     h.againButton.click();
     h.nextTimer();
     assert.equal(h.replayButton.disabled, false);
-    assert.match(h.replayButton.textContent, limit === "unlimited" ? /무제한/ : /3번 남음/);
+    assert.match(h.replayLabel.textContent, limit === "unlimited" ? /무제한/ : /3번 남음/);
     h.ear.press(0);
     assert.equal(h.ear.stop().replays, 0);
   });
@@ -139,7 +141,7 @@ test("없는 설정이나 잘못된 값은 기존 기본값 1회로 돌아간다
   for (const value of [undefined, null, "", "wrong", 0, -1, 1.5, 11, Infinity]){
     h.ear.start({ level:1, count:5, replayLimit:value });
     h.nextTimer();
-    assert.match(h.replayButton.textContent, /1번 남음/);
+    assert.match(h.replayLabel.textContent, /1번 남음/);
     h.ear.replay();
     assert.equal(h.replayButton.disabled, true);
     h.ear.stop();
@@ -152,7 +154,7 @@ test("무제한 테스트를 종료하고 1회로 시작하면 새 제한을 적
   h.ear.stop();
   h.ear.start({ level:1, count:5, replayLimit:1 });
   h.nextTimer();
-  assert.match(h.replayButton.textContent, /1번 남음/);
+  assert.match(h.replayLabel.textContent, /1번 남음/);
   h.ear.replay();
   assert.equal(h.replayButton.disabled, true);
   h.ear.destroy();

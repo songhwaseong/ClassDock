@@ -13,6 +13,13 @@ async function openApp(page){
   await page.goto("/");
 }
 
+// 도구가 탭으로 나뉘어 있어 버튼을 누르기 전에 그 갈래를 먼저 연다.
+const openMusicTab = async (page, label) => {
+  const tab = page.locator(".music-tab", { hasText:label }).last();   // 문서가 여러 개 열려 있을 수 있다
+  await tab.click();
+  await expect(tab).toHaveClass(/is-on/);
+};
+
 async function openScore(page, source){
   await page.evaluate((build) => {
     const sheet = (0, eval)(build);
@@ -20,6 +27,7 @@ async function openScore(page, source){
       { isScratch:true });
   }, source);
   await expect(page.locator(".music-score svg").last()).toBeVisible({ timeout:15_000 });
+  await openMusicTab(page, "음색/효과");        // 파트 이조 고르개가 있는 탭
 }
 
 // 다장조 C4 온음표 한 마디짜리 악보
