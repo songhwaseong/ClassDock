@@ -13,7 +13,7 @@ const javaEditorSource = fs.readFileSync(path.join(__dirname, "../src/js/java-ed
 const notebookSource = fs.readFileSync(path.join(__dirname, "../src/js/notebook-run.js"), "utf8");
 const imageSource = fs.readFileSync(path.join(__dirname, "../src/js/image-viewer.js"), "utf8");
 const whiteboardSource = fs.readFileSync(path.join(__dirname, "../src/js/whiteboard.js"), "utf8");
-const mapSource = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+const mapSource = ["map-viewer.js", "jeju-bus-map.js"].map(file => fs.readFileSync(path.join(__dirname, "../src/js", file), "utf8")).join("\n");
 const musicSource = fs.readFileSync(path.join(__dirname, "../src/js/music-editor.js"), "utf8");
 const htmlSource = fs.readFileSync(path.join(__dirname, "../classdock.html"), "utf8");
 const cssSource = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
@@ -35,16 +35,16 @@ test("도구 레지스트리는 전체 화면의 선택 도구를 담고 필수 
     && ids.includes("javaJunit") && ids.includes("javaFormat") && ids.includes("javaImports")
     && ids.includes("javaPractice") && ids.includes("javaFont"));
   assert.ok(ids.includes("wbPen") && ids.includes("wbBackground") && ids.includes("wbPng"));
-  assert.ok(ids.includes("mapSearch") && ids.includes("mapRoute") && ids.includes("mapOffline")
+  assert.ok(ids.includes("mapSearch") && ids.includes("mapRoute") && ids.includes("mapOffline") && ids.includes("mapJejuBus")
     && ids.includes("mapGeoExport") && ids.includes("mapCluster"));
   assert.ok(ids.includes("musicNoteValue") && ids.includes("musicPlayback") && ids.includes("musicDrums")
     && ids.includes("musicParts") && ids.includes("musicXml"));
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
-  assert.equal(TOGGLEABLE_TOOLS.length, 179);
+  assert.equal(TOGGLEABLE_TOOLS.length, 180);
   assert.deepEqual(
     Object.fromEntries(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]
       .map(target => [target, TOGGLEABLE_TOOLS.filter(tool => tool.target === target).length])),
-    { header:12, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:37, map:29, music:53 }
+    { header:12, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:37, map:30, music:53 }
   );
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");

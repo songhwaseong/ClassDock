@@ -2147,7 +2147,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -4363,6 +4363,8 @@ async function mountMapEditor(doc){
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
     doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); });
   }
+
+  const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow, doc, t:mapT }) : null;
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -6737,6 +6739,10 @@ async function mountMapEditor(doc){
      말풍선과 그리던 선을 먼저 정리하고 타일이 다 뜨기를 기다린 뒤, 표시·도형의 이름을 지도 칸
      좌표로 바꿔 넘긴다 — 화면 말풍선은 캡처에서 감추므로 그림에 직접 새겨야 남는다. */
   const captureMapPng = async () => {
+    const resume = jejuBus ? jejuBus.freeze() : () => {};
+    try { return await captureMapPngFrozen(); } finally { resume(); }
+  };
+  const captureMapPngFrozen = async () => {
     map.closePopup();
     setAdding(false);
     if (drawingMode) finishDrawing(false);
@@ -6800,7 +6806,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, mapAttributionText(model), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 

@@ -4215,6 +4215,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapPrint .map-toolvis-print,
   html.hide-tool-mapTask .map-toolvis-task,
   html.hide-tool-mapOffline .map-toolvis-offline,
+  html.hide-tool-mapJejuBus .map-toolvis-jeju-bus,
   html.hide-tool-mapSubway .map-toolvis-subway,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
@@ -7414,3 +7415,16 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-radius-fixed-center{border-color:#b45309;color:#b45309;pointer-events:none}
 .map-radius-a-match{outline:3px solid #b45309;outline-offset:3px;border-radius:8px}
 .map-radius-a-match.map-radius-match{outline-color:#7c3aed}
+
+/* 제주 버스: 패널은 지도 편집 층이며 내보낼 때 감춘다. */
+.map-jeju-bus-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(390px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-jeju-bus-panel[hidden]{display:none}
+.map-jeju-bus-heading,.map-jeju-bus-search,.map-jeju-bus-actions{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.map-jeju-bus-heading{justify-content:space-between}.map-jeju-bus-search input{flex:1;min-width:100px}
+.map-jeju-bus-panel>select{width:100%;max-width:100%}.map-jeju-bus-preview{white-space:pre-wrap;max-height:120px;overflow:auto;font-size:12px;overflow-wrap:anywhere}
+.map-jeju-bus-status{font-weight:600}.map-jeju-bus-note{font-size:12px;opacity:.8}.map-jeju-bus-panel a{color:#087f8c}
+.map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}
+.map-jeju-bus-number{display:none}.bus-wide-label .map-jeju-bus-number{display:inline}
+.map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:jejuBusAppear .7s ease-out}
+@keyframes jejuBusAppear{from{opacity:.25}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:none}}

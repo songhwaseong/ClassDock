@@ -1,0 +1,147 @@
+[
+  {
+    "at": 1789184056057,
+    "rows": [
+      {
+        "vhId": 7983077,
+        "plateNo": "제주79아3077",
+        "localX": 126.77965,
+        "localY": 33.549696,
+        "currStationId": 405001338,
+        "currStationNm": "만장굴입구[남]"
+      },
+      {
+        "vhId": 7983229,
+        "plateNo": "제주79아3229",
+        "localX": 126.897022,
+        "localY": 33.40675,
+        "currStationId": 406001065,
+        "currStationNm": "온평리[서]"
+      },
+      {
+        "vhId": 7983202,
+        "plateNo": "제주79아3202",
+        "localX": 126.750115,
+        "localY": 33.289031,
+        "currStationId": 406001008,
+        "currStationNm": "태흥3리사무소[서]"
+      }
+    ]
+  },
+  {
+    "at": 1789184091071,
+    "rows": [
+      {
+        "vhId": 7983077,
+        "plateNo": "제주79아3077",
+        "localX": 126.77965,
+        "localY": 33.549696,
+        "currStationId": 405001338,
+        "currStationNm": "만장굴입구[남]"
+      },
+      {
+        "vhId": 7983229,
+        "plateNo": "제주79아3229",
+        "localX": 126.897022,
+        "localY": 33.40675,
+        "currStationId": 406001065,
+        "currStationNm": "온평리[서]"
+      },
+      {
+        "vhId": 7983202,
+        "plateNo": "제주79아3202",
+        "localX": 126.745603,
+        "localY": 33.286559,
+        "currStationId": 406001006,
+        "currStationNm": "어촌계입구[북]"
+      }
+    ]
+  },
+  {
+    "at": 1789184125644,
+    "rows": [
+      {
+        "vhId": 7983077,
+        "plateNo": "제주79아3077",
+        "localX": 126.77965,
+        "localY": 33.549696,
+        "currStationId": 405001803,
+        "currStationNm": "월정리 용천동"
+      },
+      {
+        "vhId": 7983229,
+        "plateNo": "제주79아3229",
+        "localX": 126.881233,
+        "localY": 33.386034,
+        "currStationId": 406001064,
+        "currStationNm": "화성농장[서]"
+      },
+      {
+        "vhId": 7983202,
+        "plateNo": "제주79아3202",
+        "localX": 126.74115,
+        "localY": 33.284879,
+        "currStationId": 406001004,
+        "currStationNm": "태흥초등학교[북]"
+      }
+    ]
+  },
+  {
+    "at": 1789184140737,
+    "rows": [
+      {
+        "vhId": 7983077,
+        "plateNo": "제주79아3077",
+        "localX": 126.77965,
+        "localY": 33.549696,
+        "currStationId": 405001803,
+        "currStationNm": "월정리 용천동"
+      },
+      {
+        "vhId": 7983229,
+        "plateNo": "제주79아3229",
+        "localX": 126.881233,
+        "localY": 33.386034,
+        "currStationId": 406001064,
+        "currStationNm": "화성농장[서]"
+      },
+      {
+        "vhId": 7983202,
+        "plateNo": "제주79아3202",
+        "localX": 126.74115,
+        "localY": 33.284879,
+        "currStationId": 406001004,
+        "currStationNm": "태흥초등학교[북]"
+      }
+    ]
+  },
+  {
+    "at": 1789184155799,
+    "rows": [
+      {
+        "vhId": 7983077,
+        "plateNo": "제주79아3077",
+        "localX": 126.77965,
+        "localY": 33.549696,
+        "currStationId": 405001803,
+        "currStationNm": "월정리 용천동"
+      },
+      {
+        "vhId": 7983229,
+        "plateNo": "제주79아3229",
+        "localX": 126.881233,
+        "localY": 33.386034,
+        "currStationId": 406001064,
+        "currStationNm": "화성농장[서]"
+      },
+      {
+        "vhId": 7983202,
+        "plateNo": "제주79아3202",
+        "localX": 126.74115,
+        "localY": 33.284879,
+        "currStationId": 406001004,
+        "currStationNm": "태흥초등학교[북]"
+      }
+    ]
+  }
+]

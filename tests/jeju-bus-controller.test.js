@@ -1,0 +1,90 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm");
+const api=require("../src/js/jeju-bus-api.js"),live=require("../src/js/jeju-bus-live.js");
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
+const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
+function harness(){
+  class Element{
+    constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attrs={};this.handlers={};this.className="";this.textContent="";this.value="";this.offsetParent={};this.classList={add(){},remove(){},toggle(){}};}
+    append(...items){items.forEach(item=>this.appendChild(item));}
+    appendChild(item){this.children.push(item);if(this.tagName==="select" && this.children.length===1)this.value=item.value;return item;}
+    replaceChildren(...items){this.children=[];this.append(...items);}
+    setAttribute(k,v){this.attrs[k]=v;}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    removeEventListener(name){delete this.handlers[name];}
+    fire(name,event={}){return this.handlers[name]?.({preventDefault(){},stopPropagation(){},...event});}
+    click(){return this.fire("click");}
+    focus(){}
+    remove(){this.removed=true;}
+  }
+  const requests=[],groups=[],intervals=new Set(),frames=new Map(),pending=[];let now=1000000,frameId=0;
+  class Clock extends Date {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
+  const doc=new Element("document");doc.createElement=tag=>new Element(tag);doc.hidden=false;
+  const map={handlers:{},createPane:()=>new Element("pane"),removeLayer(){},getZoom:()=>14,
+    fitBounds(){this.fitCount=(this.fitCount||0)+1;},on(name,fn){this.handlers[name]=fn;},off(name){delete this.handlers[name];}};
+  const L={DomEvent:{disableClickPropagation(){},disableScrollPropagation(){}},latLngBounds:p=>p,divIcon:o=>o,
+    layerGroup(){const group={items:[],addTo(){return this;},clearLayers(){this.items=[];},addLayer(x){this.items.push(x);},removeLayer(x){this.items=this.items.filter(i=>i!==x);}};groups.push(group);return group;},
+    marker(at){const element=new Element("marker");return {at,bindTooltip(tip){this.tip=tip;return this;},setLatLng(p){this.at=p;},setOpacity(v){this.opacity=v;},getElement(){return element;}};},
+    circleMarker(){return {bindTooltip(){return this;}};},polyline:p=>({points:p})};
+  const fakeApi={...api,request(kind,value,options){requests.push({kind,value,options});
+    if(kind==="routes")return Promise.resolve([{id:"1",number:"201",from:"A",to:"B",type:"간선"},{id:"2",number:"201",from:"B",to:"A",type:"간선"}]);
+    if(kind==="route")return Promise.resolve([{id:"s",name:"stop",at:[33.3,126.5]}]);
+    if(kind==="shape")return Promise.resolve([[33.3,126.5],[33.301,126.5]]);
+    const task=deferred();pending.push({task,request:requests.at(-1)});return task.promise;}};
+  const context={console,Date:Clock,Map,Set,AbortController,Promise,MNJejuBusApi:fakeApi,MNJejuBusLive:live,L,document:doc,
+    window:{matchMedia:()=>({matches:false})},localStorage:{getItem(){return null;},setItem(){}},fetch:async()=>({ok:true,text:async()=>"yes"}),
+    setInterval(fn){intervals.add(fn);return fn;},clearInterval(fn){intervals.delete(fn);},requestAnimationFrame(fn){frames.set(++frameId,fn);return frameId;},cancelAnimationFrame(id){frames.delete(id);}};
+  vm.createContext(context);vm.runInContext(fs.readFileSync("src/js/jeju-bus-map.js","utf8")+"\nglobalThis.busModule=MNJejuBusMap;",context);
+  const stage=new Element("stage"),toolRow=new Element("tools"),documentModel={cleanupFns:[]};
+  const controller=context.busModule.mount({map,stage,toolRow,doc:documentModel});
+  const panel=stage.children[0],form=panel.children[1],select=panel.children[2],actions=panel.children[4];
+  return {controller,doc:documentModel,document:doc,stage,map,groups,requests,pending,intervals,frames,form,select,
+    panel,actions,start:actions.children[0],status:panel.children[5],button:toolRow.children[0],
+    tick(ms=1000){now+=ms;for(const fn of intervals)fn();},now:()=>now};
+}
+const body=(id,at,x=126.5)=>api.positions([{vhId:1,plateNo:"bus",localY:33.3,localX:x,currStationId:1,currStationNm:"stop"}],id,at);
+test("노선 변경 후 늦은 응답을 무시하고 지도를 닫으면 요청·타이머를 정리한다",async()=>{
+  const h=harness();await flush();assert.equal(h.button.disabled,false);
+  await h.form.fire("submit");h.start.click();assert.equal(h.pending.length,1);const old=h.pending[0];
+  h.select.value="2";await h.select.fire("change");assert.equal(old.request.options.signal.aborted,true);
+  h.start.click();old.task.resolve(body("1",h.now()));await flush();assert.equal(h.groups[0].items.length,0);
+  h.pending[1].task.resolve(body("2",h.now()));await flush();assert.equal(h.groups[0].items.length,1);
+  const fits=h.map.fitCount;h.tick(31000);h.pending[2].task.resolve(body("2",h.now(),126.5001));await flush();assert.equal(h.map.fitCount,fits);
+  h.tick(31000);const last=h.pending.at(-1);
+  assert.equal(h.actions.children.some(button=>button.textContent==="끄기"),false);
+  assert.equal(h.button.attrs["aria-pressed"],"true");h.button.click();
+  assert.equal(last.request.options.signal.aborted,true);assert.equal(h.button.attrs["aria-pressed"],"false");
+  assert.equal(h.button.attrs["aria-expanded"],"false");assert.equal(h.panel.hidden,true);
+  assert.equal(h.groups[0].items.length,0);assert.equal(h.groups[1].items.length,0);assert.equal(h.frames.size,0);
+  const requestCount=h.pending.length;h.tick(60000);assert.equal(h.pending.length,requestCount);
+  last.task.resolve(body("2",h.now()));await flush();assert.equal(h.groups[0].items.length,0);
+  h.button.click();assert.equal(h.panel.hidden,false);h.start.click();assert.equal(h.button.attrs["aria-pressed"],"true");
+  const restarted=h.pending.at(-1);h.doc.cleanupFns.forEach(fn=>fn());
+  assert.equal(restarted.request.options.signal.aborted,true);assert.equal(h.intervals.size,0);
+  restarted.task.resolve(body("2",h.now()));await flush();assert.equal(h.groups[0].items.length,0);
+});
+test("숨긴 지도는 요청을 중지하고 복귀 시 갱신하며 캡처 고정 중에는 응답을 적용하지 않는다",async()=>{
+  const h=harness();await h.form.fire("submit");h.start.click();h.tick();
+  h.document.hidden=true;h.tick();assert.equal(h.pending[0].request.options.signal.aborted,true);
+  const count=h.pending.length;h.tick(60000);assert.equal(h.pending.length,count);
+  h.document.hidden=false;h.tick();assert.equal(h.pending.length,count+1);
+  const resume=h.controller.freeze();h.pending.at(-1).task.resolve(body("1",h.now()));await flush();assert.equal(h.groups[0].items.length,0);
+  h.tick(60000);assert.equal(h.pending.length,count+1);resume();assert.equal(h.pending.length,count+2);
+  h.pending.at(-1).task.resolve(body("1",h.now()));await flush();assert.equal(h.groups[0].items.length,1);
+  assert.match(h.controller.captureNote(),/bus.jeju.go.kr/);h.controller.destroy();
+});
+test("서버 실패는 운행 차량 없음과 구분하고 재시도 간격을 지킨다",async()=>{
+  const h=harness();await h.form.fire("submit");h.tick();h.start.click();
+  const error=new Error("failed");error.retryAfterMs=120000;h.pending[0].task.reject(error);await flush();
+  h.tick(31000);assert.equal(h.pending.length,1);assert.match(h.status.textContent,/받지 못/);
+  h.tick(90000);assert.equal(h.pending.length,2);h.controller.destroy();
+});
+test("API 어댑터는 런처 캐시 시각과 Retry-After를 보존한다",async()=>{
+  const original=global.fetch;let requested;
+  try{
+    global.fetch=async(url,options)=>{requested={url,options};return {ok:true,headers:new Headers({"X-ClassDock-Bus-Fetched-At":"2026-09-12T03:34:16.000Z","X-ClassDock-Bus-Stale":"1","Retry-After":"120"}),json:async()=>[]};};
+    const result=await api.request("position","1");assert.equal(result.fetchedAt,Date.parse("2026-09-12T03:34:16Z"));assert.equal(result.stale,true);assert.equal(result.retryAfterMs,120000);
+    assert.equal(requested.url,"/jeju-bus-position?routeId=1");assert.equal(requested.options.cache,"no-store");
+    await assert.rejects(()=>api.request("position","https://example.com"));
+  }finally{global.fetch=original;}
+});

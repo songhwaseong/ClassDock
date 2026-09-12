@@ -1,0 +1,14 @@
+const fs=require('fs');const read=p=>fs.readFileSync(p,'utf8');const write=(p,s)=>fs.writeFileSync(p,s);
+let p='src/js/jeju-bus-live.js',s=read(p);
+s=s.replace('const lengths=[0];','const lengths=[0],breaks=new Set(),segments=[];let segment=[points[0]];');
+s=s.replace('if (!Number.isFinite(length) || length>500) return null;','if (!Number.isFinite(length)) return null;\n      if(length>500){breaks.add(i);if(segment.length>1)segments.push(segment);segment=[];}\n      segment.push(points[i]);');
+s=s.replace('return {points,lengths};','if(segment.length>1)segments.push(segment);\n    return segments.length?{points,lengths,breaks,segments}:null;');
+s=s.replace('const a=shape.points[i-1],b=shape.points[i],','if(shape.breaks.has(i))continue;\n      const a=shape.points[i-1],b=shape.points[i],');
+s=s.replace('if (length<=0 || length>1500', 'if ([...shape.breaks].some(i=>i>=from.index && i<=to.index))return null;\n    if (length<=0 || length>1500');
+s=s.replace('old.stationId!==row.stationId','old.stationId!==row.stationId || old.stationName!==row.stationName');write(p,s);
+p='src/js/jeju-bus-map.js';s=read(p);
+s=s.replace('const clock=stamp=>','const routeColor=()=>active && /급행|리무진/.test(active.type)?"#c0392b":active && /간선/.test(active.type)?"#176bc0":active && /관광/.test(active.type)?"#986b00":"#087f8c";\n    const clock=stamp=>');
+s=s.replace('const icon=el("span","map-jeju-bus-icon");icon.append','const icon=el("span","map-jeju-bus-icon");icon.style.backgroundColor=routeColor();icon.append');
+s=s.replace(':t("버스 정보를 받는 중…"))',':t(delayed?"버스 정보를 받지 못했어요. 다시 시도하는 중이에요.":"버스 정보를 받는 중…"))');
+s=s.replace('L.polyline(shape.points,{pane:"mapJejuBusRoutePane",color:"#087f8c"','L.polyline(shape.segments,{pane:"mapJejuBusRoutePane",color:routeColor()');
+s=s.replace('radius:3,color:"#087f8c"','radius:3,color:routeColor()');write(p,s);

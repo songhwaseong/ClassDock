@@ -79,6 +79,9 @@
     "whiteboard.js",
     "subway-stations.js",
     "subway-live.js",
+    "jeju-bus-api.js",
+    "jeju-bus-live.js",
+    "jeju-bus-map.js",
     "map-viewer.js",
     "timeline.js",
     "concept-doc.js",
@@ -215,6 +218,9 @@
         "whiteboard.js",
         "subway-stations.js",
         "subway-live.js",
+        "jeju-bus-api.js",
+        "jeju-bus-live.js",
+        "jeju-bus-map.js",
         "map-viewer.js",
         "timeline.js",
         "concept-doc.js",
@@ -376,7 +382,8 @@
       "lazy.js",
       "documents.js",
       "file-loaders.js",
-      "code-viewer.js"
+      "code-viewer.js",
+      "jeju-bus-map.js"
     ],
     "timeline.js": [
       "documents.js",
@@ -528,6 +535,10 @@
     ],
     "spreadsheet-tools.js": [
       "spreadsheet-formula.js"
+    ],
+    "jeju-bus-map.js": [
+      "jeju-bus-api.js",
+      "jeju-bus-live.js"
     ]
   },
   "moduleBoundaries": [
