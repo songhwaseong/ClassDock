@@ -3,6 +3,41 @@
 /* ===== 최근 작업공간 저장/복원 =====
    EXE(C# 로컬 서버)가 있으면 서버에 저장하고, 없으면(오프라인/온라인 HTML·file:// 포함)
    같은 바이너리 포맷을 이 브라우저의 IndexedDB에 저장한다. 복원·정리 동선은 두 경로가 동일하다. */
+// 원본 폴더를 다시 스캔해도 사용자가 닫은 파일은 자동으로 열지 않는다.
+// 제거 요청(80ms 지연)이 끝나기 전에 앱이 닫혀도 이 기록은 동기적으로 남는다.
+const WORKSPACE_CLOSED_PATHS_KEY = "classdock-workspace-closed-paths:v1";
+function workspaceClosedRestorePaths(){
+  try {
+    const rows = JSON.parse(localStorage.getItem(WORKSPACE_CLOSED_PATHS_KEY) || "[]");
+    return new Set((Array.isArray(rows) ? rows : []).filter(path => typeof path === "string"));
+  } catch(_){ return new Set(); }
+}
+function workspaceClosedPathKey(path){ return String(path || "").replace(/\\/g, "/").replace(/^\/+/, ""); }
+function workspaceRestorePathExcluded(path){
+  return workspaceClosedRestorePaths().has(workspaceClosedPathKey(path));
+}
+function workspaceSetRestorePathExclusions(paths, excluded){
+  const saved = workspaceClosedRestorePaths();
+  let changed = false;
+  for (const path of paths || []){
+    const key = workspaceClosedPathKey(path);
+    if (!key) continue;
+    if (excluded && !saved.has(key)){ saved.add(key); changed = true; }
+    else if (!excluded && saved.delete(key)) changed = true;
+  }
+  if (changed){
+    try { localStorage.setItem(WORKSPACE_CLOSED_PATHS_KEY, JSON.stringify([...saved])); }
+    catch(error){ console.warn("닫은 파일 복원 제외 기록을 저장하지 못했어요:", error); }
+  }
+}
+function workspaceClosedDocumentPaths(doc, remainingDocs){
+  if (!doc) return [];
+  // MusicXML→msheet, ipynb→py 등은 화면 이름과 복원 풀의 원본 이름이 다르다.
+  const paths = [...new Set([doc.workspaceRestorePath, doc.workspacePath].map(workspaceClosedPathKey).filter(Boolean))];
+  return paths.filter(path => !(remainingDocs || []).some(other => other && other !== doc &&
+    [other.workspaceRestorePath, other.workspacePath].some(value => workspaceClosedPathKey(value) === path)));
+}
+
 let workspaceMutationQueue = Promise.resolve();
 const pendingWorkspaceRemovals = new Set();
 let workspaceRemoveTimer = 0;

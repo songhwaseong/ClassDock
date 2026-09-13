@@ -1648,7 +1648,10 @@ function closeDoc(id, options={}){
   for (let ni = navNodes.length - 1; ni >= 0; ni--){
     if (navNodes[ni].type === "doc" && navNodes[ni].docId === d.id) navNodes.splice(ni, 1);
   }
-  const forgottenPaths = d.workspacePath ? [d.workspacePath] : [];
+  const forgottenPaths = typeof workspaceClosedDocumentPaths === "function"
+    ? workspaceClosedDocumentPaths(d, docs) : (d.workspacePath ? [d.workspacePath] : []);
+  if (options.forgetWorkspace && typeof workspaceSetRestorePathExclusions === "function")
+    workspaceSetRestorePathExclusions(forgottenPaths, true);
   if (options.forgetWorkspace && !options.skipPrune){
     let parentId = d.parentId;
     while (parentId){

@@ -90,6 +90,8 @@ async function handleFiles(files, options={}){
       sqliteDiskPath: options.sqliteDiskPath || file.__sqliteDiskPath || null,
       nativeAbsolutePath: options.nativeAbsolutePath || file.__nativeAbsolutePath || null,
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
+    if (opts.restoreFromWorkspace && typeof workspaceRestorePathExcluded === "function"
+        && workspaceRestorePathExcluded(opts.workspacePath || opts.relPath)) continue;
     opts.textEncoding = await inspectTextFileEncoding(file, ext);
     opts.sourceKey = options.sourceKey || [options.parentId || "root", opts.workspacePath || options.relPath || file.name, file.size || 0, file.lastModified || 0].join("|");
     if (opts.fsHandle && !opts.fsHandle.__classdockNativeHandle && opts.workspacePath && typeof saveFsHandle === "function")
@@ -200,8 +202,14 @@ async function handleFiles(files, options={}){
       else if (SUBTITLE_EXTS.includes(ext)) made = await loadOffice(file, "txt", opts);
       else made = await loadText(file, opts);          // 알 수 없는 확장자 → 텍스트면 열고 아니면 안내
       if (made && !firstDoc) firstDoc = made;
-      const opened = opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null;
+      const opened = made || (opts.sourceKey ? docsBySourceKey.get(opts.sourceKey) : null);
       if (opened){
+        if (!opts.transient && opts.workspacePath){
+          opened.workspaceRestorePath = opts.workspacePath;
+          // 직접 다시 연 파일은 다음 시작부터 다시 복원한다. 자동 복원은 제외 기록을 지우지 않는다.
+          if (!opts.restoreFromWorkspace && typeof workspaceSetRestorePathExclusions === "function")
+            workspaceSetRestorePathExclusions([opts.workspacePath, opened.workspacePath], false);
+        }
         // 폴더 새로고침의 변경 판별(경로+크기+수정시각)용 — 원본 파일 수정시각을 문서에 새겨 둔다.
         opened.__srcMtime = file.lastModified || 0;
         // 디스크에 없는 편집본을 자동 복원 스냅샷으로 되살린 문서 — 폴더 동기화가 덮어쓰지 않게 표시한다.

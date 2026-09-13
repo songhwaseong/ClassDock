@@ -31,7 +31,8 @@ function sanitizeHancomSpreadsheet(bytes){
 
 /* 일부 OOXML 생성기는 SpreadsheetML 요소를 <x:workbook>, <x:worksheet>처럼 접두사로 쓴다.
    XML 규격에는 맞지만 ExcelJS는 이 형식을 읽지 못하므로, 실패한 경우에만 기본 네임스페이스
-   형태로 좁게 정규화한 뒤 다시 연다. 시트 그림도 ExcelJS 모델을 통해 읽으므로 같은 보정이 필요하다. */
+   형태로 좁게 정규화한 뒤 다시 연다. /xl/tables/table1.xml 같은 패키지 루트 기준 연결도
+   ExcelJS가 해석할 수 있는 파트 상대 경로로 바꾼다. 외부 링크는 그대로 둔다. */
 function spreadsheetNormalizeXlsxNamespaces(bytes, ZipCtor){
   const Ctor = ZipCtor || (typeof JSZip !== "undefined" ? JSZip : null);
   if (!Ctor) return bytes;
@@ -40,6 +41,32 @@ function spreadsheetNormalizeXlsxNamespaces(bytes, ZipCtor){
     const zip = new Ctor(bytes);
     let changed = false;
     Object.keys(zip.files || {}).forEach(path => {
+      if (/(?:^|\/)_rels\/[^/]*\.rels$/i.test(path)){
+        const entry = zip.file(path);
+        if (!entry) return;
+        const xml = entry.asText();
+        const base = path.slice(0, path.lastIndexOf("_rels/")).split("/").filter(Boolean);
+        const fixed = xml.replace(/<(?:[A-Za-z_][\w.-]*:)?Relationship\b[^>]*>/g, tag => {
+          if (/\bTargetMode\s*=\s*(["'])External\1/i.test(tag)) return tag;
+          return tag.replace(/\bTarget\s*=\s*(["'])(\/(?!\/)[^"']*)\1/, (attribute, quote, target) => {
+            const parts = [];
+            for (const part of target.slice(1).split("/")){
+              if (!part || part === ".") continue;
+              if (part === ".."){
+                if (!parts.length) return attribute;
+                parts.pop();
+              } else parts.push(part);
+            }
+            if (!parts.length) return attribute;
+            let shared = 0;
+            while (shared < base.length && shared < parts.length && base[shared] === parts[shared]) shared++;
+            const relative = [...base.slice(shared).map(() => ".."), ...parts.slice(shared)].join("/");
+            return "Target=" + quote + relative + quote;
+          });
+        });
+        if (fixed !== xml){ zip.file(path, fixed); changed = true; }
+        return;
+      }
       if (!/\.xml$/i.test(path) || /\/_rels\//i.test(path)) return;
       const entry = zip.file(path);
       if (!entry) return;
@@ -62,6 +89,12 @@ function spreadsheetNormalizeXlsxNamespaces(bytes, ZipCtor){
     console.warn("xlsx namespace normalization skipped:", error);
     return bytes;
   }
+}
+
+function spreadsheetEditFailureMessage(libraryAvailable, loadError){
+  if (!libraryAvailable) return "서식 보존 편집 라이브러리(ExcelJS)를 불러오지 못했어요. 보기 모드로 전환합니다.";
+  if (loadError) return "엑셀 파일의 내부 형식을 읽지 못해 편집기를 열 수 없어요. 보기 모드로 전환합니다.";
+  return "선택한 시트의 편집 데이터를 찾지 못했어요. 보기 모드로 전환합니다.";
 }
 
 async function spreadsheetLoadExcelWorkbook(bytes, ExcelCtor, ZipCtor){
@@ -1845,18 +1878,19 @@ async function renderXlsx(file, host, doc){
   host.appendChild(tabs); host.appendChild(exp); host.appendChild(editBar); host.appendChild(formulaBar); host.appendChild(sheet);
 
   // ----- ExcelJS 워크북 로드(최초 편집 진입 시 1회, 원본 바이트에서) -----
-  let exWb = null, exLoadPromise = null;
+  let exWb = null, exLoadPromise = null, exLoadError = null;
   const ensureExWb = async () => {
     if (exWb) return exWb;
     if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("exceljs");   // 편집 모드에 들어갈 때 처음 로드
-    if (typeof ExcelJS === "undefined") return null;
+    if (typeof ExcelJS === "undefined" || typeof ExcelJS.Workbook !== "function") return null;
     if (!exLoadPromise){
       exLoadPromise = (async () => {
         return spreadsheetLoadExcelWorkbook(
           bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), ExcelJS);
       })();
     }
-    try { exWb = await exLoadPromise; } catch(e){ console.error(e); exWb = null; exLoadPromise = null; }
+    try { exWb = await exLoadPromise; exLoadError = null; }
+    catch(e){ console.error(e); exLoadError = e; exWb = null; exLoadPromise = null; }
     return exWb;
   };
   const floatingImageSheets = new Map();
@@ -6375,7 +6409,8 @@ async function renderXlsx(file, host, doc){
       sheet.textContent = "편집기를 준비하는 중…";
       const model = await exModelFor(currentSheet);
       if (!model){
-        toast("서식 보존 편집 라이브러리(ExcelJS)를 불러오지 못했어요. 보기 모드로 전환합니다.", 3400);
+        toast(spreadsheetEditFailureMessage(
+          typeof ExcelJS !== "undefined" && typeof ExcelJS.Workbook === "function", exLoadError), 3400);
         editMode = false; syncEditToggle(); expBtns.hidden = false; editBar.hidden = true;
         renderReadonly(currentSheet); return;
       }
@@ -6433,6 +6468,7 @@ if (typeof module === "object" && module.exports){
     spreadsheetImageMime,
     spreadsheetNormalizeXlsxNamespaces,
     spreadsheetLoadExcelWorkbook,
+    spreadsheetEditFailureMessage,
     spreadsheetPackageImageInfo,
     spreadsheetImageFormulaInfo,
     spreadsheetFormulaImages,
