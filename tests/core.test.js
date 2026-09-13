@@ -1538,6 +1538,40 @@ test("Python 단계 실행 보고서의 변수와 변경 내역을 안전하게 
   assert.deepEqual(report.steps[0].changes[0], { name:"total", before:"3", after:"7", type:"int", kind:"changed" });
   assert.equal(report.steps[1].phase, "return");
   assert.equal(report.error, "");
+  assert.equal(report.steps[0].frames, null);
+  assert.equal(report.steps[0].out, null);
+});
+
+test("Python 단계 실행 그림 보기 기록(프레임·객체·출력 길이)을 정리한다", () => {
+  const report = normalizePythonTraceReport({
+    sizeLimited:true,
+    steps:[{
+      line:2, functionName:"grow", out:"5",
+      frames:[
+        { id:1, name:"<module>", line:7, vars:[["a", { r:"1" }], ["b", { r:1 }], ["", { p:"x" }], ["n", { p:"2" }]] },
+        { id:"2", name:"grow", line:"2", vars:[["items", { r:"1" }], ["bad", null]] }
+      ],
+      heap:{
+        "1":{ k:"seq", t:"list", n:"3", items:[{ p:"1" }, { r:"2" }, "junk"] },
+        "2":{ k:"dict", t:"dict", n:1, entries:[[{ p:"'k'" }, { p:"9" }], "bad"] },
+        "3":{ k:"weird", t:"Thing", repr:"<Thing>" }
+      }
+    }]
+  });
+  const step = report.steps[0];
+  assert.equal(report.sizeLimited, true);
+  assert.equal(step.out, 5);
+  assert.equal(step.frames.length, 2);
+  assert.deepEqual(step.frames[0].vars.map((pair) => pair[0]), ["a", "b", "n"]);
+  assert.equal(step.frames[0].vars[1][1].r, "1");
+  assert.equal(step.frames[1].id, 2);
+  assert.equal(step.frames[1].vars[1][1].p, "");
+  assert.equal(step.heap["1"].n, 3);
+  assert.equal(step.heap["1"].items[1].r, "2");
+  assert.equal(step.heap["1"].items[2].p, "");
+  assert.equal(step.heap["2"].entries.length, 1);
+  assert.equal(step.heap["3"].k, "other");
+  assert.equal(step.heap["3"].repr, "<Thing>");
 });
 
 test("Tab은 커서 바로 뒤의 닫는 괄호만 통과한다", () => {

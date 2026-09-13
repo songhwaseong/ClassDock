@@ -5188,6 +5188,52 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .py-trace-empty{margin:12px 14px}.py-trace-note{margin:0 14px 12px;border-color:#f59e0b;background:rgba(245,158,11,.08);color:#b45309}
   .py-trace-error{margin:0 14px 14px;padding:10px;border:1px solid rgba(239,68,68,.45);border-radius:7px;background:rgba(239,68,68,.07);
     color:var(--danger);white-space:pre-wrap;font:11.5px/1.5 Consolas,"Courier New",monospace}
+  /* 단계 실행 그림 보기 — 프레임(이름표)과 객체 상자, 그 사이 화살표 */
+  .py-trace-views{display:flex;gap:4px;padding:8px 14px 0}
+  .py-trace-views button{border:1px solid var(--code-border);border-radius:999px;background:var(--field);color:var(--code-muted);
+    padding:4px 11px;font:700 11.5px "Malgun Gothic",sans-serif;cursor:pointer}
+  .py-trace-views button.is-on{border-color:#3b82f6;background:rgba(59,130,246,.12);color:#2563eb}
+  [data-theme="dark"] .py-trace-views button.is-on{color:#93c5fd}
+  .py-mem{border:1px solid var(--code-border);border-radius:8px;background:var(--code-bg)}
+  .py-mem-scroll{overflow:auto;max-height:520px}
+  .py-mem-inner{position:relative;display:flex;align-items:flex-start;gap:56px;min-width:max-content;padding:10px 14px 16px}
+  .py-mem-col{display:flex;flex-direction:column;gap:10px;min-width:150px}
+  .py-mem-col h5{margin:0;color:var(--code-muted);font:700 11px "Malgun Gothic",sans-serif}
+  .py-mem-frame,.py-mem-obj{border:1px solid var(--code-border);border-radius:7px;background:var(--field);color:var(--code-text);
+    font:12px/1.4 Consolas,"Courier New",monospace}
+  .py-mem-frame{min-width:150px;opacity:.72}
+  .py-mem-frame.is-current{opacity:1;border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6}
+  .py-mem-frame-head{padding:4px 9px;border-bottom:1px solid var(--code-border);background:var(--code-panel-head);color:var(--code-muted);
+    font:700 11.5px "Malgun Gothic",sans-serif;border-radius:7px 7px 0 0}
+  .py-mem-var{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 9px;border-top:1px dashed var(--code-border)}
+  .py-mem-frame-head+.py-mem-var,.py-mem-type+.py-mem-var{border-top:0}
+  .py-mem-var.is-changed{background:rgba(250,204,21,.22)}
+  .py-mem-name{color:var(--code-text);font-weight:700;white-space:nowrap}
+  .py-mem-cell{display:inline-flex;align-items:center;min-width:14px;min-height:18px}
+  .py-mem-prim{color:var(--code-text);white-space:pre;font:inherit}
+  .py-mem-ptr{display:inline-block;width:9px;height:9px;border-radius:50%;background:#3b82f6}
+  .py-mem-none{padding:4px 9px;color:var(--code-muted);font:11.5px "Malgun Gothic",sans-serif}
+  .py-mem-col.is-heap{gap:24px}
+  .py-mem-row{display:flex;align-items:flex-start;gap:48px}
+  .py-mem-obj{min-width:60px}
+  .py-mem-obj.is-changed{border-color:#eab308;box-shadow:0 0 0 2px rgba(234,179,8,.35)}
+  .py-mem-type{padding:3px 8px;color:var(--code-muted);font:700 10.5px Consolas,"Courier New",monospace}
+  .py-mem-obj.is-other>.py-mem-prim{display:block;padding:2px 8px 6px;white-space:pre-wrap;max-width:260px;word-break:break-word}
+  .py-mem-seq{display:flex;padding:0 6px 6px}
+  .py-mem-slot{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:30px;padding:2px 7px 4px;border:1px solid var(--code-border)}
+  .py-mem-slot+.py-mem-slot{border-left:0}
+  .py-mem-obj.is-set .py-mem-slot{border-radius:0}
+  .py-mem-slot small{color:var(--code-muted);font-size:9.5px}
+  .py-mem-arrows{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+  .py-mem-arrows path{fill:none;stroke:#3b82f6;stroke-width:1.6}
+  .py-mem-arrows path.is-changed{stroke:#d97706;stroke-width:2.2}
+  .py-mem-arrows .py-mem-tip{fill:#3b82f6;stroke:none}
+  .py-mem-arrows .py-mem-tip.is-changed{fill:#d97706}
+  .py-trace-printed{margin-top:10px}
+  .py-trace-printed h4{margin:0 0 5px;color:var(--code-muted);font:700 11.5px "Malgun Gothic",sans-serif}
+  .py-trace-printed pre{max-height:130px;overflow:auto;margin:0;padding:8px 10px;border:1px solid var(--code-border);border-radius:7px;
+    background:var(--code-bg);color:var(--code-text);white-space:pre-wrap;font:12px/1.5 Consolas,"Courier New",monospace}
+  .py-trace-printed pre.is-empty{color:var(--code-muted)}
   @media(max-width:720px){
     .py-diagnostic-item{grid-template-columns:auto auto minmax(0,1fr)}
     .py-diagnostic-code{display:none}
@@ -5309,6 +5355,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .code-output .py-trace-changes code,
   .code-output .py-trace-vars code,
   .code-output .py-trace-error,
+  .code-output .py-mem-frame,
+  .code-output .py-mem-obj,
+  .code-output .py-trace-printed pre,
   .code-output .py-error-detail{font-size:var(--code-fs,13px)}
   .terminal-input:disabled{color:var(--code-muted)}
   .terminal-stop{border:1px solid #7f1d1d;background:#450a0a;color:#fecaca;border-radius:6px;padding:4px 9px;cursor:pointer}

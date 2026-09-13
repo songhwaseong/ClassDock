@@ -4415,6 +4415,43 @@
     return out.sort((a, b) => a.line - b.line || a.column - b.column || a.length - b.length);
   }
 
+  // 단계 실행 그림 보기의 값 한 칸: 기본값은 {p:글자}, 리스트·객체 같은 참조는 {r:객체 번호}.
+  function normalizePythonTraceValue(value) {
+    if (value && typeof value === "object" && value.r != null && value.r !== "") return { r: String(value.r).slice(0, 40) };
+    return { p: String(value && typeof value === "object" && value.p != null ? value.p : "").slice(0, 600) };
+  }
+
+  function normalizePythonTraceMemory(step) {
+    const frames = Array.isArray(step.frames) ? step.frames.slice(0, 60).map((frame) => {
+      frame = frame && typeof frame === "object" ? frame : {};
+      return {
+        id: Math.max(0, parseInt(frame.id, 10) || 0),
+        name: String(frame.name == null ? "<module>" : frame.name).slice(0, 160),
+        line: Math.max(1, parseInt(frame.line, 10) || 1),
+        vars: (Array.isArray(frame.vars) ? frame.vars.slice(0, 40) : [])
+          .filter((pair) => Array.isArray(pair) && pair[0] != null && pair[0] !== "")
+          .map((pair) => [String(pair[0]).slice(0, 120), normalizePythonTraceValue(pair[1])])
+      };
+    }) : null;
+    if (!frames) return null;
+    const heap = {};
+    const rawHeap = step.heap && typeof step.heap === "object" && !Array.isArray(step.heap) ? step.heap : {};
+    Object.keys(rawHeap).slice(0, 120).forEach((oid) => {
+      const raw = rawHeap[oid] && typeof rawHeap[oid] === "object" ? rawHeap[oid] : {};
+      const kind = ["seq","set","dict","obj","other"].includes(raw.k) ? raw.k : "other";
+      const item = { k: kind, t: String(raw.t == null ? "" : raw.t).slice(0, 80), n: Math.max(0, parseInt(raw.n, 10) || 0) };
+      if (kind === "seq" || kind === "set") item.items = (Array.isArray(raw.items) ? raw.items.slice(0, 50) : []).map(normalizePythonTraceValue);
+      else if (kind === "dict") item.entries = (Array.isArray(raw.entries) ? raw.entries.slice(0, 50) : [])
+        .filter(Array.isArray).map((pair) => [normalizePythonTraceValue(pair[0]), normalizePythonTraceValue(pair[1])]);
+      else if (kind === "obj") item.attrs = (Array.isArray(raw.attrs) ? raw.attrs.slice(0, 50) : [])
+        .filter((pair) => Array.isArray(pair) && pair[0] != null && pair[0] !== "")
+        .map((pair) => [String(pair[0]).slice(0, 120), normalizePythonTraceValue(pair[1])]);
+      else item.repr = String(raw.repr == null ? "" : raw.repr).slice(0, 600);
+      heap[String(oid).slice(0, 40)] = item;
+    });
+    return { frames, heap };
+  }
+
   function normalizePythonTraceReport(report, maxSteps=300) {
     report = report && typeof report === "object" ? report : {};
     const steps = Array.isArray(report.steps) ? report.steps.slice(0, maxSteps).map((step, index) => {
@@ -4426,6 +4463,9 @@
         type: String(change && change.type != null ? change.type : "").slice(0, 120),
         kind: ["added","changed","removed"].includes(change && change.kind) ? change.kind : "changed"
       })).filter(change => change.name) : [];
+      // 예전 기록기(그림 정보 없음)가 만든 보고서면 frames/heap/out 을 null 로 두어 표 보기만 쓴다.
+      const memory = normalizePythonTraceMemory(step);
+      const out = parseInt(step.out, 10);
       return {
         index,
         line: Math.max(1, parseInt(step.line, 10) || 1),
@@ -4433,11 +4473,15 @@
         depth: Math.max(0, Math.min(100, parseInt(step.depth, 10) || 0)),
         phase: step.phase === "return" ? "return" : "line",
         variables: normalizePythonVariables(step.variables, 40, 600),
-        changes
+        changes,
+        frames: memory ? memory.frames : null,
+        heap: memory ? memory.heap : null,
+        out: Number.isFinite(out) && out >= 0 ? out : null
       };
     }) : [];
     return {
       steps,
+      sizeLimited: !!report.sizeLimited,
       truncated: !!report.truncated || (Array.isArray(report.steps) && report.steps.length > maxSteps),
       error: String(report.error == null ? "" : report.error).slice(0, 100000)
     };

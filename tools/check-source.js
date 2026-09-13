@@ -241,6 +241,28 @@ if (pythonProbe.status === 0) {
     process.stderr.write(traceRun.stderr || "Python trace harness check failed\n");
     process.exit(traceRun.status || 1);
   }
+  // 그림 보기 기록: 별칭(a, b 가 같은 리스트)·함수 프레임 쌓임·단계별 출력 길이가 남아야 한다.
+  const memorySource = "def grow(items):\n    items.append(3)\n    return len(items)\na = [1, 2]\nb = a\nprint('hi')\nn = grow(b)\n";
+  const memoryHarness = new vm.Script(
+    `buildPythonTraceHarness(${JSON.stringify(memorySource)}, "check.py", 60)`
+  ).runInContext(workerContext);
+  const memoryRun = spawnSync("python", ["-"], { input:memoryHarness, encoding:"utf8" });
+  const memoryMarker = String(memoryRun.stdout).match(/__CLASSDOCK_TRACE__([A-Za-z0-9+/=]+)/);
+  if (memoryRun.status !== 0 || !memoryMarker) {
+    process.stderr.write(memoryRun.stderr || "Python trace memory check failed\n");
+    process.exit(memoryRun.status || 1);
+  }
+  const memorySteps = JSON.parse(Buffer.from(memoryMarker[1], "base64").toString("utf8")).steps;
+  const insideGrow = memorySteps.find((step) => step.functionName === "grow" && step.line === 3);
+  const lastStep = memorySteps[memorySteps.length - 1];
+  const globals = lastStep && lastStep.frames && lastStep.frames[0];
+  const ref = (frame, name) => { const pair = frame && frame.vars.find((item) => item[0] === name); return pair && pair[1].r; };
+  if (!insideGrow || insideGrow.frames.length !== 2 || ref(insideGrow.frames[1], "items") !== ref(insideGrow.frames[0], "a") ||
+      !globals || !ref(globals, "a") || ref(globals, "a") !== ref(globals, "b") ||
+      lastStep.heap[ref(globals, "a")].items.length !== 3 || lastStep.out !== 3 ||
+      memorySteps.some((step) => step.functionName === "write")) {
+    throw new Error("Python trace memory model check failed");
+  }
   pythonHarnessChecked = true;
 }
 

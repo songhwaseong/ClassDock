@@ -1600,18 +1600,88 @@ function buildPythonTraceHarness(source, fileName, maxSteps=300){
     "__mt_file = __mt_b64.b64decode('" + file64 + "').decode('utf-8')",
     "__mt_limit = " + limit,
     "__mt_steps, __mt_states, __mt_error, __mt_truncated = [], {}, '', False",
+    "__mt_size, __mt_size_limited, __mt_size_budget = 0, False, 2500000",
+    // 그림 보기용 기억 모델: 객체 번호는 id() 를 그대로 쓰지 않고 처음 본 순서로 매긴다.
+    // 사라진 객체의 id() 가 새 객체에 재사용되면 '같은 상자'로 잘못 그려지므로, 한 번 본 객체는 끝까지 붙잡아 둔다.
+    "__mt_oids, __mt_keep, __mt_fids = {}, [], {}",
+    "__mt_scope = {'__name__': '__main__', '__file__': __mt_file}",
     "def __mt_repr(value):",
     "    try: text = repr(value)",
     "    except BaseException: text = '<값을 표시할 수 없음>'",
     "    return text if len(text) <= 240 else text[:239] + '…'",
+    "def __mt_hidden(name, value):",
+    "    if not name or name.startswith('__'): return True",
+    "    return isinstance(value, (__mt_types.ModuleType, __mt_types.FunctionType, __mt_types.BuiltinFunctionType, type)) or callable(value)",
     "def __mt_snapshot(frame):",
     "    result = {}",
     "    for name, value in sorted(frame.f_locals.items()):",
-    "        if not name or name.startswith('__mt_') or name.startswith('__'): continue",
-    "        if isinstance(value, (__mt_types.ModuleType, __mt_types.FunctionType, __mt_types.BuiltinFunctionType, type)) or callable(value): continue",
+    "        if __mt_hidden(name, value): continue",
     "        result[name] = {'type': type(value).__name__[:120], 'value': __mt_repr(value)}",
     "        if len(result) >= 25: break",
     "    return result",
+    "def __mt_user_frame(frame):",
+    // 학생 코드의 프레임만 — 파일 이름이 같아도 이 기록기 자신의 함수(출력 세기 등)는 전역 사전이 달라 걸러진다.
+    "    return frame.f_code.co_filename == __mt_file and frame.f_globals is __mt_scope",
+    "class __MtTee:",
+    "    def __init__(self, base): self.base, self.n = base, 0",
+    "    def write(self, text):",
+    "        result = self.base.write(text)",
+    "        try: self.n += len(str(text).encode('utf-16-le', 'surrogatepass')) // 2",
+    "        except BaseException: pass",
+    "        return result",
+    "    def flush(self): return self.base.flush()",
+    "    def __getattr__(self, name): return getattr(self.base, name)",
+    "def __mt_memory(frame):",
+    "    heap, queue = {}, []",
+    "    def val(value):",
+    "        if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):",
+    "            text = __mt_repr(value)",
+    "            return {'p': text if len(text) <= 120 else text[:119] + '…'}",
+    "        key = id(value)",
+    "        if key not in __mt_oids:",
+    "            __mt_oids[key] = str(len(__mt_oids) + 1); __mt_keep.append(value)",
+    "        oid = __mt_oids[key]",
+    "        if oid not in heap:",
+    "            if len(heap) >= 60: return {'p': __mt_repr(value)[:120]}",
+    "            heap[oid] = None; queue.append((oid, value))",
+    "        return {'r': oid}",
+    "    def describe(value):",
+    "        name = type(value).__name__[:80]",
+    "        try:",
+    "            if isinstance(value, (list, tuple)):",
+    "                return {'k': 'seq', 't': name, 'n': len(value), 'items': [val(item) for item in value[:30]]}",
+    "            if isinstance(value, (set, frozenset)):",
+    "                items = []",
+    "                for item in value:",
+    "                    if len(items) >= 30: break",
+    "                    items.append(val(item))",
+    "                return {'k': 'set', 't': name, 'n': len(value), 'items': items}",
+    "            if isinstance(value, dict):",
+    "                entries = []",
+    "                for item_key, item_value in value.items():",
+    "                    if len(entries) >= 30: break",
+    "                    entries.append([val(item_key), val(item_value)])",
+    "                return {'k': 'dict', 't': name, 'n': len(value), 'entries': entries}",
+    "            attrs = getattr(value, '__dict__', None)",
+    "            if isinstance(attrs, dict) and not isinstance(value, (__mt_types.ModuleType, type)) and not callable(value):",
+    "                shown = [[attr, val(item)] for attr, item in list(attrs.items())[:30] if not __mt_hidden(attr, item)]",
+    "                return {'k': 'obj', 't': name, 'n': len(attrs), 'attrs': shown}",
+    "        except BaseException: pass",
+    "        return {'k': 'other', 't': name, 'repr': __mt_repr(value)}",
+    "    chain, current = [], frame",
+    "    while current is not None:",
+    "        if __mt_user_frame(current): chain.append(current)",
+    "        current = current.f_back",
+    "    frames = []",
+    "    for item in reversed(chain):",
+    "        key = id(item)",
+    "        if key not in __mt_fids: __mt_fids[key] = len(__mt_fids) + 1",
+    "        names = [[name, val(value)] for name, value in sorted(item.f_locals.items()) if not __mt_hidden(name, value)][:25]",
+    "        frames.append({'id': __mt_fids[key], 'name': item.f_code.co_name, 'line': int(item.f_lineno or 1), 'vars': names})",
+    "    while queue:",
+    "        oid, value = queue.pop(0)",
+    "        heap[oid] = describe(value)",
+    "    return frames, heap",
     "def __mt_depth(frame):",
     "    depth, current = 0, frame.f_back",
     "    while current is not None:",
@@ -1619,10 +1689,10 @@ function buildPythonTraceHarness(source, fileName, maxSteps=300){
     "        current = current.f_back",
     "    return depth",
     "def __mt_trace(frame, event, arg):",
-    "    global __mt_truncated",
-    "    if frame.f_code.co_filename != __mt_file: return __mt_trace",
+    "    global __mt_truncated, __mt_size, __mt_size_limited",
+    "    if not __mt_user_frame(frame): return __mt_trace",
     "    if event not in ('line', 'return'): return __mt_trace",
-    "    if len(__mt_steps) >= __mt_limit:",
+    "    if len(__mt_steps) >= __mt_limit or __mt_size_limited:",
     "        __mt_truncated = True",
     "        return None",
     "    current = __mt_snapshot(frame)",
@@ -1636,19 +1706,32 @@ function buildPythonTraceHarness(source, fileName, maxSteps=300){
     "        changes.append({'name': '↩ 반환값', 'before': '', 'after': __mt_repr(arg), 'type': type(arg).__name__[:120], 'kind': 'added'})",
     "    __mt_states[key] = current",
     "    variables = [{'name': name, 'type': value['type'], 'value': value['value']} for name, value in current.items()]",
-    "    __mt_steps.append({'line': max(1, int(frame.f_lineno or 1)), 'functionName': frame.f_code.co_name, 'depth': __mt_depth(frame), 'phase': event, 'variables': variables, 'changes': changes[:25]})",
-    "    if event == 'return': __mt_states.pop(key, None)",
+    "    step = {'line': max(1, int(frame.f_lineno or 1)), 'functionName': frame.f_code.co_name, 'depth': __mt_depth(frame), 'phase': event, 'variables': variables, 'changes': changes[:25], 'out': __mt_tee.n}",
+    "    try: step['frames'], step['heap'] = __mt_memory(frame)",
+    "    except BaseException: pass",
+    // 단계마다 기억 전체를 담으므로 큰 자료에서는 보고서가 커진다. 프로토콜 한도(6MB, base64)를 넘기 전에 멈춘다.
+    "    try: size = len(__mt_json.dumps(step, ensure_ascii=False))",
+    "    except BaseException: size = 0",
+    "    if __mt_size + size > __mt_size_budget:",
+    "        __mt_size_limited = __mt_truncated = True",
+    "        return None",
+    "    __mt_size += size",
+    "    __mt_steps.append(step)",
+    "    if event == 'return':",
+    "        __mt_states.pop(key, None); __mt_fids.pop(key, None)",
     "    return __mt_trace",
-    "__mt_scope = {'__name__': '__main__', '__file__': __mt_file}",
+    "__mt_tee = __MtTee(__mt_sys.stdout)",
     "try:",
     "    __mt_code = compile(__mt_source, __mt_file, 'exec')",
+    "    __mt_sys.stdout = __mt_tee",
     "    __mt_sys.settrace(__mt_trace)",
     "    exec(__mt_code, __mt_scope, __mt_scope)",
     "except BaseException:",
     "    __mt_error = __mt_tb.format_exc().strip()",
     "finally:",
     "    __mt_sys.settrace(None)",
-    "__mt_payload = __mt_json.dumps({'steps': __mt_steps, 'truncated': __mt_truncated, 'error': __mt_error}, ensure_ascii=False).encode('utf-8')",
+    "    __mt_sys.stdout = __mt_tee.base",
+    "__mt_payload = __mt_json.dumps({'steps': __mt_steps, 'truncated': __mt_truncated, 'sizeLimited': __mt_size_limited, 'error': __mt_error}, ensure_ascii=False).encode('utf-8')",
     "print('\\n" + PY_TRACE_MARKER + "' + __mt_b64.b64encode(__mt_payload).decode('ascii'))"
   ].join("\n");
 }
@@ -1748,6 +1831,187 @@ function renderPythonDiagnostics(panel, rawReport, ui){
   return { errors, warnings, total:diagnostics.length };
 }
 
+let pyTraceMemorySeq = 0;
+
+// 단계 실행 그림 보기: 왼쪽은 호출 중인 함수마다 칸(프레임), 오른쪽은 리스트·딕셔너리·객체 상자,
+// 이름에서 상자로 화살표를 긋는다. 두 이름이 한 상자를 가리키면 '같은 객체'라는 게 그대로 보인다.
+// 화살표는 글자 폭에 따라 달라지는 상자 위치를 재서 긋기 때문에, 붙인 뒤 draw() 를 불러야 한다.
+function renderPythonTraceMemory(step, prevStep){
+  const heap = step.heap || {};
+  const prevHeap = prevStep && prevStep.heap ? prevStep.heap : null;
+  const prevFrames = new Map((prevStep && Array.isArray(prevStep.frames) ? prevStep.frames : []).map(frame => [frame.id, frame]));
+  const el = document.createElement("div"); el.className = "py-mem";
+  const scroll = document.createElement("div"); scroll.className = "py-mem-scroll";
+  const inner = document.createElement("div"); inner.className = "py-mem-inner";
+  scroll.appendChild(inner); el.appendChild(scroll);
+  const pointers = [];
+  const boxes = new Map();
+
+  const cell = (value, changed) => {
+    const span = document.createElement("span"); span.className = "py-mem-cell";
+    if (value && value.r != null){
+      const dot = document.createElement("span"); dot.className = "py-mem-ptr"; dot.title = "객체를 가리킴";
+      span.appendChild(dot);
+      pointers.push({ dot, oid: value.r, changed: !!changed });
+    } else {
+      const code = document.createElement("code"); code.className = "py-mem-prim";
+      code.textContent = value ? value.p : "";
+      span.appendChild(code);
+    }
+    return span;
+  };
+  const column = (title, cls) => {
+    const col = document.createElement("div"); col.className = "py-mem-col " + cls;
+    const h = document.createElement("h5"); h.textContent = title; col.appendChild(h);
+    inner.appendChild(col);
+    return col;
+  };
+
+  const framesCol = column("프레임", "is-frames");
+  step.frames.forEach((frame, i) => {
+    const prev = prevFrames.get(frame.id);
+    const prevVars = new Map(prev ? prev.vars.map(([name, value]) => [name, JSON.stringify(value)]) : []);
+    const box = document.createElement("div");
+    box.className = "py-mem-frame" + (i === step.frames.length - 1 ? " is-current" : "") + (prevStep && !prev ? " is-new" : "");
+    const head = document.createElement("div"); head.className = "py-mem-frame-head";
+    head.textContent = frame.name === "<module>" ? "전역" : frame.name + "()";
+    box.appendChild(head);
+    if (!frame.vars.length){
+      const none = document.createElement("div"); none.className = "py-mem-none"; none.textContent = "변수 없음";
+      box.appendChild(none);
+    }
+    frame.vars.forEach(([name, value]) => {
+      const changed = !!prev && prevVars.get(name) !== JSON.stringify(value);
+      const row = document.createElement("div"); row.className = "py-mem-var" + (changed ? " is-changed" : "");
+      const label = document.createElement("span"); label.className = "py-mem-name"; label.textContent = name;
+      row.append(label, cell(value, changed));
+      box.appendChild(row);
+    });
+    framesCol.appendChild(box);
+  });
+
+  const heapCol = column("객체", "is-heap");
+  const placed = new Set();
+  const childRefs = (item) => {
+    const values = item.k === "dict" ? item.entries.flat() : item.k === "obj" ? item.attrs.map(pair => pair[1]) : (item.items || []);
+    return values.filter(value => value && value.r != null).map(value => value.r);
+  };
+  const buildBox = (oid) => {
+    const item = heap[oid];
+    const changed = !!prevHeap && JSON.stringify(prevHeap[oid] || null) !== JSON.stringify(item);
+    const box = document.createElement("div"); box.className = "py-mem-obj is-" + item.k + (changed ? " is-changed" : "");
+    const type = document.createElement("div"); type.className = "py-mem-type"; type.textContent = item.t || "객체";
+    box.appendChild(type);
+    const shown = item.k === "dict" ? item.entries.length : item.k === "obj" ? item.attrs.length : item.k === "other" ? 1 : item.items.length;
+    if (item.k === "seq" || item.k === "set"){
+      const seq = document.createElement("div"); seq.className = "py-mem-seq";
+      item.items.forEach((value, index) => {
+        const slot = document.createElement("div"); slot.className = "py-mem-slot";
+        if (item.k === "seq"){ const idx = document.createElement("small"); idx.textContent = String(index); slot.appendChild(idx); }
+        slot.appendChild(cell(value));
+        seq.appendChild(slot);
+      });
+      box.appendChild(seq);
+    } else if (item.k === "dict" || item.k === "obj"){
+      const pairs = item.k === "dict" ? item.entries : item.attrs;
+      pairs.forEach(([key, value]) => {
+        const row = document.createElement("div"); row.className = "py-mem-var";
+        if (item.k === "dict") row.appendChild(cell(key));
+        else { const label = document.createElement("span"); label.className = "py-mem-name"; label.textContent = key; row.appendChild(label); }
+        row.appendChild(cell(value));
+        box.appendChild(row);
+      });
+    } else {
+      const code = document.createElement("code"); code.className = "py-mem-prim"; code.textContent = item.repr;
+      box.appendChild(code);
+    }
+    if (item.k !== "other" && !shown){
+      const none = document.createElement("div"); none.className = "py-mem-none"; none.textContent = "(비어 있음)";
+      box.appendChild(none);
+    } else if (item.k !== "other" && item.n > shown){
+      const more = document.createElement("div"); more.className = "py-mem-none"; more.textContent = "… 외 " + (item.n - shown) + "개";
+      box.appendChild(more);
+    }
+    boxes.set(oid, box);
+    return box;
+  };
+  // 이름이 처음 가리키는 객체마다 한 줄을 만들고, 그 객체가 품은 객체는 같은 줄 오른쪽에 이어 둔다.
+  const place = (oid, row) => {
+    if (placed.has(oid) || !heap[oid]) return;
+    placed.add(oid);
+    row.appendChild(buildBox(oid));
+    childRefs(heap[oid]).forEach(child => place(child, row));
+  };
+  const roots = [];
+  step.frames.forEach(frame => frame.vars.forEach(([, value]) => { if (value && value.r != null) roots.push(value.r); }));
+  Object.keys(heap).forEach(oid => roots.push(oid));
+  roots.forEach(oid => {
+    if (placed.has(oid) || !heap[oid]) return;
+    const row = document.createElement("div"); row.className = "py-mem-row";
+    place(oid, row);
+    heapCol.appendChild(row);
+  });
+  if (!placed.size){
+    const none = document.createElement("div"); none.className = "py-mem-none"; none.textContent = "리스트·딕셔너리·객체가 아직 없어요.";
+    heapCol.appendChild(none);
+  }
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg"); svg.setAttribute("class", "py-mem-arrows"); svg.setAttribute("aria-hidden", "true");
+  // 화살촉 색은 context-stroke 대신 보통/바뀜 두 벌을 둔다(크롬 구버전이 context-stroke 를 못 칠함).
+  const markerId = "pyMemArrow" + (++pyTraceMemorySeq);
+  const defs = document.createElementNS(svgNS, "defs");
+  ["", "-changed"].forEach(suffix => {
+    const marker = document.createElementNS(svgNS, "marker");
+    marker.setAttribute("id", markerId + suffix); marker.setAttribute("viewBox", "0 0 10 10"); marker.setAttribute("refX", "9"); marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "7"); marker.setAttribute("markerHeight", "7"); marker.setAttribute("orient", "auto");
+    const tip = document.createElementNS(svgNS, "path"); tip.setAttribute("d", "M0,0 L10,5 L0,10 z");
+    tip.setAttribute("class", suffix ? "py-mem-tip is-changed" : "py-mem-tip");
+    marker.appendChild(tip); defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
+  const layer = document.createElementNS(svgNS, "g"); svg.appendChild(layer);
+  inner.appendChild(svg);
+
+  const draw = () => {
+    if (!inner.isConnected) return;
+    const base = inner.getBoundingClientRect();
+    svg.setAttribute("width", String(inner.scrollWidth)); svg.setAttribute("height", String(inner.scrollHeight));
+    layer.textContent = "";
+    pointers.forEach(({ dot, oid, changed }) => {
+      const target = boxes.get(oid);
+      if (!target) return;
+      const d = dot.getBoundingClientRect(), t = target.getBoundingClientRect();
+      if (!d.width || !t.width) return;
+      const x1 = d.left + d.width / 2 - base.left, y1 = d.top + d.height / 2 - base.top;
+      let x2 = t.left - base.left - 1, y2 = t.top - base.top + 13, path;
+      if (x2 >= x1 + 16){
+        const dx = Math.max(24, (x2 - x1) / 2);
+        path = "M" + x1 + "," + y1 + " C" + (x1 + dx) + "," + y1 + " " + (x2 - dx) + "," + y2 + " " + x2 + "," + y2;
+      } else {
+        // 같은 줄 왼쪽에 있는 상자(서로 가리키는 객체 등)는 위로 돌아 들어간다.
+        x2 = t.left - base.left + Math.min(22, t.width / 2); y2 = t.top - base.top - 1;
+        const lift = Math.min(y1, y2) - 26;
+        path = "M" + x1 + "," + y1 + " C" + x1 + "," + lift + " " + x2 + "," + lift + " " + x2 + "," + y2;
+      }
+      const line = document.createElementNS(svgNS, "path");
+      line.setAttribute("d", path); line.setAttribute("marker-end", "url(#" + markerId + (changed ? "-changed" : "") + ")");
+      line.setAttribute("class", changed ? "is-changed" : "");
+      layer.appendChild(line);
+    });
+  };
+  let raf = 0;
+  const observer = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); })
+    : null;
+  if (observer) observer.observe(inner);
+  return {
+    el,
+    draw,
+    dispose: () => { if (observer) observer.disconnect(); cancelAnimationFrame(raf); }
+  };
+}
+
 function renderPythonTrace(panel, parsed, source, ui){
   panel.innerHTML = "";
   const report = normalizePythonTraceReport(parsed && parsed.report);
@@ -1775,7 +2039,28 @@ function renderPythonTrace(panel, parsed, source, ui){
   const next = document.createElement("button"); next.type = "button"; next.textContent = "다음 →";
   const count = document.createElement("strong");
   controls.append(prev, slider, next, count); panel.appendChild(controls);
+  // 그림 정보가 있는 보고서면 '그림 / 표' 보기를 고를 수 있다. 고른 보기는 다음 단계 실행에도 이어진다.
+  const hasMemory = steps.some(step => Array.isArray(step.frames));
+  let view = "table";
+  if (hasMemory){
+    view = "memory";
+    try { if (localStorage.getItem("mn.pyTraceView") === "table") view = "table"; } catch(_){}
+  }
+  const viewTabs = document.createElement("div"); viewTabs.className = "py-trace-views"; viewTabs.hidden = !hasMemory;
+  const viewButtons = [["memory", "그림으로 보기"], ["table", "표로 보기"]].map(([key, label]) => {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.dataset.view = key;
+    button.addEventListener("click", () => {
+      view = key;
+      try { localStorage.setItem("mn.pyTraceView", key); } catch(_){}
+      show(slider.value);
+    });
+    viewTabs.appendChild(button);
+    return button;
+  });
+  panel.appendChild(viewTabs);
   const card = document.createElement("section"); card.className = "py-trace-card"; panel.appendChild(card);
+  const outputText = String(parsed && parsed.output || "").replace(/\r\n/g, "\n");
+  let memoryView = null;
   const renderTable = (title, rows, columns, cls) => {
     const block = document.createElement("div"); block.className = cls;
     const h = document.createElement("h4"); h.textContent = title; block.appendChild(h);
@@ -1804,6 +2089,27 @@ function renderPythonTrace(panel, parsed, source, ui){
     meta.append(line, fn);
     const codeLine = document.createElement("pre"); codeLine.className = "py-trace-source"; codeLine.textContent = lines[step.line - 1] || "";
     card.append(meta, codeLine);
+    viewButtons.forEach(button => {
+      const on = button.dataset.view === view;
+      button.classList.toggle("is-on", on); button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    if (memoryView){ memoryView.dispose(); memoryView = null; }
+    if (view === "memory" && Array.isArray(step.frames)){
+      memoryView = renderPythonTraceMemory(step, index > 0 ? steps[index - 1] : null);
+      card.appendChild(memoryView.el);
+      if (step.out != null && outputText){
+        const printed = outputText.slice(0, step.out);
+        const box = document.createElement("div"); box.className = "py-trace-printed";
+        const h = document.createElement("h4"); h.textContent = "이 단계까지 출력";
+        const pre = document.createElement("pre"); pre.textContent = printed || "(아직 출력 없음)";
+        pre.classList.toggle("is-empty", !printed);
+        box.append(h, pre); card.appendChild(box);
+        pre.scrollTop = pre.scrollHeight;
+      }
+      memoryView.draw();
+      if (ui && ui.showTraceLine) ui.showTraceLine(step.line);
+      return;
+    }
     card.appendChild(renderTable("이 단계에서 관찰된 변수 변화", step.changes, [
       { label:"이름", value:row => row.name },
       { label:"이전", value:row => row.before || "(없음)" },
@@ -1825,7 +2131,9 @@ function renderPythonTrace(panel, parsed, source, ui){
   });
   if (report.truncated){
     const note = document.createElement("div"); note.className = "py-trace-note";
-    note.textContent = "기록이 300단계를 넘어 이후 단계는 생략했습니다. 반복 횟수를 줄여 다시 실행하면 전체 흐름을 보기 쉬워요.";
+    note.textContent = report.sizeLimited
+      ? "기록할 자료가 너무 커서 이후 단계는 생략했습니다. 리스트 크기나 반복 횟수를 줄여 다시 실행하면 전체 흐름을 보기 쉬워요."
+      : "기록이 300단계를 넘어 이후 단계는 생략했습니다. 반복 횟수를 줄여 다시 실행하면 전체 흐름을 보기 쉬워요.";
     panel.appendChild(note);
   }
   if (report.error){
