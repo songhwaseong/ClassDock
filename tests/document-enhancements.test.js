@@ -21,6 +21,7 @@ test("이름 변경은 원본 폴더 권한이 있는 문서에만 노출하고 
   assert.match(rename, /moveOriginalFile\(ctx, name, javaReplacement\)/);
   assert.match(source, /await ctx\.dirHandle\.removeEntry\(ctx\.oldName\)/);
   assert.match(source, /doc\.workspacePath = doc\.workspacePath \? refreshWorkspacePath/);
+  assert.match(source, /doc\.workspaceRestorePath = refreshWorkspacePath/);
   assert.match(source, /doc\.stableRestoreKey = docStableKey\(doc\)/);
 });
 

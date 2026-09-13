@@ -41,7 +41,8 @@ function loadWorkspaces(saved){
     tabOrder:[], activeMru:[], activeId:0, state:null, viewer:null,
     studyPdfId:null, studyReferenceLocked:false, studyTargetPane:"work",
     studyStacked:false, studySwapped:false, sidebarCollapsed:false,
-    docStableKey:(doc) => String(doc && doc.key || ""),
+    docStableKey:(doc) => String(doc && (doc.sourceRestoreKey || doc.key) || ""),
+    docLegacyStableKey:(doc) => String(doc && doc.key || ""),
     byId:() => null,
     bumpNavTree(){}, renderSidebar(){}, refreshChrome(){}, applyStudyLayout(){},
     setActiveDoc(id){ context.activeId = id || 0; },
@@ -63,8 +64,8 @@ function loadWorkspaces(saved){
 }
 
 // 자동 복원이 문서를 여는 흉내 — makeDoc 이 하는 일 중 작업공간에 닿는 부분만 그대로.
-function openDocDuringRestore(harness, key){
-  const doc = { id: harness.context.docs.length + 1, key, name:key, workspacePath:key };
+function openDocDuringRestore(harness, key, sourceRestoreKey=""){
+  const doc = { id: harness.context.docs.length + 1, key, sourceRestoreKey, name:key, workspacePath:key };
   harness.context.docs.push(doc);
   const node = { nodeId:"doc:" + doc.id, type:"doc", docId:doc.id, parentId:null };
   harness.context.navNodes.push(node);
@@ -107,6 +108,98 @@ test("복원이 끝나면 저장된 docKeys 대로 소속이 갈리고 그때부
     ["수업/a.py", "수업/b.py", "수업/c.py"]);
   assert.deepEqual(h.readSaved().items.find(rec => rec.id === "test1").docKeys,
     ["서류/x.pdf", "서류/y.pdf"], "다른 작업공간은 건드리지 않는다");
+});
+
+test("같은 화면 이름으로 변환된 원본은 구버전 키를 이어받고 활성 작업공간으로 새지 않는다", () => {
+  const saved = { version:1, activeId:"test2", items:[
+    { id:"main", name:"기본", docKeys:[], tabKeys:[], activeKey:"", mruKeys:[], boards:[] },
+    { id:"test1", name:"수업", docKeys:["악보/곡.msheet"], tabKeys:["악보/곡.msheet"],
+      activeKey:"악보/곡.msheet", mruKeys:[], boards:[] },
+    { id:"test2", name:"신고", docKeys:["신고필요한서류/영수증.pdf"],
+      tabKeys:["신고필요한서류/영수증.pdf"], activeKey:"신고필요한서류/영수증.pdf", mruKeys:[], boards:[] }
+  ] };
+  const h = loadWorkspaces(saved);
+  openDocDuringRestore(h, "악보/곡.msheet", "악보/곡.musicxml");
+  openDocDuringRestore(h, "악보/곡.msheet", "악보/곡.mxl");
+  openDocDuringRestore(h, "신고필요한서류/영수증.pdf");
+  h.run("finalizeWorkspaceRestore()");
+
+  assert.deepEqual([...h.run("docs.map(doc => (doc.sourceRestoreKey || doc.key) + '=' + [...doc.workspaceIds].join('+'))")], [
+    "악보/곡.musicxml=test1", "악보/곡.mxl=test1", "신고필요한서류/영수증.pdf=test2"
+  ]);
+  const migrated = h.readSaved();
+  assert.deepEqual(keysOf(migrated, "test1"), ["악보/곡.musicxml", "악보/곡.mxl"]);
+  assert.deepEqual(keysOf(migrated, "test2"), ["신고필요한서류/영수증.pdf"]);
+});
+
+// 실제 폴더(실사용샘플/…/12_악보)에는 곡.msheet · 곡.musicxml · 곡.mxl 이 나란히 있다.
+// 진짜 .msheet 의 새 키가 변환본들의 구버전 키와 똑같아서, 정확 일치가 구버전 키 조회를 가려
+// 변환본 둘이 소속을 못 찾고 활성 작업공간(test2)으로 새던 버그.
+test("진짜 .msheet 와 같은 이름으로 변환된 원본도 구버전 키로 소속을 이어받는다", () => {
+  const saved = { version:1, activeId:"test2", items:[
+    { id:"main", name:"기본", docKeys:[], tabKeys:[], activeKey:"", mruKeys:[], boards:[] },
+    { id:"test1", name:"수업", docKeys:["악보/곡.msheet"], tabKeys:[], activeKey:"", mruKeys:[], boards:[] },
+    { id:"test2", name:"신고", docKeys:["신고필요한서류/영수증.pdf"], tabKeys:[], activeKey:"", mruKeys:[], boards:[] }
+  ] };
+  const h = loadWorkspaces(saved);
+  openDocDuringRestore(h, "악보/곡.msheet");
+  openDocDuringRestore(h, "악보/곡.msheet", "악보/곡.musicxml");
+  openDocDuringRestore(h, "악보/곡.msheet", "악보/곡.mxl");
+  openDocDuringRestore(h, "신고필요한서류/영수증.pdf");
+  h.run("finalizeWorkspaceRestore()");
+
+  assert.deepEqual([...h.run("docs.map(doc => (doc.sourceRestoreKey || doc.key) + '=' + [...doc.workspaceIds].join('+'))")], [
+    "악보/곡.msheet=test1", "악보/곡.musicxml=test1", "악보/곡.mxl=test1", "신고필요한서류/영수증.pdf=test2"
+  ]);
+  const migrated = h.readSaved();
+  assert.deepEqual(keysOf(migrated, "test1"), ["악보/곡.msheet", "악보/곡.musicxml", "악보/곡.mxl"]);
+  assert.deepEqual(keysOf(migrated, "test2"), ["신고필요한서류/영수증.pdf"]);
+
+  // 한 번 옮겨 적힌 뒤 다시 켜도 그대로다.
+  const again = loadWorkspaces(migrated);
+  openDocDuringRestore(again, "악보/곡.msheet");
+  openDocDuringRestore(again, "악보/곡.msheet", "악보/곡.musicxml");
+  openDocDuringRestore(again, "악보/곡.msheet", "악보/곡.mxl");
+  openDocDuringRestore(again, "신고필요한서류/영수증.pdf");
+  again.run("finalizeWorkspaceRestore()");
+  assert.deepEqual(keysOf(again.readSaved(), "test2"), ["신고필요한서류/영수증.pdf"]);
+});
+
+// 폴더 안에 파일을 넣는 복원 흉내 — 그룹 노드를 먼저 만들고 그 아래에 문서 노드를 단다.
+function openGroup(harness, nodeId, parentId=null){
+  harness.context.navNodes.push({ nodeId, type:"group", name:nodeId, parentId });
+}
+function openDocInGroup(harness, key, parentId){
+  const doc = openDocDuringRestore(harness, key);
+  harness.context.navNodes[harness.context.navNodes.length - 1].parentId = parentId;
+  return doc;
+}
+
+test("저장된 키로 소속을 못 찾은 문서는 활성 작업공간이 아니라 그 폴더의 작업공간을 따른다", () => {
+  const saved = { version:1, activeId:"test2", items:[
+    { id:"main", name:"기본", docKeys:["수업/a.py"], tabKeys:[], activeKey:"", mruKeys:[], boards:[] },
+    { id:"test1", name:"수업", docKeys:["수업/악보/곡.msheet"], tabKeys:[], activeKey:"", mruKeys:[], boards:[] },
+    { id:"test2", name:"신고", docKeys:["신고/영수증.pdf"], tabKeys:[], activeKey:"", mruKeys:[], boards:[] }
+  ] };
+  const h = loadWorkspaces(saved);
+  openGroup(h, "g:수업"); openGroup(h, "g:악보", "g:수업"); openGroup(h, "g:새폴더", "g:수업"); openGroup(h, "g:신고");
+  openDocInGroup(h, "수업/a.py", "g:수업");
+  openDocInGroup(h, "수업/악보/곡.msheet", "g:악보");
+  openDocInGroup(h, "수업/악보/앱밖에서바꾼이름.msheet", "g:악보");   // 가까운 폴더(악보) → test1
+  openDocInGroup(h, "수업/새폴더/b.py", "g:새폴더");                   // 새 폴더엔 단서 없음 → 위 폴더(수업) → main+test1
+  openDocInGroup(h, "신고/영수증.pdf", "g:신고");
+  openDocDuringRestore(h, "낱개.txt");                                  // 폴더 단서가 없으면 예전처럼 활성 작업공간
+  h.run("finalizeWorkspaceRestore()");
+
+  assert.deepEqual(membership(h), [
+    "수업/a.py=main", "수업/악보/곡.msheet=test1", "수업/악보/앱밖에서바꾼이름.msheet=test1",
+    "수업/새폴더/b.py=main+test1", "신고/영수증.pdf=test2", "낱개.txt=test2"
+  ]);
+  const migrated = h.readSaved();
+  assert.deepEqual(keysOf(migrated, "test1"), ["수업/악보/곡.msheet", "수업/악보/앱밖에서바꾼이름.msheet", "수업/새폴더/b.py"],
+    "비활성 작업공간 기록에도 추론한 소속을 적어 둔다");
+  assert.deepEqual(keysOf(migrated, "main"), ["수업/a.py", "수업/새폴더/b.py"]);
+  assert.deepEqual(keysOf(migrated, "test2"), ["신고/영수증.pdf", "낱개.txt"]);
 });
 
 test("복원 원본이 통째로 비면 저장된 docKeys 를 지우지 않는다", () => {

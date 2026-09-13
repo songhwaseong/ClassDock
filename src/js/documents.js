@@ -423,6 +423,7 @@ function makeDoc(kind, name, options={}){
   byId("content").appendChild(el);
   const d = { id, nodeId: "doc:" + id, parentId: options.parentId || null, name, kind, el,
     workspacePath: options.workspacePath || null, size: options.size || 0, sourceKey: options.sourceKey || null,
+    workspaceRestorePath: options.workspaceRestorePath || null,
     isScratch: !!options.isScratch, textEncoding: options.textEncoding || null,
     nativeAbsolutePath: options.nativeAbsolutePath || null,
     originalSaveMode: !!options.originalSaveMode };   // 새로 만든 빈 코드 → 첫 저장 때 이름 받기
@@ -2239,6 +2240,7 @@ async function applyOriginalRename(doc, ctx, newName, newHandle){
   doc.name = newName;
   if (Object.prototype.hasOwnProperty.call(doc, "fileName")) doc.fileName = newName;
   doc.workspacePath = doc.workspacePath ? refreshWorkspacePath(doc.workspacePath, newName) : newPath;
+  if (doc.workspaceRestorePath) doc.workspaceRestorePath = refreshWorkspacePath(doc.workspaceRestorePath, newName);
   if (doc.relPath) doc.relPath = refreshWorkspacePath(doc.relPath, newName);
   doc.fsHandle = newHandle;
   doc.fsDirHandle = ctx.dirHandle;
@@ -2648,10 +2650,10 @@ function openSidebarGroupMenu(node, x, y){
 }
 
 /* ===== 탭 구성 저장/복원 (EXE 자동 복원과 함께 다음 실행 때 탭바 되살리기) ===== */
-// 세션이 바뀌어도 같은 파일을 가리키는 안정 키: 루트 그룹→…→파일명 경로(생성 ID가 아닌 이름 기반)
-function docStableKey(doc){
+// 예전 저장 형식의 안정 키: 루트 그룹→…→화면에 표시된 파일명 경로.
+// 변환 문서는 서로 다른 원본도 같은 이름(.musicxml/.mxl→.msheet, .task→main.py)이 될 수 있다.
+function docLegacyStableKey(doc){
   if (!doc) return "";
-  if (doc.stableRestoreKey) return doc.stableRestoreKey;
   const parts = [doc.name];
   let pid = doc.parentId;
   while (pid != null){
@@ -2661,6 +2663,14 @@ function docStableKey(doc){
     pid = parent.parentId;
   }
   return parts.join("/");
+}
+// 세션이 바뀌어도 같은 원본 파일을 가리키는 안정 키. 변환 문서는 원본 확장자까지 보존한
+// workspaceRestorePath를 사용해 화면 이름이 같은 문서끼리 작업공간 소속이 섞이지 않게 한다.
+function docStableKey(doc){
+  if (!doc) return "";
+  if (doc.stableRestoreKey) return doc.stableRestoreKey;
+  if (doc.workspaceRestorePath) return String(doc.workspaceRestorePath).replace(/\\/g, "/").replace(/^\/+/, "");
+  return docLegacyStableKey(doc);
 }
 const TAB_STATE_KEY = "classdock-tabs:v1";
 let tabRestoreInProgress = false;

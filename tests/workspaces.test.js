@@ -90,6 +90,9 @@ test("HTML과 파일 로더가 작업공간 UI와 공유 문서 경로를 연결
   assert.match(html, /src="src\/js\/workspaces\.js"/);
   assert.match(loader, /workspaceFindOpenDocument\(file, opts\)/);
   assert.match(loader, /workspaceAttachExistingDoc\(duplicate/);
+  assert.match(loader, /opts\.workspaceRestorePath = parts\.filter\(Boolean\)\.join/);
+  assert.match(docs, /function docLegacyStableKey\(doc\)/);
+  assert.match(docs, /if \(doc\.workspaceRestorePath\) return String/);
   assert.match(docs, /workspaceDetachDocFromActive\(doc\)/);
 });
 

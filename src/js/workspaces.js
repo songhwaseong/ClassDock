@@ -92,7 +92,7 @@ function workspaceRestorePathKey(value){
   return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").toLocaleLowerCase();
 }
 function workspaceDocRestorePath(doc){
-  return workspaceRestorePathKey(doc && (doc.workspacePath || doc.relPath || doc.name));
+  return workspaceRestorePathKey(doc && (doc.workspaceRestorePath || doc.workspacePath || doc.relPath || doc.name));
 }
 function workspaceIndexDocument(doc){
   if (!doc) return;
@@ -184,7 +184,7 @@ async function workspaceFindOpenDocument(file, options={}){
   if (handle && typeof handle.isSameEntry === "function"){
     const byIdentity = workspaceDocsByHandle.get(handle);
     if (byIdentity) return byIdentity;
-    const restorePath = workspaceRestorePathKey(options.workspacePath || options.relPath || file && (file.webkitRelativePath || file.name));
+    const restorePath = workspaceRestorePathKey(options.workspaceRestorePath || options.workspacePath || options.relPath || file && (file.webkitRelativePath || file.name));
     const candidates = workspaceDocsByRestorePath.get(restorePath) || [];
     for (const doc of candidates){
       if (!doc.fsHandle) continue;
@@ -357,16 +357,83 @@ function workspaceAncestorMatches(node, id){
 }
 function finalizeWorkspaceRestore(){
   if (workspaceSystemReady) return;
-  const keyToDoc = new Map();
-  docs.forEach(doc => { const key = workspaceDocKey(doc); if (key && !keyToDoc.has(key)) keyToDoc.set(key, doc); });
+  const keyToDocs = new Map(), legacyKeyToDocs = new Map();
+  const indexDoc = (map, key, doc) => {
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(doc);
+  };
+  docs.forEach(doc => {
+    const key = workspaceDocKey(doc);
+    indexDoc(keyToDocs, key, doc);
+    const legacy = typeof docLegacyStableKey === "function" ? docLegacyStableKey(doc) : "";
+    if (legacy && legacy !== key) indexDoc(legacyKeyToDocs, legacy, doc);
+  });
+  // 구버전 키 조회는 정확 일치가 있어도 따로 본다. 같은 폴더에 진짜 곡.msheet 가 있으면 그 새 키가
+  // 곡.musicxml/곡.mxl 변환본의 구버전 키와 같아서, 정확 일치만 돌려주면 변환본이 소속을 못 찾고
+  // 활성 작업공간으로 샌다. 다만 자기 새 키가 이미 저장된 문서는 정확 일치만 따른다(이주가 끝난 문서).
+  const savedKeys = new Set();
+  workspaceRegistry.items.forEach(rec => rec.docKeys.forEach(key => savedKeys.add(key)));
+  const docsForSavedKey = key => {
+    const exact = keyToDocs.get(key) || [];
+    const legacy = (legacyKeyToDocs.get(key) || []).filter(doc => !savedKeys.has(workspaceDocKey(doc)));
+    return legacy.length ? exact.concat(legacy) : exact;
+  };
   const hasSavedKeys = workspaceRegistry.items.some(rec => rec.docKeys.length);
-  const hasSavedMembership = workspaceRegistry.items.some(rec => rec.docKeys.some(key => keyToDoc.has(key)));
+  const hasSavedMembership = workspaceRegistry.items.some(rec => rec.docKeys.some(key => docsForSavedKey(key).length));
   workspaceRestoreUnresolved = workspaceRestoreNeedsPreservation(hasSavedKeys, hasSavedMembership);
   docs.forEach(doc => { doc.workspaceIds = new Set(); doc.primaryWorkspaceId = ""; });
   if (hasSavedMembership) workspaceRegistry.items.forEach(rec => rec.docKeys.forEach(key => {
-    const doc = keyToDoc.get(key); if (!doc) return;
-    doc.workspaceIds.add(rec.id); if (!doc.primaryWorkspaceId) doc.primaryWorkspaceId = rec.id;
+    docsForSavedKey(key).forEach(doc => {
+      doc.workspaceIds.add(rec.id); if (!doc.primaryWorkspaceId) doc.primaryWorkspaceId = rec.id;
+    });
   }));
+  // 저장된 키로 소속을 못 찾은 문서(앱 밖에서 이름을 바꿈·zip 이름 인코딩 차이 등)는 활성 작업공간이 아니라
+  // 그 파일이 든 폴더의 작업공간을 따른다. 가장 가까운 상위 폴더부터 올라가며, 그 아래에서 키로 소속이
+  // 정해진 문서들의 작업공간을 모두 이어받는다. 폴더 단서가 전혀 없을 때만 활성 작업공간으로 넣는다.
+  const inferredDocs = [];
+  if (hasSavedMembership){
+    const orphans = docs.filter(doc => !doc.workspaceIds.size);
+    if (orphans.length){
+      const childrenOf = new Map();
+      navNodes.forEach(node => {
+        if (node.workspaceAlias || node.parentId == null) return;
+        if (!childrenOf.has(node.parentId)) childrenOf.set(node.parentId, []);
+        childrenOf.get(node.parentId).push(node);
+      });
+      const nodeById = new Map(navNodes.map(node => [node.nodeId, node]));
+      const docById = new Map(docs.map(doc => [doc.id, doc]));
+      const groupIds = new Map();
+      const workspacesUnder = groupId => {
+        if (groupIds.has(groupId)) return groupIds.get(groupId);
+        const ids = new Set(); groupIds.set(groupId, ids);
+        (childrenOf.get(groupId) || []).forEach(child => {
+          if (child.type === "group") workspacesUnder(child.nodeId).forEach(id => ids.add(id));
+          else if (child.type === "doc"){
+            const member = docById.get(child.docId);
+            if (member) member.workspaceIds.forEach(id => ids.add(id));
+          }
+        });
+        return ids;
+      };
+      // 고아끼리 서로 단서가 되지 않도록 소속 계산을 먼저 다 끝낸 뒤에 한꺼번에 넣는다.
+      const inferred = orphans.map(doc => {
+        const own = navNodes.find(node => node.type === "doc" && node.docId === doc.id && !node.workspaceAlias);
+        let parent = own && own.parentId != null ? nodeById.get(own.parentId) : null;
+        while (parent){
+          const ids = workspacesUnder(parent.nodeId);
+          if (ids.size) return [doc, [...ids]];
+          parent = parent.parentId != null ? nodeById.get(parent.parentId) : null;
+        }
+        return [doc, null];
+      });
+      inferred.forEach(([doc, ids]) => {
+        if (!ids) return;
+        ids.forEach(id => doc.workspaceIds.add(id));
+        inferredDocs.push(doc);
+      });
+    }
+  }
   docs.forEach(doc => {
     if (!doc.workspaceIds.size) doc.workspaceIds.add(activeWorkspaceId);
     if (!doc.primaryWorkspaceId) doc.primaryWorkspaceId = [...doc.workspaceIds][0];
@@ -389,6 +456,40 @@ function finalizeWorkspaceRestore(){
     const node = workspaceDocNodeIn(doc, id);
     if (!node || !workspaceAncestorMatches(node, id)) workspaceAddAliasNode(doc, id, null, true);
   }});
+  // 구버전의 화면 이름 키를 원본 경로 키로 바꾼다. 한 화면 키에서 여러 변환 원본이
+  // 복원된 경우에도 모두 같은 기존 작업공간 소속을 이어받되, 다음 저장부터는 서로 구분된다.
+  const migrateKeys = (keys, rec) => {
+    const migrated = [], seen = new Set();
+    (keys || []).forEach(key => docsForSavedKey(key).forEach(doc => {
+      if (!doc.workspaceIds.has(rec.id)) return;
+      const next = workspaceDocKey(doc);
+      if (next && !seen.has(next)){ seen.add(next); migrated.push(next); }
+    }));
+    return migrated;
+  };
+  if (hasSavedMembership) workspaceRegistry.items.forEach(rec => {
+    const oldActive = rec.activeKey;
+    rec.docKeys = migrateKeys(rec.docKeys, rec);
+    rec.tabKeys = migrateKeys(rec.tabKeys, rec);
+    rec.mruKeys = migrateKeys(rec.mruKeys, rec).slice(0, 50);
+    rec.activeKey = migrateKeys(oldActive ? [oldActive] : [], rec)[0] || "";
+    if (rec.study){
+      const reference = migrateKeys([rec.study.reference], rec)[0];
+      const work = migrateKeys([rec.study.work], rec)[0];
+      rec.study = reference && work ? { ...rec.study, reference, work } : null;
+    }
+  });
+  // 폴더로 소속을 이어받은 문서는 비활성 작업공간 기록에도 적어 둔다. 활성 작업공간만 저장 때 다시 적히므로,
+  // 안 적어 두면 다음 실행에서 같은 추론을 매번 되풀이한다.
+  inferredDocs.forEach(doc => {
+    const key = workspaceDocKey(doc); if (!key) return;
+    doc.workspaceIds.forEach(id => {
+      const rec = workspaceRegistry.items.find(item => item.id === id);
+      if (rec && !rec.docKeys.includes(key)) rec.docKeys.push(key);
+    });
+  });
+  const keyToDoc = new Map();
+  docs.forEach(doc => { const key = workspaceDocKey(doc); if (key && !keyToDoc.has(key)) keyToDoc.set(key, doc); });
   bumpNavTree(); workspaceRegistry.items.forEach(rec => workspaceHydrateRuntime(rec, keyToDoc));
   if (!hasSavedMembership){
     const rec = workspaceRecord(activeWorkspaceId);
