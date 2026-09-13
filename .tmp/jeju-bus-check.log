@@ -1,9 +1,0 @@
-
-> check
-> npm run lint && node tools/check-source.js
-
-
-> lint
-> eslint src/js tests tools desktop *.js
-
-소스 검사 완료: JavaScript 104개, Pyodide Worker 1개, CSS 1개, Python harness 2개, 전역 선언 3407개(충돌 0)
