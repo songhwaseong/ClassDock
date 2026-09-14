@@ -319,6 +319,38 @@ function normalizeWhiteboardFormulaLibrary(saved){
   return { custom, favorites:cleanIds(saved.favorites,200), recent:cleanIds(saved.recent,20) };
 }
 
+// 우클릭 특수문자 고르개 목록. 수학 기호는 도구상자 "기호" 분류를 그대로 빌려 두 곳이 어긋나지 않게 한다.
+// 각 칸은 [글자, 이름] — 이름은 툴팁·검색용이다.
+function whiteboardSpecialCharGroups(){
+  const rows = (list) => list.trim().split(/\s+/).map((pair) => { const i = pair.indexOf(":"); return [pair.slice(0, i), pair.slice(i + 1).replace(/_/g, " ")]; });
+  const math = whiteboardEducationCatalog().filter((entry) => entry.category === "symbol").map((entry) => [entry.value, entry.label]);
+  return [
+    { id:"common", label:"자주", chars:rows("※:참고 ★:검은별 ☆:흰별 ○:동그라미 ●:검은원 △:세모 ×:곱하기 →:오른쪽화살표 ⇒:이므로 ✓:체크 °:도 ℃:섭씨 ①:1번 ②:2번 ③:3번 ㉠:ㄱ ㉡:ㄴ ·:가운뎃점 …:말줄임표 ~:물결") },
+    { id:"shape", label:"도형", chars:rows("○:동그라미 ●:검은원 ◎:겹원 ◇:마름모 ◆:검은마름모 □:네모 ■:검은네모 ▣:채운네모 △:세모 ▲:검은세모 ▽:역세모 ▼:검은역세모 ◁:왼쪽세모 ▷:오른쪽세모 ◀:검은왼쪽세모 ▶:검은오른쪽세모 ☆:흰별 ★:검은별 ♡:흰하트 ♥:검은하트 ◐:반원왼쪽 ◑:반원오른쪽 ☞:손가락 ♪:음표") },
+    { id:"arrow", label:"화살표", chars:rows("→:오른쪽 ←:왼쪽 ↑:위 ↓:아래 ↔:좌우 ↕:상하 ↗:오른쪽위 ↘:오른쪽아래 ↙:왼쪽아래 ↖:왼쪽위 ⇒:이므로 ⇐:왼쪽이중 ⇔:필요충분 ⇑:위이중 ⇓:아래이중 ⇌:가역반응 ⇄:양방향 ⟶:긴화살표 ↺:반시계 ↻:시계") },
+    { id:"number", label:"번호", chars:rows("①:1 ②:2 ③:3 ④:4 ⑤:5 ⑥:6 ⑦:7 ⑧:8 ⑨:9 ⑩:10 ㉠:ㄱ ㉡:ㄴ ㉢:ㄷ ㉣:ㄹ ㉤:ㅁ ㉥:ㅂ ⑴:괄호1 ⑵:괄호2 ⑶:괄호3 ⑷:괄호4 Ⅰ:로마1 Ⅱ:로마2 Ⅲ:로마3 Ⅳ:로마4 Ⅴ:로마5 ⓐ:a ⓑ:b ⓒ:c ⓓ:d") },
+    { id:"unit", label:"단위", chars:rows("°:도 ℃:섭씨 ℉:화씨 %:퍼센트 ‰:퍼밀 ㎜:밀리미터 ㎝:센티미터 ㎞:킬로미터 ㎠:제곱센티미터 ㎡:제곱미터 ㎤:세제곱센티미터 ㎥:세제곱미터 ㎖:밀리리터 ℓ:리터 ㎎:밀리그램 ㎏:킬로그램 Ω:옴 µ:마이크로 Å:옹스트롬 ㎐:헤르츠 ₩:원 $:달러 €:유로 ¥:엔") },
+    { id:"punct", label:"문장부호", chars:rows("※:참고 ·:가운뎃점 …:말줄임표 「:낫표열기 」:낫표닫기 『:겹낫표열기 』:겹낫표닫기 〈:홑화살괄호열기 〉:홑화살괄호닫기 《:겹화살괄호열기 》:겹화살괄호닫기 ‘:작은따옴표열기 ’:작은따옴표닫기 “:큰따옴표열기 ”:큰따옴표닫기 ─:가로줄 ~:물결 ✓:체크 ✗:엑스 ○:맞음 §:절 ¶:문단") },
+    { id:"script", label:"첨자·분수", chars:rows("²:제곱 ³:세제곱 ¹:위첨자1 ⁰:위첨자0 ⁴:위첨자4 ⁿ:위첨자n ⁺:위첨자더하기 ⁻:위첨자빼기 ₀:아래첨자0 ₁:아래첨자1 ₂:아래첨자2 ₃:아래첨자3 ₄:아래첨자4 ₊:아래첨자더하기 ₋:아래첨자빼기 ½:2분의1 ⅓:3분의1 ⅔:3분의2 ¼:4분의1 ¾:4분의3") },
+    { id:"greek", label:"그리스", chars:rows("α:알파 β:베타 γ:감마 δ:델타 ε:엡실론 θ:세타 λ:람다 μ:뮤 π:파이 ρ:로 σ:시그마 τ:타우 φ:파이 ω:오메가 Δ:대문자델타 Σ:대문자시그마 Φ:대문자파이 Ω:대문자오메가") },
+    { id:"math", label:"수학", chars:math }
+  ].map((group) => {
+    const seen = new Set();
+    return { ...group, chars:group.chars.filter(([ch]) => ch && !seen.has(ch) && seen.add(ch)) };
+  });
+}
+
+// 최근 쓴 특수문자는 앞에 두고 같은 글자는 한 번만, 상한 20개.
+function normalizeWhiteboardRecentSymbols(list, add){
+  const out = [];
+  for (const raw of [add, ...(Array.isArray(list) ? list : [])]){
+    const ch = typeof raw === "string" ? raw : "";
+    if (!ch || ch.length > 4 || out.includes(ch)) continue;
+    out.push(ch); if (out.length >= 20) break;
+  }
+  return out;
+}
+
 // 수학·과학 도구상자 1차 목록. 기호·수식은 편집 가능한 text 항목으로,
 // 조합 도형은 SVG data URL 이미지로 넣어 기존 이동·크기조절·저장·내보내기를 그대로 탄다.
 function whiteboardEducationCatalog(){
@@ -2032,9 +2064,26 @@ function renderWhiteboard(doc, host){
       ta.focus({ preventScroll:true });
       if (existing) ta.select();
     });
+    // 글상자 안 우클릭은 특수문자 고르개. Shift+우클릭은 브라우저 기본 메뉴(붙여넣기 등)를 그대로 쓴다.
+    // 어느 쪽이든 보드 우클릭 메뉴까지 올라가면 안 된다 — 메뉴가 초점을 가져가 글이 확정돼 버린다.
+    // 크롬은 우클릭한 단어를 선택해 버려 기호가 그 단어를 덮어쓴다 — 누르기 직전 커서를 기억했다 되돌린다.
+    let rightClickSelection = null;
+    ta.addEventListener("mousedown", (e) => {
+      rightClickSelection = e.button === 2 ? [ta.selectionStart, ta.selectionEnd, ta.selectionDirection] : null;
+    });
+    ta.addEventListener("contextmenu", (e) => {
+      e.stopPropagation();
+      if (e.shiftKey) return;
+      e.preventDefault();
+      if (rightClickSelection) ta.setSelectionRange(...rightClickSelection);
+      rightClickSelection = null;
+      openSymbolPicker({ kind:"text", ta }, e.clientX, e.clientY);
+    });
+    const closeOwnSymbolPicker = () => { if (symbolTarget && symbolTarget.ta === ta) closeSymbolPicker(); };
     let done = false;
     const commit = () => {
       if (done) return; done = true;
+      closeOwnSymbolPicker();
       const txt = ta.value; ta.remove();
       editingTextItem = null; positionTextEditor = null;
       if (existing){
@@ -2055,6 +2104,7 @@ function renderWhiteboard(doc, host){
     };
     ta.addEventListener("blur", commit);
     ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && symbolTarget && symbolTarget.ta === ta){ e.preventDefault(); e.stopPropagation(); closeSymbolPicker(); return; }
       if (e.key === "Escape"){
         e.preventDefault(); done = true; ta.remove(); editingTextItem = null; positionTextEditor = null;
         if (existing) wb.selected = existing; redraw();
@@ -2897,7 +2947,7 @@ function renderWhiteboard(doc, host){
   // 집중 도구 전용으로 시작했던 메뉴를 일반 편집 메뉴로 확장한다. 도구막대와 같은 실행 함수를
   // 연결해 양쪽의 활성 상태와 Undo 기록이 어긋나지 않게 한다.
   const focusContextMenu=document.createElement("div"); focusContextMenu.className="wb-focus-context-menu"; focusContextMenu.hidden=true; focusContextMenu.setAttribute("role","menu"); focusContextMenu.setAttribute("aria-label","화이트보드 빠른 메뉴");
-  let contextMenuBoardPoint=null;
+  let contextMenuBoardPoint=null, contextMenuClient={x:0,y:0};
   const makeContextSection=(title,cls="")=>{
     const section=document.createElement("section"); section.className="wb-context-section "+cls;
     if(title){const heading=document.createElement("div");heading.className="wb-context-title";heading.textContent=title;section.appendChild(heading);}
@@ -2950,6 +3000,7 @@ function renderWhiteboard(doc, host){
   const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
   const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",openImageFilePicker);
   const contextEducationBtn=contextAction("수학·과학","수학·과학 도구상자 열기","",()=>toggleEducationPanel(true));
+  const contextSymbolBtn=contextAction("특수문자","특수문자를 이 위치에 넣기 (글 입력 중에는 글상자 안에서 우클릭)","",()=>openSymbolPicker({kind:"board",point:contextMenuBoardPoint},contextMenuClient.x,contextMenuClient.y));
   const contextGraphBtn=contextAction("그래프","함수 그래프 만들기 — 식을 치면 곡선을 계산해 넣습니다","",()=>{eduCategory="graph";toggleEducationPanel(true);});
   const contextChartBtn=contextAction("차트","자료 차트 만들기 — 표 숫자로 막대·꺾은선·원그래프를 넣습니다","",()=>{eduCategory="chart";toggleEducationPanel(true);});
   const contextChemBtn=contextAction("주기율표","주기율표와 반응식 균형 맞추기 열기","",()=>{eduCategory="chemistry";toggleEducationPanel(true);});
@@ -2959,7 +3010,7 @@ function renderWhiteboard(doc, host){
   contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
   const contextFocusBtn=contextAction("집중 도구","스포트라이트·화면 가리개 설정 열기","",()=>toggleFocusPanel(true));
   const contextClearBtn=contextAction("전체 지우기","보드 내용 전체 지우기","wb-context-danger wb-context-clear",confirmClearAll);
-  contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextEducationBtn,contextGraphBtn,contextChartBtn,contextChemBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
+  contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextSymbolBtn,contextEducationBtn,contextGraphBtn,contextChartBtn,contextChemBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
   contextBoardSection.appendChild(contextBoardActions);
 
   // 교구는 판서 내용이 아니라 손에 든 도구라 보드 작업과 같은 자리(선택 없을 때)에 둔다.
@@ -3052,7 +3103,8 @@ function renderWhiteboard(doc, host){
   function onFocusContextMenu(e){
     if(focusPanel.contains(e.target)||focusControls.contains(e.target)||(!eduPanel.hidden&&eduPanel.contains(e.target))||(!bgPanel.hidden&&bgPanel.contains(e.target))||(!transformPanel.hidden&&transformPanel.contains(e.target)))return;
     e.preventDefault();e.stopPropagation();
-    const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen); contextMenuBoardPoint={x:lastBoardPointer.x,y:lastBoardPointer.y};
+    const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen); contextMenuBoardPoint={x:lastBoardPointer.x,y:lastBoardPointer.y}; contextMenuClient={x:e.clientX,y:e.clientY};
+    closeSymbolPicker();
     const canSelect=!(focus.active&&focus.controlsVisible)&&focusAllowsScreenPoint(screen);
     wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw();
 
@@ -3102,7 +3154,7 @@ function renderWhiteboard(doc, host){
     contextForwardBtn.disabled=selectedIndex<0||selectedIndex>=lastIndex; contextFrontBtn.disabled=contextForwardBtn.disabled;
     contextBackwardBtn.disabled=selectedIndex<=0; contextBackBtn.disabled=contextBackwardBtn.disabled;
     const focusBlocksInsert=focus.active&&focus.controlsVisible;
-    contextImageBtn.disabled=focusBlocksInsert; contextEducationBtn.disabled=focusBlocksInsert; contextPasteBoardBtn.disabled=contextPasteBoardBtn.disabled||focusBlocksInsert;
+    contextImageBtn.disabled=focusBlocksInsert; contextSymbolBtn.disabled=focusBlocksInsert; contextEducationBtn.disabled=focusBlocksInsert; contextPasteBoardBtn.disabled=contextPasteBoardBtn.disabled||focusBlocksInsert;
     contextGraphBtn.disabled=focusBlocksInsert; contextChartBtn.disabled=focusBlocksInsert; contextChemBtn.disabled=focusBlocksInsert;
     // 꺼낸 교구·켜 둔 옵션은 눌린 상태로 보여 준다(도구막대 단추와 같은 표시).
     for(const [button,on] of [[contextRulerBtn,!!gear.ruler],[contextProtractorBtn,!!gear.protractor],[contextCompassBtn,!!gear.compass],[contextSnapBtn,!!gear.snap],[contextTidyBtn,!!gear.tidy]]){
@@ -3149,6 +3201,83 @@ function renderWhiteboard(doc, host){
     buttons[next].focus({preventScroll:true});
   });
   stage.addEventListener("contextmenu",onFocusContextMenu);
+
+  // ----- 특수문자 고르개 -----
+  // 보드 빈 곳 우클릭 메뉴(그 자리에 글자 항목으로 넣기)와 글상자 안 우클릭(커서 자리에 끼워 넣기)이 같은 고르개를 쓴다.
+  // 글상자 쪽은 고르개를 눌러도 입력칸 초점이 빠지면 안 된다 — 빠지면 blur 로 글이 확정되고 글상자가 닫힌다.
+  // ui-keep-symbols: icons.js 가 ●■→ 같은 글자를 SVG 아이콘으로 바꾸지 못하게 한다.
+  const WB_RECENT_SYMBOLS_KEY="mn.wbRecentSymbols";
+  const symbolGroups=whiteboardSpecialCharGroups();
+  const symbolPicker=document.createElement("div"); symbolPicker.className="wb-symbol-picker ui-keep-symbols"; symbolPicker.hidden=true;
+  symbolPicker.setAttribute("role","dialog"); symbolPicker.setAttribute("aria-label","특수문자");
+  const symbolTabs=document.createElement("div"); symbolTabs.className="wb-symbol-tabs"; symbolTabs.setAttribute("role","tablist");
+  const symbolGrid=document.createElement("div"); symbolGrid.className="wb-symbol-grid";
+  const symbolHint=document.createElement("div"); symbolHint.className="wb-symbol-hint";
+  symbolPicker.append(symbolTabs,symbolGrid,symbolHint);
+  let symbolTarget=null, symbolGroupId="common", symbolAnchor={x:0,y:0};
+  const loadRecentSymbols=()=>{ try { return normalizeWhiteboardRecentSymbols(JSON.parse(localStorage.getItem(WB_RECENT_SYMBOLS_KEY)||"[]")); } catch(_){ return []; } };
+  // 고르개 안에서 누르는 마우스는 초점을 옮기지 않는다(글상자 입력 유지).
+  symbolPicker.addEventListener("mousedown",e=>e.preventDefault());
+  function renderSymbolPicker(){
+    const recent=loadRecentSymbols();
+    const groups=[...(recent.length?[{id:"recent",label:"최근",chars:recent.map(ch=>[ch,"최근"])}]:[]),...symbolGroups];
+    if(!groups.some(group=>group.id===symbolGroupId))symbolGroupId=groups[0].id;
+    symbolTabs.replaceChildren(...groups.map(group=>{
+      const tab=mkBtn(group.label,group.label,"wb-symbol-tab",()=>{symbolGroupId=group.id;renderSymbolPicker();});
+      tab.setAttribute("role","tab"); tab.setAttribute("aria-selected",String(group.id===symbolGroupId)); tab.classList.toggle("active",group.id===symbolGroupId);
+      return tab;
+    }));
+    const current=groups.find(group=>group.id===symbolGroupId);
+    symbolGrid.replaceChildren(...current.chars.map(([ch,name])=>{
+      const cell=mkBtn(ch,name===ch?ch:name+" "+ch,"wb-symbol-cell",()=>insertSymbol(ch));
+      return cell;
+    }));
+    symbolHint.textContent=symbolTarget&&symbolTarget.kind==="text"?"커서 자리에 넣어요 · Esc 닫기":"누른 자리에 글자로 넣어요 · Esc 닫기";
+  }
+  // 글상자 모드에서는 글상자를 가리지 않게 그 아래(모자라면 위)에 띄운다.
+  function placeSymbolPicker(clientX,clientY,avoid){
+    const host=document.fullscreenElement||document.body;
+    if(symbolPicker.parentElement!==host)host.appendChild(symbolPicker);
+    symbolPicker.style.left="0px"; symbolPicker.style.top="0px";
+    const rect=symbolPicker.getBoundingClientRect(),margin=6;
+    symbolPicker.style.left=Math.max(margin,Math.min(clientX,window.innerWidth-rect.width-margin))+"px";
+    let top=clientY;
+    if(avoid){
+      top=avoid.bottom+4;
+      if(top+rect.height>window.innerHeight-margin&&avoid.top-rect.height-4>=margin)top=avoid.top-rect.height-4;
+    }
+    symbolPicker.style.top=Math.max(margin,Math.min(top,window.innerHeight-rect.height-margin))+"px";
+  }
+  function openSymbolPicker(target,clientX,clientY){
+    if(!target||(target.kind==="board"&&!target.point))return;
+    closeFocusContextMenu();
+    symbolTarget=target; symbolAnchor={x:clientX,y:clientY}; symbolPicker.hidden=false; renderSymbolPicker(); placeSymbolPicker(clientX,clientY,target.kind==="text"?target.ta.getBoundingClientRect():null);
+    if(target.kind==="board")requestAnimationFrame(()=>{ const first=symbolGrid.querySelector("button"); if(first&&!symbolPicker.hidden)first.focus({preventScroll:true}); });
+  }
+  function closeSymbolPicker(){ symbolPicker.hidden=true; symbolTarget=null; }
+  function insertSymbol(ch){
+    const target=symbolTarget; if(!target)return;
+    try { localStorage.setItem(WB_RECENT_SYMBOLS_KEY,JSON.stringify(normalizeWhiteboardRecentSymbols(loadRecentSymbols(),ch))); } catch(_){}
+    if(target.kind==="text"){
+      const ta=target.ta; if(!ta.isConnected){ closeSymbolPicker(); return; }
+      if(document.activeElement!==ta)ta.focus({preventScroll:true});
+      // execCommand 로 넣어야 글상자 안 Ctrl+Z 로 되돌릴 수 있다. 막힌 환경에서만 setRangeText 로.
+      const before=ta.value.length; let ok=false; try { ok=document.execCommand("insertText",false,ch); } catch(_){}
+      if(!ok||ta.value.length===before){ ta.setRangeText(ch,ta.selectionStart,ta.selectionEnd,"end"); ta.dispatchEvent(new Event("input",{bubbles:true})); }
+      // 여러 글자를 이어 넣을 수 있게 열어 둔다. "최근" 탭이 새로 생기면 높이가 바뀌므로 자리를 다시 잡는다.
+      renderSymbolPicker(); placeSymbolPicker(symbolAnchor.x,symbolAnchor.y,ta.getBoundingClientRect()); return;
+    }
+    closeSymbolPicker();
+    insertEducationEntry({kind:"text",category:"symbol",id:"symbol-special",value:ch},target.point.x,target.point.y);
+  }
+  symbolPicker.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); closeSymbolPicker(); return; }
+    if(!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft"].includes(e.key)||!symbolGrid.contains(document.activeElement))return;
+    const cells=[...symbolGrid.querySelectorAll("button")], cur=cells.indexOf(document.activeElement); if(cur<0)return;
+    const cols=Math.max(1,Math.round(symbolGrid.clientWidth/Math.max(1,cells[0].offsetWidth))); e.preventDefault();
+    const step=e.key==="ArrowRight"?1:e.key==="ArrowLeft"?-1:e.key==="ArrowDown"?cols:-cols;
+    cells[Math.max(0,Math.min(cells.length-1,cur+step))].focus({preventScroll:true});
+  });
   let focusToolBtn=null, focusFlashTimer=0, focusDragCleanup=null;
 
   const saveFocusPrefs = () => {
@@ -5497,6 +5626,8 @@ function renderWhiteboard(doc, host){
       if (transformPickPivot){ transformPickPivot = false; syncTransformPanel(); redraw(); return; }
       toggleTransformPanel(false); if (transformToolBtn) transformToolBtn.focus(); return;
     }
+    if (e.key === "Escape" && !symbolPicker.hidden){ e.preventDefault(); e.stopPropagation(); closeSymbolPicker(); return; }
+    if (!symbolPicker.hidden && ae && symbolPicker.contains(ae)) return;
     if (e.key === "Escape" && !focusContextMenu.hidden){ e.preventDefault(); e.stopPropagation(); closeFocusContextMenu(); return; }
     if (e.key === "Escape" && !focusPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleFocusPanel(false); if (focusToolBtn) focusToolBtn.focus(); return;
@@ -5531,10 +5662,12 @@ function renderWhiteboard(doc, host){
     if (e.code !== "Space") return;
     spacePanning = false; canvas.classList.remove("pan-ready");
   };
-  const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); closeFocusContextMenu(); };
+  const onWindowBlur = () => { spacePanning=false; canvas.classList.remove("pan-ready"); closeFocusContextMenu(); closeSymbolPicker(); };
   // 배경색 판은 색만 고르면 볼 일이 끝나므로 바깥을 누르면 닫는다(색 고르개 창은 문서 밖이라 걸리지 않는다).
   const onPointerDownOutside = (e) => {
     if (!focusContextMenu.hidden && !focusContextMenu.contains(e.target)) closeFocusContextMenu();
+    // 글상자 모드에서는 글상자 안을 눌러 커서를 옮겨도 고르개를 닫지 않는다.
+    if (!symbolPicker.hidden && !symbolPicker.contains(e.target) && !(symbolTarget && symbolTarget.kind === "text" && symbolTarget.ta === e.target)) closeSymbolPicker();
     if (bgPanel.hidden) return;
     const target = e.target;
     if (bgPanel.contains(target) || bgToggleBtn.contains(target)) return;
@@ -5553,7 +5686,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
@@ -5562,7 +5695,7 @@ if (typeof module !== "undefined" && module.exports){
     whiteboardClipboardItem, whiteboardDetachedClipboardItem, whiteboardGraphUsesManualY,
     setWhiteboardInternalClipboard, getWhiteboardInternalClipboard, hasWhiteboardInternalClipboard,
     whiteboardRecolorItem, whiteboardItemColor, whiteboardCanFlipItem, whiteboardFormulaReplacementRect, whiteboardPresetResizeItem, normalizeWhiteboardTextSize, normalizeWhiteboardObjectScale, whiteboardObjectScalePercent,
-    whiteboardEducationCatalog, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
+    whiteboardEducationCatalog, whiteboardSpecialCharGroups, normalizeWhiteboardRecentSymbols, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,
     normalizeWhiteboardFocusState, whiteboardFocusGeometry, whiteboardFocusAllowsPoint, whiteboardFlashlightGeometry

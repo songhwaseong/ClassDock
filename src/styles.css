@@ -2884,6 +2884,17 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-context-text-size-control>span:first-child{margin-right:auto;color:var(--ink);font-size:12px}
   .wb-context-text-size-control .wb-text-size-input{width:64px;height:28px}
   .wb-context-history{padding-top:7px;padding-bottom:7px}
+  /* 특수문자 고르개: 우클릭 메뉴와 같은 층 위에 뜬다(메뉴를 닫고 여는 자리라 겹칠 일은 없다) */
+  .wb-symbol-picker{position:fixed;z-index:1971;box-sizing:border-box;width:318px;max-width:calc(100vw - 12px);max-height:calc(100vh - 12px);display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:0 12px 30px rgba(0,0,0,.34)}
+  .wb-symbol-picker[hidden]{display:none}
+  .wb-symbol-tabs{display:flex;flex-wrap:wrap;gap:3px}
+  .wb-symbol-picker button{border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+  .wb-symbol-picker button:hover,.wb-symbol-picker button:focus-visible{background:var(--panel-hover);color:var(--accent);outline:none}
+  .wb-symbol-tab{padding:4px 7px;font-size:11.5px}
+  .wb-symbol-picker .wb-symbol-tab.active{background:var(--accent);color:#fff}
+  .wb-symbol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:2px;min-height:0;overflow-y:auto;max-height:220px}
+  .wb-symbol-cell{height:34px;padding:0;font-size:18px;line-height:1;font-family:system-ui,"Malgun Gothic",sans-serif}
+  .wb-symbol-hint{color:var(--muted);font-size:10.5px}
   .wb-context-history-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   @media (max-width:600px),(max-height:520px){.wb-focus-head{cursor:default}.wb-focus-panel{right:8px;top:8px;width:min(330px,calc(100% - 16px));max-height:calc(100% - 16px)}}
   .wb-zoom-step{font-size:18px;padding:0 7px}

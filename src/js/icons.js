@@ -125,7 +125,7 @@
   const iconMatch = /[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲↻⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu;
   const skipUiCleanup = (node) => {
     const el = node.parentElement;
-    return !el || !!el.closest("svg,script,style,pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view");
+    return !el || !!el.closest("svg,script,style,pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view,.ui-keep-symbols");
   };
   const normalizeUiText = (node) => {
     if (node.nodeType !== Node.TEXT_NODE || skipUiCleanup(node)) return;
@@ -151,7 +151,7 @@
     node.replaceWith(fragment);
   };
   const normalizeUiAttribute = (element, name) => {
-    if (!element || !element.getAttribute || element.closest("pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view")) return;
+    if (!element || !element.getAttribute || element.closest("pre,code,textarea,input,[contenteditable],.run-output,.page,.pdf-text-layer,.text-view,.ui-keep-symbols")) return;
     const value = element.getAttribute(name);
     if (!value) return;
     const cleaned = value.replace(/[\u{1F000}-\u{1FAFF}]|[✏✎✂✓✔✕✖▶←→↔↗↩⟲↻⚠⚙⛶▭▦●■]\uFE0F?|\uFE0F/gu, "").replace(/\s{2,}/g, " ").trim();
