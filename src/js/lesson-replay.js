@@ -105,6 +105,8 @@ function validateLessonPayload(lesson){
 // 이미지 항목을 저장 가능한 dataURL 로 직렬화(원본 Image → 오프스크린 캔버스). 한 번 계산하면 캐시.
 function lessonSerializeItems(items){
   return items.map((it) => {
+    // 묶은 그룹 안의 그림도 같은 규칙으로 — 그대로 두면 <img> 가 JSON 에서 빈 객체가 되어 재생에 안 보인다.
+    if (it && it.type === "group" && Array.isArray(it.items)) return Object.assign({}, it, { items:lessonSerializeItems(it.items) });
     if (!it || it.type !== "image"){ return Object.assign({}, it); }
     if (!it._lessonSrc && it.img && it.img.complete){
       try {
@@ -217,6 +219,7 @@ function lessonItemsAt(state, idx){
 function preloadLessonImages(kfs, onReady){
   const cache = new Map();
   const attach = (it) => {
+    if (it && it.type === "group" && Array.isArray(it.items)){ it.items.forEach(attach); return; }
     if (!it || it.type !== "image" || !it.src) return;
     let img = cache.get(it.src);
     if (!img){ img = new Image(); img.src = it.src; cache.set(it.src, img); }

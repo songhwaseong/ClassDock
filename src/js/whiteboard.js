@@ -884,6 +884,21 @@ function renderWhiteboard(doc, host){
   const boardPointFromScreen = (p) => ({ x:(p.x-view.x)/view.scale, y:(p.y-view.y)/view.scale });
   const visibleBoardCenter = () => boardPointFromScreen({ x:W/2, y:H/2 });
   let boardRecoveryTimer = 0, boardRecoveryWarned = false;
+  // 그룹 안 그림까지 따라 내려가며 부른다 — 묶은 그림도 복구본·붙여넣기에서 되살아나야 한다.
+  const eachBoardImage = (items, fn) => {
+    for (const it of items || []){
+      if (!it) continue;
+      if (it.type === "image") fn(it);
+      else if (it.type === "group" && Array.isArray(it.items)) eachBoardImage(it.items, fn);
+    }
+  };
+  // 그림은 <img> 객체를 못 담는다 — data URL(src)만 남긴다. 그룹이면 자식까지 같은 규칙으로.
+  const snapshotBoardItem = (item) => {
+    const copy = { ...item };
+    if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
+    else if (copy.type === "group" && Array.isArray(copy.items)) copy.items = copy.items.map(snapshotBoardItem);
+    return copy;
+  };
   // 저장·전송 공용 직렬화: <img> 객체는 못 담으므로 data URL(src)만 남긴다.
   const boardSnapshot = () => (syncMeasureItems(), {
     version:1,
@@ -893,11 +908,7 @@ function renderWhiteboard(doc, host){
     // 그림은 <img> 객체를 못 담는다 — 항목 이미지와 같이 data URL(src)만 남긴다.
     bgImage:wb.bgImage ? { ...wb.bgImage, img:undefined } : null,
     textSize:wb.textSize,
-    items:wb.items.map(item => {
-      const copy = { ...item };
-      if (copy.type === "image"){ copy.src = copy.src || (copy.img && (copy.img.__boardSrc || copy.img.src)) || ""; delete copy.img; }
-      return copy;
-    })
+    items:wb.items.map(snapshotBoardItem)
   });
   const saveBoardRecoveryNow = () => {
     clearTimeout(boardRecoveryTimer); boardRecoveryTimer = 0;
@@ -1242,6 +1253,8 @@ function renderWhiteboard(doc, host){
      다시 쓰게 되는데, 끄는 동안에는 그 값이 하나도 바뀌지 않는다(레이아웃만 매 프레임 다시 잰다).
      paint 는 화면 좌표(view)와 항목에만 의존하고, syncControls 는 선택·도구·색·배율에만 의존한다.
      기존 호출부(60여 곳)는 그대로 두 가지를 다 하는 redraw 를 쓴다 — 끌기 경로만 paint 로 바꾼다. */
+  // 여러 개 선택 상태(아래 '여러 개 선택' 참고). paint 가 읽으므로 paint 보다 먼저 선언한다.
+  let multiSel = [], marquee = null;
   const paint = () => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, W, H);
@@ -1265,6 +1278,7 @@ function renderWhiteboard(doc, host){
       }
       ctx.restore();
     }
+    paintMultiSelection();
     drawGear();
     paintBoardBackground();                           // 판서·교구를 다 그린 뒤 맨 밑에 배경을 깐다
     // 글자 입력창은 캔버스 위에 겹쳐 둔 textarea 라 화면 이동·확대를 따라와야 한다(=paint 쪽).
@@ -1273,7 +1287,17 @@ function renderWhiteboard(doc, host){
 
   const syncControls = () => {
     const s = wb.selected;
-    if (groupActionBtn) groupActionBtn.disabled = !(s && s.type === "group");
+    if (groupActionBtn){
+      // 여러 개를 고르면 같은 자리의 단추가 '묶기'가 된다(paint 가 multiSel 을 이미 정리해 두었다).
+      const canGroup = multiSel.length > 1;
+      groupActionBtn.disabled = !(canGroup || (s && s.type === "group"));
+      const label = canGroup ? "묶기" : "분리";
+      if (groupActionBtn.textContent !== label){
+        groupActionBtn.textContent = label;
+        groupActionBtn.title = canGroup ? "선택한 항목들을 한 그룹으로 묶기 (Ctrl+G)" : "선택한 그룹 풀기 (Ctrl+Shift+G)";
+        groupActionBtn.setAttribute("aria-label", groupActionBtn.title);
+      }
+    }
     const canFlip = whiteboardCanFlipItem(s);
     if (flipXBtn){ flipXBtn.disabled = !canFlip; flipXBtn.setAttribute("aria-pressed", canFlip && s.flipX ? "true" : "false"); }
     if (flipYBtn){ flipYBtn.disabled = !canFlip; flipYBtn.setAttribute("aria-pressed", canFlip && s.flipY ? "true" : "false"); }
@@ -1295,26 +1319,27 @@ function renderWhiteboard(doc, host){
 
   const redraw = () => { paint(); syncControls(); };
   const restoreBoardImages = () => {
-    for (const item of wb.items){
-      if (!item || item.type !== "image" || item.img || !item.src) continue;
+    eachBoardImage(wb.items, (item) => {
+      if (item.img || !item.src) return;
       const img = new Image();
       img.onload = () => { item.img = img; img.__boardSrc = item.src; redraw(); };
       img.onerror = () => { console.warn("whiteboard recovery image skipped"); };
       img.src = item.src;
-    }
+    });
   };
   // 스냅샷은 항목 배열의 얕은 복사 — 항목 객체 자체를 제자리에서 고치면 이전 단계가 망가지므로
   // 기존 항목을 바꿀 때는 사본으로 교체한다(beginSelDrag 참고).
   const history = MNEditHistory.create({
     limit: MNEditHistory.LIMITS.board,
     capture: () => wb.items.slice(),
-    apply: (items) => { wb.items = items.slice(); wb.selected = null; redraw(); },
+    apply: (items) => { wb.items = items.slice(); wb.selected = null; multiSel = []; redraw(); },
     // 항목은 통째로 교체만 하고 제자리에서 고치지 않으므로 참조 비교로 충분하다.
     isEqual: (a, b) => a.length === b.length && a.every((it, i) => it === b[i]),
     onChange: () => updateUndoButtons(),
   });
-  const doUndo = () => { if (history.undo()) recordCommit(); };
-  const doRedo = () => { if (history.redo()) recordCommit(); };
+  // 화살표 키로 옮기던 중이면 그 이동을 먼저 한 단계로 남긴다 — 안 그러면 되돌리기가 그 앞 단계까지 건너뛴다.
+  const doUndo = () => { flushNudge(); if (history.undo()) recordCommit(); };
+  const doRedo = () => { flushNudge(); if (history.redo()) recordCommit(); };
   const clearAll = () => { if (!wb.items.length) return; wb.items = []; wb.selected = null; redraw(); history.commit(); recordCommit(); };
   const confirmClearAll = () => {
     if (!wb.items.length) return;
@@ -1322,6 +1347,7 @@ function renderWhiteboard(doc, host){
     else clearAll();
   };
   const deleteSelected = () => {
+    if (liveMultiSel().length) return deleteMultiSelected();   // 잘라내기·메뉴 삭제도 여러 개를 따라간다
     if (!wb.selected) return false;
     const selected = wb.selected;
     // 잰 도형을 지우면 그 값을 가리키던 라벨도 함께 사라져야 한다.
@@ -1331,6 +1357,7 @@ function renderWhiteboard(doc, host){
     return true;
   };
   const moveSelectedLayer = (direction) => {
+    if (liveMultiSel().length) return moveMultiLayer(direction);
     const selected = wb.selected, index = selected ? wb.items.indexOf(selected) : -1;
     if (index < 0) return false;
     const last = wb.items.length - 1;
@@ -1357,8 +1384,11 @@ function renderWhiteboard(doc, host){
     if (!selected || selected.type !== "group") return;
     const idx = wb.items.indexOf(selected), children = ungroupBoardItem(selected, measureBoardText);
     if (idx < 0 || !children.length) return;
-    wb.items.splice(idx, 1, ...children); wb.selected = null; redraw(); history.commit(); recordCommit();
-    if (typeof toast === "function") toast("교육 도형을 구성 요소로 분리했어요.", 1800);
+    wb.items.splice(idx, 1, ...children); wb.selected = null;
+    // 푼 조각들은 고른 채로 둔다 — 풀자마자 한꺼번에 옮기거나 다시 묶을 수 있게.
+    multiSel = children.filter((it) => isSelectableBoardItem(it) && !isVectorSumItem(it));
+    redraw(); history.commit(); recordCommit();
+    if (typeof toast === "function") toast(selected.role ? "교육 도형을 구성 요소로 분리했어요." : "그룹을 풀었어요.", 1800);
   };
   const resizeSelectedFormula = (scale) => {
     const selected = wb.selected;
@@ -1502,6 +1532,373 @@ function renderWhiteboard(doc, host){
     if (item){ beginSelDrag(e, "move"); return true; }                                    // 항목 본체 → 이동
     return false;
   };
+  /* ----- 여러 개 선택(Ctrl+끌기 선택 상자 · Ctrl+클릭 더하기/빼기) -----
+     한 개 선택(wb.selected)에 기대는 기능이 60곳이 넘어 그 칸은 그대로 두고, 두 개 이상일 때만 multiSel 에 담는다.
+     규칙: wb.selected 가 있으면 multiSel 은 비어 있다 — 항목을 넣거나 우클릭으로 하나를 고르는 곳이
+     multiSel 을 몰라도 paint 에서 저절로 풀린다. 보드에서 사라진 항목(되돌리기·지우기)도 거기서 걸러진다. */
+  function liveMultiSel(){
+    if (wb.selected && multiSel.length) multiSel = [];
+    if (multiSel.length) multiSel = multiSel.filter((it) => wb.items.includes(it));
+    if (multiSel.length === 1){ wb.selected = multiSel[0]; multiSel = []; }
+    return multiSel;
+  }
+  const clearMultiSel = () => { const had = multiSel.length > 0; multiSel = []; return had; };
+  // 측정 라벨은 대상 도형을 따라 저절로 옮겨지므로, 대상과 함께 골랐으면 라벨은 빼야 두 번 움직이지 않는다.
+  const normalizeSelection = (items) => {
+    const unique = wb.items.filter((it) => items.includes(it) && !isVectorSumItem(it));
+    return unique.filter((it) => !isMeasureItem(it) || !unique.includes(measureTargetOf(it)));
+  };
+  const setSelection = (items) => {
+    const picked = normalizeSelection(items);
+    if (picked.length <= 1){ multiSel = []; wb.selected = picked[0] || null; }
+    else { wb.selected = null; multiSel = picked; }
+    redraw();
+  };
+  const currentSelection = () => liveMultiSel().length ? multiSel.slice() : (wb.selected ? [wb.selected] : []);
+  const beginMultiDrag = (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    const start = pt(e), originals = multiSel.slice(), indexes = originals.map((it) => wb.items.indexOf(it));
+    let moved = false;
+    const move = (ev) => {
+      const q = pt(ev), dx = q.x - start.x, dy = q.y - start.y;
+      // 한 개 옮기기와 같이 이전 단계 스냅샷이 원래 객체를 가리키므로 늘 원본에서 사본을 만들어 바꿔 끼운다.
+      multiSel = originals.map((it, i) => {
+        const live = translateBoardItem(it, dx, dy);
+        wb.items[indexes[i]] = live;
+        return live;
+      });
+      moved = moved || dx !== 0 || dy !== 0;
+      paint();
+    };
+    const up = () => {
+      canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
+      redraw(); if (moved){ history.commit(); recordCommit(); }   // 여러 개를 옮겨도 되돌리기 한 번
+    };
+    canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  };
+  const beginMarquee = (e) => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    const start = pt(e), base = currentSelection();
+    marquee = { x1:start.x, y1:start.y, x2:start.x, y2:start.y };
+    const move = (ev) => { const q = pt(ev); marquee.x2 = q.x; marquee.y2 = q.y; paint(); };
+    const up = () => {
+      canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
+      const box = marquee; marquee = null;
+      const left = Math.min(box.x1, box.x2), right = Math.max(box.x1, box.x2);
+      const top = Math.min(box.y1, box.y2), bottom = Math.max(box.y1, box.y2);
+      // 상자 안에 통째로 들어온 항목만 고른다(걸치기만 한 큰 배경 그림까지 딸려 오지 않게).
+      const inside = wb.items.filter((it) => {
+        const b = boundsOf(it);
+        return b && b.x >= left && b.y >= top && b.x + b.w <= right && b.y + b.h <= bottom;
+      });
+      setSelection(base.concat(inside));   // Ctrl 을 누른 채라 기존 선택에 더한다
+    };
+    canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  };
+  // Ctrl(맥은 ⌘)을 누른 채 선택 도구로 누를 때: 항목 위면 더하기/빼기, 빈 곳이면 선택 상자.
+  const startModifierSelect = (e) => {
+    const p = pt(e), item = itemAt(p), sel = currentSelection();
+    if (!item){ beginMarquee(e); return; }
+    e.preventDefault();
+    setSelection(sel.includes(item) ? sel.filter((it) => it !== item) : sel.concat(item));
+  };
+  const deleteMultiSelected = () => {
+    const sel = liveMultiSel();
+    if (!sel.length) return false;
+    const gone = new Set(sel);
+    for (const it of sel){
+      const label = measureLabelOf(it); if (label) gone.add(label);
+      for (const sum of vectorSumsFor(it)) gone.add(sum);
+    }
+    wb.items = wb.items.filter((it) => !gone.has(it)); multiSel = [];
+    redraw(); history.commit(); recordCommit();
+    return true;
+  };
+  /* 고른 항목들을 그룹 한 개의 모델로 만든다(묶기·여러 개 복사가 같이 쓴다).
+     자식 좌표는 덩어리 왼쪽 위 기준이고 sourceW=w 라 비율 1 — ungroupBoardItem 으로 풀면 제자리로 돌아온다.
+     측정 라벨은 대상과 함께 떠나면 가리킬 곳이 없으니, 지금 보이는 값 그대로의 글로 떼어 넣는다. */
+  const SELECTION_CLIPBOARD_ROLE = "board-selection";
+  const boardItemHasImage = (it) => !!(it && (it.type === "image" || (it.type === "group" && Array.isArray(it.items) && it.items.some(boardItemHasImage))));
+  const packSelection = (items, role) => {
+    const parts = [];
+    for (const it of items){
+      parts.push(it);
+      const label = measureLabelOf(it);
+      if (label && !items.includes(label)) parts.push(liveMeasureItem(label) || label);
+    }
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const it of parts){
+      const b = boundsOf(it); if (!b) continue;
+      left = Math.min(left, b.x); top = Math.min(top, b.y); right = Math.max(right, b.x + b.w); bottom = Math.max(bottom, b.y + b.h);
+    }
+    if (!Number.isFinite(left)) return null;
+    const children = parts.map((it) => {
+      const source = it.type === "image" ? Object.assign({}, it, { src:it.src || (it.img && (it.img.__boardSrc || it.img.src)) || "" }) : it;
+      const copy = whiteboardDetachedClipboardItem(source);
+      return copy && translateBoardItem(copy, -left, -top);
+    }).filter(Boolean);
+    if (!children.length) return null;
+    const w = Math.max(1, right - left), h = Math.max(1, bottom - top);
+    const group = { type:"group", x:left, y:top, w, h, sourceW:w, sourceH:h, items:children };
+    if (role) group.role = role;
+    return group;
+  };
+  // 복사·잘라내기·복제가 넘길 원본: 여러 개면 한 덩어리로 싸고, 아니면 예전처럼 한 개.
+  const selectionClipboardSource = () => liveMultiSel().length ? packSelection(multiSel, SELECTION_CLIPBOARD_ROLE) : wb.selected;
+  const groupMultiSelected = () => {
+    const sel = liveMultiSel();
+    if (sel.length < 2) return false;
+    const group = packSelection(sel);
+    if (!group) return false;
+    // 사본은 JSON 으로 떠서 <img> 가 빠져 있다 — 이미 불러온 원본 그림을 같은 src 끼리 다시 붙여 바로 보이게 한다.
+    const loaded = new Map();
+    eachBoardImage(sel, (it) => { const src = it.src || (it.img && it.img.__boardSrc); if (src && it.img) loaded.set(src, it.img); });
+    eachBoardImage(group.items, (it) => { if (!it.img && loaded.has(it.src)) it.img = loaded.get(it.src); });
+    const gone = new Set(sel);
+    for (const it of sel){
+      const label = measureLabelOf(it); if (label) gone.add(label);
+      for (const sum of vectorSumsFor(it)) gone.add(sum);
+    }
+    // 고른 것 중 가장 위 층 자리에 그룹을 둔다 — 묶는 순간 다른 판서 밑으로 숨지 않게.
+    const at = Math.max(...sel.map((it) => wb.items.indexOf(it)));
+    const next = [];
+    wb.items.forEach((it, i) => { if (i === at) next.push(group); if (!gone.has(it)) next.push(it); });
+    wb.items = next; multiSel = []; wb.selected = group;
+    redraw(); history.commit(); recordCommit();
+    if (typeof toast === "function") toast(`${sel.length}개를 묶었어요. 분리하면 다시 따로 움직입니다.`, 1800);
+    return true;
+  };
+  const moveMultiLayer = (direction) => {
+    const sel = liveMultiSel();
+    if (!sel.length || (direction !== "front" && direction !== "back")) return false;
+    const picked = new Set(sel);
+    const rest = wb.items.filter((it) => !picked.has(it)), moving = wb.items.filter((it) => picked.has(it));
+    const next = direction === "front" ? rest.concat(moving) : moving.concat(rest);   // 고른 것끼리의 앞뒤는 그대로
+    if (next.every((it, i) => it === wb.items[i])) return false;
+    wb.items = next; redraw(); history.commit(); recordCommit();
+    return true;
+  };
+  // 한 번에 바꾸되 되돌리기는 한 단계. 항목은 늘 사본으로 바꿔 끼운다(이전 스냅샷 보호).
+  const updateMultiSelected = (change) => {
+    const sel = liveMultiSel();
+    if (!sel.length) return false;
+    let changed = false;
+    multiSel = sel.map((it) => {
+      const next = change(it);
+      if (!next || next === it) return it;
+      const idx = wb.items.indexOf(it); if (idx >= 0) wb.items[idx] = next;
+      changed = true; return next;
+    });
+    if (changed){ redraw(); history.commit(); recordCommit(); }
+    return true;
+  };
+  /* ----- 색·크기 한꺼번에(수식·그룹 속 수식 포함) -----
+     수식은 색이 그림에 박혀 있어 새 색으로 다시 그려야 한다(비동기). 전부 다 그린 뒤 한 번에 바꿔 끼워
+     되돌리기를 한 단계로 남긴다. 그룹은 속에 수식이 있을 때만 자식을 따라 내려가고, 나머지는 기존 칠하기 규칙. */
+  const isFormulaItem = (it) => !!(it && it.type === "image" && it.role === "education-formula" && it.formulaSource);
+  const boardItemHasFormula = (it) => !!(it && (isFormulaItem(it) || (it.type === "group" && Array.isArray(it.items) && it.items.some(boardItemHasFormula))));
+  const recolorItemDeep = (it, color) => {
+    const nextColor = String(color).toLowerCase();
+    if (isFormulaItem(it)){
+      if (String(it.formulaColor || "").toLowerCase() === nextColor) return Promise.resolve(it);
+      // 자리·크기는 그대로 두고 그림만 갈아 끼운다. 녹화용 캐시(_lessonSrc)는 옛 색이라 버린다.
+      return buildFormulaImage(it.formulaSource, nextColor).then(({ img, src, width, height }) =>
+        Object.assign({}, it, { img, src, formulaColor:nextColor, formulaBaseW:width, formulaBaseH:height, _lessonSrc:undefined }));
+    }
+    if (it && it.type === "group" && Array.isArray(it.items) && it.items.some(boardItemHasFormula)){
+      return Promise.all(it.items.map((child) => recolorItemDeep(child, nextColor))).then((items) => {
+        const changed = it.educationColor !== nextColor || items.some((child, i) => child !== it.items[i]);
+        return changed ? Object.assign({}, it, { items, educationColor:nextColor }) : it;
+      });
+    }
+    return Promise.resolve(whiteboardRecolorItem(it, nextColor));
+  };
+  // 다 그린 뒤 바꿔 끼운다. 그리는 사이 지워지거나 옮겨진(=다른 객체가 된) 항목은 건너뛴다.
+  // 색을 연달아 누르면 마지막에 누른 색만 반영한다.
+  let recolorToken = 0;
+  const recolorItemsLater = (items, color) => {
+    const token = ++recolorToken;
+    return Promise.all(items.map((it) => recolorItemDeep(it, color))).then((nextItems) => {
+      if (token !== recolorToken) return false;
+      const replaced = new Map();
+      items.forEach((it, i) => {
+        const idx = wb.items.indexOf(it);
+        if (idx < 0 || !nextItems[i] || nextItems[i] === it) return;
+        wb.items[idx] = nextItems[i]; replaced.set(it, nextItems[i]);
+      });
+      if (!replaced.size) return false;
+      multiSel = multiSel.map((it) => replaced.get(it) || it);
+      if (replaced.has(wb.selected)) wb.selected = replaced.get(wb.selected);
+      redraw(); history.commit(); recordCommit();
+      return true;
+    }).catch(() => { if (typeof toast === "function") toast("수식을 그리지 못했어요.", 2000); return false; });
+  };
+  const recolorMultiSelected = (color) => {
+    const sel = liveMultiSel();
+    if (!sel.length) return false;
+    if (sel.some(boardItemHasFormula)) recolorItemsLater(sel, color);
+    else updateMultiSelected((it) => whiteboardRecolorItem(it, color));
+    return true;
+  };
+  /* 크기 줄인 뒤 그룹 상자를 자식에 맞춰 다시 잡는다. 자식이 커지면 상자 밖으로 삐져나오지 않게.
+     보이는 자리는 그대로여야 하므로 뒤집힌 그룹은 로컬 오른쪽(아래) 끝이 화면 왼쪽(위)이라는 점을 따진다. */
+  const refitBoardGroup = (group, items) => {
+    const sw = Math.max(1, Number(group.sourceW) || Number(group.w) || 1), sh = Math.max(1, Number(group.sourceH) || Number(group.h) || 1);
+    const sx = (Number(group.w) || sw) / sw, sy = (Number(group.h) || sh) / sh;
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const child of items){
+      const b = boundsOf(child); if (!b) continue;
+      left = Math.min(left, b.x); top = Math.min(top, b.y); right = Math.max(right, b.x + b.w); bottom = Math.max(bottom, b.y + b.h);
+    }
+    if (!Number.isFinite(left)) return Object.assign({}, group, { items });
+    const nsw = Math.max(1, right - left), nsh = Math.max(1, bottom - top);
+    return Object.assign({}, group, {
+      items:items.map((child) => translateBoardItem(child, -left, -top)),
+      x:group.x + (group.flipX ? sw - right : left) * sx, y:group.y + (group.flipY ? sh - bottom : top) * sy,
+      w:nsw * sx, h:nsh * sy, sourceW:nsw, sourceH:nsh
+    });
+  };
+  /* S/M/L 한 번에: 수식·글자·교육 도형은 한 개 선택과 같은 크기 비율, 선·도형은 굵기.
+     제자리(자기 가운데)에서 커지고 줄어든다. 그룹은 역할 없는 그룹(=직접 묶은 것)만 속으로 들어간다 —
+     그래프·차트·표는 글자·선 굵기를 바꾸면 틀이 깨진다. 그룹 안 크기는 그룹 자신의 단위로 잰다. */
+  const presetBoardItem = (it, width, topLevel=true) => {
+    if (!it) return it;
+    const scale = FORMULA_SIZE_PRESETS[width] || 1;
+    if (isFormulaItem(it)){
+      const baseW = Number(it.formulaBaseW) || (it.img && it.img.naturalWidth) || it.w;
+      const baseH = Number(it.formulaBaseH) || (it.img && it.img.naturalHeight) || it.h;
+      let w = Math.max(24, Math.round(baseW * scale)), h = Math.max(16, Math.round(baseH * scale));
+      if (topLevel && W && H){ const fit = Math.min(1, W * .85 / w, H * .85 / h); w = Math.round(w * fit); h = Math.round(h * fit); }
+      if (w === it.w && h === it.h) return it;
+      return Object.assign({}, it, { x:it.x + it.w / 2 - w / 2, y:it.y + it.h / 2 - h / 2, w, h });
+    }
+    if (it.type === "text" || (it.type === "group" && it.role === "education-stencil")){
+      const before = boundsOf(it);
+      let resized = whiteboardPresetResizeItem(it, scale);
+      if (!resized || !before) return it;
+      if (topLevel && resized.type === "group" && W && H){
+        const fit = Math.min(1, W * .85 / resized.w, H * .85 / resized.h);
+        resized.w = Math.max(24, Math.round(resized.w * fit)); resized.h = Math.max(16, Math.round(resized.h * fit));
+      }
+      const unchanged = resized.type === "text" ? Number(resized.fontSize) === Number(it.fontSize) : resized.w === it.w && resized.h === it.h;
+      if (unchanged) return it;
+      const after = boundsOf(resized);
+      return after ? translateBoardItem(resized, before.x + before.w / 2 - after.x - after.w / 2, before.y + before.h / 2 - after.y - after.h / 2) : resized;
+    }
+    if (["line","arrow","rect","ellipse","polyline"].includes(it.type)){
+      return Number(it.width) === Number(width) ? it : Object.assign({}, it, { width });
+    }
+    if (it.type === "group" && !it.role && Array.isArray(it.items)){
+      const items = it.items.map((child) => presetBoardItem(child, width, false));
+      return items.some((child, i) => child !== it.items[i]) ? refitBoardGroup(it, items) : it;
+    }
+    return it;
+  };
+  const presetMultiSelected = (width) => updateMultiSelected((it) => presetBoardItem(it, width));
+  const selectAllItems = () => {
+    if (wb.tool !== "select") setTool("select");
+    setSelection(wb.items.filter((it) => isSelectableBoardItem(it)));
+  };
+  /* 맞춤·간격. 기준은 고른 것 전체를 감싸는 상자다(PowerPoint 의 '선택한 개체 맞춤'과 같다).
+     글자 폭은 캔버스 글꼴로 잰 값이라 화면에 보이는 가장자리와 같다. */
+  const alignMultiSelected = (kind) => {
+    const sel = liveMultiSel();
+    if (sel.length < 2) return false;
+    const boxes = new Map(sel.map((it) => [it, boundsOf(it)]));
+    const all = [...boxes.values()].filter(Boolean);
+    if (!all.length) return false;
+    const left = Math.min(...all.map((b) => b.x)), right = Math.max(...all.map((b) => b.x + b.w));
+    const top = Math.min(...all.map((b) => b.y)), bottom = Math.max(...all.map((b) => b.y + b.h));
+    return updateMultiSelected((it) => {
+      const b = boxes.get(it); if (!b) return it;
+      let dx = 0, dy = 0;
+      if (kind === "left") dx = left - b.x;
+      else if (kind === "center") dx = (left + right) / 2 - (b.x + b.w / 2);
+      else if (kind === "right") dx = right - (b.x + b.w);
+      else if (kind === "top") dy = top - b.y;
+      else if (kind === "middle") dy = (top + bottom) / 2 - (b.y + b.h / 2);
+      else if (kind === "bottom") dy = bottom - (b.y + b.h);
+      return (Math.abs(dx) < .01 && Math.abs(dy) < .01) ? it : translateBoardItem(it, dx, dy);
+    });
+  };
+  // 간격 고르게: 양 끝 항목은 그대로 두고, 사이 항목들을 가장자리 사이 틈이 같아지게 옮긴다(세 개 이상일 때 뜻이 있다).
+  const distributeMultiSelected = (axis) => {
+    const sel = liveMultiSel();
+    if (sel.length < 3){
+      if (typeof toast === "function") toast("간격을 고르게 하려면 세 개 이상 고르세요.", 2000);
+      return false;
+    }
+    const pos = axis === "x" ? "x" : "y", size = axis === "x" ? "w" : "h";
+    const order = sel.map((it) => ({ it, b:boundsOf(it) })).filter((row) => row.b)
+      .sort((a, b) => (a.b[pos] + a.b[size] / 2) - (b.b[pos] + b.b[size] / 2));
+    if (order.length < 3) return false;
+    const first = order[0].b, last = order[order.length - 1].b;
+    const used = order.reduce((sum, row) => sum + row.b[size], 0);
+    const gap = (last[pos] + last[size] - first[pos] - used) / (order.length - 1);
+    const shift = new Map();
+    let cursor = first[pos] + first[size] + gap;
+    for (let i = 1; i < order.length - 1; i++){
+      shift.set(order[i].it, cursor - order[i].b[pos]);
+      cursor += order[i].b[size] + gap;
+    }
+    return updateMultiSelected((it) => {
+      const d = shift.get(it);
+      if (!d || Math.abs(d) < .01) return it;
+      return axis === "x" ? translateBoardItem(it, d, 0) : translateBoardItem(it, 0, d);
+    });
+  };
+  /* 화살표 키로 조금씩 옮기기(1px, Shift 는 10px). 누르고 있으면 키 반복이 수십 번 오므로
+     하나하나를 되돌리기 단계로 남기지 않고, 손을 떼거나 잠시 멈추면 한 단계로 묶어 남긴다. */
+  let nudgeCommitTimer = 0;
+  const flushNudge = () => {
+    if (!nudgeCommitTimer) return;
+    clearTimeout(nudgeCommitTimer); nudgeCommitTimer = 0;
+    redraw(); history.commit(); recordCommit();
+  };
+  const nudgeSelection = (dx, dy) => {
+    const sel = liveMultiSel();
+    if (sel.length){
+      multiSel = sel.map((it) => {
+        const idx = wb.items.indexOf(it), next = translateBoardItem(it, dx, dy);
+        if (idx >= 0) wb.items[idx] = next;
+        return next;
+      });
+    } else if (wb.selected){
+      const idx = wb.items.indexOf(wb.selected); if (idx < 0) return false;
+      const next = translateBoardItem(wb.selected, dx, dy);
+      wb.items[idx] = next; wb.selected = next;
+    } else return false;
+    paint();
+    clearTimeout(nudgeCommitTimer); nudgeCommitTimer = setTimeout(flushNudge, 400);
+    return true;
+  };
+  function paintMultiSelection(){
+    const sel = liveMultiSel();
+    if (!sel.length && !marquee) return;
+    ctx.save(); ctx.globalAlpha = 1; ctx.lineWidth = 1.5 / view.scale; ctx.strokeStyle = "#2563eb";
+    ctx.setLineDash([6 / view.scale, 4 / view.scale]);
+    let all = null;
+    const pad = 4 / view.scale;
+    for (const it of sel){
+      const b = boundsOf(it); if (!b) continue;
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(1, b.w) + pad * 2, Math.max(1, b.h) + pad * 2);
+      all = all ? { l:Math.min(all.l, b.x), t:Math.min(all.t, b.y), r:Math.max(all.r, b.x + b.w), b:Math.max(all.b, b.y + b.h) }
+        : { l:b.x, t:b.y, r:b.x + b.w, b:b.y + b.h };
+    }
+    ctx.setLineDash([]);
+    if (all){                                         // 고른 것 전체를 감싸는 옅은 테두리 — 한 덩어리로 움직인다는 표시
+      const outer = pad * 3;
+      ctx.globalAlpha = .5; ctx.strokeRect(all.l - outer, all.t - outer, all.r - all.l + outer * 2, all.b - all.t + outer * 2); ctx.globalAlpha = 1;
+    }
+    if (marquee){
+      const x = Math.min(marquee.x1, marquee.x2), y = Math.min(marquee.y1, marquee.y2);
+      const w = Math.abs(marquee.x2 - marquee.x1), h = Math.abs(marquee.y2 - marquee.y1);
+      ctx.fillStyle = "rgba(37,99,235,.08)"; ctx.fillRect(x, y, w, h);
+      ctx.setLineDash([4 / view.scale, 3 / view.scale]); ctx.strokeRect(x, y, w, h);
+    }
+    ctx.restore();
+  }
   // ----- 교구 조작(옮기기·돌리기·컴퍼스로 호 그리기)과 스냅 -----
   let syncGearButtons = () => {};
   // 길이·각도는 그리는 중에만 필요한 숫자라 캔버스에 박지 않고 커서 옆 작은 딱지로 보여 준다.
@@ -1938,6 +2335,14 @@ function renderWhiteboard(doc, host){
       // 조절점을 숨긴 스포트라이트는 밝은 영역 자체를 이동 손잡이로 쓴다.
       // 보드 이동이 필요하면 기존처럼 Space+드래그 또는 가운데 버튼을 사용한다.
       if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ beginSpotlightDrag(e,.5,.5,true); return; }
+      if (e.ctrlKey || e.metaKey){ startModifierSelect(e); return; }
+      // 여러 개를 고른 채 그중 하나를 잡으면 전부 같이 옮긴다. 다른 곳을 누르면 여러 개 선택은 풀린다.
+      const multi = liveMultiSel();
+      if (multi.length){
+        const hit = itemAt(pt(e));
+        if (hit && multi.includes(hit)){ beginMultiDrag(e); return; }
+        clearMultiSel(); redraw();
+      }
       // 선택 도구의 빈 공간은 손바닥 이동 영역으로 쓴다. 항목 위에서는 기존처럼 항목을 이동한다.
       if (!startSelect(e) && !backgroundViewLocked()) beginViewPan(e);
       return;
@@ -2299,6 +2704,12 @@ function renderWhiteboard(doc, host){
     img.onerror = () => reject(new Error("education-image-load-failed"));
     img.src = src;
   });
+  // 붙여넣은 모델(JSON)에는 <img> 가 없다 — 그룹 속까지 뒤져 그림을 불러 붙인 뒤에 보드에 넣는다.
+  const attachBoardImages = (root) => {
+    const jobs = [];
+    eachBoardImage([root], (it) => { if (!it.img && it.src) jobs.push(loadBoardImageSource(it.src).then((img) => { it.img = img; })); });
+    return Promise.all(jobs);
+  };
   const formulaMathMl = (source) => {
     if (typeof ClassDockCore !== "undefined" && ClassDockCore && typeof ClassDockCore.latexToMathML === "function")
       return ClassDockCore.latexToMathML(String(source || ""), false, true);
@@ -2330,7 +2741,8 @@ function renderWhiteboard(doc, host){
       const idx = wb.items.indexOf(existing); if (idx < 0) return;
       const preserveGeometry = existing.formulaSource === source && existing.formulaColor !== formulaColor;
       const {x,y,w,h} = whiteboardFormulaReplacementRect(existing, img.naturalWidth || baseW, img.naturalHeight || baseH, W, H, preserveGeometry);
-      const item = Object.assign({}, existing, { type:"image",img,src,x,y,w,h,role:"education-formula",formulaSource:source,formulaColor,formulaBaseW:baseW,formulaBaseH:baseH });
+      // _lessonSrc 는 수업 녹화가 옛 그림으로 떠 둔 캐시 — 물려받으면 재생에 옛 색·옛 식이 나온다.
+      const item = Object.assign({}, existing, { type:"image",img,src,x,y,w,h,role:"education-formula",formulaSource:source,formulaColor,formulaBaseW:baseW,formulaBaseH:baseH,_lessonSrc:undefined });
       const keepSelected = wb.selected === existing;
       wb.items[idx] = item; if (keepSelected) wb.selected = item; redraw(); history.commit(); recordCommit();
     }).catch(() => { if (typeof toast === "function") toast("수식을 그리지 못했어요.", 2000); });
@@ -2457,12 +2869,27 @@ function renderWhiteboard(doc, host){
       else if (moved.y + moved.h > H) adjustY = H - moved.y - moved.h;
       if (adjustX || adjustY) item = translateBoardItem(item, adjustX, adjustY);
     }
+    // 여러 개를 복사한 덩어리는 붙여넣으면서 다시 낱개로 풀고, 풀린 것들을 고른 채로 둔다.
+    if (item.type === "group" && item.role === SELECTION_CLIPBOARD_ROLE){
+      const children = ungroupBoardItem(item, measureBoardText).filter((child) => isSelectableBoardItem(child));
+      if (!children.length) return false;
+      Promise.all(children.map(attachBoardImages))
+        .then(() => {
+          wb.items.push(...children); setTool("select"); setSelection(children);
+          history.commit(); recordCommit();
+        })
+        .catch(() => { if (typeof toast === "function") toast("복사한 항목을 붙여넣지 못했어요.", 2000); });
+      return true;
+    }
     const commit = () => {
       wb.items.push(item); wb.selected = item; setTool("select");
       redraw(); history.commit(); recordCommit();
     };
     if (item.type === "image"){
       loadBoardImageSource(item.src).then((img) => { item.img = img; commit(); })
+        .catch(() => { if (typeof toast === "function") toast("복사한 항목을 붙여넣지 못했어요.", 2000); });
+    } else if (item.type === "group" && boardItemHasImage(item)){
+      attachBoardImages(item).then(commit)
         .catch(() => { if (typeof toast === "function") toast("복사한 항목을 붙여넣지 못했어요.", 2000); });
     } else commit();
     return true;
@@ -2471,7 +2898,7 @@ function renderWhiteboard(doc, host){
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
     if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
-    const item = whiteboardClipboardItem(wb.selected);
+    const item = whiteboardClipboardItem(selectionClipboardSource());
     if (!item || !e.clipboardData) return;
     setWhiteboardInternalClipboard(item);
     e.preventDefault();
@@ -2502,14 +2929,14 @@ function renderWhiteboard(doc, host){
   document.addEventListener("cut", onCut);
   document.addEventListener("paste", onPaste);
   const copySelectedFromMenu = () => {
-    const item = whiteboardClipboardItem(wb.selected);
+    const item = whiteboardClipboardItem(selectionClipboardSource());
     if (!item || !setWhiteboardInternalClipboard(item)) return false;
     try { document.execCommand("copy"); } catch(_){}
     if (typeof toast === "function") toast("선택한 항목을 복사했어요.", 1500);
     return true;
   };
   const cutSelectedFromMenu = () => {
-    const item = whiteboardClipboardItem(wb.selected);
+    const item = whiteboardClipboardItem(selectionClipboardSource());
     if (!item || !setWhiteboardInternalClipboard(item)) return false;
     try { document.execCommand("copy"); } catch(_){}
     if (!deleteSelected()) return false;
@@ -2523,8 +2950,10 @@ function renderWhiteboard(doc, host){
     return true;
   };
   const duplicateSelected = () => {
-    const item = whiteboardClipboardItem(wb.selected);
-    if (!item || !pasteBoardClipboardItem(item)) return false;
+    const item = whiteboardClipboardItem(selectionClipboardSource());
+    // 여러 개는 고른 항목이 없는 셈이라 붙여넣기가 마우스 자리로 가 버린다 — 한 개 복제처럼 오른쪽 아래로 비켜 놓는다.
+    const offset = item && item.role === SELECTION_CLIPBOARD_ROLE ? { x:item.x + item.w / 2 + 24, y:item.y + item.h / 2 + 24 } : null;
+    if (!item || !pasteBoardClipboardItem(item, offset)) return false;
     if (typeof toast === "function") toast("선택한 항목을 복제했어요.", 1500);
     return true;
   };
@@ -2581,10 +3010,10 @@ function renderWhiteboard(doc, host){
   // 배경색은 화면 그대로 담는다 — 인쇄·PDF만 흰 배경으로 바꾸면, 칠판 배경에 흰 펜으로 쓴 판서가
   // 흰 종이에 흰 글씨가 되어 통째로 사라진다. 어두운 배경으로 인쇄할지는 화면에서 이미 보고 판단한다.
   const withBoardExport = (fn) => {
-    const selected=wb.selected, saved={ scale:view.scale, x:view.x, y:view.y };
-    wb.selected=null; view.scale=1; view.x=0; view.y=0; gearHidden=true; redraw();
+    const selected=wb.selected, selectedMany=multiSel, saved={ scale:view.scale, x:view.x, y:view.y };
+    wb.selected=null; multiSel=[]; view.scale=1; view.x=0; view.y=0; gearHidden=true; redraw();
     try { return fn(); }
-    finally { wb.selected=selected; view.scale=saved.scale; view.x=saved.x; view.y=saved.y; gearHidden=false; clampView(); redraw(); }
+    finally { wb.selected=selected; multiSel=selectedMany; view.scale=saved.scale; view.x=saved.x; view.y=saved.y; gearHidden=false; clampView(); redraw(); }
   };
 
   // ----- 내보내기 -----
@@ -2725,7 +3154,7 @@ function renderWhiteboard(doc, host){
   const setTool = (t) => {
     wb.tool = t; for (const k in toolBtns) toolBtns[k].classList.toggle("active", k === t);
     for (const k in contextToolBtns) contextToolBtns[k].classList.toggle("active", k === t);
-    if (t !== "select" && wb.selected){ wb.selected = null; redraw(); }   // 다른 도구로 가면 선택 해제
+    if (t !== "select" && (wb.selected || multiSel.length)){ wb.selected = null; multiSel = []; redraw(); }   // 다른 도구로 가면 선택 해제
     canvas.style.cursor = "";
     canvas.dataset.tool = t;
   };
@@ -2736,9 +3165,12 @@ function renderWhiteboard(doc, host){
     if (customColor) customColor.value = c;
     if (contextCustomColor) contextCustomColor.value = c;
     const selected = wb.selected;
+    if (options.applySelected !== false && !selected) recolorMultiSelected(c);
     if (options.applySelected !== false && selected){
       if (selected.type === "image" && selected.role === "education-formula" && selected.formulaSource && selected.formulaColor !== c){
         insertFormulaSource(selected.formulaSource, selected.x + selected.w / 2, selected.y + selected.h / 2, selected, c);
+      } else if (selected.type === "group" && boardItemHasFormula(selected)){
+        recolorItemsLater([selected], c);                // 그룹 속 수식은 다시 그려야 한다
       } else {
         replaceSelectedItem(selected, whiteboardRecolorItem(selected, c));
       }
@@ -2746,7 +3178,13 @@ function renderWhiteboard(doc, host){
     if (typeof renderEducationPanel === "function" && !eduPanel.hidden) renderEducationPanel();
   };
   const setWidth = (w) => {
+    if (!wb.selected && presetMultiSelected(w)) return;
     const selected = wb.selected;
+    // 직접 묶은 그룹 한 개: 속의 수식·글자는 크기, 선·도형은 굵기(여러 개 선택과 같은 규칙).
+    if (selected && selected.type === "group" && !selected.role){
+      replaceSelectedItem(selected, presetBoardItem(selected, w));
+      return;
+    }
     if (selected && selected.type === "image" && selected.role === "education-formula"){
       resizeSelectedFormula(FORMULA_SIZE_PRESETS[w] || 1);
       return;
@@ -2986,14 +3424,24 @@ function renderWhiteboard(doc, host){
   const contextBackBtn=contextAction("맨 뒤로","선택한 항목을 맨 뒤로","",()=>moveSelectedLayer("back"));
   const contextFlipXBtn=contextAction("좌우 반전","선택한 이미지 또는 교육 도형 좌우 반전","",()=>flipSelected("flipX"));
   const contextFlipYBtn=contextAction("상하 반전","선택한 이미지 또는 교육 도형 상하 반전","",()=>flipSelected("flipY"));
+  const contextGroupBtn=contextAction("묶기","선택한 항목들을 한 그룹으로 묶기 (Ctrl+G)","",groupMultiSelected);
   const contextUngroupBtn=contextAction("분리","선택한 그룹의 구성 요소 분리","",ungroupSelected);
   const contextMeasureBtn=contextAction("측정","선택한 도형의 길이·각도·넓이 붙이기","",toggleMeasureOnSelection);
   const contextVectorBtn=contextAction("합성","같은 점에서 출발한 두 화살표의 합력 붙이기","",toggleVectorSumOnSelection);
   const contextTransformBtn=contextAction("변환","대칭·회전·평행이동·닮음으로 바꾸기","",()=>toggleTransformPanel(true));
   const contextToBackgroundBtn=contextAction("배경으로","선택한 그림을 보드 배경으로 내리기","",()=>sendSelectedToBackground());
   const contextDeleteBtn=contextAction("삭제","선택한 항목 삭제 (Delete)","wb-context-danger",deleteSelected);
-  contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextToBackgroundBtn,contextFlipXBtn,contextFlipYBtn,contextMeasureBtn,contextTransformBtn,contextUngroupBtn,contextDeleteBtn);
+  contextItemActions.append(contextEditBtn,contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextForwardBtn,contextBackwardBtn,contextFrontBtn,contextBackBtn,contextToBackgroundBtn,contextFlipXBtn,contextFlipYBtn,contextMeasureBtn,contextTransformBtn,contextGroupBtn,contextUngroupBtn,contextDeleteBtn);
   contextItemSection.append(contextItemName,contextItemActions);
+
+  // 여러 개를 골랐을 때만 보이는 맞춤·간격. 기준은 고른 것 전체를 감싸는 상자.
+  const contextAlignSection=makeContextSection("맞춤·간격","wb-context-align-section"); contextAlignSection.hidden=true;
+  const contextAlignActions=document.createElement("div"); contextAlignActions.className="wb-context-actions wb-context-align-actions";
+  const contextAlignBtns=[["왼쪽","왼쪽 끝 맞춤","left"],["가운데","가로 가운데 맞춤","center"],["오른쪽","오른쪽 끝 맞춤","right"],["위","위쪽 끝 맞춤","top"],["중간","세로 가운데 맞춤","middle"],["아래","아래쪽 끝 맞춤","bottom"]]
+    .map(([label,title,kind])=>contextAction(label,title,"wb-context-align",()=>alignMultiSelected(kind)));
+  const contextDistributeXBtn=contextAction("가로 간격","가로 간격 고르게 (세 개 이상)","wb-context-align",()=>distributeMultiSelected("x"));
+  const contextDistributeYBtn=contextAction("세로 간격","세로 간격 고르게 (세 개 이상)","wb-context-align",()=>distributeMultiSelected("y"));
+  contextAlignActions.append(...contextAlignBtns,contextDistributeXBtn,contextDistributeYBtn); contextAlignSection.appendChild(contextAlignActions);
 
   const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
   const contextBoardActions=document.createElement("div"); contextBoardActions.className="wb-context-actions";
@@ -3097,7 +3545,7 @@ function renderWhiteboard(doc, host){
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextBoardSection,contextGearSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextAlignSection,contextBoardSection,contextGearSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
@@ -3106,7 +3554,9 @@ function renderWhiteboard(doc, host){
     const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen); contextMenuBoardPoint={x:lastBoardPointer.x,y:lastBoardPointer.y}; contextMenuClient={x:e.clientX,y:e.clientY};
     closeSymbolPicker();
     const canSelect=!(focus.active&&focus.controlsVisible)&&focusAllowsScreenPoint(screen);
-    wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw();
+    // 여러 개를 고른 채 그중 하나 위에서 우클릭하면 선택을 그대로 두고 여러 개용 메뉴를 띄운다.
+    const multiHit=canSelect&&liveMultiSel().length?itemAt(lastBoardPointer):null, keepMulti=!!multiHit&&multiSel.includes(multiHit);
+    if(!keepMulti){ clearMultiSel(); wb.selected=canSelect?itemAt(lastBoardPointer):null; redraw(); }
 
     const selected=wb.selected,formula=selected&&selected.type==="image"&&selected.role==="education-formula";
     const stencil=selected&&selected.type==="group"&&selected.role==="education-stencil",flippable=whiteboardCanFlipItem(selected);
@@ -3147,6 +3597,7 @@ function renderWhiteboard(doc, host){
     contextFlipXBtn.classList.toggle("active",flippable&&!!selected.flipX); contextFlipYBtn.classList.toggle("active",flippable&&!!selected.flipY);
     contextFlipXBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipX)); contextFlipYBtn.setAttribute("aria-pressed",String(flippable&&!!selected.flipY));
     contextUngroupBtn.hidden=!(selected&&selected.type==="group");
+    contextGroupBtn.hidden=true; contextAlignSection.hidden=true;
     // 배경으로 내리기는 그림에만 — 도형·글씨는 배경이 될 수 없다(배경은 그림 한 장이다).
     contextToBackgroundBtn.hidden=!(selected&&selected.type==="image"&&selected.src);
     const selectedIndex=selected?wb.items.indexOf(selected):-1, lastIndex=wb.items.length-1;
@@ -3164,6 +3615,18 @@ function renderWhiteboard(doc, host){
     contextClearBtn.disabled=!wb.items.length;
     const boardEmpty=!wb.items.length&&!wb.bgImage;
     contextPngBtn.disabled=boardEmpty; contextPdfBtn.disabled=boardEmpty; contextPrintBtn.disabled=boardEmpty; contextMemoBtn.disabled=boardEmpty;
+    if(keepMulti){
+      // 한 개 전용(편집·측정·변환·반전·배경으로·한 칸씩 앞뒤)은 감추고 여러 개에 뜻이 있는 것만 남긴다.
+      contextItemSection.hidden=false; contextBoardSection.hidden=true; contextGearSection.hidden=true;
+      contextOutputSection.hidden=true; contextRecordSection.hidden=true; contextPositionSection.hidden=true;
+      contextItemName.textContent=multiSel.length+"개 항목";
+      for(const button of contextItemActions.children)button.hidden=true;
+      for(const button of [contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextFrontBtn,contextBackBtn,contextGroupBtn,contextDeleteBtn])button.hidden=false;
+      contextFrontBtn.disabled=false; contextBackBtn.disabled=false;
+      contextGroupBtn.disabled=false;
+      contextAlignSection.hidden=false;
+      contextDistributeXBtn.disabled=multiSel.length<3; contextDistributeYBtn.disabled=multiSel.length<3;
+    }
     syncRecordButtons();
     for(const position in contextPositionBtns){
       const active=position===curPos; contextPositionBtns[position].classList.toggle("active",active); contextPositionBtns[position].setAttribute("aria-pressed",String(active));
@@ -5501,7 +5964,7 @@ function renderWhiteboard(doc, host){
   redoBtn = mkIconBtn("redo", "다시 실행 (Ctrl+Y)", "wb-act", doRedo);
   flipXBtn = mkBtn("↔", "선택한 이미지 또는 교육 도형 좌우 반전", "wb-act wb-flip-x wb-toolvis-flipx", () => flipSelected("flipX")); flipXBtn.disabled = true;
   flipYBtn = mkBtn("↕", "선택한 이미지 또는 교육 도형 상하 반전", "wb-act wb-flip-y wb-toolvis-flipy", () => flipSelected("flipY")); flipYBtn.disabled = true;
-  groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup wb-toolvis-ungroup", ungroupSelected); groupActionBtn.disabled = true;
+  groupActionBtn = mkBtn("분리", "선택한 교육 도형의 그룹 풀기", "wb-act wb-ungroup wb-toolvis-ungroup", () => { if (liveMultiSel().length) groupMultiSelected(); else ungroupSelected(); }); groupActionBtn.disabled = true;
   const clearBtn = mkIconBtn("trash", "보드 전체 지우기", "wb-act wb-clear wb-toolvis-clear", confirmClearAll);
   actGroup.append(undoBtn, redoBtn, flipXBtn, flipYBtn, groupActionBtn, clearBtn);
 
@@ -5648,10 +6111,25 @@ function renderWhiteboard(doc, host){
       const k = String(e.key).toLowerCase();
       if (k === "z" && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); doUndo(); }
       else if (k === "y" || (k === "z" && e.shiftKey)){ e.preventDefault(); e.stopPropagation(); doRedo(); }
+      else if ((k === "a" || k === "g") && !(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable))){
+        e.preventDefault(); e.stopPropagation();
+        if (k === "a") selectAllItems();                               // 보드 항목 전부 고르기
+        else if (e.shiftKey) ungroupSelected();                        // Ctrl+Shift+G 풀기
+        else groupMultiSelected();                                     // Ctrl+G 묶기
+      }
+    } else if (/^Arrow(Up|Down|Left|Right)$/.test(e.key) && !e.altKey && (wb.selected || liveMultiSel().length)
+      && focusContextMenu.hidden && !(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable))){
+      e.preventDefault(); e.stopPropagation();
+      const step = e.shiftKey ? 10 : 1;
+      nudgeSelection(e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0, e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0);
+    } else if ((e.key === "Delete" || e.key === "Backspace") && liveMultiSel().length){   // 여러 개 한꺼번에 삭제
+      e.preventDefault(); e.stopPropagation();
+      deleteMultiSelected();
     } else if ((e.key === "Delete" || e.key === "Backspace") && wb.selected){      // 선택한 이미지·도형·텍스트 삭제
       e.preventDefault(); e.stopPropagation();
       deleteSelected();
-    } else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
+    } else if (e.key === "Escape" && liveMultiSel().length){ clearMultiSel(); redraw(); }
+    else if (e.key === "Escape" && wb.selected){ wb.selected = null; redraw(); }   // 선택 해제
     else if (e.key === "Escape" && (gear.ruler || gear.protractor || gear.compass)){  // 꺼낸 교구 치우기
       e.preventDefault(); e.stopPropagation();
       gear.ruler = null; gear.protractor = null; gear.compass = null;
@@ -5659,6 +6137,7 @@ function renderWhiteboard(doc, host){
     }
   };
   const onKeyUp = (e) => {
+    if (/^Arrow/.test(e.key)){ flushNudge(); return; }
     if (e.code !== "Space") return;
     spacePanning = false; canvas.classList.remove("pan-ready");
   };
