@@ -150,6 +150,45 @@ static class LocalFileSaveTest
         BytesEqual(Path.Combine(root, "second.bin"), new byte[0], "next buffered request");
         NoTemps(root);
     }
+    // 쓸 수 없는 경로를 보내면 거절해야 한다. 예전에는 practice.py 로 바꿔 저장해 기존 파일을 덮어썼다.
+    static void CheckInvalidSavePath(string root)
+    {
+        string practice = Path.Combine(root, "practice.py");
+        byte[] original = Encoding.UTF8.GetBytes("print('keep me')\n");
+        byte[] other = new byte[] { 80, 75, 3, 4 };
+        File.WriteAllBytes(practice, original);
+        foreach (string invalid in new[] { "a/../b.xlsx", "report: 2024.xlsx", "what?.docx", "/", "." })
+        {
+            string response = Send(Request("/save-file", invalid, other.Length.ToString(), other, ""), 8192, false);
+            Require(response.StartsWith("HTTP/1.1 400") && response.Contains("invalid-save-path"), "invalid save path rejected: " + invalid);
+            BytesEqual(practice, original, "invalid save path must not overwrite practice.py: " + invalid);
+        }
+        // 이름을 보내지 않은 저장은 예전처럼 기본 이름으로 간다.
+        Require(Send(Request("/save-file", "", other.Length.ToString(), other, ""), 8192, false).StartsWith("HTTP/1.1 200"), "empty save path uses default");
+        BytesEqual(practice, other, "empty save path writes practice.py");
+        File.Delete(practice);
+        NoTemps(root);
+    }
+    // 같은 이름·같은 초의 시험 제출은 서로 덮어쓰지 않고 번호를 붙여 모두 남긴다.
+    static void CheckExamSubmissionNames(string root)
+    {
+        MethodInfo save = Launcher.GetMethod("ExamReceiveSaveSubmission", PrivateStatic);
+        string baseRel = "제출함/시험/김민수_20260914_101500";
+        byte[][] bodies = { new byte[] { 1 }, new byte[] { 2, 2 }, new byte[] { 3, 3, 3 } };
+        var saved = new List<string>();
+        foreach (byte[] body in bodies)
+        {
+            string full = (string)save.Invoke(null, new object[] { baseRel, body });
+            Require(full != null, "exam submission saved");
+            saved.Add(full);
+        }
+        string dir = Path.Combine(root, "제출함", "시험");
+        Require(saved[0] == Path.Combine(dir, "김민수_20260914_101500.examdone"), "first submission keeps plain name");
+        Require(saved[1] == Path.Combine(dir, "김민수_20260914_101500_2.examdone"), "second submission gets _2");
+        Require(saved[2] == Path.Combine(dir, "김민수_20260914_101500_3.examdone"), "third submission gets _3");
+        for (int i = 0; i < bodies.Length; i++) BytesEqual(saved[i], bodies[i], "exam submission bytes preserved " + (i + 1));
+        Require(save.Invoke(null, new object[] { "../밖/학생_20260914_101500", bodies[0] }) == null, "exam path outside save root rejected");
+    }
     public static void Main(string[] args)
     {
         string root = Path.Combine(Path.GetFullPath(args[0]), "files"); Directory.CreateDirectory(root);
@@ -158,6 +197,7 @@ static class LocalFileSaveTest
         var folders = (Dictionary<string, string>)Launcher.GetField("SourceFolders", PrivateStatic).GetValue(null);
         folders["test"] = root;
         CheckRoute(root, false); CheckRoute(root, true); CheckKeepAlive(root);
+        CheckInvalidSavePath(root); CheckExamSubmissionNames(root);
         Console.WriteLine("Local file save checks passed: " + checks);
     }
 }

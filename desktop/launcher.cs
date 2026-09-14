@@ -2473,10 +2473,12 @@ class ClassDockLauncher
                     try
                     {
                         string rel = headers.ContainsKey("X-Save-Path") ? Uri.UnescapeDataString(headers["X-Save-Path"]) : "";
-                        string safe = SafeRelPath(rel);
-                        if (safe == null) safe = "practice.py";
+                        // 이름을 아예 안 보냈을 때만 기본 이름을 쓴다. 보냈는데 쓸 수 없는 경로(.., 콜론 같은
+                        // Windows 금지 문자)를 기본 이름으로 바꿔 저장하면 기존 practice.py 를 조용히 덮어쓴다.
+                        // 거절하면 호출부가 !res.ok 로 다른 저장 방식으로 넘어간다.
+                        string safe = string.IsNullOrWhiteSpace(rel) ? "practice.py" : SafeRelPath(rel);
                         string full;
-                        if (!TryResolveSaveRootPath(safe, out full))
+                        if (safe == null || !TryResolveSaveRootPath(safe, out full))
                         {
                             WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("invalid-save-path"));
                             return;
@@ -13606,6 +13608,43 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
         return cleaned.Length > 0 ? cleaned : fallback;
     }
 
+    // 제출본을 baseRel + ".examdone" 에 새 파일로 쓴다. 파일 이름이 이름과 초 단위 시각뿐이라
+    // 동명이인이 같은 초에 내면 이름이 겹친다. 덮어쓰면 앞 사람 제출이 디스크에서 사라지므로
+    // CreateNew 로만 열고, 이미 있으면 _2, _3 … 을 붙인다. 성공하면 저장한 전체 경로, 실패하면 null.
+    static string ExamReceiveSaveSubmission(string baseRel, byte[] body)
+    {
+        for (int n = 1; n <= ExamReceiveMaxItems + 1; n++)
+        {
+            string rel = baseRel + (n == 1 ? "" : "_" + n) + ".examdone";
+            string full;
+            if (!TryResolveSaveRootPath(rel, out full)) return null;
+            if (File.Exists(full)) continue;
+            bool created = false;
+            try
+            {
+                string dir = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                using (FileStream output = new FileStream(full, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    created = true;
+                    output.Write(body, 0, body.Length);
+                    output.Flush(true);
+                }
+                return full;
+            }
+            catch
+            {
+                // 확인과 생성 사이에 다른 연결이 같은 이름을 먼저 만들었으면 다음 번호로 넘어간다.
+                // (csc 4.0 은 C# 5 라 예외 필터(when)를 쓸 수 없다.)
+                if (!created && File.Exists(full)) continue;
+                // 쓰다 실패한 반쪽 파일을 제출함에 남기지 않는다(학생 화면은 로컬 파일로 폴백한다).
+                if (created) { try { File.Delete(full); } catch { } }
+                return null;
+            }
+        }
+        return null;
+    }
+
     static void ExamReceiveHandle(TcpClient client)
     {
         string ip = "?";
@@ -13763,21 +13802,8 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 // 파일이 곧 진실이다 — 앱이 죽어도 남고, 파일로 받은 제출과 같은 물건이 된다.
                 string folder = "제출함/" + ExamSafeNameToken(examTitle.Length > 0 ? examTitle : title, "시험지");
                 string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                string rel = folder + "/" + ExamSafeNameToken(student, "학생") + "_" + stamp + ".examdone";
-                string full;
-                bool saved = false;
-                if (TryResolveSaveRootPath(rel, out full))
-                {
-                    try
-                    {
-                        string dir = Path.GetDirectoryName(full);
-                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                        File.WriteAllBytes(full, body);
-                        saved = true;
-                    }
-                    catch { }
-                }
-                if (!saved)
+                string baseRel = folder + "/" + ExamSafeNameToken(student, "학생") + "_" + stamp;
+                if (ExamReceiveSaveSubmission(baseRel, body) == null)
                 {
                     // 학생 화면이 로컬 .examdone 파일로 폴백할 수 있도록 성공으로 접수하지 않는다.
                     ExamReceiveWrite(stream, "500 Internal Server Error", "{\"ok\":false,\"error\":\"save-failed\"}");
