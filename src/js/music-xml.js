@@ -92,6 +92,8 @@ function musicParseXmlText(text, sourceName){
   if (musicXmlLocalName(root) !== "score-partwise"){
     throw new Error("현재는 score-partwise MusicXML만 열 수 있어요.");
   }
+  const embedded = musicXmlEmbeddedSheet(xml, text);
+  if (embedded) return { sheet:embedded, warnings:[], fromClassDock:true };
 
   const warnings = new Set();
   const parts = musicXmlChildren(root, "part");
@@ -357,7 +359,7 @@ function musicParseXmlText(text, sourceName){
     warnings.add("이 환경에서는 추가 악기 파트를 가져오지 못했어요.");
   }
   sheet.updatedAt = Date.now();
-  return { sheet, warnings:Array.from(warnings) };
+  return { sheet, warnings:Array.from(warnings), fromClassDock:false };
 }
 
 function musicXmlEscape(value){
@@ -547,7 +549,42 @@ function musicSerializeXmlSingle(sheet){
   return lines.join("\n");
 }
 
+/* 앱이 쓴 MusicXML 에는 악보(.msheet) 전체를 표준 확장 칸(<identification><miscellaneous>)에 함께 담는다.
+   MusicXML 로는 적을 수 없는 것(연습 기호·파트 음량·반주 설정 등)이 있어서, 이게 없으면 .mxl 을 앱에서 열고
+   저장할 때마다 조금씩 사라진다. 다시 열 때는 담긴 악보로 만든 MusicXML 이 파일 본문과 똑같을 때만 믿는다
+   — 다른 프로그램이 음표를 고치고 이 칸만 남겨 둔 파일이면 본문이 달라지므로 본문을 읽는다. */
+const MUSIC_XML_EMBED_FIELD = "classdock-msheet";
+const MUSIC_XML_RECOVERY_FORMAT = "classdock-musicxml-recovery";
+
 function musicSerializeXml(sheet){
+  const model = sheet || musicEmpty();
+  const body = musicSerializeXmlPlain(model);
+  const embed = '  <identification><encoding><software>ClassDock</software></encoding>'
+    + `<miscellaneous><miscellaneous-field name="${MUSIC_XML_EMBED_FIELD}">${musicXmlEscape(JSON.stringify(JSON.parse(musicSerialize(model))))}</miscellaneous-field></miscellaneous></identification>`;
+  // 함수로 바꿔 넣는다 — 가사·제목에 든 "$&" 같은 글자가 치환 패턴으로 읽히면 안 된다.
+  return body.replace(/(  <work>.*<\/work>\n)/, (line) => line + embed + "\n");
+}
+
+// 비교용 본문 — 담아 둔 악보 칸과 줄바꿈 차이는 뺀다.
+function musicXmlComparableBody(text){
+  return String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n")
+    .replace(/[ \t]*<identification>[\s\S]*?<\/identification>\n?/, "").trim();
+}
+
+// 앱이 쓴 뒤로 본문이 그대로인 파일이면 담아 둔 악보를, 아니면 null 을 돌려준다.
+function musicXmlEmbeddedSheet(xml, text){
+  const field = musicXmlDescendants(xml, "miscellaneous-field")
+    .find((node) => String(node.getAttribute("name") || "") === MUSIC_XML_EMBED_FIELD);
+  if (!field) return null;
+  try {
+    const sheet = musicParse(String(field.textContent || ""));
+    return musicXmlComparableBody(musicSerializeXmlPlain(sheet)) === musicXmlComparableBody(text) ? sheet : null;
+  } catch(error){
+    return null;
+  }
+}
+
+function musicSerializeXmlPlain(sheet){
   const model = sheet || musicEmpty();
   musicSyncActivePart(model);
   const parts = musicParts(model);
@@ -605,43 +642,81 @@ async function musicXmlReadMxl(file){
   return musicXmlZipEntryText(entry);
 }
 
-function musicXmlDerivedName(name){
-  return musicXmlSourceTitle(name) + ".msheet";
+// 문서 이름이 MusicXML 이면 그 형식("mxl" | "musicxml"), 아니면 "".
+function musicXmlDocFormat(name){
+  const match = String(name || "").match(/\.(mxl|musicxml)$/i);
+  return match ? match[1].toLowerCase() : "";
 }
 
-function musicXmlDerivedPath(path){
-  if (!path) return path;
-  const value = String(path);
-  return /\.(?:musicxml|mxl)$/i.test(value) ? value.replace(/\.(?:musicxml|mxl)$/i, ".msheet") : value + ".msheet";
+/* 저장하지 않은 편집의 복구본. 파일 이름은 원본(.mxl)과 같지만 내용은 악보 JSON 이다 — 압축을 매번
+   만들지 않으려는 것이고, 다른 프로그램이 만든 원본인지(owned)도 함께 남겨야 되살린 뒤 첫 저장에서
+   덮어쓰기를 다시 물을 수 있다. */
+function musicXmlRecoveryText(sheet, owned){
+  return JSON.stringify({ format:MUSIC_XML_RECOVERY_FORMAT, version:1, owned:owned === true,
+    sheet:JSON.parse(musicSerialize(sheet)) });
 }
 
+// 복구본이면 { sheet, owned }, 아니면 null. 압축(.mxl)은 "PK", MusicXML 은 "<" 로 시작하므로 "{" 로 가른다.
+function musicXmlReadRecovery(text){
+  const value = String(text || "").replace(/^﻿/, "").trimStart();
+  if (!value.startsWith("{")) return null;
+  const raw = JSON.parse(value);
+  if (raw && raw.format === MUSIC_XML_RECOVERY_FORMAT && raw.sheet){
+    return { sheet:musicParse(JSON.stringify(raw.sheet)), owned:raw.owned === true };
+  }
+  return { sheet:musicParse(value), owned:false };
+}
+
+async function musicXmlBuildMxl(xml){
+  if (typeof MNLazy === "undefined" || !(await MNLazy.tryNeed("jszip"))) throw new Error("압축 MusicXML을 만드는 도구를 준비하지 못했어요.");
+  const Zip = (typeof globalThis !== "undefined") ? globalThis.JSZip : null;
+  if (!Zip) throw new Error("압축 MusicXML을 만드는 도구를 준비하지 못했어요.");
+  const zip = new Zip();
+  // 규격대로 mimetype 을 맨 앞에 압축 없이 둔다. 안쪽 파일 이름은 ASCII 로 — 한글 이름은 프로그램마다 깨진다.
+  zip.file("mimetype", "application/vnd.recordare.musicxml", { compression:"STORE" });
+  zip.file("META-INF/container.xml", '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<container><rootfiles><rootfile full-path="score.musicxml" media-type="application/vnd.recordare.musicxml+xml"/></rootfiles></container>\n');
+  zip.file("score.musicxml", xml);
+  const options = { type:"uint8array", compression:"DEFLATE" };
+  return typeof zip.generateAsync === "function" ? zip.generateAsync(options) : zip.generate(options);
+}
+
+/* MusicXML 파일은 다른 파일처럼 "그 파일 그대로" 연다 — 이름·경로·자동 복원 기준이 모두 원본(.mxl)이고,
+   편집 모델만 악보(.msheet)다. 저장은 saveMusicSheet 가 원래 형식으로 되쓴다.
+   opts.importAsSheet 는 편집기의 [MusicXML 열기]처럼 위치 없이 고른 파일을 새 악보로 가져올 때만 쓴다. */
 async function loadMusicXml(file, opts = {}){
   try {
-    const ext = String(file && file.name || "").split(".").pop().toLowerCase();
-    const text = ext === "mxl" ? await musicXmlReadMxl(file) : await file.text();
-    const imported = musicParseXmlText(text, file.name);
-    const name = musicXmlDerivedName(file.name);
-    const derived = new File([musicSerialize(imported.sheet)], name, { type:"application/json" });
-    const derivedOpts = {
-      ...opts,
-      isScratch:true,
-      fsHandle:null,
-      nativeAbsolutePath:null,
-      sqliteDiskPath:null,
-      originalSaveMode:false,
-      textEncoding:null,
-      workspacePath:musicXmlDerivedPath(opts.workspacePath),
-      relPath:musicXmlDerivedPath(opts.relPath),
-      sourceKey:opts.sourceKey || file.name
-    };
-    const doc = await loadMusicSheet(derived, derivedOpts);
-    if (doc){
-      doc.importedFromMusicXml = file.name;
-      doc.musicImportWarnings = imported.warnings;
+    const format = musicXmlDocFormat(file && file.name) || "musicxml";
+    const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+    const zipped = head[0] === 0x50 && head[1] === 0x4b;
+    const text = zipped ? await musicXmlReadMxl(file) : await file.text();
+    const recovered = zipped ? null : musicXmlReadRecovery(text);
+    const imported = recovered
+      ? { sheet:recovered.sheet, warnings:[], fromClassDock:recovered.owned }
+      : musicParseXmlText(text, file.name);
+    if (opts.importAsSheet){
+      const derived = new File([musicSerialize(imported.sheet)], musicXmlSourceTitle(file.name) + ".msheet",
+        { type:"application/json" });
+      const { importAsSheet, ...rest } = opts;
+      const made = await loadMusicSheet(derived, { ...rest, isScratch:true, sourceKey:opts.sourceKey || file.name });
+      if (made) made.musicImportWarnings = imported.warnings;
+      if (typeof toast === "function"){
+        const detail = imported.warnings.length ? ` ${imported.warnings.join(" ")}` : "";
+        toast(`MusicXML을 편집용 악보로 가져왔어요.${detail}`, imported.warnings.length ? 6500 : 2600);
+      }
+      return made;
     }
-    if (typeof toast === "function"){
-      const detail = imported.warnings.length ? ` ${imported.warnings.join(" ")}` : "";
-      toast(`MusicXML을 편집용 악보로 가져왔어요.${detail}`, imported.warnings.length ? 6500 : 2600);
+    const sheetFile = new File([musicSerialize(imported.sheet)], file.name, { type:"application/json" });
+    const doc = await loadMusicSheet(sheetFile, { ...opts, textEncoding:null });
+    if (doc && doc.kind === "music"){
+      doc.musicXmlFormat = format;
+      doc.musicXmlOwned = imported.fromClassDock === true;
+      doc.musicImportWarnings = imported.warnings;
+      doc.sourceFile = file;             // 자동 복원 묶음·되돌리기는 디스크와 같은 원본 바이트를 쓴다
+      doc.musicXmlDiskFile = recovered ? null : file;
+    }
+    if (imported.warnings.length && !opts.restoreFromWorkspace && typeof toast === "function"){
+      toast(`MusicXML 일부는 편집기에서 다르게 가져왔어요. ${imported.warnings.join(" ")}`, 6500);
     }
     return doc;
   } catch(error){

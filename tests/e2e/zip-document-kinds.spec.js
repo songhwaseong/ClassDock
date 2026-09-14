@@ -117,12 +117,12 @@ test("압축 안의 압축형 MusicXML(.mxl)도 악보로 가져온다", async (
     ])
   });
 
-  /* .mxl 은 원본을 덮어쓰지 않고 편집 가능한 새 .msheet 로 가져온다(이름이 바뀐다).
+  /* .mxl 은 다른 파일처럼 그 이름 그대로 악보 편집기로 연다(저장도 원래 형식으로 되쓴다).
      예전에는 여기서 "형식 미지원"으로 세어지고 사라졌다. */
-  await expect(page.locator("#sbList .sb-item").filter({ hasText: "압축 악보.msheet" }))
+  await expect(page.locator("#sbList .sb-item").filter({ hasText: "압축 악보.mxl" }))
     .toHaveCount(1, { timeout: 20_000 });
   const kinds = await page.evaluate(() => docs.map(d => ({ name:d.name, kind:d.kind })));
-  expect(kinds).toContainEqual({ name: "압축 악보.msheet", kind: "music" });
+  expect(kinds).toContainEqual({ name: "압축 악보.mxl", kind: "music" });
   expect(kinds).toContainEqual({ name: "메모.txt", kind: "office" });
 
   // 안쪽 XML 의 내용까지 살아 있어야 한다(제목·마디).

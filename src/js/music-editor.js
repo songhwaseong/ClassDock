@@ -290,14 +290,116 @@ async function openMusicSheetFromMemo(options = {}){
 }
 
 /* ===== 저장 ===== */
+/* MusicXML(.mxl·.musicxml) 문서는 그 형식 그대로 원본에 되쓴다. 다른 프로그램이 만든 파일은 앱이 읽지
+   못한 정보(꾸밈음·레이아웃 등)가 덮어쓰면 사라지므로 처음 한 번만 묻는다. 앱이 쓴 파일은 악보 전체를
+   함께 담아 두므로(musicSerializeXml) 묻지 않는다.
+   반환: "overwrite" | "separate" | "cancel" */
+async function musicXmlAskOverwrite(doc){
+  if (!doc || doc.musicXmlOwned || typeof confirmDialog !== "function") return "overwrite";
+  const warnings = Array.isArray(doc.musicImportWarnings) ? doc.musicImportWarnings : [];
+  const message = `'${doc.name}'은(는) 다른 프로그램에서 만든 MusicXML이에요. 원본에 덮어쓰면 이 앱이 읽지 못한 정보`
+    + `(꾸밈음·레이아웃·일부 기호 등)는 사라져요.`
+    + (warnings.length ? ` 가져올 때: ${warnings.join(" ")}` : "")
+    + " 원본은 그대로 두고 악보(.msheet) 파일로 따로 저장할 수도 있어요.";
+  // Enter 가 걸리는 기본 선택지는 원본을 지키는 쪽으로 둔다.
+  const choice = await confirmDialog(message, "악보(.msheet)로 따로 저장", "취소", { altText:"원본에 덮어쓰기" });
+  return choice === "ok" ? "separate" : choice === "alt" ? "overwrite" : "cancel";
+}
+
+/* 원본은 두고, 지금 편집한 악보를 같은 폴더의 새 .msheet 탭으로 옮겨 저장한다. 저장에 성공하면 원본 탭은
+   디스크 내용으로 되돌린다 — 탭 하나가 늘 디스크 파일 하나를 가리키게. */
+async function musicSaveAsSeparateSheet(doc){
+  if (typeof handleFiles !== "function") return false;
+  const json = musicSerialize(doc.sheet);
+  const base = musicDocBaseName(doc);
+  const makeName = (n) => base + (n > 1 ? " " + n : "") + ".msheet";
+  const path = typeof normalizedRunPath === "function" ? normalizedRunPath(doc.relPath || doc.workspacePath || "") : "";
+  const dir = doc.archiveCtx && doc.parentId && path && typeof runPathDir === "function" ? runPathDir(path) : "";
+  let made;
+  if (dir){
+    const taken = new Set(docs.map((item) => normalizedRunPath(item.workspacePath || item.relPath || "")));
+    let name = makeName(1);
+    for (let n = 2; taken.has(normalizedRunPath(dir + "/" + name)); n++) name = makeName(n);
+    const relPath = dir + "/" + name;
+    const file = new File([json], name, { type:"application/json" });
+    if (typeof doc.archiveCtx.add === "function") doc.archiveCtx.add(relPath, file);
+    made = await handleFiles([file], { isScratch:true, parentId:doc.parentId, archiveCtx:doc.archiveCtx,
+      relPath, workspacePath:relPath, originalSaveMode:!!doc.originalSaveMode, fsDirHandle:doc.fsDirHandle || null });
+  } else {
+    made = await handleFiles([new File([json], makeName(1), { type:"application/json" })], { isScratch:true });
+  }
+  if (!made || made.kind !== "music") return false;
+  if (typeof setActiveDoc === "function") setActiveDoc(made.id);
+  const ok = await saveMusicSheet(made);
+  if (!ok) return false;
+  await musicRevertToDisk(doc);
+  if (typeof toast === "function") toast(`'${made.name}'(으)로 따로 저장했어요. 원본 '${doc.name}'은(는) 그대로예요.`, 3600, { type:"success" });
+  return true;
+}
+
+// 원본 탭을 디스크(또는 열 때 읽은) 내용으로 되돌리고 자동 복원 묶음의 복구본도 원본 바이트로 바꾼다.
+async function musicRevertToDisk(doc){
+  try {
+    let file = null;
+    if (doc.fsHandle && typeof doc.fsHandle.getFile === "function"){
+      try { file = await doc.fsHandle.getFile(); } catch(_){ file = null; }
+    }
+    file = file || doc.musicXmlDiskFile;
+    if (!file) return false;
+    const format = musicXmlDocFormat(doc.name);
+    const text = format === "mxl" ? await musicXmlReadMxl(file) : await file.text();
+    const imported = musicParseXmlText(text, doc.name);
+    const json = musicSerialize(imported.sheet);
+    doc.savedText = json;
+    if (typeof doc.musicLoadState === "function") doc.musicLoadState(json);
+    else doc.sheet = imported.sheet;
+    doc.savedText = musicSerialize(doc.sheet);   // 편집기가 시각 값을 옮기지 않으므로 되돌린 뒤 모습으로 다시 잰다
+    doc.musicXmlOwned = imported.fromClassDock === true;
+    doc.musicImportWarnings = imported.warnings;
+    doc.musicXmlDiskFile = file;
+    if (typeof markDocumentSavedSnapshot === "function"){
+      await markDocumentSavedSnapshot(doc, new Uint8Array(await file.arrayBuffer()), file.type || "application/octet-stream");
+    } else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
+    return true;
+  } catch(error){
+    console.warn("원본 악보로 되돌리지 못했어요:", error);
+    return false;
+  }
+}
+
 async function saveMusicSheet(doc){
   if (!doc || !doc.sheet) return false;
+  const format = musicXmlDocFormat(doc.name);
+  if (format){
+    const choice = await musicXmlAskOverwrite(doc);
+    if (choice === "cancel") return false;
+    if (choice === "separate") return musicSaveAsSeparateSheet(doc);
+  }
   const previousUpdatedAt = doc.sheet.updatedAt;
   doc.sheet.updatedAt = Date.now();
   const json = musicSerialize(doc.sheet);
-  const ok = (typeof saveTextDoc === "function") ? await saveTextDoc(json, doc, doc.name) : false;
+  let payload = json;
+  let snapshotType = "application/json";
+  try {
+    if (format === "musicxml"){
+      payload = musicSerializeXml(doc.sheet);
+      snapshotType = "application/vnd.recordare.musicxml+xml";
+    } else if (format === "mxl"){
+      payload = await musicXmlBuildMxl(musicSerializeXml(doc.sheet));
+      snapshotType = "application/vnd.recordare.musicxml";
+    }
+  } catch(error){
+    doc.sheet.updatedAt = previousUpdatedAt;
+    if (typeof toast === "function") toast(error && error.message ? error.message : "MusicXML을 만들지 못했어요.", 4200, { type:"error" });
+    return false;
+  }
+  const ok = (typeof saveTextDoc === "function") ? await saveTextDoc(payload, doc, doc.name) : false;
   if (ok){
     doc.savedText = json;
+    if (format){
+      doc.musicXmlOwned = true;           // 이제 이 파일은 악보 전체를 담고 있어 다음 저장부터 묻지 않는다
+      doc.musicImportWarnings = [];
+    }
     // updatedAt 도 스냅샷에 들어가므로 저장 성공 시 현재 이력의 기준점도 같은 JSON 으로 맞춘다.
     // 그래야 저장 → 편집 → 되돌리기 뒤 사용자 내용이 저장본과 같으면 다시 깨끗한 상태가 된다.
     if (doc._musicHistory && typeof doc._musicHistory.replaceCurrent === "function"){
@@ -307,7 +409,9 @@ async function saveMusicSheet(doc){
     // 않으므로(saveTextDoc 은 디스크에만 쓴다) 여기서 작업공간 사본까지 새 내용으로 바꿔 준다.
     // 이걸 빠뜨리면 저장한 악보가 다음 실행 때 "만들 때의 빈 악보"로 되돌아온다(표·이미지와 같은 경로).
     if (typeof markDocumentSavedSnapshot === "function"){
-      await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json");
+      // MusicXML 문서는 디스크에 쓴 바이트 그대로 남겨 폴더를 다시 읽든 묶음에서 되살리든 같은 내용이 된다.
+      const snapshot = typeof payload === "string" ? new TextEncoder().encode(payload) : payload;
+      await markDocumentSavedSnapshot(doc, snapshot, snapshotType);
     } else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false);
   } else {
     // 취소·실패한 저장이 메타데이터만 몰래 바꾸지 않게 원래 시각을 복원한다.
@@ -316,10 +420,14 @@ async function saveMusicSheet(doc){
   return ok;
 }
 
+// 확장자를 뗀 악보 이름 — .msheet 뿐 아니라 그대로 연 MusicXML(.mxl·.musicxml)도 같은 이름을 쓴다.
+function musicDocBaseName(doc){
+  return String((doc && doc.name) || (doc && doc.sheet && doc.sheet.title) || "악보")
+    .replace(/\.(?:msheet|musicxml|mxl)$/i, "");
+}
+
 function musicExportName(doc, ext){
-  const base = String((doc && doc.name) || (doc && doc.sheet && doc.sheet.title) || "악보")
-    .replace(/\.msheet$/i, "");
-  return base + "." + ext;
+  return musicDocBaseName(doc) + "." + ext;
 }
 
 // 파트 이름이 파일 이름에 들어가므로 폴더에 쓸 수 없는 글자를 걸러 낸다.
@@ -446,7 +554,12 @@ async function mountMusicEditor(doc){
      PDF·노트북·표·이미지·블록 문서와 같은 경로(saveDocumentRecoverySnapshot)이고, 원본 파일은 건드리지 않는다. */
   let recoveryTimer = 0;
   const musicRecoveryBytes = () => {
-    try { return new TextEncoder().encode(musicSerialize(sheet)); } catch(_){ return null; }
+    try {
+      // 그대로 연 MusicXML 은 원본 이름으로 복구본을 남기므로, 원본을 누가 만들었는지까지 함께 담는다.
+      const text = doc.musicXmlFormat && typeof musicXmlRecoveryText === "function"
+        ? musicXmlRecoveryText(sheet, doc.musicXmlOwned === true) : musicSerialize(sheet);
+      return new TextEncoder().encode(text);
+    } catch(_){ return null; }
   };
   const scheduleMusicRecovery = () => {
     clearTimeout(recoveryTimer);
@@ -472,6 +585,7 @@ async function mountMusicEditor(doc){
     clearTimeout(recoveryTimer);
     recoveryTimer = 0;
     if (doc.flushBackupRecovery === flushMusicBackup) delete doc.flushBackupRecovery;
+    delete doc.musicLoadState;
   });
 
   const touch = () => {
@@ -5047,7 +5161,7 @@ async function mountMusicEditor(doc){
       return;
     }
     musicXmlImportBtn.disabled = true;
-    try { await loadMusicXml(file); }
+    try { await loadMusicXml(file, { importAsSheet:true }); }   // 위치 없이 고른 파일 → 새 악보로
     finally { musicXmlImportBtn.disabled = false; }
   });
   musicXmlBtn.addEventListener("click", exportMusicXml);
@@ -5258,7 +5372,7 @@ async function mountMusicEditor(doc){
           onError:(error, failedTimbre) => console.warn("연습 음원 음색을 읽지 못했어요:", failedTimbre, error)
         });
         bytes += blob.size;
-        files.push({ name:`${musicSafeFileName(doc.name.replace(/\.msheet$/i, ""), "악보")} - ${musicSafeFileName(job.part.name, "파트")} (${percent}%).wav`, blob });
+        files.push({ name:`${musicSafeFileName(musicDocBaseName(doc), "악보")} - ${musicSafeFileName(job.part.name, "파트")} (${percent}%).wav`, blob });
       }
       if (!files.length){
         practiceStatus.textContent = practiceAudioCancel ? "그만뒀어요." : "만든 음원이 없어요.";
@@ -5280,7 +5394,7 @@ async function mountMusicEditor(doc){
       const bundle = typeof zip.generateAsync === "function"
         ? await zip.generateAsync({ type:"blob", compression:"STORE" })
         : zip.generate({ type:"blob", compression:"STORE" });
-      musicDownloadBlob(`${musicSafeFileName(doc.name.replace(/\.msheet$/i, ""), "악보")} - 연습음원.zip`, bundle);
+      musicDownloadBlob(`${musicSafeFileName(musicDocBaseName(doc), "악보")} - 연습음원.zip`, bundle);
       practiceStatus.textContent = `${files.length}벌(${megabytes}MB)을 ZIP 한 장으로 저장했어요.`;
     } catch(error){
       console.warn("연습 음원 만들기 실패:", error);
@@ -5422,7 +5536,7 @@ async function mountMusicEditor(doc){
     // 이 탭이 담고 있는 내용을 통째로 보낼 때만 원래 메모 블록을 바꾼다. 여러 단 중 한 단만
     // 보내면서 블록을 갈아치우면 나머지 단이 메모에서 사라져 버린다.
     const coversAll = !indexes || indexes.length === sheet.measures.length;
-    const base = String(doc.name || sheet.title || "악보").replace(/\.msheet$/i, "");
+    const base = musicDocBaseName(doc);
     const label = base + (indexes ? " — " + musicRangeLabel(indexes) : "");
     try {
       const blob = await scoreImageBlob(indexes ? lineIndex : null);
@@ -5495,10 +5609,7 @@ async function mountMusicEditor(doc){
 
   /* ----- 되돌리기 -----
      스냅샷은 악보 JSON 문자열 하나다(가볍고 비교가 정확하다). */
-  history = MNEditHistory.create({
-    capture:() => musicSerialize(sheet),
-    isEqual:(a, b) => a === b,
-    apply:(state) => {
+  const applyMusicState = (state) => {
       const restored = musicParse(state);
       sheet.title = restored.title;
       sheet.tempo = restored.tempo;
@@ -5528,12 +5639,22 @@ async function mountMusicEditor(doc){
       selection = null;
       syncTools();
       afterEdit();
-    },
+  };
+  history = MNEditHistory.create({
+    capture:() => musicSerialize(sheet),
+    isEqual:(a, b) => a === b,
+    apply:applyMusicState,
     onChange:updateHistoryButtons,
     limit:MUSIC_HISTORY_LIMIT
   });
   doc._musicHistory = history;
   history.reset();
+  // 원본 탭을 디스크 내용으로 되돌릴 때(musicRevertToDisk) — 되돌리기 기록도 새로 시작한다.
+  doc.musicLoadState = (state) => {
+    history.cancel();
+    applyMusicState(state);
+    history.reset();
+  };
 
   /* ----- 정리 ----- */
   document.addEventListener("keydown", onKeyDown, true);

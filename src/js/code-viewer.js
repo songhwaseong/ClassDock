@@ -697,6 +697,7 @@ function detectDominantEol(raw){
 
 // 저장 직전, 편집기의 LF 텍스트를 원본 개행·BOM 으로 되돌린다(문자 인코딩은 UTF-8 로 고정).
 function applyDocEncodingOnSave(value, ownerDoc){
+  if (value instanceof Uint8Array) return value;      // 압축 MusicXML(.mxl) 같은 이진 내용은 그대로 쓴다
   let out = String(value == null ? "" : value);
   const eol = ownerDoc && ownerDoc.textEol;
   if (eol === "crlf") out = out.replace(/\n/g, "\r\n");
@@ -3629,6 +3630,7 @@ function attachRunSplitter(split, divider){
 function downloadTextFile(text, name){
   const value = String(name || "").trim() || "practice.py";
   const outName = /\.[A-Za-z0-9]+$/.test(value) ? value : value + ".py";
+  if (text instanceof Uint8Array){ MNDownload.saveBlob(new Blob([text], { type:"application/octet-stream" }), outName); return; }
   MNDownload.saveText(text, outName,
     (/\.pyw?$/i.test(outName) ? "text/x-python" : "text/plain") + ";charset=utf-8");
 }
@@ -3795,7 +3797,7 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
       const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
         existingOnly: true,
         // 사람이 직접 누른 저장이면 원본 폴더에 그 이름의 파일이 없을 때 만들어 준다
-        // (폴더의 .mxl 을 .msheet 로 바꿔 연 문서 등 — 조용한 자동·일괄 저장은 제외).
+        // (자동 복원을 거쳐 isScratch 표식을 잃은 새 문서 등 — 조용한 자동·일괄 저장은 제외).
         createIfMissing: !silent && !existingOnly,
         noPermissionPrompt: silent && existingOnly,
         mime: "text/plain;charset=utf-8"
@@ -3845,7 +3847,9 @@ async function saveTextDoc(value, ownerDoc, name, options={}){
     const hadHandle = !!(ownerDoc && (ownerDoc.fsHandle || ownerDoc.fsDirHandle));
     const extMatch = String(name).match(/\.[A-Za-z0-9]+$/);
     const ext = extMatch ? extMatch[0].toLowerCase() : "";
-    const mime = ext === ".ipynb" ? "application/x-ipynb+json" : "text/plain";
+    const mime = ext === ".ipynb" ? "application/x-ipynb+json"
+      : ext === ".mxl" ? "application/vnd.recordare.musicxml"
+      : ext === ".musicxml" ? "application/vnd.recordare.musicxml+xml" : "text/plain";
     let pickerJavaPrepared = null;
     const wrote = await saveViaFileHandle(outValue, name, ownerDoc, {
       existingOnly,
@@ -4082,8 +4086,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
       }
     }
     // 원본 저장 폴더에서 만든 새 문서는 아직 파일이 없으므로 create:true 로 연다.
-    // 폴더 안의 .mxl 을 편집용 .msheet 로 바꿔 연 문서처럼, 원본 폴더에 속하지만 그 이름의 파일이
-    // 아직 없는 문서도 마찬가지다 — isScratch 표식은 자동 복원을 거치면 남지 않으므로 그것만
+    // 원본 폴더에 속하지만 그 이름의 파일이 아직 없는 문서도 마찬가지다 — isScratch 표식은 자동 복원을 거치면 남지 않으므로 그것만
     // 보면 "만들 수도, 덮어쓸 수도 없는" 문서가 되어 저장이 통째로 막힌다(사본 내려받기만 남는다).
     // 사람이 직접 누른 저장에서만 만든다(createIfMissing) — 조용한 자동·일괄 저장은 예전대로,
     // 이미 있는 파일만 덮어써 잘못된 위치에 새 파일이 생기지 않게 한다.

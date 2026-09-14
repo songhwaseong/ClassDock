@@ -37,7 +37,9 @@ test("새 악보는 명령 팔레트·사이드바·폴더 우클릭 세 곳에�
 
 test("저장은 기존 문서 저장 경로(saveTextDoc)를 그대로 쓴다", () => {
   // 원본 덮어쓰기·서버 저장·다운로드 세 경로를 다시 만들지 않는다.
-  assert.match(editorSource, /saveTextDoc\(json, doc, doc\.name\)/);
+  // MusicXML 문서는 같은 경로에 원래 형식(payload)을 넘긴다 — 이름을 바꾼 새 파일을 만들지 않는다.
+  assert.match(editorSource, /saveTextDoc\(payload, doc, doc\.name\)/);
+  assert.match(editorSource, /let payload = json;/);
   assert.match(editorSource, /const json = musicSerialize\(doc\.sheet\)/);
   assert.match(editorSource, /markDocumentDirty/);
   // Ctrl+S 는 전역 핸들러가 .run-save 버튼을 누르는 방식으로 연결된다.
@@ -803,7 +805,8 @@ test("MIDI 건반 입력은 모델의 음이름 표기를 함께 쓴다", () => 
 test("저장·편집 중 내용이 자동 복원 사본에도 반영된다", () => {
   // saveTextDoc 은 디스크에만 쓴다. 작업공간 사본을 갱신하지 않으면 다음 실행 때
   // "만들 때의 빈 악보"가 되살아난다 — 표·이미지와 같은 공용 헬퍼로 사본까지 바꾼다.
-  assert.match(editorSource, /markDocumentSavedSnapshot\(doc, new TextEncoder\(\)\.encode\(json\), "application\/json"\)/);
+  // 사본은 디스크에 쓴 바이트 그대로(.msheet 는 JSON, MusicXML 은 그 형식).
+  assert.match(editorSource, /const snapshot = typeof payload === "string" \? new TextEncoder\(\)\.encode\(payload\) : payload;\s*\n\s*await markDocumentSavedSnapshot\(doc, snapshot, snapshotType\)/);
   // 저장 전에 꺼져도 복구되도록 편집이 멈추면 복구본을 남긴다(.mnote 와 같은 경로·간격).
   assert.match(editorSource, /const MUSIC_RECOVERY_DELAY = 1500;/);
   assert.match(editorSource, /saveDocumentRecoverySnapshot\(doc, bytes, "application\/json"\)/);

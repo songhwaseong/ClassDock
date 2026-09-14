@@ -370,7 +370,7 @@ function finalizeWorkspaceRestore(){
     if (legacy && legacy !== key) indexDoc(legacyKeyToDocs, legacy, doc);
   });
   // 구버전 키 조회는 정확 일치가 있어도 따로 본다. 같은 폴더에 진짜 곡.msheet 가 있으면 그 새 키가
-  // 곡.musicxml/곡.mxl 변환본의 구버전 키와 같아서, 정확 일치만 돌려주면 변환본이 소속을 못 찾고
+  // 예전 판이 곡.musicxml/곡.mxl 을 곡.msheet 로 바꿔 열던 시절의 구버전 키와 같아서, 정확 일치만 돌려주면 변환본이 소속을 못 찾고
   // 활성 작업공간으로 샌다. 다만 자기 새 키가 이미 저장된 문서는 정확 일치만 따른다(이주가 끝난 문서).
   const savedKeys = new Set();
   workspaceRegistry.items.forEach(rec => rec.docKeys.forEach(key => savedKeys.add(key)));

@@ -28,17 +28,17 @@ function session(storage = new Map()){
   // Leave pending disk deletion unexecuted to reproduce closing immediately.
   context.forgetWorkspacePaths = paths => removed.push([...paths]);
   let nextId = 0;
-  const make = (file, opts, converted) => {
-    const doc = { id:++nextId, kind:"office", name:file.name, sourceKey:opts.sourceKey,
-      workspacePath:converted ? opts.workspacePath.replace(/\.(musicxml|mxl)$/i,".msheet") : opts.workspacePath,
-      el:{ remove(){} } };
+  // MusicXML 도 다른 파일처럼 원본 이름·경로 그대로 문서가 된다.
+  const make = (file, opts) => {
+    const doc = { id:++nextId, kind:"music", name:file.name, sourceKey:opts.sourceKey,
+      workspacePath:opts.workspacePath, el:{ remove(){} } };
     context.docs.push(doc);
     context.docsBySourceKey.set(opts.sourceKey, doc);
     context.navNodes.push({type:"doc", docId:doc.id});
     return doc;
   };
-  context.loadMusicSheet = (file,opts) => make(file,opts,false);
-  context.loadMusicXml = (file,opts) => make(file,opts,true);
+  context.loadMusicSheet = (file,opts) => make(file,opts);
+  context.loadMusicXml = (file,opts) => make(file,opts);
   vm.runInContext(loader.slice(loader.indexOf("async function handleFiles("), loader.indexOf("// 닫은 탭 복원 스택")), context);
   vm.runInContext(documents.slice(documents.indexOf("function closeDoc("), documents.indexOf("function withFileHandle(")), context);
   const open = (name,restore = false) => context.handleFiles([new File(["sample"],name)], {workspacePath:"scores/"+name, restoreFromWorkspace:restore});
@@ -58,7 +58,7 @@ test("두 파일을 모두 닫고 디스크 정리 전에 재시작해도 백업
   assert.deepEqual(restarted.context.docs.map(d => d.name),["new.msheet"]);
 });
 
-test("같은 msheet 이름으로 변환된 두 원본은 각각 닫기와 복원이 적용된다", async () => {
+test("이름만 같은 MusicXML 두 원본(.musicxml·.mxl)은 각각 닫기와 복원이 적용된다", async () => {
   const first = session();
   const xml = await first.open("Chopin.musicxml"), mxl = await first.open("Chopin.mxl");
   assert.equal(xml.workspaceRestorePath,"scores/Chopin.musicxml");
@@ -70,7 +70,7 @@ test("같은 msheet 이름으로 변환된 두 원본은 각각 닫기와 복원
   assert.ok(await halfway.open("Chopin.mxl",true));
   first.close(mxl);
   const restarted = session(first.storage);
-  for (const name of ["Chopin.musicxml","Chopin.mxl","Chopin.msheet"])
+  for (const name of ["Chopin.musicxml","Chopin.mxl"])
     assert.equal(await restarted.open(name,true),null);
 });
 

@@ -25,11 +25,40 @@ test("MusicXML 파일과 압축형 MXL을 전용 가져오기로 연다", () => 
   assert.match(xmlSource, /async function loadMusicXml\(file, opts = \{\}\)/);
   assert.match(xmlSource, /MNLazy\.tryNeed\("jszip"\)/);
   assert.match(xmlSource, /META-INF\/container\.xml/);
-  assert.match(xmlSource, /new File\(\[musicSerialize\(imported\.sheet\)\], name/);
-  assert.match(xmlSource, /isScratch:true/);
-  assert.match(xmlSource, /fsHandle:null/);
-  assert.match(xmlSource, /nativeAbsolutePath:null/);
-  assert.match(xmlSource, /originalSaveMode:false/);
+  // 다른 파일처럼 원본 이름 그대로 문서가 된다 — 이름을 .msheet 로 바꾸거나 원본 핸들을 떼지 않는다.
+  assert.match(xmlSource, /new File\(\[musicSerialize\(imported\.sheet\)\], file\.name/);
+  assert.doesNotMatch(xmlSource, /fsHandle:null/);
+  assert.doesNotMatch(xmlSource, /originalSaveMode:false/);
+  assert.doesNotMatch(xmlSource, /musicXmlDerivedPath/);
+});
+
+test("MusicXML 문서는 원래 형식으로 저장하고, 남이 만든 원본은 처음 한 번 묻는다", () => {
+  const editor = read("src/js/music-editor.js");
+  assert.match(editor, /const format = musicXmlDocFormat\(doc\.name\)/);
+  assert.match(editor, /payload = await musicXmlBuildMxl\(musicSerializeXml\(doc\.sheet\)\)/);
+  assert.match(editor, /if \(!doc \|\| doc\.musicXmlOwned/);
+  assert.match(editor, /confirmDialog\(message, "악보\(\.msheet\)로 따로 저장", "취소", \{ altText:"원본에 덮어쓰기" \}\)/);
+  assert.match(editor, /await loadMusicXml\(file, \{ importAsSheet:true \}\)/);
+  // 이진(.mxl) 내용이 텍스트 저장 경로에서 문자열로 바뀌면 안 된다
+  assert.match(read("src/js/code-viewer.js"), /if \(value instanceof Uint8Array\) return value;/);
+});
+
+test("앱이 쓴 MusicXML 에는 악보 전체를 담고, 복구본은 원본을 누가 만들었는지 함께 남긴다", () => {
+  const api = loadMusicXmlApi();
+  const sheet = api.musicEmpty("담기 $& 시험");
+  sheet.drumStyle = "rock";
+  const xml = api.musicSerializeXml(sheet);
+  assert.match(xml, /<\/work>\n  <identification><encoding><software>ClassDock<\/software><\/encoding><miscellaneous><miscellaneous-field name="classdock-msheet">/);
+  assert.match(xml, /&quot;drumStyle&quot;:&quot;rock&quot;/);
+  assert.match(xml, /<work-title>담기 \$&amp; 시험<\/work-title>/);
+  assert.equal(api.musicXmlComparableBody(xml), api.musicXmlComparableBody(api.musicSerializeXmlPlain(sheet)));
+  assert.equal(api.musicXmlComparableBody(xml.replace(/\n/g, "\r\n")), api.musicXmlComparableBody(xml));
+  const recovered = api.musicXmlReadRecovery(api.musicXmlRecoveryText(sheet, true));
+  assert.equal(recovered.owned, true);
+  assert.equal(recovered.sheet.drumStyle, "rock");
+  assert.equal(api.musicXmlReadRecovery("<?xml version=\"1.0\"?><score-partwise/>"), null);
+  assert.equal(api.musicXmlDocFormat("곡.MXL"), "mxl");
+  assert.equal(api.musicXmlDocFormat("곡.msheet"), "");
 });
 
 test("MusicXML 변환 계층은 모델 다음, 편집기 전에 로드된다", () => {
@@ -150,7 +179,7 @@ test("편집기에서 MusicXML 가져오기와 내려받기 버튼을 제공한�
   assert.match(editor, /const musicXmlImportBtn = musicButton\("MusicXML 열기"/);
   assert.match(editor, /musicXmlInput\.accept = "\.musicxml,\.mxl"/);
   assert.match(editor, /musicXmlImportBtn\.addEventListener\("click", \(\) => musicXmlInput\.click\(\)\)/);
-  assert.match(editor, /await loadMusicXml\(file\)/);
+  assert.match(editor, /await loadMusicXml\(file, \{ importAsSheet:true \}\)/);
   assert.match(editor, /label:"MusicXML 가져오기…", action:\(\) => musicXmlInput\.click\(\)/);
   assert.match(editor, /const musicXmlBtn = musicButton\("MusicXML 저장"/);
   assert.match(editor, /musicSerializeXml\(sheet\)/);

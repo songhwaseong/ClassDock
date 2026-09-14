@@ -32,7 +32,7 @@ function workspaceSetRestorePathExclusions(paths, excluded){
 }
 function workspaceClosedDocumentPaths(doc, remainingDocs){
   if (!doc) return [];
-  // MusicXML→msheet, ipynb→py 등은 화면 이름과 복원 풀의 원본 이름이 다르다.
+  // ipynb→py·과제 main.py 같은 변환 문서는 화면 이름과 복원 풀의 원본 이름이 다르다.
   const paths = [...new Set([doc.workspaceRestorePath, doc.workspacePath].map(workspaceClosedPathKey).filter(Boolean))];
   return paths.filter(path => !(remainingDocs || []).some(other => other && other !== doc &&
     [other.workspaceRestorePath, other.workspacePath].some(value => workspaceClosedPathKey(value) === path)));

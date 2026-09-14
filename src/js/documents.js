@@ -2651,7 +2651,7 @@ function openSidebarGroupMenu(node, x, y){
 
 /* ===== 탭 구성 저장/복원 (EXE 자동 복원과 함께 다음 실행 때 탭바 되살리기) ===== */
 // 예전 저장 형식의 안정 키: 루트 그룹→…→화면에 표시된 파일명 경로.
-// 변환 문서는 서로 다른 원본도 같은 이름(.musicxml/.mxl→.msheet, .task→main.py)이 될 수 있다.
+// 변환 문서는 서로 다른 원본도 같은 이름(.task→main.py, 예전 판의 .musicxml/.mxl→.msheet)이 될 수 있다.
 function docLegacyStableKey(doc){
   if (!doc) return "";
   const parts = [doc.name];
