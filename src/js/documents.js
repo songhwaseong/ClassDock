@@ -139,6 +139,18 @@ function updatePannableState(container){
                container.scrollHeight > container.clientHeight + 1;
   container.classList.toggle("pannable", over);
 }
+// 문서를 닫을 때 그 문서에 붙인 크기·구조 관찰자를 끊는다. 끊지 않으면 관찰자와 콜백이 닫힌 문서의
+// 요소(PDF 페이지·표 등 큰 DOM)를 붙잡고, 브라우저가 관찰 대상 정리를 GC 시점에 맡기게 된다.
+// 손바닥 도구(__panRO·__panMO)와 분할 학습 화면 PDF 맞춤(_studyRO) 세 가지다.
+function disconnectDocObservers(doc){
+  if (!doc) return;
+  const el = doc.el;
+  if (el){
+    if (el.__panRO){ try { el.__panRO.disconnect(); } catch(_){} el.__panRO = null; }
+    if (el.__panMO){ try { el.__panMO.disconnect(); } catch(_){} el.__panMO = null; }
+  }
+  if (doc._studyRO){ try { doc._studyRO.disconnect(); } catch(_){} doc._studyRO = null; }
+}
 function attachPanBehavior(container){
   if (!container || container.__panAttached) return;
   container.__panAttached = true;
@@ -1637,6 +1649,7 @@ function closeDoc(id, options={}){
   evictContentSearchDoc(id);                    // 워커 쪽 디코딩 캐시도 정리
   if (studyPdfId === id) studyPdfId = null;
   if (d.io){ d.io.disconnect(); d.io = null; }                  // 지연 렌더 옵저버 해제
+  if (typeof disconnectDocObservers === "function") disconnectDocObservers(d);   // 손바닥 도구·학습 화면 크기 관찰자 해제
   if (d.pdfjsDoc && d.pdfjsDoc.destroy){ try { d.pdfjsDoc.destroy(); } catch(e){} d.pdfjsDoc = null; }
   if (d.__fontFaces){ d.__fontFaces.forEach(ff => { try { document.fonts.delete(ff); } catch(e){} }); d.__fontFaces = null; }  // PPTX 내장 글꼴 해제
   if (d.cleanupFns){
