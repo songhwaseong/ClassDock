@@ -3385,10 +3385,37 @@ async function renderXlsx(file, host, doc){
       return out;
     }));
   };
+  /* 되돌리기 스냅샷은 편집 한 번마다 "모든" 시트를 뜬다. 시트 5천 행×3장이면 편집마다 수백 ms,
+     스냅샷 하나에 수십 MB 라서, 바뀌지 않은 시트는 직전 복제본을 그대로 다시 쓴다.
+
+     재사용해도 되는 조건(셋 다 참이어야 한다):
+       1) 수식이 없는 시트다. 수식 시트는 recalcAll·행열 이동·잘라내기·함수 정의 변경이 pushUndo 없이
+          제자리에서 셀(v·f)을 고치므로 늘 새로 복제한다(예전과 같다).
+       2) 모델 배열이 같은 객체다. 지연 로드·피벗 새로고침·되돌리기 복원은 배열 자체를 바꾼다.
+       3) 변경 번호가 그대로다. 수식 없는 시트는 pushUndo(그 시트) 직후에만 고쳐지므로 거기서 번호를 올린다.
+          sheetRevs 는 되돌리기로 예전 값에 돌아가 같은 숫자가 다시 나오므로 쓰지 않고, 다시 쓰지 않는
+          일련번호(modelStamps)를 따로 둔다.
+     빈 격자 확장(spreadsheetEnsureWorkspace)은 번호 없이 빈 칸만 덧붙이지만, 화면용 빈 칸이라
+     저장·범위 계산에서 빠지므로 확장 전 복제본으로 되돌려도 결과가 같다.
+     복제본은 히스토리 항목끼리 공유하므로 절대 고치면 안 된다 — restoreSnapshot 은 늘 다시 복제해서 쓴다. */
+  let modelStampSeq = 0;
+  const modelStamps = {};                 // name -> 마지막 변경 일련번호
+  const modelCloneCache = new Map();      // name -> { source, stamp, model }
+  const touchModel = name => { modelStamps[name] = ++modelStampSeq; };
+  const snapshotModel = (name) => {
+    const live = exModels[name] || [];
+    // CSV 변환본은 수정할 행만 복사하는 copy-on-write 모델이라 최상위 행 배열만 보관해도 안전하다.
+    if (csvFastAoa) return live.slice();
+    if (sheetsWithFormula.has(name)){ modelCloneCache.delete(name); return cloneModel(live); }
+    const cached = modelCloneCache.get(name);
+    if (cached && cached.source === live && cached.stamp === modelStamps[name]) return cached.model;
+    const model = cloneModel(live);
+    modelCloneCache.set(name, { source:live, stamp:modelStamps[name], model });
+    return model;
+  };
   const snapshot = (name) => ({
     rev: sheetRevs[name] || 0,
-    // CSV 변환본은 수정할 행만 복사하는 copy-on-write 모델이라 최상위 행 배열만 보관해도 안전하다.
-    model: csvFastAoa ? (exModels[name] || []).slice() : cloneModel(exModels[name] || []),
+    model: snapshotModel(name),
     edited: new Map(editedCells[name] || []),
     styled: new Map(styledCells[name] || []),
     merges: (exMerges[name] || []).slice(),
@@ -3399,6 +3426,9 @@ async function renderXlsx(file, host, doc){
   const restoreSnapshot = (name, snap) => {
     sheetRevs[name] = snap.rev || 0;          // 리비전도 함께 되돌려야 "미기록 변경 있음"을 오판하지 않는다
     exModels[name] = csvFastAoa ? (snap.model || []).slice() : cloneModel(snap.model);
+    // 되살린 모델은 snap.model 과 내용이 같으므로, 다음 스냅샷은 다시 복제하지 않고 그것을 쓴다.
+    touchModel(name);
+    if (!csvFastAoa) modelCloneCache.set(name, { source:exModels[name], stamp:modelStamps[name], model:snap.model });
     editedCells[name] = new Map(snap.edited);
     styledCells[name] = new Map(snap.styled);
     exMerges[name] = (snap.merges || []).slice();
@@ -3451,6 +3481,7 @@ async function renderXlsx(file, host, doc){
   };
   const pushUndo = name => {
     const h = historyFor(); h.commit(); h.dropRedo();
+    touchModel(name);   // 변경 전 상태를 기록한 "뒤에" 올려야 방금 뜬 복제본이 이 시트의 옛 상태로 남는다
     workbookRevision++; sheetRevs[name] = (sheetRevs[name] || 0) + 1;
     updateUndoButtons();
   };
@@ -6233,6 +6264,9 @@ async function renderXlsx(file, host, doc){
       sourceLayoutSheets.set(name, sourceLayoutSheets.get(oldName)); sourceLayoutSheets.delete(oldName);
     }
     if (sheetsWithFormula.delete(oldName)) sheetsWithFormula.add(name);
+    // 되돌리기 복제본 재사용 표도 이름을 따라 옮긴다(내용은 그대로라 새 이름에서도 재사용해도 된다).
+    if (modelCloneCache.has(oldName)){ modelCloneCache.set(name, modelCloneCache.get(oldName)); modelCloneCache.delete(oldName); }
+    if (Object.prototype.hasOwnProperty.call(modelStamps, oldName)){ modelStamps[name] = modelStamps[oldName]; delete modelStamps[oldName]; }
   };
   const addNewSheet = async (copyFrom = null) => {
     if (copyFrom){
@@ -6339,6 +6373,7 @@ async function renderXlsx(file, host, doc){
     delete wb.Sheets[name];
     [exModels, exMerges, editedCells, styledCells, sheetRevs, colFiltersBySheet,condRulesBySheet,worksheetViews].forEach(obj => { delete obj[name]; });
     structChanged.delete(name); sheetsWithFormula.delete(name);
+    modelCloneCache.delete(name);   // 지운 시트의 복제본은 되돌리기 히스토리가 따로 들고 있다
     if (!addedSheets.delete(name)) removedOrigSheets.add(sheetOrigNames.get(name) || name);
     sheetOrigNames.delete(name);
     anyDirty = true;
