@@ -41,7 +41,7 @@ var content embed.FS
 ===== 지도 타일 프록시 =====
 
 	launcher.cs 의 TileProxyHosts 와 같은 목록이어야 한다. 한쪽만 늘리면 그 배경지도가 이 런처에서만
-	회색으로 남는다(tests/map-viewer.test.js 가 두 파일을 함께 검사한다).
+	회색으로 남는다(tests/launcher-parity.test.js 가 두 목록과 아래 상한·주소 상수를 함께 검사한다).
 */
 var tileProxyHosts = []string{
 	"tile.openstreetmap.org", "basemaps.cartocdn.com", "tile.opentopomap.org",

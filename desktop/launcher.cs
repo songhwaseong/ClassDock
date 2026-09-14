@@ -4099,6 +4099,7 @@ class ClassDockLauncher
     static readonly string TileCacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ClassDock", "tile-cache");
+    const long TileMaxBytes = 2 * 1024 * 1024;           // 타일 한 장 상한(비정상적으로 크면 받다가 끊는다)
     const long TileCacheMaxBytes = 400L * 1024 * 1024;
     static readonly TimeSpan TileCacheMaxAge = TimeSpan.FromDays(7);
     static readonly object TileDiskLock = new object();
@@ -5377,7 +5378,7 @@ class ClassDockLauncher
                 while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
                 {
                     total += read;
-                    if (total > 2 * 1024 * 1024)
+                    if (total > TileMaxBytes)
                     {
                         if (staleData != null) { data = staleData; mime = staleMime; return true; }
                         return false;   // 타일치고 비정상적으로 크면 중단
