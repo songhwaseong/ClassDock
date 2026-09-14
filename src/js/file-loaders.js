@@ -895,8 +895,55 @@ function nativeHandleError(response, text){
 }
 async function nativeSourceFetch(url, options={}){
   const response = await fetch(url, { cache:"no-store", ...options });
-  if (!response.ok) throw nativeHandleError(response, await response.text());
+  if (!response.ok){
+    const text = await response.text();
+    const error = nativeHandleError(response, text);
+    if (response.status === 409 && String(text).trim() === "source-folder-unknown"){
+      try { error.sourceFolderUnknown = true; } catch(_){}
+    }
+    throw error;
+  }
   return response;
+}
+
+/* 원본 폴더 번호(rootId)는 런처 메모리에만 있어서 ClassDock.exe 가 다시 시작되면 사라진다.
+   이미 열린 창의 핸들은 예전 번호를 계속 들고 있어 저장이 "권한을 확인하세요" 로만 실패했다.
+   런처가 모르는 번호라고 답하면(409 source-folder-unknown) 폴더 경로로 다시 연결해 새 번호를 받고
+   한 번 재시도한다. 같은 폴더의 핸들이 여럿이어도 옛 번호→새 번호 표를 같이 보므로 재연결은 한 번이다.
+   경로 재연결은 런처가 기억하는(사용자가 고른 적 있는) 폴더만 허용한다. */
+const nativeRootIdRemap = new Map();
+const nativeRootReconnects = new Map();
+function nativeCurrentRootId(owner){
+  let id = owner.rootId;
+  for (let hops = 0; nativeRootIdRemap.has(id) && hops < 8; hops++) id = nativeRootIdRemap.get(id);
+  owner.rootId = id;
+  return id;
+}
+function reconnectNativeRoot(owner){
+  const staleId = owner.rootId;
+  if (!owner.rootPath) return Promise.resolve(false);
+  if (nativeRootReconnects.has(staleId)) return nativeRootReconnects.get(staleId);
+  const task = nativeSourceFetch("/source-folder-restore", {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=utf-8", "X-ClassDock-Action":"1" },
+    body:owner.rootPath
+  }).then(response => response.json()).then(data => {
+    if (!data || !data.id || data.id === staleId) return false;
+    nativeRootIdRemap.set(staleId, data.id);
+    return true;
+  }).catch(() => false).finally(() => nativeRootReconnects.delete(staleId));
+  nativeRootReconnects.set(staleId, task);
+  return task;
+}
+async function nativeRootFetch(owner, route, rel, options={}, extra=""){
+  nativeCurrentRootId(owner);
+  try {
+    return await nativeSourceFetch(nativeSourceUrl(route, owner.rootId, rel, extra), options);
+  } catch(error){
+    if (!error || !error.sourceFolderUnknown || !(await reconnectNativeRoot(owner))) throw error;
+    nativeCurrentRootId(owner);
+    return nativeSourceFetch(nativeSourceUrl(route, owner.rootId, rel, extra), options);
+  }
 }
 function rememberNativeSourceRoot(name, path){
   if (!name || !path) return;
@@ -921,8 +968,8 @@ async function nativeSourceSupported(){
   } catch(_){ nativeSourceFolderCapability = false; }
   return nativeSourceFolderCapability;
 }
-async function nativeSourceEntry(id, rel){
-  const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-entry", id, rel));
+async function nativeSourceEntry(owner, rel){
+  const response = await nativeRootFetch(owner, "/source-folder-entry", rel);
   return response.json();
 }
 async function nativeWritableBytes(value){
@@ -964,9 +1011,9 @@ class NativeSourceFileHandle {
   }
   async getFile(){
     let meta = this.meta;
-    if (!meta) meta = await nativeSourceEntry(this.rootId, this.relPath);
+    if (!meta) meta = await nativeSourceEntry(this, this.relPath);
     if (typeof isMediaFileName === "function" && isMediaFileName(this.name)) return this.nativeMediaFile(meta);
-    const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, this.relPath));
+    const response = await nativeRootFetch(this, "/source-folder-file", this.relPath);
     const blob = await response.blob();
     let file = new File([blob], this.name, {
       type:blob.type || "application/octet-stream",
@@ -987,7 +1034,7 @@ class NativeSourceFileHandle {
       async close(){
         if (closed) return;
         closed = true;
-        await nativeSourceFetch(nativeSourceUrl("/source-folder-file", handle.rootId, handle.relPath), {
+        await nativeRootFetch(handle, "/source-folder-file", handle.relPath, {
           method:"POST",
           headers:{ "Content-Type":"application/octet-stream", "X-ClassDock-Action":"1" },
           body:bytes
@@ -1023,7 +1070,7 @@ class NativeSourceDirectoryHandle {
     return target.slice(prefix.length).split(/[\\/]/).filter(Boolean);
   }
   async *values(){
-    const response = await nativeSourceFetch(nativeSourceUrl("/source-folder-list", this.rootId, this.relPath));
+    const response = await nativeRootFetch(this, "/source-folder-list", this.relPath);
     const data = await response.json();
     for (const item of (data.items || [])){
       const rel = nativeJoinRel(this.relPath, item.name);
@@ -1035,11 +1082,11 @@ class NativeSourceDirectoryHandle {
   async getDirectoryHandle(name, options={}){
     const rel = nativeJoinRel(this.relPath, name);
     try {
-      const item = await nativeSourceEntry(this.rootId, rel);
+      const item = await nativeSourceEntry(this, rel);
       if (item.kind !== "directory") throw nativeHandleError(null, "source-entry-is-file");
     } catch(error){
       if (!options.create || error.name !== "NotFoundError") throw error;
-      await nativeSourceFetch(nativeSourceUrl("/source-folder-directory", this.rootId, rel), {
+      await nativeRootFetch(this, "/source-folder-directory", rel, {
         method:"POST", headers:{ "X-ClassDock-Action":"1" }
       });
     }
@@ -1049,11 +1096,11 @@ class NativeSourceDirectoryHandle {
     const rel = nativeJoinRel(this.relPath, name);
     let meta = null;
     try {
-      meta = await nativeSourceEntry(this.rootId, rel);
+      meta = await nativeSourceEntry(this, rel);
       if (meta.kind !== "file") throw nativeHandleError(null, "source-entry-is-directory");
     } catch(error){
       if (!options.create || error.name !== "NotFoundError") throw error;
-      await nativeSourceFetch(nativeSourceUrl("/source-folder-file", this.rootId, rel), {
+      await nativeRootFetch(this, "/source-folder-file", rel, {
         method:"POST",
         headers:{ "Content-Type":"application/octet-stream", "X-ClassDock-Action":"1" },
         body:new Uint8Array(0)
@@ -1064,10 +1111,9 @@ class NativeSourceDirectoryHandle {
   }
   async removeEntry(name, options={}){
     const rel = nativeJoinRel(this.relPath, name);
-    await nativeSourceFetch(nativeSourceUrl("/source-folder-remove", this.rootId, rel,
-      "&recursive=" + (options.recursive ? "1" : "0")), {
+    await nativeRootFetch(this, "/source-folder-remove", rel, {
       method:"POST", headers:{ "X-ClassDock-Action":"1" }
-    });
+    }, "&recursive=" + (options.recursive ? "1" : "0"));
   }
 }
 async function chooseNativeSourceFolder(){

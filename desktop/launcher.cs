@@ -868,6 +868,22 @@ class ClassDockLauncher
         return "{\"id\":" + JsonString(id) + ",\"path\":" + JsonString(Path.GetFullPath(path)) + "}";
     }
 
+    // ?id= 로 등록된 원본 폴더를 가리키는 요청들(목록·항목·파일 읽기/쓰기·폴더 만들기·지우기).
+    static bool IsSourceFolderIdRoute(string path)
+    {
+        return path.StartsWith("/source-folder-entry?", StringComparison.Ordinal)
+            || path.StartsWith("/source-folder-list?", StringComparison.Ordinal)
+            || path.StartsWith("/source-folder-file?", StringComparison.Ordinal)
+            || path.StartsWith("/source-folder-directory?", StringComparison.Ordinal)
+            || path.StartsWith("/source-folder-remove?", StringComparison.Ordinal);
+    }
+
+    static bool IsKnownSourceFolder(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        lock (SourceFolderLock) return SourceFolders.ContainsKey(id);
+    }
+
     static bool HasLocalActionHeader(Dictionary<string, string> headers)
     {
         string value;
@@ -1682,6 +1698,26 @@ class ClassDockLauncher
                 else if (path == "/ping")
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                }
+                else if (method == "GET" && path == "/local-token")
+                {
+                    // 런처가 다시 시작되면 토큰이 바뀌는데, 이미 열린 창은 예전 토큰을 들고 있어 모든 저장·실행이
+                    // 403 이 된다. 그 창이 새로고침 없이 새 토큰을 받아 가는 입구다.
+                    // 앱 페이지(GET /)가 이미 토큰을 담아 주므로 새로 여는 권한은 없다. 다른 사이트가 읽지 못하게
+                    // 사용자 정의 헤더를 요구한다 — 교차 출처에서는 사전 요청이 거부돼 본문에 닿지 못한다.
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes("{\"token\":" + JsonString(LocalAuthToken) + "}"));
+                }
+                else if (IsSourceFolderIdRoute(path) && !IsKnownSourceFolder(QueryValue(path, "id")))
+                {
+                    // 폴더 번호는 런처 메모리에만 있어 재시작하면 사라진다. 잘못된 경로(400)와 구분해 알려야
+                    // 창이 경로로 다시 연결(/source-folder-restore)한 뒤 재시도할 수 있다.
+                    WriteResponse(stream, "409 Conflict", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("source-folder-unknown"));
                 }
                 else if (method == "POST" && path.StartsWith("/heartbeat?", StringComparison.Ordinal))
                 {

@@ -32,7 +32,7 @@ test("서버는 다른 프로세스가 쓰기로 잡은 파일도 공유 모드�
 
 test("원본 폴더의 파일은 통째로 읽지 않고 흘려보낸다", () => {
   // byte[] 로 한 번에 읽으면 .NET 배열 상한(2GB)에 걸려 큰 영상은 열리지도 않는다.
-  const handler = launcher.slice(launcher.indexOf('path.StartsWith("/source-folder-file?"'));
+  const handler = launcher.slice(launcher.indexOf('method == "GET" && path.StartsWith("/source-folder-file?"'));
   assert.match(handler.slice(0, 800), /WriteFileStreamResponse\(stream, full, "application\/octet-stream", headers\)/);
   assert.doesNotMatch(launcher, /ReadAllBytesShared/);
   // <video> 의 탐색을 위해 Range 응답(206)까지 지원해야 한다.

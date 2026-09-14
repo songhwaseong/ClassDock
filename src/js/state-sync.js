@@ -21,20 +21,72 @@
       return new URL(raw, location.href).origin === location.origin;
     } catch (_) { return false; }
   }
-  if (localToken && window.fetch) {
+
+  // 런처(ClassDock.exe)가 다시 시작되면 토큰이 새로 만들어진다. 이미 열린 창은 예전 토큰을 들고 있어
+  // 저장·실행·하트비트가 전부 403(local-token-required)이 되고, 화면에는 "권한을 확인하세요" 같은
+  // 엉뚱한 안내만 남았다. 403 을 받으면 새 토큰을 받아 오고(동시에 여러 요청이 와도 한 번만) 한 번 재시도한다.
+  var rawFetch = window.fetch ? window.fetch.bind(window) : null;
+  var tokenRefresh = null;
+  function refreshLocalToken() {
+    if (!rawFetch) return Promise.resolve(localToken);
+    if (tokenRefresh) return tokenRefresh;
+    tokenRefresh = rawFetch("/local-token", { cache: "no-store", headers: { "X-ClassDock-Action": "1" } })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (data) {
+        var next = data && typeof data.token === "string" ? data.token : "";
+        if (next && next !== localToken) {
+          localToken = next;
+          try { window.__CLASSDOCK_LOCAL_TOKEN__ = next; } catch (_) {}
+        }
+      })
+      .catch(function () {})
+      .then(function () { tokenRefresh = null; return localToken; });
+    return tokenRefresh;
+  }
+  // 같은 요청을 다시 보내도 되는 경우만 재시도한다. 스트림 본문은 한 번 읽으면 끝이고,
+  // Request 객체는 본문이 이미 소비됐을 수 있다.
+  function canReplay(input, init) {
+    if (typeof input !== "string" && !(input instanceof URL)) return false;
+    var body = init && init.body;
+    return !(typeof ReadableStream !== "undefined" && body instanceof ReadableStream);
+  }
+  function isStaleTokenResponse(response) {
+    if (!response || response.status !== 403) return Promise.resolve(false);
+    return response.clone().text()
+      .then(function (text) { return String(text).trim() === "local-token-required"; })
+      .catch(function () { return false; });
+  }
+  window.__mnRefreshLocalToken = refreshLocalToken;
+
+  if (localToken && rawFetch) {
     try {
-      var rawFetch = window.fetch.bind(window);
       window.fetch = function (input, init) {
+        var sameOrigin = false, callerToken = false, sentToken = localToken;
         try {
-          if (isSameOriginRequest(input)) {
+          sameOrigin = isSameOriginRequest(input);
+          if (sameOrigin) {
             init = init ? Object.assign({}, init) : {};
             var baseHeaders = init.headers || (input && input.headers) || undefined;
             var headers = new Headers(baseHeaders);
-            if (!headers.has("X-ClassDock-Token")) headers.set("X-ClassDock-Token", localToken);
+            callerToken = headers.has("X-ClassDock-Token");
+            if (!callerToken) headers.set("X-ClassDock-Token", localToken);
             init.headers = headers;
           }
         } catch (_) {}
-        return rawFetch(input, init);
+        var request = rawFetch(input, init);
+        if (!sameOrigin || callerToken || !canReplay(input, init)) return request;
+        return request.then(function (response) {
+          return isStaleTokenResponse(response).then(function (stale) {
+            if (!stale) return response;
+            // 다른 요청이 먼저 새 토큰을 받아 왔을 수도 있으니 '보낸 토큰과 지금 토큰이 다른지'로 판단한다.
+            return refreshLocalToken().then(function () {
+              if (localToken === sentToken) return response;
+              var retryInit = Object.assign({}, init, { headers: new Headers(init.headers) });
+              retryInit.headers.set("X-ClassDock-Token", localToken);
+              return rawFetch(input, retryInit);
+            });
+          });
+        });
       };
     } catch (_) {}
   }
@@ -96,8 +148,14 @@
     timer = null;
     try {
       var x = new XMLHttpRequest();
+      var sentToken = localToken;
       x.open("POST", "/app-state", true);
       x.setRequestHeader("Content-Type", "application/json");
+      // 런처 재시작 뒤 예전 토큰으로 보낸 설정 저장은 거절된다. 새 토큰을 받아 곧바로 다시 보낸다.
+      x.onload = function () {
+        if (x.status !== 403 || String(x.responseText).trim() !== "local-token-required") return;
+        refreshLocalToken().then(function () { if (localToken !== sentToken) schedule(); });
+      };
       x.send(JSON.stringify(snapshot()));
     } catch (_) {}
   }
