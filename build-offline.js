@@ -69,11 +69,14 @@ for (const wheel of bundledPyodideWheels) {
   };
 }
 
+// 휠 등록부(base64 로 약 2.7MB)는 실행되지 않는 JSON 블록으로 심는다. 예전에는 실행되는 스크립트의
+// 전역 변수라 파이썬을 한 번도 쓰지 않아도 앱을 켤 때마다 파싱되고 그 문자열이 JS 힙에 계속 남았다.
+// python-runtime.js 가 파이썬 코드에서 import 를 처음 확인할 때 한 번만 읽는다(펫 스프라이트·악기 샘플과 같은 방식).
 const coreScriptTag = '<script src="src/js/core.js"></script>';
 requireTag(html, coreScriptTag, "Core script");
 html = html.replace(
   coreScriptTag,
-  () => `<script>window.__MN_PYODIDE_WHEELS__=${JSON.stringify(bundledWheelRegistry)};</script>\n${coreScriptTag}`
+  () => `<script type="application/json" id="mnPyodideWheels">${esc(JSON.stringify(bundledWheelRegistry))}</script>\n${coreScriptTag}`
 );
 
 for (const file of manifest.localScripts) {

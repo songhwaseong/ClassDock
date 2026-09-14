@@ -55,7 +55,14 @@ if (executableScriptSources(source).some((src) => /^https?:\/\//i.test(src))) {
 }
 if (executableScriptSources(offline).length) fail("offline HTML contains an external script tag");
 if (/\b(?:src|href)=["'](?:src|vendor)\//i.test(offline)) fail("offline HTML still references source or vendor files");
-if (!offline.includes("window.__MN_PYODIDE_WHEELS__")) fail("offline Pyodide wheel registry is missing");
+// 휠 등록부는 시작할 때 파싱되지 않는 JSON 블록이어야 한다(실행되는 전역 변수로 되돌아가면 실패).
+if (offline.includes("window.__MN_PYODIDE_WHEELS__")) fail("offline Pyodide wheel registry must not be an executable script");
+const wheelBlock = /<script type="application\/json" id="mnPyodideWheels">([^<]+)<\/script>/.exec(offline);
+if (!wheelBlock) fail("offline Pyodide wheel registry is missing");
+let wheels;
+try { wheels = JSON.parse(wheelBlock[1]); }
+catch(_) { fail("offline Pyodide wheel registry is invalid JSON"); }
+if (!wheels.faker || !wheels.faker.base64 || !wheels.faker.fileName) fail("offline Pyodide wheel registry has no faker wheel");
 if (!offline.includes('id="pdfWorkerSrc"')) fail("offline PDF worker is missing");
 const expectedMusicSamples = {
   mnMusicSamples:["piano", 10], mnGuitarSamples:["guitar", 10],

@@ -2278,9 +2278,19 @@ const PYODIDE_PYPI_ALIASES = Object.freeze({
   yaml:"PyYAML"
 });
 
+// 단일 파일 빌드가 심어 둔 휠 등록부(#mnPyodideWheels, 실행되지 않는 JSON 블록)를 처음 필요할 때 한 번만 읽는다.
+// 개발용 원본 HTML 에는 블록이 없어 빈 등록부가 되고, 그때는 예전처럼 온라인 설치로 넘어간다.
+let _bundledPyodideWheels = null;
 function bundledPyodideWheelRegistry(){
-  const registry = (typeof globalThis !== "undefined") ? globalThis.__MN_PYODIDE_WHEELS__ : null;
-  return registry && typeof registry === "object" ? registry : {};
+  if (_bundledPyodideWheels) return _bundledPyodideWheels;
+  let registry = {};
+  try {
+    const holder = typeof document !== "undefined" ? document.getElementById("mnPyodideWheels") : null;
+    const parsed = holder ? JSON.parse(holder.textContent || "{}") : null;
+    if (parsed && typeof parsed === "object") registry = parsed;
+  } catch(e){ console.warn("번들 파이썬 휠 목록을 읽지 못했어요:", e); }
+  _bundledPyodideWheels = registry;
+  return registry;
 }
 
 function decodeBundledPyodideWheel(entry){
