@@ -69,3 +69,15 @@ test("모든 프로세스 실행은 셸을 거치지 않는다", () => {
   const shellTrue = launcher.match(/UseShellExecute = true/g) || [];
   assert.ok(shellTrue.length <= 4, "셸로 여는 자리가 늘었다 - 각각 무엇을 여는지 확인이 필요하다");
 });
+
+test("ffmpeg·SQLite 실행 인자의 경로도 QuoteProcessArgument 로 감싼다", () => {
+  assert.match(launcher, /"-hide_banner -nostdin -i " \+ QuoteProcessArgument\(inPath\)/);
+  assert.match(launcher, /" -i " \+ QuoteProcessArgument\(inPath\) \+ " -map 0:v:0\? -map 0:a:0\?"/);
+  assert.match(launcher, /" -movflags \+faststart -f mp4 " \+ QuoteProcessArgument\(outPath\)/);
+  assert.match(launcher, /QuoteProcessArgument\(runner\) \+ " " \+ QuoteProcessArgument\(dbPath\)/);
+  assert.match(launcher, /QuoteProcessArgument\(runner\) \+ " " \+ QuoteProcessArgument\(full\) \+ " preview"/);
+  assert.match(launcher, /QuoteProcessArgument\(full\)\s*\+ " exec " \+ QuoteProcessArgument\(backup\)/);
+  // 손으로 따옴표를 붙이던 모양이 되살아나면 안 된다.
+  assert.ok(!launcher.includes('-i \\"" + inPath'), "ffmpeg 입력 경로에 손으로 붙인 따옴표가 남아 있다");
+  assert.ok(!launcher.includes('"\\"" + runner + "\\" \\""'), "SQLite 러너 인자에 손으로 붙인 따옴표가 남아 있다");
+});

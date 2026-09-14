@@ -2612,7 +2612,9 @@ class ClassDockLauncher
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("definition-failed: " + FlattenMessage(ex)));
                     }
                 }
-                else if (path.StartsWith("/local-file?", StringComparison.Ordinal))
+                // 토큰 검사(RequiresLocalAuthToken)는 GET 에만 걸려 있다. 메서드를 가리지 않으면 POST 등으로
+                // 토큰 없이 로컬 파일을 읽을 수 있으므로 읽기 전용 입구답게 GET 만 받는다(호출부도 모두 GET).
+                else if (method == "GET" && path.StartsWith("/local-file?", StringComparison.Ordinal))
                 {
                     try
                     {
@@ -8439,7 +8441,7 @@ class ClassDockLauncher
     {
         string info;
         // 출력이 없어서 exit code는 1이다. 입력 정보만 파싱하고 미확인 코덱은 복사하지 않는다.
-        ReadFfmpegInfo(ffmpeg, "-hide_banner -nostdin -i \"" + inPath + "\"", 30000, out info);
+        ReadFfmpegInfo(ffmpeg, "-hide_banner -nostdin -i " + QuoteProcessArgument(inPath), 30000, out info);
         return ParseMediaInputInfo(info);
     }
 
@@ -8487,9 +8489,9 @@ class ClassDockLauncher
     internal static string MediaConvertArgs(string inPath, string outPath, MediaConvertAttempt attempt)
     {
         string head = "-y -hide_banner -loglevel error -nostdin -progress pipe:1 -nostats"
-            + " -i \"" + inPath + "\" -map 0:v:0? -map 0:a:0?";
+            + " -i " + QuoteProcessArgument(inPath) + " -map 0:v:0? -map 0:a:0?";
         string audio = attempt.CopyAudio ? " -c:a copy" : " -c:a aac -b:a 192k";
-        return head + MediaVideoArgs(attempt.Encoder) + audio + " -movflags +faststart -f mp4 \"" + outPath + "\"";
+        return head + MediaVideoArgs(attempt.Encoder) + audio + " -movflags +faststart -f mp4 " + QuoteProcessArgument(outPath);
     }
 
     // MediaConvLock 아래에서만 접근. 인코더 목록에 있어도 드라이버가 안 맞을 수 있어 실제로 시험한다.
@@ -11656,7 +11658,7 @@ class ClassDockLauncher
         try
         {
             string runner = SqlitePreviewRunner();
-            string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + dbPath + "\"";
+            string args = (interp == "py" ? "-3 " : "") + QuoteProcessArgument(runner) + " " + QuoteProcessArgument(dbPath);
             return RunSqliteRunner(interp, args, null);
         }
         finally
@@ -11966,7 +11968,7 @@ class ClassDockLauncher
         string interp = FindPython();
         if (interp == null) throw new PythonMissingException();
         string runner = SqliteExecRunner();
-        string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + full + "\" preview";
+        string args = (interp == "py" ? "-3 " : "") + QuoteProcessArgument(runner) + " " + QuoteProcessArgument(full) + " preview";
         return RunSqliteRunner(interp, args, null);
     }
 
@@ -11986,7 +11988,8 @@ class ClassDockLauncher
             ValidateDbFingerprint(headers, full, true, true);
             string backup = NextDbBackupPath(full);
             string runner = SqliteExecRunner();
-            string args = (interp == "py" ? "-3 " : "") + "\"" + runner + "\" \"" + full + "\" exec \"" + backup + "\"";
+            string args = (interp == "py" ? "-3 " : "") + QuoteProcessArgument(runner) + " " + QuoteProcessArgument(full)
+                + " exec " + QuoteProcessArgument(backup);
             return RunSqliteRunner(interp, args, sql);
         }
     }

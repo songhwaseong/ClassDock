@@ -286,3 +286,10 @@ test("버퍼링 읽기는 다음 요청의 앞부분을 삼키지 않는다", ()
   assert.match(launcher, /if \(start < end\) return true;/);
   assert.match(launcher, /int take = Math\.Min\(count, end - start\);/);
 });
+
+test("로컬 파일 읽기(/local-file)는 토큰 검사가 걸린 GET 으로만 받는다", () => {
+  // 토큰 규칙은 GET 에만 있으므로, 메서드를 가리지 않으면 POST 로 토큰 없이 읽힐 수 있었다.
+  assert.match(launcher, /if \(path\.StartsWith\("\/local-file\?", StringComparison\.Ordinal\)\) return true;/);
+  assert.match(launcher, /else if \(method == "GET" && path\.StartsWith\("\/local-file\?", StringComparison\.Ordinal\)\)/);
+  assert.ok(!/else if \(path\.StartsWith\("\/local-file\?"/.test(launcher), "메서드 구분 없는 /local-file 처리부가 남아 있다");
+});
