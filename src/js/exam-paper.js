@@ -1713,19 +1713,29 @@ async function examSendFetch(url, options, timeout){
   finally { clearTimeout(timer); }
 }
 
+// 바쁨(503) 재시도 간격. 한꺼번에 몰린 학생들이 같은 순간 다시 보내지 않게 약간의 무작위 지연을 더한다.
+const EXAM_SEND_BUSY_RETRY_MS = [1000, 2500];
+
 // { ok } | { ok:false, reason } — reason 은 화면 안내와 파일 저장 여부를 함께 결정한다.
 async function examSendSubmission(addr, code, text){
   const base = examSendBaseUrl(addr);
   if (!base) return { ok: false, reason: "addr" };
   if (!/^\d{6}$/.test(String(code || "").trim())) return { ok: false, reason: "code-format" };
   let res = null;
-  try {
-    res = await examSendFetch(base + "/exam-submit", {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=UTF-8", "X-Exam-Code": String(code).trim() },
-      body: text
-    }, 8000);
-  } catch(e){ return { ok: false, reason: "offline" }; }
+  // 한 반이 한꺼번에 내면 선생님 PC 가 동시 연결 한도에 걸려 바쁨(503)으로 답할 수 있다. 잠깐 쉬었다가 다시 보낸다.
+  // 같은 제출본은 선생님 PC 가 지문으로 중복 접수를 막으므로 여러 번 보내도 한 번만 들어간다.
+  for (let attempt = 0; ; attempt++){
+    try {
+      res = await examSendFetch(base + "/exam-submit", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8", "X-Exam-Code": String(code).trim() },
+        body: text
+      }, 8000);
+    } catch(e){ return { ok: false, reason: "offline" }; }
+    if (res.status !== 503 || attempt >= EXAM_SEND_BUSY_RETRY_MS.length) break;
+    await new Promise(resolve => setTimeout(resolve, EXAM_SEND_BUSY_RETRY_MS[attempt] + Math.floor(Math.random() * 400)));
+  }
+  if (res.status === 503) return { ok: false, reason: "busy" };
   if (res.status === 403) return { ok: false, reason: "code" };
   if (res.status === 409){
     let body = null;
@@ -1746,6 +1756,7 @@ const EXAM_SEND_FAIL_TEXT = {
   closed: { message: "선생님이 아직 제출 받기를 시작하지 않았어요. 선생님께 알려 주세요.", saveFile: false },
   "other-exam": { message: "선생님이 지금 받고 있는 시험이 아니에요. 선생님께 확인하세요.", saveFile: false },
   offline: { message: "선생님 PC 에 연결하지 못했어요. 같은 와이파이인지 확인하고, 그래도 안 되면 저장된 파일을 선생님께 내세요.", saveFile: true },
+  busy: { message: "선생님 PC 에 제출이 몰려 받지 못했어요. 잠시 뒤 다시 제출하고, 그래도 안 되면 저장된 파일을 선생님께 내세요.", saveFile: true },
   server: { message: "선생님 PC 가 제출을 받지 못했어요. 저장된 파일을 선생님께 내세요.", saveFile: true }
 };
 

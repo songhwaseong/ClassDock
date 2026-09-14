@@ -37,7 +37,9 @@ test("로컬 서버는 Host와 인증을 본문 수신 전에 검증한다", () 
   const auth = launcher.indexOf("if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers))");
   const body = launcher.indexOf("// ---- 바디(있으면) 읽기 ----");
   assert.ok(auth >= 0 && body >= 0 && auth < body);
-  assert.match(launcher, /client\.ReceiveTimeout = 15000/);
+  // 로컬 서버 연결은 읽기 시간 제한을 둔다(예전 검사식은 시험 제출 받기의 15000 에 우연히 걸려 있었다).
+  const handleClient = launcher.slice(launcher.indexOf("static void HandleClient(TcpClient client)"));
+  assert.match(handleClient.slice(0, 600), /client\.ReceiveTimeout = 30000;/);
   assert.match(launcher, /413 Payload Too Large/);
 });
 

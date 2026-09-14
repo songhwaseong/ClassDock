@@ -13400,6 +13400,14 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
     const int ExamReceiveMaxItems = 300;                 // 세션당 총 접수 상한
     const int ExamReceiveMaxBodyBytes = 1024 * 1024;     // 제출본 1개 상한
     const int ExamReceivePerIpPerMinute = 20;            // 같은 IP 도배 차단
+    // 교실 LAN 에 열린 입구라 연결 수와 연결 하나가 머무는 시간을 제한한다. 제한이 없으면 연결마다 스레드와
+    // 최대 1MB 본문 버퍼가 생기고, 바이트를 조금씩 흘려 보내는 연결이 읽기 시간 제한을 계속 갱신하며 오래 버틴다.
+    // 스레드 풀 대신 전용 스레드를 유지하는 이유: 앱 본체의 로컬 서버가 스레드 풀을 쓰므로, LAN 쪽이 몰려도
+    // 선생님 화면의 저장·실행 요청이 밀리지 않게 분리해 둔다. 한 반(수십 명)이 동시에 내도 한도 안에 든다.
+    const int ExamReceiveMaxConcurrent = 48;
+    const int ExamReceiveReadTimeoutMs = 10000;          // 읽기 한 번의 제한
+    const int ExamReceiveConnectionDeadlineMs = 20000;   // 헤더+본문을 다 받기까지의 전체 제한
+    static int ExamReceiveActive = 0;
     static readonly object ExamReceiveLock = new object();
     static TcpListener ExamReceiveListener = null;
     static int ExamReceivePort = 0;
@@ -13549,9 +13557,33 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 }
             }
             TcpClient captured = client;
-            Thread worker = new Thread(delegate() { ExamReceiveHandle(captured); });
+            if (Interlocked.Increment(ref ExamReceiveActive) > ExamReceiveMaxConcurrent)
+            {
+                // 한도를 넘으면 곧바로 바쁨(503)으로 답하고 닫는다. 학생 앱은 잠시 뒤 다시 보낸다
+                // (같은 제출본은 지문으로 중복 접수를 막으므로 재시도해도 안전하다).
+                Interlocked.Decrement(ref ExamReceiveActive);
+                try
+                {
+                    captured.SendTimeout = 2000;
+                    using (NetworkStream busy = captured.GetStream())
+                        ExamReceiveWrite(busy, "503 Service Unavailable", "{\"ok\":false,\"error\":\"busy\"}");
+                }
+                catch { }
+                try { captured.Close(); } catch { }
+                continue;
+            }
+            Thread worker = new Thread(delegate()
+            {
+                try { ExamReceiveHandle(captured); }
+                finally { Interlocked.Decrement(ref ExamReceiveActive); }
+            });
             worker.IsBackground = true;
-            worker.Start();
+            try { worker.Start(); }
+            catch
+            {
+                Interlocked.Decrement(ref ExamReceiveActive);
+                try { captured.Close(); } catch { }
+            }
         }
         try { listener.Stop(); } catch { }
         lock (ExamReceiveLock) { if (ExamReceiveListener == listener) { ExamReceiveListener = null; ExamReceivePort = 0; ExamReceiveCode = ""; } }
@@ -13698,13 +13730,15 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
             using (client)
             using (NetworkStream stream = client.GetStream())
             {
-                client.ReceiveTimeout = 15000;
-                client.SendTimeout = 15000;
+                client.ReceiveTimeout = ExamReceiveReadTimeoutMs;
+                client.SendTimeout = ExamReceiveReadTimeoutMs;
+                Stopwatch deadline = Stopwatch.StartNew();
                 List<byte> head = new List<byte>(1024);
                 bool complete = false;
                 int b;
                 while ((b = stream.ReadByte()) != -1)
                 {
+                    if (deadline.ElapsedMilliseconds > ExamReceiveConnectionDeadlineMs) { ExamReceiveWrite(stream, "408 Request Timeout", "{\"ok\":false}"); return; }
                     head.Add((byte)b);
                     int n = head.Count;
                     if (n >= 4 && head[n - 4] == 13 && head[n - 3] == 10 && head[n - 2] == 13 && head[n - 1] == 10) { complete = true; break; }
@@ -13795,6 +13829,11 @@ print(json.dumps({'ok': True, 'state': 'ready', 'items': rows, 'truncated': seen
                 int read = 0;
                 while (read < contentLength)
                 {
+                    if (deadline.ElapsedMilliseconds > ExamReceiveConnectionDeadlineMs)
+                    {
+                        ExamReceiveWrite(stream, "408 Request Timeout", "{\"ok\":false,\"error\":\"timeout\"}");
+                        return;
+                    }
                     int got = stream.Read(body, read, contentLength - read);
                     if (got <= 0) break;
                     read += got;
