@@ -161,10 +161,18 @@ function mountStudyEditor(doc){
     type.value = current ? current.type : "qa"; front.value = current ? current.front : ""; back.value = current ? current.back : ""; note.value = current ? current.note : ""; tags.value = current ? current.tags : "";
     const syncType = () => { body.querySelector(".sc-front-label").textContent = type.value === "cloze" ? "빈칸 문장" : "질문"; body.querySelector(".sc-cloze-hint").hidden = type.value !== "cloze"; }; type.onchange = syncType; syncType();
     const preview = body.querySelector(".sc-photo-preview"), photoInput = body.querySelector("input[type=file]"), showPhoto = () => { preview.innerHTML = ""; if (image){ const img = document.createElement("img"); img.src = image.dataUrl; img.alt = "선택한 사진"; preview.appendChild(img); } else preview.textContent = "사진 없음"; }; showPhoto();
-    body.querySelector(".sc-photo-pick").onclick = () => photoInput.click(); body.querySelector(".sc-photo-remove").onclick = () => { image = null; showPhoto(); }; photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".study-form-error").textContent = "사진을 넣지 못했어요."; } };
+    body.querySelector(".sc-photo-pick").onclick = () => photoInput.click(); body.querySelector(".sc-photo-remove").onclick = () => {
+      image = null;
+      showPhoto();
+    }; photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".study-form-error").textContent = "사진을 넣지 못했어요."; } };
     body.querySelector(".sc-cancel").onclick = ui.dispose; const del = body.querySelector(".sc-delete"); del.hidden = !current; del.onclick = async () => { if (await deleteCard(current.id)) ui.dispose(); };
     body.querySelector(".sc-save").onclick = () => { if (!front.value.trim()){ body.querySelector(".study-form-error").textContent = "질문이나 빈칸 문장을 입력하세요."; front.focus(); return; } if (type.value === "cloze" && !studyClozeParts({ front:front.value }).hasCloze){ body.querySelector(".study-form-error").textContent = "가릴 정답을 {{정답}}처럼 하나 이상 표시하세요."; return; }
-      if (current) Object.assign(current, { type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image }); else { if (model.cards.length >= STUDY_MAX_CARDS) return; const card = studyNormalizeCard({ type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image }); model.cards.push(card); selectedId = card.id; } ui.dispose(); history.commit(); touch(); render(); };
+      if (current) Object.assign(current, { type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image }); else {
+        if (model.cards.length >= STUDY_MAX_CARDS) return;
+        const card = studyNormalizeCard({ type:type.value, front:front.value.trim(), back:back.value.trim(), note:note.value, tags:tags.value.trim(), image });
+        model.cards.push(card);
+        selectedId = card.id;
+      } ui.dispose(); history.commit(); touch(); render(); };
     setTimeout(() => front.focus(), 0);
   }
 
@@ -191,7 +199,24 @@ function mountStudyEditor(doc){
     overlay.querySelector(".study-session-close").onclick = close; overlay.querySelector(".study-reveal").onclick = reveal; overlay.querySelectorAll("[data-rate]").forEach(button => button.onclick = () => rate(button.dataset.rate)); overlay.querySelector(".study-session-done button").onclick = close; window.addEventListener("keydown", keys); show();
   }
   addBtn.onclick = () => openCardDialog(); undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.oninput = render; filter.onchange = render; learnBtn.onclick = () => startSession();
-  titleInput.oninput = () => { model.title = titleInput.value; history.commitSoon(500); touch(); }; csvInput.onchange = async () => { const file = csvInput.files && csvInput.files[0]; csvInput.value = ""; if (!file) return; try { const cards = studyCardsFromCsv(await file.text()); if (model.cards.length + cards.length > STUDY_MAX_CARDS) throw new Error("study-limit"); model.cards.push(...cards); history.commit(); touch(); render(); if (typeof toast === "function") toast(`카드 ${cards.length}장을 가져왔어요.`, 2800); } catch(error){ if (typeof toast === "function") toast(error.message === "csv-columns" ? "CSV에 ‘질문’과 ‘정답’ 열이 필요해요." : "CSV를 읽지 못했어요.", 3500, { type:"error" }); } };
+  titleInput.oninput = () => {
+    model.title = titleInput.value;
+    history.commitSoon(500);
+    touch();
+  }; csvInput.onchange = async () => {
+    const file = csvInput.files && csvInput.files[0];
+    csvInput.value = "";
+    if (!file) return;
+    try {
+      const cards = studyCardsFromCsv(await file.text());
+      if (model.cards.length + cards.length > STUDY_MAX_CARDS) throw new Error("study-limit");
+      model.cards.push(...cards);
+      history.commit();
+      touch();
+      render();
+      if (typeof toast === "function") toast(`카드 ${cards.length}장을 가져왔어요.`, 2800);
+    } catch(error){ if (typeof toast === "function") toast(error.message === "csv-columns" ? "CSV에 ‘질문’과 ‘정답’ 열이 필요해요." : "CSV를 읽지 못했어요.", 3500, { type:"error" }); }
+  };
   const exportCsv = () => studyDownload((model.title || "암기 카드").replace(/[\\/:*?"<>|]+/g, "_") + ".csv", new Blob(["\uFEFF" + studyCardsToCsv(model.cards)], { type:"text/csv;charset=utf-8" }));
   // ⋯ 는 공용 메뉴 모듈에 맡긴다 — 자리 잡기·바깥 클릭·Esc 를 다시 짜지 않으려고(context-menu.js).
   moreBtn.onclick = () => {
@@ -207,7 +232,11 @@ function mountStudyEditor(doc){
     ], { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
   };
   saveBtn.onclick = () => saveStudyDoc(doc);
-  const keydown = event => { if (doc.el.hidden || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId && !document.querySelector(".study-modal") && !root.querySelector(".study-session")) deleteCard(selectedId); };
+  const keydown = event => {
+    if (doc.el.hidden || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
+    const key = String(event.key || "").toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId && !document.querySelector(".study-modal") && !root.querySelector(".study-session")) deleteCard(selectedId);
+  };
   window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.studySelectCard) delete doc.studySelectCard; });
   render(); touch();
 }

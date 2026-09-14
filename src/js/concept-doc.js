@@ -46,7 +46,10 @@ let _conceptScratchCount = 0;
 function conceptId(prefix){ return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
 function conceptClamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
 function conceptClampZoom(value){ return conceptClamp(value, CONCEPT_MIN_ZOOM, CONCEPT_MAX_ZOOM); }
-function conceptFitZoom(canvasWidth, canvasHeight, viewportWidth, viewportHeight){ const width = Math.max(1, Number(canvasWidth) || 1), height = Math.max(1, Number(canvasHeight) || 1), availableWidth = Math.max(1, (Number(viewportWidth) || 1) - 36), availableHeight = Math.max(1, (Number(viewportHeight) || 1) - 36); return conceptClampZoom(Math.min(availableWidth / width, availableHeight / height, 1)); }
+function conceptFitZoom(canvasWidth, canvasHeight, viewportWidth, viewportHeight){
+  const width = Math.max(1, Number(canvasWidth) || 1), height = Math.max(1, Number(canvasHeight) || 1), availableWidth = Math.max(1, (Number(viewportWidth) || 1) - 36), availableHeight = Math.max(1, (Number(viewportHeight) || 1) - 36);
+  return conceptClampZoom(Math.min(availableWidth / width, availableHeight / height, 1));
+}
 // 무대는 스크롤이 아니라 translate로 움직인다. 화면 위 점 (x,y)가 가리키는 캔버스 지점은 (x - pan) / zoom 이므로,
 // 배율이 바뀌어도 기준점 아래 지점이 그대로 있으려면 pan을 아래처럼 다시 잡아야 한다.
 function conceptZoomPan(panX, panY, anchorX, anchorY, oldZoom, nextZoom){
@@ -136,7 +139,11 @@ function conceptDirectionalLevels(nodes, edges){
   for (let i = 0; i < queue.length; i++){ const id = queue[i], nextDepth = (depth.get(id) || 0) + 1; for (const to of outgoing.get(id) || []){ depth.set(to, Math.max(depth.get(to) || 0, nextDepth)); incoming.set(to, incoming.get(to) - 1); if (incoming.get(to) === 0) queue.push(to); } }
   const maxDepth = Math.max(0, ...depth.values()); list.forEach(node => { if (!depth.has(node.id)) depth.set(node.id, maxDepth + 1); });
   const levels = new Map(); list.forEach(node => { const d = depth.get(node.id); if (!levels.has(d)) levels.set(d, []); levels.get(d).push(node); });
-  const prior = new Map(); [...levels.keys()].sort((a, b) => a - b).forEach(d => { const level = levels.get(d); level.sort((a, b) => { const score = node => { const known = (parents.get(node.id) || []).map(id => prior.get(id)).filter(value => value != null); return known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : Number(node.y) / 10000 + Number(node.x) / 100000000; }; return score(a) - score(b) || Number(a.y) - Number(b.y) || Number(a.x) - Number(b.x); }); level.forEach((node, index) => prior.set(node.id, index)); });
+  const prior = new Map(); [...levels.keys()].sort((a, b) => a - b).forEach(d => {
+    const level = levels.get(d);
+    level.sort((a, b) => { const score = node => { const known = (parents.get(node.id) || []).map(id => prior.get(id)).filter(value => value != null); return known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : Number(node.y) / 10000 + Number(node.x) / 100000000; }; return score(a) - score(b) || Number(a.y) - Number(b.y) || Number(a.x) - Number(b.x); });
+    level.forEach((node, index) => prior.set(node.id, index));
+  });
   return { levels, roots };
 }
 // 가중 모듈성 증가량이 양수인 묶음만 합친다. 약한 다리 하나로 전체가 한 묶음이 되는 것을 줄인다.
@@ -692,7 +699,21 @@ function mountConceptEditor(doc){
   };
   const touch = () => { if (typeof markDocumentDirty === "function") markDocumentDirty(doc, snapshot() !== doc._conceptSavedSnapshot); clearTimeout(recoveryTimer); recoveryTimer = setTimeout(flushRecovery, CONCEPT_RECOVERY_DELAY); };
   doc.flushBackupRecovery = flushRecovery;
-  const replaceModel = restored => { model.title = restored.title; model.layout = restored.layout; model.layoutStyle = restored.layoutStyle; model.layoutSpacing = restored.layoutSpacing; Object.assign(model, conceptLayoutSettings(restored)); model.nodes = restored.nodes; model.edges = restored.edges; model.presentation = restored.presentation; titleInput.value = model.title; animationSelect.value = model.presentation.animation; if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = ""; render(); touch(); };
+  const replaceModel = restored => {
+    model.title = restored.title;
+    model.layout = restored.layout;
+    model.layoutStyle = restored.layoutStyle;
+    model.layoutSpacing = restored.layoutSpacing;
+    Object.assign(model, conceptLayoutSettings(restored));
+    model.nodes = restored.nodes;
+    model.edges = restored.edges;
+    model.presentation = restored.presentation;
+    titleInput.value = model.title;
+    animationSelect.value = model.presentation.animation;
+    if (selectedId && !model.nodes.some(node => node.id === selectedId)) selectedId = "";
+    render();
+    touch();
+  };
   history = MNEditHistory.create({ capture:snapshot, isEqual:(a, b) => a === b, apply:value => replaceModel(conceptSnapshotModel(value)), onChange:() => { undoBtn.disabled = !history.canUndo(); redoBtn.disabled = !history.canRedo(); }, limit:CONCEPT_HISTORY_LIMIT });
   history.reset(); doc._conceptHistory = history;
 
@@ -918,7 +939,18 @@ function mountConceptEditor(doc){
       const card = document.createElement("article"); card.className = "concept-card" + (node.id === selectedId ? " is-selected" : "") + (node.pinned ? " is-pinned" : ""); card.dataset.nodeId = node.id; card.style.left = node.x + "px"; card.style.top = node.y + "px"; card.style.setProperty("--concept-color", CONCEPT_COLORS[node.color]);
       card.tabIndex = 0; card.title = node.pinned ? "위치 고정됨 · 이동하려면 고정 해제 · 클릭: 크게 보기 · 두 번 클릭: 수정" : "클릭: 크게 보기 · 끌기: 이동 · 두 번 클릭: 수정"; card.setAttribute("aria-label", node.title + (node.pinned ? " 위치 고정 카드." : " 카드.") + " Enter 키로 크게 보기");
       if (!nodeMatchesQuery(node, query)) card.classList.add("is-muted");
-      const head = document.createElement("div"); head.className = "concept-card-head"; const headLabel = document.createElement("div"), order = document.createElement("span"), category = document.createElement("small"); headLabel.className = "concept-card-label"; order.className = "concept-order-badge"; order.textContent = String(orderById.get(node.id) || "–"); order.title = "발표 순서"; category.textContent = node.category || "개념"; headLabel.append(order, category); const edit = conceptButton("⋯", "개념 수정", "concept-card-edit"); const actions = document.createElement("div"); actions.className = "concept-card-actions";
+      const head = document.createElement("div");
+      head.className = "concept-card-head";
+      const headLabel = document.createElement("div"), order = document.createElement("span"), category = document.createElement("small");
+      headLabel.className = "concept-card-label";
+      order.className = "concept-order-badge";
+      order.textContent = String(orderById.get(node.id) || "–");
+      order.title = "발표 순서";
+      category.textContent = node.category || "개념";
+      headLabel.append(order, category);
+      const edit = conceptButton("⋯", "개념 수정", "concept-card-edit");
+      const actions = document.createElement("div");
+      actions.className = "concept-card-actions";
       const pin = conceptButton(node.pinned ? "고정됨" : "고정", node.pinned ? "위치 고정 해제" : "위치 고정 · 자동정렬과 끌기에서 제자리 유지", "concept-card-pin"); pin.setAttribute("aria-pressed", String(node.pinned)); actions.append(pin, edit); head.append(headLabel, actions);
       pin.addEventListener("click", event => { event.stopPropagation(); clearTimeout(previewTimer); previewTimer = 0; node.pinned = !node.pinned; history.commit(); touch(); render(); Array.from(cards.children).find(item => item.dataset.nodeId === node.id)?.querySelector(".concept-card-pin")?.focus(); });
       const title = document.createElement("h3"); title.textContent = node.title; const body = document.createElement("div"); body.className = "concept-card-body";
@@ -928,8 +960,30 @@ function mountConceptEditor(doc){
       card.addEventListener("click", () => { if (suppressCardClick){ suppressCardClick = false; return; } selectCard(node.id); clearTimeout(previewTimer); previewTimer = setTimeout(() => { previewTimer = 0; openNodePreview(node.id, card); }, 220); });
       card.addEventListener("dblclick", event => { if (event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; openNodeDialog(node.id); });
       card.addEventListener("keydown", event => { if (event.target !== card || event.key !== "Enter") return; event.preventDefault(); selectCard(node.id); openNodePreview(node.id, card); });
-      card.addEventListener("pointerdown", event => { if (event.button !== 0 || event.target.closest("button")) return; clearTimeout(previewTimer); previewTimer = 0; selectCard(node.id); if (node.pinned) return; drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom, edges:edgesTouchingNode(node.id) }; card.setPointerCapture(event.pointerId); card.classList.add("is-dragging"); });
-      card.addEventListener("pointermove", event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0; drag.lastX = event.clientX; drag.lastY = event.clientY; if (dx || dy) setPan(panX - dx, panY - dy); const activeZoom = drag.zoom || 1; node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom); node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom); card.style.left = node.x + "px"; card.style.top = node.y + "px"; syncCanvasSize(); moveEdges(drag.edges); });
+      card.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || event.target.closest("button")) return;
+        clearTimeout(previewTimer);
+        previewTimer = 0;
+        selectCard(node.id);
+        if (node.pinned) return;
+        drag = { id:node.id, pointer:event.pointerId, x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY, ox:node.x, oy:node.y, panX, panY, zoom, edges:edgesTouchingNode(node.id) };
+        card.setPointerCapture(event.pointerId);
+        card.classList.add("is-dragging");
+      });
+      card.addEventListener("pointermove", event => {
+        if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return;
+        const rect = viewport.getBoundingClientRect(), margin = 58, speed = 22, moveX = event.clientX - drag.lastX, moveY = event.clientY - drag.lastY, dx = event.clientX > rect.right - margin && moveX > 0 ? speed : event.clientX < rect.left + margin && moveX < 0 ? -speed : 0, dy = event.clientY > rect.bottom - margin && moveY > 0 ? speed : event.clientY < rect.top + margin && moveY < 0 ? -speed : 0;
+        drag.lastX = event.clientX;
+        drag.lastY = event.clientY;
+        if (dx || dy) setPan(panX - dx, panY - dy);
+        const activeZoom = drag.zoom || 1;
+        node.x = conceptDragCoordinate(drag.ox, event.clientX - drag.x, drag.panX - panX, activeZoom);
+        node.y = conceptDragCoordinate(drag.oy, event.clientY - drag.y, drag.panY - panY, activeZoom);
+        card.style.left = node.x + "px";
+        card.style.top = node.y + "px";
+        syncCanvasSize();
+        moveEdges(drag.edges);
+      });
       const finish = event => { if (!drag || drag.pointer !== event.pointerId || drag.id !== node.id) return; const changed = node.x !== drag.ox || node.y !== drag.oy; drag = null; card.classList.remove("is-dragging"); if (changed){ suppressCardClick = true; setTimeout(() => { suppressCardClick = false; }, 0); model.layout = "free"; history.commit(); touch(); } };
       card.addEventListener("pointerup", finish); card.addEventListener("pointercancel", finish);
     }
@@ -957,9 +1011,25 @@ function mountConceptEditor(doc){
   }
   function openAutoLayoutDialog(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("정렬할 카드가 없어요.", 2200); return; }
-    const body = document.createElement("div"); body.className = "concept-layout-form"; body.innerHTML = '<fieldset><legend>배치 방식</legend><div class="concept-layout-choices"></div></fieldset><fieldset><legend>카드 간격</legend><div class="concept-layout-spacing"></div></fieldset><label class="concept-layout-fit"><input type="checkbox" checked><span><strong>정렬 뒤 화면에 맞춤</strong><small>관계도 전체가 최대한 보이도록 배율을 자동 조절합니다.</small></span></label><p class="concept-layout-root"></p><p class="concept-layout-pinned"></p><fieldset class="cl-weight-settings"><legend>관계 강도 반영</legend><label><input type="checkbox" class="cl-weighted"> 강도에 따라 거리·묶음 조절</label><label>영향도 <select class="cl-influence"><option value="weak">약하게</option><option value="normal">보통</option><option value="strong">강하게</option></select></label><small>군집형·관계 강도형·중심 집중형에 적용됩니다. 카드가 겹치면 간격을 우선 확보합니다.</small></fieldset><label class="cl-root-field">중심 카드 <select class="cl-root"></select></label><label><input type="checkbox" class="cl-show-weights"> 관계 강도를 선 굵기로 표시</label><footer><button type="button" class="cl-cancel">취소</button><button type="button" class="cl-apply primary">정렬 적용</button></footer>';
+    const body = document.createElement("div");
+    body.className = "concept-layout-form";
+    body.innerHTML = '<fieldset><legend>배치 방식</legend><div class="concept-layout-choices"></div></fieldset><fieldset><legend>카드 간격</legend><div class="concept-layout-spacing"></div></fieldset><label class="concept-layout-fit"><input type="checkbox" checked><span><strong>정렬 뒤 화면에 맞춤</strong><small>관계도 전체가 최대한 보이도록 배율을 자동 조절합니다.</small></span></label><p class="concept-layout-root"></p><p class="concept-layout-pinned"></p><fieldset class="cl-weight-settings"><legend>관계 강도 반영</legend><label><input type="checkbox" class="cl-weighted"> 강도에 따라 거리·묶음 조절</label><label>영향도 <select class="cl-influence"><option value="weak">약하게</option><option value="normal">보통</option><option value="strong">강하게</option></select></label><small>군집형·관계 강도형·중심 집중형에 적용됩니다. 카드가 겹치면 간격을 우선 확보합니다.</small></fieldset><label class="cl-root-field">중심 카드 <select class="cl-root"></select></label><label><input type="checkbox" class="cl-show-weights"> 관계 강도를 선 굵기로 표시</label><footer><button type="button" class="cl-cancel">취소</button><button type="button" class="cl-apply primary">정렬 적용</button></footer>';
     const ui = conceptModal("자동 정렬", body), choices = body.querySelector(".concept-layout-choices"), spacing = body.querySelector(".concept-layout-spacing");
-    CONCEPT_LAYOUTS.forEach(item => { const label = document.createElement("label"); label.className = "concept-layout-choice"; const input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-mode"; input.value = item.id; input.checked = item.id === model.layoutStyle; const copy = document.createElement("span"), strong = document.createElement("strong"), small = document.createElement("small"); strong.textContent = item.label; small.textContent = item.description; copy.append(strong, small); label.append(input, copy); choices.appendChild(label); });
+    CONCEPT_LAYOUTS.forEach(item => {
+      const label = document.createElement("label");
+      label.className = "concept-layout-choice";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "concept-layout-mode";
+      input.value = item.id;
+      input.checked = item.id === model.layoutStyle;
+      const copy = document.createElement("span"), strong = document.createElement("strong"), small = document.createElement("small");
+      strong.textContent = item.label;
+      small.textContent = item.description;
+      copy.append(strong, small);
+      label.append(input, copy);
+      choices.appendChild(label);
+    });
     [["tight", "좁게"], ["normal", "보통"], ["wide", "넓게"]].forEach(([value, text]) => { const label = document.createElement("label"), input = document.createElement("input"); input.type = "radio"; input.name = "concept-layout-spacing"; input.value = value; input.checked = value === model.layoutSpacing; label.append(input, document.createTextNode(text)); spacing.appendChild(label); });
     const weighted = body.querySelector(".cl-weighted"), influence = body.querySelector(".cl-influence"), showWeights = body.querySelector(".cl-show-weights"), rootSelect = body.querySelector(".cl-root");
     weighted.checked = model.layoutWeighted; influence.value = model.layoutInfluence; showWeights.checked = model.showWeights;
@@ -970,7 +1040,22 @@ function mountConceptEditor(doc){
     const syncSettings = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, usesWeights = mode === "cluster" || mode === "weighted" || mode === "focus"; body.querySelector(".cl-weight-settings").disabled = !usesWeights; influence.disabled = !usesWeights || !weighted.checked; rootSelect.disabled = mode !== "radial" && mode !== "focus"; };
     choices.onchange = syncSettings; weighted.onchange = syncSettings; syncSettings();
     body.querySelector(".concept-layout-root").textContent = "중심 카드는 방사형·중심 집중형에 적용됩니다. 중심 집중형은 연결되지 않은 묶음을 따로 정돈합니다.";
-    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => { const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked; model.layoutWeighted = weighted.checked; model.layoutInfluence = influence.value; model.showWeights = showWeights.checked; model.layoutRootId = rootSelect.value; model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:rootSelect.value, weighted:weighted.checked, influence:influence.value }); model.layout = "auto"; model.layoutStyle = mode; model.layoutSpacing = spacingValue; ui.dispose(); history.commit(); touch(); render(); if (fit) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true); };
+    body.querySelector(".cl-cancel").onclick = ui.dispose; body.querySelector(".cl-apply").onclick = () => {
+      const mode = body.querySelector('input[name="concept-layout-mode"]:checked').value, spacingValue = body.querySelector('input[name="concept-layout-spacing"]:checked').value, fit = body.querySelector(".concept-layout-fit input").checked;
+      model.layoutWeighted = weighted.checked;
+      model.layoutInfluence = influence.value;
+      model.showWeights = showWeights.checked;
+      model.layoutRootId = rootSelect.value;
+      model.nodes = conceptAutoLayout(model.nodes, model.edges, { mode, spacing:spacingValue, rootId:rootSelect.value, weighted:weighted.checked, influence:influence.value });
+      model.layout = "auto";
+      model.layoutStyle = mode;
+      model.layoutSpacing = spacingValue;
+      ui.dispose();
+      history.commit();
+      touch();
+      render();
+      if (fit) requestAnimationFrame(fitCanvasToViewport); else centerCanvas(true);
+    };
     setTimeout(() => choices.querySelector("input:checked")?.focus(), 0);
   }
 
@@ -990,7 +1075,10 @@ function mountConceptEditor(doc){
         const copy = document.createElement("div"); const title = document.createElement("strong"), category = document.createElement("small"); title.textContent = node.title; category.textContent = node.category || "개념"; copy.append(title, category);
         const up = conceptButton("↑", "한 단계 앞으로", "concept-order-move"), down = conceptButton("↓", "한 단계 뒤로", "concept-order-move"); up.disabled = index === 0; down.disabled = index === draft.length - 1; up.onclick = () => move(id, -1); down.onclick = () => move(id, 1);
         row.append(number, grip, copy, up, down); row.addEventListener("dragstart", event => { draggingId = id; row.classList.add("is-dragging"); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; }); row.addEventListener("dragend", () => { draggingId = ""; row.classList.remove("is-dragging"); });
-        row.addEventListener("dragover", event => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "move"; }); row.addEventListener("drop", event => { event.preventDefault(); if (!draggingId || draggingId === id) return; const from = draft.indexOf(draggingId); if (from < 0) return; draft.splice(from, 1); const target = draft.indexOf(id); draft.splice(target, 0, draggingId); draggingId = ""; renderList(); }); list.appendChild(row);
+        row.addEventListener("dragover", event => {
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        }); row.addEventListener("drop", event => { event.preventDefault(); if (!draggingId || draggingId === id) return; const from = draft.indexOf(draggingId); if (from < 0) return; draft.splice(from, 1); const target = draft.indexOf(id); draft.splice(target, 0, draggingId); draggingId = ""; renderList(); }); list.appendChild(row);
       });
     };
     body.querySelector(".co-auto").onclick = () => { draft = conceptAutoPresentationOrder(model.nodes, model.edges); renderList(); };
@@ -1008,10 +1096,26 @@ function mountConceptEditor(doc){
     showPhoto(); body.querySelector(".cn-photo-pick").onclick = () => photoInput.click(); body.querySelector(".cn-photo-remove").onclick = () => { image = null; showPhoto(); };
     photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".concept-form-error").textContent = "사진을 넣지 못했어요. PNG·JPG·WebP를 사용하세요."; } };
     body.querySelector(".cn-cancel").onclick = ui.dispose; const del = body.querySelector(".cn-delete"); del.hidden = !current;
-    del.onclick = async () => { if (typeof confirmDialog !== "function" || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return; model.nodes = model.nodes.filter(node => node.id !== current.id); model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id); model.presentation = conceptNormalizePresentation(model.presentation, model.nodes); selectedId = ""; ui.dispose(); history.commit(); touch(); render(); };
+    del.onclick = async () => {
+      if (typeof confirmDialog !== "function" || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return;
+      model.nodes = model.nodes.filter(node => node.id !== current.id);
+      model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id);
+      model.presentation = conceptNormalizePresentation(model.presentation, model.nodes);
+      selectedId = "";
+      ui.dispose();
+      history.commit();
+      touch();
+      render();
+    };
     body.querySelector(".cn-save").onclick = () => { if (!title.value.trim()){ body.querySelector(".concept-form-error").textContent = "개념 이름을 입력하세요."; title.focus(); return; }
       if (current) Object.assign(current, { title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked });
-      else { if (model.nodes.length >= CONCEPT_MAX_NODES){ body.querySelector(".concept-form-error").textContent = "개념은 최대 300개까지 넣을 수 있어요."; return; } const count = model.nodes.length, node = conceptNormalizeNode({ title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked, x:80 + count % 5 * 290, y:80 + Math.floor(count / 5) * 180 }, count); model.nodes.push(node); model.presentation.order.push(node.id); selectedId = node.id; }
+      else {
+        if (model.nodes.length >= CONCEPT_MAX_NODES){ body.querySelector(".concept-form-error").textContent = "개념은 최대 300개까지 넣을 수 있어요."; return; }
+        const count = model.nodes.length, node = conceptNormalizeNode({ title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked, x:80 + count % 5 * 290, y:80 + Math.floor(count / 5) * 180 }, count);
+        model.nodes.push(node);
+        model.presentation.order.push(node.id);
+        selectedId = node.id;
+      }
       ui.dispose(); history.commit(); touch(); render(); };
     setTimeout(() => title.focus(), 0);
   }
@@ -1025,13 +1129,23 @@ function mountConceptEditor(doc){
     model.nodes.forEach(node => { [from, to].forEach(select => { const option = document.createElement("option"); option.value = node.id; option.textContent = node.title; select.appendChild(option); }); }); CONCEPT_RELATIONS.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.label; type.appendChild(option); });
     from.value = current ? current.from : (selectedId || model.nodes[0].id); to.value = current ? current.to : model.nodes.find(node => node.id !== from.value).id; type.value = current ? current.type : "cause"; label.value = current ? current.label : "";
     body.querySelector(".ce-cancel").onclick = ui.dispose; const del = body.querySelector(".ce-delete"); del.hidden = !current; del.onclick = () => { model.edges = model.edges.filter(edge => edge.id !== current.id); ui.dispose(); history.commit(); touch(); render(); };
-    body.querySelector(".ce-save").onclick = () => { if (from.value === to.value){ body.querySelector(".concept-form-error").textContent = "서로 다른 개념을 고르세요."; return; } if (current) Object.assign(current, { from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) }); else if (model.edges.length < CONCEPT_MAX_EDGES) model.edges.push(conceptNormalizeEdge({ from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) })); ui.dispose(); history.commit(); touch(); render(); };
+    body.querySelector(".ce-save").onclick = () => {
+      if (from.value === to.value){ body.querySelector(".concept-form-error").textContent = "서로 다른 개념을 고르세요."; return; }
+      if (current) Object.assign(current, { from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) }); else if (model.edges.length < CONCEPT_MAX_EDGES) model.edges.push(conceptNormalizeEdge({ from:from.value, to:to.value, type:type.value, label:label.value.trim(), weight:conceptNormalizeWeight(weight.value) }));
+      ui.dispose();
+      history.commit();
+      touch();
+      render();
+    };
   }
 
   function startPresentation(){
     if (!model.nodes.length){ if (typeof toast === "function") toast("발표할 개념이 없어요.", 2200); return; }
     const baseOrder = model.presentation.order.map(id => model.nodes.find(node => node.id === id)).filter(Boolean), ordered = selectedId ? [...baseOrder.filter(node => node.id === selectedId), ...baseOrder.filter(node => node.id !== selectedId)] : baseOrder; let index = 0;
-    const overlay = document.createElement("div"); overlay.className = "concept-present"; overlay.innerHTML = '<div class="concept-present-top"><span></span><button type="button">끝내기</button></div><article><small></small><h2></h2><div class="concept-present-main"><div class="concept-present-image"></div><p></p></div><div class="concept-present-links"></div></article><div class="concept-present-controls"><button type="button" class="prev">이전</button><button type="button" class="next">다음</button></div>'; root.appendChild(overlay);
+    const overlay = document.createElement("div");
+    overlay.className = "concept-present";
+    overlay.innerHTML = '<div class="concept-present-top"><span></span><button type="button">끝내기</button></div><article><small></small><h2></h2><div class="concept-present-main"><div class="concept-present-image"></div><p></p></div><div class="concept-present-links"></div></article><div class="concept-present-controls"><button type="button" class="prev">이전</button><button type="button" class="next">다음</button></div>';
+    root.appendChild(overlay);
     const close = () => { window.removeEventListener("keydown", keys); overlay.remove(); };
     const show = () => { const node = ordered[index]; showLargeNode(overlay, node, `${index + 1} / ${ordered.length}`); overlay.querySelector(".prev").disabled = index === 0; overlay.querySelector(".next").disabled = index === ordered.length - 1; };
     const keys = event => { if (event.key === "Escape") close(); else if ((event.key === "ArrowRight" || event.key === " ") && index < ordered.length - 1){ event.preventDefault(); index++; show(); } else if (event.key === "ArrowLeft" && index > 0){ event.preventDefault(); index--; show(); } };
@@ -1058,13 +1172,35 @@ function mountConceptEditor(doc){
     }
     ordered.forEach((node, index) => {
       const card = document.createElement("article"); card.className = "concept-card concept-build-card is-build-hidden"; card.dataset.nodeId = node.id; card.dataset.step = String(index + 1); card.style.left = node.x + "px"; card.style.top = node.y + "px"; card.style.setProperty("--concept-color", CONCEPT_COLORS[node.color]); card.tabIndex = -1; card.setAttribute("aria-hidden", "true");
-      const head = document.createElement("div"); head.className = "concept-card-head"; const label = document.createElement("div"), number = document.createElement("span"), category = document.createElement("small"); label.className = "concept-card-label"; number.className = "concept-order-badge"; number.textContent = String(index + 1); category.textContent = node.category || "개념"; label.append(number, category); head.appendChild(label);
-      const title = document.createElement("h3"); title.textContent = node.title; const body = document.createElement("div"); body.className = "concept-card-body"; if (node.image){ const img = document.createElement("img"); img.src = node.image.dataUrl; img.alt = ""; body.appendChild(img); } const description = document.createElement("p"); description.textContent = node.description || "설명이 없습니다."; body.appendChild(description); card.append(head, title, body); buildCards.appendChild(card); buildCardById.set(node.id, card);
+      const head = document.createElement("div");
+      head.className = "concept-card-head";
+      const label = document.createElement("div"), number = document.createElement("span"), category = document.createElement("small");
+      label.className = "concept-card-label";
+      number.className = "concept-order-badge";
+      number.textContent = String(index + 1);
+      category.textContent = node.category || "개념";
+      label.append(number, category);
+      head.appendChild(label);
+      const title = document.createElement("h3"); title.textContent = node.title; const body = document.createElement("div"); body.className = "concept-card-body"; if (node.image){
+        const img = document.createElement("img");
+        img.src = node.image.dataUrl;
+        img.alt = "";
+        body.appendChild(img);
+      } const description = document.createElement("p"); description.textContent = node.description || "설명이 없습니다."; body.appendChild(description); card.append(head, title, body); buildCards.appendChild(card); buildCardById.set(node.id, card);
       card.addEventListener("click", () => openNodePreview(node.id, card)); card.addEventListener("keydown", event => { if (event.key === "Enter"){ event.preventDefault(); openNodePreview(node.id, card); } });
     });
     let step = 0, fitScale = 1, buildZoomAdjusted = false; const animationTimers = new Set(), reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const later = (fn, delay) => { const timer = setTimeout(() => { animationTimers.delete(timer); fn(); }, delay); animationTimers.add(timer); };
-    const layoutBuildStage = () => { const scaledWidth = stageWidth * fitScale, scaledHeight = stageHeight * fitScale, marginX = Math.max(16, (buildViewport.clientWidth - scaledWidth) / 2), marginY = Math.max(16, (buildViewport.clientHeight - scaledHeight) / 2); fit.style.width = scaledWidth + "px"; fit.style.height = scaledHeight + "px"; fit.style.margin = `${marginY}px ${marginX}px`; buildStage.style.transform = `scale(${fitScale})`; buildZoomReset.textContent = Math.round(fitScale * 100) + "%"; buildZoomOut.disabled = fitScale <= CONCEPT_MIN_ZOOM; buildZoomIn.disabled = fitScale >= CONCEPT_MAX_ZOOM; };
+    const layoutBuildStage = () => {
+      const scaledWidth = stageWidth * fitScale, scaledHeight = stageHeight * fitScale, marginX = Math.max(16, (buildViewport.clientWidth - scaledWidth) / 2), marginY = Math.max(16, (buildViewport.clientHeight - scaledHeight) / 2);
+      fit.style.width = scaledWidth + "px";
+      fit.style.height = scaledHeight + "px";
+      fit.style.margin = `${marginY}px ${marginX}px`;
+      buildStage.style.transform = `scale(${fitScale})`;
+      buildZoomReset.textContent = Math.round(fitScale * 100) + "%";
+      buildZoomOut.disabled = fitScale <= CONCEPT_MIN_ZOOM;
+      buildZoomIn.disabled = fitScale >= CONCEPT_MAX_ZOOM;
+    };
     const fitStage = () => { const width = Math.max(320, buildViewport.clientWidth - 34), height = Math.max(260, buildViewport.clientHeight - 34); fitScale = conceptClampZoom(Math.min(1, width / stageWidth, height / stageHeight)); layoutBuildStage(); };
     const setBuildZoom = (value, clientX, clientY) => {
       const next = conceptClampZoom(value); if (Math.abs(next - fitScale) < .001) return;
@@ -1073,24 +1209,81 @@ function mountConceptEditor(doc){
     };
     const onBuildWheel = event => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? buildViewport.clientHeight : 1, factor = Math.exp(-event.deltaY * unit * .0014); setBuildZoom(fitScale * factor, event.clientX, event.clientY); };
     const focusNode = node => { if (!node || !model.presentation.autoFocus) return; const left = fit.offsetLeft + (node.x + 115) * fitScale - buildViewport.clientWidth / 2, top = fit.offsetTop + (node.y + 65) * fitScale - buildViewport.clientHeight / 2; buildViewport.scrollTo({ left:Math.max(0, left), top:Math.max(0, top), behavior:reducedMotion ? "auto" : "smooth" }); };
-    const revealCard = card => { card.classList.remove("is-build-hidden"); card.setAttribute("aria-hidden", "false"); card.tabIndex = 0; if (overlay.dataset.animation !== "none" && !reducedMotion){ card.classList.remove("is-revealing"); void card.offsetWidth; card.classList.add("is-revealing"); later(() => card.classList.remove("is-revealing"), overlay.dataset.animation === "draw" ? 900 : 620); } };
+    const revealCard = card => {
+      card.classList.remove("is-build-hidden");
+      card.setAttribute("aria-hidden", "false");
+      card.tabIndex = 0;
+      if (overlay.dataset.animation !== "none" && !reducedMotion){ card.classList.remove("is-revealing"); void card.offsetWidth; card.classList.add("is-revealing"); later(() => card.classList.remove("is-revealing"), overlay.dataset.animation === "draw" ? 900 : 620); }
+    };
     const revealEdge = group => {
-      group.classList.remove("is-build-hidden"); if (overlay.dataset.animation === "none" || reducedMotion) return; group.classList.add("is-revealing"); const path = group.querySelector(".concept-edge-path"), length = Math.max(1, path.getTotalLength()), duration = overlay.dataset.animation === "draw" ? 900 : 480; path.style.transition = "none"; path.style.strokeDasharray = `${length} ${length}`; path.style.strokeDashoffset = String(length); void path.getBoundingClientRect(); path.style.transition = `stroke-dashoffset ${duration}ms ease`; path.style.strokeDashoffset = "0";
+      group.classList.remove("is-build-hidden");
+      if (overlay.dataset.animation === "none" || reducedMotion) return;
+      group.classList.add("is-revealing");
+      const path = group.querySelector(".concept-edge-path"), length = Math.max(1, path.getTotalLength()), duration = overlay.dataset.animation === "draw" ? 900 : 480;
+      path.style.transition = "none";
+      path.style.strokeDasharray = `${length} ${length}`;
+      path.style.strokeDashoffset = String(length);
+      void path.getBoundingClientRect();
+      path.style.transition = `stroke-dashoffset ${duration}ms ease`;
+      path.style.strokeDashoffset = "0";
       later(() => { group.classList.remove("is-revealing"); path.style.transition = ""; path.style.strokeDasharray = ""; path.style.strokeDashoffset = ""; }, duration + 40);
     };
     const updateStep = next => {
       const previous = step; step = Math.max(0, Math.min(ordered.length, next));
       if (step < previous){
-        ordered.forEach((node, index) => { if (index < step) return; const card = buildCardById.get(node.id); card.classList.add("is-build-hidden"); card.classList.remove("is-revealing"); card.setAttribute("aria-hidden", "true"); card.tabIndex = -1; }); edgeElements.forEach(group => { if (Number(group.dataset.revealStep) > step){ group.classList.add("is-build-hidden"); group.classList.remove("is-revealing"); } });
+        ordered.forEach((node, index) => {
+          if (index < step) return;
+          const card = buildCardById.get(node.id);
+          card.classList.add("is-build-hidden");
+          card.classList.remove("is-revealing");
+          card.setAttribute("aria-hidden", "true");
+          card.tabIndex = -1;
+        }); edgeElements.forEach(group => { if (Number(group.dataset.revealStep) > step){ group.classList.add("is-build-hidden"); group.classList.remove("is-revealing"); } });
       } else if (step > previous){
         for (let index = previous; index < step; index++) revealCard(buildCardById.get(ordered[index].id)); edgeElements.filter(group => Number(group.dataset.revealStep) > previous && Number(group.dataset.revealStep) <= step).forEach(revealEdge);
       }
-      overlay.querySelector(".concept-build-count").textContent = `${step} / ${ordered.length}`; overlay.querySelector(".concept-build-progress i").style.width = (ordered.length ? step / ordered.length * 100 : 0) + "%"; overlay.querySelector(".prev").disabled = step === 0; overlay.querySelector(".next").disabled = step === ordered.length; hint.hidden = step !== 0; if (step > 0 && step >= previous) focusNode(ordered[step - 1]);
+      overlay.querySelector(".concept-build-count").textContent = `${step} / ${ordered.length}`;
+      overlay.querySelector(".concept-build-progress i").style.width = (ordered.length ? step / ordered.length * 100 : 0) + "%";
+      overlay.querySelector(".prev").disabled = step === 0;
+      overlay.querySelector(".next").disabled = step === ordered.length;
+      hint.hidden = step !== 0;
+      if (step > 0 && step >= previous) focusNode(ordered[step - 1]);
     };
-    const keys = event => { if (closeNodePreview) return; const key = String(event.key || "").toLowerCase(), zoomKey = event.ctrlKey || event.metaKey; if (zoomKey && (key === "+" || key === "=")){ event.preventDefault(); setBuildZoom(fitScale * 1.2); } else if (zoomKey && key === "-"){ event.preventDefault(); setBuildZoom(fitScale / 1.2); } else if (zoomKey && key === "0"){ event.preventDefault(); setBuildZoom(1); } else if (event.key === "Escape"){ event.preventDefault(); close(); } else if (!zoomKey && ((event.key === " " && !event.shiftKey) || event.key === "ArrowRight")){ event.preventDefault(); updateStep(step + 1); } else if (!zoomKey && ((event.key === " " && event.shiftKey) || event.key === "ArrowLeft")){ event.preventDefault(); updateStep(step - 1); } else if (event.key === "Home"){ event.preventDefault(); updateStep(0); } else if (event.key === "End"){ event.preventDefault(); updateStep(ordered.length); } };
+    const keys = event => {
+      if (closeNodePreview) return;
+      const key = String(event.key || "").toLowerCase(), zoomKey = event.ctrlKey || event.metaKey;
+      if (zoomKey && (key === "+" || key === "=")){
+        event.preventDefault();
+        setBuildZoom(fitScale * 1.2);
+      } else if (zoomKey && key === "-"){
+        event.preventDefault();
+        setBuildZoom(fitScale / 1.2);
+      } else if (zoomKey && key === "0"){
+        event.preventDefault();
+        setBuildZoom(1);
+      } else if (event.key === "Escape"){
+        event.preventDefault();
+        close();
+      } else if (!zoomKey && ((event.key === " " && !event.shiftKey) || event.key === "ArrowRight")){
+        event.preventDefault();
+        updateStep(step + 1);
+      } else if (!zoomKey && ((event.key === " " && event.shiftKey) || event.key === "ArrowLeft")){ event.preventDefault(); updateStep(step - 1); } else if (event.key === "Home"){ event.preventDefault(); updateStep(0); } else if (event.key === "End"){ event.preventDefault(); updateStep(ordered.length); }
+    };
     const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => buildZoomAdjusted ? layoutBuildStage() : fitStage()) : null;
     const close = () => { window.removeEventListener("keydown", keys); buildViewport.removeEventListener("wheel", onBuildWheel); if (resizeObserver) resizeObserver.disconnect(); animationTimers.forEach(clearTimeout); animationTimers.clear(); overlay.remove(); if (closeBuildPresentation === close) closeBuildPresentation = null; if (buildPresentBtn.isConnected) buildPresentBtn.focus(); };
-    closeBuildPresentation = close; overlay.querySelector(".concept-build-close").onclick = close; overlay.querySelector(".prev").onclick = () => updateStep(step - 1); overlay.querySelector(".next").onclick = () => updateStep(step + 1); buildZoomOut.onclick = () => setBuildZoom(fitScale / 1.2); buildZoomReset.onclick = () => setBuildZoom(1); buildZoomIn.onclick = () => setBuildZoom(fitScale * 1.2); buildViewport.addEventListener("wheel", onBuildWheel, { passive:false }); window.addEventListener("keydown", keys); if (resizeObserver) resizeObserver.observe(buildViewport); fitStage(); updateStep(0); overlay.querySelector(".next").focus();
+    closeBuildPresentation = close;
+    overlay.querySelector(".concept-build-close").onclick = close;
+    overlay.querySelector(".prev").onclick = () => updateStep(step - 1);
+    overlay.querySelector(".next").onclick = () => updateStep(step + 1);
+    buildZoomOut.onclick = () => setBuildZoom(fitScale / 1.2);
+    buildZoomReset.onclick = () => setBuildZoom(1);
+    buildZoomIn.onclick = () => setBuildZoom(fitScale * 1.2);
+    buildViewport.addEventListener("wheel", onBuildWheel, { passive:false });
+    window.addEventListener("keydown", keys);
+    if (resizeObserver) resizeObserver.observe(buildViewport);
+    fitStage();
+    updateStep(0);
+    overlay.querySelector(".next").focus();
   }
   /* 표·개요 창 하나에 들이기와 내보내기를 함께 둔다 — 실무에서는 엑셀이나 개요 글로 이미 적어 둔
      것을 들여왔다가, 고친 뒤 다시 엑셀·개요로 넘기는 왕복이 한 자리에서 끝나야 한다.
@@ -1180,9 +1373,31 @@ function mountConceptEditor(doc){
 
   function printConcept(){ document.body.classList.add("concept-printing"); root.classList.add("concept-print-target"); const done = () => { document.body.classList.remove("concept-printing"); root.classList.remove("concept-print-target"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); setTimeout(done, 1500); }
   addNodeBtn.onclick = () => openNodeDialog(); addEdgeBtn.onclick = () => openEdgeDialog(); autoBtn.onclick = openAutoLayoutDialog; tableBtn.onclick = openTableOutlineDialog;
-  undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", applySearchFilter); titleInput.addEventListener("input", () => { model.title = titleInput.value; history.commitSoon(500); touch(); }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
-  const keydown = event => { if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return; const key = String(event.key || "").toLowerCase(); if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && lastPick === "edge"){ if (selectedEdgeIds.size === 1) openEdgeDialog([...selectedEdgeIds][0]); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); else if (event.key === "Escape" && selectedEdgeIds.size) selectEdge(""); };
-  window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); clearTimeout(previewTimer); if (closeNodePreview) closeNodePreview(); if (closeBuildPresentation) closeBuildPresentation(); if (viewportResizeObserver) viewportResizeObserver.disconnect(); viewport.removeEventListener("wheel", onViewportWheel); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.conceptSelectNode) delete doc.conceptSelectNode; });
+  undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.addEventListener("input", applySearchFilter); titleInput.addEventListener("input", () => {
+    model.title = titleInput.value;
+    history.commitSoon(500);
+    touch();
+  }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
+  const keydown = event => {
+    if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
+    const key = String(event.key || "").toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && key === "z"){
+      event.preventDefault();
+      event.shiftKey ? history.redo() : history.undo();
+    } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && lastPick === "edge"){ if (selectedEdgeIds.size === 1) openEdgeDialog([...selectedEdgeIds][0]); } else if (event.key === "Delete" && selectedId) openNodeDialog(selectedId); else if (event.key === "Escape" && selectedEdgeIds.size) selectEdge("");
+  };
+  window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => {
+    clearTimeout(recoveryTimer);
+    clearTimeout(previewTimer);
+    if (closeNodePreview) closeNodePreview();
+    if (closeBuildPresentation) closeBuildPresentation();
+    if (viewportResizeObserver) viewportResizeObserver.disconnect();
+    viewport.removeEventListener("wheel", onViewportWheel);
+    if (history) history.cancel();
+    window.removeEventListener("keydown", keydown);
+    if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
+    if (doc.conceptSelectNode) delete doc.conceptSelectNode;
+  });
   render(); touch();
 }
 

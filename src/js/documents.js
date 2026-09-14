@@ -2855,7 +2855,7 @@ function sidebarSearchQuery(){
 }
 function sidebarFilterActive(){ return !!(sidebarSearchQuery() || sidebarExtFilter); }
 function syncSidebarSearchCollapse(query){
-  const key = query + " " + sidebarExtFilter;
+  const key = query + "\u0000" + sidebarExtFilter;
   if (key === sidebarSearchCollapsedKey) return;
   sidebarSearchCollapsedKey = key;
   sidebarSearchCollapsed.clear();

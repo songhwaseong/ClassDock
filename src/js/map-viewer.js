@@ -4188,7 +4188,7 @@ async function mountMapEditor(doc){
       const drawn = new Set();
       for (const name of Object.keys(stations)){
         for (const other of MNSubwayLive.neighbours(line, name)){
-          const key = name < other ? name + " " + other : other + " " + name;
+          const key = name < other ? name + "\u0000" + other : other + "\u0000" + name;
           if (drawn.has(key)) continue;      // 이웃은 양쪽에 적혀 있어 그대로 두면 두 번 그린다
           drawn.add(key);
           subwayRouteLayer.addLayer(L.polyline([stations[name], stations[other]], {
