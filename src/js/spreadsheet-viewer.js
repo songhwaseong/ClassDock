@@ -4723,6 +4723,14 @@ async function renderXlsx(file, host, doc){
     const onBlur = () => { if (menuOpen) return; finish(true); };
     const onKey = (e) => {
       if (fxHandleKey(e)) return;                     // 자동완성 목록이 떠 있으면 ↑↓·Tab·Enter 는 완성에 사용
+      // 입력 중 Ctrl+S: 아래에서 전파를 막으므로 여기서 받지 않으면 표 저장이 안 불리고 브라우저의
+      // '다른 이름으로 페이지 저장' 창이 뜬다. 입력한 글자를 먼저 셀에 넣고 저장한다.
+      if (typeof shortcutMatches === "function" && shortcutMatches(e, "saveCurrent")){
+        e.preventDefault(); e.stopPropagation();
+        finish(true);
+        quickSave();
+        return;
+      }
       if (e.key === "Enter" && !e.altKey){ e.preventDefault(); finish(true); moveEditSelection(td, e.shiftKey ? -1 : 1, 0); }
       else if (e.key === "Tab"){ e.preventDefault(); finish(true); moveEditSelection(td, 0, e.shiftKey ? -1 : 1); }
       else if (e.key === "Escape"){ e.preventDefault(); finish(false); }
@@ -5335,6 +5343,17 @@ async function renderXlsx(file, host, doc){
     } catch(e){ console.error(e); toast("저장하지 못했어요.", 2400, { type: "error" }); }
     finally { quickSaving = false; }
   };
+  // 포커스가 표 밖(도구막대·수식 입력줄 등)에 있을 때 앱 전체 Ctrl+S 처리(app.js)가 부르는 저장 입구.
+  // 표에는 .run-save 버튼이 없어 이 입구가 없으면 브라우저의 페이지 저장 창이 떴다.
+  if (doc){
+    const saveCurrentSpreadsheet = () => {
+      if (!editMode){ toast("보기 모드예요. 편집 모드로 바꾼 뒤 저장할 수 있어요.", 2200); return; }
+      quickSave();
+    };
+    doc.saveCurrent = saveCurrentSpreadsheet;
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => { if (doc.saveCurrent === saveCurrentSpreadsheet) delete doc.saveCurrent; });
+  }
 
   // ----- 현재 시트 인쇄 / PDF 저장: 숨은 iframe에 표만 담아 인쇄(앱 UI 제외, 셀 서식 유지) -----
   const printCurrentSheet = () => {

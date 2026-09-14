@@ -89,3 +89,11 @@ test("원본 저장 모드에서 저장 API가 없으면 사본으로 우회하�
   const {context,events,doc}=fixture();context.saveViaFileHandle=undefined;await context.save();
   assert.equal(events.copies,0);assert.equal(events.downloads,0);assert.equal(doc.hasUnsavedEdits,true);
 });
+test("셀 입력 중이나 표 밖에 포커스가 있어도 Ctrl+S는 표 저장으로 가고 브라우저 페이지 저장 창을 열지 않는다",()=>{
+  const app=fs.readFileSync(require.resolve("../src/js/app.js"),"utf8");
+  // 셀 편집 키 처리는 전파를 막으므로 그 안에서 입력을 반영한 뒤 저장해야 한다.
+  assert.match(spreadsheet,/const onKey = \(e\) => \{[\s\S]*?shortcutMatches\(e, "saveCurrent"\)\)\{\s*e\.preventDefault\(\); e\.stopPropagation\(\);\s*finish\(true\);\s*quickSave\(\);/);
+  assert.match(spreadsheet,/doc\.saveCurrent = saveCurrentSpreadsheet;/);
+  assert.match(app,/if \(state && typeof state\.saveCurrent === "function"\)\{\s*e\.preventDefault\(\);\s*state\.saveCurrent\(\);/);
+  assert.match(app,/window\.addEventListener\("keydown", \(e\) => \{\s*if \(shortcutMatches\(e, "saveCurrent"\)\) e\.preventDefault\(\);\s*\}, true\);/);
+});

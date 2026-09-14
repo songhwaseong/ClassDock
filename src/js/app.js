@@ -1942,6 +1942,13 @@ function wire(){
     byId("sidebarToggle").focus();
   };
 
+  // 안전망: 이 앱에서 Ctrl+S(저장 단축키)가 브라우저의 '페이지를 다른 이름으로 저장' 창을 여는 일은 없어야 한다.
+  // 입력칸들이 keydown 전파를 막는 곳이 많아, 아래 공통 처리까지 못 오면 기본 동작이 그대로 살아 있었다.
+  // 캡처 단계에서 기본 동작만 막고 전파는 두므로 각 화면의 저장 처리는 그대로 돈다.
+  window.addEventListener("keydown", (e) => {
+    if (shortcutMatches(e, "saveCurrent")) e.preventDefault();
+  }, true);
+
   // 자주 쓰는 파일 작업 단축키. 편집기 안에서도 Ctrl+S는 현재 문서를 저장한다.
   window.addEventListener("keydown", (e) => {
     if (document.querySelector(".modal:not([hidden])")) return;
@@ -2052,6 +2059,12 @@ function wire(){
       if (state && state.examLocked){        // 아직 암호를 안 넣은 시험지 — 저장할 내용 자체가 없다
         e.preventDefault();
         toast("암호를 넣어 시험지를 연 뒤에 저장할 수 있어요.", 3000);
+        return;
+      }
+      // .run-save 버튼이 없는 화면(표 등)은 문서가 직접 저장 입구를 건넨다.
+      if (state && typeof state.saveCurrent === "function"){
+        e.preventDefault();
+        state.saveCurrent();
         return;
       }
       const save = state && state.el && state.el.querySelector(".run-save");
