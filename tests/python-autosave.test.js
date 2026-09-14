@@ -78,7 +78,8 @@ test("조용한 텍스트 자동저장은 파일·폴더 쓰기 권한 요청창
   const start = codeSource.indexOf("async function saveViaFileHandle");
   const end = codeSource.indexOf("// exe 런처", start);
   const block = codeSource.slice(start, end);
-  assert.match(block, /options\.noPermissionPrompt\) return "denied"/);
+  assert.match(block, /options\.noPermissionPrompt\) return deny\("/);
+  assert.match(block, /const deny = \(reason\) => \{[^}]*return "denied"; \}/);
   assert.match(block, /restoreFolderOriginalFileHandle\([\s\S]*!!options\.noPermissionPrompt/);
 });
 

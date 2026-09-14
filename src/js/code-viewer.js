@@ -3995,9 +3995,10 @@ async function prepareNativeOriginalSaveRoot(ownerDoc, allowPicker){
   if (!ownerDoc || !ownerDoc.originalSaveMode || typeof nativeSourceSupported !== "function"
       || !(await nativeSourceSupported())) return { supported:false, handle:null, cancelled:false };
   const root = originalSaveRootForDoc(ownerDoc);
-  if (!root) return { supported:true, handle:null, cancelled:false };
+  if (!root) return { supported:true, handle:null, cancelled:false, reason:"no-folder-root" };
   let handle = root.folderHandle && root.folderHandle.__classdockNativeHandle ? root.folderHandle : null;
   if (!handle && typeof restoreNativeSourceFolder === "function") handle = await restoreNativeSourceFolder(root.name);
+  if (!handle && !allowPicker) return { supported:true, handle:null, cancelled:false, reason:"native-root-not-restored" };
   if (!handle && allowPicker && typeof chooseNativeSourceFolder === "function"){
     toast("브라우저 권한창 없이 원본에 저장하도록 '" + root.name + "' 폴더를 한 번만 다시 선택해 주세요.", 5200);
     const picked = await chooseNativeSourceFolder();
@@ -4018,29 +4019,56 @@ async function prepareNativeOriginalSaveRoot(ownerDoc, allowPicker){
   return { supported:true, handle:handle || null, cancelled:false };
 }
 
+// 원본 저장 실패의 실제 갈래를 진단 로그에 남긴다. 경로·파일 내용은 넣지 않고 확장자와 문서 표식만 남긴다.
+function noteFileHandleSaveFailure(reason, error, ownerDoc, options){
+  if (typeof MNDiagnostics === "undefined" || !MNDiagnostics) return;
+  const root = ownerDoc && ownerDoc.originalSaveMode ? originalSaveRootForDoc(ownerDoc) : null;
+  const details = {
+    reason,
+    extension:String((ownerDoc && ownerDoc.name) || "").split(".").pop().toLowerCase(),
+    originalSaveMode:!!(ownerDoc && ownerDoc.originalSaveMode),
+    isScratch:!!(ownerDoc && ownerDoc.isScratch),
+    existingOnly:!!(options && options.existingOnly),
+    noPermissionPrompt:!!(options && options.noPermissionPrompt),
+    hasFileHandle:!!(ownerDoc && ownerDoc.fsHandle),
+    nativeFileHandle:!!(ownerDoc && ownerDoc.fsHandle && ownerDoc.fsHandle.__classdockNativeHandle),
+    hasFolderRoot:!!root,
+    nativeRootHandle:!!(root && root.folderHandle && root.folderHandle.__classdockNativeHandle)
+  };
+  try {
+    if (error) MNDiagnostics.error("file_save_failed", "원본 파일에 쓰지 못했습니다.", error, details);
+    else MNDiagnostics.warn("file_save_failed", "원본 파일 저장이 거절됐습니다.", details);
+  } catch(_){}
+}
+
+// 원본 파일 핸들을 못 찾은 이유. 저장 실패 토스트는 "권한을 확인하세요" 한 가지뿐이라,
+// 실제로 어느 갈래에서 막혔는지 진단 로그에 남길 때 쓴다(noteFileHandleSaveFailure).
+let lastOriginalHandleMiss = "";
 async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noPermissionPrompt=false){
-  if (!ownerDoc || !ownerDoc.originalSaveMode) return null;
+  const miss = (reason) => { lastOriginalHandleMiss = reason; return null; };
+  lastOriginalHandleMiss = "";
+  if (!ownerDoc || !ownerDoc.originalSaveMode) return miss("not-original-save-mode");
   const root = originalSaveRootForDoc(ownerDoc);
-  if (!root) return null;
+  if (!root) return miss("no-folder-root");
   let rootHandle = root.folderHandle || null;
   if (!rootHandle && typeof loadRememberedFolderHandle === "function"){
     rootHandle = await loadRememberedFolderHandle(root.name);
     if (rootHandle) root.folderHandle = rootHandle;
   }
-  if (!rootHandle || typeof rootHandle.getDirectoryHandle !== "function") return null;
+  if (!rootHandle || typeof rootHandle.getDirectoryHandle !== "function") return miss("no-root-handle");
   let permission = typeof rootHandle.queryPermission === "function"
     ? await rootHandle.queryPermission({ mode:"readwrite" })
     : "granted";
-  if (permission !== "granted" && noPermissionPrompt) return null;
+  if (permission !== "granted" && noPermissionPrompt) return miss("root-permission-not-granted");
   if (permission !== "granted" && typeof rootHandle.requestPermission === "function")
     permission = await rootHandle.requestPermission({ mode:"readwrite" });
-  if (permission !== "granted") return null;
+  if (permission !== "granted") return miss("root-permission-denied");
 
   const path = normalizedRunPath(ownerDoc.workspacePath || ownerDoc.relPath || ownerDoc.name || name);
   const parts = path.split("/").filter(Boolean);
-  if (parts.length > 1 && parts[0] !== root.name) return null;
+  if (parts.length > 1 && parts[0] !== root.name) return miss("path-outside-root");
   if (parts[0] === root.name) parts.shift();
-  if (parts.some(part => part === "." || part === "..")) return null;
+  if (parts.some(part => part === "." || part === "..")) return miss("path-dot-segment");
   const fileName = parts.pop() || ownerDoc.name || name;
   let dirHandle = rootHandle;
   for (const part of parts) dirHandle = await dirHandle.getDirectoryHandle(part);
@@ -4054,21 +4082,22 @@ async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noP
 }
 
 async function saveViaFileHandle(text, name, ownerDoc, options={}){
+  const deny = (reason) => { noteFileHandleSaveFailure(reason, null, ownerDoc, options); return "denied"; };
   try {
     const originalHandle = ownerDoc && ownerDoc.fsHandle;
     let handle = originalHandle;
     let pickedNewHandle = false;
     const nativeRoot = await prepareNativeOriginalSaveRoot(ownerDoc, !options.noPermissionPrompt);
     if (nativeRoot.supported){
-      if (!nativeRoot.handle) return nativeRoot.cancelled ? "cancelled" : "denied";
+      if (!nativeRoot.handle) return nativeRoot.cancelled ? "cancelled" : deny(nativeRoot.reason || "native-root-unavailable");
       handle = ownerDoc && ownerDoc.fsHandle; // 브라우저 핸들은 prepareNativeOriginalSaveRoot가 걷어냈다
     }
     if (handle && handle.queryPermission){              // 보관한 핸들의 쓰기 권한 재확인(회수됐을 수 있음)
       let perm = await handle.queryPermission({ mode: "readwrite" });
-      if (perm !== "granted" && options.noPermissionPrompt) return "denied";
+      if (perm !== "granted" && options.noPermissionPrompt) return deny("file-permission-not-granted");
       if (perm !== "granted" && handle.requestPermission) perm = await handle.requestPermission({ mode: "readwrite" });
       if (perm !== "granted"){
-        if (options.existingOnly) return "denied";
+        if (options.existingOnly) return deny("file-permission-denied");
         handle = null;                                   // 거부 → 새로 위치 선택
       }
     }
@@ -4076,13 +4105,13 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     if (!handle && ownerDoc && ownerDoc.fsDirHandle && typeof ownerDoc.fsDirHandle.getFileHandle === "function"){
       let dperm = "granted";
       if (ownerDoc.fsDirHandle.queryPermission) dperm = await ownerDoc.fsDirHandle.queryPermission({ mode: "readwrite" });
-      if (dperm !== "granted" && options.noPermissionPrompt) return "denied";
+      if (dperm !== "granted" && options.noPermissionPrompt) return deny("folder-permission-not-granted");
       if (dperm !== "granted" && ownerDoc.fsDirHandle.requestPermission) dperm = await ownerDoc.fsDirHandle.requestPermission({ mode: "readwrite" });
       if (dperm === "granted"){
         handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create: !options.existingOnly });
         ownerDoc.fsHandle = handle;            // 이후 저장은 이 .py 파일을 그대로 덮어쓴다
       } else if (options.existingOnly){
-        return "denied";
+        return deny("folder-permission-denied");
       }
     }
     // 원본 저장 폴더에서 만든 새 문서는 아직 파일이 없으므로 create:true 로 연다.
@@ -4095,7 +4124,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name,
       !!options.existingOnly && !createInOriginalFolder, !!options.noPermissionPrompt);
     if (!handle){
-      if (options.existingOnly) return "denied";
+      if (options.existingOnly) return deny("original-file-handle:" + (lastOriginalHandleMiss || "unknown"));
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";
       handle = await window.showSaveFilePicker({
         suggestedName: /\.[A-Za-z0-9]+$/.test(name) ? name : name + ".py",
@@ -4120,6 +4149,7 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
   } catch(e){
     if (e && e.name === "AbortError") return "cancelled";   // 사용자가 위치 선택 대화상자를 닫음
     console.warn("file-handle save failed:", e);
+    noteFileHandleSaveFailure("write-error", e, ownerDoc, options);
     return options.existingOnly ? "denied" : "unsupported"; // 원본 모드에서는 다른 위치로 조용히 폴백하지 않음
   }
 }
