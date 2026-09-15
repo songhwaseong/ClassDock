@@ -1318,6 +1318,43 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-select:disabled{opacity:.5}
   .map-nearby-check{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
   .map-nearby-note{margin:0 0 4px;font-size:12.5px;color:var(--muted);min-height:17px}
+  /* 색칠 지도 창 */
+  .map-choro-modal .modal-card{width:min(620px,96%);max-height:92vh;overflow-y:auto}
+  .map-choro-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .map-choro-sources label,.map-choro-check{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
+  .map-choro-check{margin-bottom:6px}
+  .map-choro-check small{color:var(--muted)}
+  .map-choro-table-box[hidden]{display:none}
+  .map-choro-paste{width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;background:var(--field);
+    color:var(--ink);padding:7px 9px;font:12px/1.45 ui-monospace,Consolas,monospace;resize:vertical;margin-bottom:8px;tab-size:14}
+  .map-choro-grow{flex:1;min-width:200px}
+  .map-choro-grow input,.map-choro-row input[type=text]{flex:1;min-width:0;border:1px solid var(--border);border-radius:7px;
+    background:var(--field);color:var(--ink);padding:5px 8px;font:inherit;font-size:12.5px}
+  .map-choro-row input.map-choro-unit{width:70px;flex:0 0 auto}
+  .map-choro-custom[hidden]{display:none}
+  .map-choro-custom input[type=color]{width:38px;height:26px;padding:1px;border:1px solid var(--border);border-radius:6px;background:var(--field);cursor:pointer}
+  .map-choro-custom input[type=color]:disabled{opacity:.35;cursor:default}
+  .map-choro-preview{display:flex;height:14px;margin:0 0 8px;border-radius:4px;overflow:hidden;border:1px solid var(--border)}
+  .map-choro-preview i{flex:1}
+  .map-choro-note{margin:0 0 6px;font-size:12.5px;color:var(--muted);min-height:17px;overflow-wrap:anywhere}
+  /* 색칠 지도 범례 — 축척 막대처럼 지도 칸에 직접 얹어 캡처·인쇄에 남긴다. 오른쪽 위(확대 단추 반대편). */
+  .map-choro-legend{position:absolute;right:8px;top:8px;z-index:800;min-width:120px;max-width:min(240px,45%);
+    padding:7px 9px;border-radius:7px;background:rgba(255,255,255,.9);color:#1f2937;
+    font:600 11px/1.3 "Malgun Gothic",system-ui,sans-serif;box-shadow:0 1px 5px rgba(15,23,42,.22);pointer-events:none}
+  .map-choro-legend[hidden],.map-choro-hover[hidden]{display:none}
+  .map-choro-legend-title{font-size:12px;font-weight:700;margin-bottom:5px;overflow-wrap:anywhere}
+  .map-choro-legend-row{display:flex;align-items:center;gap:6px;margin:2px 0;font-variant-numeric:tabular-nums}
+  .map-choro-legend-row i{width:16px;height:11px;flex:0 0 auto;border:1px solid rgba(71,85,105,.55)}
+  .map-choro-legend-foot{margin-top:5px;font-size:10px;font-weight:500;color:#64748b}
+  /* 마우스를 올린 지역 — 화면에서만 보이고 캡처에서는 감춘다(MAP_CAPTURE_HIDDEN_PANES) */
+  .map-choro-hover{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:810;max-width:70%;
+    padding:5px 10px;border-radius:999px;background:rgba(15,23,42,.86);color:#fff;
+    font:600 12px/1.3 "Malgun Gothic",system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+  .map-choro-label{width:auto!important;height:auto!important;background:none;border:0}
+  .map-choro-label span{display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);white-space:nowrap;
+    font:600 10.5px/1.15 "Malgun Gothic",system-ui,sans-serif;color:#0f172a;font-variant-numeric:tabular-nums;
+    text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff}
+  .map-choro-label b{font-weight:700}
   /* 지역 통계 창 */
   .map-region-modal .modal-card{width:min(560px,96%)}
   .map-region-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
@@ -1549,6 +1586,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-practice-staff[hidden]{display:none}
   .music-practice-info{color:var(--accent);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
   .music-practice-info[hidden]{display:none}
+  .music-practice-mic-meter{min-width:6.5em;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .music-practice-mic-meter[hidden]{display:none}
   /* 음감 테스트 — 따라치기와 정반대로 악보를 아예 감춘다(악보가 보이면 귀로 고를 이유가 없다).
      감출 때 visibility 가 아니라 display 로 지우는 이유: 자리를 비워야 테스트 판이 그 폭을
      그대로 받고, 끝나고 되돌아올 때 ResizeObserver 가 알아서 다시 조판한다. */
@@ -4213,6 +4252,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapPresent .map-toolvis-present,
   html.hide-tool-mapNearby .map-toolvis-nearby,
   html.hide-tool-mapRegion .map-toolvis-region,
+  html.hide-tool-mapChoropleth .map-toolvis-choropleth,
   html.hide-tool-mapImage .map-toolvis-image,
   html.hide-tool-mapCsvImport .map-toolvis-csv-import,
   html.hide-tool-mapGeoExport .map-toolvis-geo-export,

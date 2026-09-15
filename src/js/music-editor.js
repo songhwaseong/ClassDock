@@ -1257,7 +1257,16 @@ async function mountMusicEditor(doc){
   practiceInfo.className = "music-practice-info";
   practiceInfo.hidden = true;
   practiceInfo.setAttribute("aria-live", "polite");
-  practiceWrap.append(practiceBtn, practiceStaffSelect, practiceInfo);
+  // 🎤 따라 부르기 — 따라치기와 같은 채점에 입력만 마이크를 더한다(자판·MIDI 는 그대로 살아 있다).
+  const practiceMicBtn = musicButton("🎤 따라 부르기",
+    "악보를 보고 노래나 리코더로 소리 내어 따라 하기 — 마이크로 음높이를 듣고 맞았는지 표시합니다 (Space: 지금 음 들려주기, Esc: 그만두기)");
+  practiceMicBtn.classList.add("music-practice-mic");
+  practiceMicBtn.setAttribute("aria-pressed", "false");
+  const practiceMicMeter = document.createElement("span");
+  practiceMicMeter.className = "music-practice-mic-meter";
+  practiceMicMeter.hidden = true;
+  practiceMicMeter.title = "마이크로 듣고 있는 음 · 반음 한가운데서 벗어난 정도(센트)";
+  practiceWrap.append(practiceBtn, practiceMicBtn, practiceStaffSelect, practiceInfo, practiceMicMeter);
 
   /* 음감 테스트 — 악보를 감추고 소리만 듣고 음이름을 맞힌다(진행·채점은 music-eartest.js).
      단계·문항 수·다시 듣기·기준음은 배율·도구막대와 같은 보기 상태라 .msheet 에도 되돌리기에도 넣지 않는다. */
@@ -3963,6 +3972,7 @@ async function mountMusicEditor(doc){
       // 도구막대를 접어 두고 쓰는 사람을 위해 여기에도 둔다. 그만두기는 Esc 로 — 연습 중에는
       // 우클릭 메뉴 자체가 열리지 않는다(연습 중 편집 메뉴를 여는 길을 막아 둬서).
       { label:"따라치기(자판으로 음 맞추기)", disabled:running, action:() => { practiceBtn.click(); } },
+      { label:"따라 부르기(마이크로 음 맞추기)", disabled:running, action:() => { practiceMicBtn.click(); } },
       { label:"음감 테스트(듣고 음 맞히기)", disabled:running, action:() => { earBtn.click(); } },
       { label:"연습 속도", children:[0.5, 0.75, 1].map((rate) => ({
         label:`${Math.round(rate * 100)}%`, active:Number(speedSelect.value) === rate,
@@ -4442,7 +4452,10 @@ async function mountMusicEditor(doc){
       if (pitchClass !== undefined){
         claim();
         if (!event.repeat) practicePress(pitchClass);  // 키를 누르고 있어도 한 번만 친 것으로 센다
+        return;
       }
+      // 건반 설정이 Space 를 음으로 쓰지 않을 때만 "지금 음 들려주기"다(위에서 먼저 음으로 걸러진다).
+      if (event.code === "Space"){ claim(); if (!event.repeat) practicePromptStep(); }
       return;
     }
     if (keyboardComposeActive && !editableTarget(event.target) && !document.querySelector(".modal:not([hidden])")){
@@ -4683,12 +4696,16 @@ async function mountMusicEditor(doc){
     updatePracticeInfo();
   }
 
-  // 자판·도레미 버튼·MIDI 건반이 모두 이 문 하나로 들어온다. pc 는 옥타브를 뺀 음이름(0~11).
-  function practicePress(pc){
+  // 자판·도레미 버튼·MIDI 건반·마이크가 모두 이 문 하나로 들어온다. pc 는 옥타브를 뺀 음이름(0~11).
+  // source "mic": 목소리는 화음을 한꺼번에 낼 수 없으므로 화음 중 한 음만 맞아도 넘어간다.
+  // 또 맞은 음을 되울려 주지 않는다 — 스피커 소리가 마이크로 되들어와 다음 차례를 제멋대로 채점한다.
+  function practicePress(pc, source){
     if (!practice.active || !Number.isFinite(pc)) return;
     const step = practice.steps[practice.pos];
     if (!step) return;
+    const fromMic = source === "mic";
     if (step.pcs.includes(pc)){
+      if (fromMic){ practiceAdvance(); return; }
       if (!practice.hit.has(pc)){
         practice.hit.add(pc);
         practicePreviewMidis(step.midis.filter((midi) => musicPitchClass(midi) === pc));
@@ -4699,15 +4716,92 @@ async function mountMusicEditor(doc){
     }
     practice.wrong++;
     practice.err = true;
-    practicePreviewMidis([practiceNearMidi(pc, step.midis[0])]);
+    // 마이크로 틀렸으면 낸 음 대신 **맞는 음**을 들려준다 — 부르는 사람에게는 찾아갈 음이 필요하다.
+    if (fromMic) practicePromptStep();
+    else practicePreviewMidis([practiceNearMidi(pc, step.midis[0])]);
     paintPractice();
     updatePracticeInfo();
     const now = Date.now();
     if (typeof toast === "function" && now - practice.hintAt > 3500){
       practice.hintAt = now;
       const want = step.pcs.map((value) => MUSIC_PC_LABELS[value]).join("+");
-      toast(`누른 음: ${MUSIC_PC_LABELS[pc]} · 이 자리는 ${want}`, 2200);
+      toast(`${fromMic ? "부른" : "누른"} 음: ${MUSIC_PC_LABELS[pc]} · 이 자리는 ${want}`, 2200);
     }
+  }
+
+  /* ----- 마이크(따라 부르기) -----
+     음이 자리 잡는 시간을 맞는 음/틀린 음에 따로 준다(MNMusicPitch.createTracker 참고).
+     맞는 음은 짧게 머물러도 받고, 틀린 음은 오래 머물 때만 실수로 센다 — 노래는 음을 찾아
+     미끄러져 들어가므로 같은 기준이면 제 음에 닿기 전에 스친 음이 모두 틀린 것으로 잡힌다. */
+  const MUSIC_MIC_HOLD_OK_MS = 120;
+  const MUSIC_MIC_HOLD_WRONG_MS = 450;
+  const MUSIC_MIC_PROMPT_MUTE_MS = 1100;   // 들려준 음이 스피커에서 사라질 때까지 마이크를 막는다
+  let practiceMicMeterAt = 0;
+  const practiceMic = MNMusicPitch.createMic({
+    holdMs:(midi) => {
+      const step = practice.steps[practice.pos];
+      return step && step.pcs.includes(musicPitchClass(midi)) ? MUSIC_MIC_HOLD_OK_MS : MUSIC_MIC_HOLD_WRONG_MS;
+    },
+    onNote:(note) => { if (practice.active) practicePress(note.pc, "mic"); },
+    onLevel:(level) => {
+      // 30ms 마다 오지만 글자는 1초에 열 번만 바꾼다(매 조각 쓰면 긴 악보에서 버벅인다).
+      const now = performance.now();
+      if (level && now - practiceMicMeterAt < 100) return;
+      practiceMicMeterAt = now;
+      practiceMicMeter.textContent = level ? "🎤 " + MNMusicPitch.label(level.midi) : "🎤 …";
+    },
+    onError:(error) => {
+      const denied = error && (error.name === "NotAllowedError" || error.name === "SecurityError");
+      if (typeof toast === "function"){
+        toast(denied ? "마이크 사용을 허락하지 않아서 자판·건반으로만 따라 할 수 있어요."
+          : "마이크를 찾지 못했어요. 연결을 확인해 주세요.", 3600);
+      }
+    }
+  });
+
+  // 지금 차례의 음을 들려주고 그동안 마이크를 막는다. 목소리로 따라 하므로 화음이면 맨 위 음(가락)만.
+  function practicePromptStep(){
+    const step = practice.steps[practice.pos];
+    if (!step || !step.midis.length) return;
+    if (practiceMic.active()){
+      practiceMic.mute(MUSIC_MIC_PROMPT_MUTE_MS);
+      practicePreviewMidis([step.midis[step.midis.length - 1]]);
+    } else {
+      practicePreviewMidis(step.midis);
+    }
+  }
+
+  function syncPracticeMicChrome(){
+    const on = practiceMic.active();
+    practiceMicBtn.classList.toggle("is-on", on);
+    practiceMicBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    practiceMicMeter.hidden = !on;
+    if (!on) practiceMicMeter.textContent = "";
+  }
+
+  async function startPracticeMic(){
+    if (!practiceMic.supported()){
+      if (typeof toast === "function") toast("이 실행 환경에서는 마이크를 쓸 수 없어요.", 3000);
+      return false;
+    }
+    practiceMicMeter.hidden = false;
+    practiceMicMeter.textContent = "🎤 권한 확인 중…";
+    const ok = await practiceMic.start();
+    if (ok && !practice.active){ practiceMic.stop(); return false; }   // 허락을 기다리는 사이에 그만뒀다
+    syncPracticeMicChrome();
+    if (ok){
+      practicePromptStep();                         // 첫 음을 들려주고 시작한다
+      if (typeof toast === "function"){
+        toast("첫 음을 들려줬어요. 악보를 보고 소리 내어 따라 해 보세요. 옥타브는 달라도 맞은 것으로 봐요."
+          + " (Space: 지금 음 다시 듣기 · Esc: 그만두기)", 6000);
+      }
+    }
+    return ok;
+  }
+
+  function stopPracticeMic(){
+    practiceMic.stop();
+    syncPracticeMicChrome();
   }
 
   function setPracticeChrome(on){
@@ -4751,7 +4845,7 @@ async function mountMusicEditor(doc){
     root.classList.toggle("is-running", on);
     for (const control of [playAllBtn, playRightBtn, playLeftBtn, playPartBtn, repeatMeasureBtn,
                            playSelectedPartBtn, playbackLineSelect,
-                           speedSelect, countInBtn, metronomeBtn, fromInput, toInput, practiceBtn]){
+                           speedSelect, countInBtn, metronomeBtn, fromInput, toInput, practiceBtn, practiceMicBtn]){
       control.disabled = on;
     }
     if (!on) syncTools();
@@ -4878,6 +4972,8 @@ async function mountMusicEditor(doc){
   function stopPractice(reason = "cancel"){
     if (!practice.active) return null;
     const stats = practiceStats();
+    const sang = practiceMic.active();
+    stopPracticeMic();
     practice.active = false;
     practice.steps = []; practice.state = null; practice.total = 0;
     practice.pos = 0; practice.done = 0; practice.notes = 0; practice.hit = new Set(); practice.err = false;
@@ -4885,7 +4981,7 @@ async function mountMusicEditor(doc){
     paintPractice();
     if (typeof toast === "function"){
       if (reason === "done"){
-        toast(`다 따라 눌렀어요! 정확도 ${stats.accuracy}% · ${stats.seconds}초 · 분당 ${stats.npm}음`
+        toast(`다 따라 ${sang ? "불렀어요" : "눌렀어요"}! 정확도 ${stats.accuracy}% · ${stats.seconds}초 · 분당 ${stats.npm}음`
           + (stats.wrong ? ` (틀린 횟수 ${stats.wrong}번)` : ""), 5200);
       } else {
         toast(`따라치기를 그만뒀어요. 여기까지 ${stats.percent}% · 정확도 ${stats.accuracy}%`, 3000);
@@ -4902,6 +4998,17 @@ async function mountMusicEditor(doc){
       toast("악보를 보고 자판으로 음을 눌러 보세요. " + musicPracticeKeyHelp()
         + " · 옥타브는 달라도 맞은 것으로 봐요. (Backspace: 한 음 뒤로 · Esc: 그만두기)", 6000);
     }
+  });
+  // 쉬고 있을 때 누르면 마이크를 켠 따라치기를 시작하고, 따라치기 중에는 마이크만 켜고 끈다.
+  practiceMicBtn.addEventListener("click", () => {
+    if (practice.active){
+      if (practiceMic.active()) stopPracticeMic();
+      else startPracticeMic();
+      scoreHost.focus({ preventScroll:true });
+      return;
+    }
+    if (!startPractice()) return;
+    startPracticeMic();
   });
 
   /* ----- 재생 ----- */
@@ -4943,6 +5050,7 @@ async function mountMusicEditor(doc){
     partMuteBtn.disabled = on;
     partVolumeInput.disabled = on;
     practiceBtn.disabled = on;                   // 재생 중에는 따라치기를 시작하지 않는다(소리가 겹친다)
+    practiceMicBtn.disabled = on;
     earBtn.disabled = on;                        // 음감 테스트도 같다 — 반주와 문제 음이 겹친다
     keyboardComposeBtn.disabled = on;
     keyboardSettingsBtn.disabled = on;
@@ -5663,6 +5771,7 @@ async function mountMusicEditor(doc){
     clearTimeout(redrawTimer);
     noteDrag = null;
     scorePan = null;
+    practiceMic.stop();                          // 마이크를 놓아야 브라우저의 녹음 표시가 꺼진다
     practice.active = false;                     // 문서를 닫으면 따라치기도 끝난다(악보는 건드린 적이 없다)
     practice.steps = []; practice.state = null;
     earTest.destroy();                           // 예약해 둔 다음 문제 타이머까지 함께 걷는다

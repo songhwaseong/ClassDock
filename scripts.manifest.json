@@ -114,6 +114,7 @@
     "music-xml.js",
     "music-audio.js",
     "music-eartest.js",
+    "music-pitch.js",
     "music-editor.js",
     "image-memo.js",
     "backup.js",
@@ -258,6 +259,7 @@
         "music-xml.js",
         "music-audio.js",
         "music-eartest.js",
+        "music-pitch.js",
         "music-editor.js",
         "image-memo.js",
         "backup.js",
@@ -457,6 +459,7 @@
       "music-model.js",
       "music-audio.js"
     ],
+    "music-pitch.js": [],
     "music-xml.js": [
       "file-loaders.js",
       "lazy.js",
@@ -470,7 +473,8 @@
       "music-model.js",
       "music-xml.js",
       "music-audio.js",
-      "music-eartest.js"
+      "music-eartest.js",
+      "music-pitch.js"
     ],
     "exam-paper.js": [
       "documents.js",
@@ -723,6 +727,14 @@
       ]
     },
     {
+      "name": "music-pitch",
+      "file": "music-pitch.js",
+      "publicApi": "MNMusicPitch",
+      "consumers": [
+        "music-editor.js"
+      ]
+    },
+    {
       "name": "exchange-rate",
       "file": "exchange-rate.js",
       "publicApi": "MNExchangeRate",
@@ -895,6 +907,12 @@
       "file": "leaflet.min.js",
       "lazy": "leaflet",
       "sha384": "sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+    },
+    {
+      "src": "vendor/korea-regions.js",
+      "file": "korea-regions.js",
+      "lazy": "koreaRegions",
+      "sha384": "sha384-whklRybIsmM0yZTac7NFQJmuM3slPGgp9OEf3HGtH3OgyNjlYNamB2G0ovDBwC48"
     },
     {
       "src": "vendor/korean-font.js",

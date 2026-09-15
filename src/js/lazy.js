@@ -31,6 +31,8 @@ const MNLazy = (() => {
     vexflow:     { label:"악보 그리기",        files:["vexflow-bravura.min.js"] },
     // 지도 렌더러(Leaflet). 라이브러리 자체는 오프라인이고, 배경 타일만 인터넷에서 받는다.
     leaflet:     { label:"지도 그리기",        files:["leaflet.min.js"] },
+    // 색칠 지도의 시도·시군구 경계(통계청 SGIS 가공, 약 0.4MB). 색칠 지도를 켤 때만 읽는다.
+    koreaRegions:{ label:"행정경계(색칠 지도)", files:["korea-regions.js"] },
     /* 한글 글꼴(NanumGothic 을 gzip+base64 로 담은 생성물, 약 0.9MB).
        Pyodide 의 matplotlib 에는 한글 글꼴이 없어 한글 라벨이 깨지므로 번들하지만,
        쓰는 곳은 파이썬을 처음 돌릴 때 한 번뿐이다. 앱 코드 중 가장 큰 파일이라

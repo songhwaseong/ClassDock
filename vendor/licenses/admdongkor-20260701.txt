@@ -1,0 +1,15 @@
+korea-regions.js — 대한민국 시도·시군구 경계 (행정구역 시점 2026-07-01, 2025-12-31)
+
+본 데이터는 통계청 통계지리정보서비스(SGIS, https://sgis.kostat.go.kr)에서
+공공누리 제1유형으로 개방한 행정동 경계를 가공한 것이며
+(가공: vuski/admdongkor, https://github.com/vuski/admdongkor), CC BY 4.0으로 배포됩니다.
+
+This data is derived from administrative-dong boundaries released by Statistics
+Korea SGIS (https://sgis.kostat.go.kr) under KOGL Type 1, modified by
+vuski/admdongkor (https://github.com/vuski/admdongkor), and distributed under CC BY 4.0.
+
+ClassDock 에서 한 가공: 시도·시군구 단계(admdongkor light 버전)만 골라 좌표를 소수 넷째 자리로
+반올림하고 인코딩 폴리라인으로 줄였습니다(tools/build-korea-regions.mjs).
+
+- 공공누리 제1유형: https://www.kogl.or.kr/info/licenseType1.do
+- CC BY 4.0: https://creativecommons.org/licenses/by/4.0/

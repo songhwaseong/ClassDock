@@ -156,7 +156,8 @@ test("배경지도를 바꿔도 찍어 둔 표시는 그대로 남는다", async
   });
   await expect(page.locator(".leaflet-marker-icon")).toHaveCount(1);
 
-  await page.locator(".map-select").selectOption("light");
+  // 제주 버스 패널에도 .map-select 가 있으므로 배경지도 칸을 콕 집는다.
+  await page.locator(".map-select.map-toolvis-basemap").selectOption("light");
   expect((await mapModel(page)).basemap).toBe("light");
   await expect(page.locator(".leaflet-marker-icon")).toHaveCount(1);
 

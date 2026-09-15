@@ -85,7 +85,7 @@ test("EN 으로 바꾸면 지도 화면도 영어로 나온다", async ({ page }
   await expect(page.locator(".map-to-board")).toContainText("To whiteboard");
   await expect(page.locator(".map-title")).toHaveAttribute("placeholder", "Map title");
   await expect(page.locator(".map-goto")).toHaveAttribute("placeholder", "Place name or coordinates");
-  await expect(page.locator(".map-select option").first()).toHaveText("Standard");
+  await expect(page.locator(".map-select.map-toolvis-basemap option").first()).toHaveText("Standard");
 
   // 마커 편집 풍선도 열릴 때 번역된다.
   await page.locator(".map-add").click();

@@ -294,6 +294,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"mapPresent", label:"발표 모드", cls:"map-toolvis-present", target:"map" },
   { id:"mapNearby", label:"주변 시설", cls:"map-toolvis-nearby", target:"map" },
   { id:"mapRegion", label:"지역 통계", cls:"map-toolvis-region", target:"map" },
+  { id:"mapChoropleth", label:"색칠 지도", cls:"map-toolvis-choropleth", target:"map" },
   { id:"mapImage", label:"내 지도 이미지", cls:"map-toolvis-image", target:"map" },
   { id:"mapCsvImport", label:"자료 들이기", cls:"map-toolvis-csv-import", target:"map" },
   { id:"mapCsvExport", label:"CSV 내보내기", cls:"map-toolvis-csv-export", target:"map" },

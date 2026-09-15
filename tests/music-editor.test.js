@@ -881,7 +881,7 @@ test("따라치기 중에는 악보를 고칠 수 있는 길을 모두 막는다
 test("따라치기 표시는 다시 그려도 살아남고, 끝나면 결과를 알려 준다", () => {
   // 배율·창 크기가 바뀌면 VexFlow 가 음표 요소를 새로 만든다 — 진도 표시를 다시 칠해야 한다.
   assert.match(editorSource, /paintSelection\(\);\s*\n\s*if \(playingEvent\) highlight\(playingEvent, false\);\s*\n\s*paintPractice\(\);/);
-  assert.match(editorSource, /다 따라 눌렀어요! 정확도 \$\{stats\.accuracy\}%/);
+  assert.match(editorSource, /다 따라 \$\{sang \? "불렀어요" : "눌렀어요"\}! 정확도 \$\{stats\.accuracy\}%/);
   assert.match(editorSource, /petReact\(stats\.accuracy >= 90 \? "success" : "error"\)/);
   assert.match(editorSource, /musicButton\("🎯 따라치기"/);
   // 도구막대를 접어 두고 쓰는 사람을 위해 악보 우클릭 메뉴(재생·연습)에도 같은 길을 둔다.
