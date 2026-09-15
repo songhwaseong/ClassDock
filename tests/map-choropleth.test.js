@@ -15,8 +15,9 @@ function load(){
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(read("vendor/korea-regions.js"), context);
+  vm.runInContext(read("vendor/korea-emd.js"), context);
   vm.runInContext(read("src/js/map-viewer.js") + `
-    ;globalThis.__choro = { mapChoroMatch, mapChoroTable, mapChoroRowsFromText, mapChoroValuesFromTable,
+    ;globalThis.__choro = { mapChoroEmdScopes, mapChoroScopeVintage, mapChoroMatch, mapChoroTable, mapChoroRowsFromText, mapChoroValuesFromTable,
       mapChoroBestVintage, mapChoroBreaks, mapChoroClassOf, mapChoroColors, mapChoroRegions, mapChoroGeometry,
       mapChoroContains, mapChoroMarkerCounts, mapChoroValueKey, mapChoroNumber, mapNormalizeChoropleth,
       mapDocEmpty, mapDocParse, mapDocSerialize, mapDocContentKey, mapAttributionText, MAP_CHORO_SCHEMES };`, context);
@@ -61,6 +62,64 @@ test("시군구: 시도가 붙은 이름·같은 이름·일반구를 가린다"
   assert.equal(match("세종특별자치시").key, "세종특별자치시|세종시");
   assert.equal(match("인천 중구", "sgg", "2025-12").key, "인천광역시|중구");
   assert.equal(match("화성시", "sgg", "2025-12").keys.length, 1);
+});
+
+const emd = (text, scope, vintage = "2026-07") => plain(api.mapChoroMatch(text, "emd", vintage, scope));
+
+test("읍면동은 범위 안만 담고, 두 파일의 경계 번호를 따로 센다", () => {
+  const all = api.mapChoroRegions("emd", "2026-07", "");
+  assert.ok(all.length > 3500, "전국 읍면동");
+  const jongno = api.mapChoroRegions("emd", "2026-07", "서울특별시|종로구");
+  assert.ok(jongno.length > 10 && jongno.every(r => r.sgg === "종로구"));
+  assert.equal(api.mapChoroRegions("emd", "2026-07", "경기도|수원시").some(r => r.sgg === "수원시장안구"), true, "시를 고르면 일반구가 모두 들어온다");
+  assert.equal(api.mapChoroRegions("emd", "2026-07", "광주광역시").length, 0, "통합 뒤에는 광주광역시가 없다");
+  assert.ok(api.mapChoroRegions("emd", "2025-12", "광주광역시").length > 90);
+  assert.equal(api.mapChoroScopeVintage("광주광역시", "2026-07"), "2025-12");
+  const hyoja = jongno.find(r => r.emd === "청운효자동");
+  assert.equal(hyoja.code, "1111051500");
+  const shape = api.mapChoroGeometry(hyoja.geom);
+  assert.equal(api.mapChoroContains(shape, shape.anchor[0], shape.anchor[1]), true);
+  assert.notEqual(api.mapChoroGeometry(hyoja.geom), api.mapChoroGeometry(Number(hyoja.geom.slice(1))), "읍면동 번호와 시도·시군구 번호는 섞이지 않는다");
+  const scopes = plain(api.mapChoroEmdScopes());
+  const gyeonggi = scopes.find(item => item.sido === "경기도");
+  assert.deepEqual(gyeonggi.sggs.find(item => item.value === "수원시"), { value:"수원시", city:true });
+  assert.ok(scopes.some(item => item.sido === "광주광역시") && scopes.some(item => item.sido === "전남광주통합특별시"), "두 시점의 시도를 모두 고를 수 있다");
+});
+
+test("읍면동: 코드가 먼저, 이름은 범위 안에서 하나로 좁혀질 때만 칠한다", () => {
+  assert.equal(emd("서울특별시 종로구 청운효자동(1111051500)", "서울특별시").key, "서울특별시|종로구|청운효자동");
+  assert.equal(emd("아무 이름 1111051500", "서울특별시|종로구").key, "서울특별시|종로구|청운효자동", "코드만 맞아도 된다");
+  assert.equal(emd("서울특별시 종로구 (1111000000)", "서울특별시").status, "skip", "시군구 합계 줄");
+  assert.equal(emd("서울특별시 종로구", "서울특별시").status, "skip");
+  assert.equal(emd("청운효자동", "서울특별시|종로구").key, "서울특별시|종로구|청운효자동");
+  assert.equal(emd("청운효자동", "부산광역시").status, "outside", "범위 밖 줄은 틀린 이름이 아니다");
+  assert.equal(emd("중앙동", "경기도").status, "ambiguous", "경기도 안에도 중앙동이 여럿");
+  const jungang = emd("중앙동", "경기도|과천시");
+  assert.equal(jungang.status, "ok");
+  assert.equal(jungang.key, "경기도|과천시|중앙동");
+  assert.equal(emd("수원시 파장동", "경기도").key, "경기도|수원시장안구|파장동", "구를 빼고 적어도 찾는다");
+  assert.equal(emd("경기 수원시 장안구 파장동", "경기도|수원시").key, "경기도|수원시장안구|파장동");
+  assert.equal(emd("종로1.2.3.4가동", "서울특별시|종로구").key, "서울특별시|종로구|종로1·2·3·4가동");
+  assert.equal(emd("강동구 상일1동", "서울특별시").key, "서울특별시|강동구|상일제1동", "'제'를 빼고 적어도 같은 동");
+  assert.equal(emd("없는동", "서울특별시").status, "none");
+  // 코드 열이 따로 있는 표: 코드 열은 값으로 고를 수 없고 이름 쪽으로 넘어간다
+  const table = api.mapChoroTable(api.mapChoroRowsFromText("행정기관코드\t행정기관\t인구\n1111000000\t종로구\t139,417\n1111051500\t청운효자동\t11,000\n1111053000\t사직동\t9,000\n2611051000\t중앙동\t5,000"));
+  assert.deepEqual(plain(table.columns.map(c => [c.label, c.numeric, c.code])), [["행정기관코드", false, true], ["행정기관", false, false], ["인구", true, false]]);
+  const result = plain(api.mapChoroValuesFromTable(table, 2, "emd", "2026-07", "서울특별시|종로구"));
+  assert.deepEqual(result.values, { "서울특별시|종로구|청운효자동":11000, "서울특별시|종로구|사직동":9000 });
+  assert.equal(result.outside, 1, "부산 중앙동은 범위 밖");
+  assert.deepEqual(result.unmatched, []);
+  // 시도·시군구 지도도 이름에 붙은 코드 때문에 못 찾지 않는다
+  assert.equal(match("서울특별시 종로구 (1111000000)").key, "서울특별시|종로구");
+});
+
+test("읍면동 표시 개수와 설정 저장", () => {
+  const counts = plain(api.mapChoroMarkerCounts([{ lat:37.5665, lng:126.978 }, { lat:35.1796, lng:129.0756 }], "emd", "2026-07", "서울특별시|중구"));
+  assert.equal(Object.values(counts).reduce((a, b) => a + b, 0), 1, "범위 밖 표시는 세지 않는다");
+  const settings = plain(api.mapNormalizeChoropleth({ level:"emd", scope:" 서울특별시 | 종로구 |x", source:"markers" }));
+  assert.equal(settings.level, "emd");
+  assert.equal(settings.scope, "서울특별시|종로구");
+  assert.equal("scope" in plain(api.mapNormalizeChoropleth({ level:"sgg", scope:"서울특별시", source:"markers" })), false, "시군구 지도는 범위를 담지 않는다");
 });
 
 test("붙여 넣은 표에서 머리줄·숫자 열·빈 값을 가려 읽고, 이름이 더 맞는 시점을 고른다", () => {

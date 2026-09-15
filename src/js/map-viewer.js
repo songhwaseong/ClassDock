@@ -2524,9 +2524,12 @@ function mapRegionTally(markers, level){
    · 시도는 줄임말·옛 이름(강원도·전라북도·제주도)까지 받는다.
    · "수원시"처럼 일반구가 있는 시는 그 구들을 한 덩어리로 칠한다(값은 한 번만 센다).
    · 시도 없이 "중구"만 오면 어느 곳인지 모르므로 칠하지 않고 '여러 곳과 겹침'으로 알린다.
-   · 통계는 대개 한두 해 늦으므로 행정구역 시점을 두 개 담았고, 이름이 더 많이 맞는 쪽을 고른다. */
+   · 통계는 대개 한두 해 늦으므로 행정구역 시점을 두 개 담았고, 이름이 더 많이 맞는 쪽을 고른다.
+   · 읍면동은 vendor/korea-emd.js(지연 묶음 koreaEmd)에 따로 있고, 늘 범위(시도 또는 시군구)를 정해 그 안만 칠한다.
+     "중앙동"이 전국에 31곳이라 이름만으로는 못 가리므로 표의 코드(행안부 10자리·통계청 8자리)를 먼저 보고,
+     이름은 범위 안에서 하나로 좁혀질 때만 칠한다. 범위 밖 줄은 틀린 줄이 아니므로 조용히 센다. */
 const MAP_CHORO_VINTAGES = ["2026-07", "2025-12"];
-const MAP_CHORO_MAX_VALUES = 600;
+const MAP_CHORO_MAX_VALUES = 1000;       // 읍면동은 경기도 하나가 600곳이 넘는다
 const MAP_CHORO_CLASS_CHOICES = [3, 4, 5, 6, 7];
 const MAP_CHORO_SCHEMES = [
   { id:"blue",   label:"파랑",   colors:["#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8", "#1e40af", "#1e3a8a"] },
@@ -2543,14 +2546,22 @@ const MAP_CHORO_CUSTOM_DEFAULT = ["#fef9c3", "#b91c1c"];
 const MAP_CHORO_NO_DATA = "#e5e7eb";
 const MAP_CHORO_CUSTOM_KEY = "mn.mapChoroCustomColors";
 const MAP_CHORO_LABEL_MIN_ZOOM = 9;       // 시군구 값 글자는 이만큼 가까이 와야 겹치지 않는다
+const MAP_CHORO_EMD_LABEL_MIN_ZOOM = 13;  // 읍면동 값 글자(구 하나를 화면에 담은 배율에서는 겹친다)
 // 표의 합계 줄은 지역이 아니다 — 못 찾은 이름으로 알리지 않고 조용히 건너뛴다.
-const MAP_CHORO_TOTAL_NAMES = new Set(["전국", "합계", "계", "총계", "소계", "전체", "대한민국", "지역", "행정구역", "시도", "시군구", "구분"]);
+const MAP_CHORO_TOTAL_NAMES = new Set(["전국", "합계", "계", "총계", "소계", "전체", "대한민국", "지역", "행정구역", "시도", "시군구", "구분", "읍면동", "동읍면", "행정동"]);
 
 function mapChoroData(){
   return typeof globalThis.MN_KOREA_REGIONS === "object" && globalThis.MN_KOREA_REGIONS ? globalThis.MN_KOREA_REGIONS : null;
 }
+function mapChoroEmdData(){
+  return typeof globalThis.MN_KOREA_EMD === "object" && globalThis.MN_KOREA_EMD ? globalThis.MN_KOREA_EMD : null;
+}
 function mapChoroNorm(text){
   return String(text == null ? "" : text).replace(/[\s ·ㆍ]/g, "");
+}
+// 읍면동 이름은 "종로1.2.3.4가동" "상일제1동"/"상일1동"처럼 적는 꼴이 갈린다.
+function mapChoroEmdNorm(text){
+  return mapChoroNorm(text).replace(/[.,]/g, "").replace(/제(?=\d)/g, "");
 }
 function mapChoroNumber(text){
   if (typeof text === "number") return Number.isFinite(text) ? text : null;
@@ -2583,11 +2594,14 @@ function mapChoroDecodeRing(code, scale){
   return points;
 }
 const mapChoroGeomCache = new Map();
-// 경계 하나 → { polygons:[[바깥 고리, 구멍…], …], bbox:[남, 서, 북, 동], anchor:[위도, 경도] }
-function mapChoroGeometry(index){
-  const data = mapChoroData();
+/* 경계 하나 → { polygons:[[바깥 고리, 구멍…], …], bbox:[남, 서, 북, 동], anchor:[위도, 경도] }
+   ref 는 시도·시군구 파일의 번호(숫자)이거나 읍면동 파일의 번호("e12") — 두 파일은 번호를 따로 센다. */
+function mapChoroGeometry(ref){
+  const emd = typeof ref === "string" && ref.charAt(0) === "e";
+  const data = emd ? mapChoroEmdData() : mapChoroData();
+  const index = emd ? Number(ref.slice(1)) : ref;
   if (!data || !Array.isArray(data.geoms) || !data.geoms[index]) return null;
-  const cacheKey = data.geoms.length + ":" + index;
+  const cacheKey = (emd ? "e" : "") + data.geoms.length + ":" + index;
   if (mapChoroGeomCache.has(cacheKey)) return mapChoroGeomCache.get(cacheKey);
   const scale = Number(data.scale) || 1e4;
   const polygons = String(data.geoms[index]).split(";").map(polygon =>
@@ -2641,8 +2655,9 @@ function mapChoroRayInside(lat, lng, ring){
   return inside;
 }
 
-// 한 시점·한 단계의 지역 목록. key 는 값 표(model.choropleth.values)의 열쇠다.
-function mapChoroRegions(level, vintage){
+// 한 시점·한 단계의 지역 목록. key 는 값 표(model.choropleth.values)의 열쇠다. 읍면동은 scope 안만 돌려준다.
+function mapChoroRegions(level, vintage, scope){
+  if (level === "emd") return mapChoroEmdAll(vintage).filter(region => mapChoroInScope(region, scope));
   const data = mapChoroData();
   const set = data && data.vintages && (data.vintages[vintage] || data.vintages[MAP_CHORO_VINTAGES[0]]);
   if (!set) return [];
@@ -2650,6 +2665,74 @@ function mapChoroRegions(level, vintage){
     return (set.sido || []).map(([sido, geom]) => ({ key:sido, sido, sgg:"", name:sido, geom }));
   }
   return (set.sgg || []).map(([sido, sgg, geom]) => ({ key:sido + "|" + sgg, sido, sgg, name:sido + " " + sgg, geom }));
+}
+/* 한 시점의 읍면동 전부(범위 없이). 표 한 줄마다 찾으므로 이름 → 지역 색인과 시도별 시군구 이름을 함께 만들어 둔다.
+   배열에 붙인 byName·sggs 는 JSON 으로 옮기면 사라지는 곁자료다. */
+const mapChoroEmdCache = new Map();
+function mapChoroEmdAll(vintage){
+  const data = mapChoroEmdData();
+  if (!data || !data.vintages || !Array.isArray(data.geoms)) return [];
+  const id = data.vintages[vintage] ? vintage : MAP_CHORO_VINTAGES[0];
+  const set = data.vintages[id];
+  if (!set) return [];
+  const cacheKey = id + ":" + data.geoms.length;
+  if (mapChoroEmdCache.has(cacheKey)) return mapChoroEmdCache.get(cacheKey);
+  const regions = [];
+  const byName = new Map(), sggs = new Map([["", new Set()]]);
+  for (const [sido, sgg, list] of set.groups || []){
+    if (!sggs.has(sido)) sggs.set(sido, new Set());
+    sggs.get(sido).add(sgg); sggs.get("").add(sgg);
+    for (const [emd, code, code8, geom] of list || []){
+      const region = { key:sido + "|" + sgg + "|" + emd, sido, sgg, emd, name:mapChoroSggLabel(sgg) + " " + emd,
+        code:String(code || ""), code8:String(code8 || ""), geom:"e" + geom };
+      regions.push(region);
+      const norm = mapChoroEmdNorm(emd);
+      if (!byName.has(norm)) byName.set(norm, []);
+      byName.get(norm).push(region);
+    }
+  }
+  regions.byName = byName;
+  regions.sggs = sggs;
+  mapChoroEmdCache.set(cacheKey, regions);
+  return regions;
+}
+// "수원시장안구" → "수원시 장안구" (일반구는 시와 구 사이를 띄워 읽기 쉽게)
+function mapChoroSggLabel(sgg){
+  const city = /^(.+?시)(.+구)$/.exec(String(sgg || ""));
+  return city ? city[1] + " " + city[2] : String(sgg || "");
+}
+// 범위: "서울특별시" 또는 "서울특별시|종로구". 일반구가 있는 시("경기도|수원시")는 그 구들을 모두 담는다.
+function mapChoroScopeParts(scope){
+  const [sido = "", sgg = ""] = String(scope == null ? "" : scope).split("|");
+  return { sido, sgg };
+}
+function mapChoroInScope(region, scope){
+  const { sido, sgg } = mapChoroScopeParts(scope);
+  if (sido && region.sido !== sido) return false;
+  if (!sgg) return true;
+  return region.sgg === sgg
+    || (/시$/.test(sgg) && /구$/.test(region.sgg) && region.sgg.startsWith(sgg) && region.sgg.length > sgg.length);
+}
+/* 범위 고르기 칸에 쓸 목록 — 두 시점을 합친다(통합 전 "광주광역시"도 고를 수 있게).
+   반환: [{ sido, sggs:[{ value, city }] }] · city=true 는 일반구를 묶은 시 */
+function mapChoroEmdScopes(){
+  const bySido = new Map();
+  for (const vintage of MAP_CHORO_VINTAGES){
+    for (const region of mapChoroEmdAll(vintage)){
+      if (!bySido.has(region.sido)) bySido.set(region.sido, new Map());
+      const list = bySido.get(region.sido);
+      const city = /^(.+?시)(.+구)$/.exec(region.sgg);
+      if (city && !list.has(city[1])) list.set(city[1], { value:city[1], city:true });
+      if (!list.has(region.sgg)) list.set(region.sgg, { value:region.sgg, city:false });
+    }
+  }
+  return [...bySido].map(([sido, list]) => ({ sido, sggs:[...list.values()] }));
+}
+// 범위가 들어 있는 시점 — 고른 시점에 없으면(예: 통합 뒤 "광주광역시") 있는 쪽을 쓴다.
+function mapChoroScopeVintage(scope, preferred){
+  const order = MAP_CHORO_VINTAGES.includes(preferred)
+    ? [preferred].concat(MAP_CHORO_VINTAGES.filter(vintage => vintage !== preferred)) : MAP_CHORO_VINTAGES;
+  return order.find(vintage => mapChoroEmdAll(vintage).some(region => mapChoroInScope(region, scope))) || order[0];
 }
 function mapChoroSidoNames(vintage){
   return mapChoroRegions("sido", vintage).map(region => region.sido);
@@ -2684,10 +2767,16 @@ function mapChoroResolveSido(text, vintage){
 /* 적힌 이름 하나 → 칠할 지역.
    반환: { status:"ok"|"none"|"ambiguous"|"skip", key, keys:[지역 key…], label }
    · key 는 값을 담을 열쇠다. 일반구를 합친 시("경기도|수원시")는 지역 key 와 달라 keys 가 여럿이다. */
-function mapChoroMatch(text, level, vintage){
+const MAP_CHORO_CODE_RE = /(^|[\s(\[,])(\d{10}|\d{8})(?=$|[\s)\],])/g;
+function mapChoroMatch(text, level, vintage, scope){
   const raw = String(text == null ? "" : text).trim();
-  const norm = mapChoroNorm(raw);
-  if (!norm) return { status:"skip", key:"", keys:[], label:raw };
+  // 행안부 주민등록 통계처럼 "청운효자동(1111051500)" 으로 코드가 붙어 오면 코드와 이름을 가른다.
+  const codes = [];
+  const named = raw.replace(MAP_CHORO_CODE_RE, (all, lead, code) => { codes.push(code); return lead; })
+    .replace(/[(\[]\s*[)\]]/g, " ").trim();
+  if (level === "emd") return mapChoroMatchEmd(raw, named, codes, vintage, scope);
+  const norm = mapChoroNorm(named);
+  if (!norm) return { status:codes.length ? "none" : "skip", key:"", keys:[], label:raw };
   if (MAP_CHORO_TOTAL_NAMES.has(norm)) return { status:"skip", key:"", keys:[], label:raw };
   if (level === "sido"){
     const sido = mapChoroResolveSido(norm, vintage);
@@ -2728,6 +2817,59 @@ function mapChoroMatch(text, level, vintage){
   }
   return { status:"none", key:"", keys:[], label:raw };
 }
+/* 읍면동 한 줄 → 칠할 곳. 코드가 맞으면 그것으로, 아니면 "시도 시군구 읍면동" 앞부분을 떼어 가며 찾는다.
+   후보가 여럿이면 범위 안에서 하나로 좁혀질 때만 칠한다. status 에 "outside"(범위 밖)가 더 있다. */
+function mapChoroMatchEmd(raw, named, codes, vintage, scope){
+  const all = mapChoroEmdAll(vintage);
+  const result = (status, region) => region
+    ? { status, key:region.key, keys:[region.key], label:region.sido + " " + region.name }
+    : { status, key:"", keys:[], label:raw };
+  const decide = (candidates) => {
+    const inside = candidates.filter(region => mapChoroInScope(region, scope));
+    if (inside.length === 1) return result("ok", inside[0]);
+    return result(inside.length ? "ambiguous" : "outside");
+  };
+  for (const code of codes){
+    const found = all.filter(region => code.length === 10 ? region.code === code : region.code8 === code);
+    if (found.length) return decide(found);
+    // 뒤 다섯 자리가 0 인 10자리는 시도·시군구 합계 줄이다.
+    if (code.length === 10 && /00000$/.test(code)) return result("skip");
+  }
+  const norm = mapChoroEmdNorm(named);
+  if (!norm) return result(codes.length ? "none" : "skip");
+  if (MAP_CHORO_TOTAL_NAMES.has(norm) || !all.sggs) return result(all.sggs ? "skip" : "none");
+  const sidoParses = [];
+  for (const sido of all.sggs.keys()){
+    if (!sido) continue;
+    for (const alias of mapChoroSidoAliases(sido)){
+      if (norm.startsWith(alias)) sidoParses.push({ sido, rest:norm.slice(alias.length), length:alias.length });
+    }
+  }
+  sidoParses.sort((a, b) => b.length - a.length);
+  sidoParses.push({ sido:"", rest:norm, length:0 });
+  for (const { sido, rest } of sidoParses){
+    if (!rest) return result("skip");   // 시도 합계 줄
+    const sggParses = [];
+    for (const sgg of all.sggs.get(sido) || []){
+      const sggNorm = mapChoroEmdNorm(sgg);
+      if (rest.startsWith(sggNorm)) sggParses.push({ sgg, city:false, rest:rest.slice(sggNorm.length), length:sggNorm.length });
+      // "수원시 파장동"처럼 구를 빼고 시만 적은 줄
+      const city = /^(.+?시)(.+구)$/.exec(sgg);
+      if (city && rest.startsWith(city[1]) && !sggParses.some(item => item.city && item.sgg === city[1])){
+        sggParses.push({ sgg:city[1], city:true, rest:rest.slice(city[1].length), length:city[1].length });
+      }
+    }
+    sggParses.sort((a, b) => b.length - a.length);
+    sggParses.push({ sgg:"", city:false, rest, length:0 });
+    for (const parse of sggParses){
+      if (!parse.rest) return result("skip");   // 시군구 합계 줄
+      const candidates = (all.byName.get(parse.rest) || []).filter(region => (!sido || region.sido === sido)
+        && (!parse.sgg || (parse.city ? region.sgg.startsWith(parse.sgg) && /구$/.test(region.sgg) : region.sgg === parse.sgg)));
+      if (candidates.length) return decide(candidates);
+    }
+  }
+  return result("none");
+}
 
 /* 붙여 넣은 글(엑셀 복사=탭, CSV=쉼표)이나 엑셀 칸 배열 → 표.
    값 열: 자료 줄의 60% 이상이 숫자인 열. 이름: 나머지 글자 칸을 이어 붙인 것("서울특별시 종로구"). */
@@ -2751,22 +2893,27 @@ function mapChoroTable(rows){
   for (let col = 0; col < width; col++){
     const filled = data.filter(cells => cells[col]);
     const numbers = filled.filter(cells => mapChoroNumber(cells[col]) !== null).length;
-    const numeric = filled.length > 0 && numbers / Math.max(1, data.length) >= 0.6;
-    columns.push({ index:col, label:header[col] || (col + 1) + "열", numeric });
+    /* 행정구역 코드 열은 숫자지만 값이 아니라 이름 쪽이다 — 머리줄에 "코드"가 있거나 전부 10자리일 때.
+       값 열 후보에서 빼고 이름과 함께 넘겨 읍면동을 코드로 맞춘다. */
+    const code = filled.length > 0 && (/코드|code/i.test(header[col] || "")
+      || (filled.length >= 2 && filled.every(cells => /^\d{10}$/.test(cells[col]))));
+    const numeric = !code && filled.length > 0 && numbers / Math.max(1, data.length) >= 0.6;
+    columns.push({ index:col, label:header[col] || (col + 1) + "열", numeric, code });
   }
   return { header, rows:data, columns };
 }
-function mapChoroValuesFromTable(table, valueColumn, level, vintage){
+function mapChoroValuesFromTable(table, valueColumn, level, vintage, scope){
   const values = {}, unmatched = [], ambiguous = [];
-  let matched = 0, empty = 0;
+  let matched = 0, empty = 0, outside = 0;
   const column = (table.columns || []).find(item => item.index === valueColumn);
-  if (!column) return { values, matched, unmatched, ambiguous, empty };
+  if (!column) return { values, matched, unmatched, ambiguous, empty, outside };
   const nameColumns = table.columns.filter(item => !item.numeric && item.index !== valueColumn).map(item => item.index);
   for (const cells of table.rows){
     const name = nameColumns.map(index => cells[index] || "").filter(Boolean).join(" ");
     const value = mapChoroNumber(cells[valueColumn]);
-    const match = mapChoroMatch(name, level, vintage);
+    const match = mapChoroMatch(name, level, vintage, scope);
     if (match.status === "skip") continue;
+    if (match.status === "outside"){ outside++; continue; }
     if (match.status === "none"){ unmatched.push(match.label); continue; }
     if (match.status === "ambiguous"){ ambiguous.push(match.label); continue; }
     if (value === null){ empty++; continue; }
@@ -2774,13 +2921,13 @@ function mapChoroValuesFromTable(table, valueColumn, level, vintage){
     if (Object.keys(values).length >= MAP_CHORO_MAX_VALUES && !(match.key in values)) continue;
     values[match.key] = value;
   }
-  return { values, matched, unmatched, ambiguous, empty };
+  return { values, matched, unmatched, ambiguous, empty, outside };
 }
 // 두 시점 중 이름이 더 많이 맞는 쪽(같으면 최신). 통계표는 대개 옛 이름이다.
-function mapChoroBestVintage(table, valueColumn, level){
+function mapChoroBestVintage(table, valueColumn, level, scope){
   let best = null;
   for (const vintage of MAP_CHORO_VINTAGES){
-    const result = mapChoroValuesFromTable(table, valueColumn, level, vintage);
+    const result = mapChoroValuesFromTable(table, valueColumn, level, vintage, scope);
     if (!best || result.matched > best.result.matched) best = { vintage, result };
   }
   return best;
@@ -2790,13 +2937,14 @@ function mapChoroBestVintage(table, valueColumn, level){
 function mapChoroValueKey(region, values){
   if (!region || !values) return "";
   if (Object.prototype.hasOwnProperty.call(values, region.key)) return region.key;
+  if (region.emd) return "";
   const city = region.sgg && /^(.+?시)(.+구)$/.exec(region.sgg);
   const cityKey = city ? region.sido + "|" + city[1] : "";
   return cityKey && Object.prototype.hasOwnProperty.call(values, cityKey) ? cityKey : "";
 }
 // 표시 개수 — 경계가 앱에 있으므로 주소를 되묻지 않고 점이 어느 지역 안인지 바로 센다.
-function mapChoroMarkerCounts(markers, level, vintage){
-  const regions = mapChoroRegions(level, vintage).map(region => ({ key:region.key, geometry:mapChoroGeometry(region.geom) }));
+function mapChoroMarkerCounts(markers, level, vintage, scope){
+  const regions = mapChoroRegions(level, vintage, scope).map(region => ({ key:region.key, geometry:mapChoroGeometry(region.geom) }));
   const values = {};
   for (const region of regions) values[region.key] = 0;
   for (const marker of Array.isArray(markers) ? markers : []){
@@ -2879,7 +3027,7 @@ function mapNormalizeChoropleth(raw){
   const opacity = Number(raw.opacity);
   const scheme = MAP_CHORO_SCHEMES.some(item => item.id === raw.scheme) ? raw.scheme : "blue";
   const settings = {
-    level: raw.level === "sido" ? "sido" : "sgg",
+    level: raw.level === "sido" || raw.level === "emd" ? raw.level : "sgg",
     vintage: MAP_CHORO_VINTAGES.includes(raw.vintage) ? raw.vintage : MAP_CHORO_VINTAGES[0],
     source,
     values,
@@ -2891,29 +3039,41 @@ function mapNormalizeChoropleth(raw){
     opacity: Number.isFinite(opacity) ? Math.min(0.95, Math.max(0.3, opacity)) : 0.7,
     labels: raw.labels === true
   };
+  // 읍면동만 범위를 담는다 — 시도·시군구 지도는 예전과 같은 모양으로 저장된다.
+  if (settings.level === "emd"){
+    settings.scope = String(raw.scope == null ? "" : raw.scope).split("|")
+      .map(part => part.trim().slice(0, 30)).filter(Boolean).slice(0, 2).join("|");
+  }
   // 직접 고른 색만 담는다 — 정해 둔 색표로 칠한 지도는 예전과 같은 모양으로 저장된다.
   if (scheme === "custom") settings.customColors = mapNormalizeChoroCustom(raw.customColors);
   return settings;
 }
 
 /* ===== 색칠 지도 창 =====
-   hooks.apply(설정) = 지도에 칠하고 문서에 담는다 / hooks.clear() = 색칠을 걷는다
-   hooks.markers()   = 지금 보이는 표시(표시 개수로 칠할 때) */
+   hooks.apply(설정) = 지도에 칠하고 문서에 담는다
+   hooks.markers()   = 지금 보이는 표시(표시 개수로 칠할 때)
+   hooks.start       = 창을 채울 설정(없으면 지금 칠한 설정) — 끄기 전 설정으로 다시 열 때 쓴다.
+   색칠을 걷는 것은 창이 아니라 켜진 🎨 단추를 다시 누르는 것이다. */
 function openMapChoropleth(model, hooks){
-  const current = mapNormalizeChoropleth(model.choropleth);
+  const current = mapNormalizeChoropleth((hooks && hooks.start) || model.choropleth);
   const modal = document.createElement("div");
   modal.className = "modal map-choro-modal";
   const option = (value, label) => '<option value="' + value + '">' + label + '</option>';
   modal.innerHTML =
     '<div class="modal-card map-choro-card">' +
       '<h3>색칠 지도</h3>' +
-      '<p class="sub">시도·시군구마다 값을 넣으면 크기에 따라 색을 칠해요. 행정경계는 앱에 들어 있어 인터넷 없이 됩니다.</p>' +
+      '<p class="sub">시도·시군구·읍면동마다 값을 넣으면 크기에 따라 색을 칠해요. 행정경계는 앱에 들어 있어 인터넷 없이 됩니다.</p>' +
       '<div class="map-choro-row">' +
         '<label class="map-nearby-field"><span>기준</span><select class="map-select map-choro-level">' +
-          option("sido", "시도") + option("sgg", "시군구") + '</select></label>' +
+          option("sido", "시도") + option("sgg", "시군구") + option("emd", "읍면동") + '</select></label>' +
         '<label class="map-nearby-field"><span>행정구역 시점</span><select class="map-select map-choro-vintage">' +
           option("auto", "자동(이름이 맞는 쪽)") + option("2026-07", "2026년 7월 (최신)") + option("2025-12", "2025년 12월 (광주·전남 통합 전)") +
         '</select></label>' +
+      '</div>' +
+      '<div class="map-choro-row map-choro-scope" hidden>' +
+        '<label class="map-nearby-field"><span>범위</span><select class="map-select map-choro-scope-sido"></select></label>' +
+        '<label class="map-nearby-field"><span>시군구</span><select class="map-select map-choro-scope-sgg"></select></label>' +
+        '<small class="map-choro-scope-note">읍면동은 이름이 겹치는 곳이 많아요 — 표에 행정기관코드 열이 있으면 더 정확히 맞춥니다.</small>' +
       '</div>' +
       '<div class="map-choro-row map-choro-sources" role="radiogroup" aria-label="칠할 값">' +
         '<label><input type="radio" name="mapChoroSource" value="table"> 표에서 (붙여넣기·CSV·엑셀)</label>' +
@@ -2946,10 +3106,9 @@ function openMapChoropleth(model, hooks){
         '<label class="map-nearby-field"><span>높은 값</span><input type="color" class="map-choro-color-high"></label>' +
       '</div>' +
       '<div class="map-choro-preview" aria-hidden="true"></div>' +
-      '<label class="map-choro-check"><input type="checkbox" class="map-choro-labels"> 지도에 값 쓰기 <small>(시군구는 가까이 확대했을 때만)</small></label>' +
+      '<label class="map-choro-check"><input type="checkbox" class="map-choro-labels"> 지도에 값 쓰기 <small>(시군구·읍면동은 가까이 확대했을 때만)</small></label>' +
       '<p class="map-choro-note" aria-live="polite"></p>' +
       '<div class="modal-actions">' +
-        '<button class="btn map-choro-clear" type="button">색칠 지우기</button>' +
         '<span class="spacer"></span>' +
         '<button class="btn map-choro-close" type="button">닫기</button>' +
         '<button class="btn primary map-choro-apply" type="button">칠하기</button>' +
@@ -2969,6 +3128,7 @@ function openMapChoropleth(model, hooks){
   const lowColor = $(".map-choro-color-low"), midOn = $(".map-choro-mid-on");
   const midColor = $(".map-choro-color-mid"), highColor = $(".map-choro-color-high");
   const applyBtn = $(".map-choro-apply");
+  const scopeRow = $(".map-choro-scope"), scopeSido = $(".map-choro-scope-sido"), scopeSgg = $(".map-choro-scope-sgg");
   mapTranslate(modal);
 
   // 이미 칠해 둔 지도라면 그 설정으로 연다. 표 값은 이름·값 두 열로 되살려 고칠 수 있게 한다.
@@ -3009,8 +3169,60 @@ function openMapChoropleth(model, hooks){
   renderColors();
   if (current && current.source === "table"){
     paste.value = [mapT("지역") + "\t" + (current.unit || mapT("값"))]
-      .concat(Object.entries(current.values).map(([key, value]) => key.replace("|", " ") + "\t" + value)).join("\n");
+      .concat(Object.entries(current.values).map(([key, value]) => key.replace(/\|/g, " ") + "\t" + value)).join("\n");
   }
+
+  /* 읍면동 범위 — 경계 묶음(koreaEmd)을 읽은 뒤에야 목록을 채울 수 있다.
+     처음 고를 때 시도를 비워 두지 않도록 지금 칠한 범위나 서울특별시를 먼저 고른다. */
+  let emdScopes = null, emdLoading = false;
+  const startScope = String(start.scope || "");
+  const fillScopeSgg = (wanted) => {
+    const entry = (emdScopes || []).find(item => item.sido === scopeSido.value);
+    scopeSgg.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = ""; all.textContent = mapT("시도 전체");
+    scopeSgg.appendChild(all);
+    for (const sgg of entry ? entry.sggs : []){
+      const item = document.createElement("option");
+      item.value = sgg.value;
+      item.textContent = sgg.city ? mapTf("{city} (구 모두)", { city:sgg.value }) : mapChoroSggLabel(sgg.value);
+      scopeSgg.appendChild(item);
+    }
+    if ([...scopeSgg.options].some(item => item.value === wanted)) scopeSgg.value = wanted;
+  };
+  const fillScopes = () => {
+    emdScopes = mapChoroEmdScopes();
+    const parts = mapChoroScopeParts(startScope);
+    scopeSido.innerHTML = "";
+    for (const entry of emdScopes){
+      const item = document.createElement("option");
+      item.value = entry.sido; item.textContent = entry.sido;
+      scopeSido.appendChild(item);
+    }
+    const sido = emdScopes.some(item => item.sido === parts.sido) ? parts.sido
+      : emdScopes.some(item => item.sido === "서울특별시") ? "서울특별시" : (emdScopes[0] || {}).sido || "";
+    scopeSido.value = sido;
+    fillScopeSgg(sido === parts.sido ? parts.sgg : "");
+  };
+  const scope = () => [scopeSido.value, scopeSgg.value].filter(Boolean).join("|");
+  const ensureEmd = () => {
+    if (emdScopes || emdLoading) return;
+    if (mapChoroEmdData()){ fillScopes(); return; }
+    emdLoading = true;
+    note.textContent = mapT("읍면동 경계를 불러오는 중…");
+    applyBtn.disabled = true;
+    const loading = typeof MNLazy !== "undefined" && MNLazy && typeof MNLazy.need === "function"
+      ? MNLazy.need("koreaEmd") : Promise.reject(new Error("lazy"));
+    loading.then(() => {
+      emdLoading = false;
+      if (!modal.isConnected) return;
+      fillScopes();
+      parsePaste(); render();
+    }, () => {
+      emdLoading = false;
+      if (modal.isConnected) note.textContent = mapT("읍면동 경계를 불러오지 못했어요.");
+    });
+  };
 
   let table = { header:[], rows:[], columns:[] };
   let preview = null;
@@ -3036,14 +3248,22 @@ function openMapChoropleth(model, hooks){
   const render = () => {
     const isTable = source() === "table";
     tableBox.hidden = !isTable;
-    const level = levelSelect.value === "sgg" ? "sgg" : "sido";
+    const level = levelSelect.value === "sgg" || levelSelect.value === "emd" ? levelSelect.value : "sido";
+    scopeRow.hidden = level !== "emd";
     preview = null;
+    if (level === "emd" && !emdScopes){
+      ensureEmd();
+      if (!emdScopes){ applyBtn.disabled = true; return; }
+    }
+    const area = level === "emd" ? scope() : "";
     if (!isTable){
-      const vintage = vintageSelect.value === "auto" ? MAP_CHORO_VINTAGES[0] : vintageSelect.value;
+      const vintage = level === "emd"
+        ? mapChoroScopeVintage(area, vintageSelect.value)
+        : vintageSelect.value === "auto" ? MAP_CHORO_VINTAGES[0] : vintageSelect.value;
       const markers = hooks && typeof hooks.markers === "function" ? hooks.markers() : [];
-      const values = mapChoroMarkerCounts(markers, level, vintage);
+      const values = mapChoroMarkerCounts(markers, level, vintage, area);
       const inside = Object.values(values).reduce((sum, count) => sum + count, 0);
-      preview = { vintage, values };
+      preview = { vintage, values, scope:area };
       note.textContent = markers.length
         ? mapTf("표시 {total}개 중 {inside}개가 지역 안에 있어요 — 표시를 옮기거나 더하면 색이 따라 바뀝니다.", { total:markers.length, inside })
         : mapT("아직 표시가 없습니다 — 표시를 찍으면 지역마다 개수로 칠해요.");
@@ -3057,16 +3277,17 @@ function openMapChoropleth(model, hooks){
       return;
     }
     const chosen = vintageSelect.value === "auto"
-      ? mapChoroBestVintage(table, column, level)
-      : { vintage:vintageSelect.value, result:mapChoroValuesFromTable(table, column, level, vintageSelect.value) };
+      ? mapChoroBestVintage(table, column, level, area)
+      : { vintage:vintageSelect.value, result:mapChoroValuesFromTable(table, column, level, vintageSelect.value, area) };
     const result = chosen.result;
-    preview = { vintage:chosen.vintage, values:result.values };
+    preview = { vintage:chosen.vintage, values:result.values, scope:area };
     const parts = [mapTf("맞춘 지역 {count}곳", { count:result.matched })];
     if (vintageSelect.value === "auto" && result.matched) parts.push(mapTf("{label} 기준", { label:mapT(chosen.vintage === "2025-12" ? "2025년 12월" : "2026년 7월") }));
     const sample = (list) => list.slice(0, 6).join(", ") + (list.length > 6 ? " …" : "");
     if (result.unmatched.length) parts.push(mapTf("이름을 못 찾음 {count}개: {names}", { count:result.unmatched.length, names:sample(result.unmatched) }));
     if (result.ambiguous.length) parts.push(mapTf("여러 곳과 겹침 {count}개: {names} — 시도 이름을 함께 적어 주세요", { count:result.ambiguous.length, names:sample(result.ambiguous) }));
     if (result.empty) parts.push(mapTf("값이 빈 줄 {count}개", { count:result.empty }));
+    if (result.outside) parts.push(mapTf("범위 밖 {count}줄", { count:result.outside }));
     note.textContent = parts.join(" · ");
     applyBtn.disabled = !result.matched;
     if (!titleInput.value.trim() && table.header.length){
@@ -3080,7 +3301,8 @@ function openMapChoropleth(model, hooks){
     clearTimeout(parseTimer);
     parseTimer = setTimeout(() => { parsePaste(); render(); }, 250);
   });
-  for (const control of [levelSelect, vintageSelect, columnSelect]) control.addEventListener("change", render);
+  for (const control of [levelSelect, vintageSelect, columnSelect, scopeSgg]) control.addEventListener("change", render);
+  scopeSido.addEventListener("change", () => { fillScopeSgg(""); render(); });
   for (const radio of modal.querySelectorAll('input[name="mapChoroSource"]')) radio.addEventListener("change", render);
 
   $(".map-choro-file").addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
@@ -3126,15 +3348,11 @@ function openMapChoropleth(model, hooks){
   window.addEventListener("keydown", onKey, true);
   modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
   $(".map-choro-close").addEventListener("click", close);
-  $(".map-choro-clear").addEventListener("click", () => {
-    if (hooks && typeof hooks.clear === "function") hooks.clear();
-    close();
-  });
   applyBtn.addEventListener("click", () => {
     render();
     if (!preview || applyBtn.disabled) return;
     const settings = mapNormalizeChoropleth({
-      level: levelSelect.value, vintage: preview.vintage, source: source(),
+      level: levelSelect.value, vintage: preview.vintage, scope: preview.scope, source: source(),
       values: source() === "table" ? preview.values : {},
       title: titleInput.value.trim() || titleInput.placeholder.replace(/^예: .*/, ""),
       unit: unitInput.value.trim(),
@@ -4271,7 +4489,7 @@ async function mountMapEditor(doc){
   choroBtn.type = "button";
   choroBtn.className = "map-btn map-choropleth map-toolvis-choropleth";
   choroBtn.textContent = "🎨 색칠 지도";
-  choroBtn.title = "시도·시군구를 값의 크기에 따라 색으로 칠해요 — 표를 붙여 넣거나 표시 개수로 칠합니다 (인터넷 없이)";
+  choroBtn.title = "시도·시군구를 값의 크기에 따라 색으로 칠해요 — 칠한 뒤 다시 누르면 지우고, 범례를 누르면 설정을 고칩니다 (인터넷 없이)";
   choroBtn.setAttribute("aria-pressed", "false");
 
   const boardBtn = document.createElement("button");
@@ -4728,6 +4946,10 @@ async function mountMapEditor(doc){
   const choroLegend = document.createElement("div");
   choroLegend.className = "map-choro-legend";
   choroLegend.hidden = true;
+  choroLegend.title = mapT("눌러서 색칠 지도 설정 고치기");
+  // 범례 클릭이 지도로 새면 표시 찍기·끌기가 함께 일어난다.
+  L.DomEvent.disableClickPropagation(choroLegend);
+  L.DomEvent.disableScrollPropagation(choroLegend);
   const choroHover = document.createElement("div");
   choroHover.className = "map-choro-hover";
   choroHover.hidden = true;
@@ -4737,7 +4959,7 @@ async function mountMapEditor(doc){
   let choroReady = false;
 
   const choroValues = (settings) => settings.source === "markers"
-    ? mapChoroMarkerCounts(model.markers.filter(markerVisible), settings.level, settings.vintage)
+    ? mapChoroMarkerCounts(model.markers.filter(markerVisible), settings.level, settings.vintage, settings.scope)
     : settings.values;
   const syncChoroButton = () => {
     choroBtn.classList.toggle("is-on", !!model.choropleth);
@@ -4755,13 +4977,14 @@ async function mountMapEditor(doc){
     const settings = model.choropleth;
     if (!settings || !settings.labels || !choroDrawn.length) return;
     if (settings.level === "sgg" && map.getZoom() < MAP_CHORO_LABEL_MIN_ZOOM) return;
+    if (settings.level === "emd" && map.getZoom() < MAP_CHORO_EMD_LABEL_MIN_ZOOM) return;
     const seen = new Set();
     const markers = [];
     for (const item of choroDrawn){
       // 일반구를 합친 시는 값이 하나라 글자도 한 번만 — 가장 큰 구에 쓴다(choroDrawn 은 큰 것부터).
       if (!item.valueKey || seen.has(item.valueKey)) continue;
       seen.add(item.valueKey);
-      const name = item.valueKey.includes("|") ? item.valueKey.split("|")[1] : item.valueKey.replace(/(특별자치시|특별자치도|통합특별시|특별시|광역시)$/, "");
+      const name = item.valueKey.includes("|") ? item.valueKey.split("|").pop() : item.valueKey.replace(/(특별자치시|특별자치도|통합특별시|특별시|광역시)$/, "");
       const label = document.createElement("span");
       const strong = document.createElement("b");
       strong.textContent = name;
@@ -4776,17 +4999,18 @@ async function mountMapEditor(doc){
     syncChoroButton();
     const settings = model.choropleth;
     if (!settings){ choroLegend.hidden = true; return; }
-    if (!mapChoroData()){
+    const emdLevel = settings.level === "emd";
+    if (!(emdLevel ? mapChoroEmdData() : mapChoroData())){
       // 경계는 지연 로드 묶음이다 — 처음 한 번 불러온 뒤 다시 그린다.
       if (!choroLoading){
-        choroLoading = MNLazy.need("koreaRegions")
+        choroLoading = MNLazy.need(emdLevel ? "koreaEmd" : "koreaRegions")
           .then(() => { choroLoading = null; drawChoropleth(); })
           .catch(() => { choroLoading = null; setStatus(mapT("행정경계 자료를 불러오지 못했어요.")); });
       }
       return;
     }
     const values = choroValues(settings);
-    const regions = mapChoroRegions(settings.level, settings.vintage);
+    const regions = mapChoroRegions(settings.level, settings.vintage, settings.scope);
     const drawn = regions.map(region => {
       const valueKey = mapChoroValueKey(region, values);
       return { region, geometry:mapChoroGeometry(region.geom), valueKey, value:valueKey ? values[valueKey] : null };
@@ -7647,31 +7871,57 @@ async function mountMapEditor(doc){
   });
 
   /* ── 색칠 지도 ── */
-  choroBtn.addEventListener("click", async () => {
+  /* 켜진 단추를 다시 누르면 걷고(되돌리기로 살릴 수 있다), 꺼진 단추는 설정 창을 연다.
+     걷은 설정은 이 편집기가 열려 있는 동안 기억해 다시 켤 때 창을 채운다 — 붙여 넣은 표를 다시 찾지 않게.
+     칠한 채로 설정만 고치려면 범례를 누른다. */
+  let lastChoropleth = null;
+  const openChoroSettings = async () => {
     choroBtn.disabled = true;
-    try { await MNLazy.need("koreaRegions"); }
+    try {
+      await MNLazy.need("koreaRegions");
+      if ((model.choropleth || lastChoropleth || {}).level === "emd") await MNLazy.need("koreaEmd");
+    }
     catch(_){ setStatus(mapT("행정경계 자료를 불러오지 못했어요.")); return; }
     finally { choroBtn.disabled = false; }
+    if (document.querySelector(".map-choro-modal")) return;
     openMapChoropleth(model, {
+      start: model.choropleth || lastChoropleth,
       markers: () => model.markers.filter(markerVisible),
       apply: (settings) => {
-        const first = !model.choropleth;
+        const previous = model.choropleth;
         model.choropleth = settings;
         drawChoropleth();
-        // 처음 칠할 때 우리나라가 화면 밖이면 나라 전체로 옮긴다. 이미 우리나라를 보고 있으면 그 자리를 둔다.
-        const center = map.getCenter();
-        if (first && !(center.lat > 33 && center.lat < 38.7 && center.lng > 124.5 && center.lng < 131)){
-          map.fitBounds([[33.0, 124.5], [38.7, 131.0]]);
+        if (settings.level === "emd"){
+          // 읍면동은 범위가 좁으니 범위를 새로 고른 때마다 그 자리로 옮긴다.
+          if ((!previous || previous.level !== "emd" || previous.scope !== settings.scope) && choroDrawn.length){
+            const [s, w, n, e] = choroDrawn.reduce((box, item) => {
+              const b = item.geometry.bbox;
+              return [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])];
+            }, [90, 180, -90, -180]);
+            map.fitBounds([[s, w], [n, e]], { padding:[16, 16] });
+          }
+        } else {
+          // 처음 칠할 때 우리나라가 화면 밖이면 나라 전체로 옮긴다. 이미 우리나라를 보고 있으면 그 자리를 둔다.
+          const center = map.getCenter();
+          if (!previous && !(center.lat > 33 && center.lat < 38.7 && center.lng > 124.5 && center.lng < 131)){
+            map.fitBounds([[33.0, 124.5], [38.7, 131.0]]);
+          }
         }
-        touch();
-      },
-      clear: () => {
-        if (!model.choropleth) return;
-        model.choropleth = null;
-        drawChoropleth();
         touch();
       }
     });
+  };
+  choroBtn.addEventListener("click", () => {
+    if (!model.choropleth){ openChoroSettings(); return; }
+    lastChoropleth = model.choropleth;
+    model.choropleth = null;
+    drawChoropleth();
+    touch();
+    if (typeof toast === "function") toast(mapT("색칠을 지웠어요 — 다시 누르면 같은 설정으로 창이 열리고, Ctrl+Z 로 되돌릴 수 있어요."), 3200);
+  });
+  choroLegend.addEventListener("click", () => {
+    if (presenting || !model.choropleth) return;
+    openChoroSettings();
   });
   choroReady = true;
   drawChoropleth();

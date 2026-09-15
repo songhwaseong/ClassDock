@@ -915,6 +915,12 @@
       "sha384": "sha384-whklRybIsmM0yZTac7NFQJmuM3slPGgp9OEf3HGtH3OgyNjlYNamB2G0ovDBwC48"
     },
     {
+      "src": "vendor/korea-emd.js",
+      "file": "korea-emd.js",
+      "lazy": "koreaEmd",
+      "sha384": "sha384-LX/zJMehpdd4r0CpPFgLPWpbYLXiGJABYOqppEpLwo3CJau2fM9F5q7jxD/Ydn7j"
+    },
+    {
       "src": "vendor/korean-font.js",
       "file": "korean-font.js",
       "lazy": "kfont",

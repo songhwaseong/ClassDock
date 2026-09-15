@@ -1331,7 +1331,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-choro-grow input,.map-choro-row input[type=text]{flex:1;min-width:0;border:1px solid var(--border);border-radius:7px;
     background:var(--field);color:var(--ink);padding:5px 8px;font:inherit;font-size:12.5px}
   .map-choro-row input.map-choro-unit{width:70px;flex:0 0 auto}
-  .map-choro-custom[hidden]{display:none}
+  .map-choro-custom[hidden],.map-choro-scope[hidden]{display:none}
+  .map-choro-scope-note{flex-basis:100%;font-size:11.5px;color:var(--muted)}
   .map-choro-custom input[type=color]{width:38px;height:26px;padding:1px;border:1px solid var(--border);border-radius:6px;background:var(--field);cursor:pointer}
   .map-choro-custom input[type=color]:disabled{opacity:.35;cursor:default}
   .map-choro-preview{display:flex;height:14px;margin:0 0 8px;border-radius:4px;overflow:hidden;border:1px solid var(--border)}
@@ -1340,7 +1341,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   /* 색칠 지도 범례 — 축척 막대처럼 지도 칸에 직접 얹어 캡처·인쇄에 남긴다. 오른쪽 위(확대 단추 반대편). */
   .map-choro-legend{position:absolute;right:8px;top:8px;z-index:800;min-width:120px;max-width:min(240px,45%);
     padding:7px 9px;border-radius:7px;background:rgba(255,255,255,.9);color:#1f2937;
-    font:600 11px/1.3 "Malgun Gothic",system-ui,sans-serif;box-shadow:0 1px 5px rgba(15,23,42,.22);pointer-events:none}
+    font:600 11px/1.3 "Malgun Gothic",system-ui,sans-serif;box-shadow:0 1px 5px rgba(15,23,42,.22);cursor:pointer}
+  /* 범례를 누르면 설정 창이 열린다. 발표 중에는 고치는 창을 열지 않으므로 손가락 모양도 뺀다. */
+  .map-choro-legend:hover{box-shadow:0 0 0 2px rgba(37,99,235,.55),0 1px 5px rgba(15,23,42,.22)}
+  .is-presenting .map-choro-legend{cursor:default;box-shadow:0 1px 5px rgba(15,23,42,.22)}
   .map-choro-legend[hidden],.map-choro-hover[hidden]{display:none}
   .map-choro-legend-title{font-size:12px;font-weight:700;margin-bottom:5px;overflow-wrap:anywhere}
   .map-choro-legend-row{display:flex;align-items:center;gap:6px;margin:2px 0;font-variant-numeric:tabular-nums}

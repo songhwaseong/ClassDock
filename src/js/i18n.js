@@ -2316,10 +2316,13 @@
     "칠판에 차트를 넣지 못했어요.": "Couldn't put the chart on the whiteboard.",
     // 색칠 지도(단계구분도)
     "🎨 색칠 지도": "🎨 Choropleth",
-    "시도·시군구를 값의 크기에 따라 색으로 칠해요 — 표를 붙여 넣거나 표시 개수로 칠합니다 (인터넷 없이)":
-      "Shades provinces or districts by value — paste a table or use pin counts (works offline)",
+    "시도·시군구를 값의 크기에 따라 색으로 칠해요 — 칠한 뒤 다시 누르면 지우고, 범례를 누르면 설정을 고칩니다 (인터넷 없이)":
+      "Shades provinces or districts by value — press again to remove, click the legend to edit (works offline)",
+    "눌러서 색칠 지도 설정 고치기": "Click to edit the choropleth settings",
+    "색칠을 지웠어요 — 다시 누르면 같은 설정으로 창이 열리고, Ctrl+Z 로 되돌릴 수 있어요.":
+      "Shading removed — press again to reopen with the same settings, or Ctrl+Z to undo.",
     "색칠 지도": "Choropleth map",
-    "시도·시군구마다 값을 넣으면 크기에 따라 색을 칠해요. 행정경계는 앱에 들어 있어 인터넷 없이 됩니다.":
+    "시도·시군구·읍면동마다 값을 넣으면 크기에 따라 색을 칠해요. 행정경계는 앱에 들어 있어 인터넷 없이 됩니다.":
       "Give each province or district a value and it is shaded by size. Boundaries are built in, so no internet is needed.",
     "행정구역 시점": "Boundaries as of",
     "자동(이름이 맞는 쪽)": "Auto (best name match)",
@@ -2348,9 +2351,17 @@
     "높은 값": "High",
     "가운데": "Middle",
     " 지도에 값 쓰기 ": " Write values on the map ",
-    "(시군구는 가까이 확대했을 때만)": "(districts only when zoomed in)",
-    "색칠 지우기": "Remove shading",
+    "(시군구·읍면동은 가까이 확대했을 때만)": "(districts and neighborhoods only when zoomed in)",
     "칠하기": "Apply",
+    "읍면동": "Neighborhoods (eup·myeon·dong)",
+    "범위": "Area",
+    "시도 전체": "Whole province",
+    "{city} (구 모두)": "{city} (all districts)",
+    "읍면동은 이름이 겹치는 곳이 많아요 — 표에 행정기관코드 열이 있으면 더 정확히 맞춥니다.":
+      "Many neighborhood names repeat — a column of administrative codes in the table matches more accurately.",
+    "읍면동 경계를 불러오는 중…": "Loading neighborhood boundaries…",
+    "읍면동 경계를 불러오지 못했어요.": "Couldn't load the neighborhood boundaries.",
+    "범위 밖 {count}줄": "{count} rows outside the area",
     "지역": "Region",
     "값": "Value",
     "개": "pins",

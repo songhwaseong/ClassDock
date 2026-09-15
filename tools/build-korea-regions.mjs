@@ -1,15 +1,17 @@
-/* 색칠 지도용 행정경계(vendor/korea-regions.js) 만들기.
+/* 색칠 지도용 행정경계(vendor/korea-regions.js · vendor/korea-emd.js) 만들기.
  *
  * 원자료: vuski/admdongkor (통계청 SGIS 행정동 경계를 가공, CC BY 4.0 + 공공누리 제1유형)
  * 받는 법(한 번만, 앱 의존성에는 넣지 않는다):
  *   mkdir tmp && cd tmp && npm init -y && npm i admdongkor
- *   node -e 'import("admdongkor").then(async a=>{const fs=require("fs");for(const k of ["20260701","20251231"])for(const l of ["sido","sgg"])fs.writeFileSync(`${l}-${k}.json`,JSON.stringify(await a.get(k,l)))})'
+ *   node -e 'import("admdongkor").then(async a=>{const fs=require("fs");for(const k of ["20260701","20251231"])for(const l of ["sido","sgg","emd"])fs.writeFileSync(`${l}-${k}.json`,JSON.stringify(await a.get(k,l)))})'
  * 만들기:
  *   node tools/build-korea-regions.mjs <그 폴더>
  *
  * 담는 방식 — 교실 PC 에서 가볍게 열리도록 줄였다.
  *  · 좌표는 소수 넷째 자리(약 10m)로 반올림해 "구글 인코딩 폴리라인" 글자로 담는다(JSON 배열의 약 1/4).
  *  · 시점 두 개(최신·통합 전)는 모양이 같은 경계를 한 번만 담고 번호로 가리킨다.
+ *  · 읍면동(약 3,500곳)은 따로 korea-emd.js 로 나눈다 — 읍면동을 고를 때만 읽는다(지연 묶음 koreaEmd).
+ *    시군구마다 [읍면동 이름, 행안부 10자리 코드, 통계청 8자리 코드, 경계 번호] 로 담아 표의 코드 열로도 맞출 수 있다.
  *    통계 자료는 대개 한두 해 늦으므로 옛 이름(광주광역시·전라남도·인천 중구…)으로 칠할 수 있어야 한다.
  */
 import fs from "node:fs";
@@ -61,15 +63,36 @@ for (const vintage of VINTAGES){
   out.vintages[vintage.id] = { label:vintage.label, sido, sgg };
 }
 
-const header = `/* 대한민국 시도·시군구 경계 (색칠 지도용, 좌표 약 10m 단위로 줄임)
- * 본 데이터는 통계청 통계지리정보서비스(SGIS, https://sgis.kostat.go.kr)에서 공공누리 제1유형으로
+const target = (name) => path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "vendor", name);
+const LICENSE = ` * 본 데이터는 통계청 통계지리정보서비스(SGIS, https://sgis.kostat.go.kr)에서 공공누리 제1유형으로
  * 개방한 행정동 경계를 가공한 것이며(가공: vuski/admdongkor, https://github.com/vuski/admdongkor),
  * CC BY 4.0으로 배포됩니다. 이 파일은 tools/build-korea-regions.mjs 가 만든 생성물입니다. */
 `;
-const body = `var MN_KOREA_REGIONS = ${JSON.stringify({
-  attribution:"행정경계: 통계청 SGIS(공공누리 1유형) · 가공 vuski/admdongkor(CC BY 4.0)",
-  scale:SCALE, geoms, vintages:out.vintages
-})};\n`;
-const target = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", "vendor", "korea-regions.js");
-fs.writeFileSync(target, header + body);
-console.log(`경계 ${geoms.length}개 · ${(Buffer.byteLength(header + body) / 1024).toFixed(0)}KB → ${target}`);
+const ATTRIBUTION = "행정경계: 통계청 SGIS(공공누리 1유형) · 가공 vuski/admdongkor(CC BY 4.0)";
+function write(name, title, globalName, payload){
+  const text = `/* ${title}
+${LICENSE}var ${globalName} = ${JSON.stringify(payload)};
+`;
+  fs.writeFileSync(target(name), text);
+  console.log(`${name} · ${(Buffer.byteLength(text) / 1024).toFixed(0)}KB`);
+}
+write("korea-regions.js", "대한민국 시도·시군구 경계 (색칠 지도용, 좌표 약 10m 단위로 줄임)", "MN_KOREA_REGIONS",
+  { attribution:ATTRIBUTION, scale:SCALE, geoms, vintages:out.vintages });
+
+// 읍면동 — 경계 번호는 이 파일 안에서만 센다(시도·시군구 파일과 따로).
+geoms.length = 0; geomIndex.clear();
+const emd = { vintages:{} };
+for (const vintage of VINTAGES){
+  const features = JSON.parse(fs.readFileSync(path.join(dir, `emd-${vintage.key}.json`), "utf8")).features;
+  const groups = [];
+  const byKey = new Map();
+  for (const f of features){
+    const p = f.properties;
+    const key = p.sidonm + "|" + p.sggnm;
+    if (!byKey.has(key)){ const group = [p.sidonm, p.sggnm, []]; byKey.set(key, group); groups.push(group); }
+    byKey.get(key)[2].push([p.emdnm, p.emdcd || "", p.emd8 || "", refOf(f.geometry)]);
+  }
+  emd.vintages[vintage.id] = { groups };
+}
+write("korea-emd.js", "대한민국 읍면동(행정동) 경계 (색칠 지도용, 좌표 약 10m 단위로 줄임)", "MN_KOREA_EMD",
+  { attribution:ATTRIBUTION, scale:SCALE, geoms, vintages:emd.vintages });

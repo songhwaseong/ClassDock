@@ -89,6 +89,104 @@ test("붙여 넣은 표로 시도를 칠하고 범례·마우스 올린 지역·
   expect(errors).toEqual([]);
 });
 
+test("켜진 🎨 단추를 다시 누르면 색칠이 걷히고, 다시 켜면 걷기 전 설정이 창에 채워지며, 범례를 누르면 설정 창이 열린다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openApp(page);
+  await page.evaluate(() => newMapScratch());
+  await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
+
+  const button = page.locator(".map-choropleth");
+  const modal = page.locator(".map-choro-modal");
+  await button.click();
+  await expect(modal.locator(".map-choro-clear")).toHaveCount(0);   // 창에는 지우기 단추가 없다
+  await modal.locator(".map-choro-paste").fill(TABLE);
+  await expect(modal.locator(".map-choro-note")).toContainText("맞춘 지역 5곳");
+  await modal.locator(".map-choro-title").fill("우리 인구");
+  await modal.locator(".map-choro-apply").click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  // 되돌리기 기록은 200ms 안의 변경을 한 단계로 묶는다 — 칠한 것이 기록된 뒤에 걷어야 따로 되돌려진다.
+  await expect(page.locator(".map-undo")).toBeEnabled();
+  const legend = page.locator(".map-choro-legend");
+  await expect(legend).toBeVisible();
+
+  // 범례를 누르면 지금 설정으로 창이 열리고, 지도에는 표시가 찍히지 않는다
+  const markersBefore = (await mapModel(page)).markers.length;
+  await legend.click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator(".map-choro-title")).toHaveValue("우리 인구");
+  await modal.locator(".map-choro-close").click();
+  await expect(modal).toHaveCount(0);
+  expect((await mapModel(page)).markers.length).toBe(markersBefore);
+
+  // 켜진 단추를 누르면 창 없이 바로 걷힌다
+  await button.click();
+  await expect(modal).toHaveCount(0);
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".leaflet-mapChoro-pane path")).toHaveCount(0);
+  await expect(legend).toBeHidden();
+  expect((await mapModel(page)).choropleth).toBeNull();
+
+  // 다시 누르면 걷기 전 설정이 채워진 창이 열린다
+  await button.click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator(".map-choro-title")).toHaveValue("우리 인구");
+  await expect(modal.locator(".map-choro-paste")).toHaveValue(/서울특별시\t9386034/);
+  await modal.locator(".map-choro-close").click();
+
+  // 걷은 것도 되돌리기로 살아난다
+  await page.locator(".map-undo").click();
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+  await expect(legend).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("읍면동은 범위를 골라 코드 붙은 표로 칠하고, 범위로 지도를 옮기며, 다시 열면 범위가 남아 있다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await openApp(page);
+  await page.evaluate(() => newMapScratch());
+  await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
+
+  await page.locator(".map-choropleth").click();
+  const modal = page.locator(".map-choro-modal");
+  await expect(modal.locator(".map-choro-scope")).toBeHidden();
+  await modal.locator(".map-choro-level").selectOption("emd");
+  await expect(modal.locator(".map-choro-scope")).toBeVisible();
+  await expect(modal.locator(".map-choro-scope-sido")).toHaveValue("서울특별시");
+  await modal.locator(".map-choro-scope-sgg").selectOption("종로구");
+  await modal.locator(".map-choro-paste").fill([
+    "행정구역\t인구",
+    "서울특별시 (1100000000)\t9,386,034",
+    "서울특별시 종로구 (1111000000)\t139,417",
+    "서울특별시 종로구 청운효자동(1111051500)\t11,000",
+    "서울특별시 종로구 사직동(1111053000)\t9,000",
+    "부산광역시 중구 중앙동(2611051000)\t5,000"
+  ].join("\n"));
+  await expect(modal.locator(".map-choro-note")).toContainText("맞춘 지역 2곳");
+  await expect(modal.locator(".map-choro-note")).toContainText("범위 밖 1줄");
+  await modal.locator(".map-choro-apply").click();
+  await expect(modal).toHaveCount(0);
+
+  const settings = (await mapModel(page)).choropleth;
+  expect(settings.level).toBe("emd");
+  expect(settings.scope).toBe("서울특별시|종로구");
+  expect(settings.values).toEqual({ "서울특별시|종로구|청운효자동":11000, "서울특별시|종로구|사직동":9000 });
+  const expected = await page.evaluate(() => mapChoroRegions("emd", "2026-07", "서울특별시|종로구").length);
+  await expect(page.locator(".leaflet-mapChoro-pane path")).toHaveCount(expected);
+  // 종로구로 옮겨 간다
+  const center = await page.evaluate(() => docs.find(d => d.kind === "map").mapInstance.getCenter());
+  expect(Math.abs(center.lat - 37.59)).toBeLessThan(0.05);
+  expect(Math.abs(center.lng - 126.98)).toBeLessThan(0.05);
+
+  // 범례를 누르면 읍면동·범위가 그대로 채워진 창이 열린다
+  await page.locator(".map-choro-legend").click();
+  await expect(modal.locator(".map-choro-level")).toHaveValue("emd");
+  await expect(modal.locator(".map-choro-scope-sgg")).toHaveValue("종로구");
+  await expect(modal.locator(".map-choro-note")).toContainText("맞춘 지역 2곳");
+  expect(errors).toEqual([]);
+});
+
 test("표시 개수로 칠하면 표시를 더할 때 색이 따라 바뀌고, 시군구 값 글자는 확대해야 나온다", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
