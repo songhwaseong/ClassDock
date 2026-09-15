@@ -13,7 +13,9 @@ const MNJejuBusMap = (() => {
     const form=el("form","map-jeju-bus-search"), input=el("input","map-input");
     input.placeholder=t("노선번호 (예: 201)");input.setAttribute("aria-label",t("버스 노선번호"));input.maxLength=12;
     try {input.value=localStorage.getItem("mapJejuBusKeyword") || "201";}catch(_){input.value="201";}
-    const search=button("검색");search.type="submit";form.append(input,search);
+    const search=button("검색");search.type="submit";
+    const catalogSelect=el("select","map-select map-jeju-bus-catalog");catalogSelect.setAttribute("aria-label",t("노선 목록에서 고르기"));
+    form.append(catalogSelect,input,search);
     const select=el("select","map-select");select.setAttribute("aria-label",t("버스 세부 노선"));select.disabled=true;
     const preview=el("p","map-jeju-bus-preview","노선을 검색해 주세요.");
     const actions=el("div","map-jeju-bus-actions"), start=button("지도에 표시"),fit=button("노선 전체 보기"),refresh=button("노선 새로고침");
@@ -21,7 +23,11 @@ const MNJejuBusMap = (() => {
     const status=el("p","map-jeju-bus-status");status.setAttribute("role","status");status.setAttribute("aria-live","polite");
     const note=el("p","map-jeju-bus-note","위치는 지연될 수 있으며, 갱신 사이에는 마지막 위치를 표시합니다.");
     const source=el("a","","출처: 제주 버스정보시스템");source.href="https://bus.jeju.go.kr/";source.target="_blank";source.rel="noopener noreferrer";
-    panel.append(heading,form,select,preview,actions,status,note,source);stage.appendChild(panel);
+    const catalogRow=el("div","map-jeju-bus-catalog-info"),catalogText=el("span","");
+    const catalogRefresh=button("목록 최신화","map-jeju-bus-catalog-refresh"),catalogCancel=button("최신화 취소");
+    catalogRefresh.disabled=true;catalogCancel.hidden=true;catalogRow.append(catalogText,catalogRefresh,catalogCancel);
+    // 목록 최신화 줄은 노선 목록 바로 밑에 둔다. 패널 맨 아래로 내리면 접힌 부분에 숨어 보이지 않는다.
+    panel.append(heading,form,catalogRow,select,preview,actions,status,note,source);stage.appendChild(panel);
     L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
     const pane=map.createPane("mapJejuBusPane");pane.style.zIndex="640";
     const routePane=map.createPane("mapJejuBusRoutePane");routePane.style.zIndex="370";
@@ -31,6 +37,12 @@ const MNJejuBusMap = (() => {
     let destroyed=false,active=null,state=MNJejuBusLive.create(),shape=null,stations=[],choices=[],on=false;
     let generation=0,searchGeneration=0,selectionGeneration=0,pollAbort=null,searchAbort=null,detailAbort=null;
     let polling=false,nextPoll=0,failures=0,delayed=false,frame=0,frozen=0,wasVisible=false,needsFit=false;
+    const bundledCatalog=(()=>{
+      try{return MNJejuBusApi.catalog(typeof MNJejuBusRouteCatalog!=="undefined"?MNJejuBusRouteCatalog:null);}
+      catch(_){return {updatedAt:"",routes:[]};}
+    })();
+    let catalogData=bundledCatalog,catalogLatest=false,catalogNote="",canRefresh=false;
+    let catalogWatching=false,catalogPolling=false,catalogNextPoll=0;
     const visible=()=>!document.hidden && !!stage.offsetParent;
     const routeColor=()=>active && /급행|리무진/.test(active.type)?"#c0392b":active && /간선/.test(active.type)?"#176bc0":active && /관광/.test(active.type)?"#986b00":"#087f8c";
     const clock=stamp=>new Date(stamp).toLocaleTimeString([], {hour12:false});
@@ -115,6 +127,7 @@ const MNJejuBusMap = (() => {
     async function searchRoutes(event){
       event.preventDefault();const value=input.value.trim();
       if(!/^[0-9\-]{1,12}$/.test(value)){setStatus(t("노선번호를 입력해 주세요. (예: 201)"));return;}
+      syncCatalogSelect();
       stopLive();selectionGeneration++;if(detailAbort)detailAbort.abort();
       const seq=++searchGeneration;if(searchAbort)searchAbort.abort();searchAbort=new AbortController();
       const controller=searchAbort;search.disabled=true;select.disabled=true;start.disabled=true;refresh.disabled=true;
@@ -133,6 +146,92 @@ const MNJejuBusMap = (() => {
       }catch(error){if(!controller.signal.aborted)setStatus(t("노선을 받지 못했어요. 잠시 후 다시 검색해 주세요."));}
       finally{if(seq===searchGeneration)search.disabled=false;}
     }
+    // 노선 목록. 제주 사이트에는 전체 목록 조회가 없으므로 앱에 넣어 둔 목록을 기본으로 쓰고,
+    // 사용자가 [목록 최신화]를 누르면 런처가 번호를 하나씩 물어 만든 목록으로 갈아 끼운다.
+    function renderCatalog(){
+      const placeholder=el("option","","노선 목록에서 고르기");placeholder.value="";
+      const nodes=[placeholder];
+      for(const group of MNJejuBusApi.catalogGroups(catalogData.routes)){
+        const box=document.createElement("optgroup");
+        box.label=group.hundred>=100?group.hundred+t("번대"):t("기타 번호");
+        for(const route of group.routes){
+          const option=el("option","",route.number+(route.from&&route.to?" · "+route.from+" – "+route.to:""));
+          option.value=route.number;box.appendChild(option);
+        }
+        nodes.push(box);
+      }
+      catalogSelect.replaceChildren(...nodes);
+      catalogSelect.disabled=!catalogData.routes.length;
+      syncCatalogSelect();
+      const day=catalogData.updatedAt?new Date(catalogData.updatedAt):null;
+      catalogText.textContent=[t(catalogLatest?"최신화한 노선 목록":"앱에 들어 있는 노선 목록"),
+        catalogData.routes.length+t("개 번호"),day&&!isNaN(day)?day.toLocaleDateString():"",catalogNote].filter(Boolean).join(" · ");
+    }
+    function syncCatalogSelect(){
+      const value=input.value.trim();
+      catalogSelect.value=catalogData.routes.some(route=>route.number===value)?value:"";
+    }
+    function showCatalogJob(job){
+      const running=job.state==="running";
+      catalogWatching=catalogWatching || running;
+      catalogRefresh.disabled=running || !canRefresh;catalogCancel.hidden=!running;catalogCancel.disabled=false;
+      if(running){
+        catalogText.textContent=t("노선 목록 최신화 중")+" "+job.done+"/"+job.total+" · "+t("찾은 번호")+" "+job.found;
+        return;
+      }
+      catalogNote=job.state==="cancelled"?t("최신화를 멈췄어요. 예전 목록을 그대로 씁니다.")
+        :job.state!=="failed"?""
+        :job.error==="bus-refused"?t("사이트가 요청을 거절해 멈췄어요. 예전 목록을 그대로 씁니다.")
+        :job.error==="bus-catalog-too-few"?t("찾은 번호가 너무 적어 예전 목록을 그대로 씁니다.")
+        :t("노선 목록을 받지 못했어요. 예전 목록을 그대로 씁니다.");
+      renderCatalog();
+    }
+    async function loadCatalogFile(){
+      try{
+        const saved=await MNJejuBusApi.loadCatalog({signal:capability.signal});
+        if(destroyed || !saved || !saved.routes.length)return;
+        catalogData=saved;catalogLatest=true;renderCatalog();
+      }catch(_){}
+    }
+    async function pollCatalog(){
+      catalogPolling=true;
+      try{
+        const job=await MNJejuBusApi.catalogJob("status",{signal:capability.signal});
+        if(destroyed)return;
+        if(job.state!=="running"){catalogWatching=false;catalogNote="";}
+        showCatalogJob(job);
+        if(job.state==="done"){catalogNote=t("노선 목록을 최신화했어요.");await loadCatalogFile();}
+      }catch(_){if(!destroyed){catalogWatching=false;catalogRefresh.disabled=!canRefresh;catalogCancel.hidden=true;}}
+      finally{catalogPolling=false;catalogNextPoll=Date.now()+1000;}
+    }
+    async function startCatalogRefresh(){
+      if(typeof confirmDialog!=="function")return;
+      // 묻는 번호 개수는 런처가 정한다(상태 응답의 total). 한 번에 0.4초 남짓 걸린다.
+      let total=1999;
+      try{const job=await MNJejuBusApi.catalogJob("status",{signal:capability.signal});if(job.total)total=job.total;}catch(_){}
+      if(destroyed)return;
+      const minutes=Math.max(1,Math.round(total*0.4/60));
+      const ok=await confirmDialog(t("제주 사이트에 노선번호를 하나씩 물어 목록을 새로 만듭니다.")
+        +"\n\n"+t("약")+" "+minutes+t("분 걸리고, 요청을")+" "+total+t("번 보냅니다. 도중에 멈출 수 있어요."),t("목록 최신화"),t("취소"));
+      if(!ok || destroyed)return;
+      catalogRefresh.disabled=true;catalogNote="";
+      try{
+        const job=await MNJejuBusApi.catalogJob("refresh",{signal:capability.signal,minimum:Math.max(1,Math.ceil(bundledCatalog.routes.length/2))});
+        if(destroyed)return;
+        catalogWatching=true;catalogNextPoll=Date.now()+1000;showCatalogJob(job);
+      }catch(_){if(!destroyed){catalogNote=t("노선 목록 최신화를 시작하지 못했어요.");renderCatalog();}}
+    }
+    catalogRefresh.addEventListener("click",startCatalogRefresh);
+    catalogCancel.addEventListener("click",()=>{
+      catalogCancel.disabled=true;
+      MNJejuBusApi.catalogJob("cancel",{signal:capability.signal}).catch(()=>{});
+    });
+    catalogSelect.addEventListener("change",()=>{
+      if(!catalogSelect.value)return;
+      input.value=catalogSelect.value;searchRoutes({preventDefault(){}});
+    });
+    input.addEventListener("input",syncCatalogSelect);
+    renderCatalog();
     toggle.addEventListener("click",()=>{
       if(on){stopLive();panel.hidden=true;}
       else panel.hidden=!panel.hidden;
@@ -156,11 +255,18 @@ const MNJejuBusMap = (() => {
       if(!shown){if(wasVisible){cancelPoll();stopFrame();}wasVisible=false;return;}
       if(!wasVisible){nextPoll=0;for(const vehicle of state.vehicles.values())vehicle.animation=null;}
       wasVisible=true;if(frozen)return;
+      if(catalogWatching && !catalogPolling && Date.now()>=catalogNextPoll)pollCatalog();
       if(on){if(!frame)paint();if(Date.now()>=nextPoll)poll();}
     }
     const timer=setInterval(tick,1000);document.addEventListener("visibilitychange",tick);map.on("zoomend",paint);
     fetch("/can-proxy-jeju-bus",{cache:"no-store",signal:capability.signal}).then(r=>r.ok?r.text():"").then(value=>{
-      if(!destroyed && value.trim()==="yes"){toggle.disabled=false;toggle.title=t("제주 버스 노선을 선택해 실시간 위치를 봅니다.");}
+      if(destroyed || value.trim()!=="yes")return;
+      toggle.disabled=false;toggle.title=t("제주 버스 노선을 선택해 실시간 위치를 봅니다.");
+      canRefresh=true;catalogRefresh.disabled=false;
+      loadCatalogFile();
+      // 다른 탭에서 시작한 최신화가 돌고 있으면 이어서 지켜본다. 끝난 결과를 다시 알리지는 않는다.
+      MNJejuBusApi.catalogJob("status",{signal:capability.signal})
+        .then(job=>{if(!destroyed && job.state==="running")showCatalogJob(job);}).catch(()=>{});
     }).catch(()=>{});
     const controller={
       freeze(){frozen++;stopFrame();return ()=>{frozen=Math.max(0,frozen-1);nextPoll=0;tick();};},

@@ -44,6 +44,46 @@ const MNJejuBusApi = (() => {
     if (source.length && !vehicles.length) throw new Error("bus-invalid-data");
     return {provider,routeKey:provider+":"+id,fetchedAt,cacheAgeMs,vehicles};
   }
+  // 노선 목록 한 줄 = [번호, 기점, 종점, 세부 노선 수]. 앱에 넣어 둔 목록과 런처가 최신화한 목록이 같은 모양이다.
+  function catalog(body){
+    if (!body || !Array.isArray(body.routes)) throw new Error("bus-invalid-data");
+    const seen=new Set();
+    const routes=body.routes.flatMap(r=>{
+      const number=Array.isArray(r) ? text(r[0]) : "";
+      if (!/^[0-9\-]{1,12}$/.test(number) || seen.has(number)) return [];
+      seen.add(number);
+      return [{number,from:text(r[1]),to:text(r[2]),count:Math.max(0,Math.floor(Number(r[3]) || 0))}];
+    }).sort((a,b)=>(parseInt(a.number,10)-parseInt(b.number,10)) || a.number.localeCompare(b.number));
+    return {updatedAt:text(body.updatedAt),routes};
+  }
+  // 백 단위로 묶는다. 이 검색 응답은 노선 종류(busTypeStr)를 비워 주므로 급행·간선 같은 이름은 붙이지 않는다.
+  function catalogGroups(routes){
+    const groups=new Map();
+    for (const route of routes){
+      const n=parseInt(route.number,10), hundred=Number.isFinite(n) ? Math.floor(n/100)*100 : -1;
+      if (!groups.has(hundred)) groups.set(hundred,[]);
+      groups.get(hundred).push(route);
+    }
+    return [...groups].map(([hundred,list])=>({hundred,routes:list}));
+  }
+  async function loadCatalog({signal}={}){
+    const response=await fetch("/jeju-bus-catalog",{signal,cache:"no-store"});
+    if (response.status===404) return null;
+    if (!response.ok) throw new Error("bus-fetch-failed");
+    return catalog(await response.json());
+  }
+  async function catalogJob(action,{signal,minimum=1}={}){
+    if (!["status","refresh","cancel"].includes(action)) throw new Error("bus-bad-request");
+    const url=action==="status" ? "/jeju-bus-catalog-status"
+      : action==="refresh" ? "/jeju-bus-catalog-refresh?min="+Math.max(1,Math.floor(Number(minimum) || 1)) : "/jeju-bus-catalog-cancel";
+    const response=await fetch(url,action==="status" ? {signal,cache:"no-store"}
+      : {method:"POST",headers:{"X-ClassDock-Action":"1"},signal,cache:"no-store"});
+    if (!response.ok && response.status!==409) throw new Error("bus-catalog-failed");
+    const body=await response.json();
+    const count=v=>Math.max(0,Math.floor(Number(v) || 0));
+    return {state:text(body && body.state),error:text(body && body.error),done:count(body && body.done),
+      total:count(body && body.total),found:count(body && body.found),busy:response.status===409};
+  }
   async function request(kind,value,{signal,refresh=false}={}){
     if (!["routes","route","shape","position"].includes(kind)) throw new Error("bus-bad-request");
     if (kind==="routes" ? !/^[0-9\-]{1,12}$/.test(value) : !validId(value)) throw new Error("bus-bad-request");
@@ -64,6 +104,6 @@ const MNJejuBusApi = (() => {
     result.stale=response.headers.get("X-ClassDock-Bus-Stale")==="1";
     return result;
   }
-  return {provider,coords,routes,route,shape,positions,request};
+  return {provider,coords,routes,route,shape,positions,request,catalog,catalogGroups,loadCatalog,catalogJob};
 })();
 if (typeof module!=="undefined" && module.exports) module.exports=MNJejuBusApi;

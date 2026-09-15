@@ -7525,6 +7525,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-jeju-bus-panel[hidden]{display:none}
 .map-jeju-bus-heading,.map-jeju-bus-search,.map-jeju-bus-actions{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .map-jeju-bus-heading{justify-content:space-between}.map-jeju-bus-search input{flex:1;min-width:100px}
+.map-jeju-bus-search .map-jeju-bus-catalog{flex:1 1 100%;min-width:0;max-width:100%}
+.map-jeju-bus-catalog-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:12px}
+.map-jeju-bus-catalog-info span{flex:1;min-width:150px;opacity:.85}
 .map-jeju-bus-panel>select{width:100%;max-width:100%}.map-jeju-bus-preview{white-space:pre-wrap;max-height:120px;overflow:auto;font-size:12px;overflow-wrap:anywhere}
 .map-jeju-bus-status{font-weight:600}.map-jeju-bus-note{font-size:12px;opacity:.8}.map-jeju-bus-panel a{color:#087f8c}
 .map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}

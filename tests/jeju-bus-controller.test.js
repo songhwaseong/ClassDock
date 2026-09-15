@@ -26,20 +26,31 @@ function harness(){
     layerGroup(){const group={items:[],addTo(){return this;},clearLayers(){this.items=[];},addLayer(x){this.items.push(x);},removeLayer(x){this.items=this.items.filter(i=>i!==x);}};groups.push(group);return group;},
     marker(at){const element=new Element("marker");return {at,bindTooltip(tip){this.tip=tip;return this;},setLatLng(p){this.at=p;},setOpacity(v){this.opacity=v;},getElement(){return element;}};},
     circleMarker(){return {bindTooltip(){return this;}};},polyline:p=>({points:p})};
-  const fakeApi={...api,request(kind,value,options){requests.push({kind,value,options});
+  const catalogJobs=[];let catalogFile=null,catalogState={state:"idle",error:"",done:0,total:1999,found:0,busy:false};
+  const fakeApi={...api,
+    loadCatalog(){return Promise.resolve(catalogFile);},
+    catalogJob(action){catalogJobs.push(action);return Promise.resolve(catalogState);},
+    request(kind,value,options){requests.push({kind,value,options});
     if(kind==="routes")return Promise.resolve([{id:"1",number:"201",from:"A",to:"B",type:"간선"},{id:"2",number:"201",from:"B",to:"A",type:"간선"}]);
     if(kind==="route")return Promise.resolve([{id:"s",name:"stop",at:[33.3,126.5]}]);
     if(kind==="shape")return Promise.resolve([[33.3,126.5],[33.301,126.5]]);
     const task=deferred();pending.push({task,request:requests.at(-1)});return task.promise;}};
+  const confirms=[];let confirmAnswer=true;
   const context={console,Date:Clock,Map,Set,AbortController,Promise,MNJejuBusApi:fakeApi,MNJejuBusLive:live,L,document:doc,
+    MNJejuBusRouteCatalog:{updatedAt:"2026-09-16",routes:[["201","제주","서귀포",2],["331","제주","동부",1],["1111","제주","한라산",1]]},
+    confirmDialog(message){confirms.push(message);return Promise.resolve(confirmAnswer);},
     window:{matchMedia:()=>({matches:false})},localStorage:{getItem(){return null;},setItem(){}},fetch:async()=>({ok:true,text:async()=>"yes"}),
     setInterval(fn){intervals.add(fn);return fn;},clearInterval(fn){intervals.delete(fn);},requestAnimationFrame(fn){frames.set(++frameId,fn);return frameId;},cancelAnimationFrame(id){frames.delete(id);}};
   vm.createContext(context);vm.runInContext(fs.readFileSync("src/js/jeju-bus-map.js","utf8")+"\nglobalThis.busModule=MNJejuBusMap;",context);
   const stage=new Element("stage"),toolRow=new Element("tools"),documentModel={cleanupFns:[]};
   const controller=context.busModule.mount({map,stage,toolRow,doc:documentModel});
-  const panel=stage.children[0],form=panel.children[1],select=panel.children[2],actions=panel.children[4];
+  const panel=stage.children[0],form=panel.children[1],catalogRow=panel.children[2],select=panel.children[3],actions=panel.children[5];
   return {controller,doc:documentModel,document:doc,stage,map,groups,requests,pending,intervals,frames,form,select,
-    panel,actions,start:actions.children[0],status:panel.children[5],button:toolRow.children[0],
+    panel,actions,start:actions.children[0],status:panel.children[6],button:toolRow.children[0],
+    catalogSelect:form.children[0],input:form.children[1],catalogText:catalogRow.children[0],
+    catalogRefresh:catalogRow.children[1],catalogCancel:catalogRow.children[2],catalogJobs,confirms,
+    setCatalogState(state){catalogState={...catalogState,...state};},setCatalogFile(file){catalogFile=file;},
+    answerConfirm(value){confirmAnswer=value;},
     tick(ms=1000){now+=ms;for(const fn of intervals)fn();},now:()=>now};
 }
 const body=(id,at,x=126.5)=>api.positions([{vhId:1,plateNo:"bus",localY:33.3,localX:x,currStationId:1,currStationNm:"stop"}],id,at);
@@ -78,6 +89,37 @@ test("서버 실패는 운행 차량 없음과 구분하고 재시도 간격을 
   const error=new Error("failed");error.retryAfterMs=120000;h.pending[0].task.reject(error);await flush();
   h.tick(31000);assert.equal(h.pending.length,1);assert.match(h.status.textContent,/받지 못/);
   h.tick(90000);assert.equal(h.pending.length,2);h.controller.destroy();
+});
+test("노선 목록에서 고르면 번호를 채워 검색하고, 최신화는 확인을 받은 뒤에만 시작한다",async()=>{
+  const h=harness();await flush();
+  const numbers=h.catalogSelect.children.flatMap(node=>node.children || []).map(option=>option.value);
+  assert.deepEqual(numbers,["201","331","1111"]);
+  assert.match(h.catalogText.textContent,/앱에 들어 있는 노선 목록/);
+  h.catalogSelect.value="331";await h.catalogSelect.fire("change");
+  assert.equal(h.input.value,"331");
+  assert.deepEqual(h.requests.filter(r=>r.kind==="routes").map(r=>r.value),["331"]);
+  h.answerConfirm(false);await h.catalogRefresh.click();await flush();
+  assert.equal(h.confirms.length,1);assert.equal(h.catalogJobs.includes("refresh"),false);
+  h.answerConfirm(true);h.setCatalogState({state:"running",done:12,total:1999,found:3});
+  await h.catalogRefresh.click();await flush();
+  assert.match(h.catalogText.textContent,/12\/1999/);assert.equal(h.catalogCancel.hidden,false);
+  h.setCatalogFile({updatedAt:"2026-09-20",routes:[{number:"500",from:"서귀포",to:"제주",count:2}]});
+  h.setCatalogState({state:"done"});h.tick(1000);await flush();
+  assert.equal(h.catalogSelect.children.at(-1).children[0].value,"500");
+  assert.match(h.catalogText.textContent,/최신화한 노선 목록/);
+  assert.equal(h.catalogCancel.hidden,true);
+  h.controller.destroy();
+});
+test("최신화가 실패하거나 멈추면 예전 목록을 그대로 둔다",async()=>{
+  const h=harness();await flush();
+  h.answerConfirm(true);h.setCatalogState({state:"running",done:5,total:1999,found:1});
+  await h.catalogRefresh.click();await flush();
+  h.setCatalogState({state:"failed",error:"bus-catalog-too-few"});h.tick(1000);await flush();
+  assert.match(h.catalogText.textContent,/앱에 들어 있는 노선 목록/);
+  assert.match(h.catalogText.textContent,/너무 적어/);
+  assert.equal(h.catalogSelect.children.flatMap(node=>node.children || []).length,3);
+  assert.equal(h.catalogRefresh.disabled,false);
+  h.controller.destroy();
 });
 test("API 어댑터는 런처 캐시 시각과 Retry-After를 보존한다",async()=>{
   const original=global.fetch;let requested;

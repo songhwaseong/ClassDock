@@ -983,6 +983,7 @@ class ClassDockLauncher
             if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/exchange-rate-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/subway-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/jeju-bus-catalog", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -3318,6 +3319,35 @@ class ClassDockLauncher
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
                 }
+                else if (method == "GET" && path == "/jeju-bus-catalog")
+                {
+                    byte[] saved = null;
+                    try { if (File.Exists(JejuBusCatalogFile)) saved = File.ReadAllBytes(JejuBusCatalogFile); } catch { }
+                    if (saved != null) WriteResponse(stream, "200 OK", "application/json; charset=utf-8", saved);
+                    else WriteResponse(stream, "404 Not Found", "text/plain", Encoding.UTF8.GetBytes("no-catalog"));
+                }
+                else if (method == "GET" && path == "/jeju-bus-catalog-status")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/jeju-bus-catalog-", StringComparison.Ordinal) && !HasLocalActionHeader(headers))
+                {
+                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                }
+                else if (method == "POST" && path.StartsWith("/jeju-bus-catalog-refresh", StringComparison.Ordinal))
+                {
+                    int minimum;
+                    if (!Int32.TryParse(QueryValue(path, "min") ?? "", NumberStyles.None, CultureInfo.InvariantCulture, out minimum)) minimum = 1;
+                    minimum = Math.Max(1, Math.Min(900, minimum));
+                    if (StartJejuBusCatalog(minimum))
+                        WriteResponse(stream, "202 Accepted", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
+                    else WriteResponse(stream, "409 Conflict", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
+                }
+                else if (method == "POST" && path == "/jeju-bus-catalog-cancel")
+                {
+                    lock (JejuBusCatalogLock) { JejuBusCatalogCancel = true; }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
+                }
                 else if (method == "GET" && path.StartsWith("/jeju-bus-", StringComparison.Ordinal))
                 {
                     int question = path.IndexOf('?');
@@ -5265,32 +5295,16 @@ class ClassDockLauncher
             {
                 try
                 {
-                    try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
-                    byte[] payload = Encoding.UTF8.GetBytes((kind == "routes" ? "keyword=" : "lineId=") + Uri.EscapeDataString(value));
-                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://bus.jeju.go.kr/data/search/" + endpoint);
-                    request.Method = "POST"; request.ContentType = "application/x-www-form-urlencoded";
-                    request.UserAgent = "ClassDock/1.0 (local classroom app)"; request.Accept = "application/json";
-                    request.AllowAutoRedirect = false; request.Timeout = 12000; request.ReadWriteTimeout = 12000;
-                    request.ContentLength = payload.Length;
-                    using (Stream output = request.GetRequestStream()) output.Write(payload, 0, payload.Length);
-                    using (WebResponse response = request.GetResponse())
-                    using (Stream input = response.GetResponseStream())
-                    using (MemoryStream output = new MemoryStream())
-                    {
-                        byte[] buffer = new byte[8192]; int count;
-                        int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-                        while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
-                        { if (output.Length + count > max) throw new IOException("bus-too-large"); output.Write(buffer, 0, count); }
-                        byte[] received = output.ToArray();
-                        var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
-                        object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(received));
-                        var obj = parsed as Dictionary<string, object>;
-                        bool valid = kind == "route" ? obj != null && obj.ContainsKey("stationInfoList") && obj["stationInfoList"] is object[]
-                            : parsed is object[] || (kind != "shape" && obj != null && obj.ContainsKey(kind == "routes" ? "routeId" : "vhId"));
-                        if (!valid) throw new IOException("bus-invalid-data");
-                        entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue;
-                        data = entry.Data; fetchedAt = entry.FetchedAt; return true;
-                    }
+                    int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+                    byte[] received = JejuBusPost(endpoint, (kind == "routes" ? "keyword=" : "lineId=") + Uri.EscapeDataString(value), max);
+                    var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
+                    object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(received));
+                    var obj = parsed as Dictionary<string, object>;
+                    bool valid = kind == "route" ? obj != null && obj.ContainsKey("stationInfoList") && obj["stationInfoList"] is object[]
+                        : parsed is object[] || (kind != "shape" && obj != null && obj.ContainsKey(kind == "routes" ? "routeId" : "vhId"));
+                    if (!valid) throw new IOException("bus-invalid-data");
+                    entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue;
+                    data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
                 catch (WebException error)
                 {
@@ -5317,6 +5331,136 @@ class ClassDockLauncher
             { data = entry.Data; fetchedAt = entry.FetchedAt; stale = true; return true; }
             return false;
         }
+    }
+    static byte[] JejuBusPost(string endpoint, string body, int max)
+    {
+        try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+        byte[] payload = Encoding.UTF8.GetBytes(body);
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://bus.jeju.go.kr/data/search/" + endpoint);
+        request.Method = "POST"; request.ContentType = "application/x-www-form-urlencoded";
+        request.UserAgent = "ClassDock/1.0 (local classroom app)"; request.Accept = "application/json";
+        request.AllowAutoRedirect = false; request.Timeout = 12000; request.ReadWriteTimeout = 12000;
+        request.ContentLength = payload.Length;
+        using (Stream output = request.GetRequestStream()) output.Write(payload, 0, payload.Length);
+        using (WebResponse response = request.GetResponse())
+        using (Stream input = response.GetResponseStream())
+        using (MemoryStream output = new MemoryStream())
+        {
+            byte[] buffer = new byte[8192]; int count;
+            while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+            { if (output.Length + count > max) throw new IOException("bus-too-large"); output.Write(buffer, 0, count); }
+            return output.ToArray();
+        }
+    }
+
+    // 노선 목록 최신화. 제주 사이트에는 전체 목록 조회가 없고 번호가 정확히 같아야만 찾아 주므로 번호를 하나씩 묻는다.
+    // 사용자가 버튼을 눌렀을 때만, 한 번에 하나만, 요청 사이를 띄워 돈다. 검색 캐시(100개 상한)는 거치지 않는다 —
+    // 900번을 캐시로 돌리면 지금 보고 있는 노선 캐시까지 밀려난다. 결과가 너무 적으면 예전 목록을 그대로 둔다.
+    static readonly string JejuBusCatalogFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "jeju-bus-routes.json");
+    // 2026-09 확인 범위: 101~1113번이 쓰이고 1200번 위로는 없었다. 개편 여유를 두고 1499번까지 묻는다.
+    const int JejuBusCatalogFirst = 1, JejuBusCatalogLast = 1499, JejuBusCatalogGapMs = 300;
+    static readonly object JejuBusCatalogLock = new object();
+    static string JejuBusCatalogState = "idle"; // idle · running · done · failed · cancelled
+    static string JejuBusCatalogError = "";
+    static int JejuBusCatalogDone, JejuBusCatalogFound;
+    static bool JejuBusCatalogCancel;
+
+    static string JejuBusCatalogStatusJson()
+    {
+        var status = new Dictionary<string, object>();
+        lock (JejuBusCatalogLock)
+        {
+            status["state"] = JejuBusCatalogState; status["error"] = JejuBusCatalogError;
+            status["done"] = JejuBusCatalogDone; status["found"] = JejuBusCatalogFound;
+        }
+        status["total"] = JejuBusCatalogLast - JejuBusCatalogFirst + 1;
+        return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(status);
+    }
+    static bool StartJejuBusCatalog(int minimum)
+    {
+        lock (JejuBusCatalogLock)
+        {
+            if (JejuBusCatalogState == "running") return false;
+            JejuBusCatalogState = "running"; JejuBusCatalogError = ""; JejuBusCatalogCancel = false;
+            JejuBusCatalogDone = 0; JejuBusCatalogFound = 0;
+        }
+        Thread worker = new Thread(delegate()
+        {
+            try { RunJejuBusCatalog(minimum); }
+            catch { FinishJejuBusCatalog("failed", "bus-catalog-failed"); }
+        });
+        worker.IsBackground = true; worker.Start();
+        return true;
+    }
+    static void FinishJejuBusCatalog(string state, string error)
+    {
+        lock (JejuBusCatalogLock) { JejuBusCatalogState = state; JejuBusCatalogError = error; }
+    }
+    static string JejuBusField(Dictionary<string, object> row, string key)
+    {
+        object value;
+        return row.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture).Trim() : "";
+    }
+    // 번호 하나를 묻는다. 노선이 없으면 null, 받지 못하면 예외.
+    static object[] JejuBusCatalogEntry(string number)
+    {
+        const int max = 5 * 1024 * 1024;
+        var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
+        object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(JejuBusPost("searchSimpleLineListByLineNum", "keyword=" + number, max)));
+        object[] rows = parsed as object[];
+        var single = parsed as Dictionary<string, object>;
+        if (rows == null && single != null && single.ContainsKey("routeId")) rows = new object[] { single };
+        if (rows == null) throw new IOException("bus-invalid-data");
+        string from = "", to = ""; int count = 0;
+        foreach (object item in rows)
+        {
+            var row = item as Dictionary<string, object>;
+            if (row == null || JejuBusField(row, "routeNum") != number) continue;
+            if (count == 0) { from = JejuBusField(row, "orgtNm"); to = JejuBusField(row, "dstNm"); }
+            count++;
+        }
+        return count > 0 ? new object[] { number, from, to, count } : null;
+    }
+    static void RunJejuBusCatalog(int minimum)
+    {
+        var routes = new List<object>();
+        for (int number = JejuBusCatalogFirst; number <= JejuBusCatalogLast; number++)
+        {
+            string key = number.ToString(CultureInfo.InvariantCulture);
+            object[] found = null; bool received = false;
+            for (int attempt = 0; attempt < 3 && !received; attempt++)
+            {
+                lock (JejuBusCatalogLock) { if (JejuBusCatalogCancel) { JejuBusCatalogState = "cancelled"; return; } }
+                if (attempt > 0) Thread.Sleep(3000);
+                try { found = JejuBusCatalogEntry(key); received = true; }
+                catch (WebException error)
+                {
+                    var response = error.Response as HttpWebResponse;
+                    int code = response == null ? 0 : (int)response.StatusCode;
+                    if (response != null) response.Close();
+                    // 사이트가 거절하면 더 두드리지 않고 멈춘다.
+                    if (code == 403 || code == 429 || code == 503) { FinishJejuBusCatalog("failed", "bus-refused"); return; }
+                }
+                catch { }
+            }
+            if (!received) { FinishJejuBusCatalog("failed", "bus-fetch-failed"); return; }
+            if (found != null) routes.Add(found);
+            lock (JejuBusCatalogLock) { JejuBusCatalogDone = number - JejuBusCatalogFirst + 1; JejuBusCatalogFound = routes.Count; }
+            Thread.Sleep(JejuBusCatalogGapMs);
+        }
+        if (routes.Count < minimum) { FinishJejuBusCatalog("failed", "bus-catalog-too-few"); return; }
+        var body = new Dictionary<string, object>();
+        body["updatedAt"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+        body["source"] = "bus.jeju.go.kr";
+        body["routes"] = routes;
+        byte[] bytes = Encoding.UTF8.GetBytes(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(body));
+        Directory.CreateDirectory(Path.GetDirectoryName(JejuBusCatalogFile));
+        string temp = JejuBusCatalogFile + ".tmp";
+        File.WriteAllBytes(temp, bytes);
+        if (File.Exists(JejuBusCatalogFile)) File.Replace(temp, JejuBusCatalogFile, null);
+        else File.Move(temp, JejuBusCatalogFile);
+        FinishJejuBusCatalog("done", "");
     }
 
     static bool TryProxyMapTile(string url, out byte[] data, out string mime)

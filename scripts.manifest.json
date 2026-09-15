@@ -79,6 +79,7 @@
     "whiteboard.js",
     "subway-stations.js",
     "subway-live.js",
+    "jeju-bus-routes-data.js",
     "jeju-bus-api.js",
     "jeju-bus-live.js",
     "jeju-bus-map.js",
@@ -219,6 +220,7 @@
         "whiteboard.js",
         "subway-stations.js",
         "subway-live.js",
+        "jeju-bus-routes-data.js",
         "jeju-bus-api.js",
         "jeju-bus-live.js",
         "jeju-bus-map.js",
@@ -542,7 +544,8 @@
     ],
     "jeju-bus-map.js": [
       "jeju-bus-api.js",
-      "jeju-bus-live.js"
+      "jeju-bus-live.js",
+      "jeju-bus-routes-data.js"
     ]
   },
   "moduleBoundaries": [
