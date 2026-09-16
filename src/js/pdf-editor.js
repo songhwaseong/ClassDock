@@ -162,6 +162,15 @@ document.addEventListener("pointerdown", (e) => {
     if (!doc.selected.contains(e.target)) selectEl(null, doc);
   });
 }, true);
+// Esc: 고른 것의 선택(테두리·컨트롤 바)을 푼다. 글을 고치는 중이면 고치기도 함께 끝낸다.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.isComposing) return;
+  const picked = docs.filter(doc => doc.kind === "pdf" && doc.selected);
+  if (!picked.length) return;
+  const ae = document.activeElement;
+  if (ae && ae.classList && ae.classList.contains("text-edit") && ae.closest(".placed")) ae.blur();
+  picked.forEach(doc => selectEl(null, doc));
+});
 function removeEl(el){
   const doc = (el && el.__doc) || state;
   if (!doc || doc.kind !== "pdf") return;
@@ -198,6 +207,13 @@ function placeBase(pageIndex, kind, doc=state){
       sw.onclick = () => { const t = el.querySelector(".text-edit"); if (t) t.style.color = c; recordPdfEdit(doc); };
       ctrl.appendChild(sw);
     });
+  }
+  if (PDF_COPYABLE_KINDS.includes(kind)){
+    const dup = btn("");
+    if (typeof window.setUiIcon === "function") window.setUiIcon(dup, "copy", "복제"); else dup.textContent = "⧉";
+    dup.className = "dup"; dup.title = "복제 (Ctrl+C → Ctrl+V 로 다른 쪽에도 붙일 수 있어요)";
+    dup.onclick = () => duplicatePdfElement(el);
+    ctrl.appendChild(dup);
   }
   const del = btn("✕"); del.className = "del"; del.onclick = () => removeEl(el);
   ctrl.appendChild(del);
@@ -845,34 +861,142 @@ function updatePdfFindCount(doc){
 function hydratePdfElements(doc, items){
   if (!doc || doc.kind !== "pdf") return;
   for (const item of items || []){
-    const page = doc.pages[item.pageIndex];
-    if (!page) continue;
-    let el;
-    if (item.kind === "signature" && item.dataUrl){
-      el = addImageElement(item.dataUrl, item.aspect || 2, item.pageIndex, { doc, restoring: true });
-      el.style.width = Math.max(30, item.width * page.cssW) + "px";
-      el.style.height = Math.max(15, item.height * page.cssH) + "px";
-    } else if (["text","date","check"].includes(item.kind)){
-      el = addTextElement(item.kind, {
-        doc, pageIndex: item.pageIndex, restoring: true, text: item.text || "",
-        fontSize: item.fontSize || 18, color: item.color || "#111", fontWeight: item.fontWeight || "400"
-      });
-    } else if (item.kind === "code-link" && item.target){
-      el = addCodeLinkElement(item.target, {
-        doc, pageIndex: item.pageIndex, restoring: true, label: item.label,
-        widthPx: Math.max(40, item.width * page.cssW), heightPx: Math.max(24, item.height * page.cssH)
-      });
-    } else if (item.kind === "ink"){
-      buildInkElement(doc, item.pageIndex, item.strokes || []);   // 전체 페이지 잉크 레이어(좌표는 내부에서 0,0)
+    if (item.kind === "ink"){
+      if (doc.pages[item.pageIndex]) buildInkElement(doc, item.pageIndex, item.strokes || []);   // 전체 페이지 잉크 레이어(좌표는 내부에서 0,0)
       continue;
     }
-    if (!el) continue;
-    el.style.left = Math.max(0, Math.min(page.cssW - 8, item.x * page.cssW)) + "px";
-    el.style.top = Math.max(0, Math.min(page.cssH - 8, item.y * page.cssH)) + "px";
+    buildPdfElementFromItem(doc, item);
   }
   selectEl(null, doc);
   if (typeof refreshCodePinMarkers === "function") refreshCodePinMarkers();   // 복원된 핀을 코드 거터에도 반영
 }
+/* serializePdfElements 가 만든 항목 하나로 올려놓은 것을 다시 만든다(잉크 제외). 복원과 붙여넣기가 함께 쓴다. */
+function buildPdfElementFromItem(doc, item){
+  const page = doc.pages[item.pageIndex];
+  if (!page) return null;
+  let el;
+  if (item.kind === "signature" && item.dataUrl){
+    el = addImageElement(item.dataUrl, item.aspect || 2, item.pageIndex, { doc, restoring: true });
+    el.style.width = Math.max(30, item.width * page.cssW) + "px";
+    el.style.height = Math.max(15, item.height * page.cssH) + "px";
+  } else if (["text","date","check"].includes(item.kind)){
+    el = addTextElement(item.kind, {
+      doc, pageIndex: item.pageIndex, restoring: true, text: item.text || "",
+      fontSize: item.fontSize || 18, color: item.color || "#111", fontWeight: item.fontWeight || "400"
+    });
+  } else if (item.kind === "code-link" && item.target){
+    el = addCodeLinkElement(item.target, {
+      doc, pageIndex: item.pageIndex, restoring: true, label: item.label,
+      widthPx: Math.max(40, item.width * page.cssW), heightPx: Math.max(24, item.height * page.cssH)
+    });
+  }
+  if (!el) return null;
+  el.style.left = Math.max(0, Math.min(page.cssW - 8, item.x * page.cssW)) + "px";
+  el.style.top = Math.max(0, Math.min(page.cssH - 8, item.y * page.cssH)) + "px";
+  return el;
+}
+
+/* ===== 올려놓은 것 복사·붙여넣기(Ctrl+C / Ctrl+X / Ctrl+V, 컨트롤 바의 ⧉) =====
+   체크·글자·날짜·서명만 대상이다(잉크는 페이지 전체 층, 코드 핀은 코드 위치에 묶여 있어 뺀다).
+   시스템 클립보드에 전용 형식으로 함께 적어 두고, 붙여넣을 때 그 형식이 그대로 있을 때만 쓴다 —
+   그 사이 다른 글·그림을 복사했으면 예전 PDF 항목이 엉뚱하게 붙지 않는다.
+   붙는 자리: 지금 보고 있는 쪽의 같은 상대 위치. 같은 쪽에 거듭 붙이면 계단식으로 비켜 난다. */
+const PDF_ITEM_TRANSFER_TYPE = "application/x-classdock-pdf-item";
+const PDF_COPYABLE_KINDS = ["text", "date", "check", "signature"];
+let pdfItemClipboard = null;          // { json, item, pastes: Map(pageKey → 붙인 횟수) }
+function pdfClipboardItemOf(el){
+  const doc = el && el.__doc;
+  if (!doc || doc.kind !== "pdf" || !PDF_COPYABLE_KINDS.includes(el.__kind)) return null;
+  const entry = (doc.elements || []).find(x => x.el === el);
+  if (!entry) return null;
+  return serializePdfElements({ elements: [entry], pages: doc.pages })[0] || null;
+}
+function setPdfItemClipboard(item, sourceDoc){
+  const json = JSON.stringify({ app: "classdock-pdf", v: 1, item });
+  const pastes = new Map();
+  pastes.set((sourceDoc ? sourceDoc.id : "") + ":" + item.pageIndex, 1);   // 원래 쪽에는 첫 붙여넣기부터 비켜 놓는다
+  pdfItemClipboard = { json, item, pastes };
+  return json;
+}
+function pdfSelectionTarget(){
+  const doc = state && state.kind === "pdf" ? state : null;
+  if (!doc || !doc.selected || !doc.selected.isConnected) return null;
+  const ae = document.activeElement;
+  if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return null;   // 글 고치는 중엔 보통 복사
+  // PDF 글자를 긁으려고 누르면 바깥 누르기로 선택이 풀리므로, 선택이 남아 있으면 항목을 복사하려는 뜻이다.
+  return doc;
+}
+function copyPdfSelection(doc, cut){
+  const el = doc && doc.selected;
+  const item = pdfClipboardItemOf(el);
+  if (!item) return null;
+  const json = setPdfItemClipboard(item, doc);
+  if (cut) removeEl(el);
+  return json;
+}
+function pastePdfItem(doc, item){
+  if (!doc || doc.kind !== "pdf" || !item || !PDF_COPYABLE_KINDS.includes(item.kind)) return null;
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return null; }
+  const pageIndex = currentPageIndex(doc);
+  const page = doc.pages[pageIndex];
+  if (!page) return null;
+  const key = doc.id + ":" + pageIndex;
+  const pastes = pdfItemClipboard && pdfItemClipboard.item === item ? pdfItemClipboard.pastes : new Map();
+  const step = pastes.get(key) || 0;
+  pastes.set(key, step + 1);
+  const shift = ((step % 8) * 16);                              // 계단: 16px 씩, 8번마다 제자리로
+  const el = buildPdfElementFromItem(doc, { ...item, pageIndex });
+  if (!el) return null;
+  const maxX = Math.max(0, page.cssW - el.offsetWidth), maxY = Math.max(0, page.cssH - el.offsetHeight);
+  el.style.left = Math.min(maxX, Math.max(0, el.offsetLeft + shift)) + "px";
+  el.style.top = Math.min(maxY, Math.max(0, el.offsetTop + shift)) + "px";
+  selectEl(el, doc);
+  recordPdfEdit(doc);
+  return el;
+}
+function duplicatePdfElement(el){
+  const doc = (el && el.__doc) || state;
+  if (!doc || doc.kind !== "pdf") return;
+  const item = pdfClipboardItemOf(el);
+  if (!item) return;
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return; }
+  const page = doc.pages[item.pageIndex];
+  const copy = buildPdfElementFromItem(doc, item);
+  if (!copy || !page) return;
+  copy.style.left = Math.min(Math.max(0, page.cssW - copy.offsetWidth), el.offsetLeft + 16) + "px";
+  copy.style.top = Math.min(Math.max(0, page.cssH - copy.offsetHeight), el.offsetTop + 16) + "px";
+  selectEl(copy, doc);
+  recordPdfEdit(doc);
+}
+document.addEventListener("copy", (e) => {
+  const doc = pdfSelectionTarget();
+  if (!doc) return;
+  const json = copyPdfSelection(doc, false);
+  if (!json || !e.clipboardData) return;
+  e.clipboardData.setData(PDF_ITEM_TRANSFER_TYPE, json);
+  e.clipboardData.setData("text/plain", pdfItemClipboard.item.text || "");
+  e.preventDefault();
+});
+document.addEventListener("cut", (e) => {
+  const doc = pdfSelectionTarget();
+  if (!doc) return;
+  if (isPdfReferenceLocked(doc)){ explainPdfReferenceLocked(); return; }
+  const json = copyPdfSelection(doc, true);
+  if (!json || !e.clipboardData) return;
+  e.clipboardData.setData(PDF_ITEM_TRANSFER_TYPE, json);
+  e.clipboardData.setData("text/plain", pdfItemClipboard.item.text || "");
+  e.preventDefault();
+});
+document.addEventListener("paste", (e) => {
+  const doc = state && state.kind === "pdf" ? state : null;
+  if (!doc || !pdfItemClipboard) return;
+  const ae = document.activeElement;
+  if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
+  const json = e.clipboardData && e.clipboardData.getData(PDF_ITEM_TRANSFER_TYPE);
+  if (!json || json !== pdfItemClipboard.json) return;          // 그 뒤 다른 것을 복사했다
+  e.preventDefault();
+  pastePdfItem(doc, pdfItemClipboard.item);
+});
 function startEdit(t){
   t.contentEditable = "true"; t.focus();
   const r = document.createRange(); r.selectNodeContents(t);
