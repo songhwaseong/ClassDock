@@ -169,7 +169,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:10px 16px;flex:0 0 auto;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:30}
   .header-left{display:flex;align-items:center;gap:12px;min-width:0}
   .brand{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px;white-space:nowrap}
-  /* 브랜드는 글자 대신 락업 SVG 한 장이다. 글자는 Century Gothic Bold 외곽선을 패스로 떠서 심었으므로
+  /* 투명 PNG 심볼과 워드마크를 SVG 한 장에 배치한다. 두 테마 모두 어두운 헤더이므로
+     심볼의 밝은 중앙 면과 기존 흰색·파란색 글자를 유지한다.
+     글자는 Century Gothic Bold 외곽선을 패스로 떠서 심었으므로
      글꼴 설치 여부와 무관하게 같은 모양으로 나온다. 높이만 정하고 폭은 viewBox 비율에 맡긴다.
      높이 26px 은 임의값이 아니다 — 외곽선에는 힌팅이 없어서 20px(세로획 2.17px)에서는 획이
      픽셀 경계에 걸쳐 굵기가 제각각으로 보였다. 줄이려면 글자 x 스냅을 다시 떠야 한다. */

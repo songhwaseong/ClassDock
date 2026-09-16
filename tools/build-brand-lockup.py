@@ -4,6 +4,8 @@
 
 워드마크는 Century Gothic Bold 의 9글자 외곽선을 패스로 뜬 것이다. 글꼴 파일은 배포하지
 않고 이 글자들의 외곽선만 쓰므로, 글꼴이 깔리지 않은 환경에서도 같은 모양으로 나온다.
+헤더 심볼은 배경이 투명한 classdock-header-mark.png 를 사용한다.
+EXE와 브라우저 앱 창·탭 아이콘도 같은 PNG에서 생성한다.
 
 사용법
     python tools/build-brand-lockup.py                 # 결과만 보여주고 파일은 안 건드림
@@ -37,19 +39,19 @@
 4. classdock.html 에 심을 때 width/height 정규식을 문서 전체에 돌리면 안 된다.
    루트 <svg> 의 width/height 만 지우려던 정규식이 <rect> 의 width/height 까지 지워서
    마크 안 흰 판이 통째로 사라진 적이 있다(크기 없는 rect 는 그려지지 않는다).
-   아래 inline_svg() 는 루트 태그 안에서만 지우고, 흰 판이 살아 있는지 단정문으로 막는다.
+   아래 inline_svg() 는 루트 태그 안에서만 지우고, 내부 이미지 크기를 단정문으로 검사한다.
 
 5. 흰 판을 좁게 잡으면 작은 크기에서 '막대'로 보인다.
-   원본 로고는 판이 넓어서 '종이 한 장'으로 읽힌다. PANEL 참고.
+   현재는 원본 PNG의 밝은 중앙 면을 그대로 사용한다.
 """
 
 import argparse
+import base64
 import io
 import os
 import re
 import struct
 import sys
-from urllib.parse import quote
 
 try:
     from fontTools.ttLib import TTFont
@@ -68,6 +70,7 @@ except Exception:
     pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HEADER_MARK = "src/assets/classdock-header-mark.png"
 
 FONT  = r"C:\Windows\Fonts\GOTHICB.TTF"   # Century Gothic Bold
 TEXT  = "ClassDock"
@@ -81,38 +84,6 @@ def num(v):
     """SVG 좌표를 짧게. 0.50 -> 0.5, 3.00 -> 3"""
     return format(round(v, 2), "f").rstrip("0").rstrip(".") or "0"
 
-
-# ---- 마크(D) 도형 — 24x24 좌표계 --------------------------------------------
-# 아이콘(.ico)은 SVG 를 브라우저로 렌더하지 않고 Pillow 로 직접 그린다(파이썬에 SVG
-# 래스터라이저가 없다). 두 곳에 같은 도형을 따로 적으면 반드시 어긋나므로, 아래 숫자만
-# 진실로 두고 SVG 패스 문자열과 Pillow 렌더를 모두 여기서 파생시킨다.
-M_L, M_T, M_B = 3.0, 3.0, 21.0    # 왼쪽 / 위 / 아래
-M_SX = 12.0                       # 오른쪽 불룩한 호가 시작하는 x
-M_R  = 2.0                        # 왼쪽 모서리 반지름
-M_BULGE = (M_B - M_T) / 2.0       # 호 반지름 = 9
-
-PANEL_X, PANEL_Y, PANEL_W, PANEL_H, PANEL_R = 7.2, 5.3, 8.2, 13.4, 2.0
-PANEL_ALPHA = 0.88                # 원본의 반투명 흰 판 — 위 함정 5번
-
-# 그라데이션(시안 -> 파랑 -> 인디고)
-GRAD_STOPS = ((0.00, (0x22, 0xd3, 0xee)),
-              (0.55, (0x3b, 0x82, 0xf6)),
-              (1.00, (0x63, 0x66, 0xf1)))
-
-MARK_D = ("M%s %sh%sa%s %s 0 0 1 0 %sH%sa%s %s 0 0 1-%s-%sV%sa%s %s 0 0 1 %s-%sz" % (
-    num(M_L + M_R), num(M_T), num(M_SX - M_L - M_R),
-    num(M_BULGE), num(M_BULGE), num(M_B - M_T),
-    num(M_L + M_R), num(M_R), num(M_R), num(M_R), num(M_R),
-    num(M_T + M_R), num(M_R), num(M_R), num(M_R), num(M_R)))
-
-PANEL = ('<rect x="%s" y="%s" width="%s" height="%s" rx="%s" fill="#fff" opacity="%s"/>'
-         % (num(PANEL_X), num(PANEL_Y), num(PANEL_W), num(PANEL_H), num(PANEL_R),
-            ("%.2f" % PANEL_ALPHA).lstrip("0")))
-
-GRAD = ('<linearGradient id="cdg{id}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-        'gradientUnits="userSpaceOnUse">'
-        '<stop offset="0" stop-color="#22d3ee"/><stop offset=".55" stop-color="#3b82f6"/>'
-        '<stop offset="1" stop-color="#6366f1"/></linearGradient>')
 
 # 배경별 색 변형. 헤더(어두운 배경)에 쓰는 것은 "dark2".
 VARIANTS = {
@@ -189,88 +160,47 @@ class Lockup(object):
         self.height = self.bottom - self.top
         self.view_box = "%s %s %s %s" % (num(0), num(self.top), num(self.width), num(self.height))
 
-    def _mark(self, idsuf):
-        ms = self.mark / 24.0
-        return ('<g transform="translate(0 %s) scale(%s)"><path d="%s" fill="url(#cdg%s)"/>%s</g>'
-                % (num(self.mark_top), num(ms), MARK_D, idsuf, PANEL))
-
-    def _grad(self, idsuf):
-        ms = self.mark / 24.0
-        return GRAD.format(id=idsuf, x1=num(1.5 * ms), y1=num(self.mark_top + 2.5 * ms),
-                           x2=num(18 * ms), y2=num(self.mark_top + 21 * ms))
+    def _mark(self, embed=True):
+        href = HEADER_MARK
+        if embed:
+            with open(os.path.join(ROOT, HEADER_MARK), "rb") as f:
+                href = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+        return ('<image class="brand-mark" x="0" y="%s" width="%s" height="%s" '
+                'preserveAspectRatio="xMidYMid meet" href="%s"/>'
+                % (num(self.mark_top), num(self.mark), num(self.mark), href))
 
     def svg(self, variant=HEADER_VARIANT, standalone=True):
         c1, c2, title = VARIANTS[variant]
         head = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s" width="%s" height="%s" '
                 'role="img" aria-label="ClassDock">\n<title>%s</title>\n'
                 % (self.view_box, num(self.width), num(self.height), title))
-        body = ('<defs>%s</defs>\n%s\n<g transform="translate(%s 0)">\n'
+        body = ('%s\n<g transform="translate(%s 0)">\n'
                 '<path fill="%s" d="%s"/>\n<path fill="%s" d="%s"/>\n</g>\n</svg>\n'
-                % (self._grad(variant), self._mark(variant), num(self.word_x),
+                % (self._mark(embed=standalone), num(self.word_x),
                    c1, self.paths[0], c2, self.paths[1]))
-        return head + body if standalone else head + body
+        return head + body
 
     def mark_svg(self, variant=HEADER_VARIANT):
+        with open(os.path.join(ROOT, HEADER_MARK), "rb") as f:
+            data = base64.b64encode(f.read()).decode("ascii")
         return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" '
-                'role="img" aria-label="ClassDock">\n'
-                '<defs>%s</defs>\n<path d="%s" fill="url(#cdg%s)"/>\n%s\n</svg>\n'
-                % (GRAD.format(id=variant, x1="3", y1="3", x2="21", y2="21"), MARK_D, variant, PANEL))
+                'role="img" aria-label="ClassDock">'
+                '<image width="24" height="24" preserveAspectRatio="xMidYMid meet" '
+                'href="data:image/png;base64,%s"/></svg>' % data)
 
 
 # ---- 아이콘(.ico) ------------------------------------------------------------
-# Pillow 로 마크를 직접 그린다. 위쪽 M_* / PANEL_* / GRAD_STOPS 에서만 치수를 읽으므로
-# SVG 와 어긋날 일이 없다. 크기마다 4배로 크게 그린 뒤 줄여서 가장자리를 매끈하게 만든다.
+# 헤더와 같은 투명 PNG를 사용하고 각 크기를 원본에서 직접 축소한다.
 
-def _grad_color(t):
-    """0~1 위치의 그라데이션 색."""
-    t = min(1.0, max(0.0, t))
-    for i in range(len(GRAD_STOPS) - 1):
-        p0, c0 = GRAD_STOPS[i]
-        p1, c1 = GRAD_STOPS[i + 1]
-        if t <= p1:
-            f = 0.0 if p1 == p0 else (t - p0) / (p1 - p0)
-            return tuple(int(round(c0[k] + (c1[k] - c0[k]) * f)) for k in range(3))
-    return GRAD_STOPS[-1][1]
+def render_mark(size):
+    """헤더 로고를 비율을 유지해 투명한 size x size 캔버스에 맞춘다."""
+    from PIL import Image, ImageOps
 
-
-def render_mark(size, ss=4):
-    """마크를 size x size RGBA 로 그린다(배경 투명)."""
-    from PIL import Image, ImageDraw
-
-    n = size * ss
-    k = n / 24.0                       # 24 단위 좌표계 -> 픽셀
-    def S(v):
-        return v * k
-
-    # 1) D 실루엣 마스크 = 왼쪽 둥근 사각형 + 오른쪽 원(불룩한 호)의 합집합
-    mask = Image.new("L", (n, n), 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle([S(M_L), S(M_T), S(M_SX), S(M_B)], radius=S(M_R), fill=255)
-    md.ellipse([S(M_SX - M_BULGE), S(M_T), S(M_SX + M_BULGE), S(M_B)], fill=255)
-
-    # 2) 그라데이션 — SVG 와 같은 (3,3) -> (21,21) 대각선
-    grad = Image.new("RGB", (n, n))
-    gp = grad.load()
-    x0, y0, x1, y1 = S(3), S(3), S(21), S(21)
-    dx, dy = x1 - x0, y1 - y0
-    den = float(dx * dx + dy * dy)
-    for y in range(n):
-        for x in range(n):
-            gp[x, y] = _grad_color(((x - x0) * dx + (y - y0) * dy) / den)
-
-    img = Image.new("RGBA", (n, n), (0, 0, 0, 0))
-    img.paste(grad, (0, 0), mask)
-
-    # 3) 반투명 흰 판 — D 밖으로 새지 않게 마스크로 한 번 더 자른다
-    panel = Image.new("RGBA", (n, n), (0, 0, 0, 0))
-    ImageDraw.Draw(panel).rounded_rectangle(
-        [S(PANEL_X), S(PANEL_Y), S(PANEL_X + PANEL_W), S(PANEL_Y + PANEL_H)],
-        radius=S(PANEL_R), fill=(255, 255, 255, int(round(255 * PANEL_ALPHA))))
-    panel.putalpha(Image.composite(panel.getchannel("A"),
-                                   Image.new("L", (n, n), 0), mask))
-    img = Image.alpha_composite(img, panel)
-
-    return img.resize((size, size), Image.LANCZOS)
+    with Image.open(os.path.join(ROOT, HEADER_MARK)) as source:
+        mark = ImageOps.contain(source.convert("RGBA"), (size, size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(mark, ((size - mark.width) // 2, (size - mark.height) // 2))
+    return canvas
 
 
 def _dib(img):
@@ -292,9 +222,9 @@ def _dib(img):
 
 
 def build_ico(out_path, sizes=ICO_SIZES):
-    """크기별로 따로 렌더한 마크를 하나의 .ico 로 묶는다.
+    """같은 PNG에서 크기별로 축소한 마크를 하나의 .ico 로 묶는다.
 
-    Pillow 의 ICO 저장은 원본 한 장을 리사이즈해 담을 뿐이라 쓰지 않는다.
+    각 크기를 원본 PNG에서 직접 만들고 투명 배경과 종횡비를 보존한다.
     작은 크기는 BMP(DIB), 128 이상은 PNG 로 담는다 — PNG 엔트리는 Vista 이상만 읽는다.
     """
     import io as _io
@@ -324,16 +254,12 @@ def build_ico(out_path, sizes=ICO_SIZES):
     return len(head) + len(blob)
 
 
-def favicon_link(lock):
-    """마크를 data URI 로 담은 favicon 태그.
-
-    외부 파일로 두면 단일 HTML(exe)에서 깨지므로 인라인한다.
-    """
-    svg = lock.mark_svg().replace("\n", "").replace('"', "'")
-    # '#' 은 반드시 %23 으로 — 그대로 두면 색상값 #22d3ee 부터가 URI 프래그먼트로 잘려
-    # 아이콘이 통째로 깨진다. '<' '>' 도 속성 안이라 인코딩해 두는 편이 안전하다.
-    quoted = quote(svg, safe="/:=;{}()., '-+*")
-    return '<link rel="icon" href="data:image/svg+xml,%s">' % quoted
+def favicon_link():
+    """브라우저 앱 창·탭에도 EXE와 동일한 로고를 내장 PNG로 제공한다."""
+    buf = io.BytesIO()
+    render_mark(256).save(buf, format="PNG", optimize=True)
+    data = base64.b64encode(buf.getvalue()).decode("ascii")
+    return '<link rel="icon" href="data:image/png;base64,%s">' % data
 
 
 def inline_svg(svg):
@@ -353,11 +279,11 @@ def inline_svg(svg):
     root = re.sub(r'\s+height="[^"]*"', "", root)
     out = (root + svg[m.end():]).replace("\n", "")
 
-    # 함정 4번을 두 번 다시 겪지 않도록 여기서 막는다.
+    # 루트 크기를 없애더라도 내부 이미지의 크기는 유지해야 한다.
     if 'class="brand-lockup"' not in out:
         raise SystemExit("brand-lockup 클래스가 붙지 않았습니다.")
-    if out.count("<rect") != 1 or 'width="8.2"' not in out or 'height="13.4"' not in out:
-        raise SystemExit("마크 안 흰 판의 width/height 가 사라졌습니다. inline_svg() 의 정규식을 확인하세요.")
+    if not re.search(r'<image\b[^>]*\bwidth="[0-9.]+"[^>]*\bheight="[0-9.]+"', out):
+        raise SystemExit("헤더 마크의 width/height 가 사라졌습니다. inline_svg() 의 정규식을 확인하세요.")
     return out
 
 
@@ -379,7 +305,7 @@ def patch_sources(lock, apply_changes):
     """
     html_path = os.path.join(ROOT, "classdock.html")
     css_path = os.path.join(ROOT, "src", "styles.css")
-    svg = inline_svg(lock.svg(HEADER_VARIANT))
+    svg = inline_svg(lock.svg(HEADER_VARIANT, standalone=False))
     changed = []
 
     # --- classdock.html : 헤더 락업 + favicon. 다 바꾼 뒤 한 번만 쓴다. ---
@@ -394,7 +320,7 @@ def patch_sources(lock, apply_changes):
 
     # favicon — 앱 모드 창·브라우저 탭 아이콘. 외부 파일은 단일 HTML(exe)에서 깨지므로
     # data URI 로 <head> 안에 인라인한다.
-    link = favicon_link(lock)
+    link = favicon_link()
     # href 값 전체를 따옴표 기준으로 잡는다. [^>]* 로 잡으면 data URI 안에 '>' 가 있는
     # (예전 버그로 만들어진) 태그에서 앞부분만 잘라내고 나머지 SVG 를 문서에 흘린다.
     # 그렇게 흘린 <defs> 의 그라데이션 id 가 헤더 락업과 충돌해 앱이 통째로 깨진 적이 있다.
@@ -489,6 +415,8 @@ def main():
         else:
             print("\n바뀐 내용이 없습니다.")
         print("이제 다시 빌드하세요:  node build-offline.js  &&  desktop\\build.bat")
+    elif args.ico or args.out:
+        print("\n요청한 아이콘/SVG 파일을 생성했습니다. 헤더 소스는 변경하지 않았습니다.")
     else:
         print("\n(파일은 건드리지 않았습니다. 반영하려면 --apply)")
     return 0

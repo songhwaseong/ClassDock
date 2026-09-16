@@ -1,0 +1,6 @@
+{
+  "tool": "Built-in image_gen image edit",
+  "source": "C:/Users/SHS-JJANG/Downloads/classDocklogo2.png",
+  "asset": "classdock-header-mark.png",
+  "prompt": "Use case: background-extraction. Edit target: the supplied ClassDock symbol PNG. Produce a faithful transparent-background cutout of exactly this existing symbol for a small application header, suitable on both near-white and dark navy backgrounds. Preserve the exact silhouette, overlapping translucent planes, cyan-to-blue-to-purple gradients, proportions and the pale white central face. Only remove the exterior off-white background and trim excess exterior whitespace to a small even margin, preserving all light interior surfaces and clean antialiased edges. Output an actual RGBA PNG with alpha 0 outside the symbol, no white matte, no checkerboard baked into pixels, no glow, no shadow, no new outlines, no text, no redesign. Return only the single isolated logo asset."
+}

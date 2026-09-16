@@ -36,6 +36,13 @@ function verifyVendorIntegrity(item) {
 
 let html = read("classdock.html");
 
+// SVG 헤더 로고의 PNG도 내장해 단일 HTML/EXE에서 외부 이미지 파일 없이 표시한다.
+const headerMarkPath = "src/assets/classdock-header-mark.png";
+const headerMarkHref = `href="${headerMarkPath}"`;
+requireTag(html, headerMarkHref, "Header brand image");
+const headerMarkData = fs.readFileSync(path.join(root, headerMarkPath)).toString("base64");
+html = html.replace(headerMarkHref, () => `href="data:image/png;base64,${headerMarkData}"`);
+
 const localStyleTag = `<link rel="stylesheet" href="${manifest.styles.local}">`;
 requireTag(html, localStyleTag, "Local stylesheet");
 html = html.replace(localStyleTag, () => `<style>\n${read(manifest.styles.local)}\n</style>`);
