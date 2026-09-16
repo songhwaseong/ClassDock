@@ -1695,7 +1695,7 @@ function closeDoc(id, options={}){
       const prevId = activeMru.find(x => activeDocs.some(d => d.id === x));
       setActiveDoc(prevId != null ? prevId : activeDocs[Math.max(0, Math.min(i, activeDocs.length - 1))].id);
     }
-    else { activeId=0; state=null; viewer=null; byId("tools").hidden=true; byId("officeTools").hidden=true; }
+    else setActiveDoc(0);                 // pdf-active(플로팅 PDF 바)·펜 모드까지 함께 정리
   }
   if (!options.skipUi){
     refreshChrome();
@@ -4075,7 +4075,7 @@ async function closeGroup(nodeId, options={}){
   }
   bumpNavTree();                          // 묶음 삭제 → 인덱스/루트 캐시 무효화
   if (!workspaceActiveDocs().length){
-    activeId = 0; state=null; viewer=null; byId("tools").hidden=true; byId("officeTools").hidden=true;
+    setActiveDoc(0);                      // pdf-active(플로팅 PDF 바)·펜 모드까지 함께 정리
   } else if (activeWasInGroup && !workspaceActiveDocs().some(d => d.id === activeId)) setActiveDoc(workspaceActiveDocs()[0].id);
   refreshChrome();
   applyStudyLayout();

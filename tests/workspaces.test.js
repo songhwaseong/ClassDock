@@ -224,3 +224,31 @@ test("작업공간 탭은 드래그로 순서를 바꾸고 좁은 창에서는 �
   assert.match(styles, /header \.workspace-tab\.drop-before\{box-shadow:inset 3px 0 var\(--accent\)\}/);
   assert.match(styles, /header \.workspace-tab\.drop-after\{box-shadow:inset -3px 0 var\(--accent\)\}/);
 });
+
+test("사이드바에 그릴 수 없는 줄은 열린 항목으로 세지 않는다", () => {
+  const vm = require("node:vm");
+  const source = fs.readFileSync(path.join(root, "src/js/workspaces.js"), "utf8");
+  const lineOf = (name) => source.slice(source.indexOf(`function ${name}(`)).split("\n")[0];
+  const start = source.indexOf("function workspaceActiveNodes(");
+  const body = source.slice(start, source.indexOf("\n}\n", start) + 2);
+  const ctx = vm.createContext({ activeWorkspaceId:"work", docs:[], navNodes:[] });
+  vm.runInContext(lineOf("workspaceNodeVisible") + "\n" + body, ctx);
+  // 다른 작업공간 폴더 아래 빈 하위 폴더·닫힌 문서 줄·사라진 문서 줄 = 목록엔 아무것도 없다
+  ctx.docs = [{ id:1, closed:true }];
+  ctx.navNodes = [
+    { nodeId:"g1", type:"group", parentId:null, workspaceId:"work2" },
+    { nodeId:"g2", type:"group", parentId:"g1", workspaceId:"work" },
+    { nodeId:"d1", type:"doc", docId:1, parentId:null, workspaceId:"work" },
+    { nodeId:"d2", type:"doc", docId:9, parentId:null, workspaceId:"work" }
+  ];
+  assert.equal(vm.runInContext("workspaceActiveNodes().length", ctx), 0);
+  // 루트부터 이어진 빈 폴더와 살아 있는 문서는 센다
+  ctx.docs = [{ id:1, closed:false }];
+  ctx.navNodes.push({ nodeId:"g3", type:"group", parentId:null, workspaceId:"" });
+  assert.deepEqual(vm.runInContext("workspaceActiveNodes().map(n => n.nodeId)", ctx), ["d1", "g3"]);
+});
+
+test("파일 없는 하위 폴더의 복원 소속은 부모 폴더를 따른다", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/workspaces.js"), "utf8");
+  assert.match(source, /node\.workspaceId = inheritFromParent\(node\) \|\| activeWorkspaceId/);
+});

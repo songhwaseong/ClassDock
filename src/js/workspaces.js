@@ -127,7 +127,24 @@ function workspaceHasDoc(doc, id=activeWorkspaceId){
 }
 function workspaceActiveDocs(){ return docs.filter(doc => !doc.closed && workspaceHasDoc(doc)); }
 function workspaceNodeVisible(node, id=activeWorkspaceId){ return !!node && (!node.workspaceId || node.workspaceId === id); }
-function workspaceActiveNodes(){ return navNodes.filter(node => workspaceNodeVisible(node)); }
+// 사이드바가 실제로 그릴 수 있는 항목만 센다. 소속만 맞고 부모 폴더가 다른 작업공간이거나
+// 문서가 사라진 줄을 세면, 목록은 비었는데 시작 화면 대신 "왼쪽에서 고르세요" 안내가 뜬다.
+function workspaceActiveNodes(){
+  const id = activeWorkspaceId, byNodeId = new Map(navNodes.map(node => [node.nodeId, node]));
+  const liveDocIds = new Set(docs.filter(doc => !doc.closed).map(doc => doc.id)), reachable = new Map();
+  const canDraw = (node) => {
+    if (reachable.has(node.nodeId)) return reachable.get(node.nodeId);
+    reachable.set(node.nodeId, false);                    // 부모 고리가 꼬여도 멈추게
+    let ok = workspaceNodeVisible(node, id) && (node.type !== "doc" || liveDocIds.has(node.docId));
+    if (ok && node.parentId != null){
+      const parent = byNodeId.get(node.parentId);
+      ok = !!parent && parent.type === "group" && canDraw(parent);
+    }
+    reachable.set(node.nodeId, ok);
+    return ok;
+  };
+  return navNodes.filter(canDraw);
+}
 function workspaceRegisterGroup(node){ if (node){ node.workspaceId = activeWorkspaceId; workspaceSchedulePersist(); } return node; }
 function workspaceRegisterDoc(doc, node){
   if (!doc) return doc;
@@ -451,7 +468,18 @@ function finalizeWorkspaceRestore(){
     });
     if (!changed) break;
   }
-  navNodes.filter(node => node.type === "group").forEach(node => { if (!node.workspaceId) node.workspaceId = activeWorkspaceId; });
+  // 파일이 하나도 없는 하위 폴더는 자식에게서 소속을 못 받으므로 부모 폴더를 따른다.
+  // 지금 작업공간으로 채우면 부모가 다른 작업공간일 때 어디서도 안 보이는 줄이 남는다.
+  const inheritFromParent = (group) => {
+    let current = group;
+    for (let depth = 0; current && current.parentId != null && depth < 64; depth++){
+      current = navNodes.find(item => item.nodeId === current.parentId);
+      if (current && current.workspaceId) return current.workspaceId;
+    }
+    return "";
+  };
+  navNodes.filter(node => node.type === "group" && !node.workspaceId)
+    .forEach(node => { node.workspaceId = inheritFromParent(node) || activeWorkspaceId; });
   docs.forEach(doc => { for (const id of doc.workspaceIds){
     const node = workspaceDocNodeIn(doc, id);
     if (!node || !workspaceAncestorMatches(node, id)) workspaceAddAliasNode(doc, id, null, true);

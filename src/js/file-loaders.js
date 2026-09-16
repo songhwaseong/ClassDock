@@ -1864,7 +1864,7 @@ async function refreshFolderGroup(rootId, fileList, options={}){
     uiBatchActiveCandidate = fallbackActive;
   }
   else {
-    activeId = 0; state = null; viewer = null;
+    setActiveDoc(0);
     refreshChrome(); applyStudyLayout(); renderSidebar();
   }
   // 폴더 새로고침으로 참고 문서가 새 인스턴스로 교체되면 활성 문서가 아니어서 지연 렌더가 생략된다.
