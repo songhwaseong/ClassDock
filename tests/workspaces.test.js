@@ -8,7 +8,7 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const {
   workspaceNormalizeSaved, workspaceNormalizeBoardRows, workspaceCleanName,
-  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds, workspaceMoveOrder
+  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds
 } = require(path.join(root, "src/js/workspaces.js"));
 
 test("작업공간 저장값을 안전한 기본 구조로 정규화한다", () => {
@@ -70,23 +70,28 @@ test("HTML과 파일 로더가 작업공간 UI와 공유 문서 경로를 연결
   const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
   const loader = fs.readFileSync(path.join(root, "src/js/file-loaders.js"), "utf8");
   const docs = fs.readFileSync(path.join(root, "src/js/documents.js"), "utf8");
-  assert.match(html, /id="workspaceTabs" role="tablist"/);
-  // 헤더의 ＋/▾ 버튼은 없애고 탭 우클릭 메뉴로 옮겼다.
-  assert.doesNotMatch(html, /id="workspaceSwitch"/);
-  assert.doesNotMatch(html, /id="workspaceAdd"/);
-  assert.doesNotMatch(html, /id="workspaceMenu"/);
-  assert.match(workspaces, /className = "workspace-tab" \+ \(rec\.id === activeWorkspaceId \? " active" : ""\)/);
-  assert.match(workspaces, /setAttribute\("aria-selected", String\(rec\.id === activeWorkspaceId\)\)/);
-  assert.match(workspaces, /workspaceRevealTab\(tabs, activeTab\)/);
-  assert.match(workspaces, /tabs\.addEventListener\("wheel"/);
-  assert.match(workspaces, /tabs\.addEventListener\("contextmenu"/);
-  assert.match(workspaces, /function openWorkspaceCtxMenu\(anchorId, x, y\)/);
+  // 작업공간 UI 는 헤더가 아니라 문서 탭 줄 왼쪽 끝 버튼 하나다(누르면 목록 메뉴).
+  const header = html.slice(html.indexOf("<header>"), html.indexOf("</header>"));
+  assert.doesNotMatch(header, /workspace-switcher|workspaceTabs|workspaceMenuBtn/);
+  assert.match(html, /<div id="tabBar">\s*<div class="workspace-switcher" id="workspaceSwitcher">\s*<button type="button" class="workspace-menu-btn" id="workspaceMenuBtn" aria-haspopup="menu" aria-expanded="false"/);
+  assert.match(html, /<span class="tab-bar-sep" aria-hidden="true"><\/span>\s*<div class="doc-tabs" id="docTabs"><\/div>\s*<\/div>/);
+  assert.doesNotMatch(html, /id="workspaceTabs"/);
+  assert.doesNotMatch(workspaces, /draggedWorkspaceId|workspaceRevealTab|role", "tab"/);
+  assert.match(workspaces, /function openWorkspaceCtxMenu\(anchorId, x, y, opts\)/);
+  assert.match(workspaces, /function openWorkspaceMenuFromButton\(opts\)/);
+  assert.match(workspaces, /btn\.addEventListener\("click"[\s\S]*?if \(workspaceCtxEl\)\{ workspaceCloseCtxMenu\(\); return; \}/);
+  assert.match(workspaces, /btn\.addEventListener\("contextmenu"/);
+  // 여는 버튼 클릭은 바깥 클릭으로 보지 않는다(닫자마자 다시 열리는 것을 막는다).
+  assert.match(workspaces, /function onWorkspaceCtxDocClick\(e\)\{[\s\S]*?if \(btn && btn\.contains\(e\.target\)\) return;/);
+  // 탭이 없어도 탭 줄은 숨기지 않고, 문서 탭은 #docTabs 에만 그린다.
+  assert.match(docs, /function renderTabs\(\)\{[\s\S]*?const bar = byId\("docTabs"\);/);
+  assert.doesNotMatch(docs, /bar\.hidden = true; bar\.innerHTML = ""/);
   assert.match(styles, /\.workspace-ctx-menu\{/);
-  assert.match(styles, /\.workspace-tabs\{[^}]*overflow-x:auto/);
-  assert.match(styles, /\.workspace-tab\.active/);
+  assert.match(styles, /\.workspace-menu-btn\{[^}]*max-width:170px/);
+  assert.match(styles, /\.doc-tabs\{flex:1 1 0;min-width:0;display:flex/);
+  assert.doesNotMatch(styles, /\.workspace-tab/);
   assert.match(styles, /\.workspace-color\{[^}]*width:3px;height:14px;border-radius:2px/);
   assert.match(styles, /\.server-status-dot\{[^}]*border-radius:50%/);
-  assert.match(styles, /\.workspace-tab:not\(\.active\)\{display:none\}/);
   assert.match(html, /src="src\/js\/workspaces\.js"/);
   assert.match(loader, /workspaceFindOpenDocument\(file, opts\)/);
   assert.match(loader, /workspaceAttachExistingDoc\(duplicate/);
@@ -184,45 +189,9 @@ test("Python 정의 이동 후보는 현재 작업공간 문서로 제한한다"
   assert.match(definition, /candidates\.find\(doc => docPath\(doc\) === hit\.path\)/);
 });
 
-test("작업공간 순서 바꾸기는 items 배열만 옮기고 제자리 드롭은 걸러낸다", () => {
-  const ids = () => items.map(rec => rec.id).join(",");
-  let items = [{ id:"a" }, { id:"b" }, { id:"c" }];
-  assert.equal(workspaceMoveOrder(items, "a", "c", true), true);
-  assert.equal(ids(), "b,c,a");
-
-  items = [{ id:"a" }, { id:"b" }, { id:"c" }];
-  assert.equal(workspaceMoveOrder(items, "c", "a", false), true);
-  assert.equal(ids(), "c,a,b");
-
-  // 바로 뒤 탭의 왼쪽에 떨구면 자리가 그대로다 → 다시 그리기·저장을 건너뛰도록 false.
-  items = [{ id:"a" }, { id:"b" }, { id:"c" }];
-  assert.equal(workspaceMoveOrder(items, "a", "b", false), false);
-  assert.equal(ids(), "a,b,c");
-  assert.equal(workspaceMoveOrder(items, "a", "a", true), false);
-  assert.equal(workspaceMoveOrder(items, "a", "없는탭", true), false);
-  assert.equal(workspaceMoveOrder(items, "없는탭", "a", true), false);
-  assert.equal(ids(), "a,b,c");
-});
-
-test("작업공간 탭은 드래그로 순서를 바꾸고 좁은 창에서는 우클릭 메뉴로 옮긴다", () => {
+test("작업공간 메뉴에는 순서 옮기기 항목이 없다", () => {
   const source = fs.readFileSync(path.join(root, "src/js/workspaces.js"), "utf8");
-  const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
-  // 하나뿐인 작업공간은 옮길 자리가 없다.
-  assert.match(source, /const canDragWorkspace = workspaceRegistry\.items\.length > 1/);
-  assert.match(source, /tab\.draggable = canDragWorkspace/);
-  // 문서 탭 드래그·바깥 파일이 넘어와도 작업공간 순서는 건드리지 않는다.
-  assert.match(source, /tab\.addEventListener\("dragover"[\s\S]*?if \(draggedWorkspaceId === null \|\| draggedWorkspaceId === rec\.id\) return/);
-  assert.match(source, /tab\.addEventListener\("drop"[\s\S]*?if \(draggedWorkspaceId === null \|\| draggedWorkspaceId === rec\.id\) return/);
-  // 내부 드래그 표시가 없으면 자기 창 드롭이 파일 열기로 새어 나간다.
-  assert.match(source, /setData\(INTERNAL_DRAG_MIME, "workspace"\)/);
-  assert.match(source, /tab\.addEventListener\("dragend", workspaceResetDragState\)/);
-  assert.match(source, /renderWorkspaceUi\(\{ reveal:false \}\); workspacePersistNow\(\)/);
-  assert.match(source, /function moveWorkspaceOrder\(id, delta\)/);
-  assert.match(source, /add\("‹ 왼쪽으로 옮기기", \(\) => moveWorkspaceOrder\(anchor\.id, -1\), \{ disabled:anchorIndex <= 0 \}\)/);
-  assert.match(source, /add\("› 오른쪽으로 옮기기", \(\) => moveWorkspaceOrder\(anchor\.id, 1\)/);
-  assert.match(styles, /header \.workspace-tab\[draggable="true"\]\{cursor:grab;-webkit-user-drag:element\}/);
-  assert.match(styles, /header \.workspace-tab\.drop-before\{box-shadow:inset 3px 0 var\(--accent\)\}/);
-  assert.match(styles, /header \.workspace-tab\.drop-after\{box-shadow:inset -3px 0 var\(--accent\)\}/);
+  assert.doesNotMatch(source, /옮기기|moveWorkspaceOrder|workspaceMoveOrder/);
 });
 
 test("사이드바에 그릴 수 없는 줄은 열린 항목으로 세지 않는다", () => {

@@ -176,23 +176,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      높이 26px 은 임의값이 아니다 — 외곽선에는 힌팅이 없어서 20px(세로획 2.17px)에서는 획이
      픽셀 경계에 걸쳐 굵기가 제각각으로 보였다. 줄이려면 글자 x 스냅을 다시 떠야 한다. */
   .brand-lockup{height:26px;width:auto;display:block;flex:0 0 auto}
-  .workspace-switcher{position:relative;display:flex;align-items:center;gap:4px;min-width:0;max-width:clamp(150px,24vw,520px)}
-  .workspace-tabs{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;
-    scrollbar-width:none;scroll-behavior:smooth}
-  .workspace-tabs::-webkit-scrollbar{display:none}
-  header .workspace-tab{display:flex;align-items:center;gap:7px;flex:0 0 auto;min-width:72px;max-width:160px;height:32px;
-    padding:5px 9px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(255,255,255,.035);
-    color:#cbd5e1;font-size:12px;font-weight:600;box-shadow:none}
-  header .workspace-tab:hover{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.18)}
-  header .workspace-tab.active{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3);
-    box-shadow:inset 0 -2px 0 var(--accent),0 1px 3px rgba(0,0,0,.18)}
-  header .workspace-tab:focus-visible{outline:2px solid #93c5fd;outline-offset:1px}
-  /* 순서 바꾸기 드래그 — 크롬은 버튼에 draggable 만으로는 드래그를 시작하지 않아 -webkit-user-drag 가 필요하다. */
-  header .workspace-tab[draggable="true"]{cursor:grab;-webkit-user-drag:element}
-  header .workspace-tab.dragging{opacity:.5;cursor:grabbing}
-  header .workspace-tab.drop-before{box-shadow:inset 3px 0 var(--accent)}
-  header .workspace-tab.drop-after{box-shadow:inset -3px 0 var(--accent)}
-  .workspace-tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* 작업공간은 세로 색상 막대, 서버 연결 상태는 원형 점으로 구분한다. */
   .workspace-color{display:inline-block;flex:0 0 auto;width:3px;height:14px;border-radius:2px;background:#5b8def;box-shadow:none}
   .workspace-color[data-color="green"]{background:#36a269}.workspace-color[data-color="orange"]{background:#e39435}
@@ -436,7 +419,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     header{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"left title" "actions actions";
       gap:7px 10px;padding:8px 10px}
     .header-left{grid-area:left}
-    .workspace-switcher{max-width:min(60vw,720px)}
     .header-file-title{grid-area:title;padding:0;text-align:right}
     .header-actions{grid-area:actions;width:100%;justify-content:flex-end;gap:2px}
     .tools{flex-wrap:nowrap;gap:2px}
@@ -448,13 +430,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     .header-actions{justify-content:flex-start;align-items:flex-start;flex-wrap:wrap}
     .tools{flex-wrap:wrap}
     header button{padding:6px 9px;font-size:12px}
-    .workspace-switcher{max-width:190px}
-    .workspace-tab:not(.active){display:none}
-    header .workspace-tab{max-width:126px}
   }
   @media (max-width:430px){
     .brand{display:none}
-    .workspace-switcher{max-width:min(230px,calc(100vw - 70px))}
     .header-file-title{font-size:12px}
   }
 
@@ -462,6 +440,20 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   #tabBar{position:relative;z-index:21;flex:0 0 auto;display:flex;align-items:center;gap:4px;background:var(--sidebar);
     padding:6px 8px;overflow:visible;border-bottom:1px solid rgba(255,255,255,.06)}
   #tabBar[hidden]{display:none}
+  /* 탭 줄 왼쪽 끝 작업공간 버튼 — 탭이 없어도 늘 보인다. 문서 탭은 오른쪽 #docTabs 칸에만 그린다. */
+  .workspace-switcher{flex:0 0 auto;display:flex;align-items:center;min-width:0}
+  .workspace-menu-btn{display:inline-flex;align-items:center;gap:7px;min-width:0;max-width:170px;height:28px;padding:0 7px 0 9px;
+    border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#e2e8f0;
+    font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+  .workspace-menu-btn:hover,.workspace-menu-btn[aria-expanded="true"]{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);color:#fff}
+  .workspace-menu-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .workspace-menu-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .workspace-menu-caret{flex:0 0 auto;width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;opacity:.75;transition:transform .15s}
+  .workspace-menu-btn[aria-expanded="true"] .workspace-menu-caret{transform:rotate(180deg)}
+  .tab-bar-sep{flex:0 0 auto;width:1px;height:18px;margin:0 4px;background:rgba(255,255,255,.14)}
+  .doc-tabs{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:4px}
+  @media (max-width:720px){.workspace-menu-btn{max-width:126px}}
+  @media (max-width:430px){.workspace-menu-btn{max-width:96px}}
   .tab{display:flex;align-items:center;gap:7px;flex:0 0 auto;min-width:0;max-width:210px;
     padding:6px 7px 6px 9px;border-radius:8px;cursor:pointer;border-bottom:2px solid transparent}
   .tab:hover{background:rgba(255,255,255,.06)}

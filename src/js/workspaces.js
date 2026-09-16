@@ -13,17 +13,6 @@ function workspaceCleanName(value, fallback){
 function workspaceRestoreNeedsPreservation(hasSavedKeys, hasSavedMembership){
   return !!hasSavedKeys && !hasSavedMembership;
 }
-// 작업공간 순서는 items 배열 순서가 그대로 화면·저장 순서라 배열만 옮기면 된다(문서 탭 moveTab 과 같은 규칙).
-// 제자리에 다시 떨군 경우(바로 뒤 탭의 앞 등)에는 false 를 돌려 불필요한 다시 그리기·저장을 건너뛴다.
-function workspaceMoveOrder(items, draggedId, targetId, after){
-  if (!Array.isArray(items) || draggedId === targetId) return false;
-  const from = items.findIndex(rec => rec && rec.id === draggedId);
-  if (from < 0 || !items.some(rec => rec && rec.id === targetId)) return false;
-  const [moved] = items.splice(from, 1);
-  const target = items.findIndex(rec => rec && rec.id === targetId);
-  items.splice(target + (after ? 1 : 0), 0, moved);
-  return items.findIndex(rec => rec && rec.id === draggedId) !== from;
-}
 function workspaceNormalizeBoardRows(value){
   if (!Array.isArray(value)) return [];
   const seen = new Set(), rows = [];
@@ -79,7 +68,6 @@ function workspaceLoadRegistry(){
 let workspaceRegistry = workspaceLoadRegistry();
 let activeWorkspaceId = workspaceRegistry.activeId;
 let workspaceSystemReady = false, workspacePersistTimer = 0, workspaceCtxEl = null;
-let draggedWorkspaceId = null;                 // 작업공간 탭 드래그 중에만 값이 있다(문서 탭 draggedTabId 와 같은 역할)
 let workspaceRestoreUnresolved = false;
 const workspaceDocsByNativePath = new Map();
 const workspaceDocsByRestorePath = new Map();
@@ -632,25 +620,57 @@ async function deleteWorkspace(id){
   toast("작업공간을 삭제하고 열린 파일은 '" + fallback.name + "'에 보존했어요.", 2800);
 }
 
-// 작업공간 목록·추가·이름 변경·삭제는 헤더 버튼 대신 탭 우클릭 메뉴로 연다(문서 탭 메뉴와 같은 .tab-ctx-menu 스타일).
-function workspaceCloseCtxMenu(){
+// 작업공간 목록·추가·이름 변경·삭제는 탭 줄 왼쪽 버튼(#workspaceMenuBtn)이 여는 메뉴 하나로 모았다
+// (문서 탭 메뉴와 같은 .tab-ctx-menu 스타일). 버튼을 우클릭해도 같은 메뉴가 열린다.
+function workspaceMenuButton(){ return typeof byId === "function" ? byId("workspaceMenuBtn") : null; }
+function workspaceCloseCtxMenu(opts){
   if (!workspaceCtxEl) return;
   workspaceCtxEl.remove(); workspaceCtxEl = null;
   document.removeEventListener("keydown", onWorkspaceCtxKey, true);
   document.removeEventListener("click", onWorkspaceCtxDocClick, true);
+  const btn = workspaceMenuButton();
+  if (btn){
+    btn.setAttribute("aria-expanded", "false");
+    if (opts && opts.focusButton) btn.focus();
+  }
 }
-function onWorkspaceCtxKey(e){ if (e.key === "Escape"){ e.stopPropagation(); workspaceCloseCtxMenu(); } }
-function onWorkspaceCtxDocClick(e){ if (!(workspaceCtxEl && workspaceCtxEl.contains(e.target))) workspaceCloseCtxMenu(); }
-function openWorkspaceCtxMenu(anchorId, x, y){
+function workspaceCtxItems(){
+  return workspaceCtxEl ? [...workspaceCtxEl.querySelectorAll("button[role='menuitem']:not(:disabled)")] : [];
+}
+function onWorkspaceCtxKey(e){
+  if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); workspaceCloseCtxMenu({ focusButton:true }); return; }
+  if (e.key === "Tab"){ workspaceCloseCtxMenu(); return; }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+  const items = workspaceCtxItems(); if (!items.length) return;
+  e.preventDefault(); e.stopPropagation();
+  const at = items.indexOf(document.activeElement);
+  let next;
+  if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = items.length - 1;
+  else if (at < 0) next = e.key === "ArrowDown" ? 0 : items.length - 1;
+  else next = (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+  items[next].focus();
+}
+// 여는 버튼을 다시 누른 클릭은 여기서 닫지 않는다 — 여기서 닫으면 뒤이은 버튼 click 이 곧바로 다시 연다.
+// 버튼의 click 이 열림 상태를 보고 닫는다(토글).
+function onWorkspaceCtxDocClick(e){
+  if (workspaceCtxEl && workspaceCtxEl.contains(e.target)) return;
+  const btn = workspaceMenuButton();
+  if (btn && btn.contains(e.target)) return;
+  workspaceCloseCtxMenu();
+}
+function openWorkspaceCtxMenu(anchorId, x, y, opts){
   workspaceCloseCtxMenu();
   if (typeof closeTabMenu === "function") closeTabMenu();
   const anchor = workspaceRecord(anchorId); if (!anchor) return;
   const menu = document.createElement("div");
   menu.className = "tab-ctx-menu workspace-ctx-menu"; menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "작업공간");
   const head = document.createElement("div"); head.className = "tcx-head";
   const headTitle = document.createElement("strong"); headTitle.textContent = "작업공간";
   const headHint = document.createElement("small"); headHint.textContent = "Ctrl+Alt+←/→";
   head.append(headTitle, headHint); menu.appendChild(head);
+  let activeItem = null;
   const add = (label, run, opts) => {
     const b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "menuitem");
     const t = document.createElement("span"); t.className = "tcx-label"; t.textContent = label;
@@ -663,24 +683,21 @@ function openWorkspaceCtxMenu(anchorId, x, y){
       const c = document.createElement("span"); c.className = "tcx-count"; c.textContent = "파일 " + opts.count.toLocaleString() + "개";
       b.appendChild(c);
     }
-    if (opts && opts.active) b.classList.add("is-active");
+    if (opts && opts.active){ b.classList.add("is-active"); b.setAttribute("aria-current", "true"); activeItem = b; }
     if (opts && opts.danger) b.classList.add("danger");
+    if (opts && opts.workspaceId) b.dataset.workspaceId = opts.workspaceId;
     b.disabled = !!(opts && opts.disabled);
     b.onclick = () => { workspaceCloseCtxMenu(); run(); };
     menu.appendChild(b);
   };
   workspaceRegistry.items.forEach(rec => {
     add(rec.name, () => { if (rec.id !== activeWorkspaceId) switchWorkspace(rec.id); },
-      { color:rec.color, count:docs.filter(doc => workspaceHasDoc(doc, rec.id)).length, active:rec.id === activeWorkspaceId });
+      { color:rec.color, count:docs.filter(doc => workspaceHasDoc(doc, rec.id)).length,
+        active:rec.id === activeWorkspaceId, workspaceId:rec.id });
   });
   const sep = document.createElement("div"); sep.className = "tcx-sep"; menu.appendChild(sep);
   add("＋ 새 작업공간", () => createWorkspace());
   add("'" + anchor.name + "' 이름 변경", () => renameWorkspace(anchor.id));
-  // 좁은 창(720px 이하)에서는 활성 탭만 보여 드래그로 순서를 못 바꾼다. 키보드만 쓰는 경우도 여기로 옮긴다.
-  const anchorIndex = workspaceRegistry.items.findIndex(rec => rec.id === anchor.id);
-  add("‹ 왼쪽으로 옮기기", () => moveWorkspaceOrder(anchor.id, -1), { disabled:anchorIndex <= 0 });
-  add("› 오른쪽으로 옮기기", () => moveWorkspaceOrder(anchor.id, 1),
-    { disabled:anchorIndex < 0 || anchorIndex >= workspaceRegistry.items.length - 1 });
   add("'" + anchor.name + "' 삭제", () => deleteWorkspace(anchor.id),
     { danger:true, disabled:workspaceRegistry.items.length <= 1 });
   document.body.appendChild(menu);
@@ -688,118 +705,51 @@ function openWorkspaceCtxMenu(anchorId, x, y){
   menu.style.left = Math.max(pad, Math.min(x, window.innerWidth - mw - pad)) + "px";
   menu.style.top  = Math.max(pad, Math.min(y, window.innerHeight - mh - pad)) + "px";
   workspaceCtxEl = menu;
+  const btn = workspaceMenuButton();
+  if (btn) btn.setAttribute("aria-expanded", "true");
   setTimeout(() => document.addEventListener("click", onWorkspaceCtxDocClick, true), 0);   // 여는 클릭은 제외
   document.addEventListener("keydown", onWorkspaceCtxKey, true);
-}
-// 탭 가운데를 기준으로 왼쪽/오른쪽 중 어느 자리에 끼울지 정한다(문서 탭과 같은 판정).
-function workspaceDropAfter(tab, clientX){
-  const rect = tab.getBoundingClientRect();
-  return clientX > rect.left + rect.width / 2;
-}
-function workspaceResetDragState(){
-  draggedWorkspaceId = null;
-  if (typeof byId !== "function") return;
-  const tabs = byId("workspaceTabs");
-  if (tabs) tabs.querySelectorAll(".workspace-tab").forEach(tab => tab.classList.remove("dragging", "drop-before", "drop-after"));
-}
-// 좁은 창에서는 활성 탭만 보여 드래그가 아예 불가능하므로(.workspace-tab:not(.active){display:none})
-// 우클릭 메뉴의 왼쪽/오른쪽 옮기기가 같은 일을 하는 대체 수단이다.
-function moveWorkspaceOrder(id, delta){
-  const index = workspaceRegistry.items.findIndex(rec => rec.id === id);
-  const target = index < 0 ? null : workspaceRegistry.items[index + delta];
-  if (!target || !workspaceMoveOrder(workspaceRegistry.items, id, target.id, delta > 0)) return;
-  renderWorkspaceUi(); workspacePersistNow();
-}
-function workspaceRevealTab(tabs, tab){
-  if (!tabs || !tab) return;
-  const reveal = () => {
-    const left = tab.offsetLeft, right = left + tab.offsetWidth;
-    if (left < tabs.scrollLeft) tabs.scrollTo({ left:Math.max(0, left - 4), behavior:"smooth" });
-    else if (right > tabs.scrollLeft + tabs.clientWidth) tabs.scrollTo({ left:right - tabs.clientWidth + 4, behavior:"smooth" });
-  };
-  if (typeof requestAnimationFrame === "function") requestAnimationFrame(reveal); else reveal();
-}
-function renderWorkspaceUi(opts){
-  if (typeof byId !== "function") return;
-  const tabs = byId("workspaceTabs");
-  let activeTab = null;
-  if (tabs){
-    const keepScroll = tabs.scrollLeft;      // 다시 그리면 스크롤이 0으로 돌아가 순서를 바꾼 자리가 눈에서 사라진다
-    tabs.innerHTML = "";
-    workspaceRegistry.items.forEach(rec => {
-      const tab = document.createElement("button");
-      tab.type = "button"; tab.className = "workspace-tab" + (rec.id === activeWorkspaceId ? " active" : "");
-      tab.dataset.workspaceId = rec.id; tab.setAttribute("role", "tab");
-      tab.setAttribute("aria-selected", String(rec.id === activeWorkspaceId));
-      // 작업공간이 하나뿐이면 옮길 자리가 없다.
-      const canDragWorkspace = workspaceRegistry.items.length > 1;
-      tab.draggable = canDragWorkspace;
-      tab.tabIndex = rec.id === activeWorkspaceId ? 0 : -1;
-      tab.title = rec.name + (canDragWorkspace ? " · 드래그: 순서 바꾸기" : "") + " · 우클릭: 작업공간 메뉴";
-      const color = document.createElement("span"); color.className = "workspace-color"; color.dataset.color = rec.color;
-      const label = document.createElement("span"); label.className = "workspace-tab-name"; label.textContent = rec.name;
-      tab.append(color, label);
-      tab.onclick = event => { event.stopPropagation(); if (rec.id !== activeWorkspaceId) switchWorkspace(rec.id); };
-      tab.addEventListener("dragstart", event => {
-        // draggable=false 가 듣지 않는 합성 이벤트에서도 하나뿐인 작업공간은 끌리지 않게 막는다.
-        if (!canDragWorkspace){ event.preventDefault(); return; }
-        draggedWorkspaceId = rec.id; tab.classList.add("dragging");
-        if (!event.dataTransfer) return;
-        event.dataTransfer.effectAllowed = "move";
-        // 내부 드래그 표시 — 이게 없으면 자기 창에 떨궜을 때 파일 드롭으로 오해받는다(app.js 전역 오버레이).
-        try { event.dataTransfer.setData(INTERNAL_DRAG_MIME, "workspace"); } catch(_){ }
-        try { event.dataTransfer.setData("text/plain", rec.name); } catch(_){ }
-      });
-      // 문서 탭 드래그(draggedTabId)나 바깥 파일이 넘어와도 작업공간 순서는 건드리지 않는다.
-      tab.addEventListener("dragover", event => {
-        if (draggedWorkspaceId === null || draggedWorkspaceId === rec.id) return;
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-        const after = workspaceDropAfter(tab, event.clientX);
-        tab.classList.toggle("drop-before", !after); tab.classList.toggle("drop-after", after);
-      });
-      tab.addEventListener("dragleave", () => tab.classList.remove("drop-before", "drop-after"));
-      tab.addEventListener("drop", event => {
-        if (draggedWorkspaceId === null || draggedWorkspaceId === rec.id) return;
-        event.preventDefault(); event.stopPropagation();
-        const movedId = draggedWorkspaceId, after = workspaceDropAfter(tab, event.clientX);
-        workspaceResetDragState();
-        if (!workspaceMoveOrder(workspaceRegistry.items, movedId, rec.id, after)) return;
-        // 순서만 바뀌었을 뿐 활성 작업공간은 그대로다. 활성 탭으로 스크롤을 당기면 방금 놓은 자리가 밀린다.
-        renderWorkspaceUi({ reveal:false }); workspacePersistNow();
-      });
-      tab.addEventListener("dragend", workspaceResetDragState);
-      tabs.appendChild(tab); if (rec.id === activeWorkspaceId) activeTab = tab;
-    });
-    if (keepScroll) tabs.scrollTo({ left:keepScroll, behavior:"auto" });
-    if (!opts || opts.reveal !== false) workspaceRevealTab(tabs, activeTab);
+  // 키보드로 열었으면 지금 작업공간 항목에 초점을 둬 ↑/↓ 로 바로 고르게 한다.
+  if (opts && opts.focus){
+    const first = activeItem || workspaceCtxItems()[0];
+    if (first) first.focus();
   }
+}
+// 버튼 바로 아래(왼쪽 맞춤)에 메뉴를 연다.
+function openWorkspaceMenuFromButton(opts){
+  const btn = workspaceMenuButton(); if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  openWorkspaceCtxMenu(activeWorkspaceId, rect.left, rect.bottom + 4, opts);
+}
+// 탭 줄 왼쪽 버튼에 지금 작업공간의 색·이름을 그린다.
+function renderWorkspaceUi(){
+  const btn = workspaceMenuButton(); if (!btn) return;
+  const rec = workspaceRecord(); if (!rec) return;
+  const color = byId("workspaceMenuColor"), name = byId("workspaceMenuName");
+  if (color) color.dataset.color = rec.color || "";
+  if (name) name.textContent = rec.name;
+  const tip = "작업공간: " + rec.name + " · 클릭: 목록·추가·이름 변경·삭제 · Ctrl+Alt+←/→: 전환";
+  btn.title = tip; btn.setAttribute("aria-label", tip);
 }
 function setupWorkspaceUi(){
   if (typeof byId !== "function") return;
-  const tabs = byId("workspaceTabs");
-  if (!tabs || tabs.dataset.wired === "1") return;
-  tabs.dataset.wired = "1";
-  // 탭 위 우클릭은 그 작업공간을, 빈 자리 우클릭은 현재 작업공간을 대상으로 메뉴를 연다.
-  tabs.addEventListener("contextmenu", event => {
-    const tab = event.target.closest && event.target.closest(".workspace-tab");
-    event.preventDefault(); event.stopPropagation();
-    openWorkspaceCtxMenu(tab ? tab.dataset.workspaceId : activeWorkspaceId, event.clientX, event.clientY);
+  const btn = byId("workspaceMenuBtn");
+  if (!btn || btn.dataset.wired === "1") return;
+  btn.dataset.wired = "1";
+  btn.addEventListener("click", event => {
+    event.stopPropagation();
+    if (workspaceCtxEl){ workspaceCloseCtxMenu(); return; }
+    // 마우스 클릭은 detail>0, Enter/Space 로 누른 클릭은 detail 0 — 키보드일 때만 메뉴 안으로 초점을 옮긴다.
+    openWorkspaceMenuFromButton({ focus:event.detail === 0 });
   });
-  tabs.addEventListener("wheel", event => {
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || tabs.scrollWidth <= tabs.clientWidth) return;
-    event.preventDefault(); tabs.scrollLeft += event.deltaY;
-  }, { passive:false });
-  tabs.addEventListener("keydown", event => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const tab = event.target.closest && event.target.closest(".workspace-tab"); if (!tab) return;
-    const index = workspaceRegistry.items.findIndex(rec => rec.id === tab.dataset.workspaceId); if (index < 0) return;
+  btn.addEventListener("contextmenu", event => {
+    event.preventDefault(); event.stopPropagation();
+    openWorkspaceMenuFromButton();
+  });
+  btn.addEventListener("keydown", event => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    let nextIndex = event.key === "Home" ? 0 : event.key === "End" ? workspaceRegistry.items.length - 1
-      : (index + (event.key === "ArrowLeft" ? -1 : 1) + workspaceRegistry.items.length) % workspaceRegistry.items.length;
-    const next = workspaceRegistry.items[nextIndex]; if (!next) return;
-    switchWorkspace(next.id);
-    const nextTab = tabs.querySelector('[data-workspace-id="' + next.id + '"]'); if (nextTab) nextTab.focus();
+    if (!workspaceCtxEl) openWorkspaceMenuFromButton({ focus:true });
   });
   window.addEventListener("keydown", event => {
     if (!(event.ctrlKey && event.altKey) || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -820,5 +770,5 @@ function setupWorkspaceUi(){
 
 if (typeof module !== "undefined") module.exports = {
   workspaceNormalizeSaved, workspaceNormalizeBoardRows, workspaceCleanName,
-  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds, workspaceMoveOrder
+  workspaceRestoreNeedsPreservation, workspaceDeletionKeepNodeIds
 };

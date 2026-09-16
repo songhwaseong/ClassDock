@@ -147,6 +147,7 @@
     "작업공간": "Workspaces",
     "새 작업공간": "New workspace",
     "＋ 새 작업공간": "＋ New workspace",
+    "작업공간 목록·추가·이름 변경·삭제": "Workspaces: list, add, rename, delete",
     "작업공간 전환 (Ctrl+Alt+←/→)": "Switch workspace (Ctrl+Alt+←/→)",
     "이름 변경·삭제": "Rename or delete",
     "원본 저장": "Original file",

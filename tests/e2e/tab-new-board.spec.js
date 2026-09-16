@@ -19,8 +19,10 @@ test("탭바 칠판 버튼과 Alt+B 로 새 화이트보드가 열린다", async
   page.on("pageerror", (error) => errors.push(error.message));
   await openApp(page);
 
-  // 탭이 없으면 탭바가 숨어 있어 칠판 버튼도 안 보인다.
-  await expect(page.locator("#tabBar")).toBeHidden();
+  // 탭이 없어도 탭바는 보인다(왼쪽 작업공간 버튼·오른쪽 칠판 버튼만 있다).
+  await expect(page.locator("#tabBar")).toBeVisible();
+  await expect(page.locator("#tabBar .tab")).toHaveCount(0);
+  await expect(page.locator("#tabBar .tab-new-board")).toBeVisible();
 
   // Alt+B — 문서가 하나도 없는 상태에서도 판서를 바로 시작할 수 있다.
   await page.keyboard.press("Alt+b");

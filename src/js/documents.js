@@ -1897,22 +1897,23 @@ let tabLayoutLimit = 0;
 let tabScrollStart = 0;
 let tabBarResizeObserver = null;
 function tabLimitForWidth(width){
+  // width 는 작업공간 버튼을 뺀 문서 탭 칸(#docTabs)의 폭이다.
   // 오른쪽 끝에 항상 붙는 칠판 버튼(새 화이트보드, 32px)과 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
   const usable = Math.max(210, (width || window.innerWidth || 800) - 114);
   return Math.max(1, Math.min(6, Math.floor(usable / 210)));
 }
 
 // 헤더 아래 탭바: tabOrder(선택한 문서 순서) 중 현재 열려있는 것만 표시(1개여도 보인다)
+// 문서 탭은 #tabBar 안의 #docTabs 칸에만 그린다. 같은 줄 왼쪽 끝의 작업공간 버튼(workspaces.js)은
+// 건드리지 않고, 탭이 하나도 없어도 줄은 그대로 둔다(빈 작업공간에서도 전환 버튼과 칠판 버튼이 보여야 한다).
 function renderTabs(){
   if (typeof closeTabMenu === "function") closeTabMenu();          // 다시 그릴 때 떠 있던 우클릭 메뉴 정리
   tabOrder = tabOrder.filter(id => docs.some(d => d.id === id && workspaceHasDoc(d)));   // 닫힌 문서·다른 작업공간 정리
   // 화면에 보이는 문서는 반드시 탭에도 있어야 한다. 복원/일괄 열기 중 순서가 꼬여도 여기서 보정한다.
   if (activeId && docs.some(d => d.id === activeId && workspaceHasDoc(d)) && !tabOrder.includes(activeId)) tabOrder.unshift(activeId);
   persistTabState();                                               // 탭 구성을 저장해 다음 실행 때 복원
-  const bar = byId("tabBar");
+  const bar = byId("docTabs");
   if (!bar) return;
-  if (!tabOrder.length){ bar.hidden = true; bar.innerHTML = ""; return; }     // 열린 탭이 없을 때만 숨긴다
-  bar.hidden = false;
   bar.innerHTML = "";
   tabLayoutLimit = tabLimitForWidth(bar.clientWidth);
   if (!tabBarResizeObserver && typeof ResizeObserver !== "undefined"){

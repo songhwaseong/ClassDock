@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 const WS_KEY = "classdock-workspaces:v1";
 
-// 작업공간 세 개를 심어 둔 채로 시작한다(전환·순서 옮기기를 해 볼 대상이 필요하다).
+// 작업공간 세 개를 심어 둔 채로 시작한다(전환해 볼 대상이 필요하다).
 async function openWithThreeWorkspaces(page){
   await page.addInitScript(({ key }) => {
     try {
@@ -24,8 +24,6 @@ async function openWithThreeWorkspaces(page){
 
 const menu = page => page.locator(".workspace-ctx-menu");
 const menuNames = page => page.locator(".workspace-ctx-menu button[data-workspace-id] .tcx-label").allTextContents();
-const savedNames = page => page.evaluate(key =>
-  JSON.parse(localStorage.getItem(key)).items.map(row => row.name), WS_KEY);
 
 test("작업공간 버튼은 탭 줄 왼쪽에 있고 탭이 없어도 보인다", async ({ page }) => {
   const errors = [];
@@ -71,6 +69,8 @@ test("버튼을 누르면 바로 아래에 목록이 열리고 다시 누르면 
   await expect(btn).toHaveAttribute("aria-expanded", "true");
   expect(await menuNames(page)).toEqual(["하나", "둘", "셋"]);
   await expect(menu(page).locator("button.is-active .tcx-label")).toHaveText("하나");
+  // 순서 옮기기 항목은 두지 않는다.
+  await expect(menu(page).locator("button", { hasText:"옮기기" })).toHaveCount(0);
 
   const btnBox = await btn.boundingBox();
   const menuBox = await menu(page).boundingBox();
@@ -86,23 +86,6 @@ test("버튼을 누르면 바로 아래에 목록이 열리고 다시 누르면 
   await expect(menu(page)).toBeVisible();
   await page.locator("main").click({ position:{ x:300, y:300 } });
   await expect(menu(page)).toHaveCount(0);
-});
-
-test("메뉴의 위/아래로 옮기기로 순서를 바꾸고 다시 열어도 그대로다", async ({ page }) => {
-  await openWithThreeWorkspaces(page);
-  const btn = page.locator("#workspaceMenuBtn");
-  await btn.click();
-  // 맨 위라 위로 옮기기는 잠겨 있다.
-  await expect(menu(page).locator("button", { hasText:"위로 옮기기" })).toBeDisabled();
-  await menu(page).locator("button", { hasText:"아래로 옮기기" }).click();
-  expect(await savedNames(page)).toEqual(["둘", "하나", "셋"]);
-  // 순서만 바뀌고 활성 작업공간은 그대로다.
-  await expect(page.locator("#workspaceMenuName")).toHaveText("하나");
-
-  await page.reload();
-  await expect(page.locator("#workspaceMenuName")).toHaveText("하나");
-  await btn.click();
-  expect(await menuNames(page)).toEqual(["둘", "하나", "셋"]);
 });
 
 test("좁은 창에서도 버튼 하나로 전환한다", async ({ page }) => {

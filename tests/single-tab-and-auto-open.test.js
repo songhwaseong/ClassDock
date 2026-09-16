@@ -12,9 +12,11 @@ const shell = read("classdock.html");
 const styles = read("src/styles.css");
 const workspaceStore = read("src/js/workspace-store.js");
 
-test("탭바는 파일이 하나만 열려 있어도 보인다", () => {
-  assert.match(documents, /if \(!tabOrder\.length\)\{ bar\.hidden = true/);
-  assert.doesNotMatch(documents, /if \(tabOrder\.length < 2\)\{ bar\.hidden = true/);
+test("탭바는 파일이 하나뿐이어도, 하나도 없어도 보인다", () => {
+  // 탭 줄 왼쪽 끝에 작업공간 버튼이 있어 줄을 숨기면 빈 작업공간에서 돌아갈 길이 없어진다.
+  const renderTabs = documents.slice(documents.indexOf("function renderTabs(){"), documents.indexOf("function untabDoc("));
+  assert.doesNotMatch(renderTabs, /\bbar\.hidden = true/);
+  assert.match(shell, /<div id="tabBar">/);
 });
 
 test("상단 탭이 하나뿐이면 분할 드래그를 시작하지 않는다", () => {
